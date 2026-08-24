@@ -2,16 +2,18 @@
 //!
 //! 用法: `host-capturer --camera <id> --config <host.yaml 路径> --token <令牌文件路径>`
 //!
-//! 流程: 读 host.yaml 相机配置（source/fps，缺省 stub/30）→ mediaservo-media
-//! `VideoFrameGenerator` 产帧（stub 彩条起步；C17 单调时钟由 generator 保证）→
+//! 流程: 读 host.yaml 视频源配置（mode/width/height/fps，缺省 generator/1280x720/30）→ mediaservo-media
+//! `VideoFrameGenerator` 产帧（generator 模式；C17 单调时钟由 generator 保证）→
 //! link `FrameBus` 发布 topic `camera/<id>`（payload = FrameMeta 36B + 紧凑 I420，
-//! 与 deck closed_loop 线格式一致）。真实设备源（v4l2/mipi）后接。
+//! 与 deck closed_loop 线格式一致）。mode 分派: generator 真实现；camera（v4l2/mipi
+//! 采集后端）/ desktop / subscriber 本期未实现——明确报错退出（不静默降级）。
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use mediaservo_host::translate::SourceMode;
 use mediaservo_link::{FrameBus, FrameMeta, FrameTopic, TokenFile};
 use mediaservo_media::base::buffer::VideoBuffer;
 use mediaservo_media::base::frame::BoxVideoFrame;
@@ -24,9 +26,6 @@ use mediaservo_media::pipeline::generator::fonts::Anchor;
 use mediaservo_media::pipeline::source::VideoSource;
 use mediaservo_media::pipeline::sink::{VideoSink, VideoSinkWants};
 
-/// C1 固定分辨率（host.yaml 无分辨率字段；与 deck CaptureOptions 默认一致）。
-const DEFAULT_WIDTH: u32 = 1280;
-const DEFAULT_HEIGHT: u32 = 720;
 /// FrameMeta 像素格式: 1 = I420（D243 枚举）。
 const FORMAT_I420: u8 = 1;
 
@@ -110,7 +109,7 @@ async fn main() -> ExitCode {
         }
     };
 
-    // 相机配置（source/fps 缺省 stub/30）
+    // 视频源配置（mode/width/height/fps；缺省 generator/1280x720/30）
     let cfg_text = match std::fs::read_to_string(&args.config) {
         Ok(c) => c,
         Err(e) => {
@@ -121,7 +120,7 @@ async fn main() -> ExitCode {
     let cam = match mediaservo_host::translate::camera_config(&cfg_text, &args.camera) {
         Ok(Some(c)) => c,
         Ok(None) => {
-            eprintln!("capturer: 配置中无相机 {}", args.camera);
+            eprintln!("capturer: 配置中无视频源 {}", args.camera);
             return ExitCode::from(1);
         }
         Err(e) => {
@@ -129,10 +128,20 @@ async fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    if cam.source != "stub" {
+    // mode 分派: generator → VideoFrameGenerator 真实产帧；camera/desktop/subscriber
+    // 采集后端未实现 → 明确报错退出（C15，不静默降级）。
+    if cam.mode != SourceMode::Generator {
+        let reason = match cam.mode {
+            SourceMode::Camera => "camera 采集未实现（backend=v4l2/mipi 后接）",
+            SourceMode::Desktop => "desktop 采集未实现（屏幕捕获后接）",
+            SourceMode::Subscriber => "subscriber 消费未实现（外部源订阅后接）",
+            SourceMode::Generator => "unreachable",
+        };
         eprintln!(
-            "capturer: 相机 {} source={} 未支持（C1 仅 stub，v4l2/mipi 后接）",
-            cam.id, cam.source
+            "capturer: 视频源 {} mode={} 未支持: {}（本期仅 generator 可用）",
+            cam.id,
+            cam.mode.as_str(),
+            reason
         );
         return ExitCode::from(1);
     }
@@ -186,12 +195,14 @@ async fn main() -> ExitCode {
             TextBurner::new(BitmapFont::new(), false, Anchor::TopLeft),
             TimestampFormat::Combined,
         )),
-        DEFAULT_WIDTH,
-        DEFAULT_HEIGHT,
+        cam.width,
+        cam.height,
     );
     println!(
-        "capturer ready: topic={} {DEFAULT_WIDTH}x{DEFAULT_HEIGHT}@{} source=stub",
+        "capturer ready: topic={} {}x{}@{} source=generator",
         topic.as_str(),
+        cam.width,
+        cam.height,
         cam.fps
     );
 

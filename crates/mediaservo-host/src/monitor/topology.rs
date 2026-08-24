@@ -176,7 +176,7 @@ impl TopologyMonitor {
                 Vec::new()
             })
             .into_iter()
-            .map(|c| FrameTopic::new(format!("camera/{}", c.id)))
+            .map(|src| FrameTopic::new(format!("camera/{}", src.id)))
             .collect();
 
         let actual_processes = self.oxmgr.list().unwrap_or_else(|e| {

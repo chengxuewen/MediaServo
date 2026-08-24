@@ -850,7 +850,7 @@ mod tests {
         let push = SignalingMessage::ConfigPush {
             room_id: "vehicle-1".into(),
             target: "veh-peer".into(),
-            config: "[[cameras]]\n".into(),
+            config: "sources:\n".into(),
             version: 3,
         };
         let targets = lock_state(&state).downstream(push.clone());

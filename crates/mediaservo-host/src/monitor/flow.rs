@@ -49,7 +49,7 @@ pub struct TopicFlow {
 /// 单流推流状态（E2 快照条目）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct StreamFlow {
-    /// 流 id（host.yaml `[[streams]] id`）。
+    /// 流 id（host.yaml streams[].id）。
     pub id: String,
     /// 最近一次 stats 的 bytes_sent（webrtc OutboundRtp，累计）。
     pub bytes_sent: u64,
@@ -59,7 +59,7 @@ pub struct StreamFlow {
     pub frame_height: u32,
     /// 最近 stats 是否在新鲜窗口内。
     pub connected: bool,
-    /// 协商编解码器（host.yaml [[streams]] codec）。
+    /// 协商编解码器（host.yaml streams[].codec）。
     pub codec: String,
     /// 平均编码耗时 ms（web stats 面板——EncoderStatus 转发）。
     pub avg_encode_ms: Option<f64>,
@@ -145,8 +145,8 @@ impl FlowMonitor {
         stall_floor: Duration,
     ) -> Result<Self, String> {
         let bus = FrameBus::attach("", token, verifying_key).map_err(|e| e.to_string())?;
-        let cameras = translate::camera_configs(&host_toml).unwrap_or_else(|e| {
-            tracing::warn!("host.yaml 相机解析失败: {e}");
+        let sources = translate::camera_configs(&host_toml).unwrap_or_else(|e| {
+            tracing::warn!("host.yaml 视频源解析失败: {e}");
             Vec::new()
         });
         let streams = translate::stream_configs(&host_toml).unwrap_or_else(|e| {
@@ -157,10 +157,10 @@ impl FlowMonitor {
         let mut topics = HashMap::new();
         let mut stream_states = HashMap::new();
         let mut tasks = Vec::new();
-        for cam in cameras {
-            let topic = FrameTopic::new(format!("camera/{}", cam.id));
+        for src in sources {
+            let topic = FrameTopic::new(format!("camera/{}", src.id));
             // 停滞阈值 = max(stall_floor, 2×期望帧间隔)（fps 已知时）
-            let threshold = stall_threshold(stall_floor, cam.fps);
+            let threshold = stall_threshold(stall_floor, src.fps);
             match bus.subscribe(&topic) {
                 Ok(stream) => {
                     let state = Arc::new(Mutex::new(TopicState::default()));

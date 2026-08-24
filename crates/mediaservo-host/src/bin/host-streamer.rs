@@ -2,8 +2,8 @@
 //!
 //! 用法: `host-streamer --stream <id> --config <host.yaml 路径> --token <令牌文件路径>`
 //!
-//! 流程: 读 host.yaml `[[streams]]`（camera/codec 缺省 id/vp8，
-//! [`mediaservo_host::translate::stream_config`]）→ 相机配置（fps）→ FrameBus
+//! 流程: 读 host.yaml `streams`（source/codec 缺省 id/vp8，
+//! [`mediaservo_host::translate::stream_config`]）→ 源配置（fps）→ FrameBus
 //! 订阅 `camera/<camera-id>`（FrameMeta + 紧凑 I420，C1 capturer 线格式）→
 //! field `PushSession`（connect → publish_video：SFU transport + answer 协商 +
 //! Connect + Produce，复用 field 推流链路）→ `TrackSender::write_raw_i420_with_ts`
@@ -462,10 +462,10 @@ async fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let cam = match mediaservo_host::translate::camera_config(&cfg_text, &stream.camera) {
+    let cam = match mediaservo_host::translate::camera_config(&cfg_text, &stream.source) {
         Ok(Some(c)) => c,
         Ok(None) => {
-            eprintln!("streamer: 流 {} 引用的相机 {} 不存在", stream.id, stream.camera);
+            eprintln!("streamer: 流 {} 引用的源 {} 不存在", stream.id, stream.source);
             return ExitCode::from(1);
         }
         Err(e) => {

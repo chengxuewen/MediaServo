@@ -3,7 +3,7 @@
 //! 用法: `host-recorder --config <host.yaml 路径> --token <令牌文件路径>`
 //!
 //! 流程: 读 host.yaml（`[record]` enabled 门控 + out_dir，缺省 disabled +
-//! /tmp/mediaservo-recordings）→ 每相机一个录制任务：link `FrameBus` 订阅
+//! /tmp/mediaservo-recordings）→ 每视频源一个录制任务：link `FrameBus` 订阅
 //! `camera/<id>`（FrameMeta + 紧凑 I420，C1 capturer 线格式）→ deck `Recorder`
 //! （H264 + MP4 mux，复用 deck closed_loop 已验证闭环）→ `{out_dir}/{id}.mp4`。
 //! SIGTERM → 全部 Recorder stop（flush + trailer，worker 完成 mux）。
@@ -202,7 +202,7 @@ async fn main() -> ExitCode {
         }
     };
     if cams.is_empty() {
-        eprintln!("recorder: [record] enabled 但 host.yaml 无 [[cameras]] — 无 topic 可订阅");
+        eprintln!("recorder: [record] enabled 但 host.yaml 无 sources — 无 topic 可订阅");
         return ExitCode::from(1);
     }
 
@@ -235,7 +235,7 @@ async fn main() -> ExitCode {
         return ExitCode::from(1);
     }
 
-    // 每相机: 订阅 camera/<id> + deck Recorder 落盘任务（持续录制至 SIGTERM）
+    // 每视频源: 订阅 camera/<id> + deck Recorder 落盘任务（持续录制至 SIGTERM）
     let mut stops: Vec<mediaservo_deck::record::StopSignal> = Vec::new();
     let mut tasks: Vec<tokio::task::JoinHandle<Result<(), mediaservo_deck::DeckError>>> = Vec::new();
     let mut ids: Vec<String> = Vec::new();
@@ -280,11 +280,11 @@ async fn main() -> ExitCode {
         }));
         stops.push(stop);
         ids.push(cam.id.clone());
-        tracing::info!(topic = %topic.as_str(), out = %path.display(), "recording camera");
+        tracing::info!(topic = %topic.as_str(), out = %path.display(), "recording source");
     }
 
     println!(
-        "recorder ready: cameras={ids:?} out={}",
+        "recorder ready: sources={ids:?} out={}",
         rec.out_dir.display()
     );
 

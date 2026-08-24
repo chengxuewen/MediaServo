@@ -8,15 +8,43 @@ host:
 #   room: "my-car1"                              # 整车房间（多车隔离）
 #   local_port: 17980                            # 本地信令网关端口
 
-cameras:
+# 视频源声明（替代旧 cameras 键；旧 "cameras:" 仍可解析——`#[serde(alias = "cameras")]`
+# 兼容已部署配置，无破坏）。
+#
+# mode 四类（逻辑类别）：
+#   generator   测试/演示彩条帧——本期唯一真实实现（VideoFrameGenerator 产帧，fps/width/height 生效）
+#   camera      真实相机采集——backend=v4l2/mipi（采集后端实现中；当前 capturer 明确报"未支持"退出）
+#   desktop     屏幕捕获（未实现；capturer 明确报"未支持"退出）
+#   subscriber  订阅外部源（FrameBus/ROS topic（input 填 topic）；未实现；capturer 明确报"未支持"退出）
+#
+# 字段语义：
+#   backend      采集后端，仅 mode=camera 生效（v4l2 | mipi，单词字段）
+#   input        源地址统一字段：camera=设备路径 / subscriber=FrameBus/ROS topic / desktop=显示标识（可空）
+#   width/height 帧宽高（缺省 1280x720；subscriber 可省略——帧自带元数据）
+#   fps          帧率（缺省 30；须 > 0）
+#   reconnect_ms 相机重连间隔 ms（预留；本期未消费）
+#
+# 内部拓扑约定：capturer 发布 topic 前缀 `camera/<id>` 保留不动（本期不迁）。
+# 旧配置无 mode -> 按 generator 处理（原 stub 语义）。
+sources:
   - id: "cam0"
-    source: "stub"        # 采集源（缺省 "stub"；v4l2/mipi 后接）
+    mode: "camera"          # 相机（backend 采集后端实现中——当前 capturer 报未支持）
+    backend: "v4l2"         # v4l2 | mipi（仅 mode=camera 生效）
+    input: "/dev/video0"    # 设备路径
+    width: 1920
+    height: 1080
+    fps: 30
+    reconnect_ms: 5000      # 相机重连（预留）
+  - id: "test"
+    mode: "generator"       # 彩条生成器（真实产帧；链路验证用）
     fps: 30
 
+# 推流声明。streams[].source 引用 sources[].id（旧键名 "camera:" 仍可解析——
+# `#[serde(alias = "camera")]` 兼容）。缺省 source = 流 id 自身（topic camera/<id> 直连）。
 streams:
   - id: "cam0-stream"
-    camera: "cam0"        # 引用 cameras[].id（缺省 = 流 id 自身，topic camera/<id> 直连）
-    codec: "h264"         # 编码格式（缺省 vp8；对齐 field PublishOptions 默认）
+    source: "cam0"          # 引用 sources[].id
+    codec: "h264"           # 编码格式（缺省 vp8；对齐 field PublishOptions 默认）
 
 record:
   enabled: false

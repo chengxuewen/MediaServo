@@ -207,7 +207,7 @@ fn cmd_init(args: &mut impl Iterator<Item = String>) -> i32 {
             return 1;
         }
     };
-    let (cameras, streams) = match mediaservo_host::translate::camera_and_stream_ids(&cfg_text) {
+    let (sources, streams) = match mediaservo_host::translate::camera_and_stream_ids(&cfg_text) {
         Ok(ids) => ids,
         Err(e) => {
             eprintln!("init: {e}");
@@ -218,7 +218,7 @@ fn cmd_init(args: &mut impl Iterator<Item = String>) -> i32 {
         .unwrap_or_else(|_| link.join("ros-vision.token"))
         .to_string_lossy()
         .into_owned();
-    let yaml = mediaservo_link::bridge::ros_bridge(&cameras, &streams, &token_path);
+    let yaml = mediaservo_link::bridge::ros_bridge(&sources, &streams, &token_path);
     let ros_path = link.join("ros_bridge.yaml");
     if let Err(e) = std::fs::write(&ros_path, &yaml) {
         eprintln!("init: 写入 {} 失败: {e}", ros_path.display());
@@ -376,7 +376,9 @@ fn cmd_stop(args: &mut impl Iterator<Item = String>) -> i32 {
         println!("stop: 无 {}，无已管理进程", oxfile.display());
     }
     // 兜底: 残留 host 命名空间 app（oxfile 外遗留）逐个删除
-    match mediaservo_host::translate::live_host_apps() {
+    // （同一 per-instance daemon env——不带 env 查默认 daemon 为空，残留清理失效）
+    let env = mediaservo_host::translate::oxmgr_env(&dir);
+    match mediaservo_host::translate::live_host_apps(&env) {
         Ok(leftovers) => {
             for name in leftovers {
                 eprintln!("stop: 清理残留 app {name}");
@@ -747,7 +749,7 @@ fn issue_all(dir: &Path, ttl: u64) -> i32 {
             return 1;
         }
     };
-    let cameras = match mediaservo_host::translate::camera_configs(&cfg) {
+    let sources = match mediaservo_host::translate::camera_configs(&cfg) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("token: {e}");
@@ -765,16 +767,16 @@ fn issue_all(dir: &Path, ttl: u64) -> i32 {
     let mut issued = 0usize;
     let mut first_err: Option<String> = None;
     'issue: {
-        for cam in &cameras {
-            let out = link.join(format!("{}.token", cam.id));
+        for src in &sources {
+            let out = link.join(format!("{}.token", src.id));
             if out.exists() {
                 continue;
             }
             match issue_one(
                 dir,
                 Role::Capture,
-                format!("host-capturer-{}", cam.id),
-                vec![format!("camera/{}", cam.id)],
+                format!("host-capturer-{}", src.id),
+                vec![format!("camera/{}", src.id)],
                 &out,
                 ttl,
             ) {
@@ -790,12 +792,12 @@ fn issue_all(dir: &Path, ttl: u64) -> i32 {
             if out.exists() {
                 continue;
             }
-            let cam = s.camera.clone();
+            let src = s.source.clone();
             match issue_one(
                 dir,
                 Role::Pusher,
                 format!("host-streamer-{}", s.id),
-                vec![format!("camera/{cam}"), format!("vision/{cam}")],
+                vec![format!("camera/{src}"), format!("vision/{src}")],
                 &out,
                 ttl,
             ) {
@@ -902,7 +904,8 @@ fn cmd_doctor(args: &mut impl Iterator<Item = String>) -> i32 {
             return failed + 2; // ②③ 均因无配置失败，各打一条 [fail] 与计数一致
         }
     };
-    match toml::from_str::<toml::Value>(&cfg) {
+    // ② 配置解析与各消费进程同源（translate::validate——serde_yaml + 字段语义校验）
+    match mediaservo_host::translate::validate(&cfg) {
         Ok(_) => println!("[ok] host.yaml 可解析"),
         Err(e) => {
             println!("[fail] host.yaml 解析失败: {e}");
