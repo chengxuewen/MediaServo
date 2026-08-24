@@ -12,12 +12,20 @@
 //! 配发流程（G2 文档）: `host init` 生成 identity.json → 运维把 device_id/secret
 //! 拷入 server 的 devices.yaml（`ms-field hash` 之类工具 H 阶段提供；当前用
 //! `sha256sum` 手工算或本模块测试向量）。
+//!
+//! 热重载（unified-device-admin）: 注册表内部 `RwLock<Inner>` 化 — 外部签名
+//! （`Arc<DeviceRegistry>` / `&DeviceRegistry`）不变，signaling 鉴权调用点零改动；
+//! 管理操作（register/revoke/reset/list/save）运行时生效，无需重启 server。
+//! 写回策略：磁盘为单一事实源 — `save` 先序列化（短临界区）后 atomic 写盘
+//! （temp + fsync + rename），失败返回 Err 且内存不变。
 
 use mediaservo_common::error::CoreError;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
+use std::sync::{RwLock, RwLockReadGuard};
 use subtle::ConstantTimeEq;
 
 /// 设备认证失败原因（错误码统一 4010，见 signaling.rs 认证点注释）。
@@ -48,33 +56,63 @@ impl DeviceAuthError {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 struct RegistryFile {
     #[serde(default)]
     devices: HashMap<String, DeviceEntry>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct DeviceEntry {
     secret_hash: String,
 }
 
-/// 设备注册表（启动时加载，只读）。
-/// 注意: 不实现 Default — dummy_hash 必须启动时随机生成（Default 会给空串,
-/// 长度与真实哈希不同 → 未知设备比较路径的时序与已知设备可区分, 重开侧信道）。
-#[derive(Debug, Clone)]
-pub struct DeviceRegistry {
+/// 注册表内部态（RwLock 包裹；方法均为内部分发）。
+#[derive(Debug)]
+struct RegistryInner {
     devices: HashMap<String, String>, // device_id → "sha256:<hex>"
     /// 未知设备的固定比较目标（启动时随机生成, 与真实哈希同长, 永不匹配）。
     /// review #1: 未知设备也必须走完整 sha256 + ct_eq 路径, 响应时间不可区分。
     dummy_hash: String,
 }
 
+impl RegistryInner {
+    fn new(devices: HashMap<String, String>) -> Self {
+        Self {
+            devices,
+            dummy_hash: new_dummy_hash(),
+        }
+    }
+
+    fn verify(&self, device_id: &str, secret: &str) -> Result<(), DeviceAuthError> {
+        let known = self.devices.contains_key(device_id);
+        // review #1 防时序: 未知设备也用 dummy_hash 走完整 sha256 + ct_eq（无提前返回）。
+        // 已知/未知的响应时间不可区分; 匹配与否经 same-length ct_eq 判定。
+        let stored = self.devices.get(device_id).unwrap_or(&self.dummy_hash);
+        let want = hash_secret(device_id, secret);
+        let matched: bool = stored.as_bytes().ct_eq(want.as_bytes()).into();
+        match (matched, known) {
+            (true, _) => Ok(()),
+            // 内部区分保留（审计用）; 对外 wire 响应两者完全一致（见 message()）。
+            (false, true) => Err(DeviceAuthError::BadSecret),
+            (false, false) => Err(DeviceAuthError::Unknown),
+        }
+    }
+}
+
+/// 设备注册表（启动时加载；运行期可读热重载，管理操作经 RwLock 生效）。
+/// 注意: 不实现 Default — dummy_hash 必须启动时随机生成（Default 会给空串,
+/// 长度与真实哈希不同 → 未知设备比较路径的时序与已知设备可区分, 重开侧信道）。
+/// 注意: 不再 derive Clone（std RwLock 非 Clone）— 共享一律走 Arc，使用点已确认无克隆。
+#[derive(Debug)]
+pub struct DeviceRegistry {
+    inner: RwLock<RegistryInner>,
+}
+
 impl DeviceRegistry {
     pub fn empty() -> Self {
         Self {
-            devices: HashMap::new(),
-            dummy_hash: new_dummy_hash(),
+            inner: RwLock::new(RegistryInner::new(HashMap::new())),
         }
     }
 
@@ -103,31 +141,77 @@ impl DeviceRegistry {
             devices.insert(id, entry.secret_hash);
         }
         Ok(Self {
-            devices,
-            dummy_hash: new_dummy_hash(),
+            inner: RwLock::new(RegistryInner::new(devices)),
         })
     }
 
+    /// 锁 poison 恢复标准做法：unpoisoned 读锁；poison 时取回写者遗留的一致值。
+    fn lock_read(&self) -> RwLockReadGuard<'_, RegistryInner> {
+        self.inner.read().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn len(&self) -> usize {
-        self.devices.len()
+        self.lock_read().devices.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.devices.is_empty()
+        self.lock_read().devices.is_empty()
+    }
+
+    /// registry 内全部 device_id（管理列表用）。
+    pub fn device_ids(&self) -> Vec<String> {
+        self.lock_read().devices.keys().cloned().collect()
     }
 
     fn verify(&self, device_id: &str, secret: &str) -> Result<(), DeviceAuthError> {
-        let known = self.devices.contains_key(device_id);
-        // review #1 防时序: 未知设备也用 dummy_hash 走完整 sha256 + ct_eq（无提前返回）。
-        // 已知/未知的响应时间不可区分; 匹配与否经 same-length ct_eq 判定。
-        let stored = self.devices.get(device_id).unwrap_or(&self.dummy_hash);
-        let want = hash_secret(device_id, secret);
-        let matched: bool = stored.as_bytes().ct_eq(want.as_bytes()).into();
-        match (matched, known) {
-            (true, _) => Ok(()),
-            // 内部区分保留（审计用）; 对外 wire 响应两者完全一致（见 message()）。
-            (false, true) => Err(DeviceAuthError::BadSecret),
-            (false, false) => Err(DeviceAuthError::Unknown),
+        self.lock_read().verify(device_id, secret)
+    }
+
+    /// 序列化为 YAML 文件内容（与 from_yaml 格式互逆，round-trip 稳定）。
+    fn to_yaml(&self) -> Result<String, CoreError> {
+        let inner = self.lock_read();
+        let file = RegistryFile {
+            devices: inner
+                .devices
+                .iter()
+                .map(|(id, hash)| {
+                    (
+                        id.clone(),
+                        DeviceEntry {
+                            secret_hash: hash.clone(),
+                        },
+                    )
+                })
+                .collect(),
+        };
+        serde_yaml::to_string(&file)
+            .map_err(|e| CoreError::ConfigParse(format!("devices serialize: {e}")))
+    }
+
+    /// Atomic 写回 devices.yaml（temp + fsync + rename）。
+    /// **内存不变**：仅在序列化与写盘全部成功后返回 Ok；失败清理 temp 并返回 Err。
+    /// 调用方（管理 API 层）持有此函数的调用权 — 写路径低频、短临界区。
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<(), CoreError> {
+        let path = path.as_ref();
+        let yaml = self.to_yaml()?;
+        let tmp = path.with_extension("yaml.tmp");
+        let res = (|| -> std::io::Result<()> {
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(yaml.as_bytes())?;
+            f.sync_all()?;
+            drop(f);
+            std::fs::rename(&tmp, path)?;
+            Ok(())
+        })();
+        match res {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp); // 清理残留（成功路径无 tmp）
+                Err(CoreError::ConfigParse(format!(
+                    "devices file {}: write failed: {e}",
+                    path.display()
+                )))
+            }
         }
     }
 }
@@ -177,6 +261,10 @@ mod tests {
         let hash = hash_secret("ms-0a1b2c3d4e5f", secret);
         let yaml = format!("devices:\n  ms-0a1b2c3d4e5f:\n    secret_hash: \"{hash}\"\n");
         DeviceRegistry::from_yaml(&yaml).unwrap()
+    }
+
+    fn dummy_hash_of(reg: &DeviceRegistry) -> String {
+        reg.lock_read().dummy_hash.clone()
     }
 
     #[test]
@@ -301,10 +389,32 @@ mod tests {
         // review #1: dummy 每次启动生成、与真实哈希同长（ct_eq 路径恒等）。
         let a = DeviceRegistry::empty();
         let b = DeviceRegistry::empty();
-        assert_ne!(a.dummy_hash, b.dummy_hash, "dummy 必须每实例随机");
-        assert_eq!(a.dummy_hash.len(), "sha256:".len() + 64, "dummy 与真实哈希同长");
-        assert_eq!(a.dummy_hash.len(), hash_secret("ms-x", "s").len());
+        assert_ne!(dummy_hash_of(&a), dummy_hash_of(&b), "dummy 必须每实例随机");
+        assert_eq!(dummy_hash_of(&a).len(), "sha256:".len() + 64, "dummy 与真实哈希同长");
+        assert_eq!(dummy_hash_of(&a).len(), hash_secret("ms-x", "s").len());
         // 未知设备仍走 verify 全路径（返回 Unknown 但内部已完成 sha256+ct_eq）。
         assert_eq!(a.verify("ms-anyone", "x"), Err(DeviceAuthError::Unknown));
+    }
+
+    #[test]
+    fn save_roundtrip_preserves_entries_and_no_temp_leftover() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("ms-devices-test-{}.yaml", uuid::Uuid::new_v4()));
+        let reg = test_registry();
+        reg.save(&path).unwrap();
+        // 无 temp 残留
+        assert!(!path.with_extension("yaml.tmp").exists(), "temp 文件必须被清理");
+        // reload round-trip 保持鉴权语义
+        let reloaded = DeviceRegistry::load(&path).unwrap();
+        assert_eq!(reloaded.len(), 1);
+        assert_eq!(
+            authenticate(&reloaded, Some("ms-0a1b2c3d4e5f"), Some("s3cret")),
+            Some(Ok(()))
+        );
+        assert_eq!(
+            authenticate(&reloaded, Some("ms-nope"), Some("s3cret")),
+            Some(Err(DeviceAuthError::Unknown))
+        );
+        let _ = std::fs::remove_file(&path);
     }
 }
