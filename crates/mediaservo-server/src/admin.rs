@@ -16,6 +16,7 @@ use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use mediaservo_common::auth::{JwtAuth, JwtClaims};
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -524,6 +525,61 @@ fn map_account_reg_error(e: crate::accounts::AccountRegError) -> (StatusCode, Js
         ),
         crate::accounts::AccountRegError::InvalidVehicles(msg) => {
             (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: msg }))
+        }
+    }
+}
+
+// ── PSK 管理辅助（psk-admin-management）────────────────────────────────────
+
+/// psk 掩码（hint 展示用）：前 2 字符 + `··`；空 → 空；≤2 字符 → 原样（不泄密）。
+pub fn mask_psk(psk: &str) -> String {
+    if psk.is_empty() {
+        return String::new();
+    }
+    let chars: Vec<char> = psk.chars().collect();
+    if chars.len() <= 2 {
+        return psk.to_string();
+    }
+    format!("{}··", chars[..2].iter().collect::<String>())
+}
+
+/// 文本级写回 server.yaml 的顶层 `psk: "<value>"`（保留注释/缩进/其他字段）。
+/// 未找到 psk 行 → 追加顶层 psk 行（YAML 顶层语义—配置 psk 在顶层, 与 listen 同级）。
+/// 失败：错误清理（无 temp 残留）并返回 Err（C15 日志由调用方打）。
+fn write_back_psk(path: &std::path::Path, psk: &str) -> Result<(), String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("server config {}: read failed: {e}", path.display()))?;
+    let (new_text, replaced_count) = {
+        // 仅替换零缩进顶层 psk 行（保留注释/缩进/其他字段）; 缩进行（注释里的 # psk:）不碰
+        let mut count = 0usize;
+        let replaced = text
+            .lines()
+            .map(|line| {
+                if line.starts_with("psk:") && !line.starts_with(char::is_whitespace) {
+                    count += 1;
+                    return format!("psk: {psk:?}");
+                }
+                line.to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        (replaced, count)
+    };
+    let final_text = if replaced_count > 0 { new_text } else { format!("{text}\npsk: {psk:?}\n") };
+    let tmp = path.with_extension("yaml.tmp");
+    let res = (|| -> std::io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(final_text.as_bytes())?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    match res {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(format!("server config {}: write failed: {e}", path.display()))
         }
     }
 }
@@ -1653,5 +1709,64 @@ mod g3_tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "缺少 producer/consumer id → 400");
+    }
+
+    // ── psk-admin-management T2: 辅助函数 ────────────────────────────────
+
+    #[test]
+    fn mask_psk_bounds() {
+        assert_eq!(mask_psk(""), "");
+        assert_eq!(mask_psk("a"), "a");
+        assert_eq!(mask_psk("ab"), "ab");
+        assert_eq!(mask_psk("abc"), "ab··");
+        assert_eq!(mask_psk("secret-12345678"), "se··");
+        assert!(!mask_psk("secret-12345678").contains("cret"), "掩码不得泄露中间部分");
+    }
+
+    #[test]
+    fn write_back_psk_replaces_top_level_preserving_comments_and_indent() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("ms-server-psk-{}.yaml", uuid::Uuid::new_v4()));
+        // 含 inline 注释与缩进字段（模拟 server.docker.yaml 形态）
+        std::fs::write(&path,
+            "listen:\n  host: \"0.0.0.0\"\n  port: 9800\npsk: \"old-secret\"   # PIT-49\njwt_secret: \"x\"\n").unwrap();
+        write_back_psk(&path, "new-secret-123").unwrap();
+        let out = std::fs::read_to_string(&path).unwrap();
+        assert!(out.contains("psk: \"new-secret-123\"   # PIT-49"), "替换保留 inline 注释: {out}");
+        assert!(out.contains("jwt_secret:"), "其他字段保留: {out}");
+        assert!(!out.contains("old-secret"), "旧值清除: {out}");
+        assert!(!path.with_extension("yaml.tmp").exists(), "temp 必须清理");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn write_back_psk_appends_when_missing() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("ms-server-psk-noval-{}.yaml", uuid::Uuid::new_v4()));
+        std::fs::write(&path, "listen:\n  host: \"0.0.0.0\"\n").unwrap();
+        write_back_psk(&path, "fresh-secret-9").unwrap();
+        let out = std::fs::read_to_string(&path).unwrap();
+        assert!(out.contains("psk: \"fresh-secret-9\""), "无 psk 行时追加: {out}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn write_back_psk_does_not_touch_indented_comment_psk() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("ms-server-psk-comment-{}.yaml", uuid::Uuid::new_v4()));
+        std::fs::write(&path, "listen:\n  host: \"x\"\n# psk: \"commented\" — 注释里的非配置\n")
+            .unwrap();
+        write_back_psk(&path, "real-secret-77").unwrap();
+        let out = std::fs::read_to_string(&path).unwrap();
+        // 注释行不动 + 顶层追加
+        assert!(out.contains("# psk: \"commented\""), "注释 psk 行不替换: {out}");
+        assert!(out.contains("psk: \"real-secret-77\""), "追加真实 psk: {out}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn write_back_psk_unwritable_path_errors() {
+        let path = std::path::Path::new("/nonexistent-dir-xyz/psk.yaml");
+        assert!(write_back_psk(path, "secret-1").is_err());
     }
 }

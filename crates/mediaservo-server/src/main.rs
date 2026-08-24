@@ -160,6 +160,10 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
                     jwt_auth.clone(),
                 );
                 srv.device_registry = std::sync::Arc::clone(&device_registry);
+                // psk-admin-management: config 优先 + env 兜底（死配置修复 — server.yaml psk 正式接入鉴权）
+                let merged_psk =
+                    config.psk.clone().or_else(|| std::env::var("MEDIASERVO_PSK").ok());
+                srv.psk_state = std::sync::Arc::new(std::sync::RwLock::new(merged_psk));
                 srv
             }
             Err(e) => {
@@ -172,6 +176,9 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let mut signaling_server = {
         let mut srv = signaling::SignalingServer::new(config.ws_max_message_size, jwt_auth);
         srv.device_registry = std::sync::Arc::clone(&device_registry);
+        // psk-admin-management: config 优先 + env 兜底（死配置修复 — server.yaml psk 正式接入鉴权）
+        let merged_psk = config.psk.clone().or_else(|| std::env::var("MEDIASERVO_PSK").ok());
+        srv.psk_state = std::sync::Arc::new(std::sync::RwLock::new(merged_psk));
         srv
     };
 

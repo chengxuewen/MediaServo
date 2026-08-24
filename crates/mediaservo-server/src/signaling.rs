@@ -1,12 +1,12 @@
 use crate::audit::{self, AuditEvent};
 use crate::devices::{self, DeviceRegistry};
-use crate::roles::{AccountIdentity, CockpitRole, SessionIdentity};
-use crate::status::StatusRegistry;
-use crate::room::RoomManager;
 use crate::health::{HealthChecker, HealthStatus};
+use crate::roles::{AccountIdentity, CockpitRole, SessionIdentity};
+use crate::room::RoomManager;
+use crate::status::StatusRegistry;
 use axum::Router;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -48,6 +48,9 @@ pub struct SignalingServer {
     pub pending_messages: Arc<dashmap::DashMap<String, Vec<String>>>,
     /// JWT authenticator (optional; PSK used as fallback).
     pub jwt_auth: Option<JwtAuth>,
+    /// PSK 共享态（psk-admin-management）: main.rs 启动注入（config 优先 + env 兜底）;
+    /// admin API 轮换写锁热更新。None = 未配置 — 保持既有「跳过 PSK 校验」语义。
+    pub psk_state: std::sync::Arc<std::sync::RwLock<Option<String>>>,
     /// 整车状态上报注册表（E3: 每房间最新 StatusReport; H 阶段 admin API 读取）。
     pub status_registry: Arc<StatusRegistry>,
     /// G2 设备注册表（启动时从 devices.yaml 加载，只读；空 = PSK 路径）。
@@ -63,7 +66,11 @@ pub struct SignalingServer {
 
 impl SignalingServer {
     #[cfg(feature = "sfu-mediasoup")]
-    pub fn new(_sfu: Arc<crate::sfu::SfuManager>, ws_max_message_size: usize, jwt_auth: Option<JwtAuth>) -> Self {
+    pub fn new(
+        _sfu: Arc<crate::sfu::SfuManager>,
+        ws_max_message_size: usize,
+        jwt_auth: Option<JwtAuth>,
+    ) -> Self {
         let (shutdown_tx, _) = watch::channel(false);
         Self {
             channels: Arc::new(dashmap::DashMap::new()),
@@ -74,6 +81,7 @@ impl SignalingServer {
             ws_max_message_size,
             pending_messages: Arc::new(dashmap::DashMap::new()),
             jwt_auth,
+            psk_state: std::sync::Arc::new(std::sync::RwLock::new(None)),
             status_registry: Arc::new(StatusRegistry::default()),
             device_registry: Arc::new(DeviceRegistry::empty()),
             device_bindings: Arc::new(dashmap::DashMap::new()),
@@ -93,6 +101,7 @@ impl SignalingServer {
             ws_max_message_size,
             pending_messages: Arc::new(dashmap::DashMap::new()),
             jwt_auth,
+            psk_state: std::sync::Arc::new(std::sync::RwLock::new(None)),
             status_registry: Arc::new(StatusRegistry::default()),
             device_registry: Arc::new(DeviceRegistry::empty()),
             device_bindings: Arc::new(dashmap::DashMap::new()),
@@ -143,11 +152,7 @@ impl SignalingServer {
     }
 
     pub(crate) fn get_or_create_channel(&self, room_id: &str) -> broadcast::Sender<String> {
-        self.channels
-            .entry(room_id.to_string())
-            .or_insert_with(RoomChannel::new)
-            .tx
-            .clone()
+        self.channels.entry(room_id.to_string()).or_insert_with(RoomChannel::new).tx.clone()
     }
     /// E4 云端配置下发: 向房间 Host（整车 host-agent 会话）推送 host.toml 全文。
     /// 经房间 broadcast 频道投递（target = host peer_id，接收端按 target 过滤）。
@@ -166,7 +171,8 @@ impl SignalingServer {
             config: config.to_string(),
             version,
         };
-        let text = serde_json::to_string(&msg).map_err(|e| format!("push_config: 序列化失败: {e}"))?;
+        let text =
+            serde_json::to_string(&msg).map_err(|e| format!("push_config: 序列化失败: {e}"))?;
         let tx = self.get_or_create_channel(room_id);
         tx.send(text).map_err(|_| format!("push_config: 房间 {room_id} 无接收者"))?;
         tracing::info!(
@@ -177,7 +183,6 @@ impl SignalingServer {
         );
         Ok(())
     }
-
 }
 
 // ── HealthChecker impl ────────────────────────────────────────────────────
@@ -197,9 +202,7 @@ impl HealthChecker for SignalingServer {
 }
 
 pub fn signaling_router(server: SignalingServer) -> Router {
-    Router::new()
-        .route("/ws", get(ws_handler))
-        .with_state(server)
+    Router::new().route("/ws", get(ws_handler)).with_state(server)
 }
 
 async fn ws_handler(
@@ -255,8 +258,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     let mut peer_id = uuid::Uuid::new_v4().to_string();
     tracing::info!("New connection: peer={}", peer_id);
 
-    // PSK auth — from env var for Phase 1
-    let psk = std::env::var("MEDIASERVO_PSK").ok();
+    // PSK auth — 共享态（psk-admin-management: main.rs 注入 config/env 合并; admin 轮换热更新）
+    let psk = server.psk_state.read().unwrap_or_else(|e| e.into_inner()).clone();
     let psk_auth = psk.as_ref().map(|k| SimplePskAuth::new(k.as_bytes()));
     let mut authenticated = psk_auth.is_none();
     tracing::info!("Auth: psk_set={}, authenticated={}", psk.is_some(), authenticated);
@@ -279,10 +282,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                                 peer_id: peer_id.clone(),
                                 reason: reason.clone(),
                             });
-                            let error = SignalingMessage::Error {
-                                code: 4011,
-                                message: reason,
-                            };
+                            let error = SignalingMessage::Error { code: 4011, message: reason };
                             let _ = ws_sender
                                 .lock()
                                 .await
@@ -353,11 +353,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                         code: 4003,
                         message: "PSK authentication failed".into(),
                     };
-                    let _ = ws_sender
-                        .lock()
-                        .await
-                        .send(Message::Text(send_msg(&error).unwrap()))
-                        .await;
+                    let _ =
+                        ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
                     audit::log_event(AuditEvent::AuthFailure {
                         peer_id: peer_id.clone(),
                         reason: "PSK authentication failed".into(),
@@ -370,11 +367,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                     code: 4003,
                     message: "Authentication required".into(),
                 };
-                let _ = ws_sender
-                    .lock()
-                    .await
-                    .send(Message::Text(send_msg(&error).unwrap()))
-                    .await;
+                let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
                 audit::log_event(AuditEvent::AuthFailure {
                     peer_id: peer_id.clone(),
                     reason: "Authentication required".into(),
@@ -385,15 +378,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     }
 
     // Always send auth ack (or skip if no auth required)
-    let ack = SignalingMessage::Error {
-        code: 0,
-        message: "authenticated".into(),
-    };
-    let _ = ws_sender
-        .lock()
-        .await
-        .send(Message::Text(send_msg(&ack).unwrap()))
-        .await;
+    let ack = SignalingMessage::Error { code: 0, message: "authenticated".into() };
+    let _ = ws_sender.lock().await.send(Message::Text(send_msg(&ack).unwrap())).await;
     tracing::info!("Auth ack sent, entering RoomJoin phase");
 
     // Phase 2: RoomJoin
@@ -464,11 +450,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                                 peer_id: peer_id.clone(),
                                 device_id: Some(device.clone()),
                             });
-                            tracing::info!(
-                                "Peer {} device-authenticated as {}",
-                                peer_id,
-                                device
-                            );
+                            tracing::info!("Peer {} device-authenticated as {}", peer_id, device);
                             break (
                                 room_id,
                                 peer_role,
@@ -496,15 +478,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
             peer_id: peer_id.clone(),
             detail: detail.clone(),
         });
-        let error = SignalingMessage::Error {
-            code: 4031,
-            message: detail,
-        };
-        let _ = ws_sender
-            .lock()
-            .await
-            .send(Message::Text(send_msg(&error).unwrap()))
-            .await;
+        let error = SignalingMessage::Error { code: 4031, message: detail };
+        let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
         return;
     }
     // ② Remote 角色 = P2P 控制协商位（I1 review）: 无控制能力者禁止 —
@@ -520,15 +495,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
             peer_id: peer_id.clone(),
             detail: detail.clone(),
         });
-        let error = SignalingMessage::Error {
-            code: 4031,
-            message: detail,
-        };
-        let _ = ws_sender
-            .lock()
-            .await
-            .send(Message::Text(send_msg(&error).unwrap()))
-            .await;
+        let error = SignalingMessage::Error { code: 4031, message: detail };
+        let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
         return;
     }
     // ③ 按房间主车做矩阵 + 白名单校验（车 A 不可见车 B; 账号仅授权车）。
@@ -541,15 +509,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                 peer_id: peer_id.clone(),
                 detail: detail.clone(),
             });
-            let error = SignalingMessage::Error {
-                code: 4031,
-                message: detail,
-            };
-            let _ = ws_sender
-                .lock()
-                .await
-                .send(Message::Text(send_msg(&error).unwrap()))
-                .await;
+            let error = SignalingMessage::Error { code: 4031, message: detail };
+            let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
             return;
         }
     }
@@ -561,15 +522,11 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
             // review #2: 绑定必须发生在 join 成功之后 — 失败路径（4001/4002）零残留;
             // 断开时 cleanup 解除（见 relay 循环结束处）。
             if let Some(device) = &device_id {
-                server
-                    .device_bindings
-                    .insert(peer_id.clone(), device.clone());
+                server.device_bindings.insert(peer_id.clone(), device.clone());
                 // G3: 车端 join 成功即登记房间主车（租户隔离/授权的裁决依据）。
                 // 注: 存的是设备 ID（= 车辆 ID）。音频房间 room_id=audio-<vehicle>，
                 // 设备 ID 即 vehicle — join_vehicle_room 按它比对 allowlist，天然正确。
-                server
-                    .room_owners
-                    .insert(room_id.clone(), device.clone());
+                server.room_owners.insert(room_id.clone(), device.clone());
             }
             audit::log_event(AuditEvent::PeerJoin {
                 peer_id: peer_id.clone(),
@@ -578,15 +535,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
             });
         }
         Err(CoreError::RoomFull) => {
-            let error = SignalingMessage::Error {
-                code: 4002,
-                message: "Room is full".into(),
-            };
-            let _ = ws_sender
-                .lock()
-                .await
-                .send(Message::Text(send_msg(&error).unwrap()))
-                .await;
+            let error = SignalingMessage::Error { code: 4002, message: "Room is full".into() };
+            let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
             return;
         }
         Err(e) => {
@@ -595,25 +545,14 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                 code: 4001,
                 message: format!("Failed to join room: {}", e),
             };
-            let _ = ws_sender
-                .lock()
-                .await
-                .send(Message::Text(send_msg(&error).unwrap()))
-                .await;
+            let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
             return;
         }
     }
 
     // Send RoomJoined ack
-    let ack = SignalingMessage::RoomJoined {
-        room_id: room_id.clone(),
-        peer_id: peer_id.clone(),
-    };
-    let _ = ws_sender
-        .lock()
-        .await
-        .send(Message::Text(send_msg(&ack).unwrap()))
-        .await;
+    let ack = SignalingMessage::RoomJoined { room_id: room_id.clone(), peer_id: peer_id.clone() };
+    let _ = ws_sender.lock().await.send(Message::Text(send_msg(&ack).unwrap())).await;
 
     // ── Replay cached SDP offer + ICE candidates for late joiners ────────
     if let Some(cached) = server.pending_messages.get(&room_id) {
@@ -641,13 +580,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
             match rx.recv().await {
                 Ok(msg) => {
                     tracing::info!("Relay: forwarding to peer ({} bytes)", msg.len());
-                    if relay_sender
-                        .lock()
-                        .await
-                        .send(Message::Text(msg))
-                        .await
-                        .is_err()
-                    {
+                    if relay_sender.lock().await.send(Message::Text(msg)).await.is_err() {
                         tracing::warn!("Relay: send failed, peer disconnected");
                         break;
                     }
@@ -679,11 +612,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                     peer_id: peer_id.clone(),
                     kind: kind.clone(),
                 };
-                let _ = direct_sender
-                    .lock()
-                    .await
-                    .send(Message::Text(send_msg(&msg).unwrap()))
-                    .await;
+                let _ =
+                    direct_sender.lock().await.send(Message::Text(send_msg(&msg).unwrap())).await;
             }
         }
     }
@@ -692,11 +622,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     #[cfg(feature = "sfu-mediasoup")]
     {
         if let Some(created) = server.sfu_manager.list_data_producers(&relay_room) {
-            tracing::info!(
-                "SFU: found {} data producers in room {}",
-                created.len(),
-                relay_room
-            );
+            tracing::info!("SFU: found {} data producers in room {}", created.len(), relay_room);
             for (data_producer_id, label, peer_id) in &created {
                 let msg = SignalingMessage::NewDataProducer {
                     room_id: relay_room.clone(),
@@ -705,11 +631,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                     label: label.clone(),
                     protocol: String::new(),
                 };
-                let _ = direct_sender
-                    .lock()
-                    .await
-                    .send(Message::Text(send_msg(&msg).unwrap()))
-                    .await;
+                let _ =
+                    direct_sender.lock().await.send(Message::Text(send_msg(&msg).unwrap())).await;
             }
         }
     }
@@ -772,10 +695,9 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                             Ok(()) => {
                                 // 强审计: 谁/何时(tracing 时间戳)/哪个车/什么命令
                                 let (username, role) = match &session_identity {
-                                    SessionIdentity::Account(a) => (
-                                        a.username.clone(),
-                                        a.role.as_str().to_string(),
-                                    ),
+                                    SessionIdentity::Account(a) => {
+                                        (a.username.clone(), a.role.as_str().to_string())
+                                    }
                                     _ => (relay_peer_id.clone(), "legacy".into()),
                                 };
                                 audit::log_event(AuditEvent::EmergencyCommand {
@@ -790,19 +712,15 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                                 let _ = tx.send(text_str.clone());
                             }
                             Err(reason) => {
-                                let detail = format!(
-                                    "{reason} (peer={relay_peer_id}, room={relay_room})"
-                                );
+                                let detail =
+                                    format!("{reason} (peer={relay_peer_id}, room={relay_room})");
                                 tracing::warn!("Emergency denied: {detail}");
                                 audit::log_event(AuditEvent::AuthorizationDenied {
                                     action: "emergency".into(),
                                     peer_id: relay_peer_id.clone(),
                                     detail: detail.clone(),
                                 });
-                                let error = SignalingMessage::Error {
-                                    code: 4031,
-                                    message: detail,
-                                };
+                                let error = SignalingMessage::Error { code: 4031, message: detail };
                                 let _ = direct_sender
                                     .lock()
                                     .await
@@ -814,9 +732,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                     }
                     // ── G3 ConfigPush: server 单向下发（admin REST）; 客户端入站一律拒绝 ──
                     if let SignalingMessage::ConfigPush { .. } = &sig {
-                        let detail = format!(
-                            "config push is server-initiated only (peer={relay_peer_id})"
-                        );
+                        let detail =
+                            format!("config push is server-initiated only (peer={relay_peer_id})");
                         tracing::warn!("ConfigPush inbound rejected: {detail}");
                         audit::log_event(AuditEvent::AuthorizationDenied {
                             action: "config_push".into(),
@@ -839,7 +756,10 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                 // Check for SFU transport messages (server-side handling)
                 #[cfg(feature = "sfu-mediasoup")]
                 {
-                    tracing::debug!("SFU check: parsing message: {}", &text_str[..text_str.len().min(200)]);
+                    tracing::debug!(
+                        "SFU check: parsing message: {}",
+                        &text_str[..text_str.len().min(200)]
+                    );
                     if let Ok(sig_msg) = serde_json::from_str::<SignalingMessage>(&text_str) {
                         tracing::debug!("SFU check: parsed OK, calling handle_sfu_message");
                         if let Some(response) = handle_sfu_message(
@@ -861,7 +781,10 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                             continue; // Handled by SFU, don't relay
                         }
                     } else {
-                        tracing::debug!("SFU check: parse FAILED for: {}", &text_str[..text_str.len().min(100)]);
+                        tracing::debug!(
+                            "SFU check: parse FAILED for: {}",
+                            &text_str[..text_str.len().min(100)]
+                        );
                     }
                 }
 
@@ -869,7 +792,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                 let should_relay = match serde_json::from_str::<SignalingMessage>(&text_str) {
                     Ok(sig_msg) => matches!(
                         sig_msg,
-                        SignalingMessage::Sdp { .. } | SignalingMessage::RTCIceCandidate { .. }
+                        SignalingMessage::Sdp { .. }
+                            | SignalingMessage::RTCIceCandidate { .. }
                             | SignalingMessage::Frame { .. }
                             | SignalingMessage::EncoderStatus { .. } // v2: web-stream-stats T3
                     ),
@@ -877,13 +801,20 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                         // v2 (web-stream-stats 双审 HIGH): 解析失败消息（如旧版未知变体）静默丢弃 —
                         // C15 要求错误路径打日志; 限频防刷屏
                         if let Ok(raw) = serde_json::from_str::<serde_json::Value>(&text_str) {
-                            let is_frame = raw.get("type").and_then(|v| v.as_str()) == Some("frame");
+                            let is_frame =
+                                raw.get("type").and_then(|v| v.as_str()) == Some("frame");
                             if !is_frame {
-                                tracing::warn!("signaling: unparsable message dropped (len={}): {e}", text_str.len());
+                                tracing::warn!(
+                                    "signaling: unparsable message dropped (len={}): {e}",
+                                    text_str.len()
+                                );
                             }
                             is_frame
                         } else {
-                            tracing::warn!("signaling: non-JSON message dropped (len={})", text_str.len());
+                            tracing::warn!(
+                                "signaling: non-JSON message dropped (len={})",
+                                text_str.len()
+                            );
                             false
                         }
                     }
@@ -893,16 +824,16 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                     // I1 review: P2P 房间（非 DeviceStream）的 SDP/ICE = 控制协商载体 —
                     // 无控制能力账号（viewer/dispatcher）即使以 Consumer 入房也拦截其中继
                     // （Consumer 只走 SFU 媒体，协商是消息驱动，不需要 SDP 中继）。
-                    let is_device_room = server
-                        .room_manager
-                        .is_device_stream(&relay_room);
+                    let is_device_room = server.room_manager.is_device_stream(&relay_room);
                     if !is_device_room && !session_identity.can_control() {
                         let is_negotiation = serde_json::from_str::<SignalingMessage>(&text_str)
-                            .map(|m| matches!(
-                                m,
-                                SignalingMessage::Sdp { .. }
-                                    | SignalingMessage::RTCIceCandidate { .. }
-                            ))
+                            .map(|m| {
+                                matches!(
+                                    m,
+                                    SignalingMessage::Sdp { .. }
+                                        | SignalingMessage::RTCIceCandidate { .. }
+                                )
+                            })
                             .unwrap_or(false);
                         if is_negotiation {
                             let detail = format!(
@@ -927,8 +858,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                                 SignalingMessage::Frame { .. }
                                     | SignalingMessage::EncoderStatus { .. }
                             )
-                        } else if let Ok(raw) =
-                            serde_json::from_str::<serde_json::Value>(&text_str)
+                        } else if let Ok(raw) = serde_json::from_str::<serde_json::Value>(&text_str)
                         {
                             raw.get("type").and_then(|v| v.as_str()) == Some("frame")
                         } else {
@@ -944,9 +874,15 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                         Ok(n) => {
                             tracing::debug!("Forward: broadcast to {} receivers", n);
                             // ── Cache SDP + ICE for late-joiner replay
-                            if let Ok(sig_msg) = serde_json::from_str::<SignalingMessage>(&text_str) {
-                                if matches!(sig_msg, SignalingMessage::Sdp { .. } | SignalingMessage::RTCIceCandidate { .. }) {
-                                    let mut msgs = server.pending_messages
+                            if let Ok(sig_msg) = serde_json::from_str::<SignalingMessage>(&text_str)
+                            {
+                                if matches!(
+                                    sig_msg,
+                                    SignalingMessage::Sdp { .. }
+                                        | SignalingMessage::RTCIceCandidate { .. }
+                                ) {
+                                    let mut msgs = server
+                                        .pending_messages
                                         .entry(relay_room.clone())
                                         .or_default();
                                     msgs.push(text_str);
@@ -977,7 +913,6 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         tracing::info!("SFU: cleaned up peer {} in room {}", relay_peer_id, relay_room);
     }
 
-
     // ── Check if leaving peer is a DeviceStream host (before leave_room removes it)
     let is_device_stream_host = server.room_manager.is_device_stream(&relay_room)
         && server
@@ -993,11 +928,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
 
     // G2: 断开即解除连接级身份绑定（peer_id → device_id 仅连接存活期间有效）。
     if let Some(device) = server.device_bindings.remove(&relay_peer_id) {
-        tracing::info!(
-            "Peer {} disconnected, released device binding {}",
-            relay_peer_id,
-            device.1
-        );
+        tracing::info!("Peer {} disconnected, released device binding {}", relay_peer_id, device.1);
     }
     audit::log_event(AuditEvent::PeerLeave {
         peer_id: relay_peer_id.clone(),
@@ -1007,9 +938,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     // ── DeviceStream host disconnect: drop all consumers
     if is_device_stream_host {
         tracing::info!("DeviceStream host {} disconnected, disconnecting consumers", relay_peer_id);
-        let consumers = server
-            .room_manager
-            .disconnect_consumers(&relay_room);
+        let consumers = server.room_manager.disconnect_consumers(&relay_room);
         for consumer_id in &consumers {
             audit::log_event(AuditEvent::PeerLeave {
                 peer_id: consumer_id.clone(),
@@ -1018,8 +947,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
             tracing::info!("DeviceStream consumer {} removed (host left)", consumer_id);
         }
         if !consumers.is_empty() {
-            tracing::info!("Disconnected {} consumers from room {}",
-                consumers.len(), relay_room);
+            tracing::info!("Disconnected {} consumers from room {}", consumers.len(), relay_room);
         }
     }
 
@@ -1035,22 +963,19 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         server.room_owners.remove(&relay_room);
     }
 
-    let leave_msg = SignalingMessage::RoomLeave {
-        room_id: relay_room.clone(),
-        peer_id: relay_peer_id.clone(),
-    };
+    let leave_msg =
+        SignalingMessage::RoomLeave { room_id: relay_room.clone(), peer_id: relay_peer_id.clone() };
     let _ = tx.send(serde_json::to_string(&leave_msg).unwrap());
 
-    tracing::info!(
-        "Peer {} disconnected from room {}",
-        relay_peer_id,
-        relay_room
-    );
+    tracing::info!("Peer {} disconnected from room {}", relay_peer_id, relay_room);
 }
 
 /// I3 review: StatusReport 身份门判定 — 仅 Device 会话（车端）或 Host 角色（PSK 车端）
 /// 可上报整车状态；账号/其他会话拒绝（舱端不可伪造车端状态）。返回拒绝原因（None = 允许）。
-fn status_report_denial_reason(identity: &SessionIdentity, role: &PeerRole) -> Option<&'static str> {
+fn status_report_denial_reason(
+    identity: &SessionIdentity,
+    role: &PeerRole,
+) -> Option<&'static str> {
     if matches!(identity, SessionIdentity::Device(_)) || *role == PeerRole::Host {
         None
     } else {
@@ -1074,10 +999,7 @@ fn status_report_denial(
         peer_id: peer_id.to_string(),
         detail: detail.clone(),
     });
-    Some(SignalingMessage::Error {
-        code: 4031,
-        message: detail,
-    })
+    Some(SignalingMessage::Error { code: 4031, message: detail })
 }
 
 /// Handle SFU transport negotiation and produce/consume messages.
@@ -1093,17 +1015,14 @@ pub(crate) async fn handle_sfu_message(
 ) -> Option<SignalingMessage> {
     let sfu = &server.sfu_manager;
     match msg {
-        SignalingMessage::CreateWebRtcTransport {
-            room_id,
-            peer_id: msg_peer_id,
-            direction,
-        } => {
+        SignalingMessage::CreateWebRtcTransport { room_id, peer_id: msg_peer_id, direction } => {
             // PIT-65: 用消息 peer_id (每网页唯一 sfuPeerId), 非 session relay_peer_id
             let sfu_peer_id = msg_peer_id.as_str();
             tracing::info!(
                 "SFU: creating {} transport for peer {} in room {}",
                 serde_json::to_string(direction).unwrap_or_default(),
-                        sfu_peer_id, room_id
+                sfu_peer_id,
+                room_id
             );
             let dir_str = match direction {
                 mediaservo_common::protocol::TransportDirection::Send => "send",
@@ -1111,8 +1030,10 @@ pub(crate) async fn handle_sfu_message(
             };
             match tokio::time::timeout(
                 std::time::Duration::from_secs(5),
-                sfu.create_webrtc_transport(room_id, sfu_peer_id, dir_str)
-            ).await {
+                sfu.create_webrtc_transport(room_id, sfu_peer_id, dir_str),
+            )
+            .await
+            {
                 Ok(Ok(created)) => Some(SignalingMessage::WebRtcTransportCreated {
                     room_id: room_id.clone(),
                     peer_id: peer_id.to_string(),
@@ -1145,15 +1066,15 @@ pub(crate) async fn handle_sfu_message(
         } => {
             // PIT-65: 用消息 peer_id — 与 create/consume 一致
             let sfu_peer_id = msg_peer_id.as_str();
-            match sfu.connect_transport(&room_id, sfu_peer_id, &transport_id, dtls_parameters.clone()).await {
+            match sfu
+                .connect_transport(&room_id, sfu_peer_id, &transport_id, dtls_parameters.clone())
+                .await
+            {
                 Ok(()) => {
                     tracing::info!(
                         "SFU: transport {transport_id} connected for peer {sfu_peer_id}"
                     );
-                    Some(SignalingMessage::Error {
-                        code: 0,
-                        message: "transport_connected".into(),
-                    })
+                    Some(SignalingMessage::Error { code: 0, message: "transport_connected".into() })
                 }
                 Err(e) => {
                     tracing::error!("SFU: connect transport failed: {e}");
@@ -1174,8 +1095,15 @@ pub(crate) async fn handle_sfu_message(
         } => {
             // PIT-65: 用消息 peer_id — 与 create/connect/consume 一致
             let sfu_peer_id = msg_peer_id.as_str();
-            tracing::info!("SFU: Produce received room={} kind={:?} dir={:?} rtp={}", room_id, kind, transport_direction, rtp_parameters);
-            if !matches!(transport_direction, mediaservo_common::protocol::TransportDirection::Send) {
+            tracing::info!(
+                "SFU: Produce received room={} kind={:?} dir={:?} rtp={}",
+                room_id,
+                kind,
+                transport_direction,
+                rtp_parameters
+            );
+            if !matches!(transport_direction, mediaservo_common::protocol::TransportDirection::Send)
+            {
                 return Some(SignalingMessage::Error {
                     code: 4000,
                     message: "Produce requires send transport".into(),
@@ -1190,10 +1118,7 @@ pub(crate) async fn handle_sfu_message(
                     peer_id: peer_id.to_string(),
                     detail: detail.clone(),
                 });
-                return Some(SignalingMessage::Error {
-                    code: 4031,
-                    message: detail,
-                });
+                return Some(SignalingMessage::Error { code: 4031, message: detail });
             }
             // H2: 音频房间只允许 audio producer（全互连 opus 会议语义）— 4031 + 审计（C15）。
             if crate::sfu::is_audio_room(room_id)
@@ -1208,21 +1133,22 @@ pub(crate) async fn handle_sfu_message(
                     peer_id: peer_id.to_string(),
                     detail: detail.clone(),
                 });
-                return Some(SignalingMessage::Error {
-                    code: 4031,
-                    message: detail,
-                });
+                return Some(SignalingMessage::Error { code: 4031, message: detail });
             }
             match sfu
-                .create_producer(room_id, sfu_peer_id, kind, rtp_parameters.clone(), transport_id.as_deref())
+                .create_producer(
+                    room_id,
+                    sfu_peer_id,
+                    kind,
+                    rtp_parameters.clone(),
+                    transport_id.as_deref(),
+                )
                 .await
             {
                 Ok(result) => {
                     // G3: 车端 producer 登记所属设备（consume 授权纵深防御）。
                     if let Some(device) = server.device_id_of(peer_id) {
-                        server
-                            .producer_owners
-                            .insert(result.producer_id.clone(), device);
+                        server.producer_owners.insert(result.producer_id.clone(), device);
                     }
                     // Broadcast NewProducer to all peers in room
                     let broadcast = SignalingMessage::NewProducer {
@@ -1234,7 +1160,8 @@ pub(crate) async fn handle_sfu_message(
                     let _ = broadcast_tx.send(serde_json::to_string(&broadcast).unwrap());
                     tracing::info!(
                         "SFU: broadcast NewProducer for peer {} in room {}",
-                        peer_id, room_id
+                        peer_id,
+                        room_id
                     );
                     Some(SignalingMessage::Produced {
                         room_id: room_id.clone(),
@@ -1271,13 +1198,16 @@ pub(crate) async fn handle_sfu_message(
                     peer_id: peer_id.to_string(),
                     detail: detail.clone(),
                 });
-                return Some(SignalingMessage::Error {
-                    code: 4031,
-                    message: detail,
-                });
+                return Some(SignalingMessage::Error { code: 4031, message: detail });
             }
             match sfu
-                .create_consumer(room_id, sfu_peer_id, producer_id, rtp_capabilities.clone(), transport_id.as_deref())
+                .create_consumer(
+                    room_id,
+                    sfu_peer_id,
+                    producer_id,
+                    rtp_capabilities.clone(),
+                    transport_id.as_deref(),
+                )
                 .await
             {
                 Ok(result) => Some(SignalingMessage::Consumed {
@@ -1306,12 +1236,12 @@ pub(crate) async fn handle_sfu_message(
             let sfu_peer_id = msg_peer_id.as_str();
             tracing::info!(
                 "SFU: CreateDataProducer room={} label={} dir={:?}",
-                room_id, label, transport_direction
+                room_id,
+                label,
+                transport_direction
             );
-            if !matches!(
-                transport_direction,
-                mediaservo_common::protocol::TransportDirection::Send
-            ) {
+            if !matches!(transport_direction, mediaservo_common::protocol::TransportDirection::Send)
+            {
                 return Some(SignalingMessage::Error {
                     code: 4000,
                     message: "CreateDataProducer requires send transport".into(),
@@ -1326,10 +1256,7 @@ pub(crate) async fn handle_sfu_message(
                     peer_id: peer_id.to_string(),
                     detail: detail.clone(),
                 });
-                return Some(SignalingMessage::Error {
-                    code: 4031,
-                    message: detail,
-                });
+                return Some(SignalingMessage::Error { code: 4031, message: detail });
             }
             match sfu
                 .create_data_producer(
@@ -1346,9 +1273,7 @@ pub(crate) async fn handle_sfu_message(
                     // G3: 车端 data producer 登记所属设备（consume_data 授权纵深防御,
                     // 与媒体 producer 同一 id 空间 — UUID 唯一不冲突）。
                     if let Some(device) = server.device_id_of(peer_id) {
-                        server
-                            .producer_owners
-                            .insert(result.data_producer_id.clone(), device);
+                        server.producer_owners.insert(result.data_producer_id.clone(), device);
                     }
                     // Broadcast NewDataProducer to all peers in room (late-joiner sync)
                     let broadcast = SignalingMessage::NewDataProducer {
@@ -1361,7 +1286,9 @@ pub(crate) async fn handle_sfu_message(
                     let _ = broadcast_tx.send(serde_json::to_string(&broadcast).unwrap());
                     tracing::info!(
                         "SFU: broadcast NewDataProducer (label={}) for peer {} in room {}",
-                        label, peer_id, room_id
+                        label,
+                        peer_id,
+                        room_id
                     );
                     Some(SignalingMessage::DataProducerCreated {
                         room_id: room_id.clone(),
@@ -1387,22 +1314,19 @@ pub(crate) async fn handle_sfu_message(
             let sfu_peer_id = msg_peer_id.as_str();
             tracing::info!(
                 "SFU: ConsumeData room={} data_producer={} dir={:?}",
-                room_id, data_producer_id, transport_direction
+                room_id,
+                data_producer_id,
+                transport_direction
             );
-            if !matches!(
-                transport_direction,
-                mediaservo_common::protocol::TransportDirection::Recv
-            ) {
+            if !matches!(transport_direction, mediaservo_common::protocol::TransportDirection::Recv)
+            {
                 return Some(SignalingMessage::Error {
                     code: 4000,
                     message: "ConsumeData requires recv transport".into(),
                 });
             }
             // G3 门: 与 consume 同矩阵 — 账号只能 consume 有权车设备的 data producer。
-            let producer_owner = server
-                .producer_owners
-                .get(data_producer_id)
-                .map(|v| v.clone());
+            let producer_owner = server.producer_owners.get(data_producer_id).map(|v| v.clone());
             if let Err(reason) = identity.can_consume(producer_owner.as_deref()) {
                 let detail = format!("{reason} (peer={peer_id}, room={room_id})");
                 tracing::warn!("ConsumeData denied: {detail}");
@@ -1411,13 +1335,15 @@ pub(crate) async fn handle_sfu_message(
                     peer_id: peer_id.to_string(),
                     detail: detail.clone(),
                 });
-                return Some(SignalingMessage::Error {
-                    code: 4031,
-                    message: detail,
-                });
+                return Some(SignalingMessage::Error { code: 4031, message: detail });
             }
             match sfu
-                .create_data_consumer(room_id, sfu_peer_id, data_producer_id, transport_id.as_deref())
+                .create_data_consumer(
+                    room_id,
+                    sfu_peer_id,
+                    data_producer_id,
+                    transport_id.as_deref(),
+                )
                 .await
             {
                 Ok(result) => Some(SignalingMessage::DataConsumed {
@@ -1434,10 +1360,7 @@ pub(crate) async fn handle_sfu_message(
                 }
             }
         }
-        SignalingMessage::SfuStatsRequest {
-            producer_id,
-            consumer_id,
-        } => {
+        SignalingMessage::SfuStatsRequest { producer_id, consumer_id } => {
             // H2: G3 门 — 账号查询 producer 统计时按其所属设备做 can_consume 校验
             // （与 consume 同矩阵纵深防御）; consumer 查询/无主 producer 放行（UUID 不可枚举）。
             let query_id = producer_id.as_ref().or(consumer_id.as_ref());
@@ -1456,10 +1379,7 @@ pub(crate) async fn handle_sfu_message(
                     peer_id: peer_id.to_string(),
                     detail: detail.clone(),
                 });
-                return Some(SignalingMessage::Error {
-                    code: 4031,
-                    message: detail,
-                });
+                return Some(SignalingMessage::Error { code: 4031, message: detail });
             }
             #[cfg(feature = "sfu-mediasoup")]
             {
@@ -1473,10 +1393,7 @@ pub(crate) async fn handle_sfu_message(
                             packet_count: packets,
                             score,
                         }),
-                        Err(e) => Some(SignalingMessage::Error {
-                            code: 5000,
-                            message: e,
-                        }),
+                        Err(e) => Some(SignalingMessage::Error { code: 5000, message: e }),
                     }
                 } else if let Some(cid) = consumer_id {
                     match sfu.consumer_stats(&cid).await {
@@ -1488,10 +1405,7 @@ pub(crate) async fn handle_sfu_message(
                             packet_count: packets,
                             score,
                         }),
-                        Err(e) => Some(SignalingMessage::Error {
-                            code: 5000,
-                            message: e,
-                        }),
+                        Err(e) => Some(SignalingMessage::Error { code: 5000, message: e }),
                     }
                 } else {
                     None
@@ -1510,7 +1424,6 @@ pub(crate) async fn handle_sfu_message(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1522,9 +1435,8 @@ mod tests {
         #[cfg(feature = "sfu-mediasoup")]
         {
             let sfu = std::sync::Arc::new(
-                crate::sfu::SfuManager::new_with_port(crate::sfu::random_udp_port())
-                    .await
-                    .unwrap());
+                crate::sfu::SfuManager::new_with_port(crate::sfu::random_udp_port()).await.unwrap(),
+            );
             SignalingServer::new(sfu, 1 << 20, None)
         }
         #[cfg(not(feature = "sfu-mediasoup"))]
@@ -1536,10 +1448,7 @@ mod tests {
     #[tokio::test]
     async fn push_config_delivers_to_room_host() {
         let server = new_test_server().await;
-        server
-            .room_manager
-            .join_room("vehicle-1", "veh-peer", &PeerRole::Host)
-            .expect("join host");
+        server.room_manager.join_room("vehicle-1", "veh-peer", &PeerRole::Host).expect("join host");
         // 房间频道订阅者（模拟整车会话的连接接收端）
         let tx = server.get_or_create_channel("vehicle-1");
         let mut rx = tx.subscribe();
@@ -1570,10 +1479,7 @@ mod tests {
         // 放行: 设备会话（车端，角色不限）; legacy + Host 角色（PSK 车端）
         assert_eq!(status_report_denial_reason(&device, &PeerRole::Host), None);
         assert_eq!(status_report_denial_reason(&device, &PeerRole::Remote), None);
-        assert_eq!(
-            status_report_denial_reason(&SessionIdentity::Legacy, &PeerRole::Host),
-            None
-        );
+        assert_eq!(status_report_denial_reason(&SessionIdentity::Legacy, &PeerRole::Host), None);
         // 拒绝: 账号（舱端，Host 角色已被 RoomJoin 门拦截 — 不可达）; legacy 非 Host
         assert!(
             status_report_denial_reason(&account, &PeerRole::Remote).is_some(),
