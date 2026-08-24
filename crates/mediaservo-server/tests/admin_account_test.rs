@@ -43,6 +43,8 @@ async fn make_state(devices_path: String, accounts_path: String) -> AdminState {
         consumer_limit_per_stream: 50,
         accounts: Arc::new(AccountRegistry::empty()),
         accounts_path,
+        psk_state: std::sync::Arc::new(std::sync::RwLock::new(None)),
+        config_path: "/tmp/ms-admin-acct-server.yaml".into(),
         device_registry: Arc::new(devices::DeviceRegistry::empty()),
         devices_path,
         sfu_manager: sfu,
@@ -64,6 +66,8 @@ async fn make_state(devices_path: String, accounts_path: String) -> AdminState {
         consumer_limit_per_stream: 50,
         accounts: Arc::new(AccountRegistry::empty()),
         accounts_path,
+        psk_state: std::sync::Arc::new(std::sync::RwLock::new(None)),
+        config_path: "/tmp/ms-admin-acct-server.yaml".into(),
         device_registry: Arc::new(devices::DeviceRegistry::empty()),
         devices_path,
     }

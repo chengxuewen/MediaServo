@@ -53,6 +53,10 @@ pub enum AuditEvent {
     AccountUpdated { username: String, actor: String },
     /// 管理面账号删除（unified-device-admin）。
     AccountDeleted { username: String, actor: String },
+    /// 管理面 PSK 一次性查看（psk-admin-management）。
+    PskViewed { actor: String },
+    /// 管理面 PSK 轮换（psk-admin-management）。
+    PskRotated { actor: String },
     /// G3 授权拒绝（C15: 所有 denial 必须打日志 + 审计）。
     /// action: room_join|consume|produce|config_push|emergency。
     AuthorizationDenied { action: String, peer_id: String, detail: String },
@@ -230,6 +234,20 @@ pub fn log_event(event: AuditEvent) {
                 username = %username,
                 actor = %actor,
                 "Account deleted by admin"
+            );
+        }
+        AuditEvent::PskViewed { actor } => {
+            tracing::info!(
+                audit.event = "psk_viewed",
+                actor = %actor,
+                "PSK viewed (one-time) by admin"
+            );
+        }
+        AuditEvent::PskRotated { actor } => {
+            tracing::warn!(
+                audit.event = "psk_rotated",
+                actor = %actor,
+                "PSK rotated by admin — all hosts must sync"
             );
         }
     }

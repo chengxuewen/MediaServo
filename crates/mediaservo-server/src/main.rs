@@ -199,6 +199,8 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         consumer_limit_per_stream: config.consumer_limit_per_stream,
         accounts: std::sync::Arc::clone(&accounts),
         accounts_path: accounts_path.clone(),
+        psk_state: std::sync::Arc::clone(&signaling_server.psk_state),
+        config_path: config_path.clone(),
         device_registry: std::sync::Arc::clone(&device_registry),
         devices_path: devices_path.clone(),
         #[cfg(feature = "sfu-mediasoup")]

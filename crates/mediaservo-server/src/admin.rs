@@ -40,6 +40,10 @@ pub struct AdminState {
     pub devices_path: String,
     /// accounts.yaml 绝对路径（账号管理写回用，main.rs 装配）。
     pub accounts_path: String,
+    /// PSK 共享态（psk-admin-management）：与 signaling 同一 Arc；轮换经此热更新。
+    pub psk_state: std::sync::Arc<std::sync::RwLock<Option<String>>>,
+    /// 配置文件绝对路径（PSK 轮换写回用，main.rs 装配）。
+    pub config_path: String,
     #[cfg(feature = "sfu-mediasoup")]
     pub sfu_manager: Arc<crate::sfu::SfuManager>,
 }
@@ -99,6 +103,7 @@ pub fn admin_router(state: AdminState) -> Router {
             "/api/admin/accounts/:username",
             axum::routing::put(update_account).delete(delete_account),
         )
+        .route("/api/admin/psk", get(get_psk).post(rotate_psk))
         .route("/api/admin/events", get(ws_events));
     // H3: SFU 管理端点（仅 sfu-mediasoup 构建存在 — 原生构建无 SfuManager）。
     #[cfg(feature = "sfu-mediasoup")]
@@ -557,7 +562,18 @@ fn write_back_psk(path: &std::path::Path, psk: &str) -> Result<(), String> {
             .map(|line| {
                 if line.starts_with("psk:") && !line.starts_with(char::is_whitespace) {
                     count += 1;
-                    return format!("psk: {psk:?}");
+                    // 保留 inline 注释（`"..."   # comment` 形态 — 值尾引号后取 # 尾）
+                    let base = format!("psk: {psk:?}");
+                    return match line.rfind('"') {
+                        Some(q) => {
+                            let tail = &line[q + 1..];
+                            match tail.splitn(2, '#').nth(1) {
+                                Some(c) if !c.trim().is_empty() => format!("{base}  #{c}"),
+                                _ => base,
+                            }
+                        }
+                        None => base, // 无引号值（非标准形态）— 整体替换
+                    };
                 }
                 line.to_string()
             })
@@ -582,6 +598,85 @@ fn write_back_psk(path: &std::path::Path, psk: &str) -> Result<(), String> {
             Err(format!("server config {}: write failed: {e}", path.display()))
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RotatePskRequest {
+    /// 可选：指定新 psk（8-128 无空白）；缺省服务器随机生成 32B hex。
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+#[derive(Serialize)]
+struct PskResponse {
+    /// psk 明文 — **仅此一次**（C33 纪律；前端展示即弃）。
+    psk: String,
+    hint: String,
+}
+
+fn validate_psk_value(v: &str) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    if v.is_empty()
+        || v.len() < 8
+        || v.len() > 128
+        || v.contains('"')
+        || v.chars().any(|c| c.is_whitespace())
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "invalid psk: 8-128 字符且不含空白".into() }),
+        ));
+    }
+    Ok(())
+}
+
+/// GET /api/admin/psk — 一次性查看（admin-only; dispatcher 被角色门拦截）。
+async fn get_psk(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+) -> Result<Json<PskResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let psk = state.psk_state.read().unwrap_or_else(|e| e.into_inner()).clone();
+    let psk = psk.ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "psk 未配置（未设 server.yaml psk / MEDIASERVO_PSK）".into(),
+            }),
+        )
+    })?;
+    crate::audit::log_event(crate::audit::AuditEvent::PskViewed { actor: claims.sub });
+    let hint = mask_psk(&psk);
+    Ok(Json(PskResponse { psk, hint }))
+}
+
+/// POST /api/admin/psk — 轮换（admin-only）：热生效 + 写回 server.yaml + audit。
+async fn rotate_psk(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    axum::Json(req): axum::Json<RotatePskRequest>,
+) -> Result<Json<PskResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let new_psk = match req.password {
+        Some(p) => {
+            validate_psk_value(&p)?;
+            p
+        }
+        None => {
+            // 随机 32B hex（uuid v4 simple 36 字符 < 128 — 合法范围；与 devices new_secret 同路径）
+            uuid::Uuid::new_v4().to_string().replace('-', "")
+        }
+    };
+    // 写回文件（先落盘后生效 — 写失败不切内存）
+    if let Err(e) = write_back_psk(std::path::Path::new(&state.config_path), &new_psk) {
+        tracing::error!("psk rotate: 写回 {} 失败（内存未更新）: {e}", state.config_path);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: format!("server config write failed: {e}") }),
+        ));
+    }
+    *state.psk_state.write().unwrap_or_else(|e| e.into_inner()) = Some(new_psk.clone());
+    crate::audit::log_event(crate::audit::AuditEvent::PskRotated { actor: claims.sub.clone() });
+    tracing::warn!("PSK 已轮换（actor={}）— 所有 host 需同步新 psk", claims.sub);
+    let hint = mask_psk(&new_psk);
+    Ok(Json(PskResponse { psk: new_psk, hint }))
 }
 
 // ── Auth helper ─────────────────────────────────────────────────────────────
@@ -642,7 +737,8 @@ async fn auth_middleware(
     if !is_admin {
         // H3 dispatcher: 只读视图（音频房间/状态/视频监控），无 config/control。
         let read_only = matches!(*req.method(), axum::http::Method::GET)
-            && !req.uri().path().starts_with("/api/admin/config");
+            && !req.uri().path().starts_with("/api/admin/config")
+            && !req.uri().path().starts_with("/api/admin/psk");
         if !read_only {
             let detail = "dispatcher role is read-only";
             tracing::warn!("admin API denied: {detail} (path={})", req.uri().path());
@@ -827,6 +923,8 @@ struct ServerConfigResponse {
     rate_limit: u32,
     room_capacity: usize,
     consumer_limit_per_stream: usize,
+    /// psk 掩码（前 2 字符 + ··）— 不可逆, dispatcher 只读可见。
+    psk_hint: String,
 }
 
 async fn server_config(State(state): State<AdminState>) -> Json<ServerConfigResponse> {
@@ -836,6 +934,13 @@ async fn server_config(State(state): State<AdminState>) -> Json<ServerConfigResp
         rate_limit: state.rate_limit,
         room_capacity: state.room_capacity,
         consumer_limit_per_stream: state.consumer_limit_per_stream,
+        psk_hint: state
+            .psk_state
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_deref()
+            .map(mask_psk)
+            .unwrap_or_default(),
     })
 }
 
@@ -1063,6 +1168,8 @@ mod tests {
             consumer_limit_per_stream: 50,
             accounts: Arc::new(AccountRegistry::empty()),
             accounts_path: "/tmp/mediaservo-test-accounts.yaml".into(),
+            psk_state: std::sync::Arc::new(std::sync::RwLock::new(None)),
+            config_path: "/tmp/mediaservo-test-server.yaml".into(),
             device_registry: Arc::new(DeviceRegistry::empty()),
             devices_path: "/tmp/mediaservo-test-devices.yaml".into(),
             sfu_manager: sfu,
@@ -1083,6 +1190,8 @@ mod tests {
             consumer_limit_per_stream: 50,
             accounts: Arc::new(AccountRegistry::empty()),
             accounts_path: "/tmp/mediaservo-test-accounts.yaml".into(),
+            psk_state: std::sync::Arc::new(std::sync::RwLock::new(None)),
+            config_path: "/tmp/mediaservo-test-server.yaml".into(),
             device_registry: Arc::new(DeviceRegistry::empty()),
             devices_path: "/tmp/mediaservo-test-devices.yaml".into(),
         }
@@ -1732,7 +1841,7 @@ mod g3_tests {
             "listen:\n  host: \"0.0.0.0\"\n  port: 9800\npsk: \"old-secret\"   # PIT-49\njwt_secret: \"x\"\n").unwrap();
         write_back_psk(&path, "new-secret-123").unwrap();
         let out = std::fs::read_to_string(&path).unwrap();
-        assert!(out.contains("psk: \"new-secret-123\"   # PIT-49"), "替换保留 inline 注释: {out}");
+        assert!(out.contains("psk: \"new-secret-123\"  # PIT-49"), "替换保留 inline 注释: {out}");
         assert!(out.contains("jwt_secret:"), "其他字段保留: {out}");
         assert!(!out.contains("old-secret"), "旧值清除: {out}");
         assert!(!path.with_extension("yaml.tmp").exists(), "temp 必须清理");
