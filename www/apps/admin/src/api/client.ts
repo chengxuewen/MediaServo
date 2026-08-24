@@ -203,6 +203,22 @@ export async function deleteAccount(username: string): Promise<AdminAccountDelet
   return request(`/accounts/${encodeURIComponent(username)}`, { method: 'DELETE' });
 }
 
+// ── PSK 管理（psk-admin-management — admin-only 端点）──────────────────────
+
+export interface PskResponse {
+  psk: string;
+  hint: string;
+}
+
+export async function getPsk(): Promise<PskResponse> {
+  return request('/psk');
+}
+
+export async function rotatePsk(password?: string): Promise<PskResponse> {
+  const body = password ? { password } : {};
+  return request('/psk', { method: 'POST', body: JSON.stringify(body) });
+}
+
 
 export interface LoginResponse { token: string; username: string; role: string; expires_in_secs: number; }
 
