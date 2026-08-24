@@ -28,9 +28,8 @@ services:
       NO_PROXY: ${no_proxy:-}
     volumes:
       - .:/workspace
-      - ./config/server.docker.yaml:/opt/mediaservo/etc/server.yaml:ro
-      - ./config/devices.docker.yaml:/opt/mediaservo/etc/devices.yaml:ro
-      - ./config/accounts.docker.yaml:/opt/mediaservo/etc/accounts.yaml:ro
+      # 运行时配置目录（B: 配置模板 config/*.docker.yaml → data/etc/; API 写回 atomic rename 需目录级挂载——单文件 bind mount 无法 rename-over,PIT-133）
+      - ./data/etc:/opt/mediaservo/etc:rw
       - cargo-cache:/workspace/target
     command: cargo run --bin mediaservo-server --features sfu-mediasoup,admin-dashboard
     cap_add:

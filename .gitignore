@@ -109,3 +109,4 @@ bindings/python/mediaservo/examples/recorded.mp4/bindings/python/mediaservo/medi
 /run/
 /recordings/
 /identity.json
+data/
