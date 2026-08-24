@@ -86,9 +86,9 @@ pub fn admin_router(state: AdminState) -> Router {
         .route("/api/admin/config", get(server_config))
         .route("/api/admin/config/push", axum::routing::post(push_config))
         .route("/api/admin/devices", get(list_devices).post(register_device))
-        .route("/api/admin/devices/{device_id}", delete(revoke_device))
+        .route("/api/admin/devices/:device_id", delete(revoke_device))
         .route(
-            "/api/admin/devices/{device_id}/reset-secret",
+            "/api/admin/devices/:device_id/reset-secret",
             axum::routing::post(reset_device_secret),
         )
         .route("/api/admin/events", get(ws_events));
@@ -270,7 +270,7 @@ async fn register_device(
     State(state): State<AdminState>,
     Extension(claims): Extension<JwtClaims>,
     axum::Json(req): axum::Json<RegisterDeviceRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<ErrorResponse>)> {
     validate_device_id(&req.device_id)?;
     let (secret_hash, secret) =
         state.device_registry.register(&req.device_id).map_err(|e| match e {
@@ -298,12 +298,15 @@ async fn register_device(
         device_id: req.device_id.clone(),
         actor: claims.sub.clone(),
     });
-    Ok(Json(serde_json::json!({
-        "device_id": req.device_id,
-        "secret": secret,
-        "secret_hash": secret_hash,
-        "note": "secret 仅此一次明文展示",
-    })))
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "device_id": req.device_id,
+            "secret": secret,
+            "secret_hash": secret_hash,
+            "note": "secret 仅此一次明文展示",
+        })),
+    ))
 }
 
 /// DELETE /api/admin/devices/{device_id} — 吊销设备（下次接入 4010）。
@@ -337,7 +340,7 @@ async fn reset_device_secret(
     State(state): State<AdminState>,
     Extension(claims): Extension<JwtClaims>,
     Path(device_id): Path<String>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<ErrorResponse>)> {
     let (_, secret) = state.device_registry.reset_secret(&device_id).map_err(|_| {
         (
             StatusCode::NOT_FOUND,
@@ -359,11 +362,14 @@ async fn reset_device_secret(
         device_id: device_id.clone(),
         actor: claims.sub,
     });
-    Ok(Json(serde_json::json!({
-        "device_id": device_id,
-        "secret": secret,
-        "note": "secret 仅此一次明文展示",
-    })))
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "device_id": device_id,
+            "secret": secret,
+            "note": "secret 仅此一次明文展示",
+        })),
+    ))
 }
 
 // ── Auth helper ─────────────────────────────────────────────────────────────
