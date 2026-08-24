@@ -16,10 +16,12 @@
 
 use mediaservo_common::auth::JwtClaims;
 use mediaservo_common::error::CoreError;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
+use std::sync::{RwLock, RwLockReadGuard};
 use subtle::ConstantTimeEq;
 
 use crate::roles::{AccountIdentity, CockpitRole};
@@ -44,7 +46,28 @@ impl AccountAuthError {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+/// 账号注册表管理操作错误（管理 API 用；400/404/409 映射见 admin.rs）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccountRegError {
+    /// 创建时用户名已存在。
+    Duplicate,
+    /// 更新/删除时用户名不存在。
+    Unknown,
+    /// 角色不是 viewer|operator|admin|dispatcher。
+    InvalidRole(String),
+    /// vehicles 含空项或非法字符。
+    InvalidVehicles(String),
+}
+
+/// 管理列表视图（不含 password_hash — 密码哈希绝不外泄）。
+#[derive(Debug, Clone, Serialize)]
+pub struct AccountView {
+    pub username: String,
+    pub role: String,
+    pub vehicles: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct AccountEntryFile {
     password_hash: String,
     role: String,
@@ -52,7 +75,7 @@ struct AccountEntryFile {
     vehicles: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 struct AccountsFile {
     #[serde(default)]
     accounts: HashMap<String, AccountEntryFile>,
@@ -66,14 +89,43 @@ struct AccountEntry {
 }
 
 /// 舱端账号注册表（启动时加载，只读；空 = 无账号，PSK/设备路径不受影响）。
-#[derive(Debug, Clone, Default)]
-pub struct AccountRegistry {
+/// 注册表内部态（RwLock 包裹）。
+#[derive(Debug)]
+struct AccountRegistryInner {
     accounts: HashMap<String, AccountEntry>,
+}
+
+impl AccountRegistryInner {
+    fn new(accounts: HashMap<String, AccountEntry>) -> Self {
+        Self { accounts }
+    }
+}
+
+/// 舱端账号注册表（启动时加载；运行期可读写热重载）。
+/// 空 = 无账号，PSK/设备路径不受影响。
+#[derive(Debug)]
+pub struct AccountRegistry {
+    inner: RwLock<AccountRegistryInner>,
+}
+
+impl Default for AccountRegistry {
+    fn default() -> Self {
+        Self { inner: RwLock::new(AccountRegistryInner::new(HashMap::new())) }
+    }
 }
 
 impl AccountRegistry {
     pub fn empty() -> Self {
         Self::default()
+    }
+
+    /// 锁 poison 恢复标准做法：unpoisoned 读锁；poison 时取回写者遗留的一致值。
+    fn lock_read(&self) -> RwLockReadGuard<'_, AccountRegistryInner> {
+        self.inner.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn lock_write(&self) -> std::sync::RwLockWriteGuard<'_, AccountRegistryInner> {
+        self.inner.write().unwrap_or_else(|e| e.into_inner())
     }
 
     /// 从 YAML 文件加载。
@@ -121,42 +173,41 @@ impl AccountRegistry {
             })?;
             accounts.insert(
                 username,
-                AccountEntry {
-                    password_hash: entry.password_hash,
-                    role,
-                    vehicles: entry.vehicles,
-                },
+                AccountEntry { password_hash: entry.password_hash, role, vehicles: entry.vehicles },
             );
         }
-        Ok(Self { accounts })
+        Ok(Self { inner: RwLock::new(AccountRegistryInner::new(accounts)) })
     }
 
     pub fn len(&self) -> usize {
-        self.accounts.len()
+        self.lock_read().accounts.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.accounts.is_empty()
+        self.lock_read().accounts.is_empty()
     }
 
     /// 认证决策（login 处理调用）: 校验通过返回账号身份（进 JWT claims）。
     fn verify(&self, username: &str, password: &str) -> Result<AccountIdentity, AccountAuthError> {
-        let known = self.accounts.contains_key(username);
+        let inner = self.lock_read();
+        let known = inner.accounts.contains_key(username);
         // 未知用户也走完整 sha256 + ct_eq 路径（防时序，同 G2 dummy 机制 —
         // 此处以固定字符串为目标，长度与真实哈希一致）。
-        let stored = self
-            .accounts
-            .get(username)
-            .map(|e| e.password_hash.as_str())
-            .unwrap_or("sha256:0000000000000000000000000000000000000000000000000000000000000000");
+        let stored =
+            inner.accounts.get(username).map(|e| e.password_hash.as_str()).unwrap_or(
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            );
         let want = hash_password(username, password);
         let matched: bool = stored.as_bytes().ct_eq(want.as_bytes()).into();
         match (matched, known) {
-            (true, _) => Ok(AccountIdentity {
-                username: username.to_string(),
-                role: self.accounts[username].role,
-                vehicles: self.accounts[username].vehicles.clone(),
-            }),
+            (true, _) => {
+                let entry = &inner.accounts[username];
+                Ok(AccountIdentity {
+                    username: username.to_string(),
+                    role: entry.role,
+                    vehicles: entry.vehicles.clone(),
+                })
+            }
             (false, true) => Err(AccountAuthError::BadPassword),
             (false, false) => Err(AccountAuthError::Unknown),
         }
@@ -173,9 +224,10 @@ impl AccountRegistry {
 
     /// I2 review: 检测注册表是否含已知开发占位哈希（命中用户名列表）。
     pub fn dev_credentials_present(&self) -> Vec<&'static str> {
+        let inner = self.lock_read();
         DEV_CREDENTIAL_HASHES
             .iter()
-            .filter(|(_, hash)| self.accounts.values().any(|e| e.password_hash == *hash))
+            .filter(|(_, hash)| inner.accounts.values().any(|e| e.password_hash == *hash))
             .map(|(user, _)| *user)
             .collect()
     }
@@ -191,6 +243,147 @@ impl AccountRegistry {
             "DEVELOPMENT CREDENTIALS DETECTED in accounts registry ({}):              default dev accounts (admin123/dispatch123/operator123) are placeholder              credentials for local dev only — refuse to start. Replace them with real              hashes, or set MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 to explicitly allow              (dev environment only).",
             found.join(", ")
         ))
+    }
+
+    /// 序列化为 YAML 文件内容（与 from_yaml 格式互逆）。
+    fn to_yaml(&self) -> Result<String, CoreError> {
+        let inner = self.lock_read();
+        let accounts = inner
+            .accounts
+            .iter()
+            .map(|(username, entry)| {
+                (
+                    username.clone(),
+                    AccountEntryFile {
+                        password_hash: entry.password_hash.clone(),
+                        role: entry.role.as_str().to_string(),
+                        vehicles: entry.vehicles.clone(),
+                    },
+                )
+            })
+            .collect();
+        let file = AccountsFile { accounts };
+        serde_yaml::to_string(&file)
+            .map_err(|e| CoreError::ConfigParse(format!("accounts serialize: {e}")))
+    }
+
+    /// Atomic 写回 accounts.yaml（temp + fsync + rename）。
+    /// 内存不变：序列化与写盘全部成功才返回 Ok；失败清理 temp 并返回 Err。
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<(), CoreError> {
+        let path = path.as_ref();
+        let yaml = self.to_yaml()?;
+        let tmp = path.with_extension("yaml.tmp");
+        let res = (|| -> std::io::Result<()> {
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(yaml.as_bytes())?;
+            f.sync_all()?;
+            drop(f);
+            std::fs::rename(&tmp, path)?;
+            Ok(())
+        })();
+        match res {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                Err(CoreError::ConfigParse(format!(
+                    "accounts file {}: write failed: {e}",
+                    path.display()
+                )))
+            }
+        }
+    }
+
+    /// vehicles 校验：非空列表项、每项非空且仅 [A-Za-z0-9-_]（与 device_id 同字符集）。
+    fn validate_vehicles(vehicles: &[String]) -> Result<(), AccountRegError> {
+        if vehicles.iter().any(|v| {
+            v.is_empty()
+                || v.len() > 64
+                || !v.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        }) {
+            return Err(AccountRegError::InvalidVehicles(
+                "vehicles: 每项 1-64 字符 [A-Za-z0-9-_]".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// 创建账号：hash_password + 插入（内存）。落盘由管理 API 层调 `save` 完成。
+    pub fn create_account(
+        &self,
+        username: &str,
+        password: &str,
+        role: &str,
+        vehicles: &[String],
+    ) -> Result<(), AccountRegError> {
+        let role = CockpitRole::parse(role)
+            .ok_or_else(|| AccountRegError::InvalidRole(role.to_string()))?;
+        Self::validate_vehicles(vehicles)?;
+        let mut inner = self.lock_write();
+        if inner.accounts.contains_key(username) {
+            return Err(AccountRegError::Duplicate);
+        }
+        inner.accounts.insert(
+            username.to_string(),
+            AccountEntry {
+                password_hash: hash_password(username, password),
+                role,
+                vehicles: vehicles.to_vec(),
+            },
+        );
+        Ok(())
+    }
+
+    /// 更新账号（role/vehicles/密码按需）：None 字段保持原值。
+    pub fn update_account(
+        &self,
+        username: &str,
+        role: Option<&str>,
+        vehicles: Option<&[String]>,
+        new_password: Option<&str>,
+    ) -> Result<(), AccountRegError> {
+        let role = match role {
+            Some(r) => Some(
+                CockpitRole::parse(r).ok_or_else(|| AccountRegError::InvalidRole(r.to_string()))?,
+            ),
+            None => None,
+        };
+        if let Some(v) = vehicles {
+            Self::validate_vehicles(v)?;
+        }
+        let mut inner = self.lock_write();
+        let entry = inner.accounts.get_mut(username).ok_or(AccountRegError::Unknown)?;
+        if let Some(r) = role {
+            entry.role = r;
+        }
+        if let Some(v) = vehicles {
+            entry.vehicles = v.to_vec();
+        }
+        if let Some(p) = new_password {
+            entry.password_hash = hash_password(username, p);
+        }
+        Ok(())
+    }
+
+    /// 删除账号。
+    pub fn delete_account(&self, username: &str) -> Result<(), AccountRegError> {
+        let mut inner = self.lock_write();
+        inner.accounts.remove(username).map(|_| ()).ok_or(AccountRegError::Unknown)
+    }
+
+    /// 管理列表（不含 password_hash）。
+    pub fn list_accounts(&self) -> Vec<AccountView> {
+        let mut views: Vec<AccountView> = self
+            .lock_read()
+            .accounts
+            .iter()
+            .map(|(username, entry)| AccountView {
+                username: username.clone(),
+                role: entry.role.as_str().to_string(),
+                vehicles: entry.vehicles.clone(),
+            })
+            .collect();
+        views.sort_by(|a, b| a.username.cmp(&b.username));
+        views
     }
 }
 
@@ -391,10 +584,7 @@ mod tests {
         );
         let reg = AccountRegistry::from_yaml(&yaml).unwrap();
         assert_eq!(reg.authenticate("adm", "p").unwrap().role, CockpitRole::Admin);
-        assert_eq!(
-            reg.authenticate("disp", "p").unwrap().role,
-            CockpitRole::Dispatcher
-        );
+        assert_eq!(reg.authenticate("disp", "p").unwrap().role, CockpitRole::Dispatcher);
         // vehicles 缺省空
         assert!(reg.authenticate("adm", "p").unwrap().vehicles.is_empty());
     }
@@ -435,5 +625,84 @@ mod tests {
         // 非 dev / 空注册表 → 恒放行
         assert_eq!(test_registry().check_dev_credentials(false), Ok(()));
         assert_eq!(AccountRegistry::empty().check_dev_credentials(false), Ok(()));
+    }
+
+    // ── unified-device-admin T5: 热重载原语 ────────────────────────────────
+
+    #[test]
+    fn create_account_then_authenticate_hot() {
+        let reg = AccountRegistry::empty();
+        reg.create_account("bob", "pw", "operator", &["ms-car2".to_string()]).unwrap();
+        // 无需重启即登录成功（热重载语义）
+        let id = reg.authenticate("bob", "pw").unwrap();
+        assert_eq!(id.role, CockpitRole::Operator);
+        assert_eq!(id.vehicles, vec!["ms-car2".to_string()]);
+    }
+
+    #[test]
+    fn create_duplicate_errors() {
+        let reg = test_registry();
+        let err = reg.create_account("carol", "x", "viewer", &[]).unwrap_err();
+        assert_eq!(err, AccountRegError::Duplicate);
+    }
+
+    #[test]
+    fn create_invalid_role_rejected() {
+        let reg = AccountRegistry::empty();
+        let err = reg.create_account("eve", "pw", "superuser", &[]).unwrap_err();
+        assert!(matches!(err, AccountRegError::InvalidRole(_)));
+    }
+
+    #[test]
+    fn create_invalid_vehicles_rejected() {
+        let reg = AccountRegistry::empty();
+        let err = reg.create_account("eve", "pw", "viewer", &["bad id!".to_string()]).unwrap_err();
+        assert!(matches!(err, AccountRegError::InvalidVehicles(_)));
+    }
+
+    #[test]
+    fn update_role_and_password_hot() {
+        let reg = test_registry();
+        reg.update_account("carol", Some("admin"), None, Some("new-pw")).unwrap();
+        assert_eq!(reg.authenticate("carol", "s3cret").unwrap_err(), AccountAuthError::BadPassword);
+        let id = reg.authenticate("carol", "new-pw").unwrap();
+        assert_eq!(id.role, CockpitRole::Admin);
+    }
+
+    #[test]
+    fn delete_account_makes_login_fail() {
+        let reg = test_registry();
+        reg.delete_account("carol").unwrap();
+        assert_eq!(reg.authenticate("carol", "s3cret").unwrap_err(), AccountAuthError::Unknown);
+    }
+
+    #[test]
+    fn delete_unknown_errors() {
+        let reg = test_registry();
+        assert_eq!(reg.delete_account("nobody"), Err(AccountRegError::Unknown));
+    }
+
+    #[test]
+    fn list_accounts_excludes_password_hash() {
+        let reg = test_registry();
+        let views = reg.list_accounts();
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].username, "carol");
+        assert_eq!(views[0].role, "operator");
+        assert_eq!(views[0].vehicles, vec!["ms-car1".to_string()]);
+    }
+
+    #[test]
+    fn save_roundtrip_preserves_accounts() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("ms-accounts-test-{}.yaml", uuid::Uuid::new_v4()));
+        let reg = AccountRegistry::empty();
+        reg.create_account("bob", "pw", "dispatcher", &[]).unwrap();
+        reg.save(&path).unwrap();
+        assert!(!path.with_extension("yaml.tmp").exists(), "temp 必须清理");
+        let reloaded = AccountRegistry::load(&path).unwrap();
+        let id = reloaded.authenticate("bob", "pw").unwrap();
+        assert_eq!(id.role, CockpitRole::Dispatcher);
+        let _ = std::fs::remove_file(&path);
     }
 }
