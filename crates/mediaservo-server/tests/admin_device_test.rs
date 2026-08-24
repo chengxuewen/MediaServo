@@ -137,7 +137,6 @@ async fn devices_dispatcher_read_only() {
     // GET 允许
     let res = app
         .clone()
-        .clone()
         .oneshot(auth_request(
             Method::GET,
             "/api/admin/devices",
@@ -378,4 +377,56 @@ async fn devices_reset_secret_rotates() {
         devices::authenticate(&state.device_registry, Some("ms-rot-1"), Some(&new_secret)),
         Some(Ok(()))
     );
+}
+
+#[tokio::test]
+async fn devices_register_with_provided_secret() {
+    let state = make_state(temp_devices_path("prov-secret")).await;
+    let app = admin_router(state.clone());
+    let res = app
+        .oneshot(auth_request(
+            Method::POST,
+            "/api/admin/devices",
+            Some(&admin_token(&state)),
+            Body::from(r#"{"device_id": "ms-prov-1", "secret": "admin-chosen-1"}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let body = json_of(res).await;
+    assert_eq!(body["secret"], "admin-chosen-1", "自带 secret 原样返回");
+    assert_eq!(
+        body["secret_hash"],
+        serde_json::Value::String(format!("sha256:{}", {
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(b"ms-prov-1:admin-chosen-1");
+            h.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
+        }))
+    );
+    // 热重载实证：带自备 secret 注册后可立即鉴权
+    assert_eq!(
+        devices::authenticate(&state.device_registry, Some("ms-prov-1"), Some("admin-chosen-1")),
+        Some(Ok(()))
+    );
+}
+
+#[tokio::test]
+async fn devices_register_invalid_provided_secret_400() {
+    let state = make_state(temp_devices_path("bad-prov")).await;
+    let app = admin_router(state.clone());
+    for bad in ["", "short", "has space"] {
+        let payload = format!(r#"{{"device_id": "ms-bad-1", "secret": "{bad}"}}"#);
+        let res = app
+            .clone()
+            .oneshot(auth_request(
+                Method::POST,
+                "/api/admin/devices",
+                Some(&admin_token(&state)),
+                Body::from(payload),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST, "bad secret {bad:?} → 400");
+    }
 }

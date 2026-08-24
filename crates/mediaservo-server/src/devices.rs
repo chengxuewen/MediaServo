@@ -56,13 +56,15 @@ impl DeviceAuthError {
     }
 }
 
-/// 注册表管理操作错误（管理 API 用；409/404 映射见 admin.rs）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 注册表管理操作错误（管理 API 用；400/404/409 映射见 admin.rs）。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeviceRegError {
     /// 注册时 device_id 已存在。
     Duplicate,
     /// 吊销/重置时 device_id 不存在。
     Unknown,
+    /// 管理员提供的 secret 不合规（非空、8-128 字符、无空白）。
+    InvalidSecret(String),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -215,15 +217,40 @@ impl DeviceRegistry {
     }
     /// sha256(device_id + ":" + device_secret)，hex 编码，`sha256:` 前缀。
 
-    /// 注册新设备：生成随机 secret → 写入注册表（内存）。
+    /// 注册新设备：默认生成随机 secret。
     /// 返回 `(secret_hash, secret)` — secret 是**唯一一次明文**，调用方负责传递；
     /// 后续仅可经 reset_secret 更换。落盘由管理 API 层调 `save` 完成。
     pub fn register(&self, device_id: &str) -> Result<(String, String), DeviceRegError> {
+        self.register_with_secret(device_id, None)
+    }
+
+    /// 注册新设备：`secret` 为 `Some` 时使用管理员提供的 secret（配发流程可先配置
+    /// host 再注册，secret 全程管理员掌控、不丢失 — 方案 A）; `None` 则服务器生成。
+    /// 校验：非空、8-128 字符、无空白（质量由管理员负责，仅拦明显错误）。
+    pub fn register_with_secret(
+        &self,
+        device_id: &str,
+        secret: Option<&str>,
+    ) -> Result<(String, String), DeviceRegError> {
         let mut inner = self.lock_write();
         if inner.devices.contains_key(device_id) {
             return Err(DeviceRegError::Duplicate);
         }
-        let secret = new_secret();
+        let secret = match secret {
+            Some(s) => {
+                if s.is_empty()
+                    || s.len() < 8
+                    || s.len() > 128
+                    || s.chars().any(|c| c.is_whitespace())
+                {
+                    return Err(DeviceRegError::InvalidSecret(
+                        "secret: 8-128 字符且不含空白".into(),
+                    ));
+                }
+                s.to_string()
+            }
+            None => new_secret(),
+        };
         let hash = hash_secret(device_id, &secret);
         inner.devices.insert(device_id.to_string(), hash.clone());
         Ok((hash, secret))
@@ -497,5 +524,46 @@ mod tests {
         let reloaded = DeviceRegistry::load(&path).unwrap();
         assert_eq!(authenticate(&reloaded, Some("ms-persist-1"), Some(&secret)), Some(Ok(())));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn register_with_provided_secret_authenticates() {
+        let reg = DeviceRegistry::empty();
+        let (hash, secret) =
+            reg.register_with_secret("ms-prov-1", Some("admin-chosen-secret-1")).unwrap();
+        assert_eq!(secret, "admin-chosen-secret-1", "自备 secret 原样返回");
+        assert_eq!(hash, hash_secret("ms-prov-1", "admin-chosen-secret-1"));
+        assert_eq!(
+            authenticate(&reg, Some("ms-prov-1"), Some("admin-chosen-secret-1")),
+            Some(Ok(()))
+        );
+    }
+
+    #[test]
+    fn register_provided_secret_validation() {
+        let reg = DeviceRegistry::empty();
+        let cases = ["", "short", "has space", &"x".repeat(129)];
+        for bad in cases {
+            let err = reg.register_with_secret("ms-bad", Some(bad)).unwrap_err();
+            assert_eq!(
+                err,
+                DeviceRegError::InvalidSecret("secret: 8-128 字符且不含空白".into()),
+                "{bad:?}"
+            );
+        }
+        // 合法边界：8 字符
+        assert!(reg.register_with_secret("ms-ok8", Some("12345678")).is_ok());
+        // 128 字符
+        assert!(reg.register_with_secret("ms-ok128", Some(&"x".repeat(128))).is_ok());
+    }
+
+    #[test]
+    fn register_with_provided_secret_duplicate_priority() {
+        let reg = test_registry();
+        // 已存在 → Duplicate 优先于校验
+        assert_eq!(
+            reg.register_with_secret("ms-0a1b2c3d4e5f", Some("bad-short")).unwrap_err(),
+            DeviceRegError::Duplicate
+        );
     }
 }

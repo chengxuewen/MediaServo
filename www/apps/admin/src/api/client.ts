@@ -172,8 +172,10 @@ export async function getAdminDevices(): Promise<AdminDeviceListResponse> {
   return request('/devices');
 }
 
-export async function registerDevice(deviceId: string): Promise<AdminDeviceSecret> {
-  return request('/devices', { method: 'POST', body: JSON.stringify({ device_id: deviceId }) });
+export async function registerDevice(deviceId: string, secret?: string): Promise<AdminDeviceSecret> {
+  const body: { device_id: string; secret?: string } = { device_id: deviceId };
+  if (secret && secret.trim()) body.secret = secret.trim();
+  return request('/devices', { method: 'POST', body: JSON.stringify(body) });
 }
 
 export async function revokeDevice(deviceId: string): Promise<AdminDeviceRevoked> {

@@ -13,6 +13,7 @@ export default function Devices() {
   // 注册表单弹窗
   const [registerOpen, setRegisterOpen] = useState(false);
   const [newDeviceId, setNewDeviceId] = useState('');
+  const [providedSecret, setProvidedSecret] = useState('');
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [registering, setRegistering] = useState(false);
 
@@ -41,6 +42,7 @@ export default function Devices() {
   const openRegister = () => {
     setRegisterOpen(true);
     setNewDeviceId('');
+    setProvidedSecret('');
     setRegisterError(null);
   };
 
@@ -51,7 +53,7 @@ export default function Devices() {
     setRegistering(true);
     setRegisterError(null);
     try {
-      const resp = await registerDevice(id);
+      const resp = await registerDevice(id, providedSecret);
       setRegisterOpen(false);
       setSecretModal({ title: `Registered ${resp.device_id}`, secret: resp.secret });
       setCopied(false);
@@ -144,6 +146,19 @@ export default function Devices() {
               onChange={(e) => setNewDeviceId(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleRegister(); }}
               placeholder="vehicle-01"
+            />
+          </div>
+          <div className="form-row">
+            <label className="form-label" htmlFor="device-secret">
+              Secret <span className="form-hint">(optional — blank = server generates)</span>
+            </label>
+            <input
+              id="device-secret"
+              className="form-field"
+              type="password"
+              value={providedSecret}
+              onChange={(e) => setProvidedSecret(e.target.value)}
+              placeholder="leave blank for auto-generate"
             />
           </div>
           {registerError && <p className="form-error">{registerError}</p>}

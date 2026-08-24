@@ -253,6 +253,9 @@ fn validate_device_id(id: &str) -> Result<(), (StatusCode, Json<ErrorResponse>)>
 #[derive(Debug, Deserialize)]
 pub struct RegisterDeviceRequest {
     pub device_id: String,
+    /// 可选：管理员自带 secret（方案 A — 先配 host 再注册，secret 不丢失）；缺省服务器生成。
+    #[serde(default)]
+    pub secret: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -279,8 +282,10 @@ async fn register_device(
     axum::Json(req): axum::Json<RegisterDeviceRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<ErrorResponse>)> {
     validate_device_id(&req.device_id)?;
-    let (secret_hash, secret) =
-        state.device_registry.register(&req.device_id).map_err(|e| match e {
+    let (secret_hash, secret) = state
+        .device_registry
+        .register_with_secret(&req.device_id, req.secret.as_deref())
+        .map_err(|e| match e {
             DeviceRegError::Duplicate => (
                 StatusCode::CONFLICT,
                 Json(ErrorResponse {
@@ -291,6 +296,9 @@ async fn register_device(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse { error: "device registry internal error".into() }),
             ),
+            DeviceRegError::InvalidSecret(msg) => {
+                (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: msg }))
+            }
         })?;
     if let Err(e) = state.device_registry.save(&state.devices_path) {
         // 落盘失败 → 回滚内存（单一事实源=磁盘，保持内存不变语义）
