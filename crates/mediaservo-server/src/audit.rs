@@ -19,21 +19,11 @@ pub enum AuditEvent {
     /// A room was destroyed (last peer left).
     RoomDestroy { room_id: String },
     /// A peer joined a room.
-    PeerJoin {
-        peer_id: String,
-        room_id: String,
-        role: String,
-    },
+    PeerJoin { peer_id: String, room_id: String, role: String },
     /// A peer left a room.
-    PeerLeave {
-        peer_id: String,
-        room_id: String,
-    },
+    PeerLeave { peer_id: String, room_id: String },
     /// Authentication succeeded (PSK/JWT/device). device_id 仅设备认证路径有值（G2）。
-    AuthSuccess {
-        peer_id: String,
-        device_id: Option<String>,
-    },
+    AuthSuccess { peer_id: String, device_id: Option<String> },
     /// PSK authentication failed.
     AuthFailure { peer_id: String, reason: String },
     /// A device came online.
@@ -50,19 +40,16 @@ pub enum AuditEvent {
     ConsumerLeave { stream_id: String, peer_id: String },
     /// G3 急停强审计（D-H11）— 谁/何时/哪个车/什么命令。
     /// when = 日志时间戳（tracing 注入）；vehicle = 目标车 device_id（房间主车）。
-    EmergencyCommand {
-        username: String,
-        role: String,
-        vehicle: String,
-        command: String,
-    },
+    EmergencyCommand { username: String, role: String, vehicle: String, command: String },
+    /// 管理面设备注册（unified-device-admin）— actor = 管理员账号。
+    DeviceRegistered { device_id: String, actor: String },
+    /// 管理面设备吊销（unified-device-admin）。
+    DeviceRevoked { device_id: String, actor: String },
+    /// 管理面设备密钥重置（unified-device-admin）。
+    DeviceSecretReset { device_id: String, actor: String },
     /// G3 授权拒绝（C15: 所有 denial 必须打日志 + 审计）。
     /// action: room_join|consume|produce|config_push|emergency。
-    AuthorizationDenied {
-        action: String,
-        peer_id: String,
-        detail: String,
-    },
+    AuthorizationDenied { action: String, peer_id: String, detail: String },
 }
 
 /// Emit an audit event as a structured `tracing` info-level log.
@@ -72,9 +59,7 @@ pub enum AuditEvent {
 pub fn log_event(event: AuditEvent) {
     // 有界环形缓冲（运维/测试读最近事件; tracing 日志仍是主通道）
     {
-        let mut ring = recent_sink()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut ring = recent_sink().lock().unwrap_or_else(|e| e.into_inner());
         ring.push_back(event.clone());
         while ring.len() > AUDIT_RING_CAP {
             ring.pop_front();
@@ -95,11 +80,7 @@ pub fn log_event(event: AuditEvent) {
                 "Room destroyed"
             );
         }
-        AuditEvent::PeerJoin {
-            peer_id,
-            room_id,
-            role,
-        } => {
+        AuditEvent::PeerJoin { peer_id, room_id, role } => {
             tracing::info!(
                 audit.event = "peer_join",
                 peer_id = %peer_id,
@@ -108,10 +89,7 @@ pub fn log_event(event: AuditEvent) {
                 "Peer joined room"
             );
         }
-        AuditEvent::PeerLeave {
-            peer_id,
-            room_id,
-        } => {
+        AuditEvent::PeerLeave { peer_id, room_id } => {
             tracing::info!(
                 audit.event = "peer_leave",
                 peer_id = %peer_id,
@@ -149,10 +127,7 @@ pub fn log_event(event: AuditEvent) {
                 "Device went offline"
             );
         }
-        AuditEvent::StreamCreate {
-            stream_id,
-            device_id,
-        } => {
+        AuditEvent::StreamCreate { stream_id, device_id } => {
             tracing::info!(
                 audit.event = "stream_create",
                 stream_id = %stream_id,
@@ -167,10 +142,7 @@ pub fn log_event(event: AuditEvent) {
                 "Stream destroyed"
             );
         }
-        AuditEvent::ConsumerJoin {
-            stream_id,
-            peer_id,
-        } => {
+        AuditEvent::ConsumerJoin { stream_id, peer_id } => {
             tracing::info!(
                 audit.event = "consumer_join",
                 stream_id = %stream_id,
@@ -178,10 +150,7 @@ pub fn log_event(event: AuditEvent) {
                 "Consumer joined stream"
             );
         }
-        AuditEvent::ConsumerLeave {
-            stream_id,
-            peer_id,
-        } => {
+        AuditEvent::ConsumerLeave { stream_id, peer_id } => {
             tracing::info!(
                 audit.event = "consumer_leave",
                 stream_id = %stream_id,
@@ -189,12 +158,7 @@ pub fn log_event(event: AuditEvent) {
                 "Consumer left stream"
             );
         }
-        AuditEvent::EmergencyCommand {
-            username,
-            role,
-            vehicle,
-            command,
-        } => {
+        AuditEvent::EmergencyCommand { username, role, vehicle, command } => {
             tracing::info!(
                 audit.event = "emergency_command",
                 username = %username,
@@ -204,17 +168,37 @@ pub fn log_event(event: AuditEvent) {
                 "Emergency command (强审计)"
             );
         }
-        AuditEvent::AuthorizationDenied {
-            action,
-            peer_id,
-            detail,
-        } => {
+        AuditEvent::AuthorizationDenied { action, peer_id, detail } => {
             tracing::warn!(
                 audit.event = "authorization_denied",
                 action = %action,
                 peer_id = %peer_id,
                 detail = %detail,
                 "Authorization denied"
+            );
+        }
+        AuditEvent::DeviceRegistered { device_id, actor } => {
+            tracing::info!(
+                audit.event = "device_registered",
+                device_id = %device_id,
+                actor = %actor,
+                "Device registered by admin"
+            );
+        }
+        AuditEvent::DeviceRevoked { device_id, actor } => {
+            tracing::warn!(
+                audit.event = "device_revoked",
+                device_id = %device_id,
+                actor = %actor,
+                "Device revoked by admin"
+            );
+        }
+        AuditEvent::DeviceSecretReset { device_id, actor } => {
+            tracing::info!(
+                audit.event = "device_secret_reset",
+                device_id = %device_id,
+                actor = %actor,
+                "Device secret reset by admin"
             );
         }
     }
@@ -233,20 +217,12 @@ fn recent_sink() -> &'static std::sync::Mutex<std::collections::VecDeque<AuditEv
 
 /// 最近审计事件（有界环形，新事件在尾部；测试与运维查询用）。
 pub fn recent() -> Vec<AuditEvent> {
-    recent_sink()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .iter()
-        .cloned()
-        .collect()
+    recent_sink().lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect()
 }
 
 /// 清空环形缓冲（测试隔离用 — 各测试按新事件断言）。
 pub fn clear_recent() {
-    recent_sink()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clear();
+    recent_sink().lock().unwrap_or_else(|e| e.into_inner()).clear();
 }
 
 #[cfg(test)]

@@ -3,11 +3,12 @@
 //! Protected by JWT Bearer token auth. All endpoints require admin role.
 
 use crate::accounts::{self, AccountRegistry};
+use crate::devices::{DeviceRegError, DeviceRegistry};
 use crate::signaling::SignalingServer;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use axum::routing::{delete, get};
@@ -32,6 +33,10 @@ pub struct AdminState {
     pub consumer_limit_per_stream: usize,
     /// G3 舱端账号注册表（登录认证用; 空 = 无账号，登录一律 401）。
     pub accounts: Arc<AccountRegistry>,
+    /// 设备注册表（unified-device-admin 管理端点热生效; signaling 与 admin 共享同一 Arc）。
+    pub device_registry: std::sync::Arc<DeviceRegistry>,
+    /// devices.yaml 绝对路径（管理写回用，main.rs 装配）。
+    pub devices_path: String,
     #[cfg(feature = "sfu-mediasoup")]
     pub sfu_manager: Arc<crate::sfu::SfuManager>,
 }
@@ -41,36 +46,12 @@ pub struct AdminState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AdminEvent {
-    DeviceOnline {
-        device_id: String,
-        timestamp: String,
-    },
-    DeviceOffline {
-        device_id: String,
-        timestamp: String,
-    },
-    StreamCreate {
-        device_id: String,
-        stream_id: String,
-        timestamp: String,
-    },
-    StreamDestroy {
-        device_id: String,
-        stream_id: String,
-        timestamp: String,
-    },
-    ConsumerJoin {
-        peer_id: String,
-        device_id: String,
-        stream_id: String,
-        timestamp: String,
-    },
-    ConsumerLeave {
-        peer_id: String,
-        device_id: String,
-        stream_id: String,
-        timestamp: String,
-    },
+    DeviceOnline { device_id: String, timestamp: String },
+    DeviceOffline { device_id: String, timestamp: String },
+    StreamCreate { device_id: String, stream_id: String, timestamp: String },
+    StreamDestroy { device_id: String, stream_id: String, timestamp: String },
+    ConsumerJoin { peer_id: String, device_id: String, stream_id: String, timestamp: String },
+    ConsumerLeave { peer_id: String, device_id: String, stream_id: String, timestamp: String },
 }
 
 macro_rules! event_ts {
@@ -104,6 +85,12 @@ pub fn admin_router(state: AdminState) -> Router {
         .route("/api/admin/status", get(list_status))
         .route("/api/admin/config", get(server_config))
         .route("/api/admin/config/push", axum::routing::post(push_config))
+        .route("/api/admin/devices", get(list_devices).post(register_device))
+        .route("/api/admin/devices/{device_id}", delete(revoke_device))
+        .route(
+            "/api/admin/devices/{device_id}/reset-secret",
+            axum::routing::post(reset_device_secret),
+        )
         .route("/api/admin/events", get(ws_events));
     // H3: SFU 管理端点（仅 sfu-mediasoup 构建存在 — 原生构建无 SfuManager）。
     #[cfg(feature = "sfu-mediasoup")]
@@ -168,9 +155,7 @@ async fn login(
     let secret = state.admin_jwt_secret.as_ref().ok_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse {
-                error: "admin jwt secret not configured".into(),
-            }),
+            Json(ErrorResponse { error: "admin jwt secret not configured".into() }),
         )
     })?;
     if state.accounts.is_empty() {
@@ -182,31 +167,27 @@ async fn login(
         ));
     }
     // 未知用户与错误密码逐字一致（防枚举，同 G2 devices）。
-    let identity = state
-        .accounts
-        .authenticate(&req.username, &req.password)
-        .map_err(|_| {
-            tracing::warn!("login failed for user {}", req.username);
-            crate::audit::log_event(crate::audit::AuditEvent::AuthFailure {
-                peer_id: req.username.clone(),
-                reason: "account login failed".into(),
-            });
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(ErrorResponse {
-                    error: "account authentication failed: invalid credentials".into(),
-                }),
-            )
-        })?;
+    let identity = state.accounts.authenticate(&req.username, &req.password).map_err(|_| {
+        tracing::warn!("login failed for user {}", req.username);
+        crate::audit::log_event(crate::audit::AuditEvent::AuthFailure {
+            peer_id: req.username.clone(),
+            reason: "account login failed".into(),
+        });
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "account authentication failed: invalid credentials".into(),
+            }),
+        )
+    })?;
     let ttl: u64 = 12 * 3600; // ponytail: 12h 会话; 需要更短/续签时改为配置项
-    let token = accounts::issue_account_token(secret, &identity, ttl)
-        .map_err(|e| {
-            tracing::error!("login token issuance failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse { error: "token issuance failed".into() }),
-            )
-        })?;
+    let token = accounts::issue_account_token(secret, &identity, ttl).map_err(|e| {
+        tracing::error!("login token issuance failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: "token issuance failed".into() }),
+        )
+    })?;
     crate::audit::log_event(crate::audit::AuditEvent::AuthSuccess {
         peer_id: identity.username.clone(),
         device_id: None,
@@ -238,11 +219,151 @@ async fn push_config(
         .map(|_| Json(serde_json::json!({"pushed": req.room_id, "version": req.version})))
         .map_err(|e| {
             tracing::error!("config push failed: {e}");
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse { error: e }),
-            )
+            (StatusCode::NOT_FOUND, Json(ErrorResponse { error: e }))
         })
+}
+
+// ── Devices admin (unified-device-admin) ──────────────────────────────────
+// 设备注册表管理（G2 devices.yaml 热生效; dispatcher 只读 GET 由 auth_middleware 保证）。
+
+/// device_id 轻校验（1-64 字符，[A-Za-z0-9-_]；现有设备名 ms-<hex> 兼容）。
+fn validate_device_id(id: &str) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    let ok = !id.is_empty()
+        && id.len() <= 64
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if ok {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("invalid device_id {id:?}: want 1-64 chars of [A-Za-z0-9-_]"),
+            }),
+        ))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RegisterDeviceRequest {
+    pub device_id: String,
+}
+
+#[derive(Serialize)]
+struct DeviceView {
+    device_id: String,
+}
+
+/// GET /api/admin/devices — 注册表清单（已授权设备; 在线态由前端交叉 rooms 视图）。
+async fn list_devices(State(state): State<AdminState>) -> Json<serde_json::Value> {
+    let mut devices: Vec<DeviceView> = state
+        .device_registry
+        .device_ids()
+        .into_iter()
+        .map(|device_id| DeviceView { device_id })
+        .collect();
+    devices.sort_by(|a, b| a.device_id.cmp(&b.device_id));
+    Json(serde_json::json!({ "devices": devices, "count": devices.len() }))
+}
+
+/// POST /api/admin/devices — 注册设备，返回 secret（唯一一次明文展示）。
+async fn register_device(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    axum::Json(req): axum::Json<RegisterDeviceRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    validate_device_id(&req.device_id)?;
+    let (secret_hash, secret) =
+        state.device_registry.register(&req.device_id).map_err(|e| match e {
+            DeviceRegError::Duplicate => (
+                StatusCode::CONFLICT,
+                Json(ErrorResponse {
+                    error: format!("device {} already registered", req.device_id),
+                }),
+            ),
+            DeviceRegError::Unknown => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "device registry internal error".into() }),
+            ),
+        })?;
+    if let Err(e) = state.device_registry.save(&state.devices_path) {
+        // 落盘失败 → 回滚内存（单一事实源=磁盘，保持内存不变语义）
+        tracing::error!("device {} register: write failed, rolling back: {e}", req.device_id);
+        let _ = state.device_registry.revoke(&req.device_id);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: format!("device registry write failed: {e}") }),
+        ));
+    }
+    crate::audit::log_event(crate::audit::AuditEvent::DeviceRegistered {
+        device_id: req.device_id.clone(),
+        actor: claims.sub.clone(),
+    });
+    Ok(Json(serde_json::json!({
+        "device_id": req.device_id,
+        "secret": secret,
+        "secret_hash": secret_hash,
+        "note": "secret 仅此一次明文展示",
+    })))
+}
+
+/// DELETE /api/admin/devices/{device_id} — 吊销设备（下次接入 4010）。
+async fn revoke_device(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    Path(device_id): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    state.device_registry.revoke(&device_id).map_err(|_| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse { error: format!("device {device_id} not registered") }),
+        )
+    })?;
+    if let Err(e) = state.device_registry.save(&state.devices_path) {
+        tracing::error!("device {device_id} revoke: write failed: {e}");
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: format!("device registry write failed: {e}") }),
+        ));
+    }
+    crate::audit::log_event(crate::audit::AuditEvent::DeviceRevoked {
+        device_id: device_id.clone(),
+        actor: claims.sub,
+    });
+    Ok(Json(serde_json::json!({ "revoked": device_id })))
+}
+
+/// POST /api/admin/devices/{device_id}/reset-secret — 重置密钥（旧密钥立即失效）。
+async fn reset_device_secret(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    Path(device_id): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let (_, secret) = state.device_registry.reset_secret(&device_id).map_err(|_| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse { error: format!("device {device_id} not registered") }),
+        )
+    })?;
+    if let Err(e) = state.device_registry.save(&state.devices_path) {
+        // 无回滚（旧 hash 未快照）— 内存新值/磁盘旧值: 错误消息注明偏差，
+        // 后续任意 save（register/revoke）会修正; 重启则回旧值（C15 已留痕）。
+        tracing::error!("device {device_id} reset-secret: write failed, memory/disk diverge: {e}");
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("device registry write failed (registry may diverge): {e}"),
+            }),
+        ));
+    }
+    crate::audit::log_event(crate::audit::AuditEvent::DeviceSecretReset {
+        device_id: device_id.clone(),
+        actor: claims.sub,
+    });
+    Ok(Json(serde_json::json!({
+        "device_id": device_id,
+        "secret": secret,
+        "note": "secret 仅此一次明文展示",
+    })))
 }
 
 // ── Auth helper ─────────────────────────────────────────────────────────────
@@ -256,20 +377,27 @@ fn extract_token(req: &axum::http::Request<Body>) -> Option<String> {
         .map(|s| s.to_string())
         .or_else(|| {
             req.uri().query().and_then(|q| {
-                q.split('&')
-                    .find_map(|kv| kv.strip_prefix("token="))
-                    .map(|v| v.to_string())
+                q.split('&').find_map(|kv| kv.strip_prefix("token=")).map(|v| v.to_string())
             })
         })
         .filter(|s| !s.is_empty())
 }
 
-fn check_auth(req: &axum::http::Request<Body>, state: &AdminState) -> Result<JwtClaims, (StatusCode, Json<ErrorResponse>)> {
+fn check_auth(
+    req: &axum::http::Request<Body>,
+    state: &AdminState,
+) -> Result<JwtClaims, (StatusCode, Json<ErrorResponse>)> {
     let secret = state.admin_jwt_secret.as_ref().ok_or_else(|| {
-        (StatusCode::SERVICE_UNAVAILABLE, Json(ErrorResponse { error: "admin jwt secret not configured".into() }))
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse { error: "admin jwt secret not configured".into() }),
+        )
     })?;
     let token = extract_token(req).ok_or_else(|| {
-        (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "missing authorization token".into() }))
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse { error: "missing authorization token".into() }),
+        )
     })?;
     JwtAuth::new(secret).verify(&token).map_err(|_| {
         (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "invalid token".into() }))
@@ -281,14 +409,17 @@ fn check_auth(req: &axum::http::Request<Body>, state: &AdminState) -> Result<Jwt
 /// 写操作 POST/DELETE 一律拒绝）。viewer/operator/未知角色 → 401（现有语义不变）。
 async fn auth_middleware(
     State(state): State<AdminState>,
-    req: axum::extract::Request,
+    mut req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Result<axum::response::Response, (StatusCode, Json<ErrorResponse>)> {
     let claims = check_auth(&req, &state)?;
     let role = claims.role.as_deref().unwrap_or("");
     let is_admin = role == "admin";
     if !is_admin && role != "dispatcher" {
-        return Err((StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "admin or dispatcher role required".into() })));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse { error: "admin or dispatcher role required".into() }),
+        ));
     }
     if !is_admin {
         // H3 dispatcher: 只读视图（音频房间/状态/视频监控），无 config/control。
@@ -305,6 +436,7 @@ async fn auth_middleware(
             return Err((StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: detail.into() })));
         }
     }
+    req.extensions_mut().insert(claims);
     Ok(next.run(req).await)
 }
 
@@ -327,9 +459,7 @@ async fn get_room(
         Some(room) => Ok(Json(serde_json::json!(room))),
         None => Err((
             StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: format!("room {} not found", id),
-            }),
+            Json(ErrorResponse { error: format!("room {} not found", id) }),
         )),
     }
 }
@@ -351,9 +481,7 @@ async fn remove_room(
     } else {
         Err((
             StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: format!("room {} not found", id),
-            }),
+            Json(ErrorResponse { error: format!("room {} not found", id) }),
         ))
     }
 }
@@ -394,9 +522,7 @@ async fn kick_peer(
     } else {
         Err((
             StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: format!("peer {} not found in any room", peer_id),
-            }),
+            Json(ErrorResponse { error: format!("peer {} not found in any room", peer_id) }),
         ))
     }
 }
@@ -406,11 +532,7 @@ async fn stats(State(state): State<AdminState>) -> Json<StatsResponse> {
     let total_peers = state.signaling.room_manager.get_peer_count();
     let active_connections = state.signaling.active_connections();
 
-    Json(StatsResponse {
-        active_rooms,
-        total_peers,
-        active_connections,
-    })
+    Json(StatsResponse { active_rooms, total_peers, active_connections })
 }
 
 /// H3: 多车监控视图数据源 — StatusRegistry 全量快照（每房间最新 StatusReport）。
@@ -443,22 +565,27 @@ async fn sfu_stats(
     let consumer_id = params.get("consumer_id").cloned();
     let qid = producer_id.clone().or_else(|| consumer_id.clone());
     let Some(qid) = qid else {
-        return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "producer_id or consumer_id required".into() })));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "producer_id or consumer_id required".into() }),
+        ));
     };
     let result = if let Some(pid) = producer_id {
-        let (kind, bytes, packets, score) = state.sfu_manager.producer_stats(&pid).await.map_err(|e| {
-            tracing::error!("admin sfu_stats producer failed: {e}");
-            (StatusCode::NOT_FOUND, Json(ErrorResponse { error: e }))
-        })?;
+        let (kind, bytes, packets, score) =
+            state.sfu_manager.producer_stats(&pid).await.map_err(|e| {
+                tracing::error!("admin sfu_stats producer failed: {e}");
+                (StatusCode::NOT_FOUND, Json(ErrorResponse { error: e }))
+            })?;
         serde_json::json!({
             "producer_id": pid, "consumer_id": None::<String>,
             "kind": kind, "byte_count": bytes, "packet_count": packets, "score": score,
         })
     } else if let Some(cid) = consumer_id {
-        let (kind, bytes, packets, score) = state.sfu_manager.consumer_stats(&cid).await.map_err(|e| {
-            tracing::error!("admin sfu_stats consumer failed: {e}");
-            (StatusCode::NOT_FOUND, Json(ErrorResponse { error: e }))
-        })?;
+        let (kind, bytes, packets, score) =
+            state.sfu_manager.consumer_stats(&cid).await.map_err(|e| {
+                tracing::error!("admin sfu_stats consumer failed: {e}");
+                (StatusCode::NOT_FOUND, Json(ErrorResponse { error: e }))
+            })?;
         serde_json::json!({
             "producer_id": None::<String>, "consumer_id": cid,
             "kind": kind, "byte_count": bytes, "packet_count": packets, "score": score,
@@ -467,7 +594,11 @@ async fn sfu_stats(
         unreachable!("query_id guard above");
     };
     // C15: 响应路径日志（查询成功侧也留痕，运维可见）。
-    tracing::info!("admin sfu_stats: {qid} → {} bytes / {} packets", result["byte_count"], result["packet_count"]);
+    tracing::info!(
+        "admin sfu_stats: {qid} → {} bytes / {} packets",
+        result["byte_count"],
+        result["packet_count"]
+    );
     Ok(Json(result))
 }
 
@@ -490,10 +621,7 @@ async fn server_config(State(state): State<AdminState>) -> Json<ServerConfigResp
     })
 }
 
-async fn ws_events(
-    ws: WebSocketUpgrade,
-    State(state): State<AdminState>,
-) -> impl IntoResponse {
+async fn ws_events(ws: WebSocketUpgrade, State(state): State<AdminState>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_ws_events(socket, state))
 }
 
@@ -553,18 +681,16 @@ async fn handle_admin_sfu(
     ws_sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
 ) -> bool {
     match msg {
-        SignalingMessage::CreateWebRtcTransport {
-            room_id,
-            peer_id,
-            direction,
-        } => {
+        SignalingMessage::CreateWebRtcTransport { room_id, peer_id, direction } => {
             let dir_str = match direction {
                 TransportDirection::Send => "send",
                 TransportDirection::Recv => "recv",
             };
             tracing::info!(
                 "Admin SFU: creating {} transport for peer {} in room {}",
-                dir_str, peer_id, room_id
+                dir_str,
+                peer_id,
+                room_id
             );
             match sfu.create_webrtc_transport(room_id, peer_id, dir_str).await {
                 Ok(created) => {
@@ -585,9 +711,8 @@ async fn handle_admin_sfu(
                         code: 5000,
                         message: format!("Transport creation failed: {e}"),
                     };
-                    let _ = ws_sender
-                        .send(Message::Text(serde_json::to_string(&error).unwrap()))
-                        .await;
+                    let _ =
+                        ws_sender.send(Message::Text(serde_json::to_string(&error).unwrap())).await;
                 }
             }
             true
@@ -598,15 +723,16 @@ async fn handle_admin_sfu(
             transport_id,
             dtls_parameters,
         } => {
-            match sfu.connect_transport(&room_id, &peer_id, &transport_id, dtls_parameters.clone()).await {
+            match sfu
+                .connect_transport(&room_id, &peer_id, &transport_id, dtls_parameters.clone())
+                .await
+            {
                 Ok(()) => {
                     tracing::info!(
                         "Admin SFU: transport {transport_id} connected for peer {peer_id}"
                     );
-                    let response = SignalingMessage::Error {
-                        code: 0,
-                        message: "transport_connected".into(),
-                    };
+                    let response =
+                        SignalingMessage::Error { code: 0, message: "transport_connected".into() };
                     let _ = ws_sender
                         .send(Message::Text(serde_json::to_string(&response).unwrap()))
                         .await;
@@ -633,7 +759,13 @@ async fn handle_admin_sfu(
         } => {
             // PIT-65: 用消息 peer_id (每连接唯一), 非硬编码 admin — 多连接隔离
             match sfu
-                .create_consumer(room_id, &peer_id, producer_id, rtp_capabilities.clone(), transport_id.as_deref())
+                .create_consumer(
+                    room_id,
+                    &peer_id,
+                    producer_id,
+                    rtp_capabilities.clone(),
+                    transport_id.as_deref(),
+                )
                 .await
             {
                 Ok(result) => {
@@ -653,9 +785,8 @@ async fn handle_admin_sfu(
                         code: 5000,
                         message: format!("Consumer creation failed: {e}"),
                     };
-                    let _ = ws_sender
-                        .send(Message::Text(serde_json::to_string(&error).unwrap()))
-                        .await;
+                    let _ =
+                        ws_sender.send(Message::Text(serde_json::to_string(&error).unwrap())).await;
                 }
             }
             true
@@ -676,7 +807,7 @@ pub fn print_setup_token(secret: &str) {
         iat: now,
         exp: now + 365 * 86400, // ponytail: 1 year; rotate with shorter TTL if needed
         role: Some("admin".into()),
-            vehicles: None,
+        vehicles: None,
     };
     let token = jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),
@@ -699,7 +830,8 @@ mod tests {
     #[cfg(feature = "sfu-mediasoup")]
     pub(crate) async fn make_state() -> AdminState {
         let sfu = Arc::new(
-            crate::sfu::SfuManager::new_with_port(crate::sfu::random_udp_port()).await.unwrap());
+            crate::sfu::SfuManager::new_with_port(crate::sfu::random_udp_port()).await.unwrap(),
+        );
         let signaling = crate::signaling::SignalingServer::new(sfu.clone(), 65536, None);
         let (event_tx, _) = broadcast::channel(256);
         AdminState {
@@ -712,6 +844,8 @@ mod tests {
             room_capacity: 10,
             consumer_limit_per_stream: 50,
             accounts: Arc::new(AccountRegistry::empty()),
+            device_registry: Arc::new(DeviceRegistry::empty()),
+            devices_path: "/tmp/mediaservo-test-devices.yaml".into(),
             sfu_manager: sfu,
         }
     }
@@ -729,16 +863,17 @@ mod tests {
             room_capacity: 10,
             consumer_limit_per_stream: 50,
             accounts: Arc::new(AccountRegistry::empty()),
+            device_registry: Arc::new(DeviceRegistry::empty()),
+            devices_path: "/tmp/mediaservo-test-devices.yaml".into(),
         }
     }
 
     fn admin_token(state: &AdminState) -> String {
         let _jwt = JwtAuth::new(state.admin_jwt_secret.as_deref().unwrap());
         // ponytail: manually encode with role since sign() doesn't accept role
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as usize;
+        let now =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+                as usize;
         let claims = JwtClaims {
             sub: "admin".into(),
             iat: now,
@@ -947,9 +1082,9 @@ mod tests {
 mod g3_tests {
     use super::*;
     use crate::accounts::hash_password;
-    use mediaservo_common::protocol::PeerRole;
     use axum::body::Body;
     use http::{Method, Request, StatusCode};
+    use mediaservo_common::protocol::PeerRole;
     use tower::util::ServiceExt;
 
     fn accounts_yaml() -> String {
@@ -975,10 +1110,9 @@ mod g3_tests {
     }
 
     fn role_token(secret: &str, role: &str, vehicles: Option<Vec<String>>) -> String {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as usize;
+        let now =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+                as usize;
         let claims = mediaservo_common::auth::JwtClaims {
             sub: "u".into(),
             iat: now,
@@ -1062,14 +1196,8 @@ mod g3_tests {
                 .unwrap();
             statuses.push(resp.status());
         }
-        let limited = statuses
-            .iter()
-            .filter(|s| **s == StatusCode::TOO_MANY_REQUESTS)
-            .count();
-        assert!(
-            limited >= 2,
-            "burst={LOGIN_RATE_BURST} 之后必须被限流(429), got: {statuses:?}"
-        );
+        let limited = statuses.iter().filter(|s| **s == StatusCode::TOO_MANY_REQUESTS).count();
+        assert!(limited >= 2, "burst={LOGIN_RATE_BURST} 之后必须被限流(429), got: {statuses:?}");
         // 前若干请求必须不是 429（限流层存在但不过度拦截正常登录）
         assert!(
             statuses[..LOGIN_RATE_BURST as usize]
@@ -1152,9 +1280,7 @@ mod g3_tests {
                     .uri("/api/admin/config/push")
                     .header("content-type", "application/json")
                     .header("Authorization", format!("Bearer {op_tok}"))
-                    .body(Body::from(
-                        r#"{"room_id":"vehicle-1","config":"evil","version":4}"#,
-                    ))
+                    .body(Body::from(r#"{"room_id":"vehicle-1","config":"evil","version":4}"#))
                     .unwrap(),
             )
             .await
@@ -1263,13 +1389,20 @@ mod g3_tests {
                 Request::builder()
                     .method(Method::DELETE)
                     .uri("/api/admin/rooms/ms-car1")
-                    .header("Authorization", format!("Bearer {}", role_token(&secret, "admin", None)))
+                    .header(
+                        "Authorization",
+                        format!("Bearer {}", role_token(&secret, "admin", None)),
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "admin 不被只读拦截（房间不存在 → 404 而非 401）");
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "admin 不被只读拦截（房间不存在 → 404 而非 401）"
+        );
     }
 
     #[tokio::test]
@@ -1299,7 +1432,10 @@ mod g3_tests {
                 Request::builder()
                     .method(Method::GET)
                     .uri("/api/admin/status")
-                    .header("Authorization", format!("Bearer {}", role_token(&secret, "admin", None)))
+                    .header(
+                        "Authorization",
+                        format!("Bearer {}", role_token(&secret, "admin", None)),
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )

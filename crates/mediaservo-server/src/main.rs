@@ -1,12 +1,12 @@
-use std::time::Duration;
-use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use futures_util::FutureExt;
-use tower_http::timeout::TimeoutLayer;
+use mediaservo_common::auth::JwtAuth;
+use mediaservo_server::admin;
 use mediaservo_server::config;
 use mediaservo_server::monitor;
 use mediaservo_server::signaling;
-use mediaservo_server::admin;
-use mediaservo_common::auth::JwtAuth;
+use std::time::Duration;
+use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
+use tower_http::timeout::TimeoutLayer;
 
 /// Entry point — install panic hook, then run server with graceful shutdown.
 fn main() {
@@ -34,9 +34,8 @@ fn main() {
         .build()
         .expect("failed to build tokio runtime");
 
-    let result = rt.block_on(async {
-        std::panic::AssertUnwindSafe(run_server()).catch_unwind().await
-    });
+    let result =
+        rt.block_on(async { std::panic::AssertUnwindSafe(run_server()).catch_unwind().await });
 
     match result {
         Ok(Ok(())) => {}
@@ -56,15 +55,10 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
     tracing_subscriber::fmt()
         .json()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-        )
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    tracing::info!(
-        "MediaServo Server v{} starting",
-        env!("CARGO_PKG_VERSION")
-    );
+    tracing::info!("MediaServo Server v{} starting", env!("CARGO_PKG_VERSION"));
 
     // Parse config — collect args once for bounds-safe access
     let config_path = {
@@ -98,17 +92,18 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "/opt/mediaservo/etc/devices.yaml".to_string());
     let device_registry = match mediaservo_server::devices::DeviceRegistry::load(&devices_path) {
         Ok(reg) => {
-            tracing::info!(
-                "Device registry loaded from {devices_path}: {} devices",
-                reg.len()
-            );
+            tracing::info!("Device registry loaded from {devices_path}: {} devices", reg.len());
             reg
         }
         Err(e) => {
-            tracing::warn!("Device registry {devices_path}: {e}; running with empty registry (PSK path only)");
+            tracing::warn!(
+                "Device registry {devices_path}: {e}; running with empty registry (PSK path only)"
+            );
             mediaservo_server::devices::DeviceRegistry::empty()
         }
     };
+    // unified-device-admin: 单一 Arc 实例，signaling（接入鉴权）与 admin（管理写回）共享。
+    let device_registry = std::sync::Arc::new(device_registry);
 
     // ── G3 舱端账号注册表加载（accounts.yaml; 缺省路径与 server.yaml 同目录）────
     // 文件缺失/解析失败 → 空注册表 + 警告（PSK/设备路径不受影响，不阻断启动）。
@@ -118,10 +113,7 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "/opt/mediaservo/etc/accounts.yaml".to_string());
     let accounts = match mediaservo_server::accounts::AccountRegistry::load(&accounts_path) {
         Ok(reg) => {
-            tracing::info!(
-                "Account registry loaded from {accounts_path}: {} accounts",
-                reg.len()
-            );
+            tracing::info!("Account registry loaded from {accounts_path}: {} accounts", reg.len());
             reg
         }
         // I4 review: 文件存在但损坏 → fail-fast（静默空注册表 = 授权强制被静默禁用）。
@@ -156,8 +148,8 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     // Create the signaling server (shared state for WebSocket rooms)
     #[cfg(feature = "sfu-mediasoup")]
     let signaling_server = {
-        use std::sync::Arc;
         use mediaservo_server::sfu;
+        use std::sync::Arc;
 
         match sfu::SfuManager::new().await {
             Ok(m) => {
@@ -167,7 +159,7 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
                     config.ws_max_message_size,
                     jwt_auth.clone(),
                 );
-                srv.device_registry = std::sync::Arc::new(device_registry);
+                srv.device_registry = std::sync::Arc::clone(&device_registry);
                 srv
             }
             Err(e) => {
@@ -178,9 +170,8 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
     let mut signaling_server = {
-        let mut srv =
-            signaling::SignalingServer::new(config.ws_max_message_size, jwt_auth);
-        srv.device_registry = std::sync::Arc::new(device_registry);
+        let mut srv = signaling::SignalingServer::new(config.ws_max_message_size, jwt_auth);
+        srv.device_registry = std::sync::Arc::clone(&device_registry);
         srv
     };
 
@@ -200,6 +191,8 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         room_capacity: config.room_capacity,
         consumer_limit_per_stream: config.consumer_limit_per_stream,
         accounts: std::sync::Arc::clone(&accounts),
+        device_registry: std::sync::Arc::clone(&device_registry),
+        devices_path: devices_path.clone(),
         #[cfg(feature = "sfu-mediasoup")]
         sfu_manager: std::sync::Arc::clone(&signaling_server.sfu_manager),
     };
@@ -276,9 +269,9 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         }
     } else {
         // ── Plain TCP mode ──
-        let listener = tokio::net::TcpListener::bind(&bind_addr).await.map_err(|e| {
-            format!("Failed to bind {}: {}", bind_addr, e)
-        })?;
+        let listener = tokio::net::TcpListener::bind(&bind_addr)
+            .await
+            .map_err(|e| format!("Failed to bind {}: {}", bind_addr, e))?;
         tracing::info!("Listening on {}", bind_addr);
         tracing::info!("Server ready on {}", bind_addr);
 

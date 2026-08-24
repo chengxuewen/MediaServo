@@ -2,27 +2,29 @@
 //!
 //! Exercises all admin endpoints: rooms, stats, config, auth, delete.
 
-use mediaservo_server::accounts::AccountRegistry;
-use mediaservo_server::admin::{admin_router, AdminState};
-use mediaservo_server::signaling::SignalingServer;
-use mediaservo_common::auth::JwtClaims;
-use mediaservo_common::protocol::PeerRole;
 use axum::body::Body;
 use http::{Method, Request, StatusCode};
-use tower::util::ServiceExt;
+use mediaservo_common::auth::JwtClaims;
+use mediaservo_common::protocol::PeerRole;
+use mediaservo_server::accounts::AccountRegistry;
+use mediaservo_server::admin::{AdminState, admin_router};
+use mediaservo_server::signaling::SignalingServer;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tower::util::ServiceExt;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 #[cfg(feature = "sfu-mediasoup")]
 async fn make_state() -> AdminState {
-    let sfu = std::sync::Arc::new(
-        mediaservo_server::sfu::SfuManager::new_with_port(
-            mediaservo_server::sfu::random_udp_port(),
-        )
-        .await
-        .unwrap());
+    let sfu =
+        std::sync::Arc::new(
+            mediaservo_server::sfu::SfuManager::new_with_port(
+                mediaservo_server::sfu::random_udp_port(),
+            )
+            .await
+            .unwrap(),
+        );
     let signaling = SignalingServer::new(sfu.clone(), 65536, None);
     let (event_tx, _) = broadcast::channel(256);
     AdminState {
@@ -35,6 +37,8 @@ async fn make_state() -> AdminState {
         room_capacity: 10,
         consumer_limit_per_stream: 50,
         accounts: Arc::new(AccountRegistry::empty()),
+        device_registry: std::sync::Arc::new(mediaservo_server::devices::DeviceRegistry::empty()),
+        devices_path: "/tmp/mediaservo-e2e-test-devices.yaml".into(),
         sfu_manager: sfu,
     }
 }
@@ -52,20 +56,20 @@ async fn make_state() -> AdminState {
         room_capacity: 10,
         consumer_limit_per_stream: 50,
         accounts: Arc::new(AccountRegistry::empty()),
+        device_registry: std::sync::Arc::new(mediaservo_server::devices::DeviceRegistry::empty()),
+        devices_path: "/tmp/mediaservo-e2e-test-devices.yaml".into(),
     }
 }
 
 fn admin_token(state: &AdminState) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as usize;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+        as usize;
     let claims = JwtClaims {
         sub: "admin".into(),
         iat: now,
         exp: now + 3600,
         role: Some("admin".into()),
-            vehicles: None,
+        vehicles: None,
     };
     jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),
@@ -99,9 +103,7 @@ async fn admin_list_devices_empty() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body_bytes = axum::body::to_bytes(response.into_body(), 1024)
-        .await
-        .unwrap();
+    let body_bytes = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
     assert!(
@@ -109,11 +111,7 @@ async fn admin_list_devices_empty() {
         "expected empty devices, got: {}",
         body
     );
-    assert!(
-        body["rooms"].as_array().unwrap().is_empty(),
-        "expected empty rooms, got: {}",
-        body
-    );
+    assert!(body["rooms"].as_array().unwrap().is_empty(), "expected empty rooms, got: {}", body);
 }
 
 // ── Test 2: admin_list_devices_with_stream ──────────────────────────────────
@@ -123,11 +121,7 @@ async fn admin_list_devices_with_stream() {
     let state = make_state().await;
 
     // Join a consumer to create a DeviceStream room
-    state
-        .signaling
-        .room_manager
-        .join_room("stream-1", "consumer-1", &PeerRole::Consumer)
-        .unwrap();
+    state.signaling.room_manager.join_room("stream-1", "consumer-1", &PeerRole::Consumer).unwrap();
 
     let token = admin_token(&state);
     let app = admin_router(state);
@@ -146,9 +140,7 @@ async fn admin_list_devices_with_stream() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body_bytes = axum::body::to_bytes(response.into_body(), 4096)
-        .await
-        .unwrap();
+    let body_bytes = axum::body::to_bytes(response.into_body(), 4096).await.unwrap();
     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
     let rooms = body["rooms"].as_array().unwrap();
@@ -180,9 +172,7 @@ async fn admin_stats() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body_bytes = axum::body::to_bytes(response.into_body(), 1024)
-        .await
-        .unwrap();
+    let body_bytes = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
     assert!(body["active_rooms"].is_number());
@@ -212,9 +202,7 @@ async fn admin_config() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body_bytes = axum::body::to_bytes(response.into_body(), 1024)
-        .await
-        .unwrap();
+    let body_bytes = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
     assert_eq!(body["listen_host"], "0.0.0.0");
@@ -256,11 +244,7 @@ async fn admin_rooms_delete() {
     let state = make_state().await;
 
     // Create a room
-    state
-        .signaling
-        .room_manager
-        .join_room("room-1", "host-1", &PeerRole::Host)
-        .unwrap();
+    state.signaling.room_manager.join_room("room-1", "host-1", &PeerRole::Host).unwrap();
 
     // Verify room appears in admin list
     let token = admin_token(&state);
@@ -279,9 +263,7 @@ async fn admin_rooms_delete() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body_bytes = axum::body::to_bytes(response.into_body(), 4096)
-        .await
-        .unwrap();
+    let body_bytes = axum::body::to_bytes(response.into_body(), 4096).await.unwrap();
     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     assert_eq!(body["rooms"].as_array().unwrap().len(), 1);
     assert_eq!(body["rooms"][0]["id"], "room-1");
@@ -289,11 +271,7 @@ async fn admin_rooms_delete() {
     // Now delete the room via RoomManager (the DELETE handler does the same)
     // and verify the room is removed from admin list in a new state
     let state2 = make_state().await;
-    state2
-        .signaling
-        .room_manager
-        .join_room("room-1", "host-1", &PeerRole::Host)
-        .unwrap();
+    state2.signaling.room_manager.join_room("room-1", "host-1", &PeerRole::Host).unwrap();
     assert!(state2.signaling.room_manager.remove_room("room-1"));
 
     let token2 = admin_token(&state2);
@@ -312,9 +290,7 @@ async fn admin_rooms_delete() {
         .unwrap();
 
     assert_eq!(response2.status(), StatusCode::OK);
-    let body2_bytes = axum::body::to_bytes(response2.into_body(), 4096)
-        .await
-        .unwrap();
+    let body2_bytes = axum::body::to_bytes(response2.into_body(), 4096).await.unwrap();
     let body2: serde_json::Value = serde_json::from_slice(&body2_bytes).unwrap();
     assert!(
         body2["rooms"].as_array().unwrap().is_empty(),
