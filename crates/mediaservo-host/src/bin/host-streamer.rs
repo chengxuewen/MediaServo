@@ -1,8 +1,8 @@
 //! host-streamer: 推流进程（Task C2）— FrameBus 订阅 → WebRTC 推流。
 //!
-//! 用法: `host-streamer --stream <id> --config <host.toml 路径> --token <令牌文件路径>`
+//! 用法: `host-streamer --stream <id> --config <host.yaml 路径> --token <令牌文件路径>`
 //!
-//! 流程: 读 host.toml `[[streams]]`（camera/codec 缺省 id/vp8，
+//! 流程: 读 host.yaml `[[streams]]`（camera/codec 缺省 id/vp8，
 //! [`mediaservo_host::translate::stream_config`]）→ 相机配置（fps）→ FrameBus
 //! 订阅 `camera/<camera-id>`（FrameMeta + 紧凑 I420，C1 capturer 线格式）→
 //! field `PushSession`（connect → publish_video：SFU transport + answer 协商 +
@@ -43,7 +43,7 @@ const VISION_DC_LABEL: &str = "vision";
 /// 视觉 DC 协商截止：无舱端 answer 则降级（视觉是可选 overlay，视频不受影响）。
 const VISION_NEGOTIATE_TIMEOUT: Duration = Duration::from_secs(10);
 
-const USAGE: &str = "用法: host-streamer --stream <id> --config <host.toml> --token <令牌文件>";
+const USAGE: &str = "用法: host-streamer --stream <id> --config <host.yaml> --token <令牌文件>";
 
 /// 出站统计消息序号（stats topic FrameMeta.seq，单调）。
 static STATS_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

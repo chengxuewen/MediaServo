@@ -3,7 +3,7 @@
 //! 当前仅提供日志初始化与占位进程运行器；媒体/信令功能在后续 Phase
 //! （B/C）逐步从 host-legacy 迁移至此。单进程旧实现保留于
 //! `src/bin/host-legacy.rs`，Phase C 迁移完成后删除。
-/// host.toml → oxfile.toml 翻译器（Task A2）。
+/// host.yaml → oxfile.toml 翻译器（Task A2）。
 pub mod translate;
 /// 控制平面（Task F1）：控制信封 + 执行器接口。
 pub mod control;

@@ -3,12 +3,12 @@
 //! 观测机制（选择理由见 task-E2-report）：iceoryx2 0.9.3 注册表动态详情
 //! （[`ServiceDynamicDetails`]）仅暴露节点存活列表（`nodes`，无消息计数器，
 //! 源码 iceoryx2-0.9.3 `src/service/mod.rs:378`）→ 零消费监控不可行。
-//! 采用订阅式观测：monitor 对每个 `camera/<id>`（host.toml 声明）attach 一个
+//! 采用订阅式观测：monitor 对每个 `camera/<id>`（host.yaml 声明）attach 一个
 //! latest-slot 订阅者（buffer=1 覆盖语义，`FrameBus::subscribe`）——iceoryx2
 //! 每订阅者独立拷贝，不从 streamer/recorder 抢帧；慢消费自动跳帧（统计可接受）。
 //!
 //! 帧率/字节率: 窗口内帧数 + `FrameMeta.ts_mono_ns` 增量（发布端时钟，C17 单调）。
-//! 停滞: 距最近到达 > `max(stall_floor, 2×期望帧间隔)`（期望 fps 来自 host.toml
+//! 停滞: 距最近到达 > `max(stall_floor, 2×期望帧间隔)`（期望 fps 来自 host.yaml
 //! camera_configs）。无 grace —— 停滞是数据面事实（D-H14 的 grace 仅用于拓扑
 //! 启动窗口 vs 故障区分，不适用于数据面）。
 //!
@@ -49,7 +49,7 @@ pub struct TopicFlow {
 /// 单流推流状态（E2 快照条目）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct StreamFlow {
-    /// 流 id（host.toml `[[streams]] id`）。
+    /// 流 id（host.yaml `[[streams]] id`）。
     pub id: String,
     /// 最近一次 stats 的 bytes_sent（webrtc OutboundRtp，累计）。
     pub bytes_sent: u64,
@@ -59,7 +59,7 @@ pub struct StreamFlow {
     pub frame_height: u32,
     /// 最近 stats 是否在新鲜窗口内。
     pub connected: bool,
-    /// 协商编解码器（host.toml [[streams]] codec）。
+    /// 协商编解码器（host.yaml [[streams]] codec）。
     pub codec: String,
     /// 平均编码耗时 ms（web stats 面板——EncoderStatus 转发）。
     pub avg_encode_ms: Option<f64>,
@@ -111,7 +111,7 @@ struct StreamState {
     last_stats: Option<Instant>,
 }
 
-/// 数据流监控器：host.toml 声明 topic 的订阅 + 统计（E2）。
+/// 数据流监控器：host.yaml 声明 topic 的订阅 + 统计（E2）。
 pub struct FlowMonitor {
     topics: HashMap<String, (Arc<Mutex<TopicState>>, Duration)>,
     streams: HashMap<String, Arc<Mutex<StreamState>>>,
@@ -146,11 +146,11 @@ impl FlowMonitor {
     ) -> Result<Self, String> {
         let bus = FrameBus::attach("", token, verifying_key).map_err(|e| e.to_string())?;
         let cameras = translate::camera_configs(&host_toml).unwrap_or_else(|e| {
-            tracing::warn!("host.toml 相机解析失败: {e}");
+            tracing::warn!("host.yaml 相机解析失败: {e}");
             Vec::new()
         });
         let streams = translate::stream_configs(&host_toml).unwrap_or_else(|e| {
-            tracing::warn!("host.toml 流解析失败: {e}");
+            tracing::warn!("host.yaml 流解析失败: {e}");
             Vec::new()
         });
 

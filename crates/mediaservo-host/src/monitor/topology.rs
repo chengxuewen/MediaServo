@@ -1,6 +1,6 @@
 //! 拓扑监控核心（Task E1，D-H4 声明式期望 + 发现式实际）。
 //!
-//! 期望态: host.toml 声明（N capturer + N streamer + recorder/controller/emergency/
+//! 期望态: host.yaml 声明（N capturer + N streamer + recorder/controller/emergency/
 //! audio/agent 固定进程 + 每相机一个 `camera/<id>` 发布 topic）。
 //! 实际态: oxmgr list 进程存活 + FrameBus 跨进程发布者枚举（Momus MEDIUM-2 选项 ①，
 //! `mediaservo_link::FrameBus::list_topics`，iceoryx2 服务注册表）。
@@ -112,7 +112,7 @@ pub struct TopologyMonitor {
 /// 单次拓扑快照（E2/E3 数据基础）。
 #[derive(Debug, Clone)]
 pub struct TopologySnapshot {
-    /// 期望进程名（host.toml 声明，含固定进程与实例）。
+    /// 期望进程名（host.yaml 声明，含固定进程与实例）。
     pub expected_processes: Vec<String>,
     /// 实际进程（oxmgr list，含状态）。
     pub actual_processes: Vec<OxProcess>,
@@ -163,16 +163,16 @@ impl TopologyMonitor {
         self.started.elapsed() < self.grace
     }
 
-    /// 采集一次拓扑快照：期望（host.toml）+ 实际（oxmgr + FrameBus 发现）→ diff。
+    /// 采集一次拓扑快照：期望（host.yaml）+ 实际（oxmgr + FrameBus 发现）→ diff。
     pub fn collect(&self) -> TopologySnapshot {
         let expected_processes = translate::expected_process_names(&self.host_toml)
             .unwrap_or_else(|e| {
-                tracing::warn!("host.toml 期望进程解析失败: {e}");
+                tracing::warn!("host.yaml 期望进程解析失败: {e}");
                 Vec::new()
             });
         let expected_topics: Vec<FrameTopic> = translate::camera_configs(&self.host_toml)
             .unwrap_or_else(|e| {
-                tracing::warn!("host.toml 相机解析失败: {e}");
+                tracing::warn!("host.yaml 相机解析失败: {e}");
                 Vec::new()
             })
             .into_iter()

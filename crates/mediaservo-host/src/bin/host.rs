@@ -1,11 +1,11 @@
 //! host CLI: 业务视图运维入口（Phase A）。
 //!
 //! 子命令（`std::env::args` 手工解析，Phase A 不引入 clap）：
-//! - `host init [<dir>]`        — 生成 `etc/host.toml` 模板 + `etc/link/signing.pem`
+//! - `host init [<dir>]`        — 生成 `etc/host.yaml` 模板 + `etc/link/signing.pem`
 //!   （Ed25519 PKCS#8 keypair，0600）+ `etc/link/ros_bridge.yaml`（B3：ROS 节点
-//!   配置单一来源——topic 清单 + 令牌路径，从 host.toml 相机/流清单导出）
+//!   配置单一来源——topic 清单 + 令牌路径，从 host.yaml 相机/流清单导出）
 //!   + 标准车辆令牌集自动签发（G1：`host token issue --all`，幂等）
-//! - `host start [<dir>]` — 读 etc/host.toml → 校验 → 翻译 → 写 run/oxfile.toml
+//! - `host start [<dir>]` — 读 etc/host.yaml → 校验 → 翻译 → 写 run/oxfile.toml
 //!   → `oxmgr apply run/oxfile.toml` 拉起全部 host 进程
 //! - `host apply [<dir>]`  — 同上（E4 云端配置闭环本地等价物；增量: 新增 Start/
 //!   变更 Recreate/未变 Noop）
@@ -25,13 +25,13 @@ use mediaservo_link::{
 use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePublicKey};
 use pkcs8::LineEnding;
 
-/// `host init` 生成的配置模板（host.toml 初版 schema，A1）。
-const HOST_TOML_TEMPLATE: &str = include_str!("../host.toml.template");
+/// `host init` 生成的配置模板（host.yaml 初版 schema，A1）。
+const HOST_TOML_TEMPLATE: &str = include_str!("../host.yaml.template");
 
 const USAGE: &str = "用法: mediaservo-host <init|start|apply|restart|stop|status|doctor|token|startup|monit|ps|logs|version> [<dir>]（目录为位置参数，默认 .host/）
 子命令:
-  init [<dir>]       生成实例：host.toml 模板 + signing.pem(0600) + identity.json + 标准令牌集
-  start [<dir>]      读 host.toml → 校验 → 翻译 oxfile → oxmgr apply 拉起全部进程
+  init [<dir>]       生成实例：host.yaml 模板 + signing.pem(0600) + identity.json + 标准令牌集
+  start [<dir>]      读 host.yaml → 校验 → 翻译 oxfile → oxmgr apply 拉起全部进程
   apply [<dir>]      配置变更生效（增量: 新增 Start/变更 Recreate/未变 Noop）
   restart [<dir>]    全量重启（oxmgr stop 后重新 apply）
   stop [<dir>]       全部停止（oxmgr stop + delete）
@@ -105,20 +105,20 @@ fn main() {
 /// 参数不一致，目录统一位置参数后 -- 前缀必为用户笔误。）
 fn parse_dir(args: &mut impl Iterator<Item = String>) -> Result<PathBuf, String> {
     let Some(arg) = args.next() else {
-        // 智能默认（安装即用）: ① cwd 有实例（etc/host.toml）→ "."；
-        // ② 二进制同目录有实例（install 布局: bin/ 旁 etc/host.toml）→ 二进制目录；
+        // 智能默认（安装即用）: ① cwd 有实例（etc/host.yaml）→ "."；
+        // ② 二进制同目录有实例（install 布局: bin/ 旁 etc/host.yaml）→ 二进制目录；
         // ③ 否则 .host/（旧式根目录实例兼容）
-        if PathBuf::from("etc/host.toml").exists() {
+        if PathBuf::from("etc/host.yaml").exists() {
             return Ok(PathBuf::from("."));
         }
-        // ② 二进制同目录/上级有实例（install 布局: <inst>/bin/msrtc-host + <inst>/etc/host.toml）
+        // ② 二进制同目录/上级有实例（install 布局: <inst>/bin/msrtc-host + <inst>/etc/host.yaml）
         //    → 定位安装根，实现「任意目录执行都指向本机实例」
         if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
-            if exe_dir.join("etc").join("host.toml").exists() {
+            if exe_dir.join("etc").join("host.yaml").exists() {
                 return Ok(exe_dir.clone());
             }
             if let Some(inst_root) = exe_dir.parent() {
-                if inst_root.join("etc").join("host.toml").exists() {
+                if inst_root.join("etc").join("host.yaml").exists() {
                     return Ok(inst_root.to_path_buf());
                 }
             }
@@ -134,8 +134,8 @@ fn parse_dir(args: &mut impl Iterator<Item = String>) -> Result<PathBuf, String>
     Ok(PathBuf::from(arg))
 }
 
-/// `host init <dir>`: 生成 etc/host.toml 模板 + etc/link/signing.pem（Ed25519，0600）
-/// + etc/link/ros_bridge.yaml（topic 清单 + 令牌路径，从 host.toml 导出）。
+/// `host init <dir>`: 生成 etc/host.yaml 模板 + etc/link/signing.pem（Ed25519，0600）
+/// + etc/link/ros_bridge.yaml（topic 清单 + 令牌路径，从 host.yaml 导出）。
 fn cmd_init(args: &mut impl Iterator<Item = String>) -> i32 {
     let dir = match parse_dir(args) {
         Ok(d) => d,
@@ -151,7 +151,7 @@ fn cmd_init(args: &mut impl Iterator<Item = String>) -> i32 {
         return 1;
     }
 
-    let cfg_path = etc.join("host.toml");
+    let cfg_path = etc.join("host.yaml");
     if cfg_path.exists() {
         eprintln!("init: {} 已存在，跳过", cfg_path.display());
     } else if let Err(e) = std::fs::write(&cfg_path, HOST_TOML_TEMPLATE) {
@@ -198,7 +198,7 @@ fn cmd_init(args: &mut impl Iterator<Item = String>) -> i32 {
     }
 
     // 生成 ros_bridge.yaml（B3）：topic 清单 + 令牌路径，ROS 节点配置单一来源。
-    // 从已存在的 host.toml 解析（init 刚写入模板或用户已编辑），解析失败即报错——
+    // 从已存在的 host.yaml 解析（init 刚写入模板或用户已编辑），解析失败即报错——
     // 静默写空清单会让 ROS 节点连不上任何 topic（C15）。
     let cfg_text = match std::fs::read_to_string(&cfg_path) {
         Ok(cfg) => cfg,
@@ -255,7 +255,7 @@ fn write_private_pem(path: &Path, data: &[u8]) -> std::io::Result<()> {
     f.write_all(data)
 }
 
-/// `host start [<dir>]` / `host apply [<dir>]`（共享实现）: 读 host.toml → 校验 →
+/// `host start [<dir>]` / `host apply [<dir>]`（共享实现）: 读 host.yaml → 校验 →
 /// 翻译 → 原子写 run/oxfile.toml → `oxmgr apply`（增量: 新增 Start/变更 Recreate/
 /// 未变 Noop）。verb = "start"|"apply"（日志前缀）。
 fn cmd_apply_impl(args: &mut impl Iterator<Item = String>, verb: &str) -> i32 {
@@ -453,7 +453,7 @@ fn cmd_status(args: &mut impl Iterator<Item = String>) -> i32 {
 /// 同构。缺省 TTL 10 年（D-H10 固定令牌策略）。
 ///
 /// 每次签发写审计（etc/link/issuance.jsonl JSONL，D-H10 审计纪律）。
-const TOKEN_USAGE: &str = "用法:\n  host token issue --role <capture|processor|pusher|puller|recorder|control|perception|monitor> --node <id> [--topic <T>]... --out <path> [--ttl <secs>] [<dir>]\n  host token issue --all [--ttl <secs>] [<dir>]      # 从 host.toml 签发标准车辆令牌集（幂等，跳过已存在）\n  host token issue --for-ros [--ttl <secs>] [<dir>]  # Perception 预设（node=ros-vision, out=etc/link/ros-vision.token，与 ros_bridge.yaml 一致）\nROS 令牌示例: host token issue --role perception --node ros-vision --out etc/link/ros-vision.token <dir>";
+const TOKEN_USAGE: &str = "用法:\n  host token issue --role <capture|processor|pusher|puller|recorder|control|perception|monitor> --node <id> [--topic <T>]... --out <path> [--ttl <secs>] [<dir>]\n  host token issue --all [--ttl <secs>] [<dir>]      # 从 host.yaml 签发标准车辆令牌集（幂等，跳过已存在）\n  host token issue --for-ros [--ttl <secs>] [<dir>]  # Perception 预设（node=ros-vision, out=etc/link/ros-vision.token，与 ros_bridge.yaml 一致）\nROS 令牌示例: host token issue --role perception --node ros-vision --out etc/link/ros-vision.token <dir>";
 /// D-H10 固定令牌策略: 令牌长期有效，不随部署轮换。
 const DEFAULT_TOKEN_TTL_SECS: u64 = 10 * 365 * 24 * 3600;
 /// --for-ros 预设: ROS 视觉节点身份（与 ros_bridge.yaml token_path 同文件）。
@@ -563,7 +563,7 @@ fn cmd_token_issue(args: &mut impl Iterator<Item = String>) -> i32 {
     }
     if (all || for_ros) && (role.is_some() || node.is_some() || !topics.is_empty() || out.is_some()) {
         let preset = if all { "--all" } else { "--for-ros" };
-        eprintln!("{preset} 不能与 --role/--node/--topic/--out 同用（参数从 host.toml/预设推导）");
+        eprintln!("{preset} 不能与 --role/--node/--topic/--out 同用（参数从 host.yaml/预设推导）");
         return 2;
     }
     if all {
@@ -640,7 +640,7 @@ fn validate_topics(role: Role, topics: &[String]) -> Result<(), String> {
     ))
 }
 
-/// G1 加固: node id 字符集守卫（与 host.toml id 同规则 [A-Za-z0-9_-]+，
+/// G1 加固: node id 字符集守卫（与 host.yaml id 同规则 [A-Za-z0-9_-]+，
 /// 防畸形 claims/路径穿越）。
 fn check_node_id(id: &str) -> Result<(), String> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
@@ -731,7 +731,7 @@ fn role_name(r: &Role) -> &'static str {
     }
 }
 
-/// G1: `host token issue --all` — 从 host.toml 签发标准车辆令牌集（幂等，
+/// G1: `host token issue --all` — 从 host.yaml 签发标准车辆令牌集（幂等，
 /// 已存在跳过 — D-H10 固定令牌）：
 ///   etc/link/<cam>.token     Capture  publish camera/<cam>（host-capturer-<cam>）
 ///   etc/link/<stream>.token  Pusher   subscribe camera/<cam> + vision/<cam> + publish stats/*
@@ -739,7 +739,7 @@ fn role_name(r: &Role) -> &'static str {
 ///   etc/link/agent.token     Monitor  矩阵缺省（subscribe camera/* + stats/* — E2 数据流监控）
 /// ROS 令牌（--for-ros）不自动签发——ROS 存在性可选。
 fn issue_all(dir: &Path, ttl: u64) -> i32 {
-    let cfg_path = dir.join("etc").join("host.toml");
+    let cfg_path = dir.join("etc").join("host.yaml");
     let cfg = match std::fs::read_to_string(&cfg_path) {
         Ok(c) => c,
         Err(e) => {
@@ -873,7 +873,7 @@ fn build_acl(node_id: NodeId, role: Role, topics: Vec<String>) -> Result<NodeAcl
 }
 
 /// `host doctor [<dir>]`: 环境诊断。三项检查：
-/// ① oxmgr 可执行（PATH 内）② etc/host.toml 可解析 ③ host.toml → oxfile 可生成。
+/// ① oxmgr 可执行（PATH 内）② etc/host.yaml 可解析 ③ host.yaml → oxfile 可生成。
 /// 退出码 = 失败检查数（0..=3）。
 fn cmd_doctor(args: &mut impl Iterator<Item = String>) -> i32 {
     let dir = match parse_dir(args) {
@@ -893,19 +893,19 @@ fn cmd_doctor(args: &mut impl Iterator<Item = String>) -> i32 {
         }
     }
 
-    let cfg_path = dir.join("etc").join("host.toml");
+    let cfg_path = dir.join("etc").join("host.yaml");
     let cfg = match std::fs::read_to_string(&cfg_path) {
         Ok(cfg) => cfg,
         Err(e) => {
             println!("[fail] 读取 {} 失败: {e} — 先运行 host init <dir>", cfg_path.display());
-            println!("[fail] oxfile 生成失败: 无配置可翻译（host.toml 不可读）");
+            println!("[fail] oxfile 生成失败: 无配置可翻译（host.yaml 不可读）");
             return failed + 2; // ②③ 均因无配置失败，各打一条 [fail] 与计数一致
         }
     };
     match toml::from_str::<toml::Value>(&cfg) {
-        Ok(_) => println!("[ok] host.toml 可解析"),
+        Ok(_) => println!("[ok] host.yaml 可解析"),
         Err(e) => {
-            println!("[fail] host.toml 解析失败: {e}");
+            println!("[fail] host.yaml 解析失败: {e}");
             failed += 1;
         }
     }
@@ -1256,7 +1256,7 @@ fn startup_status(_dir: &std::path::Path) -> i32 {
 
 /// 探测 host-agent 本地网关端口是否被占用（[signaling] local_port 或默认 17980）。
 fn agent_port_in_use(dir: &std::path::Path) -> Option<u16> {
-    let cfg_path = dir.join("etc").join("host.toml");
+    let cfg_path = dir.join("etc").join("host.yaml");
     let port = std::fs::read_to_string(&cfg_path)
         .ok()
         .and_then(|c| mediaservo_host::translate::signaling_local_port(&c).ok().flatten())
@@ -1269,7 +1269,7 @@ fn agent_port_in_use(dir: &std::path::Path) -> Option<u16> {
     .ok()
 }
 
-/// 定位另一 host 实例目录：扫描 host-agent 进程 cmdline 的 --config <dir>/etc/host.toml。
+/// 定位另一 host 实例目录：扫描 host-agent 进程 cmdline 的 --config <dir>/etc/host.yaml。
 /// Linux /proc/*/cmdline；macOS ps -o command；Windows 返回 None（best-effort）。
 fn find_other_instance_dir() -> Option<std::path::PathBuf> {
     let probe = |cmd: &str| -> Option<std::path::PathBuf> {
@@ -1279,7 +1279,7 @@ fn find_other_instance_dir() -> Option<std::path::PathBuf> {
             if p == cfg_marker {
                 if let Some(path) = parts.next() {
                     let cfg = std::path::Path::new(path);
-                    if cfg.ends_with("etc/host.toml") {
+                    if cfg.ends_with("etc/host.yaml") {
                         return cfg.parent()?.parent().map(|d| d.to_path_buf());
                     }
                 }

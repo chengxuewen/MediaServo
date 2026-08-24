@@ -1,8 +1,8 @@
 //! host-recorder: 录制进程（Task C3）— FrameBus 订阅 camera/<id> → deck Recorder 落盘。
 //!
-//! 用法: `host-recorder --config <host.toml 路径> --token <令牌文件路径>`
+//! 用法: `host-recorder --config <host.yaml 路径> --token <令牌文件路径>`
 //!
-//! 流程: 读 host.toml（`[record]` enabled 门控 + out_dir，缺省 disabled +
+//! 流程: 读 host.yaml（`[record]` enabled 门控 + out_dir，缺省 disabled +
 //! /tmp/mediaservo-recordings）→ 每相机一个录制任务：link `FrameBus` 订阅
 //! `camera/<id>`（FrameMeta + 紧凑 I420，C1 capturer 线格式）→ deck `Recorder`
 //! （H264 + MP4 mux，复用 deck closed_loop 已验证闭环）→ `{out_dir}/{id}.mp4`。
@@ -30,7 +30,7 @@ const KEYFRAME_INTERVAL_SECS: u32 = 1;
 /// SIGTERM 后录制任务收尾（flush + trailer）超时。
 const FINISH_TIMEOUT: Duration = Duration::from_secs(30);
 
-const USAGE: &str = "用法: host-recorder --config <host.toml> --token <令牌文件>";
+const USAGE: &str = "用法: host-recorder --config <host.yaml> --token <令牌文件>";
 
 struct Args {
     config: PathBuf,
@@ -202,7 +202,7 @@ async fn main() -> ExitCode {
         }
     };
     if cams.is_empty() {
-        eprintln!("recorder: [record] enabled 但 host.toml 无 [[cameras]] — 无 topic 可订阅");
+        eprintln!("recorder: [record] enabled 但 host.yaml 无 [[cameras]] — 无 topic 可订阅");
         return ExitCode::from(1);
     }
 

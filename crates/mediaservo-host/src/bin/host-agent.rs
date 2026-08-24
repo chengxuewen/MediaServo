@@ -4,7 +4,7 @@
 //! 用法: `host-agent [--port <本地端口>] [--remote <ws url>] [--psk <psk>] [--room <整车房间>]`
 //! 缺省: 端口 17980；remote/psk 走 `SFU_E2E_WS_URL`/`SFU_E2E_PSK`（缺省
 //! `ws://127.0.0.1:9800/ws` / `mediaservo-dev`，对齐 streamer/e2e 约定）；room 缺省
-//! `vehicle`（D3 起由 host.toml 配置接入）。
+//! `vehicle`（D3 起由 host.yaml 配置接入）。
 //!
 //! E1-E3 监控（拓扑/数据流/信令 + 状态上报）统一由 [`spawn_status_reporter`]
 //! 单循环驱动（E3 起替换 E1/E2 独立循环；行为与日志不变）。
@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-const USAGE: &str = "用法: host-agent [--port <本地端口>] [--remote <ws url>] [--psk <psk>] [--room <房间>] [--config <host.toml>] [--token <令牌文件>]";
+const USAGE: &str = "用法: host-agent [--port <本地端口>] [--remote <ws url>] [--psk <psk>] [--room <房间>] [--config <host.yaml>] [--token <令牌文件>]";
 fn parse_args() -> Result<(GatewayConfig, Option<String>, Option<String>), String> {
     let mut cfg = GatewayConfig::default();
     let mut config_path: Option<String> = None;
@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(2);
         }
     };
-    // G4: 实例目录（--config <dir>/etc/host.toml → <dir>；oxfile/备份/身份基准）
+    // G4: 实例目录（--config <dir>/etc/host.yaml → <dir>；oxfile/备份/身份基准）
     let config_dir = config_path.as_deref().map(PathBuf::from).and_then(|p| {
         p.parent().and_then(|etc| etc.parent().map(Path::to_path_buf))
     });
@@ -79,17 +79,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         tracing::warn!("未提供 --config（实例目录不可推导）— 设备身份未加载，远端连接走 PSK 认证");
     }
-    // E1 拓扑监控: host.toml 期望态（缺省空 → 仅固定进程期望 + 告警）
+    // E1 拓扑监控: host.yaml 期望态（缺省空 → 仅固定进程期望 + 告警）
     let host_toml = match &config_path {
         Some(p) => match std::fs::read_to_string(p) {
             Ok(c) => c,
             Err(e) => {
-                tracing::warn!(path = %p, "host.toml 读取失败: {e} — 拓扑期望仅固定进程");
+                tracing::warn!(path = %p, "host.yaml 读取失败: {e} — 拓扑期望仅固定进程");
                 String::new()
             }
         },
         None => {
-            tracing::warn!("未提供 --config，拓扑期望仅固定进程（capturer/streamer 期望需 host.toml）");
+            tracing::warn!("未提供 --config，拓扑期望仅固定进程（capturer/streamer 期望需 host.yaml）");
             String::new()
         }
     };
@@ -119,7 +119,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     // E1-E3: 拓扑 + 数据流 + 信令监控 + StatusReport 上报（单循环, 5s）
     // E4: 配置版本（成功应用后 = 最近 ConfigPush.version；StatusReport 关联）
-    // F1: 启动时从 etc/host.toml.bak-<version> 备份恢复——agent 被 oxfile watch
+    // F1: 启动时从 etc/host.yaml.bak-<version> 备份恢复——agent 被 oxfile watch
     // 重启后版本不归零（磁盘上已应用版本与上报关联契约）。
     let config_version = Arc::new(AtomicU64::new(
         config_dir
@@ -130,7 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // E4: 云端配置应用循环（500ms 轮询网关待应用 ConfigPush；最新覆盖旧值）
     match &config_dir {
         Some(dir) => spawn_config_applier(gateway.clone(), dir.clone(), config_version.clone()),
-        None => tracing::warn!("未提供 --config（<dir>/etc/host.toml 不可推导）— 云端配置下发停用"),
+        None => tracing::warn!("未提供 --config（<dir>/etc/host.yaml 不可推导）— 云端配置下发停用"),
     }
     spawn_status_reporter(host_toml, monitor_started, token, gateway, STATUS_INTERVAL, config_version);
     wait_shutdown().await;

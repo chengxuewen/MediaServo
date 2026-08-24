@@ -1,8 +1,8 @@
 //! host-capturer: 采集进程（Task C1）— 相机视频 → FrameBus 发布（I420）。
 //!
-//! 用法: `host-capturer --camera <id> --config <host.toml 路径> --token <令牌文件路径>`
+//! 用法: `host-capturer --camera <id> --config <host.yaml 路径> --token <令牌文件路径>`
 //!
-//! 流程: 读 host.toml 相机配置（source/fps，缺省 stub/30）→ mediaservo-media
+//! 流程: 读 host.yaml 相机配置（source/fps，缺省 stub/30）→ mediaservo-media
 //! `VideoFrameGenerator` 产帧（stub 彩条起步；C17 单调时钟由 generator 保证）→
 //! link `FrameBus` 发布 topic `camera/<id>`（payload = FrameMeta 36B + 紧凑 I420，
 //! 与 deck closed_loop 线格式一致）。真实设备源（v4l2/mipi）后接。
@@ -24,13 +24,13 @@ use mediaservo_media::pipeline::generator::fonts::Anchor;
 use mediaservo_media::pipeline::source::VideoSource;
 use mediaservo_media::pipeline::sink::{VideoSink, VideoSinkWants};
 
-/// C1 固定分辨率（host.toml 无分辨率字段；与 deck CaptureOptions 默认一致）。
+/// C1 固定分辨率（host.yaml 无分辨率字段；与 deck CaptureOptions 默认一致）。
 const DEFAULT_WIDTH: u32 = 1280;
 const DEFAULT_HEIGHT: u32 = 720;
 /// FrameMeta 像素格式: 1 = I420（D243 枚举）。
 const FORMAT_I420: u8 = 1;
 
-const USAGE: &str = "用法: host-capturer --camera <id> --config <host.toml> --token <令牌文件>";
+const USAGE: &str = "用法: host-capturer --camera <id> --config <host.yaml> --token <令牌文件>";
 
 struct Args {
     camera: String,

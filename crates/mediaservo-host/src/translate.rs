@@ -1,6 +1,6 @@
-//! host.toml → oxfile.toml 翻译器（Task A2 + C1）。
+//! host.yaml → oxfile.toml 翻译器（Task A2 + C1）。
 //!
-//! 输入 host.toml 文本，输出 OxMgr oxfile.toml 文本（`version = 1` + `[defaults]` +
+//! 输入 host.yaml 文本，输出 OxMgr oxfile.toml 文本（`version = 1` + `[defaults]` +
 //! `[[apps]]`，字段对齐官方 [OXFILE.md](https://github.com/Vladimir-Urik/OxMgr)）。
 //! apps 含 7 类 host 进程 + 每 camera 一个 capturer 实例 + 每 stream 一个 streamer
 //! 实例（command 参数化）。Phase A 输出占位进程骨架；C1 起 capturer 实例追加
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use mediaservo_common::protocol::SignalingMessage;
 use serde::Deserialize;
 
-/// host.toml 解析模型（Phase A 子集：只需 cameras/streams 做实例化）。
+/// host.yaml 解析模型（Phase A 子集：只需 cameras/streams 做实例化）。
 #[derive(Debug, Default, Deserialize)]
 struct HostConfig {
     #[serde(default)]
@@ -72,26 +72,26 @@ struct SignalingSection {
 
 /// 网关本地端口（[signaling] local_port；缺省 None → agent 内置 17980）。
 pub fn signaling_local_port(cfg: &str) -> Result<Option<u16>, String> {
-    let cfg: HostConfig = toml::from_str(cfg).map_err(|e| format!("host.toml 解析失败: {e}"))?;
+    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     Ok(cfg.signaling.and_then(|s| s.local_port))
 }
 
 /// 整车房间（[signaling] room；缺省 None → host-agent 内置默认 "vehicle"）。
 /// D3 TODO（gateway.rs Default）关闭 — translate 负责把配置翻译进 oxfile。
 pub fn signaling_room(cfg: &str) -> Result<Option<String>, String> {
-    let cfg: HostConfig = toml::from_str(cfg).map_err(|e| format!("host.toml 解析失败: {e}"))?;
+    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     Ok(cfg.signaling.and_then(|s| s.room))
 }
 
 /// 远程 server URL（[signaling] server_url；缺省 None → host-agent 内置默认）。
 pub fn signaling_server_url(cfg: &str) -> Result<Option<String>, String> {
-    let cfg: HostConfig = toml::from_str(cfg).map_err(|e| format!("host.toml 解析失败: {e}"))?;
+    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     Ok(cfg.signaling.and_then(|s| s.server_url))
 }
 
 /// 信令 PSK（[signaling] psk；缺省 None → host-agent 内置默认）。
 pub fn signaling_psk(cfg: &str) -> Result<Option<String>, String> {
-    let cfg: HostConfig = toml::from_str(cfg).map_err(|e| format!("host.toml 解析失败: {e}"))?;
+    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     Ok(cfg.signaling.and_then(|s| s.psk))
 }
 
@@ -110,7 +110,7 @@ fn app_name(base: &str) -> String {
     format!("{}{}", mediaservo_common::brand::media_brand().app_prefix, base)
 }
 
-/// host.toml → oxfile.toml 文本。
+/// host.yaml → oxfile.toml 文本。
 ///
 /// 实例名一律 `类型-id`（如 `host-capturer-cam0`）——E4 配置演进下 app 身份稳定：
 /// 增删相机/流不得改名既有实例（1↔N 边界 rename 会丢 oxmgr 历史 + 留残留进程）。
@@ -120,11 +120,11 @@ pub fn to_oxfile(cfg: &str) -> Result<String, String> {
     to_oxfile_with_paths(cfg, Path::new(""), Path::new(""))
 }
 
-/// host.toml → oxfile.toml，capturer 实例追加 `--config <dir>/etc/host.toml`
+/// host.yaml → oxfile.toml，capturer 实例追加 `--config <dir>/etc/host.yaml`
 /// 与 `--token <dir>/etc/link/<cam>.token` 绝对路径（Task C1）。
 pub fn to_oxfile_in_dir(cfg: &str, dir: &Path) -> Result<String, String> {
-    let config_path = std::path::absolute(dir.join("etc").join("host.toml"))
-        .unwrap_or_else(|_| dir.join("etc").join("host.toml"));
+    let config_path = std::path::absolute(dir.join("etc").join("host.yaml"))
+        .unwrap_or_else(|_| dir.join("etc").join("host.yaml"));
     let token_dir = std::path::absolute(dir.join("etc").join("link"))
         .unwrap_or_else(|_| dir.join("etc").join("link"));
     to_oxfile_with_paths(cfg, &config_path, &token_dir)
@@ -132,7 +132,7 @@ pub fn to_oxfile_in_dir(cfg: &str, dir: &Path) -> Result<String, String> {
 
 // ── E4 云端配置闭环: 校验/备份/写入/apply 共享实现（host CLI 与 host-agent 同源） ──
 
-/// 校验 host.toml（与各消费进程同一解析路径：camera/stream/record/signaling；
+/// 校验 host.yaml（与各消费进程同一解析路径：camera/stream/record/signaling；
 /// 另含重复 id 守卫——重复 → oxfile app 名重复 → oxmgr apply 硬错误）。
 /// F2: id 字符集守卫 [A-Za-z0-9_-]+ —— 非法字符（引号/换行/路径穿越）会产出
 /// 畸形 oxfile（push_app 未转义）或投毒令牌路径，必须拒绝。
@@ -146,14 +146,14 @@ pub fn validate(cfg: &str) -> Result<(), String> {
     for c in &cameras {
         check_id("相机", &c.id)?;
         if !seen.insert(c.id.clone()) {
-            return Err(format!("host.toml 解析失败: 相机 id 重复: {}", c.id));
+            return Err(format!("host.yaml 解析失败: 相机 id 重复: {}", c.id));
         }
     }
     let mut seen = std::collections::HashSet::new();
     for s in &streams {
         check_id("流", &s.id)?;
         if !seen.insert(s.id.clone()) {
-            return Err(format!("host.toml 解析失败: 流 id 重复: {}", s.id));
+            return Err(format!("host.yaml 解析失败: 流 id 重复: {}", s.id));
         }
     }
     Ok(())
@@ -164,7 +164,7 @@ pub fn validate(cfg: &str) -> Result<(), String> {
 fn check_id(kind: &str, id: &str) -> Result<(), String> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
         return Err(format!(
-            "host.toml 解析失败: {kind} id 非法: {id:?}（仅允许 [A-Za-z0-9_-]+）"
+            "host.yaml 解析失败: {kind} id 非法: {id:?}（仅允许 [A-Za-z0-9_-]+）"
         ));
     }
     Ok(())
@@ -188,7 +188,7 @@ pub fn write_oxfile(cfg: &str, dir: &Path) -> Result<PathBuf, String> {
     Ok(oxfile)
 }
 
-/// F1: 从 etc/host.toml.bak-<version> 备份恢复最近应用版本（取最大版本）。
+/// F1: 从 etc/host.yaml.bak-<version> 备份恢复最近应用版本（取最大版本）。
 /// agent 被 oxfile [defaults].watch 重启后 config_version 不归零——磁盘上已应用
 /// 的版本与 StatusReport.config_version 的关联契约。无备份 → 0。
 pub fn recover_config_version(dir: &Path) -> u64 {
@@ -197,28 +197,28 @@ pub fn recover_config_version(dir: &Path) -> u64 {
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
-            name.strip_prefix("host.toml.bak-")
+            name.strip_prefix("host.yaml.bak-")
                 .and_then(|v| v.parse::<u64>().ok())
         })
         .max()
         .unwrap_or(0)
 }
 
-/// 备份当前 host.toml → etc/host.toml.bak-<version>（ConfigPush 应用前置）。
-/// 备份当前 host.toml → etc/host.toml.bak-<version>（ConfigPush 应用前置）。
+/// 备份当前 host.yaml → etc/host.yaml.bak-<version>（ConfigPush 应用前置）。
+/// 备份当前 host.yaml → etc/host.yaml.bak-<version>（ConfigPush 应用前置）。
 pub fn backup_host_config(dir: &Path, version: u64) -> Result<PathBuf, String> {
-    let cfg_path = dir.join("etc").join("host.toml");
-    let bak = dir.join("etc").join(format!("host.toml.bak-{version}"));
+    let cfg_path = dir.join("etc").join("host.yaml");
+    let bak = dir.join("etc").join(format!("host.yaml.bak-{version}"));
     std::fs::copy(&cfg_path, &bak).map_err(|e| format!("备份 {} → {} 失败: {e}", cfg_path.display(), bak.display()))?;
     Ok(bak)
 }
 
-/// E4 ConfigPush 应用（agent 侧；纯进程内可单测）：校验 → 备份 → 写 host.toml →
+/// E4 ConfigPush 应用（agent 侧；纯进程内可单测）：校验 → 备份 → 写 host.yaml →
 /// 重生成 oxfile。任一失败返回 Err（拒绝原因；文件未被部分改写——校验先行）。
 pub fn apply_config_push(dir: &Path, config: &str, version: u64) -> Result<(), String> {
     validate(config)?;
     backup_host_config(dir, version)?;
-    atomic_write(&dir.join("etc").join("host.toml"), config)?;
+    atomic_write(&dir.join("etc").join("host.yaml"), config)?;
     write_oxfile(config, dir)?;
     Ok(())
 }
@@ -325,10 +325,10 @@ fn oxfile_app_names(path: &Path) -> Result<Vec<String>, String> {
         .unwrap_or_default())
 }
 
-/// `host apply` 共享实现: 读 host.toml → 校验 → 翻译 → 写 oxfile → oxmgr apply。
+/// `host apply` 共享实现: 读 host.yaml → 校验 → 翻译 → 写 oxfile → oxmgr apply。
 pub fn apply_config(dir: &Path) -> Result<(), String> {
-    let cfg = std::fs::read_to_string(dir.join("etc").join("host.toml"))
-        .map_err(|e| format!("读取 host.toml 失败: {e} — 先运行 host init <dir>"))?;
+    let cfg = std::fs::read_to_string(dir.join("etc").join("host.yaml"))
+        .map_err(|e| format!("读取 host.yaml 失败: {e} — 先运行 host init <dir>"))?;
     write_oxfile(&cfg, dir)?;
     oxmgr_apply(dir)
 }
@@ -354,12 +354,12 @@ pub fn handle_config_push(
             tracing::info!(
                 version,
                 dir = %dir.display(),
-                "ConfigPush 应用成功 — host.toml 已更新 + oxfile 已重生成"
+                "ConfigPush 应用成功 — host.yaml 已更新 + oxfile 已重生成"
             );
             Ok(*version)
         }
         Err(e) => {
-            tracing::warn!(version, "ConfigPush 拒绝: {e} — host.toml 未变更");
+            tracing::warn!(version, "ConfigPush 拒绝: {e} — host.yaml 未变更");
             Err(e)
         }
     }
@@ -374,8 +374,8 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
         mediaservo_common::brand::media_brand().namespace
     );
 
-    // E4 热生效: [defaults] watch = host.toml（内容指纹）— agent/CLI 写入新配置后
-    // oxmgr file-watch 重启受影响进程（进程启动时重读 host.toml 生效）；
+    // E4 热生效: [defaults] watch = host.yaml（内容指纹）— agent/CLI 写入新配置后
+    // oxmgr file-watch 重启受影响进程（进程启动时重读 host.yaml 生效）；
     // 增删 app（相机/流）由 `oxmgr apply` 增量处理（Start/Recreate），watch 兜底
     // 纯内容变更（如 fps，命令不变 → apply Noop）。cwd 是 watch 前置要求（OxMgr
     // 源码 watch_fingerprint_for_process 实证）；无路径变体（doctor）不带 watch。
@@ -484,7 +484,7 @@ pub fn expected_process_names(cfg: &str) -> Result<Vec<String>, String> {
 
 /// 提取 cameras/streams 的 id 列表（host init 生成 ros_bridge.yaml 复用，单一解析点）。
 pub fn camera_and_stream_ids(cfg: &str) -> Result<(Vec<String>, Vec<String>), String> {
-    let cfg: HostConfig = toml::from_str(cfg).map_err(|e| format!("host.toml 解析失败: {e}"))?;
+    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     Ok((
         cfg.cameras.into_iter().map(|c| c.id).collect(),
         cfg.streams.into_iter().map(|s| s.id).collect(),
@@ -502,12 +502,12 @@ pub struct CameraConfig {
 /// 解析全部相机配置（C1 capturer 用；`camera_and_stream_ids` 保持 A2/B3 消费面）。
 /// fps=0 拒绝（generator.start(0) 线程内 panic → 静默挂起，C1 审查发现）。
 pub fn camera_configs(cfg: &str) -> Result<Vec<CameraConfig>, String> {
-    let cfg: HostConfig = toml::from_str(cfg).map_err(|e| format!("host.toml 解析失败: {e}"))?;
+    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     let mut out = Vec::with_capacity(cfg.cameras.len());
     for c in cfg.cameras {
         let fps = c.fps.unwrap_or(30);
         if fps == 0 {
-            return Err(format!("host.toml 解析失败: 相机 {} fps=0 无效（须 > 0）", c.id));
+            return Err(format!("host.yaml 解析失败: 相机 {} fps=0 无效（须 > 0）", c.id));
         }
         out.push(CameraConfig {
             id: c.id,
@@ -524,12 +524,12 @@ pub struct RecordConfig {
     pub out_dir: PathBuf,
 }
 
-/// 默认录制输出目录（host.toml [record] out_dir 可覆盖；开发缺省在 /tmp）。
+/// 默认录制输出目录（host.yaml [record] out_dir 可覆盖；开发缺省在 /tmp）。
 const DEFAULT_RECORD_DIR: &str = "/tmp/mediaservo-recordings";
 
 /// 解析录制配置（C3 recorder 用）。缺省: disabled + /tmp/mediaservo-recordings。
 pub fn record_config(cfg: &str) -> Result<RecordConfig, String> {
-    let cfg: HostConfig = toml::from_str(cfg).map_err(|e| format!("host.toml 解析失败: {e}"))?;
+    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     let rec = cfg.record.unwrap_or(RecordSection { enabled: None, out_dir: None });
     Ok(RecordConfig {
         enabled: rec.enabled.unwrap_or(false),
@@ -555,7 +555,7 @@ pub struct StreamConfig {
 
 /// 解析全部流配置（C2 streamer 用）。
 pub fn stream_configs(cfg: &str) -> Result<Vec<StreamConfig>, String> {
-    let cfg: HostConfig = toml::from_str(cfg).map_err(|e| format!("host.toml 解析失败: {e}"))?;
+    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     Ok(cfg
         .streams
         .into_iter()
@@ -607,12 +607,12 @@ mod tests {
     // 部署配置面: [signaling] server_url/psk → host-agent --remote/--psk
     #[test]
     fn oxfile_wires_remote_server_and_psk() {
-        let cfg = "[host]\ndevice_id = \"x\"\n[signaling]\nserver_url = \"ws://192.168.2.127:9800/ws\"\npsk = \"prod-psk\"\n[[cameras]]\nid = \"cam0\"\n[[streams]]\nid = \"cam0-stream\"\ncamera = \"cam0\"\n";
+        let cfg = "host:\n  device_id: \"x\"\nsignaling:\n  server_url: \"ws://192.168.2.127:9800/ws\"\n  psk: \"prod-psk\"\ncameras:\n  - id: \"cam0\"\nstreams:\n  - id: \"cam0-stream\"\n    camera: \"cam0\"\n";
         let ox = to_oxfile(cfg).unwrap();
         assert!(ox.contains("--remote ws://192.168.2.127:9800/ws"));
         assert!(ox.contains("--psk prod-psk"));
         // 未配置 → 不生成（agent 内置默认）
-        let ox2 = to_oxfile("[host]\ndevice_id = \"x\"\n[[cameras]]\nid = \"cam0\"\n[[streams]]\nid = \"cam0-stream\"\ncamera = \"cam0\"\n").unwrap();
+        let ox2 = to_oxfile("host:\n  device_id: \"x\"\ncameras:\n  - id: \"cam0\"\nstreams:\n  - id: \"cam0-stream\"\n    camera: \"cam0\"\n").unwrap();
         assert!(!ox2.contains("--remote"));
         assert!(!ox2.contains("--psk"));
     }
@@ -620,32 +620,32 @@ mod tests {
     use super::*;
 
     const CFG_V0: &str = r#"
-[[cameras]]
-id = "cam0"
-fps = 30
+cameras:
+  - id: "cam0"
+    fps: 30
 
-[[streams]]
-id = "s0"
-camera = "cam0"
+streams:
+  - id: "s0"
+    camera: "cam0"
 "#;
 
     fn write_host_toml(dir: &Path, cfg: &str) {
         let etc = dir.join("etc");
         std::fs::create_dir_all(&etc).unwrap();
-        std::fs::write(etc.join("host.toml"), cfg).unwrap();
+        std::fs::write(etc.join("host.yaml"), cfg).unwrap();
     }
 
     #[test]
     fn validate_rejects_invalid_toml() {
-        let err = validate("not toml [[[").unwrap_err();
+        let err = validate("host: \"unterminated").unwrap_err();
         assert!(err.contains("解析失败"), "{err}");
     }
 
     #[test]
     fn validate_rejects_duplicate_ids() {
-        let dup_cam = "[[cameras]]\nid = \"cam0\"\n[[cameras]]\nid = \"cam0\"\n";
+        let dup_cam = "cameras:\n  - id: \"cam0\"\n  - id: \"cam0\"\n";
         assert!(validate(dup_cam).unwrap_err().contains("重复"), "相机 id 重复必须拒绝");
-        let dup_stream = "[[streams]]\nid = \"s0\"\n[[streams]]\nid = \"s0\"\n";
+        let dup_stream = "streams:\n  - id: \"s0\"\n  - id: \"s0\"\n";
         assert!(validate(dup_stream).unwrap_err().contains("重复"), "流 id 重复必须拒绝");
     }
 
@@ -676,8 +676,8 @@ camera = "cam0"
     fn oxfile_watches_host_toml_with_cwd() {
         let dir = tempfile::tempdir().unwrap();
         let ox = to_oxfile_in_dir(CFG_V0, dir.path()).expect("to_oxfile_in_dir");
-        let expected_watch = format!("watch = [\"{}\"]", dir.path().join("etc").join("host.toml").display());
-        assert!(ox.contains(&expected_watch), "oxfile 应 watch host.toml 实现热生效: {ox}");
+        let expected_watch = format!("watch = [\"{}\"]", dir.path().join("etc").join("host.yaml").display());
+        assert!(ox.contains(&expected_watch), "oxfile 应 watch host.yaml 实现热生效: {ox}");
         assert!(ox.contains("watch_delay_secs"), "watch 应带防抖: {ox}");
         assert!(ox.contains("cwd = \""), "watch 前置要求 cwd: {ox}");
         // 无路径变体（doctor 用）不带 watch
@@ -703,7 +703,7 @@ camera = "cam0"
     #[test]
     fn oxfile_wires_signaling_room_to_agent() {
         // 配置了 room → --room 上 oxfile
-        let with_room = format!("{CFG_V0}\n[signaling]\nroom = \"ms-car7\"\n");
+        let with_room = format!("{CFG_V0}signaling:\n  room: \"ms-car7\"\n");
         let ox = to_oxfile(&with_room).expect("to_oxfile");
         let agent_line = ox.lines()
             .find(|l| l.contains("command") && l.contains("host-agent"))
@@ -731,7 +731,7 @@ camera = "cam0"
     #[test]
     fn oxfile_wires_audio_room_to_host_audio() {
         // 配置了 room → --room audio-<room>
-        let with_room = format!("{CFG_V0}\n[signaling]\nroom = \"ms-deploy-car1\"\n");
+        let with_room = format!("{CFG_V0}signaling:\n  room: \"ms-deploy-car1\"\n");
         let ox = to_oxfile(&with_room).expect("to_oxfile");
         let audio_line = ox.lines()
             .find(|l| l.contains("command") && l.contains("host-audio"))
@@ -755,15 +755,14 @@ camera = "cam0"
     fn apply_config_push_updates_host_toml_backs_up_and_regenerates_oxfile() {
         let dir = tempfile::tempdir().unwrap();
         write_host_toml(dir.path(), CFG_V0);
-        let cfg_v1 = format!("{CFG_V0}[[cameras]]\nid = \"cam1\"\nfps = 15\n");
-
+        let cfg_v1 = "cameras:\n  - id: \"cam0\"\n    fps: 30\n  - id: \"cam1\"\n    fps: 15\nstreams:\n  - id: \"s0\"\n    camera: \"cam0\"\n";
         apply_config_push(dir.path(), &cfg_v1, 7).expect("apply_config_push");
 
-        // host.toml 已更新
-        let now = std::fs::read_to_string(dir.path().join("etc").join("host.toml")).unwrap();
-        assert_eq!(now, cfg_v1, "host.toml 应为新配置");
+        // host.yaml 已更新
+        let now = std::fs::read_to_string(dir.path().join("etc").join("host.yaml")).unwrap();
+        assert_eq!(now, cfg_v1, "host.yaml 应为新配置");
         // 备份含旧配置
-        let bak = std::fs::read_to_string(dir.path().join("etc").join("host.toml.bak-7")).unwrap();
+        let bak = std::fs::read_to_string(dir.path().join("etc").join("host.yaml.bak-7")).unwrap();
         assert_eq!(bak, CFG_V0, "备份应为旧配置");
         // oxfile 重新生成（新相机实例）
         let ox = std::fs::read_to_string(dir.path().join("run").join("oxfile.toml")).unwrap();
@@ -775,15 +774,15 @@ camera = "cam0"
         let dir = tempfile::tempdir().unwrap();
         write_host_toml(dir.path(), CFG_V0);
 
-        let err = apply_config_push(dir.path(), "not toml [[[", 9).unwrap_err();
+        let err = apply_config_push(dir.path(), "host: \"unterminated", 9).unwrap_err();
         assert!(err.contains("解析失败"), "拒绝原因应含解析失败: {err}");
         assert_eq!(
-            std::fs::read_to_string(dir.path().join("etc").join("host.toml")).unwrap(),
+            std::fs::read_to_string(dir.path().join("etc").join("host.yaml")).unwrap(),
             CFG_V0,
-            "非法配置不得改写 host.toml"
+            "非法配置不得改写 host.yaml"
         );
         assert!(
-            !dir.path().join("etc").join("host.toml.bak-9").exists(),
+            !dir.path().join("etc").join("host.yaml.bak-9").exists(),
             "非法配置不得产生备份"
         );
         assert!(
@@ -806,7 +805,7 @@ camera = "cam0"
         // 单相机也带 id 后缀 — 增相机后 cam0 的 app 名不变（身份稳定）
         let ox1 = to_oxfile(CFG_V0).unwrap();
         assert!(ox1.contains("name = \"host-capturer-cam0\""), "单相机: {ox1}");
-        let v2 = format!("{CFG_V0}[[cameras]]\nid = \"cam1\"\nfps = 15\n");
+        let v2 = "cameras:\n  - id: \"cam0\"\n    fps: 30\n  - id: \"cam1\"\n    fps: 15\nstreams:\n  - id: \"s0\"\n    camera: \"cam0\"\n";
         let ox2 = to_oxfile(&v2).unwrap();
         assert!(ox2.contains("name = \"host-capturer-cam0\""), "双相机 cam0 名不变: {ox2}");
         assert!(ox2.contains("name = \"host-capturer-cam1\""), "双相机 cam1 入 oxfile: {ox2}");
@@ -816,17 +815,17 @@ camera = "cam0"
     fn validate_rejects_non_alnum_camera_and_stream_ids() {
         // F2: TOML 合法但含引号/换行/路径穿越的 id → oxfile 畸形（push_app 未转义）
         // 或令牌路径投毒 → 必须拒绝（仅允许 [A-Za-z0-9_-]+）
-        let quote_cam = "[[cameras]]\nid = \"cam\\\"0\"\n";
+        let quote_cam = "cameras:\n  - id: \"cam\\\"0\"\n";
         let err = validate(quote_cam).unwrap_err();
         assert!(err.contains("非法"), "引号相机 id 必须拒绝: {err}");
-        let path_cam = "[[cameras]]\nid = \"../evil\"\n";
+        let path_cam = "cameras:\n  - id: \"../evil\"\n";
         assert!(validate(path_cam).unwrap_err().contains("非法"), "路径穿越相机 id 必须拒绝");
-        let newline_cam = "[[cameras]]\nid = \"cam0\\n1\"\n";
+        let newline_cam = "cameras:\n  - id: \"cam0\\n1\"\n";
         assert!(validate(newline_cam).unwrap_err().contains("非法"), "换行相机 id 必须拒绝");
-        let quote_stream = "[[streams]]\nid = \"s\\\"0\"\n";
+        let quote_stream = "streams:\n  - id: \"s\\\"0\"\n";
         assert!(validate(quote_stream).unwrap_err().contains("非法"), "引号流 id 必须拒绝");
         // 正常 id（字母数字 + 连字符/下划线）通过
-        validate("[[cameras]]\nid = \"cam-A_1\"\n[[streams]]\nid = \"s-2_0\"\n")
+        validate("cameras:\n  - id: \"cam-A_1\"\nstreams:\n  - id: \"s-2_0\"\n")
             .expect("合法字符 id 应通过");
     }
 
@@ -836,8 +835,8 @@ camera = "cam0"
         // 恢复（备份文件取最大版本），不得归零
         let dir = tempfile::tempdir().unwrap();
         write_host_toml(dir.path(), CFG_V0);
-        let v7 = format!("{CFG_V0}[[cameras]]\nid = \"cam1\"\nfps = 15\n");
-        let v10 = format!("{CFG_V0}[[cameras]]\nid = \"cam1\"\nfps = 15\n[[cameras]]\nid = \"cam2\"\nfps = 30\n");
+        let v7 = "cameras:\n  - id: \"cam0\"\n    fps: 30\n  - id: \"cam1\"\n    fps: 15\nstreams:\n  - id: \"s0\"\n    camera: \"cam0\"\n";
+        let v10 = "cameras:\n  - id: \"cam0\"\n    fps: 30\n  - id: \"cam1\"\n    fps: 15\n  - id: \"cam2\"\n    fps: 30\nstreams:\n  - id: \"s0\"\n    camera: \"cam0\"\n";
         apply_config_push(dir.path(), &v7, 7).unwrap();
         apply_config_push(dir.path(), &v10, 10).unwrap();
         assert_eq!(recover_config_version(dir.path()), 10, "重启后应从备份恢复最大版本");
@@ -864,11 +863,11 @@ camera = "cam0"
         let stale = handle_config_push(dir.path(), 7, &push(6)).unwrap_err();
         assert!(stale.contains("已过期"), "旧版本必须拒绝: {stale}");
         assert_eq!(handle_config_push(dir.path(), 7, &push(8)).unwrap(), 8, "新版本应接受");
-        // 拒绝不得改写文件（重复推 v7 后 host.toml 仍为初始配置）
+        // 拒绝不得改写文件（重复推 v7 后 host.yaml 仍为初始配置）
         assert_eq!(
-            std::fs::read_to_string(dir.path().join("etc").join("host.toml")).unwrap(),
+            std::fs::read_to_string(dir.path().join("etc").join("host.yaml")).unwrap(),
             CFG_V0,
-            "拒绝不得改写 host.toml"
+            "拒绝不得改写 host.yaml"
         );
     }
 }

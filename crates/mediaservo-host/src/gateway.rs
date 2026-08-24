@@ -72,7 +72,7 @@ impl Default for GatewayConfig {
             remote_url: "ws://127.0.0.1:9800/ws".into(),
             psk: "mediaservo-dev".into(),
             device: None,
-            // I1 review (D3 TODO 关闭): 整车房间由 host.toml [signaling] room 配置 —
+            // I1 review (D3 TODO 关闭): 整车房间由 host.yaml [signaling] room 配置 —
             // translate 转译为 agent --room；此处为 CLI 缺省（host-agent 内置默认）。
             room: "vehicle".into(),
             retry: RetryConfig::default(),
@@ -80,7 +80,7 @@ impl Default for GatewayConfig {
     }
 }
 
-/// 默认本地端口（host.toml [signaling] local_port 可覆盖，translate 传 --port）。
+/// 默认本地端口（host.yaml [signaling] local_port 可覆盖，translate 传 --port）。
 pub const DEFAULT_LOCAL_PORT: u16 = 17980;
 /// 网关未连上远端 server 时对子进程的应答码（子进程可重试）。
 const ERR_GATEWAY_DISCONNECTED: u16 = 5001;
