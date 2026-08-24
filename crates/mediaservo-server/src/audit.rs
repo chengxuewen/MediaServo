@@ -47,6 +47,12 @@ pub enum AuditEvent {
     DeviceRevoked { device_id: String, actor: String },
     /// 管理面设备密钥重置（unified-device-admin）。
     DeviceSecretReset { device_id: String, actor: String },
+    /// 管理面账号创建（unified-device-admin）— actor = 管理员账号。
+    AccountCreated { username: String, actor: String, role: String },
+    /// 管理面账号更新（unified-device-admin）。
+    AccountUpdated { username: String, actor: String },
+    /// 管理面账号删除（unified-device-admin）。
+    AccountDeleted { username: String, actor: String },
     /// G3 授权拒绝（C15: 所有 denial 必须打日志 + 审计）。
     /// action: room_join|consume|produce|config_push|emergency。
     AuthorizationDenied { action: String, peer_id: String, detail: String },
@@ -199,6 +205,31 @@ pub fn log_event(event: AuditEvent) {
                 device_id = %device_id,
                 actor = %actor,
                 "Device secret reset by admin"
+            );
+        }
+        AuditEvent::AccountCreated { username, actor, role } => {
+            tracing::info!(
+                audit.event = "account_created",
+                username = %username,
+                actor = %actor,
+                role = %role,
+                "Account created by admin"
+            );
+        }
+        AuditEvent::AccountUpdated { username, actor } => {
+            tracing::info!(
+                audit.event = "account_updated",
+                username = %username,
+                actor = %actor,
+                "Account updated by admin"
+            );
+        }
+        AuditEvent::AccountDeleted { username, actor } => {
+            tracing::warn!(
+                audit.event = "account_deleted",
+                username = %username,
+                actor = %actor,
+                "Account deleted by admin"
             );
         }
     }

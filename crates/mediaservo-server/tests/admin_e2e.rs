@@ -37,6 +37,7 @@ async fn make_state() -> AdminState {
         room_capacity: 10,
         consumer_limit_per_stream: 50,
         accounts: Arc::new(AccountRegistry::empty()),
+        accounts_path: "/tmp/mediaservo-e2e-test-accounts.yaml".into(),
         device_registry: std::sync::Arc::new(mediaservo_server::devices::DeviceRegistry::empty()),
         devices_path: "/tmp/mediaservo-e2e-test-devices.yaml".into(),
         sfu_manager: sfu,
@@ -56,6 +57,7 @@ async fn make_state() -> AdminState {
         room_capacity: 10,
         consumer_limit_per_stream: 50,
         accounts: Arc::new(AccountRegistry::empty()),
+        accounts_path: "/tmp/mediaservo-e2e-test-accounts.yaml".into(),
         device_registry: std::sync::Arc::new(mediaservo_server::devices::DeviceRegistry::empty()),
         devices_path: "/tmp/mediaservo-e2e-test-devices.yaml".into(),
     }

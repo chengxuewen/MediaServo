@@ -37,6 +37,8 @@ pub struct AdminState {
     pub device_registry: std::sync::Arc<DeviceRegistry>,
     /// devices.yaml 绝对路径（管理写回用，main.rs 装配）。
     pub devices_path: String,
+    /// accounts.yaml 绝对路径（账号管理写回用，main.rs 装配）。
+    pub accounts_path: String,
     #[cfg(feature = "sfu-mediasoup")]
     pub sfu_manager: Arc<crate::sfu::SfuManager>,
 }
@@ -90,6 +92,11 @@ pub fn admin_router(state: AdminState) -> Router {
         .route(
             "/api/admin/devices/:device_id/reset-secret",
             axum::routing::post(reset_device_secret),
+        )
+        .route("/api/admin/accounts", get(list_accounts).post(create_account))
+        .route(
+            "/api/admin/accounts/:username",
+            axum::routing::put(update_account).delete(delete_account),
         )
         .route("/api/admin/events", get(ws_events));
     // H3: SFU 管理端点（仅 sfu-mediasoup 构建存在 — 原生构建无 SfuManager）。
@@ -370,6 +377,147 @@ async fn reset_device_secret(
             "note": "secret 仅此一次明文展示",
         })),
     ))
+}
+
+// ── Accounts admin (unified-device-admin) ────────────────────────────────
+// 账号注册表管理（G3 accounts.yaml 热生效; dispatcher 只读 GET 由 auth_middleware 保证）。
+
+#[derive(Debug, Deserialize)]
+pub struct CreateAccountRequest {
+    pub username: String,
+    pub password: String,
+    pub role: String,
+    #[serde(default)]
+    pub vehicles: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateAccountRequest {
+    pub role: Option<String>,
+    #[serde(default)]
+    pub vehicles: Option<Vec<String>>,
+    #[serde(default)]
+    pub new_password: Option<String>,
+}
+
+/// GET /api/admin/accounts — 账号清单（不含密码哈希）。
+async fn list_accounts(State(state): State<AdminState>) -> Json<serde_json::Value> {
+    let accounts = state.accounts.list_accounts();
+    let count = accounts.len();
+    Json(serde_json::json!({ "accounts": accounts, "count": count }))
+}
+
+/// POST /api/admin/accounts — 创建账号（admin 专属）。
+async fn create_account(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    axum::Json(req): axum::Json<CreateAccountRequest>,
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<ErrorResponse>)> {
+    if req.username.is_empty() || req.username.len() > 64 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "invalid username: 1-64 chars".into() }),
+        ));
+    }
+    state
+        .accounts
+        .create_account(&req.username, &req.password, &req.role, &req.vehicles)
+        .map_err(map_account_reg_error)?;
+    if let Err(e) = state.accounts.save(&state.accounts_path) {
+        tracing::error!("account {} create: write failed, rolling back: {e}", req.username);
+        let _ = state.accounts.delete_account(&req.username);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: format!("accounts file write failed: {e}") }),
+        ));
+    }
+    crate::audit::log_event(crate::audit::AuditEvent::AccountCreated {
+        username: req.username.clone(),
+        actor: claims.sub.clone(),
+        role: req.role.clone(),
+    });
+    Ok((StatusCode::CREATED, Json(serde_json::json!({ "created": req.username }))))
+}
+
+/// PUT /api/admin/accounts/{username} — 更新角色/车辆白名单/密码（admin 专属）。
+async fn update_account(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    Path(username): Path<String>,
+    axum::Json(req): axum::Json<UpdateAccountRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    state
+        .accounts
+        .update_account(
+            &username,
+            req.role.as_deref(),
+            req.vehicles.as_deref(),
+            req.new_password.as_deref(),
+        )
+        .map_err(map_account_reg_error)?;
+    if let Err(e) = state.accounts.save(&state.accounts_path) {
+        // 无快照回滚 — 内存新值/磁盘旧值: 错误消息注明偏差（同 devices reset-secret）。
+        tracing::error!("account {username} update: write failed, memory/disk diverge: {e}");
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("accounts file write failed (registry may diverge): {e}"),
+            }),
+        ));
+    }
+    crate::audit::log_event(crate::audit::AuditEvent::AccountUpdated {
+        username: username.clone(),
+        actor: claims.sub,
+    });
+    Ok(Json(serde_json::json!({ "updated": username })))
+}
+
+/// DELETE /api/admin/accounts/{username} — 删除账号（admin 专属）。
+async fn delete_account(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    Path(username): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    if username == claims.sub {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "cannot delete the account you are logged in as".into() }),
+        ));
+    }
+    state.accounts.delete_account(&username).map_err(map_account_reg_error)?;
+    if let Err(e) = state.accounts.save(&state.accounts_path) {
+        tracing::error!("account {username} delete: write failed: {e}");
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: format!("accounts file write failed: {e}") }),
+        ));
+    }
+    crate::audit::log_event(crate::audit::AuditEvent::AccountDeleted {
+        username: username.clone(),
+        actor: claims.sub,
+    });
+    Ok(Json(serde_json::json!({ "deleted": username })))
+}
+
+/// AccountRegError → HTTP 状态映射（C15: 每分支可读错误）。
+fn map_account_reg_error(e: crate::accounts::AccountRegError) -> (StatusCode, Json<ErrorResponse>) {
+    match e {
+        crate::accounts::AccountRegError::Duplicate => {
+            (StatusCode::CONFLICT, Json(ErrorResponse { error: "account already exists".into() }))
+        }
+        crate::accounts::AccountRegError::Unknown => {
+            (StatusCode::NOT_FOUND, Json(ErrorResponse { error: "account not found".into() }))
+        }
+        crate::accounts::AccountRegError::InvalidRole(role) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("invalid role {role:?}: want viewer|operator|admin|dispatcher"),
+            }),
+        ),
+        crate::accounts::AccountRegError::InvalidVehicles(msg) => {
+            (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: msg }))
+        }
+    }
 }
 
 // ── Auth helper ─────────────────────────────────────────────────────────────
@@ -850,6 +998,7 @@ mod tests {
             room_capacity: 10,
             consumer_limit_per_stream: 50,
             accounts: Arc::new(AccountRegistry::empty()),
+            accounts_path: "/tmp/mediaservo-test-accounts.yaml".into(),
             device_registry: Arc::new(DeviceRegistry::empty()),
             devices_path: "/tmp/mediaservo-test-devices.yaml".into(),
             sfu_manager: sfu,
@@ -869,6 +1018,7 @@ mod tests {
             room_capacity: 10,
             consumer_limit_per_stream: 50,
             accounts: Arc::new(AccountRegistry::empty()),
+            accounts_path: "/tmp/mediaservo-test-accounts.yaml".into(),
             device_registry: Arc::new(DeviceRegistry::empty()),
             devices_path: "/tmp/mediaservo-test-devices.yaml".into(),
         }
