@@ -20,9 +20,10 @@ use tokio_tungstenite::WebSocketStream;
 const VEHICLE_ROOM: &str = "vehicle-1";
 const VEHICLE_PEER: &str = "veh-peer";
 const HOST_TOML: &str = r#"
-[[cameras]]
-id = "cam0"
-fps = 30
+sources:
+  - id: "cam0"
+    mode: "generator"
+    fps: 30
 "#;
 
 /// mock server 完整握手（对齐 link::SignalClient 协议流程）。
@@ -96,7 +97,7 @@ async fn status_report_reaches_mock_server_with_expected_content() {
                 );
                 assert!(
                     processes.iter().any(|p| p.name == "host-capturer-cam0" && p.expected),
-                    "host.toml 相机实例应在期望并集中（单相机无 id 后缀）: {processes:?}"
+                    "host.yaml 视频源实例应在期望并集中（单源无 id 后缀）: {processes:?}"
                 );
                 assert!(signal.remote_connected, "网关已入房, remote 应 connected");
                 assert_eq!(signal.remote_peer_id, VEHICLE_PEER, "peer_id 应来自 RoomJoined");

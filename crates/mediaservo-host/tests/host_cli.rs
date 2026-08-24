@@ -16,7 +16,7 @@ fn host_no_args_prints_usage_exits_0() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("用法: host"),
+        stdout.contains("用法: mediaservo-host"),
         "stdout 应含用法: {stdout}"
     );
 }
@@ -32,7 +32,7 @@ fn host_help_flag_exits_0() {
         );
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(
-            stdout.contains("用法: host"),
+            stdout.contains("用法: mediaservo-host"),
             "host {flag} stdout 应含用法: {stdout}"
         );
         let stderr = String::from_utf8_lossy(&out.stderr);

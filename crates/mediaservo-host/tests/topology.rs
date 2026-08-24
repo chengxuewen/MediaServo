@@ -1,15 +1,15 @@
 //! Task E1: 拓扑监控单元测试（monitor/topology.rs）。
 //!
-//! 期望态（host.toml 声明）vs 实际态（oxmgr list 进程 + FrameBus 发布者枚举）
+//! 期望态（host.yaml 声明）vs 实际态（oxmgr list 进程 + FrameBus 发布者枚举）
 //! → diff 报告 + grace period 抑制启动窗口。纯单元测试，不依赖 oxmgr daemon/
 //! iceoryx2 运行时（发现数据源本身在 mediaservo-link tests/discovery.rs 覆盖）。
 
 use mediaservo_host::monitor::topology::{diff, parse_oxmgr_json, Mismatch, OxProcess, TopologyMonitor};
 use mediaservo_link::FrameTopic;
 
-/// 3 capturer + 1 streamer + [record] 的典型 host.toml。
+/// 3 source + 1 streamer + [record] 的典型 host.yaml。
 fn sample_cfg() -> &'static str {
-    "[[cameras]]\nid = \"cam0\"\n[[cameras]]\nid = \"cam1\"\n[[cameras]]\nid = \"cam2\"\n[[streams]]\nid = \"s0\"\ncamera = \"cam0\"\n"
+    "sources:\n  - id: \"cam0\"\n  - id: \"cam1\"\n  - id: \"cam2\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n"
 }
 
 #[test]
@@ -32,11 +32,11 @@ fn expected_process_names_covers_fixed_and_instances() {
 fn expected_processes_include_recorder_only_when_record_enabled() {
     // E1 审查: [record] enabled=false（缺省）→ host-recorder 按设计 exit 0 且 oxmgr
     // on_failure 不重启 → 不列入期望，否则默认配置永久 ProcessMissing 误报。
-    let disabled = "[[cameras]]\nid = \"cam0\"\n[record]\nenabled = false\n";
+    let disabled = "sources:\n  - id: \"cam0\"\nrecord:\n  enabled: false\n";
     let names = mediaservo_host::translate::expected_process_names(disabled).unwrap();
     assert!(!names.contains(&"host-recorder".to_string()), "enabled=false 不应期望 recorder: {names:?}");
 
-    let enabled = "[[cameras]]\nid = \"cam0\"\n[record]\nenabled = true\nout_dir = \"/tmp/x\"\n";
+    let enabled = "sources:\n  - id: \"cam0\"\nrecord:\n  enabled: true\n  out_dir: \"/tmp/x\"\n";
     let names = mediaservo_host::translate::expected_process_names(enabled).unwrap();
     assert!(names.contains(&"host-recorder".to_string()), "enabled=true 应期望 recorder: {names:?}");
 }

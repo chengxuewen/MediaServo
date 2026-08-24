@@ -1,6 +1,6 @@
 //! Multiprocess 骨架测试（Task A1）：9 个 bin 声明 + 占位进程生命周期。
 //!
-//! - all_bins_declared: Cargo.toml 必须声明 host / host-agent / host-capturer /
+//! - all_bins_declared: Cargo.toml 必须声明 mediaservo-host / host-agent / host-capturer /
 //!   host-streamer / host-recorder / host-controller / host-emergency / host-audio / host-legacy
 //! - placeholder_blocks_and_exits_on_signal: host-agent 网关就绪 →
 //!   阻塞存活 → SIGTERM → 退出码 0
@@ -14,12 +14,12 @@ use std::time::Duration;
 
 #[test]
 fn all_bins_declared() {
-    // 读取 Cargo.toml [[bin]] 段：必须含 host, host-agent, host-capturer,
+    // 读取 Cargo.toml [[bin]] 段：必须含 mediaservo-host, host-agent, host-capturer,
     // host-streamer, host-recorder, host-controller, host-emergency, host-audio, host-legacy
     let manifest =
         std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
     for bin in [
-        "host",
+        "mediaservo-host",
         "host-agent",
         "host-capturer",
         "host-streamer",

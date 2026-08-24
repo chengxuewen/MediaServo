@@ -50,7 +50,7 @@ async fn flow_stats_from_simulated_publisher() {
     cleanup_iceoryx();
     let pid = std::process::id();
     let cam_id = format!("e2flow-{pid}");
-    let host_toml = format!("[[cameras]]\nid = \"{cam_id}\"\nsource = \"stub\"\nfps = 30\n");
+    let host_toml = format!("sources:\n  - id: \"{cam_id}\"\n    mode: \"generator\"\n    fps: 30\n");
 
     // monitor attach（Monitor 角色 → camera/* + stats/* 订阅）
     let (mon_tok, mon_vk) = token(Role::Monitor, &format!("monitor-{pid}"));
@@ -119,7 +119,7 @@ async fn streamer_stats_ingestion() {
     let pid = std::process::id();
     let stream_id = format!("s{pid}");
     let host_toml = format!(
-        "[[streams]]\nid = \"{stream_id}\"\ncamera = \"cam0\"\ncodec = \"vp8\"\n"
+        "streams:\n  - id: \"{stream_id}\"\n    source: \"cam0\"\n    codec: \"vp8\"\n"
     );
 
     let (mon_tok, mon_vk) = token(Role::Monitor, &format!("monitor-{pid}"));
@@ -172,9 +172,9 @@ async fn real_capturer_flow_then_stall() {
     let pid = std::process::id();
     let cam_id = format!("e2cap-{pid}");
     let dir = tempfile::tempdir().expect("tempdir");
-    let host_toml = format!("[[cameras]]\nid = \"{cam_id}\"\nsource = \"stub\"\nfps = 30\n");
-    let cfg_path = dir.path().join("host.toml");
-    std::fs::write(&cfg_path, &host_toml).expect("write host.toml");
+    let host_toml = format!("sources:\n  - id: \"{cam_id}\"\n    mode: \"generator\"\n    fps: 30\n");
+    let cfg_path = dir.path().join("host.yaml");
+    std::fs::write(&cfg_path, &host_toml).expect("write host.yaml");
 
     // capturer 令牌文件（Capture 角色）
     let (cap_tok, cap_vk) = token(Role::Capture, &format!("capture-{pid}"));

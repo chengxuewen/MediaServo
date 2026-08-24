@@ -68,12 +68,12 @@ fn bad_args_exit_2_with_usage() {
 #[test]
 fn record_disabled_exits_0() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let cfg_path = dir.path().join("host.toml");
+    let cfg_path = dir.path().join("host.yaml");
     std::fs::write(
         &cfg_path,
-        "[[cameras]]\nid = \"cam0\"\n[record]\nenabled = false\n",
+        "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\nrecord:\n  enabled: false\n",
     )
-    .expect("write host.toml");
+    .expect("write host.yaml");
     // 门控先于令牌读取 — 禁用时凭据无效也应 exit 0（garbage token 验证顺序）
     let tok_path = dir.path().join("garbage.token");
     std::fs::write(&tok_path, b"garbage").expect("write token");
@@ -140,17 +140,17 @@ async fn recorder_writes_mp4_from_capturer_frames() {
     let pid = std::process::id();
     let out_dir = dir.path().join("recordings");
 
-    // host.toml: cam0 stub 30fps + [record] enabled + 测试专用 out_dir
-    let cfg_path = dir.path().join("host.toml");
+    // host.yaml: cam0 generator 30fps + [record] enabled + 测试专用 out_dir
+    let cfg_path = dir.path().join("host.yaml");
     std::fs::write(
         &cfg_path,
         format!(
-            "[[cameras]]\nid = \"cam0\"\nsource = \"stub\"\nfps = 30\n\
-             [record]\nenabled = true\nout_dir = \"{}\"\n",
+            "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\n\
+             record:\n  enabled: true\n  out_dir: \"{}\"\n",
             out_dir.display()
         ),
     )
-    .expect("write host.toml");
+    .expect("write host.yaml");
 
     // 令牌: capturer=Capture（发布 camera/*），recorder=Recorder（订阅 camera/*）
     let (cap_tok, cap_vk) = token(Role::Capture, &format!("capture-{pid}"));
@@ -239,16 +239,16 @@ async fn recorder_survives_missing_capturer_and_resumes() {
     let pid = std::process::id();
     let out_dir = dir.path().join("recordings");
 
-    let cfg_path = dir.path().join("host.toml");
+    let cfg_path = dir.path().join("host.yaml");
     std::fs::write(
         &cfg_path,
         format!(
-            "[[cameras]]\nid = \"cam0\"\nsource = \"stub\"\nfps = 30\n\
-             [record]\nenabled = true\nout_dir = \"{}\"\n",
+            "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\n\
+             record:\n  enabled: true\n  out_dir: \"{}\"\n",
             out_dir.display()
         ),
     )
-    .expect("write host.toml");
+    .expect("write host.yaml");
 
     // recorder 先起（capturer 缺席）
     let (rec_tok, rec_vk) = token(Role::Recorder, &format!("recorder-{pid}"));

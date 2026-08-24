@@ -361,12 +361,12 @@ async fn vision_dc_transport_b_forwards_external_publisher() {
     let stream_id = format!("s{pid}-stream");
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let cfg_path = dir.path().join("host.toml");
+    let cfg_path = dir.path().join("host.yaml");
     std::fs::write(
         &cfg_path,
         format!(
-            "[[cameras]]\nid = \"{cam_id}\"\nsource = \"stub\"\nfps = 30\n\
-             [[streams]]\nid = \"{stream_id}\"\ncamera = \"{cam_id}\"\ncodec = \"vp8\"\n"
+            "sources:\n  - id: \"{cam_id}\"\n    mode: \"generator\"\n    fps: 30\n\
+             streams:\n  - id: \"{stream_id}\"\n    source: \"{cam_id}\"\n    codec: \"vp8\"\n"
         ),
     )
     .expect("write host.toml");

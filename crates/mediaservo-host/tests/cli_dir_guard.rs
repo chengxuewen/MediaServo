@@ -59,7 +59,7 @@ fn token_issue_rejects_dashdash_dir() {
 
 #[test]
 fn start_accepts_positional_dir() {
-    // 位置参数被接受 → 进入命令逻辑（无 host.toml → exit 1），而非参数解析失败 exit 2
+    // 位置参数被接受 → 进入命令逻辑（无 host.yaml → exit 1），而非参数解析失败 exit 2
     let dir = tempfile::tempdir().expect("tempdir");
     let out = host().arg("start").arg(dir.path()).output().expect("spawn host start");
     assert_eq!(
@@ -69,7 +69,7 @@ fn start_accepts_positional_dir() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("host.toml"), "应报缺 host.toml, got: {stderr}");
+    assert!(stderr.contains("host.yaml"), "应报缺 host.yaml, got: {stderr}");
 }
 
 #[test]
@@ -80,8 +80,8 @@ fn init_defaults_to_hidden_host_dir() {
     let out = host().current_dir(cwd.path()).arg("init").output().expect("spawn host init");
     assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     assert!(
-        cwd.path().join(".host/etc/host.toml").is_file(),
-        ".host/etc/host.toml 应已生成（缺省 .host/），cwd 内容: {:?}",
+        cwd.path().join(".host/etc/host.yaml").is_file(),
+        ".host/etc/host.yaml 应已生成（缺省 .host/），cwd 内容: {:?}",
         std::fs::read_dir(cwd.path()).map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>()).unwrap_or_default()
     );
     assert!(

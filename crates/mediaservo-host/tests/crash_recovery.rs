@@ -58,9 +58,22 @@ fn path_with_oxmgr() -> String {
 }
 
 /// `oxmgr list --json` → host 命名空间进程列表（name/status/pid）。
-fn oxmgr_host_procs() -> Vec<(String, String, u64)> {
+
+/// oxmgr 实例 daemon env（与 translate::oxmgr_apply 同源: OXMGR_HOME 派生端口隔离
+/// daemon——`oxmgr list` 不带此 env 会连默认 daemon（空），看不到实例进程）。
+fn oxmgr_env(dir: &std::path::Path) -> Vec<(String, String)> {
+    let home = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).join("run").join("oxmgr");
+    let sum: u32 = home.to_string_lossy().bytes().map(u32::from).sum();
+    let port = 18000 + (sum % 400);
+    vec![
+        ("OXMGR_HOME".to_string(), home.to_string_lossy().into_owned()),
+        ("OXMGR_DAEMON_ADDR".to_string(), format!("127.0.0.1:{port}")),
+        ("OXMGR_API_ADDR".to_string(), format!("127.0.0.1:{}", port + 1000)),
+    ]
+}fn oxmgr_host_procs(dir: &std::path::Path) -> Vec<(String, String, u64)> {
     let out = Command::new("oxmgr")
         .env("PATH", path_with_oxmgr())
+        .envs(oxmgr_env(dir))
         .args(["list", "--json"])
         .output()
         .expect("oxmgr list");
@@ -74,7 +87,7 @@ fn oxmgr_host_procs() -> Vec<(String, String, u64)> {
         .as_array()
         .expect("oxmgr list 应为数组")
         .iter()
-        .filter(|p| p.get("namespace").and_then(|n| n.as_str()) == Some("host"))
+        .filter(|p| p.get("namespace").and_then(|n| n.as_str()) == Some("mediaservo-host"))
         .map(|p| {
             let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("?").to_string();
             let status = p.get("status").and_then(|v| v.as_str()).unwrap_or("?").to_string();
@@ -85,15 +98,17 @@ fn oxmgr_host_procs() -> Vec<(String, String, u64)> {
 }
 
 /// 测试起点幂等: 清掉上次崩溃运行可能残留的 host 进程（stop+delete 按名）。
-fn cleanup_oxmgr_host() {
-    let names: Vec<String> = oxmgr_host_procs().into_iter().map(|(n, _, _)| n).collect();
+fn cleanup_oxmgr_host(dir: &std::path::Path) {
+    let names: Vec<String> = oxmgr_host_procs(dir).into_iter().map(|(n, _, _)| n).collect();
     for name in names {
         let _ = Command::new("oxmgr")
             .env("PATH", path_with_oxmgr())
+            .envs(oxmgr_env(dir))
             .args(["stop", &name])
             .status();
         let _ = Command::new("oxmgr")
             .env("PATH", path_with_oxmgr())
+            .envs(oxmgr_env(dir))
             .args(["delete", &name])
             .status();
     }
@@ -127,16 +142,16 @@ impl Drop for OxmgrGuard {
     }
 }
 
-/// 等待 host.toml 出现（host init 生成后立即改写）。
+/// 等待 host.yaml 出现（host init 生成后立即改写）。
 fn write_host_toml(dir: &Path) {
     // recorder 驻留（[record] enabled + out_dir 于实例内）→ 真实长生命周期订阅端
     // （host-recorder 设计上跨发布端崩溃续录）；capturer 崩溃重启期间 recorder
     // 必须全程存活（pid 不变）且同句柄恢复收帧。
     let cfg = format!(
-        "[[cameras]]\nid = \"cam0\"\nsource = \"stub\"\nfps = 30\n\n[record]\nenabled = true\nout_dir = \"{}\"\n",
+        "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\nrecord:\n  enabled: true\n  out_dir: \"{}\"\n",
         dir.join("recordings").display()
     );
-    std::fs::write(dir.join("etc").join("host.toml"), cfg).expect("write host.toml");
+    std::fs::write(dir.join("etc").join("host.yaml"), cfg).expect("write host.yaml");
 }
 
 /// 等订阅端收到 ≥n 帧，返回期间看到的最大 seq。
@@ -170,13 +185,13 @@ async fn wait_frames(stream: &mediaservo_link::FrameStream, n: u32, timeout: Dur
 #[tokio::test]
 async fn capturer_kill9_restart_resumes_frames_to_subscribers() {
     cleanup_iceoryx();
-    cleanup_oxmgr_host();
     // 测试进程内启用 tracing，使 FrameBus 订阅线程的 receive 错误可见（调试用）
     mediaservo_common::logging::init(mediaservo_common::logging::LoggingConfig::default());
     let dir = tempfile::tempdir().expect("tempdir");
     let dir_path = dir.path().to_path_buf();
+    cleanup_oxmgr_host(&dir_path);
 
-    // ① host init（位置参数形态）+ 改写 host.toml（cam0 + record enabled, 无 streams
+    // ① host init（位置参数形态）+ 改写 host.yaml（cam0 + record enabled, 无 streams
     //    —— streamer 需外部 SFU server，C2/C4 覆盖） + 签发令牌
     assert_eq!(host_cli(&["init", dir_path.to_str().expect("dir utf8")]), 0);
     write_host_toml(&dir_path);
@@ -218,7 +233,7 @@ async fn capturer_kill9_restart_resumes_frames_to_subscribers() {
     // ③ host start（translate → run/oxfile.toml → oxmgr apply）→ 全部进程 running
     assert_eq!(host_cli(&["start", dir_path.to_str().expect("dir utf8")]), 0);
     let mut guard = OxmgrGuard { dir: dir_path.clone(), done: false };
-    let procs = oxmgr_host_procs();
+    let procs = oxmgr_host_procs(&dir_path);
     assert_eq!(procs.len(), 6, "预期 6 进程 (5 fixed + capturer), got: {procs:?}");
     let capturer_pid = procs
         .iter()
@@ -265,7 +280,7 @@ async fn capturer_kill9_restart_resumes_frames_to_subscribers() {
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     while std::time::Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(500));
-        let cur = oxmgr_host_procs()
+        let cur = oxmgr_host_procs(&dir_path)
             .into_iter()
             .find(|(n, _, _)| n == "host-capturer-cam0")
             .map(|(_, s, pid)| (s, pid))
@@ -313,7 +328,7 @@ async fn capturer_kill9_restart_resumes_frames_to_subscribers() {
 
     // ⑦ 崩溃隔离: recorder 全程存活（pid 不变 + running）— 无 crash-loop（仅 recorder 驻留时）
     if recorder_running {
-        let recorder_now = oxmgr_host_procs()
+        let recorder_now = oxmgr_host_procs(&dir_path)
             .into_iter()
             .find(|(n, _, _)| n == "host-recorder")
             .expect("recorder 仍在 oxmgr 中");
@@ -329,6 +344,6 @@ async fn capturer_kill9_restart_resumes_frames_to_subscribers() {
     // ⑧ 清理: host stop（oxmgr stop + delete）→ host 命名空间清空
     assert_eq!(host_cli(&["stop", dir_path.to_str().expect("dir utf8")]), 0);
     guard.done = true;
-    let remaining = oxmgr_host_procs();
+    let remaining = oxmgr_host_procs(&dir_path);
     assert!(remaining.is_empty(), "stop 后应无 host 进程: {remaining:?}");
 }

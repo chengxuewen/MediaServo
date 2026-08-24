@@ -1,6 +1,6 @@
 //! `host doctor` 子命令测试（Task A3）。
 //!
-//! 断言三检查（oxmgr 可用 / host.toml 可解析 / oxfile 可生成）与
+//! 断言三检查（oxmgr 可用 / host.yaml 可解析 / oxfile 可生成）与
 //! 退出码 = 失败检查数的语义。环境无关性：oxmgr 是否在 PATH 由测试探测，
 //! 期望退出码按探测结果推导（CI 无 oxmgr 也成立）。
 
@@ -38,7 +38,7 @@ fn doctor_healthy_dir_checks_pass() {
         return;
     }
     let dir = tmp_dir("healthy");
-    std::fs::write(dir.join("etc").join("host.toml"), "[host]\ndevice_id = \"car-01\"\n")
+    std::fs::write(dir.join("etc").join("host.yaml"), "host:\n  device_id: \"car-01\"\n")
         .unwrap();
     let out = run_doctor(&dir);
     assert!(
@@ -49,16 +49,16 @@ fn doctor_healthy_dir_checks_pass() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    for needle in ["[ok] oxmgr", "[ok] host.toml", "[ok] oxfile"] {
+    for needle in ["[ok] oxmgr", "[ok] host.yaml", "[ok] oxfile"] {
         assert!(stdout.contains(needle), "stdout 缺 {needle}:\n{stdout}");
     }
 }
 
 #[test]
 fn doctor_broken_config_counts_failures() {
-    // 语法损坏的 host.toml：检查 ②③ 恒定失败 → 退出码 = 2 + (oxmgr 缺失 ? 1 : 0)。
+    // 语法损坏的 host.yaml：检查 ②③ 恒定失败 → 退出码 = 2 + (oxmgr 缺失 ? 1 : 0)。
     let dir = tmp_dir("broken");
-    std::fs::write(dir.join("etc").join("host.toml"), "[host\nbroken toml").unwrap();
+    std::fs::write(dir.join("etc").join("host.yaml"), "[host\nbroken yaml").unwrap();
     let out = run_doctor(&dir);
     let expected = if oxmgr_present() { 2 } else { 3 };
     assert_eq!(
@@ -70,15 +70,15 @@ fn doctor_broken_config_counts_failures() {
     );
     // 输出必须逐检查标记失败原因（旧二进制无 doctor 子命令时此断言失败）
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("[fail] host.toml"), "stdout 缺 host.toml 失败标记:\n{stdout}");
+    assert!(stdout.contains("[fail] host.yaml"), "stdout 缺 host.yaml 失败标记:\n{stdout}");
     assert!(stdout.contains("[fail] oxfile"), "stdout 缺 oxfile 失败标记:\n{stdout}");
 }
 
 #[test]
 fn doctor_missing_config_counts_both_config_failures() {
-    // 空 etc/（无 host.toml）：检查 ②③ 均失败且各有一条 [fail] 标记 →
+    // 空 etc/（无 host.yaml）：检查 ②③ 均失败且各有一条 [fail] 标记 →
     // 退出码 = 2 + (oxmgr 缺失 ? 1 : 0)，与打印的失败数一致。
-    let dir = tmp_dir("missing"); // tmp_dir 只建 etc/，不写 host.toml
+    let dir = tmp_dir("missing"); // tmp_dir 只建 etc/，不写 host.yaml
     let out = run_doctor(&dir);
     let expected = if oxmgr_present() { 2 } else { 3 };
     assert_eq!(

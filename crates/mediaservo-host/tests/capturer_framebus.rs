@@ -50,13 +50,52 @@ fn bad_args_exit_2_with_usage() {
     }
 }
 
+
+/// mode 分派（契约）: camera/desktop/subscriber 采集未实现 → 明确报"未支持"退出；
+/// generator 真实现（产帧证据见 capturer_publishes_i420_frames_to_framebus）。
+#[test]
+fn unsupported_modes_exit_1_with_clear_error() {
+    for (mode, needle) in [
+        ("camera", "camera"),
+        ("desktop", "desktop"),
+        ("subscriber", "subscriber"),
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cfg_path = dir.path().join("host.yaml");
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "sources:\n  - id: \"cam0\"\n    mode: \"{mode}\"\n    fps: 30\n"
+            ),
+        )
+        .expect("write host.yaml");
+        let tok_path = dir.path().join("cam0.token");
+        std::fs::write(&tok_path, b"garbage").expect("write token");
+        let out = Command::new(env!("CARGO_BIN_EXE_host-capturer"))
+            .args([
+                "--camera",
+                "cam0",
+                "--config",
+                cfg_path.to_str().expect("cfg utf8"),
+                "--token",
+                tok_path.to_str().expect("token utf8"),
+            ])
+            .output()
+            .expect("spawn host-capturer");
+        assert_eq!(out.status.code(), Some(1), "mode={mode} 应 exit 1");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("未支持"), "mode={mode} 应报未支持, got: {stderr}");
+        assert!(stderr.contains(needle), "mode={mode} 错误应含类别 {needle}, got: {stderr}");
+    }
+}
+
 #[tokio::test]
 async fn capturer_publishes_i420_frames_to_framebus() {
     let dir = tempfile::tempdir().expect("tempdir");
     let cfg_path = dir.path().join("host.yaml");
     std::fs::write(
         &cfg_path,
-        "cameras:\n  - id: \"cam0\"\n    source: \"stub\"\n    fps: 30\n",
+        "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    width: 640\n    height: 480\n    fps: 30\n",
     )
     .expect("write host.yaml");
 
@@ -95,13 +134,13 @@ async fn capturer_publishes_i420_frames_to_framebus() {
             .expect("recv timeout — capturer 未发布帧")
             .expect("frame");
         let m = frame.meta();
-        assert_eq!(m.width, 1280, "宽度应为默认 1280");
-        assert_eq!(m.height, 720, "高度应为默认 720");
+        assert_eq!(m.width, 640, "宽度应从配置消费（width: 640）");
+        assert_eq!(m.height, 480, "高度应从配置消费（height: 480）");
         assert_eq!(m.format, 1, "format 应为 I420(1)");
         assert_eq!(m.version, 1);
         assert_eq!(
             frame.payload().len(),
-            1280 * 720 * 3 / 2,
+            640 * 480 * 3 / 2,
             "payload 应为紧凑 I420 大小"
         );
         if let Some(prev) = last_seq {
@@ -121,6 +160,10 @@ async fn capturer_publishes_i420_frames_to_framebus() {
     assert!(
         out.contains("capturer ready"),
         "stdout 缺 ready 行, got: {out:?}"
+    );
+    assert!(
+        out.contains("source=generator"),
+        "ready 行应标识 generator 源, got: {out:?}"
     );
 
     // SIGTERM → 优雅退出（退出码 0）

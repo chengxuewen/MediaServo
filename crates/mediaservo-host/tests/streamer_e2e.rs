@@ -84,12 +84,12 @@ fn bad_args_exit_2_with_usage() {
 #[test]
 fn rejects_non_30_fps_with_clear_error() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let cfg_path = dir.path().join("host.toml");
+    let cfg_path = dir.path().join("host.yaml");
     std::fs::write(
         &cfg_path,
-        "[[cameras]]\nid = \"cam0\"\nfps = 25\n[[streams]]\nid = \"s0\"\ncamera = \"cam0\"\n",
+        "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 25\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n",
     )
-    .expect("write host.toml");
+    .expect("write host.yaml");
     let tok_path = dir.path().join("t.token");
     std::fs::write(&tok_path, b"garbage").expect("write token");
     let out = Command::new(env!("CARGO_BIN_EXE_host-streamer"))
@@ -216,16 +216,16 @@ async fn streamer_pushes_through_gateway_to_server() {
     let pid = std::process::id();
     let stream_id = format!("s{pid}-stream");
 
-    // host.toml: cam0 stub 30fps + 唯一流（显式 camera 引用，验证缺省外路径）
-    let cfg_path = dir.path().join("host.toml");
+    // host.yaml: cam0 generator 30fps + 唯一流（显式 source 引用，验证缺省外路径）
+    let cfg_path = dir.path().join("host.yaml");
     std::fs::write(
         &cfg_path,
         format!(
-            "[[cameras]]\nid = \"cam0\"\nsource = \"stub\"\nfps = 30\n\
-             [[streams]]\nid = \"{stream_id}\"\ncamera = \"cam0\"\ncodec = \"vp8\"\n"
+            "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\n\
+             streams:\n  - id: \"{stream_id}\"\n    source: \"cam0\"\n    codec: \"vp8\"\n"
         ),
     )
-    .expect("write host.toml");
+    .expect("write host.yaml");
 
     // 令牌: capturer=Capture（可发布 camera/*），streamer=Recorder（可订阅 camera/*）
     let (cap_tok, cap_vk) = token(Role::Capture, &format!("capture-{pid}"));
@@ -342,18 +342,18 @@ async fn two_streamers_share_one_vehicle_session() {
     let s0 = format!("s{pid}-0");
     let s1 = format!("s{pid}-1");
 
-    // host.toml: cam0/cam1 stub 30fps + 两路流（各自显式 camera 引用）
-    let cfg_path = dir.path().join("host.toml");
+    // host.yaml: cam0/cam1 generator 30fps + 两路流（各自显式 source 引用）
+    let cfg_path = dir.path().join("host.yaml");
     std::fs::write(
         &cfg_path,
         format!(
-            "[[cameras]]\nid = \"cam0\"\nsource = \"stub\"\nfps = 30\n\
-             [[cameras]]\nid = \"cam1\"\nsource = \"stub\"\nfps = 30\n\
-             [[streams]]\nid = \"{s0}\"\ncamera = \"cam0\"\ncodec = \"vp8\"\n\
-             [[streams]]\nid = \"{s1}\"\ncamera = \"cam1\"\ncodec = \"vp8\"\n"
+            "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\n\
+              - id: \"cam1\"\n    mode: \"generator\"\n    fps: 30\n\
+             streams:\n  - id: \"{s0}\"\n    source: \"cam0\"\n    codec: \"vp8\"\n\
+              - id: \"{s1}\"\n    source: \"cam1\"\n    codec: \"vp8\"\n"
         ),
     )
-    .expect("write host.toml");
+    .expect("write host.yaml");
 
     // 令牌: capturer=Capture（camera/*）, streamer=Recorder（camera/*）— 每进程独立 node id
     let mut tok_paths = Vec::new();
