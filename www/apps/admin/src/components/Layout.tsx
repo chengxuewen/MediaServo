@@ -1,18 +1,20 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { clearToken } from '../api/client';
 import './Layout.css';
 
 export default function Layout() {
-  const { role, username, canMonitor, token } = useAuth();
+  const { role, username, canMonitor, token, isAdmin } = useAuth();
   const navigate = useNavigate();
-
+  const location = useLocation();
+  const notices = (location.state as { notice?: string } | null)?.notice;
   const handleLogout = () => {
     clearToken();
     navigate('/login');
   };
   return (
     <div className="layout">
+      {notices && <div className="notice-banner">ℹ️ {notices}</div>}
       <header className="header">
         <span className="logo">📡 MediaServo Admin</span>
         <div className="header-right">
@@ -38,6 +40,17 @@ export default function Layout() {
           {canMonitor && (
             <NavLink to="/vehicles" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               🚗 Vehicles
+            </NavLink>
+          )}
+          {/* Devices/Accounts 管理 = 仅 admin（与 RequireAdmin 守卫一致） */}
+          {isAdmin && (
+            <NavLink to="/devices" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              🖥️ Device Management
+            </NavLink>
+          )}
+          {isAdmin && (
+            <NavLink to="/accounts" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              👥 Account Management
             </NavLink>
           )}
           <NavLink to="/settings" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>

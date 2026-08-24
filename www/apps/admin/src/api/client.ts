@@ -23,6 +23,11 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
     }
     throw new Error('Authentication required — please sign in');
   }
+      // 非 2xx: 后端错误体为 {error} — 直接抛消息，让调用方可见错误分支（C15）
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? `Request failed (${res.status})`);
+      }
   return res.json();
 }
 
@@ -122,6 +127,18 @@ export interface StatusReport {
   config_version: number;
 }
 export interface VehicleStatusResponse { vehicles: { room_id: string; report: StatusReport }[]; }
+// Device/account admin（AdminState — 授权设备与账号管理端点）
+export interface AdminDevice { device_id: string; }
+export interface AdminDeviceListResponse { devices: AdminDevice[]; count: number; }
+export interface AdminDeviceSecret { device_id: string; secret: string; secret_hash: string; note: string; }
+export interface AdminDeviceRevoked { device_id: string; revoked: boolean; }
+export type AccountRole = 'viewer' | 'operator' | 'admin' | 'dispatcher';
+export interface AdminAccount { username: string; role: string; vehicles: string[]; }
+export interface AdminAccountListResponse { accounts: AdminAccount[]; count: number; }
+export interface AdminAccountCreated { created: string; }
+export interface AdminAccountUpdated { updated: string; }
+export interface AdminAccountDeleted { deleted: string; }
+
 
 // API functions
 export async function getDevices(): Promise<DeviceListResponse> {
@@ -150,6 +167,40 @@ export async function getSfuStats(producerId?: string, consumerId?: string): Pro
 export async function getVehicleStatus(): Promise<VehicleStatusResponse> {
   return request('/status');
 }
+// ── 设备管理（AdminState）──────────────────────────────────────────────
+export async function getAdminDevices(): Promise<AdminDeviceListResponse> {
+  return request('/devices');
+}
+
+export async function registerDevice(deviceId: string): Promise<AdminDeviceSecret> {
+  return request('/devices', { method: 'POST', body: JSON.stringify({ device_id: deviceId }) });
+}
+
+export async function revokeDevice(deviceId: string): Promise<AdminDeviceRevoked> {
+  return request(`/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
+}
+
+export async function resetDeviceSecret(deviceId: string): Promise<AdminDeviceSecret> {
+  return request(`/devices/${encodeURIComponent(deviceId)}/reset-secret`, { method: 'POST' });
+}
+
+// ── 账号管理（AdminState）──────────────────────────────────────────────
+export async function getAdminAccounts(): Promise<AdminAccountListResponse> {
+  return request('/accounts');
+}
+
+export async function createAccount(username: string, password: string, role: string, vehicles: string[]): Promise<AdminAccountCreated> {
+  return request('/accounts', { method: 'POST', body: JSON.stringify({ username, password, role, vehicles }) });
+}
+
+export async function updateAccount(username: string, patch: { role?: string; vehicles?: string[]; new_password?: string }): Promise<AdminAccountUpdated> {
+  return request(`/accounts/${encodeURIComponent(username)}`, { method: 'PUT', body: JSON.stringify(patch) });
+}
+
+export async function deleteAccount(username: string): Promise<AdminAccountDeleted> {
+  return request(`/accounts/${encodeURIComponent(username)}`, { method: 'DELETE' });
+}
+
 
 export interface LoginResponse { token: string; username: string; role: string; expires_in_secs: number; }
 

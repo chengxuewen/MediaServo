@@ -1,0 +1,15 @@
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.3); z-index: 100; display: flex; align-items: center; justify-content: center; }
+.modal { width: 480px; max-width: calc(100vw - 2rem); background: #fff; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.15); display: flex; flex-direction: column; max-height: calc(100vh - 4rem); }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid #e8e8e8; }
+.modal-header h3 { font-size: 1rem; }
+.modal-body { padding: 1.25rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; }
+
+/* 表单原语（模态表单共用 — Design System: 8px 网格 / token 色） */
+.form-row { display: flex; align-items: center; gap: 0.75rem; font-size: 0.9rem; }
+.form-label { width: 130px; color: #555; flex-shrink: 0; }
+.form-field { flex: 1; padding: 0.5rem 0.75rem; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem; outline: none; }
+.form-field:focus { border-color: #4361ee; }
+.form-field.form-error-border { border-color: #e74c3c; }
+.form-error { font-size: 0.8rem; color: #e74c3c; }
+.form-hint { font-size: 0.8rem; color: #888; }
+.form-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }

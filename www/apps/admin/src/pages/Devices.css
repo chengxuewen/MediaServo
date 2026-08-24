@@ -1,0 +1,17 @@
+.devices { max-width: 960px; }
+.devices-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.devices-head .section-title { margin-bottom: 0; }
+
+.device-admin-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.device-admin-row { display: flex; align-items: center; justify-content: space-between; background: #fff; border-radius: 8px; padding: 0.75rem 1rem; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.device-admin-name { font-weight: 600; }
+.device-admin-actions { display: flex; gap: 0.5rem; }
+
+/* 中性动作按钮（.btn-sm 语义为危险红）— Design System token: primary #4361ee */
+.btn-secret { padding: 0.25rem 0.75rem; font-size: 0.75rem; border: 1px solid #4361ee; background: none; color: #4361ee; border-radius: 4px; cursor: pointer; }
+.btn-secret:hover { background: #4361ee; color: #fff; }
+.btn-secret:disabled, .btn-sm:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 一次性 secret 展示（警示语义，新增 warning token #e67e22） */
+.secret-warning { font-size: 0.85rem; color: #e67e22; background: #fef9ef; border: 1px solid #f5d9a8; padding: 0.5rem 0.75rem; border-radius: 4px; }
+.secret-box { width: 100%; font-family: monospace; font-size: 0.85rem; padding: 0.5rem 0.75rem; border: 1px solid #ddd; border-radius: 4px; resize: vertical; outline: none; background: #f8f9fa; color: #1a1a2e; }
