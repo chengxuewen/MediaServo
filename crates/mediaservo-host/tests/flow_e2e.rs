@@ -134,6 +134,9 @@ async fn streamer_stats_ingestion() {
         frames_encoded: 678,
         frame_width: 1280,
         frame_height: 720,
+        codec: "h264".into(),
+        avg_encode_ms: None,
+        encoder_implementation: None,
     };
     let payload = serde_json::to_vec(&stats).expect("stats json");
     bus.publish(

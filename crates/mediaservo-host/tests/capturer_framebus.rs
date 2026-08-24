@@ -53,12 +53,12 @@ fn bad_args_exit_2_with_usage() {
 #[tokio::test]
 async fn capturer_publishes_i420_frames_to_framebus() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let cfg_path = dir.path().join("host.toml");
+    let cfg_path = dir.path().join("host.yaml");
     std::fs::write(
         &cfg_path,
-        "[[cameras]]\nid = \"cam0\"\nsource = \"stub\"\nfps = 30\n",
+        "cameras:\n  - id: \"cam0\"\n    source: \"stub\"\n    fps: 30\n",
     )
-    .expect("write host.toml");
+    .expect("write host.yaml");
 
     // 生成 capturer 令牌文件（Role::Capture → 可发布 camera/*）
     let (tok, vk) = token(Role::Capture, "capture-cam0");
