@@ -56,6 +56,15 @@ impl DeviceAuthError {
     }
 }
 
+/// 注册表管理操作错误（管理 API 用；409/404 映射见 admin.rs）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceRegError {
+    /// 注册时 device_id 已存在。
+    Duplicate,
+    /// 吊销/重置时 device_id 不存在。
+    Unknown,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 struct RegistryFile {
     #[serde(default)]
@@ -78,10 +87,7 @@ struct RegistryInner {
 
 impl RegistryInner {
     fn new(devices: HashMap<String, String>) -> Self {
-        Self {
-            devices,
-            dummy_hash: new_dummy_hash(),
-        }
+        Self { devices, dummy_hash: new_dummy_hash() }
     }
 
     fn verify(&self, device_id: &str, secret: &str) -> Result<(), DeviceAuthError> {
@@ -111,9 +117,7 @@ pub struct DeviceRegistry {
 
 impl DeviceRegistry {
     pub fn empty() -> Self {
-        Self {
-            inner: RwLock::new(RegistryInner::new(HashMap::new())),
-        }
+        Self { inner: RwLock::new(RegistryInner::new(HashMap::new())) }
     }
 
     /// 从 YAML 文件加载；文件缺失视为空注册表（PSK 路径不受影响）。
@@ -140,14 +144,16 @@ impl DeviceRegistry {
             }
             devices.insert(id, entry.secret_hash);
         }
-        Ok(Self {
-            inner: RwLock::new(RegistryInner::new(devices)),
-        })
+        Ok(Self { inner: RwLock::new(RegistryInner::new(devices)) })
     }
 
     /// 锁 poison 恢复标准做法：unpoisoned 读锁；poison 时取回写者遗留的一致值。
     fn lock_read(&self) -> RwLockReadGuard<'_, RegistryInner> {
         self.inner.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn lock_write(&self) -> std::sync::RwLockWriteGuard<'_, RegistryInner> {
+        self.inner.write().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn len(&self) -> usize {
@@ -174,14 +180,7 @@ impl DeviceRegistry {
             devices: inner
                 .devices
                 .iter()
-                .map(|(id, hash)| {
-                    (
-                        id.clone(),
-                        DeviceEntry {
-                            secret_hash: hash.clone(),
-                        },
-                    )
-                })
+                .map(|(id, hash)| (id.clone(), DeviceEntry { secret_hash: hash.clone() }))
                 .collect(),
         };
         serde_yaml::to_string(&file)
@@ -214,8 +213,47 @@ impl DeviceRegistry {
             }
         }
     }
+    /// sha256(device_id + ":" + device_secret)，hex 编码，`sha256:` 前缀。
+
+    /// 注册新设备：生成随机 secret → 写入注册表（内存）。
+    /// 返回 `(secret_hash, secret)` — secret 是**唯一一次明文**，调用方负责传递；
+    /// 后续仅可经 reset_secret 更换。落盘由管理 API 层调 `save` 完成。
+    pub fn register(&self, device_id: &str) -> Result<(String, String), DeviceRegError> {
+        let mut inner = self.lock_write();
+        if inner.devices.contains_key(device_id) {
+            return Err(DeviceRegError::Duplicate);
+        }
+        let secret = new_secret();
+        let hash = hash_secret(device_id, &secret);
+        inner.devices.insert(device_id.to_string(), hash.clone());
+        Ok((hash, secret))
+    }
+
+    /// 吊销设备：从注册表移除（内存）。下次接入鉴权即 Unknown → 4010。
+    /// 存量在线连接不受影响（鉴权仅发生在接入时）— 运营语义见 proposal。
+    pub fn revoke(&self, device_id: &str) -> Result<(), DeviceRegError> {
+        let mut inner = self.lock_write();
+        inner.devices.remove(device_id).map(|_| ()).ok_or(DeviceRegError::Unknown)
+    }
+
+    /// 重置设备 secret：旧 secret 立即失效，返回新 secret（唯一一次明文）。
+    pub fn reset_secret(&self, device_id: &str) -> Result<(String, String), DeviceRegError> {
+        let mut inner = self.lock_write();
+        if !inner.devices.contains_key(device_id) {
+            return Err(DeviceRegError::Unknown);
+        }
+        let secret = new_secret();
+        let hash = hash_secret(device_id, &secret);
+        inner.devices.insert(device_id.to_string(), hash.clone());
+        Ok((hash, secret))
+    }
 }
 
+/// 生成新设备 secret：uuid v4（122-bit CSPRNG 熵）36 字符 — 与 G2 哈希格式兼容，
+/// 无需新增依赖（design: uuid 兜底方案；H 阶段如需更强熵换 getrandom + 32B hex）。
+fn new_secret() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
 /// sha256(device_id + ":" + device_secret)，hex 编码，`sha256:` 前缀。
 /// device_id 充当每设备盐 — 无需额外 salt 存储（G2 存储决策，文档见模块头）。
 pub fn hash_secret(device_id: &str, secret: &str) -> String {
@@ -313,10 +351,7 @@ mod tests {
             Some(Err(DeviceAuthError::Incomplete))
         );
         // 全带 = 校验
-        assert_eq!(
-            authenticate(&reg, Some("ms-0a1b2c3d4e5f"), Some("s3cret")),
-            Some(Ok(()))
-        );
+        assert_eq!(authenticate(&reg, Some("ms-0a1b2c3d4e5f"), Some("s3cret")), Some(Ok(())));
         assert_eq!(
             authenticate(&reg, Some("ms-nope"), Some("s3cret")),
             Some(Err(DeviceAuthError::Unknown))
@@ -353,15 +388,8 @@ mod tests {
         assert!(DeviceAuthError::Incomplete.message().contains("both device_id"));
         assert!(DeviceAuthError::Incomplete.message().contains("device authentication failed"));
         // review #1: 未知设备与错误 secret 的 wire 消息必须逐字一致（防枚举）。
-        assert_eq!(
-            DeviceAuthError::Unknown.message(),
-            DeviceAuthError::BadSecret.message()
-        );
-        assert!(
-            DeviceAuthError::Unknown
-                .message()
-                .contains("invalid device credentials")
-        );
+        assert_eq!(DeviceAuthError::Unknown.message(), DeviceAuthError::BadSecret.message());
+        assert!(DeviceAuthError::Unknown.message().contains("invalid device credentials"));
     }
 
     #[test]
@@ -369,9 +397,8 @@ mod tests {
         // review #1 TDD: 两种失败路径的完整 wire 响应（code=4010 + message）必须一致。
         // code 由 signaling.rs 认证点统一为 4010；此处锁定 message 层等价。
         let reg = test_registry();
-        let e_unknown = authenticate(&reg, Some("ms-nope"), Some("x"))
-            .expect("creds present")
-            .unwrap_err();
+        let e_unknown =
+            authenticate(&reg, Some("ms-nope"), Some("x")).expect("creds present").unwrap_err();
         let e_bad = authenticate(&reg, Some("ms-0a1b2c3d4e5f"), Some("wrong"))
             .expect("creds present")
             .unwrap_err();
@@ -407,14 +434,68 @@ mod tests {
         // reload round-trip 保持鉴权语义
         let reloaded = DeviceRegistry::load(&path).unwrap();
         assert_eq!(reloaded.len(), 1);
-        assert_eq!(
-            authenticate(&reloaded, Some("ms-0a1b2c3d4e5f"), Some("s3cret")),
-            Some(Ok(()))
-        );
+        assert_eq!(authenticate(&reloaded, Some("ms-0a1b2c3d4e5f"), Some("s3cret")), Some(Ok(())));
         assert_eq!(
             authenticate(&reloaded, Some("ms-nope"), Some("s3cret")),
             Some(Err(DeviceAuthError::Unknown))
         );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn register_generates_secret_and_authenticates() {
+        let reg = DeviceRegistry::empty();
+        let (hash, secret) = reg.register("ms-new-1").unwrap();
+        assert!(hash.starts_with("sha256:") && hash.len() == "sha256:".len() + 64);
+        assert_eq!(secret.len(), 36, "uuid v4 36 字符");
+        // 注册后立即 authenticate（无重启 = 热重载语义）
+        assert_eq!(authenticate(&reg, Some("ms-new-1"), Some(&secret)), Some(Ok(())));
+        assert_eq!(reg.device_ids(), vec!["ms-new-1".to_string()]);
+    }
+
+    #[test]
+    fn register_duplicate_errors() {
+        let reg = test_registry();
+        let err = reg.register("ms-0a1b2c3d4e5f").unwrap_err();
+        assert_eq!(err, DeviceRegError::Duplicate);
+    }
+
+    #[test]
+    fn revoke_makes_device_unknown() {
+        let reg = test_registry();
+        reg.revoke("ms-0a1b2c3d4e5f").unwrap();
+        assert_eq!(
+            authenticate(&reg, Some("ms-0a1b2c3d4e5f"), Some("s3cret")),
+            Some(Err(DeviceAuthError::Unknown))
+        );
+    }
+
+    #[test]
+    fn revoke_unknown_device_errors() {
+        let reg = test_registry();
+        assert_eq!(reg.revoke("ms-nope"), Err(DeviceRegError::Unknown));
+    }
+
+    #[test]
+    fn reset_secret_invalidates_old_secret() {
+        let reg = test_registry();
+        let (_, new_secret) = reg.reset_secret("ms-0a1b2c3d4e5f").unwrap();
+        assert_eq!(
+            authenticate(&reg, Some("ms-0a1b2c3d4e5f"), Some("s3cret")),
+            Some(Err(DeviceAuthError::BadSecret))
+        );
+        assert_eq!(authenticate(&reg, Some("ms-0a1b2c3d4e5f"), Some(&new_secret)), Some(Ok(())));
+    }
+
+    #[test]
+    fn register_then_save_persists() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("ms-devices-crud-{}.yaml", uuid::Uuid::new_v4()));
+        let reg = DeviceRegistry::empty();
+        let (_, secret) = reg.register("ms-persist-1").unwrap();
+        reg.save(&path).unwrap();
+        let reloaded = DeviceRegistry::load(&path).unwrap();
+        assert_eq!(authenticate(&reloaded, Some("ms-persist-1"), Some(&secret)), Some(Ok(())));
         let _ = std::fs::remove_file(&path);
     }
 }
