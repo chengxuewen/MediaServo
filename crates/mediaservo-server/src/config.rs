@@ -29,6 +29,31 @@ listen:
     }
 
     #[test]
+    fn parse_sfu_announced_ips() {
+        let yaml = r#"
+version: 1
+listen:
+  host: "0.0.0.0"
+  port: 9800
+sfu:
+  announced_ips:
+    - "192.168.2.127"
+    - "10.144.0.3"
+"#;
+        let config: mediaservo_common::config::ServerConfig =
+            serde_yaml::from_str(yaml).expect("valid yaml");
+        assert_eq!(
+            config.sfu.announced_ips,
+            vec!["192.168.2.127".to_string(), "10.144.0.3".to_string()]
+        );
+        // 缺省空（env/探测兜底）
+        let minimal: mediaservo_common::config::ServerConfig =
+            serde_yaml::from_str("version: 1\nlisten:\n  host: 0.0.0.0\n  port: 9800\n")
+                .unwrap();
+        assert!(minimal.sfu.announced_ips.is_empty());
+    }
+
+    #[test]
     fn parse_full_config() {
         let yaml = r#"
 version: 1

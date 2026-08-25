@@ -10,3 +10,10 @@ jwt_secret: "docker-admin-secret-with-32-plus-bytes!!"  # PIT-49: signaling JWT 
 admin_jwt_secret: "docker-admin-secret-with-32-plus-bytes!!"
 devices_file: "/opt/mediaservo/etc/devices.yaml"
 accounts_file: "/opt/mediaservo/etc/accounts.yaml"
+
+# SFU 对外公告地址（多网卡/多网络可达 IP；优先级: env MEDIASERVO_SFU_ANNOUNCED_IP > 此处 > 自动探测）
+# mediasoup 要求 0.0.0.0 必须配 announced（容器内探测不可达——PIT-44/58/138）
+sfu:
+  announced_ips:
+    - "192.168.2.127"
+    - "10.144.0.3"

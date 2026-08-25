@@ -45,12 +45,26 @@ mod imp {
     /// PIT-58: announced_address 解析 — 环境变量 MEDIASERVO_SFU_ANNOUNCED_IP，
     /// 支持逗号分隔多 IP（宿主多网卡）。fallback: 容器内探测（172.18.0.2 仅本机可用，
     /// 部署方应经 CLI/外部注入真实宿主 IP）。
-    fn announced_ips_from_env() -> Vec<String> {
-        let raw = std::env::var("MEDIASERVO_SFU_ANNOUNCED_IP").unwrap_or_else(|_| detect_local_ip());
-        raw.split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
+    /// announced 解析（三层优先级，PIT-138 修正）:
+    /// env `MEDIASERVO_SFU_ANNOUNCED_IP`（逗号分隔多 IP）> server.yaml `sfu.announced_ips`
+    /// > 自动探测（出网 IP——容器内不可靠，仅兜底）。
+    fn announced_ips(config: Option<&mediaservo_common::config::ServerConfig>) -> Vec<String> {
+        if let Ok(raw) = std::env::var("MEDIASERVO_SFU_ANNOUNCED_IP") {
+            let ips: Vec<String> = raw
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !ips.is_empty() {
+                return ips;
+            }
+        }
+        if let Some(cfg) = config
+            && !cfg.sfu.announced_ips.is_empty()
+        {
+            return cfg.sfu.announced_ips.clone();
+        }
+        vec![detect_local_ip()]
     }
 
     /// Create RouterOptions with sensible default codecs (Opus + VP8 + H264).
@@ -255,16 +269,24 @@ mod imp {
     impl SfuManager {
         /// Create a new SfuManager with a single mediasoup Worker and WebRtcServer.
         /// SFU 端口取自 `MEDIASERVO_SFU_PORT`（缺省 20000）— 测试用 `new_with_port` 传随机端口。
-        pub async fn new() -> Result<Self, String> {
+        pub async fn new(config: Option<&mediaservo_common::config::ServerConfig>) -> Result<Self, String> {
             let sfu_port = std::env::var("MEDIASERVO_SFU_PORT")
                 .ok()
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(20000);
-            Self::new_with_port(sfu_port).await
+            Self::new_with_port_config(sfu_port, config).await
         }
 
         /// 指定 WebRtcServer 监听端口（测试隔离: 多测试并行各绑独立端口）。
         pub async fn new_with_port(sfu_port: u16) -> Result<Self, String> {
+            Self::new_with_port_config(sfu_port, None).await
+        }
+
+        /// 内部实现: 端口 + 配置（announced 三层解析入口）。
+        async fn new_with_port_config(
+            sfu_port: u16,
+            config: Option<&mediaservo_common::config::ServerConfig>,
+        ) -> Result<Self, String> {
             let worker_manager = WorkerManager::new();
             let worker = worker_manager
                 .create_worker(WorkerSettings::default())
@@ -278,7 +300,7 @@ mod imp {
             // PIT-58: 容器内探测 = 172.18.0.2 (内网地址, 其他主机不可达 → Signal Lost);
             // 必须用宿主可达 IP — 环境变量 MEDIASERVO_SFU_ANNOUNCED_IP 配置 (宿主机网卡 IP)
             // 多 announced IP（宿主多网卡）：每个 IP 一个 ListenInfo（listen 0.0.0.0:20000）
-            let announced_ips = announced_ips_from_env();
+            let announced_ips = announced_ips(config);
             let mut listen_infos = WebRtcServerListenInfos::new(ListenInfo {
                 protocol: Protocol::Udp,
                 ip: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
@@ -931,25 +953,32 @@ mod tests {
         // env 优先 (宿主 IP 场景)
         // SAFETY: 测试内串行设置/恢复, 无并发读
         unsafe { std::env::set_var("MEDIASERVO_SFU_ANNOUNCED_IP", "192.168.2.127"); }
-        assert_eq!(announced_ips_from_env(), vec!["192.168.2.127".to_string()]);
+        assert_eq!(announced_ips(None), vec!["192.168.2.127".to_string()]);
 
         // 多 IP 逗号分隔
         // SAFETY: 同上
         unsafe { std::env::set_var("MEDIASERVO_SFU_ANNOUNCED_IP", "192.168.2.127,10.0.0.5"); }
         assert_eq!(
-            announced_ips_from_env(),
+            announced_ips(None),
             vec!["192.168.2.127".to_string(), "10.0.0.5".to_string()]
         );
 
         // 逗号 + 空格容错
         // SAFETY: 同上
         unsafe { std::env::set_var("MEDIASERVO_SFU_ANNOUNCED_IP", " 192.168.2.127 , 10.0.0.5 "); }
-        assert_eq!(announced_ips_from_env().len(), 2);
+        assert_eq!(announced_ips(None).len(), 2);
 
         // fallback 探测 (未配置场景)
         // SAFETY: 同上
         unsafe { std::env::remove_var("MEDIASERVO_SFU_ANNOUNCED_IP"); }
-        let fallback = announced_ips_from_env();
+        let fallback = announced_ips(None);
+
+        // server.yaml sfu.announced_ips（env 未设时生效）
+        // SAFETY: 同上
+        unsafe { std::env::remove_var("MEDIASERVO_SFU_ANNOUNCED_IP"); }
+        let mut cfg = mediaservo_common::config::ServerConfig::default();
+        cfg.sfu.announced_ips = vec!["10.144.0.3".into()];
+        assert_eq!(announced_ips(Some(&cfg)), vec!["10.144.0.3".to_string()]);
         assert!(!fallback.is_empty(), "fallback 探测应返回非空 IP");
 
         // 恢复环境, 避免污染其他测试

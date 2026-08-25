@@ -151,7 +151,7 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         use mediaservo_server::sfu;
         use std::sync::Arc;
 
-        match sfu::SfuManager::new().await {
+        match sfu::SfuManager::new(Some(&config)).await {
             Ok(m) => {
                 tracing::info!("SFU manager initialized (mediasoup)");
                 let mut srv = signaling::SignalingServer::new(

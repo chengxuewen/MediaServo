@@ -85,6 +85,20 @@ pub struct ServerConfig {
     /// 缺省 = `/opt/mediaservo/etc/accounts.yaml`；文件缺失 = 无账号（仅 PSK/设备路径）。
     #[serde(default)]
     pub accounts_file: Option<String>,
+
+    /// SFU 配置（mediasoup WebRtcServer）。
+    #[serde(default)]
+    pub sfu: SfuConfig,
+}
+
+/// SFU（mediasoup WebRtcServer）配置。
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+pub struct SfuConfig {
+    /// 对外公告地址（多网卡/多网络可达 IP，如 `["192.168.2.127", "10.144.0.3"]`）。
+    /// 优先级: env `MEDIASERVO_SFU_ANNOUNCED_IP` > 本字段 > 自动探测（出网 IP）。
+    /// mediasoup 要求 0.0.0.0 必须配 announced（PIT-44/58/138——容器内探测不可达）。
+    #[serde(default)]
+    pub announced_ips: Vec<String>,
 }
 
 /// Config for mediaservo-client (pull + decode + control — cockpit/operator side).
