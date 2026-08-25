@@ -31,15 +31,32 @@ mod imp {
 
     /// Detect the container's primary IP (zero-dependency UDP connect trick;
     /// connect() on UDP only sets the default route target, no packet is sent).
-    fn detect_local_ip() -> String {
-        if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
-            if socket.connect("8.8.8.8:80").is_ok() {
-                if let Ok(addr) = socket.local_addr() {
-                    return addr.ip().to_string();
+    /// 自动收集本机全部 IPv4（等价 ifconfig——多网卡/VPN 全公告；过滤 loopback）。
+    /// 仅裸机有效：容器内看到的是容器网卡（172.x 不可达——容器场景必须 env/yaml 显式）。
+    /// 公告多余候选无害（ICE 多候选，对端连不通自动跳过）。
+    fn detect_all_ips() -> Vec<String> {
+        let mut ips: Vec<String> = Vec::new();
+        if let Ok(ifaces) = if_addrs::get_if_addrs() {
+            for iface in ifaces {
+                if let if_addrs::IfAddr::V4(v4) = iface.addr {
+                    let ip = v4.ip.to_string();
+                    if !ip.starts_with("127.") && !ips.contains(&ip) {
+                        ips.push(ip);
+                    }
                 }
             }
         }
-        "0.0.0.0".to_string()
+        if ips.is_empty() {
+            // 兜底: 出网探测（原 detect_local_ip）
+            if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
+                if socket.connect("8.8.8.8:80").is_ok() {
+                    if let Ok(addr) = socket.local_addr() {
+                        return vec![addr.ip().to_string()];
+                    }
+                }
+            }
+        }
+        ips
     }
 
     /// PIT-58: announced_address 解析 — 环境变量 MEDIASERVO_SFU_ANNOUNCED_IP，
@@ -64,7 +81,7 @@ mod imp {
         {
             return cfg.sfu.announced_ips.clone();
         }
-        vec![detect_local_ip()]
+        detect_all_ips()
     }
 
     /// Create RouterOptions with sensible default codecs (Opus + VP8 + H264).
@@ -949,6 +966,20 @@ mod tests {
     /// PIT-58: announced_address 必须优先环境变量 (宿主可达 IP) —
     /// 容器内探测 (172.18.0.2) 仅本机可用, 其他主机 ICE 不可达 → Signal Lost。
     #[test]
+    fn detect_all_ips_collects_interfaces_no_loopback() {
+        let ips = detect_all_ips();
+        assert!(!ips.is_empty(), "裸机至少一个非 loopback IPv4");
+        assert!(
+            ips.iter().all(|ip| !ip.starts_with("127.")),
+            "不得含 loopback: {ips:?}"
+        );
+        // 去重
+        let mut sorted = ips.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(ips.len(), sorted.len(), "IP 列表去重");
+    }
+
     fn announced_ips_prefers_env_and_falls_back() {
         // env 优先 (宿主 IP 场景)
         // SAFETY: 测试内串行设置/恢复, 无并发读
@@ -976,8 +1007,10 @@ mod tests {
         // server.yaml sfu.announced_ips（env 未设时生效）
         // SAFETY: 同上
         unsafe { std::env::remove_var("MEDIASERVO_SFU_ANNOUNCED_IP"); }
-        let mut cfg = mediaservo_common::config::ServerConfig::default();
-        cfg.sfu.announced_ips = vec!["10.144.0.3".into()];
+        let cfg: mediaservo_common::config::ServerConfig = serde_yaml::from_str(
+            "version: 1\nlisten:\n  host: 0.0.0.0\n  port: 9800\nsfu:\n  announced_ips:\n    - 10.144.0.3\n",
+        )
+        .unwrap();
         assert_eq!(announced_ips(Some(&cfg)), vec!["10.144.0.3".to_string()]);
         assert!(!fallback.is_empty(), "fallback 探测应返回非空 IP");
 
