@@ -316,8 +316,22 @@ mod imp {
             // 否则 candidate=0.0.0.0 对端无法 ICE；容器内探测本机 IP。
             // PIT-58: 容器内探测 = 172.18.0.2 (内网地址, 其他主机不可达 → Signal Lost);
             // 必须用宿主可达 IP — 环境变量 MEDIASERVO_SFU_ANNOUNCED_IP 配置 (宿主机网卡 IP)
-            // 多 announced IP（宿主多网卡）：每个 IP 一个 ListenInfo（listen 0.0.0.0:20000）
+            // 多 announced IP（PIT-143 修正）: 仅**裸机**支持多 ListenInfo——每个
+            // ListenInfo **listen 各自具体 IP**（0.0.0.0 重复 bind 同端口 = 冲突）；
+            // 容器内（announced 宿主 IP 不在容器接口列表）→ 单 ListenInfo
+            // （0.0.0.0 + 首 announced——容器无法公告多地址）。
             let announced_ips = announced_ips(config);
+            let local_ips: std::collections::HashSet<String> = if_addrs::get_if_addrs()
+                .map(|ifaces| {
+                    ifaces
+                        .iter()
+                        .filter_map(|i| match &i.addr {
+                            if_addrs::IfAddr::V4(v4) => Some(v4.ip.to_string()),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             let mut listen_infos = WebRtcServerListenInfos::new(ListenInfo {
                 protocol: Protocol::Udp,
                 ip: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
@@ -329,10 +343,15 @@ mod imp {
                 send_buffer_size: None,
                 recv_buffer_size: None,
             });
+            // 裸机多网卡: 其余 IP 若为本机接口 → 各建 ListenInfo（listen 具体 IP）
             for ip in announced_ips.iter().skip(1) {
+                if !local_ips.contains(ip) {
+                    continue; // 容器注入的宿主 IP——容器内无该接口，跳过
+                }
+                let Ok(listen_ip) = ip.parse::<IpAddr>() else { continue };
                 listen_infos = listen_infos.insert(ListenInfo {
                     protocol: Protocol::Udp,
-                    ip: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+                    ip: listen_ip,
                     announced_address: Some(ip.clone()),
                     expose_internal_ip: false,
                     port: Some(sfu_port),
