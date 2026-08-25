@@ -59,6 +59,8 @@ MediaServo — 实时媒体伺服平台（MediaServo Platform）。独立部署�
 ./mediaservo.sh build host    # 仅宿主侧（别名: build-host）
 ./mediaservo.sh build server  # 仅 server（别名: build-server）
 ./mediaservo.sh up --env dev  # 启动 dev server 容器（幂等，自动注入 ANNOUNCED_IP）；prod: up --env prod
+./mediaservo.sh up --announced-ip 10.144.0.3  # 显式指定容器公告地址（覆盖自动探测；多值逗号分隔——
+                                  # 容器仅单公告生效取首 IP，多地址需裸机运行）
 ./mediaservo.sh start host    # 启动 host 推流（杀旧进程；别名: run-host）
 ./mediaservo.sh stop server   # 停止 server（compose stop 保留容器，秒级再启）
 ./mediaservo.sh stop host     # 停止 host 进程
