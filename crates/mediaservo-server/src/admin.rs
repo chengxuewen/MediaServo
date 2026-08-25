@@ -757,7 +757,7 @@ async fn auth_middleware(
 // ── Handlers ────────────────────────────────────────────────────────────────
 
 async fn list_rooms(State(state): State<AdminState>) -> Json<serde_json::Value> {
-    let devices = state.signaling.room_manager.list_devices();
+    let devices = state.signaling.room_manager.list_devices(&state.signaling.status_registry);
     let rooms = state.signaling.room_manager.list_rooms();
     Json(serde_json::json!({
         "devices": devices,

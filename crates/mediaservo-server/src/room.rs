@@ -45,6 +45,8 @@ pub struct DeviceSnapshot {
 pub struct StreamSnapshot {
     pub stream_id: String,
     pub consumers: Vec<Consumer>,
+    /// 推流在线（multi-stream P2: host-agent StatusReport.StreamFlowJson.connected）。
+    pub online: bool,
 }
 
 /// A room with at most one Host. P2P rooms have exactly one Remote;
@@ -257,49 +259,45 @@ impl RoomManager {
     }
 
     /// Aggregate rooms by device_id into DeviceSnapshot list.
-    pub fn list_devices(&self) -> Vec<DeviceSnapshot> {
+    /// 流列表从 host-agent StatusReport 构造（multi-stream P2）——Room.device_id/
+    /// stream_id 恒 None（join_room 不设），真正的流标识与在线状态在
+    /// StatusRegistry（agent 每 5s 整车聚合上报）。无报告 → streams 空。
+    pub fn list_devices(&self, status: &crate::status::StatusRegistry) -> Vec<DeviceSnapshot> {
         let mut device_map: HashMap<String, DeviceSnapshot> = HashMap::new();
         for r in self.rooms.iter() {
-            if let Some(ref device_id) = r.device_id {
-                let entry = device_map
-                    .entry(device_id.clone())
-                    .or_insert_with(|| DeviceSnapshot {
-                        device_id: device_id.clone(),
-                        online_since: r.created_at,
-                        streams: Vec::new(),
-                    });
-                if r.created_at < entry.online_since {
-                    entry.online_since = r.created_at;
-                }
-                if let Some(ref stream_id) = r.stream_id {
-                    entry.streams.push(StreamSnapshot {
-                        stream_id: stream_id.clone(),
-                        consumers: r.consumers.clone(),
-                    });
-                }
-        }
-
-        // Include P2P rooms as pseudo-devices
-            if r.device_id.is_none() {
-                let pid = r.host.as_deref().unwrap_or("unknown");
-                let short = if pid.len() > 8 { &pid[..8] } else { pid };
-                device_map
-                    .entry(r.id.clone())
-                    .or_insert_with(|| DeviceSnapshot {
-                        device_id: r.id.clone(),
-                        online_since: r.created_at,
-                        streams: Vec::new(),
-                    });
-                let entry = device_map.get_mut(&r.id).unwrap();
-                let label = format!("host: {short}");
-                entry.streams.push(StreamSnapshot {
-                    stream_id: label,
-                    consumers: r.consumers.clone(),
+            let device_id = r.device_id.clone().unwrap_or_else(|| r.id.clone());
+            let entry = device_map
+                .entry(device_id.clone())
+                .or_insert_with(|| DeviceSnapshot {
+                    device_id: device_id.clone(),
+                    online_since: r.created_at,
+                    streams: Vec::new(),
                 });
+            if r.created_at < entry.online_since {
+                entry.online_since = r.created_at;
             }
+            // 该房间的 StatusReport → 每流状态（id/connected）；无报告/无流 → 空
+            let report_streams: Vec<StreamSnapshot> = status
+                .get(&r.id)
+                .and_then(|m| match m {
+                    mediaservo_common::protocol::SignalingMessage::StatusReport { streams, .. } => Some(streams.clone()),
+                    _ => None,
+                })
+                .map(|sfs| {
+                    sfs.iter()
+                        .map(|sf| StreamSnapshot {
+                            stream_id: sf.id.clone(),
+                            consumers: r.consumers.clone(),
+                            online: sf.connected,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !report_streams.is_empty() {
+                entry.streams = report_streams;
             }
-
-            device_map.into_values().collect()
+        }
+        device_map.into_values().collect()
     }
 
     /// Clear all consumers from a room and return their peer_ids.
@@ -471,44 +469,75 @@ mod tests {
         assert_eq!(mgr.active_rooms(), 0);
     }
 
+    fn test_report(room: &str, streams: Vec<(String, bool)>) -> mediaservo_common::protocol::SignalingMessage {
+        mediaservo_common::protocol::SignalingMessage::StatusReport {
+            room_id: room.into(),
+            topics: vec![],
+            streams: streams
+                .into_iter()
+                .map(|(id, connected)| mediaservo_common::protocol::StreamFlowJson {
+                    id,
+                    bytes_sent: 0,
+                    frames_encoded: 0,
+                    frame_width: 0,
+                    frame_height: 0,
+                    connected,
+                })
+                .collect(),
+            processes: vec![],
+            signal: mediaservo_common::protocol::SignalStatusJson {
+                remote_connected: true,
+                remote_since_secs: Some(1),
+                remote_peer_id: "p".into(),
+                children: vec![],
+                agent_uptime_secs: 1,
+            },
+            ts: 1,
+            config_version: 0,
+        }
+    }
+
     #[test]
     fn list_devices_aggregates_rooms() {
         let mgr = RoomManager::new();
+        let status = crate::status::StatusRegistry::default();
 
-        // Create a P2P room + set device_id/stream_id manually
+        // P2P room（device 分组用 r.device_id 或伪 device=room.id）
         mgr.join_room("room-1", "host-1", &PeerRole::Host).unwrap();
-        {
-            let mut room = mgr.rooms.get_mut("room-1").unwrap();
-            room.device_id = Some("device-a".into());
-            room.stream_id = Some("stream-1".into());
-        }
-
-        // Consumer room with device metadata
         mgr.join_room("room-2", "consumer-1", &PeerRole::Consumer)
             .unwrap();
-        {
-            let mut room = mgr.rooms.get_mut("room-2").unwrap();
-            room.device_id = Some("device-a".into());
-            room.stream_id = Some("stream-2".into());
-        }
-
-        // Another device
         mgr.join_room("room-3", "host-2", &PeerRole::Host).unwrap();
-        {
-            let mut room = mgr.rooms.get_mut("room-3").unwrap();
-            room.device_id = Some("device-b".into());
-            room.stream_id = Some("stream-3".into());
-        }
 
-        let devices = mgr.list_devices();
-        assert_eq!(devices.len(), 2);
+        let devices = mgr.list_devices(&status);
+        assert_eq!(devices.len(), 3); // 无报告 → 每房间一个 pseudo device，streams 空
 
-        let device_a = devices.iter().find(|d| d.device_id == "device-a").unwrap();
-        assert_eq!(device_a.streams.len(), 2);
+        // 有报告 → streams 来自 StatusReport（id/connected），consumers 保留
+        status.store("room-1", test_report("room-1", vec![("test-30fps".into(), true)]));
+        status.store("room-3", test_report("room-3", vec![("test-15fps".into(), false)]));
+        let devices = mgr.list_devices(&status);
+        assert_eq!(devices.len(), 3);
+        let d1 = devices.iter().find(|d| d.device_id == "room-1").unwrap();
+        assert_eq!(d1.streams.len(), 1);
+        assert_eq!(d1.streams[0].stream_id, "test-30fps");
+        assert!(d1.streams[0].online);
+        let d3 = devices.iter().find(|d| d.device_id == "room-3").unwrap();
+        assert_eq!(d3.streams[0].stream_id, "test-15fps");
+        assert!(!d3.streams[0].online);
+    }
 
-        let device_b = devices.iter().find(|d| d.device_id == "device-b").unwrap();
-        assert_eq!(device_b.streams.len(), 1);
-        assert_eq!(device_b.streams[0].stream_id, "stream-3");
+    #[test]
+    fn list_devices_keeps_consumers_with_report_streams() {
+        let mgr = RoomManager::new();
+        let status = crate::status::StatusRegistry::default();
+        mgr.join_room("room-1", "host-1", &PeerRole::Host).unwrap();
+        mgr.join_room("room-1", "consumer-1", &PeerRole::Consumer).unwrap();
+        status.store("room-1", test_report("room-1", vec![("test-30fps".into(), true)]));
+
+        let devices = mgr.list_devices(&status);
+        let d = devices.iter().find(|d| d.device_id == "room-1").unwrap();
+        assert_eq!(d.streams.len(), 1);
+        assert_eq!(d.streams[0].consumers.len(), 1, "consumers 保留（向后兼容）");
+        assert_eq!(d.streams[0].consumers[0].peer_id, "consumer-1");
     }
 
     #[test]
