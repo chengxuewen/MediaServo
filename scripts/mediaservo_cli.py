@@ -1027,7 +1027,7 @@ def main() -> None:
                          help="仅 build server: 构建 Docker 镜像 target（runtime=生产交付瘦身镜像；dev=工具链镜像）——其他 target 拒绝此参数")
     build_p.set_defaults(func=_cmd_build)
 
-    up_p = sub.add_parser("up", help="启动部署 <svc> [--env dev|prod]: dev=热更 compose；prod=单容器+命名卷+entrypoint 自举")
+    up_p = sub.add_parser("up", help="启动部署 <svc> [--env dev|prod] [--announced-ip IP]: dev=热更 compose；prod=单容器+命名卷+entrypoint 自举（公告地址显式覆盖）")
     up_p.add_argument("svc", nargs="?", default="server", help="服务（默认 server）")
     up_p.add_argument("--env", choices=["dev", "prod"], default="dev", help="环境（默认 dev——可省略）")
     up_p.add_argument("--build", action="store_true", help="先构建镜像再 up")
