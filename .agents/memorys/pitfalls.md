@@ -1274,3 +1274,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: 构建/启动带 `MEDIASERVO_BRAND=msrtc`（install --brand 已注入；手动维护显式带）。
 - **验证**: `grep "^name =" <dir>/run/oxfile.toml` 为 msrtc-*。
 - **禁止**: 默认构建二进制直接覆盖品牌实例 bin。
+
+## PIT-130: Room.device_id/stream_id 恒 None — list_devices 的"设备+流"聚合是 pseudo（2026-08-25）
+- **症状**: /api/admin/rooms 的 DeviceSnapshot.streams 显示 `host: <8位>` label（伪流）；真实流（test-30fps 等）不可见。
+- **根因**: signaling RoomJoin → `room_manager.join_room(&room_id, &peer_id, &role)` **不传 device_id/stream_id**（room.rs join_room 创建 Room 时两者恒 None；`replace_device_room`（按 device_id+stream_id 键）**无调用者**）——list_devices 按 device_id 分组退化为 room.id 伪设备 + label 伪流。真正的流标识与在线状态在 **host-agent 整车聚合的 StatusReport.streams**（每 5s 上报，monitor/signal.rs build_status_report，流 id = host.yaml streams[].id）。
+- **解法**: list_devices 注入 `&StatusRegistry`，streams 从 `status.get(room_id)` 的 StatusReport.streams 构造（StreamSnapshot{stream_id: sf.id, consumers: room.consumers.clone(), online: sf.connected}）；无报告 → streams 空。Room 聚合路径废弃（测试同步重写）。
+- **验证**: `curl /api/admin/rooms` → streams 含真实流 id + online；`cargo test -p mediaservo-server` 全绿。
+- **禁止**: 依赖 Room.device_id/stream_id 做设备流聚合（恒 None）；把 StatusRegistry 键冲突当多流问题（agent 整车一份上报，无冲突）。
