@@ -501,3 +501,17 @@ ff_.*_muxer` 应为 0（demuxer-only 实证）。
 **检查**: `MEDIASERVO_BRAND=cp ./target/debug/mediaservo-host version` → 应输出 `cp 0.1.0`；`git diff --stat bindings/` → 应为空；`grep -n '{ns}' crates/mediaservo-host/src/translate.rs` → 应为 0（PIT-118 禁）。**禁止**: 品牌化进 bindings/wire/crate 名；模板字符串用 replace 自指（PIT-118）。
 
 **来源**: D252 (2026-08-21)，Momus 计划审核后实施
+
+## C34: WebRTC 黑帧排查链 — announced → 订阅 → 房间 → producer (2026-08-25)
+
+**约束**: 视频黑帧（track 收到但无帧/ICE 不连）按固定链排查，每层有证据命令，禁止跳层乱试：
+
+| 层 | 检查点 | 证据命令 | PIT |
+|----|--------|---------|-----|
+| ① announced IP | SDP candidate 是否可达（0.0.0.0/172.x=不可达） | 浏览器 offer SDP / `docker logs server \| grep announced` | PIT-128/58/44 |
+| ② 推流端订阅 | streamer 是否拿到帧（acl denied=token role 错） | `grep "订阅\|acl denied\|OpenH264" <host>/run/logs/msrtc-streamer-*.err.log` | PIT-126 |
+| ③ 房间一致性 | streamer room == 消费端 Play room | `grep "streamer ready" ...out.log`（room=xxx）+ server `found N producers in room X` | PIT-127 |
+| ④ producer 存在 | 房间 producer 数 > 0 | `docker logs server --since 1m \| grep "found.*producers in room"` | — |
+| ⑤ ICE 状态 | Connected/Completed | host: `grep "ICE connection state" ...out.log`；浏览器 console | — |
+
+**检查**: 黑帧先跑 ①（30s）→②（30s）→③（30s）——90 秒内分层定位，禁止先猜编码/先改前端。

@@ -1247,3 +1247,30 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: ① sync_host_logs 改 `starts_with(brand::media_brand().app_prefix)`（默认 host-，品牌 msrtc-）；② 注释更正（[apps.logs] 已接线，本函数降为老版本兜底）
 - **验证**: brand=msrtc start → run/logs/msrtc-agent.out.log（21KB JSON tracing，持续写入）；之前"空"= 未 start 无进程
 - **教训**: 品牌化遗漏检查清单要覆盖**日志/监控类 helper 的命名前缀匹配**（sync/expected/process 名等字符串 starts_with）——不只 command 生成；且测试"功能失效"前先确认进程真在跑（空日志 ≠ 日志坏了，可能是没 start）
+
+## PIT-126: token 签发 sources/streams 同名 — Capture 占位致 Pusher 永签不出 → FrameBus acl denied (2026-08-25)
+- **症状**: streamer 循环报 `订阅 camera/<id> 失败: acl denied`；capturer ready 正常。
+- **根因**: `host token issue --all` sources 循环（Capture）与 streams 循环（Pusher）输出同名 `{id}.token`——先签的 Capture 占位，Pusher 因 `exists→continue` 幂等 skip 永签不出（Capture subscribe_allow 空）。
+- **解法**: streams 循环输出 `{id}-stream.token`（host.rs）+ translate streamer `--token` 同改；重新签发 + apply。
+- **验证**: `ls etc/link/ | grep stream` 有 `<id>-stream.token`；streamer 无 acl denied。
+- **禁止**: 多 role 令牌共用同名文件。
+
+## PIT-127: streamer 硬编码房间 stream-<id> — 消费端按整车房间 Play 0 producers (2026-08-25)
+- **症状**: host ICE Connected、producers 建立，浏览器按 vehicle Play 黑帧；server `found 0 producers in room vehicle`。
+- **根因**: host-streamer.rs 主链路与 vision DC RoomJoin 硬编码 `stream-{id}`；agent/audio 用整车房间（[signaling].room 缺省 vehicle）——房间约定分叉。
+- **解法**: streamer 改读 `translate::signaling_room`（缺省 vehicle），与 agent 同房间。
+- **验证**: `grep "streamer ready" ...out.log` 含 `room=vehicle`；server `found N producers in room vehicle`。
+- **禁止**: 推流端/消费端房间各自硬编码——统一 [signaling].room。
+
+## PIT-128: compose ${VAR:-} 空默认注入空 env — announced IP 失效 → ICE 0.0.0.0 黑屏 (2026-08-25)
+- **症状**: web Play 无帧；SDP candidate `0.0.0.0:20000`；ICE checking 卡死。
+- **根因**: `${MEDIASERVO_SFU_ANNOUNCED_IP:-}` 宿主未设 → 注入**空值** → `std::env::var` 返回 Ok("") 不走 fallback（unwrap_or_else 只对 Err）→ announced 空 → candidate 0.0.0.0。
+- **解法**: compose 默认值给宿主 IP；容器重建后日志 `announced: ["192.168.2.127"]`。
+- **禁止**: 空默认值给"可选"配置——空串 env 与未设置是两回事；代码对空串再兜底或 compose 给非空默认。
+
+## PIT-129: 默认构建二进制替换品牌实例 bin — oxfile 生成 host-* 名 spawn 失败 (2026-08-25)
+- **症状**: 手动更新 out/host/bin 后 start 报 `failed to spawn .../bin/host-streamer`。
+- **根因**: media_brand() = env MEDIASERVO_BRAND > 编译期 > 默认（host-*）；cp 默认构建二进制 → oxfile 用 host-* 名与品牌 bin（msrtc-*）不匹配。
+- **解法**: 构建/启动带 `MEDIASERVO_BRAND=msrtc`（install --brand 已注入；手动维护显式带）。
+- **验证**: `grep "^name =" <dir>/run/oxfile.toml` 为 msrtc-*。
+- **禁止**: 默认构建二进制直接覆盖品牌实例 bin。
