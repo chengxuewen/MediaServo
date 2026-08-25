@@ -65,7 +65,7 @@ mediaservo_field_push_close(s);
 
 ## 运行时前置
 
-- **server**（mediasoup SFU）运行中: `./mediaservo.sh start server`（CLI 自动注入宿主 IP）
+- **server**（mediasoup SFU）运行中: `./mediaservo.sh up --env dev`（CLI 自动注入宿主 IP）
 - **网络**: 车端可达 server 的 WS (9800) + UDP (20000/40000-40100)
 - **PSK**: 与 server 的 `MEDIASERVO_PSK` 一致
 

@@ -51,8 +51,15 @@ def _cmd_build_host() -> None:
     _run_or_exit(["cargo", "build", "-p", "mediaservo-host", "-p", "mediaservo-client"])
 
 
-def _cmd_build_server() -> None:
+def _cmd_build_server(image: str | None = None) -> None:
     _check("docker", "安装 docker 并启动 daemon")
+    if image:
+        if image == "runtime":
+            # 生产交付镜像（--target runtime——瘦身/自举 entrypoint）
+            _run_or_exit(["docker", "build", "--target", "runtime", "-t", "mediaservo-server:latest", "."])
+        else:
+            _run_or_exit(COMPOSE_BASE + ["build", "server"])
+        return
     _run_or_exit(COMPOSE_BASE + ["build", "server"])
 
 
@@ -574,7 +581,8 @@ def _cmd_start(target: str, foreground: bool = False, legacy: bool = False) -> N
         sys.exit(1)
 
 
-def _cmd_restart(target: str) -> None:
+def _cmd_restart(args: argparse.Namespace) -> None:
+    target = args.target
     """restart <target> — 清除已运行的再启动（显式中断语义）。"""
     if target == "server":
         _check("docker", "安装 docker 并启动 daemon")
@@ -697,7 +705,8 @@ def _run_host_legacy() -> None:
         print(f"✗ host 启动失败 (exit {proc.returncode}) — 日志: {log_path}", file=sys.stderr)
         sys.exit(1)
 
-def _cmd_stop(target: str) -> None:
+def _cmd_stop(args: argparse.Namespace) -> None:
+    target = args.target
     """stop <target> — server: compose stop（保留容器，秒级再启）; host/client: 杀进程。"""
     if target == "server":
         _check("docker", "安装 docker 并启动 daemon")
@@ -714,11 +723,13 @@ def _cmd_stop(target: str) -> None:
         print("✓ client 已停止")
 
 
-def _cmd_logs(target: str) -> None:
-    """logs <target> — server: compose 日志; host: /tmp/mediaservo-host.log。"""
+def _cmd_logs(args: argparse.Namespace) -> None:
+    """logs [<target>] [--follow] — server: compose 日志; host: /tmp/mediaservo-host.log。"""
+    target = args.target
+    follow = ["-f"] if args.follow else []
     if target == "server":
         _check("docker", "安装 docker 并启动 daemon")
-        _run_or_exit(COMPOSE_BASE + ["logs", "-f", "server"])
+        _run_or_exit(COMPOSE_BASE + ["logs"] + follow + ["server"])
     elif target == "host":
         log_path = Path("/tmp/mediaservo-host.log")
         if log_path.exists():  # legacy 单进程日志
@@ -733,19 +744,32 @@ def _cmd_logs(target: str) -> None:
         sys.exit(1)
 
 
-def _cmd_e2e() -> None:
-    if sys.platform == "win32":
-        print("e2e: Windows 暂不支持（run-e2e-sfu.sh 为 bash 脚本）", file=sys.stderr)
+_E2E_SUITES = {
+    "sfu": ["cargo", "test", "-p", "mediaservo-host", "--test", "e2e_sfu"],
+    "push": ["cargo", "test", "-p", "mediaservo-field", "--test", "push_e2e"],
+    "ui": ["bash", "-c", "cd www/apps/admin && npx playwright test e2e"],
+    "host": ["bash", "scripts/e2e-install-host.sh"],
+    "package": ["bash", "scripts/e2e-package.sh"],
+    "brand": ["bash", "scripts/e2e-brand.sh"],
+    "bindings": ["bash", "scripts/e2e-bindings.sh"],
+    "client": ["bash", "scripts/e2e-test.sh"],  # macOS client 9/9（I4 环境阻塞可跳过）
+    "smoke": ["bash", "scripts/e2e-prod-smoke.sh"],  # 生产冒烟（Phase 4 产物——up --env prod + admin/配发断言）
+}
+
+
+def _cmd_e2e(args: argparse.Namespace) -> None:
+    if sys.platform == "win32" and args.suite not in ("host", "package", "brand", "bindings", "smoke"):
+        print("e2e: Windows 仅支持 bash 脚本套件", file=sys.stderr)
         sys.exit(1)
     for tool, hint in (
         ("cargo", "pixi 环境未激活?"),
         ("docker", "server 容器需要 docker"),
         ("bash", "e2e 脚本需要 bash"),
-        ("node", "e2e consume 脚本需要 node"),
     ):
         _check(tool, hint)
-    # 前置: server 容器 + host 进程 + vite(5173) 运行中（脚本内会检查并明确报错）
-    _run_or_exit(["bash", "scripts/run-e2e-sfu.sh"])
+    cmd = _E2E_SUITES[args.suite]
+    print(f"e2e {args.suite}: {' '.join(cmd)}")
+    _run_or_exit(cmd)
 
 
 def _cmd_test() -> None:
@@ -765,7 +789,7 @@ def _cmd_ci() -> None:
         code = _run(step)
         if code != 0:
             sys.exit(code)
-    _cmd_e2e()
+    _cmd_e2e(argparse.Namespace(suite="sfu"))
 
 
 def _rm_tree(path: Path) -> None:
@@ -832,6 +856,19 @@ def _cmd_config(args: argparse.Namespace) -> None:
             else:
                 print(f"(缺失: {path})", file=sys.stderr)
         return
+    if args.config_cmd == "set":
+        if not args.key or args.value is None:
+            print("用法: mediaservo config set <key> <value>", file=sys.stderr)
+            sys.exit(2)
+        # dev 轨道: 写宿主 config/ 目录（prod 卷内用 exec 路径——见 docs/modules/26）
+        # 仅支持 signaling.psk 键（其他键待演进）
+        if args.key != "signaling.psk":
+            print(f"config set: 暂仅支持 signaling.psk（当前键 {args.key}）", file=sys.stderr)
+            sys.exit(2)
+        p = ROOT / "config" / "host.conf"
+        p.write_text(f"signaling.psk = {args.value}\n", encoding="utf-8")
+        print(f"已写入 {p.relative_to(ROOT)}（dev 轨道——prod 用 exec 编辑卷内 server.yaml）")
+        return
     # validate — pyyaml 真解析（审核 BLOCKER-2: pixi.toml 已加依赖）
     try:
         import yaml  # noqa: PLC0415
@@ -874,6 +911,78 @@ def _cmd_status() -> None:
         print(f"{name:8s} {output[0] if output else '?'}")
 
 
+def _compose_file(env: str) -> str:
+    """环境 → compose 文件映射（up/down/ps/exec 共用）。"""
+    return "docker-compose.yml" if env == "prod" else "docker-compose.dev.yml"
+
+
+def _cmd_up(args: argparse.Namespace) -> None:
+    """部署生命周期: up [--env dev|prod] [svc]——prod=单容器+命名卷+entrypoint 自举。"""
+    cf = _compose_file(args.env)
+    cmd = ["docker", "compose", "-f", cf, "up", "-d", args.svc]
+    if args.build:
+        cmd.insert(5, "--build")
+    _run_or_exit(cmd)
+
+
+def _cmd_down(args: argparse.Namespace) -> None:
+    """停止部署（卷保留——prod 数据持久）。"""
+    cf = _compose_file(args.env)
+    _run_or_exit(["docker", "compose", "-f", cf, "down"])
+
+
+def _cmd_exec(args: argparse.Namespace) -> None:
+    """容器内命令（调试）: exec <svc> -- <cmd>。"""
+    if not args.cmd or args.cmd[0] != "--":
+        print("用法: mediaservo exec <svc> -- <cmd>", file=sys.stderr)
+        sys.exit(2)
+    cmd = args.cmd[1:]
+    if not cmd:
+        print("用法: mediaservo exec <svc> -- <cmd>", file=sys.stderr)
+        sys.exit(2)
+    _run_or_exit(["docker", "compose", "-f", "docker-compose.dev.yml", "exec", "-T", args.svc] + cmd)
+
+
+def _cmd_ps(args: argparse.Namespace) -> None:
+    """运行态: compose ps（server 部署）+ host ps（进程实例——cwd 推断）。"""
+    cf = _compose_file(getattr(args, "env", "dev"))
+    _run(["docker", "compose", "-f", cf, "ps"])
+
+
+def _cmd_data(args: argparse.Namespace) -> None:
+    """数据卷管理: backup|reset|inspect（mediaservo-data/recordings）。"""
+    vol_data = "mediaservo_mediaservo-data"
+    vol_rec = "mediaservo_mediaservo-recordings"
+    if args.data_cmd == "inspect":
+        _run_or_exit(["docker", "volume", "ls", "--format", "{{.Name}} {{.Mountpoint}}", "--filter", "name=mediaservo_"])
+    elif args.data_cmd == "backup":
+        target = Path(args.dir or "backup")
+        target.mkdir(parents=True, exist_ok=True)
+        for vol in (vol_data, vol_rec):
+            out = target / f"{vol}.tar.gz"
+            _run_or_exit([
+                "docker", "run", "--rm", "-v", f"{vol}:/data:ro",
+                "-v", f"{target.absolute()}:/backup",
+                "alpine", "sh", "-c", f"tar czf /backup/{vol}.tar.gz -C /data .",
+            ])
+            print(f"已备份 {vol} → {out}")
+    elif args.data_cmd == "reset":
+        if not args.force:
+            ans = input(f"重置 {vol_data} + {vol_rec}（删除全部数据）？[y/N] ")
+            if ans.strip().lower() != "y":
+                print("已取消")
+                return
+        # 语义: 先 down（容器停）再删卷（entrypoint 下次 up 重新生成）
+        _cmd_down(argparse.Namespace(env="prod"))
+        _run_or_exit(["docker", "volume", "rm", vol_data, vol_rec])
+        print("卷已删除——`mediaservo up --env prod` 重新初始化（密钥重新生成）")
+
+
+def _cmd_doctor(_args: argparse.Namespace | None = None) -> None:
+    """环境诊断（原 status——团队审核: doctor 统一诊断入口，与 mediaservo-host doctor 区分）。"""
+    _cmd_status()
+
+
 def _cmd_version() -> None:
     print(VERSION)
 
@@ -885,25 +994,48 @@ def main() -> None:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    build_p = sub.add_parser("build", help="构建 <target>: all|host|server|client|bindings（默认 all）")
+    build_p = sub.add_parser("build", help="构建 <target> [--image runtime|dev] [--release]: all|host|server|client|bindings（默认 all）")
     build_p.add_argument("target", nargs="?", choices=["all", "host", "server", "client", "bindings"], default="all")
     build_p.add_argument("--release", action="store_true", help="release 构建（bindings: target/release，strip+LTO）")
-    for verb, help_txt in (
-        ("stop", "停止 <target>: server(compose stop 保留容器) | host/client(进程)"),
-        ("restart", "重启 <target>: 清旧再启（保留卷）"),
-        ("logs", "日志 <target>: server(compose) | host(/tmp/mediaservo-host.log)"),
-    ):
-        vp = sub.add_parser(verb, help=help_txt)
-        vp.add_argument("target", choices=["server", "host", "client"])
-    start_p = sub.add_parser("start", help="启动 <target> [--foreground] [--legacy]: server(compose) | host(推流进程) | client")
-    start_p.add_argument("target", choices=["server", "host", "client"])
-    start_p.add_argument("--foreground", "-f", action="store_true", help="阻塞前台运行，输出实时透传（开发调试）")
-    start_p.add_argument("--legacy", action="store_true", help="host: 回退单进程 host-legacy（C4 多进程默认）")
-    sub.add_parser(
-        "e2e", help="e2e_sfu 回归（前置: server 容器 + host + vite(5173) 运行中）"
-    )
+    build_p.add_argument("--image", choices=["runtime", "dev"], default=None,
+                         help="仅 build server: 构建 Docker 镜像 target（runtime=生产交付瘦身镜像；dev=工具链镜像）——其他 target 拒绝此参数")
+    build_p.set_defaults(func=_cmd_build)
+
+    up_p = sub.add_parser("up", help="启动部署 <svc> [--env dev|prod]: dev=热更 compose；prod=单容器+命名卷+entrypoint 自举")
+    up_p.add_argument("svc", nargs="?", default="server", help="服务（默认 server）")
+    up_p.add_argument("--env", choices=["dev", "prod"], default="dev", help="环境（默认 dev）")
+    up_p.add_argument("--build", action="store_true", help="先构建镜像再 up")
+    up_p.set_defaults(func=_cmd_up)
+
+    down_p = sub.add_parser("down", help="停止部署 [--env dev|prod]（卷保留）")
+    down_p.add_argument("--env", choices=["dev", "prod"], default="dev")
+    down_p.set_defaults(func=_cmd_down)
+
+    restart_p = sub.add_parser("restart", help="重启 <target>: host/client 进程（server 部署用 up/down）")
+    restart_p.add_argument("target", choices=["host", "client"])
+    restart_p.set_defaults(func=_cmd_restart)
+
+    logs_p = sub.add_parser("logs", help="日志 [<svc>] [--follow]: server(compose) | host(/tmp/mediaservo-host.log) | <svc> 容器")
+    logs_p.add_argument("target", nargs="?", choices=["server", "host", "client"], default="server")
+    logs_p.add_argument("--follow", "-f", action="store_true", help="跟踪输出")
+    logs_p.set_defaults(func=_cmd_logs)
+
+    ps_p = sub.add_parser("ps", help="运行态: compose ps（server 部署——按 --env）")
+    ps_p.add_argument("--env", choices=["dev", "prod"], default="dev")
+    ps_p.set_defaults(func=_cmd_ps)
+
+    exec_p = sub.add_parser("exec", help="容器内执行: exec <svc> -- <cmd>（compose exec——调试用）")
+    exec_p.add_argument("svc", help="服务名（server/proxy）")
+    exec_p.add_argument("cmd", nargs=argparse.REMAINDER, help="容器内命令（-- 后）")
+    exec_p.set_defaults(func=_cmd_exec)
+
+    e2e_p = sub.add_parser("e2e", help="测试套件: sfu|push|ui|host|package|brand|bindings|client|smoke（smoke=生产冒烟）")
+    e2e_p.add_argument("suite", choices=["sfu", "push", "ui", "host", "package", "brand", "bindings", "client", "smoke"])
+    e2e_p.set_defaults(func=_cmd_e2e)
+
     sub.add_parser("test", help="workspace 测试（排除 mediaservo-server）")
-    sub.add_parser("ci", help="CI 全链: fmt → clippy → test → e2e")
+    sub.add_parser("ci", help="CI 全链: fmt → clippy → test → e2e sfu")
+
     install_p = sub.add_parser("install", help="安装 <target>: bindings（lib 三件套 D241 + include/mediaservo 头 D248）| host（D-H13 /opt/mediaservo-host 车端布局）")
     install_p.add_argument("target", choices=["bindings", "host"])
     install_p.add_argument("--prefix", default=None, help="安装前缀（默认 bindings: <项目根>/install；host: <项目根>/install/host）")
@@ -922,25 +1054,31 @@ def main() -> None:
     clean_p.add_argument("target", nargs="?", choices=["all", "server", "host", "client"], default="all")
     clean_p.add_argument("--all", action="store_true", help="显式删卷 + docker builder prune（15-30 分钟重建代价）")
     clean_p.set_defaults(func=_cmd_clean)
-    config_p = sub.add_parser("config", help="配置 show/validate")
-    config_p.add_argument("config_cmd", choices=["show", "validate"])
+    config_p = sub.add_parser("config", help="配置 show|validate|set <key> <value>（dev 轨道 config/ 目录）")
+    config_p.add_argument("config_cmd", choices=["show", "validate", "set"])
+    config_p.add_argument("key", nargs="?", help="set: 配置键（如 signaling.psk）")
+    config_p.add_argument("value", nargs="?", help="set: 配置值")
     config_p.set_defaults(func=_cmd_config)
-    sub.add_parser("status", help="环境诊断（pixi/cargo/docker/node）")
+    data_p = sub.add_parser("data", help="数据卷管理: backup [<dir>]| reset | inspect（mediaservo-data/recordings）")
+    data_p.add_argument("data_cmd", choices=["backup", "reset", "inspect"])
+    data_p.add_argument("dir", nargs="?", help="backup: 目标目录（默认 ./backup）")
+    data_p.add_argument("--force", action="store_true", help="reset: 跳过交互确认")
+    data_p.set_defaults(func=_cmd_data)
+    doctor_p = sub.add_parser("doctor", help="环境诊断（pixi/cargo/docker/node——原 status）")
+    doctor_p.set_defaults(func=_cmd_doctor)
     sub.add_parser("version", help="CLI 版本")
 
-    # 兼容别名: build-host → build host, build-server → build server, run-host → up host
+    # 兼容别名（保留 build-*——e2e 脚本/习惯用法）: run-host/up/down 别名已移除（up/down 现一级命令）
     ALIASES = {
         "build-host": ["build", "host"],
         "build-server": ["build", "server"],
-        "run-host": ["start", "host"],
-        "up": ["start"],
-        "down": ["stop"],
     }
     argv = sys.argv[1:]
     if argv and argv[0] in ALIASES:
         argv = ALIASES[argv[0]] + argv[1:]
     args = parser.parse_args(argv)
     if args.command == "start":
+        # host/client 进程语义（server 部署用 up）
         _cmd_start(args.target, args.foreground, args.legacy)
     elif args.command == "build":
         if args.target == "bindings":
@@ -952,15 +1090,13 @@ def main() -> None:
         elif args.target == "host":
             _cmd_build_host()
         elif args.target == "server":
-            _cmd_build_server()
+            _cmd_build_server(args.image)
         elif args.target == "client":
             _cmd_build_client()
     elif args.command in ("stop", "restart", "logs"):
-        globals()[f"_cmd_{args.command}"](args.target)
-    elif args.command in ("e2e", "test", "ci"):
+        globals()[f"_cmd_{args.command}"](args)
+    elif args.command in ("test", "ci"):
         globals()[f"_cmd_{args.command}"]()
-    elif args.command == "status":
-        _cmd_status()
     elif args.command == "version":
         _cmd_version()
     elif hasattr(args, "func"):

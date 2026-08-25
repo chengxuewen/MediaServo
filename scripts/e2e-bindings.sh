@@ -16,7 +16,7 @@ note() { echo "== $1"; }
 # ── 1. server 前置 ─────────────────────────────────────────
 if ! ss -tln 2>/dev/null | grep -q ":9800"; then
     note "server not running, starting..."
-    timeout 60 ./mediaservo.sh start server >/dev/null 2>&1 || true
+    timeout 60 ./mediaservo.sh up --env dev server >/dev/null 2>&1 || true
     for _ in $(seq 1 30); do ss -tln 2>/dev/null | grep -q ":9800" && break; sleep 1; done
 fi
 ss -tln 2>/dev/null | grep -q ":9800" || { echo "FAIL: server not up on :9800"; exit 1; }

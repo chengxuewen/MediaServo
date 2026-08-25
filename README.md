@@ -58,11 +58,11 @@ MediaServo — 实时媒体伺服平台（MediaServo Platform）。独立部署�
 ./mediaservo.sh build         # 构建 all（host/client 原生 + server Docker）
 ./mediaservo.sh build host    # 仅宿主侧（别名: build-host）
 ./mediaservo.sh build server  # 仅 server（别名: build-server）
-./mediaservo.sh start server  # 启动 server 容器（幂等，自动注入 ANNOUNCED_IP）
+./mediaservo.sh up --env dev  # 启动 dev server 容器（幂等，自动注入 ANNOUNCED_IP）；prod: up --env prod
 ./mediaservo.sh start host    # 启动 host 推流（杀旧进程；别名: run-host）
 ./mediaservo.sh stop server   # 停止 server（compose stop 保留容器，秒级再启）
 ./mediaservo.sh stop host     # 停止 host 进程
-./mediaservo.sh restart server    # 重启 server（清旧再启，配置变更生效）
+./mediaservo.sh down --env dev && ./mediaservo.sh up --env dev   # 重启 dev server（清旧再启，配置变更生效）
 ./mediaservo.sh logs host     # host 日志（/tmp/mediaservo-host.log）
 ./mediaservo.sh e2e           # e2e_sfu 回归（前置: server + host + vite 运行中）
 ./mediaservo.sh status        # 环境诊断（pixi/cargo/docker/node）
