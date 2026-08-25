@@ -9,7 +9,6 @@ use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum RoomType {
-    P2P,
     DeviceStream,
 }
 
@@ -96,20 +95,12 @@ impl RoomManager {
                     }
                     room.host = Some(pid);
                 }
-                PeerRole::Remote => match room.room_type {
-                    RoomType::P2P => {
-                        if room.remote.is_some() {
-                            return Err(CoreError::RoomFull);
-                        }
-                        room.remote = Some(pid);
-                    }
-                    RoomType::DeviceStream => {
-                        room.consumers.push(Consumer {
-                            peer_id: pid,
-                            connected_since: chrono::Utc::now().to_rfc3339(),
-                        });
-                    }
-                },
+                PeerRole::Remote => {
+                    room.consumers.push(Consumer {
+                        peer_id: pid,
+                        connected_since: chrono::Utc::now().to_rfc3339(),
+                    });
+                }
                 PeerRole::Consumer => {
                     room.consumers.push(Consumer {
                         peer_id: pid,
@@ -119,14 +110,9 @@ impl RoomManager {
             }
             tracing::info!("Peer {} joined room {} as {:?}", peer_id, room_id, role);
         } else {
-            let room_type = match role {
-                // Host 首进：per-stream 房间（<vehicle>_<stream>，PIT-140 v2 约定）→
-                // DeviceStream（否则 list_devices 归一见 vehicle_test-30fps 伪设备）；
-                // 纯整车/其他房间保持 P2P 语义（host+remote 直连）。
-                PeerRole::Host if id.contains('_') => RoomType::DeviceStream,
-                PeerRole::Host => RoomType::P2P,
-                PeerRole::Remote | PeerRole::Consumer => RoomType::DeviceStream,
-            };
+            // 全 SFU（D 决策 2026-08-25）: 房间统一 DeviceStream——无 P2P 直连语义，
+            // 所有 join 均为设备流房间（Host 推流 / Remote|Consumer 消费）。
+            let room_type = RoomType::DeviceStream;
             let (h, r, consumers) = match role {
                 PeerRole::Host => (Some(pid), None, vec![]),
                 PeerRole::Remote => (None, Some(pid), vec![]),
@@ -272,13 +258,11 @@ impl RoomManager {
             // per-stream 房间（PIT-140 v2: <vehicle>_<stream>）→ device 归一：DeviceStream
             // 房间按最后一段 _<stream> 拆分出整车 device（前端 roomId = device_stream 复原；
             // P2P 房间保持原样）。StatusReport 键 = 整车房间（agent 上报），不依赖房间拆分。
-            let device_id = r.device_id.clone().unwrap_or_else(|| match r.room_type {
-                RoomType::DeviceStream => r
-                    .id
-                    .rsplit_once('_')
+            // per-stream 房间（<vehicle>_<stream>）→ device 归一（前端 roomId=device_stream 复原）
+            let device_id = r.device_id.clone().unwrap_or_else(|| {
+                r.id.rsplit_once('_')
                     .map(|(v, _s)| v.to_string())
-                    .unwrap_or_else(|| r.id.clone()),
-                RoomType::P2P => r.id.clone(),
+                    .unwrap_or_else(|| r.id.clone())
             });
             let entry = device_map
                 .entry(device_id.clone())
@@ -375,10 +359,10 @@ mod tests {
         mgr.join_room("vehicle_test-30fps", "host-1", &PeerRole::Host).unwrap();
         let room = mgr.rooms.get("vehicle_test-30fps").unwrap();
         assert_eq!(room.room_type, RoomType::DeviceStream);
-        // 纯整车房间保持 P2P
+        // 纯整车房间同为 DeviceStream（全 SFU）
         mgr.join_room("vehicle", "host-2", &PeerRole::Host).unwrap();
         let room2 = mgr.rooms.get("vehicle").unwrap();
-        assert_eq!(room2.room_type, RoomType::P2P);
+        assert_eq!(room2.room_type, RoomType::DeviceStream);
     }
 
     #[test]
@@ -399,13 +383,15 @@ mod tests {
     }
 
     #[test]
-    fn join_full_remote_slot_errors() {
-        // P2P room: Host+Remote fills the single remote slot
+    fn join_multiple_remotes_coexist() {
+        // 全 SFU（2026-08-25）: Remote = consumer，多舱端可共存（无 P2P single-slot）
         let mgr = RoomManager::new();
         mgr.join_room("room-1", "host-1", &PeerRole::Host).unwrap();
         mgr.join_room("room-1", "remote-1", &PeerRole::Remote).unwrap();
-        let result = mgr.join_room("room-1", "remote-2", &PeerRole::Remote);
-        assert!(result.is_err());
+        mgr.join_room("room-1", "remote-2", &PeerRole::Remote).unwrap();
+        assert_eq!(mgr.get_peer_count(), 3);
+        let room = mgr.rooms.get("room-1").unwrap();
+        assert_eq!(room.consumers.len(), 2);
     }
 
     #[test]

@@ -106,8 +106,6 @@ struct State {
     next_id: u64,
     /// 待决 SFU 请求 FIFO（conn id；响应按序弹出匹配）。
     pending: VecDeque<u64>,
-    /// 当前 P2P 协商归属（最后一个上行 relay 消息的本地连接）。
-    p2p_owner: Option<u64>,
     /// 最近转发的 relay 消息文本（回显去重）。
     echo_cache: VecDeque<String>,
     /// 整车 peer_id（真实 RoomJoined 取得，子进程合成应答使用）。
@@ -163,14 +161,7 @@ impl State {
                 if is_sfu_request(&m) {
                     self.pending.push_back(conn_id);
                 }
-                // IMPORTANT-3: 仅 Sdp/RTCIceCandidate 更新 P2P 协商归属 —
-                // Frame/EncoderStatus 是媒体/状态上报，抢归属会杀死在途协商
-                if matches!(
-                    m,
-                    SignalingMessage::Sdp { .. } | SignalingMessage::RTCIceCandidate { .. }
-                ) {
-                    self.p2p_owner = Some(conn_id);
-                }
+                // 全 SFU（D 决策 2026-08-25）: 无 P2P 协商归属——Sdp 下行按房间路由
                 if is_relay_msg(&m) {
                     let text = serde_json::to_string(&m).unwrap_or_default();
                     self.echo_cache.push_back(text);
@@ -215,19 +206,22 @@ impl State {
                     }
                 }
             }
-            // P2P relay：路由给当前协商归属
+            // Sdp/ICE 下行：全 SFU 模式按房间路由（rewrite 后 room 一致的所有 conn）
+            // — 多流并发协商各自房间互不干扰；无匹配丢弃（C15 日志）。
             SignalingMessage::Sdp { .. } | SignalingMessage::RTCIceCandidate { .. } => {
-                match self.p2p_owner.and_then(|id| self.conns.get(&id)) {
-                    Some(conn) => {
-                        let mut m = msg;
-                        rewrite_room(&mut m, &conn.room);
-                        vec![(conn.id, m)]
-                    }
-                    None => {
-                        tracing::warn!("P2P relay 消息无协商归属，丢弃");
-                        Vec::new()
-                    }
+                let mut m = msg;
+                rewrite_room(&mut m, &self.vehicle_room);
+                let target_room = msg_room_id(&m).unwrap_or_default().to_string();
+                let room_matches: Vec<(u64, SignalingMessage)> = self
+                    .conns
+                    .iter()
+                    .filter(|(_, c)| c.room == target_room)
+                    .map(|(id, _)| (*id, m.clone()))
+                    .collect();
+                if room_matches.is_empty() {
+                    tracing::warn!(room = %target_room, "Sdp/ICE 下行无房间匹配连接，丢弃");
                 }
+                room_matches
             }
             // E4: 云端配置下发 — 整车 agent 专属消息（房间 + 目标 peer 匹配），
             // 不入子进程路由；存入待应用槽（agent 轮询 take_config_push）。
@@ -267,9 +261,6 @@ impl State {
         // IMPORTANT-4: 不在 pending 中移除（mark-dead，严格 FIFO 消费）— 断连
         // 连接的请求可能仍在 server 在途，其响应必须按序弹出死槽丢弃；若移除
         // 槽位造成位移（[A,B] 移 A → [B]），A 的响应会弹走 B → 串线
-        if self.p2p_owner == Some(conn_id) {
-            self.p2p_owner = None;
-        }
     }
 
     /// 远端断线：清空一切与远端会话绑定的状态（server 已回收全部 transport）。
@@ -277,7 +268,6 @@ impl State {
         self.joined = false;
         self.remote_since = None;
         self.pending.clear();
-        self.p2p_owner = None;
         self.echo_cache.clear();
         self.vehicle_peer_id.clear();
     }
@@ -515,7 +505,6 @@ pub async fn run_gateway(config: GatewayConfig) -> Result<(u16, GatewayHandle), 
         conns: HashMap::new(),
         next_id: 1,
         pending: VecDeque::new(),
-        p2p_owner: None,
         echo_cache: VecDeque::new(),
         vehicle_peer_id: String::new(),
         joined: false,
@@ -788,7 +777,6 @@ mod tests {
             conns: HashMap::new(),
             next_id: 1,
             pending: VecDeque::new(),
-            p2p_owner: None,
             echo_cache: VecDeque::new(),
             vehicle_peer_id: String::new(),
             joined: false,
