@@ -1,0 +1,3 @@
+# 生产账号注册表（首启空——entrypoint 引导：MEDIASERVO_ADMIN_PASSWORD 创建 admin；
+# 或挂载/写入后重启加载）。存储决策同 G2：sha256(username:password) 单向哈希。
+accounts: {}

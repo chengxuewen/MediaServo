@@ -137,6 +137,18 @@ RUN cargo fetch && \
 # 4. Remove dummy sources
 RUN rm -rf crates/*/src
 
+# 4b. PIT-23: admin dist 必须在 cargo build 前构建（build.rs 依赖 www/apps/admin/dist 存在）
+#     dist 是 gitignore 产物（不在仓库）→ 容器内必须现场构建；否则 build.rs 回退
+#     ADMIN_DIST_DIR=/nonexistent → /admin 运行时 404。Node 20 + pnpm 10。
+#     层缓存修正（团队 build-reviewer F4）: node/pnpm 安装 + pnpm install 拆到 COPY . . 前——
+#     源码变更不再重跑网络安装（cargo 依赖缓存同构）。
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    npm install -g pnpm@10.32.1
+# 4c. www 清单层（package.json/lockfile/workspace）——依赖安装缓存层
+COPY www/package.json www/pnpm-lock.yaml www/pnpm-workspace.yaml www/turbo.json www/
+RUN cd www && CI=true pnpm install --frozen-lockfile
+
 # 5. Copy real source code
 COPY . .
 
@@ -144,13 +156,8 @@ COPY . .
 #     源码未变，链接空 common rlib 导致 cannot find protocol 连锁错误。touch 更新 mtime 解决。
 RUN find crates -name '*.rs' -exec touch {} +
 
-# 5c. PIT-23: admin dist 必须在 cargo build 前构建（build.rs 依赖 www/apps/admin/dist 存在）
-#     dist 是 gitignore 产物（不在仓库）→ 容器内必须现场构建；否则 build.rs 回退
-#     ADMIN_DIST_DIR=/nonexistent → /admin 运行时 404。Node 20 + pnpm 10。
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    npm install -g pnpm@10.32.1 && \
-    cd www && CI=true pnpm install --frozen-lockfile && CI=true pnpm build:admin && \
+# 5c. admin 构建（依赖已装——仅源码变更时重跑 build:admin）
+RUN cd www && CI=true pnpm build:admin && \
     cd / && rm -rf /workspace/www/node_modules
 
 # 6. Final build — only recompiles changed source（含正确 ADMIN_DIST_DIR）
@@ -159,11 +166,20 @@ RUN cargo build --release --bin mediaservo-server --features sfu-mediasoup
 # ---- Runtime: minimal Ubuntu 22.04 ----
 FROM ubuntu:22.04 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libssl3 libuv1 ca-certificates curl \
+    libssl3 libuv1 ca-certificates curl openssl su-exec \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -s /bin/bash mediaservo
 COPY --from=builder /workspace/target/release/mediaservo-server /usr/local/bin/
-USER mediaservo
+# 命名卷初始化（团队审核 C5/H8）: root 写卷 → entrypoint 末尾 su-exec 降权。
+# 目录属主必须在 USER 前设定——命名卷 copy-up 保留镜像属主（空卷 EACCES 根治）。
+COPY docker/entrypoint.sh /opt/mediaservo/entrypoint.sh
+COPY docker/templates/ /opt/mediaservo/templates/
+RUN chmod 755 /opt/mediaservo/entrypoint.sh \
+    && mkdir -p /opt/mediaservo/etc /opt/mediaservo/recordings \
+    && chown -R mediaservo:mediaservo /opt/mediaservo
+# 以 root 跑 entrypoint（写卷不依赖 copy-up 行为）——server 由 entrypoint 末尾 su-exec 降权（PID-1 保真）
+USER root
 EXPOSE 9800 40000-40100/udp
 HEALTHCHECK --interval=30s --timeout=3s CMD curl -f http://localhost:9800/health || exit 1
-ENTRYPOINT ["mediaservo-server"]
+# exec-form 保 PID-1（原 mediaservo-server 直启被替换——entrypoint 自举后 exec 降权同进程）
+ENTRYPOINT ["/opt/mediaservo/entrypoint.sh"]

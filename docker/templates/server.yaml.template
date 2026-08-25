@@ -1,0 +1,13 @@
+version: 1
+listen:
+  host: "0.0.0.0"
+  port: 9800
+room_capacity: 50
+rate_limit: 100
+consumer_limit_per_stream: 50
+# 首启由 entrypoint 生成（__JWT_SECRET__ 占位——jwt/admin_jwt 同值，accounts.rs fail-fast 一致性）
+jwt_secret: "__JWT_SECRET__"
+admin_jwt_secret: "__JWT_SECRET__"
+sfu:
+  worker_path: /opt/mediaservo/sfu/worker
+  rtc_ports_range: [40000, 40100]

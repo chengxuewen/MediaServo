@@ -37,3 +37,8 @@ docker-compose.yml
 .env*
 *.key
 config/*.local*
+
+# host 运行实例（socket/日志/状态——构建 context 污染）
+.host/
+install/
+dist/

@@ -1,17 +1,17 @@
-# Production docker-compose — image-based, no build context
+# Production docker-compose — 单容器 all-in-one（server + SFU + admin 嵌入；entrypoint 自举密钥）
+# 团队审核吸收: 命名卷（去 :ro——配发写入）+ 双 tag pin（回滚）+ 无硬编码凭据 + RUST_LOG info
 name: mediaservo
 services:
   server:
-    image: ghcr.io/org/mediaservo-server:latest
+    image: mediaservo-server:${TAG:-latest}
     ports:
       - "9800:9800"
       - "20000:20000/udp"
       - "40000-40100:40000-40100/udp"
     environment:
-      RUST_LOG: debug
-      MEDIASERVO_PSK: mediaservo-dev
-      # 生产：不豁免 dev 凭证守卫（fail-fast）。若挂载文件含 dev 占位账号，
-      # server 拒绝启动 — 必须使用 config/accounts.production.yaml（无 dev 账号）。
+      RUST_LOG: info
+      # 生产: 不豁免 dev 凭证守卫（fail-fast）；不设 MEDIASERVO_PSK（entrypoint 首启生成——
+      # 认证路径只读 env（signaling.rs）——卷 .env 持久化；升级/回滚见 docs/modules/26）
     deploy:
       resources:
         limits:
@@ -25,11 +25,12 @@ services:
       interval: 30s
       timeout: 3s
       retries: 3
+    restart: unless-stopped
     volumes:
-      - ./config/server.docker.yaml:/opt/mediaservo/etc/server.yaml:ro
-      - ./config/devices.docker.yaml:/opt/mediaservo/etc/devices.yaml:ro
-      - ./config/accounts.production.yaml:/opt/mediaservo/etc/accounts.yaml:ro
+      - mediaservo-data:/opt/mediaservo/etc
+      - mediaservo-recordings:/opt/mediaservo/recordings
 
+  # 可选 ingress（80/443）——不需要时注释掉此服务
   proxy:
     image: caddy:2
     ports:
@@ -40,3 +41,7 @@ services:
     depends_on:
       - server
     restart: unless-stopped
+
+volumes:
+  mediaservo-data:
+  mediaservo-recordings:
