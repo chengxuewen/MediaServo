@@ -503,8 +503,10 @@ def _cmd_package(args: argparse.Namespace) -> None:
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
-# 排除的接口类型/名称：docker 网桥、VPN 隧道、虚拟接口（这些 IP 客户端不可达）
-_ANNOUNCED_IP_BLOCKED_IFACE = ("lo", "docker", "br-", "veth", "tun", "tap", "virbr", "vpn")
+# 排除的接口类型/名称：docker 网桥、虚拟接口（这些 IP 客户端不可达）。
+# 注意: tun/vpn **不排除**——VPN 组网场景下隧道 IP 正是客户端可达路径（10.144.0.3 实证）；
+# 公告多余候选无害（ICE 多候选，对端连不通自动跳过）。
+_ANNOUNCED_IP_BLOCKED_IFACE = ("lo", "docker", "br-", "veth", "virbr")
 
 
 def _detect_announced_ips() -> list[str]:
@@ -922,7 +924,8 @@ def _cmd_up(args: argparse.Namespace) -> None:
     cmd = ["docker", "compose", "-f", cf, "up", "-d", args.svc]
     if args.build:
         cmd.insert(5, "--build")
-    _run_or_exit(cmd)
+    # PIT-79 接线: 未显式设置时自动探测宿主机全部真实 IP（多网卡/VPN 场景）注入 env
+    _run_or_exit(cmd, env=_compose_env())
 
 
 def _detect_running_env() -> str:
