@@ -925,22 +925,41 @@ def _cmd_up(args: argparse.Namespace) -> None:
     _run_or_exit(cmd)
 
 
+def _detect_running_env() -> str:
+    """检测当前运行中的 server 容器属于哪个 compose 项目（dev/prod——容器名相同，
+    按 compose config_files label 区分；无容器 = 默认 dev）。"""
+    try:
+        out = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=5, check=False,
+        ).stdout
+        if "mediaservo-server-1" in out:
+            cfg = subprocess.run(
+                ["docker", "inspect", "mediaservo-server-1", "--format",
+                 '{{index .Config.Labels "com.docker.compose.project.config_files"}}'],
+                capture_output=True, text=True, timeout=5, check=False,
+            ).stdout.strip()
+            if "docker-compose.yml" in cfg and "dev" not in cfg:
+                return "prod"
+        return "dev"
+    except (OSError, subprocess.TimeoutExpired):
+        return "dev"
+
+
 def _cmd_down(args: argparse.Namespace) -> None:
-    """停止部署（卷保留——prod 数据持久）。"""
-    cf = _compose_file(args.env)
+    """停止部署（卷保留——prod 数据持久）。无 --env 时自动检测当前运行环境。"""
+    env = args.env if args.env is not None else _detect_running_env()
+    print(f"down: 检测到环境 {env}")
+    cf = _compose_file(env)
     _run_or_exit(["docker", "compose", "-f", cf, "down"])
 
 
 def _cmd_exec(args: argparse.Namespace) -> None:
-    """容器内命令（调试）: exec <svc> -- <cmd>。"""
-    if not args.cmd or args.cmd[0] != "--":
+    """容器内命令（调试）: exec <svc> -- <cmd>（argparse REMAINDER 自动剥离 --）。"""
+    if not args.cmd:
         print("用法: mediaservo exec <svc> -- <cmd>", file=sys.stderr)
         sys.exit(2)
-    cmd = args.cmd[1:]
-    if not cmd:
-        print("用法: mediaservo exec <svc> -- <cmd>", file=sys.stderr)
-        sys.exit(2)
-    _run_or_exit(["docker", "compose", "-f", "docker-compose.dev.yml", "exec", "-T", args.svc] + cmd)
+    _run_or_exit(["docker", "compose", "-f", "docker-compose.dev.yml", "exec", "-T", args.svc] + args.cmd)
 
 
 def _cmd_ps(args: argparse.Namespace) -> None:
@@ -1003,12 +1022,12 @@ def main() -> None:
 
     up_p = sub.add_parser("up", help="启动部署 <svc> [--env dev|prod]: dev=热更 compose；prod=单容器+命名卷+entrypoint 自举")
     up_p.add_argument("svc", nargs="?", default="server", help="服务（默认 server）")
-    up_p.add_argument("--env", choices=["dev", "prod"], default="dev", help="环境（默认 dev）")
+    up_p.add_argument("--env", choices=["dev", "prod"], default="dev", help="环境（默认 dev——可省略）")
     up_p.add_argument("--build", action="store_true", help="先构建镜像再 up")
     up_p.set_defaults(func=_cmd_up)
 
-    down_p = sub.add_parser("down", help="停止部署 [--env dev|prod]（卷保留）")
-    down_p.add_argument("--env", choices=["dev", "prod"], default="dev")
+    down_p = sub.add_parser("down", help="停止部署 [--env dev|prod]（卷保留；无 --env 自动检测当前环境）")
+    down_p.add_argument("--env", choices=["dev", "prod"], default=None)
     down_p.set_defaults(func=_cmd_down)
 
     restart_p = sub.add_parser("restart", help="重启 <target>: host/client 进程（server 部署用 up/down）")
@@ -1081,6 +1100,9 @@ def main() -> None:
         # host/client 进程语义（server 部署用 up）
         _cmd_start(args.target, args.foreground, args.legacy)
     elif args.command == "build":
+        if getattr(args, "image", None) and args.target != "server":
+            print(f"build --image 仅支持 build server（当前 target={args.target}）", file=sys.stderr)
+            sys.exit(2)
         if args.target == "bindings":
             _cmd_build_bindings(args.release)
         elif args.target == "all":
