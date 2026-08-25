@@ -924,8 +924,12 @@ def _cmd_up(args: argparse.Namespace) -> None:
     cmd = ["docker", "compose", "-f", cf, "up", "-d", args.svc]
     if args.build:
         cmd.insert(5, "--build")
+    env = _compose_env()
+    if args.announced_ip:
+        env["MEDIASERVO_SFU_ANNOUNCED_IP"] = args.announced_ip
+        print(f"MEDIASERVO_SFU_ANNOUNCED_IP 显式指定: {args.announced_ip}")
     # PIT-79 接线: 未显式设置时自动探测宿主机全部真实 IP（多网卡/VPN 场景）注入 env
-    _run_or_exit(cmd, env=_compose_env())
+    _run_or_exit(cmd, env=env)
 
 
 def _detect_running_env() -> str:
@@ -1027,6 +1031,13 @@ def main() -> None:
     up_p.add_argument("svc", nargs="?", default="server", help="服务（默认 server）")
     up_p.add_argument("--env", choices=["dev", "prod"], default="dev", help="环境（默认 dev——可省略）")
     up_p.add_argument("--build", action="store_true", help="先构建镜像再 up")
+    up_p.add_argument(
+        "--announced-ip",
+        metavar="IP[,IP...]",
+        default=None,
+        help="容器 mediasoup 公告地址（覆盖自动探测——如 10.144.0.3 或 192.168.2.127,10.144.0.3；"
+        "容器仅单公告生效——首个 IP；多地址需裸机运行）",
+    )
     up_p.set_defaults(func=_cmd_up)
 
     down_p = sub.add_parser("down", help="停止部署 [--env dev|prod]（卷保留；无 --env 自动检测当前环境）")
