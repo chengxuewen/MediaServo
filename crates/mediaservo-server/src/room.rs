@@ -265,7 +265,17 @@ impl RoomManager {
     pub fn list_devices(&self, status: &crate::status::StatusRegistry) -> Vec<DeviceSnapshot> {
         let mut device_map: HashMap<String, DeviceSnapshot> = HashMap::new();
         for r in self.rooms.iter() {
-            let device_id = r.device_id.clone().unwrap_or_else(|| r.id.clone());
+            // per-stream 房间（PIT-140 v2: <vehicle>_<stream>）→ device 归一：DeviceStream
+            // 房间按最后一段 _<stream> 拆分出整车 device（前端 roomId = device_stream 复原；
+            // P2P 房间保持原样）。StatusReport 键 = 整车房间（agent 上报），不依赖房间拆分。
+            let device_id = r.device_id.clone().unwrap_or_else(|| match r.room_type {
+                RoomType::DeviceStream => r
+                    .id
+                    .rsplit_once('_')
+                    .map(|(v, _s)| v.to_string())
+                    .unwrap_or_else(|| r.id.clone()),
+                RoomType::P2P => r.id.clone(),
+            });
             let entry = device_map
                 .entry(device_id.clone())
                 .or_insert_with(|| DeviceSnapshot {

@@ -7,6 +7,8 @@ interface Props {
   serverUrl: string;
   token: string;
   onClose: () => void;
+  /** modal=全屏浮层（默认）；tile=网格单元（多流并排，multi-stream P3） */
+  variant?: 'modal' | 'tile';
 }
 
 type ConnectionStatus = 'connecting' | 'connected' | 'playing' | 'disconnected' | 'error';
@@ -19,14 +21,14 @@ const STATUS_COLORS: Record<ConnectionStatus, string> = {
   error: '#e74c3c',
 };
 
-export default function VideoPlayer({ roomId, serverUrl, token, onClose }: Props) {
+export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant = 'modal' }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const clientRef = useRef<SfuConsumerClient | null>(null);
+  const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
   const [metrics, setMetrics] = useState<StreamMetrics | null>(null);
   const [showStats, setShowStats] = useState(false);
   const [showControls, setShowControls] = useState(false);
-  let controlsTimer: ReturnType<typeof setTimeout>;
 
   useEffect(() => {
     // PIT-76: 首帧渲染时间观测
@@ -41,15 +43,13 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose }: Props
           // 首帧检测: loadedmetadata 触发时 videoWidth > 0
           videoRef.current.onloadedmetadata = () => logT('video loadedmetadata (videoWidth=' + videoRef.current?.videoWidth + ')');
           videoRef.current.onplaying = () => logT('video onplaying');
-          // 轮询 videoWidth 确认首帧实际渲染
+          // 轮询 videoWidth 确认首帧实际渲染（计时内聚组件——挂载→首帧，
+          // 避免多路时 window.__playT0 串路，multi-stream P3）
           const poll = setInterval(() => {
             const v = videoRef.current;
             if (v && v.videoWidth > 0) {
-              const now = performance.now();
-              const playT0 = (window as any).__playT0 as number | undefined;
-              const total = playT0 ? now - playT0 : null;
               logT('首帧渲染确认 videoWidth=' + v.videoWidth + 'x' + v.videoHeight);
-              console.log(`[Play→首帧] 总耗时: ${total !== null ? Math.round(total) + 'ms' : 'N/A (无 __playT0)'} (点击Play→首帧渲染)`);
+              console.log(`[挂载→首帧] ${Math.round(performance.now() - t0)}ms`);
               clearInterval(poll);
             }
           }, 100);
@@ -67,22 +67,27 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose }: Props
     return () => {
       client.close();
       clientRef.current = null;
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
     };
   }, [roomId, serverUrl, token]);
 
   const handleMouseMove = () => {
     setShowControls(true);
-    clearTimeout(controlsTimer);
-    controlsTimer = setTimeout(() => setShowControls(false), 2000);
+    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    controlsTimerRef.current = setTimeout(() => setShowControls(false), 2000);
   };
 
   const statusColor = STATUS_COLORS[status];
   const isDisconnected = status === 'disconnected' || status === 'error';
 
+  const isTile = variant === 'tile';
   return (
-    <div className="video-player-overlay" onClick={onClose}>
+    <div
+      className={`video-player-overlay${isTile ? ' tile' : ''}`}
+      onClick={isTile ? undefined : onClose}
+    >
       <div
-        className={`video-player ${isDisconnected ? 'disconnected' : ''}`}
+        className={`video-player ${isDisconnected ? 'disconnected' : ''}${isTile ? ' tile' : ''}`}
         onClick={(e) => e.stopPropagation()}
         onMouseMove={handleMouseMove}
         onMouseLeave={() => setShowControls(false)}

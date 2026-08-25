@@ -1281,3 +1281,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: list_devices 注入 `&StatusRegistry`，streams 从 `status.get(room_id)` 的 StatusReport.streams 构造（StreamSnapshot{stream_id: sf.id, consumers: room.consumers.clone(), online: sf.connected}）；无报告 → streams 空。Room 聚合路径废弃（测试同步重写）。
 - **验证**: `curl /api/admin/rooms` → streams 含真实流 id + online；`cargo test -p mediaservo-server` 全绿。
 - **禁止**: 依赖 Room.device_id/stream_id 做设备流聚合（恒 None）；把 StatusRegistry 键冲突当多流问题（agent 整车一份上报，无冲突）。
+
+## PIT-131: 网关 rewrite_room 吞 per-stream 房间 — 多流按流隔离失效（2026-08-25）
+- **症状**: streamer ready 日志 room=vehicle_test-30fps，但 server 收到 join 的 room=vehicle（"Peer joined room" + list_producers for room vehicle）；send transport 建在整车房间，多流 producer 混室。
+- **根因**: host 网关 rewrite_room（gateway.rs:346）对非 audio- 房间**无条件改写为整车房间**（upstream 方向 room 参数=整车）——PIT-140 v2 的 per-stream 房间（<vehicle>_<stream>）被吞并；audio- 房间有直通例外（H2），per-stream 视频房间无。
+- **解法**: rewrite_room 增加 per-stream 直通——消息 room_id 以 `<整车>_` 开头（且非 audio-）→ 不改写（与 audio- 同原则：消息自身 room_id 语义优先）；补直通单测。
+- **验证**: server 日志 `creating "send" transport for peer host in room vehicle_test-30fps`（非 vehicle）；浏览器 consume 出帧（late-joiner sync NewProducer → consumed → readyState=4）。
+- **禁止**: 新增房间形态（per-stream/音频）时忘记网关重写面——rewrite_room 是 host 进程房间语义的唯一出口，改房间约定必须同步检查。

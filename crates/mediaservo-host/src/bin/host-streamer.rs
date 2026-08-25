@@ -473,12 +473,14 @@ async fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    // 整车房间（PIT-140: 曾硬编码 stream-<id>，浏览器按整车房间 Play 看不到流）：
-    // 与 agent 一致——[signaling].room 缺省 "vehicle"。
-    let room = mediaservo_host::translate::signaling_room(&cfg_text)
+    // 房间约定（PIT-140 v2 + multi-stream P3）: <整车房间>_<流 id> ——每流独立房间，
+    // 前端按 device_stream 勾选/播放（与 deleteRoom 同规则）；整车房间 = [signaling].room
+    // 缺省 "vehicle"。PIT-140 v1 曾全部推整车房间导致多流无法按流区分，v2 统一 per-stream。
+    let vehicle_room = mediaservo_host::translate::signaling_room(&cfg_text)
         .ok()
         .flatten()
         .unwrap_or_else(|| "vehicle".to_string());
+    let room = format!("{}_{}", vehicle_room, stream.id);
 
     // 令牌 → FrameBus attach → 订阅 camera/<camera-id>
     let token_bytes = match std::fs::read(&args.token) {

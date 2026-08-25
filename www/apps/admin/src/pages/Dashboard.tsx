@@ -10,13 +10,17 @@ import StreamDetail from '../components/StreamDetail';
 import VideoPlayer from '../components/VideoPlayer';
 import './Dashboard.css';
 
+const MAX_PLAYING = 4;
+
 export default function Dashboard() {
   const { devices, loading, error } = useDevices();
   const { isAdmin } = useAuth();
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [expanded, setExpanded] = useState(new Set());
   const [selectedStream, setSelectedStream] = useState<{ deviceId: string; stream: StreamSnapshot } | null>(null);
-  const [playingRoom, setPlayingRoom] = useState<string | null>(null);
+  // multi-stream P3: 勾选集（roomId = device_stream，与 deleteRoom 约定一致）+ 播放中列表
+  const [selectedRooms, setSelectedRooms] = useState<Set<string>>(new Set());
+  const [playingRooms, setPlayingRooms] = useState<string[]>([]);
 
   const fetchStats = useCallback(async () => {
     try { setStats(await getStats()); } catch { /* ignore */ }
@@ -26,13 +30,53 @@ export default function Dashboard() {
 
   useAdminWS(() => {
     fetchStats();
-    // ponytail: full refetch on any event; incremental merge when complexity warrants it
   });
 
   const toggle = (id: string) => {
     setExpanded(prev => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelect = (roomId: string) => {
+    setSelectedRooms(prev => {
+      const next = new Set(prev);
+      next.has(roomId) ? next.delete(roomId) : next.add(roomId);
+      return next;
+    });
+  };
+
+  const roomIdOf = (deviceId: string, streamId: string) => `${deviceId}_${streamId}`;
+
+  // 播放勾选集（空勾选 = 播放全部流，上限 MAX_PLAYING）
+  const playSelected = (deviceId: string) => {
+    const device = devices.find(d => d.device_id === deviceId);
+    if (!device) return;
+    let rooms: string[];
+    if (selectedRooms.size > 0) {
+      rooms = device.streams
+        .map(s => roomIdOf(deviceId, s.stream_id))
+        .filter(r => selectedRooms.has(r));
+    } else {
+      rooms = device.streams.map(s => roomIdOf(deviceId, s.stream_id));
+    }
+    if (rooms.length === 0) return;
+    setPlayingRooms(prev => {
+      const merged = [...prev];
+      for (const r of rooms) if (!merged.includes(r) && merged.length < MAX_PLAYING) merged.push(r);
+      return merged;
+    });
+  };
+
+  const toggleAllDevice = (device: DeviceSnapshot, checked: boolean) => {
+    setSelectedRooms(prev => {
+      const next = new Set(prev);
+      for (const s of device.streams) {
+        const r = roomIdOf(device.device_id, s.stream_id);
+        checked ? next.add(r) : next.delete(r);
+      }
       return next;
     });
   };
@@ -58,7 +102,19 @@ export default function Dashboard() {
       ) : (
         <div className="device-list">
           {devices.map((device) => (
-            <DeviceGroup key={device.device_id} device={device} canManage={isAdmin} expanded={expanded.has(device.device_id)} onToggle={() => toggle(device.device_id)} onSelectStream={(stream) => setSelectedStream({ deviceId: device.device_id, stream })} onPlayStream={() => { (window as any).__playT0 = performance.now(); console.log('[Play] 点击 Play (' + device.device_id + ') t0=' + Math.round((window as any).__playT0)); setPlayingRoom(device.device_id); }} />
+            <DeviceGroup
+              key={device.device_id}
+              device={device}
+              canManage={isAdmin}
+              expanded={expanded.has(device.device_id)}
+              selectedRooms={selectedRooms}
+              onToggle={() => toggle(device.device_id)}
+              onSelectStream={(stream) => setSelectedStream({ deviceId: device.device_id, stream })}
+              onToggleSelect={(roomId) => toggleSelect(roomId)}
+              onToggleAll={(checked) => toggleAllDevice(device, checked)}
+              onPlaySelected={() => playSelected(device.device_id)}
+              onCloseRoom={(roomId) => setPlayingRooms(prev => prev.filter(r => r !== roomId))}
+            />
           ))}
         </div>
       )}
@@ -71,20 +127,39 @@ export default function Dashboard() {
           onClose={() => setSelectedStream(null)}
         />
       )}
-      {playingRoom && (
-        <VideoPlayer
-          roomId={playingRoom}
-          serverUrl={`ws://${window.location.host}`}
-          token={localStorage.getItem('mediaservo_admin_token') || ''}
-          onClose={() => setPlayingRoom(null)}
-        />
+      {playingRooms.length > 0 && (
+        <div className="video-grid">
+          {playingRooms.map((roomId) => (
+            <VideoPlayer
+              key={roomId}
+              roomId={roomId}
+              serverUrl={wsServerUrl()}
+              token={localStorage.getItem('mediaservo_admin_token') || ''}
+              variant="tile"
+              onClose={() => setPlayingRooms(prev => prev.filter(r => r !== roomId))}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
 }
 
-function DeviceGroup({ device, canManage, expanded, onToggle, onSelectStream, onPlayStream }: { device: DeviceSnapshot; canManage: boolean; expanded: boolean; onToggle: () => void; onSelectStream: (stream: StreamSnapshot) => void; onPlayStream: () => void }) {
+function wsServerUrl(): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}`;
+}
+
+function DeviceGroup({ device, canManage, expanded, selectedRooms, onToggle, onSelectStream, onToggleSelect, onToggleAll, onPlaySelected, onCloseRoom }: {
+  device: DeviceSnapshot; canManage: boolean; expanded: boolean;
+  selectedRooms: Set<string>;
+  onToggle: () => void; onSelectStream: (stream: StreamSnapshot) => void;
+  onToggleSelect: (roomId: string) => void; onToggleAll: (checked: boolean) => void;
+  onPlaySelected: () => void; onCloseRoom: (roomId: string) => void;
+}) {
   const status = device.streams.length > 0 ? 'online' : 'offline';
+  const deviceAllSelected = device.streams.length > 0 && device.streams.every(s => selectedRooms.has(`${device.device_id}_${s.stream_id}`));
+  const anySelected = device.streams.some(s => selectedRooms.has(`${device.device_id}_${s.stream_id}`));
 
   return (
     <div className="device-group">
@@ -93,23 +168,44 @@ function DeviceGroup({ device, canManage, expanded, onToggle, onSelectStream, on
         <span className="device-name">{device.device_id}</span>
         <StatusBadge status={status} />
         <span className="device-stream-count">{device.streams.length} streams</span>
-        <button className="btn-play" onClick={(e) => { e.stopPropagation(); onPlayStream(); }}>▶ Play</button>
+        <button className="btn-play" onClick={(e) => { e.stopPropagation(); onPlaySelected(); }}>
+          ▶ {anySelected ? 'Watch Selected' : 'Play All'}
+        </button>
+        {canManage && (
+          <label className="stream-select-all" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={deviceAllSelected}
+              onChange={(e) => onToggleAll(e.target.checked)}
+              title="Select all streams"
+            />
+            <span>Select All</span>
+          </label>
+        )}
       </div>
       {expanded && (
         <div className="stream-list">
-          {device.streams.map((stream) => (
-            <div key={stream.stream_id} className="stream-item" onClick={() => onSelectStream(stream)} style={{ cursor: 'pointer' }}>
-              <span className="stream-name">📹 {stream.stream_id}</span>
-              <span className="consumer-count">{stream.consumers.length} viewers</span>
-              <div className="consumer-list">
-                {stream.consumers.map((c) => (
-                  <span key={c.peer_id} className="consumer-tag">👁 {c.peer_id}</span>
-                ))}
+          {device.streams.map((stream) => {
+            const roomId = `${device.device_id}_${stream.stream_id}`;
+            const playing = selectedRooms.has(roomId);
+            return (
+              <div key={stream.stream_id} className="stream-item" onClick={() => onSelectStream(stream)} style={{ cursor: 'pointer' }}>
+                <span className="stream-dot" style={{ background: stream.online ? '#27ae60' : '#95a5a6' }} title={stream.online ? 'online' : 'offline'} />
+                <span className="stream-name">📹 {stream.stream_id}</span>
+                <span className="consumer-count">{stream.consumers.length} viewers</span>
+                <div className="consumer-list">
+                  {stream.consumers.map((c) => (
+                    <span key={c.peer_id} className="consumer-tag">👁 {c.peer_id}</span>
+                  ))}
+                </div>
+                <label className="stream-select" onClick={(e) => e.stopPropagation()}>
+                  <input type="checkbox" checked={playing} onChange={() => onToggleSelect(roomId)} title="Select for joint viewing" />
+                </label>
+                {canManage && <button className="btn-sm" onClick={(e) => { e.stopPropagation(); deleteRoom(roomId); }}>Close</button>}
+                {playing && <button className="btn-sm btn-outline" onClick={(e) => { e.stopPropagation(); onCloseRoom(roomId); }}>Stop</button>}
               </div>
-              {/* H3: 关闭流 = 控制操作，仅 admin（dispatcher 只读） */}
-              {canManage && <button className="btn-sm" onClick={(e) => { e.stopPropagation(); deleteRoom(`${device.device_id}_${stream.stream_id}`); }}>Close</button>}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

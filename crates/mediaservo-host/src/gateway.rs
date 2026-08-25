@@ -351,6 +351,11 @@ fn rewrite_room(msg: &mut SignalingMessage, room: &str) {
     if msg_room_id(msg).is_some_and(|r| r.starts_with("audio-")) {
         return;
     }
+    // multi-stream P3: per-stream 房间（<整车>_<stream>）直通——推流端按流隔离房间
+    // （PIT-140 v2），网关不并入整车（与 audio- 同原则：消息自身 room_id 语义优先）。
+    if msg_room_id(msg).is_some_and(|r| r.starts_with(&format!("{room}_"))) {
+        return;
+    }
     match msg {
         RoomJoin { room_id, .. }
         | RoomJoined { room_id, .. }
@@ -759,6 +764,20 @@ mod tests {
         match &msg2 {
             SignalingMessage::CreateWebRtcTransport { room_id, .. } => {
                 assert_eq!(room_id, "vehicle", "非音频房间必须改写为整车房间")
+            }
+            other => panic!("意外变体: {other:?}"),
+        }
+
+        // multi-stream P3: per-stream 房间（<整车>_<stream>）直通
+        let mut msg3 = SignalingMessage::CreateWebRtcTransport {
+            room_id: "vehicle_test-30fps".into(),
+            peer_id: "s".into(),
+            direction: TransportDirection::Send,
+        };
+        rewrite_room(&mut msg3, "vehicle");
+        match &msg3 {
+            SignalingMessage::CreateWebRtcTransport { room_id, .. } => {
+                assert_eq!(room_id, "vehicle_test-30fps", "per-stream 房间必须直通")
             }
             other => panic!("意外变体: {other:?}"),
         }
