@@ -1295,3 +1295,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: join_room 判定补 per-stream 约定——Host 首进 + room_id 含 `_` → DeviceStream（纯整车保持 P2P）；补单测（per-stream → DeviceStream / vehicle → P2P）。
 - **验证**: `curl /api/admin/rooms` → devices 仅 vehicle（双流）；无 vehicle_test-30fps。
 - **禁止**: 新增房间形态时只改创建方（streamer/前端）不改 room.rs 的类型判定与归一——房间类型决定 list_devices 分组语义，两处必须同步。
+
+## PIT-143: 多 announced 每 IP 一个 ListenInfo（listen 0.0.0.0 同端口）→ bind 冲突 panic（2026-08-25）
+- **症状**: 配双 announced IP 后容器启动 panic——`uv_udp_bind() failed [ip:'0.0.0.0', port:20000]: address already in use`；HTTP 000。
+- **根因**: sfu.rs 多 IP 实现（PIT-58 时代）为每个 announced IP 建一个 ListenInfo 且**都 listen 0.0.0.0:20000**——同端口二次 bind 冲突（多 IP 从未实测；PIT-58 只验证过单 IP）。且容器内 announced 宿主 IP 不在容器接口列表——多 ListenInfo 本就不适用。
+- **解法**: 多 announced 仅**裸机**支持——每个 ListenInfo **listen 各自具体 IP**（if_addrs 本机接口过滤，非本机接口跳过）；容器场景**单 ListenInfo**（0.0.0.0 + 首 announced——容器无法公告多地址）；compose 默认把主访问网络 IP 放首位。
+- **验证**: 容器无 panic；`docker logs | grep announced` 首 IP = 主路径；`curl http://<主IP>:9800/admin` 200。
+- **禁止**: 多 announced 复用 listen 0.0.0.0（同端口）；容器场景期待多地址公告（mediasoup 单 0.0.0.0 bind 限制——多地址需裸机 listen 具体 IP）。
