@@ -608,6 +608,8 @@ facade 仍是纯编解码（不吞 mux，D229）；后续如果 playback 落地�
 （D-H11 选项② 最小实现）——不引入第二套签名体系；② **急停命令经信令转发**（新增
 EmergencyCommand 变体）而非 P2P DC——强审计要求"谁/何时/哪个车/什么命令"全量留痕，
 P2P 流量服务端不可见；底盘/云台常规控制仍走 P2P DC（协商期按角色授权 = 强制点）；
+> **修正（2026-08-25, 用户决策）**: P2P 直连 NAT 不可达 → **全 SFU**——媒体+控制全部经 mediasoup；
+> 控制 DC 走 SFU data 域（H1, Phase B 待办）；RoomType 仅 DeviceStream；网关 Sdp 按房间路由（无 p2p_owner）。
 ③ 授权矩阵为纯函数层（roles.rs）+ SessionIdentity 三态（Device/Account/Legacy），
 仅账号与设备会话启用强制（PSK legacy 部署行为不变，additive）。
 

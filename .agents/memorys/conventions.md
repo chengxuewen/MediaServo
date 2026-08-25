@@ -515,3 +515,11 @@ ff_.*_muxer` 应为 0（demuxer-only 实证）。
 | ⑤ ICE 状态 | Connected/Completed | host: `grep "ICE connection state" ...out.log`；浏览器 console | — |
 
 **检查**: 黑帧先跑 ①（30s）→②（30s）→③（30s）——90 秒内分层定位，禁止先猜编码/先改前端。
+
+## C35: 全 SFU 架构 — 禁止 P2P 直连路径（2026-08-25）
+
+**约束**: ① **媒体与控制全部走 SFU**（mediasoup）——P2P 直连（host↔client WebRTC）因 NAT 不可达问题废弃（用户决策 2026-08-25）；② RoomType 仅 DeviceStream（无 P2P 房间——Host 推流 / Remote|Consumer 消费，多舱端共存）；③ 网关无 p2p_owner 协商归属——Sdp/RTCIceCandidate 下行**按房间路由**（rewrite 后 room 一致的 conn 全量；无匹配丢弃+日志）；④ 控制 DC（底盘/云台）SFU 化 = 经 SFU data 域（H1 DataProducer/DataChannel label）——**Phase B 待办**（host-controller 改 SFU data consumer + 舱端 SCTP over mediasoup）。
+
+**检查**: `grep -rn "p2p_owner\|RoomType::P2P" crates/` 应为 0；`grep -n "Sdp.*按房间\|全 SFU" crates/mediaservo-host/src/gateway.rs` 存在。
+
+**来源**: 用户显式要求（2026-08-25 P2P 不可达 → 全 SFU）；替代 D 系列 P2P DC 决策（decisions.md 修正）。
