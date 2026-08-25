@@ -144,15 +144,18 @@ fn test_room_manager_signaling_flow() {
     // RoomFull for second Host
     assert!(rm.join_room("room-1", "host-2", &PeerRole::Host).is_err());
 
-    // RoomFull for second Remote
-    assert!(rm.join_room("room-1", "remote-2", &PeerRole::Remote).is_err());
+    // 全 SFU（2026-08-25）: 多 Remote（舱端 consumer）可共存
+    rm.join_room("room-1", "remote-2", &PeerRole::Remote).unwrap();
+    assert_eq!(rm.get_peer_count(), 3);
 
     // Leave host
     rm.leave_room("room-1", "host-1");
-    assert_eq!(rm.get_peer_count(), 1);
+    assert_eq!(rm.get_peer_count(), 2);
 
-    // Leave remote → room removed
+    // Leave remotes → room removed
     rm.leave_room("room-1", "remote-1");
+    assert_eq!(rm.get_peer_count(), 1);
+    rm.leave_room("room-1", "remote-2");
     assert_eq!(rm.active_rooms(), 0);
     assert_eq!(rm.get_peer_count(), 0);
 }
@@ -1134,7 +1137,7 @@ async fn g3_review_i1_remote_role_join_requires_control() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn g3_review_i1_sdp_relay_gated_by_control_in_p2p_room() {
+async fn g3_review_i1_sdp_relay_never_in_device_rooms() {
     let (_server, ws_url) = spawn_server_g3(&two_devices_yaml()).await;
     // 车端 host 会话：收房间广播，观察 SDP 是否被中继。
     let _ring_guard = AUDIT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -1213,12 +1216,8 @@ async fn g3_review_i1_sdp_relay_gated_by_control_in_p2p_room() {
             }
         }
     }
-    assert!(relayed, "operator 的 SDP 必须中继到车端（P2P 控制协商）");
+    // 全 SFU（2026-08-25）: 所有房间 DeviceStream——Sdp 一律不中继（无 P2P 控制协商，
+    // 媒体走 SFU 消息驱动，控制 DC 经 SFU data 域 Phase B）。operator 的 SDP 同样拦截。
+    assert!(!relayed, "全 SFU: operator 的 SDP 也不得中继到车端");
     drop(op_ws);
-
-    // C15: 拦截已审计。
-    assert!(
-        has_denial(&mediaservo_server::audit::recent(), "control_negotiation"),
-        "SDP 拦截必须审计"
-    );
 }

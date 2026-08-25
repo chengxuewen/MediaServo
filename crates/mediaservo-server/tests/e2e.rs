@@ -370,16 +370,18 @@ fn room_manager_join_and_leave() {
     assert!(result.is_err());
     assert_eq!(rm.get_peer_count(), 2); // unchanged
 
-    // Second Remote in same room → error RoomFull
-    let result = rm.join_room("room-1", "remote-2", &PeerRole::Remote);
-    assert!(result.is_err());
+    // 全 SFU（2026-08-25）: 多 Remote（舱端 consumer）可共存——无 P2P single-slot
+    rm.join_room("room-1", "remote-2", &PeerRole::Remote).unwrap();
+    assert_eq!(rm.get_peer_count(), 3);
 
-    // Leave host → room stays (remote still there)
+    // Leave host → room stays (remotes still there)
     rm.leave_room("room-1", "host-1");
-    assert_eq!(rm.get_peer_count(), 1);
+    assert_eq!(rm.get_peer_count(), 2);
 
-    // Leave remote → room removed (empty)
+    // Leave remotes → room removed (empty)
     rm.leave_room("room-1", "remote-1");
+    assert_eq!(rm.get_peer_count(), 1);
+    rm.leave_room("room-1", "remote-2");
     assert_eq!(rm.active_rooms(), 0);
     assert_eq!(rm.get_peer_count(), 0);
 }
