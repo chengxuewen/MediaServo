@@ -24,6 +24,8 @@ async fn integration_signaling_pipeline() {
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
     let server = SignalingServer::new(65536, None);
+    let mut server = server;
+    server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));
     let app = signaling_router(server);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -246,6 +248,8 @@ async fn test_auth_failure_integration() {
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
     let server = SignalingServer::new(65536, None);
+    let mut server = server;
+    server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));
     let app = signaling_router(server);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -295,6 +299,8 @@ async fn e2e_video_frame_relay() {
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
     let server = SignalingServer::new(65536, None);
+    let mut server = server;
+    server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));
     let app = signaling_router(server);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -426,6 +432,8 @@ async fn spawn_server_with_devices(
     let mut server = SignalingServer::new(65536, None);
     server.device_registry = std::sync::Arc::new(registry);
 
+    let mut server = server;
+    server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));
     let app = signaling_router(server.clone());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -725,6 +733,8 @@ async fn spawn_server_g3(devices_yaml: &str) -> (SignalingServer, String) {
         Some(mediaservo_common::auth::JwtAuth::new(JWT_SECRET)),
     );
     server.device_registry = std::sync::Arc::new(registry);
+    let mut server = server;
+    server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));
     let app = signaling_router(server.clone());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
