@@ -120,6 +120,10 @@ impl RoomManager {
             tracing::info!("Peer {} joined room {} as {:?}", peer_id, room_id, role);
         } else {
             let room_type = match role {
+                // Host 首进：per-stream 房间（<vehicle>_<stream>，PIT-140 v2 约定）→
+                // DeviceStream（否则 list_devices 归一见 vehicle_test-30fps 伪设备）；
+                // 纯整车/其他房间保持 P2P 语义（host+remote 直连）。
+                PeerRole::Host if id.contains('_') => RoomType::DeviceStream,
                 PeerRole::Host => RoomType::P2P,
                 PeerRole::Remote | PeerRole::Consumer => RoomType::DeviceStream,
             };
@@ -361,6 +365,20 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(mgr.active_rooms(), 1);
         assert_eq!(mgr.get_peer_count(), 1);
+    }
+
+    #[test]
+    fn join_room_host_creates_device_stream_for_perstream_room() {
+        // multi-stream P3: Host 首进 <vehicle>_<stream> 房间 → DeviceStream
+        // （否则 list_devices 归一见 vehicle_test-30fps 伪设备）
+        let mgr = RoomManager::new();
+        mgr.join_room("vehicle_test-30fps", "host-1", &PeerRole::Host).unwrap();
+        let room = mgr.rooms.get("vehicle_test-30fps").unwrap();
+        assert_eq!(room.room_type, RoomType::DeviceStream);
+        // 纯整车房间保持 P2P
+        mgr.join_room("vehicle", "host-2", &PeerRole::Host).unwrap();
+        let room2 = mgr.rooms.get("vehicle").unwrap();
+        assert_eq!(room2.room_type, RoomType::P2P);
     }
 
     #[test]

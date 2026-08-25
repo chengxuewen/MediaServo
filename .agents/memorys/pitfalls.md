@@ -1288,3 +1288,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: rewrite_room 增加 per-stream 直通——消息 room_id 以 `<整车>_` 开头（且非 audio-）→ 不改写（与 audio- 同原则：消息自身 room_id 语义优先）；补直通单测。
 - **验证**: server 日志 `creating "send" transport for peer host in room vehicle_test-30fps`（非 vehicle）；浏览器 consume 出帧（late-joiner sync NewProducer → consumed → readyState=4）。
 - **禁止**: 新增房间形态（per-stream/音频）时忘记网关重写面——rewrite_room 是 host 进程房间语义的唯一出口，改房间约定必须同步检查。
+
+## PIT-132: Host 首进 per-stream 房间创建为 P2P — list_devices 归一见伪设备（2026-08-25）
+- **症状**: 运行/播放一会后 Active Devices 下出现 `vehicle_test-30fps` 伪设备（应有归一 vehicle）。
+- **根因**: join_room 房间类型判定 `Host → P2P` 无条件——streamer（Host role）首进 per-stream 房间（<vehicle>_<stream>）时创建为 P2P 类型；list_devices 归一（P3）只拆分 DeviceStream 房间 → P2P 的 per-stream 房间不拆分 → 显示为独立设备。Play 触发 = streamer 首进房间发生在重连/播放时刻。
+- **解法**: join_room 判定补 per-stream 约定——Host 首进 + room_id 含 `_` → DeviceStream（纯整车保持 P2P）；补单测（per-stream → DeviceStream / vehicle → P2P）。
+- **验证**: `curl /api/admin/rooms` → devices 仅 vehicle（双流）；无 vehicle_test-30fps。
+- **禁止**: 新增房间形态时只改创建方（streamer/前端）不改 room.rs 的类型判定与归一——房间类型决定 list_devices 分组语义，两处必须同步。
