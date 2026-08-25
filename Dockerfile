@@ -23,7 +23,8 @@ ENV RUSTUP_DIST_SERVER=https://mirrors.tuna.tsinghua.edu.cn/rustup \
     RUSTUP_UPDATE_ROOT=https://mirrors.tuna.tsinghua.edu.cn/rustup/rustup \
     HTTP_PROXY=${HTTP_PROXY:-} \
     HTTPS_PROXY=${HTTPS_PROXY:-} \
-    NO_PROXY=${NO_PROXY:-} \
+    # wrapdb 直连（代理不可达——meson wrap 下载失败根因，PIT-127）
+    NO_PROXY=${NO_PROXY:-},wrapdb.mesonbuild.com \
     PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
