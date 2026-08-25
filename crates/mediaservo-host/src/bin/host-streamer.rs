@@ -473,19 +473,12 @@ async fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-
-    // C17 fps 对齐守卫（I1 审查）: 推流路径的编码帧率由 libwebrtc 内置 30fps
-    // 决定 — cfg.framerate 仅语义传递，无下游消费（field publish_video 不读它），
-    // 非 30 会在编码器 rate control 产生 PIT-64 类失配。任意 fps 的接线点在
-    // webrtc_sys.rs:133 的 max_framerate codec prefs 面（TODO: 接线后移除守卫）。
-    if cam.fps != 30 {
-        eprintln!(
-            "streamer: 相机 {} fps={} 不支持 — 推流编码器内置 30fps \
-             （TODO: webrtc_sys.rs:133 max_framerate 接线后放开）",
-            cam.id, cam.fps
-        );
-        return ExitCode::from(1);
-    }
+    // 整车房间（PIT-140: 曾硬编码 stream-<id>，浏览器按整车房间 Play 看不到流）：
+    // 与 agent 一致——[signaling].room 缺省 "vehicle"。
+    let room = mediaservo_host::translate::signaling_room(&cfg_text)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "vehicle".to_string());
 
     // 令牌 → FrameBus attach → 订阅 camera/<camera-id>
     let token_bytes = match std::fs::read(&args.token) {
@@ -544,10 +537,10 @@ async fn main() -> ExitCode {
     let mut cfg = PushConfig::via_gateway(
         gateway_url(args.gateway.as_deref()),
         format!("host-streamer-{}", stream.id),
-        format!("stream-{}", stream.id),
+        room.clone(),
     );
-    // framerate 仅语义传递（供未来编码器配置消费）— field publish_video 与
-    // libwebrtc 编码器均不读此字段（编码帧率 = 内置 30fps）；对齐由上方 fps 守卫保证（I1）
+    // framerate 语义传递（multi-stream P1 后 field 消费: set_encoding_framerate
+    // → libwebrtc max_framerate）；产帧侧与编码器侧均按此值
     cfg.framerate = cam.fps;
     let (mut session, mut events) = match PushSession::connect(cfg.clone()).await {
         Ok(se) => se,
@@ -563,7 +556,7 @@ async fn main() -> ExitCode {
     let mut vision: Option<VisionNegotiation> = setup_vision_dc(
         &gateway_url(args.gateway.as_deref()),
         &format!("host-streamer-{}-vision", stream.id),
-        &format!("stream-{}", stream.id),
+        &room,
     )
     .await;
     if vision.is_none() {

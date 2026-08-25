@@ -93,6 +93,14 @@ Err(RTCError::NotSupported("sender_set_parameters".into()))
         Err(RTCError::NotSupported("sender_set_encoding_bitrate".into()))
     }
 
+    /// v2 (multi-stream P1): 设置发送编码器帧率上限（fps）。
+    /// 默认 NotSupported + warn（C15）; webrtc-sys 后端 override（复制 bitrate 模式，
+    /// get_parameters → enc[].max_framerate → set_parameters）。
+    fn sender_set_encoding_framerate(&self, _track_id: &str, _max_fps: Option<f64>) -> Result<(), RTCError> {
+        tracing::warn!("sender_set_encoding_framerate: not supported by backend");
+        Err(RTCError::NotSupported("sender_set_encoding_framerate".into()))
+    }
+
     /// v2 (encoder-backend-codec-config T1): 设置发送编码器后端（软/硬实现选择）。
     /// 经 track_id 分派（sender.track().id() 匹配, request_key_frame 同模式）。
     /// 默认 NotSupported + warn（C15: 错误分支必须打日志）。

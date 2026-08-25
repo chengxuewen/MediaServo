@@ -736,6 +736,31 @@ Err(RTCError::Track(format!("sender not found: {track_id}")))
         Err(RTCError::Track(format!("sender not found: {track_id}")))
     }
 
+    /// v2 (multi-stream P1): 编码帧率上限（fps）— cxx 保真往返（bitrate 同模式）。
+    /// 只改 enc[].has_max_framerate/max_framerate 字段, 天然满足 SetParameters 的
+    /// codecs/encodings 数量/transaction_id 校验（PIT-76）。
+    /// libwebrtc 收到 SetParameters 后对编码器 reconfigure（官方行为）;
+    /// 帧时间戳由 C17 单调锚定（与 fps 无关）。None → has_max_framerate=false（不限制）。
+    fn sender_set_encoding_framerate(&self, track_id: &str, max_fps: Option<f64>) -> Result<(), RTCError> {
+        for tc in self.pc.get_transceivers() {
+            let t = &tc.ptr;
+            let sender = t.sender();
+            let track = sender.track();
+            if track.id() == track_id {
+                let mut params = sender.get_parameters();
+                for enc in &mut params.encodings {
+                    enc.has_max_framerate = max_fps.is_some();
+                    enc.max_framerate = max_fps.unwrap_or(0.0);
+                }
+                tracing::info!("sender_set_encoding_framerate({track_id}, max_fps={max_fps:?}) — SetParameters");
+                return sender
+                    .set_parameters(params)
+                    .map_err(|e| RTCError::Internal(e.what().to_owned()));
+            }
+        }
+        Err(RTCError::Track(format!("sender not found: {track_id}")))
+    }
+
     /// v2 (web-stream-stats T1.5): W3C RTCRtpSender.getStats（出站统计）。
     /// 调 webrtc-sys FFI（RtpSender::get_stats → ToJson, 同步回调）→ 解析 outbound-rtp 字段。
     /// 纯 Rust 零 C++ 改动（Oracle F2: libwebrtc ToJson 已含 framesEncoded/encoderImplementation 等）。

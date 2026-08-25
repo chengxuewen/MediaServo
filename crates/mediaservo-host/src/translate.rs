@@ -511,7 +511,7 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
         cmd.push_str(&format!(" --gateway {}", signaling_gateway_url(cfg)?));
         if !config_path.as_os_str().is_empty() {
             cmd.push_str(&format!(
-            " --config {} --token {}/{}.token",
+            " --config {} --token {}/{}-stream.token",
             config_path.display(),
             token_dir.display(),
             stream
@@ -583,6 +583,9 @@ pub fn camera_configs(cfg: &str) -> Result<Vec<SourceConfig>, String> {
         let fps = c.fps.unwrap_or(30);
         if fps == 0 {
             return Err(format!("host.yaml 解析失败: 视频源 {} fps=0 无效（须 > 0）", c.id));
+        }
+        if fps > 60 {
+            return Err(format!("host.yaml 解析失败: 视频源 {} fps={fps} 超上限（<=60）", c.id));
         }
         out.push(SourceConfig {
             id: c.id,
@@ -783,6 +786,18 @@ sources:
         let err = camera_configs(cfg).unwrap_err();
         assert!(err.contains("fps") && err.contains("cam0"), "{err}");
         assert!(camera_config(cfg, "cam0").is_err());
+    }
+
+    #[test]
+    fn camera_config_rejects_fps_over_60() {
+        // multi-stream P1: fps>60 上限（缺省 30 / 零值拒绝已有）
+        let cfg = "sources:\n  - id: \"cam0\"\n    fps: 61\n";
+        let err = camera_configs(cfg).unwrap_err();
+        assert!(err.contains("60") && err.contains("cam0"), "{err}");
+        assert!(camera_config(cfg, "cam0").is_err());
+        // 边界 60 合法
+        let ok = "sources:\n  - id: \"cam0\"\n    fps: 60\n";
+        assert_eq!(camera_configs(ok).unwrap()[0].fps, 60);
     }
 
     #[test]

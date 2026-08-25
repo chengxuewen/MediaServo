@@ -86,6 +86,17 @@ impl RTCRtpSender {
         }
     }
 
+    /// v2 (multi-stream P1): 设置发送编码器帧率上限（fps）。聚焦式 API（非 W3C
+    /// setParameters 全量）— 后端 cxx 保真往返只改 enc[].max_framerate 字段（bitrate 同模式）。
+    /// None = 不限制（has_max_framerate=false）。
+    pub fn set_encoding_framerate(&self, max_fps: Option<f64>) -> Result<(), RTCError> {
+        use crate::backend::PcBackend as _;
+        match &self.backend {
+            Some(b) => b.sender_set_encoding_framerate(&self.track_id, max_fps),
+            None => Err(RTCError::Internal("sender not bound to a peer connection".into())),
+        }
+    }
+
     /// v2 (encoder-backend-codec-config T1): 设置编码器后端（软/硬, PcBackend track_id 分派）。
     /// SetEncoderSelector 语义: 偏好非强制（不可用自动 fallback）。
     pub fn set_video_encoder_backend(&self, backend: RTCVideoEncoderBackend) -> Result<(), RTCError> {

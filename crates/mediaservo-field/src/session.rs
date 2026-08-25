@@ -218,6 +218,11 @@ impl PushSession {
                 if let Err(e) = rtp_sender.set_encoding_bitrate(None, Some(max_bps)) {
                     tracing::warn!("set_encoding_bitrate: {e}");
                 }
+                // 编码帧率上限（multi-stream P1: host.yaml fps → libwebrtc
+                // max_framerate via SetParameters）——帧时间戳 C17 锚定，与 fps 无关
+                if let Err(e) = rtp_sender.set_encoding_framerate(Some(f64::from(cfg.framerate))) {
+                    tracing::warn!("set_encoding_framerate: {e}");
+                }
             }
             None => tracing::warn!("sender not found for bitrate config: {track_id}"),
         }

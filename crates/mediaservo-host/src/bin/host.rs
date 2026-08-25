@@ -788,7 +788,9 @@ fn issue_all(dir: &Path, ttl: u64) -> i32 {
             }
         }
         for s in &streams {
-            let out = link.join(format!("{}.token", s.id));
+            // <stream>-stream.token（Pusher）与 sources 的 <id>.token（Capture）分离——
+            // 同名会因幂等 skip 被 Capture 占位，streamer 订阅被 ACL 拒（PIT-139）
+            let out = link.join(format!("{}-stream.token", s.id));
             if out.exists() {
                 continue;
             }
