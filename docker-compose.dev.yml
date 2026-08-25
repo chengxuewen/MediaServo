@@ -22,7 +22,7 @@ services:
       # PIT-58: SFU announced_address 用宿主可达 IP — 容器内探测=172.18.0.2 其他主机不可达。
       # 支持逗号分隔多 IP（宿主多网卡）；由 mediaservo.sh/CLI 自动探测注入，
       # 直接 compose up 时需手动设 MEDIASERVO_SFU_ANNOUNCED_IP
-      MEDIASERVO_SFU_ANNOUNCED_IP: ${MEDIASERVO_SFU_ANNOUNCED_IP:-192.168.2.127}
+      MEDIASERVO_SFU_ANNOUNCED_IP: ${MEDIASERVO_SFU_ANNOUNCED_IP:-192.168.2.127,10.144.0.3}
       # 容器内进程（mediasoup-sys meson wrapdb）需要独立代理 (PIT-38)
       HTTPS_PROXY: ${https_proxy:-}
       NO_PROXY: ${no_proxy:-}

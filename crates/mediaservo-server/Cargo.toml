@@ -57,6 +57,7 @@ axum-server = { version = "0.7", features = ["tls-rustls"] }
 
 # Static file embedding (optional)
 rust-embed = { version = "8", optional = true }
+if-addrs = "0.15.0"
 [features]
 default = ["sfu-mediasoup", "admin-dashboard"]
 webrtc = ["dep:mediaservo-webrtc"]
