@@ -788,7 +788,17 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
 
 def _run_server_native(args: argparse.Namespace) -> None:
-    """裸机跑 server：--config config/server.docker.yaml + 公告注入 + 端口守卫。"""
+    """裸机跑 server：幂等（已在跑→提示跳过）；--config config/server.docker.yaml + 公告注入 + 端口守卫。"""
+    # 幂等: start/restart/run 共用——pid 文件存活即已运行（防自家进程撞端口卫士）
+    pid_file = ROOT / "target" / "server-native.pid"
+    if pid_file.exists():
+        try:
+            alive_pid = int(pid_file.read_text().strip())
+        except ValueError:
+            alive_pid = -1
+        if alive_pid > 0 and Path(f"/proc/{alive_pid}").exists():
+            print(f"✓ server 裸机已在运行 pid={alive_pid}（target/server-native.pid）— 跳过启动")
+            sys.exit(0)
     _check('cargo', 'pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat')
     bin_path = ROOT / 'target' / ('release' if getattr(args, 'release', False) else 'debug') / 'mediaservo-server'
     if not bin_path.exists():
@@ -1024,8 +1034,23 @@ def _cmd_clean(args: argparse.Namespace) -> None:
     target = args.target
     if target in ("all", "server"):
         mode = "compose" if getattr(args, "env", None) is not None else _resolve_mode(args, default="both")
-        # native 产物（server-native.* + target 的 server 二进制——both/native 时）
+        # native：先停裸机进程（读 pid 文件）再删产物（防孤儿——clean 曾留进程在跑 pid 已删）
         if mode in ("both", "native"):
+            pid_file = ROOT / "target" / "server-native.pid"
+            if pid_file.exists():
+                try:
+                    pid = int(pid_file.read_text().strip())
+                except ValueError:
+                    pid = -1
+                if pid > 0 and Path(f"/proc/{pid}").exists():
+                    print(f"clean server: 停止裸机进程 pid={pid}")
+                    subprocess.run(["kill", str(pid)], check=False)
+                    for _ in range(4):
+                        if not Path(f"/proc/{pid}").exists():
+                            break
+                        time.sleep(0.5)
+                    if Path(f"/proc/{pid}").exists():
+                        subprocess.run(["kill", "-9", str(pid)], check=False)
             for f in ("target/server-native.pid", "target/server-native.log",
                      "target/debug/mediaservo-server", "target/release/mediaservo-server"):
                 _rm_path(ROOT / f)
@@ -1418,8 +1443,8 @@ def main() -> None:
                        help="裸机公告地址（覆盖自动探测——默认自动含 tun/vpn、ens 全部真实 IP，符合 PIT-143 多网卡语义）")
     run_p.set_defaults(func=_cmd_run)
 
-    start_p = sub.add_parser("start", help="启动 <target>: server=native（默认）| compose（--mode）| host 多进程")
-    start_p.add_argument("target", choices=["host", "server"])
+    start_p = sub.add_parser("start", help="启动 <target>（默认 server）: server=native（默认）| compose（--mode）| host 多进程")
+    start_p.add_argument("target", nargs="?", choices=["host", "server"], default="server")
     _add_mode_args(start_p)
     start_p.add_argument("--foreground", "-f", action="store_true", help="前台阻塞（host 仅 --legacy 支持）")
     start_p.add_argument("--legacy", action="store_true", help="host 回退旧单进程 host-legacy")
