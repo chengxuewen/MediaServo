@@ -756,6 +756,11 @@ def _run_server_native(args: argparse.Namespace) -> None:
     print('     仅限开发联调；生产部署用 up --env prod（entrypoint 自举随机密钥）', file=sys.stderr)
     cmd = [str(bin_path), '--config', str(ROOT / 'config' / 'server.docker.yaml')]
     log_path = ROOT / 'target' / 'server-native.log'
+    # export 指引（AccessBase cmd_start_native L180 借鉴——PIT-79/138 公告闭环:
+    # 后续终端操作需同一公告值，零新增探测——直接读生效 env）
+    announced_val = env.get("MEDIASERVO_SFU_ANNOUNCED_IP", "")
+    if announced_val:
+        print(f"  export MEDIASERVO_SFU_ANNOUNCED_IP='{announced_val}'")
     if args.foreground:
         _run_or_exit(cmd, env=env)
     else:
