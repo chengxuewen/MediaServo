@@ -609,13 +609,34 @@ def _cmd_start(args: argparse.Namespace) -> None:
 
 def _cmd_restart(args: argparse.Namespace) -> None:
     target = args.target
-    """restart <target> — 清除已运行的再启动（显式中断语义）。"""
+    """restart <target> — server: 默认 native（B 裁决）；--mode compose=容器重启；host: 多进程重启。"""
     if target == "server":
-        _check("docker", "安装 docker 并启动 daemon")
-        print("重启 server: 停止旧容器...")
-        subprocess.run(COMPOSE_BASE + ["down"], check=False, env=_compose_env())  # 无容器时忽略错误
-        _run_or_exit(COMPOSE_BASE + ["up", "-d", "server"], env=_compose_env())
-        print("✓ server 已重启")
+        mode = _resolve_mode(args, default="native")
+        if mode == "native":
+            # 停裸机（stop native 语义）+ 重启
+            pid_file = ROOT / "target" / "server-native.pid"
+            if pid_file.exists():
+                try:
+                    pid = int(pid_file.read_text().strip())
+                except ValueError:
+                    pid = -1
+                if pid > 0 and Path(f"/proc/{pid}").exists():
+                    print(f"重启 server: 停止裸机进程 pid={pid}")
+                    subprocess.run(["kill", str(pid)], check=False)
+                    for _ in range(4):
+                        if not Path(f"/proc/{pid}").exists():
+                            break
+                        time.sleep(0.5)
+                    if Path(f"/proc/{pid}").exists():
+                        subprocess.run(["kill", "-9", str(pid)], check=False)
+                pid_file.unlink(missing_ok=True)
+            _run_server_native(args)
+        else:
+            _check("docker", "安装 docker 并启动 daemon")
+            print("重启 server: 停止旧容器...")
+            subprocess.run(COMPOSE_BASE + ["down"], check=False, env=_compose_env())  # 无容器时忽略错误
+            _run_or_exit(COMPOSE_BASE + ["up", "-d", "server"], env=_compose_env())
+            print("✓ server 已重启（容器）")
     elif target == "host":
         _cmd_run_host()
     else:  # client
@@ -932,6 +953,17 @@ def _cmd_ci() -> None:
     _cmd_e2e(argparse.Namespace(suite="sfu"))
 
 
+def _rm_path(path: Path) -> None:
+    """删文件或目录（clean 通用——二进制文件用 unlink，目录用 rmtree）。"""
+    try:
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink(missing_ok=True)
+    except FileNotFoundError:
+        pass
+
+
 def _rm_tree(path: Path) -> None:
     """跨平台目录删除（Windows 用 rmdir /s /q 语义，Unix 用 rmtree）。
     容器生成的 root 文件会导致 PermissionError — 捕获并提示手动删除，不中断后续清理。"""
@@ -965,15 +997,23 @@ def _cmd_install(args: argparse.Namespace) -> None:
 
 def _cmd_clean(args: argparse.Namespace) -> None:
     """clean <target> — all|server|host|client（默认 all）。
-    server: 停容器(+--all 删卷+builder prune); host/client: 清宿主 cargo target。"""
+    server: 默认双清（native 产物 + 容器 down）；--mode native/compose 限定；host/client: 清宿主 cargo target。"""
     target = args.target
     if target in ("all", "server"):
-        _check("docker", "安装 docker 并启动 daemon")
-        down = COMPOSE_BASE + ["down"]
-        if args.all:
-            down.append("-v")  # --all 显式删卷（cargo-cache）→ 下次 build-server 15-30 分钟重建
-            print("警告: clean --all 将删除 cargo-cache 命名卷（下次 server 构建全量重编 15-30 分钟）")
-        _run_or_exit(down)
+        mode = "compose" if getattr(args, "env", None) is not None else _resolve_mode(args, default="both")
+        # native 产物（server-native.* + target 的 server 二进制——both/native 时）
+        if mode in ("both", "native"):
+            for f in ("target/server-native.pid", "target/server-native.log",
+                     "target/debug/mediaservo-server", "target/release/mediaservo-server"):
+                _rm_path(ROOT / f)
+        # compose 容器（both/compose 时）
+        if mode in ("both", "compose"):
+            _check("docker", "安装 docker 并启动 daemon")
+            down = COMPOSE_BASE + ["down"]
+            if args.all:
+                down.append("-v")  # --all 显式删卷（cargo-cache）→ 下次 build-server 15-30 分钟重建
+                print("警告: clean --all 将删除 cargo-cache 命名卷（下次 server 构建全量重编 15-30 分钟）")
+            _run_or_exit(down)
     if target in ("all", "host", "client"):
         # 项目根 target（workspace 默认，host/client 共享）
         _rm_tree(ROOT / "target")
@@ -1343,8 +1383,9 @@ def main() -> None:
     down_p.add_argument("--env", choices=["dev", "prod"], default=None)
     down_p.set_defaults(func=_cmd_down)
 
-    restart_p = sub.add_parser("restart", help="重启 <target>: host 进程（server 部署用 up/down）")
-    restart_p.add_argument("target", choices=["host", "client"])
+    restart_p = sub.add_parser("restart", help="重启 <target>: server=裸机（默认）| compose（--mode）| host 进程")
+    restart_p.add_argument("target", choices=["host", "server"])
+    _add_mode_args(restart_p)
     restart_p.set_defaults(func=_cmd_restart)
     run_p = sub.add_parser("run", help="运行 <target> [--announced-ip IP[,IP...]]: server=裸机（唯一模式）| host 多进程")
     run_p.add_argument("target", choices=["server", "host"])
@@ -1361,7 +1402,7 @@ def main() -> None:
     start_p.add_argument("--legacy", action="store_true", help="host 回退旧单进程 host-legacy")
     start_p.set_defaults(func=_cmd_start)
 
-    stop_p = sub.add_parser("stop", help="停止 <target>: server=双停（默认）\|--mode 限定；host=优雅停止")
+    stop_p = sub.add_parser("stop", help="停止 <target>: server=双停（默认）| --mode 限定；host=优雅停止")
     stop_p.add_argument("target", choices=["host", "server"])
     _add_mode_args(stop_p)
     stop_p.set_defaults(func=_cmd_stop)
@@ -1402,8 +1443,9 @@ def main() -> None:
     package_p.add_argument("--brand", default="", help="品牌包名（dist/<brand>-host-<ver>.tar.gz；缺省 mediaservo-host-<ver>）")
     package_p.add_argument("--release", action="store_true", help="打包 release 产物（target/release, 配合 build --release）")
     package_p.set_defaults(func=_cmd_package)
-    clean_p = sub.add_parser("clean", help="清理 <target>: all|server|host|client（默认 all）")
+    clean_p = sub.add_parser("clean", help="清理 <target>: all|server|host|client（默认 all；server --mode native/compose 限定）")
     clean_p.add_argument("target", nargs="?", choices=["all", "server", "host", "client"], default="all")
+    _add_mode_args(clean_p)
     clean_p.add_argument("--all", action="store_true", help="显式删卷 + docker builder prune（15-30 分钟重建代价）")
     clean_p.set_defaults(func=_cmd_clean)
     config_p = sub.add_parser("config", help="配置 show|validate|set <key> <value>（dev 轨道 config/ 目录）")
