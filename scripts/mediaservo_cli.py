@@ -67,6 +67,7 @@ def _ensure_admin_dist() -> None:
             newers = []
         need = bool(newers)
     if not need:
+        print(f"admin dist 最新（{dist_index.parent.relative_to(ROOT)}——src 无变更）— 跳过前端构建，嵌入既有 dist")
         return
     _check("pnpm", "pnpm 未安装——前端构建需要（或先手动 cd www && pnpm build:admin）")
     print("admin dist 过期/缺失 — 构建前端（tsc -b && vite build）...")
