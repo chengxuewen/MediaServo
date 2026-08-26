@@ -60,6 +60,11 @@ check-server = "sh -c 'scripts/docker-cargo.sh check -p mediaservo-server --feat
 build-server = "sh -c 'scripts/docker-cargo.sh build -p mediaservo-server --features sfu-mediasoup'"
 test-server = "sh -c 'scripts/docker-cargo.sh test -p mediaservo-server --features sfu-mediasoup'"
 
+# mediaservo-server — 原生编译（unset MESON_ARGS/MESON: conda gcc 注入 -Dbuildtype=release 与 tasks.py --buildtype 冲突；unset MESON 让 tasks.py 回落官方 pip 自装 meson==1.11.2+ninja，首次联网 pip 后续缓存）
+check-server-native = "sh -c 'unset MESON_ARGS; unset MESON; cargo check -p mediaservo-server'"
+build-server-native = "sh -c 'unset MESON_ARGS; unset MESON; cargo build -p mediaservo-server'"
+test-server-native = "sh -c 'unset MESON_ARGS; unset MESON; cargo test -p mediaservo-server'"
+
 
 # 工具 (无变更)
 format = "cargo fmt --all -- --check"
