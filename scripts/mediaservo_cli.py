@@ -810,9 +810,20 @@ def _run_server_native(args: argparse.Namespace) -> None:
     _check_port_range_free(40000, 40100, '40000-40100(RTP)')
     # announced 注入: --announced-ip > env > CLI 探测(含 tun) > 不注入(server 侧 detect_all_ips 兜底)
     env = _compose_env(getattr(args, 'announced_ip', None))  # 复用探测（显式给值时跳过自动探测打印）
-    print('⚠ 警告: 裸机跑 config/server.docker.yaml 含 dev 公开凭据（psk=mediaservo-dev/jwt 占位）——', file=sys.stderr)
+    print('⚠ 警告: 裸机跑 dev 轨道 config（psk=mediaservo-dev + 占位账号 admin123 等）——', file=sys.stderr)
     print('     仅限开发联调；生产部署用 up --env prod（entrypoint 自举随机密钥）', file=sys.stderr)
-    cmd = [str(bin_path), '--config', str(ROOT / 'config' / 'server.docker.yaml')]
+    # 裸机 config 适配（C13 双轨——原 server.docker.yaml 的 accounts/devices 指向容器卷 /opt/…）:
+    # 裸机加载应读 config/ 同目录 dev 模板，否则空注册表 → admin 登录 401。生成 target/server.native.yaml（不动公共文件）。
+    native_cfg = ROOT / 'target' / 'server.native.yaml'
+    src_cfg = ROOT / 'config' / 'server.docker.yaml'
+    if src_cfg.exists():
+        cfg_text = src_cfg.read_text()
+        cfg_text = cfg_text.replace('/opt/mediaservo/etc/accounts.yaml', str(ROOT / 'config' / 'accounts.docker.yaml'))
+        cfg_text = cfg_text.replace('/opt/mediaservo/etc/devices.yaml', str(ROOT / 'config' / 'devices.docker.yaml'))
+        native_cfg.write_text(cfg_text)
+    # dev 占位账号豁免（fail-fast 守卫——裸机=dev 联调，与 dev compose 的 ALLOW_DEV_CREDENTIALS=1 一致）
+    env.setdefault('MEDIASERVO_ALLOW_DEV_CREDENTIALS', '1')
+    cmd = [str(bin_path), '--config', str(native_cfg)]
     log_path = ROOT / 'target' / 'server-native.log'
     # export 指引（AccessBase cmd_start_native L180 借鉴——PIT-79/138 公告闭环:
     # 后续终端操作需同一公告值，零新增探测——直接读生效 env）
