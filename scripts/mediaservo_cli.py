@@ -733,11 +733,8 @@ def _run_host_legacy() -> None:
 
 
 def _cmd_run(args: argparse.Namespace) -> None:
-    """run <target>: server=裸机（默认/唯一模式——--mode compose 拒绝）；host=oxmgr 多进程。"""
+    """run <target>: server=裸机（唯一模式——评审 H4 死参移除）| host=oxmgr 多进程。"""
     if args.target == "server":
-        if _resolve_mode(args, default="native") != "native":
-            print("run server 仅支持裸机（compose 部署用 up --env dev|prod）", file=sys.stderr)
-            sys.exit(2)
         _run_server_native(args)
     elif args.target == "host":
         _cmd_run_host()
@@ -1033,7 +1030,7 @@ def _cmd_config(args: argparse.Namespace) -> None:
     sys.exit(0 if ok else 1)
 
 
-def _cmd_status() -> None:
+def _cmd_env_diagnose() -> None:
     """环境诊断 — 逐工具检查版本，缺失标 MISSING。"""
     pixi_bin = shutil.which("pixi") or str(Path.home() / ".pixi/bin/pixi")
     tools = [
@@ -1188,9 +1185,9 @@ def _add_mode_args(p, *, env_choices=("dev", "prod")):
     grp = p.add_mutually_exclusive_group()
     grp.add_argument("--mode", choices=["native", "compose"], default=None,
                      help="运行模式: native=裸机（默认）| compose=容器（--env 同效）")
-    grp.add_argument("--native", action="store_true", help="（--mode native 短别名——默认即 native）")
+    grp.add_argument("--native", action="store_true", help="（--mode native 短别名——默认模式，可省略）")
     grp.add_argument("--env", choices=list(env_choices), default=None,
-                     help="（--mode compose 短别名 + 环境选择 dev/prod）")
+                     help="（--mode compose 短别名 = 进程族容器模式；compose 族 up/down/ps 的 --env 是环境选择——两套语义）")
     p.set_defaults(_resolve_mode_into=None)
 
 
@@ -1296,8 +1293,8 @@ def _cmd_data(args: argparse.Namespace) -> None:
 
 
 def _cmd_doctor(_args: argparse.Namespace | None = None) -> None:
-    """环境诊断（原 status——团队审核: doctor 统一诊断入口，与 mediaservo-host doctor 区分）。"""
-    _cmd_status()
+    """环境诊断（工具链版本——原 status 更名，与运行态探测 status 区分）。"""
+    _cmd_env_diagnose()
 
 
 def _cmd_version() -> None:
@@ -1307,8 +1304,16 @@ def _cmd_version() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mediaservo",
-        description="MediaServo 统一构建 CLI（单入口: build/up/e2e/clean/config/status...）",
-    )
+        description="MediaServo 统一构建 CLI（术语: native=裸机, compose=容器）",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""三模式速查（native=裸机 compose=容器）:
+  模式① 本机原生:  build server --native → run server → status server → stop server
+  模式② 单容器生产: build server --image runtime → up --env prod → logs server --env prod（--native 并行另一套）
+  模式③ compose开发: up --env dev（热更）→ logs -f → down --env dev
+  up        = compose 部署（模式②③）；run/start = 进程（模式①：run server=裸机；start server --mode compose=容器）
+  退出码    : status/logs/stop/start —— 0=成功 1=未运行/目标缺失 2=参数错/互斥
+""")
+
     sub = parser.add_subparsers(dest="command", required=True)
 
     build_p = sub.add_parser("build", help="构建 <target> [--image runtime|dev|--native]: all|host|server|client|bindings（默认 all）")
@@ -1338,32 +1343,31 @@ def main() -> None:
     down_p.add_argument("--env", choices=["dev", "prod"], default=None)
     down_p.set_defaults(func=_cmd_down)
 
-    restart_p = sub.add_parser("restart", help="重启 <target>: host/client 进程（server 部署用 up/down）")
+    restart_p = sub.add_parser("restart", help="重启 <target>: host 进程（server 部署用 up/down）")
     restart_p.add_argument("target", choices=["host", "client"])
     restart_p.set_defaults(func=_cmd_restart)
-    run_p = sub.add_parser("run", help="运行 <target> [--foreground] [--announced-ip IP]: server=裸机（默认/唯一模式）| host=oxmgr 多进程——compose 部署用 up")
-    run_p.add_argument("target", choices=["server", "host", "client"])
-    _add_mode_args(run_p)
+    run_p = sub.add_parser("run", help="运行 <target> [--announced-ip IP[,IP...]]: server=裸机（唯一模式）| host 多进程")
+    run_p.add_argument("target", choices=["server", "host"])
     run_p.add_argument("--foreground", "-f", action="store_true", help="前台阻塞运行，输出实时透传")
     run_p.add_argument("--release", action="store_true", help="用 target/release 二进制")
     run_p.add_argument("--announced-ip", metavar="IP[,IP...]", default=None,
                        help="裸机公告地址（覆盖自动探测——默认自动含 tun/vpn、ens 全部真实 IP，符合 PIT-143 多网卡语义）")
     run_p.set_defaults(func=_cmd_run)
 
-    start_p = sub.add_parser("start", help="启动 <target>: server=裸机 native（默认）| compose 容器（--mode compose）| host=oxmgr 多进程")
+    start_p = sub.add_parser("start", help="启动 <target>: server=native（默认）| compose（--mode）| host 多进程")
     start_p.add_argument("target", choices=["host", "server"])
     _add_mode_args(start_p)
     start_p.add_argument("--foreground", "-f", action="store_true", help="前台阻塞（host 仅 --legacy 支持）")
     start_p.add_argument("--legacy", action="store_true", help="host 回退旧单进程 host-legacy")
     start_p.set_defaults(func=_cmd_start)
 
-    stop_p = sub.add_parser("stop", help="停止 <target>: server=默认双停（裸机 pid + compose stop）；--mode native/compose 限定单侧；host=优雅停止")
-    stop_p.add_argument("target", choices=["host", "server", "client"])
+    stop_p = sub.add_parser("stop", help="停止 <target>: server=双停（默认）\|--mode 限定；host=优雅停止")
+    stop_p.add_argument("target", choices=["host", "server"])
     _add_mode_args(stop_p)
     stop_p.set_defaults(func=_cmd_stop)
 
     logs_p = sub.add_parser("logs", help="日志 [<svc>] [--follow] [--mode native|compose]: server=裸机日志（默认）| compose 容器日志 | host 日志")
-    logs_p.add_argument("target", nargs="?", choices=["server", "host", "client"], default="server")
+    logs_p.add_argument("target", nargs="?", choices=["server", "host"], default="server")
     _add_mode_args(logs_p)
     logs_p.add_argument("--follow", "-f", action="store_true", help="跟踪输出")
     logs_p.set_defaults(func=_cmd_logs)
@@ -1377,7 +1381,7 @@ def main() -> None:
     exec_p.add_argument("cmd", nargs=argparse.REMAINDER, help="容器内命令（-- 后）")
     exec_p.set_defaults(func=_cmd_exec)
 
-    e2e_p = sub.add_parser("e2e", help="测试套件: sfu|push|ui|host|package|brand|bindings|client|smoke（smoke=生产冒烟）")
+    e2e_p = sub.add_parser("e2e", help="测试套件: sfu|push|ui|host|package|brand|bindings|client|smoke")
     e2e_p.add_argument("suite", choices=["sfu", "push", "ui", "host", "package", "brand", "bindings", "client", "smoke"])
     e2e_p.set_defaults(func=_cmd_e2e)
 
@@ -1407,7 +1411,7 @@ def main() -> None:
     config_p.add_argument("key", nargs="?", help="set: 配置键（如 signaling.psk）")
     config_p.add_argument("value", nargs="?", help="set: 配置值")
     config_p.set_defaults(func=_cmd_config)
-    data_p = sub.add_parser("data", help="数据卷管理: backup [<dir>]| reset | inspect（mediaservo-data/recordings）")
+    data_p = sub.add_parser("data", help="数据卷: backup [<dir>]| reset | inspect")
     data_p.add_argument("data_cmd", choices=["backup", "reset", "inspect"])
     data_p.add_argument("dir", nargs="?", help="backup: 目标目录（默认 ./backup）")
     data_p.add_argument("--force", action="store_true", help="reset: 跳过交互确认")
@@ -1415,7 +1419,7 @@ def main() -> None:
     doctor_p = sub.add_parser("doctor", help="环境诊断（pixi/cargo/docker/node——原 status）")
     doctor_p.set_defaults(func=_cmd_doctor)
     status_p = sub.add_parser("status", help="健康探测 <target>（退出码 0/1/2）: server=裸机（默认）| compose 容器（--mode compose）| host 推流进程")
-    status_p.add_argument("target", choices=["server", "host", "client"])
+    status_p.add_argument("target", choices=["server", "host"])
     _add_mode_args(status_p)
     status_p.set_defaults(func=_cmd_status_runtime)
 
