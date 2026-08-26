@@ -53,8 +53,8 @@ def _cmd_build_host() -> None:
 
 
 def _cmd_build_server(image: str | None = None, native: bool = False, release: bool = False) -> None:
-    """build server: --native=原生编译（pixi 工具链）| --image runtime|dev=Docker 镜像。"""
-    if native:
+    """build server: 默认 native（用户裁决 B——不写模式=原生）| --image runtime|dev=Docker 镜像（--native 兼容别名）。"""
+    if native or image is None:   # 默认 native；--image 显式才走 Docker
         _check("cargo", "pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat")
         if not os.environ.get("MESON"):
             print("错误: MESON 环境变量未设置——请经 ./mediaservo.sh 调用（source pixi-shell.sh 注入 activation env）", file=sys.stderr)
@@ -1316,7 +1316,7 @@ def main() -> None:
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    build_p = sub.add_parser("build", help="构建 <target> [--image runtime|dev|--native]: all|host|server|client|bindings（默认 all）")
+    build_p = sub.add_parser("build", help="构建 <target> [--image runtime|dev]: all|host|server|client|bindings（默认 all；server 默认 native 编译，--image 才走 Docker）")
     build_p.add_argument("target", nargs="?", choices=["all", "host", "server", "client", "bindings"], default="all")
     build_p.add_argument("--release", action="store_true", help="release 构建（bindings: target/release，strip+LTO）")
     grp = build_p.add_mutually_exclusive_group()
