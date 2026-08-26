@@ -18,6 +18,53 @@ pub fn is_audio_room(room_id: &str) -> bool {
     room_id.starts_with("audio-")
 }
 
+/// PIT-143 裸机判定: 首 announced IP 是否属本机接口 IP 列表。
+/// 容器内 announced = 宿主可达 IP（不在容器接口列表）→ false；
+/// 裸机（announced 自动探测或 env/yaml 为本机 IP）→ true。
+/// true  → 全部 ListenInfo bind 各自具体 IP（0.0.0.0 通配 + 具体 IP 同端口 = EADDRINUSE，T3 实证）；
+/// false → 0.0.0.0 通配 + 首 announced（容器/注入场景）。
+pub fn use_bare_metal_listen(
+    announced: &[String],
+    local: &std::collections::HashSet<String>,
+) -> bool {
+    announced.first().is_some_and(|first| local.contains(first))
+}
+
+#[cfg(test)]
+mod bare_metal_tests {
+    use super::use_bare_metal_listen;
+    use std::collections::HashSet;
+
+    fn local(ips: &[&str]) -> HashSet<String> {
+        ips.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn bare_metal_all_announced_local() {
+        let announced = ["192.168.2.127".to_string(), "10.144.0.3".to_string()];
+        assert!(use_bare_metal_listen(&announced, &local(&["192.168.2.127", "10.144.0.3"])));
+    }
+
+    #[test]
+    fn container_announced_not_local() {
+        // 容器接口为 172.x，不含宿主 IP → 非裸机
+        let announced = ["10.144.0.3".to_string()];
+        assert!(!use_bare_metal_listen(&announced, &local(&["172.18.0.2"])));
+    }
+
+    #[test]
+    fn mixed_first_local_rest_not() {
+        // 首 IP 本机 = 裸机语义（后续非本机地址跳过）
+        let announced = ["192.168.2.127".to_string(), "10.144.0.3".to_string()];
+        assert!(use_bare_metal_listen(&announced, &local(&["192.168.2.127"])));
+    }
+
+    #[test]
+    fn empty_announced_falls_back() {
+        assert!(!use_bare_metal_listen(&[], &local(&["192.168.2.127"])), "空 announced 回退 0.0.0.0");
+    }
+}
+
 
 #[cfg(feature = "sfu-mediasoup")]
 mod imp {
@@ -332,34 +379,47 @@ mod imp {
                         .collect()
                 })
                 .unwrap_or_default();
-            let mut listen_infos = WebRtcServerListenInfos::new(ListenInfo {
+            // 首 ListenInfo 选择（PIT-143 修正 + T3 §3.2 实证）:
+            // 裸机（首 announced ∈ 本机接口）→ bind 具体 IP：0.0.0.0 通配先占端口,
+            // 之后具体 IP 同端口 bind = Linux EADDRINUSE（uv_udp_bind ... address already in use）;
+            // 容器/注入（announced 宿主 IP 非本机接口）→ 0.0.0.0 + 首 announced（mediasoup 要求）。
+            let first_listen_ip = if use_bare_metal_listen(&announced_ips, &local_ips) {
+                match announced_ips[0].parse::<IpAddr>() {
+                    Ok(ip) => ip,
+                    Err(_) => {
+                        tracing::warn!(
+                            "bare-metal announced IP 非法 ({}), 回退 0.0.0.0 通配",
+                            announced_ips[0]
+                        );
+                        IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
+                    }
+                }
+            } else {
+                IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
+            };
+            let make_info = |listen_ip: IpAddr, announced: Option<String>| ListenInfo {
                 protocol: Protocol::Udp,
-                ip: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
-                announced_address: announced_ips.first().cloned(),
+                ip: listen_ip,
+                announced_address: announced,
                 expose_internal_ip: false,
                 port: Some(sfu_port),  // Fixed ICE port
                 port_range: None,
                 flags: None,
                 send_buffer_size: None,
                 recv_buffer_size: None,
-            });
-            // 裸机多网卡: 其余 IP 若为本机接口 → 各建 ListenInfo（listen 具体 IP）
+            };
+            let mut listen_infos = WebRtcServerListenInfos::new(make_info(
+                first_listen_ip,
+                announced_ips.first().cloned(),
+            ));
+            // 其余 announced: 本机接口 → 各建 ListenInfo（listen 具体 IP）;
+            // 非本机（容器注入的宿主 IP 等）→ 跳过。
             for ip in announced_ips.iter().skip(1) {
                 if !local_ips.contains(ip) {
                     continue; // 容器注入的宿主 IP——容器内无该接口，跳过
                 }
                 let Ok(listen_ip) = ip.parse::<IpAddr>() else { continue };
-                listen_infos = listen_infos.insert(ListenInfo {
-                    protocol: Protocol::Udp,
-                    ip: listen_ip,
-                    announced_address: Some(ip.clone()),
-                    expose_internal_ip: false,
-                    port: Some(sfu_port),
-                    port_range: None,
-                    flags: None,
-                    send_buffer_size: None,
-                    recv_buffer_size: None,
-                });
+                listen_infos = listen_infos.insert(make_info(listen_ip, Some(ip.clone())));
             }
             tracing::info!("WebRtcServer created on port {sfu_port} (announced: {announced_ips:?})");
             let webrtc_server = worker
