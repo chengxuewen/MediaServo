@@ -635,3 +635,11 @@ EmergencyCommand 转发（H 阶段 host-emergency）; 状态/告警的 operator 
 - **决策**: oxmgr 查找顺序统一为「host 二进制同目录（current_exe().parent()/oxmgr，D-H13 打包于 bin/）优先 → PATH 回落」——接线到所有调用点：host.rs cmd_oxmgr/run_oxmgr_in(None)/doctor + translate.rs oxmgr_apply/delete/list。install 打包 oxmgr 进 bin/ 使安装目录**零配置即用**（无需 export PATH）
 - **原因**: ① oxmgr_path()/oxmgr_cmd() helper 早已存在（current_exe() 模式）但 6 个调用点仍 `Command::new("oxmgr")` 纯 PATH——同目录能力"存在未接线"（触达性 bug，非设计缺失）；② 发布壳消费方（MSRTC --pure-brand 等）期望「安装即用」，PATH 是交互文档约定，不应是运行前提；③ multi-instance 下同目录绑定实例自己的 oxmgr（C32 隔离增强）
 - **影响**: host start/apply/monit/ps/doctor 全部零 PATH 可用；exe 同目录无 oxmgr 时回落 PATH（向后兼容）；D-H13 打包语义兑现
+
+## D254: Server 构建双轨化（原生主 + Docker 兜底）(2026-08-26)
+
+- **决策**: mediaservo-server 构建从「统一 Docker」放宽为「双轨」——原生编译为主路径（开发/调试），Docker 为发布镜像与 CI 兜底。pixi 任务：`build-server-native`/`check-server-native`/`test-server-native`（原生）；`docker-cargo.sh`（Docker 兜底）。
+- **原因**: ① 主流生态惯例：mediasoup 官方 Rust 绑定 = 原生 runner 进程内 meson（同架构）；livekit/Deno/Bun/Zed 均原生构建优先，Docker 仅发布；② 本机实证（T5 模式①✓）：target/server-native 有产物；③ 裸机多 IP 公告 = run server --native（PIT-143 完整路径，sfu.rs 全具体 IP）；④ Docker 兜底保留：CI 环境依赖一致性、macOS/Windows 开发者统一、发布镜像构建。
+- **参考**: mediasoup-rs（原生 meson wrap runner）、livekit-server（原生构建）、Deno/Bun（原生编译优先）、Zed（原生 Rust 构建）
+- **影响**: ① 开发者可用原生编译快速迭代（秒级 check vs 分钟级 Docker）；② 多 IP 公告在 run 阶段生效（sfu.rs bind 全具体 IP）；③ CI 保持 Docker 兜底（依赖一致性）；④ meson wrap 首次需联网（离线前提是首次构建成功后缓存命中）
+- **来源**: 用户显式批准（2026-08-26 three-mode-build T6）+ mediasoup/livekit/Deno/Bun/Zed 调研 + T5 实证

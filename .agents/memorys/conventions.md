@@ -242,23 +242,41 @@ mediaservo-webrtc = { path = "../mediaservo-webrtc", features = ["backend-webrtc
 
 ---
 
-## C13: Server 统一 Docker 构建
+## C13: Server 构建双轨化（原生主 + Docker 兜底）(2026-08-26 修订)
 
-**约束**：mediaservo-server 统一通过 Docker 编译（mediasoup C++ Worker 需要 Linux x86_64 + meson/ninja）。原生 `cargo check --workspace` 排除 server crate。
+**约束**：mediaservo-server 构建采用双轨策略——**原生编译为主路径**（开发/调试），Docker 为发布镜像与 CI 兜底。原「统一 Docker 编译」约束已放宽。
 
-**pixi 任务映射**：
-| 任务 | 命令 | 说明 |
+**构建矩阵**：
+| 场景 | 命令 | 说明 |
 |------|------|------|
-| `check` | `cargo check --workspace --exclude mediaservo-server` | 原生 |
-| `check-server` | `scripts/docker-cargo.sh check -p mediaservo-server --features sfu-mediasoup` | Docker |
-| `build-server` | `scripts/docker-cargo.sh build -p mediaservo-server --features sfu-mediasoup` | Docker |
+| 开发/调试（主路径） | `pixi run build-server-native` | 原生编译，meson wrap 首次需联网 |
+| 原生 check | `pixi run check-server-native` | exit 0 = 原生编译通过 |
+| 原生 test | `pixi run test-server-native` | 原生测试 |
+| 发布/CI 兜底 | `scripts/docker-cargo.sh build -p mediaservo-server --features sfu-mediasoup` | Docker 编译，环境一致 |
+| CI check 兜底 | `scripts/docker-cargo.sh check -p mediaservo-server --features sfu-mediasoup` | Docker check |
+| 原生 check（排除 server） | `cargo check --workspace --exclude mediaservo-server` | 非 server crate 原生检查 |
+
+**检查命令**：
+- `pixi run build-server-native` 应 Finished
+- `pixi run check-server-native` exit 0
 
 **原因**：
-- mediasoup-sys 的 meson wrap 依赖 wrapdb.mesonbuild.com（不可达时无法下载 flatbuffers patch）
-- Docker 镜像预装所有依赖，构建环境一致
-- macOS/Windows 开发者统一使用 Docker
+- 主流生态惯例：mediasoup 官方 Rust 绑定 = 原生 runner 进程内 meson（同架构）
+- livekit/Deno/Bun/Zed 均原生构建优先，Docker 仅发布
+- 本机实证（T5 模式①✓）：target/server-native 有产物
+- 裸机多 IP 公告 = run server --native（PIT-143 完整路径，sfu.rs 全具体 IP）
+- meson wrap 首次需联网（wrapdb.mesonbuild.com），离线前提是首次构建成功后缓存命中
 
-**来源**：用户显式要求（2026-07-31）、OpenVidu pre-built binary 参考
+**Docker 兜底保留理由**：
+- CI 环境依赖一致性（Ubuntu 22.04 基线）
+- macOS/Windows 开发者 Docker 统一
+- 发布镜像构建（`--image runtime`）
+
+**修订历史**：
+- 2026-07-31 原版：server 统一 Docker 编译（C13 初版）
+- 2026-08-26 修订：双轨化，原生主 + Docker 兜底（three-mode-build T6）
+
+**来源**：用户显式批准（2026-08-26 three-mode-build T6）+ mediasoup/livekit/Deno/Bun/Zed 调研 + T5 实证
 
 ---
 

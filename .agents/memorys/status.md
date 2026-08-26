@@ -1,6 +1,6 @@
 # MediaServo Status
 
-**生成**: 2026-08-21| 决策: 52 条目 (D196-D252, 含跳号)| Phase: 3 完成 + deck 三域 + field MVP + H1 data 域 + H2 音频会议 + 整支审查 C1/I1/I2/I3 || 379 commits | 22 skills | mediasoup 0.24.1 | PIT-107 | 分支: main (C1 transport_id 注册表 + I1 room 接线 + I2 dev 守卫 + I3 StatusReport 门) || Crate | Lib Tests | Integration | 备注 |
+**生成**: 2026-08-26| 决策: 53 条目 (D196-D254, 含跳号)| Phase: 3 完成 + deck 三域 + field MVP + H1 data 域 + H2 音频会议 + 整支审查 C1/I1/I2/I3 + three-mode-build || 379 commits | 22 skills | mediasoup 0.24.1 | PIT-107 | 分支: main (C1 transport_id 注册表 + I1 room 接线 + I2 dev 守卫 + I3 StatusReport 门 + T6 C13 双轨化) || Crate | Lib Tests | Integration | 备注 |
 |-------|:---------:|:------------:|------|
 | mediaservo-common | 82 | — | +SfuStatsRequest/SfuStats (H2) |
 | mediaservo-media | 107 | — | |
@@ -135,6 +135,16 @@ Host (macOS) → WS :9800 → Docker Server → WS :9800 → Client (macOS)
 1. Host RTP 发送 — 需要 ICE/DTLS 握手完成（当前 webrtc-rs PeerConnection 无 candidate pairs）
 2. Playwright 端到端验证
 3. 浏览器 ontrack → video.srcObject → 视频帧渲染
+
+### 三种模式构建 (2026-08-26, three-mode-build T6)
+
+| 模式 | 构建 | 运行 | 调试 | 说明 |
+|------|------|------|------|------|
+| ① 原生 | `pixi run build-server-native` | `pixi run run-server-native` | `pixi run run-server-native --foreground` | 开发/调试主路径 |
+| ② 单容器 prod | `./mediaservo.sh build server --image runtime` | `./mediaservo.sh up --env prod` | — | 发布镜像 |
+| ③ compose dev | `docker compose build` | `./mediaservo.sh up --env dev` | compose 附着 | 开发环境（延后） |
+
+**C13 修订**：原「统一 Docker」→ 双轨（原生主 + Docker 兜底），详见 conventions.md C13。
 
 ## VideoSource 统一帧源接口 (2026-08-11, 计划 video-source-unification T1-T4)
 
