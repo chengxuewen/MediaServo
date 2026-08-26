@@ -61,6 +61,8 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
         cmd = ["cargo", "build"] + (["--release"] if release else []) + ["-p", "mediaservo-server"]
         # tasks.py env 坑（T1 Ruling 延伸，brief 未预见）: pixi activation 注入的 MESON 指向
         # 不存在的 NINJA → build.rs/tasks.py 跳过 pip 但 NINJA 缺失会挂；pop 掉与 T1 unset 语义一致。
+        # MESON 断言仅作为「经 mediaservo.sh 激活」代理（pixi activation 注入）；pop 后 cargo
+        # 子进程无 MESON/MESON_ARGS，与 T1 unset 语义一致（tasks.py 回落官方 pip 自装 meson/ninja）。
         env = {**os.environ}
         env.pop("MESON_ARGS", None)
         env.pop("MESON", None)
@@ -757,9 +759,12 @@ def _run_server_native(args: argparse.Namespace) -> None:
     if args.foreground:
         _run_or_exit(cmd, env=env)
     else:
+        # I-1: 清 stale pid（上次崩溃残留）——防 stop 杀错回收 pid；写后覆盖语意保留
+        pid_file = ROOT / 'target' / 'server-native.pid'
+        pid_file.unlink(missing_ok=True)
         # T3 minor: 启动时 truncate（崩溃残留不污染，重启从头记）+ start_new_session（脱离终端，stop 按 pid 文件可杀）
         proc = subprocess.Popen(cmd, env=env, stdout=open(log_path, 'wb'), stderr=subprocess.STDOUT, start_new_session=True)
-        (ROOT / 'target' / 'server-native.pid').write_text(str(proc.pid))
+        pid_file.write_text(str(proc.pid))
         print(f'✓ server 裸机运行中 pid={proc.pid} — 日志: target/server-native.log（logs server --native）')
 
 
