@@ -1018,6 +1018,133 @@ def _cmd_status() -> None:
         print(f"{name:8s} {output[0] if output else '?'}")
 
 
+def _cmd_status_runtime(args: argparse.Namespace) -> None:
+    """status <target> — 健康探测（AccessBase cmd_status_native 借鉴，评审吸收）。
+    退出码: 0=运行中 1=未运行 2=探测失败/参数错。ps=清单 vs status=健康结论（help 互引）。"""
+    code = 2
+    if args.target == "server":
+        code = _status_server_native() if args.native else _status_server_container(args.env)
+    elif args.target == "host":
+        code = _status_host()
+    else:
+        print("status client: 待实现（client 骨架阶段）", file=sys.stderr)
+    sys.exit(code)
+
+
+def _curl_health_code() -> str:
+    """curl -o /dev/null -w %{http_code} 9800（2s 超时）。"""
+    try:
+        out = subprocess.run(
+            ["curl", "--noproxy", "*", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+             "--max-time", "2", "http://127.0.0.1:9800/health"],
+            capture_output=True, text=True, timeout=5, check=False,
+        ).stdout
+        return out.strip()
+    except OSError:
+        return ""
+
+
+def _ss_listening(port: int) -> bool | None:
+    """ss -tulnp 是否含 :port。None=无法判定（C15——评审 arch F4 假阴性修正）。"""
+    try:
+        out = subprocess.run(["ss", "-tulnp"], capture_output=True, text=True, timeout=5, check=False).stdout
+        return f":{port} " in out
+    except OSError:
+        return None
+
+
+def _status_server_native() -> int:
+    """裸机运行态。返回 0/1。"""
+    print("server (native):")
+    pid_file = ROOT / "target" / "server-native.pid"
+    running = False
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text().strip())
+        except ValueError:
+            pid = 0
+        alive = pid > 0 and Path(f"/proc/{pid}").exists()
+        print(f"  pid 文件: {pid_file.name} {'存活 pid=' + str(pid) if alive else '(进程不在 — stale)'}")
+        running = alive
+    else:
+        print("  pid 文件: 不存在（未运行）")
+    code = _curl_health_code()  # 观察量——dev/prod 容器也占 9800，不作"裸机在跑"判据（pid 文件是 run/stop 契约）
+    print(f"  health 9800: {'200 OK' if code == '200' else code or '无响应'}")
+    av = _compose_env().get("MEDIASERVO_SFU_ANNOUNCED_IP", "")
+    if av:
+        print(f"  announced: {av}")   # C38 ①层观察量（评审 arch F3）
+    probe_failed = False
+    for port, name in ((20000, "SFU UDP"), (40000, "RTP 起"), (40100, "RTP 止")):
+        st = _ss_listening(port)
+        if st is None:
+            probe_failed = True
+        print(f"  {port} {name}: {'监听' if st else ('无法判定' if st is None else '空闲')}")
+    # Momus LOW：探测失败契约——无法判定 → 退出码 2（优先于 0/1）
+    return 2 if probe_failed else (0 if running else 1)
+
+
+def _compose_running(env: str) -> bool:
+    """env 是否有容器在跑（dev/prod 同容器名、compose ps 按目录聚合不分 env——
+    按 config_files label 区分，_detect_running_env 同源）。"""
+    try:
+        out = subprocess.run(["docker", "ps", "--format", "{{.Names}}"],
+                             capture_output=True, text=True, timeout=5, check=False).stdout
+        if "mediaservo-server-1" not in out:
+            return False
+        return _detect_running_env() == env
+    except OSError:
+        return False
+
+
+def _status_server_container(env_arg: str | None = None) -> int:
+    """容器运行态。env_arg 复接 --env（评审 cli F1：不许 help-实现漂移）。"""
+    code = _curl_health_code()
+    env_now = env_arg or _detect_running_env()
+    print(f"server (compose env={env_now}):", flush=True)  # flush: _run 子进程输出先于 print（pipe 缓冲）
+    _check("docker", "安装 docker 并启动 daemon")
+    _run(["docker", "compose", "-f", _compose_file(env_now), "ps"])  # 进程/容器清单（ps 子集——评审 arch F1）
+    print(f"  health 9800: {'200 OK' if code == '200' else code or '无响应'}")
+    av = _compose_env().get("MEDIASERVO_SFU_ANNOUNCED_IP", "")
+    if av:
+        print(f"  announced: {av}")   # C38 ①层观察量
+    return 0 if _compose_running(env_now) else 1
+
+
+def _status_host() -> int:
+    """host 运行态。进程名双前缀（评审 ops#1 CRITICAL：品牌化 msrtc-* vs 官方 host-*）。"""
+    print("host:")
+    procs = ["agent", "streamer", "capturer"]  # 品牌化角色（双前缀——ops#1 CRITICAL）
+    brands = ["msrtc", "host"]
+    bare_procs = ["oxmgr"]  # Momus HIGH：oxmgr daemon 进程名是裸 `oxmgr`（npm 二进制 bin/oxmgr；
+    # 品牌前缀仅作用于 translate 生成的 <brand>-<app>——agent/streamer/capturer 才带前缀）
+    any_alive = False
+    probe_failed = False
+    for role in procs + bare_procs:
+        pids: list[str] = []
+        cands = [f"{b}-{role}" for b in brands] if role not in bare_procs else [role]
+        for cname in cands:
+            out = subprocess.run(["pgrep", "-x", cname], capture_output=True, text=True, check=False).stdout.strip()
+            if out:
+                pids = out.splitlines()
+                break
+        if pids:
+            any_alive = True
+            print(f"  {role}: 运行中 pid={' '.join(pids)}")
+        else:
+            print(f"  {role}: 未运行")
+    st = _ss_listening(17980)
+    if st is None:
+        probe_failed = True
+    print(f"  网关 17980: {'监听' if st else ('无法判定' if st is None else '空闲')}")
+    # 实例日志路径（评审 ops#5/docs#3：C32 实例隔离——不硬编码占位符）
+    inst = os.environ.get("OXMGR_DATA_DIR", "")
+    log_hint = (Path(inst).parent / "run" / "logs") if inst else (ROOT.parent / "out" / "host" / "run" / "logs")
+    print(f"  日志: {log_hint}/msrtc-streamer-<stream>.err.log（C38 ②层：grep 订阅/acl denied/OpenH264）")
+    if not any_alive:
+        print("  → host 未运行：./mediaservo.sh start host（或 restart host）", file=sys.stderr)
+    return 2 if probe_failed else (0 if any_alive else 1)
+
+
 def _compose_file(env: str) -> str:
     """环境 → compose 文件映射（up/down/ps/exec 共用）。"""
     return "docker-compose.yml" if env == "prod" else "docker-compose.dev.yml"
@@ -1225,6 +1352,13 @@ def main() -> None:
     data_p.set_defaults(func=_cmd_data)
     doctor_p = sub.add_parser("doctor", help="环境诊断（pixi/cargo/docker/node——原 status）")
     doctor_p.set_defaults(func=_cmd_doctor)
+    status_p = sub.add_parser("status", help="健康探测 <target> [--native|--env dev|prod]（退出码: 0=运行 1=未运行 2=探测失败——脚本可消费）：server=容器(默认)|--native=裸机；host=推流进程+网关端口（C38 ②层）——进程/容器清单见 ps")
+    status_p.add_argument("target", choices=["server", "host", "client"])
+    grp = status_p.add_mutually_exclusive_group()
+    grp.add_argument("--native", action="store_true", help="server: 裸机运行态（pid/health/端口）")
+    grp.add_argument("--env", choices=["dev", "prod"], default=None, help="容器环境（默认自动检测）")
+    status_p.set_defaults(func=_cmd_status_runtime)
+
     sub.add_parser("version", help="CLI 版本")
 
     # 兼容别名（保留 build-*——e2e 脚本/习惯用法）: run-host/up/down 别名已移除（up/down 现一级命令）
@@ -1261,6 +1395,9 @@ def main() -> None:
         _cmd_start(args.target, args.foreground, args.legacy)
     elif args.command in ("stop", "restart", "logs"):
         globals()[f"_cmd_{args.command}"](args)
+    elif args.command == "status":
+        _cmd_status_runtime(args)
+
     elif args.command in ("test", "ci"):
         globals()[f"_cmd_{args.command}"]()
     elif args.command == "version":
