@@ -35,14 +35,14 @@ def _check(tool: str, hint: str) -> None:
         sys.exit(1)
 
 
-def _run(cmd: list[str], env: dict[str, str] | None = None) -> int:
+def _run(cmd: list[str], env: dict[str, str] | None = None, cwd: str | None = None) -> int:
     """执行命令（默认继承环境），失败透传退出码。"""
-    print(f"$ {' '.join(cmd)}")
-    return subprocess.run(cmd, env=env).returncode
+    print(f"$ {' '.join(cmd)}{'  (cwd: ' + cwd + ')' if cwd else ''}")
+    return subprocess.run(cmd, env=env, cwd=cwd).returncode
 
 
-def _run_or_exit(cmd: list[str], env: dict[str, str] | None = None) -> None:
-    code = _run(cmd, env=env)
+def _run_or_exit(cmd: list[str], env: dict[str, str] | None = None, cwd: str | None = None) -> None:
+    code = _run(cmd, env=env, cwd=cwd)
     if code != 0:
         sys.exit(code)
 
@@ -52,9 +52,31 @@ def _cmd_build_host() -> None:
     _run_or_exit(["cargo", "build", "-p", "mediaservo-host", "-p", "mediaservo-client"])
 
 
+def _ensure_admin_dist() -> None:
+    """admin 前端增量构建（C13 双轨一致性——Docker 路径 Dockerfile 内现场构建，原生路径对齐）。
+    判定: dist 缺失 或 src 有文件比 dist/index.html 新 → pnpm build:admin（turbo filter）。
+    无前端变更时零额外成本（mtime 跳过）。修复 C24 事故（改前端 rebuild 不生效）。"""
+    dist_index = ROOT / "www" / "apps" / "admin" / "dist" / "index.html"
+    src_dir = ROOT / "www" / "apps" / "admin" / "src"
+    need = True
+    if dist_index.exists() and src_dir.exists():
+        dist_mtime = dist_index.stat().st_mtime
+        try:
+            newers = [p for p in src_dir.rglob("*") if p.is_file() and p.stat().st_mtime > dist_mtime]
+        except OSError:
+            newers = []
+        need = bool(newers)
+    if not need:
+        return
+    _check("pnpm", "pnpm 未安装——前端构建需要（或先手动 cd www && pnpm build:admin）")
+    print("admin dist 过期/缺失 — 构建前端（tsc -b && vite build）...")
+    _run_or_exit(["pnpm", "build:admin"], cwd=str(ROOT / "www"))
+
+
 def _cmd_build_server(image: str | None = None, native: bool = False, release: bool = False) -> None:
     """build server: 默认 native（用户裁决 B——不写模式=原生）| --image runtime|dev=Docker 镜像（--native 兼容别名）。"""
     if native or image is None:   # 默认 native；--image 显式才走 Docker
+        _ensure_admin_dist()      # 前置增量构建前端（C13 双轨对齐——Docker 路径 Dockerfile 内自理）
         _check("cargo", "pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat")
         if not os.environ.get("MESON"):
             print("错误: MESON 环境变量未设置——请经 ./mediaservo.sh 调用（source pixi-shell.sh 注入 activation env）", file=sys.stderr)
