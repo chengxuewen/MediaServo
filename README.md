@@ -61,9 +61,12 @@ MediaServo — 实时媒体伺服平台（MediaServo Platform）。独立部署�
 ./mediaservo.sh up --env dev  # 启动 dev server 容器（幂等，自动注入 ANNOUNCED_IP）；prod: up --env prod
 ./mediaservo.sh up --announced-ip 10.144.0.3  # 显式指定容器公告地址（覆盖自动探测；多值逗号分隔——
                                   # 容器仅单公告生效取首 IP，多地址需裸机运行）
-./mediaservo.sh start host    # 启动 host 推流（杀旧进程；别名: run-host）
-./mediaservo.sh stop server   # 停止 server（compose stop 保留容器，秒级再启）
-./mediaservo.sh stop host     # 停止 host 进程
+./mediaservo.sh build server --native  # 裸机编译 server（pixi 工具链，需联网拉 meson wrap；多 IP 公告在 run 阶段生效）
+./mediaservo.sh run server --native [--foreground]  # 裸机运行 server（后台: target/server-native.pid + .log）
+./mediaservo.sh start host    # 启动 host 推流（oxmgr 多进程; 杀旧进程；别名: run-host）
+./mediaservo.sh stop server   # 停止 server（先杀裸机 pid——若在跑; 再 compose stop 保留容器——秒级再启）
+./mediaservo.sh stop host     # 停止 host 进程（pkill host-legacy + mediaservo-host stop——幂等）
+./mediaservo.sh logs server --native  # 裸机 server 日志（target/server-native.log，tail -n 100 / -f）
 ./mediaservo.sh down --env dev && ./mediaservo.sh up --env dev   # 重启 dev server（清旧再启，配置变更生效）
 ./mediaservo.sh logs host     # host 日志（/tmp/mediaservo-host.log）
 ./mediaservo.sh e2e           # e2e_sfu 回归（前置: server + host + vite 运行中）

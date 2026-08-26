@@ -563,12 +563,15 @@ def _detect_announced_ips() -> list[str]:
     return ips
 
 
-def _compose_env() -> dict[str, str]:
+def _compose_env(announced_ip: str | None = None) -> dict[str, str]:
     """docker compose 调用环境 — 确保 MEDIASERVO_SFU_ANNOUNCED_IP 有值。
     PIT-79: CLI 启动 server 时若未注入，mediasoup 公告 0.0.0.0 → 浏览器拉流失败。
-    显式 env 优先，否则自动探测宿主机全部真实 IP（逗号分隔，多网卡支持）。"""
+    显式 --announced-ip（参数/env）优先，否则自动探测宿主机全部真实 IP（逗号分隔，多网卡支持）。
+    显式给值时跳过"自动探测"打印（T3 minor）。"""
     env = {**os.environ}
-    if not env.get("MEDIASERVO_SFU_ANNOUNCED_IP"):
+    if announced_ip:
+        env["MEDIASERVO_SFU_ANNOUNCED_IP"] = announced_ip
+    elif not env.get("MEDIASERVO_SFU_ANNOUNCED_IP"):
         ips = _detect_announced_ips()
         if ips:
             env["MEDIASERVO_SFU_ANNOUNCED_IP"] = ",".join(ips)
@@ -746,9 +749,7 @@ def _run_server_native(args: argparse.Namespace) -> None:
     _check_port_free(20000, '20000(SFU UDP)')
     _check_port_range_free(40000, 40100, '40000-40100(RTP)')
     # announced 注入: --announced-ip > env > CLI 探测(含 tun) > 不注入(server 侧 detect_all_ips 兜底)
-    env = _compose_env()  # 复用探测（无显式值时才自动探测）
-    if args.announced_ip:
-        env['MEDIASERVO_SFU_ANNOUNCED_IP'] = args.announced_ip
+    env = _compose_env(args.announced_ip)  # 复用探测（显式给值时跳过自动探测打印）
     print('⚠ 警告: 裸机跑 config/server.docker.yaml 含 dev 公开凭据（psk=mediaservo-dev/jwt 占位）——', file=sys.stderr)
     print('     仅限开发联调；生产部署用 up --env prod（entrypoint 自举随机密钥）', file=sys.stderr)
     cmd = [str(bin_path), '--config', str(ROOT / 'config' / 'server.docker.yaml')]
@@ -756,7 +757,8 @@ def _run_server_native(args: argparse.Namespace) -> None:
     if args.foreground:
         _run_or_exit(cmd, env=env)
     else:
-        proc = subprocess.Popen(cmd, env=env, stdout=open(log_path, 'ab'), stderr=subprocess.STDOUT)
+        # T3 minor: 启动时 truncate（崩溃残留不污染，重启从头记）+ start_new_session（脱离终端，stop 按 pid 文件可杀）
+        proc = subprocess.Popen(cmd, env=env, stdout=open(log_path, 'wb'), stderr=subprocess.STDOUT, start_new_session=True)
         (ROOT / 'target' / 'server-native.pid').write_text(str(proc.pid))
         print(f'✓ server 裸机运行中 pid={proc.pid} — 日志: target/server-native.log（logs server --native）')
 
@@ -781,8 +783,26 @@ def _check_port_range_free(start: int, end: int, name: str) -> None:
 
 def _cmd_stop(args: argparse.Namespace) -> None:
     target = args.target
-    """stop <target> — server: compose stop（保留容器，秒级再启）; host/client: 杀进程。"""
+    """stop <target> — server: 杀裸机 pid（若在跑）→ compose stop（保留容器）; host: 优雅停止; client: 杀进程。"""
     if target == "server":
+        # ① 裸机进程（run server 后台形态写 target/server-native.pid → 读文件幂等杀）
+        pid_file = ROOT / "target" / "server-native.pid"
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+            except ValueError:
+                pid = -1
+            if pid > 0 and Path(f"/proc/{pid}").exists():
+                print(f"stop server: 停止裸机进程 pid={pid}")
+                subprocess.run(["kill", str(pid)], check=False)
+                for _ in range(4):  # 2s 宽限
+                    if not Path(f"/proc/{pid}").exists():
+                        break
+                    time.sleep(0.5)
+                if Path(f"/proc/{pid}").exists():
+                    subprocess.run(["kill", "-9", str(pid)], check=False)
+            pid_file.unlink(missing_ok=True)
+        # ② 容器路径（compose stop 保留容器——秒级再启语义；test-critic: 语义漂移禁止——不改 down）
         _check("docker", "安装 docker 并启动 daemon")
         _run_or_exit(COMPOSE_BASE + ["stop", "server"])
     elif target == "host":
@@ -798,9 +818,17 @@ def _cmd_stop(args: argparse.Namespace) -> None:
 
 
 def _cmd_logs(args: argparse.Namespace) -> None:
-    """logs [<target>] [--follow] — server: compose 日志; host: /tmp/mediaservo-host.log。"""
+    """logs [<target>] [--follow] [--native] — server: compose 日志（--native 读裸机日志）; host: /tmp/mediaservo-host.log。"""
     target = args.target
     follow = ["-f"] if args.follow else []
+    if target == "server" and getattr(args, "native", False):
+        log_path = ROOT / "target" / "server-native.log"
+        if not log_path.exists():
+            print(f"错误: {log_path} 不存在 — 裸机 server 未运行？", file=sys.stderr)
+            sys.exit(1)
+        cmd = ["tail", "-f" if args.follow else "-n", "100"] + [str(log_path)]
+        _run_or_exit(cmd)
+        return
     if target == "server":
         _check("docker", "安装 docker 并启动 daemon")
         _run_or_exit(COMPOSE_BASE + ["logs"] + follow + ["server"])
@@ -996,9 +1024,8 @@ def _cmd_up(args: argparse.Namespace) -> None:
     cmd = ["docker", "compose", "-f", cf, "up", "-d", args.svc]
     if args.build:
         cmd.insert(5, "--build")
-    env = _compose_env()
+    env = _compose_env(args.announced_ip)
     if args.announced_ip:
-        env["MEDIASERVO_SFU_ANNOUNCED_IP"] = args.announced_ip
         print(f"MEDIASERVO_SFU_ANNOUNCED_IP 显式指定: {args.announced_ip}")
     # PIT-79 接线: 未显式设置时自动探测宿主机全部真实 IP（多网卡/VPN 场景）注入 env
     _run_or_exit(cmd, env=env)
@@ -1131,9 +1158,20 @@ def main() -> None:
                        help="裸机公告地址（覆盖自动探测——默认自动含 tun/vpn、ens 全部真实 IP，符合 PIT-143 多网卡语义）")
     run_p.set_defaults(func=_cmd_run)
 
+    start_p = sub.add_parser("start", help="启动 <target> [--foreground] [--legacy]: host=oxmgr 多进程（前台需 --legacy）；server=compose up -d（自动检测 env）")
+    start_p.add_argument("target", choices=["host", "server"])
+    start_p.add_argument("--foreground", "-f", action="store_true", help="前台阻塞（host 仅 --legacy 支持）")
+    start_p.add_argument("--legacy", action="store_true", help="host 回退旧单进程 host-legacy")
+    start_p.set_defaults(func=_cmd_start)
+
+    stop_p = sub.add_parser("stop", help="停止 <target>: server=杀裸机 pid（若在跑）→ compose stop（保留容器，秒级再启）；host=优雅停止（pkill host-legacy + mediaservo-host stop）")
+    stop_p.add_argument("target", choices=["host", "server", "client"])
+    stop_p.set_defaults(func=_cmd_stop)
+
     logs_p = sub.add_parser("logs", help="日志 [<svc>] [--follow]: server(compose) | host(/tmp/mediaservo-host.log) | <svc> 容器")
     logs_p.add_argument("target", nargs="?", choices=["server", "host", "client"], default="server")
     logs_p.add_argument("--follow", "-f", action="store_true", help="跟踪输出")
+    logs_p.add_argument("--native", action="store_true", help="读裸机 server 日志 target/server-native.log（仅 server 有意义）")
     logs_p.set_defaults(func=_cmd_logs)
 
     ps_p = sub.add_parser("ps", help="运行态: compose ps（server 部署——按 --env）")
@@ -1193,10 +1231,7 @@ def main() -> None:
     if argv and argv[0] in ALIASES:
         argv = ALIASES[argv[0]] + argv[1:]
     args = parser.parse_args(argv)
-    if args.command == "start":
-        # host/client 进程语义（server 部署用 up）
-        _cmd_start(args.target, args.foreground, args.legacy)
-    elif args.command == "build":
+    if args.command == "build":
         if getattr(args, "image", None) and args.target != "server":
             print(f"build --image 仅支持 build server（当前 target={args.target}）", file=sys.stderr)
             sys.exit(2)
@@ -1217,6 +1252,8 @@ def main() -> None:
             _cmd_build_client()
     elif args.command == "run":
         _cmd_run(args)
+    elif args.command == "start":
+        _cmd_start(args.target, args.foreground, args.legacy)
     elif args.command in ("stop", "restart", "logs"):
         globals()[f"_cmd_{args.command}"](args)
     elif args.command in ("test", "ci"):
