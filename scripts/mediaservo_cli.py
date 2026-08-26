@@ -826,7 +826,7 @@ def _cmd_logs(args: argparse.Namespace) -> None:
         if not log_path.exists():
             print(f"错误: {log_path} 不存在 — 裸机 server 未运行？", file=sys.stderr)
             sys.exit(1)
-        cmd = ["tail", "-f" if args.follow else "-n", "100"] + [str(log_path)]
+        cmd = (["tail", "-f"] if args.follow else ["tail", "-n", "100"]) + [str(log_path)]
         _run_or_exit(cmd)
         return
     if target == "server":
@@ -1168,7 +1168,7 @@ def main() -> None:
     stop_p.add_argument("target", choices=["host", "server", "client"])
     stop_p.set_defaults(func=_cmd_stop)
 
-    logs_p = sub.add_parser("logs", help="日志 [<svc>] [--follow]: server(compose) | host(/tmp/mediaservo-host.log) | <svc> 容器")
+    logs_p = sub.add_parser("logs", help="日志 [<svc>] [--follow] [--native]: server(compose | --native 读 target/server-native.log) | host(/tmp/mediaservo-host.log) | <svc> 容器")
     logs_p.add_argument("target", nargs="?", choices=["server", "host", "client"], default="server")
     logs_p.add_argument("--follow", "-f", action="store_true", help="跟踪输出")
     logs_p.add_argument("--native", action="store_true", help="读裸机 server 日志 target/server-native.log（仅 server 有意义）")
