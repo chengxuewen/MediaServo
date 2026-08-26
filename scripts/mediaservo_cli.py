@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import time
 import subprocess
@@ -773,21 +774,59 @@ def _run_server_native(args: argparse.Namespace) -> None:
         print(f'✓ server 裸机运行中 pid={proc.pid} — 日志: target/server-native.log（logs server --native）')
 
 
+def _port_owner(port: int) -> str:
+    """从 ss -tulnp 解析 :port 行的占用方（name,pid）。非 root 下容器端口无 users 段——如实提示（评审 ops#2）。"""
+    try:
+        out = subprocess.run(["ss", "-tulnp"], capture_output=True, text=True, timeout=5, check=False).stdout
+        for line in out.splitlines():
+            if f":{port} " not in line:
+                continue
+            m = re.search(r'users:\s*\(\("([^"]+)",pid=(\d+)', line)
+            if m:
+                name, pid = m.group(1), m.group(2)
+                cmd = Path(f"/proc/{pid}/cmdline").read_text().replace("\0", " ").split()[:1]
+                return f"{name} (pid {pid})" + (f" — {Path(cmd[0]).name}" if cmd else "")
+            return "占用方不可见（宿主 root/容器端口——sudo ss 查看）"
+    except OSError:
+        pass
+    try:  # darwin: lsof 回退
+        out = subprocess.run(["lsof", "-i", f":{port}"], capture_output=True, text=True, timeout=5, check=False).stdout
+        for line in out.splitlines()[1:]:
+            parts = line.split()
+            if len(parts) >= 2:
+                return f"{parts[0]} (pid {parts[1]})"
+    except OSError:
+        pass
+    return "未知（ss/lsof 均不可用）"
+
+
 def _check_port_free(port: int, name: str) -> None:
-    """端口占用检查（TCP/UDP；占用则提示先停冲突方）。"""
-    _check('ss', 'ss 不可用——安装 iproute2')
-    out = subprocess.run(['ss', '-tulnp'], capture_output=True, text=True, timeout=5, check=False).stdout
-    if f':{port} ' in out:
-        print(f'错误: {name} 端口被占 — 先运行: mediaservo stop server（裸机/容器皆可）', file=sys.stderr)
+    """端口占用检查（TCP/UDP；占用则提示先停冲突方）。平台守卫 + 探测命令同平台分支（Momus MEDIUM：原版守卫选 lsof 但探测仍 ss——darwin traceback）。"""
+    if sys.platform == "darwin":
+        _check("lsof", "lsof 不可用")
+        out = subprocess.run(["lsof", "-i", f":{port}"], capture_output=True, text=True, timeout=5, check=False).stdout
+        busy = f":{port}" in out
+    else:
+        _check("ss", "ss 不可用——安装 iproute2")
+        out = subprocess.run(["ss", "-tulnp"], capture_output=True, text=True, timeout=5, check=False).stdout
+        busy = f":{port} " in out
+    if busy:
+        print(f"错误: {name} 端口被占: {_port_owner(port)} — 先运行: mediaservo stop server（裸机/容器皆可）", file=sys.stderr)
         sys.exit(1)
 
 
 def _check_port_range_free(start: int, end: int, name: str) -> None:
-    """RTP 范围扫描（mediasoup 惰性 bind——health 200 但传输间歇失败，必须显式查）。"""
-    out = subprocess.run(['ss', '-tulnp'], capture_output=True, text=True, timeout=5, check=False).stdout
-    busy = [p for p in range(start, end + 1) if f':{p} ' in out]
+    """RTP 范围扫描（mediasoup 惰性 bind——health 200 但传输间歇失败，必须显式查）。同平台分支——darwin lsof 回退。"""
+    if sys.platform == "darwin":
+        _check("lsof", "lsof 不可用")
+        out = subprocess.run(["lsof", "-i", f":{start}-{end}"], capture_output=True, text=True, timeout=5, check=False).stdout
+        busy = [p for p in range(start, end + 1) if f":{p}" in out]
+    else:
+        _check("ss", "ss 不可用——安装 iproute2")
+        out = subprocess.run(["ss", "-tulnp"], capture_output=True, text=True, timeout=5, check=False).stdout
+        busy = [p for p in range(start, end + 1) if f':{p} ' in out]
     if busy:
-        print(f'错误: {name} 端口被占 {busy[:5]}... — 先停止占用进程', file=sys.stderr)
+        print(f'错误: {name} 端口被占 {busy[:5]}... 首占者: {_port_owner(busy[0])} — 先停止占用进程', file=sys.stderr)
         sys.exit(1)
 
 
