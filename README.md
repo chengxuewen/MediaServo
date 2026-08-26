@@ -63,14 +63,16 @@ MediaServo — 实时媒体伺服平台（MediaServo Platform）。独立部署�
                                   # 容器仅单公告生效取首 IP，多地址需裸机运行）
 ./mediaservo.sh build server --native  # 裸机编译 server（pixi 工具链，需联网拉 meson wrap；多 IP 公告在 run 阶段生效）
 ./mediaservo.sh run server --native [--foreground]  # 裸机运行 server（后台: target/server-native.pid + .log）
-./mediaservo.sh start host    # 启动 host 推流（oxmgr 多进程; 杀旧进程）
+./mediaservo.sh start host    # 启动 host 推流（oxmgr 多进程; 杀旧进程）；start server=裸机 native（默认）\| --mode compose/
+#                           --env dev 容器
 ./mediaservo.sh stop server   # 停止 server（先杀裸机 pid——若在跑; 再 compose stop 保留容器——秒级再启）
 ./mediaservo.sh stop host     # 停止 host 进程（pkill host-legacy + mediaservo-host stop——幂等）
-./mediaservo.sh logs server --native  # 裸机 server 日志（target/server-native.log，tail -n 100 / -f）
+./mediaservo.sh logs server    # server 日志（默认裸机 target/server-native.log；--env dev/--mode compose 容器日志；--native 显式）
 ./mediaservo.sh down --env dev && ./mediaservo.sh up --env dev   # 重启 dev server（清旧再启，配置变更生效）
 ./mediaservo.sh logs host     # host 日志（/tmp/mediaservo-host.log）
 ./mediaservo.sh e2e           # e2e_sfu 回归（前置: server + host + vite 运行中）
-./mediaservo.sh status server|host  # 健康探测（容器 health 200 / 裸机 pid+端口 / host 进程+网关——退出码 0/1/2）；环境诊断见 doctor
+./mediaservo.sh status server  # 健康探测（默认裸机 native——pid+端口+announced；--mode compose/--env dev 容器 health；exit 0/1/2）
+./mediaservo.sh status host    # 推流进程+网关 17980+实例日志（C38 ②层）；环境诊断见 doctor
 ./mediaservo.sh config validate   # 配置校验（pyyaml）
 ./mediaservo.sh clean         # 清构建产物（保留 cargo-cache 卷）; clean --all 全清
 ./mediaservo.sh install host  # 安装到前缀（默认 <root>/install/host）; install bindings 同
