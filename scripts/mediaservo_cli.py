@@ -51,7 +51,21 @@ def _cmd_build_host() -> None:
     _run_or_exit(["cargo", "build", "-p", "mediaservo-host", "-p", "mediaservo-client"])
 
 
-def _cmd_build_server(image: str | None = None) -> None:
+def _cmd_build_server(image: str | None = None, native: bool = False, release: bool = False) -> None:
+    """build server: --native=原生编译（pixi 工具链）| --image runtime|dev=Docker 镜像。"""
+    if native:
+        _check("cargo", "pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat")
+        if not os.environ.get("MESON"):
+            print("错误: MESON 环境变量未设置——请经 ./mediaservo.sh 调用（source pixi-shell.sh 注入 activation env）", file=sys.stderr)
+            sys.exit(2)
+        cmd = ["cargo", "build"] + (["--release"] if release else []) + ["-p", "mediaservo-server"]
+        # tasks.py env 坑（T1 Ruling 延伸，brief 未预见）: pixi activation 注入的 MESON 指向
+        # 不存在的 NINJA → build.rs/tasks.py 跳过 pip 但 NINJA 缺失会挂；pop 掉与 T1 unset 语义一致。
+        env = {**os.environ}
+        env.pop("MESON_ARGS", None)
+        env.pop("MESON", None)
+        _run_or_exit(cmd, env=env)
+        return
     _check("docker", "安装 docker 并启动 daemon")
     if image:
         if image == "runtime":
@@ -1020,11 +1034,14 @@ def main() -> None:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    build_p = sub.add_parser("build", help="构建 <target> [--image runtime|dev] [--release]: all|host|server|client|bindings（默认 all）")
+    build_p = sub.add_parser("build", help="构建 <target> [--image runtime|dev|--native]: all|host|server|client|bindings（默认 all）")
     build_p.add_argument("target", nargs="?", choices=["all", "host", "server", "client", "bindings"], default="all")
     build_p.add_argument("--release", action="store_true", help="release 构建（bindings: target/release，strip+LTO）")
-    build_p.add_argument("--image", choices=["runtime", "dev"], default=None,
-                         help="仅 build server: 构建 Docker 镜像 target（runtime=生产交付瘦身镜像；dev=工具链镜像）——其他 target 拒绝此参数")
+    grp = build_p.add_mutually_exclusive_group()
+    grp.add_argument("--image", choices=["runtime", "dev"], default=None,
+                     help="仅 build server: Docker 镜像 target（runtime=生产交付瘦身镜像；dev=工具链镜像）")
+    grp.add_argument("--native", action="store_true",
+                     help="仅 build server: 原生编译（pixi 工具链——首次需联网拉 meson wrap；多 IP 公告在 run 阶段生效）")
     build_p.set_defaults(func=_cmd_build)
 
     up_p = sub.add_parser("up", help="启动部署 <svc> [--env dev|prod] [--announced-ip IP]: dev=热更 compose；prod=单容器+命名卷+entrypoint 自举（公告地址显式覆盖）")
@@ -1117,6 +1134,9 @@ def main() -> None:
         if getattr(args, "image", None) and args.target != "server":
             print(f"build --image 仅支持 build server（当前 target={args.target}）", file=sys.stderr)
             sys.exit(2)
+        if getattr(args, "native", False) and args.target != "server":
+            print(f"build --native 仅支持 build server（当前 target={args.target}）", file=sys.stderr)
+            sys.exit(2)
         if args.target == "bindings":
             _cmd_build_bindings(args.release)
         elif args.target == "all":
@@ -1126,7 +1146,7 @@ def main() -> None:
         elif args.target == "host":
             _cmd_build_host()
         elif args.target == "server":
-            _cmd_build_server(args.image)
+            _cmd_build_server(args.image, args.native, args.release)
         elif args.target == "client":
             _cmd_build_client()
     elif args.command in ("stop", "restart", "logs"):
