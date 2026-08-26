@@ -528,7 +528,8 @@ def _detect_announced_ips() -> list[str]:
 
     宿主 IP 会变且可能有多个（多网卡/DHCP）——返回全部真实 IP（逗号分隔），
     由 server 侧为每个 IP 创建 ListenInfo（WebRtcServer 多 announced）。
-    按接口名过滤 docker 网桥(br-*)/VPN(tun*)/虚拟接口，仅保留物理/真实网卡。"""
+    按接口名过滤 docker 网桥(br-*)/虚拟接口(veth/virbr)；tun/vpn **保留**
+    （VPN 组网隧道 IP 正是客户端可达路径——PIT-143 多 IP 公告语义，非过滤对象）。"""
     ips: list[str] = []
     try:
         out = subprocess.run(
@@ -720,6 +721,63 @@ def _run_host_legacy() -> None:
     else:
         print(f"✗ host 启动失败 (exit {proc.returncode}) — 日志: {log_path}", file=sys.stderr)
         sys.exit(1)
+
+
+def _cmd_run(args: argparse.Namespace) -> None:
+    """run <target>: server=裸机运行（--native 可省略——唯一形态；多 IP 公告）；host=oxmgr 多进程。"""
+    if args.target == "server":
+        _run_server_native(args)
+    elif args.target == "host":
+        _cmd_run_host()
+    else:
+        print('run client: 待实现（client 骨架阶段）', file=sys.stderr)
+        sys.exit(1)
+
+
+def _run_server_native(args: argparse.Namespace) -> None:
+    """裸机跑 server：--config config/server.docker.yaml + 公告注入 + 端口守卫。"""
+    _check('cargo', 'pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat')
+    bin_path = ROOT / 'target' / ('release' if args.release else 'debug') / 'mediaservo-server'
+    if not bin_path.exists():
+        print(f'错误: 未找到 {bin_path.relative_to(ROOT)} — 先运行: mediaservo build server --native', file=sys.stderr)
+        sys.exit(1)
+    # 端口冲突守卫: 裸机 9800/20000/40000-40100 与 dev/prod 容器并行会冲突
+    _check_port_free(9800, '9800(HTTP)')
+    _check_port_free(20000, '20000(SFU UDP)')
+    _check_port_range_free(40000, 40100, '40000-40100(RTP)')
+    # announced 注入: --announced-ip > env > CLI 探测(含 tun) > 不注入(server 侧 detect_all_ips 兜底)
+    env = _compose_env()  # 复用探测（无显式值时才自动探测）
+    if args.announced_ip:
+        env['MEDIASERVO_SFU_ANNOUNCED_IP'] = args.announced_ip
+    print('⚠ 警告: 裸机跑 config/server.docker.yaml 含 dev 公开凭据（psk=mediaservo-dev/jwt 占位）——', file=sys.stderr)
+    print('     仅限开发联调；生产部署用 up --env prod（entrypoint 自举随机密钥）', file=sys.stderr)
+    cmd = [str(bin_path), '--config', str(ROOT / 'config' / 'server.docker.yaml')]
+    log_path = ROOT / 'target' / 'server-native.log'
+    if args.foreground:
+        _run_or_exit(cmd, env=env)
+    else:
+        proc = subprocess.Popen(cmd, env=env, stdout=open(log_path, 'ab'), stderr=subprocess.STDOUT)
+        (ROOT / 'target' / 'server-native.pid').write_text(str(proc.pid))
+        print(f'✓ server 裸机运行中 pid={proc.pid} — 日志: target/server-native.log（logs server --native）')
+
+
+def _check_port_free(port: int, name: str) -> None:
+    """端口占用检查（TCP/UDP；占用则提示先停冲突方）。"""
+    _check('ss', 'ss 不可用——安装 iproute2')
+    out = subprocess.run(['ss', '-tulnp'], capture_output=True, text=True, timeout=5, check=False).stdout
+    if f':{port} ' in out:
+        print(f'错误: {name} 端口被占 — 先运行: mediaservo stop server（裸机/容器皆可）', file=sys.stderr)
+        sys.exit(1)
+
+
+def _check_port_range_free(start: int, end: int, name: str) -> None:
+    """RTP 范围扫描（mediasoup 惰性 bind——health 200 但传输间歇失败，必须显式查）。"""
+    out = subprocess.run(['ss', '-tulnp'], capture_output=True, text=True, timeout=5, check=False).stdout
+    busy = [p for p in range(start, end + 1) if f':{p} ' in out]
+    if busy:
+        print(f'错误: {name} 端口被占 {busy[:5]}... — 先停止占用进程', file=sys.stderr)
+        sys.exit(1)
+
 
 def _cmd_stop(args: argparse.Namespace) -> None:
     target = args.target
@@ -1064,6 +1122,14 @@ def main() -> None:
     restart_p = sub.add_parser("restart", help="重启 <target>: host/client 进程（server 部署用 up/down）")
     restart_p.add_argument("target", choices=["host", "client"])
     restart_p.set_defaults(func=_cmd_restart)
+    run_p = sub.add_parser("run", help="运行 <target> [--foreground] [--announced-ip IP[,IP...]]: server=裸机（多 IP 公告，先 build server --native；--native 可省略）；host=oxmgr 多进程")
+    run_p.add_argument("target", choices=["server", "host", "client"])
+    run_p.add_argument("--native", action="store_true", help="（兼容——server 默认即裸机形态，可省略）")
+    run_p.add_argument("--foreground", "-f", action="store_true", help="前台阻塞运行，输出实时透传")
+    run_p.add_argument("--release", action="store_true", help="用 target/release 二进制")
+    run_p.add_argument("--announced-ip", metavar="IP[,IP...]", default=None,
+                       help="裸机公告地址（覆盖自动探测——默认自动含 tun/vpn、ens 全部真实 IP，符合 PIT-143 多网卡语义）")
+    run_p.set_defaults(func=_cmd_run)
 
     logs_p = sub.add_parser("logs", help="日志 [<svc>] [--follow]: server(compose) | host(/tmp/mediaservo-host.log) | <svc> 容器")
     logs_p.add_argument("target", nargs="?", choices=["server", "host", "client"], default="server")
@@ -1149,6 +1215,8 @@ def main() -> None:
             _cmd_build_server(args.image, args.native, args.release)
         elif args.target == "client":
             _cmd_build_client()
+    elif args.command == "run":
+        _cmd_run(args)
     elif args.command in ("stop", "restart", "logs"):
         globals()[f"_cmd_{args.command}"](args)
     elif args.command in ("test", "ci"):
