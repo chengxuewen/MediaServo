@@ -7,7 +7,7 @@
 
 ```bash
 # 1. 安装品牌化 host 包（布局 + 品牌 app 符号链接 + identity 前缀）
-./mediaservo.sh install host --brand cp --prefix /opt/cp-host
+./mediaservo.sh deploy host --brand cp --prefix /opt/cp-host
 
 # 2. 运行时品牌（翻译/app 名/unit/设备前缀全走此 env）
 export MEDIASERVO_BRAND=cp
@@ -64,7 +64,7 @@ git diff --stat bindings/            # 应为空
 
 # 缺省零变化门: 默认品牌全量回归
 pixi run cargo test -p mediaservo-host --lib    # 50 全绿
-bash scripts/e2e-install-host.sh                # PASS（含 start/status/stop roundtrip）
+bash scripts/e2e-deploy-host.sh                # PASS（含 start/status/stop roundtrip）
 
 # 品牌化验证
 MEDIASERVO_BRAND=cp ./target/debug/mediaservo-host version   # cp 0.1.0
@@ -77,7 +77,7 @@ MEDIASERVO_BRAND=cp ./target/debug/mediaservo-host startup on <dir>  # unit oxmg
 - `crates/mediaservo-host/src/bin/host.rs`：USAGE/version/namespace 过滤/unit 名
 - `crates/mediaservo-host/src/translate.rs`：`app_name()`（app 前缀）+ oxfile namespace
 - `crates/mediaservo-host/src/identity.rs`：`generate_identity()` 设备前缀
-- `scripts/mediaservo_cli.py`：`install host --brand` / `package host --brand`
+- `scripts/mediaservo_cli.py`：`deploy host --brand` / `package host --brand`
 - `www/apps/admin/vite.config.ts`：`__APP_TITLE__` define
 
 计划: `docs/superpowers/plans/2026-08-21-app-branding-customization.md`

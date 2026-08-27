@@ -15,7 +15,7 @@ VER=$(sed -n '/\[workspace.package\]/,/^\[/p' Cargo.toml | sed -n 's/^version *=
 [ -n "$VER" ] || { echo "FAIL: 无法解析 workspace version"; exit 1; }
 MAJOR=${VER%%.*}
 
-# ── 0. 前置构建（缺啥补啥, 与 e2e-install-host.sh 同模式）──────
+# ── 0. 前置构建（缺啥补啥, 与 e2e-deploy-host.sh 同模式）──────
 if [ ! -x target/debug/mediaservo-host ]; then
     note "building mediaservo-host (debug)"
     pixi run cargo build -p mediaservo-host
@@ -52,7 +52,7 @@ echo "$LIST" | grep -q "^host$" || { echo "FAIL: 包内缺根快捷 host"; FAIL=
 if command -v oxmgr >/dev/null 2>&1; then
     echo "$LIST" | grep -q "^bin/oxmgr$" || { echo "FAIL: PATH 有 oxmgr 但包内缺 bin/oxmgr"; FAIL=1; }
 else
-    echo "NOTE: PATH 无 oxmgr — 跳过 bin/oxmgr 断言（install host 未打包, doctor 预期报错）"
+    echo "NOTE: PATH 无 oxmgr — 跳过 bin/oxmgr 断言（deploy host 未打包, doctor 预期报错）"
 fi
 for f in etc/host.toml etc/link/signing.pem etc/link/cam0.token etc/link/cam0-stream.token \
          etc/link/recorder.token etc/link/agent.token etc/link/ros_bridge.yaml \

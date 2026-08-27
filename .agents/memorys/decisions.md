@@ -624,7 +624,7 @@ EmergencyCommand 转发（H 阶段 host-emergency）; 状态/告警的 operator 
 （当前 status_registry 仅 admin API 读）。
 
 ## D252: 应用层品牌化机制（Brand）+ 固化边界（2026-08-21）
-- **决策**: 引入 `mediaservo-common::brand`（env `MEDIASERVO_BRAND` > 编译期 option_env > 默认 "mediaservo"）；host/client/server 全部用户可见串（app 名/namespace/unit/device 前缀/帮助/面板标题）走 Brand；install/package `--brand` 参数化。默认品牌映射 **legacy 串硬映射**（host-*/oxmgr-host-/ms-/mediaservo-host）——零行为变化
+- **决策**: 引入 `mediaservo-common::brand`（env `MEDIASERVO_BRAND` > 编译期 option_env > 默认 "mediaservo"）；host/client/server 全部用户可见串（app 名/namespace/unit/device 前缀/帮助/面板标题）走 Brand；deploy/package `--brand` 参数化（build 组装物理改名——D3/T1 落地）。默认品牌映射 **legacy 串硬映射**（host-*/oxmgr-host-/ms-/mediaservo-host）——零行为变化
 - **边界**: 🔒 固化 = bindings/*（C ABI 符号 mediaservo_* D247 + cxx/py/node + soname D240）+ wire 协议（信令/SFU/FrameMeta）+ crate 名；🎨 可定制 = host/client/server 应用层
 - **原因**: 基石定位（第三平台静态链接/独立部署嵌入）——白标免 fork；"数据面固化/应用层可定制"显式化
 - **影响**: Brand 三语义分离（product=CLI 名/display=产品展示/id=路径）；identity 设备前缀品牌化仅新 key（G2 配发需重注）；crate 名/bindings 不动——独立发布仍走 fork+D209
@@ -632,7 +632,7 @@ EmergencyCommand 转发（H 阶段 host-emergency）; 状态/告警的 operator 
 
 ## D253: oxmgr 同目录发现接线 — 安装即用，免 export PATH (2026-08-21)
 
-- **决策**: oxmgr 查找顺序统一为「host 二进制同目录（current_exe().parent()/oxmgr，D-H13 打包于 bin/）优先 → PATH 回落」——接线到所有调用点：host.rs cmd_oxmgr/run_oxmgr_in(None)/doctor + translate.rs oxmgr_apply/delete/list。install 打包 oxmgr 进 bin/ 使安装目录**零配置即用**（无需 export PATH）
+- **决策**: oxmgr 查找顺序统一为「host 二进制同目录（current_exe().parent()/oxmgr，D-H13 打包于 bin/）优先 → PATH 回落」——接线到所有调用点：host.rs cmd_oxmgr/run_oxmgr_in(None)/doctor + translate.rs oxmgr_apply/delete/list。deploy 打包 oxmgr 进 bin/ 使安装目录**零配置即用**（无需 export PATH）
 - **原因**: ① oxmgr_path()/oxmgr_cmd() helper 早已存在（current_exe() 模式）但 6 个调用点仍 `Command::new("oxmgr")` 纯 PATH——同目录能力"存在未接线"（触达性 bug，非设计缺失）；② 发布壳消费方（MSRTC --pure-brand 等）期望「安装即用」，PATH 是交互文档约定，不应是运行前提；③ multi-instance 下同目录绑定实例自己的 oxmgr（C32 隔离增强）
 - **影响**: host start/apply/monit/ps/doctor 全部零 PATH 可用；exe 同目录无 oxmgr 时回落 PATH（向后兼容）；D-H13 打包语义兑现
 

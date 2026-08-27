@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install host e2e smoke — 干净目录安装 → D-H13 布局断言 → doctor → 幂等重装
+# deploy host e2e smoke — 干净目录安装 → D-H13 布局断言 → doctor → 幂等重装
 # （identity/signing 保留）→ start/status/stop 冒烟。C22: 宿主原生执行。
 # 前置: target/debug 8 host 二进制（缺失自动构建）。
 set -euo pipefail
@@ -18,8 +18,8 @@ fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"; rm -rf /tmp/iceoryx2 /dev/shm/iox2_*' EXIT
 
-note "install host --prefix $TMP"
-python3 scripts/mediaservo_cli.py install host --prefix "$TMP"
+note "deploy host --prefix $TMP"
+python3 scripts/mediaservo_cli.py deploy host --prefix "$TMP"
 
 BIN="$TMP/bin"
 
@@ -72,9 +72,9 @@ echo "$out"
 echo "$out" | grep -q "全部通过" || { echo "FAIL: doctor 未全过"; FAIL=1; }
 
 # ── 6. 幂等重装: identity/signing/host.toml 哈希不变 ───────
-note "re-install idempotency"
+note "re-deploy idempotency"
 SUM_BEFORE=$(sha256sum "$TMP/etc/link/signing.pem" "$TMP/identity.json" "$TMP/etc/host.toml")
-python3 scripts/mediaservo_cli.py install host --prefix "$TMP" >/dev/null
+python3 scripts/mediaservo_cli.py deploy host --prefix "$TMP" >/dev/null
 SUM_AFTER=$(sha256sum "$TMP/etc/link/signing.pem" "$TMP/identity.json" "$TMP/etc/host.toml")
 if [ "$SUM_BEFORE" = "$SUM_AFTER" ]; then
     echo "OK: 重装后 signing.pem/identity.json/host.toml 哈希不变（凭据保留）"
@@ -100,7 +100,7 @@ echo "OK: start → status(host-agent 在列) → stop 冒烟通过"
 
 echo
 if [ "$FAIL" = 0 ]; then
-    echo "PASS: install host e2e smoke 全绿"
+    echo "PASS: deploy host e2e smoke 全绿"
 else
     echo "FAIL: $FAIL 项失败"; exit 1
 fi

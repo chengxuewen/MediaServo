@@ -42,7 +42,7 @@ echo "OK: bindings diff 0（固化）"
 
 # ── 3. install --brand cp（真安装——exe_cmd 用 current_exe 目录, brand app 必须与 CLI 同目录）─
 note "install --brand cp"
-pixi run python3 scripts/mediaservo_cli.py install host --brand cp --prefix "$TMP" >/dev/null 2>&1
+pixi run python3 scripts/mediaservo_cli.py deploy host --brand cp --prefix "$TMP" >/dev/null 2>&1
 for link in cp cp-host; do
     [ -L "$TMP/$link" ] || { echo "FAIL: 缺根快捷 $TMP/$link"; FAIL=1; }
 done

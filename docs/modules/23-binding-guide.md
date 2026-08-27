@@ -177,7 +177,7 @@ s.publish_video()
 
 ```bash
 ./mediaservo.sh build bindings                # 构建三 cdylib + dev .so.<MAJOR> symlink
-./mediaservo.sh install bindings --prefix /usr/local
+./mediaservo.sh deploy bindings --prefix /usr/local
   # lib/    libmediaservo_{field,link,deck}.so.0.1.0 + .so.0 + .so（D241 三件套）
   # include/mediaservo/  {common,field,link,deck}.h + {field,link,deck}.hpp（D248）
 # 消费方式（三选一）:
@@ -191,7 +191,7 @@ s.publish_video()
 ## Node.js 绑定（napi-rs，livekit rtc-ffi-bindings 同构，2026-08-18）
 
 - **架构**: `bindings/node/rust/mediaservo-node`（napi 3 cdylib → .node）直绑 Rust SDK async API；TS 薄包装 `lib/index.mjs`（PushSession/SignalSession/CameraSource/Recorder/Player）；事件/帧经 ThreadsafeFunction → JS 主线程（livekit async_queue 同构）
-- **构建/安装**: `./mediaservo.sh build bindings`（含 mediaservo.node）+ `install bindings` → `<prefix>/node/mediaservo/`
+- **构建/安装**: `./mediaservo.sh build bindings`（含 mediaservo.node）+ `deploy bindings` → `<prefix>/node/mediaservo/`
 - **使用**: `import { PushSession } from '<prefix>/node/mediaservo/lib/index.mjs'`（或 NODE_PATH）
 - **运行前置**: LD_LIBRARY_PATH 含 pixi lib（FFmpeg 动态库 libavformat.so.63 等——conda 工具链）；测试 `npm test`（bindings/node/）
 - **已验证**: 真 server 推流（connected/published/frames）+ 信令事件桥 + 录制回放闭环（node:test 5/5）
