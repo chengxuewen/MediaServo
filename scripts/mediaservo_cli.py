@@ -111,6 +111,11 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
         env.pop("MESON_ARGS", None)
         env.pop("MESON", None)
         _run_or_exit(cmd, env=env)
+        # 组装到 out/server/bin/（与 build host/bindings 对称——out = 统一发布根）
+        server_bin = ROOT / "target" / ("release" if release else "debug") / "mediaservo-server"
+        if server_bin.exists():
+            _stage_to_out("server", [server_bin], sub="bin")  # brand=""（server 不品牌化——D3）
+            print(f"server 交付布局组装: out/server/bin/mediaservo-server（{server_bin.stat().st_size // 1024} KB）")
         return
     _check("docker", "安装 docker 并启动 daemon")
     if image:
@@ -912,7 +917,13 @@ def _run_server_native(args: argparse.Namespace) -> None:
             print(f"✓ server 裸机已在运行 pid={alive_pid}（server-native.pid）— 跳过启动")
             sys.exit(0)
     _check('cargo', 'pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat')
-    bin_path = ROOT / 'target' / ('release' if getattr(args, 'release', False) else 'debug') / 'mediaservo-server'
+    # 优先 out/server/bin（build server 组装）→回退 target/（兼容未组装场景）
+    bin_path = _out_root() / "server" / "bin" / "mediaservo-server"
+    if not bin_path.exists():
+        bin_path_fallback = ROOT / 'target' / ('release' if getattr(args, 'release', False) else 'debug') / 'mediaservo-server'
+        if bin_path_fallback.exists():
+            print("⚠ 使用 target/ 二进制（建议先: mediaservo build server — 组装到 out/server/bin）", file=sys.stderr)
+            bin_path = bin_path_fallback
     if not bin_path.exists():
         print(f'错误: 未找到 {bin_path.relative_to(ROOT)} — 先运行: mediaservo build server --native', file=sys.stderr)
         sys.exit(1)
@@ -1186,6 +1197,7 @@ def _cmd_clean(args: argparse.Namespace) -> None:
                         subprocess.run(["kill", "-9", str(pid)], check=False)
             etc_d, logs_d, _ = _native_runtime_dirs()
             for f in (logs_d / "server-native.pid", logs_d / "server-native.log",
+                     _out_root() / "server" / "bin" / "mediaservo-server",
                      ROOT / "target/debug/mediaservo-server", ROOT / "target/release/mediaservo-server"):
                 _rm_path(f)
         # compose 容器（both/compose 时）
