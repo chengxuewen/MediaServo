@@ -11,8 +11,8 @@
 #   ⑥ set -a 注入 .env → exec su-exec 降权（PID-1 信号保真）
 set -euo pipefail
 
-ETC=/opt/mediaservo/etc
-TEMPLATES=/opt/mediaservo/templates
+ETC=/usr/local/etc
+TEMPLATES=/usr/local/etc/templates
 ENV_FILE="$ETC/.env"
 PASSWD_FILE="$ETC/accounts.yaml"
 
@@ -62,4 +62,5 @@ set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
-exec su-exec mediaservo mediaservo-server --config "$ETC/server.yaml" "$@"
+# 二进制 /usr/local/bin/ → 相对路径 bin/../etc/server.yaml = /usr/local/etc/server.yaml（entrypoint 已生成）
+exec su-exec mediaservo mediaservo-server "$@"

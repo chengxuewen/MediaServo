@@ -61,13 +61,19 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("MediaServo Server v{} starting", env!("CARGO_PKG_VERSION"));
 
     // Parse config — collect args once for bounds-safe access
+    // 默认：相对二进制路径 bin/../etc/server.yaml（build server 组装时生成）
+    // 容器 fallback：/opt/mediaservo/etc/server.yaml（旧路径兜底）
     let config_path = {
         let args: Vec<String> = std::env::args().collect();
         if args.len() > 2 && args[1] == "--config" {
             args[2].clone()
         } else {
-            "/opt/mediaservo/etc/server.yaml".to_string()
-            // ponytail: path matches docker-compose volume mount
+            std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|p| p.join("../etc/server.yaml")))
+                .filter(|p| p.exists())
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "/opt/mediaservo/etc/server.yaml".to_string())
         }
     };
     let config = match config::load(&config_path) {
@@ -81,6 +87,19 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    // 相对路径解析: devices/accounts 路径相对于 config 文件所在目录（非 CWD）
+    let config_dir = std::path::Path::new(&config_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let resolve_path = |p: &str| -> String {
+        let path = std::path::Path::new(p);
+        if path.is_absolute() {
+            p.to_string()
+        } else {
+            config_dir.join(path).to_string_lossy().into_owned()
+        }
+    };
+
     // Build JWT authenticator from config (optional)
     let jwt_auth = config.jwt_secret.as_ref().map(|s| JwtAuth::new(s.as_str()));
 
@@ -88,8 +107,9 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     // 文件缺失/解析失败 → 空注册表 + 警告（PSK 路径不受影响，不阻断启动）。
     let devices_path = config
         .devices_file
-        .clone()
-        .unwrap_or_else(|| "/opt/mediaservo/etc/devices.yaml".to_string());
+        .as_deref()
+        .map(resolve_path)
+        .unwrap_or_else(|| resolve_path("devices.yaml"));
     let device_registry = match mediaservo_server::devices::DeviceRegistry::load(&devices_path) {
         Ok(reg) => {
             tracing::info!("Device registry loaded from {devices_path}: {} devices", reg.len());
@@ -109,8 +129,9 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     // 文件缺失/解析失败 → 空注册表 + 警告（PSK/设备路径不受影响，不阻断启动）。
     let accounts_path = config
         .accounts_file
-        .clone()
-        .unwrap_or_else(|| "/opt/mediaservo/etc/accounts.yaml".to_string());
+        .as_deref()
+        .map(resolve_path)
+        .unwrap_or_else(|| resolve_path("accounts.yaml"));
     let accounts = match mediaservo_server::accounts::AccountRegistry::load(&accounts_path) {
         Ok(reg) => {
             tracing::info!("Account registry loaded from {accounts_path}: {} accounts", reg.len());

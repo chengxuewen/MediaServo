@@ -116,6 +116,23 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
         if server_bin.exists():
             _stage_to_out("server", [server_bin], sub="bin")  # brand=""（server 不品牌化——D3）
             print(f"server 交付布局组装: out/server/bin/mediaservo-server（{server_bin.stat().st_size // 1024} KB）")
+        # 组装默认配置（server.yaml——从 config/server.docker.yaml 派生，accounts/devices 相对路径）
+        etc_dir = _out_root() / "server" / "etc"
+        etc_dir.mkdir(parents=True, exist_ok=True)
+        src_cfg = ROOT / "config" / "server.docker.yaml"
+        if src_cfg.exists() and not (etc_dir / "server.yaml").exists():
+            cfg = src_cfg.read_text()
+            # accounts/devices 改为相对于 etc 目录（打包后 bin/../etc/accounts.docker.yaml 等）
+            cfg = cfg.replace('/opt/mediaservo/etc/accounts.yaml', 'accounts.docker.yaml')
+            cfg = cfg.replace('/opt/mediaservo/etc/devices.yaml', 'devices.docker.yaml')
+            (etc_dir / "server.yaml").write_text(cfg)
+            # 拷贝设备/账号文件（dev 模板——运行时可覆盖）
+            import shutil
+            for f in ("accounts.docker.yaml", "devices.docker.yaml"):
+                src = ROOT / "config" / f
+                if src.exists():
+                    shutil.copy2(src, etc_dir / f)
+            print(f"server 默认配置组装: {etc_dir.relative_to(ROOT)}/server.yaml")
         return
     _check("docker", "安装 docker 并启动 daemon")
     if image:
@@ -905,7 +922,7 @@ def _native_runtime_dirs() -> tuple[Path, Path, Path]:
 
 
 def _run_server_native(args: argparse.Namespace) -> None:
-    """裸机跑 server：幂等（已在跑→提示跳过）；--config config/server.docker.yaml + 公告注入 + 端口守卫。"""
+    """裸机跑 server：幂等（已在跑→提示跳过）；bin/../etc/server.yaml 默认配置 + 公告注入 + 端口守卫。"""
     # 幂等: start/restart/run 共用——pid 文件存活即已运行（防自家进程撞端口卫士）
     pid_file = _native_runtime_dirs()[1] / "server-native.pid"
     if pid_file.exists():
@@ -935,21 +952,27 @@ def _run_server_native(args: argparse.Namespace) -> None:
     env = _compose_env(getattr(args, 'announced_ip', None))  # 复用探测（显式给值时跳过自动探测打印）
     print('⚠ 警告: 裸机跑 dev 轨道 config（psk=mediaservo-dev + 占位账号 admin123 等）——', file=sys.stderr)
     print('     仅限开发联调；生产部署用 up --env prod（entrypoint 自举随机密钥）', file=sys.stderr)
-    # 裸机 config 适配（C13 双轨——原 server.docker.yaml 的 accounts/devices 指向容器卷 /opt/…）:
-    # 裸机加载应读 config/ 同目录 dev 模板，否则空注册表 → admin 登录 401。
-    # 生成 <runtime>/etc/server.native.yaml（发布壳 MSRTC_OUT_ROOT → out/server/etc；裸 CLI → data/etc——C35 语义统一）
-    etc_dir, _logs_dir, _data_dir = _native_runtime_dirs()
-    native_cfg = etc_dir / 'server.native.yaml'
-    native_cfg.parent.mkdir(parents=True, exist_ok=True)
-    src_cfg = ROOT / 'config' / 'server.docker.yaml'
-    if src_cfg.exists():
-        cfg_text = src_cfg.read_text()
-        cfg_text = cfg_text.replace('/opt/mediaservo/etc/accounts.yaml', str(ROOT / 'config' / 'accounts.docker.yaml'))
-        cfg_text = cfg_text.replace('/opt/mediaservo/etc/devices.yaml', str(ROOT / 'config' / 'devices.docker.yaml'))
-        native_cfg.write_text(cfg_text)
+    # 裸机 config: 优先使用 bin/../etc/server.yaml（build server 组装时生成）
+    # target/ 回退场景需 --config 显式指定
+    bin_dir = bin_path.parent  # out/server/bin
+    default_cfg = bin_dir.parent / "etc" / "server.yaml"  # out/server/etc/server.yaml
+    if default_cfg.exists() and bin_dir == (_out_root() / "server" / "bin"):
+        # 二进制在 out/server/bin/ → 等同 build server 组装 → 不需 --config
+        cmd = [str(bin_path)]
+    else:
+        # target/ 回退: 生成临时 config 并 --config 传入
+        etc_dir, _logs_dir, _data_dir = _native_runtime_dirs()
+        native_cfg = etc_dir / 'server.native.yaml'
+        native_cfg.parent.mkdir(parents=True, exist_ok=True)
+        src_cfg = ROOT / 'config' / 'server.docker.yaml'
+        if src_cfg.exists():
+            cfg_text = src_cfg.read_text()
+            cfg_text = cfg_text.replace('/opt/mediaservo/etc/accounts.yaml', str(ROOT / 'config' / 'accounts.docker.yaml'))
+            cfg_text = cfg_text.replace('/opt/mediaservo/etc/devices.yaml', str(ROOT / 'config' / 'devices.docker.yaml'))
+            native_cfg.write_text(cfg_text)
+        cmd = [str(bin_path), '--config', str(native_cfg)]
     # dev 占位账号豁免（fail-fast 守卫——裸机=dev 联调，与 dev compose 的 ALLOW_DEV_CREDENTIALS=1 一致）
     env.setdefault('MEDIASERVO_ALLOW_DEV_CREDENTIALS', '1')
-    cmd = [str(bin_path), '--config', str(native_cfg)]
     log_path = _native_runtime_dirs()[1] / "server-native.log"
     # export 指引（AccessBase cmd_start_native L180 借鉴——PIT-79/138 公告闭环:
     # 后续终端操作需同一公告值，零新增探测——直接读生效 env）

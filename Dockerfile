@@ -173,14 +173,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /workspace/target/release/mediaservo-server /usr/local/bin/
 # 命名卷初始化（团队审核 C5/H8）: root 写卷 → entrypoint 末尾 su-exec 降权。
 # 目录属主必须在 USER 前设定——命名卷 copy-up 保留镜像属主（空卷 EACCES 根治）。
-COPY docker/entrypoint.sh /opt/mediaservo/entrypoint.sh
-COPY docker/templates/ /opt/mediaservo/templates/
-RUN chmod 755 /opt/mediaservo/entrypoint.sh \
-    && mkdir -p /opt/mediaservo/etc /opt/mediaservo/recordings \
-    && chown -R mediaservo:mediaservo /opt/mediaservo
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/templates/ /usr/local/etc/templates/
+RUN chmod 755 /usr/local/bin/entrypoint.sh \
+    && mkdir -p /usr/local/etc /opt/mediaservo/recordings \
+    && chown -R mediaservo:mediaservo /usr/local/etc /opt/mediaservo
 # 以 root 跑 entrypoint（写卷不依赖 copy-up 行为）——server 由 entrypoint 末尾 su-exec 降权（PID-1 保真）
 USER root
 EXPOSE 9800 40000-40100/udp
 HEALTHCHECK --interval=30s --timeout=3s CMD curl -f http://localhost:9800/health || exit 1
 # exec-form 保 PID-1（原 mediaservo-server 直启被替换——entrypoint 自举后 exec 降权同进程）
-ENTRYPOINT ["/opt/mediaservo/entrypoint.sh"]
+# 二进制 /usr/local/bin/ → 相对路径 bin/../etc/server.yaml = /usr/local/etc/server.yaml
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
