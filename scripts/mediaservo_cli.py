@@ -120,7 +120,7 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
         etc_dir = _out_root() / "server" / "etc"
         etc_dir.mkdir(parents=True, exist_ok=True)
         src_cfg = ROOT / "config" / "server.docker.yaml"
-        if src_cfg.exists() and not (etc_dir / "server.yaml").exists():
+        if src_cfg.exists():
             cfg = src_cfg.read_text()
             # accounts/devices 改为相对于 etc 目录（打包后 bin/../etc/accounts.yaml 等）
             cfg = cfg.replace('/opt/mediaservo/etc/accounts.yaml', 'accounts.yaml')
