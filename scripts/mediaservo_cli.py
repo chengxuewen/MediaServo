@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
 """mediaservo — MediaServo 统一构建 CLI（vapkg 式单入口）。
 
 薄壳（mediaservo.sh/.bat）保证 pixi 环境激活后调用本脚本：
 环境内 PATH/LIBCLANG_PATH 已注入，subprocess 直接调 cargo/docker 等。
 平台差异仅 e2e（bash 脚本）与 clean（删除命令）两处。
 
-用法: mediaservo [-h] {build,build-host,build-server,up,down,logs,e2e,test,ci,install,package,clean,config,status,version} ...
+用法: mediaservo [-h] {build,build-host,build-server,up,down,logs,e2e,test,ci,deploy,install,package,clean,config,status,version} ...
 """
 
 from __future__ import annotations
@@ -278,56 +277,83 @@ def strip_package_binaries(staging: Path) -> None:
                 print(f"  warning: strip {f.name} 失败（跳过——包体积未优化）")
 
 
-def _cmd_install_host(prefix: str, release: bool = False, brand: str = "") -> None:
-    """安装 host 包（D-H13 /opt/mediaservo-host 布局）: bin 8 + oxmgr 打包（版本锁定）
-    + host init 生成 etc/{host.toml,link/*} + identity.json（幂等——重装保留凭据）
-    + run/logs + recordings。生产部署: --prefix /opt/mediaservo-host。"""
-    src_dir = ROOT / ("target/release" if release else "target/debug")
-    bin_dir = Path(prefix) / "bin"
+def _derive_brand(bin_dir: Path) -> str:
+    """从已装/组装 bin 目录推导品牌（三连停/init 名/快捷名全用它——禁止参数与硬编码）。
+    规则: 存在 <brand>-agent（任意品牌化角色）→ 该前缀；否则空（官方名 host-*）。"""
+    for p in bin_dir.glob("*-agent"):
+        name = p.name
+        if name.startswith("host-"):
+            continue
+        return name[: -len("-agent")]
+    return ""
+
+
+def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
+    """deploy host（有状态部署——源 out/host 已组装）：identity 幂等/oxmgr/systemd/env.sh。
+
+    D4: --prefix 必填（无默认——防污染 out/ 无状态交付；车端用 /opt/mediaservo-host）。
+    品牌全链经 _derive_brand(src) 推导（deploy-ops 高危②/arch HIGH1——禁参数与字面 hardcode）。"""
+    if not prefix:
+        print("错误: deploy 必须 --prefix（无默认——防止污染 out/ 无状态交付；车端用 /opt/mediaservo-host）", file=sys.stderr)
+        sys.exit(2)
+    src = _out_root() / "host" / "bin"
+    if not src.is_dir():
+        print(f"错误: {src} 无组装产物 — 先 build host", file=sys.stderr)
+        sys.exit(1)
+    brand = _derive_brand(src)
+    prefix_p = Path(prefix)
+    bin_dir = prefix_p / "bin"
     try:
         bin_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        print(f"错误: 无法创建 {bin_dir}: {e} — 生产部署用 --prefix /opt/mediaservo-host（需 root）", file=sys.stderr)
+        print(f"错误: 无法创建 {bin_dir}: {e} — 部署用 sudo msrtc.sh deploy host --prefix /opt/mediaservo-host", file=sys.stderr)
         sys.exit(1)
+    if str(prefix_p).startswith("/opt") and hasattr(os, "geteuid") and os.geteuid() != 0:
+        print("错误: /opt 部署需 root（sudo msrtc.sh deploy host --prefix /opt/mediaservo-host）", file=sys.stderr)
+        sys.exit(1)
+    host_cli = _exe_name(f"{brand}-host") if brand else _exe_name("mediaservo-host")
 
     # 运行中的实例二进制被占用（Text file busy）→ 复制前自动停进程族。
     # 注意: 不调 oxmgr CLI（其 IPC 命令在 daemon 未跑时自动拉起 daemon——反而制造 busy）；
     # 直接 kill host 进程族 + 占用 bin/oxmgr 的 daemon。
-    oxfile = Path(prefix) / "run" / "oxfile.toml"
-    installed_cli = bin_dir / _exe_name("mediaservo-host")
-    if oxfile.exists() and installed_cli.exists():
+    oxfile = prefix_p / "run" / "oxfile.toml"
+    if oxfile.exists() and (bin_dir / host_cli).exists():
         print("检测到运行中的 host 实例 — 先停进程族（重装不覆盖 etc/ 凭据）")
         # 复活源三连停: ① systemd 自启 unit（Restart=always 会在 daemon 被杀后立即拉起）
         # ② daemon 自身 ③ host 进程族（restart_policy=always 由 daemon 重启——必须先杀 daemon）
-        # systemctl 不接受 glob——枚举 unit 文件逐个停（self-startup unit 是 daemon 复活源）
+        # systemctl 不接受 glob——按推导 brand 只枚举 oxmgr-{brand}-*.service（deploy-ops 高危②）
         units_dir = Path.home() / ".config" / "systemd" / "user"
         if shutil.which("systemctl") and units_dir.is_dir():
-            # 双前缀枚举: legacy oxmgr-host-* + 品牌化 oxmgr-<brand>-*（install 传 --brand）
-            patterns = ["oxmgr-host-*.service"]
-            if brand:
-                patterns.append(f"oxmgr-{brand}-*.service")
-            seen = set()
-            for pat in patterns:
-                for u in sorted(units_dir.glob(pat)):
-                    if u.name in seen:
-                        continue
-                    seen.add(u.name)
-                    subprocess.run(["systemctl", "--user", "stop", u.name], check=False)
-                    subprocess.run(["systemctl", "--user", "reset-failed", u.name], check=False)
-        _kill_using(bin_dir / "oxmgr")
-        for name in ("host-agent", "host-streamer", "host-capturer", "host-recorder",
-                     "host-controller", "host-emergency", "host-audio"):
-            subprocess.run(["pkill", "-x", name], check=False)
+            for u in sorted(units_dir.glob(f"oxmgr-{brand}-*.service")):
+                subprocess.run(["systemctl", "--user", "stop", u.name], check=False)
+                subprocess.run(["systemctl", "--user", "reset-failed", u.name], check=False)
+        _kill_using(bin_dir / _exe_name("oxmgr"))
+        for base in ("agent", "streamer", "capturer", "recorder",
+                     "controller", "emergency", "audio"):
+            subprocess.run(["pkill", "-x", _exe_name(f"{brand}-{base}" if brand else f"host-{base}")], check=False)
         time.sleep(1)
 
-    missing = [str(src_dir / _exe_name(b)) for b in HOST_BINS if not (src_dir / _exe_name(b)).exists()]
-    if missing:
-        print(f"错误: 缺失二进制 {missing} — 先运行: mediaservo build host{' --release' if release else ''}，或 mediaservo install host --build", file=sys.stderr)
-        sys.exit(1)
-    for b in HOST_BINS:
-        _copy_with_kill(src_dir / _exe_name(b), bin_dir / _exe_name(b))
+    # 拷贝组装产物（out/host/bin 全件——build 已物理改名 <brand>-*；含 host-streamer 兼容链接 + client）
+    src_names = set()
+    for f in sorted(src.iterdir()):
+        if not (f.is_file() or f.is_symlink()):
+            continue
+        src_names.add(f.name)
+        _copy_with_kill(f, bin_dir / f.name)
 
-    # oxmgr 随包锁定版本（D-H13）: PATH 找到则复制打包；缺 → 清晰指引（非致命,
+    # bin 白名单（deploy-ops ④ 品牌切换残留清理）：非当前布局的 app 二进制删除
+    # （build 已物理改名——残留 = 旧品牌/旧 install 遗留）
+    roles = ("agent", "streamer", "capturer", "recorder", "controller", "emergency", "audio", "legacy", "host")
+    for p in sorted(bin_dir.iterdir()):
+        if p.is_symlink() or not p.is_file():
+            continue
+        if p.name in src_names or p.name == _exe_name("oxmgr"):
+            continue
+        if any(p.name.endswith(f"-{r}") for r in roles):
+            print(f"  清理部署残留: {p.name}")
+            p.unlink()
+
+    # oxmgr 随部署锁定版本（D-H13）: PATH 找到则复制打包；缺 → 清晰指引（非致命,
     # 运行时 PATH 缺 oxmgr 由 `host doctor` 检出）
     oxmgr_src = shutil.which("oxmgr")
     if oxmgr_src is not None:
@@ -335,58 +361,70 @@ def _cmd_install_host(prefix: str, release: bool = False, brand: str = "") -> No
         ver = subprocess.run([oxmgr_src, "--version"], capture_output=True, text=True, check=False)
         print(f"  oxmgr 已打包: {ver.stdout.strip() or ver.stderr.strip() or '?'}")
     else:
-        print("错误: PATH 未找到 oxmgr — 未打包（运行时需它拉起进程）。安装: npm install -g oxmgr（https://github.com/Vladimir-Urik/OxMgr#install），或构建 oxmgr-src 后放 ~/.local/bin，再重跑 install host", file=sys.stderr)
+        print("错误: PATH 未找到 oxmgr — 未打包（运行时需它拉起进程）。安装: npm install -g oxmgr（https://github.com/Vladimir-Urik/OxMgr#install），或构建 oxmgr-src 后放 ~/.local/bin，再重跑 deploy host", file=sys.stderr)
 
-    # host init: 生成 etc/ + identity.json + 令牌（幂等——已存在跳过, 重装保留凭据）
+    # host init: 生成 etc/ + identity.json + 令牌——幂等只写不删（已存在跳过, 重装保留凭据）
     # brand: env 注入（init 是独立进程——device 前缀需与布局品牌一致）
+    identity_file = prefix_p / "identity.json"
+    if identity_file.exists():
+        print(f"  identity.json 已存在——只写不删（设备身份保留）: {identity_file}")
     init_env = dict(os.environ)
     if brand:
         init_env["MEDIASERVO_BRAND"] = brand
-    _run_or_exit([str(bin_dir / _exe_name("mediaservo-host")), "init", str(Path(prefix))], env=init_env)
+    _run_or_exit([str(bin_dir / host_cli), "init", str(prefix_p)], env=init_env)
 
-    # 创建 <prefix>/{host,mediaservo-host} → bin/mediaservo-host 快捷方式（品牌化: cp + cp-host）
-    shortcut_names = ("host", "mediaservo-host") if not brand else (brand, f"{brand}-host")
+    # 快捷名（arch MED4：build 已物理改名为 <brand>-host——快捷指向品牌真实名；官方名回退 host/mediaservo-host）
+    if brand:
+        shortcut_names = (f"{brand}-host",)
+        link_target = _exe_name(f"{brand}-host")
+    else:
+        shortcut_names = ("host", "mediaservo-host")
+        link_target = _exe_name("mediaservo-host")
     for link_name in shortcut_names:
-        link = Path(prefix) / link_name
+        link = prefix_p / link_name
         if link.exists():
             link.unlink()
         try:
-            link.symlink_to("bin/mediaservo-host")  # 相对路径，前缀可搬迁
-            print(f"  已创建符号链接 {link} → bin/mediaservo-host")
+            link.symlink_to(f"bin/{link_target}")  # 相对路径，前缀可搬迁
+            print(f"  已创建符号链接 {link} → bin/{link_target}")
         except OSError:
-            shutil.copy2(bin_dir / "mediaservo-host", link)
-            print(f"  已复制 mediaservo-host 到 {link}（符号链接失败，回退到拷贝）")
+            shutil.copy2(bin_dir / link_target, link)
+            print(f"  已复制 {link_target} 到 {link}（符号链接失败，回退到拷贝）")
 
-    # 品牌 app 名符号链接: oxmgr 执行 cp-agent 等（translate 生成 <brand>-<app> 命令）
-    # 默认品牌 app 名 == host-*（二进制本身），无需链接；品牌化需 bin/<brand>-<app> → bin/host-<app>
+    # env.sh 一键激活（arch MED5 承接——deploy 生成；可搬迁：相对自身推导，非硬编码路径）
+    env_host = f"{brand}-host" if brand else "mediaservo-host"
+    env_sh = prefix_p / "env.sh"
+    env_lines = [
+        "#!/usr/bin/env bash",
+        f"# {env_host} 环境激活（deploy 生成）——source 后全部命令可用",
+        "# 用法: source env.sh（任意前缀/搬迁后依然有效，相对本文件推导）",
+        '__MSRTC_ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"',
+        'export PATH="${__MSRTC_ENV_DIR}/bin:$PATH"',
+    ]
     if brand:
-        app_bases = ("agent", "recorder", "controller", "emergency", "audio", "capturer", "streamer", "legacy")
-        for base in app_bases:
-            src = bin_dir / _exe_name(f"host-{base}")
-            if not src.exists():
-                continue
-            dst = bin_dir / _exe_name(f"{brand}-{base}")
-            if dst.exists() and dst.is_symlink():
-                dst.unlink()
-            try:
-                dst.symlink_to(src.name)
-                print(f"  bin/{brand}-{base} → host-{base}")
-            except OSError:
-                shutil.copy2(src, dst)
-                print(f"  bin/{brand}-{base} ← 复制（符号链接失败）")
+        env_lines.append(f'export MEDIASERVO_BRAND="{brand}"   # 品牌 env（D252），不覆盖用户预设')
+    env_lines += [
+        'BIN_DIR_MSRTC="${__MSRTC_ENV_DIR}/bin"   # 供脚本/别名引用',
+        "unset __MSRTC_ENV_DIR",
+        f'echo "[{brand or "mediaservo"}] {env_host} 环境已激活 — bin/: $BIN_DIR_MSRTC"',
+    ]
+    env_sh.write_text("\n".join(env_lines) + "\n")
+    env_sh.chmod(0o755)
+    print(f"  env.sh 已生成: {env_sh}（source 后 PATH=bin/ 全部命令可用）")
 
     for d in ("run/logs", "recordings"):
-        (Path(prefix) / d).mkdir(parents=True, exist_ok=True)
+        (prefix_p / d).mkdir(parents=True, exist_ok=True)
 
-    print(f"host 已安装到 {prefix}（{'release' if release else 'debug'}）")
-    print(f"  bin/    {', '.join(_exe_name(b) for b in HOST_BINS)} + oxmgr")
+    print(f"host 已部署到 {prefix}（{'release' if release else 'debug'}）")
+    print(f"  bin/    {', '.join(sorted(src_names))} + oxmgr")
     print("  etc/    host.toml + link/{signing.pem,*.token}（host init 生成, 重装保留）")
     print("  run/    logs/")
     print("  recordings/")
-    print("  identity.json（0600, 设备身份 — 重装保留, 勿删）")
-    print(f"使用: export PATH={bin_dir}:$PATH && mediaservo-host doctor {prefix} && mediaservo-host start {prefix}")
+    print("  identity.json（0600, 设备身份 — 只写不删, 勿删）")
+    print(f"使用: export PATH={bin_dir}:$PATH && {host_cli} doctor {prefix} && {host_cli} start {prefix}")
     if sys.platform == "win32":
         print("注意: Windows best-effort（未全面验证）— 生产部署建议 Linux 车端", file=sys.stderr)
+
 
 def _platform_tag() -> str:
     """wheel 平台 tag（Linux x86_64 → linux_x86_64；其余平台 best-effort）。"""
@@ -395,141 +433,34 @@ def _platform_tag() -> str:
     return f"{platform.system().lower()}_{mach}"
 
 
-def _cmd_install_bindings(prefix: str, components: str = "all", release: bool = False) -> None:
-    """安装 bindings（按需分发）: libmediaservo_<sdk>.so.<MAJOR>.<MINOR>.<PATCH> 三件套（D241）
-    + C/cxx 头文件（D248 include/mediaservo 布局）+ .pc + cmake config（组件裁剪）。"""
-    ver = _workspace_version()
-    src_dir = ROOT / ("target/release" if release else "target/debug")
-    major, minor, patch = ver.split(".")
-    if components == "all":
-        sdks = list(ALL_SDKS)
-    else:
-        sdks = [c.strip() for c in components.split(",")]
-        unknown = [c for c in sdks if c not in ALL_SDKS]
-        if unknown:
-            print(f"错误: 未知组件 {unknown}（可选: {ALL_SDKS} 或 all）", file=sys.stderr)
-            sys.exit(1)
-        sdks = [c for c in ALL_SDKS if c in sdks]  # 保持稳定顺序
-
-    lib_dir = Path(prefix) / "lib"
-    inc_dir = Path(prefix) / "include" / "mediaservo"
-    lib_dir.mkdir(parents=True, exist_ok=True)
-    inc_dir.mkdir(parents=True, exist_ok=True)
-
-    for sdk in sdks:
-        src = src_dir / f"libmediaservo_{sdk}.so"
-        if not src.exists():
-            print(f"错误: {src} 不存在 — 先运行: mediaservo build bindings{' --release' if release else ''}，或 mediaservo install bindings --build", file=sys.stderr)
-            sys.exit(1)
-        real = lib_dir / f"libmediaservo_{sdk}.so.{major}.{minor}.{patch}"
-        shutil.copy2(src, real)
-        _symlink_force(real.name, lib_dir / f"libmediaservo_{sdk}.so.{major}")
-        _symlink_force(f"libmediaservo_{sdk}.so.{major}", lib_dir / f"libmediaservo_{sdk}.so")
-
-    for h in (ROOT / "bindings/c/include/mediaservo").glob("*.h"):
-        shutil.copy2(h, inc_dir)  # common.h 总是装（所有头依赖）
-    # C++ 共享目录（detail/result.hpp + 3rdparty/tl/expected.hpp + NOTICE）: 总是装
-    for f in (ROOT / "bindings/cxx/include/mediaservo").rglob("*"):
-        if not f.is_file():
-            continue
-        dst = inc_dir / f.relative_to(ROOT / "bindings/cxx/include/mediaservo")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(f, dst)
-    for sdk in sdks:
-        for h in (ROOT / f"bindings/c/mediaservo-{sdk}-c/include/mediaservo").glob("*.h"):
-            shutil.copy2(h, inc_dir)
-        for h in (ROOT / f"bindings/cxx/mediaservo-{sdk}-cxx/include/mediaservo").glob("*.hpp"):
-            shutil.copy2(h, inc_dir)
-
-    # pkg-config (.pc) + CMake package config：模板随归属（.pc 在各自 SDK 包目录，
-    # cmake 聚合模板在 bindings/c/cmake/——iceoryx2 每包自带配方模式）
-    pc_dir = lib_dir / "pkgconfig"
-    cmake_dir = lib_dir / "cmake" / "mediaservo"
-    pc_dir.mkdir(parents=True, exist_ok=True)
-    cmake_dir.mkdir(parents=True, exist_ok=True)
-    prefix_abs = str(lib_dir.parent)  # 规范绝对 prefix（configure 传统；模板用 ${pcfiledir} 保持可重定位）
-    for sdk in sdks:  # 按需: 只装选中的 .pc
-        t = ROOT / f"bindings/c/mediaservo-{sdk}-c/mediaservo-{sdk}.pc.in"
-        content = t.read_text().replace("@VERSION@", ver).replace("${pcfiledir}/../..", prefix_abs)
-        (pc_dir / f"mediaservo-{sdk}.pc").write_text(content)
-    sdk_list = " ".join(sdks)  # cmake config 组件裁剪
-    cmake_tpl = ROOT / "bindings/c/cmake"
-    for name, t in (("mediaservoConfig.cmake", "mediaservoConfig.cmake.in"),
-                    ("mediaservoConfigVersion.cmake", "mediaservoConfigVersion.cmake.in")):
-        content = (cmake_tpl / t).read_text().replace("@VERSION@", ver).replace("@MAJOR@", major)
-        content = content.replace("@SDK_LIST@", sdk_list)
-        (cmake_dir / name).write_text(content)
-
-    # Python 绑定: 构建 fat wheel（选中 SDK 的 .so 三件套进包内 _libs/，
-    # CDLL 打开 .so.<MAJOR> 实体使 DT_NEEDED 自解析）→ pip install --prefix
-    py_src = ROOT / "bindings/python/mediaservo"
-    py_pkg = py_src / "mediaservo"
-    libs_src = py_pkg / "_libs"
-    libs_src.mkdir(exist_ok=True)
-    for sdk in sdks:
-        so = src_dir / f"libmediaservo_{sdk}.so"
-        so_major = libs_src / f"libmediaservo_{sdk}.so.{major}"
-        shutil.copy2(so, so_major)  # 实体（SONAME 文件名，DT_NEEDED 自解析）
-        _symlink_force(f"libmediaservo_{sdk}.so.{major}", libs_src / f"libmediaservo_{sdk}.so")
-    for stale in libs_src.glob("libmediaservo_*.so*"):
-        if not any(sdk in stale.name for sdk in sdks):
-            stale.unlink()  # 组件缩减时防残留
+def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
+    """从 out/bindings 部署三 .so+include（SDK 品牌无关——libmediaservo_* 原样，D3）。
+    D4: --prefix 必填（无默认——防污染 out/ 无状态交付；SDK 用 /opt/mediaservo-sdk）。
+    布局补齐（version-full/.pc/cmake/wheel/cxx）归 Task 2.5——deploy 只承接 build 已组装内容。"""
+    if not prefix:
+        print("错误: deploy 必须 --prefix（无默认——防止污染 out/ 无状态交付；SDK 用 /opt/mediaservo-sdk）", file=sys.stderr)
+        sys.exit(2)
+    src = _out_root() / "bindings"
+    if not (src / "lib").is_dir():
+        print(f"错误: {src} 无组装产物 — 先 build bindings", file=sys.stderr)
+        sys.exit(1)
+    prefix_p = Path(prefix)
+    lib_dir = prefix_p / "lib"
+    inc_dir = prefix_p / "include" / "mediaservo"
     try:
-        wheel_dir = Path(prefix) / "wheel"
-        wheel_dir.mkdir(parents=True, exist_ok=True)
-        r = subprocess.run(
-            ["pip", "wheel", "--no-deps", "--no-build-isolation", "-w", str(wheel_dir), str(py_src)],
-            capture_output=True, text=True,
-        )
-        if r.returncode != 0:
-            print(f"错误: wheel 构建失败 — {r.stderr[-500:]}", file=sys.stderr)
-            sys.exit(1)
-        # 强制平台 tag（wheel 含 Linux .so，拒绝 any-tag 误装跨平台）: 改 WHEEL 内 Tag + 重命名
-        import zipfile
-        wheel = next(wheel_dir.glob("mediaservo-*.whl"))
-        tag_new = f"py3-none-{_platform_tag()}"
-        with zipfile.ZipFile(wheel, "r") as z:
-            items = z.infolist()
-            data = {i.filename: z.read(i) for i in items}
-        fixed = wheel.with_name(f"mediaservo-{ver}-{tag_new}.whl")
-        with zipfile.ZipFile(fixed, "w") as z:
-            for i in items:
-                content = data[i.filename]
-                if i.filename == "mediaservo-{ver}.dist-info/WHEEL":
-                    content = content.replace(b"Tag: py3-none-any", f"Tag: {tag_new}".encode())
-                z.writestr(i, content)
-        wheel.unlink()
-        r2 = subprocess.run(
-            ["pip", "install", "--prefix", str(Path(prefix)), "--no-deps", str(fixed)],
-            capture_output=True, text=True,
-        )
-        if r2.returncode != 0:
-            print(f"错误: pip install 失败 — {r2.stderr[-500:]}", file=sys.stderr)
-            sys.exit(1)
-    finally:
-        shutil.rmtree(libs_src, ignore_errors=True)  # 清理临时 _libs（gitignore 兜底）
-
-    # Node 绑定: 包目录复制到 <prefix>/node/mediaservo/（lib + package.json + .node）
-    node_src = ROOT / "bindings/node"
-    node_dst = Path(prefix) / "node" / "mediaservo"
-    if (node_src / "mediaservo.node").exists():
-        node_dst.mkdir(parents=True, exist_ok=True)
-        for f in ("package.json", "mediaservo.node"):
-            shutil.copy2(node_src / f, node_dst)
-        lib_dst = node_dst / "lib"
-        lib_dst.mkdir(exist_ok=True)
-        shutil.copy2(node_src / "lib/index.mjs", lib_dst)
-        print(f"  node/    mediaservo 包（package.json + mediaservo.node + lib/）→ {node_dst}")
-        print("  使用: NODE_PATH=<prefix>/node npm 或 import '<prefix>/node/mediaservo/lib/index.mjs'")
-
-    site_packages = lib_dir / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
-    print(f"bindings 已安装到 {prefix}（组件: {', '.join(sdks)}；{'release' if release else 'debug'}）")
-    print(f"  lib/    {', '.join(f'libmediaservo_{s}.so.{major}.{minor}.{patch}' for s in sdks)} + .so.{major} + .so")
-    print(f"  lib/pkgconfig/   {', '.join(f'mediaservo-{s}.pc' for s in sdks)}（pkg-config 消费）")
-    print(f"  lib/cmake/mediaservo/  mediaservoConfig.cmake + ConfigVersion.cmake（find_package(mediaservo COMPONENTS {'|'.join(sdks)})）")
-    print(f"  include/mediaservo/  common.h + {', '.join(f'{s}.h' for s in sdks)} + {', '.join(f'{s}.hpp' for s in sdks)}")
-    print(f"Python: 包已装到 {site_packages}（fat 自包含, 含 _libs）")
-    print(f"  使用: export PYTHONPATH={site_packages} && python3 app.py")
+        lib_dir.mkdir(parents=True, exist_ok=True)
+        inc_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"错误: 无法创建 {prefix_p}: {e} — 部署用 sudo msrtc.sh deploy bindings --prefix /opt/mediaservo-sdk", file=sys.stderr)
+        sys.exit(1)
+    sos = []
+    for so in sorted((src / "lib").glob("libmediaservo_*.so*")):
+        _copy_with_kill(so, lib_dir / so.name)  # busy（运行中加载）→ 杀占用重试
+        sos.append(so.name)
+    for h in sorted((src / "include" / "mediaservo").glob("*.h")):
+        shutil.copy2(h, inc_dir)  # common.h 总是装（所有头依赖）
+    print(f"bindings 已部署到 {prefix}（lib/ {', '.join(sos)} + include/mediaservo/）")
+    print("  使用: export LD_LIBRARY_PATH=<prefix>/lib && 链接库见 bindings 头文件")
 
 
 # ── package: dist/ 双包发布（D-H13）──────────────────────────
@@ -564,9 +495,9 @@ def _cmd_package(args: argparse.Namespace) -> None:
     staging = Path(tempfile.mkdtemp(prefix=f"ms-{args.target}-pkg-", dir=str(dist)))
     try:
         if args.target == "host":
-            _cmd_install_host(str(staging), args.release, args.brand)
+            _cmd_deploy_host(str(staging), args.release)  # brand 由 out/host/bin 推导
         else:
-            _cmd_install_bindings(str(staging), "all", args.release)
+            _cmd_deploy_bindings(str(staging), args.release)
         _write_version_file(staging, pkg_name)
         prefix_name = args.brand if args.brand else "mediaservo"
         out = dist / f"{prefix_name}-{pkg_name}-{ver}.tar.gz"
@@ -1106,17 +1037,22 @@ def _rm_tree(path: Path) -> None:
         )
 
 
-def _cmd_install(args: argparse.Namespace) -> None:
-    """install <target> — bindings | host。"""
+def _cmd_deploy(args: argparse.Namespace) -> None:
+    """deploy <target> — bindings | host（源=out/ 组装；--prefix 必填 D4）。"""
     if args.target == "bindings":
-        if args.build:
-            _cmd_build_bindings(args.release)  # 一体化: 先构建再安装
-        _cmd_install_bindings(args.prefix or str(ROOT / "install"), args.components, args.release)
+        _cmd_deploy_bindings(args.prefix, args.release)
     elif args.target == "host":
-        if args.build:
-            _check("cargo", "pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat")
-            _run_or_exit(["cargo", "build"] + (["--release"] if args.release else []) + ["-p", "mediaservo-host"])
-        _cmd_install_host(args.prefix or str(ROOT / "install" / "host"), args.release, args.brand)
+        _cmd_deploy_host(args.prefix, args.release)
+
+
+def _cmd_install_deprecated(args: argparse.Namespace) -> None:
+    """D1: install 已改名 deploy——提示迁移后退出（不 alias——语义不同: 源=out/ 交付布局 + --prefix 必填）。"""
+    print(
+        "install 已改名 deploy：源改为 out/ 交付布局（有状态部署——identity 幂等/oxmgr/systemd/env.sh），"
+        "--prefix 必填。请用: mediaservo deploy host|bindings --prefix <前缀>（车端 host: --prefix /opt/mediaservo-host）",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 
 def _cmd_clean(args: argparse.Namespace) -> None:
@@ -1569,15 +1505,15 @@ def main() -> None:
     sub.add_parser("test", help="workspace 测试（排除 mediaservo-server）")
     sub.add_parser("ci", help="CI 全链: fmt → clippy → test → e2e sfu")
 
-    install_p = sub.add_parser("install", help="安装 <target>: bindings（lib 三件套 D241 + include/mediaservo 头 D248）| host（D-H13 /opt/mediaservo-host 车端布局）")
-    install_p.add_argument("target", choices=["bindings", "host"])
-    install_p.add_argument("--prefix", default=None, help="安装前缀（默认 bindings: <项目根>/install；host: <项目根>/install/host）")
-    install_p.add_argument("--brand", default="", help="品牌前缀（如 --brand cp → bin/cp-agent 符号链接 + 快捷名 cp/cp-host；缺省 = 官方 mediaservo 命名）")
-    install_p.add_argument("--build", action="store_true", help="先构建再安装（等价 build && install）")
-    install_p.add_argument("--components", default="all",
-                           help="按需分发: field|link|deck|all|逗号组合（如 link,deck；默认 all；仅 bindings）")
-    install_p.add_argument("--release", action="store_true", help="安装 release 产物（target/release，配合 build --release）")
-    install_p.set_defaults(func=_cmd_install)
+    deploy_p = sub.add_parser("deploy", help="部署 <target>（有状态：identity 幂等/oxmgr/systemd）：host|bindings——源=out/；--prefix 必填（/opt 需 root）")
+    deploy_p.add_argument("target", choices=["bindings", "host"])
+    deploy_p.add_argument("--prefix", default=None, help="部署前缀（必填——车端 /opt/mediaservo-host）")
+    deploy_p.add_argument("--release", action="store_true", help="部署 release 组装产物")
+    deploy_p.set_defaults(func=_cmd_deploy)
+    # D1: install 隐藏 prompt（不 alias——语义不同: 源=out/ 交付布局 + --prefix 必填）
+    install_p = sub.add_parser("install", help="已改名 deploy（提示迁移后退出 exit 2）")
+    install_p.add_argument("args", nargs=argparse.REMAINDER, help="吞掉旧调用点透传参数（T3 迁移前 msrtc.sh 仍注入 --prefix 等）——仅提示改名")
+    install_p.set_defaults(func=_cmd_install_deprecated)
     package_p = sub.add_parser("package", help="打包 <target>: host（车端包）| bindings（SDK 包）→ dist/mediaservo-<target>-<ver>.tar.gz（D-H13 双包发布, 含版本契约文件）")
     package_p.add_argument("target", choices=["host", "bindings"])
     package_p.add_argument("--brand", default="", help="品牌包名（dist/<brand>-host-<ver>.tar.gz；缺省 mediaservo-host-<ver>）")
