@@ -51,27 +51,26 @@ def _cmd_build_host() -> None:
     _check("cargo", "pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat")
     _run_or_exit(["cargo", "build", "-p", "mediaservo-host", "-p", "mediaservo-client"])
     # 组装交付布局 out/host/bin（HOST_BINS 8 件——cargo target 保留，out 为产物镜像）
+    # brand 非空时 _stage_to_out 物理重命名: host-<app> → <brand>-<app>、mediaservo-host → <brand>-host
+    brand = os.environ.get("MEDIASERVO_BRAND", "")
     tgt = ROOT / "target/debug"
-    staged = _stage_to_out("host", [tgt / _exe_name(b) for b in HOST_BINS])
-    staged += _stage_to_out("host", [tgt / _exe_name("mediaservo-client")], sub="bin")
+    staged = _stage_to_out("host", [tgt / _exe_name(b) for b in HOST_BINS], brand=brand)
+    staged += _stage_to_out("host", [tgt / _exe_name("mediaservo-client")], sub="bin")  # D3: client 不品牌
     print(f"host 交付布局组装: out/host/bin/ 共 {len(staged)} 件（{', '.join(p.name for p in staged[:4])}...）")
 
     # host-streamer 兼容链接（gateway.rs 硬编码 src="host-streamer"——品牌命名下运行时断链）
-    # 品牌场景: 把 host-streamer（cargo 原名）rename 为 <brand>-streamer，再建 host-streamer → <brand>-streamer
-    brand = os.environ.get("MEDIASERVO_BRAND", "")
+    # _stage_to_out 已把 host-streamer rename 为 <brand>-streamer；建兼容链接使 gateway 旧名可达
     bin_dir = _out_root() / "host" / "bin"
-    for base, bname in (("host-streamer", f"{brand}-streamer"),):
-        if brand:
-            src_bin = bin_dir / _exe_name(base)
-            dst_bin = bin_dir / _exe_name(bname)
-            link = bin_dir / _exe_name(base)
-            if src_bin.exists() and src_bin.is_file() and not src_bin.is_symlink():
-                try:
-                    src_bin.rename(dst_bin)
-                    link.symlink_to(dst_bin.name)
-                    print(f"  {base} → {dst_bin.name}（品牌兼容链接）")
-                except OSError:
-                    pass
+    if brand:
+        link = bin_dir / _exe_name("host-streamer")
+        target = _exe_name(f"{brand}-streamer")
+        target_path = bin_dir / target
+        if target_path.exists() and not link.exists():
+            try:
+                link.symlink_to(target)
+                print(f"  host-streamer → {target}（品牌兼容链接）")
+            except OSError:
+                pass
 
 
 def _ensure_admin_dist() -> None:
@@ -830,15 +829,22 @@ def _out_root() -> Path:
     return Path(env_out) if env_out else ROOT / "out"
 
 
-def _stage_to_out(target: str, files: list[Path], sub: str = "bin") -> list[Path]:
-    """拷贝 target/debug|release 产物到 out/<target>/<sub>（交付布局镜像——cargo 产物不搬 target）。"""
+def _stage_to_out(target: str, files: list[Path], sub: str = "bin", brand: str = "") -> list[Path]:
+    """拷贝 target/debug|release 产物到 out/<target>/<sub>（交付布局镜像）；brand 非空时物理重命名：host-<app> → <brand>-<app>、mediaservo-host → <brand>-host（D3：client/其他不品牌）。"""
     dst = _out_root() / target / sub
     dst.mkdir(parents=True, exist_ok=True)
     staged = []
     for src in files:
-        if src.exists():
-            shutil.copy2(src, dst / src.name)
-            staged.append(dst / src.name)
+        if not src.exists():
+            continue
+        name = src.name
+        if brand:
+            if name.startswith("host-"):      # host-agent → msrtc-agent（D3：仅 host- 子进程品牌化）
+                name = f"{brand}-{name[5:]}"
+            elif name == "mediaservo-host":
+                name = f"{brand}-host"
+        shutil.copy2(src, dst / name)
+        staged.append(dst / name)
     return staged
 
 
