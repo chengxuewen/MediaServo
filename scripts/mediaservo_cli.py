@@ -132,7 +132,7 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
                 src = ROOT / "config" / f
                 if src.exists():
                     shutil.copy2(src, etc_dir / f)
-            print(f"server 默认配置组装: {etc_dir.relative_to(ROOT)}/server.yaml")
+            print(f"server 默认配置组装: {etc_dir}/server.yaml")
         return
     _check("docker", "安装 docker 并启动 daemon")
     if image:
