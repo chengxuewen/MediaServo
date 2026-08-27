@@ -28,9 +28,9 @@ for port in 9800 5173; do
     || { echo "ERROR: 127.0.0.1:${port} 未监听 — 先启动环境" >&2; exit 1; }
 done
 if [ -n "$LEGACY" ]; then
-  pgrep -x host-legacy > /dev/null || { echo "ERROR: Host (legacy) 未运行 — mediaservo run-host --legacy" >&2; exit 1; }
+  pgrep -x host-legacy > /dev/null || { echo "ERROR: Host (legacy) 未运行 — 手动: target/debug/mediaservo-host start .（legacy: cargo run -p mediaservo-host --bin host-legacy）" >&2; exit 1; }
 else
-  pgrep -x host-streamer > /dev/null || { echo "ERROR: Host (多进程 streamer) 未运行 — mediaservo run-host" >&2; exit 1; }
+  pgrep -x host-streamer > /dev/null || { echo "ERROR: Host (多进程 streamer) 未运行 — 手动: target/debug/mediaservo-host init . && token issue --all . && start ." >&2; exit 1; }
 fi
 
 export HEADFUL="$HEADFUL_FLAG"

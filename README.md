@@ -63,10 +63,10 @@ MediaServo — 实时媒体伺服平台（MediaServo Platform）。独立部署�
                                   # 容器仅单公告生效取首 IP，多地址需裸机运行）
 ./mediaservo.sh build server --native  # 裸机编译 server（pixi 工具链，需联网拉 meson wrap；多 IP 公告在 run 阶段生效）
 ./mediaservo.sh run server --native [--foreground]  # 裸机运行 server（后台: target/server-native.pid + .log）
-./mediaservo.sh start host    # 启动 host 推流（oxmgr 多进程; 杀旧进程）；start server=裸机 native（默认）\| --mode compose/
-#                           --env dev 容器
+# host 运行已移除 CLI 封装（D266）——部署实例: systemctl --user start oxmgr-<brand>-host.service / <prefix>/bin/msrtc-host start <prefix>；
+# 开发: target/debug/mediaservo-host init . && token issue --all . && start .（先清 iceoryx2 残留）
 ./mediaservo.sh stop server   # 停止 server（先杀裸机 pid——若在跑; 再 compose stop 保留容器——秒级再启）
-./mediaservo.sh stop host     # 停止 host 进程（pkill host-legacy + mediaservo-host stop——幂等）
+./mediaservo.sh stop host     # 已移除（D266）——手动: systemctl --user stop oxmgr-<brand>-host.service / <prefix>/bin/msrtc-host stop <prefix>
 ./mediaservo.sh logs server    # server 日志（默认裸机 target/server-native.log；--env dev/--mode compose 容器日志；--native 显式）
 ./mediaservo.sh down --env dev && ./mediaservo.sh up --env dev   # 重启 dev server（清旧再启，配置变更生效）
 ./mediaservo.sh logs host     # host 日志（/tmp/mediaservo-host.log）
@@ -75,7 +75,7 @@ MediaServo — 实时媒体伺服平台（MediaServo Platform）。独立部署�
 ./mediaservo.sh status host    # 推流进程+网关 17980+实例日志（C38 ②层）；环境诊断见 doctor
 ./mediaservo.sh config validate   # 配置校验（pyyaml）
 ./mediaservo.sh clean         # 清构建产物（保留 cargo-cache 卷）; clean --all 全清
-./mediaservo.sh deploy host  # 部署到前缀（默认 out/host 交付布局）; deploy bindings 同
+./mediaservo.sh deploy host  # 组装+部署到前缀（--prefix 必填；品牌经 MEDIASERVO_BRAND；车端 /opt/mediaservo-host）; deploy bindings 同
 ./mediaservo.sh package host|bindings  # dist/ 双包发布（D-H13）: mediaservo-host-<ver>.tar.gz + mediaservo-sdk-<ver>.tar.gz
 ```
 

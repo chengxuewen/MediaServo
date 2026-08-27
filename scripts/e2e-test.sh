@@ -20,8 +20,8 @@ cleanup() {
     kill $HOST_PID 2>/dev/null || true
     kill $CLIENT_PID 2>/dev/null || true
     if [ -z "$HOST_PID" ] && [ -z "$LEGACY" ]; then
-        # 多进程 host: oxmgr 管理，统一走 CLI 停止
-        python scripts/mediaservo_cli.py stop host 2>/dev/null || true
+        # 多进程 host: oxmgr 管理——手动停止（CLI stop host 已移除 D266）
+        target/debug/mediaservo-host stop . 2>/dev/null || true
     fi
     echo ""
     echo "═══════════════════════════════════════"
@@ -64,8 +64,12 @@ if [ -n "$LEGACY" ]; then
         [ $i -eq 4 ] && { fail "Host connect timeout"; head -10 "$TMPDIR/host.log"; }
     done
 else
-    # 多进程: init → token issue ×N → host start（oxmgr; 日志 ~/.local/share/oxmgr/logs）
-    python scripts/mediaservo_cli.py start host
+    # 多进程: 内联四步（CLI start host 已移除 D266）——清残留 → init → token → start（oxmgr; 日志 ~/.local/share/oxmgr/logs）
+    rm -rf /tmp/iceoryx2
+    rm -f /dev/shm/iox2_* 2>/dev/null || true
+    target/debug/mediaservo-host init . >/dev/null 2>&1 || true
+    target/debug/mediaservo-host token issue --all . >/dev/null 2>&1 || true
+    target/debug/mediaservo-host start .
     OXLOG="${OXMGR_HOME:-$HOME/.local/share/oxmgr}/logs/host-streamer.out.log"
     info "streamer log: $OXLOG"
     for i in 1 2 3 4 5 6; do
