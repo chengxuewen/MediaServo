@@ -426,7 +426,9 @@ pub fn handle_config_push(
 
 
 fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Result<String, String> {
-    let (sources, streams) = camera_and_stream_ids(cfg)?;
+    // capturer 实例需完整源配置（reconnect_ms 透传）；流仅需 id。
+    let sources = camera_configs(cfg)?;
+    let (_, streams) = camera_and_stream_ids(cfg)?;
 
     let mut out = format!(
         "version = 1\n\n[defaults]\nnamespace = \"{}\"\nrestart_policy = \"always\"\n",
@@ -438,13 +440,20 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
     // 增删 app（相机/流）由 `oxmgr apply` 增量处理（Start/Recreate），watch 兜底
     // 纯内容变更（如 fps，命令不变 → apply Noop）。cwd 是 watch 前置要求（OxMgr
     // 源码 watch_fingerprint_for_process 实证）；无路径变体（doctor）不带 watch。
+    let inst_root = config_path
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|d| d.to_string_lossy().into_owned());
     if let (Some(cwd), Some(watch)) = (
-        config_path.parent().and_then(|p| p.parent()).map(|d| d.to_string_lossy().into_owned()),
+        inst_root.as_deref(),
         (!config_path.as_os_str().is_empty()).then(|| config_path.to_string_lossy().into_owned()),
     ) {
         out.push_str(&format!("cwd = \"{cwd}\"\nwatch = [\"{watch}\"]\nwatch_delay_secs = 1\n"));
     }
     out.push('\n');
+    // PIT: 日志路径绝对化（实例 run/logs）——OxMgr 按 daemon cwd 解析相对路径，残留 daemon
+    // 复用错位（cwd 指向已删临时目录）会 failed to create ./run/logs；绝对路径与 daemon cwd 无关。
+    let log_dir = inst_root.as_deref().map(|d| format!("{d}/run/logs"));
 
     for base in FIXED_APP_BASES {
         let name = app_name(base);
@@ -489,20 +498,26 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
             let room = signaling_room(cfg)?.unwrap_or_else(|| "vehicle".to_string());
             cmd.push_str(&format!(" --room audio-{room}"));
         }
-        push_app(&mut out, &name, &cmd, policy);
+        push_app(&mut out, &name, &cmd, policy, log_dir.as_deref());
     }
     for src in &sources {
-        let name = instance_name(&app_name("capturer"), src);
-        let mut cmd = format!("{} --camera {}", exe_cmd(&app_name("capturer")), src);
+        let name = instance_name(&app_name("capturer"), &src.id);
+        let mut cmd = format!("{} --camera {}", exe_cmd(&app_name("capturer")), src.id);
+        // T7: mode=camera 且配置 reconnect_ms → 透传 --reconnect-ms（generator 不加）
+        if src.mode == SourceMode::Camera
+            && let Some(ms) = src.reconnect_ms
+        {
+            cmd.push_str(&format!(" --reconnect-ms {ms}"));
+        }
         if !config_path.as_os_str().is_empty() {
             cmd.push_str(&format!(
                 " --config {} --token {}/{}.token",
                 config_path.display(),
                 token_dir.display(),
-                src
+                src.id
             ));
         }
-        push_app(&mut out, &name, &cmd, "always");
+        push_app(&mut out, &name, &cmd, "always", log_dir.as_deref());
     }
     for stream in &streams {
         let name = instance_name(&app_name("streamer"), stream);
@@ -517,7 +532,7 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
             stream
         ));
         }
-        push_app(&mut out, &name, &cmd, "always");
+        push_app(&mut out, &name, &cmd, "always", log_dir.as_deref());
     }
     Ok(out)
 }
@@ -558,6 +573,10 @@ pub struct SourceConfig {
     pub width: u32,
     pub height: u32,
     pub fps: u32,
+    /// v4l2 设备路径（mode=camera 必填；其余 mode 可空）。
+    pub input: Option<String>,
+    /// 采集失败重连间隔 ms（mode=camera 透传 capturer --reconnect-ms；缺省 capturer 侧 5000）。
+    pub reconnect_ms: Option<u64>,
 }
 
 /// 帧宽缺省（width 未配置；原 capturer DEFAULT_WIDTH）。
@@ -594,6 +613,8 @@ pub fn camera_configs(cfg: &str) -> Result<Vec<SourceConfig>, String> {
             width: c.width.unwrap_or(DEFAULT_SOURCE_WIDTH),
             height: c.height.unwrap_or(DEFAULT_SOURCE_HEIGHT),
             fps,
+            input: c.input,
+            reconnect_ms: c.reconnect_ms,
         });
     }
     Ok(out)
@@ -672,14 +693,19 @@ fn exe_cmd(name: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
-fn push_app(out: &mut String, name: &str, command: &str, restart_policy: &str) {
+fn push_app(out: &mut String, name: &str, command: &str, restart_policy: &str, log_dir: Option<&str>) {
     out.push_str(&format!(
         "[[apps]]\nname = \"{name}\"\ncommand = \"{command}\"\nrestart_policy = \"{restart_policy}\"\n"
     ));
-    // D-H13: 每节点日志落实例 run/logs（相对 oxfile 目录 = run/）；轮转由 OxMgr daemon
-    // env 控制（OXMGR_LOG_MAX_SIZE_MB/MAX_FILES/MAX_DAYS——默认 20MB×5×14d，见 OxMgr docs）
+    // D-H13 + PIT: 日志路径绝对化（实例 run/logs）——OxMgr 按 daemon cwd 解析相对路径，
+    // 残留 daemon 复用错位会 failed to create ./run/logs；无路径变体（doctor）保持相对。
+    // 轮转由 OxMgr daemon env 控制（OXMGR_LOG_MAX_SIZE_MB/MAX_FILES/MAX_DAYS——默认 20MB×5×14d）
+    let (stdout, stderr) = match log_dir {
+        Some(d) => (format!("{d}/{name}.out.log"), format!("{d}/{name}.err.log")),
+        None => (format!("logs/{name}.out.log"), format!("logs/{name}.err.log")),
+    };
     out.push_str(&format!(
-        "[apps.logs]\nstdout = \"logs/{name}.out.log\"\nstderr = \"logs/{name}.err.log\"\n\n"
+        "[apps.logs]\nstdout = \"{stdout}\"\nstderr = \"{stderr}\"\n\n"
     ));
 }
 
@@ -1047,5 +1073,56 @@ sources:
             CFG_V0,
             "拒绝不得改写 host.yaml"
         );
+    }
+    /// T7: mode=camera + reconnect_ms → capturer 命令行透传 --reconnect-ms；generator 不加；
+    /// 未配置 reconnect_ms 的 camera 源不 emit（capturer 侧缺省 5000）。
+    #[test]
+    fn oxfile_passes_reconnect_ms_for_camera_mode_only() {
+        let cfg = r#"
+sources:
+  - id: "cam0"
+    mode: "camera"
+    backend: "v4l2"
+    input: "/dev/video0"
+    width: 1920
+    height: 1080
+    fps: 30
+    reconnect_ms: 3000
+  - id: "gen0"
+    mode: "generator"
+    fps: 30
+    reconnect_ms: 9999
+streams:
+  - id: "s0"
+    source: "cam0"
+"#;
+        let ox = to_oxfile(cfg).unwrap();
+        let cam_line = ox.lines()
+            .find(|l| l.contains("command") && l.contains("--camera cam0"))
+            .expect("cam0 capturer 命令行");
+        assert!(cam_line.contains("--reconnect-ms 3000"), "camera 源应透传 reconnect_ms: {cam_line}");
+        let gen_line = ox.lines()
+            .find(|l| l.contains("command") && l.contains("--camera gen0"))
+            .expect("gen0 capturer 命令行");
+        assert!(!gen_line.contains("--reconnect-ms"), "generator 源不得加 --reconnect-ms: {gen_line}");
+        // 未配置 reconnect_ms 的 camera 源 → 不 emit（capturer 侧缺省 5000）
+        let no_reconnect = "sources:\n  - id: \"cam1\"\n    mode: \"camera\"\n    input: \"/dev/video0\"\n";
+        let ox2 = to_oxfile(no_reconnect).unwrap();
+        let cam1_line = ox2.lines()
+            .find(|l| l.contains("command") && l.contains("--camera cam1"))
+            .expect("cam1 capturer 命令行");
+        assert!(!cam1_line.contains("--reconnect-ms"), "未配置 reconnect_ms 不 emit: {cam1_line}");
+    }
+
+    /// T7: camera_configs 解析 input / reconnect_ms（缺省 None——capturer 侧回落 5000）。
+    #[test]
+    fn camera_config_resolves_input_and_reconnect_ms() {
+        let cfg = "sources:\n  - id: \"cam0\"\n    mode: \"camera\"\n    input: \"/dev/v4l/by-id/cam0\"\n    reconnect_ms: 2500\n";
+        let cams = camera_configs(cfg).unwrap();
+        assert_eq!(cams[0].input.as_deref(), Some("/dev/v4l/by-id/cam0"));
+        assert_eq!(cams[0].reconnect_ms, Some(2500));
+        let def = "sources:\n  - id: \"cam0\"\n    mode: \"camera\"\n";
+        assert_eq!(camera_configs(def).unwrap()[0].reconnect_ms, None);
+        assert_eq!(camera_configs(def).unwrap()[0].input, None);
     }
 }

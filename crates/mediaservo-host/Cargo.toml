@@ -107,7 +107,9 @@ chrono = { version = "0.4", features = ["serde"] }
 
 
 [features]
-default = []
+default = ["capture-v4l2"]
+# V4L2 相机采集后端（mediaservo-media capture-v4l2 透传；cfg 门控 host-capturer camera 路径）
+capture-v4l2 = ["mediaservo-media/capture-v4l2"]
 gstreamer = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
 production = ["gstreamer"]
 # Legacy P2P WebRTC transport (webrtc-rs)

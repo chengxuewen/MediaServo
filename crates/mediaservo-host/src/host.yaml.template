@@ -13,7 +13,7 @@ host:
 #
 # mode 四类（逻辑类别）：
 #   generator   测试/演示彩条帧——本期唯一真实实现（VideoFrameGenerator 产帧，fps/width/height 生效）
-#   camera      真实相机采集——backend=v4l2/mipi（采集后端实现中；当前 capturer 明确报"未支持"退出）
+#   camera      真实相机采集——backend=v4l2（已实现 2026-08-27：v4l crate mmap + YUYV/NV12→I420；tegra 无 S_PARM 降级 PIT-145）
 #   desktop     屏幕捕获（未实现；capturer 明确报"未支持"退出）
 #   subscriber  订阅外部源（FrameBus/ROS topic（input 填 topic）；未实现；capturer 明确报"未支持"退出）
 #
