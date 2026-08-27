@@ -637,7 +637,7 @@ def _cmd_restart(args: argparse.Namespace) -> None:
         mode = _resolve_mode(args, default="native")
         if mode == "native":
             # 停裸机（stop native 语义）+ 重启
-            pid_file = ROOT / "target" / "server-native.pid"
+            pid_file = _native_runtime_dirs()[1] / "server-native.pid"
             if pid_file.exists():
                 try:
                     pid = int(pid_file.read_text().strip())
@@ -787,17 +787,33 @@ def _cmd_run(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _native_runtime_dirs() -> tuple[Path, Path, Path]:
+    """native server 运行目录（MSRTC 发布壳注入 MSRTC_OUT_ROOT → ${out}/server；裸 CLI fallback 子模块 data/）。
+    返回 (etc_dir, logs_dir, data_dir)——config/pid/log 全收敛于发布根 out/（主仓场景）或 data/（裸用）。"""
+    env_out = os.environ.get("MSRTC_OUT_ROOT", "")
+    if env_out:
+        base = Path(env_out) / "server"
+        base.mkdir(parents=True, exist_ok=True)
+        (base / "etc").mkdir(parents=True, exist_ok=True)
+        (base / "logs").mkdir(parents=True, exist_ok=True)
+        return base / "etc", base / "logs", base
+    base = ROOT / "data"
+    (base / "etc").mkdir(parents=True, exist_ok=True)
+    (base / "logs").mkdir(parents=True, exist_ok=True)
+    return base / "etc", base / "logs", base
+
+
 def _run_server_native(args: argparse.Namespace) -> None:
     """裸机跑 server：幂等（已在跑→提示跳过）；--config config/server.docker.yaml + 公告注入 + 端口守卫。"""
     # 幂等: start/restart/run 共用——pid 文件存活即已运行（防自家进程撞端口卫士）
-    pid_file = ROOT / "target" / "server-native.pid"
+    pid_file = _native_runtime_dirs()[1] / "server-native.pid"
     if pid_file.exists():
         try:
             alive_pid = int(pid_file.read_text().strip())
         except ValueError:
             alive_pid = -1
         if alive_pid > 0 and Path(f"/proc/{alive_pid}").exists():
-            print(f"✓ server 裸机已在运行 pid={alive_pid}（target/server-native.pid）— 跳过启动")
+            print(f"✓ server 裸机已在运行 pid={alive_pid}（server-native.pid）— 跳过启动")
             sys.exit(0)
     _check('cargo', 'pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat')
     bin_path = ROOT / 'target' / ('release' if getattr(args, 'release', False) else 'debug') / 'mediaservo-server'
@@ -814,8 +830,9 @@ def _run_server_native(args: argparse.Namespace) -> None:
     print('     仅限开发联调；生产部署用 up --env prod（entrypoint 自举随机密钥）', file=sys.stderr)
     # 裸机 config 适配（C13 双轨——原 server.docker.yaml 的 accounts/devices 指向容器卷 /opt/…）:
     # 裸机加载应读 config/ 同目录 dev 模板，否则空注册表 → admin 登录 401。
-    # 生成 data/etc/server.native.yaml（与 dev 容器同持久区 data/——C35 语义统一；target/ 会被 clean 误删）
-    native_cfg = ROOT / 'data' / 'etc' / 'server.native.yaml'
+    # 生成 <runtime>/etc/server.native.yaml（发布壳 MSRTC_OUT_ROOT → out/server/etc；裸 CLI → data/etc——C35 语义统一）
+    etc_dir, _logs_dir, _data_dir = _native_runtime_dirs()
+    native_cfg = etc_dir / 'server.native.yaml'
     native_cfg.parent.mkdir(parents=True, exist_ok=True)
     src_cfg = ROOT / 'config' / 'server.docker.yaml'
     if src_cfg.exists():
@@ -826,7 +843,7 @@ def _run_server_native(args: argparse.Namespace) -> None:
     # dev 占位账号豁免（fail-fast 守卫——裸机=dev 联调，与 dev compose 的 ALLOW_DEV_CREDENTIALS=1 一致）
     env.setdefault('MEDIASERVO_ALLOW_DEV_CREDENTIALS', '1')
     cmd = [str(bin_path), '--config', str(native_cfg)]
-    log_path = ROOT / 'target' / 'server-native.log'
+    log_path = _native_runtime_dirs()[1] / "server-native.log"
     # export 指引（AccessBase cmd_start_native L180 借鉴——PIT-79/138 公告闭环:
     # 后续终端操作需同一公告值，零新增探测——直接读生效 env）
     announced_val = env.get("MEDIASERVO_SFU_ANNOUNCED_IP", "")
@@ -836,12 +853,12 @@ def _run_server_native(args: argparse.Namespace) -> None:
         _run_or_exit(cmd, env=env)
     else:
         # I-1: 清 stale pid（上次崩溃残留）——防 stop 杀错回收 pid；写后覆盖语意保留
-        pid_file = ROOT / 'target' / 'server-native.pid'
+        pid_file = _native_runtime_dirs()[1] / "server-native.pid"
         pid_file.unlink(missing_ok=True)
         # T3 minor: 启动时 truncate（崩溃残留不污染，重启从头记）+ start_new_session（脱离终端，stop 按 pid 文件可杀）
         proc = subprocess.Popen(cmd, env=env, stdout=open(log_path, 'wb'), stderr=subprocess.STDOUT, start_new_session=True)
         pid_file.write_text(str(proc.pid))
-        print(f'✓ server 裸机运行中 pid={proc.pid} — 日志: target/server-native.log（logs server --native）')
+        print(f'✓ server 裸机运行中 pid={proc.pid} — 日志: {log_path}（logs server --native）')
 
 
 def _port_owner(port: int) -> str:
@@ -907,7 +924,7 @@ def _cmd_stop(args: argparse.Namespace) -> None:
         mode = "compose" if getattr(args, "env", None) is not None else _resolve_mode(args, default="both")
         # ① 裸机（pid 文件驱动幂等——both/native 时）
         if mode in ("both", "native"):
-            pid_file = ROOT / "target" / "server-native.pid"
+            pid_file = _native_runtime_dirs()[1] / "server-native.pid"
             if pid_file.exists():
                 try:
                     pid = int(pid_file.read_text().strip())
@@ -944,7 +961,7 @@ def _cmd_logs(args: argparse.Namespace) -> None:
     if target == "server":
         mode = _resolve_mode(args, default="native")
         if mode == "native":
-            log_path = ROOT / "target" / "server-native.log"
+            log_path = _native_runtime_dirs()[1] / "server-native.log"
             if not log_path.exists():
                 print(f"错误: {log_path} 不存在 — 裸机 server 未运行？", file=sys.stderr)
                 sys.exit(1)
@@ -1049,7 +1066,7 @@ def _cmd_clean(args: argparse.Namespace) -> None:
         mode = "compose" if getattr(args, "env", None) is not None else _resolve_mode(args, default="both")
         # native：先停裸机进程（读 pid 文件）再删产物（防孤儿——clean 曾留进程在跑 pid 已删）
         if mode in ("both", "native"):
-            pid_file = ROOT / "target" / "server-native.pid"
+            pid_file = _native_runtime_dirs()[1] / "server-native.pid"
             if pid_file.exists():
                 try:
                     pid = int(pid_file.read_text().strip())
@@ -1064,9 +1081,10 @@ def _cmd_clean(args: argparse.Namespace) -> None:
                         time.sleep(0.5)
                     if Path(f"/proc/{pid}").exists():
                         subprocess.run(["kill", "-9", str(pid)], check=False)
-            for f in ("target/server-native.pid", "target/server-native.log",
-                     "target/debug/mediaservo-server", "target/release/mediaservo-server"):
-                _rm_path(ROOT / f)
+            etc_d, logs_d, _ = _native_runtime_dirs()
+            for f in (logs_d / "server-native.pid", logs_d / "server-native.log",
+                     ROOT / "target/debug/mediaservo-server", ROOT / "target/release/mediaservo-server"):
+                _rm_path(f)
         # compose 容器（both/compose 时）
         if mode in ("both", "compose"):
             _check("docker", "安装 docker 并启动 daemon")
@@ -1191,7 +1209,7 @@ def _ss_listening(port: int) -> bool | None:
 def _status_server_native() -> int:
     """裸机运行态。返回 0/1。"""
     print("server (native):")
-    pid_file = ROOT / "target" / "server-native.pid"
+    pid_file = _native_runtime_dirs()[1] / "server-native.pid"
     running = False
     if pid_file.exists():
         try:
