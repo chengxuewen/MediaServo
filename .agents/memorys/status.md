@@ -527,3 +527,47 @@ Host (macOS) → WS :9800 → Docker Server → WS :9800 → Client (macOS)
 - **PIT-118~121**: ① translate namespace {ns} 占位符残留→oxmgr 拒收→apply 挂(regression 测试已加) ② package 打包 strip/压缩超时 ③ pkill set -e 自杀（清理 pkill 必须 || true）④ cmd_oxmgr ps/monit/logs 按 cwd 推断 dir（status 才吃参数）
 - **计划**: docs/superpowers/plans/2026-08-21-app-branding-customization.md（Momus APPROVE-WITH-CONDITIONS 3 HIGH 全采纳）
 - **遗留**: e2e-package staging 残留（dist 手动清）; 品牌化 macOS/Windows startup 待三端; PIT-111（server 重启媒体面自愈——大债务待立计划）
+
+## build-deploy-unify 三种模式 + install→deploy 重构 (2026-08-27)
+
+### 三种模式命令体系（完成）
+
+| 模式 | 命令 | 状态 |
+|------|------|------|
+| ① 本机原生 | `build server --native` + `run server` + `status server` + `stop server` | ✅ |
+| ② 单容器 prod | `up --env prod`（Docker runtime 镜像——entrypoint 自举） | ✅ |
+| ③ compose dev | `up --env dev`（源码挂载 + cargo run 热更） | ✅ |
+
+- **C13 双轨化**（D255）：原生主路径 + Docker 发布/CI 兜底
+- **默认 native**（D256）：不带模式=原生，容器全显式（--mode compose/--env）
+- **-h 帮助面审计**（5 角色团队）：epilog 三模式速查 + pixi 横幅 TTY 守卫 + 退出码契约 + 术语统一
+
+### install→deploy 重构（完成）
+
+| 改动 | commit | 状态 |
+|------|--------|------|
+| `build host` 组装 out/host/bin（品牌化） | 95782dc | ✅ |
+| `build server` 组装 out/server/bin + etc/server.yaml | 7141dc6 + 00cb936 | ✅ |
+| `install → deploy` 重构（_derive_brand/D4/D1） | a9020c1 + 32f5998 | ✅ |
+| `package` 源修复（host tar 契约 + bindings 布局补齐） | eb04220 | ✅ |
+| msrtc.sh PURE_BRAND 移除 + install→deploy 转发 | 4bbe684 + 6d62739 | ✅ |
+
+- **D257**：install→deploy（build 无状态 vs deploy 有状态分离）
+- **D258**：server 默认配置路径 bin/../etc/server.yaml（相对二进形）
+- **D259**：accounts/devices.docker.yaml → accounts.yaml/devices.yaml（去 docker 后缀）
+
+### 当前命令面
+
+```
+build server|host|bindings     → out/<target>/（交付布局——品牌化组装）
+deploy host|bindings           → 有状态部署（--prefix 必填，identity/oxmgr/env.sh）
+package host|bindings          → dist/ tar（out + staging deploy 组装）
+run server                     → 裸机运行（优先 out/server/bin/，配置 bin/../etc/server.yaml）
+status server|host             → 健康探测（退出码 0/1/2）
+install                        → 改名提示 + exit 2（退役）
+```
+
+### 遗留
+- server 多 ListenInfo 完整验证（多网卡 host 场景）
+- build-deploy-unify 团队审核后退守 deferred minors
+- macOS 启动命令（launchd）待补

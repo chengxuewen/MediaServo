@@ -643,3 +643,36 @@ EmergencyCommand 转发（H 阶段 host-emergency）; 状态/告警的 operator 
 - **参考**: mediasoup-rs（原生 meson wrap runner）、livekit-server（原生构建）、Deno/Bun（原生编译优先）、Zed（原生 Rust 构建）
 - **影响**: ① 开发者可用原生编译快速迭代（秒级 check vs 分钟级 Docker）；② 多 IP 公告在 run 阶段生效（sfu.rs bind 全具体 IP）；③ CI 保持 Docker 兜底（依赖一致性）；④ meson wrap 首次需联网（离线前提是首次构建成功后缓存命中）
 - **来源**: 用户显式批准（2026-08-26 three-mode-build T6）+ mediasoup/livekit/Deno/Bun/Zed 调研 + T5 实证
+
+## D255: C13 双轨化——原生主路径 + Docker 发布/CI 兜底 (2026-08-26)
+- **决策**: C13 "server 统一 Docker 编译"放宽为"原生 + Docker 双轨"——`build/check/test server --native`（pixi 工具链）为主路径；Docker 保留发布镜像（`--image runtime`）与 CI 兜底（`docker-cargo.sh`）
+- **理由**: 主流生态惯例（mediasoup 官方 Rust 绑定即原生 runner 进程内 meson；livekit/Deno/Bun/Zed 原生优先）+ 本机已实证（target 有 mediasoup-sys 产物；wrap .wrap 文件指向外部 URL 首次需联网，非 vendored）
+- **影响**: 裸机多 IP 公告可用（多 ListenInfo 仅裸机生效）；dev 同机 host hairpin 可解；Docker 构建路径保持作为发布/CI 兜底
+- **来源**: Librarian 调研（media-server 生态 + Rust 混合项目）；Momus 团队审核吸收 6 项 HIGH
+
+## D256: 默认 native 命令模式（不带模式=原生）(2026-08-27)
+- **决策**: 用户裁决 B——"不带 mode 默认 native"；进程族命令（run/start/stop/status/logs/clean/restart）默认 native，容器/镜像全显式（--mode compose/--env/--image）
+- **理由**: 避免默认 Docker 的隐藏依赖；与"原生主路径"（D255）一致；主流 Rust/media-server 项目原生构建优先
+- **影响**: start/status/logs 翻转（原默认容器）；run 删除 --native 死参数；clean server 双清（native 产物+容器）；build server 默认 native
+- **来源**: 用户决策 + 三模式构建团队评审
+
+## D257: install→deploy 重构（无状态 build vs 有状态 deploy 分离）(2026-08-27)
+- **决策**: `install` 命令退役（隐藏改名提示 exit 2，不 alias），职责分裂：
+  - 无状态组装（拷贝布局）→ 并入 `build host`（`_stage_to_out` 物理改名→ out/ 交付布局）
+  - 有状态部署（identity/oxmgr/systemd/env.sh）→ 新 `deploy host --prefix`（必填，防污染 out/）
+  - `package host` 走 staging deploy 组装（host tar 恢复 D-H13 契约）
+- **理由**: 主流 build/install 分离惯例（cargo/npm/pip/make）；CI artifact 化（只 build→out/）；install 名在构建系统误导（语义属 Ops 阶段）
+- **影响**: `_derive_brand()` 唯一品牌来源；`install` 残留调用点 7 处迁移；e2e-install-host.sh→e2e-deploy-host.sh；docs/architecture.md 3 处；D252 品牌化描述更新
+- **来源**: 用户讨论 + 4 角色团队审核（arch/cli/deploy-ops/docs）+ Momus HIGH 裁决 b（host 包内容契约）
+
+## D258: server 默认配置路径改为 bin/../etc/server.yaml（相对二进形）(2026-08-27)
+- **决策**: main.rs 默认配置从 `/opt/mediaservo/etc/server.yaml`（容器绝对路径）改为 `bin/../etc/server.yaml`（相对二进形）；`build server` 组装时生成 `out/server/etc/server.yaml`（accounts/devices 相对路径）
+- **理由**: 直接跑二进制不需 --config；tar.gz 解压结构自然（bin/+etc/同级）；与 host 的 out/host/bin 对称
+- **影响**: 容器 Dockerfile target entrypoint 改 `/usr/local/etc/`；run server 优先 out/server/bin/；accounts/devices.docker.yaml 去 docker 后缀（dev 占位模板历史包袱）
+- **来源**: 用户决策（"默认改为上级目录下的 etc/server.yaml"）+ 现场实证
+
+## D259: accounts/devices.docker.yaml 重命名去掉 docker 后缀 (2026-08-27)
+- **决策**: `config/accounts.docker.yaml` → `config/accounts.yaml`，`config/devices.docker.yaml` → `config/devices.yaml`
+- **理由**: 名字"docker"是历史遗留——文件本质是 dev 占位账号/设备模板，裸机 run 也用——名字误导；容器卷内已是 accounts.yaml
+- **影响**: cli.py 4 处引用 + Rust 源码注释 + config/accounts.production.yaml 注释 + server.docker.yaml 模板引用
+- **来源**: 用户识别（"为什么有 docker 字段"）+ 重命名后验证 admin 200

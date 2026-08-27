@@ -1302,3 +1302,69 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: 多 announced 仅**裸机**支持——每个 ListenInfo **listen 各自具体 IP**（if_addrs 本机接口过滤，非本机接口跳过）；容器场景**单 ListenInfo**（0.0.0.0 + 首 announced——容器无法公告多地址）；compose 默认把主访问网络 IP 放首位。
 - **验证**: 容器无 panic；`docker logs | grep announced` 首 IP = 主路径；`curl http://<主IP>:9800/admin` 200。
 - **禁止**: 多 announced 复用 listen 0.0.0.0（同端口）；容器场景期待多地址公告（mediasoup 单 0.0.0.0 bind 限制——多地址需裸机 listen 具体 IP）。
+
+## PIT-144: conda gcc 激活脚本注入 MESON_ARGS 与 mediasoup-sys tasks.py 冲突 (2026-08-27)
+- **症状**: `pixi run cargo build -p mediaservo-server` 失败——meson 报 `Got argument buildtype as both -Dbuildtype and --buildtype`
+- **根因**: conda compilers 包的 `activate-gcc_linux-64.sh` L127 注入 `_MESON_ARGS="-Dbuildtype=release"` → `MESON_ARGS` env 被 mediasoup-sys tasks.py 的 `os.getenv("MESON_ARGS")` 读取 → 与 tasks.py 的 `--buildtype debug` 双参 → meson 拒绝（任何版本 1.8/1.11/1.12 均拒绝）
+- **解法**: `unset MESON_ARGS` 在 cargo 命令前（`sh -c 'unset MESON_ARGS; cargo build -p mediaservo-server'`）
+- **验证**: `pixi run build-server-native` 应 Finished；`grep MESON_ARGS .pixi/envs/default/etc/conda/activate.d/activate-gcc_linux-64.sh | head -1` 确认注入源
+
+## PIT-145: tasks.py NINJA env 覆盖指向不存在目录（meson_ninja skip）(2026-08-27)
+- **症状**: meson `ERROR: Could not detect Ninja v1.8.2 or newer`——pixi ninja 1.13.2 在 PATH 但检测不到
+- **根因**: mediasoup-sys tasks.py L45 `MESON = os.getenv("MESON") or f"{PIP_MESON_NINJA_DIR}/bin/meson"`；pixi 激活注入 `MESON=$CONDA_PREFIX/bin/meson` 存在 → meson_ninja task L120 `if os.path.isfile(MESON): return` 跳过 pip 装 ninja → L80 `os.environ["NINJA"] = f"{PIP_MESON_NINJA_DIR}/bin/ninja"`（目录未创建）→ meson 读 NINJA 指向不存在文件
+- **解法**: `unset MESON`（tasks.py L45 fallback 到 `PIP_MESON_NINJA_DIR/bin/meson` → meson_ninja 不跳过 → pip 装 meson+ninja）；或 pixi.toml 收紧 meson 版本
+- **验证**: `pixi run bash -c 'unset MESON; cargo build -p mediaservo-server'` 应过 ninja 检测
+
+## PIT-146: build server --native --release 静默出 debug 产物 (2026-08-27)
+- **症状**: `build server --native --release` 输出到 `target/debug/`（release 无效）
+- **根因**: `_cmd_build_server` native 分支硬编码 `cargo build` 未透传 `args.release`；argparse build_p 有 `--release` 参数但函数签名不接收
+- **解法**: 函数签名 `_cmd_build_server(image=None, native=False, release=False)` + native 分支 `["cargo","build"] + (["--release"] if release else [])`
+- **验证**: `./mediaservo.sh build server --native --release && ls target/release/mediaservo-server` 存在
+
+## PIT-147: build server 组装段被 `if not exists` 守卫跳过 (2026-08-27)
+- **症状**: `build server` 后 `out/server/etc/accounts.yaml` 不存在（accounts.docker.yaml 残留）
+- **根因**: `_cmd_build_server` 组装逻辑有 `if not (etc_dir / "server.yaml").exists():` 守卫——server.yaml 已存在（上次生成）→ accounts.yaml 复制也被跳过
+- **解法**: 去掉守卫（每次 build 重写模板——用户配置改后 build 更新）；组装段从 `return` 后移到 cargo build 后（死代码修复）
+- **验证**: `rm out/server/etc/server.yaml && build server && ls out/server/etc/accounts.yaml` 存在
+
+## PIT-148: MSRTC_OUT_ROOT 双 out 位置（主仓 out vs 子模块 out）(2026-08-27)
+- **症状**: `build server` 组装到主仓 out/（MSRTC_OUT_ROOT）；直接 python CLI 无 env 时写子模块 out/——两个不同目录
+- **根因**: `msrtc.sh` 注入 `MSRTC_OUT_ROOT=${MSRTC_ROOT}/out`；`_out_root()` 读 env → 主仓 out；裸 CLI 无 env → `ROOT/"out"`（子模块）
+- **解法**: 正常行为——经 msrtc.sh 品牌壳操作统一用主仓 out；裸 CLI 子模块 out 是 fallback（兼容上游裸用）
+- **验证**: `ls /home/maxsense/Documents/ms_rtc/out/server/etc/`（主仓 out 有文件）；`ls 3rdparty/MediaServo/out/server/etc/`（子模块 out——仅裸 CLI 用）
+
+## PIT-149: 直接跑 server 二进制缺 dev 凭据豁免 (2026-08-27)
+- **症状**: `./out/server/bin/mediaservo-server` → `FATAL PANIC: DEVELOPMENT CREDENTIALS DETECTED`
+- **根因**: main.rs check_dev_credentials 检测 dev 占位账号（admin/dispatcher/operator）→ 未设 `MEDIASERVO_ALLOW_DEV_CREDENTIALS=1` → panic（fail-fast 安全设计 C33）
+- **解法**: 经 `run server`（CLI 自动注入）或 `MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 ./bin/mediaservo-server`
+- **验证**: `bash msrtc.sh run server` 不 panic；`curl POST /api/auth/login admin/admin123` → 200
+
+## PIT-150: stop server 只做 compose stop 不杀裸机进程 (2026-08-27)
+- **症状**: `stop server` 后裸机 server 继续运行占端口
+- **根因**: `_cmd_stop` L710 原 server 分支只做 `COMPOSE_BASE + ["stop", "server"]`——无 native pid 处理
+- **解法**: server 分支增加 pid 文件驱动杀（读 server-native.pid → SIGTERM → SIGKILL → 删 pid）；后改为按 mode 限定（both/native/compose）
+- **验证**: `stop server` 后 `ss -tulnp | grep :9800` 空
+
+## PIT-151: clean server --mode native 只删 pid 文件不杀进程 (2026-08-27)
+- **症状**: clean 后裸机进程仍在（孤儿），下次 run 报"端口被占"
+- **根因**: `_cmd_clean` native 分支先 `_rm_path(pid_file)` 删 pid → 再无从读 pid 杀进程
+- **解法**: **先读 pid 杀进程再删文件**（stop 语义前置 clean）
+- **验证**: `run server --native` → `clean server --mode native` → `ss -tulnp | grep 9800` 空
+
+## PIT-152: e2e sfu 走 ws://127.0.0.1 loopback 与 announced 无关 (2026-08-27)
+- **症状**: 之前误归因"hairpin 死结解开 e2e sfu 全绿"——实际 e2e 不经 announced IP
+- **根因**: e2e_sfu.rs L136 `ws://127.0.0.1:9800/ws`（loopback）——与 announced IP 无关；"hairpin 死结"是 host→server media 链路问题，e2e 只测 WS 信令
+- **解法**: 不在 T5 验证矩阵加 hairpin 归因叙事；e2e sfu 是"同 config/同 PSK 的信令功能验证"，非 media 链路验证
+- **验证**: 不在计划/e2e 注释里写"hairpin 解锁"
+
+## PIT-153: 原生 server 构建实为 Docker 实证 (2026-08-27)
+- **症状**: 计划声称"本机已实证原生编译 mediasoup-sys"——首次原生 build 就失败（meson 报错）
+- **根因**: "本机已实证"实为 Docker 编译实证（target/ 有 mediasoup-sys 产物是 Docker cargo-cache 卷或容器内编译——不是 pixi 激活的宿主原生路径）
+- **解法**: 区分"Docker 实证"与"原生 pixi 实证"——原生需处理 conda 激活环境（PIT-144/145）；mediasoup-sys .wrap 文件指向外部 URL（首次需联网）——不是 vendored
+- **验证**: `MESON_ARGS='' MESON='' cargo build -p mediaservo-server`（无 pixi 激活 env）= 真正原生实证
+
+## PIT-154: build server 未组装 out/server/bin/（与 host/bindings 不对称）(2026-08-27)
+- **症状**: `build host` → out/host/bin/ ✓；`build server` → target/debug/（未组装到 out/）
+- **根因**: `_cmd_build_server` 无 `_stage_to_out` 调用；`_cmd_build_host` 已有
+- **解法**: `_stage_to_out("server", [server_bin])` + `--release` 透传
+- **验证**: `ls out/server/bin/mediaservo-server` 存在
