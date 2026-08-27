@@ -47,30 +47,10 @@ def _run_or_exit(cmd: list[str], env: dict[str, str] | None = None, cwd: str | N
 
 
 def _cmd_build_host() -> None:
+    """build host — 纯编译到 target/（组装/品牌化迁 deploy——D266）。"""
     _check("cargo", "pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat")
     _run_or_exit(["cargo", "build", "-p", "mediaservo-host", "-p", "mediaservo-client"])
-    # 组装交付布局 out/host/bin（HOST_BINS 8 件——cargo target 保留，out 为产物镜像）
-    # brand 非空时 _stage_to_out 物理重命名: host-<app> → <brand>-<app>、mediaservo-host → <brand>-host
-    brand = os.environ.get("MEDIASERVO_BRAND", "")
-    tgt = ROOT / "target/debug"
-    staged = _stage_to_out("host", [tgt / _exe_name(b) for b in HOST_BINS], brand=brand)
-    staged += _stage_to_out("host", [tgt / _exe_name("mediaservo-client")], sub="bin")  # D3: client 不品牌
-    print(f"host 交付布局组装: out/host/bin/ 共 {len(staged)} 件（{', '.join(p.name for p in staged[:4])}...）")
-
-    # host-streamer 兼容链接（gateway.rs 硬编码 src="host-streamer"——品牌命名下运行时断链）
-    # _stage_to_out 已把 host-streamer rename 为 <brand>-streamer；建兼容链接使 gateway 旧名可达
-    bin_dir = _out_root() / "host" / "bin"
-    if brand:
-        link = bin_dir / _exe_name("host-streamer")
-        target = _exe_name(f"{brand}-streamer")
-        target_path = bin_dir / target
-        if target_path.exists() and not link.exists():
-            try:
-                link.symlink_to(target)
-                print(f"  host-streamer → {target}（品牌兼容链接）")
-            except OSError:
-                pass
-
+    print("✓ host 构建完成（纯编译 target/——组装与品牌化在 deploy: mediaservo deploy host --prefix <X>）")
 
 def _ensure_admin_dist() -> None:
     """admin 前端增量构建（C13 双轨一致性——Docker 路径 Dockerfile 内现场构建，原生路径对齐）。
@@ -400,23 +380,58 @@ def _derive_brand(bin_dir: Path) -> str:
     return ""
 
 
+def _assemble_host_binaries(bin_dir: Path, release: bool, brand: str) -> set[str]:
+    """组装品牌化二进制到 bin_dir（D266——组装从 build 迁到 deploy，源=target/{debug,release}）。
+    host-<app> → <brand>-<app>、mediaservo-host → <brand>-host、client 不品牌（D3）；含兼容链接。
+    返回组装文件名集合（供部署残留白名单）。"""
+    src_dir = ROOT / "target" / ("release" if release else "debug")
+    if not src_dir.is_dir():
+        hint = "（--release 需配合 build --release）" if release else ""
+        print(f"错误: {src_dir} 无构建产物{hint} — 先 build host", file=sys.stderr)
+        sys.exit(1)
+    src_names: set[str] = set()
+    for b in HOST_BINS:
+        src = src_dir / _exe_name(b)
+        if not src.exists():
+            continue
+        name = src.name
+        if brand:
+            if name.startswith("host-"):
+                name = f"{brand}-{name[5:]}"
+            elif name == "mediaservo-host":
+                name = f"{brand}-host"
+        _copy_with_kill(src, bin_dir / name)
+        src_names.add(name)
+    client_src = src_dir / _exe_name("mediaservo-client")
+    if client_src.exists():
+        _copy_with_kill(client_src, bin_dir / _exe_name("mediaservo-client"))
+        src_names.add(_exe_name("mediaservo-client"))
+    # host-streamer 兼容链接（gateway.rs 硬编码 src="host-streamer"——品牌命名下运行时断链）
+    if brand:
+        link = bin_dir / _exe_name("host-streamer")
+        target = _exe_name(f"{brand}-streamer")
+        if (bin_dir / target).exists() and not link.exists():
+            try:
+                link.symlink_to(target)
+                print(f"  host-streamer → {target}（品牌兼容链接）")
+            except OSError:
+                pass
+    return src_names
+
 def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
-    """deploy host（有状态部署——源 out/host 已组装）：identity 幂等/oxmgr/systemd/env.sh。
+    """deploy host（有状态部署——组装 + 落地，D266）：identity 幂等/oxmgr/systemd/env.sh。
     package host 复用（Momus b——Task 2.5）: staging 目录内跑本函数组装身份/etc/env.sh；
     三连停不触发（staging 无 run/oxfile.toml——cli F5 只读安全）。
 
     D4: --prefix 必填（无默认——防污染 out/ 无状态交付；车端用 /opt/mediaservo-host）。
-    品牌全链经 _derive_brand(src) 推导（deploy-ops 高危②/arch HIGH1——禁参数与字面 hardcode）。"""
+    品牌: 环境 MEDIASERVO_BRAND 优先（msrtc.sh 注入），回退已装实例 _derive_brand（deploy-ops 高危②）。"""
     if not prefix:
         print("错误: deploy 必须 --prefix（无默认——防止污染 out/ 无状态交付；车端用 /opt/mediaservo-host）", file=sys.stderr)
         sys.exit(2)
-    src = _out_root() / "host" / "bin"
-    if not src.is_dir():
-        print(f"错误: {src} 无组装产物 — 先 build host", file=sys.stderr)
-        sys.exit(1)
-    brand = _derive_brand(src)
     prefix_p = Path(prefix)
     bin_dir = prefix_p / "bin"
+    # 品牌：环境（msrtc.sh 注入 MEDIASERVO_BRAND）优先，回退已有实例推导（重复部署零参数）
+    brand = os.environ.get("MEDIASERVO_BRAND", "") or _derive_brand(bin_dir)
     try:
         bin_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -447,13 +462,8 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
             subprocess.run(["pkill", "-x", _exe_name(f"{brand}-{base}" if brand else f"host-{base}")], check=False)
         time.sleep(1)
 
-    # 拷贝组装产物（out/host/bin 全件——build 已物理改名 <brand>-*；含 host-streamer 兼容链接 + client）
-    src_names = set()
-    for f in sorted(src.iterdir()):
-        if not (f.is_file() or f.is_symlink()):
-            continue
-        src_names.add(f.name)
-        _copy_with_kill(f, bin_dir / f.name)
+    # 组装品牌化二进制（D266：源=target/{debug,release}——build 已纯编译）
+    src_names = _assemble_host_binaries(bin_dir, release, brand)
 
     # bin 白名单（deploy-ops ④ 品牌切换残留清理）：非当前布局的 app 二进制删除
     # （build 已物理改名——残留 = 旧品牌/旧 install 遗留）
@@ -621,7 +631,7 @@ def _cmd_package(args: argparse.Namespace) -> None:
     staging = Path(tempfile.mkdtemp(prefix=f"ms-{args.target}-pkg-", dir=str(dist)))
     try:
         if args.target == "host":
-            _cmd_deploy_host(str(staging), args.release)  # brand 由 out/host/bin 推导
+            _cmd_deploy_host(str(staging), args.release)  # brand 经 MEDIASERVO_BRAND 环境/已装实例推导（D266）
         else:
             _cmd_deploy_bindings(str(staging), args.release)
         _write_version_file(staging, pkg_name)
@@ -698,8 +708,16 @@ def _compose_env(announced_ip: str | None = None) -> dict[str, str]:
     return env
 
 
+def _host_runtime_hint(action: str) -> None:
+    """host 运行已移除 CLI 封装（D266）——build=编译 / deploy=安装 / 运行=手动。"""
+    print(f"{action} host 已移除 CLI 封装——请手动运行:", file=sys.stderr)
+    print("  部署实例: systemctl --user start|stop oxmgr-<brand>-host.service", file=sys.stderr)
+    print("            或 <prefix>/bin/msrtc-host start|stop <prefix>", file=sys.stderr)
+    print("  开发:     target/debug/mediaservo-host init . && token issue --all . && start|stop .", file=sys.stderr)
+    print("            跑前清 iceoryx2 残留: rm -rf /tmp/iceoryx2 /dev/shm/iox2_*（C25）", file=sys.stderr)
+
 def _cmd_start(args: argparse.Namespace) -> None:
-    """start <target> — server: 裸机 native（默认——用户裁决 B）| compose（--mode compose/--env）；host: 多进程推流。"""
+    """start <target> — server: 裸机 native（默认——用户裁决 B）| compose（--mode compose/--env）；host 已移除 CLI 封装（手动运行）。"""
     target = args.target
     if target == "server":
         mode = _resolve_mode(args, default="native")   # 默认 native（翻转：原 compose 移入 --mode compose）
@@ -710,14 +728,8 @@ def _cmd_start(args: argparse.Namespace) -> None:
             cmd = COMPOSE_BASE + (["up"] if args.foreground else ["up", "-d", "server"])
             _run_or_exit(cmd, env=_compose_env())
     elif target == "host":
-        if args.foreground:
-            if args.legacy:
-                _run_host_foreground(_find_host_binary())
-            else:
-                print("多进程 host 由 oxmgr 守护（无前台模式）— 去掉 --foreground 或用 --legacy", file=sys.stderr)
-                sys.exit(1)
-        else:
-            _cmd_run_host(legacy=args.legacy)
+        _host_runtime_hint("start")
+        sys.exit(2)
     else:  # client
         print("start client: 待实现（client 骨架阶段）", file=sys.stderr)
         sys.exit(1)
@@ -725,7 +737,7 @@ def _cmd_start(args: argparse.Namespace) -> None:
 
 def _cmd_restart(args: argparse.Namespace) -> None:
     target = args.target
-    """restart <target> — server: 默认 native（B 裁决）；--mode compose=容器重启；host: 多进程重启。"""
+    """restart <target> — server: 默认 native（B 裁决）；--mode compose=容器重启；host 已移除 CLI 封装。"""
     if target == "server":
         mode = _resolve_mode(args, default="native")
         if mode == "native":
@@ -754,127 +766,20 @@ def _cmd_restart(args: argparse.Namespace) -> None:
             _run_or_exit(COMPOSE_BASE + ["up", "-d", "server"], env=_compose_env())
             print("✓ server 已重启（容器）")
     elif target == "host":
-        _cmd_run_host()
+        _host_runtime_hint("restart")
+        sys.exit(2)
     else:  # client
         print("restart client: 待实现（client 骨架阶段）", file=sys.stderr)
         sys.exit(1)
 
 
-def _find_host_binary() -> Path:
-    """找 host 二进制（优先 CARGO_TARGET_DIR，回退项目 target）— host-legacy 单进程（--legacy 路径）。"""
-    cargo_target = os.environ.get("CARGO_TARGET_DIR")
-    candidates = []
-    if cargo_target:
-        candidates.append(Path(cargo_target) / "debug/host-legacy")
-    candidates += [
-        ROOT / "target/debug/host-legacy",
-        ROOT / "target/release/host-legacy",
-    ]
-    bin_path = next((p for p in candidates if p.exists()), None)
-    if bin_path is None:
-        print("错误: 未找到 host-legacy 二进制 — 先运行: mediaservo build host", file=sys.stderr)
-        sys.exit(1)
-    return bin_path
-
-
-def _find_host_cli() -> Path:
-    """找多进程 host CLI 二进制（host init/start/stop/token issue 入口）。"""
-    cargo_target = os.environ.get("CARGO_TARGET_DIR")
-    candidates = []
-    if cargo_target:
-        candidates.append(Path(cargo_target) / "debug/mediaservo-host")
-    candidates += [
-        ROOT / "target/debug/mediaservo-host",
-        ROOT / "target/release/mediaservo-host",
-    ]
-    bin_path = next((p for p in candidates if p.exists()), None)
-    if bin_path is None:
-        print("错误: 未找到 mediaservo-host CLI 二进制 — 先运行: mediaservo build host", file=sys.stderr)
-        sys.exit(1)
-    return bin_path
-
-
-def _run_host_foreground(bin_path: Path) -> None:
-    """前台阻塞运行 host — 输出实时透传终端，Ctrl+C 同步退出（开发调试用）。
-    host 单实例端口 9801 独占：启动前必须清旧（与后台路径一致）。"""
-    subprocess.run(["pkill", "-x", "host-legacy"], check=False)
-    time.sleep(1)
-    env = {**os.environ, "RUST_LOG": "info"}
-    proc = subprocess.Popen([str(bin_path)], cwd=ROOT, env=env)
-    try:
-        proc.wait()
-    except KeyboardInterrupt:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        sys.exit(130)
-    sys.exit(proc.returncode)
-
-
-def _cmd_run_host(legacy: bool = False) -> None:
-    """启动多进程 host — init（缺省）→ token issue --all → host start（oxmgr 拉起全部进程）。
-    --legacy: 回退旧单进程 host-legacy（pkill + 后台 Popen，日志 /tmp/mediaservo-host.log）。"""
-    if sys.platform == "win32":
-        print("run-host: Windows 暂不支持", file=sys.stderr)
-        sys.exit(1)
-    if legacy:
-        _run_host_legacy()
-        return
-    _check("oxmgr", "多进程 host 需 oxmgr — npm install -g oxmgr")
-    host = _find_host_cli()
-    # C25: 清 iceoryx2 固定 topic 残留（上次运行崩溃/被 SIGKILL 的发布端会留下 service 状态
-    # → 跨 run 二次 subscribe/open 持久 SystemInFlux）。仅清 MediaServo 自有运行时目录。
-    subprocess.run(["rm", "-rf", "/tmp/iceoryx2"], check=False)
-    for entry in Path("/dev/shm").glob("iox2_*"):
-        entry.unlink(missing_ok=True)
-    # 1) init（幂等）— host.toml / signing.pem 已存在则跳过
-    if not (ROOT / "etc" / "host.toml").exists():
-        _run_or_exit([str(host), "init", str(ROOT)])
-    # 2) token issue --all（幂等 — 已存在不覆盖，D-H10 固定令牌；host init 已签发时即 no-op）
-    #    标准集从 host.toml 推导: <cam>.token/<stream>.token/recorder.token/agent.token
-    _run_or_exit([str(host), "token", "issue", "--all", str(ROOT)])
-    # 3) host start（oxmgr apply）
-    _run_or_exit([str(host), "start", str(ROOT)])
-    print("✓ host 多进程已启动（oxmgr 管理; 日志: ~/.local/share/oxmgr/logs 或 `oxmgr logs all`）")
-
-
-def _run_host_legacy() -> None:
-    """旧单进程 host-legacy 后台启动（--legacy 回退路径）。"""
-    bin_path = _find_host_binary()
-    if bin_path is None:
-        print("错误: 未找到 host-legacy 二进制 — 先运行: mediaservo build-host", file=sys.stderr)
-        sys.exit(1)
-    # 2) 杀旧进程（pkill -x 精确进程名，避免误杀）
-    subprocess.run(["pkill", "-x", "host-legacy"], check=False)
-    time.sleep(1)
-    # 3) 后台启动（start_new_session 脱离终端，日志 /tmp/mediaservo-host.log）
-    log_path = Path("/tmp/mediaservo-host.log")
-    env = {**os.environ, "RUST_LOG": "info"}
-    proc = subprocess.Popen(
-        [str(bin_path)],
-        cwd=ROOT,
-        env=env,
-        stdout=open(log_path, "wb"),
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    time.sleep(3)
-    if proc.poll() is None:
-        print(f"✓ host 已启动 (PID {proc.pid}) — 配置: crates/mediaservo-host/config/host.conf")
-        print(f"  日志: {log_path}")
-    else:
-        print(f"✗ host 启动失败 (exit {proc.returncode}) — 日志: {log_path}", file=sys.stderr)
-        sys.exit(1)
-
-
 def _cmd_run(args: argparse.Namespace) -> None:
-    """run <target>: server=裸机（唯一模式——评审 H4 死参移除）| host=oxmgr 多进程。"""
+    """run <target>: server=裸机（唯一模式——评审 H4 死参移除）| host 已移除 CLI 封装。"""
     if args.target == "server":
         _run_server_native(args)
     elif args.target == "host":
-        _cmd_run_host()
+        _host_runtime_hint("run")
+        sys.exit(2)
     else:
         print('run client: 待实现（client 骨架阶段）', file=sys.stderr)
         sys.exit(1)
@@ -900,7 +805,15 @@ def _stage_to_out(target: str, files: list[Path], sub: str = "bin", brand: str =
                 name = f"{brand}-{name[5:]}"
             elif name == "mediaservo-host":
                 name = f"{brand}-host"
-        shutil.copy2(src, dst / name)
+        dst_path = dst / name
+        try:
+            shutil.copy2(src, dst_path)
+        except OSError as e:
+            if e.errno == 26:  # ETXTBSY — binary is running; unlink then retry
+                dst_path.unlink()
+                shutil.copy2(src, dst_path)
+            else:
+                raise
         staged.append(dst / name)
     return staged
 
@@ -942,7 +855,8 @@ def _run_server_native(args: argparse.Namespace) -> None:
             print("⚠ 使用 target/ 二进制（建议先: mediaservo build server — 组装到 out/server/bin）", file=sys.stderr)
             bin_path = bin_path_fallback
     if not bin_path.exists():
-        print(f'错误: 未找到 {bin_path.relative_to(ROOT)} — 先运行: mediaservo build server --native', file=sys.stderr)
+        rel = bin_path.relative_to(ROOT) if bin_path.is_relative_to(ROOT) else bin_path
+        print(f'错误: 未找到 {rel} — 先运行: mediaservo build server --native', file=sys.stderr)
         sys.exit(1)
     # 端口冲突守卫: 裸机 9800/20000/40000-40100 与 dev/prod 容器并行会冲突
     _check_port_free(9800, '9800(HTTP)')
@@ -1048,7 +962,7 @@ def _check_port_range_free(start: int, end: int, name: str) -> None:
 
 
 def _cmd_stop(args: argparse.Namespace) -> None:
-    """stop <target>: server=默认双停（裸机 pid + compose stop）；--mode native/compose 限定单侧；host=优雅停止。"""
+    """stop <target>: server=默认双停（裸机 pid + compose stop）；--mode native/compose 限定单侧；host 已移除 CLI 封装。"""
     target = args.target
     if target == "server":
         mode = "compose" if getattr(args, "env", None) is not None else _resolve_mode(args, default="both")
@@ -1075,11 +989,8 @@ def _cmd_stop(args: argparse.Namespace) -> None:
             _check("docker", "安装 docker 并启动 daemon")
             _run_or_exit(COMPOSE_BASE + ["stop", "server"])
     elif target == "host":
-        subprocess.run(["pkill", "-x", "host-legacy"], check=False)
-        host_cli = next((p for p in (ROOT / "target/debug/mediaservo-host", ROOT / "target/release/mediaservo-host") if p.exists()), None)
-        if host_cli is not None:
-            _run_or_exit([str(host_cli), "stop", str(ROOT)])
-        print("✓ host 已停止")
+        _host_runtime_hint("stop")
+        sys.exit(2)
     else:  # client
         subprocess.run(["pkill", "-x", "mediaservo-client"], check=False)
         print("✓ client 已停止")
@@ -1432,7 +1343,7 @@ def _status_host() -> int:
     log_hint = (Path(inst).parent / "run" / "logs") if inst else (ROOT.parent / "out" / "host" / "run" / "logs")
     print(f"  日志: {log_hint}/msrtc-streamer-<stream>.err.log（C38 ②层：grep 订阅/acl denied/OpenH264）")
     if not any_alive:
-        print("  → host 未运行：./mediaservo.sh start host（或 restart host）", file=sys.stderr)
+        print("  → host 未运行——手动: target/debug/mediaservo-host init . && token issue --all . && start .（开发）或 systemctl --user start oxmgr-<brand>-host.service（部署）", file=sys.stderr)
     return 2 if probe_failed else (0 if any_alive else 1)
 
 
@@ -1600,11 +1511,11 @@ def main() -> None:
     down_p.add_argument("--env", choices=["dev", "prod"], default=None)
     down_p.set_defaults(func=_cmd_down)
 
-    restart_p = sub.add_parser("restart", help="重启 <target>: server=裸机（默认）| compose（--mode）| host 进程")
+    restart_p = sub.add_parser("restart", help="重启 <target>: server=裸机（默认）| compose（--mode）；host 已移除 CLI 封装（手动运行）")
     restart_p.add_argument("target", choices=["host", "server"])
     _add_mode_args(restart_p)
     restart_p.set_defaults(func=_cmd_restart)
-    run_p = sub.add_parser("run", help="运行 <target> [--announced-ip IP[,IP...]]: server=裸机（唯一模式）| host 多进程")
+    run_p = sub.add_parser("run", help="运行 <target> [--announced-ip IP[,IP...]]: server=裸机（唯一模式）；host 已移除 CLI 封装（手动运行）")
     run_p.add_argument("target", choices=["server", "host"])
     run_p.add_argument("--foreground", "-f", action="store_true", help="前台阻塞运行，输出实时透传")
     run_p.add_argument("--release", action="store_true", help="用 target/release 二进制")
@@ -1612,14 +1523,13 @@ def main() -> None:
                        help="裸机公告地址（覆盖自动探测——默认自动含 tun/vpn、ens 全部真实 IP，符合 PIT-143 多网卡语义）")
     run_p.set_defaults(func=_cmd_run)
 
-    start_p = sub.add_parser("start", help="启动 <target>（默认 server）: server=native（默认）| compose（--mode）| host 多进程")
+    start_p = sub.add_parser("start", help="启动 <target>（默认 server）: server=native（默认）| compose（--mode）；host 已移除 CLI 封装（手动运行）")
     start_p.add_argument("target", nargs="?", choices=["host", "server"], default="server")
     _add_mode_args(start_p)
-    start_p.add_argument("--foreground", "-f", action="store_true", help="前台阻塞（host 仅 --legacy 支持）")
-    start_p.add_argument("--legacy", action="store_true", help="host 回退旧单进程 host-legacy")
+    start_p.add_argument("--foreground", "-f", action="store_true", help="前台阻塞（server native）")
     start_p.set_defaults(func=_cmd_start)
 
-    stop_p = sub.add_parser("stop", help="停止 <target>: server=双停（默认）| --mode 限定；host=优雅停止")
+    stop_p = sub.add_parser("stop", help="停止 <target>: server=双停（默认）| --mode 限定；host 已移除 CLI 封装（手动运行）")
     stop_p.add_argument("target", choices=["host", "server"])
     _add_mode_args(stop_p)
     stop_p.set_defaults(func=_cmd_stop)
