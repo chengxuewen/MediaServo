@@ -50,6 +50,11 @@ def _run_or_exit(cmd: list[str], env: dict[str, str] | None = None, cwd: str | N
 def _cmd_build_host() -> None:
     _check("cargo", "pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat")
     _run_or_exit(["cargo", "build", "-p", "mediaservo-host", "-p", "mediaservo-client"])
+    # 组装交付布局 out/host/bin（HOST_BINS 8 件——cargo target 保留，out 为产物镜像）
+    tgt = ROOT / "target/debug"
+    staged = _stage_to_out("host", [tgt / _exe_name(b) for b in HOST_BINS])
+    staged += _stage_to_out("host", [tgt / _exe_name("mediaservo-client")], sub="bin")
+    print(f"host 交付布局组装: out/host/bin/ 共 {len(staged)} 件（{', '.join(p.name for p in staged[:4])}...）")
 
 
 def _ensure_admin_dist() -> None:
@@ -160,8 +165,23 @@ def _cmd_build_bindings(release: bool = False) -> None:
     node_so = out_dir / "libmediaservo_node.so"
     if node_so.exists():
         shutil.copy2(node_so, ROOT / "bindings/node/mediaservo.node")
+    # 组装交付布局 out/bindings（lib 三 .so + .so.<major> + node .node；include 头 D248）
+    bind_dst = _out_root() / "bindings"
+    lib_dst = bind_dst / "lib"; lib_dst.mkdir(parents=True, exist_ok=True)
+    inc_src = ROOT / "bindings" / "c" / "include" / "mediaservo"
+    if inc_src.is_dir():
+        shutil.copytree(inc_src, bind_dst / "include" / "mediaservo", dirs_exist_ok=True)
+    for sdk in ALL_SDKS:
+        for suffix in (".so", f".so.{major}"):
+            src = out_dir / f"libmediaservo_{sdk}{suffix}"
+            if src.is_file() or src.is_symlink():
+                shutil.copy2(src, lib_dst / src.name)
+    node_hdr = ROOT / "bindings" / "node" / "mediaservo.node"
+    if node_hdr.exists():
+        shutil.copy2(node_hdr, bind_dst / "mediaservo.node")
     print("bindings 构建完成: libmediaservo_{field,link,deck}.so + mediaservo.node (%s, symlink .so.%s)"
           % ("release" if release else "debug", major))
+    print(f"bindings 交付布局组装: out/bindings/（lib {len(list(lib_dst.glob('*')))} 件 + include/mediaservo）")
 
 
 ALL_SDKS = ("field", "link", "deck")
@@ -785,6 +805,24 @@ def _cmd_run(args: argparse.Namespace) -> None:
     else:
         print('run client: 待实现（client 骨架阶段）', file=sys.stderr)
         sys.exit(1)
+
+
+def _out_root() -> Path:
+    """发布根（MSRTC_OUT_ROOT env or 子模块 out/）——build 交付布局与 server 运行时共用。"""
+    env_out = os.environ.get("MSRTC_OUT_ROOT", "")
+    return Path(env_out) if env_out else ROOT / "out"
+
+
+def _stage_to_out(target: str, files: list[Path], sub: str = "bin") -> list[Path]:
+    """拷贝 target/debug|release 产物到 out/<target>/<sub>（交付布局镜像——cargo 产物不搬 target）。"""
+    dst = _out_root() / target / sub
+    dst.mkdir(parents=True, exist_ok=True)
+    staged = []
+    for src in files:
+        if src.exists():
+            shutil.copy2(src, dst / src.name)
+            staged.append(dst / src.name)
+    return staged
 
 
 def _native_runtime_dirs() -> tuple[Path, Path, Path]:
