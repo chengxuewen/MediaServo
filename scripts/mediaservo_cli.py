@@ -180,23 +180,112 @@ def _cmd_build_bindings(release: bool = False) -> None:
     node_so = out_dir / "libmediaservo_node.so"
     if node_so.exists():
         shutil.copy2(node_so, ROOT / "bindings/node/mediaservo.node")
-    # 组装交付布局 out/bindings（lib 三 .so + .so.<major> + node .node；include 头 D248）
+    # 组装交付布局 out/bindings（完整 SDK 包镜像——Momus HIGH3/Task 2.5 补齐）:
+    # D241 三件套 version-full（.so.<M.m.p> 实体 + .so.<major> + .so 链接）+ D248 头（C/cxx）
+    # + pkgconfig .pc + cmake config + python fat wheel/site-packages + node 包
+    ver = _workspace_version()
+    major, minor, patch = ver.split(".")
     bind_dst = _out_root() / "bindings"
     lib_dst = bind_dst / "lib"; lib_dst.mkdir(parents=True, exist_ok=True)
-    inc_src = ROOT / "bindings" / "c" / "include" / "mediaservo"
-    if inc_src.is_dir():
-        shutil.copytree(inc_src, bind_dst / "include" / "mediaservo", dirs_exist_ok=True)
+    pc_dst = lib_dst / "pkgconfig"; pc_dst.mkdir(parents=True, exist_ok=True)
+    cmake_dst = lib_dst / "cmake" / "mediaservo"; cmake_dst.mkdir(parents=True, exist_ok=True)
+    inc_dst = bind_dst / "include" / "mediaservo"; inc_dst.mkdir(parents=True, exist_ok=True)
+
+    # lib 三件套（D241）: .so.<M.m.p> 实体（SONAME 文件名——DT_NEEDED 自解析）+ 两级符号链接
     for sdk in ALL_SDKS:
-        for suffix in (".so", f".so.{major}"):
-            src = out_dir / f"libmediaservo_{sdk}{suffix}"
-            if src.is_file() or src.is_symlink():
-                shutil.copy2(src, lib_dst / src.name)
-    node_hdr = ROOT / "bindings" / "node" / "mediaservo.node"
-    if node_hdr.exists():
-        shutil.copy2(node_hdr, bind_dst / "mediaservo.node")
-    print("bindings 构建完成: libmediaservo_{field,link,deck}.so + mediaservo.node (%s, symlink .so.%s)"
-          % ("release" if release else "debug", major))
-    print(f"bindings 交付布局组装: out/bindings/（lib {len(list(lib_dst.glob('*')))} 件 + include/mediaservo）")
+        so_src = out_dir / f"libmediaservo_{sdk}.so"
+        if not so_src.exists():
+            print(f"错误: {so_src} 不存在 — cargo 未产出 {sdk} SDK", file=sys.stderr)
+            sys.exit(1)
+        full = lib_dst / f"libmediaservo_{sdk}.so.{major}.{minor}.{patch}"
+        shutil.copy2(so_src, full)
+        _symlink_force(full.name, lib_dst / f"libmediaservo_{sdk}.so.{major}")
+        _symlink_force(f"libmediaservo_{sdk}.so.{major}", lib_dst / f"libmediaservo_{sdk}.so")
+
+    # include/mediaservo（D248）: C common.h + per-sdk .h；cxx per-sdk .hpp + 共享 detail/3rdparty
+    for h in (ROOT / "bindings" / "c" / "include" / "mediaservo").glob("*.h"):
+        shutil.copy2(h, inc_dst)
+    for sdk in ALL_SDKS:
+        for h in (ROOT / f"bindings/c/mediaservo-{sdk}-c/include/mediaservo").glob("*.h"):
+            shutil.copy2(h, inc_dst)
+        for h in (ROOT / f"bindings/cxx/mediaservo-{sdk}-cxx/include/mediaservo").glob("*.hpp"):
+            shutil.copy2(h, inc_dst)
+    for f in (ROOT / "bindings" / "cxx" / "include" / "mediaservo").rglob("*"):
+        if not f.is_file():
+            continue
+        dst = inc_dst / f.relative_to(ROOT / "bindings" / "cxx" / "include" / "mediaservo")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(f, dst)
+
+    # pkg-config .pc（${pcfiledir} 保持可重定位——不绑定绝对 prefix）
+    for sdk in ALL_SDKS:
+        tpl = ROOT / f"bindings/c/mediaservo-{sdk}-c/mediaservo-{sdk}.pc.in"
+        (pc_dst / f"mediaservo-{sdk}.pc").write_text(tpl.read_text().replace("@VERSION@", ver))
+
+    # cmake package config（find_package(mediaservo COMPONENTS ...)——D248 输出纪律）
+    sdk_list = " ".join(ALL_SDKS)
+    for name, tpl_name in (("mediaservoConfig.cmake", "mediaservoConfig.cmake.in"),
+                           ("mediaservoConfigVersion.cmake", "mediaservoConfigVersion.cmake.in")):
+        content = (ROOT / "bindings" / "c" / "cmake" / tpl_name).read_text() \
+            .replace("@VERSION@", ver).replace("@MAJOR@", major).replace("@SDK_LIST@", sdk_list)
+        (cmake_dst / name).write_text(content)
+
+    # python: fat wheel（_libs 内 .so.<major> 实体——DT_NEEDED 自解析）+ pip --prefix 组装 site-packages
+    py_src = ROOT / "bindings" / "python" / "mediaservo"
+    py_pkg = py_src / "mediaservo"
+    libs_src = py_pkg / "_libs"
+    libs_src.mkdir(exist_ok=True)
+    try:
+        for sdk in ALL_SDKS:
+            so_major = libs_src / f"libmediaservo_{sdk}.so.{major}"
+            shutil.copy2(out_dir / f"libmediaservo_{sdk}.so", so_major)
+            _symlink_force(f"libmediaservo_{sdk}.so.{major}", libs_src / f"libmediaservo_{sdk}.so")
+        wheel_dir = bind_dst / "wheel"; wheel_dir.mkdir(exist_ok=True)
+        r = subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-deps",
+                            "--no-build-isolation", "-w", str(wheel_dir), str(py_src)],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"错误: wheel 构建失败 — {r.stderr[-500:]}", file=sys.stderr)
+            sys.exit(1)
+        # 强制平台 tag（wheel 含 Linux .so，拒绝 any-tag 误装跨平台）: 改 WHEEL 内 Tag + 重命名。
+        # 版本保持与 pyproject（=内 dist-info）一致——不强制 workspace ver（原 install 的 {ver} 重命名
+        # 在 workspace ver ≠ pyproject 0.1.0 时 dist-info 版本不一致 → pip 拒绝安装——本实现更小修复面）
+        import zipfile
+        wheel = next(wheel_dir.glob("mediaservo-*.whl"))
+        tag_new = f"py3-none-{_platform_tag()}"
+        with zipfile.ZipFile(wheel, "r") as z:
+            items = z.infolist()
+            data = {i.filename: z.read(i) for i in items}
+        fixed = wheel.with_name(wheel.name.replace("py3-none-any", tag_new))
+        with zipfile.ZipFile(fixed, "w") as z:
+            for i in items:
+                content = data[i.filename]
+                if i.filename.endswith(".dist-info/WHEEL"):
+                    content = content.replace(b"Tag: py3-none-any", f"Tag: {tag_new}".encode())
+                z.writestr(i, content)
+        wheel.unlink()
+        r2 = subprocess.run([sys.executable, "-m", "pip", "install", "--prefix",
+                             str(bind_dst), "--no-deps", str(fixed)],
+                            capture_output=True, text=True)
+        if r2.returncode != 0:
+            print(f"错误: pip install 失败 — {r2.stderr[-500:]}", file=sys.stderr)
+            sys.exit(1)
+    finally:
+        shutil.rmtree(libs_src, ignore_errors=True)  # 清理临时 _libs（gitignore 兜底）
+
+    # node 包: node/mediaservo/（package.json + .node + lib/index.mjs）——D248 布局
+    node_src = ROOT / "bindings" / "node"
+    if (node_src / "mediaservo.node").exists():
+        node_dst = bind_dst / "node" / "mediaservo"
+        node_dst.mkdir(parents=True, exist_ok=True)
+        for f in ("package.json", "mediaservo.node"):
+            shutil.copy2(node_src / f, node_dst)
+        (node_dst / "lib").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(node_src / "lib" / "index.mjs", node_dst / "lib")
+    print("bindings 构建完成: libmediaservo_{field,link,deck}.so 三件套 version-full + node + python + .pc + cmake (%s)"
+          % ("release" if release else "debug"))
+    n_lib = len([p for p in lib_dst.glob("libmediaservo_*") if p.is_file() or p.is_symlink()])
+    print(f"bindings 交付布局组装: out/bindings/（lib {n_lib} 件 + include/mediaservo + pkgconfig + cmake + python + wheel + node）")
 
 
 ALL_SDKS = ("field", "link", "deck")
@@ -291,6 +380,8 @@ def _derive_brand(bin_dir: Path) -> str:
 
 def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
     """deploy host（有状态部署——源 out/host 已组装）：identity 幂等/oxmgr/systemd/env.sh。
+    package host 复用（Momus b——Task 2.5）: staging 目录内跑本函数组装身份/etc/env.sh；
+    三连停不触发（staging 无 run/oxfile.toml——cli F5 只读安全）。
 
     D4: --prefix 必填（无默认——防污染 out/ 无状态交付；车端用 /opt/mediaservo-host）。
     品牌全链经 _derive_brand(src) 推导（deploy-ops 高危②/arch HIGH1——禁参数与字面 hardcode）。"""
@@ -435,9 +526,9 @@ def _platform_tag() -> str:
 
 
 def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
-    """从 out/bindings 部署三 .so+include（SDK 品牌无关——libmediaservo_* 原样，D3）。
-    D4: --prefix 必填（无默认——防污染 out/ 无状态交付；SDK 用 /opt/mediaservo-sdk）。
-    布局补齐（version-full/.pc/cmake/wheel/cxx）归 Task 2.5——deploy 只承接 build 已组装内容。"""
+    """从 out/bindings 部署完整 SDK 布局（D241 三件套 version-full + include C/cxx + .pc + cmake
+    + python/wheel + node——build 已组装，deploy 纯拷贝）。SDK 品牌无关（libmediaservo_* 原样，D3）。
+    D4: --prefix 必填（无默认——防止污染 out/ 无状态交付；SDK 用 /opt/mediaservo-sdk）。"""
     if not prefix:
         print("错误: deploy 必须 --prefix（无默认——防止污染 out/ 无状态交付；SDK 用 /opt/mediaservo-sdk）", file=sys.stderr)
         sys.exit(2)
@@ -446,22 +537,32 @@ def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
         print(f"错误: {src} 无组装产物 — 先 build bindings", file=sys.stderr)
         sys.exit(1)
     prefix_p = Path(prefix)
-    lib_dir = prefix_p / "lib"
-    inc_dir = prefix_p / "include" / "mediaservo"
     try:
-        lib_dir.mkdir(parents=True, exist_ok=True)
-        inc_dir.mkdir(parents=True, exist_ok=True)
+        prefix_p.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         print(f"错误: 无法创建 {prefix_p}: {e} — 部署用 sudo msrtc.sh deploy bindings --prefix /opt/mediaservo-sdk", file=sys.stderr)
         sys.exit(1)
+    lib_dir = prefix_p / "lib"
+    lib_dir.mkdir(parents=True, exist_ok=True)
     sos = []
     for so in sorted((src / "lib").glob("libmediaservo_*.so*")):
         _copy_with_kill(so, lib_dir / so.name)  # busy（运行中加载）→ 杀占用重试
         sos.append(so.name)
-    for h in sorted((src / "include" / "mediaservo").glob("*.h")):
-        shutil.copy2(h, inc_dir)  # common.h 总是装（所有头依赖）
-    print(f"bindings 已部署到 {prefix}（lib/ {', '.join(sos)} + include/mediaservo/）")
-    print("  使用: export LD_LIBRARY_PATH=<prefix>/lib && 链接库见 bindings 头文件")
+    # lib/ 内子目录（pkgconfig/cmake）——.so 已单独 busy 重试，子目录直接整树复制
+    for sub in sorted((src / "lib").iterdir()):
+        if sub.is_dir():
+            shutil.copytree(sub, lib_dir / sub.name, dirs_exist_ok=True)
+    # 其余（include/.pc/cmake/python/wheel/node）整树复制——.so 已单独 busy 重试
+    for e in sorted(src.iterdir()):
+        if e.name == "lib":
+            continue
+        dst = prefix_p / e.name
+        if e.is_dir():
+            shutil.copytree(e, dst, dirs_exist_ok=True)
+        elif e.is_file() or e.is_symlink():
+            shutil.copy2(e, dst, follow_symlinks=False)
+    print(f"bindings 已部署到 {prefix}（lib/ {', '.join(sos)} + include/mediaservo + pkgconfig + cmake + python + wheel + node）")
+    print("  使用: export LD_LIBRARY_PATH=<prefix>/lib && 链接库见 bindings 头文件；python: pip install <prefix>/wheel/*.whl")
 
 
 # ── package: dist/ 双包发布（D-H13）──────────────────────────
@@ -483,9 +584,11 @@ def _write_version_file(dst: Path, target: str) -> None:
 
 
 def _cmd_package(args: argparse.Namespace) -> None:
-    """package <target> — dist/mediaservo-host|sdk-<ver>.tar.gz 双包发布（D-H13）。
-    host: install host 布局（bin 8 + oxmgr + etc/ + run/logs + recordings + identity.json）
-    bindings: install bindings 布局（lib/include/python/node/pkgconfig/cmake + wheel）→ sdk 包
+    """package <target> — dist/<brand>-host|sdk-<ver>.tar.gz 双包发布（D-H13）。
+    host: staging 内跑 _cmd_deploy_host(staging)（Momus 裁决 b——identity 初始/oxmgr 锁定/
+    etc 模板/env.sh 文件组装；build 仍无状态）+ tar 含 bin 8/oxmgr/etc/identity/run/logs/recordings。
+    bindings: staging 拷贝 out/bindings（完整 SDK 布局——D241 三件套 version-full/.pc/cmake/
+    wheel/node/cxx 头，Task 2.5 补齐）→ sdk 包。
     staging 临时目录 → tar.gz; 包内含版本契约文件（host-version.txt / sdk-version.txt）。"""
     if sys.platform == "win32":
         print("package: Windows best-effort — 验证清单见 scripts/e2e-win-validate.ps1", file=sys.stderr)
