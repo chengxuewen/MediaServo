@@ -279,7 +279,8 @@ def strip_package_binaries(staging: Path) -> None:
 
 def _derive_brand(bin_dir: Path) -> str:
     """从已装/组装 bin 目录推导品牌（三连停/init 名/快捷名全用它——禁止参数与硬编码）。
-    规则: 存在 <brand>-agent（任意品牌化角色）→ 该前缀；否则空（官方名 host-*）。"""
+    规则: 存在 <brand>-agent（任意品牌化角色）→ 该前缀；否则空（官方名 host-*）。
+    已知限制: 多品牌共存时 glob 顺序文件系统相关（取首个）——当前部署单品牌；若多品牌需改排序/最长前缀策略。"""
     for p in bin_dir.glob("*-agent"):
         name = p.name
         if name.startswith("host-"):
@@ -1052,6 +1053,8 @@ def _cmd_install_deprecated(args: argparse.Namespace) -> None:
         "--prefix 必填。请用: mediaservo deploy host|bindings --prefix <前缀>（车端 host: --prefix /opt/mediaservo-host）",
         file=sys.stderr,
     )
+    if getattr(args, "args", []):
+        print(f"  （忽略旧参数: {' '.join(args.args)}）", file=sys.stderr)
     sys.exit(2)
 
 
