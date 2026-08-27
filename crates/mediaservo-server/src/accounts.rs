@@ -387,7 +387,7 @@ impl AccountRegistry {
     }
 }
 
-/// I2 review: 已知开发占位账号哈希（config/accounts.docker.yaml 的 admin123/
+/// I2 review: 已知开发占位账号哈希（config/accounts.yaml 的 admin123/
 /// dispatch123/operator123）— 哈希即 sha256(username:password)，含 username 盐。
 /// 生产部署启动守卫（check_dev_credentials）拒绝；dev compose 经
 /// MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 显式豁免。
@@ -591,7 +591,7 @@ mod tests {
 
     // ── I2 review: 开发占位账号守卫 ──────────────────────────────────────────
 
-    /// 含 dev 占位哈希的注册表（accounts.docker.yaml 同构）
+    /// 含 dev 占位哈希的注册表（accounts.yaml 同构）
     fn dev_registry() -> AccountRegistry {
         AccountRegistry::from_yaml(
             "accounts:\n  admin:\n    password_hash: \"sha256:bf6b5bdb74c79ece9fc0ad0ac9fb0359f9555d4f35a83b2e6ec69ae99e09603d\"\n    role: admin\n  operator:\n    password_hash: \"sha256:21cfc6b0fe8e257247937406f1ee83ae8acd3dc447c38b8431abecaf6d7ea437\"\n    role: operator\n",

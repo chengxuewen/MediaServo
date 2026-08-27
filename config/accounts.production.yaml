@@ -1,6 +1,6 @@
 # MediaServo 生产账号注册表（D-H11）— 无 dev 占位账号，server 启动守卫不豁免。
 #
-# 格式同 accounts.docker.yaml: username → {password_hash: "sha256:<hex>", role, vehicles}
+# 格式同 accounts.yaml: username → {password_hash: "sha256:<hex>", role, vehicles}
 #   - password_hash = sha256(username + ":" + password)（username 为盐，单向）
 #   - role: viewer | operator | admin | dispatcher
 #   - vehicles: 该账号可访问的车（device_id 列表）— dispatcher/admin 可省略（任意车）

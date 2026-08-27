@@ -163,7 +163,7 @@ fn free_local_port() -> u16 {
 }
 
 /// admin API 房间列表 — H3 起 admin REST 强制 JWT（auth_middleware），
-/// 用 accounts.docker.yaml 的 dev admin 账号登录取 token（I2 review 守卫下
+/// 用 accounts.yaml 的 dev admin 账号登录取 token（I2 review 守卫下
 /// dev compose 已显式豁免）。
 fn admin_rooms() -> serde_json::Value {
     let port = ws_url()
@@ -175,7 +175,7 @@ fn admin_rooms() -> serde_json::Value {
         .parse::<u16>()
         .unwrap_or(9800);
     use std::io::{Read, Write};
-    // 1. 登录（dev 账号 admin/admin123 — accounts.docker.yaml）
+    // 1. 登录（dev 账号 admin/admin123 — accounts.yaml）
     let mut login = std::net::TcpStream::connect(("127.0.0.1", port)).expect("login connect");
     let login_body = r#"{"username":"admin","password":"admin123"}"#;
     let login_req = format!(

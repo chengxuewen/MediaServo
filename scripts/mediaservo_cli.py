@@ -122,13 +122,13 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
         src_cfg = ROOT / "config" / "server.docker.yaml"
         if src_cfg.exists() and not (etc_dir / "server.yaml").exists():
             cfg = src_cfg.read_text()
-            # accounts/devices 改为相对于 etc 目录（打包后 bin/../etc/accounts.docker.yaml 等）
-            cfg = cfg.replace('/opt/mediaservo/etc/accounts.yaml', 'accounts.docker.yaml')
-            cfg = cfg.replace('/opt/mediaservo/etc/devices.yaml', 'devices.docker.yaml')
+            # accounts/devices 改为相对于 etc 目录（打包后 bin/../etc/accounts.yaml 等）
+            cfg = cfg.replace('/opt/mediaservo/etc/accounts.yaml', 'accounts.yaml')
+            cfg = cfg.replace('/opt/mediaservo/etc/devices.yaml', 'devices.yaml')
             (etc_dir / "server.yaml").write_text(cfg)
             # 拷贝设备/账号文件（dev 模板——运行时可覆盖）
             import shutil
-            for f in ("accounts.docker.yaml", "devices.docker.yaml"):
+            for f in ("accounts.yaml", "devices.yaml"):
                 src = ROOT / "config" / f
                 if src.exists():
                     shutil.copy2(src, etc_dir / f)
@@ -967,8 +967,8 @@ def _run_server_native(args: argparse.Namespace) -> None:
         src_cfg = ROOT / 'config' / 'server.docker.yaml'
         if src_cfg.exists():
             cfg_text = src_cfg.read_text()
-            cfg_text = cfg_text.replace('/opt/mediaservo/etc/accounts.yaml', str(ROOT / 'config' / 'accounts.docker.yaml'))
-            cfg_text = cfg_text.replace('/opt/mediaservo/etc/devices.yaml', str(ROOT / 'config' / 'devices.docker.yaml'))
+            cfg_text = cfg_text.replace('/opt/mediaservo/etc/accounts.yaml', str(ROOT / 'config' / 'accounts.yaml'))
+            cfg_text = cfg_text.replace('/opt/mediaservo/etc/devices.yaml', str(ROOT / 'config' / 'devices.yaml'))
             native_cfg.write_text(cfg_text)
         cmd = [str(bin_path), '--config', str(native_cfg)]
     # dev 占位账号豁免（fail-fast 守卫——裸机=dev 联调，与 dev compose 的 ALLOW_DEV_CREDENTIALS=1 一致）

@@ -142,7 +142,7 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
             panic!("账号注册表 {accounts_path} 损坏，拒绝以授权禁用状态启动: {e}");
         }
     };
-    // I2 review: 已知开发占位账号 fail-fast（config/accounts.docker.yaml 仅限本地 dev）—
+    // I2 review: 已知开发占位账号 fail-fast（config/accounts.yaml 仅限本地 dev）—
     // 显式覆盖 env MEDIASERVO_ALLOW_DEV_CREDENTIALS=1（dev compose 已设）豁免。
     if let Err(e) = accounts.check_dev_credentials(
         std::env::var("MEDIASERVO_ALLOW_DEV_CREDENTIALS").as_deref() == Ok("1"),
