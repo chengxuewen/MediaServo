@@ -813,8 +813,10 @@ def _run_server_native(args: argparse.Namespace) -> None:
     print('⚠ 警告: 裸机跑 dev 轨道 config（psk=mediaservo-dev + 占位账号 admin123 等）——', file=sys.stderr)
     print('     仅限开发联调；生产部署用 up --env prod（entrypoint 自举随机密钥）', file=sys.stderr)
     # 裸机 config 适配（C13 双轨——原 server.docker.yaml 的 accounts/devices 指向容器卷 /opt/…）:
-    # 裸机加载应读 config/ 同目录 dev 模板，否则空注册表 → admin 登录 401。生成 target/server.native.yaml（不动公共文件）。
-    native_cfg = ROOT / 'target' / 'server.native.yaml'
+    # 裸机加载应读 config/ 同目录 dev 模板，否则空注册表 → admin 登录 401。
+    # 生成 data/etc/server.native.yaml（与 dev 容器同持久区 data/——C35 语义统一；target/ 会被 clean 误删）
+    native_cfg = ROOT / 'data' / 'etc' / 'server.native.yaml'
+    native_cfg.parent.mkdir(parents=True, exist_ok=True)
     src_cfg = ROOT / 'config' / 'server.docker.yaml'
     if src_cfg.exists():
         cfg_text = src_cfg.read_text()
