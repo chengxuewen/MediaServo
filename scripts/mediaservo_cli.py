@@ -56,6 +56,23 @@ def _cmd_build_host() -> None:
     staged += _stage_to_out("host", [tgt / _exe_name("mediaservo-client")], sub="bin")
     print(f"host 交付布局组装: out/host/bin/ 共 {len(staged)} 件（{', '.join(p.name for p in staged[:4])}...）")
 
+    # host-streamer 兼容链接（gateway.rs 硬编码 src="host-streamer"——品牌命名下运行时断链）
+    # 品牌场景: 把 host-streamer（cargo 原名）rename 为 <brand>-streamer，再建 host-streamer → <brand>-streamer
+    brand = os.environ.get("MEDIASERVO_BRAND", "")
+    bin_dir = _out_root() / "host" / "bin"
+    for base, bname in (("host-streamer", f"{brand}-streamer"),):
+        if brand:
+            src_bin = bin_dir / _exe_name(base)
+            dst_bin = bin_dir / _exe_name(bname)
+            link = bin_dir / _exe_name(base)
+            if src_bin.exists() and src_bin.is_file() and not src_bin.is_symlink():
+                try:
+                    src_bin.rename(dst_bin)
+                    link.symlink_to(dst_bin.name)
+                    print(f"  {base} → {dst_bin.name}（品牌兼容链接）")
+                except OSError:
+                    pass
+
 
 def _ensure_admin_dist() -> None:
     """admin 前端增量构建（C13 双轨一致性——Docker 路径 Dockerfile 内现场构建，原生路径对齐）。
