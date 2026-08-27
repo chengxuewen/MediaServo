@@ -7,3 +7,4 @@ pub mod generator;
 pub mod video_adapter;
 pub mod core;
 pub mod broadcast;
+pub mod capture;

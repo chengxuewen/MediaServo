@@ -13,15 +13,20 @@ rand = "0.8"
 yuv-sys = { version = "0.3", optional = true }
 tokio = { version = "1", features = ["sync", "rt-multi-thread", "time", "macros"] }
 
+
 [dev-dependencies]
 eframe = "0.30"
 egui = "0.30"
 image = "0.25"
 
 [features]
-default = ["backend-yuv-sys"]
+default = ["backend-yuv-sys", "capture-v4l2"]
 backend-yuv-sys = ["dep:yuv-sys"]
 backend-native = []
+capture-v4l2 = ["dep:v4l"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+v4l = { version = "0.14", optional = true }
 
 [package.metadata.docs.rs]
 features = ["backend-yuv-sys"]
