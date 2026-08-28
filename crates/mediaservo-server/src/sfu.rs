@@ -692,23 +692,6 @@ mod imp {
                 }
             }
 
-            // PIT 观测: Consumer 周期 dump（每 2s 打 score — 验证 producer→consumer 转发）
-            {
-                let cid = consumer_id.clone();
-                let consumer_for_dump = consumer.clone();
-                tokio::spawn(async move {
-                    for _ in 0..15 {
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        if let Ok(dump) = consumer_for_dump.dump().await {
-                            let scores: Vec<u8> = dump.rtp_streams.iter().map(|s| s.score).collect();
-                            tracing::info!(
-                                "CONS-DUMP-PERIODIC {}: paused={} scores={:?}",
-                                cid, dump.paused, scores
-                            );
-                        }
-                    }
-                });
-            }
 
             // PIT-76: consume 后立即请求关键帧 — 绕过 libwebrtc 99s GOP（x-google-
             // max-keyframe-interval 注入对软件 VP8 编码器不生效，实测仍 99s）。
