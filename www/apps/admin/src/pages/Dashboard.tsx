@@ -13,7 +13,7 @@ import './Dashboard.css';
 const MAX_PLAYING = 4;
 
 export default function Dashboard() {
-  const { devices, loading, error } = useDevices();
+  const { devices, loading, error, refetch: refetchDevices } = useDevices();
   const { isAdmin } = useAuth();
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [expanded, setExpanded] = useState(new Set());
@@ -30,6 +30,8 @@ export default function Dashboard() {
 
   useAdminWS(() => {
     fetchStats();
+    // 列表秒级刷新: admin 事件（StreamCreate/StreamDestroy 等）→ 立即重拉设备/流快照。
+    refetchDevices();
   });
 
   const toggle = (id: string) => {
