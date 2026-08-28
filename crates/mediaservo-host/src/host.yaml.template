@@ -41,10 +41,34 @@ sources:
 
 # 推流声明。streams[].source 引用 sources[].id（旧键名 "camera:" 仍可解析——
 # `#[serde(alias = "camera")]` 兼容）。缺省 source = 流 id 自身（topic camera/<id> 直连）。
+#
+# 可用字段（全部可选，缺省即默认）：
+#   codec              编码格式（缺省 vp8）：
+#                       vp8   libwebrtc 内置软编，兼容性最好，CPU 开销中等
+#                       h264  OpenH264 软编（构建无 CUDA 时也回退软编），带宽友好
+#                       vp9  软件，压缩率最高但 CPU 开销大（4K/高码率慎用）
+#                       av1  软件（SVT-AV1，CPU 极高——通常不建议实时推流）
+#   encoder_backend    编码器后端（缺省 auto 运行时选择）：
+#                       auto      自动（默认——优先硬件，不可用回退软件）
+#                       software  强制软件编码（OpenH264/VP8——通用平台兜底）
+#                       hardware  强制硬件编码（Jetson tegra 推荐——NvCodec 路径）
+#                       nvenc     NVIDIA GPU（需带 CUDA 构建 webrtc-sys——本仓库构建
+#                                 日志出现 "cuda.h not found" 即不可用，回退 auto/software）
+#                       vaapi     Intel/AMD GPU VA-API（Linux）
+#   bitrate_kbps       编码码率 kbps（缺省 2000；1080p 建议 2500-4000，720p 1500-2500）
+#   keyframe_interval  关键帧间隔秒（GOP，缺省 2；越小丢包恢复越快、码率越不稳定）
+#
+# 参考示例（完整字段）：
+#   - id: "cam0-stream"
+#     source: "cam0"
+#     codec: "h264"
+#     encoder_backend: "hardware"     # Jetson 车端硬编
+#     bitrate_kbps: 3500
+#     keyframe_interval: 2
 streams:
   - id: "cam0-stream"
     source: "cam0"          # 引用 sources[].id
-    codec: "h264"           # 编码格式（缺省 vp8；对齐 field PublishOptions 默认）
+    codec: "h264"           # 编码格式（缺省 vp8；可选 vp8/h264/vp9/av1——见上注释）
 
 record:
   enabled: false

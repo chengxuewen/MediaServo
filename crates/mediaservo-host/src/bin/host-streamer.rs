@@ -53,6 +53,12 @@ struct Args {
     token: PathBuf,
     /// 本地网关 WS 地址（D2）；缺省 `ws://127.0.0.1:17980/ws`。
     gateway: Option<String>,
+    /// 编码器后端（auto/software/hardware/nvenc/vaapi；缺省 auto）。
+    encoder_backend: String,
+    /// 编码码率 kbps（None=field 默认 2000）。
+    bitrate_kbps: Option<u32>,
+    /// 关键帧间隔秒 GOP（None=field 默认 2）。
+    keyframe_interval: Option<u32>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -61,12 +67,18 @@ fn parse_args() -> Result<Args, String> {
     let mut config: Option<PathBuf> = None;
     let mut token: Option<PathBuf> = None;
     let mut gateway: Option<String> = None;
+    let mut encoder_backend: Option<String> = None;
+    let mut bitrate_kbps: Option<u32> = None;
+    let mut keyframe_interval: Option<u32> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--stream" => stream = Some(args.next().ok_or("--stream 缺值")?),
             "--config" => config = Some(PathBuf::from(args.next().ok_or("--config 缺值")?)),
             "--token" => token = Some(PathBuf::from(args.next().ok_or("--token 缺值")?)),
             "--gateway" => gateway = Some(args.next().ok_or("--gateway 缺值")?),
+            "--encoder-backend" => encoder_backend = Some(args.next().ok_or("--encoder-backend 缺值")?),
+            "--bitrate-kbps" => bitrate_kbps = Some(args.next().ok_or("--bitrate-kbps 缺值")?.parse().map_err(|_| "--bitrate-kbps 须为数字")?),
+            "--keyframe-interval" => keyframe_interval = Some(args.next().ok_or("--keyframe-interval 缺值")?.parse().map_err(|_| "--keyframe-interval 须为数字")?),
             _ => return Err(format!("未知参数: {arg}")),
         }
     }
@@ -75,9 +87,11 @@ fn parse_args() -> Result<Args, String> {
         config: config.ok_or("缺少 --config")?,
         token: token.ok_or("缺少 --token")?,
         gateway,
+        encoder_backend: encoder_backend.unwrap_or_else(|| "auto".into()),
+        bitrate_kbps,
+        keyframe_interval,
     })
 }
-
 /// 网关 WS 地址（D2）：`--gateway` 参数 > 缺省本地网关。
 fn gateway_url(gateway_arg: Option<&str>) -> String {
     gateway_arg
@@ -541,9 +555,14 @@ async fn main() -> ExitCode {
         format!("host-streamer-{}", stream.id),
         room.clone(),
     );
-    // framerate 语义传递（multi-stream P1 后 field 消费: set_encoding_framerate
-    // → libwebrtc max_framerate）；产帧侧与编码器侧均按此值
     cfg.framerate = cam.fps;
+    // 编码参数透传（streams 配置面；None=field 默认 2000kbps/2s GOP）
+    if let Some(k) = args.bitrate_kbps {
+        cfg.bitrate_kbps = k;
+    }
+    if let Some(g) = args.keyframe_interval {
+        cfg.keyframe_interval = g as u64;
+    }
     let (mut session, mut events) = match PushSession::connect(cfg.clone()).await {
         Ok(se) => se,
         Err(e) => {
@@ -592,7 +611,7 @@ async fn main() -> ExitCode {
     cfg.height = first.meta().height;
     let opts = PublishOptions {
         codec: stream.codec.clone(),
-        encoder_backend: "auto".into(),
+        encoder_backend: args.encoder_backend.clone(),
     };
     if let Err(e) = session.publish_video(&cfg, &opts).await {
         eprintln!("streamer: publish_video 失败: {e}");

@@ -87,6 +87,15 @@ struct Stream {
     /// 编码格式（缺省 vp8；对齐 field PublishOptions 默认）。
     #[serde(default)]
     codec: Option<String>,
+    /// 编码器后端（auto/software/hardware/nvenc/vaapi；缺省 auto 运行时选择）。
+    #[serde(default)]
+    encoder_backend: Option<String>,
+    /// 编码码率 kbps（缺省 2000——field PushConfig 默认）。
+    #[serde(default)]
+    bitrate_kbps: Option<u32>,
+    /// 关键帧间隔秒（GOP；缺省 2——field PushConfig 默认）。
+    #[serde(default)]
+    keyframe_interval: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -519,11 +528,26 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
         }
         push_app(&mut out, &name, &cmd, "always", log_dir.as_deref());
     }
+    // 流 id → 配置映射（编码参数透传；streams 循环是 id 列表）
+    let stream_cfgs: std::collections::HashMap<String, StreamConfig> =
+        stream_configs(cfg)?.into_iter().map(|s| (s.id.clone(), s)).collect();
     for stream in &streams {
         let name = instance_name(&app_name("streamer"), stream);
         let mut cmd = format!("{} --stream {}", exe_cmd(&app_name("streamer")), stream);
         // D2: 子进程 WS 目标 = 本地网关（[signaling] local_port 或缺省 17980）
         cmd.push_str(&format!(" --gateway {}", signaling_gateway_url(cfg)?));
+        // 编码参数透传（streams 配置面——encoder_backend/bitrate/gop；缺省 streamer 侧回落）
+        if let Some(sc) = stream_cfgs.get(stream) {
+            if let Some(b) = &sc.encoder_backend {
+                cmd.push_str(&format!(" --encoder-backend {b}"));
+            }
+            if let Some(k) = sc.bitrate_kbps {
+                cmd.push_str(&format!(" --bitrate-kbps {k}"));
+            }
+            if let Some(g) = sc.keyframe_interval {
+                cmd.push_str(&format!(" --keyframe-interval {g}"));
+            }
+        }
         if !config_path.as_os_str().is_empty() {
             cmd.push_str(&format!(
             " --config {} --token {}/{}-stream.token",
@@ -653,6 +677,12 @@ pub struct StreamConfig {
     pub source: String,
     /// 编码格式（对齐 field PublishOptions: vp8/h264/vp9/av1）。
     pub codec: String,
+    /// 编码器后端（auto/software/hardware/nvenc/vaapi；None=auto）。
+    pub encoder_backend: Option<String>,
+    /// 编码码率 kbps（None=field 默认 2000）。
+    pub bitrate_kbps: Option<u32>,
+    /// 关键帧间隔秒 GOP（None=field 默认 2）。
+    pub keyframe_interval: Option<u32>,
 }
 
 /// 解析全部流配置（C2 streamer 用）。
@@ -667,6 +697,9 @@ pub fn stream_configs(cfg: &str) -> Result<Vec<StreamConfig>, String> {
                 id,
                 source: s.source.unwrap_or_else(|| s.id),
                 codec: s.codec.unwrap_or_else(|| "vp8".into()),
+                encoder_backend: s.encoder_backend,
+                bitrate_kbps: s.bitrate_kbps,
+                keyframe_interval: s.keyframe_interval,
             }
         })
         .collect())
@@ -1124,5 +1157,25 @@ streams:
         let def = "sources:\n  - id: \"cam0\"\n    mode: \"camera\"\n";
         assert_eq!(camera_configs(def).unwrap()[0].reconnect_ms, None);
         assert_eq!(camera_configs(def).unwrap()[0].input, None);
+    }
+
+    /// 编码参数透传: streams 配置 encoder_backend/bitrate_kbps/keyframe_interval → oxfile 命令追加；
+    /// 未配置不 emit（streamer 侧回落 field 缺省 auto/2000/2）。
+    #[test]
+    fn oxfile_wires_stream_encoder_params() {
+        let cfg = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n    codec: \"h264\"\n    encoder_backend: \"hardware\"\n    bitrate_kbps: 3500\n    keyframe_interval: 4\n  - id: \"s1\"\n    source: \"cam0\"\n";
+        let ox = to_oxfile(cfg).unwrap();
+        let s0_line = ox.lines()
+            .find(|l| l.contains("command") && l.contains("--stream s0"))
+            .expect("s0 streamer 命令行");
+        assert!(s0_line.contains("--encoder-backend hardware"), "应透传 encoder_backend: {s0_line}");
+        assert!(s0_line.contains("--bitrate-kbps 3500"), "应透传 bitrate: {s0_line}");
+        assert!(s0_line.contains("--keyframe-interval 4"), "应透传 gop: {s0_line}");
+        let s1_line = ox.lines()
+            .find(|l| l.contains("command") && l.contains("--stream s1"))
+            .expect("s1 streamer 命令行");
+        assert!(!s1_line.contains("--encoder-backend"), "未配置不 emit: {s1_line}");
+        assert!(!s1_line.contains("--bitrate-kbps"), "未配置不 emit: {s1_line}");
+        assert!(!s1_line.contains("--keyframe-interval"), "未配置不 emit: {s1_line}");
     }
 }
