@@ -284,6 +284,17 @@ pub enum SignalingMessage {
         packet_count: u64,
         score: u8,
     },
+    /// H1 (session-recovery T1): producer 死亡通知（房间级广播）——peer WS 关闭时 server 广播。
+    /// web 收到后停旧 track 并等新轮 new_producer 自动重订（免刷新自愈）。
+    /// reason 当前唯一来源 = peer_disconnected；producer 中途死检测依赖 worker 通知（H3 不可靠，本期不做）。
+    ProducerClosed {
+        room_id: String,
+        peer_id: String,
+        producer_id: String,
+        kind: MediaKind,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
 
     // ponytail: add frame ack/retransmit when reliability matters
 }
@@ -757,6 +768,24 @@ mod tests {
         assert!(json.contains(r#""type":"new_producer""#));
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         assert!(matches!(parsed, SignalingMessage::NewProducer { .. }));
+    }
+
+    #[test]
+    fn roundtrip_producer_closed() {
+        let msg = SignalingMessage::ProducerClosed {
+            room_id: "room-1".into(),
+            peer_id: "peer-a".into(),
+            producer_id: "prod-1".into(),
+            kind: MediaKind::Video,
+            reason: Some("peer_disconnected".into()),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"producer_closed""#));
+        let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            parsed,
+            SignalingMessage::ProducerClosed { reason: Some(_), .. }
+        ));
     }
 
     #[test]
