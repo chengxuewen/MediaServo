@@ -319,6 +319,7 @@ fn msg_room_id(msg: &SignalingMessage) -> Option<&str> {
         | Produce { room_id, .. }
         | Produced { room_id, .. }
         | NewProducer { room_id, .. }
+        | ProducerClosed { room_id, .. }
         | EncoderStatus { room_id, .. }
         | Consume { room_id, .. }
         | Consumed { room_id, .. }
@@ -359,6 +360,7 @@ fn rewrite_room(msg: &mut SignalingMessage, room: &str) {
         | Produce { room_id, .. }
         | Produced { room_id, .. }
         | NewProducer { room_id, .. }
+        | ProducerClosed { room_id, .. }
         | EncoderStatus { room_id, .. }
         | Consume { room_id, .. }
         | Consumed { room_id, .. }
@@ -651,6 +653,10 @@ async fn remote_loop(
     if let Some(cred) = config.device.clone() {
         client = client.with_device_credentials(cred);
     }
+    // H6（时机修正）: 上游"断开→恢复"的重连标记——通知只在重连成功后下发。
+    // 断线瞬间通知会让 streamer 在 server 宕机窗口 1-2s 一轮重启 → 触发 oxmgr
+    // crash-loop 熔断（3次/5min）→ 永不恢复。重连成功后通知 = server 就绪，一发即中。
+    let mut reconnected = false;
     loop {
         let session = match client.connect_with_retry(config.retry).await {
             Ok(s) => s,
@@ -667,10 +673,25 @@ async fn remote_loop(
             st.remote_since = Some(Instant::now());
             st.vehicle_peer_id = session.peer_id().to_string();
         }
+        if reconnected {
+            let notify: Vec<_> = {
+                let st = lock_state(&state);
+                st.conns.values().map(|c| (c.tx.clone(), c.src.clone())).collect()
+            };
+            for (tx, src) in &notify {
+                let env = LocalEnvelope { src: "server".into(), msg: gateway_disconnected_error() };
+                if tx.send(env).is_err() {
+                    tracing::warn!(src = %src, "上游恢复通知目标连接已断开");
+                }
+            }
+            tracing::info!(children = notify.len(), "H6: 上游已恢复，要求下游重建 SFU 会话");
+            reconnected = false;
+        }
         run_session(session, &state, &mut remote_rx).await;
         // 断线：清空与远端会话绑定的状态 + 丢弃在途上行（重连后按新会话处理）
         lock_state(&state).reset_remote();
         while remote_rx.try_recv().is_ok() {}
+        reconnected = true;
         tracing::info!("远端断开，重新连接…");
     }
 }

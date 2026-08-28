@@ -86,6 +86,13 @@ impl PushSession {
         tokio::spawn(async move {
             while let Ok(ev) = signal_events.recv().await {
                 let bridge = match ev {
+                    SignalEvent::Message(SignalingMessage::Error { code, message }) if code != 0 => {
+                        // H6: server/网关错误面（code≠0）升格 SessionEvent::Error——Message 直通
+                        // 会被下游 `_ =>{}` 吞掉（5001 上游切换不可见）。
+                        SessionEvent::Error(FieldError::Link(mediaservo_link::LinkError::Signal(
+                            format!("[{code}] {message}"),
+                        )))
+                    }
                     SignalEvent::Message(msg) => SessionEvent::Message(msg),
                     SignalEvent::Disconnected { reason } => SessionEvent::Disconnected { reason },
                     SignalEvent::Error(e) => {
@@ -390,6 +397,12 @@ impl PullSession {
         tokio::spawn(async move {
             while let Ok(ev) = signal_events.recv().await {
                 let bridge = match ev {
+                    SignalEvent::Message(SignalingMessage::Error { code, message }) if code != 0 => {
+                        // H6: 同 PushSession——错误面升格，避免被 Message 吞。
+                        SessionEvent::Error(FieldError::Link(mediaservo_link::LinkError::Signal(
+                            format!("[{code}] {message}"),
+                        )))
+                    }
                     SignalEvent::Message(msg) => SessionEvent::Message(msg),
                     SignalEvent::Disconnected { reason } => SessionEvent::Disconnected { reason },
                     SignalEvent::Error(e) => {

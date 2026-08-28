@@ -647,6 +647,15 @@ async fn main() -> ExitCode {
             },
             ev = events.recv() => match ev {
                 Some(SessionEvent::Error(e)) => {
+                    // H6: 上游切换（gateway 5001）— 本会话 transport/producer 已全死，
+                    // 退出待 oxmgr 重启 → 全新 produce（与 Disconnected 同自愈通道）。
+                    if e.to_string().contains("[5001]") {
+                        // H6: server 宕机窗口的被动 5001——立即退出会 1-2s 一轮重启
+                        // 触发 oxmgr 熔断；退避 15s 给 server 重启时间，再退出重建。
+                        tracing::error!("上游切换（网关 5001）: {e} — 15s 退避后退出重 produce");
+                        tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                        break 'run;
+                    }
                     tracing::warn!("session error: {e}");
                 }
                 Some(SessionEvent::Disconnected { reason }) => {

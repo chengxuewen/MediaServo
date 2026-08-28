@@ -515,6 +515,12 @@ async fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
                         tracing::warn!("host-audio: 信令断开: {reason}");
                         break;
                     }
+                    // H6: 上游切换（gateway 重连后通知/宕机期被动 5001）——会话不可信，
+                    // 退出重启重建（与 Disconnected 同通道；server 就绪后一发即中）。
+                    Ok(SignalEvent::Message(SignalingMessage::Error { code: 5001, .. })) => {
+                        tracing::warn!("host-audio: 上游切换（网关 5001）— 退出重启重建会话");
+                        break;
+                    }
                     Ok(SignalEvent::Message(SignalingMessage::SfuStats { .. })) => {}
                     _ => {}
                 }
