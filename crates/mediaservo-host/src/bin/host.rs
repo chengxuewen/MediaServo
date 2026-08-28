@@ -304,13 +304,9 @@ fn cmd_apply_impl(args: &mut impl Iterator<Item = String>, verb: &str) -> i32 {
             }
         }
     }
-    // C25/PIT: iceoryx2 SHM 残留（SystemInFlux）会让 capturer/streamer 订阅 open 失败——
-    // start（全量启动）前清理；apply（热更新）不清理（进程在跑，SHM 在用）
+    // C25: 全量启动前清 SHM 残留；apply（热更新）不清（进程在跑，SHM 在用）
     if verb == "start" {
-        for p in ["/tmp/iceoryx2", "/dev/shm/iox2_*"] {
-            let _ = std::process::Command::new("rm").args(["-rf", p]).status();
-        }
-        println!("start: 已清理 iceoryx2 SHM 残留（C25）");
+        clear_iceoryx_residue("start");
     }
     match mediaservo_host::translate::apply_config(&dir) {
         Ok(()) => {
@@ -325,6 +321,15 @@ fn cmd_apply_impl(args: &mut impl Iterator<Item = String>, verb: &str) -> i32 {
             1
         }
     }
+}
+
+/// C25: iceoryx2 SHM 残留（SystemInFlux）会让 capturer/streamer 订阅 open 失败——
+/// 全量停进程后（start/restart）必须清理；apply（热更新）不清（进程在跑，SHM 在用）。
+fn clear_iceoryx_residue(verb: &str) {
+    for p in ["/tmp/iceoryx2", "/dev/shm/iox2_*"] {
+        let _ = std::process::Command::new("rm").args(["-rf", p]).status();
+    }
+    println!("{verb}: 已清理 iceoryx2 SHM 残留（C25）");
 }
 
 /// `host restart [<dir>]`: `oxmgr stop <oxfile>`（停全部 app）后重新 apply（全量重启）。
@@ -345,6 +350,9 @@ fn cmd_restart(args: &mut impl Iterator<Item = String>) -> i32 {
     if code != 0 {
         return code;
     }
+
+    // 全量重启 = 停后再起：与 start 同样清 SHM 残留（restart 漏清理 → SystemInFlux 黑屏）
+    clear_iceoryx_residue("restart");
     match mediaservo_host::translate::apply_config(&dir) {
         Ok(()) => {
             println!("restart: 已全量重启（{}", dir.join("run").join("oxfile.toml").display());
