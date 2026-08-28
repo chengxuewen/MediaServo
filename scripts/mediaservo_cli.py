@@ -962,10 +962,10 @@ def _check_port_range_free(start: int, end: int, name: str) -> None:
 
 
 def _cmd_stop(args: argparse.Namespace) -> None:
-    """stop <target>: server=默认双停（裸机 pid + compose stop）；--mode native/compose 限定单侧；host 已移除 CLI 封装。"""
+    """stop <target>: server=默认 native（B 裁决——容器全显式）；--mode both 双停 / compose 只停容器；host 已移除 CLI 封装。"""
     target = args.target
     if target == "server":
-        mode = "compose" if getattr(args, "env", None) is not None else _resolve_mode(args, default="both")
+        mode = _resolve_mode(args, default="native")
         # ① 裸机（pid 文件驱动幂等——both/native 时）
         if mode in ("both", "native"):
             pid_file = _native_runtime_dirs()[1] / "server-native.pid"
@@ -1108,10 +1108,10 @@ def _cmd_install_deprecated(args: argparse.Namespace) -> None:
 
 def _cmd_clean(args: argparse.Namespace) -> None:
     """clean <target> — all|server|host|client（默认 all）。
-    server: 默认双清（native 产物 + 容器 down）；--mode native/compose 限定；host/client: 清宿主 cargo target。"""
+    server: 默认 native（B 裁决——清裸机产物+先停进程）；--mode both 双清 / compose 只清容器；host/client: 清宿主 cargo target。"""
     target = args.target
     if target in ("all", "server"):
-        mode = "compose" if getattr(args, "env", None) is not None else _resolve_mode(args, default="both")
+        mode = _resolve_mode(args, default="native")
         # native：先停裸机进程（读 pid 文件）再删产物（防孤儿——clean 曾留进程在跑 pid 已删）
         if mode in ("both", "native"):
             pid_file = _native_runtime_dirs()[1] / "server-native.pid"
@@ -1347,12 +1347,15 @@ def _status_host() -> int:
     return 2 if probe_failed else (0 if any_alive else 1)
 
 
-def _add_mode_args(p, *, env_choices=("dev", "prod")):
-    """统一模式参数（--mode native|compose + 短别名 --native/--env；三选一互斥）。
-    语义: 命令默认 native（用户裁决 B）——compose 需显式 --mode compose / --env。"""
+def _add_mode_args(p, *, env_choices=("dev", "prod"), allow_both=False):
+    """统一模式参数（--mode native|compose[/both] + 短别名 --native/--env；互斥）。
+    语义: 命令默认 native（用户裁决 B）——compose 需显式 --mode compose / --env；
+    both 仅 stop/clean 启用（双停/双清两轨）。"""
+    choices = ["native", "compose"] + (["both"] if allow_both else [])
     grp = p.add_mutually_exclusive_group()
-    grp.add_argument("--mode", choices=["native", "compose"], default=None,
-                     help="运行模式: native=裸机（默认）| compose=容器（--env 同效）")
+    grp.add_argument("--mode", choices=choices, default=None,
+                     help="运行模式: native=裸机（默认）| compose=容器（--env 同效）"
+                     + (" | both=两轨全处理" if allow_both else ""))
     grp.add_argument("--native", action="store_true", help="（--mode native 短别名——默认模式，可省略）")
     grp.add_argument("--env", choices=list(env_choices), default=None,
                      help="（--mode compose 短别名 = 进程族容器模式；compose 族 up/down/ps 的 --env 是环境选择——两套语义）")
@@ -1529,9 +1532,9 @@ def main() -> None:
     start_p.add_argument("--foreground", "-f", action="store_true", help="前台阻塞（server native）")
     start_p.set_defaults(func=_cmd_start)
 
-    stop_p = sub.add_parser("stop", help="停止 <target>: server=双停（默认）| --mode 限定；host 已移除 CLI 封装（手动运行）")
+    stop_p = sub.add_parser("stop", help="停止 <target>: server=原生（默认）| --mode both 双停；host 已移除 CLI 封装（手动运行）")
     stop_p.add_argument("target", choices=["host", "server"])
-    _add_mode_args(stop_p)
+    _add_mode_args(stop_p, allow_both=True)
     stop_p.set_defaults(func=_cmd_stop)
 
     logs_p = sub.add_parser("logs", help="日志 [<svc>] [--follow] [--mode native|compose]: server=裸机日志（默认）| compose 容器日志 | host 日志")
@@ -1570,9 +1573,9 @@ def main() -> None:
     package_p.add_argument("--brand", default="", help="品牌包名（dist/<brand>-host-<ver>.tar.gz；缺省 mediaservo-host-<ver>）")
     package_p.add_argument("--release", action="store_true", help="打包 release 产物（target/release, 配合 build --release）")
     package_p.set_defaults(func=_cmd_package)
-    clean_p = sub.add_parser("clean", help="清理 <target>: all|server|host|client（默认 all；server --mode native/compose 限定）")
+    clean_p = sub.add_parser("clean", help="清理 <target>: all|server|host|client（默认 all；server=原生清（默认）| --mode both 双清）")
     clean_p.add_argument("target", nargs="?", choices=["all", "server", "host", "client"], default="all")
-    _add_mode_args(clean_p)
+    _add_mode_args(clean_p, allow_both=True)
     clean_p.add_argument("--all", action="store_true", help="显式删卷 + docker builder prune（15-30 分钟重建代价）")
     clean_p.set_defaults(func=_cmd_clean)
     config_p = sub.add_parser("config", help="配置 show|validate|set <key> <value>（dev 轨道 config/ 目录）")

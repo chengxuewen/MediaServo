@@ -65,7 +65,7 @@ MediaServo — 实时媒体伺服平台（MediaServo Platform）。独立部署�
 ./mediaservo.sh run server --native [--foreground]  # 裸机运行 server（后台: target/server-native.pid + .log）
 # host 运行已移除 CLI 封装（D266）——部署实例: systemctl --user start oxmgr-<brand>-host.service / <prefix>/bin/msrtc-host start <prefix>；
 # 开发: target/debug/mediaservo-host init . && token issue --all . && start .（先清 iceoryx2 残留）
-./mediaservo.sh stop server   # 停止 server（先杀裸机 pid——若在跑; 再 compose stop 保留容器——秒级再启）
+./mediaservo.sh stop server   # 停止 server（默认 native：杀裸机 pid；--mode both 双停 / --env dev 只停容器）
 ./mediaservo.sh stop host     # 已移除（D266）——手动: systemctl --user stop oxmgr-<brand>-host.service / <prefix>/bin/msrtc-host stop <prefix>
 ./mediaservo.sh logs server    # server 日志（默认裸机 target/server-native.log；--env dev/--mode compose 容器日志；--native 显式）
 ./mediaservo.sh down --env dev && ./mediaservo.sh up --env dev   # 重启 dev server（清旧再启，配置变更生效）
