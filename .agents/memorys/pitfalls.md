@@ -1368,3 +1368,17 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **根因**: `_cmd_build_server` 无 `_stage_to_out` 调用；`_cmd_build_host` 已有
 - **解法**: `_stage_to_out("server", [server_bin])` + `--release` 透传
 - **验证**: `ls out/server/bin/mediaservo-server` 存在
+
+## PIT-155: find_other_instance_dir 品牌不感知 — 接管失效 → 双实例竞争 → web 黑屏 (2026-08-27)
+- **症状**: 连续两次 `msrtc-host start`（第二次 y 接管）后，web play 黑屏；capturer 进程 57 次重启循环（open 失败/negotiated 交替）；streamer subscriber 反复重建；日志 "（未能定位旧实例目录——端口被其他程序占用？）"
+- **根因**: host.rs `find_other_instance_dir` 只匹配 `cmdline.contains("host-agent")`——品牌化部署进程名是 `msrtc-agent` → 定位失败 → 接管路径跳过 oxmgr stop/delete → 旧实例进程族存活 → 新 start 清 iceoryx2（旧进程在用）+ apply 同 dir → 新旧 capturer 抢 /dev/video0（EBUSY 崩溃循环）+ iceoryx2 死节点残留（max_publishers=1 端口阻塞）→ 帧流断 → web 黑屏
+- **解法**: ① `is_agent_cmdline` 品牌兼容（exe basename 以 `-agent` 结尾——host-agent/msrtc-agent 均命中）+ `probe_agent_dir` 抽纯函数；② 接管时 old_dir 定位失败 → **中止启动**（提示手动停旧实例，防混战）；③ 3 单测（官方名/品牌名/非 agent 拒绝）
+- **验证**: `pixi run cargo test -p mediaservo-host --bin mediaservo-host` 3 通过；复现场景（两次 start + y）应正常接管
+- **禁止**: 进程名硬编码官方名（品牌化后失配）；接管定位失败仍继续启动
+
+## PIT-156: Jetson encoder_backend auto/hardware → MMAPI AV1 编码器 — 协商不匹配黑屏 (2026-08-27)
+- **症状**: host.yaml codec=h264 + encoder_backend=hardware（或 auto），streamer 日志 `codec=av1 enc="Jetson MMAPI AV1 Encoder"`——实际推 AV1 但 produce/协商是 h264 → web 按 h264 解 AV1 载荷 → 黑屏
+- **根因**: livekit webrtc-sys 的 Jetson（tegra）硬编选择器（SetEncoderSelector Hardware/Auto）匹配到 MMAPI **AV1** 编码器而非 H264——**编码器后端选择与 codec 协商解耦**（选择器按"硬件优先"选编码器，不保证与 codec 一致）
+- **解法**: ① codec=h264 时用 software（OpenH264）或 auto 验证实际编码器；② 若用 Jetson 硬编：codec 必须配 av1（且 server router/web 需支持 av1——mediasoup router codecs 须含 av1）；③ 上线前必须验证 `streamer stats` 的 codec 字段 == 配置 codec
+- **验证**: `grep "streamer stats" run/logs/msrtc-streamer-*.out.log | grep -o "codec=[a-z0-9]*"` 应与 host.yaml 配置一致
+- **禁止**: hardware 后端 + h264 组合直接上线（协商不匹配）；不检查实际编码 codec 就断言推流成功

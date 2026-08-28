@@ -294,6 +294,13 @@ fn cmd_apply_impl(args: &mut impl Iterator<Item = String>, verb: &str) -> i32 {
                 eprintln!("接管: 停止旧实例 {}", od.display());
                 let _ = run_oxmgr_in(Some(&od), &["stop", &ox]);
                 let _ = run_oxmgr_in(Some(&od), &["delete", &ox]);
+            } else {
+                // PIT-155: 品牌化部署下定位旧实例失败（进程名 msrtc-agent 非 host-agent）——
+                // 若继续清 SHM + apply 会与存活旧进程混战（相机 EBUSY/SHM 断链→web 黑屏）。
+                eprintln!("接管中止: 未定位旧实例目录——旧进程可能仍在运行");
+                eprintln!("  直接启动会造成资源竞争（相机 EBUSY / SHM 断链）");
+                eprintln!("  请先手动停止旧实例（如 kill <旧进程> 或重启）后重试");
+                return 1;
             }
         }
     }
@@ -1274,24 +1281,36 @@ fn agent_port_in_use(dir: &std::path::Path) -> Option<u16> {
     .ok()
 }
 
-/// 定位另一 host 实例目录：扫描 host-agent 进程 cmdline 的 --config <dir>/etc/host.yaml。
-/// Linux /proc/*/cmdline；macOS ps -o command；Windows 返回 None（best-effort）。
-fn find_other_instance_dir() -> Option<std::path::PathBuf> {
-    let probe = |cmd: &str| -> Option<std::path::PathBuf> {
-        let cfg_marker = "--config";
-        let mut parts = cmd.split_whitespace();
-        while let Some(p) = parts.next() {
-            if p == cfg_marker {
-                if let Some(path) = parts.next() {
-                    let cfg = std::path::Path::new(path);
-                    if cfg.ends_with("etc/host.yaml") {
-                        return cfg.parent()?.parent().map(|d| d.to_path_buf());
-                    }
+/// 从进程 cmdline 提取 host 实例目录（品牌兼容：exe 名以 "-agent" 结尾即命中，PIT-155）。
+fn probe_agent_dir(cmdline: &str) -> Option<std::path::PathBuf> {
+    let cfg_marker = "--config";
+    let mut parts = cmdline.split_whitespace();
+    while let Some(p) = parts.next() {
+        if p == cfg_marker {
+            if let Some(path) = parts.next() {
+                let cfg = std::path::Path::new(path);
+                if cfg.ends_with("etc/host.yaml") {
+                    return cfg.parent()?.parent().map(|d| d.to_path_buf());
                 }
             }
         }
-        None
-    };
+    }
+    None
+}
+
+/// 判断进程 cmdline 是否为 host agent（品牌兼容：exe 名以 "-agent" 结尾）。
+fn is_agent_cmdline(cmdline: &str) -> bool {
+    cmdline
+        .split_whitespace()
+        .next()
+        .and_then(|exe| std::path::Path::new(exe).file_name())
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.ends_with("-agent"))
+}
+
+/// 定位另一 host 实例目录：扫描 agent 进程 cmdline 的 --config <dir>/etc/host.yaml。
+/// 品牌兼容（host-agent/msrtc-agent——PIT-155）。Linux /proc/*/cmdline；macOS ps；Windows None。
+fn find_other_instance_dir() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "linux")]
     {
         if let Ok(entries) = std::fs::read_dir("/proc") {
@@ -1300,8 +1319,8 @@ fn find_other_instance_dir() -> Option<std::path::PathBuf> {
                 let Some(pid) = pid.to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
                 let cmdline = std::fs::read_to_string(format!("/proc/{pid}/cmdline")).ok()?;
                 let cmdline = cmdline.replace('\0', " ");
-                if cmdline.contains("host-agent") {
-                    if let Some(d) = probe(&cmdline) {
+                if is_agent_cmdline(&cmdline) {
+                    if let Some(d) = probe_agent_dir(&cmdline) {
                         return Some(d);
                     }
                 }
@@ -1312,5 +1331,33 @@ fn find_other_instance_dir() -> Option<std::path::PathBuf> {
     #[cfg(not(target_os = "linux"))]
     {
         None
+    }
+}
+
+#[cfg(test)]
+mod instance_probe_tests {
+    use super::*;
+
+    #[test]
+    fn probe_agent_dir_finds_official_name() {
+        let cmdline = "/opt/mediaservo-host/bin/host-agent --config /opt/mediaservo-host/etc/host.yaml --port 17980";
+        assert!(is_agent_cmdline(cmdline));
+        assert_eq!(probe_agent_dir(cmdline).as_deref(), Some(std::path::Path::new("/opt/mediaservo-host")));
+    }
+
+    #[test]
+    fn probe_agent_dir_finds_branded_name() {
+        // PIT-155: 品牌化部署进程名 msrtc-agent——旧实现 "host-agent" 硬编码定位失败
+        let cmdline = "/opt/mediaservo-host/bin/msrtc-agent --config /opt/mediaservo-host/etc/host.yaml --port 17980";
+        assert!(is_agent_cmdline(cmdline));
+        assert_eq!(probe_agent_dir(cmdline).as_deref(), Some(std::path::Path::new("/opt/mediaservo-host")));
+    }
+
+    #[test]
+    fn probe_agent_dir_rejects_non_agent() {
+        let cmdline = "/opt/mediaservo-host/bin/msrtc-streamer --stream cam0 --config /opt/mediaservo-host/etc/host.yaml";
+        assert!(!is_agent_cmdline(cmdline), "streamer 不得命中 agent 探测（过滤在 is_agent_cmdline 层）");
+        // probe_agent_dir 不挑进程（任何 --config 均提取目录）——进程区分由 is_agent_cmdline 把关
+        assert_eq!(probe_agent_dir(cmdline).as_deref(), Some(std::path::Path::new("/opt/mediaservo-host")));
     }
 }

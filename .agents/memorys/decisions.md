@@ -676,3 +676,21 @@ EmergencyCommand 转发（H 阶段 host-emergency）; 状态/告警的 operator 
 - **理由**: 名字"docker"是历史遗留——文件本质是 dev 占位账号/设备模板，裸机 run 也用——名字误导；容器卷内已是 accounts.yaml
 - **影响**: cli.py 4 处引用 + Rust 源码注释 + config/accounts.production.yaml 注释 + server.docker.yaml 模板引用
 - **来源**: 用户识别（"为什么有 docker 字段"）+ 重命名后验证 admin 200
+
+## D260: streams 编码参数配置面补齐 — encoder_backend/bitrate_kbps/keyframe_interval (2026-08-27)
+
+**决策**: host.yaml `streams[]` 增加 3 个可选编码参数：`encoder_backend`（auto/software/hardware/nvenc/vaapi，缺省 auto）、`bitrate_kbps`（缺省 2000）、`keyframe_interval`（GOP 秒，缺省 2）。透传链：StreamConfig → streamer CLI（--encoder-backend/--bitrate-kbps/--keyframe-interval）→ field PublishOptions/PushConfig（能力已存在：SetEncoderSelector + max_bps/keyframe）。host.yaml.template streams 段补全字段注释（codec 可选值 vp8/h264/vp9/av1 + 各 backend 平台语义 + 示例块）。
+
+**理由**: 能力链路（field 层）早已实现但 host 配置面断点（streamer 硬编码 encoder_backend="auto"）——使用者无法配置软编/硬编/码率/GOP。
+
+**影响**: StreamConfig +3 字段（serde Option）；host-streamer +3 CLI 参数；oxfile 命令透传（有值才追加）；27 translate 单测全绿。
+
+**警示（PIT-156）**: Jetson 上 backend=hardware/auto 会匹配 MMAPI AV1 编码器——codec 与 backend 组合必须验证实际编码（streamer stats codec 字段）。
+
+## D261: host 接管品牌兼容 + 定位失败中止 (2026-08-27)
+
+**决策**: ① `find_other_instance_dir` 品牌兼容（exe basename `-agent` 后缀匹配，PIT-155）；② 接管时 old_dir 定位失败 → 中止启动（提示手动停旧实例）——防新旧实例资源竞争（相机 EBUSY/iceoryx2 死节点/SHM 断链 → web 黑屏）。
+
+**理由**: 品牌化部署（msrtc-agent）下原 "host-agent" 硬编码导致接管路径永远失效——y 接管不杀旧进程，新 start 清 SHM + apply 与存活进程混战。
+
+**影响**: +3 单测（官方名/品牌名/非 agent 拒绝）；接管失败路径从"静默混战"变"明确中止"。
