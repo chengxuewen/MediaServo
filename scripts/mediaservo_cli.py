@@ -97,21 +97,25 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
             _stage_to_out("server", [server_bin], sub="bin")  # brand=""（server 不品牌化——D3）
             print(f"server 交付布局组装: out/server/bin/mediaservo-server（{server_bin.stat().st_size // 1024} KB）")
         # 组装默认配置（server.yaml——从 config/server.docker.yaml 派生，accounts/devices 相对路径）
+        # PIT-158/160: 已存在则跳过（运行时注册表 devices/accounts 可能被 admin API 热写、
+        # server.yaml 可能被运维改过）——build 不得把模板覆盖回运行时数据；需要新模板先删旧文件。
         etc_dir = _out_root() / "server" / "etc"
         etc_dir.mkdir(parents=True, exist_ok=True)
         src_cfg = ROOT / "config" / "server.docker.yaml"
-        if src_cfg.exists():
+        if src_cfg.exists() and not (etc_dir / "server.yaml").exists():
             cfg = src_cfg.read_text()
             # accounts/devices 改为相对于 etc 目录（打包后 bin/../etc/accounts.yaml 等）
             cfg = cfg.replace('/opt/mediaservo/etc/accounts.yaml', 'accounts.yaml')
             cfg = cfg.replace('/opt/mediaservo/etc/devices.yaml', 'devices.yaml')
             (etc_dir / "server.yaml").write_text(cfg)
-            # 拷贝设备/账号文件（dev 模板——运行时可覆盖）
+        if src_cfg.exists():
+            # 拷贝设备/账号文件（dev 模板——仅首次缺失时补）
             import shutil
             for f in ("accounts.yaml", "devices.yaml"):
                 src = ROOT / "config" / f
-                if src.exists():
-                    shutil.copy2(src, etc_dir / f)
+                dst = etc_dir / f
+                if src.exists() and not dst.exists():
+                    shutil.copy2(src, dst)
             print(f"server 默认配置组装: {etc_dir}/server.yaml")
         return
     _check("docker", "安装 docker 并启动 daemon")
