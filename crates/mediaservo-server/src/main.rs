@@ -208,7 +208,8 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let monitor_router = monitor::monitor_router(signaling_server.clone());
 
     // ── Admin API state ────────────────────────────────────────────────────
-    let (admin_tx, _) = tokio::sync::broadcast::channel::<String>(256);
+    // 与 SignalingServer 内建频道同源（流上/下线事件由信令路径推送）。
+    let admin_tx = signaling_server.admin_events();
     let admin_state = admin::AdminState {
         event_tx: admin_tx,
         signaling: signaling_server.clone(),

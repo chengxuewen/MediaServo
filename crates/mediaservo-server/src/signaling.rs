@@ -43,6 +43,8 @@ pub struct SignalingServer {
     shutdown_tx: watch::Sender<bool>,
     /// Number of currently active WebSocket connections.
     active_connections: Arc<AtomicUsize>,
+    /// Admin 事件频道（列表秒级刷新触发；main.rs AdminState.event_tx 同源）。
+    admin_events: tokio::sync::broadcast::Sender<String>,
     pub ws_max_message_size: usize,
     /// Pending messages cache — stores SDP offer + ICE candidates per room for late-joiner replay.
     pub pending_messages: Arc<dashmap::DashMap<String, Vec<String>>>,
@@ -78,6 +80,7 @@ impl SignalingServer {
             sfu_manager: _sfu,
             shutdown_tx,
             active_connections: Arc::new(AtomicUsize::new(0)),
+            admin_events: { let (tx, _) = tokio::sync::broadcast::channel(256); tx },
             ws_max_message_size,
             pending_messages: Arc::new(dashmap::DashMap::new()),
             jwt_auth,
@@ -98,6 +101,7 @@ impl SignalingServer {
             room_manager: RoomManager::new(),
             shutdown_tx,
             active_connections: Arc::new(AtomicUsize::new(0)),
+            admin_events: { let (tx, _) = tokio::sync::broadcast::channel(256); tx },
             ws_max_message_size,
             pending_messages: Arc::new(dashmap::DashMap::new()),
             jwt_auth,
@@ -149,6 +153,11 @@ impl SignalingServer {
     /// Number of currently active WebSocket connections.
     pub fn active_connections(&self) -> usize {
         self.active_connections.load(Ordering::Relaxed)
+    }
+
+    /// Admin 事件频道（流上/下线事件 → 前端列表秒级刷新）。
+    pub fn admin_events(&self) -> broadcast::Sender<String> {
+        self.admin_events.clone()
     }
 
     pub(crate) fn get_or_create_channel(&self, room_id: &str) -> broadcast::Sender<String> {
@@ -683,6 +692,36 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                                 .await;
                             continue;
                         }
+                        // 列表秒级刷新: streams 集合变化 → 推 admin 事件（前端仅作
+                        // 刷新触发；5s 轮询保留兜底）。
+                        if let SignalingMessage::StatusReport { streams, .. } = &sig {
+                            let new_ids: std::collections::BTreeSet<&str> =
+                                streams.iter().map(|s| s.id.as_str()).collect();
+                            let changed = match server.status_registry.get(&relay_room) {
+                                Some(SignalingMessage::StatusReport { streams: old_s, .. }) => {
+                                    let old_ids: std::collections::BTreeSet<&str> =
+                                        old_s.iter().map(|s| s.id.as_str()).collect();
+                                    old_ids != new_ids
+                                }
+                                _ => !new_ids.is_empty(),
+                            };
+                            if changed {
+                                for s in streams {
+                                    let ev = crate::admin::AdminEvent::StreamCreate {
+                                        device_id: relay_room.clone(),
+                                        stream_id: s.id.clone(),
+                                        timestamp: chrono::Utc::now().to_rfc3339(),
+                                    };
+                                    let _ = server
+                                        .admin_events
+                                        .send(serde_json::to_string(&ev).unwrap_or_default());
+                                }
+                                tracing::info!(
+                                    "StatusReport streams changed in room {} — admin event pushed",
+                                    relay_room
+                                );
+                            }
+                        }
                         server.status_registry.store(&relay_room, sig);
                         tracing::info!("StatusReport stored for room {relay_room}");
                         continue;
@@ -982,6 +1021,15 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                         "SFU: broadcast ProducerClosed (device {} cleanup) in room {}",
                         device_id, room
                     );
+                    // 列表秒级刷新: 流下线事件（前端仅作刷新触发）。
+                    let ev = crate::admin::AdminEvent::StreamDestroy {
+                        device_id: device_id.clone(),
+                        stream_id: room.clone(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
+                    let _ = server
+                        .admin_events
+                        .send(serde_json::to_string(&ev).unwrap_or_default());
                 }
             }
         }
