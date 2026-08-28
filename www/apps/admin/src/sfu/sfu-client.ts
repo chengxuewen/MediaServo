@@ -120,6 +120,7 @@ export class SfuConsumerClient {
   private mergedMetrics: StreamMetrics | null = null;
   // 码率增量计算: 累计 bytesReceived 当瞬时值是单位错误根因
   private lastBytes = 0;
+  private mutedTicks = 0; // H1: muted 连续 tick 计数（2s tick）
   private lastTs = 0;
   private onTrack: StreamCallback;
   private onStatus: StatusCallback;
@@ -133,6 +134,8 @@ export class SfuConsumerClient {
   private transportResolver: ((params: TransportCreated) => void) | null = null;
   private pendingProducer: any = null;
   private pendingSdp: any = null;
+  /** H1: producer_closed 自愈重入守卫（广播风暴/连续消息只 restart 一次）。 */
+  private restarting = false;
   private metricsTimer: ReturnType<typeof setInterval> | null = null;
   // PIT-76: 首帧/渲染时间戳观测 — 从 startPlay 起计时，各节点打 [T+nms]
   private t0 = 0;
@@ -315,6 +318,13 @@ export class SfuConsumerClient {
           console.log('SfuClient: new_producer before transport, queuing');
           this.pendingProducer = msg;
         }
+      } else if (msg.type === 'producer_closed') {
+        // H1: host 断开/重启 → server 广播 producer 死亡。免刷新自愈：拆媒体面
+        // 重跑 startPlay（逻辑刷新），late-join/新 new_producer 广播驱动重订阅。
+        if (this.sfuMode && !this.closed && !this.restarting) {
+          this.logT('producer_closed → 自动重订阅（免刷新自愈）');
+          void this.restartStream();
+        }
       } else if (msg.type === 'encoder_status') {
         // v2 (web-stream-stats T4): Host 编码状态（room 广播）→ 合并进 metrics（不覆盖浏览器字段）
         this.emitMetrics({
@@ -450,6 +460,14 @@ export class SfuConsumerClient {
     this.stopMetrics();
     this.metricsTimer = setInterval(async () => {
       if (!this.pc) return;
+      // H1 兑底观测: producer 中途死且 ProducerClosed 不可达（H3 worker 通知静默）→ muted 持续 10s 告警
+      const vt = this.pc.getTransceivers().find(t => t.receiver.track?.kind === 'video');
+      if (vt?.receiver.track.muted) {
+        this.mutedTicks++;
+        if (this.mutedTicks === 5) console.warn('SfuClient: video track muted ≥10s — producer 可能已死且无 ProducerClosed 通知');
+      } else {
+        this.mutedTicks = 0;
+      }
       try {
         const stats = await this.pc.getStats();
         let rtt = 0, packetsLost = 0, packetsReceived = 0, fps = 0, bitrate = 0, jitter = 0;
@@ -519,6 +537,8 @@ export class SfuConsumerClient {
       try {
         await this.connect();
         console.log('SfuClient: reconnected successfully');
+        // H6: server 重启后旧 transport/媒体面全失效——WS 重连成功必须逻辑刷新媒体面。
+        if (this.sfuMode && !this.closed) void this.restartStream();
         return;
       } catch (err) {
         console.warn(`SfuClient: reconnect attempt ${attempt} failed`, err);
@@ -528,6 +548,37 @@ export class SfuConsumerClient {
     
     console.error('SfuClient: max reconnect attempts reached');
     this.onStatus('error');
+  }
+
+  /**
+   * H1: producer_closed 自愈 — 拆 pc/transport 后重跑完整 startPlay（等价页面刷新，
+   * 但保留用户视角无感）。重发 room_join 触发 server late-join 回放 existing producers
+   * （否则 host 先于本端完成 re-produce 时无 new_producer 广播可收）。
+   */
+  private async restartStream(): Promise<void> {
+    this.restarting = true;
+    try {
+      this.stopMetrics();
+      this.pc?.close();
+      this.pc = null;
+      this.transportId = null;
+      this.pendingProducer = null;
+      // PIT-65: 新 peer_id——旧 SfuPeer 残留随 server 端 producer 死亡已失效。
+      this.sfuPeerId = `${this.roomId}-consumer-${Math.random().toString(36).slice(2, 8)}`;
+      this.onStatus('connecting');
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        await this.connect(); // WS 也断了（罕见）→ 先全量重连
+      }
+      this.ws?.send(JSON.stringify({
+        type: 'room_join', room_id: this.roomId, peer_role: 'consumer',
+      }));
+      await this.startPlay();
+    } catch (err) {
+      console.warn('SfuClient: restartStream failed', err);
+      this.onStatus('disconnected');
+    } finally {
+      this.restarting = false;
+    }
   }
 
   close(): void {
