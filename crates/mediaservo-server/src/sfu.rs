@@ -541,6 +541,73 @@ mod imp {
             }
         }
 
+        /// H1 修正: 跨房间按 peer_id 清除（producer 按流注册在各 stream 房间的 sfu peers，
+        /// 而 signaling 会话的 relay_room=整车房间——旧单房间版 remove_peer 清不到 stream 房间的
+        /// producer，造成重连后死 producer 泄漏 + 无 ProducerClosed 广播）。
+        /// 返回 (room_id, [(producer_id, kind)]) 供逐房间广播。房间清空则销毁 Router。
+        pub fn remove_peer_global(&self, peer_id: &str) -> Vec<(String, Vec<(String, protocol::MediaKind)>)> {
+            let mut out = Vec::new();
+            let mut empty_rooms = Vec::new();
+            for mut entry in self.rooms.iter_mut() {
+                let rid = entry.key().clone();
+                if let Some((_pid, peer)) = entry.value_mut().peers.remove(peer_id) {
+                    let closed: Vec<(String, protocol::MediaKind)> = peer
+                        .producers
+                        .iter()
+                        .map(|p| {
+                            let kind = match p.kind() {
+                                MediaKind::Audio => protocol::MediaKind::Audio,
+                                MediaKind::Video => protocol::MediaKind::Video,
+                            };
+                            (p.id().to_string(), kind)
+                        })
+                        .collect();
+                    tracing::info!("Peer {} removed from SFU room {} ({} producers)", peer_id, rid, closed.len());
+                    if entry.value().peers.is_empty() {
+                        empty_rooms.push(rid.clone());
+                    }
+                    out.push((rid, closed));
+                }
+            }
+            // (iter_mut 守卫随 for 循环结束已释放——下方删除安全)
+            for rid in empty_rooms {
+                self.remove_room(&rid);
+            }
+            out
+        }
+
+        /// H1 修正: 按 producer_id 列表跨房间清理（各 stream 房间的 sfu peer 键为
+        /// 自报 peer_id，会话 id 清理漏删——泄漏）。返回 (room, producer_id, kind) 供广播。
+        pub fn remove_producers_by_ids(&self, producer_ids: &[String]) -> Vec<(String, String, protocol::MediaKind)> {
+            let mut out = Vec::new();
+            for mut entry in self.rooms.iter_mut() {
+                let rid = entry.key().clone();
+                for mut peer_ref in entry.value_mut().peers.iter_mut() {
+                    let peer = peer_ref.value_mut();
+                    let mut hits: Vec<(String, protocol::MediaKind)> = Vec::new();
+                    peer.producers.retain(|p| {
+                        let pid = p.id().to_string();
+                        if producer_ids.contains(&pid) {
+                            let kind = match p.kind() {
+                                MediaKind::Audio => protocol::MediaKind::Audio,
+                                MediaKind::Video => protocol::MediaKind::Video,
+                            };
+                            hits.push((pid, kind));
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                    for (pid, kind) in &hits {
+                        peer.producer_transports.remove(pid);
+                        tracing::info!("Producer {pid} removed from SFU room {rid} (device-owned cleanup)");
+                    }
+                    out.extend(hits.into_iter().map(|(pid, kind)| (rid.clone(), pid, kind)));
+                }
+            }
+            out
+        }
+
         /// Remove a room and its Router (stops forwarding for all peers).
         pub fn remove_room(&self, room_id: &str) -> bool {
             let existed = self.rooms.remove(room_id).is_some();
@@ -587,24 +654,6 @@ mod imp {
                 producer_id, kind, peer_id, room_id
             );
 
-            // PIT 观测: Producer RTP trace（每包处理/丢弃原因）— 验证 push 帧是否到达 server
-            {
-                let pid = producer_id.clone();
-                producer.on_trace(move |trace: &mediasoup::producer::ProducerTraceEventData| {
-                    tracing::info!("PROD-TRACE {}: {:?}", pid, trace);
-                });
-                let _ = producer
-                    .enable_trace_event(vec![mediasoup::producer::ProducerTraceEventType::Rtp])
-                    .await;
-            }
-            // PIT 观测: Producer dump（rtp_streams score — 收包质量）
-            {
-                let pid = producer_id.clone();
-                if let Ok(dump) = producer.dump().await {
-                    let scores: Vec<u8> = dump.rtp_streams.iter().map(|s| s.score).collect();
-                    tracing::info!("PROD-DUMP {}: paused={} scores={:?}", pid, dump.paused, scores);
-                }
-            }
 
             // C1: 记录 producer→transport 绑定（bind 断言/诊断）— 先取 id 结束 transport 借用。
             let bound_transport_id = transport.id().to_string();

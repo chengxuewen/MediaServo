@@ -575,25 +575,27 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     let direct_sender = Arc::clone(&ws_sender);
     let relay_sender = ws_sender;
 
+    tracing::info!("Relay spawned: peer={} room={}", relay_peer_id, relay_room);
+    let relay_spawn_peer = relay_peer_id.clone();
+    let relay_spawn_room = relay_room.clone();
     let relay_handle = tokio::spawn(async move {
-        loop {
+        let reason = loop {
             match rx.recv().await {
                 Ok(msg) => {
-                    tracing::info!("Relay: forwarding to peer ({} bytes)", msg.len());
+                    tracing::debug!("Relay: forwarding to peer {} ({} bytes)", relay_spawn_peer, msg.len());
                     if relay_sender.lock().await.send(Message::Text(msg)).await.is_err() {
-                        tracing::warn!("Relay: send failed, peer disconnected");
-                        break;
+                        break "send-failed";
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!("Relay: lagged behind by {} messages, continuing", n);
+                    tracing::warn!("Relay {}: lagged {} messages", relay_spawn_peer, n);
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    tracing::info!("Relay: broadcast channel closed");
-                    break;
+                    break "channel-closed";
                 }
             }
-        }
+        };
+        tracing::info!("Relay ended: peer={} room={} reason={}", relay_spawn_peer, relay_spawn_room, reason);
     });
 
     // Forward: this peer's receiver → broadcast
@@ -909,8 +911,80 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     // Clean up SFU resources for the disconnecting peer
     #[cfg(feature = "sfu-mediasoup")]
     {
-        server.sfu_manager.remove_peer(&relay_room, &relay_peer_id);
-        tracing::info!("SFU: cleaned up peer {} in room {}", relay_peer_id, relay_room);
+        // H1 修正: producer 注册在各 stream 房间的 sfu peers（relay_room=整车房间 ≠ 其房间，
+        // 单房间 remove_peer 清不到——死 producer 泄漏）。跨房间移除并逐房间广播 ProducerClosed。
+        let closed_rooms = server.sfu_manager.remove_peer_global(&relay_peer_id);
+        tracing::info!(
+            "SFU: cleaned up peer {} ({} sfu rooms touched)",
+            relay_peer_id, closed_rooms.len()
+        );
+        for (room_id, closed) in closed_rooms {
+            if closed.is_empty() {
+                continue;
+            }
+            let tx = server.get_or_create_channel(&room_id);
+            for (producer_id, kind) in closed {
+                let msg = SignalingMessage::ProducerClosed {
+                    room_id: room_id.clone(),
+                    peer_id: relay_peer_id.clone(),
+                    producer_id,
+                    kind,
+                    reason: Some("peer_disconnected".into()),
+                };
+                let _ = tx.send(serde_json::to_string(&msg).unwrap());
+            }
+            tracing::info!(
+                "SFU: broadcast ProducerClosed for peer {} in room {}",
+                relay_peer_id, room_id
+            );
+        }
+
+        // H1 修正（方案 A）: device 持有的 producer 存于各 stream 房间自报 peer 键，
+        // 会话 id 清理漏删 → producer_owners 反查该设备全部 producer 移除，
+        // 逐房间广播 ProducerClosed（web 免刷新重订阅）。
+        if let Some(device) = server.device_bindings.get(&relay_peer_id) {
+            let device_id = device.value().clone();
+            drop(device);
+            let owned: Vec<String> = server
+                .producer_owners
+                .iter()
+                .filter(|e| *e.value() == device_id)
+                .map(|e| e.key().clone())
+                .collect();
+            if !owned.is_empty() {
+                let removed = server.sfu_manager.remove_producers_by_ids(&owned);
+                for pid in &owned {
+                    server.producer_owners.remove(pid);
+                }
+                let mut by_room: std::collections::HashMap<
+                    String,
+                    Vec<(String, mediaservo_common::protocol::MediaKind)>,
+                > = std::collections::HashMap::new();
+                for (room, pid, kind) in removed {
+                    by_room.entry(room).or_default().push((pid, kind));
+                }
+                for (room, prods) in by_room {
+                    let tx = server.get_or_create_channel(&room);
+                    for (producer_id, kind) in prods {
+                        let msg = SignalingMessage::ProducerClosed {
+                            room_id: room.clone(),
+                            peer_id: relay_peer_id.clone(),
+                            producer_id,
+                            kind,
+                            reason: Some("peer_disconnected".into()),
+                        };
+                        match tx.send(serde_json::to_string(&msg).unwrap()) {
+                            Ok(n) => tracing::info!("ProducerClosed broadcast: {} channel receivers", n),
+                            Err(_) => tracing::warn!("ProducerClosed broadcast: no receivers"),
+                        }
+                    }
+                    tracing::info!(
+                        "SFU: broadcast ProducerClosed (device {} cleanup) in room {}",
+                        device_id, room
+                    );
+                }
+            }
+        }
     }
 
     // ── Check if leaving peer is a DeviceStream host (before leave_room removes it)
@@ -1009,7 +1083,7 @@ fn status_report_denial(
 pub(crate) async fn handle_sfu_message(
     msg: &SignalingMessage,
     server: &SignalingServer,
-    broadcast_tx: &tokio::sync::broadcast::Sender<String>,
+    _broadcast_tx: &tokio::sync::broadcast::Sender<String>,
     peer_id: &str,
     identity: &SessionIdentity,
 ) -> Option<SignalingMessage> {
@@ -1157,7 +1231,14 @@ pub(crate) async fn handle_sfu_message(
                         peer_id: peer_id.to_string(),
                         kind: result.kind,
                     };
-                    let _ = broadcast_tx.send(serde_json::to_string(&broadcast).unwrap());
+                    // H1 根因修复: 广播必须发到 produce 目标房间的频道（而非调用会话自己的
+                    // 频道——agent 会话房间=vehicle，web 消费者订阅的是各流房间 → 旧路径
+                    // web 永远收不到新 producer → host 重启后黑屏只能刷新恢复）。
+                    let room_tx = server.get_or_create_channel(&room_id);
+                    match room_tx.send(serde_json::to_string(&broadcast).unwrap()) {
+                        Ok(n) => tracing::info!("NewProducer broadcast: {} channel receivers in room {}", n, room_id),
+                        Err(_) => tracing::warn!("NewProducer broadcast: no receivers in room {}", room_id),
+                    }
                     tracing::info!(
                         "SFU: broadcast NewProducer for peer {} in room {}",
                         peer_id,
@@ -1283,7 +1364,9 @@ pub(crate) async fn handle_sfu_message(
                         label: label.clone(),
                         protocol: protocol.clone(),
                     };
-                    let _ = broadcast_tx.send(serde_json::to_string(&broadcast).unwrap());
+                    let _ = server
+                        .get_or_create_channel(&room_id)
+                        .send(serde_json::to_string(&broadcast).unwrap());
                     tracing::info!(
                         "SFU: broadcast NewDataProducer (label={}) for peer {} in room {}",
                         label,
