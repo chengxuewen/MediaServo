@@ -246,6 +246,8 @@ mediaservo-webrtc = { path = "../mediaservo-webrtc", features = ["backend-webrtc
 
 **约束**：mediaservo-server 构建采用双轨策略——**原生编译为主路径**（开发/调试），Docker 为发布镜像与 CI 兜底。原「统一 Docker 编译」约束已放宽。
 
+**调试主线（2026-08-28 修订）**：开发调试的**运行/取证/黑屏排查**默认连**本机 native server**（`run server` 默认 native；日志：发布壳实例 `out/server/logs/server-native.log`、裸 CLI `data/logs/server-native.log`）；Docker 容器仅用于发布镜像与 compose 路径验证。调试取证禁止默认假设 server 在容器内（`docker logs`）——先 `ss -tlnp | grep 9800` 确认监听者身份再取日志。
+
 **构建矩阵**：
 | 场景 | 命令 | 说明 |
 |------|------|------|
