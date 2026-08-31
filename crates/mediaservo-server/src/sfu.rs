@@ -977,6 +977,13 @@ mod imp {
         }
 
         /// Number of active rooms.
+        /// worker 子进程存活。mediasoup-rs reaper 对**任意退出**（崩溃/正常）翻转
+        /// closed（worker.rs:445 swap(true)）→ `!closed()` 是安全同步 liveness 探测
+        /// （frontend-process-split T7，喂 /ready）。
+        pub fn worker_alive(&self) -> bool {
+            !self.worker.closed()
+        }
+
         pub fn room_count(&self) -> usize {
             self.rooms.len()
         }

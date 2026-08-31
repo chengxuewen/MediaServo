@@ -1,5 +1,5 @@
 use crate::signaling::SignalingServer;
-use crate::health::{HealthChecker, HealthStatus};
+use crate::health::{HealthChecker, HealthStatus, ReadinessChecker};
 use axum::Router;
 use axum::extract::State;
 use axum::response::Json;
@@ -76,6 +76,15 @@ fn gather_health(state: &MonitorState) -> Vec<ComponentHealth> {
     }]
 }
 
+/// Gather readiness（worker 存活纳入——T7）：/ready 专用；/health 仍纯 liveness。
+fn gather_readiness(state: &MonitorState) -> Vec<ComponentHealth> {
+    let checker: &dyn ReadinessChecker = &state.signaling;
+    vec![ComponentHealth {
+        component: checker.name(),
+        status: checker.check_readiness(),
+    }]
+}
+
 /// Compute overall health: worst status wins (unhealthy > degraded > healthy).
 fn overall_health(components: &[ComponentHealth]) -> HealthStatus {
     let mut worst = HealthStatus::Healthy;
@@ -109,7 +118,7 @@ async fn health_handler(State(state): State<MonitorState>) -> Json<HealthRespons
 async fn ready_handler(
     State(state): State<MonitorState>,
 ) -> (axum::http::StatusCode, Json<HealthResponse>) {
-    let components = gather_health(&state);
+    let components = gather_readiness(&state);
     let overall = overall_health(&components);
     let uptime_seconds = state.start_time.elapsed().as_secs();
 

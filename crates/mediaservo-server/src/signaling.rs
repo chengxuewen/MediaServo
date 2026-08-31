@@ -1,6 +1,6 @@
 use crate::audit::{self, AuditEvent};
 use crate::devices::{self, DeviceRegistry};
-use crate::health::{HealthChecker, HealthStatus};
+use crate::health::{HealthChecker, HealthStatus, ReadinessChecker};
 use crate::roles::{AccountIdentity, CockpitRole, SessionIdentity};
 use crate::room::RoomManager;
 use crate::status::StatusRegistry;
@@ -207,6 +207,23 @@ impl HealthChecker for SignalingServer {
         tracing::debug!("Health: {connections} connections, {rooms} rooms");
         // ponytail: always healthy while alive; add degraded thresholds if needed
         HealthStatus::Healthy
+    }
+}
+
+impl ReadinessChecker for SignalingServer {
+    /// readiness = 存活 + SFU worker 存活。liveness≠readiness：`/health` 不因 worker 死亡
+    /// 降级（防外部重启风暴误杀信令）；`/ready` 503 供观测 + 人工 `msrtc-server restart`
+    /// 恢复（自动看门狗另立项——frontend-process-split T7/B3）。
+    fn check_readiness(&self) -> HealthStatus {
+        #[cfg(feature = "sfu-mediasoup")]
+        {
+            if !self.sfu_manager.worker_alive() {
+                return HealthStatus::unhealthy(
+                    "mediasoup worker process has exited — SFU unusable until this server restarts",
+                );
+            }
+        }
+        self.check_health()
     }
 }
 
