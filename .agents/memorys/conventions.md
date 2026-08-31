@@ -280,6 +280,12 @@ mediaservo-webrtc = { path = "../mediaservo-webrtc", features = ["backend-webrtc
 
 **来源**：用户显式批准（2026-08-26 three-mode-build T6）+ mediasoup/livekit/Deno/Bun/Zed 调研 + T5 实证
 
+**2026-08-31 分离修订（frontend-process-split）**: 矩阵追加 `build web`（静态产物→out/server/web）
+与 `run/stop/restart/status web`（过渡态 caddy）；`build server` 默认=不嵌入变体（default features 翻转），
+模式②嵌入经 `--image runtime` 显式化。`run/start/stop/restart server` 将在 Phase 6 后退役→转发
+msrtc-server（T21 落地时同步修订本节并更新命令矩阵）。
+
+
 ---
 
 ## C14: 子代理产物必须验证（编排者铁律）
@@ -421,6 +427,14 @@ conda 交叉编译器（会 PIT-85 复发）。
 **检查**: 修改 sfu-client.ts/VideoPlayer.tsx 后，9800 页面 JS bundle 是否含新字段（`curl http://127.0.0.1:9800/admin` → HTML 引用的 `index-*.js` 与 `dist/assets/` 最新产物一致）。
 
 **来源**: PIT-87 诊断轮实证（2026-08-13: 编码耗时功能在 9800 不生效 = dist 旧构建）
+
+### C24 修订（2026-08-31, frontend-process-split）: 适用范围收窄至模式②
+- native 主路径已分离：default 构建（`admin-dashboard` 移出 default 后）**不再于 9800 托管前端**；
+  浏览器入口=Caddy（过渡 `run web`，Phase 6 起归 msrtc-server/oxmgr 簇，默认 :8080）。
+- 改 TS → `mediaservo build web`（→ out/server/web）+ 浏览器刷新即生效，**无需 Rust 重编译**。
+- "必须 rebuild"仅存于模式②单容器（Dockerfile 显式 `--features sfu-mediasoup,admin-dashboard` 编译期嵌入）。
+  上方检查法（curl :9800/admin 比对 bundle）降级为模式②专属；分离形态验证走 Caddy 入口。
+
 
 ## C25: iceoryx2 测试残留清理 — 跑 link/涉及 FrameBus 的测试前必须清运行时目录 (2026-08-14, 修订 2026-08-19)
 

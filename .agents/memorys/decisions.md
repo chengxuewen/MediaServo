@@ -694,3 +694,23 @@ EmergencyCommand 转发（H 阶段 host-emergency）; 状态/告警的 operator 
 **理由**: 品牌化部署（msrtc-agent）下原 "host-agent" 硬编码导致接管路径永远失效——y 接管不杀旧进程，新 start 清 SHM + apply 与存活进程混战。
 
 **影响**: +3 单测（官方名/品牌名/非 agent 拒绝）；接管失败路径从"静默混战"变"明确中止"。
+
+## D262: frontend-process-split — 前端进程分离 + feature 翻转 + oxmgr 同构管理 (2026-08-31)
+
+**决策**：① Admin SPA 移出 server 进程：`admin-dashboard` 出 default features（默认构建=纯后端 API），
+产物经 `build web`→`out/server/web` 合并树，由 Caddy（deploy/caddy/Caddyfile.native/split）托管静态 +
+`@api` 反代；根 Caddyfile 保持全透传=模式② ingress/回滚资产。② D-2=B：host-agent `/ws` 直连 9800
+不变，Caddy 仅收敛浏览器面（二期迁 A 前置=protocol_version+url 配发）。③ server 裸机/开发进程管理
+**采纳 oxmgr**（Rust 单二进制，与 host 同引擎：C32 数据目录隔离/D-H13 锁定打包/startup 三端）；
+systemd 仅作开机锚点；compose 轨道无 oxmgr。④ `msrtc-server` 单二进制双角色（Phase 6 落地）：
+子命令管理面 + `run`=现 main（无参回落，既有直启链零破坏）。⑤ dev 闭环：`dev web`(vite 透传) +
+`start --no-web`（caddy 缺失自动降级）。⑥ `/ready` 接入 worker_alive（liveness≠readiness，PIT-167 范围）。
+
+**理由**：管理台为一等公民服务（视频会议/远程桌面路线）；C24 重编译绑架不可持续；分离钩子已在
+（cfg feature/动态 location.host/compose proxy 现成）改动面最小；oxmgr 初版"Node 包"否决系误判
+（PIT-169 同源文本）实证 Rust 后反转——同引擎复用 host 全部运维资产。
+
+**影响**：C24 收窄至模式②；`run/start/stop/restart server` 将在 Phase 6 后退役→转发（C39 同待遇）；
+PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构建性。
+
+**参考**：.sisyphus/plans/frontend-process-split/（主仓，含 Momus 审核修复轮）。

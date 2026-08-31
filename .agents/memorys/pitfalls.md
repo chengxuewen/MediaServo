@@ -1382,3 +1382,33 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: ① codec=h264 时用 software（OpenH264）或 auto 验证实际编码器；② 若用 Jetson 硬编：codec 必须配 av1（且 server router/web 需支持 av1——mediasoup router codecs 须含 av1）；③ 上线前必须验证 `streamer stats` 的 codec 字段 == 配置 codec
 - **验证**: `grep "streamer stats" run/logs/msrtc-streamer-*.out.log | grep -o "codec=[a-z0-9]*"` 应与 host.yaml 配置一致
 - **禁止**: hardware 后端 + h264 组合直接上线（协商不匹配）；不检查实际编码 codec 就断言推流成功
+
+> 编号与主仓 ms_rtc 同步（157-162 存于主仓未回填）。2026-08-31 frontend-process-split 轮镜像：
+
+## PIT-163: psk 未配置时提交的 JWT 被整体跳过——账号退化 Legacy，produce/data 授权门旁路 (2026-08-31)
+- **症状/根因/解法/验证/禁止**: 同主仓——`signaling.rs handle_socket` 守卫 `if !authenticated`
+  在 `authenticated = psk_auth.is_none()` 预置下吞掉验证；修为 `!authenticated || jwt_token.is_some()`；
+  e2e_sfu 双姿态 6/6。生产影响面：psk 未配 + jwt 已配的部署组合。
+
+## PIT-164: admin_router `.layer(auth)` 吞隐式 404——无 secret 时未匹配路径全 503 (2026-08-31)
+- 判据修正：验证"不嵌入"用「配 admin_jwt_secret 后 /admin=401 JSON（非 HTML）」；中期可加显式 fallback。
+
+## PIT-165: integration_test 审计断言并行抖动（全局 audit ring 冲刷）(2026-08-31)
+- `g3_emergency_audit_and_matrix` 并行套件红、单跑/`--test-threads=1` 恒绿；门禁命令固定串行；
+  根治（per-test ring/按 room 过滤）另立项。
+
+## PIT-166: pkill -x 截断名误杀同名兄弟实例 (2026-08-31)
+- 多实例机清理**只按 pid**（pidfile/ss 归属 + `ps -p <pid> -o args=` 核验），禁 pkill/killall 族签名。
+
+## PIT-167: mediasoup 0.24 worker 是进程内线程（mediasoup-sys），非子进程 (2026-08-31)
+- 全源码无 `Command::new`；C++ 崩溃=整进程亡（restart 覆盖），`/ready` 的 `!Worker::closed()`
+  覆盖线程优雅死/channel 关闭；"中继独立进程"表述作废，worker 无独立内存墙。
+
+## PIT-168: H6 自愈仅覆盖优雅重启——SIGKILL 后 video streamer 不重建 produce (2026-08-31)
+- audio 走 5001 退避重建，video transport 半开黑洞（bytes_sent 增长≠链路健康）；
+  即时=host 集群重启；根治=streamer 收包/RTCP 超时检测→会话重放（与 respawn 同批另立项）。
+  判断媒体路径以 消费出画 + sfu/rooms producer 计数 为准。
+
+## PIT-169: su-exec 在 Ubuntu 无包——e56650c 起 runtime 镜像从未构建成功 (2026-08-31)
+- 降权改 `setpriv --reuid=$(id -u ...) --regid=$(id -g ...) --clear-groups`（util-linux 自带，
+  exec 不 fork，PID-1 保真）；教训：改 Dockerfile 运行层必须真构建验证。

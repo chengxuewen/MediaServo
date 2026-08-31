@@ -571,3 +571,17 @@ install                        → 改名提示 + exit 2（退役）
 - server 多 ListenInfo 完整验证（多网卡 host 场景）
 - build-deploy-unify 团队审核后退守 deferred minors
 - macOS 启动命令（launchd）待补
+
+
+## 2026-08-31: frontend-process-split Phase 0-5 完成（子模块侧）
+
+- **fix(security)**: signaling JWT 守卫授权旁路修复 + admin_psk_test E0382（PIT-163/164/165）
+- **feat(health)**: `/ready`←`worker_alive()=!Worker::closed()`（sfu/monitor/signaling；PIT-167 线程模型）
+- **feat(build)**: `admin-dashboard` 出 default（翻转），Dockerfile 显式双 features；
+  `build web`/`run·stop·restart·status web`（过渡态）/`dev web` 后置于 Phase 6；
+  deploy/caddy/{Caddyfile.native,Caddyfile.split}；根 Caddyfile/docker-compose 不动（实况修正）
+- **fix(docker)**: runtime su-exec→setpriv（**模式②镜像自 e56650c 起从未构建成功**，PIT-169）
+- **验收**: 双姿态全测绿（e2e_sfu 6/6、integration 18/18）、Playwright 经 Caddy 出画 1280x720、
+  WS 330s 存活、host restart 免刷新自愈 V1 过、runtime 镜像 /admin 内嵌 SPA 恢复
+- **待做**: Phase 6 = msrtc-server 单二进制双角色（T15-T22）；遗留：video streamer SIGKILL 重放
+  （PIT-168）、/ready 自动看门狗、protocol_version 握手
