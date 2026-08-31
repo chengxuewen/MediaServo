@@ -585,3 +585,20 @@ install                        → 改名提示 + exit 2（退役）
   WS 330s 存活、host restart 免刷新自愈 V1 过、runtime 镜像 /admin 内嵌 SPA 恢复
 - **待做**: Phase 6 = msrtc-server 单二进制双角色（T15-T22）；遗留：video streamer SIGKILL 重放
   （PIT-168）、/ready 自动看门狗、protocol_version 握手
+
+### 2026-08-31 续: Phase 6 完成（T15-T22 实证）
+
+- **feat(server)**: 单二进制双角色（main.rs USAGE/派发/`run`=daemon 回落，既有直启零破坏）+
+  `lifecycle/`（mod/templates/inspect/startup ≈1517 行含 320 测试）：init（模板+secret 0600 幂等+
+  静态 oxfile+快照式端口烘焙）、start [--no-web]（C32 四 env 全作用域/端口守卫/macOS parity）、
+  stop/restart（闲置前缀幂等无泄漏——事故复现过）、status(/ready 列,0/1/2)、doctor、logs、
+  startup on/off（systemd 锚点 unit，二次实例拒绝）、monit/ps 代理
+- **feat(cli)**: deploy server --prefix（源=out/ 唯一，deploy 不触发构建；dev 模板账号 fail-fast
+  警告）、package server、dev web、run/start/stop/restart server 退役→exit 2、clean server 扩展、
+  _pids_using exe-inode 精确占用判定（PIT-170 修复）
+- **T22 端到端**: /tmp/t22 全环绿——deploy→适配→整簇 status=0→SPA/探针/代理/登录发证→
+  startup on/off→restart 自愈→stop 零残留、生产 9800/host 簇无损
+- **T14**: docs/modules/development/frontend-split-deploy.md（终态手册）
+- **演练暴露的既有项（未动，报主）**：`_E2E_SUITES` 未定义（cli e2e NameError，HEAD 存量）；
+  `oxmgr-host-...-MediaServo-install-host.service`（enabled，指向已不存在的旧树——开机噪音）；
+  init 端口快照语义（改进项 init --port 未做）

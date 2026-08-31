@@ -1412,3 +1412,16 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 ## PIT-169: su-exec 在 Ubuntu 无包——e56650c 起 runtime 镜像从未构建成功 (2026-08-31)
 - 降权改 `setpriv --reuid=$(id -u ...) --regid=$(id -g ...) --clear-groups`（util-linux 自带，
   exec 不 fork，PID-1 保真）；教训：改 Dockerfile 运行层必须真构建验证。
+
+## PIT-170: oxmgr CLI 对闲置前缀的 stop 回落默认地址——连坐其他 daemon（deploy 演练事故实录）(2026-08-31)
+- **症状**: deploy server 重跑的"无条件 stop 守卫"在未 start 过的前缀上执行 `oxmgr stop` →
+  本机 host 簇（另一 daemon）与 stray daemon 被连坐杀掉（agent 日志中断实锤）。
+- **根因**: oxmgr 0.5 IPC 命令在**目标 daemon 不存在**时回落默认地址，命中同机其他 daemon；
+  且 CLI 旧 `_kill_using` 以 basename 匹配 cmdline 判"占用"（同名兄弟全中，PIT-166 同族）。
+- **解法**（已落地）: ① CLI 守卫改「仅当前缀的 binary/oxmgr 经 `/proc/<pid>/exe` inode 精确匹配
+  确认在执行中才 stop」（`_pids_using`）；② 二进制侧 stop 恒走带 `OXMGR_HOME/DATA_DIR/
+  DAEMON_ADDR/API_ADDR` 四件套作用域的 `oxmgr_cmd(dir)`，闲置前缀 list 失败即幂等成功。
+- **验证**: 事故复现测试——运行中的 host 簇存在时对从未 init 的前缀 `stop` → 0 命中、
+  agent pid 前后一致；decoy daemon 两阶段（idle 部署/运行中部署）均存活。
+- **禁止**: 任何 oxmgr/进程管理 CLI 封装在无作用域地址的情况下对"可能没人"的前缀发 stop；
+  占用判定禁 basename 签名（只认 exe inode）。
