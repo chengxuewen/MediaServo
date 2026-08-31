@@ -166,19 +166,21 @@ RUN cargo build --release --bin mediaservo-server --features sfu-mediasoup
 
 # ---- Runtime: minimal Ubuntu 22.04 ----
 FROM ubuntu:22.04 AS runtime
+# 降权改用 setpriv（util-linux，基础镜像自带）——su-exec 在 Ubuntu 无包（Debian 独有），
+# e56650c 起 runtime 层引用导致镜像自那以后不可构建（T9 存量缺陷首验暴露，2026-08-31）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libssl3 libuv1 ca-certificates curl openssl su-exec \
+    libssl3 libuv1 ca-certificates curl openssl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -s /bin/bash mediaservo
 COPY --from=builder /workspace/target/release/mediaservo-server /usr/local/bin/
-# 命名卷初始化（团队审核 C5/H8）: root 写卷 → entrypoint 末尾 su-exec 降权。
+# 命名卷初始化（团队审核 C5/H8）: root 写卷 → entrypoint 末尾 setpriv 降权。
 # 目录属主必须在 USER 前设定——命名卷 copy-up 保留镜像属主（空卷 EACCES 根治）。
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/templates/ /usr/local/etc/templates/
 RUN chmod 755 /usr/local/bin/entrypoint.sh \
     && mkdir -p /usr/local/etc /opt/mediaservo/recordings \
     && chown -R mediaservo:mediaservo /usr/local/etc /opt/mediaservo
-# 以 root 跑 entrypoint（写卷不依赖 copy-up 行为）——server 由 entrypoint 末尾 su-exec 降权（PID-1 保真）
+# 以 root 跑 entrypoint（写卷不依赖 copy-up 行为）——server 由 entrypoint 末尾 setpriv 降权（exec 保 PID-1）
 USER root
 EXPOSE 9800 40000-40100/udp
 HEALTHCHECK --interval=30s --timeout=3s CMD curl -f http://localhost:9800/health || exit 1

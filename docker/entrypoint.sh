@@ -8,7 +8,7 @@
 #   ③ 模板落位（prod-safe——禁 dev 占位）: accounts:{} + devices:{} + server.yaml 渲染
 #   ④ 未完成检查（任一缺失 exit 1——首启幂等——不启 server）
 #   ⑤ 可选 admin 引导（MEDIASERVO_ADMIN_PASSWORD）
-#   ⑥ set -a 注入 .env → exec su-exec 降权（PID-1 信号保真）
+#   ⑥ set -a 注入 .env → exec setpriv 降权（exec 保 PID-1 信号）
 set -euo pipefail
 
 ETC=/usr/local/etc
@@ -27,7 +27,7 @@ if [ ! -f "$ENV_FILE" ]; then
     printf 'MEDIASERVO_PSK=%s\n' "$PSK" > "$ENV_FILE"
     # server.yaml 渲染（jwt/admin_jwt 同值——accounts.rs fail-fast 一致性）
     sed "s|__JWT_SECRET__|${JWT}|g" "$TEMPLATES/server.yaml.template" > "$ETC/server.yaml"
-    # root 生成 → 属主移交 mediaservo（su-exec 降权后 server 可读）
+    # root 生成 → 属主移交 mediaservo（setpriv 降权后 server 可读）
     chown mediaservo:mediaservo "$ENV_FILE" "$ETC/server.yaml"
     chmod 600 "$ENV_FILE" "$ETC/server.yaml"
     echo "generated fresh secrets (psk/jwt) into $ETC" >&2
@@ -57,10 +57,10 @@ EOF
     unset MEDIASERVO_ADMIN_PASSWORD
 fi
 
-# ── ⑥ 注入 env + 降权 exec（PID-1 信号保真——su-exec 而非 su）──────────
+# ── ⑥ 注入 env + 降权 exec（PID-1 保真——setpriv exec，不 fork）────
 set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
 # 二进制 /usr/local/bin/ → 相对路径 bin/../etc/server.yaml = /usr/local/etc/server.yaml（entrypoint 已生成）
-exec su-exec mediaservo mediaservo-server "$@"
+exec setpriv --reuid="$(id -u mediaservo)" --regid="$(id -g mediaservo)" --clear-groups mediaservo-server "$@"
