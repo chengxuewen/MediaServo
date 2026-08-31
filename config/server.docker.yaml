@@ -1,4 +1,6 @@
 version: 1
+# frontend-process-split D-2=B：保持 0.0.0.0（host-agent 直连 /ws）。
+# 迁「全收敛 A」前置：admin API 配发 signaling.url + protocol_version 握手就绪后改 127.0.0.1（仅 Caddy 反代进入）。
 listen:
   host: "0.0.0.0"
   port: 9800

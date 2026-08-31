@@ -1,0 +1,34 @@
+# MSRTC native 裸机分离形态（frontend-process-split T4/T6——过渡形态，Phase 6 后由 deploy server 生成同款）
+# 用法: cd <out/server 所在发布根> && caddy run --config <repo>/deploy/caddy/Caddyfile.native --adapter caddyfile
+#       （mediaservo build/run web 或 msrtc.sh run web 自动这样调；cwd 需含 ./web 静态目录）
+# 覆盖: MSRTC_WEB_ADDR（默认 :8080——非 root 可绑；生产上 443+证书由 deploy/锚点层改写本段）
+# 上游: MSRTC_BACKEND（默认 127.0.0.1:9800——D-2=B：host-agent 仍直连 backend，本代理只服务浏览器）
+# 回滚资产: 根 Caddyfile（模式②全透传，配嵌入镜像，勿混用）
+
+{$MSRTC_WEB_ADDR::8080} {
+	@api path /api/* /ws /health /ready /stats /metrics
+	# ① API/信令/探针 → 后端（Caddy2 自动 WS Upgrade；flush_interval -1 保长连不被掐——T11 门）
+	handle @api {
+		reverse_proxy {$MSRTC_BACKEND:127.0.0.1:9800} {
+			flush_interval -1
+		}
+	}
+
+	# ② 其余 → 静态 dist（vite hash 资源强缓存；入口 no-cache 防版本偏斜）
+	handle {
+		root * ./web
+		try_files {path} /index.html
+		encode zstd gzip
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+	@page path / /index.html
+	header @page Cache-Control "no-cache"
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+}

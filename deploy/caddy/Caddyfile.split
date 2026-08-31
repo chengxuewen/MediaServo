@@ -1,0 +1,32 @@
+# MediaServo compose 分离形态 Caddyfile（frontend-process-split T4——预置件，当前不接线）
+# 适用: 未来「多服务 compose」（docker-compose.dev.yml 增 proxy + 不嵌入 server 镜像）。
+# 现状决策（2026-08-31 T5 核验）: 模式③ dev compose 无 proxy 服务（dev 前端=vite 5173），
+#   模式②单容器用根 Caddyfile 全透传+后端嵌入——两者均不需改动，本文件仅为终态占位。
+# 接线时: 挂载 ./out/server/web:/srv/admin:ro（MSRTC_WEB_SRC 可覆盖，主仓 out/ 场景）
+#        + 本文件挂 /etc/caddy/Caddyfile。
+
+mediaservo.local, localhost {
+	@api path /api/* /ws /health /ready /stats /metrics
+	handle @api {
+		reverse_proxy server:9800 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		root * /srv/admin
+		try_files {path} /index.html
+		encode zstd gzip
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+	@page path / /index.html
+	header @page Cache-Control "no-cache"
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+}

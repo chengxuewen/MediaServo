@@ -67,17 +67,126 @@ def _ensure_admin_dist() -> None:
             newers = []
         need = bool(newers)
     if not need:
-        print(f"admin dist 最新（{dist_index.parent.relative_to(ROOT)}——src 无变更）— 跳过前端构建，嵌入既有 dist")
+        print(f"admin dist 最新（{dist_index.parent.relative_to(ROOT)}——src 无变更）— 跳过前端构建，复用既有 dist")
         return
     _check("pnpm", "pnpm 未安装——前端构建需要（或先手动 cd www && pnpm build:admin）")
     print("admin dist 过期/缺失 — 构建前端（tsc -b && vite build）...")
     _run_or_exit(["pnpm", "build:admin"], cwd=str(ROOT / "www"))
 
 
+def _stage_web_to_out() -> None:
+    """dist → out/server/web 合并树（frontend-process-split T2——web 唯一消费方=server 部署单元，
+    单树=单 tar=单 deploy；Caddy 静态 root 指此）。"""
+    src = ROOT / "www" / "apps" / "admin" / "dist"
+    dst = _out_root() / "server" / "web"
+    if not (src / "index.html").exists():
+        print(f"错误: {src} 无产物——pnpm build:admin 未执行或失败", file=sys.stderr)
+        sys.exit(2)
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst)
+    n = sum(1 for x in dst.rglob("*") if x.is_file())
+    print(f"web 交付物组装: out/server/web/（{n} 文件——Caddy 静态 root）")
+
+
+def _cmd_build_web() -> None:
+    """build web — 纯前端快速通道：mtime 增量 pnpm → out/server/web（不碰 cargo）。"""
+    _ensure_admin_dist()
+    _stage_web_to_out()
+
+
+def _web_pid_file() -> Path:
+    return _native_runtime_dirs()[1] / "web-native.pid"
+
+
+def _run_web_native() -> None:
+    """run web — 过渡形态：独立 caddy 静态+反代理（deploy/caddy/Caddyfile.native）。
+    Phase 6 后 web 归 msrtc-server 的 oxmgr 进程簇统管（T17），本命令退役。"""
+    pid_file = _web_pid_file()
+    if pid_file.exists():
+        try:
+            alive = int(pid_file.read_text().strip())
+        except ValueError:
+            alive = -1
+        if alive > 0 and Path(f"/proc/{alive}").exists():
+            print(f"✓ web(caddy) 已在运行 pid={alive} — 跳过启动")
+            sys.exit(0)
+    if shutil.which("caddy") is None:
+        print("错误: caddy 不在 PATH——安装 GitHub Releases 预编译二进制"
+              "（https://github.com/caddyserver/caddy/releases，sha512 见 checksums.txt），"
+              "禁止自研静态服务器", file=sys.stderr)
+        sys.exit(2)
+    out_server = _out_root() / "server"
+    if not (out_server / "web" / "index.html").exists():
+        print(f"错误: {out_server / 'web'} 无产物——先 mediaservo build web", file=sys.stderr)
+        sys.exit(2)
+    cfg = ROOT / "deploy" / "caddy" / "Caddyfile.native"
+    log_path = _native_runtime_dirs()[1] / "web-native.log"
+    with open(log_path, "ab") as lf:
+        proc = subprocess.Popen(
+            ["caddy", "run", "--config", str(cfg), "--adapter", "caddyfile"],
+            cwd=str(out_server), stdout=lf, stderr=lf,
+            stdin=subprocess.DEVNULL, start_new_session=True)
+    pid_file.write_text(str(proc.pid))
+    print(f"✓ web 运行中 pid={proc.pid} — http://localhost:8080（静态 root={out_server / 'web'}，"
+          f"反代 127.0.0.1:9800；日志 {log_path}）")
+
+
+def _stop_web_native(allow_inactive: bool = False) -> None:
+    pid_file = _web_pid_file()
+    pid = -1
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text().strip())
+        except ValueError:
+            pid = -1
+    if pid > 0 and Path(f"/proc/{pid}").exists():
+        subprocess.run(["kill", str(pid)], check=False)
+        for _ in range(4):
+            if not Path(f"/proc/{pid}").exists():
+                break
+            time.sleep(0.5)
+        if Path(f"/proc/{pid}").exists():
+            subprocess.run(["kill", "-9", str(pid)], check=False)
+        print(f"web(caddy) 已停止 pid={pid}")
+    elif not allow_inactive:
+        print("web 未在运行（pid 文件缺失或进程已亡）", file=sys.stderr)
+        pid_file.unlink(missing_ok=True)
+        sys.exit(1)
+    pid_file.unlink(missing_ok=True)
+
+
+def _status_web_native() -> int:
+    """退出码 0=运行中且入口 200 / 1=未运行或不可达 / 2=探测异常。"""
+    pid_file = _web_pid_file()
+    if not pid_file.exists():
+        print("web: 未运行（无 pid 文件）")
+        return 1
+    try:
+        pid = int(pid_file.read_text().strip())
+    except ValueError:
+        print("web: pid 文件损坏")
+        return 2
+    if not Path(f"/proc/{pid}").exists():
+        print(f"web: 未运行（pid={pid} 已亡）")
+        return 1
+    try:
+        code = subprocess.run(
+            ["curl", "-s", "--noproxy", "*", "-o", "/dev/null", "-w", "%{http_code}",
+             "--max-time", "2", "http://127.0.0.1:8080/"],
+            capture_output=True, text=True, timeout=5, check=False).stdout.strip()
+    except Exception as e:
+        print(f"web: 探测失败 {e}", file=sys.stderr)
+        return 2
+    print(f"web: 运行中 pid={pid} 入口 http={code or '—'}")
+    return 0 if code == "200" else 1
+
+
 def _cmd_build_server(image: str | None = None, native: bool = False, release: bool = False) -> None:
     """build server: 默认 native（用户裁决 B——不写模式=原生）| --image runtime|dev=Docker 镜像（--native 兼容别名）。"""
     if native or image is None:   # 默认 native；--image 显式才走 Docker
-        _ensure_admin_dist()      # 前置增量构建前端（C13 双轨对齐——Docker 路径 Dockerfile 内自理）
+        _ensure_admin_dist()      # mtime 增量前端构建（Docker 路径 Dockerfile 内自理）
+        _stage_web_to_out()       # T3 后 default=不嵌入，dist 以文件树进交付物（out/server/web）
         _check("cargo", "pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat")
         if not os.environ.get("MESON"):
             print("错误: MESON 环境变量未设置——请经 ./mediaservo.sh 调用（source pixi-shell.sh 注入 activation env）", file=sys.stderr)
@@ -142,6 +251,8 @@ def _cmd_build(target: str) -> None:
         _cmd_build_server()
     if target in ("all", "client"):
         _cmd_build_client()
+    if target == "web":   # 纯前端快速通道（all 不含——build server 已带 web 装配）
+        _cmd_build_web()
     if target == "bindings":
         _cmd_build_bindings()
 
@@ -489,7 +600,7 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
         ver = subprocess.run([oxmgr_src, "--version"], capture_output=True, text=True, check=False)
         print(f"  oxmgr 已打包: {ver.stdout.strip() or ver.stderr.strip() or '?'}")
     else:
-        print("错误: PATH 未找到 oxmgr — 未打包（运行时需它拉起进程）。安装: npm install -g oxmgr（https://github.com/Vladimir-Urik/OxMgr#install），或构建 oxmgr-src 后放 ~/.local/bin，再重跑 deploy host", file=sys.stderr)
+        print("错误: PATH 未找到 oxmgr — 未打包（运行时需它拉起进程）。安装: 下载 GitHub Releases 预编译 Rust 二进制（含 sha256/asc 校验，https://github.com/Vladimir-Urik/OxMgr/releases），或构建 oxmgr-src 后放 ~/.local/bin，再重跑 deploy host", file=sys.stderr)
 
     # host init: 生成 etc/ + identity.json + 令牌——幂等只写不删（已存在跳过, 重装保留凭据）
     # brand: env 注入（init 是独立进程——device 前缀需与布局品牌一致）
@@ -733,6 +844,8 @@ def _cmd_start(args: argparse.Namespace) -> None:
             _run_or_exit(cmd, env=_compose_env())
     elif target == "host":
         _host_runtime_hint("start")
+    elif target == "web":
+        _run_web_native()
         sys.exit(2)
     else:  # client
         print("start client: 待实现（client 骨架阶段）", file=sys.stderr)
@@ -742,6 +855,10 @@ def _cmd_start(args: argparse.Namespace) -> None:
 def _cmd_restart(args: argparse.Namespace) -> None:
     target = args.target
     """restart <target> — server: 默认 native（B 裁决）；--mode compose=容器重启；host 已移除 CLI 封装。"""
+    if target == "web":
+        _stop_web_native(allow_inactive=True)
+        _run_web_native()
+        return
     if target == "server":
         mode = _resolve_mode(args, default="native")
         if mode == "native":
@@ -783,6 +900,8 @@ def _cmd_run(args: argparse.Namespace) -> None:
         _run_server_native(args)
     elif args.target == "host":
         _host_runtime_hint("run")
+    elif args.target == "web":
+        _run_web_native()
         sys.exit(2)
     else:
         print('run client: 待实现（client 骨架阶段）', file=sys.stderr)
@@ -966,8 +1085,11 @@ def _check_port_range_free(start: int, end: int, name: str) -> None:
 
 
 def _cmd_stop(args: argparse.Namespace) -> None:
-    """stop <target>: server=默认 native（B 裁决——容器全显式）；--mode both 双停 / compose 只停容器；host 已移除 CLI 封装。"""
+    """stop <target>: server=默认 native（B 裁决——容器全显式）；--mode both 双停 / compose 只停容器；host 已移除 CLI 封装；web=过渡态 caddy。"""
     target = args.target
+    if target == "web":
+        _stop_web_native()
+        return
     if target == "server":
         mode = _resolve_mode(args, default="native")
         # ① 裸机（pid 文件驱动幂等——both/native 时）
@@ -1232,6 +1354,8 @@ def _cmd_status_runtime(args: argparse.Namespace) -> None:
         code = _status_server_native() if mode == "native" else _status_server_container(args.env)
     elif args.target == "host":
         code = _status_host()
+    elif args.target == "web":
+        code = _status_web_native()
     else:
         print("status client: 待实现（client 骨架阶段）", file=sys.stderr)
     sys.exit(code)
@@ -1491,8 +1615,8 @@ def main() -> None:
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    build_p = sub.add_parser("build", help="构建 <target> [--image runtime|dev]: all|host|server|client|bindings（默认 all；server 默认 native 编译，--image 才走 Docker）")
-    build_p.add_argument("target", nargs="?", choices=["all", "host", "server", "client", "bindings"], default="all")
+    build_p = sub.add_parser("build", help="构建 <target> [--image runtime|dev]: all|web|host|server|client|bindings（默认 all；server=不嵌入变体+web 装配一步出；web=纯前端快速通道；--image 才走 Docker）")
+    build_p.add_argument("target", nargs="?", choices=["all", "web", "host", "server", "client", "bindings"], default="all")
     build_p.add_argument("--release", action="store_true", help="release 构建（bindings: target/release，strip+LTO）")
     grp = build_p.add_mutually_exclusive_group()
     grp.add_argument("--image", choices=["runtime", "dev"], default=None,
@@ -1519,11 +1643,11 @@ def main() -> None:
     down_p.set_defaults(func=_cmd_down)
 
     restart_p = sub.add_parser("restart", help="重启 <target>: server=裸机（默认）| compose（--mode）；host 已移除 CLI 封装（手动运行）")
-    restart_p.add_argument("target", choices=["host", "server"])
+    restart_p.add_argument("target", choices=["host", "server", "web"])
     _add_mode_args(restart_p)
     restart_p.set_defaults(func=_cmd_restart)
     run_p = sub.add_parser("run", help="运行 <target> [--announced-ip IP[,IP...]]: server=裸机（唯一模式）；host 已移除 CLI 封装（手动运行）")
-    run_p.add_argument("target", choices=["server", "host"])
+    run_p.add_argument("target", choices=["server", "host", "web"])
     run_p.add_argument("--foreground", "-f", action="store_true", help="前台阻塞运行，输出实时透传")
     run_p.add_argument("--release", action="store_true", help="用 target/release 二进制")
     run_p.add_argument("--announced-ip", metavar="IP[,IP...]", default=None,
@@ -1531,13 +1655,13 @@ def main() -> None:
     run_p.set_defaults(func=_cmd_run)
 
     start_p = sub.add_parser("start", help="启动 <target>（默认 server）: server=native（默认）| compose（--mode）；host 已移除 CLI 封装（手动运行）")
-    start_p.add_argument("target", nargs="?", choices=["host", "server"], default="server")
+    start_p.add_argument("target", nargs="?", choices=["host", "server", "web"], default="server")
     _add_mode_args(start_p)
     start_p.add_argument("--foreground", "-f", action="store_true", help="前台阻塞（server native）")
     start_p.set_defaults(func=_cmd_start)
 
     stop_p = sub.add_parser("stop", help="停止 <target>: server=原生（默认）| --mode both 双停；host 已移除 CLI 封装（手动运行）")
-    stop_p.add_argument("target", choices=["host", "server"])
+    stop_p.add_argument("target", choices=["host", "server", "web"])
     _add_mode_args(stop_p, allow_both=True)
     stop_p.set_defaults(func=_cmd_stop)
 
@@ -1595,7 +1719,7 @@ def main() -> None:
     doctor_p = sub.add_parser("doctor", help="环境诊断（pixi/cargo/docker/node——原 status）")
     doctor_p.set_defaults(func=_cmd_doctor)
     status_p = sub.add_parser("status", help="健康探测 <target>（退出码 0/1/2）: server=裸机（默认）| compose 容器（--mode compose）| host 推流进程")
-    status_p.add_argument("target", choices=["server", "host"])
+    status_p.add_argument("target", choices=["server", "host", "web"])
     _add_mode_args(status_p)
     status_p.set_defaults(func=_cmd_status_runtime)
 
@@ -1629,6 +1753,8 @@ def main() -> None:
             _cmd_build_server(args.image, args.native, args.release)
         elif args.target == "client":
             _cmd_build_client()
+        elif args.target == "web":
+            _cmd_build_web()
     elif args.command == "run":
         _cmd_run(args)
     elif args.command == "start":

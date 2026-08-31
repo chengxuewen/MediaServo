@@ -59,7 +59,7 @@ axum-server = { version = "0.7", features = ["tls-rustls"] }
 rust-embed = { version = "8", optional = true }
 if-addrs = "0.15.0"
 [features]
-default = ["sfu-mediasoup", "admin-dashboard"]
+default = ["sfu-mediasoup"]  # frontend-process-split T3: 默认=不嵌入分离变体；模式②(Dockerfile)显式 --features admin-dashboard 嵌入
 webrtc = ["dep:mediaservo-webrtc"]
 sfu-mediasoup = ["dep:mediasoup"]
 admin-dashboard = ["dep:rust-embed"]

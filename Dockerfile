@@ -134,7 +134,7 @@ RUN mkdir -p crates/mediaservo-common/src && touch crates/mediaservo-common/src/
 
 # 3. Fetch and build dependencies (cached — only re-runs on Cargo.toml changes)
 RUN cargo fetch && \
-    cargo build --release --bin mediaservo-server --features sfu-mediasoup
+    cargo build --release --bin mediaservo-server --features sfu-mediasoup,admin-dashboard
 # 4. Remove dummy sources
 RUN rm -rf crates/*/src
 
@@ -162,7 +162,7 @@ RUN cd www && CI=true pnpm build:admin && \
     cd / && rm -rf /workspace/www/node_modules
 
 # 6. Final build — only recompiles changed source（含正确 ADMIN_DIST_DIR）
-RUN cargo build --release --bin mediaservo-server --features sfu-mediasoup
+RUN cargo build --release --bin mediaservo-server --features sfu-mediasoup,admin-dashboard
 
 # ---- Runtime: minimal Ubuntu 22.04 ----
 FROM ubuntu:22.04 AS runtime
