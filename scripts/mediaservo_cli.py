@@ -421,10 +421,12 @@ def _exe_name(name: str) -> str:
 
 
 
-def _kill_using(path: Path) -> None:
-    """kill 占用 path 的进程（exec 占用不通过 fd——文本 busy 是内存映射，需 cmdline 匹配）。"""
+def _pids_using(path: Path) -> list[int]:
+    """占用 path 的进程 pid：① fd 打开 ② /proc/pid/exe==realpath（exec 内存映射占用）。
+    精确匹配——禁 basename/cmdline 模糊匹配（同签名兄弟进程会被连坐，多实例机器上即生产事故
+    ——PIT-166；2026-08-31 deploy drill 实证旧 basename 匹配可波及他实例 daemon）。"""
     target = os.path.realpath(path)
-    killed = []
+    pids: list[int] = []
     try:
         for p in os.listdir("/proc"):
             if not p.isdigit():
@@ -435,21 +437,24 @@ def _kill_using(path: Path) -> None:
                 for fd in os.listdir(f"/proc/{p}/fd"):
                     try:
                         if os.path.realpath(f"/proc/{p}/fd/{fd}") == target:
-                            killed.append(pid)
+                            pids.append(pid)
                             break
                     except OSError:
                         continue
-                if pid in killed:
+                if pid in pids:
                     continue
-                # ② cmdline 匹配（exec 占用——daemon 进程自身持有二进制映射）
-                cmd = open(f"/proc/{p}/cmdline", "rb").read().replace(b"\0", b" ").decode("utf-8", "replace")
-                if target in cmd or os.path.basename(target) in cmd:
-                    killed.append(pid)
+                # ② exe 符号链接（exec 占用——内核记录的就是这个 inode，无假阳性）
+                if os.path.realpath(f"/proc/{p}/exe") == target:
+                    pids.append(pid)
             except OSError:
                 continue
     except FileNotFoundError:
         pass
-    for pid in killed:
+    return pids
+
+def _kill_using(path: Path) -> None:
+    """kill 占用 path 的进程（_pids_using 精确判据——只按 pid 杀，SIGTERM 优雅退）。"""
+    for pid in _pids_using(path):
         try:
             os.kill(pid, 15)  # SIGTERM（daemon 优雅退出）
             print(f"  已终止占用进程 {pid}")
@@ -664,6 +669,106 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
     if sys.platform == "win32":
         print("注意: Windows best-effort（未全面验证）— 生产部署建议 Linux 车端", file=sys.stderr)
 
+def _cmd_deploy_server(prefix: str) -> None:
+    """deploy server（有状态落地——T20, D266 与 host 同构；deploy 不触发构建——源=out/server 单棵交付树）。
+    server 二进制不品牌化（D3——_stage_to_out brand="" 注释）：名保持 mediaservo-server。
+    etc 已存在不覆盖（PIT-160——运维改动/注册数据不被重部署冲掉）；web 整树平移（rmtree+copytree）；
+    init 幂等渲染（run/oxfile.toml + Caddyfile + PSK/JWT secret 自举——生命周期模块已并入二进制）。
+    D4: --prefix 必填（无默认）；/opt 需 root（同 host 规则）。"""
+    if not prefix:
+        print("错误: deploy 必须 --prefix（无默认——防止污染 out/ 无状态交付；惯例 /opt/mediaservo-server）", file=sys.stderr)
+        sys.exit(2)
+    src_root = _out_root() / "server"
+    src_bin = src_root / "bin" / _exe_name("mediaservo-server")
+    src_web = src_root / "web"
+    if not src_bin.exists():
+        print(f"错误: {src_bin} 不存在 — 先 build server（deploy 不触发构建——D266）", file=sys.stderr)
+        sys.exit(2)
+    if not (src_web / "index.html").exists():
+        print(f"错误: {src_web} 无前端产物 — 先 build web（deploy 不触发构建——D266）", file=sys.stderr)
+        sys.exit(2)
+    prefix_p = Path(prefix)
+    bin_dir = prefix_p / "bin"
+    try:
+        bin_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"错误: 无法创建 {bin_dir}: {e} — 部署用 sudo mediaservo deploy server --prefix /opt/mediaservo-server", file=sys.stderr)
+        sys.exit(1)
+    if str(prefix_p).startswith("/opt") and hasattr(os, "geteuid") and os.geteuid() != 0:
+        print("错误: /opt 部署需 root（sudo mediaservo deploy server --prefix /opt/mediaservo-server）", file=sys.stderr)
+        sys.exit(1)
+
+    server_cli = bin_dir / _exe_name("mediaservo-server")
+    # 仅当该前缀二进制/oxmgr 真在跑（/proc/pid/exe 精确匹配）才走实例 stop——oxmgr CLI 在目标端口
+    # 无 daemon 时会回落触达同机其他 daemon（2026-08-31 drill 实证：空 prefix 的 stop 连坐杀了
+    # 外部 daemon 及其托管 app 簇）。闲置前缀根本不需要停；在跑时 stop 经派生端口寻址只收本簇。
+    if _pids_using(server_cli) or _pids_using(bin_dir / _exe_name("oxmgr")):
+        print("检测到运行中的 server 实例 — 先停本簇（重装不覆盖 etc/ 凭据）")
+        try:
+            subprocess.run([str(server_cli), "stop", str(prefix_p)], capture_output=True, timeout=30, check=False)
+        except subprocess.TimeoutExpired:
+            print("  ⚠ 旧实例 stop 超时（可能是无生命周期的旧二进制）— 继续重装", file=sys.stderr)
+    _copy_with_kill(src_bin, server_cli)  # server 不品牌化（D3）
+    # 生命周期冒烟：out/ 可能是无 init/start 子命令的旧构建（旧二进制会把未知参数当守护参数直启）
+    ver_line: str | None = None
+    try:
+        probe = subprocess.run([str(server_cli), "version"], capture_output=True, text=True, timeout=10, check=False)
+        if probe.returncode == 0:
+            out_lines = (probe.stdout or "").strip().splitlines()
+            ver_line = out_lines[0] if out_lines else "version ok"
+    except subprocess.TimeoutExpired:
+        pass
+    if ver_line is None:
+        print(f"错误: {server_cli} 生命周期冒烟失败（version 非零/超时——out/ 疑为无生命周期旧构建）— 先 build server 刷新后重跑 deploy", file=sys.stderr)
+        sys.exit(2)
+    print(f"  二进制就绪: {ver_line}")
+
+    # oxmgr 随部署锁定版本（D-H13，同 host 待遇）
+    oxmgr_src = shutil.which("oxmgr")
+    if oxmgr_src is not None:
+        _copy_with_kill(oxmgr_src, bin_dir / _exe_name("oxmgr"))
+        ov = subprocess.run([oxmgr_src, "--version"], capture_output=True, text=True, check=False)
+        print(f"  oxmgr 已打包: {ov.stdout.strip() or ov.stderr.strip() or '?'}")
+    else:
+        print("错误: PATH 未找到 oxmgr — 未打包（运行时需它拉起进程簇）。安装: 下载 GitHub Releases 预编译 Rust 二进制（含 sha256/asc 校验，https://github.com/Vladimir-Urik/OxMgr/releases），或构建 oxmgr-src 后放 ~/.local/bin，再重跑 deploy server", file=sys.stderr)
+
+    # etc 模板——已存在不覆盖（PIT-160；init 同样幂等，双保险）
+    etc_dir = prefix_p / "etc"
+    etc_dir.mkdir(parents=True, exist_ok=True)
+    src_etc = src_root / "etc"
+    for f in sorted(src_etc.iterdir()) if src_etc.is_dir() else []:
+        if not f.is_file():
+            continue
+        if (etc_dir / f.name).exists():
+            print(f"  etc/{f.name} 已存在—保留（PIT-160）")
+        else:
+            shutil.copy2(f, etc_dir / f.name)
+            print(f"  etc/{f.name}: 模板落地")
+
+    # web 整树平移（caddy 静态 root——绝对路径由 init 写进 oxfile/Caddyfile）
+    dst_web = prefix_p / "web"
+    if dst_web.exists():
+        shutil.rmtree(dst_web)
+    shutil.copytree(src_web, dst_web)
+    (prefix_p / "run").mkdir(parents=True, exist_ok=True)
+
+    # init 幂等渲染：etc/Caddyfile + run/oxfile.toml（server+caddy 两条目）+ secret 自举（0600）
+    # SFU 端口/公告隔离：部署前 export MEDIASERVO_SFU_PORT / MEDIASERVO_SFU_ANNOUNCED_IP，init 烘进 oxfile env
+    _run_or_exit([str(server_cli), "init", str(prefix_p)])
+
+    print(f"server 已部署到 {prefix}")
+    print("  bin/    mediaservo-server（不品牌化——D3）+ oxmgr（D-H13 锁定）")
+    print("  etc/    server/devices/accounts.yaml + Caddyfile + secret（重部署保留既有——PIT-160）")
+    print("  web/    前端交付物整树平移（caddy 静态 root）")
+    print("  run/    oxfile.toml + oxmgr/（OXMGR_DATA_DIR——C32 隔离）+ logs/")
+    print("⚠ accounts.yaml 为 dev 占位模板（admin123 等）——裸机启动将 fail-fast（C35 守卫）:")
+    print('    生产: export MEDIASERVO_ADMIN_PASSWORD=*** 后删 etc/accounts.yaml 重跑本 deploy')
+    print('    联调: run/oxfile.toml server 条目 [apps.env] 加 MEDIASERVO_ALLOW_DEV_CREDENTIALS = "1"')
+    print("下一步（实例目录命令, 本 CLI 运行分支已退役——C39）:")
+    print(f"  启动:   {server_cli} start {prefix}（仅后端: 加 --no-web；前端面过渡可用 mediaservo run web）")
+    print(f"  探测:   {server_cli} status {prefix}（退出码 0/1/2）| doctor {prefix}")
+    print(f"  开机锚点（操作方步骤, 一次性）: {server_cli} startup on {prefix}")
+
 
 def _platform_tag() -> str:
     """wheel 平台 tag（Linux x86_64 → linux_x86_64；其余平台 best-effort）。"""
@@ -731,7 +836,8 @@ def _write_version_file(dst: Path, target: str) -> None:
 
 
 def _cmd_package(args: argparse.Namespace) -> None:
-    """package <target> — dist/<brand>-host|sdk-<ver>.tar.gz 双包发布（D-H13）。
+    """package <target> — dist/<brand>-{host|server|sdk}-<ver>.tar.gz 多包发布（D-H13）。
+    server: staging 内跑 _cmd_deploy_server（bin+oxmgr/etc/web/init 幂等——与 host 同构, T20/T21）。
     host: staging 内跑 _cmd_deploy_host(staging)（Momus 裁决 b——identity 初始/oxmgr 锁定/
     etc 模板/env.sh 文件组装；build 仍无状态）+ tar 含 bin 8/oxmgr/etc/identity/run/logs/recordings。
     bindings: staging 拷贝 out/bindings（完整 SDK 布局——D241 三件套 version-full/.pc/cmake/
@@ -739,7 +845,7 @@ def _cmd_package(args: argparse.Namespace) -> None:
     staging 临时目录 → tar.gz; 包内含版本契约文件（host-version.txt / sdk-version.txt）。"""
     if sys.platform == "win32":
         print("package: Windows best-effort — 验证清单见 scripts/e2e-win-validate.ps1", file=sys.stderr)
-    pkg_name = "sdk" if args.target == "bindings" else "host"
+    pkg_name = {"bindings": "sdk", "server": "server"}.get(args.target, "host")
     ver = _workspace_version()
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
@@ -747,6 +853,8 @@ def _cmd_package(args: argparse.Namespace) -> None:
     try:
         if args.target == "host":
             _cmd_deploy_host(str(staging), args.release)  # brand 经 MEDIASERVO_BRAND 环境/已装实例推导（D266）
+        elif args.target == "server":
+            _cmd_deploy_server(str(staging))  # 同 deploy 语义整树入 staging（init 幂等落 staging）
         else:
             _cmd_deploy_bindings(str(staging), args.release)
         _write_version_file(staging, pkg_name)
@@ -831,22 +939,30 @@ def _host_runtime_hint(action: str) -> None:
     print("  开发:     target/debug/mediaservo-host init . && token issue --all . && start|stop .", file=sys.stderr)
     print("            跑前清 iceoryx2 残留: rm -rf /tmp/iceoryx2 /dev/shm/iox2_*（C25）", file=sys.stderr)
 
+def _server_runtime_hint(action: str) -> None:
+    """server 运行已移除 CLI 封装（T21——C39 与 host 同待遇）：build=编译 / deploy=安装 / 运行=实例目录命令。"""
+    print(f"{action} server 已移除 CLI 封装——请经实例目录运行:", file=sys.stderr)
+    print("  部署实例: <prefix>/bin/mediaservo-server start|stop|restart|status <prefix>（未部署: mediaservo deploy server --prefix <X>）", file=sys.stderr)
+    print("  开发:     target/debug/mediaservo-server init . && start . --no-web（前端面: dev web=vite:5173 / run web=过渡 caddy）", file=sys.stderr)
+    print("  容器（模式②③）: mediaservo up / down --env dev|prod 不变", file=sys.stderr)
+    print("  只读探测保留: mediaservo status server | logs server", file=sys.stderr)
+
+def _cmd_dev(args: argparse.Namespace) -> None:
+    """dev web — vite dev 薄透传（pnpm dev, cwd www/:5173, proxy /api /ws→9800；前台工具无 pidfile）。"""
+    _check("pnpm", "pnpm 未安装——dev web 需要（www 为 pnpm workspace，或手动 cd www && pnpm dev）")
+    _run_or_exit(["pnpm", "dev"] + list(args.rest), cwd=str(ROOT / "www"))
+
 def _cmd_start(args: argparse.Namespace) -> None:
-    """start <target> — server: 裸机 native（默认——用户裁决 B）| compose（--mode compose/--env）；host 已移除 CLI 封装（手动运行）。"""
+    """start <target> — server/host 退役→指引 exit 2（T21/C39: 实例目录命令；容器用 up）；web=过渡 caddy。"""
     target = args.target
     if target == "server":
-        mode = _resolve_mode(args, default="native")   # 默认 native（翻转：原 compose 移入 --mode compose）
-        if mode == "native":
-            _run_server_native(args)
-        else:
-            _check("docker", "安装 docker 并启动 daemon")
-            cmd = COMPOSE_BASE + (["up"] if args.foreground else ["up", "-d", "server"])
-            _run_or_exit(cmd, env=_compose_env())
+        _server_runtime_hint("start")
+        sys.exit(2)
     elif target == "host":
         _host_runtime_hint("start")
+        sys.exit(2)
     elif target == "web":
         _run_web_native()
-        sys.exit(2)
     else:  # client
         print("start client: 待实现（client 骨架阶段）", file=sys.stderr)
         sys.exit(1)
@@ -854,38 +970,14 @@ def _cmd_start(args: argparse.Namespace) -> None:
 
 def _cmd_restart(args: argparse.Namespace) -> None:
     target = args.target
-    """restart <target> — server: 默认 native（B 裁决）；--mode compose=容器重启；host 已移除 CLI 封装。"""
+    """restart <target> — web=过渡 caddy；server/host 退役→指引 exit 2（实例目录命令；容器 up/down）。"""
     if target == "web":
         _stop_web_native(allow_inactive=True)
         _run_web_native()
         return
     if target == "server":
-        mode = _resolve_mode(args, default="native")
-        if mode == "native":
-            # 停裸机（stop native 语义）+ 重启
-            pid_file = _native_runtime_dirs()[1] / "server-native.pid"
-            if pid_file.exists():
-                try:
-                    pid = int(pid_file.read_text().strip())
-                except ValueError:
-                    pid = -1
-                if pid > 0 and Path(f"/proc/{pid}").exists():
-                    print(f"重启 server: 停止裸机进程 pid={pid}")
-                    subprocess.run(["kill", str(pid)], check=False)
-                    for _ in range(4):
-                        if not Path(f"/proc/{pid}").exists():
-                            break
-                        time.sleep(0.5)
-                    if Path(f"/proc/{pid}").exists():
-                        subprocess.run(["kill", "-9", str(pid)], check=False)
-                pid_file.unlink(missing_ok=True)
-            _run_server_native(args)
-        else:
-            _check("docker", "安装 docker 并启动 daemon")
-            print("重启 server: 停止旧容器...")
-            subprocess.run(COMPOSE_BASE + ["down"], check=False, env=_compose_env())  # 无容器时忽略错误
-            _run_or_exit(COMPOSE_BASE + ["up", "-d", "server"], env=_compose_env())
-            print("✓ server 已重启（容器）")
+        _server_runtime_hint("restart")
+        sys.exit(2)
     elif target == "host":
         _host_runtime_hint("restart")
         sys.exit(2)
@@ -895,14 +987,15 @@ def _cmd_restart(args: argparse.Namespace) -> None:
 
 
 def _cmd_run(args: argparse.Namespace) -> None:
-    """run <target>: server=裸机（唯一模式——评审 H4 死参移除）| host 已移除 CLI 封装。"""
+    """run <target> — web=过渡 caddy（:8080）；server/host 退役→指引 exit 2（T21/C39）。"""
     if args.target == "server":
-        _run_server_native(args)
+        _server_runtime_hint("run")
+        sys.exit(2)
     elif args.target == "host":
         _host_runtime_hint("run")
+        sys.exit(2)
     elif args.target == "web":
         _run_web_native()
-        sys.exit(2)
     else:
         print('run client: 待实现（client 骨架阶段）', file=sys.stderr)
         sys.exit(1)
@@ -1085,35 +1178,14 @@ def _check_port_range_free(start: int, end: int, name: str) -> None:
 
 
 def _cmd_stop(args: argparse.Namespace) -> None:
-    """stop <target>: server=默认 native（B 裁决——容器全显式）；--mode both 双停 / compose 只停容器；host 已移除 CLI 封装；web=过渡态 caddy。"""
+    """stop <target> — web=过渡 caddy；server/host 退役→指引 exit 2（容器: mediaservo down）。"""
     target = args.target
     if target == "web":
         _stop_web_native()
         return
     if target == "server":
-        mode = _resolve_mode(args, default="native")
-        # ① 裸机（pid 文件驱动幂等——both/native 时）
-        if mode in ("both", "native"):
-            pid_file = _native_runtime_dirs()[1] / "server-native.pid"
-            if pid_file.exists():
-                try:
-                    pid = int(pid_file.read_text().strip())
-                except ValueError:
-                    pid = -1
-                if pid > 0 and Path(f"/proc/{pid}").exists():
-                    print(f"stop server: 停止裸机进程 pid={pid}")
-                    subprocess.run(["kill", str(pid)], check=False)
-                    for _ in range(4):
-                        if not Path(f"/proc/{pid}").exists():
-                            break
-                        time.sleep(0.5)
-                    if Path(f"/proc/{pid}").exists():
-                        subprocess.run(["kill", "-9", str(pid)], check=False)
-                pid_file.unlink(missing_ok=True)
-        # ② 容器（保留 compose stop——秒级再启语义；both/compose 时）
-        if mode in ("both", "compose"):
-            _check("docker", "安装 docker 并启动 daemon")
-            _run_or_exit(COMPOSE_BASE + ["stop", "server"])
+        _server_runtime_hint("stop")
+        sys.exit(2)
     elif target == "host":
         _host_runtime_hint("stop")
         sys.exit(2)
@@ -1213,11 +1285,13 @@ def _rm_tree(path: Path) -> None:
 
 
 def _cmd_deploy(args: argparse.Namespace) -> None:
-    """deploy <target> — bindings | host（源=out/ 组装；--prefix 必填 D4）。"""
+    """deploy <target> — bindings | host | server（源=out/ 交付树；--prefix 必填 D4；deploy 不触发构建）。"""
     if args.target == "bindings":
         _cmd_deploy_bindings(args.prefix, args.release)
     elif args.target == "host":
         _cmd_deploy_host(args.prefix, args.release)
+    elif args.target == "server":
+        _cmd_deploy_server(args.prefix)
 
 
 def _cmd_install_deprecated(args: argparse.Namespace) -> None:
@@ -1257,9 +1331,13 @@ def _cmd_clean(args: argparse.Namespace) -> None:
                         subprocess.run(["kill", "-9", str(pid)], check=False)
             etc_d, logs_d, _ = _native_runtime_dirs()
             for f in (logs_d / "server-native.pid", logs_d / "server-native.log",
-                     _out_root() / "server" / "bin" / "mediaservo-server",
-                     ROOT / "target/debug/mediaservo-server", ROOT / "target/release/mediaservo-server"):
+                      logs_d / "web-native.pid", logs_d / "web-native.log",  # 过渡 caddy 运行态（T6 漏网补清）
+                      _out_root() / "server" / "bin" / "mediaservo-server",
+                      _out_root() / "server" / "web",  # 前端交付树（T21: build web 产物随 clean 回收）
+                      ROOT / "target/debug/mediaservo-server", ROOT / "target/release/mediaservo-server"):
                 _rm_path(f)
+            for d in sorted((_out_root() / "server" / "run").glob("oxmgr*")):
+                _rm_path(d)  # out 轨演练残留 daemon 数据（C32——prefix 下的 run/ 归实例生命周期, 不在此列）
         # compose 容器（both/compose 时）
         if mode in ("both", "compose"):
             _check("docker", "安装 docker 并启动 daemon")
@@ -1606,11 +1684,15 @@ def main() -> None:
         description="MediaServo 统一构建 CLI（术语: native=裸机, compose=容器）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""三模式速查（native=裸机 compose=容器）:
-  模式① 本机原生:  build server --native → run server → status server → stop server
-  模式② 单容器生产: build server --image runtime → up --env prod → logs server --env prod（--native 并行另一套）
+  模式① 裸机交付: build server（bin/etc/web 装配）→ deploy server --prefix <X> →
+             <X>/bin/mediaservo-server init/start/stop/status/restart/doctor <X>（startup on=开机锚点）
+    快速通道: build web（仅前端→out/server/web）| dev web（vite:5173 热更, 配 start --no-web）
+             | run web（过渡独立 caddy :8080——Phase 6 后归实例进程簇）
+  模式② 单容器生产: build server --image runtime → up --env prod → logs server --env prod
   模式③ compose开发: up --env dev（热更）→ logs -f → down --env dev
-  up        = compose 部署（模式②③）；run/start = 进程（模式①：run server=裸机；start server --mode compose=容器）
-  退出码    : status/logs/stop/start —— 0=成功 1=未运行/目标缺失 2=参数错/互斥
+  退役→指引 exit 2: run/start/stop/restart server|host（C39——用实例目录命令；容器面 up/down 不变）
+  只读探测保留: status server|web / logs server / clean server
+  退出码: status/logs/stop —— 0=成功 1=未运行/目标缺失 2=参数错/退役指引
 """)
 
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1642,28 +1724,33 @@ def main() -> None:
     down_p.add_argument("--env", choices=["dev", "prod"], default=None)
     down_p.set_defaults(func=_cmd_down)
 
-    restart_p = sub.add_parser("restart", help="重启 <target>: server=裸机（默认）| compose（--mode）；host 已移除 CLI 封装（手动运行）")
+    restart_p = sub.add_parser("restart", help="重启 <target>: web=过渡 caddy；server/host 退役→指引 exit 2（<prefix>/bin/mediaservo-server restart <dir>；容器 up/down）")
     restart_p.add_argument("target", choices=["host", "server", "web"])
     _add_mode_args(restart_p)
     restart_p.set_defaults(func=_cmd_restart)
-    run_p = sub.add_parser("run", help="运行 <target> [--announced-ip IP[,IP...]]: server=裸机（唯一模式）；host 已移除 CLI 封装（手动运行）")
+    run_p = sub.add_parser("run", help="运行 <target>: web=过渡 caddy（:8080）；server/host 退役→指引 exit 2（实例命令见 <prefix>/bin/mediaservo-server -h）")
     run_p.add_argument("target", choices=["server", "host", "web"])
-    run_p.add_argument("--foreground", "-f", action="store_true", help="前台阻塞运行，输出实时透传")
-    run_p.add_argument("--release", action="store_true", help="用 target/release 二进制")
+    run_p.add_argument("--foreground", "-f", action="store_true", help="（退役遗留——server 运行分支已移除, 无效果）")
+    run_p.add_argument("--release", action="store_true", help="（退役遗留——无效果）")
     run_p.add_argument("--announced-ip", metavar="IP[,IP...]", default=None,
-                       help="裸机公告地址（覆盖自动探测——默认自动含 tun/vpn、ens 全部真实 IP，符合 PIT-143 多网卡语义）")
+                       help="（退役遗留——实例侧公告用 MEDIASERVO_SFU_ANNOUNCED_IP env）")
     run_p.set_defaults(func=_cmd_run)
 
-    start_p = sub.add_parser("start", help="启动 <target>（默认 server）: server=native（默认）| compose（--mode）；host 已移除 CLI 封装（手动运行）")
+    start_p = sub.add_parser("start", help="启动 <target>（默认 server）: server 退役→指引 exit 2（容器用 up）；host 已移除 CLI 封装；web=过渡 caddy")
     start_p.add_argument("target", nargs="?", choices=["host", "server", "web"], default="server")
     _add_mode_args(start_p)
-    start_p.add_argument("--foreground", "-f", action="store_true", help="前台阻塞（server native）")
+    start_p.add_argument("--foreground", "-f", action="store_true", help="（退役遗留——server 运行分支已移除, 无效果）")
     start_p.set_defaults(func=_cmd_start)
 
-    stop_p = sub.add_parser("stop", help="停止 <target>: server=原生（默认）| --mode both 双停；host 已移除 CLI 封装（手动运行）")
+    stop_p = sub.add_parser("stop", help="停止 <target>: server/host 退役→指引 exit 2（实例命令 stop <dir>；容器 mediaservo down）；web=过渡 caddy")
     stop_p.add_argument("target", choices=["host", "server", "web"])
     _add_mode_args(stop_p, allow_both=True)
     stop_p.set_defaults(func=_cmd_stop)
+
+    dev_p = sub.add_parser("dev", help="开发服务透传: web=vite dev（:5173, proxy /api /ws→9800——配 mediaservo-server start --no-web 组开发栈；前台工具无 pidfile）")
+    dev_p.add_argument("target", choices=["web"])
+    dev_p.add_argument("rest", nargs=argparse.REMAINDER, help="透传参数（-- 之后, 如 -- --port 5174）")
+    dev_p.set_defaults(func=_cmd_dev)
 
     logs_p = sub.add_parser("logs", help="日志 [<svc>] [--follow] [--mode native|compose]: server=裸机日志（默认）| compose 容器日志 | host 日志")
     logs_p.add_argument("target", nargs="?", choices=["server", "host"], default="server")
@@ -1687,18 +1774,18 @@ def main() -> None:
     sub.add_parser("test", help="workspace 测试（排除 mediaservo-server）")
     sub.add_parser("ci", help="CI 全链: fmt → clippy → test → e2e sfu")
 
-    deploy_p = sub.add_parser("deploy", help="部署 <target>（有状态：identity 幂等/oxmgr/systemd）：host|bindings——源=out/；--prefix 必填（/opt 需 root）")
-    deploy_p.add_argument("target", choices=["bindings", "host"])
-    deploy_p.add_argument("--prefix", default=None, help="部署前缀（必填——车端 /opt/mediaservo-host）")
+    deploy_p = sub.add_parser("deploy", help="部署 <target>（有状态落地——deploy 不触发构建, 源=out/ 交付树）：host|server|bindings；--prefix 必填（/opt 需 root）")
+    deploy_p.add_argument("target", choices=["bindings", "host", "server"])
+    deploy_p.add_argument("--prefix", default=None, help="部署前缀（必填——host: /opt/mediaservo-host | server: /opt/mediaservo-server | bindings: /opt/mediaservo-sdk）")
     deploy_p.add_argument("--release", action="store_true", help="部署 release 组装产物")
     deploy_p.set_defaults(func=_cmd_deploy)
     # D1: install 隐藏 prompt（不 alias——语义不同: 源=out/ 交付布局 + --prefix 必填）
     install_p = sub.add_parser("install", help="已改名 deploy（提示迁移后退出 exit 2）")
     install_p.add_argument("args", nargs=argparse.REMAINDER, help="吞掉旧调用点透传参数（T3 迁移前 msrtc.sh 仍注入 --prefix 等）——仅提示改名")
     install_p.set_defaults(func=_cmd_install_deprecated)
-    package_p = sub.add_parser("package", help="打包 <target>: host（车端包）| bindings（SDK 包）→ dist/mediaservo-<target>-<ver>.tar.gz（D-H13 双包发布, 含版本契约文件）")
-    package_p.add_argument("target", choices=["host", "bindings"])
-    package_p.add_argument("--brand", default="", help="品牌包名（dist/<brand>-host-<ver>.tar.gz；缺省 mediaservo-host-<ver>）")
+    package_p = sub.add_parser("package", help="打包 <target>: host|server（交付包）| bindings（SDK 包）→ dist/<brand>-<host|server|sdk>-<ver>.tar.gz（D-H13 多包发布, 含版本契约文件）")
+    package_p.add_argument("target", choices=["host", "server", "bindings"])
+    package_p.add_argument("--brand", default="", help="品牌包名（dist/<brand>-<target>-<ver>.tar.gz；缺省 mediaservo）")
     package_p.add_argument("--release", action="store_true", help="打包 release 产物（target/release, 配合 build --release）")
     package_p.set_defaults(func=_cmd_package)
     clean_p = sub.add_parser("clean", help="清理 <target>: all|server|host|client（默认 all；server=原生清（默认）| --mode both 双清）")
