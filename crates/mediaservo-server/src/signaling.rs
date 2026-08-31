@@ -276,8 +276,11 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     // G3 会话身份: JWT 角色 claim 解析结果（RoomJoin 设备认证成功后覆盖为 Device）。
     let mut account_identity: Option<AccountIdentity> = None;
 
-    // ── JWT auth (tried first; PSK is fallback) ───────────────────────
-    if !authenticated {
+    // ── JWT auth (verified whenever a token is presented; PSK is fallback) ──
+    // ⚠ 不能用 `if !authenticated` 拦——psk 未配置时 authenticated 预置 true，会把提交的
+    // token 整个跳过：账号身份永不建立 → 会话退化为 Legacy → produce/data 域授权门被旁路
+    // （2026-08-31 e2e_sfu role_enforcement/data_domain 双失败根因，测试假绿暴露）。
+    if !authenticated || jwt_token.is_some() {
         if let (Some(jwt_auth), Some(token)) = (&server.jwt_auth, &jwt_token) {
             match jwt_auth.verify(token) {
                 Ok(claims) => {

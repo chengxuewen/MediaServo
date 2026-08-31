@@ -50,7 +50,7 @@ async fn make_state(config_path: String) -> (AdminState, String) {
         psk_state: Arc::clone(&psk_state),
         config_path,
         device_registry: Arc::new(devices::DeviceRegistry::empty()),
-        devices_path,
+        devices_path: devices_path.clone(),
         sfu_manager: sfu,
     };
     (state, devices_path)
