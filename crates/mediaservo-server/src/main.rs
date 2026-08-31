@@ -8,8 +8,66 @@ use std::time::Duration;
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use tower_http::timeout::TimeoutLayer;
 
-/// Entry point — install panic hook, then run server with graceful shutdown.
+mod lifecycle;
+
+/// 用法表——品牌 replace 复用 host.rs USAGE 模式（T15；默认品牌 mediaservo-server）。
+const USAGE: &str = "用法: mediaservo-server <init|start|stop|restart|status|doctor|logs|startup|monit|ps|run|version> [<dir>]（目录为位置参数，默认 .server/）
+子命令:
+  init [<dir>]       生成实例：etc/{server,devices,accounts}.yaml + Caddyfile + run/oxfile.toml
+                     + PSK/JWT secret 自举（0600 幂等；compose entrypoint 逻辑归位——双轨同语义）
+  start [<dir>] [--no-web]
+                     oxmgr apply 拉起进程簇（mediaservo-server + caddy web）；端口竞争=交互接管/
+                     非交互退出；--no-web=仅后端（dev 形态）；caddy 不在 PATH → warn 自动降级
+  stop [<dir>]       全簇停止（oxmgr stop+delete + 实例 daemon 收敛）
+  restart [<dir>] [--no-web]  stop 后重新 apply
+  status [<dir>]     进程表 + /ready 探针列（退出码 0 健康 / 1 降级 / 2 未运行或目录非法）
+  doctor [<dir>]     环境诊断（oxmgr/caddy PATH、yaml、web dist、announced IP；退出码=失败数）
+  logs [server|web|all] [<dir>]  oxmgr logs 转发（支持 -f/--lines 透传）
+  startup on|off|status [<dir>]  开机锚点（systemd user unit 拉实例 daemon，全局唯一）
+  monit              oxmgr TUI（进程/CPU/RAM/日志流）
+  ps                 oxmgr 进程列表
+  run                【守护模式】现 mediaservo-server 启动行为原样（--config 等）；
+                     无参/未知参数 → 回落本模式——既有 systemd/compose/脚本直启零破坏
+  version            版本信息
+
+示例:
+  mediaservo-server init /opt/mediaservo && mediaservo-server start /opt/mediaservo
+  mediaservo-server --config /etc/mediaservo/server.yaml    守护直启（兼容旧链）
+  mediaservo-server -h                            本帮助";
+
+fn print_usage() {
+    println!("{}", USAGE.replace("mediaservo-server", &lifecycle::templates::server_product()));
+}
+
+/// Entry point — 单二进制双角色派发（T15）。管理面子命令 → lifecycle；
+/// `run` → 守护（显式形态）；无参/`--config`/未知 → 守护回落（向后兼容硬门：
+/// systemd/compose/docker 直启链行为逐字节不变）。
 fn main() {
+    let argv: Vec<String> = std::env::args().collect();
+    let first = argv.get(1).map(String::as_str);
+    if matches!(first, Some("-h") | Some("--help")) {
+        print_usage();
+        return;
+    }
+    if let Some(cmd) = first.filter(|c| lifecycle::is_lifecycle_cmd(c)) {
+        let code = lifecycle::dispatch(cmd, &mut argv.iter().skip(2).cloned());
+        std::process::exit(code);
+    }
+    // `run` = 显式守护形态：剔除该 token，其余 argv 与直启同构（--config 落回 args[1]）
+    let daemon_argv = if first == Some("run") {
+        let mut v: Vec<String> = Vec::with_capacity(argv.len().saturating_sub(1));
+        v.extend(argv.first().cloned());
+        v.extend(argv.iter().skip(2).cloned());
+        v
+    } else {
+        argv
+    };
+    run_daemon(daemon_argv);
+}
+
+/// 守护模式 = 原 main 本体（panic hook + runtime + run_server）。argv 透传
+/// （`--config` 判定从 env::args() 改为显式入参，其余逻辑零改动）。
+fn run_daemon(argv: Vec<String>) {
     // ── Panic boundary ───────────────────────────────────────────────────────
     std::panic::set_hook(Box::new(|info| {
         let location = info
@@ -35,7 +93,7 @@ fn main() {
         .expect("failed to build tokio runtime");
 
     let result =
-        rt.block_on(async { std::panic::AssertUnwindSafe(run_server()).catch_unwind().await });
+        rt.block_on(async { std::panic::AssertUnwindSafe(run_server(argv)).catch_unwind().await });
 
     match result {
         Ok(Ok(())) => {}
@@ -51,7 +109,7 @@ fn main() {
     }
 }
 
-async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
+async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
     tracing_subscriber::fmt()
         .json()
@@ -64,7 +122,7 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     // 默认：相对二进制路径 bin/../etc/server.yaml（build server 组装时生成）
     // 容器 fallback：/opt/mediaservo/etc/server.yaml（旧路径兜底）
     let config_path = {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = argv;
         if args.len() > 2 && args[1] == "--config" {
             args[2].clone()
         } else {
