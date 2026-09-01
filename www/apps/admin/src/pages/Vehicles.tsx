@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getVehicleStatus, type StatusReport } from '../api/client';
 import './Vehicles.css';
+import { Car } from 'lucide-react';
 
 function fmtUptime(secs: number): string {
   if (secs < 60) return `${secs}s`;
@@ -53,7 +54,7 @@ export default function Vehicles() {
           {vehicles.map(({ room_id, report }) => (
             <div key={room_id} className="vehicle-card">
               <div className="vehicle-header">
-                <span className="vehicle-name">🚗 {room_id}</span>
+                <span className="vehicle-name"><Car size={14} /> {room_id}</span>
                 <span className={`vehicle-signal ${report.signal.remote_connected ? 'ok' : 'down'}`}>
                   <span className="status-dot" />
                   {report.signal.remote_connected ? 'signal ok' : 'signal lost'}

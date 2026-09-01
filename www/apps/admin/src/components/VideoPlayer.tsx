@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import { SfuConsumerClient, type StreamMetrics } from '../sfu/sfu-client';
 import './VideoPlayer.css';
+import { X, VolumeX, Pause, Maximize, Zap, Package, Clapperboard } from 'lucide-react';
 
 interface Props {
   roomId: string;
@@ -96,39 +97,37 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
         <div className="vp-top-bar" style={{ background: isDisconnected ? '#c0392b' : '#2c3e50' }}>
           <span className="vp-status-dot" style={{ background: statusColor }} />
           <span className="vp-title">{roomId}</span>
-          {metrics && !isDisconnected && (
+          {!isTile && metrics && !isDisconnected && (
             <span className="vp-bitrate">{metrics.resolution} · {Math.round(metrics.bitrate)}Kbps</span>
           )}
-          <button className="vp-close" onClick={onClose}>✕</button>
+          <button className="vp-close" onClick={onClose}><X size={14} /></button>
         </div>
 
         {/* Video */}
         <div className="vp-body">
           <video ref={videoRef} autoPlay playsInline muted />
           {status === 'connecting' && <div className="vp-status-msg">Connecting...</div>}
-          {isDisconnected && <div className="vp-status-msg error">Signal Lost</div>}
+          {isTile && (status === 'connected' || status === 'playing') && (
+            <MiniStatsCard status={status} roomId={roomId} metrics={metrics} onExpand={() => setShowStats(true)} />
+          )}
+          {isDisconnected && <DisconnectedOverlay status={status} />}
         </div>
 
         {/* Controls (hover) */}
         {showControls && !isDisconnected && (
           <div className="vp-controls">
-            <button title="Mute">🔇</button>
-            <button title="Pause">⏸</button>
-            <button title="Fullscreen" onClick={() => videoRef.current?.requestFullscreen()}>⛶</button>
+            <button title="Mute"><VolumeX size={16} /></button>
+            <button title="Pause"><Pause size={16} /></button>
+            <button title="Fullscreen" onClick={() => videoRef.current?.requestFullscreen()}><Maximize size={16} /></button>
           </div>
         )}
 
-        {/* Metrics bar */}
-        {metrics && !isDisconnected && (
+        {/* Metrics bar — modal-only（tile 速览入口已并入左上 mini 卡；断联展示统一走遮罩） */}
+        {!isTile && metrics && !isDisconnected && (
           <div className="vp-metrics-bar" onClick={() => setShowStats(!showStats)}>
-            <span>⚡{metrics.rtt}ms</span>
-            <span>📦{metrics.packetLoss}%</span>
-            <span>🎬{metrics.fps}fps</span>
-          </div>
-        )}
-        {isDisconnected && (
-          <div className="vp-metrics-bar disconnected">
-            <span>⚠️ Connection Lost</span>
+            <span><Zap size={12} /> {metrics.rtt}ms</span>
+            <span><Package size={12} /> {metrics.packetLoss}%</span>
+            <span><Clapperboard size={12} /> {metrics.fps}fps</span>
           </div>
         )}
 
@@ -164,9 +163,42 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
               <div><label>平均编码耗时</label><span>{metrics.avgEncodeMs != null ? `${metrics.avgEncodeMs.toFixed(1)}ms/帧` : '—'}</span></div>
               <div><label>CPU/GPU</label><span>待 P3</span></div>
             </div>
-            <button className="vp-stats-close" onClick={() => setShowStats(false)}>✕</button>
+            <button className="vp-stats-close" onClick={() => setShowStats(false)}><X size={14} /></button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function MiniStatsCard({ status, roomId, metrics, onExpand }: {
+  status: ConnectionStatus; roomId: string; metrics: StreamMetrics | null; onExpand: () => void;
+}) {
+  // T1-a 消解：connected 即渲染，不等首个 getStats tick（2s）；metrics null 时字段占位。
+  const fmtKbps = (k: number) => (k >= 1000 ? `${(k / 1000).toFixed(1)}M` : `${Math.round(k)}K`);
+  const live = status === 'playing';
+  return (
+    <div className="vp-mini-stats" onClick={(e) => { e.stopPropagation(); onExpand(); }} title="点击展开详细统计">
+      <span className={`ms-dot ms-${status}`} />
+      <span className="ms-state">{live ? 'LIVE' : '…'}</span>
+      <span className="ms-name">{roomId}</span>
+      <span className="ms-vals">
+        {metrics && live
+          ? `${metrics.fps}fps · ${metrics.resolution} · ${fmtKbps(metrics.bitrate)} · ${metrics.rtt}ms`
+          : '—'}
+      </span>
+    </div>
+  );
+}
+
+function DisconnectedOverlay({ status }: { status: ConnectionStatus }) {
+  // 双态语义（T7）：error=建联失败 / disconnected=流中断——判障一眼分流。
+  const failed = status === 'error';
+  return (
+    <div className="vp-discon-overlay">
+      <div className="vp-discon-card">
+        <p className="vp-discon-title">{failed ? '连接失败' : '连接已断开'}</p>
+        <p className="vp-discon-sub">{failed ? '无法建立 WebRTC 连接' : '视频流已中断'}</p>
       </div>
     </div>
   );

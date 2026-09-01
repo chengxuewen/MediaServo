@@ -1409,6 +1409,8 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
   即时=host 集群重启；根治=streamer 收包/RTCP 超时检测→会话重放（与 respawn 同批另立项）。
   判断媒体路径以 消费出画 + sfu/rooms producer 计数 为准。
 
+**补充证据（2026-09-01 play-layout-stats 轮）**: 非 SIGKILL 场景同样触发——server 经 build:deploy 迁移重启后，host streamer produce 会话不重放（房间无 producer 而 streamer 自报 published、bytes_sent 增长），`msrtc-host restart out/host` 恢复。判定法固化：`GET /api/admin/sfu/rooms` 查目标房间 producer 存在性 × 对照 streamer out.log `streamer ready ... room=`。
+
 ## PIT-169: su-exec 在 Ubuntu 无包——e56650c 起 runtime 镜像从未构建成功 (2026-08-31)
 - 降权改 `setpriv --reuid=$(id -u ...) --regid=$(id -g ...) --clear-groups`（util-linux 自带，
   exec 不 fork，PID-1 保真）；教训：改 Dockerfile 运行层必须真构建验证。
@@ -1444,3 +1446,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: 见 D270-b——采纳 mediasoup-client + server RPC 式信令面（协议契约变更走 api-interface-design）；或最小修：SDP 组装参数化（PT/fingerprint/candidates 全从信令注入）。
 - **验证**: `grep -c "m=video 7 UDP" www/apps/admin/src/sfu/sfu-client.ts` 修复后 = 0；codec 增删（如 VP9/SVC profile）不再需要三方同步改字符串模板。
 - **附带发现（b 轮处理）**: `console.log` 观测残留 L36/261/265/267/271（PIT-64 调试期产物，违反 TS 规约"生产禁 console.log"）；重连无退避（`maxRetries=5` 固定节奏，C15 重试纪律待对齐）。
+
+## PIT-174: Playwright 拦不住 WebSocket——route abort/continue 对 WS 握手无效或崩浏览器（2026-09-01）
+- **症状**: 验收断联 failed 态时 `page.route('**/ws*', r=>r.abort())` 不生效（WS 握手不被 http route 拦截）；改 catch-all `route('**/*')+continue()` 后页面/浏览器整个关闭（Target closed）。
+- **根因**: Playwright 的 `page.route` 只覆盖 HTTP 资源请求；WebSocket 握手是 Upgrade GET，普通 route 不拦（1.48+ 有实验性 `routeWebSocket`）。catch-all + continue 对 WS 走 fallback 路径触发崩溃（上游已知缺陷）。
+- **解法**: **构造注入法**——`addInitScript` 包一层 `window.WebSocket`，按标志位（`window.__wsFail`）+ URL 后缀（`/ws`）精准抛错，其它 WS 通道（admin events）不碰；`new WebSocket` throw 沿 `connect().catch` 走真实 error 状态机，验的是产品代码路径而非 mock。
+- **验证**: a14 独立脚本 PASS（截图 t11-failed.png「连接失败」）；同类需求（网络断开/超时注入）一律先想构造注入，再想 route。
+- **附带**: 3 个 context 并发的长跑脚本崩溃假象多源于此；验收脚本按 context 拆小文件跑。

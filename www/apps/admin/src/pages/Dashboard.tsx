@@ -9,8 +9,13 @@ import type { StatsResponse, DeviceSnapshot, StreamSnapshot } from '../api/clien
 import StreamDetail from '../components/StreamDetail';
 import VideoPlayer from '../components/VideoPlayer';
 import './Dashboard.css';
+import { ChevronRight, Play, Video, Eye } from 'lucide-react';
 
+// 列数控制（play-layout-stats）：默认 3、最多 4，localStorage 持久化 + 脏值防御
 const MAX_PLAYING = 4;
+const PLAY_COLS_KEY = "mediaservo_play_cols";
+const MAX_COLS = 4;
+const DEFAULT_COLS = 3;
 
 export default function Dashboard() {
   const { devices, loading, error, refetch: refetchDevices } = useDevices();
@@ -21,6 +26,15 @@ export default function Dashboard() {
   // multi-stream P3: 勾选集（roomId = device_stream，与 deleteRoom 约定一致）+ 播放中列表
   const [selectedRooms, setSelectedRooms] = useState<Set<string>>(new Set());
   const [playingRooms, setPlayingRooms] = useState<string[]>([]);
+  const [cols, setCols] = useState<number>(() => {
+    let v: number;
+    try { v = Number(localStorage.getItem(PLAY_COLS_KEY)); } catch { v = NaN; }
+    return Number.isInteger(v) && v >= 1 && v <= MAX_COLS ? v : DEFAULT_COLS;
+  });
+  const applyCols = (n: number) => {
+    setCols(n);
+    try { localStorage.setItem(PLAY_COLS_KEY, String(n)); } catch { /* 无痕降级（隐私模式） */ }
+  };
 
   const fetchStats = useCallback(async () => {
     try { setStats(await getStats()); } catch { /* ignore */ }
@@ -95,7 +109,7 @@ export default function Dashboard() {
         <StatsCard label="Devices" value={devices.length} />
         <StatsCard label="Streams" value={totalStreams} />
         <StatsCard label="Consumers" value={totalConsumers} />
-        <StatsCard label="Uptime" value={stats ? Math.floor(stats.uptime_seconds / 3600) : '-'} unit="h" />
+        <StatsCard label="Peers" value={stats?.total_peers ?? '-'} />
       </div>
 
       <h2 className="section-title">Active Devices</h2>
@@ -130,18 +144,28 @@ export default function Dashboard() {
         />
       )}
       {playingRooms.length > 0 && (
-        <div className="video-grid">
-          {playingRooms.map((roomId) => (
-            <VideoPlayer
-              key={roomId}
-              roomId={roomId}
-              serverUrl={wsServerUrl()}
-              token={localStorage.getItem('mediaservo_admin_token') || ''}
-              variant="tile"
-              onClose={() => setPlayingRooms(prev => prev.filter(r => r !== roomId))}
-            />
-          ))}
-        </div>
+        <>
+          <div className="video-toolbar">
+            <span className="vt-label">列数</span>
+            {[1, 2, 3, 4].map((n) => (
+              <button key={n} className={n === cols ? "vt-btn active" : "vt-btn"} aria-pressed={n === cols} onClick={() => applyCols(n)}>
+                {n}
+              </button>
+            ))}
+          </div>
+          <div className="video-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+            {playingRooms.map((roomId) => (
+              <VideoPlayer
+                key={roomId}
+                roomId={roomId}
+                serverUrl={wsServerUrl()}
+                token={localStorage.getItem('mediaservo_admin_token') || ''}
+                variant="tile"
+                onClose={() => setPlayingRooms(prev => prev.filter(r => r !== roomId))}
+              />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
@@ -166,12 +190,12 @@ function DeviceGroup({ device, canManage, expanded, selectedRooms, onToggle, onS
   return (
     <div className="device-group">
       <div className="device-header" onClick={onToggle}>
-        <span className={`tree-icon ${expanded ? 'expanded' : ''}`}>▶</span>
+        <span className={`tree-icon ${expanded ? 'expanded' : ''}`}><ChevronRight size={12} /></span>
         <span className="device-name">{device.device_id}</span>
         <StatusBadge status={status} />
         <span className="device-stream-count">{device.streams.length} streams</span>
         <button className="btn-play" onClick={(e) => { e.stopPropagation(); onPlaySelected(); }}>
-          ▶ {anySelected ? 'Watch Selected' : 'Play All'}
+          <Play size={12} /> {anySelected ? 'Watch Selected' : 'Play All'}
         </button>
         {canManage && (
           <label className="stream-select-all" onClick={(e) => e.stopPropagation()}>
@@ -193,11 +217,11 @@ function DeviceGroup({ device, canManage, expanded, selectedRooms, onToggle, onS
             return (
               <div key={stream.stream_id} className="stream-item" onClick={() => onSelectStream(stream)} style={{ cursor: 'pointer' }}>
                 <span className="stream-dot" style={{ background: stream.online ? '#27ae60' : '#95a5a6' }} title={stream.online ? 'online' : 'offline'} />
-                <span className="stream-name">📹 {stream.stream_id}</span>
+                <span className="stream-name"><Video size={14} /> {stream.stream_id}</span>
                 <span className="consumer-count">{stream.consumers.length} viewers</span>
                 <div className="consumer-list">
                   {stream.consumers.map((c) => (
-                    <span key={c.peer_id} className="consumer-tag">👁 {c.peer_id}</span>
+                    <span key={c.peer_id} className="consumer-tag"><Eye size={12} /> {c.peer_id}</span>
                   ))}
                 </div>
                 <label className="stream-select" onClick={(e) => e.stopPropagation()}>

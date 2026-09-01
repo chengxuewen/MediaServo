@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import './Modal.css';
+import { X } from 'lucide-react';
 
 interface Props {
   title: string;
@@ -14,7 +15,7 @@ export default function Modal({ title, children, onClose }: Props) {
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{title}</h3>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <button className="close-btn" onClick={onClose}><X size={16} /></button>
         </div>
         <div className="modal-body">{children}</div>
       </div>

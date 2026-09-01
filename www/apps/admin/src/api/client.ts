@@ -81,7 +81,7 @@ export interface Consumer { peer_id: string; connected_since: string; }
 export interface StreamSnapshot { stream_id: string; consumers: Consumer[]; online: boolean; }
 export interface DeviceSnapshot { device_id: string; online_since: string; streams: StreamSnapshot[]; }
 export interface DeviceListResponse { devices: DeviceSnapshot[]; total_devices: number; }
-export interface StatsResponse { active_rooms: number; connected_peers: number; uptime_seconds: number; }
+export interface StatsResponse { active_rooms: number; total_peers: number; active_connections: number; }
 
 // H3: SFU 房间摘要（音频会议面板数据源）。
 export interface SfuRoom {

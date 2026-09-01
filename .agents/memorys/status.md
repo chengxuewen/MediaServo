@@ -615,3 +615,20 @@ install                        → 改名提示 + exit 2（退役）
 - **演练暴露的既有项（未动，报主）**：`_E2E_SUITES` 未定义（cli e2e NameError，HEAD 存量）；
   `oxmgr-host-...-MediaServo-install-host.service`（enabled，指向已不存在的旧树——开机噪音）；
   init 端口快照语义（改进项 init --port 未做）
+
+### 2026-09-01: play-layout-stats — 网格列数/全宽/mini stats/遮罩/lucide（验收 16/16 绿）
+
+| 项 | 状态 | 说明 |
+|----|------|------|
+| ① 列数选择器 | ✅ | 默认 3/上限 4（产品裁决），localStorage `mediaservo_play_cols` + 脏值防御；F5 持久实测 |
+| ② 全宽自适应 | ✅ | `.dashboard` 960px 锁除；2560 视口 grid 2312=可用宽 100%；tile aspect 裁切连带修复（16:9 归 vp-body） |
+| ③ mini stats 常驻卡 | ✅ | tile 左上 1 行 connected 即显（T+16ms 实测）；点击展开大面板（滚动化不遮死）；tile 底部 bar 退役、✕ 解禁 |
+| ③ 断联遮罩双态 | ✅ | 「连接失败/无法建立 WebRTC 连接」vs「连接已断开/视频流已中断」双态实盘（A9+A14）；遮罩盖画面不盖 top-bar |
+| ④ lucide 全站 | ✅ | 32 处 emoji→SVG 零残留；bundle +12KB gzip+3KB |
+| Uptime→Peers 卡 | ✅ | T1 定性改判：server 无 uptime 源、前端契约臆造（StatsResponse 三字段对齐 server 实况）；用户裁决换 Peers |
+| encoder_status 断链 | 📋 另立项 | **断点=host streamer 算了从不发**（证据链全表见 evidence/t8-deferred.md）——~10 行 Rust 即通，server 转发/web 合并/enum 全就位；挂 D270 线前置小项 |
+| 验收 | ✅ | 16/16（t11-results.json + 4 截图 + look_at 视觉复核）；Momus 两轮 0 BLOCKER |
+
+- 过程事故：开局撞 PIT-168 型黑洞（server 迁移致 streamer 会话死、房间无 producer）→ `msrtc-host restart out/host` 恢复——**PIT-168 触发面扩展：SIGKILL 之外，server 重建同样**；A14 验证法沉淀为 PIT-174（playwright 拦不了 WS，用构造注入）。
+- 提交：子模块 `feat(admin)`（www 12 文件 + 记忆）；主仓 gitlink+记忆+计划四件套+evidence+roadmap（C41 合规）。
+- 下一步衔接：D270-a 内包化（sfu-client→packages/mediaservo-sfu，独立小轮禁止混入本轮，范围外注已锁）。

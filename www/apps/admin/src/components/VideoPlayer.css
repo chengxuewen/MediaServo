@@ -56,7 +56,7 @@
 
 /* Stats panel */
 .vp-stats-panel {
-  position: absolute; right: 8px; top: 40px; width: 280px;
+  position: absolute; right: 8px; top: 40px; width: min(280px, 62%); max-height: calc(100% - 84px); overflow-y: auto;
   background: rgba(0,0,0,.55); border-radius: 8px; padding: 1rem;
   backdrop-filter: blur(2px); /* v2: 更透明 + 微模糊, 视频帧可见但文字仍可读 */
   color: #ccc; font-size: .8rem; z-index: 10;
@@ -82,4 +82,35 @@
 .video-player.tile .vp-body video {
   width: 100%; height: 100%; object-fit: contain;
 }
-.video-player.tile .vp-close { display: none; }
+/* tile ✕ 可见可关（play-layout-stats T5：原 display:none 规则删除，✕ 恢复） */
+
+
+/* mini stats 常驻卡（tile-only，T1-a/b 消解：connected 即显、1 行不遮主体） */
+.vp-mini-stats {
+  position: absolute; left: 6px; top: 6px; z-index: 10;
+  display: flex; align-items: center; gap: 6px;
+  max-width: calc(100% - 12px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 3px 8px; border-radius: 4px;
+  background: rgba(0,0,0,.35); backdrop-filter: blur(2px);
+  color: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+  cursor: pointer;
+}
+.vp-mini-stats:hover { background: rgba(0,0,0,.55); }
+.ms-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.ms-dot.ms-connected, .ms-dot.ms-playing { background: #27ae60; }
+.ms-dot.ms-connecting { background: #f39c12; }
+.ms-name { opacity: .85; overflow: hidden; text-overflow: ellipsis; }
+.ms-vals { color: #cfe3ff; }
+
+/* 断联遮罩（T7 双态）：盖画面区不盖 top-bar——✕/重开路径保持可点 */
+.vp-discon-overlay {
+  position: absolute; inset: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.5);
+}
+.vp-discon-card {
+  border: 1px solid rgba(231,76,60,.55); background: rgba(80,20,20,.85); border-radius: 8px;
+  padding: 12px 22px; text-align: center; max-width: 80%;
+}
+.vp-discon-title { color: #ff8a80; font-size: 1rem; font-weight: 600; }
+.vp-discon-sub { color: rgba(255,160,150,.75); font-size: .75rem; margin-top: 4px; }

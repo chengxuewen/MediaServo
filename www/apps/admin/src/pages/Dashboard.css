@@ -1,4 +1,4 @@
-.dashboard { max-width: 960px; }
+/* play-layout-stats: 解除 960px 锁，自适应全宽（列表区如需控宽见预案 .device-list） */
 
 .stats-bar { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
 
@@ -39,15 +39,31 @@
 .error { color: #e74c3c; }
 .btn-play { padding: .25rem .5rem; font-size: .75rem; background: #e74c3c; color: #fff; border: none; border-radius: 4px; cursor: pointer; margin-left: auto; } .btn-play:hover { background: #c0392b; }
 
-/* multi-stream P3: 多路播放网格（2×2，MAX_PLAYING=4） */
+/* multi-stream P3 + play-layout-stats: 多路播放网格（列数 inline 控制，此处为兜底 3 列）
+   裁切修复：16:9 归 .vp-body（VideoPlayer.css），整卡不再锁 aspect 致底部溢出 */
 .video-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   padding: 12px 0;
 }
-.video-grid .video-player-overlay {
-  aspect-ratio: 16/9;
+.video-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 12px;
+  font-size: 0.8rem;
+  color: #888;
+}
+.video-toolbar .vt-label { margin-right: 2px; }
+.video-toolbar .vt-btn {
+  width: 28px; height: 28px;
+  border: 1px solid #d8dbe0; background: #fff; color: #555;
+  border-radius: 4px; font-size: 0.8rem; cursor: pointer;
+}
+.video-toolbar .vt-btn:hover { background: #f0f2f5; }
+.video-toolbar .vt-btn.active {
+  border-color: #4361ee; background: #4361ee; color: #fff;
 }
 .stream-dot {
   display: inline-block;

@@ -3,6 +3,7 @@ import { getAdminDevices, registerDevice, revokeDevice, resetDeviceSecret } from
 import type { AdminDevice } from '../api/client';
 import Modal from '../components/Modal';
 import './Devices.css';
+import { MonitorCog, AlertTriangle, Check } from 'lucide-react';
 
 export default function Devices() {
   const [devices, setDevices] = useState<AdminDevice[]>([]);
@@ -125,7 +126,7 @@ export default function Devices() {
         <div className="device-admin-list">
           {devices.map((d) => (
             <div key={d.device_id} className="device-admin-row">
-              <span className="device-admin-name">🖥️ {d.device_id}</span>
+              <span className="device-admin-name"><MonitorCog size={14} /> {d.device_id}</span>
               <span className="device-admin-actions">
                 <button className="btn-secret" disabled={busy === d.device_id} onClick={() => handleResetSecret(d.device_id)}>Reset Secret</button>
                 <button className="btn-sm" disabled={busy === d.device_id} onClick={() => handleRevoke(d.device_id)}>Revoke</button>
@@ -173,7 +174,7 @@ export default function Devices() {
 
       {secretModal && (
         <Modal title={secretModal.title} onClose={() => setSecretModal(null)}>
-          <p className="secret-warning">⚠️ This secret is shown only once — save it now.</p>
+          <p className="secret-warning"><AlertTriangle size={14} /> This secret is shown only once — save it now.</p>
           <textarea
             className="secret-box"
             readOnly
@@ -183,7 +184,7 @@ export default function Devices() {
           />
           {copyError && <p className="form-error">{copyError}</p>}
           <div className="form-actions">
-            <button className="btn" onClick={handleCopy}>{copied ? '✅ Copied' : 'Copy'}</button>
+            <button className="btn" onClick={handleCopy}>{copied ? <><Check size={12} /> Copied</> : 'Copy'}</button>
             <button className="btn btn-outline" onClick={() => setSecretModal(null)}>Done</button>
           </div>
         </Modal>

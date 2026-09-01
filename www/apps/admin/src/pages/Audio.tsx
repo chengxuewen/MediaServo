@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getSfuRooms, getSfuStats, type SfuRoom, type SfuStats as SfuStatsT } from '../api/client';
 import './Audio.css';
+import { Mic } from 'lucide-react';
 
 interface RoomStats {
   producerStats: SfuStatsT[];
@@ -105,7 +106,7 @@ export default function Audio() {
             return (
               <div key={room.room_id} className="audio-room">
                 <div className="audio-room-header">
-                  <span className="audio-room-name">🎙️ {room.room_id.replace(/^audio-/, '')}</span>
+                  <span className="audio-room-name"><Mic size={14} /> {room.room_id.replace(/^audio-/, '')}</span>
                   <span className="audio-room-id">{room.room_id}</span>
                   <span className="audio-room-counts">
                     {room.participants} participants · {room.producers} producers · {room.consumers} consumers

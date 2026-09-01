@@ -1,6 +1,7 @@
 import { deleteRoom } from '../api/client';
 import type { Consumer } from '../api/client';
 import './StreamDetail.css';
+import { Video, X, Eye } from 'lucide-react';
 
 interface Props {
   deviceId: string;
@@ -16,8 +17,8 @@ export default function StreamDetail({ deviceId, streamId, consumers, onClose, o
     <div className="stream-detail-overlay" onClick={onClose}>
       <div className="stream-detail" onClick={(e) => e.stopPropagation()}>
         <div className="detail-header">
-          <h3>📹 {streamId}</h3>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <h3><Video size={15} /> {streamId}</h3>
+          <button className="close-btn" onClick={onClose}><X size={16} /></button>
         </div>
         <div className="detail-body">
           <div className="detail-row">
@@ -32,7 +33,7 @@ export default function StreamDetail({ deviceId, streamId, consumers, onClose, o
             <ul className="consumer-list-detail">
               {consumers.map((c) => (
                 <li key={c.peer_id} className="consumer-item">
-                  <span>👁 {c.peer_id}</span>
+                  <span><Eye size={13} /> {c.peer_id}</span>
                   <span className="consumer-since">{(c.connected_since ?? '').slice(0, 19)}</span>
                   {onKick && (
                     <button className="btn-sm" onClick={() => onKick(c.peer_id)}>Kick</button>

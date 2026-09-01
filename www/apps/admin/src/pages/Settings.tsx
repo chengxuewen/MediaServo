@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { setToken, clearToken, hasToken, login, getRole, getUsername, getPsk, rotatePsk } from '../api/client';
 import Modal from '../components/Modal';
 import './Settings.css';
+import { AlertTriangle, Check } from 'lucide-react';
 
 export default function Settings() {
   const [username, setUsernameInput] = useState('');
@@ -106,7 +107,7 @@ export default function Settings() {
         <h3>Account Login</h3>
         <p className="setting-desc">Sign in with a cockpit account (G3 accounts.yaml — viewer/operator/admin/dispatcher). The token is stored locally; role-aware views apply.</p>
         {currentUser && (
-          <p className="token-status saved">✅ Signed in as {currentUser}{currentRole ? ` [${currentRole}]` : ''}</p>
+          <p className="token-status saved"><Check size={14} /> Signed in as {currentUser}{currentRole ? ` [${currentRole}]` : ''}</p>
         )}
         <div className="token-row">
           <input
@@ -144,7 +145,7 @@ export default function Settings() {
           <button className="btn" onClick={handleSave}>Save Token</button>
           {saved && <button className="btn btn-outline" onClick={handleClear}>Clear</button>}
         </div>
-        {showSaved && <p className="token-status saved">✅ Token saved</p>}
+        {showSaved && <p className="token-status saved"><Check size={14} /> Token saved</p>}
       </section>
 
       {isAdmin && (
@@ -171,7 +172,7 @@ export default function Settings() {
 
       {pskSecret && (
         <Modal title="PSK (shown once)" onClose={() => setPskSecret(null)}>
-          <p className="token-status saved">⚠️ This key is shown only once — copy it now, then sync all hosts.</p>
+          <p className="token-status saved"><AlertTriangle size={14} /> This key is shown only once — copy it now, then sync all hosts.</p>
           <textarea
             className="secret-box"
             readOnly
@@ -181,7 +182,7 @@ export default function Settings() {
           />
           {pskError && <p className="token-status error">{pskError}</p>}
           <div className="token-row">
-            <button className="btn" onClick={copyPsk}>{pskCopied ? '✅ Copied' : 'Copy'}</button>
+            <button className="btn" onClick={copyPsk}>{pskCopied ? <><Check size={12} /> Copied</> : 'Copy'}</button>
             <button className="btn btn-outline" onClick={() => setPskSecret(null)}>Done</button>
           </div>
         </Modal>

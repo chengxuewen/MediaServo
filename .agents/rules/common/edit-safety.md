@@ -205,3 +205,9 @@ grep -c "重复模式" <file>    # 期望 1；>1 = edit 重复插入
 **阻塞条件**: 脚本内 pkill/pgrep 无 `|| true`；timeout 包裹长命令不带 -k；"卡住"未用 bash -x 定位直接猜死锁。
 
 **来源**: PIT-120/121 (2026-08-21 app-branding e2e-brand 调试轮)
+
+### 16. pkill/pgrep -f 模式含自身 cmdline 字面量 = 自杀挂死 shell（第二次犯，2026-09-01）
+
+**规则**: 清理浏览器/子进程时**禁止** `pkill -f <字符串>`，当该字符串出现在当前 bash 命令行里（路径如 chrome-linux64/chrome 极易入 own cmdline）。用 `ps -eo pid,comm`（comm 精确列）+ 按 pid kill，或 grep 方括号法 `[c]hrome`。
+**先例**: PIT-54（首次）；2026-09-01 play 轮 T11 调试中 `pkill -f "ms-playwright/chromium-1234/chrome-linux64/chrome"`（模式串在自身命令行）→ shell 无声挂死两个 60s/260s 工具窗口。
+**阻塞条件**: 任何 `pkill -f`/`pgrep -f` 模式串与当前命令行有子串重叠。
