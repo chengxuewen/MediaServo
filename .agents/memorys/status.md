@@ -599,6 +599,7 @@ install                        → 改名提示 + exit 2（退役）
 - **T22 端到端**: /tmp/t22 全环绿——deploy→适配→整簇 status=0→SPA/探针/代理/登录发证→
   startup on/off→restart 自愈→stop 零残留、生产 9800/host 簇无损
 - **T14**: docs/modules/development/frontend-split-deploy.md（终态手册）
+- **修复（用户报障）**: build:deploy server 糖注入 --prefix out/server=源树 → SameFileError/rmtree 源自毁风险；_cmd_deploy_server 增 inplace 守卫（bin/web 跳拷贝、init 照常渲染，out/server 可原地起实例）。一行教训：deploy 糖默认前缀语义对 server（源即交付树）与 host（源=target）不同构
 - **演练暴露的既有项（未动，报主）**：`_E2E_SUITES` 未定义（cli e2e NameError，HEAD 存量）；
   `oxmgr-host-...-MediaServo-install-host.service`（enabled，指向已不存在的旧树——开机噪音）；
   init 端口快照语义（改进项 init --port 未做）

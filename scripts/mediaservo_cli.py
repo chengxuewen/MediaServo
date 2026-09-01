@@ -698,6 +698,9 @@ def _cmd_deploy_server(prefix: str) -> None:
         print("错误: /opt 部署需 root（sudo mediaservo deploy server --prefix /opt/mediaservo-server）", file=sys.stderr)
         sys.exit(1)
 
+    # build:deploy 糖注入 --prefix out/<target>（host 惯例）——server 源即目标：原地装配模式，
+    # bin/web 拷贝必须跳过（SameFileError 防护 + rmtree 删源自毁防护），init 渲染照常。
+    inplace = prefix_p.resolve() == src_root.resolve()
     server_cli = bin_dir / _exe_name("mediaservo-server")
     # 仅当该前缀二进制/oxmgr 真在跑（/proc/pid/exe 精确匹配）才走实例 stop——oxmgr CLI 在目标端口
     # 无 daemon 时会回落触达同机其他 daemon（2026-08-31 drill 实证：空 prefix 的 stop 连坐杀了
@@ -708,7 +711,10 @@ def _cmd_deploy_server(prefix: str) -> None:
             subprocess.run([str(server_cli), "stop", str(prefix_p)], capture_output=True, timeout=30, check=False)
         except subprocess.TimeoutExpired:
             print("  ⚠ 旧实例 stop 超时（可能是无生命周期的旧二进制）— 继续重装", file=sys.stderr)
-    _copy_with_kill(src_bin, server_cli)  # server 不品牌化（D3）
+    if inplace:
+        print("  bin/mediaservo-server 原地（源=目标）— 跳过拷贝")
+    else:
+        _copy_with_kill(src_bin, server_cli)  # server 不品牌化（D3）
     # 生命周期冒烟：out/ 可能是无 init/start 子命令的旧构建（旧二进制会把未知参数当守护参数直启）
     ver_line: str | None = None
     try:
@@ -747,16 +753,19 @@ def _cmd_deploy_server(prefix: str) -> None:
 
     # web 整树平移（caddy 静态 root——绝对路径由 init 写进 oxfile/Caddyfile）
     dst_web = prefix_p / "web"
-    if dst_web.exists():
-        shutil.rmtree(dst_web)
-    shutil.copytree(src_web, dst_web)
+    if inplace:
+        print("  web/ 原地（源=目标）— 跳过平移（rmtree 防护）")
+    else:
+        if dst_web.exists():
+            shutil.rmtree(dst_web)
+        shutil.copytree(src_web, dst_web)
     (prefix_p / "run").mkdir(parents=True, exist_ok=True)
 
     # init 幂等渲染：etc/Caddyfile + run/oxfile.toml（server+caddy 两条目）+ secret 自举（0600）
     # SFU 端口/公告隔离：部署前 export MEDIASERVO_SFU_PORT / MEDIASERVO_SFU_ANNOUNCED_IP，init 烘进 oxfile env
     _run_or_exit([str(server_cli), "init", str(prefix_p)])
 
-    print(f"server 已部署到 {prefix}")
+    print(f"server 已部署到 {prefix}" + ("（原地装配——渲染完成，可直接 start）" if inplace else ""))
     print("  bin/    mediaservo-server（不品牌化——D3）+ oxmgr（D-H13 锁定）")
     print("  etc/    server/devices/accounts.yaml + Caddyfile + secret（重部署保留既有——PIT-160）")
     print("  web/    前端交付物整树平移（caddy 静态 root）")
