@@ -1437,3 +1437,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **根因**: `clean server` 设计含"读 server-native.pid → kill 防孤儿"；cp -al 全树硬链夹具把 out/server/logs/server-native.pid 一并链入，clean 按夹具路径读到**生产 pid** → kill -9 真身。硬链共享 inode 对"删除"安全（unlink 只掉链接），对"按内容 kill"完全不安全。
 - **解法**: 构建 out 树夹具排除运行态目录（logs/run），用 `rsync -a --exclude logs --exclude run` 或选择性 cp；涉及 kill 语义的命令（clean/stop）测试前，先核对 pid 文件内容归属；测试矩阵首尾 `ss -tlnp` 快照断言生产端口。
 - **验证**: 本轮已按此恢复（oxmgr 簇接管，restart_policy 自愈路径验证）；今后 deploy 验收夹具模板化时内置排除清单。
+
+## PIT-173: 浏览器端手拼 remote offer SDP——PIT-65 反模式的 web 镜像（2026-09-01 存量发现）
+- **症状**: `www/apps/admin/src/sfu/sfu-client.ts` L420-440 以字符串模板手工拼装 remote offer（`m=video 7 UDP/TLS/RTP/SAVPF 96 101 99 97` PT 硬编码、`a=sendonly` 描述 mediasoup、server 的 dtls/ice JSON→SDP 手写桥），浏览器再 createAnswer 完成协商。
+- **根因**: server 是 mediasoup（无原生 SDP 层），当初为省协议工作量把 mediasoup JSON 在浏览器侧手工映射成 SDP——绕过 `mediasoup-client` 官方 Device/rtpMapping 路径（C18 违例；与 host 侧 PIT-65 同类心态）。
+- **解法**: 见 D270-b——采纳 mediasoup-client + server RPC 式信令面（协议契约变更走 api-interface-design）；或最小修：SDP 组装参数化（PT/fingerprint/candidates 全从信令注入）。
+- **验证**: `grep -c "m=video 7 UDP" www/apps/admin/src/sfu/sfu-client.ts` 修复后 = 0；codec 增删（如 VP9/SVC profile）不再需要三方同步改字符串模板。
+- **附带发现（b 轮处理）**: `console.log` 观测残留 L36/261/265/267/271（PIT-64 调试期产物，违反 TS 规约"生产禁 console.log"）；重连无退避（`maxRetries=5` 固定节奏，C15 重试纪律待对齐）。

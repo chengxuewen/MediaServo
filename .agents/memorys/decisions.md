@@ -721,3 +721,21 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **三 BLOCKER 修复（Momus 审核）**: deploy 入口早守卫双探源（upstream→{brand}，免重 build 幂等）；`_derive_brand_server` 专用派生（env→目标树→源树三级回退 + 空 brand 防御断言）；oxfile 陈旧 command 检测（server 条目基名 ≠ 当前 bin → 删除令 init 以 current_exe 重渲染 + 手工 [apps.env] 重置警告）。
 - **unit/namespace 澄清**: `server_namespace()={bin_prefix}server` 早已随 env 品牌隔离（磁盘实证 namespace=msrtc-server），非本变更新增；brand.rs 未动（SDK/绑定面契约不变）。
 - **影响**: T14 手册/帮助面/指引文案二进制名品牌参数化；clean 品牌态双名+根链回收；生产 out/server 迁移 = 下次 `build:deploy server` 自动完成（改名触发 oxfile 重渲染）。
+
+## D270: Web 端 SDK 化三阶段路线（Phase 2 正式化，2026-09-01）
+
+**前提裁决（用户）**：产品线半年内有"在自己 Web 页里嵌实时监控画面"的真实场景 → Web SDK 从"投机"升格为正式 Phase 2 路线。
+
+**路线（顺序即依赖）**：
+- **a. 内包化**（play-layout-stats 落地后顺手，~0.5d）：`www/apps/admin/src/sfu/sfu-client.ts` → `www/packages/mediaservo-sfu`（pnpm workspace/turbo 现成），导出面 = 现 `SfuConsumerClient + onTrack/onStatus/onMetrics + StreamMetrics` 原样；VideoPlayer/Audio/Vehicles 三消费方仅改 import。
+- **b. 谈判层债清缴（SDK 封版前置，独立立项）**：采纳 `mediasoup-client`（Device.load + rtpMapping，正统方案）替代浏览器手拼 SDP（PIT-173）→ server 侧需新增 RPC 式信令消息面（getRouterRtpCapabilities 等）= **WS 协议契约变更**，走 api-interface-design 向后兼容纪律，量级 2-4 天。最小修备选（若暂不动协议）：SDP 组装全参数化注入，浏览器零硬编码。
+  - **协议面清单（2026-09-01 三场景分析补）**：`getRouterRtpCapabilities` + transport RPC（create/connect/ice candidates）+ **dc 协商消息**（SCTP 参数/stream id/label）+ **simulcast encodings 注入** + `setPreferredLayers`/priority + **speaker 事件广播**。
+  - **验收面 = 三场景用例**（2026-09-01 裁决入册）：遥控=浏览器 DataChannel 命令往返（含 unreliable 模式）· 会议=simulcast 上行 + 消费端选层/降带宽 + 活跃说话人 UI · 远程桌面=浏览器 `getDisplayMedia` produce 转发 + native host 输入注入链路（被控端恒为 native，浏览器=操控位）。
+  - **边界备忘**：TURN 穿透（coturn 部署项，非 SDK 职责）· MCU 混流归 deck · 录制归 deck · 公网时延为 WebRTC 物理属性。
+- **c. 组件包**（b 后）：VideoPlayer/mini stats 卡/断联遮罩抽 `www/packages/components`，形态参考 LiveKit components-react 的 ConnectionProvider/TrackBundle 分层。
+- **d. 发布**：私有 registry + docs + semver——触发条件 = 产品线接入排期确认。
+
+**参考系裁决**：SDK 层对标 = `mediasoup-client`（我们 server 即 mediasoup，同生态官方用法，C18）；组件层 = `livekit/components-js` **只借形态不搬码**（LiveKit 私有信令协议锁进，不可复用）；`livekit/client-sdk-js` 仅借 Room 事件模型/ConnectionState 枚举/reconnect 退避形态（现 sfu-client 重连为 maxRetries=5 无退避，b 轮顺手对齐 C15 重试纪律）。
+**否决项**：现在对外发布（移动靶期定契约）；把 PIT-173 手拼 SDP 直接封装发布（反模式焊进契约）。
+
+**检查**：`grep -n "packages/mediaservo-sfu" www/pnpm-workspace.yaml`（a 完成后存在）；`grep -n "m=video 7 UDP" www/apps/admin/src/sfu/sfu-client.ts`（b 完成后应为 0 或迁移至包内参数化生成）。
