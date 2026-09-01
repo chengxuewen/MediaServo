@@ -139,6 +139,7 @@ Host (macOS) → WS :9800 → Docker Server → WS :9800 → Client (macOS)
 | `host-streamer` 兼容链退役 | ✅ | 实证冗余（oxfile 全指 msrtc-*、src 字面量仅测试）；streamer 自报 src 改 app_prefix 派生（默认品牌逐字节不变） |
 | 验收 | ✅ | /tmp 矩阵全绿：fresh/迁移/二次部署/空brand防护/clean/package tar/host 布局/真实起停+登录 200 |
 | 事故 | 2 | PIT-171 内联凭证脱敏假 401（系统无 bug）；PIT-172 cp -al 夹具 pid 硬链 → clean 误杀生产 9800（已恢复为 oxmgr 簇管理，restart_policy 自愈） |
+| UX 缺陷补刀（用户报障轮） | ✅ | ① `-h/-H/--help` → USAGE（原先 -H 落 daemon 撞 C35 panic）；未知选项 exit 2（守护实际只认 --config，回落面收紧无兼容损失）；② **oxfile 迁移 env 回吸收**：改名重渲染时旧 [apps.env] 按 app 名自动补入新文件（只补缺不覆盖 baked 值）+ 旧文件备份 run/oxfile.toml.bak——PIT-172 同族的"迁移税"根治，用户实测复现（start 失败=env 丢）后落地 |
 | 生产迁移 | ⏳ 待用户 | `out/server` 重跑 `build:deploy server` 自动改名迁移（oxfile 重渲染+[apps.env] 手工项需重加——当前 live 有 RUST_LOG/ALLOW_DEV 两条，迁移后按提示重加）；out/host 集群拔链切换 = 下次例行 deploy 生效（本轮二进制未重编，旧链保险丝随 cli 拔除——**注**：现存 8/28 msrtc-host 二进制 spawn 走 oxfile command 路径，无风险） |
 
 ## 下一步

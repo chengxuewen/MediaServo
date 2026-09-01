@@ -33,7 +33,7 @@ const USAGE: &str = "用法: mediaservo-server <init|start|stop|restart|status|d
 示例:
   mediaservo-server init /opt/mediaservo && mediaservo-server start /opt/mediaservo
   mediaservo-server --config /etc/mediaservo/server.yaml    守护直启（兼容旧链）
-  mediaservo-server -h                            本帮助";
+  mediaservo-server -h|-H|--help                  本帮助";
 
 fn print_usage() {
     println!("{}", USAGE.replace("mediaservo-server", &lifecycle::templates::server_product()));
@@ -45,13 +45,21 @@ fn print_usage() {
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
     let first = argv.get(1).map(String::as_str);
-    if matches!(first, Some("-h") | Some("--help")) {
+    if matches!(first, Some("-h") | Some("-H") | Some("--help")) {
         print_usage();
         return;
     }
     if let Some(cmd) = first.filter(|c| lifecycle::is_lifecycle_cmd(c)) {
         let code = lifecycle::dispatch(cmd, &mut argv.iter().skip(2).cloned());
         std::process::exit(code);
+    }
+    // 选项形参收紧（PIT-171 轮 UX 缺陷）：守护分支实际只认 --config（run_server
+    // 仅读 args[1]=="--config"），其余 "-x" 首参回落守护 = 配置全默认 + 撞 C35 守卫
+    // 的误导性 panic。未知选项 → USAGE + exit 2（无参/`--config` 前缀/run 兼容链不动）。
+    if let Some(f) = first && f.starts_with('-') && f != "--config" {
+        eprintln!("未知选项: {f}");
+        print_usage();
+        std::process::exit(2);
     }
     // `run` = 显式守护形态：剔除该 token，其余 argv 与直启同构（--config 落回 args[1]）
     let daemon_argv = if first == Some("run") {

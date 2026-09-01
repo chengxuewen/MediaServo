@@ -513,37 +513,110 @@ def _server_bin_names(brand: str) -> tuple[str, str]:
     base = f"{brand}-server" if brand else "mediaservo-server"
     return _exe_name(base), base
 
-def _drop_stale_server_oxfile(prefix_p: Path, bin_name: str) -> bool:
+def _drop_stale_server_oxfile(prefix_p: Path, bin_name: str) -> tuple[bool, dict[str, dict[str, str]]]:
     """BLOCKER-3：run/oxfile.toml 的 server 条目 command 基名 != 当前布局 bin 名（改名/换品牌/
-    半迁移死路径）→ 删除令随后 init 以 current_exe 重渲染。只判 server 形态基名（{brand}-server /
-    mediaservo-server）的 [[apps]] 条目——caddy/worker 等外部命令不属本部署单元。返回是否删除。"""
+    半迁移死路径）→ 备份为 oxfile.toml.bak 并移除，令随后 init 以 current_exe 重渲染。
+    同时捕获各 [[apps]] 的 [apps.env] 键值——迁移后由 _reapply_carried_env 回吸收
+    （运维手工 env 如 ALLOW_DEV_CREDENTIALS/RUST_LOG 不再随改名丢失，PIT-171 轮教训）。
+    返回 (是否迁移, {app 名: {env 键: 值}})。"""
     oxfile = prefix_p / "run" / "oxfile.toml"
     if not oxfile.exists():
-        return False
+        return False, {}
     stale = False
-    in_app = False
+    app_envs: dict[str, dict[str, str]] = {}
+    cur_app: str | None = None
+    in_env = False
     for line in oxfile.read_text().splitlines():
-        s = line.strip()
-        if s.startswith("[[apps]]"):
-            in_app = True
+        t = line.strip()
+        if t.startswith("[[apps]]"):
+            cur_app, in_env = None, False
             continue
-        if s.startswith("["):
-            in_app = False
+        if t.startswith("name") and "=" in t and cur_app is None:
+            cur_app = t.split("=", 1)[1].strip().strip('"')
+            in_env = False
             continue
-        if in_app and s.startswith("command") and "=" in s:
-            cmd = s.split("=", 1)[1].strip().strip('"')
+        if t.startswith("[apps.env]"):
+            in_env = True
+            continue
+        if t.startswith("["):
+            in_env = False
+            continue
+        if in_env and "=" in t and cur_app:
+            k, _, v = t.partition("=")
+            app_envs.setdefault(cur_app, {})[k.strip()] = v.strip()
+            continue
+        if cur_app and t.startswith("command") and "=" in t:
+            cmd = t.split("=", 1)[1].strip().strip('"')
             parts = cmd.split()
-            if not parts:
-                continue
-            stem = Path(parts[0]).name.removesuffix(".exe")
-            if stem != "mediaservo-server" and not stem.endswith("-server"):
-                continue
-            if stem != bin_name:
-                stale = True
-                break
+            if parts:
+                stem = Path(parts[0]).name.removesuffix(".exe")
+                if (stem == "mediaservo-server" or stem.endswith("-server")) and stem != bin_name:
+                    stale = True
     if stale:
-        oxfile.unlink()
-    return stale
+        bak = oxfile.with_name("oxfile.toml.bak")
+        oxfile.replace(bak)
+    return stale, app_envs
+
+
+def _reapply_carried_env(prefix_p: Path, app_envs: dict[str, dict[str, str]]) -> list[str]:
+    """迁移回吸收：新 oxfile（init 重渲染产物）缺失的旧 env 键按 app 补回。
+    只补缺不覆盖（init 本次 baked 的键以新值为准）；返回被补的 "app:k" 列表。"""
+    if not app_envs:
+        return []
+    oxfile = prefix_p / "run" / "oxfile.toml"
+    if not oxfile.exists():
+        return []
+    lines = oxfile.read_text().splitlines()
+    carried: list[str] = []
+    for app, kv in app_envs.items():
+        if not kv:
+            continue
+        # 定位该 app 块
+        try:
+            i = next(n for n, l in enumerate(lines) if l.strip() == "[[apps]]")
+        except StopIteration:
+            continue
+        start = None
+        n = i
+        while n < len(lines):
+            if lines[n].strip() == "[[apps]]":
+                blk_i = n
+                m = n + 1
+                while m < len(lines) and not lines[m].strip().startswith("[["):
+                    m += 1
+                blk = lines[blk_i:m]
+                if any(l.strip() == f'name = "{app}"' for l in blk):
+                    start = blk_i
+                    end = m
+                    break
+                n = m
+            else:
+                n += 1
+        if start is None:
+            continue
+        blk = lines[start:end]
+        existing = {l.split("=", 1)[0].strip() for l in blk if "=" in l and not l.strip().startswith(("[", "#"))}
+        miss = {k: v for k, v in kv.items() if k.strip().strip('"') not in existing}
+        if not miss:
+            continue
+        # 找块内 [apps.env] 头，无则在块尾（下一 [[apps]] 前）新建
+        try:
+            ei = next(j for j, l in enumerate(blk) if l.strip() == "[apps.env]")
+        except StopIteration:
+            ei = None
+        add = [f"{k} = {v}" for k, v in sorted(miss.items())]
+        if ei is None:
+            new_blk = blk + ["[apps.env]"] + add
+        else:
+            je = ei + 1
+            while je < len(blk) and "=" in blk[je] and not blk[je].strip().startswith("["):
+                je += 1
+            new_blk = blk[:je] + add + blk[je:]
+        lines[start:end] = new_blk
+        carried += [f"{app}:{k}" for k in sorted(miss)]
+    if carried:
+        oxfile.write_text("\n".join(lines) + "\n")
+    return carried
 
 
 def _assemble_host_binaries(bin_dir: Path, release: bool, brand: str) -> set[str]:
@@ -821,8 +894,10 @@ def _cmd_deploy_server(prefix: str) -> None:
     # BLOCKER-3：bin 改名/换品牌迁移后 oxfile command 成死路径（init 遇已存在 oxfile 跳过——mod.rs 实证）
     # → 删除令下方 init 以 current_exe 重渲染。判据=server 条目 command 基名 != 当前 bin 名
     # （重复部署基名已一致 → 零 churn；fresh 树无 oxfile → init 正常渲染）。
-    if _drop_stale_server_oxfile(prefix_p, bin_name):
-        print("  ⚠ run/oxfile.toml 已失效删除——init 将重渲染；手工 [apps.env]（如 MEDIASERVO_ALLOW_DEV_CREDENTIALS）已被重置，需重新添加", file=sys.stderr)
+    migrated, carried_envs = _drop_stale_server_oxfile(prefix_p, bin_name)
+    if migrated:
+        print("  run/oxfile.toml 陈旧（bin 改名迁移）——已备份为 run/oxfile.toml.bak 并重渲染；"
+              "运维手工 env 自动回吸收，init 本次烘的端口类 env 以新值为准", file=sys.stderr)
 
     # etc 模板——已存在不覆盖（PIT-160；init 同样幂等，双保险）
     etc_dir = prefix_p / "etc"
@@ -850,6 +925,10 @@ def _cmd_deploy_server(prefix: str) -> None:
     # init 幂等渲染：etc/Caddyfile + run/oxfile.toml（server+caddy 两条目）+ secret 自举（0600）
     # SFU 端口/公告隔离：部署前 export MEDIASERVO_SFU_PORT / MEDIASERVO_SFU_ANNOUNCED_IP，init 烘进 oxfile env
     _run_or_exit([str(server_cli), "init", str(prefix_p)])
+    if migrated:
+        got = _reapply_carried_env(prefix_p, carried_envs)
+        if got:
+            print(f"  运维 env 已回吸收: {', '.join(got)}")
 
     # bin 白名单（host 同构——deploy-ops ④）：非当前布局的 server 二进制删除
     # （upstream 旧名/旧品牌残留；mediaservo-server 仅无 brand 布局保留）
