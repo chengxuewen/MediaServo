@@ -203,7 +203,7 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
         # 组装到 out/server/bin/（与 build host/bindings 对称——out = 统一发布根）
         server_bin = ROOT / "target" / ("release" if release else "debug") / "mediaservo-server"
         if server_bin.exists():
-            _stage_to_out("server", [server_bin], sub="bin")  # brand=""（server 不品牌化——D3）
+            _stage_to_out("server", [server_bin], sub="bin")  # brand=""（staging 保持 cargo 名——品牌化归 deploy，D266/D269）
             print(f"server 交付布局组装: out/server/bin/mediaservo-server（{server_bin.stat().st_size // 1024} KB）")
         # 组装默认配置（server.yaml——从 config/server.docker.yaml 派生，accounts/devices 相对路径）
         # PIT-158/160: 已存在则跳过（运行时注册表 devices/accounts 可能被 admin API 热写、
@@ -499,10 +499,56 @@ def _derive_brand(bin_dir: Path) -> str:
         return name[: -len("-agent")]
     return ""
 
+def _derive_brand_server(bin_dir: Path) -> str:
+    """server 树品牌派生（branding-completion BLOCKER-2）：glob bin/*-server 排除上游名。
+    禁复用 _derive_brand（只认 *-agent，server 树恒返 ""）。多品牌共存取首个（同 host 已知限制）。"""
+    for f in sorted(bin_dir.glob("*-server")):
+        if f.name == _exe_name("mediaservo-server"):
+            continue
+        return f.name[: -len("-server")]
+    return ""
+
+def _server_bin_names(brand: str) -> tuple[str, str]:
+    """(deployed bin name, root shortcut name)——brand 空 → 上游名（永不渲染 "-server" 残名）。"""
+    base = f"{brand}-server" if brand else "mediaservo-server"
+    return _exe_name(base), base
+
+def _drop_stale_server_oxfile(prefix_p: Path, bin_name: str) -> bool:
+    """BLOCKER-3：run/oxfile.toml 的 server 条目 command 基名 != 当前布局 bin 名（改名/换品牌/
+    半迁移死路径）→ 删除令随后 init 以 current_exe 重渲染。只判 server 形态基名（{brand}-server /
+    mediaservo-server）的 [[apps]] 条目——caddy/worker 等外部命令不属本部署单元。返回是否删除。"""
+    oxfile = prefix_p / "run" / "oxfile.toml"
+    if not oxfile.exists():
+        return False
+    stale = False
+    in_app = False
+    for line in oxfile.read_text().splitlines():
+        s = line.strip()
+        if s.startswith("[[apps]]"):
+            in_app = True
+            continue
+        if s.startswith("["):
+            in_app = False
+            continue
+        if in_app and s.startswith("command") and "=" in s:
+            cmd = s.split("=", 1)[1].strip().strip('"')
+            parts = cmd.split()
+            if not parts:
+                continue
+            stem = Path(parts[0]).name.removesuffix(".exe")
+            if stem != "mediaservo-server" and not stem.endswith("-server"):
+                continue
+            if stem != bin_name:
+                stale = True
+                break
+    if stale:
+        oxfile.unlink()
+    return stale
+
 
 def _assemble_host_binaries(bin_dir: Path, release: bool, brand: str) -> set[str]:
     """组装品牌化二进制到 bin_dir（D266——组装从 build 迁到 deploy，源=target/{debug,release}）。
-    host-<app> → <brand>-<app>、mediaservo-host → <brand>-host、client 不品牌（D3）；含兼容链接。
+    host-<app> → <brand>-<app>、mediaservo-host → <brand>-host；client 出树、host-streamer 兼容链已退役（D269）。
     返回组装文件名集合（供部署残留白名单）。"""
     src_dir = ROOT / "target" / ("release" if release else "debug")
     if not src_dir.is_dir():
@@ -522,20 +568,9 @@ def _assemble_host_binaries(bin_dir: Path, release: bool, brand: str) -> set[str
                 name = f"{brand}-host"
         _copy_with_kill(src, bin_dir / name)
         src_names.add(name)
-    client_src = src_dir / _exe_name("mediaservo-client")
-    if client_src.exists():
-        _copy_with_kill(client_src, bin_dir / _exe_name("mediaservo-client"))
-        src_names.add(_exe_name("mediaservo-client"))
-    # host-streamer 兼容链接（gateway.rs 硬编码 src="host-streamer"——品牌命名下运行时断链）
-    if brand:
-        link = bin_dir / _exe_name("host-streamer")
-        target = _exe_name(f"{brand}-streamer")
-        if (bin_dir / target).exists() and not link.exists():
-            try:
-                link.symlink_to(target)
-                print(f"  host-streamer → {target}（品牌兼容链接）")
-            except OSError:
-                pass
+    # client 出树（D269/T3）：舱端拉流工具不再随车端 host 树装配——bin 白名单同轮清存量实例
+    # host-streamer 兼容链已退役（D269/T2）：spawn 路径 exe_cmd(app_name()) 本已品牌感知，
+    # src 显示串无消费方（磁盘 oxfile 全指 bin/msrtc-* 实证）——白名单同轮清存量实例残链
     return src_names
 
 def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
@@ -587,7 +622,8 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
 
     # bin 白名单（deploy-ops ④ 品牌切换残留清理）：非当前布局的 app 二进制删除
     # （build 已物理改名——残留 = 旧品牌/旧 install 遗留）
-    roles = ("agent", "streamer", "capturer", "recorder", "controller", "emergency", "audio", "legacy", "host")
+    # client/streamer 收尾 = D269 出树/拔链后存量实例残留的自动回收（白名单语义）
+    roles = ("agent", "streamer", "capturer", "recorder", "controller", "emergency", "audio", "legacy", "host", "client")
     for p in sorted(bin_dir.iterdir()):
         if p.is_symlink() or not p.is_file():
             continue
@@ -671,7 +707,11 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
 
 def _cmd_deploy_server(prefix: str) -> None:
     """deploy server（有状态落地——T20, D266 与 host 同构；deploy 不触发构建——源=out/server 单棵交付树）。
-    server 二进制不品牌化（D3——_stage_to_out brand="" 注释）：名保持 mediaservo-server。
+    品牌: env MEDIASERVO_BRAND 优先，回退目标树 bin/*-server 派生（_derive_brand_server）——
+    物理二进制名 = {brand}-server（D269 品牌名=物理名，host 同构；cargo/bin 单元名不变）。
+    BLOCKER-1 双探源：上游名（fresh build）→ {brand}-server（已迁移，免重 build 二次 deploy）。
+    BLOCKER-2 空 brand 防护：brand 解析为空且目标树已有品牌化 bin → 拒绝（空 brand 永不删/改名品牌件）。
+    BLOCKER-3 oxfile 刷新：bin 改名迁移 → 删 {prefix}/run/oxfile.toml 令 init 重渲染（手工 [apps.env] 需重加）。
     etc 已存在不覆盖（PIT-160——运维改动/注册数据不被重部署冲掉）；web 整树平移（rmtree+copytree）；
     init 幂等渲染（run/oxfile.toml + Caddyfile + PSK/JWT secret 自举——生命周期模块已并入二进制）。
     D4: --prefix 必填（无默认）；/opt 需 root（同 host 规则）。"""
@@ -679,16 +719,35 @@ def _cmd_deploy_server(prefix: str) -> None:
         print("错误: deploy 必须 --prefix（无默认——防止污染 out/ 无状态交付；惯例 /opt/mediaservo-server）", file=sys.stderr)
         sys.exit(2)
     src_root = _out_root() / "server"
-    src_bin = src_root / "bin" / _exe_name("mediaservo-server")
-    src_web = src_root / "web"
-    if not src_bin.exists():
-        print(f"错误: {src_bin} 不存在 — 先 build server（deploy 不触发构建——D266）", file=sys.stderr)
+    src_bin_dir = src_root / "bin"
+    prefix_p = Path(prefix)
+    bin_dir = prefix_p / "bin"
+    # 品牌：env 优先 → 目标树派生 → 源树派生（host L554 同款零参数幂等重部署；
+    # 源树回退覆盖"out/server 已原地品牌化 → deploy /opt 未带 env"场景）。
+    brand = (os.environ.get("MEDIASERVO_BRAND", "")
+             or _derive_brand_server(bin_dir)
+             or _derive_brand_server(src_bin_dir))
+    if not brand:
+        unexpected = sorted({f.name for d in (bin_dir, src_bin_dir) for f in d.glob("*-server")
+                             if f.name != _exe_name("mediaservo-server")})
+        if unexpected:
+            # 派生恒能命中品牌件，理论不可达——防御断言：空 brand 永不走到删/改名
+            print(f"错误: 在场 {', '.join(unexpected)} 但品牌解析为空——export MEDIASERVO_BRAND 后重试", file=sys.stderr)
+            sys.exit(2)
+    bin_name, shortcut = _server_bin_names(brand)
+    server_bin_name = bin_name
+    # BLOCKER-1 双探源（按序）：上游名（fresh build 产物）→ {brand}-server（已迁移树，免重 build）
+    candidates = [src_bin_dir / _exe_name("mediaservo-server")]
+    if brand:
+        candidates.append(src_bin_dir / _exe_name(f"{brand}-server"))
+    src_bin = next((cand for cand in candidates if cand.exists()), None)
+    if src_bin is None:
+        print(f"错误: {' 与 '.join(str(c) for c in candidates)} 均不存在 — 先 build server（deploy 不触发构建——D266）", file=sys.stderr)
         sys.exit(2)
+    src_web = src_root / "web"
     if not (src_web / "index.html").exists():
         print(f"错误: {src_web} 无前端产物 — 先 build web（deploy 不触发构建——D266）", file=sys.stderr)
         sys.exit(2)
-    prefix_p = Path(prefix)
-    bin_dir = prefix_p / "bin"
     try:
         bin_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -699,22 +758,42 @@ def _cmd_deploy_server(prefix: str) -> None:
         sys.exit(1)
 
     # build:deploy 糖注入 --prefix out/<target>（host 惯例）——server 源即目标：原地装配模式，
-    # bin/web 拷贝必须跳过（SameFileError 防护 + rmtree 删源自毁防护），init 渲染照常。
+    # 跨树拷贝与 web rmtree 必须跳过（SameFileError 防护 + 删源自毁防护），init 渲染照常；
+    # 原地改名（upstream→brand）属同目录 os.rename，允许（branding-completion T1.3）。
     inplace = prefix_p.resolve() == src_root.resolve()
-    server_cli = bin_dir / _exe_name("mediaservo-server")
-    # 仅当该前缀二进制/oxmgr 真在跑（/proc/pid/exe 精确匹配）才走实例 stop——oxmgr CLI 在目标端口
-    # 无 daemon 时会回落触达同机其他 daemon（2026-08-31 drill 实证：空 prefix 的 stop 连坐杀了
-    # 外部 daemon 及其托管 app 簇）。闲置前缀根本不需要停；在跑时 stop 经派生端口寻址只收本簇。
-    if _pids_using(server_cli) or _pids_using(bin_dir / _exe_name("oxmgr")):
+    dst_bin = bin_dir / bin_name
+    server_cli = dst_bin
+    # 先停后动（PIT-170 同构：优雅 stop 先行，绝不靠 _copy/replace 强穿在跑二进制——否则
+    # _copy_with_kill 的 inode 击杀会绕过簇优雅停、inplace 改名会开 daemon 用陈旧 oxfile 重拉死路径的窗口）。
+    # 老名/新名两路径都查（改名前=老名在跑、上轮部署=新名在跑）；stop 用在场生命期二进制。
+    stop_bin = dst_bin if dst_bin.exists() else src_bin
+    running = _pids_using(dst_bin)
+    for cand in candidates:
+        if cand.name != dst_bin.name:
+            running = running or _pids_using(bin_dir / cand.name)
+    if running or _pids_using(bin_dir / _exe_name("oxmgr")):
         print("检测到运行中的 server 实例 — 先停本簇（重装不覆盖 etc/ 凭据）")
         try:
-            subprocess.run([str(server_cli), "stop", str(prefix_p)], capture_output=True, timeout=30, check=False)
+            subprocess.run([str(stop_bin), "stop", str(prefix_p)], capture_output=True, timeout=30, check=False)
         except subprocess.TimeoutExpired:
             print("  ⚠ 旧实例 stop 超时（可能是无生命周期的旧二进制）— 继续重装", file=sys.stderr)
+    # renamed 仅在发生/需要 upstream→brand 迁移时置真；同文件/同目录 no-op 不触发 oxfile 强刷
+    renamed = src_bin.name != bin_name and not (dst_bin.exists() and os.path.samefile(src_bin, dst_bin))
     if inplace:
-        print("  bin/mediaservo-server 原地（源=目标）— 跳过拷贝")
+        if renamed:
+            os.replace(src_bin, dst_bin)  # 同目录原子改名（src==dst 上游无 brand 场景不置 renamed，不到这里）
+            print(f"  bin 原地改名: {src_bin.name} → {bin_name}")
+        else:
+            print(f"  bin/{bin_name} 原地（源=目标）— 跳过拷贝")
+    elif renamed:
+        _copy_with_kill(src_bin, dst_bin)  # 上游名 → 品牌名（换名拷贝）
     else:
-        _copy_with_kill(src_bin, server_cli)  # server 不品牌化（D3）
+        if dst_bin.exists() and os.path.samefile(src_bin, dst_bin):
+            print(f"  bin/{bin_name} 已就位（源=目标同文件）— 跳过拷贝")
+        else:
+            _copy_with_kill(src_bin, dst_bin)
+    os.chmod(dst_bin, 0o755)
+    server_cli = dst_bin
     # 生命周期冒烟：out/ 可能是无 init/start 子命令的旧构建（旧二进制会把未知参数当守护参数直启）
     ver_line: str | None = None
     try:
@@ -733,10 +812,17 @@ def _cmd_deploy_server(prefix: str) -> None:
     oxmgr_src = shutil.which("oxmgr")
     if oxmgr_src is not None:
         _copy_with_kill(oxmgr_src, bin_dir / _exe_name("oxmgr"))
+        os.chmod(bin_dir / _exe_name("oxmgr"), 0o755)
         ov = subprocess.run([oxmgr_src, "--version"], capture_output=True, text=True, check=False)
         print(f"  oxmgr 已打包: {ov.stdout.strip() or ov.stderr.strip() or '?'}")
     else:
         print("错误: PATH 未找到 oxmgr — 未打包（运行时需它拉起进程簇）。安装: 下载 GitHub Releases 预编译 Rust 二进制（含 sha256/asc 校验，https://github.com/Vladimir-Urik/OxMgr/releases），或构建 oxmgr-src 后放 ~/.local/bin，再重跑 deploy server", file=sys.stderr)
+
+    # BLOCKER-3：bin 改名/换品牌迁移后 oxfile command 成死路径（init 遇已存在 oxfile 跳过——mod.rs 实证）
+    # → 删除令下方 init 以 current_exe 重渲染。判据=server 条目 command 基名 != 当前 bin 名
+    # （重复部署基名已一致 → 零 churn；fresh 树无 oxfile → init 正常渲染）。
+    if _drop_stale_server_oxfile(prefix_p, bin_name):
+        print("  ⚠ run/oxfile.toml 已失效删除——init 将重渲染；手工 [apps.env]（如 MEDIASERVO_ALLOW_DEV_CREDENTIALS）已被重置，需重新添加", file=sys.stderr)
 
     # etc 模板——已存在不覆盖（PIT-160；init 同样幂等，双保险）
     etc_dir = prefix_p / "etc"
@@ -765,18 +851,59 @@ def _cmd_deploy_server(prefix: str) -> None:
     # SFU 端口/公告隔离：部署前 export MEDIASERVO_SFU_PORT / MEDIASERVO_SFU_ANNOUNCED_IP，init 烘进 oxfile env
     _run_or_exit([str(server_cli), "init", str(prefix_p)])
 
-    print(f"server 已部署到 {prefix}" + ("（原地装配——渲染完成，可直接 start）" if inplace else ""))
-    print("  bin/    mediaservo-server（不品牌化——D3）+ oxmgr（D-H13 锁定）")
+    # bin 白名单（host 同构——deploy-ops ④）：非当前布局的 server 二进制删除
+    # （upstream 旧名/旧品牌残留；mediaservo-server 仅无 brand 布局保留）
+    for p in sorted(bin_dir.iterdir()):
+        if p.is_symlink() or not p.is_file():
+            continue
+        if p.name in {_exe_name("oxmgr"), bin_name}:
+            continue
+        if p.name.endswith("-server") or p.name == _exe_name("mediaservo-server"):
+            print(f"  清理部署残留: {p.name}")
+            p.unlink()
+
+    # 根级快捷名（host 同构——brand 非空只建 {brand}-server 链；brand 空 = 上游双快捷，永不建 "-server" 残名）
+    if brand:
+        shortcut_names = (shortcut,)
+    else:
+        shortcut_names = ("server", "mediaservo-server")
+    for link_name in shortcut_names:
+        link = prefix_p / link_name
+        if link.is_symlink() or link.exists():
+            link.unlink(missing_ok=True)
+        try:
+            link.symlink_to(f"bin/{bin_name}")  # 相对路径，前缀可搬迁
+            print(f"  已创建符号链接 {link} → bin/{bin_name}")
+        except OSError:
+            shutil.copy2(bin_dir / bin_name, link)
+            os.chmod(link, 0o755)
+            print(f"  已复制 {bin_name} 到 {link}（符号链接失败，回退到拷贝）")
+    # 旧品牌根级链清理（只碰指向本布局 bin/ 的 *-server 文件链，目录永不触碰）
+    for link in prefix_p.glob("*-server"):
+        if not link.is_symlink() or link.name == shortcut:
+            continue
+        try:
+            resolved = (prefix_p / link.readlink()).resolve()
+        except OSError:
+            continue
+        if resolved.parent == bin_dir.resolve() and link.name.endswith("-server"):
+            print(f"  清理旧品牌入口链: {link.name}")
+            link.unlink()
+
+    print(f"server 已部署到 {prefix}" + ("（原地装配——渲染完成，可直接 start）" if inplace else "")
+          + (f"（品牌 {brand}）" if brand else ""))
+    print(f"  bin/    {server_bin_name}（物理名品牌化——D269）+ oxmgr（D-H13 锁定）")
     print("  etc/    server/devices/accounts.yaml + Caddyfile + secret（重部署保留既有——PIT-160）")
     print("  web/    前端交付物整树平移（caddy 静态 root）")
     print("  run/    oxfile.toml + oxmgr/（OXMGR_DATA_DIR——C32 隔离）+ logs/")
+    print("  入口:   " + ", ".join(str(prefix_p / s) for s in shortcut_names) + f" → bin/{bin_name}")
     print("⚠ accounts.yaml 为 dev 占位模板（admin123 等）——裸机启动将 fail-fast（C35 守卫）:")
     print('    生产: export MEDIASERVO_ADMIN_PASSWORD=*** 后删 etc/accounts.yaml 重跑本 deploy')
     print('    联调: run/oxfile.toml server 条目 [apps.env] 加 MEDIASERVO_ALLOW_DEV_CREDENTIALS = "1"')
     print("下一步（实例目录命令, 本 CLI 运行分支已退役——C39）:")
-    print(f"  启动:   {server_cli} start {prefix}（仅后端: 加 --no-web；前端面过渡可用 mediaservo run web）")
-    print(f"  探测:   {server_cli} status {prefix}（退出码 0/1/2）| doctor {prefix}")
-    print(f"  开机锚点（操作方步骤, 一次性）: {server_cli} startup on {prefix}")
+    print(f"  启动:   {prefix_p / shortcut} start {prefix}（仅后端: 加 --no-web；前端面过渡可用 mediaservo run web）")
+    print(f"  探测:   {prefix_p / shortcut} status {prefix}（退出码 0/1/2）| doctor {prefix}")
+    print(f"  开机锚点（操作方步骤, 一次性）: {prefix_p / shortcut} startup on {prefix}")
 
 
 def _platform_tag() -> str:
@@ -949,9 +1076,11 @@ def _host_runtime_hint(action: str) -> None:
     print("            跑前清 iceoryx2 残留: rm -rf /tmp/iceoryx2 /dev/shm/iox2_*（C25）", file=sys.stderr)
 
 def _server_runtime_hint(action: str) -> None:
-    """server 运行已移除 CLI 封装（T21——C39 与 host 同待遇）：build=编译 / deploy=安装 / 运行=实例目录命令。"""
+    """server 运行已移除 CLI 封装（T21——C39 与 host 同待遇）：build=编译 / deploy=安装 / 运行=实例目录命令。
+    bin 名品牌感知（D269——env MEDIASERVO_BRAND，缺省上游名）。"""
+    sb = f"{os.environ.get('MEDIASERVO_BRAND', '')}-server" if os.environ.get("MEDIASERVO_BRAND", "") else "mediaservo-server"
     print(f"{action} server 已移除 CLI 封装——请经实例目录运行:", file=sys.stderr)
-    print("  部署实例: <prefix>/bin/mediaservo-server start|stop|restart|status <prefix>（未部署: mediaservo deploy server --prefix <X>）", file=sys.stderr)
+    print(f"  部署实例: <prefix>/bin/{sb} start|stop|restart|status <prefix>（未部署: mediaservo deploy server --prefix <X>；裸机入口 <prefix>/{sb}）", file=sys.stderr)
     print("  开发:     target/debug/mediaservo-server init . && start . --no-web（前端面: dev web=vite:5173 / run web=过渡 caddy）", file=sys.stderr)
     print("  容器（模式②③）: mediaservo up / down --env dev|prod 不变", file=sys.stderr)
     print("  只读探测保留: mediaservo status server | logs server", file=sys.stderr)
@@ -1017,7 +1146,7 @@ def _out_root() -> Path:
 
 
 def _stage_to_out(target: str, files: list[Path], sub: str = "bin", brand: str = "") -> list[Path]:
-    """拷贝 target/debug|release 产物到 out/<target>/<sub>（交付布局镜像）；brand 非空时物理重命名：host-<app> → <brand>-<app>、mediaservo-host → <brand>-host（D3：client/其他不品牌）。"""
+    """拷贝 target/debug|release 产物到 out/<target>/<sub>（交付布局镜像）；brand 非空时物理重命名：host-<app> → <brand>-<app>、mediaservo-host → <brand>-host（server 物理名品牌化在 deploy 段——D269）。"""
     dst = _out_root() / target / sub
     dst.mkdir(parents=True, exist_ok=True)
     staged = []
@@ -1339,11 +1468,19 @@ def _cmd_clean(args: argparse.Namespace) -> None:
                     if Path(f"/proc/{pid}").exists():
                         subprocess.run(["kill", "-9", str(pid)], check=False)
             etc_d, logs_d, _ = _native_runtime_dirs()
-            for f in (logs_d / "server-native.pid", logs_d / "server-native.log",
-                      logs_d / "web-native.pid", logs_d / "web-native.log",  # 过渡 caddy 运行态（T6 漏网补清）
-                      _out_root() / "server" / "bin" / "mediaservo-server",
-                      _out_root() / "server" / "web",  # 前端交付树（T21: build web 产物随 clean 回收）
-                      ROOT / "target/debug/mediaservo-server", ROOT / "target/release/mediaservo-server"):
+            out_server = _out_root() / "server"
+            targets = [logs_d / "server-native.pid", logs_d / "server-native.log",
+                       logs_d / "web-native.pid", logs_d / "web-native.log",  # 过渡 caddy 运行态（T6 漏网补清）
+                       out_server / "bin" / _exe_name("mediaservo-server"),
+                       out_server / "web",  # 前端交付树（T21: build web 产物随 clean 回收）
+                       ROOT / "target/debug/mediaservo-server", ROOT / "target/release/mediaservo-server"]
+            # MAJOR-C 品牌态两名全清 + 根级快捷链（glob 只收文件/链，目录永不触碰）
+            targets += [f for f in sorted((out_server / "bin").glob("*-server")) if f.is_file()]
+            targets += [f for f in sorted(out_server.glob("*-server")) if f.is_symlink()]
+            _sv = out_server / "server"  # 无品牌快捷链（brand="" 布局）
+            if _sv.is_symlink():
+                targets.append(_sv)
+            for f in targets:
                 _rm_path(f)
             for d in sorted((_out_root() / "server" / "run").glob("oxmgr*")):
                 _rm_path(d)  # out 轨演练残留 daemon 数据（C32——prefix 下的 run/ 归实例生命周期, 不在此列）
@@ -1694,7 +1831,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""三模式速查（native=裸机 compose=容器）:
   模式① 裸机交付: build server（bin/etc/web 装配）→ deploy server --prefix <X> →
-             <X>/bin/mediaservo-server init/start/stop/status/restart/doctor <X>（startup on=开机锚点）
+             <X>/<brand>-server init/start/stop/status/restart/doctor <X>（startup on=开机锚点；bin 物理名品牌化 D269）
     快速通道: build web（仅前端→out/server/web）| dev web（vite:5173 热更, 配 start --no-web）
              | run web（过渡独立 caddy :8080——Phase 6 后归实例进程簇）
   模式② 单容器生产: build server --image runtime → up --env prod → logs server --env prod
