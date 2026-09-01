@@ -280,6 +280,8 @@ mediaservo-webrtc = { path = "../mediaservo-webrtc", features = ["backend-webrtc
 
 **来源**：用户显式批准（2026-08-26 three-mode-build T6）+ mediasoup/livekit/Deno/Bun/Zed 调研 + T5 实证
 
+**2026-09-01 品牌化修订（branding-completion, D269）**: 裸机 server 交付物理名 = `{brand}-server`（deploy 装配时改名 + 根级快捷 symlink `{prefix}/{brand}-server`）；`build server` staging 仍落 cargo 名（品牌化归 deploy）；`deploy server` 支持双探源幂等（免重 build 重部署）+ 陈旧 oxfile command 自动重渲染；`mediaservo-client` 不再随 host 树；`clean server` 品牌态双名回收。命令矩阵中 `<X>/bin/mediaservo-server` 实例命令一律替换为 `<X>/<brand>-server`（或 bin/ 下同左）。
+
 **2026-08-31 分离修订（frontend-process-split）**: 矩阵追加 `build web`（静态产物→out/server/web）
 与 `run/stop/restart/status web`（过渡态 caddy）；`build server` 默认=不嵌入变体（default features 翻转），
 模式②嵌入经 `--image runtime` 显式化。`run/start/stop/restart server` 将在 Phase 6 后退役→转发

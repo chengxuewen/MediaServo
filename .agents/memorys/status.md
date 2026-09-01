@@ -130,7 +130,18 @@ Host (macOS) → WS :9800 → Docker Server → WS :9800 → Client (macOS)
 - ✅ Host RTP parameters 修复 — payloadType + H264 codec
 - ✅ WebRtcServer 单端口 — port 20000
 
-### 下一步
+#### 2026-09-01: branding-completion — 裸机物理名品牌化收口（D269）
+
+| 项 | 状态 | 说明 |
+|----|------|------|
+| server 品牌装配（`bin/{brand}-server`+根级快捷） | ✅ | 双探源幂等/`_derive_brand_server`/oxfile 陈旧检测强刷/白名单/clean 品牌态（Momus 3 BLOCKER 全修） |
+| `mediaservo-client` 出 host 树 | ✅ | tar 契约收窄；白名单同轮清存量；build/stop client cargo 面不动 |
+| `host-streamer` 兼容链退役 | ✅ | 实证冗余（oxfile 全指 msrtc-*、src 字面量仅测试）；streamer 自报 src 改 app_prefix 派生（默认品牌逐字节不变） |
+| 验收 | ✅ | /tmp 矩阵全绿：fresh/迁移/二次部署/空brand防护/clean/package tar/host 布局/真实起停+登录 200 |
+| 事故 | 2 | PIT-171 内联凭证脱敏假 401（系统无 bug）；PIT-172 cp -al 夹具 pid 硬链 → clean 误杀生产 9800（已恢复为 oxmgr 簇管理，restart_policy 自愈） |
+| 生产迁移 | ⏳ 待用户 | `out/server` 重跑 `build:deploy server` 自动改名迁移（oxfile 重渲染+[apps.env] 手工项需重加——当前 live 有 RUST_LOG/ALLOW_DEV 两条，迁移后按提示重加）；out/host 集群拔链切换 = 下次例行 deploy 生效（本轮二进制未重编，旧链保险丝随 cli 拔除——**注**：现存 8/28 msrtc-host 二进制 spawn 走 oxfile command 路径，无风险） |
+
+## 下一步
 
 1. Host RTP 发送 — 需要 ICE/DTLS 握手完成（当前 webrtc-rs PeerConnection 无 candidate pairs）
 2. Playwright 端到端验证

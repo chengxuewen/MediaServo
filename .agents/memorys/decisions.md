@@ -714,3 +714,10 @@ systemd 仅作开机锚点；compose 轨道无 oxmgr。④ `msrtc-server` 单二
 PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构建性。
 
 **参考**：.sisyphus/plans/frontend-process-split/（主仓，含 Momus 审核修复轮）。
+
+## D269: 品牌化统一收口——裸机物理二进制名 = 品牌名（2026-09-01，branding-completion）
+- **背景**: D3 实施期引申"server/client 不品牌化"与三层口径矛盾（msrtc.sh L94 承诺品牌覆盖 server、主仓 README《品牌化边界》明文 msrtc-host/msrtc-server/msrtc-client、D262/commands.md 行文全用 msrtc-server）。
+- **决策**: ① server 裸机物理名品牌化 `bin/{brand}-server` + 根级快捷 `{prefix}/{brand}-server` symlink（host 同构）；② `mediaservo-client` 移出 host 树（舱端工具不属车端部署树，`package host` tar 契约收窄；`stop client`/`build host` cargo 面不动）；③ `host-streamer` 兼容链退役（实证 install-host 时代防御冗余：oxfile command 全指 bin/msrtc-*，gateway src 字面量仅存测试；streamer 自报 src 改 app_prefix 运行时派生，默认品牌逐字节不变）；④ `build server` staging 仍落 cargo 名——品牌化归 deploy（D266 职责分层）。
+- **三 BLOCKER 修复（Momus 审核）**: deploy 入口早守卫双探源（upstream→{brand}，免重 build 幂等）；`_derive_brand_server` 专用派生（env→目标树→源树三级回退 + 空 brand 防御断言）；oxfile 陈旧 command 检测（server 条目基名 ≠ 当前 bin → 删除令 init 以 current_exe 重渲染 + 手工 [apps.env] 重置警告）。
+- **unit/namespace 澄清**: `server_namespace()={bin_prefix}server` 早已随 env 品牌隔离（磁盘实证 namespace=msrtc-server），非本变更新增；brand.rs 未动（SDK/绑定面契约不变）。
+- **影响**: T14 手册/帮助面/指引文案二进制名品牌参数化；clean 品牌态双名+根链回收；生产 out/server 迁移 = 下次 `build:deploy server` 自动完成（改名触发 oxfile 重渲染）。

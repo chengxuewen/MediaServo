@@ -6,7 +6,7 @@
 
 ```
 浏览器 ──HTTPS──▶ caddy（web 层）──┬── /            静态 out/server/web（vite dist）
-                                    └── /api /ws 等  反代 127.0.0.1:9800 → mediaservo-server
+                                    └── /api /ws 等  反代 127.0.0.1:9800 → server 实例
 host-agent ──/ws 直连 9800（D-2=B 一期姿势，不经过 caddy）
 媒体面 RTP/UDP 直连 server（不受 web 层影响，不可代理）
 ```
@@ -28,11 +28,11 @@ host-agent ──/ws 直连 9800（D-2=B 一期姿势，不经过 caddy）
 ```bash
 export MEDIASERVO_ADMIN_PASSWORD='***'      # 生产首启必设（dev 模板账号裸机 fail-fast，C35 守卫）
 ./msrtc.sh deploy server --prefix /opt/msrtc-server      # /opt 需 root；幂等重跑保 etc 凭据（PIT-160）
-# 落地树：<prefix>/{bin/mediaservo-server,bin/oxmgr,etc/*,web/,run/{oxfile.toml,oxmgr/,logs/}}
-<..>/bin/mediaservo-server startup on /opt/msrtc-server  # 开机锚点（systemd user unit → oxmgr daemon）
+# 落地树：<prefix>/{bin/<brand>-server,bin/oxmgr,etc/*,web/,run/{oxfile.toml,oxmgr/,logs/},<brand>-server→bin/（D269 品牌物理名+根级快捷）}
+<prefix>/<brand>-server startup on /opt/msrtc-server  # 开机锚点（systemd user unit → oxmgr daemon）
 loginctl enable-linger                                   # 建议：无登录会话也存活
-<..>/bin/mediaservo-server status /opt/msrtc-server      # 0=健康 1=降级 2=未运行（脚本可消费）
-<..>/bin/mediaservo-server doctor /opt/msrtc-server      # 退出码=失败数（PATH/端口/yaml/web dist/announced IP）
+<prefix>/<brand>-server status /opt/msrtc-server      # 0=健康 1=降级 2=未运行（脚本可消费）
+<prefix>/<brand>-server doctor /opt/msrtc-server      # 退出码=失败数（PATH/端口/yaml/web dist/announced IP）
 ```
 
 端口非默认时：改 `etc/server.yaml listen.port` 后，**手工同步** `etc/Caddyfile` 的
@@ -42,11 +42,11 @@ loginctl enable-linger                                   # 建议：无登录会
 ## 4. 日常运维（实例命令面 = msrtc-host 同款）
 
 ```bash
-mediaservo-server start [dir] [--no-web]   # oxmgr 整簇/仅后端；端口占用交互接管；caddy 缺→自动降级
-mediaservo-server stop|restart [dir]       # 全簇收敛（幂等；只按作用域地址操作本实例 daemon）
-mediaservo-server status [dir]             # server/web 两行 + /ready 探针列
-mediaservo-server logs [server|web|all] [dir]
-mediaservo-server monit|ps [dir]           # oxmgr TUI / 资源列
+<brand>-server start [dir] [--no-web]   # oxmgr 整簇/仅后端；端口占用交互接管；caddy 缺→自动降级
+<brand>-server stop|restart [dir]       # 全簇收敛（幂等；只按作用域地址操作本实例 daemon）
+<brand>-server status [dir]             # server/web 两行 + /ready 探针列
+<brand>-server logs [server|web|all] [dir]
+<brand>-server monit|ps [dir]           # oxmgr TUI / 资源列
 ```
 
 Python CLI 的 `run/start/stop/restart server` 已退役→指引（C39）；`run web` 保留过渡。

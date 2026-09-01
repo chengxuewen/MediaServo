@@ -550,9 +550,12 @@ async fn main() -> ExitCode {
     };
 
     // 推流会话（field PushSession 复用；D2: 经本地网关，无 PSK）
+    // 自报 src 品牌派生（D269/T2——display-only，gateway 快照/StatusReport 展示串，无匹配消费方；
+    // 默认品牌 app_prefix="host-" → 与旧字面量逐字节一致，零行为变化）
+    let app_prefix = mediaservo_common::brand::media_brand().app_prefix;
     let mut cfg = PushConfig::via_gateway(
         gateway_url(args.gateway.as_deref()),
-        format!("host-streamer-{}", stream.id),
+        format!("{app_prefix}streamer-{}", stream.id),
         room.clone(),
     );
     cfg.framerate = cam.fps;
@@ -576,7 +579,7 @@ async fn main() -> ExitCode {
     // 调度互拖 → 与视频 transport A 分离）。失败降级为纯视频（视觉可选 overlay）。
     let mut vision: Option<VisionNegotiation> = setup_vision_dc(
         &gateway_url(args.gateway.as_deref()),
-        &format!("host-streamer-{}-vision", stream.id),
+        &format!("{app_prefix}streamer-{}-vision", stream.id),
         &room,
     )
     .await;

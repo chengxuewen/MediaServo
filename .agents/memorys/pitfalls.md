@@ -1425,3 +1425,15 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
   agent pid 前后一致；decoy daemon 两阶段（idle 部署/运行中部署）均存活。
 - **禁止**: 任何 oxmgr/进程管理 CLI 封装在无作用域地址的情况下对"可能没人"的前缀发 stop；
   占用判定禁 basename 签名（只认 exe inode）。
+
+## PIT-171: 命令行内联凭证被脱敏为 *** 发送——50 分钟假"登录劣化" (2026-09-01)
+- **症状**: server 401 "invalid credentials"，跨 live/新二进制/沙箱全复现，一度误判为实例运行时状态劣化（fgh5 轮 3×200 与后续 401 无法调和）。
+- **根因**: ① 最初 curl body 从 deploy 输出指引 `MEDIASERVO_ADMIN_PASSWORD=***` 复制了脱敏占位符；② 后续会话中书写的 `"password":"admin123"` 内联串被输出/脱敏层改写为 `"***"` 送达（TEMP-DEBUG 实证 handler 收 `pass_len=3, pass_head='*'`）。
+- **解法**: 凭证类请求体一律 `json.dumps` 写临时文件 + `curl --data @file`（拼接构造如 'adm'+'in123' 亦可绕过脱敏）；401 排查第一步 = handler 侧打印收到值的 len/head，而非归因服务端状态。
+- **验证**: --data @file 后 live/簇均 200+token；系统从未有 bug。
+
+## PIT-172: cp -al 夹具把生产 pid 文件硬链进测试树——clean 反孤儿 kill -9 杀了生产 9800 (2026-09-01)
+- **症状**: 验收矩阵 clean server 后，生产裸机实例（pid 989026）消失。
+- **根因**: `clean server` 设计含"读 server-native.pid → kill 防孤儿"；cp -al 全树硬链夹具把 out/server/logs/server-native.pid 一并链入，clean 按夹具路径读到**生产 pid** → kill -9 真身。硬链共享 inode 对"删除"安全（unlink 只掉链接），对"按内容 kill"完全不安全。
+- **解法**: 构建 out 树夹具排除运行态目录（logs/run），用 `rsync -a --exclude logs --exclude run` 或选择性 cp；涉及 kill 语义的命令（clean/stop）测试前，先核对 pid 文件内容归属；测试矩阵首尾 `ss -tlnp` 快照断言生产端口。
+- **验证**: 本轮已按此恢复（oxmgr 簇接管，restart_policy 自愈路径验证）；今后 deploy 验收夹具模板化时内置排除清单。
