@@ -659,7 +659,10 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
     prefix_p = Path(prefix)
     bin_dir = prefix_p / "bin"
     # 品牌：环境（msrtc.sh 注入 MEDIASERVO_BRAND）优先，回退已有实例推导（重复部署零参数）
-    brand = os.environ.get("MEDIASERVO_BRAND", "") or _derive_brand(bin_dir)
+    # Python 布局与 Rust media_brand 对齐："mediaservo" 是显式默认，映射 legacy host-* 串。
+    brand_input = os.environ.get("MEDIASERVO_BRAND", "") or _derive_brand(bin_dir)
+    brand = "" if brand_input == "mediaservo" else brand_input
+    rust_brand = brand or "mediaservo"
     try:
         bin_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -722,8 +725,7 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
     if identity_file.exists():
         print(f"  identity.json 已存在——只写不删（设备身份保留）: {identity_file}")
     init_env = dict(os.environ)
-    if brand:
-        init_env["MEDIASERVO_BRAND"] = brand
+    init_env["MEDIASERVO_BRAND"] = rust_brand
     _run_or_exit([str(bin_dir / host_cli), "init", str(prefix_p)], env=init_env)
 
     # 快捷名（arch MED4：build 已物理改名为 <brand>-host——快捷指向品牌真实名；官方名回退 host/mediaservo-host）
@@ -754,8 +756,7 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
         '__MSRTC_ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"',
         'export PATH="${__MSRTC_ENV_DIR}/bin:$PATH"',
     ]
-    if brand:
-        env_lines.append(f'export MEDIASERVO_BRAND="{brand}"   # 品牌 env（D252），不覆盖用户预设')
+    env_lines.append(f'export MEDIASERVO_BRAND="{rust_brand}"   # 品牌 env（D252），部署包内显式钉死布局'),
     env_lines += [
         'BIN_DIR_MSRTC="${__MSRTC_ENV_DIR}/bin"   # 供脚本/别名引用',
         "unset __MSRTC_ENV_DIR",
@@ -770,7 +771,7 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
 
     print(f"host 已部署到 {prefix}（{'release' if release else 'debug'}）")
     print(f"  bin/    {', '.join(sorted(src_names))} + oxmgr")
-    print("  etc/    host.toml + link/{signing.pem,*.token}（host init 生成, 重装保留）")
+    print("  etc/    host.yaml + link/{signing.pem,*.token}（host init 生成, 重装保留）")
     print("  run/    logs/")
     print("  recordings/")
     print("  identity.json（0600, 设备身份 — 只写不删, 勿删）")
@@ -1044,26 +1045,29 @@ def _write_version_file(dst: Path, target: str) -> None:
         f"workspace_version: {ver}",
         "frame_meta_version: 1",     # FrameMeta 定长 LE 36B wire format（D243; link frame.rs）
         "token_schema_version: 1",   # MSTK 单文件自描述令牌字节版本 0x01（D238/D243; link token.rs）
-        "# host 包部署: tar 解包到前缀目录; 多设备共用同一包时, 每台删除 identity.json 后重跑",
-        "# `host init <prefix>`（幂等, 已存在凭据保留）生成独立设备身份（G4）",
+        "# host 包部署: 裸解包生成版本目录；落地到前缀目录用 `tar xzf <pkg>.tar.gz -C <prefix> --strip-components=1`",
+        "# 多设备共用同一包时, 每台删除 identity.json 后重跑",
+        "# `host init <prefix>`（幂等, 已存在凭据保留）生成独立设备身份（G4）"
     ]
     (dst / f"{target}-version.txt").write_text("\n".join(lines) + "\n")
 
 
 def _cmd_package(args: argparse.Namespace) -> None:
-    """package <target> — dist/<brand>-{host|server|sdk}-<ver>.tar.gz 多包发布（D-H13）。
+    """package <target> — <dist>/<brand>-{host|server|sdk}-<ver>.tar.gz 多包发布（D-H13）。
+    dist: --dist 指定输出目录；未指定时默认子模块 dist/（MSRTC 发布壳会注入 out/packages/）。
     server: staging 内跑 _cmd_deploy_server（bin+oxmgr/etc/web/init 幂等——与 host 同构, T20/T21）。
     host: staging 内跑 _cmd_deploy_host(staging)（Momus 裁决 b——identity 初始/oxmgr 锁定/
     etc 模板/env.sh 文件组装；build 仍无状态）+ tar 含 bin 8/oxmgr/etc/identity/run/logs/recordings。
     bindings: staging 拷贝 out/bindings（完整 SDK 布局——D241 三件套 version-full/.pc/cmake/
     wheel/node/cxx 头，Task 2.5 补齐）→ sdk 包。
-    staging 临时目录 → tar.gz; 包内含版本契约文件（host-version.txt / sdk-version.txt）。"""
+    staging 临时目录 → tar.gz; tar 内顶层为版本目录 {brand}-{target}-{ver}/，裸解包不会撒出凭据/二进制；
+    需要直接落地到前缀目录时用 `tar xzf package.tar.gz -C <prefix> --strip-components=1`。"""
     if sys.platform == "win32":
         print("package: Windows best-effort — 验证清单见 scripts/e2e-win-validate.ps1", file=sys.stderr)
     pkg_name = {"bindings": "sdk", "server": "server"}.get(args.target, "host")
     ver = _workspace_version()
-    dist = ROOT / "dist"
-    dist.mkdir(exist_ok=True)
+    dist = Path(args.dist) if getattr(args, "dist", "") else ROOT / "dist"
+    dist.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f"ms-{args.target}-pkg-", dir=str(dist)))
     try:
         if args.target == "host":
@@ -1074,12 +1078,13 @@ def _cmd_package(args: argparse.Namespace) -> None:
             _cmd_deploy_bindings(str(staging), args.release)
         _write_version_file(staging, pkg_name)
         prefix_name = args.brand if args.brand else "mediaservo"
-        out = dist / f"{prefix_name}-{pkg_name}-{ver}.tar.gz"
+        package_root = f"{prefix_name}-{pkg_name}-{ver}"
+        out = dist / f"{package_root}.tar.gz"
         strip_package_binaries(staging)  # PIT-119: debug 二进制未 strip（单 135-155MB）→ gzip 1.2GB 超时
         with tarfile.open(out, "w:gz", compresslevel=6) as tar:  # 默认 9 最慢; 6 工程折中
-            for entry in sorted(staging.iterdir()):
-                tar.add(entry, arcname=entry.name)  # 解包到前缀目录即为 D-H13 布局
+            tar.add(staging, arcname=package_root)  # 解包生成版本目录；--strip-components=1 可落前缀目录
         print(f"✓ 打包完成: {out}（{out.stat().st_size // 1024} KiB）")
+        print(f"  顶层目录: {package_root}/")
         print(f"  内容: {', '.join(sorted(e.name for e in staging.iterdir()))}")
     finally:
         shutil.rmtree(staging, ignore_errors=True)
@@ -2008,9 +2013,10 @@ def main() -> None:
     install_p = sub.add_parser("install", help="已改名 deploy（提示迁移后退出 exit 2）")
     install_p.add_argument("args", nargs=argparse.REMAINDER, help="吞掉旧调用点透传参数（T3 迁移前 msrtc.sh 仍注入 --prefix 等）——仅提示改名")
     install_p.set_defaults(func=_cmd_install_deprecated)
-    package_p = sub.add_parser("package", help="打包 <target>: host|server（交付包）| bindings（SDK 包）→ dist/<brand>-<host|server|sdk>-<ver>.tar.gz（D-H13 多包发布, 含版本契约文件）")
+    package_p = sub.add_parser("package", help="打包 <target>: host|server（交付包）| bindings（SDK 包）→ <dist>/<brand>-<host|server|sdk>-<ver>.tar.gz（D-H13 多包发布, 含版本契约文件和版本顶层目录）")
     package_p.add_argument("target", choices=["host", "server", "bindings"])
-    package_p.add_argument("--brand", default="", help="品牌包名（dist/<brand>-<target>-<ver>.tar.gz；缺省 mediaservo）")
+    package_p.add_argument("--dist", default="", help="package tar 与 staging 输出目录（默认 dist；MSRTC 发布壳默认 out/packages）")
+    package_p.add_argument("--brand", default="", help="品牌包名（<dist>/<brand>-<target>-<ver>.tar.gz；缺省 mediaservo）")
     package_p.add_argument("--release", action="store_true", help="打包 release 产物（target/release, 配合 build --release）")
     package_p.set_defaults(func=_cmd_package)
     clean_p = sub.add_parser("clean", help="清理 <target>: all|server|host|client（默认 all；server=原生清（默认）| --mode both 双清）")
