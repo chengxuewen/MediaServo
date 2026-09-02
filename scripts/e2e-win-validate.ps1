@@ -24,7 +24,7 @@
 #     备注: Windows 下二进制为 .exe（_exe_name 已处理）; oxmgr 需 npm install -g oxmgr
 
 # ── 2. 解包 + doctor ─────────────────────────────────────────────────────────
-# [ ] tar -xzf dist/mediaservo-host-<ver>.tar.gz -C C:\mediaservo-host  （Win10+ 自带 tar.exe）
+# [ ] mkdir C:\mediaservo-host; tar -xzf dist/mediaservo-host-<ver>.tar.gz -C C:\mediaservo-host --strip-components=1 （Win10+ 自带 tar.exe；包内顶层为 mediaservo-host-<ver>/）
 # [ ] C:\mediaservo-host\bin\host.exe doctor C:\mediaservo-host          # 期望: 全部通过
 #     备注: 包内 identity.json 为打包机生成的新鲜身份 — 多设备部署时每台删除后
 #     重跑 `host init <prefix>` 生成独立设备身份（G4; 见包内 host-version.txt）
