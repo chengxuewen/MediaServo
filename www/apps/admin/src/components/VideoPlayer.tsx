@@ -108,7 +108,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
           <video ref={videoRef} autoPlay playsInline muted />
           {status === 'connecting' && <div className="vp-status-msg">Connecting...</div>}
           {isTile && (status === 'connected' || status === 'playing') && (
-            <MiniStatsCard status={status} roomId={roomId} metrics={metrics} onExpand={() => setShowStats(true)} />
+            <MiniStatsCard status={status} metrics={metrics} onExpand={() => setShowStats(true)} />
           )}
           {isDisconnected && <DisconnectedOverlay status={status} />}
         </div>
@@ -171,22 +171,37 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
   );
 }
 
-function MiniStatsCard({ status, roomId, metrics, onExpand }: {
-  status: ConnectionStatus; roomId: string; metrics: StreamMetrics | null; onExpand: () => void;
+function MiniStatsCard({ status, metrics, onExpand }: {
+  status: ConnectionStatus; metrics: StreamMetrics | null; onExpand: () => void;
 }) {
-  // T1-a 消解：connected 即渲染，不等首个 getStats tick（2s）；metrics null 时字段占位。
+  // T1-a 消解：connected 即渲染，不等首个 getStats tick（2s）；metrics null → 占位。
+  // 产品精化（2026-09-01 采纳）：核心六指标 2列×3行常驻，编解码/系统详情走大面板二次点击。
   const fmtKbps = (k: number) => (k >= 1000 ? `${(k / 1000).toFixed(1)}M` : `${Math.round(k)}K`);
   const live = status === 'playing';
+  const cells: Array<[string, string]> | null = metrics && live
+    ? [
+        ['帧率', `${metrics.fps}fps`],
+        ['分辨率', metrics.resolution === 'unknown' ? '—' : metrics.resolution],
+        ['码率', fmtKbps(metrics.bitrate)],
+        ['抖动', `${metrics.jitter}ms`],
+        ['延时', `${metrics.rtt}ms`],
+        ['丢包', `${metrics.packetLoss}%`],
+      ]
+    : null;
   return (
     <div className="vp-mini-stats" onClick={(e) => { e.stopPropagation(); onExpand(); }} title="点击展开详细统计">
-      <span className={`ms-dot ms-${status}`} />
-      <span className="ms-state">{live ? 'LIVE' : '…'}</span>
-      <span className="ms-name">{roomId}</span>
-      <span className="ms-vals">
-        {metrics && live
-          ? `${metrics.fps}fps · ${metrics.resolution} · ${fmtKbps(metrics.bitrate)} · ${metrics.rtt}ms`
-          : '—'}
-      </span>
+      <div className="ms-head">
+        <span className={`ms-dot ms-${status}`} />
+        <span>{live ? 'LIVE' : '…'}</span>
+        {!cells && <span className="ms-vals">等待数据…</span>}
+      </div>
+      {cells && (
+        <div className="ms-grid">
+          {cells.map(([k, v]) => (
+            <div key={k} className="ms-cell"><span className="ms-k">{k}</span><span className="ms-v">{v}</span></div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
