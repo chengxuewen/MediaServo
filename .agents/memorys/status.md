@@ -622,7 +622,7 @@ install                        → 改名提示 + exit 2（退役）
 |----|------|------|
 | ① 列数选择器 | ✅ | 默认 3/上限 4（产品裁决），localStorage `mediaservo_play_cols` + 脏值防御；F5 持久实测 |
 | ② 全宽自适应 | ✅ | `.dashboard` 960px 锁除；2560 视口 grid 2312=可用宽 100%；tile aspect 裁切连带修复（16:9 归 vp-body） |
-| ③ mini stats 常驻卡 | ✅ | tile 左上 connected 即显（T+16ms）；**产品精化（用户采纳 A 案）**：核心六指标 2列×3行常驻（帧率/分辨率/码率/抖动/延时/丢包，遮挡 ~15% 实测），编解码/系统详情走大面板二次点击（滚动化不遮死）；tile 底部 bar 退役、✕ 解禁 |
+| ③ mini stats 常驻卡 | ✅ | tile 左上 connected 即显（T+16ms）；**产品精化（用户采纳 A 案）**：核心六指标 2列×3行常驻（帧率/分辨率/码率/抖动/延时/丢包，遮挡 ~15% 实测），编解码/系统详情走大面板二次点击（滚动化不遮死；面板已去重——「连接质量」组移除，六项以常驻卡为唯一呈现，modal 由 top/bottom bar 覆盖）；tile 底部 bar 退役、✕ 解禁 |
 | ③ 断联遮罩双态 | ✅ | 「连接失败/无法建立 WebRTC 连接」vs「连接已断开/视频流已中断」双态实盘（A9+A14）；遮罩盖画面不盖 top-bar |
 | ④ lucide 全站 | ✅ | 32 处 emoji→SVG 零残留；bundle +12KB gzip+3KB |
 | Uptime→Peers 卡 | ✅ | T1 定性改判：server 无 uptime 源、前端契约臆造（StatsResponse 三字段对齐 server 实况）；用户裁决换 Peers |

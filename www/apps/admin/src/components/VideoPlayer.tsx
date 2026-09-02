@@ -134,17 +134,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
         {/* Detail stats panel — v2 (web-stream-stats T5): ToDesk 风格分组 */}
         {showStats && metrics && (
           <div className="vp-stats-panel" onClick={(e) => e.stopPropagation()}>
-            <h4>Stream Stats</h4>
-            {/* 连接质量 */}
-            <h5>连接质量</h5>
-            <div className="stats-grid">
-              <div><label>帧率</label><span>{metrics.fps}fps</span></div>
-              <div><label>延时</label><span>{metrics.rtt}ms</span></div>
-              <div><label>丢包</label><span>{metrics.packetLoss}%</span></div>
-              <div><label>码率</label><span>{Math.round(metrics.bitrate)}Kbps</span></div>
-              <div><label>抖动</label><span>{metrics.jitter}ms</span></div>
-              <div><label>分辨率</label><span>{metrics.resolution}</span></div>
-            </div>
+            <h4>Stream Details</h4>
             {/* 编解码器（Host EncoderStatus + 浏览器解码器） */}
             <h5>编解码器</h5>
             <div className="stats-grid">
