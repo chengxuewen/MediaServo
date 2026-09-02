@@ -1453,3 +1453,34 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: **构造注入法**——`addInitScript` 包一层 `window.WebSocket`，按标志位（`window.__wsFail`）+ URL 后缀（`/ws`）精准抛错，其它 WS 通道（admin events）不碰；`new WebSocket` throw 沿 `connect().catch` 走真实 error 状态机，验的是产品代码路径而非 mock。
 - **验证**: a14 独立脚本 PASS（截图 t11-failed.png「连接失败」）；同类需求（网络断开/超时注入）一律先想构造注入，再想 route。
 - **附带**: 3 个 context 并发的长跑脚本崩溃假象多源于此；验收脚本按 context 拆小文件跑。
+
+## PIT-175: package tar flat layout 容易撒出包内容 (2026-09-02)
+- **症状**: host/server/bindings tar 解包直接生成 `bin/`、`etc/`、`identity.json` 等根级内容；直接 `tar -xzf` 会污染当前目录。
+- **根因**: `_cmd_package()` 原使用逐 entry `tar.add(entry, arcname=entry.name)`，包内容是“前缀目录内容”，不是常见发布包的版本顶层目录。
+- **解法**: host/server/bindings 包统一改为 `tar.add(staging, arcname=f"{brand}-{target}-{ver}")`；需要前缀落地用 `--strip-components=1`；`e2e-package.sh` 同步断言 `$ROOT/bin/...` 和解包 `$TMP/extract/$ROOT`。
+- **验证**:
+  ```bash
+  tar -tzf dist/mediaservo-host-0.1.0.tar.gz | awk -F/ '{print $1}' | sort -u
+  bash -n scripts/e2e-package.sh
+  ```
+
+## PIT-176: MEDIASERVO_BRAND=mediaservo 在 Python 与 Rust 映射不一致 (2026-09-02)
+- **症状**: 直接跑 package/e2e 时，Python deploy 可能把 `host-agent` 复制成 `mediaservo-agent`，或临时包 start 生成/查找 `msrtc-agent` 但 bin 下只有 `host-agent`，spawn failure。
+- **根因**: Rust `media_brand_from(Some("mediaservo"))` 视为显式默认，映射 legacy `host-*`；旧 Python `_cmd_deploy_host()` 把任意非空 env brand 都当自定义品牌。当前本机 target/debug 二进制可能编译期带 `msrtc` brand，unset env 不会回到 legacy 布局。
+- **解法**: Python 部署层归一化 `MEDIASERVO_BRAND=mediaservo` 为空布局，同时给 init/env 传 `rust_brand=brand or "mediaservo"`，用显式默认覆盖编译期 brand。MSRTC 用户传 `msrtc` 时保持品牌化布局。
+- **验证**:
+  ```bash
+  python3 -m py_compile scripts/mediaservo_cli.py
+  env MEDIASERVO_BRAND=mediaservo python3 scripts/mediaservo_cli.py package host --dist /tmp/pkg-brand-test
+  tar -tzf /tmp/pkg-brand-test/mediaservo-host-0.1.0.tar.gz | grep '/bin/host-agent$'
+  ```
+
+## PIT-177: RoomJoin 4031 owner 冲突会伪装成 streamer 5001 推流失败 (2026-09-02)
+- **症状**: server healthy，host agent 连上后被 `room join failed [4031]: device host-x1 cannot join room owned by another vehicle dev-host (room=vehicle)` 拒绝；streamer/controller/audio/emergency 全报 `[5001]: gateway not connected to server`，但 capturer FrameBus topic 仍有 30fps。
+- **根因**: server `room_owners` 是连接期房间主登记；默认 room `vehicle` 被旧设备占用后，不同 device 不能加入。agent 未 joined 时本地网关拒绝子进程上游请求，streamer 直接 exit，形成黑屏/无 producer。
+- **解法**: 多 host 共用一个 server 时配置唯一 `signaling.room`；复用默认房间必须让旧 owner 房间完全空掉（host/remote/consumer 都离开）触发 `room_owners.remove(room)`，或重启 server 清内存态。排查黑屏先按 C38，但 4031 证据优先于 codec/ICE。
+- **验证**:
+  ```bash
+  grep -E "room join failed \[4031\]|gateway not connected to server" out/host/run/logs/msrtc-agent.*.log out/host/run/logs/msrtc-streamer-*.err.log
+  grep -E "capture device negotiated|camera/cam0|fps" out/host/run/logs/msrtc-capturer-cam0.out.log
+  ```

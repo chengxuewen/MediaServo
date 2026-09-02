@@ -739,3 +739,8 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 **否决项**：现在对外发布（移动靶期定契约）；把 PIT-173 手拼 SDP 直接封装发布（反模式焊进契约）。
 
 **检查**：`grep -n "packages/mediaservo-sfu" www/pnpm-workspace.yaml`（a 完成后存在）；`grep -n "m=video 7 UDP" www/apps/admin/src/sfu/sfu-client.ts`（b 完成后应为 0 或迁移至包内参数化生成）。
+
+## D271: package tar 版本顶层目录契约 (2026-09-02)
+- **背景**: D-H13 原 host/sdk tar 内容按“前缀目录内容”设计，`tar -xzf` 裸解包会撒出 `bin/`、`etc/`、`identity.json`、`signing.pem` 和令牌；MSRTC 发布侧需要包名和目录名一致，并允许输出到主项目 `out/packages`。
+- **决策**: `mediaservo_cli.py package` 支持 `--dist` 指定 tar/staging 输出目录；未传时仍默认子模块 `dist/`。所有 package 目标（host/server/bindings）统一以 `{brand}-{target}-{ver}/` 作为 tar 顶层目录；需要直接落前缀目录时用 `--strip-components=1`。
+- **影响**: `e2e-package.sh`、Windows 验证清单和包内版本说明必须同步改为顶层目录契约；MSRTC 发布壳默认传 `--dist out/packages`，直接子模块调用保持原默认路径兼容。

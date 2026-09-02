@@ -637,3 +637,8 @@ install                        → 改名提示 + exit 2（退役）
 - host streamer 补发 EncoderStatus（2s stats 循环，room 声明=流子房间）+ gateway 豁免整车改写 + server relay_target_room 子房间路由；测试 host 6 + server 1 绿；实盘 PASS（浏览器 sniff 收到 + 面板 enc/real/mode/hostfps/avg 五值真）。
 - 部署事故×2 记训：① build:deploy host **未先 stop 旧实例** → cp ETXTBSY 崩在半程、簇被停半（正解：stop → build:deploy → start）；② out/server 簇今晨 dev-credentials PANIC crash loop（accounts.yaml 于 10:18 被改回 dev 占位哈希=有人跑过 accounts 初始化/重置，非代码 bug——ALLOW_DEV 在则无碍）。**server 自发重启根因仍未归**（10:11 running→10:40 崩窗口），遗留待查。
 
+
+### 2026-09-02: package-tar-topdir + brand normalization（主仓 package 联动）
+- CLI: `package` 增加 `--dist`，未传仍默认子模块 `dist/`；host/server/bindings tar 统一顶层 `{brand}-{target}-{ver}/`，`e2e-package.sh` 改为版本目录断言/解包路径。
+- host deploy: Python 品牌归一化——`MEDIASERVO_BRAND=mediaservo` 对齐 Rust 默认 legacy `host-*` 布局，同时给 host init/env.sh 显式传 `MEDIASERVO_BRAND` 覆盖编译期 brand。
+- 验证: `bash -n scripts/e2e-package.sh`、`py_compile`、结构 e2e 通过；带 oxmgr 的 full host lifecycle smoke 长跑未完，需后续拆步骤加 timeout。主仓当前 `./msrtc.sh package host` 成功输出 `out/packages/msrtc-host-0.1.0.tar.gz` 且 tar 顶层为 `msrtc-host-0.1.0/`。
