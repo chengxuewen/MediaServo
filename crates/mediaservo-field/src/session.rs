@@ -287,6 +287,11 @@ impl PushSession {
     }
 
     /// 获取底层 PeerConnection（escape hatch 用途；None 表示尚未 publish）。
+    /// 信令会话只读句柄（EncoderStatus 等周期控制消息上报——room 广播由 server relay；失败处理归调用方 C15/C16）。
+    pub fn signal(&self) -> &SignalSession {
+        &self.signal
+    }
+
     pub fn peer_connection(&self) -> Option<&RTCPeerConnection> {
         self.pc.as_ref()
     }

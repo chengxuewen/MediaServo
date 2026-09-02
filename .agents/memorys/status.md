@@ -622,13 +622,18 @@ install                        → 改名提示 + exit 2（退役）
 |----|------|------|
 | ① 列数选择器 | ✅ | 默认 3/上限 4（产品裁决），localStorage `mediaservo_play_cols` + 脏值防御；F5 持久实测 |
 | ② 全宽自适应 | ✅ | `.dashboard` 960px 锁除；2560 视口 grid 2312=可用宽 100%；tile aspect 裁切连带修复（16:9 归 vp-body） |
-| ③ mini stats 常驻卡 | ✅ | tile 左上 connected 即显（T+16ms）；**产品精化（用户采纳 A 案）**：核心六指标 2列×3行常驻（帧率/分辨率/码率/抖动/延时/丢包，遮挡 ~15% 实测），编解码/系统详情走大面板二次点击（滚动化不遮死；面板已去重——「连接质量」组移除，六项以常驻卡为唯一呈现，modal 由 top/bottom bar 覆盖）；tile 底部 bar 退役、✕ 解禁 |
+| ③ mini stats 常驻卡 | ✅ | tile 左上 connected 即显（T+16ms）；**产品精化（用户采纳 A 案）**：核心六指标 2列×3行常驻（帧率/分辨率/码率/抖动/延时/丢包，遮挡 ~15% 实测），编解码/系统详情走**浮层二次点击（Portal→body，fixed 浮于卡旁，与 tile 尺寸解耦——4 列小 tile 免遮挡；点外部/ESC 收起；面板已去重六项以卡为唯一呈现）**；tile 底部 bar 退役、✕ 解禁；**双击 tile→独立 modal 大窗（方案②）**|
 | ③ 断联遮罩双态 | ✅ | 「连接失败/无法建立 WebRTC 连接」vs「连接已断开/视频流已中断」双态实盘（A9+A14）；遮罩盖画面不盖 top-bar |
 | ④ lucide 全站 | ✅ | 32 处 emoji→SVG 零残留；bundle +12KB gzip+3KB |
 | Uptime→Peers 卡 | ✅ | T1 定性改判：server 无 uptime 源、前端契约臆造（StatsResponse 三字段对齐 server 实况）；用户裁决换 Peers |
-| encoder_status 断链 | 📋 另立项 | **断点=host streamer 算了从不发**（证据链全表见 evidence/t8-deferred.md）——~10 行 Rust 即通，server 转发/web 合并/enum 全就位；挂 D270 线前置小项 |
+| encoder_status 断链 | ✅ 已修（09-02） | 实际断点**两处串联**：host 从不发（E3 拆分迁移丢，补 build_encoder_status+log_stats 发送）+ gateway rewrite_room 截胡整车房间（补：该消息豁免改写 + server `relay_target_room` 按消息子房间路由，单测钉住）。教训：白名单放行≠路由正确（t8-deferred.md 有修订全案）|
 | 验收 | ✅ | 16/16（t11-results.json + 4 截图 + look_at 视觉复核）；Momus 两轮 0 BLOCKER |
 
 - 过程事故：开局撞 PIT-168 型黑洞（server 迁移致 streamer 会话死、房间无 producer）→ `msrtc-host restart out/host` 恢复——**PIT-168 触发面扩展：SIGKILL 之外，server 重建同样**；A14 验证法沉淀为 PIT-174（playwright 拦不了 WS，用构造注入）。
 - 提交：子模块 `feat(admin)`（www 12 文件 + 记忆）；主仓 gitlink+记忆+计划四件套+evidence+roadmap（C41 合规）。
 - 下一步衔接：D270-a 内包化（sfu-client→packages/mediaservo-sfu，独立小轮禁止混入本轮，范围外注已锁）。
+
+### 2026-09-02: encoder-status-chain 修复（play-layout-stats 遗留 c 象限闭环）
+- host streamer 补发 EncoderStatus（2s stats 循环，room 声明=流子房间）+ gateway 豁免整车改写 + server relay_target_room 子房间路由；测试 host 6 + server 1 绿；实盘 PASS（浏览器 sniff 收到 + 面板 enc/real/mode/hostfps/avg 五值真）。
+- 部署事故×2 记训：① build:deploy host **未先 stop 旧实例** → cp ETXTBSY 崩在半程、簇被停半（正解：stop → build:deploy → start）；② out/server 簇今晨 dev-credentials PANIC crash loop（accounts.yaml 于 10:18 被改回 dev 占位哈希=有人跑过 accounts 初始化/重置，非代码 bug——ALLOW_DEV 在则无碍）。**server 自发重启根因仍未归**（10:11 running→10:40 崩窗口），遗留待查。
+

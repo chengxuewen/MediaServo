@@ -147,6 +147,18 @@ impl State {
                 tracing::warn!(conn_id, "子进程 RoomLeave 被网关拦截（整车会话不因单进程离开而断）");
                 UpstreamAction::Drop
             }
+            // 流诊断消息（web-stream-stats host 侧补齐）：保留 streamer 声明的流子房间——
+            // server 按消息内 room 路由（relay_target_room）才能到达浏览器消费者；若改写成
+            // 整车房间则广播进浏览器不在的频道。无 pending 槽/无需 echo 缓存。
+            m @ SignalingMessage::EncoderStatus { .. } => {
+                if !self.joined {
+                    return UpstreamAction::Reply(SignalingMessage::Error {
+                        code: ERR_GATEWAY_DISCONNECTED,
+                        message: "gateway not connected to server".into(),
+                    });
+                }
+                UpstreamAction::Forward(m)
+            }
             mut m => {
                 rewrite_room(&mut m, &self.vehicle_room);
                 // CRITICAL-1: joined 检查先于一切状态记录 — 断线窗口内的请求

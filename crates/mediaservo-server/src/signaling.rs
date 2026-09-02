@@ -931,7 +931,10 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                         }
                     }
 
-                    match tx.send(text_str.clone()) {
+                    // 广播频道路由：EncoderStatus 按 streamer 声明的子房间（浏览器消费者在
+                    // 每流子房间频道），其余走整车会话频道（relay_room）。
+                    let out_tx = relay_target_room(&server, &text_str, &relay_room);
+                    match out_tx.send(text_str.clone()) {
                         Ok(n) => {
                             tracing::debug!("Forward: broadcast to {} receivers", n);
                             // ── Cache SDP + ICE for late-joiner replay
@@ -1575,6 +1578,20 @@ pub(crate) async fn handle_sfu_message(
     }
 }
 
+/// relay 消息的广播频道：`EncoderStatus` 按消息内声明的流子房间路由
+/// （浏览器消费者在 `vehicle_test` 类子房间频道，而设备会话频道在整车房间），
+/// 其余 relay 消息沿用会话房间。
+fn relay_target_room(
+    server: &SignalingServer,
+    text: &str,
+    fallback_room: &str,
+) -> tokio::sync::broadcast::Sender<String> {
+    match serde_json::from_str::<SignalingMessage>(text) {
+        Ok(SignalingMessage::EncoderStatus { room_id, .. }) => server.get_or_create_channel(&room_id),
+        _ => server.get_or_create_channel(fallback_room),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1594,6 +1611,36 @@ mod tests {
         {
             SignalingServer::new(1 << 20, None)
         }
+    }
+
+    #[tokio::test]
+    async fn relay_target_room_routes_encoder_status_to_subroom() {
+        let server = new_test_server().await;
+        let msg = serde_json::to_string(&SignalingMessage::EncoderStatus {
+            room_id: "vehicle_test".into(),
+            peer_id: "host-1".into(),
+            codec: "video/H264".into(),
+            encoder_backend: "software".into(),
+            encoder_implementation: Some("OpenH264".into()),
+            frames_per_second: 30.0,
+            frame_width: 1280,
+            frame_height: 720,
+            avg_encode_ms: Some(3.0),
+        })
+        .unwrap();
+        let mut sub_rx = server.get_or_create_channel("vehicle_test").subscribe();
+        let mut whole_rx = server.get_or_create_channel("vehicle").subscribe();
+        relay_target_room(&server, &msg, "vehicle").send("es".into()).unwrap();
+        assert_eq!(sub_rx.try_recv().unwrap(), "es", "EncoderStatus 应落消息声明的子房间频道");
+        assert!(whole_rx.try_recv().is_err(), "不应落整车频道");
+        let sdp = serde_json::to_string(&SignalingMessage::Sdp {
+            room_id: "whatever".into(),
+            target: None,
+            sdp: "s".into(),
+        })
+        .unwrap();
+        relay_target_room(&server, &sdp, "vehicle").send("sdp".into()).unwrap();
+        assert_eq!(whole_rx.try_recv().unwrap(), "sdp", "非 EncoderStatus 沿用 fallback 房间");
     }
 
     #[tokio::test]

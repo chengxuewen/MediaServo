@@ -312,7 +312,7 @@ async fn handle_vision_signal(
 
 #[cfg(test)]
 mod tests {
-    use super::{gateway_url, vision_meta_ok, vision_payload_text, vision_topic};
+    use super::{build_encoder_status, gateway_url, vision_meta_ok, vision_payload_text, vision_topic};
     use mediaservo_link::FrameMeta;
 
     #[test]
@@ -353,6 +353,30 @@ mod tests {
         );
         assert_eq!(vision_payload_text(&[0xff, 0xfe]), None, "非 UTF-8 载荷拒绝（协议违反）");
     }
+
+    #[test]
+    fn encoder_status_wire_matches_web_contract() {
+        // 字段名与 sfu-client.ts msg.* 消费面逐字对齐（web-stream-stats 断链正在于无人发送）。
+        let v = serde_json::to_value(build_encoder_status(
+            "vehicle_test", "host-1", "h264", "software",
+            Some("OpenH264".into()), 30.0, 1280, 720, Some(3.1),
+        ))
+        .unwrap();
+        assert_eq!(v["type"], "encoder_status");
+        assert_eq!(v["room_id"], "vehicle_test");
+        assert_eq!(v["codec"], "video/H264");
+        assert_eq!(v["encoder_backend"], "software");
+        assert_eq!(v["encoder_implementation"], "OpenH264");
+        assert_eq!(v["frames_per_second"], 30.0);
+        assert_eq!(v["frame_width"], 1280);
+        assert_eq!(v["avg_encode_ms"], 3.1);
+        let v2 = serde_json::to_value(build_encoder_status(
+            "r", "p", "vp8", "auto", None, 0.0, 0, 0, None,
+        ))
+        .unwrap();
+        assert!(v2.get("encoder_implementation").is_none() && v2.get("avg_encode_ms").is_none());
+        assert_eq!(v2["codec"], "video/VP8");
+    }
 }
 
 /// 紧凑 I420 payload 校验（线格式假设: tight strides Y + U + V）。
@@ -384,7 +408,39 @@ async fn shutdown_signal() -> std::io::Result<()> {
 /// 编码耗时增量基线（ΔtotalEncodeTime/ΔframesEncoded——web stats 面板 avg_encode_ms）
 static LAST_ENCODE: std::sync::Mutex<Option<(f64, u64)>> = std::sync::Mutex::new(None);
 
-fn log_stats(session: &PushSession, bus: &FrameBus, topic: &FrameTopic, started: Instant, codec: &str) {
+/// codec 标识 → W3C mimeType（web 面板 `codec.replace('video/','')` 显示约定）。
+fn codec_mime(codec: &str) -> String {
+    format!("video/{}", codec.to_uppercase())
+}
+
+/// 组 EncoderStatus（v2 协议消息——server relay / web 合并两侧早已就位，host 发送端
+/// 系 E3 多进程拆分迁移时丢失的旧 host 行为，此处补齐；wire shape 有单测钉住）。
+#[allow(clippy::too_many_arguments)]
+fn build_encoder_status(
+    room_id: &str,
+    peer_id: &str,
+    codec: &str,
+    backend: &str,
+    encoder_implementation: Option<String>,
+    frames_per_second: f64,
+    frame_width: u32,
+    frame_height: u32,
+    avg_encode_ms: Option<f64>,
+) -> SignalingMessage {
+    SignalingMessage::EncoderStatus {
+        room_id: room_id.into(),
+        peer_id: peer_id.into(),
+        codec: codec_mime(codec),
+        encoder_backend: backend.into(),
+        encoder_implementation,
+        frames_per_second,
+        frame_width,
+        frame_height,
+        avg_encode_ms,
+    }
+}
+
+async fn log_stats(session: &PushSession, bus: &FrameBus, topic: &FrameTopic, started: Instant, codec: &str, backend: &str) {
     let Some(pc) = session.peer_connection() else {
         return;
     };
@@ -443,6 +499,21 @@ fn log_stats(session: &PushSession, bus: &FrameBus, topic: &FrameTopic, started:
     };
     if let Err(e) = bus.publish(topic, &payload, &meta) {
         tracing::warn!(topic = %topic.as_str(), "stats 发布失败: {e}");
+    }
+    // EncoderStatus 上报（room 广播 relay 给同房间浏览器消费者；C15 失败打日志）。
+    let msg = build_encoder_status(
+        session.signal().room_id(),
+        session.signal().peer_id(),
+        codec,
+        backend,
+        o.encoder_implementation.clone(),
+        o.frames_per_second,
+        o.frame_width,
+        o.frame_height,
+        avg_encode_ms,
+    );
+    if let Err(e) = session.signal().send(msg).await {
+        tracing::warn!("encoder_status 发送失败: {e}");
     }
 }
 
@@ -698,7 +769,7 @@ async fn main() -> ExitCode {
                         tracing::warn!(seq = meta.seq, "write frame: {e}");
                     }
                     if last_stats.elapsed() >= STATS_INTERVAL {
-                        log_stats(&session, &bus, &stats_topic, started, &stream.codec);
+                        log_stats(&session, &bus, &stats_topic, started, &stream.codec, &args.encoder_backend).await;
                         last_stats = Instant::now();
                     }
                 }
