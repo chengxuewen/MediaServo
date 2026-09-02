@@ -26,6 +26,8 @@ export default function Dashboard() {
   // multi-stream P3: 勾选集（roomId = device_stream，与 deleteRoom 约定一致）+ 播放中列表
   const [selectedRooms, setSelectedRooms] = useState<Set<string>>(new Set());
   const [playingRooms, setPlayingRooms] = useState<string[]>([]);
+  // tile 双击→大窗播放（产品方案②）：独立 modal 实例，关闭即弃
+  const [modalRoom, setModalRoom] = useState<string | null>(null);
   const [cols, setCols] = useState<number>(() => {
     let v: number;
     try { v = Number(localStorage.getItem(PLAY_COLS_KEY)); } catch { v = NaN; }
@@ -161,11 +163,22 @@ export default function Dashboard() {
                 serverUrl={wsServerUrl()}
                 token={localStorage.getItem('mediaservo_admin_token') || ''}
                 variant="tile"
-                onClose={() => setPlayingRooms(prev => prev.filter(r => r !== roomId))}
+                onExpand={() => setModalRoom(roomId)}
+                onClose={() => { setPlayingRooms(prev => prev.filter(r => r !== roomId)); setModalRoom(prev => (prev === roomId ? null : prev)); }}
               />
             ))}
           </div>
         </>
+      )}
+      {modalRoom && (
+        <VideoPlayer
+          key={`modal-${modalRoom}`}
+          roomId={modalRoom}
+          serverUrl={wsServerUrl()}
+          token={localStorage.getItem('mediaservo_admin_token') || ''}
+          variant="modal"
+          onClose={() => setModalRoom(null)}
+        />
       )}
     </div>
   );

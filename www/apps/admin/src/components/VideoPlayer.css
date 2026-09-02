@@ -54,18 +54,20 @@
 .vp-metrics-bar:hover { color: #fff; }
 .vp-metrics-bar.disconnected { color: #e74c3c; justify-content: center; cursor: default; }
 
-/* Stats panel */
-.vp-stats-panel {
-  position: absolute; right: 8px; top: 40px; width: min(280px, 62%); max-height: calc(100% - 84px); overflow-y: auto;
-  background: rgba(0,0,0,.55); border-radius: 8px; padding: 1rem;
-  backdrop-filter: blur(2px); /* v2: 更透明 + 微模糊, 视频帧可见但文字仍可读 */
-  color: #ccc; font-size: .8rem; z-index: 10;
+/* 详情浮层（portal→document.body，fixed 浮于卡旁——产品方案① 2026-09-02） */
+.vp-stats-pop {
+  position: fixed; z-index: 300; width: 260px;
+  background: rgba(0,0,0,.78); border-radius: 6px; padding: .45rem .65rem .5rem;
+  backdrop-filter: blur(2px);
+  color: #ccc; font-size: 11px; line-height: 1.35;
+  box-shadow: 0 6px 24px rgba(0,0,0,.4);
 }
-.vp-stats-panel h4 { color: #fff; margin: 0 0 .75rem; }
-.vp-stats-panel h5 { color: #4da3ff; margin: .75rem 0 .4rem; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid #333; padding-bottom: .25rem; }
-.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
-.stats-grid label { color: #888; display: block; font-size: .7rem; }
-.stats-grid span { color: #fff; }
+.vp-stats-pop h4 { color: #fff; margin: 0 0 2px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vp-stats-pop h5 { color: #4da3ff; margin: 6px 0 2px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid #333; padding-bottom: 1px; }
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 12px; }
+.stats-grid > div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0; }
+.stats-grid label { color: #888; font-size: 10px; white-space: nowrap; }
+.stats-grid span { color: #fff; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 .vp-stats-close {
   position: absolute; top: 8px; right: 8px; background: none; border: none;
   color: #888; cursor: pointer; font-size: 1rem;

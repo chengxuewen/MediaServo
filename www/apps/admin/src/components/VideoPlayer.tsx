@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { SfuConsumerClient, type StreamMetrics } from '../sfu/sfu-client';
 import './VideoPlayer.css';
 import { X, VolumeX, Pause, Maximize, Zap, Package, Clapperboard } from 'lucide-react';
@@ -10,6 +11,8 @@ interface Props {
   onClose: () => void;
   /** modal=全屏浮层（默认）；tile=网格单元（多流并排，multi-stream P3） */
   variant?: 'modal' | 'tile';
+  /** tile 双击画面→外部打开大窗（产品方案②，2026-09-02） */
+  onExpand?: () => void;
 }
 
 type ConnectionStatus = 'connecting' | 'connected' | 'playing' | 'disconnected' | 'error';
@@ -22,7 +25,7 @@ const STATUS_COLORS: Record<ConnectionStatus, string> = {
   error: '#e74c3c',
 };
 
-export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant = 'modal' }: Props) {
+export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant = 'modal', onExpand }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const clientRef = useRef<SfuConsumerClient | null>(null);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -30,6 +33,42 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
   const [metrics, setMetrics] = useState<StreamMetrics | null>(null);
   const [showStats, setShowStats] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const [popPos, setPopPos] = useState<{ left: number; top: number } | null>(null);
+
+  // 详情浮层（portal→body，浮在卡旁，与 tile 尺寸解耦——产品方案① 2026-09-02）：
+  // 锚点=播放器矩形右侧，无空间翻左；点外部/ESC 收起；resize/scroll 跟随。
+  useEffect(() => {
+    if (!showStats) return;
+    const place = () => {
+      const a = rootRef.current?.getBoundingClientRect();
+      if (!a) return;
+      const W = 260, H = popRef.current?.offsetHeight ?? 180;
+      let left = a.right + 8;
+      if (left + W > window.innerWidth - 8) left = a.left - W - 8;
+      if (left < 8) left = Math.max(8, window.innerWidth - W - 8);
+      const top = Math.min(Math.max(8, a.top + 8), window.innerHeight - H - 8);
+      setPopPos({ left, top });
+    };
+    place();
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (popRef.current?.contains(t) || rootRef.current?.contains(t)) return;
+      setShowStats(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowStats(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [showStats]);
 
   useEffect(() => {
     // PIT-76: 首帧渲染时间观测
@@ -83,13 +122,16 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
 
   const isTile = variant === 'tile';
   return (
+    <>
     <div
       className={`video-player-overlay${isTile ? ' tile' : ''}`}
       onClick={isTile ? undefined : onClose}
     >
       <div
+        ref={rootRef}
         className={`video-player ${isDisconnected ? 'disconnected' : ''}${isTile ? ' tile' : ''}`}
         onClick={(e) => e.stopPropagation()}
+        onDoubleClick={isTile ? onExpand : undefined}
         onMouseMove={handleMouseMove}
         onMouseLeave={() => setShowControls(false)}
       >
@@ -131,33 +173,35 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
           </div>
         )}
 
-        {/* Detail stats panel — v2 (web-stream-stats T5): ToDesk 风格分组 */}
-        {showStats && metrics && (
-          <div className="vp-stats-panel" onClick={(e) => e.stopPropagation()}>
-            <h4>Stream Details</h4>
-            {/* 编解码器（Host EncoderStatus + 浏览器解码器） */}
-            <h5>编解码器</h5>
-            <div className="stats-grid">
-              <div><label>编码</label><span>{metrics.encoderImplementation ? (metrics.encoderImplementation.toLowerCase().includes('libvpx') || metrics.encoderImplementation.toLowerCase().includes('openh264') || metrics.encoderImplementation.toLowerCase().includes('libaom') ? '软编' : '硬编') : (metrics.encoderBackend === 'software' ? '软编' : metrics.encoderBackend && metrics.encoderBackend !== 'auto' ? '硬编' : '未知')}</span></div>
-              <div><label>实际编码器</label><span>{metrics.encoderImplementation || metrics.encoderBackend || '—'}</span></div>
-              <div><label>编码模式</label><span>{metrics.codec ? metrics.codec.replace('video/', '') : '—'}</span></div>
-              <div><label>解码器</label><span>{metrics.decoderImplementation || metrics.decoderCodec || '—'}</span></div>
-              <div><label>色度采样</label><span>4:2:0</span></div>
-              <div><label>HDR</label><span>已关闭</span></div>
-            </div>
-            {/* 系统性能（P3 占位） */}
-            <h5>系统性能</h5>
-            <div className="stats-grid">
-              <div><label>Host 帧率</label><span>{metrics.hostFps ? `${metrics.hostFps}fps` : '—'}</span></div>
-              <div><label>Host 分辨率</label><span>{metrics.hostResolution || '—'}</span></div>
-              <div><label>平均编码耗时</label><span>{metrics.avgEncodeMs != null ? `${metrics.avgEncodeMs.toFixed(1)}ms/帧` : '—'}</span></div>
-              <div><label>CPU/GPU</label><span>待 P3</span></div>
-            </div>
-            <button className="vp-stats-close" onClick={() => setShowStats(false)}><X size={14} /></button>
-          </div>
-        )}
       </div>
     </div>
+      {showStats && metrics && createPortal(
+        <div
+          ref={popRef}
+          className="vp-stats-pop"
+          style={popPos ? { left: popPos.left, top: popPos.top } : { left: -9999, top: -9999 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h4>Stream Details · {roomId}</h4>
+          <h5>编解码器</h5>
+          <div className="stats-grid">
+            <div><label>编码</label><span>{metrics.encoderImplementation ? (metrics.encoderImplementation.toLowerCase().includes('libvpx') || metrics.encoderImplementation.toLowerCase().includes('openh264') || metrics.encoderImplementation.toLowerCase().includes('libaom') ? '软编' : '硬编') : (metrics.encoderBackend === 'software' ? '软编' : metrics.encoderBackend && metrics.encoderBackend !== 'auto' ? '硬编' : '未知')}</span></div>
+            <div><label>实际编码器</label><span>{metrics.encoderImplementation || metrics.encoderBackend || '—'}</span></div>
+            <div><label>编码模式</label><span>{metrics.codec ? metrics.codec.replace('video/', '') : '—'}</span></div>
+            <div><label>解码器</label><span>{metrics.decoderImplementation || metrics.decoderCodec || '—'}</span></div>
+            <div><label>色度采样</label><span>4:2:0</span></div>
+            <div><label>HDR</label><span>已关闭</span></div>
+          </div>
+          <h5>系统性能</h5>
+          <div className="stats-grid">
+            <div><label>Host 帧率</label><span>{metrics.hostFps ? `${metrics.hostFps}fps` : '—'}</span></div>
+            <div><label>Host 分辨率</label><span>{metrics.hostResolution || '—'}</span></div>
+            <div><label>平均编码耗时</label><span>{metrics.avgEncodeMs != null ? `${metrics.avgEncodeMs.toFixed(1)}ms/帧` : '—'}</span></div>
+            <div><label>CPU/GPU</label><span>待 P3</span></div>
+          </div>
+          <button className="vp-stats-close" onClick={() => setShowStats(false)}><X size={14} /></button>
+        </div>, document.body)}
+    </>
   );
 }
 
