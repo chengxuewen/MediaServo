@@ -157,7 +157,7 @@ host-monitor ──(期望态镜像)──▶ 拓扑验证/告警闭环
 
 ### D-H13: 应用包布局 — host 包 + SDK 包分开发布
 - **源码**: crates/mediaservo-host 改 lib + 多 bin（host.rs/host-agent/host-capturer/host-streamer/host-recorder/host-controller/host-emergency/host-audio，8 个 [[bin]] 共享 lib）；实例参数化（host-capturer --camera cam0）
-- **部署包**: /opt/mediaservo-host/{bin（8 进程 + oxmgr 随包锁定版本）,etc/{host.toml,link/{signing.pem,*.token}},run/{oxfile.toml,logs,oxmgr.db},recordings/,identity.json(0600)}
+- **部署包**: /opt/mediaservo-host/{bin（8 进程 + oxmgr 随包锁定版本）,etc/{host.toml,link/{signing.pem,*.token}},run/{oxfile.toml,logs,oxmgr.db},recordings/,identity.json(0600)}；发布 tar 内含版本顶层目录 `{brand}-{target}-{ver}/`，直接落前缀可用 `tar xzf <pkg>.tar.gz -C <prefix> --strip-components=1`
 - **发布形态**: 分两包——mediaservo-host（车端）+ mediaservo-sdk（install bindings 现有布局）；消费方不对称（ROS/算法只要 SDK）；版本兼容靠协议契约（FrameMeta version/令牌 claims schema）显式配对，非同包隐含
 - **link 令牌配发**: 令牌 = 车端部署产物（host init 签发）不随 SDK 包；**单文件自描述令牌**（verifying key + claims + signature 合并）→ 部署编排（脚本/Ansible）配发到 ROS 节点；ROS 端启动参数/env 指定路径，固定使用
 
