@@ -1,6 +1,6 @@
 # AUDEMSP 架构决策记录
 
-> **说明**: 本文件包含活跃决策（D196+）。历史决策（D1-D190）归档在 `decisions-archived.md`（含 20 个历史跳号）。
+> **说明**: 本文件包含活跃决策（D196+）。历史决策（D1-D190）已归档后于 2026-09-03 按裁决移出工作区；恢复命令 `git cat-file -p 16ce9bb1664d`（blob 永久留存于 git 对象库）。
 > 决策格式: `## D{N}: 标题` — 决策 + 日期 + 原因 + 影响
 ## D196: Admin Dashboard Architecture
 
@@ -171,7 +171,7 @@
 **决策**: 项目对外名称与全部标识符统一由 OMSPBase 更名为 AUDEMSP（AUDE 生态多媒体系统）。范围：crates/ 7 个目录与包名（audemsp-*）、Rust 代码标识符（281 处 import 路径）、环境变量（OMSPBASE_PSK→AUDEMSP_PSK）、Docker 镜像/服务/卷名、www npm 包名、docs（73 文件）+ .agents 记忆/规则/技能（20 文件）+ README/AGENTS.md + 脚本/CI（含 /opt/omspbase→/opt/audemsp 及 oomspbase 笔误修正）。
 **日期**: 2026-08-03
 **原因**: 项目归属 AUDESYS/AUDEBase 生态，统一 AUDEMSP 命名消除「OMSPBase 是独立项目」歧义，与生态命名体系一致。团队 4 分析师交叉验证（217 文件/2363 处）。
-**例外（保留原名）**: decisions-archived.md 历史档案（174 处实测旧名引用）、git 历史/commit 消息、.omo/.sisyphus 归档快照、node_modules 生成物。
+**例外（保留原名）**: decisions-archived.md 历史档案（174 处实测旧名引用；该文件已于 2026-09-03 移出工作区，git blob 16ce9bb1664d 可恢复）、git 历史/commit 消息、.omo/.sisyphus 归档快照、node_modules 生成物。
 **影响**: ① 改名后 Docker 镜像层缓存全部失效（路径变化），首次构建回滚全量编译（一次性成本）；② 旧 env（OMSPBASE_PSK）与 localStorage 键失效——项目未发布，接受破坏；③ git mv 保留历史，单 commit 可 revert 回滚；④ 后续所有文档/命令使用 audemsp-* 命名。
 
 

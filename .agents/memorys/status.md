@@ -658,3 +658,17 @@ install                        → 改名提示 + exit 2（退役）
 - 根因三缺陷：①VideoPlayer catch → 直接 setStatus('error')——初次建联是唯一无重试保护的路径（瞬态抖动即定罪）；②ICE 从未连通时 disconnected/failed 一律映射"连接已断开"（语义错乱）；③无建联超时兜底。
 - 修复：sfu-client `reconnect()` 公有化（循环顶 closed 双检防卸载僵尸复活 PIT-50 面扩大；成功分支 `sfuMode?restartStream:startPlay` 补初次路径）+ ICE `iceEver` 局部分流（failed 未连通→error/已连通→disconnected、未连通瞬态 disconnected 忽略）+ VideoPlayer catch→retry + 30s 建联 watchdog（connecting 未出帧→error）+ 文案 Connecting...→连接中…。
 - 验证：tsc 0；SIGKILL server 立即点 Play → 0-14s 全程无红牌、+16s oxmgr 拉活后自动出帧（320x180 simulcast 入门层正常）。bundle index-CtQfrDI4.js。
+
+### 2026-09-03: 子模块工作区分析 — decisions-archived.md 删除待裁决（未提交）
+- **唯一未提交改动**：工作区删除 `.agents/memorys/decisions-archived.md`（D1-D190 历史决策归档，含 20 跳号，3129 行；`git status` 显示 ` D` **未 staged**）。**非本轮 agent 所删**（agent 全部改动已在 HEAD c1bd290）。现役 `decisions.md`（D196+，70 条）未受影响。
+- **双仓不对称**：主仓 `/home/maxsense/Documents/ms_rtc/.agents/memorys/decisions-archived.md` **仍在**（135KB，2026-08-24）——仅子模块侧被删，清理动作疑似不完整或误操作。
+- **一致性影响（若确认删除）**：① `decisions.md:3`「归档在 decisions-archived.md」+ `:174`「保留原名例外」两处引用悬空；② `conventions.md`/`pitfalls.md` 中 8 处 D1-D190 段引用失去正文来源。删除成立则须同步修订上述引用。
+- **恢复路径**：`git show HEAD:.agents/memorys/decisions-archived.md > .agents/memorys/decisions-archived.md`（HEAD c1bd290 中完好，无损）。
+- **状态**：本轮仅分析 + 记录，**未**恢复、**未**删除引用、**未**提交。待用户裁决：(A) 确认删除 → 同步修 decisions.md 悬空引用 + 归档去向说明；(B) 误删 → git show 恢复。
+
+### 2026-09-03: decisions-archived.md 删除裁决落地（用户裁决 A：确认删除）
+- 用户确认删除：D1-D190 历史决策归档移出工作区，随本次提交一并落定（3129 行）。
+- **恢复锚点**：`git cat-file -p 16ce9bb1664d`（blob hash，不随 HEAD 漂移）。
+- 悬空引用同步修订：`decisions.md` L3 说明 + L174 例外项均补移出说明与恢复命令。
+- 主仓侧同名归档（`.agents/memorys/decisions-archived.md`，135KB）**未动**——双仓记忆体系暂不对称，主仓裁留待用户另行决定。
+- 正文依赖提示：conventions/pitfalls 中 8 处 D1-D190 段引用此后仅经 git blob 可查正文。
