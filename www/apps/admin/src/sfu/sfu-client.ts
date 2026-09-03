@@ -90,8 +90,10 @@ interface TransportCreated {
 }
 
 type StreamCallback = (stream: MediaStream) => void;
-type StatusCallback = (status: 'connecting' | 'connected' | 'playing' | 'disconnected' | 'error') => void;
+type StatusCallback = (status: 'connecting' | 'connected' | 'playing' | 'stalled' | 'disconnected' | 'error') => void;
 type MetricsCallback = (metrics: StreamMetrics) => void;
+/// F2: 连续零增长 tick 数（2s/tick）判「源离线」——≈6s，保守于 fps 最慢流且不早于任何信令自愈。
+const STALL_TICKS = 3;
 
 export interface StreamMetrics {
   rtt: number;          // ms
@@ -121,6 +123,10 @@ export class SfuConsumerClient {
   // 码率增量计算: 累计 bytesReceived 当瞬时值是单位错误根因
   private lastBytes = 0;
   private mutedTicks = 0; // H1: muted 连续 tick 计数（2s tick）
+  // F2: 媒体新鲜度 watchdog（主流双保险第二柱——信令全丢也不假 LIVE）
+  private playingSeen = false; // 首次 ontrack 后启用
+  private stallTicks = 0;
+  private stalled = false;
   private lastTs = 0;
   private onTrack: StreamCallback;
   private onStatus: StatusCallback;
@@ -230,7 +236,7 @@ export class SfuConsumerClient {
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     });
     (window as any).__sfuPc = this.pc; // PIT-64 观测: 暴露 pc 供 getStats 查询
-    this.pc.ontrack = (event) => { this.logT('ONTRACK fired (track=' + event.track?.kind + ')'); console.log('SfuClient: ONTRACK fired, streams=', event.streams.length, 'track=', event.track?.kind); this.onTrack(event.streams[0]); this.onStatus('playing'); this.startMetrics(); };
+    this.pc.ontrack = (event) => { this.logT('ONTRACK fired (track=' + event.track?.kind + ')'); console.log('SfuClient: ONTRACK fired, streams=', event.streams.length, 'track=', event.track?.kind); this.playingSeen = true; this.stalled = false; this.stallTicks = 0; this.onTrack(event.streams[0]); this.onStatus('playing'); this.startMetrics(); };
     let iceEver = false; // ICE 曾连通标记——拆分"初次建联"与"已连通后断开"的语义
     this.pc.oniceconnectionstatechange = () => {
       console.log('SfuClient: iceConnectionState =', this.pc?.iceConnectionState); // PIT-56 观测
@@ -480,6 +486,7 @@ export class SfuConsumerClient {
         const stats = await this.pc.getStats();
         let rtt = 0, packetsLost = 0, packetsReceived = 0, fps = 0, bitrate = 0, jitter = 0;
         let width = 0, height = 0, decoderImpl: string | undefined, decoderCodec: string | undefined;
+        let growing = false; // F2: 本 tick 字节增量即媒体新鲜信号
 
         stats.forEach((report) => {
           if (report.type === 'candidate-pair' && report.state === 'succeeded') {
@@ -501,6 +508,7 @@ export class SfuConsumerClient {
               const elapsed = (now - this.lastTs) / 1000;
               if (elapsed > 0) bitrate = Math.round(((bytes - this.lastBytes) * 8) / elapsed / 1000); // kbps
             }
+            if (bytes > this.lastBytes) growing = true;
             this.lastBytes = bytes;
             this.lastTs = now;
             jitter = Math.round(((report as any).jitter || 0) * 1000);
@@ -520,6 +528,20 @@ export class SfuConsumerClient {
           decoderImplementation: decoderImpl,
           decoderCodec,
         });
+        // F2: 新鲜度判定——连续 STALL_TICKS 次零增长 → 'stalled'（源离线）；恢复增长 → 'playing'。
+        if (this.playingSeen) {
+          if (growing) {
+            this.stallTicks = 0;
+            if (this.stalled) { this.stalled = false; this.logT('媒体恢复增长 → playing'); this.onStatus('playing'); }
+          } else {
+            this.stallTicks++;
+            if (!this.stalled && this.stallTicks >= STALL_TICKS) {
+              this.stalled = true;
+              this.logT(`媒体 ${STALL_TICKS * 2}s 零增长 → 源离线(stalled)`);
+              this.onStatus('stalled');
+            }
+          }
+        }
       } catch (err) {
         console.warn('SfuClient: getStats failed', err);
         // getStats() may fail; non-critical
@@ -585,6 +607,7 @@ export class SfuConsumerClient {
       this.ws?.send(JSON.stringify({
         type: 'room_join', room_id: this.roomId, peer_role: 'consumer',
       }));
+      this.playingSeen = false; this.stalled = false; this.stallTicks = 0; // F2: 重置 watchdog 至新 ontrack
       await this.startPlay();
     } catch (err) {
       console.warn('SfuClient: restartStream failed', err);

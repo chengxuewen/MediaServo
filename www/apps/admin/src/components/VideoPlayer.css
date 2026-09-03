@@ -100,6 +100,7 @@
 .ms-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 .ms-dot.ms-connected, .ms-dot.ms-playing { background: #27ae60; }
 .ms-dot.ms-connecting { background: #f39c12; }
+.ms-dot.ms-stalled { background: #7f8c8d; }
 .ms-grid { display: grid; grid-template-columns: repeat(2, auto); gap: 1px 14px; }
 .ms-cell { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; }
 .ms-k { opacity: .55; }

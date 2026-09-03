@@ -678,3 +678,9 @@ install                        → 改名提示 + exit 2（退役）
 - 落地：协议 `DownstreamGone{peer_id,room_id}`（additive+roundtrip 测）；网关 produce 实键捕获（PIT-178 键漂移教训）；server `remove_peer_in_room`（单房粒度，防 host 键跨房间误杀）+ `announce_producers_closed` 三径统一链 + owners 同步 + `t4_gone_seen` 降噪门；T2 四静默面 WARN + T3 广播去 unwrap/send 分级。
 - 验收：S4 单杀秒级精确清理零扰动；S1 stop 8×1-receivers 浏览器全收、owned-empty 误报 0；H1/e2e_sfu 4/4 回归；三 crate clippy 0 新错、双姿态绿。已知 flake=g3_emergency（并行 200ms sleep，非本期）。
 - 边界：浏览器假 LIVE 残余（重订阅竞态+冻结帧）= F2/F3 另立项（web-sdk-roadmap 候补）。计划四件套 .sisyphus/plans/producer-lifecycle-f1（主仓）。
+
+### 2026-09-03: play-stalled-f2 — 源离线态（F2 媒体新鲜度兜底，假 LIVE 终结）
+- F1 残余第二刀（纯前端）：LIVE 从「链路态」解绑改绑「媒体新鲜度」——metrics tick 采 bytesReceived 增量（growing），连续 3 tick（≈6s）零增长 → status 'stalled'（灰点 + 「源离线」徽标，保留最后画面，无红屏无遮罩）；恢复增长/ontrack → 回 playing。playingSeen 门（首次 ontrack 后启用）防建联期误判；restartStream 重置三标志。
+- 三态验收（实盘往返）：① LIVE 基线 → ② host stop +9s 全部「源离线」→ ③ host 回 +4s 秒恢复 LIVE——F1 事件链 + F2 新鲜度双保险闭环；producer_closed 送达时 restartStream 与 stalled 收敛到同一终态。
+- **F3 范围收缩**：原计划的「源离线态」UI 面已被 F2 吸收大半；残余 = consume 竞态（清理后瞬时可建 consumer）+ 措辞审计，降级为可选小刀。
+- 提交：子模块 www 3 文件 + 本记忆；主仓 gitlink+镜像（C41）。

@@ -15,12 +15,13 @@ interface Props {
   onExpand?: () => void;
 }
 
-type ConnectionStatus = 'connecting' | 'connected' | 'playing' | 'disconnected' | 'error';
+type ConnectionStatus = 'connecting' | 'connected' | 'playing' | 'stalled' | 'disconnected' | 'error';
 
 const STATUS_COLORS: Record<ConnectionStatus, string> = {
   connecting: '#f39c12',
   connected: '#27ae60',
   playing: '#27ae60',
+  stalled: '#7f8c8d',
   disconnected: '#e74c3c',
   error: '#e74c3c',
 };
@@ -154,7 +155,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
         <div className="vp-body">
           <video ref={videoRef} autoPlay playsInline muted />
           {status === 'connecting' && <div className="vp-status-msg">连接中…</div>}
-          {isTile && (status === 'connected' || status === 'playing') && (
+          {isTile && (status === 'connected' || status === 'playing' || status === 'stalled') && (
             <MiniStatsCard status={status} metrics={metrics} onExpand={() => setShowStats(true)} />
           )}
           {isDisconnected && <DisconnectedOverlay status={status} />}
@@ -217,7 +218,8 @@ function MiniStatsCard({ status, metrics, onExpand }: {
   // 产品精化（2026-09-01 采纳）：核心六指标 2列×3行常驻，编解码/系统详情走大面板二次点击。
   const fmtKbps = (k: number) => (k >= 1000 ? `${(k / 1000).toFixed(1)}M` : `${Math.round(k)}K`);
   const live = status === 'playing';
-  const cells: Array<[string, string]> | null = metrics && live
+  const offline = status === 'stalled'; // F2: 链路活但媒体零增长——非红屏，灰标降级
+  const cells: Array<[string, string]> | null = metrics && (live || offline)
     ? [
         ['帧率', `${metrics.fps}fps`],
         ['分辨率', metrics.resolution === 'unknown' ? '—' : metrics.resolution],
@@ -231,7 +233,7 @@ function MiniStatsCard({ status, metrics, onExpand }: {
     <div className="vp-mini-stats" onClick={(e) => { e.stopPropagation(); onExpand(); }} title="点击展开详细统计">
       <div className="ms-head">
         <span className={`ms-dot ms-${status}`} />
-        <span>{live ? 'LIVE' : '…'}</span>
+        <span>{live ? 'LIVE' : offline ? '源离线' : '…'}</span>
         {!cells && <span className="ms-vals">等待数据…</span>}
       </div>
       {cells && (
