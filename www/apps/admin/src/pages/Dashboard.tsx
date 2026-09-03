@@ -11,8 +11,9 @@ import VideoPlayer from '../components/VideoPlayer';
 import './Dashboard.css';
 import { ChevronRight, Play, Video, Eye } from 'lucide-react';
 
+// 播放路数上限（浏览器软解资源护栏）：16 = 4 列 × 4 行网格尺度；超出忽略并提示
+const MAX_PLAYING = 16;
 // 列数控制（play-layout-stats）：默认 3、最多 4，localStorage 持久化 + 脏值防御
-const MAX_PLAYING = 4;
 const PLAY_COLS_KEY = "mediaservo_play_cols";
 const MAX_COLS = 4;
 const DEFAULT_COLS = 3;
@@ -28,6 +29,8 @@ export default function Dashboard() {
   const [playingRooms, setPlayingRooms] = useState<string[]>([]);
   // tile 双击→大窗播放（产品方案②）：独立 modal 实例，关闭即弃
   const [modalRoom, setModalRoom] = useState<string | null>(null);
+  // 播放被 MAX_PLAYING 截断时的提示（每次点 Play 刷新）
+  const [playHint, setPlayHint] = useState("");
   const [cols, setCols] = useState<number>(() => {
     let v: number;
     try { v = Number(localStorage.getItem(PLAY_COLS_KEY)); } catch { v = NaN; }
@@ -81,11 +84,11 @@ export default function Dashboard() {
       rooms = device.streams.map(s => roomIdOf(deviceId, s.stream_id));
     }
     if (rooms.length === 0) return;
-    setPlayingRooms(prev => {
-      const merged = [...prev];
-      for (const r of rooms) if (!merged.includes(r) && merged.length < MAX_PLAYING) merged.push(r);
-      return merged;
-    });
+    const fresh = rooms.filter(r => !playingRooms.includes(r));
+    const merged = [...playingRooms, ...fresh].slice(0, MAX_PLAYING);
+    const dropped = fresh.length - (merged.length - playingRooms.length);
+    setPlayingRooms(merged);
+    setPlayHint(dropped > 0 ? `已达播放上限 ${MAX_PLAYING} 路，本次忽略 ${dropped} 路（关闭部分卡片后可再播）` : "");
   };
 
   const toggleAllDevice = (device: DeviceSnapshot, checked: boolean) => {
@@ -154,6 +157,9 @@ export default function Dashboard() {
                 {n}
               </button>
             ))}
+            {playHint && (
+              <span className="vt-hint" role="status">{playHint}</span>
+            )}
           </div>
           <div className="video-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
             {playingRooms.map((roomId) => (

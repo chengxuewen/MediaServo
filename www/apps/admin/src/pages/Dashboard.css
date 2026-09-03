@@ -65,6 +65,7 @@
 .video-toolbar .vt-btn.active {
   border-color: #4361ee; background: #4361ee; color: #fff;
 }
+.video-toolbar .vt-hint { margin-left: auto; color: #b45309; font-size: 0.75rem; }
 .stream-dot {
   display: inline-block;
   width: 8px; height: 8px;

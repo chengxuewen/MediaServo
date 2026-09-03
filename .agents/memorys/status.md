@@ -642,3 +642,9 @@ install                        → 改名提示 + exit 2（退役）
 - CLI: `package` 增加 `--dist`，未传仍默认子模块 `dist/`；host/server/bindings tar 统一顶层 `{brand}-{target}-{ver}/`，`e2e-package.sh` 改为版本目录断言/解包路径。
 - host deploy: Python 品牌归一化——`MEDIASERVO_BRAND=mediaservo` 对齐 Rust 默认 legacy `host-*` 布局，同时给 host init/env.sh 显式传 `MEDIASERVO_BRAND` 覆盖编译期 brand。
 - 验证: `bash -n scripts/e2e-package.sh`、`py_compile`、结构 e2e 通过；带 oxmgr 的 full host lifecycle smoke 长跑未完，需后续拆步骤加 timeout。主仓当前 `./msrtc.sh package host` 成功输出 `out/packages/msrtc-host-0.1.0.tar.gz` 且 tar 顶层为 `msrtc-host-0.1.0/`。
+
+### 2026-09-03: play-cap-16 — Web play 路数上限 4→16 + 截断显性提示
+- 需求起点: 用户实测 "web play 最多只能显示 4 个 play" → 根因 = `Dashboard.tsx` `MAX_PLAYING=4`（P3 多流轮 cd6b2ac 开发期护栏），`playSelected` 静默丢弃超出路数；server 侧无此限（consumer_limit_per_stream=50 无关）。方案 B（用户裁决）：护栏提额 16（=4列×4行网格尺度）+ 截断显性化。
+- 落地: `MAX_PLAYING 4→16`；`playSelected` 改可算截断（fresh→slice→dropped 计数）；toolbar `.vt-hint`（role=status）提示"已达播放上限 16 路，本次忽略 N 路"；CSS +1 行。
+- 验证: tsc exit 0；唯一性断言（setPlayHint×2、useRef 残留×0）；`msrtc.sh build web` → 新 bundle index-DSh67gzc.js 经 Caddy :8080 实盘（登录 + Dashboard 渲染 + 0 console error）。>16 路截断路径本机未实弹（环境仅 2 路流）。
+- 提交纪律: 子模块 www 2 文件 + 记忆同 commit；主仓 gitlink+记忆（C41）。
