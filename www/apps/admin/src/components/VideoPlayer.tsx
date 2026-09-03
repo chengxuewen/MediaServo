@@ -102,12 +102,17 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
 
     clientRef.current = client;
     logT('connect() 调用');
-    client.connect().then(() => client.startPlay()).catch(() => setStatus('error'));
+    // 初次建联瞬态失败与断线共用同款 5 次指数退避重试（期间状态保持 connecting），
+    // 耗尽才 error——不再一瞬态就红牌"连接失败"。
+    client.connect().then(() => client.startPlay()).catch(() => { void client.reconnect(); });
+    // 建联 watchdog：30s 仍无首帧且卡 connecting → 判定失败（防永久转圈假象）
+    const watchdog = setTimeout(() => setStatus(s => (s === 'connecting' ? 'error' : s)), 30000);
 
     return () => {
       client.close();
       clientRef.current = null;
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+      clearTimeout(watchdog);
     };
   }, [roomId, serverUrl, token]);
 
@@ -148,7 +153,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
         {/* Video */}
         <div className="vp-body">
           <video ref={videoRef} autoPlay playsInline muted />
-          {status === 'connecting' && <div className="vp-status-msg">Connecting...</div>}
+          {status === 'connecting' && <div className="vp-status-msg">连接中…</div>}
           {isTile && (status === 'connected' || status === 'playing') && (
             <MiniStatsCard status={status} metrics={metrics} onExpand={() => setShowStats(true)} />
           )}

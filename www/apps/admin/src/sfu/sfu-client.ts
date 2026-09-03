@@ -231,10 +231,18 @@ export class SfuConsumerClient {
     });
     (window as any).__sfuPc = this.pc; // PIT-64 观测: 暴露 pc 供 getStats 查询
     this.pc.ontrack = (event) => { this.logT('ONTRACK fired (track=' + event.track?.kind + ')'); console.log('SfuClient: ONTRACK fired, streams=', event.streams.length, 'track=', event.track?.kind); this.onTrack(event.streams[0]); this.onStatus('playing'); this.startMetrics(); };
+    let iceEver = false; // ICE 曾连通标记——拆分"初次建联"与"已连通后断开"的语义
     this.pc.oniceconnectionstatechange = () => {
       console.log('SfuClient: iceConnectionState =', this.pc?.iceConnectionState); // PIT-56 观测
       this.logT('iceConnectionState = ' + this.pc?.iceConnectionState);
-      if (this.pc?.iceConnectionState === 'disconnected' || this.pc?.iceConnectionState === 'failed') {
+      const st = this.pc?.iceConnectionState;
+      if (st === 'connected' || st === 'completed') iceEver = true;
+      if (st === 'failed') {
+        // 从未连通 = 真·无法建立（error 语义）；已连通后 = 流中断（disconnected 语义）
+        this.onStatus(iceEver ? 'disconnected' : 'error');
+        this.stopMetrics();
+      } else if (st === 'disconnected' && iceEver) {
+        // 建联完成前的瞬态 disconnected（候选对收敛中）忽略——30s 建联 watchdog 兜底
         this.onStatus('disconnected'); this.stopMetrics();
       }
     };
@@ -526,26 +534,31 @@ export class SfuConsumerClient {
     }
   }
 
-  private async reconnect(): Promise<void> {
+  /** 连接重试（断线 / 初次建联失败共用——VideoPlayer 的 catch 也调它：初次瞬态不再秒红牌）。 */
+  async reconnect(): Promise<void> {
     const maxRetries = 5;
     let delay = 1000;
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      if (this.closed) return; // 组件已卸载（close 已调）——不再重试；connect() 会重置标志，故循环顶先拦
       console.log(`SfuClient: reconnecting (attempt ${attempt}/${maxRetries})...`);
       await new Promise(r => setTimeout(r, delay));
+      if (this.closed) return;
       
       try {
         await this.connect();
         console.log('SfuClient: reconnected successfully');
+        if (this.closed) return;
         // H6: server 重启后旧 transport/媒体面全失效——WS 重连成功必须逻辑刷新媒体面。
-        if (this.sfuMode && !this.closed) void this.restartStream();
+        if (this.sfuMode) void this.restartStream();
+        else void this.startPlay(); // 初次建联失败路径：从未进入 play 流程 → 补跑
         return;
       } catch (err) {
         console.warn(`SfuClient: reconnect attempt ${attempt} failed`, err);
         delay = Math.min(delay * 2, 30000);
       }
     }
-    
+
     console.error('SfuClient: max reconnect attempts reached');
     this.onStatus('error');
   }

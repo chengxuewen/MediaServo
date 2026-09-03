@@ -653,3 +653,8 @@ install                        → 改名提示 + exit 2（退役）
 - 现场：server 重启后 agent 重连成功（列表在线）但 play 永黑。三层根因：①H6 5001 通知在下游表项半死/被清理时丢失（gateway.rs conns.remove）→ test1-5 僵尸会话（每 2s "session closed"、帧写死传输 bytes_sent 续涨）；②field session events 通道不闭合 → 无独立自愈兜底；③宕机窗口 connect-5001 立即退出（无退避）→ 1-2s×5 轮 → oxmgr 熔断 3次/5min → test6-8 永久停摆。**白名单/通知路径不可作为唯一自愈信号**。
 - 修复（仅 host-streamer.rs）：SIGNAL_FAIL_STREAK 原子计数（≥3≈6s → break 'run 重 produce）+ upstream_unavailable() 签名 + connect 进程内 10s×36 退避重试（~6min/轮 < 熔断阈值，与 remote_loop connect_with_retry 同约定）+ 纯函数单测×1。
 - 验证：单测 7/7；V1 正常 restart（5001→15s 退避→8 路重建）；**V1b SIGKILL（当初失败形态）全链 ≈25s 自愈**；Playwright :8080 两轮重启后 8 路 video 1280x720 出帧 0 error 免刷新。遗留：field session 生命周期根修（events sender 不 drop）缓做，D270-a 一并；gateway 保 downstream 语义不改。
+
+### 2026-09-03: play-connect-semantics — 初次 play 瞬态不再红牌"连接失败"
+- 根因三缺陷：①VideoPlayer catch → 直接 setStatus('error')——初次建联是唯一无重试保护的路径（瞬态抖动即定罪）；②ICE 从未连通时 disconnected/failed 一律映射"连接已断开"（语义错乱）；③无建联超时兜底。
+- 修复：sfu-client `reconnect()` 公有化（循环顶 closed 双检防卸载僵尸复活 PIT-50 面扩大；成功分支 `sfuMode?restartStream:startPlay` 补初次路径）+ ICE `iceEver` 局部分流（failed 未连通→error/已连通→disconnected、未连通瞬态 disconnected 忽略）+ VideoPlayer catch→retry + 30s 建联 watchdog（connecting 未出帧→error）+ 文案 Connecting...→连接中…。
+- 验证：tsc 0；SIGKILL server 立即点 Play → 0-14s 全程无红牌、+16s oxmgr 拉活后自动出帧（320x180 simulcast 入门层正常）。bundle index-CtQfrDI4.js。
