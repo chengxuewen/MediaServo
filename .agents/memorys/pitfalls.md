@@ -1495,3 +1495,8 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **症状**: 「05:43 轮清理从未发生」的误判。
 - **根因**: 检索式只写了 `device cleanup`/`ProducerClosed`，漏了 `device-owned cleanup`（removed 行）与 `broadcast: no receivers`/`N channel receivers`（send 分级行）；oxmgr 日志轮转把旧窗口挪进 .1 文件。
 - **解法**: 清理链取证统一 grep `-E "ProducerClosed|removed from SFU|owned empty|missed|no receivers|channel receivers"` 且带上 `.log*` 通配 + 时间戳 awk 双确认。
+
+## PIT-180: curl 不是 WS 升级探测器 + 多服务共本机先查端口归属 (2026-09-03)
+- **症状**: 压测排障时用 curl upgrade 探测 :9800/:8080 /ws 得出「server WS 全挂」结论，实际浏览器/agent WS 正常。
+- **根因**: ①curl 手工拼 upgrade 头缺浏览器实现细节（扩展协商等），被 vite/axum 侧直接断连=000；②:8080 上真有问题但形态是 1panel 栈 Nuxt 站应答（200 HTML X-Powered-By），与 curl 假阴性叠加把水搅浑。
+- **解法**: WS 链路探测一律用真客户端（node/ws 或 playwright 页内 new WebSocket）；端口异常先 `ls /opt/1panel`、ps 全量比对归属，再怀疑自家栈。

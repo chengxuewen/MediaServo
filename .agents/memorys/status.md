@@ -684,3 +684,10 @@ install                        → 改名提示 + exit 2（退役）
 - 三态验收（实盘往返）：① LIVE 基线 → ② host stop +9s 全部「源离线」→ ③ host 回 +4s 秒恢复 LIVE——F1 事件链 + F2 新鲜度双保险闭环；producer_closed 送达时 restartStream 与 stalled 收敛到同一终态。
 - **F3 范围收缩**：原计划的「源离线态」UI 面已被 F2 吸收大半；残余 = consume 竞态（清理后瞬时可建 consumer）+ 措辞审计，降级为可选小刀。
 - 提交：子模块 www 3 文件 + 本记忆；主仓 gitlink+镜像（C41）。
+
+### 2026-09-03: play-resilience — W1-W5 客户端韧性加固（永久红牌终结）
+- 根因（压测实证）：reconnect 5次≈31s 预算 + error 终态无逃逸 + 一次性 watchdog + admin 事件 WS 无退避——server 崩溃-复活（oxmgr 退避分钟级）后浏览器永久红牌"连接失败"。
+- 落地：①reconnect 无限指数退避 1→30s+full jitter（reconnecting 闩防并发；auth 族 4000-4011 = 唯一红牌源）；②play-watchdog 下沉 client：30s 无首帧→轮次（≤3）→「源离线(等待流)」，进等待前补发 room_join 拿 late-join 回放堵竞态洞；③new_producer/producer_closed 唤醒重开预算；④server error 消息表驱动分类（classifySfuError 纯函数+单测，W4=C16 客户端镜像合规）；⑤connect() 建连前摘旧 socket handlers+close（消 onclose 振荡）；⑥W5: Forward no-receivers 洪泛 WARN→DEBUG；⑦useAdminWS 固定 5s→2→30s 退避。
+- 探测 socket 弯路记录：connectAndDrive 曾加 probe 预探测——实测引入新失败模式，删（直连快拒+10s auth 超时已被退避吸收）。
+- 验证（vite 5173 通道）：基线 LIVE；M1 host×2 stop/start 全 LIVE；M2 kill server→复活+60s LIVE×8 零红牌；M3 host 停→+45s 源离线×8（无红牌）→回+15s 唤醒 LIVE×8 稳 120s。单测 91+1、host 60、tsc 0、cargo 双姿态 0。
+- **环境发现（另案）**：:8080 生产入口被 1panel 栈的 Nuxt 站劫持（WS 升级 8ms 返 200 X-Powered-By: Nuxt；caddy 重启无效；/load 亦 502）——web play 生产路径暂不可用，与 09-02 server 自发重启悬案同源，需 root 侧清理或迁 web 端口后复验。

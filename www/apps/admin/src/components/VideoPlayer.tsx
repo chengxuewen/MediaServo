@@ -103,17 +103,13 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
 
     clientRef.current = client;
     logT('connect() 调用');
-    // 初次建联瞬态失败与断线共用同款 5 次指数退避重试（期间状态保持 connecting），
-    // 耗尽才 error——不再一瞬态就红牌"连接失败"。
+    // W1: 无限退避重连（connecting 不红牌，auth 终态除外）；W2: 首帧轮次 watchdog 已下沉 SfuClient。
     client.connect().then(() => client.startPlay()).catch(() => { void client.reconnect(); });
-    // 建联 watchdog：30s 仍无首帧且卡 connecting → 判定失败（防永久转圈假象）
-    const watchdog = setTimeout(() => setStatus(s => (s === 'connecting' ? 'error' : s)), 30000);
 
     return () => {
       client.close();
       clientRef.current = null;
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-      clearTimeout(watchdog);
     };
   }, [roomId, serverUrl, token]);
 
@@ -230,7 +226,7 @@ function MiniStatsCard({ status, metrics, onExpand }: {
       ]
     : null;
   return (
-    <div className="vp-mini-stats" onClick={(e) => { e.stopPropagation(); onExpand(); }} title="点击展开详细统计">
+    <div className="vp-mini-stats" onClick={(e) => { e.stopPropagation(); onExpand(); }} title={status === 'stalled' ? '源离线（等待流恢复或媒体停止更新；点击展开详情）' : '点击展开详细统计'}>
       <div className="ms-head">
         <span className={`ms-dot ms-${status}`} />
         <span>{live ? 'LIVE' : offline ? '源离线' : '…'}</span>

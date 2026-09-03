@@ -963,7 +963,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                             }
                         }
                         Err(tokio::sync::broadcast::error::SendError(_)) => {
-                            tracing::warn!("Forward: no receivers, message dropped");
+                            tracing::debug!("Forward: no receivers, message dropped"); // W5: 压测窗口洪泛（3321 行/窗）淹真错——空频道属常态
                         }
                     }
                 }

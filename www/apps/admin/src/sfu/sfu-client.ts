@@ -94,6 +94,25 @@ type StatusCallback = (status: 'connecting' | 'connected' | 'playing' | 'stalled
 type MetricsCallback = (metrics: StreamMetrics) => void;
 /// F2: 连续零增长 tick 数（2s/tick）判「源离线」——≈6s，保守于 fps 最慢流且不早于任何信令自愈。
 const STALL_TICKS = 3;
+/// W2: 首帧轮次 watchdog——30s 无 ontrack 计一轮失败，restartStream 最多 3 轮，耗尽→「源离线」等待。
+const PLAY_WATCHDOG_MS = 30000;
+const PLAY_ROUNDS_MAX = 3;
+
+/// W4: 错误码分流——auth/授权族=终态（红牌唯一合法源）；4031（权限可热改，C33）、
+/// 5000（SFU 内部失败，server 重启窗口典型码）、5001（网关上游切换，host 侧发射经转发）=可重试。
+export function classifySfuError(code: number): 'terminal' | 'retry' {
+  switch (code) {
+    case 4000: case 4001: case 4002: case 4003: case 4010: case 4011:
+      return 'terminal';
+    default:
+      return 'retry';
+  }
+}
+/// W1: 指数退避序列 1s→封顶（默认 30s）纯函数；jitter 由调用方外置（可断言）。
+export function nextBackoff(attempt: number, cap = 30000): number {
+  const base = Math.max(1, Math.floor(attempt));
+  return Math.min(1000 * 2 ** (base - 1), cap);
+}
 
 export interface StreamMetrics {
   rtt: number;          // ms
@@ -127,6 +146,11 @@ export class SfuConsumerClient {
   private playingSeen = false; // 首次 ontrack 后启用
   private stallTicks = 0;
   private stalled = false;
+  // W1/W2: 韧性状态机字段
+  private playTimer: ReturnType<typeof setTimeout> | null = null;
+  private playRounds = 0;
+  private waitingForProducer = false;
+  private reconnecting = false;
   private lastTs = 0;
   private onTrack: StreamCallback;
   private onStatus: StatusCallback;
@@ -172,6 +196,17 @@ export class SfuConsumerClient {
     this.closed = false;  // PIT-50: 每次 connect 重置关闭标志
     this.onStatus('connecting');
 
+    // W1: 建连前摘除旧 socket 与其 onclose 重连语义——防重连成功后旧 socket 又触发 reconnect 振荡。
+    if (this.ws) {
+      try {
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.onmessage = null;
+        this.ws.close();
+      } catch { /* noop */ }
+      this.ws = null;
+    }
+
     const protocol = this.serverUrl.startsWith('wss:') ? 'wss:' : 'ws:';
     const host = this.serverUrl.replace(/^wss?:\/\//, '');
     const wsUrl = `${protocol}//${host}/ws`;
@@ -192,8 +227,11 @@ export class SfuConsumerClient {
           if (msg.code === 0 || msg.type === 'error' && msg.code === 0) {
             this.onStatus('connected');
             resolve();
-          } else if (msg.code === 4003) {
-            reject(new Error('Auth failed'));
+          } else if (typeof msg.code === 'number' && msg.code !== 0) {
+            // W4: 握手期错误——auth/授权族=终态（重试无义）；5000/5001 族=继续等 ack（Auth timeout 10s 兜底重连）
+            if (classifySfuError(msg.code) === 'terminal') {
+              reject(new Error(`sfu-terminal:${msg.code}`));
+            }
           }
         } catch (err) {
           console.warn('SfuClient: auth message parse failed', err);
@@ -236,7 +274,7 @@ export class SfuConsumerClient {
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     });
     (window as any).__sfuPc = this.pc; // PIT-64 观测: 暴露 pc 供 getStats 查询
-    this.pc.ontrack = (event) => { this.logT('ONTRACK fired (track=' + event.track?.kind + ')'); console.log('SfuClient: ONTRACK fired, streams=', event.streams.length, 'track=', event.track?.kind); this.playingSeen = true; this.stalled = false; this.stallTicks = 0; this.onTrack(event.streams[0]); this.onStatus('playing'); this.startMetrics(); };
+    this.pc.ontrack = (event) => { this.logT('ONTRACK fired (track=' + event.track?.kind + ')'); console.log('SfuClient: ONTRACK fired, streams=', event.streams.length, 'track=', event.track?.kind); this.clearPlayWatchdog(); this.playRounds = 0; this.waitingForProducer = false; this.playingSeen = true; this.stalled = false; this.stallTicks = 0; this.onTrack(event.streams[0]); this.onStatus('playing'); this.startMetrics(); };
     let iceEver = false; // ICE 曾连通标记——拆分"初次建联"与"已连通后断开"的语义
     this.pc.oniceconnectionstatechange = () => {
       console.log('SfuClient: iceConnectionState =', this.pc?.iceConnectionState); // PIT-56 观测
@@ -263,6 +301,7 @@ export class SfuConsumerClient {
     // Set resolver BEFORE sending to avoid race condition
     const sfuPromise = new Promise<TransportCreated | null>(r => { this.transportResolver = r; });
     this.logT('发送 create_web_rtc_transport'); console.log("SfuClient: sending create_web_rtc_transport"); this.ws.send(JSON.stringify({ type: "create_web_rtc_transport", room_id: this.roomId, peer_id: this.sfuPeerId, direction: 'recv' }));
+    this.armPlayWatchdog(); // W2: 首帧轮次截止
     const sfuResult = await Promise.race([
       sfuPromise,
       new Promise<null>(r => setTimeout(() => r(null), 3000)),
@@ -295,6 +334,8 @@ export class SfuConsumerClient {
       if (this.pendingSdp) {
         console.log("SfuClient: replaying pending SDP");
         this.handleMessage(JSON.stringify(this.pendingSdp));
+      } else {
+        void this.playDeadlineHit(); // W3: 无 P2P 素材且 SFU 无响应 → 立即计轮次失败，不空等 30s
       }
     }
   }
@@ -321,6 +362,14 @@ export class SfuConsumerClient {
         });
         this.transportResolver = null;
       } else if (msg.type === 'new_producer') {
+        // W2: 「源离线等待」态收到 producer 信号 → 唤醒重开轮次预算（全量重走协商，含 late-join）。
+        if (this.waitingForProducer) {
+          this.waitingForProducer = false;
+          this.playRounds = 0;
+          this.logT('new_producer → 唤醒源离线等待');
+          void this.restartStream();
+          return;
+        }
         if (this.transportId) {
           console.log('SfuClient: consuming producer', msg.producer_id);
           const rtpCaps = videoRtpCapabilities();
@@ -335,7 +384,7 @@ export class SfuConsumerClient {
       } else if (msg.type === 'producer_closed') {
         // H1: host 断开/重启 → server 广播 producer 死亡。免刷新自愈：拆媒体面
         // 重跑 startPlay（逻辑刷新），late-join/新 new_producer 广播驱动重订阅。
-        if (this.sfuMode && !this.closed && !this.restarting) {
+        if ((this.sfuMode || this.waitingForProducer) && !this.closed && !this.restarting) {
           this.logT('producer_closed → 自动重订阅（免刷新自愈）');
           void this.restartStream();
         }
@@ -364,7 +413,16 @@ export class SfuConsumerClient {
           }));
         }
       } else if (msg.type === 'error') {
-        console.log('SfuClient: error', msg.code, msg.message);
+        // W4 (C16 客户端合规): server 失败不得静默——分类驱动状态机。
+        const code = Number(msg.code) || 0;
+        console.log('SfuClient: error', code, msg.message);
+        if (classifySfuError(code) === 'terminal') {
+          this.clearPlayWatchdog();
+          this.onStatus('error');
+        } else if (!this.playingSeen && !this.waitingForProducer && !this.restarting) {
+          this.logT(`可重试错误 ${code} → 轮次推进`);
+          void this.playDeadlineHit();
+        }
       } else if (msg.type === "sdp") {
         console.log("SfuClient: SDP received");
         // P2P 房间广播过滤: vehicle 房间是 P2P 类型, SDP/ICE 全房间广播 —
@@ -549,6 +607,30 @@ export class SfuConsumerClient {
     }, 2000);
   }
 
+  /** W2: 首帧 watchdog 装填/清除 + 轮次推进（超时/可重试错误共用入口）。 */
+  private armPlayWatchdog(): void {
+    this.clearPlayWatchdog();
+    this.playTimer = setTimeout(() => { void this.playDeadlineHit(); }, PLAY_WATCHDOG_MS);
+  }
+  private clearPlayWatchdog(): void {
+    if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; }
+  }
+  /** W2: 轮次耗尽→「源离线(等待流)」：补发一次 room_join 拿 late-join 回放
+   *  （堵住“producer 恰在轮次窗口内上线错过广播”的死锁），后续 new_producer/producer_closed 唤醒。 */
+  private async playDeadlineHit(): Promise<void> {
+    if (this.closed || this.playingSeen || this.restarting || this.waitingForProducer) return;
+    this.playRounds++;
+    if (this.playRounds >= PLAY_ROUNDS_MAX) {
+      this.waitingForProducer = true;
+      this.ws?.send(JSON.stringify({ type: 'room_join', room_id: this.roomId, peer_role: 'consumer' }));
+      this.logT(`连续 ${PLAY_ROUNDS_MAX} 轮无首帧 → 源离线（等待流唤醒）`);
+      this.onStatus('stalled');
+      return;
+    }
+    this.logT(`首帧超时（轮次 ${this.playRounds}/${PLAY_ROUNDS_MAX}）→ restartStream`);
+    await this.restartStream();
+  }
+
   private stopMetrics(): void {
     if (this.metricsTimer) {
       clearInterval(this.metricsTimer);
@@ -556,33 +638,51 @@ export class SfuConsumerClient {
     }
   }
 
-  /** 连接重试（断线 / 初次建联失败共用——VideoPlayer 的 catch 也调它：初次瞬态不再秒红牌）。 */
+  /**
+   * W1: 无限退避重连——多 host 压测下 server 崩溃-复活（oxmgr 退避可达分钟级）禁止永久红牌。
+   *  出口仅两个：组件卸载（closed）/ auth 终态。*/
   async reconnect(): Promise<void> {
-    const maxRetries = 5;
-    let delay = 1000;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      if (this.closed) return; // 组件已卸载（close 已调）——不再重试；connect() 会重置标志，故循环顶先拦
-      console.log(`SfuClient: reconnecting (attempt ${attempt}/${maxRetries})...`);
-      await new Promise(r => setTimeout(r, delay));
-      if (this.closed) return;
-      
-      try {
-        await this.connect();
-        console.log('SfuClient: reconnected successfully');
+    if (this.reconnecting) return; // 多路 onclose/重试并发防双循环
+    this.reconnecting = true;
+    try {
+      let attempt = 0;
+      while (!this.closed) {
+        attempt++;
+        const delay = nextBackoff(attempt) * (0.75 + Math.random() * 0.5); // jitter：防 server 复活瞬间 8 tile 对齐惊群
+        console.log(`SfuClient: reconnecting (attempt ${attempt}, ~${Math.round(delay)}ms)...`);
+        await new Promise(r => setTimeout(r, delay));
         if (this.closed) return;
-        // H6: server 重启后旧 transport/媒体面全失效——WS 重连成功必须逻辑刷新媒体面。
-        if (this.sfuMode) void this.restartStream();
-        else void this.startPlay(); // 初次建联失败路径：从未进入 play 流程 → 补跑
-        return;
-      } catch (err) {
-        console.warn(`SfuClient: reconnect attempt ${attempt} failed`, err);
-        delay = Math.min(delay * 2, 30000);
+        this.onStatus('connecting');
+        try {
+          await this.connectAndDrive();
+          return;
+        } catch (err) {
+          const m = String((err as Error)?.message ?? err);
+          if (m.startsWith('sfu-terminal:')) {
+            console.error('SfuClient: auth 终态，停止重试:', m);
+            this.onStatus('error');
+            return;
+          }
+          console.warn(`SfuClient: reconnect attempt ${attempt} failed (keep retrying):`, m);
+          // connect 失败时若 play-watchdog 未挂（无首帧在途）→ 重启轮次引擎，防“无限 connecting 无退出”死锁
+          if (!this.playTimer && !this.restarting) void this.playDeadlineHit();
+          continue;
+        }
       }
+    } finally {
+      this.reconnecting = false;
     }
+  }
 
-    console.error('SfuClient: max reconnect attempts reached');
-    this.onStatus('error');
+  /** W1: 直连重跑——旧 socket 振荡已由 connect() 内「摘 handlers + close」消除；server 宕机时
+   *  connect 毫秒级快拒（onerror→WS error），半死时 Auth timeout 10s，退避循环全吸收。
+   *  （探测 socket 方案已删：压测实证额外握手面只引入新失败模式，无增益。） */
+  private async connectAndDrive(): Promise<void> {
+    await this.connect();
+    if (this.closed) return;
+    console.log('SfuClient: reconnected successfully');
+    if (this.sfuMode) void this.restartStream();
+    else void this.startPlay();
   }
 
   /**
@@ -608,10 +708,19 @@ export class SfuConsumerClient {
         type: 'room_join', room_id: this.roomId, peer_role: 'consumer',
       }));
       this.playingSeen = false; this.stalled = false; this.stallTicks = 0; // F2: 重置 watchdog 至新 ontrack
+      this.waitingForProducer = false; // W2: 主动重走即脱离等待态
       await this.startPlay();
     } catch (err) {
-      console.warn('SfuClient: restartStream failed', err);
-      this.onStatus('disconnected');
+      const m = String((err as Error)?.message ?? err);
+      if (m.startsWith('sfu-terminal:')) {
+        console.error('SfuClient: restartStream auth 终态:', m);
+        this.onStatus('error');
+      } else {
+        console.warn('SfuClient: restartStream failed（推进轮次）:', m);
+        this.onStatus('connecting');
+        // W2: 失败也烧轮次——finally 清 restarting 后执行，防事件丢失式死锁
+        setTimeout(() => { void this.playDeadlineHit(); }, 1000);
+      }
     } finally {
       this.restarting = false;
     }
@@ -619,6 +728,7 @@ export class SfuConsumerClient {
 
   close(): void {
     this.closed = true;  // PIT-50: 先设标志防 onclose 重连
+    if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; } // W2: 卸载即拆 watchdog（防幽灵轮次）
     this.stopMetrics();
     this.pc?.close();
     this.pc = null;
