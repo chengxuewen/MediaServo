@@ -648,3 +648,8 @@ install                        → 改名提示 + exit 2（退役）
 - 落地: `MAX_PLAYING 4→16`；`playSelected` 改可算截断（fresh→slice→dropped 计数）；toolbar `.vt-hint`（role=status）提示"已达播放上限 16 路，本次忽略 N 路"；CSS +1 行。
 - 验证: tsc exit 0；唯一性断言（setPlayHint×2、useRef 残留×0）；`msrtc.sh build web` → 新 bundle index-DSh67gzc.js 经 Caddy :8080 实盘（登录 + Dashboard 渲染 + 0 console error）。>16 路截断路径本机未实弹（环境仅 2 路流）。
 - 提交纪律: 子模块 www 2 文件 + 记忆同 commit；主仓 gitlink+记忆（C41）。
+
+### 2026-09-03: streamer-zombie-heal — server 重启后 play 黑屏三层根因修复（PIT-168 残债闭环）
+- 现场：server 重启后 agent 重连成功（列表在线）但 play 永黑。三层根因：①H6 5001 通知在下游表项半死/被清理时丢失（gateway.rs conns.remove）→ test1-5 僵尸会话（每 2s "session closed"、帧写死传输 bytes_sent 续涨）；②field session events 通道不闭合 → 无独立自愈兜底；③宕机窗口 connect-5001 立即退出（无退避）→ 1-2s×5 轮 → oxmgr 熔断 3次/5min → test6-8 永久停摆。**白名单/通知路径不可作为唯一自愈信号**。
+- 修复（仅 host-streamer.rs）：SIGNAL_FAIL_STREAK 原子计数（≥3≈6s → break 'run 重 produce）+ upstream_unavailable() 签名 + connect 进程内 10s×36 退避重试（~6min/轮 < 熔断阈值，与 remote_loop connect_with_retry 同约定）+ 纯函数单测×1。
+- 验证：单测 7/7；V1 正常 restart（5001→15s 退避→8 路重建）；**V1b SIGKILL（当初失败形态）全链 ≈25s 自愈**；Playwright :8080 两轮重启后 8 路 video 1280x720 出帧 0 error 免刷新。遗留：field session 生命周期根修（events sender 不 drop）缓做，D270-a 一并；gateway 保 downstream 语义不改。

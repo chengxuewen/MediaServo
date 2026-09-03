@@ -312,8 +312,18 @@ async fn handle_vision_signal(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_encoder_status, gateway_url, vision_meta_ok, vision_payload_text, vision_topic};
+    use super::{build_encoder_status, gateway_url, upstream_unavailable, vision_meta_ok, vision_payload_text, vision_topic};
     use mediaservo_link::FrameMeta;
+
+    #[test]
+    fn upstream_unavailable_matches_gateway_5001_only() {
+        // 实测错误串（test6 日志原样）
+        assert!(upstream_unavailable(
+            "link: signal error: room join failed [5001]: gateway not connected to server",
+        ));
+        assert!(!upstream_unavailable("link: signal error: connect refused"));
+        assert!(!upstream_unavailable("auth failed [4001]"));
+    }
 
     #[test]
     fn gateway_url_defaults_to_local_gateway() {
@@ -440,6 +450,16 @@ fn build_encoder_status(
     }
 }
 
+/// 信令发送连续失败计数（≥SIGNAL_FAIL_MAX 判定僵尸会话，'run 退出重建；
+/// 独立于 H6 5001 通知的兑底通道——通知目标表项可能已随上游断开被清理）。
+/// 单流单进程形态，文件级 static 与 LAST_ENCODE 同模式。
+static SIGNAL_FAIL_STREAK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+const SIGNAL_FAIL_MAX: u32 = 3;
+/// 上游不可达签名（gateway 未接入 server：room join 被 5001 拒 / 未连接提示）。
+fn upstream_unavailable(err: &str) -> bool {
+    err.contains("[5001]") || err.contains("gateway not connected")
+}
+
 async fn log_stats(session: &PushSession, bus: &FrameBus, topic: &FrameTopic, started: Instant, codec: &str, backend: &str) {
     let Some(pc) = session.peer_connection() else {
         return;
@@ -513,7 +533,10 @@ async fn log_stats(session: &PushSession, bus: &FrameBus, topic: &FrameTopic, st
         avg_encode_ms,
     );
     if let Err(e) = session.signal().send(msg).await {
-        tracing::warn!("encoder_status 发送失败: {e}");
+        let streak = SIGNAL_FAIL_STREAK.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        tracing::warn!(streak, "encoder_status 发送失败: {e}");
+    } else {
+        SIGNAL_FAIL_STREAK.store(0, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -637,12 +660,27 @@ async fn main() -> ExitCode {
     if let Some(g) = args.keyframe_interval {
         cfg.keyframe_interval = g as u64;
     }
-    let (mut session, mut events) = match PushSession::connect(cfg.clone()).await {
-        Ok(se) => se,
-        Err(e) => {
-            eprintln!("streamer: PushSession connect 失败: {e}");
-            return ExitCode::from(1);
+    // C 修：宕机窗口新进程 connect 直吃 5001 → 立即退出会以 1-2s 一轮触发
+    // oxmgr 熔断（3次/5min）→ server 恢复后也无人再拉。进程内 10s 退避重试
+    // （最长 ~6min），与 gateway remote_loop connect_with_retry 同约定。
+    let (mut session, mut events) = 'connect: {
+        let mut last_err = String::from("never attempted");
+        for attempt in 1..=36u32 {
+            match PushSession::connect(cfg.clone()).await {
+                Ok(se) => break 'connect se,
+                Err(e) if upstream_unavailable(&e.to_string()) => {
+                    tracing::warn!(attempt, "上游未就绪（网关 5001），10s 后重试 connect: {e}");
+                    last_err = e.to_string();
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+                Err(e) => {
+                    eprintln!("streamer: PushSession connect 失败: {e}");
+                    return ExitCode::from(1);
+                }
+            }
         }
+        eprintln!("streamer: 上游持续未就绪（~6min），退出待 oxmgr 重拉: {last_err}");
+        return ExitCode::from(1);
     };
 
     // F3 (D-H8): transport B — 独立纯 DC PC（label "vision"），经同一本地网关
@@ -771,6 +809,13 @@ async fn main() -> ExitCode {
                     if last_stats.elapsed() >= STATS_INTERVAL {
                         log_stats(&session, &bus, &stats_topic, started, &stream.codec, &args.encoder_backend).await;
                         last_stats = Instant::now();
+                        // 僵尸兑底：信令 WS 半死时 events 不会送达任何事件，
+                        // 唯发送失败计数可见——连续 3 次（≈6s）即退出重 produce。
+                        if SIGNAL_FAIL_STREAK.load(std::sync::atomic::Ordering::Relaxed) >= SIGNAL_FAIL_MAX {
+                            tracing::error!("信令发送连续 {} 次失败 — 会话僵尸，退出重 produce", SIGNAL_FAIL_MAX);
+                            exit_code = 1;
+                            break 'run;
+                        }
                     }
                 }
                 Ok(None) => {
