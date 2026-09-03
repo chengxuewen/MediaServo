@@ -672,3 +672,9 @@ install                        → 改名提示 + exit 2（退役）
 - 悬空引用同步修订：`decisions.md` L3 说明 + L174 例外项均补移出说明与恢复命令。
 - 主仓侧同名归档（`.agents/memorys/decisions-archived.md`，135KB）**未动**——双仓记忆体系暂不对称，主仓裁留待用户另行决定。
 - 正文依赖提示：conventions/pitfalls 中 8 处 D1-D190 段引用此后仅经 git blob 可查正文。
+
+### 2026-09-03: producer-lifecycle-f1 — 流粒度权威清理（D272，DownstreamGone 事件）
+- 根因收口（T1 实证）：子进程 RoomLeave 被网关拦截 → server 单流消亡零事件 = 假 LIVE 事件链的权威面缺口；「事件从未送达」旧判被推翻（现 build 反查+广播完好，05:43 轮=oxmgr stop 异常+PIT-179 检索式漏配）。
+- 落地：协议 `DownstreamGone{peer_id,room_id}`（additive+roundtrip 测）；网关 produce 实键捕获（PIT-178 键漂移教训）；server `remove_peer_in_room`（单房粒度，防 host 键跨房间误杀）+ `announce_producers_closed` 三径统一链 + owners 同步 + `t4_gone_seen` 降噪门；T2 四静默面 WARN + T3 广播去 unwrap/send 分级。
+- 验收：S4 单杀秒级精确清理零扰动；S1 stop 8×1-receivers 浏览器全收、owned-empty 误报 0；H1/e2e_sfu 4/4 回归；三 crate clippy 0 新错、双姿态绿。已知 flake=g3_emergency（并行 200ms sleep，非本期）。
+- 边界：浏览器假 LIVE 残余（重订阅竞态+冻结帧）= F2/F3 另立项（web-sdk-roadmap 候补）。计划四件套 .sisyphus/plans/producer-lifecycle-f1（主仓）。

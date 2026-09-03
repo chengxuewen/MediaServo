@@ -64,6 +64,9 @@ pub struct SignalingServer {
     room_owners: Arc<dashmap::DashMap<String, String>>,
     /// G3 producer → 所属车 device_id（produce 时按会话设备绑定记录; consume 授权纵深防御）。
     producer_owners: Arc<dashmap::DashMap<String, String>>,
+    /// F1/T4: 该设备本次会话已收到的 DownstreamGone 计数（agent 断开时用于区分
+    /// "T4 已逐流清理"（正常）与"注册链断"（05:43 类悬案）——后者才 WARN）。
+    t4_gone_seen: Arc<dashmap::DashMap<String, u32>>,
 }
 
 impl SignalingServer {
@@ -90,6 +93,7 @@ impl SignalingServer {
             device_bindings: Arc::new(dashmap::DashMap::new()),
             room_owners: Arc::new(dashmap::DashMap::new()),
             producer_owners: Arc::new(dashmap::DashMap::new()),
+            t4_gone_seen: Arc::new(dashmap::DashMap::new()),
         }
     }
 
@@ -111,6 +115,7 @@ impl SignalingServer {
             device_bindings: Arc::new(dashmap::DashMap::new()),
             room_owners: Arc::new(dashmap::DashMap::new()),
             producer_owners: Arc::new(dashmap::DashMap::new()),
+            t4_gone_seen: Arc::new(dashmap::DashMap::new()),
         }
     }
 
@@ -975,32 +980,22 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     {
         // H1 修正: producer 注册在各 stream 房间的 sfu peers（relay_room=整车房间 ≠ 其房间，
         // 单房间 remove_peer 清不到——死 producer 泄漏）。跨房间移除并逐房间广播 ProducerClosed。
+        let binding_dev = server.device_bindings.get(&relay_peer_id).map(|e| e.value().clone());
         let closed_rooms = server.sfu_manager.remove_peer_global(&relay_peer_id);
+        // T4 配套：全局清理已广播过 = 名下实体已见光，反查空手不再当异常（防常态误报）。
+        let global_announced: usize = closed_rooms.iter().map(|(_, c)| c.len()).sum();
         tracing::info!(
             "SFU: cleaned up peer {} ({} sfu rooms touched)",
             relay_peer_id, closed_rooms.len()
         );
         for (room_id, closed) in closed_rooms {
-            if closed.is_empty() {
-                continue;
-            }
-            let tx = server.get_or_create_channel(&room_id);
-            for (producer_id, kind) in closed {
-                let msg = SignalingMessage::ProducerClosed {
-                    room_id: room_id.clone(),
-                    peer_id: relay_peer_id.clone(),
-                    producer_id,
-                    kind,
-                    reason: Some("peer_disconnected".into()),
-                };
-                let _ = tx.send(serde_json::to_string(&msg).unwrap());
-            }
-            tracing::info!(
-                "SFU: broadcast ProducerClosed for peer {} in room {}",
-                relay_peer_id, room_id
+            // T4 重构：广播/owners 同步/列表事件统一链（防多站点漂移）。
+            announce_producers_closed(
+                &server, &room_id, &relay_peer_id, binding_dev.as_deref(), closed,
             );
         }
 
+        let t4_seen = server.t4_gone_seen.remove(&relay_peer_id).map(|(_, n)| n).unwrap_or(0);
         // H1 修正（方案 A）: device 持有的 producer 存于各 stream 房间自报 peer 键，
         // 会话 id 清理漏删 → producer_owners 反查该设备全部 producer 移除，
         // 逐房间广播 ProducerClosed（web 免刷新重订阅）。
@@ -1015,6 +1010,12 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                 .collect();
             if !owned.is_empty() {
                 let removed = server.sfu_manager.remove_producers_by_ids(&owned);
+                // T2: owned−removed 差集 = 幽灵登记（owners 表有、SFU 房间无实体）——逐条 WARN。
+                let removed_ids: std::collections::HashSet<String> =
+                    removed.iter().map(|(_, p, _)| p.clone()).collect();
+                for pid in owned.iter().filter(|p| !removed_ids.contains(*p)) {
+                    tracing::warn!("remove_producers_by_ids: missed producer {pid} (device {device_id})");
+                }
                 for pid in &owned {
                     server.producer_owners.remove(pid);
                 }
@@ -1026,34 +1027,16 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                     by_room.entry(room).or_default().push((pid, kind));
                 }
                 for (room, prods) in by_room {
-                    let tx = server.get_or_create_channel(&room);
-                    for (producer_id, kind) in prods {
-                        let msg = SignalingMessage::ProducerClosed {
-                            room_id: room.clone(),
-                            peer_id: relay_peer_id.clone(),
-                            producer_id,
-                            kind,
-                            reason: Some("peer_disconnected".into()),
-                        };
-                        match tx.send(serde_json::to_string(&msg).unwrap()) {
-                            Ok(n) => tracing::info!("ProducerClosed broadcast: {} channel receivers", n),
-                            Err(_) => tracing::warn!("ProducerClosed broadcast: no receivers"),
-                        }
-                    }
-                    tracing::info!(
-                        "SFU: broadcast ProducerClosed (device {} cleanup) in room {}",
-                        device_id, room
+                    announce_producers_closed(
+                        &server, &room, &relay_peer_id, Some(&device_id), prods,
                     );
-                    // 列表秒级刷新: 流下线事件（前端仅作刷新触发）。
-                    let ev = crate::admin::AdminEvent::StreamDestroy {
-                        device_id: device_id.clone(),
-                        stream_id: room.clone(),
-                        timestamp: chrono::Utc::now().to_rfc3339(),
-                    };
-                    let _ = server
-                        .admin_events
-                        .send(serde_json::to_string(&ev).unwrap_or_default());
                 }
+            } else if global_announced == 0 && t4_seen == 0 {
+                // T2: 设备断开但名下零登记且全局清理无收获 = 注册链断（05:43 类悬案禁止静默）。
+                // DownstreamGone 已逐流清理的正常路径（global_announced>0 或 T4 逐流先到）→ debug。
+                tracing::warn!("ProducerClosed cleanup: owned empty for device {device_id} (peer {relay_peer_id})");
+            } else {
+                tracing::debug!("ProducerClosed cleanup: owned empty, {global_announced} global / {t4_seen} t4 announced (device {device_id})");
             }
         }
     }
@@ -1294,6 +1277,9 @@ pub(crate) async fn handle_sfu_message(
                     // G3: 车端 producer 登记所属设备（consume 授权纵深防御）。
                     if let Some(device) = server.device_id_of(peer_id) {
                         server.producer_owners.insert(result.producer_id.clone(), device);
+                    } else {
+                        // T2: produce 会话缺设备绑定 → owners 断链、agent 断开反查必漏（响亮告警）。
+                        tracing::warn!("producer_owners: device binding absent on produce (session={peer_id}, room={room_id})");
                     }
                     // Broadcast NewProducer to all peers in room
                     let broadcast = SignalingMessage::NewProducer {
@@ -1426,6 +1412,9 @@ pub(crate) async fn handle_sfu_message(
                     // 与媒体 producer 同一 id 空间 — UUID 唯一不冲突）。
                     if let Some(device) = server.device_id_of(peer_id) {
                         server.producer_owners.insert(result.data_producer_id.clone(), device);
+                    } else {
+                        // T2: 同媒体 producer——data 登记断链同样导致反查漏网。
+                        tracing::warn!("producer_owners: device binding absent on data produce (session={peer_id}, room={room_id})");
                     }
                     // Broadcast NewDataProducer to all peers in room (late-joiner sync)
                     let broadcast = SignalingMessage::NewDataProducer {
@@ -1574,7 +1563,69 @@ pub(crate) async fn handle_sfu_message(
                 })
             }
         }
+        // F1/T4: 网关上报下游子会话消亡——按 (room, peer) 精确清理并广播 ProducerClosed。
+        // 身份门：仅设备会话（agent）可报；旧 server 收到未知变体解析失败丢弃 = additive。
+        SignalingMessage::DownstreamGone { peer_id: gone_peer, room_id } => {
+            let Some(device) = server.device_id_of(peer_id) else {
+                tracing::warn!("DownstreamGone rejected: session {peer_id} 无设备绑定（报键={gone_peer}）");
+                return None;
+            };
+            *server.t4_gone_seen.entry(device.clone()).or_insert(0) += 1;
+            let closed = sfu.remove_peer_in_room(room_id, gone_peer);
+            if closed.is_empty() {
+                tracing::info!("DownstreamGone: {gone_peer} 在房间 {room_id} 无 SFU 实体（未 produce/键漂移/已被清理）");
+            } else {
+                announce_producers_closed(server, room_id, gone_peer, Some(&device), closed);
+            }
+            None
+        }
         _ => None,
+    }
+}
+
+/// F1/T4: ProducerClosed 通告统一链——close 全局清理 / device 反查 / DownstreamGone
+/// 三处共用（防分支漂移）。职责：逐条广播（Ok(n)/Err 可见，C15）+ owners 表同步
+/// + StreamDestroy 列表事件（设备归属时）。
+fn announce_producers_closed(
+    server: &SignalingServer,
+    room_id: &str,
+    reporter_peer: &str,
+    device_id: Option<&str>,
+    closed: Vec<(String, mediaservo_common::protocol::MediaKind)>,
+) {
+    if closed.is_empty() {
+        return;
+    }
+    let tx = server.get_or_create_channel(room_id);
+    for (producer_id, kind) in closed {
+        let msg = SignalingMessage::ProducerClosed {
+            room_id: room_id.to_string(),
+            peer_id: reporter_peer.to_string(),
+            producer_id: producer_id.clone(),
+            kind,
+            reason: Some("peer_disconnected".into()),
+        };
+        match serde_json::to_string(&msg)
+            .map_err(|e| format!("serialize: {e}"))
+            .and_then(|t| tx.send(t).map_err(|e| format!("send: {e}")))
+        {
+            Ok(n) => tracing::info!("ProducerClosed broadcast: {n} channel receivers"),
+            Err(e) => tracing::warn!("ProducerClosed broadcast failed (room {room_id}): {e}"),
+        }
+        // owners 表同步（防幽灵登记→下次反查 missed 误报）。
+        if device_id.is_some() {
+            server.producer_owners.remove(&producer_id);
+        }
+    }
+    tracing::info!("SFU: broadcast ProducerClosed for peer {reporter_peer} in room {room_id}");
+    if let Some(device) = device_id {
+        // 列表秒级刷新: 流下线事件（前端仅作刷新触发）。
+        let ev = crate::admin::AdminEvent::StreamDestroy {
+            device_id: device.to_string(),
+            stream_id: room_id.to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+        let _ = server.admin_events.send(serde_json::to_string(&ev).unwrap_or_default());
     }
 }
 
@@ -1725,5 +1776,48 @@ mod tests {
         let server = new_test_server().await;
         let err = server.push_config("empty-room", "cfg", 1).unwrap_err();
         assert!(err.contains("无 host"), "无 host 房间必须报错: {err}");
+    }
+
+    /// F1/T4: DownstreamGone 身份门——无设备绑定的会话（浏览器/匿名）上报必须拒绝。
+    #[tokio::test]
+    async fn downstream_gone_rejected_without_device_binding() {
+        let server = new_test_server().await;
+        let (tx, _rx) = tokio::sync::broadcast::channel::<String>(4);
+        let resp = handle_sfu_message(
+            &SignalingMessage::DownstreamGone {
+                peer_id: "host".into(),
+                room_id: "vehicle_test1".into(),
+            },
+            &server,
+            &tx,
+            "browser-session-1",
+            &SessionIdentity::Legacy,
+        )
+        .await;
+        assert!(resp.is_none());
+    }
+
+    /// F1/T4: 设备会话上报未知房间 = 幂等 no-op（不 panic、无响应）——重放/竞态安全。
+    #[tokio::test]
+    async fn downstream_gone_idempotent_on_unknown_room() {
+        let server = new_test_server().await;
+        server
+            .device_bindings
+            .insert("agent-1".into(), "dev-x".into());
+        let (tx, _rx) = tokio::sync::broadcast::channel::<String>(4);
+        for room in ["nope", "also_nope"] {
+            let resp = handle_sfu_message(
+                &SignalingMessage::DownstreamGone {
+                    peer_id: "host".into(),
+                    room_id: room.into(),
+                },
+                &server,
+                &tx,
+                "agent-1",
+                &SessionIdentity::Device("dev-x".into()),
+            )
+            .await;
+            assert!(resp.is_none(), "未知房间 {room} 应静默幂等");
+        }
     }
 }

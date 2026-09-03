@@ -97,6 +97,9 @@ struct Conn {
     src: String,
     /// 最近一条上行消息到达时刻（E3 快照数据源；None = 尚未收到消息）。
     last_msg: Option<Instant>,
+    /// F1/T4: 本下游 produce 的 SFU 宿主真实键 (消息自报 peer, room)——env.src 会随
+    /// 最后一条消息漂移（如 vision 子连接 src=xx-vision），清理必须用 produce 实键。
+    producer_key: Option<(String, String)>,
     tx: mpsc::UnboundedSender<LocalEnvelope>,
 }
 
@@ -123,6 +126,13 @@ struct State {
 impl State {
     /// 子进程上行消息 → 动作（转发 / 本地应答 / 丢弃）。
     fn upstream(&mut self, conn_id: u64, msg: SignalingMessage) -> UpstreamAction {
+        // F1/T4: 记录本下游 producer 宿主实键（produce 消息自报 peer——视频流常为
+        // 字面 "host"，与 env.src 不同源）。断开上报 DownstreamGone 以此为准。
+        if let SignalingMessage::Produce { room_id, peer_id, .. } = &msg {
+            if let Some(c) = self.conns.get_mut(&conn_id) {
+                c.producer_key = Some((peer_id.clone(), room_id.clone()));
+            }
+        }
         match msg {
             SignalingMessage::RoomJoin { room_id, .. } => {
                 // (a) 拦截：整车 join 由 agent 完成；子进程本地合成 RoomJoined
@@ -387,6 +397,7 @@ fn rewrite_room(msg: &mut SignalingMessage, room: &str) {
         SfuStatsRequest { .. } => {}
         SfuStats { .. } => {}
         ConfigPush { .. } => {} // E4: agent 专属，不入子进程路由，无需房间改写
+        DownstreamGone { .. } => {} // F1/T4: 网关自身上报消息，不经下游路由，无需房间改写
         EmergencyCommand { room_id, .. } => *room_id = room.to_string(), // G3: 急停房间级广播
     }
 }
@@ -559,6 +570,7 @@ pub async fn run_gateway(config: GatewayConfig) -> Result<(u16, GatewayHandle), 
                     room: String::new(),
                     src: String::new(),
                     last_msg: None,
+                    producer_key: None,
                     tx,
                 });
                 (id, rx)
@@ -648,6 +660,21 @@ async fn conn_task(
                     None => break,
                 }
             }
+        }
+    }
+    // F1/T4: 下游子进程消亡→上报 server 流粒度精确清理（producer 宿主键跨房间共用，
+    // 只有 (src, room) 配对能定位；整车粒度的断开反查由既有链路兜底，互不干扰）。
+    let gone = {
+        let st = lock_state(&state);
+        st.conns.get(&conn_id).and_then(|c| c.producer_key.clone())
+    };
+    if let Some((peer, room)) = gone {
+        tracing::info!(conn_id, "DownstreamGone 上报: peer={peer} room={room}");
+        if remote_tx
+            .send(SignalingMessage::DownstreamGone { peer_id: peer, room_id: room })
+            .is_err()
+        {
+            tracing::debug!(conn_id, "DownstreamGone 丢弃（上游已断，整车反查将兜底）");
         }
     }
     lock_state(&state).remove_conn(conn_id);
@@ -838,6 +865,7 @@ mod tests {
                 room: "room-a".into(),
                 src: "host-streamer".into(),
                 last_msg: Some(Instant::now()),
+                producer_key: None,
                 tx: mpsc::unbounded_channel().0,
             });
             st.conns.insert(2, Conn {
@@ -845,6 +873,7 @@ mod tests {
                 room: "room-b".into(),
                 src: "host-capturer".into(),
                 last_msg: None,
+                producer_key: None,
                 tx: mpsc::unbounded_channel().0,
             });
         }

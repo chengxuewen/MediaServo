@@ -576,6 +576,38 @@ mod imp {
             out
         }
 
+        /// F1/T4: 单房间精确移除（视频 producer 宿主键为自报 peer_id，多流常为同一
+        /// 字面值——按键全局 remove 会误杀其他活流，必须 (room, peer) 粒度）。
+        /// 返回被关 producers 供 ProducerClosed 广播；房间清空则销毁 Router。
+        pub fn remove_peer_in_room(
+            &self,
+            room_id: &str,
+            peer_id: &str,
+        ) -> Vec<(String, protocol::MediaKind)> {
+            let Some(mut room) = self.rooms.get_mut(room_id) else {
+                return Vec::new();
+            };
+            let Some((_pid, peer)) = room.peers.remove(peer_id) else {
+                return Vec::new();
+            };
+            let closed: Vec<(String, protocol::MediaKind)> = peer
+                .producers
+                .iter()
+                .map(|p| {
+                    let kind = match p.kind() {
+                        MediaKind::Audio => protocol::MediaKind::Audio,
+                        MediaKind::Video => protocol::MediaKind::Video,
+                    };
+                    (p.id().to_string(), kind)
+                })
+                .collect();
+            if room.peers.is_empty() {
+                drop(room);
+                self.remove_room(room_id);
+            }
+            closed
+        }
+
         /// H1 修正: 按 producer_id 列表跨房间清理（各 stream 房间的 sfu peer 键为
         /// 自报 peer_id，会话 id 清理漏删——泄漏）。返回 (room, producer_id, kind) 供广播。
         pub fn remove_producers_by_ids(&self, producer_ids: &[String]) -> Vec<(String, String, protocol::MediaKind)> {
@@ -1563,6 +1595,15 @@ mod imp {
         /// Stub — no-op in non-SFU builds.
         pub fn remove_peer(&self, _room_id: &str, _peer_id: &str) -> bool {
             false
+        }
+
+        /// Stub — no-op in non-SFU builds (F1/T4 单房间移除).
+        pub fn remove_peer_in_room(
+            &self,
+            _room_id: &str,
+            _peer_id: &str,
+        ) -> Vec<(String, protocol::MediaKind)> {
+            Vec::new()
         }
 
         /// Stub — no-op in non-SFU builds.

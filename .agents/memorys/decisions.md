@@ -744,3 +744,9 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **背景**: D-H13 原 host/sdk tar 内容按“前缀目录内容”设计，`tar -xzf` 裸解包会撒出 `bin/`、`etc/`、`identity.json`、`signing.pem` 和令牌；MSRTC 发布侧需要包名和目录名一致，并允许输出到主项目 `out/packages`。
 - **决策**: `mediaservo_cli.py package` 支持 `--dist` 指定 tar/staging 输出目录；未传时仍默认子模块 `dist/`。所有 package 目标（host/server/bindings）统一以 `{brand}-{target}-{ver}/` 作为 tar 顶层目录；需要直接落前缀目录时用 `--strip-components=1`。
 - **影响**: `e2e-package.sh`、Windows 验证清单和包内版本说明必须同步改为顶层目录契约；MSRTC 发布壳默认传 `--dist out/packages`，直接子模块调用保持原默认路径兼容。
+
+## D272: producer 生命周期流粒度清理 = 网关 DownstreamGone 事件（2026-09-03, F1）
+
+**决策**: 单 streamer 消亡（退出/crash/熔断）由网关在 local WS close 时向 server 上报 `DownstreamGone{peer_id, room_id}`（键=produce 消息自报实键，网关 upstream() 拦截捕获），server 按 (room, peer) 精确移除并广播 ProducerClosed；整车会话不断开。agent 断开反查保留为兜底（S3 场景）。三处清理路径统一走 `announce_producers_closed`（广播+owners 同步+StreamDestroy），`t4_gone_seen` 计数区分「T4 已清（正常）」与「注册链断（WARN）」。
+**原因**: 子进程 RoomLeave 被网关设计性拦截（整车会话不因单进程离开而断）→ server 对单流消亡零感知 → 死 producer 永驻 + 浏览器假 LIVE（T1 实盘闭环）。事件驱动是 LiveKit/Janus/mediasoup-demo 共识；mediasoup worker→app 通知通道本部署静默（sfu.rs 自认），不能依赖。
+**影响**: ① additive 协议（旧 server 解析失败丢弃=与无前行为一致）；② 上报键教训——信封 src ≠ 消息体 peer（PIT-178）；③ F1 只保证事件权威送达，浏览器「源离线」态与新鲜度兜底归 F2/F3 另轮；④ 消费端 restartStream 竞态窗口（closed 后仍能消费旧 producer 片刻）属 F3 面。

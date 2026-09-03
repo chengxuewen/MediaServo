@@ -1484,3 +1484,14 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
   grep -E "room join failed \[4031\]|gateway not connected to server" out/host/run/logs/msrtc-agent.*.log out/host/run/logs/msrtc-streamer-*.err.log
   grep -E "capture device negotiated|camera/cam0|fps" out/host/run/logs/msrtc-capturer-cam0.out.log
   ```
+
+## PIT-178: 网关上报键禁用信封 src——必须捕获消息体实键 (2026-09-03)
+- **症状**: S4 首跑 DownstreamGone 全部「无 SFU 实体」空手清理。
+- **根因**: `Conn.src` = LocalEnvelope 信封声明，随最后一条消息漂移（vision 子连接= `msrtc-streamer-testN-vision`），与 SFU 层 producer 宿主键（produce 消息自报 peer，视频流常为字面 `host`）不同源。信封身份 ≠ 协议身份。
+- **解法**: `upstream()` 拦截 Produce 消息记录 `(msg.peer_id, msg.room_id)` 为 `producer_key`，close 上报以此为准。
+- **验证**: 配对审计行（gateway「DownstreamGone 上报」↔ server「broadcast ProducerClosed for peer host」）双侧 info 常开；S4 单杀只清该房间。
+
+## PIT-179: ProducerClosed 取证检索式必须覆盖全部四种日志形态 (2026-09-03)
+- **症状**: 「05:43 轮清理从未发生」的误判。
+- **根因**: 检索式只写了 `device cleanup`/`ProducerClosed`，漏了 `device-owned cleanup`（removed 行）与 `broadcast: no receivers`/`N channel receivers`（send 分级行）；oxmgr 日志轮转把旧窗口挪进 .1 文件。
+- **解法**: 清理链取证统一 grep `-E "ProducerClosed|removed from SFU|owned empty|missed|no receivers|channel receivers"` 且带上 `.log*` 通配 + 时间戳 awk 双确认。

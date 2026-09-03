@@ -295,6 +295,15 @@ pub enum SignalingMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+    /// F1/T4: 网关上报下游子会话消亡（单 streamer 退出/crash——整车会话不断，
+    /// agent 断开反查只覆盖整车粒度，此消息提供流粒度）。server 按 (room_id, peer_id)
+    /// 精确清理并广播 ProducerClosed。additive：旧 server 解析失败静默丢弃 = 与无前行为一致。
+    DownstreamGone {
+        /// 子进程自报 peer 键（= SFU 层 producer 宿主键，视频流常为字面 "host"）。
+        peer_id: String,
+        /// 子进程 RoomJoin 的流子房间。
+        room_id: String,
+    },
 
     // ponytail: add frame ack/retransmit when reliability matters
 }
@@ -558,6 +567,25 @@ mod tests {
                 assert_eq!(peer_id, "peer-3");
             }
             _ => panic!("expected RoomLeave"),
+        }
+    }
+
+    #[test]
+    fn roundtrip_downstream_gone() {
+        // F1/T4 additive 契约钉住：snake_case type 标签 + 两字段
+        let msg = SignalingMessage::DownstreamGone {
+            peer_id: "host".into(),
+            room_id: "vehicle_test2".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"downstream_gone""#));
+        let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            SignalingMessage::DownstreamGone { peer_id, room_id } => {
+                assert_eq!(peer_id, "host");
+                assert_eq!(room_id, "vehicle_test2");
+            }
+            other => panic!("unexpected: {other:?}"),
         }
     }
 
