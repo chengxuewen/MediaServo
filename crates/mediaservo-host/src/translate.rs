@@ -93,6 +93,12 @@ struct Stream {
     /// 编码码率 kbps（缺省 2000——field PushConfig 默认）。
     #[serde(default)]
     bitrate_kbps: Option<u32>,
+    /// 弱网策略档（smooth|balanced|quality；缺省 balanced=现状行为，qos-framerate-priority）。
+    #[serde(default)]
+    stream_mode: Option<String>,
+    /// 码率地板 kbps（显式覆盖位；缺省随 stream_mode bundle 填充）。
+    #[serde(default)]
+    min_bitrate_kbps: Option<u32>,
     /// 关键帧间隔秒（GOP；缺省 2——field PushConfig 默认）。
     #[serde(default)]
     keyframe_interval: Option<u32>,
@@ -541,8 +547,34 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
             if let Some(b) = &sc.encoder_backend {
                 cmd.push_str(&format!(" --encoder-backend {b}"));
             }
-            if let Some(k) = sc.bitrate_kbps {
+            // qos-framerate-priority AD-2：唯一合并裁决点——显式键 > stream_mode bundle；
+            // stream_mode 合法性已在 stream_configs() 拦截，此处 expect 仅防舞。
+            let mode = sc
+                .stream_mode
+                .as_deref()
+                .map(|m| m.parse::<mediaservo_field::StreamMode>().expect("validated in stream_configs"))
+                .unwrap_or(mediaservo_field::StreamMode::Balanced);
+            let bundle = mode.bundle();
+            let bitrate = sc.bitrate_kbps.or(bundle.bitrate_kbps);
+            let min_bitrate = sc.min_bitrate_kbps.or(bundle.min_bitrate_kbps);
+            use mediaservo_webrtc::rtp::{RTCDegradationPreference as Deg, RTCRtpContentHint as Hint};
+            if bundle.degradation != Deg::Balanced {
+                let d = match bundle.degradation {
+                    Deg::Fixed => "fixed",
+                    Deg::MaintainFramerate => "framerate",
+                    Deg::MaintainResolution => "resolution",
+                    Deg::Balanced => "balanced",
+                };
+                cmd.push_str(&format!(" --degradation {d}"));
+            }
+            if bundle.content_hint == Hint::Fluid {
+                cmd.push_str(" --content-hint fluid");
+            }
+            if let Some(k) = bitrate {
                 cmd.push_str(&format!(" --bitrate-kbps {k}"));
+            }
+            if let Some(k) = min_bitrate {
+                cmd.push_str(&format!(" --min-bitrate-kbps {k}"));
             }
             if let Some(g) = sc.keyframe_interval {
                 cmd.push_str(&format!(" --keyframe-interval {g}"));
@@ -681,6 +713,10 @@ pub struct StreamConfig {
     pub encoder_backend: Option<String>,
     /// 编码码率 kbps（None=field 默认 2000）。
     pub bitrate_kbps: Option<u32>,
+    /// 弱网策略档原文（None=balanced；合法性在 stream_configs() 校验，AD-2）。
+    pub stream_mode: Option<String>,
+    /// 码率地板 kbps（None=随 bundle；显式 > preset 在 oxfile 拼接处裁决）。
+    pub min_bitrate_kbps: Option<u32>,
     /// 关键帧间隔秒 GOP（None=field 默认 2）。
     pub keyframe_interval: Option<u32>,
 }
@@ -688,21 +724,29 @@ pub struct StreamConfig {
 /// 解析全部流配置（C2 streamer 用）。
 pub fn stream_configs(cfg: &str) -> Result<Vec<StreamConfig>, String> {
     let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
-    Ok(cfg
-        .streams
+    cfg.streams
         .into_iter()
         .map(|s| {
             let id = s.id.clone();
-            StreamConfig {
+            // qos-framerate-priority AD-2：非法 stream_mode 在此拦截（deploy/build 期 Err，
+            // 错误信息含合法集；不进 streamer 防 oxmgr 重启风暴）。
+            if let Some(m) = &s.stream_mode
+                && m.parse::<mediaservo_field::StreamMode>().is_err()
+            {
+                return Err(format!("host.yaml 解析失败: 流 {id} stream_mode={m} 非法（合法: smooth|balanced|quality）"));
+            }
+            Ok(StreamConfig {
                 id,
                 source: s.source.unwrap_or_else(|| s.id),
                 codec: s.codec.unwrap_or_else(|| "vp8".into()),
                 encoder_backend: s.encoder_backend,
                 bitrate_kbps: s.bitrate_kbps,
+                stream_mode: s.stream_mode,
+                min_bitrate_kbps: s.min_bitrate_kbps,
                 keyframe_interval: s.keyframe_interval,
-            }
+            })
         })
-        .collect())
+        .collect()
 }
 
 /// 按 id 查单个流配置（不存在 → Ok(None)）。
@@ -1177,5 +1221,83 @@ streams:
         assert!(!s1_line.contains("--encoder-backend"), "未配置不 emit: {s1_line}");
         assert!(!s1_line.contains("--bitrate-kbps"), "未配置不 emit: {s1_line}");
         assert!(!s1_line.contains("--keyframe-interval"), "未配置不 emit: {s1_line}");
+    }
+
+    // ── qos-framerate-priority T4: stream_mode bundle 合并/flag 下发（表驱动） ──
+
+    fn streamer_cmd(ox: &str, stream: &str) -> String {
+        ox.lines()
+            .find(|l| l.contains("command") && l.contains(&format!("--stream {stream}")))
+            .expect("streamer 命令行")
+            .to_string()
+    }
+
+    fn qos_cfg(stream_body: &str) -> String {
+        format!("sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n{stream_body}")
+    }
+
+    #[test]
+    fn oxfile_expands_smooth_bundle_flags() {
+        let ox = to_oxfile(&qos_cfg("    stream_mode: \"smooth\"\n")).unwrap();
+        let line = streamer_cmd(&ox, "s0");
+        assert!(line.contains("--degradation framerate"), "smooth → framerate: {line}");
+        assert!(line.contains("--content-hint fluid"), "smooth → Fluid: {line}");
+        assert!(line.contains("--min-bitrate-kbps 400"), "smooth → min 400: {line}");
+        assert!(!line.contains("--bitrate-kbps"), "smooth 不动天花板: {line}");
+    }
+
+    #[test]
+    fn oxfile_expands_quality_bundle_flags() {
+        let ox = to_oxfile(&qos_cfg("    stream_mode: \"quality\"\n")).unwrap();
+        let line = streamer_cmd(&ox, "s0");
+        assert!(line.contains("--degradation resolution"), "quality → resolution: {line}");
+        assert!(line.contains("--bitrate-kbps 3000"), "quality → bundle 3000 (AD-3): {line}");
+        assert!(!line.contains("--content-hint"), "quality 无 hint: {line}");
+        assert!(!line.contains("--min-bitrate-kbps"), "quality 无地板: {line}");
+    }
+
+    #[test]
+    fn oxfile_balanced_explicit_emits_no_qos_flags() {
+        let ox = to_oxfile(&qos_cfg("    stream_mode: \"balanced\"\n")).unwrap();
+        let line = streamer_cmd(&ox, "s0");
+        assert!(!line.contains("--degradation"), "balanced 不发 degradation: {line}");
+        assert!(!line.contains("--content-hint"), "balanced 不发 hint: {line}");
+        assert!(!line.contains("--min-bitrate-kbps"), "balanced 不发 min: {line}");
+        assert!(!line.contains("--bitrate-kbps"), "balanced 不填天花板: {line}");
+    }
+
+    #[test]
+    fn oxfile_explicit_keys_win_bundle() {
+        // 显式 bitrate/min 覆盖 bundle（smooth 写 bitrate 不被抹、quality 写 bitrate 赢 3000、
+        // smooth 写 min 赢 400）
+        let ox = to_oxfile(&qos_cfg("    stream_mode: \"smooth\"\n    bitrate_kbps: 2500\n    min_bitrate_kbps: 800\n")).unwrap();
+        let line = streamer_cmd(&ox, "s0");
+        assert!(line.contains("--bitrate-kbps 2500"), "显式 bitrate 赢: {line}");
+        assert!(line.contains("--min-bitrate-kbps 800"), "显式 min 赢 400: {line}");
+        assert!(line.contains("--degradation framerate"), "bundle 原语仍在: {line}");
+        let ox2 = to_oxfile(&qos_cfg("    stream_mode: \"quality\"\n    bitrate_kbps: 5000\n")).unwrap();
+        assert!(streamer_cmd(&ox2, "s0").contains("--bitrate-kbps 5000"), "quality 显式赢 bundle 3000");
+    }
+
+    #[test]
+    fn oxfile_legacy_yaml_flag_sequence_unchanged() {
+        // 旧 yaml（无新键）：flag 序列与 HEAD 一致——不新增 --degradation/--content-hint/
+        // --min-bitrate-kbps，既有 flag（gateway/encoder-backend/bitrate/keyframe）不受影响。
+        let ox = to_oxfile(CFG_V0).unwrap();
+        let line = streamer_cmd(&ox, "s0");
+        assert!(!line.contains("--degradation"), "现状不变: {line}");
+        assert!(!line.contains("--content-hint"), "现状不变: {line}");
+        assert!(!line.contains("--min-bitrate-kbps"), "现状不变: {line}");
+        assert!(!line.contains("--bitrate-kbps"), "现状不变: {line}");
+        assert!(line.contains("--gateway"), "既有 flag 保留: {line}");
+    }
+
+    #[test]
+    fn invalid_stream_mode_rejected_at_translate() {
+        let e = stream_configs(&qos_cfg("    stream_mode: \"turbo\"\n")).unwrap_err();
+        assert!(e.contains("smooth|balanced|quality"), "错误信息含合法集: {e}");
+        assert!(e.contains("turbo"), "错误信息含非法值: {e}");
+        // to_oxfile（deploy 主路径）同步拦截
+        assert!(to_oxfile(&qos_cfg("    stream_mode: \"turbo\"\n")).is_err());
     }
 }

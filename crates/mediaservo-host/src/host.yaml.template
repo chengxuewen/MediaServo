@@ -56,6 +56,17 @@ sources:
 #                                 日志出现 "cuda.h not found" 即不可用，回退 auto/software）
 #                       vaapi     Intel/AMD GPU VA-API（Linux）
 #   bitrate_kbps       编码码率 kbps（缺省 2000；1080p 建议 2500-4000，720p 1500-2500）
+#   stream_mode        弱网策略档（缺省 balanced=行为与旧版一致）：
+#                       smooth    实时优先——保帧率降分辨率 + Fluid hint + 400kbps 码率地板
+#                                 （遥控/遥操作推荐；弱网下帧率钉住，画质让位）
+#                       balanced  libwebrtc 均衡双降（缺省，不发任何新参数）
+#                       quality   画质优先——保分辨率降帧率 + 3000kbps 天花板（取证推荐）
+#                     数值为预设 bundle，可被显式键覆盖：bitrate_kbps / min_bitrate_kbps
+#                     写了就以你写的为准（显式 > preset）；min_bitrate_kbps 设过高会人为
+#                     抬码率伤时延，建议 ≤ bitrate_kbps/4。
+#                     快照语义：stream_mode/码率键编译进 oxfile 命令行，改配置后需
+#                     build:deploy host（或 apply 后 oxmgr restart）重渲染才生效。
+#   min_bitrate_kbps   码率地板 kbps（可选显式覆盖位；缺省随 stream_mode 预设）
 #   keyframe_interval  关键帧间隔秒（GOP，缺省 2；越小丢包恢复越快、码率越不稳定）
 #
 # 参考示例（完整字段）：

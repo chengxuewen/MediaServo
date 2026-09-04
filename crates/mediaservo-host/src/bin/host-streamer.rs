@@ -57,6 +57,12 @@ struct Args {
     encoder_backend: String,
     /// 编码码率 kbps（None=field 默认 2000）。
     bitrate_kbps: Option<u32>,
+    /// 弱网降级偏好（qos-framerate-priority；None=保持 PushConfig 缺省 Balanced）。
+    degradation: Option<mediaservo_webrtc::rtp::RTCDegradationPreference>,
+    /// 内容 hint（None=缺省；仅 translate 展开 Fluid 时下发）。
+    content_hint: Option<mediaservo_webrtc::rtp::RTCRtpContentHint>,
+    /// 码率地板 kbps（None=不设下限）。
+    min_bitrate_kbps: Option<u32>,
     /// 关键帧间隔秒 GOP（None=field 默认 2）。
     keyframe_interval: Option<u32>,
 }
@@ -69,6 +75,9 @@ fn parse_args() -> Result<Args, String> {
     let mut gateway: Option<String> = None;
     let mut encoder_backend: Option<String> = None;
     let mut bitrate_kbps: Option<u32> = None;
+    let mut degradation: Option<mediaservo_webrtc::rtp::RTCDegradationPreference> = None;
+    let mut content_hint: Option<mediaservo_webrtc::rtp::RTCRtpContentHint> = None;
+    let mut min_bitrate_kbps: Option<u32> = None;
     let mut keyframe_interval: Option<u32> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -78,6 +87,11 @@ fn parse_args() -> Result<Args, String> {
             "--gateway" => gateway = Some(args.next().ok_or("--gateway 缺值")?),
             "--encoder-backend" => encoder_backend = Some(args.next().ok_or("--encoder-backend 缺值")?),
             "--bitrate-kbps" => bitrate_kbps = Some(args.next().ok_or("--bitrate-kbps 缺值")?.parse().map_err(|_| "--bitrate-kbps 须为数字")?),
+            // qos-framerate-priority 纵深防御：translate 已拦非法值，此处 FromStr Err →
+            // parse_args Err → main exit(2)（不进会话，防 oxmgr 重启风暴）。
+            "--degradation" => degradation = Some(args.next().ok_or("--degradation 缺值")?.parse().map_err(|e: String| e)?),
+            "--content-hint" => content_hint = Some(args.next().ok_or("--content-hint 缺值")?.parse().map_err(|e: String| e)?),
+            "--min-bitrate-kbps" => min_bitrate_kbps = Some(args.next().ok_or("--min-bitrate-kbps 缺值")?.parse().map_err(|_| "--min-bitrate-kbps 须为数字")?),
             "--keyframe-interval" => keyframe_interval = Some(args.next().ok_or("--keyframe-interval 缺值")?.parse().map_err(|_| "--keyframe-interval 须为数字")?),
             _ => return Err(format!("未知参数: {arg}")),
         }
@@ -89,6 +103,9 @@ fn parse_args() -> Result<Args, String> {
         gateway,
         encoder_backend: encoder_backend.unwrap_or_else(|| "auto".into()),
         bitrate_kbps,
+        degradation,
+        content_hint,
+        min_bitrate_kbps,
         keyframe_interval,
     })
 }
@@ -656,6 +673,16 @@ async fn main() -> ExitCode {
     // 编码参数透传（streams 配置面；None=field 默认 2000kbps/2s GOP）
     if let Some(k) = args.bitrate_kbps {
         cfg.bitrate_kbps = k;
+    }
+    // qos-framerate-priority：已展开原语接线（无策略逻辑——裁决在 translate）。
+    if let Some(d) = args.degradation {
+        cfg.degradation = d;
+    }
+    if let Some(h) = args.content_hint {
+        cfg.content_hint = h;
+    }
+    if let Some(k) = args.min_bitrate_kbps {
+        cfg.min_bitrate_kbps = Some(k);
     }
     if let Some(g) = args.keyframe_interval {
         cfg.keyframe_interval = g as u64;
