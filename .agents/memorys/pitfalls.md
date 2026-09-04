@@ -1512,3 +1512,18 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **根因**: 测试脚本以「命令返回」代替「系统就绪」断言。
 - **解法**: start/stop 封装一律包成就绪硬判据循环（ps 计数/端口/health，max N 轮），ready=true/false 作为断言列打印；false 时矩阵立即终止不带病续跑。
 - **验证**: stress.mjs 每轮打印 `[M1 rN] stop=true start=true`；缺列或 false = 环境失效非代码失败。
+
+## PIT-183: 浏览器消费者全关 → RoomManager last-peer 连坐销毁 router（producer 存活黑洞）(2026-09-04)
+- **症状**: 测量脚本关掉浏览器后，新会话所有瓦片永「源离线」；server `SFU: list_producers for room X` 后无 "found N" 行（返回 None=router 不存在）；host 侧 bytes_sent 持续增长、ICE Completed、零报错——发进黑洞。恢复唯一路径=host 重 produce（restart）。
+- **根因**: out/host 多流测试拓扑下，RoomManager 中 vehicle_testN 的 WS 成员只有 admin-* consumer peer（streamer 的 signaling 经 gateway 挂 room "vehicle"，mediasoup producer/router 独立于该成员表）；最后 consumer 断开 → "Room destroyed (last peer left)" → 连坐 `SFU room destroyed`。producer 存活但永不重列（host 无感：UDP 发送成功、mediasoup 不回了 RTCP BYE）。
+- **解法**: ①运维规避：涉及"浏览器全关"的测试轮之间必须 `msrtc-host restart`（或 apply 重建）重 produce；②根修（另案待做）：room 销毁判据并入 SFU producer 计数（producer>0 不毁 router），或 producer peer 计入房间成员、或 host 侧无 RTCP 反应超时触发 SIGNAL_FAIL_STREAK。
+- **验证**: 断测复现判据 = server 日志 `grep "Room destroyed"` 后紧跟同 room 的 join 无 `found .* producers`；恢复确认 = 重 produce 后 "SFU: Produce received" 新行。
+- **禁止**: 测试脚本把「上一轮浏览器关闭」当作无害事件；PIT-168（server 重建 streamer 会话死）同族——触发面=consumer 清零即断。
+- **关联**: 顺手清理了 8-21 起占据 /dev/video0 的 4 个 `cp-capturer` 僵尸（e2e-package 夹具 tmp 目录残留，C37 同款）——旧品牌测试产物会偷资源，测相机前 `ps -eo pid,lstart,args | grep cp-` 巡检。
+
+## PIT-184: ubuntu:22.04 基底无 iproute2——netem 弱网模拟静默 no-op（2026-09-04）
+- **症状**: `docker run --privileged --net host ubuntu:22.04 sh -c 'tc qdisc add dev lo root netem rate ...'` 无报错（stderr 进了重定向日志），限流"看起来生效"（码率确实 ~100k）——实际数据是 yaml 里遗留的 bitrate_kbps: 100 天花板造成的巧合，被错误归因为 netem。
+- **根因**: ubuntu:22.04 基底镜像不带 /sbin/tc（`sh: 1: tc: not found`）；且激励实验轮间未清残留配置（上一轮激励键未撤 → 下一轮"撤限回升"测的仍是限流态）。
+- **解法**: 网络注入类工具链每步硬核验——加完必 `tc qdisc show dev lo` 回读含 netem 行才算挂上；镜像先 `which tc || apt-get install -y iproute2`；解释下一轮数据前先 diff 本轮激励配置与上一轮的差异清单。
+- **验证**: 本例回读输出为空 = 当场识破。
+- **禁止**: 注入命令输出不回读；激励残留态下开新对照组；min_bitrate_kbps 配 > bitrate_kbps（min>max 未定义行为，模板注释已加警告）。

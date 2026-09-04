@@ -756,3 +756,12 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 **决策**: 浏览器播放状态机收敛为互斥表达——`连接中…`（一切重试进行时：reconnect 无限指数退避 1→30s+full jitter + 轮次引擎 30s×3）/ `LIVE`（只绑媒体新鲜度，零增长 3 tick 即降级）/ `源离线`（链路健康但无新媒体；new_producer/producer_closed 唤醒重开预算，进等待前补发 room_join 拿 late-join 回放堵竞态洞）/ `连接失败`（红牌唯一合法源 = auth/授权族错误码 4000/4001/4002/4003/4010/4011 与用户主动动作）。非 auth 失败在任何预算下不得红牌。
 **原因**: 压测实证 server 崩溃-复活（oxmgr 退避可达分钟级）后永久红牌 = reconnect 5×31s 预算 + error 无终态逃逸 + 一次性 watchdog 三层死锁。同轮弯路：connectAndDrive 探测 socket「双保险」实测引入新失败模式（删）——**先做最小直修再考虑保险，保险面自身是失败面**。
 **影响**: ①server 新增错误码必须同步 classifySfuError 分类表 + roundtrip 单测（表驱动契约）；②watchdog/轮次引擎下沉 sfu-client，组件层零定时器——D270-a 抽包时三态契约随 API 文档外化；③旧 socket 摘 handlers 是消重连振荡的唯一正解（reconnecting 闩防并发）。
+
+## D274: 弱网 QoS = stream_mode 三档 preset + min 地板双轴模型 (2026-09-04)
+- **背景**: host 推流弱网帧率 30→<5 崩塌（实盘）。根因=DegradationPreference 从未设置吃默认 Balanced + min_bitrate 硬编码 None + ContentHint 无通路（取证链见主仓 .sisyphus/plans/qos-framerate-priority/proposal.md）。
+- **决策**: 用户面双轴——`streams[].stream_mode: smooth|balanced|quality`（策略轴，ToDesk/RustDesk 同型产品概念）+ `min_bitrate_kbps`（地板轴）。捆绑：smooth=MaintainFramerate+Fluid hint+min400（max 不动）；quality=MaintainResolution+bitrate3000；balanced=全缺省=**现网逐字节零扰动**（缺省不调 setter，AD-6）。优先级 显式>preset，合并裁决唯一落 translate（AD-2：只有它区分"显式 vs 未写"；非法值 deploy 期拦截防 streamer crash-loop）。
+- **AD-1 冗余轴删除**: 用户面不设 `degradation` 键——与三 preset 双射；"完全不降级"诊断需求出现时加 `stream_mode: fixed` 枚举值（纯加法）。wrapper 层枚举保持 4 变体完整（C18 原语不裁剪）。
+- **实现**: mediaservo-webrtc `sender_set_degradation_preference`（**RtpParameters 级**非 per-enc，PIT-76 保真往返，零 vendor C++）/`sender_set_content_hint`（media_to_video）→ field PushConfig 三内部字段 → host translate/streamer。
+- **否决**: 应用层 stats 轮询控制器（webrtc-sys 无 BWE 回调，重复造 libwebrtc 环）、simulcast/SVC（单目标 produce 架构级 YAGNI）、牺牲顺序表配置（三段仅末段可配，半数排列非法=假灵活）。
+- **数值锚定**: RustDesk base×ratio（1080p 2073×{1.5,0.67,0.5}=codec.rs:893-925）→ quality 3000/min 400 落其体制；Moonlight/Parsec 码率先降=引擎第一级不可配之佐证。
+- **实证 (2026-09-04)**: 100k 紧天花板三组判别——A balanced 320x180+fps29 抖动 / B smooth **480x264@30 全程钉满** / C quality **720 死保@17-21 掉帧**；撤激励回升 720p；test3 码率顶至 bundle 3.0M 上限；H1(5s)/H6(20s)/e2e_sfu 4/4 回归全绿。netem 变体因 ubuntu:22.04 无 iproute2 未跑成（PIT-184），真机复杂内容（相机）下 A/B 帧率差将进一步拉开（合成内容 QP 不饱和逼不出 balanced 降帧分支）——Jetson 实机复测挂后续。

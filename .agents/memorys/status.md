@@ -694,3 +694,7 @@ install                        → 改名提示 + exit 2（退役）
 
 ### 2026-09-03: lesson-review 台账（本会话）
 - 新增：PIT-181（UTC/化石日志取证）、PIT-182（就绪硬判据）、D273（play 三态契约+无限韧性）、edit-safety #17（批量补丁三禁，双仓同文）。主仓侧台账索引见其 status.md「会话经验总结 2026-09-03」（主 PIT-178/179 环境组）。
+
+### 2026-09-04: qos-framerate-priority 镜像（D274）
+- webrtc 抽象层 DegradationPreference/ContentHint setter + field StreamMode 三档 preset（smooth 保帧/quality 保画/balanced 零扰动）+ host stream_mode/min_bitrate_kbps 配置面（translate 合并裁决）。
+- 实盘判别全绿（证据在主仓 .sisyphus/plans/qos-framerate-priority/evidence/）；新增 PIT-183/184、D274。
