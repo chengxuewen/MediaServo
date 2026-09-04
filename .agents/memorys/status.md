@@ -691,3 +691,6 @@ install                        → 改名提示 + exit 2（退役）
 - 探测 socket 弯路记录：connectAndDrive 曾加 probe 预探测——实测引入新失败模式，删（直连快拒+10s auth 超时已被退避吸收）。
 - 验证（vite 5173 通道）：基线 LIVE；M1 host×2 stop/start 全 LIVE；M2 kill server→复活+60s LIVE×8 零红牌；M3 host 停→+45s 源离线×8（无红牌）→回+15s 唤醒 LIVE×8 稳 120s。单测 91+1、host 60、tsc 0、cargo 双姿态 0。
 - **环境发现（另案）**：:8080 生产入口被 1panel 栈的 Nuxt 站劫持（WS 升级 8ms 返 200 X-Powered-By: Nuxt；caddy 重启无效；/load 亦 502）——web play 生产路径暂不可用，与 09-02 server 自发重启悬案同源，需 root 侧清理或迁 web 端口后复验。
+
+### 2026-09-03: lesson-review 台账（本会话）
+- 新增：PIT-181（UTC/化石日志取证）、PIT-182（就绪硬判据）、D273（play 三态契约+无限韧性）、edit-safety #17（批量补丁三禁，双仓同文）。主仓侧台账索引见其 status.md「会话经验总结 2026-09-03」（主 PIT-178/179 环境组）。

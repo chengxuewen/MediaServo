@@ -1500,3 +1500,15 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **症状**: 压测排障时用 curl upgrade 探测 :9800/:8080 /ws 得出「server WS 全挂」结论，实际浏览器/agent WS 正常。
 - **根因**: ①curl 手工拼 upgrade 头缺浏览器实现细节（扩展协商等），被 vite/axum 侧直接断连=000；②:8080 上真有问题但形态是 1panel 栈 Nuxt 站应答（200 HTML X-Powered-By），与 curl 假阴性叠加把水搅浑。
 - **解法**: WS 链路探测一律用真客户端（node/ws 或 playwright 页内 new WebSocket）；端口异常先 `ls /opt/1panel`、ps 全量比对归属，再怀疑自家栈。
+
+## PIT-181: 日志时间戳是 UTC——取证先换算，化石 err.log 误判当轮事故 (2026-09-03)
+- **症状**: 压测排障把 err.log 的 8 行 PANIC（mtime=09-01）当成本轮崩溃；"05:43 清理静默"结论部分来自本地时钟(UTC+8)去 grep Z 时间戳窗口的错位漏检。
+- **根因**: tracing 日志全 UTC(Z)，人/脚本操作全本地；err/out 文件长期无写时 mtime 属旧时代——文件里有内容 ≠ 本轮发生。
+- **解法**: 证据引用前 `date -u` 换算窗口；err.log 结论先看 `stat -c %y`；日志文件轮转后旧窗口去 `.log*` 通配里找。
+- **验证**: 每条引用的日志行时间戳必须落在 [事件时刻 ±2h]；不满足即化石。
+
+## PIT-182: oxmgr 非交互拒启静默——启停脚本必须就绪硬判据断言 (2026-09-03)
+- **症状**: 矩阵 M1 r2/r3「connecting×8 全灭」被误判为客户端状态机回归；实为 stop 后 3-10s 即 start，被 oxmgr「非交互多实例防护」拒启（exit≠0 被脚本 try/catch 吞掉）——host 根本没起，connecting 是正确显示。
+- **根因**: 测试脚本以「命令返回」代替「系统就绪」断言。
+- **解法**: start/stop 封装一律包成就绪硬判据循环（ps 计数/端口/health，max N 轮），ready=true/false 作为断言列打印；false 时矩阵立即终止不带病续跑。
+- **验证**: stress.mjs 每轮打印 `[M1 rN] stop=true start=true`；缺列或 false = 环境失效非代码失败。

@@ -750,3 +750,9 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 **决策**: 单 streamer 消亡（退出/crash/熔断）由网关在 local WS close 时向 server 上报 `DownstreamGone{peer_id, room_id}`（键=produce 消息自报实键，网关 upstream() 拦截捕获），server 按 (room, peer) 精确移除并广播 ProducerClosed；整车会话不断开。agent 断开反查保留为兜底（S3 场景）。三处清理路径统一走 `announce_producers_closed`（广播+owners 同步+StreamDestroy），`t4_gone_seen` 计数区分「T4 已清（正常）」与「注册链断（WARN）」。
 **原因**: 子进程 RoomLeave 被网关设计性拦截（整车会话不因单进程离开而断）→ server 对单流消亡零感知 → 死 producer 永驻 + 浏览器假 LIVE（T1 实盘闭环）。事件驱动是 LiveKit/Janus/mediasoup-demo 共识；mediasoup worker→app 通知通道本部署静默（sfu.rs 自认），不能依赖。
 **影响**: ① additive 协议（旧 server 解析失败丢弃=与无前行为一致）；② 上报键教训——信封 src ≠ 消息体 peer（PIT-178）；③ F1 只保证事件权威送达，浏览器「源离线」态与新鲜度兜底归 F2/F3 另轮；④ 消费端 restartStream 竞态窗口（closed 后仍能消费旧 producer 片刻）属 F3 面。
+
+## D273: web play 三态契约 + 无限韧性（2026-09-03, W1-W5）
+
+**决策**: 浏览器播放状态机收敛为互斥表达——`连接中…`（一切重试进行时：reconnect 无限指数退避 1→30s+full jitter + 轮次引擎 30s×3）/ `LIVE`（只绑媒体新鲜度，零增长 3 tick 即降级）/ `源离线`（链路健康但无新媒体；new_producer/producer_closed 唤醒重开预算，进等待前补发 room_join 拿 late-join 回放堵竞态洞）/ `连接失败`（红牌唯一合法源 = auth/授权族错误码 4000/4001/4002/4003/4010/4011 与用户主动动作）。非 auth 失败在任何预算下不得红牌。
+**原因**: 压测实证 server 崩溃-复活（oxmgr 退避可达分钟级）后永久红牌 = reconnect 5×31s 预算 + error 无终态逃逸 + 一次性 watchdog 三层死锁。同轮弯路：connectAndDrive 探测 socket「双保险」实测引入新失败模式（删）——**先做最小直修再考虑保险，保险面自身是失败面**。
+**影响**: ①server 新增错误码必须同步 classifySfuError 分类表 + roundtrip 单测（表驱动契约）；②watchdog/轮次引擎下沉 sfu-client，组件层零定时器——D270-a 抽包时三态契约随 API 文档外化；③旧 socket 摘 handlers 是消重连振荡的唯一正解（reconnecting 闩防并发）。

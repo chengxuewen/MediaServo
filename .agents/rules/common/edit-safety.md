@@ -211,3 +211,12 @@ grep -c "重复模式" <file>    # 期望 1；>1 = edit 重复插入
 **规则**: 清理浏览器/子进程时**禁止** `pkill -f <字符串>`，当该字符串出现在当前 bash 命令行里（路径如 chrome-linux64/chrome 极易入 own cmdline）。用 `ps -eo pid,comm`（comm 精确列）+ 按 pid kill，或 grep 方括号法 `[c]hrome`。
 **先例**: PIT-54（首次）；2026-09-01 play 轮 T11 调试中 `pkill -f "ms-playwright/chromium-1234/chrome-linux64/chrome"`（模式串在自身命令行）→ shell 无声挂死两个 60s/260s 工具窗口。
 **阻塞条件**: 任何 `pkill -f`/`pgrep -f` 模式串与当前命令行有子串重叠。
+
+### 17. 批量编辑失败/补丁 no-op——先 grep 现状再补刀，门禁防假绿 (2026-09-03)
+
+**规则**:
+① `edit` 工具批量调用报 hash mismatch 后**可能已部分应用**——重试前必须 grep/重读失败区确认每个 op 现状，只补未落地项；整批重发会双重应用（本会话实证：`await this.connect()` 重复行 + tsc 语法错）。
+② python 批量补丁每块 replace 前必须 `assert s.count(old)==1`——无 assert 的锚点不匹配是静默 no-op（本会话实证：矩阵脚本定义块未插入，运行至 ReferenceError 才暴露）。
+③ 门禁命令取真实退出码：`npx tsc --noEmit && echo OK`（或 `set -o pipefail`）；`cmd | head; echo $?` 读到的是管道尾命令退出码 = 假绿（本会话两次把语法错误读成 tsc=0，白跑一整个压测矩阵）。
+**验证**: 补丁落盘后 `grep -c "<新内容关键串>" <文件>` 逐 op 计数；批量 edit 失败后任何重试前必须先读现场。
+**阻塞条件**: 整批重发失败批次；无 assert replace；管道尾退出码当门禁。
