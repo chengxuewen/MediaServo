@@ -698,3 +698,7 @@ install                        → 改名提示 + exit 2（退役）
 ### 2026-09-04: qos-framerate-priority 镜像（D274）
 - webrtc 抽象层 DegradationPreference/ContentHint setter + field StreamMode 三档 preset（smooth 保帧/quality 保画/balanced 零扰动）+ host stream_mode/min_bitrate_kbps 配置面（translate 合并裁决）。
 - 实盘判别全绿（证据在主仓 .sisyphus/plans/qos-framerate-priority/evidence/）；新增 PIT-183/184、D274。
+
+### 2026-09-04: router-destroy-guard（D275，PIT-183 根修，实盘闭环）
+- server 生命周期解耦：消费者清零不再连坐毁 router（should_teardown 守卫），producer 全灭时刻 announce 尾部补毁（should_deferred_cleanup）；双姿态 API room_has_producers。
+- 证据：关→重开 T+5s 直接 LIVE 免 host 重启（修复前永源离线）；补毁 9 条恰在 device 断连秒；H1/H6/e2e 全绿；default 234/0、stub lib 奇偶。

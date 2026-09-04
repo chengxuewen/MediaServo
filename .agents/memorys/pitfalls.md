@@ -1519,6 +1519,8 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: ①运维规避：涉及"浏览器全关"的测试轮之间必须 `msrtc-host restart`（或 apply 重建）重 produce；②根修（另案待做）：room 销毁判据并入 SFU producer 计数（producer>0 不毁 router），或 producer peer 计入房间成员、或 host 侧无 RTCP 反应超时触发 SIGNAL_FAIL_STREAK。
 - **验证**: 断测复现判据 = server 日志 `grep "Room destroyed"` 后紧跟同 room 的 join 无 `found .* producers`；恢复确认 = 重 produce 后 "SFU: Produce received" 新行。
 - **禁止**: 测试脚本把「上一轮浏览器关闭」当作无害事件；PIT-168（server 重建 streamer 会话死）同族——触发面=consumer 清零即断。
+- **状态（2026-09-04 已修，D275/router-destroy-guard）**：两判据纯函数 `should_teardown`/`should_deferred_cleanup`（sfu.rs 顶层）+ `room_has_producers` 双姿态 API；leave 路径带 producer 不毁 router，announce 漏斗尾部 producer 全灭时刻补毁 registry/owners。实盘：消费者全关 0 毁房、新会话 T+5s 直接 LIVE（未重启 host）、补毁恰在 device 断连时刻 ×9；计划与证据=主仓 .sisyphus/plans/router-destroy-guard/。
+- **存量债顺记**：`cargo test -p mediaservo-server --no-default-features`（stub 姿态 **--tests 目标**）HEAD 即挂（signaling.rs:1786/1809 handle_sfu_message 无 cfg 门）——本刀前既有，lib `cargo check` stub 姿态保持 rc=0 奇偶，测试门修另案。
 - **关联**: 顺手清理了 8-21 起占据 /dev/video0 的 4 个 `cp-capturer` 僵尸（e2e-package 夹具 tmp 目录残留，C37 同款）——旧品牌测试产物会偷资源，测相机前 `ps -eo pid,lstart,args | grep cp-` 巡检。
 
 ## PIT-184: ubuntu:22.04 基底无 iproute2——netem 弱网模拟静默 no-op（2026-09-04）

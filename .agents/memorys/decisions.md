@@ -765,3 +765,8 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **否决**: 应用层 stats 轮询控制器（webrtc-sys 无 BWE 回调，重复造 libwebrtc 环）、simulcast/SVC（单目标 produce 架构级 YAGNI）、牺牲顺序表配置（三段仅末段可配，半数排列非法=假灵活）。
 - **数值锚定**: RustDesk base×ratio（1080p 2073×{1.5,0.67,0.5}=codec.rs:893-925）→ quality 3000/min 400 落其体制；Moonlight/Parsec 码率先降=引擎第一级不可配之佐证。
 - **实证 (2026-09-04)**: 100k 紧天花板三组判别——A balanced 320x180+fps29 抖动 / B smooth **480x264@30 全程钉满** / C quality **720 死保@17-21 掉帧**；撤激励回升 720p；test3 码率顶至 bundle 3.0M 上限；H1(5s)/H6(20s)/e2e_sfu 4/4 回归全绿。netem 变体因 ubuntu:22.04 无 iproute2 未跑成（PIT-184），真机复杂内容（相机）下 A/B 帧率差将进一步拉开（合成内容 QP 不饱和逼不出 balanced 降帧分支）——Jetson 实机复测挂后续。
+
+## D275: 房间生命周期两判据化（PIT-183 根修，router-destroy-guard）(2026-09-04)
+- **决策**: WS 视图（RoomManager）与转发面（SFU Router）生命周期解耦——销毁决策全部收敛为 sfu.rs 顶层两纯函数：`should_teardown(room_removed, has_producers)`（leave 路径连坐拆除守卫）与 `should_deferred_cleanup(room_gone, has_producers)`（announce_producers_closed 尾部补毁 registry/owners）。新 API `SfuManager::room_has_producers`（stub 恒 false=行为等价）。
+- **理由**: 多流拓扑下 stream 房间 WS 成员只有消费者（producer 宿主挂 gateway 会话房间），"last WS peer left"不再蕴含"无人推流"；连坐毁 Router 制造 producer 黑洞（PIT-183）。真销毁时刻=producer 全灭，由 SFU 内建 peers-empty 自毁链 + announce 统一漏斗（F1/D272 遗产）收口，无第四路径（Momus 实证 admin DELETE/优雅停机均安全）。
+- **取舍**: B 案（producer peer 计入房间成员=动 gateway 房间语义）否决；C 案（host 侧 RTCP 超时自愈）留作 worker 崩溃类静默死的全场景兜底另案。owner 延迟保留顺带修复"消费者清零→设备重 produce 失主"的潜在门缺陷（:537 produce 门依赖 room_owners）。
