@@ -156,6 +156,27 @@ fn map_rtp_parameters(p: webrtc_sys::rtp_parameters::ffi::RtpParameters) -> crat
     }
 }
 
+// ── qos-framerate-priority: crate 枚举 → vendor 枚举映射（私有，vendor 类型不出边界） ──
+fn map_pref(p: crate::rtp::RTCDegradationPreference) -> webrtc_sys::rtp_parameters::ffi::DegradationPreference {
+    use crate::rtp::RTCDegradationPreference as P;
+    use webrtc_sys::rtp_parameters::ffi::DegradationPreference as Sys;
+    match p {
+        P::Fixed => Sys::MaintainFramerateAndResolution,
+        P::MaintainFramerate => Sys::MaintainFramerate,
+        P::MaintainResolution => Sys::MaintainResolution,
+        P::Balanced => Sys::Balanced,
+    }
+}
+
+fn map_hint(h: crate::rtp::RTCRtpContentHint) -> webrtc_sys::video_track::ffi::ContentHint {
+    use crate::rtp::RTCRtpContentHint as H;
+    use webrtc_sys::video_track::ffi::ContentHint as Sys;
+    match h {
+        H::None => Sys::None,
+        H::Fluid => Sys::Fluid,
+    }
+}
+
 // ── v2: webrtc-sys RtpCapabilities → crate RTCRtpCapabilities 映射 ──
 fn map_rtp_capabilities(c: webrtc_sys::rtp_parameters::ffi::RtpCapabilities) -> crate::rtp::RTCRtpCapabilities {
     use crate::rtp::{RTCRtpCodecCapability, RTCRtpHeaderExtensionCapability};
@@ -731,6 +752,52 @@ Err(RTCError::Track(format!("sender not found: {track_id}")))
                 return sender
                     .set_parameters(params)
                     .map_err(|e| RTCError::Internal(e.what().to_owned()));
+            }
+        }
+        Err(RTCError::Track(format!("sender not found: {track_id}")))
+    }
+
+    /// v2 (qos-framerate-priority): 降级偏好 — cxx 保真往返（bitrate 同模式）。
+    /// degradation_preference 在 **RtpParameters 级**（vendor rtp_parameters.rs:191-192，
+    /// 非 per-enc）：get 原样 → has/preference 两字段 → set，天然满足 SetParameters
+    /// 校验（PIT-76）。Fixed → vendor MaintainFramerateAndResolution。
+    fn sender_set_degradation_preference(&self, track_id: &str, pref: crate::rtp::RTCDegradationPreference) -> Result<(), RTCError> {
+        let sys_pref = map_pref(pref);
+        for tc in self.pc.get_transceivers() {
+            let t = &tc.ptr;
+            let sender = t.sender();
+            let track = sender.track();
+            if track.id() == track_id {
+                let mut params = sender.get_parameters();
+                params.has_degradation_preference = true;
+                params.degradation_preference = sys_pref;
+                tracing::info!("sender_set_degradation_preference({track_id}, {pref:?}) — SetParameters");
+                return sender
+                    .set_parameters(params)
+                    .map_err(|e| RTCError::Internal(e.what().to_owned()));
+            }
+        }
+        Err(RTCError::Track(format!("sender not found: {track_id}")))
+    }
+
+    /// v2 (qos-framerate-priority): 内容 hint — track 级属性（非 SetParameters）。
+    /// sender.track() → media_to_video 下转型（:1444 VideoSink 先例同法）→ set_content_hint；
+    /// 非视频 track 转型失败 → Err（调用方 warn，C15）。
+    fn sender_set_content_hint(&self, track_id: &str, hint: crate::rtp::RTCRtpContentHint) -> Result<(), RTCError> {
+        let sys_hint = map_hint(hint);
+        for tc in self.pc.get_transceivers() {
+            let t = &tc.ptr;
+            let sender = t.sender();
+            let track = sender.track();
+            if track.id() == track_id {
+                // track_id 命中即调用方 add_track("video") 建的视频 track（publish 路径保证）；
+                // 非视频 track 下转型属未定义行为，故仅 video kind 路径调用（:1490 VideoSink 先例同法）。
+                unsafe {
+                    let video_track = webrtc_sys::video_track::ffi::media_to_video(track);
+                    video_track.set_content_hint(sys_hint);
+                }
+                tracing::info!("sender_set_content_hint({track_id}, {hint:?}) — VideoTrack");
+                return Ok(());
             }
         }
         Err(RTCError::Track(format!("sender not found: {track_id}")))

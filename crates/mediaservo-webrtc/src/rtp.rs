@@ -32,6 +32,55 @@ impl RTCVideoEncoderBackend {
     }
 }
 
+/// 发送端降级偏好（对齐 vendor webrtc-sys DegradationPreference 4 变体，C18 不裁剪）。
+/// Fixed = vendor MaintainFramerateAndResolution（帧率/分辨率双保，只丢帧）。
+/// 字符串形态（fixed/framerate/resolution/balanced）供 translate/streamer 解析复用。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum RTCDegradationPreference {
+    /// 不降级（仅丢帧）——vendor MaintainFramerateAndResolution
+    Fixed,
+    /// 保帧率，降分辨率（弱网实时优先，遥控场景）
+    MaintainFramerate,
+    /// 保分辨率，降帧率（画质/取证优先）
+    MaintainResolution,
+    /// 两者均衡（libwebrtc 缺省语义，本库缺省）
+    #[default]
+    Balanced,
+}
+
+impl std::str::FromStr for RTCDegradationPreference {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "fixed" => Ok(Self::Fixed),
+            "framerate" => Ok(Self::MaintainFramerate),
+            "resolution" => Ok(Self::MaintainResolution),
+            "balanced" => Ok(Self::Balanced),
+            _ => Err(format!("非法 degradation 值 {s:?}（合法: fixed|framerate|resolution|balanced）")),
+        }
+    }
+}
+
+/// 发送端内容提示（对齐 W3C contentHint；本库仅落 {None, Fluid}，AD-5——
+/// Detailed/Text 无监控相机场景，YAGNI，扩枚举纯加法）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum RTCRtpContentHint {
+    #[default]
+    None,
+    /// 高运动内容（libwebrtc 倾向保帧率）
+    Fluid,
+}
+
+impl std::str::FromStr for RTCRtpContentHint {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "fluid" => Ok(Self::Fluid),
+            _ => Err(format!("非法 content-hint 值 {s:?}（合法: fluid）")),
+        }
+    }
+}
+
 /// W3C RTCRtpSender — wraps a TrackRef::Sender with sender metadata (D146).
 #[derive(Debug, Clone)]
 pub struct RTCRtpSender {
@@ -103,6 +152,26 @@ impl RTCRtpSender {
         use crate::backend::PcBackend as _;
         match &self.backend {
             Some(b) => b.sender_set_video_encoder_backend(&self.track_id, backend),
+            None => Err(RTCError::Internal("sender not bound to a peer connection".into())),
+        }
+    }
+
+    /// v2 (qos-framerate-priority): 设置降级偏好——聚焦式 API（bitrate 同模式），
+    /// 后端 cxx 保真往返只改 RtpParameters.degradation_preference 字段。
+    pub fn set_degradation_preference(&self, pref: RTCDegradationPreference) -> Result<(), RTCError> {
+        use crate::backend::PcBackend as _;
+        match &self.backend {
+            Some(b) => b.sender_set_degradation_preference(&self.track_id, pref),
+            None => Err(RTCError::Internal("sender not bound to a peer connection".into())),
+        }
+    }
+
+    /// v2 (qos-framerate-priority): 设置内容 hint（track 级，非 SetParameters）——
+    /// 后端经 media_to_video 转 VideoTrack 后 set_content_hint。
+    pub fn set_content_hint(&self, hint: RTCRtpContentHint) -> Result<(), RTCError> {
+        use crate::backend::PcBackend as _;
+        match &self.backend {
+            Some(b) => b.sender_set_content_hint(&self.track_id, hint),
             None => Err(RTCError::Internal("sender not bound to a peer connection".into())),
         }
     }
@@ -332,5 +401,40 @@ mod tests {
         assert_eq!(RTCVideoEncoderBackend::from_config("HARDWARE"), Some(RTCVideoEncoderBackend::Hardware));
         assert_eq!(RTCVideoEncoderBackend::from_config("cuda"), None);
         assert_eq!(RTCVideoEncoderBackend::from_config(""), None);
+    }
+
+    // qos-framerate-priority T1: DegradationPreference / ContentHint 解析与缺省
+    #[test]
+    fn degradation_preference_from_str_legal() {
+        assert_eq!("fixed".parse::<RTCDegradationPreference>().unwrap(), RTCDegradationPreference::Fixed);
+        assert_eq!("framerate".parse::<RTCDegradationPreference>().unwrap(), RTCDegradationPreference::MaintainFramerate);
+        assert_eq!("resolution".parse::<RTCDegradationPreference>().unwrap(), RTCDegradationPreference::MaintainResolution);
+        assert_eq!("balanced".parse::<RTCDegradationPreference>().unwrap(), RTCDegradationPreference::Balanced);
+        // 大小写/空白不敏感（from_config 同风格）
+        assert_eq!(" FRAMERATE ".parse::<RTCDegradationPreference>().unwrap(), RTCDegradationPreference::MaintainFramerate);
+    }
+
+    #[test]
+    fn degradation_preference_from_str_illegal() {
+        assert!("cuda".parse::<RTCDegradationPreference>().is_err());
+        assert!("".parse::<RTCDegradationPreference>().is_err());
+    }
+
+    #[test]
+    fn degradation_preference_default_is_balanced() {
+        assert_eq!(RTCDegradationPreference::default(), RTCDegradationPreference::Balanced);
+    }
+
+    #[test]
+    fn content_hint_fluid_parses_others_err() {
+        assert_eq!("fluid".parse::<RTCRtpContentHint>().unwrap(), RTCRtpContentHint::Fluid);
+        assert!("detailed".parse::<RTCRtpContentHint>().is_err());
+        assert!("none".parse::<RTCRtpContentHint>().is_err());
+        assert!("".parse::<RTCRtpContentHint>().is_err());
+    }
+
+    #[test]
+    fn content_hint_default_is_none() {
+        assert_eq!(RTCRtpContentHint::default(), RTCRtpContentHint::None);
     }
 }

@@ -109,6 +109,20 @@ Err(RTCError::NotSupported("sender_set_parameters".into()))
         Err(RTCError::NotSupported("sender_set_video_encoder_backend".into()))
     }
 
+    /// v2 (qos-framerate-priority): 设置发送端降级偏好（RtpParameters 级）。
+    /// 默认 NotSupported + warn（C15）; webrtc-sys 后端 override 为 cxx 保真往返。
+    fn sender_set_degradation_preference(&self, track_id: &str, pref: crate::rtp::RTCDegradationPreference) -> Result<(), RTCError> {
+        tracing::warn!("sender_set_degradation_preference({track_id}, {pref:?}): not supported by backend");
+        Err(RTCError::NotSupported("sender_set_degradation_preference".into()))
+    }
+
+    /// v2 (qos-framerate-priority): 设置发送端视频 track 内容 hint。
+    /// 默认 NotSupported + warn（C15）; webrtc-sys 后端 override（media_to_video → set_content_hint）。
+    fn sender_set_content_hint(&self, track_id: &str, hint: crate::rtp::RTCRtpContentHint) -> Result<(), RTCError> {
+        tracing::warn!("sender_set_content_hint({track_id}, {hint:?}): not supported by backend");
+        Err(RTCError::NotSupported("sender_set_content_hint".into()))
+    }
+
     /// W3C RTCRtpSender.requestKeyFrame — 周期关键帧触发（PIT-76）。
     ///
     /// 默认实现: get → 全 encodings 设 request_key_frame=true → set（上层往返）。
