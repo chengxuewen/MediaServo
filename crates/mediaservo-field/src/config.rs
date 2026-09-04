@@ -4,6 +4,71 @@
 //! 富选项（MVP 只落 codec + encoder_backend，其余待真传输接入后按需扩展）。
 
 use mediaservo_common::protocol::PeerRole;
+use mediaservo_webrtc::rtp::{RTCDegradationPreference, RTCRtpContentHint};
+
+/// 推流策略档位（qos-framerate-priority，AD-1：用户面只暴露策略轴，
+/// 原语展开由 bundle() 纯表完成，合并裁决在 host translate）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamMode {
+    /// 实时优先：保帧率降分辨率 + Fluid hint + 400kbps 地板（遥控推荐）
+    Smooth,
+    /// libwebrtc 均衡双降（缺省，行为与现状逐字节一致）
+    Balanced,
+    /// 画质优先：保分辨率降帧率 + 3000kbps 天花板（取证推荐，AD-3）
+    Quality,
+}
+
+impl StreamMode {
+    /// CLI/配置字符串形态（与 FromStr 对称，translate/streamer 共用）。
+    pub fn to_str(self) -> &'static str {
+        match self {
+            StreamMode::Smooth => "smooth",
+            StreamMode::Balanced => "balanced",
+            StreamMode::Quality => "quality",
+        }
+    }
+
+    /// 档位 → 原语 bundle（纯数据，表驱动单测友好）。
+    pub fn bundle(self) -> PresetBundle {
+        match self {
+            StreamMode::Smooth => PresetBundle {
+                degradation: RTCDegradationPreference::MaintainFramerate,
+                content_hint: RTCRtpContentHint::Fluid,
+                min_bitrate_kbps: Some(400),
+                bitrate_kbps: None,
+            },
+            StreamMode::Balanced => PresetBundle::default(),
+            StreamMode::Quality => PresetBundle {
+                degradation: RTCDegradationPreference::MaintainResolution,
+                content_hint: RTCRtpContentHint::None,
+                min_bitrate_kbps: None,
+                bitrate_kbps: Some(3000),
+            },
+        }
+    }
+}
+
+impl std::str::FromStr for StreamMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "smooth" => Ok(Self::Smooth),
+            "balanced" => Ok(Self::Balanced),
+            "quality" => Ok(Self::Quality),
+            _ => Err(format!("非法 stream_mode 值 {s:?}（合法: smooth|balanced|quality）")),
+        }
+    }
+}
+
+/// StreamMode 展开后的原语集（translate 消费：显式配置 > bundle）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PresetBundle {
+    pub degradation: RTCDegradationPreference,
+    pub content_hint: RTCRtpContentHint,
+    pub min_bitrate_kbps: Option<u32>,
+    pub bitrate_kbps: Option<u32>,
+}
+
 
 /// 推流会话配置（契约 §4）。
 #[derive(Debug, Clone)]
@@ -24,6 +89,12 @@ pub struct PushConfig {
     pub framerate: u32,
     /// 编码码率 kbps。
     pub bitrate_kbps: u32,
+    /// 弱网降级偏好（qos-framerate-priority；缺省 Balanced=不调 setter，AD-6）。
+    pub degradation: RTCDegradationPreference,
+    /// 内容 hint（缺省 None=不调 setter；Smooth 档 bundle 为 Fluid）。
+    pub content_hint: RTCRtpContentHint,
+    /// 码率地板 bps 的 kbps 形态（None=不设下限；Smooth 档 bundle 为 400）。
+    pub min_bitrate_kbps: Option<u32>,
     /// 关键帧间隔秒（GOP 上限，默认 2）。
     pub keyframe_interval: u64,
     /// D2 本地网关模式：Some(src) = 通过 host-agent 网关连接
@@ -44,6 +115,9 @@ impl PushConfig {
             height: 720,
             framerate: 30,
             bitrate_kbps: 2000,
+            degradation: RTCDegradationPreference::Balanced,
+            content_hint: RTCRtpContentHint::None,
+            min_bitrate_kbps: None,
             keyframe_interval: 2,
             gateway_src: None,
         }
@@ -166,5 +240,46 @@ mod tests {
         assert_eq!(gw.psk, "", "网关模式无 PSK");
         let chained = direct.clone().with_gateway("child-2");
         assert_eq!(chained.gateway_src.as_deref(), Some("child-2"));
+    }
+
+    // qos-framerate-priority T3: StreamMode preset 表 + PushConfig 缺省等价
+    #[test]
+    fn stream_mode_from_str_legal_and_illegal() {
+        assert_eq!("smooth".parse::<StreamMode>().unwrap(), StreamMode::Smooth);
+        assert_eq!("balanced".parse::<StreamMode>().unwrap(), StreamMode::Balanced);
+        assert_eq!("quality".parse::<StreamMode>().unwrap(), StreamMode::Quality);
+        assert!("SMOOTH ".parse::<StreamMode>().is_ok(), "大小写/空白不敏感");
+        let e = "turbo".parse::<StreamMode>().unwrap_err();
+        assert!(e.contains("smooth|balanced|quality"), "错误信息含合法集: {e}");
+        assert!("".parse::<StreamMode>().is_err());
+    }
+
+    #[test]
+    fn preset_bundle_table_per_ad2_ad3_ad4() {
+        use mediaservo_webrtc::rtp::{RTCDegradationPreference, RTCRtpContentHint};
+        let s = StreamMode::Smooth.bundle();
+        assert_eq!(s.degradation, RTCDegradationPreference::MaintainFramerate);
+        assert_eq!(s.content_hint, RTCRtpContentHint::Fluid);
+        assert_eq!(s.min_bitrate_kbps, Some(400));
+        assert_eq!(s.bitrate_kbps, None, "smooth 不动码率天花板");
+        let b = StreamMode::Balanced.bundle();
+        assert_eq!(b.degradation, RTCDegradationPreference::Balanced);
+        assert_eq!(b.content_hint, RTCRtpContentHint::None);
+        assert_eq!(b.min_bitrate_kbps, None);
+        assert_eq!(b.bitrate_kbps, None);
+        let q = StreamMode::Quality.bundle();
+        assert_eq!(q.degradation, RTCDegradationPreference::MaintainResolution);
+        assert_eq!(q.content_hint, RTCRtpContentHint::None);
+        assert_eq!(q.min_bitrate_kbps, None);
+        assert_eq!(q.bitrate_kbps, Some(3000));
+    }
+
+    #[test]
+    fn push_config_new_defaults_match_legacy_behavior() {
+        // AD-6: 缺省构造 = 现状行为（Balanced/None/None → session 不调新 setter）
+        let cfg = PushConfig::new("ws://x", "psk", "room");
+        assert_eq!(cfg.degradation, mediaservo_webrtc::rtp::RTCDegradationPreference::Balanced);
+        assert_eq!(cfg.content_hint, mediaservo_webrtc::rtp::RTCRtpContentHint::None);
+        assert_eq!(cfg.min_bitrate_kbps, None);
     }
 }

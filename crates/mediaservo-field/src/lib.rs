@@ -12,7 +12,7 @@ pub mod error;
 pub mod session;
 pub mod sfu;
 
-pub use config::{PublishOptions, PullConfig, PushConfig};
+pub use config::{PresetBundle, PublishOptions, PullConfig, PushConfig, StreamMode};
 pub use error::FieldError;
 
 pub use session::{PullSession, PushSession, SessionEvent, SessionEvents};

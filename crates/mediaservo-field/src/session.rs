@@ -220,15 +220,28 @@ impl PushSession {
 
         // 编码码率区间（协商后、produce 前）
         let max_bps = u64::from(cfg.bitrate_kbps) * 1000;
+        let min_bps = cfg.min_bitrate_kbps.map(|k| u64::from(k) * 1000);
         match pc.get_senders().iter().find(|s| s.track_id == track_id) {
             Some(rtp_sender) => {
-                if let Err(e) = rtp_sender.set_encoding_bitrate(None, Some(max_bps)) {
+                if let Err(e) = rtp_sender.set_encoding_bitrate(min_bps, Some(max_bps)) {
                     tracing::warn!("set_encoding_bitrate: {e}");
                 }
                 // 编码帧率上限（multi-stream P1: host.yaml fps → libwebrtc
                 // max_framerate via SetParameters）——帧时间戳 C17 锚定，与 fps 无关
                 if let Err(e) = rtp_sender.set_encoding_framerate(Some(f64::from(cfg.framerate))) {
                     tracing::warn!("set_encoding_framerate: {e}");
+                }
+                // qos-framerate-priority（AD-6）：缺省值不调 setter——balanced 档对现网
+                // SetParameters 调用序列零扰动；非缺省才下发，Err 均 warn 回落默认（C15）。
+                if cfg.degradation != mediaservo_webrtc::rtp::RTCDegradationPreference::Balanced
+                    && let Err(e) = rtp_sender.set_degradation_preference(cfg.degradation)
+                {
+                    tracing::warn!("set_degradation_preference({:?}): {e}", cfg.degradation);
+                }
+                if cfg.content_hint != mediaservo_webrtc::rtp::RTCRtpContentHint::None
+                    && let Err(e) = rtp_sender.set_content_hint(cfg.content_hint)
+                {
+                    tracing::warn!("set_content_hint({:?}): {e}", cfg.content_hint);
                 }
             }
             None => tracing::warn!("sender not found for bitrate config: {track_id}"),
