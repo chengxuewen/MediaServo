@@ -29,6 +29,42 @@ pub fn use_bare_metal_listen(
 ) -> bool {
     announced.first().is_some_and(|first| local.contains(first))
 }
+/// PIT-183（A 案根修，D274 遗留轮）：Router 销毁两判据——
+/// 消费者清零不再连坐销毁仍带 producer 的 Router，producer 全灭时刻由
+/// `announce_producers_closed` 尾部补毁 registry/owners。纯函数供双姿态
+/// 共享与表驱动单测（决策面集中一处，防分支漂移——F1/D272 同款纪律）。
+/// 房间 WS 成员清零时，是否执行 SFU/registry/owners 连坐拆除。
+/// 带 producer 的 Router 必须存活（黑洞根因，PIT-183）。
+pub fn should_teardown(room_removed: bool, has_producers: bool) -> bool {
+    room_removed && !has_producers
+}
+
+/// producer 全灭通告后，是否补做延迟清理（房已无 WS 成员且确无 producer 才清）。
+pub fn should_deferred_cleanup(room_gone: bool, has_producers: bool) -> bool {
+    room_gone && !has_producers
+}
+
+#[cfg(test)]
+mod router_guard_tests {
+    use super::{should_deferred_cleanup, should_teardown};
+
+    #[test]
+    fn teardown_truth_table() {
+        // 真值表：仅「WS 清零 且 无 producer」连坐（第二列=has_producers）
+        assert!(!should_teardown(false, false), "房未清零不拆");
+        assert!(!should_teardown(false, true), "房未清零不拆（带 producer）");
+        assert!(should_teardown(true, false), "清零且无 producer → 拆");
+        assert!(!should_teardown(true, true), "PIT-183 主案：清零但 producer 活 → 保留");
+    }
+
+    #[test]
+    fn deferred_cleanup_truth_table() {
+        assert!(!should_deferred_cleanup(false, false), "K2：房内还有消费者→留给 leave 路径");
+        assert!(!should_deferred_cleanup(false, true), "房在与 producer 活→不动");
+        assert!(should_deferred_cleanup(true, false), "K1：房已散且 producer 全灭→补毁");
+        assert!(!should_deferred_cleanup(true, true), "房散但 producer 残→不毁");
+    }
+}
 
 #[cfg(test)]
 mod bare_metal_tests {
@@ -999,6 +1035,14 @@ mod imp {
             Some(result)
         }
 
+        /// PIT-183：该房是否仍有活 producer（守卫连坐销毁用）。
+        /// 遍历形态同 `list_producers`（DashMap iter → SfuPeer.producers）。
+        pub fn room_has_producers(&self, room_id: &str) -> bool {
+            self.rooms
+                .get(room_id)
+                .is_some_and(|r| r.peers.iter().any(|p| !p.producers.is_empty()))
+        }
+
         /// Send raw RTP data through the first video producer in the room.
         /// Used for WS→SFU frame relay (avoids Host-side ICE/DTLS).
         ///
@@ -1608,6 +1652,11 @@ mod imp {
 
         /// Stub — no-op in non-SFU builds.
         pub fn remove_room(&self, _room_id: &str) -> bool {
+            false
+        }
+
+        /// Stub — PIT-183 守卫在无 SFU 姿态下恒 false（行为等价现状直拆）。
+        pub fn room_has_producers(&self, _room_id: &str) -> bool {
             false
         }
 

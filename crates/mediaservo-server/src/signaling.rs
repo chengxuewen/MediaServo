@@ -1079,16 +1079,27 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         }
     }
 
-    // If room became empty, also remove it from SFU
+    // PIT-183（router 连坐销毁根修）: RoomManager 空 ≠ SFU 房间死——多流拓扑下
+    // stream 房间的 WS 成员只有消费者（producer 宿主挂 gateway 会话房间）。
+    // 无条件连坐销毁仍带活 producer 的 Router ⇒ host 推流进黑洞（bytes_sent
+    // 涨而永不再被 list_producers 列出）。真销毁时刻=producer 全灭：SFU 内建
+    // peers 清空自毁链 + announce 尾部补毁（should_deferred_cleanup）。
     #[cfg(feature = "sfu-mediasoup")]
-    if room_removed {
+    let sfu_alive = server.sfu_manager.room_has_producers(&relay_room);
+    #[cfg(not(feature = "sfu-mediasoup"))]
+    let sfu_alive = false; // stub 无 SFU 态 → 守卫短路，行为等价 HEAD
+    // If room became empty (and no producers left), also remove it from SFU
+    #[cfg(feature = "sfu-mediasoup")]
+    if crate::sfu::should_teardown(room_removed, sfu_alive) {
         server.sfu_manager.remove_room(&relay_room);
     }
-    // E3: 空房无状态可报 — 清理状态注册表，避免陈旧数据悬挂
-    if room_removed {
+    // E3: 空房无状态可报 — 清理状态注册表（G3: 主车登记同步；保留期内
+    // owner 仍在是设备重 produce 门（:537）所需，严格优于旧行为）
+    if crate::sfu::should_teardown(room_removed, sfu_alive) {
         server.status_registry.remove(&relay_room);
-        // G3: 房间空 = 主车登记失效（车端离开且无消费方）。
         server.room_owners.remove(&relay_room);
+    } else if room_removed {
+        tracing::debug!("PIT-183 guard: {relay_room} WS 成员清零但 producer 存活 — router/registry 保留");
     }
 
     let leave_msg =
@@ -1626,6 +1637,19 @@ fn announce_producers_closed(
             timestamp: chrono::Utc::now().to_rfc3339(),
         };
         let _ = server.admin_events.send(serde_json::to_string(&ev).unwrap_or_default());
+    }
+    // PIT-183 补毁：消费者先零被守卫保留的 registry/owners，在 producer 全灭的
+    // 本通告时刻回收（RoomManager 视图已散房 = 延迟清理生效点；K2 时序房内
+    // 尚有消费者则跳过，留给其 leave 路径的 should_teardown——双保险无泄漏）。
+    #[cfg(feature = "sfu-mediasoup")] // 补毁只在 SFU 姿态有意义（stub 无 producer 态，
+    // 清理由上方 leave 路径守卫照常）
+    if crate::sfu::should_deferred_cleanup(
+        server.room_manager.get_room(room_id).is_none(),
+        server.sfu_manager.room_has_producers(room_id),
+    ) {
+        server.status_registry.remove(room_id);
+        server.room_owners.remove(room_id);
+        tracing::info!("PIT-183 deferred cleanup done for room {room_id}");
     }
 }
 
