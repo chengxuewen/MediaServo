@@ -1529,3 +1529,11 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: 网络注入类工具链每步硬核验——加完必 `tc qdisc show dev lo` 回读含 netem 行才算挂上；镜像先 `which tc || apt-get install -y iproute2`；解释下一轮数据前先 diff 本轮激励配置与上一轮的差异清单。
 - **验证**: 本例回读输出为空 = 当场识破。
 - **禁止**: 注入命令输出不回读；激励残留态下开新对照组；min_bitrate_kbps 配 > bitrate_kbps（min>max 未定义行为，模板注释已加警告）。
+
+## PIT-185: 浏览器异常断开的 consumer 滞留行——SfuPeer 清理链只覆盖 relay peer (2026-09-07)
+- **症状**: T1 刀 A 列表模式实盘，浏览器关窗 5 分钟后 consumers 行持续在列（rp=null），计数只增（8→16 跨两 session）。
+
+- **根因（E 轮日志修正版）**: 断开清理**有**执行（`remove_peer_global(admin-xxx)`）但键不对——consumer 实际注册在合成 peer 键 `<room>-consumer-<rand>` 下（consume 路径自建），WS 会话 id 与该合成键无倒排索引 → "0 sfu rooms touched"，SfuPeer/consumers 永不清理；transport 由 worker 侧 ICE 超时消亡（句柄 closed() 不置真）→ 死行挂表。F1 只修了设备 producer 键的同类问题。
+
+- **解法（当下）**: 读侧谓词=**stats 可达**（E1 活 8/8 vs E3 死全灭双向实证；closed() 在此场景不可信已弃用为主判据），非活行整行跳过——列表模式「表内即活」。**根因修（另案立项）**: consume 路径记录 WS 会话 id→合成 peer 键倒排，WS 尾部清理据此 remove；动 H1/H6 交互面需独立回归矩阵。
+- **验证**: 部署后列表 consumers=0（滞留全隐）、开窗会话 rp 非空互异恢复可见（D0/C1 双向）；`grep -c "left room"` 关窗时段=0 佐证清理链未触发。

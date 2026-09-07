@@ -1158,9 +1158,16 @@ mod imp {
                 for peer_entry in sfu_room.peers.iter() {
                     let (peer_id, peer) = peer_entry.pair();
                     for producer in peer.producers.iter() {
+                        // 快路径：句柄已关直接跳（T2 主谓词在 transport_stat_fields 的
+                        // stats 可达性——断开泄漏场景 closed() 不会置真，见 PIT-185）。
+                        if producer.transport().closed() {
+                            continue;
+                        }
                         let pid = producer.id().to_string();
                         let tid = producer.transport().id().to_string();
-                        let tfields = Self::transport_stat_fields(peer, &tid).await;
+                        let Some(tfields) = Self::transport_stat_fields(peer, &tid).await else {
+                            continue; // 死 transport（断开泄漏行）——见 PIT-185，根因另案
+                        };
                         let (bytes, packets, score) = match producer.get_stats().await {
                             Ok(s) => s
                                 .first()
@@ -1181,9 +1188,14 @@ mod imp {
                         ));
                     }
                     for consumer in peer.consumers.iter() {
+                        if consumer.transport().closed() {
+                            continue;
+                        }
                         let cid = consumer.id().to_string();
                         let tid = consumer.transport().id().to_string();
-                        let tfields = Self::transport_stat_fields(peer, &tid).await;
+                        let Some(tfields) = Self::transport_stat_fields(peer, &tid).await else {
+                            continue;
+                        };
                         let (bytes, packets, score) = match consumer.get_stats().await {
                             Ok(s) => {
                                 let v = s.consumer_stats();
@@ -1209,30 +1221,29 @@ mod imp {
         }
 
         /// transport stats（WebRtcTransportStat 单结构含 tuple/fractionLost/BWE）→ 观测字段集。
-        /// 任何缺测路径都回「键全在、值 null」的 Map——wire shape 稳定（下游 jq 可盲取）。
+        /// **None = 非活行**（注册表查无 / stats RPC 失败 / 空 vec）——列表模式据此跳行，
+        /// 保证「表内即活」。T2 实盘修正谓词：closed() 在 consumer 键漂移泄漏场景不可信
+        /// （句柄从未被关），stats 可达性才是存活真值。
         async fn transport_stat_fields(
             peer: &SfuPeer,
             transport_id: &str,
-        ) -> serde_json::Map<String, serde_json::Value> {
-            let miss = || {
-                Self::transport_stat_fields_json(
-                    transport_id, None, None, None, (None, None), (None, None),
-                )
-            };
-            let Some(t) = peer
+        ) -> Option<serde_json::Map<String, serde_json::Value>> {
+            let t = peer
                 .send_transports
                 .iter()
                 .chain(peer.recv_transports.iter())
-                .find(|t| t.id().to_string() == transport_id)
-            else {
-                tracing::debug!("sfu transport {transport_id} not in peer registry");
-                return miss();
-            };
+                .find(|t| t.id().to_string() == transport_id)?;
             match t.get_stats().await {
                 Ok(stats) => match stats.into_iter().next() {
                     Some(s) => {
                         let tp = s.ice_selected_tuple.as_ref();
-                        Self::transport_stat_fields_json(
+                        // 活性谓词（T1「表内即活」契约，G/E 轮 35min 实证）：tuple 未选定
+                        // = 未连通或死后老化清除（~10s 内）→ 不计活行。注意 transport
+                        // 对象本身永不自关（UDP ICE 不判死，IceState 注释），stats 可达
+                        // 也非活性（G2 +150s 假活），closed() 同样不可信——tuple 是唯一
+                        // 与「可被 weaknet 定向」严格等价的读侧信号。PIT-185 根因另案。
+                        tp?;
+                        Some(Self::transport_stat_fields_json(
                             transport_id,
                             tp.map(|v| v.local_port()),
                             tp.and_then(|v| v.remote_ip()).map(|ip| ip.to_string()),
@@ -1242,13 +1253,13 @@ mod imp {
                                 s.available_outgoing_bitrate.map(u64::from),
                                 s.available_incoming_bitrate.map(u64::from),
                             ),
-                        )
+                        ))
                     }
-                    None => miss(),
+                    None => None,
                 },
                 Err(e) => {
-                    tracing::warn!("sfu transport {transport_id} stats: {e}");
-                    miss()
+                    tracing::debug!("sfu transport {transport_id} stats unavailable (dead/race): {e}");
+                    None
                 }
             }
         }
