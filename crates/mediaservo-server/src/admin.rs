@@ -871,42 +871,85 @@ async fn sfu_rooms(State(state): State<AdminState>) -> Json<serde_json::Value> {
 /// H3: SfuStats REST 查询（镜像 WS 信令 SfuStatsRequest — H2 协议的管理面路径）。
 /// 查询参数: ?producer_id=X 或 ?consumer_id=X（任一）。
 #[cfg(feature = "sfu-mediasoup")]
+/// H2: SfuStats REST 查询（镜像 WS 信令 SfuStatsRequest — H2 协议的管理面路径）。
+/// 查询参数: `?producer_id=X` 或 `?consumer_id=X` = 单条（含 transport 观测增强字段）；
+/// **均缺省 = 列表模式**（可选 `?room=<id>` 过滤）——weaknet-harness T1 刀 A/B：
+/// 原「无 query → 400」语义已改判（钉住测试同步改判），400 保留给双 id 歧义。
+#[cfg(feature = "sfu-mediasoup")]
 async fn sfu_stats(
     State(state): State<AdminState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let producer_id = params.get("producer_id").cloned();
     let consumer_id = params.get("consumer_id").cloned();
-    let qid = producer_id.clone().or_else(|| consumer_id.clone());
-    let Some(qid) = qid else {
+    if producer_id.is_some() && consumer_id.is_some() {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: "producer_id or consumer_id required".into() }),
+            Json(ErrorResponse {
+                error: "producer_id and consumer_id are mutually exclusive".into(),
+            }),
         ));
-    };
-    let result = if let Some(pid) = producer_id {
+    }
+    let base = if let Some(pid) = producer_id {
         let (kind, bytes, packets, score) =
             state.sfu_manager.producer_stats(&pid).await.map_err(|e| {
                 tracing::error!("admin sfu_stats producer failed: {e}");
                 (StatusCode::NOT_FOUND, Json(ErrorResponse { error: e }))
             })?;
-        serde_json::json!({
+        (pid.clone(), serde_json::json!({
             "producer_id": pid, "consumer_id": None::<String>,
             "kind": kind, "byte_count": bytes, "packet_count": packets, "score": score,
-        })
+        }))
     } else if let Some(cid) = consumer_id {
         let (kind, bytes, packets, score) =
             state.sfu_manager.consumer_stats(&cid).await.map_err(|e| {
                 tracing::error!("admin sfu_stats consumer failed: {e}");
                 (StatusCode::NOT_FOUND, Json(ErrorResponse { error: e }))
             })?;
-        serde_json::json!({
+        (cid.clone(), serde_json::json!({
             "producer_id": None::<String>, "consumer_id": cid,
             "kind": kind, "byte_count": bytes, "packet_count": packets, "score": score,
-        })
+        }))
     } else {
-        unreachable!("query_id guard above");
+        // 列表模式（刀 A）：全流 transport 级观测行，room 可选过滤。
+        let room = params.get("room").cloned();
+        let streams = state.sfu_manager.list_stream_stats(room.as_deref()).await;
+        tracing::info!(
+            "admin sfu_stats: list mode room={room:?} → {} entries",
+            streams.len()
+        );
+        return Ok(Json(serde_json::json!({ "streams": streams })));
     };
+    let (qid, mut result) = base;
+    // 刀 B：per-ID 模式经列表观测面并档 transport 字段（查无 → 保持基础字段，不降级）。
+    const T_FIELDS: [&str; 8] = [
+        "transport_id",
+        "local_port",
+        "remote_ip",
+        "remote_port",
+        "rtp_packet_loss_sent",
+        "rtp_packet_loss_received",
+        "available_outgoing_bitrate",
+        "available_incoming_bitrate",
+    ];
+    let rows = state.sfu_manager.list_stream_stats(None).await;
+    match rows
+        .iter()
+        .find(|v| v.get("id").and_then(|i| i.as_str()) == Some(qid.as_str()))
+    {
+        Some(row) => {
+            if let Some(obj) = result.as_object_mut() {
+                for k in T_FIELDS {
+                    if let Some(val) = row.get(k) {
+                        obj.insert(k.to_string(), val.clone());
+                    }
+                }
+            }
+        }
+        None => {
+            tracing::debug!("admin sfu_stats: {qid} has no transport observation row (race/closed)")
+        }
+    }
     // C15: 响应路径日志（查询成功侧也留痕，运维可见）。
     tracing::info!(
         "admin sfu_stats: {qid} → {} bytes / {} packets",
@@ -1802,7 +1845,7 @@ mod g3_tests {
 
     #[cfg(feature = "sfu-mediasoup")]
     #[tokio::test]
-    async fn sfu_stats_requires_query_id() {
+    async fn sfu_stats_no_query_returns_list() {
         let state = super::tests::make_state().await;
         let secret = state.admin_jwt_secret.clone().unwrap();
         let app = admin_router(state);
@@ -1817,7 +1860,40 @@ mod g3_tests {
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "缺少 producer/consumer id → 400");
+        // weaknet-harness T1 改判（Momus N1）：无 query = 列表模式 200；
+        // 原 400 语义迁移至「双 id 歧义」（见 sfu_stats_both_ids_ambiguous）。
+        assert_eq!(resp.status(), StatusCode::OK, "无 query → 列表模式 200");
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["streams"],
+            serde_json::json!([]),
+            "空 manager 的列表模式 = streams 空数组"
+        );
+    }
+
+    #[cfg(feature = "sfu-mediasoup")]
+    #[tokio::test]
+    async fn sfu_stats_both_ids_ambiguous() {
+        let state = super::tests::make_state().await;
+        let secret = state.admin_jwt_secret.clone().unwrap();
+        let app = admin_router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/sfu/stats?producer_id=a&consumer_id=b")
+                    .header("Authorization", format!("Bearer {}", dispatcher_token(&secret)))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::BAD_REQUEST,
+            "双 id 同给 = 歧义 → 400（列表模式改判后 400 仅保留此语义）"
+        );
     }
 
     // ── psk-admin-management T2: 辅助函数 ────────────────────────────────

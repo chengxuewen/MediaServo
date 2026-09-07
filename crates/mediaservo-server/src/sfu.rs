@@ -1143,7 +1143,217 @@ mod imp {
             let s = stats.consumer_stats();
             Ok((kind, s.byte_count, s.packet_count, s.score))
         }
+
+        /// weaknet-harness T1（刀 A）：全流 transport 级观测列表（可按 room 过滤）。
+        /// producer=上行（推流端 transport）、consumer=下行（消费端 transport）。
+        /// **remote_port 是流级可辨键**——本项目 WebRtcServer 固定单口（local_port 全同值）。
+        /// transport stats 失败/查无 → 对应字段 null，不丢整行（C15 warn 留痕）。
+        pub async fn list_stream_stats(&self, room: Option<&str>) -> Vec<serde_json::Value> {
+            let mut rows = Vec::new();
+            for room_entry in self.rooms.iter() {
+                let (room_id, sfu_room) = room_entry.pair();
+                if room.is_some_and(|r| r != room_id.as_str()) {
+                    continue;
+                }
+                for peer_entry in sfu_room.peers.iter() {
+                    let (peer_id, peer) = peer_entry.pair();
+                    for producer in peer.producers.iter() {
+                        let pid = producer.id().to_string();
+                        let tid = producer.transport().id().to_string();
+                        let tfields = Self::transport_stat_fields(peer, &tid).await;
+                        let (bytes, packets, score) = match producer.get_stats().await {
+                            Ok(s) => s
+                                .first()
+                                .map(|v| (v.byte_count, v.packet_count, v.score))
+                                .unwrap_or((0, 0, 0)),
+                            Err(e) => {
+                                tracing::warn!("sfu list_stream_stats producer {pid} stats: {e}");
+                                (0, 0, 0)
+                            }
+                        };
+                        let kind = match producer.kind() {
+                            MediaKind::Audio => "audio",
+                            MediaKind::Video => "video",
+                        };
+                        rows.push(Self::stream_stat_row(
+                            room_id, peer_id, "producer", &pid, kind,
+                            bytes, packets, score, &tfields,
+                        ));
+                    }
+                    for consumer in peer.consumers.iter() {
+                        let cid = consumer.id().to_string();
+                        let tid = consumer.transport().id().to_string();
+                        let tfields = Self::transport_stat_fields(peer, &tid).await;
+                        let (bytes, packets, score) = match consumer.get_stats().await {
+                            Ok(s) => {
+                                let v = s.consumer_stats();
+                                (v.byte_count, v.packet_count, v.score)
+                            }
+                            Err(e) => {
+                                tracing::warn!("sfu list_stream_stats consumer {cid} stats: {e}");
+                                (0, 0, 0)
+                            }
+                        };
+                        let kind = match consumer.kind() {
+                            MediaKind::Audio => "audio",
+                            MediaKind::Video => "video",
+                        };
+                        rows.push(Self::stream_stat_row(
+                            room_id, peer_id, "consumer", &cid, kind,
+                            bytes, packets, score, &tfields,
+                        ));
+                    }
+                }
+            }
+            rows
+        }
+
+        /// transport stats（WebRtcTransportStat 单结构含 tuple/fractionLost/BWE）→ 观测字段集。
+        /// 任何缺测路径都回「键全在、值 null」的 Map——wire shape 稳定（下游 jq 可盲取）。
+        async fn transport_stat_fields(
+            peer: &SfuPeer,
+            transport_id: &str,
+        ) -> serde_json::Map<String, serde_json::Value> {
+            let miss = || {
+                Self::transport_stat_fields_json(
+                    transport_id, None, None, None, (None, None), (None, None),
+                )
+            };
+            let Some(t) = peer
+                .send_transports
+                .iter()
+                .chain(peer.recv_transports.iter())
+                .find(|t| t.id().to_string() == transport_id)
+            else {
+                tracing::debug!("sfu transport {transport_id} not in peer registry");
+                return miss();
+            };
+            match t.get_stats().await {
+                Ok(stats) => match stats.into_iter().next() {
+                    Some(s) => {
+                        let tp = s.ice_selected_tuple.as_ref();
+                        Self::transport_stat_fields_json(
+                            transport_id,
+                            tp.map(|v| v.local_port()),
+                            tp.and_then(|v| v.remote_ip()).map(|ip| ip.to_string()),
+                            tp.and_then(|v| v.remote_port()),
+                            (s.rtp_packet_loss_sent, s.rtp_packet_loss_received),
+                            (
+                                s.available_outgoing_bitrate.map(u64::from),
+                                s.available_incoming_bitrate.map(u64::from),
+                            ),
+                        )
+                    }
+                    None => miss(),
+                },
+                Err(e) => {
+                    tracing::warn!("sfu transport {transport_id} stats: {e}");
+                    miss()
+                }
+            }
+        }
+
+        /// 纯函数（wire shape 单测钉住）：transport 观测字段构造。
+        /// loss = **fractionLost 0-1 比例（f64，Momus M1：禁整型化——8% 截 0 假绿）**。
+        fn transport_stat_fields_json(
+            transport_id: &str,
+            local_port: Option<u16>,
+            remote_ip: Option<String>,
+            remote_port: Option<u16>,
+            loss: (Option<f64>, Option<f64>),
+            bwe: (Option<u64>, Option<u64>),
+        ) -> serde_json::Map<String, serde_json::Value> {
+            serde_json::json!({
+                "transport_id": transport_id,
+                "local_port": local_port,
+                "remote_ip": remote_ip,
+                "remote_port": remote_port,
+                "rtp_packet_loss_sent": loss.0,
+                "rtp_packet_loss_received": loss.1,
+                "available_outgoing_bitrate": bwe.0,
+                "available_incoming_bitrate": bwe.1,
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default()
+        }
+
+        /// 纯函数（wire shape 单测钉住）：producer/consumer 基础字段 ∪ transport 观测字段。
+        #[allow(clippy::too_many_arguments)]
+        fn stream_stat_row(
+            room: &str,
+            peer_id: &str,
+            role: &str,
+            id: &str,
+            kind: &str,
+            byte_count: u64,
+            packet_count: u64,
+            score: u8,
+            tfields: &serde_json::Map<String, serde_json::Value>,
+        ) -> serde_json::Value {
+            let mut row = serde_json::json!({
+                "room": room,
+                "peer_id": peer_id,
+                "role": role,
+                "id": id,
+                "kind": kind,
+                "byte_count": byte_count,
+                "packet_count": packet_count,
+                "score": score,
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+            row.extend(tfields.clone());
+            serde_json::Value::Object(row)
+        }
     }
+
+#[cfg(all(test, feature = "sfu-mediasoup"))]
+mod weaknet_stat_tests {
+    use super::*;
+
+    #[test]
+    fn stream_stat_row_wire_shape_complete() {
+        let fields = SfuManager::transport_stat_fields_json(
+            "t-1",
+            Some(20000),
+            Some("127.0.0.1".into()),
+            Some(54321),
+            (Some(0.08), None),
+            (Some(1_500_000), None),
+        );
+        let row = SfuManager::stream_stat_row(
+            "vehicle_test1", "peer-a", "producer", "p-1", "video",
+            1000, 10, 10, &fields,
+        );
+        assert_eq!(row["room"], "vehicle_test1");
+        assert_eq!(row["role"], "producer");
+        assert_eq!(row["local_port"], 20000);
+        assert_eq!(row["remote_port"], 54321);
+        // fractionLost 保持浮点比例（0.08 不被整型化）；缺侧为 null。
+        assert_eq!(row["rtp_packet_loss_sent"].as_f64(), Some(0.08));
+        assert!(row["rtp_packet_loss_received"].is_null());
+    }
+
+    #[test]
+    fn transport_fields_absent_values_stay_present_as_null() {
+        let fields = SfuManager::transport_stat_fields_json(
+            "t-2", None, None, None, (None, None), (None, None),
+        );
+        for k in [
+            "transport_id", "local_port", "remote_ip", "remote_port",
+            "rtp_packet_loss_sent", "rtp_packet_loss_received",
+            "available_outgoing_bitrate", "available_incoming_bitrate",
+        ] {
+            assert!(fields.contains_key(k), "wire key {k} must always exist");
+            if k != "transport_id" {
+                assert!(fields[k].is_null(), "unmeasured {k} must be null, not absent");
+            }
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
