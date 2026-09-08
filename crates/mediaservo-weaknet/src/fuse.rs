@@ -197,6 +197,11 @@ pub fn spawn_watchdog(
     let mut cmd = std::process::Command::new(program);
     cmd.args(args)
         .stdin(std::process::Stdio::null())
+        // 继承 stdout/stderr 会让管道类调用方（apply … | tee/sed）阻塞到 watchdog 睡眠终点才见
+        // EOF（实测 duration=180 即卡 180s）；bash 原型 setsid 即 `>/dev/null 2>&1` 同形。
+        // 诊断不丢：watchdog 事件落 timeline（watchdog-clear / watchdog-clear-failed）。
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .process_group(0);
     let mut child = cmd
         .spawn()

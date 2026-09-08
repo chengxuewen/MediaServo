@@ -67,6 +67,10 @@ pub struct State {
     /// 施加时的端口/配对快照（status 展示与排障用；Media=本地口集，Stream/Device=拍平对端）。
     #[serde(default)]
     pub ports: Vec<u16>,
+    /// T5：Stream/Device 施加时解析的有序对 (local, remote)——解析结果入盘，
+    /// replay/status 免重复拉 stats；`#[serde(default)]` 向后兼容旧 state（无此键）。
+    #[serde(default)]
+    pub pairs: Vec<(u16, u16)>,
     #[serde(default)]
     pub sig_port: Option<u16>,
     pub expires_at_ms: u64,
@@ -424,6 +428,7 @@ mod tests {
             scope: ScopeSel::Media,
             iface: "lo".into(),
             ports: vec![40010, 40011],
+            pairs: vec![(20000, 40001)],
             sig_port: None,
             expires_at_ms: 1_757_000_000_000,
             created_root: true,
@@ -462,6 +467,18 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         // 不存在 = Ok(None)
         assert_eq!(State::read_from(&p).unwrap(), None);
+    }
+
+    /// 小刀 C 配套（T5）：旧 state JSON 无 pairs 键 → serde(default) 读为空集，
+    /// Media 形现场跨升级可读（禁 schema 断崖）。
+    #[test]
+    fn state_json_without_pairs_key_still_reads() {
+        let st = sample_state();
+        let mut json = serde_json::to_value(&st).unwrap();
+        json.as_object_mut().unwrap().remove("pairs");
+        let back: State = serde_json::from_value(json).unwrap();
+        assert_eq!(back.pairs, vec![]);
+        assert_eq!(back.ports, st.ports, "其余字段不受影响");
     }
 
     #[test]

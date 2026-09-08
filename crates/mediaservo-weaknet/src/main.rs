@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 use mediaservo_weaknet::engine::{self, ApplyRequest, Env, Fail, Replay, Wn};
 use mediaservo_weaknet::fuse;
+use mediaservo_weaknet::scope::{self, StatsClient, Targeting};
 use mediaservo_weaknet::spec::{self, Dir as SpecDir, ImpairSpec, LossSpec, ScopeSel};
 use mediaservo_weaknet::state::{self, Dirs, State};
 
@@ -120,18 +121,21 @@ struct ApplyArgs {
     /// 方向（缺省 both；腿定义 = design §dir 表；set 缺省不覆盖基底 dir）
     #[arg(long, value_enum)]
     dir: Option<Dir>,
-    /// 定向：房间名（=流），逗号分隔（T5 到场）
+    /// 定向：房间名（=流），逗号分隔；"all"=显式回段级（T5 scope.rs 实现）
     #[arg(long)]
     stream: Option<String>,
-    /// 定向：设备（owner 全部流）（T5 到场）
+    /// 定向：设备 ID（owner 分组全部流；旧 server 经 peer_id 兤底 WARN）（T5 实现）
     #[arg(long)]
     device: Option<String>,
-    /// 逃生门：显式 RTP 端口集，逗号分隔（T4 唯一媒体口来源）
+    /// 逃生门：显式 RTP 端口集，逗号分隔（零 server 可用；优先级最高）
     #[arg(long)]
     rtp_port: Option<String>,
-    /// 信令 TCP 腿端口（可选，bash --signaling 承接位；server.yaml 自动解析随 T5）
+    /// 信令 TCP 腿端口（可选，bash --signaling 承接位）
     #[arg(long)]
     signaling_port: Option<u16>,
+    /// stats 控制面 URL（缺省链：flag > env WEAKNET_SERVER_URL > 探测 out/server/etc/server.yaml）
+    #[arg(long)]
+    server_url: Option<String>,
     /// 参数文件 weaknet.yaml（车端面，T12 到场）
     #[arg(long)]
     config: Option<String>,
@@ -232,6 +236,7 @@ fn dispatch(cmd: Cmd) -> Wn<()> {
                 device: None,
                 rtp_port: None,
                 signaling_port: None,
+                server_url: None,
                 config: None,
                 dry_run: false,
             };
@@ -261,29 +266,38 @@ fn do_apply(a: &ApplyArgs, dirs: &Dirs, env: &Env) -> Wn<()> {
     let spec = merge_spec(&base, a)?;
     let duration = a.duration.unwrap_or(DEFAULT_DURATION);
     spec::validate_duration(duration).map_err(Fail::bad_param)?;
-    let ports = parse_ports(a.rtp_port.as_deref())?;
+    let ports_flag = parse_ports(a.rtp_port.as_deref())?;
     if a.dry_run {
-        return print_dry_run(env, &spec, &iface, &ports, a.signaling_port,
+        return print_dry_run(env, &spec, &iface, &ports_flag, a.signaling_port,
             &format!("{duration}s（惰性自愈+watchdog；--forever 豁免位未暴露）"));
     }
-    if ports.is_empty() {
-        return Err(Fail::env(
-            "媒体口集合为空：T4 端口来源=--rtp-port 40000[,40001…]（stats 观测与流定向随 T5 scope.rs 到场后自动）",
-        ));
-    }
+    let targeting = resolve_targeting(a, ports_flag)?;
     let req = ApplyRequest {
         spec: spec.clone(),
-        scope: ScopeSel::Media,
+        scope: targeting.scope,
         iface: iface.clone(),
-        ports,
-        pairs: vec![],
+        ports: targeting.ports.clone(),
+        pairs: targeting.pairs.clone(),
         sig_port: a.signaling_port,
     };
     let out = engine::replay(&req, Replay::Apply { duration_secs: duration }, dirs, env)?;
+    let scope_detail = match req.scope {
+        ScopeSel::Media => format!(
+            "ports=[{}]",
+            req.ports.iter().map(u16::to_string).collect::<Vec<_>>().join(" "),
+        ),
+        _ => format!(
+            "pairs=[{}]",
+            req.pairs
+                .iter()
+                .map(|(l, r)| format!("{l}:{r}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+    };
     println!(
-        "applied: dev={iface} spec=[{}] ports=[{}] filters={} channel={} 回读指纹过 ✓",
+        "applied: dev={iface} spec=[{}] {scope_detail} filters={} channel={} 回读指纹过 ✓",
         out.spec_string,
-        req.ports.iter().map(u16::to_string).collect::<Vec<_>>().join(" "),
         out.filter_count,
         out.channel,
     );
@@ -304,27 +318,39 @@ fn do_set(a: &ApplyArgs, dirs: &Dirs, env: &Env) -> Wn<()> {
     }
     let iface = a.iface.clone().unwrap_or_else(|| prior.iface.clone());
     let spec = merge_spec(&prior.spec, a)?;
-    let ports = if a.rtp_port.is_some() {
+    let dry_ports = if a.rtp_port.is_some() {
         parse_ports(a.rtp_port.as_deref())?
     } else {
         prior.ports.clone()
     };
     let sig = a.signaling_port.or(prior.sig_port);
     if a.dry_run {
-        return print_dry_run(env, &spec, &iface, &ports, sig, "不变(set 不续命)");
+        return print_dry_run(env, &spec, &iface, &dry_ports, sig, "不变(set 不续命)");
     }
-    if ports.is_empty() {
+    // 重定向（--rtp-port/--stream/--device 任一）= 重新解析；否则沿用基底 state 的
+    // scope/ports/pairs（T5：解析结果已入盘，replay 免重复拉 stats）。
+    let targeting =
+        if a.rtp_port.is_some() || a.stream.is_some() || a.device.is_some() {
+            resolve_targeting(a, parse_ports(a.rtp_port.as_deref())?)?
+        } else {
+            Targeting {
+                scope: prior.scope,
+                ports: prior.ports.clone(),
+                pairs: prior.pairs.clone(),
+            }
+        };
+    if targeting.ports.is_empty() && targeting.pairs.is_empty() {
         return Err(Fail::env(
-            "无可用媒体口（基底 state.ports 为空且未给 --rtp-port）——重新 apply",
+            "无可用媒体口/配对（基底 state 为空且未给 --rtp-port/--stream/--device）——重新 apply",
         ));
     }
     let before = state::param_summary(&prior.spec);
     let req = ApplyRequest {
         spec: spec.clone(),
-        scope: prior.scope,
+        scope: targeting.scope,
         iface,
-        ports,
-        pairs: vec![],
+        ports: targeting.ports,
+        pairs: targeting.pairs,
         sig_port: sig,
     };
     let out = engine::replay(
@@ -346,6 +372,18 @@ fn do_set(a: &ApplyArgs, dirs: &Dirs, env: &Env) -> Wn<()> {
 
 fn any_override(a: &ApplyArgs) -> bool {
     a.rtt.is_some()
+        || a.jitter.is_some()
+        || a.loss.is_some()
+        || a.gemodel.is_some()
+        || a.reorder.is_some()
+        || a.rate.is_some()
+        || a.seed.is_some()
+        || a.dir.is_some()
+        || a.signaling_port.is_some()
+        || a.profile.is_some()
+        || a.rtp_port.is_some()
+        || a.stream.is_some()
+        || a.device.is_some()
         || a.jitter.is_some()
         || a.loss.is_some()
         || a.gemodel.is_some()
@@ -414,11 +452,7 @@ fn merge_spec(base: &ImpairSpec, a: &ApplyArgs) -> Wn<ImpairSpec> {
 }
 
 fn reject_deferred(a: &ApplyArgs) -> Wn<()> {
-    if a.stream.is_some() || a.device.is_some() {
-        return Err(Fail::env(
-            "--stream/--device 流定向随 T5（scope.rs：stats 客户端+owner 分组+tuple 活性）到场；T4 用 --rtp-port 显式端口集",
-        ));
-    }
+    // T5 到场：--stream/--device 已由 scope.rs 承接（resolve_targeting），此处仅剩 --config。
     if a.config.is_some() {
         return Err(Fail::env(
             "--config（weaknet.yaml 车端面）随 T12（config.rs）到场",
@@ -447,6 +481,38 @@ fn parse_ports(s: Option<&str>) -> Wn<Vec<u16>> {
         })
         .collect()
 }
+
+/// 作用域裁决优先级（bash resolve_ports 同序）：--rtp-port > --stream > --device > stats 媒体口。
+/// `--stream all` = 显式回段级（bash 等价）。stats 触达仅在需要时发生
+/// （--rtp-port 逃生门保持零 server 可用——离线/无凭证场景）。
+fn resolve_targeting(a: &ApplyArgs, ports_flag: Vec<u16>) -> Wn<Targeting> {
+    if !ports_flag.is_empty() {
+        if a.stream.is_some() || a.device.is_some() {
+            eprintln!("weaknet: WARN --rtp-port 与 --stream/--device 并给：显式端口集优先（定向被忽略）");
+        }
+        return Ok(Targeting {
+            scope: ScopeSel::Media,
+            ports: ports_flag,
+            pairs: vec![],
+        });
+    }
+    let stream = a.stream.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let device = a.device.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    if stream.is_some() && device.is_some() {
+        return Err(Fail::bad_param("--stream 与 --device 互斥（作用域定向只能选一路）"));
+    }
+    let url = scope::server_url_or_default(a.server_url.as_deref())?;
+    let mut client = StatsClient::from_env(&url)?;
+    let rows = client.fetch_streams()?;
+    if let Some(s) = stream.filter(|s| *s != "all") {
+        return scope::targeting_for_rooms(&rows, s);
+    }
+    if let Some(d) = device {
+        return scope::targeting_for_devices(&rows, d);
+    }
+    scope::targeting_media(&rows)
+}
+
 
 fn print_dry_run(
     env: &Env,
@@ -478,7 +544,7 @@ fn print_dry_run(
         println!("{prefix} {}{alt}{note}", s.run.join(" "));
     }
     if legs.is_empty() {
-        println!("（媒体腿端口在执行时解析：--rtp-port 或 T5 stats 观测）");
+        println!("（媒体腿/配对在执行时解析：--stream/--device/--rtp-port 或 stats 观测）");
     }
     println!("[dry] 保险丝: {duration_note} auto-clear=0（信号层默认关）");
     Ok(())
@@ -538,11 +604,25 @@ fn do_status(dirs: &Dirs, env: &Env) -> Wn<()> {
                 watchdog_state(dirs)
             );
             println!("{}", state::param_summary(&s.spec));
+            let scope_detail = if s.pairs.is_empty() {
+                format!(
+                    "ports=[{}]",
+                    s.ports.iter().map(u16::to_string).collect::<Vec<_>>().join(" "),
+                )
+            } else {
+                format!(
+                    "pairs=[{}]",
+                    s.pairs
+                        .iter()
+                        .map(|(l, r)| format!("{l}:{r}"))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                )
+            };
             println!(
-                "scope={:?} dir={:?} ports=[{}] teardown {} 步",
+                "scope={:?} dir={:?} {scope_detail} teardown {} 步",
                 s.scope,
                 s.dir,
-                s.ports.iter().map(u16::to_string).collect::<Vec<_>>().join(" "),
                 s.teardown.steps.len()
             );
             println!("== tc 实况（{dev}）==");

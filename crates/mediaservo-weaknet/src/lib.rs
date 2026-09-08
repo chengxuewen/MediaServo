@@ -3,5 +3,6 @@
 
 pub mod engine;
 pub mod fuse;
+pub mod scope;
 pub mod spec;
 pub mod state;

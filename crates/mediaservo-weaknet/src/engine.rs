@@ -283,7 +283,7 @@ pub fn version_gate_seed(channel: &Channel) -> Wn<()> {
     }
 }
 
-fn parse_iproute2_semver(out: &str) -> Option<(u32, u32)> {
+pub(crate) fn parse_iproute2_semver(out: &str) -> Option<(u32, u32)> {
     // 真实形两种：`iproute2-6.11.0`（新，连字符）/ `iproute2 ss150831`（旧，空格）——分隔符均容。
     let after = out.split("iproute2").nth(1)?;
     let mut it = after.trim_start_matches(['-', ' ', ':']).split('.');
@@ -852,6 +852,7 @@ pub fn replay(req: &ApplyRequest, mode: Replay, dirs: &Dirs, env: &Env) -> Wn<Re
         scope: req.scope,
         iface: req.iface.clone(),
         ports: req.ports.clone(),
+        pairs: req.pairs.clone(),
         sig_port: req.sig_port,
         expires_at_ms,
         created_root: created_root_pre,

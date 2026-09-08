@@ -1537,3 +1537,9 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 
 - **解法（当下）**: 读侧谓词=**stats 可达**（E1 活 8/8 vs E3 死全灭双向实证；closed() 在此场景不可信已弃用为主判据），非活行整行跳过——列表模式「表内即活」。**根因修（另案立项）**: consume 路径记录 WS 会话 id→合成 peer 键倒排，WS 尾部清理据此 remove；动 H1/H6 交互面需独立回归矩阵。
 - **验证**: 部署后列表 consumers=0（滞留全隐）、开窗会话 rp 非空互异恢复可见（D0/C1 双向）；`grep -c "left room"` 关窗时段=0 佐证清理链未触发。
+
+## PIT-186: 常驻子进程 spawn 继承 stdio——管道调用方阻塞至 duration 终点 (2026-09-08)
+- **症状**: `mediaservo-weaknet apply … | tee` 类管道调用卡死整整一个保险丝周期（实测 180s），rc 迟迟不回。
+- **根因**: watchdog 长驻子进程 spawn 只 null 了 stdin；stdout/stderr 继承管道写端 → 父进程退出后写端仍被 watchdog 持有，读端永远等不到 EOF。
+- **解法**: 守护/看门狗类 spawn **三流全 Stdio::null()**（bash 原型 `>/dev/null 2>&1 < /dev/null` 同形）；诊断信息经 timeline 落盘不丢，不靠 stdio。
+- **验证**: 审所有长驻 spawn 的 Stdio::null 三行齐（`grep -A3 "process_group" src/fuse.rs` 见三 null）；管道冒烟 `timeout 10 sh -c '… apply --duration 60 --dry-run | cat'` 秒回。
