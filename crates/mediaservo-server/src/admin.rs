@@ -913,7 +913,10 @@ async fn sfu_stats(
     } else {
         // 列表模式（刀 A）：全流 transport 级观测行，room 可选过滤。
         let room = params.get("room").cloned();
-        let streams = state.sfu_manager.list_stream_stats(room.as_deref()).await;
+        let streams = state
+            .sfu_manager
+            .list_stream_stats(room.as_deref(), &|r: &str| state.signaling.room_owner_of(r))
+            .await;
         tracing::info!(
             "admin sfu_stats: list mode room={room:?} → {} entries",
             streams.len()
@@ -932,7 +935,10 @@ async fn sfu_stats(
         "available_outgoing_bitrate",
         "available_incoming_bitrate",
     ];
-    let rows = state.sfu_manager.list_stream_stats(None).await;
+    let rows = state
+        .sfu_manager
+        .list_stream_stats(None, &|r: &str| state.signaling.room_owner_of(r))
+        .await;
     match rows
         .iter()
         .find(|v| v.get("id").and_then(|i| i.as_str()) == Some(qid.as_str()))

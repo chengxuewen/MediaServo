@@ -1148,13 +1148,21 @@ mod imp {
         /// producer=上行（推流端 transport）、consumer=下行（消费端 transport）。
         /// **remote_port 是流级可辨键**——本项目 WebRtcServer 固定单口（local_port 全同值）。
         /// transport stats 失败/查无 → 对应字段 null，不丢整行（C15 warn 留痕）。
-        pub async fn list_stream_stats(&self, room: Option<&str>) -> Vec<serde_json::Value> {
+        /// 小刀 C（weaknet T5/D276）：`owner_of` = room→注册设备 ID 反查（signaling.room_owners
+        /// 经调用方注入，本模块不持句柄——无主房 owner=null（wire 键恒在，见 stream_stat_row）。
+        /// 泛形闭包形（非 &dyn Fn）：保 handler future 的 Send 推导（axum 0.7 Handler 硬要求）。
+        pub async fn list_stream_stats(
+            &self,
+            room: Option<&str>,
+            owner_of: impl Fn(&str) -> Option<String>,
+        ) -> Vec<serde_json::Value> {
             let mut rows = Vec::new();
             for room_entry in self.rooms.iter() {
                 let (room_id, sfu_room) = room_entry.pair();
                 if room.is_some_and(|r| r != room_id.as_str()) {
                     continue;
                 }
+                let owner = owner_of(room_id.as_str());
                 for peer_entry in sfu_room.peers.iter() {
                     let (peer_id, peer) = peer_entry.pair();
                     for producer in peer.producers.iter() {
@@ -1184,7 +1192,7 @@ mod imp {
                         };
                         rows.push(Self::stream_stat_row(
                             room_id, peer_id, "producer", &pid, kind,
-                            bytes, packets, score, &tfields,
+                            bytes, packets, score, owner.as_deref(), &tfields,
                         ));
                     }
                     for consumer in peer.consumers.iter() {
@@ -1212,7 +1220,7 @@ mod imp {
                         };
                         rows.push(Self::stream_stat_row(
                             room_id, peer_id, "consumer", &cid, kind,
-                            bytes, packets, score, &tfields,
+                            bytes, packets, score, owner.as_deref(), &tfields,
                         ));
                     }
                 }
@@ -1290,6 +1298,9 @@ mod imp {
         }
 
         /// 纯函数（wire shape 单测钉住）：producer/consumer 基础字段 ∪ transport 观测字段。
+        /// `owner`=房间注册设备 ID（小刀 C）：未知/无主 = **null 且键恒在**——与本模块
+        /// transport 观测字段同一 wire 契约（「wire key must always exist / unmeasured = null」，
+        /// transport_fields_absent_values_stay_present_as_null 钉住），消费端单判据免分叉。
         #[allow(clippy::too_many_arguments)]
         fn stream_stat_row(
             room: &str,
@@ -1300,10 +1311,12 @@ mod imp {
             byte_count: u64,
             packet_count: u64,
             score: u8,
+            owner: Option<&str>,
             tfields: &serde_json::Map<String, serde_json::Value>,
         ) -> serde_json::Value {
             let mut row = serde_json::json!({
                 "room": room,
+                "owner": owner,
                 "peer_id": peer_id,
                 "role": role,
                 "id": id,
@@ -1336,15 +1349,36 @@ mod weaknet_stat_tests {
         );
         let row = SfuManager::stream_stat_row(
             "vehicle_test1", "peer-a", "producer", "p-1", "video",
-            1000, 10, 10, &fields,
+            1000, 10, 10, Some("dev-a"), &fields,
         );
         assert_eq!(row["room"], "vehicle_test1");
         assert_eq!(row["role"], "producer");
+        assert_eq!(row["owner"], "dev-a");
         assert_eq!(row["local_port"], 20000);
         assert_eq!(row["remote_port"], 54321);
         // fractionLost 保持浮点比例（0.08 不被整型化）；缺侧为 null。
         assert_eq!(row["rtp_packet_loss_sent"].as_f64(), Some(0.08));
         assert!(row["rtp_packet_loss_received"].is_null());
+    }
+
+    /// 小刀 C 钉测试：无主房 owner = null 且键恒在（与有主房同一 wire 形，
+    /// 消费端按 `row["owner"].as_str()` 单判即可）。
+    #[test]
+    fn stream_stat_row_owner_key_always_present_null_when_unowned() {
+        let fields = SfuManager::transport_stat_fields_json(
+            "t-3", Some(20000), Some("127.0.0.1".into()), Some(40001), (None, None), (None, None),
+        );
+        let row = SfuManager::stream_stat_row(
+            "unowned-room", "peer-b", "consumer", "c-1", "audio",
+            7, 1, 10, None, &fields,
+        );
+        assert!(row.get("owner").is_some(), "owner 键必须恒在（null 形，非省略形）");
+        assert!(row["owner"].is_null(), "无主房 owner=null");
+        let owned = SfuManager::stream_stat_row(
+            "vehicle_test1", "peer-b", "consumer", "c-1", "audio",
+            7, 1, 10, Some("dev-a"), &fields,
+        );
+        assert_eq!(owned["owner"], "dev-a");
     }
 
     #[test]
