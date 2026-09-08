@@ -89,7 +89,7 @@ node_modules
 .pixi
 .pixi-pack
 .pixi-cache
-.sisyphus
+.sisyphus/
 .omo/*
 
 # Official reference source clones (git-ignored, script-managed)
