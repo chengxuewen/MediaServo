@@ -100,7 +100,7 @@ mod imp {
         }
 
         /// ponytail: stub bridge_tracks; requires webrtc feature for real RTCPeerConnection access.
-        /// Roadmap: integrate VideoFrameGenerator as test video source (see .sisyphus/plans/gen-webrtc-integration/design.md)
+        /// Roadmap: integrate VideoFrameGenerator as test video source (see docs/plans/gen-webrtc-integration/design.md)
         pub async fn bridge_tracks(
             &self,
             _host_pc: &(),

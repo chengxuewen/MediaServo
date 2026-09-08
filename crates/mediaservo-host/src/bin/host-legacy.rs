@@ -439,7 +439,7 @@ let app = axum::Router::new()
         }
 
         // B5 (v2): VideoFrameGenerator + WebRtcTrackSink — 统一帧源接口
-        // 计划: .sisyphus/plans/video-source-unification T3 (WebRtcTrackSink: c56bd87)。
+        // 计划: docs/plans/video-source-unification T3 (WebRtcTrackSink: c56bd87)。
         // 旧手写循环已删除（原 main.rs:373-406; 历史参考 d24f6e5 SquaresPattern 引入 /
         // 9cf94b8 b=AS 码率预算 / 90ea937 关键帧触发）。C17 语义由 generator 内部保证:
         // 绝对时间轴 + 锚定单调时间戳 + 时间戳水印 (TopLeft, DateTime+FrameCount)。

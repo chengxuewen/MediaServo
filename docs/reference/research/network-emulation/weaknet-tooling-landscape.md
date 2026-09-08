@@ -92,4 +92,4 @@ HoloWAN / Spirent / Apposite Netropy 等 = 真实链路仿真天花板（RF 建�
 - sitespeed throttle: https://github.com/sitespeedio/throttle（demo 引擎出处）
 - webrtc 内仿真: https://webrtc.googlesource.com/src/+/main/test/network/ | Pion vnet: https://github.com/pion/transport（vnet/）
 - mediasoup 面: WorkerSettings.libwebrtcFieldTrials、Transport.setMax*Bitrate、demo applyNetworkThrottle（versatica/mediasoup-demo）；复现配方 issues #1115/#1536（versatica/mediasoup）
-- 项目内：主仓 `.sisyphus/plans/weaknet-simulation-research.md`（全景+引文）/ `weaknet-harness/`（计划+证据）/ `weaknet-followup-roadmap.md`（F1-F4）
+- 项目内：主仓 `docs/plans/weaknet-simulation-research.md`（全景+引文）/ `weaknet-harness/`（计划+证据）/ `weaknet-followup-roadmap.md`（F1-F4）

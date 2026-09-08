@@ -113,7 +113,7 @@ This tells you:
 If the user mentions an existing change or work-in-progress:
 
 1. **Check git status** for uncommitted changes
-2. **Check `.sisyphus/plans/`** for any active plans
+2. **Check `docs/plans/`** for any active plans
 3. **Read related source files** for context
 4. **Reference findings naturally** in conversation
 

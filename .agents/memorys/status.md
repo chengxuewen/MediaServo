@@ -242,7 +242,7 @@ Host (macOS) → WS :9800 → Docker Server → WS :9800 → Client (macOS)
 
 - **重命名执行**（T1 eb7c0f7 / T2 dc46fbb / T3 480327d）: 259 文件机械替换 + 7 crate 目录/CLI mv + AUDE 生态剥离 + compose name/service/pixi 名
 - **保留面收窄**（01a1f92）: 用户指令"仅 .agents 保留"——docs 调研存档/vendor/.sisyphus/.omo 统一 MediaServo（47 文件 1118 处）; 全仓 audemsp 仅剩 .agents 82 处
-- **计划清除**（8bb8d19）: .sisyphus/plans 8 个 + .omo/plans 3 个全部清除（备份 /tmp/plans-backup-20260813）; git 跟踪残留 audemsp-codec acceptance-criteria 同步移除
+- **计划清除**（8bb8d19）: docs/plans 8 个 + .omo/plans 3 个全部清除（备份 /tmp/plans-backup-20260813）; git 跟踪残留 audemsp-codec acceptance-criteria 同步移除
 - **doc-audit 三轮**: ① 9 项发现全修复（D221/conventions/status/AGENTS/技能）② 外部 16:10:58 批量替换污染 33 文件 → 恢复保留面（PIT-89）③ 回归闭环（仅 commits 漂移同步）
 - **D221 修订**: 保留面 memorys/plans/research → 仅 .agents/; .sisyphus/.omo plans 已清除
 - 遗留: gitee 仓库改名（外部）、T4/T5 待完成（webrtc-sys workspace build + 运行时验证）
@@ -677,7 +677,7 @@ install                        → 改名提示 + exit 2（退役）
 - 根因收口（T1 实证）：子进程 RoomLeave 被网关拦截 → server 单流消亡零事件 = 假 LIVE 事件链的权威面缺口；「事件从未送达」旧判被推翻（现 build 反查+广播完好，05:43 轮=oxmgr stop 异常+PIT-179 检索式漏配）。
 - 落地：协议 `DownstreamGone{peer_id,room_id}`（additive+roundtrip 测）；网关 produce 实键捕获（PIT-178 键漂移教训）；server `remove_peer_in_room`（单房粒度，防 host 键跨房间误杀）+ `announce_producers_closed` 三径统一链 + owners 同步 + `t4_gone_seen` 降噪门；T2 四静默面 WARN + T3 广播去 unwrap/send 分级。
 - 验收：S4 单杀秒级精确清理零扰动；S1 stop 8×1-receivers 浏览器全收、owned-empty 误报 0；H1/e2e_sfu 4/4 回归；三 crate clippy 0 新错、双姿态绿。已知 flake=g3_emergency（并行 200ms sleep，非本期）。
-- 边界：浏览器假 LIVE 残余（重订阅竞态+冻结帧）= F2/F3 另立项（web-sdk-roadmap 候补）。计划四件套 .sisyphus/plans/producer-lifecycle-f1（主仓）。
+- 边界：浏览器假 LIVE 残余（重订阅竞态+冻结帧）= F2/F3 另立项（web-sdk-roadmap 候补）。计划四件套 docs/plans/producer-lifecycle-f1（主仓）。
 
 ### 2026-09-03: play-stalled-f2 — 源离线态（F2 媒体新鲜度兜底，假 LIVE 终结）
 - F1 残余第二刀（纯前端）：LIVE 从「链路态」解绑改绑「媒体新鲜度」——metrics tick 采 bytesReceived 增量（growing），连续 3 tick（≈6s）零增长 → status 'stalled'（灰点 + 「源离线」徽标，保留最后画面，无红屏无遮罩）；恢复增长/ontrack → 回 playing。playingSeen 门（首次 ontrack 后启用）防建联期误判；restartStream 重置三标志。
@@ -697,7 +697,7 @@ install                        → 改名提示 + exit 2（退役）
 
 ### 2026-09-04: qos-framerate-priority 镜像（D274）
 - webrtc 抽象层 DegradationPreference/ContentHint setter + field StreamMode 三档 preset（smooth 保帧/quality 保画/balanced 零扰动）+ host stream_mode/min_bitrate_kbps 配置面（translate 合并裁决）。
-- 实盘判别全绿（证据在主仓 .sisyphus/plans/qos-framerate-priority/evidence/）；新增 PIT-183/184、D274。
+- 实盘判别全绿（证据在主仓 docs/plans/qos-framerate-priority/evidence/）；新增 PIT-183/184、D274。
 
 ### 2026-09-04: router-destroy-guard（D275，PIT-183 根修，实盘闭环）
 - server 生命周期解耦：消费者清零不再连坐毁 router（should_teardown 守卫），producer 全灭时刻 announce 尾部补毁（should_deferred_cleanup）；双姿态 API room_has_producers。

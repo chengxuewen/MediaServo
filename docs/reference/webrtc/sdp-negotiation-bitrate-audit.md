@@ -1,7 +1,7 @@
 # SDP 协商审计:Host 构建方式 + 码率链路（2026-08-12）
 
 > 关联: [`mediasoup-client.md`](mediasoup-client.md)（官方客户端架构对照）、[`webrtc-w3c-alignment.md`](webrtc-w3c-alignment.md)（D214/D216 重构）、`conventions.md` C18（官方用法优先）、PIT-65（手工协商教训）
-> 结论采纳: **方案 A+C**（补全自构 offer 的 transport-cc/rtcp-fb + bitrate_kbps 语义修复）→ 实施计划见 `.sisyphus/plans/sfu-negotiation-completion/plan.md`
+> 结论采纳: **方案 A+C**（补全自构 offer 的 transport-cc/rtcp-fb + bitrate_kbps 语义修复）→ 实施计划见 `docs/plans/sfu-negotiation-completion/plan.md`
 
 ## 1. 结论摘要
 
@@ -106,4 +106,4 @@ host.conf encoder.min/max_bitrate_kbps ──→ main.rs:361 set_encoding_bitrat
 - `webrtc-w3c-alignment.md` — D214/D216 重构分析
 - `keyframe-black-screen-analysis.md` / `gop-control-internal-encoder.md` — PIT-65 关键帧根因（PLI 链路背景）
 - `.agents/memorys/conventions.md` C18 — 官方用法优先
-- `.sisyphus/plans/sfu-negotiation-completion/plan.md` — A+C 实施计划
+- `docs/plans/sfu-negotiation-completion/plan.md` — A+C 实施计划

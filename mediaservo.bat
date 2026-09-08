@@ -11,7 +11,7 @@ if not exist "%USERPROFILE%\.pixi\bin\pixi.exe" (
 
 call "%ROOT%scripts\pixi-shell.bat"
 if errorlevel 1 (
-    echo 激活失败: pixi.toml platforms 需含 win-64（当前不支持 Windows，见 .sisyphus/plans/build-cli/plan.md）
+    echo 激活失败: pixi.toml platforms 需含 win-64（当前不支持 Windows，见 docs/plans/build-cli/plan.md）
     exit /b 1
 )
 

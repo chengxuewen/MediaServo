@@ -266,13 +266,13 @@ CodecError (thiserror)，关键变体：
 - [08. 管线模型参考](08-pipeline-model.md) — PipelineEngine 集成
 - [决策记录 D43/D46/D70/D71/D82](../.agents/memorys/decisions.md) — 编码架构决策链
 - [FFmpeg 静态构建策略](../reference/codec/ffmpeg-static-build-strategy.md) — 构建方案
-- [SDD 验收标准](../../.sisyphus/plans/mediaservo-codec/acceptance-criteria.md) — 具体阈值
-- [验收矩阵 §10](../../.sisyphus/plans/mediaservo-codec/acceptance-criteria.md#10-test-matrix) — 20 场景 AC 矩阵
+- [SDD 验收标准](../../docs/plans/mediaservo-codec/acceptance-criteria.md) — 具体阈值
+- [验收矩阵 §10](../../docs/plans/mediaservo-codec/acceptance-criteria.md#10-test-matrix) — 20 场景 AC 矩阵
 
 ## 交叉引用
 
 以下文档链接回本文档：
 - [17. WebRTC Crate](17-webrtc-crate.md) — Phase 2 预留 write_frame / on_encoded_packet API
-- [SDD 验收标准](../../.sisyphus/plans/mediaservo-codec/acceptance-criteria.md) — 对齐 push-pull trait API
+- [SDD 验收标准](../../docs/plans/mediaservo-codec/acceptance-criteria.md) — 对齐 push-pull trait API
 - [FFmpeg 静态构建策略](../reference/codec/ffmpeg-static-build-strategy.md) — 预构建 + CI 集成
-- [验收矩阵 §10](../../.sisyphus/plans/mediaservo-codec/acceptance-criteria.md#10-test-matrix) — 8+ 场景测试矩阵
+- [验收矩阵 §10](../../docs/plans/mediaservo-codec/acceptance-criteria.md#10-test-matrix) — 8+ 场景测试矩阵

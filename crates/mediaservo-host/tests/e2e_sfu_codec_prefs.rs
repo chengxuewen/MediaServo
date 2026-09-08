@@ -1,6 +1,6 @@
 //! e2e_sfu_codec_prefs — setCodecPreferences 协商验证矩阵（T5）
 //!
-//! 计划: .sisyphus/plans/set-codec-preferences (v2, 双审核通过)
+//! 计划: docs/plans/set-codec-preferences (v2, 双审核通过)
 //!
 //! 6 场景: 无偏好基线 / [H264] 强制 / [H264,VP8] 优先 / [VP8,H264] 反转 / [VP9] / [AV1] 负向
 //!

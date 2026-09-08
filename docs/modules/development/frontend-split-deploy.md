@@ -1,6 +1,6 @@
 # 前端分离形态部署与运行手册（frontend-process-split 终态）
 
-> 2026-08-31 | 关联：D262/D268、C24 修订、PIT-163~170 | 计划档 `.sisyphus/plans/frontend-process-split/`
+> 2026-08-31 | 关联：D262/D268、C24 修订、PIT-163~170 | 计划档 `docs/plans/frontend-process-split/`
 
 ## 1. 拓扑速览
 

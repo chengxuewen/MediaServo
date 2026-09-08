@@ -193,13 +193,13 @@
 
 ## D212: docs/reference Diátaxis 重组 + 计划体系清理 (2026-08-06)
 
-**决策**: ① `docs/reference/` 按 **Diátaxis 框架**重组——活参考（Reference，按产品模块镜像 webrtc/ codec/ + 根目录平铺）与调研存档（Explanation，`research/<领域>/`）分离，README 作唯一索引（C19 约束固化）。② codec 验收标准从 `docs/sdd/` 迁入 `.sisyphus/plans/audemsp-codec/`（pre-implementation 产物归计划区）。③ 计划体系收敛为单一权威源 `.sisyphus/plans/`——移除已全部完成的 `video-framepipeline-hardening`（.sisyphus+.omo 双副本）、去重 `.omo/plans/phase3-production` 副本、清理空 `.omo/plans/` 目录。
+**决策**: ① `docs/reference/` 按 **Diátaxis 框架**重组——活参考（Reference，按产品模块镜像 webrtc/ codec/ + 根目录平铺）与调研存档（Explanation，`research/<领域>/`）分离，README 作唯一索引（C19 约束固化）。② codec 验收标准从 `docs/sdd/` 迁入 `docs/plans/audemsp-codec/`（pre-implementation 产物归计划区）。③ 计划体系收敛为单一权威源 `docs/plans/`——移除已全部完成的 `video-framepipeline-hardening`（.sisyphus+.omo 双副本）、去重 `.omo/plans/phase3-production` 副本、清理空 `.omo/plans/` 目录。
 
 **原因**: ① 原 34 篇平铺 + 领域子目录重叠，混入 28 篇一次性竞品调研 → 活参考被污染（Diátaxis"按用途分离"原则，参考对齐 VitePress/Docusaurus 主流）；② acceptance 是 Phase 2 规划产物，Phase 1 sdd/ 目录放它格格不入（未编号+内容形态+Draft 状态不符）；③ 已完成计划/重复副本是死重，`e2e-acceptance-matrix.md` 断链暴露内容已内部化。
 
 **影响**: 文档按用途可预测；计划唯一权威源，无重复无死链；历史调研保留在 `research/` 不碍事。保留：`phase3-production`（Phase 编号约定被 5 篇文档引用）、`host-sfu-w3c-alignment`（活跃待办，C18 待实施）。
 
-**验证**: `ls docs/reference/` 顶层 = README + webrtc/ + codec/ + janus-gateway.md + research/；`find .sisyphus/plans/` 剩 3 个计划；无 `e2e-acceptance-matrix` 断链残留。
+**验证**: `ls docs/reference/` 顶层 = README + webrtc/ + codec/ + janus-gateway.md + research/；`find docs/plans/` 剩 3 个计划；无 `e2e-acceptance-matrix` 断链残留。
 
 ## D213: Agent 上下文爆炸治理 — instructions 瘦身 + 模型容量 + .agents 精简 (2026-08-06)
 
@@ -713,7 +713,7 @@ systemd 仅作开机锚点；compose 轨道无 oxmgr。④ `msrtc-server` 单二
 **影响**：C24 收窄至模式②；`run/start/stop/restart server` 将在 Phase 6 后退役→转发（C39 同待遇）；
 PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构建性。
 
-**参考**：.sisyphus/plans/frontend-process-split/（主仓，含 Momus 审核修复轮）。
+**参考**：docs/plans/frontend-process-split/（主仓，含 Momus 审核修复轮）。
 
 ## D269: 品牌化统一收口——裸机物理二进制名 = 品牌名（2026-09-01，branding-completion）
 - **背景**: D3 实施期引申"server/client 不品牌化"与三层口径矛盾（msrtc.sh L94 承诺品牌覆盖 server、主仓 README《品牌化边界》明文 msrtc-host/msrtc-server/msrtc-client、D262/commands.md 行文全用 msrtc-server）。
@@ -758,7 +758,7 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 **影响**: ①server 新增错误码必须同步 classifySfuError 分类表 + roundtrip 单测（表驱动契约）；②watchdog/轮次引擎下沉 sfu-client，组件层零定时器——D270-a 抽包时三态契约随 API 文档外化；③旧 socket 摘 handlers 是消重连振荡的唯一正解（reconnecting 闩防并发）。
 
 ## D274: 弱网 QoS = stream_mode 三档 preset + min 地板双轴模型 (2026-09-04)
-- **背景**: host 推流弱网帧率 30→<5 崩塌（实盘）。根因=DegradationPreference 从未设置吃默认 Balanced + min_bitrate 硬编码 None + ContentHint 无通路（取证链见主仓 .sisyphus/plans/qos-framerate-priority/proposal.md）。
+- **背景**: host 推流弱网帧率 30→<5 崩塌（实盘）。根因=DegradationPreference 从未设置吃默认 Balanced + min_bitrate 硬编码 None + ContentHint 无通路（取证链见主仓 docs/plans/qos-framerate-priority/proposal.md）。
 - **决策**: 用户面双轴——`streams[].stream_mode: smooth|balanced|quality`（策略轴，ToDesk/RustDesk 同型产品概念）+ `min_bitrate_kbps`（地板轴）。捆绑：smooth=MaintainFramerate+Fluid hint+min400（max 不动）；quality=MaintainResolution+bitrate3000；balanced=全缺省=**现网逐字节零扰动**（缺省不调 setter，AD-6）。优先级 显式>preset，合并裁决唯一落 translate（AD-2：只有它区分"显式 vs 未写"；非法值 deploy 期拦截防 streamer crash-loop）。
 - **AD-1 冗余轴删除**: 用户面不设 `degradation` 键——与三 preset 双射；"完全不降级"诊断需求出现时加 `stream_mode: fixed` 枚举值（纯加法）。wrapper 层枚举保持 4 变体完整（C18 原语不裁剪）。
 - **实现**: mediaservo-webrtc `sender_set_degradation_preference`（**RtpParameters 级**非 per-enc，PIT-76 保真往返，零 vendor C++）/`sender_set_content_hint`（media_to_video）→ field PushConfig 三内部字段 → host translate/streamer。

@@ -1,6 +1,6 @@
 //! WebRtcTrackSink — 同步 VideoSource 广播 → 异步 TrackSender 发送的桥接。
 //!
-//! 设计来源: 计划 `.sisyphus/plans/video-source-unification/plan.md` (v2, 双审核通过)。
+//! 设计来源: 计划 `docs/plans/video-source-unification/plan.md` (v2, 双审核通过)。
 //!
 //! - **放置**: mediaservo-webrtc（media 为 plain dependency，镜像 webrtc → codec 模式）
 //! - **帧所有权** (v2 BLOCKER-2): `on_frame` 收到共享引用 `&BoxVideoFrame`（不可 move）

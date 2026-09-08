@@ -2,7 +2,7 @@
 name: openspec-propose
 description: >-
   Propose a new change for MediaServo with structured artifacts (proposal, design,
-  tasks). Generates .sisyphus/plans/<name>/proposal.md + design.md + tasks.md.
+  tasks). Generates docs/plans/<name>/proposal.md + design.md + tasks.md.
   Use when the user describes what they want to build and needs a complete proposal ready for implementation.
 license: MIT
 compatibility: Designed for Claude Code, GitHub Copilot, and similar agents.
@@ -73,12 +73,12 @@ Most Phase 1 changes target `mediaservo` only.
 ### 3. Create the proposal directory
 
 ```bash
-mkdir -p .sisyphus/plans/<change-name>
+mkdir -p docs/plans/<change-name>
 ```
 
 ### 4. Write proposal.md
 
-Create `.sisyphus/plans/<change-name>/proposal.md` with these sections:
+Create `docs/plans/<change-name>/proposal.md` with these sections:
 - **What** — 2-4 sentences, specific
 - **Why** — problem, use case, gap
 - **Scope** — in scope / out of scope
@@ -92,7 +92,7 @@ Create `.sisyphus/plans/<change-name>/proposal.md` with these sections:
 
 ### 5. Write design.md
 
-Create `.sisyphus/plans/<change-name>/design.md` with these sections:
+Create `docs/plans/<change-name>/design.md` with these sections:
 - **Architecture** — ASCII diagram or text description showing modules, data flow, ownership
 - **Files to Touch** — Create / Modify / Delete sub-tables with file paths and purpose
 - **Data Flow** — critical path from entry to exit (Signal: write→store→callback; RPC: invoke→dispatch→result)
@@ -104,7 +104,7 @@ Create `.sisyphus/plans/<change-name>/design.md` with these sections:
 
 ### 6. Write tasks.md
 
-Create `.sisyphus/plans/<change-name>/tasks.md`. Tasks must be **atomic, ordered, independently testable** — each produces one verifiable result. Structure in phases:
+Create `docs/plans/<change-name>/tasks.md`. Tasks must be **atomic, ordered, independently testable** — each produces one verifiable result. Structure in phases:
 
 ```markdown
 # Tasks: <Change-Name>
@@ -164,7 +164,7 @@ Display summary — change name, artifact list, line counts. Let user request ch
 | FlatBuffers schemas | `crates/hal-flatbuffers/*.fbs` |
 | Studio | `apps/studio/src/` |
 | Specs | `openspec/specs/` |
-| Plans | `.sisyphus/plans/<change-name>/` |
+| Plans | `docs/plans/<change-name>/` |
 | Integration tests | `tests/` |
 
 ---
