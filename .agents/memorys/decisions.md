@@ -770,3 +770,14 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **决策**: WS 视图（RoomManager）与转发面（SFU Router）生命周期解耦——销毁决策全部收敛为 sfu.rs 顶层两纯函数：`should_teardown(room_removed, has_producers)`（leave 路径连坐拆除守卫）与 `should_deferred_cleanup(room_gone, has_producers)`（announce_producers_closed 尾部补毁 registry/owners）。新 API `SfuManager::room_has_producers`（stub 恒 false=行为等价）。
 - **理由**: 多流拓扑下 stream 房间 WS 成员只有消费者（producer 宿主挂 gateway 会话房间），"last WS peer left"不再蕴含"无人推流"；连坐毁 Router 制造 producer 黑洞（PIT-183）。真销毁时刻=producer 全灭，由 SFU 内建 peers-empty 自毁链 + announce 统一漏斗（F1/D272 遗产）收口，无第四路径（Momus 实证 admin DELETE/优雅停机均安全）。
 - **取舍**: B 案（producer peer 计入房间成员=动 gateway 房间语义）否决；C 案（host 侧 RTCP 超时自愈）留作 worker 崩溃类静默死的全场景兜底另案。owner 延迟保留顺带修复"消费者清零→设备重 produce 失主"的潜在门缺陷（:537 produce 门依赖 room_owners）。
+
+## D276: sfu/stats 观测面契约——列表模式 + ICE tuple 活性谓词（weaknet-harness T1/T2）(2026-09-07)
+- **决策**: `/api/admin/sfu/stats` 无 query = 列表模式（`?room=` 过滤），条目携 transport 级观测
+  （local_port/remote_ip/remote_port/fractionLost f64/BWE）；「表内即活」谓词 = **ice_selected_tuple 存在**
+  （closed() 与 stats 可达均实证不可信——UDP transport 服务端永不判死）；per-ID 模式出入参不动，
+  400 语义收缩为双 id 歧义；WebRtcServer 固定单口下 **remote_port 是流级唯一可辨键**。
+- **理由**: 弱网定向（--stream）与泄漏观测都需要按流 transport 视角；原端点按 mediasoup 随机 id 单查、
+  无流名索引，日志反查不可脚本化。explore 幻觉两轮（rtc_*_port 配置键/端口段模型）由 Momus 二审钉正：
+  配置面零新增键、端口走运行时观测（C20 以更严格形式满足）。
+- **参考**: foxglove netem 工具链（活性探针降形为 leaf 计数）/ mediasoup 3.15 twcc 语义 / PIT-185。
+- **后果**: consumer 断连泄漏行在老化窗（~90s）内仍可能入表——remote_port 判空兜底；根因修见 PIT-185 另案。

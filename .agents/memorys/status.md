@@ -702,3 +702,9 @@ install                        → 改名提示 + exit 2（退役）
 ### 2026-09-04: router-destroy-guard（D275，PIT-183 根修，实盘闭环）
 - server 生命周期解耦：消费者清零不再连坐毁 router（should_teardown 守卫），producer 全灭时刻 announce 尾部补毁（should_deferred_cleanup）；双姿态 API room_has_producers。
 - 证据：关→重开 T+5s 直接 LIVE 免 host 重启（修复前永源离线）；补毁 9 条恰在 device 断连秒；H1/H6/e2e 全绿；default 234/0、stub lib 奇偶。
+
+### 2026-09-07: weaknet Phase1 小刀（D276，子模块 b01c59f+750c1d9）
+- sfu/stats 列表模式 + transport 观测透传（remote_port 流级键 / fractionLost f64 / 表内即活=ICE tuple）；
+  钉住测试改判（无 query→200 列表）。lib 134/0、stub 奇偶、e2e 4/4 复验。
+- 实证在册：一 room 一流 9/9（appData 备选作废）；local_port 恒=20000（WebRtcServer 单口）；
+  remote_port 16/16 互异；断连 consumer 假活永不死 → PIT-185 根因另案（WS 会话 id→合成 peer 键无倒排）。
