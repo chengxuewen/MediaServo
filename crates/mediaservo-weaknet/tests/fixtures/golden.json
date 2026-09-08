@@ -1,0 +1,86 @@
+{
+  "schema": "weaknet-golden/1",
+  "note": "9 继承案自 scripts/weaknet.sh self_check 逐字转录（dir=both 基准，导入 2026-09-08，bash 源不再追溯）；3 dir 案 = 新契约（design §dir 腿定义表推导，人核评审，无 bash 祖先）。渲染/装配合约实现见 T2 spec.rs。",
+  "cases": [
+    {
+      "id": "delay-half", "source": "bash", "kind": "netem_spec",
+      "input": { "rtt_ms": 80, "jitter_ms": 15, "loss": "0%", "loss_mode": "simple" },
+      "expect": "limit 100000 delay 40ms 7ms distribution normal"
+    },
+    {
+      "id": "loss-append", "source": "bash", "kind": "netem_spec",
+      "input": { "rtt_ms": 80, "jitter_ms": 15, "loss": "2%", "loss_mode": "simple" },
+      "expect": "limit 100000 delay 40ms 7ms distribution normal loss 2%"
+    },
+    {
+      "id": "gemodel", "source": "bash", "kind": "netem_spec",
+      "input": { "rtt_ms": 120, "jitter_ms": 0, "loss": "10%", "loss_mode": "gemodel", "gemodel": ["0.1", "0.02", "0.001"] },
+      "expect": "limit 100000 delay 60ms loss gemodel 10 0.1 0.02 0.001"
+    },
+    {
+      "id": "gemodel-loss0-demote", "source": "bash", "kind": "netem_spec",
+      "input": { "rtt_ms": 0, "jitter_ms": 0, "loss": "0%", "loss_mode": "gemodel", "gemodel": ["0.1", "0.02", "0.001"] },
+      "expect": "limit 100000 loss 0%",
+      "note": "loss=0 时 gemodel 降级 simple 渲染且 delay 零值整段省略"
+    },
+    {
+      "id": "gemodel-pct-strip", "source": "bash", "kind": "netem_spec",
+      "input": { "rtt_ms": 120, "jitter_ms": 0, "loss": "8%", "loss_mode": "gemodel", "gemodel": ["25%", "0.2", "0.05"] },
+      "expect": "limit 100000 delay 60ms loss gemodel 8 25 0.2 0.05",
+      "note": "GEMODEL_R 带%输入 → 剥除"
+    },
+    {
+      "id": "frac-loss", "source": "bash", "kind": "netem_spec",
+      "input": { "rtt_ms": 0, "jitter_ms": 0, "loss": "0.5%", "loss_mode": "simple" },
+      "expect": "limit 100000 loss 0.5%"
+    },
+    {
+      "id": "reorder", "source": "bash", "kind": "netem_spec",
+      "input": { "rtt_ms": 0, "jitter_ms": 0, "loss": "0%", "loss_mode": "simple", "reorder": "5" },
+      "expect": "limit 100000 reorder 5%"
+    },
+    {
+      "id": "rate-sentinel", "source": "bash", "kind": "rate_arg",
+      "input": { "rate_mbps": null },
+      "expect": "1000gbit",
+      "note": "未设速率时 htb 哨兵（不限速=天文带宽）"
+    },
+    {
+      "id": "rate-set", "source": "bash", "kind": "rate_arg",
+      "input": { "rate_mbps": 4 },
+      "expect": "4mbit"
+    },
+    {
+      "id": "legs-media-out-lo", "source": "new-contract", "kind": "legs",
+      "input": { "scope": "media", "dir": "out", "iface": "lo", "local_ports": [40010, 40011] },
+      "expect": {
+        "filters": [
+          { "protocol": 17, "matches": [["sport", 40010]], "flowid": "1:10" },
+          { "protocol": 17, "matches": [["sport", 40011]], "flowid": "1:10" }
+        ]
+      },
+      "note": "Media 段 dir=out = server→client（发出）→ sport∈本地媒体口；每口一 filter；protocol 17 为 rev-2.1 合取"
+    },
+    {
+      "id": "legs-media-in-lo", "source": "new-contract", "kind": "legs",
+      "input": { "scope": "media", "dir": "in", "iface": "lo", "local_ports": [40010] },
+      "expect": {
+        "filters": [
+          { "protocol": 17, "matches": [["dport", 40010]], "flowid": "1:10" }
+        ]
+      },
+      "note": "Media 段 dir=in = client→server（收到）→ dport∈本地媒体口；物理 iface 此向改走 ifb 镜像（§ifb 合同），lo 走端口腿"
+    },
+    {
+      "id": "legs-stream-both-lo", "source": "new-contract", "kind": "legs",
+      "input": { "scope": "stream", "dir": "both", "iface": "lo", "pairs": [{ "local": 40010, "remote": 51234 }] },
+      "expect": {
+        "filters": [
+          { "protocol": 17, "matches": [["sport", 40010], ["dport", 51234]], "flowid": "1:10" },
+          { "protocol": 17, "matches": [["sport", 51234], ["dport", 40010]], "flowid": "1:10" }
+        ]
+      },
+      "note": "Stream 级 = 有序对 (L,R) 双腿，每向单 filter 内双 match 合取(AND)；out=(sport=L∧dport=R) in=(sport=R∧dport=L)。拆两条单 match filter = OR 会连坐（Momus/kernel-F9），实现与测试均按本结构钉"
+    }
+  ]
+}

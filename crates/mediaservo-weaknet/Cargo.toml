@@ -1,0 +1,21 @@
+[package]
+name = "mediaservo-weaknet"
+version = "0.1.0"
+edition = "2024"
+description = "tc/netem 弱网模拟 agent（双端面单二进制：server 面 CLI/serve/面板 + 车端面 CLI/config）——产品仓 dev 工具，lib 面不进 bindings/package"
+license = "Apache-2.0"
+
+[dependencies]
+# 全部取 Cargo.lock 现件（T0 已核零新增）；axum/rust-embed 随 T6/T7 到场
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "process", "sync"] }
+
+[dev-dependencies]
+tower = "0.4"         # 钉 0.4：lock 存 0.4/0.5 双版本，axum 0.7 路由 oneshot 契约走 0.4（T6 api_matrix）
+
+[[bin]]
+name = "mediaservo-weaknet"
+path = "src/main.rs"
