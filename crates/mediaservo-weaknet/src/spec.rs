@@ -245,8 +245,20 @@ use serde_json::Value;
 /// [`ImpairSpec::effective_leg_delay_ms`]（安装层 T3/T5 取用）。
 #[must_use]
 pub fn render_netem_spec(s: &ImpairSpec) -> String {
-    let d = s.rtt_ms / 2;
-    let j = s.jitter_ms / 2;
+    render_netem_spec_with(s, s.rtt_ms / 2, s.jitter_ms / 2)
+}
+
+/// dir 感知叶形（design §dir rtt 标定：both=对半基准（= render_netem_spec）；
+/// 单腿 out|in=全额——观测 RTT 跨 dir 恒定）。golden 9 案只钉 legacy 形。
+#[must_use]
+pub fn render_netem_spec_leg(s: &ImpairSpec) -> String {
+    match s.dir {
+        Dir::Both => render_netem_spec(s),
+        Dir::Out | Dir::In => render_netem_spec_with(s, s.rtt_ms, s.jitter_ms),
+    }
+}
+
+fn render_netem_spec_with(s: &ImpairSpec, d: u64, j: u64) -> String {
     let mut spec = format!("limit {}", s.limit);
     if d > 0 {
         spec.push_str(&format!(" delay {d}ms"));
