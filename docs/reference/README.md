@@ -37,6 +37,7 @@
 | `research/streaming/` | mediamtx / srs / zlmediakit / nginx-rtmp-module / pion / obs-studio / lvqr / xiu |
 | `research/video-conference/` | mediasoup* / openvidu-* / livekit / jitsi / kurento / zoom |
 | `research/teleoperation/` | comma-ai-openpilot / tether-rally / tum-teleoperated-driving / vay |
+| `research/network-emulation/` | 弱网模拟工具全景（tc/netem 族 / clumsy / ATC·toxiproxy 核证修正 / webrtc test-network·Pion vnet / 选型速查·深坑清单） |
 
 ## WebRTC 活参考关联图
 
