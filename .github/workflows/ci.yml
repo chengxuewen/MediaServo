@@ -93,6 +93,57 @@ jobs:
           SFU_E2E_PSK="mediaservo-dev" \
           cargo test -p mediaservo-host --test e2e_sfu
 
+  test-weaknet:
+    name: Weak-net smoke (tc netem smoke on lo)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install mediasoup dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build libuv1-dev libssl-dev
+      - name: Preflight netem (PIT-184 反例防线：施加后必回读，静默 no-op 直接红)
+        run: |
+          sudo modprobe sch_netem || true
+          tc -V
+          sudo tc qdisc replace dev lo root netem limit 100000 delay 40ms 10ms distribution normal loss 2%
+          sudo tc -s qdisc show dev lo | grep "netem" | grep -q "delay 40"
+          RTT=$(ping -c 4 -i 0.2 127.0.0.1 2>/dev/null | awk -F/ "END {print \$5}")
+          awk -v a="$RTT" "BEGIN{exit !(a>=30)}" || { echo "netem 未生效：ping RTT=$RTTms"; exit 1; }
+          echo "netem 生效（ping RTT=${RTT}ms ≈ 2×40ms 口径）"
+      - name: Build server + e2e test (external mode)
+        run: |
+          cargo build -p mediaservo-server --features sfu-mediasoup
+          cargo test -p mediaservo-host --test e2e_sfu --no-run
+      - name: Start server under impairment
+        run: |
+          MEDIASERVO_PSK="mediaservo-dev" nohup ./target/debug/mediaservo-server > /tmp/server-weaknet.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -s --noproxy "*" http://127.0.0.1:9800/health 2>/dev/null | grep -q healthy && { echo "ready +${i}s"; break; }
+            sleep 1
+          done
+          curl -s --noproxy "*" http://127.0.0.1:9800/health || (cat /tmp/server-weaknet.log; exit 1)
+      - name: e2e_sfu under weak network (韧性判据)
+        run: |
+          # netem 全 lo 命中：信令/ICE/RTCP/RTP 同受 delay+loss——过 = 栈内恢复机制活着
+          # （对照口径见主仓 weaknet-harness：真机分侧损伤由 profile --stream/方向规则做）
+          SFU_E2E_WS_URL="ws://127.0.0.1:9800/ws" \
+          SFU_E2E_PSK="mediaservo-dev" \
+          timeout 300 cargo test -p mediaservo-host --test e2e_sfu
+      - name: Injection truth (netem dropped counter > 0)
+        if: always()
+        run: |
+          DROP=$(sudo tc -s qdisc show dev lo | grep -oP "dropped \K[0-9]+" | head -1 || echo 0)
+          echo "netem dropped=$DROP"
+          [ "${DROP:-0}" -gt 0 ] || { echo "注入侧零丢弃=疑似静默失效(PIT-184 同族)"; exit 1; }
+      - name: Teardown (只删自记的 root，回读确认为空)
+        if: always()
+        run: |
+          sudo tc qdisc del dev lo root || true
+          sudo tc -s qdisc show dev lo | grep -c netem | grep -q "^0$"
+
   benchmark:
     runs-on: ubuntu-latest
     steps:
