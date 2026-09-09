@@ -88,6 +88,10 @@ enum ScenarioCmd {
         /// 收尾保留现场（不 clear；bash 同义）
         #[arg(long, default_value_t = false)]
         keep: bool,
+        /// Ctrl-C/SIGTERM 等价触发既有 stop 旗标路径（不发明第二套撤损通道），
+        /// 由 runner 步末检查收尾（scenario-end aborted="user" + 既有 teardown，exit0）
+        #[arg(long, default_value_t = false)]
+        auto_clear: bool,
     },
     /// 列出可用剧本
     List,
@@ -715,6 +719,7 @@ fn do_scenario(sub: ScenarioCmd, dirs: &Dirs, env: &Env) -> Wn<()> {
             dir,
             no_baseline,
             keep,
+            auto_clear,
         } => {
             let file = file.ok_or_else(|| {
                 Fail::bad_param("scenario run 需 --file（<名|*.yaml> [--no-baseline|--keep]；-h 看帮助）")
@@ -742,7 +747,13 @@ fn do_scenario(sub: ScenarioCmd, dirs: &Dirs, env: &Env) -> Wn<()> {
                 .enable_all()
                 .build()
                 .map_err(|e| Fail::env(format!("tokio runtime 建立失败: {e}")))?;
-            let out = rt.block_on(scenario::run_full(rs, exec, dirs.clone()));
+            // serve 侧 /v1/scenario/run 不经信号层（长驻进程，停止面已有 /v1/scenario/stop
+            // 端点）——--auto-clear 仅作用于本 CLI 前台路径（out of scope 注记，票面裁 4）。
+            let out = if auto_clear {
+                rt.block_on(scenario::run_full_auto_clear(rs, exec, dirs.clone()))
+            } else {
+                rt.block_on(scenario::run_full(rs, exec, dirs.clone()))
+            };
             println!("{}", out.summary);
             if out.exit_code != 0 {
                 return Err(Fail {

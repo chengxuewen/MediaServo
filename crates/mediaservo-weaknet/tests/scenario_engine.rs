@@ -509,3 +509,46 @@ fn merge_step_inherits_base_like_bash_do_set() {
     );
     assert!(g.is_err(), "基底无 loss 时 gemodel 需报因");
 }
+
+// ---------- I：--auto-clear 信号层包装——旗标写入方=信号 handler 的等价形 ----------
+// run_full_auto_clear 内部 = unix_signals(SIGINT/SIGTERM) → request_stop 写与 scenario::stop
+// 属主存活分支同一 cancel 旗标文件；handler 本体是细包装（unix_signals/request_stop 两面
+// 已由 src/scenario.rs 单测钉住：真 SIGTERM 送达 + 旗标幂等写），本例验包装层整体合同：
+// 外部写旗标（模拟信号效果）→ 继续等 run_full 至检查点自终 → aborted:"user" 形
+// scenario-end + teardown（exec.clear 事件、现场归零、旗标消费）+ exit0。
+// 与 F 测的差异面：走 auto-clear 入口且 keep=false，把 abort 收尾的 clear 链跑通。
+
+#[tokio::test]
+async fn auto_clear_wrapper_aborts_with_teardown_like_stop() {
+    let dirs = dirs_for("autoclear");
+    let (exec, _rec) = noop(&dirs);
+    let spec_rs = rs(
+        "autoclear",
+        "scenario:\n  baseline_s: 0\n  steps:\n    - at_s: 60\n      set: {rtt_ms: 80}\n",
+        false,
+    );
+    let dirs_cl = dirs.clone();
+    // 信号效果的等价形：并发任务写 stop 旗标（handler = unix_signals→request_stop 同文件同内容）
+    let flagger = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        scenario::stop(&dirs_cl).unwrap();
+    });
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        scenario::run_full_auto_clear(spec_rs, exec, dirs.clone()),
+    )
+    .await
+    .expect("包装层应在检查点自终，不得挂到 60s 步窗");
+    let _ = flagger.await;
+    assert_eq!(out.aborted.as_deref(), Some("user"), "信号层形 = stop 旗标形");
+    assert_eq!(out.exit_code, 0, "主动中止=正常收尾族");
+    let tl = timeline_events(&dirs);
+    let end = tl.iter().rev().find(|e| e["ev"] == "scenario-end").unwrap();
+    assert_eq!(end["aborted"], "user");
+    assert!(end["note"].as_str().unwrap().starts_with("elapsed_s="));
+    // teardown 走既有 abort 收口：exec.clear 事件落 timeline、现场 state 归零、旗标消费
+    assert_eq!(tl.last().unwrap()["ev"], "clear", "abort 收尾链需跑通 clear");
+    assert!(!scenario::cancel_path(&dirs).exists());
+    assert!(!dirs.state_json().exists());
+    std::fs::remove_dir_all(&dirs.statedir).ok();
+}

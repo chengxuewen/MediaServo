@@ -990,6 +990,63 @@ pub async fn run_full(
     drive(rs, exec, dirs, cur).await
 }
 
+/// [`run_full`] 的信号层包装（design §fuse『SIGINT/SIGTERM --auto-clear』的 CLI 侧补票——
+/// 不发明第二套撤损通道）：任一信号到达即写 [`stop`] 属主存活形的同一 cancel 旗标文件，
+/// 随后**继续等** run_full 至其下一检查点（sleep_checked/wait_until ≤1s 粒度，step_sync
+/// 锁窗内不可打断）自终。产物时间线形 = `scenario-end{aborted:"user"}` + 既有 abort 收尾
+/// （非 keep 时 exec.clear 现场清除），exit_code=0——与跨进程 `scenario stop` 逐字节同形
+/// （测试 F 已钉该路径；本函数只是旗标写入方的替换：信号 → 旗标）。
+///
+/// 边界（minimal 语义，登记于此）：信号若落在 start_blocking 阻塞相（apply 落盘前），
+/// 入口 `remove_cancel` 会消费掉该旗标，run 照常进行——此时再按一次信号即走 abort 路径。
+///
+/// serve 侧 `/v1/scenario/run` 不经此路（长驻进程 SIGINT=整服务下线，其停止面已有
+/// `/v1/scenario/stop` 端点）——行为保持原样，本包装仅供 CLI 前台 `scenario run` 使用。
+pub async fn run_full_auto_clear(rs: RunSpec, exec: Arc<dyn StepExec>, dirs: Dirs) -> RunOutcome {
+    let cancel = dirs.clone(); // Dirs: Clone（stop 写旗标用）
+    let outcome = run_full(rs, exec, dirs);
+    tokio::pin!(outcome);
+    // 常听 ctrl_c + SIGTERM 双路（signal feature 已在 Cargo.toml，无新增依赖）。
+    let signals = async {
+        match unix_signals().await {
+            Ok(()) => request_stop(&cancel),
+            Err(e) => eprintln!("weaknet(scenario): WARN 信号监听建立失败（--auto-clear 失效，走原 Ctrl-C 默认终止）: {e}"),
+        }
+    };
+    tokio::pin!(signals);
+    // 单次 select：信号先至则写旗标后继续等 outcome（runner 下一检查点自终）；
+    // outcome 先完成则丢弃监听直接返回。无循环——避免重复轮询已完成 future。
+    tokio::select! {
+        biased; // run 完成优先退出，不留孤儿监听
+        o = &mut outcome => o,
+        () = &mut signals => {
+            // 旗标已写：继续等 run_full 到下一检查点自终
+            outcome.await
+        }
+    }
+}
+
+/// 两个终止信号（SIGINT/SIGTERM）任一到达即返回。注册失败向上传（调用方降级 WARN，
+/// 不炸 run——信号层是便利面，非正确性依赖）。
+async fn unix_signals() -> Result<(), std::io::Error> {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut sigint = signal(SignalKind::interrupt())?;
+    let mut sigterm = signal(SignalKind::terminate())?;
+    tokio::select! {
+        _ = sigint.recv() => {}
+        _ = sigterm.recv() => {}
+    }
+    Ok(())
+}
+
+/// 旗标写入（与 [`stop`] 属主存活分支同一文件同一内容——run_full 期本进程即属主，
+/// 无需重读 state 判活；stop 的属主亡自清分支在此不可达）。
+fn request_stop(dirs: &Dirs) {
+    if let Err(e) = std::fs::write(cancel_path(dirs), "user\n") {
+        eprintln!("weaknet(scenario): WARN 写 stop 旗标失败: {e}");
+    }
+}
+
 /// start 后重读当前已安装 spec（drive 串接基座；以磁盘现场为准，防 start/驱动间外部变更漏判）。
 fn read_start_spec(dirs: &Dirs) -> ImpairSpec {
     State::read_from(&dirs.state_json())
@@ -1055,4 +1112,112 @@ pub fn resolve_run_file(file: &str, dir_override: Option<&str>) -> Wn<(std::path
         .unwrap_or("scenario")
         .to_string();
     Ok((path, stem))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp_dirs(tag: &str) -> Dirs {
+        let d = std::env::temp_dir().join(format!("wnet-sig-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        Dirs { statedir: d }
+    }
+
+    // 真信号 E2E（自杀式 kill -TERM 本进程）刻意不设：信号 handler 是进程全局态
+    // （signal_hook 注册后同进程所有 listener 同时被唤醒），libtest 并行下任何注册
+    // unix_signals 的兄弟测试（如下 wrap 测走 run_full_auto_clear）都会被这份 SIGTERM
+    // 误触发——非确定性互污。unix_signals 本体是 tokio::signal 的 8 行直包装，其效果面
+    // （→ request_stop 落同一旗标 → runner 检查点自终）由下行幂等测 + wrap 测 +
+    // tests/scenario_engine.rs::I 三面钉住。
+
+    /// request_stop 幂等：旗标已存时重复写不报错（信号后 runner 未及消费的窗口）。
+    #[test]
+    fn request_stop_idempotent() {
+        let dirs = tmp_dirs("idem");
+        request_stop(&dirs);
+        request_stop(&dirs);
+        assert!(cancel_path(&dirs).exists());
+        remove_cancel(&dirs);
+        std::fs::remove_dir_all(&dirs.statedir).ok();
+    }
+
+    /// F 路径的信号层等价形：并发任务写 cancel 旗标（= request_stop 的效果；handler 本身
+    /// 只是 unix_signals→request_stop 的细包装（真信号 E2E 不可并行测的理由见上行注释块），断言
+    /// run_full_auto_clear 继续等 run_full 到检查点自终、返 aborted:user 形 outcome。
+    /// 完整 teardown 面（clear 事件/现场归零）钉 tests/scenario_engine.rs::I（需 NoopExec 脚手架）。
+    #[tokio::test]
+    async fn auto_clear_waits_checkpoint_after_flag_write() {
+        struct Nop(Dirs);
+        impl StepExec for Nop {
+            fn apply(&self, req: &ApplyRequest, _dur: u64) -> Wn<()> {
+                let st = State {
+                    schema: crate::state::STATE_SCHEMA.to_string(),
+                    spec: req.spec.clone(),
+                    dir: req.spec.dir,
+                    scope: req.scope,
+                    iface: req.iface.clone(),
+                    ports: req.ports.clone(),
+                    pairs: req.pairs.clone(),
+                    rooms: req.names.rooms.clone(),
+                    devices: req.names.devices.clone(),
+                    sig_port: req.sig_port,
+                    expires_at_ms: fuse::now_epoch_ms() + 300_000,
+                    created_root: true,
+                    ifb_used: false,
+                    created_ifb: false,
+                    job: None,
+                    teardown: crate::state::Teardown {
+                        channel: crate::state::ChannelSer::LocalRoot,
+                        sidecar: None,
+                        steps: vec![],
+                    },
+                };
+                st.write_to(&self.0.state_json()).map_err(Fail::env)
+            }
+            fn set(&self, _req: &ApplyRequest, prior: State) -> Wn<()> {
+                prior.write_to(&self.0.state_json()).map_err(Fail::env)
+            }
+            fn clear(&self) -> Wn<()> {
+                Ok(())
+            }
+        }
+        let dirs = tmp_dirs("wrap");
+        let exec = Arc::new(Nop(dirs.clone()));
+        // 单行短计划 + baseline 0：run 在 wait_until(60s) 窗内，旗标必在 ≤1s 检查点命中。
+        let plan = parse_plan_yaml("scenario:\n  baseline_s: 0\n  steps:\n    - at_s: 60\n      set: {rtt_ms: 80}\n").unwrap();
+        let rs = RunSpec {
+            name: "wrap".into(),
+            file_disp: "wrap.yaml".into(),
+            plan,
+            no_baseline: true,
+            keep: true, // 本例只验包装层等待形，现场清除面归 I 测
+            targeting: crate::scope::Targeting {
+                scope: crate::spec::ScopeSel::Media,
+                ports: vec![40010],
+                pairs: vec![],
+                names: vec![],
+            },
+            iface: "lo".into(),
+            sig_port: None,
+            recovery_dwell_secs: Some(0),
+        };
+        let exec: Arc<dyn StepExec> = exec;
+        let dirs_cl = dirs.clone();
+        let flagger = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            request_stop(&dirs_cl);
+        });
+        let out = tokio::time::timeout(
+            Duration::from_secs(10),
+            run_full_auto_clear(rs, exec, dirs.clone()),
+        )
+        .await
+        .expect("包装层应在检查点自终，不得挂到 60s 步窗");
+        let _ = flagger.await;
+        assert_eq!(out.aborted.as_deref(), Some("user"));
+        assert_eq!(out.exit_code, 0);
+        assert!(!cancel_path(&dirs).exists(), "abort 收尾应消费旗标");
+        std::fs::remove_dir_all(&dirs.statedir).ok();
+    }
 }
