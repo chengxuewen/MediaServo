@@ -63,8 +63,8 @@ HoloWAN / Spirent / Apposite Netropy 等 = 真实链路仿真天花板（RF 建�
 
 | 场景 | 首选 | 本项目落点 |
 |------|------|-----------|
-| Linux dev 单机（本项目主形态） | tc/netem 直用（root 或 docker NET_ADMIN sidecar） | ✅ 已交付：`msrtc.sh weaknet apply --profile remote-burst --stream <房间名>` |
-| 车端 Jetson（有 root） | tc 打在设备网卡（wlan/eth，egress=上行、ingress→ifb=下行） | roadmap F1（scp 即用执行层，触发=Jetson 复测排期） |
+| Linux dev 单机（本项目主形态） | tc/netem 直用（root 或 docker NET_ADMIN sidecar） | ✅ 已交付：agent 双端面 `mediaservo-weaknet`（`msrtc.sh weaknet apply --profile remote-burst --stream <房间名>` / `serve` 面板；D277） |
+| 车端 Jetson（有 root） | tc 打在设备网卡（wlan/eth，egress=上行、ingress→ifb=下行） | agent M4′ 转正（T12/T13：msrtc-weaknet scp+yaml 端口枚举；ifb 基座已随 T9 落地） |
 | 移动端/Web 端演示要「拨盘手感」 | clumsy(Win)/NLC(mac) 现成；Linux/无 root → udptoxy TUI | roadmap F3 |
 | 服务端 API/信令混沌 | Toxiproxy（TCP 域） | 信令 WS 可用；媒体域排除 |
 | 代码级自动集成测试 | webrtc test/network、Pion vnet、mediasoup 合成 RTCP 单测路 | 上游先例（worker TestTransportCongestionControlServer 形） |

@@ -781,3 +781,24 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
   配置面零新增键、端口走运行时观测（C20 以更严格形式满足）。
 - **参考**: foxglove netem 工具链（活性探针降形为 leaf 计数）/ mediasoup 3.15 twcc 语义 / PIT-185。
 - **后果**: consumer 断连泄漏行在老化窗（~90s）内仍可能入表——remote_port 判空兜底；根因修见 PIT-185 另案。
+
+## D277: weaknet-agent 形态决议——双端面单二进制 / 零 bash / 腿定义表 / 安全栈 / watchdog 协议（2026-09-08）
+- **决策**: 弱网模拟收敛为 `crates/mediaservo-weaknet` 单二进制两张脸——**server 面**（CLI + serve 控制面
+  [axum, REST 全 query 化, SSE 2s 状态帧=spec/scope/expires_at/job/tc/streams(kbps=stats byte_count 差分,
+  首点 null≠stale)/ev 有新才带] + rust-embed 三栏面板[零构建链,uPlot 1.6.32 vendored]）与**车端面**
+  （up/down/watch 别名 + weaknet.yaml iface/ports 枚举 + aarch64 scp 单文件，部署名 msrtc-weaknet）。
+  bash 工具面（weaknet.sh/probe.sh）T10 起 git rm，职能全量接管——双向兼容工程整体取消（单写者语义）。
+  **dir 腿定义表**为第二真值源（Media=本地口单 match/Stream·Device=有序对单 filter 双 match AND；
+  缺省 both=折半基准，单腿=全额；物理 dir=in 走 ifb 镜像）；**§ifb 合同**（link-up 步必含、teardown
+  计划入 state 含通道、探测先读后探防拆活会话、ifb0 leaf 计数非零=真穿过铁证）；**serve 安全栈**
+  （Host 白名单恒开+bind 门槛+SSE query-token 唯一豁免+token≥128bit+scenario basename）；
+  **watchdog 协议**（__watchdog 自 re-exec+process_group(0)+pid/starttime 双证+ENOENT 幂等+sidecar
+  三层兜底）；**scenario job 独占双层**（state.job 旗标+每步瞬持锁，防 step 全量重放静默覆盖，
+  陈旧=属主 starttime 判亡自清）；aborted 剧本 judge 判据作废（aborted_in_timeline helper）。
+- **理由**: 双端面=平台需求（server 按流/设备含上行、车端 radio 真值+F1 转正）；零 bash 消灭语义漂移
+  风险源与最重成本块（互操作矩阵）；评审链（team-mode 四方 44→22 簇 + Momus R3 3B→[OKAY]）实证所有
+  钉死项均为假绿/黑洞/自锁类的抗体。capability 灰显诚实降级贯穿（dir_lo/ifb_ingress 探测如实上报）。
+- **取舍**: reqwest 除名（feature 合并拉 openssl-sys=破零新增+交叉雷）→ 40 行 std 明文小客户端；
+  ratatui 搁置（同前提）；「比 bash 更严」的 created_root 门控回滚为 bash parity（PIT-187 教训入册：
+  移植语义先证原宽松为何存在）；进程级 SIGTERM 自杀测试不设（signal_hook 全进程广播=libtest 并发
+  unsound）。契约源=主仓 docs/plans/weaknet-agent/（rev-2.2+）。

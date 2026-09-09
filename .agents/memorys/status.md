@@ -708,3 +708,13 @@ install                        → 改名提示 + exit 2（退役）
   钉住测试改判（无 query→200 列表）。lib 134/0、stub 奇偶、e2e 4/4 复验。
 - 实证在册：一 room 一流 9/9（appData 备选作废）；local_port 恒=20000（WebRtcServer 单口）；
   remote_port 16/16 互异；断连 consumer 假活永不死 → PIT-185 根因另案（WS 会话 id→合成 peer 键无倒排）。
+
+### 2026-09-08: weaknet-agent M0-M3 落地（本仓侧账；轮次全史=主仓 status + docs/plans/weaknet-agent/）
+- 新 crate `mediaservo-weaknet`（T0-T10 全绿收口）：scaffold+golden12、spec/fuse（腿定义表/dir 折半）、
+  engine（sidecar 双通道/参数化指纹/reset 探测/ifb 三连/teardown 计划）、CLI 入口收敛（msrtc.sh 无回落）、
+  scope+小刀 C（stats 行 +owner）、serve 安全全家桶+状态帧、scenario 引擎（job 独占/aborted 作废/
+  judge 契约）、面板三栏（W3 19/19+FAKE_CAPS）、T10 退役 bash 面、--auto-clear 信号层。
+  tests 104/0 · clippy 0 · 零新增依赖面（axum/rust-embed/tokio 全锁现件；reqwest 除名保前提）。
+- 本仓附带变更：admin/sfu stats 列表行 owner 字段（027d57f）；ci.yml test-weaknet 扩步（agent 自证链）。
+- 记忆：D277 决议入册；PIT-186（watchdog stdio）/PIT-187（clear 门控留树）入账。M4′ 车端面（T12/T13）
+  与 T11 文档收口在主仓侧推进。
