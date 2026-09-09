@@ -138,6 +138,30 @@ jobs:
           DROP=$(sudo tc -s qdisc show dev lo | grep -oP "dropped \K[0-9]+" | head -1 || echo 0)
           echo "netem dropped=$DROP"
           [ "${DROP:-0}" -gt 0 ] || { echo "注入侧零丢弃=疑似静默失效(PIT-184 同族)"; exit 1; }
+
+      # ==== T10 扩步：mediaservo-weaknet local-root 实环（runner=root 通道，agent 自证）====
+      - name: Weaknet crate tests
+        run: |
+          cargo test -p mediaservo-weaknet
+          cargo clippy -p mediaservo-weaknet --all-targets -- -D warnings
+      - name: Weaknet agent live loop (local-root, W1/W2/W6 子集全链)
+        run: |
+          # 先收 preflight 的裸 netem 现场——否则 guard_foreign_root fail-closed 拦 agent apply
+          sudo tc qdisc del dev lo root || true
+          # loss 参数显式（delay-only 永不 drop——dropped 真值判据的参数据）
+          cargo build -p mediaservo-weaknet
+          sudo ./target/debug/mediaservo-weaknet apply --rtt 50 --loss 5 --rtp-port 20000 --dir both --duration 120
+          sudo ./target/debug/mediaservo-weaknet status | grep -q "iface=lo"
+          sudo tc -s qdisc show dev lo | grep -q "loss 5"
+          sudo ./target/debug/mediaservo-weaknet set --loss 8
+          sudo tc -s qdisc show dev lo | grep -q "loss 8"
+          DROP=$(sudo tc -s qdisc show dev lo | grep -oP "dropped \K[0-9]+" | head -1 || echo 0)
+          echo "agent-injected dropped=$DROP"
+          [ "${DROP:-0}" -gt 0 ] || exit 1
+          sudo ./target/debug/mediaservo-weaknet clear
+          sudo tc qdisc show dev lo | grep -qE "htb|netem" && { echo "撤除残留"; exit 1; }
+          echo "agent 实环链绿（apply→status→指纹→set→dropped→clear 零残留）"
+
       - name: Teardown (只删自记的 root，回读确认为空)
         if: always()
         run: |
