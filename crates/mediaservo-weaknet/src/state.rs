@@ -54,6 +54,12 @@ pub struct JobRef {
     pub name: String,
     pub pid: u32,
     pub starttime: u64,
+    /// T8：进度回显源（写处理器每 step 更新 done；total = plan 行数）。
+    /// `#[serde(default)]` 兼容 rev-2.2 首形（无 done/total 的落盘）。
+    #[serde(default)]
+    pub done: u32,
+    #[serde(default)]
+    pub total: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -71,6 +77,12 @@ pub struct State {
     /// replay/status 免重复拉 stats；`#[serde(default)]` 向后兼容旧 state（无此键）。
     #[serde(default)]
     pub pairs: Vec<(u16, u16)>,
+    /// E2（T8 小账）：定向名字（rooms=--stream 房间集；devices=--device 设备集）。
+    /// 面板勾选回显与 apply 事件 stream 字段（E1）的单一真值源。
+    #[serde(default)]
+    pub rooms: Vec<String>,
+    #[serde(default)]
+    pub devices: Vec<String>,
     #[serde(default)]
     pub sig_port: Option<u16>,
     pub expires_at_ms: u64,
@@ -386,15 +398,12 @@ pub fn param_summary(s: &ImpairSpec) -> String {
 
 /// apply 事件体（bash state_write printf 形：rtt_ms/jitter_ms 数字，loss/rate_mbps/seed/stream 字符串）。
 #[must_use]
-pub fn apply_event(s: &ImpairSpec, ports: &[u16]) -> serde_json::Value {
-    let (loss, stream) = (
-        match &s.loss {
-            Some(crate::spec::LossSpec::Simple(p)) => p.clone(),
-            Some(crate::spec::LossSpec::GeModel { loss, .. }) => loss.clone(),
-            None => "0%".to_string(),
-        },
-        String::new(), // --stream 消费随 T5（bash 现场形 stream="" 恒空串）
-    );
+pub fn apply_event(s: &ImpairSpec, ports: &[u16], stream_sel: &str) -> serde_json::Value {
+    let loss = match &s.loss {
+        Some(crate::spec::LossSpec::Simple(p)) => p.clone(),
+        Some(crate::spec::LossSpec::GeModel { loss, .. }) => loss.clone(),
+        None => "0%".to_string(),
+    };
     serde_json::json!({
         "ev": "apply",
         "rtt_ms": s.rtt_ms,
@@ -403,7 +412,8 @@ pub fn apply_event(s: &ImpairSpec, ports: &[u16]) -> serde_json::Value {
         "rate_mbps": s.rate_mbps.map(|n| if n.fract() == 0.0 { format!("{}", n as u64) } else { format!("{n}") }).unwrap_or_default(),
         "ports": ports.iter().map(u16::to_string).collect::<Vec<_>>().join(" "),
         "seed": s.seed.map(|n| n.to_string()).unwrap_or_default(),
-        "stream": stream,
+        // E1：bash STREAM_SEL 同键名——Stream/Device 定向时落名字串（段级=空串同旧形）。
+        "stream": stream_sel,
     })
 }
 
@@ -429,6 +439,8 @@ mod tests {
             iface: "lo".into(),
             ports: vec![40010, 40011],
             pairs: vec![(20000, 40001)],
+            rooms: vec!["cam0".into()],
+            devices: vec![],
             sig_port: None,
             expires_at_ms: 1_757_000_000_000,
             created_root: true,
@@ -436,6 +448,8 @@ mod tests {
                 name: "cell-edge".into(),
                 pid: 4242,
                 starttime: 99,
+                done: 2,
+                total: 4,
             }),
             teardown: Teardown {
                 channel: ChannelSer::Sidecar,
@@ -560,14 +574,14 @@ mod tests {
             rate_mbps: Some(4.0),
             ..Default::default()
         };
-        let v = apply_event(&s, &[20000]);
+        let v = apply_event(&s, &[20000], "cam0,cam1");
         assert_eq!(v["ev"], "apply");
         assert_eq!(v["rtt_ms"], 160);
         assert_eq!(v["loss"], "8%");
         assert_eq!(v["rate_mbps"], "4");
         assert_eq!(v["ports"], "20000");
         assert_eq!(v["seed"], "");
-        assert_eq!(v["stream"], "");
+        assert_eq!(v["stream"], "cam0,cam1", "E1: 定向名串入 stream 键（bash STREAM_SEL 同位）");
     }
 
     #[test]

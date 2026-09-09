@@ -12,7 +12,7 @@
 //! 不 ensure——GET 永不建容器/起进程）/ stats 复用 scope::StatsClient（token 缓存进程级）。
 //!
 //! 错误体统一 {"error":...}；Fail.code 映射：4→400 · 3→409 · 2→500（main.rs 头注语义沿用）。
-//! scenario run/stop = 诚实 501（T8 到场），但 basename/inline 校验先行——400 是真的。
+//! scenario run/stop = 真实 T8（run 同步 start 相 409/500，stop 旗标 200）；basename/inline 校验先行——400 是真的。
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -34,6 +34,7 @@ use serde_json::{Map, Value, json};
 
 use crate::engine::{self, ApplyRequest, Env, Fail, Replay, Verify, Wn};
 use crate::fuse;
+use crate::scenario::{self, StepExec};
 use crate::scope::{self, Capabilities, StatsClient, Targeting};
 use crate::spec::{self, Dir, ImpairSpec, LossSpec};
 use crate::state::{self, Dirs, State};
@@ -283,9 +284,6 @@ struct AppErr {
 impl AppErr {
     fn bad(msg: impl Into<String>) -> Self {
         Self { status: StatusCode::BAD_REQUEST, msg: msg.into() }
-    }
-    fn not_impl(msg: impl Into<String>) -> Self {
-        Self { status: StatusCode::NOT_IMPLEMENTED, msg: msg.into() }
     }
 }
 
@@ -602,6 +600,7 @@ fn do_apply_http(c: &Arc<Ctx>, cmd: ApplyCmd) -> Wn<HttpReplay> {
     let req = ApplyRequest {
         spec: cmd.spec.clone(),
         scope: targeting.scope,
+        names: targeting.scope_names(),
         iface: iface.clone(),
         ports: targeting.ports,
         pairs: targeting.pairs,
@@ -677,6 +676,7 @@ fn do_set_http(c: &Arc<Ctx>, cmd: SetCmd) -> Wn<(Value, u64, String, u64)> {
     let mut prior = State::read_from(&c.cfg.dirs.state_json())
         .map_err(Fail::env)?
         .ok_or_else(|| Fail::conflict("no active spec — 先 apply/开总闸"))?;
+    job_gate(&Some(prior.clone()))?; // rev-2.2：job 活跃期 set 同样 409（与 apply 对称）
     sanitize_job(&mut prior);
     let has_override = !cmd.overrides.is_empty()
         || cmd.iface.is_some()
@@ -698,7 +698,16 @@ fn do_set_http(c: &Arc<Ctx>, cmd: SetCmd) -> Wn<(Value, u64, String, u64)> {
     {
         resolve_cmd(c, &cmd.target)?
     } else {
-        Targeting { scope: prior.scope, ports: prior.ports.clone(), pairs: prior.pairs.clone() }
+        Targeting {
+            scope: prior.scope,
+            ports: prior.ports.clone(),
+            pairs: prior.pairs.clone(),
+            names: match prior.scope {
+                spec::ScopeSel::Stream => prior.rooms.clone(),
+                spec::ScopeSel::Device => prior.devices.clone(),
+                spec::ScopeSel::Media => vec![],
+            },
+        }
     };
     if targeting.ports.is_empty() && targeting.pairs.is_empty() {
         return Err(Fail::env(
@@ -710,6 +719,7 @@ fn do_set_http(c: &Arc<Ctx>, cmd: SetCmd) -> Wn<(Value, u64, String, u64)> {
     let req = ApplyRequest {
         spec: spec.clone(),
         scope: targeting.scope,
+        names: targeting.scope_names(),
         iface: iface.clone(),
         ports: targeting.ports,
         pairs: targeting.pairs,
@@ -800,37 +810,97 @@ fn spawn_verify(ctx: Arc<Ctx>, iface: String, pre: u64, phase: &'static str, wit
     });
 }
 
-// ---------- scenario（501 诚实位，400 校验先行——tasks T6「穿越案必须真」） ----------
+// ---------- scenario（T8：run=同步 start（真实 409/500 面）+ 后台 drive；stop=旗标通路） ----------
 
 fn is_basename(f: &str) -> bool {
     !f.is_empty() && f != "." && f != ".." && !f.contains(['/', '\\'])
 }
 
-async fn post_scenario_run(body: axum::body::Bytes) -> Result<Json<Value>, AppErr> {
+/// scenario 阻塞相产物（run 句柄元组）——type 别名消解 clippy::type_complexity。
+type PreparedRun = (Arc<scenario::RunSpec>, Arc<dyn StepExec>, Arc<Dirs>, ImpairSpec);
+/// 阻塞相：互斥门/预演/首步 apply/job 落盘（start_blocking 内串全部 409/500 真错）。
+fn scenario_prepare(
+    c: &Arc<Ctx>,
+    plan: scenario::ScenarioPlan,
+    name: String,
+    file_disp: String,
+) -> Wn<PreparedRun> {
+    let dirs = c.cfg.dirs.clone();
+    let targeting = scope::resolve_targeting(c.cfg.server_url.as_deref(), None, None, &[])?;
+    let rs = Arc::new(scenario::RunSpec {
+        name,
+        file_disp,
+        plan,
+        no_baseline: false,
+        keep: false,
+        targeting,
+        iface: engine::resolve_iface(None),
+        sig_port: None,
+        recovery_dwell_secs: None,
+    });
+    let exec: Arc<dyn StepExec> = Arc::new(scenario::EngineExec::new(dirs.clone(), c.cfg.env.clone()));
+    scenario::start_blocking(&rs, &exec, &dirs)?;
+    let cur = State::read_from(&dirs.state_json())
+        .map_err(Fail::env)?
+        .ok_or_else(|| Fail::env("scenario: start 后 state 缺失"))?
+        .spec;
+    Ok((rs, exec, Arc::new(dirs), cur))
+}
+
+async fn post_scenario_run(
+    AxumState(ctx): AxumState<Arc<Ctx>>,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, AppErr> {
     let v: Value = serde_json::from_slice(&body)
         .map_err(|e| AppErr::from(Fail::bad_param(format!("body JSON 非法: {e}"))))?;
-    if let Some(f) = v.get("file") {
+    let (plan, name, file_disp) = if let Some(f) = v.get("file") {
         let f = f.as_str().ok_or_else(|| AppErr::bad("file 需字符串（basename-only）"))?;
         if !is_basename(f) {
             return Err(AppErr::bad(
                 "file 必须为 basename（禁路径穿越/绝对路径，design §serve 安全 6）",
             ));
         }
+        let (path, stem) = scenario::resolve_serve_file(f).map_err(AppErr::from)?;
+        let src = std::fs::read_to_string(&path)
+            .map_err(|e| AppErr::from(Fail::env(format!("读 scenario {} 失败: {e}", path.display()))))?;
+        let plan = scenario::parse_plan_yaml(&src).map_err(|e| AppErr::from(Fail::bad_param(e)))?;
+        (plan, stem, path.display().to_string())
     } else if let Some(inl) = v.get("inline") {
         let s = inl.as_str().ok_or_else(|| AppErr::bad("inline 需字符串"))?;
         if s.len() > MAX_INLINE_BYTES {
             return Err(AppErr::bad(format!("inline 超 32KB 上限（{} 字节）", s.len())));
         }
+        let plan = scenario::parse_plan_yaml(s).map_err(|e| AppErr::from(Fail::bad_param(e)))?;
+        (plan, "inline".to_string(), "inline".to_string())
     } else {
         return Err(AppErr::bad(
             "body 需 file{{\"file\":\"<basename>\"}} 或 {{\"inline\":\"<yaml>\"}}",
         ));
-    }
-    Err(AppErr::not_impl("scenario 引擎随 T8 到场（job 调度/独占旗标/baseline 配对）"))
+    };
+    let total = plan.lines.len();
+    let job_name = name.clone();
+    let c = ctx.clone();
+    let (rs, exec, dirs, cur) =
+        blocking(move || scenario_prepare(&c, plan, name, file_disp)).await?;
+    tokio::spawn(async move {
+        let out = scenario::drive(rs, exec, dirs, cur).await;
+        match &out.aborted {
+            Some(r) => eprintln!("weaknet(serve): scenario abort: {r}（elapsed_s={}）", out.elapsed_s),
+            None => println!("weaknet(serve): {}", out.summary),
+        }
+    });
+    Ok(Json(json!({
+        "ok": true,
+        "job": { "name": job_name, "done": 0, "total": total },
+    })))
 }
 
-async fn post_scenario_stop() -> Result<Json<Value>, AppErr> {
-    Err(AppErr::not_impl("scenario stop 随 T8 到场（job 状态面）"))
+async fn post_scenario_stop(
+    AxumState(ctx): AxumState<Arc<Ctx>>,
+) -> Result<Json<Value>, AppErr> {
+    let dirs = ctx.cfg.dirs.clone();
+    let detail = blocking(move || scenario::stop(&dirs)).await?;
+    Ok(Json(json!({"ok": true, "detail": detail})))
 }
 
 // ---------- SSE ----------
@@ -915,12 +985,12 @@ impl FrameState {
 }
 
 /// 状态帧（design §API 全字段）：expires_at = state.expires_at_ms 顶层镜像；job 形 =
-/// state.job（{name,pid,starttime}，done/total 富化随 T8）；无 state = spec/scope/dir/
-/// expires_at/job 全 null——「键恒在、值可 null」与 kbps null 语义一致。
+/// state.job（{name,pid,starttime,done,total}）；无 state = spec/scope/dir/expires_at/job/
+/// names 全 null——「键恒在、值可 null」与 kbps null 语义一致。
 fn build_frame(ctx: &Ctx, mut fs: FrameState) -> (Value, FrameState) {
     let st = State::read_from(&ctx.cfg.dirs.state_json()).ok().flatten();
     let mut frame =
-        json!({"spec": null, "scope": null, "dir": null, "expires_at": null, "job": null});
+        json!({"spec": null, "scope": null, "dir": null, "expires_at": null, "job": null, "names": null});
     let mut tc = json!({"sent": null, "dropped": null});
     if let Some(s) = &st {
         frame["spec"] = serde_json::to_value(&s.spec).unwrap_or(Value::Null);
@@ -928,6 +998,8 @@ fn build_frame(ctx: &Ctx, mut fs: FrameState) -> (Value, FrameState) {
         frame["dir"] = serde_json::to_value(s.dir).unwrap_or(Value::Null);
         frame["expires_at"] = json!(s.expires_at_ms);
         frame["job"] = serde_json::to_value(&s.job).unwrap_or(Value::Null);
+        // E2：定向名字（面板勾选回显唯一通路——与 spec 同构，非乐观更新）。
+        frame["names"] = json!({ "rooms": s.rooms, "devices": s.devices });
         // 活性计数仅经 state.teardown 重建通道（不 probe_channel——读面零 ensure 副作用）。
         if let Some(chan) = engine::channel_of(&s.teardown)
             && let Ok(show) = engine::tc_exec(&chan, &["-s", "qdisc", "show", "dev", &s.iface])

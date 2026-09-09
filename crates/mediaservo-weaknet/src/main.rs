@@ -6,12 +6,14 @@
 //! 退出码：0 OK / 2 环境不足·施加失败 / 3 状态冲突（锁·他方 qdisc·state 背离）/ 4 参数非法。
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 
 use mediaservo_weaknet::engine::{self, ApplyRequest, Env, Fail, Replay, Verify, Wn};
 use mediaservo_weaknet::fuse;
+use mediaservo_weaknet::scenario;
 use mediaservo_weaknet::scope::{self, Targeting};
 use mediaservo_weaknet::server;
 use mediaservo_weaknet::spec::{self, Dir as SpecDir, ImpairSpec, LossSpec, ScopeSel};
@@ -73,17 +75,23 @@ enum Cmd {
 
 #[derive(Debug, Subcommand)]
 enum ScenarioCmd {
-    /// 运行剧本（steps 调度/job 独占随 T8）
+    /// 运行剧本（job 独占 + 每步瞬持锁；bash 旗标 --no-baseline/--keep 平移）
     Run {
         #[arg(long)]
         file: Option<String>,
         /// 场景根覆盖（缺省见 §车端面寻径）
         #[arg(long)]
         dir: Option<String>,
+        /// 跳过基线窗（judge 窗退化为 start+10s 缺省——bash 同义）
+        #[arg(long, default_value_t = false)]
+        no_baseline: bool,
+        /// 收尾保留现场（不 clear；bash 同义）
+        #[arg(long, default_value_t = false)]
+        keep: bool,
     },
     /// 列出可用剧本
     List,
-    /// 运行中的剧本停止（job 状态面随 T8）
+    /// 运行中的剧本停止（cancel 旗标/陈旧旗标自清；恒 exit0 幂等）
     Stop,
 }
 
@@ -189,16 +197,22 @@ fn dispatch(cmd: Cmd) -> Wn<()> {
     let env = Env::from_env();
     match cmd {
         // bash 同规：flock 覆盖 apply|set|scenario；clear/status 免锁可达（救火）。
+        // T8 独占门（rev-2.2 Momus-B2）：scenario job 存活期外部 apply/set 先行 409/exit3（锁无关）。
         Cmd::Apply(a) => {
+            scenario::job_gate(&dirs)?;
             let _lk = engine::take_write_lock(&dirs)?;
             do_apply(&a, &dirs, &env)
         }
         Cmd::Set(a) => {
+            scenario::job_gate(&dirs)?;
             let _lk = engine::take_write_lock(&dirs)?;
             engine::autoheal_if_expired(&dirs, &env)?; // apply/clear 免检、其余开场先验（bash）
             do_set(&a, &dirs, &env)
         }
-        Cmd::Scenario { step } => do_scenario(step),
+        Cmd::Scenario { step } => {
+            engine::autoheal_if_expired(&dirs, &env)?; // bash：scenario 亦先验过期
+            do_scenario(step, &dirs, &env)
+        }
         Cmd::Status { watch } => {
             if watch {
                 return Err(Fail::env("status --watch 一屏重绘随 T12（watch.rs）到场"));
@@ -283,6 +297,7 @@ fn do_apply(a: &ApplyArgs, dirs: &Dirs, env: &Env) -> Wn<()> {
     let req = ApplyRequest {
         spec: spec.clone(),
         scope: targeting.scope,
+        names: targeting.scope_names(),
         iface: iface.clone(),
         ports: targeting.ports.clone(),
         pairs: targeting.pairs.clone(),
@@ -351,6 +366,11 @@ fn do_set(a: &ApplyArgs, dirs: &Dirs, env: &Env) -> Wn<()> {
                 scope: prior.scope,
                 ports: prior.ports.clone(),
                 pairs: prior.pairs.clone(),
+                names: match prior.scope {
+                    ScopeSel::Stream => prior.rooms.clone(),
+                    ScopeSel::Device => prior.devices.clone(),
+                    ScopeSel::Media => vec![],
+                },
             }
         };
     if targeting.ports.is_empty() && targeting.pairs.is_empty() {
@@ -362,6 +382,7 @@ fn do_set(a: &ApplyArgs, dirs: &Dirs, env: &Env) -> Wn<()> {
     let req = ApplyRequest {
         spec: spec.clone(),
         scope: targeting.scope,
+        names: targeting.scope_names(),
         iface,
         ports: targeting.ports,
         pairs: targeting.pairs,
@@ -656,13 +677,55 @@ fn watchdog_state(dirs: &Dirs) -> String {
 
 // ---------- scenario ----------
 
-fn do_scenario(sub: ScenarioCmd) -> Wn<()> {
+fn do_scenario(sub: ScenarioCmd, dirs: &Dirs, env: &Env) -> Wn<()> {
     match sub {
-        ScenarioCmd::Run { .. } => Err(Fail::env(
-            "scenario run（steps 调度/job 独占/baseline 配对）随 T8 到场",
-        )),
-        ScenarioCmd::Stop => Err(Fail::env("scenario stop 随 T8（job 状态面）到场")),
+        ScenarioCmd::Run {
+            file,
+            dir,
+            no_baseline,
+            keep,
+        } => {
+            let file = file.ok_or_else(|| {
+                Fail::bad_param("scenario run 需 --file（<名|*.yaml> [--no-baseline|--keep]；-h 看帮助）")
+            })?;
+            let (path, name) = scenario::resolve_run_file(&file, dir.as_deref())?;
+            let raw = std::fs::read_to_string(&path)
+                .map_err(|e| Fail::env(format!("读 scenario {} 失败: {e}", path.display())))?;
+            let plan = scenario::parse_plan_yaml(&raw).map_err(Fail::bad_param)?;
+            // 定向 = 段级 stats（bash do_scenario 不给 --stream；缺省同 do_apply）
+            let targeting = scope::resolve_targeting(None, None, None, &[])?;
+            let rs = scenario::RunSpec {
+                name,
+                file_disp: path.display().to_string(),
+                plan,
+                no_baseline,
+                keep,
+                targeting,
+                iface: engine::resolve_iface(None),
+                sig_port: None,
+                recovery_dwell_secs: None,
+            };
+            let exec: Arc<dyn scenario::StepExec> =
+                Arc::new(scenario::EngineExec::new(dirs.clone(), env.clone()));
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| Fail::env(format!("tokio runtime 建立失败: {e}")))?;
+            let out = rt.block_on(scenario::run_full(rs, exec, dirs.clone()));
+            println!("{}", out.summary);
+            if out.exit_code != 0 {
+                return Err(Fail {
+                    code: out.exit_code,
+                    msg: out.aborted.unwrap_or_else(|| "scenario 失败（见上）".into()),
+                });
+            }
+            Ok(())
+        }
         ScenarioCmd::List => scenario_list(),
+        ScenarioCmd::Stop => {
+            println!("{}", scenario::stop(dirs)?);
+            Ok(())
+        }
     }
 }
 

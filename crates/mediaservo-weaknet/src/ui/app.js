@@ -394,6 +394,13 @@ function echoSpecInputs(f) { // 外部 CLI/其他端写 → 帧回显（聚焦�
   if (radio && !radio.disabled && document.activeElement !== radio) radio.checked = true;
   else if (radio && radio.disabled && cur && !cur.disabled) void cur;
 }
+/// 定向名字回显（E2 ledger）：state.names 是勾选的唯一真值通路——面板禁乐观更新，
+/// 一切以帧为准；唯用户 400ms debounce 在途（setTimer 未决）时让位本地新勾选，免竞态互擦。
+function echoScopeNames(f) {
+  if (setTimer) return;
+  ui.selRooms = new Set(f.names?.rooms ?? []);
+  ui.selDevices = new Set(f.names?.devices ?? []);
+}
 function onFrame(f) {
   window.__wnet.frameCount++;
   window.__wnet.lastFrame = f;
@@ -406,13 +413,14 @@ function onFrame(f) {
   renderRing(f);
   renderHeader(f);
   echoSpecInputs(f);
+  echoScopeNames(f);
   renderStreams();
   feedCharts(f);
   renderScenJob(f);
 }
 function renderScenJob(f) {
   $("#scen-job").textContent = f.job
-    ? `运行中：${f.job.name}（pid ${f.job.pid}）——done/total 随 T8`
+    ? `运行中：${f.job.name}（pid ${f.job.pid}） ${f.job.done ?? 0}/${f.job.total ?? "?"}`
     : "无活跃 job";
 }
 

@@ -256,30 +256,151 @@ async fn apply_param_validation_400s() {
     }
 }
 
+/// 活跃 job 态的 state.json（alive=true 用本进程 pid+starttime = 判活必真；false 用不可存在 pid）。
+fn write_live_job(dirs: &Dirs, alive: bool) {
+    use mediaservo_weaknet::state::{ChannelSer, JobRef, State, STATE_SCHEMA, Teardown};
+    use mediaservo_weaknet::spec::{Dir, ImpairSpec, ScopeSel};
+    let pid = if alive { std::process::id() } else { u32::MAX };
+    let st = State {
+        schema: STATE_SCHEMA.to_string(),
+        spec: ImpairSpec::default(),
+        dir: Dir::Both,
+        scope: ScopeSel::Media,
+        iface: "lo".into(),
+        ports: vec![40010],
+        pairs: vec![],
+        rooms: vec!["room-a".into()],
+        devices: vec![],
+        sig_port: None,
+        expires_at_ms: fuse::now_epoch_ms() + 300_000,
+        created_root: true,
+        job: Some(JobRef {
+            name: "matrix-job".into(),
+            pid,
+            starttime: fuse::read_proc_starttime(std::process::id()).unwrap_or(0),
+            done: 1,
+            total: 3,
+        }),
+        teardown: Teardown {
+            channel: ChannelSer::LocalRoot,
+            sidecar: None,
+            steps: vec![],
+        },
+    };
+    st.write_to(&dirs.state_json()).unwrap();
+}
+
 #[tokio::test]
-async fn scenario_basename_gate_400_before_honest_501() {
-    let router = build_router(cfg("scen"));
+async fn scenario_run_stop_t8_semantics() {
+    // T8 真实面（旧 501 桩已退）：400 门不变；合法 plan → start 相在 stats 定向处
+    // 报因 500（闭口端口注入 = 零 tc/docker 触达的确定性）；stop = 200/幂等/陈旧自清。
+    let mut c = cfg("scen");
+    let dead = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    c.server_url = Some(format!("http://127.0.0.1:{dead}"));
+    let dirs = c.dirs.clone();
+    let router = build_router(c);
     for bad in [r#"{"file":"../evil.yaml"}"#, r#"{"file":"/etc/passwd"}"#, r#"{"file":"sub/dir.yaml"}"#, r#"{"inline":1}"#, "{}"] {
         let r = router
             .clone()
             .oneshot(post("/v1/scenario/run", bad))
             .await
             .unwrap();
-        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "case {bad:?} 应 400（穿越/绝对/型错/缺参——501 前真校验）");
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "case {bad:?} 应 400（穿越/绝对/型错/缺参——start 相前置真校验）");
     }
     let big = format!(r#"{{"inline":"{}"}}"#, "x".repeat(33 * 1024));
     let r = router.clone().oneshot(post("/v1/scenario/run", &big)).await.unwrap();
     assert_eq!(r.status(), StatusCode::BAD_REQUEST, "inline >32KB → 400");
-    // 合法 basename → 501（诚实报 T8，不 404）
+    // 合法 inline（文法过）→ 定向 stats 不可达 = 诚实 500，且零副作用（未触锁/未写 state）
     let r = router
         .clone()
-        .oneshot(post("/v1/scenario/run", r#"{"file":"cell-edge.yaml"}"#))
+        .oneshot(post(
+            "/v1/scenario/run",
+            r#"{"inline":"scenario:\n  baseline_s: 1\n  steps:\n    - at_s: 5\n      set: {rtt_ms: 50}\n"}"#,
+        ))
         .await
         .unwrap();
-    assert_eq!(r.status(), StatusCode::NOT_IMPLEMENTED);
-    assert!(body_json(r).await["error"].as_str().unwrap().contains("T8"));
-    let r = router.oneshot(post("/v1/scenario/stop", "{}")).await.unwrap();
-    assert_eq!(r.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR, "合法 plan + stats 不可达 → 500（旧 501 桩退役）");
+    assert!(body_json(r).await["error"].as_str().is_some(), "错误体 {{error}} 形");
+    assert!(!dirs.state_json().exists() && !dirs.lock().exists(), "start 相前置失败 = 零落盘");
+    // 测试注入 scenario 根（WEAKNET_ASSETS_DIR）：合法 file → 盘上解析命中 → 同一 500 报因
+    let assets = std::env::temp_dir().join(format!("wnet-scen-{}", std::process::id()));
+    std::fs::create_dir_all(assets.join("scenarios")).unwrap();
+    std::fs::write(
+        assets.join("scenarios").join("mini.yaml"),
+        "scenario:\n  baseline_s: 1\n  steps:\n    - at_s: 5\n      set: {rtt_ms: 50}\n",
+    )
+    .unwrap();
+    // SAFETY: 本 binary 仅此测试读 WEAKNET_ASSETS_DIR（/v1/scenarios 无并发案），请求串行发出
+    unsafe { std::env::set_var("WEAKNET_ASSETS_DIR", &assets) };
+    let r = router
+        .clone()
+        .oneshot(post("/v1/scenario/run", r#"{"file":"mini.yaml"}"#))
+        .await
+        .unwrap();
+    // SAFETY: 请求已完成，回收窗口
+    unsafe { std::env::remove_var("WEAKNET_ASSETS_DIR") };
+    assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR, "file 解析命中后同一 start 相报因（非 400/404/501）");
+    // stop：无活跃 job → 200 幂等
+    let r = router.clone().oneshot(post("/v1/scenario/stop", "{}")).await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert!(body_json(r).await["detail"].as_str().unwrap().contains("幂等"));
+    // stop：属主存活（本进程 pid）→ 200 + cancel 旗标落盘
+    write_live_job(&dirs, true);
+    let r = router.clone().oneshot(post("/v1/scenario/stop", "{}")).await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert!(body_json(r).await["detail"].as_str().unwrap().contains("已请求停止"));
+    assert!(mediaservo_weaknet::scenario::cancel_path(&dirs).exists(), "存活属主 → 写 stop 旗标");
+    std::fs::remove_file(mediaservo_weaknet::scenario::cancel_path(&dirs)).unwrap();
+    // stop：死主（pid 不可存在）→ 200 + 盘上 job 旗标自清
+    write_live_job(&dirs, false);
+    let r = router.clone().oneshot(post("/v1/scenario/stop", "{}")).await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert!(body_json(r).await["detail"].as_str().unwrap().contains("陈旧"));
+    let st = mediaservo_weaknet::state::State::read_from(&dirs.state_json()).unwrap().unwrap();
+    assert!(st.job.is_none(), "死主旗标落盘自清");
+    std::fs::remove_dir_all(&dirs.statedir).ok();
+    std::fs::remove_dir_all(&assets).ok();
+}
+
+#[tokio::test]
+async fn live_scenario_job_gates_apply_set_409() {
+    // rev-2.2 独占门 REST 面：job 存活期 apply/set 均在 replay 之前 409（零 tc 触达）。
+    let c = cfg("job409");
+    let dirs = c.dirs.clone();
+    write_live_job(&dirs, true);
+    let router = build_router(c);
+    let r = router
+        .clone()
+        .oneshot(post("/v1/apply", r#"{"rtt_ms":80,"duration":40}"#))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CONFLICT, "job 活跃期 apply = 409");
+    assert!(body_json(r).await["error"].as_str().unwrap().contains("scenario"));
+    let r = router
+        .clone()
+        .oneshot(post("/v1/set", r#"{"rtt_ms":40}"#))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CONFLICT, "job 活跃期 set = 409（对称）");
+    // 死主旗标不拦：apply 放行到下一层（stats 不可达 500，而非 409）
+    let mut c2 = cfg("job409b");
+    let dead2 = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    c2.server_url = Some(format!("http://127.0.0.1:{dead2}"));
+    let dirs2 = c2.dirs.clone();
+    write_live_job(&dirs2, false);
+    let r = build_router(c2)
+        .oneshot(post("/v1/apply", r#"{"rtt_ms":80,"duration":40}"#))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR, "陈旧 job 判亡放行（gate 过后再报 env 因）");
+    std::fs::remove_dir_all(&dirs.statedir).ok();
+    std::fs::remove_dir_all(&dirs2.statedir).ok();
 }
 
 #[tokio::test]

@@ -106,6 +106,21 @@ pub struct Targeting {
     pub ports: Vec<u16>,
     /// scope=Stream/Device：拍平有序对集（去重升序）
     pub pairs: Vec<(u16, u16)>,
+    /// E2（T8）：定向名字——Stream=房间集 / Device=设备 ID 集 / Media=空。
+    /// 经 ApplyRequest.names 入 state，供 SSE 帧回显勾选（面板）与 apply 事件 stream 键（bash 小账）。
+    pub names: Vec<String>,
+}
+
+impl Targeting {
+    /// crate::engine::ScopeNames 映射（Stream→rooms / Device→devices / Media→空）——CLI/serve/scenario 共源。
+    #[must_use]
+    pub fn scope_names(&self) -> crate::engine::ScopeNames {
+        match self.scope {
+            ScopeSel::Stream => crate::engine::ScopeNames { rooms: self.names.clone(), devices: vec![] },
+            ScopeSel::Device => crate::engine::ScopeNames { rooms: vec![], devices: self.names.clone() },
+            ScopeSel::Media => crate::engine::ScopeNames::default(),
+        }
+    }
 }
 
 /// 单行 → (L,R) 对（缺任一端口 = 不可定向，WARN 留痕 C15）。
@@ -161,7 +176,12 @@ pub fn targeting_for_rooms(rows: &[StreamInfo], sel: &str) -> Wn<Targeting> {
             live_rooms_csv(rows)
         )));
     }
-    Ok(Targeting { scope: ScopeSel::Stream, ports: vec![], pairs })
+    Ok(Targeting {
+        scope: ScopeSel::Stream,
+        ports: vec![],
+        pairs,
+        names: want.iter().map(|s| (*s).to_string()).collect(),
+    })
 }
 
 /// --device：owner 设备逗号集 → 其名下房间全部活行（producer+consumer）的 (L,R) 并集。
@@ -207,7 +227,12 @@ pub fn targeting_for_devices(rows: &[StreamInfo], sel: &str) -> Wn<Targeting> {
             live_rooms_csv(rows)
         )));
     }
-    Ok(Targeting { scope: ScopeSel::Device, ports: vec![], pairs })
+    Ok(Targeting {
+        scope: ScopeSel::Device,
+        ports: vec![],
+        pairs,
+        names: want.iter().map(|s| (*s).to_string()).collect(),
+    })
 }
 
 /// 段级：活行 local_port 并集（bash media_ports 同义）。空集 exit2 + bash L518 措辞。
@@ -224,7 +249,7 @@ pub fn targeting_media(rows: &[StreamInfo]) -> Wn<Targeting> {
             "媒体口观测为空：server 未起 / 无在产流 / stats 不可达（起服务或重试；逃生门 --rtp-port；或 --stream 定向）",
         ));
     }
-    Ok(Targeting { scope: ScopeSel::Media, ports, pairs: vec![] })
+    Ok(Targeting { scope: ScopeSel::Media, ports, pairs: vec![], names: vec![] })
 }
 
 /// 作用域裁决优先级（bash resolve_ports 同序）：显式端口集 > stream/rooms > device/ids > stats 媒体口。
@@ -244,6 +269,7 @@ pub fn resolve_targeting(
             scope: ScopeSel::Media,
             ports: ports_flag.to_vec(),
             pairs: vec![],
+            names: vec![],
         });
     }
     let stream = stream.map(str::trim).filter(|s| !s.is_empty());

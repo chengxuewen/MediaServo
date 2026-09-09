@@ -771,10 +771,20 @@ pub fn autoheal_if_expired(dirs: &Dirs, env: &Env) -> Wn<bool> {
 
 // ---------- apply / set 编排 ----------
 
+#[derive(Debug, Clone, Default)]
+pub struct ScopeNames {
+    /// Stream 定向房间集（= bash STREAM_SEL 拆分形）
+    pub rooms: Vec<String>,
+    /// Device 定向设备 ID 集
+    pub devices: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ApplyRequest {
     pub spec: ImpairSpec,
     pub scope: ScopeSel,
+    /// E1/E2（T8）：定向名字（入 state + apply 事件 stream 字段）。
+    pub names: ScopeNames,
     pub iface: String,
     /// Media：本地口集；Stream/Device 走 pairs（与 ports 二选一非空）
     pub ports: Vec<u16>,
@@ -906,6 +916,8 @@ pub fn replay(
         iface: req.iface.clone(),
         ports: req.ports.clone(),
         pairs: req.pairs.clone(),
+        rooms: req.names.rooms.clone(),
+        devices: req.names.devices.clone(),
         sig_port: req.sig_port,
         expires_at_ms,
         created_root: created_root_pre,
@@ -931,7 +943,12 @@ pub fn replay(
     st.write_to(&dirs.state_json()).map_err(Fail::env)?;
     match &mode {
         Replay::Apply { .. } => {
-            state::timeline_append(dirs, state::apply_event(&req.spec, &req.ports))
+            let stream_sel = if !req.names.rooms.is_empty() {
+                req.names.rooms.join(",")
+            } else {
+                req.names.devices.join(",")
+            };
+            state::timeline_append(dirs, state::apply_event(&req.spec, &req.ports, &stream_sel))
                 .map_err(Fail::env)?;
             spawn_watchdog(dirs);
         }

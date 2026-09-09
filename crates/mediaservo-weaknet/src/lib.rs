@@ -3,6 +3,7 @@
 
 pub mod engine;
 pub mod fuse;
+pub mod scenario;
 pub mod scope;
 pub mod server;
 pub mod spec;
