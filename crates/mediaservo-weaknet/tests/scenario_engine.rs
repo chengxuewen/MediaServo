@@ -47,6 +47,8 @@ fn write_state(dirs: &Dirs, req: &ApplyRequest, job: Option<JobRef>, expires_at_
         sig_port: req.sig_port,
         expires_at_ms,
         created_root: true,
+        ifb_used: false,
+        created_ifb: false,
         job,
         teardown: Teardown {
             channel: ChannelSer::LocalRoot,

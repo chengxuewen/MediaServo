@@ -2,8 +2,8 @@
 //! （逐字对齐 bash build_skeleton，add-or-change 2015 兼容）+ spec 区分性回读指纹 +
 //! leaf Sent 双采样 verify / counter-reset 探测 + fail-closed guard + teardown 计划/执行。
 //!
-//! 真值源：scripts/weaknet.sh（机制）+ design.md §dir 表（腿）。ifb ingress = T9（本文件仅
-//! 在 teardown 计划形制中预留位，M0 不产生 ifb 步骤）。
+//! 真值源：scripts/weaknet.sh（机制）+ design.md §dir 表（腿）+ §ifb 合同（T9：物理口
+//! 上行走 ifb0 镜像 ingress，链路步骤见 plan_ifb；能力判定单点在 ifb.rs）。
 //!
 //! 退出码沿用：2 环境不足/施加失败 · 3 状态冲突（他方 qdisc/锁）· 4 参数非法（C15 全分支报因）。
 
@@ -11,8 +11,9 @@ use std::process::Command;
 use std::time::Duration;
 
 use crate::fuse;
+use crate::ifb;
 use crate::spec::{
-    self, IfaceKind, ImpairSpec, LegFilter, MatchKind, ScopeSel, build_filter_legs,
+    self, Dir, IfaceKind, ImpairSpec, LegFilter, MatchKind, ScopeSel, build_filter_legs,
     render_netem_spec_leg, render_rate_arg,
 };
 use crate::state::{self, ChannelSer, Dirs, SidecarRef, State, Teardown};
@@ -145,16 +146,20 @@ pub enum Channel {
 }
 
 impl Channel {
+    /// tc 子命令形（不含程序名）→ 含程序名全 argv。
     fn tc_argv(&self, args: &[&str]) -> Vec<String> {
+        let mut full = vec!["tc".to_string()];
+        full.extend(args.iter().map(|s| (*s).to_string()));
+        self.prefixed(&full)
+    }
+
+    /// 通道实执行前缀：local 原样，sidecar 经 `docker exec <c>`（任意 iproute2 程序同构）。
+    fn prefixed(&self, argv: &[String]) -> Vec<String> {
         match self {
-            Channel::LocalRoot => {
-                let mut v = vec!["tc".to_string()];
-                v.extend(args.iter().map(|s| (*s).to_string()));
-                v
-            }
+            Channel::LocalRoot => argv.to_vec(),
             Channel::Sidecar { container, .. } => {
-                let mut v = vec!["docker".to_string(), "exec".to_string(), container.clone(), "tc".to_string()];
-                v.extend(args.iter().map(|s| (*s).to_string()));
+                let mut v = vec!["docker".to_string(), "exec".to_string(), container.clone()];
+                v.extend(argv.iter().cloned());
                 v
             }
         }
@@ -173,6 +178,15 @@ impl Channel {
 pub fn tc_exec(channel: &Channel, args: &[&str]) -> Wn<String> {
     let argv = channel.tc_argv(args);
     let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+    run(&refs)
+}
+
+/// 任意 iproute2 程序实执行（argv[0]=程序名，如 `["ip","link","show","ifb0"]`；
+/// T9 ifb 路径用 `ip`，sidecar 通道同 docker exec 前缀）。
+pub fn exec_prog(channel: &Channel, argv: &[&str]) -> Wn<String> {
+    let owned: Vec<String> = argv.iter().map(|s| (*s).to_string()).collect();
+    let full = channel.prefixed(&owned);
+    let refs: Vec<&str> = full.iter().map(String::as_str).collect();
     run(&refs)
 }
 
@@ -325,10 +339,28 @@ pub fn root_action(qdisc_show: &str) -> RootAction {
     }
 }
 
+/// 执行程序（T9：ifb 链路含 `ip link` 步骤，与 tc 共用 StepPlan/通道前缀机器）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Prog {
+    Tc,
+    Ip,
+}
+
+impl Prog {
+    #[must_use]
+    pub fn str(self) -> &'static str {
+        match self {
+            Prog::Tc => "tc",
+            Prog::Ip => "ip",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StepPlan {
-    /// 主 argv（不含 `tc` 前缀）
+    /// 主 argv（不含程序名；执行/展示时按 prog 拼接）
     pub run: Vec<String>,
+    pub prog: Prog,
     /// 2015 兼容：change 失败回落 add（bash `change 2>/dev/null || add`）
     pub alt: Option<Vec<String>>,
     /// best-effort 步失败仅注记不中断（del root / filter flush）
@@ -343,7 +375,7 @@ impl StepPlan {
         steps
             .iter()
             .filter(|s| !s.best_effort)
-            .map(|s| format!("tc {}", s.run.join(" ")))
+            .map(|s| format!("{} {}", s.prog.str(), s.run.join(" ")))
             .collect()
     }
 }
@@ -364,6 +396,7 @@ pub fn plan_skeleton(
     if add_root {
         steps.push(StepPlan {
             run: vec!["qdisc".into(), "del".into(), "dev".into(), dev.into(), "root".into()],
+            prog: Prog::Tc,
             alt: None,
             best_effort: true,
             what: "前置清 root（--all 残留容忍）".into(),
@@ -371,6 +404,7 @@ pub fn plan_skeleton(
         steps.push(StepPlan {
             run: vec!["qdisc".into(), "add".into(), "dev".into(), dev.into(),
                       "root".into(), "handle".into(), "1:".into(), "htb".into(), "default".into(), "99".into()],
+            prog: Prog::Tc,
             alt: None,
             best_effort: false,
             what: "htb root 建立".into(),
@@ -398,12 +432,14 @@ pub fn plan_skeleton(
     };
     steps.push(StepPlan {
         run: leaf,
+        prog: Prog::Tc,
         alt: Some(add_leaf),
         best_effort: false,
         what: "netem 叶 10:".into(),
     });
     steps.push(StepPlan {
         run: vec!["filter".into(), "del".into(), "dev".into(), dev.into(), "parent".into(), "1:".into()],
+            prog: Prog::Tc,
         alt: None,
         best_effort: true,
         what: "filters 全量重建前置 flush（幂等）".into(),
@@ -411,6 +447,7 @@ pub fn plan_skeleton(
     for leg in legs {
         steps.push(StepPlan {
             run: filter_add_argv(dev, "1", leg),
+            prog: Prog::Tc,
             alt: None,
             best_effort: false,
             what: format!("媒体腿 filter {:?}", leg.matches),
@@ -424,6 +461,7 @@ pub fn plan_skeleton(
         };
         steps.push(StepPlan {
             run: filter_add_argv(dev, "2", &leg),
+            prog: Prog::Tc,
             alt: None,
             best_effort: false,
             what: format!("信令腿 filter dport={port}（TCP）"),
@@ -445,6 +483,7 @@ fn change_or_add(what: &str, dev: &str, rest: &[&str]) -> StepPlan {
     };
     StepPlan {
         run: mk("change"),
+        prog: Prog::Tc,
         alt: Some(mk("add")),
         best_effort: false,
         what: what.into(),
@@ -476,7 +515,129 @@ pub fn plan_all_root(dev: &str, netem_spec: &str) -> Vec<StepPlan> {
         "qdisc".into(), "replace".into(), "dev".into(), dev.into(), "root".into(), "netem".into(),
     ];
     run.extend(netem_spec.split_whitespace().map(str::to_string));
-    vec![StepPlan { run, alt: None, best_effort: false, what: "--all 裸 root netem".into() }]
+    vec![StepPlan {
+        run,
+        prog: Prog::Tc,
+        alt: None,
+        best_effort: false,
+        what: "--all 裸 root netem".into(),
+    }]
+}
+
+// ---------- T9: ifb ingress 镜像（design §ifb 合同） ----------
+
+/// 物理口 × dir∈{In,Both} → 上行腿必须走 ifb0 镜像路径（§dir 表「物理网卡 dir=in：
+/// 端口腿改走 ifb」）。lo 恒纯端口腿（dir_lo 能力恒真，§capability 表）。
+#[must_use]
+pub fn ifb_needed(kind: IfaceKind, dir: Dir) -> bool {
+    kind == IfaceKind::Physical && matches!(dir, Dir::In | Dir::Both)
+}
+
+/// fail-closed 门（错误分类判据）：需 ifb 而探测不过 → exit2 报因，禁静默降级为
+/// 「无镜像直挂 ingress」（=黑洞三连前罪）。纯判定，供单测矩阵。
+pub fn guard_ifb_required(kind: IfaceKind, dir: Dir, probe: (bool, String)) -> Wn<bool> {
+    if !ifb_needed(kind, dir) {
+        return Ok(false);
+    }
+    if probe.0 {
+        return Ok(true);
+    }
+    Err(Fail::env(format!(
+        "物理口上行（dir={:?}）需 {IFB_NOTE}，能力探测未过：{} —— 补救=宿主 root modprobe ifb（netns 非特权装不了模块）",
+        dir, probe.1
+    )))
+}
+
+const IFB_NOTE: &str = "ifb0 镜像";
+
+/// ifb 镜像链步骤（§ifb 合同施加序，含 link up——缺 up 步 = mirred 重定向到 DOWN 设备
+/// = ENETDOWN 全丢、netem 零命中而回读「行存在」的假绿源）。叶形决定（本轮记录）：
+/// **netem 直挂 ifb0 root**（合同原文 "tc qdisc add dev ifb0 root netem…" 最小形），
+/// 不把 htb 骨架镜像上 ifb0——代价 = rate 墙在 ingress 腿不生效，replay 侧 WARN 报出；
+/// 升级路径 = 需要 ifb 侧限速时移植 plan_skeleton 的 root/class 段。
+/// `need_link` 由 apply 先读后判（ifb0 已存在=他人/系统建的不重发 add、teardown 不删）。
+#[must_use]
+pub fn plan_ifb(dev: &str, netem_spec: &str, legs: &[LegFilter], need_link: bool) -> Vec<StepPlan> {
+    let mut steps = Vec::new();
+    if need_link {
+        steps.push(StepPlan {
+            run: vec!["link".into(), "add".into(), ifb::IFB_DEV.into(), "type".into(), "ifb".into()],
+            prog: Prog::Ip,
+            alt: None,
+            best_effort: false,
+            what: format!("{} 建立（本次会话为 owner）", ifb::IFB_DEV),
+        });
+    }
+    steps.push(StepPlan {
+        run: vec!["link".into(), "set".into(), ifb::IFB_DEV.into(), "up".into()],
+        prog: Prog::Ip,
+        alt: None,
+        best_effort: false,
+        what: format!("{} link up（缺此步=ENETDOWN 黑洞，§ifb 合同）", ifb::IFB_DEV),
+    });
+    let mut root: Vec<String> = vec![
+        "qdisc".into(), "change".into(), "dev".into(), ifb::IFB_DEV.into(),
+        "root".into(), "netem".into(),
+    ];
+    root.extend(netem_spec.split_whitespace().map(str::to_string));
+    let add_root: Vec<String> = {
+        let mut v = root.clone();
+        v[1] = "add".into();
+        v
+    };
+    steps.push(StepPlan {
+        run: root,
+        prog: Prog::Tc,
+        alt: Some(add_root),
+        best_effort: false,
+        what: format!("{} root netem 叶", ifb::IFB_DEV),
+    });
+    steps.push(StepPlan {
+        run: vec!["qdisc".into(), "add".into(), "dev".into(), dev.into(), "ingress".into()],
+        prog: Prog::Tc,
+        alt: None,
+        best_effort: true, // 已存在（set 重放）= File exists 容忍；真建不起由下一步 filter 报因
+        what: "iface ingress qdisc（镜像挂载点）".into(),
+    });
+    steps.push(StepPlan {
+        run: vec!["filter".into(), "del".into(), "dev".into(), dev.into(), "ingress".into()],
+        prog: Prog::Tc,
+        alt: None,
+        best_effort: true,
+        what: "ingress filters 全量重建前置 flush（幂等）".into(),
+    });
+    for leg in legs {
+        steps.push(StepPlan {
+            run: mirred_filter_argv(dev, leg),
+            prog: Prog::Tc,
+            alt: None,
+            best_effort: false,
+            what: format!("上行镜像腿 filter {:?} → {}", leg.matches, ifb::IFB_DEV),
+        });
+    }
+    steps
+}
+
+/// ingress 镜像 filter：与 egress 腿同合取形（protocol 17 + 端口 AND 单 filter），action 换
+/// `mirred egress redirect dev ifb0`（§ifb 合同；无 parent 1:/flowid——ingress qdisc 无类）。
+fn mirred_filter_argv(dev: &str, leg: &LegFilter) -> Vec<String> {
+    let mut fixed: Vec<String> = vec![
+        "filter".into(), "add".into(), "dev".into(), dev.into(), "ingress".into(),
+        "protocol".into(), "ip".into(), "u32".into(),
+        "match".into(), "ip".into(), "protocol".into(), leg.protocol.to_string(), "0xff".into(),
+    ];
+    for (kind, port) in &leg.matches {
+        let k = match kind {
+            MatchKind::Sport => "sport",
+            MatchKind::Dport => "dport",
+        };
+        fixed.extend(["match".into(), "ip".into(), k.into(), port.to_string(), "0xffff".into()]);
+    }
+    fixed.extend([
+        "action".into(), "mirred".into(), "egress".into(), "redirect".into(),
+        "dev".into(), ifb::IFB_DEV.into(),
+    ]);
+    fixed
 }
 
 pub fn iface_kind_of(dev: &str) -> IfaceKind {
@@ -552,16 +713,46 @@ pub fn fingerprint_tokens(netem_spec: &str) -> Vec<String> {
 
 const SPEC_KEYWORDS: &[&str] = &["limit", "delay", "loss", "gemodel", "reorder", "seed"];
 
-/// 叶行 = 含 netem 且 parent 1:10 的首行。
+/// 叶行形（T9：ifb 路径的 netem 挂 ifb0 root，无 parent 1:10）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeafForm {
+    /// egress 骨架：`qdisc netem … parent 1:10`。
+    Parent110,
+    /// ifb0 ingress 路径（§ifb 合同最小形）：`qdisc netem … root`。
+    Root,
+}
+
+fn leaf_line_matches(l: &str, form: LeafForm) -> bool {
+    l.contains("netem")
+        && match form {
+            LeafForm::Parent110 => l.contains("parent 1:10"),
+            LeafForm::Root => l.contains(" root"),
+        }
+}
+
+/// 叶行 = 按形匹配的首行。
+#[must_use]
+pub fn find_leaf_line_form(qdisc_show: &str, form: LeafForm) -> Option<&str> {
+    qdisc_show.lines().find(|l| leaf_line_matches(l, form))
+}
+
+/// 叶行 = 含 netem 且 parent 1:10 的首行（egress 骨架形）。
 #[must_use]
 pub fn find_leaf_line(qdisc_show: &str) -> Option<&str> {
-    qdisc_show.lines().find(|l| l.contains("netem") && l.contains("parent 1:10"))
+    find_leaf_line_form(qdisc_show, LeafForm::Parent110)
+}
+
+pub fn assert_fingerprint(qdisc_show: &str, netem_spec: &str) -> Wn<()> {
+    assert_fingerprint_form(qdisc_show, netem_spec, LeafForm::Parent110)
 }
 
 /// 指纹断言：spec 的区分 token 必须逐个出现在叶行（归一化词集）——缺失列表 got/want 报因。
-pub fn assert_fingerprint(qdisc_show: &str, netem_spec: &str) -> Wn<()> {
-    let leaf = find_leaf_line(qdisc_show).ok_or_else(|| {
-        Fail::env("回读：1:10 叶无 netem（施加未生效=PIT-184 同族假绿判据）")
+pub fn assert_fingerprint_form(qdisc_show: &str, netem_spec: &str, form: LeafForm) -> Wn<()> {
+    let leaf = find_leaf_line_form(qdisc_show, form).ok_or_else(|| {
+        Fail::env(match form {
+            LeafForm::Parent110 => "回读：1:10 叶无 netem（施加未生效=PIT-184 同族假绿判据）".to_string(),
+            LeafForm::Root => format!("回读：{} root 无 netem（ifb 镜像未生效）", ifb::IFB_DEV),
+        })
     })?;
     let words = norm_words(leaf);
     let want = fingerprint_tokens(netem_spec);
@@ -596,8 +787,14 @@ pub fn leaf_sent(qdisc_s_show: &str) -> Option<u64> {
 /// 叶行及其后一行窗口解析 `Sent _ bytes N pkt (dropped M, …)`；dropped 缺形=0（旧 tc 容错）。
 #[must_use]
 pub fn leaf_stats(qdisc_s_show: &str) -> Option<LeafStats> {
+    leaf_stats_form(qdisc_s_show, LeafForm::Parent110)
+}
+
+/// 形感知版（T9：ifb0 root netem 叶同机制取数）。
+#[must_use]
+pub fn leaf_stats_form(qdisc_s_show: &str, form: LeafForm) -> Option<LeafStats> {
     let idx = qdisc_s_show.lines().enumerate().find_map(|(i, l)| {
-        if l.contains("netem") && l.contains("parent 1:10") { Some(i) } else { None }
+        if leaf_line_matches(l, form) { Some(i) } else { None }
     })?;
     let window: Vec<&str> = qdisc_s_show.lines().skip(idx).take(2).collect();
     for line in window {
@@ -624,13 +821,25 @@ pub fn leaf_stats(qdisc_s_show: &str) -> Option<LeafStats> {
 /// 双采样命中覆盖断言（bash verify_measure：1s 窗 leaf Sent 无增量=媒体未命中过滤）。
 /// 返回 (pre, post)；post<pre（set 路径）= 计数重置（本内核实测不重置，头注 6——降 advisory 注记）。
 pub fn verify_measure(channel: &Channel, dev: &str, pre: Option<u64>) -> Wn<(u64, u64)> {
+    verify_measure_form(channel, dev, pre, LeafForm::Parent110)
+}
+
+/// 形感知版（T9：上行铁证 = ifb0 leaf Sent 增长，design §ifb「命中验证以 ifb0 leaf
+/// Sent 计数增长为包真穿过 netem 的证」）。
+pub fn verify_measure_form(
+    channel: &Channel,
+    dev: &str,
+    pre: Option<u64>,
+    form: LeafForm,
+) -> Wn<(u64, u64)> {
+    let read_leaf = |show: &str| leaf_stats_form(show, form).map(|s| s.sent_pkt);
     let pre = match pre {
         Some(p) => p,
-        None => leaf_sent(&tc_exec(channel, &["-s", "qdisc", "show", "dev", dev])?)
-            .ok_or_else(|| Fail::env("verify：读不到 1:10 叶 Sent（叶不在？）"))?,
+        None => read_leaf(&tc_exec(channel, &["-s", "qdisc", "show", "dev", dev])?)
+            .ok_or_else(|| Fail::env("verify：读不到叶 Sent（叶不在？）"))?,
     };
     std::thread::sleep(Duration::from_secs(1));
-    let post = leaf_sent(&tc_exec(channel, &["-s", "qdisc", "show", "dev", dev])?)
+    let post = read_leaf(&tc_exec(channel, &["-s", "qdisc", "show", "dev", dev])?)
         .ok_or_else(|| Fail::env("verify：二次采样叶 Sent 丢失"))?;
     if pre == post {
         return Err(Fail::env(format!(
@@ -647,20 +856,28 @@ pub fn counters_reset(pre: u64, post: u64) -> bool {
 
 // ---------- teardown 计划/执行 ----------
 
-/// apply 时落盘的撤除计划（顺序敏感：§ifb 合同 T9 形制先 ingress 后 root；created_ifb 恒
-/// false 于 M0——真值到场随 T9，此分支先行入计划语义钉）。
+/// apply 时落盘的撤除计划（design §ifb 合同，顺序敏感）：
+/// 1) iface ingress 先删（断镜像于先，防 redirect 悬空黑洞）→ 2) ifb0 root →
+/// 3) **仅本次所建** ifb0 才 del 链路（别人/系统建的不碰——state 记录 owner）→ 4) iface root。
 ///
 /// **root-del 恒常无条件**（bash do_clear parity）：clear=救火通道，步失败经 is_not_exist
 /// 幂等化（双发互踩可接受）；外米 qdisc 在 apply 时已被 guard_foreign_root 拦在门外，
 /// 能活到 clear 阶段的 root 必是我方或我方残留——都该删。前版 created_root 门控
 /// （救援轮「比 bash 更严」）即 **PIT-187 clear 留树 bug 根因**（T7 实盘三连复现）。
+/// 纯 ingress 会话虽未在 apply 动 iface root，root-del 仍恒在（回落内核缺省=幂等无害，
+/// 维持单一无条件形防 created_* 门控复辟）。
+///
+/// steps 形约定：首元素 `ip` = 链路类命令（run_step_resilient 路由到 ip 程序），
+/// 否则为 tc argv（不含程序名）。
 #[must_use]
-pub fn plan_teardown(_channel: &Channel, iface: &str, created_ifb: bool) -> Vec<Vec<String>> {
+pub fn plan_teardown(iface: &str, ifb_used: bool, ifb_created: bool) -> Vec<Vec<String>> {
     let mut steps = Vec::new();
-    if created_ifb {
-        // ponytail: ifb 真路径随 T9（§ifb teardown 序）——此处先钉形不执行
+    if ifb_used {
         steps.push(vec!["qdisc".into(), "del".into(), "dev".into(), iface.into(), "ingress".into()]);
-        steps.push(vec!["qdisc".into(), "del".into(), "dev".into(), "ifb0".into(), "root".into()]);
+        steps.push(vec!["qdisc".into(), "del".into(), "dev".into(), ifb::IFB_DEV.into(), "root".into()]);
+    }
+    if ifb_created {
+        steps.push(vec!["ip".into(), "link".into(), "del".into(), ifb::IFB_DEV.into()]);
     }
     steps.push(vec!["qdisc".into(), "del".into(), "dev".into(), iface.into(), "root".into()]);
     steps
@@ -670,7 +887,12 @@ pub fn plan_teardown(_channel: &Channel, iface: &str, created_ifb: bool) -> Vec<
 #[must_use]
 pub fn is_not_exist(msg: &str) -> bool {
     let m = msg.to_lowercase();
-    m.contains("no such file") || m.contains("not found") || m.contains("cannot find")
+    m.contains("no such file")
+        || m.contains("not found")
+        || m.contains("cannot find")
+        // tc 5.15 形："Cannot delete qdisc with handle of zero" = 设备上无实体 root qdisc
+        // （noqueue 不可删）——纯 ifb 向的无条件 root-del 步必踩，语义即幂等无物可删。
+        || m.contains("handle of zero")
 }
 
 /// 照单执行 teardown（clear/watchdog/autoheal 共用）。返回逐步失败清单（C15 由调用方落
@@ -701,24 +923,51 @@ pub fn channel_of(teardown: &Teardown) -> Option<Channel> {
     }
 }
 
+/// argv[0]=程序名（tc|ip）→ 通道实执行。run_steps（施加）与 teardown 路由共用单点。
+fn exec_argv(channel: &Channel, prog: &str, args: &[&str]) -> Wn<String> {
+    if prog == Prog::Ip.str() {
+        let mut full = vec![Prog::Ip.str()];
+        full.extend_from_slice(args);
+        exec_prog(channel, &full)
+    } else {
+        tc_exec(channel, args)
+    }
+}
+
+/// teardown step 约定（plan_teardown 头注）：首元素 `ip` = 链路命令（含程序名），
+/// 否则 tc argv（不含程序名）。拆分为 (prog, args)。
+fn split_prog(step: &[String]) -> (&'static str, Vec<&str>) {
+    let args: Vec<&str> = step.iter().map(String::as_str).collect();
+    if matches!(args.first(), Some(p) if *p == Prog::Ip.str()) {
+        (Prog::Ip.str(), args[1..].to_vec())
+    } else {
+        (Prog::Tc.str(), args)
+    }
+}
+
+fn exec_step(channel: &Channel, step: &[String]) -> Wn<String> {
+    let (prog, tail) = split_prog(step);
+    exec_argv(channel, prog, &tail)
+}
+
 fn run_step_resilient(teardown: &Teardown, step: &[String]) -> Result<(), String> {
-    let chan_args: Vec<&str> = step.iter().map(String::as_str).collect();
     let channel = channel_of(teardown)
         .ok_or_else(|| "teardown 计划为 sidecar 但缺 sidecar 指元（state 损坏）".to_string())?;
-    match tc_exec(&channel, &chan_args) {
+    let (prog, tail) = split_prog(step);
+    match exec_argv(&channel, prog, &tail) {
         Ok(_) => Ok(()),
         Err(e) if is_not_exist(&e.msg) => Ok(()),
         Err(first) => match &channel {
             // sidecar 可能被 docker rm——qdisc 在宿主 netns 持久，一次性容器兜底
             Channel::Sidecar { container, image } => {
                 let _ = run(&["docker", "start", container]);
-                match tc_exec(&channel, &chan_args) {
+                match exec_argv(&channel, prog, &tail) {
                     Ok(_) => Ok(()),
                     Err(e2) if is_not_exist(&e2.msg) => Ok(()),
                     Err(second) => match run(&[
                         "docker", "run", "--rm", "--net", "host",
-                        "--cap-add", "NET_ADMIN", "--entrypoint", "tc", image,
-                    ].into_iter().chain(step.iter().map(String::as_str)).collect::<Vec<_>>()) {
+                        "--cap-add", "NET_ADMIN", "--entrypoint", prog, image,
+                    ].into_iter().chain(tail.iter().copied()).collect::<Vec<_>>()) {
                         Ok(_) => Ok(()),
                         Err(third) => Err(format!(
                             "三层兜底尽墨：exec({}) / start+exec({}) / run --rm({})",
@@ -830,67 +1079,120 @@ pub fn replay(
     verify: Verify,
 ) -> Wn<ReplayOutcome> {
     req.spec.validate().map_err(Fail::bad_param)?;
-    let legs = build_filter_legs(
-        req.scope,
-        iface_kind_of(&req.iface),
-        req.spec.dir,
-        &req.ports,
-        &req.pairs,
-    )
-    .map_err(Fail::env)?;
+    let kind = iface_kind_of(&req.iface);
+    let use_ifb_want = ifb_needed(kind, req.spec.dir);
+    // 腿切分（§dir 表：物理口上行腿走 ifb 镜像）：ifb 会话的 egress 只留 Out 形
+    // （dir=Both）或空集（纯 In）；非 ifb = 全腿装 root（lo 现状零变更）。
+    let legs = if !use_ifb_want {
+        build_filter_legs(req.scope, kind, req.spec.dir, &req.ports, &req.pairs)
+            .map_err(Fail::env)?
+    } else if req.spec.dir == Dir::Both {
+        build_filter_legs(req.scope, kind, Dir::Out, &req.ports, &req.pairs).map_err(Fail::env)?
+    } else {
+        Vec::new()
+    };
+    let ingress_legs = if use_ifb_want {
+        build_filter_legs(req.scope, kind, Dir::In, &req.ports, &req.pairs).map_err(Fail::env)?
+    } else {
+        Vec::new()
+    };
     let channel = probe_channel(env, &req.iface)?;
+    // T9 capability 门（fail-closed）：物理口上行需 ifb0，探测不过 exit2 报因，禁静默降级。
+    let use_ifb = guard_ifb_required(kind, req.spec.dir, ifb::probe(&channel))?;
+    // 先读后判（§ifb 合同）：ifb0 已在（他人/系统/前会话建）→ 不重发 add、撤除不删链。
+    let created_ifb_new = use_ifb && !ifb::link_present(&channel);
+    if use_ifb && req.spec.rate_mbps.is_some() {
+        eprintln!(
+            "weaknet(engine): WARN rate 墙只在 egress htb 生效——{} root=netem 最小形（§ifb 合同裁量），上行腿不受限速",
+            ifb::IFB_DEV
+        );
+    }
     if req.spec.seed.is_some() {
         version_gate_seed(&channel)?;
     }
     let show = tc_exec(&channel, &["qdisc", "show", "dev", &req.iface])?;
     let state_exists = dirs.state_json().is_file();
+    // iface root 守卫对 ifb 会话同样保留（fail-closed：root 被外米占用 = 该口现场不干净，
+    // 整单拒绝进住，而非只验 ingress）。
     guard_foreign_root(&show, state_exists)?;
-    let add_root = matches!(root_action(&show), RootAction::Add | RootAction::Replace);
+    // 纯 In 物理会话 = 不动 iface root（跳骨架）；Both / 有信令腿照常建。
+    let install_skeleton = !use_ifb || !legs.is_empty() || req.sig_port.is_some();
+    let add_root =
+        install_skeleton && matches!(root_action(&show), RootAction::Add | RootAction::Replace);
     let created_root_pre = match &mode {
         Replay::Apply { .. } => add_root,
         Replay::Set { prior, .. } => prior.created_root,
     };
+    // Set 反向翻向（上行→无 ifb）：旧镜像链即时撤——全量重放语义，不留旧损伤。
+    if let Replay::Set { prior, .. } = &mode
+        && prior.ifb_used
+        && !use_ifb
+    {
+            eprintln!(
+                "weaknet(engine): set 关闭上行（dir={:?}）——撤 {} 旧镜像链",
+                req.spec.dir, prior.iface
+            );
+            rollback_ifb(&channel, &prior.iface, false);
+    }
     let spec_string = render_netem_spec_leg(&req.spec);
     let rate = render_rate_arg(req.spec.rate_mbps);
-    let steps = plan_skeleton(&req.iface, add_root, &spec_string, &rate, &legs, req.sig_port);
+    let mut steps = Vec::new();
+    if install_skeleton {
+        steps.extend(plan_skeleton(
+            &req.iface, add_root, &spec_string, &rate, &legs, req.sig_port,
+        ));
+    }
+    if use_ifb {
+        steps.extend(plan_ifb(&req.iface, &spec_string, &ingress_legs, created_ifb_new));
+    }
+    // 回读/verify 观测点：纯 In = ifb0 root 形（上行铁证）；其余 = iface 1:10（Both 观测出向腿）。
+    let (rd_dev, rd_form) = if use_ifb && !install_skeleton {
+        (ifb::IFB_DEV.to_string(), LeafForm::Root)
+    } else {
+        (req.iface.clone(), LeafForm::Parent110)
+    };
 
     let pre_sent = match &mode {
         Replay::Set { .. } => {
-            let s = tc_exec(&channel, &["-s", "qdisc", "show", "dev", &req.iface])?;
-            leaf_sent(&s)
+            let s = tc_exec(&channel, &["-s", "qdisc", "show", "dev", &rd_dev])?;
+            leaf_stats_form(&s, rd_form).map(|l| l.sent_pkt)
         }
         Replay::Apply { .. } => None,
     };
 
     if let Err(e) = run_steps(&channel, &steps) {
         if matches!(mode, Replay::Apply { .. }) {
-            rollback_root(&channel, &req.iface);
+            rollback_apply_failure(&channel, &req.iface, use_ifb, created_ifb_new, install_skeleton);
         }
         return Err(e);
     }
-    let sshow = tc_exec(&channel, &["-s", "qdisc", "show", "dev", &req.iface])?;
-    if let Err(e) = assert_fingerprint(&sshow, &spec_string)
-        .and_then(|()| assert_class_1_10(&channel, &req.iface))
-    {
+    let sshow = tc_exec(&channel, &["-s", "qdisc", "show", "dev", &rd_dev])?;
+    if let Err(e) = assert_fingerprint_form(&sshow, &spec_string, rd_form).and_then(|()| {
+        if rd_form == LeafForm::Parent110 {
+            assert_class_1_10(&channel, &req.iface)
+        } else {
+            Ok(())
+        }
+    }) {
         let e = Fail::env(match &mode {
-            Replay::Apply { .. } => format!("{}（root 已回滚）", e.msg),
+            Replay::Apply { .. } => format!("{}（施加现场已回滚）", e.msg),
             Replay::Set { .. } => format!("{}（set 未回滚防断流；重跑 set 恢复）", e.msg),
         });
         if matches!(mode, Replay::Apply { .. }) {
-            rollback_root(&channel, &req.iface);
+            rollback_apply_failure(&channel, &req.iface, use_ifb, created_ifb_new, install_skeleton);
         }
         return Err(e);
     }
-    let sent1 = leaf_sent(&sshow);
+    let sent1 = leaf_stats_form(&sshow, rd_form).map(|l| l.sent_pkt);
     let leaf = match verify {
         // Deferred：响应路径零等待；pre 原样带出，后台以同一 pre 二次采样（含 counters-reset 探测）。
         Verify::Deferred => (sent1.unwrap_or(0), sent1.unwrap_or(0)),
-        Verify::Inline => match verify_measure(&channel, &req.iface, sent1) {
+        Verify::Inline => match verify_measure_form(&channel, &rd_dev, sent1, rd_form) {
             Ok(pair) => pair,
             Err(e) => {
                 if matches!(mode, Replay::Apply { .. }) {
-                    rollback_root(&channel, &req.iface);
-                    return Err(Fail::env(format!("{}（root 已回滚）", e.msg)));
+                    rollback_apply_failure(&channel, &req.iface, use_ifb, created_ifb_new, install_skeleton);
+                    return Err(Fail::env(format!("{}（施加现场已回滚）", e.msg)));
                 }
                 // bash do_set：verify 失败 die 2 但不回滚
                 return Err(e);
@@ -908,6 +1210,14 @@ pub fn replay(
         Replay::Apply { duration_secs } => fuse::now_epoch_ms() + duration_secs * 1000,
         Replay::Set { prior, .. } => prior.expires_at_ms,
     };
+    // teardown 所有权（Set 翻向只增不减：前 in/both 会话遗留的 ifb 链必须进撤除计划）。
+    let (ifb_used_plan, ifb_created_plan) = match &mode {
+        Replay::Apply { .. } => (use_ifb, created_ifb_new),
+        Replay::Set { prior, .. } => (
+            use_ifb || prior.ifb_used,
+            created_ifb_new || prior.created_ifb,
+        ),
+    };
     let st = State {
         schema: state::STATE_SCHEMA.to_string(),
         spec: req.spec.clone(),
@@ -921,6 +1231,8 @@ pub fn replay(
         sig_port: req.sig_port,
         expires_at_ms,
         created_root: created_root_pre,
+        ifb_used: ifb_used_plan,
+        created_ifb: ifb_created_plan,
         job: match &mode {
             Replay::Set { prior, .. } => prior.job.clone(),
             Replay::Apply { .. } => None,
@@ -937,7 +1249,7 @@ pub fn replay(
                 }),
                 Channel::LocalRoot => None,
             },
-            steps: plan_teardown(&channel, &req.iface, false),
+            steps: plan_teardown(&req.iface, ifb_used_plan, ifb_created_plan),
         },
     };
     st.write_to(&dirs.state_json()).map_err(Fail::env)?;
@@ -1002,11 +1314,11 @@ pub fn spawn_watchdog(dirs: &Dirs) {
 
 fn run_steps(channel: &Channel, steps: &[StepPlan]) -> Wn<()> {
     for s in steps {
-        match tc_exec(channel, &s.run.iter().map(String::as_str).collect::<Vec<_>>()) {
+        match exec_argv(channel, s.prog.str(), &s.run.iter().map(String::as_str).collect::<Vec<_>>()) {
             Ok(_) => {}
             Err(e) => {
                 if let Some(alt) = &s.alt {
-                    match tc_exec(channel, &alt.iter().map(String::as_str).collect::<Vec<_>>()) {
+                    match exec_argv(channel, s.prog.str(), &alt.iter().map(String::as_str).collect::<Vec<_>>()) {
                         Ok(_) => {}
                         Err(e2) if s.best_effort => {
                             eprintln!("weaknet(engine): best-effort 步 [{what}] 双形皆败（容忍）: {e2}", what = s.what);
@@ -1023,7 +1335,13 @@ fn run_steps(channel: &Channel, steps: &[StepPlan]) -> Wn<()> {
                 } else if s.best_effort {
                     eprintln!("weaknet(engine): best-effort 步 [{}] 失败（容忍）: {}", s.what, e.msg);
                 } else {
-                    return Err(Fail::env(format!("{}失败 [tc {}]: {}", s.what, s.run.join(" "), e.msg)));
+                    return Err(Fail::env(format!(
+                        "{}失败 [{} {}]: {}",
+                        s.what,
+                        s.prog.str(),
+                        s.run.join(" "),
+                        e.msg
+                    )));
                 }
             }
         }
@@ -1034,6 +1352,45 @@ fn run_steps(channel: &Channel, steps: &[StepPlan]) -> Wn<()> {
 fn rollback_root(channel: &Channel, dev: &str) {
     if let Err(e) = tc_exec(channel, &["qdisc", "del", "dev", dev, "root"]) {
         eprintln!("weaknet(engine): WARN root 回滚失败（需人工 clear）: {e}");
+    }
+}
+
+/// apply 失败统一回滚（bash L522-533 + §ifb：镜像链与 root 同单清）。
+fn rollback_apply_failure(
+    channel: &Channel,
+    dev: &str,
+    use_ifb: bool,
+    created_ifb: bool,
+    install_skeleton: bool,
+) {
+    // 纯 ifb 向（未装 root 骨架）时 root-del 必踩 "handle of zero" 噪声——按现场实态回滚
+    if install_skeleton {
+        rollback_root(channel, dev);
+    }
+    if use_ifb {
+        rollback_ifb(channel, dev, created_ifb);
+    }
+}
+
+/// ifb 镜像链撤除/回滚（best-effort，ENOENT 幂等；iface root 归 rollback_root）。
+/// 也供 set 翻向即时清场（created 所有权位留在 teardown 计划，此处不删链）。
+fn rollback_ifb(channel: &Channel, dev: &str, created_ifb: bool) {
+    let mut steps = vec![
+        vec!["qdisc".into(), "del".into(), "dev".into(), dev.into(), "ingress".into()],
+        vec!["qdisc".into(), "del".into(), "dev".into(), ifb::IFB_DEV.into(), "root".into()],
+    ];
+    if created_ifb {
+        steps.push(vec!["ip".into(), "link".into(), "del".into(), ifb::IFB_DEV.into()]);
+    }
+    for st in &steps {
+        if let Err(e) = exec_step(channel, st)
+            && !is_not_exist(&e.msg)
+        {
+            eprintln!(
+                "weaknet(engine): WARN ifb 链撤除失败 [{:?}]（残留由 clear 兜底）: {}",
+                st, e.msg
+            );
+        }
     }
 }
 
@@ -1101,14 +1458,21 @@ pub fn take_write_lock(dirs: &Dirs) -> Wn<state::WriteLock> {
 /// dry-run 通道前缀（纯判定零副作用——不探测/不建容器：local 指定或 euid0 → tc，否则 sidecar 形）。
 #[must_use]
 pub fn dryrun_prefix(env: &Env) -> String {
-    let docker = || format!("docker exec {} tc", env.sidecar);
+    dryrun_prog_prefix(env, Prog::Tc)
+}
+
+/// T9：按程序的展示前缀（ifb 链步骤是 `ip ...`，sidecar 形 = `docker exec <c> ip ...`）。
+#[must_use]
+pub fn dryrun_prog_prefix(env: &Env, prog: Prog) -> String {
+    let bare = prog.str();
+    let docker = || format!("docker exec {} {bare}", env.sidecar);
     match env.channel_pref.as_str() {
-        "local" => "tc".to_string(),
+        "local" => bare.to_string(),
         "sidecar" => docker(),
         // auto：仅按 root 判据分支（零探测副作用）。
         _ => {
             if euid_is_root().unwrap_or(false) {
-                "tc".to_string()
+                bare.to_string()
             } else {
                 docker()
             }
@@ -1184,10 +1548,20 @@ mod tests {
 
     #[test]
     fn plan_teardown_order_ifb_then_own_root() {
-        // §ifb 撤除序：先断镜像 ingress → ifb0 root → iface root；root-del 恒在（PIT-187 后不门控）。
-        let steps = plan_teardown(&Channel::LocalRoot, "eth0", true);
+        // §ifb 撤除序（全真值）：先断镜像 ingress → ifb0 root → 仅本次所建才 del 链路 → iface root；
+        // root-del 恒在（PIT-187 后不门控）。
         assert_eq!(
-            steps,
+            plan_teardown("eth0", true, true),
+            vec![
+                v(&["qdisc", "del", "dev", "eth0", "ingress"]),
+                v(&["qdisc", "del", "dev", "ifb0", "root"]),
+                v(&["ip", "link", "del", "ifb0"]),
+                v(&["qdisc", "del", "dev", "eth0", "root"]),
+            ]
+        );
+        // 他人在场的 ifb0（created=false）：撤镜像与叶，但绝不 del 链路。
+        assert_eq!(
+            plan_teardown("eth0", true, false),
             vec![
                 v(&["qdisc", "del", "dev", "eth0", "ingress"]),
                 v(&["qdisc", "del", "dev", "ifb0", "root"]),
@@ -1195,18 +1569,93 @@ mod tests {
             ]
         );
         assert_eq!(
-            plan_teardown(&Channel::LocalRoot, "lo", false),
+            plan_teardown("lo", false, false),
             vec![v(&["qdisc", "del", "dev", "lo", "root"])]
         );
         // 回归钉：root 非本次创建（旧 created_root=false 语境）计划也必须含 root-del——PIT-187
         assert_eq!(
-            plan_teardown(&Channel::LocalRoot, "wlan0", false),
+            plan_teardown("wlan0", false, false),
             vec![v(&["qdisc", "del", "dev", "wlan0", "root"])]
         );
     }
 
     #[test]
+    fn ifb_needed_matrix_and_guard() {
+        // §dir 表：物理口 × {In, Both} 才需镜像；lo 恒 false；物理×Out 走 egress root。
+        assert!(!ifb_needed(IfaceKind::Loopback, Dir::In));
+        assert!(!ifb_needed(IfaceKind::Loopback, Dir::Both));
+        assert!(!ifb_needed(IfaceKind::Physical, Dir::Out));
+        assert!(ifb_needed(IfaceKind::Physical, Dir::In));
+        assert!(ifb_needed(IfaceKind::Physical, Dir::Both));
+        // 错误分类（unknown-device-type 归 Physical 面）：能力未过 = exit2 报因，禁静默降级。
+        let e = guard_ifb_required(
+            IfaceKind::Physical,
+            Dir::In,
+            (false, "内核无 ifb 模块".to_string()),
+        )
+        .unwrap_err();
+        assert_eq!(e.code, 2);
+        assert!(e.msg.contains("内核无 ifb 模块") && e.msg.contains("modprobe ifb"), "{e}");
+        // lo 不需要 ifb → 能力 false 也不拦（dir_lo 恒真）。
+        assert!(!guard_ifb_required(IfaceKind::Loopback, Dir::Both, (false, "x".into())).unwrap());
+        assert!(guard_ifb_required(IfaceKind::Physical, Dir::Both, (true, String::new())).unwrap());
+    }
+
+    #[test]
+    fn plan_ifb_apply_order_matches_contract() {
+        // §ifb 施加序：link add（仅 need_link）→ link up → ifb0 root netem → iface ingress →
+        // 前置 flush → mirred 镜像腿（protocol 17 合取 + dport AND，action redirect dev ifb0）。
+        let legs = vec![LegFilter {
+            protocol: 17,
+            matches: vec![(MatchKind::Dport, 40010)],
+            flowid: spec::MEDIA_FLOWID.to_string(),
+        }];
+        let steps = plan_ifb("ens32", "limit 100000 delay 80ms loss 10%", &legs, true);
+        let shown: Vec<String> = steps
+            .iter()
+            .map(|t| format!("{} {}{}", t.prog.str(), t.run.join(" "), if t.best_effort { " [be]" } else { "" }))
+            .collect();
+        assert_eq!(
+            shown,
+            vec![
+                "ip link add ifb0 type ifb",
+                "ip link set ifb0 up",
+                "tc qdisc change dev ifb0 root netem limit 100000 delay 80ms loss 10%",
+                "tc qdisc add dev ens32 ingress [be]",
+                "tc filter del dev ens32 ingress [be]",
+                "tc filter add dev ens32 ingress protocol ip u32 match ip protocol 17 0xff match ip dport 40010 0xffff action mirred egress redirect dev ifb0",
+            ]
+        );
+        // need_link=false（先读命中 ifb0 已在）：不重发 add，其余照常（幂等重放）。
+        assert!(!plan_ifb("ens32", "limit 100000", &[], false)
+            .iter()
+            .any(|t| t.run.join(" ").contains("link add")));
+        assert_eq!(plan_ifb("ens32", "limit 100000", &[], false)[0].run.join(" "), "link set ifb0 up");
+        // 缺 up 步 = ENETDOWN 假绿源（合同红线）：up 必须在 netem 叶与 filter 之前。
+        let idx_up = shown.iter().position(|l| l.contains("link set ifb0 up")).unwrap();
+        let idx_leaf = shown.iter().position(|l| l.contains("ifb0 root netem")).unwrap();
+        assert!(idx_up < idx_leaf, "{shown:?}");
+    }
+
+    #[test]
+    fn leaf_form_root_parsing_parent_form_untouched() {
+        // T9 形感知：ifb0 root 叶（无 parent 1:10）解析 + 指纹；Parent110 旧形不回归。
+        let root_show = "qdisc netem 8001: root refcnt 2 limit 100000 delay 80ms loss 10%\n Sent 1000 bytes 20 pkt (dropped 2, overlimits 0 requeues 0)";
+        assert!(find_leaf_line_form(root_show, LeafForm::Root).is_some());
+        assert!(find_leaf_line_form(root_show, LeafForm::Parent110).is_none());
+        assert!(assert_fingerprint_form(root_show, "limit 100000 delay 80ms loss 10%", LeafForm::Root).is_ok());
+        // 负例：Parent110 spec 不满足 Root 叶（形间不互证）。
+        let parent_show = "qdisc netem 8002: parent 1:10 handle 10: limit 100000 delay 80ms";
+        assert!(assert_fingerprint_form(parent_show, "limit 100000 delay 80ms", LeafForm::Root).is_err());
+        assert!(find_leaf_line(parent_show).is_some());
+        let ls = leaf_stats_form(root_show, LeafForm::Root).unwrap();
+        assert_eq!((ls.sent_pkt, ls.dropped), (20, 2));
+        assert!(leaf_stats(parent_show).is_none());
+    }
+
+    #[test]
     fn is_not_exist_covers_rtnetlink_and_docker_forms() {
+        assert!(is_not_exist("Error: Cannot delete qdisc with handle of zero.")); // 纯 ifb 向 root-del 噪声灭
         // 双 watchdog 并发到点第二发必踩空 → ENOENT 视同幂等成功（rev-2.2 防噪条款）。
         assert!(is_not_exist("RTNETLINK answers: No such file or directory"));
         assert!(is_not_exist("Error: Cannot find qdisc for parent 1:10"));

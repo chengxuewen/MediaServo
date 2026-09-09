@@ -123,3 +123,86 @@ fn dry_argv_snapshot_media_out_with_sig_leg_and_iface_param() {
     // 全链无绝对路径字面量（C20 巡检面顺带钉）。
     assert!(got.iter().all(|l| !l.contains('/')), "{got:?}");
 }
+
+// ---------- T9: ifb 镜像链 dry-run 快照（design §ifb 施加序 + §dir 物理口腿切分） ----------
+
+/// 展示形（含 prog 前缀；print_dry_run 同规则）。
+fn render2(steps: &[StepPlan]) -> Vec<String> {
+    steps
+        .iter()
+        .map(|s| {
+            let mut line = format!("{} {}", s.prog.str(), s.run.join(" "));
+            if let Some(alt) = &s.alt {
+                line.push_str(&format!(" || {}", alt.join(" ")));
+            }
+            if s.best_effort {
+                line.push_str("   [be]");
+            }
+            line
+        })
+        .collect()
+}
+
+#[test]
+fn dry_argv_snapshot_physical_in_pure_ifb_chain() {
+    // 物理口 dir=In = 无骨架纯镜像链（replay: install_skeleton=false 同形）。
+    use mediaservo_weaknet::engine::plan_ifb;
+    let legs_in = build_filter_legs(
+        ScopeSel::Media,
+        IfaceKind::Physical,
+        Dir::In,
+        &[40010],
+        &[],
+    )
+    .unwrap();
+    let steps = plan_ifb("ens32", "limit 100000 delay 80ms loss 10%", &legs_in, true);
+    assert_eq!(
+        render2(&steps),
+        vec![
+            "ip link add ifb0 type ifb",
+            "ip link set ifb0 up",
+            "tc qdisc change dev ifb0 root netem limit 100000 delay 80ms loss 10% || qdisc add dev ifb0 root netem limit 100000 delay 80ms loss 10%",
+            "tc qdisc add dev ens32 ingress   [be]",
+            "tc filter del dev ens32 ingress   [be]",
+            "tc filter add dev ens32 ingress protocol ip u32 match ip protocol 17 0xff match ip dport 40010 0xffff action mirred egress redirect dev ifb0",
+        ]
+    );
+}
+
+#[test]
+fn dry_argv_snapshot_physical_both_egress_skeleton_plus_ingress_mirror() {
+    // dir=Both 物理口 = egress 只装 Out 腿（root htb/netem/sport filter）+ ifb 镜像 In 腿；
+    // dport 腿绝不进 egress root（§dir 表：in 腿改走 ifb）。
+    use mediaservo_weaknet::engine::plan_ifb;
+    let legs_out = build_filter_legs(
+        ScopeSel::Stream,
+        IfaceKind::Physical,
+        Dir::Out,
+        &[],
+        &[(40010, 50001)],
+    )
+    .unwrap();
+    let legs_in = build_filter_legs(
+        ScopeSel::Stream,
+        IfaceKind::Physical,
+        Dir::In,
+        &[],
+        &[(40010, 50001)],
+    )
+    .unwrap();
+    let mut steps = plan_skeleton("ens32", false, "limit 100000 delay 40ms", "1000gbit", &legs_out, None);
+    steps.extend(plan_ifb("ens32", "limit 100000 delay 40ms", &legs_in, false));
+    let shown = render2(&steps);
+    // egress 段：仅 (sport=40010 ∧ dport=50001) 出向 AND 腿，无 link 步（ifb0 已在形）。
+    assert!(shown.iter().any(|l| l.contains("filter add dev ens32 parent 1:")
+        && l.contains("sport 40010") && l.contains("dport 50001")), "{shown:?}");
+    assert!(shown.iter().all(|l| !l.contains("parent 1:") || !l.contains("sport 50001")),
+        "in 向腿不得混入 egress root: {shown:?}");
+    // ifb 段在骨架之后且无 link add（need_link=false）；up 恒在（ENETDOWN 红线）。
+    let idx_up = shown.iter().position(|l| l == "ip link set ifb0 up").unwrap();
+    let idx_mir = shown.iter().position(|l| l.contains("mirred egress redirect dev ifb0")).unwrap();
+    assert!(shown.iter().all(|l| !l.contains("link add")));
+    assert!(idx_up < idx_mir, "{shown:?}");
+    // 镜像腿 = 反向 AND 对 (sport=50001 ∧ dport=40010)。
+    assert!(shown[idx_mir].contains("match ip sport 50001 0xffff match ip dport 40010 0xffff"), "{}", shown[idx_mir]);
+}

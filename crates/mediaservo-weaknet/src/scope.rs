@@ -538,16 +538,18 @@ pub struct Capabilities {
     pub ifb_reason: String,
 }
 
-/// tc -V 播种 seed 位；ifb 位保持单一真值源 = false +「T9 到场」（T9 替换本函数体）。
+/// tc -V 播种 seed 位；T9 到场：ifb 位走 [`crate::ifb::probe`] 先读后探链
+/// （ifb0 在=直接 true 零建删；缺席才 local 通道 modprobe→建→up→删，sidecar 只读判定）。
 pub fn capabilities(env: &Env, iface: &str) -> Wn<Capabilities> {
     let chan = probe_channel(env, iface)?;
     let v = tc_exec(&chan, &["-V"])?;
     let seed = crate::engine::parse_iproute2_semver(&v)
         .is_some_and(|(maj, min)| (maj, min) >= (6, 6));
+    let (ifb_ingress, ifb_reason) = crate::ifb::probe(&chan);
     Ok(Capabilities {
         seed,
         dir_lo: true,
-        ifb_ingress: false,
-        ifb_reason: "ifb ingress 随 T9 到场".into(),
+        ifb_ingress,
+        ifb_reason,
     })
 }

@@ -274,6 +274,8 @@ fn write_live_job(dirs: &Dirs, alive: bool) {
         sig_port: None,
         expires_at_ms: fuse::now_epoch_ms() + 300_000,
         created_root: true,
+        ifb_used: false,
+        created_ifb: false,
         job: Some(JobRef {
             name: "matrix-job".into(),
             pid,

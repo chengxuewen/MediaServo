@@ -376,11 +376,18 @@ async fn get_capabilities(
     let c = ctx.clone();
     let caps = blocking(move || {
         let _lk = engine::take_write_lock(&c.cfg.dirs)?;
-        let iface = State::read_from(&c.cfg.dirs.state_json())
-            .ok()
-            .flatten()
-            .map(|s| s.iface)
+        let st = State::read_from(&c.cfg.dirs.state_json()).ok().flatten();
+        let iface = st
+            .as_ref()
+            .map(|s| s.iface.clone())
             .unwrap_or_else(|| engine::resolve_iface(None));
+        // §capability：state 有活跃 ifb 会话时 refresh = no-op 返回缓存——真探已按先读后探
+        // 保护（ifb0 在=零建删），此守卫防「无缓存首探」在竞态窗口碰空转。
+        if st.as_ref().is_some_and(|s| s.ifb_used)
+            && let Some(cached) = c.caps.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        {
+            return Ok(cached);
+        }
         let caps = scope::capabilities(&c.cfg.env, &iface)?;
         *c.caps.lock().unwrap_or_else(|e| e.into_inner()) = Some(caps.clone());
         Ok(caps)
@@ -1001,9 +1008,11 @@ fn build_frame(ctx: &Ctx, mut fs: FrameState) -> (Value, FrameState) {
         // E2：定向名字（面板勾选回显唯一通路——与 spec 同构，非乐观更新）。
         frame["names"] = json!({ "rooms": s.rooms, "devices": s.devices });
         // 活性计数仅经 state.teardown 重建通道（不 probe_channel——读面零 ensure 副作用）。
+        // T9 观测点路由：ifb 纯上行会话的现场在 ifb0 root（上行铁证=其 Sent 增长）。
+        let (rd_dev, rd_form) = readback_target(Some(s), &s.iface);
         if let Some(chan) = engine::channel_of(&s.teardown)
-            && let Ok(show) = engine::tc_exec(&chan, &["-s", "qdisc", "show", "dev", &s.iface])
-            && let Some(ls) = engine::leaf_stats(&show)
+            && let Ok(show) = engine::tc_exec(&chan, &["-s", "qdisc", "show", "dev", rd_dev])
+            && let Some(ls) = engine::leaf_stats_form(&show, rd_form)
         {
             tc = json!({"sent": ls.sent_pkt, "dropped": ls.dropped});
         }
@@ -1216,6 +1225,18 @@ fn print_banner(cfg: &ServeConfig) {
 
 /// serve 启动交叉判定（design §Error handling，与 CLI status 共用 assert_fingerprint 原语）：
 /// state × tc 回读，分歧 → 清 state 文件 + WARN——绝不清内核盲重放（qdisc 现况归 watchdog/人工 clear）。
+/// T9 回读观测点单一判定（status/状态帧/启动交叉共用）：ifb 纯上行会话（dir=In 且
+/// 无 egress 骨架痕迹——sig 腿存在时 root 已建，观测归 iface）→ ifb0 root 形。
+#[must_use]
+fn readback_target<'a>(st: Option<&State>, iface: &'a str) -> (&'a str, engine::LeafForm) {
+    match st {
+        Some(s) if s.ifb_used && s.dir == spec::Dir::In && s.sig_port.is_none() => {
+            (crate::ifb::IFB_DEV, engine::LeafForm::Root)
+        }
+        _ => (iface, engine::LeafForm::Parent110),
+    }
+}
+
 fn startup_cross_check(dirs: &Dirs) -> Wn<()> {
     // 无 state：启动不探 tc（通道探测有 ensure 副作用且无判定对象）；残留面由 apply 守卫/status 收口。
     if let Some(mut st) = State::read_from(&dirs.state_json()).map_err(Fail::env)? {
@@ -1231,11 +1252,14 @@ fn startup_cross_check(dirs: &Dirs) -> Wn<()> {
             );
             return Ok(());
         };
-        match engine::tc_exec(&chan, &["qdisc", "show", "dev", &st.iface]) {
+        let (rd_dev, rd_form) = readback_target(Some(&st), &st.iface);
+        match engine::tc_exec(&chan, &["qdisc", "show", "dev", rd_dev]) {
             Ok(show) => {
-                if let Err(e) =
-                    engine::assert_fingerprint(&show, &spec::render_netem_spec_leg(&st.spec))
-                {
+                if let Err(e) = engine::assert_fingerprint_form(
+                    &show,
+                    &spec::render_netem_spec_leg(&st.spec),
+                    rd_form,
+                ) {
                     eprintln!(
                         "weaknet(serve): WARN 启动交叉判定分歧（qdisc 被外部改写/已消失）：{}——清 state 文件复位（未动内核；现况残留归 watchdog/clear）",
                         e.msg
@@ -1297,7 +1321,7 @@ fn parse_fake_caps(raw: Option<&str>) -> Option<Capabilities> {
         seed: false,
         dir_lo: true,
         ifb_ingress: false,
-        ifb_reason: "dev 注入（WEAKNET_FAKE_CAPS）：宿主未加载 ifb——补救=宿主 root modprobe ifb；真判定随 T9 探测链到场".into(),
+        ifb_reason: "dev 注入（WEAKNET_FAKE_CAPS）：宿主未加载 ifb——补救=宿主 root modprobe ifb；真判定=ifb::probe 先读后探链".into(),
     };
     for pair in raw.split(',') {
         let pair = pair.trim();
@@ -1432,7 +1456,10 @@ mod tests {
         assert!(!c.ifb_ingress);
         assert!(!c.seed, "未给键=保守缺省");
         assert!(c.dir_lo);
-        assert!(c.ifb_reason.contains("宿主未加载") && c.ifb_reason.contains("T9"), "灰显 tooltip 两词面");
+        assert!(
+            c.ifb_reason.contains("宿主未加载") && c.ifb_reason.contains("modprobe"),
+            "灰显 tooltip 两词面（补救文案=design §UI 区分结构性 vs 宿主未加载）",
+        );
         let g = parse_fake_caps(Some(" seed=true , dir_lo=false ,ifb_ingress=true ")).unwrap();
         assert!(g.seed && !g.dir_lo && g.ifb_ingress && g.ifb_reason.is_empty());
         assert_eq!(parse_fake_caps(None), None);

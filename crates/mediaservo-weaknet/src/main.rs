@@ -533,18 +533,34 @@ fn print_dry_run(
     sig: Option<u16>,
     duration_note: &str,
 ) -> Wn<()> {
-    let legs = spec::build_filter_legs(
-        ScopeSel::Media,
-        engine::iface_kind_of(iface),
-        spec.dir,
-        ports,
-        &[],
-    )
-    .unwrap_or_default();
+    // T9：与 replay 同构的腿切分（物理口 in/both = egress 只留 Out 形，上行腿走 ifb 展示段）。
+    let kind = engine::iface_kind_of(iface);
+    let use_ifb = engine::ifb_needed(kind, spec.dir);
+    let legs = if !use_ifb {
+        spec::build_filter_legs(ScopeSel::Media, kind, spec.dir, ports, &[]).unwrap_or_default()
+    } else if spec.dir == SpecDir::Both {
+        spec::build_filter_legs(ScopeSel::Media, kind, SpecDir::Out, ports, &[]).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let ingress_legs = if use_ifb {
+        spec::build_filter_legs(ScopeSel::Media, kind, SpecDir::In, ports, &[]).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let spec_string = spec::render_netem_spec_leg(spec);
     let rate = spec::render_rate_arg(spec.rate_mbps);
-    let steps = engine::plan_skeleton(iface, true, &spec_string, &rate, &legs, sig);
+    let install_skeleton = !use_ifb || !legs.is_empty() || sig.is_some();
+    let mut steps = Vec::new();
+    if install_skeleton {
+        steps.extend(engine::plan_skeleton(iface, true, &spec_string, &rate, &legs, sig));
+    }
+    if use_ifb {
+        // 先读后判不可有副作用——展示全链形（need_link=true 含建链+up 步）。
+        steps.extend(engine::plan_ifb(iface, &spec_string, &ingress_legs, true));
+    }
     let prefix = engine::dryrun_prefix(env);
+    let ip_prefix = engine::dryrun_prog_prefix(env, engine::Prog::Ip);
     println!("[dry] 等效命令序列（root 缺席走 add 形展示；change || add = 2015 兼容；# = best-effort）：");
     for s in &steps {
         let alt = s
@@ -552,9 +568,10 @@ fn print_dry_run(
             .as_ref()
             .map_or_else(String::new, |a| format!(" || {}", a.join(" ")));
         let note = if s.best_effort { "   # best-effort" } else { "" };
-        println!("{prefix} {}{alt}{note}", s.run.join(" "));
+        let pfx = if s.prog == engine::Prog::Ip { &ip_prefix } else { &prefix };
+        println!("{pfx} {}{alt}{note}", s.run.join(" "));
     }
-    if legs.is_empty() {
+    if legs.is_empty() && ingress_legs.is_empty() {
         println!("（媒体腿/配对在执行时解析：--stream/--device/--rtp-port 或 stats 观测）");
     }
     println!("[dry] 保险丝: {duration_note} auto-clear=0（信号层默认关）");
@@ -571,7 +588,17 @@ fn do_status(dirs: &Dirs, env: &Env) -> Wn<()> {
         .unwrap_or_else(|| resolve_iface(None));
     // 假绿防线（bash do_status）：tc 通道不可读 ≠ 无 qdisc——probe/exec 失败自带 exit2 报因。
     let chan = engine::probe_channel(env, &dev)?;
-    let show = engine::tc_exec(&chan, &["qdisc", "show", "dev", &dev])?;
+    // T9 回读路由：ifb 纯上行会话的现场在 ifb0 root（iface root 未动）。
+    let (rd_dev, rd_form) = match &st {
+        Some(s) if s.ifb_used && s.dir == SpecDir::In && s.sig_port.is_none() => {
+            (
+                mediaservo_weaknet::ifb::IFB_DEV.to_string(),
+                engine::LeafForm::Root,
+            )
+        }
+        _ => (dev.clone(), engine::LeafForm::Parent110),
+    };
+    let show = engine::tc_exec(&chan, &["qdisc", "show", "dev", &rd_dev])?;
     let observed: Vec<&str> = show
         .lines()
         .filter(|l| l.contains("netem") || l.contains("htb"))
@@ -592,7 +619,11 @@ fn do_status(dirs: &Dirs, env: &Env) -> Wn<()> {
         }
         (Some(s), false) => {
             // 交叉判定（design §Error handling）：state × tc 指纹，分歧 = 被外部改写 WARN。
-            if let Err(e) = engine::assert_fingerprint(&show, &spec::render_netem_spec_leg(&s.spec))
+            if let Err(e) = engine::assert_fingerprint_form(
+                &show,
+                &spec::render_netem_spec_leg(&s.spec),
+                rd_form,
+            )
             {
                 eprintln!(
                     "weaknet: WARN qdisc 被外部改写（另一实例/手工 tc/另一 clone）：{}",

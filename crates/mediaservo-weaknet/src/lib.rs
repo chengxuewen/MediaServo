@@ -2,6 +2,7 @@
 //! **本 lib 不进 bindings / package 清单**（W5 三判据审计），产品面零耦合。
 
 pub mod engine;
+pub mod ifb;
 pub mod fuse;
 pub mod scenario;
 pub mod scope;

@@ -88,6 +88,13 @@ pub struct State {
     pub expires_at_ms: u64,
     /// 本次现场是否由我方建立 root（teardown 只删我方建立的——guard 纪律的持久化）。
     pub created_root: bool,
+    /// T9：本会话是否装了 ifb0 镜像链（dir=in/both × 物理口）。回读/verify 观测点路由
+    /// （ifb0 root 形 vs iface 1:10）与 teardown 计划共用的单一真值源。
+    #[serde(default)]
+    pub ifb_used: bool,
+    /// T9：ifb0 链路本次是否由我方所建（§ifb owner 合同：别人/系统建的撤除不碰）。
+    #[serde(default)]
+    pub created_ifb: bool,
     #[serde(default)]
     pub job: Option<JobRef>,
     pub teardown: Teardown,
@@ -444,6 +451,8 @@ mod tests {
             sig_port: None,
             expires_at_ms: 1_757_000_000_000,
             created_root: true,
+            ifb_used: true,
+            created_ifb: true,
             job: Some(JobRef {
                 name: "cell-edge".into(),
                 pid: 4242,
