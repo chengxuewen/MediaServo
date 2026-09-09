@@ -14,6 +14,8 @@ serde_yaml = "0.9"
 # T6 控制面（design §Dependencies 三条件门：axum0.7.9/futures-core0.3.32 均为 lock 现件、纯 Rust、既有树边）
 axum = "0.7"
 futures-core = "0.3"
+# T7 内嵌面板（design §Files rust-embed）：lock 现件 8.12.0（mediaservo-server 已用）；debug-embed=调试构建同样内嵌（二进制自足，§车端面 scp 单文件语义）
+rust-embed = { version = "8", features = ["debug-embed"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "process", "sync", "net"] }
 
 [dev-dependencies]

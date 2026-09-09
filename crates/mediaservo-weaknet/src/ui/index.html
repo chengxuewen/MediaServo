@@ -1,0 +1,105 @@
+<!doctype html>
+<!-- weaknet 控制台 v1（T7）——工程密度优先的内嵌面板；契约=docs/plans/weaknet-agent/design.md §UI。
+     零框架/零打包器/零路由库；storage 唯一豁免=sessionStorage（横幅凭证，关闭即弃）。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>weaknet 控制台</title>
+<link rel="icon" href="data:,"> <!-- 免 favicon 404 控制台噪声（W3 错误数=0 判据） -->
+<link rel="stylesheet" href="/assets/vendor/uPlot.min.css">
+<link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+<div id="gate" hidden>
+  <div class="gate-card">
+    <h1>weaknet 控制台 · 需要访问凭证</h1>
+    <p>到 <code>weaknet serve</code> 终端横幅里<b>整行复制</b>面板 URL（<code>http://127.0.0.1:…/?token=…</code>）粘贴到地址栏打开。</p>
+    <p class="dim">凭证只存本标签页（sessionStorage，关闭即弃）；页面任何位置不打印它。</p>
+    <button id="gate-clear" type="button">清除无效凭证并重置本页</button>
+  </div>
+</div>
+
+<header>
+  <span class="brand">weaknet<span class="brand-sub"> netem 控制台</span></span>
+  <nav id="tabs">
+    <button class="tab on" data-tab="panel" type="button">面板</button>
+    <button class="tab" data-tab="scen" type="button">场景 S</button>
+  </nav>
+  <span id="conn" class="conn" title="SSE 状态帧连接（2s 帧）">◌ 连接中…</span>
+  <span id="hstat" class="hstat"></span>
+</header>
+
+<main id="tab-panel" class="cols">
+  <section id="left" class="col" aria-label="损伤参数">
+    <h2>损伤参数</h2>
+    <label class="row"><span>Profile</span>
+      <select id="profile"><option value="">（手工编辑）</option></select>
+    </label>
+    <div class="master">
+      <label class="switch"><input type="checkbox" id="master"><span>启用损伤（总闸）</span></label>
+      <label class="dur">时长&nbsp;s<input type="number" id="duration" min="1" max="86400" value="300"></label>
+      <svg id="ring" width="46" height="46" viewBox="0 0 46 46" aria-label="剩余倒计时">
+        <circle class="ring-bg" cx="23" cy="23" r="19"></circle>
+        <circle class="ring-fg" id="ring-fg" cx="23" cy="23" r="19"></circle>
+        <text id="ring-txt" x="23" y="27">—</text>
+      </svg>
+    </div>
+    <div id="spec-rows">
+      <label class="row"><span>RTT ms</span><input data-spec="rtt_ms" type="number" min="0" max="2000" value="0"></label>
+      <label class="row"><span>Jitter ms</span><input data-spec="jitter_ms" type="number" min="0" max="2000" value="0"></label>
+      <div class="row"><span>Loss %</span>
+        <input data-spec="loss" id="loss-range" type="range" min="0" max="100" step="0.5" value="0">
+        <input data-spec="loss" id="loss-num" type="number" min="0" max="100" step="0.1" value="0">
+      </div>
+      <label class="row sub"><span>Loss 模式</span>
+        <select id="loss-mode"><option value="simple">simple</option><option value="gemodel">gemodel</option></select>
+      </label>
+      <div id="gem" class="row sub gem" hidden><span>Gem r/h/k</span>
+        <label>r%<input data-gem="r" type="number" step="0.1" value="25"></label>
+        <label>h<input data-gem="h" type="number" step="0.01" value="0.2"></label>
+        <label>k<input data-gem="k" type="number" step="0.01" value="0.05"></label>
+      </div>
+      <label class="row"><span>Reorder %</span><input data-spec="reorder" type="number" min="0" max="100" value="0"></label>
+      <label class="row"><span>Rate Mbps</span><input data-spec="rate_mbps" type="number" min="0" step="0.1" placeholder="空=不限"></label>
+      <label class="row"><span>Limit</span><input data-spec="limit" type="number" min="1" value="100000"></label>
+      <label class="row sub"><span>Seed</span><input data-spec="seed" type="number" min="0" id="seed" placeholder="空=内核随机"></label>
+    </div>
+    <div class="row"><span>接口 iface</span><input id="iface" type="text" value="lo" size="8" spellcheck="false"></div>
+    <fieldset id="dirset">
+      <legend>方向 dir（(dir × iface × ifb) 真值表灰显）</legend>
+      <label class="dopt"><input type="radio" name="dir" value="out"> out（本地→网络）</label>
+      <label class="dopt"><input type="radio" name="dir" value="in"> in（网络→本地）</label>
+      <label class="dopt"><input type="radio" name="dir" value="both" checked> both（双向）</label>
+    </fieldset>
+    <p id="capsline" class="dim"></p>
+  </section>
+
+  <section id="mid" class="col" aria-label="流表（owner 分组）"><h2>流表</h2><div id="streams"></div></section>
+
+  <section id="right" class="col" aria-label="图表与事件">
+    <h2>每流码率 kbps <span class="dim">（null=首点·stale=拉取失败→断线，两语义皆缺口）</span></h2>
+    <div id="kbps"></div>
+    <h2>netem dropped 阶梯</h2>
+    <div id="drop"></div>
+    <h2>事件（尾 5 行 · 竖线入图 · 环上限 200）</h2>
+    <ul id="evlog"></ul>
+  </section>
+</main>
+
+<main id="tab-scen" class="cols one" hidden>
+  <section class="col scen">
+    <h2>剧本 scenarios</h2>
+    <ul id="scenlist"></ul>
+    <div class="row"><button id="scen-run" type="button">▶ 运行所选</button><button id="scen-stop" type="button">■ 停止</button></div>
+    <p id="scen-job" class="dim"></p>
+    <p class="dim">job done/total 进度随 T8 剧本引擎到场（状态帧 job 现形 = {name,pid,starttime}）。运行=诚实 501 提示直至 T8。</p>
+  </section>
+</main>
+
+<div id="toast" hidden></div>
+<noscript><p style="padding:1rem">本面板需要 JavaScript（SSE 状态帧驱动）。</p></noscript>
+<script src="/assets/vendor/uPlot.iife.min.js"></script>
+<script type="module" src="/assets/app.js"></script>
+</body>
+</html>

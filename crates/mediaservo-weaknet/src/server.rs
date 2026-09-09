@@ -22,13 +22,14 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Instant;
 
-use axum::extract::{Query, Request, State as AxumState};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::extract::{Path, Query, Request, State as AxumState};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use rust_embed::Embed;
 use serde_json::{Map, Value, json};
 
 use crate::engine::{self, ApplyRequest, Env, Fail, Replay, Verify, Wn};
@@ -102,6 +103,7 @@ fn build_router_with_ctx(ctx: Arc<Ctx>) -> Router {
         .route("/v1/state", get(get_state))
         .route("/v1/profiles", get(get_profiles))
         .route("/v1/capabilities", get(get_capabilities))
+        .route("/v1/scenarios", get(get_scenarios))
         .route("/v1/streams", get(get_streams))
         .route("/v1/apply", post(post_apply))
         .route("/v1/set", post(post_set))
@@ -109,8 +111,65 @@ fn build_router_with_ctx(ctx: Arc<Ctx>) -> Router {
         .route("/v1/scenario/run", post(post_scenario_run))
         .route("/v1/scenario/stop", post(post_scenario_stop))
         .route("/v1/events", get(get_events))
+        .route("/", get(get_index))
+        .route("/assets/*path", get(get_asset))
         .layer(middleware::from_fn_with_state(ctx.clone(), guard))
         .with_state(ctx)
+}
+
+// ---------- 内嵌面板（T7：rust-embed ui/；静态资产免 token——401 引导页须先于凭证可载，Host 白名单仍生效） ----------
+
+/// 面板资产编译期内嵌（design §Files：src/ui，零构建链）。debug-embed 已开：调试构建同样内嵌，二进制自足。
+#[derive(Embed)]
+#[folder = "src/ui/"]
+struct UiAssets;
+
+/// 扩展名 → MIME（embed 键查表，不涉文件系统；未知一律 octet-stream 防嗅探执行）。
+fn mime_for(key: &str) -> &'static str {
+    match key.rsplit('.').next().unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "ico" => "image/x-icon",
+        "txt" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
+}
+
+fn asset_response(key: &str, csp: bool) -> Response {
+    match UiAssets::get(key) {
+        Some(f) => {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(mime_for(key)));
+            headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            if csp {
+                headers.insert(
+                    header::CONTENT_SECURITY_POLICY,
+                    HeaderValue::from_static(
+                        "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'",
+                    ),
+                );
+            }
+            (StatusCode::OK, headers, f.data.to_vec()).into_response()
+        }
+        None => err_json(StatusCode::NOT_FOUND, "资源不存在"),
+    }
+}
+
+/// GET / —— index.html。
+async fn get_index() -> Response {
+    asset_response("index.html", true)
+}
+
+/// GET /assets/* —— app.js/css/vendor。穿越防御双保险：显式拒 `..` 与前导 '/'，
+/// 且 embed 键为精确哈希查找——路径永不触盘，未命中仅 404 零泄露。
+async fn get_asset(Path(p): Path<String>) -> Response {
+    if p.contains("..") || p.starts_with('/') {
+        return err_json(StatusCode::BAD_REQUEST, "非法资源路径");
+    }
+    asset_response(&p, false)
 }
 
 /// Host → Origin(--lan) → Bearer 三道门槛（/v1* 才查 token；Host 恒查）。
@@ -269,15 +328,21 @@ async fn get_state(AxumState(ctx): AxumState<Arc<Ctx>>) -> Result<Json<Value>, A
 }
 
 async fn get_profiles() -> Result<Json<Value>, AppErr> {
-    let v = blocking(|| Ok::<Value, Fail>(profiles_json())).await?;
+    let v = blocking(|| Ok::<Value, Fail>(list_yaml_dir("profiles"))).await?;
     Ok(Json(v))
 }
 
-fn profiles_json() -> Value {
+/// 剧本只读列举（T7 S 页签数据源；与 /v1/profiles 同形同目录寻径，零业务逻辑）。
+async fn get_scenarios() -> Result<Json<Value>, AppErr> {
+    let v = blocking(|| Ok::<Value, Fail>(list_yaml_dir("scenarios"))).await?;
+    Ok(Json(v))
+}
+
+fn list_yaml_dir(sub: &str) -> Value {
     let Some(root) = scope::weaknet_d_root() else {
-        return json!({"profiles": [], "note": "无资产目录（WEAKNET_ASSETS_DIR / 二进制同级 weaknet.d / scripts/weaknet.d）"});
+        return json!({sub: [], "note": "无资产目录（WEAKNET_ASSETS_DIR / 二进制同级 weaknet.d / scripts/weaknet.d）"});
     };
-    let dir = root.join("profiles");
+    let dir = root.join(sub);
     let mut names: Vec<String> = std::fs::read_dir(&dir)
         .map(|rd| {
             rd.filter_map(|e| {
@@ -292,7 +357,7 @@ fn profiles_json() -> Value {
         })
         .unwrap_or_default();
     names.sort();
-    json!({"profiles": names})
+    json!({sub: names})
 }
 
 /// capabilities：缓存优先；`?refresh=1` 重探（seed 版本门；ifb 位 = false +「T9 到场」——
@@ -1011,7 +1076,7 @@ pub async fn serve_main(
         listen_host: host.clone(),
         listen_port: port,
         server_url,
-        caps_override: None,
+        caps_override: fake_caps_from_env(),
         sse_frames_limit: None,
     };
     print_banner(&cfg);
@@ -1142,6 +1207,54 @@ fn spawn_expiry_ticker(ctx: Arc<Ctx>) {
     });
 }
 
+/// dev-only 注入（tasks T7 Verify：灰态断言依赖）：`WEAKNET_FAKE_CAPS="ifb_ingress=false,seed=false"`。
+/// 键 ∈ {seed, dir_lo, ifb_ingress}，值 true|false；未给键取保守缺省（seed=false/dir_lo=true/
+/// ifb_ingress=false——假灰不假亮，禁虚构能力）。结果进 ServeConfig.caps_override →
+/// /v1/capabilities 直返缓存跳过真探测。生产勿设——它把能力面钉成谎。
+fn fake_caps_from_env() -> Option<Capabilities> {
+    let raw = std::env::var("WEAKNET_FAKE_CAPS").ok();
+    parse_fake_caps(raw.as_deref())
+}
+
+fn parse_fake_caps(raw: Option<&str>) -> Option<Capabilities> {
+    let raw = raw?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let mut c = Capabilities {
+        seed: false,
+        dir_lo: true,
+        ifb_ingress: false,
+        ifb_reason: "dev 注入（WEAKNET_FAKE_CAPS）：宿主未加载 ifb——补救=宿主 root modprobe ifb；真判定随 T9 探测链到场".into(),
+    };
+    for pair in raw.split(',') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+        let Some((k, v)) = pair.split_once('=') else {
+            eprintln!("weaknet(serve): WARN WEAKNET_FAKE_CAPS 忽略项 {pair:?}（形如 key=true|false）");
+            continue;
+        };
+        match (k.trim(), v.trim()) {
+            ("seed", "true") => c.seed = true,
+            ("seed", "false") => c.seed = false,
+            ("dir_lo", "true") => c.dir_lo = true,
+            ("dir_lo", "false") => c.dir_lo = false,
+            ("ifb_ingress", "true") => {
+                c.ifb_ingress = true;
+                c.ifb_reason.clear();
+            }
+            ("ifb_ingress", "false") => c.ifb_ingress = false,
+            (_, v @ ("true" | "false")) => {
+                eprintln!("weaknet(serve): WARN WEAKNET_FAKE_CAPS 未知键 {v:?}（合法: seed|dir_lo|ifb_ingress）");
+            }
+            _ => eprintln!("weaknet(serve): WARN WEAKNET_FAKE_CAPS 非法值 {pair:?}（值需 true|false）"),
+        }
+    }
+    Some(c)
+}
+
 // ---------- 单元面纯函数测 ----------
 
 #[cfg(test)]
@@ -1239,5 +1352,74 @@ mod tests {
         assert_eq!(agg[0].bytes, Some(150));
         assert!(agg[0].live);
         assert_eq!(agg[1].bytes, None, "成员行缺 byte_count → 整房不可差分");
+    }
+
+    #[test]
+    fn fake_caps_parses_and_defaults_conservative() {
+        let c = parse_fake_caps(Some("ifb_ingress=false")).unwrap();
+        assert!(!c.ifb_ingress);
+        assert!(!c.seed, "未给键=保守缺省");
+        assert!(c.dir_lo);
+        assert!(c.ifb_reason.contains("宿主未加载") && c.ifb_reason.contains("T9"), "灰显 tooltip 两词面");
+        let g = parse_fake_caps(Some(" seed=true , dir_lo=false ,ifb_ingress=true ")).unwrap();
+        assert!(g.seed && !g.dir_lo && g.ifb_ingress && g.ifb_reason.is_empty());
+        assert_eq!(parse_fake_caps(None), None);
+        assert_eq!(parse_fake_caps(Some("  ")), None);
+        // 垃圾项 WARN 后忽略，不毁其余
+        let b = parse_fake_caps(Some("nope=true,seed=true,oops")).unwrap();
+        assert!(b.seed && !b.ifb_ingress);
+    }
+
+    #[tokio::test]
+    async fn static_panel_unauth_asset_auth_unchanged() {
+        use tower::util::ServiceExt;
+        let cfg = ServeConfig {
+            token: "tk".into(),
+            dirs: Dirs { statedir: std::env::temp_dir().join("wnet-t7-unit-nonexistent") },
+            env: Env::default(),
+            lan: false,
+            listen_host: "127.0.0.1".into(),
+            listen_port: 9810,
+            server_url: None,
+            caps_override: None,
+            sse_frames_limit: None,
+        };
+        let app = build_router(cfg);
+        let req = |uri: &str| {
+            axum::http::Request::builder()
+                .uri(uri)
+                .header("host", "127.0.0.1:9810")
+                .body(axum::body::Body::empty())
+                .unwrap()
+        };
+        let res = app.clone().oneshot(req("/")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(res.headers()[header::CONTENT_TYPE], "text/html; charset=utf-8");
+        assert!(res.headers()[header::CONTENT_SECURITY_POLICY].as_bytes().starts_with(b"default-src"));
+        let body = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+        assert!(String::from_utf8_lossy(&body).to_ascii_lowercase().contains("<!doctype html"));
+        let res = app.clone().oneshot(req("/assets/app.js")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(res.headers()[header::CONTENT_TYPE], "text/javascript; charset=utf-8");
+        let res = app.clone().oneshot(req("/assets/vendor/uPlot.iife.min.js")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        // 穿越：显式 `..`（含解码形）= 400；未命中键 = 404 零泄露
+        assert_eq!(app.clone().oneshot(req("/assets/../server.rs")).await.unwrap().status(), StatusCode::BAD_REQUEST);
+        assert_eq!(app.clone().oneshot(req("/assets/%2e%2e/Cargo.toml")).await.unwrap().status(), StatusCode::BAD_REQUEST);
+        assert_eq!(app.clone().oneshot(req("/assets/nope.js")).await.unwrap().status(), StatusCode::NOT_FOUND);
+        // /v1* 鉴权不变：无 token 401、带 token 200
+        assert_eq!(app.clone().oneshot(req("/v1/state")).await.unwrap().status(), StatusCode::UNAUTHORIZED);
+        let res = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/v1/state")
+                    .header("host", "127.0.0.1:9810")
+                    .header(header::AUTHORIZATION, "Bearer tk")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
     }
 }
