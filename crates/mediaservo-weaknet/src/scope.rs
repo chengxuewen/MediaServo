@@ -44,6 +44,8 @@ pub struct StreamInfo {
     pub live: bool,
     pub local_port: Option<u16>,
     pub remote_ports: Vec<u16>,
+    /// stats 行字节计数（serve 状态帧 kbps 差分源；旧 server/缺字段=None——禁假 0）。
+    pub byte_count: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,6 +67,8 @@ struct RawRow {
     local_port: Option<u16>,
     #[serde(default)]
     remote_port: Option<u16>,
+    #[serde(default)]
+    byte_count: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,6 +92,7 @@ pub fn parse_streams_body(body: &str) -> Wn<Vec<StreamInfo>> {
             live: r.transport_id.is_some(),
             local_port: r.local_port,
             remote_ports: r.remote_port.into_iter().collect(),
+            byte_count: r.byte_count,
         })
         .collect())
 }
@@ -220,6 +225,70 @@ pub fn targeting_media(rows: &[StreamInfo]) -> Wn<Targeting> {
         ));
     }
     Ok(Targeting { scope: ScopeSel::Media, ports, pairs: vec![] })
+}
+
+/// 作用域裁决优先级（bash resolve_ports 同序）：显式端口集 > stream/rooms > device/ids > stats 媒体口。
+/// `stream="all"` = 显式回段级（bash 等价）。CLI 与 serve REST 共用核（T6 自 main.rs 提取，禁复制）。
+/// stats 触达仅在需要时发生（显式端口逃生门保持零 server 可用——离线/无凭证场景）。
+pub fn resolve_targeting(
+    server_url: Option<&str>,
+    stream: Option<&str>,
+    device: Option<&str>,
+    ports_flag: &[u16],
+) -> Wn<Targeting> {
+    if !ports_flag.is_empty() {
+        if stream.is_some() || device.is_some() {
+            eprintln!("weaknet: WARN --rtp-port 与 --stream/--device 并给：显式端口集优先（定向被忽略）");
+        }
+        return Ok(Targeting {
+            scope: ScopeSel::Media,
+            ports: ports_flag.to_vec(),
+            pairs: vec![],
+        });
+    }
+    let stream = stream.map(str::trim).filter(|s| !s.is_empty());
+    let device = device.map(str::trim).filter(|s| !s.is_empty());
+    if stream.is_some() && device.is_some() {
+        return Err(Fail::bad_param("--stream 与 --device 互斥（作用域定向只能选一路）"));
+    }
+    let url = server_url_or_default(server_url)?;
+    let mut client = StatsClient::from_env(&url)?;
+    let rows = client.fetch_streams()?;
+    if let Some(s) = stream.filter(|s| *s != "all") {
+        return targeting_for_rooms(&rows, s);
+    }
+    if let Some(d) = device {
+        return targeting_for_devices(&rows, d);
+    }
+    targeting_media(&rows)
+}
+
+/// profile/scenario 资产寻径（§车端面：二进制同级 weaknet.d 优先；内嵌兜底随 T7 embed）。
+/// CLI 与 serve /v1/profiles 共用（T6 自 main.rs 上提到 lib 面，一条函数钉死）。
+#[must_use]
+pub fn weaknet_d_root() -> Option<PathBuf> {
+    if let Some(v) = std::env::var_os("WEAKNET_ASSETS_DIR").filter(|s| !s.is_empty()) {
+        let p = PathBuf::from(v);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    let exe_dir = std::env::current_exe().ok().and_then(|x| x.parent().map(Path::to_path_buf));
+    if let Some(d) = &exe_dir {
+        let sib = d.join("weaknet.d");
+        if sib.is_dir() {
+            return Some(sib);
+        }
+    }
+    for base in std::iter::once(std::env::current_dir().unwrap_or_default()).chain(exe_dir) {
+        for anc in base.ancestors().take(6) {
+            let c = anc.join("scripts").join("weaknet.d");
+            if c.is_dir() {
+                return Some(c);
+            }
+        }
+    }
+    None
 }
 
 // ---------- server_url 解析链（flag > env WEAKNET_SERVER_URL > 探测 server.yaml） ----------

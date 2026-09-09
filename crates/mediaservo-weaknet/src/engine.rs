@@ -67,6 +67,16 @@ pub struct Env {
 
 pub const DEF_SIDECAR: &str = "weaknet-ctrl";
 pub const DEF_IMAGE: &str = "gaiadocker/iproute2";
+/// bash `DEV="${WEAKNET_DEV:-lo}"` 同构缺省（C20 豁免形=文档化常量 + env/flag 覆写）。
+pub const DEFAULT_IFACE: &str = "lo";
+
+/// iface 统一解析链（CLI 与 serve 共用；T6 自 main.rs 上提，单一真值源）。
+#[must_use]
+pub fn resolve_iface(cli: Option<&str>) -> String {
+    cli.map(str::to_owned)
+        .or_else(|| std::env::var("WEAKNET_DEV").ok().filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| DEFAULT_IFACE.to_string())
+}
 
 impl Default for Env {
     fn default() -> Self {
@@ -570,9 +580,22 @@ pub fn assert_fingerprint(qdisc_show: &str, netem_spec: &str) -> Wn<()> {
     }
 }
 
+/// `-s` 叶行块统计（Sent pkt + dropped）——serve 状态帧 tc 字段取数源。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeafStats {
+    pub sent_pkt: u64,
+    pub dropped: u64,
+}
+
 /// `-s` 输出叶行块的 Sent X bytes Y pkt → Y（bash leaf_pkt 平移；扫叶行及其后一行）。
 #[must_use]
 pub fn leaf_sent(qdisc_s_show: &str) -> Option<u64> {
+    leaf_stats(qdisc_s_show).map(|s| s.sent_pkt)
+}
+
+/// 叶行及其后一行窗口解析 `Sent _ bytes N pkt (dropped M, …)`；dropped 缺形=0（旧 tc 容错）。
+#[must_use]
+pub fn leaf_stats(qdisc_s_show: &str) -> Option<LeafStats> {
     let idx = qdisc_s_show.lines().enumerate().find_map(|(i, l)| {
         if l.contains("netem") && l.contains("parent 1:10") { Some(i) } else { None }
     })?;
@@ -583,7 +606,13 @@ pub fn leaf_sent(qdisc_s_show: &str) -> Option<u64> {
             if w[0] == "Sent" && w[2] == "bytes" && w[4] == "pkt"
                 && let Ok(n) = w[3].parse::<u64>()
             {
-                return Some(n);
+                let dropped = toks
+                    .iter()
+                    .position(|t| *t == "(dropped")
+                    .and_then(|i| toks.get(i + 1))
+                    .and_then(|v| v.trim_end_matches(',').parse::<u64>().ok())
+                    .unwrap_or(0);
+                return Some(LeafStats { sent_pkt: n, dropped });
             }
         }
     }
@@ -660,18 +689,24 @@ pub fn run_teardown(state: &State) -> Vec<String> {
     failures
 }
 
-fn run_step_resilient(teardown: &Teardown, step: &[String]) -> Result<(), String> {
-    let chan_args: Vec<&str> = step.iter().map(String::as_str).collect();
-    let channel = match (teardown.channel, &teardown.sidecar) {
-        (ChannelSer::LocalRoot, _) => Channel::LocalRoot,
-        (ChannelSer::Sidecar, Some(sc)) => Channel::Sidecar {
+/// teardown 计划 → 通道重建（run_teardown / serve 状态帧共用单一构造源；
+/// sidecar 形缺指元 = None，调用方按 state 损坏处理）。
+#[must_use]
+pub fn channel_of(teardown: &Teardown) -> Option<Channel> {
+    match (teardown.channel, &teardown.sidecar) {
+        (ChannelSer::LocalRoot, _) => Some(Channel::LocalRoot),
+        (ChannelSer::Sidecar, Some(sc)) => Some(Channel::Sidecar {
             container: sc.name.clone(),
             image: sc.image.clone(),
-        },
-        (ChannelSer::Sidecar, None) => {
-            return Err("teardown 计划为 sidecar 但缺 sidecar 指元（state 损坏）".to_string());
-        }
-    };
+        }),
+        (ChannelSer::Sidecar, None) => None,
+    }
+}
+
+fn run_step_resilient(teardown: &Teardown, step: &[String]) -> Result<(), String> {
+    let chan_args: Vec<&str> = step.iter().map(String::as_str).collect();
+    let channel = channel_of(teardown)
+        .ok_or_else(|| "teardown 计划为 sidecar 但缺 sidecar 指元（state 损坏）".to_string())?;
     match tc_exec(&channel, &chan_args) {
         Ok(_) => Ok(()),
         Err(e) if is_not_exist(&e.msg) => Ok(()),
@@ -755,6 +790,15 @@ pub enum Replay {
     Set { prior: Box<State>, before: String },
 }
 
+/// 实测 verify 模式（design §server「verify 移出响应路径」）：CLI=Inline（bash 语义：
+/// apply verify 失败→root 回滚 exit2）；REST=Deferred——200 仅要求回读指纹过，双采样
+/// 移入后台任务，结果落 timeline `verify` 事件（SSE 状态帧 ev 透传播报）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verify {
+    Inline,
+    Deferred,
+}
+
 #[derive(Debug)]
 pub struct ReplayOutcome {
     pub spec_string: String,
@@ -770,7 +814,13 @@ pub struct ReplayOutcome {
 /// Apply：新保险丝 + spawn watchdog + apply 事件；失败回滚 root（bash L522-533）。
 /// Set：保原到期、不动 watchdog、回读失败不回滚（防断流——bash do_set L315-317 同规）；
 /// 携 counter-reset 探测（change 前后 leaf Sent）。
-pub fn replay(req: &ApplyRequest, mode: Replay, dirs: &Dirs, env: &Env) -> Wn<ReplayOutcome> {
+pub fn replay(
+    req: &ApplyRequest,
+    mode: Replay,
+    dirs: &Dirs,
+    env: &Env,
+    verify: Verify,
+) -> Wn<ReplayOutcome> {
     req.spec.validate().map_err(Fail::bad_param)?;
     let legs = build_filter_legs(
         req.scope,
@@ -824,20 +874,25 @@ pub fn replay(req: &ApplyRequest, mode: Replay, dirs: &Dirs, env: &Env) -> Wn<Re
         return Err(e);
     }
     let sent1 = leaf_sent(&sshow);
-    let verify = verify_measure(&channel, &req.iface, sent1);
     let leaf = match verify {
-        Ok(pair) => pair,
-        Err(e) => {
-            if matches!(mode, Replay::Apply { .. }) {
-                rollback_root(&channel, &req.iface);
-                return Err(Fail::env(format!("{}（root 已回滚）", e.msg)));
+        // Deferred：响应路径零等待；pre 原样带出，后台以同一 pre 二次采样（含 counters-reset 探测）。
+        Verify::Deferred => (sent1.unwrap_or(0), sent1.unwrap_or(0)),
+        Verify::Inline => match verify_measure(&channel, &req.iface, sent1) {
+            Ok(pair) => pair,
+            Err(e) => {
+                if matches!(mode, Replay::Apply { .. }) {
+                    rollback_root(&channel, &req.iface);
+                    return Err(Fail::env(format!("{}（root 已回滚）", e.msg)));
+                }
+                // bash do_set：verify 失败 die 2 但不回滚
+                return Err(e);
             }
-            // bash do_set：verify 失败 die 2 但不回滚
-            return Err(e);
-        }
+        },
     };
     let counters_reset = match (&mode, pre_sent) {
-        (Replay::Set { .. }, Some(pre)) => Some(counters_reset(pre, leaf.1)),
+        (Replay::Set { .. }, Some(pre)) if matches!(verify, Verify::Inline) => {
+            Some(counters_reset(pre, leaf.1))
+        }
         _ => None,
     };
 

@@ -11,10 +11,13 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "process", "sync"] }
+# T6 控制面（design §Dependencies 三条件门：axum0.7.9/futures-core0.3.32 均为 lock 现件、纯 Rust、既有树边）
+axum = "0.7"
+futures-core = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "process", "sync", "net"] }
 
 [dev-dependencies]
-tower = "0.4"         # 钉 0.4：lock 存 0.4/0.5 双版本，axum 0.7 路由 oneshot 契约走 0.4（T6 api_matrix）
+tower = { version = "0.4", features = ["util"] }  # 钉 0.4：lock 存 0.4/0.5 双版本，axum 0.7 路由 oneshot 契约走 0.4（T6 api_matrix；util=ServiceExt 非缺省须显开）
 
 [[bin]]
 name = "mediaservo-weaknet"

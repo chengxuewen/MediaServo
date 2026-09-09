@@ -10,14 +10,13 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 
-use mediaservo_weaknet::engine::{self, ApplyRequest, Env, Fail, Replay, Wn};
+use mediaservo_weaknet::engine::{self, ApplyRequest, Env, Fail, Replay, Verify, Wn};
 use mediaservo_weaknet::fuse;
-use mediaservo_weaknet::scope::{self, StatsClient, Targeting};
+use mediaservo_weaknet::scope::{self, Targeting};
+use mediaservo_weaknet::server;
 use mediaservo_weaknet::spec::{self, Dir as SpecDir, ImpairSpec, LossSpec, ScopeSel};
 use mediaservo_weaknet::state::{self, Dirs, State};
 
-/// bash `DEV="${WEAKNET_DEV:-lo}"` 同构缺省（C20 豁免形=文档化常量 + env/flag 覆写）。
-const DEFAULT_IFACE: &str = "lo";
 /// bash DEFAULT_DURATION——apply 唯一存活承诺。
 const DEFAULT_DURATION: u64 = 300;
 
@@ -211,9 +210,18 @@ fn dispatch(cmd: Cmd) -> Wn<()> {
             println!("{}", engine::clear(&dirs, &env, false)?);
             Ok(())
         }
-        Cmd::Serve(_) => Err(Fail::env(
-            "serve 控制面（REST/SSE/内嵌面板）随 T6 到场——M0 用 CLI 面",
-        )),
+        Cmd::Serve(args) => {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| Fail::env(format!("tokio runtime 建立失败: {e}")))?;
+            rt.block_on(server::serve_main(
+                args.listen.as_deref(),
+                args.lan,
+                args.token.as_deref(),
+                args.server_url.as_deref(),
+            ))
+        }
         Cmd::Up {
             profile,
             iface,
@@ -280,7 +288,13 @@ fn do_apply(a: &ApplyArgs, dirs: &Dirs, env: &Env) -> Wn<()> {
         pairs: targeting.pairs.clone(),
         sig_port: a.signaling_port,
     };
-    let out = engine::replay(&req, Replay::Apply { duration_secs: duration }, dirs, env)?;
+    let out = engine::replay(
+        &req,
+        Replay::Apply { duration_secs: duration },
+        dirs,
+        env,
+        Verify::Inline,
+    )?;
     let scope_detail = match req.scope {
         ScopeSel::Media => format!(
             "ports=[{}]",
@@ -361,6 +375,7 @@ fn do_set(a: &ApplyArgs, dirs: &Dirs, env: &Env) -> Wn<()> {
         },
         dirs,
         env,
+        Verify::Inline,
     )?;
     println!(
         "set: [{before}] → [{}]（counters_reset={}，root 未回滚·保险丝不续命）",
@@ -462,11 +477,7 @@ fn reject_deferred(a: &ApplyArgs) -> Wn<()> {
 }
 
 fn resolve_iface(cli: Option<&str>) -> String {
-    cli.map(str::to_owned).or_else(|| {
-        std::env::var("WEAKNET_DEV")
-            .ok()
-            .filter(|s| !s.is_empty())
-    }).unwrap_or_else(|| DEFAULT_IFACE.to_string())
+    engine::resolve_iface(cli)
 }
 
 fn parse_ports(s: Option<&str>) -> Wn<Vec<u16>> {
@@ -482,35 +493,14 @@ fn parse_ports(s: Option<&str>) -> Wn<Vec<u16>> {
         .collect()
 }
 
-/// 作用域裁决优先级（bash resolve_ports 同序）：--rtp-port > --stream > --device > stats 媒体口。
-/// `--stream all` = 显式回段级（bash 等价）。stats 触达仅在需要时发生
-/// （--rtp-port 逃生门保持零 server 可用——离线/无凭证场景）。
+/// 作用域裁决（T6 提取：核心入 scope::resolve_targeting 与 serve REST 共源，此处仅字段搬运）。
 fn resolve_targeting(a: &ApplyArgs, ports_flag: Vec<u16>) -> Wn<Targeting> {
-    if !ports_flag.is_empty() {
-        if a.stream.is_some() || a.device.is_some() {
-            eprintln!("weaknet: WARN --rtp-port 与 --stream/--device 并给：显式端口集优先（定向被忽略）");
-        }
-        return Ok(Targeting {
-            scope: ScopeSel::Media,
-            ports: ports_flag,
-            pairs: vec![],
-        });
-    }
-    let stream = a.stream.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let device = a.device.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    if stream.is_some() && device.is_some() {
-        return Err(Fail::bad_param("--stream 与 --device 互斥（作用域定向只能选一路）"));
-    }
-    let url = scope::server_url_or_default(a.server_url.as_deref())?;
-    let mut client = StatsClient::from_env(&url)?;
-    let rows = client.fetch_streams()?;
-    if let Some(s) = stream.filter(|s| *s != "all") {
-        return scope::targeting_for_rooms(&rows, s);
-    }
-    if let Some(d) = device {
-        return scope::targeting_for_devices(&rows, d);
-    }
-    scope::targeting_media(&rows)
+    scope::resolve_targeting(
+        a.server_url.as_deref(),
+        a.stream.as_deref(),
+        a.device.as_deref(),
+        &ports_flag,
+    )
 }
 
 
@@ -713,34 +703,9 @@ fn scenario_list() -> Wn<()> {
     Ok(())
 }
 
-/// profile/scenario 资产寻径（§车端面：二进制同级 weaknet.d 优先；内嵌兜底随 T7 embed）。
+/// profile/scenario 资产寻径（T6 上提 lib 面 scope::weaknet_d_root——CLI/serve 单一真值源）。
 fn weaknet_d_root() -> Option<PathBuf> {
-    if let Some(v) = std::env::var_os("WEAKNET_ASSETS_DIR").filter(|s| !s.is_empty()) {
-        let p = PathBuf::from(v);
-        if p.is_dir() {
-            return Some(p);
-        }
-    }
-    let exe_dir = std::env::current_exe().ok().and_then(|x| {
-        x.parent().map(Path::to_path_buf)
-    });
-    if let Some(d) = &exe_dir {
-        let sib = d.join("weaknet.d");
-        if sib.is_dir() {
-            return Some(sib);
-        }
-    }
-    for base in std::iter::once(std::env::current_dir().unwrap_or_default())
-        .chain(exe_dir.clone())
-    {
-        for anc in base.ancestors().take(6) {
-            let c = anc.join("scripts").join("weaknet.d");
-            if c.is_dir() {
-                return Some(c);
-            }
-        }
-    }
-    None
+    scope::weaknet_d_root()
 }
 
 // ---------- profile（emit.py 白名单语义的 serde_yaml 平移） ----------
