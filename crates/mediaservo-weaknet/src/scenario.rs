@@ -1114,6 +1114,55 @@ pub fn resolve_run_file(file: &str, dir_override: Option<&str>) -> Wn<(std::path
     Ok((path, stem))
 }
 
+/// 内嵌源资产名守卫：basename-only（无路径分隔/通配/空/`..`）——§serve 安全
+/// 「scenario basename」合同对内嵌侧同样执行（rust-embed 键查表本就非 fs，显式单闸）。
+#[must_use]
+pub fn is_safe_asset_name(s: &str) -> bool {
+    !s.is_empty()
+        && !s.contains('/')
+        && !s.contains('\\')
+        && !s.contains('\0')
+        && !s.contains('*')
+        && s != ".."
+        && s != "."
+}
+
+/// 资产名 → 相对键（`<名>.yaml` 自动补全，同 resolve_serve_file fname 规则）。
+#[must_use]
+pub fn asset_rel(sub: &str, name: &str) -> String {
+    if name.ends_with(".yaml") || name.ends_with(".yml") {
+        format!("{sub}/{name}")
+    } else {
+        format!("{sub}/{name}.yaml")
+    }
+}
+
+/// CLI scenario 读取（T13 §车端面寻径单函数）：fs 寻径优先，bare 名形内嵌兜底。
+/// 返回 (raw, stem, disp)；fs 报因在「不可内嵌形」（带路径/通配/--dir 覆盖）时透传。
+pub fn read_run_yaml(file: &str, dir_override: Option<&str>) -> Wn<(String, String, String)> {
+    match resolve_run_file(file, dir_override) {
+        Ok((path, stem)) => {
+            let raw = std::fs::read_to_string(&path)
+                .map_err(|e| Fail::env(format!("读 scenario {} 失败: {e}", path.display())))?;
+            Ok((raw, stem, path.display().to_string()))
+        }
+        Err(fs_err) => {
+            if dir_override.is_some() || !is_safe_asset_name(file) {
+                return Err(fs_err);
+            }
+            let rel = asset_rel("scenarios", file);
+            match crate::scope::read_asset(&rel)? {
+                Some(raw) => Ok((
+                    raw,
+                    file.trim_end_matches(".yaml").trim_end_matches(".yml").to_string(),
+                    format!("内嵌 {rel}"),
+                )),
+                None => Err(fs_err),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

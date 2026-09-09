@@ -1,0 +1,9 @@
+# smoke —— 冒烟档：轻损伤，验链路活着与恢复行为
+# 数值对标：foxglove-sdk CI netem 默认四元组（delay 80ms/jitter 20ms/loss 2%）
+# 注意：rtt_ms 为输入口径（脚本对半折算，lo 双向各过一次 → 生效 RTT≈rtt_ms）
+rtt_ms: 80
+jitter_ms: 20
+loss: "2%"
+scope:
+  media: true
+  signaling: false

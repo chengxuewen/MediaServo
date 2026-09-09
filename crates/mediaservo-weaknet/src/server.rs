@@ -337,24 +337,11 @@ async fn get_scenarios() -> Result<Json<Value>, AppErr> {
 }
 
 fn list_yaml_dir(sub: &str) -> Value {
-    let Some(root) = scope::weaknet_d_root() else {
-        return json!({sub: [], "note": "无资产目录（WEAKNET_ASSETS_DIR / 二进制同级 weaknet.d / scripts/weaknet.d）"});
-    };
-    let dir = root.join(sub);
-    let mut names: Vec<String> = std::fs::read_dir(&dir)
-        .map(|rd| {
-            rd.filter_map(|e| {
-                e.ok().and_then(|e| {
-                    let p = e.path();
-                    (p.is_file() && p.extension().is_some_and(|x| x == "yaml" || x == "yml"))
-                        .then(|| p.file_stem().and_then(|s| s.to_str().map(str::to_string)))
-                        .flatten()
-                })
-            })
-            .collect()
-        })
-        .unwrap_or_default();
-    names.sort();
+    // T13 §车端面：fs 探测链 ∪ 编译期内嵌（单一源 = scope::list_assets，与 CLI 同规则）。
+    let names = scope::list_assets(sub);
+    if names.is_empty() {
+        return json!({sub: [], "note": "无资产（WEAKNET_ASSETS_DIR / 二进制同级 weaknet.d / scripts/weaknet.d / 内嵌均空）"});
+    }
     json!({sub: names})
 }
 
@@ -867,11 +854,31 @@ async fn post_scenario_run(
                 "file 必须为 basename（禁路径穿越/绝对路径，design §serve 安全 6）",
             ));
         }
-        let (path, stem) = scenario::resolve_serve_file(f).map_err(AppErr::from)?;
-        let src = std::fs::read_to_string(&path)
-            .map_err(|e| AppErr::from(Fail::env(format!("读 scenario {} 失败: {e}", path.display()))))?;
+        let (src, stem, disp) = match scenario::resolve_serve_file(f) {
+            Ok((path, stem)) => {
+                let src = std::fs::read_to_string(&path).map_err(|e| {
+                    AppErr::from(Fail::env(format!("读 scenario {} 失败: {e}", path.display())))
+                })?;
+                (src, stem, path.display().to_string())
+            }
+            // T13 内嵌兜底（车端 scp 单文件）：fs 缺位且 basename 干净才走内嵌。
+            Err(fs_err) => {
+                if !scenario::is_safe_asset_name(f) {
+                    return Err(AppErr::from(fs_err));
+                }
+                let rel = scenario::asset_rel("scenarios", f);
+                match scope::read_asset(&rel).map_err(AppErr::from)? {
+                    Some(raw) => (
+                        raw,
+                        f.trim_end_matches(".yaml").trim_end_matches(".yml").to_string(),
+                        format!("内嵌 {rel}"),
+                    ),
+                    None => return Err(AppErr::from(fs_err)),
+                }
+            }
+        };
         let plan = scenario::parse_plan_yaml(&src).map_err(|e| AppErr::from(Fail::bad_param(e)))?;
-        (plan, stem, path.display().to_string())
+        (plan, stem, disp)
     } else if let Some(inl) = v.get("inline") {
         let s = inl.as_str().ok_or_else(|| AppErr::bad("inline 需字符串"))?;
         if s.len() > MAX_INLINE_BYTES {
@@ -1228,7 +1235,7 @@ fn print_banner(cfg: &ServeConfig) {
 /// T9 回读观测点单一判定（status/状态帧/启动交叉共用）：ifb 纯上行会话（dir=In 且
 /// 无 egress 骨架痕迹——sig 腿存在时 root 已建，观测归 iface）→ ifb0 root 形。
 #[must_use]
-fn readback_target<'a>(st: Option<&State>, iface: &'a str) -> (&'a str, engine::LeafForm) {
+pub(crate) fn readback_target<'a>(st: Option<&State>, iface: &'a str) -> (&'a str, engine::LeafForm) {
     match st {
         Some(s) if s.ifb_used && s.dir == spec::Dir::In && s.sig_port.is_none() => {
             (crate::ifb::IFB_DEV, engine::LeafForm::Root)

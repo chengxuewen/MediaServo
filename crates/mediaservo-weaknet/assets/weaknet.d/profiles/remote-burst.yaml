@@ -1,0 +1,14 @@
+# remote-burst —— 遥控判别档：突发丢包（真实无线形态），配合 D274 三档做对照
+# 参数语义：loss gemodel p r (1-h) (1-k)，p=1-H 进入坏态概率、k=1-K 留在坏态
+# 数值来源：mediasoup-client #1105 社区实证 burst 形态（8% 均值、~4 包突发）+ 160ms RTT
+rtt_ms: 160
+jitter_ms: 30
+loss: "8%"
+gemodel:
+  r: "25%"
+  h: "0.2"
+  k: "0.05"
+rate_mbps: 4
+scope:
+  media: true
+  signaling: false

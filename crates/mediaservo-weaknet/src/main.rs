@@ -1,7 +1,7 @@
 //! mediaservo-weaknet — tc/netem 弱网模拟 agent（双端面单二进制）
 //!
 //! T4 = CLI 装配：`apply|set|status|clear` 全链 + `up|down` 别名经 engine/state；
-//! 未到场里程碑（serve=T6 / scenario run=T8 / --watch·config=T12）报因 exit2——C15 禁静默。
+//! T12 = 车端面到场：`--config weaknet.yaml`（config.rs 缺省供给源）+ `status --watch`（watch.rs 一屏重绘）。
 //! 措辞/退出码真值 = `scripts/weaknet.sh`（至退役日）；契约源 = 主仓 docs/plans/weaknet-agent/。
 //! 退出码：0 OK / 2 环境不足·施加失败 / 3 状态冲突（锁·他方 qdisc·state 背离）/ 4 参数非法。
 
@@ -11,13 +11,15 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 
+use mediaservo_weaknet::config;
 use mediaservo_weaknet::engine::{self, ApplyRequest, Env, Fail, Replay, Verify, Wn};
 use mediaservo_weaknet::fuse;
 use mediaservo_weaknet::scenario;
 use mediaservo_weaknet::scope::{self, Targeting};
 use mediaservo_weaknet::server;
-use mediaservo_weaknet::spec::{self, Dir as SpecDir, ImpairSpec, LossSpec, ScopeSel};
+use mediaservo_weaknet::spec::{self, Dir as SpecDir, IfaceKind, ImpairSpec, LossSpec, ScopeSel};
 use mediaservo_weaknet::state::{self, Dirs, State};
+use mediaservo_weaknet::watch;
 
 /// bash DEFAULT_DURATION——apply 唯一存活承诺。
 const DEFAULT_DURATION: u64 = 300;
@@ -147,7 +149,7 @@ struct ApplyArgs {
     /// stats 控制面 URL（缺省链：flag > env WEAKNET_SERVER_URL > 探测 out/server/etc/server.yaml）
     #[arg(long)]
     server_url: Option<String>,
-    /// 参数文件 weaknet.yaml（车端面，T12 到场）
+    /// 参数文件 weaknet.yaml（车端面；缺省链 flag > env WEAKNET_CONFIG > 二进制同级/cwd 探测）
     #[arg(long)]
     config: Option<String>,
     /// 只打印等价命令序列（含通道前缀，零内核/docker 触达）exit0
@@ -217,11 +219,11 @@ fn dispatch(cmd: Cmd) -> Wn<()> {
             engine::autoheal_if_expired(&dirs, &env)?; // bash：scenario 亦先验过期
             do_scenario(step, &dirs, &env)
         }
-        Cmd::Status { watch } => {
-            if watch {
-                return Err(Fail::env("status --watch 一屏重绘随 T12（watch.rs）到场"));
-            }
+        Cmd::Status { watch: is_watch } => {
             engine::autoheal_if_expired(&dirs, &env)?;
+            if is_watch {
+                return watch::run(&dirs, &env);
+            }
             do_status(&dirs, &env)
         }
         Cmd::Clear => {
@@ -273,7 +275,10 @@ fn dispatch(cmd: Cmd) -> Wn<()> {
             println!("{}", engine::clear(&dirs, &env, false)?);
             Ok(())
         }
-        Cmd::Watch => Err(Fail::env("watch 一屏重绘随 T12（status --watch 同路径）到场")),
+        Cmd::Watch => {
+            engine::autoheal_if_expired(&dirs, &env)?;
+            watch::run(&dirs, &env)
+        }
         Cmd::Watchdog { state_path } => {
             fuse::watchdog_run(&PathBuf::from(state_path), watchdog_expire).map_err(Fail::env)
         }
@@ -283,21 +288,70 @@ fn dispatch(cmd: Cmd) -> Wn<()> {
 // ---------- apply / set ----------
 
 fn do_apply(a: &ApplyArgs, dirs: &Dirs, env: &Env) -> Wn<()> {
-    reject_deferred(a)?;
-    let iface = resolve_iface(a.iface.as_deref());
+    // T12 车端面：weaknet.yaml = 缺省供给源（优先级 CLI flag > env > yaml > 文档化缺省）。
+    let cfg = config::load(a.config.as_deref())?;
+    let iface = resolve_iface(
+        a.iface
+            .as_deref()
+            .or_else(|| cfg.as_ref().and_then(|c| c.iface_or())),
+    );
     let base = match a.profile.as_deref() {
         Some(p) => load_profile(p)?,
-        None => ImpairSpec::default(),
+        None => cfg
+            .as_ref()
+            .and_then(|c| c.spec.clone())
+            .unwrap_or_default(),
     };
     let spec = merge_spec(&base, a)?;
-    let duration = a.duration.unwrap_or(DEFAULT_DURATION);
+    let duration = a
+        .duration
+        .or_else(|| cfg.as_ref().and_then(|c| c.duration))
+        .unwrap_or(DEFAULT_DURATION);
     spec::validate_duration(duration).map_err(Fail::bad_param)?;
-    let ports_flag = parse_ports(a.rtp_port.as_deref())?;
+    let mut ports_flag = parse_ports(a.rtp_port.as_deref())?;
+    if ports_flag.is_empty() && let Some(p) = cfg.as_ref().and_then(|c| c.ports.clone()) {
+        ports_flag = p;
+    }
     if a.dry_run {
         return print_dry_run(env, &spec, &iface, &ports_flag, a.signaling_port,
-            &format!("{duration}s（惰性自愈+watchdog；--forever 豁免位未暴露）"));
+            &format!("{duration}s（惰性自愈+watchdog；--forever 豁免位未暴露）"),
+        );
     }
-    let targeting = resolve_targeting(a, ports_flag)?;
+    let kind = engine::iface_kind_of(&iface);
+    let targeting = match resolve_targeting(a, ports_flag.clone()) {
+        Ok(t) => t,
+        Err(mut e) => {
+            // 反锁死规则层：物理口 + 无显式端口供给（flag/yaml 皆空、stats 也未解析成）→ 枚举指引报因。
+            if let Some(hint) =
+                config::physical_ports_hint(kind == IfaceKind::Physical, !ports_flag.is_empty())
+            {
+                e.msg.push_str(hint);
+            }
+            return Err(e);
+        }
+    };
+    // 操作层反锁死（design §车端面③）：物理口施加前打印影响面。
+    if kind == IfaceKind::Physical {
+        let impact = if targeting.pairs.is_empty() {
+            targeting
+                .ports
+                .iter()
+                .map(u16::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        } else {
+            format!(
+                "pairs {}",
+                targeting
+                    .pairs
+                    .iter()
+                    .map(|(l, r)| format!("{l}:{r}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        };
+        println!("影响面: {iface}/UDP/{impact}/倒计时 {duration}s（撤损: weaknet down）");
+    }
     let req = ApplyRequest {
         spec: spec.clone(),
         scope: targeting.scope,
@@ -342,7 +396,11 @@ fn do_apply(a: &ApplyArgs, dirs: &Dirs, env: &Env) -> Wn<()> {
 }
 
 fn do_set(a: &ApplyArgs, dirs: &Dirs, env: &Env) -> Wn<()> {
-    reject_deferred(a)?;
+    if a.config.is_some() {
+        return Err(Fail::bad_param(
+            "set 不消费 --config（weaknet.yaml 是 apply 的缺省供给源；set 基底=活跃 state）",
+        ));
+    }
     let prior = State::read_from(&dirs.state_json())
         .map_err(Fail::env)?
         .ok_or_else(|| Fail::bad_param("无 state（先 apply；set 不创建新现场）"))?;
@@ -491,15 +549,6 @@ fn merge_spec(base: &ImpairSpec, a: &ApplyArgs) -> Wn<ImpairSpec> {
     Ok(s)
 }
 
-fn reject_deferred(a: &ApplyArgs) -> Wn<()> {
-    // T5 到场：--stream/--device 已由 scope.rs 承接（resolve_targeting），此处仅剩 --config。
-    if a.config.is_some() {
-        return Err(Fail::env(
-            "--config（weaknet.yaml 车端面）随 T12（config.rs）到场",
-        ));
-    }
-    Ok(())
-}
 
 fn resolve_iface(cli: Option<&str>) -> String {
     engine::resolve_iface(cli)
@@ -695,19 +744,9 @@ fn do_status(dirs: &Dirs, env: &Env) -> Wn<()> {
     Ok(())
 }
 
+/// watchdog 存活摘要（真值源已上提 watch.rs，与 --watch 共用同一判据）。
 fn watchdog_state(dirs: &Dirs) -> String {
-    match fuse::read_pidfile(&dirs.watchdog_pid()) {
-        Ok(None) => "none".into(),
-        Ok(Some(e)) => {
-            let alive = Path::new(&format!("/proc/{}", e.pid)).exists()
-                && fuse::read_proc_starttime(e.pid) == Some(e.starttime);
-            if alive { "ok".into() } else { "dead（仅剩惰性自愈层）".into() }
-        }
-        Err(e) => {
-            eprintln!("weaknet: WARN {e}");
-            "协议违例".into()
-        }
-    }
+    watch::watchdog_value(dirs).into()
 }
 
 // ---------- scenario ----------
@@ -724,15 +763,13 @@ fn do_scenario(sub: ScenarioCmd, dirs: &Dirs, env: &Env) -> Wn<()> {
             let file = file.ok_or_else(|| {
                 Fail::bad_param("scenario run 需 --file（<名|*.yaml> [--no-baseline|--keep]；-h 看帮助）")
             })?;
-            let (path, name) = scenario::resolve_run_file(&file, dir.as_deref())?;
-            let raw = std::fs::read_to_string(&path)
-                .map_err(|e| Fail::env(format!("读 scenario {} 失败: {e}", path.display())))?;
+            let (raw, name, disp) = scenario::read_run_yaml(&file, dir.as_deref())?;
             let plan = scenario::parse_plan_yaml(&raw).map_err(Fail::bad_param)?;
             // 定向 = 段级 stats（bash do_scenario 不给 --stream；缺省同 do_apply）
             let targeting = scope::resolve_targeting(None, None, None, &[])?;
             let rs = scenario::RunSpec {
                 name,
-                file_disp: path.display().to_string(),
+                file_disp: disp,
                 plan,
                 no_baseline,
                 keep,
@@ -772,38 +809,15 @@ fn do_scenario(sub: ScenarioCmd, dirs: &Dirs, env: &Env) -> Wn<()> {
 }
 
 fn scenario_list() -> Wn<()> {
-    let root = weaknet_d_root().ok_or_else(|| {
-        Fail::env(
-            "无 scenario 资产目录（探测链：WEAKNET_ASSETS_DIR > 二进制同级 weaknet.d > cwd/二进制祖先 scripts/weaknet.d）",
-        )
-    })?;
-    let dir = root.join("scenarios");
-    if !dir.is_dir() {
-        return Err(Fail::env(format!(
-            "scenario 目录不存在：{}（设 WEAKNET_ASSETS_DIR 指向 weaknet.d 资产根）",
-            dir.display()
-        )));
-    }
-    let mut names: Vec<String> = Vec::new();
-    let rd = std::fs::read_dir(&dir)
-        .map_err(|e| Fail::env(format!("读 {} 失败: {e}", dir.display())))?;
-    for e in rd {
-        let e = e.map_err(|er| Fail::env(format!("read_dir 条目失败: {er}")))?;
-        let p = e.path();
-        let is_yaml = p
-            .extension()
-            .is_some_and(|x| x == "yaml" || x == "yml");
-        if is_yaml && p.is_file() && let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
-            names.push(stem.to_string());
-        }
-    }
-    names.sort();
+    // T13 §车端面：fs 探测链 ∪ 编译期内嵌（单一源 = scope::list_assets，与 serve /v1/scenarios 同形）。
+    let names = scope::list_assets("scenarios");
     if names.is_empty() {
-        println!("（{} 无 scenario yaml）", dir.display());
-    } else {
-        for n in names {
-            println!("{n}");
-        }
+        return Err(Fail::env(
+            "无 scenario 资产（WEAKNET_ASSETS_DIR > 二进制同级 weaknet.d > 祖先 scripts/weaknet.d > 内嵌 皆空）",
+        ));
+    }
+    for n in names {
+        println!("{n}");
     }
     Ok(())
 }
@@ -816,96 +830,43 @@ fn weaknet_d_root() -> Option<PathBuf> {
 // ---------- profile（emit.py 白名单语义的 serde_yaml 平移） ----------
 
 fn load_profile(name: &str) -> Wn<ImpairSpec> {
-    let path: PathBuf = if Path::new(name).extension().is_some_and(|e| {
-        e == "yaml" || e == "yml"
-    }) {
+    let parse = |raw: &str, disp: &str| -> Wn<ImpairSpec> {
+        let doc: Value = serde_yaml::from_str(raw)
+            .map_err(|e| Fail::bad_param(format!("profile YAML 非法 {disp}: {e}")))?;
+        config::spec_from_profile_doc(&doc).map_err(Fail::bad_param)
+    };
+    // 1) 文件形（带扩展名）：直读 fs（bash 同位）。
+    if Path::new(name).extension().is_some_and(|e| e == "yaml" || e == "yml") {
         let p = PathBuf::from(name);
-        if p.is_file() {
-            p
-        } else {
+        if !p.is_file() {
             return Err(Fail::bad_param(format!("无 profile 文件: {name}")));
         }
-    } else {
-        let root = weaknet_d_root().ok_or_else(|| {
-            Fail::env(format!(
-                "无 profile '{name}'（且无资产目录：WEAKNET_ASSETS_DIR / 二进制同级 weaknet.d / scripts/weaknet.d）"
-            ))
-        })?;
-        let pdir = root.join("profiles");
-        let p = pdir.join(format!("{name}.yaml"));
-        if !p.is_file() {
-            let avail = std::fs::read_dir(&pdir)
-                .map(|rd| {
-                    rd.filter_map(|e| {
-                        e.ok().and_then(|e| {
-                            let x = e.path();
-                            (x.extension().is_some_and(|s| s == "yaml")
-                                .then(|| x.file_stem().and_then(|s| s.to_str().map(str::to_string))))
-                            .flatten()
-                        })
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                })
-                .unwrap_or_default();
-            return Err(Fail::bad_param(format!(
-                "无 profile: {name}（可用: {avail}；目录 {}）",
-                pdir.display()
-            )));
+        let raw = std::fs::read_to_string(&p)
+            .map_err(|e| Fail::env(format!("读 profile {} 失败: {e}", p.display())))?;
+        return parse(&raw, &p.display().to_string());
+    }
+    // 2) 名形：fs 资产目录优先（§车端面寻径单函数 = scope::read_asset）。
+    let fs_hit = weaknet_d_root()
+        .map(|root| root.join("profiles").join(format!("{name}.yaml")))
+        .filter(|p| p.is_file());
+    if let Some(p) = fs_hit {
+        let raw = std::fs::read_to_string(&p)
+            .map_err(|e| Fail::env(format!("读 profile {} 失败: {e}", p.display())))?;
+        return parse(&raw, &p.display().to_string());
+    }
+    // 3) 内嵌兜底（T13：车端 scp 单文件 `up smoke` 零资产依赖；名形才允许，路径穿越不入内嵌）。
+    if scenario::is_safe_asset_name(name) {
+        let rel = scenario::asset_rel("profiles", name);
+        if let Some(raw) = scope::read_asset(&rel)? {
+            return parse(&raw, &format!("内嵌 {rel}"));
         }
-        p
-    };
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|e| Fail::env(format!("读 profile {} 失败: {e}", path.display())))?;
-    let doc: Value = serde_yaml::from_str(&raw)
-        .map_err(|e| Fail::bad_param(format!("profile YAML 非法 {}: {e}", path.display())))?;
-    profile_to_spec(&doc).map_err(Fail::bad_param)
+    }
+    Err(Fail::bad_param(format!(
+        "无 profile: {name}（可用: {}；源: WEAKNET_ASSETS_DIR / 二进制同级 weaknet.d / scripts/weaknet.d / 内嵌）",
+        scope::list_assets("profiles").join(" ")
+    )))
 }
 
-/// emit.py `profile` 消费形 → from_flat_json 键形：`reorder_pct→reorder`、`gemodel{r,h,k}→[r,h,k]`、
-/// loss 数值 stringify；`scope`/`clear` 非参数字段剥离（signaling=true 时 WARN——T5 消费）。
-fn profile_to_spec(doc: &Value) -> Result<ImpairSpec, String> {
-    if doc
-        .get("scope")
-        .and_then(|s| s.get("signaling"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        eprintln!("weaknet: WARN profile scope.signaling=true——信令腿消费随 T5 到场（当前用 --signaling-port 显式）");
-    }
-    let mut flat = serde_json::Map::new();
-    for k in ["rtt_ms", "jitter_ms", "rate_mbps", "seed"] {
-        if let Some(v) = doc.get(k) {
-            flat.insert(k.to_string(), v.clone());
-        }
-    }
-    if let Some(l) = doc.get("loss") {
-        flat.insert("loss".to_string(), stringify(l));
-    }
-    if let Some(r) = doc.get("reorder_pct") {
-        flat.insert("reorder".to_string(), stringify(r));
-    }
-    if let Some(g) = doc.get("gemodel") {
-        let trio: Vec<Value> = ["r", "h", "k"]
-            .iter()
-            .filter_map(|k| g.get(*k))
-            .map(stringify)
-            .collect();
-        if trio.len() != 3 {
-            return Err("gemodel 需 dict{r,h,k}".to_string());
-        }
-        flat.insert("gemodel".to_string(), Value::Array(trio));
-        flat.insert("loss_mode".to_string(), Value::String("gemodel".into()));
-    }
-    ImpairSpec::from_flat_json(&Value::Object(flat))
-}
-
-fn stringify(v: &Value) -> Value {
-    match v {
-        Value::String(s) => Value::String(s.clone()),
-        other => Value::String(other.to_string()),
-    }
-}
 
 // ---------- __watchdog 执行体（design §fuse rev-2.2 跨通道合同） ----------
 

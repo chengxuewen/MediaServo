@@ -634,4 +634,41 @@ mod tests {
         assert_eq!(legs[3].matches, vec![(MatchKind::Sport, 5001), (MatchKind::Dport, 40010)]);
         assert!(build_filter_legs(ScopeSel::Device, IfaceKind::Physical, Dir::Both, &[], &[]).is_err());
     }
+
+    /// T12C 反锁死规则层钉（design §车端面①）：全部媒体腿 protocol 17 合取 +
+    /// 端口精确匹配（无通配形：match 非空、端口非 0、flowid 恒 1:10）——
+    /// TCP/SSH/DNS 结构性不进 netem 的 builder 层保证，vehicle netns e2e 另证行为面。
+    #[test]
+    fn legs_anti_lockout_pins_protocol_and_exact_ports() {
+        for scope in [ScopeSel::Media, ScopeSel::Stream, ScopeSel::Device] {
+            for dir in [Dir::Out, Dir::In, Dir::Both] {
+                for iface in [IfaceKind::Loopback, IfaceKind::Physical] {
+                    let legs = build_filter_legs(scope, iface, dir, &[40010, 40012], &[(40020, 5000)])
+                        .unwrap_or_else(|e| panic!("{scope:?}/{dir:?}/{iface:?}: {e}"));
+                    assert!(!legs.is_empty());
+                    for leg in &legs {
+                        assert_eq!(leg.protocol, UDP_PROTOCOL, "媒体腿必须 protocol 17（UDP）");
+                        assert_eq!(leg.flowid, MEDIA_FLOWID);
+                        assert!(!leg.matches.is_empty(), "禁空 match（通配形）");
+                        for (kind, port) in &leg.matches {
+                            assert!(*port > 0, "端口 0 = 通配形，禁");
+                            assert!(
+                                matches!(kind, MatchKind::Sport | MatchKind::Dport),
+                                "仅端口匹配维度（无地址/前缀形）"
+                            );
+                        }
+                        // 形状钉：Media=单 match（每口一腿）；Stream/Device=双 match AND
+                        match scope {
+                            ScopeSel::Media => assert_eq!(leg.matches.len(), 1),
+                            _ => assert_eq!(leg.matches.len(), 2),
+                        }
+                    }
+                    if dir == Dir::Both {
+                        let expect = if scope == ScopeSel::Media { 4 } else { 2 };
+                        assert_eq!(legs.len(), expect, "{scope:?} both 腿数");
+                    }
+                }
+            }
+        }
+    }
 }

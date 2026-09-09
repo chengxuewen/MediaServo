@@ -1,0 +1,14 @@
+# example-cell-edge-40s —— 阶梯突变示例（T7 验收用迷你形；完整 40s 形按 QNS 100/150/200 思想）
+# at_s 严格递增（emit 校验）；参数保持到下一步；baseline_s 缺省=steps 总长+尾
+scenario:
+  baseline_s: 10
+  steps:
+    - at_s: 0
+      set: {rtt_ms: 100}
+    - at_s: 6
+      set: {rtt_ms: 150, loss: "5%"}
+    - at_s: 12
+      set: {rtt_ms: 200, loss: "10%", rate_mbps: 2}
+    - at_s: 18
+      set: {rtt_ms: 0, jitter_ms: 0, loss: "0%"}   # 恢复步（repeat 轮判据的定长替代）
+  clear: false

@@ -14,6 +14,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use rust_embed::Embed;
 use serde::Deserialize;
 
 use crate::engine::{Env, Fail, Wn, probe_channel, tc_exec};
@@ -317,6 +318,64 @@ pub fn weaknet_d_root() -> Option<PathBuf> {
     None
 }
 
+// ---------- 资产内嵌兜底（§车端面 M4′：二进制同级 weaknet.d 优先、rust-embed 编译期兜底；
+// CLI 与 serve 单一函数钉死）——scp 单文件即用（up smoke 不依赖资产目录） ----------
+
+/// profile/scenario yaml 编译期内嵌（assets/weaknet.d/；debug-embed 已开=调试构建同样自足）。
+#[derive(Embed)]
+#[folder = "assets/weaknet.d/"]
+struct EmbeddedAssets;
+
+/// 读资产相对路径（形如 "profiles/smoke.yaml"）：fs 命中优先，无则内嵌；两源皆缺=Ok(None)。
+pub fn read_asset(rel: &str) -> Wn<Option<String>> {
+    if let Some(root) = weaknet_d_root() {
+        let p = root.join(rel);
+        if p.is_file() {
+            let raw = std::fs::read_to_string(&p)
+                .map_err(|e| Fail::env(format!("读资产 {} 失败: {e}", p.display())))?;
+            return Ok(Some(raw));
+        }
+    }
+    Ok(EmbeddedAssets::get(rel).map(|f| String::from_utf8_lossy(&f.data).into_owned()))
+}
+
+/// 列举某子目录（"profiles"/"scenarios"）可用资产名（stem）：fs ∪ 内嵌，去重升序。
+pub fn list_assets(sub: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    if let Some(root) = weaknet_d_root()
+        && let Ok(rd) = std::fs::read_dir(root.join(sub))
+    {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_file()
+                && p.extension().is_some_and(|x| x == "yaml" || x == "yml")
+                && let Some(stem) = p.file_stem().and_then(|s| s.to_str())
+                && !names.iter().any(|n| n == stem)
+            {
+                names.push(stem.to_string());
+            }
+        }
+    }
+    let prefix = format!("{sub}/");
+    for key in EmbeddedAssets::iter() {
+        let Some(rest) = key.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Some(stem) = rest.strip_suffix(".yaml").or_else(|| rest.strip_suffix(".yml")) else {
+            continue;
+        };
+        // 内嵌树只认一层子目录直下文件（防嵌套键泄露进平铺名单）
+        if stem.is_empty() || stem.contains('/') {
+            continue;
+        }
+        if !names.iter().any(|n| n == stem) {
+            names.push(stem.to_string());
+        }
+    }
+    names.sort();
+    names
+}
+
 // ---------- server_url 解析链（flag > env WEAKNET_SERVER_URL > 探测 server.yaml） ----------
 
 /// 纯链（三源全部注入——测试零环境触碰）。yaml 探测 = listen.port，host 回环缺省。
@@ -517,6 +576,26 @@ impl StatsClient {
             }
         }
         Err(Fail::env("GET stats 401：重登后仍拒（账号/角色变更？）"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 内嵌兜底基线（T13 §车端面）：无论 fs 探测链命中与否，内嵌 4 profile + 1 scenario
+    /// 恒可达（scp 单文件语义）；未知键 = None（禁假命中）。
+    #[test]
+    fn embedded_assets_are_always_resolvable() {
+        let smoke = read_asset("profiles/smoke.yaml").unwrap();
+        assert!(smoke.is_some() && smoke.unwrap().contains("rtt_ms: 80"));
+        let names = list_assets("profiles");
+        for n in ["smoke", "cell-edge", "bandwidth-wall", "remote-burst"] {
+            assert!(names.contains(&n.to_string()), "{n} ∈ {names:?}");
+        }
+        assert!(list_assets("scenarios").contains(&"example-cell-edge-40s".to_string()));
+        assert_eq!(read_asset("profiles/不存在的.yaml").unwrap(), None);
+        assert!(list_assets("profiles").iter().all(|n| !n.contains('/')));
     }
 }
 

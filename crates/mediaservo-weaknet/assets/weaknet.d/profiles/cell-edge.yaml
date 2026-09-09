@@ -1,0 +1,9 @@
+# cell-edge —— 弱蜂窝档：大时延+高均匀丢包+窄带宽（阶梯突变请用 scenarios/cell-edge-40s）
+# 分档思想源自 QUIC interop QNS（rtt 100/150/200 阶梯），本档取其最重静态点
+rtt_ms: 300
+jitter_ms: 80
+loss: "15%"
+rate_mbps: 1.5
+scope:
+  media: true
+  signaling: false

@@ -1,0 +1,7 @@
+# bandwidth-wall —— 纯带宽墙：零时延零丢包，仅 htb rate 天花板
+# 0.2Mbit = foxglove「几乎必挂」锚点（D274 A/B 档在该激励下判别力已实盘）
+rate_mbps: 0.2
+loss: "0%"
+scope:
+  media: true
+  signaling: false
