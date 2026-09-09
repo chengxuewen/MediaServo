@@ -649,22 +649,20 @@ pub fn counters_reset(pre: u64, post: u64) -> bool {
 
 /// apply 时落盘的撤除计划（顺序敏感：§ifb 合同 T9 形制先 ingress 后 root；created_ifb 恒
 /// false 于 M0——真值到场随 T9，此分支先行入计划语义钉）。
+///
+/// **root-del 恒常无条件**（bash do_clear parity）：clear=救火通道，步失败经 is_not_exist
+/// 幂等化（双发互踩可接受）；外米 qdisc 在 apply 时已被 guard_foreign_root 拦在门外，
+/// 能活到 clear 阶段的 root 必是我方或我方残留——都该删。前版 created_root 门控
+/// （救援轮「比 bash 更严」）即 **PIT-187 clear 留树 bug 根因**（T7 实盘三连复现）。
 #[must_use]
-pub fn plan_teardown(
-    _channel: &Channel,
-    iface: &str,
-    created_root: bool,
-    created_ifb: bool,
-) -> Vec<Vec<String>> {
+pub fn plan_teardown(_channel: &Channel, iface: &str, created_ifb: bool) -> Vec<Vec<String>> {
     let mut steps = Vec::new();
     if created_ifb {
         // ponytail: ifb 真路径随 T9（§ifb teardown 序）——此处先钉形不执行
         steps.push(vec!["qdisc".into(), "del".into(), "dev".into(), iface.into(), "ingress".into()]);
         steps.push(vec!["qdisc".into(), "del".into(), "dev".into(), "ifb0".into(), "root".into()]);
     }
-    if created_root {
-        steps.push(vec!["qdisc".into(), "del".into(), "dev".into(), iface.into(), "root".into()]);
-    }
+    steps.push(vec!["qdisc".into(), "del".into(), "dev".into(), iface.into(), "root".into()]);
     steps
 }
 
@@ -927,7 +925,7 @@ pub fn replay(
                 }),
                 Channel::LocalRoot => None,
             },
-            steps: plan_teardown(&channel, &req.iface, created_root_pre, false),
+            steps: plan_teardown(&channel, &req.iface, false),
         },
     };
     st.write_to(&dirs.state_json()).map_err(Fail::env)?;
@@ -1169,8 +1167,8 @@ mod tests {
 
     #[test]
     fn plan_teardown_order_ifb_then_own_root() {
-        // §ifb 撤除序：先断镜像 ingress → ifb0 root → 我方 iface root（仅 created 才入计划）。
-        let steps = plan_teardown(&Channel::LocalRoot, "eth0", true, true);
+        // §ifb 撤除序：先断镜像 ingress → ifb0 root → iface root；root-del 恒在（PIT-187 后不门控）。
+        let steps = plan_teardown(&Channel::LocalRoot, "eth0", true);
         assert_eq!(
             steps,
             vec![
@@ -1180,10 +1178,14 @@ mod tests {
             ]
         );
         assert_eq!(
-            plan_teardown(&Channel::LocalRoot, "lo", true, false),
+            plan_teardown(&Channel::LocalRoot, "lo", false),
             vec![v(&["qdisc", "del", "dev", "lo", "root"])]
         );
-        assert!(plan_teardown(&Channel::LocalRoot, "lo", false, false).is_empty());
+        // 回归钉：root 非本次创建（旧 created_root=false 语境）计划也必须含 root-del——PIT-187
+        assert_eq!(
+            plan_teardown(&Channel::LocalRoot, "wlan0", false),
+            vec![v(&["qdisc", "del", "dev", "wlan0", "root"])]
+        );
     }
 
     #[test]

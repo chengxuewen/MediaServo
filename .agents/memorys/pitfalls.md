@@ -1543,3 +1543,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **根因**: watchdog 长驻子进程 spawn 只 null 了 stdin；stdout/stderr 继承管道写端 → 父进程退出后写端仍被 watchdog 持有，读端永远等不到 EOF。
 - **解法**: 守护/看门狗类 spawn **三流全 Stdio::null()**（bash 原型 `>/dev/null 2>&1 < /dev/null` 同形）；诊断信息经 timeline 落盘不丢，不靠 stdio。
 - **验证**: 审所有长驻 spawn 的 Stdio::null 三行齐（`grep -A3 "process_group" src/fuse.rs` 见三 null）；管道冒烟 `timeout 10 sh -c '… apply --duration 60 --dry-run | cat'` 秒回。
+
+## PIT-187: teardown「比 bash 更严」的 created_root 门控 = clear 留树 bug (2026-09-08)
+- **症状**: CLI/REST 二次 apply（root 已由前次创建，state.created_root=false）→ clear/watchdog 均 200/幂等回声，但 `htb 1: + netem 10:` 全树滞留 lo（T7 实盘三连复现）。
+- **根因**: 救援轮把 bash `do_clear` 的无条件 `qdisc del root` 改成按 `created_root` 归因门控（当时自评「比 bash 更严」）——但 root 存在且 guard 放行时只可能是「我方前次会话残留」，门控把该删的情况删成了空计划；空计划 + state 删除 + 200 回声 = 全链路无错误信号的静默留树。
+- **解法**: `plan_teardown` root-del 恒常无条件（bash parity），幂等交给 `is_not_exist`；`created_root` 降级为状态记录字段（status 观测用）。外米 qdisc 的防线本来就在 apply 期 guard_foreign_root，不在撤除期。
+- **验证**: 复现链双 apply→created_root=false→clear→`tc qdisc show dev lo`=noqueue；回归钉=plan_teardown created=false 案断言含 root-del 步（engine tests）。
+- **教训泛化**: 移植既有工具语义时「更严格」不是默认改良——先证原语义为何宽松（bash 的宽松=救火通道要无条件），再谈收紧。
