@@ -171,6 +171,10 @@ struct ServeArgs {
     /// server 面 stats/admin URL（缺省 flag > env WEAKNET_SERVER_URL > 探测 out/server/etc/）
     #[arg(long)]
     server_url: Option<String>,
+    /// token 文件：存在则读（强制 0600）、缺则生成（0600）——优先级 --token flag > env WEAKNET_TOKEN
+    /// > 本文件 > CSPRNG（design §D2 sF5；unit 侧传 {dir}/run/weaknet.token = T4）
+    #[arg(long)]
+    token_file: Option<std::path::PathBuf>,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -239,6 +243,7 @@ fn dispatch(cmd: Cmd) -> Wn<()> {
                 args.listen.as_deref(),
                 args.lan,
                 args.token.as_deref(),
+                args.token_file.as_deref(),
                 args.server_url.as_deref(),
             ))
         }

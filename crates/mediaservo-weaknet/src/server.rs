@@ -16,11 +16,12 @@
 
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::io::Read as _;
+use std::io::{Read as _, Write as _};
+use std::path::Path as StdPath;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::extract::{Path, Query, Request, State as AxumState};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -50,6 +51,37 @@ const MAX_INLINE_BYTES: usize = 32 * 1024;
 /// ev 字段单帧事件上限。ponytail: 防 CLI 刷屏单帧爆量，50 条足够面板滚动，超限丢弃老行
 /// （cursor 照推进）。
 const MAX_EV_LINES: usize = 50;
+/// SIGTERM/SIGINT 优雅退出②步「drive 静默」总预算（design §D2 lck-F1）：超时弃 clear 直退、
+/// 撤网交幸存 watchdog——handler 本体绝不无界阻塞（否则撞 oxmgr grace 后 SIGKILL，优雅路成死路）。
+const DRIVE_QUIET_BUDGET: Duration = Duration::from_secs(2);
+
+// ---------- 优雅退出五步序（design §D2〔sF2 lck-F1〕；纯决策见 [`shutdown_plan`]） ----------
+
+/// SIGTERM/SIGINT 优雅退出步骤（映射 design §D2 五步；④「state 落 inactive」由 [`engine::clear`]
+/// 内 `remove_file` 承担——clear 已做则跳过，故不单列变体）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShutdownStep {
+    /// ① 置 scenario::stop 旗标（复用 post/request_stop 机制——属主存活写 cancel 文件，runner ≤1s 自收口）。
+    WriteStopFlag,
+    /// ② 等在飞 drive 静默（≤ DRIVE_QUIET_BUDGET；无在飞视作已静默）。
+    AwaitDriveQuiet,
+    /// ③④ clear 本 statedir 的活跃施压（engine::clear 幂等：no-queue→Ok；④ state 落 inactive 内含）。
+    ClearPressure,
+    /// ⑤ 退出（serve_main 返回 → main 退 0）。
+    Exit,
+}
+
+/// 五步序纯决策。`drive_settled=false`（②超时）⇒ 弃 ③④ 直 ⑤（lck-F1：在飞 step 仍可能落地 tc，
+/// 此刻 clear 与它竞态反致残留；撤网正确性不依赖优雅退出，交 deadline watchdog〔design D5-3〕）。
+/// `state_present=false`（无施压 / 已被 drive 的 finish_abort 撤净）⇒ ③④ 天然幂等跳过。
+pub(crate) fn shutdown_plan(drive_settled: bool, state_present: bool) -> Vec<ShutdownStep> {
+    let mut steps = vec![ShutdownStep::WriteStopFlag, ShutdownStep::AwaitDriveQuiet];
+    if drive_settled && state_present {
+        steps.push(ShutdownStep::ClearPressure);
+    }
+    steps.push(ShutdownStep::Exit);
+    steps
+}
 
 // ---------- 装配与共享态 ----------
 
@@ -76,6 +108,8 @@ struct Ctx {
     stats: Option<Mutex<StatsClient>>,
     /// capabilities 缓存（refresh 重探后覆写）。
     caps: Mutex<Option<Capabilities>>,
+    /// 在飞 scenario drive 句柄（①写 stop 旗标后 ②await 它自收口；至多一个——job 独占门）。
+    drive: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl Ctx {
@@ -88,7 +122,7 @@ impl Ctx {
                 .ok()
                 .map(Mutex::new)
         });
-        Self { cfg, stats, caps: Mutex::new(None) }
+        Self { cfg, stats, caps: Mutex::new(None), drive: Mutex::new(None) }
     }
 }
 
@@ -896,13 +930,15 @@ async fn post_scenario_run(
     let c = ctx.clone();
     let (rs, exec, dirs, cur) =
         blocking(move || scenario_prepare(&c, plan, name, file_disp)).await?;
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         let out = scenario::drive(rs, exec, dirs, cur).await;
         match &out.aborted {
             Some(r) => eprintln!("weaknet(serve): scenario abort: {r}（elapsed_s={}）", out.elapsed_s),
             None => println!("weaknet(serve): {}", out.summary),
         }
     });
+    // 优雅退出② await 此句柄（drive 见 cancel 旗标→finish_abort 自收口+clear；至多一个=job 独占门）。
+    *ctx.drive.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
     Ok(Json(json!({
         "ok": true,
         "job": { "name": job_name, "done": 0, "total": total },
@@ -1118,12 +1154,13 @@ fn tail_ev(ctx: &Ctx, fs: &mut FrameState) -> Option<Value> {
 
 // ---------- serve 主体 ----------
 
-/// `serve` 子命令入口（main.rs 建 runtime 后 block_on）：门槛校验 → token → 启动交叉判定
-/// → 横幅 → bind + 惰性过期 tick + axum::serve。
+/// `serve` 子命令入口（main.rs 建 runtime 后 block_on）：门槛校验 → token（含 --token-file）
+/// → 启动交叉判定 → 横幅 → bind + 惰性过期 tick + axum::serve ⊕ SIGTERM/SIGINT 五步优雅退出。
 pub async fn serve_main(
     listen: Option<&str>,
     lan: bool,
     token_opt: Option<&str>,
+    token_file: Option<&StdPath>,
     server_url_flag: Option<&str>,
 ) -> Wn<()> {
     let (host, port) = parse_listen(listen.unwrap_or(DEFAULT_LISTEN))?;
@@ -1138,11 +1175,16 @@ pub async fn serve_main(
         // 启动即验（免运行到写路径才炸）；local 判据零副作用，auto/sidecar 的 ensure 留按需。
         engine::probe_channel(&env, &engine::resolve_iface(None)).map(|_| ())?;
     }
-    let token = std::env::var("WEAKNET_TOKEN")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| token_opt.map(str::to_owned).filter(|s| !s.is_empty()))
-        .map_or_else(gen_token, Ok)?;
+    // token 优先级（design §D2 sF5）：--token flag > WEAKNET_TOKEN env > --token-file（读/生成）> CSPRNG。
+    let token = if let Some(t) = token_opt.filter(|s| !s.is_empty()) {
+        t.to_owned()
+    } else if let Some(t) = std::env::var("WEAKNET_TOKEN").ok().filter(|s| !s.is_empty()) {
+        t
+    } else if let Some(pf) = token_file {
+        resolve_token_file(pf)?
+    } else {
+        gen_token()?
+    };
     if lan && token.len() < 16 {
         println!(
             "weaknet(serve): WARN --lan 且 token 短于 16 字符——跨机面建议 WEAKNET_TOKEN 给足熵"
@@ -1175,9 +1217,67 @@ pub async fn serve_main(
     let listener = tokio::net::TcpListener::bind((host.as_str(), port))
         .await
         .map_err(|e| Fail::env(format!("bind {host}:{port} 失败: {e}（占用？--listen 换端口）")))?;
-    axum::serve(listener, build_router_with_ctx(ctx))
-        .await
-        .map_err(|e| Fail::env(format!("serve 异常退出: {e}")))
+    // SIGTERM/SIGINT 优雅退出（design §D2 五步序）。listener 已 bind（可连），信号监听一旦建立即进入
+    // 等待；任一终止信号到达 → 丢弃 serve future（关 listener 停接单）→ 走完五步 → 返回退 0。
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .map_err(|e| Fail::env(format!("SIGTERM 监听建立失败: {e}")))?;
+    tokio::select! {
+        r = axum::serve(listener, build_router_with_ctx(ctx.clone())) => {
+            return r.map_err(|e| Fail::env(format!("serve 异常退出: {e}")));
+        }
+        _ = tokio::signal::ctrl_c() => println!("weaknet(serve): SIGINT——优雅退出五步序"),
+        _ = sigterm.recv() => println!("weaknet(serve): SIGTERM——优雅退出五步序"),
+    }
+    graceful_shutdown(ctx).await;
+    Ok(())
+}
+
+/// SIGTERM/SIGINT 优雅退出执行体（design §D2 五步；顺序/预算分支的纯判据见 [`shutdown_plan`]）。
+/// 语义锚：lck-F1 无界阻塞=撞 oxmgr grace SIGKILL 死路 → ②await 2s 预算，超时弃 clear；runner 已常听
+/// SIGTERM+finish_abort 自收口（scenario.rs 实证）故②多为秒内即回；兜底=幸存 watchdog（apply 即 spawn
+/// 的独立 re-exec 进程，pgid 脱离，serve 死它不死）——撤网正确性不依赖本函数〔design D5-3〕。
+async fn graceful_shutdown(ctx: Arc<Ctx>) {
+    let dirs = ctx.cfg.dirs.clone();
+    let env = ctx.cfg.env.clone();
+    // ① 置 scenario::stop 旗标（复用 post 机制；无在飞 job 时幂等 no-op）。
+    let _ = blocking(move || scenario::stop(&dirs)).await;
+    println!("weaknet(serve): 优雅退出① stop 旗标已置");
+    // ② 等在飞 drive 静默（≤ DRIVE_QUIET_BUDGET）。无在飞句柄 ⇒ 视作已静默（静态施压走 ③ 主动撤）。
+    let drive = ctx.drive.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let drive_settled = match drive {
+        Some(h) => tokio::time::timeout(DRIVE_QUIET_BUDGET, h).await.is_ok(),
+        None => true,
+    };
+    println!(
+        "weaknet(serve): 优雅退出② drive 静默（{}）",
+        if drive_settled { "预算内自收口" } else { "超时→弃 clear 交 watchdog" }
+    );
+    // ③④ 裁决：drive 已静默 ∧ 本 statedir 有活跃施压 ⇒ engine::clear（quiet：不再 ensure 通道打扰，
+    // teardown 照单撤 + rm state〔=④落 inactive〕）。超时或无施压 ⇒ shutdown_plan 略过本步。
+    let dirs_for_read = ctx.cfg.dirs.clone();
+    let state_present = blocking(move || {
+        Ok::<bool, Fail>(
+            State::read_from(&dirs_for_read.state_json())
+                .map(|s| s.is_some())
+                .unwrap_or(false),
+        )
+    })
+    .await
+    .unwrap_or(false);
+    for step in shutdown_plan(drive_settled, state_present) {
+        if step == ShutdownStep::ClearPressure {
+            let (d, e) = (ctx.cfg.dirs.clone(), env.clone());
+            match blocking(move || engine::clear(&d, &e, true)).await {
+                Ok(msg) => println!("weaknet(serve): 优雅退出③④ clear 活跃施压+落 inactive：{msg}"),
+                Err(f) => println!(
+                    "weaknet(serve): 优雅退出③④ WARN clear 失败（残留归 watchdog/人工）：{}",
+                    f.msg
+                ),
+            }
+        }
+    }
+    // ⑤ 退出：serve_main 返回 Ok → main 结束 → 进程 exit 0（runtime drop 顺带回收 ticker/残余任务）。
+    println!("weaknet(serve): 优雅退出⑤ exit 0");
 }
 
 /// 解析 `--listen`（host:port；支持 [::1]:9810 括号形）。
@@ -1210,6 +1310,74 @@ fn gen_token() -> Wn<String> {
     Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// token 文件权限闸（lck-F10/F11）：既存文件 mode 可能被 daemon umask 放宽（022→644 全员可读）；
+/// 读前校验须=0600 否则拒用报因；新建 create 后 set_permissions(0600) 再读回复核。非 unix 无 POSIX
+/// mode 概念 → no-op（token 仍读写，仅不强制位）。
+#[cfg(unix)]
+fn enforce_token_mode(path: &StdPath, apply: bool) -> Wn<()> {
+    use std::os::unix::fs::PermissionsExt;
+    if apply {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| Fail::env(format!("token 文件 {} chmod 0600 失败: {e}", path.display())))?;
+    }
+    let got = std::fs::metadata(path)
+        .map_err(|e| Fail::env(format!("token 文件 {} stat 失败: {e}", path.display())))?
+        .permissions()
+        .mode()
+        & 0o777;
+    if got != 0o600 {
+        return Err(Fail::env(format!(
+            "token 文件 {} 权限 {got:#o}≠0600（既存文件可能被 daemon umask 放宽=可读泄漏；chmod 600 或 rm 后重生成）",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn enforce_token_mode(_path: &StdPath, _apply: bool) -> Wn<()> {
+    Ok(())
+}
+
+/// `--token-file`（design §D2 sF5）：存在则读（trim，强制 0600 校验）、缺则 CSPRNG 生成并原子落盘
+/// （create_new + set 0600 + 读回复核）。父目录自动建；token 真源写 run/ 由 unit 侧传路径（T4 的事）。
+fn resolve_token_file(path: &StdPath) -> Wn<String> {
+    if path.exists() {
+        enforce_token_mode(path, false)?; // 既存：先校验（lck-F10：create mode 对既存文件不生效）
+        let raw = std::fs::read_to_string(path)
+            .map_err(|e| Fail::env(format!("读 token 文件 {} 失败: {e}", path.display())))?;
+        let tok = raw.trim();
+        if tok.is_empty() {
+            return Err(Fail::env(format!("token 文件 {} 内容为空", path.display())));
+        }
+        return Ok(tok.to_owned());
+    }
+    let tok = gen_token()?;
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| Fail::env(format!("建 token 目录 {} 失败: {e}", parent.display())))?;
+    }
+    // create_new：与并发首建竞态→AlreadyExists 视作对手已落，转读校验（幂等）。
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
+        Ok(mut f) => {
+            f.write_all(tok.as_bytes())
+                .map_err(|e| Fail::env(format!("写 token 文件 {} 失败: {e}", path.display())))?;
+            f.flush().ok();
+            drop(f);
+            enforce_token_mode(path, true)?; // 新建：chmod 0600 + 读回复核（lck-F10）
+            println!(
+                "weaknet(serve): token 已生成写入 {}（0600；轮转=rm 文件 + 重启 unit）",
+                path.display()
+            );
+            Ok(tok)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => resolve_token_file(path),
+        Err(e) => Err(Fail::env(format!("创建 token 文件 {} 失败: {e}", path.display()))),
+    }
+}
+
 /// 呈现规则（design §API Token 条）：loopback 横幅 = 整行可复制 URL；--lan = 仅 token
 /// （URL 带 token 会进 shell 历史/日志）。
 fn print_banner(cfg: &ServeConfig) {
@@ -1227,6 +1395,10 @@ fn print_banner(cfg: &ServeConfig) {
     }
     println!(
         "weaknet serve 安全栈: Host 白名单恒开 + Bearer（SSE 唯一 ?token= 豁免）+ CORS 全关 + 写路径 flock 瞬持"
+    );
+    // 反代形（wW8）：经 server 后台入口（Caddy）时浏览器到不了上面的 :9810，须走 /weaknet/ 前缀。
+    println!(
+        "weaknet serve 反代入口: 经 server 后台访问时开 http://<当前 host>/weaknet/ —— token 见部署树 run/weaknet.token（与上方直连 token 同值）"
     );
 }
 
@@ -1527,5 +1699,84 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn drive_quiet_budget_is_two_seconds() {
+        // design §D2 lck-F1 预算钉：②步总预算恰为 2s（改值=撞 oxmgr grace 的回归前哨）。
+        assert_eq!(DRIVE_QUIET_BUDGET, Duration::from_secs(2));
+    }
+
+    #[test]
+    fn shutdown_plan_writes_flag_then_awaits_drive_first() {
+        let p = shutdown_plan(true, false);
+        assert_eq!(p[0], ShutdownStep::WriteStopFlag, "① stop 旗标恒先");
+        assert_eq!(p[1], ShutdownStep::AwaitDriveQuiet, "② drive 静默恒居次");
+        assert_eq!(*p.last().unwrap(), ShutdownStep::Exit, "⑤ 恒为末");
+    }
+
+    #[test]
+    fn shutdown_plan_clears_only_when_settled_and_state_present() {
+        // drive 已静默 ∧ 有施压 ⇒ ③④（ClearPressure）到场。
+        let p = shutdown_plan(true, true);
+        assert!(p.contains(&ShutdownStep::ClearPressure), "settled+present 应主动撤");
+        // 无施压 ⇒ ③④ 幂等跳过（只剩 ①②⑤）。
+        let q = shutdown_plan(false, false);
+        assert!(!q.contains(&ShutdownStep::ClearPressure), "无施压不应撤");
+        assert_eq!(
+            q,
+            vec![ShutdownStep::WriteStopFlag, ShutdownStep::AwaitDriveQuiet, ShutdownStep::Exit]
+        );
+    }
+
+    #[test]
+    fn shutdown_plan_timeout_abandons_clear() {
+        // lck-F1：②超时（drive_settled=false）⇒ 即使 state 在场也弃 clear 直退（交 watchdog），
+        // 绝不在在飞 step 可能落地 tc 时与其竞态。
+        let p = shutdown_plan(false, true);
+        assert!(!p.contains(&ShutdownStep::ClearPressure), "超时必弃 clear（lck-F1）");
+        assert_eq!(
+            p,
+            vec![ShutdownStep::WriteStopFlag, ShutdownStep::AwaitDriveQuiet, ShutdownStep::Exit]
+        );
+    }
+
+    #[test]
+    fn token_file_generates_0600_when_absent() {
+        let dir = std::env::temp_dir().join(format!("wnet-t3-gen-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sub").join("weaknet.token"); // 父目录 sub 不存在 → 自动建
+        let tok = resolve_token_file(&path).unwrap();
+        assert_eq!(tok.len(), 64, "CSPRNG 32B hex=64 字符");
+        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), tok, "落盘内容=返回值");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600,
+                "新建必 0600"
+            );
+        }
+        // 二次调用走读分支（同值，不重生成）。
+        assert_eq!(resolve_token_file(&path).unwrap(), tok);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn token_file_rejects_world_readable() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("wnet-t3-rej-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("weaknet.token");
+        std::fs::write(&path, "leaky-token\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let err = resolve_token_file(&path).unwrap_err();
+        assert!(err.msg.contains("0600"), "报因须含 0600：{}", err.msg);
+        // 修成 0600 后放行，且 trim 掉尾换行。
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(resolve_token_file(&path).unwrap(), "leaky-token");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

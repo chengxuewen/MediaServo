@@ -14,7 +14,8 @@
 <div id="gate" hidden>
   <div class="gate-card">
     <h1>weaknet 控制台 · 需要访问凭证</h1>
-    <p>到 <code>weaknet serve</code> 终端横幅里<b>整行复制</b>面板 URL（<code>http://127.0.0.1:…/?token=…</code>）粘贴到地址栏打开。</p>
+    <p><b>直连</b>：到 <code>weaknet serve</code> 终端横幅里<b>整行复制</b>面板 URL（<code>http://127.0.0.1:…/?token=…</code>）粘贴到地址栏打开。</p>
+    <p><b>经 server 后台入口（反代）</b>：开 <code>http://&lt;当前 host&gt;/weaknet/</code>，token 见部署树 <code>run/weaknet.token</code>。</p>
     <p class="dim">凭证只存本标签页（sessionStorage，关闭即弃）；页面任何位置不打印它。</p>
     <button id="gate-clear" type="button">清除无效凭证并重置本页</button>
   </div>
