@@ -182,8 +182,33 @@ def _status_web_native() -> int:
     return 0 if code == "200" else 1
 
 
+def _build_stage_weaknet(release: bool) -> None:
+    """build server 装配步：weaknet 编译 + stage out/server/bin/mediaservo-weaknet（上游名，
+    不做品牌——品牌化归 deploy，D266/D269 同构）。profile 跟随 --release 传导。
+    失败仅 WARN 不阻断 server 主流程（weaknet-server-integration design §D1 [bF4 bF5]——
+    排尾会吃 mediasoup 挂机树的 exit 连坐，本机在册 [BA-15 树挂背书=CI]）。"""
+    cmd = ["cargo", "build"] + (["--release"] if release else []) + ["-p", "mediaservo-weaknet"]
+    try:
+        code = _run(cmd)
+    except OSError as e:  # cargo 缺失/无法启动（降级路径——server 主路径自有 _check 报错退出）
+        print(f"WARN: weaknet 装配跳过（cargo 不可用: {e}）——不阻断 server 构建", file=sys.stderr)
+        return
+    if code != 0:
+        print(f"WARN: weaknet 编译失败（rc={code}）——不阻断 server 构建；排障后重跑 build server 补装配", file=sys.stderr)
+        return
+    src = ROOT / "target" / ("release" if release else "debug") / _exe_name("mediaservo-weaknet")
+    if not src.exists():
+        print(f"WARN: weaknet 编译成功但产物缺位 {src}——不 stage", file=sys.stderr)
+        return
+    _stage_to_out("server", [src], sub="bin")
+    print(f"weaknet 装配 stage: out/server/bin/{src.name}（上游名——品牌化归 deploy）")
+
+
 def _cmd_build_server(image: str | None = None, native: bool = False, release: bool = False) -> None:
     """build server: 默认 native（用户裁决 B——不写模式=原生）| --image runtime|dev=Docker 镜像（--native 兼容别名）。"""
+    # weaknet 装配最前（design §D1 [bF4 bF5 BA-15]）：必须先于 server 的 cargo build——mediasoup
+    # 姿态挂机不连坐它；其自身失败仅 WARN 也不阻断 server（独立 try）。
+    _build_stage_weaknet(release)
     if native or image is None:   # 默认 native；--image 显式才走 Docker
         _ensure_admin_dist()      # mtime 增量前端构建（Docker 路径 Dockerfile 内自理）
         _stage_web_to_out()       # T3 后 default=不嵌入，dist 以文件树进交付物（out/server/web）
@@ -512,6 +537,12 @@ def _server_bin_names(brand: str) -> tuple[str, str]:
     """(deployed bin name, root shortcut name)——brand 空 → 上游名（永不渲染 "-server" 残名）。"""
     base = f"{brand}-server" if brand else "mediaservo-server"
     return _exe_name(base), base
+
+def _weaknet_bin_name(brand: str) -> str:
+    """weaknet 物理 bin 名——brand 空 → 上游 mediaservo-weaknet，永不出 "-weaknet" 残名
+    （weaknet-server-integration design §D1 [BA-2①]，_server_bin_names 同构契约）。
+    build 只 stage 上游名，品牌化单点在 deploy（D266/D269 同构）。"""
+    return _exe_name(f"{brand}-weaknet" if brand else "mediaservo-weaknet")
 
 def _drop_stale_server_oxfile(prefix_p: Path, bin_name: str) -> tuple[bool, dict[str, dict[str, str]]]:
     """BLOCKER-3：run/oxfile.toml 的 server 条目 command 基名 != 当前布局 bin 名（改名/换品牌/
@@ -892,6 +923,26 @@ def _cmd_deploy_server(prefix: str) -> None:
     else:
         print("错误: PATH 未找到 oxmgr — 未打包（运行时需它拉起进程簇）。安装: 下载 GitHub Releases 预编译 Rust 二进制（含 sha256/asc 校验，https://github.com/Vladimir-Urik/OxMgr/releases），或构建 oxmgr-src 后放 ~/.local/bin，再重跑 deploy server", file=sys.stderr)
 
+    # weaknet 双探源拷贝（design §D1 [bF1 bF6]；bin 在场判定只落数据面——oxfile 条件渲染判据
+    # 归 Rust init（T4），M-1 钉死：Python 无渲染杠杆）。prefix 源 out/server/bin 优先（上游名→
+    # 品牌名，与 server 双探源 BLOCKER-1 同构），回退 target/{release,debug}；两处皆缺 → WARN 不阻断。
+    wnet_bin = _weaknet_bin_name(brand)
+    wnet_dst = bin_dir / wnet_bin
+    wnet_candidates = [src_bin_dir / _exe_name("mediaservo-weaknet")]
+    if brand:
+        wnet_candidates.append(src_bin_dir / wnet_bin)
+    wnet_candidates += [ROOT / "target" / p / _exe_name("mediaservo-weaknet") for p in ("release", "debug")]
+    wnet_src = next((c for c in wnet_candidates if c.exists()), None)
+    if wnet_src is None:
+        print(f"WARN: weaknet 二进制两处缺位（out/server/bin 与 target/ 均无）——本次不装配 bin/{wnet_bin}"
+              "（不阻断 deploy；先 build server 产出）", file=sys.stderr)
+    elif wnet_dst.exists() and os.path.samefile(wnet_src, wnet_dst):
+        print(f"  bin/{wnet_bin} 原地（源=目标同文件）— 跳过拷贝")
+    else:
+        _copy_with_kill(wnet_src, wnet_dst)
+        os.chmod(wnet_dst, 0o755)
+        print(f"  weaknet 装配: {wnet_src} → bin/{wnet_bin}")
+
     # BLOCKER-3：bin 改名/换品牌迁移后 oxfile command 成死路径（init 遇已存在 oxfile 跳过——mod.rs 实证）
     # → 删除令下方 init 以 current_exe 重渲染。判据=server 条目 command 基名 != 当前 bin 名
     # （重复部署基名已一致 → 零 churn；fresh 树无 oxfile → init 正常渲染）。
@@ -931,14 +982,16 @@ def _cmd_deploy_server(prefix: str) -> None:
         if got:
             print(f"  运维 env 已回吸收: {', '.join(got)}")
 
-    # bin 白名单（host 同构——deploy-ops ④）：非当前布局的 server 二进制删除
-    # （upstream 旧名/旧品牌残留；mediaservo-server 仅无 brand 布局保留）
+    # bin 白名单（host 同构——deploy-ops ④）：非当前布局的 server/weaknet 二进制删除
+    # （upstream 旧名/旧品牌残留；mediaservo-server 仅无 brand 布局保留）。
+    # weaknet keeper 双名（design §D1 [BA-2①]）：上游 mediaservo-weaknet 恒留（build stage 源 =
+    # deploy 重入探源 + msrtc.sh 解析档）；旧品牌 *-weaknet 与 server 同语义清理。
     for p in sorted(bin_dir.iterdir()):
         if p.is_symlink() or not p.is_file():
             continue
-        if p.name in {_exe_name("oxmgr"), bin_name}:
+        if p.name in {_exe_name("oxmgr"), bin_name, _weaknet_bin_name(brand), _exe_name("mediaservo-weaknet")}:
             continue
-        if p.name.endswith("-server") or p.name == _exe_name("mediaservo-server"):
+        if p.name.endswith(("-server", "-weaknet")) or p.name == _exe_name("mediaservo-server"):
             print(f"  清理部署残留: {p.name}")
             p.unlink()
 
@@ -1556,10 +1609,14 @@ def _cmd_clean(args: argparse.Namespace) -> None:
             targets = [logs_d / "server-native.pid", logs_d / "server-native.log",
                        logs_d / "web-native.pid", logs_d / "web-native.log",  # 过渡 caddy 运行态（T6 漏网补清）
                        out_server / "bin" / _exe_name("mediaservo-server"),
+                       # weaknet 装配回收（weaknet-server-integration [bF10]）：out 上游名 + target 双 profile
+                       out_server / "bin" / _exe_name("mediaservo-weaknet"),
+                       ROOT / "target/debug/mediaservo-weaknet", ROOT / "target/release/mediaservo-weaknet",
                        out_server / "web",  # 前端交付树（T21: build web 产物随 clean 回收）
                        ROOT / "target/debug/mediaservo-server", ROOT / "target/release/mediaservo-server"]
             # MAJOR-C 品牌态两名全清 + 根级快捷链（glob 只收文件/链，目录永不触碰）
             targets += [f for f in sorted((out_server / "bin").glob("*-server")) if f.is_file()]
+            targets += [f for f in sorted((out_server / "bin").glob("*-weaknet")) if f.is_file()]
             targets += [f for f in sorted(out_server.glob("*-server")) if f.is_symlink()]
             _sv = out_server / "server"  # 无品牌快捷链（brand="" 布局）
             if _sv.is_symlink():
