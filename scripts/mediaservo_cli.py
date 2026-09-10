@@ -964,6 +964,12 @@ def _cmd_deploy_server(prefix: str) -> None:
               "（不阻断 deploy；先 build server 产出）", file=sys.stderr)
     elif wnet_dst.exists() and os.path.samefile(wnet_src, wnet_dst):
         print(f"  bin/{wnet_bin} 原地（源=目标同文件）— 跳过拷贝")
+    elif wnet_src.name != wnet_bin and src_bin_dir.resolve() == bin_dir.resolve():
+        # 原地部署 + 需换名 → 同目录原子改名，上游名不残留（2026-09-10 用户裁决对齐
+        # server bin 改名语义，旧 BA-2① keeper 双名作废；target/ 源跨目录仍走拷贝——
+        # 绝不移走 cargo 缓存件）。
+        os.replace(wnet_src, wnet_dst)
+        print(f"  weaknet 原地改名装配: {wnet_src.name} → bin/{wnet_bin}")
     else:
         _copy_with_kill(wnet_src, wnet_dst)
         os.chmod(wnet_dst, 0o755)
@@ -1011,12 +1017,13 @@ def _cmd_deploy_server(prefix: str) -> None:
 
     # bin 白名单（host 同构——deploy-ops ④）：非当前布局的 server/weaknet 二进制删除
     # （upstream 旧名/旧品牌残留；mediaservo-server 仅无 brand 布局保留）。
-    # weaknet keeper 双名（design §D1 [BA-2①]）：上游 mediaservo-weaknet 恒留（build stage 源 =
-    # deploy 重入探源 + msrtc.sh 解析档）；旧品牌 *-weaknet 与 server 同语义清理。
+    # weaknet 与 server 同构（2026-09-10 改判，旧 BA-2① 双名恒留作废）：原地装配已把
+    # 上游名改名消耗；brand 空时白名单项 _weaknet_bin_name("")=上游名恒等命中。树内
+    # 残留的上游名/旧品牌（历史拷贝布局/中断）走下方 endswith 清理分支删除。
     for p in sorted(bin_dir.iterdir()):
         if p.is_symlink() or not p.is_file():
             continue
-        if p.name in {_exe_name("oxmgr"), bin_name, _weaknet_bin_name(brand), _exe_name("mediaservo-weaknet")}:
+        if p.name in {_exe_name("oxmgr"), bin_name, _weaknet_bin_name(brand)}:
             continue
         if p.name.endswith(("-server", "-weaknet")) or p.name == _exe_name("mediaservo-server"):
             print(f"  清理部署残留: {p.name}")
