@@ -718,3 +718,8 @@ install                        → 改名提示 + exit 2（退役）
 - 本仓附带变更：admin/sfu stats 列表行 owner 字段（027d57f）；ci.yml test-weaknet 扩步（agent 自证链）。
 - 记忆：D277 决议入册；PIT-186（watchdog stdio）/PIT-187（clear 门控留树）入账。M4′ 车端面（T12/T13）
   与 T11 文档收口在主仓侧推进。
+
+### 2026-09-10: weaknet-server-integration（D278 落地）
+- 批A-D 全绿：装配(build 最前/deploy 品牌/clean)+serve 优雅退出五步序/token-file 0600 校验链+oxfile/caddyfile 模板三条目条件渲染+stale 四形迁移(耦 reapply)+ui 相对化(playUrl 豁免)+gate input+admin 外链卡。
+- 实环：V2 三条目/V3 LAN-IP 全链(console 0err)/V4 UI apply↔clear+fuse×4/V5 双案(0.1s/868ms)/V6 SIGKILL watchdog 幸存/V7 幂等零churn/V9 dispatcher 无卡。tests 127/0。
+- 运维持有：weaknet unit 手工 [apps.env] WEAKNET_ADMIN_PASS（凭证不入模板）；lifecycle 新单测+server stub --tests E0425 走 CI 背书（存量债）。
