@@ -4295,7 +4295,7 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "base64",
@@ -4320,7 +4320,7 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-codec"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ffmpeg-the-third",
  "gstreamer",
@@ -4333,7 +4333,7 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-common"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "hmac",
@@ -4353,7 +4353,7 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-deck"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ffmpeg-the-third",
  "mediaservo-codec",
@@ -4366,7 +4366,7 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-deck-c"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mediaservo-codec",
  "mediaservo-deck",
@@ -4376,11 +4376,11 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-deck-cxx"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "mediaservo-field"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mediaservo-codec",
  "mediaservo-common",
@@ -4397,7 +4397,7 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-field-c"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mediaservo-field",
  "tokio",
@@ -4405,11 +4405,11 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-field-cxx"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "mediaservo-host"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4450,7 +4450,7 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-link"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures-util",
  "iceoryx2",
@@ -4466,7 +4466,7 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-link-c"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mediaservo-common",
  "mediaservo-link",
@@ -4476,11 +4476,11 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-link-cxx"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "mediaservo-media"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "eframe",
@@ -4496,7 +4496,7 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-node"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mediaservo-common",
  "mediaservo-deck",
@@ -4512,7 +4512,7 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "axum-server",
@@ -4549,7 +4549,7 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-weaknet"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "clap",
@@ -4564,7 +4564,7 @@ dependencies = [
 
 [[package]]
 name = "mediaservo-webrtc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "cxx",

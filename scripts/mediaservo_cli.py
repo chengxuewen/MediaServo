@@ -1149,55 +1149,17 @@ def _git_out(args: list[str], timeout: int = 10) -> str | None:
     return r.stdout if r.returncode == 0 else None
 
 
-def _write_changes_file(staging: Path, pkg_name: str, brand: str) -> None:
-    """发布包内嵌变更清单（package-changes 方案 B——git log 机械生成，零人肉同步）。
-    范围 = 上一 tag..HEAD（C43④ tag 纪律落地前降级最近 30 条）；节 = breaking/feat/fix，
-    其余前缀（chore/docs/refactor/test/ci…）整条丢弃——消费方只看行为变化，全量去 git。
-    空节省略；git 不可用/分类全空 → 不写文件 + WARN（**无假文件**：看见文件=有内容）。"""
-    if _git_out(["log", "-1", "--format=%s"]) is None:
-        print("WARN: git 不可用——CHANGES.md 跳过生成（不阻断打包）", file=sys.stderr)
-        return
-    prev = (_git_out(["describe", "--tags", "--abbrev=0", "HEAD^"]) or "").strip()
-    # 记录形 %s\x00%b\x1e：subject 与**多行 body** 同记录（%b 含换行禁按行 split，
-    # 记录以 \x1e 切）。Release-Note trailer（C43⑦：消费方视角一句话，agent 提交
-    # feat/fix 时顺手写）命中则作为展示行入节；无注人肉提交=回落剥前缀 subject，不阻断。
-    fmt = "--pretty=format:%s%x00%b%x1e"
-    log_args = (["log", f"{prev}..HEAD", fmt] if prev else ["log", "-30", fmt])
-    out = _git_out(log_args)
-    if out is None:
-        print("WARN: git log 范围查询失败——CHANGES.md 跳过生成（不阻断打包）", file=sys.stderr)
-        return
-    seen: set[str] = set()
-    brk: list[str] = []
-    fea: list[str] = []
-    fix: list[str] = []
-    for rec in out.split("\x1e"):
-        subj, _, body = rec.strip("\n").partition("\x00")
-        subj = subj.strip()
-        if not subj or subj in seen:
-            continue
-        seen.add(subj)
-        note = next((ln.partition(":")[2].strip() for ln in body.splitlines()
-                     if ln.startswith("Release-Note:")), "")
-        disp = note or re.sub(r"^\w+(\([^)]*\))?!?:\s*", "", subj)
-        if re.search(r"^\w+(\([^)]*\))?!:", subj):
-            brk.append(disp)
-        elif re.match(r"^feat(\(|!|:)", subj):
-            fea.append(disp)
-        elif re.match(r"^fix(\(|!|:)", subj):
-            fix.append(disp)
-
-    if not (brk or fea or fix):
-        print("WARN: CHANGES 范围内无 feat/fix/breaking 提交——不写 CHANGES.md", file=sys.stderr)
-        return
-    ver = _workspace_version()
-    date = (_git_out(["log", "-1", "--format=%cd", "--date=short"]) or "").strip()
-    lines = [f"# CHANGES — {brand}-{pkg_name} {ver}（{date}）", ""]
-    for title, rows in (("Breaking Changes", brk), ("Features", fea), ("Fixes", fix)):
-        if rows:
-            lines += [f"## {title}"] + [f"- {x}" for x in rows] + [""]
+def _write_changes_file(staging: Path) -> None:
+    """发布包内嵌更新日志（D280 维护式裁决——git log 机械分类器退役）：
+    直拷仓根 CHANGELOG.md 全文（最新版节在最前 + 历史节，升级比对最有用，
+    不做节裁剪=零解析面）。源缺失 → WARN 不阻断（CI 门禁已保证 bump 必带节）。"""
     try:
-        (staging / "CHANGES.md").write_text("\n".join(lines), encoding="utf-8")
+        text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    except OSError:
+        print("WARN: CHANGELOG.md 缺失——包内不带 CHANGES.md（不阻断打包）", file=sys.stderr)
+        return
+    try:
+        (staging / "CHANGES.md").write_text(text, encoding="utf-8")
     except OSError as e:
         print(f"WARN: CHANGES.md 写盘失败（{e}）——不阻断打包", file=sys.stderr)
 
@@ -1234,7 +1196,7 @@ def _cmd_package(args: argparse.Namespace) -> None:
             _cmd_deploy_bindings(str(staging), args.release)
         _write_version_file(staging, pkg_name)
         prefix_name = args.brand if args.brand else "mediaservo"
-        _write_changes_file(staging, pkg_name, prefix_name)  # package-changes B：内嵌变更清单（WARN 降级不阻断）
+        _write_changes_file(staging)  # D280：直拷 CHANGELOG.md（WARN 降级不阻断）
         package_root = f"{prefix_name}-{pkg_name}-{ver}"
         out = dist / f"{package_root}.tar.gz"
         strip_package_binaries(staging)  # PIT-119: debug 二进制未 strip（单 135-155MB）→ gzip 1.2GB 超时

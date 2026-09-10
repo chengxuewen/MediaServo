@@ -813,3 +813,8 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **决策**：package staging 装配调 `_write_changes_file()`（host/server/sdk 单点接线），git log subject 机械分节 breaking/feat/fix；**chore/docs/refactor/test/ci 全丢弃**（裁决：消费方只看行为变化，全量去 git——不养第二份噪音文档）；空节省略、三节全空不写文件；任何降级 WARN 不阻断打包（宁缺勿断）。
 - **否决 A**：手写 CHANGELOG.md 腐烂率高（tag=0 + v0.1.8.2 漂浮号实证"人肉记得"链已漏，C43 同类漂移面禁再养）。
 - **配套**：e2e-package host/sdk 清单断言 +README 包内容注记；D-H13 version.txt 管机器配对、CHANGES 管人读面，不重叠。
+
+## D280: CHANGELOG.md 维护式人读日志（用户裁决，改判 D279 机械提取）
+- **决策**：仓根 `CHANGELOG.md`（最新版节最前，中文消费视角）为发布日志唯一内容源；package 直拷为包内 CHANGES.md（全文不裁剪）；bump 提交必同笔补版本节（**AI 起草、人过目**），CI fmt job 门禁「workspace 版本 ∈ CHANGELOG」焊死腐烂点；git log 机械分类器退役（_git_out 留守堡守卫）。
+- **改判链**：D279 方案 B（机械分节+Release-Note 素材位）落地当日，用户裁决「changes 是给用户看的——开发者看 git log」→ 维护式。否决时担忧的人肉腐烂死穴由 CI 版本联动门禁消解；打包时调 LLM 仍否决（发布文档须确定性）。
+- **锚定收益**：v0.1.1 起 bump→tag→package 正序有物理提交可打 tag（此前 0.1.1 为工作区漂浮态——C43⑧ 守卫实弹抓获后闭环）。

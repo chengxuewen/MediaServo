@@ -24,6 +24,11 @@ jobs:
             echo "FAIL: 有 crate 自带 version 字面量——bump 必漏；改 version.workspace = true" && exit 1
           fi
           echo "OK: 全 crate 继承 [workspace.package] 版本"
+      - name: Changelog currency gate (C43⑥/D280——workspace 版本必出现在 CHANGELOG.md)
+        run: |
+          ver=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          grep -q "v$ver" CHANGELOG.md || { echo "FAIL: workspace 版本 $ver 无 CHANGELOG 节——bump 提交必须同笔补更新日志（人读版，AI 起草）"; exit 1; }
+          echo "OK: CHANGELOG.md 含 v$ver 节"
 
   check:
     strategy:
