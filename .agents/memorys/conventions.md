@@ -559,3 +559,8 @@ ff_.*_muxer` 应为 0（demuxer-only 实证）。
 **检查**: `grep -rn "p2p_owner\|RoomType::P2P" crates/` 应为 0；`grep -n "Sdp.*按房间\|全 SFU" crates/mediaservo-host/src/gateway.rs` 存在。
 
 **来源**: 用户显式要求（2026-08-25 P2P 不可达 → 全 SFU）；替代 D 系列 P2P DC 决策（decisions.md 修正）。
+
+## C43: crate 版本单一源——workspace.package 统一（2026-09-10, 用户裁决方案 A）
+- **约束**: ① 全部 crate 的 `[package] version` 必须 `version.workspace = true`，唯一数字源 = 根 `Cargo.toml` `[workspace.package] version`；禁 crate 自带 `version = "x.y.z"` 字面量（CI fmt job 有门禁，grep 命中即红）。② 打包链天然吃单源：`_workspace_version()` → package tar 名 `{brand}-{target}-{ver}` + version.txt(D-H13) + soname major——bump 只改根 1 行。③ bindings 独立面（pyproject.toml / package.json）不吃 cargo 继承，bump 时手抄对齐（wheel dist-info 一致性有既防注，勿脚本强制）——bump 清单 = 根 Cargo.toml + 这两处 + 双仓 tag。④ 版本号即发布锚：每次 `package` 发版在双仓打 `v<ver>` tag（现状 tag=0 的补账）。⑤ 文档/记忆引用项目版本必须等于 workspace 实值，禁裸写漂浮号（v0.1.8.2 无物理源事故）。
+- **理由**: 半统一姿态（5 继承/7 自带）数值凑巧相同 = 假一致，bump 日必脱节；crate 互依全纯 path 不锁版本，统一零破坏面。
+- **检查**: `git grep -c '^version = "' -- 'crates/*/Cargo.toml'` 应无匹配；`cargo metadata --no-deps | jq '[.packages[].version] | unique'` 单一值。

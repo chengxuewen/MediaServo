@@ -18,6 +18,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { components: rustfmt }
       - run: cargo fmt --all --check
+      - name: Version uniformity gate (C43——crate 版本单一源=workspace，禁自带字面量)
+        run: |
+          if grep -rn '^version = "' crates/*/Cargo.toml; then
+            echo "FAIL: 有 crate 自带 version 字面量——bump 必漏；改 version.workspace = true" && exit 1
+          fi
+          echo "OK: 全 crate 继承 [workspace.package] 版本"
 
   check:
     strategy:

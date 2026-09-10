@@ -1,6 +1,6 @@
 [package]
 name = "mediaservo-link"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "MediaServo link IPC: SHM frame bus (iceoryx2), registry, static ACL, capability token"
 license = "Apache-2.0"

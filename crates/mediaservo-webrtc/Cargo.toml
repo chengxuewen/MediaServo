@@ -1,6 +1,6 @@
 [package]
 name = "mediaservo-webrtc"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "MediaServo WebRTC — multi-backend W3C API wrapper (libwebrtc via webrtc-sys default)"
 license = "Apache-2.0"

@@ -1,6 +1,6 @@
 [package]
 name = "mediaservo-host"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "MediaServo Remote Host — V4L2 capture, NVENC encode, WebRTC push (field/vehicle side)"
 license = "Apache-2.0"

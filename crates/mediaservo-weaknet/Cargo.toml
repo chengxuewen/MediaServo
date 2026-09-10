@@ -1,6 +1,6 @@
 [package]
 name = "mediaservo-weaknet"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "tc/netem 弱网模拟 agent（双端面单二进制：server 面 CLI/serve/面板 + 车端面 CLI/config）——产品仓 dev 工具，lib 面不进 bindings/package"
 license = "Apache-2.0"

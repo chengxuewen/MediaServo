@@ -1,6 +1,6 @@
 [package]
 name = "mediaservo-client"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "MediaServo Remote Client — WebRTC receive, GStreamer decode, DataChannel control (cockpit/operator side)"
 license = "Apache-2.0"
