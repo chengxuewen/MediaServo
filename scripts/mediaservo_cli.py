@@ -1158,18 +1158,34 @@ def _write_changes_file(staging: Path, pkg_name: str, brand: str) -> None:
         print("WARN: git 不可用——CHANGES.md 跳过生成（不阻断打包）", file=sys.stderr)
         return
     prev = (_git_out(["describe", "--tags", "--abbrev=0", "HEAD^"]) or "").strip()
-    log_args = ["log", f"{prev}..HEAD", "--pretty=%s"] if prev else ["log", "-30", "--pretty=%s"]
+    # 记录形 %s\x00%b\x1e：subject 与**多行 body** 同记录（%b 含换行禁按行 split，
+    # 记录以 \x1e 切）。Release-Note trailer（C43⑦：消费方视角一句话，agent 提交
+    # feat/fix 时顺手写）命中则作为展示行入节；无注人肉提交=回落剥前缀 subject，不阻断。
+    fmt = "--pretty=format:%s%x00%b%x1e"
+    log_args = (["log", f"{prev}..HEAD", fmt] if prev else ["log", "-30", fmt])
     out = _git_out(log_args)
     if out is None:
         print("WARN: git log 范围查询失败——CHANGES.md 跳过生成（不阻断打包）", file=sys.stderr)
         return
-    subs = list(dict.fromkeys(x.strip() for x in out.splitlines() if x.strip()))
-    brk = [x for x in subs if re.search(r"^\w+(\([^)]*\))?!:", x) or x.upper().startswith("BREAKING")]
-    fea = [x for x in subs if re.match(r"^feat(\(|!|:)", x) and x not in brk]
-    fix = [x for x in subs if re.match(r"^fix(\(|!|:)", x) and x not in brk]
-
-    def strip_pre(subj: str) -> str:
-        return re.sub(r"^\w+(\([^)]*\))?!?:\s*", "", subj)
+    seen: set[str] = set()
+    brk: list[str] = []
+    fea: list[str] = []
+    fix: list[str] = []
+    for rec in out.split("\x1e"):
+        subj, _, body = rec.strip("\n").partition("\x00")
+        subj = subj.strip()
+        if not subj or subj in seen:
+            continue
+        seen.add(subj)
+        note = next((ln.partition(":")[2].strip() for ln in body.splitlines()
+                     if ln.startswith("Release-Note:")), "")
+        disp = note or re.sub(r"^\w+(\([^)]*\))?!?:\s*", "", subj)
+        if re.search(r"^\w+(\([^)]*\))?!:", subj):
+            brk.append(disp)
+        elif re.match(r"^feat(\(|!|:)", subj):
+            fea.append(disp)
+        elif re.match(r"^fix(\(|!|:)", subj):
+            fix.append(disp)
 
     if not (brk or fea or fix):
         print("WARN: CHANGES 范围内无 feat/fix/breaking 提交——不写 CHANGES.md", file=sys.stderr)
@@ -1179,7 +1195,7 @@ def _write_changes_file(staging: Path, pkg_name: str, brand: str) -> None:
     lines = [f"# CHANGES — {brand}-{pkg_name} {ver}（{date}）", ""]
     for title, rows in (("Breaking Changes", brk), ("Features", fea), ("Fixes", fix)):
         if rows:
-            lines += [f"## {title}"] + [f"- {strip_pre(x)}" for x in rows] + [""]
+            lines += [f"## {title}"] + [f"- {x}" for x in rows] + [""]
     try:
         (staging / "CHANGES.md").write_text("\n".join(lines), encoding="utf-8")
     except OSError as e:
@@ -1200,6 +1216,12 @@ def _cmd_package(args: argparse.Namespace) -> None:
         print("package: Windows best-effort — 验证清单见 scripts/e2e-win-validate.ps1", file=sys.stderr)
     pkg_name = {"bindings": "sdk", "server": "server"}.get(args.target, "host")
     ver = _workspace_version()
+    # C43⑧ 发版完整性守卫：工作区 Cargo.toml 相对 HEAD 有差且 git 可用 → 打包版本无
+    # git 锚（tag 无从落，v0.1.8.2 漂浮号事故同族）——WARN 不阻断（调试包允许脏树）。
+    if _git_out(["log", "-1", "--format=%s"]) is not None and \
+            _git_out(["diff", "--quiet", "HEAD", "--", "Cargo.toml"]) is None:
+        print(f"WARN: Cargo.toml 未提交改动承载版本 {ver}——发版前 commit bump + tag v{ver}"
+              "（当前包 CHANGES 头部版本无 git 锚）", file=sys.stderr)
     dist = Path(args.dist) if getattr(args, "dist", "") else ROOT / "dist"
     dist.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f"ms-{args.target}-pkg-", dir=str(dist)))

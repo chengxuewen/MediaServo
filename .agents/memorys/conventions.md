@@ -565,3 +565,5 @@ ff_.*_muxer` 应为 0（demuxer-only 实证）。
 - **理由**: 半统一姿态（5 继承/7 自带）数值凑巧相同 = 假一致，bump 日必脱节；crate 互依全纯 path 不锁版本，统一零破坏面。
 - **检查**: `git grep -c '^version = "' -- 'crates/*/Cargo.toml'` 应无匹配；`cargo metadata --no-deps | jq '[.packages[].version] | unique'` 单一值。
 - **⑥（2026-09-10 追加）**：package 时自动生成 `CHANGES.md` 入三包（`_write_changes_file`：上 tag..HEAD 的 breaking/feat/fix 分节，其余前缀丢弃；无 tag 降级最近 30 条；git 不可用/分类全空=不写文件+WARN，**无假文件**）。消费方"这版改了啥"零人肉同步。若未来加 CI package job：checkout 必须 `fetch-depth: 0`（浅克隆判丢范围）。
+- **⑦（2026-09-10 B 裁决）**：CHANGES 展示行优先取 commit body 的 `Release-Note:` trailer（消费方视角一句话）；**agent 提交 feat/fix 时顺手写**（本仓 commit 多由 agent 产出=AI 自动化正确落点，打包层保持确定性机械），人肉无注回落剥前缀 subject。打包时调 LLM 现写被否决：发布文档必须可复现可审计，幻觉/网络/key 不进门。
+- **⑧**：package 守卫——工作区 Cargo.toml 相对 HEAD 脏且 git 可用 → WARN"版本无 git 锚"（漂浮号事故同族防线）；不阻断（调试包允许脏树）。发版正序 = bump 提交 → tag v<ver> → package。
