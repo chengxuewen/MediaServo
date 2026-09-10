@@ -818,3 +818,8 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **决策**：仓根 `CHANGELOG.md`（最新版节最前，中文消费视角）为发布日志唯一内容源；package 直拷为包内 CHANGES.md（全文不裁剪）；bump 提交必同笔补版本节（**AI 起草、人过目**），CI fmt job 门禁「workspace 版本 ∈ CHANGELOG」焊死腐烂点；git log 机械分类器退役（_git_out 留守堡守卫）。
 - **改判链**：D279 方案 B（机械分节+Release-Note 素材位）落地当日，用户裁决「changes 是给用户看的——开发者看 git log」→ 维护式。否决时担忧的人肉腐烂死穴由 CI 版本联动门禁消解；打包时调 LLM 仍否决（发布文档须确定性）。
 - **锚定收益**：v0.1.1 起 bump→tag→package 正序有物理提交可打 tag（此前 0.1.1 为工作区漂浮态——C43⑧ 守卫实弹抓获后闭环）。
+
+## D282: host 流配置三层合并 + smooth fps 联动地板 + h264 默认根治（2026-09-10, host-stream-defaults）
+- **决策**：① `defaults:{streams,sources}` 公共层，合并链 **逐条 > defaults > 内置**，两单点解析器（camera_configs/stream_configs）落地，下游无感；deny_unknown_fields 只加 defaults 子结构（顶层存量兼容键不焊）。② smooth 码率地板 = `(fps*100/30).max(50)`kbps（每帧字节恒定；15→50/30→100/60→200 无洞），host 裁决点计算（field bundle smooth min 400→None 职责移交）；地板链 显式>fps 联动>bundle。③ 缺省 codec vp8→**h264** + 真值表 `h264×backend∈{None,auto}→显式 software`（PIT-156 根治：h264 硬件路径本链路从未可用，auto 语义修正为"选已验证路径"；显式后端原样透传）。
+- **升级警示（breaking）**：未写 codec 的存量流升版后 vp8→h264+钉 software——CHANGELOG 节随下次 bump 成文（素材=本单 Release-Note trailer）；out 轨实例 yaml 注释不含 defaults 用法（PIT-160 族手动 sync）。
+- **实证**：T4 等价钉 A(逐条)≡B(上收) oxfile 逐字节等 + 特化 quality 精准落参；T5 200k 墙下 164kbps@30.4fps 钉住、720→540 让位、对照零连坐、保险丝到点自清（evidence/weaknet-100kbps-floor.md）。

@@ -1562,3 +1562,15 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **根因**: tokio::signal（底层 signal_hook）注册的 handler 是**进程级**资源，process-directed 信号广播给所有 listener；libtest 多线程同进程 → 真信号案与任何持 listener 的案天然互斥。
 - **解法**: 等价替换——单测只验 handler 的**效应**（request_stop 写旗标 + 幂等案），handler 本体按 tokio 公共 API 细包装处理不做 e2e；确需真信号 e2e 必须放独立进程（专用测试二进制/子进程 harness），进程内 killer 一律禁止。
 - **验证**: 测试集内无 self-kill（`grep -rn 'kill.*\$\$\|SignalKind' tests/ src/*/tests* 设计用例评审`）；`cargo test -p mediaservo-weaknet` 连跑 3 次稳定全绿。
+
+## PIT-189: deploy host 重渲染可能由 bin 替换前的旧件执行——oxfile 静默出旧参数 (2026-09-10)
+- **症状**：改 translate 渲染逻辑后 `build host && deploy host`，新 oxfile 不含新 flag（grep=0），无报错。
+- **根因**：deploy 内部 init/渲染所用二进制与拷贝顺序存在旧件窗口（本次 deploy 首渲 = 旧 bin 产物；随后手动 apply 即正确=8 flags）。同族先例=「部署新鲜度教训：部署后行为断言勿信 mtime」。
+- **解法**：验证渲染参数变更时，deploy 后**必须再 `msrtc-host apply <dir>` 一次**并以 apply 后的 oxfile 为断言对象；根治（deploy 尾部自校重渲）另案。
+- **验证**：`grep -c -- "--degradation" run/oxfile.toml` 等新 flag 计数与预期流数一致后才可下"功能未生效"结论。
+
+## PIT-190: `host apply` = 受管动作（reconcile+拉起），不是纯渲染 (2026-09-10)
+- **症状**：等价性测试连跑三次 `msrtc-host apply <dir>` 比对 oxfile——实例实际被整簇拉起（20 进程在跑），后续 start 反被端口守卫拒。
+- **根因**：apply 语义 = oxfile 渲染 + oxmgr reconcile（差异即启停），无 dry-run 面。
+- **解法**：纯渲染比对用 `to_oxfile` 库级测试（translate 单测路径）；实例 apply 前确认簇应停（先 stop）。
+- **验证**：渲染实验期间 `pgrep -c msrtc-` 保持 as-found 基线。

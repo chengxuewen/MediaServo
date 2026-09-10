@@ -728,3 +728,7 @@ install                        → 改名提示 + exit 2（退役）
 - package 三包自动内嵌 CHANGES.md（_git_out+_write_changes_file：上 tag..HEAD 分节 breaking/feat/fix，其余前缀丢弃；无 tag 降级 -30；无 git=WARN 跳过、**无假文件**）。
 - 实环：host/server 真包各 18 条无噪音对账 ✓；GIT_DIR 破坏降级 ✓；bindings 真链路挂 build bindings 未跑（函数同源接线，发版日补核——计划 tasks 注）。e2e host/sdk 清单断言 +README 注 +C43⑥/D279。
 - B 增量（同仓）：CHANGES 展示行取 Release-Note trailer（C43⑦，agent 提交时顺手写=AI 落点在提交侧，打包保持确定性；否决打包调 LLM）+ C43⑧ 版本无锚守卫。实弹：本笔自狗食顶条=消费句、0.1.1 脏 bump 被 WARN 咬中。
+
+### 2026-09-10: host-stream-defaults（D282，实环全绿）
+- defaults:{streams,sources} 三层合并（两单点解析器/deny 仅子结构）+ smooth 地板 (fps*100/30).max(50) + 缺省 h264 + auto×h264→software（PIT-156 根治）；子两笔 ae9f8d9/c8d0e5e（deep worker 58min，76+11 测试/0 新 clippy，顺手清 1 存量红）。
+- 实环：T4 等价钉逐字节等+特化精准；T5 200k 墙 164kbps@30.4 钉住 720→540 让位零连坐（evidence 主仓）。踩坑入册 PIT-189（deploy 旧 bin 静默渲染）/PIT-190（apply=受管非纯渲染）；weaknet 定向流名=房间实名 vehicle_<stream>。
