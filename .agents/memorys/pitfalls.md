@@ -1550,3 +1550,15 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: `plan_teardown` root-del 恒常无条件（bash parity），幂等交给 `is_not_exist`；`created_root` 降级为状态记录字段（status 观测用）。外米 qdisc 的防线本来就在 apply 期 guard_foreign_root，不在撤除期。
 - **验证**: 复现链双 apply→created_root=false→clear→`tc qdisc show dev lo`=noqueue；回归钉=plan_teardown created=false 案断言含 root-del 步（engine tests）。
 - **教训泛化**: 移植既有工具语义时「更严格」不是默认改良——先证原语义为何宽松（bash 的宽松=救火通道要无条件），再谈收紧。
+
+## PIT-188: 同 netns 的 veth 双端 local 短路——ingress qdisc 永远看不见自发自收 (2026-09-08)
+- **症状**: netns 用例里 `apply --iface vethA --dir in`（dport 腿挂 vethA ingress），流量却从 vethA 所在 netns 发往本 netns 的 vethB IP → leaf Sent 恒 0→0，apply 报"媒体未命中过滤"回滚（引擎行为正确，测试拓扑错误）。
+- **根因**: 目的地址=本地地址走内核 local delivery，在路由前短路，完全不经过 veth 设备的 ingress 路径；同 ns 内无论哪端发都一样。
+- **解法**: peer-namespace 拓扑——`unshare -n sleep N &` 造 PEER、`ip link set vethB netns $PEER`、nsenter 进 peer 配地址+打流；vethA ingress 只见"从外面进来"的包（netns_ifb.sh / netns_vehicle.sh 均此形）。
+- **验证**: 设计 netns tc 用例先两证：① 双向 ping 连通 ② apply 的 verify leaf 增量非零（=可观测性自证）；缺任一 = 拓扑错。`bash tests/netns_ifb.sh` 命中案 Δ>0 即此判据。
+
+## PIT-189: 进程内 SIGTERM 自杀测试在 libtest 并发下 unsound——signal_hook 向全进程所有 listener 广播 (2026-09-08)
+- **症状**: scenario `--auto-clear` 单测：A 案 killer 对整测试进程发真 SIGTERM（+100ms）→ 并发跑的 B 案 run_full_auto_clear 自己的 listener 也被唤醒 → B 提前消费旗标后，B 的 flagger（300ms）再写入的旗标无人消费 → 末断言随机红（单跑绿、全量红）。
+- **根因**: tokio::signal（底层 signal_hook）注册的 handler 是**进程级**资源，process-directed 信号广播给所有 listener；libtest 多线程同进程 → 真信号案与任何持 listener 的案天然互斥。
+- **解法**: 等价替换——单测只验 handler 的**效应**（request_stop 写旗标 + 幂等案），handler 本体按 tokio 公共 API 细包装处理不做 e2e；确需真信号 e2e 必须放独立进程（专用测试二进制/子进程 harness），进程内 killer 一律禁止。
+- **验证**: 测试集内无 self-kill（`grep -rn 'kill.*\$\$\|SignalKind' tests/ src/*/tests* 设计用例评审`）；`cargo test -p mediaservo-weaknet` 连跑 3 次稳定全绿。
