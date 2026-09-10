@@ -10,7 +10,8 @@ use mediaservo_webrtc::rtp::{RTCDegradationPreference, RTCRtpContentHint};
 /// 原语展开由 bundle() 纯表完成，合并裁决在 host translate）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamMode {
-    /// 实时优先：保帧率降分辨率 + Fluid hint + 400kbps 地板（遥控推荐）
+    /// 实时优先：保帧率降分辨率 + Fluid hint + 码率地板（遥控推荐）。地板值不在本层——
+    /// 每帧字节恒定要按源 fps 算，host translate 消费 resolved fps（D282）。
     Smooth,
     /// libwebrtc 均衡双降（缺省，行为与现状逐字节一致）
     Balanced,
@@ -34,7 +35,8 @@ impl StreamMode {
             StreamMode::Smooth => PresetBundle {
                 degradation: RTCDegradationPreference::MaintainFramerate,
                 content_hint: RTCRtpContentHint::Fluid,
-                min_bitrate_kbps: Some(400),
+                // 地板移交 host（fps 联动 max(50, fps*100/30)；field 不感知 fps）——D282
+                min_bitrate_kbps: None,
                 bitrate_kbps: None,
             },
             StreamMode::Balanced => PresetBundle::default(),
@@ -93,7 +95,7 @@ pub struct PushConfig {
     pub degradation: RTCDegradationPreference,
     /// 内容 hint（缺省 None=不调 setter；Smooth 档 bundle 为 Fluid）。
     pub content_hint: RTCRtpContentHint,
-    /// 码率地板 bps 的 kbps 形态（None=不设下限；Smooth 档 bundle 为 400）。
+    /// 码率地板 bps 的 kbps 形态（None=不设下限；Smooth 档由 host 按源 fps 生成地板）。
     pub min_bitrate_kbps: Option<u32>,
     /// 关键帧间隔秒（GOP 上限，默认 2）。
     pub keyframe_interval: u64,
@@ -260,7 +262,7 @@ mod tests {
         let s = StreamMode::Smooth.bundle();
         assert_eq!(s.degradation, RTCDegradationPreference::MaintainFramerate);
         assert_eq!(s.content_hint, RTCRtpContentHint::Fluid);
-        assert_eq!(s.min_bitrate_kbps, Some(400));
+        assert_eq!(s.min_bitrate_kbps, None, "smooth 地板移交 host（按源 fps 联动，D282）");
         assert_eq!(s.bitrate_kbps, None, "smooth 不动码率天花板");
         let b = StreamMode::Balanced.bundle();
         assert_eq!(b.degradation, RTCDegradationPreference::Balanced);

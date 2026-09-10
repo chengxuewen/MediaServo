@@ -78,9 +78,11 @@ fn to_oxfile_in_dir_appends_config_and_token_paths() {
     let abs = std::path::absolute(dir.path()).unwrap();
     assert!(ox.contains(&format!("--config {}/etc/host.yaml", abs.display())));
     assert!(ox.contains(&format!("--token {}/etc/link/cam0.token", abs.display())));
-    // streamer 行追加 --gateway/—config/--token（D2 网关 + C2 同形）
-    assert!(ox.contains("--stream s0 --gateway ws://127.0.0.1:17980/ws --config"));
-    assert!(ox.contains(&format!("--token {}/etc/link/s0.token", abs.display())));
+    // streamer 行追加 --gateway/--config/--token（D2 网关 + C2 同形）。--gateway 与
+    // --config 之间可插入编码 flag（D282 缺省 h264 → --encoder-backend software）故分钉。
+    assert!(ox.contains("--stream s0 --gateway ws://127.0.0.1:17980/ws"), "gateway 紧邻 --stream");
+    assert!(ox.contains(&format!("--token {}/etc/link/s0-stream.token", abs.display())), "流令牌名 = <stream>-stream.token（C40）");
+    assert!(ox.contains("--config"), "streamer 行应带 --config");
     // 无路径变体保持 A2 形态
     let ox = mediaservo_host::translate::to_oxfile(cfg).unwrap();
     assert!(ox.contains("--camera cam0"));
@@ -100,13 +102,13 @@ fn camera_config_rejects_zero_fps() {
 
 #[test]
 fn stream_config_defaults_and_explicit() {
-    // 缺省 source/codec → id/vp8
+    // 缺省 source/codec → id/h264（D282）
     let cfg = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n";
     let streams = mediaservo_host::translate::stream_configs(cfg).unwrap();
     assert_eq!(streams.len(), 1);
     assert_eq!(streams[0].id, "s0");
     assert_eq!(streams[0].source, "s0");
-    assert_eq!(streams[0].codec, "vp8");
+    assert_eq!(streams[0].codec, "h264");
     // 显式值（source 引用 sources[].id）
     let cfg = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s1\"\n    source: \"cam0\"\n    codec: \"h264\"\n";
     let streams = mediaservo_host::translate::stream_configs(cfg).unwrap();
@@ -185,7 +187,7 @@ fn signaling_gateway_url_resolution_and_streamer_arg() {
     // streamer 命令追加 --gateway（with paths 与无 paths 变体一致）
     let ox = mediaservo_host::translate::to_oxfile_in_dir(cfg, std::path::Path::new("/tmp/x")).unwrap();
     assert!(
-        ox.contains("--stream s0 --gateway ws://127.0.0.1:18000/ws --config"),
+        ox.contains("--stream s0 --gateway ws://127.0.0.1:18000/ws") && ox.contains("--config"),
         "streamer 行应带 --gateway, got:\n{ox}"
     );
     let ox = mediaservo_host::translate::to_oxfile(cfg).unwrap();

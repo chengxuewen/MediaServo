@@ -2,7 +2,7 @@
 //!
 //! 用法: `host-streamer --stream <id> --config <host.yaml 路径> --token <令牌文件路径>`
 //!
-//! 流程: 读 host.yaml `streams`（source/codec 缺省 id/vp8，
+//! 流程: 读 host.yaml `streams`（source/codec 缺省 id/h264，
 //! [`mediaservo_host::translate::stream_config`]）→ 源配置（fps）→ FrameBus
 //! 订阅 `camera/<camera-id>`（FrameMeta + 紧凑 I420，C1 capturer 线格式）→
 //! field `PushSession`（connect → publish_video：SFU transport + answer 协商 +
@@ -568,7 +568,7 @@ async fn main() -> ExitCode {
         }
     };
 
-    // 流配置（camera/codec 缺省 id/vp8）+ 相机配置（fps）
+    // 流配置（camera/codec 缺省 id/h264）+ 相机配置（fps）
     let cfg_text = match std::fs::read_to_string(&args.config) {
         Ok(c) => c,
         Err(e) => {

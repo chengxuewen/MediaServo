@@ -8,78 +8,99 @@ host:
 #   room: "my-car1"                              # 整车房间（多车隔离）
 #   local_port: 17980                            # 本地信令网关端口
 
+# ── defaults：公共缺省段（host-stream-defaults D282）────────────────────────────
+# 多源多流部署不再逐条抄同一套编码/采集参数。合并链
+#   **逐条配置 > defaults.<子节> > 内置默认**
+# 按**键**逐条合并（条目写一个键不会把整段顶掉），且只在解析点合并一次
+# （translate）——oxfile 命令行与 capturer/streamer 看到的都是合并完毕的值。
+# 快照语义：值渲染进 oxfile，改配置需 build:deploy host（或 apply 后 oxmgr restart）才生效。
+# 本段键名严格：拼错键 / 写身份键（id、source）在 init/start/apply 期直接报错。
+defaults:
+  streams:
+    codec: h264            # 已是内置默认，此键可省；列在此处示形态
+    stream_mode: smooth    # 全局遥控档；监控取证流在条目上特化 quality
+    keyframe_interval: 2
+  sources:
+    mode: generator        # 全链路验证机型；真车端删此行逐源配 camera
+    fps: 30
+# defaults.streams 可用键 = streams[] 的全部可选键：
+#   codec / encoder_backend / bitrate_kbps / stream_mode / min_bitrate_kbps / keyframe_interval
+# defaults.sources 可用键 = sources[] 除 id 外的全部可选键：
+#   mode / backend / input / width / height / fps / reconnect_ms
+
 # 视频源声明（替代旧 cameras 键；旧 "cameras:" 仍可解析——`#[serde(alias = "cameras")]`
 # 兼容已部署配置，无破坏）。
 #
 # mode 四类（逻辑类别）：
 #   generator   测试/演示彩条帧——本期唯一真实实现（VideoFrameGenerator 产帧，fps/width/height 生效）
-#   camera      真实相机采集——backend=v4l2（已实现 2026-08-27：v4l crate mmap + YUYV/NV12→I420；tegra 无 S_PARM 降级 PIT-145）
+#   camera      真实相机采集——v4l2 后端已实现（2026-08-27：mmap + YUYV/NV12→I420；tegra 无 S_PARM 降级 PIT-145）
 #   desktop     屏幕捕获（未实现；capturer 明确报"未支持"退出）
 #   subscriber  订阅外部源（FrameBus/ROS topic（input 填 topic）；未实现；capturer 明确报"未支持"退出）
 #
-# 字段语义：
-#   backend      采集后端，仅 mode=camera 生效（v4l2 | mipi，单词字段）
-#   input        源地址统一字段：camera=设备路径 / subscriber=FrameBus/ROS topic / desktop=显示标识（可空）
-#   width/height 帧宽高（缺省 1280x720；subscriber 可省略——帧自带元数据）
-#   fps          帧率（缺省 30；须 > 0）
-#   reconnect_ms 相机重连间隔 ms（预留；本期未消费）
+# 键语义（全部可选，缺省走上层 defaults / 内置值）：
+#   backend       采集后端声明（v4l2 | mipi）——当前 capturer 按 mode+input 自动选型，此键仅声明
+#   input         源地址统一字段：camera=设备路径 / subscriber=FrameBus/ROS topic / desktop=显示标识（可空）
+#   width/height  帧宽高（缺省 1280x720；subscriber 可省略——帧自带元数据）
+#   fps           帧率（缺省 30；须 >0 且 <=60；smooth 档码率地板按此值联动，见 stream_mode）
+#   reconnect_ms  相机重连间隔 ms（仅 mode=camera 透传 capturer --reconnect-ms）
 #
 # 内部拓扑约定：capturer 发布 topic 前缀 `camera/<id>` 保留不动（本期不迁）。
-# 旧配置无 mode -> 按 generator 处理（原 stub 语义）。
+# 旧配置无 mode -> 按 generator 处理（原 stub 生成语义）。
 sources:
   - id: "cam0"
-    mode: "camera"          # 相机（backend 采集后端实现中——当前 capturer 报未支持）
-    backend: "v4l2"         # v4l2 | mipi（仅 mode=camera 生效）
+    mode: "camera"          # 相机采集（v4l2 已实现）
+    backend: "v4l2"         # 声明位（当前自动选型不消费）
     input: "/dev/video0"    # 设备路径
     width: 1920
     height: 1080
     fps: 30
-    reconnect_ms: 5000      # 相机重连（预留）
-  - id: "test"
-    mode: "generator"       # 彩条生成器（真实产帧；链路验证用）
-    fps: 30
+    reconnect_ms: 5000      # 相机重连
+  - id: "test"              # 最小形：其余键（mode/fps）走 defaults / 内置缺省
 
 # 推流声明。streams[].source 引用 sources[].id（旧键名 "camera:" 仍可解析——
 # `#[serde(alias = "camera")]` 兼容）。缺省 source = 流 id 自身（topic camera/<id> 直连）。
 #
-# 可用字段（全部可选，缺省即默认）：
-#   codec              编码格式（缺省 vp8）：
+# 编码/策略键（可写在条目上，也可写在 defaults.streams 里当公共值，语义相同）：
+#   codec              编码格式（缺省 h264——D282 改判，旧版 vp8）：
+#                       h264  OpenH264 软编，带宽友好，本产品主格式（浏览器/车端通用）
 #                       vp8   libwebrtc 内置软编，兼容性最好，CPU 开销中等
-#                       h264  OpenH264 软编（构建无 CUDA 时也回退软编），带宽友好
-#                       vp9  软件，压缩率最高但 CPU 开销大（4K/高码率慎用）
-#                       av1  软件（SVT-AV1，CPU 极高——通常不建议实时推流）
-#   encoder_backend    编码器后端（缺省 auto 运行时选择）：
-#                       auto      自动（默认——优先硬件，不可用回退软件）
+#                       vp9   软件，压缩率最高但 CPU 开销大（4K/高码率慎用）
+#                       av1   软件（SVT-AV1，CPU 极高——通常不建议实时推流）
+#                     ⚠️ 未写 codec 的存量部署升级后编码格式由 vp8 变 h264；要保持原样
+#                        就在条目或 defaults.streams 显式写 codec: vp8。
+#                     非法值（含大小写差异）在 init/start/apply 期报错，不进 streamer。
+#   encoder_backend    编码器后端（缺省按 codec 裁决，见 auto 行）：
+#                       auto      未配置时同此：codec=h264 → 钉 software（PIT-156 根治：
+#                                 h264 硬件路径在本链路从未可用，Jetson auto 选中 MMAPI →
+#                                 协商不匹配黑屏）；其他 codec 保持运行时自动选择
 #                       software  强制软件编码（OpenH264/VP8——通用平台兜底）
-#                       hardware  强制硬件编码（Jetson tegra 推荐——NvCodec 路径）
+#                       hardware  强制硬件编码（显式指定即原样透传，含"明知不可用仍要试"）
 #                       nvenc     NVIDIA GPU（需带 CUDA 构建 webrtc-sys——本仓库构建
-#                                 日志出现 "cuda.h not found" 即不可用，回退 auto/software）
+#                                 日志出现 "cuda.h not found" 即不可用）
 #                       vaapi     Intel/AMD GPU VA-API（Linux）
 #   bitrate_kbps       编码码率 kbps（缺省 2000；1080p 建议 2500-4000，720p 1500-2500）
-#   stream_mode        弱网策略档（缺省 balanced=行为与旧版一致）：
-#                       smooth    实时优先——保帧率降分辨率 + Fluid hint + 400kbps 码率地板
-#                                 （遥控/遥操作推荐；弱网下帧率钉住，画质让位）
-#                       balanced  libwebrtc 均衡双降（缺省，不发任何新参数）
+#   stream_mode        弱网策略档（缺省 balanced=不发任何新参数，行为与旧版一致）：
+#                       smooth    实时优先——保帧率降分辨率 + Fluid hint + 码率地板。
+#                                 地板按**关联源的实际 fps** 联动：
+#                                   min_bitrate = max(50, fps × 100 / 30) kbps
+#                                   （15fps→50 / 24→80 / 30→100 / 60→200）——
+#                                 每帧字节恒定，不再是一刀切固定值（遥控/遥操作推荐）
+#                       balanced  libwebrtc 均衡双降（缺省）
 #                       quality   画质优先——保分辨率降帧率 + 3000kbps 天花板（取证推荐）
-#                     数值为预设 bundle，可被显式键覆盖：bitrate_kbps / min_bitrate_kbps
-#                     写了就以你写的为准（显式 > preset）；min_bitrate_kbps 设过高会人为
-#                     抬码率伤时延，建议 ≤ bitrate_kbps/4。
-#                     快照语义：stream_mode/码率键编译进 oxfile 命令行，改配置后需
-#                     build:deploy host（或 apply 后 oxmgr restart）重渲染才生效。
-#   min_bitrate_kbps   码率地板 kbps（可选显式覆盖位；缺省随 stream_mode 预设）
+#                     预设值都可被显式键覆盖：bitrate_kbps / min_bitrate_kbps 写了就以你
+#                     写的为准（逐条 > defaults.streams > 预设 bundle）；min_bitrate_kbps
+#                     设过高会人为抬码率伤时延，建议 ≤ bitrate_kbps/4。
+#   min_bitrate_kbps   码率地板 kbps（显式覆盖位；缺省 smooth 走上面的 fps 联动公式）
 #   keyframe_interval  关键帧间隔秒（GOP，缺省 2；越小丢包恢复越快、码率越不稳定）
 #
-# 参考示例（完整字段）：
-#   - id: "cam0-stream"
-#     source: "cam0"
-#     codec: "h264"
-#     encoder_backend: "hardware"     # Jetson 车端硬编
+# 参考（特化形——只写与公共缺省不同的键，其余走 defaults）：
+#   - id: "cam1-stream"
+#     source: "cam1"
+#     stream_mode: "quality"     # 监控取证：保分辨率降帧率 + 3000kbps 天花板
 #     bitrate_kbps: 3500
-#     keyframe_interval: 2
 streams:
   - id: "cam0-stream"
-    source: "cam0"          # 引用 sources[].id
-    codec: "h264"           # 编码格式（缺省 vp8；可选 vp8/h264/vp9/av1——见上注释）
+    source: "cam0"          # 引用 sources[].id（最小形：编码/策略键走 defaults）
 
 record:
   enabled: false

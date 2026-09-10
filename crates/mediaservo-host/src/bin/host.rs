@@ -1347,6 +1347,20 @@ mod instance_probe_tests {
     use super::*;
 
     #[test]
+    fn bundled_host_yaml_template_passes_validate() {
+        // 模板 = init 落地产物。defaults 段带 deny_unknown_fields、codec/stream_mode 有
+        // 合法集门（D282）——模板写错键/错值必须在本单测红，而不是用户 init 后 deploy 挂。
+        mediaservo_host::translate::validate(HOST_TOML_TEMPLATE).expect("host.yaml.template 必须通过校验");
+        let cams = mediaservo_host::translate::camera_configs(HOST_TOML_TEMPLATE).unwrap();
+        assert_eq!(cams[0].mode, mediaservo_host::translate::SourceMode::Camera, "逐条 mode 优先于 defaults");
+        assert_eq!(cams[1].fps, 30, "test 源走 defaults.sources.fps");
+        let s = &mediaservo_host::translate::stream_configs(HOST_TOML_TEMPLATE).unwrap()[0];
+        assert_eq!(s.codec, "h264", "缺省编码 h264（D282）");
+        assert_eq!(s.stream_mode.as_deref(), Some("smooth"), "defaults.streams 进流");
+        assert_eq!(s.keyframe_interval, Some(2), "defaults.streams 逐键合并");
+    }
+
+    #[test]
     fn probe_agent_dir_finds_official_name() {
         let cmdline = "/opt/mediaservo-host/bin/host-agent --config /opt/mediaservo-host/etc/host.yaml --port 17980";
         assert!(is_agent_cmdline(cmdline));

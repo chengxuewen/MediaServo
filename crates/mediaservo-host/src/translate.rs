@@ -23,8 +23,8 @@ struct HostConfig {
     #[serde(default)]
     signaling: Option<SignalingSection>,
     /// 公共缺省段（`defaults.streams` / `defaults.sources`）——合并链
-    /// **逐条配置 > defaults.<子节> > 内置默认**（D282）。缺段 = 零注入，
-    /// 行为与旧版逐字节一致。
+    /// **逐条配置 > defaults.<子节> > 内置默认**（D282）。缺段 = 零注入：不改变任何
+    /// resolved 值（内置缺省本身由 D282 单独改判）。
     #[serde(default)]
     defaults: DefaultsCfg,
 }
@@ -89,7 +89,8 @@ struct Stream {
     /// 引用的源 id（缺省 = 流 id 自身，topic camera/<id> 直连）。旧键名 `camera` 兼容。
     #[serde(default, alias = "camera")]
     source: Option<String>,
-    /// 编码格式（缺省 vp8；对齐 field PublishOptions 默认）。
+    /// 编码格式（缺省 h264——host 层裁决，D282；field PublishOptions 自身默认仍是 vp8，
+    /// 仅供未经 host 合并的直接调用方回落）。
     #[serde(default)]
     codec: Option<String>,
     /// 编码器后端（auto/software/hardware/nvenc/vaapi；缺省 auto 运行时选择）。
@@ -505,6 +506,29 @@ pub fn handle_config_push(
 }
 
 
+/// smooth 档码率地板 = 每帧字节恒定（3.33 kbps/fps），下限 50：锚点 15fps→50 /
+/// 30fps→100，24→80 / 60→200 自然导出；封顶不设（高帧率本应高地板）。D282 取代
+/// D274 的固定 400kbps（极弱网下过保守）。
+fn smooth_bitrate_floor_kbps(fps: u32) -> u32 {
+    (fps * 100 / 30).max(50)
+}
+
+/// 编码器后端裁决真值表（D282 / PIT-156 根治；codec = 三层合并后的 resolved 值）：
+///
+/// | backend（合并后）             | codec=h264                   | 其他 codec      |
+/// |-------------------------------|------------------------------|-----------------|
+/// | None / "auto"                 | 钉 `software`                | 原样（不干预）  |
+/// | 显式 software/hardware/nvenc/vaapi | 原样透传（尊重显式）     | 原样            |
+///
+/// h264 的硬件路径在本链路从未可用（Jetson auto 选中 MMAPI → 协商不匹配黑屏），故 auto
+/// 语义修正为"h264 时选已验证路径"；用户显式指定的后端永不改写。
+fn resolved_encoder_backend<'a>(codec: &str, backend: Option<&'a str>) -> Option<&'a str> {
+    match backend {
+        None | Some("auto") if codec == "h264" => Some("software"),
+        b => b,
+    }
+}
+
 fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Result<String, String> {
     // capturer 实例需完整源配置（reconnect_ms 透传）；流仅需 id。
     let sources = camera_configs(cfg)?;
@@ -602,6 +626,9 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
     // 流 id → 配置映射（编码参数透传；streams 循环是 id 列表）
     let stream_cfgs: std::collections::HashMap<String, StreamConfig> =
         stream_configs(cfg)?.into_iter().map(|s| (s.id.clone(), s)).collect();
+    // 源 id → resolved fps（smooth 地板经 stream→source 关联取值；查不到按内置缺省 30）
+    let source_fps: std::collections::HashMap<&str, u32> =
+        sources.iter().map(|s| (s.id.as_str(), s.fps)).collect();
     for stream in &streams {
         let name = instance_name(&app_name("streamer"), stream);
         let mut cmd = format!("{} --stream {}", exe_cmd(&app_name("streamer")), stream);
@@ -609,7 +636,8 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
         cmd.push_str(&format!(" --gateway {}", signaling_gateway_url(cfg)?));
         // 编码参数透传（streams 配置面——encoder_backend/bitrate/gop；缺省 streamer 侧回落）
         if let Some(sc) = stream_cfgs.get(stream) {
-            if let Some(b) = &sc.encoder_backend {
+            // 后端裁决（真值表）：h264 × 未配置/auto → 显式钉 software（PIT-156 根治）
+            if let Some(b) = resolved_encoder_backend(&sc.codec, sc.encoder_backend.as_deref()) {
                 cmd.push_str(&format!(" --encoder-backend {b}"));
             }
             // qos-framerate-priority AD-2：唯一合并裁决点——显式键 > stream_mode bundle；
@@ -621,7 +649,12 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
                 .unwrap_or(mediaservo_field::StreamMode::Balanced);
             let bundle = mode.bundle();
             let bitrate = sc.bitrate_kbps.or(bundle.bitrate_kbps);
-            let min_bitrate = sc.min_bitrate_kbps.or(bundle.min_bitrate_kbps);
+            // smooth 地板：显式 > fps 联动地板 > bundle（smooth 档 bundle 已让位 None）
+            let floor = (mode == mediaservo_field::StreamMode::Smooth).then(|| {
+                let fps = source_fps.get(sc.source.as_str()).copied().unwrap_or(DEFAULT_SOURCE_FPS);
+                smooth_bitrate_floor_kbps(fps)
+            });
+            let min_bitrate = sc.min_bitrate_kbps.or(floor).or(bundle.min_bitrate_kbps);
             use mediaservo_webrtc::rtp::{RTCDegradationPreference as Deg, RTCRtpContentHint as Hint};
             if bundle.degradation != Deg::Balanced {
                 let d = match bundle.degradation {
@@ -772,13 +805,13 @@ pub fn camera_config(cfg: &str, id: &str) -> Result<Option<SourceConfig>, String
     Ok(camera_configs(cfg)?.into_iter().find(|c| c.id == id))
 }
 
-/// 流配置（streamer 消费；source/codec 缺省 id/vp8）。
+/// 流配置（streamer 消费；source/codec 缺省 id/h264）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamConfig {
     pub id: String,
     /// 引用的源 id（决定 FrameBus topic camera/<id>）。
     pub source: String,
-    /// 编码格式（对齐 field PublishOptions: vp8/h264/vp9/av1）。
+    /// 编码格式（对齐 field sfu::codec_spec: vp8/h264/vp9/av1；缺省 h264，D282）。
     pub codec: String,
     /// 编码器后端（auto/software/hardware/nvenc/vaapi；None=auto）。
     pub encoder_backend: Option<String>,
@@ -804,7 +837,7 @@ pub fn stream_configs(cfg: &str) -> Result<Vec<StreamConfig>, String> {
         .into_iter()
         .map(|s| {
             let id = s.id.clone();
-            let codec = s.codec.or_else(|| d.codec.clone()).unwrap_or_else(|| "vp8".into());
+            let codec = s.codec.or_else(|| d.codec.clone()).unwrap_or_else(|| "h264".into());
             let stream_mode = s.stream_mode.or_else(|| d.stream_mode.clone());
             // qos-framerate-priority AD-2：非法 stream_mode 在此拦截（deploy/build 期 Err，
             // 错误信息含合法集；不进 streamer 防 oxmgr 重启风暴）。
@@ -995,7 +1028,7 @@ sources:
         let streams = stream_configs(cfg).unwrap();
         assert_eq!(streams.len(), 2);
         assert_eq!(streams[0].source, "s0", "缺省 = 流 id 自身");
-        assert_eq!(streams[0].codec, "vp8");
+        assert_eq!(streams[0].codec, "h264", "host 层缺省编码 = h264（D282）");
         assert_eq!(streams[1].source, "cam0");
         assert_eq!(streams[1].codec, "h264");
         assert!(stream_config(cfg, "s1").unwrap().is_some());
@@ -1303,7 +1336,8 @@ streams:
         let s1_line = ox.lines()
             .find(|l| l.contains("command") && l.contains("--stream s1"))
             .expect("s1 streamer 命令行");
-        assert!(!s1_line.contains("--encoder-backend"), "未配置不 emit: {s1_line}");
+        // s1 未写 codec → 缺省 h264 → 真值表钉 software（D282；显式后端仍原样透传）
+        assert!(s1_line.contains("--encoder-backend software"), "缺省 h264 钉 software: {s1_line}");
         assert!(!s1_line.contains("--bitrate-kbps"), "未配置不 emit: {s1_line}");
         assert!(!s1_line.contains("--keyframe-interval"), "未配置不 emit: {s1_line}");
     }
@@ -1327,7 +1361,8 @@ streams:
         let line = streamer_cmd(&ox, "s0");
         assert!(line.contains("--degradation framerate"), "smooth → framerate: {line}");
         assert!(line.contains("--content-hint fluid"), "smooth → Fluid: {line}");
-        assert!(line.contains("--min-bitrate-kbps 400"), "smooth → min 400: {line}");
+        // 源 cam0 无 fps → resolved 30 → 地板 100（D282 线性口径，替代固定 400）
+        assert!(line.contains("--min-bitrate-kbps 100"), "smooth → fps 联动地板: {line}");
         assert!(!line.contains("--bitrate-kbps"), "smooth 不动天花板: {line}");
     }
 
@@ -1354,20 +1389,22 @@ streams:
     #[test]
     fn oxfile_explicit_keys_win_bundle() {
         // 显式 bitrate/min 覆盖 bundle（smooth 写 bitrate 不被抹、quality 写 bitrate 赢 3000、
-        // smooth 写 min 赢 400）
+        // smooth 写 min 赢 fps 联动地板）
         let ox = to_oxfile(&qos_cfg("    stream_mode: \"smooth\"\n    bitrate_kbps: 2500\n    min_bitrate_kbps: 800\n")).unwrap();
         let line = streamer_cmd(&ox, "s0");
         assert!(line.contains("--bitrate-kbps 2500"), "显式 bitrate 赢: {line}");
-        assert!(line.contains("--min-bitrate-kbps 800"), "显式 min 赢 400: {line}");
+        assert!(line.contains("--min-bitrate-kbps 800"), "显式 min 赢地板 100: {line}");
         assert!(line.contains("--degradation framerate"), "bundle 原语仍在: {line}");
         let ox2 = to_oxfile(&qos_cfg("    stream_mode: \"quality\"\n    bitrate_kbps: 5000\n")).unwrap();
         assert!(streamer_cmd(&ox2, "s0").contains("--bitrate-kbps 5000"), "quality 显式赢 bundle 3000");
     }
 
     #[test]
-    fn oxfile_legacy_yaml_flag_sequence_unchanged() {
-        // 旧 yaml（无新键）：flag 序列与 HEAD 一致——不新增 --degradation/--content-hint/
-        // --min-bitrate-kbps，既有 flag（gateway/encoder-backend/bitrate/keyframe）不受影响。
+    fn oxfile_legacy_yaml_emits_no_qos_flags() {
+        // 无 stream_mode 的旧 yaml：不发 --degradation/--content-hint/--*-bitrate-kbps
+        // （balanced 零扰动不变量）。既有 flag（gateway）不受影响。
+        // 注：D282 起缺省 codec=h264 会钉 --encoder-backend software —— 属后端门既定行为，
+        //     非 QoS 扰动（该键的显式透传面见 oxfile_wires_stream_encoder_params）。
         let ox = to_oxfile(CFG_V0).unwrap();
         let line = streamer_cmd(&ox, "s0");
         assert!(!line.contains("--degradation"), "现状不变: {line}");
@@ -1483,7 +1520,7 @@ defaults:
     }
 
     #[test]
-    fn defaults_section_absent_equals_legacy_resolution() {
+    fn defaults_section_absent_equals_builtin_resolution() {
         // 缺段 = 零注入：resolved 值与内置缺省逐字节一致（balanced 零扰动不变量延伸）
         let cfg = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
         assert_eq!(
@@ -1497,21 +1534,21 @@ defaults:
                 input: None,
                 reconnect_ms: None,
             }],
-            "无 defaults 段必须等于旧版逐字段缺省"
+            "无 defaults 段必须等于内置逐字段缺省"
         );
         assert_eq!(
             stream_configs(cfg).unwrap(),
             vec![StreamConfig {
                 id: "s0".into(),
                 source: "cam0".into(),
-                codec: "vp8".into(),
+                codec: "h264".into(),
                 encoder_backend: None,
                 bitrate_kbps: None,
                 stream_mode: None,
                 min_bitrate_kbps: None,
                 keyframe_interval: None,
             }],
-            "无 defaults 段必须等于旧版逐字段缺省"
+            "无 defaults 段必须等于内置逐字段缺省"
         );
         // 空 defaults 段（`defaults: {}`）与缺段渲染逐字节等
         assert_eq!(
@@ -1541,6 +1578,73 @@ defaults:
         // deploy 主路径同步拦截
         assert!(to_oxfile(d_mode).is_err());
         assert!(validate(d_codec).is_err());
+    }
+
+    // ── host-stream-defaults T2: smooth fps 地板 + h264 缺省 + auto×h264 裁决 ──
+
+    #[test]
+    fn smooth_floor_is_linear_in_fps_with_50_kbps_minimum() {
+        // 每帧字节恒定 → fps 线性；用户裁决锚点 15→50 / 30→100（0 兜底 50）
+        for (fps, expect) in [(0u32, 50u32), (15, 50), (24, 80), (30, 100), (60, 200)] {
+            assert_eq!(smooth_bitrate_floor_kbps(fps), expect, "fps={fps}");
+        }
+    }
+
+    #[test]
+    fn smooth_floor_uses_linked_source_fps() {
+        let cfg = |fps: u32| {
+            format!("sources:\n  - id: \"cam0\"\n    fps: {fps}\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n    stream_mode: \"smooth\"\n")
+        };
+        let floor_of = |fps: u32| {
+            streamer_cmd(&to_oxfile(&cfg(fps)).unwrap(), "s0")
+        };
+        assert!(floor_of(60).contains("--min-bitrate-kbps 200"), "源 fps=60 → 200: {}", floor_of(60));
+        assert!(floor_of(15).contains("--min-bitrate-kbps 50"), "源 fps=15 → 50: {}", floor_of(15));
+        // 源未写 fps（resolved 30）→ 100
+        assert!(streamer_cmd(&to_oxfile(&qos_cfg("    stream_mode: \"smooth\"\n")).unwrap(), "s0")
+            .contains("--min-bitrate-kbps 100"), "源缺省 fps → 100");
+        // 流引用的源不存在 → 按 30 口径（现有报错路径不新增语义）
+        let orphan = "streams:\n  - id: \"s0\"\n    stream_mode: \"smooth\"\n";
+        assert!(streamer_cmd(&to_oxfile(orphan).unwrap(), "s0").contains("--min-bitrate-kbps 100"), "查不到源按 30 计");
+        // defaults.sources.fps 参与地板（合并先于关联）
+        let via_defaults = "defaults:\n  sources:\n    fps: 60\n  streams:\n    stream_mode: \"smooth\"\nsources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
+        assert!(streamer_cmd(&to_oxfile(via_defaults).unwrap(), "s0").contains("--min-bitrate-kbps 200"), "defaults.sources.fps 进地板");
+    }
+
+    #[test]
+    fn h264_backend_truth_table_auto_pinned_software() {
+        let cell = |backend: &str, codec: &str| {
+            to_oxfile(&qos_cfg(&format!("    codec: \"{codec}\"\n    encoder_backend: \"{backend}\"\n")))
+        };
+        // ① h264 × auto → 钉 software（PIT-156 根治）
+        assert!(streamer_cmd(&cell("auto", "h264").unwrap(), "s0").contains("--encoder-backend software"), "h264×auto → software");
+        // ② h264 × 显式后端 → 原样透传（含"明知硬件不可用仍要试"）
+        for b in ["software", "hardware", "nvenc", "vaapi"] {
+            let line = streamer_cmd(&cell(b, "h264").unwrap(), "s0");
+            assert!(line.contains(&format!("--encoder-backend {b}")), "h264×{b} 原样: {line}");
+        }
+        // ③ 其他 codec × auto → 原样（不干预 streamer auto 现状）
+        assert!(streamer_cmd(&cell("auto", "vp8").unwrap(), "s0").contains("--encoder-backend auto"), "vp8×auto 原样");
+        // ④ 其他 codec × 未配置 → 不 emit
+        assert!(!streamer_cmd(&to_oxfile(&qos_cfg("    codec: \"vp8\"\n")).unwrap(), "s0").contains("--encoder-backend"), "vp8 未配置不 emit");
+        // 纯函数侧四格
+        assert_eq!(resolved_encoder_backend("h264", None), Some("software"));
+        assert_eq!(resolved_encoder_backend("h264", Some("auto")), Some("software"));
+        assert_eq!(resolved_encoder_backend("vp8", None), None);
+        assert_eq!(resolved_encoder_backend("vp8", Some("auto")), Some("auto"));
+        assert_eq!(resolved_encoder_backend("h264", Some("hardware")), Some("hardware"));
+    }
+
+    #[test]
+    fn codec_default_h264_flows_into_backend_pin() {
+        // 三层都未写 codec → 内置 h264（D282 改判）→ 顺带被真值表钉 software
+        assert_eq!(stream_configs(&qos_cfg("")).unwrap()[0].codec, "h264");
+        let line = streamer_cmd(&to_oxfile(&qos_cfg("")).unwrap(), "s0");
+        assert!(line.contains("--encoder-backend software"), "缺省 h264 走真值表: {line}");
+        // defaults 层写 codec 同样进真值表（resolved 口径）
+        let via_defaults = "defaults:\n  streams:\n    codec: \"vp9\"\nsources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
+        assert_eq!(stream_configs(via_defaults).unwrap()[0].codec, "vp9");
+        assert!(!streamer_cmd(&to_oxfile(via_defaults).unwrap(), "s0").contains("--encoder-backend"), "vp9 不干预");
     }
 
     #[test]
