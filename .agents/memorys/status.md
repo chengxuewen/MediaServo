@@ -723,3 +723,7 @@ install                        → 改名提示 + exit 2（退役）
 - 批A-D 全绿：装配(build 最前/deploy 品牌/clean)+serve 优雅退出五步序/token-file 0600 校验链+oxfile/caddyfile 模板三条目条件渲染+stale 四形迁移(耦 reapply)+ui 相对化(playUrl 豁免)+gate input+admin 外链卡。
 - 实环：V2 三条目/V3 LAN-IP 全链(console 0err)/V4 UI apply↔clear+fuse×4/V5 双案(0.1s/868ms)/V6 SIGKILL watchdog 幸存/V7 幂等零churn/V9 dispatcher 无卡。tests 127/0。
 - 运维持有：weaknet unit 手工 [apps.env] WEAKNET_ADMIN_PASS（凭证不入模板）；lifecycle 新单测+server stub --tests E0425 走 CI 背书（存量债）。
+
+### 2026-09-10: package-changes（D279，方案 B 落地）
+- package 三包自动内嵌 CHANGES.md（_git_out+_write_changes_file：上 tag..HEAD 分节 breaking/feat/fix，其余前缀丢弃；无 tag 降级 -30；无 git=WARN 跳过、**无假文件**）。
+- 实环：host/server 真包各 18 条无噪音对账 ✓；GIT_DIR 破坏降级 ✓；bindings 真链路挂 build bindings 未跑（函数同源接线，发版日补核——计划 tasks 注）。e2e host/sdk 清单断言 +README 注 +C43⑥/D279。
