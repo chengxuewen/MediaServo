@@ -544,48 +544,74 @@ def _weaknet_bin_name(brand: str) -> str:
     build 只 stage 上游名，品牌化单点在 deploy（D266/D269 同构）。"""
     return _exe_name(f"{brand}-weaknet" if brand else "mediaservo-weaknet")
 
-def _drop_stale_server_oxfile(prefix_p: Path, bin_name: str) -> tuple[bool, dict[str, dict[str, str]]]:
-    """BLOCKER-3：run/oxfile.toml 的 server 条目 command 基名 != 当前布局 bin 名（改名/换品牌/
-    半迁移死路径）→ 备份为 oxfile.toml.bak 并移除，令随后 init 以 current_exe 重渲染。
-    同时捕获各 [[apps]] 的 [apps.env] 键值——迁移后由 _reapply_carried_env 回吸收
-    （运维手工 env 如 ALLOW_DEV_CREDENTIALS/RUST_LOG 不再随改名丢失，PIT-171 轮教训）。
-    返回 (是否迁移, {app 名: {env 键: 值}})。"""
+WEAKNET_OXFILE_APP = "weaknet-serve"  # 品牌无关字面量——与 Rust templates::WEAKNET_APP 同值 [mn10]
+
+
+def _drop_stale_server_oxfile(prefix_p: Path, bin_name: str, wnet_bin: str) -> tuple[bool, dict[str, dict[str, str]]]:
+    """BLOCKER-3 + weaknet-server-integration D1 stale 判据（**Python 侧单点**——Rust init
+    遇 oxfile 存在恒跳过，Rust 侧写检测永不被调用 [bF3]）：
+      oxfile 迁移 = server 条目基名漂移（D269 原语义，不连坐 weaknet 在场）
+        ∨ **bin 在场 ∧（缺 weaknet-serve 条目 ∨ 其 command 基名漂移）**（mn2 后形；bin 缺位
+        = 条件渲染无条目是正确形态，零 churn）。→ .bak 令随后 init 重渲染。
+      Caddyfile 对称迁移 [wF2] = bin 在场 ∧ etc/Caddyfile 已存在 ∧ 反代段缺位（锚点判据见
+        下方 render 段注释——D3.1 定稿形无 '@weaknet' 字面量）→ .bak
+        重渲染。返回值合并进同一 migrated 旗标接既有 --reapply 路径 [lck-F4]——防
+        「oxfile 已迁 ∧ Caddyfile 未迁」半迁移假成功（unit 起了、/weaknet 404）。
+    各 [[apps]] 的 [apps.env] 键值照旧捕获回吸收（PIT-171 教训）。回吸收只补缺不覆盖 →
+    token-file 路径/statedir 模板烘值天然优先于旧手工值 [lck-F14/mn6]，无需豁免代码。
+    返回 (任一文件迁移, {app 名: {env 键: 值}})；各自 .bak 提示在本函数内打印。"""
     oxfile = prefix_p / "run" / "oxfile.toml"
-    if not oxfile.exists():
-        return False, {}
+    wnet_present = (prefix_p / "bin" / wnet_bin).is_file()
     stale = False
+    seen_apps: set[str] = set()
     app_envs: dict[str, dict[str, str]] = {}
     cur_app: str | None = None
     in_env = False
-    for line in oxfile.read_text().splitlines():
-        t = line.strip()
-        if t.startswith("[[apps]]"):
-            cur_app, in_env = None, False
-            continue
-        if t.startswith("name") and "=" in t and cur_app is None:
-            cur_app = t.split("=", 1)[1].strip().strip('"')
-            in_env = False
-            continue
-        if t.startswith("[apps.env]"):
-            in_env = True
-            continue
-        if t.startswith("["):
-            in_env = False
-            continue
-        if in_env and "=" in t and cur_app:
-            k, _, v = t.partition("=")
-            app_envs.setdefault(cur_app, {})[k.strip()] = v.strip()
-            continue
-        if cur_app and t.startswith("command") and "=" in t:
-            cmd = t.split("=", 1)[1].strip().strip('"')
-            parts = cmd.split()
-            if parts:
-                stem = Path(parts[0]).name.removesuffix(".exe")
-                if (stem == "mediaservo-server" or stem.endswith("-server")) and stem != bin_name:
-                    stale = True
-    if stale:
-        bak = oxfile.with_name("oxfile.toml.bak")
-        oxfile.replace(bak)
+    if oxfile.exists():
+        for line in oxfile.read_text().splitlines():
+            t = line.strip()
+            if t.startswith("[[apps]]"):
+                cur_app, in_env = None, False
+                continue
+            if t.startswith("name") and "=" in t and cur_app is None:
+                cur_app = t.split("=", 1)[1].strip().strip('"')
+                seen_apps.add(cur_app)
+                in_env = False
+                continue
+            if t.startswith("[apps.env]"):
+                in_env = True
+                continue
+            if t.startswith("["):
+                in_env = False
+                continue
+            if in_env and "=" in t and cur_app:
+                k, _, v = t.partition("=")
+                app_envs.setdefault(cur_app, {})[k.strip()] = v.strip()
+                continue
+            if cur_app and t.startswith("command") and "=" in t:
+                cmd = t.split("=", 1)[1].strip().strip('"')
+                parts = cmd.split()
+                if parts:
+                    stem = Path(parts[0]).name.removesuffix(".exe")
+                    if (stem == "mediaservo-server" or stem.endswith("-server")) and stem != bin_name:
+                        stale = True
+                    if cur_app == WEAKNET_OXFILE_APP and stem != Path(wnet_bin).name.removesuffix(".exe"):
+                        stale = True  # weaknet 条目基名漂移（换品牌重部署）——仅条目在场才可达
+        if wnet_present and WEAKNET_OXFILE_APP not in seen_apps:
+            stale = True  # 缺 weaknet 条目 ∧ bin 在场 → 重渲补 [bF3/mn2]
+        if stale:
+            oxfile.replace(oxfile.with_name("oxfile.toml.bak"))
+            print("  run/oxfile.toml 陈旧（bin 改名迁移/缺 weaknet 条目）——已备份为 run/oxfile.toml.bak 并重渲染；"
+                  "运维手工 env 自动回吸收，init 本次烘的端口/statedir 类 env 以新值为准", file=sys.stderr)
+    # 段在判据锚 = `handle_path /weaknet`（D3.1 定稿实测形的功能核心；票面「'@weaknet'」系
+    # design §D3.1「@weaknet 段」速记——模板字面量只有 @wnroot/handle_path，用 '@weaknet'
+    # 永假 → 每 deploy 重迁不收敛。redir 单独存在不构成反代，不算段在。）
+    caddy = prefix_p / "etc" / "Caddyfile"
+    if wnet_present and caddy.exists() and "handle_path /weaknet" not in caddy.read_text(encoding="utf-8", errors="replace"):
+        caddy.replace(caddy.with_name("Caddyfile.bak"))
+        print("  etc/Caddyfile 无 @weaknet 反代段 ∧ weaknet bin 在场——已备份为 etc/Caddyfile.bak 并令 init 重渲染"
+              "（与 oxfile 同一迁移旗标——reapply 触发耦合 [lck-F4]）", file=sys.stderr)
+        stale = True
     return stale, app_envs
 
 
@@ -946,10 +972,8 @@ def _cmd_deploy_server(prefix: str) -> None:
     # BLOCKER-3：bin 改名/换品牌迁移后 oxfile command 成死路径（init 遇已存在 oxfile 跳过——mod.rs 实证）
     # → 删除令下方 init 以 current_exe 重渲染。判据=server 条目 command 基名 != 当前 bin 名
     # （重复部署基名已一致 → 零 churn；fresh 树无 oxfile → init 正常渲染）。
-    migrated, carried_envs = _drop_stale_server_oxfile(prefix_p, bin_name)
-    if migrated:
-        print("  run/oxfile.toml 陈旧（bin 改名迁移）——已备份为 run/oxfile.toml.bak 并重渲染；"
-              "运维手工 env 自动回吸收，init 本次烘的端口类 env 以新值为准", file=sys.stderr)
+    # 迁移判据单点（含 Caddyfile 对称迁移）——wnet_bin 取本次装配目标名（在场=已拷贝成功）
+    migrated, carried_envs = _drop_stale_server_oxfile(prefix_p, bin_name, wnet_bin)
 
     # etc 模板——已存在不覆盖（PIT-160；init 同样幂等，双保险）
     etc_dir = prefix_p / "etc"
@@ -974,9 +998,12 @@ def _cmd_deploy_server(prefix: str) -> None:
         shutil.copytree(src_web, dst_web)
     (prefix_p / "run").mkdir(parents=True, exist_ok=True)
 
-    # init 幂等渲染：etc/Caddyfile + run/oxfile.toml（server+caddy 两条目）+ secret 自举（0600）
+    # init 幂等渲染：etc/Caddyfile + run/oxfile.toml（server+caddy 恒定 + weaknet-serve 条件
+    # 渲染 [M-1]——bin 在场才写，判定单点在 Rust render_oxfile）+ secret 自举（0600）
     # SFU 端口/公告隔离：部署前 export MEDIASERVO_SFU_PORT / MEDIASERVO_SFU_ANNOUNCED_IP，init 烘进 oxfile env
     _run_or_exit([str(server_cli), "init", str(prefix_p)])
+    # lck-F4：migrated = oxfile ∨ Caddyfile 任一迁移 → 统一走本回吸收路径（carried 只补缺
+    # 键，未迁移侧幂等 no-op——单一触发面防半迁移假成功）
     if migrated:
         got = _reapply_carried_env(prefix_p, carried_envs)
         if got:

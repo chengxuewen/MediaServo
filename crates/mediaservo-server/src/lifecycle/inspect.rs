@@ -8,19 +8,21 @@ use std::process::Command;
 use std::time::Duration;
 
 use super::templates::{
-    effective_announced, parse_listen_port, parse_web_port, parse_web_root, server_namespace,
-    server_product, server_web_app,
+    WEAKNET_APP, effective_announced, parse_listen_port, parse_web_port, parse_web_root,
+    server_namespace, server_product, server_web_app,
 };
 use super::{absolute, oxmgr_bin, oxmgr_list, parse_dir, run_oxmgr, which};
 
 // ── status / doctor / logs ───────────────────────────────────────────────────
 
 /// status 退出码映射（纯函数单测锚点）：
-/// server 行缺失/未跑 → 2；探针非健康 → 1；web 在簇但未跑 → 1；全绿 → 0。
-/// web=None = "not in cluster"（--no-web 形态），不计异常（design dev 闭环）。
+/// server 行缺失/未跑 → 2；探针非健康 → 1；web/weaknet 在簇但未跑 → 1；全绿 → 0。
+/// web=None / weaknet=None = "not in cluster"（--no-web 形态 / bin 缺位条件渲染形态 [M-1]），
+/// 不计异常（design dev 闭环）。BA-6 四点同步①（②status 行 ③logs 映射 ④apply 文案）。
 pub(super) fn map_status_exit(
     server_status: Option<&str>,
     web_status: Option<Option<&str>>,
+    weaknet_status: Option<Option<&str>>,
     probe: Option<bool>,
 ) -> i32 {
     let Some(s) = server_status else {
@@ -33,6 +35,9 @@ pub(super) fn map_status_exit(
         return 1;
     }
     if let Some(Some(w)) = web_status && !is_up(w) {
+        return 1;
+    }
+    if let Some(Some(w)) = weaknet_status && !is_up(w) {
         return 1;
     }
     0
@@ -63,8 +68,10 @@ pub(super) fn cmd_status(args: &mut dyn Iterator<Item = String>) -> i32 {
     };
     let srv_name = server_product();
     let web_name = server_web_app();
+    let wnet_name = WEAKNET_APP;
     let server = rows.iter().find(|p| p.get("name").and_then(|v| v.as_str()) == Some(srv_name.as_str()));
     let web = rows.iter().find(|p| p.get("name").and_then(|v| v.as_str()) == Some(web_name.as_str()));
+    let wnet = rows.iter().find(|p| p.get("name").and_then(|v| v.as_str()) == Some(wnet_name));
     let port = std::fs::read_to_string(dir.join("etc").join("server.yaml"))
         .ok()
         .and_then(|c| parse_listen_port(&c));
@@ -85,6 +92,7 @@ pub(super) fn cmd_status(args: &mut dyn Iterator<Item = String>) -> i32 {
     };
     let server_status = status_of(server);
     let web_status = web.map(|_| status_of(web));
+    let weaknet_status = wnet.map(|_| status_of(wnet));
     println!("{:<24} {:<22} {:<9} READY", "NAME", "STATUS", "PID");
     println!(
         "{:<24} {:<22} {:<9} {probe_txt}",
@@ -98,9 +106,16 @@ pub(super) fn cmd_status(args: &mut dyn Iterator<Item = String>) -> i32 {
         web_status.as_deref().unwrap_or("— (not in cluster)"),
         pid_of(web)
     );
+    println!(
+        "{:<24} {:<22} {:<9} —",
+        wnet_name,
+        weaknet_status.as_deref().unwrap_or("— (not in cluster)"),
+        pid_of(wnet)
+    );
     map_status_exit(
         server.map(|_| server_status.as_str()),
         web_status.as_deref().map(Some),
+        weaknet_status.as_deref().map(Some),
         probe,
     )
 }
@@ -183,7 +198,9 @@ pub fn parse_server_cmdline(cmdline: &str) -> Option<PathBuf> {
 
 /// 本实例 daemon 中属于本簇的 app 名（namespace 或期望名匹配）。
 pub(super) fn list_registered_apps(dir: &Path) -> Result<Vec<String>, String> {
-    let ours = [server_product(), server_web_app()];
+    // bF7：三条目——weaknet-serve 品牌无关字面量 [mn10]，否则 status/doctor 判 alien、
+    // stop 漏收敛（面板簇残留进程停不掉）。
+    let ours = [server_product(), server_web_app(), WEAKNET_APP.to_string()];
     let ns = server_namespace();
     let rows = oxmgr_list(dir)?;
     Ok(rows
@@ -271,7 +288,8 @@ pub(super) fn cmd_doctor(args: &mut dyn Iterator<Item = String>) -> i32 {
     i32::try_from(failed).unwrap_or(125).min(125)
 }
 
-/// `logs [server|web|all] [<dir>] [-f|--lines N]`：oxmgr logs 转发（app 名映射品牌）。
+/// `logs [server|web|weaknet|all] [<dir>] [-f|--lines N]`：oxmgr logs 转发（app 名映射品牌；
+/// weaknet-serve 品牌无关 [mn10]，logs 锚点=run/logs/weaknet-serve.*.log）。
 pub(super) fn cmd_logs(args: &mut dyn Iterator<Item = String>) -> i32 {
     let mut target: Option<String> = None;
     let mut dir_token: Option<String> = None;
@@ -280,6 +298,7 @@ pub(super) fn cmd_logs(args: &mut dyn Iterator<Item = String>) -> i32 {
         match a.as_str() {
             "server" if target.is_none() && dir_token.is_none() => target = Some(server_product()),
             "web" if target.is_none() && dir_token.is_none() => target = Some(server_web_app()),
+            "weaknet" if target.is_none() && dir_token.is_none() => target = Some(WEAKNET_APP.to_string()),
             "all" if target.is_none() && dir_token.is_none() => target = Some("all".to_string()),
             "--lines" => {
                 flags.push(a.to_string());
@@ -317,17 +336,21 @@ mod tests {
     #[test]
     fn status_exit_contract() {
         // 全绿 = 0
-        assert_eq!(map_status_exit(Some("running"), Some(Some("running")), Some(true)), 0);
-        // --no-web: web 不在簇，不计异常
-        assert_eq!(map_status_exit(Some("running"), None, Some(true)), 0);
+        assert_eq!(map_status_exit(Some("running"), Some(Some("running")), Some(Some("running")), Some(true)), 0);
+        // --no-web: web 不在簇，不计异常；weaknet None 同理（bin 缺位条件渲染形 [M-1]）
+        assert_eq!(map_status_exit(Some("running"), None, None, Some(true)), 0);
         // web 在簇但停了 = 1（降级）
-        assert_eq!(map_status_exit(Some("running"), Some(Some("stopped")), Some(true)), 1);
+        assert_eq!(map_status_exit(Some("running"), Some(Some("stopped")), None, Some(true)), 1);
+        // weaknet 在簇但停了 = 1（BA-6 新案：与 web 同语义，None=不在簇不计）
+        assert_eq!(map_status_exit(Some("running"), Some(Some("running")), Some(Some("stopped")), Some(true)), 1);
+        // web 剔 while weaknet 活（--no-web 正确形态 lck-F8）= 0：web=None 不连坐
+        assert_eq!(map_status_exit(Some("running"), None, Some(Some("running")), Some(true)), 0);
         // 探针失败（worker 死/503）= 1
-        assert_eq!(map_status_exit(Some("running"), None, Some(false)), 1);
-        assert_eq!(map_status_exit(Some("running"), Some(Some("running")), None), 1);
+        assert_eq!(map_status_exit(Some("running"), None, None, Some(false)), 1);
+        assert_eq!(map_status_exit(Some("running"), Some(Some("running")), Some(Some("running")), None), 1);
         // server 未跑/缺行 = 2
-        assert_eq!(map_status_exit(Some("stopped"), Some(Some("stopped")), None), 2);
-        assert_eq!(map_status_exit(None, None, None), 2);
+        assert_eq!(map_status_exit(Some("stopped"), Some(Some("stopped")), None, None), 2);
+        assert_eq!(map_status_exit(None, None, None, None), 2);
     }
 
 

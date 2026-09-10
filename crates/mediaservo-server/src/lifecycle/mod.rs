@@ -1,7 +1,7 @@
 //! `msrtc-server` 实例生命周期（frontend-process-split T15-T19，单二进制双角色之管理面）。
 //!
-//! 引擎 = oxmgr（与 host 同构，design.md「Server 进程管理：修正版」）。拓扑固定 2 进程
-//! （server + caddy web），oxfile 静态模板免翻译层。所有 oxmgr 调用走**实例 daemon**
+//! 引擎 = oxmgr（与 host 同构，design.md「Server 进程管理：修正版」）。拓扑 2~3 进程
+//! （server + caddy web + weaknet-serve 条件并管），oxfile 静态模板免翻译层。所有 oxmgr 调用走**实例 daemon**
 //! （OXMGR_HOME/OXMGR_DAEMON_ADDR 派生自实例目录——C32 隔离，基数 18500 避开 host 系）。
 //!
 //! 向后兼容硬门：main.rs 仅在首参命中 LIFECYCLE_CMDS 时进入本模块；
@@ -16,9 +16,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use templates::{
-    DEFAULT_WEB_PORT, gen_secret, instance_daemon_port, parse_listen_port, parse_web_port,
-    render_admin_account, render_caddyfile, render_oxfile, render_server_yaml, server_product,
-    server_web_app,
+    DEFAULT_WEB_PORT, WEAKNET_APP, WEAKNET_SERVE_PORT, gen_secret, instance_daemon_port,
+    oxfile_has_weaknet, parse_listen_port, parse_web_port, render_admin_account, render_caddyfile,
+    render_oxfile, render_server_yaml, server_product, server_web_app, weaknet_listen,
 };
 
 /// 管理面子命令表（main.rs 派发判据）。`run` 不在此列——它走守护模式（显式形态）。
@@ -153,12 +153,13 @@ fn init_instance(dir: &Path) -> Result<(), String> {
         eprintln!("init: {} 已存在，跳过", caddy_path.display());
     } else {
         let root = absolute(&dir.join("web"));
-        std::fs::write(&caddy_path, render_caddyfile(web_port, backend_port, &root))
+        std::fs::write(&caddy_path, render_caddyfile(web_port, backend_port, &root, &weaknet_listen()))
             .map_err(|e| format!("写入 Caddyfile 失败: {e}"))?;
         println!("已生成 {}（:{web_port} → 127.0.0.1:{backend_port}）", caddy_path.display());
     }
 
-    // ⑤ oxfile（静态 2 条目；存在不覆盖——手工 env 编辑保留）
+    // ⑤ oxfile（静态 2~3 条目，weaknet 条件渲染 [M-1]；存在不覆盖——手工 env 编辑保留，
+    //    陈旧迁移=Python _drop_stale_server_oxfile 单点 [bF3]）
     let oxfile = run.join("oxfile.toml");
     if oxfile.exists() {
         eprintln!("init: {} 已存在，跳过", oxfile.display());
@@ -332,12 +333,18 @@ fn start_impl(dir: &Path, no_web_flag: bool, verb: &str) -> i32 {
         .ok()
         .and_then(|cf| parse_web_port(&cf))
         .unwrap_or(DEFAULT_WEB_PORT);
+    // weaknet 条目在场（oxfile 文本判据——与 render_oxfile 条件渲染同源 [BA-9]）：
+    // 决定 9810 探针 + --no-web 白名单是否保留 weaknet-serve。
+    let weaknet_cluster = std::fs::read_to_string(&oxfile).is_ok_and(|t| oxfile_has_weaknet(&t));
     // 端口竞争防护（host start 同模式：交互 y 接管 / 非 tty 退出）
     let mut busy: Option<(&str, u16)> = None;
     if inspect::port_in_use(port) {
         busy = Some(("后端监听口", port));
     } else if !no_web && inspect::port_in_use(web_port) {
         busy = Some(("web 口", web_port));
+    } else if weaknet_cluster && inspect::port_in_use(WEAKNET_SERVE_PORT) {
+        // BA-9：外部 dev serve 占 9810 时簇带 crash-loop unit 假「running」——被占报因拒启
+        busy = Some(("weaknet 面板口", WEAKNET_SERVE_PORT));
     }
     if let Some((what, p)) = busy {
         return contention_flow(verb, dir, what, p, no_web);
@@ -345,18 +352,36 @@ fn start_impl(dir: &Path, no_web_flag: bool, verb: &str) -> i32 {
     apply_oxfile(dir, &oxfile, no_web, verb)
 }
 
+/// `--no-web` 的 apply 白名单（纯函数单测锚点，lck-F8）：**只剔 web，绝不连坐剔 weaknet**
+/// （D5-6）——oxmgr 0.5.0 `--only` = 白名单形制实测：非白名单条目被 stop（不删除），
+/// 三条目下缺省白名单必须含 weaknet-serve（条目在场时）。逗号并列形实测同义（`--only a,b`）。
+pub fn no_web_only_list(weaknet_in_oxfile: bool) -> String {
+    if weaknet_in_oxfile {
+        format!("{},{}", server_product(), WEAKNET_APP)
+    } else {
+        server_product()
+    }
+}
+
 fn apply_oxfile(dir: &Path, oxfile: &Path, no_web: bool, verb: &str) -> i32 {
+    let has_wnet = std::fs::read_to_string(oxfile).is_ok_and(|t| oxfile_has_weaknet(&t));
     let mut oxargs: Vec<String> = vec!["apply".into(), oxfile.to_string_lossy().into_owned()];
     if no_web {
-        oxargs.extend(["--only".into(), server_product()]);
+        oxargs.extend(["--only".into(), no_web_only_list(has_wnet)]);
     }
     let refs: Vec<&str> = oxargs.iter().map(String::as_str).collect();
     let code = run_oxmgr(Some(dir), &refs);
     if code == 0 {
+        // BA-6 四点同步之 apply_oxfile 文案：三条目形如实枚举（weaknet 在场才报）
+        let wnet_part = if has_wnet { format!(" + {WEAKNET_APP}") } else { String::new() };
         let cluster = if no_web {
-            format!("仅后端（--no-web）: {svc}", svc = server_product())
+            format!("仅后端（--no-web）: {svc}{wnet_part}", svc = server_product())
         } else {
-            format!("整簇: {svc} + {web}", svc = server_product(), web = server_web_app())
+            format!(
+                "整簇: {svc} + {web}{wnet_part}",
+                svc = server_product(),
+                web = server_web_app()
+            )
         };
         println!("{verb}: 已应用 {} — {cluster}", oxfile.display());
     }
@@ -527,6 +552,18 @@ pub(super) fn absolute(p: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_web_only_list_keeps_weaknet_never_web() {
+        // lck-F8/D5-6：--no-web 只剔 web——weaknet 条目在场必入白名单（防连坐 stop）
+        assert!(no_web_only_list(true).contains(&format!(",{WEAKNET_APP}")));
+        assert!(no_web_only_list(true).starts_with(&format!("{},", server_product())));
+        // 条目缺位（bin 未装配的条件渲染形）→ 纯 server，不带幽灵名（apply --only 未知名风险）
+        assert_eq!(no_web_only_list(false), server_product());
+        // 白名单永不含 web（剔除语义=只剔它）
+        assert!(!no_web_only_list(true).contains(&server_web_app()));
+        assert!(!no_web_only_list(false).contains(&server_web_app()));
+    }
 
     #[test]
     fn no_web_downgrade_decision() {

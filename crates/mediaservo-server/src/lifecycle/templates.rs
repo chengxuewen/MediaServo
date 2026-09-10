@@ -25,6 +25,24 @@ pub fn server_web_app() -> String {
     format!("{}web", brand::media_brand().bin_prefix)
 }
 
+/// weaknet-serve app 名——**有意品牌无关字面量**（weaknet-server-integration [mn10]：
+/// inspect `ours[2]` / deploy keeper bin 白名单 / logs 目标三处稳定依赖此字面量，勿随品牌变）。
+pub const WEAKNET_APP: &str = "weaknet-serve";
+
+/// serve 缺省监听口（D2：ServeArgs 实证 127.0.0.1:9810）。模板常数——stale 判据无
+/// listen 漂移源 [BA-13]。多实例端口 env 化留注记，低优 [wF7/BA-9]。
+pub const WEAKNET_SERVE_PORT: u16 = 9810;
+
+/// weaknet serve 监听渲染字面量（恒 loopback——D5-2 不变式，语义见 render_oxfile 注释）。
+pub fn weaknet_listen() -> String {
+    format!("127.0.0.1:{WEAKNET_SERVE_PORT}")
+}
+
+/// 已渲染 oxfile 文本是否含 weaknet-serve 条目（start 探针 / --no-web 白名单共用的纯判据）。
+pub fn oxfile_has_weaknet(text: &str) -> bool {
+    text.contains(&format!("name = \"{WEAKNET_APP}\""))
+}
+
 /// oxfile [defaults].namespace（status/stop 过滤锚点）。
 pub fn server_namespace() -> String {
     server_product()
@@ -106,6 +124,19 @@ __WEB_ADDR__ {
 			flush_interval -1
 		}
 	}
+	# weaknet 面板反代（D3.1 实测定稿形，Caddy 2.9.1——`uri replace_prefix` 不存在故 handle_path）。
+	# 上游 = __WEAKNET_BACKEND__ 渲染字面量（生成形不吃 env [w批2 F3②]：oxmgr 拉的 caddy 不继承
+	# CLI env，{$VAR} 占位会被当主机名字面量）。header_up Host 重写 = serve Host 白名单放行
+	# （sF1 BLOCKER 修；rebinding 防御职责转移 token 门）。裸 /weaknet 经 @wnroot redir 保 query [wW4]。
+	@wnroot path /weaknet
+	redir @wnroot "/weaknet/?{query}" 308
+	handle_path /weaknet/* {
+		header Cache-Control "no-store"
+		reverse_proxy __WEAKNET_BACKEND__ {
+			header_up Host {upstream_hostport}
+			flush_interval -1
+		}
+	}
 	handle {
 		root * __WEB_ROOT__
 		try_files {path} /index.html
@@ -124,7 +155,7 @@ __WEB_ADDR__ {
 }
 "#;
 
-/// oxfile 静态模板头（拓扑固定 2 进程——免翻译层，design.md「修正版」）。
+/// oxfile 静态模板（2~3 进程——web/weaknet 可选，免翻译层，design.md「修正版」）。
 /// 无 watch：server.yaml 变更 = 人工 restart（热生效项走 admin API C33——psk 轮换会重写
 /// server.yaml，watch 会触发重启风暴，此处刻意不加）。
 pub fn render_oxfile(
@@ -139,7 +170,7 @@ pub fn render_oxfile(
     let server_app = server_product();
     let web_app = server_web_app();
     let mut out = format!(
-        "# mediaservo-server init 生成——静态模板（2 条目；变更拓扑=改本文件+restart）\n\
+        "# mediaservo-server init 生成——静态模板（2~3 条目，weaknet 条件渲染；变更拓扑=改本文件+restart）\n\
          # 注意: 本文件 init 后不自动重渲染（手工 env 编辑保留），删掉后 start 会重新生成\n\
          version = 1\n\n[defaults]\nnamespace = \"{}\"\nrestart_policy = \"always\"\ncwd = \"{dir}\"\n",
         server_namespace()
@@ -159,7 +190,43 @@ pub fn render_oxfile(
         "\n[[apps]]\nname = \"{web_app}\"\ncommand = \"{caddy_cmd} run --config {dir}/etc/Caddyfile --adapter caddyfile\"\nrestart_policy = \"always\"\n"
     ));
     push_logs(&mut out, &web_app, &log_dir);
+    // weaknet-serve 第三条目（D2）——**条件渲染职责钉死于此 [M-1]**：在场判定单点=扫
+    // {dir}/bin（fresh-init 与 .bak 重渲两路共用本函数；Python 只拷贝+WARN 无渲染杠杆）。
+    // 缺位不写条目——杜绝 restart_policy=always 对缺文件的空转风暴 [bF1]。
+    // 不变式两行（[sF3/D5-2]，unit 与代码注释同款）：
+    //   ① 恒 loopback —— --listen 硬字面 127.0.0.1:9810，不开 env/参数口子；
+    //   ② 恒禁 --lan —— Origin 门按 listen 地址比对浏览器 Origin，反代下必失配
+    //      （curl 通/浏览器死的排障黑洞）；对外唯一路径 = Caddy 同源反代 + Host 重写。
+    if let Some(wnet) = discover_weaknet_bin(&dir_abs.join("bin")) {
+        let wnet_path = wnet.to_string_lossy();
+        out.push_str(&format!(
+            "\n[[apps]]\nname = \"{WEAKNET_APP}\"\ncommand = \"{wnet_path} serve --listen {} --token-file {dir}/run/weaknet.token\"\nrestart_policy = \"always\"\n",
+            weaknet_listen()
+        ));
+        // 单 state 合同 [bF8/lck-F3]：oxmgr unit 不继承 CLI env——WEAKNET_STATEDIR（weaknet
+        // state.rs 解析链首位 env 真名，非 WEAKNET_HOME [BA-5 勘误]）烘 {dir}/run/weaknet，
+        // 簇与 CLI 同 state 面（面板看得见 CLI 施压、clear 打得着、撤网撤全）。token-file/
+        // statedir 绝对形 [mn6]（OxMgr 相对路径坑——push_logs 同训）；重渲模板值优先、
+        // carried_env 只补缺键 [lck-F14]。
+        out.push_str(&format!("[apps.env]\nWEAKNET_STATEDIR = \"{dir}/run/weaknet\"\n"));
+        push_logs(&mut out, WEAKNET_APP, &log_dir);
+    }
     out
+}
+
+/// weaknet bin 在场扫描（条件渲染输入）：品牌派生名优先（= Python `_weaknet_bin_name` 同构：
+/// `{brand}-weaknet`，brand 读同一 MEDIASERVO_BRAND env/编译期值——deploy 装配产物名），
+/// 上游名 mediaservo-weaknet 兜底（keeper 双名 [BA-2①]；brand 空 = 两名同串）。
+/// 不 glob 任意 `*-weaknet`——旧品牌残件由 deploy 白名单清理，指过去=死路径。
+/// `-x` 判定（is_executable 与 lifecycle::which 同源），防非可执行残档假在场。
+fn discover_weaknet_bin(dir_bin: &Path) -> Option<std::path::PathBuf> {
+    let exe = std::env::consts::EXE_SUFFIX;
+    let branded = format!("{}weaknet{exe}", brand::media_brand().bin_prefix);
+    let upstream = format!("mediaservo-weaknet{exe}");
+    [branded.as_str(), upstream.as_str()]
+        .into_iter()
+        .map(|n| dir_bin.join(n))
+        .find(|p| p.is_file() && super::is_executable(p))
 }
 
 /// 日志绝对路径（实例 run/logs——OxMgr 按 daemon cwd 解析相对路径的坑，host translate 同训）。
@@ -175,10 +242,18 @@ pub fn render_server_yaml(psk: &str, jwt: &str) -> String {
         .replace("__JWT__", jwt)
 }
 
-pub fn render_caddyfile(web_port: u16, backend_port: u16, web_root: &Path) -> String {
+/// 渲染 web Caddyfile。`weaknet_backend` = 面板上游 host:port 字面量（init 传
+/// `weaknet_listen()` = 127.0.0.1:9810；生成形不吃 env [w批2 F3②]）。
+pub fn render_caddyfile(
+    web_port: u16,
+    backend_port: u16,
+    web_root: &Path,
+    weaknet_backend: &str,
+) -> String {
     CADDYFILE_TEMPLATE
         .replace("__WEB_ADDR__", &format!(":{web_port}"))
         .replace("__BACKEND__", &format!("127.0.0.1:{backend_port}"))
+        .replace("__WEAKNET_BACKEND__", weaknet_backend)
         .replace("__WEB_ROOT__", &web_root.to_string_lossy())
 }
 
@@ -274,7 +349,7 @@ mod tests {
 
     #[test]
     fn parses_web_port_and_root() {
-        let cf = render_caddyfile(8089, 9802, Path::new("/opt/ms/web"));
+        let cf = render_caddyfile(8089, 9802, Path::new("/opt/ms/web"), "127.0.0.1:9810");
         assert_eq!(parse_web_port(&cf), Some(8089));
         assert_eq!(parse_web_root(&cf).as_deref(), Some("/opt/ms/web"));
         assert_eq!(parse_web_port("no site here"), None);
@@ -298,6 +373,85 @@ mod tests {
             let p = instance_daemon_port(Path::new(&format!("/tmp/x{i}/run/oxmgr")));
             assert!((18500..18900).contains(&p), "避开 host 18000-18399: {p}");
         }
+    }
+
+    #[cfg(unix)]
+    fn touch_exec_bin(dir: &Path, name: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).expect("mkdir bin");
+        let p = bin.join(name);
+        std::fs::write(&p, b"#!/bin/sh\n").expect("write bin");
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oxfile_weaknet_conditional_render_present_absent() {
+        let srv = Path::new("/x/bin/mediaservo-server");
+        // 缺位形：无 bin/ → 不写条目（防 restart_policy=always 空转风暴 [bF1]）
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        let absent = render_oxfile(dir, srv, "caddy", &[]);
+        assert!(!absent.contains(WEAKNET_APP), "bin 缺位必须无条件渲染为无条目");
+        assert!(!oxfile_has_weaknet(&absent));
+        // 在场形：上游名（默认品牌 mediaservo → branded==upstream 同串）
+        touch_exec_bin(dir, "mediaservo-weaknet");
+        let yes = render_oxfile(dir, srv, "caddy", &[]);
+        let d = dir.to_string_lossy().to_string();
+        assert!(oxfile_has_weaknet(&yes), "在场判定单点=render_oxfile [M-1]");
+        assert!(
+            yes.contains(&format!(
+                "command = \"{d}/bin/mediaservo-weaknet serve --listen {} --token-file {d}/run/weaknet.token\"",
+                weaknet_listen()
+            )),
+            "全绝对形 [mn6] + token-file"
+        );
+        assert!(yes.contains(&format!("[apps.env]\nWEAKNET_STATEDIR = \"{d}/run/weaknet\"")));
+        assert!(yes.contains(&format!("{d}/run/logs/{WEAKNET_APP}.out.log")));
+        assert!(!yes.contains("--lan"), "恒禁 --lan 硬门 [sF3]");
+        assert!(!yes.contains("{$"), "生成形不吃 env 占位");
+        // ours[2]：weaknet 必须排第三（server→web→weaknet——inspect ours 索引稳定 [mn10]）
+        let (i_srv, i_web, i_wn) = (
+            yes.find("name = \"mediaservo-server\"").unwrap(),
+            yes.find("name = \"mediaservo-web\"").unwrap(),
+            yes.find(&format!("name = \"{WEAKNET_APP}\"")).unwrap(),
+        );
+        assert!(i_srv < i_web && i_web < i_wn, "条目序 = ours 序");
+        // restart_policy 同 server 条目
+        let blk = &yes[i_wn..];
+        assert!(blk.contains("restart_policy = \"always\""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oxfile_weaknet_non_exec_not_present() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).expect("mkdir");
+        std::fs::write(bin.join("mediaservo-weaknet"), b"x").expect("write");
+        // 0644 非可执行 → 不算在场
+        let out = render_oxfile(dir, Path::new("/x/bin/mediaservo-server"), "caddy", &[]);
+        assert!(!out.contains(WEAKNET_APP), "-x 判定：非可执行残档不得触发条目");
+    }
+
+    #[test]
+    fn caddyfile_weaknet_segment_rendered_literal() {
+        let cf = render_caddyfile(8080, 9800, Path::new("/opt/ms/web"), &weaknet_listen());
+        assert!(cf.contains("@wnroot path /weaknet"));
+        assert!(cf.contains("redir @wnroot \"/weaknet/?{query}\" 308"));
+        assert!(cf.contains("handle_path /weaknet/*"));
+        assert!(cf.contains("header_up Host {upstream_hostport}"));
+        assert!(cf.contains("reverse_proxy 127.0.0.1:9810"), "渲染字面量（缺省口）");
+        // 生成形不吃 env 占位 [w批2 F3②]（模板注释含 dollar-brace 字样是说明文，非指令）
+        assert!(!cf.contains(r"{$MSRTC"), "生成的反代上游必须是渲染字面量");
+        assert_eq!(weaknet_listen(), "127.0.0.1:9810");
+        // 段序：@api 之后、静态 handle 之前
+        let i_api = cf.find("handle @api").unwrap();
+        let i_wn = cf.find("handle_path /weaknet").unwrap();
+        let i_static = cf.find("root * /opt/ms/web").unwrap();
+        assert!(i_api < i_wn && i_wn < i_static, "段序 @api → @weaknet → 静态");
     }
 
     #[test]
