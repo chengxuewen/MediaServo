@@ -1,14 +1,28 @@
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { clearToken } from '../api/client';
 import './Layout.css';
-import { Radio, LayoutDashboard, Mic, Car, MonitorCog, Users, Settings as SettingsIcon } from 'lucide-react';
+import { Radio, LayoutDashboard, Mic, Car, MonitorCog, Users, Settings as SettingsIcon, Sliders } from 'lucide-react';
 
 export default function Layout() {
   const { role, username, canMonitor, token, isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const notices = (location.state as { notice?: string } | null)?.notice;
+  // T8 弱网面板入口卡：每 mount 探活一次（HEAD /weaknet/v1/capabilities），无轮询。
+  // 桶表(design D4)：401=活 / 2xx=反代段缺位(SPA fallback 假亮) / 5xx|reject=serve 或 caddy 未跑。
+  // DEV 隐藏：vite 无 /weaknet 代理（按 5173 端口判据，工程未类型化 import.meta.env）。
+  const [wnet, setWnet] = useState<'ok' | 'no-proxy' | 'down' | null>(null);
+  const showWnet = isAdmin && window.location.port !== '5173';
+  useEffect(() => {
+    if (!showWnet) return;
+    let ignore = false;
+    fetch('/weaknet/v1/capabilities', { method: 'HEAD' })
+      .then((r) => { if (!ignore) setWnet(r.ok ? 'no-proxy' : r.status >= 500 ? 'down' : 'ok'); })
+      .catch(() => { if (!ignore) setWnet('down'); });
+    return () => { ignore = true; };
+  }, [showWnet]);
   const handleLogout = () => {
     clearToken();
     navigate('/login');
@@ -53,6 +67,14 @@ export default function Layout() {
             <NavLink to="/accounts" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               <Users size={15} /> Account Management
             </NavLink>
+          )}
+          {/* 弱网面板 = 纯外链（App.tsx 路由表不加 path），新标签打开 serve 面板 */}
+          {showWnet && (
+            <a href="/weaknet/" target="_blank" rel="noopener noreferrer"
+               className={wnet ? 'nav-item dim' : 'nav-item'}
+               title={wnet === 'no-proxy' ? '反代段缺位（检查 Caddy）' : wnet === 'down' ? 'weaknet serve 未运行' : undefined}>
+              <Sliders size={15} /> 弱网面板
+            </a>
           )}
           <NavLink to="/settings" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
             <SettingsIcon size={15} /> Settings
