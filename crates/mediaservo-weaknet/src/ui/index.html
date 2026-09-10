@@ -7,8 +7,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>weaknet 控制台</title>
 <link rel="icon" href="data:,"> <!-- 免 favicon 404 控制台噪声（W3 错误数=0 判据） -->
-<link rel="stylesheet" href="/assets/vendor/uPlot.min.css">
-<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="assets/vendor/uPlot.min.css">
+<link rel="stylesheet" href="assets/styles.css">
 </head>
 <body>
 <div id="gate" hidden>
@@ -17,6 +17,11 @@
     <p><b>直连</b>：到 <code>weaknet serve</code> 终端横幅里<b>整行复制</b>面板 URL（<code>http://127.0.0.1:…/?token=…</code>）粘贴到地址栏打开。</p>
     <p><b>经 server 后台入口（反代）</b>：开 <code>http://&lt;当前 host&gt;/weaknet/</code>，token 见部署树 <code>run/weaknet.token</code>。</p>
     <p class="dim">凭证只存本标签页（sessionStorage，关闭即弃）；页面任何位置不打印它。</p>
+    <div class="gate-form">
+      <input type="password" id="gate-token" placeholder="粘贴 token（横幅 ?token= 值或 run/weaknet.token 内容）" autocomplete="off" spellcheck="false">
+      <button id="gate-apply" type="button">进入</button>
+    </div>
+    <p id="gate-err" class="err" hidden>凭证无效（401）——核对来源后重新粘贴。</p>
     <button id="gate-clear" type="button">清除无效凭证并重置本页</button>
   </div>
 </div>
@@ -100,7 +105,7 @@
 
 <div id="toast" hidden></div>
 <noscript><p style="padding:1rem">本面板需要 JavaScript（SSE 状态帧驱动）。</p></noscript>
-<script src="/assets/vendor/uPlot.iife.min.js"></script>
-<script type="module" src="/assets/app.js"></script>
+<script src="assets/vendor/uPlot.iife.min.js"></script>
+<script type="module" src="assets/app.js"></script>
 </body>
 </html>

@@ -33,7 +33,17 @@ function toast(msg, bad) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, 4200);
 }
-function showGate() { $("#gate").hidden = false; }
+function showGate(bad) {
+  const g = $("#gate");
+  g.hidden = false;
+  $("#gate-err").hidden = !bad;
+  if (bad) {
+    const card = g.querySelector(".gate-card");
+    card.classList.remove("shake");
+    void card.offsetWidth; // 重启动画（连续 401 每轮都抖）
+    card.classList.add("shake");
+  }
+}
 
 // ---------- REST 小封装 ----------
 async function api(path, opts = {}) {
@@ -48,7 +58,7 @@ async function api(path, opts = {}) {
   }
   let body = null;
   try { body = await res.json(); } catch { /* 非 JSON 响应体：忽略解析 */ }
-  if (res.status === 401) showGate(); // 全屏引导：去横幅复制
+  if (res.status === 401) showGate(!!auth); // 全屏引导：横幅整行复制或 gate 输入框粘贴（有 token 仍 401 = 抖）
   return { status: res.status, body };
 }
 
@@ -108,7 +118,7 @@ function scheduleSet(immediate) { // debounce 400ms；滑块 pointerup/离散勾
 }
 async function sendSet(retry = true) {
   const body = Object.assign(specFields(), scopeFields());
-  const r = await api("/v1/set", { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
+  const r = await api("v1/set", { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
   const err = r.body?.error || "";
   if (r.status === 409 && err.includes("锁持有")) {
     // serve×CLI/连发写 = 合法并态排队（design §Error handling）；一次性延后重发，仍忙才报
@@ -127,14 +137,14 @@ async function toggleMaster(on) {
   if (on) {
     const dur = Math.round(Number($("#duration").value) || 300);
     const body = Object.assign(specFields(), scopeFields(), { duration: dur, iface: ui.iface.trim() || "lo" });
-    const r = await api("/v1/apply", { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
+    const r = await api("v1/apply", { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
     if (r.status === 409) { toast("scenario 进行中（409）——先 stop", true); sw.checked = false; }
     else if (!r.ok && r.status !== 0) {
       toast(`apply 失败（${r.status}）：${r.body?.error ?? "?"}——多为 stats 不可达/媒体口为空，见中栏报因`, true);
       sw.checked = false;
     }
   } else {
-    const r = await api("/v1/clear", { method: "POST" });
+    const r = await api("v1/clear", { method: "POST" });
     if (r.status !== 200 && r.status !== 0) toast(`clear 失败（${r.status}）：${r.body?.error ?? "?"}`, true);
   }
   // 开关的最终视觉位置由状态帧决定（spec!=null ⇔ 总闸 on）
@@ -177,6 +187,8 @@ function renderCapsLine() {
 
 // ---------- 中栏：owner 分组流表 ----------
 const PLAY_PORT = 8080; // 文档化常量：浏览器面入口（Caddy，deploy/caddy/Caddyfile.native）；跨端口天然可用
+// T6 grep 豁免（wW9）：面板 :9810 播 server :8080 流是跨 origin 拼接，绝对形是有意的——
+// 随本文件其余 URL 一起相对化会打到面板自身，反成 bug。
 function playUrl(room) {
   return `http://${location.hostname}:${PLAY_PORT}/?room=${encodeURIComponent(room)}`;
 }
@@ -426,7 +438,7 @@ function renderScenJob(f) {
 
 // ---------- SSE ----------
 function connectSSE() {
-  es = new EventSource("/v1/events?token=" + encodeURIComponent(auth)); // query-token 唯一豁免面
+  es = new EventSource("v1/events?token=" + encodeURIComponent(auth)); // query-token 唯一豁免面
   es.onmessage = (m) => {
     let f;
     try { f = JSON.parse(m.data); } catch { toast("状态帧 JSON 解析失败", true); return; }
@@ -457,26 +469,26 @@ function renderScenList() {
   }
 }
 async function loadScenarios() {
-  const r = await api("/v1/scenarios");
+  const r = await api("v1/scenarios");
   scenarios = (r.body?.scenarios ?? []).slice();
   if (scenarios.length && !scenPick) scenPick = scenarios[0];
   renderScenList();
 }
 async function scenRun() {
   if (!scenPick) { toast("先选一个剧本"); return; }
-  const r = await api("/v1/scenario/run", { method: "POST", body: JSON.stringify({ file: scenPick }), headers: { "Content-Type": "application/json" } });
+  const r = await api("v1/scenario/run", { method: "POST", body: JSON.stringify({ file: scenPick }), headers: { "Content-Type": "application/json" } });
   if (r.status === 501) toast(`剧本引擎未到场（501）：${r.body?.error ?? "随 T8"}`);
   else if (r.status !== 200 && r.status !== 0) toast(`run 失败（${r.status}）：${r.body?.error ?? "?"}`, true);
 }
 async function scenStop() {
-  const r = await api("/v1/scenario/stop", { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } });
+  const r = await api("v1/scenario/stop", { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } });
   if (r.status === 501) toast(`stop 同随 T8（501）：${r.body?.error ?? ""}`);
   else if (r.status !== 200 && r.status !== 0) toast(`stop 失败（${r.status}）：${r.body?.error ?? "?"}`, true);
 }
 
 // ---------- 引导加载 ----------
 async function fetchStreamsNote() {
-  const r = await api("/v1/streams");
+  const r = await api("v1/streams");
   streamsNote = r.body?.note || "";
   renderStreams();
 }
@@ -486,7 +498,7 @@ async function boot() {
     sessionStorage.removeItem(AUTH_KEY);
     location.replace(location.pathname);
   });
-  const [c, p] = await Promise.all([api("/v1/capabilities"), api("/v1/profiles")]);
+  const [c, p] = await Promise.all([api("v1/capabilities"), api("v1/profiles")]);
   if (c.status === 401 || p.status === 401) return; // gate 已由 api() 呈现
   caps = c.body;
   renderCapsLine();
@@ -532,4 +544,15 @@ function bind() {
   $("#scen-stop").addEventListener("click", scenStop);
   addEventListener("resize", () => { if (kbpsChart) rebuildCharts(); });
 }
+// ---------- gate token 输入（首用动线 UI 承接）----------
+// 复用上方凭证生命周期存取（AUTH_KEY/sessionStorage）；提交即带凭证重载，
+// 地址栏零凭证——与文件头 replaceState 剥 query 策略并存。绑定置于 EOF：$ 助手已定义。
+function applyGateToken() {
+  const v = $("#gate-token").value.trim();
+  if (!v) return;
+  sessionStorage.setItem(AUTH_KEY, v);
+  location.replace(location.pathname); // 重载后 boot() 直接吃新 token
+}
+$("#gate-apply").addEventListener("click", applyGateToken);
+$("#gate-token").addEventListener("keydown", (e) => { if (e.key === "Enter") applyGateToken(); });
 boot();

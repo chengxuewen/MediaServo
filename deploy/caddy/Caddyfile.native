@@ -3,6 +3,7 @@
 #       （mediaservo build/run web 或 msrtc.sh run web 自动这样调；cwd 需含 ./web 静态目录）
 # 覆盖: MSRTC_WEB_ADDR（默认 :8080——非 root 可绑；生产上 443+证书由 deploy/锚点层改写本段）
 # 上游: MSRTC_BACKEND（默认 127.0.0.1:9800——D-2=B：host-agent 仍直连 backend，本代理只服务浏览器）
+#       MSRTC_WEAKNET_BACKEND（默认 127.0.0.1:9810——weaknet 面板 serve，簇内常驻）
 # 回滚资产: 根 Caddyfile（模式②全透传，配嵌入镜像，勿混用）
 
 {$MSRTC_WEB_ADDR::8080} {
@@ -14,7 +15,23 @@
 		}
 	}
 
-	# ② 其余 → 静态 dist（vite hash 资源强缓存；入口 no-cache 防版本偏斜）
+	# ② weaknet 面板反代（weaknet-server-integration T7，D3.1 实测定稿形，Caddy 2.9.1——
+	#    `uri replace_prefix` 不存在故 handle_path）。段体与 lifecycle/templates.rs CADDYFILE_TEMPLATE
+	#    的 @weaknet 段（T4 已落）逐行同源，唯一差异=上游形：native 过渡态经 CLI env 拉起吃
+	#    {$MSRTC_WEAKNET_BACKEND} 占位；模板侧 = init 渲染字面量（oxmgr 拉的 caddy 不继承
+	#    CLI env [w批2 F3②]）。header_up Host 重写 = serve Host 白名单放行（sF1 BLOCKER 修；
+	#    rebinding 防御职责转移 token 门）。裸 /weaknet 经 @wnroot redir 保 query [wW4]。
+	@wnroot path /weaknet
+	redir @wnroot "/weaknet/?{query}" 308
+	handle_path /weaknet/* {
+		header Cache-Control "no-store"
+		reverse_proxy {$MSRTC_WEAKNET_BACKEND:127.0.0.1:9810} {
+			header_up Host {upstream_hostport}
+			flush_interval -1
+		}
+	}
+
+	# ③ 其余 → 静态 dist（vite hash 资源强缓存；入口 no-cache 防版本偏斜）
 	handle {
 		root * ./web
 		try_files {path} /index.html
