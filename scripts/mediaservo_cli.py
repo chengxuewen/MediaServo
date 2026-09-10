@@ -1139,6 +1139,53 @@ def _write_version_file(dst: Path, target: str) -> None:
     (dst / f"{target}-version.txt").write_text("\n".join(lines) + "\n")
 
 
+def _git_out(args: list[str], timeout: int = 10) -> str | None:
+    """git 只读查询（capture stdout，cwd=仓库根）；任何失败（无 git/浅克隆/超时）→ None 不抛
+    ——package CHANGES 生成的降级面（package-changes design §边界）。"""
+    try:
+        r = subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def _write_changes_file(staging: Path, pkg_name: str, brand: str) -> None:
+    """发布包内嵌变更清单（package-changes 方案 B——git log 机械生成，零人肉同步）。
+    范围 = 上一 tag..HEAD（C43④ tag 纪律落地前降级最近 30 条）；节 = breaking/feat/fix，
+    其余前缀（chore/docs/refactor/test/ci…）整条丢弃——消费方只看行为变化，全量去 git。
+    空节省略；git 不可用/分类全空 → 不写文件 + WARN（**无假文件**：看见文件=有内容）。"""
+    if _git_out(["log", "-1", "--format=%s"]) is None:
+        print("WARN: git 不可用——CHANGES.md 跳过生成（不阻断打包）", file=sys.stderr)
+        return
+    prev = (_git_out(["describe", "--tags", "--abbrev=0", "HEAD^"]) or "").strip()
+    log_args = ["log", f"{prev}..HEAD", "--pretty=%s"] if prev else ["log", "-30", "--pretty=%s"]
+    out = _git_out(log_args)
+    if out is None:
+        print("WARN: git log 范围查询失败——CHANGES.md 跳过生成（不阻断打包）", file=sys.stderr)
+        return
+    subs = list(dict.fromkeys(x.strip() for x in out.splitlines() if x.strip()))
+    brk = [x for x in subs if re.search(r"^\w+(\([^)]*\))?!:", x) or x.upper().startswith("BREAKING")]
+    fea = [x for x in subs if re.match(r"^feat(\(|!|:)", x) and x not in brk]
+    fix = [x for x in subs if re.match(r"^fix(\(|!|:)", x) and x not in brk]
+
+    def strip_pre(subj: str) -> str:
+        return re.sub(r"^\w+(\([^)]*\))?!?:\s*", "", subj)
+
+    if not (brk or fea or fix):
+        print("WARN: CHANGES 范围内无 feat/fix/breaking 提交——不写 CHANGES.md", file=sys.stderr)
+        return
+    ver = _workspace_version()
+    date = (_git_out(["log", "-1", "--format=%cd", "--date=short"]) or "").strip()
+    lines = [f"# CHANGES — {brand}-{pkg_name} {ver}（{date}）", ""]
+    for title, rows in (("Breaking Changes", brk), ("Features", fea), ("Fixes", fix)):
+        if rows:
+            lines += [f"## {title}"] + [f"- {strip_pre(x)}" for x in rows] + [""]
+    try:
+        (staging / "CHANGES.md").write_text("\n".join(lines), encoding="utf-8")
+    except OSError as e:
+        print(f"WARN: CHANGES.md 写盘失败（{e}）——不阻断打包", file=sys.stderr)
+
+
 def _cmd_package(args: argparse.Namespace) -> None:
     """package <target> — <dist>/<brand>-{host|server|sdk}-<ver>.tar.gz 多包发布（D-H13）。
     dist: --dist 指定输出目录；未指定时默认子模块 dist/（MSRTC 发布壳会注入 out/packages/）。
@@ -1165,6 +1212,7 @@ def _cmd_package(args: argparse.Namespace) -> None:
             _cmd_deploy_bindings(str(staging), args.release)
         _write_version_file(staging, pkg_name)
         prefix_name = args.brand if args.brand else "mediaservo"
+        _write_changes_file(staging, pkg_name, prefix_name)  # package-changes B：内嵌变更清单（WARN 降级不阻断）
         package_root = f"{prefix_name}-{pkg_name}-{ver}"
         out = dist / f"{package_root}.tar.gz"
         strip_package_binaries(staging)  # PIT-119: debug 二进制未 strip（单 135-155MB）→ gzip 1.2GB 超时

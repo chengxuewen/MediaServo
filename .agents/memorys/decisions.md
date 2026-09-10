@@ -808,3 +808,8 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **边界**：面板 token 与 admin JWT 互不打通（RequireAdmin=UX 非安全边界）；撤网正确性不依赖优雅退出；车端面/模式②/根 Caddyfile 不动；package 含 weaknet（server=台架裁决）。
 - **教训钉**：Caddy 2.9.1 无 `uri replace_prefix`（实测指令真伪要跑）；同机 localhost 验收会掩盖 Host 门 403（LAN-IP 双形纪律）；"自动化绿≠人可用"（gate 无输入框=人肉断头）；门禁 grep 自身可造假绿（cd 语境）。
 - **评审链**：四席对抗（~40 簇）+ Momus [OKAY]（3 MAJOR/10 MINOR）→ rev-2.4；证据 docs/plans/weaknet-server-integration/（主仓）。
+
+## D279: CHANGES.md 自动生成随发布包——方案 B（2026-09-10）
+- **决策**：package staging 装配调 `_write_changes_file()`（host/server/sdk 单点接线），git log subject 机械分节 breaking/feat/fix；**chore/docs/refactor/test/ci 全丢弃**（裁决：消费方只看行为变化，全量去 git——不养第二份噪音文档）；空节省略、三节全空不写文件；任何降级 WARN 不阻断打包（宁缺勿断）。
+- **否决 A**：手写 CHANGELOG.md 腐烂率高（tag=0 + v0.1.8.2 漂浮号实证"人肉记得"链已漏，C43 同类漂移面禁再养）。
+- **配套**：e2e-package host/sdk 清单断言 +README 包内容注记；D-H13 version.txt 管机器配对、CHANGES 管人读面，不重叠。

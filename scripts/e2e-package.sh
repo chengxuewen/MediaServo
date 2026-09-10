@@ -59,7 +59,7 @@ else
 fi
 for f in etc/host.yaml etc/link/signing.pem etc/link/cam0.token etc/link/cam0-stream-stream.token \
          etc/link/recorder.token etc/link/agent.token etc/link/ros_bridge.yaml \
-         etc/link/issuance.jsonl identity.json host-version.txt; do
+         etc/link/issuance.jsonl identity.json host-version.txt CHANGES.md; do
     echo "$LIST" | grep -q "^$HOST_ROOT/$f$" || { echo "FAIL: 包内缺 $HOST_ROOT/$f"; FAIL=1; }
 done
 echo "$LIST" | grep -q "^$HOST_ROOT/run/logs/$" || { echo "FAIL: 包内缺 $HOST_ROOT/run/logs/"; FAIL=1; }
@@ -123,7 +123,7 @@ for f in \
     lib/pkgconfig/mediaservo-field.pc lib/pkgconfig/mediaservo-link.pc lib/pkgconfig/mediaservo-deck.pc \
     lib/cmake/mediaservo/mediaservoConfig.cmake lib/cmake/mediaservo/mediaservoConfigVersion.cmake \
     node/mediaservo/package.json node/mediaservo/mediaservo.node node/mediaservo/lib/index.mjs \
-    sdk-version.txt; do
+    sdk-version.txt CHANGES.md; do
     echo "$LIST" | grep -q "^$SDK_ROOT/$f$" || { echo "FAIL: SDK 包缺 $f"; FAIL=1; }
 done
 echo "$LIST" | grep -qE "^$SDK_ROOT/lib/python3\.[0-9]+/site-packages/mediaservo/" || { echo "FAIL: SDK 包缺 python 包"; FAIL=1; }
