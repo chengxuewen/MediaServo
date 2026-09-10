@@ -22,6 +22,11 @@ struct HostConfig {
     record: Option<RecordSection>,
     #[serde(default)]
     signaling: Option<SignalingSection>,
+    /// 公共缺省段（`defaults.streams` / `defaults.sources`）——合并链
+    /// **逐条配置 > defaults.<子节> > 内置默认**（D282）。缺段 = 零注入，
+    /// 行为与旧版逐字节一致。
+    #[serde(default)]
+    defaults: DefaultsCfg,
 }
 /// 视频源逻辑类别（mode 四类；`backend`/`input` 按 mode 生效）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -102,6 +107,66 @@ struct Stream {
     /// 关键帧间隔秒（GOP；缺省 2——field PushConfig 默认）。
     #[serde(default)]
     keyframe_interval: Option<u32>,
+}
+
+/// `defaults:` 段（host-stream-defaults D282）——streams / sources 两子节公共缺省。
+///
+/// 合并链 **逐条配置 > defaults.<子节> > 内置默认**，只在两个唯一解析点各落一次
+/// （`camera_configs()` / `stream_configs()`），下游（oxfile 裁决段、capturer/streamer
+/// 进程内解析）只见合并完毕的 resolved 值。
+///
+/// deny 姿态：两子结构带 `deny_unknown_fields`（新键无历史包袱，typo 在 deploy 期
+/// 报错——最易写错的层恰恰最严）；顶层 [`HostConfig`] **不加**（存量 yaml 带弃用键，
+/// 如 `host:` / `control:` 段与旧 `source: "stub"` 兼容面，加了就咬）。
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DefaultsCfg {
+    #[serde(default)]
+    sources: SourceDefaults,
+    #[serde(default)]
+    streams: StreamDefaults,
+}
+
+/// `defaults.streams` —— 键名与 `streams[]` 条目原键一致（不含 id/source：写了由
+/// deny_unknown_fields 在 deploy 期拒掉，公共层无身份语义）。
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StreamDefaults {
+    #[serde(default)]
+    codec: Option<String>,
+    #[serde(default)]
+    encoder_backend: Option<String>,
+    #[serde(default)]
+    bitrate_kbps: Option<u32>,
+    #[serde(default)]
+    stream_mode: Option<String>,
+    #[serde(default)]
+    min_bitrate_kbps: Option<u32>,
+    #[serde(default)]
+    keyframe_interval: Option<u32>,
+}
+
+/// `defaults.sources` —— 除 `id` 外与 [`Source`] 同形（旧 `source` 兼容键同理不入）。
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourceDefaults {
+    #[serde(default)]
+    mode: Option<SourceMode>,
+    /// 镜像 [`Source`] 的声明位（采集后端当前由 capturer 自动选型，键值未消费——
+    /// 公共层保持与条目同形，避免"条目能写、defaults 不能写"的割裂面）。
+    #[serde(default)]
+    #[allow(dead_code)]
+    backend: Option<String>,
+    #[serde(default)]
+    input: Option<String>,
+    #[serde(default)]
+    width: Option<u32>,
+    #[serde(default)]
+    height: Option<u32>,
+    #[serde(default)]
+    fps: Option<u32>,
+    #[serde(default)]
+    reconnect_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -639,14 +704,20 @@ pub struct SourceConfig {
 const DEFAULT_SOURCE_WIDTH: u32 = 1280;
 /// 帧高缺省（height 未配置；原 capturer DEFAULT_HEIGHT）。
 const DEFAULT_SOURCE_HEIGHT: u32 = 720;
+/// 帧率缺省（fps 未配置；亦为 smooth 地板查不到关联源 fps 时的回落值）。
+const DEFAULT_SOURCE_FPS: u32 = 30;
 
 /// 解析全部视频源配置（原职能 camera_configs——函数名保留，消费面不变）。
 /// 旧 `source` 字段非 "stub" 拒绝（迁移提示）；fps=0 拒绝（generator.start(0) 线程内
 /// panic → 静默挂起，C1 审查发现）。
+///
+/// `defaults.sources` 在此逐键合并（逐条 > defaults > 内置，D282）——源配置唯一解析点。
 pub fn camera_configs(cfg: &str) -> Result<Vec<SourceConfig>, String> {
-    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
-    let mut out = Vec::with_capacity(cfg.sources.len());
-    for c in cfg.sources {
+    let HostConfig { sources, defaults, .. } =
+        serde_yaml::from_str::<HostConfig>(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+    let d = defaults.sources;
+    let mut out = Vec::with_capacity(sources.len());
+    for c in sources {
         if let Some(src) = &c.source
             && src != "stub"
         {
@@ -655,7 +726,7 @@ pub fn camera_configs(cfg: &str) -> Result<Vec<SourceConfig>, String> {
                 c.id
             ));
         }
-        let fps = c.fps.unwrap_or(30);
+        let fps = c.fps.or(d.fps).unwrap_or(DEFAULT_SOURCE_FPS);
         if fps == 0 {
             return Err(format!("host.yaml 解析失败: 视频源 {} fps=0 无效（须 > 0）", c.id));
         }
@@ -664,13 +735,13 @@ pub fn camera_configs(cfg: &str) -> Result<Vec<SourceConfig>, String> {
         }
         out.push(SourceConfig {
             id: c.id,
-            // 旧配置无 mode → generator（原 stub 生成语义）
-            mode: c.mode.unwrap_or(SourceMode::Generator),
-            width: c.width.unwrap_or(DEFAULT_SOURCE_WIDTH),
-            height: c.height.unwrap_or(DEFAULT_SOURCE_HEIGHT),
+            // 条目与 defaults 均无 mode → generator（原 stub 生成语义）
+            mode: c.mode.or(d.mode).unwrap_or(SourceMode::Generator),
+            width: c.width.or(d.width).unwrap_or(DEFAULT_SOURCE_WIDTH),
+            height: c.height.or(d.height).unwrap_or(DEFAULT_SOURCE_HEIGHT),
             fps,
-            input: c.input,
-            reconnect_ms: c.reconnect_ms,
+            input: c.input.or_else(|| d.input.clone()),
+            reconnect_ms: c.reconnect_ms.or(d.reconnect_ms),
         });
     }
     Ok(out)
@@ -722,28 +793,42 @@ pub struct StreamConfig {
 }
 
 /// 解析全部流配置（C2 streamer 用）。
+///
+/// `defaults.streams` 在此逐键合并（逐条 > defaults > 内置，D282）——流配置唯一解析点；
+/// 合法性门在合并**之后**，故三源同检（错值无论写在哪层都 deploy 期报出）。
 pub fn stream_configs(cfg: &str) -> Result<Vec<StreamConfig>, String> {
-    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
-    cfg.streams
+    let HostConfig { streams, defaults, .. } =
+        serde_yaml::from_str::<HostConfig>(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+    let d = &defaults.streams;
+    streams
         .into_iter()
         .map(|s| {
             let id = s.id.clone();
+            let codec = s.codec.or_else(|| d.codec.clone()).unwrap_or_else(|| "vp8".into());
+            let stream_mode = s.stream_mode.or_else(|| d.stream_mode.clone());
             // qos-framerate-priority AD-2：非法 stream_mode 在此拦截（deploy/build 期 Err，
             // 错误信息含合法集；不进 streamer 防 oxmgr 重启风暴）。
-            if let Some(m) = &s.stream_mode
+            if let Some(m) = &stream_mode
                 && m.parse::<mediaservo_field::StreamMode>().is_err()
             {
                 return Err(format!("host.yaml 解析失败: 流 {id} stream_mode={m} 非法（合法: smooth|balanced|quality）"));
             }
+            // 合法集对齐 field sfu::codec_spec——未知值在 field 层静默回落 VP8，
+            // typo 只有拦在这里才看得见（deploy 期报错，不进 streamer）。
+            if !matches!(codec.as_str(), "vp8" | "h264" | "vp9" | "av1") {
+                return Err(format!(
+                    "host.yaml 解析失败: 流 {id} codec={codec} 非法（合法: vp8|h264|vp9|av1）"
+                ));
+            }
             Ok(StreamConfig {
                 id,
                 source: s.source.unwrap_or_else(|| s.id),
-                codec: s.codec.unwrap_or_else(|| "vp8".into()),
-                encoder_backend: s.encoder_backend,
-                bitrate_kbps: s.bitrate_kbps,
-                stream_mode: s.stream_mode,
-                min_bitrate_kbps: s.min_bitrate_kbps,
-                keyframe_interval: s.keyframe_interval,
+                codec,
+                encoder_backend: s.encoder_backend.or_else(|| d.encoder_backend.clone()),
+                bitrate_kbps: s.bitrate_kbps.or(d.bitrate_kbps),
+                stream_mode,
+                min_bitrate_kbps: s.min_bitrate_kbps.or(d.min_bitrate_kbps),
+                keyframe_interval: s.keyframe_interval.or(d.keyframe_interval),
             })
         })
         .collect()
@@ -1299,5 +1384,176 @@ streams:
         assert!(e.contains("turbo"), "错误信息含非法值: {e}");
         // to_oxfile（deploy 主路径）同步拦截
         assert!(to_oxfile(&qos_cfg("    stream_mode: \"turbo\"\n")).is_err());
+    }
+
+    // ── host-stream-defaults T1: defaults 分层合并（逐条 > defaults > 内置） ──
+
+    /// 全键 defaults（streams 6 键 + sources 7 键）——优先级矩阵的"公共层"输入。
+    const ALL_DEFAULTS: &str = r#"
+defaults:
+  streams:
+    codec: "vp9"
+    encoder_backend: "vaapi"
+    bitrate_kbps: 1500
+    stream_mode: "quality"
+    min_bitrate_kbps: 300
+    keyframe_interval: 5
+  sources:
+    mode: "generator"
+    backend: "v4l2"
+    input: "bus://default"
+    width: 640
+    height: 480
+    fps: 24
+    reconnect_ms: 4000
+"#;
+
+    /// defaults 全键 + 单源 cam0 + 单流 s0（stream_body 可空 = 该键走 defaults/内置）。
+    fn defaults_streams(stream_body: &str) -> String {
+        format!(
+            "{ALL_DEFAULTS}\nsources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n{stream_body}"
+        )
+    }
+
+    /// 同上，条目体挂在 source 条目下（source_body 可空）。
+    fn defaults_sources(source_body: &str) -> String {
+        format!(
+            "{ALL_DEFAULTS}\nsources:\n  - id: \"cam0\"\n{source_body}streams:\n  - id: \"s0\"\n    source: \"cam0\"\n"
+        )
+    }
+
+    #[test]
+    fn defaults_section_fills_every_key_when_entries_omit_them() {
+        let s = &stream_configs(&defaults_streams("")).unwrap()[0];
+        assert_eq!(s.codec, "vp9");
+        assert_eq!(s.encoder_backend.as_deref(), Some("vaapi"));
+        assert_eq!(s.bitrate_kbps, Some(1500));
+        assert_eq!(s.stream_mode.as_deref(), Some("quality"));
+        assert_eq!(s.min_bitrate_kbps, Some(300));
+        assert_eq!(s.keyframe_interval, Some(5));
+        let c = &camera_configs(&defaults_sources("")).unwrap()[0];
+        assert_eq!(c.mode, SourceMode::Generator);
+        assert_eq!(c.width, 640);
+        assert_eq!(c.height, 480);
+        assert_eq!(c.fps, 24);
+        assert_eq!(c.input.as_deref(), Some("bus://default"));
+        assert_eq!(c.reconnect_ms, Some(4000));
+    }
+
+    #[test]
+    fn entry_keys_win_over_defaults_for_every_key() {
+        let s = &stream_configs(&defaults_streams(
+            "    codec: \"av1\"\n    encoder_backend: \"nvenc\"\n    bitrate_kbps: 900\n    stream_mode: \"smooth\"\n    min_bitrate_kbps: 100\n    keyframe_interval: 1\n",
+        ))
+        .unwrap()[0];
+        assert_eq!(s.codec, "av1");
+        assert_eq!(s.encoder_backend.as_deref(), Some("nvenc"));
+        assert_eq!(s.bitrate_kbps, Some(900));
+        assert_eq!(s.stream_mode.as_deref(), Some("smooth"));
+        assert_eq!(s.min_bitrate_kbps, Some(100));
+        assert_eq!(s.keyframe_interval, Some(1));
+        let c = &camera_configs(&defaults_sources(
+            "    mode: \"subscriber\"\n    backend: \"mipi\"\n    input: \"ros:///img\"\n    width: 320\n    height: 240\n    fps: 15\n    reconnect_ms: 1000\n",
+        ))
+        .unwrap()[0];
+        assert_eq!(c.mode, SourceMode::Subscriber);
+        assert_eq!(c.width, 320);
+        assert_eq!(c.height, 240);
+        assert_eq!(c.fps, 15);
+        assert_eq!(c.input.as_deref(), Some("ros:///img"));
+        assert_eq!(c.reconnect_ms, Some(1000));
+    }
+
+    #[test]
+    fn merge_is_per_key_not_per_section() {
+        // 条目只写一个键 → 该键取条目、其余仍取 defaults
+        // （整段替换 = 分层配置最常见的实现错误，此钉逐键合并）
+        let s = &stream_configs(&defaults_streams("    codec: \"vp8\"\n")).unwrap()[0];
+        assert_eq!(s.codec, "vp8", "条目键生效");
+        assert_eq!(s.encoder_backend.as_deref(), Some("vaapi"), "其余键回落 defaults");
+        assert_eq!(s.bitrate_kbps, Some(1500));
+        assert_eq!(s.stream_mode.as_deref(), Some("quality"));
+        assert_eq!(s.min_bitrate_kbps, Some(300));
+        assert_eq!(s.keyframe_interval, Some(5));
+        let c = &camera_configs(&defaults_sources("    fps: 60\n")).unwrap()[0];
+        assert_eq!(c.fps, 60, "条目键生效");
+        assert_eq!(c.width, 640, "其余键回落 defaults");
+        assert_eq!(c.mode, SourceMode::Generator);
+        assert_eq!(c.reconnect_ms, Some(4000));
+    }
+
+    #[test]
+    fn defaults_section_absent_equals_legacy_resolution() {
+        // 缺段 = 零注入：resolved 值与内置缺省逐字节一致（balanced 零扰动不变量延伸）
+        let cfg = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
+        assert_eq!(
+            camera_configs(cfg).unwrap(),
+            vec![SourceConfig {
+                id: "cam0".into(),
+                mode: SourceMode::Generator,
+                width: DEFAULT_SOURCE_WIDTH,
+                height: DEFAULT_SOURCE_HEIGHT,
+                fps: DEFAULT_SOURCE_FPS,
+                input: None,
+                reconnect_ms: None,
+            }],
+            "无 defaults 段必须等于旧版逐字段缺省"
+        );
+        assert_eq!(
+            stream_configs(cfg).unwrap(),
+            vec![StreamConfig {
+                id: "s0".into(),
+                source: "cam0".into(),
+                codec: "vp8".into(),
+                encoder_backend: None,
+                bitrate_kbps: None,
+                stream_mode: None,
+                min_bitrate_kbps: None,
+                keyframe_interval: None,
+            }],
+            "无 defaults 段必须等于旧版逐字段缺省"
+        );
+        // 空 defaults 段（`defaults: {}`）与缺段渲染逐字节等
+        assert_eq!(
+            to_oxfile(cfg).unwrap(),
+            to_oxfile(&format!("{cfg}\ndefaults: {{}}\n")).unwrap(),
+            "空 defaults 段不得改变 oxfile 渲染"
+        );
+    }
+
+    #[test]
+    fn illegal_mode_and_codec_rejected_from_every_layer() {
+        // ① 逐条层
+        assert!(stream_configs(&qos_cfg("    stream_mode: \"turbo\"\n")).is_err());
+        let e = stream_configs(&qos_cfg("    codec: \"h265\"\n")).unwrap_err();
+        assert!(e.contains("vp8|h264|vp9|av1") && e.contains("h265"), "错误信息含合法集: {e}");
+        // ② defaults 层（合并后同检 → 错值不静默进 streamer）
+        let d_mode = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\ndefaults:\n  streams:\n    stream_mode: \"turbo\"\n";
+        let e = stream_configs(d_mode).unwrap_err();
+        assert!(e.contains("smooth|balanced|quality") && e.contains("turbo"), "{e}");
+        let d_codec = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\ndefaults:\n  streams:\n    codec: \"H264\"\n";
+        assert!(stream_configs(d_codec).unwrap_err().contains("codec=H264"), "大小写敏感=合法集精确匹配");
+        // ③ 内置层（无条目键无 defaults → 缺省值天然合法）
+        assert!(stream_configs(&qos_cfg("")).is_ok());
+        // 条目合法值覆盖 defaults 非法值 → 证门在合并之后
+        let ok = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    stream_mode: \"smooth\"\ndefaults:\n  streams:\n    stream_mode: \"turbo\"\n";
+        assert_eq!(stream_configs(ok).unwrap()[0].stream_mode.as_deref(), Some("smooth"));
+        // deploy 主路径同步拦截
+        assert!(to_oxfile(d_mode).is_err());
+        assert!(validate(d_codec).is_err());
+    }
+
+    #[test]
+    fn defaults_rejects_unknown_and_identity_keys() {
+        // 公共层带 deny_unknown_fields：typo / 身份键 deploy 期指名报错
+        let typo = "sources:\n  - id: \"cam0\"\ndefaults:\n  streams:\n    bitrate_kbps: 1000\n    bitrates: 1000\n";
+        let e = camera_configs(typo).unwrap_err();
+        assert!(e.contains("bitrates"), "未知键必须指名: {e}");
+        let ident = "sources:\n  - id: \"cam0\"\ndefaults:\n  streams:\n    id: \"x\"\n";
+        assert!(camera_configs(ident).unwrap_err().contains("id"), "id 不入公共层");
+        let legacy = "defaults:\n  sources:\n    source: \"stub\"\n";
+        assert!(camera_configs(legacy).unwrap_err().contains("source"), "旧兼容键不入公共层");
+        // 顶层不加 deny：存量 yaml 的 host:/control: 等非 HostConfig 键必须继续可解析
+        assert!(camera_configs("host:\n  device_id: \"x\"\ncontrol:\n  enabled: false\nsources: []\n").is_ok());
     }
 }
