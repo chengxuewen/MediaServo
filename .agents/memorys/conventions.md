@@ -567,3 +567,8 @@ ff_.*_muxer` 应为 0（demuxer-only 实证）。
 - **⑥（D280 改判 2026-09-10）**：package 内嵌 `CHANGES.md` = **仓根 CHANGELOG.md 直拷全文**（维护式人读日志，最新版节在最上；机械 git log 分类器已退役——升级比对要看全历史，不裁剪=零解析面）。**腐烂防线 = CI 门禁**：workspace 版本未出现在 CHANGELOG.md → fmt job 红（bump 必同笔补节）。历史注记：初版为 `_write_changes_file` 上 tag..HEAD 的 breaking/feat/fix 分节，其余前缀丢弃；无 tag 降级最近 30 条；git 不可用/分类全空=不写文件+WARN，**无假文件**）。消费方"这版改了啥"零人肉同步。若未来加 CI package job：checkout 必须 `fetch-depth: 0`（浅克隆判丢范围）。
 - **⑦（D280 后降格）**：`Release-Note:` trailer 纪律保留为**bump 时 AI 起草 CHANGELOG 节的素材来源**（agent 提交 feat/fix 顺手写一行消费方视角）；不再进打包展示链（分类器退役）。打包时调 LLM 现写被否决：发布文档必须可复现可审计，幻觉/网络/key 不进门。
 - **⑧**：package 守卫——工作区 Cargo.toml 相对 HEAD 脏且 git 可用 → WARN"版本无 git 锚"（漂浮号事故同族防线）；不阻断（调试包允许脏树）。发版正序 = bump 提交 → tag v<ver> → package。
+
+## C44: 设备准入公钥指纹语义（2026-09-11, D283；修订 C33/C35 设备凭证面）
+
+- **约束**: ① 新设备准入一律 pubkey 形：identity.json = `{device_id}`，私钥复用 `etc/link/signing.pem`（一钥两用）；「web 注册→抄 secret→写 host」分发流对新设备退役（C33 secret 语义仅存存量 secret 形过渡期，一个周期后删除）。② 准入两档：`ALLOW_DEV_ENROLL=1`=静默收录（专网档）；默认=pending 队列 + admin 批准（C33 角色门；pending 内存不落盘，设备退避重报=自然刷新，无 TTL——重启清空为契约行为）。③ 签名字节合同 `nonce(32B) ‖ device_id ‖ room_id`，verify_strict，拒绝面统一 4010 防枚举（devices.rs review #1 纪律延续），challenge 5s 超时=断连。④ 吊销=删表行（存量会话不生效、下次连接回落 pending/拒——C33③ 语义保留）。⑤ 部署断言新码生效必须打真实运行体（PIT-191：`/proc/<pid>/exe` + 二进制串扫描），装配入口用 `build:deploy server`（品牌改名形）。
+- **检查**: `grep -n "public_key" crates/mediaservo-server/src/devices.rs` 在位；新 init 的实例 `python3 -c "import json;print(open('identity.json').read())"` 无 secret 字段；`curl :9800/api/admin/devices/pending` 结构 `{pending,count}`。

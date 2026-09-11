@@ -1574,3 +1574,15 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **根因**：apply 语义 = oxfile 渲染 + oxmgr reconcile（差异即启停），无 dry-run 面。
 - **解法**：纯渲染比对用 `to_oxfile` 库级测试（translate 单测路径）；实例 apply 前确认簇应停（先 stop）。
 - **验证**：渲染实验期间 `pgrep -c msrtc-` 保持 as-found 基线。
+
+## PIT-191: build server 装配落 legacy 名——集群静默跑旧二进制 (2026-09-11)
+- **症状**: device-enroll V2 前测，新协议消息被旧 secret 分支拒（"both device_id and device_secret required"），但二进制字符串在盘上命中 5 次。
+- **根因**: `msrtc.sh build server` 装配写 `out/server/bin/mediaservo-server`（legacy 名），unit command 指 `msrtc-server`（品牌名，09-10 旧件）——两文件并存，restart 拉起的是**旧件**。09-10 weaknet bin 单名化的树内派生未覆盖 server 装配路径。
+- **解法**: 走品牌正门 `build:deploy server`（装配+os.replace 品牌改名，双名收敛）；验证新码生效= `grep -ac <新字符串> /proc/$(pgrep -f "<unit-cmd>" | head -1)/exe` 或 python 全量读二进制计数（grep -c 行计数会漏）。
+- **验证**: 装配后 `ls -la out/server/bin/` 仅品牌名单文件 + 运行体字符串命中 >0。
+
+## PIT-192: 夹具 msrtc-host start 的 C25 全局 SHM 清理连坐其他在跑实例 (2026-09-11)
+- **症状**: /tmp 夹具 start 后，用户 09:07 起跑的 out/host 实例 agent 进 crash-loop（"static storage was already removed"）。
+- **根因**: `msrtc-host start/restart` 内置 C25 清理 `rm -rf /tmp/iceoryx2 /dev/shm/iox2_*` 是**机器全局**的——同机多实例时代清任何实例的 SHM。
+- **解法**: 夹具与在用实例互斥（先 stop 其他实例再夹具 start）；实例已受管时复活/重启绕开 CLI——`kill <app-pid>` 由 oxmgr restart_policy always 自动重拉（不过 CLI 清理路径），或 `OXMGR_DATA_DIR=<实例>/run/oxmgr oxmgr restart <app>`。
+- **验证**: 事故后 `msrtc-host status` 全活 + server `device-authenticated`（本单实证自愈）。

@@ -733,3 +733,9 @@ install                        → 改名提示 + exit 2（退役）
 - defaults:{streams,sources} 三层合并（两单点解析器/deny 仅子结构）+ smooth 地板 (fps*100/30).max(50) + 缺省 h264 + auto×h264→software（PIT-156 根治）；子两笔 ae9f8d9/c8d0e5e（deep worker 58min，76+11 测试/0 新 clippy，顺手清 1 存量红）。
 - 实环：T4 等价钉逐字节等+特化精准；T5 200k 墙 164kbps@30.4 钉住 720→540 让位零连坐（evidence 主仓）。踩坑入册 PIT-189（deploy 旧 bin 静默渲染）/PIT-190（apply=受管非纯渲染）；weaknet 定向流名=房间实名 vehicle_<stream>。
 - D282 同日修订（用户二审）：defaults.sources 收窄=平台/调参键（backend 保留——整机同后端合法公共语义，钉预留位注释）；mode/input 摘除回条目（身份键公共化=新源忘配静默错形态，deny 负例焊死）。77+11 测试绿、out/host 迁移后 oxfile 逐字节零漂移。
+
+### 2026-09-11: device-enroll——公钥指纹设备准入落地（D283/C44，V 矩阵 4/4）
+- 动机=secret 配发 6 步仪式 + wire 明文 secret 安全≈零（devices.rs 自曝）。定案=公钥即指纹（复用 signing.pem 一钥两用）+ nonce 挑战-验签（`nonce‖device_id‖room_id`）；两档：`ALLOW_DEV_ENROLL=1` 专网零人工 / 默认 pending 队列+web 一键批准。纯硬件指纹白名单否决=不可轮换（Apple UDID 案底）。
+- 落地：common 3 变体+`device_pubkey` / server Entry 双形+状态机+pending/approve API / link connect 应答链+EnrollPending / host identity 新形+gateway 透传 / www 待批准卡。5 批 5 提交（701f9c8+fixup/96cf7c4/1e6a269/3d7a71e）。
+- 实环：V1 auto 自收录/V2 浏览器批准→640x360 出画面/V3 重放 4010/V4 吊销→回落 pending——全 PASS；D-E3 过渡兼容铁证=用户旧 host（secret 形）在新 server 上照常 device-authenticated。
+- 过程账：FRU 编译溢出面 7 文件设计漏列（§9 补录）；Momus 一轮 [OKAY]；交叉事故 交叉主仓 PIT-191/192（本仓编号=见 pitfalls.md 本单两条 + 主仓侧引用）。

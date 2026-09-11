@@ -824,3 +824,12 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **决策**：① `defaults:{streams,sources}` 公共层，合并链 **逐条 > defaults > 内置**，两单点解析器（camera_configs/stream_configs）落地，下游无感；deny_unknown_fields 只加 defaults 子结构（顶层存量兼容键不焊）。② smooth 码率地板 = `(fps*100/30).max(50)`kbps（每帧字节恒定；15→50/30→100/60→200 无洞），host 裁决点计算（field bundle smooth min 400→None 职责移交）；地板链 显式>fps 联动>bundle。③ 缺省 codec vp8→**h264** + 真值表 `h264×backend∈{None,auto}→显式 software`（PIT-156 根治：h264 硬件路径本链路从未可用，auto 语义修正为"选已验证路径"；显式后端原样透传）。
 - **升级警示（breaking）**：未写 codec 的存量流升版后 vp8→h264+钉 software——CHANGELOG 节随下次 bump 成文（素材=本单 Release-Note trailer）；out 轨实例 yaml 注释不含 defaults 用法（PIT-160 族手动 sync）。
 - **实证**：T4 等价钉 A(逐条)≡B(上收) oxfile 逐字节等 + 特化 quality 精准落参；T5 200k 墙下 164kbps@30.4fps 钉住、720→540 让位、对照零连坐、保险丝到点自清（evidence/weaknet-100kbps-floor.md）。
+
+## D283: 设备公钥指纹准入——secret 分发退役（2026-09-11, device-enroll）
+
+- 模型：指纹 = signing.pem 派生 Ed25519 公钥（一钥两用，用户裁决 D-E1）；server 下发 nonce（一连接一用、5s 作废），host 签 `nonce‖device_id‖room_id` 应答，`verify_strict` 放行，统一防枚举 4010。私钥永不出机器。
+- 两档准入：`ALLOW_DEV_ENROLL=1`（专网/开发）陌生设备验签即静默收录零人工；默认（生产）验签过 → pending（内存表不落盘 D-E5，验签败不入=防占位 DoS）→ web /devices 一键批准；批准后下次连接照常验签（D-E8：批准=政策门，possession proof 不豁免）。
+- 过渡（D-E3）：secret wire 分支与 devices.yaml `secret_hash` 形共存一个发布周期；secret 形入册设备以 pubkey 形来连 → 拒 + 迁移指引日志（web 删除重录）。新版 host 不再发 secret。identity.json 新形状 `{device_id}`（旧文件可读）。
+- 否决案底：纯硬件指纹白名单——嗅探=永久冒名且**不可轮换**（Apple UDID 废弃先例）；且各平台 serial 采集器比"读现成 PEM 派生公钥"更贵。serial 不采（hostname+device_id 够区分，D-E4）。
+- 先例：WireGuard peer 公钥清单 / SSH authorized_keys / Tailscale 审批队列 / AWS IoT 证书注册。
+- 证据：主仓 `docs/plans/device-enroll/`（三件套+evidence/V-matrix.md 4/4 PASS）；Momus 一轮 [OKAY]。
