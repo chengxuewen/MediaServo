@@ -119,6 +119,7 @@ async fn join<S: WsIo>(ws: &mut WebSocketStream<S>, room: &str) -> String {
             SignalingMessage::RoomJoin {
                 device_id: None,
                 device_secret: None,
+                device_pubkey: None,
                 room_id: room.into(),
                 peer_role: PeerRole::Host,
                 stream_id: None,

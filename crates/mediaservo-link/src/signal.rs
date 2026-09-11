@@ -170,6 +170,7 @@ impl SignalClient {
             stream_id: None,
             device_id: self.device.as_ref().map(|d| d.device_id.clone()),
             device_secret: self.device.as_ref().map(|d| d.device_secret.clone()),
+            device_pubkey: None,
         };
         let (join_json, unwrap) = match &self.gateway_src {
             Some(src) => (

@@ -127,6 +127,7 @@ async fn negotiate_with_prefs(
     let join = serde_json::to_string(&SignalingMessage::RoomJoin {
         device_id: None,
         device_secret: None,
+        device_pubkey: None,
         room_id: format!("codec-prefs-room-{tag}").into(),
         peer_role: PeerRole::Host,
         stream_id: None,

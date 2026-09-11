@@ -398,6 +398,8 @@ fn rewrite_room(msg: &mut SignalingMessage, room: &str) {
         SfuStats { .. } => {}
         ConfigPush { .. } => {} // E4: agent 专属，不入子进程路由，无需房间改写
         DownstreamGone { .. } => {} // F1/T4: 网关自身上报消息，不经下游路由，无需房间改写
+        // device-enroll: 验签三态由网关自身消化，不入子进程路由（真实应答链在批3/T7 接线）
+        DeviceAuthChallenge { .. } | DeviceAuthResponse { .. } | DeviceAuthPending { .. } => {}
         EmergencyCommand { room_id, .. } => *room_id = room.to_string(), // G3: 急停房间级广播
     }
 }

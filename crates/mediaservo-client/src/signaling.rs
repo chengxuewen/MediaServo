@@ -93,6 +93,7 @@ impl SignalingClient {
         let join = SignalingMessage::RoomJoin {
             device_id: None,
             device_secret: None,
+            device_pubkey: None,
             room_id: self.room_id.clone(),
             peer_role: PeerRole::Remote,
             stream_id: None,
