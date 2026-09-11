@@ -627,7 +627,7 @@ def _drop_stale_server_oxfile(prefix_p: Path, bin_name: str, wnet_bin: str) -> t
         if stale:
             oxfile.replace(oxfile.with_name("oxfile.toml.bak"))
             print("  run/oxfile.toml 陈旧（bin 改名迁移/缺 weaknet 条目）——已备份为 run/oxfile.toml.bak 并重渲染；"
-                  "运维手工 env 自动回吸收，init 本次烘的端口/statedir 类 env 以新值为准", file=sys.stderr)
+                  "运维手工 env 回吸收只补缺不覆盖（init 本次烘值优先）；整树重建场景无旧文件可吸收——手工行清单见 msrtc.sh -h 环境变量节 [B]", file=sys.stderr)
     # 段在判据锚 = `handle_path /weaknet`（D3.1 定稿实测形的功能核心；票面「'@weaknet'」系
     # design §D3.1「@weaknet 段」速记——模板字面量只有 @wnroot/handle_path，用 '@weaknet'
     # 永假 → 每 deploy 重迁不收敛。redir 单独存在不构成反代，不算段在。）

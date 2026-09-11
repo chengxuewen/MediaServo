@@ -181,6 +181,10 @@ fn write_oxfile(run_dir: &Path) -> Result<(), String> {
     let path = run_dir.join("oxfile.toml");
     std::fs::write(&path, ox).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
     println!("已生成 {}", path.display());
+    // 从零渲染（init 首建或整树重建后 start 兜底）= 手工 env 无从回吸收的静默点（PIT-160 实伤两回）。
+    eprintln!(
+        "提示: 若本树此前存在手工 [apps.env] 行（ALLOW_DEV_*/RUST_LOG/WEAKNET_ADMIN_PASS），本次渲染不含它们——按 msrtc.sh -h「环境变量 [B]」回补"
+    );
     Ok(())
 }
 
