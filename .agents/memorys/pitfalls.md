@@ -1581,6 +1581,8 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: 走品牌正门 `build:deploy server`（装配+os.replace 品牌改名，双名收敛）；验证新码生效= `grep -ac <新字符串> /proc/$(pgrep -f "<unit-cmd>" | head -1)/exe` 或 python 全量读二进制计数（grep -c 行计数会漏）。
 - **验证**: 装配后 `ls -la out/server/bin/` 仅品牌名单文件 + 运行体字符串命中 >0。
 
+- **状态（2026-09-11 根治）**: `build server` 装配已品牌名单点化（server + weaknet 两 stage 同刀：env→树派生→上游名 + legacy 兄弟名回收 os.replace 终态形）；msrtc 树 bin 恒 {brand}-server/{brand}-weaknet/oxmgr 三件。
+
 ## PIT-192: 夹具 msrtc-host start 的 C25 全局 SHM 清理连坐其他在跑实例 (2026-09-11)
 - **症状**: /tmp 夹具 start 后，用户 09:07 起跑的 out/host 实例 agent 进 crash-loop（"static storage was already removed"）。
 - **根因**: `msrtc-host start/restart` 内置 C25 清理 `rm -rf /tmp/iceoryx2 /dev/shm/iox2_*` 是**机器全局**的——同机多实例时代清任何实例的 SHM。

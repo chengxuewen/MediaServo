@@ -11,7 +11,8 @@ export default function Layout() {
   const location = useLocation();
   const notices = (location.state as { notice?: string } | null)?.notice;
   // T8 弱网面板入口卡：每 mount 探活一次（HEAD /weaknet/v1/capabilities），无轮询。
-  // 桶表(design D4)：401=活 / 2xx=反代段缺位(SPA fallback 假亮) / 5xx|reject=serve 或 caddy 未跑。
+  // 桶表(design D4，2026-09-11 消噪刀修订)：capabilities 无凭证只读豁免后 2xx+json=活；
+  // 2xx+html=SPA fallback 假亮(反代段缺位) / 其余 4xx(老版 serve 仍 401/Host 门 403)=也证明活着 / 5xx|reject=down。
   // DEV 隐藏：vite 无 /weaknet 代理（按 5173 端口判据，工程未类型化 import.meta.env）。
   const [wnet, setWnet] = useState<'ok' | 'no-proxy' | 'down' | null>(null);
   const showWnet = isAdmin && window.location.port !== '5173';
@@ -19,7 +20,11 @@ export default function Layout() {
     if (!showWnet) return;
     let ignore = false;
     fetch('/weaknet/v1/capabilities', { method: 'HEAD' })
-      .then((r) => { if (!ignore) setWnet(r.ok ? 'no-proxy' : r.status >= 500 ? 'down' : 'ok'); })
+      .then((r) => {
+        if (ignore) return;
+        const ct = r.headers.get('content-type') || '';
+        setWnet(r.ok ? (ct.includes('json') ? 'ok' : 'no-proxy') : r.status >= 500 ? 'down' : 'ok');
+      })
       .catch(() => { if (!ignore) setWnet('down'); });
     return () => { ignore = true; };
   }, [showWnet]);

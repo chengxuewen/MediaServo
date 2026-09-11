@@ -219,10 +219,23 @@ async fn guard(AxumState(ctx): AxumState<Arc<Ctx>>, req: Request, next: Next) ->
         return err_json(StatusCode::FORBIDDEN, "Origin 与监听地址不符（--lan Origin 白名单）");
     }
     if req.uri().path().starts_with("/v1") && !auth_ok(&ctx, &req) {
+        // 侧栏探活 401 消噪（2026-09-11 小刀）：capabilities 无鉴权**只读缓存**豁免——
+        // 探活方（Layout.tsx HEAD）无 token，浏览器必打 401 resource log，语义上 401 本就是
+        // 「活着但需凭证」。消噪同时不得放开探测面：refresh/冷缓存真探 = 写锁 + tc exec，
+        // 经 caddy 可被 LAN 无凭证触发 = DoS → CapsNoProbe 打标，handler 内降级为 no-probe。
+        if req.uri().path() == "/v1/capabilities" {
+            let mut req = req;
+            req.extensions_mut().insert(CapsNoProbe);
+            return next.run(req).await;
+        }
         return err_json(StatusCode::UNAUTHORIZED, "缺失或错误的 token（横幅行整行复制）");
     }
     next.run(req).await
 }
+
+/// guard 注入：本请求为无鉴权 capabilities 读（禁真探，缓存只读）。
+#[derive(Clone, Copy)]
+struct CapsNoProbe;
 
 fn auth_ok(ctx: &Ctx, req: &Request) -> bool {
     if let Some(t) = req
@@ -385,14 +398,21 @@ fn list_yaml_dir(sub: &str) -> Value {
 async fn get_capabilities(
     AxumState(ctx): AxumState<Arc<Ctx>>,
     Query(q): Query<HashMap<String, String>>,
+    no_probe: Option<axum::extract::Extension<CapsNoProbe>>,
 ) -> Result<Json<Value>, AppErr> {
     if let Some(c) = &ctx.cfg.caps_override {
         return Ok(Json(caps_json(c)));
     }
-    let refresh = q.get("refresh").is_some_and(|v| v == "1" || v == "true");
+    let no_probe = no_probe.is_some();
+    let refresh =
+        !no_probe && q.get("refresh").is_some_and(|v| v == "1" || v == "true");
     let cached = ctx.caps.lock().unwrap_or_else(|e| e.into_inner()).clone();
     if let Some(c) = cached.filter(|_| !refresh) {
         return Ok(Json(caps_json(&c)));
+    }
+    if no_probe {
+        // 无鉴权 + 无缓存：显式「待测」形 200（探活方只需状态码；不虚构能力、不触探测）。
+        return Ok(Json(serde_json::json!({ "cached": false })));
     }
     let c = ctx.clone();
     let caps = blocking(move || {
@@ -1685,8 +1705,39 @@ mod tests {
         assert_eq!(app.clone().oneshot(req("/assets/../server.rs")).await.unwrap().status(), StatusCode::BAD_REQUEST);
         assert_eq!(app.clone().oneshot(req("/assets/%2e%2e/Cargo.toml")).await.unwrap().status(), StatusCode::BAD_REQUEST);
         assert_eq!(app.clone().oneshot(req("/assets/nope.js")).await.unwrap().status(), StatusCode::NOT_FOUND);
-        // /v1* 鉴权不变：无 token 401、带 token 200
+        // /v1* 鉴权不变：无 token 401、带 token 200（capabilities 只读豁免除外，见下）
         assert_eq!(app.clone().oneshot(req("/v1/state")).await.unwrap().status(), StatusCode::UNAUTHORIZED);
+        // capabilities 无鉴权只读豁免：冷缓存不触探测（探测在本测试 env 下会 Err→非 200）、
+        // refresh=1 同样不得越门——否则 401 消噪变成无凭证 DoS 面。
+        for uri in ["/v1/capabilities", "/v1/capabilities?refresh=1"] {
+            let res = app.clone().oneshot(req(uri)).await.unwrap();
+            assert_eq!(res.status(), StatusCode::OK, "{uri} 应 200（缓存只读豁免）");
+            let body: Value =
+                serde_json::from_slice(&axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap())
+                    .unwrap();
+            assert_eq!(body["cached"], serde_json::Value::Bool(false), "{uri} 无缓存须返待测形");
+        }
+        // 带 token 的 refresh 仍走原路（无 CapsNoProbe 短路）——确定性断言：探测成功=真能力形
+        // （含 seed 键），探测失败=5xx；两态都不得是 {"cached":false} 短路形。
+        let res = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/v1/capabilities?refresh=1")
+                    .header("host", "127.0.0.1:9810")
+                    .header(header::AUTHORIZATION, "Bearer tk")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let st = res.status();
+        let body = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+        let v: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+        assert!(
+            !st.is_success() || v.get("cached") != Some(&Value::Bool(false)),
+            "带凭证 refresh 不得走 no-probe 短路，got {st} {v}"
+        );
         let res = app
             .oneshot(
                 axum::http::Request::builder()
