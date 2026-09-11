@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { SfuConsumerClient, type StreamMetrics } from '../sfu/sfu-client';
+import { SfuConsumerClient, type StreamMetrics } from '@mediaservo/client';
 import './VideoPlayer.css';
 import { X, VolumeX, Pause, Maximize, Zap, Package, Clapperboard } from 'lucide-react';
 
