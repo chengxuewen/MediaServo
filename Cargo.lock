@@ -4528,6 +4528,7 @@ dependencies = [
  "mediaservo-webrtc",
  "mediasoup",
  "prometheus-client",
+ "rand_core 0.6.4",
  "rust-embed",
  "rustls",
  "rustls-pemfile",

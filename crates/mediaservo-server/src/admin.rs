@@ -98,6 +98,10 @@ pub fn admin_router(state: AdminState) -> Router {
             "/api/admin/devices/:device_id/reset-secret",
             axum::routing::post(reset_device_secret),
         )
+        // device-enroll §5.4: 手动档待批准队列（pending=GET 列表 / approve=POST 入册）。
+        // 角色门 = 既有 auth_middleware（admin 全权; dispatcher 只读——POST 被拒）。
+        .route("/api/admin/devices/pending", get(list_pending_devices))
+        .route("/api/admin/devices/approve", axum::routing::post(approve_pending_device))
         .route("/api/admin/accounts", get(list_accounts).post(create_account))
         .route(
             "/api/admin/accounts/:username",
@@ -305,6 +309,9 @@ async fn register_device(
             DeviceRegError::InvalidSecret(msg) => {
                 (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: msg }))
             }
+            DeviceRegError::InvalidPublicKey(msg) => {
+                (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: msg }))
+            }
         })?;
     if let Err(e) = state.device_registry.save(&state.devices_path) {
         // 落盘失败 → 回滚内存（单一事实源=磁盘，保持内存不变语义）
@@ -389,6 +396,101 @@ async fn reset_device_secret(
             "device_id": device_id,
             "secret": secret,
             "note": "secret 仅此一次明文展示",
+        })),
+    ))
+}
+
+// ── device-enroll §5.4: 待批准队列（手动档）───────────────────────────────
+
+/// GET /api/admin/devices/pending — 待批准设备（验签过、未入册；内存表 D-E5 重启即清）。
+async fn list_pending_devices(State(state): State<AdminState>) -> Json<serde_json::Value> {
+    let pending: Vec<serde_json::Value> = state
+        .signaling
+        .pending_devices
+        .list()
+        .into_iter()
+        .map(|(device_id, e)| {
+            serde_json::json!({
+                "device_id": device_id,
+                "public_key": format!("ed25519:{}", e.vk),
+                "first_seen_ms": e.first_seen_ms,
+                "verified": e.verified,
+            })
+        })
+        .collect();
+    Json(serde_json::json!({ "pending": pending, "count": pending.len() }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ApproveDeviceRequest {
+    pub device_id: String,
+    /// 可选显示名（入 registry public_key 形条目；缺省 null）。
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// POST /api/admin/devices/approve — 批准 pending 设备：
+/// 命中 → enroll_auto(public_key 形) + save + 踢出 pending；未命中 404；竞态已入册 409。
+/// approve = 政策门（D-E8）：设备下次连接仍走验签挑战，possession proof 不豁免。
+async fn approve_pending_device(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    axum::Json(req): axum::Json<ApproveDeviceRequest>,
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<ErrorResponse>)> {
+    validate_device_id(&req.device_id)?;
+    let entry = state
+        .signaling
+        .pending_devices
+        .remove(&req.device_id)
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: format!("no pending device {} (未报待或已处理)", req.device_id),
+                }),
+            )
+        })?;
+    state
+        .device_registry
+        .enroll_auto(&req.device_id, &entry.vk, req.name.as_deref())
+        .map_err(|e| {
+            // 入册失败 → 恢复 pending（不吞设备重报窗口）。
+            state.signaling.pending_devices.insert(&req.device_id, &entry.vk, entry.verified);
+            match e {
+                DeviceRegError::Duplicate => (
+                    StatusCode::CONFLICT,
+                    Json(ErrorResponse {
+                        error: format!("device {} already registered", req.device_id),
+                    }),
+                ),
+                other => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse { error: format!("enroll failed: {other:?}") }),
+                ),
+            }
+        })?;
+    if let Err(e) = state.device_registry.save(&state.devices_path) {
+        // 落盘失败 → 回滚内存 + 恢复 pending（单一事实源=磁盘，同 register 回滚链）。
+        tracing::error!("device {} approve: write failed, rolling back: {e}", req.device_id);
+        let _ = state.device_registry.revoke(&req.device_id);
+        state.signaling.pending_devices.insert(&req.device_id, &entry.vk, entry.verified);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: format!("device registry write failed: {e}") }),
+        ));
+    }
+    crate::audit::log_event(crate::audit::AuditEvent::DeviceRegistered {
+        device_id: req.device_id.clone(),
+        actor: claims.sub.clone(),
+    });
+    tracing::info!("admin {} approved pending device {}", claims.sub, req.device_id);
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "device_id": req.device_id,
+            "public_key": format!("ed25519:{}", entry.vk),
+            "name": req.name,
+            "note": "已入册；设备重连（退避）即以公钥形走验签放行",
         })),
     ))
 }

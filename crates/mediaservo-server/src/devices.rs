@@ -4,8 +4,12 @@
 //! ```yaml
 //! devices:
 //!   ms-0a1b2c3d4e5f:
-//!     secret_hash: "sha256:<hex>"   # sha256(device_id + ":" + device_secret)
+//!     secret_hash: "sha256:<hex>"   # sha256(device_id + ":" + device_secret) — legacy secret 形
+//!   ms-c3d4e5f6a7b8:
+//!     public_key: "ed25519:<b64>"   # device-enroll 公钥形（base64 32B Ed25519 vk）
+//!     name: "jetson-7"              # 可选显示名
 //! ```
+//! device-enroll（design §5.1）: 条目双形共存（D-E3 一周期），读哪个走哪条验证，save 回写保形。
 //! 存储决策（G2）: 客户端经 TLS 在 wire 上明文携带 secret，注册表仅存单向哈希；
 //! `sha256(device_id + ":" + device_secret)` — device_id 充当每设备盐（无需额外存储）。
 //! 升级路径（H 阶段）: argon2id 替换 sha256，格式前缀 `argon2:<encoded>`。
@@ -19,13 +23,14 @@
 //! 写回策略：磁盘为单一事实源 — `save` 先序列化（短临界区）后 atomic 写盘
 //! （temp + fsync + rename），失败返回 Err 且内存不变。
 
+use base64::Engine as _;
 use mediaservo_common::error::CoreError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
-use std::sync::{RwLock, RwLockReadGuard};
+use std::sync::{Arc, RwLock, RwLockReadGuard};
 use subtle::ConstantTimeEq;
 
 /// 设备认证失败原因（错误码统一 4010，见 signaling.rs 认证点注释）。
@@ -65,6 +70,8 @@ pub enum DeviceRegError {
     Unknown,
     /// 管理员提供的 secret 不合规（非空、8-128 字符、无空白）。
     InvalidSecret(String),
+    /// enroll 收录的 public_key 不合规（非 base64(32B) 规范 Ed25519 vk）。
+    InvalidPublicKey(String),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -75,20 +82,37 @@ struct RegistryFile {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct DeviceEntry {
-    secret_hash: String,
+    /// legacy secret 形（D-E3 共存一周期）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    secret_hash: Option<String>,
+    /// 公钥形: "ed25519:<base64 32B vk>"。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    public_key: Option<String>,
+    /// 公钥形可选显示名（auto 收录为 None）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+/// 注册表条目双形（device-enroll design §5.1）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Entry {
+    /// secret 形: "sha256:<hex>"。
+    Secret(String),
+    /// 公钥形: vk = base64(32B Ed25519 verifying key)。
+    PublicKey { vk: String, name: Option<String> },
 }
 
 /// 注册表内部态（RwLock 包裹；方法均为内部分发）。
 #[derive(Debug)]
 struct RegistryInner {
-    devices: HashMap<String, String>, // device_id → "sha256:<hex>"
+    devices: HashMap<String, Entry>, // device_id → Secret("sha256:<hex>") | PublicKey{vk,name}
     /// 未知设备的固定比较目标（启动时随机生成, 与真实哈希同长, 永不匹配）。
     /// review #1: 未知设备也必须走完整 sha256 + ct_eq 路径, 响应时间不可区分。
     dummy_hash: String,
 }
 
 impl RegistryInner {
-    fn new(devices: HashMap<String, String>) -> Self {
+    fn new(devices: HashMap<String, Entry>) -> Self {
         Self { devices, dummy_hash: new_dummy_hash() }
     }
 
@@ -96,7 +120,11 @@ impl RegistryInner {
         let known = self.devices.contains_key(device_id);
         // review #1 防时序: 未知设备也用 dummy_hash 走完整 sha256 + ct_eq（无提前返回）。
         // 已知/未知的响应时间不可区分; 匹配与否经 same-length ct_eq 判定。
-        let stored = self.devices.get(device_id).unwrap_or(&self.dummy_hash);
+        // 公钥形条目对 secret 比较走 dummy（与未知设备同路径——不泄漏条目形态，review #1 纪律）。
+        let stored: &String = match self.devices.get(device_id) {
+            Some(Entry::Secret(h)) => h,
+            _ => &self.dummy_hash,
+        };
         let want = hash_secret(device_id, secret);
         let matched: bool = stored.as_bytes().ct_eq(want.as_bytes()).into();
         match (matched, known) {
@@ -138,13 +166,38 @@ impl DeviceRegistry {
             serde_yaml::from_str(content).map_err(|e| format!("YAML parse error: {e}"))?;
         let mut devices = HashMap::new();
         for (id, entry) in file.devices {
-            if !entry.secret_hash.starts_with("sha256:") {
-                return Err(format!("device {id}: unsupported secret_hash scheme (want sha256:)"));
-            }
-            if entry.secret_hash.len() != "sha256:".len() + 64 {
-                return Err(format!("device {id}: malformed sha256 hex length"));
-            }
-            devices.insert(id, entry.secret_hash);
+            let parsed = match (entry.secret_hash, entry.public_key) {
+                (Some(hash), None) => {
+                    if !hash.starts_with("sha256:") {
+                        return Err(format!(
+                            "device {id}: unsupported secret_hash scheme (want sha256:)"
+                        ));
+                    }
+                    if hash.len() != "sha256:".len() + 64 {
+                        return Err(format!("device {id}: malformed sha256 hex length"));
+                    }
+                    Entry::Secret(hash)
+                }
+                (None, Some(pk)) => {
+                    let vk = pk.strip_prefix("ed25519:").ok_or_else(|| {
+                        format!("device {id}: unsupported public_key scheme (want ed25519:)")
+                    })?;
+                    decode_vk(vk)
+                        .map_err(|e| format!("device {id}: malformed public_key ({e})"))?;
+                    Entry::PublicKey { vk: vk.to_string(), name: entry.name }
+                }
+                (Some(_), Some(_)) => {
+                    return Err(format!(
+                        "device {id}: entry carries both secret_hash and public_key (exactly one form allowed)"
+                    ));
+                }
+                (None, None) => {
+                    return Err(format!(
+                        "device {id}: entry must carry secret_hash or public_key"
+                    ));
+                }
+            };
+            devices.insert(id, parsed);
         }
         Ok(Self { inner: RwLock::new(RegistryInner::new(devices)) })
     }
@@ -182,7 +235,21 @@ impl DeviceRegistry {
             devices: inner
                 .devices
                 .iter()
-                .map(|(id, hash)| (id.clone(), DeviceEntry { secret_hash: hash.clone() }))
+                .map(|(id, entry)| {
+                    let fe = match entry {
+                        Entry::Secret(hash) => DeviceEntry {
+                            secret_hash: Some(hash.clone()),
+                            public_key: None,
+                            name: None,
+                        },
+                        Entry::PublicKey { vk, name } => DeviceEntry {
+                            secret_hash: None,
+                            public_key: Some(format!("ed25519:{vk}")),
+                            name: name.clone(),
+                        },
+                    };
+                    (id.clone(), fe)
+                })
                 .collect(),
         };
         serde_yaml::to_string(&file)
@@ -252,7 +319,7 @@ impl DeviceRegistry {
             None => new_secret(),
         };
         let hash = hash_secret(device_id, &secret);
-        inner.devices.insert(device_id.to_string(), hash.clone());
+        inner.devices.insert(device_id.to_string(), Entry::Secret(hash.clone()));
         Ok((hash, secret))
     }
 
@@ -266,13 +333,61 @@ impl DeviceRegistry {
     /// 重置设备 secret：旧 secret 立即失效，返回新 secret（唯一一次明文）。
     pub fn reset_secret(&self, device_id: &str) -> Result<(String, String), DeviceRegError> {
         let mut inner = self.lock_write();
-        if !inner.devices.contains_key(device_id) {
+        // 公钥形条目无 secret 可重置 → 按未注册（404）处理；迁移处置 = web 删除重录（§8）。
+        // 不拦截则 reset 会把公钥形静默改写回 secret 形（准入语义被旁路）。
+        if !matches!(inner.devices.get(device_id), Some(Entry::Secret(_))) {
             return Err(DeviceRegError::Unknown);
         }
         let secret = new_secret();
         let hash = hash_secret(device_id, &secret);
-        inner.devices.insert(device_id.to_string(), hash.clone());
+        inner.devices.insert(device_id.to_string(), Entry::Secret(hash.clone()));
         Ok((hash, secret))
+    }
+
+    // ── device-enroll: 公钥准入面（design §5.1）─────────────────────────────
+
+    /// 条目查询（signaling 状态机分形决策 / admin 断言用）。
+    pub fn entry_of(&self, device_id: &str) -> Option<Entry> {
+        self.lock_read().devices.get(device_id).cloned()
+    }
+
+    /// 公钥形设备验签（§5.3，登记 vk 为准）。未知 → Unknown；secret 形 → BadSecret
+    /// （signaling 在发挑战前已拒 secret 形接入，此处防御性兜底）。
+    pub fn verify_pubkey(
+        &self,
+        device_id: &str,
+        nonce_b64: &str,
+        room_id: &str,
+        sig_b64: &str,
+    ) -> Result<(), DeviceAuthError> {
+        let vk = match self.entry_of(device_id) {
+            Some(Entry::PublicKey { vk, .. }) => vk,
+            Some(Entry::Secret(_)) => return Err(DeviceAuthError::BadSecret),
+            None => return Err(DeviceAuthError::Unknown),
+        };
+        verify_signature(&vk, nonce_b64, device_id, room_id, sig_b64)
+    }
+
+    /// 验签通过后收录（enroll_auto = 手动档 admin approve 与 auto 档共用入口）：入
+    /// registry public_key 形（name 可缺省）。落盘由调用方 save（同一 Arc = C33 热生效链）。
+    /// vk 来自 wire → 边界校验（base64 32B 规范 key）。
+    pub fn enroll_auto(
+        &self,
+        device_id: &str,
+        vk_b64: &str,
+        name: Option<&str>,
+    ) -> Result<(), DeviceRegError> {
+        decode_vk(vk_b64)
+            .map_err(|e| DeviceRegError::InvalidPublicKey(format!("public_key 不合规: {e}")))?;
+        let mut inner = self.lock_write();
+        if inner.devices.contains_key(device_id) {
+            return Err(DeviceRegError::Duplicate);
+        }
+        inner.devices.insert(
+            device_id.to_string(),
+            Entry::PublicKey { vk: vk_b64.to_string(), name: name.map(str::to_string) },
+        );
+        Ok(())
     }
 }
 
@@ -297,6 +412,106 @@ pub fn hash_secret(device_id: &str, secret: &str) -> String {
 /// 注册设备不冲突（uuid v4），长度与真实哈希一致（71 字符）保证 ct_eq 路径恒等。
 fn new_dummy_hash() -> String {
     hash_secret(&format!("ms-dummy-{}", uuid::Uuid::new_v4()), "dummy")
+}
+
+/// base64 → 32B Ed25519 vk 解码校验（wire 输入边界；design §3: base64 standard 无换行）。
+fn decode_vk(vk_b64: &str) -> Result<[u8; 32], &'static str> {
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(vk_b64)
+        .map_err(|_| "not valid base64")?;
+    let arr: [u8; 32] = raw.as_slice().try_into().map_err(|_| "decoded length != 32 bytes")?;
+    ed25519_dalek::VerifyingKey::from_bytes(&arr).map_err(|_| "invalid ed25519 public key")?;
+    Ok(arr)
+}
+
+/// device-enroll §3 密码合同: sig = Ed25519( nonce_raw(32B) ‖ device_id ‖ room_id )，
+/// verify_strict 防签名可延展。登记/陌生共用同一函数（§5.3）。
+/// 一切失败映射 BadSecret（wire 统一消息——防枚举纪律同 review #1，区分只在调用方日志）。
+pub fn verify_signature(
+    vk_b64: &str,
+    nonce_b64: &str,
+    device_id: &str,
+    room_id: &str,
+    sig_b64: &str,
+) -> Result<(), DeviceAuthError> {
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let vk_arr = decode_vk(vk_b64).map_err(|_| DeviceAuthError::BadSecret)?;
+    let vk = ed25519_dalek::VerifyingKey::from_bytes(&vk_arr)
+        .map_err(|_| DeviceAuthError::BadSecret)?;
+    let mut msg = b64.decode(nonce_b64).map_err(|_| DeviceAuthError::BadSecret)?;
+    if msg.len() != 32 {
+        return Err(DeviceAuthError::BadSecret);
+    }
+    let sig_bytes = b64.decode(sig_b64).map_err(|_| DeviceAuthError::BadSecret)?;
+    let sig_arr: [u8; 64] = sig_bytes.as_slice().try_into().map_err(|_| DeviceAuthError::BadSecret)?;
+    msg.extend_from_slice(device_id.as_bytes());
+    msg.extend_from_slice(room_id.as_bytes());
+    vk.verify_strict(&msg, &ed25519_dalek::Signature::from_bytes(&sig_arr))
+        .map_err(|_| DeviceAuthError::BadSecret)
+}
+
+/// 待批准条目（design §5.1；D-E5 内存不落盘——重启即清、设备重连自然重报）。
+#[derive(Debug, Clone)]
+pub struct PendingEntry {
+    pub vk: String,
+    /// 首见时刻（unix ms）。
+    pub first_seen_ms: u64,
+    /// 验签是否已过（当前唯一写入点在验签通过后 → 恒 true；字段保留 pending 语义面）。
+    pub verified: bool,
+}
+
+/// 手动档待批准表：陌生 pubkey 验签过、未 admin approve 期间的等待队列。
+/// 同 device_id 换 vk 重报 → 覆盖 + WARN（design §5.1）。
+#[derive(Debug, Default, Clone)]
+pub struct PendingTable {
+    inner: Arc<dashmap::DashMap<String, PendingEntry>>,
+}
+
+impl PendingTable {
+    /// 登记/覆盖（verified 由调用方裁决——当前唯一调用点在验签通过后传 true）。
+    pub fn insert(&self, device_id: &str, vk: &str, verified: bool) {
+        let entry = PendingEntry { vk: vk.to_string(), first_seen_ms: now_ms(), verified };
+        let prev = self.inner.insert(device_id.to_string(), entry);
+        if let Some(prev) = prev
+            && prev.vk != vk
+        {
+            tracing::warn!("pending device {device_id} 换钥重报（覆盖）: {} → {}", prev.vk, vk);
+        }
+    }
+
+    pub fn get(&self, device_id: &str) -> Option<PendingEntry> {
+        self.inner.get(device_id).map(|e| e.clone())
+    }
+
+    pub fn remove(&self, device_id: &str) -> Option<PendingEntry> {
+        self.inner.remove(device_id).map(|(_, v)| v)
+    }
+
+    /// 全部待批准（admin 列表；按 device_id 稳定排序）。
+    pub fn list(&self) -> Vec<(String, PendingEntry)> {
+        let mut out: Vec<(String, PendingEntry)> = self
+            .inner
+            .iter()
+            .map(|e| (e.key().clone(), e.value().clone()))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.len() == 0
+    }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// 设备认证决策点（RoomJoin 处理调用；纯函数便于单测）。
@@ -607,5 +822,182 @@ mod tests {
         other_room.extend_from_slice(device_id.as_bytes());
         other_room.extend_from_slice(b"vehicle_cam1");
         assert!(vk.verify_strict(&other_room, &sig).is_err());
+    }
+
+    // ─── device-enroll T3: 双形 registry / verify_pubkey / PendingTable / enroll_auto ──
+    // 复用 sig_vector 常量（seed=bytes(0..=31) 的 vk/nonce/sig，批3 host 交叉复验同锚）。
+
+    const TEST_VK: &str = "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=";
+    const TEST_SIG_CAM0: &str = "Gnz2kGCFH6igsOfv5QW0+8aRyu/lP5ytAa8fJA0CPYP3fIX5UsYr6uTjFjqOEEFBUB2scnDffIZ1WfP9O2ECCg==";
+
+    fn test_nonce_b64() -> String {
+        base64::engine::general_purpose::STANDARD.encode((0x40u8..0x60).collect::<Vec<u8>>())
+    }
+
+    fn pubkey_yaml() -> String {
+        format!(
+            "devices:\n  ms-0a1b2c3d4e5f:\n    public_key: \"ed25519:{TEST_VK}\"\n    name: jetson-7\n"
+        )
+    }
+
+    #[test]
+    fn yaml_dual_form_roundtrip_preserves_shape() {
+        let secret_hash = hash_secret("ms-sec000000000", "s3cret");
+        let yaml = format!(
+            "devices:\n  ms-sec000000000:\n    secret_hash: \"{secret_hash}\"\n  ms-pub000000000:\n    public_key: \"ed25519:{TEST_VK}\"\n    name: jetson-7\n"
+        );
+        let reg = DeviceRegistry::from_yaml(&yaml).unwrap();
+        assert_eq!(reg.len(), 2);
+        assert_eq!(
+            reg.entry_of("ms-pub000000000").unwrap(),
+            Entry::PublicKey { vk: TEST_VK.into(), name: Some("jetson-7".into()) }
+        );
+        let path = format!("/tmp/ms-devices-dual-{}.yaml", uuid::Uuid::new_v4());
+        reg.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("secret_hash") && text.contains("ed25519:") && text.contains("name: jetson-7"),
+            "{text}"
+        );
+        // 回写保形: 双形不互窜（public_key 条目不得长出 secret_hash 行）
+        let re = DeviceRegistry::load(&path).unwrap();
+        assert_eq!(authenticate(&re, Some("ms-sec000000000"), Some("s3cret")), Some(Ok(())));
+        assert_eq!(re.entry_of("ms-pub000000000"), reg.entry_of("ms-pub000000000"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn from_yaml_rejects_both_or_neither_form() {
+        let both = "devices:\n  ms-x:\n    secret_hash: \"sha256:0000000000000000000000000000000000000000000000000000000000000000\"\n    public_key: \"ed25519:AAAA\"\n";
+        let err = DeviceRegistry::from_yaml(both).unwrap_err();
+        assert!(err.contains("both secret_hash and public_key"), "{err}");
+        let neither = "devices:\n  ms-x:\n    name: orphan\n";
+        let err = DeviceRegistry::from_yaml(neither).unwrap_err();
+        assert!(err.contains("must carry"), "{err}");
+    }
+
+    #[test]
+    fn from_yaml_rejects_bad_public_key() {
+        let no_prefix = "devices:\n  ms-x:\n    public_key: \"AAAAB3NzaC1yc2E=\"\n";
+        let err = DeviceRegistry::from_yaml(no_prefix).unwrap_err();
+        assert!(err.contains("unsupported public_key scheme"), "{err}");
+        let short = "devices:\n  ms-x:\n    public_key: \"ed25519:bm90MzJieXRlcw==\"\n";
+        let err = DeviceRegistry::from_yaml(short).unwrap_err();
+        assert!(err.contains("malformed public_key"), "{err}");
+    }
+
+    #[test]
+    fn verify_pubkey_uses_registered_vk_and_rejects_tampering() {
+        let reg = DeviceRegistry::from_yaml(&pubkey_yaml()).unwrap();
+        let n = test_nonce_b64();
+        assert_eq!(reg.verify_pubkey("ms-0a1b2c3d4e5f", &n, "vehicle_cam0", TEST_SIG_CAM0), Ok(()));
+        // 换房间重放（D-E7 绑房）→ 拒
+        assert_eq!(
+            reg.verify_pubkey("ms-0a1b2c3d4e5f", &n, "vehicle_cam1", TEST_SIG_CAM0),
+            Err(DeviceAuthError::BadSecret)
+        );
+        // 换 nonce（一次一用的跨连接重放面）→ 拒
+        let other_nonce = base64::engine::general_purpose::STANDARD.encode([0xABu8; 32]);
+        assert_eq!(
+            reg.verify_pubkey("ms-0a1b2c3d4e5f", &other_nonce, "vehicle_cam0", TEST_SIG_CAM0),
+            Err(DeviceAuthError::BadSecret)
+        );
+        // 未登记 → Unknown；secret 形条目 → BadSecret（wire 消息同家族，防枚举）
+        assert_eq!(
+            reg.verify_pubkey("ms-nope", &n, "vehicle_cam0", TEST_SIG_CAM0),
+            Err(DeviceAuthError::Unknown)
+        );
+        let sec = test_registry();
+        assert_eq!(
+            sec.verify_pubkey("ms-0a1b2c3d4e5f", &n, "vehicle_cam0", TEST_SIG_CAM0),
+            Err(DeviceAuthError::BadSecret)
+        );
+    }
+
+    #[test]
+    fn verify_signature_accepts_offered_vk_for_unknown_device() {
+        // 陌生设备: 验签用其上报 vk（enroll 前置，§5.3 同一函数）。
+        assert_eq!(
+            verify_signature(TEST_VK, &test_nonce_b64(), "ms-0a1b2c3d4e5f", "vehicle_cam0", TEST_SIG_CAM0),
+            Ok(())
+        );
+        // 垃圾 vk / 垃圾 sig → 统一 BadSecret（不外泄失败种类）。
+        assert_eq!(
+            verify_signature("!!!", &test_nonce_b64(), "ms-0a1b2c3d4e5f", "vehicle_cam0", TEST_SIG_CAM0),
+            Err(DeviceAuthError::BadSecret)
+        );
+        assert_eq!(
+            verify_signature(TEST_VK, &test_nonce_b64(), "ms-0a1b2c3d4e5f", "vehicle_cam0", "notb64"),
+            Err(DeviceAuthError::BadSecret)
+        );
+    }
+
+    #[test]
+    fn enroll_auto_persists_and_rejects_bad_inputs() {
+        // ms-0a1b2c3d4e5f = sig_vector 绑定设备（sig 消息含 device_id，D-E7）。
+        let reg = DeviceRegistry::empty();
+        reg.enroll_auto("ms-0a1b2c3d4e5f", TEST_VK, Some("cam-9")).unwrap();
+        assert_eq!(
+            reg.entry_of("ms-0a1b2c3d4e5f").unwrap(),
+            Entry::PublicKey { vk: TEST_VK.into(), name: Some("cam-9".into()) }
+        );
+        assert_eq!(
+            reg.enroll_auto("ms-0a1b2c3d4e5f", TEST_VK, None).unwrap_err(),
+            DeviceRegError::Duplicate
+        );
+        assert_eq!(
+            reg.enroll_auto("ms-badvk", "zzz", None).unwrap_err(),
+            DeviceRegError::InvalidPublicKey("public_key 不合规: not valid base64".into())
+        );
+        // save+reload 后公钥形仍可直接验签（热生效链 = 同一 Arc 实例运行期即生效，落盘保重启）
+        let path = format!("/tmp/ms-devices-enroll-{}.yaml", uuid::Uuid::new_v4());
+        reg.save(&path).unwrap();
+        let re = DeviceRegistry::load(&path).unwrap();
+        assert_eq!(
+            re.verify_pubkey("ms-0a1b2c3d4e5f", &test_nonce_b64(), "vehicle_cam0", TEST_SIG_CAM0),
+            Ok(())
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn pending_table_lifecycle_with_vk_overwrite() {
+        let t = PendingTable::default();
+        assert!(t.is_empty());
+        t.insert("ms-p1", "vk-A", true);
+        t.insert("ms-p2", "vk-B", true);
+        let e1 = t.get("ms-p1").unwrap();
+        assert!(e1.verified && e1.vk == "vk-A" && e1.first_seen_ms > 0);
+        assert_eq!(
+            t.list().iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+            vec!["ms-p1", "ms-p2"]
+        );
+        // 同 id 换 vk 重报 → 覆盖 + WARN（first_seen 刷新 = 重报时刻，D-E5 语义）
+        std::thread::sleep(std::time::Duration::from_millis(3));
+        t.insert("ms-p1", "vk-C", true);
+        assert_eq!(t.len(), 2);
+        let e1b = t.get("ms-p1").unwrap();
+        assert_eq!(e1b.vk, "vk-C");
+        assert!(e1b.first_seen_ms > e1.first_seen_ms);
+        assert_eq!(t.remove("ms-p1").unwrap().vk, "vk-C");
+        assert!(t.get("ms-p1").is_none());
+        assert!(t.remove("ms-nope").is_none());
+    }
+
+    #[test]
+    fn pubkey_entry_isolated_from_secret_surface() {
+        // secret 面对公钥形条目: authenticate=BadSecret 家族 / reset_secret=Unknown / register=Duplicate
+        let reg = DeviceRegistry::from_yaml(&pubkey_yaml()).unwrap();
+        assert_eq!(
+            authenticate(&reg, Some("ms-0a1b2c3d4e5f"), Some("whatever")),
+            Some(Err(DeviceAuthError::BadSecret))
+        );
+        assert_eq!(reg.reset_secret("ms-0a1b2c3d4e5f").unwrap_err(), DeviceRegError::Unknown);
+        assert_eq!(reg.register("ms-0a1b2c3d4e5f").unwrap_err(), DeviceRegError::Duplicate);
+        // 时序面: 未知设备与公钥形条目都走 dummy 全路径（响应时间不可区分，review #1）
+        assert_eq!(
+            authenticate(&reg, Some("ms-ghost"), Some("x")),
+            Some(Err(DeviceAuthError::Unknown))
+        );
     }
 }

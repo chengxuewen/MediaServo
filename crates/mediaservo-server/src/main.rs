@@ -191,6 +191,13 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     // unified-device-admin: 单一 Arc 实例，signaling（接入鉴权）与 admin（管理写回）共享。
     let device_registry = std::sync::Arc::new(device_registry);
 
+    // device-enroll §7: ALLOW_DEV_ENROLL（env，缺省 false = 生产手动 pending 队列；
+    // =1 专网/开发验签过即自动入册零人工）。解析语义同族（ALLOW_DEV_CREDENTIALS）：仅字面 "1"。
+    let allow_dev_enroll = std::env::var("ALLOW_DEV_ENROLL").as_deref() == Ok("1");
+    if allow_dev_enroll {
+        tracing::warn!("ALLOW_DEV_ENROLL=1: 陌生设备验签通过即自动入册（仅限受控专网/开发环境）");
+    }
+
     // ── G3 舱端账号注册表加载（accounts.yaml; 缺省路径与 server.yaml 同目录）────
     // 文件缺失/解析失败 → 空注册表 + 警告（PSK/设备路径不受影响，不阻断启动）。
     let accounts_path = config
@@ -247,6 +254,9 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
                     jwt_auth.clone(),
                 );
                 srv.device_registry = std::sync::Arc::clone(&device_registry);
+                srv.allow_dev_enroll =
+                    std::sync::Arc::new(std::sync::atomic::AtomicBool::new(allow_dev_enroll));
+                srv.devices_path = std::sync::Arc::from(devices_path.as_str());
                 // psk-admin-management: config 优先 + env 兜底（死配置修复 — server.yaml psk 正式接入鉴权）
                 let merged_psk =
                     config.psk.clone().or_else(|| std::env::var("MEDIASERVO_PSK").ok());
@@ -263,6 +273,9 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     let mut signaling_server = {
         let mut srv = signaling::SignalingServer::new(config.ws_max_message_size, jwt_auth);
         srv.device_registry = std::sync::Arc::clone(&device_registry);
+        srv.allow_dev_enroll =
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(allow_dev_enroll));
+        srv.devices_path = std::sync::Arc::from(devices_path.as_str());
         // psk-admin-management: config 优先 + env 兜底（死配置修复 — server.yaml psk 正式接入鉴权）
         let merged_psk = config.psk.clone().or_else(|| std::env::var("MEDIASERVO_PSK").ok());
         srv.psk_state = std::sync::Arc::new(std::sync::RwLock::new(merged_psk));

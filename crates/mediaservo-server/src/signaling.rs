@@ -1,5 +1,6 @@
+use base64::Engine as _;
 use crate::audit::{self, AuditEvent};
-use crate::devices::{self, DeviceRegistry};
+use crate::devices::{self, DeviceRegistry, PendingTable};
 use crate::health::{HealthChecker, HealthStatus, ReadinessChecker};
 use crate::roles::{AccountIdentity, CockpitRole, SessionIdentity};
 use crate::room::RoomManager;
@@ -17,7 +18,7 @@ use mediaservo_common::auth::{JwtAuth, SimplePskAuth};
 use mediaservo_common::error::CoreError;
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tokio::sync::broadcast;
 use tokio::sync::watch;
 
@@ -57,6 +58,12 @@ pub struct SignalingServer {
     pub status_registry: Arc<StatusRegistry>,
     /// G2 设备注册表（启动时从 devices.yaml 加载，只读；空 = PSK 路径）。
     pub device_registry: Arc<DeviceRegistry>,
+    /// device-enroll: 手动档待批准表（内存不落盘 D-E5；与 admin pending/approve 共享同一 Arc）。
+    pub pending_devices: Arc<PendingTable>,
+    /// device-enroll §7: ALLOW_DEV_ENROLL 门（main.rs 启动读 env 注入，仿 psk_state 共享态模式）。
+    pub allow_dev_enroll: Arc<AtomicBool>,
+    /// device-enroll: enroll_auto 落盘路径（main.rs 与 AdminState.devices_path 同源注入）。
+    pub devices_path: Arc<str>,
     /// G2 连接级身份绑定（D-H11）: peer_id → device_id（设备认证成功时建立，断开时清除）。
     device_bindings: Arc<dashmap::DashMap<String, String>>,
     /// G3 房间主车登记（room_id → device_id; device 会话 join 成功时记录，
@@ -90,6 +97,9 @@ impl SignalingServer {
             psk_state: std::sync::Arc::new(std::sync::RwLock::new(None)),
             status_registry: Arc::new(StatusRegistry::default()),
             device_registry: Arc::new(DeviceRegistry::empty()),
+            pending_devices: Arc::new(PendingTable::default()),
+            allow_dev_enroll: Arc::new(AtomicBool::new(false)),
+            devices_path: Arc::from(""),
             device_bindings: Arc::new(dashmap::DashMap::new()),
             room_owners: Arc::new(dashmap::DashMap::new()),
             producer_owners: Arc::new(dashmap::DashMap::new()),
@@ -112,6 +122,9 @@ impl SignalingServer {
             psk_state: std::sync::Arc::new(std::sync::RwLock::new(None)),
             status_registry: Arc::new(StatusRegistry::default()),
             device_registry: Arc::new(DeviceRegistry::empty()),
+            pending_devices: Arc::new(PendingTable::default()),
+            allow_dev_enroll: Arc::new(AtomicBool::new(false)),
+            devices_path: Arc::from(""),
             device_bindings: Arc::new(dashmap::DashMap::new()),
             room_owners: Arc::new(dashmap::DashMap::new()),
             producer_owners: Arc::new(dashmap::DashMap::new()),
@@ -267,6 +280,24 @@ fn send_msg(msg: &SignalingMessage) -> Result<String, String> {
     serde_json::to_string(msg).map_err(|e| format!("serialize error: {e}"))
 }
 
+/// device-enroll §5.3: 验签挑战在途态（per-connection；nonce 一连接一次性，用掉即焚）。
+struct PendingAuth {
+    /// base64 32B 随机 nonce（应答验签直接用 wire 形比较）。
+    nonce_b64: String,
+    device_id: String,
+    room_id: String,
+    peer_role: PeerRole,
+    /// Some = 陌生设备（验签用其上报 vk，通过后走政策门）；None = 已登记公钥形（登记 vk 为准）。
+    offered_vk: Option<String>,
+    deadline: tokio::time::Instant,
+}
+
+/// design §5.2: 「5s 超时未答 = 断连 WARN」。
+const DEVICE_AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// 挑战窗口内非应答消息的延后队列上限（防未鉴权洪泛；超限 = 断连 WARN）。
+const MAX_DEFERRED_AUTH_MSGS: usize = 16;
+
 async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Option<String>) {
     // Track active connection count
     server.active_connections.fetch_add(1, Ordering::Relaxed);
@@ -417,6 +448,10 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     tracing::info!("Auth ack sent, entering RoomJoin phase");
 
     // Phase 2: RoomJoin
+    // device-enroll §5.2/§5.3: 带 device_pubkey 的 Join 走「挑战→应答→验签」状态机；
+    // secret 形与无凭证路径逐字节不变（回归隔离，D-E3 共存一周期）。
+    let mut pending_auth: Option<PendingAuth> = None;
+    let mut deferred: Vec<SignalingMessage> = Vec::new();
     let (room_id, role, device_id, session_identity) = loop {
         // Check for shutdown during RoomJoin
         if *shutdown_rx.borrow() {
@@ -425,17 +460,336 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         }
 
         tracing::debug!("RoomJoin: waiting for message...");
-        match receiver.next().await {
-            Some(Ok(Message::Text(text))) => {
+        // 挑战在途 → deadline 限时等待应答（超时 = 统一 4010 + 断连，nonce 随连接作废）。
+        let msg = match pending_auth.as_ref() {
+            Some(pa) => {
+                let dur = pa.deadline.saturating_duration_since(tokio::time::Instant::now());
+                match tokio::time::timeout(dur, receiver.next()).await {
+                    Ok(Some(Ok(m))) => m,
+                    // 与旧 `_ => continue` 逐字节对齐: Err 帧继续, 流结束才返回。
+                    Ok(Some(Err(_))) => continue,
+                    Ok(None) => return,
+                    Err(_elapsed) => {
+                        tracing::warn!(
+                            "Peer {} device auth timeout (device={}, room={}) — closing",
+                            peer_id,
+                            pa.device_id,
+                            pa.room_id
+                        );
+                        audit::log_event(AuditEvent::AuthFailure {
+                            peer_id: peer_id.clone(),
+                            reason: format!(
+                                "device auth challenge timeout (device={})",
+                                pa.device_id
+                            ),
+                        });
+                        let error = SignalingMessage::Error {
+                            code: 4010,
+                            message: devices::DeviceAuthError::BadSecret.message().into(),
+                        };
+                        let _ = ws_sender
+                            .lock()
+                            .await
+                            .send(Message::Text(send_msg(&error).unwrap()))
+                            .await;
+                        return;
+                    }
+                }
+            }
+            None => match receiver.next().await {
+                Some(Ok(m)) => m,
+                Some(Err(_)) => continue,
+                None => return,
+            },
+        };
+        match msg {
+            Message::Text(text) => {
                 let text_str = text.to_string();
+
+                // ── 挑战在途（§5.3）: 只接受 DeviceAuthResponse；其余延后，不可解析丢弃 ──
+                if let Some(pa) = pending_auth.take() {
+                    let resp_sig = match serde_json::from_str::<SignalingMessage>(&text_str) {
+                        Ok(SignalingMessage::DeviceAuthResponse { sig, .. }) => Some(sig),
+                        Ok(other) => {
+                            // 非应答消息: 恢复挑战态 + 延后队列（封顶断连，防未鉴权洪泛）。
+                            pending_auth = Some(pa);
+                            if deferred.len() >= MAX_DEFERRED_AUTH_MSGS {
+                                tracing::warn!(
+                                    "Peer {} challenge-window deferred queue overflow (>{} msgs) — closing (anti-flood)",
+                                    peer_id,
+                                    MAX_DEFERRED_AUTH_MSGS
+                                );
+                                return;
+                            }
+                            deferred.push(other);
+                            continue;
+                        }
+                        Err(_) => {
+                            // 不可解析垃圾: 与旧路径 `_ => continue` 丢弃语义一致，不占队列。
+                            pending_auth = Some(pa);
+                            continue;
+                        }
+                    };
+                    let Some(sig) = resp_sig else { continue };
+                    // nonce 一连接一次性: take() 即焚，任何后续消息不再进入验签。
+                    // ── §5.3 验签: 登记 vk 为准（换钥不符验自败），陌生用上报 vk ──
+                    let registered = server.device_registry.entry_of(&pa.device_id);
+                    let check_vk = match &registered {
+                        Some(devices::Entry::PublicKey { vk, .. }) => Some(vk.clone()),
+                        _ => pa.offered_vk.clone(),
+                    };
+                    let verified = match &check_vk {
+                        Some(vk) => devices::verify_signature(
+                            vk,
+                            &pa.nonce_b64,
+                            &pa.device_id,
+                            &pa.room_id,
+                            &sig,
+                        )
+                        .is_ok(),
+                        None => false,
+                    };
+                    if !verified {
+                        // §5.2 验签败: 不入 pending（防垃圾占位 DoS）+ 断连 WARN。
+                        // wire 统一 4010 消息（不发"为什么"——防枚举纪律同 review #1）。
+                        tracing::warn!(
+                            "Peer {} device pubkey verify FAILED (device={}, room={}, registered={}) — 已登记=换钥需 web 删除重录（§8）；陌生=拒收录",
+                            peer_id,
+                            pa.device_id,
+                            pa.room_id,
+                            registered.is_some()
+                        );
+                        audit::log_event(AuditEvent::AuthFailure {
+                            peer_id: peer_id.clone(),
+                            reason: format!(
+                                "device pubkey verify failed (device={})",
+                                pa.device_id
+                            ),
+                        });
+                        let error = SignalingMessage::Error {
+                            code: 4010,
+                            message: devices::DeviceAuthError::BadSecret.message().into(),
+                        };
+                        let _ = ws_sender
+                            .lock()
+                            .await
+                            .send(Message::Text(send_msg(&error).unwrap()))
+                            .await;
+                        return;
+                    }
+                    audit::log_event(AuditEvent::AuthSuccess {
+                        peer_id: peer_id.clone(),
+                        device_id: Some(pa.device_id.clone()),
+                    });
+                    tracing::info!(
+                        "Peer {} device pubkey-authenticated as {}",
+                        peer_id,
+                        pa.device_id
+                    );
+                    // 陌生设备（offered_vk 在）→ 政策门（§5.2）；已登记 → 直接放行漏斗（D-E8）。
+                    if let Some(vk) = pa.offered_vk.as_deref() {
+                        if server.allow_dev_enroll.load(Ordering::Relaxed) {
+                            match server.device_registry.enroll_auto(&pa.device_id, vk, None) {
+                                Ok(()) => {
+                                    if let Err(e) =
+                                        server.device_registry.save(server.devices_path.as_ref())
+                                    {
+                                        // 内存已收录（本连接可用）；磁盘回退 = 重启后设备重报
+                                        // 自愈——不反噬断连（对齐 reset-secret 无回滚留痕语义，C15）。
+                                        tracing::error!(
+                                            "device {} auto-enroll write failed, memory/disk diverge: {e}",
+                                            pa.device_id
+                                        );
+                                    }
+                                    // 模式切换残留: 曾有 stale pending 则清除。
+                                    server.pending_devices.remove(&pa.device_id);
+                                    tracing::info!(
+                                        "Peer {} auto-enrolled device {} (ALLOW_DEV_ENROLL=1)",
+                                        peer_id,
+                                        pa.device_id
+                                    );
+                                }
+                                Err(devices::DeviceRegError::Duplicate) => {
+                                    // 竞态: 挑战在途期间已入册（admin approve / 另一连接抢跑）。
+                                    // 同钥 → 照常放行；异钥 → 换钥拒（验签用的是上报 vk，
+                                    // 登记的是另一把私钥对应 vk）。
+                                    let same_vk = matches!(
+                                        server.device_registry.entry_of(&pa.device_id),
+                                        Some(devices::Entry::PublicKey { vk: reg, .. })
+                                            if reg == vk
+                                    );
+                                    if !same_vk {
+                                        tracing::warn!(
+                                            "Peer {} device {} enroll race: registered vk differs from reported — rejected",
+                                            peer_id,
+                                            pa.device_id
+                                        );
+                                        let error = SignalingMessage::Error {
+                                            code: 4010,
+                                            message: devices::DeviceAuthError::BadSecret
+                                                .message()
+                                                .into(),
+                                        };
+                                        let _ = ws_sender
+                                            .lock()
+                                            .await
+                                            .send(Message::Text(send_msg(&error).unwrap()))
+                                            .await;
+                                        return;
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Peer {} auto-enroll rejected device={}: {:?}",
+                                        peer_id,
+                                        pa.device_id,
+                                        e
+                                    );
+                                    let error = SignalingMessage::Error {
+                                        code: 4010,
+                                        message: devices::DeviceAuthError::BadSecret.message().into(),
+                                    };
+                                    let _ = ws_sender
+                                        .lock()
+                                        .await
+                                        .send(Message::Text(send_msg(&error).unwrap()))
+                                        .await;
+                                    return;
+                                }
+                            }
+                        } else {
+                            // 手动档: 验签过 → pending{vk, verified=true} + DeviceAuthPending → 断连。
+                            // 设备沿用既有 retry 退避重连等待批准（批3 host 对接: 此帧 = 退避信号）。
+                            server.pending_devices.insert(&pa.device_id, vk, true);
+                            tracing::info!(
+                                "Peer {} device {} verify passed, awaiting admin approval (pending, not enrolled)",
+                                peer_id,
+                                pa.device_id
+                            );
+                            let pending = SignalingMessage::DeviceAuthPending {
+                                device_id: pa.device_id.clone(),
+                            };
+                            let _ = ws_sender
+                                .lock()
+                                .await
+                                .send(Message::Text(send_msg(&pending).unwrap()))
+                                .await;
+                            return;
+                        }
+                    }
+                    // 放行 join 漏斗（副作用复用原路径函数体；deferred 在 relay 循环前冲刷）。
+                    break (
+                        pa.room_id.clone(),
+                        pa.peer_role.clone(),
+                        Some(pa.device_id.clone()),
+                        SessionIdentity::Device(pa.device_id.clone()),
+                    );
+                }
                 if let Ok(SignalingMessage::RoomJoin {
                     room_id,
                     peer_role,
                     device_id,
                     device_secret,
+                    device_pubkey,
                     ..
                 }) = serde_json::from_str(&text_str)
                 {
+                    // ── device-enroll §5.2: pubkey 形 → 一律先发挑战（每连接验 possession，D-E8）──
+                    if device_pubkey.is_some() {
+                        if device_secret.is_some() {
+                            // 两形同现 = 协议歧义 → 参数类拒（4000）。
+                            tracing::warn!(
+                                "Peer {} RoomJoin carries both device_secret and device_pubkey (device={:?}) — rejected",
+                                peer_id,
+                                device_id
+                            );
+                            let error = SignalingMessage::Error {
+                                code: 4000,
+                                message: "device credentials: exactly one of device_secret / device_pubkey".into(),
+                            };
+                            let _ = ws_sender
+                                .lock()
+                                .await
+                                .send(Message::Text(send_msg(&error).unwrap()))
+                                .await;
+                            return;
+                        }
+                        let Some(did) = device_id.clone() else {
+                            tracing::warn!("Peer {} RoomJoin device_pubkey without device_id — rejected", peer_id);
+                            let error = SignalingMessage::Error {
+                                code: 4000,
+                                message: "device_id is required with device_pubkey".into(),
+                            };
+                            let _ = ws_sender
+                                .lock()
+                                .await
+                                .send(Message::Text(send_msg(&error).unwrap()))
+                                .await;
+                            return;
+                        };
+                        match server.device_registry.entry_of(&did) {
+                            // 存量 secret 形设备以 pubkey 形来连 = 迁移未收口（design §8）：
+                            // 不发挑战直接拒（省 RTT）；wire 统一 4010，可操作处置只进日志。
+                            Some(devices::Entry::Secret(_)) => {
+                                tracing::warn!(
+                                    "Peer {peer_id} device {did} registered as secret-form, pubkey join rejected — migration: delete device in web, re-enroll with pubkey form (ALLOW_DEV_ENROLL auto-pass / manual one-time approve, design §8)"
+                                );
+                                audit::log_event(AuditEvent::AuthFailure {
+                                    peer_id: peer_id.clone(),
+                                    reason: format!(
+                                        "pubkey join on secret-form device {did} (migrate via web re-enroll)"
+                                    ),
+                                });
+                                let error = SignalingMessage::Error {
+                                    code: 4010,
+                                    message: devices::DeviceAuthError::BadSecret.message().into(),
+                                };
+                                let _ = ws_sender
+                                    .lock()
+                                    .await
+                                    .send(Message::Text(send_msg(&error).unwrap()))
+                                    .await;
+                                return;
+                            }
+                            entry => {
+                                let mut nonce = [0u8; 32];
+                                {
+                                    use rand_core::RngCore as _;
+                                    rand_core::OsRng.fill_bytes(&mut nonce);
+                                }
+                                let nonce_b64 =
+                                    base64::engine::general_purpose::STANDARD.encode(nonce);
+                                let challenge =
+                                    SignalingMessage::DeviceAuthChallenge { nonce: nonce_b64.clone() };
+                                if ws_sender
+                                    .lock()
+                                    .await
+                                    .send(Message::Text(send_msg(&challenge).unwrap()))
+                                    .await
+                                    .is_err()
+                                {
+                                    return;
+                                }
+                                pending_auth = Some(PendingAuth {
+                                    nonce_b64,
+                                    device_id: did,
+                                    room_id,
+                                    peer_role,
+                                    // 已登记公钥形 → 登记 vk 为准（offered 不符验自败）；陌生 → 验上报 vk。
+                                    offered_vk: if matches!(
+                                        entry,
+                                        Some(devices::Entry::PublicKey { .. })
+                                    ) {
+                                        None
+                                    } else {
+                                        device_pubkey
+                                    },
+                                    deadline: tokio::time::Instant::now() + DEVICE_AUTH_TIMEOUT,
+                                });
+                                continue;
+                            }
+                        }
+                    }
                     // ── G2 设备认证（D-H11; 错误码 4010 单一家族防设备枚举）──────
                     // 双缺 = PSK 路径（保持原流程）; 半带/失败 = Error 4010 后断开。
                     match devices::authenticate(
@@ -495,7 +849,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                     }
                 }
             }
-            Some(Ok(Message::Close(_))) | None => return,
+            Message::Close(_) => return,
             _ => continue,
         }
     };
@@ -673,7 +1027,16 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         }
     }
 
-    while let Some(Ok(msg)) = receiver.next().await {
+    // device-enroll §5.3: 挑战窗口延后的消息按序冲刷（鉴权通过后进入与实时消息同一管线）。
+    let mut deferred_iter = deferred.into_iter();
+    loop {
+        let msg = match deferred_iter.next() {
+            Some(d) => Message::Text(send_msg(&d).unwrap_or_default()),
+            None => match receiver.next().await {
+                Some(Ok(m)) => m,
+                _ => break,
+            },
+        };
         // Check shutdown signal before processing each message
         if *shutdown_rx.borrow() {
             tracing::info!("Shutdown requested, disconnecting peer {}", relay_peer_id);
