@@ -183,8 +183,8 @@ def _status_web_native() -> int:
 
 
 def _build_stage_weaknet(release: bool) -> None:
-    """build server 装配步：weaknet 编译 + stage out/server/bin/mediaservo-weaknet（上游名，
-    不做品牌——品牌化归 deploy，D266/D269 同构）。profile 跟随 --release 传导。
+    """build server 装配步：weaknet 编译 + stage out/server/bin/{brand}-weaknet（品牌单点化——
+    PIT-191 根治后 build 即落终态名，deploy 改名语义对同值 no-op）。profile 跟随 --release 传导。
     失败仅 WARN 不阻断 server 主流程（weaknet-server-integration design §D1 [bF4 bF5]——
     排尾会吃 mediasoup 挂机树的 exit 连坐，本机在册 [BA-15 树挂背书=CI]）。"""
     cmd = ["cargo", "build"] + (["--release"] if release else []) + ["-p", "mediaservo-weaknet"]
@@ -200,8 +200,21 @@ def _build_stage_weaknet(release: bool) -> None:
     if not src.exists():
         print(f"WARN: weaknet 编译成功但产物缺位 {src}——不 stage", file=sys.stderr)
         return
-    _stage_to_out("server", [src], sub="bin")
-    print(f"weaknet 装配 stage: out/server/bin/{src.name}（上游名——品牌化归 deploy）")
+    # PIT-191 根治同构延伸：out/server/bin 是现役集群目录、unit 指品牌名——build 落上游名
+    # = 新编译件永不生效（双名漂移，09-10 weaknet 单名化只修了 deploy 侧）。解析序同 server 装配。
+    bin_dir = _out_root() / "server" / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    brand = os.environ.get("MEDIASERVO_BRAND", "").strip() or _derive_brand_server(bin_dir)
+    wname = _weaknet_bin_name(brand)
+    tmp = bin_dir / (wname + ".new")
+    shutil.copy2(src, tmp)
+    os.replace(tmp, bin_dir / wname)
+    if brand:
+        legacy_w = bin_dir / _exe_name("mediaservo-weaknet")
+        if legacy_w.exists():
+            legacy_w.unlink()
+            print("  已回收 legacy 兄弟名 mediaservo-weaknet（unit 只认品牌名）", file=sys.stderr)
+    print(f"weaknet 装配 stage: out/server/bin/{wname}")
 
 
 def _cmd_build_server(image: str | None = None, native: bool = False, release: bool = False) -> None:
@@ -228,8 +241,21 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
         # 组装到 out/server/bin/（与 build host/bindings 对称——out = 统一发布根）
         server_bin = ROOT / "target" / ("release" if release else "debug") / "mediaservo-server"
         if server_bin.exists():
-            _stage_to_out("server", [server_bin], sub="bin")  # brand=""（staging 保持 cargo 名——品牌化归 deploy，D266/D269）
-            print(f"server 交付布局组装: out/server/bin/mediaservo-server（{server_bin.stat().st_size // 1024} KB）")
+            # PIT-191 根治：装配品牌名单点化（解析序与 deploy 同源：env MEDIASERVO_BRAND →
+            # 树内 *-server 派生 → 上游名）。out/server/bin 是**现役集群目录**——build 写 legacy
+            # 名而 unit 指品牌名 = 集群静默跑旧二进制（PIT-191 事故面；与 09-10 weaknet 单名化同源）。
+            bin_dir = _out_root() / "server" / "bin"
+            bin_dir.mkdir(parents=True, exist_ok=True)
+            brand = os.environ.get("MEDIASERVO_BRAND", "").strip() or _derive_brand_server(bin_dir)
+            deployed, base = _server_bin_names(brand)
+            tmp = bin_dir / (deployed + ".new")
+            shutil.copy2(server_bin, tmp)
+            os.replace(tmp, bin_dir / deployed)
+            legacy = bin_dir / _exe_name("mediaservo-server")
+            if brand and legacy.exists():
+                legacy.unlink()
+                print("  已回收 legacy 兄弟名 mediaservo-server（bin 单名化——unit 只认品牌名）", file=sys.stderr)
+            print(f"server 交付布局组装: out/server/bin/{base}（{server_bin.stat().st_size // 1024} KB）")
         # 组装默认配置（server.yaml——从 config/server.docker.yaml 派生，accounts/devices 相对路径）
         # PIT-158/160: 已存在则跳过（运行时注册表 devices/accounts 可能被 admin API 热写、
         # server.yaml 可能被运维改过）——build 不得把模板覆盖回运行时数据；需要新模板先删旧文件。
@@ -244,7 +270,6 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
             (etc_dir / "server.yaml").write_text(cfg)
         if src_cfg.exists():
             # 拷贝设备/账号文件（dev 模板——仅首次缺失时补）
-            import shutil
             for f in ("accounts.yaml", "devices.yaml"):
                 src = ROOT / "config" / f
                 dst = etc_dir / f
