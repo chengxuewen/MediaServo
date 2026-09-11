@@ -47,7 +47,10 @@ const USAGE: &str = "用法: mediaservo-host <init|start|apply|restart|stop|stat
 
 示例:
   mediaservo-host start /opt/mediaservo-host    启动部署实例
-  mediaservo-host -h                            本帮助";
+  mediaservo-host -h                            本帮助
+
+注: 本实例运行 env 全量由 etc/host.yaml 渲染进 run/oxfile.toml——手工往 oxfile 加 [apps.env] 行
+    会在下次 start 被覆盖，不被支持。日志级别等启动 env 在 shell 里 export RUST_LOG 后再 start 即可";
 
 fn print_usage() {
     let b = mediaservo_common::brand::media_brand();
