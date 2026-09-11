@@ -805,6 +805,7 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 
 ## D278: weaknet server 集成形态——装配/并管/入口三合一（2026-09-09, weaknet-server-integration）
 - **决策**：mediaservo-weaknet 并入 server 交付树三形态收口——①build 最前装配（mediasoup 连坐免疫）+deploy 双探源品牌拷贝（keeper 双名，brand 空无残名）；②oxmgr 簇第三兄弟 unit `weaknet-serve`（条件渲染钉 Rust render_oxfile——bin 在场才写；恒 loopback 恒无 --lan；statedir 单点 run/weaknet；SIGTERM 五步序②2s 预算超时弃 clear 交幸存 watchdog）；③Caddy handle_path /weaknet/* + header_up Host {upstream_hostport}（rebinding 防御职责转移 token 门——Host 门 curl 可绕本非实质防线）+ admin 侧栏 RequireAdmin 外链卡（探活 401/200-html/502|reject 三态，永不回传 token）。
+  - **①′ 修订（同日用户二审）**：defaults.sources 收窄为**平台/调参键**（backend/width/height/fps/reconnect_ms）；mode/input 属**源身份**必须逐条目——公共化会令新源忘配身份时静默错形态（全局 generator 下新相机漏写 mode → 彩条顶替真实画面）。backend 经用户裁决**保留**（整机同后端是合法公共语义），注释钉预留位（mipi 接线时条目+公共层一并生效）。deny 负例测试焊死原则防回流。
 - **边界**：面板 token 与 admin JWT 互不打通（RequireAdmin=UX 非安全边界）；撤网正确性不依赖优雅退出；车端面/模式②/根 Caddyfile 不动；package 含 weaknet（server=台架裁决）。
 - **教训钉**：Caddy 2.9.1 无 `uri replace_prefix`（实测指令真伪要跑）；同机 localhost 验收会掩盖 Host 门 403（LAN-IP 双形纪律）；"自动化绿≠人可用"（gate 无输入框=人肉断头）；门禁 grep 自身可造假绿（cd 语境）。
 - **评审链**：四席对抗（~40 簇）+ Momus [OKAY]（3 MAJOR/10 MINOR）→ rev-2.4；证据 docs/plans/weaknet-server-integration/（主仓）。
