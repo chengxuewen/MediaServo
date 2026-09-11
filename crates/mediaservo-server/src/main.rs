@@ -33,23 +33,15 @@ const USAGE: &str = "用法: mediaservo-server <init|start|stop|restart|status|d
 示例:
   mediaservo-server init /opt/mediaservo && mediaservo-server start /opt/mediaservo
   mediaservo-server --config /etc/mediaservo/server.yaml    守护直启（兼容旧链）
-  mediaservo-server -h|-H|--help                  本帮助
-
-环境变量:
-  [B] oxfile 手工行——持久于 run/oxfile.toml 对应 [[apps]] 的 [apps.env] 段。
-      ⚠ 整树重建后从零渲染（init / start 兜底）不含手工行——须照此回补:
-      MEDIASERVO_ALLOW_DEV_CREDENTIALS=1   放行开发占位账号（生产不设）
-      ALLOW_DEV_ENROLL=1                   公钥指纹自动入册陌生设备（专网/开发档，生产不设）
-      RUST_LOG=mediaservo_server=info      日志级别
-      WEAKNET_ADMIN_PASS=…                 weaknet 面板写凭证（凭证不入模板）
-  [C] 启动 env（shell/systemd/unit 注入均可）:
-      MEDIASERVO_PSK               信令共享密钥（server.yaml 优先，env 兜底）
-      MEDIASERVO_SFU_ANNOUNCED_IP  ICE 公告地址（多网卡/容器 NAT 必设）
-      MEDIASERVO_SFU_PORT          媒体固定端口（缺省 20000）
-      MEDIASERVO_WEB_PORT          web 入口 8080 让位时用";
+  mediaservo-server -h|-H|--help                  本帮助";
 
 fn print_usage() {
-    println!("{}", USAGE.replace("mediaservo-server", &lifecycle::templates::server_product()));
+    // env 总表来自 common 资产（单一真源，与 msrtc.sh/host 面同源）；品牌词随 product 替换。
+    println!(
+        "{}",
+        format!("{}\n\n{}", USAGE, mediaservo_common::env_usage_text())
+            .replace("mediaservo-server", &lifecycle::templates::server_product())
+    );
 }
 
 /// Entry point — 单二进制双角色派发（T15）。管理面子命令 → lifecycle；
