@@ -220,6 +220,8 @@ mod imp {
         pub ice_parameters: protocol::IceParameters,
         pub dtls_parameters: protocol::DtlsParameters,
         pub ice_candidates: Vec<protocol::IceCandidate>,
+        /// P1: transport 级 SCTP 参数（mediasoup SctpParameters 序列化透传；序列化失败=None）。
+        pub sctp_parameters: Option<serde_json::Value>,
     }
 
     /// Result of a producer creation request.
@@ -471,6 +473,35 @@ mod imp {
             })
         }
 
+        /// P1: 房间 Router 懒创建（create_webrtc_transport / router_rtp_capabilities 共用——
+        /// mediasoup-client 协商流程先要 caps 后建 transport，两处必须同路径）。
+        async fn ensure_router(&self, room_id: &str) -> Result<Arc<Router>, String> {
+            if let Some(room) = self.rooms.get(room_id) {
+                return Ok(Arc::clone(&room.router));
+            }
+            // No room yet — create one
+            let router = self
+                .worker
+                .create_router(default_router_options())
+                .await
+                .map_err(|e| {
+                    // v2 诊断: 打印 codec 列表定位 PT 冲突
+                    tracing::error!("Router create failed; media_codecs={:?}", default_router_options());
+                    format!("Failed to create router: {e}")
+                })?;
+            let router = Arc::new(router);
+            tracing::info!("Router created for room {}", room_id);
+
+            self.rooms.insert(
+                room_id.to_string(),
+                SfuRoom {
+                    router: Arc::clone(&router),
+                    peers: DashMap::new(),
+                },
+            );
+            Ok(router)
+        }
+
         /// Create a WebRTC transport for a peer in a room.
         pub async fn create_webrtc_transport(
             &self,
@@ -478,34 +509,8 @@ mod imp {
             peer_id: &str,
             direction: &str,
         ) -> Result<TransportCreated, String> {
-            // Get or create room
-            let router = {
-                if let Some(room) = self.rooms.get(room_id) {
-                    Arc::clone(&room.router)
-                } else {
-                    // No room yet — create one
-                    let router = self
-                        .worker
-                        .create_router(default_router_options())
-                        .await
-                        .map_err(|e| {
-                            // v2 诊断: 打印 codec 列表定位 PT 冲突
-                            tracing::error!("Router create failed; media_codecs={:?}", default_router_options());
-                            format!("Failed to create router: {e}")
-                        })?;
-                    let router = Arc::new(router);
-                    tracing::info!("Router created for room {}", room_id);
-
-                    self.rooms.insert(
-                        room_id.to_string(),
-                        SfuRoom {
-                            router: Arc::clone(&router),
-                            peers: DashMap::new(),
-                        },
-                    );
-                    router
-                }
-            };
+            // Get or create room（P1: 提取 ensure_router — caps 请求同路径懒建）
+            let router = self.ensure_router(room_id).await?;
 
             // Create transport using shared WebRtcServer (single port)
             // H1 (SFU data 域): enable_sctp = true — SCTP/DataChannel 协商必需（mediasoup
@@ -522,6 +527,12 @@ mod imp {
             let ice = transport.ice_parameters().clone();
             let dtls = transport.dtls_parameters();
             let ice_candidates = convert_ice_candidates(transport.ice_candidates());
+            // P1: transport 级 SCTP 参数透传（enable_sctp 恒开 → 常态 Some；失败=None+warn, C15）。
+            let sctp_parameters = transport.sctp_parameters().and_then(|p| {
+                serde_json::to_value(p)
+                    .map_err(|e| tracing::warn!("sctp_parameters 序列化失败: {e}"))
+                    .ok()
+            });
 
             // Store transport on peer
             if let Some(room) = self.rooms.get_mut(room_id) {
@@ -555,7 +566,52 @@ mod imp {
                 ice_parameters: convert_ice_parameters(&ice),
                 dtls_parameters: convert_dtls_parameters(&dtls),
                 ice_candidates,
+                sctp_parameters,
             })
+        }
+
+        /// P1 (client-dual-form): 房间 Router RTP capabilities — mediasoup-client
+        /// Device.load() 输入（C18）。房间不存在则懒建 Router（协商先于 transport）。
+        pub async fn router_rtp_capabilities(
+            &self,
+            room_id: &str,
+        ) -> Result<serde_json::Value, String> {
+            let router = self.ensure_router(room_id).await?;
+            let caps = router.rtp_capabilities();
+            serde_json::to_value(&caps).map_err(|e| format!("rtp_capabilities 序列化失败: {e}"))
+        }
+
+        /// P1: consumer 层级偏好（simulcast/SVC 选层）。未知 room/peer/consumer → Err
+        /// （C15: 调用方 warn+Error 回发）。Consumer 句柄先 clone 释放 DashMap guard 再 await。
+        pub async fn set_preferred_layers(
+            &self,
+            room_id: &str,
+            peer_id: &str,
+            consumer_id: &str,
+            spatial_layer: u8,
+            temporal_layer: Option<u8>,
+        ) -> Result<(), String> {
+            let consumer = {
+                let room = self
+                    .rooms
+                    .get(room_id)
+                    .ok_or_else(|| format!("Room {room_id} not found"))?;
+                let peer = room
+                    .peers
+                    .get(peer_id)
+                    .ok_or_else(|| format!("Peer {peer_id} not found in room {room_id}"))?;
+                peer.consumers
+                    .iter()
+                    .find(|c| c.id().to_string() == consumer_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        format!("Consumer {consumer_id} not found for peer {peer_id}")
+                    })?
+            };
+            consumer
+                .set_preferred_layers(ConsumerLayers { spatial_layer, temporal_layer })
+                .await
+                .map_err(|e| format!("set_preferred_layers failed: {e}"))
         }
 
         /// Remove a peer from a room, cleaning up transports, producers, and consumers.
@@ -1888,6 +1944,23 @@ mod imp {
 
         /// Stub — returns error in non-SFU builds.
         pub async fn connect_transport(&self, _room_id: &str, _peer_id: &str, _transport_id: &str, _dtls_params: protocol::DtlsParameters) -> Result<(), String> {
+            Err("sfu-mediasoup feature not enabled".into())
+        }
+
+        /// Stub — returns error in non-SFU builds (P1).
+        pub async fn router_rtp_capabilities(&self, _room_id: &str) -> Result<serde_json::Value, String> {
+            Err("sfu-mediasoup feature not enabled".into())
+        }
+
+        /// Stub — returns error in non-SFU builds (P1).
+        pub async fn set_preferred_layers(
+            &self,
+            _room_id: &str,
+            _peer_id: &str,
+            _consumer_id: &str,
+            _spatial_layer: u8,
+            _temporal_layer: Option<u8>,
+        ) -> Result<(), String> {
             Err("sfu-mediasoup feature not enabled".into())
         }
 

@@ -1175,6 +1175,7 @@ async fn handle_admin_sfu(
                         ice_parameters: created.ice_parameters,
                         dtls_parameters: created.dtls_parameters,
                         ice_candidates: Some(created.ice_candidates),
+                        sctp_parameters: created.sctp_parameters,
                     };
                     let _ = ws_sender
                         .send(Message::Text(serde_json::to_string(&response).unwrap()))

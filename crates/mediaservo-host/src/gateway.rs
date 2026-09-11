@@ -351,6 +351,9 @@ fn msg_room_id(msg: &SignalingMessage) -> Option<&str> {
         | NewDataProducer { room_id, .. }
         | ConsumeData { room_id, .. }
         | DataConsumed { room_id, .. }
+        | GetRouterRtpCapabilities { room_id, .. }
+        | RouterRtpCapabilities { room_id, .. }
+        | SetPreferredLayers { room_id, .. }
         | EmergencyCommand { room_id, .. } => Some(room_id),
         _ => None,
     }
@@ -391,7 +394,11 @@ fn rewrite_room(msg: &mut SignalingMessage, room: &str) {
         | DataProducerCreated { room_id, .. }
         | NewDataProducer { room_id, .. }
         | ConsumeData { room_id, .. }
-        | DataConsumed { room_id, .. } => *room_id = room.to_string(),
+        | DataConsumed { room_id, .. }
+        // P1 (client-dual-form): mediasoup-client 协商面消息 — 与 CreateWebRtcTransport 同组改写
+        | GetRouterRtpCapabilities { room_id, .. }
+        | RouterRtpCapabilities { room_id, .. }
+        | SetPreferredLayers { room_id, .. } => *room_id = room.to_string(),
         Error { .. } => {}
         StatusReport { .. } => {}
         // H2: 无房间字段的 SFU 统计消息 — 无需改写（下游按 FIFO 路由）

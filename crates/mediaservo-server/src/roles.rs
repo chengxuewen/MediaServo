@@ -164,14 +164,22 @@ impl SessionIdentity {
         }
     }
 
-    /// Produce 门: 车端自动允许（自己的流）; 账号禁止（舱端只消费）; Legacy 允许（dev 路径）。
-    pub fn can_produce(&self) -> Result<(), String> {
+    /// Produce 门: 车端自动允许（自己的流）; 账号默认禁止（舱端只消费）——
+    /// **audio-* 会议房豁免**（D-H11 修订/P1: 会议麦上行，C29 全互连语义）;
+    /// Legacy 允许（dev 路径）。
+    pub fn can_produce(&self, room_id: &str) -> Result<(), String> {
         match self {
-            Self::Account(a) => Err(format!(
-                "account {} role {} cannot produce media (cockpit is consume-only)",
-                a.username,
-                a.role.as_str()
-            )),
+            Self::Account(a) => {
+                if crate::sfu::is_audio_room(room_id) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "account {} role {} cannot produce media (cockpit is consume-only)",
+                        a.username,
+                        a.role.as_str()
+                    ))
+                }
+            }
             Self::Device(_) | Self::Legacy => Ok(()),
         }
     }
@@ -353,13 +361,32 @@ mod tests {
 
     #[test]
     fn produce_gate_device_and_legacy_allowed_account_denied() {
-        assert_eq!(SessionIdentity::Device("d".into()).can_produce(), Ok(()), "车端 produce 自动允许");
-        assert_eq!(SessionIdentity::Legacy.can_produce(), Ok(()), "dev 路径放行");
+        assert_eq!(SessionIdentity::Device("d".into()).can_produce("vehicle_x"), Ok(()), "车端 produce 自动允许");
+        assert_eq!(SessionIdentity::Legacy.can_produce("vehicle_x"), Ok(()), "dev 路径放行");
         assert!(
-            account(CockpitRole::Viewer, vec![]).can_produce().is_err(),
-            "账号禁止 produce"
+            account(CockpitRole::Viewer, vec![]).can_produce("vehicle_x").is_err(),
+            "账号禁止 produce（视频房）"
         );
-        assert!(account(CockpitRole::Admin, vec![]).can_produce().is_err());
+        assert!(account(CockpitRole::Admin, vec![]).can_produce("vehicle_x").is_err());
+    }
+
+    #[test]
+    fn produce_gate_audio_room_account_exempt() {
+        // P1/D-H11 修订: audio-* 会议房账号上行豁免（C29 麦语义）；视频房与近前缀房仍禁。
+        assert_eq!(
+            account(CockpitRole::Operator, vec![]).can_produce("audio-car1"),
+            Ok(()),
+            "audio 会议房账号上行豁免"
+        );
+        assert_eq!(account(CockpitRole::Viewer, vec![]).can_produce("audio-car1"), Ok(()));
+        assert!(
+            account(CockpitRole::Operator, vec![]).can_produce("vehicle_car1").is_err(),
+            "视频房账号仍禁"
+        );
+        assert!(
+            account(CockpitRole::Operator, vec![]).can_produce("audiox").is_err(),
+            "audio 前缀必须是 audio-（近前缀不豁免）"
+        );
     }
 
     #[test]

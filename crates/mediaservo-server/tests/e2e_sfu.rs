@@ -1033,7 +1033,7 @@ async fn e2e_sfu_data_domain() {
     });
     let _carol_ws = carol_handle.await.unwrap();
 
-    // ── ③ operator 尝试 produce_data → 4031（账号只消费）────────────────────
+    // ── ③ P1/F8 契约改判: operator(can_control) 建控制 DC → role 门放行 ────────
     let prod_url = ws_url.clone();
     let prod_handle = tokio::spawn(async move {
         let mut ws = g3_account_connect(&prod_url, &g3_token("carol", "operator", &["ms-car1"])).await;
@@ -1099,14 +1099,50 @@ async fn e2e_sfu_data_domain() {
             .unwrap()
             .unwrap()
             .unwrap();
-        assert!(
-            resp.to_text().unwrap().contains(r#""code":4031"#),
-            "账号 produce_data 必须拒绝: {}",
-            resp.to_text().unwrap()
-        );
+        // P1/F8（有意契约变更，原 4031 全禁）: operator 有控制能力 → role 门放行 → SFU data 域创建。
+        match serde_json::from_str::<SignalingMessage>(resp.to_text().unwrap()).unwrap() {
+            SignalingMessage::DataProducerCreated { .. } => {}
+            other => panic!("operator 控制 DC 必须放行（F8 role 门）, got: {other:?}"),
+        }
         ws
     });
     let _prod_ws = prod_handle.await.unwrap();
+
+    // ── ④ P1/F8 负例: dispatcher 无控制能力 → 建控制 DC → 4012 显式拒（D273 terminal 可见）──
+    let dis_url = ws_url.clone();
+    let dis_handle = tokio::spawn(async move {
+        let mut ws = g3_account_connect(&dis_url, &g3_token("dave", "dispatcher", &[])).await;
+        g3_auth_and_join(&mut ws, G3_ROOM, PeerRole::Consumer).await;
+        let produce_data = serde_json::to_string(&SignalingMessage::CreateDataProducer {
+            room_id: G3_ROOM.into(),
+            peer_id: "dave-prod".into(),
+            transport_direction: mediaservo_common::protocol::TransportDirection::Send,
+            label: "control".into(),
+            protocol: "mediaservo.control".into(),
+            sctp_stream_parameters: None,
+            transport_id: None,
+        })
+        .unwrap();
+        ws.send(WsMsg::Text(produce_data.into())).await.unwrap();
+        let resp = loop {
+            let r = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            match serde_json::from_str::<SignalingMessage>(r.to_text().unwrap()).unwrap() {
+                SignalingMessage::NewProducer { .. } | SignalingMessage::NewDataProducer { .. } => {
+                    continue
+                }
+                other => break other,
+            }
+        };
+        assert!(
+            matches!(&resp, SignalingMessage::Error { code: 4012, .. }),
+            "dispatcher 控制 DC 必须 4012 显式拒, got: {resp:?}"
+        );
+    });
+    let _dis_ws = dis_handle.await.unwrap();
 
     // Cleanup
     let _ = host_ws;

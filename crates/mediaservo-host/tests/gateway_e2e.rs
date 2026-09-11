@@ -170,6 +170,7 @@ fn transport_created_for(transport_id: &str, peer_id: &str) -> SignalingMessage 
         room_id: VEHICLE_ROOM.into(),
         peer_id: peer_id.into(),
         transport_id: transport_id.into(),
+        sctp_parameters: None, // P1 additive 字段——夹具不消费
         ice_parameters: IceParameters {
             username_fragment: "ufrag".into(),
             password: "pwd".into(),

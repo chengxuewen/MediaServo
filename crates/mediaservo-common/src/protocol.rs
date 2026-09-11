@@ -86,6 +86,11 @@ pub enum SignalingMessage {
         /// ICE candidates for the transport (None for backward compat).
         #[serde(skip_serializing_if = "Option::is_none")]
         ice_candidates: Option<Vec<IceCandidate>>,
+        /// P1 (client-dual-form): transport 级 SCTP 参数（mediasoup SctpParameters 序列化
+        /// 原样透传；None = 向后兼容）。opaque Value 循 rtp_parameters 先例——浏览器侧
+        /// 字段映射（OS/MIS/maxMessageSize）归 TS proto handler 单点。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sctp_parameters: Option<serde_json::Value>,
     },
 
     /// Client sends back DTLS parameters to connect the transport.
@@ -94,6 +99,30 @@ pub enum SignalingMessage {
         peer_id: String,
         transport_id: String,
         dtls_parameters: DtlsParameters,
+    },
+
+    /// P1 (client-dual-form): 客户端请求房间 Router 的 RTP capabilities —
+    /// mediasoup-client Device.load() 的输入（C18 官方协商流程第一步）。
+    GetRouterRtpCapabilities {
+        room_id: String,
+    },
+
+    /// Server 回 Router RTP capabilities（mediasoup RtpCapabilitiesFinalized 序列化
+    /// 原样透传 — opaque Value 循 rtp_parameters 先例，禁手拼）。
+    RouterRtpCapabilities {
+        room_id: String,
+        capabilities: serde_json::Value,
+    },
+
+    /// P1: consumer 层级偏好（simulcast/SVC 选层 — 会议 P4a 带宽自适应的服务端入口）。
+    /// ack 循 Error{code:0} 先例（transport_connected 同型）。
+    SetPreferredLayers {
+        room_id: String,
+        peer_id: String,
+        consumer_id: String,
+        spatial_layer: u8,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        temporal_layer: Option<u8>,
     },
 
     /// Error response from Server.
@@ -814,6 +843,7 @@ mod tests {
                 role: "auto".into(),
             },
             ice_candidates: None,
+            sctp_parameters: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"web_rtc_transport_created""#));
@@ -1261,5 +1291,83 @@ mod tests {
             }
             other => panic!("expected RTCIceCandidate, got {other:?}"),
         }
+    }
+
+    // ── P1 (client-dual-form): mediasoup-client 标准协商面 ──────────────────
+
+    #[test]
+    fn roundtrip_get_router_rtp_capabilities() {
+        let msg = SignalingMessage::GetRouterRtpCapabilities { room_id: "r1".into() };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"get_router_rtp_capabilities""#));
+        let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
+        assert!(
+            matches!(parsed, SignalingMessage::GetRouterRtpCapabilities { room_id } if room_id == "r1")
+        );
+    }
+
+    #[test]
+    fn roundtrip_router_rtp_capabilities_opaque() {
+        let msg = SignalingMessage::RouterRtpCapabilities {
+            room_id: "r1".into(),
+            capabilities: serde_json::json!({ "codecs": [{ "mimeType": "video/H264" }] }),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"router_rtp_capabilities""#));
+        let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            SignalingMessage::RouterRtpCapabilities { capabilities, .. } => {
+                assert_eq!(capabilities["codecs"][0]["mimeType"], "video/H264");
+            }
+            other => panic!("expected RouterRtpCapabilities, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn roundtrip_set_preferred_layers() {
+        let msg = SignalingMessage::SetPreferredLayers {
+            room_id: "r1".into(),
+            peer_id: "p1".into(),
+            consumer_id: "c1".into(),
+            spatial_layer: 2,
+            temporal_layer: Some(1),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"set_preferred_layers""#));
+        let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            parsed,
+            SignalingMessage::SetPreferredLayers { spatial_layer: 2, temporal_layer: Some(1), .. }
+        ));
+        // temporal_layer None → 不上 wire（additive 容错）
+        let msg2 = SignalingMessage::SetPreferredLayers {
+            room_id: "r1".into(),
+            peer_id: "p1".into(),
+            consumer_id: "c1".into(),
+            spatial_layer: 0,
+            temporal_layer: None,
+        };
+        assert!(!serde_json::to_string(&msg2).unwrap().contains("temporal_layer"));
+    }
+
+    #[test]
+    fn transport_created_sctp_parameters_optional_on_wire() {
+        let make = |sctp: Option<serde_json::Value>| SignalingMessage::WebRtcTransportCreated {
+            room_id: "r1".into(),
+            peer_id: "p1".into(),
+            transport_id: "t1".into(),
+            ice_parameters: IceParameters { username_fragment: "u".into(), password: "p".into() },
+            dtls_parameters: DtlsParameters { fingerprints: vec![], role: "auto".into() },
+            ice_candidates: None,
+            sctp_parameters: sctp,
+        };
+        // None → 字段不上 wire；缺字段 wire → 解析 None（双向兼容钉）
+        let json = serde_json::to_string(&make(None)).unwrap();
+        assert!(!json.contains("sctp_parameters"));
+        let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(parsed, SignalingMessage::WebRtcTransportCreated { sctp_parameters: None, .. }));
+        // Some → 透传
+        let json_with = serde_json::to_string(&make(Some(serde_json::json!({ "port": 5000 })))).unwrap();
+        assert!(json_with.contains(r#""sctp_parameters":{"port":5000}"#));
     }
 }

@@ -217,6 +217,7 @@ let app = axum::Router::new()
                     match msg {
                         SignalingMessage::WebRtcTransportCreated {
                             room_id: _, peer_id: _, transport_id, ice_parameters, dtls_parameters, ice_candidates,
+                            sctp_parameters: _, // P1 additive 字段——legacy 夹具不消费
                         } => break (transport_id, ice_parameters, dtls_parameters, ice_candidates),
                         SignalingMessage::Sdp { .. } | SignalingMessage::RTCIceCandidate { .. } => {
                             tracing::debug!("SFU: skipping P2P message");

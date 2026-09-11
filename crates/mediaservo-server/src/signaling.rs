@@ -1543,6 +1543,7 @@ pub(crate) async fn handle_sfu_message(
                     ice_parameters: created.ice_parameters,
                     dtls_parameters: created.dtls_parameters,
                     ice_candidates: Some(created.ice_candidates),
+                    sctp_parameters: created.sctp_parameters,
                 }),
                 Ok(Err(e)) => {
                     tracing::error!("SFU: create transport failed: {e}");
@@ -1587,6 +1588,78 @@ pub(crate) async fn handle_sfu_message(
                 }
             }
         }
+        // ── P1 (client-dual-form): mediasoup-client 标准协商面 ──────────────────
+        SignalingMessage::GetRouterRtpCapabilities { room_id } => {
+            // Device.load() 输入（C18 官方流程）；房间不存在则懒建 Router（同 create transport 路径）。
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                sfu.router_rtp_capabilities(&room_id),
+            )
+            .await
+            {
+                Ok(Ok(capabilities)) => Some(SignalingMessage::RouterRtpCapabilities {
+                    room_id: room_id.clone(),
+                    capabilities,
+                }),
+                Ok(Err(e)) => {
+                    tracing::error!("SFU: get router rtp capabilities failed: {e}");
+                    Some(SignalingMessage::Error {
+                        code: 5000,
+                        message: format!("GetRouterRtpCapabilities failed: {e}"),
+                    })
+                }
+                Err(_) => {
+                    tracing::error!("SFU: get router rtp capabilities timed out after 5s");
+                    Some(SignalingMessage::Error {
+                        code: 5000,
+                        message: "GetRouterRtpCapabilities timed out".into(),
+                    })
+                }
+            }
+        }
+        SignalingMessage::SetPreferredLayers {
+            room_id,
+            peer_id: msg_peer_id,
+            consumer_id,
+            spatial_layer,
+            temporal_layer,
+        } => {
+            // PIT-65 同纪律: 用消息 peer_id。ack 循 Error{code:0} 先例（transport_connected 同型）。
+            let sfu_peer_id = msg_peer_id.as_str();
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                sfu.set_preferred_layers(
+                    &room_id,
+                    sfu_peer_id,
+                    &consumer_id,
+                    *spatial_layer,
+                    *temporal_layer,
+                ),
+            )
+            .await
+            {
+                Ok(Ok(())) => {
+                    tracing::info!(
+                        "SFU: consumer {consumer_id} preferred layers {spatial_layer}/{temporal_layer:?} (peer {sfu_peer_id})"
+                    );
+                    Some(SignalingMessage::Error { code: 0, message: "preferred_layers_set".into() })
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!("SFU: set_preferred_layers failed: {e}");
+                    Some(SignalingMessage::Error {
+                        code: 5000,
+                        message: format!("SetPreferredLayers failed: {e}"),
+                    })
+                }
+                Err(_) => {
+                    tracing::error!("SFU: set_preferred_layers timed out after 5s");
+                    Some(SignalingMessage::Error {
+                        code: 5000,
+                        message: "SetPreferredLayers timed out".into(),
+                    })
+                }
+            }
+        }
         SignalingMessage::Produce {
             room_id,
             peer_id: msg_peer_id,
@@ -1612,7 +1685,7 @@ pub(crate) async fn handle_sfu_message(
                 });
             }
             // G3 门: 车端自动允许（自己的流）; 账号禁止 produce（舱端只消费）; legacy 放行。
-            if let Err(reason) = identity.can_produce() {
+            if let Err(reason) = identity.can_produce(room_id) {
                 let detail = format!("{reason} (peer={peer_id}, room={room_id})");
                 tracing::warn!("Produce denied: {detail}");
                 audit::log_event(AuditEvent::AuthorizationDenied {
@@ -1759,16 +1832,26 @@ pub(crate) async fn handle_sfu_message(
                     message: "CreateDataProducer requires send transport".into(),
                 });
             }
-            // G3 门: 与 produce 同矩阵 — 车端自动允许（自己的 DC）; 账号禁止; legacy 放行。
-            if let Err(reason) = identity.can_produce() {
-                let detail = format!("{reason} (peer={peer_id}, room={room_id})");
-                tracing::warn!("CreateDataProducer denied: {detail}");
-                audit::log_event(AuditEvent::AuthorizationDenied {
-                    action: "produce_data".into(),
-                    peer_id: peer_id.to_string(),
-                    detail: detail.clone(),
-                });
-                return Some(SignalingMessage::Error { code: 4031, message: detail });
+            // G3 门: 与 produce 同矩阵 — 车端自动允许（自己的 DC）; 账号默认禁止; legacy 放行。
+            // P1 修正（F8 真落点）: 全 SFU 决策（D 2026-08-25，room.rs 房间统一 DeviceStream）后
+            // SDP 中继 can_control 门不可达——遥控 DC 建立口 = 本消息。账号控制豁免:
+            // operator/admin（can_control）放行建控制 DataProducer；viewer/dispatcher 显式
+            // 4012 + audit（D273 terminal 红牌可见，替代静默）。
+            if let Err(reason) = identity.can_produce(room_id) {
+                if identity.can_control() {
+                    tracing::info!(
+                        "CreateDataProducer: 账号控制 DC 经 role 门放行 (peer={peer_id}, room={room_id}, label={label})"
+                    );
+                } else {
+                    let detail = format!("control_denied: {reason} (peer={peer_id}, room={room_id})");
+                    tracing::warn!("CreateDataProducer denied: {detail}");
+                    audit::log_event(AuditEvent::AuthorizationDenied {
+                        action: "control_dc".into(),
+                        peer_id: peer_id.to_string(),
+                        detail: detail.clone(),
+                    });
+                    return Some(SignalingMessage::Error { code: 4012, message: detail });
+                }
             }
             match sfu
                 .create_data_producer(
