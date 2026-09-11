@@ -21,7 +21,7 @@ pub mod token;
 pub use acl::{NodeAcl, Role};
 pub use bus::framebus::FrameBus;
 pub use registry::{NodeInfo, Registry, TopicInfo};
-pub use signal::{DeviceCredential, LocalEnvelope, RetryConfig, SignalClient, SignalEvent, SignalSession};
+pub use signal::{DeviceCredential, DeviceIdentity, LocalEnvelope, RetryConfig, SignalClient, SignalEvent, SignalSession};
 pub use token::{CapabilityToken, Claims, Ed25519SigningKey, Ed25519VerifyingKey, TokenFile};
 pub use error::LinkError;
 pub use frame::{FrameMeta, FrameRef, FrameStream};

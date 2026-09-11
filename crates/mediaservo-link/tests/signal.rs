@@ -2,7 +2,8 @@
 
 use futures_util::{SinkExt, StreamExt};
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
-use mediaservo_link::{SignalClient, SignalEvent};
+use base64::Engine as _;
+use mediaservo_link::{DeviceIdentity, LinkError, SignalClient, SignalEvent};
 use tokio_tungstenite::tungstenite::Message;
 
 #[tokio::test]
@@ -390,4 +391,172 @@ async fn on_disconnect_fires_when_server_closes() {
         .expect("on_disconnect 应在 server 关闭时触发（3s 超时）")
         .expect("watch channel 不应关闭");
     server.await.unwrap();
+}
+
+// ── device-enroll T7: 公钥指纹验签链（challenge→应答→终态）+ 单锚交叉复验 ─────
+// 常量与期望值 = server devices.rs::sig_vector（批2 钉死）同一锚点，逐字抄录不重算。
+
+const SIG_VECTOR_VK_B64: &str = "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=";
+const SIG_VECTOR_SIG_CAM0_B64: &str =
+    "Gnz2kGCFH6igsOfv5QW0+8aRyu/lP5ytAa8fJA0CPYP3fIX5UsYr6uTjFjqOEEFBUB2scnDffIZ1WfP9O2ECCg==";
+
+fn sig_nonce() -> Vec<u8> {
+    (0x40u8..0x60).collect()
+}
+
+/// sig_vector 身份：seed = bytes(0..=31)，device_id = ms-0a1b2c3d4e5f。
+fn ident_seed0() -> DeviceIdentity {
+    let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
+    DeviceIdentity::new("ms-0a1b2c3d4e5f", ed25519_dalek::SigningKey::from_bytes(&seed))
+}
+
+#[test]
+fn device_auth_sig_cross_anchor_matches_server_vector() {
+    // 单锚交叉复验：本 crate 签名函数 × server 钉期望值 —— 同输入必出同字节。
+    let ident = ident_seed0();
+    assert_eq!(ident.pubkey_b64, SIG_VECTOR_VK_B64, "公钥指纹必须 = server 钉值");
+    assert_eq!(
+        ident.sign_device_auth(&sig_nonce(), "vehicle_cam0"),
+        SIG_VECTOR_SIG_CAM0_B64,
+        "同 seed/nonce/device_id/room 必出同 sig（字节合同 §3 两侧一致）"
+    );
+}
+
+/// mock server：PSK ack → 断言 Join 为 pubkey 形 → challenge(sig_vector nonce) →
+/// 断言应答 verify_strict 过 → 回 `final_msg` 终态。
+async fn spawn_pubkey_server(final_msg: SignalingMessage) -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let _psk = ws.next().await.unwrap().unwrap();
+        let ack = SignalingMessage::Error { code: 0, message: String::new() };
+        ws.send(Message::Text(serde_json::to_string(&ack).unwrap()))
+            .await
+            .unwrap();
+        let join_msg = ws.next().await.unwrap().unwrap();
+        let room_id =
+            match serde_json::from_str::<SignalingMessage>(join_msg.to_text().unwrap()).unwrap() {
+                SignalingMessage::RoomJoin { room_id, device_id, device_secret, device_pubkey, .. } => {
+                    assert_eq!(device_id.as_deref(), Some("ms-0a1b2c3d4e5f"));
+                    assert_eq!(device_secret, None, "pubkey 形 Join 不得携带 secret");
+                    assert_eq!(
+                        device_pubkey.as_deref(),
+                        Some(SIG_VECTOR_VK_B64),
+                        "Join 应带 device_pubkey（= sig_vector vk）"
+                    );
+                    room_id
+                }
+                other => panic!("expected RoomJoin, got {other:?}"),
+            };
+        let nonce_raw = sig_nonce();
+        let ch = SignalingMessage::DeviceAuthChallenge {
+            nonce: base64::engine::general_purpose::STANDARD.encode(&nonce_raw),
+        };
+        ws.send(Message::Text(serde_json::to_string(&ch).unwrap()))
+            .await
+            .unwrap();
+        // server 同款纪律验签（verify_strict，§3）+ 同锚 sig 比对
+        let resp_msg = ws.next().await.unwrap().unwrap();
+        match serde_json::from_str::<SignalingMessage>(resp_msg.to_text().unwrap()).unwrap() {
+            SignalingMessage::DeviceAuthResponse { room_id: r, sig } => {
+                assert_eq!(r, room_id, "应答 room 必须回显 Join 房间");
+                assert_eq!(sig, SIG_VECTOR_SIG_CAM0_B64, "nonce/ids/room 同锚必出同 sig");
+                let vk_arr: [u8; 32] = base64::engine::general_purpose::STANDARD
+                    .decode(SIG_VECTOR_VK_B64)
+                    .unwrap()
+                    .as_slice()
+                    .try_into()
+                    .unwrap();
+                let sig_arr: [u8; 64] = base64::engine::general_purpose::STANDARD
+                    .decode(&sig)
+                    .unwrap()
+                    .as_slice()
+                    .try_into()
+                    .unwrap();
+                let mut msg = nonce_raw;
+                msg.extend_from_slice(b"ms-0a1b2c3d4e5f");
+                msg.extend_from_slice(room_id.as_bytes());
+                ed25519_dalek::VerifyingKey::from_bytes(&vk_arr)
+                    .unwrap()
+                    .verify_strict(&msg, &ed25519_dalek::Signature::from_bytes(&sig_arr))
+                    .expect("host 应答必须通过验签");
+            }
+            other => panic!("expected DeviceAuthResponse, got {other:?}"),
+        }
+        ws.send(Message::Text(serde_json::to_string(&final_msg).unwrap()))
+            .await
+            .unwrap();
+    });
+    addr
+}
+
+fn pubkey_client(addr: std::net::SocketAddr) -> SignalClient {
+    SignalClient::new(&format!("ws://{addr}/ws"), "test-psk", "vehicle_cam0", PeerRole::Host)
+        .with_device_identity(ident_seed0())
+}
+
+#[tokio::test]
+async fn pubkey_join_challenge_answered_receives_joined() {
+    // 全链过：Join(pubkey) → challenge → 应答 → RoomJoined → 会话可用
+    let addr = spawn_pubkey_server(SignalingMessage::RoomJoined {
+        room_id: "vehicle_cam0".into(),
+        peer_id: "peer-vk".into(),
+    })
+    .await;
+    let session = pubkey_client(addr).connect().await.expect("pubkey 全链应过");
+    assert_eq!(session.peer_id(), "peer-vk");
+    session.close().await.expect("close");
+}
+
+#[tokio::test]
+async fn pubkey_join_pending_maps_to_enroll_pending_error() {
+    // 手动档未批准：DeviceAuthPending → typed EnrollPending（host 日志面可判别）
+    let addr = spawn_pubkey_server(SignalingMessage::DeviceAuthPending {
+        device_id: "ms-0a1b2c3d4e5f".into(),
+    })
+    .await;
+    let err = pubkey_client(addr).connect().await.expect_err("pending 必须报 typed 错误");
+    assert!(
+        matches!(&err, LinkError::EnrollPending { device_id } if device_id == "ms-0a1b2c3d4e5f"),
+        "应为 EnrollPending{{device_id}}，got: {err:?}"
+    );
+    assert!(err.to_string().contains("device enroll pending"), "Display 含家族串: {err}");
+}
+
+#[tokio::test]
+async fn pubkey_join_rejected_after_answer_surfaces_error() {
+    // 验签被拒（4010 统一防枚举消息）→ 错误上抛，会话不建
+    let addr = spawn_pubkey_server(SignalingMessage::Error {
+        code: 4010,
+        message: "device authentication failed: invalid device credentials".into(),
+    })
+    .await;
+    let err = pubkey_client(addr).connect().await.expect_err("拒签必须报错");
+    assert!(
+        err.to_string().contains("4010") && err.to_string().contains("device authentication failed"),
+        "got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn pubkey_join_silence_hits_five_second_disconnect() {
+    // §1 合同：pubkey 形 Join 后服务端静默 → 5s 超时断连错误（start_paused 瞬时推进）
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let _psk = ws.next().await.unwrap().unwrap();
+        let ack = SignalingMessage::Error { code: 0, message: String::new() };
+        ws.send(Message::Text(serde_json::to_string(&ack).unwrap()))
+            .await
+            .unwrap();
+        let _join = ws.next().await; // 此后静默
+        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+    });
+    let err = pubkey_client(addr).connect().await.expect_err("静默必须超时");
+    assert!(err.to_string().contains("no server response within 5s"), "got: {err}");
+    server.abort();
 }

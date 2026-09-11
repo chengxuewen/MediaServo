@@ -180,15 +180,21 @@ fn cmd_init(args: &mut impl Iterator<Item = String>) -> i32 {
         }
     }
 
-    // G4: 设备身份 identity.json（D-H13 实例根，0600；幂等——仅缺失时生成，
-    // 覆盖会使 server 侧注册失效）。损坏文件显式报错（C15），不静默覆盖。
+    // G4+device-enroll: 设备身份 identity.json（D-H13 实例根，0600；幂等——仅缺失时
+    // 生成，覆盖会使 server 侧注册失效；新形状 {device_id}，公指纹即凭据）。损坏显式报错。
+    let id_path = dir.join(mediaservo_host::identity::IDENTITY_FILE);
+    let id_pre_existing = id_path.exists();
     match mediaservo_host::identity::ensure_identity(&dir) {
-        Ok(cred) => {
-            let p = dir.join(mediaservo_host::identity::IDENTITY_FILE);
-            if p.exists() {
-                eprintln!("init: {} 已存在，跳过", p.display());
+        Ok(device_id) => {
+            if id_pre_existing {
+                eprintln!("init: {} 已存在，跳过", id_path.display());
             } else {
-                println!("已生成 {}（device_id={}，0600）", p.display(), cred.device_id);
+                let fp = mediaservo_host::identity::load_device_identity(&dir)
+                    .ok()
+                    .flatten()
+                    .map(|i| format!("，公钥指纹={}", i.pubkey_b64))
+                    .unwrap_or_default();
+                println!("已生成 {}（device_id={device_id}{fp}，0600）", id_path.display());
             }
         }
         Err(e) => {

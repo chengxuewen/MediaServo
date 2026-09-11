@@ -32,6 +32,10 @@ pub enum LinkError {
     #[error("signal error: {0}")]
     Signal(String),
 
+    /// 设备已入册待管理员批准（device-enroll 手动档，`DeviceAuthPending` 应答）。
+    #[error("device enroll pending: {device_id}")]
+    EnrollPending { device_id: String },
+
     /// 已关闭。
     #[error("closed")]
     Closed,

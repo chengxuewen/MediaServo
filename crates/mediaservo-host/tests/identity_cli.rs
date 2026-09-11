@@ -26,7 +26,9 @@ fn init_generates_identity_json_idempotently() {
     let first: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).expect("identity.json 可解析");
     assert!(first["device_id"].as_str().unwrap().starts_with("ms-"), "device_id 应 ms- 前缀");
-    assert_eq!(first["device_secret"].as_str().unwrap().len(), 64, "device_secret 32 字节 hex");
+    // device-enroll 新形状：仅 device_id（公钥指纹即凭据），不再写 secret
+    assert_eq!(first.get("device_secret"), None, "新形状 identity.json 不得含 device_secret");
+    assert_eq!(first.as_object().unwrap().len(), 1, "新形状仅一个字段");
 
     // 幂等：重复 init 不得覆盖（覆盖会使 server 侧注册失效）
     let out2 = host().arg("init").arg(dir.path()).output().expect("spawn host init again");

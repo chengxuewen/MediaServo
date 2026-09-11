@@ -18,7 +18,7 @@ use mediaservo_common::protocol::{
     TransportDirection,
 };
 use mediaservo_host::gateway::{run_gateway, GatewayConfig, LocalEnvelope};
-use mediaservo_link::{DeviceCredential, RetryConfig};
+use mediaservo_link::{DeviceIdentity, RetryConfig};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
@@ -734,11 +734,18 @@ async fn frame_relay_does_not_steal_p2p_ownership() {
     server.await.unwrap();
 }
 
-// ── G4: 远端 Join 携带设备凭证（device_id/device_secret，additive）──────────
+// ── device-enroll: 远端 Join 公钥指纹全链（challenge→应答→joined）────────────
 
 #[tokio::test]
 async fn remote_join_carries_device_credentials() {
-    // mock 远端 server：PSK 确认后断言 RoomJoin 携带设备凭证（G4 wire 契约）
+    use base64::Engine as _;
+    use ed25519_dalek::VerifyingKey;
+    // 网关侧身份 = sig_vector 同锚 seed（批3 交叉复验同一常量系）
+    let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
+    let ident = DeviceIdentity::new("ms-gw-device", ed25519_dalek::SigningKey::from_bytes(&seed));
+    let expect_pk = ident.pubkey_b64.clone();
+    // mock 远端 server：PSK 确认后断言 RoomJoin 带 device_pubkey（pubkey 形，无 secret），
+    // 发 challenge → 断言应答验签过（server 同款 verify_strict）→ RoomJoined。
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -748,38 +755,61 @@ async fn remote_join_carries_device_credentials() {
         assert!(matches!(psk, Message::Text(_)), "首条应为 PSK 文本");
         ws.send(Message::Text(
             serde_json::to_string(&SignalingMessage::Error { code: 0, message: String::new() })
-                .unwrap()
-                .into(),
+                .unwrap(),
         ))
         .await
         .unwrap();
         let join = ws.next().await.unwrap().unwrap();
+        let nonce_raw: Vec<u8> = (0x40u8..0x60).collect();
         match serde_json::from_str::<SignalingMessage>(join.to_text().unwrap()).unwrap() {
-            SignalingMessage::RoomJoin { device_id, device_secret, .. } => {
+            SignalingMessage::RoomJoin { device_id, device_secret, device_pubkey, .. } => {
                 assert_eq!(device_id.as_deref(), Some("ms-gw-device"), "远端 RoomJoin 应携带 device_id");
-                assert_eq!(device_secret.as_deref(), Some("gw-secret"), "远端 RoomJoin 应携带 device_secret");
+                assert_eq!(device_secret, None, "pubkey 形不携带 secret（D-E3 两形互斥）");
+                assert_eq!(device_pubkey.as_deref(), Some(expect_pk.as_str()), "应携带装配出的公钥指纹");
             }
             other => panic!("expected RoomJoin, got {other:?}"),
+        }
+        ws.send(Message::Text(
+            serde_json::to_string(&SignalingMessage::DeviceAuthChallenge {
+                nonce: base64::engine::general_purpose::STANDARD.encode(&nonce_raw),
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+        let resp = ws.next().await.unwrap().unwrap();
+        match serde_json::from_str::<SignalingMessage>(resp.to_text().unwrap()).unwrap() {
+            SignalingMessage::DeviceAuthResponse { room_id, sig } => {
+                assert_eq!(room_id, VEHICLE_ROOM, "应答 room 回显整车房间");
+                let vk_arr: [u8; 32] = base64::engine::general_purpose::STANDARD
+                    .decode(&expect_pk).unwrap().as_slice().try_into().unwrap();
+                let sig_arr: [u8; 64] = base64::engine::general_purpose::STANDARD
+                    .decode(&sig).unwrap().as_slice().try_into().unwrap();
+                let mut msg = nonce_raw;
+                msg.extend_from_slice(b"ms-gw-device");
+                msg.extend_from_slice(VEHICLE_ROOM.as_bytes());
+                VerifyingKey::from_bytes(&vk_arr)
+                    .unwrap()
+                    .verify_strict(&msg, &ed25519_dalek::Signature::from_bytes(&sig_arr))
+                    .expect("网关应答必须通过验签");
+            }
+            other => panic!("expected DeviceAuthResponse, got {other:?}"),
         }
         ws.send(Message::Text(
             serde_json::to_string(&SignalingMessage::RoomJoined {
                 room_id: VEHICLE_ROOM.into(),
                 peer_id: VEHICLE_PEER.into(),
             })
-            .unwrap()
-            .into(),
+            .unwrap(),
         ))
         .await
         .unwrap();
         tokio::time::sleep(Duration::from_millis(500)).await; // 保持连接至断言完成
     });
 
-    // 网关携带设备凭证（host-agent 从 identity.json 加载后注入）
+    // 网关携带设备身份（host-agent 从 identity.json + signing.pem 装配——device-enroll T6/T7）
     let mut gateway_cfg = cfg(addr);
-    gateway_cfg.device = Some(mediaservo_link::DeviceCredential {
-        device_id: "ms-gw-device".into(),
-        device_secret: "gw-secret".into(),
-    });
+    gateway_cfg.device = Some(ident);
     let (port, _handle) = run_gateway(gateway_cfg).await.expect("run_gateway");
     // 本地子进程 join：合成 RoomJoined 证明远端会话已就绪（连接全链路）
     let mut child = local(port).await;

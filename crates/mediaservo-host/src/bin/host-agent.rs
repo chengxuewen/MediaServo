@@ -65,16 +65,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_dir = config_path.as_deref().map(PathBuf::from).and_then(|p| {
         p.parent().and_then(|etc| etc.parent().map(Path::to_path_buf))
     });
-    // G4: 设备身份 — identity.json 存在则远端 Join 携带（additive；缺失/损坏 →
-    // warn 回落 PSK，G2 起 server 校验设备凭证）
+    // device-enroll T6: 设备身份 = identity.json(device_id) + signing.pem(公钥指纹)。
+    // 齐备则远端 Join 走验签链；identity.json 缺失 / PEM 缺失或损坏 →
+    // warn 退 PSK-only（行为 = 旧版无 identity.json）。
     if let Some(dir) = &config_dir {
-        match mediaservo_host::identity::load_identity(dir) {
-            Ok(Some(cred)) => {
-                cfg.device = Some(cred.clone());
-                tracing::info!(device_id = %cred.device_id, "已加载设备身份");
+        match mediaservo_host::identity::load_device_identity(dir) {
+            Ok(Some(ident)) => {
+                tracing::info!(device_id = %ident.device_id, pubkey = %ident.pubkey_b64, "已加载设备身份（公钥指纹准入）");
+                cfg.device = Some(ident);
             }
-            Ok(None) => tracing::warn!(path = %dir.join(mediaservo_host::identity::IDENTITY_FILE).display(), "设备身份缺失 — 远端连接走 PSK 认证（G2 起需设备凭证）"),
-            Err(e) => tracing::warn!("{e} — 远端连接走 PSK 认证"),
+            Ok(None) => tracing::warn!(path = %dir.join(mediaservo_host::identity::IDENTITY_FILE).display(), "设备身份缺失 — 远端连接走 PSK 认证"),
+            Err(e) => tracing::warn!("{e} — 设备身份不可用，远端连接走 PSK 认证"),
         }
     } else {
         tracing::warn!("未提供 --config（实例目录不可推导）— 设备身份未加载，远端连接走 PSK 认证");

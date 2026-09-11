@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
-use mediaservo_link::{RetryConfig, SignalClient, SignalEvent, SignalSession};
+use mediaservo_link::{LinkError, RetryConfig, SignalClient, SignalEvent, SignalSession};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
@@ -56,9 +56,10 @@ pub struct GatewayConfig {
     pub remote_url: String,
     /// PSK（每连接重认证，B1 语义）。
     pub psk: String,
-    /// G4 设备凭证（D-H11）：Some = 远端 Join 携带 device_id/device_secret（additive）；
-    /// None = PSK 路径（G2 切换校验前保持）。host-agent 从 identity.json 加载。
-    pub device: Option<mediaservo_link::DeviceCredential>,
+    /// device-enroll 设备身份（公钥指纹）：Some = 远端 Join 携带 device_pubkey 走验签链
+    /// （未批准 = EnrollPending → 「待管理员批准」日志 + 既有退避）；None = PSK 路径。
+    /// host-agent 从 identity.json + etc/link/signing.pem 装配。
+    pub device: Option<mediaservo_link::DeviceIdentity>,
     /// 整车房间（agent 单次 join 的房间）。
     pub room: String,
     /// 远端连接重试配置（断线重连复用）。
@@ -690,9 +691,9 @@ async fn remote_loop(
     mut remote_rx: mpsc::UnboundedReceiver<SignalingMessage>,
 ) {
     let mut client = SignalClient::new(&config.remote_url, &config.psk, &config.room, PeerRole::Host);
-    // G4: 设备凭证随 Join 携带（additive；None = PSK 路径）
-    if let Some(cred) = config.device.clone() {
-        client = client.with_device_credentials(cred);
+    // device-enroll T7: 设备身份随 Join 携带 device_pubkey（None = PSK 路径）
+    if let Some(ident) = config.device.clone() {
+        client = client.with_device_identity(ident);
     }
     // H6（时机修正）: 上游"断开→恢复"的重连标记——通知只在重连成功后下发。
     // 断线瞬间通知会让 streamer 在 server 宕机窗口 1-2s 一轮重启 → 触发 oxmgr
@@ -701,6 +702,11 @@ async fn remote_loop(
     loop {
         let session = match client.connect_with_retry(config.retry).await {
             Ok(s) => s,
+            Err(LinkError::EnrollPending { device_id }) => {
+                tracing::warn!("设备待管理员批准 device_id={device_id}（公钥已入 pending），10s 后重连");
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                continue;
+            }
             Err(e) => {
                 tracing::error!("远端信令连接失败: {e}，10s 后重试");
                 tokio::time::sleep(Duration::from_secs(10)).await;

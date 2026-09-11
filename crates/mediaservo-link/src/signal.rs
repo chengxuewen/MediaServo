@@ -13,6 +13,8 @@
 //!
 //! D2 网关模式（`SignalClient::new_gateway`）：本地 wire 包 `LocalEnvelope`
 //! （无 PSK 挑战——网关本地侧不认证，整车 PSK 在 agent 的远端连接）。
+use base64::Engine as _;
+use ed25519_dalek::Signer as _;
 use futures_util::{SinkExt, StreamExt};
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
 use serde::{Deserialize, Serialize};
@@ -87,6 +89,9 @@ pub struct SignalClient {
     /// G4 设备凭证（D-H11）：Some = RoomJoin 携带 device_id/device_secret（additive），
     /// G2 起 server 校验；None = PSK 认证路径（现状保持）。
     device: Option<DeviceCredential>,
+    /// device-enroll T7：公钥指纹身份（Some = Join 带 device_pubkey 走验签链，
+    /// 优先于 device）。gateway/host-agent 装配透传。
+    identity: Option<DeviceIdentity>,
 }
 
 /// 设备凭证（identity.json 格式 + RoomJoin wire 载体，G4/D-H13）。
@@ -98,6 +103,58 @@ pub struct DeviceCredential {
     pub device_secret: String,
 }
 
+/// device-enroll 验签链单跳超时（design §1：challenge 5s 未达/未答 = 断连错误）。
+const DEVICE_AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// 运行期设备身份（device-enroll T6/T7，公钥指纹路径）：gateway 持有；RoomJoin 携带
+/// `pubkey_b64`，DeviceAuthChallenge 以 [`DeviceIdentity::sign_device_auth`] 应答。
+/// 与 secret 形 [`DeviceCredential`] 共存一个周期（D-E3）。
+#[derive(Clone)]
+pub struct DeviceIdentity {
+    /// 设备 ID（identity.json `device_id`，server 注册键）。
+    pub device_id: String,
+    /// Ed25519 私钥（`etc/link/signing.pem` PKCS#8 读出，D-E1 一钥两用）。
+    pub signing: ed25519_dalek::SigningKey,
+    /// 验签公钥 32B 的 base64 standard 形（无换行）= RoomJoin.device_pubkey wire 值。
+    pub pubkey_b64: String,
+}
+
+impl DeviceIdentity {
+    /// 由私钥构建并派生公钥指纹。
+    pub fn new(device_id: impl Into<String>, signing: ed25519_dalek::SigningKey) -> Self {
+        let pubkey_b64 = base64::engine::general_purpose::STANDARD
+            .encode(signing.verifying_key().to_bytes());
+        Self {
+            device_id: device_id.into(),
+            signing,
+            pubkey_b64,
+        }
+    }
+
+    /// 字节合同（design §3）：sig = base64( Ed25519::sign( nonce_raw(32B) ‖ device_id ‖ room_id ) )。
+    /// 交叉复验锚 = server devices.rs::sig_vector（同常量必出同 sig）。
+    pub fn sign_device_auth(&self, nonce_raw: &[u8], room_id: &str) -> String {
+        let mut msg =
+            Vec::with_capacity(nonce_raw.len() + self.device_id.len() + room_id.len());
+        msg.extend_from_slice(nonce_raw);
+        msg.extend_from_slice(self.device_id.as_bytes());
+        msg.extend_from_slice(room_id.as_bytes());
+        base64::engine::general_purpose::STANDARD
+            .encode(self.signing.sign(&msg).to_bytes())
+    }
+}
+
+impl std::fmt::Debug for DeviceIdentity {
+    /// 私钥不落日志：signing 以占位呈现。
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeviceIdentity")
+            .field("device_id", &self.device_id)
+            .field("pubkey_b64", &self.pubkey_b64)
+            .field("signing", &"<redacted>")
+            .finish()
+    }
+}
+
 impl SignalClient {
     pub fn new(url: &str, psk: &str, room_id: &str, role: PeerRole) -> Self {
         Self {
@@ -107,6 +164,7 @@ impl SignalClient {
             role,
             gateway_src: None,
             device: None,
+            identity: None,
         }
     }
 
@@ -120,12 +178,20 @@ impl SignalClient {
             role,
             gateway_src: Some(src.to_string()),
             device: None,
+            identity: None,
         }
     }
 
     /// 附加设备凭证（G4）：RoomJoin 携带 device_id/device_secret（additive，PSK 并存）。
     pub fn with_device_credentials(mut self, device: DeviceCredential) -> Self {
         self.device = Some(device);
+        self
+    }
+
+    /// 附加设备身份（device-enroll T7）：RoomJoin 携带 device_pubkey，challenge 到达时
+    /// 以私钥签 DeviceAuthResponse；未批准（手动档）→ `LinkError::EnrollPending`。
+    pub fn with_device_identity(mut self, identity: DeviceIdentity) -> Self {
+        self.identity = Some(identity);
         self
     }
 
@@ -168,9 +234,13 @@ impl SignalClient {
             room_id: self.room_id.clone(),
             peer_role: self.role.clone(),
             stream_id: None,
-            device_id: self.device.as_ref().map(|d| d.device_id.clone()),
+            device_id: self
+                .identity
+                .as_ref()
+                .map(|i| i.device_id.clone())
+                .or_else(|| self.device.as_ref().map(|d| d.device_id.clone())),
             device_secret: self.device.as_ref().map(|d| d.device_secret.clone()),
-            device_pubkey: None,
+            device_pubkey: self.identity.as_ref().map(|i| i.pubkey_b64.clone()),
         };
         let (join_json, unwrap) = match &self.gateway_src {
             Some(src) => (
@@ -188,24 +258,24 @@ impl SignalClient {
             .send(Message::Text(join_json.into()))
             .await
             .map_err(|e| LinkError::Signal(format!("send RoomJoin: {e}")))?;
-        let joined = receiver
-            .next()
-            .await
-            .ok_or_else(|| LinkError::Signal("connection closed during room join".into()))?
-            .map_err(|e| LinkError::Signal(format!("RoomJoin read: {e}")))?;
-        let joined = match joined {
-            Message::Text(t) => {
-                if unwrap {
-                    let env: LocalEnvelope = serde_json::from_str(&t)
-                        .map_err(|e| LinkError::Signal(format!("parse envelope response: {e}")))?;
-                    env.msg
-                } else {
-                    serde_json::from_str::<SignalingMessage>(&t)
-                        .map_err(|e| LinkError::Signal(format!("parse RoomJoined: {e}")))? 
-                }
+        let joined = if self.identity.is_some() {
+            // device-enroll §1：pubkey 形 Join 后每一跳响应（challenge/终态）≤5s，静默 = 断连错误
+            tokio::time::timeout(DEVICE_AUTH_TIMEOUT, read_join_response(&mut receiver, unwrap))
+                .await
+                .map_err(|_| {
+                    LinkError::Signal("device auth: no server response within 5s after RoomJoin".into())
+                })?
+                ?
+        } else {
+            read_join_response(&mut receiver, unwrap).await?
+        };
+        let joined = match (&self.identity, &joined) {
+            (Some(_), SignalingMessage::DeviceAuthChallenge { .. })
+            | (Some(_), SignalingMessage::DeviceAuthPending { .. }) => {
+                self.run_device_auth(joined, &mut sender, &mut receiver, unwrap)
+                    .await?
             }
-            Message::Close(_) => return Err(LinkError::Signal("closed during room join".into())),
-            _ => return Err(LinkError::Signal("unexpected RoomJoined response".into())),
+            _ => joined,
         };
         match joined {
             SignalingMessage::RoomJoined { room_id, peer_id } => {
@@ -237,6 +307,71 @@ impl SignalClient {
         }
     }
 
+    /// 验签应答链（device-enroll §4 修订）：challenge→签发 DeviceAuthResponse→（再）读，
+    /// RoomJoined/Error 等终态放行给调用方 match；DeviceAuthPending → typed EnrollPending。
+    /// 调用方保证 identity = Some；每跳 5s 超时 = 断连错误（§1）。
+    async fn run_device_auth(
+        &self,
+        first: SignalingMessage,
+        sender: &mut futures_util::stream::SplitSink<WsStream, Message>,
+        receiver: &mut futures_util::stream::SplitStream<WsStream>,
+        unwrap: bool,
+    ) -> Result<SignalingMessage, LinkError> {
+        let identity = self
+            .identity
+            .as_ref()
+            .ok_or_else(|| LinkError::Signal("device auth without identity (internal)".into()))?;
+        let mut msg = first;
+        loop {
+            msg = match msg {
+                SignalingMessage::DeviceAuthChallenge { nonce } => {
+                    let nonce_raw = base64::engine::general_purpose::STANDARD
+                        .decode(&nonce)
+                        .map_err(|e| LinkError::Signal(format!("challenge nonce base64: {e}")))?;
+                    if nonce_raw.len() != 32 {
+                        return Err(LinkError::Signal(format!(
+                            "challenge nonce must be 32 bytes, got {}",
+                            nonce_raw.len()
+                        )));
+                    }
+                    let resp = SignalingMessage::DeviceAuthResponse {
+                        room_id: self.room_id.clone(),
+                        sig: identity.sign_device_auth(&nonce_raw, &self.room_id),
+                    };
+                    let json = match &self.gateway_src {
+                        Some(src) => serde_json::to_string(&LocalEnvelope {
+                            src: src.clone(),
+                            msg: resp,
+                        }),
+                        None => serde_json::to_string(&resp),
+                    }
+                    .map_err(|e| {
+                        LinkError::Signal(format!("serialize DeviceAuthResponse: {e}"))
+                    })?;
+                    sender
+                        .send(Message::Text(json))
+                        .await
+                        .map_err(|e| LinkError::Signal(format!("send DeviceAuthResponse: {e}")))?;
+                    tokio::time::timeout(
+                        DEVICE_AUTH_TIMEOUT,
+                        read_join_response(receiver, unwrap),
+                    )
+                    .await
+                    .map_err(|_| {
+                        LinkError::Signal(
+                            "device auth: no server response within 5s after DeviceAuthResponse"
+                                .into(),
+                        )
+                    })??
+                }
+                SignalingMessage::DeviceAuthPending { device_id } => {
+                    return Err(LinkError::EnrollPending { device_id });
+                }
+                other => return Ok(other),
+            };
+        }
+    }
+
     /// 连接并自动重试（指数退避 + ±25% jitter）。
     ///
     /// 每次重试都走完整 `connect()`（WS 连接 → PSK 认证 → 入房），
@@ -261,6 +396,7 @@ impl SignalClient {
                     tokio::time::sleep(sleep).await;
                     attempt += 1;
                 }
+                Err(e @ LinkError::EnrollPending { .. }) => return Err(e),
                 Err(e) => {
                     return Err(LinkError::Signal(format!(
                         "connect after {} retries: {e}",
@@ -328,6 +464,32 @@ impl SignalSession {
         drop(self.send_tx); // 触发后台任务退出
         let _ = self.task.await;
         Ok(())
+    }
+}
+
+/// RoomJoin 首响应：一帧 WS 读 +（信封）JSON 解析（逻辑自 connect 原路径原样迁入）。
+async fn read_join_response(
+    receiver: &mut futures_util::stream::SplitStream<WsStream>,
+    unwrap: bool,
+) -> Result<SignalingMessage, LinkError> {
+    let joined = receiver
+        .next()
+        .await
+        .ok_or_else(|| LinkError::Signal("connection closed during room join".into()))?
+        .map_err(|e| LinkError::Signal(format!("RoomJoin read: {e}")))?;
+    match joined {
+        Message::Text(t) => {
+            if unwrap {
+                let env: LocalEnvelope = serde_json::from_str(&t)
+                    .map_err(|e| LinkError::Signal(format!("parse envelope response: {e}")))?;
+                Ok(env.msg)
+            } else {
+                serde_json::from_str::<SignalingMessage>(&t)
+                    .map_err(|e| LinkError::Signal(format!("parse RoomJoined: {e}")))
+            }
+        }
+        Message::Close(_) => Err(LinkError::Signal("closed during room join".into())),
+        _ => Err(LinkError::Signal("unexpected RoomJoined response".into())),
     }
 }
 
