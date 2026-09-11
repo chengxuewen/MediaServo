@@ -132,6 +132,10 @@ export interface AdminDevice { device_id: string; }
 export interface AdminDeviceListResponse { devices: AdminDevice[]; count: number; }
 export interface AdminDeviceSecret { device_id: string; secret: string; secret_hash: string; note: string; }
 export interface AdminDeviceRevoked { device_id: string; revoked: boolean; }
+// device-enroll §5.4: 待批准队列（验签过、未入册；内存表重启即清）
+export interface PendingDevice { device_id: string; public_key: string; first_seen_ms: number; verified: boolean; }
+export interface PendingDeviceListResponse { pending: PendingDevice[]; count: number; }
+export interface PendingDeviceApproved { device_id: string; public_key: string; name: string | null; note: string; }
 export type AccountRole = 'viewer' | 'operator' | 'admin' | 'dispatcher';
 export interface AdminAccount { username: string; role: string; vehicles: string[]; }
 export interface AdminAccountListResponse { accounts: AdminAccount[]; count: number; }
@@ -184,6 +188,17 @@ export async function revokeDevice(deviceId: string): Promise<AdminDeviceRevoked
 
 export async function resetDeviceSecret(deviceId: string): Promise<AdminDeviceSecret> {
   return request(`/devices/${encodeURIComponent(deviceId)}/reset-secret`, { method: 'POST' });
+}
+
+// ── 待批准队列（device-enroll 手动档）──────────────────────────────────
+export async function getPendingDevices(): Promise<PendingDeviceListResponse> {
+  return request('/devices/pending');
+}
+
+export async function approvePendingDevice(deviceId: string, name?: string): Promise<PendingDeviceApproved> {
+  const body: { device_id: string; name?: string } = { device_id: deviceId };
+  if (name && name.trim()) body.name = name.trim();
+  return request('/devices/approve', { method: 'POST', body: JSON.stringify(body) });
 }
 
 // ── 账号管理（AdminState）──────────────────────────────────────────────

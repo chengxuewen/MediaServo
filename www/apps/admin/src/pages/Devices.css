@@ -7,6 +7,13 @@
 .device-admin-name { font-weight: 600; }
 .device-admin-actions { display: flex; gap: 0.5rem; }
 
+/* device-enroll: 待批准队列 Card（页顶；行布局仿 .device-admin-row） */
+.pending-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.pending-row { display: flex; align-items: center; gap: 0.75rem; background: #fff; border-radius: 8px; padding: 0.75rem 1rem; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.pending-id { font-family: monospace; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pending-seen { font-size: 0.75rem; color: #888; white-space: nowrap; }
+.pending-name-input { flex: 0 1 10rem; min-width: 0; padding: 0.25rem 0.5rem; font-size: 0.8rem; border: 1px solid #ddd; border-radius: 4px; outline: none; }
+
 /* 中性动作按钮（.btn-sm 语义为危险红）— Design System token: primary #4361ee */
 .btn-secret { padding: 0.25rem 0.75rem; font-size: 0.75rem; border: 1px solid #4361ee; background: none; color: #4361ee; border-radius: 4px; cursor: pointer; }
 .btn-secret:hover { background: #4361ee; color: #fff; }

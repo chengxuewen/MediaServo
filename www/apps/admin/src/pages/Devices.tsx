@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
-import { getAdminDevices, registerDevice, revokeDevice, resetDeviceSecret } from '../api/client';
-import type { AdminDevice } from '../api/client';
+import { getAdminDevices, registerDevice, revokeDevice, resetDeviceSecret, getPendingDevices, approvePendingDevice } from '../api/client';
+import type { AdminDevice, PendingDevice } from '../api/client';
 import Modal from '../components/Modal';
 import './Devices.css';
-import { MonitorCog, AlertTriangle, Check } from 'lucide-react';
+import { MonitorCog, AlertTriangle, Check, Inbox } from 'lucide-react';
+
+// 首见时间 → 相对时间（刻度仿 Vehicles fmtUptime）
+function fmtAgo(firstSeenMs: number): string {
+  const secs = Math.max(0, Math.floor((Date.now() - firstSeenMs) / 1000));
+  if (secs < 60) return `${secs}s 前`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m 前`;
+  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m 前`;
+}
 
 export default function Devices() {
   const [devices, setDevices] = useState<AdminDevice[]>([]);
@@ -26,6 +34,12 @@ export default function Devices() {
   // 吊销/重置进行中的行（防重复点击）
   const [busy, setBusy] = useState<string | null>(null);
 
+  // device-enroll: 待批准队列（手动档；内存表 D-E5，重启即清）
+  const [pending, setPending] = useState<PendingDevice[]>([]);
+  const [pendingError, setPendingError] = useState<string | null>(null);
+  const [pendingNames, setPendingNames] = useState<Record<string, string>>({});
+  const [pendingBusy, setPendingBusy] = useState<string | null>(null);
+
   const fetchDevices = useCallback(async () => {
     try {
       const data = await getAdminDevices();
@@ -39,6 +53,23 @@ export default function Devices() {
   }, []);
 
   useEffect(() => { fetchDevices(); }, [fetchDevices]);
+
+  const fetchPending = useCallback(async () => {
+    try {
+      const data = await getPendingDevices();
+      setPending(data.pending);
+      setPendingError(null);
+    } catch (e) {
+      setPendingError(e instanceof Error ? e.message : 'Failed to fetch pending devices');
+    }
+  }, []);
+
+  useEffect(() => { fetchPending(); }, [fetchPending]);
+  // ponytail: 5s 轮询（与 useDevices/Vehicles 同节奏）
+  useEffect(() => {
+    const interval = setInterval(fetchPending, 5000);
+    return () => clearInterval(interval);
+  }, [fetchPending]);
 
   const openRegister = () => {
     setRegisterOpen(true);
@@ -96,6 +127,21 @@ export default function Devices() {
     }
   };
 
+  const handleApprove = async (deviceId: string) => {
+    if (pendingBusy) return;
+    setPendingBusy(deviceId);
+    try {
+      const resp = await approvePendingDevice(deviceId, pendingNames[deviceId]);
+      setPendingNames((prev) => { const next = { ...prev }; delete next[deviceId]; return next; });
+      setActionMsg({ type: 'success', text: `${resp.device_id} 已批准 — ${resp.note}` });
+      fetchPending();
+    } catch (e) {
+      setActionMsg({ type: 'error', text: e instanceof Error ? e.message : 'Approve failed' });
+    } finally {
+      setPendingBusy(null);
+    }
+  };
+
   const handleCopy = async () => {
     if (!secretModal) return;
     try {
@@ -112,6 +158,34 @@ export default function Devices() {
 
   return (
     <div className="devices">
+      <div className="pending-card">
+        <h2 className="section-title"><Inbox size={14} /> 待批准设备</h2>
+        {pendingError && <p className="token-status error">{pendingError}</p>}
+        {pending.length === 0 ? (
+          <p className="empty">暂无待批准设备</p>
+        ) : (
+          <div className="pending-list">
+            {pending.map((p) => (
+              <div key={p.device_id} className="pending-row">
+                <span className="pending-id">{p.device_id}</span>
+                <span className="pending-seen">首见 {fmtAgo(p.first_seen_ms)}</span>
+                <input
+                  className="pending-name-input"
+                  placeholder="名称（可选）"
+                  value={pendingNames[p.device_id] ?? ''}
+                  onChange={(e) => setPendingNames((prev) => ({ ...prev, [p.device_id]: e.target.value }))}
+                />
+                <button
+                  className="btn-secret"
+                  disabled={pendingBusy === p.device_id}
+                  onClick={() => handleApprove(p.device_id)}
+                >批准</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="devices-head">
         <h2 className="section-title">Registered Devices</h2>
         <button className="btn" onClick={openRegister}>+ Register Device</button>
