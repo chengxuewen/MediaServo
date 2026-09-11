@@ -21,12 +21,13 @@ defaults:
     stream_mode: smooth    # 全局遥控档；监控取证流在条目上特化 quality
     keyframe_interval: 2
   sources:
-    mode: generator        # 全链路验证机型；真车端删此行逐源配 camera
+    # 仅平台/调参键可公共化（backend/width/height/fps/reconnect_ms）；
+    # mode/input 属源身份必须逐条目写——全局 generator 下新源忘配会静默出彩条。
     fps: 30
 # defaults.streams 可用键 = streams[] 的全部可选键：
 #   codec / encoder_backend / bitrate_kbps / stream_mode / min_bitrate_kbps / keyframe_interval
-# defaults.sources 可用键 = sources[] 除 id 外的全部可选键：
-#   mode / backend / input / width / height / fps / reconnect_ms
+# defaults.sources 可用键 = 平台/调参键（身份键 mode/input 不入，写了 deploy 拒）：
+#   backend / width / height / fps / reconnect_ms
 
 # 视频源声明（替代旧 cameras 键；旧 "cameras:" 仍可解析——`#[serde(alias = "cameras")]`
 # 兼容已部署配置，无破坏）。

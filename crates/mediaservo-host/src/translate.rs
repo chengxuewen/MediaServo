@@ -147,19 +147,19 @@ struct StreamDefaults {
     keyframe_interval: Option<u32>,
 }
 
-/// `defaults.sources` —— 除 `id` 外与 [`Source`] 同形（旧 `source` 兼容键同理不入）。
+/// `defaults.sources` —— 平台/调参键（width/height/fps/reconnect_ms/backend）。
+/// **身份/拓扑键不入公共层**（D282 修订裁决）：`mode`（源类型）与 `input`（源地址）
+/// 属每源身份属性，写在条目上——公共化会让"新源忘配身份"静默落入错误形态
+/// （如全局 generator 下新相机漏写 mode → 彩条顶替真实画面）。写了直接 deny 报错。
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SourceDefaults {
-    #[serde(default)]
-    mode: Option<SourceMode>,
-    /// 镜像 [`Source`] 的声明位（采集后端当前由 capturer 自动选型，键值未消费——
-    /// 公共层保持与条目同形，避免"条目能写、defaults 不能写"的割裂面）。
+    /// 平台统一采集后端声明——整台机同后端是合法公共语义（x86 全 v4l2 / Jetson 全 mipi）。
+    /// 注：**预留位**（条目层同口径）——当前 capturer 按 mode+input 自动选型，v4l2 为
+    /// 唯一实现；mipi 后端接线时条目+公共层一并生效。
     #[serde(default)]
     #[allow(dead_code)]
     backend: Option<String>,
-    #[serde(default)]
-    input: Option<String>,
     #[serde(default)]
     width: Option<u32>,
     #[serde(default)]
@@ -768,12 +768,12 @@ pub fn camera_configs(cfg: &str) -> Result<Vec<SourceConfig>, String> {
         }
         out.push(SourceConfig {
             id: c.id,
-            // 条目与 defaults 均无 mode → generator（原 stub 生成语义）
-            mode: c.mode.or(d.mode).unwrap_or(SourceMode::Generator),
+            // mode 身份键仅条目层（D282 修订）；均无 → generator（原 stub 生成语义，存量兼容）
+            mode: c.mode.unwrap_or(SourceMode::Generator),
             width: c.width.or(d.width).unwrap_or(DEFAULT_SOURCE_WIDTH),
             height: c.height.or(d.height).unwrap_or(DEFAULT_SOURCE_HEIGHT),
             fps,
-            input: c.input.or_else(|| d.input.clone()),
+            input: c.input,  // 源地址属身份键，仅条目层（D282 修订）
             reconnect_ms: c.reconnect_ms.or(d.reconnect_ms),
         });
     }
@@ -1425,7 +1425,7 @@ streams:
 
     // ── host-stream-defaults T1: defaults 分层合并（逐条 > defaults > 内置） ──
 
-    /// 全键 defaults（streams 6 键 + sources 7 键）——优先级矩阵的"公共层"输入。
+    /// 全键 defaults（streams 6 键 + sources 平台键 5 个）——优先级矩阵的"公共层"输入。
     const ALL_DEFAULTS: &str = r#"
 defaults:
   streams:
@@ -1436,9 +1436,7 @@ defaults:
     min_bitrate_kbps: 300
     keyframe_interval: 5
   sources:
-    mode: "generator"
     backend: "v4l2"
-    input: "bus://default"
     width: 640
     height: 480
     fps: 24
@@ -1469,12 +1467,22 @@ defaults:
         assert_eq!(s.min_bitrate_kbps, Some(300));
         assert_eq!(s.keyframe_interval, Some(5));
         let c = &camera_configs(&defaults_sources("")).unwrap()[0];
-        assert_eq!(c.mode, SourceMode::Generator);
+        assert_eq!(c.mode, SourceMode::Generator, "mode 身份键不入 defaults——条目缺省落内置");
         assert_eq!(c.width, 640);
         assert_eq!(c.height, 480);
         assert_eq!(c.fps, 24);
-        assert_eq!(c.input.as_deref(), Some("bus://default"));
+        assert_eq!(c.input, None, "input 身份键不入 defaults");
         assert_eq!(c.reconnect_ms, Some(4000));
+    }
+
+    #[test]
+    fn identity_keys_are_denied_in_defaults_sources() {
+        // D282 修订：mode/input 属源身份——误写公共层必须 deploy 期报错而非静默忽略。
+        for bad in ["mode: \"generator\"", "input: \"/dev/video0\""] {
+            let cfg = format!("sources:\n  - id: \"cam0\"\n    mode: camera\ndefaults:\n  sources:\n    {bad}\nstreams: []\n");
+            let e = camera_configs(&cfg).unwrap_err();
+            assert!(e.contains("unknown field"), "deny 应点名未知字段: {e}");
+        }
     }
 
     #[test]

@@ -732,3 +732,4 @@ install                        → 改名提示 + exit 2（退役）
 ### 2026-09-10: host-stream-defaults（D282，实环全绿）
 - defaults:{streams,sources} 三层合并（两单点解析器/deny 仅子结构）+ smooth 地板 (fps*100/30).max(50) + 缺省 h264 + auto×h264→software（PIT-156 根治）；子两笔 ae9f8d9/c8d0e5e（deep worker 58min，76+11 测试/0 新 clippy，顺手清 1 存量红）。
 - 实环：T4 等价钉逐字节等+特化精准；T5 200k 墙 164kbps@30.4 钉住 720→540 让位零连坐（evidence 主仓）。踩坑入册 PIT-189（deploy 旧 bin 静默渲染）/PIT-190（apply=受管非纯渲染）；weaknet 定向流名=房间实名 vehicle_<stream>。
+- D282 同日修订（用户二审）：defaults.sources 收窄=平台/调参键（backend 保留——整机同后端合法公共语义，钉预留位注释）；mode/input 摘除回条目（身份键公共化=新源忘配静默错形态，deny 负例焊死）。77+11 测试绿、out/host 迁移后 oxfile 逐字节零漂移。

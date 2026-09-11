@@ -1352,7 +1352,7 @@ mod instance_probe_tests {
         // 合法集门（D282）——模板写错键/错值必须在本单测红，而不是用户 init 后 deploy 挂。
         mediaservo_host::translate::validate(HOST_TOML_TEMPLATE).expect("host.yaml.template 必须通过校验");
         let cams = mediaservo_host::translate::camera_configs(HOST_TOML_TEMPLATE).unwrap();
-        assert_eq!(cams[0].mode, mediaservo_host::translate::SourceMode::Camera, "逐条 mode 优先于 defaults");
+        assert_eq!(cams[0].mode, mediaservo_host::translate::SourceMode::Camera, "mode 身份键逐条目显式（D282 修订：不入 defaults）");
         assert_eq!(cams[1].fps, 30, "test 源走 defaults.sources.fps");
         let s = &mediaservo_host::translate::stream_configs(HOST_TOML_TEMPLATE).unwrap()[0];
         assert_eq!(s.codec, "h264", "缺省编码 h264（D282）");
