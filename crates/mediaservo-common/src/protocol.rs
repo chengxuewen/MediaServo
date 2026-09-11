@@ -28,6 +28,11 @@ pub enum SignalingMessage {
         device_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         device_secret: Option<String>,
+        /// device-enroll 公钥准入（additive，D-E3 与 secret 共存一周期）：base64 32B Ed25519
+        /// verifying key，与 device_id 同现同缺；携带时触发 server 验签挑战链（design §5.2）。
+        /// 缺省 = 旧 secret/PSK 路径逐字节不变；旧 server 忽略未知字段 = 不劣化。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        device_pubkey: Option<String>,
     },
 
     /// Room join acknowledged by Server.
@@ -305,6 +310,26 @@ pub enum SignalingMessage {
         room_id: String,
     },
 
+    /// device-enroll §2 (server→host): 验签挑战。nonce = base64 32B 随机 (OsRng)；
+    /// 每连接 0..1 次，仅对带 device_pubkey 的 RoomJoin 发出（secret 形/PSK 路径不发）。
+    DeviceAuthChallenge {
+        nonce: String,
+    },
+
+    /// device-enroll §2 (host→server): 挑战应答。
+    /// 字节合同: sig = base64( Ed25519::sign( nonce_raw(32B) ‖ device_id ‖ room_id ) )，
+    /// 钉死测试见 server devices.rs::sig_vector（host 侧批3 交叉复验同向量，D-E7 绑房防跨用）。
+    DeviceAuthResponse {
+        room_id: String,
+        sig: String,
+    },
+
+    /// device-enroll §2 (server→host): 手动档验签过但未批准（入 pending）。
+    /// 设备沿用既有 retry 退避重连等待批准（日志「待管理员批准」）。
+    DeviceAuthPending {
+        device_id: String,
+    },
+
     // ponytail: add frame ack/retransmit when reliability matters
 }
 
@@ -470,6 +495,7 @@ mod tests {
             stream_id: None,
             device_id: None,
             device_secret: None,
+            device_pubkey: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"room_join""#));
@@ -488,6 +514,7 @@ mod tests {
             stream_id: Some("stream-42".into()),
             device_id: Some("ms-001122334455".into()),
             device_secret: Some("s3cr3t".into()),
+            device_pubkey: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"room_join""#));
@@ -506,6 +533,90 @@ mod tests {
                 assert_eq!(device_secret.as_deref(), Some("s3cr3t"));
             }
             _ => panic!("expected RoomJoin"),
+        }
+    }
+
+    #[test]
+    fn roundtrip_room_join_with_device_pubkey() {
+        let msg = SignalingMessage::RoomJoin {
+            room_id: "room-1".into(),
+            peer_role: PeerRole::Host,
+            stream_id: None,
+            device_id: Some("ms-0a1b2c3d4e5f".into()),
+            device_secret: None,
+            // seed=bytes(0..32) 派生的真 vk，与 devices.rs sig_vector 测试同值（跨 crate 锚）
+            device_pubkey: Some("A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=".into()),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""device_pubkey":"A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=""#));
+        // pubkey 形与 secret 互斥：secret None 不出 wire
+        assert!(!json.contains("device_secret"));
+
+        match serde_json::from_str::<SignalingMessage>(&json).unwrap() {
+            SignalingMessage::RoomJoin { device_id, device_pubkey, .. } => {
+                assert_eq!(device_id.as_deref(), Some("ms-0a1b2c3d4e5f"));
+                assert_eq!(
+                    device_pubkey.as_deref(),
+                    Some("A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=")
+                );
+            }
+            _ => panic!("expected RoomJoin"),
+        }
+    }
+
+    #[test]
+    fn room_join_without_pubkey_omits_field_on_wire() {
+        // additive 钉①：None → JSON 不含 device_pubkey 键（旧 server 无感知）
+        let msg = SignalingMessage::RoomJoin {
+            room_id: "room-1".into(),
+            peer_role: PeerRole::Host,
+            stream_id: None,
+            device_id: Some("ms-0a1b2c3d4e5f".into()),
+            device_secret: Some("s3cr3t".into()),
+            device_pubkey: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(!json.contains("device_pubkey"));
+
+        // additive 钉②：旧 wire（缺键 JSON）照 parse = 新 server 兼容旧 host（升级序先 server 后 host）
+        let old_wire = r#"{"type":"room_join","room_id":"room-1","peer_role":"host","device_id":"ms-0a1b2c3d4e5f","device_secret":"s3cr3t"}"#;
+        match serde_json::from_str::<SignalingMessage>(old_wire).unwrap() {
+            SignalingMessage::RoomJoin { device_pubkey, device_secret, .. } => {
+                assert_eq!(device_pubkey, None);
+                assert_eq!(device_secret.as_deref(), Some("s3cr3t"));
+            }
+            _ => panic!("expected RoomJoin"),
+        }
+    }
+
+    #[test]
+    fn roundtrip_device_auth_variants() {
+        let cases = [
+            (
+                SignalingMessage::DeviceAuthChallenge {
+                    nonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+                },
+                r#""type":"device_auth_challenge""#,
+            ),
+            (
+                SignalingMessage::DeviceAuthResponse {
+                    room_id: "vehicle_cam0".into(),
+                    sig: "c2ln".into(),
+                },
+                r#""type":"device_auth_response""#,
+            ),
+            (
+                SignalingMessage::DeviceAuthPending {
+                    device_id: "ms-0a1b2c3d4e5f".into(),
+                },
+                r#""type":"device_auth_pending""#,
+            ),
+        ];
+        for (msg, wire_tag) in cases {
+            let json = serde_json::to_string(&msg).unwrap();
+            assert!(json.contains(wire_tag), "{json}");
+            let reparsed = serde_json::to_string(&serde_json::from_str::<SignalingMessage>(&json).unwrap()).unwrap();
+            assert_eq!(reparsed, json);
         }
     }
 

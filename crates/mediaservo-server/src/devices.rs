@@ -566,4 +566,46 @@ mod tests {
             DeviceRegError::Duplicate
         );
     }
+
+    // ─── device-enroll T2: 签名字节合同（design §3）─────────────────────────────
+    // sig = base64( Ed25519::sign( nonce_raw(32B) ‖ device_id ‖ room_id ) )；验签 verify_strict。
+    // 本向量 = host/server 交叉复验锚：批3 host 侧（T6）以 seed=bytes(0..=31)、
+    // nonce=bytes(0x40..=0x5f)、同 device_id/room_id 复现同一签名。
+
+    #[test]
+    fn sig_vector_binds_nonce_device_room_and_verifies_strict() {
+        use base64::Engine as _;
+        use ed25519_dalek::Signer; // verify_strict = VerifyingKey 内建方法，无需 Verifier trait
+
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
+        let signing = ed25519_dalek::SigningKey::from_bytes(&seed);
+        let vk = signing.verifying_key();
+
+        let nonce: Vec<u8> = (0x40u8..0x60).collect();
+        let device_id = "ms-0a1b2c3d4e5f";
+        let room_id = "vehicle_cam0";
+        let mut msg = nonce.clone();
+        msg.extend_from_slice(device_id.as_bytes());
+        msg.extend_from_slice(room_id.as_bytes());
+
+        // 钉①: vk base64 = devices.yaml public_key 形指纹（与 protocol.rs pubkey 用例同值）
+        assert_eq!(b64.encode(vk.to_bytes()), "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=");
+
+        // 钉②: 字节合同签名钉死（host 批3 交叉复验同向量 = 两侧同 seed/nonce/ids 必出此值）
+        let sig = signing.sign(&msg);
+        assert_eq!(
+            b64.encode(sig.to_bytes()),
+            "Gnz2kGCFH6igsOfv5QW0+8aRyu/lP5ytAa8fJA0CPYP3fIX5UsYr6uTjFjqOEEFBUB2scnDffIZ1WfP9O2ECCg=="
+        );
+
+        // 钉③: 登记 vk 验签过（verify_strict —— §3 防签名 malleability 批注）
+        vk.verify_strict(&msg, &sig).unwrap();
+
+        // 钉④: 换 room_id 重放 = D-E7 跨房间绑定 → 拒
+        let mut other_room = nonce.clone();
+        other_room.extend_from_slice(device_id.as_bytes());
+        other_room.extend_from_slice(b"vehicle_cam1");
+        assert!(vk.verify_strict(&other_room, &sig).is_err());
+    }
 }

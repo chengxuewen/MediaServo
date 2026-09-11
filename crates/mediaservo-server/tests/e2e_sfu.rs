@@ -66,6 +66,7 @@ async fn e2e_sfu_lifecycle() {
             stream_id: None,
             device_id: None,
             device_secret: None,
+            device_pubkey: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -119,6 +120,7 @@ async fn e2e_sfu_lifecycle() {
             stream_id: None,
             device_id: None,
             device_secret: None,
+            device_pubkey: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -203,6 +205,7 @@ async fn e2e_sfu_cleanup_on_disconnect() {
         stream_id: None,
         device_id: None,
         device_secret: None,
+        device_pubkey: None,
     })
     .unwrap();
     ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -270,6 +273,7 @@ async fn e2e_sfu_consume_pipeline() {
             room_id: "sfu-consume-room".into(), peer_role: PeerRole::Host, stream_id: None,
             device_id: None,
             device_secret: None,
+            device_pubkey: None,
         }).unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
         let joined = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
@@ -337,6 +341,7 @@ async fn e2e_sfu_consume_pipeline() {
             room_id: "sfu-consume-room".into(), peer_role: PeerRole::Remote, stream_id: None,
             device_id: None,
             device_secret: None,
+            device_pubkey: None,
         }).unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
         let joined = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
@@ -468,6 +473,7 @@ async fn g3_auth_and_join(ws: &mut KeepAliveWs, room: &str, role: PeerRole) {
         stream_id: None,
         device_id: None,
         device_secret: None,
+        device_pubkey: None,
     })
     .unwrap();
     ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -556,6 +562,7 @@ async fn e2e_sfu_role_enforcement() {
             stream_id: None,
             device_id: Some("ms-car1".into()),
             device_secret: Some("car1-secret".into()),
+            device_pubkey: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -768,6 +775,7 @@ async fn e2e_sfu_role_enforcement() {
             stream_id: None,
             device_id: None,
             device_secret: None,
+            device_pubkey: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -845,6 +853,7 @@ async fn e2e_sfu_data_domain() {
             stream_id: None,
             device_id: Some("ms-car1".into()),
             device_secret: Some("car1-secret".into()),
+            device_pubkey: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -1157,6 +1166,7 @@ async fn e2e_audio_room_device_identity() {
             stream_id: None,
             device_id: Some("ms-car1".into()),
             device_secret: Some("car1-secret".into()),
+            device_pubkey: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -1193,6 +1203,7 @@ async fn e2e_audio_room_device_identity() {
             stream_id: None,
             device_id: Some("ms-car2".into()),
             device_secret: Some("car2-secret".into()),
+            device_pubkey: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();

@@ -32,6 +32,9 @@ serde_json = "1"
 sha2 = "0.10"
 subtle = "2"
 
+# device-enroll 公钥验签（Ed25519；特征组与 host 逐字一致 —— 依赖树零新增）
+ed25519-dalek = { version = "2", features = ["pkcs8", "rand_core", "alloc"] }
+
 # Observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }

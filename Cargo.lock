@@ -4519,6 +4519,7 @@ dependencies = [
  "base64",
  "chrono",
  "dashmap 6.2.1",
+ "ed25519-dalek",
  "futures-util",
  "http",
  "if-addrs",

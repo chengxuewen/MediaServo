@@ -190,6 +190,7 @@ fn protocol_roundtrip_room_join() {
         stream_id: None,
         device_id: None,
         device_secret: None,
+        device_pubkey: None,
     };
     let json = serde_json::to_string(&msg).unwrap();
     let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();

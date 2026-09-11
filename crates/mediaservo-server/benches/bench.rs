@@ -52,6 +52,7 @@ fn main() {
             stream_id: None,
             device_id: None,
             device_secret: None,
+            device_pubkey: None,
         };
         serde_json::to_string(&msg).unwrap();
     });
