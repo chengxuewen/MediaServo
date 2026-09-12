@@ -1,0 +1,17 @@
+{
+  "name": "ack-ok",
+  "kind": "ack",
+  "wire": {
+    "ack": 12,
+    "result": {
+      "ok": true,
+      "channel": "chassis",
+      "seq": 12
+    }
+  },
+  "checks": {
+    "ack": 12,
+    "result.ok": true,
+    "result.channel": "chassis"
+  }
+}

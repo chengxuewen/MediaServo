@@ -1,0 +1,43 @@
+{
+  "name": "transport-created-with-sctp",
+  "kind": "signal",
+  "wire": {
+    "type": "web_rtc_transport_created",
+    "room_id": "r",
+    "peer_id": "p",
+    "transport_id": "t-1",
+    "ice_parameters": {
+      "username_fragment": "ufrag1",
+      "password": "pwd1"
+    },
+    "dtls_parameters": {
+      "fingerprints": [
+        {
+          "algorithm": "sha-256",
+          "value": "AA:BB:CC"
+        }
+      ],
+      "role": "auto"
+    },
+    "ice_candidates": [
+      {
+        "ip": "10.144.0.3",
+        "port": 20000,
+        "protocol": "udp",
+        "foundation": "f1",
+        "priority": 2130000000,
+        "candidateType": "host"
+      }
+    ],
+    "sctp_parameters": {
+      "port": 5000,
+      "maxSendMessageSize": 262144
+    }
+  },
+  "checks": {
+    "type": "web_rtc_transport_created",
+    "transport_id": "t-1",
+    "sctp_parameters.port": 5000,
+    "ice_candidates.0.candidateType": "host"
+  }
+}

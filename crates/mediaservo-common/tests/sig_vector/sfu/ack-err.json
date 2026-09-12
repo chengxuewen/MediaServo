@@ -1,0 +1,14 @@
+{
+  "name": "ack-err",
+  "kind": "ack",
+  "wire": {
+    "ack": 3,
+    "result": {
+      "error": "unknown cmd"
+    }
+  },
+  "checks": {
+    "ack": 3,
+    "result.error": "unknown cmd"
+  }
+}

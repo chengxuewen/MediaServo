@@ -1,0 +1,17 @@
+{
+  "name": "set-preferred-layers",
+  "kind": "signal",
+  "wire": {
+    "type": "set_preferred_layers",
+    "room_id": "vehicle_test",
+    "peer_id": "c-p1",
+    "consumer_id": "cons-1",
+    "spatial_layer": 2,
+    "temporal_layer": 1
+  },
+  "checks": {
+    "type": "set_preferred_layers",
+    "spatial_layer": 2,
+    "temporal_layer": 1
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "get-router-caps-req",
+  "kind": "signal",
+  "wire": {
+    "type": "get_router_rtp_capabilities",
+    "room_id": "vehicle_test"
+  },
+  "checks": {
+    "type": "get_router_rtp_capabilities",
+    "room_id": "vehicle_test"
+  }
+}

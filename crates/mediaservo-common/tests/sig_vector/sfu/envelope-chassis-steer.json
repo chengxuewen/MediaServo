@@ -1,0 +1,16 @@
+{
+  "name": "envelope-chassis-steer",
+  "kind": "envelope",
+  "wire": {
+    "seq": 42,
+    "cmd": "steer",
+    "payload": {
+      "value": 0.35
+    }
+  },
+  "checks": {
+    "seq": 42,
+    "cmd": "steer",
+    "payload.value": 0.35
+  }
+}

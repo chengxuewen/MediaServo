@@ -512,6 +512,53 @@ pub struct SctpStreamParameters {
     pub max_retransmits: Option<u16>,
 }
 
+/// 控制请求信封（client-dual-form T1.3 自 mediaservo-host 提仓——四方单一真源：
+/// host-controller/host-emergency/TS 镜像/夹具共用 `{seq, cmd, payload}` 现网活形）。
+/// 通道边界 = DC label（chassis/gimbal/light），信封内不重复携带通道名；
+/// `seq` 发送方单调递增，回执 `ack` 原样回传配对（D-H3 语义）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlEnvelope {
+    /// 发送方单调递增序号（回执配对用）。
+    pub seq: u64,
+    /// 执行器命令（如 "steer"/"pan"/"on"；语义由执行器实现定义）。
+    pub cmd: String,
+    /// 命令参数（缺省 = 空对象）。
+    #[serde(default = "default_control_payload")]
+    pub payload: serde_json::Value,
+}
+
+/// 控制回执（与请求同通道发回）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlAck {
+    /// 回执对应的请求 seq。
+    pub ack: u64,
+    /// 执行器结果；失败时 `{"error": "<原因>"}`。
+    pub result: serde_json::Value,
+}
+
+impl ControlAck {
+    pub fn ok(seq: u64, result: serde_json::Value) -> Self {
+        Self { ack: seq, result }
+    }
+
+    pub fn err(seq: u64, message: impl Into<String>) -> Self {
+        Self {
+            ack: seq,
+            result: serde_json::json!({ "error": message.into() }),
+        }
+    }
+}
+
+/// 从 DC 字节解析请求信封。
+pub fn parse_envelope(data: &[u8]) -> Result<ControlEnvelope, serde_json::Error> {
+    serde_json::from_slice(data)
+}
+
+/// 缺省 payload = 空对象（`Value::default()` 是 Null，语义不符）。
+fn default_control_payload() -> serde_json::Value {
+    serde_json::json!({})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

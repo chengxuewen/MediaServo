@@ -1,0 +1,15 @@
+{
+  "name": "set-preferred-layers-no-temporal",
+  "kind": "signal",
+  "wire": {
+    "type": "set_preferred_layers",
+    "room_id": "r",
+    "peer_id": "p",
+    "consumer_id": "c",
+    "spatial_layer": 0
+  },
+  "checks": {
+    "type": "set_preferred_layers",
+    "spatial_layer": 0
+  }
+}

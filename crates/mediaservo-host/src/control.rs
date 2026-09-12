@@ -9,51 +9,9 @@
 //! - 通道可靠性（host-controller 创建）：chassis/light reliable-ordered，
 //!   gimbal partial-reliable（D-H3：急停 reliable / 云台 partial-reliable）。
 
-use serde::{Deserialize, Serialize};
-
-/// 控制请求信封（JSON，UTF-8 文本；`payload` 为执行器语义自由体）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ControlEnvelope {
-    /// 发送方单调递增序号（回执配对用）。
-    pub seq: u64,
-    /// 执行器命令（如 "steer"/"pan"/"on"；语义由执行器实现定义）。
-    pub cmd: String,
-    /// 命令参数（缺省 = 空对象）。
-    #[serde(default = "default_payload")]
-    pub payload: serde_json::Value,
-}
-
-/// 控制回执（与请求同通道发回）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ControlAck {
-    /// 回执对应的请求 seq。
-    pub ack: u64,
-    /// 执行器结果；失败时 `{"error": "<原因>"}`。
-    pub result: serde_json::Value,
-}
-
-impl ControlAck {
-    pub fn ok(seq: u64, result: serde_json::Value) -> Self {
-        Self { ack: seq, result }
-    }
-
-    pub fn err(seq: u64, message: impl Into<String>) -> Self {
-        Self {
-            ack: seq,
-            result: serde_json::json!({ "error": message.into() }),
-        }
-    }
-}
-
-/// 从 DC 字节解析请求信封。
-pub fn parse_envelope(data: &[u8]) -> Result<ControlEnvelope, serde_json::Error> {
-    serde_json::from_slice(data)
-}
-
-/// 缺省 payload = 空对象（`Value::default()` 是 Null，语义不符）。
-fn default_payload() -> serde_json::Value {
-    serde_json::json!({})
-}
+/// 信封类型 T1.3 已提 `mediaservo-common::protocol`（四方单一真源：host 两 bin /
+/// TS 镜像 / sig_vector 夹具）——本模块原地 re-export，消费方 import 零改动。
+pub use mediaservo_common::protocol::{parse_envelope, ControlAck, ControlEnvelope};
 
 /// 执行器接口 — 按通道路由命令；返回回执 result（Err → `ControlAck::err`）。
 /// 实现方必须打日志（C15）；错误信息返回给对端（ACK 语义，非静默）。
@@ -90,58 +48,8 @@ impl Actuator for StubActuator {
 mod tests {
     use super::*;
 
-    #[test]
-    fn envelope_roundtrip() {
-        let env = ControlEnvelope {
-            seq: 42,
-            cmd: "steer".into(),
-            payload: serde_json::json!({ "value": 0.35 }),
-        };
-        let json = serde_json::to_string(&env).unwrap();
-        let back: ControlEnvelope = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.seq, 42);
-        assert_eq!(back.cmd, "steer");
-        assert_eq!(back.payload["value"], 0.35);
-    }
-
-    #[test]
-    fn envelope_parse_from_bytes() {
-        let data = br#"{"seq":7,"cmd":"pan","payload":{"deg":90}}"#;
-        let env = parse_envelope(data).unwrap();
-        assert_eq!(env.seq, 7);
-        assert_eq!(env.cmd, "pan");
-        assert_eq!(env.payload["deg"], 90);
-    }
-
-    #[test]
-    fn envelope_payload_defaults_empty() {
-        let env: ControlEnvelope = serde_json::from_str(r#"{"seq":1,"cmd":"on"}"#).unwrap();
-        assert_eq!(env.payload, serde_json::json!({}));
-    }
-
-    #[test]
-    fn envelope_rejects_missing_seq() {
-        let err = serde_json::from_str::<ControlEnvelope>(r#"{"cmd":"on"}"#);
-        assert!(err.is_err(), "缺 seq 必须解析失败");
-    }
-
-    #[test]
-    fn ack_ok_shape() {
-        let ack = ControlAck::ok(12, serde_json::json!({ "ok": true }));
-        let json = serde_json::to_string(&ack).unwrap();
-        assert!(json.contains(r#""ack":12"#), "ack 字段: {json}");
-        let back: ControlAck = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.ack, 12);
-        assert_eq!(back.result["ok"], true);
-    }
-
-    #[test]
-    fn ack_err_shape() {
-        let ack = ControlAck::err(3, "unknown cmd");
-        let back: ControlAck = serde_json::from_str(&serde_json::to_string(&ack).unwrap()).unwrap();
-        assert_eq!(back.ack, 3);
-        assert_eq!(back.result["error"], "unknown cmd");
-    }
+    // 线形测试（roundtrip/parse/defaults/rejects/ack 形 ×6）已随类型迁
+    // common::protocol::tests + sig_vector/sfu 夹具；此处驻执行器语义。
 
     #[test]
     fn stub_actuator_replies_with_channel_and_seq() {

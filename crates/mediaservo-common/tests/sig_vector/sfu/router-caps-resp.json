@@ -1,0 +1,29 @@
+{
+  "name": "router-caps-resp",
+  "kind": "signal",
+  "wire": {
+    "type": "router_rtp_capabilities",
+    "room_id": "vehicle_test",
+    "capabilities": {
+      "codecs": [
+        {
+          "mimeType": "video/H264",
+          "kind": "video",
+          "clockRate": 90000,
+          "preferredPayloadType": 101,
+          "parameters": {
+            "packetization-mode": 1,
+            "profile-level-id": "42e01f"
+          },
+          "rtcpFeedback": []
+        }
+      ],
+      "headerExtensions": []
+    }
+  },
+  "checks": {
+    "type": "router_rtp_capabilities",
+    "capabilities.codecs.0.mimeType": "video/H264",
+    "capabilities.codecs.0.preferredPayloadType": 101
+  }
+}

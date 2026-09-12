@@ -1,0 +1,12 @@
+{
+  "name": "envelope-light-no-payload",
+  "kind": "envelope",
+  "wire": {
+    "seq": 1,
+    "cmd": "on"
+  },
+  "checks": {
+    "seq": 1,
+    "cmd": "on"
+  }
+}

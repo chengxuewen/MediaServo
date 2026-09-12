@@ -1,0 +1,16 @@
+{
+  "name": "envelope-gimbal-pan",
+  "kind": "envelope",
+  "wire": {
+    "seq": 7,
+    "cmd": "pan",
+    "payload": {
+      "deg": 90
+    }
+  },
+  "checks": {
+    "seq": 7,
+    "cmd": "pan",
+    "payload.deg": 90
+  }
+}

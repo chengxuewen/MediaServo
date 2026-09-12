@@ -1,0 +1,13 @@
+{
+  "name": "error-4012-control-denied",
+  "kind": "signal",
+  "wire": {
+    "type": "error",
+    "code": 4012,
+    "message": "control_denied: account dave role dispatcher cannot produce media (cockpit is consume-only) (peer=dave, room=vehicle)"
+  },
+  "checks": {
+    "type": "error",
+    "code": 4012
+  }
+}
