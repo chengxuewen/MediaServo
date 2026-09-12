@@ -8,6 +8,7 @@
 ### 新增
 - 设备公钥指纹准入：host 用初始化时已生成的设备私钥应答服务器挑战，注册只需在管理台「待批准设备」点批准；专网/开发环境设 `ALLOW_DEV_ENROLL=1` 后新设备接入零人工（不再抄发/配置任何密钥）。
 - 管理台设备页新增「待批准设备」队列（一键批准 + 可选命名）。
+- Web 播放器协商内核改用官方 mediasoup-client（手拼 SDP/硬编码负载类型技术债清偿；对外行为与界面不变，弱网韧性语义原样保留）。
 - 部署帮助新增「环境变量总表」：`msrtc.sh -h` 与 `msrtc-server -h` / `msrtc-host -h` 三面共用单一真源 `crates/mediaservo-common/assets/env-usage.md`（[A] 脚本注入 / [B] oxfile 手工行 / [C] 启动 env），整树重部署丢手工 env 时按表回补。
 
 ### ⚠ 升级注意

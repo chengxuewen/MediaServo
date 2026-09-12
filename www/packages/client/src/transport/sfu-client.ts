@@ -1,92 +1,57 @@
-// SFU Consumer Client — mediasoup Server-Offer transport
-// Flow: CreateWebRtcTransport(recv) → WebRtcTransportCreated → buildRemoteSdp → setRemoteDescription → createAnswer → ConnectWebRtcTransport
-// After consume, ontrack delivers remote stream.
+// SFU Consumer Client — mediasoup-client 内核（P1/D270-R2 换心）
+// Flow: get_router_rtp_capabilities → Device.load → create_web_rtc_transport(recv)
+//       → device.createRecvTransport(opts) → 'connect'→connect_web_rtc_transport(dtls)
+//       → new_producer → consume(rtp_capabilities=device.rtpCapabilities) → consumed
+//       → transport.consume → track。
+// 韧性层（W1-W5/F2/H1/H3/V2）与旧实现逐段同构——SDP/ORTC 手拼逻辑（拼 offer/硬编码 PT/
+// videoRtpCapabilities，PIT-173/PIT-55/PIT-56 债群）由 mediasoup-client 官方实现接管（C18）。
+// P2P 回退移除：全 SFU 决策（2026-08-25，server 房间统一 DeviceStream、SDP/ICE 中继丢弃）
+// 使旧 P2P 通路本就不通——sdp/ice 广播静默忽略（噪音），协商失败走轮次引擎。
 
-// PIT-55: mediasoup consume 匹配要求完整 codec 字段 (clockRate/parameters/preferredPayloadType)，
-// 缺任一 → match_codecs strict 匹配失败 → "No compatible media codecs"
-// 参数与 Router/Producer 一致 (4d0032 Main, packetization-mode=1)
-// PIT-55: mediasoup consume 匹配要求完整 codec 字段 (clockRate/parameters/preferredPayloadType)，
-// 缺任一 → match_codecs strict 匹配失败 → "No compatible media codecs"
-// P3 (2026-08-07): router 默认 VP8 (PT 96) — capabilities 必须含 VP8 才能匹配 Host produce
-// (Host 标准协商 answer 选 VP8 96); H264 保留作备选
-function videoRtpCapabilities() {
-  return {
-    codecs: [{
-      kind: 'video', // serde(tag="kind") 必需 (PIT-55)
-      mimeType: 'video/VP8',
-      clockRate: 90000,
-      preferredPayloadType: 96,
-      parameters: {},
-      rtcpFeedback: [],
-    }, {
-      kind: 'video',
-      mimeType: 'video/H264',
-      clockRate: 90000,
-      preferredPayloadType: 101,
-      parameters: {
-        'level-asymmetry-allowed': 1,
-        'packetization-mode': 1,
-        'profile-level-id': '42e01f', // v2: 与 router/Host 对齐 (encoder-backend-codec-config T7)
-      },
-      rtcpFeedback: [],
-    }, {
-      kind: 'video',
-      mimeType: 'video/VP9',
-      clockRate: 90000,
-      preferredPayloadType: 99,
-      parameters: {},
-      rtcpFeedback: [],
-    }, {
-      kind: 'video',
-      mimeType: 'video/AV1',
-      clockRate: 90000,
-      preferredPayloadType: 97,
-      parameters: {},
-      rtcpFeedback: [],
-    }],
-    // v3 (sfu-negotiation-completion T4): 声明 transport-cc/abs-capture-time —
-    // mediasoup 端据此在输出 RTP 上附加扩展 → 浏览器生成 transport-cc feedback
-    // → mediasoup 转发 → host BWE 自适应（BWE 闭环第三段, 与 host T2 对称）。
-    headerExtensions: [{
-      kind: 'video',
-      uri: 'http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01',
-      preferredId: 3,
-      preferredEncrypt: false,
-      direction: 'sendrecv',
-    }, {
-      kind: 'video',
-      uri: 'http://www.webrtc.org/experiments/rtp-hdrext/abs-capture-time',
-      preferredId: 5,
-      preferredEncrypt: false,
-      direction: 'sendrecv',
-    }],
-  };
-}
-interface IceParams {
-  username_fragment: string;
-  password: string;
-}
+import { Device } from 'mediasoup-client';
+import type { Consumer, Transport as MsTransport } from 'mediasoup-client/types';
+import type { DtlsParameters as MsDtlsParameters, RtpParameters } from 'mediasoup-client/types';
 
-interface DtlsParams {
-  fingerprints: { algorithm: string; value: string }[];
-  role: string;
-}
+// ── server wire（snake_case SignalingMessage）↔ mediasoup-client（camel）映射纯函数 ──
+// 单点收敛（design §3）：vitest 直接回放 P1.1 新消息 wire 形。
 
-// PIT-56: server 的 IceCandidate 是字段格式 (ip/port/protocol/foundation/priority/candidate_type)，非 SDP 字符串
-interface IceCandidate {
-  ip: string;
-  port: number;
-  protocol: string;
-  foundation: string;
-  priority: number;
-  candidate_type?: string;
+interface WireIceParams { username_fragment: string; password: string }
+interface WireDtlsParams { fingerprints: { algorithm: string; value: string }[]; role: string }
+// 服务端 IceCandidate 结构体 rename_all=camelCase（candidateType）；兼容手写 candidate_type。
+interface WireIceCandidate {
+  ip: string; port: number; protocol: string; foundation: string; priority: number;
+  candidateType?: string; candidate_type?: string;
 }
-
 interface TransportCreated {
   transport_id: string;
-  ice_parameters: IceParams;
-  dtls_parameters: DtlsParams;
-  ice_candidates?: IceCandidate[];
+  ice_parameters: WireIceParams;
+  dtls_parameters: WireDtlsParams;
+  ice_candidates?: WireIceCandidate[];
+}
+
+export function mapIceParameters(p: WireIceParams): { usernameFragment: string; password: string; iceLite: true } {
+  // iceLite 恒真 = mediasoup server 传输的设计不变量（worker 侧 ICE-Lite）；server wire 的
+  // IceParameters 不带该旗，handler 据 iceParameters.iceLite 在 remote SDP 输出 a=ice-lite——
+  // 缺失则浏览器按 full-ICE 对待对端，STUN 检查方向/时机错位（A/B 抓包定位：req 95/resp 0）。
+  return { usernameFragment: p.username_fragment, password: p.password, iceLite: true };
+}
+
+export function mapDtlsParameters(p: WireDtlsParams): MsDtlsParameters {
+  return {
+    role: p.role as MsDtlsParameters['role'],
+    fingerprints: p.fingerprints.map((f) => ({ algorithm: f.algorithm, value: f.value })),
+  } as MsDtlsParameters;
+}
+
+export function mapIceCandidates(list: WireIceCandidate[]): Array<Record<string, unknown>> {
+  return list.map((c) => ({
+    foundation: c.foundation,
+    priority: c.priority,
+    ip: c.ip,
+    port: c.port,
+    protocol: c.protocol,
+    type: c.candidateType ?? c.candidate_type ?? 'host',
+  }));
 }
 
 type StreamCallback = (stream: MediaStream) => void;
@@ -94,15 +59,18 @@ type StatusCallback = (status: 'connecting' | 'connected' | 'playing' | 'stalled
 type MetricsCallback = (metrics: StreamMetrics) => void;
 /// F2: 连续零增长 tick 数（2s/tick）判「源离线」——≈6s，保守于 fps 最慢流且不早于任何信令自愈。
 const STALL_TICKS = 3;
-/// W2: 首帧轮次 watchdog——30s 无 ontrack 计一轮失败，restartStream 最多 3 轮，耗尽→「源离线」等待。
+/// W2: 首帧轮次 watchdog——30s 无首帧计一轮失败，restartStream 最多 3 轮，耗尽→「源离线」等待。
 const PLAY_WATCHDOG_MS = 30000;
 const PLAY_ROUNDS_MAX = 3;
+/// PIT-76 观测：logT 默认静默（T1.2 调试输出清账），localStorage 开关 `mediaservo_sfu_debug=1` 还原。
+const SFU_DEBUG = typeof localStorage !== 'undefined' && localStorage.getItem('mediaservo_sfu_debug') === '1';
 
 /// W4: 错误码分流——auth/授权族=终态（红牌唯一合法源）；4031（权限可热改，C33）、
 /// 5000（SFU 内部失败，server 重启窗口典型码）、5001（网关上游切换，host 侧发射经转发）=可重试。
+/// P1/T1.2 有意变更（design §1）：4012（控制 DC 拒权，F8 role 门显式拒）入 terminal 族。
 export function classifySfuError(code: number): 'terminal' | 'retry' {
   switch (code) {
-    case 4000: case 4001: case 4002: case 4003: case 4010: case 4011:
+    case 4000: case 4001: case 4002: case 4003: case 4010: case 4011: case 4012:
       return 'terminal';
     default:
       return 'retry';
@@ -135,7 +103,10 @@ export interface StreamMetrics {
 export class SfuConsumerClient {
   private ws: WebSocket | null = null;
   private closed = false;  // PIT-50: close() 后禁止重连（StrictMode 双挂载竞争）
-  private pc: RTCPeerConnection | null = null;
+  // P1 换心：媒体面归 mediasoup-client（Transport 自带 getStats/connectionstatechange）。
+  private device: Device | null = null;
+  private transport: MsTransport | null = null;
+  private consumer: Consumer | null = null;
   // v2 (web-stream-stats 修复): 双数据源合并累加器 — getStats 与 encoder_status 交替
   // 覆盖导致面板闪烁（一会数值一会 "-"）; 统一合并后回调
   private mergedMetrics: StreamMetrics | null = null;
@@ -143,7 +114,7 @@ export class SfuConsumerClient {
   private lastBytes = 0;
   private mutedTicks = 0; // H1: muted 连续 tick 计数（2s tick）
   // F2: 媒体新鲜度 watchdog（主流双保险第二柱——信令全丢也不假 LIVE）
-  private playingSeen = false; // 首次 ontrack 后启用
+  private playingSeen = false;
   private stallTicks = 0;
   private stalled = false;
   // W1/W2: 韧性状态机字段
@@ -156,24 +127,26 @@ export class SfuConsumerClient {
   private onStatus: StatusCallback;
   private onMetrics: MetricsCallback;
   private transportId: string | null = null;
-  /** SFU 模式标志: startPlay 发出 create_web_rtc_transport 即置位 —
-      P2P 房间的 SDP/ICE 全房间广播（host 侧协商），SFU 流程收到即无关，一律忽略 */
+  /** SFU 模式标志: startPlay 发出 create_web_rtc_transport 即置位——
+      房间内历史 P2P 协商广播（sdp/rtc_ice_candidate）一律静默忽略。 */
   private sfuMode = false;
   // PIT-65: 每连接唯一 SFU peer_id — 多网页同 peer_id 导致 SfuManager recv_transport 互相覆盖
   private sfuPeerId: string;
   private transportResolver: ((params: TransportCreated) => void) | null = null;
-  private pendingProducer: any = null;
-  private pendingSdp: any = null;
+  private pendingProducer: { producer_id: string; kind: string } | null = null;
+  // P1 换心 RPC 单发旁路（handleMessage 优先消费；一次一个在途请求——协商本就串行）：
+  private capsResolver: ((caps: unknown) => void) | null = null;
+  private consumeResolver: ((msg: { consumer_id: string; producer_id: string; kind: string; rtp_parameters: unknown }) => void) | null = null;
   /** H1: producer_closed 自愈重入守卫（广播风暴/连续消息只 restart 一次）。 */
   private restarting = false;
   private metricsTimer: ReturnType<typeof setInterval> | null = null;
-  // PIT-76: 首帧/渲染时间戳观测 — 从 startPlay 起计时，各节点打 [T+nms]
+  // PIT-76: 首帧/渲染时间戳观测 — 从 startPlay 起计时（SFU_DEBUG 开关，默认静默）
   private t0 = 0;
   private logT(msg: string): void {
+    if (!SFU_DEBUG) return;
     const t = performance.now();
-    console.log(`[T+${Math.round(t - this.t0)}ms] ${msg}`);
+    console.info(`[T+${Math.round(t - this.t0)}ms] ${msg}`);
   }
-
 
   constructor(
     private serverUrl: string,
@@ -263,83 +236,160 @@ export class SfuConsumerClient {
       this.reconnect();
     };
   }
+
   async startPlay(): Promise<void> {
-    this.sfuMode = true; // 进入 SFU 流程: 之后到达的 sdp 广播一律忽略
+    this.sfuMode = true; // 进入 SFU 流程: 之后到达的 sdp/ice 广播一律忽略
     if (!this.ws) throw new Error('Not connected');
 
-    // Create RTCPeerConnection upfront (shared for SFU and P2P)
     this.t0 = performance.now();
-    this.logT('startPlay: 创建 RTCPeerConnection');
-    this.pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-    });
-    (window as any).__sfuPc = this.pc; // PIT-64 观测: 暴露 pc 供 getStats 查询
-    this.pc.ontrack = (event) => { this.logT('ONTRACK fired (track=' + event.track?.kind + ')'); console.log('SfuClient: ONTRACK fired, streams=', event.streams.length, 'track=', event.track?.kind); this.clearPlayWatchdog(); this.playRounds = 0; this.waitingForProducer = false; this.playingSeen = true; this.stalled = false; this.stallTicks = 0; this.onTrack(event.streams[0]); this.onStatus('playing'); this.startMetrics(); };
-    let iceEver = false; // ICE 曾连通标记——拆分"初次建联"与"已连通后断开"的语义
-    this.pc.oniceconnectionstatechange = () => {
-      console.log('SfuClient: iceConnectionState =', this.pc?.iceConnectionState); // PIT-56 观测
-      this.logT('iceConnectionState = ' + this.pc?.iceConnectionState);
-      const st = this.pc?.iceConnectionState;
-      if (st === 'connected' || st === 'completed') iceEver = true;
-      if (st === 'failed') {
-        // 从未连通 = 真·无法建立（error 语义）；已连通后 = 流中断（disconnected 语义）
-        this.onStatus(iceEver ? 'disconnected' : 'error');
-        this.stopMetrics();
-      } else if (st === 'disconnected' && iceEver) {
-        // 建联完成前的瞬态 disconnected（候选对收敛中）忽略——30s 建联 watchdog 兜底
-        this.onStatus('disconnected'); this.stopMetrics();
-      }
-    };
-    this.pc.onicecandidate = (event) => {
-      console.log('SfuClient: local candidate', event.candidate?.candidate); // PIT-56 观测
-      if (event.candidate) this.ws?.send(JSON.stringify({ type: 'rtc_ice_candidate', room_id: this.roomId, target: null, candidate: event.candidate.candidate, sdp_mid: event.candidate.sdpMid, sdp_mline_index: event.candidate.sdpMLineIndex }));
-    };
-    this.pc.addTransceiver('video', { direction: 'recvonly' });
-    this.pc.addTransceiver('audio', { direction: 'recvonly' });
+    this.logT('startPlay: Device.load(routerRtpCapabilities)');
 
-    // Try SFU (mediasoup) with 3s timeout. Fall back to P2P if no response.
-    // Set resolver BEFORE sending to avoid race condition
-    const sfuPromise = new Promise<TransportCreated | null>(r => { this.transportResolver = r; });
-    this.logT('发送 create_web_rtc_transport'); console.log("SfuClient: sending create_web_rtc_transport"); this.ws.send(JSON.stringify({ type: "create_web_rtc_transport", room_id: this.roomId, peer_id: this.sfuPeerId, direction: 'recv' }));
+    // 换心第一步：P1.1 server 面拉 router caps → Device.load（官方协商序 C18；
+    // 旧 videoRtpCapabilities 硬编码 PT 面自此消亡）。失败与协商失败同路径→轮次引擎。
+    this.device = new Device();
+    try {
+      const caps = await this.rpcRouterRtpCapabilities();
+      await this.device.load({ routerRtpCapabilities: caps as never });
+    } catch (err) {
+      this.device = null;
+      const m = String((err as Error)?.message ?? err);
+      if (m.startsWith('sfu-terminal:')) { this.device = null; throw err; }
+      this.logT(`Device.load 失败 → 轮次推进: ${m}`);
+      void this.playDeadlineHit();
+      return;
+    }
+
+    // recv transport：server create → 选项映射 → device.createRecvTransport。
+    // resolver 先挂后发（旧竞态教训）；3s 无响应=轮次失败（P2P 回退已随全 SFU 现实移除）。
+    const sfuPromise = new Promise<TransportCreated | null>((r) => { this.transportResolver = r; });
+    this.logT('发送 create_web_rtc_transport');
+    this.ws.send(JSON.stringify({ type: 'create_web_rtc_transport', room_id: this.roomId, peer_id: this.sfuPeerId, direction: 'recv' }));
     this.armPlayWatchdog(); // W2: 首帧轮次截止
     const sfuResult = await Promise.race([
       sfuPromise,
-      new Promise<null>(r => setTimeout(() => r(null), 3000)),
+      new Promise<null>((r) => setTimeout(() => r(null), 3000)),
     ]);
+    if (!sfuResult) {
+      this.transportResolver = null;
+      this.logT('SFU create 无响应 → 轮次推进');
+      void this.playDeadlineHit();
+      return;
+    }
 
-    if (sfuResult) {
-      this.logT('收到 web_rtc_transport_created'); console.log('SfuClient: SFU transport created, building SDP...');
-      this.transportId = sfuResult.transport_id;
-      // pending producer will be processed after connect_web_rtc_transport succeeds
-      this.logT('开始 setRemoteDescription'); console.log('SfuClient: setting remote description...');
-      const offerSdp = this.buildRemoteSdp(sfuResult.ice_parameters, sfuResult.dtls_parameters, sfuResult.ice_candidates ?? []);
-      try {
-        console.log('SfuClient: offer SDP:\n' + offerSdp); // PIT-56 观测
-        await this.pc.setRemoteDescription({ type: 'offer', sdp: offerSdp });
-        this.logT('setRemoteDescription 完成'); console.log('SfuClient: remote description set OK');
-        const answer = await this.pc.createAnswer();
-        this.logT('createAnswer 完成'); console.log('SfuClient: answer created');
-        console.log('SfuClient: answer SDP:\n' + answer.sdp); // PIT-56 观测
-        await this.pc.setLocalDescription(answer);
-        this.logT('setLocalDescription 完成, 发送 connect_web_rtc_transport'); console.log('SfuClient: local description set, sending connect_web_rtc_transport');
-        // PIT-56: connect 的 fingerprints 必须是浏览器本地证书指纹 (从 answer SDP 提取),
-        // 传 sfuResult 的 (mediasoup 指纹) → DTLS fingerprint mismatch → 无 SRTP → Consumer 不转发
-        const localFp = (answer.sdp ?? '').match(/a=fingerprint:(\S+) (\S+)/);
-        this.ws.send(JSON.stringify({ type: 'connect_web_rtc_transport', room_id: this.roomId, peer_id: this.sfuPeerId, transport_id: sfuResult.transport_id, dtls_parameters: { fingerprints: localFp ? [{ algorithm: localFp[1], value: localFp[2] }] : sfuResult.dtls_parameters.fingerprints, role: "client" }, sdp: answer.sdp }));
-      } catch (e) {
-        console.error('SfuClient: SDP negotiation failed:', e);
+    this.logT('收到 web_rtc_transport_created, id: ' + sfuResult.transport_id);
+    this.transportId = sfuResult.transport_id;
+    const transport = this.device.createRecvTransport({
+      id: sfuResult.transport_id,
+      iceParameters: mapIceParameters(sfuResult.ice_parameters),
+      iceCandidates: mapIceCandidates(sfuResult.ice_candidates ?? []) as never,
+      dtlsParameters: mapDtlsParameters(sfuResult.dtls_parameters),
+      // sctpParameters 省略——P1 无浏览器 SFU-DC（控制面随 P2 host-controller 迁移接入）。
+    });
+    this.transport = transport;
+    // PIT-64 观测面（headless 调试）：debug 开关下暴露 transport。
+    if (SFU_DEBUG) ((window as unknown as { __sfuTransports?: MsTransport[] }).__sfuTransports ??= []).push(transport);
+
+    // 'connect' 事件 = mediasoup-client 生成本地 DTLS 指纹（旧手拼 answer 提取指纹的 PIT-56 债群消亡）。
+    transport.on('connect', ({ dtlsParameters }, ok, fail) => {
+      this.logT('transport connect → connect_web_rtc_transport');
+      const ws = this.ws;
+      if (!ws || ws.readyState !== WebSocket.OPEN) { fail(new Error('ws closed')); return; }
+      ws.send(JSON.stringify({
+        type: 'connect_web_rtc_transport',
+        room_id: this.roomId,
+        peer_id: this.sfuPeerId,
+        transport_id: this.transportId,
+        dtls_parameters: {
+          fingerprints: dtlsParameters.fingerprints.map((f) => ({ algorithm: f.algorithm, value: f.value })),
+          role: dtlsParameters.role,
+        },
+      }));
+      ok();
+    });
+    // ICE/DTLS 汇聚状态（旧 pc.oniceconnectionstatechange 语义等价迁移）
+    let iceEver = false; // 曾连通标记——区分"初次建联失败"与"已连通后断开"语义
+    transport.on('connectionstatechange', (state) => {
+      this.logT(`connectionstatechange = ${state}`);
+      if (state === 'connected') iceEver = true;
+      if (state === 'failed') {
+        this.onStatus(iceEver ? 'disconnected' : 'error');
+        this.stopMetrics();
+      } else if (state === 'disconnected' && iceEver) {
+        // 建联完成前的瞬态忽略——30s 建联 watchdog 兜底
+        this.onStatus('disconnected');
+        this.stopMetrics();
       }
-    } else {
-      console.log("SfuClient: SFU timeout, falling back to P2P");
-      if (this.pendingSdp) {
-        console.log("SfuClient: replaying pending SDP");
-        this.handleMessage(JSON.stringify(this.pendingSdp));
-      } else {
-        void this.playDeadlineHit(); // W3: 无 P2P 素材且 SFU 无响应 → 立即计轮次失败，不空等 30s
-      }
+    });
+
+    // transport 就绪：排队 producer（transport 前到达）即刻消费；后续 new_producer 走 handleMessage。
+    if (this.pendingProducer) {
+      const p = this.pendingProducer;
+      this.pendingProducer = null;
+      void this.consumeProducer(p.producer_id, p.kind);
     }
   }
-  // WS message handler — routed from connect() onmessage
+
+  /** get_router_rtp_capabilities → router_rtp_capabilities 单发旁路（handleMessage 路由）。 */
+  private rpcRouterRtpCapabilities(): Promise<unknown> {
+    const ws = this.ws;
+    if (!ws) return Promise.reject(new Error('Not connected'));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.capsResolver = null; reject(new Error('router caps timeout')); }, 5000);
+      this.capsResolver = (caps) => { clearTimeout(timer); this.capsResolver = null; resolve(caps); };
+      ws.send(JSON.stringify({ type: 'get_router_rtp_capabilities', room_id: this.roomId }));
+    });
+  }
+
+  /** consume 请求+consumed 响应（server Consumer 落参）→ 本地 transport.consume 落轨
+   *  （协商完成点 = 旧 ontrack 语义锚）。rtp_capabilities 用 Device 协商结果——
+   *  旧 PIT-55 完整 codec 字段手拼债随换心消亡。 */
+  private async consumeProducer(producerId: string, kind: string): Promise<void> {
+    const transport = this.transport;
+    const device = this.device;
+    const ws = this.ws;
+    if (!transport || !device || !ws) return;
+    this.logT(`发送 consume（producer=${producerId}）`);
+    const result = await new Promise<{ consumer_id: string; producer_id: string; kind: string; rtp_parameters: unknown } | 'timeout'>((resolve) => {
+      const timer = setTimeout(() => { this.consumeResolver = null; resolve('timeout'); }, 8000);
+      this.consumeResolver = (msg) => { clearTimeout(timer); this.consumeResolver = null; resolve(msg); };
+      ws.send(JSON.stringify({
+        type: 'consume',
+        room_id: this.roomId,
+        peer_id: this.sfuPeerId,
+        transport_id: this.transportId,
+        producer_id: producerId,
+        kind,
+        rtp_capabilities: device.rtpCapabilities,
+      }));
+    });
+    if (result === 'timeout') {
+      this.logT('consume 超时 → 轮次推进');
+      if (!this.playingSeen && !this.restarting && !this.waitingForProducer) void this.playDeadlineHit();
+      return;
+    }
+    try {
+      const consumer = await transport.consume({
+        id: result.consumer_id,
+        producerId: result.producer_id,
+        kind: result.kind as 'audio' | 'video',
+        rtpParameters: result.rtp_parameters as RtpParameters,
+      });
+      this.consumer = consumer;
+      this.clearPlayWatchdog();
+      this.playRounds = 0;
+      this.waitingForProducer = false;
+      this.playingSeen = true;
+      this.stalled = false;
+      this.stallTicks = 0;
+      this.onTrack(new MediaStream([consumer.track]));
+      this.onStatus('playing');
+      this.startMetrics();
+    } catch (err) {
+      console.warn('SfuClient: transport.consume failed', err);
+      if (!this.playingSeen && !this.restarting) void this.playDeadlineHit();
+    }
+  }
+
   /** v2: 合并式 metrics 上报 — 部分字段只覆盖, 不重置其他字段（闪烁修复） */
   private emitMetrics(partial: Partial<StreamMetrics>): void {
     this.mergedMetrics = { ...(this.mergedMetrics ?? { rtt: 0, packetLoss: 0, fps: 0, bitrate: 0, jitter: 0, resolution: '' }), ...partial };
@@ -349,16 +399,17 @@ export class SfuConsumerClient {
   handleMessage(data: string): void {
     try {
       const msg = JSON.parse(data);
-      console.log('SfuClient: received message type:', msg.type);
+
+      // RPC 单发旁路优先（caps/consumed）——消费后即摘。
+      if (msg.type === 'router_rtp_capabilities' && this.capsResolver) { this.capsResolver(msg.capabilities); return; }
+      if (msg.type === 'consumed' && this.consumeResolver) { this.consumeResolver(msg); return; }
 
       if (msg.type === 'web_rtc_transport_created' && this.transportResolver) {
-        console.log('SfuClient: transport msg keys:', Object.keys(msg).join(','), 'cands=', JSON.stringify(msg.ice_candidates)); // PIT-56 观测
-        console.log('SfuClient: transport created, id:', msg.transport_id);
         this.transportResolver({
           transport_id: msg.transport_id,
           ice_parameters: msg.ice_parameters,
           dtls_parameters: msg.dtls_parameters,
-          ice_candidates: msg.ice_candidates ?? [], // PIT-56: 必须传给 buildRemoteSdp
+          ice_candidates: msg.ice_candidates ?? [],
         });
         this.transportResolver = null;
       } else if (msg.type === 'new_producer') {
@@ -370,16 +421,11 @@ export class SfuConsumerClient {
           void this.restartStream();
           return;
         }
-        if (this.transportId) {
-          console.log('SfuClient: consuming producer', msg.producer_id);
-          const rtpCaps = videoRtpCapabilities();
-          this.ws?.send(JSON.stringify({
-            type: 'consume', room_id: this.roomId, peer_id: this.sfuPeerId, transport_id: this.transportId,
-            producer_id: msg.producer_id, kind: msg.kind, rtp_capabilities: rtpCaps,
-          }));
+        if (this.transportId && this.transport) {
+          void this.consumeProducer(msg.producer_id, msg.kind);
         } else {
-          console.log('SfuClient: new_producer before transport, queuing');
-          this.pendingProducer = msg;
+          this.logT('new_producer before transport, queuing');
+          this.pendingProducer = { producer_id: msg.producer_id, kind: msg.kind };
         }
       } else if (msg.type === 'producer_closed') {
         // H1: host 断开/重启 → server 广播 producer 死亡。免刷新自愈：拆媒体面
@@ -398,24 +444,13 @@ export class SfuConsumerClient {
           hostResolution: msg.frame_width && msg.frame_height ? `${msg.frame_width}x${msg.frame_height}` : undefined,
           avgEncodeMs: msg.avg_encode_ms ?? undefined,
         });
-      } else if (msg.type === 'consumed') {
-        this.logT('consumed (consumer 创建成功, 等待 RTP)');
-        // ponytail: producer consumed, stream arrives via ontrack
       } else if (msg.type === 'error' && msg.code === 0) {
-        this.logT('transport_connected'); console.log('SfuClient: transport_connected (code: 0)');
-        if (this.pendingProducer && this.transportId) {
-          this.logT('consuming pending producer ' + this.pendingProducer.producer_id); console.log('SfuClient: consuming pending producer', this.pendingProducer.producer_id);
-          // PIT-55: rtp_capabilities 需完整 codec 字段, 见 videoRtpCapabilities()
-          const rtpCaps = videoRtpCapabilities();
-          this.ws?.send(JSON.stringify({
-            type: 'consume', room_id: this.roomId, peer_id: this.sfuPeerId, transport_id: this.transportId,
-            producer_id: this.pendingProducer.producer_id, kind: this.pendingProducer.kind, rtp_capabilities: rtpCaps,
-          }));
-        }
+        // transport_connected / RPC ack——协商节拍由 consumed/track 驱动，此处仅观测。
+        this.logT('ack code:0 ' + msg.message);
       } else if (msg.type === 'error') {
         // W4 (C16 客户端合规): server 失败不得静默——分类驱动状态机。
         const code = Number(msg.code) || 0;
-        console.log('SfuClient: error', code, msg.message);
+        console.warn('SfuClient: error', code, msg.message);
         if (classifySfuError(code) === 'terminal') {
           this.clearPlayWatchdog();
           this.onStatus('error');
@@ -423,144 +458,51 @@ export class SfuConsumerClient {
           this.logT(`可重试错误 ${code} → 轮次推进`);
           void this.playDeadlineHit();
         }
-      } else if (msg.type === "sdp") {
-        console.log("SfuClient: SDP received");
-        // P2P 房间广播过滤: vehicle 房间是 P2P 类型, SDP/ICE 全房间广播 —
-        // host 侧（controller/emergency/vision）的协商 SDP 会到达浏览器。
-        // SFU 模式（transportId 已建）的 consume 是消息驱动, 不需要任何 SDP 消息 —
-        // 收到即无关广播, 忽略（否则把别人的 offer 当自己的协商 → 状态错乱）。
-        if (this.sfuMode) {
-          console.log("SfuClient: SDP ignored (SFU mode, room broadcast)");
-          return;
-        }
-        if (!this.pc) { this.pendingSdp = msg; return; }
-        // P2P mode: handle host's SDP offer → create answer
-        try {
-          const sdp = typeof msg.sdp === 'string' ? JSON.parse(msg.sdp) : msg.sdp;
-          if (sdp.type === 'offer' && this.pc) {
-            this.pc.setRemoteDescription(sdp).then(async () => {
-              if (!this.pc) return;
-              const answer = await this.pc.createAnswer();
-              await this.pc.setLocalDescription(answer);
-              this.ws?.send(JSON.stringify({ type: 'sdp', room_id: this.roomId, target: null, sdp: JSON.stringify(answer) }));
-            }).catch((err) => console.warn('SfuClient: SDP setRemoteDescription failed', err));
-          }
-        } catch (err) {
-          console.warn('SfuClient: SDP handling failed', err);
-        }
-      } else if ((msg.type === 'rtc_ice_candidate' || msg.type === 'r_t_c_ice_candidate') && this.pc) {
-        // PIT-106 (I2 review): server 中继重序列化为规范名 r_t_c_ice_candidate（serde snake_case）
-        // — 两 tag 都收，兼容旧 server 与新 alias 两种 wire。
-        if (this.sfuMode && this.pc && this.pc.remoteDescription === null) {
-          return; // 协商未完成前的房间广播 candidate，忽略
-        }
-        console.log('SfuClient: ICE candidate received', msg.candidate);
-        this.pc.addIceCandidate({
-          candidate: msg.candidate,
-          sdpMid: msg.sdp_mid ?? null,
-          sdpMLineIndex: msg.sdp_mline_index ?? null,
-        }).catch((e) => console.warn('SfuClient: addIceCandidate failed', e));
+      } else if (msg.type === 'sdp' || msg.type === 'rtc_ice_candidate' || msg.type === 'r_t_c_ice_candidate') {
+        // 全 SFU 决策（2026-08-25）后 server 丢弃 P2P 中继——房间内历史协商广播静默忽略（噪音）。
       }
     } catch (err) {
       console.warn('SfuClient: message handling failed', err);
     }
   }
 
-  // Build a server-side SDP offer from mediasoup ICE/DTLS parameters.
-  // The browser answers this offer to establish the server-offer transport.
-  private buildRemoteSdp(ice: IceParams, dtls: DtlsParams, candidates: IceCandidate[]): string {
-    const fp = dtls.fingerprints[0];
-    // PIT-56: mediasoup ICE-Lite 候选必须嵌入 offer 的 m= 段（无候选 → 浏览器 ICE 无对端地址，永不发起）
-    // 转为 SDP candidate 行 (candidate 必须在 m= 段内 — PIT-46 同教训)
-    const toCandidateLine = (c: IceCandidate) =>
-      `a=candidate:${c.foundation} 1 ${c.protocol.toUpperCase()} ${c.priority} ${c.ip} ${c.port} typ ${c.candidate_type ?? 'host'}`;
-    const videoCandidates = candidates.map(toCandidateLine).join('\r\n');
-    const audioCandidates = '';
-    return [
-      'v=0',
-      'o=- 0 0 IN IP4 0.0.0.0',
-      's=-',
-      't=0 0',
-      'a=group:BUNDLE video audio',
-      'a=ice-lite',
-      `a=ice-ufrag:${ice.username_fragment}`,
-      `a=ice-pwd:${ice.password}`,
-      `a=fingerprint:${fp.algorithm.toLowerCase()} ${fp.value}`,
-      'a=setup:passive', // PIT-56: offer setup 决定 answerer 角色 — passive → 浏览器 active (ClientHello 发起方)；mediasoup 是 DTLS server 等 ClientHello (Host 侧 actpass 同理)
-      // Video: VP8 96 + H264 101 同时请求（producer codec 由 Host 配置决定, v2:
-      // offer codec 必须匹配 consume codec, 否则浏览器不接收 RTP → 无视频）
-      'm=video 7 UDP/TLS/RTP/SAVPF 96 101 99 97',
-      'c=IN IP4 127.0.0.1',
-      'a=rtcp-mux',
-      'a=mid:video',
-      // v3 (sfu-negotiation-completion T4): transport-cc + abs-capture-time extmap —
-      // 浏览器收流需声明 transport-cc 才会生成 feedback → mediasoup 转发 → host BWE
-      // 自适应（BWE 闭环另一端, 与 host 侧 T1 对称）。
-      'a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01',
-      'a=extmap:5 http://www.webrtc.org/experiments/rtp-hdrext/abs-capture-time',
-      'a=sendonly', // PIT-56: offer 描述 mediasoup (发送方) — recvonly+浏览器recvonly → 协商 inactive → 无媒体轨
-      'a=rtpmap:96 VP8/90000',
-      'a=rtcp-fb:96 nack',
-      'a=rtcp-fb:96 nack pli',
-      'a=rtpmap:101 H264/90000',
-      'a=fmtp:101 profile-level-id=42e01f;packetization-mode=1',
-      'a=rtcp-fb:101 nack',
-      'a=rtcp-fb:101 nack pli',
-      'a=rtpmap:99 VP9/90000',
-      'a=rtcp-fb:99 nack',
-      'a=rtcp-fb:99 nack pli',
-      'a=rtpmap:97 AV1/90000',
-      'a=rtcp-fb:97 nack',
-      'a=rtcp-fb:97 nack pli',
-      ...(videoCandidates ? [videoCandidates] : []),
-      'a=end-of-candidates',
-      // Audio: Opus
-      'm=audio 7 UDP/TLS/RTP/SAVPF 111',
-      'c=IN IP4 127.0.0.1',
-      'a=rtcp-mux',
-      'a=mid:audio',
-      'a=rtpmap:111 opus/48000/2',
-      'a=fmtp:111 minptime=10;useinbandfec=1',
-      ...(audioCandidates ? [audioCandidates] : []),
-      'a=end-of-candidates',
-      '',
-    ].join('\r\n');
-  }
-
-  // startMetrics polls RTCPeerConnection.getStats() every 2s
+  // startMetrics polls Transport.getStats()（= underlying RTCPeerConnection 原始报告）every 2s
   private startMetrics(): void {
     this.stopMetrics();
     this.metricsTimer = setInterval(async () => {
-      if (!this.pc) return;
-      // H1 兑底观测: producer 中途死且 ProducerClosed 不可达（H3 worker 通知静默）→ muted 持续 10s 告警
-      const vt = this.pc.getTransceivers().find(t => t.receiver.track?.kind === 'video');
-      if (vt?.receiver.track.muted) {
+      const transport = this.transport;
+      if (!transport) return;
+      // H1 兜底观测: producer 中途死且 ProducerClosed 不可达（H3 worker 通知静默）→ muted 持续 10s 告警
+      const track = this.consumer?.track;
+      if (track?.muted) {
         this.mutedTicks++;
         if (this.mutedTicks === 5) console.warn('SfuClient: video track muted ≥10s — producer 可能已死且无 ProducerClosed 通知');
       } else {
         this.mutedTicks = 0;
       }
       try {
-        const stats = await this.pc.getStats();
+        const stats = await transport.getStats();
         let rtt = 0, packetsLost = 0, packetsReceived = 0, fps = 0, bitrate = 0, jitter = 0;
         let width = 0, height = 0, decoderImpl: string | undefined, decoderCodec: string | undefined;
         let growing = false; // F2: 本 tick 字节增量即媒体新鲜信号
 
         stats.forEach((report) => {
           if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-            rtt = Math.round((report as any).currentRoundTripTime * 1000) || 0;
+            rtt = Math.round((report as unknown as { currentRoundTripTime?: number }).currentRoundTripTime ?? 0 * 1000) || 0;
           }
           // v2 (解码器修复): headless shell inbound-rtp 无 decoderImplementation 字段 →
           // 降级用 codec 报告 mimeType（浏览器实际解码格式）
-          if (report.type === 'codec' && (report as any).mimeType?.startsWith('video/')) {
-            decoderCodec = (report as any).mimeType;
+          if (report.type === 'codec') {
+            const mime = (report as unknown as { mimeType?: string }).mimeType;
+            if (mime?.startsWith('video/')) decoderCodec = mime;
           }
           if (report.type === 'inbound-rtp' && report.kind === 'video') {
-            packetsLost = (report as any).packetsLost || 0;
-            packetsReceived = (report as any).packetsReceived || 0;
-            fps = (report as any).framesPerSecond || 0;
+            const r = report as RTCInboundRtpStreamStats & { decoderImplementation?: string };
+            packetsLost = r.packetsLost || 0;
+            packetsReceived = r.packetsReceived || 0;
+            fps = r.framesPerSecond || 0;
             // v2 (单位修复): 码率 = 字节增量/时间窗（累计 bytesReceived 当瞬时值 → 数字虚增）
-            const bytes = (report as any).bytesReceived || 0;
+            const bytes = r.bytesReceived || 0;
             const now = performance.now();
             if (this.lastTs > 0 && bytes >= this.lastBytes) {
               const elapsed = (now - this.lastTs) / 1000;
@@ -569,10 +511,10 @@ export class SfuConsumerClient {
             if (bytes > this.lastBytes) growing = true;
             this.lastBytes = bytes;
             this.lastTs = now;
-            jitter = Math.round(((report as any).jitter || 0) * 1000);
-            width = (report as any).frameWidth || 0;
-            height = (report as any).frameHeight || 0;
-            decoderImpl = (report as any).decoderImplementation || undefined; // v2 T4
+            jitter = Math.round((r.jitter || 0) * 1000);
+            width = r.frameWidth || 0;
+            height = r.frameHeight || 0;
+            decoderImpl = r.decoderImplementation || undefined; // v2 T4
           }
         });
 
@@ -616,7 +558,7 @@ export class SfuConsumerClient {
     if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; }
   }
   /** W2: 轮次耗尽→「源离线(等待流)」：补发一次 room_join 拿 late-join 回放
-   *  （堵住“producer 恰在轮次窗口内上线错过广播”的死锁），后续 new_producer/producer_closed 唤醒。 */
+   *  （堵住"producer 恰在轮次窗口内上线错过广播"的死锁），后续 new_producer/producer_closed 唤醒。 */
   private async playDeadlineHit(): Promise<void> {
     if (this.closed || this.playingSeen || this.restarting || this.waitingForProducer) return;
     this.playRounds++;
@@ -649,7 +591,7 @@ export class SfuConsumerClient {
       while (!this.closed) {
         attempt++;
         const delay = nextBackoff(attempt) * (0.75 + Math.random() * 0.5); // jitter：防 server 复活瞬间 8 tile 对齐惊群
-        console.log(`SfuClient: reconnecting (attempt ${attempt}, ~${Math.round(delay)}ms)...`);
+        this.logT(`reconnecting (attempt ${attempt}, ~${Math.round(delay)}ms)...`);
         await new Promise(r => setTimeout(r, delay));
         if (this.closed) return;
         this.onStatus('connecting');
@@ -664,7 +606,7 @@ export class SfuConsumerClient {
             return;
           }
           console.warn(`SfuClient: reconnect attempt ${attempt} failed (keep retrying):`, m);
-          // connect 失败时若 play-watchdog 未挂（无首帧在途）→ 重启轮次引擎，防“无限 connecting 无退出”死锁
+          // connect 失败时若 play-watchdog 未挂（无首帧在途）→ 重启轮次引擎，防"无限 connecting 无退出"死锁
           if (!this.playTimer && !this.restarting) void this.playDeadlineHit();
           continue;
         }
@@ -675,29 +617,32 @@ export class SfuConsumerClient {
   }
 
   /** W1: 直连重跑——旧 socket 振荡已由 connect() 内「摘 handlers + close」消除；server 宕机时
-   *  connect 毫秒级快拒（onerror→WS error），半死时 Auth timeout 10s，退避循环全吸收。
-   *  （探测 socket 方案已删：压测实证额外握手面只引入新失败模式，无增益。） */
+   *  connect 毫秒级快拒（onerror→WS error），半死时 Auth timeout 10s，退避循环全吸收。 */
   private async connectAndDrive(): Promise<void> {
     await this.connect();
     if (this.closed) return;
-    console.log('SfuClient: reconnected successfully');
+    this.logT('reconnected successfully');
     if (this.sfuMode) void this.restartStream();
     else void this.startPlay();
   }
 
   /**
-   * H1: producer_closed 自愈 — 拆 pc/transport 后重跑完整 startPlay（等价页面刷新，
-   * 但保留用户视角无感）。重发 room_join 触发 server late-join 回放 existing producers
-   * （否则 host 先于本端完成 re-produce 时无 new_producer 广播可收）。
+   * H1: producer_closed 自愈 — 拆媒体面（transport/device 全弃重造）后重跑完整 startPlay
+   * （等价页面刷新，但保留用户视角无感）。重发 room_join 触发 server late-join 回放 existing
+   * producers（否则 host 先于本端完成 re-produce 时无 new_producer 广播可收）。
    */
   private async restartStream(): Promise<void> {
     this.restarting = true;
     try {
       this.stopMetrics();
-      this.pc?.close();
-      this.pc = null;
+      this.transport?.close();
+      this.transport = null;
+      this.device = null;
+      this.consumer = null;
       this.transportId = null;
       this.pendingProducer = null;
+      this.capsResolver = null;
+      this.consumeResolver = null;
       // PIT-65: 新 peer_id——旧 SfuPeer 残留随 server 端 producer 死亡已失效。
       this.sfuPeerId = `${this.roomId}-consumer-${Math.random().toString(36).slice(2, 8)}`;
       this.onStatus('connecting');
@@ -707,7 +652,7 @@ export class SfuConsumerClient {
       this.ws?.send(JSON.stringify({
         type: 'room_join', room_id: this.roomId, peer_role: 'consumer',
       }));
-      this.playingSeen = false; this.stalled = false; this.stallTicks = 0; // F2: 重置 watchdog 至新 ontrack
+      this.playingSeen = false; this.stalled = false; this.stallTicks = 0; // F2: 重置 watchdog 至新首帧
       this.waitingForProducer = false; // W2: 主动重走即脱离等待态
       await this.startPlay();
     } catch (err) {
@@ -730,12 +675,120 @@ export class SfuConsumerClient {
     this.closed = true;  // PIT-50: 先设标志防 onclose 重连
     if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; } // W2: 卸载即拆 watchdog（防幽灵轮次）
     this.stopMetrics();
-    this.pc?.close();
-    this.pc = null;
+    this.transport?.close();
+    this.transport = null;
+    this.device = null;
+    this.consumer = null;
+    this.capsResolver = null;
+    this.consumeResolver = null;
     this.ws?.close();
     this.ws = null;
     this.transportId = null;
     this.sfuPeerId = `${this.roomId}-consumer-${Math.random().toString(36).slice(2, 8)}`; // PIT-65
     this.transportResolver = null;
+  }
+}
+
+/**
+ * P1/T1.2 上行最小面（会议麦根，D270-R2 验收「会议」的 SDK 前置）：
+ * send transport + produce(track)。server 门 = audio-* 房账号豁免（D-H11 修订/P1.1 已落）。
+ * 控制面 data-produce 随 P2 host-controller SFU-DC 迁移接入（design §4）——本类不掺。
+ */
+export class SfuMicProducer {
+  private ws: WebSocket | null = null;
+  private transport: MsTransport | null = null;
+  /** 响应类型键 → 一次性 resolver（auth/join/caps/transport/produced 串行流程够用）。 */
+  private pending = new Map<string, (m: Record<string, unknown>) => void>();
+
+  constructor(
+    private serverUrl: string,
+    private roomId: string,
+    private token: string,
+  ) {}
+
+  private rpcWait<T>(type: string, map: (m: Record<string, unknown>) => T, ms = 8000): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.pending.delete(type); reject(new Error(`${type} timeout`)); }, ms);
+      this.pending.set(type, (m) => { clearTimeout(timer); this.pending.delete(type); resolve(map(m)); });
+    });
+  }
+
+  private route(m: Record<string, unknown>): void {
+    // error code:0 = ack（transport_connected/produced 例外——produced 是独立 type）；终态错误打断在途 RPC。
+    if (m.type === 'error' && Number(m.code) !== 0 && classifySfuError(Number(m.code)) === 'terminal') {
+      for (const [, cb] of this.pending) { void cb; }
+      this.pending.clear(); // 语义：调用方以 timeout/抛错感知（本类流程短，接受 timeout 形）
+    }
+    const type = String(m.type ?? '');
+    const cb = this.pending.get(type);
+    if (cb) { this.pending.delete(type); cb(m); }
+  }
+
+  /** 完整上行链：auth → join → caps → load → send transport → produce(track)。 */
+  async produceAudio(track: MediaStreamTrack): Promise<void> {
+    const protocol = this.serverUrl.startsWith('wss:') ? 'wss:' : 'ws:';
+    const host = this.serverUrl.replace(/^wss?:\/\//, '');
+    const ws = new WebSocket(`${protocol}//${host}/ws`, this.token ? [this.token] : []);
+    this.ws = ws;
+    ws.onmessage = (ev) => {
+      try { this.route(JSON.parse(String(ev.data))); } catch { /* 忽略非 JSON */ }
+    };
+    const send = (m: Record<string, unknown>) => ws.send(JSON.stringify(m));
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => resolve();
+      ws.onerror = () => reject(new Error('WS error'));
+      setTimeout(() => reject(new Error('mic connect timeout')), 10000);
+    });
+    const peerId = `${this.roomId}-mic-${Math.random().toString(36).slice(2, 8)}`;
+    await this.rpcWait('error', () => true, 10000); // auth ack (code:0 authenticated)
+    send({ type: 'room_join', room_id: this.roomId, peer_role: 'consumer' });
+    await this.rpcWait('room_joined', () => true);
+    const capsP = this.rpcWait('router_rtp_capabilities', (m) => m.capabilities);
+    send({ type: 'get_router_rtp_capabilities', room_id: this.roomId });
+    const device = new Device();
+    await device.load({ routerRtpCapabilities: (await capsP) as never });
+
+    const createdP = this.rpcWait('web_rtc_transport_created', (m) => m);
+    send({ type: 'create_web_rtc_transport', room_id: this.roomId, peer_id: peerId, direction: 'send' });
+    const created = await createdP;
+    const transport = device.createSendTransport({
+      id: String(created.transport_id),
+      iceParameters: mapIceParameters(created.ice_parameters as WireIceParams),
+      iceCandidates: mapIceCandidates((created.ice_candidates ?? []) as WireIceCandidate[]) as never,
+      dtlsParameters: mapDtlsParameters(created.dtls_parameters as WireDtlsParams),
+    } as never);
+    this.transport = transport;
+    transport.on('connect', ({ dtlsParameters }, ok, fail) => {
+      if (ws.readyState !== WebSocket.OPEN) { fail(new Error('ws closed')); return; }
+      send({
+        type: 'connect_web_rtc_transport', room_id: this.roomId, peer_id: peerId,
+        transport_id: String(created.transport_id),
+        dtls_parameters: {
+          fingerprints: dtlsParameters.fingerprints.map((x) => ({ algorithm: x.algorithm, value: x.value })),
+          role: dtlsParameters.role,
+        },
+      });
+      ok();
+    });
+    transport.on('produce', ({ kind, rtpParameters }, cb, errCb) => {
+      if (ws.readyState !== WebSocket.OPEN) { errCb(new Error('ws closed')); return; }
+      this.rpcWait('produced', (m) => { cb({ id: String(m.producer_id) }); return true; })
+        .catch((err: Error) => errCb(err));
+      send({
+        type: 'produce', room_id: this.roomId, peer_id: peerId,
+        transport_direction: kind === 'audio' ? 'send' : 'send',
+        transport_id: String(created.transport_id),
+        kind, rtp_parameters: rtpParameters as Record<string, unknown>,
+      });
+    });
+    await transport.produce({ track });
+  }
+
+  /** 撤麦（幂等）：关 producer 所在 transport 与 WS——会议 P4a 若需细粒度改走 producer.pause()。 */
+  close(): void {
+    this.transport?.close();
+    this.transport = null;
+    if (this.ws) { this.ws.onmessage = null; this.ws.close(); this.ws = null; }
+    this.pending.clear();
   }
 }

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>@mediaservo/client mic produce example</title></head>
+<body style="font-family: monospace; padding: 2rem">
+  <h3>SfuMicProducer 示例（P1/T1.2，会议麦根）</h3>
+  <p>server: <code>ws://127.0.0.1:9800</code>（示例固定，验证用）</p>
+  <button id="go">produce mic → <input id="room" value="audio-mic-example" size="24"></button>
+  <pre id="out"></pre>
+<script type="module">
+  import { SfuMicProducer } from '../src/index.ts';
+  const $ = (id) => document.getElementById(id);
+  $('go').onclick = async () => {
+    const tok = localStorage.getItem('mediaservo_admin_token');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const p = new SfuMicProducer('ws://127.0.0.1:9800', $('room').value.trim() || 'audio-mic-example', tok || '');
+      await p.produceAudio(stream.getAudioTracks()[0]);
+      $('out').textContent = 'PRODUCED OK';
+    } catch (e) { $('out').textContent = 'ERR: ' + e.message; }
+  };
+</script>
+</body></html>
