@@ -1,0 +1,10 @@
+# degraded —— 断联演练档（S0.5-a2 心跳/会话续期验证专用，PLAN §11.2）
+# 烈度目标：WS 必然经历静默窗（重挂路径实弹）+ 媒体塌陷（归因分离对照）。
+# 与 cell-edge(300/80/15%) 的分工：cell-edge = 可通话劣化；degraded = 接近失联。
+rtt_ms: 1000
+jitter_ms: 250
+loss: "30%"
+rate_mbps: 0.2
+scope:
+  media: true
+  signaling: true

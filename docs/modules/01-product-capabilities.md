@@ -26,7 +26,7 @@
 | **WebRTC 栈** | webrtc-sys (libwebrtc FFI, 默认) / str0m (LAN) / mediasoup-sys (Phase 2, D118) | MVP Phase 1: libwebrtc P2P + RTP Track 级 API
 | **GPU 编码** | libloading 桥接 NVENC/VAAPI/VT | 避免编译时绑定 GPU SDK |
 | **编解码** | GStreamer (gst-plugins-rs) | 覆盖全，生态成熟 |
-| **信令** | WebSocket (Phase 1) + MQTT 5.0 (Phase 2+) | D74
+| **信令** | WebSocket（长期；MQTT=触发条款——D289/F13 改判 D74 的双轨承诺） | D74→D289
 | **内部协议** | FlatBuffers | 零拷贝、多语言 |
 | **桌面 GUI** | Tauri v2 + React | 轻量、Rust 后端、跨平台 |
 | **嵌入式 Web** | axum + 静态 HTML | Host 配置页，无框架依赖 |

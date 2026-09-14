@@ -36,7 +36,8 @@ async fn e2e_sfu_lifecycle() {
     let initial_room_count = sfu.room_count();
 
     // Create signaling server with SFU
-    let server = SignalingServer::new(Arc::clone(&sfu), 65536, None);
+    let mut server = SignalingServer::new(Arc::clone(&sfu), 65536, None);
+    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；本套件裸 JSON 读环不吃控制帧
     let app = signaling_router(server);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -183,7 +184,8 @@ async fn e2e_sfu_cleanup_on_disconnect() {
     let sfu = Arc::new(sfu);
     let initial_count = sfu.room_count();
 
-    let server = SignalingServer::new(Arc::clone(&sfu), 65536, None);
+    let mut server = SignalingServer::new(Arc::clone(&sfu), 65536, None);
+    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；本套件裸 JSON 读环不吃控制帧
     let app = signaling_router(server);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -261,7 +263,8 @@ async fn e2e_sfu_consume_pipeline() {
         SfuManager::new_with_port(mediaservo_server::sfu::random_udp_port())
             .await
             .expect("Failed to create SFU manager"));
-    let server = SignalingServer::new(Arc::clone(&sfu), 65536, None);
+    let mut server = SignalingServer::new(Arc::clone(&sfu), 65536, None);
+    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；本套件裸 JSON 读环不吃控制帧
     let app = signaling_router(server);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -548,6 +551,7 @@ async fn e2e_sfu_role_enforcement() {
         65536,
         Some(mediaservo_common::auth::JwtAuth::new(G3_JWT)),
     );
+    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；本套件裸 JSON 读环不吃控制帧
     let hash = mediaservo_server::devices::hash_secret("ms-car1", "car1-secret");
     server.device_registry = std::sync::Arc::new(
         mediaservo_server::devices::DeviceRegistry::from_yaml(&format!(
@@ -845,6 +849,7 @@ async fn e2e_sfu_data_domain() {
         65536,
         Some(mediaservo_common::auth::JwtAuth::new(G3_JWT)),
     );
+    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；本套件裸 JSON 读环不吃控制帧
     let hash = mediaservo_server::devices::hash_secret("ms-car1", "car1-secret");
     server.device_registry = std::sync::Arc::new(
         mediaservo_server::devices::DeviceRegistry::from_yaml(&format!(
@@ -1196,6 +1201,7 @@ async fn e2e_audio_room_device_identity() {
             .expect("Failed to create SFU manager"),
     );
     let mut server = SignalingServer::new(Arc::clone(&sfu), 65536, None);
+    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；本套件裸 JSON 读环不吃控制帧
     let hash1 = mediaservo_server::devices::hash_secret("ms-car1", "car1-secret");
     let hash2 = mediaservo_server::devices::hash_secret("ms-car2", "car2-secret");
     server.device_registry = std::sync::Arc::new(

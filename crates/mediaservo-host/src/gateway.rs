@@ -117,6 +117,8 @@ struct State {
     /// S0：上游(agent↔server)协商谈成的方言版本（1 = 旧 server）。合成子进程
     /// RoomJoined 时填 min(子声明, 本值)——子进程看见全链上限。
     upstream_negotiated: u32,
+    /// a2（S0.5）：上游会话断开时可携带的一次性重挂票（server 下发；取走即清）。
+    pending_resume: Option<String>,
     /// 远端会话是否在途。
     joined: bool,
     /// 本次远端会话建立时刻（E3 快照数据源；reset_remote 清空）。
@@ -301,6 +303,7 @@ impl State {
         self.echo_cache.clear();
         self.vehicle_peer_id.clear();
         self.upstream_negotiated = 1;
+        self.pending_resume = None;
     }
 }
 
@@ -592,6 +595,7 @@ pub async fn run_gateway(config: GatewayConfig) -> Result<(u16, GatewayHandle), 
         echo_cache: VecDeque::new(),
         vehicle_peer_id: String::new(),
         upstream_negotiated: 1,
+        pending_resume: None,
         joined: false,
         remote_since: None,
         vehicle_room: config.room.clone(),
@@ -778,6 +782,7 @@ async fn remote_loop(
             st.remote_since = Some(Instant::now());
             st.vehicle_peer_id = session.peer_id().to_string();
             st.upstream_negotiated = session.negotiated_protocol();
+            st.pending_resume = session.session_nonce().map(str::to_string);
         }
         if reconnected {
             let notify: Vec<_> = {
@@ -793,6 +798,9 @@ async fn remote_loop(
             tracing::info!(children = notify.len(), "H6: 上游已恢复，要求下游重建 SFU 会话");
             reconnected = false;
         }
+        // a2：本会话结束 = 断线。把 server 下发的重挂票转交给 client（下一次
+        // connect_with_retry 携带 resume；命中失败自然回落全量 join——票一次性）。
+        client.set_resume_ticket(lock_state(&state).pending_resume.take());
         run_session(session, &state, &mut remote_hi_rx, &mut remote_lo_rx).await;
         // 断线：清空与远端会话绑定的状态 + 丢弃在途上行（重连后按新会话处理）
         lock_state(&state).reset_remote();
@@ -812,8 +820,8 @@ async fn run_session(
 ) {
     let mut events = session.events();
     loop {
+        // 公平 poll（勿 biased——events 洪泛会饿死上行；hi>lo 序约在 link 网络出口层）。
         tokio::select! {
-            biased;
             ev = events.recv() => match ev {
                 Ok(SignalEvent::Message(msg)) => {
                     let targets = lock_state(state).downstream(msg);
@@ -919,6 +927,7 @@ mod tests {
             echo_cache: VecDeque::new(),
             vehicle_peer_id: String::new(),
             upstream_negotiated: 1,
+            pending_resume: None,
             joined: false,
             remote_since: None,
             vehicle_room: "vehicle-1".into(),

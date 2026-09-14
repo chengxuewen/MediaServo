@@ -389,4 +389,6 @@ Remote ←──WS── SignalHandler ←──SDP adapter── mediasoup Rout
 
 ## 10.11 Phase 2+: MQTT 5.0 信令
 
+> **状态改判（D289 / F13，2026-09-14 团队评审定稿）**：MQTT 不再是默认 Phase 2+ 双轨项——WS 信令硬化已由 S0.5 落地（v3 心跳/会话续期/优先级队列），MQTT 仅在「离线指令下发 / 大规模 presence」场景出现时触发评估，**前置闸=先完成会话状态外置改造评估**（本仓「连接=会话」模型与 broker 总线模型不可混用；presence 双源=同会话双栈已否决 D 项）。以下为原设计存档（未实施）。
+
 Phase 2+ 引入 MQTT 5.0 作为 Vehicle-to-Cloud 信令通道。Phase 1 仅使用 WebSocket。MQTT 5.0 的核心特性（session persistence、shared subscriptions、request-response pattern）适用于大规模车联场景（D74）。

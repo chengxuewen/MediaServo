@@ -94,6 +94,10 @@ pub struct SignalClient {
     /// device-enroll T7：公钥指纹身份（Some = Join 带 device_pubkey 走验签链，
     /// 优先于 device）。gateway/host-agent 装配透传。
     identity: Option<DeviceIdentity>,
+    /// a2（S0.5）：上次会话的一次性重挂票（server RoomJoined.session_nonce）。
+    /// Some = 下一次 connect 的 RoomJoin 带 resume（仅 v3 被 server 受理）；
+    /// 取出即焚（消费/失败都不复用——重放由 server 端 burn 保证）。
+    resume_ticket: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 /// 设备凭证（identity.json 格式 + RoomJoin wire 载体，G4/D-H13）。
@@ -167,6 +171,7 @@ impl SignalClient {
             gateway_src: None,
             device: None,
             identity: None,
+            resume_ticket: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -181,6 +186,7 @@ impl SignalClient {
             gateway_src: Some(src.to_string()),
             device: None,
             identity: None,
+            resume_ticket: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -188,6 +194,18 @@ impl SignalClient {
     pub fn with_device_credentials(mut self, device: DeviceCredential) -> Self {
         self.device = Some(device);
         self
+    }
+
+    /// a2：设置重挂票（gateway 断线时回灌上次 nonce；None = 清票走全量 join）。
+    pub fn set_resume_ticket(&self, nonce: Option<String>) {
+        if let Ok(mut g) = self.resume_ticket.lock() {
+            *g = nonce;
+        }
+    }
+
+    /// a2：取出并清空（一次性）。
+    fn take_resume_ticket(&self) -> Option<String> {
+        self.resume_ticket.lock().ok().and_then(|mut g| g.take())
     }
 
     /// 附加设备身份（device-enroll T7）：RoomJoin 携带 device_pubkey，challenge 到达时
@@ -246,8 +264,8 @@ impl SignalClient {
             // S0: 声明本端方言上限（server 取 min 回谈成值）。
             protocol: Some(SIGNALING_PROTOCOL_VERSION),
             client_version: None,
-            // a2: v1 resume 发起方 = B3 接线（此前恒 None = 全量 join）。
-            resume: None,
+            // a2: 有一次性票则声明重挂（server 侧 negotiated≥3 + 认证重跑 + nonce 校验）。
+            resume: self.take_resume_ticket(),
         };
         let (join_json, unwrap) = match &self.gateway_src {
             Some(src) => (
@@ -568,14 +586,19 @@ async fn session_task(
     on_disconnect: DisconnectSlot,
     gateway_src: Option<String>,
 ) {
+    // a1 client 侧：定期 ping（split-sink 下自动 pong 须有写 poll 驱动冲刷——双向 ping
+    // 是免误杀的诚实解）+ 入站静默 15s 判死（预算与 server 侧 interval×(miss+1) 对齐；
+    // 措辞纪律：非「秒级」承诺）。网关本地环回不做心跳（断开即时可见）。
+    let mut hb = tokio::time::interval(std::time::Duration::from_secs(5));
+    hb.tick().await; // 吞掉 interval 的 t=0 就绪拍（刚建连即 ping = 无谓帧）
+    let mut last_rx = std::time::Instant::now();
     loop {
-        // biased：hi 先于 lo 出队——恢复突发期低优不插队认证/控制（应用层 HoL 解药；
-        // kernel/TCP framing HoL 归急停双路 a4，死链判定归 a1 心跳，见 PLAN §11.2 边界）。
+        // biased：读最优先（饿读 = 活性误判 + pong 不冲刷）；hi 先于 lo（应用层 HoL 解药，
+        // 边界见 PLAN §11.2 a3——kernel/TCP 归急停双路，死链归本心跳）。
         let outbound = tokio::select! {
             biased;
-            m = hi_rx.recv() => m,
-            m = lo_rx.recv() => m,
             ws = ws_rx.next() => {
+                last_rx = std::time::Instant::now();
                 match ws {
                     Some(Ok(Message::Text(text))) => {
                         let parsed = match &gateway_src {
@@ -601,6 +624,26 @@ async fn session_task(
                         fire_disconnect(&on_disconnect);
                         break;
                     }
+                }
+                continue;
+            }
+            m = hi_rx.recv() => m,
+            m = lo_rx.recv() => m,
+            _ = hb.tick() => {
+                if gateway_src.is_some() {
+                    continue; // 本地环回模式：不心跳
+                }
+                if last_rx.elapsed() > std::time::Duration::from_secs(15) {
+                    tracing::warn!("a1: 入站静默 15s → 判死，主动断开走既有重连");
+                    let _ = events_tx.send(SignalEvent::Disconnected {
+                        reason: "heartbeat silent >15s".into(),
+                    });
+                    fire_disconnect(&on_disconnect);
+                    break;
+                }
+                if ws_tx.send(Message::Ping("msrtc-hb".into())).await.is_err() {
+                    fire_disconnect(&on_disconnect);
+                    break;
                 }
                 continue;
             }

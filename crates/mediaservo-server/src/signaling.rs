@@ -47,6 +47,23 @@ pub struct SignalingServer {
     /// Admin 事件频道（列表秒级刷新触发；main.rs AdminState.event_tx 同源）。
     admin_events: tokio::sync::broadcast::Sender<String>,
     pub ws_max_message_size: usize,
+    /// a1 心跳（S0.5）：server 主动 ping 间隔秒；0 = 关闭。env MEDIASERVO_WS_PING_SECS。
+    pub ws_ping_secs: u64,
+    /// a1：连续 miss 个间隔无 pong → 判死（检测预算=interval×(miss+1)，≈10-15s——
+    /// 非"秒级"承诺；RST/TCP 错误即时）。env MEDIASERVO_WS_PONG_MISS。
+    pub ws_pong_miss: u32,
+    /// a1 配套：连接后未过 PSK 的裸等上限（默认 10s；现网裸 await 的加固）。
+    pub ws_psk_wait_secs: u64,
+    /// a1 配套：已认证未 join 的等待上限（默认 30s）。
+    pub ws_join_wait_secs: u64,
+    /// a2（S0.5）：会话保留票表，key = (identity_key, room)。Joined-ack 挂载
+    /// （Host+Device+n≥3），断开 = 延迟清理凭据，resume 命中 = 取出即焚。
+    pub resume_table:
+        Arc<std::sync::Mutex<std::collections::HashMap<(String, String), HeldResume>>>,
+    /// a2 单调票号（延迟清理身份凭证 + cap 逐出序）。
+    resume_seq: Arc<std::sync::atomic::AtomicU64>,
+    /// a2 保留窗秒数（env MEDIASERVO_WS_RESUME_HOLD_SECS，默认 30）。
+    pub ws_resume_hold_secs: u64,
     /// Pending messages cache — stores SDP offer + ICE candidates per room for late-joiner replay.
     pub pending_messages: Arc<dashmap::DashMap<String, Vec<String>>>,
     /// JWT authenticator (optional; PSK used as fallback).
@@ -65,7 +82,7 @@ pub struct SignalingServer {
     /// device-enroll: enroll_auto 落盘路径（main.rs 与 AdminState.devices_path 同源注入）。
     pub devices_path: Arc<str>,
     /// G2 连接级身份绑定（D-H11）: peer_id → device_id（设备认证成功时建立，断开时清除）。
-    device_bindings: Arc<dashmap::DashMap<String, String>>,
+    pub device_bindings: Arc<dashmap::DashMap<String, String>>,
     /// G3 房间主车登记（room_id → device_id; device 会话 join 成功时记录，
     /// 房间空时清除）— 舱端 RoomJoin/急停按主车做租户隔离 + 白名单授权。
     room_owners: Arc<dashmap::DashMap<String, String>>,
@@ -92,6 +109,13 @@ impl SignalingServer {
             active_connections: Arc::new(AtomicUsize::new(0)),
             admin_events: { let (tx, _) = tokio::sync::broadcast::channel(256); tx },
             ws_max_message_size,
+            ws_ping_secs: hb_env("MEDIASERVO_WS_PING_SECS", 5),
+            ws_pong_miss: (hb_env("MEDIASERVO_WS_PONG_MISS", 2) as u32).max(1),
+            ws_psk_wait_secs: hb_env("MEDIASERVO_WS_PSK_WAIT_SECS", 10),
+            ws_join_wait_secs: hb_env("MEDIASERVO_WS_JOIN_WAIT_SECS", 30),
+            resume_table: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            resume_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            ws_resume_hold_secs: hb_env("MEDIASERVO_WS_RESUME_HOLD_SECS", 30),
             pending_messages: Arc::new(dashmap::DashMap::new()),
             jwt_auth,
             psk_state: std::sync::Arc::new(std::sync::RwLock::new(None)),
@@ -117,6 +141,13 @@ impl SignalingServer {
             active_connections: Arc::new(AtomicUsize::new(0)),
             admin_events: { let (tx, _) = tokio::sync::broadcast::channel(256); tx },
             ws_max_message_size,
+            ws_ping_secs: hb_env("MEDIASERVO_WS_PING_SECS", 5),
+            ws_pong_miss: (hb_env("MEDIASERVO_WS_PONG_MISS", 2) as u32).max(1),
+            ws_psk_wait_secs: hb_env("MEDIASERVO_WS_PSK_WAIT_SECS", 10),
+            ws_join_wait_secs: hb_env("MEDIASERVO_WS_JOIN_WAIT_SECS", 30),
+            resume_table: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            resume_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            ws_resume_hold_secs: hb_env("MEDIASERVO_WS_RESUME_HOLD_SECS", 30),
             pending_messages: Arc::new(dashmap::DashMap::new()),
             jwt_auth,
             psk_state: std::sync::Arc::new(std::sync::RwLock::new(None)),
@@ -276,6 +307,63 @@ async fn ws_handler(
 }
 
 /// Send a signaling message to this peer directly (not broadcast).
+/// a1 参数 env 兜底（C35 双通道纪律的 env 侧；非法值回默认）。
+fn hb_env(key: &str, default: u64) -> u64 {
+    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+/// a1 检测预算纯函数：静默 > interval×(miss+1) 判死（测试钉矩阵，勿在循环内裸算）。
+#[must_use]
+pub fn pong_budget_exceeded(silent: std::time::Duration, interval: std::time::Duration, miss: u32) -> bool {
+    silent > interval * (miss + 1)
+}
+
+/// a2：全局保留票上限（UDP 口池 40000-40100 仅 ~100——保留态是实打实资源；
+/// per-device cap=1 由表键天然保证）。
+const RESUME_GLOBAL_CAP: usize = 32;
+
+/// a2 保留记录：nonce **不是凭证**（认证全量重跑，SEC-1），peer_id = 待接管会话键。
+pub struct HeldResume {
+    pub peer_id: String,
+    pub nonce: String,
+    pub negotiated: u32,
+    pub seq: u64,
+}
+
+/// a2：会话身份稳定键（v1 仅 Device 参与挂载；其余键查询必 miss = 全量 join）。
+fn identity_key(id: &SessionIdentity) -> String {
+    match id {
+        SessionIdentity::Device(d) => d.clone(),
+        SessionIdentity::Account(a) => a.username.clone(),
+        SessionIdentity::Legacy => "legacy".into(),
+    }
+}
+
+/// a2 cap 逐出：全局超容时最旧 seq 先清（纯函数钉单测）。
+fn prune_resume(table: &mut std::collections::HashMap<(String, String), HeldResume>, cap: usize) {
+    while table.len() > cap {
+        match table.iter().min_by_key(|(_, h)| h.seq).map(|(k, _)| k.clone()) {
+            Some(k) => {
+                table.remove(&k);
+            }
+            None => break,
+        }
+    }
+}
+
+/// a2 nonce 常数时间比对（高熵票也不给比较层留时序 oracle）。
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// a2：一次性重挂票（32B CSPRNG base64——与 device challenge nonce 同规格）。
+fn gen_session_nonce() -> String {
+    let mut raw = [0u8; 32];
+    use rand_core::RngCore as _;
+    rand_core::OsRng.fill_bytes(&mut raw);
+    base64::engine::general_purpose::STANDARD.encode(raw)
+}
+
 fn send_msg(msg: &SignalingMessage) -> Result<String, String> {
     serde_json::to_string(msg).map_err(|e| format!("serialize error: {e}"))
 }
@@ -400,7 +488,20 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     // ── PSK auth (fallback) ───────────────────────────────────────────
     if !authenticated {
         tracing::info!("Auth: waiting for PSK...");
-        match receiver.next().await {
+        // a1 配套：pre-auth 裸等加固（超时=断连，防资源裸占——现网原为无限 await）。
+        let psk_frame = match tokio::time::timeout(
+            std::time::Duration::from_secs(server.ws_psk_wait_secs),
+            receiver.next(),
+        )
+        .await
+        {
+            Ok(m) => m,
+            Err(_) => {
+                tracing::warn!("a1: pre-auth PSK 等待超时({}s) → 断连", server.ws_psk_wait_secs);
+                return;
+            }
+        };
+        match psk_frame {
             Some(Ok(Message::Text(text))) => {
                 if let Some(ref a) = psk_auth
                     && (a.sign(peer_id.as_bytes()) == a.sign(text.as_bytes())
@@ -453,6 +554,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     let mut pending_auth: Option<PendingAuth> = None;
     // S0: 客户端方言声明（仅 RoomJoin 解析处赋值；None = v1）。
     let mut client_protocol_claim: Option<u32> = None;
+    // a2: 重挂票声明（同处赋值；一次性——取出后失败不回收）。
+    let mut resume_claim: Option<String> = None;
     let mut deferred: Vec<SignalingMessage> = Vec::new();
     let (room_id, role, device_id, session_identity) = loop {
         // Check for shutdown during RoomJoin
@@ -498,10 +601,20 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                     }
                 }
             }
-            None => match receiver.next().await {
-                Some(Ok(m)) => m,
-                Some(Err(_)) => continue,
-                None => return,
+            None => match tokio::time::timeout(
+                std::time::Duration::from_secs(server.ws_join_wait_secs),
+                receiver.next(),
+            )
+            .await
+            {
+                Ok(Some(Ok(m))) => m,
+                Ok(Some(Err(_))) => continue,
+                Ok(None) => return,
+                // a1 配套：已认证未 join 超时 → 断连（防占坑 DoS）。
+                Err(_) => {
+                    tracing::warn!("a1: 已认证未 join 超时({}s) → 断连", server.ws_join_wait_secs);
+                    return;
+                }
             },
         };
         match msg {
@@ -694,12 +807,14 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                     device_secret,
                     device_pubkey,
                     protocol,
+                    resume,
                     ..
                 }) = serde_json::from_str(&text_str)
                 {
                     // S0: 记 claim；方言过旧 → 4101（terminal 族）断连——低于 min 是
                     // 显式拒，不静默降级（静默 = 旧端点带新预期连上后行为漂移）。
                     client_protocol_claim = protocol;
+                    resume_claim = resume;
                     if protocol.unwrap_or(1)
                         < mediaservo_common::protocol::SIGNALING_PROTOCOL_MIN_SUPPORTED
                     {
@@ -875,6 +990,51 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     // S0: 协商 = min(client claim（缺省 v1), server max)——I5 能力门只读这个。
     let negotiated = mediaservo_common::protocol::negotiate_protocol(client_protocol_claim);
 
+    // a2: resume = 重挂索引——**永不替代认证**（PSK/JWT/设备挑战链在 join 漏斗已对本连接
+    // 全量重跑，D283 吊销即刻生效，SEC-1）。协议门 + 票号常数时间比对 + 即查即焚。
+    let mut resumed_from: Option<HeldResume> = None;
+    if let Some(n) = resume_claim.clone() {
+        if negotiated >= mediaservo_common::protocol::PROTOCOL_MIN_RESUME {
+            let key = (identity_key(&session_identity), room_id.clone());
+            let hit = server
+                .resume_table
+                .lock()
+                .ok()
+                .and_then(|mut t| {
+                    let ok = t
+                        .get(&key)
+                        .is_some_and(|h| h.negotiated == negotiated && ct_eq(n.as_bytes(), h.nonce.as_bytes()));
+                    ok.then(|| t.remove(&key)).flatten()
+                });
+            match hit {
+                Some(h) => {
+                    tracing::info!("a2: resume 命中 → peer={} 接管，延迟清理作废（票已轮换）", h.peer_id);
+                    peer_id = h.peer_id.clone();
+                    resumed_from = Some(h);
+                }
+                None => tracing::warn!("a2: resume 票无效/过期/方言不符 → 回落全量 join (room={room_id})"),
+            }
+        } else {
+            tracing::warn!("a2: resume 请求但 negotiated={negotiated}<3 → 忽略（回落全量 join）");
+        }
+    }
+    // a2: 同 (identity, room) 存在保留票却走全量 join = 接管——立即清旧 peer，
+    // 否则旧成员未删 → join_room 误报 RoomFull（票一次性丢失的自愈路径）。
+    if resumed_from.is_none() {
+        let key = (identity_key(&session_identity), room_id.clone());
+        let stale = server
+            .resume_table
+            .lock()
+            .ok()
+            .and_then(|mut t| t.remove(&key))
+            .map(|h| h.peer_id);
+        if let Some(old_peer) = stale {
+            tracing::info!("a2: 全量 join 接管 → 即刻清理旧挂起 peer={old_peer}");
+            let tx_now = server.get_or_create_channel(&room_id);
+            disconnect_session(server.clone(), old_peer, room_id.clone(), tx_now).await;
+        }
+    }
+
     // ── G3 RoomJoin 门（D-H11 矩阵 + 租户隔离）──────────────────────────
     // ① 账号会话禁止以 Host 角色入房（Host = 车端位，防账号抢占房间使车无法上线）。
     if role == PeerRole::Host
@@ -924,7 +1084,15 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         }
     }
 
-    // Join the room
+    // Join the room（a2: resume 接管 = 成员资格仍在保留窗内未被删，跳过 join；
+    // bindings/owners 由旧会话保留态自然维持）
+    if resumed_from.is_some() {
+        audit::log_event(AuditEvent::PeerJoin {
+            peer_id: peer_id.clone(),
+            room_id: room_id.clone(),
+            role: format!("{:?}", role),
+        });
+    } else {
     match server.room_manager.join_room(&room_id, &peer_id, &role) {
         Ok(()) => {
             // G2: 设备认证成功的会话在此绑定连接级身份（peer_id → device_id, D-H11）。
@@ -959,13 +1127,34 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         }
     }
 
+    }
     // Send RoomJoined ack
+    // a2: 车端设备会话（Host + Device 身份 + n≥3）下发一次性重挂票并挂载保留记录。
+    // resume 接管会话同样走这里 = **票轮换刷新**（旧票已在裁决时 burn，无双活窗口）。
+    let mut session_nonce: Option<String> = None;
+    if role == PeerRole::Host
+        && matches!(&session_identity, SessionIdentity::Device(_))
+        && negotiated >= mediaservo_common::protocol::PROTOCOL_MIN_RESUME
+    {
+        let n = gen_session_nonce();
+        let seq = server
+            .resume_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let Ok(mut t) = server.resume_table.lock() {
+            t.insert(
+                (identity_key(&session_identity), room_id.clone()),
+                HeldResume { peer_id: peer_id.clone(), nonce: n.clone(), negotiated, seq },
+            );
+            prune_resume(&mut t, RESUME_GLOBAL_CAP);
+        }
+        session_nonce = Some(n);
+    }
     let ack = SignalingMessage::RoomJoined {
         room_id: room_id.clone(),
         peer_id: peer_id.clone(),
         protocol: Some(negotiated),
         server_version: Some(env!("CARGO_PKG_VERSION").into()),
-        session_nonce: None,
+        session_nonce,
     };
     let _ = ws_sender.lock().await.send(Message::Text(send_msg(&ack).unwrap())).await;
 
@@ -988,6 +1177,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
 
     // Clone ws_sender for direct responses (SFU + G3 授权拒绝回复) and relay
     let direct_sender = Arc::clone(&ws_sender);
+    let hb_sender = Arc::clone(&ws_sender); // a1: ping task 用（ws_sender 即将被 pump move 走）
     let relay_sender = ws_sender;
 
     tracing::info!("Relay spawned: peer={} room={}", relay_peer_id, relay_room);
@@ -1054,14 +1244,51 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         }
     }
 
+    // a1（S0.5）：会话建立后 server 主动心跳（ack 后启动——握手窗口零控制帧噪声）。
+    //pong/ping 任一入站活性帧刷新静默戳；超预算 → hb 信号
+    // → relay 循环走与 Close 同一 break→既有清理管线（勿另建拆除路径）。
+    let last_alive = Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+    let (hb_tx, mut hb_rx) = tokio::sync::mpsc::channel::<()>(1);
+    if server.ws_ping_secs > 0 {
+        let (ptx, stamp, dead) = (Arc::clone(&hb_sender), Arc::clone(&last_alive), hb_tx.clone());
+        let (interval, miss) = (
+            std::time::Duration::from_secs(server.ws_ping_secs),
+            server.ws_pong_miss.max(1),
+        );
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(interval);
+            tick.tick().await; // 吞 t=0 就绪拍（ack 后首 ping 等一个间隔）
+            loop {
+                tick.tick().await;
+                let silent = match stamp.lock() {
+                    Ok(g) => g.elapsed(),
+                    Err(_) => return,
+                };
+                if pong_budget_exceeded(silent, interval, miss) {
+                    tracing::info!("a1: 入站活性静默 {silent:?} 超预算 → 合成断链");
+                    let _ = dead.try_send(());
+                    return;
+                }
+                if ptx.lock().await.send(Message::Ping("msrtc-hb".into())).await.is_err() {
+                    return; // 写路已断：主循环的读端会先行收尾清理
+                }
+            }
+        });
+    }
+
+
     // device-enroll §5.3: 挑战窗口延后的消息按序冲刷（鉴权通过后进入与实时消息同一管线）。
     let mut deferred_iter = deferred.into_iter();
     loop {
         let msg = match deferred_iter.next() {
             Some(d) => Message::Text(send_msg(&d).unwrap_or_default()),
-            None => match receiver.next().await {
-                Some(Ok(m)) => m,
-                _ => break,
+            None => tokio::select! {
+                // a1: 心跳判死 = 与对端 Close 同管线（break → 既有 disconnect 清理）。
+                _ = hb_rx.recv() => break,
+                r = receiver.next() => match r {
+                    Some(Ok(m)) => m,
+                    _ => break,
+                },
             },
         };
         // Check shutdown signal before processing each message
@@ -1360,12 +1587,75 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                 }
             }
             Message::Close(_) => break,
+            // a1: pong/ping 任一 = 对端存活证据（client 定期 ping 亦刷新，免 split-sink
+            // 自动 pong 冲刷依赖）。
+            Message::Pong(_) | Message::Ping(_) => {
+                if let Ok(mut g) = last_alive.lock() {
+                    *g = std::time::Instant::now();
+                }
+            }
             _ => {}
         }
     }
 
     relay_handle.abort();
 
+    // a2（S0.5）：本 (identity, room) 仍有未消费的保留票 → 清理进入保留窗
+    // （transport 存活 = resume 可重挂）；命中重挂 = 条目 burn-and-burn，延迟任务空转。
+    let hold_key = (identity_key(&session_identity), relay_room.clone());
+    let held_seq = server
+        .resume_table
+        .lock()
+        .ok()
+        .and_then(|t| t.get(&hold_key).filter(|h| h.peer_id == relay_peer_id).map(|h| h.seq));
+    match held_seq {
+        Some(seq) => {
+            tracing::info!(
+                "a2: peer={} 进入保留窗 ({}s)，等待重挂",
+                relay_peer_id, server.ws_resume_hold_secs
+            );
+            let (srv, peer, room, tx, key) = (
+                server.clone(),
+                relay_peer_id.clone(),
+                relay_room.clone(),
+                tx.clone(),
+                hold_key.clone(),
+            );
+            let hold = server.ws_resume_hold_secs;
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(hold)).await;
+                let expired = srv
+                    .resume_table
+                    .lock()
+                    .map(|mut t| {
+                        if t.get(&key).is_some_and(|h| h.seq == seq) {
+                            t.remove(&key);
+                            true
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
+                if expired {
+                    tracing::info!("a2: 保留窗到期无人重挂 → 执行延迟清理 peer={peer}");
+                    disconnect_session(srv, peer, room, tx).await;
+                } else {
+                    tracing::debug!("a2: 保留票已被接管/替换 — 跳过延迟清理 peer={peer}");
+                }
+            });
+        }
+        None => disconnect_session(server, relay_peer_id, relay_room, tx).await,
+    }
+}
+
+/// a2 拆离本体：SFU 跨房清理 / 设备解绑 / 离场 / 消费者断连 / router 补毁 / RoomLeave 广播。
+/// 三调用点（即刻 / 延迟 / 接管）共用一份——防多站点漂移。
+async fn disconnect_session(
+    server: SignalingServer,
+    relay_peer_id: String,
+    relay_room: String,
+    tx: tokio::sync::broadcast::Sender<String>,
+) {
     // Clean up SFU resources for the disconnecting peer
     #[cfg(feature = "sfu-mediasoup")]
     {
@@ -1499,6 +1789,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
 
     tracing::info!("Peer {} disconnected from room {}", relay_peer_id, relay_room);
 }
+
 
 /// I3 review: StatusReport 身份门判定 — 仅 Device 会话（车端）或 Host 角色（PSK 车端）
 /// 可上报整车状态；账号/其他会话拒绝（舱端不可伪造车端状态）。返回拒绝原因（None = 允许）。
@@ -2172,6 +2463,36 @@ mod tests {
         {
             SignalingServer::new(1 << 20, None)
         }
+    }
+
+    #[test]
+    fn resume_prune_and_ct_eq() {
+        use std::collections::HashMap;
+        let mut t: HashMap<(String, String), HeldResume> = HashMap::new();
+        for i in 0..35u64 {
+            t.insert(
+                (format!("dev{i}"), "r".into()),
+                HeldResume { peer_id: format!("p{i}"), nonce: "n".into(), negotiated: 3, seq: i },
+            );
+            prune_resume(&mut t, RESUME_GLOBAL_CAP);
+            assert!(t.len() <= RESUME_GLOBAL_CAP);
+        }
+        // 最旧 0..2 被逐出，最新必在场
+        assert!(!t.contains_key(&("dev0".to_string(), "r".to_string())));
+        assert!(t.contains_key(&("dev34".to_string(), "r".to_string())));
+        assert!(ct_eq(b"abc123", b"abc123"));
+        assert!(!ct_eq(b"abc123", b"abc124"));
+        assert!(!ct_eq(b"abc", b"abc123"));
+    }
+
+    #[test]
+    fn pong_budget_matrix() {
+        use std::time::Duration;
+        let i = Duration::from_secs(5);
+        assert!(!pong_budget_exceeded(Duration::from_secs(10), i, 2), "2 静默窗未越界");
+        assert!(!pong_budget_exceeded(Duration::from_secs(15), i, 2), "=15s 恰在预算线内(严格>)");
+        assert!(pong_budget_exceeded(Duration::from_secs(16), i, 2), "16s 越界=合成断链");
+        assert!(pong_budget_exceeded(Duration::from_secs(3), Duration::from_secs(1), 1), "1s×2 预算 3s<");
     }
 
     #[tokio::test]

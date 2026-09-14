@@ -753,7 +753,7 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 
 ## D273: web play 三态契约 + 无限韧性（2026-09-03, W1-W5）
 
-**决策**: 浏览器播放状态机收敛为互斥表达——`连接中…`（一切重试进行时：reconnect 无限指数退避 1→30s+full jitter + 轮次引擎 30s×3）/ `LIVE`（只绑媒体新鲜度，零增长 3 tick 即降级）/ `源离线`（链路健康但无新媒体；new_producer/producer_closed 唤醒重开预算，进等待前补发 room_join 拿 late-join 回放堵竞态洞）/ `连接失败`（红牌唯一合法源 = auth/授权族错误码 4000/4001/4002/4003/4010/4011 与用户主动动作）。非 auth 失败在任何预算下不得红牌。
+**决策**: 浏览器播放状态机收敛为互斥表达——`连接中…`（一切重试进行时：reconnect 无限指数退避 1→30s+full jitter + 轮次引擎 30s×3）/ `LIVE`（只绑媒体新鲜度，零增长 3 tick 即降级）/ `源离线`（链路健康但无新媒体；new_producer/producer_closed 唤醒重开预算，进等待前补发 room_join 拿 late-join 回放堵竞态洞）/ `连接失败`（红牌唯一合法源 = auth/授权/协议拒族错误码（S0.5 修订：以 sfu-client.ts `classifySfuError` 终局表为单一真源——现涵盖 4000-4003/4010/4011/4012[F8 拒控]/4101[协议拒低]，新增终局码只改表不改文）与用户主动动作）。非 auth 失败在任何预算下不得红牌。
 **原因**: 压测实证 server 崩溃-复活（oxmgr 退避可达分钟级）后永久红牌 = reconnect 5×31s 预算 + error 无终态逃逸 + 一次性 watchdog 三层死锁。同轮弯路：connectAndDrive 探测 socket「双保险」实测引入新失败模式（删）——**先做最小直修再考虑保险，保险面自身是失败面**。
 **影响**: ①server 新增错误码必须同步 classifySfuError 分类表 + roundtrip 单测（表驱动契约）；②watchdog/轮次引擎下沉 sfu-client，组件层零定时器——D270-a 抽包时三态契约随 API 文档外化；③旧 socket 摘 handlers 是消重连振荡的唯一正解（reconnecting 闩防并发）。
 

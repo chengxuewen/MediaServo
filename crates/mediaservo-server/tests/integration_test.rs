@@ -13,7 +13,7 @@ async fn integration_signaling_pipeline() {
     unsafe { std::env::set_var("MEDIASERVO_PSK", PSK) };
 
     #[cfg(feature = "sfu-mediasoup")]
-    let server = {
+    let mut server = {
         let sfu = std::sync::Arc::new(
             mediaservo_server::sfu::SfuManager::new_with_port(
                 mediaservo_server::sfu::random_udp_port(),
@@ -23,7 +23,8 @@ async fn integration_signaling_pipeline() {
         SignalingServer::new(sfu, 65536, None)
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
-    let server = SignalingServer::new(65536, None);
+    let mut server = SignalingServer::new(65536, None);
+    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；裸 JSON 读环不吃控制帧
     let mut server = server;
     server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));
     let app = signaling_router(server);
@@ -248,7 +249,7 @@ async fn test_auth_failure_integration() {
     unsafe { std::env::set_var("MEDIASERVO_PSK", PSK) };
 
     #[cfg(feature = "sfu-mediasoup")]
-    let server = {
+    let mut server = {
         let sfu = std::sync::Arc::new(
             mediaservo_server::sfu::SfuManager::new_with_port(
                 mediaservo_server::sfu::random_udp_port(),
@@ -258,7 +259,8 @@ async fn test_auth_failure_integration() {
         SignalingServer::new(sfu, 65536, None)
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
-    let server = SignalingServer::new(65536, None);
+    let mut server = SignalingServer::new(65536, None);
+    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；裸 JSON 读环不吃控制帧
     let mut server = server;
     server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));
     let app = signaling_router(server);
@@ -299,7 +301,7 @@ async fn e2e_video_frame_relay() {
     unsafe { std::env::set_var("MEDIASERVO_PSK", PSK) };
 
     #[cfg(feature = "sfu-mediasoup")]
-    let server = {
+    let mut server = {
         let sfu = std::sync::Arc::new(
             mediaservo_server::sfu::SfuManager::new_with_port(
                 mediaservo_server::sfu::random_udp_port(),
@@ -309,7 +311,8 @@ async fn e2e_video_frame_relay() {
         SignalingServer::new(sfu, 65536, None)
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
-    let server = SignalingServer::new(65536, None);
+    let mut server = SignalingServer::new(65536, None);
+    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；裸 JSON 读环不吃控制帧
     let mut server = server;
     server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));
     let app = signaling_router(server);
@@ -449,6 +452,7 @@ async fn spawn_server_with_devices(
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
     let mut server = SignalingServer::new(65536, None);
+    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；裸 JSON 读环不吃控制帧
     server.device_registry = std::sync::Arc::new(registry);
 
     let mut server = server;
@@ -755,6 +759,7 @@ async fn spawn_server_g3(devices_yaml: &str) -> (SignalingServer, String) {
         65536,
         Some(mediaservo_common::auth::JwtAuth::new(JWT_SECRET)),
     );
+    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉
     server.device_registry = std::sync::Arc::new(registry);
     let mut server = server;
     server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));

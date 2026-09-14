@@ -1602,3 +1602,17 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法（当下）**: 改包源码后手动 `cd www && pnpm build:admin` 再 `build web` 装配；产物字节核验（`grep -l "protocol:2" apps/admin/dist/assets/*.js`）。
 - **修法（在册待做）**: rglob 集合扩 `www/packages/*/src`（或 turbo 产物指纹）——小刀另案，勿混进功能批。
 - **验证**: 部署后 served bundle 名与 dist 新物一致（curl index.html 比对 hash 名）。
+
+## PIT-195: tokio interval 首拍立即就绪——心跳/定时器新建立即发帧污染握手窗 (2026-09-15, S0.5)
+- **症状**: server ack 后 ping task 的 `interval(5s)` 第一拍 t=0 即 Ready → 立即发 Ping；gateway_e2e `room_join_intercepted_not_forwarded`（2s 无上行泄漏窗）与并发协商测试吃到控制帧误红；device_enroll 读序同雷区。
+- **根因**: tokio::time::interval 语义=首拍 immediate（missed_tick 补偿设计）。
+- **解法**: 心跳类 timer 创建后循环前 `tick.tick().await` 吞首拍（server ping task + link session tick 双处）；或 `interval_at(Instant::now()+period, period)`。
+- **验证**: gateway_e2e 回 HEAD 同款 4 红集（diff 空）；heartbeat_e2e 正向窗仍 ≥2 ping。
+- **禁止**: 新加周期性控制帧不改既有测试读窗假设又不吞首拍。
+
+## PIT-196: tokio select biased 放在多分支泵=低优分支饿死高吞吐分支——gateway 上行假死 (2026-09-15, S0.5)
+- **症状**: run_session select 加 `biased;`（events→hi→lo）后，gateway_e2e reconnect/concurrent 两测试挂死超时——上行队列在 events 持续就绪时被饿死（biased 按序取第一个 ready）。
+- **根因**: biased 的序约只有在**网络出口 writer**（link session_task：hi>lo，入站支带 continue）语义成立；在"下行广播/上行泵"复合 select 里，events 是常驻热支，任何排它优先都会饿死兄弟支。
+- **解法**: gateway 层去 biased 回公平轮询（hi/lo 优先序契约只存于 link 出口层，注释钉死）；复合泵保持 random-ordered select。
+- **验证**: gateway_e2e 红集 == HEAD 基线；b3gw 复跑通过。
+- **禁止**: 见"顺序不对"就全局加 biased——先问这条 select 里有没有常驻就绪支。

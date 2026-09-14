@@ -590,7 +590,7 @@ mod tests {
         let smoke = read_asset("profiles/smoke.yaml").unwrap();
         assert!(smoke.is_some() && smoke.unwrap().contains("rtt_ms: 80"));
         let names = list_assets("profiles");
-        for n in ["smoke", "cell-edge", "bandwidth-wall", "remote-burst"] {
+        for n in ["smoke", "cell-edge", "bandwidth-wall", "remote-burst", "degraded"] {
             assert!(names.contains(&n.to_string()), "{n} ∈ {names:?}");
         }
         assert!(list_assets("scenarios").contains(&"example-cell-edge-40s".to_string()));

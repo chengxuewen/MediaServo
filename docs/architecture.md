@@ -459,7 +459,7 @@ if (permissions.surveillance) modules.push(SurveillanceModule); // 监控 tab
 
 > 📄 详见 [modules/07-protocols.md](/docs/modules/07-protocols.md)
 
-协议栈分五层：内部 IPC（FlatBuffers 零拷贝）、第三方平台集成（C FFI 静态链接）、宿主平台集成（napi-rs 原生模块）、后台控制面（gRPC + REST）和媒体数据面（RTP/SRT/WebRTC）。信令采用自研 WebSocket（Phase 1）+ MQTT 5.0（Phase 2+ 车端）双轨演进。
+协议栈分五层：内部 IPC（FlatBuffers 零拷贝）、第三方平台集成（C FFI 静态链接）、宿主平台集成（napi-rs 原生模块）、后台控制面（gRPC + REST）和媒体数据面（RTP/SRT/WebRTC）。信令采用自研 WebSocket 并长期演进（v2=控制域、v3=会话续期，S0/S0.5 已落地）；MQTT 5.0 通道制**不再是默认双轨承诺**——出现离线指令下发/大规模 presence 场景才触发评估，前置闸=「会话状态外置」改造（本仓「连接=会话」模型与 broker 总线模型不可混用）。裁决=F13/D289（预约入账）。
 
 | 层次 | 协议 | 说明 |
 |------|------|------|
@@ -467,7 +467,7 @@ if (permissions.surveillance) modules.push(SurveillanceModule); // 监控 tab
 | **第三方平台** | C FFI | Rust → C 静态链接 |
 | **宿主平台** | napi-rs | Rust → Node.js 原生模块 |
 | **后台服务** | gRPC (protobuf) | 控制面 API |
-| **信令** | 自研 WebSocket (Phase 1) / MQTT 5.0 (Phase 2+ 车端) | 房间管理、SDP/ICE 交换，详见 [信令架构文档](modules/10-signaling-architecture.md) |
+| **信令** | 自研 WebSocket（长期；MQTT=触发条款，D289 改判 D74 双轨承诺） | 房间管理、SDP/ICE 交换，详见 [信令架构文档](modules/10-signaling-architecture.md) |
 | **媒体传输** | RTP/RTCP, SRT, WebRTC | 数据面 |
 | **客户端 ⇄ 后台** | gRPC + REST | 认证、权限拉取、配置同步 |
 | **未来探索** | MoQ (Media-over-QUIC) | Phase 3 评估: 低延迟媒体传输, WebTransport |
@@ -498,7 +498,7 @@ Phase 2+ 计划 crates: mediaservo-component, mediaservo-transport, mediaservo-s
 | **WebRTC 栈** | webrtc-sys (libwebrtc FFI, 默认, D137+D139) → webrtc-rs (Phase 0 struct 骨架, 纯 Rust, D32) → str0m (Phase 2+, Embed, D11) | 多后端编译期 feature gate 分发 (D139-D140, D144-D151) |
 | **GPU 编码** | libloading 桥接 NVENC/VAAPI/VT | 避免编译时绑定 GPU SDK |
 | **编解码** | GStreamer (gst-plugins-rs) | 覆盖全，生态成熟 |
-| **信令** | 自研 WebSocket (Phase 1) + MQTT 5.0 (Phase 2+) | 统一 Room + Protobuf 双格式 (D52-D53) |
+| **信令** | 自研 WebSocket（长期；MQTT=触发条款，D289） | 统一 Room + Protobuf 双格式 (D52-D53) |
 | **内部协议** | FlatBuffers | 零拷贝、多语言 |
 | **桌面 GUI** | Tauri v2 + React | 轻量、Rust 后端、跨平台 |
 | **嵌入式 Web** | axum + 静态 HTML | Host 配置页，无框架依赖 |
