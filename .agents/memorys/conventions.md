@@ -572,3 +572,5 @@ ff_.*_muxer` 应为 0（demuxer-only 实证）。
 
 - **约束**: ① 新设备准入一律 pubkey 形：identity.json = `{device_id}`，私钥复用 `etc/link/signing.pem`（一钥两用）；「web 注册→抄 secret→写 host」分发流对新设备退役（C33 secret 语义仅存存量 secret 形过渡期，一个周期后删除）。② 准入两档：`ALLOW_DEV_ENROLL=1`=静默收录（专网档）；默认=pending 队列 + admin 批准（C33 角色门；pending 内存不落盘，设备退避重报=自然刷新，无 TTL——重启清空为契约行为）。③ 签名字节合同 `nonce(32B) ‖ device_id ‖ room_id`，verify_strict，拒绝面统一 4010 防枚举（devices.rs review #1 纪律延续），challenge 5s 超时=断连。④ 吊销=删表行（存量会话不生效、下次连接回落 pending/拒——C33③ 语义保留）。⑤ 部署断言新码生效必须打真实运行体（PIT-191：`/proc/<pid>/exe` + 二进制串扫描），装配入口用 `build:deploy server`（品牌改名形）。
 - **检查**: `grep -n "public_key" crates/mediaservo-server/src/devices.rs` 在位；新 init 的实例 `python3 -c "import json;print(open('identity.json').read())"` 无 secret 字段；`curl :9800/api/admin/devices/pending` 结构 `{pending,count}`。
+
+## C45 镜像（2026-09-14，全文见主仓 conventions.md C45 与主仓 .agents/rules/common/docs-convention.md）: docs 树规范——计划=交付记录单源 PLAN.md、状态生命周期永不删除、交付归档 _archive/、索引同笔登记、agent 草稿禁入 docs。本仓 docs/ 同规生效（modules/reference/sdd 分区；历史叙述豁免）。
