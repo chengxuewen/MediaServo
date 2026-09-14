@@ -171,6 +171,7 @@ async fn ws_auth_and_join<S>(
             room_id: room_id.into(),
             peer_role: role,
             stream_id: None,
+            resume: None,
         })
         .unwrap();
     ws.send(WsMsg::Text(join.into())).await.unwrap();

@@ -90,6 +90,7 @@ async fn mock_handshake(listener: &TcpListener) -> WebSocketStream<TcpStream> {
                     peer_id: VEHICLE_PEER.into(),
                     protocol: None,
                     server_version: None,
+                    session_nonce: None,
                 })
                 .unwrap()
                 .into(),

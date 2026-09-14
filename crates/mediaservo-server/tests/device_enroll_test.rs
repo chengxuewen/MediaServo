@@ -122,6 +122,7 @@ async fn join_pubkey(ws: &mut Ws, device: Option<&str>, secret: Option<&str>) {
             device_pubkey: Some(VK.into()),
             protocol: None,
             client_version: None,
+            resume: None,
         },
     )
     .await;
@@ -345,6 +346,7 @@ async fn credential_shape_violations_rejected_4000() {
             device_pubkey: Some(VK.into()),
             protocol: None,
             client_version: None,
+            resume: None,
         },
     )
     .await;
@@ -375,6 +377,7 @@ async fn secret_legacy_path_regression() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         },
     )
     .await;
@@ -393,6 +396,7 @@ async fn secret_legacy_path_regression() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         },
     )
     .await;

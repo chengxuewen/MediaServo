@@ -150,6 +150,7 @@ impl State {
                         // S0: 子进程看到全链上限 = min(子声明(缺省 v1), 上游谈成)。
                         protocol: Some(child_claim.unwrap_or(1).min(self.upstream_negotiated)),
                         server_version: None,
+                        session_nonce: None,
                     })
                 } else {
                     tracing::warn!(conn_id, "RoomJoin 拦截时网关尚未连上 server");
@@ -450,11 +451,54 @@ pub struct RemoteStatus {
     pub peer_id: String,
 }
 
+/// a3（S0.5）：上行双队列。hi = 无界（认证/控制/终态——量小且有界增长，不丢）；
+/// lo = 有界尽力（封闭白名单 {StatusReport}，满=丢弃+计数——丢点放**入口**才有新鲜度，
+/// 积压在网关内存同样过期）。网络拥塞背压下的真丢点在 link session 的 lo（同形）。
+#[derive(Clone)]
+struct UpstreamQueue {
+    hi: mpsc::UnboundedSender<SignalingMessage>,
+    lo: mpsc::Sender<SignalingMessage>,
+    dropped: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl UpstreamQueue {
+    fn new() -> (
+        Self,
+        mpsc::UnboundedReceiver<SignalingMessage>,
+        mpsc::Receiver<SignalingMessage>,
+    ) {
+        let (hi, hi_rx) = mpsc::unbounded_channel();
+        let (lo, lo_rx) = mpsc::channel(16);
+        (
+            Self { hi, lo, dropped: Arc::new(std::sync::atomic::AtomicU64::new(0)) },
+            hi_rx,
+            lo_rx,
+        )
+    }
+
+    /// 路由入队：白名单 → lo try_send（满丢+计数）；其余 → hi（无界，仅断链 Err）。
+    fn push(&self, msg: SignalingMessage) -> Result<(), String> {
+        if matches!(msg, SignalingMessage::StatusReport { .. }) {
+            if self.lo.try_send(msg).is_err() {
+                let n = self
+                    .dropped
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    + 1;
+                if n == 1 || n % 64 == 0 {
+                    tracing::warn!("a3: 网关低优队列满，StatusReport 丢弃（累计 {n}）");
+                }
+            }
+            return Ok(());
+        }
+        self.hi.send(msg).map_err(|_| "upstream closed".into())
+    }
+}
+
 /// 网关运行期句柄（E3）— 监控快照 + 远端上报通道。
 #[derive(Clone)]
 pub struct GatewayHandle {
     state: Arc<Mutex<State>>,
-    remote_tx: mpsc::UnboundedSender<SignalingMessage>,
+    upstream: UpstreamQueue,
 }
 
 impl GatewayHandle {
@@ -490,9 +534,7 @@ impl GatewayHandle {
         if !st.joined {
             return Err("gateway not connected to server".into());
         }
-        self.remote_tx
-            .send(msg)
-            .map_err(|_| "remote session closed".into())
+        self.upstream.push(msg).map_err(|_| "remote session closed".into())
     }
 
     /// 取走待应用 ConfigPush（E4；None = 无待应用；最新覆盖旧值）。
@@ -555,12 +597,12 @@ pub async fn run_gateway(config: GatewayConfig) -> Result<(u16, GatewayHandle), 
         vehicle_room: config.room.clone(),
         pending_config: None,
     }));
-    let (remote_tx, remote_rx) = mpsc::unbounded_channel::<SignalingMessage>();
-    let handle = GatewayHandle { state: Arc::clone(&state), remote_tx: remote_tx.clone() };
+    let (upstream, remote_hi_rx, remote_lo_rx) = UpstreamQueue::new();
+    let handle = GatewayHandle { state: Arc::clone(&state), upstream: upstream.clone() };
 
     // 本地 accept 循环
     let accept_state = Arc::clone(&state);
-    let accept_tx = remote_tx.clone();
+    let accept_tx = upstream.clone();
     tokio::spawn(async move {
         loop {
             let (stream, peer) = match listener.accept().await {
@@ -601,7 +643,7 @@ pub async fn run_gateway(config: GatewayConfig) -> Result<(u16, GatewayHandle), 
     });
 
     // 远端连接 + 重连循环
-    tokio::spawn(remote_loop(config, state, remote_rx));
+    tokio::spawn(remote_loop(config, state, remote_hi_rx, remote_lo_rx));
 
     Ok((port, handle))
 }
@@ -612,7 +654,7 @@ async fn conn_task(
     ws: WebSocketStream<TcpStream>,
     mut out_rx: mpsc::UnboundedReceiver<LocalEnvelope>,
     state: Arc<Mutex<State>>,
-    remote_tx: mpsc::UnboundedSender<SignalingMessage>,
+    remote_tx: UpstreamQueue,
 ) {
     let (mut ws_tx, mut ws_rx) = ws.split();
     loop {
@@ -641,7 +683,7 @@ async fn conn_task(
                             }
                             match st.upstream(conn_id, env.msg) {
                                 UpstreamAction::Forward(msg) => {
-                                    if remote_tx.send(msg).is_err() {
+                                    if remote_tx.push(msg).is_err() {
                                         // 远端任务已退出（网关关闭）：回滚本请求的
                                         // pending 槽（锁内唯一 push，pop_back 安全）
                                         st.pending.pop_back();
@@ -689,7 +731,7 @@ async fn conn_task(
     if let Some((peer, room)) = gone {
         tracing::info!(conn_id, "DownstreamGone 上报: peer={peer} room={room}");
         if remote_tx
-            .send(SignalingMessage::DownstreamGone { peer_id: peer, room_id: room })
+            .push(SignalingMessage::DownstreamGone { peer_id: peer, room_id: room })
             .is_err()
         {
             tracing::debug!(conn_id, "DownstreamGone 丢弃（上游已断，整车反查将兜底）");
@@ -703,7 +745,8 @@ async fn conn_task(
 async fn remote_loop(
     config: GatewayConfig,
     state: Arc<Mutex<State>>,
-    mut remote_rx: mpsc::UnboundedReceiver<SignalingMessage>,
+    mut remote_hi_rx: mpsc::UnboundedReceiver<SignalingMessage>,
+    mut remote_lo_rx: mpsc::Receiver<SignalingMessage>,
 ) {
     let mut client = SignalClient::new(&config.remote_url, &config.psk, &config.room, PeerRole::Host);
     // device-enroll T7: 设备身份随 Join 携带 device_pubkey（None = PSK 路径）
@@ -750,10 +793,11 @@ async fn remote_loop(
             tracing::info!(children = notify.len(), "H6: 上游已恢复，要求下游重建 SFU 会话");
             reconnected = false;
         }
-        run_session(session, &state, &mut remote_rx).await;
+        run_session(session, &state, &mut remote_hi_rx, &mut remote_lo_rx).await;
         // 断线：清空与远端会话绑定的状态 + 丢弃在途上行（重连后按新会话处理）
         lock_state(&state).reset_remote();
-        while remote_rx.try_recv().is_ok() {}
+        while remote_hi_rx.try_recv().is_ok() {}
+        while remote_lo_rx.try_recv().is_ok() {}
         reconnected = true;
         tracing::info!("远端断开，重新连接…");
     }
@@ -763,11 +807,13 @@ async fn remote_loop(
 async fn run_session(
     session: SignalSession,
     state: &Arc<Mutex<State>>,
-    remote_rx: &mut mpsc::UnboundedReceiver<SignalingMessage>,
+    remote_hi_rx: &mut mpsc::UnboundedReceiver<SignalingMessage>,
+    remote_lo_rx: &mut mpsc::Receiver<SignalingMessage>,
 ) {
     let mut events = session.events();
     loop {
         tokio::select! {
+            biased;
             ev = events.recv() => match ev {
                 Ok(SignalEvent::Message(msg)) => {
                     let targets = lock_state(state).downstream(msg);
@@ -792,7 +838,8 @@ async fn run_session(
                 }
                 Err(_) => break, // 会话通道关闭 = 断开
             },
-            msg = remote_rx.recv() => match msg {
+            // a3：hi 先于 lo 出队（与 link 层同序约）；lo 关闭不终结会话。
+            msg = remote_hi_rx.recv(), if !remote_hi_rx.is_closed() => match msg {
                 Some(m) => {
                     if let Err(e) = session.send(m).await {
                         tracing::warn!("远端发送失败: {e}");
@@ -800,6 +847,14 @@ async fn run_session(
                     }
                 }
                 None => return, // 网关关闭
+            },
+            msg = remote_lo_rx.recv(), if !remote_lo_rx.is_closed() => {
+                if let Some(m) = msg {
+                    if let Err(e) = session.send(m).await {
+                        tracing::warn!("远端发送失败: {e}");
+                        break;
+                    }
+                }
             },
         }
     }
@@ -873,8 +928,11 @@ mod tests {
 
 
     fn handle_for(state: Arc<Mutex<State>>) -> (GatewayHandle, mpsc::UnboundedReceiver<SignalingMessage>) {
-        let (tx, rx) = mpsc::unbounded_channel();
-        (GatewayHandle { state, remote_tx: tx }, rx)
+        let (upstream, hi_rx, lo_rx) = UpstreamQueue::new();
+        // 同步测试无 runtime 合并双队列：本组测试只喂 hi（Sdp/终态族）；
+        // lo receiver 持活避免 try_send Closed 假计数。
+        std::mem::forget(lo_rx);
+        (GatewayHandle { state, upstream }, hi_rx)
     }
 
     #[test]

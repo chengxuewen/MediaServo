@@ -246,6 +246,8 @@ impl SignalClient {
             // S0: 声明本端方言上限（server 取 min 回谈成值）。
             protocol: Some(SIGNALING_PROTOCOL_VERSION),
             client_version: None,
+            // a2: v1 resume 发起方 = B3 接线（此前恒 None = 全量 join）。
+            resume: None,
         };
         let (join_json, unwrap) = match &self.gateway_src {
             Some(src) => (
@@ -283,14 +285,19 @@ impl SignalClient {
             _ => joined,
         };
         match joined {
-            SignalingMessage::RoomJoined { room_id, peer_id, protocol, .. } => {
+            SignalingMessage::RoomJoined { room_id, peer_id, protocol, session_nonce, .. } => {
                 let (events_tx, _) = broadcast::channel(64);
-                let (send_tx, send_rx) = mpsc::unbounded_channel();
+                // a3（S0.5）：双有界队列——hi（认证/控制/一切非白名单）背压不丢；
+                // lo（封闭白名单 {StatusReport}）尽力而为，满=丢弃+计数。
+                let (hi_tx, hi_rx) = mpsc::channel(64);
+                let (lo_tx, lo_rx) = mpsc::channel(16);
+                let dropped = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
                 let on_disconnect = DisconnectSlot::default();
                 let task = tokio::spawn(session_task(
                     receiver,
                     sender,
-                    send_rx,
+                    hi_rx,
+                    lo_rx,
                     events_tx.clone(),
                     on_disconnect.clone(),
                     self.gateway_src.clone(),
@@ -300,7 +307,10 @@ impl SignalClient {
                     room_id,
                     peer_id,
                     negotiated: negotiate_protocol(protocol),
-                    send_tx,
+                    session_nonce,
+                    hi_tx,
+                    lo_tx,
+                    dropped,
                     events_tx,
                     task,
                     on_disconnect,
@@ -421,7 +431,13 @@ pub struct SignalSession {
     peer_id: String,
     /// S0：协商谈成的方言版本（server RoomJoined.protocol；缺省 = v1）。
     negotiated: u32,
-    send_tx: mpsc::UnboundedSender<SignalingMessage>,
+    /// a2：一次性重挂票（negotiated≥3 时 server 下发；消费即焚由 server 端保证）。
+    session_nonce: Option<String>,
+    /// a3：高优有界队列（认证/控制/一切非白名单）。
+    hi_tx: mpsc::Sender<SignalingMessage>,
+    /// a3：低优尽力队列（封闭白名单 {StatusReport}）——满即丢，dropped 计数。
+    lo_tx: mpsc::Sender<SignalingMessage>,
+    dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
     events_tx: broadcast::Sender<SignalEvent>,
     task: tokio::task::JoinHandle<()>,
     on_disconnect: DisconnectSlot,
@@ -451,9 +467,24 @@ impl SignalSession {
     }
 
     /// 发送一条信令消息（JSON 序列化后经 WS 发出）。
+    /// a3 路由：白名单（StatusReport）→ lo try_send（满 = 丢弃+计数，拥塞期保新鲜度）；
+    /// 其余 → hi await 背压（认证/控制/终态永不丢）。
     pub async fn send(&self, msg: SignalingMessage) -> Result<(), LinkError> {
-        self.send_tx
+        if is_low_priority(&msg) {
+            if self.lo_tx.try_send(msg).is_err() {
+                let n = self
+                    .dropped
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    + 1;
+                if n == 1 || n % 64 == 0 {
+                    tracing::warn!("a3: 低优队列满，StatusReport 丢弃（累计 {n}）");
+                }
+            }
+            return Ok(());
+        }
+        self.hi_tx
             .send(msg)
+            .await
             .map_err(|_| LinkError::Signal("session closed".into()))
     }
 
@@ -473,9 +504,21 @@ impl SignalSession {
         self.negotiated
     }
 
+    /// a2: 上次会话下发的重挂票（None = 未谈成 v3；使用方 B3 resume 链接线）。
+    #[must_use]
+    pub fn session_nonce(&self) -> Option<&str> {
+        self.session_nonce.as_deref()
+    }
+
+    /// a3: 低优累计丢弃数（SLA 测量面；StatusReport 透传位届时接）。
+    #[must_use]
+    pub fn dropped_low(&self) -> u64 {
+        self.dropped.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// 关闭会话：停止发送通道并等待后台任务退出。
     pub async fn close(self) -> Result<(), LinkError> {
-        drop(self.send_tx); // 触发后台任务退出
+        drop((self.hi_tx, self.lo_tx)); // 双通道齐关 → writer 退出；单端 None 不误判
         let _ = self.task.await;
         Ok(())
     }
@@ -507,21 +550,33 @@ async fn read_join_response(
     }
 }
 
-/// 后台任务：WS 读 → events；send 通道 → WS 写。
+/// a3（S0.5）：封闭丢弃白名单——v1 仅 {StatusReport}（高频、丢一条无硬害、下一条覆盖）。
+/// 新条目必须显式列入并复核「可丢」论证。
+#[must_use]
+fn is_low_priority(msg: &SignalingMessage) -> bool {
+    matches!(msg, SignalingMessage::StatusReport { .. })
+}
+
+/// 后台任务：WS 读 → events；双上行队列（hi 优先出队 / lo 尽力）→ WS 写。
 /// D2 网关模式：gateway_src = Some(src) 时收发均包 LocalEnvelope 信封。
-#[allow(clippy::too_many_arguments)]
 async fn session_task(
     mut ws_rx: futures_util::stream::SplitStream<WsStream>,
     mut ws_tx: futures_util::stream::SplitSink<WsStream, Message>,
-    mut send_rx: mpsc::UnboundedReceiver<SignalingMessage>,
+    mut hi_rx: mpsc::Receiver<SignalingMessage>,
+    mut lo_rx: mpsc::Receiver<SignalingMessage>,
     events_tx: broadcast::Sender<SignalEvent>,
     on_disconnect: DisconnectSlot,
     gateway_src: Option<String>,
 ) {
     loop {
-        tokio::select! {
-            msg = ws_rx.next() => {
-                match msg {
+        // biased：hi 先于 lo 出队——恢复突发期低优不插队认证/控制（应用层 HoL 解药；
+        // kernel/TCP framing HoL 归急停双路 a4，死链判定归 a1 心跳，见 PLAN §11.2 边界）。
+        let outbound = tokio::select! {
+            biased;
+            m = hi_rx.recv() => m,
+            m = lo_rx.recv() => m,
+            ws = ws_rx.next() => {
+                match ws {
                     Some(Ok(Message::Text(text))) => {
                         let parsed = match &gateway_src {
                             Some(_) => serde_json::from_str::<LocalEnvelope>(&text)
@@ -540,37 +595,32 @@ async fn session_task(
                         fire_disconnect(&on_disconnect);
                         break;
                     }
-                    Some(Ok(_)) => {} // 忽略非文本
+                    Some(Ok(_)) => {} // 忽略非文本（含入站 pong——tokio-tungstenite 已自动应答）
                     Some(Err(e)) => {
                         let _ = events_tx.send(SignalEvent::Error(e.to_string()));
                         fire_disconnect(&on_disconnect);
                         break;
                     }
                 }
+                continue;
             }
-            msg = send_rx.recv() => {
-                match msg {
-                    Some(m) => {
-                        let json = match &gateway_src {
-                            Some(src) => serde_json::to_string(&LocalEnvelope { src: src.clone(), msg: m })
-                                .map_err(|e| format!("serialize envelope: {e}")),
-                            None => serde_json::to_string(&m).map_err(|e| format!("serialize: {e}")),
-                        };
-                        let json = match json {
-                            Ok(j) => j,
-                            Err(e) => {
-                                let _ = events_tx.send(SignalEvent::Error(e));
-                                continue;
-                            }
-                        };
-                        if ws_tx.send(Message::Text(json.into())).await.is_err() {
-                            fire_disconnect(&on_disconnect);
-                            break;
-                        }
-                    }
-                    None => break, // 会话主动关闭，不触发 on_disconnect
-                }
+        };
+        let Some(m) = outbound else { break }; // 双 sender 同坠 = 会话主动关闭，不触发断线回调
+        let json = match &gateway_src {
+            Some(src) => serde_json::to_string(&LocalEnvelope { src: src.clone(), msg: m })
+                .map_err(|e| format!("serialize envelope: {e}")),
+            None => serde_json::to_string(&m).map_err(|e| format!("serialize: {e}")),
+        };
+        let json = match json {
+            Ok(j) => j,
+            Err(e) => {
+                let _ = events_tx.send(SignalEvent::Error(e));
+                continue;
             }
+        };
+        if ws_tx.send(Message::Text(json.into())).await.is_err() {
+            fire_disconnect(&on_disconnect);
+            break;
         }
     }
 }

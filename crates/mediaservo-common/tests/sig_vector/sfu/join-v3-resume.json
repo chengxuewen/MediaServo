@@ -1,0 +1,15 @@
+{
+  "name": "join-v3-resume",
+  "kind": "signal",
+  "wire": {
+    "type": "room_join",
+    "room_id": "vehicle_test",
+    "peer_role": "host",
+    "protocol": 3,
+    "resume": "kX3vOnceTicket"
+  },
+  "checks": {
+    "protocol": 3,
+    "resume": "kX3vOnceTicket"
+  }
+}

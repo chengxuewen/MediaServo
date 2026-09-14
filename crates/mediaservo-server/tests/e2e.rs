@@ -193,6 +193,7 @@ fn protocol_roundtrip_room_join() {
         device_pubkey: None,
         protocol: None,
         client_version: None,
+        resume: None,
     };
     let json = serde_json::to_string(&msg).unwrap();
     let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
@@ -212,6 +213,7 @@ fn protocol_roundtrip_room_joined() {
         peer_id: "peer-abc".into(),
         protocol: None,
         server_version: None,
+        session_nonce: None,
     };
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"room_joined""#));

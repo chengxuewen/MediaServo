@@ -1,0 +1,15 @@
+{
+  "name": "joined-v3-nonce",
+  "kind": "signal",
+  "wire": {
+    "type": "room_joined",
+    "room_id": "vehicle_test",
+    "peer_id": "host-1",
+    "protocol": 3,
+    "session_nonce": "yT9qOnceTicket"
+  },
+  "checks": {
+    "protocol": 3,
+    "session_nonce": "yT9qOnceTicket"
+  }
+}

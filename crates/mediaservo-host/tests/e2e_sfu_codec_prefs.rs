@@ -133,6 +133,7 @@ async fn negotiate_with_prefs(
         room_id: format!("codec-prefs-room-{tag}").into(),
         peer_role: PeerRole::Host,
         stream_id: None,
+        resume: None,
     })
     .unwrap();
     ws_tx.send(WsMsg::Text(join.into())).await.unwrap();

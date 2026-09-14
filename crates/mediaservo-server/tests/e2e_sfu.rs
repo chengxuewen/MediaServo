@@ -69,6 +69,7 @@ async fn e2e_sfu_lifecycle() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -125,6 +126,7 @@ async fn e2e_sfu_lifecycle() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -213,6 +215,7 @@ async fn e2e_sfu_cleanup_on_disconnect() {
         // S0: 本 helper 代表新端点发声（data_domain/F8 门控需 negotiated>=2）。
         protocol: Some(2),
         client_version: None,
+        resume: None,
     })
     .unwrap();
     ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -283,6 +286,7 @@ async fn e2e_sfu_consume_pipeline() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         }).unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
         let joined = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
@@ -353,6 +357,7 @@ async fn e2e_sfu_consume_pipeline() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         }).unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
         let joined = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
@@ -488,6 +493,7 @@ async fn g3_auth_and_join(ws: &mut KeepAliveWs, room: &str, role: PeerRole) {
         // S0: 本 helper 代表新端点发声（data_domain/F8 门控需 negotiated>=2）。
         protocol: Some(2),
         client_version: None,
+        resume: None,
     })
     .unwrap();
     ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -579,6 +585,7 @@ async fn e2e_sfu_role_enforcement() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -794,6 +801,7 @@ async fn e2e_sfu_role_enforcement() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -874,6 +882,7 @@ async fn e2e_sfu_data_domain() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -1225,6 +1234,7 @@ async fn e2e_audio_room_device_identity() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
@@ -1264,6 +1274,7 @@ async fn e2e_audio_room_device_identity() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         })
         .unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();

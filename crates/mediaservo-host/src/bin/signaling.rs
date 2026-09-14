@@ -106,6 +106,7 @@ impl SignalingClient {
             // legacy HMAC 对自洽：保持 v1 发声（不声明方言）。
             protocol: None,
             client_version: None,
+            resume: None,
         };
         let join_json = serde_json::to_string(&join_msg).map_err(|e| {
             CoreError::ConfigParse(format!("serialize RoomJoin: {}", e))

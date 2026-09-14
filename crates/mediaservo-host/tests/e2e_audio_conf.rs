@@ -80,6 +80,7 @@ where
         room_id: room_id.into(),
         peer_role: role,
         stream_id: None,
+        resume: None,
     })
     .unwrap();
     ws.send(WsMsg::Text(join)).await.unwrap();

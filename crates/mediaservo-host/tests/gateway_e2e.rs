@@ -85,6 +85,7 @@ async fn mock_handshake(listener: &TcpListener) -> (WsServer, String, PeerRole) 
             peer_id: VEHICLE_PEER.into(),
             protocol: None,
             server_version: None,
+            session_nonce: None,
         })
         .unwrap()
         .into(),
@@ -127,6 +128,7 @@ async fn join<S: WsIo>(ws: &mut WebSocketStream<S>, room: &str) -> String {
                 room_id: room.into(),
                 peer_role: PeerRole::Host,
                 stream_id: None,
+                resume: None,
             },
         )))
         .await
@@ -806,6 +808,7 @@ async fn remote_join_carries_device_credentials() {
                 peer_id: VEHICLE_PEER.into(),
                 protocol: None,
                 server_version: None,
+                session_nonce: None,
             })
             .unwrap(),
         ))

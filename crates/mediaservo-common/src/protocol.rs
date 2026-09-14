@@ -8,13 +8,16 @@ use serde::{Deserialize, Serialize};
 
 // ── S0: 协议版本协商（不变式 I5：能力门只看协商后的整数；包版本/协议整数/schema·ABI
 // 三平面分离）。v1 = wire 无 protocol 字段（老形逐字节不变）；v2 = datachannel.control
-// 域（F8 控制 DC 门）开放。（v3 = 会话续期，S0.5 追加——整数单调性是「方言精确」的载体。）
+// 域（F8 控制 DC 门）开放；v3 = 会话续期（S0.5：resume/session_nonce——整数单调性是
+// 「方言精确」的载体：resume 必须占代际，否则同一方言号两套语义）。
 /// 本仓端点支持的最高方言。
-pub const SIGNALING_PROTOCOL_VERSION: u32 = 2;
+pub const SIGNALING_PROTOCOL_VERSION: u32 = 3;
 /// 可接受连接的最低方言（不声明 protocol 的旧客户端 = v1；低于此值 → Error 4101）。
 pub const SIGNALING_PROTOCOL_MIN_SUPPORTED: u32 = 1;
 /// 开控制 DC 域（create_data_producer）所需最低方言。
 pub const PROTOCOL_MIN_CONTROL_DC: u32 = 2;
+/// 会话续期（resume 请求被受理）所需最低方言。
+pub const PROTOCOL_MIN_RESUME: u32 = 3;
 
 /// 协商结果 = min(客户端声明（None = v1），server 最高)。拒低形态由调用方先行
 /// （claim < MIN_SUPPORTED → 4101），此处只收敛。
@@ -57,6 +60,10 @@ pub enum SignalingMessage {
         /// 观测位：客户端自身版本串，不参与任何门控判定。
         #[serde(skip_serializing_if = "Option::is_none")]
         client_version: Option<String>,
+        /// a2 会话续期（additive，仅 negotiated≥3 被消费）：携带上次下发的 session_nonce
+        /// 作重挂索引——**不是凭证**，认证链照常重跑（D283 吊销即刻生效）。缺省 = 全量 join。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resume: Option<String>,
     },
 
     /// Room join acknowledged by Server.
@@ -69,6 +76,10 @@ pub enum SignalingMessage {
         /// 观测位：server 版本串。
         #[serde(skip_serializing_if = "Option::is_none")]
         server_version: Option<String>,
+        /// a2：一次性重挂票（≥32B CSPRNG base64；仅 negotiated≥3 下发）。只索引重挂会话
+        /// 快照——不绑源 IP（换 IP = 设计场景），即发即用、消费即焚。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_nonce: Option<String>,
     },
 
     /// A peer has left the room. Broadcast by Server.
@@ -604,6 +615,7 @@ mod tests {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"room_join""#));
@@ -625,6 +637,7 @@ mod tests {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"room_join""#));
@@ -658,6 +671,7 @@ mod tests {
             device_pubkey: Some("A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=".into()),
             protocol: None,
             client_version: None,
+            resume: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""device_pubkey":"A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=""#));
@@ -688,6 +702,7 @@ mod tests {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(!json.contains("device_pubkey"));
@@ -791,6 +806,7 @@ mod tests {
             peer_id: "peer-7".into(),
             protocol: None,
             server_version: None,
+            session_nonce: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"room_joined""#));

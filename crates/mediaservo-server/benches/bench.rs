@@ -55,6 +55,7 @@ fn main() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         };
         serde_json::to_string(&msg).unwrap();
     });

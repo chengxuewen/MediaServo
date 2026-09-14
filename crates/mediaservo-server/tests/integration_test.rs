@@ -58,6 +58,7 @@ async fn integration_signaling_pipeline() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         }).unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
         let joined = ws.next().await.unwrap().unwrap();
@@ -92,6 +93,7 @@ async fn integration_signaling_pipeline() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         }).unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
         let joined = ws.next().await.unwrap().unwrap();
@@ -332,6 +334,7 @@ async fn e2e_video_frame_relay() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         }).unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
         ws.next().await.unwrap().unwrap(); // room_joined
@@ -372,6 +375,7 @@ async fn e2e_video_frame_relay() {
             device_pubkey: None,
             protocol: None,
             client_version: None,
+            resume: None,
         }).unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
         ws.next().await.unwrap().unwrap(); // room_joined
@@ -509,6 +513,7 @@ fn device_join(device_id: Option<&str>, device_secret: Option<&str>) -> Signalin
         device_pubkey: None,
         protocol: None,
         client_version: None,
+        resume: None,
     }
 }
 
@@ -773,6 +778,7 @@ fn device_join_room(room: &str, device_id: &str, secret: &str) -> SignalingMessa
         device_pubkey: None,
         protocol: None,
         client_version: None,
+        resume: None,
     }
 }
 
@@ -786,6 +792,7 @@ fn legacy_join(room: &str, role: PeerRole) -> SignalingMessage {
         device_pubkey: None,
         protocol: None,
         client_version: None,
+        resume: None,
     }
 }
 
@@ -820,6 +827,7 @@ async fn account_join(
         device_pubkey: None,
         protocol: None,
         client_version: None,
+        resume: None,
     };
     ws.send(WsMsg::Text(serde_json::to_string(&join).unwrap().into()))
         .await

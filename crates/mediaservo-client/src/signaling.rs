@@ -99,6 +99,7 @@ impl SignalingClient {
             stream_id: None,
             protocol: None,
             client_version: None,
+            resume: None,
         };
         let join_json = serde_json::to_string(&join)
             .map_err(|e| CoreError::ConfigParse(format!("serialize RoomJoin: {e}")))?;

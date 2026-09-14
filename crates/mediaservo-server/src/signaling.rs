@@ -965,6 +965,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         peer_id: peer_id.clone(),
         protocol: Some(negotiated),
         server_version: Some(env!("CARGO_PKG_VERSION").into()),
+        session_nonce: None,
     };
     let _ = ws_sender.lock().await.send(Message::Text(send_msg(&ack).unwrap())).await;
 
