@@ -1,0 +1,13 @@
+{
+  "name": "join-v1-absent",
+  "kind": "signal",
+  "wire": {
+    "type": "room_join",
+    "room_id": "vehicle_test",
+    "peer_role": "host"
+  },
+  "checks": {
+    "room_id": "vehicle_test",
+    "peer_role": "host"
+  }
+}

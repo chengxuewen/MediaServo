@@ -1,0 +1,15 @@
+{
+  "name": "joined-v2",
+  "kind": "signal",
+  "wire": {
+    "type": "room_joined",
+    "room_id": "vehicle_test",
+    "peer_id": "host-1",
+    "protocol": 2,
+    "server_version": "0.1.0"
+  },
+  "checks": {
+    "protocol": 2,
+    "peer_id": "host-1"
+  }
+}

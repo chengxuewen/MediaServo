@@ -56,6 +56,8 @@ async fn integration_signaling_pipeline() {
             device_id: None,
             device_secret: None,
             device_pubkey: None,
+            protocol: None,
+            client_version: None,
         }).unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
         let joined = ws.next().await.unwrap().unwrap();
@@ -88,6 +90,8 @@ async fn integration_signaling_pipeline() {
             device_id: None,
             device_secret: None,
             device_pubkey: None,
+            protocol: None,
+            client_version: None,
         }).unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
         let joined = ws.next().await.unwrap().unwrap();
@@ -326,6 +330,8 @@ async fn e2e_video_frame_relay() {
             device_id: None,
             device_secret: None,
             device_pubkey: None,
+            protocol: None,
+            client_version: None,
         }).unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
         ws.next().await.unwrap().unwrap(); // room_joined
@@ -364,6 +370,8 @@ async fn e2e_video_frame_relay() {
             device_id: None,
             device_secret: None,
             device_pubkey: None,
+            protocol: None,
+            client_version: None,
         }).unwrap();
         ws.send(WsMsg::Text(join.into())).await.unwrap();
         ws.next().await.unwrap().unwrap(); // room_joined
@@ -499,6 +507,8 @@ fn device_join(device_id: Option<&str>, device_secret: Option<&str>) -> Signalin
         device_id: device_id.map(String::from),
         device_secret: device_secret.map(String::from),
         device_pubkey: None,
+        protocol: None,
+        client_version: None,
     }
 }
 
@@ -761,6 +771,8 @@ fn device_join_room(room: &str, device_id: &str, secret: &str) -> SignalingMessa
         device_id: Some(device_id.into()),
         device_secret: Some(secret.into()),
         device_pubkey: None,
+        protocol: None,
+        client_version: None,
     }
 }
 
@@ -772,6 +784,8 @@ fn legacy_join(room: &str, role: PeerRole) -> SignalingMessage {
         device_id: None,
         device_secret: None,
         device_pubkey: None,
+        protocol: None,
+        client_version: None,
     }
 }
 
@@ -804,6 +818,8 @@ async fn account_join(
         device_id: None,
         device_secret: None,
         device_pubkey: None,
+        protocol: None,
+        client_version: None,
     };
     ws.send(WsMsg::Text(serde_json::to_string(&join).unwrap().into()))
         .await

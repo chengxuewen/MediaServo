@@ -1588,3 +1588,17 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **根因**: `msrtc-host start/restart` 内置 C25 清理 `rm -rf /tmp/iceoryx2 /dev/shm/iox2_*` 是**机器全局**的——同机多实例时代清任何实例的 SHM。
 - **解法**: 夹具与在用实例互斥（先 stop 其他实例再夹具 start）；实例已受管时复活/重启绕开 CLI——`kill <app-pid>` 由 oxmgr restart_policy always 自动重拉（不过 CLI 清理路径），或 `OXMGR_DATA_DIR=<实例>/run/oxmgr oxmgr restart <app>`。
 - **验证**: 事故后 `msrtc-host status` 全活 + server `device-authenticated`（本单实证自愈）。
+
+## PIT-193: mediasoup 姿态构建=干净 shell 跑 pixi——父 shell 环境残留换指纹触发 tasks.py 重建失败 (2026-09-14, S0)
+- **症状**: `pixi run test-server-native` 直跑报 mediasoup-sys build script 失败（Failed to build libmediasoup-worker）；同命令在 `env -i HOME=... bash -lc` 干净子 shell 里 100% 绿。
+- **根因**: 持久化 agent shell 累积的 PATH 导出 / unset MESON 等改动进入 build script 输入指纹 → hash 变 → 强制重建 → pip bootstrap meson 在代理/网络姿态下与 tasks.py 语义冲突（09-08 meson double-buildtype 旧伤的新入口）。缓存产物没错，错在"何时被迫重跑"。
+- **解法**: 凡涉 mediasoup/webrtc 重依赖的门禁命令，用 `env -i HOME="$HOME" PATH="/usr/local/bin:/usr/bin:/bin" bash -lc '~/.pixi/bin/pixi run <task>'` 执行；不要手动 export/清理 pixi 环境后直跑 cargo。
+- **验证**: SRV2=0（145 lib + 全套件绿）同指令在污染 shell = 101。
+- **禁止**: 在持久 shell 里 `unset MESON` 后裸跑 cargo check server（指纹污染+无 LIBCLANG/PKG_CONFIG，双输）。
+
+## PIT-194: `build web` 新鲜度只盯 apps/admin/src——workspace 包（packages/client）改动零感知 (2026-09-14, S0)
+- **症状**: 改 `www/packages/client/src/transport/sfu-client.ts` 后 `msrtc.sh build web` 打印"src 无变更—跳过前端构建"，装配的是旧 bundle（不含 `protocol:2`）。
+- **根因**: `_ensure_admin_dist()` 的 rglob 只扫 `www/apps/admin/src`；vite 经 workspace 依赖把 packages/client 打进 admin bundle——依赖面与监视面不一致。
+- **解法（当下）**: 改包源码后手动 `cd www && pnpm build:admin` 再 `build web` 装配；产物字节核验（`grep -l "protocol:2" apps/admin/dist/assets/*.js`）。
+- **修法（在册待做）**: rglob 集合扩 `www/packages/*/src`（或 turbo 产物指纹）——小刀另案，勿混进功能批。
+- **验证**: 部署后 served bundle 名与 dist 新物一致（curl index.html 比对 hash 名）。

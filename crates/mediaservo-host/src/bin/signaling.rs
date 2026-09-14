@@ -103,6 +103,9 @@ impl SignalingClient {
             room_id: self.room_id.clone(),
             peer_role: PeerRole::Host,
             stream_id: None,
+            // legacy HMAC 对自洽：保持 v1 发声（不声明方言）。
+            protocol: None,
+            client_version: None,
         };
         let join_json = serde_json::to_string(&join_msg).map_err(|e| {
             CoreError::ConfigParse(format!("serialize RoomJoin: {}", e))

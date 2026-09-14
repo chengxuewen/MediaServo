@@ -33,7 +33,7 @@ async fn connect_auth_join_and_roundtrip() {
             SignalingMessage::RoomJoin { room_id, .. } => room_id,
             _ => panic!("expected RoomJoin"),
         };
-        let joined = SignalingMessage::RoomJoined { room_id, peer_id: "peer-1".to_string() };
+        let joined = SignalingMessage::RoomJoined { room_id, peer_id: "peer-1".to_string() , protocol: None, server_version: None};
         ws.send(Message::Text(serde_json::to_string(&joined).unwrap().into()))
             .await
             .unwrap();
@@ -111,7 +111,7 @@ async fn gateway_mode_connects_with_envelope_wire() {
         // 2) 信封回 RoomJoined
         let joined = mediaservo_link::LocalEnvelope {
             src: "server".into(),
-            msg: SignalingMessage::RoomJoined { room_id, peer_id: "veh-peer".into() },
+            msg: SignalingMessage::RoomJoined { room_id, peer_id: "veh-peer".into() , protocol: None, server_version: None},
         };
         ws.send(Message::Text(serde_json::to_string(&joined).unwrap().into()))
             .await
@@ -233,7 +233,7 @@ async fn room_join_carries_device_credentials() {
             }
             other => panic!("expected RoomJoin, got {other:?}"),
         }
-        let joined = SignalingMessage::RoomJoined { room_id: "r".into(), peer_id: "peer-1".into() };
+        let joined = SignalingMessage::RoomJoined { room_id: "r".into(), peer_id: "peer-1".into() , protocol: None, server_version: None};
         ws.send(Message::Text(serde_json::to_string(&joined).unwrap().into())).await.unwrap();
     });
     let client = SignalClient::new(&format!("ws://{addr}/ws"), "test-psk", "r", PeerRole::Host)
@@ -304,7 +304,7 @@ async fn refuse_then_serve(refuse: usize, total: usize) -> (std::net::SocketAddr
                     SignalingMessage::RoomJoin { room_id, .. } => room_id,
                     _ => panic!("expected RoomJoin"),
                 };
-                let joined = SignalingMessage::RoomJoined { room_id, peer_id: "peer-1".to_string() };
+                let joined = SignalingMessage::RoomJoined { room_id, peer_id: "peer-1".to_string() , protocol: None, server_version: None};
                 ws.send(Message::Text(serde_json::to_string(&joined).unwrap().into())).await.unwrap();
                 return; // 本轮服务完成，剩余连接不再处理
             }
@@ -365,7 +365,7 @@ async fn on_disconnect_fires_when_server_closes() {
         let ack = SignalingMessage::Error { code: 0, message: String::new() };
         ws.send(Message::Text(serde_json::to_string(&ack).unwrap().into())).await.unwrap();
         let _join = ws.next().await.unwrap().unwrap();
-        let joined = SignalingMessage::RoomJoined { room_id: "r".to_string(), peer_id: "peer-1".to_string() };
+        let joined = SignalingMessage::RoomJoined { room_id: "r".to_string(), peer_id: "peer-1".to_string() , protocol: None, server_version: None};
         ws.send(Message::Text(serde_json::to_string(&joined).unwrap().into())).await.unwrap();
         let _ready = ws.next().await.unwrap().unwrap(); // 等客户端就绪
         ws.close(None).await.unwrap();
@@ -503,6 +503,8 @@ async fn pubkey_join_challenge_answered_receives_joined() {
     let addr = spawn_pubkey_server(SignalingMessage::RoomJoined {
         room_id: "vehicle_cam0".into(),
         peer_id: "peer-vk".into(),
+        protocol: None,
+        server_version: None,
     })
     .await;
     let session = pubkey_client(addr).connect().await.expect("pubkey 全链应过");

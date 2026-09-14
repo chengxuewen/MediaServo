@@ -1,0 +1,12 @@
+{
+  "name": "error-4101-protocol",
+  "kind": "signal",
+  "wire": {
+    "type": "error",
+    "code": 4101,
+    "message": "protocol_version_unsupported: claim Some(0) below min 1"
+  },
+  "checks": {
+    "code": 4101
+  }
+}

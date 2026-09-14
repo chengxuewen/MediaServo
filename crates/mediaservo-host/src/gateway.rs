@@ -114,6 +114,9 @@ struct State {
     echo_cache: VecDeque<String>,
     /// 整车 peer_id（真实 RoomJoined 取得，子进程合成应答使用）。
     vehicle_peer_id: String,
+    /// S0：上游(agent↔server)协商谈成的方言版本（1 = 旧 server）。合成子进程
+    /// RoomJoined 时填 min(子声明, 本值)——子进程看见全链上限。
+    upstream_negotiated: u32,
     /// 远端会话是否在途。
     joined: bool,
     /// 本次远端会话建立时刻（E3 快照数据源；reset_remote 清空）。
@@ -135,7 +138,7 @@ impl State {
             }
         }
         match msg {
-            SignalingMessage::RoomJoin { room_id, .. } => {
+            SignalingMessage::RoomJoin { room_id, protocol: child_claim, .. } => {
                 // (a) 拦截：整车 join 由 agent 完成；子进程本地合成 RoomJoined
                 if let Some(c) = self.conns.get_mut(&conn_id) {
                     c.room = room_id.clone();
@@ -144,6 +147,9 @@ impl State {
                     UpstreamAction::Reply(SignalingMessage::RoomJoined {
                         room_id,
                         peer_id: self.vehicle_peer_id.clone(),
+                        // S0: 子进程看到全链上限 = min(子声明(缺省 v1), 上游谈成)。
+                        protocol: Some(child_claim.unwrap_or(1).min(self.upstream_negotiated)),
+                        server_version: None,
                     })
                 } else {
                     tracing::warn!(conn_id, "RoomJoin 拦截时网关尚未连上 server");
@@ -293,6 +299,7 @@ impl State {
         self.pending.clear();
         self.echo_cache.clear();
         self.vehicle_peer_id.clear();
+        self.upstream_negotiated = 1;
     }
 }
 
@@ -542,6 +549,7 @@ pub async fn run_gateway(config: GatewayConfig) -> Result<(u16, GatewayHandle), 
         pending: VecDeque::new(),
         echo_cache: VecDeque::new(),
         vehicle_peer_id: String::new(),
+        upstream_negotiated: 1,
         joined: false,
         remote_since: None,
         vehicle_room: config.room.clone(),
@@ -726,6 +734,7 @@ async fn remote_loop(
             st.joined = true;
             st.remote_since = Some(Instant::now());
             st.vehicle_peer_id = session.peer_id().to_string();
+            st.upstream_negotiated = session.negotiated_protocol();
         }
         if reconnected {
             let notify: Vec<_> = {
@@ -854,6 +863,7 @@ mod tests {
             pending: VecDeque::new(),
             echo_cache: VecDeque::new(),
             vehicle_peer_id: String::new(),
+            upstream_negotiated: 1,
             joined: false,
             remote_since: None,
             vehicle_room: "vehicle-1".into(),

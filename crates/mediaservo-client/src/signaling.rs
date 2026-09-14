@@ -97,6 +97,8 @@ impl SignalingClient {
             room_id: self.room_id.clone(),
             peer_role: PeerRole::Remote,
             stream_id: None,
+            protocol: None,
+            client_version: None,
         };
         let join_json = serde_json::to_string(&join)
             .map_err(|e| CoreError::ConfigParse(format!("serialize RoomJoin: {e}")))?;
@@ -110,7 +112,7 @@ impl SignalingClient {
                 let msg: SignalingMessage = serde_json::from_str(&text)
                     .map_err(|e| CoreError::WebSocketDisconnect(format!("parse room response: {e}")))?;
                 match msg {
-                    SignalingMessage::RoomJoined { room_id, peer_id } => {
+                    SignalingMessage::RoomJoined { room_id, peer_id, .. } => {
                         tracing::info!("Signaling: joined room {room_id} as {peer_id}");
                         peer_id
                     }

@@ -88,6 +88,8 @@ async fn mock_handshake(listener: &TcpListener) -> WebSocketStream<TcpStream> {
                 serde_json::to_string(&SignalingMessage::RoomJoined {
                     room_id,
                     peer_id: VEHICLE_PEER.into(),
+                    protocol: None,
+                    server_version: None,
                 })
                 .unwrap()
                 .into(),

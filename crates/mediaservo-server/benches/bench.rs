@@ -53,6 +53,8 @@ fn main() {
             device_id: None,
             device_secret: None,
             device_pubkey: None,
+            protocol: None,
+            client_version: None,
         };
         serde_json::to_string(&msg).unwrap();
     });

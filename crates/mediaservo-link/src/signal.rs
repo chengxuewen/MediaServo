@@ -16,7 +16,9 @@
 use base64::Engine as _;
 use ed25519_dalek::Signer as _;
 use futures_util::{SinkExt, StreamExt};
-use mediaservo_common::protocol::{PeerRole, SignalingMessage};
+use mediaservo_common::protocol::{
+    negotiate_protocol, PeerRole, SignalingMessage, SIGNALING_PROTOCOL_VERSION,
+};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc};
@@ -241,6 +243,9 @@ impl SignalClient {
                 .or_else(|| self.device.as_ref().map(|d| d.device_id.clone())),
             device_secret: self.device.as_ref().map(|d| d.device_secret.clone()),
             device_pubkey: self.identity.as_ref().map(|i| i.pubkey_b64.clone()),
+            // S0: 声明本端方言上限（server 取 min 回谈成值）。
+            protocol: Some(SIGNALING_PROTOCOL_VERSION),
+            client_version: None,
         };
         let (join_json, unwrap) = match &self.gateway_src {
             Some(src) => (
@@ -278,7 +283,7 @@ impl SignalClient {
             _ => joined,
         };
         match joined {
-            SignalingMessage::RoomJoined { room_id, peer_id } => {
+            SignalingMessage::RoomJoined { room_id, peer_id, protocol, .. } => {
                 let (events_tx, _) = broadcast::channel(64);
                 let (send_tx, send_rx) = mpsc::unbounded_channel();
                 let on_disconnect = DisconnectSlot::default();
@@ -294,6 +299,7 @@ impl SignalClient {
                 Ok(SignalSession {
                     room_id,
                     peer_id,
+                    negotiated: negotiate_protocol(protocol),
                     send_tx,
                     events_tx,
                     task,
@@ -413,6 +419,8 @@ pub struct SignalSession {
     room_id: String,
     /// RoomJoined 返回的 peer_id（D1 网关合成子进程应答使用）。
     peer_id: String,
+    /// S0：协商谈成的方言版本（server RoomJoined.protocol；缺省 = v1）。
+    negotiated: u32,
     send_tx: mpsc::UnboundedSender<SignalingMessage>,
     events_tx: broadcast::Sender<SignalEvent>,
     task: tokio::task::JoinHandle<()>,
@@ -457,6 +465,12 @@ impl SignalSession {
     /// 当前会话的 peer_id（RoomJoined 时 server 分配；D1 网关合成子进程应答）。
     pub fn peer_id(&self) -> &str {
         &self.peer_id
+    }
+
+    /// S0 方言协商结果（min(client claim, server max)；1 = 旧对端/旧 server）。
+    #[must_use]
+    pub fn negotiated_protocol(&self) -> u32 {
+        self.negotiated
     }
 
     /// 关闭会话：停止发送通道并等待后台任务退出。

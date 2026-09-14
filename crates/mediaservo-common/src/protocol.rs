@@ -6,6 +6,23 @@
 
 use serde::{Deserialize, Serialize};
 
+// ── S0: 协议版本协商（不变式 I5：能力门只看协商后的整数；包版本/协议整数/schema·ABI
+// 三平面分离）。v1 = wire 无 protocol 字段（老形逐字节不变）；v2 = datachannel.control
+// 域（F8 控制 DC 门）开放。（v3 = 会话续期，S0.5 追加——整数单调性是「方言精确」的载体。）
+/// 本仓端点支持的最高方言。
+pub const SIGNALING_PROTOCOL_VERSION: u32 = 2;
+/// 可接受连接的最低方言（不声明 protocol 的旧客户端 = v1；低于此值 → Error 4101）。
+pub const SIGNALING_PROTOCOL_MIN_SUPPORTED: u32 = 1;
+/// 开控制 DC 域（create_data_producer）所需最低方言。
+pub const PROTOCOL_MIN_CONTROL_DC: u32 = 2;
+
+/// 协商结果 = min(客户端声明（None = v1），server 最高)。拒低形态由调用方先行
+/// （claim < MIN_SUPPORTED → 4101），此处只收敛。
+#[must_use]
+pub fn negotiate_protocol(claim: Option<u32>) -> u32 {
+    claim.unwrap_or(1).min(SIGNALING_PROTOCOL_VERSION)
+}
+
 /// A signaling message exchanged via WebSocket.
 ///
 /// # Flow
@@ -33,12 +50,25 @@ pub enum SignalingMessage {
         /// 缺省 = 旧 secret/PSK 路径逐字节不变；旧 server 忽略未知字段 = 不劣化。
         #[serde(skip_serializing_if = "Option::is_none")]
         device_pubkey: Option<String>,
+        /// S0 协议协商（additive）：缺省 = v1（2026-09-14 前 wire 逐字节不变，
+        /// 旧 server/旧 host 双向无感——升级顺序无约束）。server 按 min(claim, max) 入会话。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        protocol: Option<u32>,
+        /// 观测位：客户端自身版本串，不参与任何门控判定。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        client_version: Option<String>,
     },
 
     /// Room join acknowledged by Server.
     RoomJoined {
         room_id: String,
         peer_id: String,
+        /// S0：server 回显谈成值（缺省 = 旧 server，端按 v1）。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        protocol: Option<u32>,
+        /// 观测位：server 版本串。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        server_version: Option<String>,
     },
 
     /// A peer has left the room. Broadcast by Server.
@@ -572,6 +602,8 @@ mod tests {
             device_id: None,
             device_secret: None,
             device_pubkey: None,
+            protocol: None,
+            client_version: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"room_join""#));
@@ -591,6 +623,8 @@ mod tests {
             device_id: Some("ms-001122334455".into()),
             device_secret: Some("s3cr3t".into()),
             device_pubkey: None,
+            protocol: None,
+            client_version: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"room_join""#));
@@ -622,6 +656,8 @@ mod tests {
             device_secret: None,
             // seed=bytes(0..32) 派生的真 vk，与 devices.rs sig_vector 测试同值（跨 crate 锚）
             device_pubkey: Some("A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=".into()),
+            protocol: None,
+            client_version: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""device_pubkey":"A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=""#));
@@ -650,6 +686,8 @@ mod tests {
             device_id: Some("ms-0a1b2c3d4e5f".into()),
             device_secret: Some("s3cr3t".into()),
             device_pubkey: None,
+            protocol: None,
+            client_version: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(!json.contains("device_pubkey"));
@@ -722,16 +760,43 @@ mod tests {
     }
 
     #[test]
+    fn room_join_protocol_absent_is_v1_byte_stable() {
+        // S0 硬门①：v1 wire（无 protocol/client_version）序列化前后逐字节不变——
+        // 旧端点行为等价是 additive 承诺的全部含义。
+        let old = r#"{"type":"room_join","room_id":"vehicle_test","peer_role":"host"}"#;
+        let parsed: SignalingMessage = serde_json::from_str(old).unwrap();
+        assert_eq!(serde_json::to_string(&parsed).unwrap(), old);
+        match parsed {
+            SignalingMessage::RoomJoin { protocol, .. } => assert_eq!(protocol, None),
+            other => panic!("expected RoomJoin, got {other:?}"),
+        }
+        let old_joined = r#"{"type":"room_joined","room_id":"vehicle_test","peer_id":"p1"}"#;
+        let parsed: SignalingMessage = serde_json::from_str(old_joined).unwrap();
+        assert_eq!(serde_json::to_string(&parsed).unwrap(), old_joined);
+    }
+
+    #[test]
+    fn negotiate_protocol_matrix() {
+        // S0 硬门②：协商纯函数矩阵（缺省=1 / 同代=2 / 超宣钳 server max）。
+        assert_eq!(negotiate_protocol(None), 1);
+        assert_eq!(negotiate_protocol(Some(1)), 1);
+        assert_eq!(negotiate_protocol(Some(2)), 2);
+        assert_eq!(negotiate_protocol(Some(99)), SIGNALING_PROTOCOL_VERSION);
+    }
+
+    #[test]
     fn roundtrip_room_joined() {
         let msg = SignalingMessage::RoomJoined {
             room_id: "room-42".into(),
             peer_id: "peer-7".into(),
+            protocol: None,
+            server_version: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"room_joined""#));
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         match parsed {
-            SignalingMessage::RoomJoined { room_id, peer_id } => {
+            SignalingMessage::RoomJoined { room_id, peer_id, .. } => {
                 assert_eq!(room_id, "room-42");
                 assert_eq!(peer_id, "peer-7");
             }

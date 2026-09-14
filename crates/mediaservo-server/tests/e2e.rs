@@ -191,6 +191,8 @@ fn protocol_roundtrip_room_join() {
         device_id: None,
         device_secret: None,
         device_pubkey: None,
+        protocol: None,
+        client_version: None,
     };
     let json = serde_json::to_string(&msg).unwrap();
     let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
@@ -208,12 +210,14 @@ fn protocol_roundtrip_room_joined() {
     let msg = SignalingMessage::RoomJoined {
         room_id: "room-x".into(),
         peer_id: "peer-abc".into(),
+        protocol: None,
+        server_version: None,
     };
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"room_joined""#));
     let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
     match parsed {
-        SignalingMessage::RoomJoined { room_id, peer_id } => {
+        SignalingMessage::RoomJoined { room_id, peer_id, .. } => {
             assert_eq!(room_id, "room-x");
             assert_eq!(peer_id, "peer-abc");
         }

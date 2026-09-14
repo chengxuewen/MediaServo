@@ -83,6 +83,8 @@ async fn mock_handshake(listener: &TcpListener) -> (WsServer, String, PeerRole) 
         serde_json::to_string(&SignalingMessage::RoomJoined {
             room_id: room.clone(),
             peer_id: VEHICLE_PEER.into(),
+            protocol: None,
+            server_version: None,
         })
         .unwrap()
         .into(),
@@ -120,6 +122,8 @@ async fn join<S: WsIo>(ws: &mut WebSocketStream<S>, room: &str) -> String {
                 device_id: None,
                 device_secret: None,
                 device_pubkey: None,
+                protocol: None,
+                client_version: None,
                 room_id: room.into(),
                 peer_role: PeerRole::Host,
                 stream_id: None,
@@ -129,7 +133,7 @@ async fn join<S: WsIo>(ws: &mut WebSocketStream<S>, room: &str) -> String {
         .unwrap();
         let (_src, msg) = read_env(ws).await;
         match msg {
-            SignalingMessage::RoomJoined { room_id, peer_id } => {
+            SignalingMessage::RoomJoined { room_id, peer_id, .. } => {
                 assert_eq!(room_id, room, "合成 RoomJoined 应回显子进程房间");
                 return peer_id;
             }
@@ -800,6 +804,8 @@ async fn remote_join_carries_device_credentials() {
             serde_json::to_string(&SignalingMessage::RoomJoined {
                 room_id: VEHICLE_ROOM.into(),
                 peer_id: VEHICLE_PEER.into(),
+                protocol: None,
+                server_version: None,
             })
             .unwrap(),
         ))

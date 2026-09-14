@@ -451,6 +451,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     // device-enroll §5.2/§5.3: 带 device_pubkey 的 Join 走「挑战→应答→验签」状态机；
     // secret 形与无凭证路径逐字节不变（回归隔离，D-E3 共存一周期）。
     let mut pending_auth: Option<PendingAuth> = None;
+    // S0: 客户端方言声明（仅 RoomJoin 解析处赋值；None = v1）。
+    let mut client_protocol_claim: Option<u32> = None;
     let mut deferred: Vec<SignalingMessage> = Vec::new();
     let (room_id, role, device_id, session_identity) = loop {
         // Check for shutdown during RoomJoin
@@ -691,9 +693,25 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                     device_id,
                     device_secret,
                     device_pubkey,
+                    protocol,
                     ..
                 }) = serde_json::from_str(&text_str)
                 {
+                    // S0: 记 claim；方言过旧 → 4101（terminal 族）断连——低于 min 是
+                    // 显式拒，不静默降级（静默 = 旧端点带新预期连上后行为漂移）。
+                    client_protocol_claim = protocol;
+                    if protocol.unwrap_or(1)
+                        < mediaservo_common::protocol::SIGNALING_PROTOCOL_MIN_SUPPORTED
+                    {
+                        let detail = format!(
+                            "protocol_version_unsupported: claim {protocol:?} below min {}",
+                            mediaservo_common::protocol::SIGNALING_PROTOCOL_MIN_SUPPORTED
+                        );
+                        tracing::warn!("RoomJoin denied: {detail} (peer={peer_id})");
+                        let error = SignalingMessage::Error { code: 4101, message: detail };
+                        let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
+                        return;
+                    }
                     // ── device-enroll §5.2: pubkey 形 → 一律先发挑战（每连接验 possession，D-E8）──
                     if device_pubkey.is_some() {
                         if device_secret.is_some() {
@@ -854,6 +872,9 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         }
     };
 
+    // S0: 协商 = min(client claim（缺省 v1), server max)——I5 能力门只读这个。
+    let negotiated = mediaservo_common::protocol::negotiate_protocol(client_protocol_claim);
+
     // ── G3 RoomJoin 门（D-H11 矩阵 + 租户隔离）──────────────────────────
     // ① 账号会话禁止以 Host 角色入房（Host = 车端位，防账号抢占房间使车无法上线）。
     if role == PeerRole::Host
@@ -939,7 +960,12 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     }
 
     // Send RoomJoined ack
-    let ack = SignalingMessage::RoomJoined { room_id: room_id.clone(), peer_id: peer_id.clone() };
+    let ack = SignalingMessage::RoomJoined {
+        room_id: room_id.clone(),
+        peer_id: peer_id.clone(),
+        protocol: Some(negotiated),
+        server_version: Some(env!("CARGO_PKG_VERSION").into()),
+    };
     let _ = ws_sender.lock().await.send(Message::Text(send_msg(&ack).unwrap())).await;
 
     // ── Replay cached SDP offer + ICE candidates for late joiners ────────
@@ -1197,6 +1223,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                             &tx,
                             &relay_peer_id,
                             &session_identity,
+                            negotiated,
                         )
                         .await
                         {
@@ -1514,6 +1541,8 @@ pub(crate) async fn handle_sfu_message(
     _broadcast_tx: &tokio::sync::broadcast::Sender<String>,
     peer_id: &str,
     identity: &SessionIdentity,
+    // S0: 会话协商方言（能力域门读它，禁读包版本）。
+    negotiated: u32,
 ) -> Option<SignalingMessage> {
     let sfu = &server.sfu_manager;
     match msg {
@@ -1838,12 +1867,22 @@ pub(crate) async fn handle_sfu_message(
             // operator/admin（can_control）放行建控制 DataProducer；viewer/dispatcher 显式
             // 4012 + audit（D273 terminal 红牌可见，替代静默）。
             if let Err(reason) = identity.can_produce(room_id) {
-                if identity.can_control() {
+                // S0 收紧: role 有 + 方言 ≥ PROTOCOL_MIN_CONTROL_DC 才放行（I5 首用户）。
+                if identity.can_control()
+                    && negotiated >= mediaservo_common::protocol::PROTOCOL_MIN_CONTROL_DC
+                {
                     tracing::info!(
                         "CreateDataProducer: 账号控制 DC 经 role 门放行 (peer={peer_id}, room={room_id}, label={label})"
                     );
                 } else {
-                    let detail = format!("control_denied: {reason} (peer={peer_id}, room={room_id})");
+                    let mut detail = format!("control_denied: {reason} (peer={peer_id}, room={room_id})");
+                    if identity.can_control() {
+                        // role 有权限、方言未到 v2——措辞区分，旧端点排查不歧义。
+                        detail = format!(
+                            "control_denied: requires_protocol>={} negotiated={negotiated} (peer={peer_id}, room={room_id})",
+                            mediaservo_common::protocol::PROTOCOL_MIN_CONTROL_DC
+                        );
+                    }
                     tracing::warn!("CreateDataProducer denied: {detail}");
                     audit::log_event(AuditEvent::AuthorizationDenied {
                         action: "control_dc".into(),
@@ -2262,6 +2301,7 @@ mod tests {
             &tx,
             "browser-session-1",
             &SessionIdentity::Legacy,
+            1,
         )
         .await;
         assert!(resp.is_none());
@@ -2285,6 +2325,7 @@ mod tests {
                 &tx,
                 "agent-1",
                 &SessionIdentity::Device("dev-x".into()),
+                1,
             )
             .await;
             assert!(resp.is_none(), "未知房间 {room} 应静默幂等");

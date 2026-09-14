@@ -739,3 +739,9 @@ install                        → 改名提示 + exit 2（退役）
 - 落地：common 3 变体+`device_pubkey` / server Entry 双形+状态机+pending/approve API / link connect 应答链+EnrollPending / host identity 新形+gateway 透传 / www 待批准卡。5 批 5 提交（701f9c8+fixup/96cf7c4/1e6a269/3d7a71e）。
 - 实环：V1 auto 自收录/V2 浏览器批准→640x360 出画面/V3 重放 4010/V4 吊销→回落 pending——全 PASS；D-E3 过渡兼容铁证=用户旧 host（secret 形）在新 server 上照常 device-authenticated。
 - 过程账：FRU 编译溢出面 7 文件设计漏列（§9 补录）；Momus 一轮 [OKAY]；交叉事故 交叉主仓 PIT-191/192（本仓编号=见 pitfalls.md 本单两条 + 主仓侧引用）。
+
+### 2026-09-14: S0 协议协商基础（client-dual-form S 批首刀，主仓计划 v1.6/Momus [OKAY]）
+- common：`SIGNALING_PROTOCOL_VERSION=2/MIN_SUPPORTED=1/PROTOCOL_MIN_CONTROL_DC=2`+`negotiate_protocol()` 纯函数；RoomJoin/RoomJoined additive `protocol`+观测位（缺省=v1 wire 逐字节不变，新单测×2+旧 11 夹具零 diff 双钉）。
+- server：协商入会话（RoomJoin 解析处 claim→loop 后 negotiated）、4101 拒低显式断连、F8 控制 DC 门收紧 `can_control && negotiated>=2`（I5 首用户；`handle_sfu_message` +negotiated 参×3 调用点）。link：SignalSession.negotiated+公开读面；gateway：合成子进程 RoomJoined 填 min(子声明,上游谈成)——子进程看见全链上限。TS：join 全 4 站点 `protocol:2`+`negotiated` getter+4101∈terminal。L1 +5 四象限向量（16 件双语言）。
+- 门全绿：test-server-native（env -i 干净壳=新 PIT-193）145 lib+全套件 · common/link · host --lib 76 · gateway_e2e 4红=HEAD 同款（stash 亲验）· stub --lib=HEAD 同款 E0425 在册债 · vitest 26/26 · tsc 双零面 · clippy 新增行零命中（4 老账=media/backup/brand 在册）。
+- 活体：矩阵 4/4（v1 缺省→echo1 / v2→2 / claim99→钳2 / claim0→4101，evidence 主仓 s0-live-matrix.txt）· 旧 out/host(v1 二进制) server 重建后自愈出流 1280x720（C25 处方）· Playwright v2 bundle LIVE 30fps 0 console err（s0-playback-v2.png）。新坑 PIT-193/194 入册。

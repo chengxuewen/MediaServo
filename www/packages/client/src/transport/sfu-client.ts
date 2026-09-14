@@ -70,7 +70,7 @@ const SFU_DEBUG = typeof localStorage !== 'undefined' && localStorage.getItem('m
 /// P1/T1.2 有意变更（design §1）：4012（控制 DC 拒权，F8 role 门显式拒）入 terminal 族。
 export function classifySfuError(code: number): 'terminal' | 'retry' {
   switch (code) {
-    case 4000: case 4001: case 4002: case 4003: case 4010: case 4011: case 4012:
+    case 4000: case 4001: case 4002: case 4003: case 4010: case 4011: case 4012: case 4101:
       return 'terminal';
     default:
       return 'retry';
@@ -115,6 +115,13 @@ export class SfuConsumerClient {
   private mutedTicks = 0; // H1: muted 连续 tick 计数（2s tick）
   // F2: 媒体新鲜度 watchdog（主流双保险第二柱——信令全丢也不假 LIVE）
   private playingSeen = false;
+  /** S0: 与 server 协商谈成的方言版本（room_joined.protocol；缺省 = 1 旧 server）。 */
+  private negotiatedProtocol = 1;
+
+  /** S0 协商结果的公开读面（控制 DC 能力位/S0.5 resume 门消费）。 */
+  get negotiated(): number {
+    return this.negotiatedProtocol;
+  }
   private stallTicks = 0;
   private stalled = false;
   // W1/W2: 韧性状态机字段
@@ -226,6 +233,7 @@ export class SfuConsumerClient {
       type: 'room_join',
       room_id: this.roomId,
       peer_role: 'consumer',
+      protocol: 2, // S0: 声明本端方言上限（server 取 min 谈成）
     }));
 
     // Reconnect on WS close
@@ -400,6 +408,9 @@ export class SfuConsumerClient {
     try {
       const msg = JSON.parse(data);
 
+      // S0: 协商结果落存（缺 protocol = v1）——控制 DC/(未来)resume 门控读点。
+      if (msg.type === 'room_joined' && typeof msg.protocol === 'number') this.negotiatedProtocol = msg.protocol;
+
       // RPC 单发旁路优先（caps/consumed）——消费后即摘。
       if (msg.type === 'router_rtp_capabilities' && this.capsResolver) { this.capsResolver(msg.capabilities); return; }
       if (msg.type === 'consumed' && this.consumeResolver) { this.consumeResolver(msg); return; }
@@ -564,7 +575,7 @@ export class SfuConsumerClient {
     this.playRounds++;
     if (this.playRounds >= PLAY_ROUNDS_MAX) {
       this.waitingForProducer = true;
-      this.ws?.send(JSON.stringify({ type: 'room_join', room_id: this.roomId, peer_role: 'consumer' }));
+      this.ws?.send(JSON.stringify({ type: 'room_join', room_id: this.roomId, peer_role: 'consumer', protocol: 2 }));
       this.logT(`连续 ${PLAY_ROUNDS_MAX} 轮无首帧 → 源离线（等待流唤醒）`);
       this.onStatus('stalled');
       return;
@@ -650,7 +661,7 @@ export class SfuConsumerClient {
         await this.connect(); // WS 也断了（罕见）→ 先全量重连
       }
       this.ws?.send(JSON.stringify({
-        type: 'room_join', room_id: this.roomId, peer_role: 'consumer',
+        type: 'room_join', room_id: this.roomId, peer_role: 'consumer', protocol: 2,
       }));
       this.playingSeen = false; this.stalled = false; this.stallTicks = 0; // F2: 重置 watchdog 至新首帧
       this.waitingForProducer = false; // W2: 主动重走即脱离等待态
@@ -741,7 +752,7 @@ export class SfuMicProducer {
     });
     const peerId = `${this.roomId}-mic-${Math.random().toString(36).slice(2, 8)}`;
     await this.rpcWait('error', () => true, 10000); // auth ack (code:0 authenticated)
-    send({ type: 'room_join', room_id: this.roomId, peer_role: 'consumer' });
+    send({ type: 'room_join', room_id: this.roomId, peer_role: 'consumer', protocol: 2 });
     await this.rpcWait('room_joined', () => true);
     const capsP = this.rpcWait('router_rtp_capabilities', (m) => m.capabilities);
     send({ type: 'get_router_rtp_capabilities', room_id: this.roomId });
