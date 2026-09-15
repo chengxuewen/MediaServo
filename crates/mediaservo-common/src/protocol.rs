@@ -545,6 +545,8 @@ pub enum PeerRole {
 pub enum MediaKind {
     Audio,
     Video,
+    /// S4′: SCTP DataProducer（ProducerClosed 广播用；produce wire 面不出现此值）。
+    Data,
 }
 
 /// H1 (SFU data 域): SCTP stream parameters for a DataChannel (wire 版，
@@ -1396,6 +1398,28 @@ mod tests {
         assert!(json.contains(r#"type":"data_consumed"#));
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         assert!(matches!(parsed, SignalingMessage::DataConsumed { .. }));
+    }
+
+    /// S4′: ProducerClosed 的 data kind wire 值钉（TS 媒体面过滤依赖 "data" 字面）。
+    #[test]
+    fn producer_closed_serializes_data_kind() {
+        let msg = SignalingMessage::ProducerClosed {
+            room_id: "r".into(),
+            peer_id: "p".into(),
+            producer_id: "d1".into(),
+            kind: MediaKind::Data,
+            reason: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""kind":"data""#), "wire snake_case: {json}");
+        let back: SignalingMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            back,
+            SignalingMessage::ProducerClosed {
+                kind: MediaKind::Data,
+                ..
+            }
+        ));
     }
 
     /// S2d 兼容钉：老 server 的 wire（无 sctpStreamParameters/label/protocol）必须可解析。

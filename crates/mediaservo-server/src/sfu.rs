@@ -709,6 +709,9 @@ mod imp {
         /// 自报 peer_id，会话 id 清理漏删——泄漏）。返回 (room, producer_id, kind) 供广播。
         pub fn remove_producers_by_ids(&self, producer_ids: &[String]) -> Vec<(String, String, protocol::MediaKind)> {
             let mut out = Vec::new();
+            // 第一遍：按 id 关闭 producers（media + data 对称）。facade Drop = close
+            // （mediasoup-rs 所有权语义），返回清单供 ProducerClosed 广播。
+            let mut gone_dps: std::collections::HashSet<String> = std::collections::HashSet::new();
             for mut entry in self.rooms.iter_mut() {
                 let rid = entry.key().clone();
                 for mut peer_ref in entry.value_mut().peers.iter_mut() {
@@ -727,11 +730,43 @@ mod imp {
                             true
                         }
                     });
+                    // S4′: 设备名下 DataProducer 同路清理（旧版只收 media = dp 漏网）。
+                    peer.data_producers.retain(|p| {
+                        let pid = p.id().to_string();
+                        if producer_ids.contains(&pid) {
+                            gone_dps.insert(pid.clone());
+                            hits.push((pid, protocol::MediaKind::Data));
+                            false
+                        } else {
+                            true
+                        }
+                    });
                     for (pid, kind) in &hits {
                         peer.producer_transports.remove(pid);
-                        tracing::info!("Producer {pid} removed from SFU room {rid} (device-owned cleanup)");
+                        peer.data_producer_transports.remove(pid);
+                        tracing::info!("Producer {pid} ({kind:?}) removed from SFU room {rid} (owned cleanup)");
                     }
                     out.extend(hits.into_iter().map(|(pid, kind)| (rid.clone(), pid, kind)));
+                }
+            }
+            // 第二遍（rooms 借用已过）：连坐关闭绑定到死亡 dp 的 data consumers——
+            // 否则对端 consumer 占位 + worker used_sctp_stream_ids 永不释放
+            // = `StreamId reserved` 消费天花板根因（2026-09-15 活体实锤）。
+            if !gone_dps.is_empty() {
+                for mut entry in self.rooms.iter_mut() {
+                    let room_label = entry.key().clone();
+                    for mut peer_ref in entry.value_mut().peers.iter_mut() {
+                        let peer = peer_ref.value_mut();
+                        let before = peer.data_consumers.len();
+                        peer.data_consumers
+                            .retain(|c| !gone_dps.contains(&c.data_producer_id().to_string()));
+                        let reaped = before - peer.data_consumers.len();
+                        if reaped > 0 {
+                            tracing::info!(
+                                "S4′: closed {reaped} orphan data consumers in room {room_label}"
+                            );
+                        }
+                    }
                 }
             }
             out
@@ -762,6 +797,10 @@ mod imp {
             let ms_kind = match kind {
                 protocol::MediaKind::Audio => MediaKind::Audio,
                 protocol::MediaKind::Video => MediaKind::Video,
+                // S4′ 广播 kind 值域；produce wire 面不出现（媒体面拒收）。
+                protocol::MediaKind::Data => {
+                    return Err("MediaKind::Data is broadcast-only, not producible".to_string());
+                }
             };
 
             let room = self.rooms.get_mut(room_id)
@@ -1635,6 +1674,68 @@ mod tests {
             "worker 必须已把消息路由到 DataConsumer (messages_sent=1)"
         );
         assert_eq!(stats.bytes_sent, 13);
+    }
+
+    /// S4′: `remove_producers_by_ids` 必须收割 DataProducer（kind=Data 回报）并
+    /// 连坐关闭绑定死亡 dp 的其他 peer data consumer——`found N data producers`
+    /// 单调泄漏 + `StreamId reserved` 消费天花板的根修钉（2026-09-15 活体实锤）。
+    #[tokio::test]
+    async fn remove_producers_by_ids_reaps_data_plane() {
+        let sfu = SfuManager::new_with_port(random_udp_port())
+            .await
+            .expect("sfu");
+        // 舱端出程（producer 方 send transport 需先 connect 才 produce——沿用
+        // produce_data_on_unconnected_transport_graceful 同款仅建不断言 connect 的路径；
+        // create_data_producer 在 transport 未 connect 时仍成功注册 = 现有宽容行为）。
+        sfu.create_webrtc_transport("room-reap", "cockpit", "send")
+            .await
+            .expect("t-send");
+        let dp = sfu
+            .create_data_producer(
+                "room-reap",
+                "cockpit",
+                "chassis",
+                "sctp",
+                Some(protocol::SctpStreamParameters {
+                    stream_id: 0,
+                    ordered: true,
+                    max_packet_life_time: None,
+                    max_retransmits: None,
+                }),
+                None,
+            )
+            .await
+            .expect("data producer")
+            .data_producer_id;
+        // 车端消费方
+        sfu.create_webrtc_transport("room-reap", "host", "recv")
+            .await
+            .expect("t-recv");
+        let dc = sfu
+            .create_data_consumer("room-reap", "host", &dp, None)
+            .await
+            .expect("data consumer")
+            .data_consumer_id;
+
+        let closed = sfu.remove_producers_by_ids(&[dp.clone()]);
+        assert!(
+            closed
+                .iter()
+                .any(|(_, id, kind)| id == &dp && *kind == protocol::MediaKind::Data),
+            "dp 必须被 id 定向收割且 kind=Data（旧版只遍历 media = 舱端泄漏根因）"
+        );
+        let room = sfu.rooms.get("room-reap").expect("room");
+        assert!(
+            room.peers.get("cockpit").expect("cp").data_producers.is_empty(),
+            "dp 台账必须清空"
+        );
+        let host = room.peers.get("host").expect("hp");
+        assert!(
+            host.data_consumers
+                .iter()
+                .all(|c| c.id().to_string() != dc),
+            "绑定死亡 dp 的孤儿 consumer 必须连坐回收（used sid 释放前提）"
+        );
     }
 
     /// H1: DataProducer.send() → DataConsumer.on_message() 端到端消息接收证明。

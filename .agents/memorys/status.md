@@ -785,3 +785,10 @@ install                        → 改名提示 + exit 2（退役）
 - CI 接线：ci.yml 新 test-cxx job（四 SDK build-c+测试+ABI 巡检双脚本）；pixi build-c 扩 client+soname symlink；test-cxx.sh 环纳入 client（C++11 fsyntax 验证过）。
 - ROS2 样例（device-day 面）：ros2_node/{package.xml,CMakeLists.txt,control_relay_node.cpp}= cmd/ack topic 桥接、口令 env-only（PIT-171 纪律）、pkg-config 消费 SDK。
 - 插曲归因：本批活体首跑超时 = controller crash-loop（5001 冷启动时序=在册 S2 前小刀+`StreamId reserved` sid=4=**数据面 consumer 泄漏天花板实锤**——8 producer 泄漏+四轮 sid 递增到 4，S4′ 必修面证据升级）；host restart 清场后全绿。
+
+### 2026-09-15: S4′ 数据面生命周期三刀（泄漏天花板破除+5001 冷启动退避）
+- **刀1 根因下钻**：WS 断链清理键 = 会话 id(`admin-xxx`)，SFU 层注册键 = 自报 peer_id(`consumer`)——**两层键空间从未对上 = 舱端 dp/consumer 断链零回收**（`found 8 data producers` 单调泄漏与 `StreamId reserved` sid=4 消费天花板的同一根，PIT-185 家族正主）。
+- **修法**：`MediaKind::Data`（广播域，produce 拒收）+ producer_owners device 缺席落 `session:<ws-id>` 兜底键 + disconnect 按 id 定向收割（`remove_producers_by_ids` 两遍：收割 dp + **连坐关闭绑定死亡 dp 的孤儿 consumer**=used sid 释放）+ controller/client 消费 `ProducerClosed(Data)` 定向拆除本地 DC（purge channel/route_dc select）。**web 顺带修雷**：producer_closed 旧版不看 kind=任何舱端 DC 翻转全 dashboard 假 restartStream——kind==='data' 挡。
+- **刀2**：controller `connect_with_retry`（1s→8s×12）覆盖 server 簇拉起窗。实环复现：整簇 down→host 先起→8s 时 controller 存活退避（旧形态已熔断循环）→server 补位→ICE Completed×2 自动在册。
+- **刀3 降观察**：多舱共享 `consumer` 键的串扰面已被 S2d backlog 排空 + session 定向回收（不键删互伤）消化；残余=事件广播互见为无害语义。
+- **活体**：4 轮舱端开关矩阵 rc=0×4 全真 ack；`closed 1 orphan data consumers`/`名下回收 1 producer`/`定向拆除已下发` 三层台账每轮齐；**sid 0→1→2→3 递减复用**=deallocate 铁证。新测试：server `remove_producers_by_ids_reaps_data_plane`、common data kind 钉。

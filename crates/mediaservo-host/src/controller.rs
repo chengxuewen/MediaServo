@@ -22,14 +22,14 @@
 //! ICE-Lite：候选随 WebRtcTransportCreated 内联下发，无 RTCIceCandidate 交换回合；
 //! `transport_connected`（Error{code:0} 惯例）非真错误）。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use mediaservo_common::protocol::{
-    ControlAck, DtlsParameters, Fingerprint, IceCandidate, IceParameters, SctpStreamParameters,
-    SignalingMessage, TransportDirection, parse_envelope,
+    ControlAck, DtlsParameters, Fingerprint, IceCandidate, IceParameters, MediaKind,
+    SctpStreamParameters, SignalingMessage, TransportDirection, parse_envelope,
 };
 use mediaservo_link::{FrameBus, FrameMeta, FrameTopic, SignalEvent, SignalSession};
 use mediaservo_webrtc::data_channel::{
@@ -256,28 +256,39 @@ pub async fn handle_command(
 
 /// 单通道路由：spool 接收 → [`handle_command`] → 回执（ack DC 主路 + 同通道回声）。
 pub async fn route_dc(
-    dc: RTCDataChannel,
+    mut dc: RTCDataChannel,
     actuator: Arc<dyn Actuator>,
     bus: Option<Arc<FrameBus>>,
     ack: Arc<Mutex<Option<RTCDataChannel>>>,
+    mut purge: mpsc::UnboundedReceiver<()>,
 ) {
     let label = dc.label().to_string();
     let mut rx = dc.spool().await;
     tracing::info!(label, "DC 路由启动");
-    while let Some(ev) = rx.recv().await {
-        match ev {
-            RTCDataChannelEvent::Open => tracing::info!(label, "DC open"),
-            RTCDataChannelEvent::Closed => {
-                tracing::info!(label, "DC closed");
+    loop {
+        tokio::select! {
+            ev = rx.recv() => match ev {
+                Some(RTCDataChannelEvent::Open) => tracing::info!(label, "DC open"),
+                Some(RTCDataChannelEvent::Closed) => {
+                    tracing::info!(label, "DC closed");
+                    break;
+                }
+                Some(RTCDataChannelEvent::Error(e)) => tracing::warn!(label, "DC error: {e}"),
+                Some(RTCDataChannelEvent::Message(m)) => {
+                    let sink = DcAckSink {
+                        ack: ack.clone(),
+                        inbound: dc.clone(),
+                    };
+                    handle_command(&label, &m.data, actuator.as_ref(), bus.as_deref(), &sink).await;
+                }
+                None => break,
+            },
+            // S4′: 上游 DataProducer 死亡（主循环定向）→ 本地关闭释放 libwebrtc
+            // stream id 占用（否则 zombie DC = `StreamId reserved` 消费天花板）。
+            _ = purge.recv() => {
+                tracing::info!(label, "S4′: 上游 DataProducer 死亡—consumer DC 自拆");
+                dc.close().await;
                 break;
-            }
-            RTCDataChannelEvent::Error(e) => tracing::warn!(label, "DC error: {e}"),
-            RTCDataChannelEvent::Message(m) => {
-                let sink = DcAckSink {
-                    ack: ack.clone(),
-                    inbound: dc.clone(),
-                };
-                handle_command(&label, &m.data, actuator.as_ref(), bus.as_deref(), &sink).await;
             }
         }
     }
@@ -480,7 +491,11 @@ async fn setup_send_side(
             *ack.lock().unwrap_or_else(|p| p.into_inner()) = Some(dc.clone());
         }
         // 出程通道也挂路由（防御：对端若经本通道回写仍走统一命令链）
-        tokio::spawn(route_dc(dc.clone(), actuator.clone(), bus.clone(), ack.clone()));
+        // 自建出程 DC 无定向拆除需求：tx 刻意 forget = 通道永活不发消息
+        //（select purge 臂恒悬停；4 字节泄漏为显式契约）。
+        let (purge_tx, purge_rx) = mpsc::unbounded_channel();
+        std::mem::forget(purge_tx);
+        tokio::spawn(route_dc(dc.clone(), actuator.clone(), bus.clone(), ack.clone(), purge_rx));
         dcs.push((label.clone(), dc));
     }
     connect_answer(signal, &pc, &t).await?;
@@ -591,6 +606,8 @@ pub async fn control_loop(
     };
     // own 回声去重：server 把 NewDataProducer 广播给全房（含自己）——自建 id 集跳过
     let mut consumed: HashSet<String> = own.clone();
+    // S4′: dp_id → consumer DC 定向拆除通道（ProducerClosed(Data) 到达时 send）。
+    let mut consumer_purge: HashMap<String, mpsc::UnboundedSender<()>> = HashMap::new();
 
     // 建立期夹带的 NewDataProducer：排空消费
     for np in pending.drain(..) {
@@ -681,11 +698,26 @@ pub async fn control_loop(
                                 "DataConsumed：negotiated consumer DC 已建，开始收令"
                             );
                             let (a, b, k) = (actuator.clone(), bus.clone(), ack.clone());
-                            tokio::spawn(route_dc(dc, a, b, k));
+                            let (purge_tx, purge_rx) = mpsc::unbounded_channel();
+                            consumer_purge.insert(data_producer_id.clone(), purge_tx);
+                            tokio::spawn(route_dc(dc, a, b, k, purge_rx));
                         }
                         Err(e) => {
                             tracing::error!(label, "negotiated consumer DC 创建失败: {e}");
                         }
+                    }
+                }
+                Ok(SignalEvent::Message(SignalingMessage::ProducerClosed {
+                    producer_id,
+                    kind: MediaKind::Data,
+                    ..
+                })) => {
+                    // S4′: 上游 data producer 死亡（server 定向广播）→ 本地 consumer
+                    // DC 自拆 + 台账清理（允许对端重订阅后再次消费）。
+                    if let Some(tx) = consumer_purge.remove(&producer_id) {
+                        let _ = tx.send(());
+                        consumed.remove(&producer_id);
+                        tracing::info!(producer_id, "S4′: 定向拆除已下发");
                     }
                 }
                 Ok(SignalEvent::Message(SignalingMessage::DataProducerCreated { .. })) => {

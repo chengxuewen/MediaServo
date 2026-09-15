@@ -439,9 +439,11 @@ export class SfuConsumerClient {
           this.pendingProducer = { producer_id: msg.producer_id, kind: msg.kind };
         }
       } else if (msg.type === 'producer_closed') {
-        // H1: host 断开/重启 → server 广播 producer 死亡。免刷新自愈：拆媒体面
-        // 重跑 startPlay（逻辑刷新），late-join/新 new_producer 广播驱动重订阅。
-        if ((this.sfuMode || this.waitingForProducer) && !this.closed && !this.restarting) {
+        // S4′: data producer（遥控 DC 域）死亡与视频流无关——不触发媒体面 restart，
+        // 否则每次舱端/车端 DC 翻转全 dashboard 假重启。
+        if (msg.kind === 'data') {
+          this.logT('producer_closed(data) — 媒体面无涉，忽略');
+        } else if ((this.sfuMode || this.waitingForProducer) && !this.closed && !this.restarting) {
           this.logT('producer_closed → 自动重订阅（免刷新自愈）');
           void this.restartStream();
         }

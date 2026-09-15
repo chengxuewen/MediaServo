@@ -262,7 +262,7 @@ impl RoomSession {
         let room = self.signal.room_id().to_string();
         let peer = self.signal.sfu_peer_id().to_string();
         // S2d: 取 connect 同刻预订阅的第二流（建立期车端 ack announce 零缺口）。
-        let mut pump_ev = self
+        let pump_ev = self
             .pump_events
             .lock()
             .await
@@ -467,7 +467,13 @@ async fn await_router_caps(
 // ── S2d ack 消费链路（舱端 = 车端 ack producer 的 consumer）──────────
 
 /// 等车端 ack producer 公告（非 ack label / 自身回显跳过；`None` = 事件流终结）。
-async fn await_ack_producer(ev: &mut broadcast::Receiver<SignalEvent>, self_peer: &str) -> Option<String> {
+/// S4′: 途经 `ProducerClosed(Data)` 定向拆除对应本地 consumer DC（释放 libwebrtc
+/// stream id 占用 = `StreamId reserved` 消费天花板的舱端解法）。
+async fn await_ack_producer(
+    ev: &mut broadcast::Receiver<SignalEvent>,
+    self_peer: &str,
+    consumers: &mut HashMap<String, mpsc::UnboundedSender<()>>,
+) -> Option<String> {
     loop {
         match ev.recv().await {
             Ok(SignalEvent::Message(SignalingMessage::NewDataProducer {
@@ -478,6 +484,16 @@ async fn await_ack_producer(ev: &mut broadcast::Receiver<SignalEvent>, self_peer
             })) => {
                 if label == sfu::ACK_LABEL && peer_id != self_peer {
                     return Some(data_producer_id);
+                }
+            }
+            Ok(SignalEvent::Message(SignalingMessage::ProducerClosed {
+                producer_id,
+                kind: mediaservo_common::protocol::MediaKind::Data,
+                ..
+            })) => {
+                if let Some(tx) = consumers.remove(&producer_id) {
+                    let _ = tx.send(());
+                    tracing::info!(producer_id, "ack 泵: 车端 DataProducer 死亡—本地 DC 定向拆除");
                 }
             }
             Ok(SignalEvent::Message(_)) | Ok(SignalEvent::Connected { .. }) => {}
@@ -571,6 +587,8 @@ async fn ack_consumer_pump(
     ack_tx: mpsc::Sender<ControlAck>,
 ) {
     let mut transport: Option<(RTCPeerConnection, String)> = None;
+    // S4′: dp_id → 本地 ack consumer DC 拆除通道。
+    let mut consumers: HashMap<String, mpsc::UnboundedSender<()>> = HashMap::new();
     // 预订阅流与主流各见全量广播 = 开局积压混有 step1 send transport 的
     // Created/connect ack（泵直接 await 会抓错旧应答 → 对 send 槽二次 connect
     // = worker "connect() already called"，2026-09-15 活体实证）。排空积压：
@@ -598,7 +616,7 @@ async fn ack_consumer_pump(
         let dp_id = match seed.pop() {
             Some(dp) => dp,
             None => {
-                let Some(dp) = await_ack_producer(&mut ev, &peer).await else {
+                let Some(dp) = await_ack_producer(&mut ev, &peer, &mut consumers).await else {
                     return;
                 };
                 dp
@@ -655,22 +673,35 @@ async fn ack_consumer_pump(
                 );
                 let tx = ack_tx.clone();
                 let mut rx = dc.spool().await;
+                let (purge_tx, mut purge_rx) = mpsc::unbounded_channel();
+                consumers.insert(dp_id.clone(), purge_tx);
                 tokio::spawn(async move {
-                    let _dc = dc; // 通道生命周期锚（drop 即关）
-                    while let Some(item) = rx.recv().await {
-                        match item {
-                            RTCDataChannelEvent::Message(m) => {
-                                match serde_json::from_slice::<ControlAck>(&m.data) {
-                                    Ok(ack) => {
-                                        if tx.send(ack).await.is_err() {
-                                            break;
+                    let mut _dc = dc; // 通道生命周期锚（drop 即关）
+                    loop {
+                        tokio::select! {
+                            item = rx.recv() => match item {
+                                Some(RTCDataChannelEvent::Message(m)) => {
+                                    match serde_json::from_slice::<ControlAck>(&m.data) {
+                                        Ok(ack) => {
+                                            if tx.send(ack).await.is_err() {
+                                                break;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!("ack DC 非 ControlAck 载荷丢弃: {e}")
                                         }
                                     }
-                                    Err(e) => tracing::warn!("ack DC 非 ControlAck 载荷丢弃: {e}"),
                                 }
+                                Some(RTCDataChannelEvent::Closed) => break,
+                                Some(_) => {}
+                                None => break,
+                            },
+                            // S4′: 车端 ack dp 死亡（泵定向）→ 本地关闭释放 sid 占用。
+                            _ = purge_rx.recv() => {
+                                tracing::info!("ack 泵: 本地 consumer DC 自拆（车端 DataProducer 死亡）");
+                                _dc.close().await;
+                                break;
                             }
-                            RTCDataChannelEvent::Closed => break,
-                            RTCDataChannelEvent::Open | RTCDataChannelEvent::Error(_) => {}
                         }
                     }
                 });

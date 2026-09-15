@@ -95,13 +95,21 @@ async fn main() -> ExitCode {
         .unwrap_or_else(|| "ws://127.0.0.1:17980/ws".to_string());
 
     // 信令：经本地网关（D2 信封 wire；网关拦截 RoomJoin 合成 RoomJoined）
+    // S4′(刀2): 冷启动竞态——agent 上游 WS 未连上 server 时 join 回 5001
+    //（gateway 本地秒起不背锅）。指数退避重试覆盖 server 簇拉起窗（S1 挂账小刀，
+    // 此前形态 = 5001×N 即触 oxmgr 熔断）。耗尽仍败 → exit 1 交 restart_policy 兜底。
+    let retry = mediaservo_link::RetryConfig {
+        max_retries: 12,
+        base_delay: std::time::Duration::from_secs(1),
+        max_delay: std::time::Duration::from_secs(8),
+    };
     let signal = match SignalClient::new_gateway(&gateway, SRC, ROOM, PeerRole::Host)
-        .connect()
+        .connect_with_retry(retry)
         .await
     {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("controller: 信令连接失败: {e}");
+            eprintln!("controller: 信令连接失败（重试耗尽）: {e}");
             return ExitCode::from(1);
         }
     };

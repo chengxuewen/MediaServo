@@ -1675,6 +1675,28 @@ async fn disconnect_session(
             );
         }
 
+        // S4′: 会话名下资源回收（舱端 dp/producer 以 session:<ws-id> 键登记）——
+        // SFU 层自报键（"consumer"）跨会话共享不可按键删，id 定向回收防误伤
+        // 其他活舱；连带关闭绑定死亡 dp 的孤儿 consumer（sfu 第二遍）。
+        let session_key = format!("session:{relay_peer_id}");
+        let mine: Vec<String> = server
+            .producer_owners
+            .iter()
+            .filter(|e| e.value() == &session_key)
+            .map(|e| e.key().clone())
+            .collect();
+        if !mine.is_empty() {
+            let removed = server.sfu_manager.remove_producers_by_ids(&mine);
+            for pid in &mine {
+                server.producer_owners.remove(pid);
+            }
+            for (room_id, closed) in group_closed_by_room(removed) {
+                announce_producers_closed(
+                    &server, &room_id, &relay_peer_id, None, closed,
+                );
+            }
+            tracing::info!("S4′: session {relay_peer_id} 名下回收 {} 个 producer", mine.len());
+        }
         let t4_seen = server.t4_gone_seen.remove(&relay_peer_id).map(|(_, n)| n).unwrap_or(0);
         // H1 修正（方案 A）: device 持有的 producer 存于各 stream 房间自报 peer 键，
         // 会话 id 清理漏删 → producer_owners 反查该设备全部 producer 移除，
@@ -2042,12 +2064,11 @@ pub(crate) async fn handle_sfu_message(
             {
                 Ok(result) => {
                     // G3: 车端 producer 登记所属设备（consume 授权纵深防御）。
-                    if let Some(device) = server.device_id_of(peer_id) {
-                        server.producer_owners.insert(result.producer_id.clone(), device);
-                    } else {
-                        // T2: produce 会话缺设备绑定 → owners 断链、agent 断开反查必漏（响亮告警）。
-                        tracing::warn!("producer_owners: device binding absent on produce (session={peer_id}, room={room_id})");
-                    }
+                    // S4′: 同 data producer——device 缺席落 session 兜底键（断链按 id 回收）。
+                    let owner = server
+                        .device_id_of(peer_id)
+                        .unwrap_or_else(|| format!("session:{peer_id}"));
+                    server.producer_owners.insert(result.producer_id.clone(), owner);
                     // Broadcast NewProducer to all peers in room
                     let broadcast = SignalingMessage::NewProducer {
                         room_id: room_id.clone(),
@@ -2197,12 +2218,13 @@ pub(crate) async fn handle_sfu_message(
                 Ok(result) => {
                     // G3: 车端 data producer 登记所属设备（consume_data 授权纵深防御,
                     // 与媒体 producer 同一 id 空间 — UUID 唯一不冲突）。
-                    if let Some(device) = server.device_id_of(peer_id) {
-                        server.producer_owners.insert(result.data_producer_id.clone(), device);
-                    } else {
-                        // T2: 同媒体 producer——data 登记断链同样导致反查漏网。
-                        tracing::warn!("producer_owners: device binding absent on data produce (session={peer_id}, room={room_id})");
-                    }
+                    // S4′: device 缺席（舱端账号会话）落 `session:<ws-id>` 兜底键——
+                    // 断链清理按同一空间回收（旧版纯 warn = 舱端 dp 断链零回收 =
+                    // `found N data producers` 单调泄漏与 `StreamId reserved` 天花板根因）。
+                    let owner = server
+                        .device_id_of(peer_id)
+                        .unwrap_or_else(|| format!("session:{peer_id}"));
+                    server.producer_owners.insert(result.data_producer_id.clone(), owner);
                     // Broadcast NewDataProducer to all peers in room (late-joiner sync)
                     let broadcast = SignalingMessage::NewDataProducer {
                         room_id: room_id.clone(),
@@ -2377,6 +2399,20 @@ pub(crate) async fn handle_sfu_message(
 /// F1/T4: ProducerClosed 通告统一链——close 全局清理 / device 反查 / DownstreamGone
 /// 三处共用（防分支漂移）。职责：逐条广播（Ok(n)/Err 可见，C15）+ owners 表同步
 /// + StreamDestroy 列表事件（设备归属时）。
+/// S4′: remove_* 三元组清单 → 按房间分组（统一广播链复用形）。
+fn group_closed_by_room(
+    list: Vec<(String, String, mediaservo_common::protocol::MediaKind)>,
+) -> Vec<(String, Vec<(String, mediaservo_common::protocol::MediaKind)>)> {
+    let mut acc: std::collections::HashMap<
+        String,
+        Vec<(String, mediaservo_common::protocol::MediaKind)>,
+    > = std::collections::HashMap::new();
+    for (room, id, kind) in list {
+        acc.entry(room).or_default().push((id, kind));
+    }
+    acc.into_iter().collect()
+}
+
 fn announce_producers_closed(
     server: &SignalingServer,
     room_id: &str,

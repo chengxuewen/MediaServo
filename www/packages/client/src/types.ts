@@ -23,7 +23,7 @@ export interface SfuRoomsResponse { rooms: SfuRoom[]; }
 export interface SfuStats {
   producer_id?: string;
   consumer_id?: string;
-  kind?: 'audio' | 'video';
+  kind?: 'audio' | 'video' | 'data';
   byte_count: number;
   packet_count: number;
   score: number;
