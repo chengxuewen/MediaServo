@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc};
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{client_async, connect_async, MaybeTlsStream, WebSocketStream};
 
 use crate::error::LinkError;
 
@@ -94,6 +94,11 @@ pub struct SignalClient {
     /// device-enroll T7：公钥指纹身份（Some = Join 带 device_pubkey 走验签链，
     /// 优先于 device）。gateway/host-agent 装配透传。
     identity: Option<DeviceIdentity>,
+    /// S2（client v2）：账号 JWT。Some = 握手经 `Sec-WebSocket-Protocol` 头透传
+    /// （server signaling::ws_handler 从该头读取，兼容 "Bearer <jwt>" 与纯 <jwt>；
+    /// **非 query 参数**——/ws 路由无 Query 提取器），并跳过 PSK 文本帧阶段
+    /// （server JWT 验签后会话即已认证，再发 PSK 帧会污染 RoomJoin 读取）。
+    jwt: Option<String>,
     /// a2（S0.5）：上次会话的一次性重挂票（server RoomJoined.session_nonce）。
     /// Some = 下一次 connect 的 RoomJoin 带 resume（仅 v3 被 server 受理）；
     /// 取出即焚（消费/失败都不复用——重放由 server 端 burn 保证）。
@@ -171,6 +176,7 @@ impl SignalClient {
             gateway_src: None,
             device: None,
             identity: None,
+            jwt: None,
             resume_ticket: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
@@ -186,6 +192,7 @@ impl SignalClient {
             gateway_src: Some(src.to_string()),
             device: None,
             identity: None,
+            jwt: None,
             resume_ticket: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
@@ -215,16 +222,56 @@ impl SignalClient {
         self
     }
 
+    /// S2：附加账号 JWT（登录 REST 输出）。握手请求带 `Sec-WebSocket-Protocol: <jwt>`，
+    /// 连接阶段跳过 PSK 文本帧（JWT 即认证凭证，D273 红牌族中 auth 终态由 server 4011 表达）。
+    /// 仅适用明文 `ws://`（wss 需 TLS connector，归 S4+ 裁决——同 login v1 口径）。
+    pub fn with_jwt(mut self, token: impl Into<String>) -> Self {
+        self.jwt = Some(token.into());
+        self
+    }
+
     /// 连接 server、PSK 认证、加入房间，返回会话。
     pub async fn connect(&self) -> Result<SignalSession, LinkError> {
-        let (ws_stream, _resp) = connect_async(&self.url)
-            .await
-            .map_err(|e| LinkError::Signal(format!("connect {}: {e}", self.url)))?;
+        let ws_stream = match &self.jwt {
+            None => connect_async(&self.url)
+                .await
+                .map_err(|e| LinkError::Signal(format!("connect {}: {e}", self.url)))?
+                .0,
+            Some(token) => {
+                // JWT 走子协议头（server 只认这个通道）。手工 request 只为插这一头。
+                use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+                let mut request = self
+                    .url
+                    .as_str()
+                    .into_client_request()
+                    .map_err(|e| LinkError::Signal(format!("jwt handshake request: {e}")))?;
+                request.headers_mut().insert(
+                    "sec-websocket-protocol",
+                    token
+                        .as_str()
+                        .parse()
+                        .map_err(|e| LinkError::Signal(format!("jwt header value: {e}")))?,
+                );
+                let host = request
+                    .uri()
+                    .host()
+                    .ok_or_else(|| LinkError::Signal(format!("no host in url {}", self.url)))?
+                    .to_string();
+                let port = request.uri().port_u16().unwrap_or(80);
+                let tcp = TcpStream::connect((host.as_str(), port))
+                    .await
+                    .map_err(|e| LinkError::Signal(format!("connect {}: {e}", self.url)))?;
+                client_async(request, MaybeTlsStream::Plain(tcp))
+                    .await
+                    .map_err(|e| LinkError::Signal(format!("connect {}: {e}", self.url)))?
+                    .0
+            }
+        };
         let (mut sender, mut receiver) = ws_stream.split();
 
         // Phase 1: PSK 认证 — 仅直连 server 模式；网关本地侧不认证（D2，
         // 信任边界 127.0.0.1，整车 PSK 在 agent 的远端连接）
-        if self.gateway_src.is_none() {
+        if self.gateway_src.is_none() && self.jwt.is_none() {
             sender
                 .send(Message::Text(self.psk.clone().into()))
                 .await
@@ -690,4 +737,78 @@ fn jittered(backoff: std::time::Duration) -> std::time::Duration {
     seed ^= seed << 5;
     let jitter = (seed as f64 / u32::MAX as f64) * 0.5 - 0.25;
     std::time::Duration::from_secs_f64(backoff.as_secs_f64() * (1.0 + jitter))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 裸 TCP mock：读握手头 → 断言子协议 → 完成 101（回显子协议，server ws_handler 同形）
+    /// → 延迟关闭。jwt 形 connect 应过握手、在 RoomJoin 读处报 closed（= 握手过成功的判据），
+    /// 且握手后即进 join（= PSK 帧阶段被跳过——若未跳过，mock 关前收不到 join 响应行为不同）。
+    async fn jwt_handshake_mock() -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = Vec::new();
+            let mut byte = [0u8; 1];
+            while !buf.ends_with(b"\r\n\r\n") {
+                if tokio::io::AsyncReadExt::read(&mut sock, &mut byte).await.unwrap_or(0) == 0 {
+                    return;
+                }
+                buf.push(byte[0]);
+            }
+            let raw = String::from_utf8_lossy(&buf).to_string();
+            let text = raw.to_lowercase();
+            // key 大小写敏感（base64）——必须从原文提取，勿用 to_lowercase 后的 text。
+            let key = raw
+                .lines()
+                .find_map(|l| {
+                    let (name, v) = l.split_once(':')?;
+                    (name.eq_ignore_ascii_case("sec-websocket-key"))
+                        .then(|| v.trim().to_string())
+                })
+                .expect("mock: 握手缺 key");
+            assert!(
+                text.contains("sec-websocket-protocol: jwt.tok.en"),
+                "握手必须带子协议头，实得:\n{text}"
+            );
+            let accept = tokio_tungstenite::tungstenite::handshake::derive_accept_key(key.as_bytes());
+            let resp = format!(
+                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\nSec-WebSocket-Protocol: jwt.tok.en\r\n\r\n"
+            );
+            let _ = tokio::io::AsyncWriteExt::write_all(&mut sock, resp.as_bytes()).await;
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        });
+        addr
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn jwt_connect_sends_subprotocol_and_skips_psk() {
+        let addr = jwt_handshake_mock().await;
+        let client = SignalClient::new(
+            &format!("ws://{addr}/ws"),
+            "unused-psk",
+            "test-room",
+            PeerRole::Consumer,
+        )
+        .with_jwt("jwt.tok.en");
+        let err = client
+            .connect()
+            .await
+            .expect_err("mock 握手后即关 → join 读必败（握手成功的判据）");
+        // 必须死在 RoomJoin 读——说明握手过且 PSK 帧阶段被跳过（未走「auth denied/
+        // unexpected auth response」路径）。
+        let text = err.to_string();
+        assert!(text.contains("RoomJoin"), "期望 RoomJoin 阶段错误（= PSK 阶段已跳过），实得: {err}");
+    }
+
+    #[test]
+    fn with_jwt_is_additive_builder() {
+        let c = SignalClient::new("ws://h/ws", "psk", "r", PeerRole::Consumer);
+        assert!(c.jwt.is_none());
+        let c = c.with_jwt("tok");
+        assert_eq!(c.jwt.as_deref(), Some("tok"));
+    }
 }

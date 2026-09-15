@@ -2,50 +2,33 @@
 name = "mediaservo-client"
 version.workspace = true
 edition = "2024"
-description = "MediaServo Remote Client — WebRTC receive, GStreamer decode, DataChannel control (cockpit/operator side)"
+description = "MediaServo Client SDK v2 — 舱端/监控侧最小消费与控制库（SFU consume + ControlEnvelope 控制 DC，登录 JWT）"
 license = "Apache-2.0"
 
-[[bin]]
-name = "mediaservo-client"
-path = "src/main.rs"
+[lib]
+name = "mediaservo_client"
+path = "src/lib.rs"
 
 [dependencies]
 mediaservo-common = { path = "../mediaservo-common" }
-mediaservo-media = { path = "../mediaservo-media" }
-# GStreamer (optional — requires system GStreamer)
-gstreamer = { version = "0.23", optional = true }
-gstreamer-app = { version = "0.23", optional = true }
-gstreamer-video = { version = "0.23", optional = true }
-
-# WebRTC (mediaservo-webrtc thin wrapper around webrtc-rs)
+# 信令面单一真源：WS/PSK/协商/心跳/重挂全部走 link（S2 拆解归位，禁私有 tungstenite）
+mediaservo-link = { path = "../mediaservo-link" }
+# C12：WebRTC 仅经 mediaservo-webrtc 抽象层（libwebrtc 后端），禁直依 webrtc-rs
 mediaservo-webrtc = { path = "../mediaservo-webrtc", default-features = false, features = ["backend-webrtc-sys"] }
 
-# HTTP + WebSocket (config UI)
-axum = { version = "0.7", features = ["ws"] }
-tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = { version = "0.24", features = ["connect"] }
-tower-http = { version = "0.5", features = ["trace", "cors", "timeout"] }
-
-# Config + serialization
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
 serde_json = "1"
-
-# Observability
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+thiserror = "2"
+async-trait = "0.1"
 
-# Crypto (HMAC for DataChannel)
-hmac = "0.12"
-sha2 = "0.10"
-
-# Async utilities
+[dev-dependencies]
+# 测试 mock server（sfu_surface）= 直连 WS 形：服务端侧 accept_async 需tungstenite。
+tokio-tungstenite = "0.24"
 futures-util = "0.3"
-base64 = "0.22"
+tokio = { version = "1", features = ["full"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [features]
 default = []
-gstreamer = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
-webrtc = []
-production = ["gstreamer", "webrtc"]
-

@@ -1,232 +1,106 @@
-//! RTCDataChannel control sender — signs commands with HMAC-SHA256, rate-limited send.
+//! 控制面 SFU DataChannel 句柄（S2 重写——旧 HMAC-P2P 形随 main.rs 一并退役）。
 //!
-//! Uses `mediaservo_common::auth::SimplePskAuth` for signing.
-//! Commands are buffered (max 3), oldest dropped when full.
+//! wire 形 = [`ControlEnvelope`]/[`ControlAck`]（common::protocol 单一真源，
+//! 与 host S1 `mediaservo-host::controller` 配对）。回执经**同 label DC 回声**
+//! 回来（host `DcAckSink` 双写：ack 主路 DC + 入站 DC 回声——client 侧只需回声，
+//! 免建 Recv 消费链）。零 HMAC、零 PSK 签名。
 
-use mediaservo_common::auth::SimplePskAuth;
-use mediaservo_common::error::CoreError;
-use mediaservo_webrtc::RTCDataChannel;
-use std::collections::VecDeque;
-use tokio::sync::Mutex;
+use std::collections::HashMap;
+use std::time::Duration;
 
-// ponytail: 3-frame buffer prevents back-pressure stall in control loop
+use mediaservo_common::protocol::{ControlAck, ControlEnvelope};
+use mediaservo_webrtc::data_channel::RTCDataChannel;
+use mediaservo_webrtc::RTCPeerConnection;
+use tokio::sync::mpsc;
 
-/// Control commands sent over RTCDataChannel from Remote to Host.
-#[derive(Debug, Clone)]
-pub enum ControlCommand {
-    /// Steering angle in degrees.
-    Steering(f64),
-    /// Brake pressure 0.0–1.0.
-    Brake(f64),
-    /// Throttle position 0.0–1.0.
-    Throttle(f64),
-    /// Immediate emergency stop.
-    EmergencyStop,
-}
+use crate::error::ClientError;
 
-/// Serialize a control command to bytes for HMAC signing.
-fn command_to_bytes(cmd: &ControlCommand) -> Vec<u8> {
-    match cmd {
-        ControlCommand::Steering(v) => format!("steering:{v}").into_bytes(),
-        ControlCommand::Brake(v) => format!("brake:{v}").into_bytes(),
-        ControlCommand::Throttle(v) => format!("throttle:{v}").into_bytes(),
-        ControlCommand::EmergencyStop => b"emergency_stop".to_vec(),
+impl std::fmt::Debug for ControlChannel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ControlChannel")
+            .field("labels", &self.labels)
+            .field("producer_ids", &self.producer_ids)
+            .finish_non_exhaustive()
     }
 }
 
-/// Control sender — signs and buffers commands for RTCDataChannel transmission.
-pub struct ControlSender {
-    /// PSK authenticator used for HMAC signing.
-    auth: SimplePskAuth,
-    /// Buffer of (command, signature) pairs awaiting send.
-    buffer: Mutex<VecDeque<(ControlCommand, Vec<u8>)>>,
-    /// Maximum send rate in Hz.
-    rate_hz: u32,
+/// 一次 `open_control` 建立的出程控制通道集。
+///
+/// 构造仅由 [`crate::RoomSession::open_control`] 完成（transport/DC/announce 序列
+/// 在 session 侧）；本类型只做收发与保活（持 pc 引用防其提前释放）。
+pub struct ControlChannel {
+    dcs: HashMap<String, RTCDataChannel>,
+    labels: Vec<String>,
+    ack_rx: mpsc::Receiver<ControlAck>,
+    producer_ids: Vec<String>,
+    /// 出程 transport 的 PC——句柄存活期间持有，drop 即断 DC。
+    _pc: RTCPeerConnection,
 }
 
-impl ControlSender {
-    /// Create a new control sender.
-    ///
-    /// `hmac_key` is used as the PSK for HMAC-SHA256 signing.
-    /// `rate_hz` limits the send rate (frames per second).
-    pub fn new(hmac_key: &str, rate_hz: u32) -> Self {
-        tracing::info!(
-            hmac_key = hmac_key,
-            rate_hz = rate_hz,
-            "Control sender initialized"
-        );
+impl ControlChannel {
+    pub(crate) fn new(
+        dcs: HashMap<String, RTCDataChannel>,
+        labels: Vec<String>,
+        ack_rx: mpsc::Receiver<ControlAck>,
+        producer_ids: Vec<String>,
+        pc: RTCPeerConnection,
+    ) -> Self {
         Self {
-            auth: SimplePskAuth::new(hmac_key.as_bytes()),
-            buffer: Mutex::new(VecDeque::with_capacity(4)),
-            rate_hz,
+            dcs,
+            labels,
+            ack_rx,
+            producer_ids,
+            _pc: pc,
         }
     }
 
-    /// Sign a control command, returning the 8-byte HMAC-SHA256 tag.
-    pub fn sign_command(&self, command: &ControlCommand) -> Vec<u8> {
-        let payload = command_to_bytes(command);
-        self.auth.sign(&payload)
+    /// 已建立的通道 label（按 open_control 入参序）。
+    #[must_use]
+    pub fn labels(&self) -> &[String] {
+        &self.labels
     }
 
-    /// Enqueue a command for sending.
-    ///
-    /// Rate-limited by `rate_hz`. Drops oldest command if buffer exceeds 3 entries.
-    pub async fn send(&self, command: ControlCommand) -> Result<(), CoreError> {
-        let tag = self.sign_command(&command);
-
-        let mut buf = self.buffer.lock().await;
-        if buf.len() >= 3 {
-            buf.pop_front();
-            tracing::warn!("Control buffer full, dropped oldest command");
-        }
-        buf.push_back((command, tag));
-
-        // ponytail: simple fixed-rate pacing; replace with token bucket if burst tolerance needed
-        let interval_ms = 1000u64 / self.rate_hz as u64;
-        tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
-        Ok(())
+    /// server 分配的 data producer id（审计/排查用）。
+    #[must_use]
+    pub fn producer_ids(&self) -> &[String] {
+        &self.producer_ids
     }
 
-    /// Current buffer depth (for health monitoring).
-    pub async fn depth(&self) -> usize {
-        self.buffer.lock().await.len()
-    }
-    /// Send a control command immediately via RTCDataChannel.
-    /// Signs with HMAC-SHA256 (key: mediaservo-control), prefixes 0x01, sends binary.
-    pub async fn send_via_dc(&self, dc: &RTCDataChannel, cmd: &ControlCommand) -> Result<(), CoreError> {
-        let body = cmd.to_json_body();
-        let tag = self.hmac_sign(&body);
-        let mut payload = vec![0x01u8];
-        payload.extend_from_slice(&tag);
-        payload.extend_from_slice(body.as_bytes());
-        dc.send(&payload).await
-            .map_err(|e| CoreError::Unknown(format!("dc send: {e}")))?;
-        Ok(())
-    }
-    /// Compute 8-byte HMAC-SHA256 tag with key 'mediaservo-control'.
-    fn hmac_sign(&self, body: &str) -> [u8; 8] {
-        use hmac::{Hmac, Mac};
-        use sha2::Sha256;
-        let mut mac = Hmac::<Sha256>::new_from_slice(b"mediaservo-control")
-            .expect("HMAC key derivation should not fail");
-        mac.update(body.as_bytes());
-        let result = mac.finalize().into_bytes();
-        let mut tag = [0u8; 8];
-        tag.copy_from_slice(&result[..8]);
-        tag
-    }
-}
-
-impl ControlCommand {
-    /// Serialize to JSON body matching host's ControlFrame format.
-    pub fn to_json_body(&self) -> String {
-        match self {
-            ControlCommand::Steering(v) => format!(r#"{{"type":"steering","value":{v}}}"#),
-            ControlCommand::Brake(v) => format!(r#"{{"type":"brake","value":{v}}}"#),
-            ControlCommand::Throttle(v) => format!(r#"{{"type":"throttle","value":{v}}}"#),
-            ControlCommand::EmergencyStop => r#"{{"type":"emergency_stop"}}"#.to_string(),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sign_steering_command() {
-        let sender = ControlSender::new("test-key", 30);
-        let cmd = ControlCommand::Steering(15.2);
-        let tag = sender.sign_command(&cmd);
-        assert_eq!(tag.len(), 8);
+    /// 在指定 label 通道发一条命令信封（seq 由调用方自增维护）。
+    pub async fn send(
+        &self,
+        label: &str,
+        seq: u64,
+        cmd: &str,
+        payload: serde_json::Value,
+    ) -> Result<(), ClientError> {
+        self.send_envelope(label, &ControlEnvelope { seq, cmd: cmd.into(), payload })
+            .await
     }
 
-    #[test]
-    fn sign_different_keys_produce_different_tags() {
-        let sender_a = ControlSender::new("key-a", 30);
-        let sender_b = ControlSender::new("key-b", 30);
-        let cmd = ControlCommand::Brake(0.5);
-        let tag_a = sender_a.sign_command(&cmd);
-        let tag_b = sender_b.sign_command(&cmd);
-        assert_ne!(tag_a, tag_b);
+    /// 信封直发（已持有 [`ControlEnvelope`] 时的低层入口）。
+    pub async fn send_envelope(
+        &self,
+        label: &str,
+        env: &ControlEnvelope,
+    ) -> Result<(), ClientError> {
+        let dc = self
+            .dcs
+            .get(label)
+            .ok_or_else(|| ClientError::InvalidState(format!("control DC \"{label}\" 未开启")))?;
+        let text = serde_json::to_string(env)
+            .map_err(|e| ClientError::MalformedResponse(format!("envelope serialize: {e}")))?;
+        dc.send_text(&text)
+            .await
+            .map_err(|e| ClientError::WebRtc(format!("DC {label} send: {e}")))
     }
 
-    #[test]
-    fn sign_all_command_types() {
-        let sender = ControlSender::new("test-key", 30);
-        for cmd in [
-            ControlCommand::Steering(1.0),
-            ControlCommand::Brake(0.5),
-            ControlCommand::Throttle(45.0),
-            ControlCommand::EmergencyStop,
-        ] {
-            let tag = sender.sign_command(&cmd);
-            assert_eq!(tag.len(), 8);
-        }
-    }
-
-    #[test]
-    fn emergency_stop_bytes() {
-        let bytes = command_to_bytes(&ControlCommand::EmergencyStop);
-        assert_eq!(bytes, b"emergency_stop");
-    }
-
-    #[test]
-    fn command_to_bytes_all_variants() {
-        assert_eq!(
-            command_to_bytes(&ControlCommand::Steering(1.5)),
-            b"steering:1.5"
-        );
-        assert_eq!(
-            command_to_bytes(&ControlCommand::Brake(0.3)),
-            b"brake:0.3"
-        );
-        assert_eq!(
-            command_to_bytes(&ControlCommand::Throttle(80.0)),
-            b"throttle:80"
-        );
-    }
-
-    #[tokio::test]
-    async fn buffer_depth_tracks_commands() {
-        let sender = ControlSender::new("test-key", 1000);
-        // high rate_hz so rate-limiting doesn't slow the test
-        assert_eq!(sender.depth().await, 0);
-        sender.send(ControlCommand::Steering(1.0)).await.unwrap();
-        assert_eq!(sender.depth().await, 1);
-        sender.send(ControlCommand::Brake(0.5)).await.unwrap();
-        assert_eq!(sender.depth().await, 2);
-    }
-
-    #[test]
-    fn steering_and_brake_produce_different_tags() {
-        let sender = ControlSender::new("test-key", 30);
-        let tag_steering = sender.sign_command(&ControlCommand::Steering(10.0));
-        let tag_brake = sender.sign_command(&ControlCommand::Brake(0.5));
-        assert_ne!(tag_steering, tag_brake);
-    }
-
-    #[tokio::test]
-    async fn buffer_overflow_drops_oldest() {
-        // rate_hz 1000 avoids rate-limiting delay
-        let sender = ControlSender::new("test-key", 1000);
-        sender.send(ControlCommand::Steering(1.0)).await.unwrap();
-        sender.send(ControlCommand::Steering(2.0)).await.unwrap();
-        sender.send(ControlCommand::Steering(3.0)).await.unwrap();
-        // buffer is now full (3 commands)
-        assert_eq!(sender.depth().await, 3);
-        // 4th command should drop oldest (Steering(1.0)) and add new one
-        sender.send(ControlCommand::Steering(4.0)).await.unwrap();
-        assert_eq!(sender.depth().await, 3);
-    }
-
-    #[test]
-    fn emergency_stop_serialization_roundtrip() {
-        let bytes = command_to_bytes(&ControlCommand::EmergencyStop);
-        assert_eq!(bytes, b"emergency_stop");
-        // Verify it produces a valid HMAC tag
-        let sender = ControlSender::new("test-key", 30);
-        let tag = sender.sign_command(&ControlCommand::EmergencyStop);
-        assert_eq!(tag.len(), 8);
+    /// 取下一条回执（host 回声/ack 广播同队），`wait` 内无回执 →
+    /// [`ClientError::Timeout`]。
+    pub async fn recv_ack(&mut self, wait: Duration) -> Result<ControlAck, ClientError> {
+        tokio::time::timeout(wait, self.ack_rx.recv())
+            .await
+            .map_err(|_| ClientError::Timeout { what: "ControlAck" })?
+            .ok_or_else(|| ClientError::InvalidState("ack 流已关闭（DC 断开）".into()))
     }
 }

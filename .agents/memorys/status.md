@@ -757,3 +757,7 @@ install                        → 改名提示 + exit 2（退役）
 - controller 死 P2P 段（offer→Sdp 中继永等）删除 → `src/controller.rs` lib 化（control_loop：PushSession 同形 Send transport + DC-only×4 + CreateDataProducer announce + Recv transport on_data_channel 入程 + ConsumeData/pending 缓存/回声自跳过 + StubActuator 链 + FrameBus control/cmd|ack 镜像旁路永不阻塞执行）。link/acl Control 角色补 publish control/ack + subscribe control/cmd。
 - 门：link 3/76 lib/e2e 1/单测 6/clippy 零新增（全绿）。活体：**CreateDataProducer×4 server 侧同刻 DataProducer 建立 + DC open×4 + ICE Completed×2（真 DTLS/SCTP）**——P2P 永等→SFU 成立决定性翻转；Cmd 入程等 S2 舱端 producer。
 - 账：worker 偏差记录两则采纳（ICE 交换实形=候选内联无交换回合；webrtc_transport 被 legacy 引用不删=退役裁决留案）。新债入册：**controller 冷启动时序竞争 gateway 未连（5001×N 熔断）= deploy 接线小刀 S2 前处理**；gateway data 域 FIFO 配对间隙（4012 弹错槽）挂 S4 小刀候选。
+
+### 2026-09-15: S2 client v2 最小三件（deep worker 完成，编排亲验）
+- mediaservo-client = 纯 lib（auth/session/control 三件 + error/config/sfu/signal 支撑）：登录 REST(JWT 经 Sec-WebSocket-Protocol 传递，link 新增 with_jwt 一处 additive) + RoomSession(consume_video=PullSession 序列本地复刻) + ControlChannel(SFU-DC produce 形，4012→ControlDenied、negotiated<2→ProtocolTooLow 预检，ack=同 DC 回程模型)。删除：私有 WS 316L/HMAC control/decode/:9101/axum 面（-1468L，净 -575）；examples/basic.rs=活体载体在位。门亲验：client 全绿(4 套)/link 回归 0 红/硬编码 src=0(测试 mock 3 处合法)。
+- 债：consume 的 Consume.rtp_capabilities 走 field 同款最小 VP8 声明+codec 自 Consumed 回读（H264 直连消费是否放行=活体首验点，ponytail 注已钉）；活体一圈（basic.rs→S1 controller Cmd/ACK 闭环）= 本批收门，下会话执行。

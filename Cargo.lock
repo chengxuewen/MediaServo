@@ -4297,23 +4297,16 @@ dependencies = [
 name = "mediaservo-client"
 version = "0.1.1"
 dependencies = [
- "axum",
- "base64",
+ "async-trait",
  "futures-util",
- "gstreamer",
- "gstreamer-app",
- "gstreamer-video",
- "hmac",
  "mediaservo-common",
- "mediaservo-media",
+ "mediaservo-link",
  "mediaservo-webrtc",
  "serde",
  "serde_json",
- "serde_yaml",
- "sha2 0.10.9",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
- "tower-http 0.5.2",
  "tracing",
  "tracing-subscriber",
 ]

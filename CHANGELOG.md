@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### 新增
+- 新增 mediaservo-client v2 消费端 SDK（Rust 库）：账号登录(JWT)、入房、SFU 视频消费、遥控数据通道（4012 拒控/协议过低为显式类型化错误）；旧客户端演示形态（内置 WS/:9101 转发/HMAC 通道）退役。
 - 车端遥控接收链路换代：host-controller 从（自 2026-08-25 起即已死路的）点对点协商改为服务端 SFU 数据通道——上电即完成 DTLS/SCTP 注册（chassis/gimbal/light/ack 四通道），指令镜像发布到本机总线 control/cmd（回执 control/ack）供 ROS/回放节点零改动消费。
 - 信令通道硬化：服务器主动心跳探测断链（约 10-15 秒回收僵尸连接；网络抖动期连接不再被误杀）；车端短暂失联后凭一次性重挂票快速重挂（认证始终全量重跑，吊销即刻生效）；心跳与超时参数经环境变量 MEDIASERVO_WS_PING_SECS / WS_PONG_MISS / WS_PSK_WAIT_SECS / WS_JOIN_WAIT_SECS / WS_RESUME_HOLD_SECS 可调。
 - 信令拥塞时高频状态上报限损（丢弃计数自报），认证/控制/终态消息不再被状态洪流排队拖死（优先级双队列）。协议方言升至 v3（新增会话续期域；v1/v2 端点行为逐字节不变）。
