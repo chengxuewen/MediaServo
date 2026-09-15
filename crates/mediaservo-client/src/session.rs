@@ -156,23 +156,24 @@ impl RoomSession {
             }
         });
 
-        // 3. Consume（C1 显式绑 transport_id；caps 用 e2e 验证过的最小 VP8 形）
-        // ponytail: rtp_capabilities 硬编码 VP8 镜像 field PullSession——H264
-        // producer 会被 mediasoup can_consume 拒。升级路径 = GetRouterRtpCapabilities
-        // 回包直传（P1 T1.1 已在 server），归 S4 弱网矩阵轮一并验。
+        // 3a. Router 能力查询直传（mediasoup-client Device.load 同款官方流程，C18；
+        //     手拼 caps 在 H264 producer 下必拒——S2b 活体教训，PullSession 同罪另案）。
+        self.signal
+            .send(SignalingMessage::GetRouterRtpCapabilities { room_id: room.clone() })
+            .await?;
+        let router_caps = tokio::time::timeout(RESPONSE_WAIT, await_router_caps(&mut ev))
+            .await
+            .map_err(|_| ClientError::Timeout {
+                what: "RouterRtpCapabilities",
+            })??;
+
+        // 3b. Consume（C1 显式绑 transport_id；caps = router 原样回包）
         self.signal
             .send(SignalingMessage::Consume {
                 room_id: room.clone(),
                 peer_id: peer.clone(),
                 producer_id: producer_id.to_string(),
-                rtp_capabilities: serde_json::json!({
-                    "codecs": [{"mimeType": "video/VP8", "clockRate": 90000, "kind": "video"}],
-                    "headerExtensions": [
-                        {"uri": "urn:ietf:params:rtp-hdrext:sdes:mid", "preferredId": 1, "kind": "video", "preferredEncrypt": false, "direction": "sendrecv"},
-                        {"uri": "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01", "preferredId": 3, "kind": "video", "preferredEncrypt": false, "direction": "sendrecv"},
-                        {"uri": "http://www.webrtc.org/experiments/rtp-hdrext/abs-capture-time", "preferredId": 5, "kind": "video", "preferredEncrypt": false, "direction": "sendrecv"},
-                    ],
-                }),
+                rtp_capabilities: router_caps,
                 transport_id: Some(transport_id.clone()),
             })
             .await?;
@@ -422,6 +423,17 @@ async fn await_data_producer_created(
             SignalingMessage::Error { message, .. } if message == "transport_connected" => {}
             other => return Err(on_unexpected(other, "DataProducerCreated"))?,
         }
+    }
+}
+
+/// S2b：consume 前查 router 真实 caps——手拼"仅 VP8"声明被 H264 producer 的
+/// can_consume 直拒（5000 No compatible media codecs，09-15 活体实锤）。
+async fn await_router_caps(
+    ev: &mut broadcast::Receiver<SignalEvent>,
+) -> Result<serde_json::Value, ClientError> {
+    match next_msg(ev).await? {
+        SignalingMessage::RouterRtpCapabilities { capabilities, .. } => Ok(capabilities),
+        other => Err(on_unexpected(other, "RouterRtpCapabilities")),
     }
 }
 

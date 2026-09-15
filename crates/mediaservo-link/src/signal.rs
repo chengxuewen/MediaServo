@@ -295,6 +295,28 @@ impl SignalClient {
                 _ => return Err(LinkError::Signal("unexpected auth message".into())),
             }
         }
+        // JWT 子协议认证的连接，server 照发 auth ack（无条件一行）——本侧必须消费
+        // 该帧，否则它会漏进 RoomJoined 读窗被当 join 响应（S2b 活体实锤：
+        // "room join failed [0]: authenticated"）。
+        if self.gateway_src.is_none() && self.jwt.is_some() {
+            let auth_msg = receiver
+                .next()
+                .await
+                .ok_or_else(|| LinkError::Signal("connection closed during auth".into()))?
+                .map_err(|e| LinkError::Signal(format!("auth read: {e}")))?;
+            match auth_msg {
+                Message::Text(t) => match serde_json::from_str::<SignalingMessage>(&t) {
+                    Ok(SignalingMessage::Error { code: 0, .. }) => {}
+                    Ok(SignalingMessage::Error { code, message }) => {
+                        return Err(LinkError::Signal(format!("auth denied [{code}]: {message}")));
+                    }
+                    Ok(other) => return Err(LinkError::Signal(format!("unexpected auth message: {other:?}"))),
+                    Err(e) => return Err(LinkError::Signal(format!("parse auth response: {e}"))),
+                },
+                Message::Close(_) => return Err(LinkError::Signal("closed during auth".into())),
+                _ => return Err(LinkError::Signal("unexpected auth response".into())),
+            }
+        }
 
         // Phase 2: 加入房间（网关模式包 LocalEnvelope）
         let join = SignalingMessage::RoomJoin {
@@ -779,6 +801,12 @@ mod tests {
                 "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\nSec-WebSocket-Protocol: jwt.tok.en\r\n\r\n"
             );
             let _ = tokio::io::AsyncWriteExt::write_all(&mut sock, resp.as_bytes()).await;
+            // 真 server 对 JWT 连接也无条件先发 auth ack（S2b 教训）——mock 补这一帧：
+            // 单帧非掩码 text（FIN|opcode1, len<126 无扩展长），消费掉才轮到 RoomJoin。
+            let payload = br#"{"type":"error","code":0,"message":"authenticated"}"#;
+            let mut frame = vec![0x81u8, payload.len() as u8];
+            frame.extend_from_slice(payload);
+            let _ = tokio::io::AsyncWriteExt::write_all(&mut sock, &frame).await;
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         });
         addr

@@ -91,7 +91,11 @@ pub(crate) fn parse_response(raw: &[u8]) -> Result<(u16, &[u8]), ClientError> {
     let header_end = raw
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
-        .ok_or_else(|| ClientError::MalformedResponse("no header-body separator".into()))?;
+        .ok_or_else(|| ClientError::MalformedResponse(format!(
+            "no header-body separator ({} bytes: {:?})",
+            raw.len(),
+            String::from_utf8_lossy(&raw[..raw.len().min(80)]),
+        )))?;
     let (status_line, rest) = raw[..header_end].split_at(
         raw[..header_end]
             .iter()
@@ -155,8 +159,9 @@ pub async fn login(
             tracing::warn!(error = %e, "login write failed");
             ClientError::Io(e)
         })?;
-    // 半关写端，触发 server 发完响应后 close
-    stream.shutdown().await.ok();
+    // 不做写半关（S2b 实锤：hyper 对"body 未读全即遇 half-close"的请求
+    // 直接静默断连 = 0 字节）。响应由 Connection: close 保证服务端发完即关，
+    // read_to_end 以 EOF 终止。
 
     let mut raw = Vec::with_capacity(4096);
     timeout(IO_TIMEOUT, stream.read_to_end(&mut raw))
@@ -211,6 +216,7 @@ mod tests {
     fn build_request_content_length_and_method() {
         let req = build_request("host", 9800, b"{\"x\":1}");
         let s = String::from_utf8(req).unwrap();
+        println!("REQBYTES {:?}", s);
         assert!(s.starts_with("POST /api/auth/login HTTP/1.1\r\n"));
         assert!(s.contains("Content-Length: 7\r\n"));
         assert!(s.contains("Connection: close\r\n"));

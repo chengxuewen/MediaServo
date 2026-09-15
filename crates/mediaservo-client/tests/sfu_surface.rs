@@ -147,6 +147,20 @@ async fn pair(
                     };
                     send_msg(&mut ws, &transport_created(id)).await;
                 }
+                SignalingMessage::GetRouterRtpCapabilities { .. } => {
+                    send_msg(
+                        &mut ws,
+                        &SignalingMessage::RouterRtpCapabilities {
+                            room_id: ROOM.into(),
+                            capabilities: serde_json::json!({
+                                "codecs": [{"mimeType": "video/VP8", "clockRate": 90000,
+                                           "kind": "video", "payloadTypes": [96]}],
+                                "headerExtensions": [],
+                            }),
+                        },
+                    )
+                    .await;
+                }
                 SignalingMessage::Consume { .. } => {
                     send_msg(
                         &mut ws,
@@ -229,7 +243,7 @@ async fn consume_video_drives_recv_sfu_sequence() {
 
     session.consume_video("prod-1").await.expect("consume_video 应建立");
 
-    let msgs = take(&mut obs, 3).await;
+    let msgs = take(&mut obs, 4).await;
     match &msgs[0] {
         SignalingMessage::CreateWebRtcTransport { room_id, peer_id, direction } => {
             assert_eq!(room_id, ROOM);
@@ -239,13 +253,22 @@ async fn consume_video_drives_recv_sfu_sequence() {
         other => panic!("① 期望 CreateWebRtcTransport(Recv), got {other:?}"),
     }
     match &msgs[1] {
-        SignalingMessage::Consume { producer_id, transport_id, .. } => {
+        // S2b：consume 前必须先查 router caps（手拼 caps 被真 mediasoup 拒——勿回退）
+        SignalingMessage::GetRouterRtpCapabilities { room_id } => assert_eq!(room_id, ROOM),
+        other => panic!("① 期望 GetRouterRtpCapabilities, got {other:?}"),
+    }
+    match &msgs[2] {
+        SignalingMessage::Consume { producer_id, transport_id, rtp_capabilities, .. } => {
             assert_eq!(producer_id, "prod-1");
             assert_eq!(transport_id.as_deref(), Some("t-recv"), "C1 显式绑 recv transport");
+            assert!(
+                rtp_capabilities["codecs"].to_string().contains("VP8"),
+                "Consume 必须携带 router 回包 caps，实得 {rtp_capabilities}"
+            );
         }
         other => panic!("① 期望 Consume, got {other:?}"),
     }
-    match &msgs[2] {
+    match &msgs[3] {
         SignalingMessage::ConnectWebRtcTransport { transport_id, dtls_parameters, .. } => {
             assert_eq!(transport_id, "t-recv");
             assert_eq!(dtls_parameters.role, "client", "端点 = DTLS client");

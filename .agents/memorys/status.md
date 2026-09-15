@@ -761,3 +761,8 @@ install                        → 改名提示 + exit 2（退役）
 ### 2026-09-15: S2 client v2 最小三件（deep worker 完成，编排亲验）
 - mediaservo-client = 纯 lib（auth/session/control 三件 + error/config/sfu/signal 支撑）：登录 REST(JWT 经 Sec-WebSocket-Protocol 传递，link 新增 with_jwt 一处 additive) + RoomSession(consume_video=PullSession 序列本地复刻) + ControlChannel(SFU-DC produce 形，4012→ControlDenied、negotiated<2→ProtocolTooLow 预检，ack=同 DC 回程模型)。删除：私有 WS 316L/HMAC control/decode/:9101/axum 面（-1468L，净 -575）；examples/basic.rs=活体载体在位。门亲验：client 全绿(4 套)/link 回归 0 红/硬编码 src=0(测试 mock 3 处合法)。
 - 债：consume 的 Consume.rtp_capabilities 走 field 同款最小 VP8 声明+codec 自 Consumed 回读（H264 直连消费是否放行=活体首验点，ponytail 注已钉）；活体一圈（basic.rs→S1 controller Cmd/ACK 闭环）= 本批收门，下会话执行。
+
+### 2026-09-15: S2b 活体三修（auth/link/consume）+ consume 协商面闭环
+- 活体连环定损（python 字节级复现掌稳）：① **auth 手卷 HTTP 写半关 = 真 hyper 静默断连（0 字节无响应）**——删 shutdown 改依赖 Connection: close；tests mock 同步改 content-length 完整读（防 RST 吞响应）。② **JWT 子协议连接 server 仍无条件发 auth ack**——link 补 jwt 消费分支（不吞=漏进 join 读窗报 `[0]: authenticated`）；前 worker jwt 单测 mock 补手写 ack 帧对齐真行为。③ **consume 手拼 VP8 caps 被真 mediasoup 拒（5000 No compatible codecs，H264 producer）= field PullSession 同罪**（push_e2e #[ignore] 故漏网）——session.rs 先 GetRouterRtpCapabilities 回包直传 Consume（C18 官方流），sfu_surface mock 补 arm+断言序列 4 帧。
+- 活体五跑（admin/vehicle_test 子房间）：login→join(negotiated=3)→wait producer→transport create→**DTLS/ICE Connected+Completed**→…首帧等待超时=媒体面在查（keyframe 周期/inject ssrc demux——**S2c 立案**：真帧 + Cmd 整车房间闭环两债）。
+- 门：client 22+5+4 全绿、link lib 5/5。教训：mock canned ≠ 真态——真 server 三连咬（half-close/ack/codec）全在 mock 盲区，S4′ 矩阵"样例即测试三层"的存在理由。

@@ -13,8 +13,38 @@ async fn canned_server(resp: Vec<u8>) -> u16 {
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
+        // 客户端不再写半关（S2b：真实 hyper 对 half-close 前置请求静默断连）——
+        // mock 同真 server 语义：读到完整请求头+body 即回应。loopback 下
+        // write_all 一发全达，单 read 足够。
+        use tokio::io::AsyncReadExt;
         let mut req = Vec::new();
-        sock.read_to_end(&mut req).await.ok();
+        let mut tmp = [0u8; 4096];
+        let mut body_needed = false;
+        loop {
+            if let Some(pos) = req.windows(4).position(|w| w == b"\r\n\r\n") {
+                if !body_needed {
+                    let heads = String::from_utf8_lossy(&req[..pos]).to_string();
+                    let cl: usize = heads
+                        .lines()
+                        .find_map(|l| {
+                            let (k, v) = l.split_once(':')?;
+                            k.trim().eq_ignore_ascii_case("content-length")
+                                .then(|| v.trim().parse().ok())?
+                        })
+                        .unwrap_or(0);
+                    body_needed = true;
+                    let have = req.len() - pos - 4;
+                    if have >= cl {
+                        break;
+                    }
+                }
+            }
+            let n = sock.read(&mut tmp).await.unwrap_or(0);
+            if n == 0 {
+                break;
+            }
+            req.extend_from_slice(&tmp[..n]);
+        }
         assert!(
             req.starts_with(b"POST /api/auth/login HTTP/1.1\r\n"),
             "请求报文头部形不符: {req:?}"
