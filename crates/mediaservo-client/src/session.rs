@@ -149,6 +149,9 @@ impl RoomSession {
         let pc = create_pc().await?;
         let (frame_tx, frame_rx) = mpsc::channel::<VideoFrame>(3);
         pc.on_track(move |receiver| {
+            // S2c 诊断（常久日志）：on_track 到达 = RTP 已 demux 成 track；
+            // 「ICE/DTLS 通过但零帧」的分水岭判据。
+            tracing::info!(kind = ?receiver.kind, track_id = ?receiver.track_id, "consume on_track 到达");
             if let TrackRef::Receiver(r) = receiver.track {
                 r.set_frame_sink(Box::new(FrameChanSink {
                     tx: frame_tx.clone(),
@@ -207,6 +210,7 @@ impl RoomSession {
             },
         )
         .map_err(|e| ClientError::WebRtc(format!("add_transceiver: {e}")))?;
+        tracing::debug!(remote_sdp = %remote_sdp, "consume remote offer（SSRC 注入后）");
         pc.set_remote_description(&RTCSessionDescription::new(RTCSdpType::Offer, remote_sdp))
             .await
             .map_err(|e| ClientError::WebRtc(format!("set_remote_description: {e}")))?;
