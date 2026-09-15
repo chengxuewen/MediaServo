@@ -162,6 +162,10 @@ self.backend.sender_get_parameters(track_id)
         self.backend.sender_get_stats(track_id)
     }
 
+    fn receiver_get_stats(&self, track_id: &str) -> Vec<crate::stats::RTCStats> {
+        self.backend.receiver_get_stats(track_id)
+    }
+
     fn get_configuration(&self) -> RTCConfiguration {
         self.backend.pc_configuration()
     }

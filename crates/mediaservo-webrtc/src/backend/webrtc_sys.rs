@@ -62,6 +62,32 @@ fn extract_tx<T: Send + 'static>(
 
 /// 解析 libwebrtc getStats ToJson（数组）→ outbound-rtp RTCStats。
 /// 字段: framesEncoded/framesPerSecond/frameWidth/frameHeight/encoderImplementation（Oracle F2 实证）。
+/// S2c：libwebrtc inbound-rtp 记录解析（收侧二分判据：packetsReceived vs framesDecoded）。
+fn parse_inbound_stats_json(json: &str) -> Vec<crate::stats::RTCStats> {
+    use crate::stats::{RTCInboundRtpStreamStats, RTCStats};
+    let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(json) else {
+        return vec![];
+    };
+    arr.iter()
+        .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("inbound-rtp"))
+        .filter_map(|v| {
+            Some(RTCStats::InboundRtp(RTCInboundRtpStreamStats {
+                id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                timestamp: v.get("timestamp").and_then(|x| x.as_f64()).unwrap_or(0.0),
+                ssrc: v.get("ssrc").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+                kind: v.get("kind").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                packets_received: v.get("packetsReceived").and_then(|x| x.as_u64()).unwrap_or(0),
+                packets_lost: v.get("packets_lost").or_else(|| v.get("packetsLost")).and_then(|x| x.as_u64()).unwrap_or(0),
+                bytes_received: v.get("bytesReceived").and_then(|x| x.as_u64()).unwrap_or(0),
+                frames_decoded: v.get("framesDecoded").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+                frame_width: v.get("frameWidth").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+                frame_height: v.get("frameHeight").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+                frames_per_second: v.get("framesPerSecond").and_then(|x| x.as_f64()).unwrap_or(0.0),
+            }))
+        })
+        .collect()
+}
+
 fn parse_outbound_stats_json(json: &str) -> Vec<crate::stats::RTCStats> {
     use crate::stats::{RTCStats, RTCOutboundRtpStreamStats};
     let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(json) else {
@@ -831,6 +857,28 @@ Err(RTCError::Track(format!("sender not found: {track_id}")))
     /// v2 (web-stream-stats T1.5): W3C RTCRtpSender.getStats（出站统计）。
     /// 调 webrtc-sys FFI（RtpSender::get_stats → ToJson, 同步回调）→ 解析 outbound-rtp 字段。
     /// 纯 Rust 零 C++ 改动（Oracle F2: libwebrtc ToJson 已含 framesEncoded/encoderImplementation 等）。
+    fn receiver_get_stats(&self, track_id: &str) -> Vec<crate::stats::RTCStats> {
+        for tc in self.pc.get_transceivers() {
+            let receiver = tc.ptr.receiver();
+            if receiver.track().id() != track_id {
+                continue;
+            }
+            let (tx, rx) = std::sync::mpsc::sync_channel::<String>(1);
+            let ctx = Box::new(webrtc_sys::rtp_receiver::ReceiverContext(Box::new(tx)));
+            receiver.get_stats(ctx, |ctx, json| {
+                // 同步回调（C++ OnStatsDelivered 同线程）— mpsc 立即投递（sender 同形）。
+                if let Some(tx) = ctx.0.downcast_ref::<std::sync::mpsc::SyncSender<String>>() {
+                    let _ = tx.send(json);
+                }
+            });
+            return match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                Ok(json) => parse_inbound_stats_json(&json),
+                Err(_) => vec![],
+            };
+        }
+        vec![]
+    }
+
     fn sender_get_stats(&self, track_id: &str) -> Vec<crate::stats::RTCStats> {
         use crate::stats::{RTCStats, RTCOutboundRtpStreamStats};
         for tc in self.pc.get_transceivers() {
@@ -1505,13 +1553,71 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
                 let adapter = VideoSinkAdapter { sink: sink_arc.clone() };
                 let wrapper = webrtc_sys::video_track::VideoSinkWrapper::new(std::sync::Arc::new(adapter));
 
-                // Register sink with the video track
+                // Register sink with the video track（立即一次——若 channel 已就绪即通）
                 tracing::debug!("VideoSinkAdapter: attaching native sink to video track");
                 unsafe {
-                    let video_track = webrtc_sys::video_track::ffi::media_to_video(track);
+                    let video_track = webrtc_sys::video_track::ffi::media_to_video(track.clone());
                     let native_sink = webrtc_sys::video_track::ffi::new_native_video_sink(Box::new(wrapper));
                     video_track.add_sink(&native_sink);
                     callbacks.video_sinks.lock().unwrap().push(native_sink);
+                }
+                // S2c：answerer 角色下 on_track 于 SetRemoteDescription 期触发，
+                // 此后 SetLocalDescription 可能重建接收轨道（receiver params codecs=0 佐证
+                // 协商未完成）——延迟 1s 对同一 track 再挂一次 sink（libwebrtc 重复
+                // AddSink 幂等由双 sink 计数容忍；帧流若已在通道轨上则第一次即通，
+                // 本重挂覆盖"重建窗口"变体）。
+                {
+                    let callbacks2 = callbacks.clone();
+                    let sink_arc2 = sink_arc.clone();
+                    let track2 = track.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(1000));
+                        if sink_arc2.lock().unwrap().is_none() {
+                            return;
+                        }
+                        struct NoopSink;
+                        impl webrtc_sys::video_track::VideoSink for NoopSink {
+                            fn on_frame(&self, _: cxx::UniquePtr<vff::VideoFrame>) {}
+                            fn on_discarded_frame(&self) {}
+                            fn on_constraints_changed(&self, _: webrtc_sys::video_track::ffi::VideoTrackSourceConstraints) {}
+                        }
+                        // 真帧 sink 用原 adapter 的第二个实例（同一 Arc 用户 sink）。
+                        #[allow(dead_code)]
+                        struct VideoSinkAdapter2 {
+                            sink: std::sync::Arc<std::sync::Mutex<Option<Box<dyn crate::track::FrameSink>>>>,
+                        }
+                        impl webrtc_sys::video_track::VideoSink for VideoSinkAdapter2 {
+                            fn on_frame(&self, frame: cxx::UniquePtr<vff::VideoFrame>) {
+                                tracing::debug!("VideoSinkAdapter2(重挂) on_frame fired");
+                                if let Some(ref sink) = *self.sink.lock().unwrap() {
+                                    let w = frame.width();
+                                    let h = frame.height();
+                                    let buf = unsafe { frame.video_frame_buffer() };
+                                    let i420 = unsafe { (*buf).to_i420() };
+                                    let yuv = unsafe { vfb::i420_to_yuv8(&*i420) };
+                                    let y_size = (w * h) as usize;
+                                    let uv_size = ((w / 2) * (h / 2)) as usize;
+                                    let mut data = vec![0u8; y_size + 2 * uv_size];
+                                    unsafe {
+                                        std::ptr::copy_nonoverlapping((*yuv).data_y(), data.as_mut_ptr(), y_size);
+                                        std::ptr::copy_nonoverlapping((*yuv).data_u(), data.as_mut_ptr().add(y_size), uv_size);
+                                        std::ptr::copy_nonoverlapping((*yuv).data_v(), data.as_mut_ptr().add(y_size + uv_size), uv_size);
+                                    }
+                                    sink.on_frame(&data, w, h);
+                                }
+                            }
+                            fn on_discarded_frame(&self) {}
+                            fn on_constraints_changed(&self, _: webrtc_sys::video_track::ffi::VideoTrackSourceConstraints) {}
+                        }
+                        let wrapper2 = webrtc_sys::video_track::VideoSinkWrapper::new(std::sync::Arc::new(VideoSinkAdapter2 { sink: sink_arc2 }));
+                        unsafe {
+                            let vt = webrtc_sys::video_track::ffi::media_to_video(track2);
+                            let ns = webrtc_sys::video_track::ffi::new_native_video_sink(Box::new(wrapper2));
+                            vt.add_sink(&ns);
+                            callbacks2.video_sinks.lock().unwrap().push(ns);
+                        }
+                        tracing::debug!("S2c: 延迟重挂完成");
+                    });
                 }
             }
         }

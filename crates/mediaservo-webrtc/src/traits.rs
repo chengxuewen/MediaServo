@@ -118,6 +118,12 @@ pub trait PeerConnectionApi: Send + Sync + 'static {
     /// W3C RTCRtpSender.getStats — 出站统计（outbound-rtp, v2 web-stream-stats T2）。
     fn sender_get_stats(&self, track_id: &str) -> Vec<crate::stats::RTCStats>;
 
+    /// S2c：收侧 inbound-rtp stats（packetsReceived/framesDecoded 二分判据）。
+    /// 默认空面 = 未接线的后端零成本。
+    fn receiver_get_stats(&self, _track_id: &str) -> Vec<crate::stats::RTCStats> {
+        Vec::new()
+    }
+
     /// W3C RTCRtpTransceiver.setCodecPreferences — 协商 codec 偏好（降序）。
     /// v2 实证修正: 按 track_id 定位 transceiver（mid 在协商前不存在 — offerer 场景核心）,
     /// 同 sender_get_parameters/request_key_frame 的 sender.track().id() 匹配模式。

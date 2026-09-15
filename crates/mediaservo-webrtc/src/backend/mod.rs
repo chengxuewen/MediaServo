@@ -150,6 +150,11 @@ Err(RTCError::NotSupported("sender_set_parameters".into()))
     }
 
     /// W3C RTCRtpSender.getStats（出站统计，可选）
+    /// S2c：收侧 stats（packetsReceived/framesDecoded 二分）；默认空面 = stub/webrtc-rs 零成本。
+    fn receiver_get_stats(&self, _track_id: &str) -> Vec<RTCStats> {
+        Vec::new()
+    }
+
     fn sender_get_stats(&self, _track_id: &str) -> Vec<RTCStats> {
         vec![]
     }
