@@ -752,3 +752,8 @@ install                        → 改名提示 + exit 2（退役）
 - B3（a2）：ResumeTable（per-(device,room) cap1 + 全局 32 prune + seq 身份票）+ ack 挂载（Host+Device+n≥3，**票轮换**每次 join）+ 断链延迟清理 T=30s（disconnect_session 抽 fn，即刻/延迟/接管三调用点共用防漂移）+ resume 裁决链（认证先全量重跑 SEC-1 → 协议门 → ct 比对 → 即查即焚 → miss 静默回落）+ **全量 join 接管**（stale 票即刻清旧，防 RoomFull 误伤）+ link/gateway 断线票据转接（一次性）。docs 三处 MQTT 改判写回（architecture×3/capabilities/10.11 supersede 注）+ D273 红牌族化 + degraded profile 新建（内嵌资产+测试清单）。
 - 门全绿：server-native 13 套件 RC=0（resume_e2e 4/4 + heartbeat_e2e 3/3 + 全回归）· link 全目标 · host --lib 76 · gateway_e2e 回 HEAD 同款 4 红 · vitest 28/28 · tsc 双零。活体（主仓 evidence/s0.5-live.md）：agent 会话 loss30 全程**零误杀**（反 false-kill 生产成立）· 死链 3×17-20s 检出 · 重启后旧票 **miss 回落全量 join** ×2 正常推流 · 保险丝自愈。hit 路径生产格待 S4（需非重启型断链）。
 - 新坑：PIT-195（interval 首拍即就绪污染握手窗）/PIT-196（gateway 层 biased=events 饿死上行）；测试纪律：常驻 server 的 WS 集成测试建 server 必 `ws_ping_secs=0` 隔离（heartbeat_e2e 专钉）。
+
+### 2026-09-15: S1 host-controller SFU-DC 迁移（deep worker 执行+编排验收，活体 SCTP 闭环）
+- controller 死 P2P 段（offer→Sdp 中继永等）删除 → `src/controller.rs` lib 化（control_loop：PushSession 同形 Send transport + DC-only×4 + CreateDataProducer announce + Recv transport on_data_channel 入程 + ConsumeData/pending 缓存/回声自跳过 + StubActuator 链 + FrameBus control/cmd|ack 镜像旁路永不阻塞执行）。link/acl Control 角色补 publish control/ack + subscribe control/cmd。
+- 门：link 3/76 lib/e2e 1/单测 6/clippy 零新增（全绿）。活体：**CreateDataProducer×4 server 侧同刻 DataProducer 建立 + DC open×4 + ICE Completed×2（真 DTLS/SCTP）**——P2P 永等→SFU 成立决定性翻转；Cmd 入程等 S2 舱端 producer。
+- 账：worker 偏差记录两则采纳（ICE 交换实形=候选内联无交换回合；webrtc_transport 被 legacy 引用不删=退役裁决留案）。新债入册：**controller 冷启动时序竞争 gateway 未连（5001×N 熔断）= deploy 接线小刀 S2 前处理**；gateway data 域 FIFO 配对间隙（4012 弹错槽）挂 S4 小刀候选。

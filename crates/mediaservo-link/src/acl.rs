@@ -47,8 +47,9 @@ impl NodeAcl {
             // F3: 订阅视觉结果（vision/<camera-id>，D-H8 链路）
             Role::Recorder => (vec!["stats/*".into()], vec!["camera/*".into(), "video/*".into(), "vision/*".into()]),
             Role::Control => (
-                vec!["control/cmd".into()],
-                vec!["control/telemetry".into(), "status/*".into()],
+                // S1 总线镜像：controller 发布 cmd/ack 双 topic；消费侧（ROS 节点/回放）订阅 cmd。
+                vec!["control/cmd".into(), "control/ack".into()],
+                vec!["control/cmd".into(), "control/telemetry".into(), "status/*".into()],
             ),
             // F3: ROS 视觉节点发布 vision/<camera-id>（D-H7/D-H8，桥接配置单一来源）
             Role::Perception => (vec!["perception/*".into(), "vision/*".into()], vec!["camera/*".into()]),

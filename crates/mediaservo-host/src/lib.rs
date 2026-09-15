@@ -7,6 +7,8 @@
 pub mod translate;
 /// 控制平面（Task F1）：控制信封 + 执行器接口。
 pub mod control;
+/// 控制平面 SFU-DC 化（S1）：controller 传输建立 + 命令回路 + 总线镜像。
+pub mod controller;
 /// 紧急停车平面（Task F2）：急停执行器闩锁 + 强审计。
 pub mod emergency;
 /// 初始化日志系统，role 作为首个日志事件的标识字段。
