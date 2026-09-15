@@ -12,7 +12,6 @@ use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use axum::routing::get;
 #[cfg(feature = "sfu-mediasoup")]
-use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use mediaservo_common::auth::{JwtAuth, SimplePskAuth};
 use mediaservo_common::error::CoreError;
@@ -2281,6 +2280,10 @@ pub(crate) async fn handle_sfu_message(
                     room_id: room_id.clone(),
                     data_consumer_id: result.data_consumer_id,
                     data_producer_id: result.data_producer_id,
+                    // S2d: 官方契约——consumer 以 negotiated DC(id=stream_id) 接收转发消息。
+                    sctp_stream_parameters: result.sctp_stream_parameters,
+                    label: result.label,
+                    protocol: result.protocol,
                 }),
                 Err(e) => {
                     tracing::error!("SFU: DataConsumer creation failed: {e}");

@@ -336,10 +336,20 @@ pub enum SignalingMessage {
     },
 
     /// Server confirms data consumer created.
+    /// S2d：官方契约（mediasoup-client Chrome74.receiveDataChannel）= consumer 侧必须以
+    /// negotiated DC（id=streamId, 带外协商）建通道接收 worker 转发消息——DCEP 带内
+    /// 握手 worker 从不代发。故回执携带 consumer 的 sctp 参数/label/protocol。
+    /// Option+default 保旧 wire 可读（缺字段 = 老 server；新 client 明确报错不静默降级）。
     DataConsumed {
         room_id: String,
         data_consumer_id: String,
         data_producer_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")] // S2d: 老 server 缺省兼容
+        sctp_stream_parameters: Option<SctpStreamParameters>,
+        #[serde(default)] // S2d: consumer DC label（建通道用）
+        label: String,
+        #[serde(default)] // S2d: consumer DC sub-protocol
+        protocol: String,
     },
 
     /// H2 (audio conference): 查询 SFU producer/consumer RTP 统计（媒体面证据 + 运维观测）。
@@ -1373,11 +1383,30 @@ mod tests {
             room_id: "room-1".into(),
             data_consumer_id: "dc-1".into(),
             data_producer_id: "dp-1".into(),
+            sctp_stream_parameters: Some(SctpStreamParameters {
+                stream_id: 7,
+                ordered: true,
+                max_packet_life_time: None,
+                max_retransmits: None,
+            }),
+            label: "chassis".into(),
+            protocol: "mediaservo.control".into(),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#"type":"data_consumed"#));
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         assert!(matches!(parsed, SignalingMessage::DataConsumed { .. }));
+    }
+
+    /// S2d 兼容钉：老 server 的 wire（无 sctpStreamParameters/label/protocol）必须可解析。
+    #[test]
+    fn data_consumed_parses_legacy_wire_without_sctp_fields() {
+        let legacy = r#"{"type":"data_consumed","room_id":"r","data_consumer_id":"c","data_producer_id":"p"}"#;
+        let parsed: SignalingMessage = serde_json::from_str(legacy).unwrap();
+        assert!(matches!(
+            parsed,
+            SignalingMessage::DataConsumed { sctp_stream_parameters: None, label, .. } if label.is_empty()
+        ));
     }
 
     #[test]

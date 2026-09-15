@@ -103,4 +103,24 @@ impl ControlChannel {
             .map_err(|_| ClientError::Timeout { what: "ControlAck" })?
             .ok_or_else(|| ClientError::InvalidState("ack 流已关闭（DC 断开）".into()))
     }
+
+    /// 取配对 `want_seq` 的回执——更早的过期 ack（丢包重发窗口的产物）丢弃跳过。
+    /// `wait` = 整窗超时（非单条）。
+    pub async fn recv_ack_for(&mut self, want_seq: u64, wait: Duration) -> Result<ControlAck, ClientError> {
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            let remain = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remain.is_zero() {
+                return Err(ClientError::Timeout { what: "ControlAck" });
+            }
+            let ack = tokio::time::timeout(remain, self.ack_rx.recv())
+                .await
+                .map_err(|_| ClientError::Timeout { what: "ControlAck" })?
+                .ok_or_else(|| ClientError::InvalidState("ack 流已关闭（DC 断开）".into()))?;
+            if ack.ack == want_seq {
+                return Ok(ack);
+            }
+            tracing::debug!(got = ack.ack, want = want_seq, "过期 ack 跳过（重发窗产物）");
+        }
+    }
 }

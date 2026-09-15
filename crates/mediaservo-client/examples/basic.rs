@@ -87,10 +87,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("control open: labels={:?} producers={:?}", ctl.labels(), ctl.producer_ids());
     // 对端（车端 controller）消费舱端 producer 存在 ~20s 事件链时延——demo 以
     // 5s 间隔重发 + 25s 窗收 ack（真实座舱为人手操作，天然覆盖该窗口）。
+    // 同 seq 重发（车端 consumer attach 前的消息 mediasoup 不缓存会丢；D-H3 seq
+    // 配对 = 重发幂等安全）。recv_ack_for 跳过错序旧 ack。
+    let seq = 1u64;
     let mut ack_opt = None;
-    for seq in 1..=12u64 {
+    for attempt in 0..12u64 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
         ctl.send(&label, seq, "steer", serde_json::json!({ "deg": 0.0 })).await?;
-        ack_opt = ctl.recv_ack(Duration::from_secs(5)).await.ok();
+        ack_opt = ctl.recv_ack_for(seq, Duration::from_secs(5)).await.ok();
         if ack_opt.is_some() {
             break;
         }

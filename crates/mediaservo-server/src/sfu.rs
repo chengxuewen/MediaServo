@@ -249,6 +249,11 @@ mod imp {
     pub struct DataConsumeResult {
         pub data_consumer_id: String,
         pub data_producer_id: String,
+        /// S2d：worker 分配的 consumer SCTP 流参数——官方契约 consumer 端必须以此
+        /// 建 negotiated DC（Chrome74.receiveDataChannel: id=streamId）。
+        pub sctp_stream_parameters: Option<protocol::SctpStreamParameters>,
+        pub label: String,
+        pub protocol: String,
     }
 
     /// Per-peer state: send/recv transports and active producers/consumers.
@@ -973,8 +978,8 @@ mod imp {
 
             let data_consumer_id = consumer.id().to_string();
             tracing::info!(
-                "DataConsumer {} created for peer {} (data_producer: {}) in room {}",
-                data_consumer_id, peer_id, data_producer_id, room_id
+                "DataConsumer {} created for peer {} (data_producer: {}, sctp={:?}) in room {}",
+                data_consumer_id, peer_id, data_producer_id, consumer.sctp_stream_parameters(), room_id
             );
 
             // H1 观测: 消费端 on_message — SCTP DataConsumer 的消息事件（端点经 SCTP
@@ -984,11 +989,25 @@ mod imp {
                 tracing::debug!("DATA-CONS {}: {:?}", cid, msg);
             });
 
+            // S2d: push 前取 worker 实配参数（mediasoup→wire 同构映射，镜像 produce 侧）。
+            let (ms_sctp, c_label, c_protocol) = (
+                consumer.sctp_stream_parameters(),
+                consumer.label().clone(),
+                consumer.protocol().clone(),
+            );
             peer.data_consumers.push(consumer);
 
             Ok(DataConsumeResult {
                 data_consumer_id,
                 data_producer_id: data_producer_id.to_string(),
+                sctp_stream_parameters: ms_sctp.map(|p| protocol::SctpStreamParameters {
+                    stream_id: p.stream_id,
+                    ordered: p.ordered,
+                    max_packet_life_time: p.max_packet_life_time,
+                    max_retransmits: p.max_retransmits,
+                }),
+                label: c_label,
+                protocol: c_protocol,
             })
         }
 

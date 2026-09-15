@@ -24,6 +24,25 @@ pub fn channel_init(label: &str) -> RTCDataChannelInit {
     }
 }
 
+/// 回执回程通道 label（mirror host controller::ACK_LABEL——单向对模型契约：
+/// 回执 = 舱端消费车端 ack DataProducer，consumer 反向回声 worker 不透传）。
+pub const ACK_LABEL: &str = "ack";
+
+/// S2d consumer 侧 negotiated DC 参数（官方 Chrome74.receiveDataChannel 契约：
+/// id = server 回执分配的 stream_id，带外协商——mediasoup 代理域 in-band DCEP
+/// 永不触发，inbound 通道只能以此形建）。
+#[must_use]
+pub fn negotiated_init(sp: &SctpStreamParameters, protocol: &str) -> RTCDataChannelInit {
+    RTCDataChannelInit {
+        ordered: sp.ordered,
+        max_retransmit_time: sp.max_packet_life_time.map(i32::from),
+        max_retransmits: sp.max_retransmits.map(i32::from),
+        protocol: protocol.to_string(),
+        negotiated: true,
+        id: i32::from(sp.stream_id),
+    }
+}
+
 /// DC 的 SCTP 流参数（mirror controller::sctp_stream_params）。
 /// stream_id 取 libwebrtc 实配 DC id。
 pub fn sctp_stream_params(label: &str, id: i32) -> Result<SctpStreamParameters, String> {
@@ -283,5 +302,33 @@ mod tests {
     #[test]
     fn codec_from_consumer_empty() {
         assert!(codec_from_consumer(&serde_json::json!({})).is_none());
+    }
+}
+
+#[cfg(test)]
+mod tests_negotiated {
+    use super::*;
+
+    #[test]
+    fn negotiated_init_maps_server_stream_params() {
+        let sp = SctpStreamParameters {
+            stream_id: 7,
+            ordered: false,
+            max_packet_life_time: Some(120),
+            max_retransmits: None,
+        };
+        let init = negotiated_init(&sp, "sctp");
+        assert!(init.negotiated);
+        assert_eq!(init.id, 7);
+        assert!(!init.ordered);
+        assert_eq!(init.max_retransmit_time, Some(120));
+        assert_eq!(init.max_retransmits, None);
+        assert_eq!(init.protocol, "sctp");
+    }
+
+    #[test]
+    fn ack_label_mirrors_host_controller() {
+        // 车端 controller::ACK_LABEL = "ack"（跨 crate 字面值钉，S 批不合并牌位）。
+        assert_eq!(ACK_LABEL, "ack");
     }
 }

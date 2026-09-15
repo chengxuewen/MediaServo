@@ -7,11 +7,12 @@
 //! `Error{code:0,"transport_connected"}` 是 server 惯例 ack，非真错误。
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use mediaservo_common::protocol::{
     ControlAck, DtlsParameters, Fingerprint, IceCandidate, IceParameters, MediaKind,
-    SignalingMessage, TransportDirection,
+    SctpStreamParameters, SignalingMessage, TransportDirection,
 };
 use mediaservo_link::{SignalClient, SignalEvent};
 use mediaservo_webrtc::data_channel::RTCDataChannelEvent;
@@ -50,10 +51,14 @@ pub struct VideoFrame {
 
 /// 已入房会话：视频消费 + 控制出程共用一条 link WS 信令面。
 pub struct RoomSession {
-    signal: LinkSignal,
+    /// S2d: ack 消费后台泵与前台共用信令面 = Arc 共享。
+    signal: Arc<LinkSignal>,
     /// connect 即刻订阅（broadcast 无历史重放——接住 join 时 server 回放的
     /// late-join NewProducer）。
     events: Mutex<broadcast::Receiver<SignalEvent>>,
+    /// S2d: open_control 专用第二流（connect 同刻订阅 = join 回放零缺口；
+    /// take 后移交 ack 泵，每会话一次性）。
+    pump_events: Mutex<Option<broadcast::Receiver<SignalEvent>>>,
     /// consume 建立的 recv PC 保活（句柄即生命周期）。
     _pcs: Vec<RTCPeerConnection>,
 }
@@ -82,10 +87,14 @@ impl RoomSession {
         }
         let session = client.connect().await.map_err(classify_link_error)?;
         let events = session.events();
+        // S2d: 第二流与主流同刻订阅（LinkSignal::events 在 async 态 blocking_lock
+        // 会 panic——订阅必须在此同步点完成）。
+        let pump_events = session.events();
         let signal = LinkSignal::new(session, sfu_peer_key(&cfg.role).to_string());
         Ok(Self {
-            signal,
+            signal: Arc::new(signal),
             events: Mutex::new(events),
+            pump_events: Mutex::new(Some(pump_events)),
             _pcs: Vec::new(),
         })
     }
@@ -233,7 +242,7 @@ impl RoomSession {
             .map_err(|e| ClientError::WebRtc(format!("set_local_description: {e}")))?;
 
         // 6. Connect（本地 DTLS 指纹，role=client）
-        connect_transport(&self.signal, &room, &peer, &transport_id, &pc).await?;
+        connect_transport(&*self.signal, &room, &peer, &transport_id, &pc).await?;
 
         self._pcs.push(pc);
         tracing::info!(producer_id, transport_id = %transport_id, "client consume_video 建立");
@@ -252,6 +261,13 @@ impl RoomSession {
         let mut ev = self.events.lock().await;
         let room = self.signal.room_id().to_string();
         let peer = self.signal.sfu_peer_id().to_string();
+        // S2d: 取 connect 同刻预订阅的第二流（建立期车端 ack announce 零缺口）。
+        let mut pump_ev = self
+            .pump_events
+            .lock()
+            .await
+            .take()
+            .ok_or_else(|| ClientError::InvalidState("控制面已开启（ack 泵每会话一次）".into()))?;
 
         // 1. Send transport
         self.signal
@@ -275,7 +291,8 @@ impl RoomSession {
             .await
             .map_err(|e| ClientError::WebRtc(format!("set_remote_description: {e}")))?;
 
-        // 3. 每 label create_data_channel + 回声回执路由（非 ControlAck 载荷 warn 丢弃）
+        // 3. 每 label 出程 DC（mediasoup 单向对模型：producer DC 无入程，回执
+        //    回程 = step 6 ack 消费链路——2026-09-15 活体证 consumer 反向不透传）。
         let (ack_tx, ack_rx) = mpsc::channel::<ControlAck>(32);
         let mut dcs = HashMap::new();
         let mut order = Vec::with_capacity(labels.len());
@@ -284,27 +301,6 @@ impl RoomSession {
                 .create_data_channel(label, sfu::channel_init(label))
                 .await
                 .map_err(|e| ClientError::WebRtc(format!("create_data_channel {label}: {e}")))?;
-            let tx = ack_tx.clone();
-            let mut rx = dc.spool().await;
-            let lbl = label.to_string();
-            tokio::spawn(async move {
-                while let Some(item) = rx.recv().await {
-                    match item {
-                        RTCDataChannelEvent::Message(m) => {
-                            match serde_json::from_slice::<ControlAck>(&m.data) {
-                                Ok(ack) => {
-                                    if tx.send(ack).await.is_err() {
-                                        break; // 句柄已 drop
-                                    }
-                                }
-                                Err(e) => tracing::warn!(label = %lbl, "DC 非 ControlAck 载荷丢弃: {e}"),
-                            }
-                        }
-                        RTCDataChannelEvent::Closed => break,
-                        RTCDataChannelEvent::Open | RTCDataChannelEvent::Error(_) => {}
-                    }
-                }
-            });
             dcs.insert(label.to_string(), dc);
             order.push(label.to_string());
         }
@@ -317,10 +313,9 @@ impl RoomSession {
         pc.set_local_description(&answer)
             .await
             .map_err(|e| ClientError::WebRtc(format!("set_local_description: {e}")))?;
-        connect_transport(&self.signal, &room, &peer, &transport_id, &pc).await?;
+        connect_transport(&*self.signal, &room, &peer, &transport_id, &pc).await?;
 
         // 5. 逐 DC CreateDataProducer announce（4012 → ControlDenied 终态）
-        drop(ack_tx); // 仅路由任务持发送端
         let mut producer_ids = Vec::with_capacity(order.len());
         for label in &order {
             let dc = &dcs[label];
@@ -346,6 +341,10 @@ impl RoomSession {
             tracing::info!(label = %label, data_producer_id = %dp, "client DataProducer 已建立");
             producer_ids.push(dp);
         }
+
+        // 6. S2d 官方单向对模型：后台消费车端 label=ack DataProducer，negotiated
+        //    consumer DC 的 ControlAck 路由进 ack_rx（recv_ack 的正式供数来源）。
+        tokio::spawn(ack_consumer_pump(pump_ev, self.signal.clone(), room, peer, ack_tx));
 
         Ok(ControlChannel::new(dcs, order, ack_rx, producer_ids, pc))
     }
@@ -462,6 +461,222 @@ async fn await_router_caps(
     match next_msg(ev).await? {
         SignalingMessage::RouterRtpCapabilities { capabilities, .. } => Ok(capabilities),
         other => Err(on_unexpected(other, "RouterRtpCapabilities")),
+    }
+}
+
+// ── S2d ack 消费链路（舱端 = 车端 ack producer 的 consumer）──────────
+
+/// 等车端 ack producer 公告（非 ack label / 自身回显跳过；`None` = 事件流终结）。
+async fn await_ack_producer(ev: &mut broadcast::Receiver<SignalEvent>, self_peer: &str) -> Option<String> {
+    loop {
+        match ev.recv().await {
+            Ok(SignalEvent::Message(SignalingMessage::NewDataProducer {
+                data_producer_id,
+                label,
+                peer_id,
+                ..
+            })) => {
+                if label == sfu::ACK_LABEL && peer_id != self_peer {
+                    return Some(data_producer_id);
+                }
+            }
+            Ok(SignalEvent::Message(_)) | Ok(SignalEvent::Connected { .. }) => {}
+            Ok(SignalEvent::Error(e)) => tracing::warn!("ack 泵: 信令事件错误（忽略续等）: {e}"),
+            Ok(_) => {}
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                tracing::warn!("ack 泵: 队列溢出丢 {n} 事件，续");
+            }
+            Err(_) => return None, // Closed = 会话终结
+        }
+    }
+}
+
+/// 等 DataConsumed 的 S2d 参数三元组（Error 终态，其余无关事件忽略续等）。
+async fn await_data_consumed(
+    ev: &mut broadcast::Receiver<SignalEvent>,
+) -> Result<(SctpStreamParameters, String, String), ClientError> {
+    loop {
+        match next_msg(ev).await? {
+            // connect ack（code=0 豁免形，同 await_transport_created——泵恰跨 connect 窗）。
+            SignalingMessage::Error { ref message, .. } if message == "transport_connected" => {}
+            SignalingMessage::DataConsumed {
+                sctp_stream_parameters,
+                label,
+                protocol,
+                ..
+            } => {
+                let sp = sctp_stream_parameters.ok_or_else(|| {
+                    ClientError::MalformedResponse(
+                        "DataConsumed 缺 sctp 参数（server 过旧，无 negotiated 依据）".into(),
+                    )
+                })?;
+                return Ok((sp, label, protocol));
+            }
+            err @ SignalingMessage::Error { .. } => {
+                return Err(on_unexpected(err, "DataConsumed"));
+            }
+            other => {
+                tracing::debug!(msg = ?other, "ack 泵 await 期忽略无关事件");
+                continue;
+            }
+        }
+    }
+}
+
+/// 建 DC-only recv transport 并 connect（S1 车端 setup_recv_side 同形；negotiated
+/// DC 带外协商不受「DC 先于 answer」时序合同约束）。
+async fn open_dc_recv_transport(
+    ev: &mut broadcast::Receiver<SignalEvent>,
+    signal: &LinkSignal,
+    room: &str,
+    peer: &str,
+) -> Result<(RTCPeerConnection, String), ClientError> {
+    signal
+        .send(SignalingMessage::CreateWebRtcTransport {
+            room_id: room.to_string(),
+            peer_id: peer.to_string(),
+            direction: TransportDirection::Recv,
+        })
+        .await?;
+    let (transport_id, ice, dtls, candidates) =
+        tokio::time::timeout(RESPONSE_WAIT, await_transport_created(ev))
+            .await
+            .map_err(|_| ClientError::Timeout {
+                what: "WebRtcTransportCreated(recv-ack)",
+            })??;
+    let pc = create_pc().await?;
+    let remote_sdp = sfu::build_dc_remote_sdp(&ice, &dtls, candidates.as_ref());
+    pc.set_remote_description(&RTCSessionDescription::new(RTCSdpType::Offer, remote_sdp))
+        .await
+        .map_err(|e| ClientError::WebRtc(format!("set_remote(recv-ack): {e}")))?;
+    let answer = pc
+        .create_answer(&RTCAnswerOptions)
+        .await
+        .map_err(|e| ClientError::WebRtc(format!("create_answer(recv-ack): {e}")))?;
+    pc.set_local_description(&answer)
+        .await
+        .map_err(|e| ClientError::WebRtc(format!("set_local(recv-ack): {e}")))?;
+    connect_transport(signal, room, peer, &transport_id, &pc).await?;
+    Ok((pc, transport_id))
+}
+
+/// 后台泵：消费车端 ack producer → negotiated DC → ControlAck 路由进 `ack_tx`。
+/// 循环等后续 announce（车端重启/多车实例自适应）；transport 首建复用。
+/// `ack_tx` 全 drop（ControlChannel 释放）或事件流 Closed 时退出。
+async fn ack_consumer_pump(
+    mut ev: broadcast::Receiver<SignalEvent>,
+    signal: Arc<LinkSignal>,
+    room: String,
+    peer: String,
+    ack_tx: mpsc::Sender<ControlAck>,
+) {
+    let mut transport: Option<(RTCPeerConnection, String)> = None;
+    // 预订阅流与主流各见全量广播 = 开局积压混有 step1 send transport 的
+    // Created/connect ack（泵直接 await 会抓错旧应答 → 对 send 槽二次 connect
+    // = worker "connect() already called"，2026-09-15 活体实证）。排空积压：
+    // ack announce 入 seed，其余丢弃；此后队列只剩本泵轮次的应答。
+    let mut seed: Vec<String> = Vec::new();
+    'drain: loop {
+        match ev.try_recv() {
+            Ok(SignalEvent::Message(SignalingMessage::NewDataProducer {
+                data_producer_id,
+                label,
+                peer_id,
+                ..
+            })) => {
+                if label == sfu::ACK_LABEL && peer_id != peer {
+                    seed.push(data_producer_id);
+                }
+            }
+            Ok(_) => {}
+            Err(broadcast::error::TryRecvError::Lagged(_)) => continue 'drain,
+            Err(broadcast::error::TryRecvError::Empty) => break 'drain,
+            Err(broadcast::error::TryRecvError::Closed) => return,
+        }
+    }
+    while !ack_tx.is_closed() {
+        let dp_id = match seed.pop() {
+            Some(dp) => dp,
+            None => {
+                let Some(dp) = await_ack_producer(&mut ev, &peer).await else {
+                    return;
+                };
+                dp
+            }
+        };
+        tracing::info!(data_producer_id = %dp_id, "ack 泵: 发现车端 DataProducer，消费");
+        let (pc, tid) = match transport.clone() {
+            Some(t) => t,
+            None => match open_dc_recv_transport(&mut ev, &signal, &room, &peer).await {
+                Ok(t) => {
+                    transport = Some(t.clone());
+                    t
+                }
+                Err(e) => {
+                    tracing::error!("ack 泵: recv transport 建立失败: {e}");
+                    continue;
+                }
+            },
+        };
+        if let Err(e) = signal
+            .send(SignalingMessage::ConsumeData {
+                room_id: room.clone(),
+                peer_id: peer.clone(),
+                transport_direction: TransportDirection::Recv,
+                data_producer_id: dp_id.clone(),
+                transport_id: Some(tid),
+            })
+            .await
+        {
+            tracing::error!("ack 泵: ConsumeData 发送失败: {e}");
+            continue;
+        }
+        let sp = match tokio::time::timeout(RESPONSE_WAIT, await_data_consumed(&mut ev)).await {
+            Ok(Ok(v)) => v,
+            Ok(Err(e)) => {
+                tracing::error!("ack 泵: DataConsumed 异常: {e}");
+                continue;
+            }
+            Err(_) => {
+                tracing::error!("ack 泵: DataConsumed 等待超时");
+                continue;
+            }
+        };
+        let (sp, label, protocol) = sp;
+        match pc
+            .create_data_channel(&label, sfu::negotiated_init(&sp, &protocol))
+            .await
+        {
+            Ok(dc) => {
+                tracing::info!(
+                    label,
+                    stream_id = sp.stream_id,
+                    "ack 泵: negotiated consumer DC 已建，回执接入 recv_ack"
+                );
+                let tx = ack_tx.clone();
+                let mut rx = dc.spool().await;
+                tokio::spawn(async move {
+                    let _dc = dc; // 通道生命周期锚（drop 即关）
+                    while let Some(item) = rx.recv().await {
+                        match item {
+                            RTCDataChannelEvent::Message(m) => {
+                                match serde_json::from_slice::<ControlAck>(&m.data) {
+                                    Ok(ack) => {
+                                        if tx.send(ack).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Err(e) => tracing::warn!("ack DC 非 ControlAck 载荷丢弃: {e}"),
+                                }
+                            }
+                            RTCDataChannelEvent::Closed => break,
+                            RTCDataChannelEvent::Open | RTCDataChannelEvent::Error(_) => {}
+                        }
+                    }
+                });
+            }
+            Err(e) => tracing::error!("ack 泵: negotiated DC 创建失败: {e}"),
+        }
     }
 }
 

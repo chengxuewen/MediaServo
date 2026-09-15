@@ -280,6 +280,15 @@ async fn controller_sfu_dc_signaling_sequence() {
                         room_id: ROOM.into(),
                         data_consumer_id: "dc-cockpit".into(),
                         data_producer_id,
+                        // S2d: 带外 negotiated DC 参数（真机由 worker 分配；此处夹具值）。
+                        sctp_stream_parameters: Some(SctpStreamParameters {
+                            stream_id: 9,
+                            ordered: true,
+                            max_packet_life_time: None,
+                            max_retransmits: None,
+                        }),
+                        label: "chassis".into(),
+                        protocol: String::new(),
                     }))
                     .await
                     .unwrap();

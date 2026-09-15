@@ -7,6 +7,9 @@
 //!   CreateWebRtcTransport(Send)→TransportCreated→合成 offer→DC→create_answer→
 //!   ConnectWebRtcTransport(dtls)→CreateDataProducer 序列，DC-only（无 add_track）。
 //! - 入程（[`setup_recv_side`]）：`PullSession::subscribe` 的 Recv transport 形；
+//!   S2d：consumer DC = DataConsumed 回执带外建 negotiated 通道（官方
+//!   Chrome74.receiveDataChannel 契约；mediasoup 代理 worker 从不代发 DCEP，
+//!   in-band on_data_channel 在此域永不触发）。
 //!   舱端 control DataProducer 经 `NewDataProducer` 广播 → `ConsumeData` →
 //!   SCTP inbound DC 到 `pc.on_data_channel`（mediaservo-webrtc 跨后端在位）。
 //!
@@ -502,27 +505,20 @@ async fn setup_send_side(
     Ok((pc, own))
 }
 
-/// 入程建立：Recv transport → **先注册 on_data_channel**（PullSession 教训：remote
-/// 侧对象可能在协商落地瞬间触发，晚注册丢首个通道）→ answer/connect。
+/// 入程建立：Recv transport → answer/connect。S2d 起不再注册 on_data_channel
+/// （mediasoup 代理域 in-band DCEP 永不来）；消费通道由主循环收到 DataConsumed
+/// 后按服务端回执参数以 negotiated 形建（[`consume_data`] 的请求侧闭环）。
 async fn setup_recv_side(
     signal: &SignalSession,
     events: &mut broadcast::Receiver<SignalEvent>,
     pending: &mut Vec<PendingProducer>,
-    ack: Arc<Mutex<Option<RTCDataChannel>>>,
-    actuator: &Arc<dyn Actuator>,
-    bus: &Option<Arc<FrameBus>>,
 ) -> Result<(RTCPeerConnection, String), String> {
     let (pc, t) = open_transport(signal, events, pending, TransportDirection::Recv).await?;
-    let (cb_act, cb_bus, cb_ack) = (actuator.clone(), bus.clone(), ack.clone());
-    pc.on_data_channel(move |dc| {
-        let (a, b, k) = (cb_act.clone(), cb_bus.clone(), cb_ack.clone());
-        tokio::spawn(route_dc(dc, a, b, k));
-    });
     connect_answer(signal, &pc, &t).await?;
     Ok((pc, t.transport_id))
 }
 
-/// 消费一个舱端 data producer（ConsumeData；应答 DataConsumed 由主循环日志，C16）。
+/// 消费一个舱端 data producer（ConsumeData；应答 DataConsumed 由主循环建 negotiated DC，S2d）。
 async fn consume_data(signal: &SignalSession, recv_transport_id: &str, dp_id: &str) {
     if let Err(e) = signal
         .send(SignalingMessage::ConsumeData {
@@ -583,14 +579,7 @@ pub async fn control_loop(
             return 1;
         }
     };
-    let (recv_pc, recv_tid) = match setup_recv_side(
-        &signal,
-        &mut events,
-        &mut pending,
-        ack.clone(),
-        &actuator,
-        &bus,
-    )
+    let (recv_pc, recv_tid) = match setup_recv_side(&signal, &mut events, &mut pending)
     .await
     {
         Ok(v) => v,
@@ -660,13 +649,44 @@ pub async fn control_loop(
                 Ok(SignalEvent::Message(SignalingMessage::DataConsumed {
                     data_consumer_id,
                     data_producer_id,
+                    sctp_stream_parameters,
+                    label,
+                    protocol,
                     ..
                 })) => {
-                    tracing::info!(
-                        data_consumer_id = %data_consumer_id,
-                        data_producer_id = %data_producer_id,
-                        "DataConsumed（inbound DC 经 on_data_channel 送达后开始收令）"
-                    );
+                    // S2d 官方契约：consumer 以带外 negotiated DC（id=worker 分配的
+                    // stream_id）接收转发消息。缺参数 = 老 server，明确报错（C15）。
+                    let Some(sp) = sctp_stream_parameters else {
+                        tracing::error!(
+                            data_consumer_id,
+                            "DataConsumed 缺 sctp 参数（server 过旧？）——无法建 negotiated DC"
+                        );
+                        continue;
+                    };
+                    let init = RTCDataChannelInit {
+                        negotiated: true,
+                        id: sp.stream_id as i32,
+                        ordered: sp.ordered,
+                        max_retransmit_time: sp.max_packet_life_time.map(i32::from),
+                        max_retransmits: sp.max_retransmits.map(i32::from),
+                        protocol,
+                    };
+                    match recv_pc.create_data_channel(&label, init).await {
+                        Ok(dc) => {
+                            tracing::info!(
+                                data_consumer_id,
+                                data_producer_id,
+                                label,
+                                stream_id = sp.stream_id,
+                                "DataConsumed：negotiated consumer DC 已建，开始收令"
+                            );
+                            let (a, b, k) = (actuator.clone(), bus.clone(), ack.clone());
+                            tokio::spawn(route_dc(dc, a, b, k));
+                        }
+                        Err(e) => {
+                            tracing::error!(label, "negotiated consumer DC 创建失败: {e}");
+                        }
+                    }
                 }
                 Ok(SignalEvent::Message(SignalingMessage::DataProducerCreated { .. })) => {
                     // announce 确认已在建立期消费；网关广播回声在此忽略（C16 已建链）
