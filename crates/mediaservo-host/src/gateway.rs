@@ -365,7 +365,8 @@ fn msg_room_id(msg: &SignalingMessage) -> Option<&str> {
         | GetRouterRtpCapabilities { room_id, .. }
         | RouterRtpCapabilities { room_id, .. }
         | SetPreferredLayers { room_id, .. }
-        | EmergencyCommand { room_id, .. } => Some(room_id),
+        | EmergencyCommand { room_id, .. }
+        | ControlAudit { room_id, .. } => Some(room_id),
         _ => None,
     }
 }
@@ -420,6 +421,8 @@ fn rewrite_room(msg: &mut SignalingMessage, room: &str) {
         // device-enroll: 验签三态由网关自身消化，不入子进程路由（真实应答链在批3/T7 接线）
         DeviceAuthChallenge { .. } | DeviceAuthResponse { .. } | DeviceAuthPending { .. } => {}
         EmergencyCommand { room_id, .. } => *room_id = room.to_string(), // G3: 急停房间级广播
+        // S4/a4: 急停 WS 审计副本（若经网关 = 与 EmergencyCommand 同组重写；舱端直连时不经过）。
+        ControlAudit { room_id, .. } => *room_id = room.to_string(),
     }
 }
 

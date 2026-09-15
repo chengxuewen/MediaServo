@@ -29,8 +29,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use mediaservo_common::protocol::{
     ControlAck, DtlsParameters, Fingerprint, IceCandidate, IceParameters, MediaKind,
-    SctpStreamParameters, SignalingMessage, TransportDirection, parse_envelope,
-};
+    SctpStreamParameters, SignalingMessage, TransportDirection, parse_envelope, ControlEnvelope, is_estop_cmd, control_hmac_verify};
 use mediaservo_link::{FrameBus, FrameMeta, FrameTopic, SignalEvent, SignalSession};
 use mediaservo_webrtc::data_channel::{
     RTCDataChannel, RTCDataChannelEvent, RTCDataChannelInit, RTCDataChannelState,
@@ -212,12 +211,70 @@ pub fn publish_bus(bus: Option<&FrameBus>, topic: &str, payload: &[u8]) {
 }
 
 /// 单条命令处理：parse_envelope → Actuator::on_command → ControlAck 写回 + 总线镜像。
+/// S4/a4·T3.5：命令执行策略（e-stop 验签门 + actuation 审计落点）。
+/// 规则（无自锁迁移形态）：hmac_key 未配置 = 验签不启用（estop 放行 + WARN 留痕）；
+/// 配置后 estop 必验，sig 缺失仅在 `allow_unsigned_estop=true` 时放行。
+#[derive(Debug, Clone, Default)]
+pub struct CommandPolicy {
+    pub hmac_key: Option<String>,
+    pub allow_unsigned_estop: bool,
+    /// act-then-audit jsonl 落点（None = 仅 tracing 行，永不阻塞执行）。
+    pub actuation_log: Option<std::path::PathBuf>,
+}
+
+impl CommandPolicy {
+    /// env 驱动构造（deploy 面单点）：
+    /// `MEDIASERVO_CONTROL_HMAC_KEY` 缺省空 = 未启用；`CONTROL_ALLOW_UNSIGNED_ESTOP=1` 逃生位；
+    /// `CONTROL_ACTUATION_LOG` 未设 = 仅 tracing 行。
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self {
+            hmac_key: std::env::var("MEDIASERVO_CONTROL_HMAC_KEY")
+                .ok()
+                .filter(|v| !v.is_empty()),
+            allow_unsigned_estop: std::env::var("CONTROL_ALLOW_UNSIGNED_ESTOP").as_deref() == Ok("1"),
+            actuation_log: std::env::var("CONTROL_ACTUATION_LOG")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .map(std::path::PathBuf::from),
+        }
+    }
+}
+
+/// estop 验签裁决矩阵（纯函数可测）。
+#[must_use]
+pub fn estop_verdict(policy: &CommandPolicy, env: &ControlEnvelope) -> (&'static str, bool) {
+    // (sig_state, 是否放行执行)
+    if !is_estop_cmd(&env.cmd) {
+        return ("n/a", true);
+    }
+    match (policy.hmac_key.as_deref(), env.sig.as_deref()) {
+        (None, Some(_)) => ("signed-unconfigured", true),
+        (None, None) => ("unsigned-unconfigured", true),
+        (Some(_), Some(sig)) => {
+            if control_hmac_verify(policy.hmac_key.as_deref().unwrap_or_default(), env, sig) {
+                ("ok", true)
+            } else {
+                ("invalid", false)
+            }
+        }
+        (Some(_), None) => {
+            if policy.allow_unsigned_estop {
+                ("absent-allowed", true)
+            } else {
+                ("absent", false)
+            }
+        }
+    }
+}
+
 pub async fn handle_command(
     label: &str,
     data: &[u8],
     actuator: &dyn Actuator,
     bus: Option<&FrameBus>,
     sink: &dyn AckSink,
+    policy: &CommandPolicy,
 ) {
     let env = match parse_envelope(data) {
         Ok(e) => e,
@@ -226,10 +283,30 @@ pub async fn handle_command(
             return;
         }
     };
+    // S4/a4: e-stop 验签门（执行前拒 = 语义；拒执亦回执 err ack + 审计行）。
+    let (sig_state, allow) = estop_verdict(policy, &env);
+    if !allow {
+        tracing::warn!(
+            channel = %label,
+            cmd = %env.cmd,
+            seq = env.seq,
+            "S4: e-stop 验签失败拒执（sig={sig_state}）"
+        );
+        actuation_audit(policy, label, &env, sig_state, "rejected");
+        let json = serde_json::to_string(&ControlAck::err(env.seq, "estop_signature_rejected"))
+            .unwrap_or_default();
+        let _ = sink.write(&json).await;
+        return;
+    }
+    if sig_state == "unsigned-unconfigured" && is_estop_cmd(&env.cmd) {
+        tracing::warn!("S4: estop 到达但 hmac_key 未配置——放行（部署缺口，见 actuation 审计）");
+    }
     publish_bus(bus, TOPIC_CMD, data);
+    let mut exec_state = "ok";
     let ack = match actuator.on_command(label, &env) {
         Ok(result) => ControlAck::ok(env.seq, result),
         Err(e) => {
+            exec_state = "error";
             // C15: 错误分支必须打日志（错误回执仍发对端，本侧可观测性不能丢）
             tracing::warn!(
                 channel = %label,
@@ -241,6 +318,7 @@ pub async fn handle_command(
             ControlAck::err(env.seq, e)
         }
     };
+    actuation_audit(policy, label, &env, sig_state, exec_state);
     let json = match serde_json::to_string(&ack) {
         Ok(j) => j,
         Err(e) => {
@@ -254,6 +332,33 @@ pub async fn handle_command(
     }
 }
 
+/// act-then-audit：jsonl（env 显式路径才写文件）+ 恒发 tracing 行；IO 错误容忍
+/// （审计永不阻塞执行——席3 裁决）。
+fn actuation_audit(policy: &CommandPolicy, label: &str, env: &ControlEnvelope, sig: &str, exec: &str) {
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    tracing::info!(
+        channel = %label,
+        cmd = %env.cmd,
+        seq = env.seq,
+        sig,
+        exec,
+        ts_ms,
+        "actuation"
+    );
+    let Some(path) = &policy.actuation_log else { return };
+    let line = serde_json::json!({
+        "ts_ms": ts_ms, "channel": label, "cmd": env.cmd, "seq": env.seq,
+        "sig": sig, "exec": exec,
+    });
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{line}"); // 审计写失败仅容忍（执行已过）
+    }
+}
+
 /// 单通道路由：spool 接收 → [`handle_command`] → 回执（ack DC 主路 + 同通道回声）。
 pub async fn route_dc(
     mut dc: RTCDataChannel,
@@ -261,6 +366,7 @@ pub async fn route_dc(
     bus: Option<Arc<FrameBus>>,
     ack: Arc<Mutex<Option<RTCDataChannel>>>,
     mut purge: mpsc::UnboundedReceiver<()>,
+    policy: Arc<CommandPolicy>,
 ) {
     let label = dc.label().to_string();
     let mut rx = dc.spool().await;
@@ -279,7 +385,8 @@ pub async fn route_dc(
                         ack: ack.clone(),
                         inbound: dc.clone(),
                     };
-                    handle_command(&label, &m.data, actuator.as_ref(), bus.as_deref(), &sink).await;
+                    handle_command(&label, &m.data, actuator.as_ref(), bus.as_deref(), &sink, &policy)
+                        .await;
                 }
                 None => break,
             },
@@ -479,6 +586,7 @@ async fn setup_send_side(
     ack: Arc<Mutex<Option<RTCDataChannel>>>,
     actuator: &Arc<dyn Actuator>,
     bus: &Option<Arc<FrameBus>>,
+    policy: &Arc<CommandPolicy>,
 ) -> Result<(RTCPeerConnection, HashSet<String>), String> {
     let (pc, t) = open_transport(signal, events, pending, TransportDirection::Send).await?;
     let mut dcs = Vec::with_capacity(labels.len());
@@ -495,7 +603,14 @@ async fn setup_send_side(
         //（select purge 臂恒悬停；4 字节泄漏为显式契约）。
         let (purge_tx, purge_rx) = mpsc::unbounded_channel();
         std::mem::forget(purge_tx);
-        tokio::spawn(route_dc(dc.clone(), actuator.clone(), bus.clone(), ack.clone(), purge_rx));
+        tokio::spawn(route_dc(
+            dc.clone(),
+            actuator.clone(),
+            bus.clone(),
+            ack.clone(),
+            purge_rx,
+            policy.clone(),
+        ));
         dcs.push((label.clone(), dc));
     }
     connect_answer(signal, &pc, &t).await?;
@@ -571,7 +686,9 @@ pub async fn control_loop(
     cfg: ControllerConfig,
     actuator: Arc<dyn Actuator>,
     bus: Option<Arc<FrameBus>>,
+    policy: CommandPolicy,
 ) -> u8 {
+    let policy = Arc::new(policy);
     // 先订阅事件再发任何请求（broadcast 无历史重放）
     let mut events = signal.events();
     let mut pending: Vec<PendingProducer> = Vec::new();
@@ -585,6 +702,7 @@ pub async fn control_loop(
         ack.clone(),
         &actuator,
         &bus,
+        &policy,
     )
     .await
     {
@@ -700,7 +818,7 @@ pub async fn control_loop(
                             let (a, b, k) = (actuator.clone(), bus.clone(), ack.clone());
                             let (purge_tx, purge_rx) = mpsc::unbounded_channel();
                             consumer_purge.insert(data_producer_id.clone(), purge_tx);
-                            tokio::spawn(route_dc(dc, a, b, k, purge_rx));
+                            tokio::spawn(route_dc(dc, a, b, k, purge_rx, policy.clone()));
                         }
                         Err(e) => {
                             tracing::error!(label, "negotiated consumer DC 创建失败: {e}");

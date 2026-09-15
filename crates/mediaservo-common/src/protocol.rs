@@ -352,6 +352,17 @@ pub enum SignalingMessage {
         protocol: String,
     },
 
+    /// S4/a4：急停 WS 审计副本（舱端 send_estop 与 DC 快路径同发，best-effort）。
+    /// 审计主落点 = host 执行器 actuation log（DC 不经 server，副本可丢——PLAN §11.6
+    /// 席3 裁决）；server 侧仅落 audit 环 + WARN 留痕，不转发不裁决执行。
+    ControlAudit {
+        room_id: String,
+        seq: u64,
+        cmd: String,
+        /// 签名存在位（载荷不复制——审计体积与 payload 隐私）。
+        sig_present: bool,
+    },
+
     /// H2 (audio conference): 查询 SFU producer/consumer RTP 统计（媒体面证据 + 运维观测）。
     /// 携带 producer_id 或 consumer_id（任一）；server 回复 SfuStats。
     SfuStatsRequest {
@@ -578,6 +589,73 @@ pub struct ControlEnvelope {
     /// 命令参数（缺省 = 空对象）。
     #[serde(default = "default_control_payload")]
     pub payload: serde_json::Value,
+    /// S4/T3.5(R-B HMAC 方案)：e-stop 类命令必带签名——
+    /// `hex(HMAC-SHA256(key, canonical_envelope_json))`；key=部署预共享
+    /// （env `MEDIASERVO_CONTROL_HMAC_KEY`，车舱双侧配置一致）。
+    /// additive：旧端 serde 忽略（其 estop 会被新车端拒 = 版本墙非破坏）。
+    /// 威胁模型注记：HMAC 共享密钥 = 无不可否认性（中间形态），
+    /// Ed25519/PKI 签名面归 P3′ 威胁模型裁决（PLAN §2 P3′ 行）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sig: Option<String>,
+}
+
+/// e-stop 命令族判定（前缀合同：`estop` / `estop_*` / `estop-*`）。
+#[must_use]
+pub fn is_estop_cmd(cmd: &str) -> bool {
+    cmd == "estop" || cmd.starts_with("estop_") || cmd.starts_with("estop-")
+}
+
+/// S4/T3.5 HMAC 签名的 canonical 消息 = 不含 sig 的信封 JSON
+/// （发送/校验两侧同一函数构造 = 字节稳定；sig=None 序列化即无该字段）。
+fn canonical_envelope_bytes(env: &ControlEnvelope) -> Vec<u8> {
+    let base = ControlEnvelope {
+        seq: env.seq,
+        cmd: env.cmd.clone(),
+        payload: env.payload.clone(),
+        sig: None,
+    };
+    serde_json::to_vec(&base).expect("ControlEnvelope is infallible to serialize")
+}
+
+/// `hex(HMAC-SHA256(key, canonical))`（车舱共用构造函数）。
+#[must_use]
+pub fn control_hmac_sign(key: &str, env: &ControlEnvelope) -> String {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    let mut mac = Hmac::<Sha256>::new_from_slice(key.as_bytes())
+        .expect("hmac accepts any key length");
+    mac.update(&canonical_envelope_bytes(env));
+    // 全 32B → 64 hex（遥控语义足够；DC 帧预算友好）。
+    mac
+        .finalize()
+        .into_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// 恒时校验（hmac `verify_slice` = 内部 constant-time；hex 解码手写免增依赖）。
+#[must_use]
+pub fn control_hmac_verify(key: &str, env: &ControlEnvelope, sig_hex: &str) -> bool {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    fn from_hex(h: &str) -> Option<Vec<u8>> {
+        let b = h.as_bytes();
+        (b.len() % 2 == 0)
+            .then(|| {
+                b.chunks(2)
+                    .map(|p| u8::from_str_radix(std::str::from_utf8(p).ok()?, 16).ok())
+                    .collect::<Option<Vec<u8>>>()
+            })
+            .flatten()
+    }
+    let Some(given) = from_hex(sig_hex) else {
+        return false;
+    };
+    let mut mac = Hmac::<Sha256>::new_from_slice(key.as_bytes())
+        .expect("hmac accepts any key length");
+    mac.update(&canonical_envelope_bytes(env));
+    mac.verify_slice(&given).is_ok()
 }
 
 /// 控制回执（与请求同通道发回）。
@@ -1377,6 +1455,33 @@ mod tests {
         assert!(json.contains(r#"type":"consume_data"#));
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         assert!(matches!(parsed, SignalingMessage::ConsumeData { .. }));
+    }
+
+    #[test]
+    fn s4_envelope_wire_backcompat_no_sig() {
+        // 旧线形（无 sig 字段）必须可读；新发送带 sig 也回读对称。
+        let old_wire = r#"{"seq":7,"cmd":"steer","payload":{"deg":1.0}}"#;
+        let env: ControlEnvelope = serde_json::from_str(old_wire).unwrap();
+        assert_eq!(env.sig, None);
+        let signed = control_hmac_sign("k1", &env);
+        let env2 = ControlEnvelope {
+            seq: 7,
+            cmd: "steer".into(),
+            payload: env.payload.clone(),
+            sig: Some(signed.clone()),
+        };
+        assert!(control_hmac_verify("k1", &env2, &signed));
+        assert!(!control_hmac_verify("wrong", &env2, &signed));
+        assert!(!control_hmac_verify("k1", &env2, "deadbeef"));
+    }
+
+    #[test]
+    fn s4_estop_cmd_family() {
+        assert!(is_estop_cmd("estop"));
+        assert!(is_estop_cmd("estop_all"));
+        assert!(is_estop_cmd("estop-steer"));
+        assert!(!is_estop_cmd("steer"));
+        assert!(!is_estop_cmd("restore_estop"));
     }
 
     #[test]

@@ -12,8 +12,7 @@ use std::time::Duration;
 
 use mediaservo_common::protocol::{
     ControlAck, DtlsParameters, Fingerprint, IceCandidate, IceParameters, MediaKind,
-    SctpStreamParameters, SignalingMessage, TransportDirection,
-};
+    SctpStreamParameters, SignalingMessage, TransportDirection, ControlEnvelope};
 use mediaservo_link::{SignalClient, SignalEvent};
 use mediaservo_webrtc::data_channel::RTCDataChannelEvent;
 use mediaservo_webrtc::rtp::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit};
@@ -53,6 +52,8 @@ pub struct VideoFrame {
 pub struct RoomSession {
     /// S2d: ack 消费后台泵与前台共用信令面 = Arc 共享。
     signal: Arc<LinkSignal>,
+    /// S4/T3.5: 急停 HMAC 密钥（emergency_stop 签名用；None = 不签）。
+    hmac_key: Option<String>,
     /// connect 即刻订阅（broadcast 无历史重放——接住 join 时 server 回放的
     /// late-join NewProducer）。
     events: Mutex<broadcast::Receiver<SignalEvent>>,
@@ -74,6 +75,44 @@ impl RoomSession {
             .collect()
     }
 
+    /// S4/a4·T3.5：急停双路 —— DC 快路径（带 HMAC sig，车端 act-then-audit 主留痕）
+    /// 伴随 WS `ControlAudit` 审计副本（best-effort：副本失败不影响已投递 DC 命令
+    /// ——急停恰多发于 WS 降级窗，审计主落点=车端执行器，PLAN §11.6 席3 裁决）。
+    pub async fn emergency_stop(
+        &mut self,
+        ctl: &mut ControlChannel,
+        label: &str,
+        seq: u64,
+        payload: serde_json::Value,
+    ) -> Result<(), ClientError> {
+        let mut env = ControlEnvelope {
+            seq,
+            cmd: "estop".to_string(),
+            payload,
+            sig: None,
+        };
+        if let Some(k) = &self.hmac_key {
+            env.sig = Some(mediaservo_common::protocol::control_hmac_sign(k, &env));
+        }
+        ctl.send_envelope(label, &env).await?; // DC 快路径先行（急停语义 = 不等审计副本）
+        let _ = self
+            .signal
+            .send(SignalingMessage::ControlAudit {
+                room_id: self.room_id().to_string(),
+                seq,
+                cmd: env.cmd.clone(),
+                sig_present: env.sig.is_some(),
+            })
+            .await; // WS 副本 best-effort（C15：失败静默 = 主留痕在车端 actuation）
+        Ok(())
+    }
+
+    /// S4：急停密钥是否已配置（观测面；密钥值永不外泄）。
+    #[must_use]
+    pub fn hmac_key_debug_present(&self) -> bool {
+        self.hmac_key.is_some()
+    }
+
     /// 信令连接 + 入房（PSK 或 JWT，见 [`ClientConfig`]；link 承载全部握手）。
     pub async fn connect(cfg: &ClientConfig) -> Result<Self, ClientError> {
         let mut client = SignalClient::new(
@@ -93,6 +132,7 @@ impl RoomSession {
         let signal = LinkSignal::new(session, sfu_peer_key(&cfg.role).to_string());
         Ok(Self {
             signal: Arc::new(signal),
+            hmac_key: cfg.hmac_key.clone(),
             events: Mutex::new(events),
             pump_events: Mutex::new(Some(pump_events)),
             _pcs: Vec::new(),

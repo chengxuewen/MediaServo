@@ -58,6 +58,7 @@ mod tests {
             seq: 5,
             cmd: "steer".into(),
             payload: serde_json::json!({ "value": -0.2 }),
+            sig: None,
         };
         let result = actuator.on_command("chassis", &env).unwrap();
         assert_eq!(result["ok"], true);
@@ -68,7 +69,7 @@ mod tests {
     #[test]
     fn stub_actuator_distinguishes_channels() {
         let actuator = StubActuator;
-        let env = ControlEnvelope { seq: 1, cmd: "pan".into(), payload: serde_json::json!({}) };
+        let env = ControlEnvelope { seq: 1, cmd: "pan".into(), payload: serde_json::json!({}), sig: None };
         let chassis = actuator.on_command("chassis", &env).unwrap();
         let gimbal = actuator.on_command("gimbal", &env).unwrap();
         assert_eq!(chassis["channel"], "chassis");

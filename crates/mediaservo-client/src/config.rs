@@ -18,6 +18,9 @@ pub struct ClientConfig {
     pub jwt: Option<String>,
     /// 入房角色（cockpit 侧 = Remote 或 Consumer）。
     pub role: PeerRole,
+    /// S4/T3.5：e-stop HMAC 预共享密钥（与车端 `MEDIASERVO_CONTROL_HMAC_KEY` 同值）。
+    /// None = 急停不带 sig（车端未配置 key 时照常执行；车端配置后 estop 会被拒）。
+    pub hmac_key: Option<String>,
 }
 
 // jwt 在 Debug 中脱敏——凭证永不入日志。

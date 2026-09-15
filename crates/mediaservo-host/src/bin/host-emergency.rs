@@ -464,6 +464,7 @@ mod tests {
             seq: 9,
             cmd: "panic".into(),
             payload: serde_json::json!({}),
+            sig: None,
         };
         let ack = handle_envelope(&a, &env);
         assert_eq!(ack.ack, 9);
@@ -480,6 +481,7 @@ mod tests {
             seq,
             cmd: EMERGENCY_STOP.into(),
             payload: serde_json::json!({}),
+            sig: None,
         };
         let ack1 = handle_envelope(&a, &env(1));
         assert_eq!(ack1.result["ok"], true);
@@ -503,6 +505,7 @@ mod tests {
                 seq: 1,
                 cmd: EMERGENCY_STOP.into(),
                 payload: serde_json::json!({}),
+            sig: None,
             };
             let ack = handle_envelope(&a, &env);
             assert_eq!(ack.result["ok"], true, "急停本身不受审计失败影响");

@@ -7,8 +7,8 @@ use mediaservo_common::protocol::{
 
 use mediaservo_host::control::{Actuator, StubActuator};
 use mediaservo_host::controller::{
-    ACK_LABEL, CollectAckSink, build_dc_remote_sdp, channel_init, handle_command,
-    sctp_stream_params,
+    ACK_LABEL, CommandPolicy, CollectAckSink, build_dc_remote_sdp, channel_init, estop_verdict,
+    handle_command, sctp_stream_params,
 };
 
     #[test]
@@ -101,6 +101,7 @@ use mediaservo_host::controller::{
             seq: 7,
             cmd: "steer".into(),
             payload: serde_json::json!({ "value": 0.35 }),
+            sig: None,
         };
         handle_command(
             "chassis",
@@ -108,6 +109,7 @@ use mediaservo_host::controller::{
             &actuator,
             None,
             &sink,
+            &mediaservo_host::controller::CommandPolicy::default(),
         )
         .await;
         let items = sink.items.lock().unwrap();
@@ -132,7 +134,7 @@ use mediaservo_host::controller::{
         }
         let sink = CollectAckSink::default();
         let bytes = br#"{"seq":9,"cmd":"on","payload":{}}"#;
-        handle_command("light", bytes, &Failing, None, &sink).await;
+        handle_command("light", bytes, &Failing, None, &sink, &mediaservo_host::controller::CommandPolicy::default()).await;
         let items = sink.items.lock().unwrap();
         let ack: ControlAck = serde_json::from_str(&items[0]).unwrap();
         assert_eq!(ack.ack, 9);
@@ -142,6 +144,76 @@ use mediaservo_host::controller::{
     #[tokio::test]
     async fn handle_command_ignores_garbage() {
         let sink = CollectAckSink::default();
-        handle_command("chassis", b"not-json", &StubActuator, None, &sink).await;
+        handle_command("chassis", b"not-json", &StubActuator, None, &sink, &mediaservo_host::controller::CommandPolicy::default()).await;
         assert!(sink.items.lock().unwrap().is_empty(), "坏信封不得产生回执");
     }
+
+// ── S4/a4·T3.5 estop 门 ──────────────────────────────────────
+
+#[test]
+fn estop_verdict_matrix() {
+    let env_with = |sig: Option<&str>| ControlEnvelope {
+        seq: 1,
+        cmd: "estop".into(),
+        payload: serde_json::json!({}),
+        sig: sig.map(str::to_string),
+    };
+    let pol = |key: Option<&str>, allow: bool| CommandPolicy {
+        hmac_key: key.map(str::to_string),
+        allow_unsigned_estop: allow,
+        actuation_log: None,
+    };
+    assert!(estop_verdict(&pol(None, false), &env_with(None)).1, "未配 key 迁移放行");
+    let signed = mediaservo_common::protocol::control_hmac_sign("k", &env_with(None));
+    assert!(estop_verdict(&pol(Some("k"), false), &env_with(Some(&signed))).1, "正确签名放行");
+    assert!(!estop_verdict(&pol(Some("k"), false), &env_with(Some("bad"))).1, "错签必拒");
+    assert!(!estop_verdict(&pol(Some("k"), false), &env_with(None)).1, "有 key 无 sig 必拒");
+    assert!(estop_verdict(&pol(Some("k"), true), &env_with(None)).1, "逃生位显式开放行");
+    let steer = ControlEnvelope { cmd: "steer".into(), ..env_with(None) };
+    assert!(estop_verdict(&pol(Some("k"), false), &steer).1, "非 estop 族不涉签名");
+}
+
+#[tokio::test]
+async fn estop_rejected_does_not_reach_actuator() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Counting(Arc<AtomicUsize>);
+    impl Actuator for Counting {
+        fn on_command(
+            &self,
+            _l: &str,
+            _e: &ControlEnvelope,
+        ) -> Result<serde_json::Value, String> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(serde_json::json!({ "ok": true }))
+        }
+    }
+    let n = Arc::new(AtomicUsize::new(0));
+    let pol = CommandPolicy {
+        hmac_key: Some("k".into()),
+        allow_unsigned_estop: false,
+        actuation_log: None,
+    };
+    let env = ControlEnvelope {
+        seq: 7,
+        cmd: "estop_all".into(),
+        payload: serde_json::json!({}),
+        sig: None,
+    };
+    let sink = CollectAckSink::default();
+    handle_command(
+        "chassis",
+        serde_json::to_vec(&env).unwrap().as_slice(),
+        &Counting(n.clone()),
+        None,
+        &sink,
+        &pol,
+    )
+    .await;
+    assert_eq!(n.load(Ordering::SeqCst), 0, "验签失败 estop 不得触达执行器");
+    let acks = sink.items.lock().unwrap_or_else(|e| e.into_inner());
+    assert!(
+        acks[0].contains("estop_signature_rejected"),
+        "拒执必须错误回执: {acks:?}"
+    );
+}

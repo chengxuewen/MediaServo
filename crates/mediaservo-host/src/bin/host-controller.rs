@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use mediaservo_common::protocol::PeerRole;
 use mediaservo_host::control::{Actuator, StubActuator};
-use mediaservo_host::controller::{ControllerConfig, control_loop};
+use mediaservo_host::controller::{CommandPolicy as ControllerPolicy, ControllerConfig, control_loop};
 use mediaservo_link::{FrameBus, SignalClient, TokenFile};
 
 /// 本地房间名（网关拦截并重写为整车房间；子进程本地房间仅作下行改写目标）。
@@ -117,7 +117,9 @@ async fn main() -> ExitCode {
 
     let bus = attach_bus(args.token.as_ref());
     let actuator: Arc<dyn Actuator> = Arc::new(StubActuator);
-    let code = control_loop(signal, ControllerConfig::default(), actuator, bus).await;
+    // S4/a4·T3.5：e-stop 验签策略（env 驱动，车舱同值 key = 部署配置面）。
+    let policy = ControllerPolicy::from_env();
+    let code = control_loop(signal, ControllerConfig::default(), actuator, bus, policy).await;
     ExitCode::from(code)
 }
 

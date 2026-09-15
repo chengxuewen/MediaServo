@@ -54,6 +54,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         psk: None,
         jwt: Some(token.jwt),
         role: PeerRole::Consumer,
+        // S4/T3.5：急停 HMAC 预共享密钥（车端 MEDIASERVO_CONTROL_HMAC_KEY 同值）。
+        hmac_key: std::env::var("MEDIASERVO_CONTROL_HMAC_KEY").ok().filter(|v| !v.is_empty()),
     };
     let mut session = RoomSession::connect(&cfg).await?;
     println!("joined room={} negotiated={}", session.room_id(), session.negotiated());
@@ -63,7 +65,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let skip_video = std::env::var("MSRTC_SKIP_VIDEO").is_ok_and(|v| v == "1");
     let producer = if skip_video { String::new() } else { session.wait_video_producer(Duration::from_secs(30)).await? };
     if !skip_video { println!("video producer discovered: {producer}"); }
-    let mut frame_opt = None;
     if !skip_video {
     let mut frames = session.consume_video(&producer).await?;
     let frame = match tokio::time::timeout(Duration::from_secs(30), frames.recv()).await {
@@ -79,30 +80,43 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     println!("first frame {}x{} ({}B I420)", frame.width, frame.height, frame.data.len());
-    frame_opt = Some(frame);
     }
 
     // 4. 控制出程：open → send → ack
     let mut ctl = session.open_control(&[label.as_str()]).await?;
     println!("control open: labels={:?} producers={:?}", ctl.labels(), ctl.producer_ids());
-    // 对端（车端 controller）消费舱端 producer 存在 ~20s 事件链时延——demo 以
-    // 5s 间隔重发 + 25s 窗收 ack（真实座舱为人手操作，天然覆盖该窗口）。
-    // 同 seq 重发（车端 consumer attach 前的消息 mediasoup 不缓存会丢；D-H3 seq
-    // 配对 = 重发幂等安全）。recv_ack_for 跳过错序旧 ack。
+    // 对端（车端 controller）消费舱端 producer 有事件链时延 = 同 seq 重发幂等
+    // （attach 前消息 mediasoup 不缓存；D-H3 seq 配对）；recv_ack_for 跳过旧 ack。
     let seq = 1u64;
     let mut ack_opt = None;
+    // S4 弱网还账计量：每 attempt 记录 send→ack 延迟（ms，未回记 -1），
+    // 末行 `[rtt] a,b,c` 供脚本抓取（remote-burst/基线分布对照）。
+    let mut rtts: Vec<i64> = Vec::new();
     for attempt in 0..12u64 {
         if attempt > 0 {
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
+        let t0 = std::time::Instant::now();
         ctl.send(&label, seq, "steer", serde_json::json!({ "deg": 0.0 })).await?;
         ack_opt = ctl.recv_ack_for(seq, Duration::from_secs(5)).await.ok();
+        rtts.push(match &ack_opt {
+            Some(_) => t0.elapsed().as_millis().min(i64::MAX as u128) as i64,
+            None => -1,
+        });
         if ack_opt.is_some() {
             break;
         }
     }
+    println!("[rtt] {}", rtts.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","));
     let ack = ack_opt.ok_or("timed out waiting for ControlAck (12 retries)")?;
     println!("ack seq={} result={}", ack.ack, ack.result);
+    // S4/a4：急停双路演示（MSRTC_ESTOP=1 触发；DC sig + WS 审计副本 + 车端 actuation 留痕）。
+    if std::env::var("MSRTC_ESTOP").is_ok_and(|v| v == "1") {
+        session.emergency_stop(&mut ctl, &label, 900, serde_json::json!({"reason":"demo"})).await?;
+        println!("estop sent (sig={})", if session.hmac_key_debug_present() { "signed" } else { "unsigned" });
+        let estop_ack = ctl.recv_ack_for(900, Duration::from_secs(10)).await?;
+        println!("estop ack result={}", estop_ack.result);
+    }
     if ack.ack != 1 {
         return Err(format!("ack seq mismatch: got {} want 1", ack.ack).into());
     }

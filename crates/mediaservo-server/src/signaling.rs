@@ -1931,6 +1931,22 @@ pub(crate) async fn handle_sfu_message(
             }
         }
         // ── P1 (client-dual-form): mediasoup-client 标准协商面 ──────────────────
+        // S4/a4：急停 WS 审计副本——仅留痕（执行与验签裁决在车端 actuator = 审计主落点，
+        // PLAN §11.6 席3）。返回 None = 不响应（副本语义 = 无需回执，避免应答风暴）。
+        SignalingMessage::ControlAudit {
+            room_id,
+            seq,
+            cmd,
+            sig_present,
+        } => {
+            audit::log_event(audit::AuditEvent::EstopAudit {
+                room_id: room_id.clone(),
+                seq: *seq,
+                cmd: cmd.clone(),
+                sig_present: *sig_present,
+            });
+            None
+        }
         SignalingMessage::GetRouterRtpCapabilities { room_id } => {
             // Device.load() 输入（C18 官方流程）；房间不存在则懒建 Router（同 create transport 路径）。
             match tokio::time::timeout(

@@ -74,7 +74,7 @@ impl ControlChannel {
         cmd: &str,
         payload: serde_json::Value,
     ) -> Result<(), ClientError> {
-        self.send_envelope(label, &ControlEnvelope { seq, cmd: cmd.into(), payload })
+        self.send_envelope(label, &ControlEnvelope { seq, cmd: cmd.into(), payload, sig: None })
             .await
     }
 

@@ -14,6 +14,13 @@
 /// Audit event variants covering all security-relevant server operations.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuditEvent {
+    /// S4/a4：座舱急停 WS 审计副本（DC 快路径不经 server，本副本 best-effort 留痕）。
+    EstopAudit {
+        room_id: String,
+        seq: u64,
+        cmd: String,
+        sig_present: bool,
+    },
     /// A new room was created.
     RoomCreate { room_id: String },
     /// A room was destroyed (last peer left).
@@ -76,6 +83,21 @@ pub fn log_event(event: AuditEvent) {
         }
     }
     match event {
+        AuditEvent::EstopAudit {
+            room_id,
+            seq,
+            cmd,
+            sig_present,
+        } => {
+            tracing::warn!(
+                audit.event = "estop_audit",
+                room_id = %room_id,
+                seq,
+                cmd = %cmd,
+                sig_present,
+                "WS audit copy: cockpit e-stop"
+            );
+        }
         AuditEvent::RoomCreate { room_id } => {
             tracing::info!(
                 audit.event = "room_create",

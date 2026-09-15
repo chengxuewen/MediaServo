@@ -1,0 +1,19 @@
+{
+  "name": "estop-signed",
+  "kind": "ctl-signature",
+  "key": "l1-estop-key",
+  "wire": {
+    "seq": 900,
+    "cmd": "estop",
+    "payload": {
+      "reason": "matrix"
+    }
+  },
+  "sig": "303e0724936d5fb84b79622ea720fb0560a94b35f970df41547b1dc8dfb23b0d",
+  "canonical_json": "{\"seq\":900,\"cmd\":\"estop\",\"payload\":{\"reason\":\"matrix\"}}",
+  "checks": {
+    "verifies": true,
+    "wrong_key_verifies": false,
+    "tampered_seq_verifies": false
+  }
+}

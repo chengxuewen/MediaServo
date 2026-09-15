@@ -6,6 +6,16 @@
 ## Unreleased
 
 ### 新增
+- 急停命令链路（遥控安全）：座舱 SDK `emergency_stop` 双路投递——数据通道快路径携带 HMAC-SHA256
+  签名（部署预共享密钥 MEDIASERVO_CONTROL_HMAC_KEY，车舱同值）+ 信令通道审计副本；车端执行器
+  验签闸门（密钥已配置时，无签名/错签的急停一律拒执并回执 estop_signature_rejected），执行结果
+  逐条落 actuation 审计（jsonl 或日志行，审计永不阻塞执行）。密钥未配置 = 行为与旧版一致（迁移期）。
+- 兼容矩阵脚本 scripts/e2e-compat.sh：方言四探针（缺字段→v1/声明钳制/拒低 4101）+ 新 SDK 全链
+  回环 + dispatcher 4012 拒控负例；旧 server 象限需 b34f3a1 产物（缺省 SKIP 记账）。
+- 弱网还账（loss × Cmd/ACK）：remote-burst 5/5 全通 RTT 254-301ms；degraded 失联级零脆断，
+  结论与证据见主仓 docs/plans/client-dual-form/evidence/s4-weaknet.md。
+
+### 新增
 - 座舱 SDK 第四家族（C ABI + C++）：新库 mediaservo-client-c 提供 ms_client_* 稳定 C 接口
   （登录/入房/视频回调/遥控通道），新头文件 mediaservo/client.hpp 提供 C++11 兼容 RAII 包装；
   附纯 C++ 遥控样例 control_demo 与 ROS2 桥接样例节点（device-day 构建）。CI 新增 test-cxx

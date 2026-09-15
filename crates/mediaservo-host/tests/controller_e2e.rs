@@ -319,7 +319,7 @@ async fn controller_sfu_dc_signaling_sequence() {
 
     let code = tokio::time::timeout(
         Duration::from_secs(30),
-        control_loop(signal, ControllerConfig::default(), Arc::new(StubActuator), None),
+        control_loop(signal, ControllerConfig::default(), Arc::new(StubActuator), None, Default::default()),
     )
     .await
     .expect("control_loop 30s 未退出");
