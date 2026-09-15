@@ -59,6 +59,16 @@ pub struct RoomSession {
 }
 
 impl RoomSession {
+    /// S2c 诊断面：video receiver 的 inbound-rtp stats（"包没进来" vs
+    /// "进而不解" 二分的定案读点；track_id = offer msid 注入的 "video"）。
+    #[must_use]
+    pub fn video_receiver_stats(&self) -> Vec<mediaservo_webrtc::stats::RTCStats> {
+        self._pcs
+            .iter()
+            .flat_map(|pc| pc.receiver_get_stats("video"))
+            .collect()
+    }
+
     /// 信令连接 + 入房（PSK 或 JWT，见 [`ClientConfig`]；link 承载全部握手）。
     pub async fn connect(cfg: &ClientConfig) -> Result<Self, ClientError> {
         let mut client = SignalClient::new(
@@ -398,7 +408,13 @@ async fn await_transport_created(
                 ..
             } => return Ok((transport_id, ice_parameters, dtls_parameters, ice_candidates)),
             SignalingMessage::Error { message, .. } if message == "transport_connected" => {}
-            other => return Err(on_unexpected(other, "WebRtcTransportCreated")),
+            // 并发事件容忍（车房常态：他人 producer 广播与 transport 应答同窗）；
+            // 仅 Error 终态（C15 带上下文）。
+            err @ SignalingMessage::Error { .. } => return Err(on_unexpected(err, "WebRtcTransportCreated")),
+            other => {
+                tracing::debug!(msg = ?other, "await(transport) 忽略无关事件，继续等");
+                continue;
+            }
         }
     }
 }
@@ -410,7 +426,11 @@ async fn await_consumed(ev: &mut broadcast::Receiver<SignalEvent>) -> Result<ser
                 rtp_parameters, ..
             } => return Ok(rtp_parameters),
             SignalingMessage::Error { message, .. } if message == "transport_connected" => {}
-            other => return Err(on_unexpected(other, "Consumed"))?,
+            err @ SignalingMessage::Error { .. } => return Err(on_unexpected(err, "Consumed")),
+            other => {
+                tracing::debug!(msg = ?other, "await(consumed) 忽略无关事件，继续等");
+                continue;
+            }
         }
     }
 }
@@ -425,7 +445,11 @@ async fn await_data_producer_created(
                 ..
             } => return Ok(data_producer_id),
             SignalingMessage::Error { message, .. } if message == "transport_connected" => {}
-            other => return Err(on_unexpected(other, "DataProducerCreated"))?,
+            err @ SignalingMessage::Error { .. } => return Err(on_unexpected(err, "DataProducerCreated")),
+            other => {
+                tracing::debug!(msg = ?other, "await(producer) 忽略无关事件，继续等");
+                continue;
+            }
         }
     }
 }

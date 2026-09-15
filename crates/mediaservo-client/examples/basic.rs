@@ -58,21 +58,44 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut session = RoomSession::connect(&cfg).await?;
     println!("joined room={} negotiated={}", session.room_id(), session.negotiated());
 
-    // 3. 消费一路视频并取首帧（late-join NewProducer 回放 ≤30s）
-    let producer = session.wait_video_producer(Duration::from_secs(30)).await?;
-    println!("video producer discovered: {producer}");
+    // 3. 消费一路视频并取首帧（late-join NewProducer 回放 ≤30s）。
+    //    MSRTC_SKIP_VIDEO=1：纯控制回路验证（整车房间——controller  producers/消费皆在此）。
+    let skip_video = std::env::var("MSRTC_SKIP_VIDEO").is_ok_and(|v| v == "1");
+    let producer = if skip_video { String::new() } else { session.wait_video_producer(Duration::from_secs(30)).await? };
+    if !skip_video { println!("video producer discovered: {producer}"); }
+    let mut frame_opt = None;
+    if !skip_video {
     let mut frames = session.consume_video(&producer).await?;
-    let frame = tokio::time::timeout(Duration::from_secs(30), frames.recv())
-        .await
-        .map_err(|_| "timeout waiting first video frame")?
-        .ok_or("frame stream closed")?;
+    let frame = match tokio::time::timeout(Duration::from_secs(30), frames.recv()).await {
+        Ok(Some(f)) => f,
+        Ok(None) => return Err("frame stream closed".into()),
+        Err(_) => {
+            // S2c 二分判据：超时即 dump 收侧 stats（packetsReceived>0 而不解码=解码/mid 面；
+            // 0 包=到达性/SRTP 面）。
+            for s in session.video_receiver_stats() {
+                println!("receiver-stats {s:?}");
+            }
+            return Err("timeout waiting first video frame".into());
+        }
+    };
     println!("first frame {}x{} ({}B I420)", frame.width, frame.height, frame.data.len());
+    frame_opt = Some(frame);
+    }
 
     // 4. 控制出程：open → send → ack
     let mut ctl = session.open_control(&[label.as_str()]).await?;
     println!("control open: labels={:?} producers={:?}", ctl.labels(), ctl.producer_ids());
-    ctl.send(&label, 1, "steer", serde_json::json!({ "deg": 0.0 })).await?;
-    let ack = ctl.recv_ack(Duration::from_secs(5)).await?;
+    // 对端（车端 controller）消费舱端 producer 存在 ~20s 事件链时延——demo 以
+    // 5s 间隔重发 + 25s 窗收 ack（真实座舱为人手操作，天然覆盖该窗口）。
+    let mut ack_opt = None;
+    for seq in 1..=12u64 {
+        ctl.send(&label, seq, "steer", serde_json::json!({ "deg": 0.0 })).await?;
+        ack_opt = ctl.recv_ack(Duration::from_secs(5)).await.ok();
+        if ack_opt.is_some() {
+            break;
+        }
+    }
+    let ack = ack_opt.ok_or("timed out waiting for ControlAck (12 retries)")?;
     println!("ack seq={} result={}", ack.ack, ack.result);
     if ack.ack != 1 {
         return Err(format!("ack seq mismatch: got {} want 1", ack.ack).into());

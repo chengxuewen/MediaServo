@@ -766,3 +766,8 @@ install                        → 改名提示 + exit 2（退役）
 - 活体连环定损（python 字节级复现掌稳）：① **auth 手卷 HTTP 写半关 = 真 hyper 静默断连（0 字节无响应）**——删 shutdown 改依赖 Connection: close；tests mock 同步改 content-length 完整读（防 RST 吞响应）。② **JWT 子协议连接 server 仍无条件发 auth ack**——link 补 jwt 消费分支（不吞=漏进 join 读窗报 `[0]: authenticated`）；前 worker jwt 单测 mock 补手写 ack 帧对齐真行为。③ **consume 手拼 VP8 caps 被真 mediasoup 拒（5000 No compatible codecs，H264 producer）= field PullSession 同罪**（push_e2e #[ignore] 故漏网）——session.rs 先 GetRouterRtpCapabilities 回包直传 Consume（C18 官方流），sfu_surface mock 补 arm+断言序列 4 帧。
 - 活体五跑（admin/vehicle_test 子房间）：login→join(negotiated=3)→wait producer→transport create→**DTLS/ICE Connected+Completed**→…首帧等待超时=媒体面在查（keyframe 周期/inject ssrc demux——**S2c 立案**：真帧 + Cmd 整车房间闭环两债）。
 - 门：client 22+5+4 全绿、link lib 5/5。教训：mock canned ≠ 真态——真 server 三连咬（half-close/ack/codec）全在 mock 盲区，S4′ 矩阵"样例即测试三层"的存在理由。
+
+### 2026-09-15: S2c 首帧破 + S2d 立案（DC 消息体单侧开）
+- **首帧已破（产品级修复）**：answerer 角色下 on_track 于 SetRemote 期触发、SetLocal 后接收轨可能重建——VideoSinkAdapter 延迟 1s 重挂一次（双挂容忍）→ `first frame 1280x720 (1382400B I420)` 活体出帧。receiver_get_stats 三层补面（ffi 已有口，默认空面 stub 零成本）= 本次二分判据的常久资产。
+- client 健壮性三连：await 循环并发事件容忍（车房他人 producer 广播=常态，仅 Error 终态；PullSession 同罪在册）；example SKIP_VIDEO 开关 + ack 重试环。
+- **S2d 新案（活体真墙）**：舱端 CreateDataProducer→车端 NewDataProducer→ConsumeData→**DataConsumed 双回合同绿，但车端 on_data_channel 永不触发（无 open 线）+ 舱端 12×5s 重发全丢** = mediasoup SCTP 代理 DCEP 双向握手未通、舱端 producer DC "open" 为单侧假象。方向=mediasoup consumer sctpStreams / worker datachannel 代理配置（sfu.rs transport 创建参数 surface）。**教训入册**：S1/S2 活体门当时只验到信令面（produce/consume 注册），DC 消息体往返未验=活体盲区第三层（mock 盲区之后）。
