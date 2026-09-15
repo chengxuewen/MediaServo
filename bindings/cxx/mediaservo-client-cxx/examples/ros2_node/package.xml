@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>mediaservo_control_relay</name>
+  <version>0.1.0</version>
+  <description>
+    MSRTC 舱端遥控 → ROS2 桥接样例（G5 三层之 device-day 面）：经 mediaservo-client
+    C++ SDK（sdk-client 包 components/client）建立控制 DataChannel，把回执转发为
+    ROS topic /mediaservo/ack；指令由 ROS topic /mediaservo/cmd 注入（seq 进程内自增）。
+    构建前置：sdk-client 包安装（libmediaservo_client + headers，见包内 README）。
+  </description>
+  <maintainer email="dev@maxsense.local">maxsense</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

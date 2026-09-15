@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+### 新增
+- 座舱 SDK 第四家族（C ABI + C++）：新库 mediaservo-client-c 提供 ms_client_* 稳定 C 接口
+  （登录/入房/视频回调/遥控通道），新头文件 mediaservo/client.hpp 提供 C++11 兼容 RAII 包装；
+  附纯 C++ 遥控样例 control_demo 与 ROS2 桥接样例节点（device-day 构建）。CI 新增 test-cxx
+  作业：四 SDK C++ 测试编译运行 + C ABI 符号表巡检（含 client 新面 12 导出对表）。
+
 ### 修复
 - 遥控数据通道消息体单侧开（车端/舱端互发收不到）根修：数据通道消费回执现在携带服务端
   分配的 SCTP 流参数，两端以带外协商通道接收转发消息（mediasoup-client 官方契约）——

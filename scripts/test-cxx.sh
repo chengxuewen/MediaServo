@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# C++ header-only 绑定测试: 编译并运行 field/link/deck 三 SDK 测试程序。
+# C++ header-only 绑定测试: 编译并运行 field/link/deck/client 四 SDK 测试程序。
 # 前置: 三个 cdylib 已构建（pixi run build-c，含 .so.0 dev symlink）。
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 export PATH="$HOME/.pixi/bin:$PATH"
 export LD_LIBRARY_PATH="$PWD/target/debug${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-for sdk in field link deck; do
+for sdk in field link deck client; do
     echo "=== $sdk-cxx ==="
     g++ -std=c++11 -Wall -Wextra \
         -I "bindings/cxx/mediaservo-$sdk-cxx/include" -I bindings/cxx/include \

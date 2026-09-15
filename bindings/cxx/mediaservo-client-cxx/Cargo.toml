@@ -1,0 +1,9 @@
+[package]
+name = "mediaservo-client-cxx"
+version.workspace = true
+edition.workspace = true
+description = "MediaServo client C++ header-only RAII binding (over C ABI)"
+license.workspace = true
+
+[lib]
+# 空载体：header-only C++ 绑定，本 crate 仅承载测试与分发元数据

@@ -43,7 +43,7 @@ test = "cargo test --workspace --exclude mediaservo-server"
 lint = "cargo clippy --workspace --all-targets -- -D warnings"
 # === Bindings tasks（绑定矩阵, link/deck/field × c/cxx/py）===
 # cdylib 构建 + dev .so.<MAJOR> symlink（D241: DT_NEEDED 解析）
-build-c = "cargo build -p mediaservo-field-c -p mediaservo-link-c -p mediaservo-deck-c && ln -sf libmediaservo_field.so target/debug/libmediaservo_field.so.0 && ln -sf libmediaservo_link.so target/debug/libmediaservo_link.so.0 && ln -sf libmediaservo_deck.so target/debug/libmediaservo_deck.so.0"
+build-c = "cargo build -p mediaservo-field-c -p mediaservo-link-c -p mediaservo-deck-c -p mediaservo-client-c && ln -sf libmediaservo_field.so target/debug/libmediaservo_field.so.0 && ln -sf libmediaservo_link.so target/debug/libmediaservo_link.so.0 && ln -sf libmediaservo_deck.so target/debug/libmediaservo_deck.so.0 && ln -sf libmediaservo_client.so target/debug/libmediaservo_client.so.0"
 # C++ header-only 绑定测试（g++ 编译 + 运行断言）
 test-cxx = "bash scripts/test-cxx.sh"
 # Python ctypes 绑定测试（stdlib unittest）

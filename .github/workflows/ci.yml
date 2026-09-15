@@ -61,6 +61,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
 
+  test-cxx:
+    # cxx header-only 家族编译+运行门（四 SDK 测试程序）+ C ABI 符号巡检（老三面漂移 +
+    # client 新面）。前置 build-c 产四 cdylib。ASan/UBSan 活体环归 device-day（需活 server）。
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build C ABI cdylibs (field/link/deck/client)
+        run: cargo build -p mediaservo-field-c -p mediaservo-link-c -p mediaservo-deck-c -p mediaservo-client-c
+      - name: Dev soname symlinks (loader 解析 libmediaservo_*.so.0)
+        run: |
+          cd target/debug
+          for l in field link deck client; do ln -sf libmediaservo_$l.so libmediaservo_$l.so.0; done
+      - name: C++ header-only tests
+        run: LD_LIBRARY_PATH=$PWD/target/debug bash scripts/test-cxx.sh
+      - name: C ABI symbol checks
+        run: bash scripts/check-abi-drift.sh && bash scripts/check-abi-client.sh
+
   test-gstreamer:
     runs-on: ubuntu-latest
     steps:

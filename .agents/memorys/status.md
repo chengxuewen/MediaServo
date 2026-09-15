@@ -778,3 +778,10 @@ install                        → 改名提示 + exit 2（退役）
 - **活体（新环境+3 轮重连）**：`ack seq=1 {ok:true}` rc=0 ×3；车端"收到命令"↔舱端 ack = **消息体双向全通**。
 - **新坑四枚**：① `StreamId reserved` = libwebrtc 对 worker 递增 sid 与本地存活 DC 数耦合，**server 数据面清理缺失（remove_peer 三函数只遍历 media producers，data_producers/consumers 全泄漏——"found 8 data producers" 实锤）= 天花板未爆，S4′ 必修**；② 双 receiver 泵开局必须 try_recv 排空（否则抓错上一轮应答）；③ 预订阅必须在 `connect` 同步点（`LinkSignal::events` 在 async 态 blocking_lock panic）；④ pixi 配方 `unset MESON_ARGS` 必须在 **task 内层**（外层被 activation 覆盖=假 unset，PIT-193 家族新亚种）。
 - 挂账：S4′（数据面清理+ProducerClosed 覆盖 data kind+双端 DC 生命周期闭环）· 多舱共享 peer 键 "consumer" 碰撞（sfu_peer_key role 级恒定 = 同 room 双舱串扰，实测同形）· controller 冷启动 5001 时序小刀。
+
+### 2026-09-15: S3 cxx 第四家族落地（client-c cdylib + client.hpp RAII + demo 活体 rc=0）
+- 交付：`bindings/c/mediaservo-client-c`（ms_client_* 12 导出/opaque handle/全局 OnceLock runtime[ack 泵 tokio::spawn 必须活运行时]/exhaustive ClientError→错误码 10 档/panic=catch 兜底；模块拆分 lib/config/errors）+ `bindings/cxx/mediaservo-client-cxx`（client.hpp C++11 兼容 RAII 镜像 link.hpp idiom、Result 面无异常、ctl→session 逆序析构=正序 close）+ control_demo.cpp（env 参数面+同 seq 重发）+ test_client.cpp（bogus url 类型化错误断言，无网络依赖）。
+- 门全绿：client-c cargo test 22/22 · check-abi-client 12==12 · 老三面 check-abi-drift PASS+git diff 零改动 · demo 全链 g++ 链接 · **活体 rc=0：C++ SDK→cdylib→mediasoup negotiated→车端 ack{ok:true,seq:1} 往返** · **ASan+UBSan(detect_leaks=0) 环 rc=0 零报告**。
+- CI 接线：ci.yml 新 test-cxx job（四 SDK build-c+测试+ABI 巡检双脚本）；pixi build-c 扩 client+soname symlink；test-cxx.sh 环纳入 client（C++11 fsyntax 验证过）。
+- ROS2 样例（device-day 面）：ros2_node/{package.xml,CMakeLists.txt,control_relay_node.cpp}= cmd/ack topic 桥接、口令 env-only（PIT-171 纪律）、pkg-config 消费 SDK。
+- 插曲归因：本批活体首跑超时 = controller crash-loop（5001 冷启动时序=在册 S2 前小刀+`StreamId reserved` sid=4=**数据面 consumer 泄漏天花板实锤**——8 producer 泄漏+四轮 sid 递增到 4，S4′ 必修面证据升级）；host restart 清场后全绿。
