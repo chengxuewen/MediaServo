@@ -1621,7 +1621,11 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **症状**: Rust/C 双层 consume_video 单 session 均：首帧 1280x720 正常、fired 恰 29 次（≈966ms@30fps）后归零；server stats 四 consumer 全速外发、client packets/frames_decoded 持续增长（解码正常）——帧在 C++ 内 decoded 但 Rust sink 永不再触发。
 - **根因**: mediasoup consume（client=answerer）`SetLocalDescription(answer)` 重建接收轨道；首挂 on_track 的 track=重建**前**轨道（交付 ~1s 幸存窗）；S2c 延迟重挂线程捕获的 track2 **同为旧轨道句柄**——重挂永远救不到重建后的新 track。本 spike 另证：对已交付同 track 重复 add_sink = 自我破坏（替换 sink 且新实例零触发），已修「hits>0 跳过」为部分缓解。
 - **为何历轮不可见**: S2c/S2d/S3/S4 活体判据=**首帧**（basic 打一行 first frame 即过）——首帧全部落在重建前幸存窗内；web 走浏览器栈不经 webrtc-sys sink，无关。教训升格：**持续媒体判据必须"60s 帧计数不衰减"，首帧不是交付证据**。
-- **全修（R3 另案）**: 重挂线程经 `pc.get_receivers()` 取**当前** receiving track 挂 sink（非 on_track 捕获参数）；W4 前必落。
+- **全修尝试与再立案（09-16 下午追实）**：`transceiver.receiver().track()` 证实**指针确实变了**
+  （0x…9d50→0x…0ce0），追踪版对**新指针** add_sink 仍 60s 零回调、指针此后不再变——断点比
+  "轨道代理替换"更深（新代理的 sink 注册不生效，疑 libwebrtc VideoReceiveStream 输出注册/
+  render 调度换代面）。**R3b 另案**：需 libwebrtc 语义深查（对照 livekit rust-sdk answerer 先例
+  + webrtc video_receive_stream RenderFrames 路径），追踪重挂基础设施已就位（改一处生效）。
 - **验证**: `zz_spike_probe` 式双源对照（cb_frames vs frames_decoded diff 持续增长）——诊断探针法入册。
 
 ## PIT-198: `rt.block_on(timeout(d, fut))` 外侧实参在无 context 线程构造 = reactor panic——C 层泵线程实锤 (2026-09-16, p3 spike)

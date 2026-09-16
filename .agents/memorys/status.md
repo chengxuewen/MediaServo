@@ -797,3 +797,4 @@ install                        → 改名提示 + exit 2（退役）
 - 多 Session 并发实测（5 会话：1 控制+4 视频同房、单 JWT）：**server 四 consumer 全速 fanout（stats 各 +740K/10s）、close 零连坐（rc=0、其余照常收）、ack 真往返、negotiated=3**——G11「房间=流、每房一 Session」模型成立，p3 W2/W3 前提解锁。
 - 抓出真 bug×3：① C 层 video_pump reactor panic（PIT-198，已修=async 包裹 timeout 实参）；② client-c 自 S4 字段腐化 E0063（已补 sig/hmac_key 迁移形=本刀随修；教训=common 扩字段后 build-c 三连，V 批门禁化）；③ **R3 主案 PIT-197：webrtc-sys consume sink ~29帧(1s) 断流**——SetLocal 重建接收轨道、历轮首帧判据全落在重建前幸存窗=验收盲区；「hits>0 跳过重挂」部分缓解已落（重挂自我破坏半案），全修=经 pc.get_receivers() 挂当前轨道=W2 前置刀。
 - 判据纪律升格：**持续媒体=60s 帧计数不衰减，首帧不是交付证据**。探针（zz_spike_probe）throwaway 已删，方法入 PIT-197。
+- 同日追打（W2-D 尝试）：hits-skip 后 cb 仍 0；transceiver 现取证实 track 指针代换（first≠cur）但对新代理补挂 sink 零回调且指针永不再变——R3 升级为 **R3b（输出注册层断点）**，追踪重挂机制已并入（12s×500ms，hits>10 收工），全修待 libwebrtc 语义专项。诊断法沉淀：裸文件插桩绕日志管线疑障 + 双源计数（cb vs frames_decoded）。

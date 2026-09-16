@@ -1570,38 +1570,25 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
                 // AddSink 幂等由双 sink 计数容忍；帧流若已在通道轨上则第一次即通，
                 // 本重挂覆盖"重建窗口"变体）。
                 {
+                    // R3 全修（09-16 实验实锤：on_track 捕获的 track 代理会在
+                    // SetLocal/DTLS/重建过程中被替换，旧句柄上的 sink 永不再触发；
+                    // dbg 指针对照 first≠cur）。单次固定延迟重挂救不稳——
+                    // 改为**追踪重挂**：12s 窗内每 500ms 现取 transceiver 当前 track，
+                    // 指针变化即挂新 sink（libwebrtc 侧多 sink 无害、旧代理自然消亡），
+                    // 直到开始稳定交付（hits>10）收工。
                     let callbacks2 = callbacks.clone();
                     let sink_arc2 = sink_arc.clone();
-                    let track2 = track.clone();
+                    let transceiver2 = transceiver.clone();
                     let hits2 = hits.clone();
+                    let first_track_ptr = &*track as *const _ as usize;
                     std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_millis(1000));
-                        // S2c 重挂语义修正第一步（spike 09-16 实锤）：已交付则不重复 add_sink
-                        // （重挂对同 track 是自我破坏——替换 sink 且新实例零触发）。
-                        // ⚠ 非全修：29 帧（≈重建前窗口）后断流的主根因 = 本线程持有的 track2 是
-                        //   重建前旧轨道，重建出的新接收轨道永远无 sink。全修 = 经 pc.get_receivers()
-                        //   取**当前** track 重挂（R3 另案，见子模块 status/PLAN p3-gui-viewer §12）。
-                        if hits2.load(std::sync::atomic::Ordering::Relaxed) > 0 {
-                            tracing::debug!("S2c: 首挂已在交付，跳过延迟重挂");
-                            return;
-                        }
-                        if sink_arc2.lock().unwrap().is_none() {
-                            return;
-                        }
-                        struct NoopSink;
-                        impl webrtc_sys::video_track::VideoSink for NoopSink {
-                            fn on_frame(&self, _: cxx::UniquePtr<vff::VideoFrame>) {}
-                            fn on_discarded_frame(&self) {}
-                            fn on_constraints_changed(&self, _: webrtc_sys::video_track::ffi::VideoTrackSourceConstraints) {}
-                        }
-                        // 真帧 sink 用原 adapter 的第二个实例（同一 Arc 用户 sink）。
-                        #[allow(dead_code)]
-                        struct VideoSinkAdapter2 {
+                        struct TrackAdapter {
                             sink: std::sync::Arc<std::sync::Mutex<Option<Box<dyn crate::track::FrameSink>>>>,
+                            hits: std::sync::Arc<std::sync::atomic::AtomicU64>,
                         }
-                        impl webrtc_sys::video_track::VideoSink for VideoSinkAdapter2 {
+                        impl webrtc_sys::video_track::VideoSink for TrackAdapter {
                             fn on_frame(&self, frame: cxx::UniquePtr<vff::VideoFrame>) {
-                                tracing::debug!("VideoSinkAdapter2(重挂) on_frame fired");
+                                self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                 if let Some(ref sink) = *self.sink.lock().unwrap() {
                                     let w = frame.width();
                                     let h = frame.height();
@@ -1622,14 +1609,33 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
                             fn on_discarded_frame(&self) {}
                             fn on_constraints_changed(&self, _: webrtc_sys::video_track::ffi::VideoTrackSourceConstraints) {}
                         }
-                        let wrapper2 = webrtc_sys::video_track::VideoSinkWrapper::new(std::sync::Arc::new(VideoSinkAdapter2 { sink: sink_arc2 }));
-                        unsafe {
-                            let vt = webrtc_sys::video_track::ffi::media_to_video(track2);
-                            let ns = webrtc_sys::video_track::ffi::new_native_video_sink(Box::new(wrapper2));
-                            vt.add_sink(&ns);
-                            callbacks2.video_sinks.lock().unwrap().push(ns);
+                        let mut last_ptr = first_track_ptr;
+                        for _tick in 0..24 {
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            if sink_arc2.lock().unwrap().is_none() {
+                                return; // 用户注销 sink / 会话销毁
+                            }
+                            if hits2.load(std::sync::atomic::Ordering::Relaxed) > 10 {
+                                return; // 已稳定交付，收工
+                            }
+                            let cur = transceiver2.receiver().track();
+                            let cur_ptr = &*cur as *const _ as usize;
+                            if cur_ptr == last_ptr {
+                                continue;
+                            }
+                            last_ptr = cur_ptr;
+                            let wrapper = webrtc_sys::video_track::VideoSinkWrapper::new(
+                                std::sync::Arc::new(TrackAdapter { sink: sink_arc2.clone(), hits: hits2.clone() }),
+                            );
+                            unsafe {
+                                let vt = webrtc_sys::video_track::ffi::media_to_video(cur);
+                                let ns = webrtc_sys::video_track::ffi::new_native_video_sink(Box::new(wrapper));
+                                vt.add_sink(&ns);
+                                callbacks2.video_sinks.lock().unwrap().push(ns);
+                            }
+                            tracing::debug!("R3: sink 追踪重挂 → 0x{cur_ptr:x}（hits={}）",
+                                hits2.load(std::sync::atomic::Ordering::Relaxed));
                         }
-                        tracing::debug!("S2c: 延迟重挂完成");
                     });
                 }
             }
