@@ -806,3 +806,10 @@ install                        → 改名提示 + exit 2（退役）
 - 测试纪律两钉：DashMap 迭代序无保证（按 id 检索断言，串跑抓出 order bug）；集成走 tower oneshot 先例（admin.rs:1459 同法）零起进程。
 - 存量在册：**server native（--no-default-features）lib 编译挂**（signaling.rs:404 WebSocket.split 缺 StreamExt 导入——clean HEAD 复现，与本轮无关，stub 债族新形态，CI 背书面外另案）。
 - 门禁：rooms 12/0 · server-native lib 156/0 · clippy 零相关 error。W2-B（client list_rooms+GET 面）待打。
+
+### 2026-09-16: p3 W2-B 交付——client list_rooms + 手写 HTTP 面 GET（子）
+- auth.rs 抽 `request_raw`（connect/write/read/parse 单实现，login 改调用=行为零变、auth_unit 5/5 回归钉）+ `build_get_request`（Bearer，GET 无 body 面）+ `list_rooms(http_base, jwt) -> Vec<RoomInfo>`（PLAN §5-B 自由函数合同兑现；权限矩阵 server 权威、客户端零二次过滤）。
+- error.rs additive `RestRejected{code,message}`（401≠InvalidCredentials 语义分离：凭证曾有效=授权面拒绝）；RoomInfo=二字段 serde 钉与 server rooms.rs wire 同源（garbage→MalformedResponse 三态测）。
+- 测试：rooms_unit 4 案（GET 形+Bearer 断言 mock、空列表、401、垃圾）——mock 断言纪律自咬一次（token 串与 Bearer 断言不一致=panic 无回应=错变体，测试也 test 自己）。
+- 门：client lib 26 + auth_unit 5 + rooms_unit 4 + sfu_surface 4 全绿；clippy 无 error；C21 亲验=client Cargo.toml 零 server 引用。
+- 队列：W2-C（cxx `ms_client_list_rooms` 含 needed out-param + ABI 三连）→ W0 档案。

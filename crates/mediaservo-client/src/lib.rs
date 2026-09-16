@@ -47,7 +47,7 @@ pub mod session;
 pub mod sfu;
 pub mod signal;
 
-pub use auth::{LoginOutcome, login};
+pub use auth::{LoginOutcome, RoomInfo, list_rooms, login};
 pub use config::ClientConfig;
 pub use control::ControlChannel;
 pub use error::ClientError;

@@ -17,6 +17,9 @@ const IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// login path——只用于测试断言；生产直接拼入 `http_base`。
 pub(crate) const LOGIN_PATH: &str = "/api/auth/login";
 
+/// rooms 发现 path（GET /api/rooms——server 侧 p3 W2-A 端点）。
+pub(crate) const ROOMS_PATH: &str = "/api/rooms";
+
 /// 登录成功返回（精简 shape——server `admin.rs:163` LoginResponse）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoginOutcome {
@@ -38,6 +41,19 @@ struct LoginWire {
     role: String,
     #[serde(default)]
     expires_in_secs: u64,
+}
+
+/// 消费面发现的房间（server wire = `{room_id, kind}` 二字段，serde 钉同源）。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct RoomInfo {
+    pub room_id: String,
+    /// "video" | "audio"（server 按房间名前缀派生，未知前缀透传——客户端不判型）。
+    pub kind: String,
+}
+
+#[derive(Deserialize)]
+struct RoomsWire {
+    rooms: Vec<RoomInfo>,
 }
 
 #[derive(Deserialize)]
@@ -62,6 +78,19 @@ pub(crate) fn build_request(host: &str, port: u16, body: &[u8]) -> Vec<u8> {
     .into_bytes();
     req.extend_from_slice(body);
     req
+}
+
+/// 构造 HTTP/1.1 GET 请求报文（Bearer JWT——login 签发的同一凭证）。
+pub(crate) fn build_get_request(host: &str, port: u16, path: &str, jwt: &str) -> Vec<u8> {
+    format!(
+        "GET {path} HTTP/1.1\r\n\
+         Host: {host}:{port}\r\n\
+         Authorization: Bearer {jwt}\r\n\
+         Accept: application/json\r\n\
+         Connection: close\r\n\
+         \r\n"
+    )
+    .into_bytes()
 }
 
 /// 解析 `http_base`（仅 http scheme）。
@@ -141,39 +170,11 @@ pub async fn login(
     }))
     .map_err(|e| ClientError::MalformedResponse(format!("body serialize: {e}")))?;
     let req = build_request(&host, port, &body);
-
-    // connect + 写请求 + read_to_end (Connection: close 保证 EOF 终止)
-    let mut stream = timeout(CONNECT_TIMEOUT, TcpStream::connect((host.as_str(), port)))
-        .await
-        .map_err(|_| ClientError::Timeout { what: "tcp connect" })?
-        .map_err(|e| {
-            tracing::warn!(host = %host, port, error = %e, "tcp connect failed");
-            ClientError::Io(e)
-        })?;
-    stream.set_nodelay(true).ok();
-
-    timeout(IO_TIMEOUT, stream.write_all(&req))
-        .await
-        .map_err(|_| ClientError::Timeout { what: "write login request" })?
-        .map_err(|e| {
-            tracing::warn!(error = %e, "login write failed");
-            ClientError::Io(e)
-        })?;
-    // 不做写半关（S2b 实锤：hyper 对"body 未读全即遇 half-close"的请求
-    // 直接静默断连 = 0 字节）。响应由 Connection: close 保证服务端发完即关，
-    // read_to_end 以 EOF 终止。
-
-    let mut raw = Vec::with_capacity(4096);
-    timeout(IO_TIMEOUT, stream.read_to_end(&mut raw))
-        .await
-        .map_err(|_| ClientError::Timeout { what: "read login response" })?
-        .map_err(ClientError::Io)?;
-
-    let (status, body_bytes) = parse_response(&raw)?;
+    let (status, body_bytes) = request_raw(&host, port, &req, "http login").await?;
 
     match status {
         200 => {
-            let wire: LoginWire = serde_json::from_slice(body_bytes).map_err(|e| {
+            let wire: LoginWire = serde_json::from_slice(&body_bytes).map_err(|e| {
                 tracing::warn!(body_len = body_bytes.len(), error = %e, "login 200 body parse failed");
                 ClientError::MalformedResponse(format!("login body: {e}"))
             })?;
@@ -189,7 +190,7 @@ pub async fn login(
             })
         }
         401 => {
-            let msg = serde_json::from_slice::<ErrorWire>(body_bytes)
+            let msg = serde_json::from_slice::<ErrorWire>(&body_bytes)
                 .ok()
                 .and_then(|w| w.error)
                 .unwrap_or_else(|| "invalid credentials".into());
@@ -198,12 +199,72 @@ pub async fn login(
         }
         429 => Err(ClientError::Login("rate limited (429)".into())),
         other => {
-            let msg = serde_json::from_slice::<ErrorWire>(body_bytes)
+            let msg = serde_json::from_slice::<ErrorWire>(&body_bytes)
                 .ok()
                 .and_then(|w| w.error)
                 .unwrap_or_default();
             tracing::warn!(status = other, msg = %msg, "login failed");
             Err(ClientError::Login(format!("HTTP {other}: {msg}")))
+        }
+    }
+}
+
+/// 单请求单响应（Connection: close → read_to_end 以 EOF 终止）。
+/// login 与 list_rooms 共用——同一手写 TCP 面，零第二实现。
+async fn request_raw(
+    host: &str,
+    port: u16,
+    req: &[u8],
+    what: &'static str,
+) -> Result<(u16, Vec<u8>), ClientError> {
+    let mut stream = timeout(CONNECT_TIMEOUT, TcpStream::connect((host, port)))
+        .await
+        .map_err(|_| ClientError::Timeout { what: "tcp connect" })?
+        .map_err(|e| {
+            tracing::warn!(host = %host, port, error = %e, "tcp connect failed");
+            ClientError::Io(e)
+        })?;
+    stream.set_nodelay(true).ok();
+
+    timeout(IO_TIMEOUT, stream.write_all(req))
+        .await
+        .map_err(|_| ClientError::Timeout { what })?
+        .map_err(|e| {
+            tracing::warn!(error = %e, "http write failed");
+            ClientError::Io(e)
+        })?;
+    // 不做写半关（S2b 实锤：hyper 对"body 未读全即遇 half-close"的请求
+    // 直接静默断连 = 0 字节）。响应由 Connection: close 保证服务端发完即关。
+
+    let mut raw = Vec::with_capacity(4096);
+    timeout(IO_TIMEOUT, stream.read_to_end(&mut raw))
+        .await
+        .map_err(|_| ClientError::Timeout { what })?
+        .map_err(ClientError::Io)?;
+
+    parse_response(&raw).map(|(code, body)| (code, body.to_vec()))
+}
+
+/// 消费面房间发现（p3 W2-B）：`GET {base}/api/rooms`，账号 JWT（login 签发）。
+///
+/// 权限矩阵以 server 为准（admin/dispatcher 全量，viewer/operator allowlist），
+/// 客户端不做二次过滤。非 2xx（token 失效/过期/角色不符）→ [`ClientError::RestRejected`]
+/// ——不是 InvalidCredentials：凭证曾有效，此处是授权面拒绝。
+pub async fn list_rooms(http_base: &str, jwt: &str) -> Result<Vec<RoomInfo>, ClientError> {
+    let (host, port) = parse_http_base(http_base)?;
+    let req = build_get_request(&host, port, ROOMS_PATH, jwt);
+    let (status, body) = request_raw(&host, port, &req, "http list_rooms").await?;
+    match status {
+        200 => serde_json::from_slice::<RoomsWire>(&body)
+            .map(|w| w.rooms)
+            .map_err(|e| {
+                tracing::warn!(body_len = body.len(), error = %e, "list_rooms 200 body parse failed");
+                ClientError::MalformedResponse(format!("rooms body: {e}"))
+            }),
+        other => {
+            let msg = String::from_utf8_lossy(&body).chars().take(120).collect::<String>();
+            tracing::warn!(status = other, body = %msg, "list_rooms failed");
+            Err(ClientError::RestRejected { code: other, message: msg })
         }
     }
 }
@@ -264,6 +325,33 @@ mod tests {
         let (code, body_bytes) = parse_response(&resp).unwrap();
         assert_eq!(code, 200);
         assert_eq!(body_bytes, body);
+    }
+
+    #[test]
+    fn build_get_request_shape() {
+        let req =
+            String::from_utf8(build_get_request("h", 9800, "/api/rooms", "jwt-1")).unwrap();
+        assert!(req.starts_with("GET /api/rooms HTTP/1.1\r\n"));
+        assert!(req.contains("Authorization: Bearer jwt-1\r\n"));
+        assert!(req.contains("Connection: close\r\n"));
+        assert!(!req.contains("Content-Length"));
+        assert!(req.ends_with("\r\n\r\n"));
+    }
+
+    #[test]
+    fn rooms_wire_parses_server_shape() {
+        // server wire 钉（rooms.rs 集成测同源形）：恰好二字段，多字段忽略不炸。
+        let w: RoomsWire = serde_json::from_str(
+            r#"{"rooms":[{"room_id":"vehicle_t1","kind":"video"},{"room_id":"audio-c1","kind":"audio"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            w.rooms,
+            vec![
+                RoomInfo { room_id: "vehicle_t1".into(), kind: "video".into() },
+                RoomInfo { room_id: "audio-c1".into(), kind: "audio".into() },
+            ]
+        );
     }
 
     #[test]

@@ -11,6 +11,9 @@ pub enum ClientError {
     /// 401 —— 用户名或口令错（server 防枚举措辞，细节仅本侧 WARN）。
     #[error("invalid credentials")]
     InvalidCredentials,
+    /// REST 发现面（GET /api/rooms）非 2xx——token 失效/过期/授权不符（p3 W2-B）。
+    #[error("REST rejected [{code}]: {message}")]
+    RestRejected { code: u16, message: String },
     /// 连接级认证被拒（4003 PSK / 4010 设备 / 4011 role 非法）。
     #[error("auth rejected [{code}]: {message}")]
     AuthRejected { code: u16, message: String },

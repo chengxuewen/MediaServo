@@ -11,6 +11,9 @@
   全量在线房；viewer/operator 按 allowlist，改单热生效）；离线/无主房间不列出；响应仅含
   room_id 与 kind（video/audio），替代"手输房间名"接入方式。p3 GUI 例子首刀，C++/Rust SDK
   将提供 `list_rooms` 便捷封装（后续刀）。
+- [sdk-client] `mediaservo_client::list_rooms(http_base, jwt)`：房间发现便捷函数（GET /api/rooms
+  → `Vec<RoomInfo>{room_id, kind}`，自由函数会话前可用）；登录/发现共用同一手写 HTTP 面（零新增依赖）；
+  授权面拒绝返回 `ClientError::RestRejected{code, message}`。C++ 绑定 `ms_client_list_rooms` 后续刀。
 - [sdk-client] C 绑定视频消费崩溃修复：帧泵线程 reactor panic（block_on 外侧实参构造）
   ——修复前 C/cxx 面 consume_video 收帧线程静默死亡（多路画面必现；spike 实锤四连 panic）。
 - [sdk-client] 改进：视频接收 sink 重挂由「固定 1s 单次」升级为「12s 窗内追踪重挂」——
