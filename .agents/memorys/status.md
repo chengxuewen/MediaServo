@@ -798,3 +798,4 @@ install                        → 改名提示 + exit 2（退役）
 - 抓出真 bug×3：① C 层 video_pump reactor panic（PIT-198，已修=async 包裹 timeout 实参）；② client-c 自 S4 字段腐化 E0063（已补 sig/hmac_key 迁移形=本刀随修；教训=common 扩字段后 build-c 三连，V 批门禁化）；③ **R3 主案 PIT-197：webrtc-sys consume sink ~29帧(1s) 断流**——SetLocal 重建接收轨道、历轮首帧判据全落在重建前幸存窗=验收盲区；「hits>0 跳过重挂」部分缓解已落（重挂自我破坏半案），全修=经 pc.get_receivers() 挂当前轨道=W2 前置刀。
 - 判据纪律升格：**持续媒体=60s 帧计数不衰减，首帧不是交付证据**。探针（zz_spike_probe）throwaway 已删，方法入 PIT-197。
 - 同日追打（W2-D 尝试）：hits-skip 后 cb 仍 0；transceiver 现取证实 track 指针代换（first≠cur）但对新代理补挂 sink 零回调且指针永不再变——R3 升级为 **R3b（输出注册层断点）**，追踪重挂机制已并入（12s×500ms，hits>10 收工），全修待 libwebrtc 语义专项。诊断法沉淀：裸文件插桩绕日志管线疑障 + 双源计数（cb vs frames_decoded）。
+- 排除实验第二轮（09-16 晚）：信号线程（Stable 钩子现取 transceiver 补挂）hits 仍零 = **信号线程假设证伪**；残余域 = worker 线程契约（vendored 无 dispatcher，入口=rtp_receiver.cc proxy 语义+微型 C++ ffi 候选）。机制件（pending_video/Stable 钩/R3SinkAdapter）合入备用（子 448ae7a）。**过程自纠**：本笔 python 锚失败中断但 git 链照跑 = 448ae7a message 言过（#17 族再犯第四例），以本补记笔收正。

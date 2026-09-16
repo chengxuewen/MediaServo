@@ -1626,6 +1626,11 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
   "轨道代理替换"更深（新代理的 sink 注册不生效，疑 libwebrtc VideoReceiveStream 输出注册/
   render 调度换代面）。**R3b 另案**：需 libwebrtc 语义深查（对照 livekit rust-sdk answerer 先例
   + webrtc video_receive_stream RenderFrames 路径），追踪重挂基础设施已就位（改一处生效）。
+- **排除实验第二轮（09-16 晚，信号线程假设证伪）**：`ObserverCallbacks::pending_video` 救援名单 +
+  `on_signaling_change(Stable)`（setLocal 完成、重建落定、**libwebrtc 信号线程**）现取 transceiver track 补挂
+  ——hits 仍全零。**信号线程 ≠ 答案**；残余假设域收窄至 **worker 线程契约**（VideoTrackProxy broadcaster/
+  channel 输出的线程语义，vendored webrtc-sys 无 dispatcher 导出——下一步侦查入口：读 rtp_receiver.cc
+  proxy 族 + 必要时 3 行 C++ ffi）。机制件（pending_video/Stable 钩子/R3SinkAdapter）已合入备用。
 - **验证**: `zz_spike_probe` 式双源对照（cb_frames vs frames_decoded diff 持续增长）——诊断探针法入册。
 
 ## PIT-198: `rt.block_on(timeout(d, fut))` 外侧实参在无 context 线程构造 = reactor panic——C 层泵线程实锤 (2026-09-16, p3 spike)
