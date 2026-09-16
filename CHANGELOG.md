@@ -17,6 +17,10 @@
 - [sdk-client] C/C++ 绑定 `ms_client_list_rooms`（C ABI，JSON 数组透传 + `needed` 溢出反馈——
   新缓冲合同，`control_producer_ids` 的 cap 盲点不复制）与 C++ `client::list_rooms()`
   （header-only，溢出自动扩容重试一次，上限 64KiB）。ABI 表 12→13 符号对账绿。
+- [sdk-client] C++ 例子命令面 `./mediaservo.sh list/build/run/test example [名]`（p3 W0）：
+  产物 `target/examples/bin/`（不进交付树）；GUI 依赖档案 SDL3 release-3.4.16 + Dear ImGui
+  v1.92.9b（3rdparty/ 本地 zip+sha256 台账）；新例子 `imgui_viewer`（空窗骨架）与
+  `imgui_shell`（渲染壳）目录就位，`control_demo` 迁入统一聚合。
 - [sdk-client] C 绑定视频消费崩溃修复：帧泵线程 reactor panic（block_on 外侧实参构造）
   ——修复前 C/cxx 面 consume_video 收帧线程静默死亡（多路画面必现；spike 实锤四连 panic）。
 - [sdk-client] 改进：视频接收 sink 重挂由「固定 1s 单次」升级为「12s 窗内追踪重挂」——

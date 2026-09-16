@@ -1352,8 +1352,109 @@ def _cmd_restart(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+# ───────── example 命令面（p3-gui-viewer W0，G7）─────────
+#
+# 目录契约 = bindings/cxx/examples/<name>/CMakeLists.txt（目录名==target==产物名，G4）。
+# CLI 与聚合根 CMake 字面同规则 glob（F-A-6）。产物 target/examples/{build,bin}/，
+# 不进 out/、不 package（例子产品化闸门，PLAN §6）。
+
+_EXAMPLES_DIR = ROOT / "bindings" / "cxx" / "examples"
+_EXAMPLES_BUILD = ROOT / "target" / "examples" / "build"
+_EXAMPLES_BIN = ROOT / "target" / "examples" / "bin"
+
+
+def _example_names() -> list[tuple[str, bool]]:
+    """[(目录名, 是否纯库)]——聚合根 file(GLOB */CMakeLists.txt) 的字面同规则。"""
+    out = []
+    for cml in sorted(_EXAMPLES_DIR.glob("*/CMakeLists.txt")):
+        name = cml.parent.name
+        is_lib = "add_library(" in cml.read_text(encoding="utf-8")
+        out.append((name, is_lib))
+    return out
+
+
+def _cmd_list_example() -> None:
+    names = _example_names()
+    if not names:
+        print(f"（{_EXAMPLES_DIR.relative_to(ROOT)} 暂无例子）", file=sys.stderr)
+        return
+    print("可用例子（目录=target=产物名；[库]=非可执行）:")
+    for name, is_lib in names:
+        art = _EXAMPLES_BIN / name
+        if is_lib:
+            tag = "[库]"
+        else:
+            tag = "[已构建]" if art.exists() else "[未构建]"
+        print(f"  {name:24s} {tag}")
+
+
+def _cmd_build_example(names: list[str], release: bool = False) -> None:
+    # build-c 前置（PLAN G7；无则自动补——新鲜度由 cargo 增量自管）。
+    if not (ROOT / "target" / "debug" / "libmediaservo_client.so").exists():
+        print("[example] libmediaservo_client.so 缺失 → 先执行 build-c", file=sys.stderr)
+        _run_or_exit([os.environ.get("PIXI_BIN", "pixi"), "run", "build-c"])
+    gen_build = "Release" if release else "Debug"
+    cache = _EXAMPLES_BUILD / "CMakeCache.txt"
+    if not cache.exists():
+        _run_or_exit([
+            "cmake", "-S", str(_EXAMPLES_DIR), "-B", str(_EXAMPLES_BUILD),
+            "-G", "Ninja",  # pixi 环境有 ninja 无 make（3.4.16 实录）
+            "-DCMAKE_BUILD_TYPE=" + gen_build,
+            "-DMEDIASERVO_SDK_DIR=" + str(ROOT / "target" / ("release" if release else "debug")),
+        ])
+    cmd = ["cmake", "--build", str(_EXAMPLES_BUILD), "-j"]
+    if names:
+        known = {n for n, _ in _example_names()}
+        for n in names:
+            if n not in known:
+                print(f"[example] 未知例子 '{n}'（./mediaservo.sh list example 看清单）",
+                      file=sys.stderr)
+                sys.exit(2)
+        cmd += ["--target"] + names
+    _run_or_exit(cmd)
+    print(f"[example] 产物 → {_EXAMPLES_BIN.relative_to(ROOT)}/")
+
+
+def _cmd_run_example(rest: list[str]) -> None:
+    """run example <name> [透传…] — 需要则先 build，再前台 exec（开发工具面，
+    与 host run 退役语义（C39=部署实例）不同物）。"""
+    if not rest:
+        print("用法: run example <name> [args…]（./mediaservo.sh list example）",
+              file=sys.stderr)
+        sys.exit(2)
+    name, extra = rest[0], rest[1:]
+    known = dict(_example_names())
+    if name not in known:
+        print(f"[example] 未知例子 '{name}'", file=sys.stderr)
+        sys.exit(2)
+    if known[name]:  # 纯库无产物可 run
+        _cmd_build_example([name])
+        print(f"[example] '{name}' 是库（无产物可运行）", file=sys.stderr)
+        sys.exit(1)
+    _cmd_build_example([name])
+    exe = _EXAMPLES_BIN / name
+    if not exe.exists():
+        print(f"[example] 构建后仍无产物 {exe}", file=sys.stderr)
+        sys.exit(1)
+    env = dict(os.environ, LD_LIBRARY_PATH=str(ROOT / "target" / "debug") +
+               (":" + os.environ["LD_LIBRARY_PATH"] if os.environ.get("LD_LIBRARY_PATH") else ""))
+    sys.exit(subprocess.run([str(exe), *extra], env=env).returncode)
+
+
+def _cmd_test_example(name: str | None) -> None:
+    """test example [<name>] — ctest（-R 过滤）；构建目录不存在=先 build。"""
+    if not (_EXAMPLES_BUILD / "CTestTestfile.cmake").exists():
+        _cmd_build_example([])
+    cmd = ["ctest", "--test-dir", str(_EXAMPLES_BUILD), "--output-on-failure"]
+    if name:
+        cmd += ["-R", name]
+    _run_or_exit(cmd)
+
+
 def _cmd_run(args: argparse.Namespace) -> None:
     """run <target> — web=过渡 caddy（:8080）；server/host 退役→指引 exit 2（T21/C39）。"""
+    if args.target == "example":
+        _cmd_run_example(args.rest)
     if args.target == "server":
         _server_runtime_hint("run")
         sys.exit(2)
@@ -2070,19 +2171,23 @@ def main() -> None:
   模式③ compose开发: up --env dev（热更）→ logs -f → down --env dev
   退役→指引 exit 2: run/start/stop/restart server|host（C39——用实例目录命令；容器面 up/down 不变）
   只读探测保留: status server|web / logs server / clean server
+  C++ 例子面（p3）: list example → build example [名…] → run example <名> / test example
+             （前台开发工具，产物 target/examples/bin/——不进 out/；build-c 前置自动补）
   退出码: status/logs/stop —— 0=成功 1=未运行/目标缺失 2=参数错/退役指引
 """)
 
     sub = parser.add_subparsers(dest="command", required=True)
 
     build_p = sub.add_parser("build", help="构建 <target> [--image runtime|dev]: all|web|host|server|client|bindings（默认 all；server=不嵌入变体+web 装配一步出；web=纯前端快速通道；--image 才走 Docker）")
-    build_p.add_argument("target", nargs="?", choices=["all", "web", "host", "server", "client", "bindings"], default="all")
+    build_p.add_argument("target", nargs="?", choices=["all", "web", "host", "server", "client", "bindings", "example"], default="all")
     build_p.add_argument("--release", action="store_true", help="release 构建（bindings: target/release，strip+LTO）")
     grp = build_p.add_mutually_exclusive_group()
     grp.add_argument("--image", choices=["runtime", "dev"], default=None,
                      help="仅 build server: Docker 镜像 target（runtime=生产交付瘦身镜像；dev=工具链镜像）")
     grp.add_argument("--native", action="store_true",
                      help="仅 build server: 原生编译（pixi 工具链——首次需联网拉 meson wrap；多 IP 公告在 run 阶段生效）")
+    build_p.add_argument("names", nargs="*", metavar="NAME",
+                        help="仅 build example: 例子名（省略=全部；list example 看清单）")
     build_p.set_defaults(func=_cmd_build)
 
     up_p = sub.add_parser("up", help="启动部署 <svc> [--env dev|prod] [--announced-ip IP]: dev=热更 compose；prod=单容器+命名卷+entrypoint 自举（公告地址显式覆盖）")
@@ -2107,7 +2212,9 @@ def main() -> None:
     _add_mode_args(restart_p)
     restart_p.set_defaults(func=_cmd_restart)
     run_p = sub.add_parser("run", help="运行 <target>: web=过渡 caddy（:8080）；server/host 退役→指引 exit 2（实例命令见 <prefix>/bin/mediaservo-server -h）")
-    run_p.add_argument("target", choices=["server", "host", "web"])
+    run_p.add_argument("target", choices=["server", "host", "web", "example"])
+    run_p.add_argument("rest", nargs=argparse.REMAINDER,
+                       help="仅 run example: <name> [应用透传参数…]")
     run_p.add_argument("--foreground", "-f", action="store_true", help="（退役遗留——server 运行分支已移除, 无效果）")
     run_p.add_argument("--release", action="store_true", help="（退役遗留——无效果）")
     run_p.add_argument("--announced-ip", metavar="IP[,IP...]", default=None,
@@ -2149,7 +2256,13 @@ def main() -> None:
     e2e_p.add_argument("suite", choices=["sfu", "push", "ui", "host", "package", "brand", "bindings", "client", "smoke"])
     e2e_p.set_defaults(func=_cmd_e2e)
 
-    sub.add_parser("test", help="workspace 测试（排除 mediaservo-server）")
+    list_p = sub.add_parser("list", help="清单 <target>: example=C++ 例子（目录契约=G4 三形合一）")
+    list_p.add_argument("target", choices=["example"])
+    list_p.set_defaults(func=lambda a: _cmd_list_example())
+    test_p = sub.add_parser("test", help="workspace 测试（排除 mediaservo-server）| example=<name> ctest")
+    test_p.add_argument("what", nargs="?", choices=["example"], default=None,
+                        help="example=GUI/SDK 例子 ctest 面（裸 test=workspace 语义不变，F-A-9①）")
+    test_p.add_argument("name", nargs="?", help="example: 例子名过滤（ctest -R）")
     sub.add_parser("ci", help="CI 全链: fmt → clippy → test → e2e sfu")
 
     deploy_p = sub.add_parser("deploy", help="部署 <target>（有状态落地——deploy 不触发构建, 源=out/ 交付树）：host|server|bindings；--prefix 必填（/opt 需 root）")
@@ -2221,6 +2334,8 @@ def main() -> None:
             _cmd_build_client()
         elif args.target == "web":
             _cmd_build_web()
+        elif args.target == "example":
+            _cmd_build_example(args.names, args.release)
     elif args.command == "run":
         _cmd_run(args)
     elif args.command == "start":
@@ -2230,8 +2345,13 @@ def main() -> None:
     elif args.command == "status":
         _cmd_status_runtime(args)
 
-    elif args.command in ("test", "ci"):
-        globals()[f"_cmd_{args.command}"]()
+    elif args.command == "ci":
+        _cmd_ci()
+    elif args.command == "test":
+        if args.what == "example":
+            _cmd_test_example(args.name)
+        else:
+            _cmd_test()
     elif args.command == "version":
         _cmd_version()
     elif hasattr(args, "func"):

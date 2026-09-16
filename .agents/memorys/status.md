@@ -820,3 +820,13 @@ install                        → 改名提示 + exit 2（退役）
 - **sfu_surface 串跑 SIGSEGV（PIT-199 立案）**：第 3 案稳定崩、单案 ×3 稳、**stash 归因=HEAD 同款**（存量 webrtc teardown 泄漏，非本笔）；W2-B 晚并行姿态侥幸绿。CI 风险在册观察。
 - 活体注：/api/rooms 真 server 全链验= W5（out/server 簇二进制早于 W2-A，curl 现网 404=预期非 bug——PIT-191 反语义）。
 - 队列：W0 依赖档案 → W3 壳面（R3b 挡视频纹理，控制/发现面先行）。
+
+### 2026-09-16: p3 W0 交付——GUI 依赖档案 + 例子命令面 + 空窗骨架（子）
+- **档案（D281 同法）**：3rdparty/sdl3-release-3.4.16.zip（17MB）+ imgui-v1.92.9b.zip（commit f1cc2ae，2.3MB）+ .sha256 + PROVENANCE-gui-deps.md 台账（哈希生成=本会话，**第二人复验=待用户** F-S-5）。"三档案"勘误入账：SDL3+ImGui（自带 sdl3/sdlrenderer3 后端）两件覆盖构建依赖全集，字体档案 W3 需要再入。
+- **聚合根** bindings/cxx/examples/CMakeLists.txt：FetchContent file://本地 zip+URL_HASH；MEDIASERVO_SDK_DIR 缺失 FATAL 指 build-c（PIT-189 等价）；三形合一=configure 期断言（早于编译，偏离 PLAN"ctest 断言"措辞更硬）；子目录 glob 字面同规则 CLI list（F-A-6）。
+- **imgui_shell**（W0 窗体骨架：SDL3+ImGui context+帧循环；headless fail-soft=init 失败→循环零圈 exit 0 实录）+ **imgui_viewer**（空窗+SDK version 冒烟）+ control_demo git mv 入聚合。
+- **CLI 命令面（G7）**：`list example`（同源扫描+[库]/[已构建]）/ `build example [names]`（build-c 前置自动补+Ninja——pixi 环境有 ninja 无 make 实录）/ `run example <n> [透传]`（纯库拒 exit1 亲验 RC=1）/ `test example [n]`=ctest。裸 test workspace 语义不变（F-A-9①）。
+- **SDL headless 组合（3.4.16 实录两处坑）**：缺 xorg dev 头=CheckX11 FATAL（SDL_missing_dependency 不吃 console 旗标）→ 正解=X11/WAYLAND 显式 OFF **+ SDL_UNIX_CONSOLE_BUILD=ON**（否则 PrintSummary 无后端二次 FATAL）；桌面出窗覆盖形已注释在聚合根（W3/W5 用）。
+- 门：build example 全量 RC=0（viewer+control_demo 双例子链过）· test example RC=0 · 空窗 headless RC=0 · LIBRUN RC=1 亲验（管道吞码=#17③ 再证：**门禁 RC 取用必须无管道或 pipefail**）。
+- 事故自纠：**#17③ 第七例**——python 尾行 SyntaxError 整脚本 compile-abort（一行未执行=CHANGELOG/status 没写）但 heredoc 后 git 链无 `&&` 照 commit。修复=补写+amend（未推段内）。
+- 队列：W1 余项（android prebuilt 核）→ W3 壳肉（R3b worker 契约前置刀仍在案）。
