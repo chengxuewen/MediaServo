@@ -3,7 +3,7 @@
 //! **v1 安全约束**：仅明文 http；TLS 面归 S4+ 裁决（避免 Cargo 生态 TLS 栈冲突面）。
 //! **设计取舍**：hyper 会引入 TLS+http 传递依赖，当前手写 TCP 足以覆盖 v1 面。
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -44,7 +44,7 @@ struct LoginWire {
 }
 
 /// 消费面发现的房间（server wire = `{room_id, kind}` 二字段，serde 钉同源）。
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomInfo {
     pub room_id: String,
     /// "video" | "audio"（server 按房间名前缀派生，未知前缀透传——客户端不判型）。

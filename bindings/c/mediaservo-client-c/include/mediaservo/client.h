@@ -50,7 +50,8 @@ extern "C" {
 /* ── 错误码（0 = ok, <0 = error；ClientError 全变体映射，穷尽 match 单测钉）── */
 #define MEDIASERVO_CLIENT_ERR_INVALID_ARG   (-1)
 #define MEDIASERVO_CLIENT_ERR_LOGIN         (-2)   /* 登录请求/解析失败 */
-#define MEDIASERVO_CLIENT_ERR_UNAUTHORIZED  (-3)   /* InvalidCredentials / AuthRejected(4003/4010/4011) */
+#define MEDIASERVO_CLIENT_ERR_UNAUTHORIZED  (-3)   /* InvalidCredentials / AuthRejected(4003/4010/4011) /
+                                                       RestRejected(REST 发现面非 2xx) */
 #define MEDIASERVO_CLIENT_ERR_DENIED        (-4)   /* ControlDenied（server 4012） */
 #define MEDIASERVO_CLIENT_ERR_TIMEOUT       (-5)   /* Timeout{what} */
 #define MEDIASERVO_CLIENT_ERR_SIGNAL        (-6)   /* Signal/LinkError（WS 建连/断连/收发） */
@@ -105,6 +106,13 @@ typedef void (*ms_client_ack_cb)(ms_client_control_t* c, const char* ack_json, v
 /* 账号登录（POST {http_base}/api/auth/login，阻塞）。成功 out_token = NUL 结尾 JWT
  * （cap 不足 → ERR_INVALID_ARG，不截断写入）。 */
 mediaservo_err_t ms_client_login(const ms_client_login_config_t* cfg, char* out_token, size_t cap);
+
+/* 房间发现（GET {http_base}/api/rooms，阻塞；会话前自由函数——不依赖任何 handle）。
+ * out_json = JSON 数组 `[{"room_id":..,"kind":"video"|"audio"},..]`（server wire 透传，
+ * 本层不解析）。溢出合同（producer_ids cap 盲点的修正形）：cap 不足 → *needed 写入
+ * 必需字节数（含 NUL）+ 返回 ERR_INVALID_ARG；成功 → *needed = 实际长度。needed 可 NULL。
+ * token 失效/角色不符（非 2xx）→ ERR_UNAUTHORIZED，详情 ms_client_last_error。 */
+mediaservo_err_t ms_client_list_rooms(const char* http_base, const char* jwt, char* out_json, size_t cap, size_t* needed);
 
 /* 信令连接 + 入房（阻塞）。jwt/psk 恰一非空；成功后 *out 指向新 handle（调用方 close）。 */
 mediaservo_err_t ms_client_session_create(const ms_client_config_t* cfg, ms_client_session_t** out);

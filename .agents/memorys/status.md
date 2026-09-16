@@ -813,3 +813,10 @@ install                        → 改名提示 + exit 2（退役）
 - 测试：rooms_unit 4 案（GET 形+Bearer 断言 mock、空列表、401、垃圾）——mock 断言纪律自咬一次（token 串与 Bearer 断言不一致=panic 无回应=错变体，测试也 test 自己）。
 - 门：client lib 26 + auth_unit 5 + rooms_unit 4 + sfu_surface 4 全绿；clippy 无 error；C21 亲验=client Cargo.toml 零 server 引用。
 - 队列：W2-C（cxx `ms_client_list_rooms` 含 needed out-param + ABI 三连）→ W0 档案。
+
+### 2026-09-16: p3 W2-C 交付——ms_client_list_rooms C/cxx 面（子）
+- C ABI 第 13 符号（F-T-8 会话前自由函数形）：null/cap 守卫先于出网、JSON 数组透传不解析、**`needed` out-param 溢出反馈**（producer_ids cap 盲点不复制——copy_out_str 不动、新函数自带，两态恒写）。cxx `list_rooms()` header-only：needed 驱动自动扩一次重试（≤64KiB）。穷尽 match 编译钉兑现：RestRejected 入 error_code=UNAUTHORIZED(-3)+矩阵 case。
+- 门：client-c 23 测 · **check-abi 13==13** · test-cxx 四 SDK+common 全套 PASS · clippy 净 · client lib 26（Serialize derive additive）。
+- **sfu_surface 串跑 SIGSEGV（PIT-199 立案）**：第 3 案稳定崩、单案 ×3 稳、**stash 归因=HEAD 同款**（存量 webrtc teardown 泄漏，非本笔）；W2-B 晚并行姿态侥幸绿。CI 风险在册观察。
+- 活体注：/api/rooms 真 server 全链验= W5（out/server 簇二进制早于 W2-A，curl 现网 404=预期非 bug——PIT-191 反语义）。
+- 队列：W0 依赖档案 → W3 壳面（R3b 挡视频纹理，控制/发现面先行）。

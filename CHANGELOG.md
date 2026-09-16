@@ -13,7 +13,10 @@
   将提供 `list_rooms` 便捷封装（后续刀）。
 - [sdk-client] `mediaservo_client::list_rooms(http_base, jwt)`：房间发现便捷函数（GET /api/rooms
   → `Vec<RoomInfo>{room_id, kind}`，自由函数会话前可用）；登录/发现共用同一手写 HTTP 面（零新增依赖）；
-  授权面拒绝返回 `ClientError::RestRejected{code, message}`。C++ 绑定 `ms_client_list_rooms` 后续刀。
+  授权面拒绝返回 `ClientError::RestRejected{code, message}`。
+- [sdk-client] C/C++ 绑定 `ms_client_list_rooms`（C ABI，JSON 数组透传 + `needed` 溢出反馈——
+  新缓冲合同，`control_producer_ids` 的 cap 盲点不复制）与 C++ `client::list_rooms()`
+  （header-only，溢出自动扩容重试一次，上限 64KiB）。ABI 表 12→13 符号对账绿。
 - [sdk-client] C 绑定视频消费崩溃修复：帧泵线程 reactor panic（block_on 外侧实参构造）
   ——修复前 C/cxx 面 consume_video 收帧线程静默死亡（多路画面必现；spike 实锤四连 panic）。
 - [sdk-client] 改进：视频接收 sink 重挂由「固定 1s 单次」升级为「12s 窗内追踪重挂」——

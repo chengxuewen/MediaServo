@@ -61,9 +61,9 @@ pub(crate) fn copy_out_str(s: &str, buf: *mut c_char, cap: usize) -> c_int {
 pub(crate) fn error_code(e: &ClientError) -> c_int {
     match e {
         ClientError::Login(_) => MEDIASERVO_CLIENT_ERR_LOGIN,
-        ClientError::InvalidCredentials | ClientError::AuthRejected { .. } => {
-            MEDIASERVO_CLIENT_ERR_UNAUTHORIZED
-        }
+        ClientError::InvalidCredentials
+        | ClientError::AuthRejected { .. }
+        | ClientError::RestRejected { .. } => MEDIASERVO_CLIENT_ERR_UNAUTHORIZED,
         ClientError::ControlDenied(_) => MEDIASERVO_CLIENT_ERR_DENIED,
         ClientError::Timeout { .. } => MEDIASERVO_CLIENT_ERR_TIMEOUT,
         ClientError::Signal(_) => MEDIASERVO_CLIENT_ERR_SIGNAL,
@@ -165,6 +165,13 @@ mod tests {
             (
                 ClientError::AuthRejected {
                     code: 4010,
+                    message: "x".into(),
+                },
+                MEDIASERVO_CLIENT_ERR_UNAUTHORIZED,
+            ),
+            (
+                ClientError::RestRejected {
+                    code: 401,
                     message: "x".into(),
                 },
                 MEDIASERVO_CLIENT_ERR_UNAUTHORIZED,

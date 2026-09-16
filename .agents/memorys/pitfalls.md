@@ -1638,3 +1638,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: 实参挪进 async 块：`rt.block_on(async { timeout(d, rx.recv()).await })`。
 - **连带账**: 该 panic 线程无 catch_unwind（ABI 入口才有）=泵静默死亡；且 client-c 自 S4（sig/hmac_key additive 字段）起从未重编译——E0063 缺字段腐烂，本地门禁（test-cxx job 未推=CI 未跑）抓不到，spike 亲撞补 `sig:None`/`hmac_key:None` 迁移形。**common::protocol 扩字段后必须 `pixi run build-c` + cxx 三连过编译——列入后续提交前检查单（V 批门禁化）**。
 - **验证**: 修后 spike 无 panic、首帧+ack 双绿。
+
+## PIT-199: sfu_surface 串跑第三案 SIGSEGV（webrtc 跨用例 teardown 泄漏，存量）(2026-09-16)
+- **症状**: `cargo test -p mediaservo-client --test sfu_surface -- --test-threads=1` 稳定崩在第 3 案 `old_server_negotiated_1_pre_refuses_control`（signal 11）；各案单跑 ×3 稳定过；W2-B 晚 cargo 默认并行姿态 4/4 绿。
+- **根因**: 同二进制内前两案（consume/control_denied）各建真 webrtc-sys PeerConnection，teardown 与后续用例构造竞态（libwebrtc worker 线程残留句柄跨用例）。**stash 归因铁证：W2-C 改动全摘后 HEAD 同款复崩=非本轮引入**。
+- **解法**: 根修另案（候选=用例间强制 factory 静默窗 / pc.close join 收敛断言，与 PIT-197 worker 契约案同域可并查）。临时纪律：sfu_surface 验收按单案跑（或 `--skip old_server` 后单补该 case）。
+- **验证**: 单案 ×3 稳定绿 + 串跑必崩（复现命令即上）。**CI 风险在册**: ubuntu runner 上 cargo test 并行调度若撞上同序=红——观察，连红 ≥2 次升级门禁跳过。
+- **禁止**: 把本崩归因到 bindings/client 改动上（stash 实验已排除）；禁止为过门删用例。

@@ -166,6 +166,62 @@ pub extern "C" fn ms_client_login(
     })
 }
 
+/// 房间发现（`GET {http_base}/api/rooms`，阻塞；**会话前自由函数**——不依赖任何
+/// handle，F-T-8）。out_json = JSON 数组 `[{"room_id":..,"kind":..}]`（服务端 wire
+/// 原样透传，本层不解析内容）。溢出合同（producer_ids cap 盲点的修正形）：cap 不足时
+/// `*needed` 写入必需字节数（含 NUL）并返回 ERR_INVALID_ARG；成功时 `*needed` = 实际
+/// 长度。`needed` 可 NULL（不需要反馈）。非 2xx → ERR_UNAUTHORIZED（详情 last_error）。
+#[unsafe(no_mangle)]
+pub extern "C" fn ms_client_list_rooms(
+    http_base: *const c_char,
+    jwt: *const c_char,
+    out_json: *mut c_char,
+    cap: usize,
+    needed: *mut usize,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        let (base, token) = match (cstr(http_base), cstr(jwt)) {
+            (Ok(Some(b)), Ok(Some(t))) => (b, t),
+            _ => {
+                set_last_error("ms_client_list_rooms: null/invalid http_base or jwt");
+                return MEDIASERVO_CLIENT_ERR_INVALID_ARG;
+            }
+        };
+        if out_json.is_null() || cap == 0 {
+            set_last_error("ms_client_list_rooms: null out_json or cap 0");
+            return MEDIASERVO_CLIENT_ERR_INVALID_ARG;
+        }
+        let rooms = match runtime().block_on(mediaservo_client::list_rooms(base, token)) {
+            Ok(r) => r,
+            Err(e) => {
+                set_last_error(format!("ms_client_list_rooms: {e}"));
+                return error_code(&e);
+            }
+        };
+        let json = match serde_json::to_string(&rooms) {
+            Ok(j) => j,
+            Err(e) => {
+                set_last_error(format!("ms_client_list_rooms: serialize: {e}"));
+                return MEDIASERVO_CLIENT_ERR_INTERNAL;
+            }
+        };
+        // needed 先写（溢出/成功两态都有值——调用方凭此决定重试尺寸）。
+        let need = json.as_bytes().len() + 1;
+        if let Some(n) = unsafe { needed.as_mut() } {
+            *n = need;
+        }
+        let rc = copy_out_str(&json, out_json, cap);
+        if rc != MEDIASERVO_OK {
+            set_last_error(format!("ms_client_list_rooms: buffer too small, need {need} bytes"));
+        }
+        rc
+    }))
+    .unwrap_or_else(|_| {
+        set_last_error("ms_client_list_rooms: panic");
+        MEDIASERVO_CLIENT_ERR_INTERNAL
+    })
+}
+
 /// 信令连接 + 入房（阻塞）。成功 `*out` = 新 handle（调用方 close）。
 #[unsafe(no_mangle)]
 pub extern "C" fn ms_client_session_create(
@@ -682,6 +738,28 @@ mod tests {
         let mut buf = [0u8; 64];
         let rc = ms_client_login(ptr::null(), buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_CLIENT_ERR_INVALID_ARG);
+    }
+
+    #[test]
+    fn list_rooms_guards_fail_before_network() {
+        let mut buf = [0u8; 128];
+        let base = std::ffi::CString::new("http://127.0.0.1:9").unwrap();
+        let jwt = std::ffi::CString::new("j").unwrap();
+        // null http_base / null jwt / null out / cap 0——全部本地拒（不出网，
+        // 断言点先于 block_on：若出网则是 Io/Timeout 而非 INVALID_ARG）。
+        let cases = [
+            (ptr::null(), jwt.as_ptr(), buf.as_mut_ptr() as *mut c_char, buf.len()),
+            (base.as_ptr(), ptr::null(), buf.as_mut_ptr() as *mut c_char, buf.len()),
+            (base.as_ptr(), jwt.as_ptr(), ptr::null_mut(), buf.len()),
+            (base.as_ptr(), jwt.as_ptr(), buf.as_mut_ptr() as *mut c_char, 0),
+        ];
+        for (b, j, o, c) in cases {
+            assert_eq!(
+                ms_client_list_rooms(b, j, o, c, ptr::null_mut()),
+                MEDIASERVO_CLIENT_ERR_INVALID_ARG,
+                "case b={b:?} c={c}"
+            );
+        }
     }
 
     #[test]

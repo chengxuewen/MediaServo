@@ -68,6 +68,28 @@ inline Result<std::string> login(const std::string& http_base_url,
     return Result<std::string>(std::string(token));
 }
 
+/// 房间发现（阻塞，会话前自由函数）。返回 JSON 数组
+/// `[{"room_id":..,"kind":..}]`（与 producer_ids 同形：header-only 无 JSON 依赖，
+/// 调用方解析）。缓冲溢出经 needed out-param 反馈并自动扩一次重试（producer_ids 的
+/// cap 盲点修正；>64KiB 列表拒——超限时报 INVALID_ARG 带必需长度）。
+inline Result<std::string> list_rooms(const std::string& http_base, const std::string& jwt) {
+    size_t cap = 4096;
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        std::vector<char> buf(cap);
+        size_t need = 0;
+        int rc = ms_client_list_rooms(http_base.c_str(), jwt.c_str(), buf.data(), cap, &need);
+        if (rc == MEDIASERVO_OK) {
+            return Result<std::string>(std::string(buf.data()));
+        }
+        if (need > cap && attempt == 0 && need <= 65536) {
+            cap = need;
+            continue;
+        }
+        return Result<std::string>(tl::unexpect, detail::make_error(rc));
+    }
+    return Result<std::string>(tl::unexpect, detail::make_error(MEDIASERVO_CLIENT_ERR_INVALID_ARG));
+}
+
 /// 会话配置（对应 ms_client_config_t）。jwt/psk 恰一非空（connect 校验）。
 struct Config {
     std::string signaling_url; // "ws://host:9800/ws"
