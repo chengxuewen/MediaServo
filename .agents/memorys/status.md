@@ -830,3 +830,11 @@ install                        → 改名提示 + exit 2（退役）
 - 门：build example 全量 RC=0（viewer+control_demo 双例子链过）· test example RC=0 · 空窗 headless RC=0 · LIBRUN RC=1 亲验（管道吞码=#17③ 再证：**门禁 RC 取用必须无管道或 pipefail**）。
 - 事故自纠：**#17③ 第七例**——python 尾行 SyntaxError 整脚本 compile-abort（一行未执行=CHANGELOG/status 没写）但 heredoc 后 git 链无 `&&` 照 commit。修复=补写+amend（未推段内）。
 - 队列：W1 余项（android prebuilt 核）→ W3 壳肉（R3b worker 契约前置刀仍在案）。
+
+### 2026-09-16: p3 W3a 交付——stats 三层穿透 + viewer_core 纯函数（子）
+- **A1**：client `video_stats_summary()`（fold_inbound_stats 自由函数形可测：求和域/max 域混排单测钉）→ C ABI `ms_client_session_video_stats`（needed 合同同 list_rooms 形）→ cxx `Session::video_stats()`（自动扩重试）。ABI 13→14。
+- **A2**：viewer_core（imgui_shell 目录内，GUI 无关）：RateEstimator（Δt=0 保持上一窗/倒退重锚归零/正常窗滚动——三钉全过）+ json_u64/f64（无三方库字节扫描，拒带引号/小数量=宁缺毋错）+ tests/core_test.cpp assert main。
+- 坑两枚实录：ctest "No tests found"=根缺 enable_testing()（add_test 静默无效不报错）；lib.rs 锚文本漂移（doc 注释与头文件措辞不同=插入前必须 grep 实况，#17① 同族）。
+- 门（无管道）：cargo test client 27 / clippy 0 / build-c + check-abi 14==14 / test-cxx 四 SDK+common PASS / build example RC=0 / **ctest -R core Passed**。
+- 桌面黑底纹理冒烟 = W3b（本机构成：xorg dev 头缺 → headless fail-soft 或装依赖出窗）。
+- 队列：W3b 纹理管线+响应式壳 → W4 面板（登录 stdin/勾房 list_rooms/tile 状态机/急停）。

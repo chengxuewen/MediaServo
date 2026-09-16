@@ -51,4 +51,4 @@ pub use auth::{LoginOutcome, RoomInfo, list_rooms, login};
 pub use config::ClientConfig;
 pub use control::ControlChannel;
 pub use error::ClientError;
-pub use session::{RoomSession, VideoFrame};
+pub use session::{RoomSession, VideoFrame, VideoStreamStats};

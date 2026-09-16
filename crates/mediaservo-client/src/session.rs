@@ -39,6 +39,36 @@ const DATA_PROTOCOL: &str = "sctp";
 const RESPONSE_WAIT: Duration = Duration::from_secs(10);
 
 /// 解码视频帧（I420，libwebrtc 侧渲染前格式；C5 边界语义）。
+/// inbound-rtp 折叠规则单一落点（求和/max 混排——自由函数形单测可钉，免触真 pc）。
+fn fold_inbound_stats(items: Vec<mediaservo_webrtc::stats::RTCStats>) -> VideoStreamStats {
+    use mediaservo_webrtc::stats::RTCStats;
+    let mut out = VideoStreamStats::default();
+    for st in items {
+        if let RTCStats::InboundRtp(r) = st {
+            out.bytes_received += r.bytes_received;
+            out.packets_received += r.packets_received;
+            out.packets_lost += r.packets_lost;
+            out.frames_decoded += u64::from(r.frames_decoded);
+            out.frame_width = out.frame_width.max(r.frame_width);
+            out.frame_height = out.frame_height.max(r.frame_height);
+            out.frames_per_second = out.frames_per_second.max(r.frames_per_second);
+        }
+    }
+    out
+}
+
+/// [`RoomSession::video_stats_summary`] 的扁平结果（serde 键名 = C 面 JSON 契约）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub struct VideoStreamStats {
+    pub bytes_received: u64,
+    pub packets_received: u64,
+    pub packets_lost: u64,
+    pub frames_decoded: u64,
+    pub frame_width: u32,
+    pub frame_height: u32,
+    pub frames_per_second: f64,
+}
+
 #[derive(Debug, Clone)]
 pub struct VideoFrame {
     pub width: u32,
@@ -73,6 +103,13 @@ impl RoomSession {
             .iter()
             .flat_map(|pc| pc.receiver_get_stats("video"))
             .collect()
+    }
+
+    /// 消费面视频统计汇总（W3 mini-stats 数据源）：本会话全部 inbound-rtp 折叠。
+    /// 形状刻意**扁平 + 稳定键名**（C ABI JSON 透传给 C++ mini-parse 消费，
+    /// 不导出 webrtc 内部枚举 wire）。计数类求和；fps 取最大（多轨无求和语义）。
+    pub fn video_stats_summary(&self) -> VideoStreamStats {
+        fold_inbound_stats(self.video_receiver_stats())
     }
 
     /// S4/a4·T3.5：急停双路 —— DC 快路径（带 HMAC sig，车端 act-then-audit 主留痕）
@@ -790,5 +827,38 @@ impl mediaservo_webrtc::track::FrameSink for FrameChanSink {
             data: data.to_vec(),
             ts_us: 0,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mediaservo_webrtc::stats::{RTCInboundRtpStreamStats, RTCStats};
+
+    fn mk(bytes: u64, w: u32, fps: f64) -> RTCStats {
+        RTCStats::InboundRtp(RTCInboundRtpStreamStats {
+            id: "x".into(),
+            timestamp: 0.0,
+            ssrc: 1,
+            kind: "video".into(),
+            packets_received: bytes,
+            packets_lost: bytes,
+            bytes_received: bytes,
+            frames_decoded: 10,
+            frame_width: w,
+            frame_height: 720,
+            frames_per_second: fps,
+        })
+    }
+
+    #[test]
+    fn fold_inbound_sums_counts_maxes_size_and_fps() {
+        let out = fold_inbound_stats(vec![mk(100, 1280, 24.0), mk(50, 1920, 30.0)]);
+        assert_eq!(out.bytes_received, 150);
+        assert_eq!(out.packets_lost, 150);
+        assert_eq!(out.frames_decoded, 20);
+        assert_eq!(out.frame_width, 1920);
+        assert_eq!(out.frames_per_second, 30.0);
+        assert_eq!(fold_inbound_stats(vec![]), VideoStreamStats::default());
     }
 }

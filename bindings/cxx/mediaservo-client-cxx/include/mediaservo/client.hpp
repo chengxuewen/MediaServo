@@ -163,6 +163,28 @@ public:
         return Result<void>();
     }
 
+    /// 视频统计汇总 JSON（inbound-rtp 折叠，键见 client.h；mini-stats 渲染源——
+    /// 差分/码率推导属消费方，imgui_shell core::RateEstimator 为参考实现）。
+    /// 溢出经 needed 反馈自动扩一次重试（list_rooms 同形）。
+    Result<std::string> video_stats() {
+        if (!h_) return Result<std::string>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed"});
+        size_t cap = 1024;
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            std::vector<char> buf(cap);
+            size_t need = 0;
+            int rc = ms_client_session_video_stats(h_, buf.data(), cap, &need);
+            if (rc == MEDIASERVO_OK) {
+                return Result<std::string>(std::string(buf.data()));
+            }
+            if (need > cap && attempt == 0 && need <= 65536) {
+                cap = need;
+                continue;
+            }
+            return Result<std::string>(tl::unexpect, detail::make_error(rc));
+        }
+        return Result<std::string>(tl::unexpect, detail::make_error(MEDIASERVO_CLIENT_ERR_INVALID_ARG));
+    }
+
     /// 开出程控制通道集（每会话一次性；labels 如 {"chassis"}）。
     Result<class Control> open_control(const std::vector<std::string>& labels);
 

@@ -14,6 +14,8 @@
 cmake_minimum_required(VERSION 3.24)
 project(mediaservo_examples LANGUAGES C CXX)
 
+enable_testing() # 子目录 add_test 生效前提（core 判据面）
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)

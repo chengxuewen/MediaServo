@@ -124,6 +124,11 @@ mediaservo_err_t ms_client_session_negotiated(const ms_client_session_t* s, uint
  * 重复调用 → ERR_STATE）。帧回调仅在该泵线程触发。 */
 mediaservo_err_t ms_client_session_consume_video(ms_client_session_t* s, ms_client_frame_cb cb, void* user);
 
+/* 视频统计汇总 JSON（{"bytes_received","packets_received","packets_lost",
+ * "frames_decoded","frame_width","frame_height","frames_per_second"}，本会话
+ * inbound-rtp 折叠；无消费者=全零）。needed 溢出合同同 ms_client_list_rooms。 */
+mediaservo_err_t ms_client_session_video_stats(const ms_client_session_t* s, char* out_json, size_t cap, size_t* needed);
+
 /* 开出程控制通道集（每会话一次性——ack 泵每会话一条；二次调用 → ERR_STATE）。
  * labels 为通道名数组（如 "chassis"/"gimbal"）。方言 <2 本地预拒（ERR_PROTOCOL）。 */
 mediaservo_err_t ms_client_open_control(ms_client_session_t* s, const char* const* labels, size_t labels_len, ms_client_control_t** out);

@@ -454,6 +454,57 @@ fn ack_pump(c: *mut ms_client_control_t) {
     }
 }
 
+/// 视频统计汇总 JSON（W3 mini-stats 源；对象形 `{"bytes_received":..,
+/// "packets_received":..,"packets_lost":..,"frames_decoded":..,"frame_width":..,
+/// "frame_height":..,"frames_per_second":..}`，读自会话当前 inbound-rtp 折叠，
+/// 无消费者=全零）。needed 溢出合同同 ms_client_list_rooms。
+#[unsafe(no_mangle)]
+pub extern "C" fn ms_client_session_video_stats(
+    s: *const ms_client_session_t,
+    out_json: *mut c_char,
+    cap: usize,
+    needed: *mut usize,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if s.is_null() || out_json.is_null() || cap == 0 {
+            set_last_error("ms_client_session_video_stats: null handle/out or cap 0");
+            return MEDIASERVO_CLIENT_ERR_INVALID_ARG;
+        }
+        let h = unsafe { &*s };
+        let guard = match h.session.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                set_last_error("ms_client_session_video_stats: lock poisoned");
+                return MEDIASERVO_CLIENT_ERR_INTERNAL;
+            }
+        };
+        let Some(session) = guard.as_ref() else {
+            set_last_error("ms_client_session_video_stats: session closed");
+            return MEDIASERVO_CLIENT_ERR_STATE;
+        };
+        let json = match serde_json::to_string(&session.video_stats_summary()) {
+            Ok(j) => j,
+            Err(e) => {
+                set_last_error(format!("ms_client_session_video_stats: serialize: {e}"));
+                return MEDIASERVO_CLIENT_ERR_INTERNAL;
+            }
+        };
+        let need = json.as_bytes().len() + 1;
+        if let Some(n) = unsafe { needed.as_mut() } {
+            *n = need;
+        }
+        let rc = copy_out_str(&json, out_json, cap);
+        if rc != MEDIASERVO_OK {
+            set_last_error(format!("ms_client_session_video_stats: buffer too small, need {need}"));
+        }
+        rc
+    }))
+    .unwrap_or_else(|_| {
+        set_last_error("ms_client_session_video_stats: panic");
+        MEDIASERVO_CLIENT_ERR_INTERNAL
+    })
+}
+
 /// 开出程控制通道集（每会话一次性——ack 泵每会话一条，Rust 侧闸门）。
 #[unsafe(no_mangle)]
 pub extern "C" fn ms_client_open_control(
@@ -766,6 +817,22 @@ mod tests {
     fn session_create_null_fails() {
         let rc = ms_client_session_create(ptr::null(), ptr::null_mut());
         assert_eq!(rc, MEDIASERVO_CLIENT_ERR_INVALID_ARG);
+    }
+
+    #[test]
+    fn video_stats_null_and_cap_guards() {
+        let mut buf = [0u8; 256];
+        let jwt = std::ffi::CString::new("j").unwrap();
+        assert_eq!(
+            ms_client_session_video_stats(ptr::null(), buf.as_mut_ptr() as *mut c_char, buf.len(), ptr::null_mut()),
+            MEDIASERVO_CLIENT_ERR_INVALID_ARG
+        );
+        // 非 null 但 cap 0：句柄不合法也不许触网/解引用——先参数守卫。
+        assert_eq!(
+            ms_client_session_video_stats(ptr::null(), buf.as_mut_ptr() as *mut c_char, 0, ptr::null_mut()),
+            MEDIASERVO_CLIENT_ERR_INVALID_ARG
+        );
+        let _ = jwt;
     }
 
     #[test]

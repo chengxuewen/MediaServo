@@ -21,6 +21,11 @@
   产物 `target/examples/bin/`（不进交付树）；GUI 依赖档案 SDL3 release-3.4.16 + Dear ImGui
   v1.92.9b（3rdparty/ 本地 zip+sha256 台账）；新例子 `imgui_viewer`（空窗骨架）与
   `imgui_shell`（渲染壳）目录就位，`control_demo` 迁入统一聚合。
+- [sdk-client] 会话视频统计面 `ms_client_session_video_stats` / C++ `Session::video_stats()`：
+  inbound-rtp 折叠扁平 JSON（bytes/frames/分辨率/fps/丢包），mini-stats 渲染数据源
+  （Rust 侧 fold 规则单测钉；C 面 needed 溢出合同同形）。
+- [sdk-client] 例子壳 `viewer_core`：RateEstimator（Δt=0 保持/计数倒退重锚，绝不负速率）
+  与无依赖 JSON 标量提取，ctest `-R core` 判据就位。
 - [sdk-client] C 绑定视频消费崩溃修复：帧泵线程 reactor panic（block_on 外侧实参构造）
   ——修复前 C/cxx 面 consume_video 收帧线程静默死亡（多路画面必现；spike 实锤四连 panic）。
 - [sdk-client] 改进：视频接收 sink 重挂由「固定 1s 单次」升级为「12s 窗内追踪重挂」——
