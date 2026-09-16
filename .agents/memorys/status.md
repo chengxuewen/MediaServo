@@ -792,3 +792,8 @@ install                        → 改名提示 + exit 2（退役）
 - **刀2**：controller `connect_with_retry`（1s→8s×12）覆盖 server 簇拉起窗。实环复现：整簇 down→host 先起→8s 时 controller 存活退避（旧形态已熔断循环）→server 补位→ICE Completed×2 自动在册。
 - **刀3 降观察**：多舱共享 `consumer` 键的串扰面已被 S2d backlog 排空 + session 定向回收（不键删互伤）消化；残余=事件广播互见为无害语义。
 - **活体**：4 轮舱端开关矩阵 rc=0×4 全真 ack；`closed 1 orphan data consumers`/`名下回收 1 producer`/`定向拆除已下发` 三层台账每轮齐；**sid 0→1→2→3 递减复用**=deallocate 铁证。新测试：server `remove_producers_by_ids_reaps_data_plane`、common data kind 钉。
+
+### 2026-09-16: p3-gui-viewer spike——G11 并发判据 ✓ + R3 断流案立（PIT-197/198）
+- 多 Session 并发实测（5 会话：1 控制+4 视频同房、单 JWT）：**server 四 consumer 全速 fanout（stats 各 +740K/10s）、close 零连坐（rc=0、其余照常收）、ack 真往返、negotiated=3**——G11「房间=流、每房一 Session」模型成立，p3 W2/W3 前提解锁。
+- 抓出真 bug×3：① C 层 video_pump reactor panic（PIT-198，已修=async 包裹 timeout 实参）；② client-c 自 S4 字段腐化 E0063（已补 sig/hmac_key 迁移形=本刀随修；教训=common 扩字段后 build-c 三连，V 批门禁化）；③ **R3 主案 PIT-197：webrtc-sys consume sink ~29帧(1s) 断流**——SetLocal 重建接收轨道、历轮首帧判据全落在重建前幸存窗=验收盲区；「hits>0 跳过重挂」部分缓解已落（重挂自我破坏半案），全修=经 pc.get_receivers() 挂当前轨道=W2 前置刀。
+- 判据纪律升格：**持续媒体=60s 帧计数不衰减，首帧不是交付证据**。探针（zz_spike_probe）throwaway 已删，方法入 PIT-197。

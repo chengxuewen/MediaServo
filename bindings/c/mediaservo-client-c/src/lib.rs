@@ -110,7 +110,9 @@ fn video_pump(s: *mut ms_client_session_t, mut rx: mpsc::Receiver<VideoFrame>) {
         if h.closed.load(Ordering::SeqCst) {
             break;
         }
-        match rt.block_on(timeout(VIDEO_POLL, rx.recv())) {
+        // 注意: `timeout(..)` 若作 block_on 的外侧实参会在**无 context 的本线程**构造
+        //        （Sleep::new_timeout → Handle::current panic，spike 实锤）——必须在 async 块内构造。
+        match rt.block_on(async { timeout(VIDEO_POLL, rx.recv()).await }) {
             Ok(Some(frame)) => {
                 let Some((cb, user)) = h.video_cb.lock().ok().and_then(|g| *g) else {
                     continue; // 未注册/已取消注册：帧丢弃（latest 语义泵）
@@ -185,6 +187,9 @@ pub extern "C" fn ms_client_session_create(
             psk: parts.psk.map(str::to_string),
             jwt: parts.jwt.map(str::to_string),
             role: parts.role,
+            // C 面暂不暴露急停 HMAC key（W2-C 增票：ms_client_config 扩字段+0600 文件形，G13 语义）——
+            // None = C 侧 estop 不签名，与 S4 前行为一致（车端有 key 时拒签=正确裁决，非静默）。
+            hmac_key: None,
         };
         match runtime().block_on(RoomSession::connect(&client_cfg)) {
             Ok(session) => {

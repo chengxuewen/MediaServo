@@ -1616,3 +1616,16 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: gateway 层去 biased 回公平轮询（hi/lo 优先序契约只存于 link 出口层，注释钉死）；复合泵保持 random-ordered select。
 - **验证**: gateway_e2e 红集 == HEAD 基线；b3gw 复跑通过。
 - **禁止**: 见"顺序不对"就全局加 biased——先问这条 select 里有没有常驻就绪支。
+
+## PIT-197: webrtc-sys consume sink 交付在 ~1s(29帧) 后断流——S2c 重挂挂在重建前旧轨道，历轮"首帧判据"全在幸存窗内 (2026-09-16, p3 spike)
+- **症状**: Rust/C 双层 consume_video 单 session 均：首帧 1280x720 正常、fired 恰 29 次（≈966ms@30fps）后归零；server stats 四 consumer 全速外发、client packets/frames_decoded 持续增长（解码正常）——帧在 C++ 内 decoded 但 Rust sink 永不再触发。
+- **根因**: mediasoup consume（client=answerer）`SetLocalDescription(answer)` 重建接收轨道；首挂 on_track 的 track=重建**前**轨道（交付 ~1s 幸存窗）；S2c 延迟重挂线程捕获的 track2 **同为旧轨道句柄**——重挂永远救不到重建后的新 track。本 spike 另证：对已交付同 track 重复 add_sink = 自我破坏（替换 sink 且新实例零触发），已修「hits>0 跳过」为部分缓解。
+- **为何历轮不可见**: S2c/S2d/S3/S4 活体判据=**首帧**（basic 打一行 first frame 即过）——首帧全部落在重建前幸存窗内；web 走浏览器栈不经 webrtc-sys sink，无关。教训升格：**持续媒体判据必须"60s 帧计数不衰减"，首帧不是交付证据**。
+- **全修（R3 另案）**: 重挂线程经 `pc.get_receivers()` 取**当前** receiving track 挂 sink（非 on_track 捕获参数）；W4 前必落。
+- **验证**: `zz_spike_probe` 式双源对照（cb_frames vs frames_decoded diff 持续增长）——诊断探针法入册。
+
+## PIT-198: `rt.block_on(timeout(d, fut))` 外侧实参在无 context 线程构造 = reactor panic——C 层泵线程实锤 (2026-09-16, p3 spike)
+- **症状**: C 层 video_pump（std::thread）四连 panic "there is no reactor running" at `block_on(timeout(VIDEO_POLL, rx.recv()))`——**timeout() 是普通 fn，其 Sleep 实参在 block_on 建立 context 之前、于无 runtime 的泵线程上构造**→Handle::current() panic。block_on 只包裹求值期，不救参数构造期。
+- **解法**: 实参挪进 async 块：`rt.block_on(async { timeout(d, rx.recv()).await })`。
+- **连带账**: 该 panic 线程无 catch_unwind（ABI 入口才有）=泵静默死亡；且 client-c 自 S4（sig/hmac_key additive 字段）起从未重编译——E0063 缺字段腐烂，本地门禁（test-cxx job 未推=CI 未跑）抓不到，spike 亲撞补 `sig:None`/`hmac_key:None` 迁移形。**common::protocol 扩字段后必须 `pixi run build-c` + cxx 三连过编译——列入后续提交前检查单（V 批门禁化）**。
+- **验证**: 修后 spike 无 panic、首帧+ack 双绿。

@@ -6,6 +6,12 @@
 ## Unreleased
 
 ### 新增
+- [sdk-client] C 绑定视频消费崩溃修复：帧泵线程 reactor panic（block_on 外侧实参构造）
+  ——修复前 C/cxx 面 consume_video 收帧线程静默死亡（多路画面必现；spike 实锤四连 panic）。
+- [sdk-client] 修复：视频接收通道重建窗口的 sink 自我破坏——已正常交付时不再延迟重复挂载
+  （重挂会替换正在工作的 sink 致断流）；断流主根因（重建后新轨道无 sink）登记为在案缺陷，
+  彻底修复另刀。**已知问题：非浏览器 SDK 消费视频 ~1 秒后画面停止刷新**（首秒正常）。
+
 - [sdk-client][host][protocol] 急停命令链路（遥控安全）：座舱 SDK `emergency_stop` 双路投递——数据通道快路径携带 HMAC-SHA256
   签名（部署预共享密钥 MEDIASERVO_CONTROL_HMAC_KEY，车舱同值）+ 信令通道审计副本；车端执行器
   验签闸门（密钥已配置时，无签名/错签的急停一律拒执并回执 estop_signature_rejected），执行结果

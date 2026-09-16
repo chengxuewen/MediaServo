@@ -124,6 +124,7 @@ pub(crate) fn build_envelope(
         seq,
         cmd: cmd.to_string(),
         payload,
+        sig: None, // C 面暂不产急停签名（W2-C 增票与 hmac_key 同批；见 lib.rs ClientConfig 注）
     })
 }
 

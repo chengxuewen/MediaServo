@@ -1519,9 +1519,11 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
                 #[allow(dead_code)]
                 struct VideoSinkAdapter {
                     sink: std::sync::Arc<std::sync::Mutex<Option<Box<dyn crate::track::FrameSink>>>>,
+                    hits: std::sync::Arc<std::sync::atomic::AtomicU64>,
                 }
                 impl webrtc_sys::video_track::VideoSink for VideoSinkAdapter {
                     fn on_frame(&self, frame: cxx::UniquePtr<vff::VideoFrame>) {
+                        self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         tracing::debug!("VideoSinkAdapter::on_frame fired (w={} h={})", frame.width(), frame.height());
                         if let Some(ref sink) = *self.sink.lock().unwrap() {
                             let w = frame.width();
@@ -1550,7 +1552,8 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
                     fn on_constraints_changed(&self, _: webrtc_sys::video_track::ffi::VideoTrackSourceConstraints) {}
                 }
 
-                let adapter = VideoSinkAdapter { sink: sink_arc.clone() };
+                let hits = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+                let adapter = VideoSinkAdapter { sink: sink_arc.clone(), hits: hits.clone() };
                 let wrapper = webrtc_sys::video_track::VideoSinkWrapper::new(std::sync::Arc::new(adapter));
 
                 // Register sink with the video track（立即一次——若 channel 已就绪即通）
@@ -1570,8 +1573,18 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
                     let callbacks2 = callbacks.clone();
                     let sink_arc2 = sink_arc.clone();
                     let track2 = track.clone();
+                    let hits2 = hits.clone();
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_millis(1000));
+                        // S2c 重挂语义修正第一步（spike 09-16 实锤）：已交付则不重复 add_sink
+                        // （重挂对同 track 是自我破坏——替换 sink 且新实例零触发）。
+                        // ⚠ 非全修：29 帧（≈重建前窗口）后断流的主根因 = 本线程持有的 track2 是
+                        //   重建前旧轨道，重建出的新接收轨道永远无 sink。全修 = 经 pc.get_receivers()
+                        //   取**当前** track 重挂（R3 另案，见子模块 status/PLAN p3-gui-viewer §12）。
+                        if hits2.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+                            tracing::debug!("S2c: 首挂已在交付，跳过延迟重挂");
+                            return;
+                        }
                         if sink_arc2.lock().unwrap().is_none() {
                             return;
                         }
