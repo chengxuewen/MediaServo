@@ -1,0 +1,14 @@
+# handover-blackscreen-30s —— SLA 切换近似（S4/PLAN §11.6 补丁 d 前提案）
+# ⚠ 近似声明：tc netem 不表达真 IP 变更——本场景用"100% 全丢黑障 30s + 恢复驻留"
+#   逼近舱/车换网时刻的协议面（WS resume / transport 重建 / streamer 重挂）。
+#   真换 IP = netns 扩展项或真车日。基线配对与四指标采集见主仓 evidence/s4-sla.md。
+scenario:
+  baseline_s: 8
+  steps:
+    - at_s: 0
+      set: {rtt_ms: 0, jitter_ms: 0, loss: "0%"}        # 基线（可配 loopback 对照）
+    - at_s: 8
+      set: {loss: "100%", rtt_ms: 160}                 # 黑障入（全丢，协议栈盲飞 30s）
+    - at_s: 38
+      set: {rtt_ms: 0, jitter_ms: 0, loss: "0%"}       # 恢复（四指标计时窗开启）
+  clear: false
