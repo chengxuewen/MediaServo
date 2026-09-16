@@ -838,3 +838,11 @@ install                        → 改名提示 + exit 2（退役）
 - 门（无管道）：cargo test client 27 / clippy 0 / build-c + check-abi 14==14 / test-cxx 四 SDK+common PASS / build example RC=0 / **ctest -R core Passed**。
 - 桌面黑底纹理冒烟 = W3b（本机构成：xorg dev 头缺 → headless fail-soft 或装依赖出窗）。
 - 队列：W3b 纹理管线+响应式壳 → W4 面板（登录 stdin/勾房 list_rooms/tile 状态机/急停）。
+
+### 2026-09-16: R3b 根修——PIT-197 断流结清（sink 交付层 wrapper 连坐析构）
+- **侦查判据一击定案**：五探针位（on_track 指纹/首挂 ptr/trace tick/DISCARDED 计数/Stable 日志）+ 90s 双源探针——实测 dec 2700@30fps 全程健康而 cb=0、零 discard、**单次 on_track（轨道从未被替换）**、`receiver().track()` 每调用新建 wrapper（tick 间指针恒变是假象）。
+- **根因**：webrtc-sys `~VideoTrack` 对 wrapper 注册过的全部 sink 执行 RemoveSink；`video_sinks` 只持 sink 不持 add_sink 时的 wrapper → wrapper 出 scope = 刚挂的 sink 连坐摘除。"29 帧幸存窗" = on_track 入参 wrapper 被事件链暂引的寿命。历轮"轨道替换/信号线程/worker 线程契约"三假设全部证伪。
+- **修**：(wrapper, sink) 成对持有（类型收口 `video_sinks: Vec<(SharedPtr<MediaStreamTrack>, SharedPtr<NativeVideoSink>)>` 三挂点单 funnel）；**删除** Stable 救援块 + R3SinkAdapter + 12s 追踪重挂线程（前提已死 + 双 sink 重复交付 cb=2×dec 实锤其害）。on_discarded_frame 空实现补计数 warn（原静默吞=诊断盲点）。
+- **判据终验**：90s cb=2700/dec=2699 咬合、fps 30 稳、单 sink 无重复、discard 0。basic 例回归 login/join/首帧 1280x720 ✓（ack 段卡点=车端 controller 系 01:34 旧件未部署 + gateway 5001 在册环境问题，非本批——部署新鲜度教训反向再证）。
+- 门禁：webrtc 27 + client 25 lib 全绿 · clippy --all-targets 0 · **新亚种入账：`cargo check` 无 `--all-targets` 吃缓存旁路语法错（假绿），语法终判必须 clippy/check --all-targets 或真 build**。
+- 衔接：W3b 纹理壳肉解锁（真帧 30fps 已在），S 批「非浏览器 SDK 视频」已知问题公示结清。
