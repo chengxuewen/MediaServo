@@ -77,8 +77,8 @@ struct StatsResponse {
 }
 
 #[derive(Serialize)]
-struct ErrorResponse {
-    error: String,
+pub(crate) struct ErrorResponse {
+    pub(crate) error: String,
 }
 
 // ── Router ──────────────────────────────────────────────────────────────────
@@ -798,7 +798,7 @@ fn extract_token(req: &axum::http::Request<Body>) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-fn check_auth(
+pub(crate) fn check_auth(
     req: &axum::http::Request<Body>,
     state: &AdminState,
 ) -> Result<JwtClaims, (StatusCode, Json<ErrorResponse>)> {
@@ -1296,7 +1296,7 @@ pub fn print_setup_token(secret: &str) {
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use axum::body::Body;
     use http::{Method, Request, StatusCode};
@@ -1347,6 +1347,29 @@ mod tests {
             device_registry: Arc::new(DeviceRegistry::empty()),
             devices_path: "/tmp/mediaservo-test-devices.yaml".into(),
         }
+    }
+
+    /// rooms 等跨模块集成测试共用：任意 sub/role 的合法 JWT。
+    #[cfg(test)]
+    pub(crate) fn token_of_role(state: &AdminState, user: &str, role: Option<&str>) -> String {
+        let now =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+                as usize;
+        let claims = JwtClaims {
+            sub: user.into(),
+            iat: now,
+            exp: now + 3600,
+            role: role.map(str::to_string),
+            vehicles: None,
+        };
+        jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(
+                state.admin_jwt_secret.as_deref().unwrap().as_bytes(),
+            ),
+        )
+        .unwrap()
     }
 
     fn admin_token(state: &AdminState) -> String {

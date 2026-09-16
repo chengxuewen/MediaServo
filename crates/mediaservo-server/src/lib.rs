@@ -15,6 +15,7 @@ pub mod status;
 pub mod sfu;
 pub mod health;
 pub mod signaling;
+pub mod rooms;
 pub mod static_files;
 pub mod tls;
 

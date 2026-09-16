@@ -799,3 +799,10 @@ install                        → 改名提示 + exit 2（退役）
 - 判据纪律升格：**持续媒体=60s 帧计数不衰减，首帧不是交付证据**。探针（zz_spike_probe）throwaway 已删，方法入 PIT-197。
 - 同日追打（W2-D 尝试）：hits-skip 后 cb 仍 0；transceiver 现取证实 track 指针代换（first≠cur）但对新代理补挂 sink 零回调且指针永不再变——R3 升级为 **R3b（输出注册层断点）**，追踪重挂机制已并入（12s×500ms，hits>10 收工），全修待 libwebrtc 语义专项。诊断法沉淀：裸文件插桩绕日志管线疑障 + 双源计数（cb vs frames_decoded）。
 - 排除实验第二轮（09-16 晚）：信号线程（Stable 钩子现取 transceiver 补挂）hits 仍零 = **信号线程假设证伪**；残余域 = worker 线程契约（vendored 无 dispatcher，入口=rtp_receiver.cc proxy 语义+微型 C++ ffi 候选）。机制件（pending_video/Stable 钩/R3SinkAdapter）合入备用（子 448ae7a）。**过程自纠**：本笔 python 锚失败中断但 git 链照跑 = 448ae7a message 言过（#17 族再犯第四例），以本补记笔收正。
+
+### 2026-09-16: p3 W2-A 交付——/api/rooms 消费者面发现端点（server 侧首刀）
+- rooms.rs 独立 router（F-S-1 三钉兑现：独立门/复用 check_auth 验签/非账号·未知角色 401+audit）；权限=D-H11 矩阵同源判定（can_pull 复用，禁第二实现）；**G16 裁决落地**：owner=None 对一切角色隐藏，不变量「列表⊆可进/可进∖列表仅 owner=None 族」单测双向钉（join_vehicle_room 同输入比对）；wire 二字段 serde 钉；allowlist 以 registry 现值（C33 热生效，viewer 改单即变可见集测钉）。
+- 设计自纠一处：初版"账号缺席=空列表"误伤不在 accounts.yaml 的 admin（测试抓出）→ 特权角色豁免分支。
+- 测试纪律两钉：DashMap 迭代序无保证（按 id 检索断言，串跑抓出 order bug）；集成走 tower oneshot 先例（admin.rs:1459 同法）零起进程。
+- 存量在册：**server native（--no-default-features）lib 编译挂**（signaling.rs:404 WebSocket.split 缺 StreamExt 导入——clean HEAD 复现，与本轮无关，stub 债族新形态，CI 背书面外另案）。
+- 门禁：rooms 12/0 · server-native lib 156/0 · clippy 零相关 error。W2-B（client list_rooms+GET 面）待打。

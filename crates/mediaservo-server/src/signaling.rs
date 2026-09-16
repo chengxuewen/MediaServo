@@ -178,6 +178,12 @@ impl SignalingServer {
         self.room_owners.get(room_id).map(|v| v.clone())
     }
 
+    /// test-only：为房间登记 owner（真路径 = device RoomJoin 分支 1105 插入）。
+    #[cfg(test)]
+    pub(crate) fn set_room_owner_for_test(&self, room_id: &str, device: &str) {
+        self.room_owners.insert(room_id.to_string(), device.to_string());
+    }
+
     /// G3 已登记主车的房间数（运维/测试用）。
     pub fn room_owner_count(&self) -> usize {
         self.room_owners.len()

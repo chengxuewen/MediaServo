@@ -321,6 +321,8 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         .merge(signaling_router)
         .merge(monitor_router)
         .merge(login_router)
+        // p3 W2-A: 消费者面房间发现（独立 router，与 admin 特权面隔离）。
+        .merge(mediaservo_server::rooms::rooms_router(admin_state.clone()))
         .merge(admin_router);
     let app = mediaservo_server::static_files::add_admin_routes(app);
 
