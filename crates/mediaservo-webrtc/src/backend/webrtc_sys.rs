@@ -1376,6 +1376,43 @@ pub(crate) struct ObserverCallbacks {
     pub on_data_channel: Mutex<Option<Box<dyn Fn(crate::data_channel::RTCDataChannel) + Send + Sync + 'static>>>,
     /// Staged media tracks awaiting register_track consumption (webrtc-sys only).
     pub staged_media_tracks: Mutex<Vec<cxx::SharedPtr<webrtc_sys::media_stream_track::ffi::MediaStreamTrack>>>,
+    /// R3 实验：未交付的 (transceiver, 用户 sink, 计数) 救援名单——
+    /// signaling 进入 Stable（=setLocal 完成、通道重建落定）时由**信号线程**补挂 sink。
+    pub pending_video: Mutex<Vec<(
+        cxx::SharedPtr<webrtc_sys::rtp_transceiver::ffi::RtpTransceiver>,
+        std::sync::Arc<std::sync::Mutex<Option<Box<dyn crate::track::FrameSink>>>>,
+        std::sync::Arc<std::sync::atomic::AtomicU64>,
+    )>>,
+}
+
+/// R3：sink 救援适配器（信号线程/追踪线程共用；与首挂 VideoSinkAdapter 同形）。
+struct R3SinkAdapter {
+    sink: std::sync::Arc<std::sync::Mutex<Option<Box<dyn crate::track::FrameSink>>>>,
+    hits: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+impl webrtc_sys::video_track::VideoSink for R3SinkAdapter {
+    fn on_frame(&self, frame: cxx::UniquePtr<webrtc_sys::video_frame::ffi::VideoFrame>) {
+        use webrtc_sys::video_frame_buffer::ffi as vfb2;
+        self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let Some(ref sink) = *self.sink.lock().unwrap() {
+            let w = frame.width();
+            let h = frame.height();
+            let buf = unsafe { frame.video_frame_buffer() };
+            let i420 = unsafe { (*buf).to_i420() };
+            let yuv = unsafe { vfb2::i420_to_yuv8(&*i420) };
+            let y_size = (w * h) as usize;
+            let uv_size = ((w / 2) * (h / 2)) as usize;
+            let mut data = vec![0u8; y_size + 2 * uv_size];
+            unsafe {
+                std::ptr::copy_nonoverlapping((*yuv).data_y(), data.as_mut_ptr(), y_size);
+                std::ptr::copy_nonoverlapping((*yuv).data_u(), data.as_mut_ptr().add(y_size), uv_size);
+                std::ptr::copy_nonoverlapping((*yuv).data_v(), data.as_mut_ptr().add(y_size + uv_size), uv_size);
+            }
+            sink.on_frame(&data, w, h);
+        }
+    }
+    fn on_discarded_frame(&self) {}
+    fn on_constraints_changed(&self, _: webrtc_sys::video_track::ffi::VideoTrackSourceConstraints) {}
 }
 
 /// Real observer that forwards libwebrtc events to Rust callbacks.
@@ -1384,7 +1421,48 @@ struct RealObserver {
 }
 
 impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserver {
-    fn on_signaling_change(&self, _: webrtc_sys::peer_connection::ffi::SignalingState) {}
+    fn on_signaling_change(&self, new_state: webrtc_sys::peer_connection::ffi::SignalingState) {
+        // R3 实验主刀：Stable = setLocalDescription(answer) 完成、接收通道重建落定，
+        // 本回调运行于 libwebrtc 信号线程——与首挂成功的线程上下文一致。
+        // 追踪线程（裸 std::thread）补挂无效的头号嫌疑=线程上下文，此处判别。
+        use webrtc_sys::peer_connection::ffi::SignalingState;
+        if !matches!(new_state, SignalingState::Stable) {
+            return;
+        }
+        let cbs = self.callbacks.clone();
+        let mut pend = cbs.pending_video.lock().unwrap();
+        if pend.is_empty() {
+            return;
+        }
+        let mut keep = Vec::new();
+        let mut log = String::new();
+        for (transceiver, sink_arc, hits) in pend.drain(..) {
+            if hits.load(std::sync::atomic::Ordering::Relaxed) > 10 {
+                continue; // 已在交付，救援完成
+            }
+            let cur = transceiver.receiver().track();
+            let cur_ptr = &*cur as *const _ as usize;
+            let wrapper = webrtc_sys::video_track::VideoSinkWrapper::new(std::sync::Arc::new(
+                R3SinkAdapter { sink: sink_arc.clone(), hits: hits.clone() },
+            ));
+            unsafe {
+                let vt = webrtc_sys::video_track::ffi::media_to_video(cur);
+                let ns = webrtc_sys::video_track::ffi::new_native_video_sink(Box::new(wrapper));
+                vt.add_sink(&ns);
+                cbs.video_sinks.lock().unwrap().push(ns);
+            }
+            let _ = std::fmt::write(&mut log, format_args!("signal-attach 0x{cur_ptr:x} hits={}\n", hits.load(std::sync::atomic::Ordering::Relaxed)));
+            keep.push((transceiver, sink_arc, hits));
+        }
+        *pend = keep;
+        drop(pend);
+        if !log.is_empty() {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/r3sig.txt") {
+                let _ = f.write_all(log.as_bytes());
+            }
+        }
+    }
     fn on_add_stream(&self, _: cxx::SharedPtr<webrtc_sys::media_stream::ffi::MediaStream>) {}
     fn on_remove_stream(&self, _: cxx::SharedPtr<webrtc_sys::media_stream::ffi::MediaStream>) {}
     fn on_data_channel(&self, dc: cxx::SharedPtr<webrtc_sys::data_channel::ffi::DataChannel>) {
@@ -1554,6 +1632,7 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
 
                 let hits = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
                 let adapter = VideoSinkAdapter { sink: sink_arc.clone(), hits: hits.clone() };
+                let _ = callbacks.pending_video.lock().map(|mut g| g.push((transceiver.clone(), sink_arc.clone(), hits.clone())));
                 let wrapper = webrtc_sys::video_track::VideoSinkWrapper::new(std::sync::Arc::new(adapter));
 
                 // Register sink with the video track（立即一次——若 channel 已就绪即通）
@@ -1729,6 +1808,7 @@ impl WebrtcSysFactory {
             on_ice_connection_state_change: Mutex::new(None),
             on_peer_connection_state_change: Mutex::new(None),
             on_ice_candidate: Mutex::new(None),
+            pending_video: Mutex::new(Vec::new()),
             on_data_channel: Mutex::new(None),
             staged_media_tracks: Mutex::new(Vec::new()),
         });
