@@ -6,38 +6,38 @@
 ## Unreleased
 
 ### 新增
-- 急停命令链路（遥控安全）：座舱 SDK `emergency_stop` 双路投递——数据通道快路径携带 HMAC-SHA256
+- [sdk-client][host][protocol] 急停命令链路（遥控安全）：座舱 SDK `emergency_stop` 双路投递——数据通道快路径携带 HMAC-SHA256
   签名（部署预共享密钥 MEDIASERVO_CONTROL_HMAC_KEY，车舱同值）+ 信令通道审计副本；车端执行器
   验签闸门（密钥已配置时，无签名/错签的急停一律拒执并回执 estop_signature_rejected），执行结果
   逐条落 actuation 审计（jsonl 或日志行，审计永不阻塞执行）。密钥未配置 = 行为与旧版一致（迁移期）。
-- 兼容矩阵脚本 scripts/e2e-compat.sh：方言四探针（缺字段→v1/声明钳制/拒低 4101）+ 新 SDK 全链
+- [deploy] 兼容矩阵脚本 scripts/e2e-compat.sh：方言四探针（缺字段→v1/声明钳制/拒低 4101）+ 新 SDK 全链
   回环 + dispatcher 4012 拒控负例；旧 server 象限需 b34f3a1 产物（缺省 SKIP 记账）。
-- 弱网还账（loss × Cmd/ACK）：remote-burst 5/5 全通 RTT 254-301ms；degraded 失联级零脆断，
+- [deploy] 弱网还账（loss × Cmd/ACK）：remote-burst 5/5 全通 RTT 254-301ms；degraded 失联级零脆断，
   结论与证据见主仓 docs/plans/client-dual-form/evidence/s4-weaknet.md。
 
 ### 新增
-- 座舱 SDK 第四家族（C ABI + C++）：新库 mediaservo-client-c 提供 ms_client_* 稳定 C 接口
+- [sdk-client] 座舱 SDK 第四家族（C ABI + C++）：新库 mediaservo-client-c 提供 ms_client_* 稳定 C 接口
   （登录/入房/视频回调/遥控通道），新头文件 mediaservo/client.hpp 提供 C++11 兼容 RAII 包装；
   附纯 C++ 遥控样例 control_demo 与 ROS2 桥接样例节点（device-day 构建）。CI 新增 test-cxx
   作业：四 SDK C++ 测试编译运行 + C ABI 符号表巡检（含 client 新面 12 导出对表）。
 
 ### 修复
-- 遥控数据通道资源泄漏（生产级）：座舱端断开连接后其数据通道注册与对端消费句柄此前
+- [server][host][sdk-client] 遥控数据通道资源泄漏（生产级）：座舱端断开连接后其数据通道注册与对端消费句柄此前
   不回收，长期运行会耗尽可用通道号导致新座舱无法建链（并曾表现为仪表盘数据源计数
   单调增长）；现断链即定向收割并通知车端拆除本地通道。仪表盘同步修正：数据通道
   关闭事件不再误触发视频流重启。
-- 车端控制器冷启动不再因服务端未就绪而崩溃重启风暴：信令连接加入指数退避重试
+- [host] 车端控制器冷启动不再因服务端未就绪而崩溃重启风暴：信令连接加入指数退避重试
   （覆盖整簇拉起窗口），耗尽后仍由守护策略兜底。
-- 遥控数据通道消息体单侧开（车端/舱端互发收不到）根修：数据通道消费回执现在携带服务端
+- [server][host][sdk-client] 遥控数据通道消息体单侧开（车端/舱端互发收不到）根修：数据通道消费回执现在携带服务端
   分配的 SCTP 流参数，两端以带外协商通道接收转发消息（mediasoup-client 官方契约）——
   此前等待的带内握手在代理形态下永不发生。兼容旧版线形（字段缺省可读）。
 
 ### 新增
-- 新增 mediaservo-client v2 消费端 SDK（Rust 库）：账号登录(JWT)、入房、SFU 视频消费、遥控数据通道（4012 拒控/协议过低为显式类型化错误）；旧客户端演示形态（内置 WS/:9101 转发/HMAC 通道）退役。
-- 车端遥控接收链路换代：host-controller 从（自 2026-08-25 起即已死路的）点对点协商改为服务端 SFU 数据通道——上电即完成 DTLS/SCTP 注册（chassis/gimbal/light/ack 四通道），指令镜像发布到本机总线 control/cmd（回执 control/ack）供 ROS/回放节点零改动消费。
-- 信令通道硬化：服务器主动心跳探测断链（约 10-15 秒回收僵尸连接；网络抖动期连接不再被误杀）；车端短暂失联后凭一次性重挂票快速重挂（认证始终全量重跑，吊销即刻生效）；心跳与超时参数经环境变量 MEDIASERVO_WS_PING_SECS / WS_PONG_MISS / WS_PSK_WAIT_SECS / WS_JOIN_WAIT_SECS / WS_RESUME_HOLD_SECS 可调。
-- 信令拥塞时高频状态上报限损（丢弃计数自报），认证/控制/终态消息不再被状态洪流排队拖死（优先级双队列）。协议方言升至 v3（新增会话续期域；v1/v2 端点行为逐字节不变）。
-- 信令协议版本协商：端点在加入房间时声明方言版本，服务器协商后回显生效值；过旧版本显式拒绝（错误码 4101）而非静默降级。旧客户端不声明即按 v1 处理——线上报文逐字节不变，升级顺序无约束。控制数据通道（遥控）要求协商版本 ≥2。
+- [sdk-client] 新增 mediaservo-client v2 消费端 SDK（Rust 库）：账号登录(JWT)、入房、SFU 视频消费、遥控数据通道（4012 拒控/协议过低为显式类型化错误）；旧客户端演示形态（内置 WS/:9101 转发/HMAC 通道）退役。
+- [host][protocol] 车端遥控接收链路换代：host-controller 从（自 2026-08-25 起即已死路的）点对点协商改为服务端 SFU 数据通道——上电即完成 DTLS/SCTP 注册（chassis/gimbal/light/ack 四通道），指令镜像发布到本机总线 control/cmd（回执 control/ack）供 ROS/回放节点零改动消费。
+- [protocol][server][host] 信令通道硬化：服务器主动心跳探测断链（约 10-15 秒回收僵尸连接；网络抖动期连接不再被误杀）；车端短暂失联后凭一次性重挂票快速重挂（认证始终全量重跑，吊销即刻生效）；心跳与超时参数经环境变量 MEDIASERVO_WS_PING_SECS / WS_PONG_MISS / WS_PSK_WAIT_SECS / WS_JOIN_WAIT_SECS / WS_RESUME_HOLD_SECS 可调。
+- [protocol][server] 信令拥塞时高频状态上报限损（丢弃计数自报），认证/控制/终态消息不再被状态洪流排队拖死（优先级双队列）。协议方言升至 v3（新增会话续期域；v1/v2 端点行为逐字节不变）。
+- [protocol] 信令协议版本协商：端点在加入房间时声明方言版本，服务器协商后回显生效值；过旧版本显式拒绝（错误码 4101）而非静默降级。旧客户端不声明即按 v1 处理——线上报文逐字节不变，升级顺序无约束。控制数据通道（遥控）要求协商版本 ≥2。
 - 设备公钥指纹准入：host 用初始化时已生成的设备私钥应答服务器挑战，注册只需在管理台「待批准设备」点批准；专网/开发环境设 `ALLOW_DEV_ENROLL=1` 后新设备接入零人工（不再抄发/配置任何密钥）。
 - 管理台设备页新增「待批准设备」队列（一键批准 + 可选命名）。
 - Web 播放器协商内核改用官方 mediasoup-client（手拼 SDP/硬编码负载类型技术债清偿；对外行为与界面不变，弱网韧性语义原样保留）。

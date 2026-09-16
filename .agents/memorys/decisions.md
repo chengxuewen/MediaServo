@@ -833,3 +833,33 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - 否决案底：纯硬件指纹白名单——嗅探=永久冒名且**不可轮换**（Apple UDID 废弃先例）；且各平台 serial 采集器比"读现成 PEM 派生公钥"更贵。serial 不采（hostname+device_id 够区分，D-E4）。
 - 先例：WireGuard peer 公钥清单 / SSH authorized_keys / Tailscale 审批队列 / AWS IoT 证书注册。
 - 证据：主仓 `docs/plans/device-enroll/`（三件套+evidence/V-matrix.md 4/4 PASS）；Momus 一轮 [OKAY]。
+
+## D284: 执行序重排——cxx SDK+遥控链前置（2026-09-14, client-dual-form F10）
+- **决策**: S 批（S0 协议协商→S1 host-controller SFU-DC→S2 client v2→S3 cxx 家族→S4 全链收口）前置；Electron/GUI 半区（原 P2′/P3′）后移。
+- **理由**: 用户转向——舱端/车端 ROS C++ 消费者与遥控链路是当期交付主干，GUI 依赖 SDK 面完备后再动才不会双轮重复。
+- **影响**: S0 的 protocol 协商是 S1/S3 共同前置；P2′/P3′/V 保持顶层长期态。
+- **参考**: docs/plans/client-dual-form/PLAN.md §2 F10 / §11。
+
+## D285: CHANGELOG 目标标记 + 发布机械切片（2026-09-14, F11, D280 增量非替代）
+- **决策**: 仓根 CHANGELOG.md 单真源不变（D280）；**每个条目追加 scope 标记**，词表 {host,server,sdk-field,sdk-client,web,protocol,ipc,deploy,package}；发布打包期按 targets.toml 的 scope→target 映射**机械切片**出包内 CHANGES.md（无标记条目 loud 警告并全量入包，不静默丢）；git-cliff 仅本地草稿位，打包链零 LLM（确定性纪律保留）。
+- **理由**: 「changes 给用户看」与 per-target 发布诉求并存——单源不破、切片可复算。
+- **影响**: CI fmt job 加词表合法+覆盖强制（V 批落码）；S5 起首批入标记（本批 Unreleased 回填）。
+- **参考**: F11 裁决 + D280（维护式改判判例）。
+
+## D286: SDK 交付成对——sdk-field / sdk-client（2026-09-14, F12）
+- **决策**: 交付面=两份用户包成对：**sdk-field**（设备/生产者半区←mediaservo-field：组件化 {link 轻组件禁 ffmpeg 依赖面, media 全家桶, py, node}+manifest+组件独立可用冒烟）与 **sdk-client**（消费半区←mediaservo-client，S3 cxx=其首成员）。行业词 vehicle/cockpit 命名被裁（边缘/监控/机器人消费者同样装包）；`bindings` 目标更名 sdk-field（一周期 alias）。**进包≠公开面**：codec/webrtc/media 内部层可在包内非导出 target。C43 版本源改判（交付 crate 独立版本）连带在册。
+- **理由**: F6 牌位镜像（mediaservo-client=SDK 正名），半区切分经 targets 映射表——新增半区=加数据不加代码。
+- **影响**: V 批 targets.toml/manifest/发现机制（CMake config/pkg-config/wheel/npm）全按此形派生。
+- **参考**: F12/F6 裁决、09-14 X/Y 冲突终裁记录（status）。
+
+## D287: C4 修订——host/client 对称模型扩展至 SDK 语义（2026-09-11, F7 连带）
+- **决策**: C4 的 host(被控/推流)↔client(主控/拉流) 对称在 SDK 域展开：**client = 消费端/参会者 SDK**（拉流为主 + 会议对称角色 + 遥控能力位），非"主机客户端"歧义义；AudioSession 归 client v2（F7）即此语义的落地件。host 侧对称保持推流/被控/设备身份（D283 入册主体）。
+- **理由**: client 牌位横跨二进制（拉流端）与 SDK（舱端消费）两域，不修订则"client=桌面 GUI 全功能应用"旧注记与 sdk-client 交付面持续互相误导。
+- **影响**: README 架构图 Client 行注记、sdk-client 命名（D286）、host-audio P3′ 迁入 client 的边界判定。
+- **参考**: C4 原文（conventions）、F7 裁决。
+
+## D288: e-stop 签名 R-B HMAC 中间态（2026-09-15 执行账, S4/a4+T3.5；D289 顺延）
+- **决策**: e-stop 族命令强制 **HMAC-SHA256(sig)**——预共享密钥 `MEDIASERVO_CONTROL_HMAC_KEY` 车舱同值（CommandPolicy env 驱动；未配 key=迁移放行+WARN，配后无签/错签拒执+错误回执）；ControlAudit WS 审计副本 best-effort（主落点=车端 actuation act-then-audit）。**D289 位本预留给 F13 写回，但 F13/D273 修订已于 S0.5 笔实际完成——F13 不重复入册，D289 顺延为 e-stop 威胁模型裁决案（P3′ T3.5 Ed25519/PKI 案）**，杜绝幽灵号脱节。
+- **理由**: 舱端设备公钥注册面不存在（D283 入册主体=车端），Ed25519 验签无锚；HMAC 防本地注入/伪造（FrameBus/IPC 面），无不可否认性——威胁模型升级留 P3′。
+- **影响**: sig 为 additive 线形（旧端忽略=其 estop 被新端拒=版本墙非破坏）；L1 双语言 canonical 钉；跨会话 stale ack 观察项挂 S4′。
+- **参考**: S4 evidence/s4-estop-audit.md、席3 安全评审（09-14 团队轮）。
