@@ -1300,7 +1300,11 @@ def _cmd_package(args: argparse.Namespace) -> None:
     # C43⑧ 发版完整性守卫：工作区 Cargo.toml 相对 HEAD 有差且 git 可用 → 打包版本无
     # git 锚（tag 无从落，v0.1.8.2 漂浮号事故同族）——WARN 不阻断（调试包允许脏树）。
     if _git_out(["log", "-1", "--format=%s"]) is not None and \
-            _git_out(["diff", "--quiet", "HEAD", "--", "Cargo.toml"]) is None:
+            _git_out(["diff", "--quiet", "HEAD", "--", "Cargo.toml",
+                                  "crates/mediaservo-host/Cargo.toml",
+                                  "crates/mediaservo-server/Cargo.toml",
+                                  "crates/mediaservo-field/Cargo.toml",
+                                  "crates/mediaservo-client/Cargo.toml"]) is None:
         print(f"WARN: Cargo.toml 未提交改动承载版本 {ver}——发版前 commit bump + tag v{ver}"
               "（当前包 CHANGES 头部版本无 git 锚）", file=sys.stderr)
     dist = Path(args.dist) if getattr(args, "dist", "") else ROOT / "dist"

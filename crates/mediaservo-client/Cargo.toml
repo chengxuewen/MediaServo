@@ -1,6 +1,6 @@
 [package]
 name = "mediaservo-client"
-version.workspace = true
+version = "0.1.1"  # 交付面独立版本源（F12/N1——内部 crate 仍继承 workspace）
 edition = "2024"
 description = "MediaServo Client SDK v2 — 舱端/监控侧最小消费与控制库（SFU consume + ControlEnvelope 控制 DC，登录 JWT）"
 license = "Apache-2.0"

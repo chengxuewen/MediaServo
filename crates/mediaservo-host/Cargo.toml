@@ -1,6 +1,6 @@
 [package]
 name = "mediaservo-host"
-version.workspace = true
+version = "0.1.1"  # 交付面独立版本源（F12/N1——内部 crate 仍继承 workspace）
 edition = "2024"
 description = "MediaServo Remote Host — V4L2 capture, NVENC encode, WebRTC push (field/vehicle side)"
 license = "Apache-2.0"

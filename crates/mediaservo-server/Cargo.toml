@@ -1,6 +1,6 @@
 [package]
 name = "mediaservo-server"
-version.workspace = true
+version = "0.1.1"  # 交付面独立版本源（F12/N1——内部 crate 仍继承 workspace）
 edition = "2024"
 description = "MediaServo Server — signaling relay, room management, and monitoring"
 license = "Apache-2.0"
