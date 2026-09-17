@@ -37,6 +37,10 @@
   （新增壳层件 FrameStaging 泵线程→主线程最新帧槽 + VideoTexture SDL IYUV 工位）。
   无头判据 `SDL_VIDEODRIVER=dummy` + `MSRTC_RUN_SECS` 自退 + `[frame] cb=/tex=` 双计数
   ——CI 无显示环境亦可验收视频链路。
+- [sdk-client] GUI 例子 W4 合并轮：登录面板（口令输入框，G13）→ `/api/rooms` 勾选多路
+  （每房一会话）→ Tiles 页 1-3 列网格 + mini-stats 行（kbps/fps/分辨率，W3a 资产消费端）
+  → Control 页（chassis steer 滑条 + ack 回显 + RTT；急停按钮为未签名形，签名刀在案）。
+  无头 CI 通道：MSRTC_PASS+MSRTC_ROOM 自动登录入房，`[tile]` 异常显式打印。
 
 - [sdk-client][host][protocol] 急停命令链路（遥控安全）：座舱 SDK `emergency_stop` 双路投递——数据通道快路径携带 HMAC-SHA256
   签名（部署预共享密钥 MEDIASERVO_CONTROL_HMAC_KEY，车舱同值）+ 信令通道审计副本；车端执行器

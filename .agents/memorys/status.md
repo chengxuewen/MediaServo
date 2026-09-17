@@ -854,3 +854,11 @@ install                        → 改名提示 + exit 2（退役）
 - 诊断插曲（当场清账）：C 面首跑 cb=0 假黑洞——临时 eprintln 探针定位到**诊断件自身污染判据**：探针期数据其实已绿（cb=357/12s），删探针后忘重编 cdylib → example 重链旧 .so ZZ 仍冒（**PIT-189 第三亚种：探针删除后 .so 不重建=二进制残留假脏**）。正解序=改 Rust → build -p client-c → build example。
 - 门：clippy --all-targets error 0（warning 存量盘点）· webrtc27/client25/client-c24 · ABI 14 无漂移 · test-cxx 6 PASS · ctest core 1/1 · build example RC=0。
 - 队列：W3b 续（tile 网格/两档响应式 + list_rooms 勾选多路[W4 合并推进]）· W5 CI（dummy 判据可直接入 job）· W6 收口。
+
+### 2026-09-17: p3 W4 合并轮——GUI 全形态无头绿 + 双簇升级复验
+- viewer 大改：登录面板（UI 口令 G13）→list_rooms 勾选多房（每房一 Session=G11）→Tiles 1-3 列+mini-stats（RateEstimator/video_stats 首次实耗）→Control 页（steer/ack/RTT；急停=未签名形，C 面签名刀 W4b 在案）。join lambda 复用（UI 勾选+auto 通道同码）。
+- 大改自咬一枚：主循环 staging.pop→tex.update 段重写时遗失（cb=657/tex=0 半链铁证）——补回即全绿。**教训=重写判据段必须对照出门命令清单逐项勾**（PLAN W3 判据 `[frame] cb=/tex=` 双计数存在的意义）。
+- **生产簇双升级**（用户批准）：build:deploy server+host——server 旧件缺 /api/rooms（01:33 化石=PIT-189 族第 N 犯）；host 升级后 test 流 H6 自愈复产（ICE Failed→01:57 bytes 续增铁证）。[apps.env] 手工三行存活（回吸收链兑现）。
+- **新账 A：/api/rooms 数据面缺口**——列表报 `vehicle`（agent 自报房间），streamer 实际 produce 房间 = `vehicle_test`（流条目 room 键），两者不一致时消费者按列表 join 会 wait-producer 超时。**W2-A 语义裁决题（agent 注册房 vs 可消费房）另刀**。
+- **新账 B：遥控 ack 活体复测未通**——controller 新件 DC 传输 ICE Completed×4 全立在，舱端 steer 12 发无 ack（Cmd 消费链未达）；怀疑=controller 对舱端后到 DataProducer 的 consume 重建缺口（H6 名单只覆 streamer/audio）。basic 例历史（09-15 S2d）同形态 PASS=回归窗口在本轮升级后，**排查票 W4c**。
+- 判据终态：dummy 无头 22s cb=tex=657@30fps；门 build RC=0（余门见主提交注）。
