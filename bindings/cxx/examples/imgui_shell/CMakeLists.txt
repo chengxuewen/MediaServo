@@ -1,4 +1,4 @@
-add_library(imgui_shell STATIC src/shell.cpp src/core.cpp)
+add_library(imgui_shell STATIC src/shell.cpp src/core.cpp src/texture.cpp)
 target_include_directories(imgui_shell PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_link_libraries(imgui_shell PUBLIC imgui)
 

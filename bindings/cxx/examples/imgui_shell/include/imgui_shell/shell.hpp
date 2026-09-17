@@ -45,6 +45,9 @@ public:
     /// 底层 SDL_Window（W3 纹理管线用；本壳持有所有权）。
     void* sdl_window() const;
 
+    /// 主线程 SDL_Renderer*（视频纹理工位用；窗口未建 = nullptr）。
+    void* sdl_renderer() const;
+
 private:
     struct Impl;
     Impl* impl_;

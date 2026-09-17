@@ -33,6 +33,10 @@
   此前所有"轨道重建/线程上下文"假设均证伪，实测包装每次取用新建、指针恒变。
   修复 = 注册时与 sink 成对持有包装；90 秒双源对拍（回调帧数 vs libwebrtc 解码计数）
   2700/2699 咬合零衰减。附带删除救援/追踪重挂补丁机制（其前提假设已死且致重复交付）。
+- [sdk-client] GUI 例子 `imgui_viewer` W3b 首刀：登录→入房→消费→**I420 纹理上屏全链**
+  （新增壳层件 FrameStaging 泵线程→主线程最新帧槽 + VideoTexture SDL IYUV 工位）。
+  无头判据 `SDL_VIDEODRIVER=dummy` + `MSRTC_RUN_SECS` 自退 + `[frame] cb=/tex=` 双计数
+  ——CI 无显示环境亦可验收视频链路。
 
 - [sdk-client][host][protocol] 急停命令链路（遥控安全）：座舱 SDK `emergency_stop` 双路投递——数据通道快路径携带 HMAC-SHA256
   签名（部署预共享密钥 MEDIASERVO_CONTROL_HMAC_KEY，车舱同值）+ 信令通道审计副本；车端执行器

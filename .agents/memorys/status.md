@@ -846,3 +846,11 @@ install                        → 改名提示 + exit 2（退役）
 - **判据终验**：90s cb=2700/dec=2699 咬合、fps 30 稳、单 sink 无重复、discard 0。basic 例回归 login/join/首帧 1280x720 ✓（ack 段卡点=车端 controller 系 01:34 旧件未部署 + gateway 5001 在册环境问题，非本批——部署新鲜度教训反向再证）。
 - 门禁：webrtc 27 + client 25 lib 全绿 · clippy --all-targets 0 · **新亚种入账：`cargo check` 无 `--all-targets` 吃缓存旁路语法错（假绿），语法终判必须 clippy/check --all-targets 或真 build**。
 - 衔接：W3b 纹理壳肉解锁（真帧 30fps 已在），S 批「非浏览器 SDK 视频」已知问题公示结清。
+
+### 2026-09-17: p3 W3b 首刀——纹理管线全链无头绿（viewer 出画管子通）
+- FrameStaging（泵线程 push latest-only / 主线程 pop swap 复用容量）+ VideoTexture（SDL_CreateTexture(IYUV,STREAMING) + SDL_UpdateYUVTexture 三平面 pitch w/w/2——I420 连续缓冲零搬移；尺寸变即重建）+ shell 暴露 sdl_renderer()。
+- viewer 第一刀直连：login(stdin 口令 G13)→Session::connect(role=**Client** 非 consumer，C 面枚举词坑)→consume_video(cb→staging)→主循环 pop→tex.update→ImGui::Image 等比 fit。双计数判据 `[frame] cb=/tex=`。
+- **无头环境判据成立**：SDL_VIDEODRIVER=dummy 全链跑通——22s 窗 cb=tex=597≈30fps 咬合零衰减（PIT-197 判据链 GUI 面复验）。
+- 诊断插曲（当场清账）：C 面首跑 cb=0 假黑洞——临时 eprintln 探针定位到**诊断件自身污染判据**：探针期数据其实已绿（cb=357/12s），删探针后忘重编 cdylib → example 重链旧 .so ZZ 仍冒（**PIT-189 第三亚种：探针删除后 .so 不重建=二进制残留假脏**）。正解序=改 Rust → build -p client-c → build example。
+- 门：clippy --all-targets error 0（warning 存量盘点）· webrtc27/client25/client-c24 · ABI 14 无漂移 · test-cxx 6 PASS · ctest core 1/1 · build example RC=0。
+- 队列：W3b 续（tile 网格/两档响应式 + list_rooms 勾选多路[W4 合并推进]）· W5 CI（dummy 判据可直接入 job）· W6 收口。

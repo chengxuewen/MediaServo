@@ -83,4 +83,6 @@ void App::end_frame() {
 
 void* App::sdl_window() const { return impl_->window; }
 
+void* App::sdl_renderer() const { return impl_->renderer; }
+
 } // namespace imgui_shell
