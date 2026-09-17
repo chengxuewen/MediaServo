@@ -16,7 +16,7 @@ async fn multiproc_zero_copy_1080p() {
     let tok = CapabilityToken::sign(&acl, 3600, &sk).unwrap();
     let bus = FrameBus::attach("", &tok, &vk).unwrap();
     // 唯一 topic（避免跨 run 的 iceoryx2 全局服务污染）
-    let topic = FrameTopic::new(&format!("camera/mp/{}/raw", std::process::id()));
+    let topic = FrameTopic::new(format!("camera/mp/{}/raw", std::process::id()));
     let stream = bus.subscribe(&topic).unwrap();
     // spawn 子进程发布 3_110_400 字节
     let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_framebus_pub"))

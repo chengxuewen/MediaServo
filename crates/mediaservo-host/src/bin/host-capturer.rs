@@ -141,7 +141,7 @@ fn publish_i420(
         width,
         height,
         format: FORMAT_I420,
-        version: 1,
+        version: FrameMeta::WIRE_VERSION,
         is_keyframe: seq.is_multiple_of(u64::from(fps)),
         ts_mono_ns,
         ts_epoch_ns: 0,

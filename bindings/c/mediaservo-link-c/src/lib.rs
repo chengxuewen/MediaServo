@@ -1193,7 +1193,7 @@ mod tests {
 
         // 4. 发布
         let meta = mediaservo_frame_meta_t {
-            seq: 7, width: 640, height: 480, format: 1, version: 1,
+            seq: 7, width: 640, height: 480, format: 1, version: FrameMeta::WIRE_VERSION,
             is_keyframe: 1, reserved: 0, ts_mono_ns: 1000, ts_epoch_ns: 2000,
         };
         let payload = [0xAAu8; 64];

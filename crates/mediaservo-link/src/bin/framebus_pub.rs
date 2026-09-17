@@ -27,7 +27,7 @@ fn main() {
         width: 1920,
         height: 1080,
         format: 1, // I420
-        version: 1,
+        version: FrameMeta::WIRE_VERSION,
         is_keyframe: true,
         ts_mono_ns: 0,
         ts_epoch_ns: 0,

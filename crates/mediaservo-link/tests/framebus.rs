@@ -22,14 +22,14 @@ async fn pubsub_roundtrip() {
     let bus_pub = FrameBus::attach("", &tok_pub, &vk_pub).unwrap();
     let (tok_sub, vk_sub) = token(Role::Processor, "proc-fb0");
     let bus_sub = FrameBus::attach("", &tok_sub, &vk_sub).unwrap();
-    let topic = FrameTopic::new(&format!("camera/fb0/{}/raw", std::process::id())); // 唯一名, 避免跨 run 残留
+    let topic = FrameTopic::new(format!("camera/fb0/{}/raw", std::process::id())); // 唯一名, 避免跨 run 残留
     let stream = bus_sub.subscribe(&topic).unwrap();
     let meta = FrameMeta {
         seq: 1,
         width: 640,
         height: 480,
         format: 1, // I420
-        version: 1,
+        version: FrameMeta::WIRE_VERSION,
         is_keyframe: true,
         ts_mono_ns: 100,
         ts_epoch_ns: 200,

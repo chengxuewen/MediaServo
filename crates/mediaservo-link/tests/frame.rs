@@ -18,7 +18,7 @@ fn frame_meta_has_format_and_version_roundtrip() {
         width: 1920,
         height: 1080,
         format: 1, // I420
-        version: 1,
+        version: FrameMeta::WIRE_VERSION,
         is_keyframe: true,
         ts_mono_ns: 123,
         ts_epoch_ns: 456,
@@ -27,7 +27,7 @@ fn frame_meta_has_format_and_version_roundtrip() {
     assert_eq!(bytes.len(), FrameMeta::WIRE_LEN);
     let d = FrameMeta::decode(&bytes).unwrap();
     assert_eq!(d, m, "roundtrip 应无损");
-    assert_eq!((d.format, d.version), (1, 1), "format/version 字段必须保留");
+    assert_eq!((d.format, d.version), (1, FrameMeta::WIRE_VERSION), "format/version 字段必须保留");
     assert!(d.is_keyframe);
 }
 

@@ -21,7 +21,7 @@ async fn connect_auth_join_and_roundtrip() {
 
         // 2) 发认证确认 Error{code:0}
         let ack = SignalingMessage::Error { code: 0, message: String::new() };
-        ws.send(Message::Text(serde_json::to_string(&ack).unwrap().into()))
+        ws.send(Message::Text(serde_json::to_string(&ack).unwrap()))
             .await
             .unwrap();
 
@@ -34,7 +34,7 @@ async fn connect_auth_join_and_roundtrip() {
             _ => panic!("expected RoomJoin"),
         };
         let joined = SignalingMessage::RoomJoined { room_id, peer_id: "peer-1".to_string() , protocol: None, server_version: None, session_nonce: None};
-        ws.send(Message::Text(serde_json::to_string(&joined).unwrap().into()))
+        ws.send(Message::Text(serde_json::to_string(&joined).unwrap()))
             .await
             .unwrap();
 
@@ -113,7 +113,7 @@ async fn gateway_mode_connects_with_envelope_wire() {
             src: "server".into(),
             msg: SignalingMessage::RoomJoined { room_id, peer_id: "veh-peer".into() , protocol: None, server_version: None, session_nonce: None},
         };
-        ws.send(Message::Text(serde_json::to_string(&joined).unwrap().into()))
+        ws.send(Message::Text(serde_json::to_string(&joined).unwrap()))
             .await
             .unwrap();
 
@@ -173,7 +173,7 @@ async fn gateway_mode_room_join_denied_returns_error() {
             src: "server".into(),
             msg: SignalingMessage::Error { code: 5001, message: "gateway not connected to server".into() },
         };
-        ws.send(Message::Text(serde_json::to_string(&deny).unwrap().into()))
+        ws.send(Message::Text(serde_json::to_string(&deny).unwrap()))
             .await
             .unwrap();
     });
@@ -199,7 +199,7 @@ async fn auth_denied_returns_error() {
         let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
         let _psk = ws.next().await.unwrap().unwrap();
         let deny = SignalingMessage::Error { code: 4003, message: "PSK authentication failed".to_string() };
-        ws.send(Message::Text(serde_json::to_string(&deny).unwrap().into()))
+        ws.send(Message::Text(serde_json::to_string(&deny).unwrap()))
             .await
             .unwrap();
     });
@@ -223,7 +223,7 @@ async fn room_join_carries_device_credentials() {
         let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
         let _psk = ws.next().await.unwrap().unwrap();
         let ack = SignalingMessage::Error { code: 0, message: String::new() };
-        ws.send(Message::Text(serde_json::to_string(&ack).unwrap().into())).await.unwrap();
+        ws.send(Message::Text(serde_json::to_string(&ack).unwrap())).await.unwrap();
         let join_msg = ws.next().await.unwrap().unwrap();
         let join: SignalingMessage = serde_json::from_str(join_msg.to_text().unwrap()).unwrap();
         match join {
@@ -234,7 +234,7 @@ async fn room_join_carries_device_credentials() {
             other => panic!("expected RoomJoin, got {other:?}"),
         }
         let joined = SignalingMessage::RoomJoined { room_id: "r".into(), peer_id: "peer-1".into() , protocol: None, server_version: None, session_nonce: None};
-        ws.send(Message::Text(serde_json::to_string(&joined).unwrap().into())).await.unwrap();
+        ws.send(Message::Text(serde_json::to_string(&joined).unwrap())).await.unwrap();
     });
     let client = SignalClient::new(&format!("ws://{addr}/ws"), "test-psk", "r", PeerRole::Host)
         .with_device_credentials(mediaservo_link::DeviceCredential {
@@ -257,10 +257,10 @@ async fn room_join_denied_surfaces_device_auth_error() {
         let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
         let _psk = ws.next().await.unwrap().unwrap();
         let ack = SignalingMessage::Error { code: 0, message: String::new() };
-        ws.send(Message::Text(serde_json::to_string(&ack).unwrap().into())).await.unwrap();
+        ws.send(Message::Text(serde_json::to_string(&ack).unwrap())).await.unwrap();
         let _join = ws.next().await.unwrap().unwrap();
         let deny = SignalingMessage::Error { code: 4010, message: "device authentication failed".to_string() };
-        ws.send(Message::Text(serde_json::to_string(&deny).unwrap().into())).await.unwrap();
+        ws.send(Message::Text(serde_json::to_string(&deny).unwrap())).await.unwrap();
     });
     let client = SignalClient::new(&format!("ws://{addr}/ws"), "test-psk", "r", PeerRole::Host)
         .with_device_credentials(mediaservo_link::DeviceCredential {
@@ -297,7 +297,7 @@ async fn refuse_then_serve(refuse: usize, total: usize) -> (std::net::SocketAddr
                 let psk_msg = ws.next().await.unwrap().unwrap();
                 assert!(matches!(psk_msg, Message::Text(_)));
                 let ack = SignalingMessage::Error { code: 0, message: String::new() };
-                ws.send(Message::Text(serde_json::to_string(&ack).unwrap().into())).await.unwrap();
+                ws.send(Message::Text(serde_json::to_string(&ack).unwrap())).await.unwrap();
                 let join_msg = ws.next().await.unwrap().unwrap();
                 let join: SignalingMessage = serde_json::from_str(join_msg.to_text().unwrap()).unwrap();
                 let room_id = match join {
@@ -305,7 +305,7 @@ async fn refuse_then_serve(refuse: usize, total: usize) -> (std::net::SocketAddr
                     _ => panic!("expected RoomJoin"),
                 };
                 let joined = SignalingMessage::RoomJoined { room_id, peer_id: "peer-1".to_string() , protocol: None, server_version: None, session_nonce: None};
-                ws.send(Message::Text(serde_json::to_string(&joined).unwrap().into())).await.unwrap();
+                ws.send(Message::Text(serde_json::to_string(&joined).unwrap())).await.unwrap();
                 return; // 本轮服务完成，剩余连接不再处理
             }
         }
@@ -363,10 +363,10 @@ async fn on_disconnect_fires_when_server_closes() {
         let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
         let _psk = ws.next().await.unwrap().unwrap();
         let ack = SignalingMessage::Error { code: 0, message: String::new() };
-        ws.send(Message::Text(serde_json::to_string(&ack).unwrap().into())).await.unwrap();
+        ws.send(Message::Text(serde_json::to_string(&ack).unwrap())).await.unwrap();
         let _join = ws.next().await.unwrap().unwrap();
         let joined = SignalingMessage::RoomJoined { room_id: "r".to_string(), peer_id: "peer-1".to_string() , protocol: None, server_version: None, session_nonce: None};
-        ws.send(Message::Text(serde_json::to_string(&joined).unwrap().into())).await.unwrap();
+        ws.send(Message::Text(serde_json::to_string(&joined).unwrap())).await.unwrap();
         let _ready = ws.next().await.unwrap().unwrap(); // 等客户端就绪
         ws.close(None).await.unwrap();
     });

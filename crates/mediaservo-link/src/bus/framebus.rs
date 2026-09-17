@@ -151,13 +151,12 @@ impl FrameBus {
             });
         }
         // D239 单发布者：该 topic 已有其他节点的活跃发布者 → 冲突（进程本地快速检查）
-        if let Some(existing) = Registry::topic_publisher(topic).map_err(|e| LinkError::Bus(e.to_string()))? {
-            if existing != self.node_id {
+        if let Some(existing) = Registry::topic_publisher(topic).map_err(|e| LinkError::Bus(e.to_string()))?
+            && existing != self.node_id {
                 return Err(LinkError::TopicConflict {
                     topic: topic.as_str().into(),
                 });
             }
-        }
         let buf_len = FrameMeta::WIRE_LEN + payload.len();
         if buf_len > MAX_FRAME_BYTES {
             return Err(LinkError::Bus(format!(
@@ -250,17 +249,26 @@ impl FrameBus {
                     }
                 }
             };
-            loop {
-                let Some(inner) = weak.upgrade() else { break };
+            while let Some(inner) = weak.upgrade() {
                 match subscriber.receive() {
                     Ok(Some(sample)) => {
                         last_frame = std::time::Instant::now();
-                        let data: &[u8] = &*sample;
+                        let data: &[u8] = &sample;
                         if data.len() >= FrameMeta::WIRE_LEN {
-                            if let Ok(meta) = FrameMeta::decode(&data[..FrameMeta::WIRE_LEN]) {
-                                // Phase 1：一拷贝进 owned Vec（Phase 2 可持 Sample 实现真零拷贝）
-                                let payload = data[FrameMeta::WIRE_LEN..].to_vec();
-                                inner.deliver(FrameRef::new(meta, payload));
+                            match FrameMeta::decode(&data[..FrameMeta::WIRE_LEN]) {
+                                Ok(meta) => {
+                                    // Phase 1：一拷贝进 owned Vec（Phase 2 可持 Sample 实现真零拷贝）
+                                    let payload = data[FrameMeta::WIRE_LEN..].to_vec();
+                                    inner.deliver(FrameRef::new(meta, payload));
+                                }
+                                // N4：拒帧必出声（C15）；每订阅线程一次防热路径洪泛
+                                Err(e) => {
+                                    static VERSION_WARNED: std::sync::atomic::AtomicBool =
+                                        std::sync::atomic::AtomicBool::new(false);
+                                    if !VERSION_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                        tracing::warn!("FrameBus meta 拒帧: {e}");
+                                    }
+                                }
                             }
                         }
                     }

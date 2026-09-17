@@ -24,7 +24,7 @@ fn token(role: Role, node_id: &str) -> (CapabilityToken, Ed25519VerifyingKey) {
 async fn list_topics_finds_published_topic_with_alive_node() {
     let (tok_pub, vk_pub) = token(Role::Capture, "capture-disc0");
     let bus = FrameBus::attach("", &tok_pub, &vk_pub).unwrap();
-    let topic = FrameTopic::new(&format!("camera/disc0/{}/raw", std::process::id())); // 唯一名
+    let topic = FrameTopic::new(format!("camera/disc0/{}/raw", std::process::id())); // 唯一名
     bus.publish(&topic, &[1u8, 2, 3], &FrameMeta::default()).unwrap();
 
     let topics = FrameBus::list_topics().unwrap();
@@ -40,7 +40,7 @@ async fn list_topics_sees_subscriber_only_service() {
     // 订阅端（如 recorder）也会创建 topic 服务 — 发现语义: 服务存在即可见
     let (tok_sub, vk_sub) = token(Role::Processor, "proc-disc0");
     let bus = FrameBus::attach("", &tok_sub, &vk_sub).unwrap();
-    let topic = FrameTopic::new(&format!("camera/disc0/{}/subonly", std::process::id()));
+    let topic = FrameTopic::new(format!("camera/disc0/{}/subonly", std::process::id()));
     let stream = bus.subscribe(&topic).unwrap();
 
     let topics = FrameBus::list_topics().unwrap();

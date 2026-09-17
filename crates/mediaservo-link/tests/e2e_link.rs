@@ -20,8 +20,8 @@ fn token(role: Role, node_id: &str) -> (CapabilityToken, Ed25519VerifyingKey) {
 #[tokio::test]
 async fn e2e_capture_stitch_push() {
     let suffix = std::process::id();
-    let cam_topic = FrameTopic::new(&format!("camera/e2e/{suffix}/front/raw"));
-    let stitched_topic = FrameTopic::new(&format!("video/e2e/{suffix}/stitched"));
+    let cam_topic = FrameTopic::new(format!("camera/e2e/{suffix}/front/raw"));
+    let stitched_topic = FrameTopic::new(format!("video/e2e/{suffix}/stitched"));
 
     // 出图节点：Capture 发布相机帧
     let (tok_cap, vk_cap) = token(Role::Capture, "e2e-capture");
@@ -43,7 +43,7 @@ async fn e2e_capture_stitch_push() {
         width: 1920,
         height: 1080,
         format: 1,
-        version: 1,
+        version: FrameMeta::WIRE_VERSION,
         is_keyframe: true,
         ts_mono_ns: 0,
         ts_epoch_ns: 0,
@@ -61,7 +61,7 @@ async fn e2e_capture_stitch_push() {
         width: 3840, // 拼接宽度（占位：两路 1920 横拼）
         height: 1080,
         format: 1,
-        version: 1,
+        version: FrameMeta::WIRE_VERSION,
         is_keyframe: true,
         ts_mono_ns: 0,
         ts_epoch_ns: 0,
@@ -93,7 +93,7 @@ async fn e2e_acl_negative() {
 #[tokio::test]
 async fn e2e_single_publisher_conflict() {
     let suffix = std::process::id();
-    let topic = FrameTopic::new(&format!("video/e2e/{suffix}/conflict"));
+    let topic = FrameTopic::new(format!("video/e2e/{suffix}/conflict"));
     let (tok_a, vk_a) = token(Role::Processor, "e2e-proc-a");
     let bus_a = FrameBus::attach("", &tok_a, &vk_a).unwrap();
     bus_a.publish(&topic, &[1], &FrameMeta::default()).unwrap();

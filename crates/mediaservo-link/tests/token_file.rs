@@ -113,7 +113,7 @@ fn truncated_or_wrong_length_rejected() {
 
 #[test]
 fn wrong_signing_key_rejected() {
-    let (sk, vk) = keys();
+    let (sk, _vk) = keys();
     let acl = NodeAcl::for_role(NodeId::new("capture-0"), Role::Capture);
     let tok = CapabilityToken::sign(&acl, 3600, &sk).unwrap();
     // 用另一密钥对的公钥编码 → 文件内验签必须失败

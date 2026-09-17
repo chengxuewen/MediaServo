@@ -35,7 +35,7 @@ fn main() {
             width: 16,
             height: 16,
             format: 1, // I420
-            version: 1,
+            version: FrameMeta::WIRE_VERSION,
             is_keyframe: seq == 1,
             ts_mono_ns: seq,
             ts_epoch_ns: 0,

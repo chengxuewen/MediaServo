@@ -618,7 +618,6 @@ fn canonical_envelope_bytes(env: &ControlEnvelope) -> Vec<u8> {
 }
 
 /// `hex(HMAC-SHA256(key, canonical))`（车舱共用构造函数）。
-#[must_use]
 /// 急停 HMAC 密钥文件读取（G13 文件通道的**双端共用真源**：舱端 client-c
 /// `hmac_key_file` 与车端 `MEDIASERVO_CONTROL_HMAC_KEY_FILE` 同纪律）。
 /// 权限门 0600（组/他可读即拒——弱文件权限=密钥泄露面）、尾换行剥离、非空、UTF-8。
@@ -663,7 +662,7 @@ pub fn control_hmac_verify(key: &str, env: &ControlEnvelope, sig_hex: &str) -> b
     use sha2::Sha256;
     fn from_hex(h: &str) -> Option<Vec<u8>> {
         let b = h.as_bytes();
-        (b.len() % 2 == 0)
+        (b.len().is_multiple_of(2))
             .then(|| {
                 b.chunks(2)
                     .map(|p| u8::from_str_radix(std::str::from_utf8(p).ok()?, 16).ok())
@@ -1345,8 +1344,8 @@ mod tests {
                 assert_eq!(topics[0].topic, "camera/cam0");
                 assert_eq!(topics[0].frames, 148);
                 assert_eq!(streams[0].frames_encoded, 21_000);
-                assert_eq!(processes[1].running, false);
-                assert_eq!(processes[1].expected, true);
+                assert!(!processes[1].running);
+                assert!(processes[1].expected);
                 assert_eq!(signal.remote_peer_id, "veh-peer");
                 assert_eq!(signal.children[0].src, "host-streamer");
                 assert_eq!(ts, 1_700_000_000);

@@ -90,7 +90,7 @@ fn instance() -> RawBrand {
     static CACHE: OnceLock<RawBrand> = OnceLock::new();
     *CACHE.get_or_init(|| {
         let mut raw = DEFAULT_RAW;
-        if let Some(v) = std::env::var("MEDIASERVO_BRAND").ok() {
+        if let Ok(v) = std::env::var("MEDIASERVO_BRAND") {
             if valid_brand(&v) {
                 raw.env_product = Some(leak(v));
             } else {

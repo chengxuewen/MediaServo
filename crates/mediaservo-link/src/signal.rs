@@ -273,7 +273,7 @@ impl SignalClient {
         // 信任边界 127.0.0.1，整车 PSK 在 agent 的远端连接）
         if self.gateway_src.is_none() && self.jwt.is_none() {
             sender
-                .send(Message::Text(self.psk.clone().into()))
+                .send(Message::Text(self.psk.clone()))
                 .await
                 .map_err(|e| LinkError::Signal(format!("send auth: {e}")))?;
             let auth_msg = receiver
@@ -288,7 +288,7 @@ impl SignalClient {
                 _ => return Err(LinkError::Signal("unexpected auth response".into())),
             };
             match auth_msg {
-                SignalingMessage::Error { code, .. } if code == 0 => {}
+                SignalingMessage::Error { code: 0, .. } => {}
                 SignalingMessage::Error { code, message } => {
                     return Err(LinkError::Signal(format!("auth denied [{code}]: {message}")));
                 }
@@ -349,7 +349,7 @@ impl SignalClient {
             ),
         };
         sender
-            .send(Message::Text(join_json.into()))
+            .send(Message::Text(join_json))
             .await
             .map_err(|e| LinkError::Signal(format!("send RoomJoin: {e}")))?;
         let joined = if self.identity.is_some() {
@@ -563,7 +563,7 @@ impl SignalSession {
                     .dropped
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                     + 1;
-                if n == 1 || n % 64 == 0 {
+                if n == 1 || n.is_multiple_of(64) {
                     tracing::warn!("a3: 低优队列满，StatusReport 丢弃（累计 {n}）");
                 }
             }
@@ -730,7 +730,7 @@ async fn session_task(
                 continue;
             }
         };
-        if ws_tx.send(Message::Text(json.into())).await.is_err() {
+        if ws_tx.send(Message::Text(json)).await.is_err() {
             fire_disconnect(&on_disconnect);
             break;
         }

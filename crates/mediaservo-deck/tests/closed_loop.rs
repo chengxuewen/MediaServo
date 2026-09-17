@@ -115,7 +115,7 @@ async fn camera_framebus_recorder_roundtrip() {
                         width: f.format.width,
                         height: f.format.height,
                         format: 1, // I420
-                        version: 1,
+                        version: FrameMeta::WIRE_VERSION,
                         is_keyframe: seq % 30 == 0,
                         ts_mono_ns: f.pts * 1000,
                         ts_epoch_ns: 0,

@@ -70,20 +70,19 @@ impl<T: Serialize + DeserializeOwned + Clone + Debug> BackupManager<T> {
         };
 
         // Staleness check
-        if let Some(max_stale) = self.max_stale {
-            if let Ok(modified) = metadata.modified() {
-                let age = std::time::SystemTime::now()
-                    .duration_since(modified)
-                    .unwrap_or(Duration::MAX);
-                if age > max_stale {
-                    tracing::info!(
-                        path = %path.display(),
-                        age_secs = age.as_secs(),
-                        max_stale_secs = max_stale.as_secs(),
-                        "Backup file too stale, ignoring"
-                    );
-                    return Ok(None);
-                }
+        if let Some(max_stale) = self.max_stale
+            && let Ok(modified) = metadata.modified() {
+            let age = std::time::SystemTime::now()
+                .duration_since(modified)
+                .unwrap_or(Duration::MAX);
+            if age > max_stale {
+                tracing::info!(
+                    path = %path.display(),
+                    age_secs = age.as_secs(),
+                    max_stale_secs = max_stale.as_secs(),
+                    "Backup file too stale, ignoring"
+                );
+                return Ok(None);
             }
         }
 

@@ -12,7 +12,8 @@ pub struct FrameMeta {
     /// 像素格式（0=未知, 1=I420, 2=NV12, 3=RGBA, 4=JSON 载荷——非像素数据，
     /// 如 E2 streamer 推流状态 stats/* topic）。
     pub format: u8,
-    /// 元数据版本（演进用，D243）。
+    /// 元数据版本（演进用，D243）。encode 恒写 [`Self::WIRE_VERSION`]；
+    /// decode 对非当前版本**拒帧**（N4：静默错解 36 字节 = 比丢帧更糟）。
     pub version: u8,
     pub is_keyframe: bool,
     pub ts_mono_ns: u64,
@@ -22,6 +23,10 @@ pub struct FrameMeta {
 impl FrameMeta {
     /// JSON 载荷格式标记（E2 stats topic 线格式；非像素数据）。
     pub const FORMAT_JSON: u8 = 4;
+
+    /// 当前线格式版本。0 = 历史恒零值（全量部署字节形即 v0）——**上线零断裂**；
+    /// 未来演进 bump 此常数并在 decode 加兼容窗。
+    pub const WIRE_VERSION: u8 = 0;
 
     /// 定长编码字节数：
     /// seq(8) + width(4) + height(4) + format(1) + version(1) + keyframe(1) + reserved(1)
@@ -48,6 +53,14 @@ impl FrameMeta {
                 "frame meta too short: {} < {}",
                 b.len(),
                 Self::WIRE_LEN
+            )));
+        }
+        // N4 版本门：未知版本拒帧（解析后字段全错位 = 静默花屏比丢帧更坏）。
+        if b[17] != Self::WIRE_VERSION {
+            return Err(crate::LinkError::Bus(format!(
+                "frame meta wire version {} unsupported (expected {})",
+                b[17],
+                Self::WIRE_VERSION
             )));
         }
         Ok(Self {
@@ -194,5 +207,15 @@ mod tests {
         let s = FrameStream::new();
         s.inner().shutdown();
         assert!(s.recv().await.is_none(), "关停后 recv 应返回 None");
+    }
+
+    #[test]
+    fn decode_rejects_unknown_wire_version() {
+        // N4：版本位非 0 = 拒帧且报版本（36 字节全错位比丢帧更坏）
+        let mut b = FrameMeta { seq: 7, width: 4, ..Default::default() }.encode();
+        assert_eq!(FrameMeta::decode(&b).unwrap().version, FrameMeta::WIRE_VERSION);
+        b[17] = 9;
+        let e = FrameMeta::decode(&b).expect_err("v9 must be rejected");
+        assert!(e.to_string().contains("version 9"), "{e}");
     }
 }
