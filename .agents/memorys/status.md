@@ -893,3 +893,10 @@ install                        → 改名提示 + exit 2（退役）
 ### 2026-09-17: p3 W6 收口——功能面/文档面/CI 面三清账（p3 终态=主体交付 ✅）
 - 例子 README（IN/OUT/运行/双房约定/CI 边界）入 bindings/cxx/examples/；CHANGELOG F11 补 [sdk-client] CI+README 条目；矩阵 15/15 改判（对表缺口由样例轮闭合，余=py/node 面）。
 - p3-gui-viewer 主仓归档 _archive（C45）：状态头 ✅、索引同步、母计划活指针×2 改写同笔。W1 android-prebuilt 离线不可证=让位 device-day（诚实注记非静默账）。
+
+### 2026-09-17: server 编译姿态双雷清偿（小刀包）
+- **雷1 stub lib 编译挂**（W2-A 在册）：根因=signaling.rs L14 `use futures_util::{SinkExt,StreamExt}` 误挂 sfu cfg——handle_socket WS 泵**无条件**消费 split/send（410/444/528…），stub 下 trait 缺席 E0599。修=cfg 摘除+注释钉根因。
+- **雷2 stub --tests E0425**（09-03/09-10 两度在册）：3 个 test（push_config_errors/downstream_gone×2）调 sfu-only `handle_sfu_message` → 逐测补 `#[cfg(feature="sfu-mediasoup")]` 门（非整模关——保留 stub 面其余 136 测继续跑）。
+- 门：stub lib 139/sfu 157 全绿·两姿态 --all-targets 0 error·clippy(sfu) 0。**「stub 奇偶」基线自此双姿态 CI 可门**（V 批 CI 矩阵前置雷拆）。
+- 浏览器面确认：www 不消费 /api/rooms（只 admin/rooms）=W4d 对 Dashboard 零回归面。
+- 小刀包余项：estop `MEDIASERVO_CONTROL_HMAC_KEY` 的 render_oxfile 注入面 = 真部署刀（白名单/模板/文档三段），留 V 批/专轮（上下文限）。

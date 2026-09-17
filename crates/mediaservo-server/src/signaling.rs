@@ -11,8 +11,8 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use axum::routing::get;
-#[cfg(feature = "sfu-mediasoup")]
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{SinkExt, StreamExt}; // handle_socket WS 泵无条件消费（stub 姿态同需——
+                                          // 曾误挂 sfu cfg = --no-default-features lib 编译挂根因）
 use mediaservo_common::auth::{JwtAuth, SimplePskAuth};
 use mediaservo_common::error::CoreError;
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
@@ -2664,6 +2664,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "sfu-mediasoup")] // handle_sfu_message 仅 SFU 姿态存在（stub --tests E0425 在册案清偿）
     async fn push_config_errors_when_room_has_no_host() {
         let server = new_test_server().await;
         let err = server.push_config("empty-room", "cfg", 1).unwrap_err();
@@ -2672,6 +2673,7 @@ mod tests {
 
     /// F1/T4: DownstreamGone 身份门——无设备绑定的会话（浏览器/匿名）上报必须拒绝。
     #[tokio::test]
+    #[cfg(feature = "sfu-mediasoup")] // handle_sfu_message 仅 SFU 姿态存在（stub --tests E0425 在册案清偿）
     async fn downstream_gone_rejected_without_device_binding() {
         let server = new_test_server().await;
         let (tx, _rx) = tokio::sync::broadcast::channel::<String>(4);
@@ -2692,6 +2694,7 @@ mod tests {
 
     /// F1/T4: 设备会话上报未知房间 = 幂等 no-op（不 panic、无响应）——重放/竞态安全。
     #[tokio::test]
+    #[cfg(feature = "sfu-mediasoup")] // handle_sfu_message 仅 SFU 姿态存在（stub --tests E0425 在册案清偿）
     async fn downstream_gone_idempotent_on_unknown_room() {
         let server = new_test_server().await;
         server
