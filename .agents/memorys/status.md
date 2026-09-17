@@ -862,3 +862,10 @@ install                        → 改名提示 + exit 2（退役）
 - **新账 A：/api/rooms 数据面缺口**——列表报 `vehicle`（agent 自报房间），streamer 实际 produce 房间 = `vehicle_test`（流条目 room 键），两者不一致时消费者按列表 join 会 wait-producer 超时。**W2-A 语义裁决题（agent 注册房 vs 可消费房）另刀**。
 - **新账 B：遥控 ack 活体复测未通**——controller 新件 DC 传输 ICE Completed×4 全立在，舱端 steer 12 发无 ack（Cmd 消费链未达）；怀疑=controller 对舱端后到 DataProducer 的 consume 重建缺口（H6 名单只覆 streamer/audio）。basic 例历史（09-15 S2d）同形态 PASS=回归窗口在本轮升级后，**排查票 W4c**。
 - 判据终态：dummy 无头 22s cb=tex=657@30fps；门 build RC=0（余门见主提交注）。
+
+### 2026-09-17: W4c 结案——遥控 ack 非回归，舱端面=两类房间约定（零代码刀）
+- **判决性实验**：basic join 整车房 `vehicle` → steer ack **4/4 PASS**（RTT 1-2ms，首发 -1=consume 竞态窗重发兜底=D-H3 设计内）；viewer join 流房 `vehicle_test` → 507 帧@30fps 全绿。两房间各就各位 = 链路本通。
+- **根因**：PIT-140 v2 契约 = **媒体面 per-stream 房 `<vehicle_room>_<stream_id>`**（streamer L608 `format!("{}_{}",vehicle_room,stream.id)`）+ **控制面整车房 `<vehicle_room>`**（controller 经 gateway rewrite）。舱端示例拿一个 env room 打天下——join 流房则控制跨房不可见（broadcast 不到 controller=无 ack），join 整车房则无 producer（viewer wait 超时）。浏览器端从未坏 = web 按 per-stream 勾选播放天然正确。
+- **排除过程实录（教训素材）**：初判「H6 consume 重建缺口」三疑全部证伪——① controller crash-loop err 风暴=**09-15 化石**（mtime 亲验，H6/重试早已自愈）② token room claim=**不存在**（重签 2 pusher token 后 room 依旧 → 反向证实 room 源于流 id 派生与 token 无关，C40 清白）③ `pgrep -x msrtc-controller` 假死=comm 15 字符截断（PIT-15 再证）。
+- **新账 A 升级定性**：`/api/rooms`（W2-A）只报 agent 注册整车房——**不报 per-stream 流房 = 消费者按列表发现不到可播房**。修复方向：数据源并 device streams → 流房派生（`<room>_<stream_id>`，在线门=streams[].online）+ kind 分面（控制房无视频消费者预期）。**W4d 刀票**。
+- 约定沉淀（W6 SDK 文档必写）：舱端消费者=双房形态（流房看视频 / 整车房开控制），或等 W4d 后按列表一键拿两类。
