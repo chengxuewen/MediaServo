@@ -409,6 +409,10 @@ def _cmd_build_bindings(release: bool = False) -> None:
             shutil.copy2(out_dir / f"libmediaservo_{sdk}.so", so_major)
             _symlink_force(f"libmediaservo_{sdk}.so.{major}", libs_src / f"libmediaservo_{sdk}.so")
         wheel_dir = bind_dst / "wheel"; wheel_dir.mkdir(exist_ok=True)
+        # 陈旧 whl 清扫（09-17 e2e-delivery 首跑抓出：glob 无序 + 跨 run 残留 →
+        # next() 可咬旧文件 = rename 链自蚀源 pip ENOENT）。
+        for _stale in wheel_dir.glob("*.whl"):
+            _stale.unlink()
         r = subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-deps",
                             "--no-build-isolation", "-w", str(wheel_dir), str(py_src)],
                            capture_output=True, text=True)
@@ -419,7 +423,7 @@ def _cmd_build_bindings(release: bool = False) -> None:
         # 版本保持与 pyproject（=内 dist-info）一致——不强制 workspace ver（原 install 的 {ver} 重命名
         # 在 workspace ver ≠ pyproject 0.1.0 时 dist-info 版本不一致 → pip 拒绝安装——本实现更小修复面）
         import zipfile
-        wheel = next(wheel_dir.glob("mediaservo-*.whl"))
+        wheel = next(wheel_dir.glob("mediaservo-*-py3-none-any.whl"))  # 仅 any 源形
         tag_new = f"py3-none-{_platform_tag()}"
         with zipfile.ZipFile(wheel, "r") as z:
             items = z.infolist()

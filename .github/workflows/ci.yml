@@ -87,6 +87,36 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
 
+  test-server-stub:
+    # V5 双姿态门：stub（--no-default-features）lib+tests 编译面。09-17 双雷清偿
+    # （signaling E0599 / handle_sfu_message 测 E0425 = cfg 门的静默回归面）焊成守卫。
+    # --all-targets 必带：E0425 只在 tests 编译面暴露（lib-only 恒绿=半证据）。
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p mediaservo-server --no-default-features --all-targets
+
+  test-delivery:
+    # V5 交付面冒烟：out/bindings 组装 → 组件纯度(轻组件禁 FFmpeg) +
+    # find_package COMPONENTS 真符号 + pkg-config 版本对账 + ABI 巡检。
+    # 全系统工具链（无 pixi）= 交付物本应对干净环境可用（N7 事故面的反向守卫）。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system deps (干净消费者形)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake python3-pip
+      - name: Delivery smoke
+        run: bash scripts/e2e-delivery.sh
+
   test-cxx:
     # cxx header-only 家族编译+运行门（四 SDK 测试程序）+ C ABI 符号巡检（老三面漂移 +
     # client 新面）。前置 build-c 产四 cdylib。ASan/UBSan 活体环归 device-day（需活 server）。

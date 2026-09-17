@@ -915,3 +915,9 @@ install                        → 改名提示 + exit 2（退役）
 - 落地：host.yaml `[control].hmac_key_file`（Option，serde default）→ translate 注入 controller `--hmac-key-file`（相对→实例根绝对化；缺段零加参=逐字节钉）；bin 面显式 arg > env、读败 error+exit 1（安全功能拒静默降级）；**write_oxfile 部署期守卫**（配置指不存在文件=渲染 Err，早于 crash-loop）；模板注释段+CHANGELOG 条目。
 - 门：host --lib 79/79（新 3 测：注入/零扰动/守卫）；lint 零新增（4 处命中=存量旧行）；`--hmac-key-file` 双测锚。
 - 残留（device-day/另案）：全 key 验签 live 双端形（车舱同文件带内分发）；out/host 实例启用=配一行+簇重启+补密钥文件（0600）。
+
+### 2026-09-17: V5 残两件收口——stub 双姿态 CI 门 + 交付面冒烟 job
+- ci.yml 新 job：`test-server-stub`（ubuntu+macos 矩阵，`--no-default-features --all-targets`——E0425 教训焊成守卫，lib-only=半证据）+ `test-delivery`（系统 cmake/pip 无 pixi = 交付物对干净环境可用的反向守卫，跑 scripts/e2e-delivery.sh）。
+- `scripts/e2e-delivery.sh` 四判据全绿（RC=0）：① link/field 轻组件禁 FFmpeg DT_NEEDED（V1 组件化断言）② find_package COMPONENTS link+client 真符号链接运行③ pkg-config 四件==workspace 实值④ ABI drift 4/4。
+- **顺手斩 CLI 真 bug**（脚本首跑抓出）：wheel 目录跨 run 残留 + `glob().next()` 无序 = rename 链自蚀源 → pip ENOENT。修 = build 前清 *.whl + glob 仅 `*-py3-none-any.whl` 源形。**教训：写死「单次运行干净态」假设的脚本在 CI 复用旧 out/ 目录必炸**——e2e 脚本自带前置清扫。
+- V5 三件全落（密钥链/双姿态门/组件冒烟）；V 批残 = V1（等 N1 裁）+ V6 收口彩排。
