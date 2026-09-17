@@ -938,3 +938,9 @@ install                        → 改名提示 + exit 2（退役）
 - **三连污染案（同族三形态，全部源生成/清扫根治）**：① `pip wheel` 不吃变更检测——setuptools build/ 旧 _libs（含 client）被原样带出 = build 前 rmtree；② 顶层 `lib/python3.12/` 不在 ("python","wheel","node") 摘除 tuple = pip --prefix 实体位置认知错 = 改 glob("python3.*")；③ `pip install --prefix` **不删旧 data_files** = site-packages/_libs 残留上一轮 client 尸体 = 装前摘旧包树。教训：**pip 三缓存面（build/、装树、--prefix）每轮装配全要主动清扫，「构建产物=源之真像」在 pip 生态是错的**。
 - 判据纠偏两枚：tar 清单 grep 子串假命中（`_libs/` 内路径命中顶层判定——判据锚定路径前缀）；`tar tzf + -O` 混用读不到内容（验证命令自身出错≠产品错）。
 - alias 实测：package bindings → sdk 包+WARN 一周期形 ✓。V1b 残 = manifest.json 生成（N2 件）+ V6 彩排。
+
+### 2026-09-17: N2 manifest.json 落地（V1 收官小刀）
+- `_write_manifest_file`：components 从包 staging 实内容派生 + requires_ffmpeg **readelf DT_NEEDED 实据**（零硬编码；readelf 缺席=None 诚实形非 false）+ protocol wire 版本源生成；sdk-field（deck true / field,link false + node/python）/ sdk-client（client-only）双包出；e2e 断言节（含 wire=0 与 client-only 唯一性）。
+- 判据两连自咬当场修：`av` 词边界咬不到 `[libavformat]`（假全 False——regex 面测出真值才收）；python 组件探测路径写错（site-packages 包名=mediaservo）。
+- 事实附注：field-c cdylib DT_NEEDED 无 libav*（cargo 层「field 传递依赖 ffmpeg」不下沉到 C 交付面）——manifest 实据优于旧口头账。
+- **V 批账面**：V1 ✅（manifest 后全闭环）· V2 ◐(N7 等裁) · V3 ◑(残 token_schema/openapi) · V4-5 ✅ · V6 ⏳(等 V 批全完)。未推：主 ≈99 / 子 ≈28。

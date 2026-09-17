@@ -125,7 +125,7 @@ for f in \
     lib/pkgconfig/mediaservo-field.pc lib/pkgconfig/mediaservo-link.pc lib/pkgconfig/mediaservo-deck.pc \
     lib/cmake/mediaservo/mediaservoConfig.cmake lib/cmake/mediaservo/mediaservoConfigVersion.cmake \
     node/mediaservo/package.json node/mediaservo/mediaservo.node node/mediaservo/lib/index.mjs \
-    sdk-version.txt CHANGES.md; do
+    sdk-version.txt manifest.json CHANGES.md; do
     echo "$LIST" | grep -q "^$SDK_ROOT/$f$" || { echo "FAIL: SDK 包缺 $f"; FAIL=1; }
 done
 echo "$LIST" | grep -qE "^$SDK_ROOT/lib/python3\.[0-9]+/site-packages/mediaservo/" || { echo "FAIL: SDK 包缺 python 包"; FAIL=1; }
@@ -147,6 +147,18 @@ done
 grep -qE "libmediaservo_(field|link|deck)" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client 包混入设备面 lib"; FAIL=1; }
 grep -q "site-packages" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client 包混入 python 设备面"; FAIL=1; }
 echo "OK: sdk-client 半区包成型（client-only + 零设备面混入）"
+# N2 manifest 内容抽查：client 包 components 唯一且 ffmpeg=false（读elf实据形）
+tar xzf "$CLI_TGZ" -C "$TMP/cli" "$CLI_ROOT/manifest.json" 2>/dev/null
+python3 - "$TMP/cli/$CLI_ROOT/manifest.json" <<'PYV'
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d["package"] == "sdk-client" and d["schema"] == 1
+c = [x for x in d["components"] if "cmake_component" in x]
+assert [x["cmake_component"] for x in c] == ["client"], c
+assert c[0]["requires_ffmpeg"] in (False, None), c
+assert d["protocol"]["frame_meta_wire_version"] == 0, "wire 版本必须=源生成实值"
+print("OK: manifest.json 内容对账（client-only/ffmpeg 实据/wire=0）")
+PYV
 
 # ── 6. 版本契约文件内容（D-H14 最小版: workspace + FrameMeta wire 版本）──
 note "version contract file"

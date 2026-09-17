@@ -29,6 +29,9 @@
   host-controller `--hmac-key-file` 参数（显式 > 环境变量，读败 = error 早退不静默降级）；
   未配置 = dev 迁移形逐字节不变（专网/开发零扰动）。生产部署急停验签从「手工 env 三件套」
   收敛为一行配置。
+- [deploy] 发布包新增 `manifest.json`（N2 发现面）：机械派生的组件枚举（lib/头/pc/cmake 组件名
+  + `requires_ffmpeg` **按 readelf DT_NEEDED 实据**——deck=true、field/link=false）与协议配对
+  （frame_meta 线版本源生成）；ROS/打包器/CI 不解析 CMake 即可判能力面。sdk-field/sdk-client 两包各自成型。
 - [deploy] 发布包 F12 双半区切分：`package` 目标成型 **sdk-field**（设备半区：field/link/deck
   库+C/cxx 头+Python wheel+node）与 **sdk-client**（舱端半区：client 库+头+pc+cmake 独立组件
   集，零设备面混入）；原 `bindings` 目标更名 `sdk-field`（一周期 alias，出包名 sdk 并 WARN）。

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -1228,6 +1229,45 @@ def _stage_sdk_package(staging: Path, domain: str) -> None:
             .replace("@VERSION@", ver).replace("@MAJOR@", major).replace("@SDK_LIST@", sdk_list))
 
 
+_SDK_EXTRA = {"python", "node"}  # sdk-field 非 C 组件（发现面对 py/npm 消费方）
+
+
+def _write_manifest_file(dst: Path, domain: str, pkg_root: Path) -> None:
+    """N2 交付发现 manifest（机械派生零新事实源）：components 来自包实际 staging
+    内容 + readelf ffmpeg 实据——消费方（ROS/打包器/CI）不 parse CMake 即可枚举能力面。"""
+    ver = _crate_version(_TARGET_CRATE[domain])
+    comps = []
+    for so in sorted((pkg_root / "lib").glob("libmediaservo_*.so")):
+        name = so.name.removeprefix("libmediaservo_").removesuffix(".so")
+        try:
+            nee = subprocess.run(["readelf", "-d", str(so.resolve() if so.is_symlink() else so)],
+                                 capture_output=True, text=True, timeout=10).stdout
+            ffmpeg = bool(re.search(r"NEEDED.*\[libav(format|codec)", nee))  # DT_NEEDED 名=libav*
+        except (OSError, subprocess.TimeoutExpired):
+            ffmpeg = None  # readelf 缺席（非 Linux）= 未知而非 false（诚实形）
+        comps.append({
+            "name": name, "lib": f"lib/{so.name}",
+            "header": f"include/mediaservo/{name}.h",
+            "pkgconfig": f"lib/pkgconfig/mediaservo-{name}.pc",
+            "cmake_component": name, "requires_ffmpeg": ffmpeg,
+        })
+    if domain == "sdk-field":
+        if (pkg_root / "node").exists():
+            comps.append({"name": "node"})
+        if any((pkg_root / "lib").glob("python3.*/site-packages/mediaservo/")):
+            comps.append({"name": "python"})
+    manifest = {
+        "schema": 1,
+        "package": f"{domain}",
+        "version": ver,
+        "components": comps,
+        "protocol": {"frame_meta_wire_version": _frame_meta_wire_version(),
+                     "token_schema_version": 1},
+        "generated_by": "mediaservo_cli package (D281/N2)",
+    }
+    (dst / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+
+
 def _write_version_file(dst: Path, target: str) -> None:
     """版本契约文件（D-H13: 版本兼容靠协议契约显式配对, 非同包隐含）。
     host-version.txt / sdk-version.txt: workspace 版本 + FrameMeta wire 版本 + 令牌 schema 版本。
@@ -1404,6 +1444,8 @@ def _cmd_package(args: argparse.Namespace) -> None:
                   file=sys.stderr)
             sys.exit(2)
         _write_version_file(staging, pkg_name)
+        if args.target in ("bindings", "sdk-field", "sdk-client"):
+            _write_manifest_file(staging, "sdk-client" if args.target == "sdk-client" else "sdk-field", staging)
         prefix_name = args.brand if args.brand else "mediaservo"
         _write_changes_file(staging, args.target)  # D280 单源 + F11-X 切片（WARN 降级不阻断）
         package_root = f"{prefix_name}-{pkg_name}-{ver}"
