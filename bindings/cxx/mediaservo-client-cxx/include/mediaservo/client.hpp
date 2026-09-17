@@ -95,6 +95,7 @@ struct Config {
     std::string signaling_url; // "ws://host:9800/ws"
     std::string room;          // 房间 ID
     std::string jwt;           // login() 输出（与 psk 二选一）
+    std::string hmac_key_file; // 急停密钥文件（0600；空 = 不签名，语义见 client.h）
     std::string psk;           // PSK 直传（与 jwt 二选一）
     /// "Client"(默认)/"Viewer"/"Remote"；空串 = "Client"。
     std::string role;
@@ -111,6 +112,7 @@ public:
         c.jwt = cfg.jwt.empty() ? nullptr : cfg.jwt.c_str();
         c.psk = cfg.psk.empty() ? nullptr : cfg.psk.c_str();
         c.role = cfg.role.empty() ? nullptr : cfg.role.c_str();
+        c.hmac_key_file = cfg.hmac_key_file.empty() ? nullptr : cfg.hmac_key_file.c_str();
 
         ms_client_session_t* h = nullptr;
         int rc = ms_client_session_create(&c, &h);
@@ -187,6 +189,11 @@ public:
 
     /// 开出程控制通道集（每会话一次性；labels 如 {"chassis"}）。
     Result<class Control> open_control(const std::vector<std::string>& labels);
+
+    /// 急停双路投递（W4b；签名态 = Config.hmac_key_file）。OK = 投递成功，
+    /// 车端执行裁决看 ctl 的 seq 回执 ack。payload_json "" = null。
+    Result<void> emergency_stop(const class Control& ctl, const std::string& label,
+                                uint64_t seq, const std::string& payload_json);
 
     /// 关闭会话并释放 handle（幂等；join 视频泵后才释放回调对象）。
     Result<void> close() noexcept {
@@ -309,6 +316,19 @@ private:
     ms_client_control_t* h_ = nullptr;
     std::vector<std::function<void(const std::string&)>*> cbs_;
 };
+
+inline Result<void> Session::emergency_stop(const class Control& ctl, const std::string& label,
+                                            uint64_t seq, const std::string& payload_json) {
+    if (!h_ || !ctl.h_) {
+        return Result<void>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed"});
+    }
+    const int rc = ms_client_session_emergency_stop(
+        h_, ctl.h_, label.c_str(), seq, payload_json.empty() ? nullptr : payload_json.c_str());
+    if (rc != MEDIASERVO_OK) {
+        return Result<void>(tl::unexpect, detail::make_error(rc));
+    }
+    return Result<void>();
+}
 
 inline Result<class Control> Session::open_control(const std::vector<std::string>& labels) {
     if (!h_) return Result<Control>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed"});

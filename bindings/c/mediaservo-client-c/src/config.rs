@@ -42,6 +42,10 @@ pub struct ms_client_config_t {
     pub jwt: *const std::os::raw::c_char,
     pub psk: *const std::os::raw::c_char,
     pub role: *const std::os::raw::c_char,
+    /// 急停 HMAC 密钥文件路径（W4b；G13 语义=密钥永不走 argv/env 明文）。
+    /// 文件须 0600 且非空；NULL/空 = estop 不签名（车端未配 key = 迁移放行形，
+    /// 车端已配 key = 拒签正确裁决）。载荷 = 原始密钥字节（trim 尾换行）。
+    pub hmac_key_file: *const std::os::raw::c_char,
 }
 
 pub const MEDIASERVO_CLIENT_CONFIG_MIN_SIZE: usize = size_of::<ms_client_config_t>();
@@ -55,6 +59,7 @@ impl Default for ms_client_config_t {
             jwt: ptr::null(),
             psk: ptr::null(),
             role: ptr::null(),
+            hmac_key_file: ptr::null(),
         }
     }
 }
@@ -90,6 +95,7 @@ pub(crate) struct SessionCfg<'a> {
     pub jwt: Option<&'a str>,
     pub psk: Option<&'a str>,
     pub role: PeerRole,
+    pub hmac_key_file: Option<&'a str>,
 }
 
 /// 会话配置校验（纯函数，单测钉）：url/room 必填；jwt/psk 恰一非空；role 可空。
@@ -119,11 +125,25 @@ pub(crate) fn validate_session_cfg(cfg: &ms_client_config_t) -> Result<SessionCf
     match (jwt, psk) {
         (Some(j), None) if clean(j) => {
             let role = session_role(cfg)?;
-            Ok(SessionCfg { signaling_url: url, room, jwt: Some(j), psk: None, role })
+            Ok(SessionCfg {
+                signaling_url: url,
+                room,
+                jwt: Some(j),
+                psk: None,
+                role,
+                hmac_key_file: session_hmac_key_file(cfg),
+            })
         }
         (None, Some(p)) if clean(p) => {
             let role = session_role(cfg)?;
-            Ok(SessionCfg { signaling_url: url, room, jwt: None, psk: Some(p), role })
+            Ok(SessionCfg {
+                signaling_url: url,
+                room,
+                jwt: None,
+                psk: Some(p),
+                role,
+                hmac_key_file: session_hmac_key_file(cfg),
+            })
         }
         (Some(j), Some(p)) if clean(j) && clean(p) => {
             set_last_error(
@@ -142,6 +162,33 @@ pub(crate) fn validate_session_cfg(cfg: &ms_client_config_t) -> Result<SessionCf
             Err(MEDIASERVO_CLIENT_ERR_INVALID_ARG)
         }
     }
+}
+
+fn session_hmac_key_file(cfg: &ms_client_config_t) -> Option<&str> {
+    // cstr 生命周期 = cfg 借用期（SessionCfg 生命周期随 cfg）。非法 UTF-8 与缺失同路
+    // = 该路径在会话建立期不报错（可选字段），estop 使用时按"文件不可读"暴露。
+    match cstr(cfg.hmac_key_file) {
+        Ok(Some(s)) if !s.is_empty() => Some(s),
+        _ => None,
+    }
+}
+
+/// W4b：读急停密钥文件（0600 权限门 + 非空）。G13 语义 = 密钥只经文件通道。
+pub(crate) fn load_hmac_key_file(path: &str) -> Result<String, String> {
+    use std::os::unix::fs::PermissionsExt;
+    let meta = std::fs::metadata(path).map_err(|e| format!("hmac_key_file {path}: {e}"))?;
+    let mode = meta.permissions().mode() & 0o777;
+    if mode & 0o077 != 0 {
+        return Err(format!("hmac_key_file {path}: mode {mode:04o} 过宽（须 0600 或更严）"));
+    }
+    let mut bytes = std::fs::read(path).map_err(|e| format!("hmac_key_file {path}: {e}"))?;
+    while matches!(bytes.last(), Some(b'\n') | Some(b'\r')) {
+        bytes.pop();
+    }
+    if bytes.is_empty() {
+        return Err(format!("hmac_key_file {path}: 空密钥"));
+    }
+    String::from_utf8(bytes).map_err(|_| format!("hmac_key_file {path}: 非 UTF-8 密钥"))
 }
 
 fn session_role(cfg: &ms_client_config_t) -> Result<PeerRole, c_int> {
@@ -163,6 +210,7 @@ fn session_role(cfg: &ms_client_config_t) -> Result<PeerRole, c_int> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn login_cfg_small_struct_size_rejected() {
@@ -218,6 +266,7 @@ mod tests {
                 jwt,
                 psk,
                 role: ptr::null(),
+                hmac_key_file: ptr::null(),
             }
         };
         // 双凭证 → 拒
@@ -248,10 +297,40 @@ mod tests {
             jwt: c"j".as_ptr(),
             psk: ptr::null(),
             role: c"Bogus".as_ptr(),
+            hmac_key_file: ptr::null(),
         };
         assert_eq!(
             validate_session_cfg(&cfg).unwrap_err(),
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         );
+    }
+    #[test]
+    fn hmac_key_file_gate_and_trim() {
+        let dir = std::env::temp_dir().join(format!("msw4b-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("k.key");
+        std::fs::write(&p, b"s3cret\n").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(load_hmac_key_file(p.to_str().unwrap()).unwrap(), "s3cret"); // trim 钉
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(load_hmac_key_file(p.to_str().unwrap()).unwrap_err().contains("过宽"));
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::write(&p, b"\n").unwrap();
+        assert!(load_hmac_key_file(p.to_str().unwrap()).unwrap_err().contains("空密钥"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn session_cfg_reads_hmac_key_file_optional() {
+        let cfg = ms_client_config_t {
+            struct_size: MEDIASERVO_CLIENT_CONFIG_MIN_SIZE,
+            signaling_url: c"ws://h:9800/ws".as_ptr(),
+            room: c"r".as_ptr(),
+            jwt: c"j".as_ptr(),
+            psk: ptr::null(),
+            role: ptr::null(),
+            hmac_key_file: c"/tmp/k".as_ptr(),
+        };
+        assert_eq!(validate_session_cfg(&cfg).unwrap().hmac_key_file, Some("/tmp/k"));
     }
 }

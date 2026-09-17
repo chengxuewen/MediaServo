@@ -876,3 +876,11 @@ install                        → 改名提示 + exit 2（退役）
 - **潜伏 bug 首见光=parse_rooms off-by-one**：`find('"', pos+8)` 自撞 `"room_id"` 闭引号 → room_id/kind 全解析空串（+9/+7 修）。多年未爆 = 显式 MSRTC_ROOM env 通道从不走解析、UI 勾选通道无人无头实测——**无头判据补位后才被 auto-fallback 路径暴露**（「样例即测试三层」又一证）。
 - 生产复验（build:deploy server + 簇重启，用户批准）：/api/rooms 实况 `[{vehicle,control},{vehicle_test,video}]`；viewer **纯发现模式**（无 ROOM env）fallback→pairing→20s cb=tex=597@30fps 全绿。
 - 环境注记：PIT-193 新亚种=**clippy 也会咬 mediasoup 双 buildtype**（env -i 不够，必须 task 内层 unset MESON_ARGS/MESON——指纹变化重跑 build script 所致，正解=照抄 build-server-native 配方体外壳）。
+
+### 2026-09-17: p3 W4b——急停签名 C/C++ 面暴露（安全功能交付面补全）
+- **config 扩尾** `hmac_key_file`（G13 文件形：0600 门+非空+trim+UTF-8 校验单测钉；struct_size 闸门=旧尺寸拒="rebuild with current header"既有纪律）；路径坏**不拦建会话**（estop 调用点报 INVALID_ARG=单坏路径不拖垮整会话）。
+- **组合函数** `ms_client_session_emergency_stop`（锁序 session→ctl 全局一致=无死锁面；payload NULL=Null；OK=投递语义注释钉"非已执行"）；cxx `Session::emergency_stop(ctl,…)` out-of-line（Control incomplete 类+friend h_ 直访）。ABI 14→15。
+- viewer：按钮换签名口 + `MSRTC_ESTOP_KEY_FILE` env 注入 + signed/unsigned 措辞随配置态。
+- **插曲自咬（#17 族新例）**：① 空引用 UB 测试构想（reinterpret_cast<Control*>(nullptr) 解引用）当场撤回；② python 三段 replace 锚=想象形（run_env 行不存在=实况 env_or 形）assert 失败零写盘两连——**行号锚前必 grep 实况**（#9 再证）；③ key_file 声明位置 vs lambda 捕获作用域编译咬中即挪。
+- 活体（迁移放行形复验）：basic estop → 车端 `actuation estop` 执行 + **ack seq=900 ok:true** + 断连定向拆除（S4′ 清理链连带）；守卫/权限门=单测 27 绿；test-cxx 6 PASS。全 key 验签正负例=S4 轮 Rust 面已活体（wire 同一合成件），C 面签名形=device-day 复跑。
+- 门：client-c 27 · ABI 15==15 · test-cxx 6 · ctest core · build example RC=0。p3 功能面自 W4b 起 = 完整（W4c/W4d 已毕），余 W5 CI + W6 收口。

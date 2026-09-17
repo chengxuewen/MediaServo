@@ -40,6 +40,11 @@
   control（整车房，无视频 producer）/ audio。`imgui_viewer` 同步：勾选流房自动并入
   整车控制房 tile（双房约定产品形态）、auto 发现 fallback、修房间名解析 off-by-one
   （显式 env 通道带病多年首见光）。
+- [sdk-client] 急停签名面 C/C++ 暴露（W4b）：配置新增 `hmac_key_file`（密钥文件通道，
+  0600 权限门+非空+尾换行剥离，G13=密钥永不 argv/env 明文）；`ms_client_session_emergency_stop`
+  / C++ `Session::emergency_stop(ctl,…)` 双路投递（DC 快路径带签 + 信令审计副本）。
+  未配 key = 不签名（车端未配 key = 迁移放行形；车端配 key 则拒签=正确裁决）。
+  ABI 14→15；`imgui_viewer` 急停按钮换签名口（signed/unsigned 措辞随配置态）。
 - [sdk-client] GUI 例子 `imgui_viewer` W3b 首刀：登录→入房→消费→**I420 纹理上屏全链**
   （新增壳层件 FrameStaging 泵线程→主线程最新帧槽 + VideoTexture SDL IYUV 工位）。
   无头判据 `SDL_VIDEODRIVER=dummy` + `MSRTC_RUN_SECS` 自退 + `[frame] cb=/tex=` 双计数

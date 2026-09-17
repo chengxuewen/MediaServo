@@ -134,6 +134,7 @@ struct Tile {
 };
 
 struct Ui {
+    bool key_signed = false; // estop 签名态（面板措辞；W4b）
     char user[64] = "admin";
     char pass[256] = "";
     bool pass_shown = false;
@@ -161,6 +162,7 @@ int main() {
     const std::string ws = env_or("MSRTC_WS_URL", "ws://127.0.0.1:9800/ws");
     const std::string http_base = env_or("MSRTC_HTTP_BASE", "http://127.0.0.1:9800");
     const int run_secs = std::atoi(env_or("MSRTC_RUN_SECS", "0"));
+    const char* key_file = std::getenv("MSRTC_ESTOP_KEY_FILE"); // G13 文件通道注入
     const char* pass_env = std::getenv("MSRTC_PASS"); // 仅无头 CI 通道（G13：GUI 面走输入框）
     const std::string auto_room = env_or("MSRTC_ROOM", "");
 
@@ -185,6 +187,10 @@ int main() {
         cfg.room = room_id;
         cfg.jwt = ui.jwt;
         cfg.role = "Client";
+        if (key_file && *key_file) {
+            cfg.hmac_key_file = key_file;
+            ui.key_signed = true;
+        }
         auto tile = std::make_unique<Tile>(room_id);
         tile->video = video; // 控制房 tile 不发 consume（整车房无媒体=wait-producer 黑洞）
         Tile* tp = tile.get();
@@ -388,11 +394,19 @@ int main() {
                                             (std::string("{\"deg\":") + std::to_string(ui.steer_deg) + "}").c_str());
                             }
                             ImGui::SameLine();
-                            // W4b 待补：签名急停（HMAC sig + WS 审计副本）——C 面暴露刀另立。
-                            if (ImGui::Button("ESTOP (unsigned)")) {
-                                t->send_cmd("chassis", 900, "estop", "{\"reason\":\"viewer\"}");
-                                ui.estop_sent = true;
+                            // W4b：签名急停组合面（Config.hmac_key_file 决定签名态；
+                            // 未配 key = 迁移放行形；车端有 key 则拒签=正确裁决）。
+                            if (ImGui::Button("ESTOP")) {
+                                auto es = t->sess.emergency_stop(*t->ctl, "chassis", 900,
+                                                                 R"({"reason":"viewer-ui"})");
+                                ui.estop_sent = es.has_value();
+                                if (!es) {
+                                    std::lock_guard<std::mutex> lk(t->ack_mu);
+                                    t->ack_last = "estop: " + es.error().message;
+                                }
                             }
+                            ImGui::SameLine();
+                            ImGui::TextDisabled("%s", ui.key_signed ? "signed" : "unsigned (no key file)");
                             std::string acks;
                             {
                                 std::lock_guard<std::mutex> lk(t->ack_mu);

@@ -80,9 +80,14 @@ typedef struct ms_client_config_t {
     const char* role;          /* "Client"/"Viewer"→消费角色, "Remote"→舱对端角色; NULL=Client。
                                 *   注: Client/Viewer 本地同形（PeerRole::Consumer）——
                                 *   控制权限差异由 server 账号 can_control 门裁决，非本地角色。 */
+    const char* hmac_key_file; /* 急停 HMAC 密钥文件（W4b；须 0600，非空，≤4KiB 尾换行自动剥离）。
+                                *   NULL = estop 不签名（车端未配 key = 迁移放行形；
+                                *   车端已配 key = 车端拒签=正确裁决非静默）。路径坏不拦
+                                *   建会话——estop 调用点报 INVALID_ARG。G13: 密钥不走 argv/env。 */
 } ms_client_config_t;
 
-#define MEDIASERVO_CLIENT_CONFIG_DEFAULT { sizeof(ms_client_config_t), NULL, NULL, NULL, NULL, NULL }
+#define MEDIASERVO_CLIENT_CONFIG_DEFAULT \
+    { sizeof(ms_client_config_t), NULL, NULL, NULL, NULL, NULL, NULL }
 
 /* ── opaque handle ── */
 typedef struct ms_client_session_t ms_client_session_t;
@@ -128,6 +133,13 @@ mediaservo_err_t ms_client_session_consume_video(ms_client_session_t* s, ms_clie
  * "frames_decoded","frame_width","frame_height","frames_per_second"}，本会话
  * inbound-rtp 折叠；无消费者=全零）。needed 溢出合同同 ms_client_list_rooms。 */
 mediaservo_err_t ms_client_session_video_stats(const ms_client_session_t* s, char* out_json, size_t cap, size_t* needed);
+
+/* 急停双路投递（W4b）：DC 快路径（hmac_key_file 配置时带 HMAC 签名）+ 信令审计副本。
+ * 前置：ms_client_open_control 已成功。payload_json NULL/空 = null。
+ * OK = 投递成功（非"已执行"——车端裁决看 seq 回执 ack）。 */
+mediaservo_err_t ms_client_session_emergency_stop(ms_client_session_t* s, ms_client_control_t* c,
+                                                  const char* label, uint64_t seq,
+                                                  const char* payload_json);
 
 /* 开出程控制通道集（每会话一次性——ack 泵每会话一条；二次调用 → ERR_STATE）。
  * labels 为通道名数组（如 "chassis"/"gimbal"）。方言 <2 本地预拒（ERR_PROTOCOL）。 */

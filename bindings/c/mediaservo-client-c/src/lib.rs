@@ -243,9 +243,15 @@ pub extern "C" fn ms_client_session_create(
             psk: parts.psk.map(str::to_string),
             jwt: parts.jwt.map(str::to_string),
             role: parts.role,
-            // C 面暂不暴露急停 HMAC key（W2-C 增票：ms_client_config 扩字段+0600 文件形，G13 语义）——
-            // None = C 侧 estop 不签名，与 S4 前行为一致（车端有 key 时拒签=正确裁决，非静默）。
-            hmac_key: None,
+            // W4b：急停密钥文件通道（G13=密钥永不 argv/env 明文）。路径无效**不拦建会话**
+            // ——steer/consume 等非安全面照常工作，estop 调用点才报 INVALID_ARG
+            // （建会话期硬拦会让一个坏路径拖垮整个 SDK 会话=可用性反噬；车端无 key
+            // 时本字段本就无关）。
+            hmac_key: parts.hmac_key_file.and_then(|p| {
+                config::load_hmac_key_file(p)
+                    .map_err(|e| set_last_error(format!("ms_client_session_create: {e}")))
+                    .ok()
+            }),
         };
         match runtime().block_on(RoomSession::connect(&client_cfg)) {
             Ok(session) => {
@@ -501,6 +507,80 @@ pub extern "C" fn ms_client_session_video_stats(
     }))
     .unwrap_or_else(|_| {
         set_last_error("ms_client_session_video_stats: panic");
+        MEDIASERVO_CLIENT_ERR_INTERNAL
+    })
+}
+
+/// 急停双路投递（W4b·S4 语义的 C 面化）：DC 快路径（会话建会话时经
+/// `hmac_key_file` 加载的密钥签名；未配置=未签形）+ 信令审计副本。
+/// 前置：ms_client_open_control 已成功（ctl 句柄来自该调用）。payload_json
+/// NULL/空 = Null 载荷。返回 OK 仅表示**投递**成功（车端裁决看 ack——
+/// recv_ack 收 seq 回执），非"已执行"。
+#[unsafe(no_mangle)]
+pub extern "C" fn ms_client_session_emergency_stop(
+    s: *mut ms_client_session_t,
+    c: *mut ms_client_control_t,
+    label: *const c_char,
+    seq: u64,
+    payload_json: *const c_char,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if s.is_null() || c.is_null() {
+            set_last_error("ms_client_session_emergency_stop: null handle");
+            return MEDIASERVO_CLIENT_ERR_INVALID_ARG;
+        }
+        let label = match cstr(label) {
+            Ok(Some(l)) if !l.is_empty() => l,
+            _ => {
+                set_last_error("ms_client_session_emergency_stop: label required");
+                return MEDIASERVO_CLIENT_ERR_INVALID_ARG;
+            }
+        };
+        let payload = match cstr(payload_json) {
+            Ok(Some(p)) if !p.is_empty() => match serde_json::from_str::<serde_json::Value>(p) {
+                Ok(v) => v,
+                Err(e) => {
+                    set_last_error(format!("ms_client_session_emergency_stop: payload json: {e}"));
+                    return MEDIASERVO_CLIENT_ERR_MALFORMED;
+                }
+            },
+            _ => serde_json::Value::Null,
+        };
+        let sh = unsafe { &*s };
+        let ch = unsafe { &*c };
+        if sh.closed.load(Ordering::SeqCst) || ch.closed.load(Ordering::SeqCst) {
+            set_last_error("ms_client_session_emergency_stop: session or control closed");
+            return MEDIASERVO_CLIENT_ERR_STATE;
+        }
+        // 锁序 session→ctl（与所有组合操作一致；无逆序路径=无死锁面）。
+        let mut sg = match sh.session.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                set_last_error("ms_client_session_emergency_stop: session lock poisoned");
+                return MEDIASERVO_CLIENT_ERR_INTERNAL;
+            }
+        };
+        let Some(session) = sg.as_mut() else {
+            set_last_error("ms_client_session_emergency_stop: session closed");
+            return MEDIASERVO_CLIENT_ERR_STATE;
+        };
+        let mut cg = match ch.ctl.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                set_last_error("ms_client_session_emergency_stop: control lock poisoned");
+                return MEDIASERVO_CLIENT_ERR_INTERNAL;
+            }
+        };
+        match runtime().block_on(session.emergency_stop(&mut cg, label, seq, payload)) {
+            Ok(()) => MEDIASERVO_OK,
+            Err(e) => {
+                set_last_error(format!("ms_client_session_emergency_stop: {e}"));
+                error_code(&e)
+            }
+        }
+    }))
+    .unwrap_or_else(|_| {
+        set_last_error("ms_client_session_emergency_stop: panic");
         MEDIASERVO_CLIENT_ERR_INTERNAL
     })
 }
@@ -833,6 +913,22 @@ mod tests {
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         );
         let _ = jwt;
+    }
+
+    #[test]
+    fn emergency_stop_null_guards_before_network() {
+        let label = std::ffi::CString::new("chassis").unwrap();
+        assert_eq!(
+            ms_client_session_emergency_stop(ptr::null_mut(), ptr::null_mut(),
+                                             label.as_ptr(), 900, ptr::null()),
+            MEDIASERVO_CLIENT_ERR_INVALID_ARG
+        );
+        // label 空指针（session 侧不合法同样先参数守卫）。
+        let dummy_ctl = ptr::null_mut::<ms_client_control_t>();
+        assert_eq!(
+            ms_client_session_emergency_stop(ptr::null_mut(), dummy_ctl, ptr::null(), 1, ptr::null()),
+            MEDIASERVO_CLIENT_ERR_INVALID_ARG
+        );
     }
 
     #[test]
