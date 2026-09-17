@@ -1,6 +1,6 @@
 {
   "name": "mediaservo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MediaServo Node.js 绑定 — napi-rs 直绑 Rust SDK（field/link/deck）",
   "type": "module",
   "main": "lib/index.mjs",

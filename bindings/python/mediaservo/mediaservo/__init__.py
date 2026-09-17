@@ -4,7 +4,7 @@
 未安装的 SDK 在显式 import 时才报错，不影响已装 SDK 使用。
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __all__ = ["field", "link", "deck", "MediaServoError", "__version__"]
 
 from . import _ffi  # noqa: F401  (共享 ctypes 层；MediaServoError 供顶层 re-export)

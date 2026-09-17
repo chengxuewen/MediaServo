@@ -18,6 +18,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { components: rustfmt }
       - run: cargo fmt --all --check
+      - name: Bindings version parity (C43③ 手抄三处防漂移)
+        run: |
+          v=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="mediaservo-link"))')
+          grep -q "version = \"$v\"" bindings/python/mediaservo/pyproject.toml
+          grep -q "__version__ = \"$v\"" bindings/python/mediaservo/mediaservo/__init__.py
+          grep -q "\"version\": \"$v\"" bindings/node/package.json
       - name: Version uniformity gate (C43——crate 版本单一源=workspace，禁自带字面量)
         run: |
           if grep -rn '^version = "' crates/*/Cargo.toml; then

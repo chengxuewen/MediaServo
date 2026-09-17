@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mediaservo"
-version = "0.1.0"
+version = "0.1.1"
 description = "MediaServo Python bindings — ctypes over libmediaservo_{field,link,deck} (D227 step 1)"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
