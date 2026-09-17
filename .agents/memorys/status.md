@@ -889,3 +889,7 @@ install                        → 改名提示 + exit 2（退役）
 - ci.yml 新 job（test-cxx 模板形）：apt cmake/ninja + client-c cdylib + soname link + `build example`（SDL3/ImGui 全走仓内 file:// 档案零联网）+ `ctest -R core`。
 - 聚合根新增 **SDL 音频后端守卫族**（ALSA/PULSEAUDIO/PIPEWIRE/SNDIO/OSS 默认 OFF，`if(NOT DEFINED)` 留 override）——clean ubuntu 无 libasound2-dev 时 SDL 默认 ON 必炸的预防刀（本机冷构复验 RC=0 + ctest 绿）。
 - 边界诚实注：dummy 活体出画判据（cb=tex 咬合）需活 server+producer = device-day/self-hosted 位；CI 门 = 编译+纯函数面。mac/win job = W5 后续（macOS 有 X11-free SDL 路径但 imgui 后端组合未本机复验，Windows=MSVC 面待 device-day）。
+
+### 2026-09-17: p3 W6 收口——功能面/文档面/CI 面三清账（p3 终态=主体交付 ✅）
+- 例子 README（IN/OUT/运行/双房约定/CI 边界）入 bindings/cxx/examples/；CHANGELOG F11 补 [sdk-client] CI+README 条目；矩阵 15/15 改判（对表缺口由样例轮闭合，余=py/node 面）。
+- p3-gui-viewer 主仓归档 _archive（C45）：状态头 ✅、索引同步、母计划活指针×2 改写同笔。W1 android-prebuilt 离线不可证=让位 device-day（诚实注记非静默账）。

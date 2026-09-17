@@ -21,6 +21,9 @@
   产物 `target/examples/bin/`（不进交付树）；GUI 依赖档案 SDL3 release-3.4.16 + Dear ImGui
   v1.92.9b（3rdparty/ 本地 zip+sha256 台账）；新例子 `imgui_viewer`（空窗骨架）与
   `imgui_shell`（渲染壳）目录就位，`control_demo` 迁入统一聚合。
+- [sdk-client] CI `test-gui` job：GUI 例子编译门 + `ctest -R core`；SDL3/ImGui 仓内档案
+  零联网；聚合根 SDL 音频后端默认 OFF 守卫（clean ubuntu 预防）。例子目录新增 README
+  （IN/OUT + **舱端双房约定**（媒体 `<整车房>_<流>` / 控制 `<整车房>`）+ 无头判据用法）。
 - [sdk-client] 会话视频统计面 `ms_client_session_video_stats` / C++ `Session::video_stats()`：
   inbound-rtp 折叠扁平 JSON（bytes/frames/分辨率/fps/丢包），mini-stats 渲染数据源
   （Rust 侧 fold 规则单测钉；C 面 needed 溢出合同同形）。
