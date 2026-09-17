@@ -81,6 +81,17 @@ s.publish_video()
 运行: `export MEDIASERVO_LIB_DIR=$PWD/target/debug && python3 app.py`
 （或 `LD_LIBRARY_PATH=target/debug`；三 SDK 子模块 `mediaservo.{field,link,deck}`）
 
+## 版本与 soname 链（V1a 四独立源后的全景规则）
+
+| 环节 | 规则 | 单一真源 |
+|---|---|---|
+| crate 版本 | 交付四目标（host/server/field/client）各自独立 `version`；内部 crate 继承 `[workspace.package]`（F12/C43） | 各 `Cargo.toml` |
+| 交付域映射 | package/装配的版本读取按 `_TARGET_CRATE` 表：host 包←mediaservo-host · server 包←server · sdk(bindings) 包←**field** | cli 同表（V1b 四包名续用） |
+| soname 三件套 | `libmediaservo_<sdk>.so.<M.m.p>` 实体 + `.so.<MAJOR>`（DT_SONAME/加载器）+ `.so`（链接期）；MAJOR 取自 **field 域版本**（bindings 域=交付 sdk 包的版本源） | D241 + `_crate_version` |
+| py/node 手抄面 | `pyproject.toml`/`__init__.py`/`package.json` 对齐 **field** 版本；CI fmt job parity 门（cargo metadata 真值比对，漂移=红） | C43③ + ci 步骤 |
+| FrameMeta 线版本 | `WIRE_VERSION=0`（decode 拒未知版本=N4）；version.txt 内 `frame_meta_version` **由 Rust 源生成**（禁手抄漂浮） | `link/src/frame.rs` |
+| 包内版本声明 | `<target>-version.txt` = 域版本 + 协议配对（D-H13）；`token_schema_version` 仍手抄（N2 生成化待做） | cli `_write_version_file` |
+
 ## 契约要点（跨语言一致）
 
 | 项 | 规则 |

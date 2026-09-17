@@ -11,6 +11,8 @@ FAIL=0
 note() { echo "== $1"; }
 
 # workspace 版本（与 mediaservo_cli.py _workspace_version 同源: Cargo.toml [workspace.package]）
+# V1a 后四源独立：现四值同数故读 workspace 仍正确；V1b 四包名化时必须改 per-target
+# 域读取（与 cli _TARGET_CRATE 表同源）——host 包验 host crate、sdk 包验 field crate。
 VER=$(sed -n '/\[workspace.package\]/,/^\[/p' Cargo.toml | sed -n 's/^version *= *"\(.*\)"/\1/p' | head -1)
 [ -n "$VER" ] || { echo "FAIL: 无法解析 workspace version"; exit 1; }
 MAJOR=${VER%%.*}
@@ -137,7 +139,8 @@ note "version contract file"
 mkdir -p "$TMP/sdk"
 tar xzf "$SDK_TGZ" -C "$TMP/sdk" "$SDK_ROOT/sdk-version.txt"
 grep -q "workspace_version: $VER" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt 缺 workspace_version=$VER"; FAIL=1; }
-grep -q "^frame_meta_version: 1$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt 缺 frame_meta_version"; FAIL=1; }
+FW=$(grep -oE "pub const WIRE_VERSION: u8 = [0-9]+" crates/mediaservo-link/src/frame.rs | grep -oE "[0-9]+$")
+grep -q "^frame_meta_version: $FW$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt frame_meta_version != 源实值 $FW（漂浮号钉）"; FAIL=1; }
 grep -q "^token_schema_version: 1$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt 缺 token_schema_version"; FAIL=1; }
 grep -q "workspace_version: $VER" <(tar xzf "$HOST_TGZ" -O "$HOST_ROOT/host-version.txt") || { echo "FAIL: host-version.txt 缺 workspace_version=$VER"; FAIL=1; }
 echo "OK: 版本契约文件（host-version.txt + sdk-version.txt）内容正确"

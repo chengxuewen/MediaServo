@@ -927,3 +927,8 @@ install                        → 改名提示 + exit 2（退役）
 - 纪律自咬两枚（本仓实录）：**git checkout -- 误吞未提交本地化**（独立性演示回正轮把 field 文件打回继承形——发现于 diff 断言，重打）；**heredoc python 崩溃后 git 链照跑**（code 笔有 docs 笔无 = #17③ 第八例，补正=本笔 docs+status 单独成笔）。
 - F12 改判注此前**只登主仓未镜像子仓**=镜像协议缺口，本次 C43 头部补全。
 - V1 残 = V1b：package 四包名（targets 映射）+ sdk-field/sdk-client 切分 + manifest（N2）+ bindings 更名 alias。
+
+### 2026-09-17: V3 残件小刀——版本链接线补全（V1a 遗留半截清偿）
+- 发现（文档刀反哺）：装配/package 仍单读 `_workspace_version()` = V1a 分源后 field/server/host bump 不回Soname/包名（未来雷）。修：`_crate_version(crate)`（本地版本→workspace 回落）+ `_TARGET_CRATE` 域映射表（V1b 雏形）接线 build bindings/package/version.txt 三处；sdk 包实测 workspace_version=0.1.1 域形。
+- 第二咬：**frame_meta_version: 1 漂浮号**（V3 已钉实值 0，version.txt+e2e-package 断言双处皆旧值）。修 = `_frame_meta_wire_version()` 从 frame.rs 源生成 + e2e 断言派生形（FW 读源）。token_schema_version 手抄面挂 N2（在册不扩面）。
+- 指南扩节：23-binding-guide「版本与 soname 链」六行表（域映射/soname/parity/源生成全锚）。e2e-package.sh VER 加 V1b 接线注（防丢）。

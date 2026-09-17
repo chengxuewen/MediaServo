@@ -27,6 +27,33 @@ HOST_CONF = ROOT / "crates/mediaservo-host/config/host.conf"
 SERVER_YAML = ROOT / "config/server.docker.yaml"
 
 
+# 交付目标 → 版本源 crate（F12 四独立版本源的打包侧接线；V1b 四包名化续用此表）。
+_TARGET_CRATE = {"host": "mediaservo-host", "server": "mediaservo-server",
+                 "bindings": "mediaservo-field"}
+
+
+def _crate_version(crate: str) -> str:
+    """crate 本地版本；`version.workspace = true` 回落根 [workspace.package]。"""
+    text = (ROOT / "crates" / crate / "Cargo.toml").read_text()
+    seg = text.split("[package]", 1)[1].split("[", 1)[0] if "[package]" in text else ""
+    for line in seg.splitlines():
+        line = line.strip()
+        if line.startswith("version"):
+            if "workspace" in line:
+                return _workspace_version()
+            return line.split("=", 1)[1].strip().strip('"').split("  #")[0]
+    return _workspace_version()
+
+
+def _frame_meta_wire_version() -> int:
+    """FrameMeta 线版本从 Rust 源生成（D243/N4——version.txt 漂浮号终结）。"""
+    text = (ROOT / "crates" / "mediaservo-link" / "src" / "frame.rs").read_text()
+    m = re.search(r"pub const WIRE_VERSION: u8 = (\d+)", text)
+    if not m:
+        raise SystemExit("错误: frame.rs WIRE_VERSION 常数未找到（形态漂移）")
+    return int(m.group(1))
+
+
 def _check(tool: str, hint: str) -> None:
     """依赖检查 — 缺失时明确报错退出（不静默）。"""
     if shutil.which(tool) is None:
@@ -336,7 +363,7 @@ def _cmd_build_bindings(release: bool = False) -> None:
     for _sdk in ALL_SDKS:
         cmd += ["-p", f"mediaservo-{_sdk}-c"]
     _run_or_exit(cmd)
-    major = _workspace_version().split(".")[0]
+    major = _crate_version("mediaservo-field").split(".")[0]
     out_dir = ROOT / ("target/release" if release else "target/debug")
     for sdk in ALL_SDKS:
         _symlink_force(
@@ -351,7 +378,7 @@ def _cmd_build_bindings(release: bool = False) -> None:
     # 组装交付布局 out/bindings（完整 SDK 包镜像——Momus HIGH3/Task 2.5 补齐）:
     # D241 三件套 version-full（.so.<M.m.p> 实体 + .so.<major> + .so 链接）+ D248 头（C/cxx）
     # + pkgconfig .pc + cmake config + python fat wheel/site-packages + node 包
-    ver = _workspace_version()
+    ver = _crate_version("mediaservo-field")
     major, minor, patch = ver.split(".")
     bind_dst = _out_root() / "bindings"
     lib_dst = bind_dst / "lib"; lib_dst.mkdir(parents=True, exist_ok=True)
@@ -1158,11 +1185,11 @@ def _write_version_file(dst: Path, target: str) -> None:
     host-version.txt / sdk-version.txt: workspace 版本 + FrameMeta wire 版本 + 令牌 schema 版本。
     消费方（ROS/算法）校验 sdk-version.txt 与 host 包配对; 信令 wire 契约随 workspace 演进,
     独立协议版本号 = 后续工作（D-H14 全量版本化方案）。"""
-    ver = _workspace_version()
+    ver = _crate_version(_TARGET_CRATE.get(target, "mediaservo-link"))
     lines = [
         f"# mediaservo-{target}-{ver} — 协议契约版本声明（D-H13/D-H14 最小版）",
         f"workspace_version: {ver}",
-        "frame_meta_version: 1",     # FrameMeta 定长 LE 36B wire format（D243; link frame.rs）
+        f"frame_meta_version: {_frame_meta_wire_version()}",  # 源生成（WIRE_VERSION）
         "token_schema_version: 1",   # MSTK 单文件自描述令牌字节版本 0x01（D238/D243; link token.rs）
         "# host 包部署: 裸解包生成版本目录；落地到前缀目录用 `tar xzf <pkg>.tar.gz -C <prefix> --strip-components=1`",
         "# 多设备共用同一包时, 每台删除 identity.json 后重跑",
@@ -1296,7 +1323,7 @@ def _cmd_package(args: argparse.Namespace) -> None:
     if sys.platform == "win32":
         print("package: Windows best-effort — 验证清单见 scripts/e2e-win-validate.ps1", file=sys.stderr)
     pkg_name = {"bindings": "sdk", "server": "server"}.get(args.target, "host")
-    ver = _workspace_version()
+    ver = _crate_version(_TARGET_CRATE.get(args.target, "mediaservo-link"))
     # C43⑧ 发版完整性守卫：工作区 Cargo.toml 相对 HEAD 有差且 git 可用 → 打包版本无
     # git 锚（tag 无从落，v0.1.8.2 漂浮号事故同族）——WARN 不阻断（调试包允许脏树）。
     if _git_out(["log", "-1", "--format=%s"]) is not None and \
