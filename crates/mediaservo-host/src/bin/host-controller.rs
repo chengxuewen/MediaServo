@@ -29,14 +29,17 @@ const ROOM: &str = "control";
 /// 本地信封 src（网关子进程标识）。
 const SRC: &str = "host-controller";
 
-const USAGE: &str =
-    "用法: host-controller [--gateway <本地网关 ws url>] [--token <FrameBus 令牌路径>]";
+const USAGE: &str = "用法: host-controller [--gateway <本地网关 ws url>] [--token <FrameBus 令牌路径>] \
+    [--hmac-key-file <急停验签密钥文件>]";
 
 #[derive(Debug, Default)]
 struct Args {
     gateway: Option<String>,
     /// FrameBus 令牌（可选镜像面：缺省/失败仅关总线旁路，不影响执行）。
     token: Option<PathBuf>,
+    /// 急停 HMAC 验签密钥文件（V5：[control].hmac_key_file 渲染透传；
+    /// 显式 > env MEDIASERVO_CONTROL_HMAC_KEY_FILE；读败 = 早退非静默降级）。
+    hmac_key_file: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -51,6 +54,10 @@ fn args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         match arg.as_str() {
             "--gateway" => out.gateway = Some(args.next().ok_or("--gateway 缺值")?),
             "--token" => out.token = Some(PathBuf::from(args.next().ok_or("--token 缺值")?)),
+            "--hmac-key-file" => {
+                out.hmac_key_file =
+                    Some(PathBuf::from(args.next().ok_or("--hmac-key-file 缺值")?))
+            }
             _ => return Err(format!("未知参数: {arg}\n{USAGE}")),
         }
     }
@@ -118,7 +125,18 @@ async fn main() -> ExitCode {
     let bus = attach_bus(args.token.as_ref());
     let actuator: Arc<dyn Actuator> = Arc::new(StubActuator);
     // S4/a4·T3.5：e-stop 验签策略（env 驱动，车舱同值 key = 部署配置面）。
-    let policy = ControllerPolicy::from_env();
+    // V5：--hmac-key-file 显式形（host.yaml [control] 渲染透传）优先于 env；
+    // 密钥读败 = 安全功能拒绝静默降级——error+exit 1 交 restart_policy（同 env 纪律）。
+    let mut policy = ControllerPolicy::from_env();
+    if let Some(f) = &args.hmac_key_file {
+        match mediaservo_common::protocol::control_hmac_key_from_file(&f.to_string_lossy()) {
+            Ok(k) => policy.hmac_key = Some(k),
+            Err(e) => {
+                tracing::error!("--hmac-key-file {} 加载失败: {e}——急停验签不可静默降级", f.display());
+                return ExitCode::from(1);
+            }
+        }
+    }
     let code = control_loop(signal, ControllerConfig::default(), actuator, bus, policy).await;
     ExitCode::from(code)
 }

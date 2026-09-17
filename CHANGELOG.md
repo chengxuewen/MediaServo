@@ -24,6 +24,11 @@
 - [host][sdk-client] 急停密钥文件通道车舱对齐：新增 `MEDIASERVO_CONTROL_HMAC_KEY_FILE`
   （车端 controller，0600 权限门+读失败 panic 早死=安全功能拒绝静默降级，与舱端
   `hmac_key_file` 同纪律）；双端共用 common 真源加载器。明文 env 形保留迁移兼容。
+- [host][deploy] 急停密钥配置面进渲染链：host.yaml 新增 `[control].hmac_key_file`
+  （相对路径按实例根解析）→ 部署期文件缺失即渲染拒绝（早于进程拉起），翻译为
+  host-controller `--hmac-key-file` 参数（显式 > 环境变量，读败 = error 早退不静默降级）；
+  未配置 = dev 迁移形逐字节不变（专网/开发零扰动）。生产部署急停验签从「手工 env 三件套」
+  收敛为一行配置。
 - [deploy] 发布包 CHANGES.md 机械切片（F11-X）：仓根单源按 `[scope]` 标记路由进 host/server/sdk 包（protocol 随三包、deploy 随集群两包；无标记历史条目全带=宁全勿缺）；CI 强制 Unreleased 新条目带词表内标记（缺/外=红）。
 - [sdk-client] CI `test-gui` job：GUI 例子编译门 + `ctest -R core`；SDL3/ImGui 仓内档案
   零联网；聚合根 SDL 音频后端默认 OFF 守卫（clean ubuntu 预防）。例子目录新增 README

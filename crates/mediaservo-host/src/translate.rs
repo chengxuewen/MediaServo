@@ -27,6 +27,19 @@ struct HostConfig {
     /// resolved 值（内置缺省本身由 D282 单独改判）。
     #[serde(default)]
     defaults: DefaultsCfg,
+    /// 遥控执行域（V5）：急停验签密钥文件等 controller 进程配置。
+    #[serde(default)]
+    control: Option<ControlSection>,
+}
+
+/// [control] 节（V5/F11 部署面收口）。
+#[derive(Debug, Default, Deserialize)]
+struct ControlSection {
+    /// 急停命令 HMAC 验签密钥文件（相对路径按实例根解析；渲染为
+    /// controller `--hmac-key-file`，0600 权限门由加载器强制）。
+    /// 缺省 = dev 迁移形（controller 放行 + WARN，S4 estop_verdict 矩阵）。
+    #[serde(default)]
+    hmac_key_file: Option<String>,
 }
 /// 视频源逻辑类别（mode 四类；`backend`/`input` 按 mode 生效）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -207,6 +220,12 @@ pub fn signaling_room(cfg: &str) -> Result<Option<String>, String> {
     Ok(cfg.signaling.and_then(|s| s.room))
 }
 
+/// [control].hmac_key_file（V5；缺省 None → controller 零扰动）。
+pub fn control_hmac_key_file(cfg: &str) -> Result<Option<String>, String> {
+    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+    Ok(cfg.control.and_then(|c| c.hmac_key_file))
+}
+
 /// 远程 server URL（[signaling] server_url；缺省 None → host-agent 内置默认）。
 pub fn signaling_server_url(cfg: &str) -> Result<Option<String>, String> {
     let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
@@ -304,6 +323,14 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
 /// 校验 + 翻译 + 原子写 run/oxfile.toml，返回 oxfile 路径。
 pub fn write_oxfile(cfg: &str, dir: &Path) -> Result<PathBuf, String> {
     validate(cfg)?;
+    // V5 部署期守卫：配置了验签密钥但文件缺失 = 渲染拦下（早死优于 controller
+    // crash-loop×restart_policy 风暴——读失败 panic 是执行侧纪律，部署侧更前应拦）。
+    if let Some(rel) = control_hmac_key_file(cfg)? {
+        let p = dir.join(&rel); // rel 绝对形时 join 直取
+        if !p.exists() {
+            return Err(format!("[control].hmac_key_file 指向的文件不存在: {}", p.display()));
+        }
+    }
     let ox = to_oxfile_in_dir(cfg, dir)?;
     let run_dir = dir.join("run");
     std::fs::create_dir_all(&run_dir).map_err(|e| format!("创建 {} 失败: {e}", run_dir.display()))?;
@@ -597,6 +624,19 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
         // C4: recorder [record] enabled=false 时按设计 exit 0 — 在 oxmgr
         // restart_policy=always 下会重启风暴; 改 on_failure（崩溃重启，干净退出不重启）。
         let policy = if name == app_name("recorder") { "on_failure" } else { "always" };
+        // V5: [control].hmac_key_file → controller --hmac-key-file（未配置零加参=
+        // 逐字节不变；相对路径按实例根绝对化——apply 期不依赖 controller cwd）。
+        if name == app_name("controller")
+            && let Some(rel) = control_hmac_key_file(cfg)?
+        {
+            let abs = match inst_root.as_deref() {
+                Some(r) if !std::path::Path::new(&rel).is_absolute() => {
+                    format!("{r}/{rel}")
+                }
+                _ => rel,
+            };
+            cmd.push_str(&format!(" --hmac-key-file {abs}"));
+        }
         // H2: host-audio 必须带 --room audio-<room>（[signaling] room 或缺省 vehicle）。
         if name == app_name("audio") {
             let room = signaling_room(cfg)?.unwrap_or_else(|| "vehicle".to_string());
@@ -1667,5 +1707,41 @@ defaults:
         assert!(camera_configs(legacy).unwrap_err().contains("source"), "旧兼容键不入公共层");
         // 顶层不加 deny：存量 yaml 的 host:/control: 等非 HostConfig 键必须继续可解析
         assert!(camera_configs("host:\n  device_id: \"x\"\ncontrol:\n  enabled: false\nsources: []\n").is_ok());
+    }
+    // ── V5 [control].hmac_key_file 渲染注入 ──
+
+    const CFG_CONTROL: &str = r#"
+sources:
+  - id: "cam0"
+    mode: "generator"
+streams:
+  - id: "s0"
+    source: "cam0"
+control:
+  hmac_key_file: "etc/control.hmac.key"
+"#;
+
+    #[test]
+    fn control_key_file_injected_into_controller_app() {
+        let ox = to_oxfile_in_dir(CFG_CONTROL, Path::new("/opt/h")).unwrap();
+        // 相对路径按实例根绝对化，仅 controller app 带参
+        assert!(ox.contains("--hmac-key-file /opt/h/etc/control.hmac.key"), "{ox}");
+        assert_eq!(ox.matches("--hmac-key-file").count(), 1);
+    }
+
+    #[test]
+    fn control_absent_means_byte_identical_oxfile() {
+        // 缺段零扰动（stream_mode balanced 同款可证形）：老配置渲染不含新参数
+        let ox = to_oxfile_in_dir(CFG_V0, Path::new("/opt/h")).unwrap();
+        assert!(!ox.contains("--hmac-key-file"));
+        assert!(!ox.contains("hmac"));
+    }
+
+    #[test]
+    fn control_key_file_missing_rejects_at_render() {
+        // 部署期守卫：配置指向不存在文件 = write_oxfile Err（早于 controller 进程拉起）
+        let e = write_oxfile(CFG_CONTROL, Path::new("/nonexistent-v5-guard-dir"))
+            .expect_err("缺密钥文件必须拒渲染");
+        assert!(e.contains("hmac_key_file 指向的文件不存在"), "{e}");
     }
 }

@@ -910,3 +910,8 @@ install                        → 改名提示 + exit 2（退役）
 - 落地：`_changelog_slice` 二态渲染（## 节→### 小节→条目块；空节丢弃；**无标记历史条目全带=宁全勿缺**，历史节零改动不编造）；CI fmt job 加 Unreleased 标记门（词表 {host,server,sdk-client,sdk-field,protocol,deploy}）；Unreleased 6 条旧裸条目补诚实标记（归类非改写）。
 - 实证：三包路由 43→26/27/33 对账；单标/双标/三标/无标四形判据全钉（**判据教训：正文子串假命中——相邻条目含关键词，判据必锚定 `- [标记]` 前缀**）；host 真包 tar CHANGES 26 条咬合。
 - 环境事故：**/ 分区再度 100%**（09-17 早清 33G，target 又胀 138G）——清 incremental 15G+examples 回 18G；target 卫生（定期清/CI artifact 分流）升 V 批急件。
+
+### 2026-09-17: V5 急停密钥渲染注入链（host 面收口）
+- 落地：host.yaml `[control].hmac_key_file`（Option，serde default）→ translate 注入 controller `--hmac-key-file`（相对→实例根绝对化；缺段零加参=逐字节钉）；bin 面显式 arg > env、读败 error+exit 1（安全功能拒静默降级）；**write_oxfile 部署期守卫**（配置指不存在文件=渲染 Err，早于 crash-loop）；模板注释段+CHANGELOG 条目。
+- 门：host --lib 79/79（新 3 测：注入/零扰动/守卫）；lint 零新增（4 处命中=存量旧行）；`--hmac-key-file` 双测锚。
+- 残留（device-day/另案）：全 key 验签 live 双端形（车舱同文件带内分发）；out/host 实例启用=配一行+簇重启+补密钥文件（0600）。
