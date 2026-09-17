@@ -944,3 +944,8 @@ install                        → 改名提示 + exit 2（退役）
 - 判据两连自咬当场修：`av` 词边界咬不到 `[libavformat]`（假全 False——regex 面测出真值才收）；python 组件探测路径写错（site-packages 包名=mediaservo）。
 - 事实附注：field-c cdylib DT_NEEDED 无 libav*（cargo 层「field 传递依赖 ffmpeg」不下沉到 C 交付面）——manifest 实据优于旧口头账。
 - **V 批账面**：V1 ✅（manifest 后全闭环）· V2 ◐(N7 等裁) · V3 ◑(残 token_schema/openapi) · V4-5 ✅ · V6 ⏳(等 V 批全完)。未推：主 ≈99 / 子 ≈28。
+
+### 2026-09-17: token_schema 源生成化（V3 残件第二刀，version.txt/manifest 双漂浮号清零）
+- `_token_file_version()` 从 token.rs TokenFile::VERSION 派生（与 frame_meta 同族形）；version.txt/manifest 两处手抄 1 全替换；e2e-package 双版本源生成钉（FW+TV）。
+- 事实：MSTK 令牌文件格式版本门**出生即有**（decode unsupported version）——FrameMeta 是补票，token 是原生。Rust 侧测试既备，本刀纯交付面接线。
+- V3 残 = openapi 生成化（N3 utoipa=新依赖+全端点标注=中型刀，待裁后开工）。

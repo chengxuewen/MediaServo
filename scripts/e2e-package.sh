@@ -167,6 +167,8 @@ tar xzf "$SDK_TGZ" -C "$TMP/sdk" "$SDK_ROOT/sdk-version.txt"
 grep -q "workspace_version: $VER" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt 缺 workspace_version=$VER"; FAIL=1; }
 FW=$(grep -oE "pub const WIRE_VERSION: u8 = [0-9]+" crates/mediaservo-link/src/frame.rs | grep -oE "[0-9]+$")
 grep -q "^frame_meta_version: $FW$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt frame_meta_version != 源实值 $FW（漂浮号钉）"; FAIL=1; }
+TV=$(grep -oE "pub const VERSION: u8 = [0-9]+" crates/mediaservo-link/src/token.rs | grep -oE "[0-9]+$")
+grep -q "^token_schema_version: $TV$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: token_schema_version != 源实值 $TV（漂浮号钉）"; FAIL=1; }
 grep -q "^token_schema_version: 1$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt 缺 token_schema_version"; FAIL=1; }
 grep -q "workspace_version: $VER" <(tar xzf "$HOST_TGZ" -O "$HOST_ROOT/host-version.txt") || { echo "FAIL: host-version.txt 缺 workspace_version=$VER"; FAIL=1; }
 echo "OK: 版本契约文件（host-version.txt + sdk-version.txt）内容正确"

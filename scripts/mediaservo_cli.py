@@ -56,6 +56,15 @@ def _frame_meta_wire_version() -> int:
     return int(m.group(1))
 
 
+def _token_file_version() -> int:
+    """MSTK 令牌文件格式版本从 Rust 源生成（TokenFile::VERSION，D-H10）。"""
+    text = (ROOT / "crates" / "mediaservo-link" / "src" / "token.rs").read_text()
+    m = re.search(r"pub const VERSION: u8 = (\d+)", text)
+    if not m:
+        raise SystemExit("错误: token.rs TokenFile::VERSION 未找到（形态漂移）")
+    return int(m.group(1))
+
+
 def _check(tool: str, hint: str) -> None:
     """依赖检查 — 缺失时明确报错退出（不静默）。"""
     if shutil.which(tool) is None:
@@ -1262,7 +1271,7 @@ def _write_manifest_file(dst: Path, domain: str, pkg_root: Path) -> None:
         "version": ver,
         "components": comps,
         "protocol": {"frame_meta_wire_version": _frame_meta_wire_version(),
-                     "token_schema_version": 1},
+                     "token_schema_version": _token_file_version()},
         "generated_by": "mediaservo_cli package (D281/N2)",
     }
     (dst / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
@@ -1278,7 +1287,7 @@ def _write_version_file(dst: Path, target: str) -> None:
         f"# mediaservo-{target}-{ver} — 协议契约版本声明（D-H13/D-H14 最小版）",
         f"workspace_version: {ver}",
         f"frame_meta_version: {_frame_meta_wire_version()}",  # 源生成（WIRE_VERSION）
-        "token_schema_version: 1",   # MSTK 单文件自描述令牌字节版本 0x01（D238/D243; link token.rs）
+        f"token_schema_version: {_token_file_version()}",  # MSTK 令牌文件版本源生成（D-H10; link token.rs）
         "# host 包部署: 裸解包生成版本目录；落地到前缀目录用 `tar xzf <pkg>.tar.gz -C <prefix> --strip-components=1`",
         "# 多设备共用同一包时, 每台删除 identity.json 后重跑",
         "# `host init <prefix>`（幂等, 已存在凭据保留）生成独立设备身份（G4）"
