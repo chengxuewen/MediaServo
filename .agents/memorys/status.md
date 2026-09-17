@@ -921,3 +921,9 @@ install                        → 改名提示 + exit 2（退役）
 - `scripts/e2e-delivery.sh` 四判据全绿（RC=0）：① link/field 轻组件禁 FFmpeg DT_NEEDED（V1 组件化断言）② find_package COMPONENTS link+client 真符号链接运行③ pkg-config 四件==workspace 实值④ ABI drift 4/4。
 - **顺手斩 CLI 真 bug**（脚本首跑抓出）：wheel 目录跨 run 残留 + `glob().next()` 无序 = rename 链自蚀源 → pip ENOENT。修 = build 前清 *.whl + glob 仅 `*-py3-none-any.whl` 源形。**教训：写死「单次运行干净态」假设的脚本在 CI 复用旧 out/ 目录必炸**——e2e 脚本自带前置清扫。
 - V5 三件全落（密钥链/双姿态门/组件冒烟）；V 批残 = V1（等 N1 裁）+ V6 收口彩排。
+
+### 2026-09-17: V1a 交付 crate 独立版本源落地（F12/N1 兑现，子仓 C43 补注改判）
+- host/server/field/client 四 crate 版本本地化 0.1.1（注释钉 F12）；内部 crate 保持 workspace 继承。**独立机制实证**：field 临时 9.9.9 → metadata 四源零连坐。CI 门随动：字面量豁免四名、bindings parity 对齐 link→field（交付域语义）、C43⑧ 脏守卫扩五源。双门模拟 PASS+四 crate check 0 error+sfu build Finished。
+- 纪律自咬两枚（本仓实录）：**git checkout -- 误吞未提交本地化**（独立性演示回正轮把 field 文件打回继承形——发现于 diff 断言，重打）；**heredoc python 崩溃后 git 链照跑**（code 笔有 docs 笔无 = #17③ 第八例，补正=本笔 docs+status 单独成笔）。
+- F12 改判注此前**只登主仓未镜像子仓**=镜像协议缺口，本次 C43 头部补全。
+- V1 残 = V1b：package 四包名（targets 映射）+ sdk-field/sdk-client 切分 + manifest（N2）+ bindings 更名 alias。
