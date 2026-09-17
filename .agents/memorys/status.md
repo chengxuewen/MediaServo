@@ -869,3 +869,10 @@ install                        → 改名提示 + exit 2（退役）
 - **排除过程实录（教训素材）**：初判「H6 consume 重建缺口」三疑全部证伪——① controller crash-loop err 风暴=**09-15 化石**（mtime 亲验，H6/重试早已自愈）② token room claim=**不存在**（重签 2 pusher token 后 room 依旧 → 反向证实 room 源于流 id 派生与 token 无关，C40 清白）③ `pgrep -x msrtc-controller` 假死=comm 15 字符截断（PIT-15 再证）。
 - **新账 A 升级定性**：`/api/rooms`（W2-A）只报 agent 注册整车房——**不报 per-stream 流房 = 消费者按列表发现不到可播房**。修复方向：数据源并 device streams → 流房派生（`<room>_<stream_id>`，在线门=streams[].online）+ kind 分面（控制房无视频消费者预期）。**W4d 刀票**。
 - 约定沉淀（W6 SDK 文档必写）：舱端消费者=双房形态（流房看视频 / 整车房开控制），或等 W4d 后按列表一键拿两类。
+
+### 2026-09-17: p3 W4d——rooms 列表派生流房 + kind 三面（双仓生产闭环）
+- **server/rooms.rs**：注册列表 ⊕ StatusReport(connected) 派生 `<base>_<stream>` 流房（owner 继承 base 房，可见性同向 can_pull；离线流/audio 房/越权不派生；已注册流房同源归并不重复）；room_kind 三面 = video(流房)/control(整车房——旧标 video 误导消费者)/audio。server lib 157 绿（新测 http_stream_rooms_derived 含 G16 流房正向钉）。
+- **viewer 同步**：r.video 纯 kind 判（starts_with 名字猜退役）；勾选流房自动 join base 控制房 tile（双房约定=产品形态，video=false 不发 consume——首版误 pair consume 撞 vehicle 房 wait-producer 黑洞自咬）；std::function 递归 join lambda。
+- **潜伏 bug 首见光=parse_rooms off-by-one**：`find('"', pos+8)` 自撞 `"room_id"` 闭引号 → room_id/kind 全解析空串（+9/+7 修）。多年未爆 = 显式 MSRTC_ROOM env 通道从不走解析、UI 勾选通道无人无头实测——**无头判据补位后才被 auto-fallback 路径暴露**（「样例即测试三层」又一证）。
+- 生产复验（build:deploy server + 簇重启，用户批准）：/api/rooms 实况 `[{vehicle,control},{vehicle_test,video}]`；viewer **纯发现模式**（无 ROOM env）fallback→pairing→20s cb=tex=597@30fps 全绿。
+- 环境注记：PIT-193 新亚种=**clippy 也会咬 mediasoup 双 buildtype**（env -i 不够，必须 task 内层 unset MESON_ARGS/MESON——指纹变化重跑 build script 所致，正解=照抄 build-server-native 配方体外壳）。

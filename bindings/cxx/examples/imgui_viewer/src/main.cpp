@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -43,7 +44,7 @@ std::vector<std::pair<std::string, std::string>> parse_rooms(const std::string& 
     std::vector<std::pair<std::string, std::string>> out;
     std::string::size_type pos = 0;
     while ((pos = json.find("\"room_id\"", pos)) != std::string::npos) {
-        auto q1 = json.find('"', pos + 8);
+        auto q1 = json.find('"', pos + 9); // pat 尾后起（+8 会自撞 pat 闭引号=空串 bug）
         auto q2 = json.find('"', q1 + 1);
         if (q1 == std::string::npos || q2 == std::string::npos) break;
         std::string room = json.substr(q1 + 1, q2 - q1 - 1);
@@ -51,7 +52,7 @@ std::vector<std::pair<std::string, std::string>> parse_rooms(const std::string& 
         auto kp = json.find("\"kind\"", q2);
         auto next_room = json.find("\"room_id\"", q2);
         if (kp != std::string::npos && (next_room == std::string::npos || kp < next_room)) {
-            auto k1 = json.find('"', kp + 6);
+            auto k1 = json.find('"', kp + 7); // 同上："kind" 长 7
             auto k2 = json.find('"', k1 + 1);
             if (k1 != std::string::npos && k2 != std::string::npos) kind = json.substr(k1 + 1, k2 - k1 - 1);
         }
@@ -72,6 +73,7 @@ struct Tile {
     explicit Tile(std::string room_) : room(std::move(room_)) {}
 
     std::string room;
+    bool video = false;
     ms::Session sess;
     sh::FrameStaging staging;
     sh::VideoTexture tex;
@@ -176,28 +178,41 @@ int main() {
         auto_join = true;
     }
 
-    auto join_room = [&](const std::string& room_id, bool video) {
+    std::function<void(const std::string&, bool)> join_room;
+    join_room = [&](const std::string& room_id, bool video) {
         ms::Config cfg;
         cfg.signaling_url = ws;
         cfg.room = room_id;
         cfg.jwt = ui.jwt;
         cfg.role = "Client";
-        (void)video;
         auto tile = std::make_unique<Tile>(room_id);
+        tile->video = video; // 控制房 tile 不发 consume（整车房无媒体=wait-producer 黑洞）
         Tile* tp = tile.get();
         auto sj = ms::Session::connect(cfg);
         if (!sj) {
             tile->err = "join: " + sj.error().message;
         } else {
             tile->sess = std::move(*sj);
-            auto cv = tp->sess.consume_video([tp](const mediaservo_client_frame_t& f) {
-                tp->staging.push(f.data, f.len, f.width, f.height);
-                tp->cb.fetch_add(1, std::memory_order_relaxed);
-            });
-            if (!cv) tile->err = "consume: " + cv.error().message;
+            if (video) {
+                auto cv = tp->sess.consume_video([tp](const mediaservo_client_frame_t& f) {
+                    tp->staging.push(f.data, f.len, f.width, f.height);
+                    tp->cb.fetch_add(1, std::memory_order_relaxed);
+                });
+                if (!cv) tile->err = "consume: " + cv.error().message;
+            }
         }
         if (!tile->err.empty()) std::printf("[tile] %s: %s\n", room_id.c_str(), tile->err.c_str());
         ui.tiles.push_back(std::move(tile));
+        // W4d 双房约定：流房（`<base>_<stream>`）自动并入整车房做控制面 tile
+        // （G11 多会话形态；控制通道只在整车房建——PIT-140 v2 + W4c 定性）。
+        const auto sep = room_id.rfind('_');
+        if (video && sep != std::string::npos) {
+            const std::string base = room_id.substr(0, sep);
+            bool has = base.empty();
+            for (auto& t : ui.tiles)
+                if (t->room == base) has = true;
+            if (!has) join_room(base, false);
+        }
     };
 
     const auto t0 = std::chrono::steady_clock::now();
@@ -252,7 +267,7 @@ int main() {
                             RoomRow r;
                             r.room_id = rid;
                             r.kind = kind;
-                            r.video = kind == "video" || rid.rfind("vehicle", 0) == 0;
+                            r.video = kind == "video"; // W4d：kind 三面直判，名字猜测退役
                             ui.rooms.push_back(std::move(r));
                         }
                         ui.logged_in = true;

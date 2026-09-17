@@ -33,6 +33,13 @@
   此前所有"轨道重建/线程上下文"假设均证伪，实测包装每次取用新建、指针恒变。
   修复 = 注册时与 sink 成对持有包装；90 秒双源对拍（回调帧数 vs libwebrtc 解码计数）
   2700/2699 咬合零衰减。附带删除救援/追踪重挂补丁机制（其前提假设已死且致重复交付）。
+- [server][sdk-client] 房间发现补全（W4d）：`GET /api/rooms` 此前只报注册房——
+  媒体面 per-stream 房（`<整车房>_<流id>`，PIT-140 v2）由 streamer produce 但不
+  RoomJoin，SDK 消费者按列表发现不到可播房。现由 StatusReport(connected) 派生流房、
+  owner 继承 base（allowlist 过滤同向；离线流不派生），kind 分三面 = video（流房）/
+  control（整车房，无视频 producer）/ audio。`imgui_viewer` 同步：勾选流房自动并入
+  整车控制房 tile（双房约定产品形态）、auto 发现 fallback、修房间名解析 off-by-one
+  （显式 env 通道带病多年首见光）。
 - [sdk-client] GUI 例子 `imgui_viewer` W3b 首刀：登录→入房→消费→**I420 纹理上屏全链**
   （新增壳层件 FrameStaging 泵线程→主线程最新帧槽 + VideoTexture SDL IYUV 工位）。
   无头判据 `SDL_VIDEODRIVER=dummy` + `MSRTC_RUN_SECS` 自退 + `[frame] cb=/tex=` 双计数
