@@ -29,7 +29,8 @@ SERVER_YAML = ROOT / "config/server.docker.yaml"
 
 # 交付目标 → 版本源 crate（F12 四独立版本源的打包侧接线；V1b 四包名化续用此表）。
 _TARGET_CRATE = {"host": "mediaservo-host", "server": "mediaservo-server",
-                 "bindings": "mediaservo-field"}
+                 "bindings": "mediaservo-field", "sdk-field": "mediaservo-field",
+                 "sdk-client": "mediaservo-client"}
 
 
 def _crate_version(crate: str) -> str:
@@ -431,7 +432,7 @@ def _cmd_build_bindings(release: bool = False) -> None:
     libs_src = py_pkg / "_libs"
     libs_src.mkdir(exist_ok=True)
     try:
-        for sdk in ALL_SDKS:
+        for sdk in ("field", "link", "deck"):  # py 域=设备半区三件（client 属 sdk-client 包，V1b 防冗余入 wheel）
             so_major = libs_src / f"libmediaservo_{sdk}.so.{major}"
             shutil.copy2(out_dir / f"libmediaservo_{sdk}.so", so_major)
             _symlink_force(f"libmediaservo_{sdk}.so.{major}", libs_src / f"libmediaservo_{sdk}.so")
@@ -440,6 +441,9 @@ def _cmd_build_bindings(release: bool = False) -> None:
         # next() 可咬旧文件 = rename 链自蚀源 pip ENOENT）。
         for _stale in wheel_dir.glob("*.whl"):
             _stale.unlink()
+        # setuptools build/ 缓存同族清扫（09-17 V1b 抓出：_libs 域变更后旧 client.so
+        # 残留 build/lib.*/mediaservo/_libs → 被 wheel 原样带出——pip wheel 不判变更）。
+        shutil.rmtree(py_src / "build", ignore_errors=True)
         r = subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-deps",
                             "--no-build-isolation", "-w", str(wheel_dir), str(py_src)],
                            capture_output=True, text=True)
@@ -463,6 +467,10 @@ def _cmd_build_bindings(release: bool = False) -> None:
                     content = content.replace(b"Tag: py3-none-any", f"Tag: {tag_new}".encode())
                 z.writestr(i, content)
         wheel.unlink()
+        # pip --prefix 不删旧 data_files（V1b 抓出：域收缩后 site-packages/_libs 残留
+        # 上一轮 client.so 尸体——wheel 新形正确但装树被旧件混入）。装前摘旧包树。
+        for _old_sp in bind_dst.glob("lib/python3.*/site-packages/mediaservo"):
+            shutil.rmtree(_old_sp, ignore_errors=True)
         r2 = subprocess.run([sys.executable, "-m", "pip", "install", "--prefix",
                              str(bind_dst), "--no-deps", str(fixed)],
                             capture_output=True, text=True)
@@ -1180,6 +1188,46 @@ def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
 
 
 # ── package: dist/ 双包发布（D-H13）──────────────────────────
+def _stage_sdk_package(staging: Path, domain: str) -> None:
+    """V1b 双包切分（F12：设备半区 sdk-field / 舱端半区 sdk-client）——
+    源 = out/bindings 单树（deploy bindings 全形），按域文件清单切分；
+    cmake config 按域重渲染 SDK_LIST（consumers 只见本包组件，未知组件报错=正确）。"""
+    src = _out_root() / "bindings"
+    if not src.exists():
+        print("错误: out/bindings 不存在——先 build bindings", file=sys.stderr)
+        sys.exit(1)
+    shutil.copytree(src, staging, dirs_exist_ok=True, symlinks=True)
+    sdk_cmake = staging / "lib" / "cmake" / "mediaservo"
+    ver = _crate_version(_TARGET_CRATE[domain])
+    major = ver.split(".")[0]
+    if domain == "sdk-client":
+        # 摘设备面：libs 除 client 三件套、include 除 field/link/deck 头、pc、py/node/wheel
+        for pat in ("libmediaservo_field", "libmediaservo_link", "libmediaservo_deck"):
+            for p in (staging / "lib").glob(f"{pat}*"):
+                p.unlink()
+        shutil.rmtree(staging / "wheel", ignore_errors=True)
+        shutil.rmtree(staging / "node", ignore_errors=True)
+        for pydir in (staging / "lib").glob("python3.*"):  # pip --prefix 实体在此（非顶层 python/）
+            shutil.rmtree(pydir, ignore_errors=True)
+        for name in ("field.h", "field.hpp", "link.h", "link.hpp", "deck.h", "deck.hpp"):
+            (staging / "include" / "mediaservo" / name).unlink(missing_ok=True)
+        for name in ("mediaservo-field.pc", "mediaservo-link.pc", "mediaservo-deck.pc"):
+            (staging / "lib" / "pkgconfig" / name).unlink(missing_ok=True)
+        sdk_list = "client"
+    else:  # sdk-field（含 bindings alias）
+        for p in (staging / "lib").glob("libmediaservo_client*"):
+            p.unlink()
+        for name in ("client.h", "client.hpp"):
+            (staging / "include" / "mediaservo" / name).unlink(missing_ok=True)
+        (staging / "lib" / "pkgconfig" / "mediaservo-client.pc").unlink(missing_ok=True)
+        sdk_list = "field link deck"
+    for name, tpl in (("mediaservoConfig.cmake", "mediaservoConfig.cmake.in"),
+                      ("mediaservoConfigVersion.cmake", "mediaservoConfigVersion.cmake.in")):
+        (sdk_cmake / name).write_text(
+            (ROOT / "bindings/c/cmake" / tpl).read_text()
+            .replace("@VERSION@", ver).replace("@MAJOR@", major).replace("@SDK_LIST@", sdk_list))
+
+
 def _write_version_file(dst: Path, target: str) -> None:
     """版本契约文件（D-H13: 版本兼容靠协议契约显式配对, 非同包隐含）。
     host-version.txt / sdk-version.txt: workspace 版本 + FrameMeta wire 版本 + 令牌 schema 版本。
@@ -1213,7 +1261,9 @@ def _git_out(args: list[str], timeout: int = 10) -> str | None:
 CHANGES_SCOPES = {
     "host": {"host", "protocol", "deploy"},
     "server": {"server", "protocol", "deploy"},
-    "bindings": {"sdk-client", "sdk-field", "protocol"},
+    "bindings": {"sdk-field", "protocol"},      # alias = sdk-field 形
+    "sdk-field": {"sdk-field", "protocol"},
+    "sdk-client": {"sdk-client", "protocol"},
 }
 
 _MARKERS = re.compile(r"\[([a-z0-9-]+)\]")
@@ -1322,8 +1372,11 @@ def _cmd_package(args: argparse.Namespace) -> None:
     需要直接落地到前缀目录时用 `tar xzf package.tar.gz -C <prefix> --strip-components=1`。"""
     if sys.platform == "win32":
         print("package: Windows best-effort — 验证清单见 scripts/e2e-win-validate.ps1", file=sys.stderr)
-    pkg_name = {"bindings": "sdk", "server": "server"}.get(args.target, "host")
-    ver = _crate_version(_TARGET_CRATE.get(args.target, "mediaservo-link"))
+    if args.target == "bindings":
+        print("WARN: target `bindings` 已更名 `sdk-field`（F12 双半区切分；本 alias 保留一个版本周期）",
+              file=sys.stderr)
+    pkg_name = {"bindings": "sdk", "server": "server"}.get(args.target, args.target)
+    ver = _crate_version(_TARGET_CRATE[args.target])
     # C43⑧ 发版完整性守卫：工作区 Cargo.toml 相对 HEAD 有差且 git 可用 → 打包版本无
     # git 锚（tag 无从落，v0.1.8.2 漂浮号事故同族）——WARN 不阻断（调试包允许脏树）。
     if _git_out(["log", "-1", "--format=%s"]) is not None and \
@@ -1342,8 +1395,14 @@ def _cmd_package(args: argparse.Namespace) -> None:
             _cmd_deploy_host(str(staging), args.release)  # brand 经 MEDIASERVO_BRAND 环境/已装实例推导（D266）
         elif args.target == "server":
             _cmd_deploy_server(str(staging))  # 同 deploy 语义整树入 staging（init 幂等落 staging）
+        elif args.target in ("bindings", "sdk-field"):
+            _stage_sdk_package(staging, "sdk-field")  # bindings = 一周期 alias（F12 更名 WARN 见上）
+        elif args.target == "sdk-client":
+            _stage_sdk_package(staging, "sdk-client")
         else:
-            _cmd_deploy_bindings(str(staging), args.release)
+            print(f"错误: 未知 package 目标 {args.target!r}（可选 host|server|sdk-field|sdk-client，bindings=alias）",
+                  file=sys.stderr)
+            sys.exit(2)
         _write_version_file(staging, pkg_name)
         prefix_name = args.brand if args.brand else "mediaservo"
         _write_changes_file(staging, args.target)  # D280 单源 + F11-X 切片（WARN 降级不阻断）
@@ -2399,8 +2458,8 @@ def main() -> None:
     install_p = sub.add_parser("install", help="已改名 deploy（提示迁移后退出 exit 2）")
     install_p.add_argument("args", nargs=argparse.REMAINDER, help="吞掉旧调用点透传参数（T3 迁移前 msrtc.sh 仍注入 --prefix 等）——仅提示改名")
     install_p.set_defaults(func=_cmd_install_deprecated)
-    package_p = sub.add_parser("package", help="打包 <target>: host|server（交付包）| bindings（SDK 包）→ <dist>/<brand>-<host|server|sdk>-<ver>.tar.gz（D-H13 多包发布, 含版本契约文件和版本顶层目录）")
-    package_p.add_argument("target", choices=["host", "server", "bindings"])
+    package_p = sub.add_parser("package", help="打包 <target>: host|server|sdk-field（设备半区，原 bindings 更名 alias 一周期）|sdk-client（舱端半区）→ <dist>/<brand>-<target>-<ver>.tar.gz（D-H13/F12，含版本契约与版本顶层目录）")
+    package_p.add_argument("target", choices=["host", "server", "bindings", "sdk-field", "sdk-client"])
     package_p.add_argument("--dist", default="", help="package tar 与 staging 输出目录（默认 dist；MSRTC 发布壳默认 out/packages）")
     package_p.add_argument("--brand", default="", help="品牌包名（<dist>/<brand>-<target>-<ver>.tar.gz；缺省 mediaservo）")
     package_p.add_argument("--release", action="store_true", help="打包 release 产物（target/release, 配合 build --release）")

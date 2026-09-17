@@ -90,6 +90,7 @@ s.publish_video()
 | soname 三件套 | `libmediaservo_<sdk>.so.<M.m.p>` 实体 + `.so.<MAJOR>`（DT_SONAME/加载器）+ `.so`（链接期）；MAJOR 取自 **field 域版本**（bindings 域=交付 sdk 包的版本源） | D241 + `_crate_version` |
 | py/node 手抄面 | `pyproject.toml`/`__init__.py`/`package.json` 对齐 **field** 版本；CI fmt job parity 门（cargo metadata 真值比对，漂移=红） | C43③ + ci 步骤 |
 | FrameMeta 线版本 | `WIRE_VERSION=0`（decode 拒未知版本=N4）；version.txt 内 `frame_meta_version` **由 Rust 源生成**（禁手抄漂浮） | `link/src/frame.rs` |
+| 发布包切分 | 设备半区 sdk-field（field/link/deck+py+node）/ 舱端半区 sdk-client（client-only）两包独立版本源；`bindings` = 一周期 alias（更名 WARN）（F12/V1b） | cli `_stage_sdk_package` |
 | 包内版本声明 | `<target>-version.txt` = 域版本 + 协议配对（D-H13）；`token_schema_version` 仍手抄（N2 生成化待做） | cli `_write_version_file` |
 
 ## 契约要点（跨语言一致）

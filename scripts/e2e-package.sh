@@ -120,11 +120,9 @@ for f in \
     lib/libmediaservo_field.so lib/libmediaservo_field.so.$MAJOR \
     lib/libmediaservo_link.so lib/libmediaservo_link.so.$MAJOR \
     lib/libmediaservo_deck.so lib/libmediaservo_deck.so.$MAJOR \
-    lib/libmediaservo_client.so lib/libmediaservo_client.so.$MAJOR \
     include/mediaservo/common.h include/mediaservo/field.h \
     include/mediaservo/link.h include/mediaservo/deck.h \
-    include/mediaservo/client.h \
-    lib/pkgconfig/mediaservo-field.pc lib/pkgconfig/mediaservo-link.pc lib/pkgconfig/mediaservo-deck.pc lib/pkgconfig/mediaservo-client.pc \
+    lib/pkgconfig/mediaservo-field.pc lib/pkgconfig/mediaservo-link.pc lib/pkgconfig/mediaservo-deck.pc \
     lib/cmake/mediaservo/mediaservoConfig.cmake lib/cmake/mediaservo/mediaservoConfigVersion.cmake \
     node/mediaservo/package.json node/mediaservo/mediaservo.node node/mediaservo/lib/index.mjs \
     sdk-version.txt CHANGES.md; do
@@ -133,6 +131,22 @@ done
 echo "$LIST" | grep -qE "^$SDK_ROOT/lib/python3\.[0-9]+/site-packages/mediaservo/" || { echo "FAIL: SDK 包缺 python 包"; FAIL=1; }
 echo "$LIST" | grep -qE "^$SDK_ROOT/wheel/mediaservo-.*\.whl$" || { echo "FAIL: SDK 包缺 wheel"; FAIL=1; }
 echo "OK: SDK 包关键文件完整（版本顶层目录 $SDK_ROOT/ + lib 三件套实体+符号链接 + include + python + wheel + node + .pc + cmake + sdk-version.txt）"
+
+# ── V1b 舱端半区包（sdk-client 独立形态）──
+"$MSRTC_CLI" package sdk-client --dist "$TMP/dist" >/dev/null 2>&1 || { echo "FAIL: package sdk-client 失败"; exit 1; }
+CLI_TGZ=$(ls "$TMP/dist"/mediaservo-sdk-client-*.tar.gz | head -1)
+[ -n "$CLI_TGZ" ] || { echo "FAIL: sdk-client tar 未生成"; exit 1; }
+CLI_ROOT=$(tar tzf "$CLI_TGZ" | head -1 | cut -d/ -f1)
+tar tzf "$CLI_TGZ" > "$TMP/cli-list.txt"
+for f in lib/libmediaservo_client.so "lib/libmediaservo_client.so.$MAJOR" \
+         include/mediaservo/client.h include/mediaservo/client.hpp \
+         lib/pkgconfig/mediaservo-client.pc lib/cmake/mediaservo/mediaservoConfig.cmake \
+         sdk-client-version.txt CHANGES.md; do
+    grep -q "^$CLI_ROOT/$f$" "$TMP/cli-list.txt" || { echo "FAIL: sdk-client 包缺 $f"; FAIL=1; }
+done
+grep -qE "libmediaservo_(field|link|deck)" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client 包混入设备面 lib"; FAIL=1; }
+grep -q "site-packages" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client 包混入 python 设备面"; FAIL=1; }
+echo "OK: sdk-client 半区包成型（client-only + 零设备面混入）"
 
 # ── 6. 版本契约文件内容（D-H14 最小版: workspace + FrameMeta wire 版本）──
 note "version contract file"

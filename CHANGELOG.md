@@ -29,6 +29,11 @@
   host-controller `--hmac-key-file` 参数（显式 > 环境变量，读败 = error 早退不静默降级）；
   未配置 = dev 迁移形逐字节不变（专网/开发零扰动）。生产部署急停验签从「手工 env 三件套」
   收敛为一行配置。
+- [deploy] 发布包 F12 双半区切分：`package` 目标成型 **sdk-field**（设备半区：field/link/deck
+  库+C/cxx 头+Python wheel+node）与 **sdk-client**（舱端半区：client 库+头+pc+cmake 独立组件
+  集，零设备面混入）；原 `bindings` 目标更名 `sdk-field`（一周期 alias，出包名 sdk 并 WARN）。
+  包名 `<品牌>-<target>-<版本>.tar.gz` 四形齐；各包 CMake 组件面按域渲染（舱端包
+  find_package 只识 client，误请求 field 显式报错）。
 - [deploy] 发布包 CHANGES.md 机械切片（F11-X）：仓根单源按 `[scope]` 标记路由进 host/server/sdk 包（protocol 随三包、deploy 随集群两包；无标记历史条目全带=宁全勿缺）；CI 强制 Unreleased 新条目带词表内标记（缺/外=红）。
 - [sdk-client] CI `test-gui` job：GUI 例子编译门 + `ctest -R core`；SDL3/ImGui 仓内档案
   零联网；聚合根 SDL 音频后端默认 OFF 守卫（clean ubuntu 预防）。例子目录新增 README

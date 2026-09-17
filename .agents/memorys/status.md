@@ -932,3 +932,9 @@ install                        → 改名提示 + exit 2（退役）
 - 发现（文档刀反哺）：装配/package 仍单读 `_workspace_version()` = V1a 分源后 field/server/host bump 不回Soname/包名（未来雷）。修：`_crate_version(crate)`（本地版本→workspace 回落）+ `_TARGET_CRATE` 域映射表（V1b 雏形）接线 build bindings/package/version.txt 三处；sdk 包实测 workspace_version=0.1.1 域形。
 - 第二咬：**frame_meta_version: 1 漂浮号**（V3 已钉实值 0，version.txt+e2e-package 断言双处皆旧值）。修 = `_frame_meta_wire_version()` 从 frame.rs 源生成 + e2e 断言派生形（FW 读源）。token_schema_version 手抄面挂 N2（在册不扩面）。
 - 指南扩节：23-binding-guide「版本与 soname 链」六行表（域映射/soname/parity/源生成全锚）。e2e-package.sh VER 加 V1b 接线注（防丢）。
+
+### 2026-09-17: V1b 发布包双半区切分（F12 兑现，bindings→sdk-field 一周期 alias）
+- package 四目标成型：host/server/sdk-field/sdk-client（`_TARGET_CRATE` 域表驱动版本与包名；`_stage_sdk_package` 按清单切 staging + cmake 按域重渲染 SDK_LIST=舱端包误请求 field 显式报错=正确形）。CHANGES_SCOPES 随动（sdk-client 条目不再进设备包）。e2e-package 新增 sdk-client 断言节（混入=红）。
+- **三连污染案（同族三形态，全部源生成/清扫根治）**：① `pip wheel` 不吃变更检测——setuptools build/ 旧 _libs（含 client）被原样带出 = build 前 rmtree；② 顶层 `lib/python3.12/` 不在 ("python","wheel","node") 摘除 tuple = pip --prefix 实体位置认知错 = 改 glob("python3.*")；③ `pip install --prefix` **不删旧 data_files** = site-packages/_libs 残留上一轮 client 尸体 = 装前摘旧包树。教训：**pip 三缓存面（build/、装树、--prefix）每轮装配全要主动清扫，「构建产物=源之真像」在 pip 生态是错的**。
+- 判据纠偏两枚：tar 清单 grep 子串假命中（`_libs/` 内路径命中顶层判定——判据锚定路径前缀）；`tar tzf + -O` 混用读不到内容（验证命令自身出错≠产品错）。
+- alias 实测：package bindings → sdk 包+WARN 一周期形 ✓。V1b 残 = manifest.json 生成（N2 件）+ V6 彩排。
