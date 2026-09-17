@@ -905,3 +905,8 @@ install                        → 改名提示 + exit 2（退役）
 - common::protocol 新增 `control_hmac_key_from_file`（0600 门/trim/非空/UTF-8 真源，双端共用）；client-c load 转调（消双实现）；host `CommandPolicy::from_env` 补 `MEDIASERVO_CONTROL_HMAC_KEY_FILE`（文件**优先**明文 env；文件配置了但读失败=**panic 早死**——车端密钥是闸门本身，静默降级=装门不锁，与舱端"坏路径不拦会话"方向相反的理由注释钉）。env-usage.md [C] 两行（三面 -h 自动生效）。
 - 门：common 106 · client-c 27 · host --lib 76 全绿。
 - 让位注记（V 批）：host.yaml `[control].hmac_key_file` → 渲染进 controller env 的部署面全链（跨 python/Rust 渲染器）未做——当前注入 = unit Environment=/shell export（[C] 类合法通道）。
+
+### 2026-09-17: V4 CHANGELOG 机械切片（F11-X，D280 单源不破，子仓 conventions C43⑥ 改判）
+- 落地：`_changelog_slice` 二态渲染（## 节→### 小节→条目块；空节丢弃；**无标记历史条目全带=宁全勿缺**，历史节零改动不编造）；CI fmt job 加 Unreleased 标记门（词表 {host,server,sdk-client,sdk-field,protocol,deploy}）；Unreleased 6 条旧裸条目补诚实标记（归类非改写）。
+- 实证：三包路由 43→26/27/33 对账；单标/双标/三标/无标四形判据全钉（**判据教训：正文子串假命中——相邻条目含关键词，判据必锚定 `- [标记]` 前缀**）；host 真包 tar CHANGES 26 条咬合。
+- 环境事故：**/ 分区再度 100%**（09-17 早清 33G，target 又胀 138G）——清 incremental 15G+examples 回 18G；target 卫生（定期清/CI artifact 分流）升 V 批急件。

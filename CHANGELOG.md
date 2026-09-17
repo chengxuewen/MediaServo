@@ -24,6 +24,7 @@
 - [host][sdk-client] 急停密钥文件通道车舱对齐：新增 `MEDIASERVO_CONTROL_HMAC_KEY_FILE`
   （车端 controller，0600 权限门+读失败 panic 早死=安全功能拒绝静默降级，与舱端
   `hmac_key_file` 同纪律）；双端共用 common 真源加载器。明文 env 形保留迁移兼容。
+- [deploy] 发布包 CHANGES.md 机械切片（F11-X）：仓根单源按 `[scope]` 标记路由进 host/server/sdk 包（protocol 随三包、deploy 随集群两包；无标记历史条目全带=宁全勿缺）；CI 强制 Unreleased 新条目带词表内标记（缺/外=红）。
 - [sdk-client] CI `test-gui` job：GUI 例子编译门 + `ctest -R core`；SDL3/ImGui 仓内档案
   零联网；聚合根 SDL 音频后端默认 OFF 守卫（clean ubuntu 预防）。例子目录新增 README
   （IN/OUT + **舱端双房约定**（媒体 `<整车房>_<流>` / 控制 `<整车房>`）+ 无头判据用法）。
@@ -92,14 +93,14 @@
 - [protocol][server][host] 信令通道硬化：服务器主动心跳探测断链（约 10-15 秒回收僵尸连接；网络抖动期连接不再被误杀）；车端短暂失联后凭一次性重挂票快速重挂（认证始终全量重跑，吊销即刻生效）；心跳与超时参数经环境变量 MEDIASERVO_WS_PING_SECS / WS_PONG_MISS / WS_PSK_WAIT_SECS / WS_JOIN_WAIT_SECS / WS_RESUME_HOLD_SECS 可调。
 - [protocol][server] 信令拥塞时高频状态上报限损（丢弃计数自报），认证/控制/终态消息不再被状态洪流排队拖死（优先级双队列）。协议方言升至 v3（新增会话续期域；v1/v2 端点行为逐字节不变）。
 - [protocol] 信令协议版本协商：端点在加入房间时声明方言版本，服务器协商后回显生效值；过旧版本显式拒绝（错误码 4101）而非静默降级。旧客户端不声明即按 v1 处理——线上报文逐字节不变，升级顺序无约束。控制数据通道（遥控）要求协商版本 ≥2。
-- 设备公钥指纹准入：host 用初始化时已生成的设备私钥应答服务器挑战，注册只需在管理台「待批准设备」点批准；专网/开发环境设 `ALLOW_DEV_ENROLL=1` 后新设备接入零人工（不再抄发/配置任何密钥）。
-- 管理台设备页新增「待批准设备」队列（一键批准 + 可选命名）。
-- Web 播放器协商内核改用官方 mediasoup-client（手拼 SDP/硬编码负载类型技术债清偿；对外行为与界面不变，弱网韧性语义原样保留）。
-- 部署帮助新增「环境变量总表」：`msrtc.sh -h` 与 `msrtc-server -h` / `msrtc-host -h` 三面共用单一真源 `crates/mediaservo-common/assets/env-usage.md`（[A] 脚本注入 / [B] oxfile 手工行 / [C] 启动 env），整树重部署丢手工 env 时按表回补。
+- [host][server][deploy] 设备公钥指纹准入：host 用初始化时已生成的设备私钥应答服务器挑战，注册只需在管理台「待批准设备」点批准；专网/开发环境设 `ALLOW_DEV_ENROLL=1` 后新设备接入零人工（不再抄发/配置任何密钥）。
+- [server] 管理台设备页新增「待批准设备」队列（一键批准 + 可选命名）。
+- [server] Web 播放器协商内核改用官方 mediasoup-client（手拼 SDP/硬编码负载类型技术债清偿；对外行为与界面不变，弱网韧性语义原样保留）。
+- [deploy] 部署帮助新增「环境变量总表」：`msrtc.sh -h` 与 `msrtc-server -h` / `msrtc-host -h` 三面共用单一真源 `crates/mediaservo-common/assets/env-usage.md`（[A] 脚本注入 / [B] oxfile 手工行 / [C] 启动 env），整树重部署丢手工 env 时按表回补。
 
 ### ⚠ 升级注意
-- 设备准入换代：旧版按「设备密钥」注册的车辆，升级 host 后首次连接会被拒绝——请在管理台删除旧条目，再让设备重新接入（自动档秒收录；默认档点一次批准）。设备密钥通路保留一个版本周期，下版删除。
-- `host init` 生成的 `identity.json` 不再包含密钥字段（旧文件仍可读）。
+- [host][server] 设备准入换代：旧版按「设备密钥」注册的车辆，升级 host 后首次连接会被拒绝——请在管理台删除旧条目，再让设备重新接入（自动档秒收录；默认档点一次批准）。设备密钥通路保留一个版本周期，下版删除。
+- [host] `host init` 生成的 `identity.json` 不再包含密钥字段（旧文件仍可读）。
 
 ## v0.1.1（2026-09-10）
 

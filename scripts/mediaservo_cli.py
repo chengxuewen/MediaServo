@@ -1177,15 +1177,102 @@ def _git_out(args: list[str], timeout: int = 10) -> str | None:
     return r.stdout if r.returncode == 0 else None
 
 
-def _write_changes_file(staging: Path) -> None:
-    """发布包内嵌更新日志（D280 维护式裁决——git log 机械分类器退役）：
-    直拷仓根 CHANGELOG.md 全文（最新版节在最前 + 历史节，升级比对最有用，
-    不做节裁剪=零解析面）。源缺失 → WARN 不阻断（CI 门禁已保证 bump 必带节）。"""
+# V4/F11-X：scope 标记 → 包路由表（词表=CI lint 守护；protocol=全链路词三包全带，
+# deploy=集群侧仅 host/server；V1 四包化时 sdk-field/sdk-client 拆独立行）。
+CHANGES_SCOPES = {
+    "host": {"host", "protocol", "deploy"},
+    "server": {"server", "protocol", "deploy"},
+    "bindings": {"sdk-client", "sdk-field", "protocol"},
+}
+
+_MARKERS = re.compile(r"\[([a-z0-9-]+)\]")
+
+
+def _cl_keep(first_line: str, keep: set[str]) -> bool:
+    tags = _MARKERS.findall(first_line[: first_line.find("：") if "：" in first_line else len(first_line)])
+    # 无标记 = 全带（F11-X 前历史节条目/升级注意散文——宁全勿缺；新条目由 CI 门强制有标记）
+    return (not tags) or any(t in keep for t in tags)
+
+
+def _cl_items(lines: list[str]):
+    """条目块生成器：("- "行+缩进续行) 与 其他行 逐块产出 (is_item, block)。"""
+    i, n = 0, len(lines)
+    while i < n:
+        if lines[i].startswith("- "):
+            k = i + 1
+            while k < n and (lines[k].startswith((" ", "\t")) or not lines[k].strip()):
+                if not lines[k].strip():
+                    k += 1
+                    break
+                k += 1
+            yield True, lines[i:k]
+            i = k
+        else:
+            yield False, [lines[i]]
+            i += 1
+
+
+def _cl_render_block(head: str | None, body: list[str], keep: set[str]) -> list[str]:
+    """小节渲染：条目过滤；无保留条目 = 空节（返回 [] 表示丢弃）。"""
+    out: list[str] = []
+    for is_item, blk in _cl_items(body):
+        if is_item and not _cl_keep(blk[0], keep):
+            continue
+        out.extend(blk)
+    if not any(l.startswith("- ") for l in out):
+        return []
+    return ([head] if head else []) + out
+
+
+def _changelog_slice(text: str, keep: set[str]) -> str:
+    """F11-X 机械切片（D280 单源不动，仅进包时路由）：
+    条目="- "行+缩进续行，[scope] ∈ keep 保留；空小节/空版本节丢弃；文件头恒留。"""
+    lines = text.splitlines()
+    head_end = next((i for i, l in enumerate(lines) if l.startswith("## ")), len(lines))
+    out = lines[:head_end]
+    i, n = head_end, len(lines)
+    while i < n:
+        if not lines[i].startswith("## "):
+            i += 1
+            continue
+        j = i + 1
+        while j < n and not lines[j].startswith("## "):
+            j += 1
+        ver_head, ver_body = lines[i], lines[i + 1:j]
+        # ## 体按 ### 切块逐节渲染
+        blocks: list[tuple[str | None, list[str]]] = []
+        cur: tuple[str | None, list[str]] = (None, [])
+        for ln in ver_body:
+            if ln.startswith("### "):
+                blocks.append(cur)
+                cur = (ln, [])
+            else:
+                cur[1].append(ln)
+        blocks.append(cur)
+        rendered: list[str] = []
+        for sub_head, sub_body in blocks:
+            rendered.extend(_cl_render_block(sub_head, sub_body, keep))
+        if rendered:
+            out.append(ver_head)
+            out.extend(rendered)
+        i = j
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _write_changes_file(staging: Path, target: str) -> None:
+    """发布包内嵌更新日志（D280 单源 + F11-X 机械切片 V4）：
+    仓根 CHANGELOG.md 按 [scope] 标记路由进包（CHANGES_SCOPES 表）。
+    未知 target / 全空切片 → 降级直拷全文（宁全勿缺）。源缺失 → WARN 不阻断。"""
     try:
         text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     except OSError:
         print("WARN: CHANGELOG.md 缺失——包内不带 CHANGES.md（不阻断打包）", file=sys.stderr)
         return
+    keep = CHANGES_SCOPES.get(target)
+    if keep:
+        sliced = _changelog_slice(text, keep)
+        if any(l.startswith("- ") for l in sliced.split("\n")):
+            text = sliced
     try:
         (staging / "CHANGES.md").write_text(text, encoding="utf-8")
     except OSError as e:
@@ -1224,7 +1311,7 @@ def _cmd_package(args: argparse.Namespace) -> None:
             _cmd_deploy_bindings(str(staging), args.release)
         _write_version_file(staging, pkg_name)
         prefix_name = args.brand if args.brand else "mediaservo"
-        _write_changes_file(staging)  # D280：直拷 CHANGELOG.md（WARN 降级不阻断）
+        _write_changes_file(staging, args.target)  # D280 单源 + F11-X 切片（WARN 降级不阻断）
         package_root = f"{prefix_name}-{pkg_name}-{ver}"
         out = dist / f"{package_root}.tar.gz"
         strip_package_binaries(staging)  # PIT-119: debug 二进制未 strip（单 135-155MB）→ gzip 1.2GB 超时
