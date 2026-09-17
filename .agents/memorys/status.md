@@ -884,3 +884,8 @@ install                        → 改名提示 + exit 2（退役）
 - **插曲自咬（#17 族新例）**：① 空引用 UB 测试构想（reinterpret_cast<Control*>(nullptr) 解引用）当场撤回；② python 三段 replace 锚=想象形（run_env 行不存在=实况 env_or 形）assert 失败零写盘两连——**行号锚前必 grep 实况**（#9 再证）；③ key_file 声明位置 vs lambda 捕获作用域编译咬中即挪。
 - 活体（迁移放行形复验）：basic estop → 车端 `actuation estop` 执行 + **ack seq=900 ok:true** + 断连定向拆除（S4′ 清理链连带）；守卫/权限门=单测 27 绿；test-cxx 6 PASS。全 key 验签正负例=S4 轮 Rust 面已活体（wire 同一合成件），C 面签名形=device-day 复跑。
 - 门：client-c 27 · ABI 15==15 · test-cxx 6 · ctest core · build example RC=0。p3 功能面自 W4b 起 = 完整（W4c/W4d 已毕），余 W5 CI + W6 收口。
+
+### 2026-09-17: p3 W5 首批——test-gui CI job（Linux 编译+单测门）
+- ci.yml 新 job（test-cxx 模板形）：apt cmake/ninja + client-c cdylib + soname link + `build example`（SDL3/ImGui 全走仓内 file:// 档案零联网）+ `ctest -R core`。
+- 聚合根新增 **SDL 音频后端守卫族**（ALSA/PULSEAUDIO/PIPEWIRE/SNDIO/OSS 默认 OFF，`if(NOT DEFINED)` 留 override）——clean ubuntu 无 libasound2-dev 时 SDL 默认 ON 必炸的预防刀（本机冷构复验 RC=0 + ctest 绿）。
+- 边界诚实注：dummy 活体出画判据（cb=tex 咬合）需活 server+producer = device-day/self-hosted 位；CI 门 = 编译+纯函数面。mac/win job = W5 后续（macOS 有 X11-free SDL 路径但 imgui 后端组合未本机复验，Windows=MSVC 面待 device-day）。

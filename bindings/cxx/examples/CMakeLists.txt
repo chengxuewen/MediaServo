@@ -64,6 +64,14 @@ endif()
 if(NOT DEFINED SDL_WAYLAND)
     set(SDL_WAYLAND OFF CACHE BOOL "" FORCE)
 endif()
+# 音频后端（GUI 例子零音频需求）：clean CI（ubuntu-22.04 无 libasound2-dev 等）
+# 下 SDL 默认 ON 会 FATAL/find 失败——同 X11 纪律显式 OFF，`if(NOT DEFINED)` 留_OVERRIDE 位。
+foreach(_snd ALSA PULSEAUDIO PIPEWIRE SNDIO OSS)
+    if(NOT DEFINED SDL_${_snd})
+        set(SDL_${_snd} OFF CACHE BOOL "" FORCE)
+    endif()
+endforeach()
+
 if(NOT DEFINED SDL_UNIX_CONSOLE_BUILD)
     set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
 endif()

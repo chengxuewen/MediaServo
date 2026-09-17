@@ -80,6 +80,27 @@ jobs:
       - name: C ABI symbol checks
         run: bash scripts/check-abi-drift.sh && bash scripts/check-abi-client.sh
 
+  test-gui:
+    # p3 GUI examples 编译+单测门：SDL3/ImGui 走仓内档案（file:// FetchContent，
+    # 零联网），X11/音频后端在聚合根显式 OFF（clean ubuntu 依赖面）。
+    # 判据 = build example RC=0 + ctest -R core（viewer_core 纯函数钉）。
+    # 活体出画（dummy cb=tex 咬合，需活 server+producer）= device-day/self-hosted 位。
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cmake/ninja
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Build client-c cdylib (SDK_DIR guard input)
+        run: cargo build -p mediaservo-client-c
+      - name: Dev soname symlinks (同 test-cxx 纪律)
+        run: cd target/debug && ln -sf libmediaservo_client_c.so libmediaservo_client_c.so.0
+      - name: Build GUI examples (aggregated FetchContent, headless combos)
+        run: ./mediaservo.sh build example
+      - name: ctest viewer_core
+        run: ctest --test-dir target/examples/build -R core --output-on-failure
+
   test-gstreamer:
     runs-on: ubuntu-latest
     steps:
