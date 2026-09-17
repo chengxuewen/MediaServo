@@ -333,11 +333,12 @@ def _cmd_build_bindings(release: bool = False) -> None:
     cmd = ["cargo", "build"]
     if release:
         cmd.append("--release")
-    cmd += ["-p", "mediaservo-field-c", "-p", "mediaservo-link-c", "-p", "mediaservo-deck-c"]
+    for _sdk in ALL_SDKS:
+        cmd += ["-p", f"mediaservo-{_sdk}-c"]
     _run_or_exit(cmd)
     major = _workspace_version().split(".")[0]
     out_dir = ROOT / ("target/release" if release else "target/debug")
-    for sdk in ("field", "link", "deck"):
+    for sdk in ALL_SDKS:
         _symlink_force(
             f"libmediaservo_{sdk}.so",
             out_dir / f"libmediaservo_{sdk}.so.{major}",
@@ -449,13 +450,15 @@ def _cmd_build_bindings(release: bool = False) -> None:
             shutil.copy2(node_src / f, node_dst)
         (node_dst / "lib").mkdir(parents=True, exist_ok=True)
         shutil.copy2(node_src / "lib" / "index.mjs", node_dst / "lib")
-    print("bindings 构建完成: libmediaservo_{field,link,deck}.so 三件套 version-full + node + python + .pc + cmake (%s)"
-          % ("release" if release else "debug"))
+    print("bindings 构建完成: libmediaservo_{%s}.so 三件套 version-full + node + python + .pc + cmake (%s)"
+          % (",".join(ALL_SDKS), "release" if release else "debug"))
     n_lib = len([p for p in lib_dst.glob("libmediaservo_*") if p.is_file() or p.is_symlink()])
     print(f"bindings 交付布局组装: out/bindings/（lib {n_lib} 件 + include/mediaservo + pkgconfig + cmake + python + wheel + node）")
 
 
-ALL_SDKS = ("field", "link", "deck")
+# client 入列（V2 补全刀 09-17）：C 面 15 符号+cxx RAII 头在仓、pc.in 在位——此前 ALL_SDKS
+# 缺 client 导致交付面=零（find_package/pkg-config/include 三面皆无）。全下游环节皆本常量驱动+模板泛化。
+ALL_SDKS = ("field", "link", "deck", "client")
 
 
 # D-H13: host 包 8 进程二进制（host CLI + 7 守护进程；host-legacy 旧单进程不入包）

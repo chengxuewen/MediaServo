@@ -118,9 +118,11 @@ for f in \
     lib/libmediaservo_field.so lib/libmediaservo_field.so.$MAJOR \
     lib/libmediaservo_link.so lib/libmediaservo_link.so.$MAJOR \
     lib/libmediaservo_deck.so lib/libmediaservo_deck.so.$MAJOR \
+    lib/libmediaservo_client.so lib/libmediaservo_client.so.$MAJOR \
     include/mediaservo/common.h include/mediaservo/field.h \
     include/mediaservo/link.h include/mediaservo/deck.h \
-    lib/pkgconfig/mediaservo-field.pc lib/pkgconfig/mediaservo-link.pc lib/pkgconfig/mediaservo-deck.pc \
+    include/mediaservo/client.h \
+    lib/pkgconfig/mediaservo-field.pc lib/pkgconfig/mediaservo-link.pc lib/pkgconfig/mediaservo-deck.pc lib/pkgconfig/mediaservo-client.pc \
     lib/cmake/mediaservo/mediaservoConfig.cmake lib/cmake/mediaservo/mediaservoConfigVersion.cmake \
     node/mediaservo/package.json node/mediaservo/mediaservo.node node/mediaservo/lib/index.mjs \
     sdk-version.txt CHANGES.md; do

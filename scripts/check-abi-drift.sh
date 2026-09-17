@@ -8,7 +8,9 @@ cd "$(dirname "$0")/.."
 export PATH="$HOME/.pixi/bin:$PATH"
 FAIL=0
 
-for sdk in field link deck; do
+for sdk in field link deck client; do
+    # client C 面前缀=ms_client_（非 mediaservo_client_，V2 入列时核实）
+    case "$sdk" in client) SYM="ms_client_";; *) SYM="mediaservo_${sdk}_";; esac
     HDR="bindings/c/mediaservo-$sdk-c/include/mediaservo/$sdk.h"
     SO="target/debug/libmediaservo_$sdk.so"
     if [ ! -f "$SO" ]; then
@@ -16,10 +18,10 @@ for sdk in field link deck; do
         continue
     fi
     # header 声明: 行首为返回类型（排除注释/宏/typedef）
-    declared=$(grep -oE "^(mediaservo_err_t|void) mediaservo_${sdk}_[a-z_]+" "$HDR" | awk '{print $2}' | sort -u)
+    declared=$(grep -oE "^(mediaservo_err_t|void|int) ${SYM}[a-z_]+" "$HDR" | awk '{print $2}' | sort -u)
     # .so 导出: GLOBAL 定义符号（排除 UND）
     exported=$(readelf -W --dyn-syms "$SO" | grep " GLOBAL " | grep -v " UND " \
-        | grep -oE "mediaservo_${sdk}_[a-z_]+" | sort -u)
+        | grep -oE "${SYM}[a-z_]+" | sort -u)
     missing=$(comm -23 <(printf '%s\n' "$declared") <(printf '%s\n' "$exported"))
     undeclared=$(comm -13 <(printf '%s\n' "$declared") <(printf '%s\n' "$exported"))
     if [ -n "$missing" ] || [ -n "$undeclared" ]; then
