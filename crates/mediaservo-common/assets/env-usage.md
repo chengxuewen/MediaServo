@@ -12,4 +12,7 @@
       MEDIASERVO_SFU_PORT                  媒体固定端口（缺省 ${MEDIASERVO_SFU_PORT}）
       MEDIASERVO_WEB_PORT                  web 入口 8080 让位时用
       WEAKNET_BIN                          弱网入口解析首选（簇常驻机不设即命中 out/server/bin）
+      MEDIASERVO_CONTROL_HMAC_KEY_FILE     车端急停验签密钥文件（推荐；0600 门，D-HMAC；
+                                           controller 专属——注入位=unit Environment= 或 shell export）
+      MEDIASERVO_CONTROL_HMAC_KEY          急停密钥明文形（迁移兼容，文件形优先）
   注: host 树运行 env 每次 start 由 etc/host.yaml 全量渲染进 run/oxfile.toml——手工编该 oxfile 加 env 行会被覆盖，不被支持

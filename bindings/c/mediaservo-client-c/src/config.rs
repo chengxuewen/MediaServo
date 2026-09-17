@@ -173,22 +173,9 @@ fn session_hmac_key_file(cfg: &ms_client_config_t) -> Option<&str> {
     }
 }
 
-/// W4b：读急停密钥文件（0600 权限门 + 非空）。G13 语义 = 密钥只经文件通道。
+/// W4b：读急停密钥文件——薄转调 common 真源（车舱同纪律，防双实现漂移）。
 pub(crate) fn load_hmac_key_file(path: &str) -> Result<String, String> {
-    use std::os::unix::fs::PermissionsExt;
-    let meta = std::fs::metadata(path).map_err(|e| format!("hmac_key_file {path}: {e}"))?;
-    let mode = meta.permissions().mode() & 0o777;
-    if mode & 0o077 != 0 {
-        return Err(format!("hmac_key_file {path}: mode {mode:04o} 过宽（须 0600 或更严）"));
-    }
-    let mut bytes = std::fs::read(path).map_err(|e| format!("hmac_key_file {path}: {e}"))?;
-    while matches!(bytes.last(), Some(b'\n') | Some(b'\r')) {
-        bytes.pop();
-    }
-    if bytes.is_empty() {
-        return Err(format!("hmac_key_file {path}: 空密钥"));
-    }
-    String::from_utf8(bytes).map_err(|_| format!("hmac_key_file {path}: 非 UTF-8 密钥"))
+    mediaservo_common::protocol::control_hmac_key_from_file(path)
 }
 
 fn session_role(cfg: &ms_client_config_t) -> Result<PeerRole, c_int> {

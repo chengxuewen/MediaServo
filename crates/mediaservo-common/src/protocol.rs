@@ -619,6 +619,28 @@ fn canonical_envelope_bytes(env: &ControlEnvelope) -> Vec<u8> {
 
 /// `hex(HMAC-SHA256(key, canonical))`（车舱共用构造函数）。
 #[must_use]
+/// 急停 HMAC 密钥文件读取（G13 文件通道的**双端共用真源**：舱端 client-c
+/// `hmac_key_file` 与车端 `MEDIASERVO_CONTROL_HMAC_KEY_FILE` 同纪律）。
+/// 权限门 0600（组/他可读即拒——弱文件权限=密钥泄露面）、尾换行剥离、非空、UTF-8。
+pub fn control_hmac_key_from_file(path: &str) -> Result<String, String> {
+    use std::os::unix::fs::PermissionsExt;
+    let meta = std::fs::metadata(path).map_err(|e| format!("hmac key file {path}: {e}"))?;
+    let mode = meta.permissions().mode() & 0o777;
+    if mode & 0o077 != 0 {
+        return Err(format!(
+            "hmac key file {path}: mode {mode:04o} 过宽（须 0600 或更严，G13）"
+        ));
+    }
+    let mut bytes = std::fs::read(path).map_err(|e| format!("hmac key file {path}: {e}"))?;
+    while matches!(bytes.last(), Some(b'\n') | Some(b'\r')) {
+        bytes.pop();
+    }
+    if bytes.is_empty() {
+        return Err(format!("hmac key file {path}: 空密钥"));
+    }
+    String::from_utf8(bytes).map_err(|_| format!("hmac key file {path}: 非 UTF-8 密钥"))
+}
+
 pub fn control_hmac_sign(key: &str, env: &ControlEnvelope) -> String {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
@@ -1473,6 +1495,20 @@ mod tests {
         assert!(control_hmac_verify("k1", &env2, &signed));
         assert!(!control_hmac_verify("wrong", &env2, &signed));
         assert!(!control_hmac_verify("k1", &env2, "deadbeef"));
+    }
+
+    #[test]
+    fn control_hmac_key_from_file_gates() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mskey-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("k");
+        std::fs::write(&p, b"secret\n").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(control_hmac_key_from_file(p.to_str().unwrap()).unwrap(), "secret");
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(control_hmac_key_from_file(p.to_str().unwrap()).unwrap_err().contains("过宽"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

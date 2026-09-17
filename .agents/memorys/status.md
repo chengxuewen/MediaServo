@@ -900,3 +900,8 @@ install                        → 改名提示 + exit 2（退役）
 - 门：stub lib 139/sfu 157 全绿·两姿态 --all-targets 0 error·clippy(sfu) 0。**「stub 奇偶」基线自此双姿态 CI 可门**（V 批 CI 矩阵前置雷拆）。
 - 浏览器面确认：www 不消费 /api/rooms（只 admin/rooms）=W4d 对 Dashboard 零回归面。
 - 小刀包余项：estop `MEDIASERVO_CONTROL_HMAC_KEY` 的 render_oxfile 注入面 = 真部署刀（白名单/模板/文档三段），留 V 批/专轮（上下文限）。
+
+### 2026-09-17: 急停密钥车舱对齐（key 注入刀·功能半区）
+- common::protocol 新增 `control_hmac_key_from_file`（0600 门/trim/非空/UTF-8 真源，双端共用）；client-c load 转调（消双实现）；host `CommandPolicy::from_env` 补 `MEDIASERVO_CONTROL_HMAC_KEY_FILE`（文件**优先**明文 env；文件配置了但读失败=**panic 早死**——车端密钥是闸门本身，静默降级=装门不锁，与舱端"坏路径不拦会话"方向相反的理由注释钉）。env-usage.md [C] 两行（三面 -h 自动生效）。
+- 门：common 106 · client-c 27 · host --lib 76 全绿。
+- 让位注记（V 批）：host.yaml `[control].hmac_key_file` → 渲染进 controller env 的部署面全链（跨 python/Rust 渲染器）未做——当前注入 = unit Environment=/shell export（[C] 类合法通道）。

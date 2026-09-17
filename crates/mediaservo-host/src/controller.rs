@@ -224,14 +224,25 @@ pub struct CommandPolicy {
 
 impl CommandPolicy {
     /// env 驱动构造（deploy 面单点）：
-    /// `MEDIASERVO_CONTROL_HMAC_KEY` 缺省空 = 未启用；`CONTROL_ALLOW_UNSIGNED_ESTOP=1` 逃生位；
+    /// `MEDIASERVO_CONTROL_HMAC_KEY_FILE`（**推荐**，G13 文件形 0600，与舱端 client-c
+    /// `hmac_key_file` 同纪律同真源）优先于 `MEDIASERVO_CONTROL_HMAC_KEY`（明文形，
+    /// 迁移兼容）；皆缺省 = 验签不启用。文件**配置了但读失败 = panic 早死**（fail-fast：
+    /// 安全功能静默降级为未配置形不可接受，与舱端"坏路径不拦会话"方向相反——车端
+    /// 密钥是验签闸门本身，静默放行 = 装门不锁）。`CONTROL_ALLOW_UNSIGNED_ESTOP=1` 逃生位；
     /// `CONTROL_ACTUATION_LOG` 未设 = 仅 tracing 行。
     #[must_use]
     pub fn from_env() -> Self {
+        let key_file = std::env::var("MEDIASERVO_CONTROL_HMAC_KEY_FILE")
+            .ok()
+            .filter(|v| !v.is_empty());
         Self {
-            hmac_key: std::env::var("MEDIASERVO_CONTROL_HMAC_KEY")
-                .ok()
-                .filter(|v| !v.is_empty()),
+            hmac_key: match key_file {
+                Some(p) => Some(mediaservo_common::protocol::control_hmac_key_from_file(&p)
+                    .unwrap_or_else(|e| panic!("controller 急停密钥不可用: {e}"))),
+                None => std::env::var("MEDIASERVO_CONTROL_HMAC_KEY")
+                    .ok()
+                    .filter(|v| !v.is_empty()),
+            },
             allow_unsigned_estop: std::env::var("CONTROL_ALLOW_UNSIGNED_ESTOP").as_deref() == Ok("1"),
             actuation_log: std::env::var("CONTROL_ACTUATION_LOG")
                 .ok()
