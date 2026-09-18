@@ -25,7 +25,12 @@ gate() {  # gate <名> <命令...>（每门独立 mktemp 日志——首跑抓�
 port_busy() { ss -tln 2>/dev/null | grep -q ":9800 "; }
 
 # ── fmt job 三碎片 ──
-gate "fmt --check"                cargo fmt --all --check
+gate "fmt --check (增量)"         bash -c '
+  base=$(git rev-parse --abbrev-ref "@{u}" 2>/dev/null || echo HEAD)
+  files=$(git diff --name-only "$base" -- "*.rs")
+  [ -z "$files" ] && { echo "无改动 .rs（基线 $base）"; exit 0; }
+  echo "检查 $(echo "$files" | grep -c .) 个改动文件（基线 $base）"
+  rustfmt --edition 2024 --check $files'
 gate "changelog markers (F11-X)"  python3 scripts/gate-changelog.py
 gate "bindings version parity"    python3 scripts/gate-parity.py
 gate "crate literal versions"     bash -c '! git grep -l "^version = \"" -- "crates/*/Cargo.toml" | grep -vE "mediaservo-(host|server|field|client)/Cargo.toml" | grep -q .'

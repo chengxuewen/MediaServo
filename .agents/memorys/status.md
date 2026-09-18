@@ -969,3 +969,9 @@ install                        → 改名提示 + exit 2（退役）
 - **首日战果**：E0753×8（webrtc_transport.rs 的 #!`!` 文档注释位于 #[cfg] 之后）= 08-18 骨架期遗留、潜伏一个月——历史 check/clippy/test 全绿是因为**没人跑过含该 bin 的完整编译面**。教训：门的价值在覆盖面，合并门的意义当场兑现。修复=//! 移文件首（cfg 保持）。
 - 工具事故两枚当场记：`git checkout -- .` 误吞未提交修复（重放）；「已重放成功」幻觉回执 ×2（head 回显证伪）= **edit 结果断言必须独立短命令回显，链尾输出不算数**。
 - 预期账面：clippy -D --workspace 首跑必红（link-c19/host+deck63/media8 存量在册=V 批清偿队列）——红是真账不是门病。
+
+### 2026-09-18: all-gates quick 首跑全貌 + 债务战立案（N8/N9）
+- quick 门实跑：fmt(增量)/changelog/parity/literal/check/stub 过，**clippy -D --workspace = 红**——存量债全貌现身：~130 处（codec/deck/host/link-c 在册 90 + **server sfu 姿态 lib 34 = V5 双姿态清偿只查了 stub 面的盲区**）。collect_files dead_code 已顺手修（#[allow] 注释钉 feature 组合语义）。
+- E0753 修复二轮补全（一轮只挪首行=门把半成品也考了）：//! 全块 12 行转 //（bin 顶层文件 inner-doc 本非法，位置修法皆错，转注释才是正解）——**门的严格性两次教育了修复者**。
+- gate fmt 基线 bug 修：@{u} 自适应（首版写死 origin/master 在子仓 main 分支静默空跑——空清单≠通过，脚本现输出文件数）。
+- **债务战立案（新会话专项）**：N8 = clippy 存量 ~130 清偿（--fix 批+手修，分 crate 多笔）；N9 = 全仓 fmt 2083 一次性对齐（决策：做=巨型纯格式笔污染评审队列 / 不做=增量门永久化——推荐增量门+旧文件随改触碰到时顺手 fmt，Linux 内核模式）。清完前 all-gates 语义 = 除 clippy 门外全绿即快速过。

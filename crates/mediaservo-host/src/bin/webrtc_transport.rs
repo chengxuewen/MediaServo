@@ -1,17 +1,16 @@
-//! WebRTC transport module for MediaServo Host.
+// WebRTC transport module for MediaServo Host.
 #[cfg(feature = "webrtc-p2p")]
-//! Creates a RTCPeerConnection, establishes an unordered unreliable RTCDataChannel
-//! named "frames", and exchanges SDP/ICE candidates via the existing signaling WS.
-//!
-//! # Flow
-//! 1. `WebrtcTransport::new(sender, room_id)` — builds PC, creates DC,
-//!    registers ICE handler, creates offer, sends SDP via WS.
-//!    Returns `(Self, mpsc::UnboundedReceiver<DcEvent>)` — the receiver
-//!    yields RTCDataChannel lifecycle events (Open/Closed/Message).
-//! 2. The ICE handler sends candidates automatically via the WS sender.
-//! 3. `send_frame(data)` — sends raw bytes through the RTCDataChannel.
-//! 4. The caller spawns a task to poll the event receiver.
-
+// Creates a RTCPeerConnection, establishes an unordered unreliable RTCDataChannel
+// named "frames", and exchanges SDP/ICE candidates via the existing signaling WS.
+//
+// # Flow
+// 1. `WebrtcTransport::new(sender, room_id)` — builds PC, creates DC,
+//    registers ICE handler, creates offer, sends SDP via WS.
+//    Returns `(Self, mpsc::UnboundedReceiver<DcEvent>)` — the receiver
+//    yields RTCDataChannel lifecycle events (Open/Closed/Message).
+// 2. The ICE handler sends candidates automatically via the WS sender.
+// 3. `send_frame(data)` — sends raw bytes through the RTCDataChannel.
+// 4. The caller spawns a task to poll the event receiver.
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
@@ -19,16 +18,16 @@ use bytes::Bytes;
 use futures_util::SinkExt;
 use mediaservo_common::error::CoreError;
 use mediaservo_common::protocol::SignalingMessage;
-use tokio::sync::{mpsc, Mutex as TokioMutex};
+use tokio::sync::{Mutex as TokioMutex, mpsc};
 use tokio_tungstenite::tungstenite::Message;
 use webrtc::api::APIBuilder;
+use webrtc::data_channel::RTCDataChannel;
 use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::data_channel_state::RTCDataChannelState;
-use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidate;
-use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::ice_transport::ice_server::RTCIceServer;
+use webrtc::peer_connection::configuration::RTCConfiguration;
 
 use crate::control::{self, ControlHandler};
 use crate::signaling::WsSender;
@@ -86,31 +85,27 @@ impl WebrtcTransport {
         {
             let ws_clone = ws.clone();
             let room = room_id.clone();
-            pc.on_ice_candidate_native(Box::new(
-                move |candidate: Option<RTCIceCandidate>| {
-                    let ws = ws_clone.clone();
-                    let room_id = room.clone();
-                    Box::pin(async move {
-                        if let Some(c) = candidate {
-                            if let Ok(init) = c.to_json() {
-                                let msg = SignalingMessage::RTCIceCandidate {
-                                    room_id,
-                                    target: None,
-                                    candidate: init.candidate,
-                                    sdp_mid: init.sdp_mid,
-                                    sdp_mline_index: init.sdp_mline_index,
-                                };
-                                if let Ok(json) = serde_json::to_string(&msg) {
-                                    let mut sender = ws.lock().await;
-                                    let _ = sender
-                                        .send(Message::Text(json.into()))
-                                        .await;
-                                }
+            pc.on_ice_candidate_native(Box::new(move |candidate: Option<RTCIceCandidate>| {
+                let ws = ws_clone.clone();
+                let room_id = room.clone();
+                Box::pin(async move {
+                    if let Some(c) = candidate {
+                        if let Ok(init) = c.to_json() {
+                            let msg = SignalingMessage::RTCIceCandidate {
+                                room_id,
+                                target: None,
+                                candidate: init.candidate,
+                                sdp_mid: init.sdp_mid,
+                                sdp_mline_index: init.sdp_mline_index,
+                            };
+                            if let Ok(json) = serde_json::to_string(&msg) {
+                                let mut sender = ws.lock().await;
+                                let _ = sender.send(Message::Text(json.into())).await;
                             }
                         }
-                    })
-                },
-            ));
+                    }
+                })
+            }));
         }
 
         // Create unordered unreliable RTCDataChannel for low-latency frame delivery
@@ -172,11 +167,7 @@ impl WebrtcTransport {
         let sdp_json = serde_json::to_string(&offer)
             .map_err(|e| CoreError::ConfigParse(format!("serialize SDP: {e}")))?;
 
-        let sdp_msg = SignalingMessage::Sdp {
-            room_id,
-            target: None,
-            sdp: sdp_json,
-        };
+        let sdp_msg = SignalingMessage::Sdp { room_id, target: None, sdp: sdp_json };
 
         let sdp_text = serde_json::to_string(&sdp_msg)
             .map_err(|e| CoreError::ConfigParse(format!("serialize Sdp message: {e}")))?;
@@ -186,22 +177,12 @@ impl WebrtcTransport {
             sender
                 .send(Message::Text(sdp_text.into()))
                 .await
-                .map_err(|e| {
-                    CoreError::WebSocketDisconnect(format!("send SDP offer: {e}"))
-                })?;
+                .map_err(|e| CoreError::WebSocketDisconnect(format!("send SDP offer: {e}")))?;
         }
 
         tracing::info!("SDP offer sent via signaling");
 
-        Ok((
-            Self {
-                pc,
-                dc,
-                _ws_sender: ws,
-                _dc_tx: dc_tx,
-            },
-            dc_rx,
-        ))
+        Ok((Self { pc, dc, _ws_sender: ws, _dc_tx: dc_tx }, dc_rx))
     }
 
     /// Send a frame (raw bytes) through the RTCDataChannel.
@@ -215,7 +196,7 @@ impl WebrtcTransport {
         self.dc
             .send(&chunk)
             .await
-.map(|_s| ())
+            .map(|_s| ())
             .map_err(|e| CoreError::PeerConnectionFailure(format!("DC send: {e}")))
     }
 
@@ -281,7 +262,10 @@ impl Drop for WebrtcTransport {
 /// Run the RTCDataChannel event loop — logs lifecycle events.
 ///
 /// Call this in a spawned task with the receiver from `WebrtcTransport::new()`.
-pub async fn run_dc_event_loop(mut rx: mpsc::UnboundedReceiver<DcEvent>, control_handler: Arc<Mutex<ControlHandler>>) {
+pub async fn run_dc_event_loop(
+    mut rx: mpsc::UnboundedReceiver<DcEvent>,
+    control_handler: Arc<Mutex<ControlHandler>>,
+) {
     loop {
         match rx.recv().await {
             Some(DcEvent::Open) => {
