@@ -11,8 +11,11 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
-use mediaservo_host::monitor::topology::{diff, Mismatch, OxmgrClient, TopologyMonitor};
-use mediaservo_link::{CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, FrameBus, FrameMeta, FrameTopic, NodeAcl, NodeId, Role};
+use mediaservo_host::monitor::topology::{Mismatch, OxmgrClient, TopologyMonitor, diff};
+use mediaservo_link::{
+    CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, FrameBus, FrameMeta, FrameTopic,
+    NodeAcl, NodeId, Role,
+};
 
 const PRIV_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIObCg8b+Le6kKOI/+pE+4+YhXUlr6X6h7q8p/MjvHmXT\n-----END PRIVATE KEY-----\n";
 const PUB_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgXprEbnahCZoZtLpiUqR0ruqtzEfRXk/Gl/6F6PEm4o=\n-----END PUBLIC KEY-----\n";
@@ -27,10 +30,8 @@ fn oxmgr_bin() -> Option<PathBuf> {
             }
         }
     }
-    let fallback = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default()
-        .join(".local/bin/oxmgr");
+    let fallback =
+        std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".local/bin/oxmgr");
     fallback.is_file().then_some(fallback)
 }
 
@@ -76,7 +77,7 @@ fn oxmgr_process_lifecycle_reflected_in_snapshot() {
     let monitor = TopologyMonitor::new_with_grace(String::new(), Duration::ZERO);
     let snap = monitor.collect();
     assert!(snap.actual_processes.iter().any(|p| p.name == name && p.status == "running"));
-    assert!(diff(&[name.clone()], &[], &snap.actual_processes, &[]).is_empty());
+    assert!(diff(std::slice::from_ref(&name), &[], &snap.actual_processes, &[]).is_empty());
 
     // 杀 → 实际态缺失 → mismatch 出现（grace=0 即时生效）
     let out = Command::new(&bin).args(["stop", &name]).output().expect("oxmgr stop 执行");
@@ -90,9 +91,8 @@ fn oxmgr_process_lifecycle_reflected_in_snapshot() {
     }
     let snap = monitor.collect();
     assert!(
-        diff(&[name.clone()], &[], &snap.actual_processes, &[]).contains(&Mismatch::ProcessMissing {
-            name: name.clone()
-        }),
+        diff(std::slice::from_ref(&name), &[], &snap.actual_processes, &[])
+            .contains(&Mismatch::ProcessMissing { name: name.clone() }),
         "停止后应报进程缺失: {snap:#?}"
     );
 }
@@ -105,7 +105,7 @@ async fn publisher_discovery_visible_in_snapshot() {
     let acl = NodeAcl::for_role(NodeId::new("capture-e1e2"), Role::Capture);
     let tok = CapabilityToken::sign(&acl, 3600, &sk).unwrap();
     let bus = FrameBus::attach("", &tok, &vk).unwrap();
-    let topic = FrameTopic::new(&format!("camera/e1e2/{}/raw", std::process::id()));
+    let topic = FrameTopic::new(format!("camera/e1e2/{}/raw", std::process::id()));
     bus.publish(&topic, &[1u8, 2, 3], &FrameMeta::default()).unwrap();
 
     let monitor = TopologyMonitor::new_with_grace(String::new(), Duration::ZERO);

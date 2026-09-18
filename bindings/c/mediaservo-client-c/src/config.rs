@@ -68,19 +68,13 @@ impl Default for ms_client_config_t {
 pub(crate) fn validate_login_cfg(
     cfg: &ms_client_login_config_t,
 ) -> Result<(&str, &str, &str), c_int> {
-    check_struct_size(
-        cfg.struct_size,
-        MS_CLIENT_LOGIN_CONFIG_MIN_SIZE,
-        "ms_client_login",
-    )?;
+    check_struct_size(cfg.struct_size, MS_CLIENT_LOGIN_CONFIG_MIN_SIZE, "ms_client_login")?;
     let required = |p: *const std::os::raw::c_char| -> Option<&str> {
         cstr(p).ok().flatten().filter(|s| !s.is_empty())
     };
-    let (Some(base), Some(user), Some(pass)) = (
-        required(cfg.http_base_url),
-        required(cfg.username),
-        required(cfg.password),
-    ) else {
+    let (Some(base), Some(user), Some(pass)) =
+        (required(cfg.http_base_url), required(cfg.username), required(cfg.password))
+    else {
         set_last_error("ms_client_login: http_base_url/username/password all required");
         return Err(MEDIASERVO_CLIENT_ERR_INVALID_ARG);
     };
@@ -156,9 +150,7 @@ pub(crate) fn validate_session_cfg(cfg: &ms_client_config_t) -> Result<SessionCf
             Err(MEDIASERVO_CLIENT_ERR_INVALID_ARG)
         }
         (None, None) => {
-            set_last_error(
-                "ms_client_session_create: exactly one of jwt/psk required (neither)",
-            );
+            set_last_error("ms_client_session_create: exactly one of jwt/psk required (neither)");
             Err(MEDIASERVO_CLIENT_ERR_INVALID_ARG)
         }
     }
@@ -201,23 +193,14 @@ mod tests {
 
     #[test]
     fn login_cfg_small_struct_size_rejected() {
-        let cfg = ms_client_login_config_t {
-            struct_size: 1,
-            ..Default::default()
-        };
-        assert_eq!(
-            validate_login_cfg(&cfg).unwrap_err(),
-            MEDIASERVO_CLIENT_ERR_INVALID_ARG
-        );
+        let cfg = ms_client_login_config_t { struct_size: 1, ..Default::default() };
+        assert_eq!(validate_login_cfg(&cfg).unwrap_err(), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
     }
 
     #[test]
     fn login_cfg_missing_fields_rejected() {
         let cfg = ms_client_login_config_t::default();
-        assert_eq!(
-            validate_login_cfg(&cfg).unwrap_err(),
-            MEDIASERVO_CLIENT_ERR_INVALID_ARG
-        );
+        assert_eq!(validate_login_cfg(&cfg).unwrap_err(), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
         let user = c"op";
         let cfg = ms_client_login_config_t {
             struct_size: MS_CLIENT_LOGIN_CONFIG_MIN_SIZE,
@@ -225,10 +208,7 @@ mod tests {
             username: user.as_ptr(),
             password: ptr::null(),
         };
-        assert_eq!(
-            validate_login_cfg(&cfg).unwrap_err(),
-            MEDIASERVO_CLIENT_ERR_INVALID_ARG
-        );
+        assert_eq!(validate_login_cfg(&cfg).unwrap_err(), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
     }
 
     #[test]
@@ -258,16 +238,10 @@ mod tests {
         };
         // 双凭证 → 拒
         let both = mk(c"j".as_ptr(), c"p".as_ptr());
-        assert_eq!(
-            validate_session_cfg(&both).unwrap_err(),
-            MEDIASERVO_CLIENT_ERR_INVALID_ARG
-        );
+        assert_eq!(validate_session_cfg(&both).unwrap_err(), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
         // 无凭证 → 拒
         let none = mk(ptr::null(), ptr::null());
-        assert_eq!(
-            validate_session_cfg(&none).unwrap_err(),
-            MEDIASERVO_CLIENT_ERR_INVALID_ARG
-        );
+        assert_eq!(validate_session_cfg(&none).unwrap_err(), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
         // jwt 单 → 过
         let jwt = mk(c"j".as_ptr(), ptr::null());
         let parts = validate_session_cfg(&jwt).expect("valid");
@@ -286,10 +260,7 @@ mod tests {
             role: c"Bogus".as_ptr(),
             hmac_key_file: ptr::null(),
         };
-        assert_eq!(
-            validate_session_cfg(&cfg).unwrap_err(),
-            MEDIASERVO_CLIENT_ERR_INVALID_ARG
-        );
+        assert_eq!(validate_session_cfg(&cfg).unwrap_err(), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
     }
     #[test]
     fn hmac_key_file_gate_and_trim() {

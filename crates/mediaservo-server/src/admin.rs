@@ -438,22 +438,16 @@ async fn approve_pending_device(
     axum::Json(req): axum::Json<ApproveDeviceRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<ErrorResponse>)> {
     validate_device_id(&req.device_id)?;
-    let entry = state
-        .signaling
-        .pending_devices
-        .remove(&req.device_id)
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: format!("no pending device {} (未报待或已处理)", req.device_id),
-                }),
-            )
-        })?;
-    state
-        .device_registry
-        .enroll_auto(&req.device_id, &entry.vk, req.name.as_deref())
-        .map_err(|e| {
+    let entry = state.signaling.pending_devices.remove(&req.device_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: format!("no pending device {} (未报待或已处理)", req.device_id),
+            }),
+        )
+    })?;
+    state.device_registry.enroll_auto(&req.device_id, &entry.vk, req.name.as_deref()).map_err(
+        |e| {
             // 入册失败 → 恢复 pending（不吞设备重报窗口）。
             state.signaling.pending_devices.insert(&req.device_id, &entry.vk, entry.verified);
             match e {
@@ -468,7 +462,8 @@ async fn approve_pending_device(
                     Json(ErrorResponse { error: format!("enroll failed: {other:?}") }),
                 ),
             }
-        })?;
+        },
+    )?;
     if let Err(e) = state.device_registry.save(&state.devices_path) {
         // 落盘失败 → 回滚内存 + 恢复 pending（单一事实源=磁盘，同 register 回滚链）。
         tracing::error!("device {} approve: write failed, rolling back: {e}", req.device_id);
@@ -669,7 +664,7 @@ fn write_back_psk(path: &std::path::Path, psk: &str) -> Result<(), String> {
                     return match line.rfind('"') {
                         Some(q) => {
                             let tail = &line[q + 1..];
-                            match tail.splitn(2, '#').nth(1) {
+                            match tail.split_once('#').map(|x| x.1) {
                                 Some(c) if !c.trim().is_empty() => format!("{base}  #{c}"),
                                 _ => base,
                             }
@@ -998,20 +993,26 @@ async fn sfu_stats(
                 tracing::error!("admin sfu_stats producer failed: {e}");
                 (StatusCode::NOT_FOUND, Json(ErrorResponse { error: e }))
             })?;
-        (pid.clone(), serde_json::json!({
-            "producer_id": pid, "consumer_id": None::<String>,
-            "kind": kind, "byte_count": bytes, "packet_count": packets, "score": score,
-        }))
+        (
+            pid.clone(),
+            serde_json::json!({
+                "producer_id": pid, "consumer_id": None::<String>,
+                "kind": kind, "byte_count": bytes, "packet_count": packets, "score": score,
+            }),
+        )
     } else if let Some(cid) = consumer_id {
         let (kind, bytes, packets, score) =
             state.sfu_manager.consumer_stats(&cid).await.map_err(|e| {
                 tracing::error!("admin sfu_stats consumer failed: {e}");
                 (StatusCode::NOT_FOUND, Json(ErrorResponse { error: e }))
             })?;
-        (cid.clone(), serde_json::json!({
-            "producer_id": None::<String>, "consumer_id": cid,
-            "kind": kind, "byte_count": bytes, "packet_count": packets, "score": score,
-        }))
+        (
+            cid.clone(),
+            serde_json::json!({
+                "producer_id": None::<String>, "consumer_id": cid,
+                "kind": kind, "byte_count": bytes, "packet_count": packets, "score": score,
+            }),
+        )
     } else {
         // 列表模式（刀 A）：全流 transport 级观测行，room 可选过滤。
         let room = params.get("room").cloned();
@@ -1019,10 +1020,7 @@ async fn sfu_stats(
             .sfu_manager
             .list_stream_stats(room.as_deref(), &|r: &str| state.signaling.room_owner_of(r))
             .await;
-        tracing::info!(
-            "admin sfu_stats: list mode room={room:?} → {} entries",
-            streams.len()
-        );
+        tracing::info!("admin sfu_stats: list mode room={room:?} → {} entries", streams.len());
         return Ok(Json(serde_json::json!({ "streams": streams })));
     };
     let (qid, mut result) = base;
@@ -1041,10 +1039,7 @@ async fn sfu_stats(
         .sfu_manager
         .list_stream_stats(None, &|r: &str| state.signaling.room_owner_of(r))
         .await;
-    match rows
-        .iter()
-        .find(|v| v.get("id").and_then(|i| i.as_str()) == Some(qid.as_str()))
-    {
+    match rows.iter().find(|v| v.get("id").and_then(|i| i.as_str()) == Some(qid.as_str())) {
         Some(row) => {
             if let Some(obj) = result.as_object_mut() {
                 for k in T_FIELDS {
@@ -1115,7 +1110,7 @@ async fn handle_ws_events(socket: WebSocket, state: AdminState) {
             event = rx.recv() => {
                 match event {
                     Ok(msg) => {
-                        if ws_sender.send(Message::Text(msg.into())).await.is_err() {
+                        if ws_sender.send(Message::Text(msg)).await.is_err() {
                             break;
                         }
                     }
@@ -1199,7 +1194,7 @@ async fn handle_admin_sfu(
             dtls_parameters,
         } => {
             match sfu
-                .connect_transport(&room_id, &peer_id, &transport_id, dtls_parameters.clone())
+                .connect_transport(room_id, peer_id, transport_id, dtls_parameters.clone())
                 .await
             {
                 Ok(()) => {
@@ -1236,7 +1231,7 @@ async fn handle_admin_sfu(
             match sfu
                 .create_consumer(
                     room_id,
-                    &peer_id,
+                    peer_id,
                     producer_id,
                     rtp_capabilities.clone(),
                     transport_id.as_deref(),

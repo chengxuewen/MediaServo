@@ -22,7 +22,10 @@ use std::time::{Duration, Instant};
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
 use mediaservo_field::{PublishOptions, PushConfig, PushSession, SessionEvent};
 use mediaservo_host::monitor::flow::StreamerStats;
-use mediaservo_link::{FrameBus, FrameMeta, FrameRef, FrameStream, FrameTopic, SignalClient, SignalEvent, SignalSession, TokenFile};
+use mediaservo_link::{
+    FrameBus, FrameMeta, FrameRef, FrameStream, FrameTopic, SignalClient, SignalEvent,
+    SignalSession, TokenFile,
+};
 use mediaservo_webrtc::data_channel::{RTCDataChannel, RTCDataChannelInit, RTCDataChannelState};
 use mediaservo_webrtc::peer_connection::{RTCConfiguration, RTCIceCandidate};
 use mediaservo_webrtc::sdp::{RTCSdpType, RTCSessionDescription};
@@ -85,14 +88,43 @@ fn parse_args() -> Result<Args, String> {
             "--config" => config = Some(PathBuf::from(args.next().ok_or("--config 缺值")?)),
             "--token" => token = Some(PathBuf::from(args.next().ok_or("--token 缺值")?)),
             "--gateway" => gateway = Some(args.next().ok_or("--gateway 缺值")?),
-            "--encoder-backend" => encoder_backend = Some(args.next().ok_or("--encoder-backend 缺值")?),
-            "--bitrate-kbps" => bitrate_kbps = Some(args.next().ok_or("--bitrate-kbps 缺值")?.parse().map_err(|_| "--bitrate-kbps 须为数字")?),
+            "--encoder-backend" => {
+                encoder_backend = Some(args.next().ok_or("--encoder-backend 缺值")?)
+            }
+            "--bitrate-kbps" => {
+                bitrate_kbps = Some(
+                    args.next()
+                        .ok_or("--bitrate-kbps 缺值")?
+                        .parse()
+                        .map_err(|_| "--bitrate-kbps 须为数字")?,
+                )
+            }
             // qos-framerate-priority 纵深防御：translate 已拦非法值，此处 FromStr Err →
             // parse_args Err → main exit(2)（不进会话，防 oxmgr 重启风暴）。
-            "--degradation" => degradation = Some(args.next().ok_or("--degradation 缺值")?.parse().map_err(|e: String| e)?),
-            "--content-hint" => content_hint = Some(args.next().ok_or("--content-hint 缺值")?.parse().map_err(|e: String| e)?),
-            "--min-bitrate-kbps" => min_bitrate_kbps = Some(args.next().ok_or("--min-bitrate-kbps 缺值")?.parse().map_err(|_| "--min-bitrate-kbps 须为数字")?),
-            "--keyframe-interval" => keyframe_interval = Some(args.next().ok_or("--keyframe-interval 缺值")?.parse().map_err(|_| "--keyframe-interval 须为数字")?),
+            "--degradation" => {
+                degradation =
+                    Some(args.next().ok_or("--degradation 缺值")?.parse().map_err(|e: String| e)?)
+            }
+            "--content-hint" => {
+                content_hint =
+                    Some(args.next().ok_or("--content-hint 缺值")?.parse().map_err(|e: String| e)?)
+            }
+            "--min-bitrate-kbps" => {
+                min_bitrate_kbps = Some(
+                    args.next()
+                        .ok_or("--min-bitrate-kbps 缺值")?
+                        .parse()
+                        .map_err(|_| "--min-bitrate-kbps 须为数字")?,
+                )
+            }
+            "--keyframe-interval" => {
+                keyframe_interval = Some(
+                    args.next()
+                        .ok_or("--keyframe-interval 缺值")?
+                        .parse()
+                        .map_err(|_| "--keyframe-interval 须为数字")?,
+                )
+            }
             _ => return Err(format!("未知参数: {arg}")),
         }
     }
@@ -111,9 +143,7 @@ fn parse_args() -> Result<Args, String> {
 }
 /// 网关 WS 地址（D2）：`--gateway` 参数 > 缺省本地网关。
 fn gateway_url(gateway_arg: Option<&str>) -> String {
-    gateway_arg
-        .map(str::to_string)
-        .unwrap_or_else(|| "ws://127.0.0.1:17980/ws".to_string())
+    gateway_arg.map(str::to_string).unwrap_or_else(|| "ws://127.0.0.1:17980/ws".to_string())
 }
 /// 视觉 topic（bridge.rs B3 约定: `vision/<camera-id>` 镜像相机 id）。
 fn vision_topic(camera_id: &str) -> String {
@@ -160,9 +190,7 @@ enum VisionEvent {
 /// 建立 transport B（信令 + PC + DC "vision" + offer）。任何一步失败 → None
 /// （降级为纯视频；C15 每分支打日志）。
 async fn setup_vision_dc(gateway: &str, src: &str, room: &str) -> Option<VisionNegotiation> {
-    let signal = match SignalClient::new_gateway(gateway, src, room, PeerRole::Host)
-        .connect()
-        .await
+    let signal = match SignalClient::new_gateway(gateway, src, room, PeerRole::Host).connect().await
     {
         Ok(s) => s,
         Err(e) => {
@@ -183,10 +211,7 @@ async fn setup_vision_dc(gateway: &str, src: &str, room: &str) -> Option<VisionN
     pc.on_ice_candidate(move |candidate| {
         let _ = ice_tx.send(candidate);
     });
-    let dc = match pc
-        .create_data_channel(VISION_DC_LABEL, RTCDataChannelInit::default())
-        .await
-    {
+    let dc = match pc.create_data_channel(VISION_DC_LABEL, RTCDataChannelInit::default()).await {
         Ok(d) => d,
         Err(e) => {
             tracing::warn!("vision create_data_channel 失败: {e}");
@@ -212,11 +237,7 @@ async fn setup_vision_dc(gateway: &str, src: &str, room: &str) -> Option<VisionN
         }
     };
     if let Err(e) = signal
-        .send(SignalingMessage::Sdp {
-            room_id: room.into(),
-            target: None,
-            sdp: offer_json,
-        })
+        .send(SignalingMessage::Sdp { room_id: room.into(), target: None, sdp: offer_json })
         .await
     {
         tracing::warn!("vision 发送 offer 失败: {e}");
@@ -289,13 +310,12 @@ async fn handle_vision_signal(
             }
         }
         Ok(SignalEvent::Message(SignalingMessage::RTCIceCandidate {
-            candidate, sdp_mid, sdp_mline_index, ..
+            candidate,
+            sdp_mid,
+            sdp_mline_index,
+            ..
         })) => {
-            let c = RTCIceCandidate {
-                candidate,
-                sdp_mid,
-                sdp_mline_index,
-            };
+            let c = RTCIceCandidate { candidate, sdp_mid, sdp_mline_index };
             if v.remote_set {
                 if let Err(e) = v.pc.add_ice_candidate(&c).await {
                     tracing::warn!("vision add_ice_candidate: {e}");
@@ -327,85 +347,6 @@ async fn handle_vision_signal(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{build_encoder_status, gateway_url, upstream_unavailable, vision_meta_ok, vision_payload_text, vision_topic};
-    use mediaservo_link::FrameMeta;
-
-    #[test]
-    fn upstream_unavailable_matches_gateway_5001_only() {
-        // 实测错误串（test6 日志原样）
-        assert!(upstream_unavailable(
-            "link: signal error: room join failed [5001]: gateway not connected to server",
-        ));
-        assert!(!upstream_unavailable("link: signal error: connect refused"));
-        assert!(!upstream_unavailable("auth failed [4001]"));
-    }
-
-    #[test]
-    fn gateway_url_defaults_to_local_gateway() {
-        assert_eq!(gateway_url(None), "ws://127.0.0.1:17980/ws");
-    }
-
-    #[test]
-    fn gateway_url_override_wins() {
-        assert_eq!(
-            gateway_url(Some("ws://127.0.0.1:18888/ws")),
-            "ws://127.0.0.1:18888/ws"
-        );
-    }
-
-    #[test]
-    fn vision_topic_mirrors_camera_id() {
-        // bridge.rs B3 约定: vision/<camera-id> 镜像相机 id（ROS 桥接配置单一来源）
-        assert_eq!(vision_topic("cam0"), "vision/cam0");
-        assert_eq!(vision_topic("front/raw"), "vision/front/raw");
-    }
-
-    #[test]
-    fn vision_meta_ok_accepts_only_json_format() {
-        let json = FrameMeta { format: FrameMeta::FORMAT_JSON, ..Default::default() };
-        assert!(vision_meta_ok(&json), "JSON 载荷必须放行");
-        let i420 = FrameMeta { format: super::FORMAT_I420, ..Default::default() };
-        assert!(!vision_meta_ok(&i420), "像素载荷不得当视觉 JSON 转发");
-    }
-
-    #[test]
-    fn vision_payload_text_is_transparent() {
-        // D-H8 决策: 透明转发（streamer = pipe，HMI 解析，不重编码）
-        let payload = br#"{"frame":{"seq":1,"ts_mono_ns":2},"objects":[]}"#;
-        assert_eq!(
-            vision_payload_text(payload),
-            Some(r#"{"frame":{"seq":1,"ts_mono_ns":2},"objects":[]}"#)
-        );
-        assert_eq!(vision_payload_text(&[0xff, 0xfe]), None, "非 UTF-8 载荷拒绝（协议违反）");
-    }
-
-    #[test]
-    fn encoder_status_wire_matches_web_contract() {
-        // 字段名与 sfu-client.ts msg.* 消费面逐字对齐（web-stream-stats 断链正在于无人发送）。
-        let v = serde_json::to_value(build_encoder_status(
-            "vehicle_test", "host-1", "h264", "software",
-            Some("OpenH264".into()), 30.0, 1280, 720, Some(3.1),
-        ))
-        .unwrap();
-        assert_eq!(v["type"], "encoder_status");
-        assert_eq!(v["room_id"], "vehicle_test");
-        assert_eq!(v["codec"], "video/H264");
-        assert_eq!(v["encoder_backend"], "software");
-        assert_eq!(v["encoder_implementation"], "OpenH264");
-        assert_eq!(v["frames_per_second"], 30.0);
-        assert_eq!(v["frame_width"], 1280);
-        assert_eq!(v["avg_encode_ms"], 3.1);
-        let v2 = serde_json::to_value(build_encoder_status(
-            "r", "p", "vp8", "auto", None, 0.0, 0, 0, None,
-        ))
-        .unwrap();
-        assert!(v2.get("encoder_implementation").is_none() && v2.get("avg_encode_ms").is_none());
-        assert_eq!(v2["codec"], "video/VP8");
-    }
-}
-
 /// 紧凑 I420 payload 校验（线格式假设: tight strides Y + U + V）。
 fn valid_i420(meta: &FrameMeta, payload_len: usize) -> bool {
     meta.format == FORMAT_I420
@@ -418,7 +359,8 @@ fn valid_i420(meta: &FrameMeta, payload_len: usize) -> bool {
 async fn shutdown_signal() -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}
             _ = sigterm.recv() => {}
@@ -431,8 +373,8 @@ async fn shutdown_signal() -> std::io::Result<()> {
 
 /// 出站统计：日志（e2e 证据: bytes_sent/frames_encoded > 0，对齐 field D4 模式）
 /// + FrameBus 发布 [`StreamerStats`] JSON 到 `stats/stream-<id>`（E2 数据面监控，
-/// additive；监控订阅者才消费，无消费者时发布零开销级）。
-/// 编码耗时增量基线（ΔtotalEncodeTime/ΔframesEncoded——web stats 面板 avg_encode_ms）
+///   additive；监控订阅者才消费，无消费者时发布零开销级）。
+///   编码耗时增量基线（ΔtotalEncodeTime/ΔframesEncoded——web stats 面板 avg_encode_ms）
 static LAST_ENCODE: std::sync::Mutex<Option<(f64, u64)>> = std::sync::Mutex::new(None);
 
 /// codec 标识 → W3C mimeType（web 面板 `codec.replace('video/','')` 显示约定）。
@@ -477,7 +419,14 @@ fn upstream_unavailable(err: &str) -> bool {
     err.contains("[5001]") || err.contains("gateway not connected")
 }
 
-async fn log_stats(session: &PushSession, bus: &FrameBus, topic: &FrameTopic, started: Instant, codec: &str, backend: &str) {
+async fn log_stats(
+    session: &PushSession,
+    bus: &FrameBus,
+    topic: &FrameTopic,
+    started: Instant,
+    codec: &str,
+    backend: &str,
+) {
     let Some(pc) = session.peer_connection() else {
         return;
     };
@@ -723,7 +672,6 @@ async fn main() -> ExitCode {
         tracing::warn!("transport B 不可用 — 降级为纯视频推流");
     }
 
-
     // 首帧决定分辨率（capturer 固定 1280x720，按 meta 自适应更稳）→ publish
     let first = match tokio::time::timeout(NO_FRAME_TIMEOUT, frames.recv()).await {
         Ok(Some(f)) => f,
@@ -765,7 +713,13 @@ async fn main() -> ExitCode {
     };
     println!(
         "streamer ready: stream={} topic={} {}x{}@{} codec={} room={} vision={}",
-        stream.id, topic.as_str(), cfg.width, cfg.height, cam.fps, stream.codec, cfg.room,
+        stream.id,
+        topic.as_str(),
+        cfg.width,
+        cfg.height,
+        cam.fps,
+        stream.codec,
+        cfg.room,
         if vision.is_some() && vision_frames.is_some() { "on (transport B)" } else { "off" }
     );
 
@@ -934,4 +888,90 @@ async fn main() -> ExitCode {
     }
     tracing::info!("streamer stopped (exit={exit_code})");
     ExitCode::from(exit_code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_encoder_status, gateway_url, upstream_unavailable, vision_meta_ok,
+        vision_payload_text, vision_topic,
+    };
+    use mediaservo_link::FrameMeta;
+
+    #[test]
+    fn upstream_unavailable_matches_gateway_5001_only() {
+        // 实测错误串（test6 日志原样）
+        assert!(upstream_unavailable(
+            "link: signal error: room join failed [5001]: gateway not connected to server",
+        ));
+        assert!(!upstream_unavailable("link: signal error: connect refused"));
+        assert!(!upstream_unavailable("auth failed [4001]"));
+    }
+
+    #[test]
+    fn gateway_url_defaults_to_local_gateway() {
+        assert_eq!(gateway_url(None), "ws://127.0.0.1:17980/ws");
+    }
+
+    #[test]
+    fn gateway_url_override_wins() {
+        assert_eq!(gateway_url(Some("ws://127.0.0.1:18888/ws")), "ws://127.0.0.1:18888/ws");
+    }
+
+    #[test]
+    fn vision_topic_mirrors_camera_id() {
+        // bridge.rs B3 约定: vision/<camera-id> 镜像相机 id（ROS 桥接配置单一来源）
+        assert_eq!(vision_topic("cam0"), "vision/cam0");
+        assert_eq!(vision_topic("front/raw"), "vision/front/raw");
+    }
+
+    #[test]
+    fn vision_meta_ok_accepts_only_json_format() {
+        let json = FrameMeta { format: FrameMeta::FORMAT_JSON, ..Default::default() };
+        assert!(vision_meta_ok(&json), "JSON 载荷必须放行");
+        let i420 = FrameMeta { format: super::FORMAT_I420, ..Default::default() };
+        assert!(!vision_meta_ok(&i420), "像素载荷不得当视觉 JSON 转发");
+    }
+
+    #[test]
+    fn vision_payload_text_is_transparent() {
+        // D-H8 决策: 透明转发（streamer = pipe，HMI 解析，不重编码）
+        let payload = br#"{"frame":{"seq":1,"ts_mono_ns":2},"objects":[]}"#;
+        assert_eq!(
+            vision_payload_text(payload),
+            Some(r#"{"frame":{"seq":1,"ts_mono_ns":2},"objects":[]}"#)
+        );
+        assert_eq!(vision_payload_text(&[0xff, 0xfe]), None, "非 UTF-8 载荷拒绝（协议违反）");
+    }
+
+    #[test]
+    fn encoder_status_wire_matches_web_contract() {
+        // 字段名与 sfu-client.ts msg.* 消费面逐字对齐（web-stream-stats 断链正在于无人发送）。
+        let v = serde_json::to_value(build_encoder_status(
+            "vehicle_test",
+            "host-1",
+            "h264",
+            "software",
+            Some("OpenH264".into()),
+            30.0,
+            1280,
+            720,
+            Some(3.1),
+        ))
+        .unwrap();
+        assert_eq!(v["type"], "encoder_status");
+        assert_eq!(v["room_id"], "vehicle_test");
+        assert_eq!(v["codec"], "video/H264");
+        assert_eq!(v["encoder_backend"], "software");
+        assert_eq!(v["encoder_implementation"], "OpenH264");
+        assert_eq!(v["frames_per_second"], 30.0);
+        assert_eq!(v["frame_width"], 1280);
+        assert_eq!(v["avg_encode_ms"], 3.1);
+        let v2 = serde_json::to_value(build_encoder_status(
+            "r", "p", "vp8", "auto", None, 0.0, 0, 0, None,
+        ))
+        .unwrap();
+        assert!(v2.get("encoder_implementation").is_none() && v2.get("avg_encode_ms").is_none());
+        assert_eq!(v2["codec"], "video/VP8");
+    }
 }

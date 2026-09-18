@@ -1,4 +1,4 @@
-use crate::codec::{PixelFormat, VideoFormat};
+use crate::codec::VideoFormat;
 
 /// A single plane of raw video data.
 #[derive(Debug, Clone)]
@@ -17,8 +17,12 @@ pub struct VideoFrame {
 }
 
 impl VideoFrame {
-    pub fn width(&self) -> u32 { self.format.width }
-    pub fn height(&self) -> u32 { self.format.height }
+    pub fn width(&self) -> u32 {
+        self.format.width
+    }
+    pub fn height(&self) -> u32 {
+        self.format.height
+    }
     pub fn plane_data(&self, index: usize) -> Option<&[u8]> {
         self.planes.get(index).map(|p| p.data.as_slice())
     }

@@ -1,3 +1,5 @@
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+// C ABI 门面形态：extern fn 收裸指针是合同本身，判空守卫在体内（unsafe fn 形反而把义务推给 C 侧）
 //! MediaServo link C ABI — 信令 + 帧总线（设备侧 SDK 消费）。
 //!
 //! 契约 §7（D109/D240/D241）：opaque handle + int 错误码 + 回调。
@@ -45,17 +47,17 @@
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
 use mediaservo_link::{
     CapabilityToken, Ed25519VerifyingKey, FrameBus, FrameMeta, FrameRef, FrameStream, FrameTopic,
     SignalClient, SignalEvent, SignalSession,
 };
-use tokio::sync::{broadcast, Notify};
+use tokio::sync::{Notify, broadcast};
 
 // ── 错误码（0 = ok, <0 = error；MEDIASERVO_LINK_ERR_*，D241 前缀化）──
 pub const MEDIASERVO_OK: c_int = 0;
@@ -133,7 +135,8 @@ pub struct mediaservo_link_signal_config_t {
 }
 
 /// C 结构已知前缀尺寸（版本演进时的最小合法值）。
-pub const MEDIASERVO_LINK_SIGNAL_CONFIG_MIN_SIZE: usize = size_of::<mediaservo_link_signal_config_t>();
+pub const MEDIASERVO_LINK_SIGNAL_CONFIG_MIN_SIZE: usize =
+    size_of::<mediaservo_link_signal_config_t>();
 
 impl Default for mediaservo_link_signal_config_t {
     fn default() -> Self {
@@ -183,7 +186,8 @@ unsafe impl Sync for mediaservo_link_signal_t {}
 
 /// 信令事件回调（C ABI）。event_json 仅在回调内有效。
 #[allow(non_camel_case_types)] // C ABI 命名（C6 例外：mediaservo_* 前缀）
-pub type mediaservo_link_event_cb = extern "C" fn(*mut mediaservo_link_signal_t, *const c_char, *mut c_void);
+pub type mediaservo_link_event_cb =
+    extern "C" fn(*mut mediaservo_link_signal_t, *const c_char, *mut c_void);
 
 /// SignalEvent → opaque JSON 字符串（v1）。
 fn event_to_json(ev: &SignalEvent) -> String {
@@ -205,7 +209,7 @@ fn event_to_json(ev: &SignalEvent) -> String {
 /// 调 C 回调（不持任何锁 — cb 克隆后释放 guard，R2）。
 fn deliver_event(handle: *mut mediaservo_link_signal_t, json: String) {
     let h = unsafe { &*handle };
-    let cb = h.cb.lock().ok().and_then(|g| g.clone());
+    let cb = h.cb.lock().ok().and_then(|g| *g);
     if let Some((cb, user)) = cb {
         // CString 存活至回调返回（serde_json 输出无内嵌 NUL）。
         if let Ok(cstr) = CString::new(json) {
@@ -431,7 +435,8 @@ pub extern "C" fn mediaservo_link_signal_on_event(
             // NonNull<T>: T: Send 时 Send（mediaservo_link_signal_t 已 unsafe impl Send）。
             // 裸指针非 Send：经 usize 传递（值语义，仅地址搬运）。
             let raw = s as usize;
-            let join = std::thread::spawn(move || signal_pump(raw as *mut mediaservo_link_signal_t));
+            let join =
+                std::thread::spawn(move || signal_pump(raw as *mut mediaservo_link_signal_t));
             *pump_guard = Some(join);
         }
     }));
@@ -453,10 +458,10 @@ pub extern "C" fn mediaservo_link_signal_close(s: *mut mediaservo_link_signal_t)
             return MEDIASERVO_OK; // 幂等：已关闭
         }
         let session = handle.session.lock().ok().and_then(|mut g| g.take());
-        if let Some(session) = session {
-            if let Err(e) = handle.rt.block_on(session.close()) {
-                set_last_error(format!("mediaservo_link_signal_close: {e}"));
-            }
+        if let Some(session) = session
+            && let Err(e) = handle.rt.block_on(session.close())
+        {
+            set_last_error(format!("mediaservo_link_signal_close: {e}"));
         }
         if let Some(join) = handle.pump.lock().ok().and_then(|mut g| g.take()) {
             let _ = join.join();
@@ -521,11 +526,7 @@ pub extern "C" fn mediaservo_link_bus_attach(
             set_last_error("mediaservo_link_bus_attach: null args");
             return MEDIASERVO_LINK_ERR_INVALID_ARG;
         }
-        let (endpoint, token_pem, vk_pem) = match (
-            cstr(endpoint),
-            cstr(token_pem),
-            cstr(vk_pem),
-        ) {
+        let (endpoint, token_pem, vk_pem) = match (cstr(endpoint), cstr(token_pem), cstr(vk_pem)) {
             (Ok(Some(e)), Ok(Some(t)), Ok(Some(v))) => {
                 (e.to_string(), t.to_string(), v.to_string())
             }
@@ -609,11 +610,8 @@ pub extern "C" fn mediaservo_link_bus_publish(
                 return MEDIASERVO_LINK_ERR_INVALID_ARG;
             }
         };
-        let payload_slice = if len > 0 {
-            unsafe { std::slice::from_raw_parts(payload, len) }
-        } else {
-            &[]
-        };
+        let payload_slice =
+            if len > 0 { unsafe { std::slice::from_raw_parts(payload, len) } } else { &[] };
         let guard = match handle.bus.lock() {
             Ok(g) => g,
             Err(_) => {
@@ -804,11 +802,7 @@ fn last_error_impl(buf: *mut c_char, len: usize) -> c_int {
     if buf.is_null() || len == 0 {
         return MEDIASERVO_LINK_ERR_INVALID_ARG;
     }
-    let msg = LAST_ERROR
-        .lock()
-        .ok()
-        .and_then(|g| g.clone())
-        .unwrap_or_default();
+    let msg = LAST_ERROR.lock().ok().and_then(|g| g.clone()).unwrap_or_default();
     let bytes = msg.as_bytes();
     let n = bytes.len().min(len - 1);
     unsafe {
@@ -821,7 +815,8 @@ fn last_error_impl(buf: *mut c_char, len: usize) -> c_int {
 /// 最近错误详情。
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_link_last_error(buf: *mut c_char, len: usize) -> c_int {
-    catch_unwind(AssertUnwindSafe(|| last_error_impl(buf, len))).unwrap_or(MEDIASERVO_LINK_ERR_INTERNAL)
+    catch_unwind(AssertUnwindSafe(|| last_error_impl(buf, len)))
+        .unwrap_or(MEDIASERVO_LINK_ERR_INTERNAL)
 }
 
 /// 版本信息（MAJOR.MINOR.PATCH — D241 soname 语义）。
@@ -906,9 +901,7 @@ mod tests {
         let mut buf = [0u8; 64];
         let rc = mediaservo_link_last_error(buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
-        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }
-            .to_str()
-            .unwrap();
+        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap();
         assert_eq!(s, "test error");
     }
 
@@ -917,9 +910,7 @@ mod tests {
         let mut buf = [0u8; 32];
         let rc = mediaservo_link_version(buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
-        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }
-            .to_str()
-            .unwrap();
+        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap();
         assert!(s.starts_with("0.1."), "version: {s}");
     }
 
@@ -1017,14 +1008,21 @@ mod tests {
     #[test]
     fn bus_attach_null_fails() {
         let mut out: *mut mediaservo_link_bus_t = ptr::null_mut();
-        let rc = mediaservo_link_bus_attach(ptr::null(), c"token".as_ptr(), c"vk".as_ptr(), &mut out);
+        let rc =
+            mediaservo_link_bus_attach(ptr::null(), c"token".as_ptr(), c"vk".as_ptr(), &mut out);
         assert_eq!(rc, MEDIASERVO_LINK_ERR_INVALID_ARG);
         assert!(out.is_null());
     }
 
     #[test]
     fn bus_publish_null_fails() {
-        let rc = mediaservo_link_bus_publish(ptr::null_mut(), c"camera/0".as_ptr(), ptr::null(), 0, ptr::null());
+        let rc = mediaservo_link_bus_publish(
+            ptr::null_mut(),
+            c"camera/0".as_ptr(),
+            ptr::null(),
+            0,
+            ptr::null(),
+        );
         assert_eq!(rc, MEDIASERVO_LINK_ERR_INVALID_ARG);
     }
 
@@ -1068,13 +1066,20 @@ mod tests {
 
     #[test]
     fn bus_subscribe_null_fails() {
-        let rc = mediaservo_link_bus_subscribe(ptr::null_mut(), c"camera/0".as_ptr(), ptr::null_mut());
+        let rc =
+            mediaservo_link_bus_subscribe(ptr::null_mut(), c"camera/0".as_ptr(), ptr::null_mut());
         assert_eq!(rc, MEDIASERVO_LINK_ERR_INVALID_ARG);
     }
 
     #[test]
     fn bus_recv_null_fails() {
-        let rc = mediaservo_link_bus_recv(ptr::null_mut(), ptr::null_mut(), ptr::null_mut(), 0, ptr::null_mut());
+        let rc = mediaservo_link_bus_recv(
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            0,
+            ptr::null_mut(),
+        );
         assert_eq!(rc, MEDIASERVO_LINK_ERR_INVALID_ARG);
     }
 
@@ -1107,7 +1112,11 @@ mod tests {
         // 走真实生产路径：36B 拷贝 + decode（与 meta_from_c 同机制）
         let mut buf = [0u8; FrameMeta::WIRE_LEN];
         unsafe {
-            ptr::copy_nonoverlapping(&c as *const _ as *const u8, buf.as_mut_ptr(), FrameMeta::WIRE_LEN);
+            ptr::copy_nonoverlapping(
+                &c as *const _ as *const u8,
+                buf.as_mut_ptr(),
+                FrameMeta::WIRE_LEN,
+            );
         }
         let decoded = FrameMeta::decode(&buf).expect("decode");
         assert_eq!(decoded, rust);
@@ -1127,7 +1136,11 @@ mod tests {
         let mut out_buf = [0u8; FrameMeta::WIRE_LEN];
         meta_to_c(&decoded, &mut back);
         unsafe {
-            ptr::copy_nonoverlapping(&back as *const _ as *const u8, out_buf.as_mut_ptr(), FrameMeta::WIRE_LEN);
+            ptr::copy_nonoverlapping(
+                &back as *const _ as *const u8,
+                out_buf.as_mut_ptr(),
+                FrameMeta::WIRE_LEN,
+            );
         }
         assert_eq!(out_buf, decoded.encode());
     }
@@ -1150,7 +1163,9 @@ mod tests {
     fn bus_attach_publish_subscribe_recv_roundtrip() {
         const PRIV_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIObCg8b+Le6kKOI/+pE+4+YhXUlr6X6h7q8p/MjvHmXT\n-----END PRIVATE KEY-----\n";
         const PUB_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgXprEbnahCZoZtLpiUqR0ruqtzEfRXk/Gl/6F6PEm4o=\n-----END PUBLIC KEY-----\n";
-        use mediaservo_link::{CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, NodeAcl, NodeId, Role};
+        use mediaservo_link::{
+            CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, NodeAcl, NodeId, Role,
+        };
 
         let sk = Ed25519SigningKey::from_pem(PRIV_PEM.as_bytes());
         let vk = Ed25519VerifyingKey::from_pem(PUB_PEM.as_bytes());
@@ -1193,21 +1208,47 @@ mod tests {
 
         // 4. 发布
         let meta = mediaservo_frame_meta_t {
-            seq: 7, width: 640, height: 480, format: 1, version: FrameMeta::WIRE_VERSION,
-            is_keyframe: 1, reserved: 0, ts_mono_ns: 1000, ts_epoch_ns: 2000,
+            seq: 7,
+            width: 640,
+            height: 480,
+            format: 1,
+            version: FrameMeta::WIRE_VERSION,
+            is_keyframe: 1,
+            reserved: 0,
+            ts_mono_ns: 1000,
+            ts_epoch_ns: 2000,
         };
         let payload = [0xAAu8; 64];
-        let rc = mediaservo_link_bus_publish(bus, topic.as_ptr(), payload.as_ptr(), payload.len(), ptr::addr_of!(meta));
+        let rc = mediaservo_link_bus_publish(
+            bus,
+            topic.as_ptr(),
+            payload.as_ptr(),
+            payload.len(),
+            ptr::addr_of!(meta),
+        );
         assert_eq!(rc, MEDIASERVO_OK, "publish");
 
         // 5. 接收并断言 meta/payload
         let mut out_meta = mediaservo_frame_meta_t {
-            seq: 0, width: 0, height: 0, format: 0, version: 0,
-            is_keyframe: 0, reserved: 0, ts_mono_ns: 0, ts_epoch_ns: 0,
+            seq: 0,
+            width: 0,
+            height: 0,
+            format: 0,
+            version: 0,
+            is_keyframe: 0,
+            reserved: 0,
+            ts_mono_ns: 0,
+            ts_epoch_ns: 0,
         };
         let mut buf = [0u8; 128];
         let mut out_len: usize = 0;
-        let rc = mediaservo_link_bus_recv(stream, ptr::addr_of_mut!(out_meta), buf.as_mut_ptr(), buf.len(), &mut out_len);
+        let rc = mediaservo_link_bus_recv(
+            stream,
+            ptr::addr_of_mut!(out_meta),
+            buf.as_mut_ptr(),
+            buf.len(),
+            &mut out_len,
+        );
         assert_eq!(rc, MEDIASERVO_OK, "recv");
         // packed 结构字段读取必须 read_unaligned（E0793）
         unsafe {

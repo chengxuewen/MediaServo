@@ -20,13 +20,13 @@ use mediaservo_link::{FrameBus, FrameMeta, FrameTopic, TokenFile};
 use mediaservo_media::base::buffer::VideoBuffer;
 use mediaservo_media::base::frame::BoxVideoFrame;
 use mediaservo_media::error::MediaError;
-use mediaservo_media::pipeline::generator::{
-    BitmapFont, ColorStrategy, PatternMode, SquaresConfig, TextBurner,
-    TimestampFormat, TimestampOverlay, VideoFrameGenerator,
-};
 use mediaservo_media::pipeline::generator::fonts::Anchor;
-use mediaservo_media::pipeline::source::VideoSource;
+use mediaservo_media::pipeline::generator::{
+    BitmapFont, ColorStrategy, PatternMode, SquaresConfig, TextBurner, TimestampFormat,
+    TimestampOverlay, VideoFrameGenerator,
+};
 use mediaservo_media::pipeline::sink::{VideoSink, VideoSinkWants};
+use mediaservo_media::pipeline::source::VideoSource;
 
 #[cfg(all(feature = "capture-v4l2", target_os = "linux"))]
 use mediaservo_media::pipeline::capture::v4l2::V4l2Backend;
@@ -65,10 +65,8 @@ fn parse_args_from<I: Iterator<Item = String>>(mut args: I) -> Result<Args, Stri
             "--token" => token = Some(PathBuf::from(args.next().ok_or("--token 缺值")?)),
             "--reconnect-ms" => {
                 let v = args.next().ok_or("--reconnect-ms 缺值")?;
-                reconnect_ms = Some(
-                    v.parse()
-                        .map_err(|e| format!("--reconnect-ms 解析失败: {e}"))?,
-                );
+                reconnect_ms =
+                    Some(v.parse().map_err(|e| format!("--reconnect-ms 解析失败: {e}"))?);
             }
             _ => return Err(format!("未知参数: {arg}")),
         }
@@ -100,18 +98,17 @@ fn select_backend(
     match mode {
         SourceMode::Generator => BackendKind::Generator,
         SourceMode::Camera => match input {
-            Some(path) if !path.trim().is_empty() => BackendKind::V4l2 {
-                path: path.to_string(),
-                width,
-                height,
-                fps,
-            },
+            Some(path) if !path.trim().is_empty() => {
+                BackendKind::V4l2 { path: path.to_string(), width, height, fps }
+            }
             _ => BackendKind::Unsupported(
                 "camera 需 input 设备路径（如 /dev/video0 或 /dev/v4l/by-id/ 稳定路径）",
             ),
         },
         SourceMode::Desktop => BackendKind::Unsupported("desktop 采集未实现（屏幕捕获后接）"),
-        SourceMode::Subscriber => BackendKind::Unsupported("subscriber 消费未实现（外部源订阅后接）"),
+        SourceMode::Subscriber => {
+            BackendKind::Unsupported("subscriber 消费未实现（外部源订阅后接）")
+        }
     }
 }
 
@@ -125,6 +122,7 @@ struct FrameBusSink {
 }
 
 /// 发布一帧紧凑 I420（payload = FrameMeta + I420）——generator 与 v4l2 共用线格式（DRY）。
+#[allow(clippy::too_many_arguments)] // 采集泵参数组（D274 追加后 8 元），打包 = 独立重构
 fn publish_i420(
     bus: &FrameBus,
     topic: &FrameTopic,
@@ -158,10 +156,12 @@ impl VideoSink<BoxVideoFrame> for FrameBusSink {
             .as_i420()
             .ok_or_else(|| MediaError::Internal("frame buffer not I420".into()))?;
         debug_assert_eq!(
-            buf.stride_y, buf.width(),
+            buf.stride_y,
+            buf.width(),
             "generator buffer 应为紧凑布局（payload 线格式假设）"
         );
-        let mut payload = Vec::with_capacity(buf.data_y.len() + buf.data_u.len() + buf.data_v.len());
+        let mut payload =
+            Vec::with_capacity(buf.data_y.len() + buf.data_u.len() + buf.data_v.len());
         payload.extend_from_slice(&buf.data_y);
         payload.extend_from_slice(&buf.data_u);
         payload.extend_from_slice(&buf.data_v);
@@ -242,7 +242,7 @@ fn run_v4l2_capture(
 async fn wait_for_shutdown() -> ExitCode {
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         let mut sigterm = match signal(SignalKind::terminate()) {
             Ok(s) => s,
             Err(e) => {
@@ -296,11 +296,7 @@ async fn main() -> ExitCode {
     let backend_kind =
         select_backend(cam.mode, cam.input.as_deref(), cam.width, cam.height, cam.fps);
     if let BackendKind::Unsupported(reason) = &backend_kind {
-        eprintln!(
-            "capturer: 视频源 {} mode={} 未支持: {reason}",
-            cam.id,
-            cam.mode.as_str()
-        );
+        eprintln!("capturer: 视频源 {} mode={} 未支持: {reason}", cam.id, cam.mode.as_str());
         return ExitCode::from(1);
     }
 
@@ -463,7 +459,8 @@ mod tests {
 
     #[test]
     fn parse_args_defaults_reconnect_ms_to_5000() {
-        let a = parse_args_from(args(&["--camera", "cam0", "--config", "c", "--token", "t"])).unwrap();
+        let a =
+            parse_args_from(args(&["--camera", "cam0", "--config", "c", "--token", "t"])).unwrap();
         assert_eq!(a.reconnect_ms, DEFAULT_RECONNECT_MS);
         assert_eq!(a.camera, "cam0");
     }
@@ -482,13 +479,30 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(a.reconnect_ms, 3000);
-        assert!(parse_args_from(args(&[
-            "--camera", "cam0", "--config", "c", "--token", "t", "--reconnect-ms", "abc",
-        ]))
-        .is_err());
-        assert!(parse_args_from(args(&[
-            "--camera", "cam0", "--config", "c", "--token", "t", "--reconnect-ms",
-        ]))
-        .is_err());
+        assert!(
+            parse_args_from(args(&[
+                "--camera",
+                "cam0",
+                "--config",
+                "c",
+                "--token",
+                "t",
+                "--reconnect-ms",
+                "abc",
+            ]))
+            .is_err()
+        );
+        assert!(
+            parse_args_from(args(&[
+                "--camera",
+                "cam0",
+                "--config",
+                "c",
+                "--token",
+                "t",
+                "--reconnect-ms",
+            ]))
+            .is_err()
+        );
     }
 }

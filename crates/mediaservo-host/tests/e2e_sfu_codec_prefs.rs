@@ -24,14 +24,12 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 
 use mediaservo_common::protocol::{
-    DtlsParameters, Fingerprint, IceParameters, MediaKind, PeerRole, SignalingMessage,
-    TransportDirection,
+    DtlsParameters, Fingerprint, IceParameters, PeerRole, SignalingMessage, TransportDirection,
 };
-use mediaservo_webrtc::rtp::RTCRtpTransceiverDirection;
 use mediaservo_webrtc::traits::PeerConnectionApi;
 use mediaservo_webrtc::{
-    RTCPeerConnectionFactory, RTCAnswerOptions, RTCConfiguration, RTCSessionDescription,
-    RTCSdpType, RTCPeerConnectionState, TrackKind,
+    RTCAnswerOptions, RTCConfiguration, RTCPeerConnectionFactory, RTCPeerConnectionState,
+    RTCSdpType, RTCSessionDescription, TrackKind,
 };
 
 fn psk() -> String {
@@ -61,11 +59,7 @@ fn build_multi_codec_sdp(
         "a=ice-lite".to_string(),
         format!("a=ice-ufrag:{}", ice_parameters.username_fragment),
         format!("a=ice-pwd:{}", ice_parameters.password),
-        format!(
-            "a=fingerprint:{} {}",
-            fp.algorithm.to_lowercase(),
-            fp.value
-        ),
+        format!("a=fingerprint:{} {}", fp.algorithm.to_lowercase(), fp.value),
         "a=setup:actpass".to_string(),
     ];
 
@@ -88,7 +82,12 @@ fn build_multi_codec_sdp(
             }
             lines.push(format!(
                 "a=candidate:{} 1 {} {} {} {} typ {}",
-                c.foundation, c.protocol.to_uppercase(), c.priority, c.ip, c.port, c.candidate_type
+                c.foundation,
+                c.protocol.to_uppercase(),
+                c.priority,
+                c.ip,
+                c.port,
+                c.candidate_type
             ));
         }
     }
@@ -101,22 +100,14 @@ fn build_multi_codec_sdp(
 
 /// 完整协商流程（每场景独立 transport/session）。
 /// 返回 (negotiated_mime, prefs_set_result)。
-async fn negotiate_with_prefs(
-    pref_order: Vec<&str>,
-    tag: &str,
-) -> (String, Result<(), String>) {
+async fn negotiate_with_prefs(pref_order: Vec<&str>, tag: &str) -> (String, Result<(), String>) {
     // 1. WS 连接 + auth + join
-    let url = std::env::var("SFU_E2E_WS_URL")
-        .unwrap_or_else(|_| "ws://127.0.0.1:9800/ws".to_string());
-    let (ws, _) = connect_async(&url)
-        .await
-        .expect("WS connect to SFU server");
+    let url =
+        std::env::var("SFU_E2E_WS_URL").unwrap_or_else(|_| "ws://127.0.0.1:9800/ws".to_string());
+    let (ws, _) = connect_async(&url).await.expect("WS connect to SFU server");
     let (mut ws_tx, mut ws_rx) = ws.split();
 
-    ws_tx
-        .send(WsMsg::Text(psk().into()))
-        .await
-        .expect("auth send");
+    ws_tx.send(WsMsg::Text(psk())).await.expect("auth send");
     let ack = tokio::time::timeout(Duration::from_secs(5), ws_rx.next())
         .await
         .expect("auth timeout")
@@ -130,13 +121,13 @@ async fn negotiate_with_prefs(
         device_pubkey: None,
         protocol: None,
         client_version: None,
-        room_id: format!("codec-prefs-room-{tag}").into(),
+        room_id: format!("codec-prefs-room-{tag}"),
         peer_role: PeerRole::Host,
         stream_id: None,
         resume: None,
     })
     .unwrap();
-    ws_tx.send(WsMsg::Text(join.into())).await.unwrap();
+    ws_tx.send(WsMsg::Text(join)).await.unwrap();
     let joined = tokio::time::timeout(Duration::from_secs(5), ws_rx.next())
         .await
         .expect("join timeout")
@@ -146,12 +137,12 @@ async fn negotiate_with_prefs(
 
     // 2. CreateWebRtcTransport (Send)
     let create = serde_json::to_string(&SignalingMessage::CreateWebRtcTransport {
-        room_id: format!("codec-prefs-room-{tag}").into(),
-        peer_id: format!("codec-prefs-host-{tag}").into(),
+        room_id: format!("codec-prefs-room-{tag}"),
+        peer_id: format!("codec-prefs-host-{tag}"),
         direction: TransportDirection::Send,
     })
     .unwrap();
-    ws_tx.send(WsMsg::Text(create.into())).await.unwrap();
+    ws_tx.send(WsMsg::Text(create)).await.unwrap();
 
     let (transport_id, ice_parameters, dtls_parameters) = loop {
         let msg = tokio::time::timeout(Duration::from_secs(10), ws_rx.next())
@@ -206,43 +197,31 @@ async fn negotiate_with_prefs(
         let mut codecs = caps.codecs.clone();
         // 排序: pref_order 命中的 mime 提前（保持偏好顺序）
         codecs.sort_by_key(|c| {
-            pref_order
-                .iter()
-                .position(|m| c.mime_type.starts_with(m))
-                .unwrap_or(usize::MAX)
+            pref_order.iter().position(|m| c.mime_type.starts_with(m)).unwrap_or(usize::MAX)
         });
         // 强制模式: 只保留偏好中的 mime（rtx 等会丢失 — 矩阵已标注）
         codecs.retain(|c| pref_order.iter().any(|m| c.mime_type.starts_with(m)));
-        pc.transceiver_set_codec_preferences("video", codecs)
-            .map_err(|e| e.to_string())
+        pc.transceiver_set_codec_preferences("video", codecs).map_err(|e| e.to_string())
     };
 
     // 6. create_answer → set_local_description
-    let answer = pc
-        .create_answer(&RTCAnswerOptions::default())
-        .await
-        .expect("create_answer");
-    pc.set_local_description(&answer)
-        .await
-        .expect("set_local_description");
+    let answer = pc.create_answer(&RTCAnswerOptions).await.expect("create_answer");
+    pc.set_local_description(&answer).await.expect("set_local_description");
 
     // 7. ConnectWebRtcTransport + 等 Connected（保持会话完整）
     let fp_hex = pc.local_dtls_fingerprint().expect("dtls fingerprint");
     let connect = serde_json::to_string(&SignalingMessage::ConnectWebRtcTransport {
-        room_id: format!("codec-prefs-room-{tag}").into(),
-        peer_id: format!("codec-prefs-host-{tag}").into(),
+        room_id: format!("codec-prefs-room-{tag}"),
+        peer_id: format!("codec-prefs-host-{tag}"),
         transport_id: transport_id.clone(),
         dtls_parameters: DtlsParameters {
-            fingerprints: vec![Fingerprint {
-                algorithm: "sha-256".into(),
-                value: fp_hex,
-            }],
+            fingerprints: vec![Fingerprint { algorithm: "sha-256".into(), value: fp_hex }],
             role: "client".into(),
         },
     })
     .unwrap();
     let _ = &transport_id;
-    ws_tx.send(WsMsg::Text(connect.into())).await.unwrap();
+    ws_tx.send(WsMsg::Text(connect)).await.unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(15), connected.notified()).await;
 
     // 8. 协商后发送参数 → codecs[0].mime_type
@@ -291,7 +270,8 @@ async fn codec_prefs_force_h264() {
 /// 场景 3: [H264, VP8] 排序优先 → H.264
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn codec_prefs_h264_priority() {
-    let (mime, prefs_result) = negotiate_with_prefs(vec!["video/H264", "video/VP8"], "h264prio").await;
+    let (mime, prefs_result) =
+        negotiate_with_prefs(vec!["video/H264", "video/VP8"], "h264prio").await;
     assert!(prefs_result.is_ok());
     // 同上: answerer 偏好不生效（实证结论）
     assert_eq!(mime, "video/VP8", "answerer 偏好不生效（实证）— 仍 VP8, got {mime}");
@@ -300,7 +280,8 @@ async fn codec_prefs_h264_priority() {
 /// 场景 4: [VP8, H264] 序反转 → VP8
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn codec_prefs_vp8_priority() {
-    let (mime, prefs_result) = negotiate_with_prefs(vec!["video/VP8", "video/H264"], "vp8prio").await;
+    let (mime, prefs_result) =
+        negotiate_with_prefs(vec!["video/VP8", "video/H264"], "vp8prio").await;
     assert!(prefs_result.is_ok());
     // 与默认一致（offer 序 VP8 在前）— answerer 路径基线行为
     assert_eq!(mime, "video/VP8", "VP8（offer 序默认）, got {mime}");
@@ -317,8 +298,10 @@ async fn codec_prefs_force_vp9_negative() {
     assert_ne!(mime, "video/VP9", "VP9 不应被协商（router 无 VP9）");
     if prefs_result.is_ok() {
         // 合法负向证据: no-codec（inactive answer）或 sender-gone（track 被 detach）
-        assert!(mime == "<no-codec>" || mime == "<sender-gone>",
-                "set 成功但协商应无 codec, got {mime}");
+        assert!(
+            mime == "<no-codec>" || mime == "<sender-gone>",
+            "set 成功但协商应无 codec, got {mime}"
+        );
     }
 }
 
@@ -330,7 +313,9 @@ async fn codec_prefs_force_av1_negative() {
     tracing::info!("[AV1] set result: {prefs_result:?}, negotiated: {mime}");
     assert_ne!(mime, "video/AV1", "AV1 不应被协商（router 无 AV1）");
     if prefs_result.is_ok() {
-        assert!(mime == "<no-codec>" || mime == "<sender-gone>",
-                "set 成功但协商应无 codec, got {mime}");
+        assert!(
+            mime == "<no-codec>" || mime == "<sender-gone>",
+            "set 成功但协商应无 codec, got {mime}"
+        );
     }
 }

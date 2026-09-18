@@ -19,8 +19,8 @@ use std::process::Command;
 use std::time::Duration;
 
 use mediaservo_link::{
-    CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, FrameBus, FrameTopic, NodeAcl,
-    NodeId, Role,
+    CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, FrameBus, FrameTopic, NodeAcl, NodeId,
+    Role,
 };
 
 // 测试用 Ed25519 密钥对（openssl 生成，仅测试用；与 link/deck/capturer 测试同源）。
@@ -58,7 +58,6 @@ fn path_with_oxmgr() -> String {
 }
 
 /// `oxmgr list --json` → host 命名空间进程列表（name/status/pid）。
-
 /// oxmgr 实例 daemon env（与 translate::oxmgr_apply 同源: OXMGR_HOME 派生端口隔离
 /// daemon——`oxmgr list` 不带此 env 会连默认 daemon（空），看不到实例进程）。
 fn oxmgr_env(dir: &std::path::Path) -> Vec<(String, String)> {
@@ -70,7 +69,8 @@ fn oxmgr_env(dir: &std::path::Path) -> Vec<(String, String)> {
         ("OXMGR_DAEMON_ADDR".to_string(), format!("127.0.0.1:{port}")),
         ("OXMGR_API_ADDR".to_string(), format!("127.0.0.1:{}", port + 1000)),
     ]
-}fn oxmgr_host_procs(dir: &std::path::Path) -> Vec<(String, String, u64)> {
+}
+fn oxmgr_host_procs(dir: &std::path::Path) -> Vec<(String, String, u64)> {
     let out = Command::new("oxmgr")
         .env("PATH", path_with_oxmgr())
         .envs(oxmgr_env(dir))
@@ -183,6 +183,7 @@ async fn wait_frames(stream: &mediaservo_link::FrameStream, n: u32, timeout: Dur
 /// 之后取到的全是 seq≥基线 的帧。判别改为: 杀前等 ≥30 帧（基线 seq ≥29），
 /// 后台 drainer 全程记录 seq，重启后断言出现 seq < 基线（归零必可捕获）。
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // 轮询持锁窗极短且显式 drop；await 仅 sleep（测试域）
 async fn capturer_kill9_restart_resumes_frames_to_subscribers() {
     cleanup_iceoryx();
     // 测试进程内启用 tracing，使 FrameBus 订阅线程的 receive 错误可见（调试用）

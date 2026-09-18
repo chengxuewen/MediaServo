@@ -1,40 +1,87 @@
 //! RTCPeerConnection — W3C WebRTC API.
+use crate::RTCError;
+use crate::backend::{ActivePc, PcBackend};
+use crate::data_channel::{RTCDataChannel, RTCDataChannelInit};
+use crate::rtp::{RTCRtpReceiver, RTCRtpSender};
+use crate::sdp::RTCSessionDescription;
+use crate::track::{TrackKind, TrackReceiver, TrackRef, TrackSender};
+use crate::traits::PeerConnectionApi as _;
 use std::collections::HashMap;
 use std::sync::Arc;
 #[cfg(feature = "backend-webrtc-rs")]
-use std::{pin::Pin, future::Future};
-use crate::backend::{ActivePc, PcBackend};
-use crate::traits::PeerConnectionApi as _;
-use crate::data_channel::{RTCDataChannel, RTCDataChannelInit};
-use crate::sdp::RTCSessionDescription;
-use crate::track::{TrackKind, TrackReceiver, TrackRef, TrackSender};
-use crate::rtp::{RTCRtpSender, RTCRtpReceiver};
-use crate::RTCError;
+use std::{future::Future, pin::Pin};
 
 // ── Configuration types ──
 #[derive(Debug, Clone)]
-pub struct RTCIceServer { pub urls: Vec<String>, pub username: String, pub password: String }
+pub struct RTCIceServer {
+    pub urls: Vec<String>,
+    pub username: String,
+    pub password: String,
+}
 #[derive(Debug, Clone)]
-pub struct RTCConfiguration { pub ice_servers: Vec<RTCIceServer>, pub ice_transport_type: RTCIceTransportPolicy }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RTCIceTransportPolicy { Relay, NoHost, All }
-impl Default for RTCConfiguration {
-    fn default() -> Self { Self { ice_servers: vec![], ice_transport_type: RTCIceTransportPolicy::All } }
+pub struct RTCConfiguration {
+    pub ice_servers: Vec<RTCIceServer>,
+    pub ice_transport_type: RTCIceTransportPolicy,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RTCPeerConnectionState { New, Connecting, Connected, Disconnected, Failed, Closed }
+pub enum RTCIceTransportPolicy {
+    Relay,
+    NoHost,
+    All,
+}
+impl Default for RTCConfiguration {
+    fn default() -> Self {
+        Self { ice_servers: vec![], ice_transport_type: RTCIceTransportPolicy::All }
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RTCIceConnectionState { New, Checking, Connected, Completed, Failed, Disconnected, Closed }
+pub enum RTCPeerConnectionState {
+    New,
+    Connecting,
+    Connected,
+    Disconnected,
+    Failed,
+    Closed,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RTCIceGatheringState { New, Gathering, Complete }
+pub enum RTCIceConnectionState {
+    New,
+    Checking,
+    Connected,
+    Completed,
+    Failed,
+    Disconnected,
+    Closed,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RTCSignalingState { Stable, HaveLocalOffer, HaveLocalPrAnswer, HaveRemoteOffer, HaveRemotePrAnswer, Closed }
+pub enum RTCIceGatheringState {
+    New,
+    Gathering,
+    Complete,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RTCSignalingState {
+    Stable,
+    HaveLocalOffer,
+    HaveLocalPrAnswer,
+    HaveRemoteOffer,
+    HaveRemotePrAnswer,
+    Closed,
+}
 #[derive(Debug, Clone, Default)]
-pub struct RTCOfferOptions { pub ice_restart: bool, pub offer_to_receive_audio: bool, pub offer_to_receive_video: bool }
+pub struct RTCOfferOptions {
+    pub ice_restart: bool,
+    pub offer_to_receive_audio: bool,
+    pub offer_to_receive_video: bool,
+}
 #[derive(Debug, Clone, Default)]
 pub struct RTCAnswerOptions;
 #[derive(Debug, Clone)]
-pub struct RTCIceCandidate { pub candidate: String, pub sdp_mid: Option<String>, pub sdp_mline_index: Option<u16> }
+pub struct RTCIceCandidate {
+    pub candidate: String,
+    pub sdp_mid: Option<String>,
+    pub sdp_mline_index: Option<u16>,
+}
 
 /// W3C RTCIceCandidateError — onicecandidateerror 事件参数 (v2)
 #[derive(Debug, Clone, Default)]
@@ -58,10 +105,16 @@ pub struct RTCPeerConnection {
 // ── PeerConnectionApi trait implementation ──
 
 impl crate::traits::PeerConnectionApi for RTCPeerConnection {
-    async fn create_offer(&self, options: &RTCOfferOptions) -> Result<RTCSessionDescription, RTCError> {
+    async fn create_offer(
+        &self,
+        options: &RTCOfferOptions,
+    ) -> Result<RTCSessionDescription, RTCError> {
         self.backend.create_offer(options).await
     }
-    async fn create_answer(&self, options: &RTCAnswerOptions) -> Result<RTCSessionDescription, RTCError> {
+    async fn create_answer(
+        &self,
+        options: &RTCAnswerOptions,
+    ) -> Result<RTCSessionDescription, RTCError> {
         self.backend.create_answer(options).await
     }
     async fn set_local_description(&self, desc: &RTCSessionDescription) -> Result<(), RTCError> {
@@ -73,17 +126,33 @@ impl crate::traits::PeerConnectionApi for RTCPeerConnection {
     async fn add_ice_candidate(&self, candidate: &RTCIceCandidate) -> Result<(), RTCError> {
         self.backend.add_ice_candidate(candidate).await
     }
-    async fn create_data_channel(&self, label: &str, init: RTCDataChannelInit) -> Result<RTCDataChannel, RTCError> {
+    async fn create_data_channel(
+        &self,
+        label: &str,
+        init: RTCDataChannelInit,
+    ) -> Result<RTCDataChannel, RTCError> {
         self.backend.create_data_channel(label, init).await
     }
-    fn connection_state(&self) -> RTCPeerConnectionState { self.backend.connection_state() }
-    fn ice_connection_state(&self) -> RTCIceConnectionState { self.backend.ice_connection_state() }
-    fn ice_gathering_state(&self) -> RTCIceGatheringState { self.backend.ice_gathering_state() }
-    fn signaling_state(&self) -> RTCSignalingState { self.backend.signaling_state() }
-    async fn close(&self) { self.backend.close().await; }
+    fn connection_state(&self) -> RTCPeerConnectionState {
+        self.backend.connection_state()
+    }
+    fn ice_connection_state(&self) -> RTCIceConnectionState {
+        self.backend.ice_connection_state()
+    }
+    fn ice_gathering_state(&self) -> RTCIceGatheringState {
+        self.backend.ice_gathering_state()
+    }
+    fn signaling_state(&self) -> RTCSignalingState {
+        self.backend.signaling_state()
+    }
+    async fn close(&self) {
+        self.backend.close().await;
+    }
     fn add_track(&self, track_id: &str, kind: TrackKind) -> Result<String, RTCError> {
         let mut tracks = self.tracks.lock().unwrap();
-        if tracks.len() >= MAX_TRACKS { return Err(RTCError::Track("max tracks reached".into())); }
+        if tracks.len() >= MAX_TRACKS {
+            return Err(RTCError::Track("max tracks reached".into()));
+        }
 
         let sender = self.create_track_sender(track_id, kind);
 
@@ -94,25 +163,49 @@ impl crate::traits::PeerConnectionApi for RTCPeerConnection {
     }
     fn remove_track(&self, track_id: &str) -> Result<(), RTCError> {
         let mut tracks = self.tracks.lock().unwrap();
-        tracks.remove(track_id).map(|_|()).ok_or_else(|| RTCError::Track(format!("track not found: {}", track_id)))
+        tracks
+            .remove(track_id)
+            .map(|_| ())
+            .ok_or_else(|| RTCError::Track(format!("track not found: {}", track_id)))
     }
-    fn get_track(&self, track_id: &str) -> Option<TrackRef> { self.tracks.lock().unwrap().get(track_id).cloned() }
-    fn track_count(&self) -> usize { self.tracks.lock().unwrap().len() }
-    fn track_ids(&self) -> Vec<String> { self.tracks.lock().unwrap().keys().cloned().collect() }
+    fn get_track(&self, track_id: &str) -> Option<TrackRef> {
+        self.tracks.lock().unwrap().get(track_id).cloned()
+    }
+    fn track_count(&self) -> usize {
+        self.tracks.lock().unwrap().len()
+    }
+    fn track_ids(&self) -> Vec<String> {
+        self.tracks.lock().unwrap().keys().cloned().collect()
+    }
     fn get_senders(&self) -> Vec<RTCRtpSender> {
         let backend = self.backend.clone();
-        self.tracks.lock().unwrap().values().filter(|tr| matches!(tr, TrackRef::Sender(_)))
+        self.tracks
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|tr| matches!(tr, TrackRef::Sender(_)))
             .map(|tr| RTCRtpSender::new(tr.clone()).with_backend(backend.clone()))
             .collect()
     }
     fn get_receivers(&self) -> Vec<RTCRtpReceiver> {
-        self.tracks.lock().unwrap().values().filter(|tr| matches!(tr, TrackRef::Receiver(_))).map(|tr| RTCRtpReceiver::new(tr.clone())).collect()
+        self.tracks
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|tr| matches!(tr, TrackRef::Receiver(_)))
+            .map(|tr| RTCRtpReceiver::new(tr.clone()))
+            .collect()
     }
-    fn on_track<F>(&self, callback: F) where F: Fn(RTCRtpReceiver) + Send + Sync + 'static {
+    fn on_track<F>(&self, callback: F)
+    where
+        F: Fn(RTCRtpReceiver) + Send + Sync + 'static,
+    {
         *self.on_track_callback.lock().unwrap() = Some(Box::new(callback));
         let bk_cb_from = self.on_track_callback.clone();
         self.backend.set_on_track(Box::new(move |tr: TrackReceiver| {
-            if let Some(ref f) = *bk_cb_from.lock().unwrap() { f(RTCRtpReceiver::new(TrackRef::Receiver(tr))); }
+            if let Some(ref f) = *bk_cb_from.lock().unwrap() {
+                f(RTCRtpReceiver::new(TrackRef::Receiver(tr)));
+            }
         }));
     }
 
@@ -122,31 +215,51 @@ impl crate::traits::PeerConnectionApi for RTCPeerConnection {
         self.backend.get_transceivers()
     }
 
-    fn add_transceiver(&self, kind: TrackKind, init: crate::rtp::RTCRtpTransceiverInit) -> Result<crate::rtp::RTCRtpTransceiver, RTCError> {
+    fn add_transceiver(
+        &self,
+        kind: TrackKind,
+        init: crate::rtp::RTCRtpTransceiverInit,
+    ) -> Result<crate::rtp::RTCRtpTransceiver, RTCError> {
         self.backend.add_transceiver(kind, &init)
     }
 
-    fn add_transceiver_with_track(&self, track: &TrackSender, init: crate::rtp::RTCRtpTransceiverInit) -> Result<crate::rtp::RTCRtpTransceiver, RTCError> {
+    fn add_transceiver_with_track(
+        &self,
+        track: &TrackSender,
+        init: crate::rtp::RTCRtpTransceiverInit,
+    ) -> Result<crate::rtp::RTCRtpTransceiver, RTCError> {
         self.backend.add_transceiver_with_track(track, &init)
     }
 
-fn get_sending_rtp_parameters(&self, track_id: &str) -> Result<crate::rtp::RTCRtpParameters, RTCError> {
-self.backend.sender_get_parameters(track_id)
+    fn get_sending_rtp_parameters(
+        &self,
+        track_id: &str,
+    ) -> Result<crate::rtp::RTCRtpParameters, RTCError> {
+        self.backend.sender_get_parameters(track_id)
     }
 
     fn request_key_frame(&self, track_id: &str) -> Result<(), RTCError> {
         self.backend.request_key_frame(track_id)
     }
 
-    fn get_receiving_rtp_parameters(&self, track_id: &str) -> Result<crate::rtp::RTCRtpParameters, RTCError> {
+    fn get_receiving_rtp_parameters(
+        &self,
+        track_id: &str,
+    ) -> Result<crate::rtp::RTCRtpParameters, RTCError> {
         self.backend.receiver_get_parameters(track_id)
     }
 
-    fn get_sender_capabilities(&self, kind: TrackKind) -> Result<Option<crate::rtp::RTCRtpCapabilities>, RTCError> {
+    fn get_sender_capabilities(
+        &self,
+        kind: TrackKind,
+    ) -> Result<Option<crate::rtp::RTCRtpCapabilities>, RTCError> {
         self.backend.get_sender_capabilities(kind)
     }
 
-    fn get_receiver_capabilities(&self, kind: TrackKind) -> Result<Option<crate::rtp::RTCRtpCapabilities>, RTCError> {
+    fn get_receiver_capabilities(
+        &self,
+        kind: TrackKind,
+    ) -> Result<Option<crate::rtp::RTCRtpCapabilities>, RTCError> {
         self.backend.get_receiver_capabilities(kind)
     }
 
@@ -154,7 +267,11 @@ self.backend.sender_get_parameters(track_id)
         self.backend.restart_ice()
     }
 
-    fn transceiver_set_codec_preferences(&self, track_id: &str, codecs: Vec<crate::rtp::RTCRtpCodecCapability>) -> Result<(), RTCError> {
+    fn transceiver_set_codec_preferences(
+        &self,
+        track_id: &str,
+        codecs: Vec<crate::rtp::RTCRtpCodecCapability>,
+    ) -> Result<(), RTCError> {
         self.backend.transceiver_set_codec_preferences(track_id, codecs)
     }
 
@@ -182,15 +299,24 @@ self.backend.sender_get_parameters(track_id)
         self.backend.current_remote_description()
     }
 
-    fn on_negotiation_needed<F>(&self, _callback: F) where F: Fn() + Send + Sync + 'static {
+    fn on_negotiation_needed<F>(&self, _callback: F)
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
         // v2: backend 无 negotiation callback 接口，暂空实现（可后续接 on_renegotiation_needed）
     }
 
-    fn on_ice_gathering_state_change<F>(&self, _callback: F) where F: Fn(RTCIceGatheringState) + Send + Sync + 'static {
+    fn on_ice_gathering_state_change<F>(&self, _callback: F)
+    where
+        F: Fn(RTCIceGatheringState) + Send + Sync + 'static,
+    {
         // v2: webrtc-sys observer 有 on_ice_gathering_change，可后续暴露
     }
 
-    fn on_ice_candidate_error<F>(&self, _callback: F) where F: Fn(RTCIceCandidateError) + Send + Sync + 'static {
+    fn on_ice_candidate_error<F>(&self, _callback: F)
+    where
+        F: Fn(RTCIceCandidateError) + Send + Sync + 'static,
+    {
         // v2: webrtc-sys observer 有 on_ice_candidate_error，可后续暴露
     }
 }
@@ -216,12 +342,7 @@ impl RTCPeerConnection {
             #[cfg(not(feature = "backend-webrtc-sys"))]
             {
                 let (backend, _media_track) = self.factory.create_video_track();
-                return TrackSender {
-                    id: track_id.to_string(),
-                    kind,
-                    audio_config: None,
-                    backend,
-                };
+                return TrackSender { id: track_id.to_string(), kind, audio_config: None, backend };
             }
         }
         // H2: 音频 track（webrtc-sys）— AudioTrackSource + AudioTrack，stage 供
@@ -298,8 +419,17 @@ impl RTCPeerConnection {
     /// webrtc-rs 原生候选回调 (P2P 路径) — 与通用 trickle 版 (on_ice_candidate) 区分命名。
     pub fn on_ice_candidate_native(
         &self,
-        f: Box<dyn FnMut(Option<webrtc::ice_transport::ice_candidate::RTCIceCandidate>) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> + Send + Sync + 'static>,
-    ) { self.backend.on_ice_candidate(f); }
+        f: Box<
+            dyn FnMut(
+                    Option<webrtc::ice_transport::ice_candidate::RTCIceCandidate>,
+                ) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+                + Send
+                + Sync
+                + 'static,
+        >,
+    ) {
+        self.backend.on_ice_candidate(f);
+    }
 }
 
 impl Clone for RTCPeerConnection {
@@ -315,7 +445,10 @@ impl Clone for RTCPeerConnection {
 
 impl std::fmt::Debug for RTCPeerConnection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RTCPeerConnection").field("connection_state", &self.connection_state()).field("track_count", &self.track_count()).finish()
+        f.debug_struct("RTCPeerConnection")
+            .field("connection_state", &self.connection_state())
+            .field("track_count", &self.track_count())
+            .finish()
     }
 }
 
@@ -324,9 +457,9 @@ impl std::fmt::Debug for RTCPeerConnection {
 #[cfg(all(test, not(any(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys"))))]
 mod tests {
     use super::*;
+    use crate::data_channel::RTCDataChannelInit;
     use crate::factory::RTCPeerConnectionFactory;
     use crate::sdp::RTCSdpType;
-    use crate::data_channel::RTCDataChannelInit;
 
     #[test]
     fn stub_factory_default_creates() {
@@ -339,7 +472,11 @@ mod tests {
     #[test]
     fn stub_create_offer_returns_sdp_type_offer() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         let offer = rt.block_on(pc.create_offer(&RTCOfferOptions::default())).unwrap();
         assert_eq!(offer.sdp_type, RTCSdpType::Offer);
     }
@@ -347,7 +484,11 @@ mod tests {
     #[test]
     fn stub_create_answer_returns_sdp_type_answer() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         let answer = rt.block_on(pc.create_answer(&RTCAnswerOptions::default())).unwrap();
         assert_eq!(answer.sdp_type, RTCSdpType::Answer);
     }
@@ -355,7 +496,11 @@ mod tests {
     #[test]
     fn stub_sdp_operations_are_noop() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         let sd = RTCSessionDescription::new(RTCSdpType::Offer, String::new());
         assert!(rt.block_on(pc.set_local_description(&sd)).is_ok());
         assert!(rt.block_on(pc.set_remote_description(&sd)).is_ok());
@@ -364,16 +509,29 @@ mod tests {
     #[test]
     fn stub_add_ice_candidate_is_noop() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
-        let ic = RTCIceCandidate { candidate: "candidate:1".into(), sdp_mid: Some("0".into()), sdp_mline_index: Some(0) };
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
+        let ic = RTCIceCandidate {
+            candidate: "candidate:1".into(),
+            sdp_mid: Some("0".into()),
+            sdp_mline_index: Some(0),
+        };
         assert!(rt.block_on(pc.add_ice_candidate(&ic)).is_ok());
     }
 
     #[test]
     fn stub_create_data_channel_preserves_label() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
-        let dc = rt.block_on(pc.create_data_channel("mychan", RTCDataChannelInit::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
+        let dc =
+            rt.block_on(pc.create_data_channel("mychan", RTCDataChannelInit::default())).unwrap();
         assert_eq!(dc.label(), "mychan");
         assert_eq!(dc.id(), 0);
     }
@@ -381,7 +539,11 @@ mod tests {
     #[test]
     fn stub_connection_states_are_default() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         assert!(matches!(pc.connection_state(), RTCPeerConnectionState::New));
         assert!(matches!(pc.ice_connection_state(), RTCIceConnectionState::New));
         assert!(matches!(pc.ice_gathering_state(), RTCIceGatheringState::New));
@@ -391,7 +553,11 @@ mod tests {
     #[test]
     fn stub_close_is_noop() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         rt.block_on(pc.close());
     }
 
@@ -407,7 +573,11 @@ mod tests {
     #[test]
     fn add_track_registers_in_map() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         let id = pc.add_track("video-1", TrackKind::Video).unwrap();
         assert_eq!(id, "video-1");
         assert_eq!(pc.track_count(), 1);
@@ -418,7 +588,11 @@ mod tests {
     #[test]
     fn add_track_respects_max() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         for i in 0..8 {
             pc.add_track(&format!("track-{}", i), TrackKind::Video).unwrap();
         }
@@ -430,7 +604,11 @@ mod tests {
     #[test]
     fn remove_track_not_found() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         let err = pc.remove_track("nonexistent").unwrap_err();
         assert!(matches!(err, RTCError::Track(_)));
     }
@@ -438,7 +616,11 @@ mod tests {
     #[test]
     fn remove_track_succeeds() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         pc.add_track("audio-1", TrackKind::Audio).unwrap();
         assert_eq!(pc.track_count(), 1);
         pc.remove_track("audio-1").unwrap();
@@ -448,7 +630,11 @@ mod tests {
     #[test]
     fn get_track_returns_clone() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         pc.add_track("vid-1", TrackKind::Video).unwrap();
         let tr = pc.get_track("vid-1").unwrap();
         assert_eq!(tr.id(), "vid-1");
@@ -458,7 +644,11 @@ mod tests {
     #[test]
     fn get_track_missing_returns_none() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         assert!(pc.get_track("missing").is_none());
     }
 
@@ -467,7 +657,11 @@ mod tests {
     #[test]
     fn add_track_w3c_returns_sender() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         let track_id = pc.add_track("video-w3c", TrackKind::Video).unwrap();
         assert_eq!(track_id, "video-w3c");
         let tr = pc.get_track("video-w3c").unwrap();
@@ -477,7 +671,11 @@ mod tests {
     #[test]
     fn get_senders_filters_correctly() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         pc.add_track("vid-1", TrackKind::Video).unwrap();
         pc.add_track("vid-2", TrackKind::Video).unwrap();
         let senders = pc.get_senders();
@@ -487,14 +685,22 @@ mod tests {
     #[test]
     fn get_receivers_empty_initially() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         assert!(pc.get_receivers().is_empty());
     }
 
     #[test]
     fn on_track_registers_callback() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc = rt.block_on(RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default())).unwrap();
+        let pc = rt
+            .block_on(
+                RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
+            )
+            .unwrap();
         pc.on_track(|_receiver| {});
     }
 }

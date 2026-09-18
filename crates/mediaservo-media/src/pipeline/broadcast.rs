@@ -1,10 +1,12 @@
 #![allow(dead_code)]
 
+use crate::error::MediaError;
+use crate::pipeline::core::{
+    FormatSpec, MediaSource, MediaType, NodeCapability, NodeInfo, PipelineNode,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tokio::sync::broadcast;
-use crate::error::MediaError;
-use crate::pipeline::core::{FormatSpec, MediaSource, MediaType, NodeCapability, NodeInfo, PipelineNode};
 
 type Result<T> = std::result::Result<T, MediaError>;
 
@@ -38,6 +40,7 @@ impl<P: Clone + Send + 'static> FragmentBroadcaster<P> {
     }
 
     /// Create a new subscriber stream.
+    #[allow(clippy::type_complexity)] // 广播回调签名（Arc<dyn Fn>）
     pub fn subscribe(&self) -> BroadcastStream<P> {
         BroadcastStream { rx: self.tx.subscribe(), _meta: self.meta.clone() }
     }
@@ -62,16 +65,8 @@ impl<P: Clone + Send + 'static> NodeInfo for BroadcastStream<P> {
     }
     fn capabilities(&self) -> NodeCapability {
         NodeCapability {
-            input: FormatSpec {
-                media_type: MediaType::Both,
-                codecs: None,
-                pixel_formats: vec![],
-            },
-            output: FormatSpec {
-                media_type: MediaType::Both,
-                codecs: None,
-                pixel_formats: vec![],
-            },
+            input: FormatSpec { media_type: MediaType::Both, codecs: None, pixel_formats: vec![] },
+            output: FormatSpec { media_type: MediaType::Both, codecs: None, pixel_formats: vec![] },
         }
     }
 }
@@ -107,6 +102,7 @@ impl<P: Clone + Send + 'static> MediaSource for BroadcastStream<P> {
 // ── 3. PipelineRegistry ──
 
 /// Central registry for dynamic source broadcasters.
+#[allow(clippy::type_complexity)] // 广播器注册表键值形（(topic,kind)->broadcaster）
 pub struct PipelineRegistry {
     broadcasters: RwLock<HashMap<(String, String), Arc<FragmentBroadcaster<Vec<u8>>>>>,
 }

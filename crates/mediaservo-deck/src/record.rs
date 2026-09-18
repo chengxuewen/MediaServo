@@ -5,8 +5,8 @@
 //! 全部帧（持续录制），`stop()` 收尾（flush + trailer + join）。
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use mediaservo_codec::frame::VideoFrame;
 
@@ -33,12 +33,7 @@ pub struct RecordOptions {
 
 impl Default for RecordOptions {
     fn default() -> Self {
-        Self {
-            codec: VideoCodec::H264,
-            container: Container::Mp4,
-            fps: 30,
-            keyframe_interval: 60,
-        }
+        Self { codec: VideoCodec::H264, container: Container::Mp4, fps: 30, keyframe_interval: 60 }
     }
 }
 
@@ -61,27 +56,21 @@ impl Recorder {
     pub fn new(path: impl Into<PathBuf>, opts: RecordOptions) -> Result<Self, DeckError> {
         let path = path.into();
         // 父目录必须存在（不隐式创建 — 明确失败让调用方知道路径问题）
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() && !parent.exists() {
-                return Err(DeckError::NotFound(format!(
-                    "parent dir {} does not exist",
-                    parent.display()
-                )));
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+            && !parent.exists()
+        {
+            return Err(DeckError::NotFound(format!(
+                "parent dir {} does not exist",
+                parent.display()
+            )));
         }
-        Ok(Self {
-            path,
-            opts,
-            running: Arc::new(AtomicBool::new(false)),
-            worker: None,
-        })
+        Ok(Self { path, opts, running: Arc::new(AtomicBool::new(false)), worker: None })
     }
 
     /// 停止信号（与 recorder 共享 running 标志）。
     pub fn stop_signal(&self) -> StopSignal {
-        StopSignal {
-            running: Arc::clone(&self.running),
-        }
+        StopSignal { running: Arc::clone(&self.running) }
     }
 
     /// 开始录制：消费帧流直到流结束（`recv` 返回 None）或 `stop()`。
@@ -115,19 +104,14 @@ impl Recorder {
             if !self.running.load(Ordering::SeqCst) {
                 break;
             }
-            match tokio::time::timeout(
-                std::time::Duration::from_millis(50),
-                frames.next(),
-            )
-            .await
-            {
+            match tokio::time::timeout(std::time::Duration::from_millis(50), frames.next()).await {
                 Ok(Some(frame)) => {
                     if tx.send(frame).is_err() {
                         tracing::warn!("recorder worker exited; stopping frame pump");
                         break;
                     }
                 }
-                Ok(None) => break, // 帧源结束
+                Ok(None) => break,  // 帧源结束
                 Err(_elapsed) => {} // 超时：继续检查 running
             }
         }
@@ -185,7 +169,6 @@ impl Frames for &mut crate::source::FrameStream {
 
 /// 持续录制循环的帧泵：迭代器语义包一层 async fn 也可。
 /// （若调用方有同步帧源，可用 `tokio::task::block_in_place` 转接 — YAGNI。）
-
 #[cfg(feature = "backend-ffmpeg")]
 fn mux_worker(
     path: &PathBuf,
@@ -207,14 +190,12 @@ fn mux_worker(
     let first = next_frame(rx, running, None)?;
     let w = first.format.width;
     let h = first.format.height;
-    let fps = opts.fps as i32;
+    let _fps = opts.fps as i32;
 
     // 配置并打开编码器
-    let mut ctx = ffmpeg::codec::context::Context::new_with_codec(codec);
-    let mut enc = ctx
-        .encoder()
-        .video()
-        .map_err(|e| DeckError::Codec(format!("create encoder: {e}")))?;
+    let ctx = ffmpeg::codec::context::Context::new_with_codec(codec);
+    let mut enc =
+        ctx.encoder().video().map_err(|e| DeckError::Codec(format!("create encoder: {e}")))?;
     enc.set_width(w);
     enc.set_height(h);
     enc.set_format(ffmpeg::format::Pixel::YUV420P);
@@ -223,9 +204,8 @@ fn mux_worker(
     enc.set_gop(opts.keyframe_interval);
     enc.set_max_b_frames(0);
     enc.set_bit_rate(2_000_000);
-    let mut enc = enc
-        .open_with(h264_dict())
-        .map_err(|e| DeckError::Codec(format!("open encoder: {e}")))?;
+    let mut enc =
+        enc.open_with(h264_dict()).map_err(|e| DeckError::Codec(format!("open encoder: {e}")))?;
 
     // 容器 stream：从打开的编码器复制完整 codecpar（含 SPS/PPS extradata，
     // 官方 muxing.c 模式；ctx 由于 encoder() consume 不可复用，从 enc.0 复制）
@@ -234,8 +214,7 @@ fn mux_worker(
         .map_err(|e| DeckError::Codec(format!("add stream: {e}")))?;
     stream.copy_parameters_from_context(&enc.0);
     stream.set_time_base(ffmpeg::Rational(1, 1_000_000));
-    out.write_header()
-        .map_err(|e| DeckError::Codec(format!("write header: {e}")))?;
+    out.write_header().map_err(|e| DeckError::Codec(format!("write header: {e}")))?;
 
     // pts 锚定首帧基准（generator/source 的 pts 是 epoch 大值 →
     // 不加权会得到 duration= 117s 的假长文件）
@@ -262,8 +241,7 @@ fn mux_worker(
             Err(_) => break,
         }
     }
-    out.write_trailer()
-        .map_err(|e| DeckError::Codec(format!("write trailer: {e}")))?;
+    out.write_trailer().map_err(|e| DeckError::Codec(format!("write trailer: {e}")))?;
     tracing::info!("recorder finished: {:?}", path);
     Ok(())
 }
@@ -273,7 +251,7 @@ fn mux_worker(
 fn next_frame(
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<VideoFrame>,
     running: &AtomicBool,
-    first: Option<&VideoFrame>,
+    _first: Option<&VideoFrame>,
 ) -> Result<VideoFrame, DeckError> {
     loop {
         match rx.try_recv() {
@@ -319,8 +297,7 @@ fn encode_and_mux(
         }
     }
     avframe.set_pts(Some(frame.pts.saturating_sub(base_pts) as i64));
-    enc.send_frame(&avframe)
-        .map_err(|e| DeckError::Codec(format!("send frame: {e}")))?;
+    enc.send_frame(&avframe).map_err(|e| DeckError::Codec(format!("send frame: {e}")))?;
     loop {
         let mut pkt = ffmpeg::codec::packet::Packet::empty();
         match enc.receive_packet(&mut pkt) {
@@ -340,7 +317,5 @@ fn mux_worker(
     _rx: &mut tokio::sync::mpsc::UnboundedReceiver<VideoFrame>,
     _running: &std::sync::atomic::AtomicBool,
 ) -> Result<(), DeckError> {
-    Err(DeckError::Codec(
-        "recorder requires backend-ffmpeg feature".into(),
-    ))
+    Err(DeckError::Codec("recorder requires backend-ffmpeg feature".into()))
 }

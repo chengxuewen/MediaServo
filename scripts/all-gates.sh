@@ -38,7 +38,7 @@ gate "crate literal versions"     bash -c '! git grep -l "^version = \"" -- "cra
 # ── 编译面 ──
 gate "check --workspace"          cargo check --workspace
 gate "clippy -D --workspace"      cargo clippy --workspace -- -D warnings
-gate "server stub --all-targets"  cargo test -p mediaservo-server --no-default-features --all-targets
+gate "server stub --all-targets"  cargo test -p mediaservo-server --no-default-features --all-targets -- --test-threads=1 # g3 并行竞态在册 flake（09-11/09-18 双证），门=确定性判据
 
 # ── 测试面 ──
 gate "test --workspace (lib)"     cargo test --workspace --lib

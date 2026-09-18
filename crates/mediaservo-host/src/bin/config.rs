@@ -10,12 +10,9 @@ use std::path::Path;
 
 /// Load host configuration from a YAML file path.
 pub fn load<P: AsRef<Path>>(path: P) -> Result<HostConfig, CoreError> {
-    let f = fs::File::open(path).map_err(|e| {
-        CoreError::ConfigParse(format!("cannot open config: {e}"))
-    })?;
-    serde_yaml::from_reader(f).map_err(|e| {
-        CoreError::ConfigParse(format!("YAML parse error: {e}"))
-    })
+    let f = fs::File::open(path)
+        .map_err(|e| CoreError::ConfigParse(format!("cannot open config: {e}")))?;
+    serde_yaml::from_reader(f).map_err(|e| CoreError::ConfigParse(format!("YAML parse error: {e}")))
 }
 
 #[cfg(test)]

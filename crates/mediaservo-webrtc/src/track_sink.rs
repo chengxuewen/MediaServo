@@ -10,8 +10,8 @@
 //! - **生命周期** (v2 BLOCKER-4): 后台任务在 channel closed / 连续写错误超阈值时退出；
 //!   帧源线程由调用方（Host）显式 stop
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
@@ -21,8 +21,8 @@ use mediaservo_media::base::frame::BoxVideoFrame;
 use mediaservo_media::error::MediaError;
 use mediaservo_media::pipeline::sink::{VideoSink, VideoSinkWants};
 
-use crate::track::TrackSender;
 use crate::RTCError;
+use crate::track::TrackSender;
 
 /// Channel 容量 — 3 帧 ≈ 100ms @30fps。满则 drop-new（v2 修订）。
 const CHANNEL_CAPACITY: usize = 3;
@@ -123,12 +123,7 @@ impl VideoSink<BoxVideoFrame> for WebRtcTrackSink {
         data.extend_from_slice(&buf.data_u[..uv_size]);
         data.extend_from_slice(&buf.data_v[..uv_size]);
 
-        let item = OwnedI420Frame {
-            data,
-            width,
-            height,
-            ts_us: frame.timestamp_us,
-        };
+        let item = OwnedI420Frame { data, width, height, ts_us: frame.timestamp_us };
         match self.tx.try_send(item) {
             Ok(()) => Ok(VideoSinkWants::default()),
             Err(mpsc::error::TrySendError::Full(_)) => {
@@ -139,10 +134,7 @@ impl VideoSink<BoxVideoFrame> for WebRtcTrackSink {
             Err(mpsc::error::TrySendError::Closed(_)) => {
                 // 接收端已退出 → 通知源停止广播本 sink。
                 tracing::debug!("WebRtcTrackSink channel closed — deactivating");
-                Ok(VideoSinkWants {
-                    is_active: false,
-                    ..Default::default()
-                })
+                Ok(VideoSinkWants { is_active: false, ..Default::default() })
             }
         }
     }
@@ -153,16 +145,15 @@ impl VideoSink<BoxVideoFrame> for WebRtcTrackSink {
 #[cfg(all(test, not(any(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys"))))]
 mod tests {
     use super::*;
+    use crate::track::TrackKind;
     use mediaservo_media::base::buffer::I420Buffer;
     use mediaservo_media::base::frame::VideoFrame;
-    use crate::track::TrackKind;
     use std::time::Duration;
 
     fn test_frame(ts_us: i64, w: u32, h: u32) -> BoxVideoFrame {
         let buf: Box<dyn VideoBuffer> = Box::new(I420Buffer::new(w, h));
         VideoFrame::new(buf).with_timestamp(ts_us)
     }
-
 
     /// stub 后端帧数观测（TrackSender.backend 与任务内 clone 共享 Arc 记录）。
     fn written(track: &TrackSender) -> u64 {
@@ -203,10 +194,7 @@ mod tests {
         assert_eq!(history[0], 1_700_000_000_000);
         // C17 断言: 相邻帧差值 ≈ 33.3ms ± 5ms。
         let delta = history[1] - history[0];
-        assert!(
-            (33_333 - delta).abs() <= 5_000,
-            "expected ~33.3ms delta, got {delta}µs"
-        );
+        assert!((33_333 - delta).abs() <= 5_000, "expected ~33.3ms delta, got {delta}µs");
         let delta2 = history[2] - history[1];
         assert!((33_333 - delta2).abs() <= 5_000, "got {delta2}µs");
     }
@@ -219,8 +207,7 @@ mod tests {
         // current_thread runtime: 同步 on_frame 期间后台任务无法被 poll →
         // 容量 3 的 channel 在第 4 帧起 drop-new。
         for i in 0..5 {
-            sink.on_frame(&test_frame(1_000_000 + i * 33_333, 64, 48))
-                .unwrap();
+            sink.on_frame(&test_frame(1_000_000 + i * 33_333, 64, 48)).unwrap();
         }
 
         tokio::time::sleep(Duration::from_millis(100)).await;

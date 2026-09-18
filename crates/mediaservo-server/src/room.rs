@@ -71,9 +71,7 @@ pub struct RoomManager {
 impl RoomManager {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Self {
-            rooms: Arc::new(DashMap::new()),
-        }
+        Self { rooms: Arc::new(DashMap::new()) }
     }
 
     /// Join a room as Host, Remote, or Consumer.
@@ -83,7 +81,12 @@ impl RoomManager {
     /// - `Remote` in a DeviceStream room: pushes to consumers (N allowed).
     /// - `Consumer`: pushes to consumers (N allowed).
     /// - New room creation: Host → P2P, Remote/Consumer → DeviceStream.
-    pub fn join_room(&self, room_id: &str, peer_id: &str, role: &PeerRole) -> Result<(), CoreError> {
+    pub fn join_room(
+        &self,
+        room_id: &str,
+        peer_id: &str,
+        role: &PeerRole,
+    ) -> Result<(), CoreError> {
         let id = room_id.to_string();
         let pid = peer_id.to_string();
 
@@ -139,9 +142,7 @@ impl RoomManager {
                 },
             );
             tracing::info!("Room {} created by {:?} {}", room_id, role, peer_id);
-            audit::log_event(AuditEvent::RoomCreate {
-                room_id: room_id.to_string(),
-            });
+            audit::log_event(AuditEvent::RoomCreate { room_id: room_id.to_string() });
         }
 
         Ok(())
@@ -162,14 +163,11 @@ impl RoomManager {
             tracing::info!("Peer {} left room {}", peer_id, room_id);
         }
         // Retain rooms that still have any peers
-        self.rooms
-            .retain(|_, r| r.host.is_some() || r.remote.is_some() || !r.consumers.is_empty());
+        self.rooms.retain(|_, r| r.host.is_some() || r.remote.is_some() || !r.consumers.is_empty());
         let room_gone = !self.rooms.contains_key(&id);
         if room_gone {
             tracing::info!("Room {} destroyed (last peer left)", room_id);
-            audit::log_event(AuditEvent::RoomDestroy {
-                room_id: room_id.to_string(),
-            });
+            audit::log_event(AuditEvent::RoomDestroy { room_id: room_id.to_string() });
         }
         room_gone
     }
@@ -211,25 +209,21 @@ impl RoomManager {
 
     /// Check whether a room is a DeviceStream room.
     pub fn is_device_stream(&self, room_id: &str) -> bool {
-        self.rooms
-            .get(room_id)
-            .map(|r| r.room_type == RoomType::DeviceStream)
-            .unwrap_or(false)
+        self.rooms.get(room_id).map(|r| r.room_type == RoomType::DeviceStream).unwrap_or(false)
     }
 
     pub fn connected_peers(&self) -> usize {
         self.rooms
             .iter()
-            .map(|r| (r.host.is_some() as usize) + (r.remote.is_some() as usize) + r.consumers.len())
+            .map(|r| {
+                (r.host.is_some() as usize) + (r.remote.is_some() as usize) + r.consumers.len()
+            })
             .sum()
     }
 
     pub fn get_peer_count(&self) -> usize {
         self.connected_peers()
     }
-
-
-    /// Snapshot of all active rooms.
 
     /// Snapshot of all active rooms.
     pub fn list_rooms(&self) -> Vec<RoomSnapshot> {
@@ -260,17 +254,13 @@ impl RoomManager {
             // P2P 房间保持原样）。StatusReport 键 = 整车房间（agent 上报），不依赖房间拆分。
             // per-stream 房间（<vehicle>_<stream>）→ device 归一（前端 roomId=device_stream 复原）
             let device_id = r.device_id.clone().unwrap_or_else(|| {
-                r.id.rsplit_once('_')
-                    .map(|(v, _s)| v.to_string())
-                    .unwrap_or_else(|| r.id.clone())
+                r.id.rsplit_once('_').map(|(v, _s)| v.to_string()).unwrap_or_else(|| r.id.clone())
             });
-            let entry = device_map
-                .entry(device_id.clone())
-                .or_insert_with(|| DeviceSnapshot {
-                    device_id: device_id.clone(),
-                    online_since: r.created_at,
-                    streams: Vec::new(),
-                });
+            let entry = device_map.entry(device_id.clone()).or_insert_with(|| DeviceSnapshot {
+                device_id: device_id.clone(),
+                online_since: r.created_at,
+                streams: Vec::new(),
+            });
             if r.created_at < entry.online_since {
                 entry.online_since = r.created_at;
             }
@@ -278,7 +268,9 @@ impl RoomManager {
             let report_streams: Vec<StreamSnapshot> = status
                 .get(&r.id)
                 .and_then(|m| match m {
-                    mediaservo_common::protocol::SignalingMessage::StatusReport { streams, .. } => Some(streams.clone()),
+                    mediaservo_common::protocol::SignalingMessage::StatusReport {
+                        streams, ..
+                    } => Some(streams.clone()),
                     _ => None,
                 })
                 .map(|sfs| {
@@ -308,8 +300,7 @@ impl RoomManager {
             room.consumers.clear();
         }
         // Clean up if room is now empty
-        self.rooms
-            .retain(|_, r| r.host.is_some() || r.remote.is_some() || !r.consumers.is_empty());
+        self.rooms.retain(|_, r| r.host.is_some() || r.remote.is_some() || !r.consumers.is_empty());
         peer_ids
     }
 
@@ -434,8 +425,7 @@ mod tests {
     fn join_device_stream_consumer() {
         let mgr = RoomManager::new();
         // Consumer creates a DeviceStream room
-        mgr.join_room("stream-1", "consumer-1", &PeerRole::Consumer)
-            .unwrap();
+        mgr.join_room("stream-1", "consumer-1", &PeerRole::Consumer).unwrap();
         let rooms = mgr.list_rooms();
         assert_eq!(rooms.len(), 1);
         assert_eq!(rooms[0].room_type, RoomType::DeviceStream);
@@ -448,14 +438,11 @@ mod tests {
     fn multiple_consumers() {
         let mgr = RoomManager::new();
         // First consumer creates the room
-        mgr.join_room("stream-1", "consumer-1", &PeerRole::Consumer)
-            .unwrap();
+        mgr.join_room("stream-1", "consumer-1", &PeerRole::Consumer).unwrap();
         // Second consumer joins (Remote in DeviceStream room)
-        mgr.join_room("stream-1", "consumer-2", &PeerRole::Remote)
-            .unwrap();
+        mgr.join_room("stream-1", "consumer-2", &PeerRole::Remote).unwrap();
         // Third consumer joins
-        mgr.join_room("stream-1", "consumer-3", &PeerRole::Consumer)
-            .unwrap();
+        mgr.join_room("stream-1", "consumer-3", &PeerRole::Consumer).unwrap();
         assert_eq!(mgr.get_peer_count(), 3);
         let rooms = mgr.list_rooms();
         assert_eq!(rooms.len(), 1);
@@ -465,10 +452,8 @@ mod tests {
     #[test]
     fn consumer_leave() {
         let mgr = RoomManager::new();
-        mgr.join_room("stream-1", "consumer-1", &PeerRole::Consumer)
-            .unwrap();
-        mgr.join_room("stream-1", "consumer-2", &PeerRole::Consumer)
-            .unwrap();
+        mgr.join_room("stream-1", "consumer-1", &PeerRole::Consumer).unwrap();
+        mgr.join_room("stream-1", "consumer-2", &PeerRole::Consumer).unwrap();
         assert_eq!(mgr.get_peer_count(), 2);
 
         mgr.leave_room("stream-1", "consumer-1");
@@ -483,7 +468,10 @@ mod tests {
         assert_eq!(mgr.active_rooms(), 0);
     }
 
-    fn test_report(room: &str, streams: Vec<(String, bool)>) -> mediaservo_common::protocol::SignalingMessage {
+    fn test_report(
+        room: &str,
+        streams: Vec<(String, bool)>,
+    ) -> mediaservo_common::protocol::SignalingMessage {
         mediaservo_common::protocol::SignalingMessage::StatusReport {
             room_id: room.into(),
             topics: vec![],
@@ -518,8 +506,7 @@ mod tests {
 
         // P2P room（device 分组用 r.device_id 或伪 device=room.id）
         mgr.join_room("room-1", "host-1", &PeerRole::Host).unwrap();
-        mgr.join_room("room-2", "consumer-1", &PeerRole::Consumer)
-            .unwrap();
+        mgr.join_room("room-2", "consumer-1", &PeerRole::Consumer).unwrap();
         mgr.join_room("room-3", "host-2", &PeerRole::Host).unwrap();
 
         let devices = mgr.list_devices(&status);
@@ -557,12 +544,9 @@ mod tests {
     #[test]
     fn disconnect_consumers_clears_all() {
         let mgr = RoomManager::new();
-        mgr.join_room("stream-1", "consumer-1", &PeerRole::Consumer)
-            .unwrap();
-        mgr.join_room("stream-1", "consumer-2", &PeerRole::Consumer)
-            .unwrap();
-        mgr.join_room("stream-1", "consumer-3", &PeerRole::Consumer)
-            .unwrap();
+        mgr.join_room("stream-1", "consumer-1", &PeerRole::Consumer).unwrap();
+        mgr.join_room("stream-1", "consumer-2", &PeerRole::Consumer).unwrap();
+        mgr.join_room("stream-1", "consumer-3", &PeerRole::Consumer).unwrap();
 
         let removed = mgr.disconnect_consumers("stream-1");
         assert_eq!(removed.len(), 3);
@@ -607,10 +591,8 @@ mod tests {
     fn get_peer_count_includes_consumers() {
         let mgr = RoomManager::new();
         mgr.join_room("room-1", "host-1", &PeerRole::Host).unwrap();
-        mgr.join_room("room-1", "consumer-1", &PeerRole::Consumer)
-            .unwrap();
-        mgr.join_room("room-1", "consumer-2", &PeerRole::Consumer)
-            .unwrap();
+        mgr.join_room("room-1", "consumer-1", &PeerRole::Consumer).unwrap();
+        mgr.join_room("room-1", "consumer-2", &PeerRole::Consumer).unwrap();
         assert_eq!(mgr.get_peer_count(), 3); // host + 2 consumers
     }
 
@@ -618,8 +600,7 @@ mod tests {
     fn remote_in_device_stream_room_goes_to_consumers() {
         // Remote creating a room → DeviceStream
         let mgr = RoomManager::new();
-        mgr.join_room("room-1", "remote-1", &PeerRole::Remote)
-            .unwrap();
+        mgr.join_room("room-1", "remote-1", &PeerRole::Remote).unwrap();
         assert_eq!(mgr.get_peer_count(), 1);
 
         // Second Remote joins → consumers (N allowed in DeviceStream)

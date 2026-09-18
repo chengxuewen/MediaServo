@@ -9,14 +9,14 @@
 //! 检查在源头，C15：失败打日志不静默）。上报为周期性幂等消息——断线窗口
 //! 丢弃/发送失败均可由下一周期自愈。
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use mediaservo_common::protocol::{
     ChildSignalJson, ProcessStateJson, SignalStatusJson, SignalingMessage, StreamFlowJson,
     TopicFlowJson,
 };
 use mediaservo_link::{CapabilityToken, Ed25519VerifyingKey};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::gateway::{ChildStatus, GatewayHandle, GatewayStatus};
 use crate::monitor::flow::{FlowMonitor, FlowSnapshot, StreamFlow, TopicFlow};
@@ -84,7 +84,8 @@ pub fn spawn_status_reporter(
         let room = gateway.vehicle_room();
         // web stats 面板数据源: streamer 编码信息（StreamerStats 扩展字段）→ EncoderStatus 信令
         // 上报（server relay 广播 → 浏览器 sfu-client emitMetrics——旧 host EncoderStatus 同链路）
-        let mut last_enc: std::collections::HashMap<String, (f64, u64)> = std::collections::HashMap::new();
+        let _last_enc: std::collections::HashMap<String, (f64, u64)> =
+            std::collections::HashMap::new();
         let mut tick = tokio::time::interval(interval);
         tick.tick().await; // 消费首个立即 tick（对齐 E1/E2 行为）
         loop {
@@ -187,10 +188,7 @@ fn build_status_report(
     signal: &SignalSnapshot,
     config_version: u64,
 ) -> SignalingMessage {
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     SignalingMessage::StatusReport {
         room_id: room_id.to_string(),
         topics: flow.topics.iter().map(topic_to_json).collect(),
@@ -209,10 +207,7 @@ fn processes_to_json(snap: &TopologySnapshot) -> Vec<ProcessStateJson> {
         .iter()
         .map(|name| ProcessStateJson {
             name: name.clone(),
-            running: snap
-                .actual_processes
-                .iter()
-                .any(|p| &p.name == name && p.status == "running"),
+            running: snap.actual_processes.iter().any(|p| &p.name == name && p.status == "running"),
             expected: true,
         })
         .collect();
@@ -358,7 +353,9 @@ mod tests {
                 assert_eq!(room_id, "vehicle-1");
                 assert_eq!(topics[0].topic, "camera/cam0");
                 assert_eq!(streams[0].frames_encoded, 42);
-                assert!(processes.iter().any(|p| p.name == "host-agent" && p.running && p.expected));
+                assert!(
+                    processes.iter().any(|p| p.name == "host-agent" && p.running && p.expected)
+                );
                 assert_eq!(signal.remote_peer_id, "veh-peer");
                 assert_eq!(signal.children[0].src, "host-streamer");
                 assert_eq!(signal.agent_uptime_secs, 123);
@@ -389,7 +386,7 @@ mod tests {
         match msg {
             SignalingMessage::StatusReport { topics, streams, config_version, .. } => {
                 assert_eq!(topics[0].fps, 29.0);
-                assert_eq!(topics[0].stalled, false);
+                assert!(!topics[0].stalled);
                 assert_eq!(streams[0].bytes_sent, 999);
                 assert_eq!(streams[0].frame_width, 640);
                 assert_eq!(config_version, 3, "config_version 透传");

@@ -9,6 +9,7 @@
 //! ④ 断线重连：远端 WS 断开 → B1 重连 → 转发恢复；断线在途请求清空
 //! ⑤ P2P Sdp/ICE 单协商路由：回显去重 + 协商归属切换
 
+#![allow(dead_code)] // Ws 别名 = 套件通用件位（当前分支未消费）
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -17,7 +18,7 @@ use mediaservo_common::protocol::{
     DtlsParameters, Fingerprint, IceParameters, MediaKind, PeerRole, SignalingMessage,
     TransportDirection,
 };
-use mediaservo_host::gateway::{run_gateway, GatewayConfig, LocalEnvelope};
+use mediaservo_host::gateway::{GatewayConfig, LocalEnvelope, run_gateway};
 use mediaservo_link::{DeviceIdentity, RetryConfig};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
@@ -67,8 +68,7 @@ async fn mock_handshake(listener: &TcpListener) -> (WsServer, String, PeerRole) 
     assert!(matches!(psk, Message::Text(_)), "首条应为 PSK 文本");
     ws.send(Message::Text(
         serde_json::to_string(&SignalingMessage::Error { code: 0, message: String::new() })
-            .unwrap()
-            .into(),
+            .unwrap(),
     ))
     .await
     .unwrap();
@@ -87,8 +87,7 @@ async fn mock_handshake(listener: &TcpListener) -> (WsServer, String, PeerRole) 
             server_version: None,
             session_nonce: None,
         })
-        .unwrap()
-        .into(),
+        .unwrap(),
     ))
     .await
     .unwrap();
@@ -177,10 +176,7 @@ fn transport_created_for(transport_id: &str, peer_id: &str) -> SignalingMessage 
         peer_id: peer_id.into(),
         transport_id: transport_id.into(),
         sctp_parameters: None, // P1 additive 字段——夹具不消费
-        ice_parameters: IceParameters {
-            username_fragment: "ufrag".into(),
-            password: "pwd".into(),
-        },
+        ice_parameters: IceParameters { username_fragment: "ufrag".into(), password: "pwd".into() },
         dtls_parameters: DtlsParameters {
             fingerprints: vec![Fingerprint {
                 algorithm: "sha-256".into(),
@@ -239,8 +235,7 @@ async fn multiple_clients_forward_with_room_rewrite() {
                 peer_id: VEHICLE_PEER.into(),
                 kind: MediaKind::Video,
             })
-            .unwrap()
-            .into(),
+            .unwrap(),
         ))
         .await
         .unwrap();
@@ -348,9 +343,11 @@ async fn concurrent_sfu_negotiation_routes_responses() {
             }
         }
         // 响应序列：t1(markers[0]) → NewProducer 广播（夹在响应之间）→ t2(markers[1])
-        ws.send(Message::Text(serde_json::to_string(&transport_created_for("t1", &markers[0])).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(Message::Text(
+            serde_json::to_string(&transport_created_for("t1", &markers[0])).unwrap(),
+        ))
+        .await
+        .unwrap();
         ws.send(Message::Text(
             serde_json::to_string(&SignalingMessage::NewProducer {
                 room_id: VEHICLE_ROOM.into(),
@@ -358,14 +355,15 @@ async fn concurrent_sfu_negotiation_routes_responses() {
                 peer_id: VEHICLE_PEER.into(),
                 kind: MediaKind::Video,
             })
-            .unwrap()
-            .into(),
+            .unwrap(),
         ))
         .await
         .unwrap();
-        ws.send(Message::Text(serde_json::to_string(&transport_created_for("t2", &markers[1])).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(Message::Text(
+            serde_json::to_string(&transport_created_for("t2", &markers[1])).unwrap(),
+        ))
+        .await
+        .unwrap();
         tokio::time::sleep(Duration::from_secs(1)).await;
     });
 
@@ -401,10 +399,7 @@ async fn reconnect_resumes_forwarding() {
         // 连接 1：完整握手 → 收一条消息 → 关闭（模拟远端断线）
         let (mut ws1, _r, _role) = mock_handshake(&listener).await;
         let m1 = ws1.next().await.unwrap().unwrap();
-        assert!(
-            m1.to_text().unwrap().contains("\"type\":\"sdp\""),
-            "连接 1 应收到子进程 Sdp"
-        );
+        assert!(m1.to_text().unwrap().contains("\"type\":\"sdp\""), "连接 1 应收到子进程 Sdp");
         drop(ws1);
 
         // 连接 2：握手 → 收 Create → 响应
@@ -416,7 +411,7 @@ async fn reconnect_resumes_forwarding() {
                 if room_id == VEHICLE_ROOM),
             "重连后 Create 房间应为整车房间, got {c:?}"
         );
-        ws2.send(Message::Text(serde_json::to_string(&transport_created("t-after")).unwrap().into()))
+        ws2.send(Message::Text(serde_json::to_string(&transport_created("t-after")).unwrap()))
             .await
             .unwrap();
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -429,11 +424,7 @@ async fn reconnect_resumes_forwarding() {
     // 断线前：Sdp 转发（mock 连接 1 收后关闭）
     a.send(Message::Text(env(
         "a",
-        SignalingMessage::Sdp {
-            room_id: "room-a".into(),
-            target: None,
-            sdp: "v=0 offer".into(),
-        },
+        SignalingMessage::Sdp { room_id: "room-a".into(), target: None, sdp: "v=0 offer".into() },
     )))
     .await
     .unwrap();
@@ -485,8 +476,7 @@ async fn p2p_sdp_ice_single_negotiation_routing() {
                 target: Some("remote-peer".into()),
                 sdp: "b-answer".into(),
             })
-            .unwrap()
-            .into(),
+            .unwrap(),
         ))
         .await
         .unwrap();
@@ -503,8 +493,7 @@ async fn p2p_sdp_ice_single_negotiation_routing() {
                 sdp_mid: Some("0".into()),
                 sdp_mline_index: Some(0),
             })
-            .unwrap()
-            .into(),
+            .unwrap(),
         ))
         .await
         .unwrap();
@@ -520,11 +509,7 @@ async fn p2p_sdp_ice_single_negotiation_routing() {
     // A 发 offer（协商归属 = A）
     a.send(Message::Text(env(
         "a",
-        SignalingMessage::Sdp {
-            room_id: "room-a".into(),
-            target: None,
-            sdp: "a-offer".into(),
-        },
+        SignalingMessage::Sdp { room_id: "room-a".into(), target: None, sdp: "a-offer".into() },
     )))
     .await
     .unwrap();
@@ -591,7 +576,7 @@ async fn disconnect_window_stale_pending_not_cross_routed() {
             "mock2 应收到 B 的请求, got {c2:?}"
         );
         ws2.send(Message::Text(
-            serde_json::to_string(&transport_created_for("t-b", "req-b")).unwrap().into(),
+            serde_json::to_string(&transport_created_for("t-b", "req-b")).unwrap(),
         ))
         .await
         .unwrap();
@@ -685,8 +670,7 @@ async fn frame_relay_does_not_steal_p2p_ownership() {
                 target: Some("remote-peer".into()),
                 sdp: "b-answer".into(),
             })
-            .unwrap()
-            .into(),
+            .unwrap(),
         ))
         .await
         .unwrap();
@@ -702,11 +686,7 @@ async fn frame_relay_does_not_steal_p2p_ownership() {
     // A 发 offer（协商归属 = A）
     a.send(Message::Text(env(
         "a",
-        SignalingMessage::Sdp {
-            room_id: "room-a".into(),
-            target: None,
-            sdp: "a-offer".into(),
-        },
+        SignalingMessage::Sdp { room_id: "room-a".into(), target: None, sdp: "a-offer".into() },
     )))
     .await
     .unwrap();
@@ -733,11 +713,7 @@ async fn frame_relay_does_not_steal_p2p_ownership() {
     );
     // B 不得收到任何消息（Frame 回显去重；应答不属于 B）
     let extra = tokio::time::timeout(Duration::from_millis(300), read_env(&mut b)).await;
-    assert!(
-        extra.is_err(),
-        "B 不应收到消息, got {:?}",
-        extra.ok().map(|(_, m)| m)
-    );
+    assert!(extra.is_err(), "B 不应收到消息, got {:?}", extra.ok().map(|(_, m)| m));
     server.await.unwrap();
 }
 
@@ -770,9 +746,17 @@ async fn remote_join_carries_device_credentials() {
         let nonce_raw: Vec<u8> = (0x40u8..0x60).collect();
         match serde_json::from_str::<SignalingMessage>(join.to_text().unwrap()).unwrap() {
             SignalingMessage::RoomJoin { device_id, device_secret, device_pubkey, .. } => {
-                assert_eq!(device_id.as_deref(), Some("ms-gw-device"), "远端 RoomJoin 应携带 device_id");
+                assert_eq!(
+                    device_id.as_deref(),
+                    Some("ms-gw-device"),
+                    "远端 RoomJoin 应携带 device_id"
+                );
                 assert_eq!(device_secret, None, "pubkey 形不携带 secret（D-E3 两形互斥）");
-                assert_eq!(device_pubkey.as_deref(), Some(expect_pk.as_str()), "应携带装配出的公钥指纹");
+                assert_eq!(
+                    device_pubkey.as_deref(),
+                    Some(expect_pk.as_str()),
+                    "应携带装配出的公钥指纹"
+                );
             }
             other => panic!("expected RoomJoin, got {other:?}"),
         }
@@ -789,9 +773,17 @@ async fn remote_join_carries_device_credentials() {
             SignalingMessage::DeviceAuthResponse { room_id, sig } => {
                 assert_eq!(room_id, VEHICLE_ROOM, "应答 room 回显整车房间");
                 let vk_arr: [u8; 32] = base64::engine::general_purpose::STANDARD
-                    .decode(&expect_pk).unwrap().as_slice().try_into().unwrap();
+                    .decode(&expect_pk)
+                    .unwrap()
+                    .as_slice()
+                    .try_into()
+                    .unwrap();
                 let sig_arr: [u8; 64] = base64::engine::general_purpose::STANDARD
-                    .decode(&sig).unwrap().as_slice().try_into().unwrap();
+                    .decode(&sig)
+                    .unwrap()
+                    .as_slice()
+                    .try_into()
+                    .unwrap();
                 let mut msg = nonce_raw;
                 msg.extend_from_slice(b"ms-gw-device");
                 msg.extend_from_slice(VEHICLE_ROOM.as_bytes());

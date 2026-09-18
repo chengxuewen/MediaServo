@@ -20,9 +20,11 @@
 //! ```
 //! 错误码：MEDIASERVO_DECK_ERR_INVALID_ARG(-1)/DEVICE(-2)/RECORDER(-3)/PLAYER(-4)/STATE(-5)/INTERNAL(-6)。
 
+#![allow(clippy::not_unsafe_ptr_arg_deref)] // C ABI 门面：非空/对齐 = 文档契约（link-c 同形 crate-top 先例）
+#![allow(non_camel_case_types)] // C 可见类型名 = snake_case 镜像（*_*_t 词形是 ABI 一部分）
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,8 +34,8 @@ use std::time::Duration;
 use mediaservo_codec::frame::VideoFrame;
 use mediaservo_deck::record::{Frames, Recorder, StopSignal};
 use mediaservo_deck::{
-    CameraSource, CaptureOptions, DeckError, DeviceId, FrameStream, MediaDevices,
-    MediaDeviceKind, Player, RecordOptions,
+    CameraSource, CaptureOptions, DeckError, DeviceId, FrameStream, MediaDeviceKind, MediaDevices,
+    Player, RecordOptions,
 };
 use tokio::sync::mpsc;
 
@@ -72,7 +74,8 @@ pub struct mediaservo_deck_capture_options_t {
 }
 
 /// C 结构已知前缀尺寸（版本演进时的最小合法值）。
-pub const MEDIASERVO_DECK_CAPTURE_OPTIONS_MIN_SIZE: usize = size_of::<mediaservo_deck_capture_options_t>();
+pub const MEDIASERVO_DECK_CAPTURE_OPTIONS_MIN_SIZE: usize =
+    size_of::<mediaservo_deck_capture_options_t>();
 
 /// 内存帧（I420 三平面；布局与 mediaservo_common.h 的 mediaservo_frame_t 一致）。
 /// data_* 指针仅在回调内有效。
@@ -144,13 +147,13 @@ fn lock<'a, T>(
     guard: Result<
         std::sync::MutexGuard<'a, T>,
         std::sync::PoisonError<std::sync::MutexGuard<'a, T>>,
-    >) -> Result<std::sync::MutexGuard<'a, T>, c_int> {
+    >,
+) -> Result<std::sync::MutexGuard<'a, T>, c_int> {
     guard.map_err(|_| {
         set_last_error("deck-c: mutex poisoned");
         MEDIASERVO_DECK_ERR_INTERNAL
     })
 }
-
 
 /// VideoFrame → mediaservo_frame_t（data 指针指向帧内 planes，仅回调内有效）。
 fn to_mediaservo_frame(f: &VideoFrame) -> mediaservo_frame_t {
@@ -215,20 +218,19 @@ fn camera_pump_loop(shared: Arc<CameraInner>, mut stream: FrameStream) {
 
 /// 单帧扇出：先 cb（借用），再录制桥（move 所有权）。
 fn deliver_frame(shared: &CameraInner, frame: VideoFrame) {
-    if let Ok(guard) = shared.cb.lock() {
-        if let Some((cb, user)) = *guard {
-            let mf = to_mediaservo_frame(&frame);
-            unsafe { cb(&mf, user) };
-        }
+    if let Ok(guard) = shared.cb.lock()
+        && let Some((cb, user)) = *guard
+    {
+        let mf = to_mediaservo_frame(&frame);
+        unsafe { cb(&mf, user) };
     }
-    if let Ok(guard) = shared.rec_tx.lock() {
-        if let Some(tx) = guard.clone() {
-            if tx.send(frame).is_err() {
-                // 录制任务已结束（rx 已 drop）→ 自愈清除
-                if let Ok(mut g) = shared.rec_tx.lock() {
-                    *g = None;
-                }
-            }
+    if let Ok(guard) = shared.rec_tx.lock()
+        && let Some(tx) = guard.clone()
+        && tx.send(frame).is_err()
+    {
+        // 录制任务已结束（rx 已 drop）→ 自愈清除
+        if let Ok(mut g) = shared.rec_tx.lock() {
+            *g = None;
         }
     }
 }
@@ -249,15 +251,14 @@ pub extern "C" fn mediaservo_deck_devices_enumerate(
             1 => MediaDeviceKind::Audio,
             2 => MediaDeviceKind::Screen,
             _ => {
-                set_last_error("mediaservo_deck_devices_enumerate: invalid kind (0=Camera 1=Audio 2=Screen)");
+                set_last_error(
+                    "mediaservo_deck_devices_enumerate: invalid kind (0=Camera 1=Audio 2=Screen)",
+                );
                 return MEDIASERVO_DECK_ERR_INVALID_ARG;
             }
         };
-        let ids = MediaDevices::enumerate(kind)
-            .into_iter()
-            .map(|d| d.0)
-            .collect::<Vec<_>>()
-            .join("\n");
+        let ids =
+            MediaDevices::enumerate(kind).into_iter().map(|d| d.0).collect::<Vec<_>>().join("\n");
         if !out_len.is_null() {
             unsafe { *out_len = ids.len() };
         }
@@ -457,10 +458,10 @@ pub extern "C" fn mediaservo_deck_camera_stop(c: *mut mediaservo_deck_camera_t) 
         }
         let handle = unsafe { &*c };
         handle.inner.stop.store(true, Ordering::SeqCst);
-        if let Ok(mut guard) = handle.inner.src.lock() {
-            if let Some(src) = guard.as_mut() {
-                src.stop();
-            }
+        if let Ok(mut guard) = handle.inner.src.lock()
+            && let Some(src) = guard.as_mut()
+        {
+            src.stop();
         }
         MEDIASERVO_OK
     }))
@@ -503,6 +504,7 @@ struct FrameRx {
 }
 
 impl Frames for FrameRx {
+    #[allow(clippy::manual_async_fn)] // 泵线程入口返回显式 Future：async 化牵动线程边界，收益 < 风险
     fn next(&mut self) -> impl std::future::Future<Output = Option<VideoFrame>> + Send {
         async move { self.rx.recv().await }
     }
@@ -607,7 +609,9 @@ pub extern "C" fn mediaservo_deck_recorder_record(
             Err(rc) => return rc,
         };
         let Some(mut recorder) = rec_guard.take() else {
-            set_last_error("mediaservo_deck_recorder_record: recorder not open or already recording");
+            set_last_error(
+                "mediaservo_deck_recorder_record: recorder not open or already recording",
+            );
             return MEDIASERVO_DECK_ERR_STATE;
         };
         let mut tx_guard = match lock(cam.inner.rec_tx.lock()) {
@@ -802,12 +806,11 @@ pub extern "C" fn mediaservo_deck_player_frames_cb(
                 return rc;
             }
         };
-        let shared = Arc::clone(&handle.inner);
+        let _shared = Arc::clone(&handle.inner);
         // *mut c_void 非 Send → 线程闭包内经 usize 往返（FFI 惯例）
         let user_tag = user as usize;
-        let pump = match std::thread::Builder::new()
-            .name("deck-player-pump".into())
-            .spawn(move || {
+        let pump =
+            match std::thread::Builder::new().name("deck-player-pump".into()).spawn(move || {
                 let user = user_tag as *mut c_void;
                 // 泵运行至 EOF（或解码错误）自然结束 — 不被 close 中止：
                 // close 语义 = join（阻塞至解码完成），否则 frames_cb 返回后
@@ -825,15 +828,14 @@ pub extern "C" fn mediaservo_deck_player_frames_cb(
                         }
                     }
                 }
-            })
-        {
-            Ok(p) => p,
-            Err(e) => {
-                // player 已移入闭包（spawn 失败时随闭包 drop — 资源耗尽级错误，不可恢复）
-                set_last_error(format!("mediaservo_deck_player_frames_cb: spawn pump: {e}"));
-                return MEDIASERVO_DECK_ERR_INTERNAL;
-            }
-        };
+            }) {
+                Ok(p) => p,
+                Err(e) => {
+                    // player 已移入闭包（spawn 失败时随闭包 drop — 资源耗尽级错误，不可恢复）
+                    set_last_error(format!("mediaservo_deck_player_frames_cb: spawn pump: {e}"));
+                    return MEDIASERVO_DECK_ERR_INTERNAL;
+                }
+            };
         *pump_guard = Some(pump);
         MEDIASERVO_OK
     }))
@@ -873,11 +875,7 @@ fn last_error_impl(buf: *mut c_char, len: usize) -> c_int {
     if buf.is_null() || len == 0 {
         return MEDIASERVO_DECK_ERR_INVALID_ARG;
     }
-    let msg = LAST_ERROR
-        .lock()
-        .ok()
-        .and_then(|g| g.clone())
-        .unwrap_or_default();
+    let msg = LAST_ERROR.lock().ok().and_then(|g| g.clone()).unwrap_or_default();
     let bytes = msg.as_bytes();
     let n = bytes.len().min(len - 1);
     unsafe {
@@ -940,9 +938,7 @@ mod tests {
         let mut buf = [0u8; 64];
         let rc = mediaservo_deck_last_error(buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
-        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }
-            .to_str()
-            .unwrap();
+        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap();
         assert_eq!(s, "deck test error");
     }
 
@@ -951,9 +947,7 @@ mod tests {
         let mut buf = [0u8; 32];
         let rc = mediaservo_deck_version(buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
-        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }
-            .to_str()
-            .unwrap();
+        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap();
         assert!(s.starts_with("0.1."), "version: {s}");
     }
 
@@ -966,12 +960,15 @@ mod tests {
         assert_eq!(rc as usize, len1);
         let mut buf = [0u8; 64];
         let mut len2: usize = 0;
-        let rc2 = mediaservo_deck_devices_enumerate(0, buf.as_mut_ptr() as *mut c_char, buf.len(), &mut len2);
+        let rc2 = mediaservo_deck_devices_enumerate(
+            0,
+            buf.as_mut_ptr() as *mut c_char,
+            buf.len(),
+            &mut len2,
+        );
         assert_eq!(rc2, rc, "second call length mismatch");
         assert_eq!(len2, len1);
-        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }
-            .to_str()
-            .unwrap();
+        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap();
         assert_eq!(s, "stub:test-camera");
         assert_eq!(s.len(), len1);
     }
@@ -1000,7 +997,8 @@ mod tests {
     #[test]
     fn camera_open_small_struct_size_fails() {
         let dev = c"stub:test-camera";
-        let opts = mediaservo_deck_capture_options_t { struct_size: 1, width: 0, height: 0, framerate: 0 };
+        let opts =
+            mediaservo_deck_capture_options_t { struct_size: 1, width: 0, height: 0, framerate: 0 };
         let mut out: *mut mediaservo_deck_camera_t = ptr::null_mut();
         let rc = mediaservo_deck_camera_open(dev.as_ptr(), &opts, &mut out);
         assert_eq!(rc, MEDIASERVO_DECK_ERR_INVALID_ARG);
@@ -1051,7 +1049,6 @@ mod tests {
         assert_eq!(rc, MEDIASERVO_DECK_ERR_INVALID_ARG);
         assert_eq!(mediaservo_deck_camera_close(cam), MEDIASERVO_OK);
     }
-
 
     #[test]
     fn recorder_new_null_fails() {

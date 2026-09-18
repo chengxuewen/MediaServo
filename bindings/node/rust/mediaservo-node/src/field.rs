@@ -63,10 +63,7 @@ impl JsPushSession {
         let (session, _events) = PushSession::connect(push_cfg.clone())
             .await
             .map_err(|e| napi::Error::from_reason(format!("connect: {e}")))?;
-        Ok(Self {
-            inner: Arc::new(tokio::sync::Mutex::new(Some(session))),
-            cfg: push_cfg,
-        })
+        Ok(Self { inner: Arc::new(tokio::sync::Mutex::new(Some(session))), cfg: push_cfg })
     }
 
     /// 发布视频轨（SFU 协商；返回 track id）。
@@ -74,7 +71,9 @@ impl JsPushSession {
     pub async fn publish_video(&self) -> Result<String> {
         let mut guard = self.inner.lock().await;
         let opts = PublishOptions::default();
-        guard.as_mut().ok_or_else(closed_err)?
+        guard
+            .as_mut()
+            .ok_or_else(closed_err)?
             .publish_video(&self.cfg, &opts)
             .await
             .map_err(|e| napi::Error::from_reason(format!("publish_video: {e}")))
@@ -84,7 +83,9 @@ impl JsPushSession {
     #[napi]
     pub async fn start_video_frames(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;
-        guard.as_mut().ok_or_else(closed_err)?
+        guard
+            .as_mut()
+            .ok_or_else(closed_err)?
             .start_video_frames(&self.cfg)
             .map_err(|e| napi::Error::from_reason(format!("start_video_frames: {e}")))
     }
@@ -93,7 +94,9 @@ impl JsPushSession {
     #[napi]
     pub async fn stop_video_frames(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;
-        if let Some(s) = guard.as_mut() { s.stop_video_frames(); }
+        if let Some(s) = guard.as_mut() {
+            s.stop_video_frames();
+        }
         Ok(())
     }
 
@@ -102,10 +105,9 @@ impl JsPushSession {
     pub async fn close(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;
         match guard.take() {
-            Some(mut session) => session
-            .close()
-            .await
-            .map_err(|e| napi::Error::from_reason(format!("close: {e}"))),
+            Some(session) => {
+                session.close().await.map_err(|e| napi::Error::from_reason(format!("close: {e}")))
+            }
             None => Ok(()),
         }
     }

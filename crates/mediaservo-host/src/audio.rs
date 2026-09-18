@@ -5,7 +5,7 @@
 
 use mediaservo_common::protocol::{DtlsParameters, IceCandidate, IceParameters};
 use mediaservo_webrtc::rtp::RTCRtpParameters;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// opus 标准 PT（server default_router_options: opus 111/48000/2ch）。
 pub const OPUS_PT: u16 = 111;
@@ -40,11 +40,7 @@ pub fn build_remote_audio_sdp(
         "a=ice-lite".to_string(),
         format!("a=ice-ufrag:{}", ice_parameters.username_fragment),
         format!("a=ice-pwd:{}", ice_parameters.password),
-        format!(
-            "a=fingerprint:{} {}",
-            fp.algorithm.to_lowercase(),
-            fp.value
-        ),
+        format!("a=fingerprint:{} {}", fp.algorithm.to_lowercase(), fp.value),
         "a=setup:actpass".to_string(),
         format!("m=audio 7 UDP/TLS/RTP/SAVPF {OPUS_PT}"),
         format!("c=IN IP4 {conn_ip}"),
@@ -52,16 +48,16 @@ pub fn build_remote_audio_sdp(
         "a=rtcp-rsize".to_string(),
         format!("a=mid:{mid}"),
         "a=extmap:1 urn:ietf:params:rtp-hdrext:sdes:mid".to_string(),
-        "a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01".to_string(),
+        "a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
+            .to_string(),
         if sendonly { "a=sendonly" } else { "a=recvonly" }.to_string(),
         format!("a=rtpmap:{OPUS_PT} opus/{SAMPLE_RATE}/2"),
         format!("a=fmtp:{OPUS_PT} minptime=10;useinbandfec=1"),
     ];
-    if sendonly
-        && let Some(ssrc) = ssrc {
-            lines.push(format!("a=ssrc:{ssrc} cname:mediaservo-audio"));
-            lines.push(format!("a=ssrc:{ssrc} msid:audio audio"));
-        }
+    if sendonly && let Some(ssrc) = ssrc {
+        lines.push(format!("a=ssrc:{ssrc} cname:mediaservo-audio"));
+        lines.push(format!("a=ssrc:{ssrc} msid:audio audio"));
+    }
     if let Some(candidates) = ice_candidates {
         for c in candidates {
             if c.ip.contains(".local") {
@@ -103,10 +99,8 @@ pub fn build_audio_produce_rtp_parameters(params: &RTCRtpParameters) -> Value {
                     let mut map = serde_json::Map::new();
                     for kv in line.split(';') {
                         if let Some((k, v)) = kv.split_once('=') {
-                            let val: Value = v
-                                .parse::<i64>()
-                                .map(|n| json!(n))
-                                .unwrap_or_else(|_| json!(v));
+                            let val: Value =
+                                v.parse::<i64>().map(|n| json!(n)).unwrap_or_else(|_| json!(v));
                             map.insert(k.trim().to_string(), val);
                         }
                     }
@@ -175,7 +169,9 @@ pub fn tone_frame(phase: &mut f64, freq_hz: f64) -> Vec<u8> {
 mod tests {
     use super::*;
     use mediaservo_common::protocol::Fingerprint;
-    use mediaservo_webrtc::rtp::{RTCRtpCodecParameters, RTCRtpEncodingParameters, RTCRtcpParameters};
+    use mediaservo_webrtc::rtp::{
+        RTCRtcpParameters, RTCRtpCodecParameters, RTCRtpEncodingParameters,
+    };
 
     #[test]
     fn remote_sdp_recvonly_has_opus() {

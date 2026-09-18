@@ -7,7 +7,7 @@
 
 use mediaservo_common::protocol::{DtlsParameters, IceCandidate, IceParameters};
 use mediaservo_webrtc::rtp::RTCRtpParameters;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// codec 规格（SDP PT/名称/时钟/fmtp，与 mediasoup router 默认对齐——
 /// sfu.rs default_router_options: VP8 96 / H264 101 / VP9 99 / AV1 97）。
@@ -27,24 +27,9 @@ pub fn codec_spec(codec: &str) -> CodecSpec {
             clock_rate: 90000,
             fmtp: Some("profile-level-id=42e01f;packetization-mode=1"),
         },
-        "vp9" => CodecSpec {
-            payload_type: 99,
-            name: "VP9",
-            clock_rate: 90000,
-            fmtp: None,
-        },
-        "av1" => CodecSpec {
-            payload_type: 97,
-            name: "AV1",
-            clock_rate: 90000,
-            fmtp: None,
-        },
-        _ => CodecSpec {
-            payload_type: 96,
-            name: "VP8",
-            clock_rate: 90000,
-            fmtp: None,
-        },
+        "vp9" => CodecSpec { payload_type: 99, name: "VP9", clock_rate: 90000, fmtp: None },
+        "av1" => CodecSpec { payload_type: 97, name: "AV1", clock_rate: 90000, fmtp: None },
+        _ => CodecSpec { payload_type: 96, name: "VP8", clock_rate: 90000, fmtp: None },
     }
 }
 
@@ -61,6 +46,7 @@ pub enum RemoteDirection {
     ServerRecvonly,
 }
 
+#[allow(clippy::too_many_arguments)] // C18 存量债（P1 标准协商重写在册），债务战不动重构面
 pub fn build_remote_sdp(
     ice_parameters: &IceParameters,
     dtls_parameters: &DtlsParameters,
@@ -89,11 +75,7 @@ pub fn build_remote_sdp(
         "a=ice-lite".to_string(),
         format!("a=ice-ufrag:{}", ice_parameters.username_fragment),
         format!("a=ice-pwd:{}", ice_parameters.password),
-        format!(
-            "a=fingerprint:{} {}",
-            fp.algorithm.to_lowercase(),
-            fp.value
-        ),
+        format!("a=fingerprint:{} {}", fp.algorithm.to_lowercase(), fp.value),
         "a=setup:actpass".to_string(),
     ];
 
@@ -101,7 +83,7 @@ pub fn build_remote_sdp(
         format!("m=video 7 UDP/TLS/RTP/SAVPF {}", payload_type),
         format!("c=IN IP4 {}", conn_ip),
         "a=rtcp-mux".to_string(),
-        "a=rtcp-rsize".to_string(),  // 对齐 libmediasoupclient recv offer（rtcp reduced size）
+        "a=rtcp-rsize".to_string(), // 对齐 libmediasoupclient recv offer（rtcp reduced size）
         match direction {
             // mediasoup consumer 的 RTP mid 固定为 "0" — 接收侧 answer 必须对齐
             // （不匹配 → libwebrtc demux 丢弃 RTP → 收不到帧）
@@ -112,7 +94,8 @@ pub fn build_remote_sdp(
         //   id=1 mid（BUNDLE demux 关键 — consumer RTP 带 mid 扩展, 不声明则 libwebrtc 无法解析）
         //   id=3 transport-cc, id=5 abs-capture-time（BWE 反馈链路必需）
         "a=extmap:1 urn:ietf:params:rtp-hdrext:sdes:mid".to_string(),
-        "a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01".to_string(),
+        "a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
+            .to_string(),
         "a=extmap:5 http://www.webrtc.org/experiments/rtp-hdrext/abs-capture-time".to_string(),
         match direction {
             RemoteDirection::ServerSendonly => "a=sendonly".to_string(),
@@ -203,10 +186,8 @@ pub fn build_produce_rtp_parameters_from_rtp(params: &RTCRtpParameters) -> Value
                     let mut map = serde_json::Map::new();
                     for kv in line.split(';') {
                         if let Some((k, v)) = kv.split_once('=') {
-                            let val: Value = v
-                                .parse::<i64>()
-                                .map(|n| json!(n))
-                                .unwrap_or_else(|_| json!(v));
+                            let val: Value =
+                                v.parse::<i64>().map(|n| json!(n)).unwrap_or_else(|_| json!(v));
                             map.insert(k.trim().to_string(), val);
                         }
                     }
@@ -265,7 +246,9 @@ pub fn build_produce_rtp_parameters_from_rtp(params: &RTCRtpParameters) -> Value
 mod tests {
     use super::*;
     use mediaservo_common::protocol::Fingerprint;
-    use mediaservo_webrtc::rtp::{RTCRtpCodecParameters, RTCRtpEncodingParameters, RTCRtcpParameters};
+    use mediaservo_webrtc::rtp::{
+        RTCRtcpParameters, RTCRtpCodecParameters, RTCRtpEncodingParameters,
+    };
 
     #[test]
     fn codec_spec_maps_all_supported() {
@@ -295,10 +278,7 @@ mod tests {
                 ..Default::default()
             }],
             header_extensions: vec![],
-            rtcp: RTCRtcpParameters {
-                cname: None,
-                reduced_size: true,
-            },
+            rtcp: RTCRtcpParameters { cname: None, reduced_size: true },
         };
         let v = build_produce_rtp_parameters_from_rtp(&params);
         assert_eq!(v["codecs"][0]["mimeType"], "video/H264");
@@ -324,10 +304,7 @@ mod tests {
             role: "client".into(),
         };
         let sdp = build_remote_sdp(
-            &IceParameters {
-                username_fragment: "ufrag".into(),
-                password: "pwd".into(),
-            },
+            &IceParameters { username_fragment: "ufrag".into(), password: "pwd".into() },
             &dtls,
             None,
             96,
@@ -336,7 +313,9 @@ mod tests {
             None,
             RemoteDirection::ServerRecvonly,
         );
-        assert!(sdp.contains("a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"));
+        assert!(sdp.contains(
+            "a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
+        ));
         assert!(sdp.contains("a=rtcp-fb:96 nack pli"));
         assert!(sdp.contains("a=rtcp-fb:96 ccm fir"));
         assert!(sdp.contains("a=ice-lite"));

@@ -1,9 +1,9 @@
 use futures_util::{SinkExt, StreamExt};
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
-use mediaservo_server::signaling::{signaling_router, SignalingServer};
+use mediaservo_server::signaling::{SignalingServer, signaling_router};
 use tokio::net::TcpListener;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 const PSK: &str = "test-psk";
 const ROOM: &str = "test-room";
@@ -19,7 +19,8 @@ async fn integration_signaling_pipeline() {
                 mediaservo_server::sfu::random_udp_port(),
             )
             .await
-            .unwrap());
+            .unwrap(),
+        );
         SignalingServer::new(sfu, 65536, None)
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
@@ -60,8 +61,9 @@ async fn integration_signaling_pipeline() {
             protocol: None,
             client_version: None,
             resume: None,
-        }).unwrap();
-        ws.send(WsMsg::Text(join.into())).await.unwrap();
+        })
+        .unwrap();
+        ws.send(WsMsg::Text(join)).await.unwrap();
         let joined = ws.next().await.unwrap().unwrap();
         let joined_text = joined.to_text().unwrap();
         assert!(joined_text.contains("room_joined"), "host join failed: {}", joined_text);
@@ -95,16 +97,18 @@ async fn integration_signaling_pipeline() {
             protocol: None,
             client_version: None,
             resume: None,
-        }).unwrap();
-        ws.send(WsMsg::Text(join.into())).await.unwrap();
+        })
+        .unwrap();
+        ws.send(WsMsg::Text(join)).await.unwrap();
         let joined = ws.next().await.unwrap().unwrap();
         assert!(joined.to_text().unwrap().contains("room_joined"));
         remote_tx.send("joined".into()).unwrap();
         while let Some(Ok(msg)) = ws.next().await {
-            if let Ok(text) = msg.to_text() {
-                if !text.contains("authenticated") && !text.contains("room_join") {
-                    let _ = remote_tx.send(text.to_string());
-                }
+            if let Ok(text) = msg.to_text()
+                && !text.contains("authenticated")
+                && !text.contains("room_join")
+            {
+                let _ = remote_tx.send(text.to_string());
             }
         }
     });
@@ -213,10 +217,7 @@ fn test_sdp_frame_ice_serialization() {
     assert!(matches!(back, SignalingMessage::RTCIceCandidate { .. }));
 
     // Error round-trip
-    let err = SignalingMessage::Error {
-        code: 4002,
-        message: "Room is full".into(),
-    };
+    let err = SignalingMessage::Error { code: 4002, message: "Room is full".into() };
     let json = serde_json::to_string(&err).unwrap();
     let back: SignalingMessage = serde_json::from_str(&json).unwrap();
     match back {
@@ -228,19 +229,16 @@ fn test_sdp_frame_ice_serialization() {
     }
 
     // RoomJoin/RoomJoined/RoomLeave
-    let join: SignalingMessage = serde_json::from_str(
-        r#"{"type":"room_join","room_id":"abc","peer_role":"host"}"#
-    ).unwrap();
+    let join: SignalingMessage =
+        serde_json::from_str(r#"{"type":"room_join","room_id":"abc","peer_role":"host"}"#).unwrap();
     assert!(matches!(join, SignalingMessage::RoomJoin { .. }));
 
-    let joined: SignalingMessage = serde_json::from_str(
-        r#"{"type":"room_joined","room_id":"abc","peer_id":"p1"}"#
-    ).unwrap();
+    let joined: SignalingMessage =
+        serde_json::from_str(r#"{"type":"room_joined","room_id":"abc","peer_id":"p1"}"#).unwrap();
     assert!(matches!(joined, SignalingMessage::RoomJoined { .. }));
 
-    let leave: SignalingMessage = serde_json::from_str(
-        r#"{"type":"room_leave","room_id":"abc","peer_id":"p1"}"#
-    ).unwrap();
+    let leave: SignalingMessage =
+        serde_json::from_str(r#"{"type":"room_leave","room_id":"abc","peer_id":"p1"}"#).unwrap();
     assert!(matches!(leave, SignalingMessage::RoomLeave { .. }));
 }
 
@@ -255,7 +253,8 @@ async fn test_auth_failure_integration() {
                 mediaservo_server::sfu::random_udp_port(),
             )
             .await
-            .unwrap());
+            .unwrap(),
+        );
         SignalingServer::new(sfu, 65536, None)
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
@@ -292,8 +291,6 @@ async fn test_auth_failure_integration() {
     drop(ws);
 }
 
-
-
 // ── E2E video frame relay test ──
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -307,7 +304,8 @@ async fn e2e_video_frame_relay() {
                 mediaservo_server::sfu::random_udp_port(),
             )
             .await
-            .unwrap());
+            .unwrap(),
+        );
         SignalingServer::new(sfu, 65536, None)
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
@@ -318,7 +316,9 @@ async fn e2e_video_frame_relay() {
     let app = signaling_router(server);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let ws_url = format!("ws://{}/ws", addr);
 
@@ -338,8 +338,9 @@ async fn e2e_video_frame_relay() {
             protocol: None,
             client_version: None,
             resume: None,
-        }).unwrap();
-        ws.send(WsMsg::Text(join.into())).await.unwrap();
+        })
+        .unwrap();
+        ws.send(WsMsg::Text(join)).await.unwrap();
         ws.next().await.unwrap().unwrap(); // room_joined
 
         // Wait for remote to signal SDP (we use a sleep since we can't coordinate channels here)
@@ -357,7 +358,7 @@ async fn e2e_video_frame_relay() {
                     format!("frame-{seq}").as_bytes(),
                 ),
             };
-            ws.send(WsMsg::Text(serde_json::to_string(&frame).unwrap().into())).await.unwrap();
+            ws.send(WsMsg::Text(serde_json::to_string(&frame).unwrap())).await.unwrap();
         }
         // Keep connection alive briefly
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -379,30 +380,27 @@ async fn e2e_video_frame_relay() {
             protocol: None,
             client_version: None,
             resume: None,
-        }).unwrap();
-        ws.send(WsMsg::Text(join.into())).await.unwrap();
+        })
+        .unwrap();
+        ws.send(WsMsg::Text(join)).await.unwrap();
         ws.next().await.unwrap().unwrap(); // room_joined
 
         // Drain: collect Frame messages until timeout
         let mut received_frames: Vec<u64> = Vec::new();
         loop {
-            let msg = tokio::time::timeout(
-                std::time::Duration::from_secs(3),
-                ws.next(),
-            ).await;
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(3), ws.next()).await;
             match msg {
                 Ok(Some(Ok(ws_msg))) => {
-                    if let Ok(text) = ws_msg.to_text() {
-                        if let Ok(sig) = serde_json::from_str::<SignalingMessage>(text) {
-                            if let SignalingMessage::Frame { sequence, is_keyframe, codec, .. } = sig {
-                                received_frames.push(sequence);
-                                // First frame must be keyframe
-                                if sequence == 0 {
-                                    assert!(is_keyframe, "first frame must be keyframe");
-                                }
-                                assert_eq!(codec, "h264");
-                            }
+                    if let Ok(text) = ws_msg.to_text()
+                        && let Ok(sig) = serde_json::from_str::<SignalingMessage>(text)
+                        && let SignalingMessage::Frame { sequence, is_keyframe, codec, .. } = sig
+                    {
+                        received_frames.push(sequence);
+                        // First frame must be keyframe
+                        if sequence == 0 {
+                            assert!(is_keyframe, "first frame must be keyframe");
                         }
+                        assert_eq!(codec, "h264");
                     }
                 }
                 _ => break, // timeout or error — stop
@@ -428,9 +426,7 @@ async fn e2e_video_frame_relay() {
 
 /// 启动带设备注册表的测试 server，返回 (server, ws_url)。
 /// registry_yaml: `devices:` 下的条目文本（None = 空注册表）。
-async fn spawn_server_with_devices(
-    registry_yaml: Option<&str>,
-) -> (SignalingServer, String) {
+async fn spawn_server_with_devices(registry_yaml: Option<&str>) -> (SignalingServer, String) {
     unsafe { std::env::set_var("MEDIASERVO_PSK", PSK) };
 
     let yaml = match registry_yaml {
@@ -447,7 +443,8 @@ async fn spawn_server_with_devices(
                 mediaservo_server::sfu::random_udp_port(),
             )
             .await
-            .unwrap());
+            .unwrap(),
+        );
         SignalingServer::new(sfu, 65536, None)
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
@@ -474,26 +471,20 @@ async fn psk_join_and_recv(ws_url: &str, join: &SignalingMessage) -> String {
     let ack = ws.next().await.unwrap().unwrap();
     assert!(ack.to_text().unwrap().contains("authenticated"));
     let join = serde_json::to_string(join).unwrap();
-    ws.send(WsMsg::Text(join.into())).await.unwrap();
+    ws.send(WsMsg::Text(join)).await.unwrap();
     let resp = ws.next().await.unwrap().unwrap();
     resp.to_text().unwrap().to_string()
 }
 
 /// 同 `psk_join_and_recv` 但保持连接存活（返回 ws + 响应）— 绑定生命周期断言需要。
-type KeepAliveWs = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
-async fn connect_join_keepalive(
-    ws_url: &str,
-    join: &SignalingMessage,
-) -> (KeepAliveWs, String) {
+type KeepAliveWs =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+async fn connect_join_keepalive(ws_url: &str, join: &SignalingMessage) -> (KeepAliveWs, String) {
     let (mut ws, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
     ws.send(WsMsg::Text(PSK.into())).await.unwrap();
     let ack = ws.next().await.unwrap().unwrap();
     assert!(ack.to_text().unwrap().contains("authenticated"));
-    ws.send(WsMsg::Text(serde_json::to_string(join).unwrap().into()))
-        .await
-        .unwrap();
+    ws.send(WsMsg::Text(serde_json::to_string(join).unwrap())).await.unwrap();
     let resp = ws.next().await.unwrap().unwrap();
     (ws, resp.to_text().unwrap().to_string())
 }
@@ -525,11 +516,9 @@ fn device_join(device_id: Option<&str>, device_secret: Option<&str>) -> Signalin
 async fn g2_device_auth_success_binds_and_unbinds_on_disconnect() {
     let (server, ws_url) = spawn_server_with_devices(Some(&test_device_yaml())).await;
     // 保持连接存活（绑定是连接级生命周期 — 见 review #2 语义）。
-    let (ws, resp) = connect_join_keepalive(
-        &ws_url,
-        &device_join(Some(TEST_DEVICE), Some(TEST_DEVICE_SECRET)),
-    )
-    .await;
+    let (ws, resp) =
+        connect_join_keepalive(&ws_url, &device_join(Some(TEST_DEVICE), Some(TEST_DEVICE_SECRET)))
+            .await;
     let joined: SignalingMessage = serde_json::from_str(&resp).expect("RoomJoined expected");
     let peer_id = match joined {
         SignalingMessage::RoomJoined { peer_id, .. } => peer_id,
@@ -545,27 +534,19 @@ async fn g2_device_auth_success_binds_and_unbinds_on_disconnect() {
     // 断开 → cleanup 必须解除绑定（review #2: 断开清理验证）。
     drop(ws);
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    assert_eq!(
-        server.device_id_of(&peer_id),
-        None,
-        "断开后绑定必须解除"
-    );
+    assert_eq!(server.device_id_of(&peer_id), None, "断开后绑定必须解除");
     assert_eq!(server.device_binding_count(), 0);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn g2_device_auth_unknown_device_rejected() {
     let (_server, ws_url) = spawn_server_with_devices(Some(&test_device_yaml())).await;
-    let resp = psk_join_and_recv(&ws_url, &device_join(Some("ms-not-registered"), Some("x")))
-        .await;
+    let resp = psk_join_and_recv(&ws_url, &device_join(Some("ms-not-registered"), Some("x"))).await;
     let msg: SignalingMessage = serde_json::from_str(&resp).unwrap();
     match msg {
         SignalingMessage::Error { code, message } => {
             assert_eq!(code, 4010, "未知设备必须 4010");
-            assert!(
-                message.contains("invalid device credentials"),
-                "message: {message}"
-            );
+            assert!(message.contains("invalid device credentials"), "message: {message}");
         }
         other => panic!("expected Error, got {other:?}"),
     }
@@ -574,16 +555,13 @@ async fn g2_device_auth_unknown_device_rejected() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn g2_device_auth_wrong_secret_rejected() {
     let (_server, ws_url) = spawn_server_with_devices(Some(&test_device_yaml())).await;
-    let resp = psk_join_and_recv(&ws_url, &device_join(Some(TEST_DEVICE), Some("wrong-secret")))
-        .await;
+    let resp =
+        psk_join_and_recv(&ws_url, &device_join(Some(TEST_DEVICE), Some("wrong-secret"))).await;
     let msg: SignalingMessage = serde_json::from_str(&resp).unwrap();
     match msg {
         SignalingMessage::Error { code, message } => {
             assert_eq!(code, 4010, "错误 secret 必须 4010");
-            assert!(
-                message.contains("invalid device credentials"),
-                "message: {message}"
-            );
+            assert!(message.contains("invalid device credentials"), "message: {message}");
         }
         other => panic!("expected Error, got {other:?}"),
     }
@@ -593,10 +571,8 @@ async fn g2_device_auth_wrong_secret_rejected() {
 async fn g2_device_auth_half_present_rejected() {
     // G4 review Minor 1: 形状检查 — 只带 id 不带 secret 必须拒绝（不留歧义）。
     let (_server, ws_url) = spawn_server_with_devices(Some(&test_device_yaml())).await;
-    for join in [
-        device_join(Some(TEST_DEVICE), None),
-        device_join(None, Some(TEST_DEVICE_SECRET)),
-    ] {
+    for join in [device_join(Some(TEST_DEVICE), None), device_join(None, Some(TEST_DEVICE_SECRET))]
+    {
         let resp = psk_join_and_recv(&ws_url, &join).await;
         let msg: SignalingMessage = serde_json::from_str(&resp).unwrap();
         match msg {
@@ -619,11 +595,7 @@ async fn g2_psk_path_regression_with_registry_loaded() {
         SignalingMessage::RoomJoined { peer_id, .. } => peer_id,
         other => panic!("expected RoomJoined, got {other:?}"),
     };
-    assert_eq!(
-        server.device_id_of(&peer_id),
-        None,
-        "PSK 路径不得产生设备绑定"
-    );
+    assert_eq!(server.device_id_of(&peer_id), None, "PSK 路径不得产生设备绑定");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -633,11 +605,8 @@ async fn g2_unknown_vs_wrong_secret_wire_identical() {
     let (_server, ws_url) = spawn_server_with_devices(Some(&test_device_yaml())).await;
     let r_unknown =
         psk_join_and_recv(&ws_url, &device_join(Some("ms-not-registered"), Some("x"))).await;
-    let r_bad = psk_join_and_recv(
-        &ws_url,
-        &device_join(Some(TEST_DEVICE), Some("wrong-secret")),
-    )
-    .await;
+    let r_bad =
+        psk_join_and_recv(&ws_url, &device_join(Some(TEST_DEVICE), Some("wrong-secret"))).await;
     assert_eq!(
         r_unknown, r_bad,
         "未知设备与错误 secret 的 wire 响应必须逐字节一致（防枚举/防时序）"
@@ -646,10 +615,7 @@ async fn g2_unknown_vs_wrong_secret_wire_identical() {
     match msg {
         SignalingMessage::Error { code, message } => {
             assert_eq!(code, 4010);
-            assert!(
-                message.contains("invalid device credentials"),
-                "message: {message}"
-            );
+            assert!(message.contains("invalid device credentials"), "message: {message}");
         }
         other => panic!("expected Error, got {other:?}"),
     }
@@ -660,38 +626,25 @@ async fn g2_join_failure_leaves_no_binding() {
     // review #2: 绑定必须发生在 join 成功之后 — RoomFull(4002) 不得产生残留绑定。
     let (server, ws_url) = spawn_server_with_devices(Some(&test_device_yaml())).await;
     // conn1: 第一个 Host 加入成功（保持连接）→ 绑定建立。
-    let (ws1, resp1) = connect_join_keepalive(
-        &ws_url,
-        &device_join(Some(TEST_DEVICE), Some(TEST_DEVICE_SECRET)),
-    )
-    .await;
+    let (ws1, resp1) =
+        connect_join_keepalive(&ws_url, &device_join(Some(TEST_DEVICE), Some(TEST_DEVICE_SECRET)))
+            .await;
     let joined: SignalingMessage = serde_json::from_str(&resp1).unwrap();
     let peer1 = match joined {
         SignalingMessage::RoomJoined { peer_id, .. } => peer_id,
         other => panic!("expected RoomJoined, got {other:?}"),
     };
-    assert_eq!(
-        server.device_id_of(&peer1).as_deref(),
-        Some(TEST_DEVICE),
-        "conn1 绑定应建立"
-    );
+    assert_eq!(server.device_id_of(&peer1).as_deref(), Some(TEST_DEVICE), "conn1 绑定应建立");
     assert_eq!(server.device_binding_count(), 1);
     // conn2: 同房间第二个 Host → RoomFull(4002)，认证通过但 join 失败。
-    let resp2 = psk_join_and_recv(
-        &ws_url,
-        &device_join(Some(TEST_DEVICE), Some(TEST_DEVICE_SECRET)),
-    )
-    .await;
+    let resp2 =
+        psk_join_and_recv(&ws_url, &device_join(Some(TEST_DEVICE), Some(TEST_DEVICE_SECRET))).await;
     let msg: SignalingMessage = serde_json::from_str(&resp2).unwrap();
     match msg {
         SignalingMessage::Error { code, .. } => assert_eq!(code, 4002, "第二 Host 应 RoomFull"),
         other => panic!("expected Error, got {other:?}"),
     }
-    assert_eq!(
-        server.device_binding_count(),
-        1,
-        "join 失败不得残留绑定（review #2）"
-    );
+    assert_eq!(server.device_binding_count(), 1, "join 失败不得残留绑定（review #2）");
     drop(ws1);
 }
 
@@ -706,10 +659,8 @@ const JWT_SECRET: &str = "g3-test-jwt-secret-32-bytes-min!!";
 static AUDIT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn account_token(username: &str, role: &str, vehicles: &[&str]) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as usize;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+        as usize;
     let claims = mediaservo_common::auth::JwtClaims {
         sub: username.into(),
         iat: now,
@@ -748,17 +699,11 @@ async fn spawn_server_g3(devices_yaml: &str) -> (SignalingServer, String) {
             .await
             .unwrap(),
         );
-        SignalingServer::new(
-            sfu,
-            65536,
-            Some(mediaservo_common::auth::JwtAuth::new(JWT_SECRET)),
-        )
+        SignalingServer::new(sfu, 65536, Some(mediaservo_common::auth::JwtAuth::new(JWT_SECRET)))
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
-    let mut server = SignalingServer::new(
-        65536,
-        Some(mediaservo_common::auth::JwtAuth::new(JWT_SECRET)),
-    );
+    let mut server =
+        SignalingServer::new(65536, Some(mediaservo_common::auth::JwtAuth::new(JWT_SECRET)));
     server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉
     server.device_registry = std::sync::Arc::new(registry);
     let mut server = server;
@@ -809,13 +754,9 @@ async fn account_join(
     room: &str,
     role: PeerRole,
 ) -> (KeepAliveWs, String) {
-    let mut req = ws_url
-        .into_client_request()
-        .expect("valid ws url");
-    req.headers_mut().insert(
-        "Sec-WebSocket-Protocol",
-        token.parse().expect("token is a valid header value"),
-    );
+    let mut req = ws_url.into_client_request().expect("valid ws url");
+    req.headers_mut()
+        .insert("Sec-WebSocket-Protocol", token.parse().expect("token is a valid header value"));
     let (mut ws, _) = tokio_tungstenite::connect_async(req).await.unwrap();
     let ack = ws.next().await.unwrap().unwrap();
     assert!(
@@ -834,9 +775,7 @@ async fn account_join(
         client_version: None,
         resume: None,
     };
-    ws.send(WsMsg::Text(serde_json::to_string(&join).unwrap().into()))
-        .await
-        .unwrap();
+    ws.send(WsMsg::Text(serde_json::to_string(&join).unwrap())).await.unwrap();
     let resp = ws.next().await.unwrap().unwrap();
     (ws, resp.to_text().unwrap().to_string())
 }
@@ -859,7 +798,6 @@ async fn g3_room_join_matrix_and_tenant_isolation() {
     mediaservo_server::audit::clear_recent();
     let _ring_guard = AUDIT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-
     // 车 A / 车 B 上线（各自房间登记主车）。
     let (_veh_a, resp) =
         connect_join_keepalive(&ws_url, &device_join_room("car1-room", "ms-car1", "car1-secret"))
@@ -871,7 +809,7 @@ async fn g3_room_join_matrix_and_tenant_isolation() {
     assert!(resp.contains("room_joined"), "车 B 上线: {resp}");
 
     // operator carol（白名单 [ms-car1]）: 授权车放行 ✅
-    let (mut ws, resp) = account_join(
+    let (ws, resp) = account_join(
         &ws_url,
         &account_token("carol", "operator", &["ms-car1"]),
         "car1-room",
@@ -889,10 +827,7 @@ async fn g3_room_join_matrix_and_tenant_isolation() {
         PeerRole::Consumer,
     )
     .await;
-    assert!(
-        resp.contains(r#""code":4031"#),
-        "operator 非授权车必须拒绝: {resp}"
-    );
+    assert!(resp.contains(r#""code":4031"#), "operator 非授权车必须拒绝: {resp}");
 
     // viewer 空白名单: 授权车也看不了 ❌
     let (_ws, resp) = account_join(
@@ -905,7 +840,7 @@ async fn g3_room_join_matrix_and_tenant_isolation() {
     assert!(resp.contains(r#""code":4031"#), "viewer 空白名单必须拒绝: {resp}");
 
     // dispatcher: 任意车 ✅（拉流+状态）
-    let (mut ws, resp) = account_join(
+    let (ws, resp) = account_join(
         &ws_url,
         &account_token("d1", "dispatcher", &[]),
         "car2-room",
@@ -919,10 +854,7 @@ async fn g3_room_join_matrix_and_tenant_isolation() {
     let (_ws, resp) =
         connect_join_keepalive(&ws_url, &device_join_room("car1-room", "ms-car2", "car2-secret"))
             .await;
-    assert!(
-        resp.contains(r#""code":4031"#),
-        "车 A 不可见车 B（租户隔离）: {resp}"
-    );
+    assert!(resp.contains(r#""code":4031"#), "车 A 不可见车 B（租户隔离）: {resp}");
 
     // legacy PSK 不受矩阵限制（additive 回归: 未配置账号的部署行为不变）。
     let resp = psk_join_and_recv(&ws_url, &legacy_join("car1-room", PeerRole::Consumer)).await;
@@ -930,14 +862,8 @@ async fn g3_room_join_matrix_and_tenant_isolation() {
 
     // C15: 全部 denial 已审计。
     let audit = mediaservo_server::audit::recent();
-    assert!(
-        has_denial(&audit, "room_join"),
-        "room_join denials 必须审计: {audit:?}"
-    );
-    assert!(
-        has_denial(&audit, "room_join"),
-        "tenant-isolation denials 必须审计"
-    );
+    assert!(has_denial(&audit, "room_join"), "room_join denials 必须审计: {audit:?}");
+    assert!(has_denial(&audit, "room_join"), "tenant-isolation denials 必须审计");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -966,9 +892,7 @@ async fn g3_emergency_audit_and_matrix() {
         room_id: "car1-room".into(),
         command: "e-stop".into(),
     };
-    ws.send(WsMsg::Text(serde_json::to_string(&emergency).unwrap().into()))
-        .await
-        .unwrap();
+    ws.send(WsMsg::Text(serde_json::to_string(&emergency).unwrap())).await.unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     let events = mediaservo_server::audit::recent();
     assert!(
@@ -998,9 +922,7 @@ async fn g3_emergency_audit_and_matrix() {
     .await;
     assert!(resp.contains("room_joined"));
     mediaservo_server::audit::clear_recent();
-    ws.send(WsMsg::Text(serde_json::to_string(&emergency).unwrap().into()))
-        .await
-        .unwrap();
+    ws.send(WsMsg::Text(serde_json::to_string(&emergency).unwrap())).await.unwrap();
     let resp = tokio::time::timeout(std::time::Duration::from_secs(3), ws.next())
         .await
         .unwrap()
@@ -1011,10 +933,7 @@ async fn g3_emergency_audit_and_matrix() {
         "dispatcher 急停必须拒绝: {}",
         resp.to_text().unwrap()
     );
-    assert!(
-        has_denial(&mediaservo_server::audit::recent(), "emergency"),
-        "急停拒绝必须审计"
-    );
+    assert!(has_denial(&mediaservo_server::audit::recent(), "emergency"), "急停拒绝必须审计");
     drop(ws);
 
     // viewer 可拉流但急停被拒 ❌。
@@ -1027,9 +946,7 @@ async fn g3_emergency_audit_and_matrix() {
     .await;
     assert!(resp.contains("room_joined"));
     mediaservo_server::audit::clear_recent();
-    ws.send(WsMsg::Text(serde_json::to_string(&emergency).unwrap().into()))
-        .await
-        .unwrap();
+    ws.send(WsMsg::Text(serde_json::to_string(&emergency).unwrap())).await.unwrap();
     let resp = tokio::time::timeout(std::time::Duration::from_secs(3), ws.next())
         .await
         .unwrap()
@@ -1060,10 +977,7 @@ async fn g3_config_push_inbound_rejected() {
         config: "[[cameras]]\nid = \"cam0\"\n".into(),
         version: 1,
     };
-    veh_ws
-        .send(WsMsg::Text(serde_json::to_string(&cfg).unwrap().into()))
-        .await
-        .unwrap();
+    veh_ws.send(WsMsg::Text(serde_json::to_string(&cfg).unwrap())).await.unwrap();
     let resp = tokio::time::timeout(std::time::Duration::from_secs(3), veh_ws.next())
         .await
         .unwrap()
@@ -1084,13 +998,9 @@ async fn g3_config_push_inbound_rejected() {
 async fn g3_jwt_unknown_role_rejected_at_handshake() {
     let (_server, ws_url) = spawn_server_g3(&two_devices_yaml()).await;
     let token = account_token("evil", "superuser", &[]);
-    let mut req = ws_url
-        .into_client_request()
-        .expect("valid ws url");
-    req.headers_mut().insert(
-        "Sec-WebSocket-Protocol",
-        token.parse().expect("token is a valid header value"),
-    );
+    let mut req = ws_url.into_client_request().expect("valid ws url");
+    req.headers_mut()
+        .insert("Sec-WebSocket-Protocol", token.parse().expect("token is a valid header value"));
     let (mut ws, _) = tokio_tungstenite::connect_async(req).await.unwrap();
     let resp = tokio::time::timeout(std::time::Duration::from_secs(3), ws.next())
         .await
@@ -1125,10 +1035,7 @@ async fn g3_review_i1_remote_role_join_requires_control() {
         PeerRole::Remote,
     )
     .await;
-    assert!(
-        resp.contains(r#""code":4031"#),
-        "viewer Remote join 必须拒绝（无控制）: {resp}"
-    );
+    assert!(resp.contains(r#""code":4031"#), "viewer Remote join 必须拒绝（无控制）: {resp}");
 
     // dispatcher（任意车拉流但无控制）: Remote join ❌ 4031
     let (_ws, resp) = account_join(
@@ -1144,21 +1051,18 @@ async fn g3_review_i1_remote_role_join_requires_control() {
     );
 
     // operator（授权车 + 控制）: Remote join ✅（P2P 控制协商位）
-    let (mut ws, resp) = account_join(
+    let (ws, resp) = account_join(
         &ws_url,
         &account_token("carol", "operator", &["ms-car1"]),
         "car1-room",
         PeerRole::Remote,
     )
     .await;
-    assert!(
-        resp.contains("room_joined"),
-        "operator Remote join 必须放行: {resp}"
-    );
+    assert!(resp.contains("room_joined"), "operator Remote join 必须放行: {resp}");
     drop(ws);
 
     // viewer 以 Consumer join 仍可（SFU 媒体拉流不受影响）
-    let (mut ws, resp) = account_join(
+    let (ws, resp) = account_join(
         &ws_url,
         &account_token("vic", "viewer", &["ms-car1"]),
         "car1-room",
@@ -1198,18 +1102,12 @@ async fn g3_review_i1_sdp_relay_never_in_device_rooms() {
         target: None,
         sdp: "g3-review-i1-viewer-sdp".into(),
     };
-    vic_ws
-        .send(WsMsg::Text(serde_json::to_string(&viewer_sdp).unwrap().into()))
-        .await
-        .unwrap();
+    vic_ws.send(WsMsg::Text(serde_json::to_string(&viewer_sdp).unwrap())).await.unwrap();
 
     // 车端在 500ms 内不应收到任何 SDP（viewer 的控制协商被服务端拦截）。
     let mut blocked = true;
-    if let Ok(Some(Ok(msg))) = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        veh_ws.next(),
-    )
-    .await
+    if let Ok(Some(Ok(msg))) =
+        tokio::time::timeout(std::time::Duration::from_millis(500), veh_ws.next()).await
     {
         let text = msg.to_text().unwrap().to_string();
         if text.contains("g3-review-i1-viewer-sdp") {
@@ -1233,18 +1131,12 @@ async fn g3_review_i1_sdp_relay_never_in_device_rooms() {
         target: None,
         sdp: "g3-review-i1-operator-sdp".into(),
     };
-    op_ws
-        .send(WsMsg::Text(serde_json::to_string(&op_sdp).unwrap().into()))
-        .await
-        .unwrap();
+    op_ws.send(WsMsg::Text(serde_json::to_string(&op_sdp).unwrap())).await.unwrap();
 
     let mut relayed = false;
     for _ in 0..5 {
-        if let Ok(Some(Ok(msg))) = tokio::time::timeout(
-            std::time::Duration::from_secs(1),
-            veh_ws.next(),
-        )
-        .await
+        if let Ok(Some(Ok(msg))) =
+            tokio::time::timeout(std::time::Duration::from_secs(1), veh_ws.next()).await
         {
             let text = msg.to_text().unwrap().to_string();
             if text.contains("g3-review-i1-operator-sdp") {

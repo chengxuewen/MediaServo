@@ -33,10 +33,7 @@ struct ReadyChecks {
 /// Create axum router with /health, /ready, and /metrics endpoints.
 pub fn metrics_router(metrics: SharedMetrics) -> Router {
     Router::new()
-        .route(
-            "/health",
-            get(|| async { Json(HealthResponse { status: "ok".to_string() }) }),
-        )
+        .route("/health", get(|| async { Json(HealthResponse { status: "ok".to_string() }) }))
         .route(
             "/ready",
             get(|State(m): State<SharedMetrics>| async move {

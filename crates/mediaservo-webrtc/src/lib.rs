@@ -6,29 +6,32 @@
 //! - `backend-webrtc-rs` feature: real webrtc-rs implementation
 //! - default (no feature): stub for compilation without WebRTC
 
+#![allow(async_fn_in_trait)]
+// W3C 镜像 trait 的 async 签名 = 设计形（auto-trait-bound 限制随上游 async trait 稳定退役）
+#![allow(private_interfaces)] // backend 访问器返回 cfg 姿态 opaque 类型（Active*）；'进包≠公开面' F12 裁定，不公开后端类型名
+pub mod backend;
 pub mod data_channel;
+pub mod engine;
+pub mod factory;
 pub mod peer_connection;
+pub mod rtp;
 pub mod sdp;
+pub mod stats;
 pub mod track;
 pub mod track_sink;
-pub mod engine;
-pub mod rtp;
-pub mod stats;
-pub mod backend;
-pub mod factory;
 pub mod traits;
 
 // Re-export backend-specific types for examples/tests
 pub use backend::TrackWriteBackend;
+pub use data_channel::*;
+pub use engine::*;
+pub use factory::*;
 pub use peer_connection::*;
+pub use rtp::*;
 pub use sdp::*;
+pub use stats::*;
 pub use track::*;
 pub use track_sink::*;
-pub use engine::*;
-pub use rtp::*;
-pub use stats::*;
-pub use factory::*;
-pub use data_channel::*;
 
 /// Error type for all WebRTC operations.
 #[derive(Debug, thiserror::Error)]

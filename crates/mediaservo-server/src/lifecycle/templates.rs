@@ -237,9 +237,7 @@ fn push_logs(out: &mut String, name: &str, log_dir: &str) {
 }
 
 pub fn render_server_yaml(psk: &str, jwt: &str) -> String {
-    SERVER_YAML_TEMPLATE
-        .replace("__PSK__", psk)
-        .replace("__JWT__", jwt)
+    SERVER_YAML_TEMPLATE.replace("__PSK__", psk).replace("__JWT__", jwt)
 }
 
 /// 渲染 web Caddyfile。`weaknet_backend` = 面板上游 host:port 字面量（init 传
@@ -285,9 +283,7 @@ pub fn parse_web_port(caddyfile: &str) -> Option<u16> {
         let t = l.trim();
         let rest = t.strip_prefix(':')?;
         let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-        (!digits.is_empty() && digits.len() <= rest.len())
-            .then(|| digits.parse().ok())
-            .flatten()
+        (!digits.is_empty() && digits.len() <= rest.len()).then(|| digits.parse().ok()).flatten()
     })
 }
 

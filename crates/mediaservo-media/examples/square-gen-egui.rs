@@ -10,15 +10,15 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use eframe::egui;
-#[cfg(feature = "backend-native")]
-use mediaservo_media::backend::NativeTransform;
 #[cfg(feature = "backend-yuv-sys")]
 use mediaservo_media::backend::LibyuvTransform;
+#[cfg(feature = "backend-native")]
+use mediaservo_media::backend::NativeTransform;
 use mediaservo_media::base::frame::BoxVideoFrame;
 use mediaservo_media::error::MediaError;
 use mediaservo_media::pipeline::generator::{
-    Anchor, BitmapFont, PatternMode, SquaresConfig, TextBurner, TimestampFormat,
-    TimestampOverlay, VideoFrameGenerator,
+    Anchor, BitmapFont, PatternMode, SquaresConfig, TextBurner, TimestampFormat, TimestampOverlay,
+    VideoFrameGenerator,
 };
 use mediaservo_media::pipeline::sink::{VideoSink, VideoSinkWants};
 use mediaservo_media::pipeline::source::VideoSource;
@@ -34,9 +34,7 @@ struct FrameQueue {
 
 impl FrameQueue {
     fn new() -> Self {
-        Self {
-            data: Mutex::new(VecDeque::new()),
-        }
+        Self { data: Mutex::new(VecDeque::new()) }
     }
 
     fn push(&self, rgba: Vec<u8>) {
@@ -66,9 +64,21 @@ impl VideoSink<BoxVideoFrame> for GeneratorSink {
         if let Some(i420_ref) = frame.buffer.as_i420_ref() {
             let mut rgba = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
             #[cfg(feature = "backend-yuv-sys")]
-            let result = LibyuvTransform::i420_to_argb(i420_ref, WIDTH, HEIGHT, PixelFormat::RGBA, &mut rgba);
+            let result = LibyuvTransform::i420_to_argb(
+                i420_ref,
+                WIDTH,
+                HEIGHT,
+                PixelFormat::RGBA,
+                &mut rgba,
+            );
             #[cfg(all(feature = "backend-native", not(feature = "backend-yuv-sys")))]
-            let result = NativeTransform::i420_to_argb(i420_ref, WIDTH, HEIGHT, PixelFormat::RGBA, &mut rgba);
+            let result = NativeTransform::i420_to_argb(
+                i420_ref,
+                WIDTH,
+                HEIGHT,
+                PixelFormat::RGBA,
+                &mut rgba,
+            );
             // ponytail: log error instead of panic — keeps generator thread alive
             if let Err(e) = result {
                 eprintln!("i420_to_argb failed: {e:?}");
@@ -93,21 +103,10 @@ impl App {
         let generator = VideoFrameGenerator::new();
         let queue = Arc::new(FrameQueue::new());
         generator.add_or_update_sink(
-            Box::new(GeneratorSink {
-                queue: queue.clone(),
-            }),
-            VideoSinkWants {
-                is_active: true,
-                ..Default::default()
-            },
+            Box::new(GeneratorSink { queue: queue.clone() }),
+            VideoSinkWants { is_active: true, ..Default::default() },
         );
-        Self {
-            generator,
-            queue,
-            running: false,
-            frame_count: 0,
-            texture: None,
-        }
+        Self { generator, queue, running: false, frame_count: 0, texture: None }
     }
 }
 
@@ -128,11 +127,7 @@ impl eframe::App for App {
                     let font = BitmapFont::new();
                     let burner = TextBurner::new(font, false, Anchor::TopLeft);
                     let overlay = TimestampOverlay::new(burner, TimestampFormat::Combined);
-                    let config = SquaresConfig {
-                        count: 50,
-                        motion_speed: 3,
-                        ..Default::default()
-                    };
+                    let config = SquaresConfig { count: 50, motion_speed: 3, ..Default::default() };
                     self.generator.start(
                         FPS,
                         PatternMode::Squares(config),
@@ -143,40 +138,31 @@ impl eframe::App for App {
                     self.running = true;
                 }
                 ui.separator();
-                ui.label(format!(
-                    "{}x{}  {}fps  Frame: {}",
-                    WIDTH, HEIGHT, FPS, self.frame_count
-                ));
+                ui.label(format!("{}x{}  {}fps  Frame: {}", WIDTH, HEIGHT, FPS, self.frame_count));
             });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            if self.running {
-                if let Some(rgba) = self.queue.take_latest() {
-                    let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                        [WIDTH as usize, HEIGHT as usize],
-                        &rgba,
-                    );
-                    // ponytail: reuse texture with set() instead of recreating each frame
-                    if let Some(tex) = self.texture.as_mut() {
-                        tex.set(color_image, egui::TextureOptions::LINEAR);
-                    } else {
-                        let tex = ctx.load_texture(
-                            "frame",
-                            color_image,
-                            egui::TextureOptions::LINEAR,
-                        );
-                        self.texture = Some(tex);
-                    }
-                    self.frame_count += 1;
+            if self.running
+                && let Some(rgba) = self.queue.take_latest()
+            {
+                let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                    [WIDTH as usize, HEIGHT as usize],
+                    &rgba,
+                );
+                // ponytail: reuse texture with set() instead of recreating each frame
+                if let Some(tex) = self.texture.as_mut() {
+                    tex.set(color_image, egui::TextureOptions::LINEAR);
+                } else {
+                    let tex = ctx.load_texture("frame", color_image, egui::TextureOptions::LINEAR);
+                    self.texture = Some(tex);
                 }
+                self.frame_count += 1;
             }
 
             if let Some(tex) = &self.texture {
                 let available = ui.available_size();
-                let scale = (available.x / WIDTH as f32)
-                    .min(available.y / HEIGHT as f32)
-                    .min(1.0);
+                let scale = (available.x / WIDTH as f32).min(available.y / HEIGHT as f32).min(1.0);
                 ui.image(egui::load::SizedTexture::new(
                     tex.id(),
                     [WIDTH as f32 * scale, HEIGHT as f32 * scale],

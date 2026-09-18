@@ -111,14 +111,8 @@ impl TimestampMapper {
             // this path is effectively unreachable.
             SystemTime::now() - anchor_instant.elapsed()
         });
-        let anchor_uptime = SystemTime::now()
-            .duration_since(anchor_epoch)
-            .unwrap_or_default();
-        Self {
-            anchor_epoch,
-            anchor_instant,
-            anchor_uptime,
-        }
+        let anchor_uptime = SystemTime::now().duration_since(anchor_epoch).unwrap_or_default();
+        Self { anchor_epoch, anchor_instant, anchor_uptime }
     }
 
     /// Map a v4l2 kernel timestamp (CLOCK_MONOTONIC since boot) to epoch ns.
@@ -133,10 +127,9 @@ impl TimestampMapper {
         self.to_epoch_ns(self.anchor_epoch + uptime)
     }
 
+    #[allow(clippy::wrong_self_convention)] // 状态查询语义非构造
     fn to_epoch_ns(&self, t: SystemTime) -> u64 {
-        t.duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0)
+        t.duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0)
     }
 }
 
@@ -168,13 +161,7 @@ impl FakeBackend {
     /// Backend replaying the given frames in order; exhausted reads return
     /// a `Stream` error (simulating device end).
     pub fn new(frames: Vec<CapturedFrame>) -> Self {
-        Self {
-            frames: frames.into(),
-            open_error: None,
-            read_error: None,
-            opened: false,
-            reads: 0,
-        }
+        Self { frames: frames.into(), open_error: None, read_error: None, opened: false, reads: 0 }
     }
 
     /// Inject a failure at `open()`.
@@ -229,7 +216,10 @@ impl CaptureBackend for FakeBackend {
         }
         let frame = self.frames.pop_front().ok_or_else(|| CaptureError::Stream {
             path: "<fake>".into(),
-            source: std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "frame sequence exhausted"),
+            source: std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "frame sequence exhausted",
+            ),
         })?;
         self.reads += 1;
         Ok(frame)
@@ -339,10 +329,7 @@ mod tests {
                 mapped >= proc_start_ns,
                 "kernel_ts {kts:?} mapped {mapped} < process start {proc_start_ns}"
             );
-            assert!(
-                mapped <= now_ns,
-                "kernel_ts {kts:?} mapped {mapped} > now {now_ns}"
-            );
+            assert!(mapped <= now_ns, "kernel_ts {kts:?} mapped {mapped} > now {now_ns}");
         }
     }
 
@@ -362,10 +349,7 @@ mod tests {
     fn map_now_falls_within_lifetime_window() {
         let mapper = TimestampMapper::sample_now();
         let mapped = mapper.map_now();
-        let proc_start_ns = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64;
+        let proc_start_ns = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
         // map_now ≈ current wall time (allow small clock skew backward)
         assert!(
             mapped.abs_diff(proc_start_ns) < 5_000_000_000,

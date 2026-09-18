@@ -2,7 +2,6 @@
 
 use mediaservo_codec::codec::CodecId;
 use mediaservo_codec::config::DecoderConfig;
-use mediaservo_codec::decoder::VideoDecoder;
 use mediaservo_codec::factory::CodecFactory;
 
 #[test]

@@ -8,24 +8,26 @@
 //! - **G16/F-S-2 裁决**：无主房（车未上线/离线）对一切角色隐藏——不变量
 //!   「列表 ⊆ 可进；可进∖列表 仅允许 owner=None 一族」，单测双向钉。
 //! - 响应 serde 钉死 `{room_id, kind}` 二字段（admin/rooms 富字段不下放，F-S-6/9）。
-//! W4d 增补（09-17）：**per-stream 流房派生**——媒体面 producer 活在
-//! `<整车房>_<stream_id>`（PIT-140 v2）且不经 RoomJoin 注册，只看注册列表的 SDK
-//! 消费者发现不到可播房（浏览器按流勾选天然免疫，web 未暴露）。派生源 =
-//! StatusReport streams[].connected；owner 继承 base 房（可见性判定同向）。
-//! kind 三面 = audio（C29 前缀）/ video（流房）/ control（整车房——无视频 producer）。
+//!   W4d 增补（09-17）：**per-stream 流房派生**——媒体面 producer 活在
+//!   `<整车房>_<stream_id>`（PIT-140 v2）且不经 RoomJoin 注册，只看注册列表的 SDK
+//!   消费者发现不到可播房（浏览器按流勾选天然免疫，web 未暴露）。派生源 =
+//!   StatusReport streams[].connected；owner 继承 base 房（可见性判定同向）。
+//!   kind 三面 = audio（C29 前缀）/ video（流房）/ control（整车房——无视频 producer）。
 //!
 //! - 枚举源 = room_manager.list_rooms（与 admin 视图同源，禁第三份）；owner 权威源 =
 //!   signaling.room_owner_of（RoomJoin 门读同一 map，同源=不变量成立的前提）。
 
+use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Json;
 use axum::routing::get;
-use axum::Router;
 use serde::Serialize;
 
 use crate::admin::{AdminState, ErrorResponse, check_auth};
 use crate::audit::{AuditEvent, log_event};
+#[allow(unused_imports)]
+// clippy --fix cfg 盲区（09-18 N8 实录）：本姿态-unused 的项是 stub 姿态/tests 分支在用
 use crate::roles::{AccountIdentity, CockpitRole, SessionIdentity};
 
 /// 列表项（wire 契约——单测钉字段形，多字段=回归失败）。
@@ -57,11 +59,9 @@ pub fn room_kind(room_id: &str, is_stream_room: bool) -> &'static str {
 fn online_stream_ids(status: &crate::status::StatusRegistry, room_id: &str) -> Vec<String> {
     use mediaservo_common::protocol::SignalingMessage;
     match status.get(room_id) {
-        Some(SignalingMessage::StatusReport { streams, .. }) => streams
-            .iter()
-            .filter(|f| f.connected)
-            .map(|f| f.id.clone())
-            .collect(),
+        Some(SignalingMessage::StatusReport { streams, .. }) => {
+            streams.iter().filter(|f| f.connected).map(|f| f.id.clone()).collect()
+        }
         _ => Vec::new(),
     }
 }
@@ -85,21 +85,14 @@ async fn list_rooms(
     let claims = check_auth(&req, &state)?; // token 提取/验签复用（同一发证链）
     // 身份门：只放行合法账号角色的 JWT。无 role claim（Legacy 等）/未知角色 → 401。
     // Device 身份不经 REST 发证，天然不在此面（显式拒=防未来 device token 混入）。
-    let role = claims
-        .role
-        .as_deref()
-        .and_then(CockpitRole::parse)
-        .ok_or_else(|| {
-            log_event(AuditEvent::AuthorizationDenied {
-                action: "api_rooms".into(),
-                peer_id: claims.sub.clone(),
-                detail: "non-account or unknown role token".into(),
-            });
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(ErrorResponse { error: "account role required".into() }),
-            )
-        })?;
+    let role = claims.role.as_deref().and_then(CockpitRole::parse).ok_or_else(|| {
+        log_event(AuditEvent::AuthorizationDenied {
+            action: "api_rooms".into(),
+            peer_id: claims.sub.clone(),
+            detail: "non-account or unknown role token".into(),
+        });
+        (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "account role required".into() }))
+    })?;
     // allowlist 以 accounts registry 现值为准（C33 热生效：改单即变）。特权角色
     // （admin/dispatcher）不依赖 allowlist（roles.rs 语义），账号表缺席不拦——否则
     // 内置 admin（不在 accounts.yaml 场景）也被误伤；viewer/operator token 而账号已删
@@ -134,22 +127,16 @@ async fn list_rooms(
             derived.push((format!("{}_{}", r.id, sid), owner.clone()));
         }
     }
-    let stream_rooms: std::collections::HashSet<String> = derived.iter().map(|(id, _)| id.clone())
-        .chain(
-            state
-                .signaling
-                .room_manager
-                .list_rooms()
-                .into_iter()
-                .map(|r| r.id)
-                .filter(|id| {
-                    // 注册房命中派生命名 = 流房被 consumer join 过（同源再判一次）
-                    let Some((base, _)) = id.rsplit_once('_') else { return false };
-                    !id.starts_with("audio-")
-                        && !online_stream_ids(&state.signaling.status_registry, base).is_empty()
-                        && derived.iter().any(|(d, _)| d == id)
-                }),
-        )
+    let stream_rooms: std::collections::HashSet<String> = derived
+        .iter()
+        .map(|(id, _)| id.clone())
+        .chain(state.signaling.room_manager.list_rooms().into_iter().map(|r| r.id).filter(|id| {
+            // 注册房命中派生命名 = 流房被 consumer join 过（同源再判一次）
+            let Some((base, _)) = id.rsplit_once('_') else { return false };
+            !id.starts_with("audio-")
+                && !online_stream_ids(&state.signaling.status_registry, base).is_empty()
+                && derived.iter().any(|(d, _)| d == id)
+        }))
         .collect();
     let mut rooms: Vec<RoomEntry> = state
         .signaling
@@ -203,16 +190,28 @@ mod tests {
             assert!(room_visible(&role, &allowed(&["ms-car1"]), Some("ms-car1")));
             assert!(!room_visible(&role, &allowed(&["ms-car1"]), Some("ms-car2")));
             assert!(!room_visible(&role, &allowed(&["ms-car1"]), None));
-            assert!(!room_visible(&role, &[], Some("ms-car1")), "empty allowlist = nothing visible");
+            assert!(
+                !room_visible(&role, &[], Some("ms-car1")),
+                "empty allowlist = nothing visible"
+            );
         }
     }
 
     /// 不变量正向：列表可见 ⇒ join 门必放行（同 owner 输入下比对 roles.rs 现成判定）。
     #[test]
     fn invariant_visible_implies_joinable() {
-        for role in [CockpitRole::Admin, CockpitRole::Dispatcher, CockpitRole::Viewer, CockpitRole::Operator] {
+        for role in [
+            CockpitRole::Admin,
+            CockpitRole::Dispatcher,
+            CockpitRole::Viewer,
+            CockpitRole::Operator,
+        ] {
             let allowed = allowed(&["ms-car1"]);
-            let ident = SessionIdentity::Account(AccountIdentity { username: "u".into(), role: role.clone(), vehicles: allowed.clone() });
+            let ident = SessionIdentity::Account(AccountIdentity {
+                username: "u".into(),
+                role: role.clone(),
+                vehicles: allowed.clone(),
+            });
             for owner in [Some("ms-car1"), Some("ms-car2")] {
                 if room_visible(&role, &allowed, owner) {
                     assert_eq!(
@@ -230,7 +229,11 @@ mod tests {
     fn invariant_hidden_only_for_ownerless_or_denied() {
         let allowed = allowed(&["ms-car1"]);
         for role in [CockpitRole::Viewer, CockpitRole::Operator] {
-            let ident = SessionIdentity::Account(AccountIdentity { username: "u".into(), role: role.clone(), vehicles: allowed.clone() });
+            let ident = SessionIdentity::Account(AccountIdentity {
+                username: "u".into(),
+                role: role.clone(),
+                vehicles: allowed.clone(),
+            });
             // 有主但被 join 拒的房：列表同样拒（两向一致）
             assert!(ident.join_vehicle_room(Some("ms-car2")).is_some());
             assert!(!room_visible(&role, &allowed, Some("ms-car2")));
@@ -283,7 +286,11 @@ mod tests {
         assert_eq!(body, r#"{"rooms":[]}"#, "ownerless hidden even for admin (G16)");
         // 登记 owner → admin 全量可见，含 kind 派生
         state.signaling.set_room_owner_for_test("vehicle_t1", "ms-car1");
-        state.signaling.room_manager.join_room("audio-ms-car1", "c-2", &mediaservo_common::protocol::PeerRole::Consumer).unwrap();
+        state
+            .signaling
+            .room_manager
+            .join_room("audio-ms-car1", "c-2", &mediaservo_common::protocol::PeerRole::Consumer)
+            .unwrap();
         state.signaling.set_room_owner_for_test("audio-ms-car1", "ms-car1");
         let (_, body) = get_rooms(&state, Some(&tok)).await;
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -332,20 +339,32 @@ mod tests {
             connected,
         };
         // 整车房注册 + owner；流 test 在线 / 流 cam0 离线
-        state.signaling.room_manager.join_room("ms-car1", "h-1", &mediaservo_common::protocol::PeerRole::Host).unwrap();
+        state
+            .signaling
+            .room_manager
+            .join_room("ms-car1", "h-1", &mediaservo_common::protocol::PeerRole::Host)
+            .unwrap();
         state.signaling.set_room_owner_for_test("ms-car1", "ms-car1");
         state
             .signaling
             .status_registry
             .store("ms-car1", report(vec![flow("test", true), flow("cam0-stream", false)]));
         // audio 房不参与派生
-        state.signaling.room_manager.join_room("audio-ms-car1", "a-1", &mediaservo_common::protocol::PeerRole::Consumer).unwrap();
+        state
+            .signaling
+            .room_manager
+            .join_room("audio-ms-car1", "a-1", &mediaservo_common::protocol::PeerRole::Consumer)
+            .unwrap();
         state.signaling.set_room_owner_for_test("audio-ms-car1", "ms-car1");
 
         let (_, body) = get_rooms(&state, Some(&tok)).await;
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         let kind_of = |id: &str| {
-            v["rooms"].as_array().unwrap().iter().find(|e| e["room_id"] == id)
+            v["rooms"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["room_id"] == id)
                 .map(|e| e["kind"].as_str().unwrap().to_string())
         };
         assert_eq!(kind_of("ms-car1_test").as_deref(), Some("video"), "{body} 流房派生");
@@ -355,16 +374,24 @@ mod tests {
         // G16 正向不变量（流房面）：列表可见 ⇒ join 放行——流房 owner 未登记
         // （producer 不 RoomJoin）→ join_vehicle_room(None) 豁免族放行，成立。
         let ident = SessionIdentity::Account(AccountIdentity {
-            username: "v".into(), role: CockpitRole::Viewer, vehicles: vec!["ms-car1".into()],
+            username: "v".into(),
+            role: CockpitRole::Viewer,
+            vehicles: vec!["ms-car1".into()],
         });
         assert!(ident.join_vehicle_room(None).is_none(), "stream-room join 豁免族 = 列表⊆可进");
         // viewer allowlist 命中 base owner → 流房同样可见（owner 继承同向）
-        state.accounts.create_account("v2", "pw", "viewer", &["ms-car1".to_string()].to_vec()).unwrap();
+        state
+            .accounts
+            .create_account("v2", "pw", "viewer", &["ms-car1".to_string()].to_vec())
+            .unwrap();
         let vt = crate::admin::tests::token_of_role(&state, "v2", Some("viewer"));
         let (_, body) = get_rooms(&state, Some(&vt)).await;
         assert!(body.contains("ms-car1_test"), "{body}");
         // 不在 allowlist → 流房不可见
-        state.accounts.create_account("v3", "pw", "viewer", &["ms-car2".to_string()].to_vec()).unwrap();
+        state
+            .accounts
+            .create_account("v3", "pw", "viewer", &["ms-car2".to_string()].to_vec())
+            .unwrap();
         let vt3 = crate::admin::tests::token_of_role(&state, "v3", Some("viewer"));
         let (_, body) = get_rooms(&state, Some(&vt3)).await;
         assert!(!body.contains("ms-car1_test"), "{body} 越权流房必须隐藏");
@@ -373,10 +400,17 @@ mod tests {
     #[tokio::test]
     async fn http_viewer_allowlist_filter_hot_effect() {
         let state = crate::admin::tests::make_state().await;
-        state.accounts.create_account("v1", "pw", "viewer", &["ms-car1".to_string()].to_vec()).unwrap();
+        state
+            .accounts
+            .create_account("v1", "pw", "viewer", &["ms-car1".to_string()].to_vec())
+            .unwrap();
         let tok = crate::admin::tests::token_of_role(&state, "v1", Some("viewer"));
         for (id, owner) in [("vehicle_t1", "ms-car1"), ("vehicle_t2", "ms-car2")] {
-            state.signaling.room_manager.join_room(id, id, &mediaservo_common::protocol::PeerRole::Consumer).unwrap();
+            state
+                .signaling
+                .room_manager
+                .join_room(id, id, &mediaservo_common::protocol::PeerRole::Consumer)
+                .unwrap();
             state.signaling.set_room_owner_for_test(id, owner);
         }
         let (_, body) = get_rooms(&state, Some(&tok)).await;
@@ -394,7 +428,9 @@ mod tests {
     /// wire 契约：恰好 {room_id, kind} 二字段（多/少字段= serde 输出变化=本测先红）。
     #[test]
     fn wire_shape_exactly_two_fields() {
-        let json = serde_json::to_value(RoomEntry { room_id: "vehicle_test1".into(), kind: "video" }).unwrap();
+        let json =
+            serde_json::to_value(RoomEntry { room_id: "vehicle_test1".into(), kind: "video" })
+                .unwrap();
         assert_eq!(json, serde_json::json!({ "room_id": "vehicle_test1", "kind": "video" }));
         assert_eq!(room_kind("audio-v1", false), "audio");
         assert_eq!(room_kind("vehicle_test1", true), "video");

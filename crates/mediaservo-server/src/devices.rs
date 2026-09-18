@@ -192,9 +192,7 @@ impl DeviceRegistry {
                     ));
                 }
                 (None, None) => {
-                    return Err(format!(
-                        "device {id}: entry must carry secret_hash or public_key"
-                    ));
+                    return Err(format!("device {id}: entry must carry secret_hash or public_key"));
                 }
             };
             devices.insert(id, parsed);
@@ -283,7 +281,6 @@ impl DeviceRegistry {
         }
     }
     /// sha256(device_id + ":" + device_secret)，hex 编码，`sha256:` 前缀。
-
     /// 注册新设备：默认生成随机 secret。
     /// 返回 `(secret_hash, secret)` — secret 是**唯一一次明文**，调用方负责传递；
     /// 后续仅可经 reset_secret 更换。落盘由管理 API 层调 `save` 完成。
@@ -416,9 +413,8 @@ fn new_dummy_hash() -> String {
 
 /// base64 → 32B Ed25519 vk 解码校验（wire 输入边界；design §3: base64 standard 无换行）。
 fn decode_vk(vk_b64: &str) -> Result<[u8; 32], &'static str> {
-    let raw = base64::engine::general_purpose::STANDARD
-        .decode(vk_b64)
-        .map_err(|_| "not valid base64")?;
+    let raw =
+        base64::engine::general_purpose::STANDARD.decode(vk_b64).map_err(|_| "not valid base64")?;
     let arr: [u8; 32] = raw.as_slice().try_into().map_err(|_| "decoded length != 32 bytes")?;
     ed25519_dalek::VerifyingKey::from_bytes(&arr).map_err(|_| "invalid ed25519 public key")?;
     Ok(arr)
@@ -436,14 +432,15 @@ pub fn verify_signature(
 ) -> Result<(), DeviceAuthError> {
     let b64 = base64::engine::general_purpose::STANDARD;
     let vk_arr = decode_vk(vk_b64).map_err(|_| DeviceAuthError::BadSecret)?;
-    let vk = ed25519_dalek::VerifyingKey::from_bytes(&vk_arr)
-        .map_err(|_| DeviceAuthError::BadSecret)?;
+    let vk =
+        ed25519_dalek::VerifyingKey::from_bytes(&vk_arr).map_err(|_| DeviceAuthError::BadSecret)?;
     let mut msg = b64.decode(nonce_b64).map_err(|_| DeviceAuthError::BadSecret)?;
     if msg.len() != 32 {
         return Err(DeviceAuthError::BadSecret);
     }
     let sig_bytes = b64.decode(sig_b64).map_err(|_| DeviceAuthError::BadSecret)?;
-    let sig_arr: [u8; 64] = sig_bytes.as_slice().try_into().map_err(|_| DeviceAuthError::BadSecret)?;
+    let sig_arr: [u8; 64] =
+        sig_bytes.as_slice().try_into().map_err(|_| DeviceAuthError::BadSecret)?;
     msg.extend_from_slice(device_id.as_bytes());
     msg.extend_from_slice(room_id.as_bytes());
     vk.verify_strict(&msg, &ed25519_dalek::Signature::from_bytes(&sig_arr))
@@ -489,11 +486,8 @@ impl PendingTable {
 
     /// 全部待批准（admin 列表；按 device_id 稳定排序）。
     pub fn list(&self) -> Vec<(String, PendingEntry)> {
-        let mut out: Vec<(String, PendingEntry)> = self
-            .inner
-            .iter()
-            .map(|e| (e.key().clone(), e.value().clone()))
-            .collect();
+        let mut out: Vec<(String, PendingEntry)> =
+            self.inner.iter().map(|e| (e.key().clone(), e.value().clone())).collect();
         out.sort_by(|a, b| a.0.cmp(&b.0));
         out
     }
@@ -828,7 +822,8 @@ mod tests {
     // 复用 sig_vector 常量（seed=bytes(0..=31) 的 vk/nonce/sig，批3 host 交叉复验同锚）。
 
     const TEST_VK: &str = "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=";
-    const TEST_SIG_CAM0: &str = "Gnz2kGCFH6igsOfv5QW0+8aRyu/lP5ytAa8fJA0CPYP3fIX5UsYr6uTjFjqOEEFBUB2scnDffIZ1WfP9O2ECCg==";
+    const TEST_SIG_CAM0: &str =
+        "Gnz2kGCFH6igsOfv5QW0+8aRyu/lP5ytAa8fJA0CPYP3fIX5UsYr6uTjFjqOEEFBUB2scnDffIZ1WfP9O2ECCg==";
 
     fn test_nonce_b64() -> String {
         base64::engine::general_purpose::STANDARD.encode((0x40u8..0x60).collect::<Vec<u8>>())
@@ -856,7 +851,9 @@ mod tests {
         reg.save(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("secret_hash") && text.contains("ed25519:") && text.contains("name: jetson-7"),
+            text.contains("secret_hash")
+                && text.contains("ed25519:")
+                && text.contains("name: jetson-7"),
             "{text}"
         );
         // 回写保形: 双形不互窜（public_key 条目不得长出 secret_hash 行）
@@ -918,16 +915,34 @@ mod tests {
     fn verify_signature_accepts_offered_vk_for_unknown_device() {
         // 陌生设备: 验签用其上报 vk（enroll 前置，§5.3 同一函数）。
         assert_eq!(
-            verify_signature(TEST_VK, &test_nonce_b64(), "ms-0a1b2c3d4e5f", "vehicle_cam0", TEST_SIG_CAM0),
+            verify_signature(
+                TEST_VK,
+                &test_nonce_b64(),
+                "ms-0a1b2c3d4e5f",
+                "vehicle_cam0",
+                TEST_SIG_CAM0
+            ),
             Ok(())
         );
         // 垃圾 vk / 垃圾 sig → 统一 BadSecret（不外泄失败种类）。
         assert_eq!(
-            verify_signature("!!!", &test_nonce_b64(), "ms-0a1b2c3d4e5f", "vehicle_cam0", TEST_SIG_CAM0),
+            verify_signature(
+                "!!!",
+                &test_nonce_b64(),
+                "ms-0a1b2c3d4e5f",
+                "vehicle_cam0",
+                TEST_SIG_CAM0
+            ),
             Err(DeviceAuthError::BadSecret)
         );
         assert_eq!(
-            verify_signature(TEST_VK, &test_nonce_b64(), "ms-0a1b2c3d4e5f", "vehicle_cam0", "notb64"),
+            verify_signature(
+                TEST_VK,
+                &test_nonce_b64(),
+                "ms-0a1b2c3d4e5f",
+                "vehicle_cam0",
+                "notb64"
+            ),
             Err(DeviceAuthError::BadSecret)
         );
     }

@@ -8,13 +8,14 @@
 //! 5. Wait for `RoomJoined { room_id, peer_id }`
 //! 6. Return split sender/receiver for SDP/ICE relay
 
+#![allow(dead_code, clippy::redundant_guards)] // legacy mod 形态占位件（host-legacy 在用 mod 声明，本文件面 = 在册死面）
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use mediaservo_common::error::CoreError;
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 /// Sender half of the signaling WebSocket (for sending SDP/ICE messages).
 pub type WsSender = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
@@ -52,45 +53,37 @@ impl SignalingClient {
     pub async fn connect(&self) -> Result<(WsSender, WsReceiver), CoreError> {
         let url = self.server_url.clone();
         tracing::info!("Signaling: connecting to {url}");
-        let (ws_stream, _resp) = connect_async(&url).await.map_err(|e| {
-            CoreError::WebSocketDisconnect(format!("connect to {}: {}", url, e))
-        })?;
+        let (ws_stream, _resp) = connect_async(&url)
+            .await
+            .map_err(|e| CoreError::WebSocketDisconnect(format!("connect to {}: {}", url, e)))?;
 
         let (mut sender, mut receiver) = ws_stream.split();
 
         // Phase 1: PSK authentication — send raw token as first message
         sender
-            .send(Message::Text(self.psk.clone().into()))
+            .send(Message::Text(self.psk.clone()))
             .await
             .map_err(|e| CoreError::WebSocketDisconnect(format!("send auth: {}", e)))?;
 
         match receiver.next().await {
             Some(Ok(Message::Text(text))) => {
-                let msg: SignalingMessage =
-                    serde_json::from_str(&text).map_err(|e| {
-                        CoreError::ConfigParse(format!("parse auth response: {}", e))
-                    })?;
+                let msg: SignalingMessage = serde_json::from_str(&text)
+                    .map_err(|e| CoreError::ConfigParse(format!("parse auth response: {}", e)))?;
                 match msg {
                     SignalingMessage::Error { code, .. } if code == 0 => {
                         tracing::info!("Signaling PSK auth accepted");
                     }
                     SignalingMessage::Error { code, message } => {
-                        return Err(CoreError::Unknown(format!(
-                            "auth denied [{code}]: {message}"
-                        )));
+                        return Err(CoreError::Unknown(format!("auth denied [{code}]: {message}")));
                     }
                     _ => return Err(CoreError::PskAuthFailed),
                 }
             }
             Some(Ok(Message::Close(_))) | None => {
-                return Err(CoreError::WebSocketDisconnect(
-                    "connection closed during auth".into(),
-                ));
+                return Err(CoreError::WebSocketDisconnect("connection closed during auth".into()));
             }
             Some(Err(e)) => {
-                return Err(CoreError::WebSocketDisconnect(format!(
-                    "auth read error: {}", e
-                )));
+                return Err(CoreError::WebSocketDisconnect(format!("auth read error: {}", e)));
             }
             _ => return Err(CoreError::PskAuthFailed),
         }
@@ -108,24 +101,19 @@ impl SignalingClient {
             client_version: None,
             resume: None,
         };
-        let join_json = serde_json::to_string(&join_msg).map_err(|e| {
-            CoreError::ConfigParse(format!("serialize RoomJoin: {}", e))
-        })?;
+        let join_json = serde_json::to_string(&join_msg)
+            .map_err(|e| CoreError::ConfigParse(format!("serialize RoomJoin: {}", e)))?;
 
         sender
-            .send(Message::Text(join_json.into()))
+            .send(Message::Text(join_json))
             .await
             .map_err(|e| CoreError::WebSocketDisconnect(format!("send RoomJoin: {}", e)))?;
 
         match receiver.next().await {
             Some(Ok(Message::Text(text))) => {
-                let msg: SignalingMessage =
-                    serde_json::from_str(&text).map_err(|e| {
-                        CoreError::ConfigParse(format!(
-                            "parse RoomJoined response: {}",
-                            e
-                        ))
-                    })?;
+                let msg: SignalingMessage = serde_json::from_str(&text).map_err(|e| {
+                    CoreError::ConfigParse(format!("parse RoomJoined response: {}", e))
+                })?;
                 match msg {
                     SignalingMessage::RoomJoined { .. } => {
                         tracing::info!("Joined room '{}'", self.room_id);
@@ -136,9 +124,7 @@ impl SignalingClient {
                         )));
                     }
                     _ => {
-                        return Err(CoreError::Unknown(
-                            "unexpected response to RoomJoin".into(),
-                        ));
+                        return Err(CoreError::Unknown("unexpected response to RoomJoin".into()));
                     }
                 }
             }
@@ -148,14 +134,10 @@ impl SignalingClient {
                 ));
             }
             Some(Err(e)) => {
-                return Err(CoreError::WebSocketDisconnect(format!(
-                    "RoomJoin read error: {}", e
-                )));
+                return Err(CoreError::WebSocketDisconnect(format!("RoomJoin read error: {}", e)));
             }
             _ => {
-                return Err(CoreError::WebSocketDisconnect(
-                    "no response to RoomJoin".into(),
-                ));
+                return Err(CoreError::WebSocketDisconnect("no response to RoomJoin".into()));
             }
         }
 

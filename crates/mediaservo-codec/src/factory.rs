@@ -1,8 +1,8 @@
-use crate::backend::{ActiveEncoder, ActiveDecoder};
+use crate::backend::{ActiveDecoder, ActiveEncoder};
 use crate::codec::{BackendId, CodecId};
-use crate::config::{EncoderConfig, DecoderConfig};
-use crate::encoder::VideoEncoder;
+use crate::config::{DecoderConfig, EncoderConfig};
 use crate::decoder::VideoDecoder;
+use crate::encoder::VideoEncoder;
 use crate::error::CodecError;
 
 /// Encoder capability descriptor.
@@ -26,12 +26,20 @@ pub struct DecoderCapability {
 /// Central factory for creating video encoders and decoders.
 pub struct CodecFactory;
 
+impl Default for CodecFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodecFactory {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     pub fn create_encoder(
         &self,
-        config: EncoderConfig,
+        _config: EncoderConfig,
         _preferred_backend: Option<BackendId>,
     ) -> Result<Box<dyn VideoEncoder>, CodecError> {
         Ok(Box::new(ActiveEncoder::default()))
@@ -39,7 +47,7 @@ impl CodecFactory {
 
     pub fn create_decoder(
         &self,
-        config: DecoderConfig,
+        _config: DecoderConfig,
         _preferred_backend: Option<BackendId>,
     ) -> Result<Box<dyn VideoDecoder>, CodecError> {
         Ok(Box::new(ActiveDecoder::default()))

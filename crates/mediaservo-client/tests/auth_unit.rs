@@ -21,22 +21,23 @@ async fn canned_server(resp: Vec<u8>) -> u16 {
         let mut tmp = [0u8; 4096];
         let mut body_needed = false;
         loop {
-            if let Some(pos) = req.windows(4).position(|w| w == b"\r\n\r\n") {
-                if !body_needed {
-                    let heads = String::from_utf8_lossy(&req[..pos]).to_string();
-                    let cl: usize = heads
-                        .lines()
-                        .find_map(|l| {
-                            let (k, v) = l.split_once(':')?;
-                            k.trim().eq_ignore_ascii_case("content-length")
-                                .then(|| v.trim().parse().ok())?
-                        })
-                        .unwrap_or(0);
-                    body_needed = true;
-                    let have = req.len() - pos - 4;
-                    if have >= cl {
-                        break;
-                    }
+            if let Some(pos) = req.windows(4).position(|w| w == b"\r\n\r\n")
+                && !body_needed
+            {
+                let heads = String::from_utf8_lossy(&req[..pos]).to_string();
+                let cl: usize = heads
+                    .lines()
+                    .find_map(|l| {
+                        let (k, v) = l.split_once(':')?;
+                        k.trim()
+                            .eq_ignore_ascii_case("content-length")
+                            .then(|| v.trim().parse().ok())?
+                    })
+                    .unwrap_or(0);
+                body_needed = true;
+                let have = req.len() - pos - 4;
+                if have >= cl {
+                    break;
                 }
             }
             let n = sock.read(&mut tmp).await.unwrap_or(0);
@@ -70,9 +71,7 @@ async fn login_ok_returns_outcome() {
         r#"{"token":"jwt-abc","username":"op","role":"operator","expires_in_secs":3600}"#,
     ))
     .await;
-    let out = login(&format!("http://127.0.0.1:{port}"), "op", "pw")
-        .await
-        .unwrap();
+    let out = login(&format!("http://127.0.0.1:{port}"), "op", "pw").await.unwrap();
     assert_eq!(out.jwt, "jwt-abc");
     assert_eq!(out.username, "op");
     assert_eq!(out.role, "operator");
@@ -82,27 +81,21 @@ async fn login_ok_returns_outcome() {
 #[tokio::test]
 async fn login_401_maps_invalid_credentials() {
     let port = canned_server(response("401 Unauthorized", r#"{"error":"no such user"}"#)).await;
-    let e = login(&format!("http://127.0.0.1:{port}"), "op", "bad")
-        .await
-        .unwrap_err();
+    let e = login(&format!("http://127.0.0.1:{port}"), "op", "bad").await.unwrap_err();
     assert!(matches!(e, ClientError::InvalidCredentials), "got {e:?}");
 }
 
 #[tokio::test]
 async fn login_garbage_maps_malformed() {
     let port = canned_server(b"totally-not-http".to_vec()).await;
-    let e = login(&format!("http://127.0.0.1:{port}"), "op", "pw")
-        .await
-        .unwrap_err();
+    let e = login(&format!("http://127.0.0.1:{port}"), "op", "pw").await.unwrap_err();
     assert!(matches!(e, ClientError::MalformedResponse(_)), "got {e:?}");
 }
 
 #[tokio::test]
 async fn login_200_empty_token_rejected() {
     let port = canned_server(response("200 OK", r#"{"token":""}"#)).await;
-    let e = login(&format!("http://127.0.0.1:{port}"), "op", "pw")
-        .await
-        .unwrap_err();
+    let e = login(&format!("http://127.0.0.1:{port}"), "op", "pw").await.unwrap_err();
     assert!(matches!(e, ClientError::MalformedResponse(_)), "got {e:?}");
 }
 

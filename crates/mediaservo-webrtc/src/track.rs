@@ -6,8 +6,8 @@
 //! - TrackReceiver reads frames from remote RTCPeerConnection
 //! - TrackRef is the unified handle enum for registry management (D148)
 
-use crate::backend::{ActiveTrack, TrackWriteBackend};
 use crate::RTCError;
+use crate::backend::{ActiveTrack, TrackWriteBackend};
 
 /// Audio track configuration (D147).
 ///
@@ -69,10 +69,7 @@ impl Clone for TrackReceiver {
 
 impl std::fmt::Debug for TrackReceiver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TrackReceiver")
-            .field("id", &self.id)
-            .field("kind", &self.kind)
-            .finish()
+        f.debug_struct("TrackReceiver").field("id", &self.id).field("kind", &self.kind).finish()
     }
 }
 
@@ -113,12 +110,7 @@ pub struct TrackSender {
 }
 impl TrackSender {
     pub fn new(id: String, kind: TrackKind) -> Self {
-        Self {
-            id,
-            kind,
-            audio_config: None,
-            backend: ActiveTrack::default(),
-        }
+        Self { id, kind, audio_config: None, backend: ActiveTrack::default() }
     }
 
     /// Create an audio track with Opus configuration (D147).
@@ -144,13 +136,22 @@ impl TrackSender {
     /// The backend handles encoding. Delegates to the active backend.
     ///
     /// `data` layout: Y plane (w*h) + U plane (w*h/4) + V plane (w*h/4).
-    pub async fn write_raw_i420(&self, data: &[u8], width: u32, height: u32) -> Result<(), RTCError> {
+    pub async fn write_raw_i420(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<(), RTCError> {
         self.backend.write_raw_i420(data, width, height).await
     }
 
     /// PIT-63: 时间戳参数化 — ts_us 为帧捕获时刻 (µs); None → 后端默认 (锚定单调 wall-clock)。
     pub async fn write_raw_i420_with_ts(
-        &self, data: &[u8], width: u32, height: u32, ts_us: Option<i64>,
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        ts_us: Option<i64>,
     ) -> Result<(), RTCError> {
         self.backend.write_raw_i420_with_ts(data, width, height, ts_us).await
     }

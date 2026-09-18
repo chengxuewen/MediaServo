@@ -447,9 +447,7 @@ pub fn validate_secret_pairing(
         return Ok(()); // 无账号 → 无矩阵可绕过（PSK/设备路径不受影响）
     }
     match (jwt_secret, admin_jwt_secret) {
-        (Some(a), Some(b)) if a != b => Err(format!(
-            "jwt_secret 与 admin_jwt_secret 不一致: 账号 token 经 admin_jwt_secret 签发、             /ws 握手经 jwt_secret 验签，不一致会使账号认证静默失败并回退 PSK（矩阵绕过）。             请配置为同一 secret"
-        )),
+        (Some(a), Some(b)) if a != b => Err("jwt_secret 与 admin_jwt_secret 不一致: 账号 token 经 admin_jwt_secret 签发、             /ws 握手经 jwt_secret 验签，不一致会使账号认证静默失败并回退 PSK（矩阵绕过）。             请配置为同一 secret".to_string()),
         _ => Ok(()),
     }
 }

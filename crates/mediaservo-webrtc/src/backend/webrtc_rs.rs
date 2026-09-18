@@ -6,20 +6,20 @@ use std::sync::{Arc, Mutex};
 use super::DcBackend;
 use super::PcBackend;
 use super::TrackWriteBackend;
+use crate::RTCError;
 use crate::data_channel::{
-    RTCDataChannel as PubDataChannel, RTCDataChannelEvent, RTCDataChannelInit,
-    RTCDataChannelRx, RTCDataChannelState, RTCDataMessage,
+    RTCDataChannel as PubDataChannel, RTCDataChannelEvent, RTCDataChannelInit, RTCDataChannelRx,
+    RTCDataChannelState, RTCDataMessage,
 };
 use crate::peer_connection::{
-    RTCAnswerOptions, RTCIceCandidate, RTCOfferOptions,
-    RTCIceConnectionState, RTCIceGatheringState, RTCPeerConnectionState, RTCSignalingState,
+    RTCAnswerOptions, RTCIceCandidate, RTCIceConnectionState, RTCIceGatheringState,
+    RTCOfferOptions, RTCPeerConnectionState, RTCSignalingState,
 };
 use crate::sdp::{RTCSdpType, RTCSessionDescription};
 use crate::track::{RTCAudioTrackConfig, TrackKind, TrackReceiver};
-use crate::RTCError;
 use mediaservo_codec::{
-    CodecFactory, EncoderConfig, EncoderPreset, Bitrate, CodecId, PixelFormat,
-    VideoEncoder, VideoFrame, VideoFormat, Plane,
+    Bitrate, CodecFactory, CodecId, EncoderConfig, EncoderPreset, PixelFormat, Plane, VideoEncoder,
+    VideoFormat, VideoFrame,
 };
 
 // ── WebrtcRsPc ──
@@ -27,7 +27,8 @@ use mediaservo_codec::{
 #[derive(Clone)]
 pub(crate) struct WebrtcRsPc {
     inner: Arc<webrtc::peer_connection::RTCPeerConnection>,
-    on_track_cb: Arc<Mutex<Option<Box<dyn Fn(crate::track::TrackReceiver) + Send + Sync + 'static>>>>,
+    on_track_cb:
+        Arc<Mutex<Option<Box<dyn Fn(crate::track::TrackReceiver) + Send + Sync + 'static>>>>,
 }
 
 impl std::fmt::Debug for WebrtcRsPc {
@@ -50,7 +51,8 @@ impl WebrtcRsPc {
         f: Box<
             dyn FnMut(
                     Arc<webrtc::data_channel::RTCDataChannel>,
-                ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>
+                )
+                    -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>
                 + Send
                 + Sync
                 + 'static,
@@ -65,7 +67,8 @@ impl WebrtcRsPc {
         f: Box<
             dyn FnMut(
                     Option<webrtc::ice_transport::ice_candidate::RTCIceCandidate>,
-                ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>
+                )
+                    -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>
                 + Send
                 + Sync
                 + 'static,
@@ -80,7 +83,8 @@ impl WebrtcRsPc {
         f: Box<
             dyn FnMut(
                     webrtc::ice_transport::ice_connection_state::RTCIceConnectionState,
-                ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>
+                )
+                    -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>
                 + Send
                 + Sync
                 + 'static,
@@ -100,33 +104,26 @@ impl WebrtcRsPc {
             .await
             .map_err(|e| RTCError::RTCDataChannel(e.to_string()))?;
         let id = dc.id() as i32;
-        Ok(PubDataChannel {
-            label: label.to_string(),
-            id,
-            backend: WebrtcRsDc { inner: dc },
-        })
+        Ok(PubDataChannel { label: label.to_string(), id, backend: WebrtcRsDc { inner: dc } })
     }
 }
 
 impl PcBackend for WebrtcRsPc {
-    async fn create_offer(&self, options: &RTCOfferOptions) -> Result<RTCSessionDescription, RTCError> {
+    async fn create_offer(
+        &self,
+        options: &RTCOfferOptions,
+    ) -> Result<RTCSessionDescription, RTCError> {
         let mut opts = webrtc::peer_connection::offer_answer_options::RTCOfferOptions::default();
         if options.ice_restart {
             opts.ice_restart = true;
         }
         let sdp = self.inner.create_offer(Some(opts)).await?;
-        Ok(RTCSessionDescription {
-            sdp_type: RTCSdpType::Offer,
-            sdp: sdp.sdp,
-        })
+        Ok(RTCSessionDescription { sdp_type: RTCSdpType::Offer, sdp: sdp.sdp })
     }
 
     async fn create_answer(&self, _: &RTCAnswerOptions) -> Result<RTCSessionDescription, RTCError> {
         let sdp = self.inner.create_answer(None).await?;
-        Ok(RTCSessionDescription {
-            sdp_type: RTCSdpType::Answer,
-            sdp: sdp.sdp,
-        })
+        Ok(RTCSessionDescription { sdp_type: RTCSdpType::Answer, sdp: sdp.sdp })
     }
 
     async fn set_local_description(&self, desc: &RTCSessionDescription) -> Result<(), RTCError> {
@@ -304,7 +301,7 @@ async fn run_decode_pipeline(
     track: Arc<webrtc::track::track_remote::TrackRemote>,
     receiver: TrackReceiver,
 ) {
-    use mediaservo_codec::{CodecFactory, DecoderConfig, CodecId};
+    use mediaservo_codec::{CodecFactory, CodecId, DecoderConfig};
 
     let factory = CodecFactory::new();
     let decoder_config = DecoderConfig { codec: CodecId::H264 };
@@ -356,7 +353,11 @@ async fn run_decode_pipeline(
 }
 
 /// Push access unit to decoder and drain decoded frames to FrameSink.
-fn feed_and_drain(decoder: &mut Box<dyn mediaservo_codec::VideoDecoder>, receiver: &TrackReceiver, au: &[u8]) {
+fn feed_and_drain(
+    decoder: &mut Box<dyn mediaservo_codec::VideoDecoder>,
+    receiver: &TrackReceiver,
+    au: &[u8],
+) {
     if decoder.push_packet(au).is_err() {
         return;
     }
@@ -413,11 +414,7 @@ impl DcBackend for WebrtcRsDc {
 
     async fn send(&self, data: &[u8]) -> Result<(), RTCError> {
         let b = bytes::Bytes::copy_from_slice(data);
-        self.inner
-            .send(&b)
-            .await
-            .map(|_| ())
-            .map_err(|e| RTCError::RTCDataChannel(e.to_string()))
+        self.inner.send(&b).await.map(|_| ()).map_err(|e| RTCError::RTCDataChannel(e.to_string()))
     }
 
     async fn send_text(&self, text: &str) -> Result<(), RTCError> {
@@ -463,7 +460,8 @@ impl DcBackend for WebrtcRsDc {
 // ── WebrtcRsTrack ──
 
 pub(crate) struct WebrtcRsTrack {
-    inner: Option<Arc<webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample>>,
+    inner:
+        Option<Arc<webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample>>,
     encoder: Mutex<Option<Box<dyn VideoEncoder>>>,
 }
 
@@ -471,21 +469,14 @@ impl WebrtcRsTrack {
     pub(crate) fn new(
         track: Arc<webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample>,
     ) -> Self {
-        Self {
-            inner: Some(track),
-            encoder: Mutex::new(None),
-        }
+        Self { inner: Some(track), encoder: Mutex::new(None) }
     }
 
     /// Initialize the H.264 encoder. Called before first write_raw_i420.
     pub(crate) fn init_encoder(&self, width: u32, height: u32) -> Result<(), RTCError> {
         let config = EncoderConfig {
             codec: CodecId::H264,
-            format: VideoFormat {
-                width,
-                height,
-                pixel_format: PixelFormat::Yuv420p,
-            },
+            format: VideoFormat { width, height, pixel_format: PixelFormat::Yuv420p },
             bitrate: Bitrate::Vbr { target: 2_000_000, max: 4_000_000 },
             fps: mediaservo_codec::FrameRate { num: 30, den: 1 },
             preset: EncoderPreset::P1UltraFast,
@@ -495,9 +486,7 @@ impl WebrtcRsTrack {
         let mut encoder = factory
             .create_encoder(config.clone(), None)
             .map_err(|e| RTCError::Track(format!("codec: {e}")))?;
-        encoder
-            .configure(&config)
-            .map_err(|e| RTCError::Track(format!("codec configure: {e}")))?;
+        encoder.configure(&config).map_err(|e| RTCError::Track(format!("codec configure: {e}")))?;
         *self.encoder.lock().unwrap() = Some(encoder);
         Ok(())
     }
@@ -530,23 +519,22 @@ impl TrackWriteBackend for WebrtcRsTrack {
     ) -> Result<(), RTCError> {
         if let Some(ref track) = self.inner {
             // ponytail: audio uses config frame duration, video uses 30fps
-            let duration_ms = audio_config
-                .map(|c| c.frame_duration_ms())
-                .unwrap_or(33);
+            let duration_ms = audio_config.map(|c| c.frame_duration_ms()).unwrap_or(33);
             let sample = webrtc::media::Sample {
                 data: bytes::Bytes::copy_from_slice(data),
                 duration: std::time::Duration::from_millis(duration_ms),
                 ..Default::default()
             };
-            track
-                .write_sample(&sample)
-                .await
-                .map_err(|e| RTCError::Track(e.to_string()))?;
+            track.write_sample(&sample).await.map_err(|e| RTCError::Track(e.to_string()))?;
         }
         Ok(())
     }
     async fn write_raw_i420_with_ts(
-        &self, data: &[u8], width: u32, height: u32, ts_us: Option<i64>,
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        ts_us: Option<i64>,
     ) -> Result<(), RTCError> {
         // ponytail: auto-init encoder on first call
         if self.encoder.lock().unwrap().is_none() {
@@ -561,8 +549,11 @@ impl TrackWriteBackend for WebrtcRsTrack {
             format: VideoFormat { width, height, pixel_format: PixelFormat::Yuv420p },
             planes: vec![
                 Plane { data: data[..y_size].to_vec(), stride: width },
-                Plane { data: data[y_size..y_size+uv_size].to_vec(), stride: width/2 },
-                Plane { data: data[y_size+uv_size..y_size+2*uv_size].to_vec(), stride: width/2 },
+                Plane { data: data[y_size..y_size + uv_size].to_vec(), stride: width / 2 },
+                Plane {
+                    data: data[y_size + uv_size..y_size + 2 * uv_size].to_vec(),
+                    stride: width / 2,
+                },
             ],
             pts: ts_us.unwrap_or(0) as u64, // PIT-63: 时间戳参数化 (None → 保持 0)
             keyframe: false,
@@ -570,19 +561,18 @@ impl TrackWriteBackend for WebrtcRsTrack {
         // Push frame under lock, release before writing
         {
             let mut guard = self.encoder.lock().unwrap();
-            let enc = guard.as_mut()
-                .ok_or_else(|| RTCError::Track("encoder not initialized".into()))?;
-            enc.push_frame(&frame)
-                .map_err(|e| RTCError::Track(format!("codec push: {e}")))?;
+            let enc =
+                guard.as_mut().ok_or_else(|| RTCError::Track("encoder not initialized".into()))?;
+            enc.push_frame(&frame).map_err(|e| RTCError::Track(format!("codec push: {e}")))?;
         }
         // Drain packets — acquire/release lock per iteration
         loop {
             let packet = {
                 let mut guard = self.encoder.lock().unwrap();
-                let enc = guard.as_mut()
+                let enc = guard
+                    .as_mut()
                     .ok_or_else(|| RTCError::Track("encoder not initialized".into()))?;
-                enc.pull_packet()
-                    .map_err(|e| RTCError::Track(format!("codec pull: {e}")))?
+                enc.pull_packet().map_err(|e| RTCError::Track(format!("codec pull: {e}")))?
             };
             match packet {
                 Some(p) => self.write_frame(&p.data, TrackKind::Video, None).await?,
@@ -661,10 +651,8 @@ impl WebrtcRsFactory {
     /// the media track can be added to the RTCPeerConnection via add_track.
     pub(crate) fn create_video_track(
         &self,
-    ) -> (
-        WebrtcRsTrack,
-        std::sync::Arc<dyn webrtc::track::track_local::TrackLocal + Send + Sync>,
-    ) {
+    ) -> (WebrtcRsTrack, std::sync::Arc<dyn webrtc::track::track_local::TrackLocal + Send + Sync>)
+    {
         use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
         use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 

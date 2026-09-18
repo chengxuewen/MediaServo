@@ -4,8 +4,8 @@
 //! push 链路复用 host SFU 推流序列（CreateWebRtcTransport → answer 协商 →
 //! Connect → Produce → WebRtcTrackSink 帧注入），经 mediaservo-webrtc 抽象层（C12）。
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use mediaservo_common::protocol::{
     DtlsParameters, Fingerprint, IceCandidate, IceParameters, MediaKind, PeerRole,
@@ -13,7 +13,6 @@ use mediaservo_common::protocol::{
 };
 use mediaservo_deck::DeckError;
 use mediaservo_link::{SignalClient, SignalEvent, SignalSession};
-use mediaservo_webrtc::traits::PeerConnectionApi;
 use mediaservo_media::pipeline::generator::{
     Anchor, BitmapFont, ColorStrategy, PatternMode, SquaresConfig, TextBurner, TimestampFormat,
     TimestampOverlay, VideoFrameGenerator,
@@ -21,10 +20,11 @@ use mediaservo_media::pipeline::generator::{
 use mediaservo_media::pipeline::sink::VideoSinkWants;
 use mediaservo_media::pipeline::source::VideoSource;
 use mediaservo_webrtc::rtp::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit};
+use mediaservo_webrtc::traits::PeerConnectionApi;
 use mediaservo_webrtc::{
-    RTCPeerConnection, RTCPeerConnectionFactory, RTCConfiguration, RTCIceServer,
-    RTCIceTransportPolicy, RTCSessionDescription, RTCSdpType, TrackKind, TrackRef,
-    TrackSender, WebRtcTrackSink,
+    RTCConfiguration, RTCIceServer, RTCIceTransportPolicy, RTCPeerConnection,
+    RTCPeerConnectionFactory, RTCSdpType, RTCSessionDescription, TrackKind, TrackRef, TrackSender,
+    WebRtcTrackSink,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -86,7 +86,9 @@ impl PushSession {
         tokio::spawn(async move {
             while let Ok(ev) = signal_events.recv().await {
                 let bridge = match ev {
-                    SignalEvent::Message(SignalingMessage::Error { code, message }) if code != 0 => {
+                    SignalEvent::Message(SignalingMessage::Error { code, message })
+                        if code != 0 =>
+                    {
                         // H6: server/网关错误面（code≠0）升格 SessionEvent::Error——Message 直通
                         // 会被下游 `_ =>{}` 吞掉（5001 上游切换不可见）。
                         SessionEvent::Error(FieldError::Link(mediaservo_link::LinkError::Signal(
@@ -162,12 +164,7 @@ impl PushSession {
             .map_err(|e| FieldError::WebRtc(format!("create peer connection: {e}")))?;
 
         // 5. 标准 answerer 协商：remote SDP → add_track → create_answer (P3 v2, C18)
-        let sfu::CodecSpec {
-            payload_type,
-            name,
-            clock_rate,
-            fmtp,
-        } = sfu::codec_spec(&opts.codec);
+        let sfu::CodecSpec { payload_type, name, clock_rate, fmtp } = sfu::codec_spec(&opts.codec);
         let remote_sdp = sfu::build_remote_sdp(
             &ice_parameters,
             &dtls_parameters,
@@ -195,23 +192,22 @@ impl PushSession {
         };
 
         // 编码器后端（软/硬）偏好 — 协商前设置（对齐 host: 经 get_senders 的 RTCRtpSender）
-        if let Some(backend) = mediaservo_webrtc::rtp::RTCVideoEncoderBackend::from_config(
-            &opts.encoder_backend,
-        ) {
-            if backend != mediaservo_webrtc::rtp::RTCVideoEncoderBackend::Auto {
-                match pc.get_senders().iter().find(|s| s.track_id == track_id) {
-                    Some(rtp_sender) => {
-                        if let Err(e) = rtp_sender.set_video_encoder_backend(backend) {
-                            tracing::warn!("set_video_encoder_backend({backend:?}): {e}");
-                        }
+        if let Some(backend) =
+            mediaservo_webrtc::rtp::RTCVideoEncoderBackend::from_config(&opts.encoder_backend)
+            && backend != mediaservo_webrtc::rtp::RTCVideoEncoderBackend::Auto
+        {
+            match pc.get_senders().iter().find(|s| s.track_id == track_id) {
+                Some(rtp_sender) => {
+                    if let Err(e) = rtp_sender.set_video_encoder_backend(backend) {
+                        tracing::warn!("set_video_encoder_backend({backend:?}): {e}");
                     }
-                    None => tracing::warn!("sender not found for backend config: {track_id}"),
                 }
+                None => tracing::warn!("sender not found for backend config: {track_id}"),
             }
         }
 
         let answer = pc
-            .create_answer(&mediaservo_webrtc::RTCAnswerOptions::default())
+            .create_answer(&mediaservo_webrtc::RTCAnswerOptions)
             .await
             .map_err(|e| FieldError::WebRtc(format!("create answer: {e}")))?;
         pc.set_local_description(&answer)
@@ -256,10 +252,7 @@ impl PushSession {
             peer_id: peer_id(&cfg.role),
             transport_id: transport_id.clone(),
             dtls_parameters: DtlsParameters {
-                fingerprints: vec![Fingerprint {
-                    algorithm: "sha-256".to_string(),
-                    value: fp_hex,
-                }],
+                fingerprints: vec![Fingerprint { algorithm: "sha-256".to_string(), value: fp_hex }],
                 role: "client".to_string(),
             },
         };
@@ -283,9 +276,7 @@ impl PushSession {
 
         self.pc = Some(pc);
         self.video_sender = Some(sender);
-        let _ = self.events.send(SessionEvent::TrackPublished {
-            track: track_id.clone(),
-        });
+        let _ = self.events.send(SessionEvent::TrackPublished { track: track_id.clone() });
         tracing::info!(track = %track_id, "PushSession video published (codec={})", opts.codec);
         Ok(track_id)
     }
@@ -415,7 +406,9 @@ impl PullSession {
         tokio::spawn(async move {
             while let Ok(ev) = signal_events.recv().await {
                 let bridge = match ev {
-                    SignalEvent::Message(SignalingMessage::Error { code, message }) if code != 0 => {
+                    SignalEvent::Message(SignalingMessage::Error { code, message })
+                        if code != 0 =>
+                    {
                         // H6: 同 PushSession——错误面升格，避免被 Message 吞。
                         SessionEvent::Error(FieldError::Link(mediaservo_link::LinkError::Signal(
                             format!("[{code}] {message}"),
@@ -435,12 +428,8 @@ impl PullSession {
             }
         });
 
-        let session = Self {
-            signal,
-            pc: None,
-            events: events_tx,
-            closed: Arc::new(AtomicBool::new(false)),
-        };
+        let session =
+            Self { signal, pc: None, events: events_tx, closed: Arc::new(AtomicBool::new(false)) };
         Ok((session, events_rx))
     }
 
@@ -513,7 +502,11 @@ impl PullSession {
         let frame_tx_for_cb = frame_tx.clone();
         pc.on_track(move |receiver| {
             let tx = frame_tx_for_cb.clone();
-            tracing::info!("PullSession on_track: kind={:?} id={}", receiver.kind, receiver.track_id);
+            tracing::info!(
+                "PullSession on_track: kind={:?} id={}",
+                receiver.kind,
+                receiver.track_id
+            );
             if let TrackRef::Receiver(r) = receiver.track {
                 tracing::info!("PullSession attaching FrameSink to receiver {}", r.id);
                 r.set_frame_sink(Box::new(PullFrameSink { tx }));
@@ -579,7 +572,7 @@ impl PullSession {
             .map_err(|e| FieldError::WebRtc(format!("set remote description: {e}")))?;
 
         let answer = pc
-            .create_answer(&mediaservo_webrtc::RTCAnswerOptions::default())
+            .create_answer(&mediaservo_webrtc::RTCAnswerOptions)
             .await
             .map_err(|e| FieldError::WebRtc(format!("create answer: {e}")))?;
         tracing::info!("PullSession answer SDP:\n{}", answer.sdp);
@@ -607,13 +600,10 @@ impl PullSession {
             .await
             .map_err(FieldError::Link)?;
 
-
         let pc_state = pc.connection_state();
         let ice_state = pc.ice_connection_state();
         self.pc = Some(pc);
-        let _ = self.events.send(SessionEvent::TrackSubscribed {
-            track: producer_id.to_string(),
-        });
+        let _ = self.events.send(SessionEvent::TrackSubscribed { track: producer_id.to_string() });
         tracing::info!(
             "PullSession subscribed to producer {producer_id} (pc={pc_state:?} ice={ice_state:?})"
         );
@@ -641,9 +631,7 @@ impl PullSession {
                 Ok(SignalEvent::Message(SignalingMessage::Error { code: 0, message }))
                     if message == "transport_connected" => {}
                 Ok(SignalEvent::Message(SignalingMessage::Error { code, message })) => {
-                    return Err(FieldError::WebRtc(format!(
-                        "SFU error [{code}]: {message}"
-                    )));
+                    return Err(FieldError::WebRtc(format!("SFU error [{code}]: {message}")));
                 }
                 Ok(SignalEvent::Disconnected { reason }) => {
                     return Err(FieldError::InvalidState(format!(
@@ -688,9 +676,7 @@ impl mediaservo_webrtc::track::FrameSink for PullFrameSink {
     }
 }
 
-/// 从 deck/link 错误便捷转换为 FieldError（供后续 slice 使用）。
-
-/// 消费信令直到 `WebRtcTransportCreated`（Push/Pull 共用）。
+/// 从 deck/link 错误便捷转换为 FieldError（供后续 slice 使用）。/// 消费信令直到 `WebRtcTransportCreated`（Push/Pull 共用）。
 /// `events` 必须在发送请求前已订阅（broadcast 无历史重放，先订阅防丢）。
 async fn await_transport_created_msg(
     events: &mut tokio::sync::broadcast::Receiver<SignalEvent>,
@@ -704,20 +690,13 @@ async fn await_transport_created_msg(
                 ice_candidates,
                 ..
             })) => {
-                return Ok((
-                    transport_id,
-                    ice_parameters,
-                    dtls_parameters,
-                    ice_candidates,
-                ));
+                return Ok((transport_id, ice_parameters, dtls_parameters, ice_candidates));
             }
             // transport_connected 是 ConnectWebRtcTransport 的确认（非真错误，server 惯例）
-            Ok(SignalEvent::Message(SignalingMessage::Error { code, message }))
+            Ok(SignalEvent::Message(SignalingMessage::Error { code: _, message }))
                 if message == "transport_connected" => {}
             Ok(SignalEvent::Message(SignalingMessage::Error { code, message })) => {
-                return Err(FieldError::WebRtc(format!(
-                    "SFU error [{code}]: {message}"
-                )));
+                return Err(FieldError::WebRtc(format!("SFU error [{code}]: {message}")));
             }
             Ok(SignalEvent::Disconnected { reason }) => {
                 return Err(FieldError::InvalidState(format!(
@@ -744,6 +723,7 @@ fn peer_id(role: &PeerRole) -> String {
     }
 }
 
+#[allow(dead_code)] // 部分 feature 姿态转换位（PIT-203 族：默认姿态 unused ≠ 全姿态 unused）
 pub(crate) fn deck_err(e: DeckError) -> FieldError {
     FieldError::Deck(e)
 }

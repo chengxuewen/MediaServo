@@ -4,17 +4,15 @@
 //! - GstCaptureSource: wraps crate::pipeline::Pipeline as MediaSource<InternalPacket>
 //! - WebrtcOutputSink: wraps crate::webrtc_transport::WebrtcTransport as MediaSink<InternalPacket>
 
+#![allow(dead_code)] // 双身份文件：host-legacy bin 的 `mod` 形态在用（T1.3 翻案），独立 bin 编译形态全 dead = 结构噪音
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
-
 use mediaservo_media::error::MediaError;
-use mediaservo_media::pipeline::core::{
-    FormatSpec, InternalPacket, MediaSink, MediaSource, MediaType, NodeCapability,
-    NodeInfo, PipelineNode,
-};
 #[cfg(feature = "gstreamer")]
 use mediaservo_media::pipeline::core::{EncodedFragment, FragmentFlags, FrameTiming};
+use mediaservo_media::pipeline::core::{
+    FormatSpec, InternalPacket, MediaSource, MediaType, NodeCapability, NodeInfo, PipelineNode,
+};
 
 type Result<T> = std::result::Result<T, MediaError>;
 
@@ -66,9 +64,8 @@ fn extract_sps_pps(data: &[u8]) -> Vec<u8> {
     let mut offset = 0;
     while let Some((nal_type, next)) = scan_nal_header(data, offset) {
         // find the actual start code position for slicing
-        let start_offset = (offset..next)
-            .find(|&i| data[i] == 0x00 && data[i + 1] == 0x00)
-            .unwrap_or(offset);
+        let start_offset =
+            (offset..next).find(|&i| data[i] == 0x00 && data[i + 1] == 0x00).unwrap_or(offset);
         if nal_type == 7 || nal_type == 8 {
             out.extend_from_slice(&data[start_offset..next]);
         }
@@ -114,11 +111,7 @@ impl NodeInfo for GstCaptureSource {
 
     fn capabilities(&self) -> NodeCapability {
         NodeCapability {
-            input: FormatSpec {
-                media_type: MediaType::Both,
-                codecs: None,
-                pixel_formats: vec![],
-            },
+            input: FormatSpec { media_type: MediaType::Both, codecs: None, pixel_formats: vec![] },
             output: FormatSpec {
                 media_type: MediaType::Encoded,
                 codecs: None,
@@ -152,17 +145,11 @@ impl MediaSource for GstCaptureSource {
                 // accumulate SPS/PPS for init_data
                 let sps_pps = extract_sps_pps(&data);
                 if !sps_pps.is_empty() {
-                    self.sps_pps_buf
-                        .get_or_insert_with(Vec::new)
-                        .extend(&sps_pps);
+                    self.sps_pps_buf.get_or_insert_with(Vec::new).extend(&sps_pps);
                 }
 
                 // pass accumulated init_data with first data frame, then clear
-                let init_data = if has_data_nal(&data) {
-                    self.sps_pps_buf.take()
-                } else {
-                    None
-                };
+                let init_data = if has_data_nal(&data) { self.sps_pps_buf.take() } else { None };
 
                 Ok(Some(InternalPacket::Encoded(EncodedFragment {
                     track_id: "capture".into(),
@@ -172,11 +159,7 @@ impl MediaSource for GstCaptureSource {
                         duration: 0,
                         wall_clock: Some(std::time::Instant::now()),
                     },
-                    flags: FragmentFlags {
-                        keyframe: is_kf,
-                        independent: true,
-                        discardable: false,
-                    },
+                    flags: FragmentFlags { keyframe: is_kf, independent: true, discardable: false },
                     codec: "h264".into(),
                     init_data,
                     payload: data,
@@ -210,11 +193,7 @@ impl NodeInfo for GstCaptureSource {
 
     fn capabilities(&self) -> NodeCapability {
         NodeCapability {
-            input: FormatSpec {
-                media_type: MediaType::Both,
-                codecs: None,
-                pixel_formats: vec![],
-            },
+            input: FormatSpec { media_type: MediaType::Both, codecs: None, pixel_formats: vec![] },
             output: FormatSpec {
                 media_type: MediaType::Encoded,
                 codecs: None,
@@ -255,9 +234,7 @@ pub struct WebrtcOutputSink {
 
 #[cfg(feature = "webrtc-p2p")]
 impl WebrtcOutputSink {
-    pub fn new(
-        transport: Arc<crate::webrtc_transport::WebrtcTransport>,
-    ) -> Self {
+    pub fn new(transport: Arc<crate::webrtc_transport::WebrtcTransport>) -> Self {
         // ponytail: bounded channel (capacity 4) replaces fire-and-forget spawn.
         // Full channel → drop oldest frame. Single consumer drains sequentially,
         // avoiding unbounded task accumulation on DC backpressure.
@@ -267,10 +244,7 @@ impl WebrtcOutputSink {
                 let _ = transport.send_frame(&data).await;
             }
         });
-        Self {
-            _drain_handle: drain_handle,
-            frame_tx,
-        }
+        Self { _drain_handle: drain_handle, frame_tx }
     }
 }
 

@@ -6,10 +6,10 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use mediaservo_webrtc::peer_connection::{RTCAnswerOptions, RTCOfferOptions, RTCConfiguration};
-use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
-use mediaservo_webrtc::traits::PeerConnectionApi;
 use mediaservo_webrtc::RTCError;
+use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
+use mediaservo_webrtc::peer_connection::{RTCAnswerOptions, RTCConfiguration, RTCOfferOptions};
+use mediaservo_webrtc::traits::PeerConnectionApi;
 
 /// FPS counter — tracks frame count over time.
 ///
@@ -26,10 +26,7 @@ pub struct FpsCounter {
 
 impl FpsCounter {
     pub fn new() -> Self {
-        Self {
-            count: AtomicU64::new(0),
-            started: Instant::now(),
-        }
+        Self { count: AtomicU64::new(0), started: Instant::now() }
     }
 
     pub fn tick(&self) {
@@ -42,11 +39,7 @@ impl FpsCounter {
 
     pub fn fps(&self) -> f64 {
         let elapsed = self.started.elapsed().as_secs_f64();
-        if elapsed > 0.0 {
-            self.count() as f64 / elapsed
-        } else {
-            0.0
-        }
+        if elapsed > 0.0 { self.count() as f64 / elapsed } else { 0.0 }
     }
 }
 
@@ -67,7 +60,7 @@ pub async fn exchange_sdp(
 
     // 2. PC2 receives offer, creates answer
     pc2.set_remote_description(&offer).await?;
-    let answer = pc2.create_answer(&RTCAnswerOptions::default()).await?;
+    let answer = pc2.create_answer(&RTCAnswerOptions).await?;
     pc2.set_local_description(&answer).await?;
 
     // 3. PC1 receives answer
@@ -83,8 +76,7 @@ pub async fn exchange_sdp(
 ///
 /// # Panics
 /// If SDP exchange fails, this function panics.
-pub async fn create_connected_pair(
-) -> Result<
+pub async fn create_connected_pair() -> Result<
     (
         mediaservo_webrtc::peer_connection::RTCPeerConnection,
         mediaservo_webrtc::peer_connection::RTCPeerConnection,
@@ -92,12 +84,8 @@ pub async fn create_connected_pair(
     RTCError,
 > {
     let factory = RTCPeerConnectionFactory::new();
-    let pc1 = factory
-        .create_peer_connection(RTCConfiguration::default())
-        .await?;
-    let pc2 = factory
-        .create_peer_connection(RTCConfiguration::default())
-        .await?;
+    let pc1 = factory.create_peer_connection(RTCConfiguration::default()).await?;
+    let pc2 = factory.create_peer_connection(RTCConfiguration::default()).await?;
 
     exchange_sdp(&pc1, &pc2).await?;
 
@@ -124,10 +112,10 @@ pub fn generate_test_frame(width: u32, height: u32, frame_index: u64) -> Vec<u8>
         for x in 0..width {
             let bar = ((x + shift) / bar_width) % 4;
             let y_val: u8 = match bar {
-                0 => 0,    // black
-                1 => 128,  // gray
-                2 => 200,  // light gray
-                _ => 255,  // white
+                0 => 0,   // black
+                1 => 128, // gray
+                2 => 200, // light gray
+                _ => 255, // white
             };
             frame[(y * width + x) as usize] = y_val;
         }
@@ -168,13 +156,8 @@ mod tests {
     fn generate_frame_has_correct_i420_size() {
         for (w, h) in [(320, 240), (640, 480), (1920, 1080)] {
             let frame = generate_test_frame(w, h, 0);
-            let expected =
-                (w * h) as usize + 2 * ((w * h) / 4) as usize;
-            assert_eq!(
-                frame.len(),
-                expected,
-                "size mismatch for {w}x{h}"
-            );
+            let expected = (w * h) as usize + 2 * ((w * h) / 4) as usize;
+            assert_eq!(frame.len(), expected, "size mismatch for {w}x{h}");
         }
     }
 
@@ -182,9 +165,6 @@ mod tests {
     fn generate_frame_changes_with_index() {
         let frame0 = generate_test_frame(320, 240, 0);
         let frame50 = generate_test_frame(320, 240, 50);
-        assert_ne!(
-            frame0, frame50,
-            "frames with different indices should differ"
-        );
+        assert_ne!(frame0, frame50, "frames with different indices should differ");
     }
 }

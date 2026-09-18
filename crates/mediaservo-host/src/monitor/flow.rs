@@ -194,16 +194,11 @@ impl FlowMonitor {
                 _ => 0.0,
             };
             let (fps, bps) = if st.frames >= 2 && window_secs > 0.0 {
-                (
-                    (st.frames - 1) as f64 / window_secs,
-                    (st.bytes as f64 / window_secs) as u64,
-                )
+                ((st.frames - 1) as f64 / window_secs, (st.bytes as f64 / window_secs) as u64)
             } else {
                 (0.0, 0)
             };
-            let stalled = st
-                .last_arrival
-                .is_none_or(|t| t.elapsed() > *threshold);
+            let stalled = st.last_arrival.is_none_or(|t| t.elapsed() > *threshold);
             out.topics.push(TopicFlow {
                 topic: name.clone(),
                 fps,
@@ -220,7 +215,8 @@ impl FlowMonitor {
         }
         for (id, state) in &self.streams {
             let st = state.lock().expect("stream state lock");
-            let (bytes_sent, frames_encoded, frame_width, frame_height, connected) = match &st.last {
+            let (bytes_sent, frames_encoded, frame_width, frame_height, connected) = match &st.last
+            {
                 Some(s) => (
                     s.bytes_sent,
                     s.frames_encoded,
@@ -239,7 +235,8 @@ impl FlowMonitor {
                 connected,
                 codec: st.last.as_ref().map(|s| s.codec.clone()).unwrap_or_default(),
                 avg_encode_ms: st.last.as_ref().and_then(|s| s.avg_encode_ms),
-                encoder_implementation: st.last
+                encoder_implementation: st
+                    .last
                     .as_ref()
                     .and_then(|s| s.encoder_implementation.clone()),
             });
@@ -257,7 +254,10 @@ fn stall_threshold(floor: Duration, fps: u32) -> Duration {
 }
 
 /// 帧 drain 任务：latest-slot 到达 → 窗口状态更新（计数/字节/ts/到达时刻）。
-fn spawn_frame_drain(stream: FrameStream, state: Arc<Mutex<TopicState>>) -> tokio::task::JoinHandle<()> {
+fn spawn_frame_drain(
+    stream: FrameStream,
+    state: Arc<Mutex<TopicState>>,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(f) = stream.recv().await {
             let mut st = state.lock().expect("topic state lock");
@@ -304,18 +304,12 @@ mod tests {
     fn stall_threshold_scales_for_low_fps() {
         // 0.25fps: 2×4s = 8s > 2s floor
         assert_eq!(stall_threshold(Duration::from_secs(2), 1), Duration::from_secs(2));
-        assert_eq!(
-            stall_threshold(Duration::from_secs(2), 1),
-            Duration::from_secs(2)
-        );
+        assert_eq!(stall_threshold(Duration::from_secs(2), 1), Duration::from_secs(2));
     }
 
     #[test]
     fn stall_threshold_zero_fps_falls_back_to_floor() {
-        assert_eq!(
-            stall_threshold(Duration::from_millis(300), 0),
-            Duration::from_millis(300)
-        );
+        assert_eq!(stall_threshold(Duration::from_millis(300), 0), Duration::from_millis(300));
     }
 
     #[test]

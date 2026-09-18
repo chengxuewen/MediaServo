@@ -4,19 +4,32 @@
 //! and compile-time type alias dispatch via cfg gates.
 //! Zero dyn overhead — all dispatch is monomorphized.
 
+use crate::RTCError;
 use crate::data_channel::{RTCDataChannel, RTCDataChannelRx, RTCDataChannelState};
-use crate::peer_connection::{RTCAnswerOptions, RTCIceCandidate, RTCOfferOptions, RTCIceConnectionState, RTCIceGatheringState, RTCPeerConnectionState, RTCSignalingState, RTCConfiguration};
+use crate::peer_connection::{
+    RTCAnswerOptions, RTCConfiguration, RTCIceCandidate, RTCIceConnectionState,
+    RTCIceGatheringState, RTCOfferOptions, RTCPeerConnectionState, RTCSignalingState,
+};
+use crate::rtp::{
+    RTCRtpCapabilities, RTCRtpCodecCapability, RTCRtpParameters, RTCRtpTransceiver,
+    RTCRtpTransceiverDirection, RTCRtpTransceiverInit,
+};
 use crate::sdp::RTCSessionDescription;
 use crate::stats::RTCStats;
 use crate::track::{RTCAudioTrackConfig, TrackKind, TrackReceiver, TrackSender};
-use crate::rtp::{RTCRtpCapabilities, RTCRtpCodecCapability, RTCRtpParameters, RTCRtpTransceiver, RTCRtpTransceiverDirection, RTCRtpTransceiverInit};
-use crate::RTCError;
 
 // ── Traits ──
 
+#[allow(dead_code)] // W3C API 镜像默认方法位（PIT-65 官方对齐保留，包装层未消费 = C18）
 pub(crate) trait PcBackend: Send + Sync + 'static {
-    async fn create_offer(&self, options: &RTCOfferOptions) -> Result<RTCSessionDescription, RTCError>;
-    async fn create_answer(&self, options: &RTCAnswerOptions) -> Result<RTCSessionDescription, RTCError>;
+    async fn create_offer(
+        &self,
+        options: &RTCOfferOptions,
+    ) -> Result<RTCSessionDescription, RTCError>;
+    async fn create_answer(
+        &self,
+        options: &RTCAnswerOptions,
+    ) -> Result<RTCSessionDescription, RTCError>;
     async fn set_local_description(&self, desc: &RTCSessionDescription) -> Result<(), RTCError>;
     async fn set_remote_description(&self, desc: &RTCSessionDescription) -> Result<(), RTCError>;
     async fn add_ice_candidate(&self, candidate: &RTCIceCandidate) -> Result<(), RTCError>;
@@ -57,13 +70,21 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
     }
 
     /// W3C addTransceiver(kind, init) — kind 版（同步，v2）
-    fn add_transceiver(&self, kind: TrackKind, init: &RTCRtpTransceiverInit) -> Result<RTCRtpTransceiver, RTCError> {
+    fn add_transceiver(
+        &self,
+        _kind: TrackKind,
+        _init: &RTCRtpTransceiverInit,
+    ) -> Result<RTCRtpTransceiver, RTCError> {
         tracing::warn!("add_transceiver: not supported by backend");
         Err(RTCError::NotSupported("add_transceiver".into()))
     }
 
     /// W3C addTransceiver(track, init) — track 版重载（v2，P3 核心：kind 版会产生无法写帧的空 track）
-    fn add_transceiver_with_track(&self, track: &TrackSender, init: &RTCRtpTransceiverInit) -> Result<RTCRtpTransceiver, RTCError> {
+    fn add_transceiver_with_track(
+        &self,
+        _track: &TrackSender,
+        _init: &RTCRtpTransceiverInit,
+    ) -> Result<RTCRtpTransceiver, RTCError> {
         tracing::warn!("add_transceiver_with_track: not supported by backend");
         Err(RTCError::NotSupported("add_transceiver_with_track".into()))
     }
@@ -80,15 +101,24 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Err(RTCError::NotSupported("receiver_get_parameters".into()))
     }
 
-/// W3C RTCRtpSender.setParameters — v2 补
-fn sender_set_parameters(&self, _track_id: &str, _params: &RTCRtpParameters) -> Result<(), RTCError> {
-tracing::warn!("sender_set_parameters: not supported by backend");
-Err(RTCError::NotSupported("sender_set_parameters".into()))
+    /// W3C RTCRtpSender.setParameters — v2 补
+    fn sender_set_parameters(
+        &self,
+        _track_id: &str,
+        _params: &RTCRtpParameters,
+    ) -> Result<(), RTCError> {
+        tracing::warn!("sender_set_parameters: not supported by backend");
+        Err(RTCError::NotSupported("sender_set_parameters".into()))
     }
 
     /// v2 (encoder-bitrate): 设置发送编码器 min/max 码率（bps）。
     /// 默认 NotSupported + warn（C15）; webrtc-sys 后端 override 为 cxx 保真往返。
-    fn sender_set_encoding_bitrate(&self, _track_id: &str, _min_bps: Option<u64>, _max_bps: Option<u64>) -> Result<(), RTCError> {
+    fn sender_set_encoding_bitrate(
+        &self,
+        _track_id: &str,
+        _min_bps: Option<u64>,
+        _max_bps: Option<u64>,
+    ) -> Result<(), RTCError> {
         tracing::warn!("sender_set_encoding_bitrate: not supported by backend");
         Err(RTCError::NotSupported("sender_set_encoding_bitrate".into()))
     }
@@ -96,7 +126,11 @@ Err(RTCError::NotSupported("sender_set_parameters".into()))
     /// v2 (multi-stream P1): 设置发送编码器帧率上限（fps）。
     /// 默认 NotSupported + warn（C15）; webrtc-sys 后端 override（复制 bitrate 模式，
     /// get_parameters → enc[].max_framerate → set_parameters）。
-    fn sender_set_encoding_framerate(&self, _track_id: &str, _max_fps: Option<f64>) -> Result<(), RTCError> {
+    fn sender_set_encoding_framerate(
+        &self,
+        _track_id: &str,
+        _max_fps: Option<f64>,
+    ) -> Result<(), RTCError> {
         tracing::warn!("sender_set_encoding_framerate: not supported by backend");
         Err(RTCError::NotSupported("sender_set_encoding_framerate".into()))
     }
@@ -104,21 +138,37 @@ Err(RTCError::NotSupported("sender_set_parameters".into()))
     /// v2 (encoder-backend-codec-config T1): 设置发送编码器后端（软/硬实现选择）。
     /// 经 track_id 分派（sender.track().id() 匹配, request_key_frame 同模式）。
     /// 默认 NotSupported + warn（C15: 错误分支必须打日志）。
-    fn sender_set_video_encoder_backend(&self, track_id: &str, backend: crate::rtp::RTCVideoEncoderBackend) -> Result<(), RTCError> {
-        tracing::warn!("sender_set_video_encoder_backend({track_id}, {backend:?}): not supported by backend");
+    fn sender_set_video_encoder_backend(
+        &self,
+        track_id: &str,
+        backend: crate::rtp::RTCVideoEncoderBackend,
+    ) -> Result<(), RTCError> {
+        tracing::warn!(
+            "sender_set_video_encoder_backend({track_id}, {backend:?}): not supported by backend"
+        );
         Err(RTCError::NotSupported("sender_set_video_encoder_backend".into()))
     }
 
     /// v2 (qos-framerate-priority): 设置发送端降级偏好（RtpParameters 级）。
     /// 默认 NotSupported + warn（C15）; webrtc-sys 后端 override 为 cxx 保真往返。
-    fn sender_set_degradation_preference(&self, track_id: &str, pref: crate::rtp::RTCDegradationPreference) -> Result<(), RTCError> {
-        tracing::warn!("sender_set_degradation_preference({track_id}, {pref:?}): not supported by backend");
+    fn sender_set_degradation_preference(
+        &self,
+        track_id: &str,
+        pref: crate::rtp::RTCDegradationPreference,
+    ) -> Result<(), RTCError> {
+        tracing::warn!(
+            "sender_set_degradation_preference({track_id}, {pref:?}): not supported by backend"
+        );
         Err(RTCError::NotSupported("sender_set_degradation_preference".into()))
     }
 
     /// v2 (qos-framerate-priority): 设置发送端视频 track 内容 hint。
     /// 默认 NotSupported + warn（C15）; webrtc-sys 后端 override（media_to_video → set_content_hint）。
-    fn sender_set_content_hint(&self, track_id: &str, hint: crate::rtp::RTCRtpContentHint) -> Result<(), RTCError> {
+    fn sender_set_content_hint(
+        &self,
+        track_id: &str,
+        hint: crate::rtp::RTCRtpContentHint,
+    ) -> Result<(), RTCError> {
         tracing::warn!("sender_set_content_hint({track_id}, {hint:?}): not supported by backend");
         Err(RTCError::NotSupported("sender_set_content_hint".into()))
     }
@@ -160,13 +210,19 @@ Err(RTCError::NotSupported("sender_set_parameters".into()))
     }
 
     /// W3C 静态 RTCRtpSender.getCapabilities(kind)
-    fn get_sender_capabilities(&self, _kind: TrackKind) -> Result<Option<RTCRtpCapabilities>, RTCError> {
+    fn get_sender_capabilities(
+        &self,
+        _kind: TrackKind,
+    ) -> Result<Option<RTCRtpCapabilities>, RTCError> {
         tracing::warn!("get_sender_capabilities: not supported by backend");
         Err(RTCError::NotSupported("get_sender_capabilities".into()))
     }
 
     /// W3C 静态 RTCRtpReceiver.getCapabilities(kind)
-    fn get_receiver_capabilities(&self, _kind: TrackKind) -> Result<Option<RTCRtpCapabilities>, RTCError> {
+    fn get_receiver_capabilities(
+        &self,
+        _kind: TrackKind,
+    ) -> Result<Option<RTCRtpCapabilities>, RTCError> {
         tracing::warn!("get_receiver_capabilities: not supported by backend");
         Err(RTCError::NotSupported("get_receiver_capabilities".into()))
     }
@@ -200,7 +256,11 @@ Err(RTCError::NotSupported("sender_set_parameters".into()))
     }
 
     /// W3C RTCRtpTransceiver.setDirection — v2 补（经 mid 分派）
-    fn transceiver_set_direction(&self, _mid: &str, _dir: RTCRtpTransceiverDirection) -> Result<(), RTCError> {
+    fn transceiver_set_direction(
+        &self,
+        _mid: &str,
+        _dir: RTCRtpTransceiverDirection,
+    ) -> Result<(), RTCError> {
         tracing::warn!("transceiver_set_direction: not supported by backend");
         Err(RTCError::NotSupported("transceiver_set_direction".into()))
     }
@@ -212,7 +272,11 @@ Err(RTCError::NotSupported("sender_set_parameters".into()))
     }
 
     /// W3C RTCRtpTransceiver.setCodecPreferences — v2 补
-    fn transceiver_set_codec_preferences(&self, _track_id: &str, _codecs: Vec<RTCRtpCodecCapability>) -> Result<(), RTCError> {
+    fn transceiver_set_codec_preferences(
+        &self,
+        _track_id: &str,
+        _codecs: Vec<RTCRtpCodecCapability>,
+    ) -> Result<(), RTCError> {
         tracing::warn!("transceiver_set_codec_preferences: not supported by backend");
         Err(RTCError::NotSupported("transceiver_set_codec_preferences".into()))
     }
@@ -220,19 +284,13 @@ Err(RTCError::NotSupported("sender_set_parameters".into()))
     /// Register a local track with the RTCPeerConnection for RTP transmission.
     /// Backends that support track registration (webrtc-sys) call into
     /// libwebrtc to activate the track. Other backends store in the wrapper.
-    fn register_track(
-        &self, _track_id: &str, _kind: TrackKind,
-    ) -> Result<(), RTCError> {
+    fn register_track(&self, _track_id: &str, _kind: TrackKind) -> Result<(), RTCError> {
         Ok(())
     }
 
     /// Register callback for trickled local ICE candidates (P2P 需要完整转发).
     /// 默认空实现（webrtc-rs 后端如有需要自行实现）。
-    fn set_on_ice_candidate(
-        &self,
-        _cb: Box<dyn Fn(RTCIceCandidate) + Send + Sync + 'static>,
-    ) {
-    }
+    fn set_on_ice_candidate(&self, _cb: Box<dyn Fn(RTCIceCandidate) + Send + Sync + 'static>) {}
     /// Register callback for ICE connection state changes (monitoring).
     fn set_on_ice_connection_state_change(
         &self,
@@ -275,9 +333,7 @@ pub trait TrackWriteBackend: Send + Sync + 'static {
     ///
     /// `data` layout: Y plane (w*h) + U plane (w*h/4) + V plane (w*h/4).
     /// 默认方法委托 with_ts(None) — 单入口避免双实现漂移 (PIT-54 教训)。
-    async fn write_raw_i420(
-        &self, data: &[u8], width: u32, height: u32,
-    ) -> Result<(), RTCError> {
+    async fn write_raw_i420(&self, data: &[u8], width: u32, height: u32) -> Result<(), RTCError> {
         self.write_raw_i420_with_ts(data, width, height, None).await
     }
 
@@ -285,7 +341,11 @@ pub trait TrackWriteBackend: Send + Sync + 'static {
     /// None → 后端内部默认时间戳 (webrtc-sys: 锚定单调 wall-clock; webrtc-rs: pts=0)。
     /// 相机接入时传入 V4L2 buffer timestamp (µs)。
     async fn write_raw_i420_with_ts(
-        &self, _data: &[u8], _width: u32, _height: u32, _ts_us: Option<i64>,
+        &self,
+        _data: &[u8],
+        _width: u32,
+        _height: u32,
+        _ts_us: Option<i64>,
     ) -> Result<(), RTCError> {
         Ok(())
     }
@@ -294,7 +354,9 @@ pub trait TrackWriteBackend: Send + Sync + 'static {
 // ── Mutual exclusion guard ──
 
 #[cfg(all(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys"))]
-compile_error!("Only one backend can be enabled at a time. Choose either backend-webrtc-rs or backend-webrtc-sys.");
+compile_error!(
+    "Only one backend can be enabled at a time. Choose either backend-webrtc-rs or backend-webrtc-sys."
+);
 
 // ── Module declarations ──
 
@@ -305,7 +367,6 @@ pub(crate) mod webrtc_rs;
 #[cfg(feature = "backend-webrtc-sys")]
 pub mod webrtc_sys;
 // ── Type alias dispatch (compile-time, monomorphized) ──
-
 
 #[cfg(feature = "backend-webrtc-rs")]
 pub type ActivePc = webrtc_rs::WebrtcRsPc;

@@ -3,6 +3,7 @@
 //! Receives "STOP\n" to trigger emergency shutdown. Used for out-of-band
 //! control when the normal signaling channel is unavailable.
 
+#![allow(dead_code)] // 双身份文件：host-legacy bin 的 `mod` 形态在用（T1.3 翻案），独立 bin 编译形态全 dead = 结构噪音
 use mediaservo_common::error::CoreError;
 use tokio::net::UdpSocket;
 

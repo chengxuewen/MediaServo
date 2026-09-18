@@ -34,10 +34,14 @@ pub(super) fn map_status_exit(
     if probe != Some(true) {
         return 1;
     }
-    if let Some(Some(w)) = web_status && !is_up(w) {
+    if let Some(Some(w)) = web_status
+        && !is_up(w)
+    {
         return 1;
     }
-    if let Some(Some(w)) = weaknet_status && !is_up(w) {
+    if let Some(Some(w)) = weaknet_status
+        && !is_up(w)
+    {
         return 1;
     }
     0
@@ -55,7 +59,9 @@ pub(super) fn cmd_status(args: &mut dyn Iterator<Item = String>) -> i32 {
             return 2;
         }
     };
-    if !dir.join("etc").join("server.yaml").exists() && !dir.join("run").join("oxfile.toml").exists() {
+    if !dir.join("etc").join("server.yaml").exists()
+        && !dir.join("run").join("oxfile.toml").exists()
+    {
         eprintln!("status: {} 非实例目录（无 etc/server.yaml 与 run/oxfile.toml）", dir.display());
         return 2;
     }
@@ -69,8 +75,10 @@ pub(super) fn cmd_status(args: &mut dyn Iterator<Item = String>) -> i32 {
     let srv_name = server_product();
     let web_name = server_web_app();
     let wnet_name = WEAKNET_APP;
-    let server = rows.iter().find(|p| p.get("name").and_then(|v| v.as_str()) == Some(srv_name.as_str()));
-    let web = rows.iter().find(|p| p.get("name").and_then(|v| v.as_str()) == Some(web_name.as_str()));
+    let server =
+        rows.iter().find(|p| p.get("name").and_then(|v| v.as_str()) == Some(srv_name.as_str()));
+    let web =
+        rows.iter().find(|p| p.get("name").and_then(|v| v.as_str()) == Some(web_name.as_str()));
     let wnet = rows.iter().find(|p| p.get("name").and_then(|v| v.as_str()) == Some(wnet_name));
     let port = std::fs::read_to_string(dir.join("etc").join("server.yaml"))
         .ok()
@@ -82,9 +90,7 @@ pub(super) fn cmd_status(args: &mut dyn Iterator<Item = String>) -> i32 {
         None => "unreachable",
     };
     let status_of = |row: Option<&serde_json::Value>| -> String {
-        row.and_then(|p| p.get("status").and_then(|s| s.as_str()))
-            .unwrap_or("?")
-            .to_string()
+        row.and_then(|p| p.get("status").and_then(|s| s.as_str())).unwrap_or("?").to_string()
     };
     let pid_of = |row: Option<&serde_json::Value>| -> String {
         row.and_then(|p| p.get("pid").and_then(|v| v.as_u64()))
@@ -160,7 +166,9 @@ pub(super) fn find_other_server_dir(my_dir: &Path) -> Option<PathBuf> {
                 continue;
             };
             let cmdline = cmdline.replace('\0', " ");
-            if let Some(d) = parse_server_cmdline(&cmdline) && absolute(&d) != mine {
+            if let Some(d) = parse_server_cmdline(&cmdline)
+                && absolute(&d) != mine
+            {
                 return Some(d);
             }
         }
@@ -207,7 +215,9 @@ pub(super) fn list_registered_apps(dir: &Path) -> Result<Vec<String>, String> {
         .iter()
         .filter(|p| {
             p.get("namespace").and_then(|n| n.as_str()) == Some(ns.as_str())
-                || p.get("name").and_then(|n| n.as_str()).is_some_and(|n| ours.iter().any(|o| o == n))
+                || p.get("name")
+                    .and_then(|n| n.as_str())
+                    .is_some_and(|n| ours.iter().any(|o| o == n))
         })
         .filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(String::from))
         .collect())
@@ -236,7 +246,11 @@ pub(super) fn cmd_doctor(args: &mut dyn Iterator<Item = String>) -> i32 {
         "oxmgr 可用",
         "不在 PATH（deploy 会锁定于 <prefix>/bin——export PATH 或重新 deploy）",
     );
-    check(which("caddy").is_some(), "caddy 在 PATH", "裸机需安装 caddy（dev --no-web 形态可忽略本项）");
+    check(
+        which("caddy").is_some(),
+        "caddy 在 PATH",
+        "裸机需安装 caddy（dev --no-web 形态可忽略本项）",
+    );
 
     let cfg_path = dir.join("etc").join("server.yaml");
     let cfg = std::fs::read_to_string(&cfg_path).ok();
@@ -245,7 +259,8 @@ pub(super) fn cmd_doctor(args: &mut dyn Iterator<Item = String>) -> i32 {
         "server.yaml 可解析",
         "缺失或 listen.port 解析失败——先 init",
     );
-    let parsed = cfg_path.exists().then(|| mediaservo_server::config::load(&cfg_path).ok()).flatten();
+    let parsed =
+        cfg_path.exists().then(|| mediaservo_server::config::load(&cfg_path).ok()).flatten();
     check(parsed.is_some(), "server.yaml 全字段合法", "ServerConfig 反序列化失败（start 会拒绝）");
     for f in ["devices.yaml", "accounts.yaml"] {
         let p = dir.join("etc").join(f);
@@ -298,7 +313,9 @@ pub(super) fn cmd_logs(args: &mut dyn Iterator<Item = String>) -> i32 {
         match a.as_str() {
             "server" if target.is_none() && dir_token.is_none() => target = Some(server_product()),
             "web" if target.is_none() && dir_token.is_none() => target = Some(server_web_app()),
-            "weaknet" if target.is_none() && dir_token.is_none() => target = Some(WEAKNET_APP.to_string()),
+            "weaknet" if target.is_none() && dir_token.is_none() => {
+                target = Some(WEAKNET_APP.to_string())
+            }
             "all" if target.is_none() && dir_token.is_none() => target = Some("all".to_string()),
             "--lines" => {
                 flags.push(a.to_string());
@@ -328,7 +345,6 @@ pub(super) fn cmd_logs(args: &mut dyn Iterator<Item = String>) -> i32 {
     run_oxmgr(Some(&dir), &refs)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,34 +352,58 @@ mod tests {
     #[test]
     fn status_exit_contract() {
         // 全绿 = 0
-        assert_eq!(map_status_exit(Some("running"), Some(Some("running")), Some(Some("running")), Some(true)), 0);
+        assert_eq!(
+            map_status_exit(
+                Some("running"),
+                Some(Some("running")),
+                Some(Some("running")),
+                Some(true)
+            ),
+            0
+        );
         // --no-web: web 不在簇，不计异常；weaknet None 同理（bin 缺位条件渲染形 [M-1]）
         assert_eq!(map_status_exit(Some("running"), None, None, Some(true)), 0);
         // web 在簇但停了 = 1（降级）
         assert_eq!(map_status_exit(Some("running"), Some(Some("stopped")), None, Some(true)), 1);
         // weaknet 在簇但停了 = 1（BA-6 新案：与 web 同语义，None=不在簇不计）
-        assert_eq!(map_status_exit(Some("running"), Some(Some("running")), Some(Some("stopped")), Some(true)), 1);
+        assert_eq!(
+            map_status_exit(
+                Some("running"),
+                Some(Some("running")),
+                Some(Some("stopped")),
+                Some(true)
+            ),
+            1
+        );
         // web 剔 while weaknet 活（--no-web 正确形态 lck-F8）= 0：web=None 不连坐
         assert_eq!(map_status_exit(Some("running"), None, Some(Some("running")), Some(true)), 0);
         // 探针失败（worker 死/503）= 1
         assert_eq!(map_status_exit(Some("running"), None, None, Some(false)), 1);
-        assert_eq!(map_status_exit(Some("running"), Some(Some("running")), Some(Some("running")), None), 1);
+        assert_eq!(
+            map_status_exit(Some("running"), Some(Some("running")), Some(Some("running")), None),
+            1
+        );
         // server 未跑/缺行 = 2
         assert_eq!(map_status_exit(Some("stopped"), Some(Some("stopped")), None, None), 2);
         assert_eq!(map_status_exit(None, None, None, None), 2);
     }
 
-
     #[test]
     fn server_cmdline_probe_brand_compatible() {
-        let dir =
-            parse_server_cmdline("/opt/ms/bin/mediaservo-server run --config /opt/ms/etc/server.yaml");
+        let dir = parse_server_cmdline(
+            "/opt/ms/bin/mediaservo-server run --config /opt/ms/etc/server.yaml",
+        );
         assert_eq!(dir.as_deref(), Some(Path::new("/opt/ms")));
         let branded =
             parse_server_cmdline("/opt/ms/bin/msrtc-server run --config /opt/ms/etc/server.yaml");
         assert_eq!(branded.as_deref(), Some(Path::new("/opt/ms")));
         assert!(parse_server_cmdline("caddy run --config /opt/ms/etc/Caddyfile").is_none());
-        assert!(parse_server_cmdline("/opt/x/bin/msrtc-host run --config /opt/x/etc/host.yaml").is_none());
-        assert!(parse_server_cmdline("/opt/x/bin/msrtc-server --config /opt/x/server.yaml").is_none());
+        assert!(
+            parse_server_cmdline("/opt/x/bin/msrtc-host run --config /opt/x/etc/host.yaml")
+                .is_none()
+        );
+        assert!(
+            parse_server_cmdline("/opt/x/bin/msrtc-server --config /opt/x/server.yaml").is_none()
+        );
     }
 }

@@ -8,10 +8,9 @@
 
 #[cfg(test)]
 mod factory_tests {
-    use mediaservo_webrtc::peer_connection::{RTCConfiguration, RTCPeerConnectionState};
     use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
+    use mediaservo_webrtc::peer_connection::{RTCConfiguration, RTCPeerConnectionState};
     use mediaservo_webrtc::traits::PeerConnectionApi;
-
 
     #[test]
     fn factory_creates_default() {
@@ -37,12 +36,10 @@ mod factory_tests {
     fn factory_creates_multiple_pcs() {
         let factory = RTCPeerConnectionFactory::new();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc1 = rt
-            .block_on(factory.create_peer_connection(RTCConfiguration::default()))
-            .expect("pc1");
-        let pc2 = rt
-            .block_on(factory.create_peer_connection(RTCConfiguration::default()))
-            .expect("pc2");
+        let pc1 =
+            rt.block_on(factory.create_peer_connection(RTCConfiguration::default())).expect("pc1");
+        let pc2 =
+            rt.block_on(factory.create_peer_connection(RTCConfiguration::default())).expect("pc2");
         assert_eq!(pc1.connection_state(), RTCPeerConnectionState::New);
         assert_eq!(pc2.connection_state(), RTCPeerConnectionState::New);
     }
@@ -50,10 +47,12 @@ mod factory_tests {
 
 #[cfg(test)]
 mod state_tests {
-    use mediaservo_webrtc::peer_connection::{RTCIceConnectionState, RTCIceGatheringState, RTCConfiguration, RTCPeerConnectionState, RTCSignalingState};
     use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
+    use mediaservo_webrtc::peer_connection::{
+        RTCConfiguration, RTCIceConnectionState, RTCIceGatheringState, RTCPeerConnectionState,
+        RTCSignalingState,
+    };
     use mediaservo_webrtc::traits::PeerConnectionApi;
-
 
     #[test]
     fn initial_states_are_correct() {
@@ -105,8 +104,8 @@ mod state_tests {
 
 #[cfg(test)]
 mod sdp_tests {
-    use mediaservo_webrtc::peer_connection::{RTCAnswerOptions, RTCOfferOptions, RTCConfiguration};
     use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
+    use mediaservo_webrtc::peer_connection::{RTCAnswerOptions, RTCConfiguration, RTCOfferOptions};
 
     use mediaservo_webrtc::sdp::RTCSdpType;
     use mediaservo_webrtc::traits::PeerConnectionApi;
@@ -118,9 +117,8 @@ mod sdp_tests {
         let pc = rt
             .block_on(factory.create_peer_connection(RTCConfiguration::default()))
             .expect("create pc");
-        let offer = rt
-            .block_on(pc.create_offer(&RTCOfferOptions::default()))
-            .expect("create offer");
+        let offer =
+            rt.block_on(pc.create_offer(&RTCOfferOptions::default())).expect("create offer");
         assert_eq!(offer.sdp_type, RTCSdpType::Offer);
     }
 
@@ -132,13 +130,10 @@ mod sdp_tests {
         let pc = rt
             .block_on(factory.create_peer_connection(RTCConfiguration::default()))
             .expect("create pc");
-        let offer = rt
-            .block_on(pc.create_offer(&RTCOfferOptions::default()))
-            .expect("create offer");
+        let offer =
+            rt.block_on(pc.create_offer(&RTCOfferOptions::default())).expect("create offer");
         rt.block_on(pc.set_remote_description(&offer)).expect("set remote offer");
-        let answer = rt
-            .block_on(pc.create_answer(&RTCAnswerOptions::default()))
-            .expect("create answer");
+        let answer = rt.block_on(pc.create_answer(&RTCAnswerOptions)).expect("create answer");
         assert_eq!(answer.sdp_type, RTCSdpType::Answer);
     }
 
@@ -149,11 +144,9 @@ mod sdp_tests {
         let pc = rt
             .block_on(factory.create_peer_connection(RTCConfiguration::default()))
             .expect("create pc");
-        let offer = rt
-            .block_on(pc.create_offer(&RTCOfferOptions::default()))
-            .expect("create offer");
-        rt.block_on(pc.set_local_description(&offer))
-            .expect("set local");
+        let offer =
+            rt.block_on(pc.create_offer(&RTCOfferOptions::default())).expect("create offer");
+        rt.block_on(pc.set_local_description(&offer)).expect("set local");
     }
 
     #[test]
@@ -164,39 +157,27 @@ mod sdp_tests {
         let pc = rt
             .block_on(factory.create_peer_connection(RTCConfiguration::default()))
             .expect("create pc");
-        let offer = rt
-            .block_on(pc.create_offer(&RTCOfferOptions::default()))
-            .expect("create offer");
-        rt.block_on(pc.set_remote_description(&offer))
-            .expect("set remote");
+        let offer =
+            rt.block_on(pc.create_offer(&RTCOfferOptions::default())).expect("create offer");
+        rt.block_on(pc.set_remote_description(&offer)).expect("set remote");
     }
 
     #[test]
     fn sdp_round_trip_offer_answer() {
         let factory = RTCPeerConnectionFactory::new();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let pc1 = rt
-            .block_on(factory.create_peer_connection(RTCConfiguration::default()))
-            .expect("pc1");
-        let pc2 = rt
-            .block_on(factory.create_peer_connection(RTCConfiguration::default()))
-            .expect("pc2");
+        let pc1 =
+            rt.block_on(factory.create_peer_connection(RTCConfiguration::default())).expect("pc1");
+        let pc2 =
+            rt.block_on(factory.create_peer_connection(RTCConfiguration::default())).expect("pc2");
 
-        let offer = rt
-            .block_on(pc1.create_offer(&RTCOfferOptions::default()))
-            .expect("offer");
-        rt.block_on(pc1.set_local_description(&offer))
-            .expect("pc1 set local");
-        rt.block_on(pc2.set_remote_description(&offer))
-            .expect("pc2 set remote");
+        let offer = rt.block_on(pc1.create_offer(&RTCOfferOptions::default())).expect("offer");
+        rt.block_on(pc1.set_local_description(&offer)).expect("pc1 set local");
+        rt.block_on(pc2.set_remote_description(&offer)).expect("pc2 set remote");
 
-        let answer = rt
-            .block_on(pc2.create_answer(&RTCAnswerOptions::default()))
-            .expect("answer");
-        rt.block_on(pc2.set_local_description(&answer))
-            .expect("pc2 set local");
-        rt.block_on(pc1.set_remote_description(&answer))
-            .expect("pc1 set remote");
+        let answer = rt.block_on(pc2.create_answer(&RTCAnswerOptions)).expect("answer");
+        rt.block_on(pc2.set_local_description(&answer)).expect("pc2 set local");
+        rt.block_on(pc1.set_remote_description(&answer)).expect("pc1 set remote");
     }
 
     #[test]
@@ -218,10 +199,9 @@ mod sdp_tests {
 
 #[cfg(test)]
 mod ice_tests {
-    use mediaservo_webrtc::peer_connection::{RTCIceCandidate, RTCConfiguration, RTCOfferOptions};
     use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
+    use mediaservo_webrtc::peer_connection::{RTCConfiguration, RTCIceCandidate, RTCOfferOptions};
     use mediaservo_webrtc::traits::PeerConnectionApi;
-
 
     #[test]
     fn add_ice_candidate_succeeds() {
@@ -233,9 +213,7 @@ mod ice_tests {
             .expect("create pc");
         // offer_to_receive_video: 生成含 m=video 段的 offer，candidate 的 mline_index=0 才匹配
         let options = RTCOfferOptions { offer_to_receive_video: true, ..Default::default() };
-        let offer = rt
-            .block_on(pc.create_offer(&options))
-            .expect("create offer");
+        let offer = rt.block_on(pc.create_offer(&options)).expect("create offer");
         rt.block_on(pc.set_remote_description(&offer)).expect("set remote offer");
         // candidate 格式与 m-line 对应由 libwebrtc 严格校验（Err 也是合法行为）—
         // 测试目的是验证 API 调用路径 + 状态机前置（有 remote description）
@@ -256,9 +234,7 @@ mod ice_tests {
             .block_on(factory.create_peer_connection(RTCConfiguration::default()))
             .expect("create pc");
         let options = RTCOfferOptions { offer_to_receive_video: true, ..Default::default() };
-        let offer = rt
-            .block_on(pc.create_offer(&options))
-            .expect("create offer");
+        let offer = rt.block_on(pc.create_offer(&options)).expect("create offer");
         rt.block_on(pc.set_remote_description(&offer)).expect("set remote offer");
         for i in 0..5 {
             let candidate = RTCIceCandidate {
@@ -277,10 +253,9 @@ mod ice_tests {
 #[cfg(test)]
 mod datachannel_tests {
     use mediaservo_webrtc::data_channel::{RTCDataChannelInit, RTCDataChannelState};
-    use mediaservo_webrtc::peer_connection::{RTCConfiguration};
     use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
+    use mediaservo_webrtc::peer_connection::RTCConfiguration;
     use mediaservo_webrtc::traits::PeerConnectionApi;
-
 
     #[test]
     fn create_data_channel_returns_correct_label() {
@@ -383,16 +358,14 @@ mod datachannel_tests {
 #[cfg(test)]
 mod stats_and_rtp_tests {
     use mediaservo_webrtc::rtp::{
-        RTCRtpCodecParameters, RTCRtpEncodingParameters, RTCRtpHeaderExtensionParameters, RTCRtpParameters,
+        RTCRtpCodecParameters, RTCRtpEncodingParameters, RTCRtpHeaderExtensionParameters,
+        RTCRtpParameters,
     };
-    use mediaservo_webrtc::stats::{
-        RTCInboundRtpStreamStats, RTCPeerConnectionStats, RTCStats,
-    };
-    use mediaservo_webrtc::traits::PeerConnectionApi;
+    use mediaservo_webrtc::stats::{RTCInboundRtpStreamStats, RTCPeerConnectionStats, RTCStats};
 
     #[test]
     fn rtc_stats_types_construct() {
-        let stats = vec![
+        let stats = [
             RTCStats::RTCPeerConnection(RTCPeerConnectionStats {
                 id: "pc1".into(),
                 timestamp: 0.0,
@@ -469,17 +442,16 @@ mod stats_and_rtp_tests {
     }
 }
 
-
 // ── T1: W3C transceiver/capabilities 类型单测 (v2) ──
 #[cfg(test)]
 mod transceiver_types_tests {
     use mediaservo_webrtc::rtp::{
-        RTCRtpCapabilities, RTCRtpCodecCapability, RTCRtpHeaderExtensionCapability,
-        RTCRtpTransceiver, RTCRtpTransceiverDirection, RTCRtpTransceiverInit,
-        RTCRtpEncodingParameters, RTCRtpParameters,
+        RTCRtpCapabilities, RTCRtpCodecCapability, RTCRtpEncodingParameters,
+        RTCRtpHeaderExtensionCapability, RTCRtpParameters, RTCRtpTransceiver,
+        RTCRtpTransceiverDirection, RTCRtpTransceiverInit,
     };
+    use mediaservo_webrtc::rtp::{RTCRtpReceiver, RTCRtpSender};
     use mediaservo_webrtc::track::TrackKind;
-    use mediaservo_webrtc::rtp::{RTCRtpSender, RTCRtpReceiver};
     use mediaservo_webrtc::track::TrackRef;
     use mediaservo_webrtc::track::TrackSender;
 
@@ -501,8 +473,11 @@ mod transceiver_types_tests {
 
     #[test]
     fn transceiver_struct_fields() {
-        let sender = RTCRtpSender::new(TrackRef::Sender(TrackSender::new("s1".into(), TrackKind::Video)));
-        let receiver = RTCRtpReceiver::new(TrackRef::Receiver(mediaservo_webrtc::track::TrackReceiver::new("r1".into(), TrackKind::Video)));
+        let sender =
+            RTCRtpSender::new(TrackRef::Sender(TrackSender::new("s1".into(), TrackKind::Video)));
+        let receiver = RTCRtpReceiver::new(TrackRef::Receiver(
+            mediaservo_webrtc::track::TrackReceiver::new("r1".into(), TrackKind::Video),
+        ));
         let tc = RTCRtpTransceiver::new(
             Some("0".into()),
             RTCRtpTransceiverDirection::Sendonly,
@@ -523,10 +498,7 @@ mod transceiver_types_tests {
 
     #[test]
     fn capabilities_construct() {
-        let caps = RTCRtpCapabilities {
-            codecs: vec![],
-            header_extensions: vec![],
-        };
+        let caps = RTCRtpCapabilities { codecs: vec![], header_extensions: vec![] };
         assert!(caps.codecs.is_empty());
         assert!(caps.header_extensions.is_empty());
     }
@@ -572,27 +544,27 @@ mod transceiver_types_tests {
     }
 }
 
-
 // ── T3: 包装层测试（v2）──
 #[cfg(test)]
 mod wrapper_tests {
-    use mediaservo_webrtc::peer_connection::RTCConfiguration;
     use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
-    use mediaservo_webrtc::rtp::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit};
+    use mediaservo_webrtc::peer_connection::RTCConfiguration;
+    #[cfg(not(any(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys")))]
+    use mediaservo_webrtc::rtp::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit}; // stub 姿态门测在用（clippy --fix 姿态盲区第三例）
+
     use mediaservo_webrtc::track::TrackKind;
     use mediaservo_webrtc::traits::PeerConnectionApi;
 
     fn new_pc() -> mediaservo_webrtc::peer_connection::RTCPeerConnection {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(
-            RTCPeerConnectionFactory::new()
-                .create_peer_connection(RTCConfiguration::default()),
+            RTCPeerConnectionFactory::new().create_peer_connection(RTCConfiguration::default()),
         )
         .unwrap()
     }
 
     #[test]
-#[cfg(not(any(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys")))]
+    #[cfg(not(any(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys")))]
 
     fn pc_add_transceiver_w3c() {
         let pc = new_pc();
@@ -610,7 +582,7 @@ mod wrapper_tests {
     }
 
     #[test]
-#[cfg(not(any(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys")))]
+    #[cfg(not(any(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys")))]
 
     fn pc_get_transceivers_after_add() {
         let pc = new_pc();
@@ -665,7 +637,7 @@ mod wrapper_tests {
     }
 
     #[test]
-#[cfg(not(any(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys")))]
+    #[cfg(not(any(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys")))]
 
     fn add_transceiver_with_track_writable() {
         let pc = new_pc();
@@ -680,7 +652,7 @@ mod wrapper_tests {
         assert_eq!(tc.kind, TrackKind::Video);
         // 写帧不 panic（锁死 P3 写帧链路）
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let _ = rt.block_on(track.write_raw_i420(&vec![0u8; 640*480*3/2], 640, 480));
+        let _ = rt.block_on(track.write_raw_i420(&vec![0u8; 640 * 480 * 3 / 2], 640, 480));
     }
 
     #[test]

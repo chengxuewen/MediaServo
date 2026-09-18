@@ -9,9 +9,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::error::MediaError;
-use crate::pipeline::core::{
-    InternalPacket, MediaProcessor, MediaSink, MediaSource,
-};
+use crate::pipeline::core::{InternalPacket, MediaProcessor, MediaSink, MediaSource};
 
 type Result<T> = std::result::Result<T, MediaError>;
 
@@ -47,7 +45,8 @@ pub struct PipelineEngine {
 /// Internal state for a single chain, with Option wrappers for move-out support.
 struct ChainState {
     source: Option<Box<dyn MediaSource<Output = InternalPacket>>>,
-    processors: Option<Vec<Box<dyn MediaProcessor<Input = InternalPacket, Output = InternalPacket>>>>,
+    processors:
+        Option<Vec<Box<dyn MediaProcessor<Input = InternalPacket, Output = InternalPacket>>>>,
     sinks: Option<Vec<Box<dyn MediaSink<Input = InternalPacket>>>>,
     /// Spawned task handle (None if not started)
     task: Option<JoinHandle<()>>,
@@ -103,9 +102,9 @@ impl PipelineEngine {
     /// Remove a chain by ID. If running, the chain task is aborted.
     pub fn remove_chain(&self, id: &str) -> Result<()> {
         let mut chains = self.chains.write().unwrap();
-        let state = chains.remove(id).ok_or_else(|| {
-            MediaError::Internal(format!("chain '{id}' not found"))
-        })?;
+        let state = chains
+            .remove(id)
+            .ok_or_else(|| MediaError::Internal(format!("chain '{id}' not found")))?;
 
         if let Some(handle) = state.task {
             handle.abort();
@@ -120,9 +119,7 @@ impl PipelineEngine {
             return Ok(());
         }
 
-        let chain_ids: Vec<String> = {
-            self.chains.read().unwrap().keys().cloned().collect()
-        };
+        let chain_ids: Vec<String> = { self.chains.read().unwrap().keys().cloned().collect() };
 
         for id in &chain_ids {
             self.spawn_chain(id)?;
@@ -161,9 +158,9 @@ impl PipelineEngine {
 
     fn spawn_chain(&self, id: &str) -> Result<()> {
         let mut chains = self.chains.write().unwrap();
-        let state = chains.get_mut(id).ok_or_else(|| {
-            MediaError::Internal(format!("chain '{id}' not found"))
-        })?;
+        let state = chains
+            .get_mut(id)
+            .ok_or_else(|| MediaError::Internal(format!("chain '{id}' not found")))?;
 
         let source = state.source.take().ok_or_else(|| {
             MediaError::Internal(format!("chain '{id}': source already consumed"))
@@ -184,7 +181,9 @@ impl PipelineEngine {
     async fn run_chain(
         id: ChainId,
         mut source: Box<dyn MediaSource<Output = InternalPacket>>,
-        mut processors: Vec<Box<dyn MediaProcessor<Input = InternalPacket, Output = InternalPacket>>>,
+        mut processors: Vec<
+            Box<dyn MediaProcessor<Input = InternalPacket, Output = InternalPacket>>,
+        >,
         mut sinks: Vec<Box<dyn MediaSink<Input = InternalPacket>>>,
         shutdown_rx: &mut watch::Receiver<bool>,
     ) {
@@ -198,7 +197,10 @@ impl PipelineEngine {
 
             let fragment = match source.poll_fragment() {
                 Ok(Some(f)) => f,
-                Ok(None) => { tokio::task::yield_now().await; continue; }
+                Ok(None) => {
+                    tokio::task::yield_now().await;
+                    continue;
+                }
                 Err(e) => {
                     tracing::error!(chain = %id, error = %e, "source poll failed");
                     tokio::task::yield_now().await;
@@ -254,7 +256,7 @@ impl PipelineEngine {
 mod tests {
     use super::*;
     use crate::pipeline::core::{
-        EncodedFragment, FrameTiming, FragmentFlags, MediaType, NodeCapability,
+        EncodedFragment, FragmentFlags, FrameTiming, MediaType, NodeCapability,
     };
     use std::sync::Mutex;
 
@@ -264,18 +266,33 @@ mod tests {
     }
 
     impl crate::pipeline::core::NodeInfo for TestSource {
-        fn name(&self) -> &str { self.name }
+        fn name(&self) -> &str {
+            self.name
+        }
         fn capabilities(&self) -> NodeCapability {
             NodeCapability {
-                input: crate::pipeline::core::FormatSpec { media_type: MediaType::Both, codecs: None, pixel_formats: vec![] },
-                output: crate::pipeline::core::FormatSpec { media_type: MediaType::Both, codecs: None, pixel_formats: vec![] },
+                input: crate::pipeline::core::FormatSpec {
+                    media_type: MediaType::Both,
+                    codecs: None,
+                    pixel_formats: vec![],
+                },
+                output: crate::pipeline::core::FormatSpec {
+                    media_type: MediaType::Both,
+                    codecs: None,
+                    pixel_formats: vec![],
+                },
             }
         }
     }
 
     impl crate::pipeline::core::PipelineNode for TestSource {
-        fn on_start(&mut self) -> Result<()> { self.counter = 0; Ok(()) }
-        fn on_stop(&mut self) -> Result<()> { Ok(()) }
+        fn on_start(&mut self) -> Result<()> {
+            self.counter = 0;
+            Ok(())
+        }
+        fn on_stop(&mut self) -> Result<()> {
+            Ok(())
+        }
     }
 
     impl MediaSource for TestSource {
@@ -287,8 +304,17 @@ mod tests {
             }
             Ok(Some(InternalPacket::Encoded(EncodedFragment {
                 track_id: "test".into(),
-                timing: FrameTiming { dts: self.counter, pts: self.counter, duration: 1, wall_clock: None },
-                flags: FragmentFlags { keyframe: self.counter == 1, independent: true, discardable: false },
+                timing: FrameTiming {
+                    dts: self.counter,
+                    pts: self.counter,
+                    duration: 1,
+                    wall_clock: None,
+                },
+                flags: FragmentFlags {
+                    keyframe: self.counter == 1,
+                    independent: true,
+                    discardable: false,
+                },
                 codec: "test".into(),
                 init_data: None,
                 payload: vec![self.counter as u8],
@@ -296,21 +322,37 @@ mod tests {
         }
     }
 
-    struct TestProcessor { name: &'static str }
+    struct TestProcessor {
+        name: &'static str,
+    }
 
     impl crate::pipeline::core::NodeInfo for TestProcessor {
-        fn name(&self) -> &str { self.name }
+        fn name(&self) -> &str {
+            self.name
+        }
         fn capabilities(&self) -> NodeCapability {
             NodeCapability {
-                input: crate::pipeline::core::FormatSpec { media_type: MediaType::Both, codecs: None, pixel_formats: vec![] },
-                output: crate::pipeline::core::FormatSpec { media_type: MediaType::Both, codecs: None, pixel_formats: vec![] },
+                input: crate::pipeline::core::FormatSpec {
+                    media_type: MediaType::Both,
+                    codecs: None,
+                    pixel_formats: vec![],
+                },
+                output: crate::pipeline::core::FormatSpec {
+                    media_type: MediaType::Both,
+                    codecs: None,
+                    pixel_formats: vec![],
+                },
             }
         }
     }
 
     impl crate::pipeline::core::PipelineNode for TestProcessor {
-        fn on_start(&mut self) -> Result<()> { Ok(()) }
-        fn on_stop(&mut self) -> Result<()> { Ok(()) }
+        fn on_start(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn on_stop(&mut self) -> Result<()> {
+            Ok(())
+        }
     }
 
     impl MediaProcessor for TestProcessor {
@@ -340,18 +382,32 @@ mod tests {
     }
 
     impl crate::pipeline::core::NodeInfo for TestSink {
-        fn name(&self) -> &str { self.name }
+        fn name(&self) -> &str {
+            self.name
+        }
         fn capabilities(&self) -> NodeCapability {
             NodeCapability {
-                input: crate::pipeline::core::FormatSpec { media_type: MediaType::Both, codecs: None, pixel_formats: vec![] },
-                output: crate::pipeline::core::FormatSpec { media_type: MediaType::Both, codecs: None, pixel_formats: vec![] },
+                input: crate::pipeline::core::FormatSpec {
+                    media_type: MediaType::Both,
+                    codecs: None,
+                    pixel_formats: vec![],
+                },
+                output: crate::pipeline::core::FormatSpec {
+                    media_type: MediaType::Both,
+                    codecs: None,
+                    pixel_formats: vec![],
+                },
             }
         }
     }
 
     impl crate::pipeline::core::PipelineNode for TestSink {
-        fn on_start(&mut self) -> Result<()> { Ok(()) }
-        fn on_stop(&mut self) -> Result<()> { Ok(()) }
+        fn on_start(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn on_stop(&mut self) -> Result<()> {
+            Ok(())
+        }
     }
 
     impl MediaSink for TestSink {
@@ -367,7 +423,14 @@ mod tests {
         let rt = tokio::runtime::Handle::current();
         let engine = PipelineEngine::new(rt);
         let (sink, received) = TestSink::new();
-        engine.add_chain("test".into(), Box::new(TestSource { counter: 0, name: "test-src" }), vec![], vec![Box::new(sink)]).unwrap();
+        engine
+            .add_chain(
+                "test".into(),
+                Box::new(TestSource { counter: 0, name: "test-src" }),
+                vec![],
+                vec![Box::new(sink)],
+            )
+            .unwrap();
         engine.start().unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         engine.stop().await.unwrap();
@@ -379,7 +442,14 @@ mod tests {
         let rt = tokio::runtime::Handle::current();
         let engine = PipelineEngine::new(rt);
         let (sink, received) = TestSink::new();
-        engine.add_chain("test".into(), Box::new(TestSource { counter: 0, name: "test-src" }), vec![Box::new(TestProcessor { name: "test-proc" })], vec![Box::new(sink)]).unwrap();
+        engine
+            .add_chain(
+                "test".into(),
+                Box::new(TestSource { counter: 0, name: "test-src" }),
+                vec![Box::new(TestProcessor { name: "test-proc" })],
+                vec![Box::new(sink)],
+            )
+            .unwrap();
         engine.start().unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         engine.stop().await.unwrap();
@@ -395,11 +465,25 @@ mod tests {
         let rt = tokio::runtime::Handle::current();
         let engine = PipelineEngine::new(rt);
         let (sink1, received1) = TestSink::new();
-        engine.add_chain("chain1".into(), Box::new(TestSource { counter: 0, name: "src1" }), vec![], vec![Box::new(sink1)]).unwrap();
+        engine
+            .add_chain(
+                "chain1".into(),
+                Box::new(TestSource { counter: 0, name: "src1" }),
+                vec![],
+                vec![Box::new(sink1)],
+            )
+            .unwrap();
         engine.start().unwrap();
 
         let (sink2, received2) = TestSink::new();
-        engine.add_chain("chain2".into(), Box::new(TestSource { counter: 0, name: "src2" }), vec![], vec![Box::new(sink2)]).unwrap();
+        engine
+            .add_chain(
+                "chain2".into(),
+                Box::new(TestSource { counter: 0, name: "src2" }),
+                vec![],
+                vec![Box::new(sink2)],
+            )
+            .unwrap();
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         engine.stop().await.unwrap();
@@ -412,7 +496,14 @@ mod tests {
         let rt = tokio::runtime::Handle::current();
         let engine = PipelineEngine::new(rt);
         let (sink, received) = TestSink::new();
-        engine.add_chain("tmp".into(), Box::new(TestSource { counter: 0, name: "tmp-src" }), vec![], vec![Box::new(sink)]).unwrap();
+        engine
+            .add_chain(
+                "tmp".into(),
+                Box::new(TestSource { counter: 0, name: "tmp-src" }),
+                vec![],
+                vec![Box::new(sink)],
+            )
+            .unwrap();
         engine.start().unwrap();
         // Verify the chain runs (at least one fragment arrives)
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -421,7 +512,7 @@ mod tests {
         assert_eq!(engine.chain_count(), 0);
         engine.stop().await.unwrap();
         // Verify some fragments were received before removal
-        assert!(received.lock().unwrap().len() > 0, "should have received at least 1 fragment");
+        assert!(!received.lock().unwrap().is_empty(), "should have received at least 1 fragment");
     }
 
     #[tokio::test]
@@ -430,10 +521,24 @@ mod tests {
         let engine = PipelineEngine::new(rt);
         assert_eq!(engine.chain_count(), 0);
         let (s1, _) = TestSink::new();
-        engine.add_chain("a".into(), Box::new(TestSource { counter: 0, name: "a" }), vec![], vec![Box::new(s1)]).unwrap();
+        engine
+            .add_chain(
+                "a".into(),
+                Box::new(TestSource { counter: 0, name: "a" }),
+                vec![],
+                vec![Box::new(s1)],
+            )
+            .unwrap();
         assert_eq!(engine.chain_count(), 1);
         let (s2, _) = TestSink::new();
-        engine.add_chain("b".into(), Box::new(TestSource { counter: 0, name: "b" }), vec![], vec![Box::new(s2)]).unwrap();
+        engine
+            .add_chain(
+                "b".into(),
+                Box::new(TestSource { counter: 0, name: "b" }),
+                vec![],
+                vec![Box::new(s2)],
+            )
+            .unwrap();
         assert_eq!(engine.chain_count(), 2);
         engine.remove_chain("a").unwrap();
         assert_eq!(engine.chain_count(), 1);
@@ -444,9 +549,25 @@ mod tests {
         let rt = tokio::runtime::Handle::current();
         let engine = PipelineEngine::new(rt);
         let (s1, _) = TestSink::new();
-        engine.add_chain("dup".into(), Box::new(TestSource { counter: 0, name: "a" }), vec![], vec![Box::new(s1)]).unwrap();
+        engine
+            .add_chain(
+                "dup".into(),
+                Box::new(TestSource { counter: 0, name: "a" }),
+                vec![],
+                vec![Box::new(s1)],
+            )
+            .unwrap();
         let (s2, _) = TestSink::new();
-        assert!(engine.add_chain("dup".into(), Box::new(TestSource { counter: 0, name: "b" }), vec![], vec![Box::new(s2)]).is_err());
+        assert!(
+            engine
+                .add_chain(
+                    "dup".into(),
+                    Box::new(TestSource { counter: 0, name: "b" }),
+                    vec![],
+                    vec![Box::new(s2)]
+                )
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -455,13 +576,27 @@ mod tests {
         let rt = tokio::runtime::Handle::current();
         let engine = PipelineEngine::new(rt);
         let (s1, _) = TestSink::new();
-        engine.add_chain("r".into(), Box::new(TestSource { counter: 0, name: "a" }), vec![], vec![Box::new(s1)]).unwrap();
+        engine
+            .add_chain(
+                "r".into(),
+                Box::new(TestSource { counter: 0, name: "a" }),
+                vec![],
+                vec![Box::new(s1)],
+            )
+            .unwrap();
         engine.start().unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         engine.remove_chain("r").unwrap();
         assert_eq!(engine.chain_count(), 0);
         let (s2, r2) = TestSink::new();
-        engine.add_chain("r".into(), Box::new(TestSource { counter: 0, name: "b" }), vec![], vec![Box::new(s2)]).unwrap();
+        engine
+            .add_chain(
+                "r".into(),
+                Box::new(TestSource { counter: 0, name: "b" }),
+                vec![],
+                vec![Box::new(s2)],
+            )
+            .unwrap();
         assert_eq!(engine.chain_count(), 1);
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         engine.stop().await.unwrap();
@@ -481,7 +616,14 @@ mod tests {
         let rt = tokio::runtime::Handle::current();
         let engine = PipelineEngine::new(rt);
         let (sink, received) = TestSink::new();
-        engine.add_chain("c".into(), Box::new(TestSource { counter: 0, name: "c" }), vec![], vec![Box::new(sink)]).unwrap();
+        engine
+            .add_chain(
+                "c".into(),
+                Box::new(TestSource { counter: 0, name: "c" }),
+                vec![],
+                vec![Box::new(sink)],
+            )
+            .unwrap();
         engine.start().unwrap();
         engine.start().unwrap(); // idempotent
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -495,11 +637,25 @@ mod tests {
         let rt = tokio::runtime::Handle::current();
         let engine = PipelineEngine::new(rt);
         let (sink1, r1) = TestSink::new();
-        engine.add_chain("c1".into(), Box::new(TestSource { counter: 0, name: "c1" }), vec![], vec![Box::new(sink1)]).unwrap();
+        engine
+            .add_chain(
+                "c1".into(),
+                Box::new(TestSource { counter: 0, name: "c1" }),
+                vec![],
+                vec![Box::new(sink1)],
+            )
+            .unwrap();
         engine.start().unwrap();
 
         let (sink2, r2) = TestSink::new();
-        engine.add_chain("c2".into(), Box::new(TestSource { counter: 0, name: "c2" }), vec![Box::new(TestProcessor { name: "p" })], vec![Box::new(sink2)]).unwrap();
+        engine
+            .add_chain(
+                "c2".into(),
+                Box::new(TestSource { counter: 0, name: "c2" }),
+                vec![Box::new(TestProcessor { name: "p" })],
+                vec![Box::new(sink2)],
+            )
+            .unwrap();
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         engine.stop().await.unwrap();
@@ -517,8 +673,22 @@ mod tests {
         let engine = PipelineEngine::new(rt);
         let (s1, _) = TestSink::new();
         let (s2, _) = TestSink::new();
-        engine.add_chain("a".into(), Box::new(TestSource { counter: 0, name: "a" }), vec![], vec![Box::new(s1)]).unwrap();
-        engine.add_chain("b".into(), Box::new(TestSource { counter: 0, name: "b" }), vec![], vec![Box::new(s2)]).unwrap();
+        engine
+            .add_chain(
+                "a".into(),
+                Box::new(TestSource { counter: 0, name: "a" }),
+                vec![],
+                vec![Box::new(s1)],
+            )
+            .unwrap();
+        engine
+            .add_chain(
+                "b".into(),
+                Box::new(TestSource { counter: 0, name: "b" }),
+                vec![],
+                vec![Box::new(s2)],
+            )
+            .unwrap();
         engine.start().unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         engine.remove_chain("a").unwrap();

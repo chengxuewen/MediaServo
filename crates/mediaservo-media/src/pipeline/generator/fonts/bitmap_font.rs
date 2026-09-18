@@ -79,11 +79,7 @@ static GLYPH_DATA: [Glyph; 13] = [
 
 impl Default for BitmapFont {
     fn default() -> Self {
-        Self {
-            glyphs: GlyphSet::new(GLYPH_DATA),
-            scale_x: 1,
-            scale_y: 1,
-        }
+        Self { glyphs: GlyphSet::new(GLYPH_DATA), scale_x: 1, scale_y: 1 }
     }
 }
 
@@ -95,11 +91,7 @@ impl BitmapFont {
 
     /// Create with unscaled glyphs (scale_x=1, scale_y=1).
     pub fn with_scale(scale_x: u32, scale_y: u32) -> Self {
-        Self {
-            glyphs: GlyphSet::new(GLYPH_DATA),
-            scale_x,
-            scale_y,
-        }
+        Self { glyphs: GlyphSet::new(GLYPH_DATA), scale_x, scale_y }
     }
 
     /// The current scale factor for X (horizontal).
@@ -124,6 +116,7 @@ impl BitmapFont {
 
     /// Render one scaled glyph into the Y plane at absolute pixel coordinates `(ox, oy)`.
     /// Pixels outside the frame are silently clipped.
+    #[allow(clippy::too_many_arguments)] // 字形栅格化内部函数，参数打包 = 独立重构
     pub fn draw_glyph(
         &self,
         y: &mut [u8],
@@ -176,6 +169,7 @@ impl BitmapFont {
 
     /// Render a string of glyphs into the Y plane starting at `(ox, oy)`.
     /// Returns the x-offset after the last glyph drawn (for chaining).
+    #[allow(clippy::too_many_arguments)] // 同上：字形渲染链参数，独立重构
     pub fn draw_text(
         &self,
         y: &mut [u8],

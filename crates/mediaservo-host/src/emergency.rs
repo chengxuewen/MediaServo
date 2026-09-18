@@ -17,8 +17,8 @@
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// emergency 通道唯一命令（EMERGENCY STOP）。
 pub const EMERGENCY_STOP: &str = "stop";
@@ -104,9 +104,7 @@ impl StubEmergencyActuator {
         .to_string()
             + "\n";
         let mut f = self.audit.lock().map_err(|e| format!("审计锁: {e}"))?;
-        f.write_all(line.as_bytes())
-            .and_then(|_| f.flush())
-            .map_err(|e| format!("审计追加: {e}"))
+        f.write_all(line.as_bytes()).and_then(|_| f.flush()).map_err(|e| format!("审计追加: {e}"))
     }
 }
 
@@ -130,11 +128,7 @@ impl EmergencyActuator for StubEmergencyActuator {
         if let Err(e) = &audit {
             tracing::error!(source = source.as_str(), seq, error = %e, "审计写入失败");
         }
-        Ok(EmergencyTrigger {
-            latched,
-            trigger_count,
-            audit,
-        })
+        Ok(EmergencyTrigger { latched, trigger_count, audit })
     }
 }
 

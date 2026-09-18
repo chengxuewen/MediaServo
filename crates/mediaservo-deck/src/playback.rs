@@ -10,6 +10,7 @@ use mediaservo_codec::frame::{Plane, VideoFrame};
 use crate::DeckError;
 
 /// 回放器：打开媒体文件，逐帧产出解码帧。
+#[allow(dead_code)] // path/w/h 在非 ffmpeg 后端姿态不读（cfg 差异 = PIT-203 族）
 pub struct Player {
     path: PathBuf,
     #[cfg(feature = "backend-ffmpeg")]
@@ -61,14 +62,13 @@ impl Player {
                 path.display()
             )));
         }
-        Err(DeckError::Codec(
-            "playback requires backend-ffmpeg feature".into(),
-        ))
+        Err(DeckError::Codec("playback requires backend-ffmpeg feature".into()))
     }
 }
 
 /// 播放器内部状态（demux + decoder）。
 #[cfg(feature = "backend-ffmpeg")]
+#[allow(dead_code)] // w/h 在解码器重建路径备用（ffmpeg 姿态未读 = 设计保留位）
 struct PlayerInner {
     input: ffmpeg_the_third::format::context::Input,
     stream_index: usize,
@@ -83,7 +83,7 @@ impl PlayerInner {
         use ffmpeg_the_third as ffmpeg;
         ffmpeg::init().map_err(|e| DeckError::Codec(format!("ffmpeg init: {e}")))?;
 
-        let mut input = ffmpeg::format::input(path)
+        let input = ffmpeg::format::input(path)
             .map_err(|e| DeckError::Io(std::io::Error::other(format!("open input: {e}"))))?;
 
         // 找第一个视频流
@@ -115,18 +115,10 @@ impl PlayerInner {
                 .map_err(|e| DeckError::Codec(format!("set parameters: {e}")))?;
         }
         // decoder::Video(pub Opened) 即 open 后解码器（send_packet/receive_frame 经 Deref）
-        let decoder = ctx
-            .decoder()
-            .video()
-            .map_err(|e| DeckError::Codec(format!("create decoder: {e}")))?;
+        let decoder =
+            ctx.decoder().video().map_err(|e| DeckError::Codec(format!("create decoder: {e}")))?;
 
-        Ok(Self {
-            input,
-            stream_index,
-            decoder,
-            width: w,
-            height: h,
-        })
+        Ok(Self { input, stream_index, decoder, width: w, height: h })
     }
 
     fn next_frame(&mut self) -> Result<Option<VideoFrame>, DeckError> {
@@ -136,7 +128,8 @@ impl PlayerInner {
         // 循环取包直到解码出一帧或 EOF。
         // PacketIter<Item = Result<(Stream, Packet), Error>>
         for item in self.input.packets() {
-            let (stream, packet) = item.map_err(|e| DeckError::Codec(format!("read packet: {e}")))?;
+            let (stream, packet) =
+                item.map_err(|e| DeckError::Codec(format!("read packet: {e}")))?;
             if stream.index() != self.stream_index {
                 continue;
             }
@@ -157,13 +150,10 @@ impl PlayerInner {
 
         if decoded.is_none() {
             // flush 解码器残留帧（文件尾部）
-            self.decoder
-                .send_eof()
-                .map_err(|e| DeckError::Codec(format!("send_eof: {e}")))?;
+            self.decoder.send_eof().map_err(|e| DeckError::Codec(format!("send_eof: {e}")))?;
             let mut avframe = ffmpeg::util::frame::Video::empty();
-            match self.decoder.receive_frame(&mut avframe) {
-                Ok(()) => decoded = Some(self.video_frame(&avframe)),
-                Err(_) => {}
+            if let Ok(()) = self.decoder.receive_frame(&mut avframe) {
+                decoded = Some(self.video_frame(&avframe))
             }
         }
         Ok(decoded)

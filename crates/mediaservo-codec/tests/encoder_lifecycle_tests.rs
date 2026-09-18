@@ -2,9 +2,8 @@
 
 use mediaservo_codec::codec::{CodecId, PixelFormat, VideoFormat};
 use mediaservo_codec::config::{Bitrate, EncoderConfig, EncoderPreset};
-use mediaservo_codec::encoder::VideoEncoder;
 use mediaservo_codec::factory::CodecFactory;
-use mediaservo_codec::frame::{VideoFrame, Plane};
+use mediaservo_codec::frame::{Plane, VideoFrame};
 
 fn make_config(w: u32, h: u32) -> EncoderConfig {
     let fmt = VideoFormat { width: w, height: h, pixel_format: PixelFormat::Yuv420p };
@@ -77,7 +76,7 @@ fn push_flush_pull_sequence_does_not_panic() {
     // Pull until drained
     loop {
         match encoder.pull_packet() {
-            Ok(Some(_)) => {},
+            Ok(Some(_)) => {}
             Ok(None) => break,
             Err(_) => panic!("unexpected error"),
         }

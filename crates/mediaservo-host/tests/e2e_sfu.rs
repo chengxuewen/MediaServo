@@ -19,12 +19,11 @@ use mediaservo_common::protocol::{
     DtlsParameters, Fingerprint, IceCandidate, IceParameters, MediaKind, PeerRole,
     SignalingMessage, TransportDirection,
 };
-use mediaservo_webrtc::{
-    RTCAnswerOptions, RTCConfiguration,
-    RTCPeerConnectionFactory, RTCPeerConnectionState, RTCSdpType, RTCSessionDescription,
-    TrackKind, TrackRef,
-};
 use mediaservo_webrtc::traits::PeerConnectionApi;
+use mediaservo_webrtc::{
+    RTCAnswerOptions, RTCConfiguration, RTCPeerConnectionFactory, RTCPeerConnectionState,
+    RTCSdpType, RTCSessionDescription, TrackKind, TrackRef,
+};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -68,11 +67,7 @@ fn build_remote_sdp(
         "a=ice-lite".to_string(),
         format!("a=ice-ufrag:{}", ice_parameters.username_fragment),
         format!("a=ice-pwd:{}", ice_parameters.password),
-        format!(
-            "a=fingerprint:{} {}",
-            fp.algorithm.to_lowercase(),
-            fp.value
-        ),
+        format!("a=fingerprint:{} {}", fp.algorithm.to_lowercase(), fp.value),
         "a=setup:actpass".to_string(), // ICE-Lite responder expects client to initiate
     ];
 
@@ -133,9 +128,8 @@ struct SfuTestHarness {
 impl SfuTestHarness {
     async fn new() -> Self {
         // 缺省 dev server（docker compose 9800）——仍连外部 server（C21）; 生产/CI 用 env 覆盖
-        let url = std::env::var("SFU_E2E_WS_URL").unwrap_or_else(|_| {
-            "ws://127.0.0.1:9800/ws".to_string()
-        });
+        let url = std::env::var("SFU_E2E_WS_URL")
+            .unwrap_or_else(|_| "ws://127.0.0.1:9800/ws".to_string());
         tracing::info!("SfuTestHarness: 外部 mediasoup server 模式 ({url})");
         Self { ws_url: url }
     }
@@ -145,41 +139,33 @@ impl SfuTestHarness {
 // Helper: auth + RoomJoin on a WebSocket
 // ═══════════════════════════════════════════════════════════════════════════
 
-async fn ws_auth_and_join<S>(
-    ws: &mut S,
-    role: PeerRole,
-    room_id: &str,
-) where
-    S: SinkExt<WsMsg> + StreamExt<Item = Result<WsMsg, tokio_tungstenite::tungstenite::Error>> + Unpin,
+async fn ws_auth_and_join<S>(ws: &mut S, role: PeerRole, room_id: &str)
+where
+    S: SinkExt<WsMsg>
+        + StreamExt<Item = Result<WsMsg, tokio_tungstenite::tungstenite::Error>>
+        + Unpin,
     <S as futures_util::Sink<WsMsg>>::Error: std::fmt::Debug,
 {
-    ws.send(WsMsg::Text(psk().into())).await.unwrap();
-    let ack = tokio::time::timeout(Duration::from_secs(5), ws.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    ws.send(WsMsg::Text(psk())).await.unwrap();
+    let ack =
+        tokio::time::timeout(Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
     assert!(ack.to_text().unwrap().contains("authenticated"));
 
-    let join =
-        serde_json::to_string(&SignalingMessage::RoomJoin {
-            device_id: None,
-            device_secret: None,
-            device_pubkey: None,
-            protocol: None,
-            client_version: None,
-            room_id: room_id.into(),
-            peer_role: role,
-            stream_id: None,
-            resume: None,
-        })
-        .unwrap();
-    ws.send(WsMsg::Text(join.into())).await.unwrap();
-    let joined = tokio::time::timeout(Duration::from_secs(5), ws.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    let join = serde_json::to_string(&SignalingMessage::RoomJoin {
+        device_id: None,
+        device_secret: None,
+        device_pubkey: None,
+        protocol: None,
+        client_version: None,
+        room_id: room_id.into(),
+        peer_role: role,
+        stream_id: None,
+        resume: None,
+    })
+    .unwrap();
+    ws.send(WsMsg::Text(join)).await.unwrap();
+    let joined =
+        tokio::time::timeout(Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
     assert!(joined.to_text().unwrap().contains("room_joined"));
 }
 
@@ -202,23 +188,18 @@ async fn e2e_sfu_host_webrtc_connect() {
 
     let host_url = harness.ws_url.clone();
     let host_handle = tokio::spawn(async move {
-        let (mut ws, _) = tokio_tungstenite::connect_async(&host_url)
-            .await
-            .unwrap();
+        let (mut ws, _) = tokio_tungstenite::connect_async(&host_url).await.unwrap();
 
         ws_auth_and_join(&mut ws, PeerRole::Host, ROOM).await;
 
         // Create send WebRTC transport
-        let create_transport =
-            serde_json::to_string(&SignalingMessage::CreateWebRtcTransport {
-                room_id: ROOM.into(),
-                peer_id: "host".to_string(),
-                direction: TransportDirection::Send,
-            })
-            .unwrap();
-        ws.send(WsMsg::Text(create_transport.into()))
-            .await
-            .unwrap();
+        let create_transport = serde_json::to_string(&SignalingMessage::CreateWebRtcTransport {
+            room_id: ROOM.into(),
+            peer_id: "host".to_string(),
+            direction: TransportDirection::Send,
+        })
+        .unwrap();
+        ws.send(WsMsg::Text(create_transport)).await.unwrap();
 
         // Wait for WebRtcTransportCreated
         let (transport_id, ice_parameters, dtls_parameters, ice_candidates) = loop {
@@ -258,10 +239,7 @@ async fn e2e_sfu_host_webrtc_connect() {
         // Create PeerConnection via mediaservo-webrtc
         let factory = RTCPeerConnectionFactory::new();
         let config = RTCConfiguration::default();
-        let pc = factory
-            .create_peer_connection(config)
-            .await
-            .expect("Failed to create PC");
+        let pc = factory.create_peer_connection(config).await.expect("Failed to create PC");
 
         // Set up connection state watcher
         let connected = Arc::new(tokio::sync::Notify::new());
@@ -274,41 +252,27 @@ async fn e2e_sfu_host_webrtc_connect() {
 
         // Negotiate: set remote → add track → create answer → set local
         let remote_desc = RTCSessionDescription::new(RTCSdpType::Offer, remote_sdp);
-        pc.set_remote_description(&remote_desc)
-            .await
-            .expect("set_remote_description");
+        pc.set_remote_description(&remote_desc).await.expect("set_remote_description");
 
-        let track_id = pc
-            .add_track("video", TrackKind::Video)
-            .expect("add_track");
+        let track_id = pc.add_track("video", TrackKind::Video).expect("add_track");
 
-        let answer = pc
-            .create_answer(&RTCAnswerOptions::default())
-            .await
-            .expect("create_answer");
-        pc.set_local_description(&answer)
-            .await
-            .expect("set_local_description");
+        let answer = pc.create_answer(&RTCAnswerOptions).await.expect("create_answer");
+        pc.set_local_description(&answer).await.expect("set_local_description");
         let _ = remote_sdp;
 
         // Extract DTLS fingerprint → send ConnectWebRtcTransport
-        let fp_hex = pc
-            .local_dtls_fingerprint()
-            .expect("local_dtls_fingerprint");
+        let fp_hex = pc.local_dtls_fingerprint().expect("local_dtls_fingerprint");
         let connect = SignalingMessage::ConnectWebRtcTransport {
             room_id: ROOM.into(),
             peer_id: "host".to_string(),
             transport_id: transport_id.clone(),
             dtls_parameters: DtlsParameters {
-                fingerprints: vec![Fingerprint {
-                    algorithm: "sha-256".to_string(),
-                    value: fp_hex,
-                }],
+                fingerprints: vec![Fingerprint { algorithm: "sha-256".to_string(), value: fp_hex }],
                 role: "client".to_string(),
             },
         };
         let json = serde_json::to_string(&connect).unwrap();
-        ws.send(WsMsg::Text(json.into())).await.unwrap();
+        ws.send(WsMsg::Text(json)).await.unwrap();
 
         // Wait for PC connected (ICE + DTLS negotiation)
         match tokio::time::timeout(CONNECT_TIMEOUT, connected.notified()).await {
@@ -327,7 +291,6 @@ async fn e2e_sfu_host_webrtc_connect() {
     let (host_ws, transport_id, track_id) = host_handle.await.unwrap();
     assert!(!transport_id.is_empty());
     assert!(!track_id.is_empty());
-
 
     // Cleanup
     drop(host_ws);
@@ -357,10 +320,7 @@ async fn e2e_sfu_host_reconnect_failure() {
             Ok((mut ws, _)) => {
                 // Unexpectedly connected — close gracefully and break
                 let _ = ws.close(None).await;
-                panic!(
-                    "Unexpectedly connected to {} on attempt {}",
-                    ws_url, attempt
-                );
+                panic!("Unexpectedly connected to {} on attempt {}", ws_url, attempt);
             }
             Err(e) => {
                 last_err = Some(format!("{e}"));
@@ -400,9 +360,7 @@ async fn e2e_sfu_host_produce() {
     // ── Host: connect transport + produce ──
     let host_url = harness.ws_url.clone();
     let host_handle = tokio::spawn(async move {
-        let (mut ws, _) = tokio_tungstenite::connect_async(&host_url)
-            .await
-            .unwrap();
+        let (mut ws, _) = tokio_tungstenite::connect_async(&host_url).await.unwrap();
 
         ws_auth_and_join(&mut ws, PeerRole::Host, produce_room).await;
 
@@ -412,9 +370,7 @@ async fn e2e_sfu_host_produce() {
             peer_id: "host".into(),
             direction: TransportDirection::Send,
         };
-        ws.send(WsMsg::Text(serde_json::to_string(&create).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(WsMsg::Text(serde_json::to_string(&create).unwrap())).await.unwrap();
 
         let (send_tid, send_dtls) = loop {
             let resp = tokio::time::timeout(Duration::from_secs(5), ws.next())
@@ -422,13 +378,10 @@ async fn e2e_sfu_host_produce() {
                 .unwrap()
                 .unwrap()
                 .unwrap();
-            let sig: SignalingMessage =
-                serde_json::from_str(resp.to_text().unwrap()).unwrap();
+            let sig: SignalingMessage = serde_json::from_str(resp.to_text().unwrap()).unwrap();
             match sig {
                 SignalingMessage::WebRtcTransportCreated {
-                    transport_id,
-                    dtls_parameters,
-                    ..
+                    transport_id, dtls_parameters, ..
                 } => break (transport_id, dtls_parameters),
                 SignalingMessage::RoomLeave { .. } => continue,
                 other => panic!("Unexpected: {other:?}"),
@@ -442,9 +395,7 @@ async fn e2e_sfu_host_produce() {
             transport_id: send_tid.clone(),
             dtls_parameters: send_dtls,
         };
-        ws.send(WsMsg::Text(serde_json::to_string(&connect).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(WsMsg::Text(serde_json::to_string(&connect).unwrap())).await.unwrap();
         let conn_resp = tokio::time::timeout(Duration::from_secs(5), ws.next())
             .await
             .unwrap()
@@ -467,17 +418,14 @@ async fn e2e_sfu_host_produce() {
             }),
             transport_id: None, // legacy 路径回归
         };
-        ws.send(WsMsg::Text(serde_json::to_string(&produce).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(WsMsg::Text(serde_json::to_string(&produce).unwrap())).await.unwrap();
         let produced: SignalingMessage = loop {
             let resp = tokio::time::timeout(Duration::from_secs(5), ws.next())
                 .await
                 .unwrap()
                 .unwrap()
                 .unwrap();
-            let sig: SignalingMessage =
-                serde_json::from_str(resp.to_text().unwrap()).unwrap();
+            let sig: SignalingMessage = serde_json::from_str(resp.to_text().unwrap()).unwrap();
             match sig {
                 SignalingMessage::NewProducer { .. } => continue, // broadcast, skip
                 other => break other,
@@ -489,9 +437,7 @@ async fn e2e_sfu_host_produce() {
         };
 
         // Signal done with producer_id
-        ws.send(WsMsg::Text(format!("host-ready:{}", producer_id)))
-            .await
-            .unwrap();
+        ws.send(WsMsg::Text(format!("host-ready:{}", producer_id))).await.unwrap();
         (ws, producer_id)
     });
 
@@ -501,9 +447,7 @@ async fn e2e_sfu_host_produce() {
     let consumer_url = harness.ws_url.clone();
     let pid = producer_id.clone();
     let consumer_handle = tokio::spawn(async move {
-        let (mut ws, _) = tokio_tungstenite::connect_async(&consumer_url)
-            .await
-            .unwrap();
+        let (mut ws, _) = tokio_tungstenite::connect_async(&consumer_url).await.unwrap();
 
         ws_auth_and_join(&mut ws, PeerRole::Remote, produce_room).await;
 
@@ -513,9 +457,7 @@ async fn e2e_sfu_host_produce() {
             peer_id: "consumer".into(),
             direction: TransportDirection::Recv,
         };
-        ws.send(WsMsg::Text(serde_json::to_string(&create).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(WsMsg::Text(serde_json::to_string(&create).unwrap())).await.unwrap();
         let mut saw_new_producer = false;
         let (recv_tid, recv_dtls) = loop {
             let resp = tokio::time::timeout(Duration::from_secs(5), ws.next())
@@ -523,13 +465,10 @@ async fn e2e_sfu_host_produce() {
                 .unwrap()
                 .unwrap()
                 .unwrap();
-            let sig: SignalingMessage =
-                serde_json::from_str(resp.to_text().unwrap()).unwrap();
+            let sig: SignalingMessage = serde_json::from_str(resp.to_text().unwrap()).unwrap();
             match sig {
                 SignalingMessage::WebRtcTransportCreated {
-                    transport_id,
-                    dtls_parameters,
-                    ..
+                    transport_id, dtls_parameters, ..
                 } => break (transport_id, dtls_parameters),
                 SignalingMessage::NewProducer { .. } => {
                     saw_new_producer = true;
@@ -547,9 +486,7 @@ async fn e2e_sfu_host_produce() {
             transport_id: recv_tid,
             dtls_parameters: recv_dtls,
         };
-        ws.send(WsMsg::Text(serde_json::to_string(&connect).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(WsMsg::Text(serde_json::to_string(&connect).unwrap())).await.unwrap();
         let conn_resp = tokio::time::timeout(Duration::from_secs(5), ws.next())
             .await
             .unwrap()
@@ -588,25 +525,19 @@ async fn e2e_sfu_host_produce() {
             }),
             transport_id: None, // legacy 路径回归
         };
-        ws.send(WsMsg::Text(serde_json::to_string(&consume).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(WsMsg::Text(serde_json::to_string(&consume).unwrap())).await.unwrap();
 
-        let consumed_resp =
-            tokio::time::timeout(Duration::from_secs(5), ws.next())
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
+        let consumed_resp = tokio::time::timeout(Duration::from_secs(5), ws.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
         let consumed: SignalingMessage =
             serde_json::from_str(consumed_resp.to_text().unwrap()).unwrap();
         let (consumer_id, consumed_producer_id, consumed_kind) = match consumed {
-            SignalingMessage::Consumed {
-                consumer_id,
-                producer_id,
-                kind,
-                ..
-            } => (consumer_id, producer_id, kind),
+            SignalingMessage::Consumed { consumer_id, producer_id, kind, .. } => {
+                (consumer_id, producer_id, kind)
+            }
             other => panic!("Expected Consumed, got: {other:?}"),
         };
 
@@ -621,7 +552,6 @@ async fn e2e_sfu_host_produce() {
         saw_new_producer,
         "Consumer should have received NewProducer (broadcast or late-joiner sync)"
     );
-
 
     // Cleanup
     drop(host_ws);
@@ -649,9 +579,7 @@ async fn e2e_sfu_full_pipeline() {
     // ── Host: full WebRTC negotiation + produce + frame send ──
     let host_url = harness.ws_url.clone();
     let host_handle = tokio::spawn(async move {
-        let (mut ws, _) = tokio_tungstenite::connect_async(&host_url)
-            .await
-            .unwrap();
+        let (mut ws, _) = tokio_tungstenite::connect_async(&host_url).await.unwrap();
 
         ws_auth_and_join(&mut ws, PeerRole::Host, pipeline_room).await;
 
@@ -661,9 +589,7 @@ async fn e2e_sfu_full_pipeline() {
             peer_id: "host".into(),
             direction: TransportDirection::Send,
         };
-        ws.send(WsMsg::Text(serde_json::to_string(&create).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(WsMsg::Text(serde_json::to_string(&create).unwrap())).await.unwrap();
 
         let (send_tid, ice_params, dtls_params, ice_candidates) = loop {
             let resp = tokio::time::timeout(Duration::from_secs(5), ws.next())
@@ -671,8 +597,7 @@ async fn e2e_sfu_full_pipeline() {
                 .unwrap()
                 .unwrap()
                 .unwrap();
-            let sig: SignalingMessage =
-                serde_json::from_str(resp.to_text().unwrap()).unwrap();
+            let sig: SignalingMessage = serde_json::from_str(resp.to_text().unwrap()).unwrap();
             match sig {
                 SignalingMessage::WebRtcTransportCreated {
                     transport_id,
@@ -688,10 +613,7 @@ async fn e2e_sfu_full_pipeline() {
 
         // Create PeerConnection with mediaservo-webrtc
         let factory = RTCPeerConnectionFactory::new();
-        let pc = factory
-            .create_peer_connection(RTCConfiguration::default())
-            .await
-            .unwrap();
+        let pc = factory.create_peer_connection(RTCConfiguration::default()).await.unwrap();
 
         let connected = Arc::new(tokio::sync::Notify::new());
         let connected_clone = connected.clone();
@@ -715,7 +637,7 @@ async fn e2e_sfu_full_pipeline() {
         pc.set_remote_description(&remote_desc).await.unwrap();
 
         let track_id = pc.add_track("video", TrackKind::Video).unwrap();
-        let answer = pc.create_answer(&RTCAnswerOptions::default()).await.unwrap();
+        let answer = pc.create_answer(&RTCAnswerOptions).await.unwrap();
         pc.set_local_description(&answer).await.unwrap();
 
         // Connect transport
@@ -725,16 +647,11 @@ async fn e2e_sfu_full_pipeline() {
             peer_id: "host".into(),
             transport_id: send_tid.clone(),
             dtls_parameters: DtlsParameters {
-                fingerprints: vec![Fingerprint {
-                    algorithm: "sha-256".to_string(),
-                    value: fp_hex,
-                }],
+                fingerprints: vec![Fingerprint { algorithm: "sha-256".to_string(), value: fp_hex }],
                 role: "client".to_string(),
             },
         };
-        ws.send(WsMsg::Text(serde_json::to_string(&connect).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(WsMsg::Text(serde_json::to_string(&connect).unwrap())).await.unwrap();
 
         // Wait for PC connected
         tokio::time::timeout(CONNECT_TIMEOUT, connected.notified())
@@ -751,7 +668,9 @@ async fn e2e_sfu_full_pipeline() {
             let text = msg.to_text().unwrap();
             if let Ok(sig) = serde_json::from_str::<SignalingMessage>(text) {
                 match sig {
-                    SignalingMessage::Error { message, .. } if message == "transport_connected" => continue,
+                    SignalingMessage::Error { message, .. } if message == "transport_connected" => {
+                        continue;
+                    }
                     SignalingMessage::NewProducer { .. } => continue,
                     _ => break,
                 }
@@ -775,20 +694,19 @@ async fn e2e_sfu_full_pipeline() {
             }),
             transport_id: None, // legacy 路径回归
         };
-        ws.send(WsMsg::Text(serde_json::to_string(&produce).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(WsMsg::Text(serde_json::to_string(&produce).unwrap())).await.unwrap();
         let produced: SignalingMessage = loop {
             let resp = tokio::time::timeout(Duration::from_secs(5), ws.next())
                 .await
                 .unwrap()
                 .unwrap()
                 .unwrap();
-            let sig: SignalingMessage =
-                serde_json::from_str(resp.to_text().unwrap()).unwrap();
+            let sig: SignalingMessage = serde_json::from_str(resp.to_text().unwrap()).unwrap();
             match sig {
                 SignalingMessage::NewProducer { .. } => continue, // broadcast, skip
-                SignalingMessage::Error { message, .. } if message == "transport_connected" => continue,
+                SignalingMessage::Error { message, .. } if message == "transport_connected" => {
+                    continue;
+                }
                 other => break other,
             }
         };
@@ -820,12 +738,8 @@ async fn e2e_sfu_full_pipeline() {
             for y in 0..height {
                 for x in 0..width {
                     let idx = (y * width + x) as usize;
-                    y_plane[idx] = if ((x / 20 + y / 20 + offset as u32 / 10) & 1) == 0
-                    {
-                        40
-                    } else {
-                        200
-                    };
+                    y_plane[idx] =
+                        if ((x / 20 + y / 20 + offset as u32 / 10) & 1) == 0 { 40 } else { 200 };
                 }
             }
             match track.write_raw_i420(&frame, width, height).await {
@@ -837,15 +751,10 @@ async fn e2e_sfu_full_pipeline() {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert!(
-            frames_sent > 0,
-            "Should have sent at least one video frame"
-        );
+        assert!(frames_sent > 0, "Should have sent at least one video frame");
 
         // Signal completion
-        ws.send(WsMsg::Text(format!("host-done:{}", producer_id)))
-            .await
-            .unwrap();
+        ws.send(WsMsg::Text(format!("host-done:{}", producer_id))).await.unwrap();
         (ws, producer_id, frames_sent)
     });
 
@@ -856,9 +765,7 @@ async fn e2e_sfu_full_pipeline() {
     let consumer_url = harness.ws_url.clone();
     let pid = producer_id.clone();
     let consumer_handle = tokio::spawn(async move {
-        let (mut ws, _) = tokio_tungstenite::connect_async(&consumer_url)
-            .await
-            .unwrap();
+        let (mut ws, _) = tokio_tungstenite::connect_async(&consumer_url).await.unwrap();
 
         ws_auth_and_join(&mut ws, PeerRole::Remote, pipeline_room).await;
 
@@ -868,9 +775,7 @@ async fn e2e_sfu_full_pipeline() {
             peer_id: "consumer".into(),
             direction: TransportDirection::Recv,
         };
-        ws.send(WsMsg::Text(serde_json::to_string(&create).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(WsMsg::Text(serde_json::to_string(&create).unwrap())).await.unwrap();
         let mut got_producer = false;
         let (recv_tid, recv_dtls) = loop {
             let resp = tokio::time::timeout(Duration::from_secs(5), ws.next())
@@ -878,13 +783,10 @@ async fn e2e_sfu_full_pipeline() {
                 .unwrap()
                 .unwrap()
                 .unwrap();
-            let sig: SignalingMessage =
-                serde_json::from_str(resp.to_text().unwrap()).unwrap();
+            let sig: SignalingMessage = serde_json::from_str(resp.to_text().unwrap()).unwrap();
             match sig {
                 SignalingMessage::WebRtcTransportCreated {
-                    transport_id,
-                    dtls_parameters,
-                    ..
+                    transport_id, dtls_parameters, ..
                 } => break (transport_id, dtls_parameters),
                 SignalingMessage::NewProducer { producer_id: np_id, .. } => {
                     if np_id == pid {
@@ -902,9 +804,7 @@ async fn e2e_sfu_full_pipeline() {
             transport_id: recv_tid,
             dtls_parameters: recv_dtls,
         };
-        ws.send(WsMsg::Text(serde_json::to_string(&connect).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(WsMsg::Text(serde_json::to_string(&connect).unwrap())).await.unwrap();
         let conn_resp = tokio::time::timeout(Duration::from_secs(5), ws.next())
             .await
             .unwrap()
@@ -922,21 +822,16 @@ async fn e2e_sfu_full_pipeline() {
                     .unwrap()
                     .unwrap();
                 let text = msg.to_text().unwrap();
-                if let Ok(SignalingMessage::NewProducer {
-                    producer_id: np_id, ..
-                }) = serde_json::from_str(text)
+                if let Ok(SignalingMessage::NewProducer { producer_id: np_id, .. }) =
+                    serde_json::from_str(text)
+                    && np_id == pid
                 {
-                    if np_id == pid {
-                        got_producer = true;
-                        break;
-                    }
+                    got_producer = true;
+                    break;
                 }
             }
         }
-        assert!(
-            got_producer,
-            "Consumer should receive NewProducer for producer {pid}"
-        );
+        assert!(got_producer, "Consumer should receive NewProducer for producer {pid}");
         // Consume
         let consume = SignalingMessage::Consume {
             room_id: pipeline_room.into(),
@@ -948,30 +843,19 @@ async fn e2e_sfu_full_pipeline() {
             }),
             transport_id: None, // legacy 路径回归
         };
-        ws.send(WsMsg::Text(serde_json::to_string(&consume).unwrap().into()))
+        ws.send(WsMsg::Text(serde_json::to_string(&consume).unwrap())).await.unwrap();
+        let consumed_resp = tokio::time::timeout(Duration::from_secs(5), ws.next())
             .await
+            .unwrap()
+            .unwrap()
             .unwrap();
-        let consumed_resp =
-            tokio::time::timeout(Duration::from_secs(5), ws.next())
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
         let consumed: SignalingMessage =
             serde_json::from_str(consumed_resp.to_text().unwrap()).unwrap();
         match consumed {
-            SignalingMessage::Consumed {
-                consumer_id,
-                kind,
-                rtp_parameters,
-                ..
-            } => {
+            SignalingMessage::Consumed { consumer_id, kind, rtp_parameters, .. } => {
                 assert!(!consumer_id.is_empty(), "consumer_id must not be empty");
                 assert_eq!(kind, MediaKind::Video);
-                assert!(
-                    !rtp_parameters.is_null(),
-                    "rtp_parameters must not be null"
-                );
+                assert!(!rtp_parameters.is_null(), "rtp_parameters must not be null");
             }
             other => panic!("Expected Consumed, got: {other:?}"),
         }
@@ -980,7 +864,6 @@ async fn e2e_sfu_full_pipeline() {
     });
 
     let consumer_ws = consumer_handle.await.unwrap();
-
 
     // Cleanup
     drop(host_ws);

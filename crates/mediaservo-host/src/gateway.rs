@@ -40,8 +40,8 @@ use mediaservo_common::protocol::{PeerRole, SignalingMessage};
 use mediaservo_link::{LinkError, RetryConfig, SignalClient, SignalEvent, SignalSession};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
 
 /// 本地协议信封：`{src, msg}` — 仅本地 wire；远端为纯 SignalingMessage（零改动）。
 /// 类型定义在 mediaservo-link（D2 I1: 单一来源，防 wire 漂移——子进程经 field 复用同型）。
@@ -90,6 +90,7 @@ const ECHO_CACHE_CAP: usize = 256;
 
 /// 单个本地子进程连接。
 #[derive(Clone)]
+#[allow(dead_code)] // id = 诊断/审计位（E3 快照扩展预留）
 struct Conn {
     id: u64,
     /// 子进程 RoomJoin 声明（拦截时记录；下行响应房间改写目标）。
@@ -134,10 +135,10 @@ impl State {
     fn upstream(&mut self, conn_id: u64, msg: SignalingMessage) -> UpstreamAction {
         // F1/T4: 记录本下游 producer 宿主实键（produce 消息自报 peer——视频流常为
         // 字面 "host"，与 env.src 不同源）。断开上报 DownstreamGone 以此为准。
-        if let SignalingMessage::Produce { room_id, peer_id, .. } = &msg {
-            if let Some(c) = self.conns.get_mut(&conn_id) {
-                c.producer_key = Some((peer_id.clone(), room_id.clone()));
-            }
+        if let SignalingMessage::Produce { room_id, peer_id, .. } = &msg
+            && let Some(c) = self.conns.get_mut(&conn_id)
+        {
+            c.producer_key = Some((peer_id.clone(), room_id.clone()));
         }
         match msg {
             SignalingMessage::RoomJoin { room_id, protocol: child_claim, .. } => {
@@ -164,7 +165,10 @@ impl State {
             }
             SignalingMessage::RoomLeave { .. } => {
                 // 单进程 leave 上行会让 server 断开整车会话 — 拦截丢弃
-                tracing::warn!(conn_id, "子进程 RoomLeave 被网关拦截（整车会话不因单进程离开而断）");
+                tracing::warn!(
+                    conn_id,
+                    "子进程 RoomLeave 被网关拦截（整车会话不因单进程离开而断）"
+                );
                 UpstreamAction::Drop
             }
             // 流诊断消息（web-stream-stats host 侧补齐）：保留 streamer 声明的流子房间——
@@ -221,7 +225,8 @@ impl State {
             | SignalingMessage::Produced { .. }
             | SignalingMessage::Consumed { .. }
             | SignalingMessage::Error { .. }
-            | SignalingMessage::SfuStats { .. } => { // H2: SfuStats 响应同 FIFO 路由
+            | SignalingMessage::SfuStats { .. } => {
+                // H2: SfuStats 响应同 FIFO 路由
                 let Some(conn_id) = self.pending.pop_front() else {
                     tracing::warn!("SFU 响应无对应待决请求，丢弃");
                     return Vec::new();
@@ -468,29 +473,19 @@ struct UpstreamQueue {
 }
 
 impl UpstreamQueue {
-    fn new() -> (
-        Self,
-        mpsc::UnboundedReceiver<SignalingMessage>,
-        mpsc::Receiver<SignalingMessage>,
-    ) {
+    fn new() -> (Self, mpsc::UnboundedReceiver<SignalingMessage>, mpsc::Receiver<SignalingMessage>)
+    {
         let (hi, hi_rx) = mpsc::unbounded_channel();
         let (lo, lo_rx) = mpsc::channel(16);
-        (
-            Self { hi, lo, dropped: Arc::new(std::sync::atomic::AtomicU64::new(0)) },
-            hi_rx,
-            lo_rx,
-        )
+        (Self { hi, lo, dropped: Arc::new(std::sync::atomic::AtomicU64::new(0)) }, hi_rx, lo_rx)
     }
 
     /// 路由入队：白名单 → lo try_send（满丢+计数）；其余 → hi（无界，仅断链 Err）。
     fn push(&self, msg: SignalingMessage) -> Result<(), String> {
         if matches!(msg, SignalingMessage::StatusReport { .. }) {
             if self.lo.try_send(msg).is_err() {
-                let n = self
-                    .dropped
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                    + 1;
-                if n == 1 || n % 64 == 0 {
+                let n = self.dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                if n == 1 || n.is_multiple_of(64) {
                     tracing::warn!("a3: 网关低优队列满，StatusReport 丢弃（累计 {n}）");
                 }
             }
@@ -518,7 +513,9 @@ impl GatewayHandle {
             .map(|c| ChildStatus {
                 src: c.src.clone(),
                 connected: true,
-                last_msg_secs: c.last_msg.map_or(u64::MAX, |t| now.saturating_duration_since(t).as_secs()),
+                last_msg_secs: c
+                    .last_msg
+                    .map_or(u64::MAX, |t| now.saturating_duration_since(t).as_secs()),
             })
             .collect();
         children.sort_by(|a, b| a.src.cmp(&b.src));
@@ -586,10 +583,7 @@ pub async fn run_gateway(config: GatewayConfig) -> Result<(u16, GatewayHandle), 
     let listener = TcpListener::bind(("127.0.0.1", config.local_port))
         .await
         .map_err(|e| format!("bind local gateway :{}: {e}", config.local_port))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| format!("local_addr: {e}"))?
-        .port();
+    let port = listener.local_addr().map_err(|e| format!("local_addr: {e}"))?.port();
 
     let state = Arc::new(Mutex::new(State {
         conns: HashMap::new(),
@@ -632,14 +626,17 @@ pub async fn run_gateway(config: GatewayConfig) -> Result<(u16, GatewayHandle), 
                 let (tx, rx) = mpsc::unbounded_channel();
                 let id = st.next_id;
                 st.next_id += 1;
-                st.conns.insert(id, Conn {
+                st.conns.insert(
                     id,
-                    room: String::new(),
-                    src: String::new(),
-                    last_msg: None,
-                    producer_key: None,
-                    tx,
-                });
+                    Conn {
+                        id,
+                        room: String::new(),
+                        src: String::new(),
+                        last_msg: None,
+                        producer_key: None,
+                        tx,
+                    },
+                );
                 (id, rx)
             };
             tracing::info!(conn_id, peer = %peer, "本地子进程接入");
@@ -755,7 +752,8 @@ async fn remote_loop(
     mut remote_hi_rx: mpsc::UnboundedReceiver<SignalingMessage>,
     mut remote_lo_rx: mpsc::Receiver<SignalingMessage>,
 ) {
-    let mut client = SignalClient::new(&config.remote_url, &config.psk, &config.room, PeerRole::Host);
+    let mut client =
+        SignalClient::new(&config.remote_url, &config.psk, &config.room, PeerRole::Host);
     // device-enroll T7: 设备身份随 Join 携带 device_pubkey（None = PSK 路径）
     if let Some(ident) = config.device.clone() {
         client = client.with_device_identity(ident);
@@ -768,7 +766,9 @@ async fn remote_loop(
         let session = match client.connect_with_retry(config.retry).await {
             Ok(s) => s,
             Err(LinkError::EnrollPending { device_id }) => {
-                tracing::warn!("设备待管理员批准 device_id={device_id}（公钥已入 pending），10s 后重连");
+                tracing::warn!(
+                    "设备待管理员批准 device_id={device_id}（公钥已入 pending），10s 后重连"
+                );
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 continue;
             }
@@ -799,7 +799,7 @@ async fn remote_loop(
                 }
             }
             tracing::info!(children = notify.len(), "H6: 上游已恢复，要求下游重建 SFU 会话");
-            reconnected = false;
+            let _ = reconnected; // 复位位保留语义，当前分支无后续读（clippy unused_assignments）
         }
         // a2：本会话结束 = 断线。把 server 下发的重挂票转交给 client（下一次
         // connect_with_retry 携带 resume；命中失败自然回落全量 join——票一次性）。
@@ -860,12 +860,11 @@ async fn run_session(
                 None => return, // 网关关闭
             },
             msg = remote_lo_rx.recv(), if !remote_lo_rx.is_closed() => {
-                if let Some(m) = msg {
-                    if let Err(e) = session.send(m).await {
+                if let Some(m) = msg
+                    && let Err(e) = session.send(m).await {
                         tracing::warn!("远端发送失败: {e}");
                         break;
                     }
-                }
             },
         }
     }
@@ -938,8 +937,9 @@ mod tests {
         }))
     }
 
-
-    fn handle_for(state: Arc<Mutex<State>>) -> (GatewayHandle, mpsc::UnboundedReceiver<SignalingMessage>) {
+    fn handle_for(
+        state: Arc<Mutex<State>>,
+    ) -> (GatewayHandle, mpsc::UnboundedReceiver<SignalingMessage>) {
         let (upstream, hi_rx, lo_rx) = UpstreamQueue::new();
         // 同步测试无 runtime 合并双队列：本组测试只喂 hi（Sdp/终态族）；
         // lo receiver 持活避免 try_send Closed 假计数。
@@ -955,22 +955,28 @@ mod tests {
             st.joined = true;
             st.vehicle_peer_id = "veh-peer".into();
             st.remote_since = Some(Instant::now());
-            st.conns.insert(1, Conn {
-                id: 1,
-                room: "room-a".into(),
-                src: "host-streamer".into(),
-                last_msg: Some(Instant::now()),
-                producer_key: None,
-                tx: mpsc::unbounded_channel().0,
-            });
-            st.conns.insert(2, Conn {
-                id: 2,
-                room: "room-b".into(),
-                src: "host-capturer".into(),
-                last_msg: None,
-                producer_key: None,
-                tx: mpsc::unbounded_channel().0,
-            });
+            st.conns.insert(
+                1,
+                Conn {
+                    id: 1,
+                    room: "room-a".into(),
+                    src: "host-streamer".into(),
+                    last_msg: Some(Instant::now()),
+                    producer_key: None,
+                    tx: mpsc::unbounded_channel().0,
+                },
+            );
+            st.conns.insert(
+                2,
+                Conn {
+                    id: 2,
+                    room: "room-b".into(),
+                    src: "host-capturer".into(),
+                    last_msg: None,
+                    producer_key: None,
+                    tx: mpsc::unbounded_channel().0,
+                },
+            );
         }
         let (handle, _rx) = handle_for(state);
         let snap = handle.snapshot();
@@ -992,7 +998,11 @@ mod tests {
         let state = test_state();
         let (handle, mut rx) = handle_for(state);
         let err = handle
-            .send_remote(SignalingMessage::Sdp { room_id: "r".into(), target: None, sdp: "v=0".into() })
+            .send_remote(SignalingMessage::Sdp {
+                room_id: "r".into(),
+                target: None,
+                sdp: "v=0".into(),
+            })
             .unwrap_err();
         assert!(err.contains("not connected"), "未 joined 必须拒绝: {err}");
         assert!(rx.try_recv().is_err(), "拒绝的消息不得进入远端通道");

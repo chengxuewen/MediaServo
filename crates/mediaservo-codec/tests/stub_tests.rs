@@ -1,21 +1,18 @@
 //! Stub backend behavior tests.
 
-use mediaservo_codec::codec::{CodecId, PixelFormat, VideoFormat, FrameRate};
-use mediaservo_codec::config::{Bitrate, EncoderConfig, DecoderConfig, EncoderPreset};
-use mediaservo_codec::encoder::{VideoEncoder, EncoderStats};
-use mediaservo_codec::decoder::VideoDecoder;
+use mediaservo_codec::codec::{CodecId, PixelFormat, VideoFormat};
+use mediaservo_codec::config::{Bitrate, DecoderConfig, EncoderConfig, EncoderPreset};
 use mediaservo_codec::factory::CodecFactory;
-use mediaservo_codec::frame::{VideoFrame, Plane};
-use mediaservo_codec::codec::BackendId;
+use mediaservo_codec::frame::{Plane, VideoFrame};
 
 fn make_test_frame() -> VideoFrame {
     let fmt = VideoFormat { width: 640, height: 480, pixel_format: PixelFormat::Yuv420p };
     VideoFrame {
         format: fmt.clone(),
         planes: vec![
-            Plane { data: vec![128u8; 640*480], stride: 640 },
-            Plane { data: vec![128u8; 320*240], stride: 320 },
-            Plane { data: vec![128u8; 320*240], stride: 320 },
+            Plane { data: vec![128u8; 640 * 480], stride: 640 },
+            Plane { data: vec![128u8; 320 * 240], stride: 320 },
+            Plane { data: vec![128u8; 320 * 240], stride: 320 },
         ],
         pts: 0,
         keyframe: false,
@@ -95,6 +92,7 @@ fn stub_decode_flush_noop() {
 
 #[test]
 fn stub_encoder_and_decoder_are_send() {
+    #[allow(dead_code)] // 编译期断言文档位
     fn assert_send<T: Send>() {}
     let factory = CodecFactory::new();
     let encoder = factory.create_encoder(make_test_config(), None).unwrap();

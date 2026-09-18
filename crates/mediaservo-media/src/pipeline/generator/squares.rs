@@ -19,20 +19,15 @@ pub struct Square {
 }
 
 /// Strategy for assigning colors to squares.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum ColorStrategy {
     /// New random colors for all squares on every frame.
     RandomPerFrame,
     /// Each square keeps its initial random color (existing behavior).
+    #[default]
     RandomPerSquare,
     /// Explicit list of (Y, U, V) tuples, cycled per square.
     Fixed(Vec<(u8, u8, u8)>),
-}
-
-impl Default for ColorStrategy {
-    fn default() -> Self {
-        Self::RandomPerSquare
-    }
 }
 
 /// Configuration for the squares pattern.
@@ -78,21 +73,12 @@ impl SquaresPattern {
             _ => Vec::new(),
         };
 
-        Self {
-            squares,
-            config,
-            rng,
-            fixed_colors,
-            fixed_index: 0,
-        }
+        Self { squares, config, rng, fixed_colors, fixed_index: 0 }
     }
 
     /// Convenience constructor: random-per-square colors, no motion.
     pub fn new(width: u32, height: u32, num_squares: u32) -> Self {
-        let config = SquaresConfig {
-            count: num_squares,
-            ..Default::default()
-        };
+        let config = SquaresConfig { count: num_squares, ..Default::default() };
         Self::with_config(width, height, config)
     }
 
@@ -126,17 +112,17 @@ impl SquaresPattern {
             let dx = if config.motion_speed > 0 {
                 rng_clone.gen_range(1..=config.motion_speed) as i32
                     * if rng_clone.gen_bool(0.5) { 1 } else { -1 }
-            } else { 0 };
+            } else {
+                0
+            };
             let dy = if config.motion_speed > 0 {
                 rng_clone.gen_range(1..=config.motion_speed) as i32
                     * if rng_clone.gen_bool(0.5) { 1 } else { -1 }
-            } else { 0 };
+            } else {
+                0
+            };
 
-            squares.push(Square {
-                x, y, size,
-                y_val, u_val, v_val,
-                dx, dy,
-            });
+            squares.push(Square { x, y, size, y_val, u_val, v_val, dx, dy });
         }
         squares
     }
@@ -201,7 +187,9 @@ impl FramePattern for SquaresPattern {
         }
 
         // 4. If Fixed color strategy with cycling
-        if matches!(self.config.color_strategy, ColorStrategy::Fixed(_)) && !self.fixed_colors.is_empty() {
+        if matches!(self.config.color_strategy, ColorStrategy::Fixed(_))
+            && !self.fixed_colors.is_empty()
+        {
             for (i, sq) in self.squares.iter_mut().enumerate() {
                 let c = self.fixed_colors[(self.fixed_index + i) % self.fixed_colors.len()];
                 sq.y_val = c.0;
@@ -254,10 +242,7 @@ mod tests {
 
     #[test]
     fn squares_pattern_creates_correct_number_of_squares() {
-        let config = SquaresConfig {
-            count: 5,
-            ..Default::default()
-        };
+        let config = SquaresConfig { count: 5, ..Default::default() };
         let pattern = SquaresPattern::with_config(64, 48, config);
         assert_eq!(pattern.squares.len(), 5);
     }
@@ -266,7 +251,11 @@ mod tests {
     fn squares_pattern_with_fixed_colors() {
         let config = SquaresConfig {
             count: 3,
-            color_strategy: ColorStrategy::Fixed(vec![(200, 100, 100), (100, 200, 100), (100, 100, 200)]),
+            color_strategy: ColorStrategy::Fixed(vec![
+                (200, 100, 100),
+                (100, 200, 100),
+                (100, 100, 200),
+            ]),
             ..Default::default()
         };
         let pattern = SquaresPattern::with_config(32, 32, config);
@@ -292,13 +281,30 @@ mod tests {
         // Draw many frames and verify squares stay in bounds
         for _ in 0..100 {
             pattern.draw(
-                &mut y, &mut u, &mut v,
-                w as usize, (w / 2) as usize, (w / 2) as usize,
-                w, h,
+                &mut y,
+                &mut u,
+                &mut v,
+                w as usize,
+                (w / 2) as usize,
+                (w / 2) as usize,
+                w,
+                h,
             );
             for sq in &pattern.squares {
-                assert!(sq.x + sq.size <= w, "square x out of bounds: {} + {} > {}", sq.x, sq.size, w);
-                assert!(sq.y + sq.size <= h, "square y out of bounds: {} + {} > {}", sq.y, sq.size, h);
+                assert!(
+                    sq.x + sq.size <= w,
+                    "square x out of bounds: {} + {} > {}",
+                    sq.x,
+                    sq.size,
+                    w
+                );
+                assert!(
+                    sq.y + sq.size <= h,
+                    "square y out of bounds: {} + {} > {}",
+                    sq.y,
+                    sq.size,
+                    h
+                );
             }
         }
     }

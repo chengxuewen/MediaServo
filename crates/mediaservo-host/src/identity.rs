@@ -33,11 +33,7 @@ pub fn generate_device_id() -> String {
     use rand_core::RngCore;
     let mut id_bytes = [0u8; 6];
     rand_core::OsRng.fill_bytes(&mut id_bytes);
-    format!(
-        "{}{}",
-        mediaservo_common::brand::media_brand().device_prefix,
-        hex(&id_bytes)
-    )
+    format!("{}{}", mediaservo_common::brand::media_brand().device_prefix, hex(&id_bytes))
 }
 
 /// `host init`：幂等确保 identity.json 存在（存在 → 返回其 device_id，不覆盖；
@@ -46,9 +42,7 @@ pub fn ensure_identity(dir: &Path) -> Result<String, String> {
     if let Some(existing) = load_identity(dir)? {
         return Ok(existing);
     }
-    let id = IdentityFile {
-        device_id: generate_device_id(),
-    };
+    let id = IdentityFile { device_id: generate_device_id() };
     let path = dir.join(IDENTITY_FILE);
     let json = serde_json::to_string_pretty(&id)
         .map_err(|e| format!("序列化 {} 失败: {e}", path.display()))?;
@@ -64,8 +58,8 @@ pub fn load_identity(dir: &Path) -> Result<Option<String>, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(format!("读取 {} 失败: {e}", path.display())),
     };
-    let id: IdentityFile = serde_json::from_slice(&raw)
-        .map_err(|e| format!("{} 解析失败: {e}", path.display()))?;
+    let id: IdentityFile =
+        serde_json::from_slice(&raw).map_err(|e| format!("{} 解析失败: {e}", path.display()))?;
     Ok(Some(id.device_id))
 }
 
@@ -88,16 +82,15 @@ pub fn load_device_identity(dir: &Path) -> Result<Option<DeviceIdentity>, String
 /// 写凭据文件并设 0600（与 signing.pem 同纪律；幂等由调用方保证）。
 fn write_secret_file(path: &Path, data: &[u8]) -> Result<(), String> {
     use std::io::Write;
-    let mut f = std::fs::File::create(path)
-        .map_err(|e| format!("创建 {} 失败: {e}", path.display()))?;
+    let mut f =
+        std::fs::File::create(path).map_err(|e| format!("创建 {} 失败: {e}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         f.set_permissions(std::fs::Permissions::from_mode(0o600))
             .map_err(|e| format!("设置 {} 权限失败: {e}", path.display()))?;
     }
-    f.write_all(data)
-        .map_err(|e| format!("写入 {} 失败: {e}", path.display()))
+    f.write_all(data).map_err(|e| format!("写入 {} 失败: {e}", path.display()))
 }
 
 /// 小端 hex（无依赖；device_id 为固定长度）。
@@ -187,9 +180,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         ensure_identity(dir.path()).expect("ensure identity");
         write_signing_pem(dir.path(), std::array::from_fn(|i| i as u8));
-        let ident = load_device_identity(dir.path())
-            .expect("load")
-            .expect("Some（identity+PEM 齐备）");
+        let ident =
+            load_device_identity(dir.path()).expect("load").expect("Some（identity+PEM 齐备）");
         assert_eq!(ident.device_id, load_identity(dir.path()).unwrap().unwrap());
         assert_eq!(
             ident.pubkey_b64, "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=",
@@ -200,7 +192,10 @@ mod tests {
     #[test]
     fn load_device_identity_missing_identity_is_none() {
         let dir = tempfile::tempdir().expect("tempdir");
-        assert!(matches!(load_device_identity(dir.path()), Ok(None)), "无 identity.json → None（PSK 回落）");
+        assert!(
+            matches!(load_device_identity(dir.path()), Ok(None)),
+            "无 identity.json → None（PSK 回落）"
+        );
     }
 
     #[test]
@@ -217,7 +212,8 @@ mod tests {
         ensure_identity(dir.path()).expect("ensure identity");
         let link = dir.path().join("etc").join("link");
         std::fs::create_dir_all(&link).expect("mkdir");
-        std::fs::write(link.join("signing.pem"), b"-----BEGIN PRIVATE KEY-----\nbroken\n").expect("write");
+        std::fs::write(link.join("signing.pem"), b"-----BEGIN PRIVATE KEY-----\nbroken\n")
+            .expect("write");
         let err = load_device_identity(dir.path()).expect_err("坏 PEM 必须显式报错");
         assert!(err.contains("signing.pem 解析失败"), "应指出 PEM 解析失败: {err}");
     }

@@ -28,8 +28,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use mediaservo_common::protocol::{
-    ControlAck, DtlsParameters, Fingerprint, IceCandidate, IceParameters, MediaKind,
-    SctpStreamParameters, SignalingMessage, TransportDirection, parse_envelope, ControlEnvelope, is_estop_cmd, control_hmac_verify};
+    ControlAck, ControlEnvelope, DtlsParameters, Fingerprint, IceCandidate, IceParameters,
+    MediaKind, SctpStreamParameters, SignalingMessage, TransportDirection, control_hmac_verify,
+    is_estop_cmd, parse_envelope,
+};
 use mediaservo_link::{FrameBus, FrameMeta, FrameTopic, SignalEvent, SignalSession};
 use mediaservo_webrtc::data_channel::{
     RTCDataChannel, RTCDataChannelEvent, RTCDataChannelInit, RTCDataChannelState,
@@ -64,11 +66,9 @@ const ICE_FAILED_WAIT: Duration = Duration::from_secs(1);
 /// gimbal partial-reliable（云台连续调节可丢帧，低延迟优先）。
 pub fn channel_init(label: &str) -> RTCDataChannelInit {
     match label {
-        "gimbal" => RTCDataChannelInit {
-            ordered: false,
-            max_retransmits: Some(5),
-            ..Default::default()
-        },
+        "gimbal" => {
+            RTCDataChannelInit { ordered: false, max_retransmits: Some(5), ..Default::default() }
+        }
         _ => RTCDataChannelInit::default(), // chassis / light / ack: reliable ordered
     }
 }
@@ -194,10 +194,7 @@ pub struct CollectAckSink {
 #[async_trait]
 impl AckSink for CollectAckSink {
     async fn write(&self, text: &str) -> Result<(), String> {
-        self.items
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .push(text.to_string());
+        self.items.lock().unwrap_or_else(|p| p.into_inner()).push(text.to_string());
         Ok(())
     }
 }
@@ -232,18 +229,18 @@ impl CommandPolicy {
     /// `CONTROL_ACTUATION_LOG` 未设 = 仅 tracing 行。
     #[must_use]
     pub fn from_env() -> Self {
-        let key_file = std::env::var("MEDIASERVO_CONTROL_HMAC_KEY_FILE")
-            .ok()
-            .filter(|v| !v.is_empty());
+        let key_file =
+            std::env::var("MEDIASERVO_CONTROL_HMAC_KEY_FILE").ok().filter(|v| !v.is_empty());
         Self {
             hmac_key: match key_file {
-                Some(p) => Some(mediaservo_common::protocol::control_hmac_key_from_file(&p)
-                    .unwrap_or_else(|e| panic!("controller 急停密钥不可用: {e}"))),
-                None => std::env::var("MEDIASERVO_CONTROL_HMAC_KEY")
-                    .ok()
-                    .filter(|v| !v.is_empty()),
+                Some(p) => Some(
+                    mediaservo_common::protocol::control_hmac_key_from_file(&p)
+                        .unwrap_or_else(|e| panic!("controller 急停密钥不可用: {e}")),
+                ),
+                None => std::env::var("MEDIASERVO_CONTROL_HMAC_KEY").ok().filter(|v| !v.is_empty()),
             },
-            allow_unsigned_estop: std::env::var("CONTROL_ALLOW_UNSIGNED_ESTOP").as_deref() == Ok("1"),
+            allow_unsigned_estop: std::env::var("CONTROL_ALLOW_UNSIGNED_ESTOP").as_deref()
+                == Ok("1"),
             actuation_log: std::env::var("CONTROL_ACTUATION_LOG")
                 .ok()
                 .filter(|v| !v.is_empty())
@@ -345,7 +342,13 @@ pub async fn handle_command(
 
 /// act-then-audit：jsonl（env 显式路径才写文件）+ 恒发 tracing 行；IO 错误容忍
 /// （审计永不阻塞执行——席3 裁决）。
-fn actuation_audit(policy: &CommandPolicy, label: &str, env: &ControlEnvelope, sig: &str, exec: &str) {
+fn actuation_audit(
+    policy: &CommandPolicy,
+    label: &str,
+    env: &ControlEnvelope,
+    sig: &str,
+    exec: &str,
+) {
     let ts_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -454,10 +457,7 @@ async fn await_transport_created(
                 label,
                 ..
             })) => {
-                pending.push(PendingProducer {
-                    data_producer_id,
-                    label,
-                });
+                pending.push(PendingProducer { data_producer_id, label });
             }
             // transport_connected 是 Connect 确认（server 惯例 Error{code:0}，非真错误）
             Ok(SignalEvent::Message(SignalingMessage::Error { message, .. }))
@@ -493,10 +493,7 @@ async fn await_data_producer_created(
                 label,
                 ..
             })) => {
-                pending.push(PendingProducer {
-                    data_producer_id,
-                    label,
-                });
+                pending.push(PendingProducer { data_producer_id, label });
             }
             Ok(SignalEvent::Message(SignalingMessage::Error { message, .. }))
                 if message == "transport_connected" => {}
@@ -558,27 +555,18 @@ async fn connect_answer(
     pc: &RTCPeerConnection,
     t: &TransportCreated,
 ) -> Result<(), String> {
-    let answer = pc
-        .create_answer(&RTCAnswerOptions)
-        .await
-        .map_err(|e| format!("create_answer: {e}"))?;
+    let answer =
+        pc.create_answer(&RTCAnswerOptions).await.map_err(|e| format!("create_answer: {e}"))?;
     tracing::debug!("controller answer SDP:\n{}", answer.sdp);
-    pc.set_local_description(&answer)
-        .await
-        .map_err(|e| format!("set_local_description: {e}"))?;
-    let fp_hex = pc
-        .local_dtls_fingerprint()
-        .ok_or_else(|| "无本地 DTLS 指纹".to_string())?;
+    pc.set_local_description(&answer).await.map_err(|e| format!("set_local_description: {e}"))?;
+    let fp_hex = pc.local_dtls_fingerprint().ok_or_else(|| "无本地 DTLS 指纹".to_string())?;
     signal
         .send(SignalingMessage::ConnectWebRtcTransport {
             room_id: signal.room_id().to_string(),
             peer_id: SFU_PEER_ID.into(),
             transport_id: t.transport_id.clone(),
             dtls_parameters: DtlsParameters {
-                fingerprints: vec![Fingerprint {
-                    algorithm: "sha-256".to_string(),
-                    value: fp_hex,
-                }],
+                fingerprints: vec![Fingerprint { algorithm: "sha-256".to_string(), value: fp_hex }],
                 role: "client".to_string(),
             },
         })
@@ -589,6 +577,7 @@ async fn connect_answer(
 
 /// 出程建立：Send transport → 每 label create_data_channel（含 "ack"，先于 answer）→
 /// answer/connect → 逐 DC CreateDataProducer announce。返回 (pc, 自建 producer id 集)。
+#[allow(clippy::too_many_arguments)] // SFU-DC 建连参数组（S1 形），打包 = 独立重构
 async fn setup_send_side(
     signal: &SignalSession,
     events: &mut broadcast::Receiver<SignalEvent>,
@@ -723,9 +712,7 @@ pub async fn control_loop(
             return 1;
         }
     };
-    let (recv_pc, recv_tid) = match setup_recv_side(&signal, &mut events, &mut pending)
-    .await
-    {
+    let (recv_pc, recv_tid) = match setup_recv_side(&signal, &mut events, &mut pending).await {
         Ok(v) => v,
         Err(e) => {
             tracing::error!("controller: 入程（Recv transport）建立失败: {e}");
@@ -762,11 +749,7 @@ pub async fn control_loop(
         });
     }
 
-    println!(
-        "controller ready: room={} labels={}",
-        signal.room_id(),
-        cfg.labels.join(",")
-    );
+    println!("controller ready: room={} labels={}", signal.room_id(), cfg.labels.join(","));
 
     let mut exit_code: u8 = 0;
     'run: loop {

@@ -3,10 +3,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::backend::ActiveFactory;
-use crate::peer_connection::{RTCPeerConnection, RTCConfiguration};
-use crate::track::{TrackSender, TrackKind};
 use crate::RTCError;
+use crate::backend::ActiveFactory;
+use crate::peer_connection::{RTCConfiguration, RTCPeerConnection};
+use crate::track::{TrackKind, TrackSender};
 
 pub struct RTCPeerConnectionFactory {
     pub backend: Arc<ActiveFactory>,
@@ -17,7 +17,10 @@ impl RTCPeerConnectionFactory {
         Self { backend: Arc::new(ActiveFactory::default()) }
     }
 
-    pub async fn create_peer_connection(&self, config: RTCConfiguration) -> Result<RTCPeerConnection, RTCError> {
+    pub async fn create_peer_connection(
+        &self,
+        config: RTCConfiguration,
+    ) -> Result<RTCPeerConnection, RTCError> {
         let pc_backend = self.backend.create_peer_connection(config).await?;
         Ok(RTCPeerConnection {
             backend: pc_backend,
@@ -30,7 +33,12 @@ impl RTCPeerConnectionFactory {
     /// Create a video track with a real video track backend.
     pub fn create_video_track(&self, track_id: &str) -> TrackSender {
         let (backend, _media_track) = self.backend.create_video_track();
-        TrackSender { id: track_id.to_string(), kind: TrackKind::Video, audio_config: None, backend }
+        TrackSender {
+            id: track_id.to_string(),
+            kind: TrackKind::Video,
+            audio_config: None,
+            backend,
+        }
     }
 
     /// Create a video track returning raw backend + media track (for webrtc-sys binding).
@@ -72,5 +80,7 @@ impl RTCPeerConnectionFactory {
 }
 
 impl Default for RTCPeerConnectionFactory {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

@@ -13,8 +13,8 @@ use std::time::Duration;
 use mediaservo_media::base::frame::BoxVideoFrame;
 use mediaservo_media::error::MediaError;
 use mediaservo_media::pipeline::generator::{
-    Anchor, BitmapFont, PatternMode, SquaresConfig, TextBurner, TimestampFormat,
-    TimestampOverlay, VideoFrameGenerator,
+    Anchor, BitmapFont, PatternMode, SquaresConfig, TextBurner, TimestampFormat, TimestampOverlay,
+    VideoFrameGenerator,
 };
 use mediaservo_media::pipeline::sink::{VideoSink, VideoSinkWants};
 use mediaservo_media::pipeline::source::VideoSource;
@@ -28,6 +28,7 @@ struct StatsSink {
 }
 
 impl StatsSink {
+    #[allow(clippy::type_complexity)] // 样例三通道回执元组，不值得起别名
     fn new() -> (Self, Arc<Mutex<u32>>, Arc<Mutex<Option<u32>>>, Arc<Mutex<Option<u32>>>) {
         let count = Arc::new(Mutex::new(0u32));
         let first_width = Arc::new(Mutex::new(None));
@@ -71,11 +72,7 @@ fn main() {
     let font = BitmapFont::new();
     let burner = TextBurner::new(font, false, Anchor::TopLeft);
     let overlay = TimestampOverlay::new(burner, TimestampFormat::Combined);
-    let config = SquaresConfig {
-        count: num_squares,
-        motion_speed: 3,
-        ..Default::default()
-    };
+    let config = SquaresConfig { count: num_squares, motion_speed: 3, ..Default::default() };
     generator.start(fps, PatternMode::Squares(config), Some(overlay), width, height);
 
     thread::sleep(duration);

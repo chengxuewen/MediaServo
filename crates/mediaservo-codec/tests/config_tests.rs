@@ -1,7 +1,7 @@
 //! Config builder unit tests.
 
-use mediaservo_codec::codec::{CodecId, FrameRate, PixelFormat, VideoFormat};
-use mediaservo_codec::config::{Bitrate, EncoderConfig, EncoderPreset, DecoderConfig};
+use mediaservo_codec::codec::{CodecId, PixelFormat, VideoFormat};
+use mediaservo_codec::config::{Bitrate, DecoderConfig, EncoderConfig, EncoderPreset};
 
 #[test]
 fn encoder_config_defaults_are_valid() {
@@ -29,7 +29,9 @@ fn encoder_config_builder_sets_all_fields() {
     if let Bitrate::Vbr { target, max } = cfg.bitrate {
         assert_eq!(target, 4000);
         assert_eq!(max, 8000);
-    } else { panic!("expected Vbr"); }
+    } else {
+        panic!("expected Vbr");
+    }
 }
 
 #[test]

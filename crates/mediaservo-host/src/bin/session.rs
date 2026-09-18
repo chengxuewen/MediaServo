@@ -21,15 +21,9 @@ impl Session {
     /// Load session from `state_path` if the file is < 60s stale.
     /// Returns a fresh session otherwise.
     pub fn load(state_path: Option<&str>) -> Self {
-        let path = PathBuf::from(
-            state_path.unwrap_or("/tmp/mediaservo-host-session.json"),
-        );
+        let path = PathBuf::from(state_path.unwrap_or("/tmp/mediaservo-host-session.json"));
 
-        let _fallback = Self {
-            id: "unknown".to_string(),
-            room_id: None,
-            started_at: Utc::now(),
-        };
+        let _fallback = Self { id: "unknown".to_string(), room_id: None, started_at: Utc::now() };
         let contents = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(_) => {
@@ -47,29 +41,22 @@ impl Session {
         };
 
         // Check staleness
-        match std::fs::metadata(&path) {
-            Ok(meta) => match meta.modified() {
-                Ok(modified) => {
-                    let age = std::time::SystemTime::now()
-                        .duration_since(modified)
-                        .unwrap_or(Duration::from_secs(999));
-                    if age < Duration::from_secs(60) {
-                        tracing::info!(
-                            "Loaded session: id={}, room={:?}, age={}s",
-                            state.id,
-                            state.room_id,
-                            age.as_secs()
-                        );
-                        return state;
-                    }
-                    tracing::info!(
-                        "Session state stale ({}s > 60s), starting fresh",
-                        age.as_secs()
-                    );
-                }
-                Err(_) => {}
-            },
-            Err(_) => {}
+        if let Ok(meta) = std::fs::metadata(&path)
+            && let Ok(modified) = meta.modified()
+        {
+            let age = std::time::SystemTime::now()
+                .duration_since(modified)
+                .unwrap_or(Duration::from_secs(999));
+            if age < Duration::from_secs(60) {
+                tracing::info!(
+                    "Loaded session: id={}, room={:?}, age={}s",
+                    state.id,
+                    state.room_id,
+                    age.as_secs()
+                );
+                return state;
+            }
+            tracing::info!("Session state stale ({}s > 60s), starting fresh", age.as_secs());
         }
         new_session()
     }
@@ -82,11 +69,10 @@ impl Session {
             let mut interval = time::interval(Duration::from_secs(10));
             loop {
                 interval.tick().await;
-                let content = serde_json::to_string_pretty(&state)
-                    .unwrap_or_else(|e| {
-                        tracing::error!("Failed to serialize session: {e}");
-                        "{}".to_string()
-                    });
+                let content = serde_json::to_string_pretty(&state).unwrap_or_else(|e| {
+                    tracing::error!("Failed to serialize session: {e}");
+                    "{}".to_string()
+                });
                 // ponytail: atomic write via temp file + rename
                 let tmp_path = path.with_extension("tmp");
                 if let Err(e) = std::fs::write(&tmp_path, &content) {
@@ -102,11 +88,7 @@ impl Session {
 }
 
 fn new_session() -> Session {
-    Session {
-        id: "unknown".to_string(),
-        room_id: None,
-        started_at: Utc::now(),
-    }
+    Session { id: "unknown".to_string(), room_id: None, started_at: Utc::now() }
 }
 
 #[cfg(test)]
@@ -134,36 +116,33 @@ mod tests {
     }
 }
 
-    #[test]
-    fn session_load_writes_and_reads_back() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("session.json");
-        let path_str = path.to_str().unwrap();
+#[test]
+fn session_load_writes_and_reads_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.json");
+    let path_str = path.to_str().unwrap();
 
-        let state = Session {
-            id: "host-001".to_string(),
-            room_id: Some("room-1".to_string()),
-            started_at: Utc::now(),
-        };
-        std::fs::write(&path, serde_json::to_string(&state).unwrap()).unwrap();
+    let state = Session {
+        id: "host-001".to_string(),
+        room_id: Some("room-1".to_string()),
+        started_at: Utc::now(),
+    };
+    std::fs::write(&path, serde_json::to_string(&state).unwrap()).unwrap();
 
-        let loaded = Session::load(Some(path_str));
-        assert_eq!(loaded.id, "host-001");
-        assert_eq!(loaded.room_id, Some("room-1".to_string()));
-    }
+    let loaded = Session::load(Some(path_str));
+    assert_eq!(loaded.id, "host-001");
+    assert_eq!(loaded.room_id, Some("room-1".to_string()));
+}
 
-    #[tokio::test]
-    async fn session_start_persist_spawns() {
-        let session = Session {
-            id: "host-persist-test".to_string(),
-            room_id: None,
-            started_at: Utc::now(),
-        };
-        let handle = session.start_persist();
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        handle.abort();
+#[tokio::test]
+async fn session_start_persist_spawns() {
+    let session =
+        Session { id: "host-persist-test".to_string(), room_id: None, started_at: Utc::now() };
+    let handle = session.start_persist();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    handle.abort();
 
-        let path = std::path::PathBuf::from("/tmp/mediaservo-host-session.json");
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("host-persist-test"));
-    }
+    let path = std::path::PathBuf::from("/tmp/mediaservo-host-session.json");
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert!(content.contains("host-persist-test"));
+}

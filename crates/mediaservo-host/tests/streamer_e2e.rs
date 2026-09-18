@@ -10,6 +10,7 @@
 //! 前置: `SFU_E2E_WS_URL` 指向外部 mediasoup server（C21 纯外部模式，不 import
 //! server 类型）; C25: 跑前清 `/tmp/iceoryx2` + `/dev/shm/iox2_*`。
 
+#![allow(clippy::doc_lazy_continuation)] // 头注释列表续行 ` + capturer` 形 = 散文非语法列表，不逐空格伺候
 #![cfg(target_os = "linux")]
 
 use std::io::Read;
@@ -61,10 +62,10 @@ static ROOM_E2E_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[test]
 fn bad_args_exit_2_with_usage() {
     for args in [
-        vec![],                   // 全缺
-        vec!["--stream"],         // 缺值
-        vec!["--stream", "s0"],   // 缺 config/token
-        vec!["--bogus", "x"],     // 未知参数
+        vec![],                 // 全缺
+        vec!["--stream"],       // 缺值
+        vec!["--stream", "s0"], // 缺 config/token
+        vec!["--bogus", "x"],   // 未知参数
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_host-streamer"))
             .args(&args)
@@ -112,10 +113,7 @@ fn rejects_non_30_fps_with_clear_error() {
 /// 读取子进程日志（stdout+stderr 合并到同一文件）。
 fn read_log(file: &tempfile::NamedTempFile) -> String {
     let mut out = String::new();
-    file.reopen()
-        .expect("reopen log")
-        .read_to_string(&mut out)
-        .expect("read log");
+    file.reopen().expect("reopen log").read_to_string(&mut out).expect("read log");
     out
 }
 
@@ -239,14 +237,7 @@ async fn streamer_pushes_through_gateway_to_server() {
     let gw_port = free_local_port();
     let agent_log = tempfile::NamedTempFile::new().expect("agent log");
     let mut agent = Command::new(env!("CARGO_BIN_EXE_host-agent"))
-        .args([
-            "--port",
-            &gw_port.to_string(),
-            "--remote",
-            &ws_url(),
-            "--room",
-            "vehicle",
-        ])
+        .args(["--port", &gw_port.to_string(), "--remote", &ws_url(), "--room", "vehicle"])
         .stdout(Stdio::from(agent_log.reopen().expect("reopen agent log")))
         .stderr(Stdio::from(agent_log.reopen().expect("reopen agent log")))
         .spawn()
@@ -299,15 +290,11 @@ async fn streamer_pushes_through_gateway_to_server() {
     let rooms_arr = rooms["rooms"].as_array().expect("rooms array");
     eprintln!("[streamer_e2e] admin rooms: {rooms}");
     assert!(
-        rooms_arr
-            .iter()
-            .any(|r| r["id"] == "vehicle" && r["host"].is_string()),
+        rooms_arr.iter().any(|r| r["id"] == "vehicle" && r["host"].is_string()),
         "server 应见到 vehicle 房间 + host, got {rooms}"
     );
     assert!(
-        !rooms_arr
-            .iter()
-            .any(|r| r["id"].as_str().is_some_and(|id| id.starts_with("stream-"))),
+        !rooms_arr.iter().any(|r| r["id"].as_str().is_some_and(|id| id.starts_with("stream-"))),
         "streamer RoomJoin 应被网关拦截（无 stream-* 房间）, got {rooms}"
     );
 
@@ -373,14 +360,7 @@ async fn two_streamers_share_one_vehicle_session() {
     let gw_port = free_local_port();
     let agent_log = tempfile::NamedTempFile::new().expect("agent log");
     let mut agent = Command::new(env!("CARGO_BIN_EXE_host-agent"))
-        .args([
-            "--port",
-            &gw_port.to_string(),
-            "--remote",
-            &ws_url(),
-            "--room",
-            "vehicle",
-        ])
+        .args(["--port", &gw_port.to_string(), "--remote", &ws_url(), "--room", "vehicle"])
         .stdout(Stdio::from(agent_log.reopen().expect("reopen agent log")))
         .stderr(Stdio::from(agent_log.reopen().expect("reopen agent log")))
         .spawn()
@@ -454,14 +434,9 @@ async fn two_streamers_share_one_vehicle_session() {
     eprintln!("[streamer_e2e] admin rooms: {rooms}");
     let vehicle: Vec<_> = rooms_arr.iter().filter(|r| r["id"] == "vehicle").collect();
     assert_eq!(vehicle.len(), 1, "应恰好一个 vehicle 房间（两流同车）: got {rooms}");
+    assert!(vehicle[0]["host"].is_string(), "vehicle 房间应含 host peer: got {rooms}");
     assert!(
-        vehicle[0]["host"].is_string(),
-        "vehicle 房间应含 host peer: got {rooms}"
-    );
-    assert!(
-        !rooms_arr
-            .iter()
-            .any(|r| r["id"].as_str().is_some_and(|id| id.starts_with("stream-"))),
+        !rooms_arr.iter().any(|r| r["id"].as_str().is_some_and(|id| id.starts_with("stream-"))),
         "streamer RoomJoin 应被网关拦截（无 stream-* 房间）: got {rooms}"
     );
 

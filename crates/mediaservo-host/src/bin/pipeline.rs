@@ -5,6 +5,7 @@
 //! - macOS: vt264enc (VideoToolbox)
 //! - Other: x264enc (software, universal fallback)
 
+#![allow(dead_code)] // 同上：legacy 引擎管线演示件（真管线在 mediaservo-deck）
 #[cfg(feature = "gstreamer")]
 mod imp {
     use gstreamer::prelude::*;
@@ -36,7 +37,6 @@ mod imp {
         {
             "x264enc"
         }
-
     }
 
     impl Pipeline {
@@ -105,11 +105,11 @@ mod imp {
                     match msg.view() {
                         MessageView::Error(err) => {
                             tracing::error!(
-                                src = ?err.src(),
-                                error = %err.error(),
-                        debug = ?err.debug(),
-                                "GStreamer pipeline error"
-                            );
+                                    src = ?err.src(),
+                                    error = %err.error(),
+                            debug = ?err.debug(),
+                                    "GStreamer pipeline error"
+                                );
                         }
                         MessageView::Warning(warn) => {
                             tracing::warn!(
@@ -179,7 +179,7 @@ mod imp {
             tracing::info!("Pipeline dummy (fallback videotestsrc)");
             Pipeline { pipeline, appsink }
         }
-}
+    }
 }
 #[cfg(not(feature = "gstreamer"))]
 mod imp {
@@ -265,5 +265,5 @@ mod tests {
         let sample = pipe.pull_sample();
         assert!(sample.is_ok());
         assert!(pipe.stop().is_ok());
-}
+    }
 }

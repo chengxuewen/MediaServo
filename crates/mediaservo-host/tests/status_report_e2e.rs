@@ -10,12 +10,12 @@ use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
-use mediaservo_host::gateway::{run_gateway, GatewayConfig};
+use mediaservo_host::gateway::{GatewayConfig, run_gateway};
 use mediaservo_host::monitor::signal::spawn_status_reporter;
 use mediaservo_link::RetryConfig;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
 
 const VEHICLE_ROOM: &str = "vehicle-1";
 const VEHICLE_PEER: &str = "veh-peer";
@@ -29,15 +29,12 @@ sources:
 /// mock server 完整握手（对齐 link::SignalClient 协议流程）。
 async fn mock_handshake(listener: &TcpListener) -> WebSocketStream<TcpStream> {
     let (stream, _) = listener.accept().await.expect("mock accept");
-    let mut ws = tokio_tungstenite::accept_async(stream)
-        .await
-        .expect("mock ws handshake");
+    let mut ws = tokio_tungstenite::accept_async(stream).await.expect("mock ws handshake");
     let psk = ws.next().await.unwrap().unwrap();
     assert!(matches!(psk, Message::Text(_)), "首条应为 PSK 文本");
     ws.send(Message::Text(
         serde_json::to_string(&SignalingMessage::Error { code: 0, message: String::new() })
-            .unwrap()
-            .into(),
+            .unwrap(),
     ))
     .await
     .unwrap();
@@ -59,8 +56,7 @@ async fn mock_handshake(listener: &TcpListener) -> WebSocketStream<TcpStream> {
             server_version: None,
             session_nonce: None,
         })
-        .unwrap()
-        .into(),
+        .unwrap(),
     ))
     .await
     .unwrap();

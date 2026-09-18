@@ -65,10 +65,7 @@ mod tests {
 
     #[test]
     fn serde_camel_case_roundtrip() {
-        let sd = RTCSessionDescription {
-            sdp_type: RTCSdpType::Answer,
-            sdp: "v=0\r\n".into(),
-        };
+        let sd = RTCSessionDescription { sdp_type: RTCSdpType::Answer, sdp: "v=0\r\n".into() };
         let json = serde_json::to_string(&sd).unwrap();
         // camelCase: {"type":"answer","sdp":"v=0\r\n"}
         assert!(json.contains("\"type\":\"answer\""));

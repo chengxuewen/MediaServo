@@ -3,8 +3,8 @@
 //! Delegates operations to the backend (DcBackend trait)
 //! via compile-time type alias dispatch.
 
-use crate::backend::{ActiveDc, DcBackend};
 use crate::RTCError;
+use crate::backend::{ActiveDc, DcBackend};
 
 #[derive(Debug, Clone)]
 pub struct RTCDataChannelInit {
@@ -18,13 +18,24 @@ pub struct RTCDataChannelInit {
 
 impl Default for RTCDataChannelInit {
     fn default() -> Self {
-        Self { ordered: true, max_retransmit_time: None, max_retransmits: None,
-               protocol: String::new(), negotiated: false, id: -1 }
+        Self {
+            ordered: true,
+            max_retransmit_time: None,
+            max_retransmits: None,
+            protocol: String::new(),
+            negotiated: false,
+            id: -1,
+        }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RTCDataChannelState { Connecting, Open, Closing, Closed }
+pub enum RTCDataChannelState {
+    Connecting,
+    Open,
+    Closing,
+    Closed,
+}
 
 pub struct RTCDataChannel {
     pub(crate) label: String,
@@ -33,8 +44,12 @@ pub struct RTCDataChannel {
 }
 
 impl RTCDataChannel {
-    pub fn label(&self) -> &str { &self.label }
-    pub fn id(&self) -> i32 { self.id }
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+    pub fn id(&self) -> i32 {
+        self.id
+    }
 
     pub fn state(&self) -> RTCDataChannelState {
         self.backend.state()
@@ -66,11 +81,7 @@ impl RTCDataChannel {
 }
 impl Clone for RTCDataChannel {
     fn clone(&self) -> Self {
-        Self {
-            label: self.label.clone(),
-            id: self.id,
-            backend: self.backend.clone(),
-        }
+        Self { label: self.label.clone(), id: self.id, backend: self.backend.clone() }
     }
 }
 
@@ -83,12 +94,18 @@ impl std::fmt::Debug for RTCDataChannel {
 // ── Events ──
 
 #[derive(Clone)]
-pub enum RTCDataChannelEvent { Open, Closed, Message(RTCDataMessage), Error(String) }
+pub enum RTCDataChannelEvent {
+    Open,
+    Closed,
+    Message(RTCDataMessage),
+    Error(String),
+}
 
 impl std::fmt::Debug for RTCDataChannelEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Open => write!(f, "Open"), Self::Closed => write!(f, "Closed"),
+            Self::Open => write!(f, "Open"),
+            Self::Closed => write!(f, "Closed"),
             Self::Message(m) => write!(f, "Message({}B)", m.data.len()),
             Self::Error(e) => write!(f, "Error({e})"),
         }
@@ -96,7 +113,9 @@ impl std::fmt::Debug for RTCDataChannelEvent {
 }
 
 #[derive(Debug, Clone)]
-pub struct RTCDataMessage { pub data: Vec<u8> }
+pub struct RTCDataMessage {
+    pub data: Vec<u8>,
+}
 
 /// Receiver for RTCDataChannel events.
 /// Created by spool() — polls the backend's event stream.
@@ -113,6 +132,7 @@ impl RTCDataChannelRx {
         Self { rx }
     }
 
+    #[allow(dead_code)] // stub/webrtc-rs 姿态构造器（sfu 姿态-unused = PIT-203 族）
     pub(crate) fn stub() -> Self {
         Self { rx: None }
     }

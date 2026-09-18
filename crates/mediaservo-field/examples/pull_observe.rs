@@ -3,8 +3,9 @@
 use std::time::Duration;
 
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
-use mediaservo_field::{PullConfig, PullSession, PushConfig, PushSession, PublishOptions, SessionEvent};
-use mediaservo_webrtc::stats::RTCStats;
+use mediaservo_field::{
+    PublishOptions, PullConfig, PullSession, PushConfig, PushSession, SessionEvent,
+};
 use mediaservo_webrtc::traits::PeerConnectionApi;
 
 #[tokio::main]
@@ -18,10 +19,14 @@ async fn main() {
 
     // Pull 先入房
     let pull_cfg = PullConfig {
-        url: url.clone(), psk: psk.clone(), room: room.clone(),
-        role: PeerRole::Consumer, auto_subscribe: true,
+        url: url.clone(),
+        psk: psk.clone(),
+        room: room.clone(),
+        role: PeerRole::Consumer,
+        auto_subscribe: true,
     };
-    let (mut pull, mut pull_events) = PullSession::connect(pull_cfg.clone()).await.expect("pull connect");
+    let (mut pull, mut pull_events) =
+        PullSession::connect(pull_cfg.clone()).await.expect("pull connect");
 
     // Push publish + 帧
     let push_cfg = PushConfig::new(url, psk, room);
@@ -33,15 +38,22 @@ async fn main() {
     let producer_id = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             match pull_events.recv().await {
-                Some(SessionEvent::Message(SignalingMessage::NewProducer { producer_id, .. })) => return producer_id,
+                Some(SessionEvent::Message(SignalingMessage::NewProducer {
+                    producer_id, ..
+                })) => return producer_id,
                 _ => continue,
             }
         }
-    }).await.expect("NewProducer timeout");
+    })
+    .await
+    .expect("NewProducer timeout");
 
     // subscribe
-    let mut _frames = tokio::time::timeout(Duration::from_secs(30), pull.subscribe(&pull_cfg, &producer_id))
-        .await.expect("subscribe timeout").expect("subscribe failed");
+    let mut _frames =
+        tokio::time::timeout(Duration::from_secs(30), pull.subscribe(&pull_cfg, &producer_id))
+            .await
+            .expect("subscribe timeout")
+            .expect("subscribe failed");
     println!("subscribed to {producer_id}");
 
     // 监控: 每 1s 打点（确认进程存活 + server 转发持续）

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
 use mediaservo_link::{SignalClient, SignalEvent, SignalSession};
 use napi::bindgen_prelude::*;
-use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode, ThreadsafeCallContext};
+use napi::threadsafe_function::ThreadsafeFunctionCallMode;
 use napi_derive::napi;
 
 /// 信令配置（role: "Host"/"Pusher"→Host, "Client"/"Puller"→Remote; 默认 Host）。
@@ -59,9 +59,7 @@ impl JsSignalSession {
             .connect()
             .await
             .map_err(|e| napi::Error::from_reason(format!("connect: {e}")))?;
-        Ok(Self {
-            inner: Arc::new(tokio::sync::Mutex::new(Some(session))),
-        })
+        Ok(Self { inner: Arc::new(tokio::sync::Mutex::new(Some(session))) })
     }
 
     /// 发送信令消息（JSON 字符串，SignalingMessage serde 格式）。
@@ -80,17 +78,16 @@ impl JsSignalSession {
 
     /// 订阅事件（JSON 字符串回调；connect 后可随时注册，替换旧回调）。
     #[napi]
+    #[allow(clippy::while_let_loop)] // 泵循环 match 形保留 None 分支日志钩位，不改 while-let
     pub fn on_event(&self, cb: Function<String, ()>) -> Result<()> {
         // TSFN 的 T 自动转 JS 参数（JsValuesTupleIntoVec）；无闭包 build 即可
-        let tsfn = cb
-            .build_threadsafe_function::<String>()
-            .build()?;
+        let tsfn = cb.build_threadsafe_function::<String>().build()?;
 
         let session = self.inner.clone();
         // 泵: broadcast receiver → tsfn.call（JS 主线程）；broadcast 关闭（session 关闭）后退出。
         // 同步方法无 tokio 上下文 → 用全局共享 runtime（field-c 同款模式）。
         super::event_runtime().spawn(async move {
-            let (room_id, mut rx) = {
+            let (room_id, rx) = {
                 let guard = session.lock().await;
                 match guard.as_ref() {
                     Some(s) => (s.room_id().to_string(), Some(s.events())),
@@ -121,10 +118,9 @@ impl JsSignalSession {
     pub async fn close(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;
         match guard.take() {
-            Some(session) => session
-                .close()
-                .await
-                .map_err(|e| napi::Error::from_reason(format!("close: {e}"))),
+            Some(session) => {
+                session.close().await.map_err(|e| napi::Error::from_reason(format!("close: {e}")))
+            }
             None => Ok(()),
         }
     }

@@ -11,6 +11,7 @@
 //!
 //! 前置（C25）: 测试自带 iceoryx2 清理（/tmp/iceoryx2 + /dev/shm/iox2_*）。
 
+#![allow(clippy::doc_lazy_continuation, clippy::await_holding_lock, unused_assignments)] // 头注释 ` +` 散文续行 + 轮询哨兵初值 0（break 路径必覆盖）
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,11 +20,11 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
-use mediaservo_host::gateway::{run_gateway, GatewayConfig, GatewayHandle};
+use mediaservo_host::gateway::{GatewayConfig, GatewayHandle, run_gateway};
 use mediaservo_link::RetryConfig;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
 
 /// 最近一次应用结果（Err 拒绝原因 = handle_config_push 审计日志 warn 载荷；
 /// 测试断言审计内容的确定性通道——日志经 tracing 输出, 内容与 Err 文本一致）。
@@ -43,18 +44,17 @@ fn write_host_toml(dir: &Path, cfg: &str) {
 
 /// 与 host-agent 同形的应用循环（轮询网关待应用 ConfigPush；测试用 100ms 轮询）。
 /// outcome 记录最近一次结果（成功版本 / 拒绝原因——与 handle_config_push 审计日志同文）。
-fn spawn_applier(
-    handle: GatewayHandle,
-    dir: PathBuf,
-    version: Arc<AtomicU64>,
-    outcome: Outcome,
-) {
+fn spawn_applier(handle: GatewayHandle, dir: PathBuf, version: Arc<AtomicU64>, outcome: Outcome) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(100));
         loop {
             tick.tick().await;
             let Some(push) = handle.take_config_push() else { continue };
-            match mediaservo_host::translate::handle_config_push(&dir, version.load(Ordering::Relaxed), &push) {
+            match mediaservo_host::translate::handle_config_push(
+                &dir,
+                version.load(Ordering::Relaxed),
+                &push,
+            ) {
                 Ok(v) => {
                     version.store(v, Ordering::Relaxed);
                     *outcome.lock().expect("outcome lock") = Some(format!("accepted v{v}"));
@@ -68,20 +68,18 @@ fn spawn_applier(
 /// mock server 完整握手（对齐 link::SignalClient 协议流程）。
 async fn mock_handshake(listener: &TcpListener) -> WebSocketStream<TcpStream> {
     let (stream, _) = listener.accept().await.expect("mock accept");
-    let mut ws = tokio_tungstenite::accept_async(stream)
-        .await
-        .expect("mock ws handshake");
+    let mut ws = tokio_tungstenite::accept_async(stream).await.expect("mock ws handshake");
     let psk = ws.next().await.unwrap().unwrap();
     assert!(matches!(psk, Message::Text(_)), "首条应为 PSK 文本");
     ws.send(Message::Text(
         serde_json::to_string(&SignalingMessage::Error { code: 0, message: String::new() })
-            .unwrap()
-            .into(),
+            .unwrap(),
     ))
     .await
     .unwrap();
     let join = ws.next().await.unwrap().unwrap();
-    match serde_json::from_str::<SignalingMessage>(join.to_text().unwrap()).expect("parse RoomJoin") {
+    match serde_json::from_str::<SignalingMessage>(join.to_text().unwrap()).expect("parse RoomJoin")
+    {
         SignalingMessage::RoomJoin { room_id, peer_role, .. } => {
             assert_eq!(peer_role, PeerRole::Host);
             ws.send(Message::Text(
@@ -92,8 +90,7 @@ async fn mock_handshake(listener: &TcpListener) -> WebSocketStream<TcpStream> {
                     server_version: None,
                     session_nonce: None,
                 })
-                .unwrap()
-                .into(),
+                .unwrap(),
             ))
             .await
             .unwrap();
@@ -145,8 +142,7 @@ async fn config_push_via_mock_server_updates_host_toml_backs_up_and_regenerates_
                 config: CFG_V1.into(),
                 version: 7,
             })
-            .unwrap()
-            .into(),
+            .unwrap(),
         ))
         .await
         .unwrap();
@@ -160,7 +156,9 @@ async fn config_push_via_mock_server_updates_host_toml_backs_up_and_regenerates_
 
     let version = Arc::new(AtomicU64::new(0));
     let outcome: Outcome = Arc::default();
-    let (_handle, _port) = start_gateway_and_applier(&addr.to_string(), dir_path.clone(), version.clone(), outcome).await;
+    let (_handle, _port) =
+        start_gateway_and_applier(&addr.to_string(), dir_path.clone(), version.clone(), outcome)
+            .await;
 
     // 轮询应用结果（host.yaml 更新 + 备份 + oxfile 重生成 + 版本记入）
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
@@ -189,9 +187,8 @@ async fn config_push_via_mock_server_updates_host_toml_backs_up_and_regenerates_
         "备份应为旧配置"
     );
     // F1 关联契约: 模拟 agent 重启 — 新实例（新 Arc）从备份恢复版本，不归零
-    let restarted = Arc::new(AtomicU64::new(
-        mediaservo_host::translate::recover_config_version(&dir_path),
-    ));
+    let restarted =
+        Arc::new(AtomicU64::new(mediaservo_host::translate::recover_config_version(&dir_path)));
     assert_eq!(restarted.load(Ordering::Relaxed), 7, "重启后应从磁盘恢复版本 7（关联契约）");
     assert_eq!(
         std::fs::read_to_string(dir_path.join("etc").join("host.yaml.bak-7")).unwrap(),
@@ -218,8 +215,7 @@ async fn invalid_config_push_rejected_with_audit_log_and_unchanged_files() {
                 config: "not toml [[[".into(),
                 version: 9,
             })
-            .unwrap()
-            .into(),
+            .unwrap(),
         ))
         .await
         .unwrap();
@@ -232,17 +228,20 @@ async fn invalid_config_push_rejected_with_audit_log_and_unchanged_files() {
 
     let version = Arc::new(AtomicU64::new(0));
     let outcome: Outcome = Arc::default();
-    let (_handle, _port) = start_gateway_and_applier(&addr.to_string(), dir_path.clone(), version.clone(), outcome.clone()).await;
+    let (_handle, _port) = start_gateway_and_applier(
+        &addr.to_string(),
+        dir_path.clone(),
+        version.clone(),
+        outcome.clone(),
+    )
+    .await;
 
     // 等拒绝结果（outcome 记录 = handle_config_push 审计日志 warn 的同一载荷）
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let guard = outcome.lock().expect("outcome lock");
         if let Some(reason) = guard.as_deref() {
-            assert!(
-                reason.contains("解析失败"),
-                "拒绝原因应含解析失败（审计载荷）: {reason}"
-            );
+            assert!(reason.contains("解析失败"), "拒绝原因应含解析失败（审计载荷）: {reason}");
             break;
         }
         drop(guard);
@@ -259,14 +258,8 @@ async fn invalid_config_push_rejected_with_audit_log_and_unchanged_files() {
         CFG_V0,
         "非法配置不得改写 host.yaml"
     );
-    assert!(
-        !dir_path.join("etc").join("host.yaml.bak-9").exists(),
-        "非法配置不得产生备份"
-    );
-    assert!(
-        !dir_path.join("run").join("oxfile.toml").exists(),
-        "非法配置不得改写 oxfile"
-    );
+    assert!(!dir_path.join("etc").join("host.yaml.bak-9").exists(), "非法配置不得产生备份");
+    assert!(!dir_path.join("run").join("oxfile.toml").exists(), "非法配置不得改写 oxfile");
     assert_eq!(version.load(Ordering::Relaxed), 0, "版本不得推进");
 }
 
@@ -298,18 +291,19 @@ mod oxmgr_hot_reload {
         path
     }
 
-/// oxmgr 实例 daemon env（与 translate::oxmgr_apply 同源: OXMGR_HOME 派生端口隔离
-/// daemon——`oxmgr list` 不带此 env 会连默认 daemon（空），看不到实例进程）。
-fn oxmgr_env(dir: &std::path::Path) -> Vec<(String, String)> {
-    let home = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).join("run").join("oxmgr");
-    let sum: u32 = home.to_string_lossy().bytes().map(u32::from).sum();
-    let port = 18000 + (sum % 400);
-    vec![
-        ("OXMGR_HOME".to_string(), home.to_string_lossy().into_owned()),
-        ("OXMGR_DAEMON_ADDR".to_string(), format!("127.0.0.1:{port}")),
-        ("OXMGR_API_ADDR".to_string(), format!("127.0.0.1:{}", port + 1000)),
-    ]
-}
+    /// oxmgr 实例 daemon env（与 translate::oxmgr_apply 同源: OXMGR_HOME 派生端口隔离
+    /// daemon——`oxmgr list` 不带此 env 会连默认 daemon（空），看不到实例进程）。
+    fn oxmgr_env(dir: &std::path::Path) -> Vec<(String, String)> {
+        let home =
+            dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).join("run").join("oxmgr");
+        let sum: u32 = home.to_string_lossy().bytes().map(u32::from).sum();
+        let port = 18000 + (sum % 400);
+        vec![
+            ("OXMGR_HOME".to_string(), home.to_string_lossy().into_owned()),
+            ("OXMGR_DAEMON_ADDR".to_string(), format!("127.0.0.1:{port}")),
+            ("OXMGR_API_ADDR".to_string(), format!("127.0.0.1:{}", port + 1000)),
+        ]
+    }
     fn oxmgr_host_procs(dir: &std::path::Path) -> Vec<(String, String, u64)> {
         let out = Command::new("oxmgr")
             .env("PATH", path_with_oxmgr())
@@ -362,7 +356,11 @@ fn oxmgr_env(dir: &std::path::Path) -> Vec<(String, String)> {
             .expect("spawn host CLI");
         let code = out.status.code().unwrap_or(-1);
         if code != 0 {
-            eprintln!("host {} 失败 (exit {code}): {}", args[0], String::from_utf8_lossy(&out.stderr));
+            eprintln!(
+                "host {} 失败 (exit {code}): {}",
+                args[0],
+                String::from_utf8_lossy(&out.stderr)
+            );
         }
         code
     }
@@ -439,18 +437,17 @@ fn oxmgr_env(dir: &std::path::Path) -> Vec<(String, String)> {
             let cur = oxmgr_host_procs(&dir_path);
             let cam1 = cur.iter().find(|(n, _, _)| n == "host-capturer-cam1").cloned();
             let cam0 = cur.iter().find(|(n, _, _)| n == "host-capturer-cam0").cloned();
-            if let Some((_, s1, _)) = &cam1 {
-                if s1 == "running" {
-                    if let Some((_, s0, p0)) = &cam0 {
-                        if p0 != &0 && p0 != &old_pid {
-                            new_pid = *p0;
-                            eprintln!(
-                                "[config_push_e2e] OK: cam1 running + cam0 watch 重启 {old_pid}→{new_pid}"
-                            );
-                            break;
-                        }
-                    }
-                }
+            if let Some((_, s1, _)) = &cam1
+                && s1 == "running"
+                && let Some((_, _s0, p0)) = &cam0
+                && p0 != &0
+                && p0 != &old_pid
+            {
+                new_pid = *p0;
+                eprintln!(
+                    "[config_push_e2e] OK: cam1 running + cam0 watch 重启 {old_pid}→{new_pid}"
+                );
+                break;
             }
             if std::time::Instant::now() > deadline {
                 panic!(
@@ -474,16 +471,16 @@ fn oxmgr_env(dir: &std::path::Path) -> Vec<(String, String)> {
             let cur = oxmgr_host_procs(&dir_path);
             let cam1 = cur.iter().find(|(n, _, _)| n == "host-capturer-cam1").cloned();
             let cam0 = cur.iter().find(|(n, _, _)| n == "host-capturer-cam0").cloned();
-            if cam1.is_none() {
-                if let Some((_, s0, p0)) = &cam0 {
-                    if p0 != &0 && p0 != &new_pid {
-                        pid_after_remove = *p0;
-                        eprintln!(
-                            "[config_push_e2e] OK: cam1 已删除 + cam0 watch 重启 {new_pid}→{pid_after_remove}"
-                        );
-                        break;
-                    }
-                }
+            if cam1.is_none()
+                && let Some((_, _s0, p0)) = &cam0
+                && p0 != &0
+                && p0 != &new_pid
+            {
+                pid_after_remove = *p0;
+                eprintln!(
+                    "[config_push_e2e] OK: cam1 已删除 + cam0 watch 重启 {new_pid}→{pid_after_remove}"
+                );
+                break;
             }
             if std::time::Instant::now() > deadline {
                 panic!(

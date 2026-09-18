@@ -3,14 +3,14 @@
 //! 当前仅提供日志初始化与占位进程运行器；媒体/信令功能在后续 Phase
 //! （B/C）逐步从 host-legacy 迁移至此。单进程旧实现保留于
 //! `src/bin/host-legacy.rs`，Phase C 迁移完成后删除。
-/// host.yaml → oxfile.toml 翻译器（Task A2）。
-pub mod translate;
 /// 控制平面（Task F1）：控制信封 + 执行器接口。
 pub mod control;
 /// 控制平面 SFU-DC 化（S1）：controller 传输建立 + 命令回路 + 总线镜像。
 pub mod controller;
 /// 紧急停车平面（Task F2）：急停执行器闩锁 + 强审计。
 pub mod emergency;
+/// host.yaml → oxfile.toml 翻译器（Task A2）。
+pub mod translate;
 /// 初始化日志系统，role 作为首个日志事件的标识字段。
 pub fn init_logging(role: &str) {
     mediaservo_common::logging::init(mediaservo_common::logging::LoggingConfig::default());
@@ -28,8 +28,6 @@ pub mod monitor;
 pub mod audio;
 
 /// 占位运行器：打印 `<role> placeholder ready`，随后阻塞等待
-
-/// 占位运行器：打印 `<role> placeholder ready`，随后阻塞等待
 /// SIGINT（Ctrl-C）或 SIGTERM，收到信号后返回 `Ok(())` 优雅退出。
 ///
 /// Phase A 各进程薄壳仅以此占位，真实功能在后续 Phase 逐个替换。
@@ -37,7 +35,7 @@ pub async fn run_placeholder(role: &str) -> Result<(), Box<dyn std::error::Error
     println!("{role} placeholder ready");
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         let mut sigterm = signal(SignalKind::terminate())?;
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}

@@ -11,16 +11,13 @@
 
 /// 信封类型 T1.3 已提 `mediaservo-common::protocol`（四方单一真源：host 两 bin /
 /// TS 镜像 / sig_vector 夹具）——本模块原地 re-export，消费方 import 零改动。
-pub use mediaservo_common::protocol::{parse_envelope, ControlAck, ControlEnvelope};
+pub use mediaservo_common::protocol::{ControlAck, ControlEnvelope, parse_envelope};
 
 /// 执行器接口 — 按通道路由命令；返回回执 result（Err → `ControlAck::err`）。
 /// 实现方必须打日志（C15）；错误信息返回给对端（ACK 语义，非静默）。
 pub trait Actuator: Send + Sync {
-    fn on_command(
-        &self,
-        channel: &str,
-        env: &ControlEnvelope,
-    ) -> Result<serde_json::Value, String>;
+    fn on_command(&self, channel: &str, env: &ControlEnvelope)
+    -> Result<serde_json::Value, String>;
 }
 
 /// Stub 执行器（F1 阶段）：日志 + 回执 `{"ok": true, "channel": .., "seq": ..}`。
@@ -69,7 +66,12 @@ mod tests {
     #[test]
     fn stub_actuator_distinguishes_channels() {
         let actuator = StubActuator;
-        let env = ControlEnvelope { seq: 1, cmd: "pan".into(), payload: serde_json::json!({}), sig: None };
+        let env = ControlEnvelope {
+            seq: 1,
+            cmd: "pan".into(),
+            payload: serde_json::json!({}),
+            sig: None,
+        };
         let chassis = actuator.on_command("chassis", &env).unwrap();
         let gimbal = actuator.on_command("gimbal", &env).unwrap();
         assert_eq!(chassis["channel"], "chassis");

@@ -41,10 +41,7 @@ fn test_config() -> PushConfig {
     let room = format!(
         "field-push-test-{}-{:?}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
     );
     let mut cfg = PushConfig::new(ws_url(), psk(), room);
     cfg.role = PeerRole::Host;
@@ -60,9 +57,8 @@ fn test_config() -> PushConfig {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn field_push_session_publish_video() {
     let cfg = test_config();
-    let (mut session, mut events) = PushSession::connect(cfg.clone())
-        .await
-        .expect("PushSession connect failed");
+    let (mut session, mut events) =
+        PushSession::connect(cfg.clone()).await.expect("PushSession connect failed");
 
     let opts = PublishOptions::default(); // VP8 / auto backend
     let track = tokio::time::timeout(CONNECT_TIMEOUT, session.publish_video(&cfg, &opts))
@@ -75,9 +71,7 @@ async fn field_push_session_publish_video() {
     tokio::time::timeout(CONNECT_TIMEOUT, async {
         while let Some(ev) = events.recv().await {
             match ev {
-                SessionEvent::TrackPublished {
-                    track: published,
-                } => {
+                SessionEvent::TrackPublished { track: published } => {
                     assert_eq!(published, track, "published track id mismatch");
                     return;
                 }
@@ -109,9 +103,7 @@ async fn field_push_session_connect_failure() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn field_push_session_peer_connection_available() {
     let cfg = test_config();
-    let (mut session, _events) = PushSession::connect(cfg.clone())
-        .await
-        .expect("connect failed");
+    let (mut session, _events) = PushSession::connect(cfg.clone()).await.expect("connect failed");
 
     // publish 前无 PC
     assert!(session.peer_connection().is_none(), "PC should be None before publish");
@@ -132,9 +124,7 @@ async fn field_push_session_peer_connection_available() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn field_push_session_video_frames_flow() {
     let cfg = test_config();
-    let (mut session, _events) = PushSession::connect(cfg.clone())
-        .await
-        .expect("connect failed");
+    let (mut session, _events) = PushSession::connect(cfg.clone()).await.expect("connect failed");
 
     let opts = PublishOptions::default();
     tokio::time::timeout(CONNECT_TIMEOUT, session.publish_video(&cfg, &opts))
@@ -146,9 +136,7 @@ async fn field_push_session_video_frames_flow() {
     assert!(session.peer_connection().is_some(), "PC after publish");
 
     // 启动帧生成
-    session
-        .start_video_frames(&cfg)
-        .expect("start_video_frames failed");
+    session.start_video_frames(&cfg).expect("start_video_frames failed");
     // 重复启动应报 InvalidState
     let dup = session.start_video_frames(&cfg).unwrap_err();
     assert!(matches!(dup, FieldError::InvalidState(_)), "got {dup:?}");
@@ -162,16 +150,16 @@ async fn field_push_session_video_frames_flow() {
         if let Some(o) = stats.iter().find_map(|s| match s {
             mediaservo_webrtc::stats::RTCStats::OutboundRtp(o) => Some(o),
             _ => None,
-        }) {
-            if o.bytes_sent > 0 && o.frames_encoded > 0 {
-                tracing::info!(
-                    "frames flowing: bytes_sent={} frames_encoded={}",
-                    o.bytes_sent,
-                    o.frames_encoded
-                );
-                observed_frames = true;
-                break;
-            }
+        }) && o.bytes_sent > 0
+            && o.frames_encoded > 0
+        {
+            tracing::info!(
+                "frames flowing: bytes_sent={} frames_encoded={}",
+                o.bytes_sent,
+                o.frames_encoded
+            );
+            observed_frames = true;
+            break;
         }
     }
     assert!(observed_frames, "no outbound frames observed within 10s");
@@ -198,10 +186,7 @@ async fn field_pull_session_consumes_video() {
     let room = format!(
         "field-pull-test-{}-{:?}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
     );
     let push_cfg = PushConfig::new(ws_url(), psk(), room.clone());
     let pull_cfg = PullConfig {
@@ -213,14 +198,12 @@ async fn field_pull_session_consumes_video() {
     };
 
     // 1. Pull 先入房（Consumer 角色）— 保证 push publish 的 NewProducer 广播必达
-    let (mut pull, mut pull_events) = PullSession::connect(pull_cfg.clone())
-        .await
-        .expect("pull connect");
+    let (mut pull, mut pull_events) =
+        PullSession::connect(pull_cfg.clone()).await.expect("pull connect");
 
     // 2. Push 侧: 连接 + publish + 帧生成（广播给房间内已有 peer = Pull）
-    let (mut push, mut push_events) = PushSession::connect(push_cfg.clone())
-        .await
-        .expect("push connect");
+    let (mut push, push_events) =
+        PushSession::connect(push_cfg.clone()).await.expect("push connect");
     let opts = PublishOptions::default();
     let track = tokio::time::timeout(CONNECT_TIMEOUT, push.publish_video(&push_cfg, &opts))
         .await
@@ -232,7 +215,9 @@ async fn field_pull_session_consumes_video() {
     let producer_id = tokio::time::timeout(CONNECT_TIMEOUT, async {
         loop {
             match pull_events.recv().await {
-                Some(SessionEvent::Message(SignalingMessage::NewProducer { producer_id, .. })) => {
+                Some(SessionEvent::Message(SignalingMessage::NewProducer {
+                    producer_id, ..
+                })) => {
                     return producer_id;
                 }
                 Some(SessionEvent::Error(e)) => panic!("pull session error: {e:?}"),
@@ -252,16 +237,14 @@ async fn field_pull_session_consumes_video() {
     // 5. 等待解码帧流出（≤15s; WebRtcTrackSink 推帧 → SFU relay → 解码 → FrameSink）
     let mut got_frame = false;
     for _ in 0..30 {
-        tokio::time::timeout(Duration::from_secs(1), frames.recv())
-            .await
-            .map(|opt| {
-                if let Some(f) = opt {
-                    assert!(f.width > 0 && f.height > 0, "frame dims");
-                    assert!(!f.data.is_empty(), "frame data");
-                    tracing::info!("pull frame: {}x{} ({} bytes)", f.width, f.height, f.data.len());
-                    got_frame = true;
-                }
-            });
+        tokio::time::timeout(Duration::from_secs(1), frames.recv()).await.map(|opt| {
+            if let Some(f) = opt {
+                assert!(f.width > 0 && f.height > 0, "frame dims");
+                assert!(!f.data.is_empty(), "frame data");
+                tracing::info!("pull frame: {}x{} ({} bytes)", f.width, f.height, f.data.len());
+                got_frame = true;
+            }
+        });
         if got_frame {
             break;
         }
@@ -280,9 +263,7 @@ async fn field_pull_session_consumes_video() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn field_push_session_double_publish_fails() {
     let cfg = test_config();
-    let (mut session, _events) = PushSession::connect(cfg.clone())
-        .await
-        .expect("connect failed");
+    let (mut session, _events) = PushSession::connect(cfg.clone()).await.expect("connect failed");
 
     let opts = PublishOptions::default();
     tokio::time::timeout(CONNECT_TIMEOUT, session.publish_video(&cfg, &opts))
@@ -305,9 +286,7 @@ async fn field_push_session_low_res_frames() {
     cfg.framerate = 15;
     cfg.bitrate_kbps = 500;
 
-    let (mut session, _events) = PushSession::connect(cfg.clone())
-        .await
-        .expect("connect failed");
+    let (mut session, _events) = PushSession::connect(cfg.clone()).await.expect("connect failed");
     let opts = PublishOptions::default();
     tokio::time::timeout(CONNECT_TIMEOUT, session.publish_video(&cfg, &opts))
         .await
@@ -325,14 +304,13 @@ async fn field_push_session_low_res_frames() {
         if let Some(o) = stats.iter().find_map(|s| match s {
             mediaservo_webrtc::stats::RTCStats::OutboundRtp(o) => Some(o),
             _ => None,
-        }) {
-            if o.frames_encoded > 0 {
-                // 分辨率可能被 libwebrtc BWE 自适应降级（低码率 → scaling down）—
-                // 不强制等于配置, 验证帧已编码即可（尺寸语义由 C17 帧循环保证）
-                assert!(o.frame_width > 0 && o.frame_height > 0, "frame dims");
-                observed = true;
-                break;
-            }
+        }) && o.frames_encoded > 0
+        {
+            // 分辨率可能被 libwebrtc BWE 自适应降级（低码率 → scaling down）—
+            // 不强制等于配置, 验证帧已编码即可（尺寸语义由 C17 帧循环保证）
+            assert!(o.frame_width > 0 && o.frame_height > 0, "frame dims");
+            observed = true;
+            break;
         }
     }
     assert!(observed, "no frames at low-res config within 10s");

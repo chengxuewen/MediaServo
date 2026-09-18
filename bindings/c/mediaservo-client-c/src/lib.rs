@@ -34,10 +34,9 @@ mod errors;
 
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_void};
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mediaservo_client::error::ClientError;
@@ -49,9 +48,8 @@ use config::{
     ms_client_config_t, ms_client_login_config_t, validate_login_cfg, validate_session_cfg,
 };
 use errors::{
-    MEDIASERVO_CLIENT_ERR_INVALID_ARG, MEDIASERVO_CLIENT_ERR_INTERNAL,
-    MEDIASERVO_CLIENT_ERR_STATE, MEDIASERVO_OK, build_envelope, copy_out_str, cstr, error_code,
-    last_error_impl, set_last_error,
+    MEDIASERVO_CLIENT_ERR_INTERNAL, MEDIASERVO_CLIENT_ERR_INVALID_ARG, MEDIASERVO_CLIENT_ERR_STATE,
+    MEDIASERVO_OK, build_envelope, copy_out_str, cstr, error_code, last_error_impl, set_last_error,
 };
 
 pub use config::{MEDIASERVO_CLIENT_CONFIG_MIN_SIZE, MS_CLIENT_LOGIN_CONFIG_MIN_SIZE};
@@ -126,7 +124,7 @@ fn video_pump(s: *mut ms_client_session_t, mut rx: mpsc::Receiver<VideoFrame>) {
                 };
                 cb(s, &cframe, user);
             }
-            Ok(None) => break, // 会话 drop → 帧通道消亡（正常收敛）
+            Ok(None) => break,  // 会话 drop → 帧通道消亡（正常收敛）
             Err(_) => continue, // VIDEO_POLL 空转，复查 closed
         }
     }
@@ -206,7 +204,7 @@ pub extern "C" fn ms_client_list_rooms(
             }
         };
         // needed 先写（溢出/成功两态都有值——调用方凭此决定重试尺寸）。
-        let need = json.as_bytes().len() + 1;
+        let need = json.len() + 1;
         if let Some(n) = unsafe { needed.as_mut() } {
             *n = need;
         }
@@ -495,7 +493,7 @@ pub extern "C" fn ms_client_session_video_stats(
                 return MEDIASERVO_CLIENT_ERR_INTERNAL;
             }
         };
-        let need = json.as_bytes().len() + 1;
+        let need = json.len() + 1;
         if let Some(n) = unsafe { needed.as_mut() } {
             *n = need;
         }
@@ -861,6 +859,8 @@ pub extern "C" fn ms_client_version(buf: *mut c_char, len: usize) -> c_int {
 
 #[cfg(test)]
 mod tests {
+    use std::ptr;
+
     use super::*;
 
     // ── FFI 入口 null 守卫（不触网）──
@@ -904,12 +904,22 @@ mod tests {
         let mut buf = [0u8; 256];
         let jwt = std::ffi::CString::new("j").unwrap();
         assert_eq!(
-            ms_client_session_video_stats(ptr::null(), buf.as_mut_ptr() as *mut c_char, buf.len(), ptr::null_mut()),
+            ms_client_session_video_stats(
+                ptr::null(),
+                buf.as_mut_ptr() as *mut c_char,
+                buf.len(),
+                ptr::null_mut()
+            ),
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         );
         // 非 null 但 cap 0：句柄不合法也不许触网/解引用——先参数守卫。
         assert_eq!(
-            ms_client_session_video_stats(ptr::null(), buf.as_mut_ptr() as *mut c_char, 0, ptr::null_mut()),
+            ms_client_session_video_stats(
+                ptr::null(),
+                buf.as_mut_ptr() as *mut c_char,
+                0,
+                ptr::null_mut()
+            ),
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         );
         let _ = jwt;
@@ -919,14 +929,25 @@ mod tests {
     fn emergency_stop_null_guards_before_network() {
         let label = std::ffi::CString::new("chassis").unwrap();
         assert_eq!(
-            ms_client_session_emergency_stop(ptr::null_mut(), ptr::null_mut(),
-                                             label.as_ptr(), 900, ptr::null()),
+            ms_client_session_emergency_stop(
+                ptr::null_mut(),
+                ptr::null_mut(),
+                label.as_ptr(),
+                900,
+                ptr::null()
+            ),
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         );
         // label 空指针（session 侧不合法同样先参数守卫）。
         let dummy_ctl = ptr::null_mut::<ms_client_control_t>();
         assert_eq!(
-            ms_client_session_emergency_stop(ptr::null_mut(), dummy_ctl, ptr::null(), 1, ptr::null()),
+            ms_client_session_emergency_stop(
+                ptr::null_mut(),
+                dummy_ctl,
+                ptr::null(),
+                1,
+                ptr::null()
+            ),
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         );
     }
@@ -988,9 +1009,8 @@ mod tests {
         let mut buf = [0u8; 32];
         let rc = ms_client_version(buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
-        let s = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr() as *const c_char) }
-            .to_str()
-            .unwrap();
+        let s =
+            unsafe { std::ffi::CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap();
         assert!(s.starts_with("0.1."), "version: {s}");
     }
 

@@ -17,21 +17,18 @@ use std::time::Duration;
 use v4l::buffer::{Flags as BufferFlags, Type};
 use v4l::capability::Flags as CapFlags;
 use v4l::device::Device;
-use v4l::format::{FourCC, Format};
+use v4l::format::{Format, FourCC};
 use v4l::fraction::Fraction;
 use v4l::io::mmap;
 use v4l::io::traits::CaptureStream;
-use v4l::video::capture::Parameters as CaptureParameters;
 use v4l::video::Capture;
+use v4l::video::capture::Parameters as CaptureParameters;
 
 use super::{CaptureBackend, CaptureError, CapturedFrame, TimestampMapper};
 
 /// Preferred capture pixel formats, in negotiation order (first supported wins).
 /// YUYV (UVC) before NV12 (mipi/imx185) — see design decision 5.
-pub const PREFERRED_FOURCC: [FourCC; 2] = [
-    FourCC { repr: *b"YUYV" },
-    FourCC { repr: *b"NV12" },
-];
+pub const PREFERRED_FOURCC: [FourCC; 2] = [FourCC { repr: *b"YUYV" }, FourCC { repr: *b"NV12" }];
 
 const YUYV: FourCC = FourCC { repr: *b"YUYV" };
 const NV12: FourCC = FourCC { repr: *b"NV12" };
@@ -47,17 +44,11 @@ pub fn select_format(
     preferred: &[FourCC],
 ) -> Result<Format, String> {
     let fmt_str = |f: &FourCC| f.str().unwrap_or("????").to_string();
-    let fourcc = preferred
-        .iter()
-        .find(|f| supported.contains(f))
-        .copied()
-        .ok_or_else(|| {
-            let wanted = preferred.iter().map(fmt_str).collect::<Vec<_>>().join(", ");
-            let available = supported.iter().map(fmt_str).collect::<Vec<_>>().join(", ");
-            format!(
-                "preferred formats [{wanted}] not supported; device offers: [{available}]"
-            )
-        })?;
+    let fourcc = preferred.iter().find(|f| supported.contains(f)).copied().ok_or_else(|| {
+        let wanted = preferred.iter().map(fmt_str).collect::<Vec<_>>().join(", ");
+        let available = supported.iter().map(fmt_str).collect::<Vec<_>>().join(", ");
+        format!("preferred formats [{wanted}] not supported; device offers: [{available}]")
+    })?;
     Ok(Format::new(width, height, fourcc))
 }
 
@@ -65,11 +56,7 @@ pub fn select_format(
 /// (interval = num/denom seconds → fps = denom/num).
 fn actual_fps(params: &CaptureParameters) -> u32 {
     let f = params.interval;
-    if f.numerator == 0 {
-        0
-    } else {
-        f.denominator / f.numerator
-    }
+    f.denominator.checked_div(f.numerator).unwrap_or(0)
 }
 
 // ── V4l2Backend ──────────────────────────────────────────
@@ -142,9 +129,10 @@ impl V4l2Backend {
             .map_err(|message| CaptureError::Format { path: self.path.clone(), message })?;
 
         // S_FMT — driver may adjust; the return value is authoritative.
-        let actual = dev
-            .set_format(&fmt)
-            .map_err(|e| CaptureError::Format { path: self.path.clone(), message: e.to_string() })?;
+        let actual = dev.set_format(&fmt).map_err(|e| CaptureError::Format {
+            path: self.path.clone(),
+            message: e.to_string(),
+        })?;
 
         // S_PARM — frame interval; tegra-video 驱动不支持（实证: VIDIOC_S_PARM
         // Inappropriate ioctl）→ 降级 warn 不阻断（帧率由传感器/ISP 固定）；
@@ -199,13 +187,13 @@ impl V4l2Backend {
         let stream = self.stream.as_mut().ok_or_else(not_open)?;
         let fmt = self.negotiated.as_ref().ok_or_else(not_open)?;
 
-        let (bytes, meta) = stream.next().map_err(|e| CaptureError::Stream {
-            path: self.path.clone(),
-            source: e,
-        })?;
+        let (bytes, meta) = stream
+            .next()
+            .map_err(|e| CaptureError::Stream { path: self.path.clone(), source: e })?;
         // Defensive: never read past the mmap buffer even if bytesused lies.
         let used = meta.bytesused.min(bytes.len() as u32) as usize;
-        let data = convert_to_compact_i420(&bytes[..used], fmt.fourcc, fmt.width, fmt.height, fmt.stride)?;
+        let data =
+            convert_to_compact_i420(&bytes[..used], fmt.fourcc, fmt.width, fmt.height, fmt.stride)?;
 
         let ts = if meta.flags.contains(BufferFlags::TIMESTAMP_MONOTONIC) {
             self.ts_mapper.map(Duration::from(meta.timestamp))
@@ -263,7 +251,12 @@ fn convert_to_compact_i420(
     }
 }
 
-fn yuyv_to_compact_i420(raw: &[u8], w: usize, h: usize, stride: usize) -> Result<Vec<u8>, CaptureError> {
+fn yuyv_to_compact_i420(
+    raw: &[u8],
+    w: usize,
+    h: usize,
+    stride: usize,
+) -> Result<Vec<u8>, CaptureError> {
     let needed = stride * h;
     if raw.len() < needed {
         return Err(CaptureError::Convert(format!(
@@ -299,7 +292,12 @@ fn yuyv_to_compact_i420(raw: &[u8], w: usize, h: usize, stride: usize) -> Result
     Ok(out)
 }
 
-fn nv12_to_compact_i420(raw: &[u8], w: usize, h: usize, stride: usize) -> Result<Vec<u8>, CaptureError> {
+fn nv12_to_compact_i420(
+    raw: &[u8],
+    w: usize,
+    h: usize,
+    stride: usize,
+) -> Result<Vec<u8>, CaptureError> {
     let y_len = stride * h;
     let uv_offset = y_len; // UV plane offset = stride×h (NOT width×h — padded)
     let needed = uv_offset + stride * (h / 2);
@@ -348,7 +346,6 @@ mod tests {
     const YUYV: FourCC = FourCC { repr: *b"YUYV" };
     const NV12: FourCC = FourCC { repr: *b"NV12" };
     const MJPG: FourCC = FourCC { repr: *b"MJPG" };
-
 
     // ── select_format (T3) ─────────────────────────────────
 

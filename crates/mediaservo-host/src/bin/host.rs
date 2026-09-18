@@ -11,18 +11,19 @@
 //!   变更 Recreate/未变 Noop）
 //! - `host restart [<dir>]`— `oxmgr stop <oxfile>` 后重新 apply（全量重启）
 //! - `host stop [<dir>]`  — `oxmgr stop run/oxfile.toml` + `oxmgr delete run/oxfile.toml`
-//! OxMgr 动词核对（C11/C18，来源 .refinfo/OxMgr/docs/CLI.md + SKILL.md）：
-//! `apply <config>` / `list [--json]` / `stop <name|id|config>` / `delete <name|id|config>`
-//! （**无** `stop/delete --namespace` 旗标；config 目标自动解析 oxfile 内全部 app，
-//! 见 CLI.md "Lifecycle" 段）。
+//!   OxMgr 动词核对（C11/C18，来源 .refinfo/OxMgr/docs/CLI.md + SKILL.md）：
+//!   `apply <config>` / `list [--json]` / `stop <name|id|config>` / `delete <name|id|config>`
+//!   （**无** `stop/delete --namespace` 旗标；config 目标自动解析 oxfile 内全部 app，
+//!   见 CLI.md "Lifecycle" 段）。
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use mediaservo_link::{
-    CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, FrameTopic, NodeAcl, NodeId, Role, TokenFile,
-};
 use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePublicKey};
+use mediaservo_link::{
+    CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, FrameTopic, NodeAcl, NodeId, Role,
+    TokenFile,
+};
 use pkcs8::LineEnding;
 
 /// `host init` 生成的配置模板（host.yaml 初版 schema，A1）。
@@ -91,7 +92,11 @@ fn main() {
         "ps" => cmd_oxmgr(&mut args, &["list"]),
         "logs" => cmd_oxmgr(&mut args, &["logs"]),
         "version" => {
-            println!("{} {}", mediaservo_common::brand::media_brand().product, env!("CARGO_PKG_VERSION"));
+            println!(
+                "{} {}",
+                mediaservo_common::brand::media_brand().product,
+                env!("CARGO_PKG_VERSION")
+            );
             0
         }
         _ => {
@@ -118,14 +123,16 @@ fn parse_dir(args: &mut impl Iterator<Item = String>) -> Result<PathBuf, String>
         }
         // ② 二进制同目录/上级有实例（install 布局: <inst>/bin/msrtc-host + <inst>/etc/host.yaml）
         //    → 定位安装根，实现「任意目录执行都指向本机实例」
-        if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
+        if let Some(exe_dir) =
+            std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        {
             if exe_dir.join("etc").join("host.yaml").exists() {
                 return Ok(exe_dir.clone());
             }
-            if let Some(inst_root) = exe_dir.parent() {
-                if inst_root.join("etc").join("host.yaml").exists() {
-                    return Ok(inst_root.to_path_buf());
-                }
+            if let Some(inst_root) = exe_dir.parent()
+                && inst_root.join("etc").join("host.yaml").exists()
+            {
+                return Ok(inst_root.to_path_buf());
             }
         }
         return Ok(PathBuf::from(".host"));
@@ -248,9 +255,7 @@ fn gen_signing_pem() -> Result<String, String> {
     use ed25519_dalek::pkcs8::EncodePrivateKey;
     let mut csprng = rand_core::OsRng;
     let signing = ed25519_dalek::SigningKey::generate(&mut csprng);
-    let doc = signing
-        .to_pkcs8_pem(pkcs8::LineEnding::LF)
-        .map_err(|e| e.to_string())?;
+    let doc = signing.to_pkcs8_pem(pkcs8::LineEnding::LF).map_err(|e| e.to_string())?;
     Ok(doc.to_string())
 }
 
@@ -279,40 +284,42 @@ fn cmd_apply_impl(args: &mut impl Iterator<Item = String>, verb: &str) -> i32 {
     };
     // 多实例竞争检测: host-agent 本地网关端口被占用 = 另一 host 实例在运行。
     // 交互式二选一（非交互环境默认退出）: 退出 / 接管（停旧实例启当前）。
-    if verb == "start" {
-        if let Some(port) = agent_port_in_use(&dir) {
-            let old_dir = find_other_instance_dir();
-            eprintln!("检测到另一 host 实例在运行（本地信令网关端口 {port} 被占用）");
-            if let Some(od) = &old_dir {
-                eprintln!("  旧实例目录: {}", od.display());
-            } else {
-                eprintln!("  （未能定位旧实例目录——端口被其他程序占用？）");
-            }
-            if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-                eprintln!("  非交互环境——退出（有意多实例: 配置不同 [signaling] local_port + room 共存）");
-                return 1;
-            }
-            eprint!("  输入 y 接管（停止旧实例并启动当前）/ 其他键退出: ");
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-            let mut ans = String::new();
-            let _ = std::io::stdin().read_line(&mut ans);
-            if !ans.trim().eq_ignore_ascii_case("y") {
-                return 1;
-            }
-            if let Some(od) = old_dir {
-                let oxfile = od.join("run").join("oxfile.toml");
-                let ox = oxfile.to_str().unwrap_or_default().to_string();
-                eprintln!("接管: 停止旧实例 {}", od.display());
-                let _ = run_oxmgr_in(Some(&od), &["stop", &ox]);
-                let _ = run_oxmgr_in(Some(&od), &["delete", &ox]);
-            } else {
-                // PIT-155: 品牌化部署下定位旧实例失败（进程名 msrtc-agent 非 host-agent）——
-                // 若继续清 SHM + apply 会与存活旧进程混战（相机 EBUSY/SHM 断链→web 黑屏）。
-                eprintln!("接管中止: 未定位旧实例目录——旧进程可能仍在运行");
-                eprintln!("  直接启动会造成资源竞争（相机 EBUSY / SHM 断链）");
-                eprintln!("  请先手动停止旧实例（如 kill <旧进程> 或重启）后重试");
-                return 1;
-            }
+    if verb == "start"
+        && let Some(port) = agent_port_in_use(&dir)
+    {
+        let old_dir = find_other_instance_dir();
+        eprintln!("检测到另一 host 实例在运行（本地信令网关端口 {port} 被占用）");
+        if let Some(od) = &old_dir {
+            eprintln!("  旧实例目录: {}", od.display());
+        } else {
+            eprintln!("  （未能定位旧实例目录——端口被其他程序占用？）");
+        }
+        if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            eprintln!(
+                "  非交互环境——退出（有意多实例: 配置不同 [signaling] local_port + room 共存）"
+            );
+            return 1;
+        }
+        eprint!("  输入 y 接管（停止旧实例并启动当前）/ 其他键退出: ");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        let mut ans = String::new();
+        let _ = std::io::stdin().read_line(&mut ans);
+        if !ans.trim().eq_ignore_ascii_case("y") {
+            return 1;
+        }
+        if let Some(od) = old_dir {
+            let oxfile = od.join("run").join("oxfile.toml");
+            let ox = oxfile.to_str().unwrap_or_default().to_string();
+            eprintln!("接管: 停止旧实例 {}", od.display());
+            let _ = run_oxmgr_in(Some(&od), &["stop", &ox]);
+            let _ = run_oxmgr_in(Some(&od), &["delete", &ox]);
+        } else {
+            // PIT-155: 品牌化部署下定位旧实例失败（进程名 msrtc-agent 非 host-agent）——
+            // 若继续清 SHM + apply 会与存活旧进程混战（相机 EBUSY/SHM 断链→web 黑屏）。
+            eprintln!("接管中止: 未定位旧实例目录——旧进程可能仍在运行");
+            eprintln!("  直接启动会造成资源竞争（相机 EBUSY / SHM 断链）");
+            eprintln!("  请先手动停止旧实例（如 kill <旧进程> 或重启）后重试");
+            return 1;
         }
     }
     // C25: 全量启动前清 SHM 残留；apply（热更新）不清（进程在跑，SHM 在用）
@@ -457,7 +464,10 @@ fn cmd_status(args: &mut impl Iterator<Item = String>) -> i32 {
     };
     let host_procs: Vec<&serde_json::Value> = rows
         .iter()
-        .filter(|p| p.get("namespace").and_then(|n| n.as_str()) == Some(mediaservo_common::brand::media_brand().namespace))
+        .filter(|p| {
+            p.get("namespace").and_then(|n| n.as_str())
+                == Some(mediaservo_common::brand::media_brand().namespace)
+        })
         .collect();
     if host_procs.is_empty() {
         println!("host 命名空间无已管理进程（先 host start [<dir>]）");
@@ -589,7 +599,8 @@ fn cmd_token_issue(args: &mut impl Iterator<Item = String>) -> i32 {
         eprintln!("--all 与 --for-ros 互斥");
         return 2;
     }
-    if (all || for_ros) && (role.is_some() || node.is_some() || !topics.is_empty() || out.is_some()) {
+    if (all || for_ros) && (role.is_some() || node.is_some() || !topics.is_empty() || out.is_some())
+    {
         let preset = if all { "--all" } else { "--for-ros" };
         eprintln!("{preset} 不能与 --role/--node/--topic/--out 同用（参数从 host.yaml/预设推导）");
         return 2;
@@ -600,9 +611,21 @@ fn cmd_token_issue(args: &mut impl Iterator<Item = String>) -> i32 {
     if for_ros {
         let out = std::path::absolute(dir.join("etc").join("link").join(ROS_TOKEN_FILE))
             .unwrap_or_else(|_| dir.join("etc").join("link").join(ROS_TOKEN_FILE));
-        return match issue_one(&dir, Role::Perception, ROS_TOKEN_NODE.to_string(), Vec::new(), &out, ttl) {
+        return match issue_one(
+            &dir,
+            Role::Perception,
+            ROS_TOKEN_NODE.to_string(),
+            Vec::new(),
+            &out,
+            ttl,
+        ) {
             Ok(()) => {
-                println!("已签发 Perception 令牌 → {}（node={} ttl={}s）", out.display(), ROS_TOKEN_NODE, ttl);
+                println!(
+                    "已签发 Perception 令牌 → {}（node={} ttl={}s）",
+                    out.display(),
+                    ROS_TOKEN_NODE,
+                    ttl
+                );
                 0
             }
             Err(e) => {
@@ -688,9 +711,8 @@ fn issue_one(
     ttl: u64,
 ) -> Result<(), String> {
     let pem_path = dir.join("etc").join("link").join("signing.pem");
-    let pem = std::fs::read(&pem_path).map_err(|e| {
-        format!("读取 {} 失败: {e} — 先运行 host init <dir>", pem_path.display())
-    })?;
+    let pem = std::fs::read(&pem_path)
+        .map_err(|e| format!("读取 {} 失败: {e} — 先运行 host init <dir>", pem_path.display()))?;
     let signing = ed25519_dalek::SigningKey::from_pkcs8_pem(&String::from_utf8_lossy(&pem))
         .map_err(|e| format!("{} 不是有效 PKCS#8 Ed25519 私钥: {e}", pem_path.display()))?;
     let acl = build_acl(NodeId::new(node.clone()), role, topics.clone())?;
@@ -838,7 +860,8 @@ fn issue_all(dir: &Path, ttl: u64) -> i32 {
         }
         let rec = link.join("recorder.token");
         if !rec.exists() {
-            match issue_one(dir, Role::Recorder, "host-recorder".to_string(), Vec::new(), &rec, ttl) {
+            match issue_one(dir, Role::Recorder, "host-recorder".to_string(), Vec::new(), &rec, ttl)
+            {
                 Ok(()) => issued += 1,
                 Err(e) => first_err = Some(format!("签发 {} 失败: {e}", rec.display())),
             }
@@ -846,7 +869,14 @@ fn issue_all(dir: &Path, ttl: u64) -> i32 {
         if first_err.is_none() {
             let agent = link.join("agent.token");
             if !agent.exists() {
-                match issue_one(dir, Role::Monitor, "host-agent".to_string(), Vec::new(), &agent, ttl) {
+                match issue_one(
+                    dir,
+                    Role::Monitor,
+                    "host-agent".to_string(),
+                    Vec::new(),
+                    &agent,
+                    ttl,
+                ) {
                     Ok(()) => issued += 1,
                     Err(e) => first_err = Some(format!("签发 {} 失败: {e}", agent.display())),
                 }
@@ -875,7 +905,9 @@ fn parse_role(s: &str) -> Result<Role, String> {
         "control" => Ok(Role::Control),
         "perception" => Ok(Role::Perception),
         "monitor" => Ok(Role::Monitor),
-        _ => Err(format!("未知角色: {s}（可选: capture/processor/pusher/puller/recorder/control/perception/monitor）")),
+        _ => Err(format!(
+            "未知角色: {s}（可选: capture/processor/pusher/puller/recorder/control/perception/monitor）"
+        )),
     }
 }
 
@@ -953,7 +985,6 @@ fn cmd_doctor(args: &mut impl Iterator<Item = String>) -> i32 {
     failed
 }
 
-
 /// 代理 oxmgr CLI；oxmgr 不在 PATH 时报清晰错误并提示安装。
 /// 注入实例化的 oxmgr 数据目录（<dir>/run/oxmgr——oxmgr 用 OXMGR_HOME env）——多实例 daemon 状态隔离
 /// 注入实例化的 oxmgr 环境——多实例 daemon 完全隔离:
@@ -978,8 +1009,6 @@ fn instance_daemon_port(dir: &std::path::Path) -> u16 {
     18000u16 + (sum % 400) as u16
 }
 
-
-
 fn run_oxmgr_in(dir: Option<&std::path::Path>, args: &[&str]) -> i32 {
     let mut cmd = match dir {
         Some(d) => oxmgr_env(d),
@@ -988,7 +1017,9 @@ fn run_oxmgr_in(dir: Option<&std::path::Path>, args: &[&str]) -> i32 {
     match cmd.args(args).status() {
         Ok(status) => status.code().unwrap_or(1),
         Err(e) => {
-            eprintln!("oxmgr 执行失败: {e} — 请先安装 OxMgr 并加入 PATH（npm install -g oxmgr，见 https://github.com/Vladimir-Urik/OxMgr#install）");
+            eprintln!(
+                "oxmgr 执行失败: {e} — 请先安装 OxMgr 并加入 PATH（npm install -g oxmgr，见 https://github.com/Vladimir-Urik/OxMgr#install）"
+            );
             1
         }
     }
@@ -998,11 +1029,7 @@ fn run_oxmgr_in(dir: Option<&std::path::Path>, args: &[&str]) -> i32 {
 /// 用法: mediaservo-host <monit|ps|logs [proc]> —— oxmgr 不在 PATH 时报清晰错误。
 fn cmd_oxmgr(args: &mut impl Iterator<Item = String>, fixed: &[&str]) -> i32 {
     // monit/ps 无额外参数；logs 透传全部参数（进程名 + oxmgr 选项如 --lines/-f）
-    let extra: Vec<String> = if fixed[0] == "logs" {
-        args.collect()
-    } else {
-        Vec::new()
-    };
+    let extra: Vec<String> = if fixed[0] == "logs" { args.collect() } else { Vec::new() };
     let dir = parse_dir(&mut std::iter::empty()).unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut cmd = oxmgr_env(&dir);
     cmd.args(fixed).args(&extra);
@@ -1010,7 +1037,9 @@ fn cmd_oxmgr(args: &mut impl Iterator<Item = String>, fixed: &[&str]) -> i32 {
         Ok(st) => st.code().unwrap_or(1),
         Err(e) => {
             eprintln!("无法执行 oxmgr: {e}");
-            eprintln!("提示: oxmgr 在 install 打包的 bin/ 下——export PATH=<prefix>/bin:$PATH 后使用（或绝对路径）");
+            eprintln!(
+                "提示: oxmgr 在 install 打包的 bin/ 下——export PATH=<prefix>/bin:$PATH 后使用（或绝对路径）"
+            );
             1
         }
     }
@@ -1045,7 +1074,7 @@ fn sync_host_logs(dir: &std::path::Path) {
             }
             let _ = std::fs::remove_file(&link);
         }
-        if std::os::unix::fs::symlink(&e.path(), &link).is_ok() {
+        if std::os::unix::fs::symlink(e.path(), &link).is_ok() {
             n += 1;
         }
     }
@@ -1127,7 +1156,9 @@ fn other_startup_units(dir: &std::path::Path) -> Vec<(std::path::PathBuf, std::p
             .ok()
             .and_then(|c| {
                 c.lines().find_map(|l| {
-                    l.trim().strip_prefix("Environment=OXMGR_DATA_DIR=").map(|v| v.trim().to_string())
+                    l.trim()
+                        .strip_prefix("Environment=OXMGR_DATA_DIR=")
+                        .map(|v| v.trim().to_string())
                 })
             })
             .map(|d| std::path::PathBuf::from(d).join("..").join(".."))
@@ -1146,7 +1177,9 @@ fn startup_install(dir: &std::path::Path) -> i32 {
             eprintln!("检测到其他实例已开启自启: {}（实例目录: {}）", p.display(), od.display());
         }
         if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-            eprintln!("  非交互环境——退出（只允许一个自启实例；先 `mediaservo-host startup off <旧dir>` 或手动接管）");
+            eprintln!(
+                "  非交互环境——退出（只允许一个自启实例；先 `mediaservo-host startup off <旧dir>` 或手动接管）"
+            );
             return 1;
         }
         eprint!("  输入 y 接管（停旧实例并改为当前实例自启）/ 其他键退出: ");
@@ -1218,7 +1251,10 @@ fn startup_install(dir: &std::path::Path) -> i32 {
                 return 1;
             }
             Err(e) => {
-                eprintln!("startup on: 执行 {} 失败: {e}（systemd 用户服务不可用？）", args.join(" "));
+                eprintln!(
+                    "startup on: 执行 {} 失败: {e}（systemd 用户服务不可用？）",
+                    args.join(" ")
+                );
                 return 1;
             }
         }
@@ -1262,14 +1298,20 @@ fn startup_status(dir: &std::path::Path) -> i32 {
         }
         0
     } else {
-        println!("startup: 未启用（{} 无自启 unit——用 `{} startup on` 启用）", dir.display(), mediaservo_common::brand::media_brand().product);
+        println!(
+            "startup: 未启用（{} 无自启 unit——用 `{} startup on` 启用）",
+            dir.display(),
+            mediaservo_common::brand::media_brand().product
+        );
         1
     }
 }
 
 #[cfg(not(target_os = "linux"))]
 fn startup_install(_dir: &std::path::Path) -> i32 {
-    eprintln!("startup on: 非 Linux 平台——请用 oxmgr service install（macOS launchd / Windows Task Scheduler）");
+    eprintln!(
+        "startup on: 非 Linux 平台——请用 oxmgr service install（macOS launchd / Windows Task Scheduler）"
+    );
     1
 }
 
@@ -1305,12 +1347,12 @@ fn probe_agent_dir(cmdline: &str) -> Option<std::path::PathBuf> {
     let cfg_marker = "--config";
     let mut parts = cmdline.split_whitespace();
     while let Some(p) = parts.next() {
-        if p == cfg_marker {
-            if let Some(path) = parts.next() {
-                let cfg = std::path::Path::new(path);
-                if cfg.ends_with("etc/host.yaml") {
-                    return cfg.parent()?.parent().map(|d| d.to_path_buf());
-                }
+        if p == cfg_marker
+            && let Some(path) = parts.next()
+        {
+            let cfg = std::path::Path::new(path);
+            if cfg.ends_with("etc/host.yaml") {
+                return cfg.parent()?.parent().map(|d| d.to_path_buf());
             }
         }
     }
@@ -1338,10 +1380,10 @@ fn find_other_instance_dir() -> Option<std::path::PathBuf> {
                 let Some(pid) = pid.to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
                 let cmdline = std::fs::read_to_string(format!("/proc/{pid}/cmdline")).ok()?;
                 let cmdline = cmdline.replace('\0', " ");
-                if is_agent_cmdline(&cmdline) {
-                    if let Some(d) = probe_agent_dir(&cmdline) {
-                        return Some(d);
-                    }
+                if is_agent_cmdline(&cmdline)
+                    && let Some(d) = probe_agent_dir(&cmdline)
+                {
+                    return Some(d);
                 }
             }
         }
@@ -1361,9 +1403,14 @@ mod instance_probe_tests {
     fn bundled_host_yaml_template_passes_validate() {
         // 模板 = init 落地产物。defaults 段带 deny_unknown_fields、codec/stream_mode 有
         // 合法集门（D282）——模板写错键/错值必须在本单测红，而不是用户 init 后 deploy 挂。
-        mediaservo_host::translate::validate(HOST_TOML_TEMPLATE).expect("host.yaml.template 必须通过校验");
+        mediaservo_host::translate::validate(HOST_TOML_TEMPLATE)
+            .expect("host.yaml.template 必须通过校验");
         let cams = mediaservo_host::translate::camera_configs(HOST_TOML_TEMPLATE).unwrap();
-        assert_eq!(cams[0].mode, mediaservo_host::translate::SourceMode::Camera, "mode 身份键逐条目显式（D282 修订：不入 defaults）");
+        assert_eq!(
+            cams[0].mode,
+            mediaservo_host::translate::SourceMode::Camera,
+            "mode 身份键逐条目显式（D282 修订：不入 defaults）"
+        );
         assert_eq!(cams[1].fps, 30, "test 源走 defaults.sources.fps");
         let s = &mediaservo_host::translate::stream_configs(HOST_TOML_TEMPLATE).unwrap()[0];
         assert_eq!(s.codec, "h264", "缺省编码 h264（D282）");
@@ -1375,7 +1422,10 @@ mod instance_probe_tests {
     fn probe_agent_dir_finds_official_name() {
         let cmdline = "/opt/mediaservo-host/bin/host-agent --config /opt/mediaservo-host/etc/host.yaml --port 17980";
         assert!(is_agent_cmdline(cmdline));
-        assert_eq!(probe_agent_dir(cmdline).as_deref(), Some(std::path::Path::new("/opt/mediaservo-host")));
+        assert_eq!(
+            probe_agent_dir(cmdline).as_deref(),
+            Some(std::path::Path::new("/opt/mediaservo-host"))
+        );
     }
 
     #[test]
@@ -1383,14 +1433,23 @@ mod instance_probe_tests {
         // PIT-155: 品牌化部署进程名 msrtc-agent——旧实现 "host-agent" 硬编码定位失败
         let cmdline = "/opt/mediaservo-host/bin/msrtc-agent --config /opt/mediaservo-host/etc/host.yaml --port 17980";
         assert!(is_agent_cmdline(cmdline));
-        assert_eq!(probe_agent_dir(cmdline).as_deref(), Some(std::path::Path::new("/opt/mediaservo-host")));
+        assert_eq!(
+            probe_agent_dir(cmdline).as_deref(),
+            Some(std::path::Path::new("/opt/mediaservo-host"))
+        );
     }
 
     #[test]
     fn probe_agent_dir_rejects_non_agent() {
         let cmdline = "/opt/mediaservo-host/bin/msrtc-streamer --stream cam0 --config /opt/mediaservo-host/etc/host.yaml";
-        assert!(!is_agent_cmdline(cmdline), "streamer 不得命中 agent 探测（过滤在 is_agent_cmdline 层）");
+        assert!(
+            !is_agent_cmdline(cmdline),
+            "streamer 不得命中 agent 探测（过滤在 is_agent_cmdline 层）"
+        );
         // probe_agent_dir 不挑进程（任何 --config 均提取目录）——进程区分由 is_agent_cmdline 把关
-        assert_eq!(probe_agent_dir(cmdline).as_deref(), Some(std::path::Path::new("/opt/mediaservo-host")));
+        assert_eq!(
+            probe_agent_dir(cmdline).as_deref(),
+            Some(std::path::Path::new("/opt/mediaservo-host"))
+        );
     }
 }

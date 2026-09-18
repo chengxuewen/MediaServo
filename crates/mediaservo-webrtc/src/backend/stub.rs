@@ -4,14 +4,16 @@
 use super::DcBackend;
 use super::PcBackend;
 use super::TrackWriteBackend;
-use crate::data_channel::{RTCDataChannel, RTCDataChannelInit, RTCDataChannelRx, RTCDataChannelState};
+use crate::RTCError;
+use crate::data_channel::{
+    RTCDataChannel, RTCDataChannelInit, RTCDataChannelRx, RTCDataChannelState,
+};
 use crate::peer_connection::{
-    RTCAnswerOptions, RTCIceCandidate, RTCOfferOptions, RTCConfiguration,
-    RTCIceConnectionState, RTCIceGatheringState, RTCPeerConnectionState, RTCSignalingState,
+    RTCAnswerOptions, RTCConfiguration, RTCIceCandidate, RTCIceConnectionState,
+    RTCIceGatheringState, RTCOfferOptions, RTCPeerConnectionState, RTCSignalingState,
 };
 use crate::sdp::{RTCSdpType, RTCSessionDescription};
 use crate::track::{RTCAudioTrackConfig, TrackKind};
-use crate::RTCError;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -77,12 +79,16 @@ impl PcBackend for StubPc {
         self.closed.store(true, Ordering::Relaxed);
     }
 
-// ── v2: W3C API stub overrides（状态化）──
+    // ── v2: W3C API stub overrides（状态化）──
     fn get_transceivers(&self) -> Result<Vec<crate::rtp::RTCRtpTransceiver>, crate::RTCError> {
         Ok(self.transceivers.lock().unwrap().clone())
     }
 
-    fn add_transceiver(&self, kind: TrackKind, init: &crate::rtp::RTCRtpTransceiverInit) -> Result<crate::rtp::RTCRtpTransceiver, crate::RTCError> {
+    fn add_transceiver(
+        &self,
+        kind: TrackKind,
+        init: &crate::rtp::RTCRtpTransceiverInit,
+    ) -> Result<crate::rtp::RTCRtpTransceiver, crate::RTCError> {
         let sender = crate::rtp::RTCRtpSender::new(crate::track::TrackRef::Sender(
             crate::track::TrackSender::new("stub-".to_string() + kind.as_str(), kind),
         ));
@@ -102,10 +108,17 @@ impl PcBackend for StubPc {
         Ok(tc)
     }
 
-    fn add_transceiver_with_track(&self, track: &crate::track::TrackSender, init: &crate::rtp::RTCRtpTransceiverInit) -> Result<crate::rtp::RTCRtpTransceiver, crate::RTCError> {
+    fn add_transceiver_with_track(
+        &self,
+        track: &crate::track::TrackSender,
+        init: &crate::rtp::RTCRtpTransceiverInit,
+    ) -> Result<crate::rtp::RTCRtpTransceiver, crate::RTCError> {
         let sender = crate::rtp::RTCRtpSender::new(crate::track::TrackRef::Sender(track.clone()));
         let receiver = crate::rtp::RTCRtpReceiver::new(crate::track::TrackRef::Receiver(
-            crate::track::TrackReceiver::new("stub-r-".to_string() + track.kind.as_str(), track.kind),
+            crate::track::TrackReceiver::new(
+                "stub-r-".to_string() + track.kind.as_str(),
+                track.kind,
+            ),
         ));
         let tc = crate::rtp::RTCRtpTransceiver::new(
             Some("0".into()),
@@ -120,35 +133,63 @@ impl PcBackend for StubPc {
         Ok(tc)
     }
 
-    fn sender_get_parameters(&self, _track_id: &str) -> Result<crate::rtp::RTCRtpParameters, crate::RTCError> {
+    fn sender_get_parameters(
+        &self,
+        _track_id: &str,
+    ) -> Result<crate::rtp::RTCRtpParameters, crate::RTCError> {
         Ok(crate::rtp::RTCRtpParameters::default())
     }
 
-    fn receiver_get_parameters(&self, _track_id: &str) -> Result<crate::rtp::RTCRtpParameters, crate::RTCError> {
+    fn receiver_get_parameters(
+        &self,
+        _track_id: &str,
+    ) -> Result<crate::rtp::RTCRtpParameters, crate::RTCError> {
         Ok(crate::rtp::RTCRtpParameters::default())
     }
 
-    fn sender_set_parameters(&self, _track_id: &str, _params: &crate::rtp::RTCRtpParameters) -> Result<(), crate::RTCError> {
+    fn sender_set_parameters(
+        &self,
+        _track_id: &str,
+        _params: &crate::rtp::RTCRtpParameters,
+    ) -> Result<(), crate::RTCError> {
         Ok(())
     }
 
-    fn sender_set_video_encoder_backend(&self, _track_id: &str, _backend: crate::rtp::RTCVideoEncoderBackend) -> Result<(), crate::RTCError> {
+    fn sender_set_video_encoder_backend(
+        &self,
+        _track_id: &str,
+        _backend: crate::rtp::RTCVideoEncoderBackend,
+    ) -> Result<(), crate::RTCError> {
         Ok(())
     }
 
-    fn sender_replace_track(&self, _track_id: &str, _new_track_id: &str) -> Result<(), crate::RTCError> {
+    fn sender_replace_track(
+        &self,
+        _track_id: &str,
+        _new_track_id: &str,
+    ) -> Result<(), crate::RTCError> {
         Ok(())
     }
 
-    fn sender_set_streams(&self, _track_id: &str, _stream_ids: &[String]) -> Result<(), crate::RTCError> {
+    fn sender_set_streams(
+        &self,
+        _track_id: &str,
+        _stream_ids: &[String],
+    ) -> Result<(), crate::RTCError> {
         Ok(())
     }
 
-    fn get_sender_capabilities(&self, _kind: TrackKind) -> Result<Option<crate::rtp::RTCRtpCapabilities>, crate::RTCError> {
+    fn get_sender_capabilities(
+        &self,
+        _kind: TrackKind,
+    ) -> Result<Option<crate::rtp::RTCRtpCapabilities>, crate::RTCError> {
         Ok(None)
     }
 
-    fn get_receiver_capabilities(&self, _kind: TrackKind) -> Result<Option<crate::rtp::RTCRtpCapabilities>, crate::RTCError> {
+    fn get_receiver_capabilities(
+        &self,
+        _kind: TrackKind,
+    ) -> Result<Option<crate::rtp::RTCRtpCapabilities>, crate::RTCError> {
         Ok(None)
     }
 
@@ -156,15 +197,23 @@ impl PcBackend for StubPc {
         Ok(())
     }
 
-    fn current_local_description(&self) -> Result<Option<crate::sdp::RTCSessionDescription>, crate::RTCError> {
+    fn current_local_description(
+        &self,
+    ) -> Result<Option<crate::sdp::RTCSessionDescription>, crate::RTCError> {
         Ok(None)
     }
 
-    fn current_remote_description(&self) -> Result<Option<crate::sdp::RTCSessionDescription>, crate::RTCError> {
+    fn current_remote_description(
+        &self,
+    ) -> Result<Option<crate::sdp::RTCSessionDescription>, crate::RTCError> {
         Ok(None)
     }
 
-    fn transceiver_set_direction(&self, _mid: &str, _dir: crate::rtp::RTCRtpTransceiverDirection) -> Result<(), crate::RTCError> {
+    fn transceiver_set_direction(
+        &self,
+        _mid: &str,
+        _dir: crate::rtp::RTCRtpTransceiverDirection,
+    ) -> Result<(), crate::RTCError> {
         Ok(())
     }
 
@@ -172,7 +221,11 @@ impl PcBackend for StubPc {
         Ok(())
     }
 
-    fn transceiver_set_codec_preferences(&self, _track_id: &str, _codecs: Vec<crate::rtp::RTCRtpCodecCapability>) -> Result<(), crate::RTCError> {
+    fn transceiver_set_codec_preferences(
+        &self,
+        _track_id: &str,
+        _codecs: Vec<crate::rtp::RTCRtpCodecCapability>,
+    ) -> Result<(), crate::RTCError> {
         Ok(())
     }
 }
@@ -194,11 +247,7 @@ impl StubPc {
         label: &str,
         _init: RTCDataChannelInit,
     ) -> Result<RTCDataChannel, RTCError> {
-        Ok(RTCDataChannel {
-            label: label.to_string(),
-            id: 0,
-            backend: StubDc,
-        })
+        Ok(RTCDataChannel { label: label.to_string(), id: 0, backend: StubDc })
     }
 }
 
@@ -262,7 +311,11 @@ impl TrackWriteBackend for StubTrack {
 
     /// 记录 I420 写入（帧数 + 时间戳），测试断言透传/单调性。
     async fn write_raw_i420_with_ts(
-        &self, data: &[u8], width: u32, height: u32, ts_us: Option<i64>,
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        ts_us: Option<i64>,
     ) -> Result<(), RTCError> {
         self.frames_written.fetch_add(1, Ordering::Relaxed);
         if let Some(ts) = ts_us {
@@ -291,9 +344,7 @@ impl StubFactory {
     }
 
     /// Create a stub video track — no-op.
-    pub(crate) fn create_video_track(
-        &self,
-    ) -> (StubTrack, ()) {
+    pub(crate) fn create_video_track(&self) -> (StubTrack, ()) {
         (StubTrack::default(), ())
     }
 }
@@ -386,8 +437,7 @@ mod tests {
     #[test]
     fn transceiver_set_direction_stop() {
         let pc = new_pc();
-        pc.transceiver_set_direction("0", RTCRtpTransceiverDirection::Recvonly)
-            .unwrap();
+        pc.transceiver_set_direction("0", RTCRtpTransceiverDirection::Recvonly).unwrap();
         pc.transceiver_stop("0").unwrap();
     }
 }

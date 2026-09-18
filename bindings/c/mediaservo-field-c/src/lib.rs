@@ -21,9 +21,11 @@
 //! mediaservo_err_t mediaservo_field_version(char* buf, size_t len);
 //! ```
 
+#![allow(clippy::not_unsafe_ptr_arg_deref)] // C ABI 门面（deck-c/link-c 同形先例）
+#![allow(non_camel_case_types)] // C 可见 *_t 类型名镜像
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -279,7 +281,9 @@ pub extern "C" fn mediaservo_field_push_publish_video(
 
 /// 启动视频帧生成（Squares + 时间戳水印；阻塞仅本地启动）。
 #[unsafe(no_mangle)]
-pub extern "C" fn mediaservo_field_push_start_video_frames(s: *mut mediaservo_field_push_t) -> c_int {
+pub extern "C" fn mediaservo_field_push_start_video_frames(
+    s: *mut mediaservo_field_push_t,
+) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
         if s.is_null() {
             set_last_error("mediaservo_field_push_start_video_frames: null handle");
@@ -328,10 +332,10 @@ pub extern "C" fn mediaservo_field_push_stop_video_frames(s: *mut mediaservo_fie
         if handle.closed.load(Ordering::SeqCst) {
             return;
         }
-        if let Ok(mut guard) = handle.inner.lock() {
-            if let Some(session) = guard.as_mut() {
-                session.stop_video_frames();
-            }
+        if let Ok(mut guard) = handle.inner.lock()
+            && let Some(session) = guard.as_mut()
+        {
+            session.stop_video_frames();
         }
     }));
 }
@@ -374,11 +378,7 @@ fn last_error_impl(buf: *mut c_char, len: usize) -> c_int {
     if buf.is_null() || len == 0 {
         return MEDIASERVO_FIELD_ERR_INVALID_ARG;
     }
-    let msg = LAST_ERROR
-        .lock()
-        .ok()
-        .and_then(|g| g.clone())
-        .unwrap_or_default();
+    let msg = LAST_ERROR.lock().ok().and_then(|g| g.clone()).unwrap_or_default();
     let bytes = msg.as_bytes();
     let n = bytes.len().min(len - 1);
     unsafe {
@@ -425,30 +425,25 @@ pub extern "C" fn mediaservo_field_version(buf: *mut c_char, len: usize) -> c_in
 mod tests {
     use super::*;
 
+    /// 全局 last_error = 进程级状态，两测试并跑必竞态（09-18 gate 实抓）。
+    /// 合并为单测串行验证新名+别名两条路径。
     #[test]
-    fn last_error_roundtrip() {
-        // 全局状态跨测试竞争: 先清空再设（不依赖其他测试未写）
-        set_last_error("");
-        set_last_error("test error");
+    fn last_error_roundtrip_and_alias() {
         let mut buf = [0u8; 64];
+        set_last_error("test error");
         let rc = mediaservo_field_last_error(buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
-        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }
-            .to_str()
-            .unwrap();
-        assert_eq!(s, "test error");
-    }
-
-    #[test]
-    fn last_error_deprecated_alias() {
+        assert_eq!(
+            unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap(),
+            "test error"
+        );
         set_last_error("alias error");
-        let mut buf = [0u8; 64];
         let rc = mediaservo_last_error(buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
-        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }
-            .to_str()
-            .unwrap();
-        assert_eq!(s, "alias error");
+        assert_eq!(
+            unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap(),
+            "alias error"
+        );
     }
 
     #[test]
@@ -456,9 +451,7 @@ mod tests {
         let mut buf = [0u8; 32];
         let rc = mediaservo_field_version(buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
-        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }
-            .to_str()
-            .unwrap();
+        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap();
         assert!(s.starts_with("0.1."), "version: {s}");
     }
 

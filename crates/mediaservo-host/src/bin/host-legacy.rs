@@ -10,41 +10,43 @@
 //! 7. Start emergency UDP listener
 //! 8. Serve until shutdown signal
 
-
+#![allow(unused_assignments, unused_variables, dead_code)] // frame_generator = Drop-guard（PIT-81：存活本身 = 语义，无读取方）
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tower_http::timeout::TimeoutLayer;
 
 use futures_util::{SinkExt, StreamExt};
-use mediaservo_media::engine::PipelineEngine;
-use mediaservo_common::protocol::{DtlsParameters, Fingerprint, IceCandidate, IceParameters, MediaKind, SignalingMessage, TransportDirection};
-use tokio_tungstenite::tungstenite::Message;
-use signaling::SignalingClient;
-use mediaservo_webrtc::{RTCPeerConnectionFactory, RTCConfiguration, RTCIceServer, RTCIceTransportPolicy, RTCSessionDescription, RTCSdpType, RTCAnswerOptions, RTCOfferOptions, TrackKind, TrackSender, TrackRef, RTCPeerConnectionState};
-use mediaservo_webrtc::rtp::{RTCRtpTransceiverInit, RTCRtpTransceiverDirection, RTCRtpParameters};
+use mediaservo_common::protocol::{
+    DtlsParameters, Fingerprint, MediaKind, SignalingMessage, TransportDirection,
+};
+use mediaservo_webrtc::rtp::RTCRtpParameters;
 use mediaservo_webrtc::traits::PeerConnectionApi;
+use mediaservo_webrtc::{
+    RTCAnswerOptions, RTCConfiguration, RTCIceServer, RTCIceTransportPolicy,
+    RTCPeerConnectionFactory, RTCPeerConnectionState, RTCSdpType, RTCSessionDescription, TrackKind,
+    TrackRef,
+};
+use signaling::SignalingClient;
+use tokio_tungstenite::tungstenite::Message;
 mod config;
 mod control;
-mod sfu_media;
 mod emergency;
+mod engine_adapters;
 mod metrics;
 mod pipeline;
-mod engine_adapters;
 mod session;
+mod sfu_media;
 mod signaling;
 mod transport;
 #[cfg(feature = "webrtc-p2p")]
 mod webrtc_transport;
-
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
         .json()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-        )
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
     tracing::info!("MediaServo Host v{} starting", env!("CARGO_PKG_VERSION"));
@@ -71,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
             tracing::warn!("Config {config_path}: {e}, using defaults");
             serde_yaml::from_str(&default_host_config()).unwrap()
         }
-    };// ponytail: fallback to defaults when config file missing, add config wizard when needed
+    }; // ponytail: fallback to defaults when config file missing, add config wizard when needed
 
     // v2 (encoder-bitrate): 码率区间校验 — min>=max 会 libwebrtc 双失效（视频静默降级）
     if let Err(e) = config.encoder.validate_bitrate() {
@@ -93,22 +95,18 @@ async fn main() -> anyhow::Result<()> {
     let mut background_tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
     // PIT-81: SFU 帧生成器必须存活到 main 结束（if 分支作用域内绑定 → 分支结束即 Drop → 线程被 stop）。
-    let mut frame_generator: Option<mediaservo_media::pipeline::generator::VideoFrameGenerator> = None;
+    let mut frame_generator: Option<mediaservo_media::pipeline::generator::VideoFrameGenerator> =
+        None;
 
     // Phase 2: Start GStreamer pipeline
-    let pipeline = std::sync::Arc::new(pipeline::Pipeline::new(
-        &config.capture,
-        width,
-        height,
-        framerate,
-        bitrate,
-        encoder,
-    )
-    .unwrap_or_else(|e| {
-        tracing::warn!("Pipeline init failed: {e}, running headless");
-        // ponytail: return dummy pipeline for headless mode (E2E testing)
-        pipeline::Pipeline::dummy()
-    }));
+    let pipeline = std::sync::Arc::new(
+        pipeline::Pipeline::new(&config.capture, width, height, framerate, bitrate, encoder)
+            .unwrap_or_else(|e| {
+                tracing::warn!("Pipeline init failed: {e}, running headless");
+                // ponytail: return dummy pipeline for headless mode (E2E testing)
+                pipeline::Pipeline::dummy()
+            }),
+    );
     // ponytail: pipeline start may fail without GStreamer; non-fatal for E2E
     if let Err(e) = pipeline.start() {
         tracing::warn!("Pipeline start failed: {e}, continuing headless");
@@ -118,16 +116,15 @@ async fn main() -> anyhow::Result<()> {
     // Phase 4: Create control handler (shared with metrics)
     let control_handler = control::ControlHandler::new();
     let frames_dropped = control_handler.frames_dropped.clone();
-    let control_handler = Arc::new(Mutex::new(control_handler));
+    let _control_handler = Arc::new(Mutex::new(control_handler));
 
     // Phase 5: Build axum router (metrics)
     let core_metrics = mediaservo_common::metrics::CoreMetrics::new();
     let shared_metrics = std::sync::Arc::new(std::sync::RwLock::new(core_metrics));
     let metrics_router = metrics::metrics_router(shared_metrics.clone());
 
-let app = axum::Router::new()
-    .merge(metrics_router)
-    .layer(TimeoutLayer::new(Duration::from_secs(30)));
+    let app =
+        axum::Router::new().merge(metrics_router).layer(TimeoutLayer::new(Duration::from_secs(30)));
 
     // Determine bind address
     let bind_addr = "0.0.0.0:9801"; // ponytail: separate port from server (9800)
@@ -137,20 +134,17 @@ let app = axum::Router::new()
             tracing::info!("Listening on {}", bind_addr);
             l
         }
-            Err(e) => {
-                tracing::error!("Failed to bind {}: {}", bind_addr, e);
-                return Err(anyhow::anyhow!("Failed to bind {bind_addr}: {e}"));
-            }
-        };
+        Err(e) => {
+            tracing::error!("Failed to bind {}: {}", bind_addr, e);
+            return Err(anyhow::anyhow!("Failed to bind {bind_addr}: {e}"));
+        }
+    };
 
     tracing::info!("Host ready — session id={}", config.capture.source);
 
     // Phase 4: Connect to signaling and create WebRTC transport
     let signaling_url = config.server.signaling_url.clone();
-    let psk = config
-        .psk
-        .clone()
-        .unwrap_or_else(|| "mediaservo-dev".to_string());
+    let psk = config.psk.clone().unwrap_or_else(|| "mediaservo-dev".to_string());
     let room_id = config.room.id.clone();
 
     const MAX_RETRIES: u32 = 5;
@@ -161,9 +155,16 @@ let app = axum::Router::new()
         let mut result = None;
         for attempt in 1..=MAX_RETRIES {
             match client.connect().await {
-                Ok(pair) => { result = Some(pair); break; }
+                Ok(pair) => {
+                    result = Some(pair);
+                    break;
+                }
                 Err(e) => {
-                    tracing::warn!(attempt, max = MAX_RETRIES, "Signaling connect failed: {e}, retrying in {delay:?}");
+                    tracing::warn!(
+                        attempt,
+                        max = MAX_RETRIES,
+                        "Signaling connect failed: {e}, retrying in {delay:?}"
+                    );
                     last_err = Some(e);
                     tokio::time::sleep(delay).await;
                     delay = (delay * 2).min(std::time::Duration::from_secs(16));
@@ -173,13 +174,16 @@ let app = axum::Router::new()
         match result {
             Some(pair) => pair,
             None => {
-                tracing::error!("Signaling connection failed after {MAX_RETRIES} attempts: {last_err:?}");
-                return Err(anyhow::anyhow!("Signaling connection failed after {MAX_RETRIES} attempts: {last_err:?}"));
+                tracing::error!(
+                    "Signaling connection failed after {MAX_RETRIES} attempts: {last_err:?}"
+                );
+                return Err(anyhow::anyhow!(
+                    "Signaling connection failed after {MAX_RETRIES} attempts: {last_err:?}"
+                ));
             }
         }
     };
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
 
     // PipelineEngine: P2P path only — SFU uses mediaservo-webrtc (C12)
     // ponytail: engine declared here so it's visible to cleanup at end of main()
@@ -187,7 +191,7 @@ let app = axum::Router::new()
     #[allow(unused_variables)]
     let engine = PipelineEngine::new(tokio::runtime::Handle::current());
     #[cfg(not(feature = "webrtc-p2p"))]
-    let engine = (); // placeholder for cleanup scope
+    let _engine = (); // placeholder for cleanup scope
 
     // SFU produce (mediasoup) — via mediaservo-webrtc abstraction
     if config.sfu_produce {
@@ -203,7 +207,7 @@ let app = axum::Router::new()
         };
         let json = serde_json::to_string(&create_transport)?;
         ws_sender
-            .send(Message::Text(json.into()))
+            .send(Message::Text(json))
             .await
             .map_err(|e| anyhow::anyhow!("SFU CreateWebRtcTransport send: {}", e))?;
         tracing::info!("SFU: CreateWebRtcTransport sent");
@@ -216,7 +220,12 @@ let app = axum::Router::new()
                         .map_err(|e| anyhow::anyhow!("SFU parse: {}", e))?;
                     match msg {
                         SignalingMessage::WebRtcTransportCreated {
-                            room_id: _, peer_id: _, transport_id, ice_parameters, dtls_parameters, ice_candidates,
+                            room_id: _,
+                            peer_id: _,
+                            transport_id,
+                            ice_parameters,
+                            dtls_parameters,
+                            ice_candidates,
                             sctp_parameters: _, // P1 additive 字段——legacy 夹具不消费
                         } => break (transport_id, ice_parameters, dtls_parameters, ice_candidates),
                         SignalingMessage::Sdp { .. } | SignalingMessage::RTCIceCandidate { .. } => {
@@ -246,22 +255,29 @@ let app = axum::Router::new()
             }
         };
         let candidate_count = ice_candidates.as_ref().map_or(0, |v| v.len());
-        tracing::info!("SFU: WebRtcTransportCreated id={}, candidates={}", transport_id, candidate_count);
+        tracing::info!(
+            "SFU: WebRtcTransportCreated id={}, candidates={}",
+            transport_id,
+            candidate_count
+        );
 
         // Step 3: Create RTCPeerConnection via mediaservo-webrtc (NOT webrtc-rs)
-        let ice_servers: Vec<RTCIceServer> = config.server.ice_servers.iter()
+        let ice_servers: Vec<RTCIceServer> = config
+            .server
+            .ice_servers
+            .iter()
             .map(|url| RTCIceServer {
                 urls: vec![url.clone()],
                 username: String::new(),
                 password: String::new(),
             })
             .collect();
-        let rtc_config = RTCConfiguration {
-            ice_servers,
-            ice_transport_type: RTCIceTransportPolicy::All,
-        };
+        let rtc_config =
+            RTCConfiguration { ice_servers, ice_transport_type: RTCIceTransportPolicy::All };
         let factory = RTCPeerConnectionFactory::new();
-        let pc = factory.create_peer_connection(rtc_config).await
+        let pc = factory
+            .create_peer_connection(rtc_config)
+            .await
             .map_err(|e| anyhow::anyhow!("PC create: {}", e))?;
 
         // B4: Register ICE/PC state callbacks
@@ -309,9 +325,11 @@ let app = axum::Router::new()
         // 固定 offer codec = 固定协商交集 = 固定实际编码（Oracle 审核: produce 参数裁剪不可行）
         // PT 对齐 router 默认（sfu.rs default_router_options: VP8 96 / H264 101）; VP9/AV1 router 无 → 协商失败负向
         let (sdp_pt, sdp_codec, sdp_clock, sdp_fmtp) = match config.encoder.codec.as_str() {
-            "h264" => (101u16, "H264", 90000u32, Some("profile-level-id=42e01f;packetization-mode=1")), // v2 T7: 与 router 42e01f 对齐
+            "h264" => {
+                (101u16, "H264", 90000u32, Some("profile-level-id=42e01f;packetization-mode=1"))
+            } // v2 T7: 与 router 42e01f 对齐
             "vp8" => (96u16, "VP8", 90000u32, None),
-            "vp9" => (99u16, "VP9", 90000u32, None),  // PT 与 router 对齐 (sfu.rs default_router_options)
+            "vp9" => (99u16, "VP9", 90000u32, None), // PT 与 router 对齐 (sfu.rs default_router_options)
             "av1" => (97u16, "AV1", 90000u32, None),
             _ => (96u16, "VP8", 90000u32, None), // auto 默认: 现状行为（router 序 VP8 优先）
         };
@@ -324,16 +342,22 @@ let app = axum::Router::new()
             sdp_clock,
             sdp_fmtp,
         );
-        tracing::info!("SFU: offer codec={sdp_codec} PT={sdp_pt} (encoder.codec={})", config.encoder.codec);
+        tracing::info!(
+            "SFU: offer codec={sdp_codec} PT={sdp_pt} (encoder.codec={})",
+            config.encoder.codec
+        );
         let remote_desc = RTCSessionDescription::new(RTCSdpType::Offer, remote_sdp);
-        pc.set_remote_description(&remote_desc).await
+        pc.set_remote_description(&remote_desc)
+            .await
             .map_err(|e| anyhow::anyhow!("set remote: {}", e))?;
         tracing::info!("SFU: remote description set (server ICE-Lite offer)");
 
         // ② add track (sendrecv; answer 协商后 host 侧 sendonly)
-        let track_id = pc.add_track("video", TrackKind::Video)
+        let track_id = pc
+            .add_track("video", TrackKind::Video)
             .map_err(|e| anyhow::anyhow!("add_track: {}", e))?;
-        let track_ref = pc.get_track(&track_id)
+        let track_ref = pc
+            .get_track(&track_id)
             .ok_or_else(|| anyhow::anyhow!("track not found after add_track"))?;
         let video_track = match track_ref {
             TrackRef::Sender(s) => s,
@@ -342,26 +366,28 @@ let app = axum::Router::new()
 
         // v2 (T5): 编码器软/硬后端选择 — 协商前设置（首个编码器创建于首帧, SetEncoderSelector 生效）
         // 语义: 偏好非强制（不可用时 libwebrtc 自动 fallback + warning）
-        if let Some(backend) = mediaservo_webrtc::rtp::RTCVideoEncoderBackend::from_config(&config.encoder.backend) {
-            if backend != mediaservo_webrtc::rtp::RTCVideoEncoderBackend::Auto {
-                match pc.get_senders().iter().find(|s| s.track_id == track_id) {
-                    Some(sender) => {
-                        if let Err(e) = sender.set_video_encoder_backend(backend) {
-                            tracing::warn!("SFU: set_video_encoder_backend({backend:?}): {e}");
-                        }
+        if let Some(backend) =
+            mediaservo_webrtc::rtp::RTCVideoEncoderBackend::from_config(&config.encoder.backend)
+            && backend != mediaservo_webrtc::rtp::RTCVideoEncoderBackend::Auto
+        {
+            match pc.get_senders().iter().find(|s| s.track_id == track_id) {
+                Some(sender) => {
+                    if let Err(e) = sender.set_video_encoder_backend(backend) {
+                        tracing::warn!("SFU: set_video_encoder_backend({backend:?}): {e}");
                     }
-                    None => tracing::warn!("SFU: sender not found for backend config: {track_id}"),
                 }
+                None => tracing::warn!("SFU: sender not found for backend config: {track_id}"),
             }
         }
         tracing::info!("SFU: video track added (id={})", track_id);
 
         // ③ answer + set local — PIT-76 v2: x-google 注入已移除（见 build_remote_sdp）
-        let answer = pc.create_answer(&RTCAnswerOptions::default()).await
+        let answer = pc
+            .create_answer(&RTCAnswerOptions)
+            .await
             .map_err(|e| anyhow::anyhow!("create answer: {}", e))?;
         tracing::debug!("SFU local answer SDP:\n{}", answer.sdp);
-        pc.set_local_description(&answer).await
-            .map_err(|e| anyhow::anyhow!("set local: {}", e))?;
+        pc.set_local_description(&answer).await.map_err(|e| anyhow::anyhow!("set local: {}", e))?;
 
         // v2 (encoder-bitrate): 设置发送编码器 min/max 码率（协商后、get_sending_rtp_parameters 前）—
         // produce 路径自动反射 max_bitrate（build_produce 读 e.max_bitrate）。
@@ -372,32 +398,33 @@ let app = axum::Router::new()
             match pc.get_senders().iter().find(|s| s.track_id == track_id) {
                 Some(sender) => {
                     if let Err(e) = sender.set_encoding_bitrate(min_bps, max_bps) {
-                        tracing::warn!("SFU: set_encoding_bitrate({min_bps:?}, {max_bps:?}): {e} — 继续 produce");
+                        tracing::warn!(
+                            "SFU: set_encoding_bitrate({min_bps:?}, {max_bps:?}): {e} — 继续 produce"
+                        );
                     } else {
-                        tracing::info!("SFU: set_encoding_bitrate(min={min_bps:?}, max={max_bps:?})");
+                        tracing::info!(
+                            "SFU: set_encoding_bitrate(min={min_bps:?}, max={max_bps:?})"
+                        );
                     }
                 }
                 None => tracing::warn!("SFU: sender not found for bitrate config: {track_id}"),
             }
         }
         // B3: Extract DTLS fingerprint via mediaservo-webrtc API (not SDP parsing)
-        let fp_hex = pc.local_dtls_fingerprint()
-            .ok_or_else(|| anyhow::anyhow!("no DTLS fingerprint"))?;
+        let fp_hex =
+            pc.local_dtls_fingerprint().ok_or_else(|| anyhow::anyhow!("no DTLS fingerprint"))?;
         let connect = SignalingMessage::ConnectWebRtcTransport {
             room_id: sfu_room.clone(),
             peer_id: peer_id.to_string(),
             transport_id: transport_id.clone(),
             dtls_parameters: DtlsParameters {
-                fingerprints: vec![Fingerprint {
-                    algorithm: "sha-256".to_string(),
-                    value: fp_hex,
-                }],
+                fingerprints: vec![Fingerprint { algorithm: "sha-256".to_string(), value: fp_hex }],
                 role: "client".to_string(),
             },
         };
         let json = serde_json::to_string(&connect)?;
         ws_sender
-            .send(Message::Text(json.into()))
+            .send(Message::Text(json))
             .await
             .map_err(|e| anyhow::anyhow!("SFU ConnectWebRtcTransport: {}", e))?;
         tracing::info!("SFU: ConnectWebRtcTransport sent");
@@ -410,16 +437,25 @@ let app = axum::Router::new()
 
         // Step 4: Produce video (P3 v2: 从 get_sending_rtp_parameters 推导，非手工)
         // PIT-56 替代: 不再手工解析 answer ssrc — 走 transceiver.sender.get_parameters() 官方路径
-        let rtp_params: RTCRtpParameters = pc.get_sending_rtp_parameters("video")
+        let rtp_params: RTCRtpParameters = pc
+            .get_sending_rtp_parameters("video")
             .map_err(|e| anyhow::anyhow!("get_sending_rtp_parameters: {}", e))?;
-        tracing::debug!("SFU: negotiated rtp params mid={} codecs={} encodings={} header_extensions={}",
-            rtp_params.mid, rtp_params.codecs.len(), rtp_params.encodings.len(), rtp_params.header_extensions.len());
+        tracing::debug!(
+            "SFU: negotiated rtp params mid={} codecs={} encodings={} header_extensions={}",
+            rtp_params.mid,
+            rtp_params.codecs.len(),
+            rtp_params.encodings.len(),
+            rtp_params.header_extensions.len()
+        );
         // v3 (sfu-negotiation-completion T4): transport-cc 协商实证 — header_extensions 非空
         // 即 BWE 反馈链路恢复（mediasoup 将转发 consumer feedback 给 host）。
         if rtp_params.header_extensions.is_empty() {
-            tracing::warn!("SFU: no negotiated header extensions — transport-cc 未协商, BWE 反馈链路断裂");
+            tracing::warn!(
+                "SFU: no negotiated header extensions — transport-cc 未协商, BWE 反馈链路断裂"
+            );
         } else {
-            let uris: Vec<&str> = rtp_params.header_extensions.iter().map(|h| h.uri.as_str()).collect();
+            let uris: Vec<&str> =
+                rtp_params.header_extensions.iter().map(|h| h.uri.as_str()).collect();
             tracing::info!("SFU: negotiated header extensions: {uris:?}");
         }
 
@@ -433,7 +469,9 @@ let app = axum::Router::new()
             transport_id: Some(transport_id.clone()),
         };
         let json = serde_json::to_string(&produce)?;
-        match tokio::time::timeout(Duration::from_secs(10), ws_sender.send(Message::Text(json.into()))).await {
+        match tokio::time::timeout(Duration::from_secs(10), ws_sender.send(Message::Text(json)))
+            .await
+        {
             Ok(Ok(())) => tracing::info!("SFU: Produce (Video) sent"),
             Ok(Err(e)) => return Err(anyhow::anyhow!("SFU Produce send error: {}", e)),
             Err(_) => return Err(anyhow::anyhow!("SFU Produce send timeout after 10s")),
@@ -499,7 +537,8 @@ let app = axum::Router::new()
         // 回退 backend 请求值。停流（WS 断）时任务随 SFU 分支结束。
         let pc_stats = pc.clone();
         let track_stats = track_id.clone();
-        let codec_stats = rtp_params.codecs.first().map(|c| c.mime_type.clone()).unwrap_or_default();
+        let codec_stats =
+            rtp_params.codecs.first().map(|c| c.mime_type.clone()).unwrap_or_default();
         let backend_req = config.encoder.backend.clone();
         let mut ws_stats = ws_sender; // move 进 stats 任务（if/else 分支互斥, else 分支独立 move）
         let last_bytes_sent = std::sync::atomic::AtomicU64::new(0);
@@ -516,7 +555,7 @@ let app = axum::Router::new()
                     mediaservo_webrtc::stats::RTCStats::OutboundRtp(o) => Some(o),
                     _ => None,
                 });
-                let enc_impl = outbound
+                let _enc_impl = outbound
                     .and_then(|o| o.encoder_implementation.clone())
                     .unwrap_or_else(|| backend_req.clone());
                 // v3 (sfu-negotiation-completion T4 诊断): 实际发送码率增量（BWE 实证）—
@@ -527,11 +566,15 @@ let app = axum::Router::new()
                     if prev > 0 && now > prev {
                         // interval 固定 2s; 累计窗口 = 自上次打印以来经过的 tick 数 × 2
                         let ticks = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                        if ticks % 5 == 0 {
+                        if ticks.is_multiple_of(5) {
                             let window_s = 10.0;
                             let kbps = (now - prev) as f64 * 8.0 / 1000.0 / window_s;
-                            tracing::info!("SFU: outbound send bitrate ≈ {kbps:.0} kbps (bytes={now}, fps={:.1}, {x}x{y})",
-                                o.frames_per_second, x = o.frame_width, y = o.frame_height);
+                            tracing::info!(
+                                "SFU: outbound send bitrate ≈ {kbps:.0} kbps (bytes={now}, fps={:.1}, {x}x{y})",
+                                o.frames_per_second,
+                                x = o.frame_width,
+                                y = o.frame_height
+                            );
                         }
                     }
                     last_bytes_sent.store(now, std::sync::atomic::Ordering::Relaxed);
@@ -541,7 +584,8 @@ let app = axum::Router::new()
                 let avg_encode_ms = outbound.and_then(|o| {
                     let now_ms = (o.total_encode_time? * 1000.0) as u64;
                     let prev_ms = last_encode_ms.load(std::sync::atomic::Ordering::Relaxed);
-                    let prev_frames = last_frames_encoded.load(std::sync::atomic::Ordering::Relaxed);
+                    let prev_frames =
+                        last_frames_encoded.load(std::sync::atomic::Ordering::Relaxed);
                     let frames = u64::from(o.frames_encoded);
                     last_encode_ms.store(now_ms, std::sync::atomic::Ordering::Relaxed);
                     last_frames_encoded.store(frames, std::sync::atomic::Ordering::Relaxed);
@@ -556,149 +600,168 @@ let app = axum::Router::new()
                     peer_id: peer_id.to_string(),
                     codec: codec_stats.clone(),
                     encoder_backend: backend_req.clone(),
-                    encoder_implementation: outbound
-                        .and_then(|o| o.encoder_implementation.clone()),
+                    encoder_implementation: outbound.and_then(|o| o.encoder_implementation.clone()),
                     frames_per_second: outbound.map(|o| o.frames_per_second).unwrap_or(0.0),
                     frame_width: outbound.map(|o| o.frame_width).unwrap_or(0),
                     frame_height: outbound.map(|o| o.frame_height).unwrap_or(0),
                     avg_encode_ms,
                 };
-                if let Ok(json) = serde_json::to_string(&msg) {
-                    if let Err(e) = ws_stats.send(Message::Text(json.into())).await {
-                        tracing::warn!("SFU: EncoderStatus send error: {}", e);
-                        break;
-                    }
+                if let Ok(json) = serde_json::to_string(&msg)
+                    && let Err(e) = ws_stats.send(Message::Text(json)).await
+                {
+                    tracing::warn!("SFU: EncoderStatus send error: {}", e);
+                    break;
                 }
             }
         });
 
-tracing::info!("SFU produce transport {} ready — Squares b=AS fix", transport_id);
+        tracing::info!("SFU produce transport {} ready — Squares b=AS fix", transport_id);
     } else {
+        // P2P transport path — gated behind webrtc-p2p feature
+        #[cfg(feature = "webrtc-p2p")]
+        {
+            // ponytail: wait for remote to join room before sending SDP offer
+            // ponytail: wait for remote to join room before sending SDP offer
 
-    // P2P transport path — gated behind webrtc-p2p feature
-    #[cfg(feature = "webrtc-p2p")]
-    {
-    // ponytail: wait for remote to join room before sending SDP offer
-    // ponytail: wait for remote to join room before sending SDP offer
+            let (webrtc_transport, dc_events) =
+                webrtc_transport::WebrtcTransport::new(ws_sender, room_id).await.map_err(|e| {
+                    tracing::error!("WebRTC transport creation failed: {e}");
+                    anyhow::anyhow!("WebRTC transport creation failed: {e}")
+                })?;
 
-    let (webrtc_transport, dc_events) =
-        webrtc_transport::WebrtcTransport::new(ws_sender, room_id)
-            .await
-            .map_err(|e| {
-                tracing::error!("WebRTC transport creation failed: {e}");
-                anyhow::anyhow!("WebRTC transport creation failed: {e}")
-            })?;
+            let webrtc = Arc::new(webrtc_transport);
 
-    let webrtc = Arc::new(webrtc_transport);
-
-    // Spawn WS receiver loop — handles incoming SDP answers and ICE candidates
-    let ws_webrtc = webrtc.clone();
-    let ws_receiver_handle = tokio::spawn(async move {
-        while let Some(msg) = ws_receiver.next().await {
-            match msg {
-                Ok(msg) => {
-                    if let Ok(text) = msg.to_text() {
-                        tracing::debug!("WS received: {}", text);
-                        if let Ok(sig_msg) =
-                            serde_json::from_str::<SignalingMessage>(text)
-                        {
-                            match sig_msg {
-                                SignalingMessage::Sdp { sdp, .. } => {
-                                    // ponytail: ignore offer echo from server relay; only process answers
-                                    let sdp_type = serde_json::from_str::<serde_json::Value>(&sdp)
-                                        .ok()
-                                        .and_then(|v| v.get("type")?.as_str().map(String::from));
-                                    if sdp_type.as_deref() != Some("answer") {
-                                        tracing::debug!("Ignoring non-answer SDP (type={sdp_type:?})");
-                                        continue;
+            // Spawn WS receiver loop — handles incoming SDP answers and ICE candidates
+            let ws_webrtc = webrtc.clone();
+            let ws_receiver_handle = tokio::spawn(async move {
+                while let Some(msg) = ws_receiver.next().await {
+                    match msg {
+                        Ok(msg) => {
+                            if let Ok(text) = msg.to_text() {
+                                tracing::debug!("WS received: {}", text);
+                                if let Ok(sig_msg) = serde_json::from_str::<SignalingMessage>(text)
+                                {
+                                    match sig_msg {
+                                        SignalingMessage::Sdp { sdp, .. } => {
+                                            // ponytail: ignore offer echo from server relay; only process answers
+                                            let sdp_type =
+                                                serde_json::from_str::<serde_json::Value>(&sdp)
+                                                    .ok()
+                                                    .and_then(|v| {
+                                                        v.get("type")?.as_str().map(String::from)
+                                                    });
+                                            if sdp_type.as_deref() != Some("answer") {
+                                                tracing::debug!(
+                                                    "Ignoring non-answer SDP (type={sdp_type:?})"
+                                                );
+                                                continue;
+                                            }
+                                            tracing::info!(
+                                                "Received SDP answer, setting remote description"
+                                            );
+                                            match ws_webrtc.handle_answer(&sdp).await {
+                                                Ok(()) => tracing::info!("Remote description set"),
+                                                Err(e) => tracing::error!(
+                                                    "Failed to set remote description: {e}"
+                                                ),
+                                            }
+                                        }
+                                        SignalingMessage::RTCIceCandidate {
+                                            candidate,
+                                            sdp_mid,
+                                            sdp_mline_index,
+                                            ..
+                                        } => {
+                                            let candidate_json = serde_json::json!({
+                                                "candidate": candidate,
+                                                "sdpMid": sdp_mid,
+                                                "sdpMLineIndex": sdp_mline_index,
+                                            })
+                                            .to_string();
+                                            match ws_webrtc.handle_remote_ice(&candidate_json).await
+                                            {
+                                                Ok(()) => tracing::debug!("ICE candidate added"),
+                                                // ponytail: ICE-before-SDP race is expected; non-fatal
+                                                Err(e) => {
+                                                    tracing::debug!("ICE candidate deferred: {e}")
+                                                }
+                                            }
+                                        }
+                                        SignalingMessage::RoomLeave { .. } => {
+                                            tracing::info!("Peer left room");
+                                        }
+                                        SignalingMessage::WebRtcTransportCreated {
+                                            transport_id,
+                                            ..
+                                        } => {
+                                            // ponytail: logged for SFU path; SFU skeleton consumes this synchronously,
+                                            // this is a fallback for async arrival
+                                            tracing::info!(
+                                                "SFU: WebRtcTransportCreated id={} (async)",
+                                                transport_id
+                                            );
+                                        }
+                                        _ => {} // ponytail: ignore other variants
                                     }
-                                    tracing::info!("Received SDP answer, setting remote description");
-                                    match ws_webrtc.handle_answer(&sdp).await {
-                                        Ok(()) => tracing::info!("Remote description set"),
-                                        Err(e) => tracing::error!("Failed to set remote description: {e}"),
-                                    }
                                 }
-                                SignalingMessage::RTCIceCandidate { candidate, sdp_mid, sdp_mline_index, .. } => {
-                                    let candidate_json = serde_json::json!({
-                                        "candidate": candidate,
-                                        "sdpMid": sdp_mid,
-                                        "sdpMLineIndex": sdp_mline_index,
-                                    }).to_string();
-                                    match ws_webrtc.handle_remote_ice(&candidate_json).await {
-                                        Ok(()) => tracing::debug!("ICE candidate added"),
-                                        // ponytail: ICE-before-SDP race is expected; non-fatal
-                                        Err(e) => tracing::debug!("ICE candidate deferred: {e}"),
-                                    }
-                                }
-                                SignalingMessage::RoomLeave { .. } => {
-                                    tracing::info!("Peer left room");
-                                }
-                                SignalingMessage::WebRtcTransportCreated { transport_id, .. } => {
-                                    // ponytail: logged for SFU path; SFU skeleton consumes this synchronously,
-                                    // this is a fallback for async arrival
-                                    tracing::info!("SFU: WebRtcTransportCreated id={} (async)", transport_id);
-                                }
-                                _ => {} // ponytail: ignore other variants
                             }
                         }
+                        Err(e) => tracing::warn!("WS receive error: {e}"),
                     }
                 }
-                Err(e) => tracing::warn!("WS receive error: {e}"),
-            }
+                tracing::warn!("WS receiver loop ended");
+            });
+            background_tasks.push(ws_receiver_handle);
+
+            // Spawn DC event loop — logs lifecycle events
+            let dc_event_handle = tokio::spawn(async move {
+                webrtc_transport::run_dc_event_loop(dc_events, control_handler.clone()).await;
+            });
+            background_tasks.push(dc_event_handle);
+
+            // Phase 7: Emergency UDP listener (background)
+            let emergency_handle = tokio::spawn(async move {
+                let listener = match emergency::EmergencyListener::bind(9999).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::warn!("Emergency listener failed to bind: {e}");
+                        return;
+                    }
+                };
+                if let Err(e) = listener.listen().await {
+                    tracing::error!("Emergency listener error: {e}");
+                }
+            });
+            background_tasks.push(emergency_handle);
+
+            // PipelineEngine: orchestrate capture → encode → WebRTC push
+            let push_pipeline = pipeline.clone();
+            let push_webrtc = webrtc.clone();
+            let shared_m = shared_metrics.clone();
+
+            engine
+                .add_chain(
+                    "capture".into(),
+                    Box::new(engine_adapters::GstCaptureSource::new(push_pipeline.clone())),
+                    vec![],
+                    vec![Box::new(engine_adapters::WebrtcOutputSink::new(push_webrtc.clone()))],
+                )
+                .expect("Failed to add capture chain");
+
+            engine.start().expect("Failed to start engine");
+        } // end P2P cfg
+        #[cfg(not(feature = "webrtc-p2p"))]
+        {
+            tracing::error!(
+                "SFU produce disabled and webrtc-p2p not enabled; no transport available"
+            );
+            return Err(anyhow::anyhow!("No WebRTC transport feature available"));
         }
-        tracing::warn!("WS receiver loop ended");
-    });
-    background_tasks.push(ws_receiver_handle);
-
-    // Spawn DC event loop — logs lifecycle events
-    let dc_event_handle = tokio::spawn(async move {
-        webrtc_transport::run_dc_event_loop(dc_events, control_handler.clone()).await;
-    });
-    background_tasks.push(dc_event_handle);
-
-    // Phase 7: Emergency UDP listener (background)
-    let emergency_handle = tokio::spawn(async move {
-        let listener = match emergency::EmergencyListener::bind(9999).await {
-            Ok(l) => l,
-            Err(e) => {
-                tracing::warn!("Emergency listener failed to bind: {e}");
-                return;
-            }
-        };
-        if let Err(e) = listener.listen().await {
-            tracing::error!("Emergency listener error: {e}");
-        }
-    });
-    background_tasks.push(emergency_handle);
-
-    // PipelineEngine: orchestrate capture → encode → WebRTC push
-    let push_pipeline = pipeline.clone();
-    let push_webrtc = webrtc.clone();
-    let shared_m = shared_metrics.clone();
-
-    engine.add_chain(
-        "capture".into(),
-        Box::new(engine_adapters::GstCaptureSource::new(push_pipeline.clone())),
-        vec![],
-        vec![Box::new(engine_adapters::WebrtcOutputSink::new(
-            push_webrtc.clone(),
-        ))],
-    ).expect("Failed to add capture chain");
-
-    engine.start().expect("Failed to start engine");
-
-    }  // end P2P cfg
-    #[cfg(not(feature = "webrtc-p2p"))]
-    {
-        tracing::error!("SFU produce disabled and webrtc-p2p not enabled; no transport available");
-        return Err(anyhow::anyhow!("No WebRTC transport feature available"));
-    }
-    }  // end else (P2P path)
+    } // end else (P2P path)
     // Start metrics updater: sync dropped frames counter
     let dropped = frames_dropped;
     let metrics_updater = tokio::spawn(async move {
-        let mut interval =
-            tokio::time::interval(std::time::Duration::from_secs(5));
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
         loop {
             interval.tick().await;
             let _ = dropped.load(std::sync::atomic::Ordering::Relaxed);
@@ -736,7 +799,7 @@ tracing::info!("SFU produce transport {} ready — Squares b=AS fix", transport_
     // persist_handle runs for session lifetime, abort last
     persist_handle.abort();
 
-Ok(())
+    Ok(())
 }
 
 /// Parse "WIDTHxHEIGHT" into (width, height). Defaults to 1280x720.
@@ -769,5 +832,6 @@ encoder:
 room:
   id: "default-room"
 psk: "mediaservo-dev"
-"#.to_string()
+"#
+    .to_string()
 }

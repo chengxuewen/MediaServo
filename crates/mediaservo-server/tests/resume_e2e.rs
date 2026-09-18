@@ -15,21 +15,18 @@ use tokio_tungstenite::tungstenite::Message as WsMsg;
 const DEV: &str = "ms-0a1b2c3d4e5f";
 const ROOM: &str = "vehicle_cam0";
 
-type Ws = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type Ws =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 fn signing_key() -> SigningKey {
     SigningKey::from_bytes(&std::array::from_fn::<u8, 32, _>(|i| i as u8))
 }
 
 fn sign(nonce_b64: &str, device_id: &str, room_id: &str) -> String {
-    let mut msg = base64::engine::general_purpose::STANDARD
-        .decode(nonce_b64)
-        .unwrap();
+    let mut msg = base64::engine::general_purpose::STANDARD.decode(nonce_b64).unwrap();
     msg.extend_from_slice(device_id.as_bytes());
     msg.extend_from_slice(room_id.as_bytes());
-    base64::engine::general_purpose::STANDARD.encode(&signing_key().sign(&msg).to_bytes())
+    base64::engine::general_purpose::STANDARD.encode(signing_key().sign(&msg).to_bytes())
 }
 
 async fn spawn_server(allow_enroll: bool, hold_secs: u64) -> (String, SignalingServer) {
@@ -80,9 +77,7 @@ async fn recv(ws: &mut Ws) -> SignalingMessage {
 }
 
 async fn send(ws: &mut Ws, msg: &SignalingMessage) {
-    ws.send(WsMsg::Text(serde_json::to_string(msg).unwrap()))
-        .await
-        .unwrap();
+    ws.send(WsMsg::Text(serde_json::to_string(msg).unwrap())).await.unwrap();
 }
 
 /// pubkey 形 join + 验签挑战链走完 → RoomJoined。resume 票可选携带（仅 v3 受理）。
@@ -128,7 +123,13 @@ async fn resume_rebinds_peer_and_rotates_nonce() {
     let (url, srv) = spawn_server(true, hold).await;
     let mut ws = connect(&url).await;
     let j1 = device_join(&mut ws, 3, None).await;
-    let SignalingMessage::RoomJoined { peer_id: peer1, session_nonce: Some(nonce1), protocol: Some(3), .. } = &j1 else {
+    let SignalingMessage::RoomJoined {
+        peer_id: peer1,
+        session_nonce: Some(nonce1),
+        protocol: Some(3),
+        ..
+    } = &j1
+    else {
         panic!("v3 车端设备会话必须谈成 3 并下发重挂票, got {j1:?}")
     };
     let (peer1, nonce1) = (peer1.clone(), nonce1.clone());
@@ -137,10 +138,7 @@ async fn resume_rebinds_peer_and_rotates_nonce() {
     // 断链（drop = 服务端读端 EOF）→ 进入保留窗
     drop(ws);
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(
-        srv.device_bindings.contains_key(&peer1),
-        "保留窗内绑定不得被清（延迟清理在等票）"
-    );
+    assert!(srv.device_bindings.contains_key(&peer1), "保留窗内绑定不得被清（延迟清理在等票）");
 
     // 重挂：认证链全量重跑（新挑战新签）+ resume 票
     let mut ws2 = connect(&url).await;

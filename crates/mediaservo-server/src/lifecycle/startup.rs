@@ -7,8 +7,8 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{absolute, oxmgr_bin, parse_dir};
 use super::templates::{instance_daemon_port, server_namespace, server_product};
+use super::{absolute, oxmgr_bin, parse_dir};
 
 // ── startup（T19 开机锚点——systemd user unit 拉实例 daemon，host 同构）────────
 
@@ -95,9 +95,7 @@ fn other_startup_units(dir: &Path) -> Vec<(PathBuf, PathBuf)> {
             .ok()
             .and_then(|c| {
                 c.lines().find_map(|l| {
-                    l.trim()
-                        .strip_prefix("Environment=OXMGR_HOME=")
-                        .map(|v| v.trim().to_string())
+                    l.trim().strip_prefix("Environment=OXMGR_HOME=").map(|v| v.trim().to_string())
                 })
             })
             .map(|h| PathBuf::from(h).join("..").join(".."))
@@ -147,7 +145,8 @@ fn startup_install(dir: &Path) -> i32 {
             for (p, od) in &others {
                 eprintln!("  接管: 卸载旧 unit {}（实例 {}）", p.display(), od.display());
                 let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
-                let _ = Command::new("systemctl").args(["--user", "disable", "--now", &name]).status();
+                let _ =
+                    Command::new("systemctl").args(["--user", "disable", "--now", &name]).status();
                 let _ = std::fs::remove_file(p);
             }
             let _ = Command::new("systemctl").args(["--user", "daemon-reload"]).status();
@@ -176,7 +175,10 @@ fn startup_install(dir: &Path) -> i32 {
                 return 1;
             }
             Err(e) => {
-                eprintln!("startup on: 执行 {} 失败: {e}（systemd 用户服务不可用？）", args.join(" "));
+                eprintln!(
+                    "startup on: 执行 {} 失败: {e}（systemd 用户服务不可用？）",
+                    args.join(" ")
+                );
                 return 1;
             }
         }
@@ -221,7 +223,9 @@ fn startup_status(dir: &Path) -> i32 {
 
 #[cfg(not(target_os = "linux"))]
 fn startup_install(_dir: &Path) -> i32 {
-    eprintln!("startup on: 非 Linux——用 oxmgr service install（macOS launchd / Windows Task Scheduler）");
+    eprintln!(
+        "startup on: 非 Linux——用 oxmgr service install（macOS launchd / Windows Task Scheduler）"
+    );
     1
 }
 #[cfg(not(target_os = "linux"))]

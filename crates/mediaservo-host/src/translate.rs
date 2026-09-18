@@ -75,6 +75,8 @@ struct Source {
     mode: Option<SourceMode>,
     /// 采集后端（仅 mode=camera 生效：v4l2 | mipi）。
     #[serde(default)]
+    #[allow(dead_code)]
+    // C36 字段就位（后端选择经 select_backend 消费链，struct 侧未读 = 在册形态）
     backend: Option<String>,
     /// 源地址统一字段：v4l2=设备路径 / subscriber=FrameBus/ROS topic / desktop=显示标识（可空）。
     #[serde(default)]
@@ -209,32 +211,37 @@ struct SignalingSection {
 
 /// 网关本地端口（[signaling] local_port；缺省 None → agent 内置 17980）。
 pub fn signaling_local_port(cfg: &str) -> Result<Option<u16>, String> {
-    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+    let cfg: HostConfig =
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     Ok(cfg.signaling.and_then(|s| s.local_port))
 }
 
 /// 整车房间（[signaling] room；缺省 None → host-agent 内置默认 "vehicle"）。
 /// D3 TODO（gateway.rs Default）关闭 — translate 负责把配置翻译进 oxfile。
 pub fn signaling_room(cfg: &str) -> Result<Option<String>, String> {
-    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+    let cfg: HostConfig =
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     Ok(cfg.signaling.and_then(|s| s.room))
 }
 
 /// [control].hmac_key_file（V5；缺省 None → controller 零扰动）。
 pub fn control_hmac_key_file(cfg: &str) -> Result<Option<String>, String> {
-    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+    let cfg: HostConfig =
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     Ok(cfg.control.and_then(|c| c.hmac_key_file))
 }
 
 /// 远程 server URL（[signaling] server_url；缺省 None → host-agent 内置默认）。
 pub fn signaling_server_url(cfg: &str) -> Result<Option<String>, String> {
-    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+    let cfg: HostConfig =
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     Ok(cfg.signaling.and_then(|s| s.server_url))
 }
 
 /// 信令 PSK（[signaling] psk；缺省 None → host-agent 内置默认）。
 pub fn signaling_psk(cfg: &str) -> Result<Option<String>, String> {
-    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+    let cfg: HostConfig =
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     Ok(cfg.signaling.and_then(|s| s.psk))
 }
 
@@ -306,9 +313,7 @@ pub fn validate(cfg: &str) -> Result<(), String> {
 /// FrameBus topic 均直接拼入 id，非法字符导致畸形输出或路径穿越）。
 fn check_id(kind: &str, id: &str) -> Result<(), String> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
-        return Err(format!(
-            "host.yaml 解析失败: {kind} id 非法: {id:?}（仅允许 [A-Za-z0-9_-]+）"
-        ));
+        return Err(format!("host.yaml 解析失败: {kind} id 非法: {id:?}（仅允许 [A-Za-z0-9_-]+）"));
     }
     Ok(())
 }
@@ -333,7 +338,8 @@ pub fn write_oxfile(cfg: &str, dir: &Path) -> Result<PathBuf, String> {
     }
     let ox = to_oxfile_in_dir(cfg, dir)?;
     let run_dir = dir.join("run");
-    std::fs::create_dir_all(&run_dir).map_err(|e| format!("创建 {} 失败: {e}", run_dir.display()))?;
+    std::fs::create_dir_all(&run_dir)
+        .map_err(|e| format!("创建 {} 失败: {e}", run_dir.display()))?;
     let oxfile = run_dir.join("oxfile.toml");
     atomic_write(&oxfile, &ox)?;
     Ok(oxfile)
@@ -348,8 +354,7 @@ pub fn recover_config_version(dir: &Path) -> u64 {
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
-            name.strip_prefix("host.yaml.bak-")
-                .and_then(|v| v.parse::<u64>().ok())
+            name.strip_prefix("host.yaml.bak-").and_then(|v| v.parse::<u64>().ok())
         })
         .max()
         .unwrap_or(0)
@@ -360,7 +365,8 @@ pub fn recover_config_version(dir: &Path) -> u64 {
 pub fn backup_host_config(dir: &Path, version: u64) -> Result<PathBuf, String> {
     let cfg_path = dir.join("etc").join("host.yaml");
     let bak = dir.join("etc").join(format!("host.yaml.bak-{version}"));
-    std::fs::copy(&cfg_path, &bak).map_err(|e| format!("备份 {} → {} 失败: {e}", cfg_path.display(), bak.display()))?;
+    std::fs::copy(&cfg_path, &bak)
+        .map_err(|e| format!("备份 {} → {} 失败: {e}", cfg_path.display(), bak.display()))?;
     Ok(bak)
 }
 
@@ -469,7 +475,10 @@ pub fn live_host_apps(env: &[(String, String)]) -> Result<Vec<String>, String> {
         .as_array()
         .map(|arr| {
             arr.iter()
-                .filter(|p| p.get("namespace").and_then(|n| n.as_str()) == Some(mediaservo_common::brand::media_brand().namespace))
+                .filter(|p| {
+                    p.get("namespace").and_then(|n| n.as_str())
+                        == Some(mediaservo_common::brand::media_brand().namespace)
+                })
                 .filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(String::from))
                 .collect()
         })
@@ -480,7 +489,8 @@ pub fn live_host_apps(env: &[(String, String)]) -> Result<Vec<String>, String> {
 fn oxfile_app_names(path: &Path) -> Result<Vec<String>, String> {
     let text =
         std::fs::read_to_string(path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
-    let val: toml::Value = toml::from_str(&text).map_err(|e| format!("解析 {} 失败: {e}", path.display()))?;
+    let val: toml::Value =
+        toml::from_str(&text).map_err(|e| format!("解析 {} 失败: {e}", path.display()))?;
     Ok(val
         .get("apps")
         .and_then(|a| a.as_array())
@@ -532,7 +542,6 @@ pub fn handle_config_push(
     }
 }
 
-
 /// smooth 档码率地板 = 每帧字节恒定（3.33 kbps/fps），下限 50：锚点 15fps→50 /
 /// 30fps→100，24→80 / 60→200 自然导出；封顶不设（高帧率本应高地板）。D282 取代
 /// D274 的固定 400kbps（极弱网下过保守）。
@@ -571,10 +580,8 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
     // 增删 app（相机/流）由 `oxmgr apply` 增量处理（Start/Recreate），watch 兜底
     // 纯内容变更（如 fps，命令不变 → apply Noop）。cwd 是 watch 前置要求（OxMgr
     // 源码 watch_fingerprint_for_process 实证）；无路径变体（doctor）不带 watch。
-    let inst_root = config_path
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|d| d.to_string_lossy().into_owned());
+    let inst_root =
+        config_path.parent().and_then(|p| p.parent()).map(|d| d.to_string_lossy().into_owned());
     if let (Some(cwd), Some(watch)) = (
         inst_root.as_deref(),
         (!config_path.as_os_str().is_empty()).then(|| config_path.to_string_lossy().into_owned()),
@@ -685,7 +692,9 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
             let mode = sc
                 .stream_mode
                 .as_deref()
-                .map(|m| m.parse::<mediaservo_field::StreamMode>().expect("validated in stream_configs"))
+                .map(|m| {
+                    m.parse::<mediaservo_field::StreamMode>().expect("validated in stream_configs")
+                })
                 .unwrap_or(mediaservo_field::StreamMode::Balanced);
             let bundle = mode.bundle();
             let bitrate = sc.bitrate_kbps.or(bundle.bitrate_kbps);
@@ -695,7 +704,9 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
                 smooth_bitrate_floor_kbps(fps)
             });
             let min_bitrate = sc.min_bitrate_kbps.or(floor).or(bundle.min_bitrate_kbps);
-            use mediaservo_webrtc::rtp::{RTCDegradationPreference as Deg, RTCRtpContentHint as Hint};
+            use mediaservo_webrtc::rtp::{
+                RTCDegradationPreference as Deg, RTCRtpContentHint as Hint,
+            };
             if bundle.degradation != Deg::Balanced {
                 let d = match bundle.degradation {
                     Deg::Fixed => "fixed",
@@ -720,17 +731,16 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
         }
         if !config_path.as_os_str().is_empty() {
             cmd.push_str(&format!(
-            " --config {} --token {}/{}-stream.token",
-            config_path.display(),
-            token_dir.display(),
-            stream
-        ));
+                " --config {} --token {}/{}-stream.token",
+                config_path.display(),
+                token_dir.display(),
+                stream
+            ));
         }
         push_app(&mut out, &name, &cmd, "always", log_dir.as_deref());
     }
     Ok(out)
 }
-
 
 /// 期望进程名列表（E1 拓扑监控期望态；与 oxfile 生成同一实例命名来源，DRY）。
 pub fn expected_process_names(cfg: &str) -> Result<Vec<String>, String> {
@@ -752,7 +762,8 @@ pub fn expected_process_names(cfg: &str) -> Result<Vec<String>, String> {
 
 /// 提取 sources/streams 的 id 列表（host init 生成 ros_bridge.yaml 复用，单一解析点）。
 pub fn camera_and_stream_ids(cfg: &str) -> Result<(Vec<String>, Vec<String>), String> {
-    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+    let cfg: HostConfig =
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     Ok((
         cfg.sources.into_iter().map(|c| c.id).collect(),
         cfg.streams.into_iter().map(|s| s.id).collect(),
@@ -813,7 +824,7 @@ pub fn camera_configs(cfg: &str) -> Result<Vec<SourceConfig>, String> {
             width: c.width.or(d.width).unwrap_or(DEFAULT_SOURCE_WIDTH),
             height: c.height.or(d.height).unwrap_or(DEFAULT_SOURCE_HEIGHT),
             fps,
-            input: c.input,  // 源地址属身份键，仅条目层（D282 修订）
+            input: c.input, // 源地址属身份键，仅条目层（D282 修订）
             reconnect_ms: c.reconnect_ms.or(d.reconnect_ms),
         });
     }
@@ -831,14 +842,14 @@ const DEFAULT_RECORD_DIR: &str = "/tmp/mediaservo-recordings";
 
 /// 解析录制配置（C3 recorder 用）。缺省: disabled + /tmp/mediaservo-recordings。
 pub fn record_config(cfg: &str) -> Result<RecordConfig, String> {
-    let cfg: HostConfig = serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+    let cfg: HostConfig =
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
     let rec = cfg.record.unwrap_or(RecordSection { enabled: None, out_dir: None });
     Ok(RecordConfig {
         enabled: rec.enabled.unwrap_or(false),
         out_dir: PathBuf::from(rec.out_dir.unwrap_or_else(|| DEFAULT_RECORD_DIR.to_string())),
     })
 }
-
 
 /// 按 id 查单个视频源配置（不存在 → Ok(None)）。
 pub fn camera_config(cfg: &str, id: &str) -> Result<Option<SourceConfig>, String> {
@@ -895,7 +906,7 @@ pub fn stream_configs(cfg: &str) -> Result<Vec<StreamConfig>, String> {
             }
             Ok(StreamConfig {
                 id,
-                source: s.source.unwrap_or_else(|| s.id),
+                source: s.source.unwrap_or(s.id),
                 codec,
                 encoder_backend: s.encoder_backend.or_else(|| d.encoder_backend.clone()),
                 bitrate_kbps: s.bitrate_kbps.or(d.bitrate_kbps),
@@ -928,7 +939,13 @@ fn exe_cmd(name: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
-fn push_app(out: &mut String, name: &str, command: &str, restart_policy: &str, log_dir: Option<&str>) {
+fn push_app(
+    out: &mut String,
+    name: &str,
+    command: &str,
+    restart_policy: &str,
+    log_dir: Option<&str>,
+) {
     out.push_str(&format!(
         "[[apps]]\nname = \"{name}\"\ncommand = \"{command}\"\nrestart_policy = \"{restart_policy}\"\n"
     ));
@@ -939,9 +956,7 @@ fn push_app(out: &mut String, name: &str, command: &str, restart_policy: &str, l
         Some(d) => (format!("{d}/{name}.out.log"), format!("{d}/{name}.err.log")),
         None => (format!("logs/{name}.out.log"), format!("logs/{name}.err.log")),
     };
-    out.push_str(&format!(
-        "[apps.logs]\nstdout = \"{stdout}\"\nstderr = \"{stderr}\"\n\n"
-    ));
+    out.push_str(&format!("[apps.logs]\nstdout = \"{stdout}\"\nstderr = \"{stderr}\"\n\n"));
 }
 
 #[cfg(test)]
@@ -986,7 +1001,11 @@ streams:
         let cams = camera_configs(CFG_LEGACY).unwrap();
         assert_eq!(cams.len(), 1);
         assert_eq!(cams[0].id, "cam0");
-        assert_eq!(cams[0].mode, SourceMode::Generator, "旧配置无 mode → generator（原 stub 语义）");
+        assert_eq!(
+            cams[0].mode,
+            SourceMode::Generator,
+            "旧配置无 mode → generator（原 stub 语义）"
+        );
         assert_eq!(cams[0].width, 1280, "旧配置缺 width → 默认 1280");
         assert_eq!(cams[0].height, 720, "旧配置缺 height → 默认 720");
         assert_eq!(cams[0].fps, 30);
@@ -1112,7 +1131,8 @@ sources:
         let quote_stream = "streams:\n  - id: \"s\\\"0\"\n";
         assert!(validate(quote_stream).unwrap_err().contains("非法"), "引号流 id 必须拒绝");
         // 正常 id（字母数字 + 连字符/下划线）通过
-        validate("sources:\n  - id: \"cam-A_1\"\nstreams:\n  - id: \"s-2_0\"\n").expect("合法字符 id 应通过");
+        validate("sources:\n  - id: \"cam-A_1\"\nstreams:\n  - id: \"s-2_0\"\n")
+            .expect("合法字符 id 应通过");
     }
 
     // ── oxfile 翻译 ──
@@ -1133,7 +1153,10 @@ sources:
     fn defaults_namespace_is_concrete_not_placeholder() {
         // PIT-118 回归门: namespace 曾残留 "{ns}" 字面——oxmgr 拒收 → apply 挂起
         let ox = to_oxfile(CFG_V0).unwrap();
-        assert!(ox.contains("namespace = \"mediaservo-host\""), "默认品牌 namespace 应为 mediaservo-host: {ox}");
+        assert!(
+            ox.contains("namespace = \"mediaservo-host\""),
+            "默认品牌 namespace 应为 mediaservo-host: {ox}"
+        );
         assert!(!ox.contains("{ns}"), "禁止占位符残留: {ox}");
     }
 
@@ -1151,7 +1174,8 @@ sources:
     fn oxfile_watches_host_yaml_with_cwd() {
         let dir = tempfile::tempdir().unwrap();
         let ox = to_oxfile_in_dir(CFG_V0, dir.path()).expect("to_oxfile_in_dir");
-        let expected_watch = format!("watch = [\"{}\"]", dir.path().join("etc").join("host.yaml").display());
+        let expected_watch =
+            format!("watch = [\"{}\"]", dir.path().join("etc").join("host.yaml").display());
         assert!(ox.contains(&expected_watch), "oxfile 应 watch host.yaml 实现热生效: {ox}");
         assert!(ox.contains("watch_delay_secs"), "watch 应带防抖: {ox}");
         assert!(ox.contains("cwd = \""), "watch 前置要求 cwd: {ox}");
@@ -1165,7 +1189,8 @@ sources:
     fn oxfile_wires_agent_token() {
         let dir = tempfile::tempdir().unwrap();
         let ox = to_oxfile_in_dir(CFG_V0, dir.path()).expect("to_oxfile_in_dir");
-        let agent_line = ox.lines()
+        let agent_line = ox
+            .lines()
             .find(|l| l.contains("command") && l.contains("host-agent"))
             .expect("agent 命令行: {ox}");
         assert!(
@@ -1179,13 +1204,18 @@ sources:
     fn oxfile_wires_signaling_room_to_agent() {
         let with_room = format!("{CFG_V0}signaling:\n  room: \"ms-car7\"\n");
         let ox = to_oxfile(&with_room).expect("to_oxfile");
-        let agent_line = ox.lines()
+        let agent_line = ox
+            .lines()
             .find(|l| l.contains("command") && l.contains("host-agent"))
             .expect("agent 命令行: {ox}");
-        assert!(agent_line.contains("--room ms-car7"), "host-agent 应带 --room ms-car7: {agent_line}");
+        assert!(
+            agent_line.contains("--room ms-car7"),
+            "host-agent 应带 --room ms-car7: {agent_line}"
+        );
         assert_eq!(signaling_room(&with_room).unwrap().as_deref(), Some("ms-car7"));
         let ox2 = to_oxfile(CFG_V0).expect("to_oxfile 默认");
-        let agent_line2 = ox2.lines()
+        let agent_line2 = ox2
+            .lines()
             .find(|l| l.contains("command") && l.contains("host-agent"))
             .expect("agent 命令行: {ox2}");
         assert!(!agent_line2.contains("--room"), "未配置 room 时不得 emit --room: {agent_line2}");
@@ -1197,15 +1227,23 @@ sources:
     fn oxfile_wires_audio_room_to_host_audio() {
         let with_room = format!("{CFG_V0}signaling:\n  room: \"ms-deploy-car1\"\n");
         let ox = to_oxfile(&with_room).expect("to_oxfile");
-        let audio_line = ox.lines()
+        let audio_line = ox
+            .lines()
             .find(|l| l.contains("command") && l.contains("host-audio"))
             .expect("host-audio 命令行: {ox}");
-        assert!(audio_line.contains("--room audio-ms-deploy-car1"), "host-audio 应带 --room audio-ms-deploy-car1: {audio_line}");
+        assert!(
+            audio_line.contains("--room audio-ms-deploy-car1"),
+            "host-audio 应带 --room audio-ms-deploy-car1: {audio_line}"
+        );
         let ox2 = to_oxfile(CFG_V0).expect("to_oxfile 默认");
-        let audio_line2 = ox2.lines()
+        let audio_line2 = ox2
+            .lines()
             .find(|l| l.contains("command") && l.contains("host-audio"))
             .expect("host-audio 命令行: {ox2}");
-        assert!(audio_line2.contains("--room audio-vehicle"), "host-audio 未配置 room 时默认 audio-vehicle: {audio_line2}");
+        assert!(
+            audio_line2.contains("--room audio-vehicle"),
+            "host-audio 未配置 room 时默认 audio-vehicle: {audio_line2}"
+        );
     }
 
     #[test]
@@ -1213,7 +1251,7 @@ sources:
         let dir = tempfile::tempdir().unwrap();
         write_host_yaml(dir.path(), CFG_V0);
         let cfg_v1 = "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\n  - id: \"cam1\"\n    mode: \"generator\"\n    fps: 15\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
-        apply_config_push(dir.path(), &cfg_v1, 7).expect("apply_config_push");
+        apply_config_push(dir.path(), cfg_v1, 7).expect("apply_config_push");
 
         // host.yaml 已更新
         let now = std::fs::read_to_string(dir.path().join("etc").join("host.yaml")).unwrap();
@@ -1238,19 +1276,14 @@ sources:
             CFG_V0,
             "非法配置不得改写 host.yaml"
         );
-        assert!(
-            !dir.path().join("etc").join("host.yaml.bak-9").exists(),
-            "非法配置不得产生备份"
-        );
-        assert!(
-            !dir.path().join("run").join("oxfile.toml").exists(),
-            "非法配置不得改写 oxfile"
-        );
+        assert!(!dir.path().join("etc").join("host.yaml.bak-9").exists(), "非法配置不得产生备份");
+        assert!(!dir.path().join("run").join("oxfile.toml").exists(), "非法配置不得改写 oxfile");
     }
 
     #[test]
     fn removed_apps_diff_live_vs_desired() {
-        let live = vec!["host-agent".into(), "host-capturer-cam0".into(), "host-capturer-cam1".into()];
+        let live =
+            vec!["host-agent".into(), "host-capturer-cam0".into(), "host-capturer-cam1".into()];
         let desired = vec!["host-agent".into(), "host-capturer-cam0".into()];
         assert_eq!(removed_apps(&live, &desired), vec!["host-capturer-cam1"]);
         // 全部在期望内 → 无删除
@@ -1263,7 +1296,7 @@ sources:
         let ox1 = to_oxfile(CFG_V0).unwrap();
         assert!(ox1.contains("name = \"host-capturer-cam0\""), "单源: {ox1}");
         let v2 = "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\n  - id: \"cam1\"\n    mode: \"generator\"\n    fps: 15\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
-        let ox2 = to_oxfile(&v2).unwrap();
+        let ox2 = to_oxfile(v2).unwrap();
         assert!(ox2.contains("name = \"host-capturer-cam0\""), "双源 cam0 名不变: {ox2}");
         assert!(ox2.contains("name = \"host-capturer-cam1\""), "双源 cam1 入 oxfile: {ox2}");
     }
@@ -1276,8 +1309,8 @@ sources:
         write_host_yaml(dir.path(), CFG_V0);
         let v7 = "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\n  - id: \"cam1\"\n    mode: \"generator\"\n    fps: 15\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
         let v10 = "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\n  - id: \"cam1\"\n    mode: \"generator\"\n    fps: 15\n  - id: \"cam2\"\n    mode: \"generator\"\n    fps: 30\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
-        apply_config_push(dir.path(), &v7, 7).unwrap();
-        apply_config_push(dir.path(), &v10, 10).unwrap();
+        apply_config_push(dir.path(), v7, 7).unwrap();
+        apply_config_push(dir.path(), v10, 10).unwrap();
         assert_eq!(recover_config_version(dir.path()), 10, "重启后应从备份恢复最大版本");
         // 无备份 → 0
         let fresh = tempfile::tempdir().unwrap();
@@ -1332,18 +1365,28 @@ streams:
     source: "cam0"
 "#;
         let ox = to_oxfile(cfg).unwrap();
-        let cam_line = ox.lines()
+        let cam_line = ox
+            .lines()
             .find(|l| l.contains("command") && l.contains("--camera cam0"))
             .expect("cam0 capturer 命令行");
-        assert!(cam_line.contains("--reconnect-ms 3000"), "camera 源应透传 reconnect_ms: {cam_line}");
-        let gen_line = ox.lines()
+        assert!(
+            cam_line.contains("--reconnect-ms 3000"),
+            "camera 源应透传 reconnect_ms: {cam_line}"
+        );
+        let gen_line = ox
+            .lines()
             .find(|l| l.contains("command") && l.contains("--camera gen0"))
             .expect("gen0 capturer 命令行");
-        assert!(!gen_line.contains("--reconnect-ms"), "generator 源不得加 --reconnect-ms: {gen_line}");
+        assert!(
+            !gen_line.contains("--reconnect-ms"),
+            "generator 源不得加 --reconnect-ms: {gen_line}"
+        );
         // 未配置 reconnect_ms 的 camera 源 → 不 emit（capturer 侧缺省 5000）
-        let no_reconnect = "sources:\n  - id: \"cam1\"\n    mode: \"camera\"\n    input: \"/dev/video0\"\n";
+        let no_reconnect =
+            "sources:\n  - id: \"cam1\"\n    mode: \"camera\"\n    input: \"/dev/video0\"\n";
         let ox2 = to_oxfile(no_reconnect).unwrap();
-        let cam1_line = ox2.lines()
+        let cam1_line = ox2
+            .lines()
             .find(|l| l.contains("command") && l.contains("--camera cam1"))
             .expect("cam1 capturer 命令行");
         assert!(!cam1_line.contains("--reconnect-ms"), "未配置 reconnect_ms 不 emit: {cam1_line}");
@@ -1367,13 +1410,18 @@ streams:
     fn oxfile_wires_stream_encoder_params() {
         let cfg = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n    codec: \"h264\"\n    encoder_backend: \"hardware\"\n    bitrate_kbps: 3500\n    keyframe_interval: 4\n  - id: \"s1\"\n    source: \"cam0\"\n";
         let ox = to_oxfile(cfg).unwrap();
-        let s0_line = ox.lines()
+        let s0_line = ox
+            .lines()
             .find(|l| l.contains("command") && l.contains("--stream s0"))
             .expect("s0 streamer 命令行");
-        assert!(s0_line.contains("--encoder-backend hardware"), "应透传 encoder_backend: {s0_line}");
+        assert!(
+            s0_line.contains("--encoder-backend hardware"),
+            "应透传 encoder_backend: {s0_line}"
+        );
         assert!(s0_line.contains("--bitrate-kbps 3500"), "应透传 bitrate: {s0_line}");
         assert!(s0_line.contains("--keyframe-interval 4"), "应透传 gop: {s0_line}");
-        let s1_line = ox.lines()
+        let s1_line = ox
+            .lines()
             .find(|l| l.contains("command") && l.contains("--stream s1"))
             .expect("s1 streamer 命令行");
         // s1 未写 codec → 缺省 h264 → 真值表钉 software（D282；显式后端仍原样透传）
@@ -1392,7 +1440,9 @@ streams:
     }
 
     fn qos_cfg(stream_body: &str) -> String {
-        format!("sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n{stream_body}")
+        format!(
+            "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n{stream_body}"
+        )
     }
 
     #[test]
@@ -1430,13 +1480,20 @@ streams:
     fn oxfile_explicit_keys_win_bundle() {
         // 显式 bitrate/min 覆盖 bundle（smooth 写 bitrate 不被抹、quality 写 bitrate 赢 3000、
         // smooth 写 min 赢 fps 联动地板）
-        let ox = to_oxfile(&qos_cfg("    stream_mode: \"smooth\"\n    bitrate_kbps: 2500\n    min_bitrate_kbps: 800\n")).unwrap();
+        let ox = to_oxfile(&qos_cfg(
+            "    stream_mode: \"smooth\"\n    bitrate_kbps: 2500\n    min_bitrate_kbps: 800\n",
+        ))
+        .unwrap();
         let line = streamer_cmd(&ox, "s0");
         assert!(line.contains("--bitrate-kbps 2500"), "显式 bitrate 赢: {line}");
         assert!(line.contains("--min-bitrate-kbps 800"), "显式 min 赢地板 100: {line}");
         assert!(line.contains("--degradation framerate"), "bundle 原语仍在: {line}");
-        let ox2 = to_oxfile(&qos_cfg("    stream_mode: \"quality\"\n    bitrate_kbps: 5000\n")).unwrap();
-        assert!(streamer_cmd(&ox2, "s0").contains("--bitrate-kbps 5000"), "quality 显式赢 bundle 3000");
+        let ox2 =
+            to_oxfile(&qos_cfg("    stream_mode: \"quality\"\n    bitrate_kbps: 5000\n")).unwrap();
+        assert!(
+            streamer_cmd(&ox2, "s0").contains("--bitrate-kbps 5000"),
+            "quality 显式赢 bundle 3000"
+        );
     }
 
     #[test]
@@ -1519,7 +1576,9 @@ defaults:
     fn identity_keys_are_denied_in_defaults_sources() {
         // D282 修订：mode/input 属源身份——误写公共层必须 deploy 期报错而非静默忽略。
         for bad in ["mode: \"generator\"", "input: \"/dev/video0\""] {
-            let cfg = format!("sources:\n  - id: \"cam0\"\n    mode: camera\ndefaults:\n  sources:\n    {bad}\nstreams: []\n");
+            let cfg = format!(
+                "sources:\n  - id: \"cam0\"\n    mode: camera\ndefaults:\n  sources:\n    {bad}\nstreams: []\n"
+            );
             let e = camera_configs(&cfg).unwrap_err();
             assert!(e.contains("unknown field"), "deny 应点名未知字段: {e}");
         }
@@ -1617,7 +1676,10 @@ defaults:
         let e = stream_configs(d_mode).unwrap_err();
         assert!(e.contains("smooth|balanced|quality") && e.contains("turbo"), "{e}");
         let d_codec = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\ndefaults:\n  streams:\n    codec: \"H264\"\n";
-        assert!(stream_configs(d_codec).unwrap_err().contains("codec=H264"), "大小写敏感=合法集精确匹配");
+        assert!(
+            stream_configs(d_codec).unwrap_err().contains("codec=H264"),
+            "大小写敏感=合法集精确匹配"
+        );
         // ③ 内置层（无条目键无 defaults → 缺省值天然合法）
         assert!(stream_configs(&qos_cfg("")).is_ok());
         // 条目合法值覆盖 defaults 非法值 → 证门在合并之后
@@ -1641,40 +1703,67 @@ defaults:
     #[test]
     fn smooth_floor_uses_linked_source_fps() {
         let cfg = |fps: u32| {
-            format!("sources:\n  - id: \"cam0\"\n    fps: {fps}\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n    stream_mode: \"smooth\"\n")
+            format!(
+                "sources:\n  - id: \"cam0\"\n    fps: {fps}\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n    stream_mode: \"smooth\"\n"
+            )
         };
-        let floor_of = |fps: u32| {
-            streamer_cmd(&to_oxfile(&cfg(fps)).unwrap(), "s0")
-        };
-        assert!(floor_of(60).contains("--min-bitrate-kbps 200"), "源 fps=60 → 200: {}", floor_of(60));
+        let floor_of = |fps: u32| streamer_cmd(&to_oxfile(&cfg(fps)).unwrap(), "s0");
+        assert!(
+            floor_of(60).contains("--min-bitrate-kbps 200"),
+            "源 fps=60 → 200: {}",
+            floor_of(60)
+        );
         assert!(floor_of(15).contains("--min-bitrate-kbps 50"), "源 fps=15 → 50: {}", floor_of(15));
         // 源未写 fps（resolved 30）→ 100
-        assert!(streamer_cmd(&to_oxfile(&qos_cfg("    stream_mode: \"smooth\"\n")).unwrap(), "s0")
-            .contains("--min-bitrate-kbps 100"), "源缺省 fps → 100");
+        assert!(
+            streamer_cmd(&to_oxfile(&qos_cfg("    stream_mode: \"smooth\"\n")).unwrap(), "s0")
+                .contains("--min-bitrate-kbps 100"),
+            "源缺省 fps → 100"
+        );
         // 流引用的源不存在 → 按 30 口径（现有报错路径不新增语义）
         let orphan = "streams:\n  - id: \"s0\"\n    stream_mode: \"smooth\"\n";
-        assert!(streamer_cmd(&to_oxfile(orphan).unwrap(), "s0").contains("--min-bitrate-kbps 100"), "查不到源按 30 计");
+        assert!(
+            streamer_cmd(&to_oxfile(orphan).unwrap(), "s0").contains("--min-bitrate-kbps 100"),
+            "查不到源按 30 计"
+        );
         // defaults.sources.fps 参与地板（合并先于关联）
         let via_defaults = "defaults:\n  sources:\n    fps: 60\n  streams:\n    stream_mode: \"smooth\"\nsources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
-        assert!(streamer_cmd(&to_oxfile(via_defaults).unwrap(), "s0").contains("--min-bitrate-kbps 200"), "defaults.sources.fps 进地板");
+        assert!(
+            streamer_cmd(&to_oxfile(via_defaults).unwrap(), "s0")
+                .contains("--min-bitrate-kbps 200"),
+            "defaults.sources.fps 进地板"
+        );
     }
 
     #[test]
     fn h264_backend_truth_table_auto_pinned_software() {
         let cell = |backend: &str, codec: &str| {
-            to_oxfile(&qos_cfg(&format!("    codec: \"{codec}\"\n    encoder_backend: \"{backend}\"\n")))
+            to_oxfile(&qos_cfg(&format!(
+                "    codec: \"{codec}\"\n    encoder_backend: \"{backend}\"\n"
+            )))
         };
         // ① h264 × auto → 钉 software（PIT-156 根治）
-        assert!(streamer_cmd(&cell("auto", "h264").unwrap(), "s0").contains("--encoder-backend software"), "h264×auto → software");
+        assert!(
+            streamer_cmd(&cell("auto", "h264").unwrap(), "s0")
+                .contains("--encoder-backend software"),
+            "h264×auto → software"
+        );
         // ② h264 × 显式后端 → 原样透传（含"明知硬件不可用仍要试"）
         for b in ["software", "hardware", "nvenc", "vaapi"] {
             let line = streamer_cmd(&cell(b, "h264").unwrap(), "s0");
             assert!(line.contains(&format!("--encoder-backend {b}")), "h264×{b} 原样: {line}");
         }
         // ③ 其他 codec × auto → 原样（不干预 streamer auto 现状）
-        assert!(streamer_cmd(&cell("auto", "vp8").unwrap(), "s0").contains("--encoder-backend auto"), "vp8×auto 原样");
+        assert!(
+            streamer_cmd(&cell("auto", "vp8").unwrap(), "s0").contains("--encoder-backend auto"),
+            "vp8×auto 原样"
+        );
         // ④ 其他 codec × 未配置 → 不 emit
-        assert!(!streamer_cmd(&to_oxfile(&qos_cfg("    codec: \"vp8\"\n")).unwrap(), "s0").contains("--encoder-backend"), "vp8 未配置不 emit");
+        assert!(
+            !streamer_cmd(&to_oxfile(&qos_cfg("    codec: \"vp8\"\n")).unwrap(), "s0")
+                .contains("--encoder-backend"),
+            "vp8 未配置不 emit"
+        );
         // 纯函数侧四格
         assert_eq!(resolved_encoder_backend("h264", None), Some("software"));
         assert_eq!(resolved_encoder_backend("h264", Some("auto")), Some("software"));
@@ -1692,7 +1781,10 @@ defaults:
         // defaults 层写 codec 同样进真值表（resolved 口径）
         let via_defaults = "defaults:\n  streams:\n    codec: \"vp9\"\nsources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
         assert_eq!(stream_configs(via_defaults).unwrap()[0].codec, "vp9");
-        assert!(!streamer_cmd(&to_oxfile(via_defaults).unwrap(), "s0").contains("--encoder-backend"), "vp9 不干预");
+        assert!(
+            !streamer_cmd(&to_oxfile(via_defaults).unwrap(), "s0").contains("--encoder-backend"),
+            "vp9 不干预"
+        );
     }
 
     #[test]
@@ -1706,7 +1798,10 @@ defaults:
         let legacy = "defaults:\n  sources:\n    source: \"stub\"\n";
         assert!(camera_configs(legacy).unwrap_err().contains("source"), "旧兼容键不入公共层");
         // 顶层不加 deny：存量 yaml 的 host:/control: 等非 HostConfig 键必须继续可解析
-        assert!(camera_configs("host:\n  device_id: \"x\"\ncontrol:\n  enabled: false\nsources: []\n").is_ok());
+        assert!(
+            camera_configs("host:\n  device_id: \"x\"\ncontrol:\n  enabled: false\nsources: []\n")
+                .is_ok()
+        );
     }
     // ── V5 [control].hmac_key_file 渲染注入 ──
 

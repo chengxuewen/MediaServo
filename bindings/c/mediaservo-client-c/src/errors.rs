@@ -133,11 +133,7 @@ pub(crate) fn last_error_impl(buf: *mut c_char, len: usize) -> c_int {
     if buf.is_null() || len == 0 {
         return MEDIASERVO_CLIENT_ERR_INVALID_ARG;
     }
-    let msg = LAST_ERROR
-        .lock()
-        .ok()
-        .and_then(|g| g.clone())
-        .unwrap_or_default();
+    let msg = LAST_ERROR.lock().ok().and_then(|g| g.clone()).unwrap_or_default();
     let bytes = msg.as_bytes();
     let n = bytes.len().min(len - 1);
     unsafe {
@@ -158,68 +154,29 @@ mod tests {
     fn error_code_covers_every_variant() {
         let cases: Vec<(ClientError, c_int)> = vec![
             (ClientError::Login("x".into()), MEDIASERVO_CLIENT_ERR_LOGIN),
+            (ClientError::InvalidCredentials, MEDIASERVO_CLIENT_ERR_UNAUTHORIZED),
             (
-                ClientError::InvalidCredentials,
+                ClientError::AuthRejected { code: 4010, message: "x".into() },
                 MEDIASERVO_CLIENT_ERR_UNAUTHORIZED,
             ),
             (
-                ClientError::AuthRejected {
-                    code: 4010,
-                    message: "x".into(),
-                },
+                ClientError::RestRejected { code: 401, message: "x".into() },
                 MEDIASERVO_CLIENT_ERR_UNAUTHORIZED,
             ),
+            (ClientError::ControlDenied("x".into()), MEDIASERVO_CLIENT_ERR_DENIED),
+            (ClientError::Timeout { what: "x" }, MEDIASERVO_CLIENT_ERR_TIMEOUT),
+            (ClientError::Signal(LinkError::Signal("x".into())), MEDIASERVO_CLIENT_ERR_SIGNAL),
+            (ClientError::ProtocolUnsupported("x".into()), MEDIASERVO_CLIENT_ERR_PROTOCOL),
+            (ClientError::ProtocolTooLow { need: 2, got: 1 }, MEDIASERVO_CLIENT_ERR_PROTOCOL),
+            (ClientError::MalformedResponse("x".into()), MEDIASERVO_CLIENT_ERR_MALFORMED),
+            (ClientError::UnsupportedScheme("https".into()), MEDIASERVO_CLIENT_ERR_MALFORMED),
+            (ClientError::InvalidState("x".into()), MEDIASERVO_CLIENT_ERR_STATE),
             (
-                ClientError::RestRejected {
-                    code: 401,
-                    message: "x".into(),
-                },
-                MEDIASERVO_CLIENT_ERR_UNAUTHORIZED,
-            ),
-            (
-                ClientError::ControlDenied("x".into()),
-                MEDIASERVO_CLIENT_ERR_DENIED,
-            ),
-            (
-                ClientError::Timeout { what: "x" },
-                MEDIASERVO_CLIENT_ERR_TIMEOUT,
-            ),
-            (
-                ClientError::Signal(LinkError::Signal("x".into())),
-                MEDIASERVO_CLIENT_ERR_SIGNAL,
-            ),
-            (
-                ClientError::ProtocolUnsupported("x".into()),
-                MEDIASERVO_CLIENT_ERR_PROTOCOL,
-            ),
-            (
-                ClientError::ProtocolTooLow { need: 2, got: 1 },
-                MEDIASERVO_CLIENT_ERR_PROTOCOL,
-            ),
-            (
-                ClientError::MalformedResponse("x".into()),
-                MEDIASERVO_CLIENT_ERR_MALFORMED,
-            ),
-            (
-                ClientError::UnsupportedScheme("https".into()),
-                MEDIASERVO_CLIENT_ERR_MALFORMED,
-            ),
-            (
-                ClientError::InvalidState("x".into()),
-                MEDIASERVO_CLIENT_ERR_STATE,
-            ),
-            (
-                ClientError::Server {
-                    code: 5000,
-                    message: "x".into(),
-                },
+                ClientError::Server { code: 5000, message: "x".into() },
                 MEDIASERVO_CLIENT_ERR_INTERNAL,
             ),
             (ClientError::WebRtc("x".into()), MEDIASERVO_CLIENT_ERR_INTERNAL),
-            (
-                ClientError::Io(std::io::Error::other("x")),
-                MEDIASERVO_CLIENT_ERR_INTERNAL,
-            ),
+            (ClientError::Io(std::io::Error::other("x")), MEDIASERVO_CLIENT_ERR_INTERNAL),
         ];
         for (e, want) in cases {
             assert_eq!(error_code(&e), want, "variant: {e:?}");
@@ -271,9 +228,7 @@ mod tests {
         let rc = copy_out_str("abc", buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
         assert_eq!(
-            unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }
-                .to_str()
-                .unwrap(),
+            unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap(),
             "abc"
         );
     }
@@ -286,18 +241,14 @@ mod tests {
         let rc = last_error_impl(buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
         // 内容竞争容忍: 读得回合法 C 串即达标（link-c 同纪律，独有标记可能被并发测试覆写）
-        let s = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }
-            .to_str()
-            .expect("valid utf8");
+        let s =
+            unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().expect("valid utf8");
         assert!(!s.is_empty());
     }
 
     #[test]
     fn last_error_null_buf_fails() {
-        assert_eq!(
-            last_error_impl(ptr::null_mut(), 64),
-            MEDIASERVO_CLIENT_ERR_INVALID_ARG
-        );
+        assert_eq!(last_error_impl(ptr::null_mut(), 64), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
         let mut buf = [0u8; 4];
         assert_eq!(
             last_error_impl(buf.as_mut_ptr() as *mut c_char, 0),

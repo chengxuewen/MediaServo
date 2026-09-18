@@ -1,6 +1,5 @@
-
-use crate::track::{TrackKind, TrackRef};
 use crate::RTCError;
+use crate::track::{TrackKind, TrackRef};
 
 /// 编码器后端选择（对齐 webrtc-sys VideoEncoderBackend）。
 /// 语义: 偏好非强制 — 不可用时 libwebrtc 自动 fallback（video_encoder_factory.cpp:511-566 实证）。
@@ -56,7 +55,9 @@ impl std::str::FromStr for RTCDegradationPreference {
             "framerate" => Ok(Self::MaintainFramerate),
             "resolution" => Ok(Self::MaintainResolution),
             "balanced" => Ok(Self::Balanced),
-            _ => Err(format!("非法 degradation 值 {s:?}（合法: fixed|framerate|resolution|balanced）")),
+            _ => Err(format!(
+                "非法 degradation 值 {s:?}（合法: fixed|framerate|resolution|balanced）"
+            )),
         }
     }
 }
@@ -95,12 +96,7 @@ impl RTCRtpSender {
     pub fn new(track: TrackRef) -> Self {
         let track_id = track.id().to_string();
         let kind = track.kind();
-        Self {
-            track,
-            track_id,
-            kind,
-            backend: None,
-        }
+        Self { track, track_id, kind, backend: None }
     }
 
     /// v2: 绑定 backend 句柄（get_senders 构造时填充）
@@ -127,7 +123,11 @@ impl RTCRtpSender {
     /// 聚焦式 API（非 W3C setParameters 全量）— 后端 cxx 保真往返只改 bitrate 字段（PIT-76）。
     /// min 为受限链路 best-effort 下限（libwebrtc 分配层生效, 编码器无硬下限）;
     /// max 为可靠硬上限。None = 不限制。
-    pub fn set_encoding_bitrate(&self, min_bps: Option<u64>, max_bps: Option<u64>) -> Result<(), RTCError> {
+    pub fn set_encoding_bitrate(
+        &self,
+        min_bps: Option<u64>,
+        max_bps: Option<u64>,
+    ) -> Result<(), RTCError> {
         use crate::backend::PcBackend as _;
         match &self.backend {
             Some(b) => b.sender_set_encoding_bitrate(&self.track_id, min_bps, max_bps),
@@ -148,7 +148,10 @@ impl RTCRtpSender {
 
     /// v2 (encoder-backend-codec-config T1): 设置编码器后端（软/硬, PcBackend track_id 分派）。
     /// SetEncoderSelector 语义: 偏好非强制（不可用自动 fallback）。
-    pub fn set_video_encoder_backend(&self, backend: RTCVideoEncoderBackend) -> Result<(), RTCError> {
+    pub fn set_video_encoder_backend(
+        &self,
+        backend: RTCVideoEncoderBackend,
+    ) -> Result<(), RTCError> {
         use crate::backend::PcBackend as _;
         match &self.backend {
             Some(b) => b.sender_set_video_encoder_backend(&self.track_id, backend),
@@ -158,7 +161,10 @@ impl RTCRtpSender {
 
     /// v2 (qos-framerate-priority): 设置降级偏好——聚焦式 API（bitrate 同模式），
     /// 后端 cxx 保真往返只改 RtpParameters.degradation_preference 字段。
-    pub fn set_degradation_preference(&self, pref: RTCDegradationPreference) -> Result<(), RTCError> {
+    pub fn set_degradation_preference(
+        &self,
+        pref: RTCDegradationPreference,
+    ) -> Result<(), RTCError> {
         use crate::backend::PcBackend as _;
         match &self.backend {
             Some(b) => b.sender_set_degradation_preference(&self.track_id, pref),
@@ -199,14 +205,9 @@ impl RTCRtpReceiver {
     pub fn new(track: TrackRef) -> Self {
         let track_id = track.id().to_string();
         let kind = track.kind();
-        Self {
-            track,
-            track_id,
-            kind,
-        }
+        Self { track, track_id, kind }
     }
 }
-
 
 /// W3C RTCRtpCodecParameters
 #[derive(Debug, Clone)]
@@ -349,15 +350,7 @@ impl RTCRtpTransceiver {
         receiver: RTCRtpReceiver,
         kind: TrackKind,
     ) -> Self {
-        Self {
-            mid,
-            direction,
-            current_direction,
-            stopped,
-            sender,
-            receiver,
-            kind,
-        }
+        Self { mid, direction, current_direction, stopped, sender, receiver, kind }
     }
 }
 
@@ -392,13 +385,31 @@ mod tests {
     fn backend_from_config_mapping() {
         // v2 (encoder-backend-codec-config T2): host.conf string ↔ enum
         assert_eq!(RTCVideoEncoderBackend::from_config("auto"), Some(RTCVideoEncoderBackend::Auto));
-        assert_eq!(RTCVideoEncoderBackend::from_config("software"), Some(RTCVideoEncoderBackend::Software));
-        assert_eq!(RTCVideoEncoderBackend::from_config("hardware"), Some(RTCVideoEncoderBackend::Hardware));
-        assert_eq!(RTCVideoEncoderBackend::from_config("nvenc"), Some(RTCVideoEncoderBackend::Nvenc));
-        assert_eq!(RTCVideoEncoderBackend::from_config("vaapi"), Some(RTCVideoEncoderBackend::Vaapi));
-        assert_eq!(RTCVideoEncoderBackend::from_config("videotoolbox"), Some(RTCVideoEncoderBackend::VideoToolbox));
+        assert_eq!(
+            RTCVideoEncoderBackend::from_config("software"),
+            Some(RTCVideoEncoderBackend::Software)
+        );
+        assert_eq!(
+            RTCVideoEncoderBackend::from_config("hardware"),
+            Some(RTCVideoEncoderBackend::Hardware)
+        );
+        assert_eq!(
+            RTCVideoEncoderBackend::from_config("nvenc"),
+            Some(RTCVideoEncoderBackend::Nvenc)
+        );
+        assert_eq!(
+            RTCVideoEncoderBackend::from_config("vaapi"),
+            Some(RTCVideoEncoderBackend::Vaapi)
+        );
+        assert_eq!(
+            RTCVideoEncoderBackend::from_config("videotoolbox"),
+            Some(RTCVideoEncoderBackend::VideoToolbox)
+        );
         // 大小写不敏感 + 未知值 None
-        assert_eq!(RTCVideoEncoderBackend::from_config("HARDWARE"), Some(RTCVideoEncoderBackend::Hardware));
+        assert_eq!(
+            RTCVideoEncoderBackend::from_config("HARDWARE"),
+            Some(RTCVideoEncoderBackend::Hardware)
+        );
         assert_eq!(RTCVideoEncoderBackend::from_config("cuda"), None);
         assert_eq!(RTCVideoEncoderBackend::from_config(""), None);
     }
@@ -406,12 +417,27 @@ mod tests {
     // qos-framerate-priority T1: DegradationPreference / ContentHint 解析与缺省
     #[test]
     fn degradation_preference_from_str_legal() {
-        assert_eq!("fixed".parse::<RTCDegradationPreference>().unwrap(), RTCDegradationPreference::Fixed);
-        assert_eq!("framerate".parse::<RTCDegradationPreference>().unwrap(), RTCDegradationPreference::MaintainFramerate);
-        assert_eq!("resolution".parse::<RTCDegradationPreference>().unwrap(), RTCDegradationPreference::MaintainResolution);
-        assert_eq!("balanced".parse::<RTCDegradationPreference>().unwrap(), RTCDegradationPreference::Balanced);
+        assert_eq!(
+            "fixed".parse::<RTCDegradationPreference>().unwrap(),
+            RTCDegradationPreference::Fixed
+        );
+        assert_eq!(
+            "framerate".parse::<RTCDegradationPreference>().unwrap(),
+            RTCDegradationPreference::MaintainFramerate
+        );
+        assert_eq!(
+            "resolution".parse::<RTCDegradationPreference>().unwrap(),
+            RTCDegradationPreference::MaintainResolution
+        );
+        assert_eq!(
+            "balanced".parse::<RTCDegradationPreference>().unwrap(),
+            RTCDegradationPreference::Balanced
+        );
         // 大小写/空白不敏感（from_config 同风格）
-        assert_eq!(" FRAMERATE ".parse::<RTCDegradationPreference>().unwrap(), RTCDegradationPreference::MaintainFramerate);
+        assert_eq!(
+            " FRAMERATE ".parse::<RTCDegradationPreference>().unwrap(),
+            RTCDegradationPreference::MaintainFramerate
+        );
     }
 
     #[test]

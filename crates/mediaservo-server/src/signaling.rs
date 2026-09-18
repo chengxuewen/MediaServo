@@ -1,4 +1,3 @@
-use base64::Engine as _;
 use crate::audit::{self, AuditEvent};
 use crate::devices::{self, DeviceRegistry, PendingTable};
 use crate::health::{HealthChecker, HealthStatus, ReadinessChecker};
@@ -11,8 +10,9 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use axum::routing::get;
+use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt}; // handle_socket WS 泵无条件消费（stub 姿态同需——
-                                          // 曾误挂 sfu cfg = --no-default-features lib 编译挂根因）
+// 曾误挂 sfu cfg = --no-default-features lib 编译挂根因）
 use mediaservo_common::auth::{JwtAuth, SimplePskAuth};
 use mediaservo_common::error::CoreError;
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
@@ -106,7 +106,10 @@ impl SignalingServer {
             sfu_manager: _sfu,
             shutdown_tx,
             active_connections: Arc::new(AtomicUsize::new(0)),
-            admin_events: { let (tx, _) = tokio::sync::broadcast::channel(256); tx },
+            admin_events: {
+                let (tx, _) = tokio::sync::broadcast::channel(256);
+                tx
+            },
             ws_max_message_size,
             ws_ping_secs: hb_env("MEDIASERVO_WS_PING_SECS", 5),
             ws_pong_miss: (hb_env("MEDIASERVO_WS_PONG_MISS", 2) as u32).max(1),
@@ -138,7 +141,10 @@ impl SignalingServer {
             room_manager: RoomManager::new(),
             shutdown_tx,
             active_connections: Arc::new(AtomicUsize::new(0)),
-            admin_events: { let (tx, _) = tokio::sync::broadcast::channel(256); tx },
+            admin_events: {
+                let (tx, _) = tokio::sync::broadcast::channel(256);
+                tx
+            },
             ws_max_message_size,
             ws_ping_secs: hb_env("MEDIASERVO_WS_PING_SECS", 5),
             ws_pong_miss: (hb_env("MEDIASERVO_WS_PONG_MISS", 2) as u32).max(1),
@@ -319,7 +325,11 @@ fn hb_env(key: &str, default: u64) -> u64 {
 
 /// a1 检测预算纯函数：静默 > interval×(miss+1) 判死（测试钉矩阵，勿在循环内裸算）。
 #[must_use]
-pub fn pong_budget_exceeded(silent: std::time::Duration, interval: std::time::Duration, miss: u32) -> bool {
+pub fn pong_budget_exceeded(
+    silent: std::time::Duration,
+    interval: std::time::Duration,
+    miss: u32,
+) -> bool {
     silent > interval * (miss + 1)
 }
 
@@ -426,66 +436,63 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     // ⚠ 不能用 `if !authenticated` 拦——psk 未配置时 authenticated 预置 true，会把提交的
     // token 整个跳过：账号身份永不建立 → 会话退化为 Legacy → produce/data 域授权门被旁路
     // （2026-08-31 e2e_sfu role_enforcement/data_domain 双失败根因，测试假绿暴露）。
-    if !authenticated || jwt_token.is_some() {
-        if let (Some(jwt_auth), Some(token)) = (&server.jwt_auth, &jwt_token) {
-            match jwt_auth.verify(token) {
-                Ok(claims) => {
-                    // G3 角色解析（D-H11）: 合法 role → 账号身份（舱端）; 无 role = legacy
-                    // token（保持原行为）; 未知 role → 拒绝连接（4011）。
-                    match claims.role.as_deref() {
-                        Some(role_str) if CockpitRole::parse(role_str).is_none() => {
-                            let reason = format!("token role {role_str:?} not recognized");
-                            tracing::warn!("JWT auth rejected: {reason}");
-                            audit::log_event(AuditEvent::AuthFailure {
-                                peer_id: peer_id.clone(),
-                                reason: reason.clone(),
-                            });
-                            let error = SignalingMessage::Error { code: 4011, message: reason };
-                            let _ = ws_sender
-                                .lock()
-                                .await
-                                .send(Message::Text(send_msg(&error).unwrap()))
-                                .await;
-                            return;
-                        }
-                        Some(role_str) => {
-                            // 账号会话: peer_id 用 username + 短随机后缀（同账号多舱端并发不冲突）。
-                            let role = CockpitRole::parse(role_str).expect("checked above");
-                            account_identity = Some(AccountIdentity {
-                                username: claims.sub.clone(),
-                                role,
-                                vehicles: claims.vehicles.clone().unwrap_or_default(),
-                            });
-                            peer_id = format!(
-                                "{}-{}",
-                                claims.sub,
-                                &uuid::Uuid::new_v4().to_string()[..8]
-                            );
-                            authenticated = true;
-                            tracing::info!(
-                                "JWT account authenticated: user={} role={}",
-                                claims.sub,
-                                role_str
-                            );
-                            audit::log_event(AuditEvent::AuthSuccess {
-                                peer_id: peer_id.clone(),
-                                device_id: None,
-                            });
-                        }
-                        None => {
-                            peer_id = claims.sub.clone();
-                            authenticated = true;
-                            tracing::info!("JWT authenticated: peer={}", peer_id);
-                            audit::log_event(AuditEvent::AuthSuccess {
-                                peer_id: peer_id.clone(),
-                                device_id: None,
-                            });
-                        }
+    if (!authenticated || jwt_token.is_some())
+        && let (Some(jwt_auth), Some(token)) = (&server.jwt_auth, &jwt_token)
+    {
+        match jwt_auth.verify(token) {
+            Ok(claims) => {
+                // G3 角色解析（D-H11）: 合法 role → 账号身份（舱端）; 无 role = legacy
+                // token（保持原行为）; 未知 role → 拒绝连接（4011）。
+                match claims.role.as_deref() {
+                    Some(role_str) if CockpitRole::parse(role_str).is_none() => {
+                        let reason = format!("token role {role_str:?} not recognized");
+                        tracing::warn!("JWT auth rejected: {reason}");
+                        audit::log_event(AuditEvent::AuthFailure {
+                            peer_id: peer_id.clone(),
+                            reason: reason.clone(),
+                        });
+                        let error = SignalingMessage::Error { code: 4011, message: reason };
+                        let _ = ws_sender
+                            .lock()
+                            .await
+                            .send(Message::Text(send_msg(&error).unwrap()))
+                            .await;
+                        return;
+                    }
+                    Some(role_str) => {
+                        // 账号会话: peer_id 用 username + 短随机后缀（同账号多舱端并发不冲突）。
+                        let role = CockpitRole::parse(role_str).expect("checked above");
+                        account_identity = Some(AccountIdentity {
+                            username: claims.sub.clone(),
+                            role,
+                            vehicles: claims.vehicles.clone().unwrap_or_default(),
+                        });
+                        peer_id =
+                            format!("{}-{}", claims.sub, &uuid::Uuid::new_v4().to_string()[..8]);
+                        authenticated = true;
+                        tracing::info!(
+                            "JWT account authenticated: user={} role={}",
+                            claims.sub,
+                            role_str
+                        );
+                        audit::log_event(AuditEvent::AuthSuccess {
+                            peer_id: peer_id.clone(),
+                            device_id: None,
+                        });
+                    }
+                    None => {
+                        peer_id = claims.sub.clone();
+                        authenticated = true;
+                        tracing::info!("JWT authenticated: peer={}", peer_id);
+                        audit::log_event(AuditEvent::AuthSuccess {
+                            peer_id: peer_id.clone(),
+                            device_id: None,
+                        });
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("JWT verification failed: {}, falling back to PSK", e);
-                }
+            }
+            Err(e) => {
+                tracing::warn!("JWT verification failed: {}, falling back to PSK", e);
             }
         }
     }
@@ -767,7 +774,9 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                                     );
                                     let error = SignalingMessage::Error {
                                         code: 4010,
-                                        message: devices::DeviceAuthError::BadSecret.message().into(),
+                                        message: devices::DeviceAuthError::BadSecret
+                                            .message()
+                                            .into(),
                                     };
                                     let _ = ws_sender
                                         .lock()
@@ -829,7 +838,11 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                         );
                         tracing::warn!("RoomJoin denied: {detail} (peer={peer_id})");
                         let error = SignalingMessage::Error { code: 4101, message: detail };
-                        let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
+                        let _ = ws_sender
+                            .lock()
+                            .await
+                            .send(Message::Text(send_msg(&error).unwrap()))
+                            .await;
                         return;
                     }
                     // ── device-enroll §5.2: pubkey 形 → 一律先发挑战（每连接验 possession，D-E8）──
@@ -853,7 +866,10 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                             return;
                         }
                         let Some(did) = device_id.clone() else {
-                            tracing::warn!("Peer {} RoomJoin device_pubkey without device_id — rejected", peer_id);
+                            tracing::warn!(
+                                "Peer {} RoomJoin device_pubkey without device_id — rejected",
+                                peer_id
+                            );
                             let error = SignalingMessage::Error {
                                 code: 4000,
                                 message: "device_id is required with device_pubkey".into(),
@@ -897,8 +913,9 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                                 }
                                 let nonce_b64 =
                                     base64::engine::general_purpose::STANDARD.encode(nonce);
-                                let challenge =
-                                    SignalingMessage::DeviceAuthChallenge { nonce: nonce_b64.clone() };
+                                let challenge = SignalingMessage::DeviceAuthChallenge {
+                                    nonce: nonce_b64.clone(),
+                                };
                                 if ws_sender
                                     .lock()
                                     .await
@@ -1001,23 +1018,24 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     if let Some(n) = resume_claim.clone() {
         if negotiated >= mediaservo_common::protocol::PROTOCOL_MIN_RESUME {
             let key = (identity_key(&session_identity), room_id.clone());
-            let hit = server
-                .resume_table
-                .lock()
-                .ok()
-                .and_then(|mut t| {
-                    let ok = t
-                        .get(&key)
-                        .is_some_and(|h| h.negotiated == negotiated && ct_eq(n.as_bytes(), h.nonce.as_bytes()));
-                    ok.then(|| t.remove(&key)).flatten()
+            let hit = server.resume_table.lock().ok().and_then(|mut t| {
+                let ok = t.get(&key).is_some_and(|h| {
+                    h.negotiated == negotiated && ct_eq(n.as_bytes(), h.nonce.as_bytes())
                 });
+                ok.then(|| t.remove(&key)).flatten()
+            });
             match hit {
                 Some(h) => {
-                    tracing::info!("a2: resume 命中 → peer={} 接管，延迟清理作废（票已轮换）", h.peer_id);
+                    tracing::info!(
+                        "a2: resume 命中 → peer={} 接管，延迟清理作废（票已轮换）",
+                        h.peer_id
+                    );
                     peer_id = h.peer_id.clone();
                     resumed_from = Some(h);
                 }
-                None => tracing::warn!("a2: resume 票无效/过期/方言不符 → 回落全量 join (room={room_id})"),
+                None => tracing::warn!(
+                    "a2: resume 票无效/过期/方言不符 → 回落全量 join (room={room_id})"
+                ),
             }
         } else {
             tracing::warn!("a2: resume 请求但 negotiated={negotiated}<3 → 忽略（回落全量 join）");
@@ -1027,12 +1045,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     // 否则旧成员未删 → join_room 误报 RoomFull（票一次性丢失的自愈路径）。
     if resumed_from.is_none() {
         let key = (identity_key(&session_identity), room_id.clone());
-        let stale = server
-            .resume_table
-            .lock()
-            .ok()
-            .and_then(|mut t| t.remove(&key))
-            .map(|h| h.peer_id);
+        let stale =
+            server.resume_table.lock().ok().and_then(|mut t| t.remove(&key)).map(|h| h.peer_id);
         if let Some(old_peer) = stale {
             tracing::info!("a2: 全量 join 接管 → 即刻清理旧挂起 peer={old_peer}");
             let tx_now = server.get_or_create_channel(&room_id);
@@ -1074,19 +1088,19 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         return;
     }
     // ③ 按房间主车做矩阵 + 白名单校验（车 A 不可见车 B; 账号仅授权车）。
-    if let Some(owner) = server.room_owner_of(&room_id) {
-        if let Some(reason) = session_identity.join_vehicle_room(Some(&owner)) {
-            let detail = format!("{reason} (peer={peer_id}, room={room_id})");
-            tracing::warn!("RoomJoin denied: {detail}");
-            audit::log_event(AuditEvent::AuthorizationDenied {
-                action: "room_join".into(),
-                peer_id: peer_id.clone(),
-                detail: detail.clone(),
-            });
-            let error = SignalingMessage::Error { code: 4031, message: detail };
-            let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
-            return;
-        }
+    if let Some(owner) = server.room_owner_of(&room_id)
+        && let Some(reason) = session_identity.join_vehicle_room(Some(&owner))
+    {
+        let detail = format!("{reason} (peer={peer_id}, room={room_id})");
+        tracing::warn!("RoomJoin denied: {detail}");
+        audit::log_event(AuditEvent::AuthorizationDenied {
+            action: "room_join".into(),
+            peer_id: peer_id.clone(),
+            detail: detail.clone(),
+        });
+        let error = SignalingMessage::Error { code: 4031, message: detail };
+        let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
+        return;
     }
 
     // Join the room（a2: resume 接管 = 成员资格仍在保留窗内未被删，跳过 join；
@@ -1098,40 +1112,39 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
             role: format!("{:?}", role),
         });
     } else {
-    match server.room_manager.join_room(&room_id, &peer_id, &role) {
-        Ok(()) => {
-            // G2: 设备认证成功的会话在此绑定连接级身份（peer_id → device_id, D-H11）。
-            // review #2: 绑定必须发生在 join 成功之后 — 失败路径（4001/4002）零残留;
-            // 断开时 cleanup 解除（见 relay 循环结束处）。
-            if let Some(device) = &device_id {
-                server.device_bindings.insert(peer_id.clone(), device.clone());
-                // G3: 车端 join 成功即登记房间主车（租户隔离/授权的裁决依据）。
-                // 注: 存的是设备 ID（= 车辆 ID）。音频房间 room_id=audio-<vehicle>，
-                // 设备 ID 即 vehicle — join_vehicle_room 按它比对 allowlist，天然正确。
-                server.room_owners.insert(room_id.clone(), device.clone());
+        match server.room_manager.join_room(&room_id, &peer_id, &role) {
+            Ok(()) => {
+                // G2: 设备认证成功的会话在此绑定连接级身份（peer_id → device_id, D-H11）。
+                // review #2: 绑定必须发生在 join 成功之后 — 失败路径（4001/4002）零残留;
+                // 断开时 cleanup 解除（见 relay 循环结束处）。
+                if let Some(device) = &device_id {
+                    server.device_bindings.insert(peer_id.clone(), device.clone());
+                    // G3: 车端 join 成功即登记房间主车（租户隔离/授权的裁决依据）。
+                    // 注: 存的是设备 ID（= 车辆 ID）。音频房间 room_id=audio-<vehicle>，
+                    // 设备 ID 即 vehicle — join_vehicle_room 按它比对 allowlist，天然正确。
+                    server.room_owners.insert(room_id.clone(), device.clone());
+                }
+                audit::log_event(AuditEvent::PeerJoin {
+                    peer_id: peer_id.clone(),
+                    room_id: room_id.clone(),
+                    role: format!("{:?}", role),
+                });
             }
-            audit::log_event(AuditEvent::PeerJoin {
-                peer_id: peer_id.clone(),
-                room_id: room_id.clone(),
-                role: format!("{:?}", role),
-            });
+            Err(CoreError::RoomFull) => {
+                let error = SignalingMessage::Error { code: 4002, message: "Room is full".into() };
+                let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
+                return;
+            }
+            Err(e) => {
+                tracing::error!("Room join error: {}", e);
+                let error = SignalingMessage::Error {
+                    code: 4001,
+                    message: format!("Failed to join room: {}", e),
+                };
+                let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
+                return;
+            }
         }
-        Err(CoreError::RoomFull) => {
-            let error = SignalingMessage::Error { code: 4002, message: "Room is full".into() };
-            let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
-            return;
-        }
-        Err(e) => {
-            tracing::error!("Room join error: {}", e);
-            let error = SignalingMessage::Error {
-                code: 4001,
-                message: format!("Failed to join room: {}", e),
-            };
-            let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
-            return;
-        }
-    }
-
     }
     // Send RoomJoined ack
     // a2: 车端设备会话（Host + Device 身份 + n≥3）下发一次性重挂票并挂载保留记录。
@@ -1142,9 +1155,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         && negotiated >= mediaservo_common::protocol::PROTOCOL_MIN_RESUME
     {
         let n = gen_session_nonce();
-        let seq = server
-            .resume_seq
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let seq = server.resume_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Ok(mut t) = server.resume_table.lock() {
             t.insert(
                 (identity_key(&session_identity), room_id.clone()),
@@ -1192,7 +1203,11 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         let reason = loop {
             match rx.recv().await {
                 Ok(msg) => {
-                    tracing::debug!("Relay: forwarding to peer {} ({} bytes)", relay_spawn_peer, msg.len());
+                    tracing::debug!(
+                        "Relay: forwarding to peer {} ({} bytes)",
+                        relay_spawn_peer,
+                        msg.len()
+                    );
                     if relay_sender.lock().await.send(Message::Text(msg)).await.is_err() {
                         break "send-failed";
                     }
@@ -1205,7 +1220,12 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                 }
             }
         };
-        tracing::info!("Relay ended: peer={} room={} reason={}", relay_spawn_peer, relay_spawn_room, reason);
+        tracing::info!(
+            "Relay ended: peer={} room={} reason={}",
+            relay_spawn_peer,
+            relay_spawn_room,
+            reason
+        );
     });
 
     // Forward: this peer's receiver → broadcast
@@ -1256,10 +1276,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     let (hb_tx, mut hb_rx) = tokio::sync::mpsc::channel::<()>(1);
     if server.ws_ping_secs > 0 {
         let (ptx, stamp, dead) = (Arc::clone(&hb_sender), Arc::clone(&last_alive), hb_tx.clone());
-        let (interval, miss) = (
-            std::time::Duration::from_secs(server.ws_ping_secs),
-            server.ws_pong_miss.max(1),
-        );
+        let (interval, miss) =
+            (std::time::Duration::from_secs(server.ws_ping_secs), server.ws_pong_miss.max(1));
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(interval);
             tick.tick().await; // 吞 t=0 就绪拍（ack 后首 ping 等一个间隔）
@@ -1280,7 +1298,6 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
             }
         });
     }
-
 
     // device-enroll §5.3: 挑战窗口延后的消息按序冲刷（鉴权通过后进入与实时消息同一管线）。
     let mut deferred_iter = deferred.into_iter();
@@ -1567,21 +1584,18 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                             tracing::debug!("Forward: broadcast to {} receivers", n);
                             // ── Cache SDP + ICE for late-joiner replay
                             if let Ok(sig_msg) = serde_json::from_str::<SignalingMessage>(&text_str)
-                            {
-                                if matches!(
+                                && matches!(
                                     sig_msg,
                                     SignalingMessage::Sdp { .. }
                                         | SignalingMessage::RTCIceCandidate { .. }
-                                ) {
-                                    let mut msgs = server
-                                        .pending_messages
-                                        .entry(relay_room.clone())
-                                        .or_default();
-                                    msgs.push(text_str);
-                                    // ponytail: cap at 64 messages; real ring-buffer if this overflows
-                                    if msgs.len() > 64 {
-                                        msgs.remove(0);
-                                    }
+                                )
+                            {
+                                let mut msgs =
+                                    server.pending_messages.entry(relay_room.clone()).or_default();
+                                msgs.push(text_str);
+                                // ponytail: cap at 64 messages; real ring-buffer if this overflows
+                                if msgs.len() > 64 {
+                                    msgs.remove(0);
                                 }
                             }
                         }
@@ -1617,7 +1631,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         Some(seq) => {
             tracing::info!(
                 "a2: peer={} 进入保留窗 ({}s)，等待重挂",
-                relay_peer_id, server.ws_resume_hold_secs
+                relay_peer_id,
+                server.ws_resume_hold_secs
             );
             let (srv, peer, room, tx, key) = (
                 server.clone(),
@@ -1672,12 +1687,17 @@ async fn disconnect_session(
         let global_announced: usize = closed_rooms.iter().map(|(_, c)| c.len()).sum();
         tracing::info!(
             "SFU: cleaned up peer {} ({} sfu rooms touched)",
-            relay_peer_id, closed_rooms.len()
+            relay_peer_id,
+            closed_rooms.len()
         );
         for (room_id, closed) in closed_rooms {
             // T4 重构：广播/owners 同步/列表事件统一链（防多站点漂移）。
             announce_producers_closed(
-                &server, &room_id, &relay_peer_id, binding_dev.as_deref(), closed,
+                &server,
+                &room_id,
+                &relay_peer_id,
+                binding_dev.as_deref(),
+                closed,
             );
         }
 
@@ -1697,9 +1717,7 @@ async fn disconnect_session(
                 server.producer_owners.remove(pid);
             }
             for (room_id, closed) in group_closed_by_room(removed) {
-                announce_producers_closed(
-                    &server, &room_id, &relay_peer_id, None, closed,
-                );
+                announce_producers_closed(&server, &room_id, &relay_peer_id, None, closed);
             }
             tracing::info!("S4′: session {relay_peer_id} 名下回收 {} 个 producer", mine.len());
         }
@@ -1722,7 +1740,9 @@ async fn disconnect_session(
                 let removed_ids: std::collections::HashSet<String> =
                     removed.iter().map(|(_, p, _)| p.clone()).collect();
                 for pid in owned.iter().filter(|p| !removed_ids.contains(*p)) {
-                    tracing::warn!("remove_producers_by_ids: missed producer {pid} (device {device_id})");
+                    tracing::warn!(
+                        "remove_producers_by_ids: missed producer {pid} (device {device_id})"
+                    );
                 }
                 for pid in &owned {
                     server.producer_owners.remove(pid);
@@ -1736,15 +1756,23 @@ async fn disconnect_session(
                 }
                 for (room, prods) in by_room {
                     announce_producers_closed(
-                        &server, &room, &relay_peer_id, Some(&device_id), prods,
+                        &server,
+                        &room,
+                        &relay_peer_id,
+                        Some(&device_id),
+                        prods,
                     );
                 }
             } else if global_announced == 0 && t4_seen == 0 {
                 // T2: 设备断开但名下零登记且全局清理无收获 = 注册链断（05:43 类悬案禁止静默）。
                 // DownstreamGone 已逐流清理的正常路径（global_announced>0 或 T4 逐流先到）→ debug。
-                tracing::warn!("ProducerClosed cleanup: owned empty for device {device_id} (peer {relay_peer_id})");
+                tracing::warn!(
+                    "ProducerClosed cleanup: owned empty for device {device_id} (peer {relay_peer_id})"
+                );
             } else {
-                tracing::debug!("ProducerClosed cleanup: owned empty, {global_announced} global / {t4_seen} t4 announced (device {device_id})");
+                tracing::debug!(
+                    "ProducerClosed cleanup: owned empty, {global_announced} global / {t4_seen} t4 announced (device {device_id})"
+                );
             }
         }
     }
@@ -1807,7 +1835,9 @@ async fn disconnect_session(
         server.status_registry.remove(&relay_room);
         server.room_owners.remove(&relay_room);
     } else if room_removed {
-        tracing::debug!("PIT-183 guard: {relay_room} WS 成员清零但 producer 存活 — router/registry 保留");
+        tracing::debug!(
+            "PIT-183 guard: {relay_room} WS 成员清零但 producer 存活 — router/registry 保留"
+        );
     }
 
     let leave_msg =
@@ -1816,7 +1846,6 @@ async fn disconnect_session(
 
     tracing::info!("Peer {} disconnected from room {}", relay_peer_id, relay_room);
 }
-
 
 /// I3 review: StatusReport 身份门判定 — 仅 Device 会话（车端）或 Host 角色（PSK 车端）
 /// 可上报整车状态；账号/其他会话拒绝（舱端不可伪造车端状态）。返回拒绝原因（None = 允许）。
@@ -1918,7 +1947,7 @@ pub(crate) async fn handle_sfu_message(
             // PIT-65: 用消息 peer_id — 与 create/consume 一致
             let sfu_peer_id = msg_peer_id.as_str();
             match sfu
-                .connect_transport(&room_id, sfu_peer_id, &transport_id, dtls_parameters.clone())
+                .connect_transport(room_id, sfu_peer_id, transport_id, dtls_parameters.clone())
                 .await
             {
                 Ok(()) => {
@@ -1939,12 +1968,7 @@ pub(crate) async fn handle_sfu_message(
         // ── P1 (client-dual-form): mediasoup-client 标准协商面 ──────────────────
         // S4/a4：急停 WS 审计副本——仅留痕（执行与验签裁决在车端 actuator = 审计主落点，
         // PLAN §11.6 席3）。返回 None = 不响应（副本语义 = 无需回执，避免应答风暴）。
-        SignalingMessage::ControlAudit {
-            room_id,
-            seq,
-            cmd,
-            sig_present,
-        } => {
+        SignalingMessage::ControlAudit { room_id, seq, cmd, sig_present } => {
             audit::log_event(audit::AuditEvent::EstopAudit {
                 room_id: room_id.clone(),
                 seq: *seq,
@@ -1957,7 +1981,7 @@ pub(crate) async fn handle_sfu_message(
             // Device.load() 输入（C18 官方流程）；房间不存在则懒建 Router（同 create transport 路径）。
             match tokio::time::timeout(
                 std::time::Duration::from_secs(5),
-                sfu.router_rtp_capabilities(&room_id),
+                sfu.router_rtp_capabilities(room_id),
             )
             .await
             {
@@ -1993,9 +2017,9 @@ pub(crate) async fn handle_sfu_message(
             match tokio::time::timeout(
                 std::time::Duration::from_secs(5),
                 sfu.set_preferred_layers(
-                    &room_id,
+                    room_id,
                     sfu_peer_id,
-                    &consumer_id,
+                    consumer_id,
                     *spatial_layer,
                     *temporal_layer,
                 ),
@@ -2006,7 +2030,10 @@ pub(crate) async fn handle_sfu_message(
                     tracing::info!(
                         "SFU: consumer {consumer_id} preferred layers {spatial_layer}/{temporal_layer:?} (peer {sfu_peer_id})"
                     );
-                    Some(SignalingMessage::Error { code: 0, message: "preferred_layers_set".into() })
+                    Some(SignalingMessage::Error {
+                        code: 0,
+                        message: "preferred_layers_set".into(),
+                    })
                 }
                 Ok(Err(e)) => {
                     tracing::warn!("SFU: set_preferred_layers failed: {e}");
@@ -2101,10 +2128,17 @@ pub(crate) async fn handle_sfu_message(
                     // H1 根因修复: 广播必须发到 produce 目标房间的频道（而非调用会话自己的
                     // 频道——agent 会话房间=vehicle，web 消费者订阅的是各流房间 → 旧路径
                     // web 永远收不到新 producer → host 重启后黑屏只能刷新恢复）。
-                    let room_tx = server.get_or_create_channel(&room_id);
+                    let room_tx = server.get_or_create_channel(room_id);
                     match room_tx.send(serde_json::to_string(&broadcast).unwrap()) {
-                        Ok(n) => tracing::info!("NewProducer broadcast: {} channel receivers in room {}", n, room_id),
-                        Err(_) => tracing::warn!("NewProducer broadcast: no receivers in room {}", room_id),
+                        Ok(n) => tracing::info!(
+                            "NewProducer broadcast: {} channel receivers in room {}",
+                            n,
+                            room_id
+                        ),
+                        Err(_) => tracing::warn!(
+                            "NewProducer broadcast: no receivers in room {}",
+                            room_id
+                        ),
                     }
                     tracing::info!(
                         "SFU: broadcast NewProducer for peer {} in room {}",
@@ -2209,7 +2243,8 @@ pub(crate) async fn handle_sfu_message(
                         "CreateDataProducer: 账号控制 DC 经 role 门放行 (peer={peer_id}, room={room_id}, label={label})"
                     );
                 } else {
-                    let mut detail = format!("control_denied: {reason} (peer={peer_id}, room={room_id})");
+                    let mut detail =
+                        format!("control_denied: {reason} (peer={peer_id}, room={room_id})");
                     if identity.can_control() {
                         // role 有权限、方言未到 v2——措辞区分，旧端点排查不歧义。
                         detail = format!(
@@ -2256,7 +2291,7 @@ pub(crate) async fn handle_sfu_message(
                         protocol: protocol.clone(),
                     };
                     let _ = server
-                        .get_or_create_channel(&room_id)
+                        .get_or_create_channel(room_id)
                         .send(serde_json::to_string(&broadcast).unwrap());
                     tracing::info!(
                         "SFU: broadcast NewDataProducer (label={}) for peer {} in room {}",
@@ -2362,7 +2397,7 @@ pub(crate) async fn handle_sfu_message(
             #[cfg(feature = "sfu-mediasoup")]
             {
                 if let Some(pid) = producer_id {
-                    match sfu.producer_stats(&pid).await {
+                    match sfu.producer_stats(pid).await {
                         Ok((kind, bytes, packets, score)) => Some(SignalingMessage::SfuStats {
                             producer_id: Some(pid.to_string()),
                             consumer_id: None,
@@ -2374,7 +2409,7 @@ pub(crate) async fn handle_sfu_message(
                         Err(e) => Some(SignalingMessage::Error { code: 5000, message: e }),
                     }
                 } else if let Some(cid) = consumer_id {
-                    match sfu.consumer_stats(&cid).await {
+                    match sfu.consumer_stats(cid).await {
                         Ok((kind, bytes, packets, score)) => Some(SignalingMessage::SfuStats {
                             producer_id: None,
                             consumer_id: Some(cid.to_string()),
@@ -2402,13 +2437,17 @@ pub(crate) async fn handle_sfu_message(
         // 身份门：仅设备会话（agent）可报；旧 server 收到未知变体解析失败丢弃 = additive。
         SignalingMessage::DownstreamGone { peer_id: gone_peer, room_id } => {
             let Some(device) = server.device_id_of(peer_id) else {
-                tracing::warn!("DownstreamGone rejected: session {peer_id} 无设备绑定（报键={gone_peer}）");
+                tracing::warn!(
+                    "DownstreamGone rejected: session {peer_id} 无设备绑定（报键={gone_peer}）"
+                );
                 return None;
             };
             *server.t4_gone_seen.entry(device.clone()).or_insert(0) += 1;
             let closed = sfu.remove_peer_in_room(room_id, gone_peer);
             if closed.is_empty() {
-                tracing::info!("DownstreamGone: {gone_peer} 在房间 {room_id} 无 SFU 实体（未 produce/键漂移/已被清理）");
+                tracing::info!(
+                    "DownstreamGone: {gone_peer} 在房间 {room_id} 无 SFU 实体（未 produce/键漂移/已被清理）"
+                );
             } else {
                 announce_producers_closed(server, room_id, gone_peer, Some(&device), closed);
             }
@@ -2421,7 +2460,7 @@ pub(crate) async fn handle_sfu_message(
 /// F1/T4: ProducerClosed 通告统一链——close 全局清理 / device 反查 / DownstreamGone
 /// 三处共用（防分支漂移）。职责：逐条广播（Ok(n)/Err 可见，C15）+ owners 表同步
 /// + StreamDestroy 列表事件（设备归属时）。
-/// S4′: remove_* 三元组清单 → 按房间分组（统一广播链复用形）。
+///   S4′: remove_* 三元组清单 → 按房间分组（统一广播链复用形）。
 fn group_closed_by_room(
     list: Vec<(String, String, mediaservo_common::protocol::MediaKind)>,
 ) -> Vec<(String, Vec<(String, mediaservo_common::protocol::MediaKind)>)> {
@@ -2500,7 +2539,9 @@ fn relay_target_room(
     fallback_room: &str,
 ) -> tokio::sync::broadcast::Sender<String> {
     match serde_json::from_str::<SignalingMessage>(text) {
-        Ok(SignalingMessage::EncoderStatus { room_id, .. }) => server.get_or_create_channel(&room_id),
+        Ok(SignalingMessage::EncoderStatus { room_id, .. }) => {
+            server.get_or_create_channel(&room_id)
+        }
         _ => server.get_or_create_channel(fallback_room),
     }
 }
@@ -2553,7 +2594,10 @@ mod tests {
         assert!(!pong_budget_exceeded(Duration::from_secs(10), i, 2), "2 静默窗未越界");
         assert!(!pong_budget_exceeded(Duration::from_secs(15), i, 2), "=15s 恰在预算线内(严格>)");
         assert!(pong_budget_exceeded(Duration::from_secs(16), i, 2), "16s 越界=合成断链");
-        assert!(pong_budget_exceeded(Duration::from_secs(3), Duration::from_secs(1), 1), "1s×2 预算 3s<");
+        assert!(
+            pong_budget_exceeded(Duration::from_secs(3), Duration::from_secs(1), 1),
+            "1s×2 预算 3s<"
+        );
     }
 
     #[tokio::test]
@@ -2697,16 +2741,11 @@ mod tests {
     #[cfg(feature = "sfu-mediasoup")] // handle_sfu_message 仅 SFU 姿态存在（stub --tests E0425 在册案清偿）
     async fn downstream_gone_idempotent_on_unknown_room() {
         let server = new_test_server().await;
-        server
-            .device_bindings
-            .insert("agent-1".into(), "dev-x".into());
+        server.device_bindings.insert("agent-1".into(), "dev-x".into());
         let (tx, _rx) = tokio::sync::broadcast::channel::<String>(4);
         for room in ["nope", "also_nope"] {
             let resp = handle_sfu_message(
-                &SignalingMessage::DownstreamGone {
-                    peer_id: "host".into(),
-                    room_id: room.into(),
-                },
+                &SignalingMessage::DownstreamGone { peer_id: "host".into(), room_id: room.into() },
                 &server,
                 &tx,
                 "agent-1",

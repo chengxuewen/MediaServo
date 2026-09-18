@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use mediaservo_codec::codec::PixelFormat;
 use mediaservo_codec::frame::VideoFrame;
-use mediaservo_deck::record::{Recorder, RecordOptions, VideoCodec};
+use mediaservo_deck::record::{RecordOptions, Recorder, VideoCodec};
 use mediaservo_deck::source::{CameraSource, CaptureOptions, DeviceId};
 use mediaservo_link::{
     CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, FrameBus, FrameMeta, FrameTopic,
@@ -48,10 +48,7 @@ fn payload_to_frame(meta: &FrameMeta, payload: &[u8]) -> VideoFrame {
             pixel_format: PixelFormat::Yuv420p,
         },
         planes: vec![
-            mediaservo_codec::frame::Plane {
-                data: payload[..y].to_vec(),
-                stride: w as u32,
-            },
+            mediaservo_codec::frame::Plane { data: payload[..y].to_vec(), stride: w as u32 },
             mediaservo_codec::frame::Plane {
                 data: payload[y..y + uv].to_vec(),
                 stride: (w / 2) as u32,
@@ -69,7 +66,7 @@ fn payload_to_frame(meta: &FrameMeta, payload: &[u8]) -> VideoFrame {
 #[tokio::test]
 async fn camera_framebus_recorder_roundtrip() {
     let suffix = std::process::id();
-    let topic = FrameTopic::new(&format!("camera/deck-e2e/{suffix}/raw"));
+    let topic = FrameTopic::new(format!("camera/deck-e2e/{suffix}/raw"));
     let dir = std::env::temp_dir().join("deck-closed-loop");
     std::fs::create_dir_all(&dir).expect("mkdir");
     let path = dir.join("loop.mp4");
@@ -78,16 +75,10 @@ async fn camera_framebus_recorder_roundtrip() {
     // ── 采集侧（Capture）────────────────────────────
     let (tok_cap, vk_cap) = token(Role::Capture, "deck-capture");
     let cap_bus = FrameBus::attach("", &tok_cap, &vk_cap).expect("capture attach");
-    let mut cam = CameraSource::open(
-        DeviceId("stub:test-camera".into()),
-        CaptureOptions::default(),
-    )
-    .expect("open cam");
-    let opts = CaptureOptions {
-        resolution: Some((320, 240)),
-        framerate: Some(30),
-        format: None,
-    };
+    let mut cam =
+        CameraSource::open(DeviceId("stub:test-camera".into()), CaptureOptions::default())
+            .expect("open cam");
+    let opts = CaptureOptions { resolution: Some((320, 240)), framerate: Some(30), format: None };
     let mut cam_frames = cam.start(&opts).expect("cam start");
 
     // 帧发布泵：CameraSource 帧 → FrameBus publish（flat I420）。
@@ -103,12 +94,7 @@ async fn camera_framebus_recorder_roundtrip() {
             if pub_stop_task.load(std::sync::atomic::Ordering::SeqCst) {
                 break;
             }
-            match tokio::time::timeout(
-                Duration::from_millis(50),
-                cam_frames.recv(),
-            )
-            .await
-            {
+            match tokio::time::timeout(Duration::from_millis(50), cam_frames.recv()).await {
                 Ok(Some(f)) => {
                     let meta = FrameMeta {
                         seq,
@@ -116,7 +102,7 @@ async fn camera_framebus_recorder_roundtrip() {
                         height: f.format.height,
                         format: 1, // I420
                         version: FrameMeta::WIRE_VERSION,
-                        is_keyframe: seq % 30 == 0,
+                        is_keyframe: seq.is_multiple_of(30),
                         ts_mono_ns: f.pts * 1000,
                         ts_epoch_ns: 0,
                     };

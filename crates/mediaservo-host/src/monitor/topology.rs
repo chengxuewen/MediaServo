@@ -21,9 +21,13 @@ use crate::translate;
 /// 期望进程在 oxmgr 中缺失或非 running。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mismatch {
-    ProcessMissing { name: String },
+    ProcessMissing {
+        name: String,
+    },
     /// 期望相机 topic 无活跃连接（发布端进程活着但总线无发布者）。
-    PublisherMissing { topic: String },
+    PublisherMissing {
+        topic: String,
+    },
 }
 
 /// oxmgr list --json 单条进程（未知字段忽略）。
@@ -140,12 +144,7 @@ impl TopologyMonitor {
 
     /// 显式 grace + 起点（E1 审查: host-agent 起点 = main 入口，覆盖网关慢连窗口）。
     pub fn new_at(host_toml: String, grace: Duration, started: Instant) -> Self {
-        Self {
-            host_toml,
-            grace,
-            started,
-            oxmgr: OxmgrClient::new(),
-        }
+        Self { host_toml, grace, started, oxmgr: OxmgrClient::new() }
     }
 
     /// 测试用：注入 oxmgr 客户端（不依赖 daemon）。
@@ -165,8 +164,8 @@ impl TopologyMonitor {
 
     /// 采集一次拓扑快照：期望（host.yaml）+ 实际（oxmgr + FrameBus 发现）→ diff。
     pub fn collect(&self) -> TopologySnapshot {
-        let expected_processes = translate::expected_process_names(&self.host_toml)
-            .unwrap_or_else(|e| {
+        let expected_processes =
+            translate::expected_process_names(&self.host_toml).unwrap_or_else(|e| {
                 tracing::warn!("host.yaml 期望进程解析失败: {e}");
                 Vec::new()
             });
@@ -194,12 +193,8 @@ impl TopologyMonitor {
             .map(|t| t.topic)
             .collect();
 
-        let mismatches = diff(
-            &expected_processes,
-            &expected_topics,
-            &actual_processes,
-            &actual_topics,
-        );
+        let mismatches =
+            diff(&expected_processes, &expected_topics, &actual_processes, &actual_topics);
         TopologySnapshot {
             expected_processes,
             actual_processes,
@@ -220,8 +215,5 @@ fn find_oxmgr() -> PathBuf {
             }
         }
     }
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default()
-        .join(".local/bin/oxmgr")
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".local/bin/oxmgr")
 }

@@ -145,16 +145,17 @@ fn init_instance(dir: &Path) -> Result<(), String> {
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(DEFAULT_WEB_PORT);
-    let backend_port = std::fs::read_to_string(&cfg_path)
-        .ok()
-        .and_then(|c| parse_listen_port(&c))
-        .unwrap_or(9800);
+    let backend_port =
+        std::fs::read_to_string(&cfg_path).ok().and_then(|c| parse_listen_port(&c)).unwrap_or(9800);
     if caddy_path.exists() {
         eprintln!("init: {} 已存在，跳过", caddy_path.display());
     } else {
         let root = absolute(&dir.join("web"));
-        std::fs::write(&caddy_path, render_caddyfile(web_port, backend_port, &root, &weaknet_listen()))
-            .map_err(|e| format!("写入 Caddyfile 失败: {e}"))?;
+        std::fs::write(
+            &caddy_path,
+            render_caddyfile(web_port, backend_port, &root, &weaknet_listen()),
+        )
+        .map_err(|e| format!("写入 Caddyfile 失败: {e}"))?;
         println!("已生成 {}（:{web_port} → 127.0.0.1:{backend_port}）", caddy_path.display());
     }
 
@@ -233,7 +234,8 @@ pub fn bootstrap_admin(path: &Path, pass: &str) -> Result<(), String> {
     if pass.trim().is_empty() {
         return Ok(());
     }
-    let text = std::fs::read_to_string(path).map_err(|e| format!("读取 accounts.yaml 失败: {e}"))?;
+    let text =
+        std::fs::read_to_string(path).map_err(|e| format!("读取 accounts.yaml 失败: {e}"))?;
     if text.lines().any(|l| l.trim() == "admin:") {
         eprintln!("init: admin 账号已存在，跳过引导");
         return Ok(());
@@ -250,7 +252,8 @@ pub fn bootstrap_admin(path: &Path, pass: &str) -> Result<(), String> {
 
 /// 凭据文件写入 + 0600（unix）。
 fn write_private(path: &Path, data: &[u8]) -> Result<(), String> {
-    let mut f = std::fs::File::create(path).map_err(|e| format!("创建 {} 失败: {e}", path.display()))?;
+    let mut f =
+        std::fs::File::create(path).map_err(|e| format!("创建 {} 失败: {e}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -311,7 +314,9 @@ fn start_impl(dir: &Path, no_web_flag: bool, verb: &str) -> i32 {
     }
     // oxfile：init 产物为准（手工编辑保留——drill 的 SFU 端口注入路径）；缺失才重渲染
     let oxfile = dir.join("run").join("oxfile.toml");
-    if !oxfile.exists() && let Err(e) = write_oxfile(&dir.join("run")) {
+    if !oxfile.exists()
+        && let Err(e) = write_oxfile(&dir.join("run"))
+    {
         eprintln!("{verb}: {e}");
         return 1;
     }
@@ -401,7 +406,9 @@ fn contention_flow(verb: &str, dir: &Path, what: &str, port: u16, no_web: bool) 
         None => eprintln!("  （未能定位旧实例目录——端口可能被其他程序占用）"),
     }
     if !std::io::stdin().is_terminal() {
-        eprintln!("  非交互环境——退出（多实例共存: 各实例配不同 listen.port + MEDIASERVO_WEB_PORT 后重新 init）");
+        eprintln!(
+            "  非交互环境——退出（多实例共存: 各实例配不同 listen.port + MEDIASERVO_WEB_PORT 后重新 init）"
+        );
         return 1;
     }
     eprint!("  输入 y 接管（停止旧实例并启动当前）/ 其他键退出: ");
@@ -532,7 +539,9 @@ pub(super) fn run_oxmgr(dir: Option<&Path>, args: &[&str]) -> i32 {
     match cmd.args(args).status() {
         Ok(st) => st.code().unwrap_or(1),
         Err(e) => {
-            eprintln!("oxmgr 执行失败: {e} — 安装 OxMgr（GitHub Releases 预编译 / cargo install，见 https://github.com/Vladimir-Urik/OxMgr#install）");
+            eprintln!(
+                "oxmgr 执行失败: {e} — 安装 OxMgr（GitHub Releases 预编译 / cargo install，见 https://github.com/Vladimir-Urik/OxMgr#install）"
+            );
             1
         }
     }

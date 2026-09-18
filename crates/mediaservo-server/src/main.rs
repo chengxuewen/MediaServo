@@ -5,7 +5,6 @@ use mediaservo_server::config;
 use mediaservo_server::monitor;
 use mediaservo_server::signaling;
 use std::time::Duration;
-use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use tower_http::timeout::TimeoutLayer;
 
 mod lifecycle;
@@ -61,7 +60,10 @@ fn main() {
     // 选项形参收紧（PIT-171 轮 UX 缺陷）：守护分支实际只认 --config（run_server
     // 仅读 args[1]=="--config"），其余 "-x" 首参回落守护 = 配置全默认 + 撞 C35 守卫
     // 的误导性 panic。未知选项 → USAGE + exit 2（无参/`--config` 前缀/run 兼容链不动）。
-    if let Some(f) = first && f.starts_with('-') && f != "--config" {
+    if let Some(f) = first
+        && f.starts_with('-')
+        && f != "--config"
+    {
         eprintln!("未知选项: {f}");
         print_usage();
         std::process::exit(2);
@@ -159,9 +161,8 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     };
 
     // 相对路径解析: devices/accounts 路径相对于 config 文件所在目录（非 CWD）
-    let config_dir = std::path::Path::new(&config_path)
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."));
+    let config_dir =
+        std::path::Path::new(&config_path).parent().unwrap_or_else(|| std::path::Path::new("."));
     let resolve_path = |p: &str| -> String {
         let path = std::path::Path::new(p);
         if path.is_absolute() {

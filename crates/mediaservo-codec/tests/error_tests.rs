@@ -36,7 +36,7 @@ fn error_nobackend_displays() {
 
 #[test]
 fn error_chain_via_thiserror() {
-    let inner = std::io::Error::new(std::io::ErrorKind::Other, "io failed");
+    let inner = std::io::Error::other("io failed");
     // CodecError doesn't support chaining directly, but verify it produces Debug
     let err = CodecError::Internal("test".into());
     assert!(!format!("{:?}", err).is_empty());

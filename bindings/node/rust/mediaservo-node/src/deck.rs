@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use mediaservo_deck::{CameraSource, CaptureOptions};
 use napi::bindgen_prelude::*;
-use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
+use napi::threadsafe_function::ThreadsafeFunctionCallMode;
 use napi_derive::napi;
 
 /// 采集选项（省略字段用默认 1280x720@30）。
@@ -67,22 +67,20 @@ impl JsCameraSource {
 
     /// 订阅帧回调（(meta_json, i420_buffer) → JS；stream 关闭后泵退出）。
     #[napi]
+    #[allow(clippy::while_let_loop)] // 泵循环 match 形保留 None 分支日志钩位，不改 while-let
     pub fn on_frame(&self, cb: Function<(String, Vec<u8>), ()>) -> Result<()> {
-        let tsfn = cb
-            .build_threadsafe_function::<(String, Vec<u8>)>()
-            .build()?;
+        let tsfn = cb.build_threadsafe_function::<(String, Vec<u8>)>().build()?;
         let stream = self.stream.clone();
         super::event_runtime().spawn(async move {
             // FrameStream 非 Clone（mpsc Receiver）——take 独占；sender 全 drop 后 recv 返回 None 停泵
-            let mut rx = { stream.lock().await.take() };
+            let rx = { stream.lock().await.take() };
             let Some(mut rx) = rx else { return };
             loop {
                 match rx.recv().await {
                     Some(frame) => {
                         // I420 三平面拼接（Y + U + V）
-                        let mut data = Vec::with_capacity(
-                            frame.planes.iter().map(|p| p.data.len()).sum(),
-                        );
+                        let mut data =
+                            Vec::with_capacity(frame.planes.iter().map(|p| p.data.len()).sum());
                         for p in &frame.planes {
                             data.extend_from_slice(&p.data);
                         }
@@ -206,17 +204,13 @@ impl JsPlayer {
     pub async fn open(path: String) -> Result<Self> {
         let p = mediaservo_deck::Player::open(path)
             .map_err(|e| napi::Error::from_reason(format!("open: {e}")))?;
-        Ok(Self {
-            inner: Arc::new(tokio::sync::Mutex::new(Some(p))),
-        })
+        Ok(Self { inner: Arc::new(tokio::sync::Mutex::new(Some(p))) })
     }
 
     /// 逐帧回调（泵线程 next_frame → tsfn；EOF 或 None 停泵）。
     #[napi]
     pub fn on_frame(&self, cb: Function<(String, Vec<u8>), ()>) -> Result<()> {
-        let tsfn = cb
-            .build_threadsafe_function::<(String, Vec<u8>)>()
-            .build()?;
+        let tsfn = cb.build_threadsafe_function::<(String, Vec<u8>)>().build()?;
         let inner = self.inner.clone();
         std::thread::spawn(move || {
             let mut guard = match inner.try_lock() {
@@ -227,9 +221,8 @@ impl JsPlayer {
             loop {
                 match player.next_frame() {
                     Ok(Some(frame)) => {
-                        let mut data = Vec::with_capacity(
-                            frame.planes.iter().map(|p| p.data.len()).sum(),
-                        );
+                        let mut data =
+                            Vec::with_capacity(frame.planes.iter().map(|p| p.data.len()).sum());
                         for p in &frame.planes {
                             data.extend_from_slice(&p.data);
                         }
@@ -245,7 +238,11 @@ impl JsPlayer {
                     Ok(None) => break, // EOF
                     Err(e) => {
                         let _ = tsfn.call(
-                            (serde_json::json!({"type": "error", "error": e.to_string()}).to_string(), Vec::new()),
+                            (
+                                serde_json::json!({"type": "error", "error": e.to_string()})
+                                    .to_string(),
+                                Vec::new(),
+                            ),
                             ThreadsafeFunctionCallMode::Blocking,
                         );
                         break;
@@ -259,10 +256,7 @@ impl JsPlayer {
     /// 媒体时长（秒）。
     #[napi]
     pub fn duration_secs(&self) -> Result<f64> {
-        let guard = self
-            .inner
-            .try_lock()
-            .map_err(|_| napi::Error::from_reason("player busy"))?;
+        let guard = self.inner.try_lock().map_err(|_| napi::Error::from_reason("player busy"))?;
         guard
             .as_ref()
             .ok_or_else(closed_err)?
