@@ -1,6 +1,5 @@
+//! WebRTC transport module for MediaServo Host.
 #[cfg(feature = "webrtc-p2p")]
-// WebRTC transport module for MediaServo Host.
-//
 //! Creates a RTCPeerConnection, establishes an unordered unreliable RTCDataChannel
 //! named "frames", and exchanges SDP/ICE candidates via the existing signaling WS.
 //!

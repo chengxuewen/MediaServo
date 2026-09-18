@@ -963,3 +963,9 @@ install                        → 改名提示 + exit 2（退役）
 ### 2026-09-18: N7 strip 小刀落地（体积主账清零）
 - `_strip_so` 双点（交付树 lib 三件套实体 + wheel _libs 源，wheel 烘焙定型故 strip 必须前置）。实测 wheel **528MB→79.9MB**、sdk-field tar →112M；e2e-delivery RC=0 全绿 + ABI 4/4（strip-unneeded 保 .dynsym 零感知）。
 - 剩余体积账（不紧急，登记）：① sdk-field 包内同 .so 三形重复（lib 顶层+site-packages/_libs+wheel）=~多付 2×；② 80MB 本体=conda FFmpeg 动态库实依（deck 依赖面）——「干净系统可运行」仍是 B 案 bundled/系统基线题，与体积已解耦。裁决面：N7-d 瘦构建**正式降级为不做**（体积病已治，DT_NEEDED 面等真消费者出现再开 B 案）。
+
+### 2026-09-18: all-gates 本地合并门落地（CI 执行缺口的现实形）+ 首日抓出潜伏雷
+- 背景查证：remote=gitee+Gerrit 无 GitHub = ci.yml 13 jobs **从未有远端执行者**（含本轮 5 新门——「推送即看守」是错账，纠正）。落地 = scripts/all-gates.sh（quick/--full 两级 + PIT-192 活体端口探测 SKIP + PIT-193 MESON 清）+ 三门碎片脚本化（gate-changelog/parity/openapi.py，与 ci.yml 语义同源）。
+- **首日战果**：E0753×8（webrtc_transport.rs 的 #!`!` 文档注释位于 #[cfg] 之后）= 08-18 骨架期遗留、潜伏一个月——历史 check/clippy/test 全绿是因为**没人跑过含该 bin 的完整编译面**。教训：门的价值在覆盖面，合并门的意义当场兑现。修复=//! 移文件首（cfg 保持）。
+- 工具事故两枚当场记：`git checkout -- .` 误吞未提交修复（重放）；「已重放成功」幻觉回执 ×2（head 回显证伪）= **edit 结果断言必须独立短命令回显，链尾输出不算数**。
+- 预期账面：clippy -D --workspace 首跑必红（link-c19/host+deck63/media8 存量在册=V 批清偿队列）——红是真账不是门病。
