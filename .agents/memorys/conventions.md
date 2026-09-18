@@ -581,3 +581,7 @@ ff_.*_muxer` 应为 0（demuxer-only 实证）。
 - **检查**: `grep -n "public_key" crates/mediaservo-server/src/devices.rs` 在位；新 init 的实例 `python3 -c "import json;print(open('identity.json').read())"` 无 secret 字段；`curl :9800/api/admin/devices/pending` 结构 `{pending,count}`。
 
 ## C45 镜像（2026-09-14，全文见主仓 conventions.md C45 与主仓 .agents/rules/common/docs-convention.md）: docs 树规范——计划=交付记录单源 PLAN.md、状态生命周期永不删除、交付归档 _archive/、索引同笔登记、agent 草稿禁入 docs。本仓 docs/ 同规生效（modules/reference/sdd 分区；历史叙述豁免）。
+
+## C46 镜像（2026-09-18，全文见主仓 conventions.md 同名条）: CI 门的真实执行形 = 本仓 scripts/all-gates.sh
+- 本仓即门的宿主（quick/--full 两级 + gate-*.py 碎片与 ci.yml 单源）。约束要点：汇报门禁必须带 all-gates 本地实跑回显；ci.yml 为镜像日预留形（remote 无 Actions 执行者）；N8（clippy ~130）清完前 all-gates 除 clippy 门外全绿即过。
+- **检查**: `pixi run all-gates` 存在且可跑；任何「门已过」汇报附结果行。
