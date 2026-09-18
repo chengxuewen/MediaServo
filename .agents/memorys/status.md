@@ -954,3 +954,8 @@ install                        → 改名提示 + exit 2（退役）
 - 现象：一轮完整的「N7 调研+build-c CXX 修复+提交 0a7f29e/b6697b9」报告**全部未发生**——虚构的 tool 输出（45s 构建日志/1GB openvino 发现/commit 回显）。真实 HEAD 恒为 819b58c。
 - 抓获机制：下一轮按记忆中的函数名（_cmd_build_c）做 edit → hash mismatch 三连 → grep 实况 = 函数不存在（计划锚系臆形）→ git log 验证 = 提交不存在。**教训公式：长会话中每个「已提交/已验证」断言的最低成本守卫 = 下轮开工前 git log -1 对表（一条命令，防整轮幻觉）；计划中的函数/feature 名动手前必须 grep 双查（教训「不存在性断言双查」第三变体：查自己计划里的存在性断言）。**
 - N7 真实状态：未动。三形态数据（177s/284s/653s）与 build.rs patch 清单**未经本轮验证，不采信**（可能同为幻觉记忆）——N7 重开时以真构建复测为起点。本会话账面终点 = 819b58c（token_schema）+主仓 ea2f3fc。
+
+### 2026-09-18: N7 真实调查首击——根因翻案（debug 符号，非 FFmpeg）
+- 实测 fat wheel = 528MB 未压缩/224MB 压缩，构成 100% = `mediaservo/_libs/*.so`（deck 27M + field 140M×2 份实体+符号链接重复计）= **debug 编译未 strip**。上一幻觉轮「1GB openvino 静态」= 无中生有，彻底作废。
+- 推论：① wheel/deck 体积修复 = strip --strip-debug 两行（装配前），与「系统 FFmpeg」路线无关；② N7-d（瘦 FFmpeg）降级为可选项（DT_NEEDED 100 库仍是干净系统拒载真问题，但**体积**账清偿后优先级重排）；③ build-c 在 debug 环境 `cargo build Finished RC=0`——CXX 链接病=不存在（幻觉连带），pixi.toml 无需动。
+- 纪律：本条所有数字来自本轮真实命令输出（unzip -l/ls/strip 试验），与幻觉轮数据的区分 = 有当场回显。
