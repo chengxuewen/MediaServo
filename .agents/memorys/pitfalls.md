@@ -1663,3 +1663,12 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **根因**: 判据命令是代码也是证据源；排除/匹配词与被扫对象的命名空间重叠时自我干扰。
 - **解法**: 排除词禁用目标路径子串（扫 crates/ 就别 `-iv crate`）；匹配带真实前后缀（`[libav` 而非 `\bav`）；存在性判据锚定**结构前缀**（`- [tag]` 行首形）而非正文词；tar 取内容用 `tar xzf ... -O --wildcards`，列名用 `tzf`，永不混。
 - **验证**: 判据脚本先对「已知红/已知绿」各测一例（阳性/阴性对照）再采信其结论。
+
+
+## PIT-203: cargo clippy --fix 不判 feature 姿态删 import——多姿态 crate 被"修"炸（2026-09-18）
+- **症状**: N8 债务战 --fix 后 server stub 姿态编译炸（rooms.rs SessionIdentity/AccountIdentity「unused」被删，stub 姿态 tests 分支在用）；benches/bench.rs SignalingServer/monitor_router 被删；w3c_api_tests stub 姿态门测的 rtp import 被删（姿态盲区三例同轮）。
+- **根因**: --fix 的 unused 判定基于**当前编译姿态**；default(sfu) 姿态 unused ≠ 全姿态 unused。多姿态 crate（sfu/stub、backend-* 家族）必炸。
+- **解法**: 按当前姿态实况回滚 import + `#[allow(unused_imports)]` 注释钉死「本姿态-unused 是他姿态在用」；防线纪律 = **--fix 后必跑双姿态 --all-targets 全编译**（本轮 stub 门就是这条防线抓的）。
+- **附带翻案**: 同日「stub 集成测试挂死 21 分钟」= **误判**——test 二进制 sleeping 实为首次全量编译+运行的正常耗时（rustc 子进程消失后 test harness 独活假象）。判挂死前先看编译阶段占比（etime 对比 cargo 父进程）。
+- **验证**: `cargo clippy --workspace --all-targets -- -D warnings` 双姿态全绿（本日 gate 实跑）。
+- **禁止**: 对多姿态 crate 跑 --fix 后只验单一姿态就提交。

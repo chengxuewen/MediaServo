@@ -975,3 +975,10 @@ install                        → 改名提示 + exit 2（退役）
 - E0753 修复二轮补全（一轮只挪首行=门把半成品也考了）：//! 全块 12 行转 //（bin 顶层文件 inner-doc 本非法，位置修法皆错，转注释才是正解）——**门的严格性两次教育了修复者**。
 - gate fmt 基线 bug 修：@{u} 自适应（首版写死 origin/master 在子仓 main 分支静默空跑——空清单≠通过，脚本现输出文件数）。
 - **债务战立案（新会话专项）**：N8 = clippy 存量 ~130 清偿（--fix 批+手修，分 crate 多笔）；N9 = 全仓 fmt 2083 一次性对齐（决策：做=巨型纯格式笔污染评审队列 / 不做=增量门永久化——推荐增量门+旧文件随改触碰到时顺手 fmt，Linux 内核模式）。清完前 all-gates 语义 = 除 clippy 门外全绿即快速过。
+
+### 2026-09-18: N8 clippy 债务战收口（all-gates 9/9 全绿，C46 门首杀）
+- **账**: 130 存量 → 0（--fix 三轮 ~90 + 手术 ~55）。门 = 本地 `pixi run all-gates` 实跑 exit 0（/tmp/n8g13.log），CI 镜像日预留形不变。
+- **门抓出三枚存量债（建立门的价值兑现）**: ① transport.rs test mod E0433（host-legacy mod 形态 --all-targets 首次编译）② field-c last_error 双测试并跑竞态（gate 随机红实锤）③ g3_emergency 并行 flake 第三次咬门 → stub 行 `--test-threads=1` 钉死。
+- **PIT-203**: --fix 不判 feature 姿态删 import（同轮三例：rooms/bench/w3c_api_tests）；防线 = --fix 后双姿态 --all-targets 全编译。同日"stub 挂死 21min"翻案 = 冷编译慢，非测试挂。
+- **allow 纪律**: 每处 allow 带根因注释（C ABI 门面/W3C 镜像设计形/Drop-guard PIT-81/C18 存量债/PIT-203 族），无裸 allow。
+- **N9 未动**: 全仓 fmt 2083 存量仍按增量门+顺手 fmt（本轮 --fix 触碰文件已全部顺手 format，工作树零遗留）。
