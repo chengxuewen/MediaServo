@@ -959,3 +959,7 @@ install                        → 改名提示 + exit 2（退役）
 - 实测 fat wheel = 528MB 未压缩/224MB 压缩，构成 100% = `mediaservo/_libs/*.so`（deck 27M + field 140M×2 份实体+符号链接重复计）= **debug 编译未 strip**。上一幻觉轮「1GB openvino 静态」= 无中生有，彻底作废。
 - 推论：① wheel/deck 体积修复 = strip --strip-debug 两行（装配前），与「系统 FFmpeg」路线无关；② N7-d（瘦 FFmpeg）降级为可选项（DT_NEEDED 100 库仍是干净系统拒载真问题，但**体积**账清偿后优先级重排）；③ build-c 在 debug 环境 `cargo build Finished RC=0`——CXX 链接病=不存在（幻觉连带），pixi.toml 无需动。
 - 纪律：本条所有数字来自本轮真实命令输出（unzip -l/ls/strip 试验），与幻觉轮数据的区分 = 有当场回显。
+
+### 2026-09-18: N7 strip 小刀落地（体积主账清零）
+- `_strip_so` 双点（交付树 lib 三件套实体 + wheel _libs 源，wheel 烘焙定型故 strip 必须前置）。实测 wheel **528MB→79.9MB**、sdk-field tar →112M；e2e-delivery RC=0 全绿 + ABI 4/4（strip-unneeded 保 .dynsym 零感知）。
+- 剩余体积账（不紧急，登记）：① sdk-field 包内同 .so 三形重复（lib 顶层+site-packages/_libs+wheel）=~多付 2×；② 80MB 本体=conda FFmpeg 动态库实依（deck 依赖面）——「干净系统可运行」仍是 B 案 bundled/系统基线题，与体积已解耦。裁决面：N7-d 瘦构建**正式降级为不做**（体积病已治，DT_NEEDED 面等真消费者出现再开 B 案）。

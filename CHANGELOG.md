@@ -29,6 +29,9 @@
   host-controller `--hmac-key-file` 参数（显式 > 环境变量，读败 = error 早退不静默降级）；
   未配置 = dev 迁移形逐字节不变（专网/开发零扰动）。生产部署急停验签从「手工 env 三件套」
   收敛为一行配置。
+- [deploy] 交付体积根治：bindings 装配的 .so 实体与 wheel 内嵌 _libs 出库前
+  `strip --strip-unneeded`（debug 符号是 fat wheel 528MB→**80MB** 的全部主因）。
+  导出 ABI 零影响（.dynsym 不动，符号巡检/消费者链接/find_package 全量复跑绿）。
 - [deploy] 发布包新增 `manifest.json`（N2 发现面）：机械派生的组件枚举（lib/头/pc/cmake 组件名
   + `requires_ffmpeg` **按 readelf DT_NEEDED 实据**——deck=true、field/link=false）与协议配对
   （frame_meta 线版本源生成）；ROS/打包器/CI 不解析 CMake 即可判能力面。sdk-field/sdk-client 两包各自成型。

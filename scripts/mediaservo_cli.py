@@ -405,6 +405,7 @@ def _cmd_build_bindings(release: bool = False) -> None:
             sys.exit(1)
         full = lib_dst / f"libmediaservo_{sdk}.so.{major}.{minor}.{patch}"
         shutil.copy2(so_src, full)
+        _strip_so(full)  # N7: debug 符号不进交付树（wheel/tar 体积主因实测翻案）
         _symlink_force(full.name, lib_dst / f"libmediaservo_{sdk}.so.{major}")
         _symlink_force(f"libmediaservo_{sdk}.so.{major}", lib_dst / f"libmediaservo_{sdk}.so")
 
@@ -445,6 +446,7 @@ def _cmd_build_bindings(release: bool = False) -> None:
         for sdk in ("field", "link", "deck"):  # py 域=设备半区三件（client 属 sdk-client 包，V1b 防冗余入 wheel）
             so_major = libs_src / f"libmediaservo_{sdk}.so.{major}"
             shutil.copy2(out_dir / f"libmediaservo_{sdk}.so", so_major)
+            _strip_so(so_major)  # 同族：wheel 内嵌 _libs 烘完不可改，strip 必须前置
             _symlink_force(f"libmediaservo_{sdk}.so.{major}", libs_src / f"libmediaservo_{sdk}.so")
         wheel_dir = bind_dst / "wheel"; wheel_dir.mkdir(exist_ok=True)
         # 陈旧 whl 清扫（09-17 e2e-delivery 首跑抓出：glob 无序 + 跨 run 残留 →
@@ -588,6 +590,17 @@ def strip_package_binaries(staging: Path) -> None:
             code = subprocess.run(["strip", "--strip-unneeded", str(f)], capture_output=True, check=False).returncode
             if code != 0:
                 print(f"  warning: strip {f.name} 失败（跳过——包体积未优化）")
+
+
+def _strip_so(path: Path) -> None:
+    """交付树 .so 实体 strip --strip-unneeded（N7 09-18 实测：debug cdylib 是 fat wheel
+    528MB 的全部主因，非 FFmpeg——未压 27M→~1M 级）。动态符号(.dynsym/导出 ABI)不动，
+    check-abi-drift 与消费者 ldd 无感知；仅删调试段。target/ 开发树不碰（gdb 要栈）。"""
+    if not shutil.which("strip"):
+        return
+    if subprocess.run(["strip", "--strip-unneeded", str(path)],
+                      capture_output=True, check=False).returncode != 0:
+        print(f"  warning: strip {path.name} 失败（跳过——交付体积未优化）")
 
 
 def _derive_brand(bin_dir: Path) -> str:
