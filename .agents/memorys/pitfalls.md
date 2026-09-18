@@ -1645,3 +1645,21 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: 根修另案（候选=用例间强制 factory 静默窗 / pc.close join 收敛断言，与 PIT-197 worker 契约案同域可并查）。临时纪律：sfu_surface 验收按单案跑（或 `--skip old_server` 后单补该 case）。
 - **验证**: 单案 ×3 稳定绿 + 串跑必崩（复现命令即上）。**CI 风险在册**: ubuntu runner 上 cargo test 并行调度若撞上同序=红——观察，连红 ≥2 次升级门禁跳过。
 - **禁止**: 把本崩归因到 bindings/client 改动上（stash 实验已排除）；禁止为过门删用例。
+
+## PIT-200: bin 顶层文件的 //! inner-doc 在任何位置都非法 (2026-09-18, all-gates 首日抓)
+- **症状**: `bin/webrtc_transport.rs` E0753×8（expected outer doc comment）——潜伏一月（08-18 骨架期引入），历史 check/clippy/test 全绿无感。
+- **根因**: ① 文件首行 `#[cfg(feature)]` 后接 `//!` 想「整文件 cfg」= 非法且 cfg 也没包住全文件（只贴住了下一个 item）；② 该 bin 从未进过任何已跑门的目标面（workspace check 历史多被 mediasoup 编译失败掩盖/只跑 lib）。二轮修复教训：只挪首行 = 半成品，被 fmt 门再次打回——**正解 = bin 顶层文件用 `//` 普通注释 + 整文件门控要 `#![cfg(...)]` inner attribute**。
+- **解法**: //! 全块 12 行转 //；需要整文件 cfg 用 #![cfg(feature = ...)]（inner attr 可置于 //! 块后）。
+- **验证**: `cargo fmt --check` 单文件干净 + `cargo check -p <crate> --bins` 过；all-gates fmt/clippy 门常态覆盖 bins。
+
+## PIT-201: pip 三缓存面——「构建产物=源之真像」在 pip 生态是错的 (2026-09-17/18)
+- **症状**: ① setuptools `build/` 旧 `_libs/*.so` 被 `pip wheel` 原样带出（域收缩后 wheel 仍含旧件，pip wheel 不吃变更检测）；② `pip install --prefix` 装树实体在 `lib/python3.x/site-packages/`（非顶层 `python/`，摘除 tuple 写错位=静默脱靶）；③ `pip install --prefix` **不删旧 data_files**——上一轮残留 .so 混进新装树（wheel 干净、装树脏）。
+- **根因**: pip/wheel 生态三层缓存各自独立（build/ 目录、--prefix 装树、dist-info data_files），任何「装配即新态」假设都不成立。
+- **解法**: 装配每轮**主动清扫**三连（mediaservo_cli build bindings 已内置）：`rmtree(py_src/build)` + `wheel_dir.glob("*.whl") unlink` + `装前 rmtree(site-packages/mediaservo)`；摘除判据用 glob("python3.*") 非硬编码目录名。
+- **验证**: e2e-delivery/e2e-package 断言含「混入=红」项；`unzip -l wheel | grep -oE '_libs/[^/]+\.so' | sort -u` 对账域清单。
+
+## PIT-202: grep 判据自伤家族——过滤词/词边界/子串三式 (2026-09-17/18 四例)
+- **症状**: ① `grep -iv "crate"` 把 `crates/` 全路径排除 = 扫描目标自己漏网（漏 10 处夹具致三轮返工）；② `\bav` 词边界永远咬不到 `[libavformat]`（lib 前缀吃掉边界）= requires_ffmpeg 假全 False；③ 判据用正文关键词匹配 = 相邻条目带火（"GET /api/rooms" 出现在别条目）；④ `tar tzf` 与 `-O` 混用读到空 = 验证命令自身坏被当成产品错。
+- **根因**: 判据命令是代码也是证据源；排除/匹配词与被扫对象的命名空间重叠时自我干扰。
+- **解法**: 排除词禁用目标路径子串（扫 crates/ 就别 `-iv crate`）；匹配带真实前后缀（`[libav` 而非 `\bav`）；存在性判据锚定**结构前缀**（`- [tag]` 行首形）而非正文词；tar 取内容用 `tar xzf ... -O --wildcards`，列名用 `tzf`，永不混。
+- **验证**: 判据脚本先对「已知红/已知绿」各测一例（阳性/阴性对照）再采信其结论。
