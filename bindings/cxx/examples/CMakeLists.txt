@@ -44,7 +44,12 @@ target_link_libraries(ms_client_sdk INTERFACE
 include(FetchContent)
 FetchContent_Declare(sdl3
     URL "file://${REPO_ROOT}/3rdparty/sdl3-release-3.4.16.zip"
-    URL_HASH SHA256=547af2e721e8fc1a60f17acbb01cf6b65a6fa2022d885746b776e2d867adc2b1)
+    URL_HASH SHA256=547af2e721e8fc1a60f17acbb01cf6b65a6fa2022d885746b776e2d867adc2b1
+    # 上游 bug 补丁：X11_PickTarget 对 Xwayland XdndTypeList 的 None 原子调 XGetAtomName
+    # → Xlib 默认 handler exit(1)（3.4.16 未修/无报告/无 hint，09-20 对 main 逐字比对确认；
+    # 崩点四处 PickTarget/SDL_FORMATS×2/PropertyNotify，守护形=同文件 1436 既有 if(name) 同款）。
+    # 档案 zip 保持上游逐字节；guard 解包后应用（python 脚本，逐点幂等），headless 亦无害。
+    PATCH_COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/patches/sdl3-x11-none-guard.py)
 FetchContent_Declare(imgui
     URL "file://${REPO_ROOT}/3rdparty/imgui-v1.92.9b.zip"
     URL_HASH SHA256=008e1f3398e1c6e4d317ae4a05d2dec597bd360f4f3717b1d96e9edb66dba34f)
@@ -58,8 +63,30 @@ set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 # X11/Wayland 显式 OFF + SDL_UNIX_CONSOLE_BUILD=ON（否则 PrintSummary 无后端 FATAL）。
 # 桌面真跑出窗（W3 冒烟 / W5 ubuntu-x11 job）：装 README-linux 包后传
 #   -DSDL_X11=ON -DSDL_UNIX_CONSOLE_BUILD=OFF
+# 桌面真跑出窗自动化（09-20 小刀，官方配方 README L59-60）：构建机 xorg 头包组齐
+# → 自动开 X11（-DSDL_X11=OFF 可强制 headless）；缺 → W0 headless 形（CI 零扰动）。
+# 09-20 三坑一并绕：① conda 编译器默认不搜 /usr/include（补 -isystem）；② pixi 自带
+# x11.pc 指向残缺 conda 头目录盖过系统（PKG_CONFIG_PATH 系统段前置）；③ SDL 无全局
+# Xlib error handler（Xwayland None 原子 = PATCH_COMMAND 上游 bug 补丁）。
 if(NOT DEFINED SDL_X11)
-    set(SDL_X11 OFF CACHE BOOL "" FORCE)
+    set(_msrtc_x11_probe ON)
+    foreach(_h "X11/XKBlib.h" "X11/extensions/Xfixes.h" "X11/extensions/XInput2.h"
+               "X11/extensions/Xrandr.h" "X11/Xcursor/Xcursor.h")
+        find_file(_msrtc_h NAMES ${_h} PATHS /usr/include NO_DEFAULT_PATH)
+        if(NOT _msrtc_h)
+            set(_msrtc_x11_probe OFF)
+        endif()
+        unset(_msrtc_h CACHE)
+    endforeach()
+    if(_msrtc_x11_probe AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(SDL_X11 ON CACHE BOOL "" FORCE)
+        string(PREPEND CMAKE_C_FLAGS "-isystem /usr/include ")
+        string(PREPEND CMAKE_CXX_FLAGS "-isystem /usr/include ")
+        set(ENV{PKG_CONFIG_PATH} "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+        message(STATUS "GUI 例子: 检出系统 xorg 头包组 → SDL_X11=ON（出窗形态；-DSDL_X11=OFF 可强制 headless）")
+    else()
+        set(SDL_X11 OFF CACHE BOOL "" FORCE)
+    endif()
 endif()
 if(NOT DEFINED SDL_WAYLAND)
     set(SDL_WAYLAND OFF CACHE BOOL "" FORCE)
@@ -73,7 +100,11 @@ foreach(_snd ALSA PULSEAUDIO PIPEWIRE SNDIO OSS)
 endforeach()
 
 if(NOT DEFINED SDL_UNIX_CONSOLE_BUILD)
-    set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
+    if(SDL_X11)
+        set(SDL_UNIX_CONSOLE_BUILD OFF CACHE BOOL "" FORCE)  # 官方真窗配方（无后端才需 console）
+    else()
+        set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
+    endif()
 endif()
 FetchContent_MakeAvailable(sdl3)
 

@@ -5,6 +5,21 @@
 #include <backends/imgui_impl_sdlrenderer3.h>
 #include <imgui.h>
 
+#ifdef MSRTC_X11
+#include <X11/Xlib.h>  // 仅 X11 形态：安装非 exit 的 error handler（见 CreateWindow 处注）
+namespace {
+int x11_tolerant_error_handler(Display*, XErrorEvent* ev) {
+    // Xlib 默认 handler 对任何 X error exit(1)。SDL 3.4.16 无全局 handler，Xwayland
+    // selection/property 协商的 None 原子触发 BadAtom 会直接杀进程（09-20 出窗轮实录，
+    // 见 patches/sdl3-x11-none-guard.py）。此 handler 记日志并 return 0 = 让失败调用返回
+    // NULL 后 SDL 按返回值处理继续；与 events.c 的 None/NULL 守护配合（缺一即二阶崩）。
+    SDL_Log("imgui_shell: 忽略非致命 X11 error code=%d req=%d res=%lu（Xwayland 协商常态）",
+            ev->error_code, ev->request_code, static_cast<unsigned long>(ev->resourceid));
+    return 0;
+}
+}  // namespace
+#endif
+
 namespace imgui_shell {
 
 struct App::Impl {
@@ -15,6 +30,11 @@ struct App::Impl {
 };
 
 App::App(const WindowSpec& spec) : impl_(new Impl) {
+    #ifdef MSRTC_X11
+    // 须在 SDL_Init 前装：CreateWindow 期间 SDL 已订阅 clipboard 属性，早期 BadAtom 会撞
+    // Xlib 默认 handler(=exit)。libX11 为 DT_NEEDED，XSetErrorHandler 进程级、不依赖 display。
+    XSetErrorHandler(x11_tolerant_error_handler);
+    #endif
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("imgui_shell: SDL_Init(video) failed: %s", SDL_GetError());
         return; // running()=false → 主循环零圈直接收摊（无显示环境=CI 编译面可过）
