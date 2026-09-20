@@ -1684,6 +1684,16 @@ def _cmd_run_example(rest: list[str]) -> None:
     if not exe.exists():
         print(f"[example] 构建后仍无产物 {exe}", file=sys.stderr)
         sys.exit(1)
+    # 出窗提示（探测+明示，不代设——display 是会话语义，脚本从会话外猜 = 猜错目标比 fail-soft 难查；
+    # 正解 = ssh -X / 桌面 session 自带 DISPLAY。本段只把缺失与出口讲清。）
+    if not os.environ.get("DISPLAY") and not os.environ.get("SDL_VIDEODRIVER"):
+        print("[example] 无显示环境变量（DISPLAY/SDL_VIDEODRIVER 均未设）:", file=sys.stderr)
+        xsock = "/tmp/.X11-unix"
+        xs = sorted(f":{f[1:]}" for f in os.listdir(xsock) if f.startswith("X")) if os.path.isdir(xsock) else []
+        if xs:
+            print(f"  • 出窗: 本机可用 {' '.join(xs)} → export DISPLAY=:N 后重跑"
+                  "（若报 x11 not available = 当前构建 SDL_X11=OFF，需 cmake -DSDL_X11=ON 重配）", file=sys.stderr)
+        print("  • 无头验收: SDL_VIDEODRIVER=dummy MSRTC_RUN_SECS=20 重跑（cb/tex 双计数判据）", file=sys.stderr)
     env = dict(os.environ, LD_LIBRARY_PATH=str(ROOT / "target" / "debug") +
                (":" + os.environ["LD_LIBRARY_PATH"] if os.environ.get("LD_LIBRARY_PATH") else ""))
     sys.exit(subprocess.run([str(exe), *extra], env=env).returncode)
