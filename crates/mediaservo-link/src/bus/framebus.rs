@@ -6,6 +6,13 @@ use std::sync::{Arc, Mutex};
 use iceoryx2::port::publisher::Publisher;
 use iceoryx2::prelude::*;
 
+/// 单 topic 订阅者上限（服务创建时定死的静态配置，iceoryx2 0.9.3 默认仅 8）：
+/// D282 defaults 形态后「N 路流共用同一 source」= 合法常态（09-21 实录：8 路 streamer
+/// 共享 camera/generator → 8 槽顶格 + 僵尸节点占位 → 确定性 ExceedsMaxSupportedSubscribers，
+/// 且旧服务的静态配置跨 restart 存活 = 重启无效）。
+/// ponytail: 常量固定；上限 = 边缘盒无 >32 路共享单源的已知场景，升级路径 = host.yaml 配置键。
+const MAX_SUBSCRIBERS_PER_TOPIC: usize = 32;
+
 use crate::acl::NodeAcl;
 use crate::error::LinkError;
 use crate::frame::{FrameMeta, FrameRef, FrameStream, StreamInner};
@@ -25,7 +32,6 @@ pub struct DiscoveredTopic {
     /// 服务上活跃节点数（0 = 无活进程连接该 topic）。
     pub alive_nodes: usize,
 }
-
 
 /// 帧总线（每节点一个实例；attach 即注册，D235）。
 pub struct FrameBus {
@@ -84,9 +90,7 @@ impl FrameBus {
         verifying_key: &Ed25519VerifyingKey,
     ) -> Result<Self, LinkError> {
         let _ = endpoint; // Phase 1 预留（iceoryx2 用全局 config，无显式 endpoint）
-        let claims = token
-            .verify(verifying_key)
-            .map_err(|e| LinkError::Attach(e.to_string()))?;
+        let claims = token.verify(verifying_key).map_err(|e| LinkError::Attach(e.to_string()))?;
         let acl = claims.acl.clone();
         let node_id = NodeId::new(claims.node_id.clone());
         let node = NodeBuilder::new()
@@ -105,11 +109,19 @@ impl FrameBus {
 
     /// 统一 topic service 构造（pub/sub 必须同配置，审核 C1）：
     /// buffer_size=1 + enable_safe_overflow(true) → latest-frame 覆盖；
-    /// max_publishers(1) → 单发布者兜底（D239，跨进程由 iceoryx2 强制）。
+    /// max_publishers(1) → 单发布者兜底（D239，跨进程由 iceoryx2 强制）；
+    /// max_subscribers → 见 [`MAX_SUBSCRIBERS_PER_TOPIC`]（09-21 顶格事故根治）。
     fn topic_service(
         &self,
         topic: &FrameTopic,
-    ) -> Result<iceoryx2::service::port_factory::publish_subscribe::PortFactory<ipc_threadsafe::Service, [u8], ()>, LinkError> {
+    ) -> Result<
+        iceoryx2::service::port_factory::publish_subscribe::PortFactory<
+            ipc_threadsafe::Service,
+            [u8],
+            (),
+        >,
+        LinkError,
+    > {
         let name = topic
             .as_str()
             .try_into()
@@ -124,6 +136,7 @@ impl FrameBus {
                 .subscriber_max_buffer_size(1)
                 .enable_safe_overflow(true)
                 .max_publishers(1)
+                .max_subscribers(MAX_SUBSCRIBERS_PER_TOPIC)
                 .open_or_create()
             {
                 Ok(service) => return Ok(service),
@@ -137,31 +150,29 @@ impl FrameBus {
                 }
             }
         }
-        Err(LinkError::Bus(format!(
-            "open topic service failed after retries: {:?}",
-            last_err
-        )))
+        Err(LinkError::Bus(format!("open topic service failed after retries: {:?}", last_err)))
     }
 
     /// 发布一帧：ACL 检查 → 单发布者检查 → 缓存 publisher → loan 写入 SHM → send → 记录活跃发布者。
-    pub fn publish(&self, topic: &FrameTopic, payload: &[u8], meta: &FrameMeta) -> Result<(), LinkError> {
+    pub fn publish(
+        &self,
+        topic: &FrameTopic,
+        payload: &[u8],
+        meta: &FrameMeta,
+    ) -> Result<(), LinkError> {
         if !self.acl.can_publish(topic) {
-            return Err(LinkError::AclDenied {
-                topic: topic.as_str().into(),
-            });
+            return Err(LinkError::AclDenied { topic: topic.as_str().into() });
         }
         // D239 单发布者：该 topic 已有其他节点的活跃发布者 → 冲突（进程本地快速检查）
-        if let Some(existing) = Registry::topic_publisher(topic).map_err(|e| LinkError::Bus(e.to_string()))?
-            && existing != self.node_id {
-                return Err(LinkError::TopicConflict {
-                    topic: topic.as_str().into(),
-                });
-            }
+        if let Some(existing) =
+            Registry::topic_publisher(topic).map_err(|e| LinkError::Bus(e.to_string()))?
+            && existing != self.node_id
+        {
+            return Err(LinkError::TopicConflict { topic: topic.as_str().into() });
+        }
         let buf_len = FrameMeta::WIRE_LEN + payload.len();
         if buf_len > MAX_FRAME_BYTES {
-            return Err(LinkError::Bus(format!(
-                "frame too large: {buf_len} > {MAX_FRAME_BYTES}"
-            )));
+            return Err(LinkError::Bus(format!("frame too large: {buf_len} > {MAX_FRAME_BYTES}")));
         }
         // 取或建缓存 publisher（持有它维持 max_publishers(1) 锁；跨进程冲突在此失败）
         let mut publishers = self
@@ -178,9 +189,7 @@ impl FrameBus {
                 .map_err(|e| {
                     tracing::warn!(topic = %topic.as_str(), "publisher create failed: {e:?}");
                     // iceoryx2 max_publishers(1) 兜底：已有发布者（跨进程）
-                    LinkError::TopicConflict {
-                        topic: topic.as_str().into(),
-                    }
+                    LinkError::TopicConflict { topic: topic.as_str().into() }
                 })?;
             publishers.insert(topic.as_str().to_string(), publisher);
         }
@@ -193,16 +202,15 @@ impl FrameBus {
             .map_err(|e| LinkError::Bus(format!("loan: {e:?}")))?;
         let sample = sample.write_from_slice(&buf);
         sample.send().map_err(|e| LinkError::Bus(format!("send: {e:?}")))?;
-        Registry::mark_publisher(topic, &self.node_id).map_err(|e| LinkError::Bus(e.to_string()))?;
+        Registry::mark_publisher(topic, &self.node_id)
+            .map_err(|e| LinkError::Bus(e.to_string()))?;
         Ok(())
     }
 
     /// 订阅一个 topic：ACL 检查 → subscriber（buffer_size=1）→ 后台线程投递 latest-slot。
     pub fn subscribe(&self, topic: &FrameTopic) -> Result<FrameStream, LinkError> {
         if !self.acl.can_subscribe(topic) {
-            return Err(LinkError::AclDenied {
-                topic: topic.as_str().into(),
-            });
+            return Err(LinkError::AclDenied { topic: topic.as_str().into() });
         }
         let service = self.topic_service(topic)?;
         let subscriber = service
@@ -232,8 +240,8 @@ impl FrameBus {
                 [u8],
                 (),
             >,
-                                      last_frame: &mut std::time::Instant,
-                                      last_rebuild: &mut std::time::Instant|
+                               last_frame: &mut std::time::Instant,
+                               last_rebuild: &mut std::time::Instant|
              -> bool {
                 match service.subscriber_builder().buffer_size(1).create() {
                     Ok(new_sub) => {
@@ -265,7 +273,9 @@ impl FrameBus {
                                 Err(e) => {
                                     static VERSION_WARNED: std::sync::atomic::AtomicBool =
                                         std::sync::atomic::AtomicBool::new(false);
-                                    if !VERSION_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                    if !VERSION_WARNED
+                                        .swap(true, std::sync::atomic::Ordering::Relaxed)
+                                    {
                                         tracing::warn!("FrameBus meta 拒帧: {e}");
                                     }
                                 }
@@ -310,10 +320,8 @@ impl FrameBus {
 
     /// 关闭：shutdown 全部流（recv 返回 None）+ 注销节点（释放 publishers 与单发布者锁）。
     pub fn close(self) -> Result<(), LinkError> {
-        let streams = self
-            .streams
-            .lock()
-            .map_err(|_| LinkError::Bus("streams lock poisoned".into()))?;
+        let streams =
+            self.streams.lock().map_err(|_| LinkError::Bus("streams lock poisoned".into()))?;
         for s in streams.iter() {
             s.shutdown();
         }

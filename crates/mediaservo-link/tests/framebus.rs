@@ -52,7 +52,10 @@ async fn acl_deny_publish() {
     let bus = FrameBus::attach("", &tok, &vk).unwrap();
     let topic = FrameTopic::new("control/cmd");
     let err = bus.publish(&topic, &[1], &FrameMeta::default()).unwrap_err();
-    assert!(matches!(err, LinkError::AclDenied { .. }), "capture 不应能 publish control/cmd，got: {err:?}");
+    assert!(
+        matches!(err, LinkError::AclDenied { .. }),
+        "capture 不应能 publish control/cmd，got: {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -85,4 +88,40 @@ async fn same_node_republish_allowed() {
     let topic = FrameTopic::new("camera/fb4/raw");
     bus.publish(&topic, &[1], &FrameMeta::default()).unwrap();
     bus.publish(&topic, &[2], &FrameMeta::default()).unwrap(); // 同节点再次发布应允许
+}
+
+#[tokio::test]
+async fn many_subscribers_share_single_source_topic() {
+    // 回归钉（09-21 顶格事故）：8+ 路流共用单 source = D282 defaults 合法形态；
+    // iceoryx2 默认 max_subscribers=8 顶格时第 9 订必炸 ExceedsMaxSupportedSubscribers。
+    // 显式扩至 32 后 10 订阅者共存 + 发布联通钉。
+    let (tok_pub, vk_pub) = token(Role::Capture, "capture-fbcap");
+    let bus_pub = FrameBus::attach("", &tok_pub, &vk_pub).unwrap();
+    let topic = FrameTopic::new(format!("camera/fbcap/{}", std::process::id()));
+    let mut subs = Vec::new();
+    for i in 0..10 {
+        let (tok, vk) = token(Role::Processor, &format!("proc-fbcap-{i}"));
+        let bus = FrameBus::attach("", &tok, &vk).unwrap();
+        let stream = bus.subscribe(&topic).unwrap();
+        subs.push((bus, stream));
+    }
+    let meta = FrameMeta {
+        seq: 7,
+        width: 16,
+        height: 16,
+        format: 1,
+        version: FrameMeta::WIRE_VERSION,
+        is_keyframe: true,
+        ts_mono_ns: 1,
+        ts_epoch_ns: 2,
+    };
+    bus_pub.publish(&topic, &[9u8; 4], &meta).unwrap();
+    // latest-slot 覆盖语义：全员都应拿到该帧
+    for (i, (_, stream)) in subs.iter().enumerate() {
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(3), stream.recv())
+            .await
+            .unwrap_or_else(|_| panic!("subscriber #{i} 未收到帧（容量/联通异常）"))
+            .unwrap_or_else(|| panic!("subscriber #{i} 流已关闭"));
+        assert_eq!(frame.meta().seq, 7);
+    }
 }

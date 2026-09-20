@@ -423,12 +423,18 @@ pub extern "C" fn mediaservo_field_version(buf: *mut c_char, len: usize) -> c_in
 
 #[cfg(test)]
 mod tests {
+    /// 本文件测试共享进程级 static LAST_ERROR（C ABI 语义如此）——凡走 API 错误路径的
+    /// 测试都会隐式写它（null-handle 形 ×N），并跑互踩 = flaky（09-21 gate 实抓：
+    /// 显式守护合并成单测仍被竞跑 null-handle 测试覆写）。全文件测试经此锁串行。
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     use super::*;
 
     /// 全局 last_error = 进程级状态，两测试并跑必竞态（09-18 gate 实抓）。
     /// 合并为单测串行验证新名+别名两条路径。
     #[test]
     fn last_error_roundtrip_and_alias() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut buf = [0u8; 64];
         set_last_error("test error");
         let rc = mediaservo_field_last_error(buf.as_mut_ptr() as *mut c_char, buf.len());
@@ -448,6 +454,7 @@ mod tests {
 
     #[test]
     fn version_roundtrip() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut buf = [0u8; 32];
         let rc = mediaservo_field_version(buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
@@ -457,12 +464,14 @@ mod tests {
 
     #[test]
     fn connect_null_cfg_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rc = mediaservo_field_push_connect(ptr::null(), ptr::null_mut());
         assert_eq!(rc, MEDIASERVO_FIELD_ERR_INVALID_ARG);
     }
 
     #[test]
     fn connect_small_struct_size_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // 旧头文件编译的调用方：struct_size 过小 → 明确错误（R3）
         let cfg = mediaservo_push_config_t { struct_size: 1, ..Default::default() };
         let mut out: *mut mediaservo_field_push_t = ptr::null_mut();
@@ -473,6 +482,7 @@ mod tests {
 
     #[test]
     fn connect_missing_required_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // struct_size 合法但 url/psk/room 为空 → 必填错误
         let cfg = mediaservo_push_config_t::default();
         let mut out: *mut mediaservo_field_push_t = ptr::null_mut();
@@ -483,6 +493,7 @@ mod tests {
 
     #[test]
     fn publish_null_handle_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut track = [0u8; 64];
         let rc = mediaservo_field_push_publish_video(
             ptr::null_mut(),
@@ -494,17 +505,20 @@ mod tests {
 
     #[test]
     fn close_null_is_ok() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(mediaservo_field_push_close(ptr::null_mut()), MEDIASERVO_OK);
     }
 
     #[test]
     fn start_video_frames_null_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rc = mediaservo_field_push_start_video_frames(ptr::null_mut());
         assert_eq!(rc, MEDIASERVO_FIELD_ERR_INVALID_ARG);
     }
 
     #[test]
     fn stop_video_frames_null_noop() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         mediaservo_field_push_stop_video_frames(ptr::null_mut()); // void: 不崩即过
     }
 }
