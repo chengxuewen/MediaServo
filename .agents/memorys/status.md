@@ -982,3 +982,10 @@ install                        → 改名提示 + exit 2（退役）
 - **PIT-203**: --fix 不判 feature 姿态删 import（同轮三例：rooms/bench/w3c_api_tests）；防线 = --fix 后双姿态 --all-targets 全编译。同日"stub 挂死 21min"翻案 = 冷编译慢，非测试挂。
 - **allow 纪律**: 每处 allow 带根因注释（C ABI 门面/W3C 镜像设计形/Drop-guard PIT-81/C18 存量债/PIT-203 族），无裸 allow。
 - **N9 未动**: 全仓 fmt 2083 存量仍按增量门+顺手 fmt（本轮 --fix 触碰文件已全部顺手 format，工作树零遗留）。
+
+### 2026-09-21: Xwayland 真窗出画打通（9b033c3，p3 GUI device-day 前置清偿）
+- 需求：用户本机 :0/:1 跑 imgui_viewer 只报 "No available video device"。三层根因逐层剥：① 聚合根 SDL_X11=OFF（CI 守卫，有意）→ 装 xorg 头 + 探测自动开；② **conda 编译器默认不搜 /usr/include**（"XKBlib.h not found"而文件在=假象）→ -isystem 补；③ pixi x11.pc 指残缺 conda 头盖系统 → PKG_CONFIG_PATH 系统段前置。
+- 开 X11 后新坑：**SDL3 3.4.16 无全局 Xlib error handler**，Xwayland selection/property 协商投 None(0) 原子 → XGetAtomName BadAtom → 默认 handler **在失败往返那一刻 exit(1)**——返回值 NULL 后的守护拦不住（serial 305→311→319→398 漂移=任意失败调用皆杀，逐点 patch 是无底洞）。librarian 对 release-3.4.16/main 逐字比对：upstream 未修无报告无 hint。
+- 终形=**组合双保险**：imgui_shell SDL_Init 前装非 exit 的 XSetErrorHandler（治所有失败调用，须在 CreateWindow 前——SDL 建窗期间已订阅 clipboard）+ python PATCH_COMMAND 四处 None/NULL 守护（防 handler 放行返 NULL 后的二阶 segfault，strlen/stpcpy/strncmp 裸点）。单用任一必崩（实测钉）。
+- 验收：真窗 6/6 零崩（handler 吞错日志 10 次实见）/dummy 回归 rc=0/`-DSDL_X11=OFF` 独立树编译过（CI 形态零扰动）/档案 zip 上游逐字节不变。
+- 事故自犯×2：printf/cat 追加 CMake 块**未落盘即重跑测试**（白烧 3 轮，#17 变体：append 后必须 grep 验证，本轮破例未守）；cd 链误发子仓 add 报 fatal 无实害。出窗正解路径已机械化：clone→装 xorg 头→`run example` 即真窗，Xwayland/GNOME 舱端可交付。

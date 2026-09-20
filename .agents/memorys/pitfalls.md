@@ -1672,3 +1672,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **附带翻案**: 同日「stub 集成测试挂死 21 分钟」= **误判**——test 二进制 sleeping 实为首次全量编译+运行的正常耗时（rustc 子进程消失后 test harness 独活假象）。判挂死前先看编译阶段占比（etime 对比 cargo 父进程）。
 - **验证**: `cargo clippy --workspace --all-targets -- -D warnings` 双姿态全绿（本日 gate 实跑）。
 - **禁止**: 对多姿态 crate 跑 --fix 后只验单一姿态就提交。
+
+## PIT-204: Xlib 默认 error handler 在失败往返即 exit——NULL 守护救不了（2026-09-21）
+- **症状**: SDL3 无全局 Xlib error handler，Xwayland（GNOME/mutter）下 clipboard/DnD 协商收到 atom=0(None) → `XGetAtomName(0)` → BadAtom → 进程 exit(1)。报错 serial 每轮漂移（305→398）=任意失败调用皆杀，非固定行。
+- **根因（关键机制）**: Xlib 默认 handler **在错误到达那一刻就 exit**，`XGetAtomName` 根本不会「返回 NULL 让下游判空」——所以只在调用后加 `if (name)` 守护 = 完全无效（本人连判两轮，白烧 ~3 轮测试）。
+- **解法（组合，缺一即崩，实测钉）**: ① app 侧进程级非 exit handler（`XSetErrorHandler` return 0，**须在 SDL_Init 前装**——SDL 建窗期间已订阅 clipboard 属性，装晚了早期错误仍杀）；② handler 放行后失败调用返 NULL，**再补 None/NULL 守护**防二阶 segfault（SDL events.c 四处裸 strlen/stpcpy/strncmp；librarian 定案 3.4.16 与 main 均未修）。
+- **验证**: 循环 ≥6 轮 exit=124/0 且 handler 吞错日志非零；`-DSDL_X11=OFF` 独立树编译过（CI headless 零扰动）。
+- **同场连带**: conda/pixi 编译器默认不搜 /usr/include（"XKBlib.h not found"文件却在=假象，C23 家族反向变体）；pixi 自带 x11.pc 指残缺 conda 头目录盖过系统 → PKG_CONFIG_PATH 系统段前置。
