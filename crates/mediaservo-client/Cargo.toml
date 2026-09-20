@@ -32,3 +32,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [features]
 default = []
+# S6 批0/K11：FakeEngine 测试基座（发布构建不含；仅测试/CI 演练开启）
+engine-fake = []

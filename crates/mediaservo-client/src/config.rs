@@ -54,17 +54,12 @@ pub fn sfu_peer_key(role: &PeerRole) -> &'static str {
 /// `"ws://10.0.0.2:9800/ws"` → `"http://10.0.0.2:9800"`
 /// `"wss://host/ws"` → `"https://host"`（login 层面后续 Reject scheme）。
 pub fn http_base_from_signaling(url: &str) -> Result<String, ClientError> {
-    let (scheme, rest) = url
-        .split_once("://")
-        .ok_or_else(|| ClientError::MalformedResponse(format!("no scheme in signaling URL: {url}")))?;
-    let host_port = rest
-        .split('/')
-        .next()
-        .unwrap_or(rest);
+    let (scheme, rest) = url.split_once("://").ok_or_else(|| {
+        ClientError::MalformedResponse(format!("no scheme in signaling URL: {url}"))
+    })?;
+    let host_port = rest.split('/').next().unwrap_or(rest);
     if host_port.is_empty() {
-        return Err(ClientError::MalformedResponse(
-            "empty host in signaling URL".into(),
-        ));
+        return Err(ClientError::MalformedResponse("empty host in signaling URL".into()));
     }
     let http_scheme = match scheme {
         "ws" => "http",
@@ -103,10 +98,7 @@ mod tests {
 
     #[test]
     fn http_base_no_path() {
-        assert_eq!(
-            http_base_from_signaling("ws://host:9800").unwrap(),
-            "http://host:9800"
-        );
+        assert_eq!(http_base_from_signaling("ws://host:9800").unwrap(), "http://host:9800");
     }
 
     #[test]

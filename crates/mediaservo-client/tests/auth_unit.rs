@@ -1,6 +1,6 @@
 //! auth::login 的 TCP mock 单测——canned 响应各态（ok / 401 / 垃圾 / 空 token）。
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 
 use mediaservo_client::auth::login;

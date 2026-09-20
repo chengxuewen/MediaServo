@@ -60,14 +60,8 @@ pub fn from_wire_error(code: u16, message: &str) -> ClientError {
     match code {
         4012 => ClientError::ControlDenied(message.to_string()),
         4101 => ClientError::ProtocolUnsupported(message.to_string()),
-        4003 | 4010 | 4011 => ClientError::AuthRejected {
-            code,
-            message: message.to_string(),
-        },
-        _ => ClientError::Server {
-            code,
-            message: message.to_string(),
-        },
+        4003 | 4010 | 4011 => ClientError::AuthRejected { code, message: message.to_string() },
+        _ => ClientError::Server { code, message: message.to_string() },
     }
 }
 
@@ -114,10 +108,7 @@ mod tests {
             from_wire_error(4003, "psk"),
             ClientError::AuthRejected { code: 4003, .. }
         ));
-        assert!(matches!(
-            from_wire_error(5000, "boom"),
-            ClientError::Server { code: 5000, .. }
-        ));
+        assert!(matches!(from_wire_error(5000, "boom"), ClientError::Server { code: 5000, .. }));
     }
 
     #[test]

@@ -15,11 +15,9 @@ use serde_json::Value;
 #[must_use]
 pub fn channel_init(label: &str) -> RTCDataChannelInit {
     match label {
-        "gimbal" => RTCDataChannelInit {
-            ordered: false,
-            max_retransmits: Some(5),
-            ..Default::default()
-        },
+        "gimbal" => {
+            RTCDataChannelInit { ordered: false, max_retransmits: Some(5), ..Default::default() }
+        }
         _ => RTCDataChannelInit::default(),
     }
 }
@@ -46,8 +44,8 @@ pub fn negotiated_init(sp: &SctpStreamParameters, protocol: &str) -> RTCDataChan
 /// DC 的 SCTP 流参数（mirror controller::sctp_stream_params）。
 /// stream_id 取 libwebrtc 实配 DC id。
 pub fn sctp_stream_params(label: &str, id: i32) -> Result<SctpStreamParameters, String> {
-    let stream_id =
-        u16::try_from(id).map_err(|_| format!("DC {label} id={id} unavailable as SCTP stream_id"))?;
+    let stream_id = u16::try_from(id)
+        .map_err(|_| format!("DC {label} id={id} unavailable as SCTP stream_id"))?;
     let init = channel_init(label);
     Ok(SctpStreamParameters {
         stream_id,
@@ -133,7 +131,8 @@ pub fn build_recv_video_sdp(
         "a=rtcp-rsize".into(),
         "a=mid:0".into(),
         "a=extmap:1 urn:ietf:params:rtp-hdrext:sdes:mid".into(),
-        "a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01".into(),
+        "a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
+            .into(),
         "a=extmap:5 http://www.webrtc.org/experiments/rtp-hdrext/abs-capture-time".into(),
         "a=sendonly".into(),
         format!("a=rtpmap:{payload_type} {codec_name}/{clock_rate}"),
@@ -188,10 +187,7 @@ pub fn inject_remote_ssrc(remote_sdp: &str, consumer_rtp: &Value) -> String {
 pub fn codec_from_consumer(rtp: &Value) -> Option<(u16, String, u32, Option<String>)> {
     let codecs = rtp.get("codecs")?.as_array()?;
     let codec = codecs.iter().find(|c| {
-        c.get("mimeType")
-            .and_then(|m| m.as_str())
-            .map(|m| !m.ends_with("/rtx"))
-            .unwrap_or(true)
+        c.get("mimeType").and_then(|m| m.as_str()).map(|m| !m.ends_with("/rtx")).unwrap_or(true)
     })?;
     let pt = codec.get("payloadType")?.as_u64()? as u16;
     let mime = codec.get("mimeType")?.as_str()?.to_string();
@@ -202,13 +198,11 @@ pub fn codec_from_consumer(rtp: &Value) -> Option<(u16, String, u32, Option<Stri
         let pairs: Vec<String> = params
             .as_object()?
             .iter()
-            .map(|(k, v)| {
-                if let Some(s) = v.as_str() {
-                    format!("{k}={s}")
-                } else {
-                    format!("{k}={v}")
-                }
-            })
+            .map(
+                |(k, v)| {
+                    if let Some(s) = v.as_str() { format!("{k}={s}") } else { format!("{k}={v}") }
+                },
+            )
             .collect();
         Some(pairs.join(";"))
     } else {
@@ -231,7 +225,12 @@ fn append_candidates(lines: &mut Vec<String>, candidates: Option<&Vec<IceCandida
             };
             lines.push(format!(
                 "a=candidate:{} 1 {} {} {} {} typ {}",
-                c.foundation, c.protocol.to_uppercase(), c.priority, c.ip, c.port, ctype
+                c.foundation,
+                c.protocol.to_uppercase(),
+                c.priority,
+                c.ip,
+                c.port,
+                ctype
             ));
         }
     }

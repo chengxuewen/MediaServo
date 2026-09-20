@@ -101,36 +101,32 @@ fn parse_http_base(url: &str) -> Result<(String, u16), ClientError> {
     let (host, port) = match rest.split_once(':') {
         Some((h, p)) => {
             let path_end = p.find('/').unwrap_or(p.len());
-            (h.to_string(), p[..path_end].parse::<u16>().map_err(
-                |e| ClientError::MalformedResponse(format!("bad port in {url}: {e}")),
-            )?)
+            (
+                h.to_string(),
+                p[..path_end].parse::<u16>().map_err(|e| {
+                    ClientError::MalformedResponse(format!("bad port in {url}: {e}"))
+                })?,
+            )
         }
         None => (rest.to_string(), 80u16),
     };
     if host.is_empty() {
-        return Err(ClientError::MalformedResponse(format!(
-            "empty host in {url}"
-        )));
+        return Err(ClientError::MalformedResponse(format!("empty host in {url}")));
     }
     Ok((host, port))
 }
 
 /// 解析 HTTP 响应：`("HTTP/1.1 200 OK\r\n...", body_bytes)` → (status, body)。
 pub(crate) fn parse_response(raw: &[u8]) -> Result<(u16, &[u8]), ClientError> {
-    let header_end = raw
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .ok_or_else(|| ClientError::MalformedResponse(format!(
+    let header_end = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or_else(|| {
+        ClientError::MalformedResponse(format!(
             "no header-body separator ({} bytes: {:?})",
             raw.len(),
             String::from_utf8_lossy(&raw[..raw.len().min(80)]),
-        )))?;
-    let (status_line, rest) = raw[..header_end].split_at(
-        raw[..header_end]
-            .iter()
-            .position(|&b| b == b'\r')
-            .unwrap_or(header_end),
-    );
+        ))
+    })?;
+    let (status_line, rest) = raw[..header_end]
+        .split_at(raw[..header_end].iter().position(|&b| b == b'\r').unwrap_or(header_end));
     let _ = rest; // only need status line
     let code = parse_status_line(status_line)?;
     let body = &raw[header_end + 4..];
@@ -144,10 +140,8 @@ fn parse_status_line(line: &[u8]) -> Result<u16, ClientError> {
         .position(|&b| b == b' ')
         .ok_or_else(|| ClientError::MalformedResponse("missing space in status line".into()))?;
     let rest = &line[first_space + 1..];
-    let code_end = rest
-        .iter()
-        .position(|&b| b == b' ' || b == b'\r' || b == b'\n')
-        .unwrap_or(rest.len());
+    let code_end =
+        rest.iter().position(|&b| b == b' ' || b == b'\r' || b == b'\n').unwrap_or(rest.len());
     let code_str = std::str::from_utf8(&rest[..code_end])
         .map_err(|_| ClientError::MalformedResponse("non-ASCII status code".into()))?;
     code_str
@@ -255,12 +249,10 @@ pub async fn list_rooms(http_base: &str, jwt: &str) -> Result<Vec<RoomInfo>, Cli
     let req = build_get_request(&host, port, ROOMS_PATH, jwt);
     let (status, body) = request_raw(&host, port, &req, "http list_rooms").await?;
     match status {
-        200 => serde_json::from_slice::<RoomsWire>(&body)
-            .map(|w| w.rooms)
-            .map_err(|e| {
-                tracing::warn!(body_len = body.len(), error = %e, "list_rooms 200 body parse failed");
-                ClientError::MalformedResponse(format!("rooms body: {e}"))
-            }),
+        200 => serde_json::from_slice::<RoomsWire>(&body).map(|w| w.rooms).map_err(|e| {
+            tracing::warn!(body_len = body.len(), error = %e, "list_rooms 200 body parse failed");
+            ClientError::MalformedResponse(format!("rooms body: {e}"))
+        }),
         other => {
             let msg = String::from_utf8_lossy(&body).chars().take(120).collect::<String>();
             tracing::warn!(status = other, body = %msg, "list_rooms failed");
@@ -299,10 +291,7 @@ mod tests {
 
     #[test]
     fn parse_http_base_rejects_non_http() {
-        assert!(matches!(
-            parse_http_base("https://host"),
-            Err(ClientError::UnsupportedScheme(_))
-        ));
+        assert!(matches!(parse_http_base("https://host"), Err(ClientError::UnsupportedScheme(_))));
     }
 
     #[test]
@@ -329,8 +318,7 @@ mod tests {
 
     #[test]
     fn build_get_request_shape() {
-        let req =
-            String::from_utf8(build_get_request("h", 9800, "/api/rooms", "jwt-1")).unwrap();
+        let req = String::from_utf8(build_get_request("h", 9800, "/api/rooms", "jwt-1")).unwrap();
         assert!(req.starts_with("GET /api/rooms HTTP/1.1\r\n"));
         assert!(req.contains("Authorization: Bearer jwt-1\r\n"));
         assert!(req.contains("Connection: close\r\n"));

@@ -39,12 +39,7 @@ impl LinkSignal {
     pub fn new(session: SignalSession, sfu_peer: String) -> Self {
         let room = session.room_id().to_string();
         let negotiated = session.negotiated_protocol();
-        Self {
-            session: tokio::sync::Mutex::new(Some(session)),
-            room,
-            sfu_peer,
-            negotiated,
-        }
+        Self { session: tokio::sync::Mutex::new(Some(session)), room, sfu_peer, negotiated }
     }
 }
 
@@ -60,9 +55,7 @@ impl Signal for LinkSignal {
 
     fn events(&self) -> broadcast::Receiver<SignalEvent> {
         // std::sync::Mutex short lock — broadcast::subscribe is sync, no await
-        let guard = self
-            .session
-            .blocking_lock();
+        let guard = self.session.blocking_lock();
         match guard.as_ref() {
             Some(s) => s.events(),
             None => {

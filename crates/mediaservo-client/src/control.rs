@@ -6,13 +6,13 @@
 //! 免建 Recv 消费链）。零 HMAC、零 PSK 签名。
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use mediaservo_common::protocol::{ControlAck, ControlEnvelope};
-use mediaservo_webrtc::data_channel::RTCDataChannel;
-use mediaservo_webrtc::RTCPeerConnection;
 use tokio::sync::mpsc;
 
+use crate::engine::{DcHandle, PcHandle};
 use crate::error::ClientError;
 
 impl std::fmt::Debug for ControlChannel {
@@ -29,29 +29,23 @@ impl std::fmt::Debug for ControlChannel {
 /// 构造仅由 [`crate::RoomSession::open_control`] 完成（transport/DC/announce 序列
 /// 在 session 侧）；本类型只做收发与保活（持 pc 引用防其提前释放）。
 pub struct ControlChannel {
-    dcs: HashMap<String, RTCDataChannel>,
+    dcs: HashMap<String, Arc<dyn DcHandle>>,
     labels: Vec<String>,
     ack_rx: mpsc::Receiver<ControlAck>,
     producer_ids: Vec<String>,
     /// 出程 transport 的 PC——句柄存活期间持有，drop 即断 DC。
-    _pc: RTCPeerConnection,
+    _pc: Arc<dyn PcHandle>,
 }
 
 impl ControlChannel {
     pub(crate) fn new(
-        dcs: HashMap<String, RTCDataChannel>,
+        dcs: HashMap<String, Arc<dyn DcHandle>>,
         labels: Vec<String>,
         ack_rx: mpsc::Receiver<ControlAck>,
         producer_ids: Vec<String>,
-        pc: RTCPeerConnection,
+        pc: Arc<dyn PcHandle>,
     ) -> Self {
-        Self {
-            dcs,
-            labels,
-            ack_rx,
-            producer_ids,
-            _pc: pc,
-        }
+        Self { dcs, labels, ack_rx, producer_ids, _pc: pc }
     }
 
     /// 已建立的通道 label（按 open_control 入参序）。
@@ -90,9 +84,8 @@ impl ControlChannel {
             .ok_or_else(|| ClientError::InvalidState(format!("control DC \"{label}\" 未开启")))?;
         let text = serde_json::to_string(env)
             .map_err(|e| ClientError::MalformedResponse(format!("envelope serialize: {e}")))?;
-        dc.send_text(&text)
-            .await
-            .map_err(|e| ClientError::WebRtc(format!("DC {label} send: {e}")))
+        // 错误映射在引擎侧（SysDc="DC {label} send: {e}" / Fake 同型）。
+        dc.send_text(&text).await
     }
 
     /// 取下一条回执（host 回声/ack 广播同队），`wait` 内无回执 →
@@ -106,7 +99,11 @@ impl ControlChannel {
 
     /// 取配对 `want_seq` 的回执——更早的过期 ack（丢包重发窗口的产物）丢弃跳过。
     /// `wait` = 整窗超时（非单条）。
-    pub async fn recv_ack_for(&mut self, want_seq: u64, wait: Duration) -> Result<ControlAck, ClientError> {
+    pub async fn recv_ack_for(
+        &mut self,
+        want_seq: u64,
+        wait: Duration,
+    ) -> Result<ControlAck, ClientError> {
         let deadline = tokio::time::Instant::now() + wait;
         loop {
             let remain = deadline.saturating_duration_since(tokio::time::Instant::now());
