@@ -989,3 +989,7 @@ install                        → 改名提示 + exit 2（退役）
 - 终形=**组合双保险**：imgui_shell SDL_Init 前装非 exit 的 XSetErrorHandler（治所有失败调用，须在 CreateWindow 前——SDL 建窗期间已订阅 clipboard）+ python PATCH_COMMAND 四处 None/NULL 守护（防 handler 放行返 NULL 后的二阶 segfault，strlen/stpcpy/strncmp 裸点）。单用任一必崩（实测钉）。
 - 验收：真窗 6/6 零崩（handler 吞错日志 10 次实见）/dummy 回归 rc=0/`-DSDL_X11=OFF` 独立树编译过（CI 形态零扰动）/档案 zip 上游逐字节不变。
 - 事故自犯×2：printf/cat 追加 CMake 块**未落盘即重跑测试**（白烧 3 轮，#17 变体：append 后必须 grep 验证，本轮破例未守）；cd 链误发子仓 add 报 fatal 无实害。出窗正解路径已机械化：clone→装 xorg 头→`run example` 即真窗，Xwayland/GNOME 舱端可交付。
+
+### 2026-09-20: S6 批0 FakeEngine 测试基座（K11，9b8f078+366509f）
+- mediaservo-client 抽 Engine/PcHandle/DcHandle 最小面 trait（sys.rs 真后端零逻辑直通）+ feature `engine-fake` 有状态假引擎（ICE/track/DC 语义模拟 + fail_next_connect/fail_next_resume/drop_dc_mid_send 注入）+ 四类确定性演练（join 全链/故障映射/DC 状态/双 consumer）。既有 40 测试双姿态全绿、client-c 零破坏、all-gates 9/9。connect_with_engine 为批1 K1-K5 的 CI 验收地基（PLAN=主仓 docs/plans/sdk-api-hardening/）。
+- 顺带存量两清：link-c/deck-c last_error 测试族 TEST_LOCK 串行（field-c 同型手术；gate 实抓竞跑）+ auth_unit unused import（N8 门 clippy 行无 --all-targets 的测试目标盲区——**门升级 --all-targets 后全仓仅此一发，可安全升门，批1 落**）。

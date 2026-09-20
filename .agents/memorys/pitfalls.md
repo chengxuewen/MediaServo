@@ -1679,3 +1679,9 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法（组合，缺一即崩，实测钉）**: ① app 侧进程级非 exit handler（`XSetErrorHandler` return 0，**须在 SDL_Init 前装**——SDL 建窗期间已订阅 clipboard 属性，装晚了早期错误仍杀）；② handler 放行后失败调用返 NULL，**再补 None/NULL 守护**防二阶 segfault（SDL events.c 四处裸 strlen/stpcpy/strncmp；librarian 定案 3.4.16 与 main 均未修）。
 - **验证**: 循环 ≥6 轮 exit=124/0 且 handler 吞错日志非零；`-DSDL_X11=OFF` 独立树编译过（CI headless 零扰动）。
 - **同场连带**: conda/pixi 编译器默认不搜 /usr/include（"XKBlib.h not found"文件却在=假象，C23 家族反向变体）；pixi 自带 x11.pc 指残缺 conda 头目录盖过系统 → PKG_CONFIG_PATH 系统段前置。
+
+## PIT-205: 测试批插串行锁只认"无参 {"形状，连 helper 一起插 = 非重入锁自死锁（2026-09-20）
+- **症状**: deck-c TEST_LOCK 手术（22 守卫批插）后 camera/enumerate 全部 60s+ 卡相，link-c 却两连跑绿（无 helper 调用链，侥幸）。
+- **根因**: 批插正则匹配 `fn name() {`（含带返回值形），把 helper `fn open_camera() -> *mut ...` 也插了守卫；持锁测试（camera_open_*_roundtrip）内部调用 open_camera → 同线程二次 lock 非重入 std::Mutex → 永久阻塞，锁被死后其余测试排队全灭。「通过=首刀 link-c 骗过了形状审查」。
+- **解法**: 插锁批脚本必须以 `#[test]`/`#[tokio::test]` **属性在场**为唯一判据（doc 注释与空行可穿越），非属性 fn 一律跳过；批插后立即单包跑（勿只跑看起来干净的那个）+卡相>60s 首查锁链非慢测试。
+- **验证**: `grep -n "TEST_LOCK.lock()" lib.rs` 计数 == `grep -c "#\[test\]\|#\[tokio::test\]"` 计数（helper 零守卫形状等式）；deck-c 21/0 0.01s（拆 helper 后从卡死到秒级）。
