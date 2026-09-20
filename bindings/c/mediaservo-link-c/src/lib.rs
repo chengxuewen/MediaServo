@@ -860,6 +860,11 @@ pub struct mediaservo_frame_meta_t {
 
 #[cfg(test)]
 mod tests {
+    /// 本文件测试共享进程级 static LAST_ERROR（C ABI 语义在册）——null-handle 负例
+    /// 隐式写它，显式读断言并互踩 = flaky（field-c 09-20 同型手术；link-c 09-20 gate
+    /// 实抓 last_error_roundtrip 竞跑覆写；deck-c 预防同批）。测试域全文件经此锁串行。
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     use super::*;
 
     /// 合成一个未连接的信令 handle（会话 None，仅用于 closed/STATE 路径测试）。
@@ -887,6 +892,7 @@ mod tests {
 
     /// 合成一个未 attach 的总线 handle（bus None）。
     fn bus_handle_closed() -> *mut mediaservo_link_bus_t {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         Box::into_raw(Box::new(mediaservo_link_bus_t {
             bus: std::sync::Mutex::new(None),
             closed: AtomicBool::new(false),
@@ -895,6 +901,7 @@ mod tests {
 
     #[test]
     fn last_error_roundtrip() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // 全局状态跨测试竞争: 先清空再设（不依赖其他测试未写）
         set_last_error("");
         set_last_error("test error");
@@ -907,6 +914,7 @@ mod tests {
 
     #[test]
     fn version_roundtrip() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut buf = [0u8; 32];
         let rc = mediaservo_link_version(buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
@@ -916,12 +924,14 @@ mod tests {
 
     #[test]
     fn connect_null_cfg_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rc = mediaservo_link_signal_connect(ptr::null(), ptr::null_mut());
         assert_eq!(rc, MEDIASERVO_LINK_ERR_INVALID_ARG);
     }
 
     #[test]
     fn connect_small_struct_size_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // 旧头文件编译的调用方：struct_size 过小 → 明确错误（R3）
         let cfg = mediaservo_link_signal_config_t { struct_size: 1, ..Default::default() };
         let mut out: *mut mediaservo_link_signal_t = ptr::null_mut();
@@ -932,6 +942,7 @@ mod tests {
 
     #[test]
     fn connect_missing_required_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // struct_size 合法但 url/psk/room 为空 → 必填错误
         let cfg = mediaservo_link_signal_config_t::default();
         let mut out: *mut mediaservo_link_signal_t = ptr::null_mut();
@@ -942,6 +953,7 @@ mod tests {
 
     #[test]
     fn connect_bad_role_fails_before_network() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // 角色字符串非法 → 连接前即拒绝（不触网）
         let url = c"ws://127.0.0.1:1/ws";
         let psk = c"psk";
@@ -962,12 +974,14 @@ mod tests {
 
     #[test]
     fn send_null_handle_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rc = mediaservo_link_signal_send(ptr::null_mut(), c"{}".as_ptr(), 2);
         assert_eq!(rc, MEDIASERVO_LINK_ERR_INVALID_ARG);
     }
 
     #[test]
     fn send_empty_message_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let s = signal_handle(false);
         let rc = mediaservo_link_signal_send(s, c"{}".as_ptr(), 0);
         assert_eq!(rc, MEDIASERVO_LINK_ERR_INVALID_ARG);
@@ -976,6 +990,7 @@ mod tests {
 
     #[test]
     fn send_without_session_returns_state() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let s = signal_handle(false);
         // 合法 SignalingMessage（frame）但会话缺失 → STATE
         let msg = c"{\"type\":\"frame\",\"room_id\":\"r\",\"codec\":\"h264\",\"sequence\":1,\"is_keyframe\":true,\"data_base64\":\"\"}";
@@ -986,6 +1001,7 @@ mod tests {
 
     #[test]
     fn send_after_closed_flag_returns_state() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let s = signal_handle(true);
         // closed 标志已置 → STATE（不触会话）
         let rc = mediaservo_link_signal_send(s, c"{}".as_ptr(), 2);
@@ -995,6 +1011,7 @@ mod tests {
 
     #[test]
     fn close_null_is_ok() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(mediaservo_link_signal_close(ptr::null_mut()), MEDIASERVO_OK);
         assert_eq!(mediaservo_link_bus_close(ptr::null_mut()), MEDIASERVO_OK);
         assert_eq!(mediaservo_link_stream_close(ptr::null_mut()), MEDIASERVO_OK);
@@ -1002,11 +1019,13 @@ mod tests {
 
     #[test]
     fn on_event_null_handle_noop() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         mediaservo_link_signal_on_event(ptr::null_mut(), None, ptr::null_mut());
     }
 
     #[test]
     fn bus_attach_null_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut out: *mut mediaservo_link_bus_t = ptr::null_mut();
         let rc =
             mediaservo_link_bus_attach(ptr::null(), c"token".as_ptr(), c"vk".as_ptr(), &mut out);
@@ -1016,6 +1035,7 @@ mod tests {
 
     #[test]
     fn bus_publish_null_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rc = mediaservo_link_bus_publish(
             ptr::null_mut(),
             c"camera/0".as_ptr(),
@@ -1028,6 +1048,7 @@ mod tests {
 
     #[test]
     fn bus_publish_without_bus_returns_state() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let b = bus_handle(false);
         let meta = mediaservo_frame_meta_t {
             seq: 1,
@@ -1047,6 +1068,7 @@ mod tests {
 
     #[test]
     fn bus_publish_after_closed_flag_returns_state() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let b = bus_handle(true);
         let meta = mediaservo_frame_meta_t {
             seq: 1,
@@ -1066,6 +1088,7 @@ mod tests {
 
     #[test]
     fn bus_subscribe_null_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rc =
             mediaservo_link_bus_subscribe(ptr::null_mut(), c"camera/0".as_ptr(), ptr::null_mut());
         assert_eq!(rc, MEDIASERVO_LINK_ERR_INVALID_ARG);
@@ -1073,6 +1096,7 @@ mod tests {
 
     #[test]
     fn bus_recv_null_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rc = mediaservo_link_bus_recv(
             ptr::null_mut(),
             ptr::null_mut(),
@@ -1085,6 +1109,7 @@ mod tests {
 
     #[test]
     fn frame_meta_c_layout_matches_wire() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // R4: repr(C, packed) 镜像结构逐字段填 → 36B 拷贝 + decode →
         // 与 Rust FrameMeta::encode 逐字节比对
         assert_eq!(size_of::<mediaservo_frame_meta_t>(), FrameMeta::WIRE_LEN);
@@ -1147,11 +1172,13 @@ mod tests {
 
     #[test]
     fn stream_close_null_ok() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(mediaservo_link_stream_close(ptr::null_mut()), MEDIASERVO_OK);
     }
 
     #[test]
     fn bus_close_null_ok() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(mediaservo_link_bus_close(ptr::null_mut()), MEDIASERVO_OK);
     }
 
@@ -1161,6 +1188,7 @@ mod tests {
     /// 复用 mediaservo-link e2e 测试密钥对（D235 测试 fixture）。
     #[test]
     fn bus_attach_publish_subscribe_recv_roundtrip() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         const PRIV_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIObCg8b+Le6kKOI/+pE+4+YhXUlr6X6h7q8p/MjvHmXT\n-----END PRIVATE KEY-----\n";
         const PUB_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgXprEbnahCZoZtLpiUqR0ruqtzEfRXk/Gl/6F6PEm4o=\n-----END PUBLIC KEY-----\n";
         use mediaservo_link::{

@@ -913,6 +913,11 @@ pub extern "C" fn mediaservo_deck_version(buf: *mut c_char, len: usize) -> c_int
 
 #[cfg(test)]
 mod tests {
+    /// 本文件测试共享进程级 static LAST_ERROR（C ABI 语义在册）——null-handle 负例
+    /// 隐式写它，显式读断言并互踩 = flaky（field-c 09-20 同型手术；link-c 09-20 gate
+    /// 实抓 last_error_roundtrip 竞跑覆写；deck-c 预防同批）。测试域全文件经此锁串行。
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     use super::*;
 
     /// 辅助：open 一台默认相机（成功后调用方负责 close）。
@@ -932,6 +937,7 @@ mod tests {
 
     #[test]
     fn last_error_roundtrip() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // 全局状态跨测试竞争: 先清空再设（不依赖其他测试未写）
         set_last_error("");
         set_last_error("deck test error");
@@ -944,6 +950,7 @@ mod tests {
 
     #[test]
     fn version_roundtrip() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut buf = [0u8; 32];
         let rc = mediaservo_deck_version(buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
@@ -953,6 +960,7 @@ mod tests {
 
     #[test]
     fn enumerate_two_call_roundtrip() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // 第一次: 长度（含分隔符，不含 NUL）；第二次: 内容一致
         let mut len1: usize = 0;
         let rc = mediaservo_deck_devices_enumerate(0, ptr::null_mut(), 0, &mut len1);
@@ -975,6 +983,7 @@ mod tests {
 
     #[test]
     fn enumerate_empty_kind() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Audio/Screen 无设备 → 长度 0
         let mut len: usize = 0;
         let rc = mediaservo_deck_devices_enumerate(1, ptr::null_mut(), 0, &mut len);
@@ -984,18 +993,21 @@ mod tests {
 
     #[test]
     fn enumerate_invalid_kind() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rc = mediaservo_deck_devices_enumerate(7, ptr::null_mut(), 0, ptr::null_mut());
         assert_eq!(rc, MEDIASERVO_DECK_ERR_INVALID_ARG);
     }
 
     #[test]
     fn camera_open_null_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rc = mediaservo_deck_camera_open(ptr::null(), ptr::null(), ptr::null_mut());
         assert_eq!(rc, MEDIASERVO_DECK_ERR_INVALID_ARG);
     }
 
     #[test]
     fn camera_open_small_struct_size_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dev = c"stub:test-camera";
         let opts =
             mediaservo_deck_capture_options_t { struct_size: 1, width: 0, height: 0, framerate: 0 };
@@ -1007,6 +1019,7 @@ mod tests {
 
     #[test]
     fn camera_open_unknown_device_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dev = c"stub:nonexistent";
         let opts = mediaservo_deck_capture_options_t {
             struct_size: MEDIASERVO_DECK_CAPTURE_OPTIONS_MIN_SIZE,
@@ -1022,6 +1035,7 @@ mod tests {
 
     #[test]
     fn camera_open_close_roundtrip() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let cam = open_camera();
         assert!(!cam.is_null());
         assert_eq!(mediaservo_deck_camera_close(cam), MEDIASERVO_OK);
@@ -1031,6 +1045,7 @@ mod tests {
 
     #[test]
     fn camera_double_start_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let cam = open_camera();
         assert_eq!(mediaservo_deck_camera_start(cam), MEDIASERVO_OK);
         let rc = mediaservo_deck_camera_start(cam);
@@ -1042,6 +1057,7 @@ mod tests {
 
     #[test]
     fn camera_frames_cb_null_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rc = mediaservo_deck_camera_frames_cb(ptr::null_mut(), None, ptr::null_mut());
         assert_eq!(rc, MEDIASERVO_DECK_ERR_INVALID_ARG);
         let cam = open_camera();
@@ -1052,6 +1068,7 @@ mod tests {
 
     #[test]
     fn recorder_new_null_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut out: *mut mediaservo_deck_recorder_t = ptr::null_mut();
         let rc = mediaservo_deck_recorder_new(ptr::null(), &mut out);
         assert_eq!(rc, MEDIASERVO_DECK_ERR_INVALID_ARG);
@@ -1060,6 +1077,7 @@ mod tests {
 
     #[test]
     fn recorder_new_missing_parent_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // 父目录不存在 → NotFound → RECORDER
         let mut out: *mut mediaservo_deck_recorder_t = ptr::null_mut();
         let p = c"/tmp/opencode/no-such-dir-xyz/deck_test.mp4";
@@ -1070,12 +1088,14 @@ mod tests {
 
     #[test]
     fn recorder_record_null_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rc = mediaservo_deck_recorder_record(ptr::null_mut(), ptr::null_mut());
         assert_eq!(rc, MEDIASERVO_DECK_ERR_INVALID_ARG);
     }
 
     #[test]
     fn recorder_record_camera_not_started_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let cam = open_camera();
         let mut rec: *mut mediaservo_deck_recorder_t = ptr::null_mut();
         let p = c"/tmp/opencode/deck_test_never_written.mp4";
@@ -1089,11 +1109,13 @@ mod tests {
 
     #[test]
     fn recorder_close_null_is_ok() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(mediaservo_deck_recorder_close(ptr::null_mut()), MEDIASERVO_OK);
     }
 
     #[test]
     fn player_open_missing_file_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut out: *mut mediaservo_deck_player_t = ptr::null_mut();
         let p = c"/tmp/opencode/no-such-file-xyz.mp4";
         let rc = mediaservo_deck_player_open(p.as_ptr(), &mut out);
@@ -1103,6 +1125,7 @@ mod tests {
 
     #[test]
     fn player_open_null_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut out: *mut mediaservo_deck_player_t = ptr::null_mut();
         let rc = mediaservo_deck_player_open(ptr::null(), &mut out);
         assert_eq!(rc, MEDIASERVO_DECK_ERR_INVALID_ARG);
@@ -1111,17 +1134,20 @@ mod tests {
 
     #[test]
     fn player_close_null_is_ok() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(mediaservo_deck_player_close(ptr::null_mut()), MEDIASERVO_OK);
     }
 
     #[test]
     fn recorder_stop_null_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rc = mediaservo_deck_recorder_stop(ptr::null_mut());
         assert_eq!(rc, MEDIASERVO_DECK_ERR_INVALID_ARG);
     }
 
     #[test]
     fn player_frames_cb_null_fails() {
+        let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rc = mediaservo_deck_player_frames_cb(ptr::null_mut(), None, ptr::null_mut());
         assert_eq!(rc, MEDIASERVO_DECK_ERR_INVALID_ARG);
     }
