@@ -52,6 +52,65 @@ pub enum ClientError {
     InvalidState(String),
 }
 
+impl ClientError {
+    /// S6/K2: wire 码反向可查——`from_wire_error` 分类源的机读回读面。
+    ///
+    /// 单源纪律：4012/4101/4003|4010|4011 的归属与 [`from_wire_error`] 一致，
+    /// 不重抄映射表；`Signal` 变体经 [`extract_wire_code`] 从 link 嵌入串恢复。
+    /// 返回 `None` = 该错误无 wire 码（本地/REST/IO 域）。
+    #[must_use]
+    pub fn wire_code(&self) -> Option<u32> {
+        match self {
+            // 无 wire 码的本地/REST/传输域。
+            Self::Login(_)
+            | Self::InvalidCredentials
+            | Self::RestRejected { .. }
+            | Self::UnsupportedScheme(_)
+            | Self::MalformedResponse(_)
+            | Self::WebRtc(_)
+            | Self::Io(_)
+            | Self::Timeout { .. }
+            | Self::InvalidState(_)
+            // I5 本地预拒（未发出任何请求，无 server 应答码）。
+            | Self::ProtocolTooLow { .. } => None,
+            Self::AuthRejected { code, .. } => Some(u32::from(*code)),
+            Self::ProtocolUnsupported(_) => Some(4101),
+            Self::ControlDenied(_) => Some(4012),
+            Self::Server { code, .. } => Some(u32::from(*code)),
+            Self::Signal(e) => extract_wire_code(&e.to_string()).map(u32::from),
+        }
+    }
+
+    /// S6/K2: 重试语义一等位（K1 重连环的判据源）。
+    ///
+    /// 出处 = D273 红牌家族语义（web 半区已实盘）：auth 族（4003/4010/4011/4012）
+    /// 与方言拒（4101）= 终态（重连必然同败，重试只掩盖凭证问题）；连接类
+    /// （IO/Signal 无码/WebRtc 建连/Timeout）与 server 域 ≥5000（5001=SFU 暂不可用
+    /// 等瞬态）= 可重试。REST 拒/协议错位/状态违例按保守不重试（4xx 语义）。
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            // 终态族（D273 红牌 = auth 族 + 4101；ProtocolTooLow = 本地门同族）。
+            Self::InvalidCredentials
+            | Self::AuthRejected { .. }
+            | Self::ProtocolUnsupported(_)
+            | Self::ControlDenied(_)
+            | Self::ProtocolTooLow { .. }
+            | Self::UnsupportedScheme(_)
+            | Self::RestRejected { .. }
+            | Self::MalformedResponse(_)
+            | Self::InvalidState(_) => false,
+            // 连接/瞬态族。
+            Self::Io(_) | Self::WebRtc(_) | Self::Timeout { .. } | Self::Login(_) => true,
+            Self::Server { code, .. } => *code >= 5000,
+            // link 透传：嵌入 auth 族码 = 终态；纯连接错 = 可重试。
+            Self::Signal(e) => {
+                !matches!(extract_wire_code(&e.to_string()), Some(4003 | 4010 | 4011 | 4012 | 4101))
+            }
+        }
+    }
+}
+
 /// wire `Error{code,message}` → 终态分类（D273 terminal 族在 SDK 侧的落点）。
 ///
 /// 4012=控制拒、4101=方言拒单独成 typed；其余承载为 [`ClientError::Server`]。
@@ -127,5 +186,54 @@ mod tests {
         assert!(matches!(classify_link_error(e), ClientError::ProtocolUnsupported(_)));
         let other = LinkError::Signal("connect refused".into());
         assert!(matches!(classify_link_error(other), ClientError::Signal(_)));
+    }
+
+    /// K2 钉：wire_code 与 from_wire_error 分类源一致（穷尽 match 的表外回归网）。
+    #[test]
+    fn wire_code_round_trips_classification_source() {
+        assert_eq!(from_wire_error(4012, "x").wire_code(), Some(4012));
+        assert_eq!(from_wire_error(4101, "x").wire_code(), Some(4101));
+        assert_eq!(from_wire_error(4010, "x").wire_code(), Some(4010));
+        assert_eq!(from_wire_error(5001, "x").wire_code(), Some(5001));
+        // 本地域无码。
+        assert_eq!(ClientError::InvalidCredentials.wire_code(), None);
+        assert_eq!(
+            ClientError::ProtocolTooLow { need: 2, got: 1 }.wire_code(),
+            None,
+            "本地预拒不发请求 = 无 wire 码"
+        );
+        // Signal 嵌入码恢复（classify 未命中的未知码从串里捞回）。
+        let e = ClientError::Signal(LinkError::Signal("room join failed [4031]: denied".into()));
+        assert_eq!(e.wire_code(), Some(4031));
+    }
+
+    /// K2 钉：重试分类对齐 D273 红牌家族（auth 族/4101/4012 终态；连接类/5001 可重试）。
+    #[test]
+    fn retryable_matches_d273_red_card_family() {
+        for terminal in [
+            from_wire_error(4003, "psk"),
+            from_wire_error(4010, "device"),
+            from_wire_error(4011, "role"),
+            from_wire_error(4012, "control"),
+            from_wire_error(4101, "protocol"),
+            ClientError::InvalidCredentials,
+            ClientError::RestRejected { code: 401, message: String::new() },
+        ] {
+            assert!(!terminal.is_retryable(), "auth/方言族必须终态: {terminal:?}");
+        }
+        for retry in [
+            ClientError::Io(std::io::Error::other("refused")),
+            ClientError::WebRtc("ice".into()),
+            ClientError::Timeout { what: "Consumed" },
+            from_wire_error(5000, "boom"),
+            from_wire_error(5001, "sfu unavailable"),
+            ClientError::Signal(LinkError::Signal("connect ws://x: refused".into())),
+        ] {
+            assert!(retry.is_retryable(), "连接/≥5000 族必须可重试: {retry:?}");
+        }
+        // Signal 嵌入 auth 码 = 终态（link 透传形与 typed 形同判）。
+        assert!(!ClientError::Signal(LinkError::Signal("join [4010] nope".into())).is_retryable());
+        // 4xxx 非 auth 的 Server 码（如 4031 produce 拒）保守不重试。
+        assert!(!from_wire_error(4031, "video in audio room").is_retryable());
     }
 }

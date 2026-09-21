@@ -6,6 +6,9 @@
 ## Unreleased
 
 ### 新增
+- [sdk-client] 舱端 SDK（Rust 面，S6 批1a）：信令断链自动重连（退避+resume 票优先、auth 族终态、Consumer 帧流跨重连续流、
+  `connection_state()`/`set_auto_reconnect()`）；`Consumer` 对象多路消费（每 producer 一路句柄，pause 待批2）；
+  错误机读（`wire_code()`/`is_retryable()`）；控制通道背压读取（`ready_state()`/`buffered_amount()`）。C/C++ 面随 S6 批1 后续开放。
 
 - [server] 消费者面房间发现 `GET /api/rooms`：账号 JWT 即可见房间列表（admin/dispatcher
   全量在线房；viewer/operator 按 allowlist，改单热生效）；离线/无主房间不列出；响应仅含

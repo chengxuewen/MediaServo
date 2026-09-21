@@ -12,6 +12,8 @@ use std::time::Duration;
 use mediaservo_common::protocol::{ControlAck, ControlEnvelope};
 use tokio::sync::mpsc;
 
+use mediaservo_webrtc::data_channel::RTCDataChannelState;
+
 use crate::engine::{DcHandle, PcHandle};
 use crate::error::ClientError;
 
@@ -95,6 +97,41 @@ impl ControlChannel {
             .await
             .map_err(|_| ClientError::Timeout { what: "ControlAck" })?
             .ok_or_else(|| ClientError::InvalidState("ack 流已关闭（DC 断开）".into()))
+    }
+
+    /// S6/K5: 就绪态聚合——全部出程 DC 的**最差**态（Closed > Closing > Connecting > Open）。
+    /// 判据：任一通道劣化即整组不可乐观发送（急停/命令前置预检的单一读点）。
+    #[must_use]
+    pub fn ready_state(&self) -> RTCDataChannelState {
+        fn rank(s: RTCDataChannelState) -> u8 {
+            match s {
+                RTCDataChannelState::Open => 0,
+                RTCDataChannelState::Connecting => 1,
+                RTCDataChannelState::Closing => 2,
+                RTCDataChannelState::Closed => 3,
+            }
+        }
+        self.dcs
+            .values()
+            .map(|dc| rank(dc.state()))
+            .max()
+            .map(|r| match r {
+                0 => RTCDataChannelState::Open,
+                1 => RTCDataChannelState::Connecting,
+                2 => RTCDataChannelState::Closing,
+                _ => RTCDataChannelState::Closed,
+            })
+            .unwrap_or(RTCDataChannelState::Open)
+    }
+
+    /// S6/K5: 待发队列水位总和（全通道 buffered_amount 求和）。
+    /// 用途：大批量命令/急停投递前的背压预检（水位高 = 先降载或等待，勿盲灌）。
+    pub async fn buffered_amount(&self) -> u64 {
+        let mut total = 0u64;
+        for dc in self.dcs.values() {
+            total += dc.buffered_amount().await;
+        }
+        total
     }
 
     /// 取配对 `want_seq` 的回执——更早的过期 ack（丢包重发窗口的产物）丢弃跳过。

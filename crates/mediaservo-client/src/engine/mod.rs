@@ -38,7 +38,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use mediaservo_webrtc::data_channel::RTCDataChannelInit;
+use mediaservo_webrtc::data_channel::{RTCDataChannelInit, RTCDataChannelState};
 use mediaservo_webrtc::rtp::RTCRtpTransceiverInit;
 use mediaservo_webrtc::stats::RTCStats;
 use mediaservo_webrtc::track::{FrameSink, TrackKind};
@@ -128,6 +128,10 @@ pub trait DcHandle: Send + Sync + 'static {
     fn id(&self) -> i32;
     /// 文本发送（控制信封）。[control.rs:93]
     async fn send_text(&self, text: &str) -> Result<(), ClientError>;
+    /// S6/K5: 通道就绪态（open/closing/closed + connecting——背压/可用性判据）。
+    fn state(&self) -> RTCDataChannelState;
+    /// S6/K5: 待发队列字节数（急停投递前水位预检用）。
+    async fn buffered_amount(&self) -> u64;
     /// 订阅入程事件流（每次调用独立订阅端，同 spool 语义）。[session.rs:752]
     async fn events(&self) -> mpsc::UnboundedReceiver<EngineDcEvent>;
     /// 主动关闭（本地自拆）。[session.rs:779]

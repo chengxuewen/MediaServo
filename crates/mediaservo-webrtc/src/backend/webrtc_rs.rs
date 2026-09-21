@@ -412,6 +412,11 @@ impl DcBackend for WebrtcRsDc {
         }
     }
 
+    /// S6/K5: webrtc-rs buffered_amount 为 async（内部锁）——u64 拓宽透传。
+    async fn buffered_amount(&self) -> u64 {
+        self.inner.buffered_amount().await as u64
+    }
+
     async fn send(&self, data: &[u8]) -> Result<(), RTCError> {
         let b = bytes::Bytes::copy_from_slice(data);
         self.inner.send(&b).await.map(|_| ()).map_err(|e| RTCError::RTCDataChannel(e.to_string()))

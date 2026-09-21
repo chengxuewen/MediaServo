@@ -3,6 +3,8 @@
 //! 生产实现 = [`LinkSignal`]（封装 mediaservo_link::SignalSession）；
 //! 测试实现 = tests/sfu_surface.rs 内 MockSignal（内存 broadcast + uplink 收集）。
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use async_trait::async_trait;
 use mediaservo_common::protocol::SignalingMessage;
 use mediaservo_link::{SignalEvent, SignalSession};
@@ -32,14 +34,27 @@ pub struct LinkSignal {
     session: tokio::sync::Mutex<Option<SignalSession>>,
     room: String,
     sfu_peer: String,
-    negotiated: u32,
+    /// S6/K1: 重连 swap 后原子更新（trait 读点无锁化）。
+    negotiated: AtomicU32,
 }
 
 impl LinkSignal {
     pub fn new(session: SignalSession, sfu_peer: String) -> Self {
         let room = session.room_id().to_string();
-        let negotiated = session.negotiated_protocol();
+        let negotiated = AtomicU32::new(session.negotiated_protocol());
         Self { session: tokio::sync::Mutex::new(Some(session)), room, sfu_peer, negotiated }
+    }
+
+    /// S6/K1: supervisor 重连成功后来料替换底层会话（谈成方言随新会话更新；
+    /// 旧会话已断链 = drop 即弃，不补发 close）。
+    pub async fn swap_session(&self, new: SignalSession) {
+        self.negotiated.store(new.negotiated_protocol(), Ordering::Release);
+        *self.session.lock().await = Some(new);
+    }
+
+    /// S6/K1: 现会话的 a2 一次性重挂票（旧 server / 未下发 = None → 全量 join）。
+    pub async fn session_nonce(&self) -> Option<String> {
+        self.session.lock().await.as_ref().and_then(|s| s.session_nonce().map(str::to_string))
     }
 }
 
@@ -75,7 +90,7 @@ impl Signal for LinkSignal {
     }
 
     fn negotiated(&self) -> u32 {
-        self.negotiated
+        self.negotiated.load(Ordering::Acquire)
     }
 
     async fn close(&self) -> Result<(), ClientError> {

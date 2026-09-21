@@ -159,6 +159,14 @@ impl DcHandle for SysDc {
             .map_err(|e| ClientError::WebRtc(format!("DC {label} send: {e}")))
     }
 
+    fn state(&self) -> mediaservo_webrtc::data_channel::RTCDataChannelState {
+        self.dc.state()
+    }
+
+    async fn buffered_amount(&self) -> u64 {
+        self.dc.buffered_amount().await
+    }
+
     async fn events(&self) -> mpsc::UnboundedReceiver<EngineDcEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut spool = self.dc.spool().await;

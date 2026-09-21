@@ -20,11 +20,13 @@ use mediaservo_webrtc::track::TrackKind;
 use tokio::sync::{Mutex, broadcast, mpsc};
 
 use crate::config::{ClientConfig, sfu_peer_key};
+use crate::consumer::{Consumer, ConsumerSlot};
 use crate::control::ControlChannel;
 use crate::engine::{DcHandle, Engine, EngineDcEvent, PcHandle, SysEngine};
 use crate::error::{ClientError, classify_link_error, from_wire_error};
 use crate::sfu;
 use crate::signal::{LinkSignal, Signal};
+use crate::supervisor::{self, ConnectionState, SupervisorCtx};
 
 /// 控制域能力门（I5 首用户，S0 契约）：CreateDataProducer 的 can_control 门
 /// 自方言 2 起生效——低于 2 本地预拒，不发请求（省一次 4012 往返）。
@@ -36,7 +38,9 @@ const RESPONSE_WAIT: Duration = Duration::from_secs(10);
 
 /// 解码视频帧（I420，libwebrtc 侧渲染前格式；C5 边界语义）。
 /// inbound-rtp 折叠规则单一落点（求和/max 混排——自由函数形单测可钉，免触真 pc）。
-fn fold_inbound_stats(items: Vec<mediaservo_webrtc::stats::RTCStats>) -> VideoStreamStats {
+pub(crate) fn fold_inbound_stats(
+    items: Vec<mediaservo_webrtc::stats::RTCStats>,
+) -> VideoStreamStats {
     use mediaservo_webrtc::stats::RTCStats;
     let mut out = VideoStreamStats::default();
     for st in items {
@@ -75,21 +79,20 @@ pub struct VideoFrame {
 }
 
 /// 已入房会话：视频消费 + 控制出程共用一条 link WS 信令面。
+///
+/// S6/K1：信令面韧性——`ctx` 持有 supervisor 上下文（重连环/帧槽/状态机），
+/// 跨重连存续；`events`/`pump_events` 是 per-session 订阅（重连后 refresh）。
 pub struct RoomSession {
-    /// S2d: ack 消费后台泵与前台共用信令面 = Arc 共享。
-    signal: Arc<LinkSignal>,
+    /// S6/K1: 信令面韧性上下文（Arc 单实例；forwarder/supervisor/重放共用）。
+    ctx: Arc<SupervisorCtx>,
     /// S4/T3.5: 急停 HMAC 密钥（emergency_stop 签名用；None = 不签）。
     hmac_key: Option<String>,
-    /// connect 即刻订阅（broadcast 无历史重放——接住 join 时 server 回放的
-    /// late-join NewProducer）。
+    /// connect 时刻订阅（broadcast 无历史重放——接住 join 时 server 回放的
+    /// late-join NewProducer）。重连后由 supervisor 刷新。
     events: Mutex<broadcast::Receiver<SignalEvent>>,
     /// S2d: open_control 专用第二流（connect 同刻订阅 = join 回放零缺口；
     /// take 后移交 ack 泵，每会话一次性）。
     pump_events: Mutex<Option<broadcast::Receiver<SignalEvent>>>,
-    /// 引擎面（真=SysEngine 直通 / 测试=FakeEngine 注入，S6 批0/K11）。
-    engine: Arc<dyn Engine>,
-    /// consume 建立的 recv PC 保活（句柄即生命周期）。
-    _pcs: Vec<Arc<dyn PcHandle>>,
 }
 
 impl RoomSession {
@@ -97,7 +100,14 @@ impl RoomSession {
     /// "进而不解" 二分的定案读点；track_id = offer msid 注入的 "video"）。
     #[must_use]
     pub fn video_receiver_stats(&self) -> Vec<mediaservo_webrtc::stats::RTCStats> {
-        self._pcs.iter().flat_map(|pc| pc.receiver_stats("video")).collect()
+        // 全路并集（与旧 _pcs flat_map 语义逐位一致；单路读数走 Consumer::stats）。
+        self.ctx
+            .slots
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .flat_map(|slot| slot.receiver_stats())
+            .collect()
     }
 
     /// 消费面视频统计汇总（W3 mini-stats 数据源）：本会话全部 inbound-rtp 折叠。
@@ -123,6 +133,7 @@ impl RoomSession {
         }
         ctl.send_envelope(label, &env).await?; // DC 快路径先行（急停语义 = 不等审计副本）
         let _ = self
+            .ctx
             .signal
             .send(SignalingMessage::ControlAudit {
                 room_id: self.room_id().to_string(),
@@ -147,44 +158,47 @@ impl RoomSession {
     }
 
     /// 信令连接 + 入房 + 引擎注入（S6 批0/K11：测试以 FakeEngine 走全链确定性演练）。
+    ///
+    /// S6/K1：创建 SupervisorCtx（持有 Arc<SignalClient> 供 supervisor 重连），
+    /// 订阅事件流后 spawn epoch-1 forwarder + supervisor。
     pub async fn connect_with_engine(
         cfg: &ClientConfig,
         engine: Arc<dyn Engine>,
     ) -> Result<Self, ClientError> {
-        let mut client = SignalClient::new(
+        let client = SignalClient::new(
             &cfg.signaling_url,
             cfg.psk.as_deref().unwrap_or(""),
             &cfg.room_id,
             cfg.role.clone(),
         );
-        if let Some(jwt) = &cfg.jwt {
-            client = client.with_jwt(jwt.clone());
-        }
+        let client = if let Some(jwt) = &cfg.jwt { client.with_jwt(jwt.clone()) } else { client };
         let session = client.connect().await.map_err(classify_link_error)?;
-        let events = session.events();
-        // S2d: 第二流与主流同刻订阅（LinkSignal::events 在 async 态 blocking_lock
+        // 第二流与主流同刻订阅（LinkSignal::events 在 async 态 blocking_lock
         // 会 panic——订阅必须在此同步点完成）。
+        let raw_events = session.events();
         let pump_events = session.events();
-        let signal = LinkSignal::new(session, sfu_peer_key(&cfg.role).to_string());
+        let signal = Arc::new(LinkSignal::new(session, sfu_peer_key(&cfg.role).to_string()));
+        let client = Arc::new(client);
+        let ctx = SupervisorCtx::new(signal, client, engine, raw_events);
+        let events = ctx.ev_tx.subscribe();
+        supervisor::start(&ctx);
         Ok(Self {
-            signal: Arc::new(signal),
+            ctx,
             hmac_key: cfg.hmac_key.clone(),
             events: Mutex::new(events),
             pump_events: Mutex::new(Some(pump_events)),
-            engine,
-            _pcs: Vec::new(),
         })
     }
 
     /// 谈成的方言版本（S0；旧 server = 1）。
     #[must_use]
     pub fn negotiated(&self) -> u32 {
-        self.signal.negotiated()
+        self.ctx.signal.negotiated()
     }
 
     #[must_use]
     pub fn room_id(&self) -> &str {
-        self.signal.room_id()
+        self.ctx.signal.room_id()
     }
 
     /// 等待房间内的视频 producer（join 时 server 对存量 producer 回放 NewProducer）。
@@ -214,107 +228,47 @@ impl RoomSession {
         .map_err(|_| ClientError::Timeout { what: "video NewProducer" })?
     }
 
-    /// 订阅一路视频 producer：Recv transport → Consume（拿 ssrc）→ answerer
-    /// 协商 → Connect → on_track 帧流。镜像 field PullSession::subscribe。
+    /// S6/K4: 订阅一路视频 producer，返回 [`Consumer`] 句柄（多路注册）。
+    ///
+    /// 序列 = 旧 consume_video 原体（挪入 [`consume_sequence`]，零复制）；差异 =
+    /// pc 挂注册槽：帧通道 frame_tx 随槽存续，K1 重连重放换 pc 不换槽，app
+    /// 手里的 receiver 跨重连续流（无感）。与重放经 consume_lock 串行（K1）。
+    pub async fn consume(&self, producer_id: &str) -> Result<Consumer, ClientError> {
+        let _seq = self.ctx.consume_lock.lock().await;
+        let mut ev = self.events.lock().await;
+        let (frame_tx, frame_rx) = mpsc::channel::<VideoFrame>(3);
+        let pc = consume_sequence(
+            producer_id,
+            &self.ctx.engine,
+            &self.ctx.signal,
+            &mut ev,
+            frame_tx.clone(),
+        )
+        .await?;
+        let slot = Arc::new(ConsumerSlot::new(producer_id, frame_tx));
+        slot.set_pc(pc);
+        self.ctx.slots.lock().unwrap_or_else(|e| e.into_inner()).push(slot.clone());
+        Ok(Consumer::new(producer_id.to_string(), slot, frame_rx))
+    }
+
+    /// 旧形桥（R3 行为重映射）：等价 `consume(p).await?.into_receiver()`，
+    /// 返回裸帧流接收端，行为与旧 consume_video 逐字节一致。
     pub async fn consume_video(
         &mut self,
         producer_id: &str,
     ) -> Result<mpsc::Receiver<VideoFrame>, ClientError> {
-        let mut ev = self.events.lock().await;
-        let room = self.signal.room_id().to_string();
-        let peer = self.signal.sfu_peer_id().to_string();
-
-        // 1. Recv transport
-        self.signal
-            .send(SignalingMessage::CreateWebRtcTransport {
-                room_id: room.clone(),
-                peer_id: peer.clone(),
-                direction: TransportDirection::Recv,
-            })
-            .await?;
-        let (transport_id, ice, dtls, candidates) =
-            tokio::time::timeout(RESPONSE_WAIT, await_transport_created(&mut ev))
-                .await
-                .map_err(|_| ClientError::Timeout { what: "WebRtcTransportCreated(recv)" })??;
-
-        // 2. PC（mediasoup ICE-Lite，无 STUN）+ on_track 先于 set_remote（晚注册丢首 track）
-        let pc = self.engine.create_pc().await?;
-        let (frame_tx, frame_rx) = mpsc::channel::<VideoFrame>(3);
-        pc.on_track(Box::new(move |track| {
-            // S2c 诊断（常久日志）：on_track 到达 = RTP 已 demux 成 track；
-            // 「ICE/DTLS 通过但零帧」的分水岭判据。
-            tracing::info!(kind = ?track.kind, track_id = ?track.track_id, "consume on_track 到达");
-            track.set_frame_sink(Box::new(FrameChanSink { tx: frame_tx.clone() }));
-        }));
-
-        // 3a. Router 能力查询直传（mediasoup-client Device.load 同款官方流程，C18；
-        //     手拼 caps 在 H264 producer 下必拒——S2b 活体教训，PullSession 同罪另案）。
-        self.signal
-            .send(SignalingMessage::GetRouterRtpCapabilities { room_id: room.clone() })
-            .await?;
-        let router_caps = tokio::time::timeout(RESPONSE_WAIT, await_router_caps(&mut ev))
-            .await
-            .map_err(|_| ClientError::Timeout { what: "RouterRtpCapabilities" })??;
-
-        // 3b. Consume（C1 显式绑 transport_id；caps = router 原样回包）
-        self.signal
-            .send(SignalingMessage::Consume {
-                room_id: room.clone(),
-                peer_id: peer.clone(),
-                producer_id: producer_id.to_string(),
-                rtp_capabilities: router_caps,
-                transport_id: Some(transport_id.clone()),
-            })
-            .await?;
-        let consumer_rtp = tokio::time::timeout(RESPONSE_WAIT, await_consumed(&mut ev))
-            .await
-            .map_err(|_| ClientError::Timeout { what: "Consumed" })??;
-
-        // 4. remote SDP：codec 取自 consumer rtp_parameters，注入 ssrc 供 demux
-        let (pt, name, clock, fmtp) = sfu::codec_from_consumer(&consumer_rtp).ok_or_else(|| {
-            ClientError::MalformedResponse("Consumed rtp_parameters 无 video codec".into())
-        })?;
-        let remote_sdp = sfu::build_recv_video_sdp(
-            &ice,
-            &dtls,
-            candidates.as_ref(),
-            pt,
-            &name,
-            clock,
-            fmtp.as_deref(),
-        );
-        let remote_sdp = sfu::inject_remote_ssrc(&remote_sdp, &consumer_rtp);
-
-        // 5. answerer 收口：add_transceiver(recvonly) → set_remote(offer) → answer
-        pc.add_transceiver(
-            TrackKind::Video,
-            RTCRtpTransceiverInit {
-                direction: RTCRtpTransceiverDirection::Recvonly,
-                ..Default::default()
-            },
-        )?;
-        tracing::debug!(remote_sdp = %remote_sdp, "consume remote offer（SSRC 注入后）");
-        pc.set_remote_offer(remote_sdp).await?;
-        let answer = pc.create_answer().await?;
-        pc.set_local_answer(&answer).await?;
-
-        // 6. Connect（本地 DTLS 指纹，role=client）
-        connect_transport(&*self.signal, &room, &peer, &transport_id, &pc).await?;
-
-        self._pcs.push(pc);
-        tracing::info!(producer_id, transport_id = %transport_id, "client consume_video 建立");
-        Ok(frame_rx)
+        self.consume(producer_id).await.map(Consumer::into_receiver)
     }
 
     /// 开出程控制通道集（host S1 镜像）。前置 I5 门：方言 ≥2，否则本地预拒。
     pub async fn open_control(&mut self, labels: &[&str]) -> Result<ControlChannel, ClientError> {
-        let got = self.signal.negotiated();
+        let got = self.ctx.signal.negotiated();
         if got < CONTROL_MIN_PROTOCOL {
             return Err(ClientError::ProtocolTooLow { need: CONTROL_MIN_PROTOCOL, got });
         }
         let mut ev = self.events.lock().await;
-        let room = self.signal.room_id().to_string();
-        let peer = self.signal.sfu_peer_id().to_string();
+        let room = self.ctx.signal.room_id().to_string();
+        let peer = self.ctx.signal.sfu_peer_id().to_string();
         // S2d: 取 connect 同刻预订阅的第二流（建立期车端 ack announce 零缺口）。
         let pump_ev =
             self.pump_events.lock().await.take().ok_or_else(|| {
@@ -322,7 +276,8 @@ impl RoomSession {
             })?;
 
         // 1. Send transport
-        self.signal
+        self.ctx
+            .signal
             .send(SignalingMessage::CreateWebRtcTransport {
                 room_id: room.clone(),
                 peer_id: peer.clone(),
@@ -335,7 +290,7 @@ impl RoomSession {
                 .map_err(|_| ClientError::Timeout { what: "WebRtcTransportCreated(send)" })??;
 
         // 2. PC + 合成 offer set_remote；DC 必须先于 answer 创建（S1 时序合同）
-        let pc = self.engine.create_pc().await?;
+        let pc = self.ctx.engine.create_pc().await?;
         let remote_sdp = sfu::build_dc_remote_sdp(&ice, &dtls, candidates.as_ref());
         pc.set_remote_offer(remote_sdp).await?;
 
@@ -353,13 +308,14 @@ impl RoomSession {
         // 4. answer/connect 收口
         let answer = pc.create_answer().await?;
         pc.set_local_answer(&answer).await?;
-        connect_transport(&*self.signal, &room, &peer, &transport_id, &pc).await?;
+        connect_transport(&*self.ctx.signal, &room, &peer, &transport_id, &pc).await?;
 
         // 5. 逐 DC CreateDataProducer announce（4012 → ControlDenied 终态）
         let mut producer_ids = Vec::with_capacity(order.len());
         for label in &order {
             let dc = &dcs[label];
-            self.signal
+            self.ctx
+                .signal
                 .send(SignalingMessage::CreateDataProducer {
                     room_id: room.clone(),
                     peer_id: peer.clone(),
@@ -384,8 +340,8 @@ impl RoomSession {
         //    consumer DC 的 ControlAck 路由进 ack_rx（recv_ack 的正式供数来源）。
         tokio::spawn(ack_consumer_pump(
             pump_ev,
-            self.signal.clone(),
-            self.engine.clone(),
+            self.ctx.signal.clone(),
+            self.ctx.engine.clone(),
             room,
             peer,
             ack_tx,
@@ -394,10 +350,129 @@ impl RoomSession {
         Ok(ControlChannel::new(dcs, order, ack_rx, producer_ids, pc))
     }
 
-    /// 关闭会话（释放 WS + 后台任务；帧/ack 流随 drop 收敛）。
+    /// 关闭会话（shutdown supervisor + 释放 WS；帧/ack 流随 drop 收敛）。
     pub async fn close(self) -> Result<(), ClientError> {
-        self.signal.close().await
+        self.ctx.shutdown();
+        self.ctx.signal.close().await
     }
+
+    /// S6/K1: 信令连接态观测（单一 watch 真源；重连/终态实时可读）。
+    #[must_use]
+    pub fn connection_state(&self) -> ConnectionState {
+        self.ctx.state()
+    }
+
+    /// S6/K1: 信令连接态变更流（subscriber 语义；重连/终态自动推送）。
+    #[must_use]
+    pub fn subscribe_connection_state(&self) -> tokio::sync::watch::Receiver<ConnectionState> {
+        self.ctx.subscribe_state()
+    }
+
+    /// S6/K1: 动态切换自动重连（D273 红牌语义：Failed = auth 族终态，不受此开关控制）。
+    ///
+    /// **DEVIATION**：设计最初考虑为 ClientConfig 字段，但 client-c lib.rs:238
+    /// 的 ClientConfig 是 exhaustive 字面量，新增字段 = C ABI break（本批禁触），
+    /// 故改为运行时方法（K5 亦用运行时 setter 形）。
+    pub fn set_auto_reconnect(&mut self, on: bool) {
+        self.ctx.set_auto_reconnect(on);
+    }
+}
+
+impl Drop for RoomSession {
+    fn drop(&mut self) {
+        self.ctx.shutdown();
+    }
+}
+
+/// K4/K1: 单路视频收流建立全序列（Recv transport → router caps → Consume →
+/// answerer 协商 → Connect）。自旧 consume_video 原体抽出 = K1 重放共用，零复制。
+/// 帧出口由 `frame_tx` 注入（槽持有的长寿命 sender；on_track 每 sink 克隆一份）。
+pub(crate) async fn consume_sequence(
+    producer_id: &str,
+    engine: &Arc<dyn Engine>,
+    signal: &LinkSignal,
+    ev: &mut broadcast::Receiver<SignalEvent>,
+    frame_tx: mpsc::Sender<VideoFrame>,
+) -> Result<Arc<dyn PcHandle>, ClientError> {
+    let room = signal.room_id().to_string();
+    let peer = signal.sfu_peer_id().to_string();
+
+    // 1. Recv transport
+    signal
+        .send(SignalingMessage::CreateWebRtcTransport {
+            room_id: room.clone(),
+            peer_id: peer.clone(),
+            direction: TransportDirection::Recv,
+        })
+        .await?;
+    let (transport_id, ice, dtls, candidates) =
+        tokio::time::timeout(RESPONSE_WAIT, await_transport_created(ev))
+            .await
+            .map_err(|_| ClientError::Timeout { what: "WebRtcTransportCreated(recv)" })??;
+
+    // 2. PC（mediasoup ICE-Lite，无 STUN）+ on_track 先于 set_remote（晚注册丢首 track）
+    let pc = engine.create_pc().await?;
+    pc.on_track(Box::new(move |track| {
+        // S2c 诊断（常久日志）：on_track 到达 = RTP 已 demux 成 track；
+        // 「ICE/DTLS 通过但零帧」的分水岭判据。
+        tracing::info!(kind = ?track.kind, track_id = ?track.track_id, "consume on_track 到达");
+        track.set_frame_sink(Box::new(FrameChanSink { tx: frame_tx.clone() }));
+    }));
+
+    // 3a. Router 能力查询直传（mediasoup-client Device.load 同款官方流程，C18；
+    //     手拼 caps 在 H264 producer 下必拒——S2b 活体教训，PullSession 同罪另案）。
+    signal.send(SignalingMessage::GetRouterRtpCapabilities { room_id: room.clone() }).await?;
+    let router_caps = tokio::time::timeout(RESPONSE_WAIT, await_router_caps(ev))
+        .await
+        .map_err(|_| ClientError::Timeout { what: "RouterRtpCapabilities" })??;
+
+    // 3b. Consume（C1 显式绑 transport_id；caps = router 原样回包）
+    signal
+        .send(SignalingMessage::Consume {
+            room_id: room.clone(),
+            peer_id: peer.clone(),
+            producer_id: producer_id.to_string(),
+            rtp_capabilities: router_caps,
+            transport_id: Some(transport_id.clone()),
+        })
+        .await?;
+    let consumer_rtp = tokio::time::timeout(RESPONSE_WAIT, await_consumed(ev))
+        .await
+        .map_err(|_| ClientError::Timeout { what: "Consumed" })??;
+
+    // 4. remote SDP：codec 取自 consumer rtp_parameters，注入 ssrc 供 demux
+    let (pt, name, clock, fmtp) = sfu::codec_from_consumer(&consumer_rtp).ok_or_else(|| {
+        ClientError::MalformedResponse("Consumed rtp_parameters 无 video codec".into())
+    })?;
+    let remote_sdp = sfu::build_recv_video_sdp(
+        &ice,
+        &dtls,
+        candidates.as_ref(),
+        pt,
+        &name,
+        clock,
+        fmtp.as_deref(),
+    );
+    let remote_sdp = sfu::inject_remote_ssrc(&remote_sdp, &consumer_rtp);
+
+    // 5. answerer 收口：add_transceiver(recvonly) → set_remote(offer) → answer
+    pc.add_transceiver(
+        TrackKind::Video,
+        RTCRtpTransceiverInit {
+            direction: RTCRtpTransceiverDirection::Recvonly,
+            ..Default::default()
+        },
+    )?;
+    tracing::debug!(remote_sdp = %remote_sdp, "consume remote offer（SSRC 注入后）");
+    pc.set_remote_offer(remote_sdp).await?;
+    let answer = pc.create_answer().await?;
+    pc.set_local_answer(&answer).await?;
+
+    // 6. Connect（本地 DTLS 指纹，role=client）
+    connect_transport(signal, &room, &peer, &transport_id, &pc).await?;
+
+    tracing::info!(producer_id, transport_id = %transport_id, "client consume_video 建立");
+    Ok(pc)
 }
 
 async fn connect_transport(

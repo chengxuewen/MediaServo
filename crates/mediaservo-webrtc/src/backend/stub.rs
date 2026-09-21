@@ -261,6 +261,10 @@ impl DcBackend for StubDc {
         RTCDataChannelState::Closed
     }
 
+    async fn buffered_amount(&self) -> u64 {
+        0
+    }
+
     async fn send(&self, _: &[u8]) -> Result<(), RTCError> {
         Ok(())
     }

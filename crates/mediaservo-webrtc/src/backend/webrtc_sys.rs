@@ -1187,6 +1187,11 @@ impl DcBackend for WebrtcSysDc {
         }
     }
 
+    /// S6/K5: libwebrtc 原生同步读（FFI 已含 buffered_amount，补最后一段封装）。
+    async fn buffered_amount(&self) -> u64 {
+        self.dc.buffered_amount()
+    }
+
     async fn send(&self, data: &[u8]) -> Result<(), RTCError> {
         let buf = webrtc_sys::data_channel::ffi::DataBuffer {
             ptr: data.as_ptr(),

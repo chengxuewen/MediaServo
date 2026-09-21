@@ -10,13 +10,13 @@
 //! ponytail: 全局锁，若演练并行化出现竞争再分 pc 锁。
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use async_trait::async_trait;
 use tokio::sync::{broadcast, mpsc};
 
-use mediaservo_webrtc::data_channel::RTCDataChannelInit;
+use mediaservo_webrtc::data_channel::{RTCDataChannelInit, RTCDataChannelState};
 use mediaservo_webrtc::rtp::RTCRtpTransceiverInit;
 use mediaservo_webrtc::stats::{RTCInboundRtpStreamStats, RTCStats};
 use mediaservo_webrtc::track::{FrameSink, TrackKind};
@@ -159,6 +159,28 @@ impl FakeEngine {
         hit
     }
 
+    /// K5 演练位：按 label 定向关闭 DC（state → Closed；ready_state 最差态聚合断言用）。
+    pub fn close_dc(&self, label: &str) {
+        for pc in self.live_pcs() {
+            for dc in pc.dcs_snapshot() {
+                if dc.label_inner() == label {
+                    dc.close_inner();
+                }
+            }
+        }
+    }
+
+    /// K5 演练位：把匹配 label 的 DC 待发队列覆写为指定字节数（模拟拥塞水位）。
+    pub fn set_dc_buffered(&self, label: &str, bytes: u64) {
+        for pc in self.live_pcs() {
+            for dc in pc.dcs_snapshot() {
+                if dc.label_inner() == label {
+                    dc.buffered.store(bytes as usize, Ordering::Release);
+                }
+            }
+        }
+    }
+
     /// 出程记账读取：该 label 已真实送达的文本序列（drop_dc_mid_send 的不计入）。
     #[must_use]
     pub fn sent_texts(&self, label: &str) -> Vec<String> {
@@ -180,10 +202,13 @@ impl Engine for FakeEngine {
     }
 }
 
+/// on_track 回调槽类型（clippy type_complexity 豁免面收敛成别名）。
+type OnTrackCb = Arc<dyn Fn(EngineTrack) + Send + Sync + 'static>;
+
 /// pc 可变内核（回调槽 / track / DC / stats）。
 #[derive(Default)]
 struct FakePcInner {
-    on_track: Mutex<Option<Arc<dyn Fn(EngineTrack) + Send + Sync + 'static>>>,
+    on_track: Mutex<Option<OnTrackCb>>,
     had_remote: AtomicBool,
     tracks: Mutex<Vec<Arc<FakeTrack>>>,
     dcs: Mutex<Vec<Arc<FakeDc>>>,
@@ -314,6 +339,8 @@ impl PcHandle for FakePc {
             label: label.to_string(),
             id,
             open: AtomicBool::new(auto_open),
+            closed: AtomicBool::new(false),
+            buffered: AtomicUsize::new(0),
             tx,
             st: self.st.clone(),
         });
@@ -350,6 +377,10 @@ struct FakeDc {
     label: String,
     id: i32,
     open: AtomicBool,
+    /// K5 演练位：close 后 state 报 Closed（open=false 单旗标区分不了未开/已关）。
+    closed: AtomicBool,
+    /// K5 演练位：待发队列记账（send 实送达累加；set_dc_buffered 覆写）。
+    buffered: AtomicUsize,
     tx: broadcast::Sender<EngineDcEvent>,
     st: Arc<Mutex<St>>,
 }
@@ -373,6 +404,13 @@ impl FakeDc {
     fn push_message(&self, bytes: Vec<u8>) {
         let _ = self.tx.send(EngineDcEvent::Message(bytes));
     }
+
+    /// 同步关闭内核（async close 与 FakeEngine::close_dc 共用——旗标+事件，无 await）。
+    fn close_inner(&self) {
+        self.open.store(false, Ordering::Release);
+        self.closed.store(true, Ordering::Release);
+        let _ = self.tx.send(EngineDcEvent::Closed);
+    }
 }
 
 #[async_trait]
@@ -383,6 +421,21 @@ impl DcHandle for FakeDc {
 
     fn id(&self) -> i32 {
         self.id
+    }
+
+    /// 三态映射：open → Open；close 过 → Closed；其余（auto_open=false 未推）→ Connecting。
+    fn state(&self) -> RTCDataChannelState {
+        if self.open.load(Ordering::Acquire) {
+            RTCDataChannelState::Open
+        } else if self.closed.load(Ordering::Acquire) {
+            RTCDataChannelState::Closed
+        } else {
+            RTCDataChannelState::Connecting
+        }
+    }
+
+    async fn buffered_amount(&self) -> u64 {
+        self.buffered.load(Ordering::Acquire) as u64
     }
 
     async fn send_text(&self, text: &str) -> Result<(), ClientError> {
@@ -396,6 +449,7 @@ impl DcHandle for FakeDc {
             return Ok(());
         }
         st.sent.entry(self.label.clone()).or_default().push(text.to_string());
+        self.buffered.fetch_add(text.len(), Ordering::AcqRel);
         Ok(())
     }
 
@@ -419,8 +473,7 @@ impl DcHandle for FakeDc {
     }
 
     async fn close(&self) {
-        self.open.store(false, Ordering::Release);
-        let _ = self.tx.send(EngineDcEvent::Closed);
+        self.close_inner();
     }
 }
 

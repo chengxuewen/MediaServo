@@ -313,6 +313,8 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
 
 pub(crate) trait DcBackend: Send + Sync + 'static {
     fn state(&self) -> RTCDataChannelState;
+    /// S6/K5: 待发队列字节数（背压可观测；W3 bufferedAmount 语义）。
+    async fn buffered_amount(&self) -> u64;
     async fn send(&self, data: &[u8]) -> Result<(), RTCError>;
     async fn send_text(&self, text: &str) -> Result<(), RTCError>;
     async fn spool(&self) -> RTCDataChannelRx;

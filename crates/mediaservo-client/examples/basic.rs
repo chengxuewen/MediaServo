@@ -14,8 +14,8 @@
 
 use std::time::Duration;
 
-use mediaservo_client::{RoomSession, auth::login, config::http_base_from_signaling};
 use mediaservo_client::ClientConfig;
+use mediaservo_client::{RoomSession, auth::login, config::http_base_from_signaling};
 use mediaservo_common::protocol::PeerRole;
 
 #[tokio::main]
@@ -63,23 +63,29 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // 3. 消费一路视频并取首帧（late-join NewProducer 回放 ≤30s）。
     //    MSRTC_SKIP_VIDEO=1：纯控制回路验证（整车房间——controller  producers/消费皆在此）。
     let skip_video = std::env::var("MSRTC_SKIP_VIDEO").is_ok_and(|v| v == "1");
-    let producer = if skip_video { String::new() } else { session.wait_video_producer(Duration::from_secs(30)).await? };
-    if !skip_video { println!("video producer discovered: {producer}"); }
-    if !skip_video {
-    let mut frames = session.consume_video(&producer).await?;
-    let frame = match tokio::time::timeout(Duration::from_secs(30), frames.recv()).await {
-        Ok(Some(f)) => f,
-        Ok(None) => return Err("frame stream closed".into()),
-        Err(_) => {
-            // S2c 二分判据：超时即 dump 收侧 stats（packetsReceived>0 而不解码=解码/mid 面；
-            // 0 包=到达性/SRTP 面）。
-            for s in session.video_receiver_stats() {
-                println!("receiver-stats {s:?}");
-            }
-            return Err("timeout waiting first video frame".into());
-        }
+    let producer = if skip_video {
+        String::new()
+    } else {
+        session.wait_video_producer(Duration::from_secs(30)).await?
     };
-    println!("first frame {}x{} ({}B I420)", frame.width, frame.height, frame.data.len());
+    if !skip_video {
+        println!("video producer discovered: {producer}");
+    }
+    if !skip_video {
+        let mut frames = session.consume_video(&producer).await?;
+        let frame = match tokio::time::timeout(Duration::from_secs(30), frames.recv()).await {
+            Ok(Some(f)) => f,
+            Ok(None) => return Err("frame stream closed".into()),
+            Err(_) => {
+                // S2c 二分判据：超时即 dump 收侧 stats（packetsReceived>0 而不解码=解码/mid 面；
+                // 0 包=到达性/SRTP 面）。
+                for s in session.video_receiver_stats() {
+                    println!("receiver-stats {s:?}");
+                }
+                return Err("timeout waiting first video frame".into());
+            }
+        };
+        println!("first frame {}x{} ({}B I420)", frame.width, frame.height, frame.data.len());
     }
 
     // 4. 控制出程：open → send → ack
@@ -113,7 +119,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // S4/a4：急停双路演示（MSRTC_ESTOP=1 触发；DC sig + WS 审计副本 + 车端 actuation 留痕）。
     if std::env::var("MSRTC_ESTOP").is_ok_and(|v| v == "1") {
         session.emergency_stop(&mut ctl, &label, 900, serde_json::json!({"reason":"demo"})).await?;
-        println!("estop sent (sig={})", if session.hmac_key_debug_present() { "signed" } else { "unsigned" });
+        println!(
+            "estop sent (sig={})",
+            if session.hmac_key_debug_present() { "signed" } else { "unsigned" }
+        );
         let estop_ack = ctl.recv_ack_for(900, Duration::from_secs(10)).await?;
         println!("estop ack result={}", estop_ack.result);
     }

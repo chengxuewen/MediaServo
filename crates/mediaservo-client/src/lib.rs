@@ -41,15 +41,20 @@
 
 pub mod auth;
 pub mod config;
+pub mod consumer;
 pub mod control;
 pub mod engine;
 pub mod error;
 pub mod session;
 pub mod sfu;
 pub mod signal;
+pub mod supervisor;
 
 pub use auth::{LoginOutcome, RoomInfo, list_rooms, login};
 pub use config::ClientConfig;
+pub use consumer::Consumer;
 pub use control::ControlChannel;
 pub use error::ClientError;
+pub use mediaservo_webrtc::data_channel::RTCDataChannelState;
 pub use session::{RoomSession, VideoFrame, VideoStreamStats};
+pub use supervisor::ConnectionState;

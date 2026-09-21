@@ -55,6 +55,11 @@ impl RTCDataChannel {
         self.backend.state()
     }
 
+    /// S6/K5: 待发队列字节数（拥塞水位判据；急停投递前预检用）。
+    pub async fn buffered_amount(&self) -> u64 {
+        self.backend.buffered_amount().await
+    }
+
     pub async fn send(&self, data: &[u8]) -> Result<(), RTCError> {
         self.backend.send(data).await
     }
