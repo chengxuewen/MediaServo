@@ -1189,23 +1189,29 @@ def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
         sys.exit(1)
     lib_dir = prefix_p / "lib"
     lib_dir.mkdir(parents=True, exist_ok=True)
-    sos = []
-    for so in sorted((src / "lib").glob("libmediaservo_*.so*")):
-        _copy_with_kill(so, lib_dir / so.name)  # busy（运行中加载）→ 杀占用重试
-        sos.append(so.name)
-    # lib/ 内子目录（pkgconfig/cmake）——.so 已单独 busy 重试，子目录直接整树复制
-    for sub in sorted((src / "lib").iterdir()):
-        if sub.is_dir():
-            shutil.copytree(sub, lib_dir / sub.name, dirs_exist_ok=True)
-    # 其余（include/.pc/cmake/python/wheel/node）整树复制——.so 已单独 busy 重试
-    for e in sorted(src.iterdir()):
-        if e.name == "lib":
-            continue
-        dst = prefix_p / e.name
-        if e.is_dir():
-            shutil.copytree(e, dst, dirs_exist_ok=True)
-        elif e.is_file() or e.is_symlink():
-            shutil.copy2(e, dst, follow_symlinks=False)
+    # 同树幂等守卫（build:deploy bindings 默认前缀=out/bindings=组装源本身）：
+    # build 阶段已把 lib/include/cmake/wheel 装配到位，再复制=SameFileError（09-21 实炸；
+    # server/host 部署 L982 同款，bindings 路径漏了——V1b 交付面扩 client.so 后首咬）。
+    if prefix_p.resolve() == src.resolve():
+        sos = sorted(x.name for x in (src / "lib").glob("libmediaservo_*.so*"))
+    else:
+        sos = []
+        for so in sorted((src / "lib").glob("libmediaservo_*.so*")):
+            _copy_with_kill(so, lib_dir / so.name)  # busy（运行中加载）→ 杀占用重试
+            sos.append(so.name)
+        # lib/ 内子目录（pkgconfig/cmake）——.so 已单独 busy 重试，子目录直接整树复制
+        for sub in sorted((src / "lib").iterdir()):
+            if sub.is_dir():
+                shutil.copytree(sub, lib_dir / sub.name, dirs_exist_ok=True)
+        # 其余（include/.pc/cmake/python/wheel/node）整树复制——.so 已单独 busy 重试
+        for e in sorted(src.iterdir()):
+            if e.name == "lib":
+                continue
+            dst = prefix_p / e.name
+            if e.is_dir():
+                shutil.copytree(e, dst, dirs_exist_ok=True)
+            elif e.is_file() or e.is_symlink():
+                shutil.copy2(e, dst, follow_symlinks=False)
     print(f"bindings 已部署到 {prefix}（lib/ {', '.join(sos)} + include/mediaservo + pkgconfig + cmake + python + wheel + node）")
     print("  使用: export LD_LIBRARY_PATH=<prefix>/lib && 链接库见 bindings 头文件；python: pip install <prefix>/wheel/*.whl")
 
