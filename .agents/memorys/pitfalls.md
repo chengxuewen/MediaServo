@@ -1685,3 +1685,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **根因**: 批插正则匹配 `fn name() {`（含带返回值形），把 helper `fn open_camera() -> *mut ...` 也插了守卫；持锁测试（camera_open_*_roundtrip）内部调用 open_camera → 同线程二次 lock 非重入 std::Mutex → 永久阻塞，锁被死后其余测试排队全灭。「通过=首刀 link-c 骗过了形状审查」。
 - **解法**: 插锁批脚本必须以 `#[test]`/`#[tokio::test]` **属性在场**为唯一判据（doc 注释与空行可穿越），非属性 fn 一律跳过；批插后立即单包跑（勿只跑看起来干净的那个）+卡相>60s 首查锁链非慢测试。
 - **验证**: `grep -n "TEST_LOCK.lock()" lib.rs` 计数 == `grep -c "#\[test\]\|#\[tokio::test\]"` 计数（helper 零守卫形状等式）；deck-c 21/0 0.01s（拆 helper 后从卡死到秒级）。
+
+## PIT-206: link WS 泵读错误支只发 Error 不发 Disconnected——RST 形断链下游永久失声（2026-09-21）
+- **症状**: S6 drill e/f `wait_state` 2s 超时——kick（对端裸 drop）后 client supervisor 的 dead 信永不到达；正向 Close/None 路径正常。
+- **根因**: signal.rs 泵 `Some(Err(e))` 臂 `events_tx.send(Error)` + break——「连接已死」这一事实在错误支被吞。凡按事件分派的下游只等 Disconnected 语义 = 永久静默。旧兜底唯一=心跳 15s 静默判死（把协议错误伪装成慢）。
+- **解法**: Err 支 Error 后**追发** Disconnected{reason}（与 Close/None 同事实三臂对齐）；消费方核查纪律：Error 臂语义各有真实消费者（controller 致命返错/streamer warn 续）不可挪用，断开=独立事件补发。
+- **验证**: ⚠ 修复 7439cc2 **当前无回归钉**（link tests grep 0 命中）——1c 首刀补：mock WS 发畸形帧制造 Some(Err) → 断言 events 序列含 Error 后跟 Disconnected。
+- **禁止**: 任何「事件面单臂沉默终态事实」的泵实现；新增事件消费方前先对表泵的全部 break 臂各发了什么。
