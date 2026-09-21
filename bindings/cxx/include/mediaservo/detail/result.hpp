@@ -18,14 +18,28 @@
 
 #include <mediaservo/3rdparty/tl/expected.hpp>
 
+#include <cstdint>
 #include <string>
 
 namespace mediaservo {
 
 /// 错误详情（code 为对应 SDK C 头 MEDIASERVO_<SDK>_ERR_* 值；message 读自 last_error）。
+///
+/// S6 批1b 追加机读位（client 家族填充；link/deck/field 恒 0/false）：
+/// wire_code = server 线码回读（0=本地/无码域）；retryable = 可重试族
+/// （D273 分类的 C++ 镜像）。构造器形保持全部既有 `Error{code, msg}` 两参
+/// brace-init 源兼容且不触发 -Wmissing-field-initializers（C++11 起步编译面）；
+/// header-only 无 ABI 承诺（D241 仅锁 C ABI）。
 struct Error {
     int code;
     std::string message;
+    uint16_t wire_code;
+    bool retryable;
+
+    Error() : code(0), message(), wire_code(0), retryable(false) {}
+    Error(int c, std::string m) : code(c), message(std::move(m)), wire_code(0), retryable(false) {}
+    Error(int c, std::string m, uint16_t w, bool r)
+        : code(c), message(std::move(m)), wire_code(w), retryable(r) {}
 };
 
 /// 原生 tl::expected API（has_value()/value()/error()/value_or()，无 operator bool）。

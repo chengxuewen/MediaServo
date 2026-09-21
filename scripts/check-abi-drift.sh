@@ -9,8 +9,7 @@ export PATH="$HOME/.pixi/bin:$PATH"
 FAIL=0
 
 for sdk in field link deck client; do
-    # client C 面前缀=ms_client_（非 mediaservo_client_，V2 入列时核实）
-    case "$sdk" in client) SYM="ms_client_";; *) SYM="mediaservo_${sdk}_";; esac
+    SYM="mediaservo_${sdk}_"
     HDR="bindings/c/mediaservo-$sdk-c/include/mediaservo/$sdk.h"
     SO="target/debug/libmediaservo_$sdk.so"
     if [ ! -f "$SO" ]; then

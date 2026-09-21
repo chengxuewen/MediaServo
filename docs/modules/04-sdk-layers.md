@@ -30,10 +30,20 @@ mediaservo-client（舱端消费编排）── 依赖 field ──（+ deck pla
 
 | SDK | crate | 职责 | C ABI 前缀 |
 |-----|-------|------|-----------|
-| **link** | `mediaservo-link` | frame_bus（两端通用帧总线 + Registry）、signal（WS 信令客户端）、auth 集成（复用 common PSK/JWT）、dc（Phase2, webrtc 后端） | `ms_link_*` |
-| **field** | `mediaservo-field` | **组合 SDK**: push/pull（webrtc 经 mediaservo-webrtc, C12）+ re-export link（SignalClient/FrameBus/auth）+ re-export deck（MediaDevices/VideoSource/CameraSource）——一行依赖完整闭环 | `ms_field_*` |
-| **client** | `mediaservo-client` | **消费编排**: VideoRenderer（GPU interop）、多路会话编排、Input Forward/遥测绑定、deck playback 集成 | `ms_client_*` |
-| **deck** | `mediaservo-deck` | source（相机/麦克风/桌面, GStreamer）、codec（FFmpeg 静态）、record（mux 落盘）、playback（回放/快放） | `ms_deck_*` |
+| **link** | `mediaservo-link` | frame_bus（两端通用帧总线 + Registry）、signal（WS 信令客户端）、auth 集成（复用 common PSK/JWT）、dc（Phase2, webrtc 后端） | `mediaservo_link_*` |
+| **field** | `mediaservo-field` | **组合 SDK**: push/pull（webrtc 经 mediaservo-webrtc, C12）+ re-export link（SignalClient/FrameBus/auth）+ re-export deck（MediaDevices/VideoSource/CameraSource）——一行依赖完整闭环 | `mediaservo_field_*` |
+| **client** | `mediaservo-client` | **消费编排**: VideoRenderer（GPU interop）、多路会话编排、Input Forward/遥测绑定、deck playback 集成 | `mediaservo_client_*`（批1b 终形 28 符号，见下注） |
+| **deck** | `mediaservo-deck` | source（相机/麦克风/桌面, GStreamer）、codec（FFmpeg 静态）、record（mux 落盘）、playback（回放/快放） | `mediaservo_deck_*` |
+
+> **client C ABI 批1b 终形注（S6）**：前缀全量 `ms_client_*` → `mediaservo_client_*`（⚠ breaking，
+> 零别名）。28 符号 = 自由函数 5（login 转扁平参数形 + strerror 静态文案）· 会话 12（新增
+> state/on_state 状态观测、wait_video 纯等待、consume 多路形、error/last_error 句柄错误槽
+> ——`mediaservo_client_error_t{struct_size,code,wire_code,retryable}` 机读位）· 消费者 3
+> （consumer id/stats/close，每路独立泵互不连坐）· 控制 8（on_ack 累积形+token、off_ack 注销、
+> ready_state/buffered_amount 背压观测、producer_ids needed 升形）。⊘ 旧形保留一周期（行为逐字节
+> 保持）：全局 last_error / 首路 consume_video / 会话 union video_stats；登录 config 结构形退役
+> （结构保留一周期）。清单真源 = `bindings/c/mediaservo-client-c/include/mediaservo/client.h`
+> （ABI 对账门 check-abi-drift 四面统一 `mediaservo_<sdk>_` 前缀）。
 
 ## 二、deck 双形态与 feature 切片
 
@@ -98,7 +108,7 @@ bindings/python/ → mediaservo_{link,field,deck,client}/ (非 cargo member, 纯
 ## 九、未来扩展（Phase 3+）
 
 - 视频会议 / 直播 / 监控子场景 SDK：在 field 会话面上叠加场景 API（ConferenceSession 等）
-- 安卓 JNI：统一 C ABI（ms_* 系）直供 Java/Kotlin 薄包装（livekit JNI_OnLoad 模式）
+- 安卓 JNI：统一 C ABI（mediaservo_* 系）直供 Java/Kotlin 薄包装（livekit JNI_OnLoad 模式）
 - Python/C++ 绑定：link/field/deck/client 各自的薄包装包（发行层按需拆分）
 
 ## 十、关键技术选型（已论证）

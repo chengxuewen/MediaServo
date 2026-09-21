@@ -1,4 +1,8 @@
-//! 错误码 / last_error / 纯映射函数（ClientError → C 码、信封构造、辅助提取）。
+//! 错误码 / last_error / 句柄级错误槽（K3）/ error_t / strerror 表 / 纯映射函数。
+//!
+//! K3 合同（批1b §2）：错误文本从进程全局迁至句柄内（session/control/consumer 各一
+//! `Mutex<Option<HandleError>>`）；`mediaservo_client_last_error` ⊘ 保留全局一周期——
+//! 裁决=最小改动形：新代码路径一律**句柄槽 + 全局兜底双写**（[`HandleErr::note`] 单点）。
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
@@ -19,13 +23,93 @@ pub const MEDIASERVO_CLIENT_ERR_MALFORMED: c_int = -8;
 pub const MEDIASERVO_CLIENT_ERR_STATE: c_int = -9;
 pub const MEDIASERVO_CLIENT_ERR_INTERNAL: c_int = -10;
 
-/// 全局最近错误信息（ms_client_last_error 读取）。
+/// 全局最近错误信息（⊘ `mediaservo_client_last_error` 读取；K3 双写兜底保一周期）。
 pub(crate) static LAST_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 pub(crate) fn set_last_error(msg: impl Into<String>) {
     if let Ok(mut guard) = LAST_ERROR.lock() {
         *guard = Some(msg.into());
     }
+}
+
+// ── K3: 句柄级错误槽 ──
+
+/// 一次句柄级错误记录（error_t 线形 + 文本源的存储形）。
+pub(crate) struct HandleError {
+    pub code: c_int,
+    pub wire: u32,
+    pub retryable: bool,
+    pub msg: String,
+}
+
+/// 句柄错误槽（session/control/consumer 各持一个）。
+pub(crate) type ErrSlot = std::sync::Mutex<Option<HandleError>>;
+
+/// error_t 线形（C 出参；struct_size 前向兼容纪律同 config 结构）。
+#[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
+#[repr(C)]
+pub struct mediaservo_client_error_t {
+    pub struct_size: usize,
+    pub code: c_int,
+    pub wire_code: u32,
+    pub retryable: u8,
+}
+
+/// error_t 的已知最小尺寸（当前 = 全字段；演进时旧调用方报旧值）。
+pub(crate) const CLIENT_ERROR_T_SIZE: usize = size_of::<mediaservo_client_error_t>();
+
+/// 句柄错误写入的统一入口（trait——session/control/consumer 三形共享）。
+pub(crate) trait HandleErr {
+    fn err_slot(&self) -> &ErrSlot;
+
+    /// 唯一写点：句柄槽 + 全局 LAST_ERROR 双写（K3 裁决形）。
+    fn note(&self, err: HandleError) {
+        set_last_error(err.msg.clone());
+        if let Ok(mut g) = self.err_slot().lock() {
+            *g = Some(err);
+        }
+    }
+
+    /// ClientError → 槽（code=error_code 穷尽映射；wire/retryable 机读位透传）。
+    fn fail_client(&self, ctx: &str, e: &ClientError) -> c_int {
+        let code = error_code(e);
+        self.note(HandleError {
+            code,
+            wire: e.wire_code().unwrap_or(0),
+            retryable: e.is_retryable(),
+            msg: format!("{ctx}: {e}"),
+        });
+        code
+    }
+
+    /// 任意码入槽（表外码走此门，禁发明新负数码——复用既有值域）。
+    fn fail(&self, code: c_int, msg: &str) -> c_int {
+        self.note(HandleError { code, wire: 0, retryable: false, msg: msg.to_string() });
+        code
+    }
+
+    fn fail_arg(&self, msg: &str) -> c_int {
+        self.fail(MEDIASERVO_CLIENT_ERR_INVALID_ARG, msg)
+    }
+
+    fn fail_state(&self, msg: &str) -> c_int {
+        self.fail(MEDIASERVO_CLIENT_ERR_STATE, msg)
+    }
+
+    fn fail_internal(&self, msg: &str) -> c_int {
+        self.fail(MEDIASERVO_CLIENT_ERR_INTERNAL, msg)
+    }
+
+    /// panic 兜底（catch_unwind 尾；句柄仍有效时经 ffi_catch 调用）。
+    fn fail_panic(&self, name: &str) {
+        self.fail_internal(&format!("{name}: panic"));
+    }
+}
+
+/// 无句柄自由函数的错误写入（仅全局——login/list_rooms/strerror/version 族）。
+pub(crate) fn fail_global(msg: impl Into<String>, code: c_int) -> c_int {
+    set_last_error(msg);
+    code
 }
 
 /// 提取 C 字符串（null → None）。非法 UTF-8 → Err。
@@ -57,6 +141,42 @@ pub(crate) fn copy_out_str(s: &str, buf: *mut c_char, cap: usize) -> c_int {
     MEDIASERVO_OK
 }
 
+/// needed 溢出反馈合同（login/list_rooms/wait_video/consumer_id/consumer_stats/
+/// producer_ids/video_stats 共用）：**needed 先写**（溢出/成功两态都有值——调用方
+/// 凭此决定重试尺寸），再拷贝。`needed` 可 NULL（不需要反馈）。纯缓冲逻辑，单测钉。
+pub(crate) fn copy_out_needed(
+    name: &str,
+    s: &str,
+    buf: *mut c_char,
+    cap: usize,
+    needed: *mut usize,
+) -> c_int {
+    let need = s.len() + 1;
+    if !needed.is_null() {
+        // SAFETY: 已判非 null；指向调用方 usize 存储。
+        unsafe { *needed = need };
+    }
+    let rc = copy_out_str(s, buf, cap);
+    if rc != MEDIASERVO_OK {
+        set_last_error(format!("{name}: buffer too small, need {need} bytes"));
+    }
+    rc
+}
+
+/// 截断式文本拷贝（last_error 族语义：读多少算多少，恒 OK——缓冲不足截断不报错）。
+pub(crate) fn copy_out_text(msg: &str, buf: *mut c_char, len: usize) -> c_int {
+    if buf.is_null() || len == 0 {
+        return MEDIASERVO_CLIENT_ERR_INVALID_ARG;
+    }
+    let bytes = msg.as_bytes();
+    let n = bytes.len().min(len - 1);
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, n);
+        *buf.add(n) = 0;
+    }
+    MEDIASERVO_OK
+}
+
 /// [`ClientError`] → C 错误码（穷尽 match——新变体编译期强制归类）。
 pub(crate) fn error_code(e: &ClientError) -> c_int {
     match e {
@@ -79,6 +199,28 @@ pub(crate) fn error_code(e: &ClientError) -> c_int {
         ClientError::Server { .. } | ClientError::WebRtc(_) | ClientError::Io(_) => {
             MEDIASERVO_CLIENT_ERR_INTERNAL
         }
+    }
+}
+
+/// code → 静态文案（`mediaservo_client_strerror` 表源）。
+///
+/// 禁新文案发明：每条取自既有真源——`ClientError` Display 模板（error.rs）与
+/// client.h 错误码注释的并集，剥去动态参数位。未知码 → 固定兜底串。
+#[must_use]
+pub(crate) fn strerror_text(code: c_int) -> &'static str {
+    match code {
+        MEDIASERVO_OK => "ok",
+        MEDIASERVO_CLIENT_ERR_INVALID_ARG => "invalid argument",
+        MEDIASERVO_CLIENT_ERR_LOGIN => "login failed",
+        MEDIASERVO_CLIENT_ERR_UNAUTHORIZED => "invalid credentials / auth rejected / rest rejected",
+        MEDIASERVO_CLIENT_ERR_DENIED => "control denied (4012)",
+        MEDIASERVO_CLIENT_ERR_TIMEOUT => "timed out waiting",
+        MEDIASERVO_CLIENT_ERR_SIGNAL => "signal error",
+        MEDIASERVO_CLIENT_ERR_PROTOCOL => "negotiated protocol rejected (4101 / too low)",
+        MEDIASERVO_CLIENT_ERR_MALFORMED => "malformed response / unsupported scheme",
+        MEDIASERVO_CLIENT_ERR_STATE => "invalid state: closed",
+        MEDIASERVO_CLIENT_ERR_INTERNAL => "internal error",
+        _ => "unknown error code",
     }
 }
 
@@ -128,19 +270,10 @@ pub(crate) fn build_envelope(
     })
 }
 
-/// last_error 实现（ms_client_last_error 与单测共用，纯缓冲写入）。
+/// last_error 实现（⊘ 全局形，mediaservo_client_last_error 与单测共用）。
 pub(crate) fn last_error_impl(buf: *mut c_char, len: usize) -> c_int {
-    if buf.is_null() || len == 0 {
-        return MEDIASERVO_CLIENT_ERR_INVALID_ARG;
-    }
     let msg = LAST_ERROR.lock().ok().and_then(|g| g.clone()).unwrap_or_default();
-    let bytes = msg.as_bytes();
-    let n = bytes.len().min(len - 1);
-    unsafe {
-        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, n);
-        *buf.add(n) = 0;
-    }
-    MEDIASERVO_OK
+    copy_out_text(&msg, buf, len)
 }
 
 #[cfg(test)]
@@ -181,6 +314,49 @@ mod tests {
         for (e, want) in cases {
             assert_eq!(error_code(&e), want, "variant: {e:?}");
         }
+    }
+
+    // ── strerror 表（全码覆盖 + 兜底）──
+    #[test]
+    fn strerror_covers_all_codes_and_falls_back() {
+        let codes = [-1, -2, -3, -4, -5, -6, -7, -8, -9, -10, 0];
+        for c in codes {
+            assert!(!strerror_text(c).is_empty(), "code {c} 无文案");
+        }
+        // 同码稳定（表源静态，非随机/动态）。
+        assert_eq!(strerror_text(-9), strerror_text(MEDIASERVO_CLIENT_ERR_STATE));
+        assert_eq!(strerror_text(12345), "unknown error code");
+        assert_eq!(strerror_text(1), "unknown error code");
+    }
+
+    // ── needed 溢出合同两态（先写 needed，溢出/成功都有值）──
+    #[test]
+    fn copy_out_needed_two_states() {
+        let mut buf = [0u8; 8];
+        let mut need = 0usize;
+        // 溢出态：needed = 必需字节数（含 NUL），不写半截，rc=INVALID_ARG。
+        let rc = copy_out_needed(
+            "t",
+            "abcdefghij",
+            buf.as_mut_ptr() as *mut c_char,
+            buf.len(),
+            &mut need,
+        );
+        assert_eq!(rc, MEDIASERVO_CLIENT_ERR_INVALID_ARG);
+        assert_eq!(need, 11);
+        // 成功态：needed = 实际长度，缓冲 NUL 结尾。
+        let rc = copy_out_needed("t", "abc", buf.as_mut_ptr() as *mut c_char, buf.len(), &mut need);
+        assert_eq!(rc, MEDIASERVO_OK);
+        assert_eq!(need, 4);
+        assert_eq!(
+            unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap(),
+            "abc"
+        );
+        // needed 可 NULL。
+        assert_eq!(
+            copy_out_needed("t", "ab", buf.as_mut_ptr() as *mut c_char, buf.len(), ptr::null_mut()),
+            MEDIASERVO_OK
+        );
     }
 
     // ── 信封构造纯函数 ──
@@ -253,6 +429,20 @@ mod tests {
         assert_eq!(
             last_error_impl(buf.as_mut_ptr() as *mut c_char, 0),
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
+        );
+    }
+
+    #[test]
+    fn copy_out_text_truncates_not_rejects() {
+        let mut buf = [0u8; 4];
+        // 截断语义（last_error 族）：短缓冲不报错，读 len-1 字节 + NUL。
+        assert_eq!(
+            copy_out_text("abcdefgh", buf.as_mut_ptr() as *mut c_char, buf.len()),
+            MEDIASERVO_OK
+        );
+        assert_eq!(
+            unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap(),
+            "abc"
         );
     }
 }

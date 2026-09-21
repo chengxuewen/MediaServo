@@ -9,22 +9,24 @@ use crate::errors::{
     MEDIASERVO_CLIENT_ERR_INVALID_ARG, check_struct_size, cstr, parse_role, set_last_error,
 };
 
-/// 登录配置。
+/// 登录配置（⊘ 保留一周期：批1b 起 login 转扁平参数形，本结构不再被消费；
+/// struct_size 演进纪律下的存量形状，批2 随 ⊘ 清单一并移除）。
 #[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
 #[repr(C)]
-pub struct ms_client_login_config_t {
+pub struct mediaservo_client_login_config_t {
     pub struct_size: usize,
     pub http_base_url: *const std::os::raw::c_char,
     pub username: *const std::os::raw::c_char,
     pub password: *const std::os::raw::c_char,
 }
 
-pub const MS_CLIENT_LOGIN_CONFIG_MIN_SIZE: usize = size_of::<ms_client_login_config_t>();
+pub const MEDIASERVO_CLIENT_LOGIN_CONFIG_MIN_SIZE: usize =
+    size_of::<mediaservo_client_login_config_t>();
 
-impl Default for ms_client_login_config_t {
+impl Default for mediaservo_client_login_config_t {
     fn default() -> Self {
         Self {
-            struct_size: MS_CLIENT_LOGIN_CONFIG_MIN_SIZE,
+            struct_size: MEDIASERVO_CLIENT_LOGIN_CONFIG_MIN_SIZE,
             http_base_url: ptr::null(),
             username: ptr::null(),
             password: ptr::null(),
@@ -35,7 +37,7 @@ impl Default for ms_client_login_config_t {
 /// 会话配置。
 #[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
 #[repr(C)]
-pub struct ms_client_config_t {
+pub struct mediaservo_client_config_t {
     pub struct_size: usize,
     pub signaling_url: *const std::os::raw::c_char,
     pub room: *const std::os::raw::c_char,
@@ -48,9 +50,9 @@ pub struct ms_client_config_t {
     pub hmac_key_file: *const std::os::raw::c_char,
 }
 
-pub const MEDIASERVO_CLIENT_CONFIG_MIN_SIZE: usize = size_of::<ms_client_config_t>();
+pub const MEDIASERVO_CLIENT_CONFIG_MIN_SIZE: usize = size_of::<mediaservo_client_config_t>();
 
-impl Default for ms_client_config_t {
+impl Default for mediaservo_client_config_t {
     fn default() -> Self {
         Self {
             struct_size: MEDIASERVO_CLIENT_CONFIG_MIN_SIZE,
@@ -62,23 +64,6 @@ impl Default for ms_client_config_t {
             hmac_key_file: ptr::null(),
         }
     }
-}
-
-/// 登录配置校验（纯函数，单测钉）。空串按缺失处理。
-pub(crate) fn validate_login_cfg(
-    cfg: &ms_client_login_config_t,
-) -> Result<(&str, &str, &str), c_int> {
-    check_struct_size(cfg.struct_size, MS_CLIENT_LOGIN_CONFIG_MIN_SIZE, "ms_client_login")?;
-    let required = |p: *const std::os::raw::c_char| -> Option<&str> {
-        cstr(p).ok().flatten().filter(|s| !s.is_empty())
-    };
-    let (Some(base), Some(user), Some(pass)) =
-        (required(cfg.http_base_url), required(cfg.username), required(cfg.password))
-    else {
-        set_last_error("ms_client_login: http_base_url/username/password all required");
-        return Err(MEDIASERVO_CLIENT_ERR_INVALID_ARG);
-    };
-    Ok((base, user, pass))
 }
 
 /// 会话配置校验产物。
@@ -93,11 +78,13 @@ pub(crate) struct SessionCfg<'a> {
 }
 
 /// 会话配置校验（纯函数，单测钉）：url/room 必填；jwt/psk 恰一非空；role 可空。
-pub(crate) fn validate_session_cfg(cfg: &ms_client_config_t) -> Result<SessionCfg<'_>, c_int> {
+pub(crate) fn validate_session_cfg(
+    cfg: &mediaservo_client_config_t,
+) -> Result<SessionCfg<'_>, c_int> {
     check_struct_size(
         cfg.struct_size,
         MEDIASERVO_CLIENT_CONFIG_MIN_SIZE,
-        "ms_client_session_create",
+        "mediaservo_client_session_create",
     )?;
     let required = |p: *const std::os::raw::c_char| -> Option<&str> {
         cstr(p).ok().flatten().filter(|s| !s.is_empty())
@@ -110,7 +97,7 @@ pub(crate) fn validate_session_cfg(cfg: &ms_client_config_t) -> Result<SessionCf
         }
     };
     let (Some(url), Some(room)) = (required(cfg.signaling_url), required(cfg.room)) else {
-        set_last_error("ms_client_session_create: signaling_url/room required");
+        set_last_error("mediaservo_client_session_create: signaling_url/room required");
         return Err(MEDIASERVO_CLIENT_ERR_INVALID_ARG);
     };
     let jwt = opt_nonempty(cfg.jwt);
@@ -141,22 +128,24 @@ pub(crate) fn validate_session_cfg(cfg: &ms_client_config_t) -> Result<SessionCf
         }
         (Some(j), Some(p)) if clean(j) && clean(p) => {
             set_last_error(
-                "ms_client_session_create: exactly one of jwt/psk required (both given)",
+                "mediaservo_client_session_create: exactly one of jwt/psk required (both given)",
             );
             Err(MEDIASERVO_CLIENT_ERR_INVALID_ARG)
         }
         (Some(_), _) | (_, Some(_)) => {
-            set_last_error("ms_client_session_create: invalid UTF-8 in jwt/psk");
+            set_last_error("mediaservo_client_session_create: invalid UTF-8 in jwt/psk");
             Err(MEDIASERVO_CLIENT_ERR_INVALID_ARG)
         }
         (None, None) => {
-            set_last_error("ms_client_session_create: exactly one of jwt/psk required (neither)");
+            set_last_error(
+                "mediaservo_client_session_create: exactly one of jwt/psk required (neither)",
+            );
             Err(MEDIASERVO_CLIENT_ERR_INVALID_ARG)
         }
     }
 }
 
-fn session_hmac_key_file(cfg: &ms_client_config_t) -> Option<&str> {
+fn session_hmac_key_file(cfg: &mediaservo_client_config_t) -> Option<&str> {
     // cstr 生命周期 = cfg 借用期（SessionCfg 生命周期随 cfg）。非法 UTF-8 与缺失同路
     // = 该路径在会话建立期不报错（可选字段），estop 使用时按"文件不可读"暴露。
     match cstr(cfg.hmac_key_file) {
@@ -170,17 +159,17 @@ pub(crate) fn load_hmac_key_file(path: &str) -> Result<String, String> {
     mediaservo_common::protocol::control_hmac_key_from_file(path)
 }
 
-fn session_role(cfg: &ms_client_config_t) -> Result<PeerRole, c_int> {
+fn session_role(cfg: &mediaservo_client_config_t) -> Result<PeerRole, c_int> {
     match cstr(cfg.role) {
         Ok(Some(r)) if !r.is_empty() => parse_role(r).map_err(|()| {
             set_last_error(format!(
-                "ms_client_session_create: unknown role '{r}' (Client/Viewer/Remote/Host)"
+                "mediaservo_client_session_create: unknown role '{r}' (Client/Viewer/Remote/Host)"
             ));
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         }),
         Ok(Some(_)) | Ok(None) => Ok(PeerRole::Consumer), // NULL/空 = "Client" 缺省
         Err(()) => {
-            set_last_error("ms_client_session_create: invalid UTF-8 in role");
+            set_last_error("mediaservo_client_session_create: invalid UTF-8 in role");
             Err(MEDIASERVO_CLIENT_ERR_INVALID_ARG)
         }
     }
@@ -192,41 +181,9 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
-    fn login_cfg_small_struct_size_rejected() {
-        let cfg = ms_client_login_config_t { struct_size: 1, ..Default::default() };
-        assert_eq!(validate_login_cfg(&cfg).unwrap_err(), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
-    }
-
-    #[test]
-    fn login_cfg_missing_fields_rejected() {
-        let cfg = ms_client_login_config_t::default();
-        assert_eq!(validate_login_cfg(&cfg).unwrap_err(), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
-        let user = c"op";
-        let cfg = ms_client_login_config_t {
-            struct_size: MS_CLIENT_LOGIN_CONFIG_MIN_SIZE,
-            http_base_url: c"http://h:9800".as_ptr(),
-            username: user.as_ptr(),
-            password: ptr::null(),
-        };
-        assert_eq!(validate_login_cfg(&cfg).unwrap_err(), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
-    }
-
-    #[test]
-    fn login_cfg_ok_path() {
-        let cfg = ms_client_login_config_t {
-            struct_size: MS_CLIENT_LOGIN_CONFIG_MIN_SIZE,
-            http_base_url: c"http://h:9800".as_ptr(),
-            username: c"op".as_ptr(),
-            password: c"pw".as_ptr(),
-        };
-        let (base, user, pass) = validate_login_cfg(&cfg).expect("valid");
-        assert_eq!((base, user, pass), ("http://h:9800", "op", "pw"));
-    }
-
-    #[test]
     fn session_cfg_requires_exactly_one_credential() {
         let mk = |jwt: *const std::os::raw::c_char, psk: *const std::os::raw::c_char| {
-            ms_client_config_t {
+            mediaservo_client_config_t {
                 struct_size: MEDIASERVO_CLIENT_CONFIG_MIN_SIZE,
                 signaling_url: c"ws://h:9800/ws".as_ptr(),
                 room: c"r".as_ptr(),
@@ -251,7 +208,7 @@ mod tests {
 
     #[test]
     fn session_cfg_bad_role_rejected() {
-        let cfg = ms_client_config_t {
+        let cfg = mediaservo_client_config_t {
             struct_size: MEDIASERVO_CLIENT_CONFIG_MIN_SIZE,
             signaling_url: c"ws://h:9800/ws".as_ptr(),
             room: c"r".as_ptr(),
@@ -280,7 +237,7 @@ mod tests {
 
     #[test]
     fn session_cfg_reads_hmac_key_file_optional() {
-        let cfg = ms_client_config_t {
+        let cfg = mediaservo_client_config_t {
             struct_size: MEDIASERVO_CLIENT_CONFIG_MIN_SIZE,
             signaling_url: c"ws://h:9800/ws".as_ptr(),
             room: c"r".as_ptr(),

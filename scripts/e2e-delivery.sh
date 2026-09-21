@@ -37,7 +37,7 @@ cat > "$TMP/pkg/main.c" <<'C'
 /* 符号存在性判据（链接期即证；不调用——免网络/设备依赖）。 */
 int main(void) {
     void *a = (void *)mediaservo_link_version;
-    void *b = (void *)ms_client_login;
+    void *b = (void *)mediaservo_client_login;
     return (a != 0 && b != 0) ? 0 : 1;
 }
 C

@@ -3,7 +3,7 @@ name = "mediaservo-client-c"
 build = "build.rs"
 version.workspace = true
 edition.workspace = true
-description = "MediaServo client C ABI — ms_client_* opaque handle bindings (舱端消费 + 控制)"
+description = "MediaServo client C ABI — mediaservo_client_* opaque handle bindings (舱端消费 + 控制)"
 license.workspace = true
 
 [lib]

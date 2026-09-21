@@ -5,7 +5,25 @@
 
 ## Unreleased
 
+### ⚠ 破坏性变更
+- [sdk-client] ⚠ breaking：舱端 C ABI 全量改名 `ms_client_*` → `mediaservo_client_*`（S6 批1b，零别名、
+  旧名不保留）；`login` 转扁平参数形（旧 config 结构形退役，结构定义留一周期）；`control_on_ack`
+  转累积形 + token 出参（新增 `control_off_ack(token)` 注销；旧"重复注册替换"语义作废）；
+  `control_producer_ids` 统一 needed 溢出反馈形。C++ 面同步：`Control::on_ack` 返回
+  `Result<uint64_t>`（token），`Error` 增 `wire_code`/`retryable` 机读位（其余三族恒 0/false 源兼容）。
+  ⊘ 旧形保留一周期（行为逐字节保持，批2 清退）：`last_error` 进程全局 / `consume_video` 首路 /
+  `video_stats` 会话 union。迁移 = 机械前缀替换 + 上述三签名点。
+
 ### 新增
+- [sdk-client] 舱端 C ABI/C++ 批1b 新面（28 符号）：多路 `Consumer`（`session_consume`→id/stats/close
+  句柄，每路独立帧泵互不连坐，close 有界 ≤250ms）、会话状态观测（`session_state` 快照 +
+  `session_on_state` 累积回调，Disconnected/Connected/Reconnecting/Failed 线值 0..3）、
+  `wait_video` 纯等待（多路编排定向入口）、句柄级错误槽（`session_error` 机读
+  code/wire_code/retryable + `session_last_error` 文本；`strerror` 静态文案表）、控制背压观测
+  （`ready_state`/`buffered_amount`）；user_free 契约 = 每条注册恰好一次（on_state→session_close、
+  consume→consumer_close、on_ack→off_ack 泵回收或 control_close）。C++ 镜像 = `Consumer` RAII 类 +
+  `State`/`DcState` 枚举 + `wait_video`/`consume`/`off_ack`/`ready_state`/`buffered_amount`，
+  `consume_video`/`video_stats` 旧桥保留。
 - [sdk-client] 舱端 SDK（Rust 面，S6 批1a）：信令断链自动重连（退避+resume 票优先、auth 族终态、Consumer 帧流跨重连续流、
   `connection_state()`/`set_auto_reconnect()`）；`Consumer` 对象多路消费（每 producer 一路句柄，pause 待批2）；
   错误机读（`wire_code()`/`is_retryable()`）；控制通道背压读取（`ready_state()`/`buffered_amount()`）。C/C++ 面随 S6 批1 后续开放。

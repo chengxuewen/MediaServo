@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABI 漂移门禁（client 家族，审核 L2 / D248 同法）：
-# client.h 声明的 ms_client_* 函数集合 ↔ cdylib 导出符号集合 一一对账。
+# client.h 声明的 mediaservo_client_* 函数集合 ↔ cdylib 导出符号集合 一一对账。
 # 漂移 = header 有而 .so 无（漏导出/改名）或 .so 有而 header 无（漏声明）。
 # 前置: cargo build -p mediaservo-client-c。binutils(readelf) 来自 pixi 环境——
 # 推荐经 `pixi run bash scripts/check-abi-client.sh` 执行（同 check-abi-drift.sh 纪律）。
@@ -22,10 +22,10 @@ if [ ! -f "$SO" ]; then
 fi
 
 # header 声明: 行首返回类型 mediaservo_err_t（排除注释/宏/typedef）
-declared=$(grep -oE "^mediaservo_err_t ms_client_[a-z_]+" "$HDR" | awk '{print $2}' | sort -u)
+declared=$(grep -oE "^mediaservo_err_t mediaservo_client_[a-z_]+" "$HDR" | awk '{print $2}' | sort -u)
 # .so 导出: GLOBAL 定义符号（排除 UND）
 exported=$(readelf -W --dyn-syms "$SO" | grep " GLOBAL " | grep -v " UND " \
-    | grep -oE "ms_client_[a-z_]+" | sort -u)
+    | grep -oE "mediaservo_client_[a-z_]+" | sort -u)
 
 missing=$(comm -23 <(printf '%s\n' "$declared") <(printf '%s\n' "$exported"))
 undeclared=$(comm -13 <(printf '%s\n' "$declared") <(printf '%s\n' "$exported"))

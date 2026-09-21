@@ -31,13 +31,13 @@ if(NOT EXISTS "${MEDIASERVO_SDK_DIR}/libmediaservo_client.so")
         " 先执行 ./mediaservo.sh build-c（或 pixi run build-c）再配置（PIT-189）")
 endif()
 
-add_library(ms_client_sdk INTERFACE)
-target_include_directories(ms_client_sdk INTERFACE
+add_library(mediaservo_client_sdk INTERFACE)
+target_include_directories(mediaservo_client_sdk INTERFACE
     "${REPO_ROOT}/bindings/cxx/mediaservo-client-cxx/include"  # client.hpp（C++）
     "${REPO_ROOT}/bindings/cxx/include"                          # detail/result.hpp
     "${REPO_ROOT}/bindings/c/mediaservo-client-c/include"        # client.h（C ABI）
     "${REPO_ROOT}/bindings/c/include")                           # common.h
-target_link_libraries(ms_client_sdk INTERFACE
+target_link_libraries(mediaservo_client_sdk INTERFACE
     "${MEDIASERVO_SDK_DIR}/libmediaservo_client.so")
 
 # ── GUI 依赖档案（FetchContent 本地 zip + 哈希）──
