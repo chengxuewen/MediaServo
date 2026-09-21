@@ -17,13 +17,13 @@ use base64::Engine as _;
 use ed25519_dalek::Signer as _;
 use futures_util::{SinkExt, StreamExt};
 use mediaservo_common::protocol::{
-    negotiate_protocol, PeerRole, SignalingMessage, SIGNALING_PROTOCOL_VERSION,
+    PeerRole, SIGNALING_PROTOCOL_VERSION, SignalingMessage, negotiate_protocol,
 };
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc};
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{client_async, connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, client_async, connect_async};
 
 use crate::error::LinkError;
 
@@ -37,8 +37,6 @@ pub struct LocalEnvelope {
     pub src: String,
     pub msg: SignalingMessage,
 }
-
-
 
 /// 断线回调槽（会话与后台任务共享；注册后至多触发一次）。
 type DisconnectSlot = std::sync::Arc<std::sync::Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
@@ -133,25 +131,19 @@ pub struct DeviceIdentity {
 impl DeviceIdentity {
     /// 由私钥构建并派生公钥指纹。
     pub fn new(device_id: impl Into<String>, signing: ed25519_dalek::SigningKey) -> Self {
-        let pubkey_b64 = base64::engine::general_purpose::STANDARD
-            .encode(signing.verifying_key().to_bytes());
-        Self {
-            device_id: device_id.into(),
-            signing,
-            pubkey_b64,
-        }
+        let pubkey_b64 =
+            base64::engine::general_purpose::STANDARD.encode(signing.verifying_key().to_bytes());
+        Self { device_id: device_id.into(), signing, pubkey_b64 }
     }
 
     /// 字节合同（design §3）：sig = base64( Ed25519::sign( nonce_raw(32B) ‖ device_id ‖ room_id ) )。
     /// 交叉复验锚 = server devices.rs::sig_vector（同常量必出同 sig）。
     pub fn sign_device_auth(&self, nonce_raw: &[u8], room_id: &str) -> String {
-        let mut msg =
-            Vec::with_capacity(nonce_raw.len() + self.device_id.len() + room_id.len());
+        let mut msg = Vec::with_capacity(nonce_raw.len() + self.device_id.len() + room_id.len());
         msg.extend_from_slice(nonce_raw);
         msg.extend_from_slice(self.device_id.as_bytes());
         msg.extend_from_slice(room_id.as_bytes());
-        base64::engine::general_purpose::STANDARD
-            .encode(self.signing.sign(&msg).to_bytes())
+        base64::engine::general_purpose::STANDARD.encode(self.signing.sign(&msg).to_bytes())
     }
 }
 
@@ -233,10 +225,12 @@ impl SignalClient {
     /// 连接 server、PSK 认证、加入房间，返回会话。
     pub async fn connect(&self) -> Result<SignalSession, LinkError> {
         let ws_stream = match &self.jwt {
-            None => connect_async(&self.url)
-                .await
-                .map_err(|e| LinkError::Signal(format!("connect {}: {e}", self.url)))?
-                .0,
+            None => {
+                connect_async(&self.url)
+                    .await
+                    .map_err(|e| LinkError::Signal(format!("connect {}: {e}", self.url)))?
+                    .0
+            }
             Some(token) => {
                 // JWT 走子协议头（server 只认这个通道）。手工 request 只为插这一头。
                 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -310,7 +304,11 @@ impl SignalClient {
                     Ok(SignalingMessage::Error { code, message }) => {
                         return Err(LinkError::Signal(format!("auth denied [{code}]: {message}")));
                     }
-                    Ok(other) => return Err(LinkError::Signal(format!("unexpected auth message: {other:?}"))),
+                    Ok(other) => {
+                        return Err(LinkError::Signal(format!(
+                            "unexpected auth message: {other:?}"
+                        )));
+                    }
                     Err(e) => return Err(LinkError::Signal(format!("parse auth response: {e}"))),
                 },
                 Message::Close(_) => return Err(LinkError::Signal("closed during auth".into())),
@@ -357,17 +355,17 @@ impl SignalClient {
             tokio::time::timeout(DEVICE_AUTH_TIMEOUT, read_join_response(&mut receiver, unwrap))
                 .await
                 .map_err(|_| {
-                    LinkError::Signal("device auth: no server response within 5s after RoomJoin".into())
-                })?
-                ?
+                    LinkError::Signal(
+                        "device auth: no server response within 5s after RoomJoin".into(),
+                    )
+                })??
         } else {
             read_join_response(&mut receiver, unwrap).await?
         };
         let joined = match (&self.identity, &joined) {
             (Some(_), SignalingMessage::DeviceAuthChallenge { .. })
             | (Some(_), SignalingMessage::DeviceAuthPending { .. }) => {
-                self.run_device_auth(joined, &mut sender, &mut receiver, unwrap)
-                    .await?
+                self.run_device_auth(joined, &mut sender, &mut receiver, unwrap).await?
             }
             _ => joined,
         };
@@ -442,30 +440,24 @@ impl SignalClient {
                         sig: identity.sign_device_auth(&nonce_raw, &self.room_id),
                     };
                     let json = match &self.gateway_src {
-                        Some(src) => serde_json::to_string(&LocalEnvelope {
-                            src: src.clone(),
-                            msg: resp,
-                        }),
+                        Some(src) => {
+                            serde_json::to_string(&LocalEnvelope { src: src.clone(), msg: resp })
+                        }
                         None => serde_json::to_string(&resp),
                     }
-                    .map_err(|e| {
-                        LinkError::Signal(format!("serialize DeviceAuthResponse: {e}"))
-                    })?;
+                    .map_err(|e| LinkError::Signal(format!("serialize DeviceAuthResponse: {e}")))?;
                     sender
                         .send(Message::Text(json))
                         .await
                         .map_err(|e| LinkError::Signal(format!("send DeviceAuthResponse: {e}")))?;
-                    tokio::time::timeout(
-                        DEVICE_AUTH_TIMEOUT,
-                        read_join_response(receiver, unwrap),
-                    )
-                    .await
-                    .map_err(|_| {
-                        LinkError::Signal(
+                    tokio::time::timeout(DEVICE_AUTH_TIMEOUT, read_join_response(receiver, unwrap))
+                        .await
+                        .map_err(|_| {
+                            LinkError::Signal(
                             "device auth: no server response within 5s after DeviceAuthResponse"
                                 .into(),
                         )
-                    })??
+                        })??
                 }
                 SignalingMessage::DeviceAuthPending { device_id } => {
                     return Err(LinkError::EnrollPending { device_id });
@@ -559,20 +551,14 @@ impl SignalSession {
     pub async fn send(&self, msg: SignalingMessage) -> Result<(), LinkError> {
         if is_low_priority(&msg) {
             if self.lo_tx.try_send(msg).is_err() {
-                let n = self
-                    .dropped
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                    + 1;
+                let n = self.dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                 if n == 1 || n.is_multiple_of(64) {
                     tracing::warn!("a3: 低优队列满，StatusReport 丢弃（累计 {n}）");
                 }
             }
             return Ok(());
         }
-        self.hi_tx
-            .send(msg)
-            .await
-            .map_err(|_| LinkError::Signal("session closed".into()))
+        self.hi_tx.send(msg).await.map_err(|_| LinkError::Signal("session closed".into()))
     }
 
     /// 当前房间 ID。
@@ -690,6 +676,12 @@ async fn session_task(
                     Some(Ok(_)) => {} // 忽略非文本（含入站 pong——tokio-tungstenite 已自动应答）
                     Some(Err(e)) => {
                         let _ = events_tx.send(SignalEvent::Error(e.to_string()));
+                        // S6/K1 根修：读错误 = 连接已死（与 Close/None 支同事实）——
+                        // 只发 Error 不发 Disconnected 使 RST 形断链（对端裸 drop）在
+                        // 下游永久失声（client supervisor 等不到 dead 信，drill e/f 实抓）。
+                        let _ = events_tx.send(SignalEvent::Disconnected {
+                            reason: format!("ws read error: {e}"),
+                        });
                         fire_disconnect(&on_disconnect);
                         break;
                     }
@@ -788,15 +780,15 @@ mod tests {
                 .lines()
                 .find_map(|l| {
                     let (name, v) = l.split_once(':')?;
-                    (name.eq_ignore_ascii_case("sec-websocket-key"))
-                        .then(|| v.trim().to_string())
+                    (name.eq_ignore_ascii_case("sec-websocket-key")).then(|| v.trim().to_string())
                 })
                 .expect("mock: 握手缺 key");
             assert!(
                 text.contains("sec-websocket-protocol: jwt.tok.en"),
                 "握手必须带子协议头，实得:\n{text}"
             );
-            let accept = tokio_tungstenite::tungstenite::handshake::derive_accept_key(key.as_bytes());
+            let accept =
+                tokio_tungstenite::tungstenite::handshake::derive_accept_key(key.as_bytes());
             let resp = format!(
                 "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\nSec-WebSocket-Protocol: jwt.tok.en\r\n\r\n"
             );
@@ -822,14 +814,15 @@ mod tests {
             PeerRole::Consumer,
         )
         .with_jwt("jwt.tok.en");
-        let err = client
-            .connect()
-            .await
-            .expect_err("mock 握手后即关 → join 读必败（握手成功的判据）");
+        let err =
+            client.connect().await.expect_err("mock 握手后即关 → join 读必败（握手成功的判据）");
         // 必须死在 RoomJoin 读——说明握手过且 PSK 帧阶段被跳过（未走「auth denied/
         // unexpected auth response」路径）。
         let text = err.to_string();
-        assert!(text.contains("RoomJoin"), "期望 RoomJoin 阶段错误（= PSK 阶段已跳过），实得: {err}");
+        assert!(
+            text.contains("RoomJoin"),
+            "期望 RoomJoin 阶段错误（= PSK 阶段已跳过），实得: {err}"
+        );
     }
 
     #[test]
