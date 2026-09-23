@@ -114,6 +114,9 @@
   作业：四 SDK C++ 测试编译运行 + C ABI 符号表巡检（含 client 新面 12 导出对表）。
 
 ### 修复
+- [deploy] build/deploy/package bindings 交付面随带 SDK 使用手册：sdk-cxx 四册拷入 out/bindings/docs/sdk-cxx/
+  （同目录互链保留；每轮先摘后拷防陈旧册残留）；sdk-field/sdk-client 发布包按半区切分文档
+  （client 包只带 client.md，field 包带 field/link/deck 三册），e2e-package 正/反断言四处钉住。
 - [deploy] build:deploy bindings 同树崩溃修复：build 阶段已把交付布局组装进 out/bindings，deploy 再向同一前缀
   复制即"同一文件"报错中断（首次使用该组合命令即触发）；现同树幂等跳过复制（与 server/host 部署同款守卫）。
 - [host] 信令断链感知补全：WebSocket 异常关闭（对端进程被杀/崩溃触发的 RST、读错误）此前不发断链事件，

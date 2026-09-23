@@ -501,10 +501,18 @@ def _cmd_build_bindings(release: bool = False) -> None:
             shutil.copy2(node_src / f, node_dst)
         (node_dst / "lib").mkdir(parents=True, exist_ok=True)
         shutil.copy2(node_src / "lib" / "index.mjs", node_dst / "lib")
+    # docs: SDK 消费侧帮助（sdk-cxx 手册——out/bindings 树/发布包消费者直接可读，
+    # 同目录互链有效；每轮先摘后拷=防已删册残留，09-17 wheel 清扫同族纪律）
+    docs_dst = bind_dst / "docs" / "sdk-cxx"
+    shutil.rmtree(docs_dst, ignore_errors=True)
+    docs_dst.mkdir(parents=True)
+    for m in (ROOT / "docs" / "reference" / "sdk-cxx").glob("*.md"):
+        shutil.copy2(m, docs_dst)
+    n_docs = len(list(docs_dst.glob("*.md")))
     print("bindings 构建完成: libmediaservo_{%s}.so 三件套 version-full + node + python + .pc + cmake (%s)"
           % (",".join(ALL_SDKS), "release" if release else "debug"))
     n_lib = len([p for p in lib_dst.glob("libmediaservo_*") if p.is_file() or p.is_symlink()])
-    print(f"bindings 交付布局组装: out/bindings/（lib {n_lib} 件 + include/mediaservo + pkgconfig + cmake + python + wheel + node）")
+    print(f"bindings 交付布局组装: out/bindings/（lib {n_lib} 件 + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx {n_docs} 册）")
 
 
 # client 入列（V2 补全刀 09-17）：C 面 15 符号+cxx RAII 头在仓、pc.in 在位——此前 ALL_SDKS
@@ -1212,7 +1220,7 @@ def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
                 shutil.copytree(e, dst, dirs_exist_ok=True)
             elif e.is_file() or e.is_symlink():
                 shutil.copy2(e, dst, follow_symlinks=False)
-    print(f"bindings 已部署到 {prefix}（lib/ {', '.join(sos)} + include/mediaservo + pkgconfig + cmake + python + wheel + node）")
+    print(f"bindings 已部署到 {prefix}（lib/ {', '.join(sos)} + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx）")
     print("  使用: export LD_LIBRARY_PATH=<prefix>/lib && 链接库见 bindings 头文件；python: pip install <prefix>/wheel/*.whl")
 
 
@@ -1242,6 +1250,8 @@ def _stage_sdk_package(staging: Path, domain: str) -> None:
             (staging / "include" / "mediaservo" / name).unlink(missing_ok=True)
         for name in ("mediaservo-field.pc", "mediaservo-link.pc", "mediaservo-deck.pc"):
             (staging / "lib" / "pkgconfig" / name).unlink(missing_ok=True)
+        for name in ("field.md", "link.md", "deck.md"):
+            (staging / "docs" / "sdk-cxx" / name).unlink(missing_ok=True)
         sdk_list = "client"
     else:  # sdk-field（含 bindings alias）
         for p in (staging / "lib").glob("libmediaservo_client*"):
@@ -1249,6 +1259,7 @@ def _stage_sdk_package(staging: Path, domain: str) -> None:
         for name in ("client.h", "client.hpp"):
             (staging / "include" / "mediaservo" / name).unlink(missing_ok=True)
         (staging / "lib" / "pkgconfig" / "mediaservo-client.pc").unlink(missing_ok=True)
+        (staging / "docs" / "sdk-cxx" / "client.md").unlink(missing_ok=True)
         sdk_list = "field link deck"
     for name, tpl in (("mediaservoConfig.cmake", "mediaservoConfig.cmake.in"),
                       ("mediaservoConfigVersion.cmake", "mediaservoConfigVersion.cmake.in")):

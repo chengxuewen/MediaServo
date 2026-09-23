@@ -125,11 +125,13 @@ for f in \
     lib/pkgconfig/mediaservo-field.pc lib/pkgconfig/mediaservo-link.pc lib/pkgconfig/mediaservo-deck.pc \
     lib/cmake/mediaservo/mediaservoConfig.cmake lib/cmake/mediaservo/mediaservoConfigVersion.cmake \
     node/mediaservo/package.json node/mediaservo/mediaservo.node node/mediaservo/lib/index.mjs \
+    docs/sdk-cxx/field.md docs/sdk-cxx/link.md docs/sdk-cxx/deck.md \
     sdk-version.txt manifest.json CHANGES.md; do
     echo "$LIST" | grep -q "^$SDK_ROOT/$f$" || { echo "FAIL: SDK 包缺 $f"; FAIL=1; }
 done
 echo "$LIST" | grep -qE "^$SDK_ROOT/lib/python3\.[0-9]+/site-packages/mediaservo/" || { echo "FAIL: SDK 包缺 python 包"; FAIL=1; }
 echo "$LIST" | grep -qE "^$SDK_ROOT/wheel/mediaservo-.*\.whl$" || { echo "FAIL: SDK 包缺 wheel"; FAIL=1; }
+echo "$LIST" | grep -q "^$SDK_ROOT/docs/sdk-cxx/client.md$" && { echo "FAIL: sdk-field 包混入舱端面文档"; FAIL=1; }
 echo "OK: SDK 包关键文件完整（版本顶层目录 $SDK_ROOT/ + lib 三件套实体+符号链接 + include + python + wheel + node + .pc + cmake + sdk-version.txt）"
 
 # ── V1b 舱端半区包（sdk-client 独立形态）──
@@ -141,11 +143,13 @@ tar tzf "$CLI_TGZ" > "$TMP/cli-list.txt"
 for f in lib/libmediaservo_client.so "lib/libmediaservo_client.so.$MAJOR" \
          include/mediaservo/client.h include/mediaservo/client.hpp \
          lib/pkgconfig/mediaservo-client.pc lib/cmake/mediaservo/mediaservoConfig.cmake \
+         docs/sdk-cxx/client.md \
          sdk-client-version.txt CHANGES.md; do
     grep -q "^$CLI_ROOT/$f$" "$TMP/cli-list.txt" || { echo "FAIL: sdk-client 包缺 $f"; FAIL=1; }
 done
 grep -qE "libmediaservo_(field|link|deck)" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client 包混入设备面 lib"; FAIL=1; }
 grep -q "site-packages" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client 包混入 python 设备面"; FAIL=1; }
+grep -qE "^$CLI_ROOT/docs/sdk-cxx/(field|link|deck).md$" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client 包混入设备面文档"; FAIL=1; }
 echo "OK: sdk-client 半区包成型（client-only + 零设备面混入）"
 # N2 manifest 内容抽查：client 包 components 唯一且 ffmpeg=false（读elf实据形）
 tar xzf "$CLI_TGZ" -C "$TMP/cli" "$CLI_ROOT/manifest.json" 2>/dev/null
