@@ -1,6 +1,6 @@
 # MediaServo 参考文档索引
 
-> 更新: 2026-08-06 | 组织原则: **Diátaxis 框架**（活参考 / 调研存档分离）
+> 更新: 2026-09-23 | 组织原则: **Diátaxis 框架**（活参考 / 调研存档分离）
 > 活参考按**产品模块**镜像组织（reference mirror product structure）；调研存档独立于 `research/`（历史调研，不碍事）
 
 ## 活参考（Reference — 查用，按产品模块）
@@ -20,6 +20,14 @@
 |------|------|
 | `codec/ffmpeg-static-build-strategy.md` | FFmpeg 静态构建策略（codec 三后端） |
 | `codec/build-optimization-strategy.md` | Docker 构建优化（分层缓存、国内镜像、lto） |
+
+### 🧩 SDK C++ 绑定 — `sdk-cxx/`
+| 文档 | 内容 |
+|------|------|
+| `sdk-cxx/link.md` | 设备侧 IPC：信令 + 帧总线（12 函数 C 面的 cxx RAII；重连/resume/ACK 泵语义） |
+| `sdk-cxx/deck.md` | 采集 / 录制 / 回放（FFmpeg 静态内嵌口径；FrameBus 不在 C/C++ 面、采集 MVP=stub 双警示） |
+| `sdk-cxx/field.md` | 设备侧推流闭环（PushSession/内置帧源；**无外部喂帧入口**、拉流不在此面 两警示） |
+| `sdk-cxx/client.md` | 舱端/消费侧（S6 批1b 28 符号形；Consumer RAII、协商/控制 DC/急停签名面） |
 
 ### 其他活参考（根目录）
 | 文档 | 内容 |
