@@ -28,8 +28,6 @@ namespace field {
 using mediaservo::Error;
 using mediaservo::Result;
 
-/// 错误详情（code 为 mediaservo/field.h 中 MEDIASERVO_FIELD_ERR_* 值；message 读自 last_error）。
-;
 
 namespace detail {
 

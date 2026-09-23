@@ -34,8 +34,6 @@ namespace deck {
 using mediaservo::Error;
 using mediaservo::Result;
 
-/// 错误详情（code 为 mediaservo/deck.h 中 MEDIASERVO_DECK_ERR_* 值；message 读自 last_error）。
-;
 
 namespace detail {
 
