@@ -16,13 +16,17 @@ void render_control(AppModel& m) {
     ImGui::Begin(dock::kControl);
     if (m.tiles.empty()) {
         ImGui::TextDisabled("join a room first");
+        ImGui::End();  // 早退也必须关窗（T4 补丁漏网：Begin/End 配平要数所有 return 路径——09-24 用户实跑第二次揪出）
         return;
     }
     std::vector<const char*> names;
     for (auto& t : m.tiles) names.push_back(t->room.c_str());
     if (m.sel_control >= static_cast<int>(names.size())) m.sel_control = -1;
     ImGui::Combo("tile", &m.sel_control, names.data(), static_cast<int>(names.size()));
-    if (m.sel_control < 0) return;
+    if (m.sel_control < 0) {
+        ImGui::End();  // 同族早退二漏（grep 全面板扫出）——Begin/End 配平=每文件 return 路径逐条数
+        return;
+    }
     Tile* t = m.tiles[m.sel_control].get();
     ensure_control(*t); // 一次性建立；失败原因进红行，重连=Rooms 页 Reconnect（旧内联块的调用化）
     ImGui::SeparatorText(t->room.c_str());
