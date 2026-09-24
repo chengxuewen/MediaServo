@@ -4,6 +4,7 @@
 #include "video_grid.hpp"
 
 #include <algorithm>
+#include <vector>
 
 #include <imgui.h>
 
@@ -25,8 +26,13 @@ void render_grid(AppModel& m) {
         m.cols = idx + 1;
     m.cols = std::max(kMinCols, std::min(kMaxCols, m.cols));
 
-    if (m.tiles.empty()) {
-        ImGui::TextDisabled("no streams - tick in Streams tree, then Pull selected");
+    // 网格只画**视频会话**——双房配对自动并入的控制房（vehicle）无媒体流，
+    // 曾占一格"永远 waiting"=假位（09-24 用户桌测揪出）。控制配对存在性见窗底说明行。
+    std::vector<Tile*> vids;
+    for (auto& t : m.tiles)
+        if (t->video) vids.push_back(t.get());
+    if (vids.empty()) {
+        ImGui::TextDisabled("no video streams - tick in Streams tree, then Pull selected");
         ImGui::End();
         return;
     }
@@ -37,9 +43,9 @@ void render_grid(AppModel& m) {
     const float cell_w =
         (ImGui::GetContentRegionAvail().x - spacing * (ncol - 1)) / static_cast<float>(ncol);
 
-    for (size_t i = 0; i < m.tiles.size(); ++i) {
+    for (size_t i = 0; i < vids.size(); ++i) {
         if (i % static_cast<size_t>(ncol) != 0) ImGui::SameLine(0.0f, spacing);
-        Tile* t = m.tiles[i].get();
+        Tile* t = vids[i];
         ImGui::BeginGroup();
         ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + cell_w); // 6 列窄格：房名换行不越格
         ImGui::Text("%s", t->room.c_str());
@@ -59,6 +65,9 @@ void render_grid(AppModel& m) {
         ImGui::PopTextWrapPos();
         ImGui::EndGroup();
     }
+    // 控制配对说明行（透明化"没勾 vehicle 却有 vehicle 会话"——遥控通道随流房自动并入）
+    if (const size_t npair = m.tiles.size() - vids.size(); npair > 0)
+        ImGui::TextDisabled("%zu control session%s (auto-paired with stream rooms)", npair, npair > 1 ? "s" : "");
     ImGui::End();
 }
 
