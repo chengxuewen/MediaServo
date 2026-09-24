@@ -6,12 +6,12 @@
 
 | 项 | SDL3 | Dear ImGui |
 |----|------|-----------|
-| 档案 | `sdl3-release-3.4.16.zip`（~17MB） | `imgui-v1.92.9b.zip`（~2.3MB） |
-| 上游 | github.com/libsdl-org/SDL tag `release-3.4.16` | github.com/ocornut/imgui tag `v1.92.9b`（= commit `f1cc2ae15e53a861a874c3034aae6798fde194ab`） |
-| sha256 | `547af2e721e8fc1a60f17acbb01cf6b65a6fa2022d885746b776e2d867adc2b1` | `008e1f3398e1c6e4d317ae4a05d2dec597bd360f4f3717b1d96e9edb66dba34f` |
+| 档案 | `sdl3-release-3.4.16.zip`（~17MB） | `imgui-v1.92.9b-docking.zip`（~2.4MB） |
+| 上游 | github.com/libsdl-org/SDL tag `release-3.4.16` | github.com/ocornut/imgui tag `v1.92.9b-docking`（= commit `b48d1afbe8ee8b238e2961dc363a949dd7304e23`；第一方 docking 分支随版 tag，`IMGUI_HAS_DOCK` 指纹=分支判据，`IMGUI_VERSION` 宏与 master 同串不作数） |
+| sha256 | `547af2e721e8fc1a60f17acbb01cf6b65a6fa2022d885746b776e2d867adc2b1` | `0434445157a575f452ff0f2d1681fdd90ea8939e0c6983e6f8e47c51fba1bccd` |
 | 锚定语义 | 3.4.x stable（PLAN 版本锚 F-T-13）；**鸿蒙线解锁钩子 = 3.6.0 tag 发布后换档案**（PLAN §12 开放项） | **commit-pin**（F-A-12：禁 master 移动快照；zip 按 commit 全 sha 下载，tag 名仅档案命名） |
 | 哈希生成人 | Sisyphus agent（2026-09-16，下载会话内 `sha256sum` 现算） | 同左 |
-| 第二人复验 | ⏳ 待用户：`cd 3rdparty && sha256sum -c sdl3-release-3.4.16.zip.sha256 imgui-v1.92.9b.zip.sha256` + 与上游 release 页对照（F-S-5 判据项） | 同左 |
+| 第二人复验 | sdl 行：待用户复验（09-16 档）；**imgui 行：09-23 换 docking 档复验义务重置**——`cd 3rdparty && sha256sum -c sdl3-release-3.4.16.zip.sha256 imgui-v1.92.9b-docking.zip.sha256` + 对上游 tag `v1.92.9b-docking` 页（F-S-5） | 同左 |
 
 **体积判例**：SDL3 源码 zip 17MB 进 git = oxmgr tar（D281）先例，PLAN 明示接受。
 

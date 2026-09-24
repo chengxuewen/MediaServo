@@ -51,8 +51,10 @@ FetchContent_Declare(sdl3
     # 档案 zip 保持上游逐字节；guard 解包后应用（python 脚本，逐点幂等），headless 亦无害。
     PATCH_COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/patches/sdl3-x11-none-guard.py)
 FetchContent_Declare(imgui
-    URL "file://${REPO_ROOT}/3rdparty/imgui-v1.92.9b.zip"
-    URL_HASH SHA256=008e1f3398e1c6e4d317ae4a05d2dec597bd360f4f3717b1d96e9edb66dba34f)
+    # v1.92.9b-docking = 第一方 docking 分支随版 tag（commit b48d1af，IMGUI_HAS_DOCK 在位；
+    # imgui.h 的 IMGUI_VERSION 与 master 同串不带后缀——分支指纹只认 IMGUI_HAS_DOCK 宏）
+    URL "file://${REPO_ROOT}/3rdparty/imgui-v1.92.9b-docking.zip"
+    URL_HASH SHA256=0434445157a575f452ff0f2d1681fdd90ea8939e0c6983e6f8e47c51fba1bccd)
 
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)      # 例子静态吃 SDL3，产物免运行时库路径钉子
 set(SDL_STATIC ON CACHE BOOL "" FORCE)

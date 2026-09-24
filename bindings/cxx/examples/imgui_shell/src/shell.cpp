@@ -1,6 +1,7 @@
 #include "imgui_shell/shell.hpp"
 
 #include <SDL3/SDL.h>
+#include <cstring>  // std::strcmp（dummy 判）
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlrenderer3.h>
 #include <imgui.h>
@@ -27,9 +28,10 @@ struct App::Impl {
     SDL_Renderer* renderer = nullptr;
     bool running = false;
     bool backends_ready = false;  // imgui context/后端 init 全成才置位（析构门）
+    std::string ini_name;         // io.IniFilename 指它——生命周期必须随 Impl（imgui 只存裸指针）
 };
 
-App::App(const WindowSpec& spec) : impl_(new Impl) {
+App::App(const WindowSpec& spec, const ShellOptions& opt) : impl_(new Impl) {
     #ifdef MSRTC_X11
     // 须在 SDL_Init 前装：CreateWindow 期间 SDL 已订阅 clipboard 属性，早期 BadAtom 会撞
     // Xlib 默认 handler(=exit)。libX11 为 DT_NEEDED，XSetErrorHandler 进程级、不依赖 display。
@@ -51,6 +53,18 @@ App::App(const WindowSpec& spec) : impl_(new Impl) {
     }
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
+
+    // —— docking 与布局持久化纪律（语义解释在 shell.hpp ShellOptions 注释）——
+    ImGuiIO& io = ImGui::GetIO();
+    if (opt.docking) io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    const char* drv = SDL_GetCurrentVideoDriver();
+    const bool headless = !drv || std::strcmp(drv, "dummy") == 0;
+    if (!opt.ini_path.empty() && !headless) {
+        impl_->ini_name = opt.ini_path;            // 拷贝归 Impl，io 持 c_str()
+        io.IniFilename = impl_->ini_name.c_str();
+    } else {
+        io.IniFilename = nullptr;  // 禁写盘：防 CWD 污染（09-23 活证=子仓根 imgui.ini 曾被跟踪）
+    }
     if (!ImGui_ImplSDL3_InitForSDLRenderer(impl_->window, impl_->renderer) ||
         !ImGui_ImplSDLRenderer3_Init(impl_->renderer)) {
         SDL_Log("imgui_shell: imgui backend init failed");

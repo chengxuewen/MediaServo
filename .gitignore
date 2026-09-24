@@ -110,3 +110,8 @@ bindings/python/mediaservo/examples/recorded.mp4/bindings/python/mediaservo/medi
 /recordings/
 /identity.json
 data/
+
+# imgui 布局缓存（09-24 脱轨：曾被子仓根跟踪=CI/构建目录污染面）
+imgui.ini
+*.imgui.ini
+imgui_viewer.ini
