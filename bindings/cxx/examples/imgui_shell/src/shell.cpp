@@ -15,8 +15,13 @@ int x11_tolerant_error_handler(Display*, XErrorEvent* ev) {
     // selection/property 协商的 None 原子触发 BadAtom 会直接杀进程（09-20 出窗轮实录，
     // 见 patches/sdl3-x11-none-guard.py）。此 handler 记日志并 return 0 = 让失败调用返回
     // NULL 后 SDL 按返回值处理继续；与 events.c 的 None/NULL 守护配合（缺一即二阶崩）。
-    SDL_Log("imgui_shell: 忽略非致命 X11 error code=%d req=%d res=%lu（Xwayland 协商常态）",
-            ev->error_code, ev->request_code, static_cast<unsigned long>(ev->resourceid));
+    // 去重：同 error_code 只首播 + 每 100 次汇总一条（Xwayland 剪贴板协商风暴是良性常态，
+    // 刷屏会让"示例即模板"看起来像坏了——09-24 用户实跑 20+ 条/分钟实录）
+    static int seen[32] = {0};
+    const int slot = ev->error_code & 31;
+    if (++seen[slot] == 1 || seen[slot] % 100 == 0)
+        SDL_Log("imgui_shell: 忽略非致命 X11 error code=%d req=%d（第 %d 次，Xwayland 协商常态）",
+                ev->error_code, ev->request_code, seen[slot]);
     return 0;
 }
 }  // namespace

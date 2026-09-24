@@ -43,9 +43,11 @@ void render_streams_tree(AppModel& m, const Env& env) {
         for (size_t i : groups[g])
             for (auto& t : m.tiles)
                 if (t->room == m.rooms[i].room_id) any_live = true;
-        ImGui::TreeNodeEx(g.c_str(),
-                          any_live ? ImGuiTreeNodeFlags_DefaultOpen : 0,
-                          "%s%s", g.c_str(), any_live ? "  ●" : "");
+        // TreeNodeEx 只在展开时压 ID 栈——折叠则不得渲染子项也不得 TreePop
+        // （无条件 Pop=折叠瞬间 IDStack 下溢断言，09-24 用户手测实锤）
+        if (ImGui::TreeNodeEx(g.c_str(),
+                              any_live ? ImGuiTreeNodeFlags_DefaultOpen : 0,
+                              "%s%s", g.c_str(), any_live ? "  ●" : "")) {
         for (size_t i : groups[g]) {
             const RoomRow& row = m.rooms[i];
             bool already = false;
@@ -68,6 +70,7 @@ void render_streams_tree(AppModel& m, const Env& env) {
             ImGui::PopID();
         }
         ImGui::TreePop();
+        }  // if(expanded) end
     }
 
     if (ImGui::Button("Reconnect")) { // 换 server/重登录逃生舱（旧语义原样）
