@@ -1,7 +1,8 @@
 #include "imgui_shell/shell.hpp"
 
 #include <SDL3/SDL.h>
-#include <cstring>  // std::strcmp（dummy 判）
+#include <cstring>
+#include <filesystem>  // exists（布局存档探测）  // std::strcmp（dummy 判）
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlrenderer3.h>
 #include <imgui.h>
@@ -29,6 +30,7 @@ struct App::Impl {
     bool running = false;
     bool backends_ready = false;  // imgui context/后端 init 全成才置位（析构门）
     std::string ini_name;         // io.IniFilename 指它——生命周期必须随 Impl（imgui 只存裸指针）
+    bool had_saved_layout = false;  // 构造期探测结果（App::had_saved_layout 转发）
 };
 
 App::App(const WindowSpec& spec, const ShellOptions& opt) : impl_(new Impl) {
@@ -60,6 +62,8 @@ App::App(const WindowSpec& spec, const ShellOptions& opt) : impl_(new Impl) {
     const char* drv = SDL_GetCurrentVideoDriver();
     const bool headless = !drv || std::strcmp(drv, "dummy") == 0;
     if (!opt.ini_path.empty() && !headless) {
+        std::error_code ec;  // 非抛出 exists——只读探测，成败都不拦启动
+        impl_->had_saved_layout = std::filesystem::exists(opt.ini_path, ec);
         impl_->ini_name = opt.ini_path;            // 拷贝归 Impl，io 持 c_str()
         io.IniFilename = impl_->ini_name.c_str();
     } else {
@@ -75,6 +79,8 @@ App::App(const WindowSpec& spec, const ShellOptions& opt) : impl_(new Impl) {
     impl_->backends_ready = true;
     impl_->running = true;
 }
+
+bool App::had_saved_layout() const { return impl_->had_saved_layout; }
 
 App::~App() {
     if (impl_->backends_ready) {

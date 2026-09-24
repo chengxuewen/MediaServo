@@ -5,9 +5,12 @@
 
 #include <imgui.h>
 
+#include "../dock_layout.hpp"
+
 namespace viewer {
 
-void render_grid_body(AppModel& m) {
+void render_grid(AppModel& m) {
+    ImGui::Begin(dock::kGrid);
     ImGui::SameLine(ImGui::GetWindowWidth() - 220);
     int old_cols = m.cols;
     ImGui::SetNextItemWidth(100);
@@ -41,6 +44,7 @@ void render_grid_body(AppModel& m) {
         ImGui::NextColumn();
         ImGui::Columns(1);
     }
+    ImGui::End();
 }
 
 } // namespace viewer

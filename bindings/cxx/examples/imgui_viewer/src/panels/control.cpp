@@ -6,11 +6,14 @@
 
 #include <imgui.h>
 
+#include "../app_log.hpp"
+#include "../dock_layout.hpp"
 #include "../sessions.hpp"
 
 namespace viewer {
 
-void render_control_body(AppModel& m) {
+void render_control(AppModel& m) {
+    ImGui::Begin(dock::kControl);
     if (m.tiles.empty()) {
         ImGui::TextDisabled("join a room first");
         return;
@@ -36,6 +39,8 @@ void render_control_body(AppModel& m) {
         auto es = t->sess.emergency_stop(*t->ctl, "chassis", 900,
                                          R"({"reason":"viewer-ui"})");
         m.estop_sent = es.has_value();
+        log().add_fmt(es ? "info" : "warn", "ESTOP %s (%s)", es ? "sent+acked" : "FAILED",
+                      m.key_signed ? "signed" : "unsigned");
         if (!es) {
             std::lock_guard<std::mutex> lk(t->ack_mu);
             t->ack_last = "estop: " + es.error().message;
@@ -51,6 +56,7 @@ void render_control_body(AppModel& m) {
     ImGui::Text("ack: %s", acks.empty() ? "-" : acks.c_str());
     if (t->rtt_ms >= 0.0) ImGui::SameLine(), ImGui::Text("(rtt=%.0fms)", t->rtt_ms);
     ImGui::Text("estop sent=%s", m.estop_sent ? "yes" : "no");
+    ImGui::End();
 }
 
 } // namespace viewer

@@ -10,6 +10,9 @@
 namespace viewer {
 
 void render_login(AppModel& m, const Env& env) {
+    // 登录前浮动单窗（未 dock）；位置语义与拆分前一致
+    ImGui::SetNextWindowPos(ImVec2(8, 40), ImGuiCond_FirstUseEver);
+    ImGui::Begin("MSRTC Viewer");
     ImGui::TextDisabled("ws=%s", env.ws.c_str());
     ImGui::TextDisabled("http=%s", env.http_base.c_str());
     ImGui::InputText("user", m.user, sizeof(m.user));
@@ -22,6 +25,7 @@ void render_login(AppModel& m, const Env& env) {
     bool do_login = ImGui::Button("Login") && m.pass[0] != '\0';
     if (m.auto_join) do_login = true;
     if (do_login) perform_login(m, env);   // 登录+列举+auto-join 全在 sessions 层
+    ImGui::End();
 }
 
 } // namespace viewer

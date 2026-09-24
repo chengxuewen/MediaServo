@@ -6,6 +6,8 @@
 #include <memory>
 #include <utility>
 
+#include "app_log.hpp"
+
 #include <mediaservo/client.hpp>
 
 namespace viewer {
@@ -39,6 +41,8 @@ void join_room(AppModel& m, const Env& env, const std::string& room_id, bool vid
         }
     }
     if (!tile->err.empty()) std::printf("[tile] %s: %s\n", room_id.c_str(), tile->err.c_str());
+    log().add_fmt(tile->err.empty() ? "info" : "warn", "%s %s%s", video ? "join" : "pair-join",
+                  room_id.c_str(), tile->err.empty() ? " ok" : (": " + tile->err).c_str());
     m.tiles.push_back(std::move(tile));
     // W4d 双房约定：流房（`<base>_<stream>`）自动并入整车房做控制面 tile
     // （G11 多会话形态；控制通道只在整车房建——PIT-140 v2 + W4c 定性）。
@@ -57,8 +61,10 @@ void ensure_control(Tile& t) {
     auto oc = t.sess.open_control({"chassis"});
     if (!oc) {
         t.err = "control: " + oc.error().message;
+        log().add_fmt("warn", "control %s: %s", t.room.c_str(), oc.error().message.c_str());
         return;
     }
+    log().add_fmt("info", "control up: %s (chassis)", t.room.c_str());
     t.ctl = std::make_unique<ms::Control>(std::move(*oc));
     Tile* tp = &t;
     t.ctl->on_ack([tp](const std::string& ack) {
@@ -80,6 +86,7 @@ void ensure_control(Tile& t) {
 void perform_login(AppModel& m, const Env& env) {
     auto token = ms::login(env.http_base, m.user, m.pass);
     if (!token) {
+        log().add_fmt("warn", "login failed: %s", token.error().message.c_str());
         m.status = "login: " + token.error().message;
         m.auto_join = false;
         return;
@@ -100,6 +107,7 @@ void perform_login(AppModel& m, const Env& env) {
     }
     m.logged_in = true;
     m.status.clear();
+    log().add_fmt("info", "login ok: %zu rooms listed", m.rooms.size());
     if (m.auto_join) {
         std::string target = env.room_hint;
         if (target.empty())

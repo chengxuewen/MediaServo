@@ -7,7 +7,7 @@
 
 namespace viewer {
 
-void render_grid_body(AppModel& m);
+void render_grid(AppModel& m);
 
 } // namespace viewer
 

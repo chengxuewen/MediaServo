@@ -61,6 +61,11 @@ public:
     /// 主线程 SDL_Renderer*（视频纹理工位用；窗口未建 = nullptr）。
     void* sdl_renderer() const;
 
+    /// 构造时 ini_path 文件是否已存在（=有上次布局存档）。dock 首版布局守卫用：
+    /// 有存档 → 不跑 DockBuilder（否则每次启动覆盖用户拖拽——docking 头号新手坑）。
+    /// dummy/禁用写盘场景恒 false（首跑形，配 dock_layout 的 reset 路径自洽）。
+    bool had_saved_layout() const;
+
 private:
     struct Impl;
     Impl* impl_;

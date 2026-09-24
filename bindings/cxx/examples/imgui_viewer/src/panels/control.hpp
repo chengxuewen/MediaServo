@@ -7,7 +7,7 @@
 
 namespace viewer {
 
-void render_control_body(AppModel& m);
+void render_control(AppModel& m);
 
 } // namespace viewer
 

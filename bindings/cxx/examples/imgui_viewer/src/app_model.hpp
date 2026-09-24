@@ -119,6 +119,7 @@ struct AppModel {
     bool auto_join = false;           // 无头 CI 通道标志（原 main 局部，入模后 panels 无状态化）
     std::vector<std::unique_ptr<Tile>> tiles;
     int sel_control = -1;             // 控制室选中的 tile 下标
+    int sel_info = 0;                 // 右区详情聚焦的 tile 下标
     float steer_deg = 0.0f;
     uint64_t seq = 1;                 // 舱端自增（D-H3 会话内单调）
     bool estop_sent = false;
