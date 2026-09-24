@@ -43,6 +43,16 @@ pub(crate) fn fold_inbound_stats(
 ) -> VideoStreamStats {
     use mediaservo_webrtc::stats::RTCStats;
     let mut out = VideoStreamStats::default();
+    // 诊断（debug 级）：区分「stats 表里根本没有该 inbound-rtp（demux 注册失败）」与
+    // 「有行但全零（RTP 未达 transport）」——零帧排障的两级判据（09-24 实录入册）。
+    tracing::debug!(
+        rows = items.len(),
+        kinds = ?items.iter().map(|x| match x {
+            RTCStats::InboundRtp(_) => "inbound-rtp".to_string(),
+            o => format!("{o:?}").chars().take(20).collect::<String>(),
+        }).collect::<Vec<_>>(),
+        "fold_inbound_stats raw rows"
+    );
     for st in items {
         if let RTCStats::InboundRtp(r) = st {
             out.bytes_received += r.bytes_received;
