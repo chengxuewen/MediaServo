@@ -60,7 +60,6 @@ struct Tile {
     // stats 扩面（09-24 对表 web play；键=SDK 会话级 union JSON additive 字段）
     double st_jitter = 0.0;
     uint64_t st_packets = 0, packets_lost = 0, st_dropped = 0, st_nack = 0, st_pli = 0, st_fir = 0;
-    std::chrono::steady_clock::time_point stats_t{};
 
     // 控制室（仅视频房开 chassis）
     std::unique_ptr<mediaservo::client::Control> ctl;
@@ -91,13 +90,13 @@ struct Tile {
         ::viewer_core::json_f64(*js, "jitter", &st_jitter);
         w = static_cast<uint32_t>(uw);
         h = static_cast<uint32_t>(uh);
+        // RateEstimator 要**绝对时间戳+累计值**，斜率/重锚/倒退防其内部自理——
+        // 曾喂"距上次毫秒差"致 dt 恒负、码率永久 0（09-24 用户实锤，09-01 web 同族）。
         const auto now = std::chrono::steady_clock::now();
-        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - stats_t).count();
-        if (ms > 0) {
-            bytes_rate.update(ms, bytes); // RateEstimator 单位=累计值/毫秒差
-            fps = f;
-        }
-        stats_t = now;
+        bytes_rate.update(
+            std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+            bytes);
+        fps = f;
         bytes_prev = bytes;
         frames_prev = frames;
     }
