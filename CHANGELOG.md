@@ -15,6 +15,7 @@
   `video_stats` 会话 union。迁移 = 机械前缀替换 + 上述三签名点。
 
 ### 新增
+- [sdk-client] video_stats JSON 契约扩面（additive）：jitter/frame_dropped/nack_count/pli_count/fir_count 五字段——libwebrtc inbound-rtp 一直携带、此前抽象层只搬 10 字段；union 语义=抖动取 max、计数求和（对表 web play 详情层）。
 - [sdk-client] 舱端 C ABI/C++ 批1b 新面（28 符号）：多路 `Consumer`（`session_consume`→id/stats/close
   句柄，每路独立帧泵互不连坐，close 有界 ≤250ms）、会话状态观测（`session_state` 快照 +
   `session_on_state` 累积回调，Disconnected/Connected/Reconnecting/Failed 线值 0..3）、

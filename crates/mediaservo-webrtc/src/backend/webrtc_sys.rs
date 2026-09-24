@@ -87,6 +87,11 @@ fn parse_inbound_stats_json(json: &str) -> Vec<crate::stats::RTCStats> {
                 frame_width: v.get("frameWidth").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
                 frame_height: v.get("frameHeight").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
                 frames_per_second: v.get("framesPerSecond").and_then(|x| x.as_f64()).unwrap_or(0.0),
+                jitter: v.get("jitter").and_then(|x| x.as_f64()).unwrap_or(0.0),
+                frame_dropped: v.get("frameDropped").and_then(|x| x.as_u64()).unwrap_or(0),
+                nack_count: v.get("nackCount").and_then(|x| x.as_u64()).unwrap_or(0),
+                pli_count: v.get("pliCount").and_then(|x| x.as_u64()).unwrap_or(0),
+                fir_count: v.get("firCount").and_then(|x| x.as_u64()).unwrap_or(0),
             }))
         })
         .collect()

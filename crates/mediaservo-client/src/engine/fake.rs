@@ -316,6 +316,11 @@ impl PcHandle for FakePc {
             frame_width: stats.width,
             frame_height: stats.height,
             frames_per_second: 30.0,
+                jitter: 0.0,
+                frame_dropped: 0,
+                nack_count: 0,
+                pli_count: 0,
+                fir_count: 0,
         })]
     }
 

@@ -384,6 +384,11 @@ mod stats_and_rtp_tests {
                 frame_width: 1920,
                 frame_height: 1080,
                 frames_per_second: 30.0,
+                jitter: 0.0,
+                frame_dropped: 0,
+                nack_count: 0,
+                pli_count: 0,
+                fir_count: 0,
             }),
         ];
         assert_eq!(stats.len(), 2);

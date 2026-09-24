@@ -58,6 +58,12 @@ pub struct RTCInboundRtpStreamStats {
     pub frame_width: u32,
     pub frame_height: u32,
     pub frames_per_second: f64,
+    // W3C 口径补全（09-24 对表 web play：libwebrtc stats JSON 一直全带，此前只搬 10 字段）
+    pub jitter: f64, // 秒（W3C）——面板显示乘 1000
+    pub frame_dropped: u64,
+    pub nack_count: u64,
+    pub pli_count: u64,
+    pub fir_count: u64,
 }
 
 /// Outbound RTP statistics.

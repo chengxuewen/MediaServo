@@ -57,6 +57,9 @@ struct Tile {
     uint64_t bytes_prev = 0, frames_prev = 0;
     double fps = 0.0;
     uint32_t w = 0, h = 0;
+    // stats 扩面（09-24 对表 web play；键=SDK 会话级 union JSON additive 字段）
+    double st_jitter = 0.0;
+    uint64_t st_packets = 0, packets_lost = 0, st_dropped = 0, st_nack = 0, st_pli = 0, st_fir = 0;
     std::chrono::steady_clock::time_point stats_t{};
 
     // 控制室（仅视频房开 chassis）
@@ -79,6 +82,13 @@ struct Tile {
         uint64_t uw = 0, uh = 0;
         ::viewer_core::json_u64(*js, "frame_width", &uw);
         ::viewer_core::json_u64(*js, "frame_height", &uh);
+        ::viewer_core::json_u64(*js, "packets_received", &st_packets);
+        ::viewer_core::json_u64(*js, "packets_lost", &packets_lost);
+        ::viewer_core::json_u64(*js, "frame_dropped", &st_dropped);
+        ::viewer_core::json_u64(*js, "nack_count", &st_nack);
+        ::viewer_core::json_u64(*js, "pli_count", &st_pli);
+        ::viewer_core::json_u64(*js, "fir_count", &st_fir);
+        ::viewer_core::json_f64(*js, "jitter", &st_jitter);
         w = static_cast<uint32_t>(uw);
         h = static_cast<uint32_t>(uh);
         const auto now = std::chrono::steady_clock::now();

@@ -62,6 +62,11 @@ pub(crate) fn fold_inbound_stats(
             out.frame_width = out.frame_width.max(r.frame_width);
             out.frame_height = out.frame_height.max(r.frame_height);
             out.frames_per_second = out.frames_per_second.max(r.frames_per_second);
+            out.jitter = out.jitter.max(r.jitter);
+            out.frame_dropped += r.frame_dropped;
+            out.nack_count += r.nack_count;
+            out.pli_count += r.pli_count;
+            out.fir_count += r.fir_count;
         }
     }
     out
@@ -77,6 +82,11 @@ pub struct VideoStreamStats {
     pub frame_width: u32,
     pub frame_height: u32,
     pub frames_per_second: f64,
+    pub jitter: f64,        // 秒（多路 union 取 max）
+    pub frame_dropped: u64, // 多路求和
+    pub nack_count: u64,
+    pub pli_count: u64,
+    pub fir_count: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -873,7 +883,37 @@ mod tests {
             frame_width: w,
             frame_height: 720,
             frames_per_second: fps,
+            jitter: 0.0,
+            frame_dropped: 0,
+            nack_count: 0,
+            pli_count: 0,
+            fir_count: 0,
         })
+    }
+
+    #[test]
+    fn fold_inbound_unions_new_w3c_fields() {
+        // 09-24 扩面语义钉：jitter 多路取 max，dropped/nack/pli/fir 求和
+        let mut mk2 = mk(100, 1280, 30.0);
+        if let RTCStats::InboundRtp(r) = &mut mk2 {
+            r.jitter = 0.004;
+            r.frame_dropped = 7;
+            r.nack_count = 5;
+            r.pli_count = 2;
+            r.fir_count = 1;
+        }
+        let mut mk3 = mk(100, 1280, 30.0);
+        if let RTCStats::InboundRtp(r) = &mut mk3 {
+            r.jitter = 0.009;
+            r.frame_dropped = 3;
+            r.nack_count = 4;
+        }
+        let out = fold_inbound_stats(vec![mk2, mk3]);
+        assert!((out.jitter - 0.009).abs() < 1e-9, "jitter=max");
+        assert_eq!(out.frame_dropped, 10);
+        assert_eq!(out.nack_count, 9);
+        assert_eq!(out.pli_count, 2);
+        assert_eq!(out.fir_count, 1);
     }
 
     #[test]
