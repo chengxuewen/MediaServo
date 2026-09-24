@@ -1,6 +1,7 @@
 // sessions — 实现（T3 自 main.cpp join_room lambda 与登录分支迁居；语义逐字保持）。
 #include "sessions.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <memory>
@@ -81,6 +82,14 @@ void ensure_control(Tile& t) {
             tp->rtt_ms = (now_us - tp->sent_us.load()) / 1000.0;
         }
     });
+}
+
+void close_room(AppModel& m, const std::string& room) {
+    const auto it = std::find_if(m.tiles.begin(), m.tiles.end(),
+                                 [&room](const std::unique_ptr<Tile>& t) { return t->room == room; });
+    if (it == m.tiles.end()) return;
+    log().add("info", "close " + room);
+    m.tiles.erase(it);
 }
 
 void perform_login(AppModel& m, const Env& env) {

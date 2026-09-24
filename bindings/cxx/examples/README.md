@@ -39,6 +39,7 @@ dummy 无头模式下 ini 不写盘（CI 构建目录零污染）。
 
 ### 手测单（首轮验收，5 分钟）
 
+- [ ] 网格格右上 x / 树 live 行 x → 该会话关闭、格消失、树行回可选；再勾选可重新 Pull
 - [ ] 登录 → 左树出现设备分组；**点行/勾盒多选**（选中行黄高亮）→ 点「Pull selected ▶」→ 中格出画、右上详情有 fps/kbps、树内转 live 灰缀
 - [ ] cols 下拉切 1/2/3/6 列 → **网格真实变列**（legacy Columns 单列 bug 已根修）；拖大/小 Video Grid 窗格 → 格宽自适应
 - [ ] Pull 流房自动并入整车控制房（树里 `●` 组 + 网格窗底 "1 control session (auto-paired)" 说明行；**控制房不占画面格**），Control 右下 steer→ack RTT 现值

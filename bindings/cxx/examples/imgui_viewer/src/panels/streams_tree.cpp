@@ -98,6 +98,11 @@ void render_streams_tree(AppModel& m, const Env& env) {
             ImGui::Text("%s  [%s]%s", leaf.c_str(), row.kind.c_str(), already ? "  live" : "");
             if (sel) ImGui::PopStyleColor();
             if (!already && ImGui::IsItemClicked()) m.rooms[i].checked = !m.rooms[i].checked;
+            if (already) {  // 在播行 → ✕ 关该会话（控制房在此独立可关）
+                ImGui::SameLine();
+                if (ImGui::SmallButton("x")) close_room(m, row.room_id);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("close this session");
+            }
             ImGui::PopID();
         }
         ImGui::TreePop();

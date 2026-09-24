@@ -9,6 +9,7 @@
 #include <imgui.h>
 
 #include "../dock_layout.hpp"
+#include "../sessions.hpp"
 
 namespace viewer {
 
@@ -43,12 +44,17 @@ void render_grid(AppModel& m) {
     const float cell_w =
         (ImGui::GetContentRegionAvail().x - spacing * (ncol - 1)) / static_cast<float>(ncol);
 
+    std::string to_close;  // 一帧最多关一路：环内只记录，环外 erase（防迭代中悬挂）
     for (size_t i = 0; i < vids.size(); ++i) {
         if (i % static_cast<size_t>(ncol) != 0) ImGui::SameLine(0.0f, spacing);
         Tile* t = vids[i];
+        ImGui::PushID(t->room.c_str());
         ImGui::BeginGroup();
         ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + cell_w); // 6 列窄格：房名换行不越格
         ImGui::Text("%s", t->room.c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("x")) to_close = t->room;
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("close this stream");
         if (t->tex.texture_id()) {
             const float ar = static_cast<float>(t->tex.width()) / static_cast<float>(t->tex.height());
             ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(t->tex.texture_id())),
@@ -64,7 +70,9 @@ void render_grid(AppModel& m) {
                     t->w, t->h, static_cast<unsigned long long>(t->cb.load()));
         ImGui::PopTextWrapPos();
         ImGui::EndGroup();
+        ImGui::PopID();
     }
+    if (!to_close.empty()) close_room(m, to_close);
     // 控制配对说明行（透明化"没勾 vehicle 却有 vehicle 会话"——遥控通道随流房自动并入）
     if (const size_t npair = m.tiles.size() - vids.size(); npair > 0)
         ImGui::TextDisabled("%zu control session%s (auto-paired with stream rooms)", npair, npair > 1 ? "s" : "");

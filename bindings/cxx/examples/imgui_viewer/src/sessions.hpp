@@ -18,6 +18,11 @@ void join_room(AppModel& m, const Env& env, const std::string& room_id, bool vid
 /// 控制通道惰性建立（一次性；含 ack→RTT 挂点）。失败记 tile.err 红行。
 void ensure_control(Tile& t);
 
+/// 关闭单路会话（网格里 ✕ / 树行 ✕）：摘出注册表即毁——Tile RAII 收场
+/// （ctl 泵先停、Session 后关），与 Reconnect 全清同机制；日志进环。
+/// 只关指定房：流房关闭不牵连同 base 控制房（各自独立可关，配对在树里显形）。
+void close_room(AppModel& m, const std::string& room);
+
 } // namespace viewer
 
 #endif // MSRTC_VIEWER_SESSIONS_HPP
