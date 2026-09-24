@@ -52,17 +52,26 @@ App::App(const WindowSpec& spec, const ShellOptions& opt) : impl_(new Impl) {
     // 回退固定 1280x720——无头判据路径零依赖显示环境）。
     int w = spec.width, h = spec.height;
     bool adaptive = (w <= 0 || h <= 0);
-    SDL_Rect disp{};
-    if (adaptive && SDL_GetDisplayBounds(0, &disp) && disp.w > 0 && disp.h > 0) {
-        w = disp.w * 4 / 5;
-        h = disp.h * 4 / 5;
-    } else if (adaptive) {
-        w = 1280;
-        h = 720;
+    SDL_Rect usable{};
+    if (adaptive) {
+        // UsableBounds=扣掉 GNOME 顶栏/dock 的工作区（GetDisplayBounds 是全屏边界——
+        // 拿它算 80% 仍会被 dock 遮，09-24 用户实锤 1280x768 桌面）。失败回退 bounds，
+        // 再失败（dummy 无头）回退 1280x720。
+        if (!SDL_GetDisplayUsableBounds(0, &usable) || usable.w <= 0 || usable.h <= 0) {
+            if (!SDL_GetDisplayBounds(0, &usable) || usable.w <= 0 || usable.h <= 0) {
+                usable.x = usable.y = 0;
+                usable.w = 1280;
+                usable.h = 720;
+            }
+        }
+        w = usable.w * 4 / 5;
+        h = usable.h * 4 / 5;
     }
     impl_->window = SDL_CreateWindow(spec.title.c_str(), w, h, 0);
-    if (adaptive && impl_->window && disp.w > 0) {
-        SDL_SetWindowPosition(impl_->window, (disp.w - w) / 2, (disp.h - h) / 2); // 本档期 SDL 无 Center API，手算居中
+    if (adaptive && impl_->window) {
+        // 居中于工作区（含原点偏移——dock 在左侧时 (0,0) 不是视觉中心；本档期 SDL 无 Center API）
+        SDL_SetWindowPosition(impl_->window, usable.x + (usable.w - w) / 2,
+                               usable.y + (usable.h - h) / 2);
     }
     if (!impl_->window) {
         SDL_Log("imgui_shell: CreateWindow failed: %s", SDL_GetError());
