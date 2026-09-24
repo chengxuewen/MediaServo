@@ -48,7 +48,22 @@ App::App(const WindowSpec& spec, const ShellOptions& opt) : impl_(new Impl) {
         SDL_Log("imgui_shell: SDL_Init(video) failed: %s", SDL_GetError());
         return; // running()=false → 主循环零圈直接收摊（无显示环境=CI 编译面可过）
     }
-    impl_->window = SDL_CreateWindow(spec.title.c_str(), spec.width, spec.height, 0);
+    // 自适应初始尺寸：主显示 80% 取整（SDL_GetDisplayBounds 失败/零尺寸=dummy 无头形，
+    // 回退固定 1280x720——无头判据路径零依赖显示环境）。
+    int w = spec.width, h = spec.height;
+    bool adaptive = (w <= 0 || h <= 0);
+    SDL_Rect disp{};
+    if (adaptive && SDL_GetDisplayBounds(0, &disp) && disp.w > 0 && disp.h > 0) {
+        w = disp.w * 4 / 5;
+        h = disp.h * 4 / 5;
+    } else if (adaptive) {
+        w = 1280;
+        h = 720;
+    }
+    impl_->window = SDL_CreateWindow(spec.title.c_str(), w, h, 0);
+    if (adaptive && impl_->window && disp.w > 0) {
+        SDL_SetWindowPosition(impl_->window, (disp.w - w) / 2, (disp.h - h) / 2); // 本档期 SDL 无 Center API，手算居中
+    }
     if (!impl_->window) {
         SDL_Log("imgui_shell: CreateWindow failed: %s", SDL_GetError());
         return;

@@ -53,9 +53,8 @@ int main() {
     env.run_secs = std::atoi(env_or("MSRTC_RUN_SECS", "0"));
 
     imgui_shell::WindowSpec spec;
-    spec.title = "MSRTC Viewer";
-    spec.width = 1440;
-    spec.height = 900;
+    spec.title = "MSRTC Viewer"; // 尺寸走 WindowSpec 默认自适应（主显 80%+居中）；
+                                 // 需要固定初始值再显式赋 width/height
     imgui_shell::ShellOptions sopt;
     sopt.docking = true;                 // 本例是四区 IDE 布局（对照：control_demo 保持默认关）
     sopt.ini_path = "imgui_viewer.ini";  // 布局持久化（dummy 驱动下 shell 自动禁写）

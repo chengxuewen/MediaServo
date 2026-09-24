@@ -17,8 +17,10 @@ namespace imgui_shell {
 
 struct WindowSpec {
     std::string title = "MediaServo";
-    int width = 1280;
-    int height = 720;
+    /// <=0 = 自适应：取主显示器工作区的 80% 并居中（dummy/无显示环境回退 1280x720）。
+    /// 显式正值 = 固定初始尺寸（SDL3 窗口默认可拖拽 resize，初始值只是起点）。
+    int width = 0;
+    int height = 0;
 };
 
 /// 壳行为选项（默认形=既有全消费者逐字节不变：control_demo 源兼容即回归对照）。
