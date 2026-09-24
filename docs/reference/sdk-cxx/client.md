@@ -261,12 +261,12 @@ auto stats = cons->stats();                       // 单路读数 JSON
 ```
 
 > 说明：多路 `wait_video+consume` 的 cxx 完整可运行 example 在仓内暂无
-> （imgui_viewer 现用 ⊘ `consume_video` 首路桥，见其 main.cpp L203）；上段为
+> （imgui_viewer 现用 ⊘ `consume_video` 首路桥，见其 `sessions.cpp` `join_room` 的 video 分支；docking 改造后指针=文件+符号形）；上段为
 > client.h 文件头真实 C 序列的逐行 RAII 转写，非假代码。
 
 ### 5.4 急停（真实代码，imgui_viewer）
 
-`bindings/cxx/examples/imgui_viewer/src/main.cpp` L400 附近：
+`bindings/cxx/examples/imgui_viewer/src/panels/control.cpp` `render_control`（ESTOP 按钮块）：
 `t->sess.emergency_stop(*t->ctl, "chassis", 900, payload)`——签名态由
 `Config::hmac_key_file` 决定（见 §8.2）。
 
@@ -420,5 +420,5 @@ frame_height / frames_per_second`。多路精确读数必须用 `Consumer::stats
   注释或 examples/README 出处，无 (待核实) 遗留项。
 - 唯一 (待核实)：`set_auto_reconnect` 仅 Rust 面存在（session.rs L376），C/cxx 面未暴露——
   是否规划暴露未见于两文件注释，§3/§8.6 已按实况措辞。
-- 差异一处：imgui_viewer 实际仍用 ⊘ `consume_video`（main.cpp L203）而非新多路形——
+- 差异一处：imgui_viewer 实际仍用 ⊘ `consume_video`（sessions.cpp join_room video 分支）而非新多路形——
   多路 cxx 完整 example 缺位，§5.3 以 C 头文件真实序列转写补足并声明。
