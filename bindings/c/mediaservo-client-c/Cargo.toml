@@ -15,6 +15,10 @@ mediaservo-common = { path = "../../../crates/mediaservo-common" }
 mediaservo-client = { path = "../../../crates/mediaservo-client" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 serde_json = "1"
+# C 桥诊断面：宿主 C++ 进程零 subscriber 时，on_track/ICE 等分水岭日志全哑火
+# （09-24 排障实锤）——runtime 惰性装一层，RUST_LOG 可关。
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 mediaservo-link = { path = "../../../crates/mediaservo-link" }

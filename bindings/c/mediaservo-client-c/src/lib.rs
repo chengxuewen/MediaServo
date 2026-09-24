@@ -88,9 +88,25 @@ pub(crate) const ACK_POLL: Duration = Duration::from_secs(1);
 const VIDEO_POLL: Duration = Duration::from_secs(2);
 
 /// 进程级共享 multi_thread runtime（见模块头 runtime 节）。
+/// 诊断 subscriber 惰性安装（runtime 同刻一次）：默认 mediaservo=info——
+/// "consume on_track 到达"/ICE 状态/client consume 建立 = 零帧问题的分水岭证据链。
+/// 宿主已有 subscriber → try_init Err 静默让位；RUST_LOG env 全程可覆盖级别。
+fn init_tracing() {
+    static DONE: std::sync::Once = std::sync::Once::new();
+    DONE.call_once(|| {
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("mediaservo=info"));
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(true)
+            .try_init();
+    });
+}
+
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     RT.get_or_init(|| {
+        init_tracing();
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
