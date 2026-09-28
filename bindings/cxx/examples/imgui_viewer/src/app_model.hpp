@@ -124,6 +124,11 @@ struct AppModel {
     // server 地址（main 以 env 预置；登录面板可改——env 缺省/演示机场景）
     char url_ws[256] = "";
     char url_http[256] = "";
+    // 登录模式（accountless-client-auth T2 / F11）：false=账号+密码 true=API-key 换发。
+    // 凭证走输入框（G13 永不 argv）；MSRTC_KEY_ID/SECRET 为无头 CI 专用预置通道。
+    bool use_key = false;
+    char key_id[64] = "";
+    char key_secret[256] = "";
     std::string status;               // 登录/列举错误行
     std::vector<RoomRow> rooms;
     bool logged_in = false;

@@ -130,6 +130,17 @@ inline Result<std::string> login(const std::string& http_base_url,
     });
 }
 
+/// API-key 换短 JWT（阻塞；accountless-client-auth T2 镜像 C 面）。输出原样填
+/// Config::jwt 走既有 /ws 门。401（未知 key/错 secret 防枚举）→ error.code=UNAUTHORIZED。
+inline Result<std::string> exchange(const std::string& http_base_url,
+                                    const std::string& key_id,
+                                    const std::string& secret) {
+    return detail::needed_read(nullptr, [&](char* b, size_t c, size_t* n) {
+        return mediaservo_client_exchange(http_base_url.c_str(), key_id.c_str(),
+                                          secret.c_str(), b, c, n);
+    });
+}
+
 /// 房间发现（阻塞，会话前自由函数）。返回 JSON 数组
 /// `[{"room_id":..,"kind":..}]`（与 producer_ids 同形：header-only 无 JSON 依赖，
 /// 调用方解析）。溢出经 needed 反馈自动扩一次重试。

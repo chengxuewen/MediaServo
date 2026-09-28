@@ -25,6 +25,14 @@ static void test_version() {
     assert(v.value().rfind("0.1.", 0) == 0);
 }
 
+static void test_exchange_invalid_arg() {
+    // accountless-client-auth T2：空 key/secret 本地即拒（不触网）。
+    auto r = mediaservo::client::exchange("http://127.0.0.1:9", "", "s");
+    assert(!r.has_value());
+    assert(r.error().code == MEDIASERVO_CLIENT_ERR_INVALID_ARG);
+    assert(!r.error().message.empty());
+}
+
 static void test_login_invalid_arg() {
     // 空凭证 → 本地校验即拒（不触网）
     auto r = mediaservo::client::login("http://127.0.0.1:9", "", "");
@@ -173,6 +181,7 @@ static void test_strerror_c_surface() {
 
 int main() {
     test_version();
+    test_exchange_invalid_arg();
     test_login_invalid_arg();
     test_list_rooms_guards_no_network();
     test_list_rooms_cxx_typed_error();

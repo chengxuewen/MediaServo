@@ -16,9 +16,10 @@ const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// login path——只用于测试断言；生产直接拼入 `http_base`。
 pub(crate) const LOGIN_PATH: &str = "/api/auth/login";
-
 /// rooms 发现 path（GET /api/rooms——server 侧 p3 W2-A 端点）。
 pub(crate) const ROOMS_PATH: &str = "/api/rooms";
+/// `POST /api/auth/exchange` 路径（accountless-client-auth T2：API-key 换短 JWT）。
+const EXCHANGE_PATH: &str = "/api/auth/exchange";
 
 /// 登录成功返回（精简 shape——server `admin.rs:163` LoginResponse）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,9 +66,9 @@ struct ErrorWire {
 // ───────── 纯函数（单元测试）─────────
 
 /// 构造 HTTP/1.1 POST 请求报文。
-pub(crate) fn build_request(host: &str, port: u16, body: &[u8]) -> Vec<u8> {
+pub(crate) fn build_request(host: &str, port: u16, path: &str, body: &[u8]) -> Vec<u8> {
     let mut req = format!(
-        "POST {LOGIN_PATH} HTTP/1.1\r\n\
+        "POST {path} HTTP/1.1\r\n\
          Host: {host}:{port}\r\n\
          Content-Type: application/json\r\n\
          Content-Length: {}\r\n\
@@ -157,23 +158,45 @@ pub async fn login(
     username: &str,
     password: &str,
 ) -> Result<LoginOutcome, ClientError> {
+    let body = serde_json::json!({"username": username, "password": password});
+    auth_post(http_base, LOGIN_PATH, &body, username, "login").await
+}
+
+/// API-key 换短 JWT（accountless-client-auth T2；server = POST /api/auth/exchange，
+/// LiveKit apikey/apiSecret 同型）。返回形与 [`login`] 完全一致（同一 `LoginWire`），
+/// 拿到 jwt 后注入 [`ClientConfig::jwt`] 走既有 `/ws` 门——凭证来源换、消费面不变。
+/// 401（未知 key 或错 secret，server 侧逐字同消息防枚举）→ `InvalidCredentials` 终态。
+pub async fn exchange(
+    http_base: &str,
+    key_id: &str,
+    secret: &str,
+) -> Result<LoginOutcome, ClientError> {
+    let body = serde_json::json!({"key_id": key_id, "secret": secret});
+    auth_post(http_base, EXCHANGE_PATH, &body, key_id, "exchange").await
+}
+
+/// login 与 exchange 共用的 POST→LoginOutcome 链（手写 HTTP/1.1，S2 零新依赖）。
+async fn auth_post(
+    http_base: &str,
+    path: &str,
+    body: &serde_json::Value,
+    who: &str,
+    tag: &'static str,
+) -> Result<LoginOutcome, ClientError> {
     let (host, port) = parse_http_base(http_base)?;
-    let body = serde_json::to_vec(&serde_json::json!({
-        "username": username,
-        "password": password,
-    }))
-    .map_err(|e| ClientError::MalformedResponse(format!("body serialize: {e}")))?;
-    let req = build_request(&host, port, &body);
+    let raw = serde_json::to_vec(body)
+        .map_err(|e| ClientError::MalformedResponse(format!("body serialize: {e}")))?;
+    let req = build_request(&host, port, path, &raw);
     let (status, body_bytes) = request_raw(&host, port, &req, "http login").await?;
 
     match status {
         200 => {
             let wire: LoginWire = serde_json::from_slice(&body_bytes).map_err(|e| {
-                tracing::warn!(body_len = body_bytes.len(), error = %e, "login 200 body parse failed");
-                ClientError::MalformedResponse(format!("login body: {e}"))
+                tracing::warn!(body_len = body_bytes.len(), error = %e, "{tag} 200 body parse failed");
+                ClientError::MalformedResponse(format!("{tag} body: {e}"))
             })?;
             if wire.token.is_empty() {
-                tracing::warn!("login 200 returned empty token");
+                tracing::warn!("{tag} 200 returned empty token");
                 return Err(ClientError::MalformedResponse("empty token".into()));
             }
             Ok(LoginOutcome {
@@ -188,7 +211,7 @@ pub async fn login(
                 .ok()
                 .and_then(|w| w.error)
                 .unwrap_or_else(|| "invalid credentials".into());
-            tracing::info!(user = %username, msg = %msg, "login 401");
+            tracing::info!(who = %who, msg = %msg, "{tag} 401");
             Err(ClientError::InvalidCredentials)
         }
         429 => Err(ClientError::Login("rate limited (429)".into())),
@@ -197,7 +220,7 @@ pub async fn login(
                 .ok()
                 .and_then(|w| w.error)
                 .unwrap_or_default();
-            tracing::warn!(status = other, msg = %msg, "login failed");
+            tracing::warn!(status = other, msg = %msg, "{tag} failed");
             Err(ClientError::Login(format!("HTTP {other}: {msg}")))
         }
     }
@@ -267,7 +290,7 @@ mod tests {
 
     #[test]
     fn build_request_content_length_and_method() {
-        let req = build_request("host", 9800, b"{\"x\":1}");
+        let req = build_request("host", 9800, LOGIN_PATH, b"{\"x\":1}");
         let s = String::from_utf8(req).unwrap();
         println!("REQBYTES {:?}", s);
         assert!(s.starts_with("POST /api/auth/login HTTP/1.1\r\n"));

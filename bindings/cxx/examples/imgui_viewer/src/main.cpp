@@ -70,6 +70,15 @@ int main() {
             m.auto_join = true;
         }
     }
+    if (const char* k = std::getenv("MSRTC_KEY_ID"); k && *k) { // 无头 CI API-key 通道（同 G13 纪律）
+        const char* sec = std::getenv("MSRTC_KEY_SECRET");
+        if (sec && *sec) {
+            std::strncpy(m.key_id, k, sizeof(m.key_id) - 1);
+            std::strncpy(m.key_secret, sec, sizeof(m.key_secret) - 1);
+            m.use_key = true;
+            m.auto_join = true;
+        }
+    }
 
     const auto t0 = std::chrono::steady_clock::now();
     log().set_time_origin(t0);

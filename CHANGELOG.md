@@ -157,6 +157,10 @@
 - [sdk-client] imgui_viewer 窗口可缩放/最大化：CreateWindow 补 SDL_WINDOW_RESIZABLE（SDL3 默认非 resizable，旧注记「本就可拖」证伪）；初始 80% 自适应与 ini 布局不受影响。
 
 ### 新增
+- [sdk-client] API-key 换发三家族齐（accountless-client-auth T2）：Rust `mediaservo_client::exchange(http_base, key_id, secret)`、
+  C `mediaservo_client_exchange`（ABI 29 符号）、C++ `mediaservo::client::exchange`——输出 JWT 原样填既有 `jwt` 配置位，
+  消费面零改动；imgui_viewer 登录面板新增「use api key」模式（账号/key 二选一，G13 口令纪律同形；
+  MSRTC_KEY_ID/MSRTC_KEY_SECRET 为无头 CI 预置通道）。坏 key=401 → InvalidCredentials 终态（不重试）。
 - [server] 免账号客户端凭证（accountless-client-auth T1）：`POST /api/auth/exchange {key_id, secret}`
   换短 JWT（LiveKit apikey/apiSecret 同型）——签发起用现成 admin 密钥基建，`/ws` 与 REST 全部既有
   角色门零改动复用；管理面 `/api/admin/apikeys` CRUD（secret 仅注册响应一次明文，吊销挡新发、

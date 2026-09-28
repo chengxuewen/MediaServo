@@ -159,6 +159,14 @@ mediaservo_err_t mediaservo_client_login(const char* http_base, const char* user
                                          const char* password, char* out_jwt, size_t cap,
                                          size_t* needed);
 
+/* API-key 换短 JWT（POST {http_base}/api/auth/exchange，阻塞；会话前自由函数，
+ * accountless-client-auth T2）。成功 out_jwt = NUL 结尾 JWT，原样填 config.jwt 走
+ * 既有 /ws 门（凭证来源换、消费面不变）。401（未知 key/错 secret 逐字同消息防枚举）
+ * → ERR_UNAUTHORIZED；needed 溢出合同同 login。 */
+mediaservo_err_t mediaservo_client_exchange(const char* http_base, const char* key_id,
+                                            const char* secret, char* out_jwt, size_t cap,
+                                            size_t* needed);
+
 /* 房间发现（GET {http_base}/api/rooms，阻塞；会话前自由函数——不依赖任何 handle）。
  * out_json = JSON 数组 `[{"room_id":..,"kind":"video"|"audio"},..]`（server wire 透传，
  * 本层不解析）。needed 溢出合同见文件头。

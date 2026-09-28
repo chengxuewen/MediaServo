@@ -93,7 +93,9 @@ void close_room(AppModel& m, const std::string& room) {
 }
 
 void perform_login(AppModel& m, const Env& env) {
-    auto token = ms::login(m.url_http, m.user, m.pass);
+    // 两模式同 LoginWire 形（server exchange 复用 LoginResponse）——下游 jwt/rooms 链零分支。
+    auto token = m.use_key ? ms::exchange(m.url_http, m.key_id, m.key_secret)
+                           : ms::login(m.url_http, m.user, m.pass);
     if (!token) {
         log().add_fmt("warn", "login failed: %s", token.error().message.c_str());
         m.status = "login: " + token.error().message;

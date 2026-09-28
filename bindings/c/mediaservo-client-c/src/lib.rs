@@ -232,6 +232,50 @@ pub extern "C" fn mediaservo_client_login(
     })
 }
 
+/// API-key 换短 JWT（`POST {http_base}/api/auth/exchange`，阻塞；会话前自由函数，
+/// accountless-client-auth T2）。成功 out_jwt = NUL 结尾 JWT（后续原样填
+/// `mediaservo_client_config_t.jwt`——凭证来源换、消费面不变）。401（未知 key 或
+/// 错 secret，server 逐字同消息防枚举）→ ERR_UNAUTHORIZED；needed 溢出合同同 login。
+#[unsafe(no_mangle)]
+pub extern "C" fn mediaservo_client_exchange(
+    http_base: *const c_char,
+    key_id: *const c_char,
+    secret: *const c_char,
+    out_jwt: *mut c_char,
+    cap: usize,
+    needed: *mut usize,
+) -> c_int {
+    const NAME: &str = "mediaservo_client_exchange";
+    ffi_global(NAME, || {
+        let (base, kid, sec) = match (cstr(http_base), cstr(key_id), cstr(secret)) {
+            (Ok(Some(b)), Ok(Some(k)), Ok(Some(s)))
+                if !b.is_empty() && !k.is_empty() && !s.is_empty() =>
+            {
+                (b, k, s)
+            }
+            _ => {
+                return fail_global(
+                    "mediaservo_client_exchange: http_base/key_id/secret all required",
+                    MEDIASERVO_CLIENT_ERR_INVALID_ARG,
+                );
+            }
+        };
+        if out_jwt.is_null() || cap == 0 {
+            return fail_global(
+                "mediaservo_client_exchange: null out_jwt or cap 0",
+                MEDIASERVO_CLIENT_ERR_INVALID_ARG,
+            );
+        }
+        match runtime().block_on(mediaservo_client::exchange(base, kid, sec)) {
+            Ok(outcome) => copy_out_needed(NAME, &outcome.jwt, out_jwt, cap, needed),
+            Err(e) => {
+                set_last_error(format!("mediaservo_client_exchange: {e}"));
+                error_code(&e)
+            }
+        }
+    })
+}
+
 /// 房间发现（`GET {http_base}/api/rooms`，阻塞；**会话前自由函数**——不依赖任何
 /// handle，F-T-8）。out_json = JSON 数组 `[{"room_id":..,"kind":..}]`（服务端 wire
 /// 原样透传，本层不解析内容）。溢出合同（producer_ids cap 盲点的修正形）：cap 不足时
@@ -1054,6 +1098,40 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     // ── FFI 入口 null 守卫（不触网）──
+    #[test]
+    fn exchange_null_args_fail() {
+        // accountless-client-auth T2：三面缺失 + null out 均本地拒（不出网）。
+        let mut buf = [0u8; 64];
+        let mut need = 0usize;
+        let rc = mediaservo_client_exchange(
+            ptr::null(),
+            c"k".as_ptr(),
+            c"s".as_ptr(),
+            buf.as_mut_ptr() as *mut c_char,
+            buf.len(),
+            &mut need,
+        );
+        assert_eq!(rc, MEDIASERVO_CLIENT_ERR_INVALID_ARG);
+        let rc = mediaservo_client_exchange(
+            c"http://127.0.0.1:9".as_ptr(),
+            c"".as_ptr(),
+            c"s".as_ptr(),
+            buf.as_mut_ptr() as *mut c_char,
+            buf.len(),
+            &mut need,
+        );
+        assert_eq!(rc, MEDIASERVO_CLIENT_ERR_INVALID_ARG);
+        let rc = mediaservo_client_exchange(
+            c"http://127.0.0.1:9".as_ptr(),
+            c"k".as_ptr(),
+            c"s".as_ptr(),
+            ptr::null_mut(),
+            0,
+            ptr::null_mut(),
+        );
+        assert_eq!(rc, MEDIASERVO_CLIENT_ERR_INVALID_ARG);
+    }
+
     #[test]
     fn login_null_args_fail() {
         let mut buf = [0u8; 64];

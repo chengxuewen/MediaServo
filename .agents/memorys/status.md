@@ -1002,6 +1002,9 @@ install                        → 改名提示 + exit 2（退役）
 
 - **09-24 stats 对表补全（web play 差距分析→SDK 五字段扩面）**：viewer 信息面板值少/零判定失真——根因=webrtc-sys 抽象 stats 采集只搬 10 字段（libwebrtc JSON 全量 30+ 直带）。补 jitter/frame_dropped/nack/pli/fir 三文件链路（后端采集+VideoStreamStats+fold union 语义钉新测）+ viewer Stream Info 三行（jitter ms / loss·dropped / nack·pli·fir）。活体实锤 jitter=0.003s fps=30@1080p；lost/nack=0 为本地环真零非故障。CHANGELOG [sdk-client] additive 契约行。遗账（另案）：帧 ts_us 恒 0（上游时钟源未透传）、candidate-pair 级 RTT 需 pc-stats API、编码格式名需 Consume 响应 rtpParameters 留痕。
 
+### 2026-09-28: accountless-client-auth T2 SDK exchange 三家族
+- auth.rs 抽 `auth_post`（login/exchange 共用 POST→LoginOutcome 链，build_request 加 path 参）+ lib re-export；C `mediaservo_client_exchange`（null/空三面守卫本地拒，头文件手工维护同步）；cxx inline needed 自动扩镜像；viewer 登录面板 use-api-key 开关 + MSRTC_KEY_ID/SECRET 无头通道。门：client lib 30 · auth_unit 7（exchange×2 含 401 终态钉）· client-c 42（含 exchange 守卫钉）· ABI 29↔29 · test-cxx 四族 PASS · build/test example 绿 · dummy 心跳绿。
+
 ### 2026-09-28: accountless-client-auth T1 server key 基建
 - `apikeys.rs` 注册表（YAML/RwLock 热生效/atomic save/sha256 盐=key_id/subtle/dummy 时间垫/防枚举逐字同消息）+ `POST /api/auth/exchange`（独立 governor 桶，login_router 重构 per-route layer）+ `/api/admin/apikeys` CRUD（secret 一次明文、写败回滚、ApiKeyRegistered/Revoked 审计）+ config `api_keys_file`/`api_token_ttl_secs`(43200) + server.docker.yaml 模板注释键。sub 前缀 claims 复用 admin_jwt_secret 签发（jwt_secret 配对启动校验自动覆盖）。门：钉×3 全绿 · stub 13 套件绿 · native test-server-native 绿（除 g3_emergency 在册 flake 单跑绿）· check --all-targets 0。环境新账：mediasoup wrap 下载需干净壳+**带代理**（env -i 剥 proxy=wrapdb 超时新变体，PIT-193 注）。
 
