@@ -3,6 +3,7 @@
 //! Re-exports all server modules for binary and integration test use.
 
 pub mod accounts;
+pub mod apikeys;
 pub mod admin;
 pub mod audit;
 pub mod roles;

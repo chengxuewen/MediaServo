@@ -40,6 +40,13 @@ pub struct AdminState {
     pub devices_path: String,
     /// accounts.yaml 绝对路径（账号管理写回用，main.rs 装配）。
     pub accounts_path: String,
+    /// API-key 注册表（accountless-client-auth T1：exchange 发证与 /api/admin/apikeys
+    /// 管理共享同一 Arc — devices 同款热生效纪律；空 = exchange 恒 401）。
+    pub api_registry: Arc<crate::apikeys::ApiKeyRegistry>,
+    /// api_keys.yaml 绝对路径（管理写回用，main.rs 装配）。
+    pub api_keys_path: String,
+    /// exchange 签发 TTL 秒（config api_token_ttl_secs，缺省 43200）。
+    pub api_token_ttl_secs: u64,
     /// PSK 共享态（psk-admin-management）：与 signaling 同一 Arc；轮换经此热更新。
     pub psk_state: std::sync::Arc<std::sync::RwLock<Option<String>>>,
     /// 配置文件绝对路径（PSK 轮换写回用，main.rs 装配）。
@@ -107,6 +114,10 @@ pub fn admin_router(state: AdminState) -> Router {
             "/api/admin/accounts/:username",
             axum::routing::put(update_account).delete(delete_account),
         )
+        // accountless-client-auth T1: API-key 管理面（admin 全权；dispatcher 只读——
+        // POST/DELETE 被既有 auth_middleware 拒，同 devices 纪律）。
+        .route("/api/admin/apikeys", get(list_api_keys).post(register_api_key))
+        .route("/api/admin/apikeys/:key_id", delete(revoke_api_key))
         .route("/api/admin/psk", get(get_psk).post(rotate_psk))
         .route("/api/admin/events", get(ws_events));
     // H3: SFU 管理端点（仅 sfu-mediasoup 构建存在 — 原生构建无 SfuManager）。
@@ -159,9 +170,24 @@ pub fn login_router(state: AdminState) -> Router {
             .finish()
             .expect("governor config"),
     ));
+    // exchange 同暴力破解面 — 独立桶（login 突发不挤兑换发配额，反之亦然）。
+    let ex_limiter: &'static _ = Box::leak(Box::new(
+        tower_governor::governor::GovernorConfigBuilder::default()
+            .key_extractor(tower_governor::key_extractor::GlobalKeyExtractor)
+            .per_second(LOGIN_RATE_PER_SEC)
+            .burst_size(LOGIN_RATE_BURST)
+            .finish()
+            .expect("governor config exchange"),
+    ));
     Router::new()
-        .route("/api/auth/login", axum::routing::post(login))
-        .layer(tower_governor::GovernorLayer { config: limiter })
+        .route(
+            "/api/auth/login",
+            axum::routing::post(login).layer(tower_governor::GovernorLayer { config: limiter }),
+        )
+        .route(
+            "/api/auth/exchange",
+            axum::routing::post(exchange).layer(tower_governor::GovernorLayer { config: ex_limiter }),
+        )
         .with_state(state)
 }
 
@@ -215,6 +241,151 @@ async fn login(
         role: identity.role.as_str().to_string(),
         expires_in_secs: ttl,
     }))
+}
+
+// ── API-key exchange（accountless-client-auth T1；LiveKit apikey/apiSecret 同型）────
+
+#[derive(Debug, Deserialize)]
+pub struct ExchangeRequest {
+    pub key_id: String,
+    pub secret: String,
+}
+
+/// POST /api/auth/exchange — API-key 换短 JWT。凭证对验后以 `admin_jwt_secret` 现签
+/// `{sub:"apikey:<id>", role, vehicles, exp}`，此后 `/ws` 与 REST 走既有账号门（T0 三面同步）。
+/// 防枚举：未知 key 与错 secret 逐字同消息（devices 同纪律）；限流独立桶（login_router）。
+async fn exchange(
+    State(state): State<AdminState>,
+    axum::Json(req): axum::Json<ExchangeRequest>,
+) -> Result<Json<LoginResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let signing = state.admin_jwt_secret.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse { error: "admin jwt secret not configured".into() }),
+        )
+    })?;
+    let entry = state.api_registry.verify(&req.key_id, &req.secret).map_err(|e| {
+        tracing::warn!("exchange failed for key_id={}", req.key_id);
+        crate::audit::log_event(crate::audit::AuditEvent::AuthFailure {
+            peer_id: format!("apikey:{}", req.key_id),
+            reason: "api key exchange failed".into(),
+        });
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse { error: e.message().into() }),
+        )
+    })?;
+    let ttl = state.api_token_ttl_secs;
+    let token = crate::apikeys::issue_api_token(signing, &req.key_id, &entry, ttl).map_err(|e| {
+        tracing::error!("exchange token issuance failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: "token issuance failed".into() }),
+        )
+    })?;
+    crate::audit::log_event(crate::audit::AuditEvent::AuthSuccess {
+        peer_id: format!("apikey:{}", req.key_id),
+        device_id: None,
+    });
+    Ok(Json(LoginResponse {
+        token,
+        username: req.key_id,
+        role: entry.role.as_str().to_string(),
+        expires_in_secs: ttl,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RegisterApiKeyRequest {
+    pub key_id: String,
+    pub role: String,
+    #[serde(default)]
+    pub vehicles: Vec<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+/// GET /api/admin/apikeys — 列表（secret_hash 绝不出内存，同 devices/C33 语义）。
+async fn list_api_keys(State(state): State<AdminState>) -> Json<serde_json::Value> {
+    let items: Vec<_> = state
+        .api_registry
+        .list()
+        .into_iter()
+        .map(|(key_id, role, vehicles, label)| {
+            serde_json::json!({"key_id": key_id, "role": role, "vehicles": vehicles, "label": label})
+        })
+        .collect();
+    Json(serde_json::json!({"api_keys": items}))
+}
+
+/// POST /api/admin/apikeys — 注册（服务器生成 secret，**仅响应内一次明文**，C33 纪律）。
+/// 写盘失败 → 内存回滚（register_device 同形）。
+async fn register_api_key(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    axum::Json(req): axum::Json<RegisterApiKeyRequest>,
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<ErrorResponse>)> {
+    let secret = state.api_registry.register(
+        &req.key_id,
+        &req.role,
+        &req.vehicles,
+        req.label.as_deref(),
+    ).map_err(|e| match e {
+        crate::apikeys::ApiKeyRegError::Duplicate => (
+            StatusCode::CONFLICT,
+            Json(ErrorResponse { error: "api key already registered".into() }),
+        ),
+        crate::apikeys::ApiKeyRegError::Invalid(msg) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: msg }),
+        ),
+        crate::apikeys::ApiKeyRegError::Unknown => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: "api key registry internal error".into() }),
+        ),
+    })?;
+    if let Err(e) = state.api_registry.save(&state.api_keys_path) {
+        let _ = state.api_registry.revoke(&req.key_id);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: format!("api keys file write failed: {e}") }),
+        ));
+    }
+    crate::audit::log_event(crate::audit::AuditEvent::ApiKeyRegistered {
+        key_id: req.key_id.clone(),
+        actor: claims.sub.clone(),
+    });
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "key_id": req.key_id,
+            "secret": secret,
+            "note": "secret 仅此一次展示；丢失=吊销后重注册（无找回路径）。吊销只挡后续 exchange，已发 JWT 至 TTL 自然失效。"
+        })),
+    ))
+}
+
+/// DELETE /api/admin/apikeys/:key_id — 吊销（内存即时 + 写回；已发 JWT 至 exp 自然死 = F10）。
+async fn revoke_api_key(
+    State(state): State<AdminState>,
+    Path(key_id): Path<String>,
+    Extension(claims): Extension<JwtClaims>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    state.api_registry.revoke(&key_id).map_err(|_| {
+        (StatusCode::NOT_FOUND, Json(ErrorResponse { error: "api key not found".into() }))
+    })?;
+    if let Err(e) = state.api_registry.save(&state.api_keys_path) {
+        tracing::error!("api key revoked in memory but save failed: {e}");
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: format!("api keys file write failed: {e}") }),
+        ));
+    }
+    crate::audit::log_event(crate::audit::AuditEvent::ApiKeyRevoked {
+        key_id: key_id.clone(),
+        actor: claims.sub.clone(),
+    });
+    Ok(Json(serde_json::json!({"revoked": key_id})))
 }
 
 /// POST /api/admin/config/push — admin 专属整车配置下发（E4 push_config 的 HTTP 入口）。
@@ -1319,6 +1490,9 @@ pub(crate) mod tests {
             config_path: "/tmp/mediaservo-test-server.yaml".into(),
             device_registry: Arc::new(DeviceRegistry::empty()),
             devices_path: "/tmp/mediaservo-test-devices.yaml".into(),
+            api_registry: Arc::new(crate::apikeys::ApiKeyRegistry::empty()),
+            api_keys_path: format!("/tmp/ms-apikeys-{}.yaml", uuid::Uuid::new_v4()),
+            api_token_ttl_secs: 3600,
             sfu_manager: sfu,
         }
     }
@@ -1341,6 +1515,9 @@ pub(crate) mod tests {
             config_path: "/tmp/mediaservo-test-server.yaml".into(),
             device_registry: Arc::new(DeviceRegistry::empty()),
             devices_path: "/tmp/mediaservo-test-devices.yaml".into(),
+            api_registry: Arc::new(crate::apikeys::ApiKeyRegistry::empty()),
+            api_keys_path: format!("/tmp/ms-apikeys-{}.yaml", uuid::Uuid::new_v4()),
+            api_token_ttl_secs: 3600,
         }
     }
 
@@ -1367,7 +1544,7 @@ pub(crate) mod tests {
         .unwrap()
     }
 
-    fn admin_token(state: &AdminState) -> String {
+    pub(crate) fn admin_token(state: &AdminState) -> String {
         let _jwt = JwtAuth::new(state.admin_jwt_secret.as_deref().unwrap());
         // ponytail: manually encode with role since sign() doesn't accept role
         let now =
@@ -2080,5 +2257,194 @@ mod g3_tests {
     fn write_back_psk_unwritable_path_errors() {
         let path = std::path::Path::new("/nonexistent-dir-xyz/psk.yaml");
         assert!(write_back_psk(path, "secret-1").is_err());
+    }
+}
+
+// ── accountless-client-auth T1: API-key 管理面 + exchange 端到端钉 ─────────────
+
+#[cfg(test)]
+mod apikey_tests {
+    use super::tests::{admin_token, make_state};
+    use super::*;
+    use crate::apikeys;
+    use axum::body::Body;
+    use http::{Method, Request, StatusCode};
+    use tower::util::ServiceExt;
+
+    async fn json_body(resp: http::Response<Body>) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn apikey_crud_exchange_and_revoke_flow() {
+        let state = make_state().await;
+
+        // 1) 管理面注册 → 201 + secret 一次明文
+        let admin = admin_token(&state);
+        let app = admin_router(state.clone());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/apikeys")
+                    .header("Authorization", format!("Bearer {admin}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({
+                            "key_id": "ci-1", "role": "viewer", "vehicles": ["vehicle_a"]
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = json_body(resp).await;
+        let secret = body["secret"].as_str().expect("secret 一次明文").to_string();
+
+        // 2) 列表不含哈希/secret（C33 语义）
+        let app = admin_router(state.clone());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/apikeys")
+                    .header("Authorization", format!("Bearer {admin}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let list = json_body(resp).await;
+        let text = list.to_string();
+        assert!(!text.contains("secret_hash") && !text.contains(&secret), "列表泄密: {text}");
+
+        // 3) exchange 成功 → token claims 形（F5 sub 前缀 / role / vehicles / TTL）
+        let app = login_router(state.clone());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/auth/exchange")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({"key_id": "ci-1", "secret": secret}))
+                            .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ex = json_body(resp).await;
+        assert_eq!(ex["role"], "viewer");
+        assert_eq!(ex["expires_in_secs"], 3600);
+        let claims: mediaservo_common::auth::JwtClaims = jsonwebtoken::decode(
+            ex["token"].as_str().unwrap(),
+            &jsonwebtoken::DecodingKey::from_secret(b"test-admin-secret-32-byte-min"),
+            &jsonwebtoken::Validation::default(),
+        )
+        .unwrap()
+        .claims;
+        assert_eq!(claims.sub, "apikey:ci-1");
+        assert_eq!(claims.vehicles.as_deref().unwrap(), ["vehicle_a"]);
+
+        // 4) 防枚举：错 secret 与未知 key 逐字同消息
+        let mut msgs: Vec<String> = Vec::new();
+        for (kid, sec) in [("ci-1", "typo"), ("nope", &secret)] {
+            let app = login_router(state.clone());
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/api/auth/exchange")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            serde_json::to_vec(&serde_json::json!({"key_id": kid, "secret": sec}))
+                                .unwrap(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{kid}");
+            let b = json_body(resp).await;
+            msgs.push(b["error"].as_str().unwrap().to_string());
+        }
+        assert_eq!(msgs[0], msgs[1], "exchange 防枚举破防");
+
+        // 5) 吊销 → 后续 exchange 即 401（F10：挡新发；已发 JWT 至 exp 自然死）
+        let app = admin_router(state.clone());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri("/api/admin/apikeys/ci-1")
+                    .header("Authorization", format!("Bearer {admin}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let app = login_router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/auth/exchange")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({"key_id": "ci-1", "secret": secret}))
+                            .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "吊销后 exchange 必须拒");
+    }
+
+    #[tokio::test]
+    async fn register_rejects_illegal_role_with_400() {
+        let state = make_state().await;
+        let admin = admin_token(&state);
+        let app = admin_router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/apikeys")
+                    .header("Authorization", format!("Bearer {admin}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({"key_id": "k", "role": "superuser"}))
+                            .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "矩阵外角色 deploy 期拦");
+    }
+
+    #[tokio::test]
+    async fn exchange_issue_path_uses_apikeys_module_directly() {
+        // 纯函数链：register → verify → issue_api_token 的 sub 前缀钉（与 handler 解耦的第二层保险）
+        let reg = apikeys::ApiKeyRegistry::empty();
+        let secret = reg.register("ci-2", "operator", &[], None).unwrap();
+        let entry = reg.verify("ci-2", &secret).unwrap();
+        let tok = apikeys::issue_api_token("s3cret-min-32-bytes-for-test!!", "ci-2", &entry, 60).unwrap();
+        let claims: mediaservo_common::auth::JwtClaims = jsonwebtoken::decode(
+            &tok,
+            &jsonwebtoken::DecodingKey::from_secret(b"s3cret-min-32-bytes-for-test!!"),
+            &jsonwebtoken::Validation::default(),
+        )
+        .unwrap()
+        .claims;
+        assert_eq!(claims.sub, "apikey:ci-2");
+        assert_eq!(claims.role.as_deref(), Some("operator"));
     }
 }

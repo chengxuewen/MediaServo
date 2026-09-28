@@ -1002,6 +1002,9 @@ install                        → 改名提示 + exit 2（退役）
 
 - **09-24 stats 对表补全（web play 差距分析→SDK 五字段扩面）**：viewer 信息面板值少/零判定失真——根因=webrtc-sys 抽象 stats 采集只搬 10 字段（libwebrtc JSON 全量 30+ 直带）。补 jitter/frame_dropped/nack/pli/fir 三文件链路（后端采集+VideoStreamStats+fold union 语义钉新测）+ viewer Stream Info 三行（jitter ms / loss·dropped / nack·pli·fir）。活体实锤 jitter=0.003s fps=30@1080p；lost/nack=0 为本地环真零非故障。CHANGELOG [sdk-client] additive 契约行。遗账（另案）：帧 ts_us 恒 0（上游时钟源未透传）、candidate-pair 级 RTT 需 pc-stats API、编码格式名需 Consume 响应 rtpParameters 留痕。
 
+### 2026-09-28: accountless-client-auth T1 server key 基建
+- `apikeys.rs` 注册表（YAML/RwLock 热生效/atomic save/sha256 盐=key_id/subtle/dummy 时间垫/防枚举逐字同消息）+ `POST /api/auth/exchange`（独立 governor 桶，login_router 重构 per-route layer）+ `/api/admin/apikeys` CRUD（secret 一次明文、写败回滚、ApiKeyRegistered/Revoked 审计）+ config `api_keys_file`/`api_token_ttl_secs`(43200) + server.docker.yaml 模板注释键。sub 前缀 claims 复用 admin_jwt_secret 签发（jwt_secret 配对启动校验自动覆盖）。门：钉×3 全绿 · stub 13 套件绿 · native test-server-native 绿（除 g3_emergency 在册 flake 单跑绿）· check --all-targets 0。环境新账：mediasoup wrap 下载需干净壳+**带代理**（env -i 剥 proxy=wrapdb 超时新变体，PIT-193 注）。
+
 ### 2026-09-28: accountless-client-auth T0 fail-closed（4013 三面同步）
 - server `Err(e)` 臂不再落 PSK 回落（旧形=过期 token+对 PSK 静默升 Legacy=G3 矩阵全旁路）→ Error 4013 断连+审计；client error 族/`is_retryable`/TS `classifySfuError` 三面同步 4013∈auth 终态；钉=integration_test `bad_jwt_rejects_4013_and_never_degrades_to_psk_legacy` + client 单测 + vitest 各一。门：server stub 全量绿 · client lib 绿 · vitest 28/28 · clippy rc0（存量 warn 另册）。
 

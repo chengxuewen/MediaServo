@@ -197,6 +197,26 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     // unified-device-admin: 单一 Arc 实例，signaling（接入鉴权）与 admin（管理写回）共享。
     let device_registry = std::sync::Arc::new(device_registry);
 
+    // ── accountless-client-auth T1: API-key 注册表（api_keys.yaml；缺省与 server.yaml 同目录）
+    // 文件缺失/解析失败 → 空注册表 + 警告（exchange 恒 401；账号/PSK/设备通路零影响）。
+    let api_keys_path = config
+        .api_keys_file
+        .as_deref()
+        .map(resolve_path)
+        .unwrap_or_else(|| resolve_path("api_keys.yaml"));
+    let api_registry = match mediaservo_server::apikeys::ApiKeyRegistry::load(&api_keys_path) {
+        Ok(reg) => {
+            tracing::info!("API key registry loaded from {api_keys_path}: {} keys", reg.len());
+            reg
+        }
+        Err(e) => {
+            tracing::warn!("API key registry {api_keys_path}: {e}; running with empty registry");
+            mediaservo_server::apikeys::ApiKeyRegistry::empty()
+        }
+    };
+    let api_registry = std::sync::Arc::new(api_registry);
+    let api_token_ttl_secs = config.api_token_ttl_secs;
+
     // device-enroll §7: ALLOW_DEV_ENROLL（env，缺省 false = 生产手动 pending 队列；
     // =1 专网/开发验签过即自动入册零人工）。解析语义同族（ALLOW_DEV_CREDENTIALS）：仅字面 "1"。
     let allow_dev_enroll = std::env::var("ALLOW_DEV_ENROLL").as_deref() == Ok("1");
@@ -310,6 +330,9 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         config_path: config_path.clone(),
         device_registry: std::sync::Arc::clone(&device_registry),
         devices_path: devices_path.clone(),
+        api_registry: std::sync::Arc::clone(&api_registry),
+        api_keys_path: api_keys_path.clone(),
+        api_token_ttl_secs: config.api_token_ttl_secs,
         #[cfg(feature = "sfu-mediasoup")]
         sfu_manager: std::sync::Arc::clone(&signaling_server.sfu_manager),
     };

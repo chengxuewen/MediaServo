@@ -54,6 +54,10 @@ pub enum AuditEvent {
     DeviceRevoked { device_id: String, actor: String },
     /// 管理面设备密钥重置（unified-device-admin）。
     DeviceSecretReset { device_id: String, actor: String },
+    /// 管理面 API-key 注册（accountless-client-auth T1）— 只落 key_id，secret 永不入事件。
+    ApiKeyRegistered { key_id: String, actor: String },
+    /// 管理面 API-key 吊销（后续 exchange 即 401；已发 JWT 至 exp 自然死）。
+    ApiKeyRevoked { key_id: String, actor: String },
     /// 管理面账号创建（unified-device-admin）— actor = 管理员账号。
     AccountCreated { username: String, actor: String, role: String },
     /// 管理面账号更新（unified-device-admin）。
@@ -231,6 +235,22 @@ pub fn log_event(event: AuditEvent) {
                 device_id = %device_id,
                 actor = %actor,
                 "Device secret reset by admin"
+            );
+        }
+        AuditEvent::ApiKeyRegistered { key_id, actor } => {
+            tracing::info!(
+                audit.event = "api_key_registered",
+                key_id = %key_id,
+                actor = %actor,
+                "API key registered by admin"
+            );
+        }
+        AuditEvent::ApiKeyRevoked { key_id, actor } => {
+            tracing::warn!(
+                audit.event = "api_key_revoked",
+                key_id = %key_id,
+                actor = %actor,
+                "API key revoked by admin"
             );
         }
         AuditEvent::AccountCreated { username, actor, role } => {

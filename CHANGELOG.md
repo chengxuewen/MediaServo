@@ -157,6 +157,11 @@
 - [sdk-client] imgui_viewer 窗口可缩放/最大化：CreateWindow 补 SDL_WINDOW_RESIZABLE（SDL3 默认非 resizable，旧注记「本就可拖」证伪）；初始 80% 自适应与 ini 布局不受影响。
 
 ### 新增
+- [server] 免账号客户端凭证（accountless-client-auth T1）：`POST /api/auth/exchange {key_id, secret}`
+  换短 JWT（LiveKit apikey/apiSecret 同型）——签发起用现成 admin 密钥基建，`/ws` 与 REST 全部既有
+  角色门零改动复用；管理面 `/api/admin/apikeys` CRUD（secret 仅注册响应一次明文，吊销挡新发、
+  已发 JWT 至 TTL 自然死）；注册表 `api_keys.yaml` 热生效（devices 同款 atomic save/防枚举/常数时间）。
+  server.yaml 新键 `api_keys_file`（缺省同目录 api_keys.yaml）与 `api_token_ttl_secs`（缺省 43200=12h）。
 - [sdk-client] imgui_viewer 服务器地址登录面板可编辑：`MSRTC_WS_URL/MSRTC_HTTP_BASE` 降为预置值（demo/联调机免重启换地址）；server 地址入模型，登录/发现/建会话三路消费点统一读面板值。
 
 ## v0.1.1（2026-09-10）

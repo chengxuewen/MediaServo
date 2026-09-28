@@ -86,6 +86,17 @@ pub struct ServerConfig {
     #[serde(default)]
     pub accounts_file: Option<String>,
 
+    /// API-key 注册表文件（accountless-client-auth T1，YAML: `api_keys: {<id>: {secret_hash,
+    /// role, vehicles}}`）——`POST /api/auth/exchange` 免账号换短 JWT 的凭证源。
+    /// 缺省 = server.yaml 同目录 `api_keys.yaml`；文件缺失 = 空注册表（exchange 恒 401，
+    /// 不影响账号/PSK/设备通路）。
+    #[serde(default)]
+    pub api_keys_file: Option<String>,
+
+    /// exchange 签发 JWT 的存活秒数（缺省 43200=12h，对齐账号登录 TTL；吊销粒度见 F10）。
+    #[serde(default = "default_api_token_ttl")]
+    pub api_token_ttl_secs: u64,
+
     /// SFU 配置（mediasoup WebRtcServer）。
     #[serde(default)]
     pub sfu: SfuConfig,
@@ -286,6 +297,8 @@ fn default_rate_limit() -> u32 {
 fn default_ws_max_message_size() -> usize {
     65536
 }
+fn default_api_token_ttl() -> u64 { 43200 }
+
 fn default_consumer_limit_per_stream() -> usize {
     50
 }

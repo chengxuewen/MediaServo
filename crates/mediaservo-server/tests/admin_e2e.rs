@@ -42,6 +42,9 @@ async fn make_state() -> AdminState {
         config_path: "/tmp/mediaservo-e2e-server.yaml".into(),
         device_registry: std::sync::Arc::new(mediaservo_server::devices::DeviceRegistry::empty()),
         devices_path: "/tmp/mediaservo-e2e-test-devices.yaml".into(),
+        api_registry: Arc::new(mediaservo_server::apikeys::ApiKeyRegistry::empty()),
+        api_keys_path: format!("/tmp/ms-apikeys-{}.yaml", uuid::Uuid::new_v4()),
+        api_token_ttl_secs: 3600,
         sfu_manager: sfu,
     }
 }
@@ -64,6 +67,9 @@ async fn make_state() -> AdminState {
         config_path: "/tmp/mediaservo-e2e-server.yaml".into(),
         device_registry: std::sync::Arc::new(mediaservo_server::devices::DeviceRegistry::empty()),
         devices_path: "/tmp/mediaservo-e2e-test-devices.yaml".into(),
+        api_registry: Arc::new(mediaservo_server::apikeys::ApiKeyRegistry::empty()),
+        api_keys_path: format!("/tmp/ms-apikeys-{}.yaml", uuid::Uuid::new_v4()),
+        api_token_ttl_secs: 3600,
     }
 }
 

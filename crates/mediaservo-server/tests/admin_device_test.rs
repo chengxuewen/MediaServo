@@ -48,6 +48,9 @@ async fn make_state(devices_path: String) -> AdminState {
         config_path: "/tmp/ms-admin-dev-server.yaml".into(),
         device_registry: Arc::new(devices::DeviceRegistry::empty()),
         devices_path,
+        api_registry: Arc::new(mediaservo_server::apikeys::ApiKeyRegistry::empty()),
+        api_keys_path: format!("/tmp/ms-apikeys-{}.yaml", uuid::Uuid::new_v4()),
+        api_token_ttl_secs: 3600,
         sfu_manager: sfu,
     }
 }
@@ -71,6 +74,9 @@ async fn make_state(devices_path: String) -> AdminState {
         config_path: "/tmp/ms-admin-dev-server.yaml".into(),
         device_registry: Arc::new(devices::DeviceRegistry::empty()),
         devices_path,
+        api_registry: Arc::new(mediaservo_server::apikeys::ApiKeyRegistry::empty()),
+        api_keys_path: format!("/tmp/ms-apikeys-{}.yaml", uuid::Uuid::new_v4()),
+        api_token_ttl_secs: 3600,
     }
 }
 
@@ -463,6 +469,9 @@ async fn make_state_loaded(devices_path: String) -> AdminState {
         config_path: "/tmp/ms-admin-dev-server.yaml".into(),
         device_registry: Arc::new(devices::DeviceRegistry::load(&devices_path).unwrap()),
         devices_path,
+        api_registry: Arc::new(mediaservo_server::apikeys::ApiKeyRegistry::empty()),
+        api_keys_path: format!("/tmp/ms-apikeys-{}.yaml", uuid::Uuid::new_v4()),
+        api_token_ttl_secs: 3600,
         sfu_manager: sfu,
     }
 }
@@ -486,6 +495,9 @@ async fn make_state_loaded(devices_path: String) -> AdminState {
         config_path: "/tmp/ms-admin-dev-server.yaml".into(),
         device_registry: Arc::new(devices::DeviceRegistry::load(&devices_path).unwrap()),
         devices_path,
+        api_registry: Arc::new(mediaservo_server::apikeys::ApiKeyRegistry::empty()),
+        api_keys_path: format!("/tmp/ms-apikeys-{}.yaml", uuid::Uuid::new_v4()),
+        api_token_ttl_secs: 3600,
     }
 }
 
