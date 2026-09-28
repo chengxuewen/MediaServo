@@ -8,6 +8,7 @@ import Audio from './pages/Audio';
 import Vehicles from './pages/Vehicles';
 import Devices from './pages/Devices';
 import Accounts from './pages/Accounts';
+import ApiKeys from './pages/ApiKeys';
 import { hasToken } from './api/client';
 import { useAuth } from './hooks/useAuth';
 
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/devices" element={<RequireAdmin><Devices /></RequireAdmin>} />
         <Route path="/accounts" element={<RequireAdmin><Accounts /></RequireAdmin>} />
+        <Route path="/apikeys" element={<RequireAdmin><ApiKeys /></RequireAdmin>} />
         <Route path="/audio" element={<Audio />} />
         <Route path="/vehicles" element={<Vehicles />} />
         <Route path="/settings" element={<Settings />} />

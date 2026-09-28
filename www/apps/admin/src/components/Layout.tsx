@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { clearToken } from '../api/client';
 import './Layout.css';
-import { Radio, LayoutDashboard, Mic, Car, MonitorCog, Users, Settings as SettingsIcon, Sliders } from 'lucide-react';
+import { Radio, LayoutDashboard, Mic, Car, MonitorCog, Users, Settings as SettingsIcon, Sliders, KeyRound } from 'lucide-react';
 
 export default function Layout() {
   const { role, username, canMonitor, token, isAdmin } = useAuth();
@@ -62,7 +62,7 @@ export default function Layout() {
               <Car size={15} /> Vehicles
             </NavLink>
           )}
-          {/* Devices/Accounts 管理 = 仅 admin（与 RequireAdmin 守卫一致） */}
+          {/* Devices/Accounts/ApiKeys 管理 = 仅 admin（与 RequireAdmin 守卫一致） */}
           {isAdmin && (
             <NavLink to="/devices" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               <MonitorCog size={15} /> Device Management
@@ -71,6 +71,11 @@ export default function Layout() {
           {isAdmin && (
             <NavLink to="/accounts" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               <Users size={15} /> Account Management
+            </NavLink>
+          )}
+          {isAdmin && (
+            <NavLink to="/apikeys" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              <KeyRound size={15} /> API Keys
             </NavLink>
           )}
           {/* 弱网面板 = 纯外链（App.tsx 路由表不加 path），新标签打开 serve 面板 */}

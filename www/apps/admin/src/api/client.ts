@@ -123,6 +123,30 @@ export async function deleteAccount(username: string): Promise<AdminAccountDelet
   return request(`/accounts/${encodeURIComponent(username)}`, { method: 'DELETE' });
 }
 
+// ── API Keys 管理（accountless-client-auth T1；wire 类型 admin 专属留此）──
+export interface AdminApiKey {
+  key_id: string;
+  role: string;
+  vehicles: string[];
+  label: string | null;
+}
+
+export interface AdminApiKeyListResponse { api_keys: AdminApiKey[] }
+export interface AdminApiKeyCreated { key_id: string; secret: string; note: string }
+export interface AdminApiKeyRevoked { revoked: string }
+
+export async function getApiKeys(): Promise<AdminApiKeyListResponse> {
+  return request('/apikeys');
+}
+
+export async function createApiKey(keyId: string, role: string, vehicles: string[], label: string | null): Promise<AdminApiKeyCreated> {
+  return request('/apikeys', { method: 'POST', body: JSON.stringify({ key_id: keyId, role, vehicles, label }) });
+}
+
+export async function revokeApiKey(keyId: string): Promise<AdminApiKeyRevoked> {
+  return request(`/apikeys/${encodeURIComponent(keyId)}`, { method: 'DELETE' });
+}
+
 // ── PSK 管理（psk-admin-management — admin-only 端点）──────────────────────
 
 export async function getPsk(): Promise<PskResponse> {

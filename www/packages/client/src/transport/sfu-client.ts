@@ -194,13 +194,17 @@ export class SfuConsumerClient {
 
     // Auth: JWT 经 sec-websocket-protocol 子协议（RFC 6455 token 禁止空格——不能带 "Bearer " 前缀）
     // PIT-49: 浏览器子协议 = 纯 JWT；server 解析时兼容 "Bearer " 前缀
-    this.ws = new WebSocket(wsUrl, this.token ? [this.token] : []);
+    // fail-closed（accountless-client-auth T4；PIT-171 族硬编码清理）：无 token=不建连，
+    // 原 'mediaservo-dev' 共享 PSK 兜底退役——浏览器面认证 = 登录凭证唯一，server 端
+    // T0 语义（PSK 只留给真持 key 的 host/link 客户端）对齐。
+    if (!this.token) {
+      throw new Error('sfu-terminal:no-token');
+    }
+    this.ws = new WebSocket(wsUrl, [this.token]);
 
-    // Auth: PSK fallback（无 token 时发明文 PSK；有 JWT 子协议则不发）
-    const psk = this.token ? null : 'mediaservo-dev';
     const authPromise = new Promise<void>((resolve, reject) => {
       this.ws!.onopen = () => {
-        if (psk) this.ws!.send(psk);
+        // JWT 走 sec-websocket-protocol 子协议，无 PSK 帧可发
       };
       this.ws!.onmessage = (event) => {
         try {

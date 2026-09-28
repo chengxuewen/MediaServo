@@ -157,6 +157,11 @@
 - [sdk-client] imgui_viewer 窗口可缩放/最大化：CreateWindow 补 SDL_WINDOW_RESIZABLE（SDL3 默认非 resizable，旧注记「本就可拖」证伪）；初始 80% 自适应与 ini 布局不受影响。
 
 ### 新增
+- [server] 管理台新页「API Keys」（/devices /accounts 同款纪律）：注册（key_id/角色/车辆白名单/备注，
+  secret 一次性展示+复制，关窗即弃=吊销重注册）、吊销（只挡后续 exchange，已发 JWT 至 TTL 自然死）；
+  与 `POST /api/auth/exchange` 配套，非admin 守卫同 devices。
+- [sdk-client] ⚠ 网页播放器不再隐式发共享 PSK：无 token 建连直接拒绝（`mediaservo-dev` 硬编码兜底
+  退役，PIT-171 族/S2 清偿）——浏览器面认证=登录发证唯一路；真 PSK 形态保留给 host/link 客户端直配。
 - [sdk-client] 舱端 SDK 设备身份接线（accountless-client-auth T3，D283 公钥链）：`ClientConfig::identity_dir`
   指向实例目录（`identity.json` + `etc/link/signing.pem`，与 `msrtc-host init` 同布局）→ RoomJoin 带
   device_pubkey + Ed25519 挑战应答进门（身份=Device，免账号免 key）。装载器上收为
