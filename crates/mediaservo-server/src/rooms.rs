@@ -99,8 +99,12 @@ async fn list_rooms(
     // （吊销窗口）→ 空列表（不 401——连接语义与 admin 面一致，UI 侧「需重新登录」兜底，F-S-7）。
     let account = state.accounts.list_accounts().into_iter().find(|a| a.username == claims.sub);
     let privileged = matches!(role, CockpitRole::Admin | CockpitRole::Dispatcher);
-    let vehicles = match (&account, privileged) {
-        (Some(a), _) => {
+    // apikey 形（T1/T2 exchange 发证，sub="apikey:<id>"）无账号行=设计使然：授权
+    // 完全内嵌 claims（与 RoomJoin 门同源；吊销=TTL 自然死 F10），vehicles 取 claims。
+    let apikey_vehicles =
+        claims.sub.starts_with("apikey:").then(|| claims.vehicles.clone().unwrap_or_default());
+    let vehicles = match (&account, privileged, &apikey_vehicles) {
+        (Some(a), _, _) => {
             if CockpitRole::parse(&a.role).as_ref() != Some(&role) {
                 return Err((
                     StatusCode::UNAUTHORIZED,
@@ -109,10 +113,10 @@ async fn list_rooms(
             }
             a.vehicles.clone()
         }
-        (None, true) => Vec::new(),
-        (None, false) => Vec::new(),
+        (None, _, Some(v)) => v.clone(),
+        (None, _, None) => Vec::new(),
     };
-    if !privileged && account.is_none() {
+    if !privileged && account.is_none() && apikey_vehicles.is_none() {
         return Ok(Json(RoomsResponse { rooms: Vec::new() })); // 吊销窗口：非特权且账号已删
     }
     // W4d 派生集：base 房（非 audio、有 owner）× 其 StatusReport connected 流。
@@ -266,6 +270,45 @@ mod tests {
         let state = crate::admin::tests::make_state().await;
         let (code, _) = get_rooms(&state, None).await;
         assert_eq!(code, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn http_apikey_token_visibility_uses_claims_vehicles() {
+        // T5 实盘同形回归钉：apikey 形无账号行，可见性=claims.vehicles 直裁（非空列表旁路）。
+        use mediaservo_common::auth::JwtClaims;
+        let state = crate::admin::tests::make_state().await;
+        let now =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+                as usize;
+        let mk = |vehicles: Vec<String>| {
+            jsonwebtoken::encode(
+                &jsonwebtoken::Header::default(),
+                &JwtClaims {
+                    sub: "apikey:ci-1".into(),
+                    iat: now,
+                    exp: now + 3600,
+                    role: Some("viewer".into()),
+                    vehicles: Some(vehicles),
+                },
+                &jsonwebtoken::EncodingKey::from_secret(
+                    state.admin_jwt_secret.as_deref().unwrap().as_bytes(),
+                ),
+            )
+            .unwrap()
+        };
+        state
+            .signaling
+            .room_manager
+            .join_room("vehicle_demo", "c-1", &mediaservo_common::protocol::PeerRole::Host)
+            .unwrap();
+        state.signaling.set_room_owner_for_test("vehicle_demo", "ms-car1");
+        // 白名单不含 owner → 空（非全放）。
+        let (_, body) = get_rooms(&state, Some(&mk(vec!["ms-other".into()]))).await;
+        assert_eq!(body, r#"{"rooms":[]}"#, "claims 白名单未命中必须空");
+        // 命中 → 可见（含派生 kind）。
+        let (_, body) = get_rooms(&state, Some(&mk(vec!["ms-car1".into()]))).await;
+        assert!(body.contains(r#""room_id":"vehicle_demo""#), "{body}");
+        assert!(body.contains(r#""kind":"control""#), "base 房无在线流=control kind");
     }
 
     #[tokio::test]

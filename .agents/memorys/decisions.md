@@ -143,8 +143,6 @@
 > **修订 (D208)**: 机制改为 compose `image:` + `pull_policy: always`（本地零构建）；命名统一 `audemsp-server-dev` / `audemsp-server-builder`；预烘焙按需启动（团队扩张时实施）。
 **影响**: 待用户确认 ghcr org 名称后实施。Dockerfile base 阶段改为 FROM 预构建镜像。
 
----
-
 ## D208: 构建优化策略实施 (2026-08-03)
 
 **决策**: 采纳 docs/reference/codec/build-optimization-strategy.md 方案 B（dev+builder 双镜像预烘焙 + 国内镜像修复 + lto 优化），分三阶段执行（本周修复 / 本月结构 / 下月按需）。
@@ -863,3 +861,9 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **理由**: 舱端设备公钥注册面不存在（D283 入册主体=车端），Ed25519 验签无锚；HMAC 防本地注入/伪造（FrameBus/IPC 面），无不可否认性——威胁模型升级留 P3′。
 - **影响**: sig 为 additive 线形（旧端忽略=其 estop 被新端拒=版本墙非破坏）；L1 双语言 canonical 钉；跨会话 stale ack 观察项挂 S4′。
 - **参考**: S4 evidence/s4-estop-audit.md、席3 安全评审（09-14 团队轮）。
+
+## D291: 免账号客户端凭证 = API-key 换短 JWT + 设备公钥链分层（accountless-client-auth，2026-09-28）
+- **决策**: 舱端/三方集成用 `POST /api/auth/exchange {key_id, secret}` 换 `{sub:"apikey:<id>", role, vehicles, exp≤TTL}` HS256 JWT（admin_jwt_secret 现签，`/ws` 与 REST 门零改动）；边缘设备用 D283 Ed25519 公钥链（client `identity_dir` 接线）。客户端自签（签钥下放=可伪造全权）与不透明 key 直传 WS 两案否决。
+- **理由**: 测绘实证 server 授权只看 SessionIdentity 枚举——JWT 验签不依赖账号存在，换签发源即可（改动面最小）；LiveKit apikey/apiSecret 业界同型。吊销粒度=删 key 挡新发 + 已发 JWT 至 TTL（不建 revocation 表，YAGNI）。
+- **配套（完成判据）**: T0 fail-closed——坏/过期 JWT 直接 4013 断连（旧形回落 PSK 且 PSK 对=Legacy 矩阵全旁路，免账号会在此变免鉴权）；三面终态族同步（Rust error 族/TS 分类/D273 文档）。/api/rooms 授权同源读 claims（本批活体抓出的副作用修复）。
+- **参考**: LiveKit AccessToken · Agora RTCToken · mediasoup-demo（auth 归应用层）；计划=主仓 docs/plans/accountless-client-auth/。

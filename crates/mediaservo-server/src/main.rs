@@ -215,7 +215,6 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         }
     };
     let api_registry = std::sync::Arc::new(api_registry);
-    let api_token_ttl_secs = config.api_token_ttl_secs;
 
     // device-enroll §7: ALLOW_DEV_ENROLL（env，缺省 false = 生产手动 pending 队列；
     // =1 专网/开发验签过即自动入册零人工）。解析语义同族（ALLOW_DEV_CREDENTIALS）：仅字面 "1"。

@@ -155,6 +155,7 @@
 ### 修复
 - [deploy] examples 构建链 conda/系统工具链混编根治（Ubuntu 20.04 出窗事故族）：`build example` 的 configure/build 子进程统一钉系统编译器 + 剥离 conda 构建 env（CFLAGS/PKG_CONFIG*/CONDA_PREFIX 等）+ SDL 外设三关显式 OFF（liburing/dbus/libusb）+ `-isystem /usr/include` hack 条件化（仅 conda 编译器生效）；老系统（glibc<2.33）集成方现可原生构建 GUI 例子，CI/Jetson conda 路线逐字节不变。
 - [sdk-client] imgui_viewer 窗口可缩放/最大化：CreateWindow 补 SDL_WINDOW_RESIZABLE（SDL3 默认非 resizable，旧注记「本就可拖」证伪）；初始 80% 自适应与 ini 布局不受影响。
+- [server] /api/rooms 对 apikey 形令牌可见性修复：allowlist 原只查 accounts 注册表（换发令牌无账号行=设计使然）→ `apikey:` 前缀 sub 的授权直取 claims.vehicles（与 RoomJoin 门同源同权；人形账号路径逐字不变）。症状=viewer key 换发成功但房间列表恒空（活体 V1 实抓）。
 
 ### 新增
 - [server] 管理台新页「API Keys」（/devices /accounts 同款纪律）：注册（key_id/角色/车辆白名单/备注，

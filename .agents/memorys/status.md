@@ -1002,6 +1002,11 @@ install                        → 改名提示 + exit 2（退役）
 
 - **09-24 stats 对表补全（web play 差距分析→SDK 五字段扩面）**：viewer 信息面板值少/零判定失真——根因=webrtc-sys 抽象 stats 采集只搬 10 字段（libwebrtc JSON 全量 30+ 直带）。补 jitter/frame_dropped/nack/pli/fir 三文件链路（后端采集+VideoStreamStats+fold union 语义钉新测）+ viewer Stream Info 三行（jitter ms / loss·dropped / nack·pli·fir）。活体实锤 jitter=0.003s fps=30@1080p；lost/nack=0 为本地环真零非故障。CHANGELOG [sdk-client] additive 契约行。遗账（另案）：帧 ts_us 恒 0（上游时钟源未透传）、candidate-pair 级 RTT 需 pc-stats API、编码格式名需 Consume 响应 rtpParameters 留痕。
 
+### 2026-09-28: accountless-client-auth T5 活体收官（V 矩阵 + 一处真 bug 收网）
+- V 实盘（/tmp/vsrv 原生簇 + /tmp/vhost generator 车）：V1a admin CRUD（201 一次明文/列表无哈希/防枚举逐字同）· V1b viewer key 无头全链 **cb=597 帧/20s≈满帧** · V2 吊销→exchange 401 · V3 伪造 token WS→4013 帧断连（判决钉）· V5/V6 让位环境（无 web 簇/未装 weaknet；理由=4013 与 4003 同族、S0.5 矩阵已覆盖其形）。
+- **活体抓出真 bug**：/api/rooms allowlist 只查 accounts 注册表 → apikey 令牌恒空列表（单测全绿=夹具用账号 token 的身份形盲区）；修=apikey 前缀 sub 直取 claims.vehicles + 双向钉，rooms 13/13 + 实盘复跑可见。教训：**夹具身份形必须与生产形对齐**（V 矩阵非过场再证）。
+- D291 入册；CHANGELOG 三节同步。环境账：mediasoup 脏壳 buildtype 双旗=PIT-193 再犯当场（env -i+代理+`*-server-native` 三件套含 build 面已钉）。
+
 ### 2026-09-28: accountless-client-auth T4 管理页 + JS 卫生
 - /apikeys 页（worker 交付+编排亲验 tsc0/build0）：ApiKeys.tsx 199 行镜像 devices 形（一次明文/确认吊销/role-badge 复用）+ client.ts 三 API + 路由侧栏；sfu-client.ts `'mediaservo-dev'` PSK 兜底摘除（无 token=sfu-terminal:no-token 拒连，vitest 28 绿）。
 
