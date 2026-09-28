@@ -68,9 +68,10 @@ const SFU_DEBUG = typeof localStorage !== 'undefined' && localStorage.getItem('m
 /// W4: 错误码分流——auth/授权族=终态（红牌唯一合法源）；4031（权限可热改，C33）、
 /// 5000（SFU 内部失败，server 重启窗口典型码）、5001（网关上游切换，host 侧发射经转发）=可重试。
 /// P1/T1.2 有意变更（design §1）：4012（控制 DC 拒权，F8 role 门显式拒）入 terminal 族。
+/// accountless-client-auth T0：4013（JWT 呈现而验签失败=auth 族终态，红牌提示重登录）。
 export function classifySfuError(code: number): 'terminal' | 'retry' {
   switch (code) {
-    case 4000: case 4001: case 4002: case 4003: case 4010: case 4011: case 4012: case 4101:
+    case 4000: case 4001: case 4002: case 4003: case 4010: case 4011: case 4012: case 4013: case 4101:
       return 'terminal';
     default:
       return 'retry';

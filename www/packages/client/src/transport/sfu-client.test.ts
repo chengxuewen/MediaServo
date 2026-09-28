@@ -12,6 +12,7 @@ describe('classifySfuError (W4 错误分类表)', () => {
   // P1/T1.2 有意变更（design §1，随 server 4012 落地）：控制 DC 拒权入 terminal 族。
   it('4012（F8 控制 DC 显式拒）= terminal（T1.2 契约变更钉）', () => {
     expect(classifySfuError(4012)).toBe('terminal');
+    expect(classifySfuError(4013)).toBe('terminal'); // T0 fail-closed（JWT 验签失败=auth 族）
   });
   it('其余 = retry（含 producer/内部错误族）', () => {
     for (const code of [4031, 5000, 5001, 1006, 0, 4999]) {

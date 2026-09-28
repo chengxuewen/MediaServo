@@ -148,6 +148,7 @@
 - [deploy] 部署帮助新增「环境变量总表」：`msrtc.sh -h` 与 `msrtc-server -h` / `msrtc-host -h` 三面共用单一真源 `crates/mediaservo-common/assets/env-usage.md`（[A] 脚本注入 / [B] oxfile 手工行 / [C] 启动 env），整树重部署丢手工 env 时按表回补。
 
 ### ⚠ 升级注意
+- [protocol] 认证失败语义收紧（fail-closed）：握手呈现 JWT 且验签失败 → Error 4013 即刻断连（旧行为=回落 PSK，PSK 对则静默获得无角色矩阵权限）。仓内 Rust/TS 客户端已把 4013 归 auth 终态族；外接自研签 token 的集成方须同步——4013 不做终态处理将导致坏凭证无限重试。
 - [host][server] 设备准入换代：旧版按「设备密钥」注册的车辆，升级 host 后首次连接会被拒绝——请在管理台删除旧条目，再让设备重新接入（自动档秒收录；默认档点一次批准）。设备密钥通路保留一个版本周期，下版删除。
 - [host] `host init` 生成的 `identity.json` 不再包含密钥字段（旧文件仍可读）。
 

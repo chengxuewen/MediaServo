@@ -492,7 +492,21 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                 }
             }
             Err(e) => {
-                tracing::warn!("JWT verification failed: {}, falling back to PSK", e);
+                // T0 fail-closed（accountless-client-auth）：token 已呈现而验签失败 = 拒绝。
+                // 旧路径落 PSK——PSK 对则身份=Legacy=G3 矩阵全旁路（过期 token 反而升权）。
+                // 4013 = auth 族终态码（Rust error 族/TS 分类/D273 文档三面同步是完成判据）。
+                tracing::warn!("JWT verification failed: {e} → 4013（不再回落 PSK）");
+                audit::log_event(AuditEvent::AuthFailure {
+                    peer_id: peer_id.clone(),
+                    reason: "jwt presented but verification failed".into(),
+                });
+                let error = SignalingMessage::Error { code: 4013, message: "JWT invalid or expired".into() };
+                let _ = ws_sender
+                    .lock()
+                    .await
+                    .send(Message::Text(send_msg(&error).unwrap()))
+                    .await;
+                return;
             }
         }
     }

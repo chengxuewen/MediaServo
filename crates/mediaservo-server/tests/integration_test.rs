@@ -1014,6 +1014,48 @@ async fn g3_jwt_unknown_role_rejected_at_handshake() {
     );
 }
 
+/// T0 fail-closed 钉：JWT 已呈现且验签失败（异签密钥伪造）→ 4013 断连；
+/// 拒绝后补发正确 PSK 也不得获得 authenticated（旧形会落 PSK → Legacy 矩阵旁路）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bad_jwt_rejects_4013_and_never_degrades_to_psk_legacy() {
+    let (_server, ws_url) = spawn_server_g3(&two_devices_yaml()).await;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+        as usize;
+    let claims = mediaservo_common::auth::JwtClaims {
+        sub: "rogue".into(),
+        iat: now,
+        exp: now + 3600,
+        role: Some("viewer".into()),
+        vehicles: None,
+    };
+    let rogue = jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(b"not-the-server-secret-32b-min!!"),
+    )
+    .unwrap();
+    let mut req = ws_url.into_client_request().expect("valid ws url");
+    req.headers_mut().insert("Sec-WebSocket-Protocol", rogue.parse().unwrap());
+    let (mut ws, _) = tokio_tungstenite::connect_async(req).await.unwrap();
+    let resp = tokio::time::timeout(std::time::Duration::from_secs(3), ws.next())
+        .await
+        .expect("应即时收到 4013 拒（非静默挂起）")
+        .unwrap()
+        .unwrap();
+    assert!(
+        resp.to_text().unwrap().contains(r#""code":4013"#),
+        "坏 JWT 必须 4013 拒绝: {}",
+        resp.to_text().unwrap()
+    );
+    // 拒后再递真 PSK：连接已死，任何 authenticated 语义 = 降级回归。
+    let _ = ws.send(WsMsg::Text(PSK.into())).await;
+    match tokio::time::timeout(std::time::Duration::from_secs(3), ws.next()).await {
+        Err(_) => {}                              // 无响应（连接僵死）——可接受终形
+        Ok(None) | Ok(Some(Err(_))) => {}          // 关闭
+        Ok(Some(Ok(m))) => panic!("4013 后不应再有帧: {}", m.to_text().unwrap()),
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // G3 review I1: P2P 路径控制列强制 — Remote 角色 join 门（can_control）+
 // P2P 房间 SDP/ICE 中继门（防 viewer/dispatcher 经 SDP 协商控制）。

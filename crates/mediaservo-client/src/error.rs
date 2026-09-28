@@ -14,7 +14,7 @@ pub enum ClientError {
     /// REST 发现面（GET /api/rooms）非 2xx——token 失效/过期/授权不符（p3 W2-B）。
     #[error("REST rejected [{code}]: {message}")]
     RestRejected { code: u16, message: String },
-    /// 连接级认证被拒（4003 PSK / 4010 设备 / 4011 role 非法）。
+    /// 连接级认证被拒（4003 PSK / 4010 设备 / 4011 role 非法 / 4013 JWT 验签失败）。
     #[error("auth rejected [{code}]: {message}")]
     AuthRejected { code: u16, message: String },
     /// server 拒绝方言版本（4101，S0）——不静默降级，终态。
@@ -105,7 +105,7 @@ impl ClientError {
             Self::Server { code, .. } => *code >= 5000,
             // link 透传：嵌入 auth 族码 = 终态；纯连接错 = 可重试。
             Self::Signal(e) => {
-                !matches!(extract_wire_code(&e.to_string()), Some(4003 | 4010 | 4011 | 4012 | 4101))
+                !matches!(extract_wire_code(&e.to_string()), Some(4003 | 4010 | 4011 | 4012 | 4013 | 4101))
             }
         }
     }
@@ -119,7 +119,7 @@ pub fn from_wire_error(code: u16, message: &str) -> ClientError {
     match code {
         4012 => ClientError::ControlDenied(message.to_string()),
         4101 => ClientError::ProtocolUnsupported(message.to_string()),
-        4003 | 4010 | 4011 => ClientError::AuthRejected { code, message: message.to_string() },
+        4003 | 4010 | 4011 | 4013 => ClientError::AuthRejected { code, message: message.to_string() },
         _ => ClientError::Server { code, message: message.to_string() },
     }
 }
@@ -133,7 +133,7 @@ pub fn from_wire_error(code: u16, message: &str) -> ClientError {
 pub fn classify_link_error(err: LinkError) -> ClientError {
     let text = err.to_string();
     match extract_wire_code(&text) {
-        Some(code) if matches!(code, 4003 | 4010 | 4011 | 4012 | 4101) => {
+        Some(code) if matches!(code, 4003 | 4010 | 4011 | 4012 | 4013 | 4101) => {
             from_wire_error(code, &text)
         }
         _ => ClientError::Signal(err),
@@ -166,6 +166,10 @@ mod tests {
         assert!(matches!(
             from_wire_error(4003, "psk"),
             ClientError::AuthRejected { code: 4003, .. }
+        ));
+        assert!(matches!(
+            from_wire_error(4013, "jwt expired"),
+            ClientError::AuthRejected { code: 4013, .. }
         ));
         assert!(matches!(from_wire_error(5000, "boom"), ClientError::Server { code: 5000, .. }));
     }

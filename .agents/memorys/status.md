@@ -1002,5 +1002,8 @@ install                        → 改名提示 + exit 2（退役）
 
 - **09-24 stats 对表补全（web play 差距分析→SDK 五字段扩面）**：viewer 信息面板值少/零判定失真——根因=webrtc-sys 抽象 stats 采集只搬 10 字段（libwebrtc JSON 全量 30+ 直带）。补 jitter/frame_dropped/nack/pli/fir 三文件链路（后端采集+VideoStreamStats+fold union 语义钉新测）+ viewer Stream Info 三行（jitter ms / loss·dropped / nack·pli·fir）。活体实锤 jitter=0.003s fps=30@1080p；lost/nack=0 为本地环真零非故障。CHANGELOG [sdk-client] additive 契约行。遗账（另案）：帧 ts_us 恒 0（上游时钟源未透传）、candidate-pair 级 RTT 需 pc-stats API、编码格式名需 Consume 响应 rtpParameters 留痕。
 
+### 2026-09-28: accountless-client-auth T0 fail-closed（4013 三面同步）
+- server `Err(e)` 臂不再落 PSK 回落（旧形=过期 token+对 PSK 静默升 Legacy=G3 矩阵全旁路）→ Error 4013 断连+审计；client error 族/`is_retryable`/TS `classifySfuError` 三面同步 4013∈auth 终态；钉=integration_test `bad_jwt_rejects_4013_and_never_degrades_to_psk_legacy` + client 单测 + vitest 各一。门：server stub 全量绿 · client lib 绿 · vitest 28/28 · clippy rc0（存量 warn 另册）。
+
 ### 2026-09-28: examples 工具链根治（PIT-207，focal 出窗四连爆）
 - `_example_env()` 剥 conda env+钉系统编译器+PKG_CONFIG_LIBDIR 锁系统+SDL 外设三关 OFF；isystem hack 条件化；SDK INTERFACE conda libstdc++ 链接三连。判据全绿（build/出窗/ldd/dummy/ctest）。主仓镜像=PIT-199。
