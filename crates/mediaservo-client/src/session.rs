@@ -192,6 +192,19 @@ impl RoomSession {
             cfg.role.clone(),
         );
         let client = if let Some(jwt) = &cfg.jwt { client.with_jwt(jwt.clone()) } else { client };
+        // T3：设备公钥身份（与 jwt 可叠——server 端 device 认证优先建 room 归属）。
+        // 加载语义见 ClientConfig::identity_dir 文档；Err 文案直呈（本地配置问题，重试无益）。
+        let client = match &cfg.identity_dir {
+            Some(dir) => {
+                match mediaservo_link::DeviceIdentity::load_from_instance_dir(dir)
+                    .map_err(|e| ClientError::InvalidState(format!("device identity: {e}")))?
+                {
+                    Some(ident) => client.with_device_identity(ident),
+                    None => client,
+                }
+            }
+            None => client,
+        };
         let session = client.connect().await.map_err(classify_link_error)?;
         // 第二流与主流同刻订阅（LinkSignal::events 在 async 态 blocking_lock
         // 会 panic——订阅必须在此同步点完成）。

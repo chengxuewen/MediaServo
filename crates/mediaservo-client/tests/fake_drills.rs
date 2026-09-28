@@ -92,6 +92,7 @@ async fn pair_fake() -> Harness {
         jwt: None,
         role: PeerRole::Consumer,
         hmac_key: None,
+    identity_dir: None,
     };
     let (obs_tx, obs_rx) = mpsc::unbounded_channel();
     let (push_tx, mut push_rx) = mpsc::unbounded_channel::<SignalingMessage>();
@@ -476,6 +477,7 @@ async fn pair_fake_scripted(plan: Vec<JoinPlan>) -> ScriptedHarness {
         jwt: None,
         role: PeerRole::Consumer,
         hmac_key: None,
+    identity_dir: None,
     };
     let (obs_tx, obs_rx) = mpsc::unbounded_channel();
     let (push_tx, mut push_rx) = mpsc::unbounded_channel::<SignalingMessage>();

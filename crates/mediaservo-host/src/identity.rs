@@ -67,17 +67,10 @@ pub fn load_identity(dir: &Path) -> Result<Option<String>, String> {
 /// → 派生公钥指纹。identity.json 缺失 → `Ok(None)`（PSK 回落）；PEM 缺失/损坏 →
 /// 显式 Err（host-agent 侧 warn 退 PSK-only）。
 pub fn load_device_identity(dir: &Path) -> Result<Option<DeviceIdentity>, String> {
-    let Some(device_id) = load_identity(dir)? else {
-        return Ok(None);
-    };
-    use ed25519_dalek::pkcs8::DecodePrivateKey as _;
-    let pem_path = dir.join(SIGNING_PEM);
-    let pem = std::fs::read(&pem_path)
-        .map_err(|e| format!("读取 {} 失败（host init 生成）: {e}", pem_path.display()))?;
-    let signing = ed25519_dalek::SigningKey::from_pkcs8_pem(&String::from_utf8_lossy(&pem))
-        .map_err(|e| format!("{} 解析失败（Ed25519 PKCS#8 PEM）: {e}", pem_path.display()))?;
-    Ok(Some(DeviceIdentity::new(device_id, signing)))
+    // 单一 loader 已上收 mediaservo-link::DeviceIdentity（T3 去重；措辞兼容既有钉）。
+    DeviceIdentity::load_from_instance_dir(dir)
 }
+
 
 /// 写凭据文件并设 0600（与 signing.pem 同纪律；幂等由调用方保证）。
 fn write_secret_file(path: &Path, data: &[u8]) -> Result<(), String> {

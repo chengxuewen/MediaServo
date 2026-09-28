@@ -56,6 +56,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         role: PeerRole::Consumer,
         // S4/T3.5：急停 HMAC 预共享密钥（车端 MEDIASERVO_CONTROL_HMAC_KEY 同值）。
         hmac_key: std::env::var("MEDIASERVO_CONTROL_HMAC_KEY").ok().filter(|v| !v.is_empty()),
+    identity_dir: None,
     };
     let mut session = RoomSession::connect(&cfg).await?;
     println!("joined room={} negotiated={}", session.room_id(), session.negotiated());

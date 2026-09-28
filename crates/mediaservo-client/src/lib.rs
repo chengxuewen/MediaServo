@@ -24,6 +24,7 @@
 //!     jwt: Some(token.jwt),
 //!     role: PeerRole::Consumer,
 //!     hmac_key: None,
+//!     identity_dir: None,
 //! };
 //! let mut session = RoomSession::connect(&cfg).await?;
 //! // 视频：发现 producer → 消费，帧从 mpsc receiver 取（latest 语义，容量 3）

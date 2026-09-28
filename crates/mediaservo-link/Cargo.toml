@@ -16,10 +16,11 @@ tracing = "0.1"
 tokio = { version = "1", features = ["sync", "rt", "time", "macros", "net"] }
 tokio-tungstenite = { version = "0.24", features = ["connect"] }
 futures-util = "0.3"
-ed25519-dalek = { version = "2", features = ["pkcs8", "rand_core", "alloc"] }
+ed25519-dalek = { version = "2", features = ["pem", "rand_core", "alloc"] }  # pem ⊃ pkcs8+ed25519/pem——from_pkcs8_pem 需 pkcs8/pem（link 独立图无 host 的 pkcs8 直依）
 base64 = "0.22"
 
 [dev-dependencies]
+pkcs8 = { version = "0.10", features = ["pem"] }  # 测试侧 to_pkcs8_pem/LineEnding（loader 本体仅需 dalek pem）
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.24"
 # 测试用本地 mock WS server (accept_async)

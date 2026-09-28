@@ -482,6 +482,8 @@ pub extern "C" fn mediaservo_client_session_create(
                     .map_err(|e| set_last_error(format!("mediaservo_client_session_create: {e}")))
                     .ok()
             }),
+            // T3 identity_dir：C/cxx 面暂不暴露（设备身份 SDK 路=Rust 面；开放项在册）。
+            identity_dir: None,
         };
         match runtime().block_on(RoomSession::connect(&client_cfg)) {
             Ok(session) => {

@@ -1002,6 +1002,9 @@ install                        → 改名提示 + exit 2（退役）
 
 - **09-24 stats 对表补全（web play 差距分析→SDK 五字段扩面）**：viewer 信息面板值少/零判定失真——根因=webrtc-sys 抽象 stats 采集只搬 10 字段（libwebrtc JSON 全量 30+ 直带）。补 jitter/frame_dropped/nack/pli/fir 三文件链路（后端采集+VideoStreamStats+fold union 语义钉新测）+ viewer Stream Info 三行（jitter ms / loss·dropped / nack·pli·fir）。活体实锤 jitter=0.003s fps=30@1080p；lost/nack=0 为本地环真零非故障。CHANGELOG [sdk-client] additive 契约行。遗账（另案）：帧 ts_us 恒 0（上游时钟源未透传）、candidate-pair 级 RTT 需 pc-stats API、编码格式名需 Consume 响应 rtpParameters 留痕。
 
+### 2026-09-28: accountless-client-auth T3 设备身份接线
+- link `DeviceIdentity::load_from_instance_dir` 单一装载器（identity.json 缺→None=PSK 回落；PEM 坏→显式 Err）+ host load_device_identity 薄包（措辞兼容三钉）+ client `identity_dir` 配置位（session 装配 with_device_identity）。link 独立图踩出 dalek pem 特性依赖（from_pkcs8_pem 需 pkcs8/pem，host 图被其 pkcs8 直依掩盖）——link Cargo.toml 改 pem + 测试 dev-dep pkcs8。C/cxx identity 面暂不暴露（开放项）。门：link 全量 · host lib 79 · client 全量 · client-c 42 全绿。
+
 ### 2026-09-28: accountless-client-auth T2 SDK exchange 三家族
 - auth.rs 抽 `auth_post`（login/exchange 共用 POST→LoginOutcome 链，build_request 加 path 参）+ lib re-export；C `mediaservo_client_exchange`（null/空三面守卫本地拒，头文件手工维护同步）；cxx inline needed 自动扩镜像；viewer 登录面板 use-api-key 开关 + MSRTC_KEY_ID/SECRET 无头通道。门：client lib 30 · auth_unit 7（exchange×2 含 401 终态钉）· client-c 42（含 exchange 守卫钉）· ABI 29↔29 · test-cxx 四族 PASS · build/test example 绿 · dummy 心跳绿。
 

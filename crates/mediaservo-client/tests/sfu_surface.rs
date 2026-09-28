@@ -99,6 +99,7 @@ async fn pair(
         jwt: None,
         role: PeerRole::Consumer,
         hmac_key: None,
+    identity_dir: None,
     };
     let (tx, rx) = mpsc::unbounded_channel();
     let server = tokio::spawn(async move {

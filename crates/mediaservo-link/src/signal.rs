@@ -129,6 +129,35 @@ pub struct DeviceIdentity {
 }
 
 impl DeviceIdentity {
+    /// 从实例目录装配公钥指纹身份（device-enroll T6 布局，D-H13）：
+    /// `identity.json`(device_id) + `etc/link/signing.pem`(Ed25519 PKCS#8)。
+    /// identity.json 缺失 → `Ok(None)`（PSK 回落，D-E3 共存周期）；有身份但
+    /// PEM 缺失/损坏 → 显式 Err（C15，不静默降 PSK）。
+    /// host-agent 装配与 client SDK（accountless-client-auth T3）共用本单源。
+    pub fn load_from_instance_dir(
+        dir: &std::path::Path,
+    ) -> Result<Option<Self>, String> {
+        #[derive(serde::Deserialize)]
+        struct IdentityFile {
+            device_id: String,
+        }
+        let id_path = dir.join("identity.json");
+        let raw = match std::fs::read(&id_path) {
+            Ok(r) => r,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(format!("读取 {} 失败: {e}", id_path.display())),
+        };
+        let id: IdentityFile = serde_json::from_slice(&raw)
+            .map_err(|e| format!("{} 解析失败: {e}", id_path.display()))?;
+        use ed25519_dalek::pkcs8::DecodePrivateKey as _;
+        let pem_path = dir.join("etc").join("link").join("signing.pem");
+        let pem = std::fs::read(&pem_path)
+            .map_err(|e| format!("读取 {} 失败: {e}", pem_path.display()))?;
+        let signing = ed25519_dalek::SigningKey::from_pkcs8_pem(&String::from_utf8_lossy(&pem))
+            .map_err(|e| format!("{} 解析失败（Ed25519 PKCS#8 PEM）: {e}", pem_path.display()))?;
+        Ok(Some(Self::new(id.device_id, signing)))
+    }
+
     /// 由私钥构建并派生公钥指纹。
     pub fn new(device_id: impl Into<String>, signing: ed25519_dalek::SigningKey) -> Self {
         let pubkey_b64 =
@@ -755,6 +784,53 @@ fn jittered(backoff: std::time::Duration) -> std::time::Duration {
 
 #[cfg(test)]
 mod tests {
+
+    // ── T3 loader 钉（accountless-client-auth：单一实例目录装配）──
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("ms-link-ident-{tag}-{nanos}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir temp");
+        dir
+    }
+
+    #[test]
+    fn identity_dir_missing_file_is_none_psk_fallback() {
+        let dir = temp_dir("missing");
+        assert!(matches!(DeviceIdentity::load_from_instance_dir(&dir), Ok(None)));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn identity_dir_loads_and_derives_pubkey_fingerprint() {
+        use ed25519_dalek::pkcs8::EncodePrivateKey;
+        use pkcs8::LineEnding;
+        let dir = temp_dir("load");
+        std::fs::write(dir.join("identity.json"), r#"{"device_id":"ms-test-01"}"#).unwrap();
+        let link = dir.join("etc").join("link");
+        std::fs::create_dir_all(&link).unwrap();
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let pem = sk.to_pkcs8_pem(LineEnding::LF).expect("pem encode");
+        std::fs::write(link.join("signing.pem"), pem.as_bytes()).unwrap();
+        let ident = DeviceIdentity::load_from_instance_dir(&dir)
+            .expect("load ok")
+            .expect("Some");
+        assert_eq!(ident.device_id, "ms-test-01");
+        assert_eq!(
+            ident.pubkey_b64,
+            base64::engine::general_purpose::STANDARD
+                .encode(sk.verifying_key().to_bytes()),
+            "指纹必须 = 同一私钥派生"
+        );
+        // 坏 PEM 显式 Err（不静默降 PSK，C15）。
+        std::fs::write(link.join("signing.pem"), b"-----BEGIN PRIVATE KEY-----\nbroken\n").unwrap();
+        let err = DeviceIdentity::load_from_instance_dir(&dir).expect_err("corrupt pem must err");
+        assert!(err.contains("signing.pem 解析失败"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     use super::*;
 
     /// 裸 TCP mock：读握手头 → 断言子协议 → 完成 101（回显子协议，server ws_handler 同形）

@@ -21,6 +21,12 @@ pub struct ClientConfig {
     /// S4/T3.5：e-stop HMAC 预共享密钥（与车端 `MEDIASERVO_CONTROL_HMAC_KEY` 同值）。
     /// None = 急停不带 sig（车端未配置 key 时照常执行；车端配置后 estop 会被拒）。
     pub hmac_key: Option<String>,
+    /// 设备身份实例目录（accountless-client-auth T3 / D283 公钥链接线）：内含
+    /// `identity.json` + `etc/link/signing.pem`（`msrtc-host init` 同布局）。
+    /// Some 且文件齐 → RoomJoin 带 device_pubkey + Ed25519 挑战应答（免账号进门，
+    /// 身份 = Device）；identity.json 缺失 → 静默无身份（PSK/JWT 路原样）；
+    /// PEM 缺失/损坏 → connect 显式报错（不静默降级，C15）。
+    pub identity_dir: Option<std::path::PathBuf>,
 }
 
 // jwt 在 Debug 中脱敏——凭证永不入日志。
