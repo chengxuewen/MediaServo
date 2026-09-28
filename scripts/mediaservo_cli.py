@@ -1627,6 +1627,30 @@ _EXAMPLES_DIR = ROOT / "bindings" / "cxx" / "examples"
 _EXAMPLES_BUILD = ROOT / "target" / "examples" / "build"
 _EXAMPLES_BIN = ROOT / "target" / "examples" / "bin"
 
+# pixi/conda 激活注入的编译相关 env——configure 子进程剥离（见 _cmd_build_example 注）
+_CONDA_BUILD_ENV_VARS = frozenset({
+    "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "CPATH",
+    "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "CONDA_PREFIX",
+    "CMAKE_PREFIX_PATH", "PKG_CONFIG_PATH", "PKG_CONFIG_SYSROOT_DIR",
+    "COMPILER_PATH", "LIBRARY_PATH",
+})
+
+
+def _example_env() -> dict[str, str]:
+    """examples configure+build 共用：剥 conda 构建 env + PATH 前置 /usr/bin
+    （collect2 按 PATH 找 ld，否则拾 conda ld → Ubuntu multiarch 库目录缺失，
+    libxcb 等间接依赖 undefined reference，focal 事故 2026-09-28）。"""
+    env = {k: v for k, v in os.environ.items() if k not in _CONDA_BUILD_ENV_VARS}
+    env["PATH"] = "/usr/bin:" + env.get("PATH", "")
+    # conda 的 pkg-config 把自身目录编进默认搜索路径（env 剥离也拦不住，
+    # liburing/dbus 经它重新泄漏 → configure 探测必须锁系统 pkgconfig 集）
+    multi = {"x86_64": "x86_64-linux-gnu", "aarch64": "aarch64-linux-gnu"}.get(
+        os.uname().machine)
+    dirs = ([f"/usr/lib/{multi}/pkgconfig"] if multi else []) + [
+        "/usr/lib/pkgconfig", "/usr/share/pkgconfig"]
+    env["PKG_CONFIG_LIBDIR"] = ":".join(dirs)
+    return env
+
 
 def _example_names() -> list[tuple[str, bool]]:
     """[(目录名, 是否纯库)]——聚合根 file(GLOB */CMakeLists.txt) 的字面同规则。"""
@@ -1661,12 +1685,23 @@ def _cmd_build_example(names: list[str], release: bool = False) -> None:
     gen_build = "Release" if release else "Debug"
     cache = _EXAMPLES_BUILD / "CMakeCache.txt"
     if not cache.exists():
-        _run_or_exit([
+        cfg = [
             "cmake", "-S", str(_EXAMPLES_DIR), "-B", str(_EXAMPLES_BUILD),
             "-G", "Ninja",  # pixi 环境有 ninja 无 make（3.4.16 实录）
             "-DCMAKE_BUILD_TYPE=" + gen_build,
             "-DMEDIASERVO_SDK_DIR=" + str(ROOT / "target" / ("release" if release else "debug")),
-        ])
+            # 例子面不需要游戏外设栈；显式关死，杜绝 pkg-config 探测经 conda env
+            # （libusb-1.0.pc 等）反向漏进 SDL 构建（focal 事故 2026-09-28）
+            "-DSDL_LIBURING=OFF", "-DSDL_DBUS=OFF", "-DSDL_LIBUSB=OFF",
+        ]
+        # conda/系统工具链互斥（focal 事故 2026-09-28）：conda cc+sysroot 与 glibc 2.31
+        # 头混编（bits/endian.h guard 冲突 → SDL pthreads FATAL）；系统编译器又被激活
+        # env（CFLAGS/CONDA_PREFIX）烘进 cache 劫持探测。examples 面单走系统工具链
+        # + 剥离 conda 构建 env（C23 Jetson 同配方；cargo build-c 前置不经此处，零扰动）。
+        if Path("/usr/bin/cc").exists():
+            cfg += ["-DCMAKE_C_COMPILER=/usr/bin/cc", "-DCMAKE_CXX_COMPILER=/usr/bin/c++"]
+        ex_env = _example_env()
+        _run_or_exit(cfg, env=ex_env)
     cmd = ["cmake", "--build", str(_EXAMPLES_BUILD), "-j"]
     if names:
         known = {n for n, _ in _example_names()}
@@ -1676,7 +1711,7 @@ def _cmd_build_example(names: list[str], release: bool = False) -> None:
                       file=sys.stderr)
                 sys.exit(2)
         cmd += ["--target"] + names
-    _run_or_exit(cmd)
+    _run_or_exit(cmd, env=_example_env())
     print(f"[example] 产物 → {_EXAMPLES_BIN.relative_to(ROOT)}/")
 
 

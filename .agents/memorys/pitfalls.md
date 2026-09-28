@@ -1692,3 +1692,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: Err 支 Error 后**追发** Disconnected{reason}（与 Close/None 同事实三臂对齐）；消费方核查纪律：Error 臂语义各有真实消费者（controller 致命返错/streamer warn 续）不可挪用，断开=独立事件补发。
 - **验证**: ⚠ 修复 7439cc2 **当前无回归钉**（link tests grep 0 命中）——1c 首刀补：mock WS 发畸形帧制造 Some(Err) → 断言 events 序列含 Error 后跟 Disconnected。
 - **禁止**: 任何「事件面单臂沉默终态事实」的泵实现；新增事件消费方前先对表泵的全部 break 臂各发了什么。
+
+## PIT-207: conda/系统双工具链在 examples 构建链互踩四连爆（2026-09-28，focal）
+- **症状**: Ubuntu 20.04 `build example` 装齐 xorg 头后连环：SDL `Threads ... cannot be disabled` FATAL → 系统编译器 `#include_next <stdlib.h>` 找不到 → `libiconv_open/xcb_*` undefined → `GLIBCXX_3.4.29/30` 版本符号 undefined。
+- **根因**: conda cc+sysroot 头与 glibc 2.31 混编（`-isystem /usr/include` hack 引发 bits/endian guard 冲突）；反向系统 gcc 被 pixi 激活 env 烘进 cache 的 flags/CONDA_PREFIX 劫持探测（conda pkg-config 内置默认路径拦不住、collect2 按 PATH 拾 conda ld 不认 multiarch）；SDK 制品引用 conda libstdc++ 新符号，系统 ld 需显式 `-L+rpath-link+rpath` 三连。
+- **解法**: `mediaservo_cli.py::_example_env()`（configure+build 共用）剥 conda env + PATH 前置 /usr/bin + `PKG_CONFIG_LIBDIR` 锁系统 + 钉 `/usr/bin/cc|c++` + SDL_LIBURING/DBUS/LIBUSB OFF；`examples/CMakeLists.txt` isystem hack 条件化（compiler MATCHES conda）+ SDK INTERFACE conda lib 三连。
+- **验证**: build example RC=0 · DISPLAY=:0 10s 真出窗 · ldd 零缺失 · dummy headless 心跳绿 · test example RC=0。
+- **禁止**: pixi shell 里给 CMake 传系统编译器却不剥 conda env（半混态最糟）；对系统 gcc 施加 `-isystem /usr/include`（include_next 去重断链=结构性）；把 "No available video device" 归因 DISPLAY（先查 CMakeCache SDL_X11）。

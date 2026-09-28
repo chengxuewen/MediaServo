@@ -151,6 +151,9 @@
 - [host][server] 设备准入换代：旧版按「设备密钥」注册的车辆，升级 host 后首次连接会被拒绝——请在管理台删除旧条目，再让设备重新接入（自动档秒收录；默认档点一次批准）。设备密钥通路保留一个版本周期，下版删除。
 - [host] `host init` 生成的 `identity.json` 不再包含密钥字段（旧文件仍可读）。
 
+### 修复
+- [deploy] examples 构建链 conda/系统工具链混编根治（Ubuntu 20.04 出窗事故族）：`build example` 的 configure/build 子进程统一钉系统编译器 + 剥离 conda 构建 env（CFLAGS/PKG_CONFIG*/CONDA_PREFIX 等）+ SDL 外设三关显式 OFF（liburing/dbus/libusb）+ `-isystem /usr/include` hack 条件化（仅 conda 编译器生效）；老系统（glibc<2.33）集成方现可原生构建 GUI 例子，CI/Jetson conda 路线逐字节不变。
+
 ## v0.1.1（2026-09-10）
 
 ### 新增

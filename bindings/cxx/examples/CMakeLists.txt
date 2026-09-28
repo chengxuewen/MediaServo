@@ -39,6 +39,19 @@ target_include_directories(mediaservo_client_sdk INTERFACE
     "${REPO_ROOT}/bindings/c/include")                           # common.h
 target_link_libraries(mediaservo_client_sdk INTERFACE
     "${MEDIASERVO_SDK_DIR}/libmediaservo_client.so")
+# SDK 由 conda 工具链编译（GLIBCXX_3.4.29/3.4.30 新符号）：examples 走系统
+# 编译器链（focal 头混编修复，2026-09-28）时，链接期需 rpath-link 看见 conda
+# libstdc++ 解析版本符号；运行时由 .so 自带 RPATH 兜底，conda 编译器亦兼容此旗。
+set(_ms_conda_lib "${REPO_ROOT}/.pixi/envs/default/lib")
+if(EXISTS "${_ms_conda_lib}/libstdc++.so.6")
+    # -L 使驱动追加的 -lstdc++ 解析到 conda 版（版本符号齐全，先 -L 先赢）；
+    # rpath-link 供 ld 解 .so 的 NEEDED 链；rpath 保运行时加载 conda libstdc++
+    # （系统 gcc-10 的 3.4.28 无 3.4.29/30 → 运行期 version not found）。
+    target_link_options(mediaservo_client_sdk INTERFACE
+        "-L${_ms_conda_lib}"
+        "-Wl,-rpath-link,${_ms_conda_lib}"
+        "-Wl,-rpath,${_ms_conda_lib}")
+endif()
 
 # ── GUI 依赖档案（FetchContent 本地 zip + 哈希）──
 include(FetchContent)
@@ -82,9 +95,14 @@ if(NOT DEFINED SDL_X11)
     endforeach()
     if(_msrtc_x11_probe AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
         set(SDL_X11 ON CACHE BOOL "" FORCE)
-        string(PREPEND CMAKE_C_FLAGS "-isystem /usr/include ")
-        string(PREPEND CMAKE_CXX_FLAGS "-isystem /usr/include ")
-        set(ENV{PKG_CONFIG_PATH} "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+        # 09-20 两hack仅 conda 编译器适用：系统 gcc 默认链已含 /usr/include，
+        # 再 -isystem 会触发 include_next 去重断链（c++/10/cstdlib 找不到 stdlib.h，
+        # focal 事故 2026-09-28）。conda 侧行为不变（CI/老 Jetson 零扰动）。
+        if(CMAKE_C_COMPILER MATCHES "conda|envs/default")
+            string(PREPEND CMAKE_C_FLAGS "-isystem /usr/include ")
+            string(PREPEND CMAKE_CXX_FLAGS "-isystem /usr/include ")
+            set(ENV{PKG_CONFIG_PATH} "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+        endif()
         message(STATUS "GUI 例子: 检出系统 xorg 头包组 → SDL_X11=ON（出窗形态；-DSDL_X11=OFF 可强制 headless）")
     else()
         set(SDL_X11 OFF CACHE BOOL "" FORCE)
