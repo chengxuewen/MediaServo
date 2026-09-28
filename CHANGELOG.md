@@ -153,6 +153,10 @@
 
 ### 修复
 - [deploy] examples 构建链 conda/系统工具链混编根治（Ubuntu 20.04 出窗事故族）：`build example` 的 configure/build 子进程统一钉系统编译器 + 剥离 conda 构建 env（CFLAGS/PKG_CONFIG*/CONDA_PREFIX 等）+ SDL 外设三关显式 OFF（liburing/dbus/libusb）+ `-isystem /usr/include` hack 条件化（仅 conda 编译器生效）；老系统（glibc<2.33）集成方现可原生构建 GUI 例子，CI/Jetson conda 路线逐字节不变。
+- [sdk-client] imgui_viewer 窗口可缩放/最大化：CreateWindow 补 SDL_WINDOW_RESIZABLE（SDL3 默认非 resizable，旧注记「本就可拖」证伪）；初始 80% 自适应与 ini 布局不受影响。
+
+### 新增
+- [sdk-client] imgui_viewer 服务器地址登录面板可编辑：`MSRTC_WS_URL/MSRTC_HTTP_BASE` 降为预置值（demo/联调机免重启换地址）；server 地址入模型，登录/发现/建会话三路消费点统一读面板值。
 
 ## v0.1.1（2026-09-10）
 

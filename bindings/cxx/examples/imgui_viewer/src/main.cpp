@@ -61,6 +61,8 @@ int main() {
     imgui_shell::App app(spec, sopt);
 
     AppModel m;
+    std::snprintf(m.url_ws, sizeof(m.url_ws), "%s", env.ws.c_str());
+    std::snprintf(m.url_http, sizeof(m.url_http), "%s", env.http_base.c_str());
     if (const char* pass_env = std::getenv("MSRTC_PASS")) { // 仅无头 CI 通道（G13：GUI 面走输入框）
         if (*pass_env) {
             std::strncpy(m.user, "admin", sizeof(m.user) - 1);

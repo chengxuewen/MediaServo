@@ -121,6 +121,9 @@ struct AppModel {
     char user[64] = "admin";
     char pass[256] = "";
     bool pass_shown = false;
+    // server 地址（main 以 env 预置；登录面板可改——env 缺省/演示机场景）
+    char url_ws[256] = "";
+    char url_http[256] = "";
     std::string status;               // 登录/列举错误行
     std::vector<RoomRow> rooms;
     bool logged_in = false;

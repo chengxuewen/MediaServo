@@ -17,7 +17,7 @@ namespace ms = mediaservo::client;
 
 void join_room(AppModel& m, const Env& env, const std::string& room_id, bool video) {
     ms::Config cfg;
-    cfg.signaling_url = env.ws;
+    cfg.signaling_url = m.url_ws;
     cfg.room = room_id;
     cfg.jwt = m.jwt;
     cfg.role = "Client";
@@ -93,7 +93,7 @@ void close_room(AppModel& m, const std::string& room) {
 }
 
 void perform_login(AppModel& m, const Env& env) {
-    auto token = ms::login(env.http_base, m.user, m.pass);
+    auto token = ms::login(m.url_http, m.user, m.pass);
     if (!token) {
         log().add_fmt("warn", "login failed: %s", token.error().message.c_str());
         m.status = "login: " + token.error().message;
@@ -101,7 +101,7 @@ void perform_login(AppModel& m, const Env& env) {
         return;
     }
     m.jwt = *token;
-    auto lr = ms::list_rooms(env.http_base, m.jwt);
+    auto lr = ms::list_rooms(m.url_http, m.jwt);
     if (!lr) {
         m.status = "list_rooms: " + lr.error().message;
         m.auto_join = false;

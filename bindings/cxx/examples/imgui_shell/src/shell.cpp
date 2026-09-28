@@ -67,7 +67,9 @@ App::App(const WindowSpec& spec, const ShellOptions& opt) : impl_(new Impl) {
         w = usable.w * 4 / 5;
         h = usable.h * 4 / 5;
     }
-    impl_->window = SDL_CreateWindow(spec.title.c_str(), w, h, 0);
+    // RESIZABLE：SDL3 窗口默认不可拖拽改大小（SDL2 同——旧注记「本就可拖」翻案）；
+    // 缺此旗 WM 不给缩放/最大化按钮。初始尺寸自适应（主显工作区 80%+居中）另计。
+    impl_->window = SDL_CreateWindow(spec.title.c_str(), w, h, SDL_WINDOW_RESIZABLE);
     if (adaptive && impl_->window) {
         // 居中于工作区（含原点偏移——dock 在左侧时 (0,0) 不是视觉中心；本档期 SDL 无 Center API）
         SDL_SetWindowPosition(impl_->window, usable.x + (usable.w - w) / 2,

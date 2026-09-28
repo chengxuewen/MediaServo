@@ -13,8 +13,10 @@ void render_login(AppModel& m, const Env& env) {
     // 登录前浮动单窗（未 dock）；位置语义与拆分前一致
     ImGui::SetNextWindowPos(ImVec2(8, 40), ImGuiCond_FirstUseEver);
     ImGui::Begin("MSRTC Viewer");
-    ImGui::TextDisabled("ws=%s", env.ws.c_str());
-    ImGui::TextDisabled("http=%s", env.http_base.c_str());
+    // server 地址登录前可改（env/缺省值预置进字段；登录后会话沿用建联时的值）
+    ImGui::SetNextItemWidth(280);
+    ImGui::InputText("server ws##url", m.url_ws, sizeof(m.url_ws));
+    ImGui::InputText("server http##url", m.url_http, sizeof(m.url_http));
     ImGui::InputText("user", m.user, sizeof(m.user));
     ImGui::InputText("password", m.pass, sizeof(m.pass),
                      m.pass_shown ? ImGuiInputTextFlags_None
