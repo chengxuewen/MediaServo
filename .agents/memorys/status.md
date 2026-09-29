@@ -1034,3 +1034,8 @@ install                        → 改名提示 + exit 2（退役）
 - caddy 收编 pixi（pixi.toml >=2.10）+ build 装配随包（out/server/bin/caddy）+ 探测三级链 caddy_probe（PATH→exe 同目录→仓内 pixi 树）——裸 shell start 从"静默 --no-web"变完整簇。双 announced 幽灵 IP（192.168.2.127 非本机）写进实例 yaml → mediasoup worker bind 报误导性 "already in use"——yaml 收敛单值（deploy 探测校验另立项）。
 - out/host 推流链五层排障（PIT-209）：僵尸族（exe-deleted 旧 agent 占 17980，爹=全局旧 oxmgr daemon 58443）→ devices.yaml secret 旧形 vs host 公钥形（手动升形+非标 PEM vk 提取）→ oxmgr state 残留 → 8 流共源 ACL 错位（8 源 1:1 根修）。终态 8 路推流 30fps、9 房可发现。
 - 遗留立项：start-conflict-doctor（docs/plans/start-conflict-doctor/，Momus [OKAY]）——占用者指认+stop 自证，不做自动杀。
+
+### 2026-09-29: start-conflict-doctor 交付（T1-T5，占用者指认+stop 自证）
+- server lifecycle/conflict.rs（/proc/net tcp+udp inode 反查→/proc/pid fd→exe/cmd/ppid；deleted=升级残留铁证）+ host src/conflict.rs 镜像；接线两处（server mod.rs contention 行/host.rs:291 分支）+ stop 自证（≤5s 轮询家族归零，"自证清场 ✓/⚠ 未能验证"双态）。
+- 实盘验收：裸环境 start 撞 (deleted) 活簇 → 报告完整（pid/升级残留/父=init/建议 kill）；按报告清残留后整簇三件 running 全 200。单测×3（空占用/自占 TCP+UDP/人话行格式）。
+- 门：check/test-server-native 全绿（13 套件）。

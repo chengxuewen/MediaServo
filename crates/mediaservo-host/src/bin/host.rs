@@ -289,6 +289,13 @@ fn cmd_apply_impl(args: &mut impl Iterator<Item = String>, verb: &str) -> i32 {
     {
         let old_dir = find_other_instance_dir();
         eprintln!("检测到另一 host 实例在运行（本地信令网关端口 {port} 被占用）");
+        // start-conflict-doctor T3：占用者指认（pid/exe/deleted/父进程）——指认不杀戮。
+        for r in mediaservo_host::conflict::diagnose_port(port) {
+            eprintln!("  {}", r.line());
+            if r.deleted {
+                eprintln!("  → exe 已删除（升级残留）；kill {} 后重跑", r.pid);
+            }
+        }
         if let Some(od) = &old_dir {
             eprintln!("  旧实例目录: {}", od.display());
         } else {
@@ -426,7 +433,18 @@ fn cmd_stop(args: &mut impl Iterator<Item = String>) -> i32 {
         }
     }
     if failed == 0 {
-        println!("stop: 已停止全部 host 进程");
+        // start-conflict-doctor T4：stop 自证（≤5s 轮询家族归零）
+        let mut verified = false;
+        for _ in 0..10 {
+            let gone = ["host-agent", "host-streamer", "host-capturer", "host-recorder",
+                        "host-controller", "host-emergency", "host-audio"]
+                .iter()
+                .all(|app| mediaservo_host::conflict::diagnose_app_gone(app));
+            if gone { verified = true; break; }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        println!("stop: 已停止全部 host 进程{}",
+                 if verified { "——自证清场 ✓" } else { "——⚠ 未能验证清场（残留见 ps）" });
     }
     failed
 }

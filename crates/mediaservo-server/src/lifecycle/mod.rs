@@ -7,6 +7,7 @@
 //! 向后兼容硬门：main.rs 仅在首参命中 LIFECYCLE_CMDS 时进入本模块；
 //! `run`/无参/`--config`/未知参数 = 守护模式原样（systemd/compose/docker 直启零破坏）。
 
+mod conflict;
 mod inspect;
 mod startup;
 pub mod templates;
@@ -426,6 +427,9 @@ fn apply_oxfile(dir: &Path, oxfile: &Path, no_web: bool, verb: &str) -> i32 {
 /// 端口占用 → 定位旧 server 实例 → 交互接管（stop 旧簇）/ 非 tty 退出（host PIT-155 模式）。
 fn contention_flow(verb: &str, dir: &Path, what: &str, port: u16, no_web: bool) -> i32 {
     eprintln!("{verb}: {what} {port} 被占用——检测到另一进程在监听");
+    // start-conflict-doctor T2：占用者指认（pid/exe/deleted/父 daemon）——指认不杀戮（F1）。
+    let reports = conflict::diagnose_port(port);
+    conflict::print_report(&reports, port);
     let old = inspect::find_other_server_dir(dir);
     match &old {
         Some(od) => eprintln!("  旧实例目录: {}", od.display()),
@@ -489,8 +493,27 @@ fn stop_cluster(dir: &Path) -> i32 {
         eprintln!("stop: 实例 daemon 停止命令未成功（可能已自行退出）");
     }
     if failed == 0 {
+        // start-conflict-doctor T4：stop 自证——轮询 ≤5s 至进程表归零才报"验证清场"。
+        // （C37 as-found 纪律自查面：stop 假成功会毒化后续 start/验证——今天的实录。）
+        let mut verified = false;
+        for _ in 0..10 {
+            let residual: Vec<String> = names
+                .iter()
+                .filter(|nm| !conflict::diagnose_app_gone(nm))
+                .cloned()
+                .collect();
+            if residual.is_empty() {
+                verified = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            if !residual.is_empty() {
+                eprintln!("stop: 残留进程 {} —— 可能 crash-restart 中，建议手动复核", residual.join(","));
+            }
+        }
         println!(
-            "stop: 已停止 {n} 个进程并收敛实例 daemon（{prod} 簇）",
+            "stop: 已停止 {n} 个进程并收敛实例 daemon（{prod} 簇）{}",
+            if verified { "——自证清场 ✓" } else { "——⚠ 未能验证清场" },
             n = names.len(),
             prod = server_product()
         );
