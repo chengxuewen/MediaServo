@@ -12,6 +12,7 @@ python = "3.12.*"
 pip = ">=24.0,<26"
 pyyaml = ">=6.0,<7"  # build-cli: mediaservo config validate (PIT-76 审核 BLOCKER-2)
 pnpm = ">=10.32,<11"  # www 前端构建（build web / build server 装配步；packageManager 字段同线——2026-09-29 新机缺 pnpm 报错收编 pixi）
+caddy = ">=2.10"       # web 入口反代（msrtc-web 簇条目；缺=deploy 静默降级无前端——2026-09-29 新机补）
 ripgrep = ">=14.1.0,<15"
 # GStreamer 1.24+ (gstreamer-rs 0.23 min=1.14, tested=1.24)
 gstreamer = ">=1.24.0,<2"

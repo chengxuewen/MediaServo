@@ -1029,3 +1029,8 @@ install                        → 改名提示 + exit 2（退役）
 - viewer-auth-matrix（子 bced5fdf+d3dcfc67，Momus [OKAY]）：imgui_viewer 五模式鉴权面板（Radio/按需显隐/identity: 回显行）+ C ABI additive identity_dir 字段（struct_size 判界读取，MIN_SIZE=旧形状）+ session_identity 符号 + M3/M4 跳发现直 join（M4 揪出 Device 无 REST 发证面）+ M5b 4013 两连拒判决钉 + auth-guide.md 新册（选型/时序/四语言片段/FAQ；client.md 同步）。
 - psk-discover（本笔 5b8248c5）：server /api/rooms 的 Authorization: Psk 分支（Legacy 全量视角——PSK join 门本就全放行，"能进不能看"系意外产物；恒时比对+错密钥显式 401 防枚举）+ SDK 三语言 list_rooms_psk（ABI 32）+ viewer M3 摘 room 框（发现为主形）。活体 curl Psk 200 全量/错密钥 401/[discover] psk rooms=N；all-gates 9/9。⚠同批升级语义在 CHANGELOG（老 server 对 Psk scheme 401=用户 192.168.2.127 实撞）。
 - PIT-208 双课：远程 server 报错先做物理定位（ip addr/uptime 证据在眼前要查）；拆簇收口必须 ss 端口清零复核（(deleted) exe 残留毒化验证）。
+
+### 2026-09-29 续: caddy 随包+探测三级链 + out/host 推流链五层排障（PIT-209）
+- caddy 收编 pixi（pixi.toml >=2.10）+ build 装配随包（out/server/bin/caddy）+ 探测三级链 caddy_probe（PATH→exe 同目录→仓内 pixi 树）——裸 shell start 从"静默 --no-web"变完整簇。双 announced 幽灵 IP（192.168.2.127 非本机）写进实例 yaml → mediasoup worker bind 报误导性 "already in use"——yaml 收敛单值（deploy 探测校验另立项）。
+- out/host 推流链五层排障（PIT-209）：僵尸族（exe-deleted 旧 agent 占 17980，爹=全局旧 oxmgr daemon 58443）→ devices.yaml secret 旧形 vs host 公钥形（手动升形+非标 PEM vk 提取）→ oxmgr state 残留 → 8 流共源 ACL 错位（8 源 1:1 根修）。终态 8 路推流 30fps、9 房可发现。
+- 遗留立项：start-conflict-doctor（docs/plans/start-conflict-doctor/，Momus [OKAY]）——占用者指认+stop 自证，不做自动杀。

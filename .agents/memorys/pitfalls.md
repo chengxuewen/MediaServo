@@ -1707,3 +1707,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **验证**: `ss -tlnp | grep 9800` 空；升级后 `curl -H "Authorization: Psk <真psk>" /api/rooms` 回 200 全量。
 - **禁止**: 拿本机修复结果回答远程环境问题；用"执行过 stop"当"环境已干净"（C37 as-found 纪律的自查面）。
 
+
+## PIT-209: 8 流共源 ACL 错位 + 非标准 PKCS#8 PEM（2026-09-29，out/host 推流链排障）
+- **症状**: ① streamer 全员实时刷 `ACL deny subscribe camera/generator`（订阅被 link ACL 拒）；② openssl `pkey -in signing.pem` 报 wrong tag 拒载，而 host（ed25519-dalek）正常跑。
+- **根因**: ① out/host 配 8 流**共享 1 个 source**（source=generator → capturer 发 `camera/generator`），但 streamer 令牌按 **stream id** 签（`camera/generatorN` 带编号）→ 订阅目标与 ACL 永远对不上——配置形态与令牌签发规则的结构性冲突，埋于 09-20 FrameBus 32 订阅轮；② out/host 的 signing.pem 是 **83B 非标准 PKCS#8**（seed OCTET 内多嵌 32B pub），openssl 严格 ASN.1 校验拒载、dalek 宽容解析（读出 seed 即用）——工具链分歧掩盖文件非标。
+- **解法**: ① yaml 改 8 源 1:1（sources/streams 各 generator1..8，capturer 每 source 一只）→ 重签 8 令牌（ACL=camera/generatorN 与订阅目标一致）；② vk 提取绕过 openssl：PEM base64 解 DER 取**末 32 字节**即 Ed25519 vk（非标形下 openssl 不可用时的通用法）。
+- **验证**: streamer stats 663→724 帧/2s（~30fps）bytes 持续增长；发现接口 8 个 video 房全列。
+- **禁止**: "N 流共享 1 源"配置形态（与令牌 per-stream 签发规则冲突=地雷）；用 openssl 校验结果判定 dalek 生态 PEM 有效性（宽容度不同，非标 PEM 在 dalek 下静默可用）。
