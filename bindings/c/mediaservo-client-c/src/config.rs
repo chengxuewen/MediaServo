@@ -227,7 +227,7 @@ mod tests {
                 psk,
                 role: ptr::null(),
                 hmac_key_file: ptr::null(),
-            identity_dir: ptr::null(),
+                identity_dir: ptr::null(),
             }
         };
         // 双凭证 → 拒

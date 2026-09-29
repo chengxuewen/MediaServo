@@ -148,6 +148,7 @@
 - [deploy] 部署帮助新增「环境变量总表」：`msrtc.sh -h` 与 `msrtc-server -h` / `msrtc-host -h` 三面共用单一真源 `crates/mediaservo-common/assets/env-usage.md`（[A] 脚本注入 / [B] oxfile 手工行 / [C] 启动 env），整树重部署丢手工 env 时按表回补。
 
 ### ⚠ 升级注意
+- [protocol] PSK 发现面（psk-discover）为同批特性：新客户端（list_rooms_psk）配老 server 收 401——请整批升级；老客户端不受影响（无 Psk scheme 不走新分支）。
 - [protocol] 认证失败语义收紧（fail-closed）：握手呈现 JWT 且验签失败 → Error 4013 即刻断连（旧行为=回落 PSK，PSK 对则静默获得无角色矩阵权限）。仓内 Rust/TS 客户端已把 4013 归 auth 终态族；外接自研签 token 的集成方须同步——4013 不做终态处理将导致坏凭证无限重试。
 - [host][server] 设备准入换代：旧版按「设备密钥」注册的车辆，升级 host 后首次连接会被拒绝——请在管理台删除旧条目，再让设备重新接入（自动档秒收录；默认档点一次批准）。设备密钥通路保留一个版本周期，下版删除。
 - [host] `host init` 生成的 `identity.json` 不再包含密钥字段（旧文件仍可读）。
@@ -158,6 +159,10 @@
 - [server] /api/rooms 对 apikey 形令牌可见性修复：allowlist 原只查 accounts 注册表（换发令牌无账号行=设计使然）→ `apikey:` 前缀 sub 的授权直取 claims.vehicles（与 RoomJoin 门同源同权；人形账号路径逐字不变）。症状=viewer key 换发成功但房间列表恒空（活体 V1 实抓）。
 
 ### 新增
+- [server][sdk-client] PSK 房间发现（psk-discover，跨房间拉流收口）：`GET /api/rooms` 新增
+  `Authorization: Psk <secret>` 认证分支——Legacy 全量视角（与 PSK join 门能力对齐：
+  本就全能，"能进不能看"系意外产物；constant-time 比对、错密钥/未配 PSK 均显式 401）。
+  SDK 三语言 `list_rooms_psk`；viewer PSK 模式房名留空=发现树勾选多房（填房名=直连覆盖）。
 - [sdk-client] imgui_viewer 鉴权五模式测试面板（viewer-auth-matrix）：登录面板 Radio 选
   账号/API-Key/PSK/设备身份/JWT 直贴，按模式显隐输入域；连接后底部 `identity:` 行回显生效
   身份；PSK/设备路跳房间发现直 join（Legacy 发现 401 / Device 无 REST 发证——语义必须）；

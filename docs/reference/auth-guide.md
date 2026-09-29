@@ -96,12 +96,14 @@ MSRTC_AUTH_MODE=apikey MSRTC_KEY_ID=.. MSRTC_KEY_SECRET=.. MSRTC_ROOM=<video房>
 # 判据行 [frame] t=..s cb=597/20s ≈ 满帧；坏 token（JWT 模式贴错）→ [tile] join: auth rejected [4013]
 ```
 
-## 4. 两类变体（跳过发现的直连路）
+## 4. 变体与发现能力
 
-| 变体 | 为什么跳发现 | 怎么给房间 |
+| 变体 | 发现面 | 说明 |
 |---|---|---|
-| **PSK** | Legacy 身份调 `/api/rooms` = 401（发现接口只认账号角色） | 房名手填（`_` 分隔名按流房处理） |
-| **设备身份** | Device 无 REST 发证面（公钥挑战只在 WS join 面） | 同上 |
+| **PSK** | ✅ **全量发现**（`Authorization: Psk <psk>` → psk-discover）——与 join 门能力对齐（Legacy 全放行），**跨房间拉流**的主路：树勾几路连几路 | viewer M3 留空房名即走发现；填房名=直连覆盖 |
+| **设备身份** | ❌ 直连（Device 无 REST 发证面，公钥挑战只在 WS join 面） | 房名手填 |
+
+Rust：`list_rooms_psk(base, psk)`；C/C++：`list_rooms_psk(...)`；viewer：PSK 模式留空房名。
 
 ## 5. 运维要点
 
@@ -118,7 +120,7 @@ MSRTC_AUTH_MODE=apikey MSRTC_KEY_ID=.. MSRTC_KEY_SECRET=.. MSRTC_ROOM=<video房>
 | 吊销 | 删账号 | 删 key |
 | 适用 | 有账号体系的正式用户 | 分发/集成 |
 
-- **PSK 限制**：全权限（矩阵旁路）+ 无审计归属 + 看不到房间列表——只用于封闭内网联调。
+- **PSK 注意**：全权限（矩阵旁路）+ 无审计归属 + 全量可见（psk-discover）——只用于封闭内网/可信环境。
 
 ## 6. FAQ
 

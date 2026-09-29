@@ -335,6 +335,13 @@ private:
 };
 
 /// 单路视频消费者（move-only RAII；析构自动 close；默认构造 = 已关闭）。
+/// PSK 房间发现（psk-discover：Legacy 全量视角，跨房间拉流的发现面）。
+inline Result<std::string> list_rooms_psk(const std::string& http_base, const std::string& psk) {
+    return detail::needed_read(nullptr, [&](char* b, size_t c, size_t* n) {
+        return mediaservo_client_list_rooms_psk(http_base.c_str(), psk.c_str(), b, c, n);
+    });
+}
+
 /// 生效身份标签（T4/F6 镜像；零网络，create 期本地推导静态值）。closed 会话仍可读。
 inline Result<std::string> identity_label(const Session& s) {
     return detail::needed_read(nullptr, [&](char* b, size_t c, size_t* n) {

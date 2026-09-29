@@ -178,6 +178,10 @@ mediaservo_err_t mediaservo_client_exchange(const char* http_base, const char* k
  * token 失效/角色不符（非 2xx）→ ERR_UNAUTHORIZED，详情 mediaservo_client_last_error。 */
 mediaservo_err_t mediaservo_client_list_rooms(const char* http_base, const char* jwt, char* out_json, size_t cap, size_t* needed);
 
+/* PSK 房间发现（psk-discover：Authorization: Psk <psk> → Legacy 全量视角，
+ * 跨房间拉流的发现面）。out_json 形同 list_rooms；401 → ERR_UNAUTHORIZED。 */
+mediaservo_err_t mediaservo_client_list_rooms_psk(const char* http_base, const char* psk, char* out_json, size_t cap, size_t* needed);
+
 /* 错误码 → 静态文案（表源 = ClientError Display 模板；未知码 "unknown error code"）。
  * 拷贝语义 = 截断不报错（与 last_error 同形）。 */
 mediaservo_err_t mediaservo_client_strerror(int code, char* buf, size_t cap);

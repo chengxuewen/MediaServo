@@ -51,7 +51,7 @@ pub mod sfu;
 pub mod signal;
 pub mod supervisor;
 
-pub use auth::{LoginOutcome, RoomInfo, exchange, list_rooms, login};
+pub use auth::{LoginOutcome, RoomInfo, exchange, list_rooms, list_rooms_psk, login};
 pub use config::ClientConfig;
 pub use consumer::Consumer;
 pub use control::ControlChannel;

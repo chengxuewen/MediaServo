@@ -96,10 +96,7 @@ fn init_tracing() {
     DONE.call_once(|| {
         let filter = tracing_subscriber::EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("mediaservo=info"));
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_target(true)
-            .try_init();
+        let _ = tracing_subscriber::fmt().with_env_filter(filter).with_target(true).try_init();
     });
 }
 
@@ -270,6 +267,55 @@ pub extern "C" fn mediaservo_client_exchange(
             Ok(outcome) => copy_out_needed(NAME, &outcome.jwt, out_jwt, cap, needed),
             Err(e) => {
                 set_last_error(format!("mediaservo_client_exchange: {e}"));
+                error_code(&e)
+            }
+        }
+    })
+}
+
+/// PSK 房间发现（`GET {http_base}/api/rooms` + `Authorization: Psk <psk>`，
+/// 阻塞；psk-discover 路——Legacy 全量视角，跨房间拉流的发现面）。非 2xx →
+/// ERR_UNAUTHORIZED（详情 last_error）；out_json 形同 list_rooms。
+#[unsafe(no_mangle)]
+pub extern "C" fn mediaservo_client_list_rooms_psk(
+    http_base: *const c_char,
+    psk: *const c_char,
+    out_json: *mut c_char,
+    cap: usize,
+    needed: *mut usize,
+) -> c_int {
+    const NAME: &str = "mediaservo_client_list_rooms_psk";
+    ffi_global(NAME, || {
+        let (base, psk) = match (cstr(http_base), cstr(psk)) {
+            (Ok(Some(b)), Ok(Some(p))) if !b.is_empty() && !p.is_empty() => (b, p),
+            _ => {
+                return fail_global(
+                    "mediaservo_client_list_rooms_psk: null/invalid http_base or psk",
+                    MEDIASERVO_CLIENT_ERR_INVALID_ARG,
+                );
+            }
+        };
+        if out_json.is_null() || cap == 0 {
+            return fail_global(
+                "mediaservo_client_list_rooms_psk: null out_json or cap 0",
+                MEDIASERVO_CLIENT_ERR_INVALID_ARG,
+            );
+        }
+        match runtime().block_on(mediaservo_client::list_rooms_psk(base, psk)) {
+            Ok(rooms) => {
+                let json = match serde_json::to_string(&rooms) {
+                    Ok(j) => j,
+                    Err(e) => {
+                        return fail_global(
+                            format!("mediaservo_client_list_rooms_psk: serialize: {e}"),
+                            MEDIASERVO_CLIENT_ERR_MALFORMED,
+                        );
+                    }
+                };
+                copy_out_needed(NAME, &json, out_json, cap, needed)
+            }
+            Err(e) => {
+                set_last_error(format!("mediaservo_client_list_rooms_psk: {e}"));
                 error_code(&e)
             }
         }
@@ -485,18 +531,12 @@ pub extern "C" fn mediaservo_client_session_create(
                     .ok()
             }),
             // viewer-auth-matrix T1：C ABI additive 字段（struct_size 判界读取）。
-            identity_dir: parts
-                .identity_dir
-                .map(std::path::PathBuf::from),
+            identity_dir: parts.identity_dir.map(std::path::PathBuf::from),
         };
         // viewer-auth-matrix T4/F6：连接前由**本地配置**推导身份标签（零网络）。
         // 语义与 server 判序一致：Device(公钥齐备) > jwt > psk；jwt 形 sub 不可知
         // （SDK 不解 token），标 "jwt:<n> chars"。三者皆无 = "(no credential)"。
-        let identity_label = match (
-            parts.identity_dir,
-            parts.jwt,
-            parts.psk,
-        ) {
+        let identity_label = match (parts.identity_dir, parts.jwt, parts.psk) {
             (Some(dir), _, _) => format!("Device({})", device_id_of_dir(dir)),
             (_, Some(_), _) => "jwt".to_string(),
             (_, _, Some(_)) => "legacy-psk".to_string(),
@@ -543,8 +583,7 @@ fn device_id_of_dir(dir: &str) -> String {
         v.get("device_id")?.as_str().map(str::to_string)
     };
     match std::fs::read(std::path::Path::new(dir).join("identity.json")) {
-        Ok(raw) => parse_device_id(&raw)
-            .unwrap_or_else(|| fallback_name(dir)),
+        Ok(raw) => parse_device_id(&raw).unwrap_or_else(|| fallback_name(dir)),
         Err(_) => fallback_name(dir),
     }
 }
@@ -1386,6 +1425,7 @@ mod tests {
         Box::into_raw(Box::new(mediaservo_client_session_t {
             session: std::sync::Mutex::new(None),
             negotiated: 3,
+            identity_label: "jwt".to_string(),
             closed: AtomicBool::new(false),
             video_started: AtomicBool::new(false),
             video_cb: std::sync::Mutex::new(None),

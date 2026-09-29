@@ -104,9 +104,10 @@ impl ClientError {
             Self::Io(_) | Self::WebRtc(_) | Self::Timeout { .. } | Self::Login(_) => true,
             Self::Server { code, .. } => *code >= 5000,
             // link 透传：嵌入 auth 族码 = 终态；纯连接错 = 可重试。
-            Self::Signal(e) => {
-                !matches!(extract_wire_code(&e.to_string()), Some(4003 | 4010 | 4011 | 4012 | 4013 | 4101))
-            }
+            Self::Signal(e) => !matches!(
+                extract_wire_code(&e.to_string()),
+                Some(4003 | 4010 | 4011 | 4012 | 4013 | 4101)
+            ),
         }
     }
 }
@@ -119,7 +120,9 @@ pub fn from_wire_error(code: u16, message: &str) -> ClientError {
     match code {
         4012 => ClientError::ControlDenied(message.to_string()),
         4101 => ClientError::ProtocolUnsupported(message.to_string()),
-        4003 | 4010 | 4011 | 4013 => ClientError::AuthRejected { code, message: message.to_string() },
+        4003 | 4010 | 4011 | 4013 => {
+            ClientError::AuthRejected { code, message: message.to_string() }
+        }
         _ => ClientError::Server { code, message: message.to_string() },
     }
 }

@@ -1699,3 +1699,11 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: `mediaservo_cli.py::_example_env()`（configure+build 共用）剥 conda env + PATH 前置 /usr/bin + `PKG_CONFIG_LIBDIR` 锁系统 + 钉 `/usr/bin/cc|c++` + SDL_LIBURING/DBUS/LIBUSB OFF；`examples/CMakeLists.txt` isystem hack 条件化（compiler MATCHES conda）+ SDK INTERFACE conda lib 三连。
 - **验证**: build example RC=0 · DISPLAY=:0 10s 真出窗 · ldd 零缺失 · dummy headless 心跳绿 · test example RC=0。
 - **禁止**: pixi shell 里给 CMake 传系统编译器却不剥 conda env（半混态最糟）；对系统 gcc 施加 `-isystem /usr/include`（include_next 去重断链=结构性）；把 "No available video device" 归因 DISPLAY（先查 CMakeCache SDL_X11）。
+
+## PIT-208: psk-discover 排障两课——远程机物理定位 + 拆簇残留毒化（2026-09-29）
+- **症状**: ① 用户报 viewer PSK 发现 `invalid credentials`，第一轮答"升级 server 即可"但用户仍报错——因为 `192.168.2.127` 是**另一台机器**（本机无该网卡），升级的是本机旧簇；② T5 收口拆临时簇后 `/proc/<pid>/exe` 显示 `(deleted)` 的旧 server 仍占 9800，行为=旧二进制（无 psk-discover），毒化后续验证。
+- **根因**: ① "server"一词未做物理定位（uptime 5.2h/网卡枚举都是现成证据，没查）；② 收口清等于"跑了 stop 命令"而非"端口清零验证"——stop 失败/漏管 daemon 无复核。
+- **解法**: ① 排障第一问=**哪台机器**（`ip addr` 对 IP / `ss -tlnp` 对端口 / uptime 对版本窗口），本机探活结果不能外推远程；② 拆环境后必须 `ss -tlnp | grep <端口>` 计数为 0 才算拆完；`(deleted)` exe=确定证据。
+- **验证**: `ss -tlnp | grep 9800` 空；升级后 `curl -H "Authorization: Psk <真psk>" /api/rooms` 回 200 全量。
+- **禁止**: 拿本机修复结果回答远程环境问题；用"执行过 stop"当"环境已干净"（C37 as-found 纪律的自查面）。
+

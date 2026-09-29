@@ -1024,3 +1024,8 @@ install                        → 改名提示 + exit 2（退役）
 
 ### 2026-09-28: examples 工具链根治（PIT-207，focal 出窗四连爆）
 - `_example_env()` 剥 conda env+钉系统编译器+PKG_CONFIG_LIBDIR 锁系统+SDL 外设三关 OFF；isystem hack 条件化；SDK INTERFACE conda libstdc++ 链接三连。判据全绿（build/出窗/ldd/dummy/ctest）。主仓镜像=PIT-199。
+
+### 2026-09-29: viewer-auth-matrix 全批（T1-T6）+ psk-discover 同日追加
+- viewer-auth-matrix（子 bced5fdf+d3dcfc67，Momus [OKAY]）：imgui_viewer 五模式鉴权面板（Radio/按需显隐/identity: 回显行）+ C ABI additive identity_dir 字段（struct_size 判界读取，MIN_SIZE=旧形状）+ session_identity 符号 + M3/M4 跳发现直 join（M4 揪出 Device 无 REST 发证面）+ M5b 4013 两连拒判决钉 + auth-guide.md 新册（选型/时序/四语言片段/FAQ；client.md 同步）。
+- psk-discover（本笔 5b8248c5）：server /api/rooms 的 Authorization: Psk 分支（Legacy 全量视角——PSK join 门本就全放行，"能进不能看"系意外产物；恒时比对+错密钥显式 401 防枚举）+ SDK 三语言 list_rooms_psk（ABI 32）+ viewer M3 摘 room 框（发现为主形）。活体 curl Psk 200 全量/错密钥 401/[discover] psk rooms=N；all-gates 9/9。⚠同批升级语义在 CHANGELOG（老 server 对 Psk scheme 401=用户 192.168.2.127 实撞）。
+- PIT-208 双课：远程 server 报错先做物理定位（ip addr/uptime 证据在眼前要查）；拆簇收口必须 ss 端口清零复核（(deleted) exe 残留毒化验证）。
