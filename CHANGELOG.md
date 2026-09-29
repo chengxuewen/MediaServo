@@ -158,6 +158,12 @@
 - [server] /api/rooms 对 apikey 形令牌可见性修复：allowlist 原只查 accounts 注册表（换发令牌无账号行=设计使然）→ `apikey:` 前缀 sub 的授权直取 claims.vehicles（与 RoomJoin 门同源同权；人形账号路径逐字不变）。症状=viewer key 换发成功但房间列表恒空（活体 V1 实抓）。
 
 ### 新增
+- [sdk-client] imgui_viewer 鉴权五模式测试面板（viewer-auth-matrix）：登录面板 Radio 选
+  账号/API-Key/PSK/设备身份/JWT 直贴，按模式显隐输入域；连接后底部 `identity:` 行回显生效
+  身份；PSK/设备路跳房间发现直 join（Legacy 发现 401 / Device 无 REST 发证——语义必须）；
+  坏 JWT 直贴=4013 红牌 GUI 化验收点。无头注入 `MSRTC_AUTH_MODE=account|apikey|psk|device|jwt`
+  + 对应凭证键。C ABI additive：config_t 尾部 `identity_dir` 字段（MIN_SIZE=旧形状，判界读取）
+  + `mediaservo_client_session_identity` 符号；cxx `Config::identity_dir` + `identity_label()`。
 - [server] 管理台新页「API Keys」（/devices /accounts 同款纪律）：注册（key_id/角色/车辆白名单/备注，
   secret 一次性展示+复制，关窗即弃=吊销重注册）、吊销（只挡后续 exchange，已发 JWT 至 TTL 自然死）；
   与 `POST /api/auth/exchange` 配套，非admin 守卫同 devices。

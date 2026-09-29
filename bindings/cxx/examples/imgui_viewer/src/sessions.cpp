@@ -19,7 +19,10 @@ void join_room(AppModel& m, const Env& env, const std::string& room_id, bool vid
     ms::Config cfg;
     cfg.signaling_url = m.url_ws;
     cfg.room = room_id;
-    cfg.jwt = m.jwt;
+    // T4：凭证按模式带（每会话都带——server 侧每次 join 独立鉴权）。
+    if (m.auth == AuthMode::Psk) cfg.psk = m.psk;
+    if (m.auth == AuthMode::Device) cfg.identity_dir = m.identity_dir;
+    if (!m.jwt.empty()) cfg.jwt = m.jwt; // M1/M2/M5 换发/直贴产物
     cfg.role = "Client";
     if (!env.key_file.empty()) {
         cfg.hmac_key_file = env.key_file;
@@ -93,41 +96,109 @@ void close_room(AppModel& m, const std::string& room) {
 }
 
 void perform_login(AppModel& m, const Env& env) {
-    // 两模式同 LoginWire 形（server exchange 复用 LoginResponse）——下游 jwt/rooms 链零分支。
-    auto token = m.use_key ? ms::exchange(m.url_http, m.key_id, m.key_secret)
-                           : ms::login(m.url_http, m.user, m.pass);
-    if (!token) {
-        log().add_fmt("warn", "login failed: %s", token.error().message.c_str());
-        m.status = "login: " + token.error().message;
-        m.auto_join = false;
-        return;
+    // T4：五模式两段化——acquire（M1/M2 换发；M3/M4 无）→ discover（M3 跳；M5 失败容忍）。
+    switch (m.auth) {
+    case AuthMode::Account: {
+        auto token = ms::login(m.url_http, m.user, m.pass);
+        if (!token) {
+            log().add_fmt("warn", "login failed: %s", token.error().message.c_str());
+            m.status = "login: " + token.error().message;
+            m.auto_join = false;
+            return;
+        }
+        m.jwt = *token;
+        break;
     }
-    m.jwt = *token;
-    auto lr = ms::list_rooms(m.url_http, m.jwt);
-    if (!lr) {
-        m.status = "list_rooms: " + lr.error().message;
-        m.auto_join = false;
-        return;
+    case AuthMode::ApiKey: {
+        auto token = ms::exchange(m.url_http, m.key_id, m.key_secret);
+        if (!token) {
+            log().add_fmt("warn", "exchange failed: %s", token.error().message.c_str());
+            m.status = "exchange: " + token.error().message;
+            m.auto_join = false;
+            return;
+        }
+        m.jwt = *token;
+        break;
     }
-    for (auto& [rid, kind] : parse_rooms(*lr)) {
+    case AuthMode::Psk:
+        m.jwt.clear(); // M3：无 JWT；join 带 psk（上）
+        break;
+    case AuthMode::Device:
+        // M4：Device 身份无 REST 发证（D283 wire 只在 WS join 面）——发现走不了，
+        // 与 M3 同形直 join（房名 direct_room/MSRTC_ROOM）。
+        m.jwt.clear();
+        break;
+    case AuthMode::JwtPaste:
+        m.jwt = m.jwt_paste; // M5：直贴（坏 token 由 join 期 4013 红牌裁决）
+        break;
+    }
+    // 发现段：M3/M4 跳过（Legacy 发现 401 / Device 无 REST token——均直 join）；
+    // M5 失败容忍（坏 token 测试点在 join 期红牌，非发现）。
+    if (m.auth == AuthMode::Psk || m.auth == AuthMode::Device) {
+        m.rooms.clear();
+        if (!m.direct_room[0]) {
+            m.status = "psk: room required (direct join)";
+            m.auto_join = false;
+            return;
+        }
         RoomRow r;
-        r.room_id = rid;
-        r.kind = kind;
-        r.video = kind == "video"; // W4d：kind 三面直判，名字猜测退役
+        r.room_id = m.direct_room;
+        // F2 kind 猜测：`_` 分隔名按流房（video）处理，否则整车房（control——不占格）。
+        r.kind = r.room_id.find('_') != std::string::npos ? "video" : "control";
+        r.video = r.kind == "video";
         m.rooms.push_back(std::move(r));
+        m.logged_in = true;
+        m.status.clear();
+        log().add_fmt("info", "psk direct-join target: %s", m.rooms[0].room_id.c_str());
+    } else {
+        auto lr = ms::list_rooms(m.url_http, m.jwt);
+        if (!lr) {
+            if (m.auth == AuthMode::JwtPaste) {
+                log().add_fmt("warn", "list_rooms failed (jwt paste): %s — join will judge", lr.error().message.c_str());
+                m.rooms.clear();
+                m.logged_in = true; // 放行到 join 期 4013 红牌（M5b 判据）
+                m.status.clear();
+                goto auto_join; // 不能 return——4013 判决点在下发 join
+            }
+            m.status = "list_rooms: " + lr.error().message;
+            m.auto_join = false;
+            return;
+        }
+        m.rooms.clear();
+        for (auto& [rid, kind] : parse_rooms(*lr)) {
+            RoomRow r;
+            r.room_id = rid;
+            r.kind = kind;
+            r.video = kind == "video"; // W4d：kind 三面直判，名字猜测退役
+            m.rooms.push_back(std::move(r));
+        }
+        m.logged_in = true;
+        m.status.clear();
+        log().add_fmt("info", "login ok: %zu rooms listed", m.rooms.size());
     }
-    m.logged_in = true;
-    m.status.clear();
-    log().add_fmt("info", "login ok: %zu rooms listed", m.rooms.size());
+auto_join:
     if (m.auto_join) {
         std::string target = env.room_hint;
         if (target.empty())
             for (auto& r : m.rooms)
                 if (r.video) { target = r.room_id; break; }
+        // M5b：发现被 401 打掉=rooms 空——仍按 hint 直 join，4013 判决点在 join 期。
+        if (target.empty() && m.auth == AuthMode::JwtPaste) target = "vehicle_probe";
         if (!target.empty()) join_room(m, env, target, true);
         else m.status = "auto-join: no video room";
         m.auto_join = false;
     }
+}
+
+void refresh_identity_label(AppModel& m) {
+    // T4/F6：任一活动会话取身份标签（静态快照，同值；无会话=空显示）。
+    for (auto& t : m.tiles)
+        if (t->sess) {
+            auto lb = ms::identity_label(t->sess);
+            m.identity_label = lb ? *lb : "";
+            return;
+        }
+    m.identity_label.clear();
 }
 
 } // namespace viewer

@@ -46,6 +46,9 @@ dummy 无头模式下 ini 不写盘（CI 构建目录零污染）。
 - [ ] 抓任意分栏边界拖动 → 退出重开 → **宽度保持**（ini 生效）
 - [ ] 双击 Video Grid 标题=最大化，再双击=还原；拖 Streams 标题出画布=浮动
 - [ ] Log 区「reset layout」→ 四区回出厂切分
+- [ ] **鉴权五模式**（viewer-auth-matrix）：Radio 切换互斥、无关域灰显；Account/API-Key 登录出画；
+  PSK 填 psk+房名点「Connect」直达（无发现步骤）；Device 填 identity 目录同形；JWT 贴坏 token →
+  红牌 4013 不风暴；登录后底部 `identity:` 行与 server 日志身份一致
 
 ## 运行
 
@@ -57,11 +60,17 @@ dummy 无头模式下 ini 不写盘（CI 构建目录零污染）。
 ./target/examples/bin/imgui_viewer
 #   口令走 UI/stdin（G13 永不 argv）；勾选流房（kind=video）自动并入整车控制房
 
-# 无头验收（CI/服务器机）：dummy 驱动 + 定时自退 + env 注入
-SDL_VIDEODRIVER=dummy MSRTC_ROOM=vehicle_test MSRTC_PASS=dev \
-  MSRTC_WS_URL=ws://<server>:9800 MSRTC_HTTP_BASE=http://<server>:9800 \
-  MSRTC_USER=admin MSRTC_RUN_SECS=20 ./target/examples/bin/imgui_viewer
+# 无头验收（CI/服务器机）：dummy 驱动 + 定时自退 + env 注入（viewer-auth-matrix 五模式）
+# 公共：SDL_VIDEODRIVER=dummy MSRTC_RUN_SECS=<N> MSRTC_WS_URL=ws://<s>:9800/ws MSRTC_HTTP_BASE=http://<s>:9800
 #   判据行：[frame] t=..s cb=<回调帧> tex=<纹理帧> WxH —— 稳态两者相等且 ~30fps 增长
+#
+# M1 账号：MSRTC_AUTH_MODE=account MSRTC_USER=<u> MSRTC_PASS=<p> MSRTC_ROOM=<video房>
+# M2 API-Key：MSRTC_AUTH_MODE=apikey MSRTC_KEY_ID=<id> MSRTC_KEY_SECRET=<s> MSRTC_ROOM=<video房>
+# M3 PSK（跳发现直 join）：MSRTC_AUTH_MODE=psk MSRTC_PSK=<psk> MSRTC_ROOM=<房名>
+# M4 设备身份（identity_dir 直 join）：MSRTC_AUTH_MODE=device MSRTC_IDENTITY_DIR=<实例目录> MSRTC_ROOM=<房名>
+# M5a/M5b 直贴 JWT：MSRTC_AUTH_MODE=jwt MSRTC_JWT=<token> MSRTC_ROOM=<房名>
+#   M5b 坏 token 判据 = [tile] join: auth rejected [4013]（fail-closed 红牌，不重连风暴）
+# GUI 面五 Radio 同此五路（登录面板底部 identity: 行 = 生效身份回显）
 
 # 急停签名（可选）：预共享密钥文件（0600，车舱同值；无文件 = 不签名形）
 export MSRTC_ESTOP_KEY_FILE=/path/to/control-hmac.key

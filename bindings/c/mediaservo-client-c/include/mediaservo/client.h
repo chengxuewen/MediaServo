@@ -188,6 +188,11 @@ mediaservo_err_t mediaservo_client_session_create(const mediaservo_client_config
 /* 谈成的方言版本（S0；旧 server = 1）。 */
 mediaservo_err_t mediaservo_client_session_negotiated(const mediaservo_client_session_t* s, uint32_t* out_protocol);
 
+/* 生效身份标签（viewer-auth-matrix T4/F6；create 期本地推导静态值，零网络）。
+ * 形如 "Device(ms-...)" / "jwt" / "legacy-psk" / "(no credential)"；needed 溢出
+ * 合同同 list_rooms。closed 会话仍可读（静态快照）。 */
+mediaservo_err_t mediaservo_client_session_identity(const mediaservo_client_session_t* s, char* out, size_t cap, size_t* needed);
+
 /* 会话连接态快照（out_state = MEDIASERVO_CLIENT_STATE_*）。会话已关 → ERR_STATE。 */
 mediaservo_err_t mediaservo_client_session_state(const mediaservo_client_session_t* s, uint8_t* out_state);
 
