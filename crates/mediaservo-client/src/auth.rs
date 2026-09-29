@@ -81,12 +81,12 @@ pub(crate) fn build_request(host: &str, port: u16, path: &str, body: &[u8]) -> V
     req
 }
 
-/// 构造 HTTP/1.1 GET 请求报文（Bearer JWT——login 签发的同一凭证）。
-pub(crate) fn build_get_request(host: &str, port: u16, path: &str, jwt: &str) -> Vec<u8> {
+/// 同上，但 Authorization 值由调用方给（`Psk <secret>` = PSK 发现路，psk-discover）。
+pub(crate) fn build_get_request_authed(host: &str, port: u16, path: &str, auth: &str) -> Vec<u8> {
     format!(
         "GET {path} HTTP/1.1\r\n\
          Host: {host}:{port}\r\n\
-         Authorization: Bearer {jwt}\r\n\
+         Authorization: {auth}\r\n\
          Accept: application/json\r\n\
          Connection: close\r\n\
          \r\n"
@@ -267,21 +267,47 @@ async fn request_raw(
 /// 权限矩阵以 server 为准（admin/dispatcher 全量，viewer/operator allowlist），
 /// 客户端不做二次过滤。非 2xx（token 失效/过期/角色不符）→ [`ClientError::RestRejected`]
 /// ——不是 InvalidCredentials：凭证曾有效，此处是授权面拒绝。
-pub async fn list_rooms(http_base: &str, jwt: &str) -> Result<Vec<RoomInfo>, ClientError> {
+/// PSK 发现（psk-discover；server /api/rooms 的 `Authorization: Psk <secret>` 分支）。
+/// Legacy 视角全量列表（与 PSK join 门能力对齐——跨房间拉流的发现面）。
+/// 401（错 PSK/未配）→ `InvalidCredentials` 终态。
+pub async fn list_rooms_psk(http_base: &str, psk: &str) -> Result<Vec<RoomInfo>, ClientError> {
+    list_rooms_authed(http_base, &format!("Psk {psk}"), "psk discover").await
+}
+
+async fn list_rooms_authed(
+    http_base: &str,
+    auth_value: &str,
+    tag: &'static str,
+) -> Result<Vec<RoomInfo>, ClientError> {
     let (host, port) = parse_http_base(http_base)?;
-    let req = build_get_request(&host, port, ROOMS_PATH, jwt);
-    let (status, body) = request_raw(&host, port, &req, "http list_rooms").await?;
-    match status {
-        200 => serde_json::from_slice::<RoomsWire>(&body).map(|w| w.rooms).map_err(|e| {
-            tracing::warn!(body_len = body.len(), error = %e, "list_rooms 200 body parse failed");
-            ClientError::MalformedResponse(format!("rooms body: {e}"))
-        }),
-        other => {
-            let msg = String::from_utf8_lossy(&body).chars().take(120).collect::<String>();
-            tracing::warn!(status = other, body = %msg, "list_rooms failed");
-            Err(ClientError::RestRejected { code: other, message: msg })
-        }
+    let req = build_get_request_authed(&host, port, ROOMS_PATH, auth_value);
+    let (status, body_bytes) = request_raw(&host, port, &req, tag).await?;
+    if status != 200 {
+        let msg = serde_json::from_slice::<ErrorWire>(&body_bytes)
+            .ok()
+            .and_then(|w| w.error)
+            .unwrap_or_default();
+        tracing::warn!(status, msg = %msg, tag);
+        return Err(if status == 401 {
+            ClientError::InvalidCredentials
+        } else {
+            ClientError::RestRejected { code: status, message: msg }
+        });
     }
+    parse_rooms_body(&body_bytes, tag).await
+}
+
+pub async fn list_rooms(http_base: &str, jwt: &str) -> Result<Vec<RoomInfo>, ClientError> {
+    let auth = format!("Bearer {jwt}");
+    list_rooms_authed(http_base, &auth, "http list_rooms").await
+}
+
+/// 200 body → RoomInfo 列表（RoomsWire 共用解析）。
+async fn parse_rooms_body(body: &[u8], tag: &'static str) -> Result<Vec<RoomInfo>, ClientError> {
+    serde_json::from_slice::<RoomsWire>(body).map(|w| w.rooms).map_err(|e| {
+        tracing::warn!(body_len = body.len(), error = %e, "{tag} 200 body parse failed");
+        ClientError::MalformedResponse(format!("rooms body: {e}"))
+    })
 }
 
 #[cfg(test)]
@@ -341,12 +367,19 @@ mod tests {
 
     #[test]
     fn build_get_request_shape() {
-        let req = String::from_utf8(build_get_request("h", 9800, "/api/rooms", "jwt-1")).unwrap();
+        let req =
+            String::from_utf8(build_get_request_authed("h", 9800, "/api/rooms", "Bearer jwt-1"))
+                .unwrap();
         assert!(req.starts_with("GET /api/rooms HTTP/1.1\r\n"));
         assert!(req.contains("Authorization: Bearer jwt-1\r\n"));
         assert!(req.contains("Connection: close\r\n"));
         assert!(!req.contains("Content-Length"));
         assert!(req.ends_with("\r\n\r\n"));
+        // psk-discover 变体（scheme=Psk）
+        let psk_req =
+            String::from_utf8(build_get_request_authed("h", 9800, "/api/rooms", "Psk sekrit"))
+                .unwrap();
+        assert!(psk_req.contains("Authorization: Psk sekrit\r\n"));
     }
 
     #[test]

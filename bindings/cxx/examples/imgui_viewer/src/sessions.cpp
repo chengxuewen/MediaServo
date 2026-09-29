@@ -132,9 +132,10 @@ void perform_login(AppModel& m, const Env& env) {
         m.jwt = m.jwt_paste; // M5：直贴（坏 token 由 join 期 4013 红牌裁决）
         break;
     }
-    // 发现段：M3/M4 跳过（Legacy 发现 401 / Device 无 REST token——均直 join）；
+    // 发现段（psk-discover 后）：M3 有 PSK 即走发现（Legacy 全量视角——跨房间拉流主路）；
+    // 填了 direct_room 则直连（可选覆盖）；M4 Device 仍无 REST 发证面 → 直 join；
     // M5 失败容忍（坏 token 测试点在 join 期红牌，非发现）。
-    if (m.auth == AuthMode::Psk || m.auth == AuthMode::Device) {
+    if (m.auth == AuthMode::Psk && m.direct_room[0]) {
         m.rooms.clear();
         if (!m.direct_room[0]) {
             m.status = "psk: room required (direct join)";
@@ -150,6 +151,45 @@ void perform_login(AppModel& m, const Env& env) {
         m.logged_in = true;
         m.status.clear();
         log().add_fmt("info", "psk direct-join target: %s", m.rooms[0].room_id.c_str());
+    } else if (m.auth == AuthMode::Psk) {
+        // psk-discover：Legacy 全量列表——与账号模式同形（树勾选多房=跨房间拉流）。
+        auto lr = ms::list_rooms_psk(m.url_http, m.psk);
+        if (!lr) {
+            m.status = "psk discover: " + lr.error().message;
+            m.auto_join = false;
+            return;
+        }
+        m.rooms.clear();
+        for (auto& [rid, kind] : parse_rooms(*lr)) {
+            RoomRow r;
+            r.room_id = rid;
+            r.kind = kind;
+            r.video = kind == "video";
+            m.rooms.push_back(std::move(r));
+        }
+        m.logged_in = true;
+        m.status.clear();
+        std::printf("[discover] psk rooms=%zu\n", m.rooms.size()); // 无头判据行
+        log().add_fmt("info", "psk discover ok: %zu rooms", m.rooms.size());
+    } else if (m.auth == AuthMode::Device) {
+        m.rooms.clear();
+        if (!m.direct_room[0] && m.identity_dir[0]) {
+            // Device 无 REST 发证面（D283 挑战只在 WS）→ 直 join 语义；房名从
+            // identity 目录旁的约定取不可能——由 MSRTC_ROOM/UI 提供。
+        }
+        if (!m.direct_room[0]) {
+            m.status = "device: room required (no REST discovery)";
+            m.auto_join = false;
+            return;
+        }
+        RoomRow r;
+        r.room_id = m.direct_room;
+        r.kind = r.room_id.find('_') != std::string::npos ? "video" : "control";
+        r.video = r.kind == "video";
+        m.rooms.push_back(std::move(r));
+        m.logged_in = true;
+        m.status.clear();
+        log().add_fmt("info", "device direct-join target: %s", m.rooms[0].room_id.c_str());
     } else {
         auto lr = ms::list_rooms(m.url_http, m.jwt);
         if (!lr) {

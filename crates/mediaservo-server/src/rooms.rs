@@ -78,10 +78,65 @@ fn room_visible(role: &CockpitRole, allowed: &[String], owner: Option<&str>) -> 
 
 type RoomsError = (StatusCode, Json<ErrorResponse>);
 
+/// PSK 发现认证：`Authorization: Psk <secret>`（scheme 区分账号 Bearer）。
+/// 命中 → Legacy 全量视角（所有在线房 + kind 派生，与 join 门能力对齐）；
+/// 未配 PSK/密钥错/缺凭证 → None（落回 JWT 链）或 401（带了 Psk scheme 但密钥错——
+/// 显式 401 防止静默滑进 JWT 链产生误导性错误语）。
+fn psk_discover(
+    req: &axum::extract::Request,
+    state: &AdminState,
+) -> Result<Option<Json<RoomsResponse>>, RoomsError> {
+    let Some(raw) =
+        req.headers().get(axum::http::header::AUTHORIZATION).and_then(|v| v.to_str().ok())
+    else {
+        return Ok(None);
+    };
+    let Some(secret) = raw.strip_prefix("Psk ") else { return Ok(None) };
+    let configured = state.psk_state.read().unwrap_or_else(|e| e.into_inner()).clone();
+    let Some(configured) = configured else {
+        return Err(unauthorized_rooms("psk authentication failed"));
+    };
+    // constant-time + dummy 垫（长度差也恒时——与 devices 同纪律）
+    let a = configured.as_bytes();
+    let b = secret.as_bytes();
+    let lt = if a.len() < b.len() { a.len() } else { b.len() };
+    let mut diff = (a.len() ^ b.len()) as u8;
+    for i in 0..lt {
+        diff |= a[i] ^ b[i];
+    }
+    if diff != 0 {
+        return Err(unauthorized_rooms("psk authentication failed"));
+    }
+    // Legacy 全量视角：所有房 + 派生流房 kind（与账号路派生逻辑同形）。
+    let mut rooms: Vec<RoomEntry> = Vec::new();
+    for r in state.signaling.room_manager.list_rooms() {
+        if r.id.starts_with("audio-") {
+            rooms.push(RoomEntry { room_id: r.id, kind: "audio" });
+            continue;
+        }
+        rooms.push(RoomEntry { room_id: r.id.clone(), kind: "control" });
+        for sid in online_stream_ids(&state.signaling.status_registry, &r.id) {
+            rooms.push(RoomEntry { room_id: format!("{}_{}", r.id, sid), kind: "video" });
+        }
+    }
+    Ok(Some(Json(RoomsResponse { rooms })))
+}
+
+fn unauthorized_rooms(msg: &str) -> RoomsError {
+    (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: msg.to_string() }))
+}
+
 async fn list_rooms(
     State(state): State<AdminState>,
     req: axum::extract::Request,
 ) -> Result<Json<RoomsResponse>, RoomsError> {
+    // PSK 发现分支（psk-discover）：`Authorization: Psk <secret>` → Legacy 视角全量列表。
+    // 权限论证：PSK 本就在 join 门全放行（roles.rs Legacy 直通）——"能进不能看"是意外
+    // 产物非设计；打开发现不新增能力（能枚举≠能进入，进入已全通），只消除盲态。
+    // 比对 constant-time（与 devices/psk 认证同纪律）；错 PSK 与缺凭证同消息（防枚举）。
+    if let Some(psk_view) = psk_discover(&req, &state)? {
+        return Ok(psk_view);
+    }
     let claims = check_auth(&req, &state)?; // token 提取/验签复用（同一发证链）
     // 身份门：只放行合法账号角色的 JWT。无 role claim（Legacy 等）/未知角色 → 401。
     // Device 身份不经 REST 发证，天然不在此面（显式拒=防未来 device token 混入）。
@@ -263,6 +318,83 @@ mod tests {
         let status = resp.status();
         let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
         (status, String::from_utf8_lossy(&bytes).to_string())
+    }
+
+    #[tokio::test]
+    async fn http_psk_discover_full_visibility_and_401_paths() {
+        // psk-discover：PSK 持者=Legacy 全能（join 门全放行）→ 发现面同样全量。
+        let state = crate::admin::tests::make_state().await;
+        *state.psk_state.write().unwrap() = Some("sekrit-psk".into());
+        state
+            .signaling
+            .room_manager
+            .join_room("vehicle_x", "c-1", &mediaservo_common::protocol::PeerRole::Host)
+            .unwrap();
+        state.signaling.set_room_owner_for_test("vehicle_x", "ms-car1");
+        state
+            .signaling
+            .room_manager
+            .join_room("audio-ms-car1", "c-2", &mediaservo_common::protocol::PeerRole::Consumer)
+            .unwrap();
+        state.signaling.set_room_owner_for_test("audio-ms-car1", "ms-car1");
+
+        // 命中 → 200 全量（含 audio 前缀三面 kind）
+        let app = rooms_router(state.clone());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/rooms")
+                    .header("Authorization", "Psk sekrit-psk")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let ids: Vec<&str> =
+            v["rooms"].as_array().unwrap().iter().map(|r| r["room_id"].as_str().unwrap()).collect();
+        assert!(ids.contains(&"vehicle_x"), "{ids:?}");
+        assert!(ids.contains(&"audio-ms-car1"), "{ids:?}");
+
+        // 错密钥 → 401（不滑进 JWT 链给误导语）
+        let app = rooms_router(state.clone());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/rooms")
+                    .header("Authorization", "Psk wrong")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let b = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&b),
+            r#"{"error":"psk authentication failed"}"#,
+            "错 PSK 语与未知 key 同形（防枚举）"
+        );
+
+        // 未配 PSK 的服务器：带 Psk scheme 也 401（不静默放行）
+        let state2 = crate::admin::tests::make_state().await;
+        let app = rooms_router(state2);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/rooms")
+                    .header("Authorization", "Psk anything")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

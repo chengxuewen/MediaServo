@@ -66,7 +66,7 @@ dummy 无头模式下 ini 不写盘（CI 构建目录零污染）。
 #
 # M1 账号：MSRTC_AUTH_MODE=account MSRTC_USER=<u> MSRTC_PASS=<p> MSRTC_ROOM=<video房>
 # M2 API-Key：MSRTC_AUTH_MODE=apikey MSRTC_KEY_ID=<id> MSRTC_KEY_SECRET=<s> MSRTC_ROOM=<video房>
-# M3 PSK（跳发现直 join）：MSRTC_AUTH_MODE=psk MSRTC_PSK=<psk> MSRTC_ROOM=<房名>
+# M3 PSK（全量发现，树勾选跨房拉流）：MSRTC_AUTH_MODE=psk MSRTC_PSK=<psk>（无需 ROOM；server 需同批升级含 psk-discover）
 # M4 设备身份（identity_dir 直 join）：MSRTC_AUTH_MODE=device MSRTC_IDENTITY_DIR=<实例目录> MSRTC_ROOM=<房名>
 # M5a/M5b 直贴 JWT：MSRTC_AUTH_MODE=jwt MSRTC_JWT=<token> MSRTC_ROOM=<房名>
 #   M5b 坏 token 判据 = [tile] join: auth rejected [4013]（fail-closed 红牌，不重连风暴）

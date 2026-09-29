@@ -44,8 +44,7 @@ void render_login(AppModel& m, const Env& env) {
         ImGui::InputText("psk", m.psk, sizeof(m.psk), secret_shown);
         ImGui::SameLine();
         ImGui::Checkbox("show", &m.pass_shown);
-        ImGui::InputText("room (direct join)", m.direct_room, sizeof(m.direct_room));
-        ImGui::TextDisabled("discovery skipped: legacy identity cannot list rooms (401)");
+        ImGui::TextDisabled("connect = discover all rooms (cross-room pull in tree)");
     } else if (m.auth == AuthMode::Device) {
         ImGui::InputText("identity dir", m.identity_dir, sizeof(m.identity_dir));
         ImGui::TextDisabled("dir must contain identity.json + etc/link/signing.pem");
@@ -63,7 +62,7 @@ void render_login(AppModel& m, const Env& env) {
     const char* btn;
     switch (m.auth) {
     case AuthMode::ApiKey: cred_ready = m.key_id[0] && m.key_secret[0]; btn = "Login"; break;
-    case AuthMode::Psk:    cred_ready = m.psk[0] && m.direct_room[0];   btn = "Connect"; break; // F2 文案
+    case AuthMode::Psk:    cred_ready = m.psk[0] != '\0';               btn = "Connect"; break; // room 可选：空=发现树
     case AuthMode::Device: cred_ready = m.identity_dir[0];              btn = "Connect"; break;
     case AuthMode::JwtPaste: cred_ready = m.jwt_paste[0];               btn = "Connect"; break;
     default:               cred_ready = m.pass[0] != '\0';              btn = "Login"; break;
