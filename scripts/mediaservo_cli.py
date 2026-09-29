@@ -294,6 +294,21 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
                 legacy.unlink()
                 print("  已回收 legacy 兄弟名 mediaservo-server（bin 单名化——unit 只认品牌名）", file=sys.stderr)
             print(f"server 交付布局组装: out/server/bin/{base}（{server_bin.stat().st_size // 1024} KB）")
+        # caddy 随包（2026-09-29：探测只认 PATH → 裸 shell start 静默 --no-web 的根治）——
+        # 找得到（PATH/仓内 pixi 树）就拷进 bin/（部署自包含：探测链第三条=bin 同目录）；
+        # 找不到 WARN 不阻断（老形态：PATH 提供）。
+        caddy_src = shutil.which("caddy") or next(
+            (c for c in (ROOT / ".pixi" / "envs" / "default" / "bin" / "caddy",
+                         ROOT.parent / ".pixi" / "envs" / "default" / "bin" / "caddy")
+             if c.is_file()), None)
+        if caddy_src:
+            caddy_dst = _out_root() / "server" / "bin" / "caddy"
+            if not caddy_dst.exists() or Path(caddy_src).resolve() != caddy_dst.resolve():
+                shutil.copy2(caddy_src, caddy_dst)
+                print(f"caddy 随包: out/server/bin/caddy（自 {caddy_src}）")
+        else:
+            print("WARN: caddy 未找到（PATH/仓内 pixi 树）——out/server 不含 caddy，"
+                  "start 时须 PATH 提供否则 web 静默降级", file=sys.stderr)
         # 组装默认配置（server.yaml——从 config/server.docker.yaml 派生，accounts/devices 相对路径）
         # PIT-158/160: 已存在则跳过（运行时注册表 devices/accounts 可能被 admin API 热写、
         # server.yaml 可能被运维改过）——build 不得把模板覆盖回运行时数据；需要新模板先删旧文件。

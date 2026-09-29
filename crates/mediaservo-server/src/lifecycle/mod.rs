@@ -197,9 +197,35 @@ fn sfu_env_passthrough() -> Vec<(String, String)> {
         .collect()
 }
 
-/// caddy 命令：PATH 命中则绝对化（oxmgr daemon 继承的 PATH 与 CLI 可能不同），否则字面量。
+/// caddy 命令探测链（2026-09-29 自适应化）：① PATH ② 本二进制同目录（out/server/bin
+/// 自包含部署——caddy 随包）③ 仓内 pixi 树（源码机）。全落空 = 字面量（保持现降级语义）。
 fn caddy_command() -> String {
-    which("caddy").unwrap_or_else(|| "caddy".to_string())
+    caddy_probe().unwrap_or_else(|| "caddy".to_string())
+}
+
+fn caddy_probe() -> Option<String> {
+    if let Some(p) = which("caddy") {
+        return Some(p);
+    }
+    // ② exe 同目录（部署树 bin/ 三件套形态）
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let p = dir.join("caddy");
+        if p.is_file() {
+            return Some(p.to_string_lossy().into_owned());
+        }
+    }
+    // ③ 仓内 pixi 树（源码机直跑 target/debug 形态；构建期路径，跨机部署由 ② 接管）
+    for cand in [
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.pixi/envs/default/bin/caddy"),
+    ] {
+        let p = cand.canonicalize().unwrap_or(cand.clone());
+        if p.is_file() {
+            return Some(p.to_string_lossy().into_owned());
+        }
+    }
+    None
 }
 
 pub(super) fn which(bin: &str) -> Option<String> {
@@ -334,7 +360,7 @@ fn start_impl(dir: &Path, no_web_flag: bool, verb: &str) -> i32 {
             return 1;
         }
     };
-    let (no_web, caddy_missing) = decide_no_web(no_web_flag, which("caddy").is_some());
+    let (no_web, caddy_missing) = decide_no_web(no_web_flag, caddy_probe().is_some());
     if caddy_missing {
         eprintln!("{verb}: caddy 不在 PATH——warn 自动降级 --no-web（dev 形态；严格检查用 doctor）");
     }
