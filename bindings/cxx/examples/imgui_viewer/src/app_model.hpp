@@ -115,6 +115,11 @@ struct Tile {
     }
 };
 
+/// 鉴权模式（viewer-auth-matrix T2；F1 五选一 Radio）。语义表见 PLAN §2.1：
+/// Account/ApiKey=换发型（login/exchange→发现→join）；Psk=跳发现直 join（Legacy
+/// 发现 401）；Device=identity_dir 公钥链；JwtPaste=直贴 token（坏 token→4013 测试点）。
+enum class AuthMode { Account, ApiKey, Psk, Device, JwtPaste };
+
 /// 全应用状态（T3 前的旧名 Ui；字段逐字保留=搬迁可 diff 审）。
 struct AppModel {
     bool key_signed = false; // estop 签名态（面板措辞；W4b）
@@ -124,11 +129,15 @@ struct AppModel {
     // server 地址（main 以 env 预置；登录面板可改——env 缺省/演示机场景）
     char url_ws[256] = "";
     char url_http[256] = "";
-    // 登录模式（accountless-client-auth T2 / F11）：false=账号+密码 true=API-key 换发。
-    // 凭证走输入框（G13 永不 argv）；MSRTC_KEY_ID/SECRET 为无头 CI 专用预置通道。
-    bool use_key = false;
-    char key_id[64] = "";
-    char key_secret[256] = "";
+    // 鉴权五模式（T2；G13 纪律：凭证走输入框或 env，永不 argv）。
+    AuthMode auth = AuthMode::Account;
+    char key_id[64] = "";           // M2
+    char key_secret[256] = "";      // M2
+    char psk[256] = "";             // M3
+    char direct_room[128] = "";     // M3 专属：跳发现直 join 的目标房
+    char identity_dir[512] = "";    // M4：设备身份实例目录
+    char jwt_paste[2048] = "";      // M5：直贴 JWT（坏 token 测试点）
+    std::string identity_label;     // T4/F6：连接后回显（"Device(ms-x)"/"legacy-psk"/…）
     std::string status;               // 登录/列举错误行
     std::vector<RoomRow> rooms;
     bool logged_in = false;

@@ -354,6 +354,8 @@ pub struct mediaservo_client_session_t {
     session: std::sync::Mutex<Option<RoomSession>>,
     /// connect 时快照（negotiated 会话期恒定）。
     negotiated: u32,
+    /// T4/F6 身份标签（create 期本地推导，静态；session_identity 符号读出）。
+    identity_label: String,
     closed: AtomicBool,
     /// ⊘ consume_video 一次性闸门（首调用置位；失败路径回滚）。
     video_started: AtomicBool,
@@ -487,12 +489,26 @@ pub extern "C" fn mediaservo_client_session_create(
                 .identity_dir
                 .map(std::path::PathBuf::from),
         };
+        // viewer-auth-matrix T4/F6：连接前由**本地配置**推导身份标签（零网络）。
+        // 语义与 server 判序一致：Device(公钥齐备) > jwt > psk；jwt 形 sub 不可知
+        // （SDK 不解 token），标 "jwt:<n> chars"。三者皆无 = "(no credential)"。
+        let identity_label = match (
+            parts.identity_dir,
+            parts.jwt,
+            parts.psk,
+        ) {
+            (Some(dir), _, _) => format!("Device({})", device_id_of_dir(dir)),
+            (_, Some(_), _) => "jwt".to_string(),
+            (_, _, Some(_)) => "legacy-psk".to_string(),
+            _ => "(no credential)".to_string(),
+        };
         match runtime().block_on(RoomSession::connect(&client_cfg)) {
             Ok(session) => {
                 let negotiated = session.negotiated();
                 let handle = Box::new(mediaservo_client_session_t {
                     session: std::sync::Mutex::new(Some(session)),
                     negotiated,
+                    identity_label,
                     closed: AtomicBool::new(false),
                     video_started: AtomicBool::new(false),
                     video_cb: std::sync::Mutex::new(None),
@@ -510,6 +526,27 @@ pub extern "C" fn mediaservo_client_session_create(
             }
         }
     })
+}
+
+fn fallback_name(dir: &str) -> String {
+    std::path::Path::new(dir)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| dir.to_string())
+}
+
+/// M4 身份标签的 device_id 提取：读 `<dir>/identity.json`（失败回退目录名尾段）。
+fn device_id_of_dir(dir: &str) -> String {
+    // 手工解固定键（避免为此引入 serde derive 依赖；identity.json 形状由 D-H13 钉死）。
+    let parse_device_id = |raw: &[u8]| -> Option<String> {
+        let v: serde_json::Value = serde_json::from_slice(raw).ok()?;
+        v.get("device_id")?.as_str().map(str::to_string)
+    };
+    match std::fs::read(std::path::Path::new(dir).join("identity.json")) {
+        Ok(raw) => parse_device_id(&raw)
+            .unwrap_or_else(|| fallback_name(dir)),
+        Err(_) => fallback_name(dir),
+    }
 }
 
 /// 谈成的方言版本（S0；旧 server = 1）。
@@ -534,6 +571,34 @@ pub extern "C" fn mediaservo_client_session_negotiated(
         }
         unsafe { *out_protocol = h.negotiated };
         MEDIASERVO_OK
+    })
+}
+
+/// 生效身份标签（viewer-auth-matrix T4/F6；create 期本地推导静态值，零网络）。
+/// 形如 "Device(ms-a1b2...)" / "jwt" / "legacy-psk" / "(no credential)"。
+/// needed 溢出合同同 list_rooms；closed 会话仍可读（标签是静态快照）。
+#[unsafe(no_mangle)]
+pub extern "C" fn mediaservo_client_session_identity(
+    s: *const mediaservo_client_session_t,
+    out: *mut std::os::raw::c_char,
+    cap: usize,
+    needed: *mut usize,
+) -> c_int {
+    const NAME: &str = "mediaservo_client_session_identity";
+    ffi_global(NAME, || {
+        let Some(h) = (unsafe { s.as_ref() }) else {
+            return fail_global(
+                "mediaservo_client_session_identity: null session",
+                MEDIASERVO_CLIENT_ERR_INVALID_ARG,
+            );
+        };
+        if out.is_null() || cap == 0 {
+            return fail_global(
+                "mediaservo_client_session_identity: null out or cap 0",
+                MEDIASERVO_CLIENT_ERR_INVALID_ARG,
+            );
+        }
+        copy_out_needed(NAME, &h.identity_label, out, cap, needed)
     })
 }
 

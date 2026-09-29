@@ -71,7 +71,7 @@ sequenceDiagram
     V-->>A: JWT
     A->>V: GET /api/rooms（list_rooms() 自由函数）
     V-->>A: [{"room_id":..,"kind":"video"|"audio"|"control"}]
-    A->>S: Session::connect(Config{signaling_url, room, jwt|psk 恰一, role, hmac_key_file?})
+    A->>S: Session::connect(Config{signaling_url, room, jwt|psk 恰一, role, hmac_key_file?, identity_dir?})
     S->>V: WS 建连 + RoomJoin（携带 protocol 期望）
     V-->>S: RoomJoined{protocol = min(双方)}（S0 协商，当前代际 3）
     Note over S: negotiated() 可读取谈成版本
@@ -117,6 +117,7 @@ struct Config {
     std::string jwt;           // login() 输出（与 psk 恰一非空）
     std::string hmac_key_file; // 急停密钥文件（0600；空 = 不签名）
     std::string psk;           // PSK 直传（与 jwt 恰一非空）
+    std::string identity_dir;  // 设备身份实例目录（空=不启用；与 jwt/psk 可叠，三凭证齐给=INVALID_ARG）
     std::string role;          // "Client"(默认)/"Viewer"/"Remote"；空串 = "Client"
 };
 ```

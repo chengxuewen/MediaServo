@@ -11,6 +11,8 @@ namespace viewer {
 
 /// 登录 + list_rooms 填房间表；auto_join 置位时并勾入目标房（原 main 登录按钮分支迁居）。
 void perform_login(AppModel& m, const Env& env);
+/// T4/F6：活动会话身份标签回填 m.identity_label（无会话=清空）。
+void refresh_identity_label(AppModel& m);
 
 /// 勾选一路房间 = 建一个会话（含 W4d 双房配对递归，见函数内注）。
 void join_room(AppModel& m, const Env& env, const std::string& room_id, bool video);

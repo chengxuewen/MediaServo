@@ -35,6 +35,7 @@
 #include "app_log.hpp"
 #include "app_model.hpp"
 #include "dock_layout.hpp"
+#include "sessions.hpp"
 #include "panels/control.hpp"
 #include "panels/log_view.hpp"
 #include "panels/login.hpp"
@@ -75,9 +76,37 @@ int main() {
         if (sec && *sec) {
             std::strncpy(m.key_id, k, sizeof(m.key_id) - 1);
             std::strncpy(m.key_secret, sec, sizeof(m.key_secret) - 1);
-            m.use_key = true;
+            m.auth = AuthMode::ApiKey;
             m.auto_join = true;
         }
+    }
+    // T2：五模式无头注入通道（MSRTC_AUTH_MODE=account|apikey|psk|device|jwt）。
+    if (const char* mode = std::getenv("MSRTC_AUTH_MODE"); mode && *mode) {
+        auto pick = [](const char* k2) -> const char* {
+            const char* v = std::getenv(k2);
+            return (v && *v) ? v : nullptr;
+        };
+        if (std::strcmp(mode, "psk") == 0) {
+            if (auto* v = pick("MSRTC_PSK")) {
+                std::strncpy(m.psk, v, sizeof(m.psk) - 1);
+                if (auto* r = pick("MSRTC_ROOM")) std::strncpy(m.direct_room, r, sizeof(m.direct_room) - 1);
+                m.auth = AuthMode::Psk;
+                m.auto_join = true;
+            }
+        } else if (std::strcmp(mode, "device") == 0) {
+            if (auto* v = pick("MSRTC_IDENTITY_DIR")) {
+                std::strncpy(m.identity_dir, v, sizeof(m.identity_dir) - 1);
+                m.auth = AuthMode::Device;
+                m.auto_join = true;
+            }
+        } else if (std::strcmp(mode, "jwt") == 0) {
+            if (auto* v = pick("MSRTC_JWT")) {
+                std::strncpy(m.jwt_paste, v, sizeof(m.jwt_paste) - 1);
+                m.auth = AuthMode::JwtPaste;
+                m.auto_join = true;
+            }
+        }
+        // account/apikey 走上面既有通道（PASS / KEY_ID+SECRET）。
     }
 
     const auto t0 = std::chrono::steady_clock::now();
@@ -114,6 +143,7 @@ int main() {
 
         // stats 轮询 + 无头双计数报告（每 ~1s 一次 tick 节拍）
         if (tick % 60 == 0) {
+            refresh_identity_label(m); // T4/F6：身份行低频回填（tiles 空则清空）
             for (auto& t : m.tiles) t->poll_stats();
         }
         const unsigned long long secs =

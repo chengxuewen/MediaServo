@@ -25,9 +25,13 @@
 | 文档 | 内容 |
 |------|------|
 | `sdk-cxx/link.md` | 设备侧 IPC：信令 + 帧总线（12 函数 C 面的 cxx RAII；重连/resume/ACK 泵语义） |
+| `auth-guide.md` | 客户端鉴权总指南（四凭证选型/时序/四语言片段/运维要点；单点真源——sdk-cxx 四册只留指针） | viewer-auth-matrix T6 |
 | `sdk-cxx/deck.md` | 采集 / 录制 / 回放（FFmpeg 静态内嵌口径；FrameBus 不在 C/C++ 面、采集 MVP=stub 双警示） |
+| `auth-guide.md` | 客户端鉴权总指南（四凭证选型/时序/四语言片段/运维要点；单点真源——sdk-cxx 四册只留指针） | viewer-auth-matrix T6 |
 | `sdk-cxx/field.md` | 设备侧推流闭环（PushSession/内置帧源；**无外部喂帧入口**、拉流不在此面 两警示） |
+| `auth-guide.md` | 客户端鉴权总指南（四凭证选型/时序/四语言片段/运维要点；单点真源——sdk-cxx 四册只留指针） | viewer-auth-matrix T6 |
 | `sdk-cxx/client.md` | 舱端/消费侧（S6 批1b 28 符号形；Consumer RAII、协商/控制 DC/急停签名面） |
+| `auth-guide.md` | 客户端鉴权总指南（四凭证选型/时序/四语言片段/运维要点；单点真源——sdk-cxx 四册只留指针） | viewer-auth-matrix T6 |
 
 ### 其他活参考（根目录）
 | 文档 | 内容 |

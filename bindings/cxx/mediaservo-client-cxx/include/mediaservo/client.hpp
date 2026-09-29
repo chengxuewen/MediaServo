@@ -170,6 +170,9 @@ class Consumer;
 class Session {
 public:
     /// 信令连接 + 入房（阻塞；失败返回错误，不抛异常）。
+    /// T4/F6 自由函数 identity_label 需读私有 C 句柄。
+    friend Result<std::string> identity_label(const Session& s);
+
     static Result<Session> connect(const Config& cfg) {
         mediaservo_client_config_t c = MEDIASERVO_CLIENT_CONFIG_DEFAULT;
         c.signaling_url = cfg.signaling_url.empty() ? nullptr : cfg.signaling_url.c_str();
@@ -332,6 +335,13 @@ private:
 };
 
 /// 单路视频消费者（move-only RAII；析构自动 close；默认构造 = 已关闭）。
+/// 生效身份标签（T4/F6 镜像；零网络，create 期本地推导静态值）。closed 会话仍可读。
+inline Result<std::string> identity_label(const Session& s) {
+    return detail::needed_read(nullptr, [&](char* b, size_t c, size_t* n) {
+        return mediaservo_client_session_identity(s.h_, b, c, n); // 友元形：自由函数读私有句柄
+    });
+}
+
 class Consumer {
 public:
     Consumer() noexcept = default;
