@@ -125,10 +125,15 @@ typedef struct mediaservo_client_config_t {
                                 *   NULL = estop 不签名（车端未配 key = 迁移放行形；
                                 *   车端已配 key = 车端拒签=正确裁决非静默）。路径坏不拦
                                 *   建会话——estop 调用点报 INVALID_ARG。G13: 密钥不走 argv/env。 */
+    /* 设备身份实例目录（viewer-auth-matrix T1；identity.json + etc/link/signing.pem
+     * 同 msrtc-host init 布局）。尾部 additive：老调用方（struct_size 较小）= 字段
+     * 缺席，库按 struct_size 判界不读此槽。NULL/空 = 不启用。与 jwt/psk 可叠
+     * （server 设备认证优先）；三者齐给 = INVALID_ARG。目录缺文件在 connect 报错。 */
+    const char* identity_dir;
 } mediaservo_client_config_t;
 
 #define MEDIASERVO_CLIENT_CONFIG_DEFAULT \
-    { sizeof(mediaservo_client_config_t), NULL, NULL, NULL, NULL, NULL, NULL }
+    { sizeof(mediaservo_client_config_t), NULL, NULL, NULL, NULL, NULL, NULL, NULL }
 
 /* ── opaque handle ── */
 typedef struct mediaservo_client_session_t mediaservo_client_session_t;

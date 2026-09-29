@@ -157,6 +157,9 @@ struct Config {
     std::string jwt;           // login() 输出（与 psk 二选一）
     std::string hmac_key_file; // 急停密钥文件（0600；空 = 不签名，语义见 client.h）
     std::string psk;           // PSK 直传（与 jwt 二选一）
+    /// 设备身份实例目录（viewer-auth-matrix T1；identity.json+signing.pem 同
+    /// msrtc-host init 布局）。空=不启用；与 jwt/psk 可叠（server 设备认证优先）。
+    std::string identity_dir;
     /// "Client"(默认)/"Viewer"/"Remote"；空串 = "Client"。
     std::string role;
 };
@@ -175,6 +178,7 @@ public:
         c.psk = cfg.psk.empty() ? nullptr : cfg.psk.c_str();
         c.role = cfg.role.empty() ? nullptr : cfg.role.c_str();
         c.hmac_key_file = cfg.hmac_key_file.empty() ? nullptr : cfg.hmac_key_file.c_str();
+        c.identity_dir = cfg.identity_dir.empty() ? nullptr : cfg.identity_dir.c_str();
 
         mediaservo_client_session_t* h = nullptr;
         int rc = mediaservo_client_session_create(&c, &h);

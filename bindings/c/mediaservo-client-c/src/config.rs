@@ -48,20 +48,43 @@ pub struct mediaservo_client_config_t {
     /// 文件须 0600 且非空；NULL/空 = estop 不签名（车端未配 key = 迁移放行形，
     /// 车端已配 key = 拒签正确裁决）。载荷 = 原始密钥字节（trim 尾换行）。
     pub hmac_key_file: *const std::os::raw::c_char,
+    /// 设备身份实例目录（viewer-auth-matrix T1，accountless T3 布局：identity.json +
+    /// etc/link/signing.pem）。**尾部 additive**：MIN_SIZE = 旧形状（本字段在覆盖区外），
+    /// 老调用方 struct_size 校验照过；读取必须按 `cfg.struct_size` 判界（见
+    /// [`identity_dir_of`]——老二进制传小结构 = 字段不存在，非解引用垃圾）。
+    /// NULL/空 = 不启用。与 jwt/psk 可叠（server 设备认证优先，D-E3）；防呆=三凭证
+    /// 齐给 INVALID_ARG。
+    pub identity_dir: *const std::os::raw::c_char,
 }
 
-pub const MEDIASERVO_CLIENT_CONFIG_MIN_SIZE: usize = size_of::<mediaservo_client_config_t>();
+/// 新调用方（含 identity_dir 字段）的完整尺寸。MIN_SIZE 保持旧形状值——
+/// check_struct_size(actual < MIN) 拒，[MIN, FULL) = 老形状（identity_dir 缺席）。
+pub const MEDIASERVO_CLIENT_CONFIG_FULL_SIZE: usize = size_of::<mediaservo_client_config_t>();
+pub const MEDIASERVO_CLIENT_CONFIG_MIN_SIZE: usize =
+    MEDIASERVO_CLIENT_CONFIG_FULL_SIZE - size_of::<*const std::os::raw::c_char>();
+
+/// additive 字段安全读取：调用方 struct_size ≥ FULL 才有该字段（返回 None = 缺席）。
+pub(crate) fn identity_dir_of(cfg: &mediaservo_client_config_t) -> Option<&str> {
+    if cfg.struct_size < MEDIASERVO_CLIENT_CONFIG_FULL_SIZE {
+        return None;
+    }
+    match crate::errors::cstr(cfg.identity_dir) {
+        Ok(Some(s)) if !s.is_empty() => Some(s),
+        _ => None,
+    }
+}
 
 impl Default for mediaservo_client_config_t {
     fn default() -> Self {
         Self {
-            struct_size: MEDIASERVO_CLIENT_CONFIG_MIN_SIZE,
+            struct_size: MEDIASERVO_CLIENT_CONFIG_FULL_SIZE,
             signaling_url: ptr::null(),
             room: ptr::null(),
             jwt: ptr::null(),
             psk: ptr::null(),
             role: ptr::null(),
             hmac_key_file: ptr::null(),
+            identity_dir: ptr::null(),
         }
     }
 }
@@ -75,6 +98,7 @@ pub(crate) struct SessionCfg<'a> {
     pub psk: Option<&'a str>,
     pub role: PeerRole,
     pub hmac_key_file: Option<&'a str>,
+    pub identity_dir: Option<&'a str>,
 }
 
 /// 会话配置校验（纯函数，单测钉）：url/room 必填；jwt/psk 恰一非空；role 可空。
@@ -102,6 +126,16 @@ pub(crate) fn validate_session_cfg(
     };
     let jwt = opt_nonempty(cfg.jwt);
     let psk = opt_nonempty(cfg.psk);
+    // additive 字段按 struct_size 判界读取（老调用方无此字段=None，非垃圾）。
+    let identity_dir = identity_dir_of(cfg);
+    // 防呆（T1 合同）：三凭证齐给 = INVALID_ARG。jwt/psk 仍恰一（不变）；
+    // identity_dir 与任一可叠（server 设备认证优先，D-E3）。
+    if identity_dir.is_some() && jwt.is_some() && psk.is_some() {
+        set_last_error(
+            "mediaservo_client_session_create: identity_dir with both jwt and psk (pick two at most)",
+        );
+        return Err(MEDIASERVO_CLIENT_ERR_INVALID_ARG);
+    }
     let clean = |s: &str| !s.starts_with('\u{0}');
     match (jwt, psk) {
         (Some(j), None) if clean(j) => {
@@ -113,6 +147,7 @@ pub(crate) fn validate_session_cfg(
                 psk: None,
                 role,
                 hmac_key_file: session_hmac_key_file(cfg),
+                identity_dir,
             })
         }
         (None, Some(p)) if clean(p) => {
@@ -124,6 +159,7 @@ pub(crate) fn validate_session_cfg(
                 psk: Some(p),
                 role,
                 hmac_key_file: session_hmac_key_file(cfg),
+                identity_dir,
             })
         }
         (Some(j), Some(p)) if clean(j) && clean(p) => {
@@ -191,6 +227,7 @@ mod tests {
                 psk,
                 role: ptr::null(),
                 hmac_key_file: ptr::null(),
+            identity_dir: ptr::null(),
             }
         };
         // 双凭证 → 拒
@@ -216,6 +253,7 @@ mod tests {
             psk: ptr::null(),
             role: c"Bogus".as_ptr(),
             hmac_key_file: ptr::null(),
+            identity_dir: ptr::null(),
         };
         assert_eq!(validate_session_cfg(&cfg).unwrap_err(), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
     }
@@ -245,7 +283,52 @@ mod tests {
             psk: ptr::null(),
             role: ptr::null(),
             hmac_key_file: c"/tmp/k".as_ptr(),
+            identity_dir: ptr::null(),
         };
         assert_eq!(validate_session_cfg(&cfg).unwrap().hmac_key_file, Some("/tmp/k"));
+    }
+
+    // ── viewer-auth-matrix T1: identity_dir additive 字段判别 ──
+    fn base_cfg() -> mediaservo_client_config_t {
+        mediaservo_client_config_t {
+            struct_size: MEDIASERVO_CLIENT_CONFIG_FULL_SIZE,
+            signaling_url: c"ws://h:9800/ws".as_ptr(),
+            room: c"r".as_ptr(),
+            jwt: c"j".as_ptr(),
+            psk: ptr::null(),
+            role: ptr::null(),
+            hmac_key_file: ptr::null(),
+            identity_dir: ptr::null(),
+        }
+    }
+
+    #[test]
+    fn identity_dir_absent_on_legacy_struct_size() {
+        // 老调用方（MIN_SIZE）传小结构：字段槽不存在 → None（非解引用垃圾）。
+        let mut cfg = base_cfg();
+        cfg.struct_size = MEDIASERVO_CLIENT_CONFIG_MIN_SIZE;
+        cfg.identity_dir = c"/evil".as_ptr(); // 槽外内存——必须被忽略
+        let parts = validate_session_cfg(&cfg).expect("legacy shape still valid");
+        assert_eq!(parts.identity_dir, None);
+    }
+
+    #[test]
+    fn identity_dir_passed_through_when_present() {
+        let mut cfg = base_cfg();
+        cfg.identity_dir = c"/tmp/inst".as_ptr();
+        let parts = validate_session_cfg(&cfg).expect("valid");
+        assert_eq!(parts.identity_dir, Some("/tmp/inst"));
+        // 空串 = 不启用
+        cfg.identity_dir = c"".as_ptr(); // 空串 = 不启用（identity_dir_of 过滤）
+        let parts = validate_session_cfg(&cfg).expect("valid");
+        assert_eq!(parts.identity_dir, None);
+    }
+
+    #[test]
+    fn identity_dir_with_both_credentials_rejected() {
+        let mut cfg = base_cfg();
+        cfg.identity_dir = c"/tmp/inst".as_ptr();
+        cfg.psk = c"p".as_ptr();
+        assert_eq!(validate_session_cfg(&cfg).unwrap_err(), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
     }
 }
