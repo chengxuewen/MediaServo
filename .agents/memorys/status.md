@@ -1050,3 +1050,6 @@ install                        → 改名提示 + exit 2（退役）
 ### 2026-09-29 续7: mediaservo.sh 加 build:deploy 组合动词（与主仓命令面对齐，用户裁断 A 案）
 - 子模块壳此前无 build:deploy（主仓 msrtc.sh 独有）——用户在子模块目录工作撞 invalid choice。加薄组合（build <t> && deploy <t> --prefix <out>/<t>；--prefix 显式覆盖/--release 透传；OUT_ROOT 缺省 $ROOT/out——子模块壳无主仓注入职责）。
 - 实测：build:deploy bindings 全链通（部署到子模块 out/bindings 四目录）；host --prefix /tmp 组合通（deploy 阶段 oxmgr PATH 警告=pixi-run 内环境局限，产物完整；生产走主仓壳 ③c oxmgr 注入）。
+
+### 2026-09-29 续9: bindings 构建产物迁 staging（PIT-210，源码树卫生清偿）
+- `_cmd_build_bindings` 引入 target/bindings-staging/：.node 与 python wheel 构建树（staging 镜像层，源映射=bindings/python/mediaservo 包根）全落 staging；装配读 staging+真源码（package.json/index.mjs）。旧源码树产物（.node/build/_libs/egg-info）已清。三面验收：git 零 diff / staging 有物 / out 交付完整。
