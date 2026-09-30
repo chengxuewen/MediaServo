@@ -78,7 +78,7 @@ export MSRTC_ESTOP_KEY_FILE=/path/to/control-hmac.key
 
 ## 舱端双房约定（读 API 前先读这段）
 
-媒体面与控制面**不同房间**（PIT-140 v2 + W4c 定性）：
+媒体面与控制面**不同房间**（PIT-140 v2 + W4c 定性；语义注记 2026-09-29：per-stream 房=底层隔离粒度非产品语义——UI/发现层应按整车房分组、流为子项，见 pitfalls PIT-140 注记）：
 
 | 面 | 房间 | 发现方式 |
 |---|---|---|

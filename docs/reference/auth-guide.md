@@ -105,6 +105,16 @@ MSRTC_AUTH_MODE=apikey MSRTC_KEY_ID=.. MSRTC_KEY_SECRET=.. MSRTC_ROOM=<video房>
 
 Rust：`list_rooms_psk(base, psk)`；C/C++：`list_rooms_psk(...)`；viewer：PSK 模式留空房名。
 
+## 4.5 房间模型语义（重要——避免误读）
+
+`GET /api/rooms` 返回的 `room_id` 分两类：**整车房**（`vehicle`，遥控面）与**流房**
+（`vehicle_generatorN`，每路流一条）。流房是 **SFU 底层隔离粒度**（每流独立
+produce/consume/权限），**不是"一台车一个房间"**——产品语义上它们归属同一台车。
+
+- 消费端 UI 应按 **base 房分组**（`vehicle_*` 前缀归组到 `vehicle`），流为子项
+- 底层 join/produce 仍按流房粒度（本语义不影响 API 调用方式）
+- wire 的归属关系表达（streams 内嵌/parent 字段）= additive 演进在册
+
 ## 5. 运维要点
 
 - **吊销**：API-Key 删除后**新** exchange 立即 401；已发 JWT 到期自然死（TTL 默认 12h，

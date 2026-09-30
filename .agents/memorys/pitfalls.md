@@ -1714,3 +1714,9 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: ① yaml 改 8 源 1:1（sources/streams 各 generator1..8，capturer 每 source 一只）→ 重签 8 令牌（ACL=camera/generatorN 与订阅目标一致）；② vk 提取绕过 openssl：PEM base64 解 DER 取**末 32 字节**即 Ed25519 vk（非标形下 openssl 不可用时的通用法）。
 - **验证**: streamer stats 663→724 帧/2s（~30fps）bytes 持续增长；发现接口 8 个 video 房全列。
 - **禁止**: "N 流共享 1 源"配置形态（与令牌 per-stream 签发规则冲突=地雷）；用 openssl 校验结果判定 dalek 生态 PEM 有效性（宽容度不同，非标 PEM 在 dalek 下静默可用）。
+
+## PIT-140 语义升级注记（2026-09-29，用户裁断）——"每流=一房"是底层实现非产品语义
+- **裁断**: per-stream 房间（`<vehicle>_<stream>`）是 **SFU 底层隔离粒度**（produce/consume/权限/容错的合理单位），**不是产品语义**——用户/发现/UI 层的正确表达 = **1 整车房 + N 路流子项**（vehicle 下挂 generator1..8）。
+- **事故**: psk-discover 与 viewer 把底层房形直接漏到 UI——8 路流显示为 8 个独立房间（含去重丢失 video 项的次生 bug，已修 rooms.rs 去重钉）；第三方集成方照 wire 平铺形消费会复刻同一误解。
+- **规则**: ①发现层（/api/rooms 及后续 wire 演进）必须表达**归属关系**（streams 内嵌或 parent 字段——wire additive 批在册）；②UI/树按 base 房分组、流为子项；③新写消费端不得把 room_id 平铺当房间列表语义；④底层（join/produce/ACL/令牌）per-stream 粒度**不动**。
+- **修复锚**: rooms.rs psk_discover 去重钉（同日）；wire streams 内嵌=开放项（O5）。
