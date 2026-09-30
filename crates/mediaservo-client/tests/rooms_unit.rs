@@ -54,8 +54,8 @@ async fn list_rooms_ok_returns_entries() {
     assert_eq!(
         rooms,
         vec![
-            RoomInfo { room_id: "vehicle_t1".into(), kind: "video".into() },
-            RoomInfo { room_id: "audio-c1".into(), kind: "audio".into() },
+            RoomInfo { room_id: "vehicle_t1".into(), kind: "video".into(), parent: None, streams: None },
+            RoomInfo { room_id: "audio-c1".into(), kind: "audio".into(), parent: None, streams: None },
         ]
     );
 }
@@ -67,11 +67,13 @@ async fn list_rooms_empty_list_is_ok() {
 }
 
 #[tokio::test]
-async fn list_rooms_401_maps_rest_rejected() {
+async fn list_rooms_401_maps_invalid_credentials() {
     let port = canned_get_server(response("401 Unauthorized", r#"{"error":"invalid token"}"#)).await;
-    // token 串走 mock 断言（Bearer jwt-abc），401 语义=server 判无效——客户端不辨原因。
+    // psk-discover 刀起的语义统一：list 面非 2xx 的 401 = InvalidCredentials 终态
+    // （与 exchange/login 同族——D273 红牌，不重试）。
     let e = list_rooms(&format!("http://127.0.0.1:{port}"), "jwt-abc").await.unwrap_err();
-    assert!(matches!(e, ClientError::RestRejected { code: 401, .. }), "got {e:?}");
+    assert!(matches!(e, ClientError::InvalidCredentials), "got {e:?}");
+    assert!(!e.is_retryable());
 }
 
 #[tokio::test]

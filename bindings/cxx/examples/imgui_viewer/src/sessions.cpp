@@ -160,10 +160,11 @@ void perform_login(AppModel& m, const Env& env) {
             return;
         }
         m.rooms.clear();
-        for (auto& [rid, kind] : parse_rooms(*lr)) {
+        for (auto& [rid, kind, parent] : parse_rooms_full(*lr)) {
             RoomRow r;
             r.room_id = rid;
             r.kind = kind;
+            r.parent = parent;
             r.video = kind == "video";
             m.rooms.push_back(std::move(r));
         }
@@ -205,10 +206,11 @@ void perform_login(AppModel& m, const Env& env) {
             return;
         }
         m.rooms.clear();
-        for (auto& [rid, kind] : parse_rooms(*lr)) {
+        for (auto& [rid, kind, parent] : parse_rooms_full(*lr)) {
             RoomRow r;
             r.room_id = rid;
             r.kind = kind;
+            r.parent = parent;
             r.video = kind == "video"; // W4d：kind 三面直判，名字猜测退役
             m.rooms.push_back(std::move(r));
         }

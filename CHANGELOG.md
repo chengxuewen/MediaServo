@@ -160,6 +160,12 @@
 - [server] /api/rooms 对 apikey 形令牌可见性修复：allowlist 原只查 accounts 注册表（换发令牌无账号行=设计使然）→ `apikey:` 前缀 sub 的授权直取 claims.vehicles（与 RoomJoin 门同源同权；人形账号路径逐字不变）。症状=viewer key 换发成功但房间列表恒空（活体 V1 实抓）。
 
 ### 新增
+- [server] 房间归属语义 wire 化（room-grouping-semantics）：`GET /api/rooms` 房目增
+  `parent`（流房反指整车）/`streams`（整车房内嵌在线流）双字段（additive）；**派生流房
+  不再以顶层条目平铺**（此前 8 路流显示为 8 个独立房间）。消费端 UI 按整车房分组、流为
+  子项（1 车 N 流）；底层 join/produce/令牌粒度不变。
+  ⚠ 升级注意：老 viewer 配新 server 树上看不到流房条目（已并入 streams）——客户端与
+  server 整批升级；新客户端配老 server 自动走 `_` 前缀兜底分组，无感。
 - [server][sdk-client] PSK 房间发现（psk-discover，跨房间拉流收口）：`GET /api/rooms` 新增
   `Authorization: Psk <secret>` 认证分支——Legacy 全量视角（与 PSK join 门能力对齐：
   本就全能，"能进不能看"系意外产物；constant-time 比对、错密钥/未配 PSK 均显式 401）。

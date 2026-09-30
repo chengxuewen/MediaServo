@@ -37,6 +37,7 @@ const char* env_or(const char* k, const char* dflt);
 
 struct RoomRow {
     std::string room_id, kind;
+    std::string parent; // T3：整车房归属（空=平铺单位/老 wire）
     bool video = false; // kind 提示（vehicle-* 含视频；audio-* 仅音频）
     bool checked = false; // 直存 bool（vector<bool> 代理引用不可 &）
 };
@@ -154,6 +155,9 @@ struct AppModel {
 
 /// list_rooms JSON 数组的逐项提取（键均字符串形，手工扫描零依赖）。
 std::vector<std::pair<std::string, std::string>> parse_rooms(const std::string& json);
+/// room-grouping-semantics T3：三元组形（room_id, kind, parent）——树按 parent 归组。
+std::vector<std::tuple<std::string, std::string, std::string>> parse_rooms_full(
+    const std::string& json);
 
 } // namespace viewer
 
