@@ -37,6 +37,13 @@ use crate::roles::{AccountIdentity, CockpitRole, SessionIdentity};
 pub struct RoomEntry {
     pub room_id: String,
     pub kind: &'static str,
+    /// room-grouping-semantics T1：归属整车房（流房反指；`Some` 仅派生流房/已注册
+    /// 流房——发现即全量）。`None` = 平铺单位（整车/普通/audio 房）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    /// 整车房内嵌在线流派生（`generator1..N` 流 id 列表；仅 control 房携带）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub streams: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,31 +116,62 @@ fn psk_discover(
     if diff != 0 {
         return Err(unauthorized_rooms("psk authentication failed"));
     }
-    // Legacy 全量视角：与账号路派生逻辑同形——先建派生集（base×在线流），
-    // 再遍历注册房：**已在派生集内的流房跳过 control 项**（否则 consumer join 过的
-    // 流房会以 control 重复出现——同名两遍，viewer 去重后丢 video 项，2026-09-29 实盘）。
-    let mut derived: Vec<(String, &'static str)> = Vec::new();
+    // Legacy 全量视角（room-grouping-semantics T1）：先建派生集（base×在线流）——
+    // 整车房 streams 内嵌；流房以**流房条目**（kind=video + parent 反指）出现，
+    // **不再产生顶层 control 拷贝**（去重+归属一体——PIT-140 语义注记的 wire 落地）。
+    let mut streams_of: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
     for r in state.signaling.room_manager.list_rooms() {
         if r.id.starts_with("audio-") || r.id.contains('_') {
             continue; // audio 前缀房与流房（含 `_`）不做派生源
         }
         for sid in online_stream_ids(&state.signaling.status_registry, &r.id) {
-            derived.push((format!("{}_{}", r.id, sid), "video"));
+            streams_of.entry(r.id.clone()).or_default().push(sid);
         }
     }
-    let derived_ids: std::collections::HashSet<String> =
-        derived.iter().map(|(id, _)| id.clone()).collect();
     let mut rooms: Vec<RoomEntry> = Vec::new();
+    let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
     for r in state.signaling.room_manager.list_rooms() {
         if r.id.starts_with("audio-") {
-            rooms.push(RoomEntry { room_id: r.id, kind: "audio" });
+            rooms.push(RoomEntry { room_id: r.id, kind: "audio", parent: None, streams: None });
             continue;
         }
-        if !derived_ids.contains(&r.id) {
-            rooms.push(RoomEntry { room_id: r.id.clone(), kind: "control" });
+        if let Some((base, sid)) = r.id.rsplit_once('_')
+            && let Some((parent, streams)) = streams_of.get_key_value(base)
+            && streams.iter().any(|s| s == sid)
+        {
+            // 真注册流房（consumer join 过）：kind=video + parent 反指——去重+归属。
+            rooms.push(RoomEntry {
+                room_id: r.id.clone(),
+                kind: "video",
+                parent: Some(parent.clone()),
+                streams: None,
+            });
+            emitted.insert(r.id);
+            continue;
+        }
+        let streams = streams_of.remove(&r.id);
+        rooms.push(RoomEntry {
+            room_id: r.id.clone(),
+            kind: "control",
+            parent: None,
+            streams: streams.clone(),
+        });
+        if let Some(ss) = &streams {
+            for sid in ss {
+                let id = format!("{}_{}", r.id, sid);
+                if !emitted.contains(&id) {
+                    // 未注册的派生流房：发现即全量（video + parent）
+                    rooms.push(RoomEntry {
+                        room_id: id,
+                        kind: "video",
+                        parent: Some(r.id.clone()),
+                        streams: None,
+                    });
+                }
+            }
         }
     }
-    rooms.extend(derived.into_iter().map(|(id, kind)| RoomEntry { room_id: id, kind }));
     Ok(Some(Json(RoomsResponse { rooms })))
 }
 
@@ -191,25 +229,25 @@ async fn list_rooms(
     }
     // W4d 派生集：base 房（非 audio、有 owner）× 其 StatusReport connected 流。
     // 已注册的流房（consumer join 过）并入同源判定，不重复、kind 一致。
-    let mut derived: Vec<(String, String)> = Vec::new(); // (stream_room, owner)
+    let mut derived: Vec<(String, String, String)> = Vec::new(); // (stream_room, owner, sid)
     for r in state.signaling.room_manager.list_rooms() {
         if r.id.starts_with("audio-") {
             continue;
         }
         let Some(owner) = state.signaling.room_owner_of(&r.id) else { continue };
         for sid in online_stream_ids(&state.signaling.status_registry, &r.id) {
-            derived.push((format!("{}_{}", r.id, sid), owner.clone()));
+            derived.push((format!("{}_{}", r.id, sid), owner.clone(), sid.clone()));
         }
     }
     let stream_rooms: std::collections::HashSet<String> = derived
         .iter()
-        .map(|(id, _)| id.clone())
+        .map(|(id, _, _)| id.clone())
         .chain(state.signaling.room_manager.list_rooms().into_iter().map(|r| r.id).filter(|id| {
             // 注册房命中派生命名 = 流房被 consumer join 过（同源再判一次）
             let Some((base, _)) = id.rsplit_once('_') else { return false };
             !id.starts_with("audio-")
                 && !online_stream_ids(&state.signaling.status_registry, base).is_empty()
-                && derived.iter().any(|(d, _)| d == id)
+                && derived.iter().any(|(d, _, _)| d == id)
         }))
         .collect();
     let mut rooms: Vec<RoomEntry> = state
@@ -219,21 +257,38 @@ async fn list_rooms(
         .into_iter()
         .filter_map(|r| {
             let owner = state.signaling.room_owner_of(&r.id);
+            // room-grouping-semantics T1：流房（在派生集）→ video + parent 反指；
+            // 整车房 → control + streams 内嵌（成员级 owner 过滤后的可见流）。
+            if let Some((base, sid)) = r.id.rsplit_once('_')
+                && !r.id.starts_with("audio-")
+                && let Some((_, owner_d, sid_d)) =
+                    derived.iter().find(|(id, _, s)| *id == r.id && s == sid)
+            {
+                let _ = (owner_d, sid_d);
+                return room_visible(&role, &vehicles, Some(owner_d)).then(|| RoomEntry {
+                    room_id: r.id.clone(),
+                    kind: "video",
+                    parent: Some(base.to_string()),
+                    streams: None,
+                });
+            }
+            let streams: Vec<String> = derived
+                .iter()
+                .filter(|(id, owner_d, _)| {
+                    id.rsplit_once('_').map(|(b, _)| *b == r.id).unwrap_or(false)
+                        && room_visible(&role, &vehicles, Some(owner_d))
+                })
+                .map(|(_, _, sid)| sid.clone())
+                .collect();
+            let streams = (!streams.is_empty()).then_some(streams);
             room_visible(&role, &vehicles, owner.as_deref()).then(|| {
                 let kind = room_kind(&r.id, stream_rooms.contains(&r.id));
-                RoomEntry { room_id: r.id, kind }
+                RoomEntry { room_id: r.id.clone(), kind, parent: None, streams }
             })
         })
         .collect();
-    // 派生流房（多数未注册——producer 不 RoomJoin）：owner 继承 base，同向过滤。
-    for (id, owner) in derived {
-        if rooms.iter().any(|e| e.room_id == id) {
-            continue;
-        }
-        if room_visible(&role, &vehicles, Some(&owner)) {
-            rooms.push(RoomEntry { kind: room_kind(&id, true), room_id: id });
-        }
-    }
+    // 派生流房（多数未注册——producer 不 RoomJoin）：owner 继承 base。
+    // T1：未注册流房**不再平铺**——已并入上方整车房的 streams 内嵌（可见性成员级过滤）。
     Ok(Json(RoomsResponse { rooms }))
 }
 
@@ -598,9 +653,20 @@ mod tests {
                 .find(|e| e["room_id"] == id)
                 .map(|e| e["kind"].as_str().unwrap().to_string())
         };
-        assert_eq!(kind_of("ms-car1_test").as_deref(), Some("video"), "{body} 流房派生");
-        assert_eq!(kind_of("ms-car1_cam0-stream").as_deref(), None, "{body} 离线流不派生");
+        // room-grouping-semantics T1：派生流房**不平铺**——经整车房 streams 内嵌表达；
+        // 离线流不进 streams。整车房=control + streams 内嵌可见流。
+        let streams_of = |id: &str| {
+            v["rooms"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["room_id"] == id)
+                .map(|e| e["streams"].as_array().map(|a| a.len()).unwrap_or(0))
+        };
+        assert_eq!(kind_of("ms-car1_test"), None, "{body} 派生流房不平铺");
+        assert_eq!(kind_of("ms-car1_cam0-stream"), None, "{body} 离线流不出现");
         assert_eq!(kind_of("ms-car1").as_deref(), Some("control"), "{body} 整车房=控制面");
+        assert_eq!(streams_of("ms-car1"), Some(1), "{body} streams 内嵌在线流（test 在线/cam0 离线）");
         assert_eq!(kind_of("audio-ms-car1").as_deref(), Some("audio"), "{body}");
         // G16 正向不变量（流房面）：列表可见 ⇒ join 放行——流房 owner 未登记
         // （producer 不 RoomJoin）→ join_vehicle_room(None) 豁免族放行，成立。
@@ -617,7 +683,10 @@ mod tests {
             .unwrap();
         let vt = crate::admin::tests::token_of_role(&state, "v2", Some("viewer"));
         let (_, body) = get_rooms(&state, Some(&vt)).await;
-        assert!(body.contains("ms-car1_test"), "{body}");
+        assert!(
+            body.contains(r#""streams":["test"]"#) || body.contains(r#""streams": ["test"]"#),
+            "{body} viewer 白名单内车的流经整车房 streams 内嵌"
+        );
         // 不在 allowlist → 流房不可见
         state
             .accounts
@@ -660,7 +729,7 @@ mod tests {
     #[test]
     fn wire_shape_exactly_two_fields() {
         let json =
-            serde_json::to_value(RoomEntry { room_id: "vehicle_test1".into(), kind: "video" })
+            serde_json::to_value(RoomEntry { room_id: "vehicle_test1".into(), kind: "video", parent: None, streams: None })
                 .unwrap();
         assert_eq!(json, serde_json::json!({ "room_id": "vehicle_test1", "kind": "video" }));
         assert_eq!(room_kind("audio-v1", false), "audio");

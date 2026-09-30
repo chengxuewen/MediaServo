@@ -1039,3 +1039,6 @@ install                        → 改名提示 + exit 2（退役）
 - server lifecycle/conflict.rs（/proc/net tcp+udp inode 反查→/proc/pid fd→exe/cmd/ppid；deleted=升级残留铁证）+ host src/conflict.rs 镜像；接线两处（server mod.rs contention 行/host.rs:291 分支）+ stop 自证（≤5s 轮询家族归零，"自证清场 ✓/⚠ 未能验证"双态）。
 - 实盘验收：裸环境 start 撞 (deleted) 活簇 → 报告完整（pid/升级残留/父=init/建议 kill）；按报告清残留后整簇三件 running 全 200。单测×3（空占用/自占 TCP+UDP/人话行格式）。
 - 门：check/test-server-native 全绿（13 套件）。
+
+### 2026-09-29 续3: room-grouping-semantics wire 落地（1 房 N 流，O5 销账）
+- server 双路（账号/PSK）parent+streams 双字段（additive）；派生流房不平铺（整批升级⚠在 CHANGELOG）；真注册流房=video+parent 去重形态。SDK Rust RoomInfo additive（C/cxx JSON 透传零改动）；viewer group_of parent 优先+_兜底、parse_rooms_full 三元组。门：rooms 12/12 · client 全绿 · ctest 0 · 活体 PSK discover rooms=9 零重复 · 老 wire 兜底单测覆盖。O5 销账。

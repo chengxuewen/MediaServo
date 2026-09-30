@@ -50,6 +50,12 @@ pub struct RoomInfo {
     pub room_id: String,
     /// "video" | "audio"（server 按房间名前缀派生，未知前缀透传——客户端不判型）。
     pub kind: String,
+    /// 归属整车房（流房反指；room-grouping-semantics T2 additive，老 server 缺省 None）。
+    #[serde(default)]
+    pub parent: Option<String>,
+    /// 整车房内嵌在线流（仅 control 房携带；老 server 缺省 None）。
+    #[serde(default)]
+    pub streams: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -392,8 +398,8 @@ mod tests {
         assert_eq!(
             w.rooms,
             vec![
-                RoomInfo { room_id: "vehicle_t1".into(), kind: "video".into() },
-                RoomInfo { room_id: "audio-c1".into(), kind: "audio".into() },
+                RoomInfo { room_id: "vehicle_t1".into(), kind: "video".into(), parent: None, streams: None },
+                RoomInfo { room_id: "audio-c1".into(), kind: "audio".into(), parent: None, streams: None },
             ]
         );
     }

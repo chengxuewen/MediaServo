@@ -15,8 +15,10 @@ namespace viewer {
 
 namespace {
 
-/// 流房 `<base>_<stream>` → base；其它形态（control 整车房 / audio-*）自身即分组头。
+/// 分组键（room-grouping-semantics T3）：wire parent 优先（新 server 归属直给）；
+/// 老 wire 兜底 `_` 前缀猜测；control 整车房/audio 自身即分组头。
 std::string group_of(const RoomRow& r) {
+    if (!r.parent.empty()) return r.parent;
     if (r.kind == "video") {
         const auto sep = r.room_id.rfind('_');
         if (sep != std::string::npos) return r.room_id.substr(0, sep);
