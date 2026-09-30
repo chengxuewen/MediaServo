@@ -1196,10 +1196,12 @@ def _platform_tag() -> str:
 def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
     """从 out/bindings 部署完整 SDK 布局（D241 三件套 version-full + include C/cxx + .pc + cmake
     + python/wheel + node——build 已组装，deploy 纯拷贝）。SDK 品牌无关（libmediaservo_* 原样，D3）。
-    D4: --prefix 必填（无默认——防止污染 out/ 无状态交付；SDK 用 /opt/mediaservo-sdk）。"""
+    prefix 缺省 = `<out>/bindings`（room-grouping 同源：out 根随调用壳解析——msrtc.sh 注入
+    MSRTC_OUT_ROOT=主仓 out；mediaservo.sh/裸 CLI fallback 子模块 out。同树 deploy=幂等守卫）。
+    D4 收窄（2026-09-29）：bindings 纯静态无状态 → 可默认；host/server 仍必填（运行数据防误写）。"""
     if not prefix:
-        print("错误: deploy 必须 --prefix（无默认——防止污染 out/ 无状态交付；SDK 用 /opt/mediaservo-sdk）", file=sys.stderr)
-        sys.exit(2)
+        prefix = str(_out_root() / "bindings")
+        print(f"[deploy bindings] prefix 缺省 → {prefix}（out 根随调用壳；--prefix 可覆盖）")
     src = _out_root() / "bindings"
     if not (src / "lib").is_dir():
         print(f"错误: {src} 无组装产物 — 先 build bindings", file=sys.stderr)
@@ -2590,9 +2592,9 @@ def main() -> None:
     test_p.add_argument("name", nargs="?", help="example: 例子名过滤（ctest -R）")
     sub.add_parser("ci", help="CI 全链: fmt → clippy → test → e2e sfu")
 
-    deploy_p = sub.add_parser("deploy", help="部署 <target>（有状态落地——deploy 不触发构建, 源=out/ 交付树）：host|server|bindings；--prefix 必填（/opt 需 root）")
+    deploy_p = sub.add_parser("deploy", help="部署 <target>（有状态落地——deploy 不触发构建, 源=out/ 交付树）：host|server|bindings；host/server --prefix 必填（/opt 需 root）；bindings 缺省=<out>/bindings")
     deploy_p.add_argument("target", choices=["bindings", "host", "server"])
-    deploy_p.add_argument("--prefix", default=None, help="部署前缀（必填——host: /opt/mediaservo-host | server: /opt/mediaservo-server | bindings: /opt/mediaservo-sdk）")
+    deploy_p.add_argument("--prefix", default=None, help="部署前缀（host/server 必填：/opt/mediaservo-{host,server}；bindings 缺省=<out>/bindings，out 根随调用壳）")
     deploy_p.add_argument("--release", action="store_true", help="部署 release 组装产物")
     deploy_p.set_defaults(func=_cmd_deploy)
     # D1: install 隐藏 prompt（不 alias——语义不同: 源=out/ 交付布局 + --prefix 必填）

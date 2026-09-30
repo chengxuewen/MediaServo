@@ -1042,3 +1042,7 @@ install                        → 改名提示 + exit 2（退役）
 
 ### 2026-09-29 续3: room-grouping-semantics wire 落地（1 房 N 流，O5 销账）
 - server 双路（账号/PSK）parent+streams 双字段（additive）；派生流房不平铺（整批升级⚠在 CHANGELOG）；真注册流房=video+parent 去重形态。SDK Rust RoomInfo additive（C/cxx JSON 透传零改动）；viewer group_of parent 优先+_兜底、parse_rooms_full 三元组。门：rooms 12/12 · client 全绿 · ctest 0 · 活体 PSK discover rooms=9 零重复 · 老 wire 兜底单测覆盖。O5 销账。
+
+### 2026-09-29 续5: deploy bindings 默认 prefix=<out>/bindings（用户裁断，D4 收窄）
+- bindings 纯静态无状态 → prefix 缺省走 _out_root()/bindings（out 根随调用壳：msrtc.sh 注入主仓 out / mediaservo.sh+裸 CLI fallback 子模块 out——不写死路径）；host/server 必填不动（运行数据防误写，D266 原则保留）。help 双行同步。
+- 三态实测：mediaservo.sh deploy bindings（缺省→子模块 out/bindings，装前校验陈货缺位报错正确）· msrtc.sh build:deploy bindings（主仓壳本就注入 --prefix out/<target>，同树幂等守卫回归）· --prefix /tmp 显式覆盖优先。
