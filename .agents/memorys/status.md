@@ -1046,3 +1046,7 @@ install                        → 改名提示 + exit 2（退役）
 ### 2026-09-29 续5: deploy bindings 默认 prefix=<out>/bindings（用户裁断，D4 收窄）
 - bindings 纯静态无状态 → prefix 缺省走 _out_root()/bindings（out 根随调用壳：msrtc.sh 注入主仓 out / mediaservo.sh+裸 CLI fallback 子模块 out——不写死路径）；host/server 必填不动（运行数据防误写，D266 原则保留）。help 双行同步。
 - 三态实测：mediaservo.sh deploy bindings（缺省→子模块 out/bindings，装前校验陈货缺位报错正确）· msrtc.sh build:deploy bindings（主仓壳本就注入 --prefix out/<target>，同树幂等守卫回归）· --prefix /tmp 显式覆盖优先。
+
+### 2026-09-29 续7: mediaservo.sh 加 build:deploy 组合动词（与主仓命令面对齐，用户裁断 A 案）
+- 子模块壳此前无 build:deploy（主仓 msrtc.sh 独有）——用户在子模块目录工作撞 invalid choice。加薄组合（build <t> && deploy <t> --prefix <out>/<t>；--prefix 显式覆盖/--release 透传；OUT_ROOT 缺省 $ROOT/out——子模块壳无主仓注入职责）。
+- 实测：build:deploy bindings 全链通（部署到子模块 out/bindings 四目录）；host --prefix /tmp 组合通（deploy 阶段 oxmgr PATH 警告=pixi-run 内环境局限，产物完整；生产走主仓壳 ③c oxmgr 注入）。
