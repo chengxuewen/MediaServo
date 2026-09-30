@@ -381,8 +381,15 @@ def _symlink_force(target: str, link: Path) -> None:
 
 
 def _cmd_build_bindings(release: bool = False) -> None:
-    """构建三 SDK cdylib + dev .so.<MAJOR> symlink（D241: DT_NEEDED 解析）。"""
+    """构建三 SDK cdylib + dev .so.<MAJOR> symlink（D241: DT_NEEDED 解析）。
+
+    staging 纪律（2026-09-29）：bindings/node、bindings/python 的**构建产物**
+    （.node/.whl 中间物/_libs）一律落 target/bindings-staging/（gitignore 区），
+    源码树回归纯源码——此前就地写源码目录（观感差+git 噪音+误提交风险）。
+    """
     _check("cargo", "pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat")
+    staging = ROOT / "target" / "bindings-staging"
+    staging.mkdir(parents=True, exist_ok=True)
     cmd = ["cargo", "build"]
     if release:
         cmd.append("--release")
@@ -399,8 +406,9 @@ def _cmd_build_bindings(release: bool = False) -> None:
     # node 绑定（napi-rs .node；FFmpeg 动态库链接经 build.rs 补齐）
     _run_or_exit(["cargo", "build"] + (["--release"] if release else []) + ["-p", "mediaservo-node"])
     node_so = out_dir / "libmediaservo_node.so"
+    node_node = staging / "mediaservo.node"
     if node_so.exists():
-        shutil.copy2(node_so, ROOT / "bindings/node/mediaservo.node")
+        shutil.copy2(node_so, node_node)
     # 组装交付布局 out/bindings（完整 SDK 包镜像——Momus HIGH3/Task 2.5 补齐）:
     # D241 三件套 version-full（.so.<M.m.p> 实体 + .so.<major> + .so 链接）+ D248 头（C/cxx）
     # + pkgconfig .pc + cmake config + python fat wheel/site-packages + node 包
@@ -453,7 +461,15 @@ def _cmd_build_bindings(release: bool = False) -> None:
         (cmake_dst / name).write_text(content)
 
     # python: fat wheel（_libs 内 .so.<major> 实体——DT_NEEDED 自解析）+ pip --prefix 组装 site-packages
-    py_src = ROOT / "bindings" / "python" / "mediaservo"
+    # python wheel 构建树 = staging 镜像（拷源码文件 + _libs 全在 staging；
+    # 源码树 bindings/python 零写入——build/ 缓存与 _libs 均不再进源码目录）
+    # 源映射：bindings/python/mediaservo/ = pip 构建根（pyproject 同层）——
+    # staging 镜像整层（剥产物/缓存），py_src 即构建根。
+    py_src = staging / "python-pkg"
+    shutil.rmtree(py_src, ignore_errors=True)
+    shutil.copytree(ROOT / "bindings" / "python" / "mediaservo", py_src,
+                    ignore=shutil.ignore_patterns("build", "__pycache__", "_libs",
+                                                  "*.egg-info", "dist", "examples"))
     py_pkg = py_src / "mediaservo"
     libs_src = py_pkg / "_libs"
     libs_src.mkdir(exist_ok=True)
@@ -468,12 +484,11 @@ def _cmd_build_bindings(release: bool = False) -> None:
         # next() 可咬旧文件 = rename 链自蚀源 pip ENOENT）。
         for _stale in wheel_dir.glob("*.whl"):
             _stale.unlink()
-        # setuptools build/ 缓存同族清扫（09-17 V1b 抓出：_libs 域变更后旧 client.so
-        # 残留 build/lib.*/mediaservo/_libs → 被 wheel 原样带出——pip wheel 不判变更）。
+        # setuptools build/ 缓存同族清扫（09-17 V1b；build/ 现在也在 staging——源码树零污染）
         shutil.rmtree(py_src / "build", ignore_errors=True)
         r = subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-deps",
-                            "--no-build-isolation", "-w", str(wheel_dir), str(py_src)],
-                           capture_output=True, text=True)
+                            "--no-build-isolation", "-w", str(wheel_dir), "."],
+                           cwd=str(py_src), capture_output=True, text=True)
         if r.returncode != 0:
             print(f"错误: wheel 构建失败 — {r.stderr[-500:]}", file=sys.stderr)
             sys.exit(1)
@@ -509,11 +524,11 @@ def _cmd_build_bindings(release: bool = False) -> None:
 
     # node 包: node/mediaservo/（package.json + .node + lib/index.mjs）——D248 布局
     node_src = ROOT / "bindings" / "node"
-    if (node_src / "mediaservo.node").exists():
+    if node_node.exists():
         node_dst = bind_dst / "node" / "mediaservo"
         node_dst.mkdir(parents=True, exist_ok=True)
-        for f in ("package.json", "mediaservo.node"):
-            shutil.copy2(node_src / f, node_dst)
+        shutil.copy2(node_node, node_dst / "mediaservo.node")           # 产物=staging
+        shutil.copy2(node_src / "package.json", node_dst)               # 源码=源码树
         (node_dst / "lib").mkdir(parents=True, exist_ok=True)
         shutil.copy2(node_src / "lib" / "index.mjs", node_dst / "lib")
     # docs: SDK 消费侧帮助（sdk-cxx 手册——out/bindings 树/发布包消费者直接可读，

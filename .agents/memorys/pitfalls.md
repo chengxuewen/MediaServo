@@ -1720,3 +1720,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **事故**: psk-discover 与 viewer 把底层房形直接漏到 UI——8 路流显示为 8 个独立房间（含去重丢失 video 项的次生 bug，已修 rooms.rs 去重钉）；第三方集成方照 wire 平铺形消费会复刻同一误解。
 - **规则**: ①发现层（/api/rooms 及后续 wire 演进）必须表达**归属关系**（streams 内嵌或 parent 字段——wire additive 批在册）；②UI/树按 base 房分组、流为子项；③新写消费端不得把 room_id 平铺当房间列表语义；④底层（join/produce/ACL/令牌）per-stream 粒度**不动**。
 - **修复锚**: rooms.rs psk_discover 去重钉（同日）；wire streams 内嵌=开放项（O5）。
+
+## PIT-210: bindings 构建产物就地写源码树（2026-09-29，观感+卫生债清偿）
+- **症状**: `build bindings` 过程中 `bindings/node/mediaservo.node`、`bindings/python/mediaservo/{build,_libs,*.egg-info}` 在 **git 源码树**里生成/变新（node 树 180MB 大半是构建物）——`git status` 噪音、误提交风险、跨机 clone 体感差；且与 server/host 的 `target/→out/` 两段形态不一致。
+- **根因**: napi/pip 构建流程就地用源码目录当工作区（C28 时代落的，早于 out/ 交付根成形）；`.gitignore` 只盖部分路径。
+- **解法**: build bindings 引入 `target/bindings-staging/`（gitignore 区）：.node 拷 staging；python wheel 构建=staging 镜像层（copytree 剥产物/缓存→_libs 与 pip build 全在 staging，pip wheel cwd=staging 根）。装配读 staging+源码（package.json/index.mjs 等真源码仍读源码树）。
+- **验证**: 构建后 `git status bindings/` 零 diff、`bindings/node/mediaservo.node` 不存在、无 build/_libs/egg-info；staging 有物；out/bindings 交付完整（.node/whl/site-packages/docs 四面）。
+- **禁止**: 新绑定构建流程往 `bindings/` 源码树写任何产物；用 `.gitignore` 盖产物路径当"卫生方案"（掩盖不解决）。
