@@ -10,6 +10,8 @@
 //! - 响应 serde 钉死 `{room_id, kind}` 二字段（admin/rooms 富字段不下放，F-S-6/9）。
 //!   W4d 增补（09-17）：**per-stream 流房派生**——媒体面 producer 活在
 //!   `<整车房>_<stream_id>`（PIT-140 v2）且不经 RoomJoin 注册，只看注册列表的 SDK
+//!   语义注记(2026-09-29): per-stream 房=底层隔离粒度，非产品语义——发现层表达
+//!   归属(整车主条+流派生，去重钉在 psk_discover)；UI 按 base 分组。详见 pitfalls PIT-140 注记。
 //!   消费者发现不到可播房（浏览器按流勾选天然免疫，web 未暴露）。派生源 =
 //!   StatusReport streams[].connected；owner 继承 base 房（可见性判定同向）。
 //!   kind 三面 = audio（C29 前缀）/ video（流房）/ control（整车房——无视频 producer）。
@@ -107,18 +109,31 @@ fn psk_discover(
     if diff != 0 {
         return Err(unauthorized_rooms("psk authentication failed"));
     }
-    // Legacy 全量视角：所有房 + 派生流房 kind（与账号路派生逻辑同形）。
+    // Legacy 全量视角：与账号路派生逻辑同形——先建派生集（base×在线流），
+    // 再遍历注册房：**已在派生集内的流房跳过 control 项**（否则 consumer join 过的
+    // 流房会以 control 重复出现——同名两遍，viewer 去重后丢 video 项，2026-09-29 实盘）。
+    let mut derived: Vec<(String, &'static str)> = Vec::new();
+    for r in state.signaling.room_manager.list_rooms() {
+        if r.id.starts_with("audio-") || r.id.contains('_') {
+            continue; // audio 前缀房与流房（含 `_`）不做派生源
+        }
+        for sid in online_stream_ids(&state.signaling.status_registry, &r.id) {
+            derived.push((format!("{}_{}", r.id, sid), "video"));
+        }
+    }
+    let derived_ids: std::collections::HashSet<String> =
+        derived.iter().map(|(id, _)| id.clone()).collect();
     let mut rooms: Vec<RoomEntry> = Vec::new();
     for r in state.signaling.room_manager.list_rooms() {
         if r.id.starts_with("audio-") {
             rooms.push(RoomEntry { room_id: r.id, kind: "audio" });
             continue;
         }
-        rooms.push(RoomEntry { room_id: r.id.clone(), kind: "control" });
-        for sid in online_stream_ids(&state.signaling.status_registry, &r.id) {
-            rooms.push(RoomEntry { room_id: format!("{}_{}", r.id, sid), kind: "video" });
+        if !derived_ids.contains(&r.id) {
+            rooms.push(RoomEntry { room_id: r.id.clone(), kind: "control" });
         }
     }
+    rooms.extend(derived.into_iter().map(|(id, kind)| RoomEntry { room_id: id, kind }));
     Ok(Some(Json(RoomsResponse { rooms })))
 }
 
@@ -318,6 +333,47 @@ mod tests {
         let status = resp.status();
         let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
         (status, String::from_utf8_lossy(&bytes).to_string())
+    }
+
+    #[tokio::test]
+    async fn psk_discover_no_duplicate_for_joined_stream_rooms() {
+        // 2026-09-29 实盘钉：consumer join 过的流房（真注册房）不得以 control 与
+        // 派生 video 重复出现（同名两遍→viewer 去重丢 video 项）。
+        let state = crate::admin::tests::make_state().await;
+        *state.psk_state.write().unwrap() = Some("psk".into());
+        state
+            .signaling
+            .room_manager
+            .join_room("vehicle", "c-1", &mediaservo_common::protocol::PeerRole::Host)
+            .unwrap();
+        state.signaling.set_room_owner_for_test("vehicle", "ms-car1");
+        // 流房被 consumer join 过 = 真注册房
+        state
+            .signaling
+            .room_manager
+            .join_room("vehicle_gen1", "c-2", &mediaservo_common::protocol::PeerRole::Consumer)
+            .unwrap();
+        state.signaling.set_room_owner_for_test("vehicle_gen1", "ms-car1");
+        let app = rooms_router(state.clone());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/rooms")
+                    .header("Authorization", "Psk psk")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let ids: Vec<&str> =
+            v["rooms"].as_array().unwrap().iter().map(|r| r["room_id"].as_str().unwrap()).collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(ids.len(), sorted.len(), "同名房不得重复: {ids:?}");
+        assert!(ids.contains(&"vehicle_gen1"), "{ids:?}");
     }
 
     #[tokio::test]
