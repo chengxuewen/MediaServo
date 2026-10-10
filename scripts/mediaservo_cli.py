@@ -557,6 +557,25 @@ HOST_BINS = (
 )
 
 
+def _resolve_oxmgr_or_die(role: str) -> Path:
+    """oxmgr 硬依赖探源（config-unification 前置修复，D-H13 补强）：PATH → ~/.cache/oxmgr
+    回收 → 都缺则 deploy 失败。旧语义"非致命提示"是部署陷阱——bin/ 缺 oxmgr 后
+    start/stop 全废（'No such file or directory'），错误离根因隔一个 deploy 周期。"""
+    found = shutil.which("oxmgr")
+    if found:
+        return Path(found)
+    # 本机缓存回收（同版本优先；OxMgr 官方下载器布局 oxmgr-v<ver>-<target>/oxmgr）
+    cache = sorted(Path.home().glob(".cache/oxmgr/oxmgr-v*/oxmgr"), reverse=True)
+    if cache:
+        print(f"  oxmgr: PATH 未找到，回收本机缓存 {cache[0]}")
+        return cache[0]
+    print(f"错误: PATH 与 ~/.cache/oxmgr 均未找到 oxmgr — deploy {role} 必须打包进程管理器"
+          "（运行时 start/stop 硬依赖）。安装: 下载 GitHub Releases 预编译 Rust 二进制"
+          "（含 sha256/asc 校验，https://github.com/Vladimir-Urik/OxMgr/releases），"
+          "或构建 oxmgr-src 后放 ~/.local/bin，再重跑 deploy", file=sys.stderr)
+    sys.exit(2)
+
+
 def _exe_name(name: str) -> str:
     """Windows best-effort: 二进制名带 .exe（其余平台原名）。"""
     return name + (".exe" if sys.platform == "win32" else "")
@@ -894,15 +913,11 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
             print(f"  清理部署残留: {p.name}")
             p.unlink()
 
-    # oxmgr 随部署锁定版本（D-H13）: PATH 找到则复制打包；缺 → 清晰指引（非致命,
-    # 运行时 PATH 缺 oxmgr 由 `host doctor` 检出）
-    oxmgr_src = shutil.which("oxmgr")
-    if oxmgr_src is not None:
-        _copy_with_kill(oxmgr_src, bin_dir / _exe_name("oxmgr"))
-        ver = subprocess.run([oxmgr_src, "--version"], capture_output=True, text=True, check=False)
-        print(f"  oxmgr 已打包: {ver.stdout.strip() or ver.stderr.strip() or '?'}")
-    else:
-        print("错误: PATH 未找到 oxmgr — 未打包（运行时需它拉起进程）。安装: 下载 GitHub Releases 预编译 Rust 二进制（含 sha256/asc 校验，https://github.com/Vladimir-Urik/OxMgr/releases），或构建 oxmgr-src 后放 ~/.local/bin，再重跑 deploy host", file=sys.stderr)
+    # oxmgr 随部署锁定版本（D-H13）: PATH → 缓存回收 → 硬依赖缺失即失败
+    oxmgr_src = _resolve_oxmgr_or_die("host")
+    _copy_with_kill(oxmgr_src, bin_dir / _exe_name("oxmgr"))
+    ver = subprocess.run([str(oxmgr_src), "--version"], capture_output=True, text=True, check=False)
+    print(f"  oxmgr 已打包: {ver.stdout.strip() or ver.stderr.strip() or '?'}")
 
     # host init: 生成 etc/ + identity.json + 令牌——幂等只写不删（已存在跳过, 重装保留凭据）
     # brand: env 注入（init 是独立进程——device 前缀需与布局品牌一致）
@@ -1067,15 +1082,12 @@ def _cmd_deploy_server(prefix: str) -> None:
         sys.exit(2)
     print(f"  二进制就绪: {ver_line}")
 
-    # oxmgr 随部署锁定版本（D-H13，同 host 待遇）
-    oxmgr_src = shutil.which("oxmgr")
-    if oxmgr_src is not None:
-        _copy_with_kill(oxmgr_src, bin_dir / _exe_name("oxmgr"))
-        os.chmod(bin_dir / _exe_name("oxmgr"), 0o755)
-        ov = subprocess.run([oxmgr_src, "--version"], capture_output=True, text=True, check=False)
-        print(f"  oxmgr 已打包: {ov.stdout.strip() or ov.stderr.strip() or '?'}")
-    else:
-        print("错误: PATH 未找到 oxmgr — 未打包（运行时需它拉起进程簇）。安装: 下载 GitHub Releases 预编译 Rust 二进制（含 sha256/asc 校验，https://github.com/Vladimir-Urik/OxMgr/releases），或构建 oxmgr-src 后放 ~/.local/bin，再重跑 deploy server", file=sys.stderr)
+    # oxmgr 随部署锁定版本（D-H13，同 host 待遇）: PATH → 缓存回收 → 硬依赖缺失即失败
+    oxmgr_src = _resolve_oxmgr_or_die("server")
+    _copy_with_kill(oxmgr_src, bin_dir / _exe_name("oxmgr"))
+    os.chmod(bin_dir / _exe_name("oxmgr"), 0o755)
+    ov = subprocess.run([str(oxmgr_src), "--version"], capture_output=True, text=True, check=False)
+    print(f"  oxmgr 已打包: {ov.stdout.strip() or ov.stderr.strip() or '?'}")
 
     # weaknet 双探源拷贝（design §D1 [bF1 bF6]；bin 在场判定只落数据面——oxfile 条件渲染判据
     # 归 Rust init（T4），M-1 钉死：Python 无渲染杠杆）。prefix 源 out/server/bin 优先（上游名→
