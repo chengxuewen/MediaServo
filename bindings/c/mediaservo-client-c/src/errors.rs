@@ -185,7 +185,11 @@ pub(crate) fn error_code(e: &ClientError) -> c_int {
         | ClientError::AuthRejected { .. }
         | ClientError::RestRejected { .. } => MEDIASERVO_CLIENT_ERR_UNAUTHORIZED,
         ClientError::ControlDenied(_) => MEDIASERVO_CLIENT_ERR_DENIED,
-        ClientError::Timeout { .. } => MEDIASERVO_CLIENT_ERR_TIMEOUT,
+        // StreamNotFound 归 TIMEOUT 码域（§0 裁决：不加 ABI 码——message 已含
+        // "stream not found: <label>"，C 侧语义由 message 承载）
+        ClientError::Timeout { .. } | ClientError::StreamNotFound { .. } => {
+            MEDIASERVO_CLIENT_ERR_TIMEOUT
+        }
         ClientError::Signal(_) => MEDIASERVO_CLIENT_ERR_SIGNAL,
         ClientError::ProtocolUnsupported(_) | ClientError::ProtocolTooLow { .. } => {
             MEDIASERVO_CLIENT_ERR_PROTOCOL

@@ -25,6 +25,36 @@ use crate::{
 /// 帧泵空转复查窗（closed / 通道消亡的轮询粒度；兼作 close/stats 最坏锁延迟）。
 const CONSUMER_POLL: Duration = Duration::from_millis(250);
 
+/// QOE 快照 C 布局（client.h `mediaservo_client_qoe_snapshot_t` 镜像；
+/// 字段序冻结——ABI 只增纪律，新字段尾部追加）。
+#[repr(C)]
+#[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
+pub struct mediaservo_client_qoe_snapshot_t {
+    pub struct_size: u32,
+    pub fps: u32,
+    pub kbps: u32,
+    pub lost_percent: f32,
+    pub decoded_total: u64,
+    pub avg_decode_ms: u32,
+    pub jitter_ms: u32,
+    pub rtt_ms: u32,
+    pub width: u32,
+    pub height: u32,
+    pub epoch: u32,
+}
+
+/// QOE 回调 C 函数指针。
+pub type mediaservo_client_qoe_cb =
+    extern "C" fn(*const mediaservo_client_qoe_snapshot_t, *mut c_void);
+
+/// `*mut c_void` 的 Send/Sync 包装——C 回调契约：**调用方保证 user 上下文的
+/// 线程安全**（client.h QOE 节注释；SDK 节拍线程触发 cb）。
+#[derive(Clone, Copy)]
+struct CbUser(*mut c_void);
+// SAFETY: C ABI 契约——user 上下文线程安全由调用方保证（client.h 明示）。
+unsafe impl Send for CbUser {}
+unsafe impl Sync for CbUser {}
+
 /// 单路视频消费者 opaque handle。
 #[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
 pub struct mediaservo_client_consumer_t {
@@ -38,6 +68,9 @@ pub struct mediaservo_client_consumer_t {
     user: *mut c_void,
     free: Option<mediaservo_client_user_free>,
     pump: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// QOE 节拍 task 句柄——close 时 abort 释放 trampoline 闭包
+    /// （lsan.1096280 实证：进程退出 tokio runtime 不 shutdown → Box 残留 64B/次注册）。
+    qoe_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     err: ErrSlot,
 }
 
@@ -71,6 +104,7 @@ pub(crate) fn spawn(
         user,
         free,
         pump: Mutex::new(None),
+        qoe_task: Mutex::new(None),
         err: Mutex::new(None),
     });
     let raw = Box::into_raw(handle);
@@ -195,6 +229,68 @@ pub extern "C" fn mediaservo_client_consumer_stats(
     })
 }
 
+/// QOE 周期回调（consumer-qoe-callback）：Rust on_qoe → C trampoline。
+/// cb 在 SDK 节拍 task 触发（tokio worker），C 侧须自行保证线程安全。
+#[unsafe(no_mangle)]
+pub extern "C" fn mediaservo_client_consumer_on_qoe(
+    c: *mut mediaservo_client_consumer_t,
+    period_ms: u32,
+    cb: mediaservo_client_qoe_cb,
+    user: *mut c_void,
+) -> c_int {
+    const NAME: &str = "mediaservo_client_consumer_on_qoe";
+    ffi_catch(NAME, c, || {
+        let Some(h) = (unsafe { c.as_ref() }) else {
+            return fail_global(
+                "mediaservo_client_consumer_on_qoe: null handle",
+                MEDIASERVO_CLIENT_ERR_INVALID_ARG,
+            );
+        };
+        if period_ms == 0 {
+            return h.fail_arg("mediaservo_client_consumer_on_qoe: period_ms 0");
+        }
+        let guard = match h.consumer.lock() {
+            Ok(g) => g,
+            Err(_) => return h.fail_internal("mediaservo_client_consumer_on_qoe: lock poisoned"),
+        };
+        let Some(consumer) = guard.as_ref() else {
+            return h.fail_state("mediaservo_client_consumer_on_qoe: consumer closed");
+        };
+        // C trampoline：QoeSnapshot → C struct（字段序冻结，client.h ABI 注释）。
+        // CbUser 携带裸指针过 Send 边界（C 契约：调用方保证 user 线程安全）。
+        let ctx = std::sync::Arc::new(CbUser(user));
+        let cb_cb = cb;
+        let trampoline = move |snap: mediaservo_client::consumer::QoeSnapshot| {
+            let c_snap = mediaservo_client_qoe_snapshot_t {
+                struct_size: std::mem::size_of::<mediaservo_client_qoe_snapshot_t>() as u32,
+                fps: snap.fps,
+                kbps: snap.kbps,
+                lost_percent: snap.lost_percent,
+                decoded_total: snap.decoded_total,
+                avg_decode_ms: snap.avg_decode_ms,
+                jitter_ms: snap.jitter_ms,
+                rtt_ms: snap.rtt_ms,
+                width: snap.width,
+                height: snap.height,
+                epoch: snap.epoch,
+            };
+            cb_cb(&c_snap, ctx.0);
+        };
+        let qoe_task = consumer.on_qoe(
+            std::time::Duration::from_millis(u64::from(period_ms)),
+            Box::new(trampoline),
+        );
+        if let Ok(mut g) = h.qoe_task.lock() {
+            // 幂等语义（重复注册替换前次）——旧 task abort（释放旧闭包）
+            if let Some(old_task) = g.take() {
+                old_task.abort();
+            }
+            *g = Some(qoe_task);
+        }
+        MEDIASERVO_OK
+    })
+}
+
 /// 关闭本路并释放 handle（幂等）。置 closed → 取走 Consumer（receiver drop → K1 重放
 /// 判死本路）→ join 泵（≤CONSUMER_POLL）→ user_free 恰好一次 → free。
 #[unsafe(no_mangle)]
@@ -210,6 +306,13 @@ pub extern "C" fn mediaservo_client_consumer_close(c: *mut mediaservo_client_con
         // 取走即 drop：帧通道接收端消亡，泵下轮 recv → None → break。
         if let Ok(mut g) = handle.consumer.lock() {
             drop(g.take());
+        }
+        // QOE 节拍 task abort——释放 trampoline 闭包（CbUser 堆上下文）
+        // （lsan.1096280: 64B/次注册残留——进程退出 runtime 不 shutdown）
+        if let Ok(mut g) = handle.qoe_task.lock() {
+            if let Some(t) = g.take() {
+                t.abort();
+            }
         }
         if let Some(join) = handle.pump.lock().ok().and_then(|mut g| g.take()) {
             let _ = join.join();
@@ -282,6 +385,7 @@ mod tests {
             user: ptr::null_mut(),
             free: Some(mark_free),
             pump: Mutex::new(None),
+            qoe_task: Mutex::new(None),
             err: Mutex::new(None),
         });
         let raw = Box::into_raw(handle);

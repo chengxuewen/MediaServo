@@ -51,6 +51,7 @@ mod control;
 mod errors;
 
 use std::os::raw::{c_char, c_int, c_void};
+use std::ffi::CStr;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -771,6 +772,63 @@ pub extern "C" fn mediaservo_client_session_wait_video(
         let rc = copy_out_needed(NAME, &produced, out_pid, cap, needed);
         if rc != MEDIASERVO_OK {
             h.fail_arg("mediaservo_client_session_wait_video: buffer too small (see needed)");
+        }
+        rc
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mediaservo_client_session_wait_video_labeled(
+    s: *mut mediaservo_client_session_t,
+    label: *const c_char,
+    timeout_ms: u64,
+    out_pid: *mut c_char,
+    cap: usize,
+    needed: *mut usize,
+) -> c_int {
+    const NAME: &str = "mediaservo_client_session_wait_video_labeled";
+    ffi_catch(NAME, s, || {
+        let Some(h) = (unsafe { s.as_ref() }) else {
+            return fail_global(
+                "mediaservo_client_session_wait_video_labeled: null handle",
+                MEDIASERVO_CLIENT_ERR_INVALID_ARG,
+            );
+        };
+        if out_pid.is_null() || cap == 0 {
+            return h.fail_arg("mediaservo_client_session_wait_video_labeled: null out or cap 0");
+        }
+        if h.closed.load(Ordering::SeqCst) {
+            return h.fail_state("mediaservo_client_session_wait_video_labeled: session closed");
+        }
+        let mut guard = match h.session.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                return h.fail_internal("mediaservo_client_session_wait_video_labeled: lock poisoned");
+            }
+        };
+        let Some(session) = guard.as_mut() else {
+            return h.fail_state("mediaservo_client_session_wait_video_labeled: session closed");
+        };
+        let label_opt = if label.is_null() {
+            None
+        } else {
+            match unsafe { CStr::from_ptr(label) }.to_str() {
+                Ok(l) if !l.is_empty() => Some(l.to_string()),
+                _ => None,
+            }
+        };
+        let produced = match runtime()
+            .block_on(session.wait_video_producer_labeled(
+                Duration::from_millis(timeout_ms),
+                label_opt.as_deref(),
+            ))
+        {
+            Ok(p) => p,
+            Err(e) => return h.fail_client("mediaservo_client_session_wait_video_labeled", &e),
+        };
+        let rc = copy_out_needed(NAME, &produced, out_pid, cap, needed);
+        if rc != MEDIASERVO_OK {
+            h.fail_arg("mediaservo_client_session_wait_video_labeled: buffer too small (see needed)");
         }
         rc
     })

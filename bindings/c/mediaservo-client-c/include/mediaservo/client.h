@@ -213,6 +213,12 @@ mediaservo_err_t mediaservo_client_session_wait_video(mediaservo_client_session_
                                                       uint64_t timeout_ms, char* out_pid,
                                                       size_t cap, size_t* needed);
 
+/* producer-label T2.2: 按标签定向等待（label NULL/空 = 不过滤, 第一路回退语义）。
+ * 其余合同同 wait_video（needed 溢出/超时/断链）。additive: 旧消费方零影响。 */
+mediaservo_err_t mediaservo_client_session_wait_video_labeled(
+    const mediaservo_client_session_t* s, const char* label,
+    uint64_t timeout_ms, char* out_pid, size_t cap, size_t* needed);
+
 /* 订阅一路视频 producer（多路新形，K4）：每路独立帧泵 + consumer 句柄，互不连坐。
  * producer_id 来自 wait_video 或 list/观测面。成功后 **out_consumer = 新 handle
  * （调用方 consumer_close；session_close 不隐式关）。user_free 在 consumer_close
@@ -288,6 +294,30 @@ mediaservo_err_t mediaservo_client_consumer_id(const mediaservo_client_consumer_
 
 /* 本路视频统计 JSON（单路读数，键表 = session_video_stats 同形）。needed 合同同上。 */
 mediaservo_err_t mediaservo_client_consumer_stats(mediaservo_client_consumer_t* c, char* out_json, size_t cap, size_t* needed);
+
+/* QOE 周期回调（consumer-qoe-callback，2026-10-09；对齐 TRRO OnMediaState 形态）：
+ * SDK 内置节拍/差分/换算——cb 收现成换算值。幂等：重复注册替换前次；
+ * consumer_close 即停。cb 在 SDK 节拍线程触发——**禁止阻塞**。
+ * 字段布局冻结（ABI 只增纪律）：后续新增字段只能尾部追加。 */
+typedef struct mediaservo_client_qoe_snapshot {
+    uint32_t struct_size;    /* sizeof 本结构（调用方填，演进护栏） */
+    uint32_t fps;
+    uint32_t kbps;
+    float    lost_percent;
+    uint64_t decoded_total;
+    uint32_t avg_decode_ms;  /* 平均解码耗时 ms/帧（ΔtotalDecodeTime/Δframes；qoe-full-metrics 尾追加） */
+    uint32_t jitter_ms;      /* 抖动 ms（inbound jitter×1000） */
+    uint32_t rtt_ms;         /* 往返时延 ms（candidate-pair；后端无源=0） */
+    uint32_t width;
+    uint32_t height;
+    uint32_t epoch;          /* 重协商断点代（仅识别用，不做业务判断） */
+} mediaservo_client_qoe_snapshot_t;
+
+typedef void (*mediaservo_client_qoe_cb)(const mediaservo_client_qoe_snapshot_t* snap, void* user);
+
+mediaservo_err_t mediaservo_client_consumer_on_qoe(mediaservo_client_consumer_t* c,
+                                                   uint32_t period_ms,
+                                                   mediaservo_client_qoe_cb cb, void* user);
 
 /* 关闭本路并释放 handle（幂等；撤接收端 → join 泵（≤250ms）→ user_free 恰好一次）。 */
 mediaservo_err_t mediaservo_client_consumer_close(mediaservo_client_consumer_t* c);

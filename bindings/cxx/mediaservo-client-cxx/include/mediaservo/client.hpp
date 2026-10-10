@@ -254,6 +254,16 @@ public:
         });
     }
 
+    /// producer-label T2.2: 按标签定向等待（裁决 §12-1 设备房+label 形）。
+    /// label 空 = 不过滤（第一路回退）；其余合同同 wait_video。
+    Result<std::string> wait_video_labeled(const std::string& label, uint64_t timeout_ms) {
+        if (!h_) return Result<std::string>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
+        return detail::needed_read(h_, [&](char* b, size_t c, size_t* n) {
+            return mediaservo_client_session_wait_video_labeled(
+                h_, label.empty() ? nullptr : label.c_str(), timeout_ms, b, c, n);
+        });
+    }
+
     /// 订阅一路视频 producer（多路新形，K4：每路独立泵，互不连坐）。返回的
     /// Consumer 为 move-only RAII（析构自动 close；Session.close 不隐式关）。
     Result<Consumer> consume(const std::string& producer_id,
@@ -356,11 +366,16 @@ public:
 
     Consumer(const Consumer&) = delete;
     Consumer& operator=(const Consumer&) = delete;
-    Consumer(Consumer&& other) noexcept : h_(other.release_()) {}
+    Consumer(Consumer&& other) noexcept
+        : h_(other.release_()), qoe_ctx_(other.qoe_ctx_) {
+        other.qoe_ctx_ = nullptr;
+    }
     Consumer& operator=(Consumer&& other) noexcept {
         if (this != &other) {
-            (void)close();
+            (void)close();  // 释放自身 qoe_ctx + 旧 handle
             h_ = other.release_();
+            qoe_ctx_ = other.qoe_ctx_;
+            other.qoe_ctx_ = nullptr;
         }
         return *this;
     }
@@ -385,11 +400,61 @@ public:
         });
     }
 
-    /// 关闭本路并释放 handle（幂等；C 侧 join 泵 + user_free 帧回调堆对象）。
+    /// QOE 周期回调（consumer-qoe-callback，2026-10-09；对齐 TRRO OnMediaState）：
+    /// SDK 内置节拍/差分/换算——cb 收现成换算值。幂等（替换前次）；close 即停。
+    /// cb 在 SDK 节拍线程触发——**回调内禁止阻塞**。
+    struct QoeSnapshot {
+        uint32_t fps;
+        uint32_t kbps;
+        float lost_percent;
+        uint64_t decoded_total;
+        uint32_t avg_decode_ms;  // 平均解码耗时 ms/帧
+        uint32_t jitter_ms;      // 抖动 ms
+        uint32_t rtt_ms;         // 往返时延 ms（后端无源=0）
+        uint32_t width;
+        uint32_t height;
+        uint32_t epoch;  // 重协商断点代（仅识别用）
+    };
+
+    Result<void> on_qoe(std::chrono::milliseconds period,
+                        std::function<void(const QoeSnapshot&)> cb) {
+        if (!h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
+        // 堆上悬挂保护：cb 存活期 = C 侧注册期（consumer_close 停回调后 C 侧
+        // 不再触发——trampoline 闭包随 Rust on_qoe task 结束而释放）。
+        auto* heap_cb = new std::function<void(const QoeSnapshot&)>(std::move(cb));
+        auto* ctx = new std::function<void(const QoeSnapshot&)>(*heap_cb);
+        delete heap_cb;
+        static_assert(sizeof(QoeSnapshot) >= sizeof(mediaservo_client_qoe_snapshot_t) - sizeof(uint32_t),
+                      "QoeSnapshot 字段序漂移——C ABI 兼容破坏");
+        int rc = mediaservo_client_consumer_on_qoe(
+            h_, static_cast<uint32_t>(period.count()),
+            [](const mediaservo_client_qoe_snapshot_t* snap, void* user) {
+                auto* fn = static_cast<std::function<void(const QoeSnapshot&)>*>(user);
+                QoeSnapshot q{snap->fps, snap->kbps, snap->lost_percent,
+                              snap->decoded_total, snap->avg_decode_ms, snap->jitter_ms,
+                              snap->rtt_ms, snap->width, snap->height, snap->epoch};
+                (*fn)(q);
+            },
+            ctx);
+        if (rc != MEDIASERVO_OK) {
+            delete ctx;
+            return Result<void>(tl::unexpect, detail::make_error(rc));
+        }
+        // 幂等替换：旧 ctx 释放（新注册已让 C 层 abort 旧 task——旧 ctx 不再被触发）
+        delete static_cast<std::function<void(const QoeSnapshot&)>*>(qoe_ctx_);
+        qoe_ctx_ = ctx;
+        return Result<void>();
+    }
+
+    /// 关闭本路并释放 handle（幂等；C 侧 join 泵 + abort qoe task + user_free 帧回调堆对象）。
     Result<void> close() noexcept {
         if (!h_) return Result<void>();
         int rc = mediaservo_client_consumer_close(h_);
         h_ = nullptr;
+        // qoe 回调堆上下文释放（lsan.1096280 实证 64B/次注册）：
+        // C close 已 abort qoe task——回调不再触发，此处 delete 安全。
+        delete static_cast<std::function<void(const QoeSnapshot&)>*>(qoe_ctx_);
+        qoe_ctx_ = nullptr;
         if (rc != MEDIASERVO_OK) {
             return Result<void>(tl::unexpect, detail::make_error(rc));
         }
@@ -405,6 +470,8 @@ private:
         return p;
     }
     mediaservo_client_consumer_t* h_ = nullptr;
+    /// qoe 回调堆上下文（on_qoe 存；close 释放——move 转移见下）
+    void* qoe_ctx_ = nullptr;
 };
 
 /// 出程控制通道集（move-only RAII；析构自动 close）。
