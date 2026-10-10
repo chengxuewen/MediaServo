@@ -141,7 +141,6 @@ export class SfuConsumerClient {
   // PIT-65: 每连接唯一 SFU peer_id — 多网页同 peer_id 导致 SfuManager recv_transport 互相覆盖
   private sfuPeerId: string;
   private transportResolver: ((params: TransportCreated) => void) | null = null;
-  private pendingProducer: { producer_id: string; kind: string } | null = null;
   // P1 换心 RPC 单发旁路（handleMessage 优先消费；一次一个在途请求——协商本就串行）：
   private capsResolver: ((caps: unknown) => void) | null = null;
   private consumeResolver: ((msg: { consumer_id: string; producer_id: string; kind: string; rtp_parameters: unknown }) => void) | null = null;
@@ -156,6 +155,11 @@ export class SfuConsumerClient {
     console.info(`[T+${Math.round(t - this.t0)}ms] ${msg}`);
   }
 
+  /** producer-label（§12-1 设备房+流标签）：只消费 label===expectedLabel 的 producer。
+   *  未设 = 旧行为（派生房形态：房内所有 producer 全消费），全兼容。 */
+  private expectedLabel: string | undefined;
+  private pendingProducer: { producer_id: string; kind: string } | null = null;
+
   constructor(
     private serverUrl: string,
     private roomId: string,
@@ -165,10 +169,12 @@ export class SfuConsumerClient {
       onStatus: StatusCallback;
       onMetrics: MetricsCallback;
     },
+    options?: { expectedLabel?: string },
   ) {
     this.onTrack = callbacks.onTrack;
     this.onStatus = callbacks.onStatus;
     this.onMetrics = callbacks.onMetrics;
+    this.expectedLabel = options?.expectedLabel;
     // PIT-65: 每连接唯一 SFU peer_id (多网页同 peer_id → SfuManager transport 覆盖)
     this.sfuPeerId = `${this.roomId}-consumer-${Math.random().toString(36).slice(2, 8)}`;
   }
@@ -429,6 +435,12 @@ export class SfuConsumerClient {
         });
         this.transportResolver = null;
       } else if (msg.type === 'new_producer') {
+        // producer-label 过滤（§12-1）：expectedLabel 设定时，非目标流一律忽略
+        // （设备房形态下同房多流广播——每路 VideoPlayer 只吃自己的 label）。
+        if (this.expectedLabel !== undefined && msg.label !== this.expectedLabel) {
+          this.logT(`new_producer label=${msg.label} ≠ expected=${this.expectedLabel} — 忽略`);
+          return;
+        }
         // W2: 「源离线等待」态收到 producer 信号 → 唤醒重开轮次预算（全量重走协商，含 late-join）。
         if (this.waitingForProducer) {
           this.waitingForProducer = false;
@@ -503,6 +515,7 @@ export class SfuConsumerClient {
         let rtt = 0, packetsLost = 0, packetsReceived = 0, fps = 0, bitrate = 0, jitter = 0;
         let width = 0, height = 0, decoderImpl: string | undefined, decoderCodec: string | undefined;
         let growing = false; // F2: 本 tick 字节增量即媒体新鲜信号
+        const pendingInbound: (RTCInboundRtpStreamStats & { decoderImplementation?: string })[] = [];
 
         stats.forEach((report) => {
           if (report.type === 'candidate-pair' && report.state === 'succeeded') {
@@ -515,26 +528,44 @@ export class SfuConsumerClient {
             if (mime?.startsWith('video/')) decoderCodec = mime;
           }
           if (report.type === 'inbound-rtp' && report.kind === 'video') {
-            const r = report as RTCInboundRtpStreamStats & { decoderImplementation?: string };
-            packetsLost = r.packetsLost || 0;
-            packetsReceived = r.packetsReceived || 0;
-            fps = r.framesPerSecond || 0;
-            // v2 (单位修复): 码率 = 字节增量/时间窗（累计 bytesReceived 当瞬时值 → 数字虚增）
-            const bytes = r.bytesReceived || 0;
-            const now = performance.now();
-            if (this.lastTs > 0 && bytes >= this.lastBytes) {
-              const elapsed = (now - this.lastTs) / 1000;
-              if (elapsed > 0) bitrate = Math.round(((bytes - this.lastBytes) * 8) / elapsed / 1000); // kbps
-            }
-            if (bytes > this.lastBytes) growing = true;
-            this.lastBytes = bytes;
-            this.lastTs = now;
-            jitter = Math.round((r.jitter || 0) * 1000);
-            width = r.frameWidth || 0;
-            height = r.frameHeight || 0;
-            decoderImpl = r.decoderImplementation || undefined; // v2 T4
+            // PIT-212 续：双行并存（冻结旧行+活行）——静态锁首见 id 会锁死到冻结行。
+            // 动态选行：只处理 timestamp 比已见同 id 行新的，且跨行取 timestamp 全场最新。
+            // 简化为两遍：先收集，后选 timestamp 最大的行。
+            pendingInbound.push(report as RTCInboundRtpStreamStats & { decoderImplementation?: string });
+            return;
           }
         });
+
+        // 选行（PIT-212 终形）：实测同 pc 多行中真视频行的 ssrc/id **每次采样都变**
+        // （mediasoup 动态 demux），id/ssrc/timestamp 判据全部失效。活性判据：
+        // framesDecoded>0 优先（只有真解码行>0）；同活性取 bytes 最大（累计单调）。
+        let r: (RTCInboundRtpStreamStats & { decoderImplementation?: string }) | null = null;
+        for (const cand of pendingInbound) {
+          if (!r) { r = cand; continue; }
+          const rLive = (r.framesDecoded || 0) > 0;
+          const cLive = (cand.framesDecoded || 0) > 0;
+          if (cLive && !rLive) { r = cand; continue; }
+          if (cLive === rLive && (cand.bytesReceived || 0) > (r.bytesReceived || 0)) r = cand;
+        }
+        if (r) {
+          packetsLost = r.packetsLost || 0;
+          packetsReceived = r.packetsReceived || 0;
+          fps = r.framesPerSecond || 0;
+          // v2 (单位修复): 码率 = 字节增量/时间窗
+          const bytes = r.bytesReceived || 0;
+          const now = performance.now();
+          if (this.lastTs > 0 && bytes >= this.lastBytes) {
+            const elapsed = (now - this.lastTs) / 1000;
+            if (elapsed > 0) bitrate = Math.round(((bytes - this.lastBytes) * 8) / elapsed / 1000); // kbps
+          }
+          if (bytes > this.lastBytes) growing = true;
+          this.lastBytes = bytes;
+          this.lastTs = now;
+          jitter = Math.round((r.jitter || 0) * 1000);
+          width = r.frameWidth || 0;
+          height = r.frameHeight || 0;
+          decoderImpl = r.decoderImplementation || undefined;
+        }
 
         this.emitMetrics({
           rtt,

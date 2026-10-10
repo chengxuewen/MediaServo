@@ -8,6 +8,9 @@ interface Props {
   roomId: string;
   serverUrl: string;
   token: string;
+  /** producer-label（§12-1 设备房+流标签）：传 stream_id → 只消费该 label 的 producer。
+   *  缺省 = 旧行为（派生房形态）。 */
+  streamLabel?: string;
   onClose: () => void;
   /** modal=全屏浮层（默认）；tile=网格单元（多流并排，multi-stream P3） */
   variant?: 'modal' | 'tile';
@@ -26,7 +29,7 @@ const STATUS_COLORS: Record<ConnectionStatus, string> = {
   error: '#e74c3c',
 };
 
-export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant = 'modal', onExpand }: Props) {
+export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onClose, variant = 'modal', onExpand }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const clientRef = useRef<SfuConsumerClient | null>(null);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -99,7 +102,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
       },
       onStatus: (s) => { logT('status = ' + s); setStatus(s); },
       onMetrics: setMetrics,
-    });
+    }, streamLabel ? { expectedLabel: streamLabel } : undefined);
 
     clientRef.current = client;
     logT('connect() 调用');
@@ -111,7 +114,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
       clientRef.current = null;
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
     };
-  }, [roomId, serverUrl, token]);
+  }, [roomId, serverUrl, token, streamLabel]);
 
   const handleMouseMove = () => {
     setShowControls(true);
@@ -140,7 +143,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
         {/* Top bar */}
         <div className="vp-top-bar" style={{ background: isDisconnected ? '#c0392b' : '#2c3e50' }}>
           <span className="vp-status-dot" style={{ background: statusColor }} />
-          <span className="vp-title">{roomId}</span>
+          <span className="vp-title">{streamLabel ? `${roomId} · ${streamLabel}` : roomId}</span>
           {!isTile && metrics && !isDisconnected && (
             <span className="vp-bitrate">{metrics.resolution} · {Math.round(metrics.bitrate)}Kbps</span>
           )}
@@ -184,7 +187,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, onClose, variant
           style={popPos ? { left: popPos.left, top: popPos.top } : { left: -9999, top: -9999 }}
           onClick={(e) => e.stopPropagation()}
         >
-          <h4>Stream Details · {roomId}</h4>
+          <h4>Stream Details · {streamLabel ? `${roomId} · ${streamLabel}` : roomId}</h4>
           <h5>编解码器</h5>
           <div className="stats-grid">
             <div><label>编码</label><span>{metrics.encoderImplementation ? (metrics.encoderImplementation.toLowerCase().includes('libvpx') || metrics.encoderImplementation.toLowerCase().includes('openh264') || metrics.encoderImplementation.toLowerCase().includes('libaom') ? '软编' : '硬编') : (metrics.encoderBackend === 'software' ? '软编' : metrics.encoderBackend && metrics.encoderBackend !== 'auto' ? '硬编' : '未知')}</span></div>

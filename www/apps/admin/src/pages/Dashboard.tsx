@@ -24,7 +24,10 @@ export default function Dashboard() {
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [expanded, setExpanded] = useState(new Set());
   const [selectedStream, setSelectedStream] = useState<{ deviceId: string; stream: StreamSnapshot } | null>(null);
-  // multi-stream P3: 勾选集（roomId = device_stream，与 deleteRoom 约定一致）+ 播放中列表
+  // multi-stream P3: 勾选集 + 播放中列表。
+  // §12-1 设备房+流标签：键 `device_stream` 仅作 UI 状态键（勾选/去重/关闭），
+  // 信令寻址 = VideoPlayer 内拆解（roomId=device 房 + streamLabel=stream_id）。
+  // 旧派生房 `${device}_${stream}` 直连已废弃（host 只推设备房，派生房永远空）。
   const [selectedRooms, setSelectedRooms] = useState<Set<string>>(new Set());
   const [playingRooms, setPlayingRooms] = useState<string[]>([]);
   // tile 双击→大窗播放（产品方案②）：独立 modal 实例，关闭即弃
@@ -162,30 +165,43 @@ export default function Dashboard() {
             )}
           </div>
           <div className="video-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
-            {playingRooms.map((roomId) => (
-              <VideoPlayer
-                key={roomId}
-                roomId={roomId}
-                serverUrl={wsServerUrl()}
-                token={localStorage.getItem('mediaservo_admin_token') || ''}
-                variant="tile"
-                onExpand={() => setModalRoom(roomId)}
-                onClose={() => { setPlayingRooms(prev => prev.filter(r => r !== roomId)); setModalRoom(prev => (prev === roomId ? null : prev)); }}
-              />
-            ))}
+            {playingRooms.map((key) => {
+              // §12-1: UI 键 `device_stream` → 设备房 + 流标签（host 只推设备房）
+              const sep = key.indexOf('_');
+              const deviceId = sep > 0 ? key.slice(0, sep) : key;
+              const streamId = sep > 0 ? key.slice(sep + 1) : '';
+              return (
+                <VideoPlayer
+                  key={key}
+                  roomId={deviceId}
+                  streamLabel={streamId}
+                  serverUrl={wsServerUrl()}
+                  token={localStorage.getItem('mediaservo_admin_token') || ''}
+                  variant="tile"
+                  onExpand={() => setModalRoom(key)}
+                  onClose={() => { setPlayingRooms(prev => prev.filter(r => r !== key)); setModalRoom(prev => (prev === key ? null : prev)); }}
+                />
+              );
+            })}
           </div>
         </>
       )}
-      {modalRoom && (
-        <VideoPlayer
-          key={`modal-${modalRoom}`}
-          roomId={modalRoom}
-          serverUrl={wsServerUrl()}
-          token={localStorage.getItem('mediaservo_admin_token') || ''}
-          variant="modal"
-          onClose={() => setModalRoom(null)}
-        />
-      )}
+      {modalRoom && (() => {
+        const sep = modalRoom.indexOf('_');
+        const deviceId = sep > 0 ? modalRoom.slice(0, sep) : modalRoom;
+        const streamId = sep > 0 ? modalRoom.slice(sep + 1) : '';
+        return (
+          <VideoPlayer
+            key={`modal-${modalRoom}`}
+            roomId={deviceId}
+            streamLabel={streamId}
+            serverUrl={wsServerUrl()}
+            token={localStorage.getItem('mediaservo_admin_token') || ''}
+            variant="modal"
+            onClose={() => setModalRoom(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
