@@ -500,12 +500,11 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                     peer_id: peer_id.clone(),
                     reason: "jwt presented but verification failed".into(),
                 });
-                let error = SignalingMessage::Error { code: 4013, message: "JWT invalid or expired".into() };
-                let _ = ws_sender
-                    .lock()
-                    .await
-                    .send(Message::Text(send_msg(&error).unwrap()))
-                    .await;
+                let error = SignalingMessage::Error {
+                    code: 4013,
+                    message: "JWT invalid or expired".into(),
+                };
+                let _ = ws_sender.lock().await.send(Message::Text(send_msg(&error).unwrap())).await;
                 return;
             }
         }
@@ -1251,12 +1250,14 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         tracing::info!("SFU: list_producers for room {}", relay_room);
         if let Some(created) = server.sfu_manager.list_producers(&relay_room) {
             tracing::info!("SFU: found {} producers in room {}", created.len(), relay_room);
-            for (producer_id, kind, peer_id) in &created {
+            for (producer_id, kind, peer_id, label) in &created {
+                // producer-label T1.3: 回放窗带真实 label（sfu producer_labels 表）
                 let msg = SignalingMessage::NewProducer {
                     room_id: relay_room.clone(),
                     producer_id: producer_id.clone(),
                     peer_id: peer_id.clone(),
                     kind: kind.clone(),
+                    label: label.clone(),
                 };
                 let _ =
                     direct_sender.lock().await.send(Message::Text(send_msg(&msg).unwrap())).await;
@@ -2072,6 +2073,7 @@ pub(crate) async fn handle_sfu_message(
             kind,
             rtp_parameters,
             transport_id,
+            label,
         } => {
             // PIT-65: 用消息 peer_id — 与 create/connect/consume 一致
             let sfu_peer_id = msg_peer_id.as_str();
@@ -2122,6 +2124,7 @@ pub(crate) async fn handle_sfu_message(
                     kind,
                     rtp_parameters.clone(),
                     transport_id.as_deref(),
+                    label.clone(),
                 )
                 .await
             {
@@ -2133,11 +2136,13 @@ pub(crate) async fn handle_sfu_message(
                         .unwrap_or_else(|| format!("session:{peer_id}"));
                     server.producer_owners.insert(result.producer_id.clone(), owner);
                     // Broadcast NewProducer to all peers in room
+                    // producer-label T1.2: label 从 Produce 请求透传（None=旧 host 形）
                     let broadcast = SignalingMessage::NewProducer {
                         room_id: room_id.clone(),
                         producer_id: result.producer_id.clone(),
                         peer_id: peer_id.to_string(),
                         kind: result.kind,
+                        label: label.clone(),
                     };
                     // H1 根因修复: 广播必须发到 produce 目标房间的频道（而非调用会话自己的
                     // 频道——agent 会话房间=vehicle，web 消费者订阅的是各流房间 → 旧路径

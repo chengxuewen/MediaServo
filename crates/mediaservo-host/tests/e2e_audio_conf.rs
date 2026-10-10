@@ -16,11 +16,11 @@ use mediaservo_common::protocol::{
     SignalingMessage, TransportDirection,
 };
 use mediaservo_webrtc::rtp::RTCRtpTransceiverInit;
+use mediaservo_webrtc::traits::PeerConnectionApi;
 use mediaservo_webrtc::{
     RTCAnswerOptions, RTCConfiguration, RTCPeerConnectionFactory, RTCPeerConnectionState,
     RTCSdpType, RTCSessionDescription, TrackKind, TrackRef,
 };
-use mediaservo_webrtc::traits::PeerConnectionApi;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 
@@ -50,9 +50,8 @@ struct Harness {
 
 impl Harness {
     async fn new() -> Self {
-        let url = std::env::var("SFU_E2E_WS_URL").unwrap_or_else(|_| {
-            panic!("SFU_E2E_WS_URL 未设置 — 需连外部 mediasoup server (C21)")
-        });
+        let url = std::env::var("SFU_E2E_WS_URL")
+            .unwrap_or_else(|_| panic!("SFU_E2E_WS_URL 未设置 — 需连外部 mediasoup server (C21)"));
         tracing::info!("SfuTestHarness: 外部 mediasoup server 模式 ({url})");
         Self { ws_url: url }
     }
@@ -60,15 +59,14 @@ impl Harness {
 
 async fn ws_auth_and_join<S>(ws: &mut S, role: PeerRole, room_id: &str)
 where
-    S: SinkExt<WsMsg> + StreamExt<Item = Result<WsMsg, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    S: SinkExt<WsMsg>
+        + StreamExt<Item = Result<WsMsg, tokio_tungstenite::tungstenite::Error>>
+        + Unpin,
     <S as futures_util::Sink<WsMsg>>::Error: std::fmt::Debug,
 {
     ws.send(WsMsg::Text(psk())).await.unwrap();
-    let ack = tokio::time::timeout(Duration::from_secs(5), ws.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    let ack =
+        tokio::time::timeout(Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
     assert!(ack.to_text().unwrap().contains("authenticated"));
 
     let join = serde_json::to_string(&SignalingMessage::RoomJoin {
@@ -84,20 +82,17 @@ where
     })
     .unwrap();
     ws.send(WsMsg::Text(join)).await.unwrap();
-    let joined = tokio::time::timeout(Duration::from_secs(5), ws.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    let joined =
+        tokio::time::timeout(Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
     assert!(joined.to_text().unwrap().contains("room_joined"));
 }
 
 /// 读下一条消息并解析；跳过 transport_connected ack 与 NewProducer 广播。
-async fn next_sig_skip_noise<S>(
-    ws: &mut S,
-) -> SignalingMessage
+async fn next_sig_skip_noise<S>(ws: &mut S) -> SignalingMessage
 where
-    S: SinkExt<WsMsg> + StreamExt<Item = Result<WsMsg, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    S: SinkExt<WsMsg>
+        + StreamExt<Item = Result<WsMsg, tokio_tungstenite::tungstenite::Error>>
+        + Unpin,
     <S as futures_util::Sink<WsMsg>>::Error: std::fmt::Debug,
 {
     loop {
@@ -141,11 +136,7 @@ fn build_remote_audio_sdp(
         "a=ice-lite".to_string(),
         format!("a=ice-ufrag:{}", ice_parameters.username_fragment),
         format!("a=ice-pwd:{}", ice_parameters.password),
-        format!(
-            "a=fingerprint:{} {}",
-            fp.algorithm.to_lowercase(),
-            fp.value
-        ),
+        format!("a=fingerprint:{} {}", fp.algorithm.to_lowercase(), fp.value),
         "a=setup:actpass".to_string(),
         format!("m=audio 7 UDP/TLS/RTP/SAVPF {OPUS_PT}"),
         format!("c=IN IP4 {conn_ip}"),
@@ -153,16 +144,16 @@ fn build_remote_audio_sdp(
         "a=rtcp-rsize".to_string(),
         format!("a=mid:{mid}"),
         "a=extmap:1 urn:ietf:params:rtp-hdrext:sdes:mid".to_string(),
-        "a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01".to_string(),
+        "a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
+            .to_string(),
         if sendonly { "a=sendonly" } else { "a=recvonly" }.to_string(),
         format!("a=rtpmap:{OPUS_PT} opus/{SAMPLE_RATE}/2"),
         format!("a=fmtp:{OPUS_PT} minptime=10;useinbandfec=1"),
     ];
-    if sendonly
-        && let Some(ssrc) = ssrc {
-            lines.push(format!("a=ssrc:{ssrc} cname:mediaservo-audio"));
-            lines.push(format!("a=ssrc:{ssrc} msid:audio audio"));
-        }
+    if sendonly && let Some(ssrc) = ssrc {
+        lines.push(format!("a=ssrc:{ssrc} cname:mediaservo-audio"));
+        lines.push(format!("a=ssrc:{ssrc} msid:audio audio"));
+    }
     if let Some(candidates) = ice_candidates {
         for c in candidates {
             if c.ip.contains(".local") {
@@ -219,7 +210,9 @@ async fn audio_producer<S>(
     std::sync::Arc<std::sync::atomic::AtomicU64>,
 )
 where
-    S: SinkExt<WsMsg> + StreamExt<Item = Result<WsMsg, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    S: SinkExt<WsMsg>
+        + StreamExt<Item = Result<WsMsg, tokio_tungstenite::tungstenite::Error>>
+        + Unpin,
     <S as futures_util::Sink<WsMsg>>::Error: std::fmt::Debug,
 {
     ws_auth_and_join(ws, PeerRole::Consumer, room).await;
@@ -251,10 +244,7 @@ where
 
     // 2. PC + 标准 answerer 协商（C18: remote SDP → add_track → create_answer）
     let factory = RTCPeerConnectionFactory::new();
-    let pc = factory
-        .create_peer_connection(RTCConfiguration::default())
-        .await
-        .unwrap();
+    let pc = factory.create_peer_connection(RTCConfiguration::default()).await.unwrap();
     let connected = std::sync::Arc::new(tokio::sync::Notify::new());
     let connected_clone = connected.clone();
     pc.on_peer_connection_state_change(move |state| {
@@ -263,7 +253,14 @@ where
         }
     });
 
-    let remote_sdp = build_remote_audio_sdp(&ice_params, &dtls_params, ice_candidates.as_ref(), false, None, "audio");
+    let remote_sdp = build_remote_audio_sdp(
+        &ice_params,
+        &dtls_params,
+        ice_candidates.as_ref(),
+        false,
+        None,
+        "audio",
+    );
     let remote_desc = RTCSessionDescription::new(RTCSdpType::Offer, remote_sdp);
     pc.set_remote_description(&remote_desc).await.unwrap();
     // track id 必须与 libwebrtc 内部 track label 一致（create_audio_track 建 "audio"）—
@@ -281,10 +278,7 @@ where
             peer_id: peer.into(),
             transport_id: send_tid,
             dtls_parameters: DtlsParameters {
-                fingerprints: vec![Fingerprint {
-                    algorithm: "sha-256".to_string(),
-                    value: fp_hex,
-                }],
+                fingerprints: vec![Fingerprint { algorithm: "sha-256".to_string(), value: fp_hex }],
                 role: "client".to_string(),
             },
         })
@@ -367,15 +361,17 @@ where
             "rtcp": {"reducedSize": rtp_params.rtcp.reduced_size},
         }),
         transport_id: None, // legacy 路径回归
+
+        label: None,
     };
-    ws.send(WsMsg::Text(serde_json::to_string(&produce).unwrap()))
-        .await
-        .unwrap();
+    ws.send(WsMsg::Text(serde_json::to_string(&produce).unwrap())).await.unwrap();
     let producer_id = {
         let sig = next_sig_skip_noise(ws).await;
         match sig {
             SignalingMessage::Produced { producer_id, .. } => producer_id,
-            SignalingMessage::Error { code, message } => panic!("producer {peer}: Produce error {code}: {message}"),
+            SignalingMessage::Error { code, message } => {
+                panic!("producer {peer}: Produce error {code}: {message}")
+            }
             other => panic!("producer {peer}: expected Produced, got {other:?}"),
         }
     };
@@ -419,14 +415,11 @@ where
 
 /// 消费方：Recv transport → Consume → 构造含 ssrc 的 sendonly SDP → answer →
 /// Connect → 返回 consumer_id。DTLS 完成后 mediasoup 才会转发 RTP（consumer 统计生效）。
-async fn audio_consumer<S>(
-    ws: &mut S,
-    room: &str,
-    peer: &str,
-    producer_id: &str,
-) -> String
+async fn audio_consumer<S>(ws: &mut S, room: &str, peer: &str, producer_id: &str) -> String
 where
-    S: SinkExt<WsMsg> + StreamExt<Item = Result<WsMsg, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    S: SinkExt<WsMsg>
+        + StreamExt<Item = Result<WsMsg, tokio_tungstenite::tungstenite::Error>>
+        + Unpin,
     <S as futures_util::Sink<WsMsg>>::Error: std::fmt::Debug,
 {
     // 1. Recv transport
@@ -491,18 +484,11 @@ where
         .and_then(|a| a.first())
         .and_then(|enc| enc.get("ssrc"))
         .and_then(|s| s.as_u64());
-    let mid = consumer_rtp
-        .get("mid")
-        .and_then(|m| m.as_str())
-        .unwrap_or("0")
-        .to_string();
+    let mid = consumer_rtp.get("mid").and_then(|m| m.as_str()).unwrap_or("0").to_string();
 
     // 3. PC + recvonly audio transceiver → sendonly SDP（含 ssrc）→ answer
     let factory = RTCPeerConnectionFactory::new();
-    let pc = factory
-        .create_peer_connection(RTCConfiguration::default())
-        .await
-        .unwrap();
+    let pc = factory.create_peer_connection(RTCConfiguration::default()).await.unwrap();
     let connected = std::sync::Arc::new(tokio::sync::Notify::new());
     let connected_clone = connected.clone();
     pc.on_peer_connection_state_change(move |state| {
@@ -539,10 +525,7 @@ where
             peer_id: peer.into(),
             transport_id: recv_tid,
             dtls_parameters: DtlsParameters {
-                fingerprints: vec![Fingerprint {
-                    algorithm: "sha-256".to_string(),
-                    value: fp_hex,
-                }],
+                fingerprints: vec![Fingerprint { algorithm: "sha-256".to_string(), value: fp_hex }],
                 role: "client".to_string(),
             },
         })
@@ -555,7 +538,9 @@ where
         .expect("consumer PC connect timeout");
     assert_eq!(pc.connection_state(), RTCPeerConnectionState::Connected);
 
-    tracing::info!("consumer {peer}: subscribed producer {producer_id} → consumer {consumer_id} (ssrc={ssrc:?})");
+    tracing::info!(
+        "consumer {peer}: subscribed producer {producer_id} → consumer {consumer_id} (ssrc={ssrc:?})"
+    );
     consumer_id
 }
 
@@ -566,7 +551,9 @@ async fn sfu_stats<S>(
     consumer_id: Option<&str>,
 ) -> SignalingMessage
 where
-    S: SinkExt<WsMsg> + StreamExt<Item = Result<WsMsg, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    S: SinkExt<WsMsg>
+        + StreamExt<Item = Result<WsMsg, tokio_tungstenite::tungstenite::Error>>
+        + Unpin,
     <S as futures_util::Sink<WsMsg>>::Error: std::fmt::Debug,
 {
     ws.send(WsMsg::Text(
@@ -605,11 +592,8 @@ async fn e2e_audio_conf_three_party_all_hear_all() {
     let mut tone_tasks = Vec::new();
     let mut pcm_pushed = Vec::new();
     for peer in peers {
-        let (mut ws, _) = tokio_tungstenite::connect_async(&harness.ws_url)
-            .await
-            .unwrap();
-        let (producer_id, _track, tone_task, pushed) =
-            audio_producer(&mut ws, &room, peer).await;
+        let (mut ws, _) = tokio_tungstenite::connect_async(&harness.ws_url).await.unwrap();
+        let (producer_id, _track, tone_task, pushed) = audio_producer(&mut ws, &room, peer).await;
         tracing::info!("{peer}: produced {producer_id}");
         producers.push(producer_id);
         tone_tasks.push(tone_task);
@@ -665,10 +649,8 @@ async fn e2e_audio_conf_three_party_all_hear_all() {
 
     // PCM 推流成功断言（I4 re-review）: tone 任务静默失败（write_frame 全 Err /
     // 任务早退）→ total_pushed == 0 → 测试失败。abort 后计数仍可读（Arc）。
-    let total_pushed: u64 = pcm_pushed
-        .iter()
-        .map(|c| c.load(std::sync::atomic::Ordering::Relaxed))
-        .sum();
+    let total_pushed: u64 =
+        pcm_pushed.iter().map(|c| c.load(std::sync::atomic::Ordering::Relaxed)).sum();
     assert!(
         total_pushed > 0,
         "PCM 帧必须成功推入 libwebrtc（capture_frame 接受）— 推流静默失败 = 接线回归"
@@ -690,9 +672,7 @@ async fn e2e_audio_room_rejects_video_produce() {
     let harness = Harness::new().await;
     let room = format!("audio-e2e-neg-{}", std::process::id());
 
-    let (mut ws, _) = tokio_tungstenite::connect_async(&harness.ws_url)
-        .await
-        .unwrap();
+    let (mut ws, _) = tokio_tungstenite::connect_async(&harness.ws_url).await.unwrap();
     ws_auth_and_join(&mut ws, PeerRole::Consumer, &room).await;
 
     ws.send(WsMsg::Text(
@@ -728,6 +708,8 @@ async fn e2e_audio_room_rejects_video_produce() {
                 "rtcp": {"reducedSize": true}
             }),
             transport_id: None, // legacy 路径回归
+
+            label: None,
         })
         .unwrap(),
     ))
@@ -739,7 +721,7 @@ async fn e2e_audio_room_rejects_video_produce() {
             SignalingMessage::Error { code, message } => {
                 assert_eq!(code, 4031, "音频房间视频 produce 必须 4031: {message}");
                 assert!(message.contains("audio rooms allow audio producers only"));
-                            }
+            }
             SignalingMessage::Produced { .. } => {
                 panic!("音频房间视频 produce 必须被拒，却返回 Produced")
             }

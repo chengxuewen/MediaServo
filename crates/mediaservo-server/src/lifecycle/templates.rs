@@ -33,14 +33,33 @@ pub const WEAKNET_APP: &str = "weaknet-serve";
 /// listen 漂移源 [BA-13]。多实例端口 env 化留注记，低优 [wF7/BA-9]。
 pub const WEAKNET_SERVE_PORT: u16 = 9810;
 
-/// weaknet serve 监听渲染字面量（恒 loopback——D5-2 不变式，语义见 render_oxfile 注释）。
-pub fn weaknet_listen() -> String {
-    format!("127.0.0.1:{WEAKNET_SERVE_PORT}")
+/// 读序解析纯函数（config-unification P1）：yaml(显式配置) > env(兜底) > default(殿后)。
+/// None = 未配置，由下一层生效。调用方负责读 env（本函数不碰进程环境——可测性）。
+pub fn resolve_port(yaml: Option<u16>, env: Option<u16>, default: u16) -> u16 {
+    yaml.or(env).unwrap_or(default)
+}
+
+/// weaknet serve 监听渲染字面量（恒 loopback——D5-2 不变式：IP 恒 127.0.0.1 不变，
+/// 端口可配 = server.yaml `sfu.weaknet_port`，None 缺省 9810。语义见 render_oxfile 注释）。
+pub fn weaknet_listen(port: u16) -> String {
+    format!("127.0.0.1:{port}")
 }
 
 /// 已渲染 oxfile 文本是否含 weaknet-serve 条目（start 探针 / --no-web 白名单共用的纯判据）。
 pub fn oxfile_has_weaknet(text: &str) -> bool {
     text.contains(&format!("name = \"{WEAKNET_APP}\""))
+}
+
+/// oxfile 文本 → weaknet serve 监听口（`serve --listen 127.0.0.1:NNNN` 行；
+/// 与 parse_web_port 同构纯函数——start 探针与渲染同源，漂移时以产物为准）。
+pub fn parse_weaknet_port(oxfile: &str) -> Option<u16> {
+    oxfile.lines().find_map(|l| {
+        let t = l.trim();
+        let rest = t.split("--listen").nth(1)?;
+        let rest = rest.trim().strip_prefix("127.0.0.1:")?;
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
+    })
 }
 
 /// oxfile [defaults].namespace（status/stop 过滤锚点）。
@@ -93,6 +112,16 @@ accounts_file: "accounts.yaml"
 # sfu:
 #   announced_ips:
 #     - "192.168.0.10"
+
+# Web 静态层（caddy）——缺省 8080 / 实例 web/；env MEDIASERVO_WEB_PORT 兜底（yaml 配置优先，C35 同形）。
+# web:
+#   port: 8080
+#   static_root: "/abs/web"
+
+# SFU/weaknet 端口 —— 缺省 20000 / 9810（env MEDIASERVO_SFU_PORT 兜底 sfu.port）。
+# sfu:
+#   port: 20000
+#   weaknet_port: 9811
 "#;
 
 /// devices.yaml 空注册表模板（prod-safe——无占位设备；注册走 admin API C33）。
@@ -163,6 +192,7 @@ pub fn render_oxfile(
     server_bin: &Path,
     caddy_cmd: &str,
     server_env: &[(String, String)],
+    weaknet_port: u16,
 ) -> String {
     let dir = dir_abs.to_string_lossy();
     let cfg = format!("{dir}/etc/server.yaml");
@@ -194,14 +224,15 @@ pub fn render_oxfile(
     // {dir}/bin（fresh-init 与 .bak 重渲两路共用本函数；Python 只拷贝+WARN 无渲染杠杆）。
     // 缺位不写条目——杜绝 restart_policy=always 对缺文件的空转风暴 [bF1]。
     // 不变式两行（[sF3/D5-2]，unit 与代码注释同款）：
-    //   ① 恒 loopback —— --listen 硬字面 127.0.0.1:9810，不开 env/参数口子；
+    //   ① 恒 loopback —— IP 恒 127.0.0.1 不变（端口可配 = server.yaml `sfu.weaknet_port`，
+    //      config-unification P1；缺省 9810）；
     //   ② 恒禁 --lan —— Origin 门按 listen 地址比对浏览器 Origin，反代下必失配
     //      （curl 通/浏览器死的排障黑洞）；对外唯一路径 = Caddy 同源反代 + Host 重写。
     if let Some(wnet) = discover_weaknet_bin(&dir_abs.join("bin")) {
         let wnet_path = wnet.to_string_lossy();
         out.push_str(&format!(
             "\n[[apps]]\nname = \"{WEAKNET_APP}\"\ncommand = \"{wnet_path} serve --listen {} --token-file {dir}/run/weaknet.token\"\nrestart_policy = \"always\"\n",
-            weaknet_listen()
+            weaknet_listen(weaknet_port)
         ));
         // 单 state 合同 [bF8/lck-F3]：oxmgr unit 不继承 CLI env——WEAKNET_STATEDIR（weaknet
         // state.rs 解析链首位 env 真名，非 WEAKNET_HOME [BA-5 勘误]）烘 {dir}/run/weaknet，
@@ -241,7 +272,7 @@ pub fn render_server_yaml(psk: &str, jwt: &str) -> String {
 }
 
 /// 渲染 web Caddyfile。`weaknet_backend` = 面板上游 host:port 字面量（init 传
-/// `weaknet_listen()` = 127.0.0.1:9810；生成形不吃 env [w批2 F3②]）。
+/// `weaknet_listen(port)`（config-unification P1 端口可配）；生成形不吃 env [w批2 F3②]）。
 pub fn render_caddyfile(
     web_port: u16,
     backend_port: u16,
@@ -311,12 +342,14 @@ mod tests {
             Path::new("/opt/ms/bin/mediaservo-server"),
             "/usr/bin/caddy",
             &[("MEDIASERVO_SFU_PORT".to_string(), "20012".to_string())],
+            WEAKNET_SERVE_PORT,
         );
         let b = render_oxfile(
             Path::new("/opt/ms"),
             Path::new("/opt/ms/bin/mediaservo-server"),
             "/usr/bin/caddy",
             &[("MEDIASERVO_SFU_PORT".to_string(), "20012".to_string())],
+            WEAKNET_SERVE_PORT,
         );
         assert_eq!(a, b, "同输入必须逐字节一致");
         assert!(a.contains("namespace = \"mediaservo-server\""));
@@ -330,6 +363,7 @@ mod tests {
             Path::new("/opt/ms/bin/mediaservo-server"),
             "caddy",
             &[],
+            WEAKNET_SERVE_PORT,
         );
         assert_ne!(a, c);
     }
@@ -388,18 +422,18 @@ mod tests {
         // 缺位形：无 bin/ → 不写条目（防 restart_policy=always 空转风暴 [bF1]）
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path();
-        let absent = render_oxfile(dir, srv, "caddy", &[]);
+        let absent = render_oxfile(dir, srv, "caddy", &[], WEAKNET_SERVE_PORT);
         assert!(!absent.contains(WEAKNET_APP), "bin 缺位必须无条件渲染为无条目");
         assert!(!oxfile_has_weaknet(&absent));
         // 在场形：上游名（默认品牌 mediaservo → branded==upstream 同串）
         touch_exec_bin(dir, "mediaservo-weaknet");
-        let yes = render_oxfile(dir, srv, "caddy", &[]);
+        let yes = render_oxfile(dir, srv, "caddy", &[], WEAKNET_SERVE_PORT);
         let d = dir.to_string_lossy().to_string();
         assert!(oxfile_has_weaknet(&yes), "在场判定单点=render_oxfile [M-1]");
         assert!(
             yes.contains(&format!(
                 "command = \"{d}/bin/mediaservo-weaknet serve --listen {} --token-file {d}/run/weaknet.token\"",
-                weaknet_listen()
+                weaknet_listen(WEAKNET_SERVE_PORT)
             )),
             "全绝对形 [mn6] + token-file"
         );
@@ -428,13 +462,24 @@ mod tests {
         std::fs::create_dir_all(&bin).expect("mkdir");
         std::fs::write(bin.join("mediaservo-weaknet"), b"x").expect("write");
         // 0644 非可执行 → 不算在场
-        let out = render_oxfile(dir, Path::new("/x/bin/mediaservo-server"), "caddy", &[]);
+        let out = render_oxfile(
+            dir,
+            Path::new("/x/bin/mediaservo-server"),
+            "caddy",
+            &[],
+            WEAKNET_SERVE_PORT,
+        );
         assert!(!out.contains(WEAKNET_APP), "-x 判定：非可执行残档不得触发条目");
     }
 
     #[test]
     fn caddyfile_weaknet_segment_rendered_literal() {
-        let cf = render_caddyfile(8080, 9800, Path::new("/opt/ms/web"), &weaknet_listen());
+        let cf = render_caddyfile(
+            8080,
+            9800,
+            Path::new("/opt/ms/web"),
+            &weaknet_listen(WEAKNET_SERVE_PORT),
+        );
         assert!(cf.contains("@wnroot path /weaknet"));
         assert!(cf.contains("redir @wnroot \"/weaknet/?{query}\" 308"));
         assert!(cf.contains("handle_path /weaknet/*"));
@@ -442,7 +487,7 @@ mod tests {
         assert!(cf.contains("reverse_proxy 127.0.0.1:9810"), "渲染字面量（缺省口）");
         // 生成形不吃 env 占位 [w批2 F3②]（模板注释含 dollar-brace 字样是说明文，非指令）
         assert!(!cf.contains(r"{$MSRTC"), "生成的反代上游必须是渲染字面量");
-        assert_eq!(weaknet_listen(), "127.0.0.1:9810");
+        assert_eq!(weaknet_listen(WEAKNET_SERVE_PORT), "127.0.0.1:9810");
         // 段序：@api 之后、静态 handle 之前
         let i_api = cf.find("handle @api").unwrap();
         let i_wn = cf.find("handle_path /weaknet").unwrap();
@@ -454,5 +499,77 @@ mod tests {
     fn templates_parse_as_yaml() {
         serde_yaml::from_str::<serde_yaml::Value>(DEVICES_TEMPLATE).expect("devices yaml");
         serde_yaml::from_str::<serde_yaml::Value>(ACCOUNTS_TEMPLATE).expect("accounts yaml");
+    }
+
+    // ---- config-unification P1: resolve_port / weaknet_listen / parse_weaknet_port ----
+
+    #[test]
+    fn resolve_port_priority() {
+        // yaml > env > default
+        assert_eq!(resolve_port(Some(9090), Some(7070), 8080), 9090);
+        assert_eq!(resolve_port(None, Some(7070), 8080), 7070);
+        assert_eq!(resolve_port(None, None, 8080), 8080);
+    }
+
+    #[test]
+    fn weaknet_listen_on_matches_constant() {
+        assert_eq!(weaknet_listen(WEAKNET_SERVE_PORT), "127.0.0.1:9810");
+        assert_eq!(weaknet_listen(9811), "127.0.0.1:9811");
+    }
+
+    #[test]
+    fn parse_weaknet_port_from_oxfile() {
+        // render → parse 闭环（自定义端口贯通）
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        touch_exec_bin(dir, "mediaservo-weaknet");
+        let out = render_oxfile(dir, Path::new("/x/bin/mediaservo-server"), "caddy", &[], 9811);
+        assert_eq!(parse_weaknet_port(&out), Some(9811));
+        // 缺省口
+        let out = render_oxfile(
+            dir,
+            Path::new("/x/bin/mediaservo-server"),
+            "caddy",
+            &[],
+            WEAKNET_SERVE_PORT,
+        );
+        assert_eq!(parse_weaknet_port(&out), Some(9810));
+        // 无 weaknet 条目 → None
+        let tmp2 = tempfile::tempdir().expect("tempdir");
+        let none = render_oxfile(tmp2.path(), Path::new("/x/bin/s"), "caddy", &[], 9810);
+        assert_eq!(parse_weaknet_port(&none), None);
+        assert_eq!(parse_weaknet_port("garbage"), None);
+    }
+
+    #[test]
+    fn sfu_defaults_match_templates() {
+        // 常量与 serde 缺省互证（防漂移）
+        assert_eq!(WEAKNET_SERVE_PORT, 9810);
+        assert_eq!(DEFAULT_WEB_PORT, 8080);
+        use mediaservo_common::config::{ServerConfig, SfuConfig, WebConfig};
+        let cfg: ServerConfig = serde_yaml::from_str("listen: {}").expect("parse");
+        assert_eq!(cfg.sfu, SfuConfig::default());
+        assert_eq!(cfg.sfu.port, None);
+        assert_eq!(cfg.sfu.weaknet_port, None);
+        assert_eq!(cfg.web, WebConfig::default());
+    }
+
+    #[test]
+    fn new_template_roundtrip() {
+        // 模板（含新注释块）解析 ✓ 且新键全 None + 往返全等
+        use mediaservo_common::config::ServerConfig;
+        let yaml = render_server_yaml("p", "j");
+        let cfg: ServerConfig = serde_yaml::from_str(&yaml).expect("template must parse");
+        assert_eq!(cfg.web.port, None);
+        assert_eq!(cfg.web.static_root, None);
+        assert_eq!(cfg.sfu.port, None);
+        assert_eq!(cfg.sfu.weaknet_port, None);
+        let re: ServerConfig =
+            serde_yaml::from_str(&serde_yaml::to_string(&cfg).unwrap()).expect("roundtrip");
+        assert_eq!(re.web, cfg.web);
+        assert_eq!(re.sfu, cfg.sfu);
+        // 模板含注释形新键示例（R5 防漂移锚点）
+        assert!(yaml.contains("web:"));
+        assert!(yaml.contains("weaknet_port:"));
     }
 }

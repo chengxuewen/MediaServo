@@ -103,6 +103,10 @@ pub struct PushConfig {
     /// （LocalEnvelope 信封 wire，无 PSK；整车 PSK 在 agent 远端）；
     /// None = 直连 server（PSK 认证）。
     pub gateway_src: Option<String>,
+    /// peer_id 唯一化后缀（producer-label 设备房形态必需）：None = 纯 role 名
+    /// （"host"，多会话同房冲突——PIT-65 同款）；Some(s) = "host-s"。
+    /// host-streamer 传 stream.id，同流重启自然顶替自己的旧会话（接管语义正确）。
+    pub peer_suffix: Option<String>,
 }
 
 impl PushConfig {
@@ -122,6 +126,7 @@ impl PushConfig {
             min_bitrate_kbps: None,
             keyframe_interval: 2,
             gateway_src: None,
+            peer_suffix: None,
         }
     }
 
@@ -134,6 +139,12 @@ impl PushConfig {
     /// 启用本地网关模式（链式；供配置复用）。
     pub fn with_gateway(mut self, src: impl Into<String>) -> Self {
         self.gateway_src = Some(src.into());
+        self
+    }
+
+    /// peer_id 唯一化后缀（链式；设备房多流同房必备——peer 冲突 PIT-65 同款）。
+    pub fn with_peer_suffix(mut self, suffix: impl Into<String>) -> Self {
+        self.peer_suffix = Some(suffix.into());
         self
     }
 }
@@ -172,6 +183,9 @@ pub struct PublishOptions {
     pub codec: String,
     /// 编码器后端（auto/software/hardware）。
     pub encoder_backend: String,
+    /// producer-label T3: 流业务标签（如 "fl"）——Produce 透传 + NewProducer 回带；
+    /// None = 旧 host 形（消费端第一路回退）。additive。
+    pub label: Option<String>,
 }
 
 impl Default for PublishOptions {
@@ -179,6 +193,7 @@ impl Default for PublishOptions {
         Self {
             codec: "vp8".to_string(),
             encoder_backend: "auto".to_string(),
+            label: None,
         }
     }
 }

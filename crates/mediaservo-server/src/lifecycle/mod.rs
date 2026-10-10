@@ -18,8 +18,9 @@ use std::process::Command;
 
 use templates::{
     DEFAULT_WEB_PORT, WEAKNET_APP, WEAKNET_SERVE_PORT, gen_secret, instance_daemon_port,
-    oxfile_has_weaknet, parse_listen_port, parse_web_port, render_admin_account, render_caddyfile,
-    render_oxfile, render_server_yaml, server_product, server_web_app, weaknet_listen,
+    oxfile_has_weaknet, parse_listen_port, parse_weaknet_port, parse_web_port,
+    render_admin_account, render_caddyfile, render_oxfile, render_server_yaml, resolve_port,
+    server_product, server_web_app, weaknet_listen,
 };
 
 /// 管理面子命令表（main.rs 派发判据）。`run` 不在此列——它走守护模式（显式形态）。
@@ -140,21 +141,21 @@ fn init_instance(dir: &Path) -> Result<(), String> {
     // ③ admin 引导账号（env 提供且尚无任何 admin 时追加——entrypoint ⑤ 归位）
     bootstrap_admin_from_env(&etc.join("accounts.yaml"))?;
 
-    // ④ Caddyfile（web 端口 env MEDIASERVO_WEB_PORT 可覆盖——多实例/drill 友好）
+    // ④ Caddyfile（config-unification P1 读序：yaml > env MEDIASERVO_WEB_PORT > 缺省 8080）
     let caddy_path = etc.join("Caddyfile");
-    let web_port = std::env::var("MEDIASERVO_WEB_PORT")
+    let yaml_cfg = std::fs::read_to_string(&cfg_path)
         .ok()
-        .and_then(|v| v.parse::<u16>().ok())
-        .unwrap_or(DEFAULT_WEB_PORT);
+        .and_then(|c| serde_yaml::from_str::<mediaservo_common::config::ServerConfig>(&c).ok());
+    let (web_port, web_root_override, weaknet_port) = resolved_ports(yaml_cfg.as_ref());
     let backend_port =
         std::fs::read_to_string(&cfg_path).ok().and_then(|c| parse_listen_port(&c)).unwrap_or(9800);
     if caddy_path.exists() {
         eprintln!("init: {} 已存在，跳过", caddy_path.display());
     } else {
-        let root = absolute(&dir.join("web"));
+        let root = web_root_override.unwrap_or_else(|| absolute(&dir.join("web")));
         std::fs::write(
             &caddy_path,
-            render_caddyfile(web_port, backend_port, &root, &weaknet_listen()),
+            render_caddyfile(web_port, backend_port, &root, &weaknet_listen(weaknet_port)),
         )
         .map_err(|e| format!("写入 Caddyfile 失败: {e}"))?;
         println!("已生成 {}（:{web_port} → 127.0.0.1:{backend_port}）", caddy_path.display());
@@ -175,11 +176,31 @@ fn init_instance(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// 统一端口读序（config-unification P1）：yaml(Option 字段) > env > 常量缺省。
+/// init ④ 与 write_oxfile 共用——消灭双份读序漂移。yaml_cfg=None（缺文件/解析失败）= 全兜底。
+fn resolved_ports(
+    yaml_cfg: Option<&mediaservo_common::config::ServerConfig>,
+) -> (u16, Option<std::path::PathBuf>, u16) {
+    let env_u16 = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<u16>().ok());
+    let web = yaml_cfg.map(|c| &c.web);
+    let sfu = yaml_cfg.map(|c| &c.sfu);
+    let web_port =
+        resolve_port(web.and_then(|w| w.port), env_u16("MEDIASERVO_WEB_PORT"), DEFAULT_WEB_PORT);
+    let weaknet_port = resolve_port(sfu.and_then(|s| s.weaknet_port), None, WEAKNET_SERVE_PORT);
+    let root = web.and_then(|w| w.static_root.clone()).map(std::path::PathBuf::from);
+    (web_port, root, weaknet_port)
+}
+
 /// 写 run/oxfile.toml（init 与 start-缺文件兜底共用）。
 fn write_oxfile(run_dir: &Path) -> Result<(), String> {
     let dir = run_dir.parent().ok_or("oxfile 渲染需实例根目录")?;
     let bin = std::env::current_exe().map_err(|e| format!("current_exe 失败: {e}"))?;
-    let ox = render_oxfile(&absolute(dir), &bin, &caddy_command(), &sfu_env_passthrough());
+    let yaml_cfg = std::fs::read_to_string(dir.join("etc").join("server.yaml"))
+        .ok()
+        .and_then(|c| serde_yaml::from_str::<mediaservo_common::config::ServerConfig>(&c).ok());
+    let (_, _, weaknet_port) = resolved_ports(yaml_cfg.as_ref());
+    let ox =
+        render_oxfile(&absolute(dir), &bin, &caddy_command(), &sfu_env_passthrough(), weaknet_port);
     let path = run_dir.join("oxfile.toml");
     std::fs::write(&path, ox).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
     println!("已生成 {}", path.display());
@@ -188,6 +209,15 @@ fn write_oxfile(run_dir: &Path) -> Result<(), String> {
         "提示: 若本树此前存在手工 [apps.env] 行（ALLOW_DEV_*/RUST_LOG/WEAKNET_ADMIN_PASS），本次渲染不含它们——按 msrtc.sh -h「环境变量 [B]」回补"
     );
     Ok(())
+}
+
+/// weaknet 探针口 = oxfile 反解（`serve --listen 127.0.0.1:NNNN`）——与渲染产物同源；
+/// 反解失败（旧 oxfile 无条目/手工损形）回退缺省常量。
+fn weaknet_probe_port(oxfile: &Path) -> u16 {
+    std::fs::read_to_string(oxfile)
+        .ok()
+        .and_then(|t| parse_weaknet_port(&t))
+        .unwrap_or(WEAKNET_SERVE_PORT)
 }
 
 /// init 时把 SFU 相关 env 烘进 oxfile [apps.env]（drill/多实例端口隔离入口）。
@@ -218,9 +248,9 @@ fn caddy_probe() -> Option<String> {
         }
     }
     // ③ 仓内 pixi 树（源码机直跑 target/debug 形态；构建期路径，跨机部署由 ② 接管）
-    for cand in [
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.pixi/envs/default/bin/caddy"),
-    ] {
+    for cand in
+        [PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.pixi/envs/default/bin/caddy")]
+    {
         let p = cand.canonicalize().unwrap_or(cand.clone());
         if p.is_file() {
             return Some(p.to_string_lossy().into_owned());
@@ -378,9 +408,10 @@ fn start_impl(dir: &Path, no_web_flag: bool, verb: &str) -> i32 {
         busy = Some(("后端监听口", port));
     } else if !no_web && inspect::port_in_use(web_port) {
         busy = Some(("web 口", web_port));
-    } else if weaknet_cluster && inspect::port_in_use(WEAKNET_SERVE_PORT) {
-        // BA-9：外部 dev serve 占 9810 时簇带 crash-loop unit 假「running」——被占报因拒启
-        busy = Some(("weaknet 面板口", WEAKNET_SERVE_PORT));
+    } else if weaknet_cluster && inspect::port_in_use(weaknet_probe_port(&oxfile)) {
+        // BA-9：外部 dev serve 占 weaknet 口时簇带 crash-loop unit 假「running」——被占报因拒启
+        // 探针口 = oxfile 反解（与渲染同源；反解失败回退常量——config-unification P1）
+        busy = Some(("weaknet 面板口", weaknet_probe_port(&oxfile)));
     }
     if let Some((what, p)) = busy {
         return contention_flow(verb, dir, what, p, no_web);
@@ -497,18 +528,18 @@ fn stop_cluster(dir: &Path) -> i32 {
         // （C37 as-found 纪律自查面：stop 假成功会毒化后续 start/验证——今天的实录。）
         let mut verified = false;
         for _ in 0..10 {
-            let residual: Vec<String> = names
-                .iter()
-                .filter(|nm| !conflict::diagnose_app_gone(nm))
-                .cloned()
-                .collect();
+            let residual: Vec<String> =
+                names.iter().filter(|nm| !conflict::diagnose_app_gone(nm)).cloned().collect();
             if residual.is_empty() {
                 verified = true;
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(500));
             if !residual.is_empty() {
-                eprintln!("stop: 残留进程 {} —— 可能 crash-restart 中，建议手动复核", residual.join(","));
+                eprintln!(
+                    "stop: 残留进程 {} —— 可能 crash-restart 中，建议手动复核",
+                    residual.join(",")
+                );
             }
         }
         println!(
@@ -702,5 +733,60 @@ mod tests {
     fn dir_flag_guard_rejects_dashdash() {
         let mut it = ["--dir".to_string(), "/tmp/x".to_string()].into_iter();
         assert!(parse_dir(&mut it).is_err(), "--dir 类笔误必须拒绝（host init --dir 事故同训）");
+    }
+
+    // ---- config-unification P1: yaml 端口键贯通 init 渲染产物 ----
+
+    #[test]
+    fn init_caddyfile_uses_yaml_web_port() {
+        // PIT-13 正对照：断言具体渲染值，非仅"无告警"
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        init_instance(dir).expect("first init");
+        // 覆盖 server.yaml 加 web.port，删 Caddyfile 后重 init（PIT-160 语义：缺失才写）
+        let cfg = dir.join("etc").join("server.yaml");
+        let text = std::fs::read_to_string(&cfg).expect("read");
+        std::fs::write(&cfg, format!("{text}\nweb:\n  port: 9080\n")).expect("write");
+        std::fs::remove_file(dir.join("etc").join("Caddyfile")).expect("rm caddyfile");
+        init_instance(dir).expect("re-init");
+        let cf = std::fs::read_to_string(dir.join("etc").join("Caddyfile")).expect("read cf");
+        assert!(cf.contains(":9080 {"), "yaml web.port 必须渲染进 Caddyfile 站点地址");
+        assert!(!cf.contains(":8080"), "缺省口不得残留在站点地址");
+    }
+
+    #[test]
+    fn init_weaknet_yaml_port_flows_to_oxfile_and_caddyfile() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        init_instance(dir).expect("first init");
+        let cfg = dir.join("etc").join("server.yaml");
+        let text = std::fs::read_to_string(&cfg).expect("read");
+        std::fs::write(&cfg, format!("{text}\nsfu:\n  weaknet_port: 9811\n")).expect("write");
+        // 重渲 oxfile（write_oxfile 单点——删掉让 init 重建）
+        std::fs::remove_file(dir.join("run").join("oxfile.toml")).expect("rm oxfile");
+        // oxfile 条件渲染需要 bin/weaknet 在场；无 bin 时只验 Caddyfile 侧
+        std::fs::remove_file(dir.join("etc").join("Caddyfile")).expect("rm cf");
+        init_instance(dir).expect("re-init");
+        let cf = std::fs::read_to_string(dir.join("etc").join("Caddyfile")).expect("read cf");
+        assert!(cf.contains("reverse_proxy 127.0.0.1:9811"), "weaknet_port 渲染进 Caddyfile 上游");
+        // oxfile：手工造 bin 后直接调 write_oxfile 验证两产物同源
+        std::fs::create_dir_all(dir.join("bin")).expect("mkdir bin");
+        std::fs::write(dir.join("bin").join("mediaservo-weaknet"), b"#!/bin/sh\n")
+            .expect("write bin");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                dir.join("bin").join("mediaservo-weaknet"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .expect("chmod");
+        }
+        write_oxfile(&dir.join("run")).expect("write oxfile");
+        let ox = std::fs::read_to_string(dir.join("run").join("oxfile.toml")).expect("read ox");
+        assert!(
+            ox.contains("serve --listen 127.0.0.1:9811"),
+            "weaknet_port 渲染进 oxfile --listen（两产物同源）"
+        );
     }
 }

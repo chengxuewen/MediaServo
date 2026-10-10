@@ -28,7 +28,7 @@ pub struct HostConfig {
 
     /// Room configuration.
     #[serde(default)]
-pub room: RoomConfig,
+    pub room: RoomConfig,
 
     /// SFU produce mode (mediasoup). When true, host pushes via SFU instead of P2P.
     #[serde(default)]
@@ -58,7 +58,6 @@ pub struct ServerConfig {
     /// JWT secret for admin API authentication (optional).
     #[serde(default)]
     pub admin_jwt_secret: Option<String>,
-
 
     /// Rate limit (requests per second per connection).
     #[serde(default = "default_rate_limit")]
@@ -100,16 +99,54 @@ pub struct ServerConfig {
     /// SFU 配置（mediasoup WebRtcServer）。
     #[serde(default)]
     pub sfu: SfuConfig,
+
+    /// Web 静态层（caddy）配置。缺省全 None = 现行为（8080 + 实例 `web/`）。
+    #[serde(default)]
+    pub web: WebConfig,
 }
 
 /// SFU（mediasoup WebRtcServer）配置。
-#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+///
+/// ⚠️ 手写 Default（勿改回 derive）：`Option<u16>` 字段若 derive(Default)
+/// 不会出问题，但历史教训是 u16 数值字段 derive 会得 0；手写集中管控，
+/// 钉死测试 `default_impl_matches_serde_absent`。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct SfuConfig {
     /// 对外公告地址（多网卡/多网络可达 IP，如 `["192.168.2.127", "10.144.0.3"]`）。
     /// 优先级: env `MEDIASERVO_SFU_ANNOUNCED_IP` > 本字段 > 自动探测（出网 IP）。
     /// mediasoup 要求 0.0.0.0 必须配 announced（PIT-44/58/138——容器内探测不可达）。
     #[serde(default)]
     pub announced_ips: Vec<String>,
+    /// mediasoup WebRtcServer 监听口。None = env `MEDIASERVO_SFU_PORT` 兜底 → 20000。
+    #[serde(default)]
+    pub port: Option<u16>,
+    /// weaknet-serve 面板口。None = 9810（`WEAKNET_SERVE_PORT` 常量）。仅改端口数字，恒 loopback。
+    #[serde(default)]
+    pub weaknet_port: Option<u16>,
+}
+
+impl Default for SfuConfig {
+    fn default() -> Self {
+        Self { announced_ips: Vec::new(), port: None, weaknet_port: None }
+    }
+}
+
+/// Web 静态层（caddy）配置 — server.yaml `web:` 段（init 渲染 Caddyfile 的单一来源）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WebConfig {
+    /// Caddy 对外端口。None = env `MEDIASERVO_WEB_PORT` 兜底 → 8080。
+    /// Option 而非带值缺省的原因：区分“用户写 8080”与“serde 填 8080”，保 env 兜底语义存活。
+    #[serde(default)]
+    pub port: Option<u16>,
+    /// 静态站点根目录。None = 实例目录 `web/`。相对路径按实例根目录解析。
+    #[serde(default)]
+    pub static_root: Option<String>,
+}
+
+impl Default for WebConfig {
+    fn default() -> Self {
+        Self { port: None, static_root: None }
+    }
 }
 
 /// Config for mediaservo-client (pull + decode + control — cockpit/operator side).
@@ -256,7 +293,6 @@ pub struct TlsConfig {
     pub key_path: String,
 }
 
-
 // --- Defaults ---
 
 fn default_version() -> u8 {
@@ -284,8 +320,8 @@ fn default_codec() -> String {
     "auto".to_string()
 }
 fn default_gop() -> u32 {
-// PIT-76: 语义从帧改为秒（周期关键帧触发间隔）
-2
+    // PIT-76: 语义从帧改为秒（周期关键帧触发间隔）
+    2
 }
 fn default_room_capacity() -> usize {
     10
@@ -297,7 +333,9 @@ fn default_rate_limit() -> u32 {
 fn default_ws_max_message_size() -> usize {
     65536
 }
-fn default_api_token_ttl() -> u64 { 43200 }
+fn default_api_token_ttl() -> u64 {
+    43200
+}
 
 fn default_consumer_limit_per_stream() -> usize {
     50
@@ -345,7 +383,7 @@ webrtc:
         assert_eq!(parsed.capture.device.as_deref(), Some("/dev/video0"));
         assert_eq!(parsed.encoder.backend, "nvenc");
         assert_eq!(parsed.encoder.bitrate_kbps, 4000);
-        assert_eq!(parsed.encoder.keyframe_interval, 2);  // PIT-76: 秒
+        assert_eq!(parsed.encoder.keyframe_interval, 2); // PIT-76: 秒
         assert_eq!(parsed.psk.as_deref(), Some("secret123"));
         assert_eq!(parsed.webrtc.as_ref().unwrap().ice_timeout_secs, 45);
 
@@ -462,7 +500,7 @@ backend: "software"
         let parsed: EncoderConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(parsed.backend, "software");
         assert_eq!(parsed.bitrate_kbps, 2000);
-        assert_eq!(parsed.keyframe_interval, 2);  // PIT-76: 秒
+        assert_eq!(parsed.keyframe_interval, 2); // PIT-76: 秒
     }
 
     #[test]
@@ -538,10 +576,7 @@ consumer_limit_per_stream: 100
         assert!(cfg.validate_bitrate().is_ok());
 
         // 只设 max → OK
-        let cfg = EncoderConfig {
-            max_bitrate_kbps: Some(4000),
-            ..cfg.clone()
-        };
+        let cfg = EncoderConfig { max_bitrate_kbps: Some(4000), ..cfg.clone() };
         assert!(cfg.validate_bitrate().is_ok());
 
         // min < max → OK
@@ -567,5 +602,77 @@ consumer_limit_per_stream: 100
             ..cfg.clone()
         };
         assert!(cfg.validate_bitrate().is_err());
+    }
+
+    // ---- config-unification P1: web/sfu 端口键（additive, 旧 yaml 零改动） ----
+
+    #[test]
+    fn server_config_old_yaml_backward_compat() {
+        // 1.1 版前的完整旧 yaml（含 sfu 旧形）→ 新键全 None = env/default 兜底存活
+        let yaml = r#"
+version: 1
+listen: {host: "0.0.0.0", port: 9800}
+room_capacity: 50
+psk: "old-psk"
+jwt_secret: "old-jwt"
+admin_jwt_secret: "old-jwt"
+rate_limit: 100
+consumer_limit_per_stream: 50
+devices_file: "devices.yaml"
+accounts_file: "accounts.yaml"
+sfu:
+  announced_ips: ["192.168.2.127"]
+"#;
+        let cfg: ServerConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.web.port, None);
+        assert_eq!(cfg.web.static_root, None);
+        assert_eq!(cfg.sfu.port, None);
+        assert_eq!(cfg.sfu.weaknet_port, None);
+        assert_eq!(
+            cfg.sfu.announced_ips,
+            vec!["192.168.2.127"].iter().map(|s| s.to_string()).collect::<Vec<String>>()
+        );
+        // roundtrip 全等
+        let re: ServerConfig = serde_yaml::from_str(&serde_yaml::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(re.sfu.weaknet_port, None);
+        assert_eq!(re.sfu.port, None);
+        assert_eq!(re.web, cfg.web);
+    }
+
+    #[test]
+    fn web_config_full_partial_absent() {
+        // full
+        let full: WebConfig = serde_yaml::from_str("{port: 9000, static_root: /var/www}").unwrap();
+        assert_eq!(full.port, Some(9000));
+        assert_eq!(full.static_root.as_deref(), Some("/var/www"));
+        // empty
+        let empty: WebConfig = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(empty, WebConfig::default());
+        // absent → ServerConfig 层 default
+        let parsed: ServerConfig = serde_yaml::from_str("listen: {}").unwrap();
+        assert_eq!(parsed.web, WebConfig::default());
+    }
+
+    #[test]
+    fn sfu_config_port_keys() {
+        // 两端口键同时解析
+        let sfu: SfuConfig = serde_yaml::from_str("{port: 21000, weaknet_port: 9811}").unwrap();
+        assert_eq!(sfu.port, Some(21000));
+        assert_eq!(sfu.weaknet_port, Some(9811));
+        // announced_ips 单独在场 → 两端口仍 None（per-field 缺省不串味）
+        let sfu: SfuConfig = serde_yaml::from_str("{announced_ips: [x]}").unwrap();
+        assert_eq!(sfu.port, None);
+        assert_eq!(sfu.weaknet_port, None);
+    }
+
+    #[test]
+    fn default_impl_matches_serde_absent() {
+        // 防未来有人改回 derive(Default) 引入 port=0 回归
+        let parsed: SfuConfig = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(parsed, SfuConfig::default());
+        assert_eq!(parsed.port, None);
+        assert_eq!(parsed.weaknet_port, None);
+        let parsed: WebConfig = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(parsed, WebConfig::default());
     }
 }

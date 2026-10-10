@@ -417,6 +417,7 @@ async fn e2e_sfu_host_produce() {
                 "rtcp": {"reducedSize": true}
             }),
             transport_id: None, // legacy 路径回归
+            label: None,
         };
         ws.send(WsMsg::Text(serde_json::to_string(&produce).unwrap())).await.unwrap();
         let produced: SignalingMessage = loop {
@@ -693,6 +694,7 @@ async fn e2e_sfu_full_pipeline() {
                 "rtcp": {"reducedSize": true}
             }),
             transport_id: None, // legacy 路径回归
+            label: None,
         };
         ws.send(WsMsg::Text(serde_json::to_string(&produce).unwrap())).await.unwrap();
         let produced: SignalingMessage = loop {

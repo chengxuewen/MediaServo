@@ -212,6 +212,7 @@ async fn publish_audio(
             rtp_parameters: audio::build_audio_produce_rtp_parameters(&rtp_params),
             // C1: 指名绑定本会话的 send transport（host 子进程共享 peer_id 防串线）
             transport_id: Some(send_tid),
+            label: None, // producer-label T3: 音频暂不带业务标签
         })
         .await
         .map_err(|e| format!("produce: {e}"))?;

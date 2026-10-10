@@ -234,6 +234,7 @@ async fn multiple_clients_forward_with_room_rewrite() {
                 producer_id: "p1".into(),
                 peer_id: VEHICLE_PEER.into(),
                 kind: MediaKind::Video,
+                label: None,
             })
             .unwrap(),
         ))
@@ -354,6 +355,7 @@ async fn concurrent_sfu_negotiation_routes_responses() {
                 producer_id: "p9".into(),
                 peer_id: VEHICLE_PEER.into(),
                 kind: MediaKind::Video,
+                label: None,
             })
             .unwrap(),
         ))

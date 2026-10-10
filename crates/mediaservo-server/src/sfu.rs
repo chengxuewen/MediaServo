@@ -296,6 +296,9 @@ mod imp {
     pub struct SfuRoom {
         pub router: Arc<Router>,
         pub peers: DashMap<String, SfuPeer>,
+        /// producer-label T1.3: producer_id → 业务标签（Produce.label; late-join 回放源;
+        /// 空 map 兼容旧 host 无标签形）
+        pub producer_labels: DashMap<String, String>,
     }
 
     /// H3: 管理面板房间列表摘要（音频会议面板数据源）。
@@ -503,7 +506,7 @@ mod imp {
 
             self.rooms.insert(
                 room_id.to_string(),
-                SfuRoom { router: Arc::clone(&router), peers: DashMap::new() },
+                SfuRoom { router: Arc::clone(&router), peers: DashMap::new(), producer_labels: DashMap::new() },
             );
             Ok(router)
         }
@@ -798,6 +801,7 @@ mod imp {
             kind: &protocol::MediaKind,
             rtp_parameters_json: serde_json::Value,
             transport_id: Option<&str>,
+            label: Option<String>,
         ) -> Result<ProduceResult, String> {
             // Convert JSON RTP parameters to mediasoup type
             let rtp_parameters: RtpParameters = serde_json::from_value(rtp_parameters_json)
@@ -845,6 +849,12 @@ mod imp {
             let bound_transport_id = transport.id().to_string();
             peer.producers.push(producer);
             peer.producer_transports.insert(producer_id.clone(), bound_transport_id);
+            // producer-label T1.3: 记录业务标签（late-join 回放源; None 不记）。
+            // 死锁教训（PIT）: 必须复用已持有的 room 守卫（get_mut 写锁中）——重入
+            // self.rooms.get() 同 shard 读锁 = 同任务自锁死（DashMap 不可重入）。
+            if let Some(l) = label {
+                room.producer_labels.insert(producer_id.clone(), l);
+            }
             Ok(ProduceResult { producer_id, kind: kind.clone() })
         }
 
@@ -1203,7 +1213,7 @@ mod imp {
         pub fn list_producers(
             &self,
             room_id: &str,
-        ) -> Option<Vec<(String, protocol::MediaKind, String)>> {
+        ) -> Option<Vec<(String, protocol::MediaKind, String, Option<String>)>> {
             let room = self.rooms.get(room_id)?;
             let mut result = Vec::new();
             for entry in room.peers.iter() {
@@ -1216,7 +1226,15 @@ mod imp {
                     result.push((producer.id().to_string(), kind, peer_id.clone()));
                 }
             }
-            Some(result)
+            // producer-label T1.3: 收集完再查 labels（避免 DashMap 双重 get 借用冲突）
+            let labeled: Vec<_> = result
+                .into_iter()
+                .map(|(pid, kind, peer)| {
+                    let label = room.producer_labels.get(pid.as_str()).map(|l| l.value().clone());
+                    (pid, kind, peer, label)
+                })
+                .collect();
+            Some(labeled)
         }
 
         /// PIT-183：该房是否仍有活 producer（守卫连坐销毁用）。
@@ -2007,6 +2025,7 @@ mod imp {
                     &protocol::MediaKind::Video,
                     rtp.clone(),
                     Some(&t1),
+                    None,
                 )
                 .await
                 .expect("p1");
@@ -2017,6 +2036,7 @@ mod imp {
                     &protocol::MediaKind::Video,
                     rtp.clone(),
                     Some(&t2),
+                    None,
                 )
                 .await
                 .expect("p2");
@@ -2032,7 +2052,7 @@ mod imp {
             );
             // legacy 客户端回退: 无 transport_id → 最近创建（单槽语义保持）
             let p3 = sfu
-                .create_producer("room-c1", "host", &protocol::MediaKind::Video, rtp, None)
+                .create_producer("room-c1", "host", &protocol::MediaKind::Video, rtp, None, None)
                 .await
                 .expect("p3");
             assert_eq!(
@@ -2135,6 +2155,7 @@ mod imp {
             _kind: &protocol::MediaKind,
             _rtp_parameters_json: serde_json::Value,
             _transport_id: Option<&str>,
+            _label: Option<String>,
         ) -> Result<ProduceResult, String> {
             Err("sfu-mediasoup feature not enabled".into())
         }

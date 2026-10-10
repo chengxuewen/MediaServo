@@ -68,7 +68,8 @@ fn bad_args_exit_2_with_usage() {
     assert!(log.contains("用法"), "必须输出用法: {log}");
 
     // 非 audio- 房间
-    let (code, log) = run_audio(&["--room", "ms-car1", "--server", "ws://127.0.0.1:1/ws", "--psk", "x"], 10);
+    let (code, log) =
+        run_audio(&["--room", "ms-car1", "--server", "ws://127.0.0.1:1/ws", "--psk", "x"], 10);
     assert_eq!(code, 2, "非 audio- 房间必须 exit 2: {log}");
     assert!(log.contains("audio-<vehicle>"), "必须提示房间约定: {log}");
 }
@@ -79,24 +80,11 @@ fn bad_args_exit_2_with_usage() {
 fn audio_process_publishes_and_exits_clean() {
     let url = ws_url();
     let room = format!("audio-e2e-proc-{}", std::process::id());
-    let (code, log) = run_audio(
-        &[
-            "--server", &url,
-            "--psk", &psk(),
-            "--room", &room,
-            "--duration", "6",
-        ],
-        30,
-    );
+    let (code, log) =
+        run_audio(&["--server", &url, "--psk", &psk(), "--room", &room, "--duration", "6"], 30);
     assert_eq!(code, 0, "host-audio 必须优雅退出 0: {log}");
-    assert!(
-        log.contains(&format!("已加入音频房间 {room}")),
-        "必须加入音频房间: {log}"
-    );
-    assert!(
-        log.contains("published producer"),
-        "必须成功 publish opus: {log}"
-    );
+    assert!(log.contains(&format!("已加入音频房间 {room}")), "必须加入音频房间: {log}");
+    assert!(log.contains("published producer"), "必须成功 publish opus: {log}");
     // I4 re-review: PCM 推流成功计数（stats 日志 pushed_pcm=N）— tone 任务静默
     // 失败（write_frame 全 Err）→ pushed_pcm=0 → 测试失败。
     let pushed_line = log
@@ -119,7 +107,6 @@ fn audio_process_publishes_and_exits_clean() {
 /// ② host-audio --gateway 全流程（join + publish + 优雅退出 0）③ 整车房间含 host。
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn audio_through_gateway_reaches_audio_room() {
-    
     use mediaservo_common::protocol::{MediaKind, SignalingMessage, TransportDirection};
     use mediaservo_link::{SignalClient, SignalEvent};
 
@@ -130,11 +117,7 @@ async fn audio_through_gateway_reaches_audio_room() {
 
     // host-agent（本地网关）: 随机端口 + 远端指真 server
     let mut agent = Command::new(env!("CARGO_BIN_EXE_host-agent"))
-        .args([
-            "--port", &gw_port.to_string(),
-            "--remote", &url,
-            "--room", &vehicle_room,
-        ])
+        .args(["--port", &gw_port.to_string(), "--remote", &url, "--room", &vehicle_room])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -145,10 +128,15 @@ async fn audio_through_gateway_reaches_audio_room() {
 
     // ① 网关模式 probe: audio- 房间 produce 视频 → 4031（服务端音频房间门生效）
     let gw_url = format!("ws://127.0.0.1:{gw_port}/ws");
-    let probe = SignalClient::new_gateway(&gw_url, "audio-probe", &audio_room, mediaservo_common::protocol::PeerRole::Consumer)
-        .connect()
-        .await
-        .expect("probe 经网关 join 音频房间");
+    let probe = SignalClient::new_gateway(
+        &gw_url,
+        "audio-probe",
+        &audio_room,
+        mediaservo_common::protocol::PeerRole::Consumer,
+    )
+    .connect()
+    .await
+    .expect("probe 经网关 join 音频房间");
     probe
         .send(SignalingMessage::CreateWebRtcTransport {
             room_id: audio_room.clone(),
@@ -160,7 +148,9 @@ async fn audio_through_gateway_reaches_audio_room() {
     let mut events = probe.events();
     let transport_ok = loop {
         match events.recv().await {
-            Ok(SignalEvent::Message(SignalingMessage::WebRtcTransportCreated { .. })) => break true,
+            Ok(SignalEvent::Message(SignalingMessage::WebRtcTransportCreated { .. })) => {
+                break true;
+            }
             Ok(SignalEvent::Message(SignalingMessage::Error { code, message })) => {
                 panic!("probe transport error {code}: {message}")
             }
@@ -183,6 +173,8 @@ async fn audio_through_gateway_reaches_audio_room() {
                 "rtcp": {"reducedSize": true}
             }),
             transport_id: None, // legacy 路径回归
+
+            label: None,
         })
         .await
         .expect("probe produce");
@@ -213,19 +205,10 @@ async fn audio_through_gateway_reaches_audio_room() {
     probe.close().await.expect("probe close");
 
     // ② host-audio 经网关全流程
-    let (code, log) = run_audio(
-        &[
-            "--gateway", &gw_url,
-            "--room", &audio_room,
-            "--duration", "6",
-        ],
-        30,
-    );
+    let (code, log) =
+        run_audio(&["--gateway", &gw_url, "--room", &audio_room, "--duration", "6"], 30);
     assert_eq!(code, 0, "host-audio 经网关必须优雅退出 0: {log}");
-    assert!(
-        log.contains(&format!("已加入音频房间 {audio_room}")),
-        "经网关必须加入音频房间: {log}"
-    );
+    assert!(log.contains(&format!("已加入音频房间 {audio_room}")), "经网关必须加入音频房间: {log}");
     assert!(log.contains("published producer"), "经网关必须 publish: {log}");
 
     // SIGTERM → 网关优雅退出 0

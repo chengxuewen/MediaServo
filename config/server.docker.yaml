@@ -24,3 +24,13 @@ sfu:
   announced_ips:
     - "192.168.2.127"
     - "10.144.0.3"
+
+# Web 静态层（caddy）——缺省 8080 / 实例 web/；env MEDIASERVO_WEB_PORT 兜底（yaml 配置优先，C35 同形）。
+# web:
+#   port: 8080
+#   static_root: "/abs/web"
+#
+# SFU/weaknet 端口 —— 缺省 20000 / 9810（env MEDIASERVO_SFU_PORT 兜底 sfu.port）。
+# sfu:
+#   port: 20000
+#   weaknet_port: 9811

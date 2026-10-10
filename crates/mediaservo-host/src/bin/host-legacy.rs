@@ -467,6 +467,7 @@ async fn main() -> anyhow::Result<()> {
             rtp_parameters: sfu_media::build_produce_rtp_parameters_from_rtp(&rtp_params),
             // C1: 指名绑定本会话的 send transport（防多会话共享 peer_id 串线）
             transport_id: Some(transport_id.clone()),
+            label: None, // producer-label T3: legacy 链路保持旧形
         };
         let json = serde_json::to_string(&produce)?;
         match tokio::time::timeout(Duration::from_secs(10), ws_sender.send(Message::Text(json)))

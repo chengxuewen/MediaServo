@@ -364,7 +364,8 @@ async fn e2e_sfu_consume_pipeline() {
             kind: mediaservo_common::protocol::MediaKind::Video,
             rtp_parameters: serde_json::json!({"mid": "0", "codecs": [{"mimeType": "video/VP8", "payloadType": 100, "clockRate": 90000}], "headerExtensions": [], "encodings": [{"ssrc": 12345}], "rtcp": {"reducedSize": true}}),
             transport_id: Some(send_tid.clone()), // C1: 指名绑定本会话 transport
-        }).unwrap();
+
+            label: None,}).unwrap();
         ws.send(WsMsg::Text(produce)).await.unwrap();
         let prod_resp = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next())
             .await
@@ -722,7 +723,8 @@ async fn e2e_sfu_role_enforcement() {
             kind: mediaservo_common::protocol::MediaKind::Video,
             rtp_parameters: serde_json::json!({"mid": "0", "codecs": [{"mimeType": "video/VP8", "payloadType": 100, "clockRate": 90000}], "headerExtensions": [], "encodings": [{"ssrc": 12345}], "rtcp": {"reducedSize": true}}),
             transport_id: None, // legacy 路径回归
-        })
+
+            label: None,})
         .unwrap();
         ws.send(WsMsg::Text(produce)).await.unwrap();
         let prod = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next())
@@ -844,7 +846,8 @@ async fn e2e_sfu_role_enforcement() {
             kind: mediaservo_common::protocol::MediaKind::Video,
             rtp_parameters: serde_json::json!({"mid": "0", "codecs": [{"mimeType": "video/VP8", "payloadType": 100, "clockRate": 90000}], "headerExtensions": [], "encodings": [{"ssrc": 999}], "rtcp": {"reducedSize": true}}),
             transport_id: None, // legacy 路径回归
-        })
+
+            label: None,})
         .unwrap();
         ws.send(WsMsg::Text(produce)).await.unwrap();
         let resp = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next())
@@ -1381,6 +1384,8 @@ async fn e2e_audio_room_device_identity() {
                     "rtcp": {"reducedSize": true}
                 }),
                 transport_id: None, // legacy 路径回归
+
+                label: None,
             })
             .unwrap(),
         ))
