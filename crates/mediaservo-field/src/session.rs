@@ -143,7 +143,7 @@ impl PushSession {
         // 2. CreateWebRtcTransport (Send)
         let create_transport = SignalingMessage::CreateWebRtcTransport {
             room_id: cfg.room.clone(),
-            peer_id: peer_id(&cfg.role),
+            peer_id: peer_id(&cfg.role, cfg),
             direction: TransportDirection::Send,
         };
         self.signal.send(create_transport).await.map_err(FieldError::Link)?;
@@ -249,7 +249,7 @@ impl PushSession {
             .ok_or_else(|| FieldError::WebRtc("no DTLS fingerprint".into()))?;
         let connect = SignalingMessage::ConnectWebRtcTransport {
             room_id: cfg.room.clone(),
-            peer_id: peer_id(&cfg.role),
+            peer_id: peer_id(&cfg.role, cfg),
             transport_id: transport_id.clone(),
             dtls_parameters: DtlsParameters {
                 fingerprints: vec![Fingerprint { algorithm: "sha-256".to_string(), value: fp_hex }],
@@ -264,13 +264,15 @@ impl PushSession {
             .map_err(|e| FieldError::WebRtc(format!("get_sending_rtp_parameters: {e}")))?;
         let produce = SignalingMessage::Produce {
             room_id: cfg.room.clone(),
-            peer_id: peer_id(&cfg.role),
+            peer_id: peer_id(&cfg.role, cfg),
             transport_direction: TransportDirection::Send,
             kind: MediaKind::Video,
             rtp_parameters: sfu::build_produce_rtp_parameters_from_rtp(&rtp_params),
             // C1: 指名绑定本会话创建的 send transport（host 子进程共享 peer_id 时
             // 不依赖"最近创建"单槽 — 防 boot storm 串线）
             transport_id: Some(transport_id.clone()),
+            // producer-label T3: 发布标签透传（None=旧形）
+            label: opts.label.clone(),
         };
         self.signal.send(produce).await.map_err(FieldError::Link)?;
 
@@ -458,7 +460,7 @@ impl PullSession {
         self.signal
             .send(SignalingMessage::CreateWebRtcTransport {
                 room_id: cfg.room.clone(),
-                peer_id: peer_id(&cfg.role),
+                peer_id: pull_peer_id(&cfg.role),
                 direction: TransportDirection::Recv,
             })
             .await
@@ -518,7 +520,7 @@ impl PullSession {
         self.signal
             .send(SignalingMessage::Consume {
                 room_id: cfg.room.clone(),
-                peer_id: peer_id(&cfg.role),
+                peer_id: pull_peer_id(&cfg.role),
                 producer_id: producer_id.to_string(),
                 rtp_capabilities: serde_json::json!({
                     // 保持 e2e_sfu D2 验证过的最小 codec（加字段会触发 mediasoup
@@ -587,7 +589,7 @@ impl PullSession {
         self.signal
             .send(SignalingMessage::ConnectWebRtcTransport {
                 room_id: cfg.room.clone(),
-                peer_id: peer_id(&cfg.role),
+                peer_id: pull_peer_id(&cfg.role),
                 transport_id: transport_id.clone(),
                 dtls_parameters: DtlsParameters {
                     fingerprints: vec![Fingerprint {
@@ -714,12 +716,28 @@ async fn await_transport_created_msg(
     }
 }
 
-/// peer_id：复用 SignalClient 的 role 语义（host 为 "host"）。
-fn peer_id(role: &PeerRole) -> String {
+/// peer_id：复用 SignalClient 的 role 语义（host 为 "host"），
+/// `cfg.peer_suffix` 追加唯一后缀（设备房多流同房必备——6 路 streamer 同
+/// peer_id="host" 互相顶替，produce 报 "Peer host not found"（PIT-65 同款，
+/// 2026-10-09 generator3/5 黑屏根因）。
+fn pull_peer_id(role: &PeerRole) -> String {
     match role {
-        PeerRole::Host => "host".to_string(),
-        PeerRole::Remote => "remote".to_string(),
-        PeerRole::Consumer => "consumer".to_string(),
+        PeerRole::Host => "host",
+        PeerRole::Remote => "remote",
+        PeerRole::Consumer => "consumer",
+    }
+    .to_string()
+}
+
+fn peer_id(role: &PeerRole, cfg: &PushConfig) -> String {
+    let base = match role {
+        PeerRole::Host => "host",
+        PeerRole::Remote => "remote",
+        PeerRole::Consumer => "consumer",
+    };
+    match &cfg.peer_suffix {
+        Some(s) => format!("{base}-{s}"),
+        None => base.to_string(),
     }
 }
 

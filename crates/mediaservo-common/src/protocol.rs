@@ -196,6 +196,11 @@ pub enum SignalingMessage {
         /// transport_id）。None = legacy 单槽回退（最近创建的 send transport）。
         #[serde(skip_serializing_if = "Option::is_none")]
         transport_id: Option<String>,
+        /// producer-label T1（设备房+流标签, PIT-140 v2 退役前置）: 流业务标签（如 "fl"/"fm"）。
+        /// additive: 旧 server 忽略未知字段、旧 client 不带字段——双向兼容（G4 device_id 先例）。
+        /// None = 无标签（旧 host 形）——消费端按"房内第一路"回退匹配。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
     },
 
     /// Server confirms producer created.
@@ -210,6 +215,9 @@ pub enum SignalingMessage {
         producer_id: String,
         peer_id: String,
         kind: MediaKind,
+        /// producer-label T1: Produce.label 透传（None = 旧 host 无标签形）。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
     },
 
     /// v2 (web-stream-stats T1): Host 周期上报编码状态（room 广播 relay 到浏览器）。
@@ -1127,6 +1135,7 @@ mod tests {
             kind: MediaKind::Video,
             rtp_parameters: serde_json::json!({"codecs": [{"mimeType": "video/VP8"}]}),
             transport_id: Some("transport-9".into()),
+            label: Some("fl".into()),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"produce""#));
@@ -1171,6 +1180,7 @@ mod tests {
             producer_id: "prod-1".into(),
             peer_id: "peer-a".into(),
             kind: MediaKind::Audio,
+            label: Some("fl".into()),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"new_producer""#));

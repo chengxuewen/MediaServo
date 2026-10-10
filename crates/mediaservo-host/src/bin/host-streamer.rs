@@ -547,14 +547,14 @@ async fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    // 房间约定（PIT-140 v2 + multi-stream P3）: <整车房间>_<流 id> ——每流独立房间，
-    // 前端按 device_stream 勾选/播放（与 deleteRoom 同规则）；整车房间 = [signaling].room
-    // 缺省 "vehicle"。PIT-140 v1 曾全部推整车房间导致多流无法按流区分，v2 统一 per-stream。
+    // 房间约定（producer-label T3, §12-1 裁决: 设备房+流标签）: 推流到整车/设备房，
+    // 流身份经 Produce.label=流 id 表达（NewProducer 回带）——消费端按 label 选流。
+    // PIT-140 v2 派生房（<整车>_<流 id>）随本变更 deprecated（过渡一版后退役，裁决 §12-2）。
     let vehicle_room = mediaservo_host::translate::signaling_room(&cfg_text)
         .ok()
         .flatten()
         .unwrap_or_else(|| "vehicle".to_string());
-    let room = format!("{}_{}", vehicle_room, stream.id);
+    let room = vehicle_room;
 
     // 令牌 → FrameBus attach → 订阅 camera/<camera-id>
     let token_bytes = match std::fs::read(&args.token) {
@@ -617,7 +617,12 @@ async fn main() -> ExitCode {
         gateway_url(args.gateway.as_deref()),
         format!("{app_prefix}streamer-{}", stream.id),
         room.clone(),
-    );
+    )
+    // 设备房多流同房：peer_id 必须带流后缀（"host-generator3"），否则 6 路
+    // streamer 同 peer_id="host" 互相顶替 → produce "Peer host not found"
+    // （PIT-65 同款，2026-10-09 generator3/5 黑屏根因）。同流重启 = 顶替
+    // 自己旧会话（接管语义正确）。
+    .with_peer_suffix(&stream.id);
     cfg.framerate = cam.fps;
     // 编码参数透传（streams 配置面；None=field 默认 2000kbps/2s GOP）
     if let Some(k) = args.bitrate_kbps {
@@ -699,6 +704,7 @@ async fn main() -> ExitCode {
     let opts = PublishOptions {
         codec: stream.codec.clone(),
         encoder_backend: args.encoder_backend.clone(),
+        label: Some(stream.id.clone()), // producer-label T3: 流 id 即标签
     };
     if let Err(e) = session.publish_video(&cfg, &opts).await {
         eprintln!("streamer: publish_video 失败: {e}");
