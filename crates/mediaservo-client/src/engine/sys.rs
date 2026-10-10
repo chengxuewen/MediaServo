@@ -107,6 +107,11 @@ impl PcHandle for SysPc {
         self.pc.local_dtls_fingerprint()
     }
 
+    fn connection_stats(&self) -> Option<mediaservo_webrtc::stats::ConnectionStats> {
+        // RTCPeerConnection 公共包装已转发（PcBackend pub(crate) 不可直接引）
+        mediaservo_webrtc::traits::PeerConnectionApi::connection_stats(&self.pc)
+    }
+
     fn receiver_stats(&self, track_id: &str) -> Vec<RTCStats> {
         self.pc.receiver_get_stats(track_id)
     }

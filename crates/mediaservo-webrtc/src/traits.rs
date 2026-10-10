@@ -156,6 +156,12 @@ pub trait PeerConnectionApi: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// 连接级统计（candidate-pair currentRoundTripTime）——rtt 唯一口径源。
+    /// None = 后端未实现/无 succeeded pair（调用方置 0）。
+    fn connection_stats(&self) -> Option<crate::stats::ConnectionStats> {
+        None
+    }
+
     /// W3C RTCRtpTransceiver.setCodecPreferences — 协商 codec 偏好（降序）。
     /// v2 实证修正: 按 track_id 定位 transceiver（mid 在协商前不存在 — offerer 场景核心）,
     /// 同 sender_get_parameters/request_key_frame 的 sender.track().id() 匹配模式。

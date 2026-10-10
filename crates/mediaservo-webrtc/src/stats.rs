@@ -60,10 +60,19 @@ pub struct RTCInboundRtpStreamStats {
     pub frames_per_second: f64,
     // W3C 口径补全（09-24 对表 web play：libwebrtc stats JSON 一直全带，此前只搬 10 字段）
     pub jitter: f64, // 秒（W3C）——面板显示乘 1000
+    /// 累计解码耗时（秒，W3C totalDecodeTime）——avg = Δdecode/Δframes 差分比值
+    pub total_decode_time: f64,
     pub frame_dropped: u64,
     pub nack_count: u64,
     pub pli_count: u64,
     pub fir_count: u64,
+}
+
+/// 连接级统计（candidate-pair）——rtt 唯一 W3C 口径源（receiver 级 getStats 无此行）。
+#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
+pub struct ConnectionStats {
+    /// 当前选中 pair 的往返时延（毫秒；currentRoundTripTime 秒×1000）
+    pub rtt_ms: f64,
 }
 
 /// Outbound RTP statistics.

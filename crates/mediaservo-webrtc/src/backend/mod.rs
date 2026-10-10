@@ -56,6 +56,10 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
     fn get_stats(&self) -> Vec<RTCStats> {
         vec![]
     }
+    /// 连接级统计（candidate-pair rtt）——仅 webrtc_sys 实现，其余 None。
+    fn connection_stats(&self) -> Option<crate::stats::ConnectionStats> {
+        None
+    }
     /// 旧版 add_transceiver (str, str) — v2 重命名，避免与 W3C 签名同名冲突（零调用方）
     #[allow(dead_code)]
     fn add_transceiver_legacy(&self, _media_type: &str, _direction: &str) -> Result<(), RTCError> {

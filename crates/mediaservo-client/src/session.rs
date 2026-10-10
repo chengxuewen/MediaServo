@@ -37,12 +37,17 @@ const DATA_PROTOCOL: &str = "sctp";
 const RESPONSE_WAIT: Duration = Duration::from_secs(10);
 
 /// 解码视频帧（I420，libwebrtc 侧渲染前格式；C5 边界语义）。
-/// inbound-rtp 折叠规则单一落点（求和/max 混排——自由函数形单测可钉，免触真 pc）。
+/// inbound-rtp 折叠规则单一落点（自由函数形单测可钉，免触真 pc）。
+///
+/// 多行语义（PIT-2026-10-09 码率异常）：libwebrtc 同 pc 可并存 2 行 inbound-rtp
+/// （新旧 SSRC 报告共存，旧行冻结在最后 timestamp）。累计型字段（bytes/packets/frames）
+/// 若 `+=` 会把冻结旧行重复计入 → 差分基线错位 → 码率恒 0/跳变。**按 ssrc 去重、
+/// 每组取 timestamp 最新的行**，再跨组求和（真多 SSRC 场景仍正确累加）。
 pub(crate) fn fold_inbound_stats(
     items: Vec<mediaservo_webrtc::stats::RTCStats>,
 ) -> VideoStreamStats {
     use mediaservo_webrtc::stats::RTCStats;
-    let mut out = VideoStreamStats::default();
+    // ssrc → 最新行（timestamp 大者胜；ssrc=0 的旧行不丢——用 id 兜底分组）
     // 诊断（debug 级）：区分「stats 表里根本没有该 inbound-rtp（demux 注册失败）」与
     // 「有行但全零（RTP 未达 transport）」——零帧排障的两级判据（09-24 实录入册）。
     tracing::debug!(
@@ -53,21 +58,34 @@ pub(crate) fn fold_inbound_stats(
         }).collect::<Vec<_>>(),
         "fold_inbound_stats raw rows"
     );
-    for st in items {
+    let mut latest: std::collections::HashMap<(u32, String), mediaservo_webrtc::stats::RTCInboundRtpStreamStats> =
+        std::collections::HashMap::new();
+    for st in &items {
         if let RTCStats::InboundRtp(r) = st {
-            out.bytes_received += r.bytes_received;
-            out.packets_received += r.packets_received;
-            out.packets_lost += r.packets_lost;
-            out.frames_decoded += u64::from(r.frames_decoded);
-            out.frame_width = out.frame_width.max(r.frame_width);
-            out.frame_height = out.frame_height.max(r.frame_height);
-            out.frames_per_second = out.frames_per_second.max(r.frames_per_second);
-            out.jitter = out.jitter.max(r.jitter);
-            out.frame_dropped += r.frame_dropped;
-            out.nack_count += r.nack_count;
-            out.pli_count += r.pli_count;
-            out.fir_count += r.fir_count;
+            let key = (r.ssrc, r.id.clone());
+            match latest.get_mut(&key) {
+                Some(prev) if prev.timestamp >= r.timestamp => {}
+                _ => {
+                    latest.insert(key, r.clone());
+                }
+            }
         }
+    }
+    let mut out = VideoStreamStats::default();
+    for (_, r) in latest {
+        out.bytes_received += r.bytes_received;
+        out.packets_received += r.packets_received;
+        out.packets_lost += r.packets_lost;
+        out.frames_decoded += u64::from(r.frames_decoded);
+        out.frame_width = out.frame_width.max(r.frame_width);
+        out.frame_height = out.frame_height.max(r.frame_height);
+        out.frames_per_second = out.frames_per_second.max(r.frames_per_second);
+        out.jitter = out.jitter.max(r.jitter);
+        out.total_decode_time = out.total_decode_time.max(r.total_decode_time);
+        out.frame_dropped += r.frame_dropped;
+        out.nack_count += r.nack_count;
+        out.pli_count += r.pli_count;
+        out.fir_count += r.fir_count;
     }
     out
 }
@@ -83,6 +101,7 @@ pub struct VideoStreamStats {
     pub frame_height: u32,
     pub frames_per_second: f64,
     pub jitter: f64,        // 秒（多路 union 取 max）
+    pub total_decode_time: f64, // 秒累计（多路 union 取 max——解码耗时非可加量）
     pub frame_dropped: u64, // 多路求和
     pub nack_count: u64,
     pub pli_count: u64,
@@ -113,6 +132,13 @@ pub struct RoomSession {
     /// S2d: open_control 专用第二流（connect 同刻订阅 = join 回放零缺口；
     /// take 后移交 ack 泵，每会话一次性）。
     pump_events: Mutex<Option<broadcast::Receiver<SignalEvent>>>,
+    /// msrtc-stream-not-found: 房间视频 label 全集（wait 循环内增量维护——
+    /// events 队列被 wait 独占消费，循环是唯一可靠汇聚点；重连重放经同一入口）。
+    /// label=None 的旧 host 流不入集。集合空 = 未知态（走保守盲等，不判不存在）。
+    /// producer_labels: producer_id→label 反查（ProducerClosed 无 label 字段，
+    /// 摘除需按 id 回查；重推同 id 复插覆盖）。
+    known_video_labels: Mutex<std::collections::HashSet<String>>,
+    producer_labels: Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl RoomSession {
@@ -220,6 +246,8 @@ impl RoomSession {
             hmac_key: cfg.hmac_key.clone(),
             events: Mutex::new(events),
             pump_events: Mutex::new(Some(pump_events)),
+            known_video_labels: Mutex::new(std::collections::HashSet::new()),
+            producer_labels: Mutex::new(std::collections::HashMap::new()),
         })
     }
 
@@ -236,15 +264,82 @@ impl RoomSession {
 
     /// 等待房间内的视频 producer（join 时 server 对存量 producer 回放 NewProducer）。
     pub async fn wait_video_producer(&mut self, wait: Duration) -> Result<String, ClientError> {
+        self.wait_video_producer_labeled(wait, None).await
+    }
+
+    /// producer-label T2.1: 按标签定向等待。label=None = 不过滤（第一路回退语义）；
+    /// Some(label) 只匹配带同标签的 producer——无标签流（旧 host）不匹配，继续等。
+    pub async fn wait_video_producer_labeled(
+        &mut self,
+        wait: Duration,
+        label: Option<&str>,
+    ) -> Result<String, ClientError> {
+        // msrtc-stream-not-found 快路径前置量：label 定向等待才判存在性。
         let mut ev = self.events.lock().await;
-        tokio::time::timeout(wait, async {
+        // 回放汇聚窗：join ack 与 NewProducer 回放存在时序竞态——立刻判空集会
+        // 误入保守盲等。先非阻塞抽干当前队列（回放事件已投递则在缓冲内），
+        // 把已知 label 收进集合后再做存在性判定。
+        {
+            let mut known = self.known_video_labels.lock().await;
+            let mut plabels = self.producer_labels.lock().await;
+            while let Ok(sig) = ev.try_recv() {
+                if let SignalEvent::Message(SignalingMessage::NewProducer {
+                    producer_id, kind: MediaKind::Video, label: Some(l), ..
+                }) = sig
+                {
+                    known.insert(l.clone());
+                    plabels.insert(producer_id, l);
+                }
+            }
+        }
+        let set_snapshot = self.known_video_labels.lock().await.clone();
+        // 存在性判定：集合仍空 = 房间确认无任何带标签视频流（回放窗已抽干）。
+        // 目标 label 不在全集 → 兜底窗 3s（覆盖"consumer 先到、推流后到"竞态），
+        // 窗内仍未等到才判 StreamNotFound（区别于网络盲等的 Timeout）。
+        const ABSENT_GRACE: Duration = Duration::from_secs(3);
+        const REPLAY_SETTLE: Duration = Duration::from_millis(500);
+        let grace = match label {
+            Some(want) if !set_snapshot.contains(want) => Some(ABSENT_GRACE),
+            _ => None,
+        };
+        let effective_wait = grace.unwrap_or(wait);
+        let _ = REPLAY_SETTLE; // 汇聚已由 try_recv 抽干完成（保留常量注释语义）
+        tokio::time::timeout(effective_wait, async {
             loop {
                 match ev.recv().await {
                     Ok(SignalEvent::Message(SignalingMessage::NewProducer {
                         producer_id,
                         kind: MediaKind::Video,
+                        label: pl,
                         ..
-                    })) => return Ok(producer_id),
+                    })) => {
+                        // 全集增量维护（None 标签不入集）+ id→label 反查记录
+                        if let Some(l) = &pl {
+                            self.known_video_labels.lock().await.insert(l.clone());
+                            self.producer_labels
+                                .lock()
+                                .await
+                                .insert(producer_id.clone(), l.clone());
+                        }
+                        let matched = match label {
+                            None => true,
+                            Some(want) => pl.as_deref() == Some(want),
+                        };
+                        if matched
+                        {
+                            return Ok(producer_id);
+                        }
+                        // 标签不匹配——继续等下一路
+                    }
+                    Ok(SignalEvent::Message(SignalingMessage::ProducerClosed {
+                        producer_id: ref pid, kind: MediaKind::Video, ..
+                    })) => {
+                        // 流下线 → 按 id 反查 label 摘出全集（重推回房间会再收 NewProducer；
+                        // ProducerClosed 协议面无 label 字段——producer_labels 反查）
+                        if let Some(l) = self.producer_labels.lock().await.remove(pid) {
+                            self.known_video_labels.lock().await.remove(&l);
+                        }
+                    }
                     Ok(SignalEvent::Disconnected { reason }) => {
                         return Err(ClientError::InvalidState(format!(
                             "等待 producer 期信令断开: {reason}"
@@ -258,7 +353,18 @@ impl RoomSession {
             }
         })
         .await
-        .map_err(|_| ClientError::Timeout { what: "video NewProducer" })?
+        .map_err(|_| match grace {
+            // 兜底窗超时 = label 确认不在全集（3s 内也无新 producer）
+            Some(_) => ClientError::StreamNotFound { label: label.unwrap_or("").to_string() },
+            None => ClientError::Timeout { what: "video NewProducer" },
+        })?
+    }
+
+    /// 房间已知视频 label 全集快照（诊断/测试面；wait 循环增量维护）。
+    #[must_use]
+    pub async fn known_video_labels(&self) -> Vec<String> {
+        let known = self.known_video_labels.lock().await;
+        known.iter().cloned().collect()
     }
 
     /// S6/K4: 订阅一路视频 producer，返回 [`Consumer`] 句柄（多路注册）。
@@ -884,10 +990,14 @@ mod tests {
     use mediaservo_webrtc::stats::{RTCInboundRtpStreamStats, RTCStats};
 
     fn mk(bytes: u64, w: u32, fps: f64) -> RTCStats {
+        mk_keyed("x", 1, 0.0, bytes, w, fps)
+    }
+
+    fn mk_keyed(id: &str, ssrc: u32, ts: f64, bytes: u64, w: u32, fps: f64) -> RTCStats {
         RTCStats::InboundRtp(RTCInboundRtpStreamStats {
-            id: "x".into(),
-            timestamp: 0.0,
-            ssrc: 1,
+            id: id.into(),
+            timestamp: ts,
+            ssrc,
             kind: "video".into(),
             packets_received: bytes,
             packets_lost: bytes,
@@ -897,6 +1007,7 @@ mod tests {
             frame_height: 720,
             frames_per_second: fps,
             jitter: 0.0,
+            total_decode_time: 0.0,
             frame_dropped: 0,
             nack_count: 0,
             pli_count: 0,
@@ -906,8 +1017,9 @@ mod tests {
 
     #[test]
     fn fold_inbound_unions_new_w3c_fields() {
-        // 09-24 扩面语义钉：jitter 多路取 max，dropped/nack/pli/fir 求和
-        let mut mk2 = mk(100, 1280, 30.0);
+        // 09-24 扩面语义钉：jitter 多路取 max，dropped/nack/pli/fir 跨 SSRC 求和
+        // （PIT-212 修订：fold 按 (ssrc,id) 去重——夹具必须异 ssrc 才是"多路"）
+        let mut mk2 = mk_keyed("a", 1, 1.0, 100, 1280, 30.0);
         if let RTCStats::InboundRtp(r) = &mut mk2 {
             r.jitter = 0.004;
             r.frame_dropped = 7;
@@ -915,7 +1027,7 @@ mod tests {
             r.pli_count = 2;
             r.fir_count = 1;
         }
-        let mut mk3 = mk(100, 1280, 30.0);
+        let mut mk3 = mk_keyed("b", 2, 1.0, 100, 1280, 30.0);
         if let RTCStats::InboundRtp(r) = &mut mk3 {
             r.jitter = 0.009;
             r.frame_dropped = 3;
@@ -927,11 +1039,35 @@ mod tests {
         assert_eq!(out.nack_count, 9);
         assert_eq!(out.pli_count, 2);
         assert_eq!(out.fir_count, 1);
+        assert_eq!(out.bytes_received, 200, "异 ssrc 跨组求和");
+    }
+
+    #[test]
+    fn fold_inbound_dedup_frozen_row_takes_latest() {
+        // PIT-212 钉（码率异常根因）：同 pc 双行 = 冻结旧行 + 活行（同 ssrc 同 id）。
+        // 冻结行 bytes 停在旧值——`+=` 会把它重复计入 → 差分基线错位。
+        // 新语义：同 key 取 timestamp 最新的行（活行），旧行丢弃。
+        let frozen = mk_keyed("x", 1, 10.0, 100, 1280, 24.0);   // 旧行：ts 旧、bytes 小
+        let mut live = mk_keyed("x", 1, 20.0, 900, 1920, 30.0); // 活行：ts 新
+        if let RTCStats::InboundRtp(r) = &mut live {
+            r.frame_dropped = 5;
+            r.nack_count = 3;
+        }
+        let out = fold_inbound_stats(vec![frozen, live]);
+        assert_eq!(out.bytes_received, 900, "同 key 取 timestamp 最新行（非求和）");
+        assert_eq!(out.frame_width, 1920);
+        assert_eq!(out.frames_per_second, 30.0);
+        assert_eq!(out.frame_dropped, 5, "冻结行的 dropped 不得叠加");
+        assert_eq!(out.nack_count, 3);
     }
 
     #[test]
     fn fold_inbound_sums_counts_maxes_size_and_fps() {
-        let out = fold_inbound_stats(vec![mk(100, 1280, 24.0), mk(50, 1920, 30.0)]);
+        // 异 ssrc（真多路）跨组求和
+        let out = fold_inbound_stats(vec![
+            mk_keyed("x", 1, 1.0, 100, 1280, 24.0),
+            mk_keyed("y", 2, 1.0, 50, 1920, 30.0),
+        ]);
         assert_eq!(out.bytes_received, 150);
         assert_eq!(out.packets_lost, 150);
         assert_eq!(out.frames_decoded, 20);

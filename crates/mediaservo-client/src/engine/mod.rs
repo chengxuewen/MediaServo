@@ -111,6 +111,10 @@ pub trait PcHandle: Send + Sync + 'static {
     fn local_dtls_fingerprint(&self) -> Option<String>;
     /// 指定 track 的 receiver stats。[session.rs:104]
     fn receiver_stats(&self, track_id: &str) -> Vec<RTCStats>;
+    /// 连接级统计（candidate-pair rtt）。[consumer.rs on_qoe tick]
+    fn connection_stats(&self) -> Option<mediaservo_webrtc::stats::ConnectionStats> {
+        None
+    }
     /// 建数据通道。[session.rs:377, 741]
     async fn create_data_channel(
         &self,

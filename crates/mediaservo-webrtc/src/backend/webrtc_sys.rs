@@ -88,6 +88,10 @@ fn parse_inbound_stats_json(json: &str) -> Vec<crate::stats::RTCStats> {
                 frame_height: v.get("frameHeight").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
                 frames_per_second: v.get("framesPerSecond").and_then(|x| x.as_f64()).unwrap_or(0.0),
                 jitter: v.get("jitter").and_then(|x| x.as_f64()).unwrap_or(0.0),
+                total_decode_time: v
+                    .get("totalDecodeTime")
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(0.0),
                 frame_dropped: v.get("frameDropped").and_then(|x| x.as_u64()).unwrap_or(0),
                 nack_count: v.get("nackCount").and_then(|x| x.as_u64()).unwrap_or(0),
                 pli_count: v.get("pliCount").and_then(|x| x.as_u64()).unwrap_or(0),
@@ -979,6 +983,55 @@ impl PcBackend for WebrtcSysPc {
             };
         }
         vec![]
+    }
+
+    /// qoe-full-metrics S1: pc 级 getStats 全表 → candidate-pair(succeeded) 的
+    /// currentRoundTripTime（秒→ms）。nominated 优先，否则第一条 succeeded。
+    fn connection_stats(&self) -> Option<crate::stats::ConnectionStats> {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<String>(1);
+        let ctx = Box::new(webrtc_sys::peer_connection::PeerContext(Box::new(tx)));
+        self.pc.get_stats(ctx, |ctx, json| {
+            if let Some(tx) = ctx.0.downcast_ref::<std::sync::mpsc::SyncSender<String>>() {
+                let _ = tx.send(json);
+            }
+        });
+        let json = rx
+            .recv_timeout(std::time::Duration::from_millis(200))
+            .ok()?;
+        let arr = serde_json::from_str::<Vec<serde_json::Value>>(&json).ok()?;
+        // RTT 口径（2026-10-10 实测）：client 为 ICE-lite 被动端时
+        // currentRoundTripTime 恒 0（响应不发 request 不计）——实证可用真值 =
+        // totalRoundTripTime / responsesReceived（平均 RTT，同 libwebrtc 内部口径）。
+        // 优先 currentRoundTripTime（标准主动端），回退平均口径。
+        let mut best: Option<crate::stats::ConnectionStats> = None;
+        for v in arr.iter() {
+            if v.get("type").and_then(|t| t.as_str()) != Some("candidate-pair") {
+                continue;
+            }
+            if v.get("state").and_then(|x| x.as_str()) != Some("succeeded") {
+                continue;
+            }
+            let rtt_s = v
+                .get("currentRoundTripTime")
+                .and_then(|x| x.as_f64())
+                .filter(|r| *r > 0.0)
+                .or_else(|| {
+                    let total = v.get("totalRoundTripTime").and_then(|x| x.as_f64())?;
+                    let n = v
+                        .get("responsesReceived")
+                        .and_then(|x| x.as_u64())?
+                        .max(1);
+                    (total > 0.0).then(|| total / n as f64)
+                });
+            let Some(rtt) = rtt_s else { continue };
+            // ceil：内网亚毫秒（0.2ms 级）round 会抹成 0——至少显示 1ms
+            let c = crate::stats::ConnectionStats { rtt_ms: (rtt * 1000.0).ceil() };
+            if v.get("nominated").and_then(|x| x.as_bool()) == Some(true) {
+                return Some(c);
+            }
+            best = best.or(Some(c));
+        }
+        best
     }
 
     fn sender_get_stats(&self, track_id: &str) -> Vec<crate::stats::RTCStats> {

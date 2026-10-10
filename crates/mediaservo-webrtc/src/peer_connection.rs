@@ -283,6 +283,10 @@ impl crate::traits::PeerConnectionApi for RTCPeerConnection {
         self.backend.receiver_get_stats(track_id)
     }
 
+    fn connection_stats(&self) -> Option<crate::stats::ConnectionStats> {
+        self.backend.connection_stats()
+    }
+
     fn get_configuration(&self) -> RTCConfiguration {
         self.backend.pc_configuration()
     }

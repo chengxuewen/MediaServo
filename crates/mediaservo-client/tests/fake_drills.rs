@@ -243,6 +243,7 @@ async fn drill_a_join_consume_frames_ack_roundtrip() {
         producer_id: "prod-1".into(),
         peer_id: "host-1".into(),
         kind: MediaKind::Video,
+        label: None,
     })
     .unwrap();
     assert_eq!(session.wait_video_producer(Duration::from_secs(5)).await.unwrap(), "prod-1");
@@ -648,6 +649,7 @@ async fn drill_e_reconnect_resume_replay() {
         producer_id: "prod-1".into(),
         peer_id: "host-1".into(),
         kind: MediaKind::Video,
+        label: None,
     })
     .unwrap();
     let producer_id = session.wait_video_producer(Duration::from_secs(5)).await.unwrap();
@@ -748,4 +750,77 @@ async fn drill_g_drop_session_no_lingering_tasks() {
     })
     .await;
     assert!(result.is_ok(), "drop(session) 应在 3s 内完成（无 hang）");
+}
+
+// ───────── msrtc-stream-not-found 演练 ─────────
+
+/// 快路径：join 回放收齐 label 全集后，等一个不在全集的 label → 3s 兜底窗内
+/// 判 StreamNotFound（区别于 30s 盲等 Timeout）。
+#[tokio::test]
+async fn drill_stream_not_found_fast_path() {
+    let h = pair_fake().await;
+    let Harness { mut session, fake: _fake, obs: _obs, push } = h;
+
+    // join 回放：generator1（有标签）到达 → 全集 = {generator1}
+    push.send(SignalingMessage::NewProducer {
+        room_id: ROOM.into(),
+        producer_id: "prod-g1".into(),
+        peer_id: "host-1".into(),
+        kind: MediaKind::Video,
+        label: Some("generator1".into()),
+    })
+    .unwrap();
+    assert_eq!(
+        session.wait_video_producer_labeled(Duration::from_secs(10), Some("generator1")).await.unwrap(),
+        "prod-g1",
+        "全集内 label 正常匹配"
+    );
+
+    // 等不存在的 generator8：快路径 3s 兜底窗 → StreamNotFound（远小于 10s 上限）
+    let t0 = std::time::Instant::now();
+    let err = session
+        .wait_video_producer_labeled(Duration::from_secs(30), Some("generator8"))
+        .await
+        .expect_err("不存在 label 应报错");
+    assert!(matches!(err, ClientError::StreamNotFound { ref label } if label == "generator8"),
+        "应报 StreamNotFound，实际 {err:?}");
+    assert!(t0.elapsed() < Duration::from_secs(10), "快路径应在兜底窗内返回，实际 {:?}", t0.elapsed());
+}
+
+/// 竞态窗：全集不含目标 label，但 3s 兜底窗内新 producer 到达 → 等到（不误判）。
+#[tokio::test]
+async fn drill_stream_not_found_grace_window_catches_late_producer() {
+    let h = pair_fake().await;
+    let Harness { mut session, fake: _fake, obs: _obs, push } = h;
+
+    // 全集先有 generator1
+    push.send(SignalingMessage::NewProducer {
+        room_id: ROOM.into(),
+        producer_id: "prod-g1".into(),
+        peer_id: "host-1".into(),
+        kind: MediaKind::Video,
+        label: Some("generator1".into()),
+    })
+    .unwrap();
+    let _ = session.wait_video_producer_labeled(Duration::from_secs(5), Some("generator1")).await;
+
+    // 250ms 后 generator8 才开始推流（模拟 consumer 先到）
+    let push_late = push.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let _ = push_late.send(SignalingMessage::NewProducer {
+            room_id: ROOM.into(),
+            producer_id: "prod-g8".into(),
+            peer_id: "host-8".into(),
+            kind: MediaKind::Video,
+            label: Some("generator8".into()),
+        });
+    });
+
+    // 兜底窗应接住迟到 producer
+    assert_eq!(
+        session.wait_video_producer_labeled(Duration::from_secs(30), Some("generator8")).await.unwrap(),
+        "prod-g8",
+        "3s 兜底窗内迟到的 producer 应被等到"
+    );
 }
