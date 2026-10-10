@@ -175,7 +175,7 @@ async fn run_forwarder(ctx: Arc<SupervisorCtx>, mut raw: broadcast::Receiver<Sig
                     break;
                 }
                 Ok(m @ (SignalEvent::Message(_) | SignalEvent::Error(_))) => {
-                    eprintln!("[fwd] got Message/Error (relay only)");
+                    tracing::debug!("forwarder: relay Message/Error");
                     let _ = ctx.ev_tx.send(m);
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {

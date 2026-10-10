@@ -47,6 +47,10 @@ pub enum ClientError {
     /// 有界等待超时（操作名标注，便于归因）。
     #[error("timed out waiting for {what}")]
     Timeout { what: &'static str },
+    /// 流不存在（msrtc-stream-not-found：房间已知 label 全集内无此 label，
+    /// 兜底窗内也未等到——URL 写错流名的确定性判定，区别于网络盲等超时）。
+    #[error("stream not found: {label}")]
+    StreamNotFound { label: String },
     /// 状态机违例（未知通道、会话已关闭等）。
     #[error("invalid state: {0}")]
     InvalidState(String),
@@ -70,6 +74,7 @@ impl ClientError {
             | Self::WebRtc(_)
             | Self::Io(_)
             | Self::Timeout { .. }
+            | Self::StreamNotFound { .. }
             | Self::InvalidState(_)
             // I5 本地预拒（未发出任何请求，无 server 应答码）。
             | Self::ProtocolTooLow { .. } => None,
@@ -99,7 +104,8 @@ impl ClientError {
             | Self::UnsupportedScheme(_)
             | Self::RestRejected { .. }
             | Self::MalformedResponse(_)
-            | Self::InvalidState(_) => false,
+            | Self::InvalidState(_)
+            | Self::StreamNotFound { .. } => false,
             // 连接/瞬态族。
             Self::Io(_) | Self::WebRtc(_) | Self::Timeout { .. } | Self::Login(_) => true,
             Self::Server { code, .. } => *code >= 5000,
