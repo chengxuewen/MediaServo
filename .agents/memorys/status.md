@@ -51,6 +51,11 @@ Host (macOS) → WS :9800 → Docker Server → WS :9800 → Client (macOS)
 | deck Phase 2 最小闭环 (采集→FrameBus→落盘) | ✅ |
 | deck playback 域 (Player demux+decode) | ✅ |
 | field MVP (组合门面, 10th member) | ✅ |
+| producer-label 设备房+流标签（host/server/协议/前端全链） | ✅ (2026-10-09 端到端 6/6) |
+| admin web label 迁移（设备房寻址+expectedLabel 过滤+标题） | ✅ (2026-10-09, 未提交) |
+| config-unification P1（web.port/sfu.port/weaknet_port + resolve_port） | ✅ (2026-10-09, 未提交) |
+| oxmgr 方案 Y 固化（3rdparty/oxmgr 档案+shell 注入+deploy 硬门） | ✅ (2026-10-09, 未提交) |
+| peer_suffix 设备房唯一化（PIT-212） | ✅ (2026-10-09, 未提交) |
 | OpenCode 配置优化 | ✅ |
 | Doc-Audit 完整审计 | ✅ |
 | OMO 插件版本审计 | ✅ (4.19.2→4.19.3 patch) |
@@ -1053,3 +1058,11 @@ install                        → 改名提示 + exit 2（退役）
 
 ### 2026-09-29 续9: bindings 构建产物迁 staging（PIT-210，源码树卫生清偿）
 - `_cmd_build_bindings` 引入 target/bindings-staging/：.node 与 python wheel 构建树（staging 镜像层，源映射=bindings/python/mediaservo 包根）全落 staging；装配读 staging+真源码（package.json/index.mjs）。旧源码树产物（.node/build/_libs/egg-info）已清。三面验收：git 零 diff / staging 有物 / out 交付完整。
+
+
+## Sanitizer 工具链（2026-10-10）
+- TPHMI san 构建收编 CMake 原生：`cmake -DTP_SANITIZER=<mode>`（cmake/TPSanitizer.cmake；9+1 模式/try_run lsan 预检/.san_env.sh 生成/san_reports 报告文件化）；build_san.sh 瘦身 launcher（目录位置参数自动判别/模式切换防护/env 校验）。
+- QExt 新增 `QEXT_SKIP_QMLPLUGINDUMP`（san 构建必 ON——qmlplugindump dlopen 插桩 .so 静态 TLS 崩，PIT-219）。
+- QOE on_qoe 三层泄漏修复（PIT-220）：Rust JoinHandle → C ABI qoe_task abort → C++ qoe_ctx_ 生命周期。
+- lsan.supp 沉淀第三方良性（libva/FFmpeg/Qt/glib ~97KB）——报告只剩 TPHMI 自有代码。
+- 均未提交（C1）：TPHMI 5 文件 + QExt 1 文件 + MediaServo consumer.rs/client.hpp/lsan.supp。

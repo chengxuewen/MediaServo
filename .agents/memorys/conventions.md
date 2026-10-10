@@ -585,3 +585,15 @@ ff_.*_muxer` 应为 0（demuxer-only 实证）。
 ## C46 镜像（2026-09-18，全文见主仓 conventions.md 同名条）: CI 门的真实执行形 = 本仓 scripts/all-gates.sh
 - 本仓即门的宿主（quick/--full 两级 + gate-*.py 碎片与 ci.yml 单源）。约束要点：汇报门禁必须带 all-gates 本地实跑回显；ci.yml 为镜像日预留形（remote 无 Actions 执行者）；N8（clippy ~130）清完前 all-gates 除 clippy 门外全绿即过。
 - **检查**: `pixi run all-gates` 存在且可跑；任何「门已过」汇报附结果行。
+
+## C47: 架构聚合前必须审计"靠分散隐式保证"的假设 (2026-10-09, PIT-212 教训结构化)
+「约束」: 把多实体聚合到单一命名空间（多房→单设备房、多文件→单文件、多实例→单进程）的变更，实施前必须列出并逐条裁决"原来靠分散隐式保证"的假设——聚合会让它们变显性炸弹。已知的此类假设：peer_id 唯一性（派生房时代同名 peer 异房不冲突）、端口占用（派生房形态天然分房无共享面）、配置漂移半径（单文件聚合后一处漂移全局可见）。
+- 检查: 架构聚合 PR 的 proposal.md 必须含「隐式假设审计」小节，逐条标注（保留/迁移/新防御）。
+- 先例: producer-label 设备房迁移漏掉 peer_id 唯一性 → 6 路 streamer 互顶、generator3/5 黑屏（PIT-212）。
+
+
+## C48: TPHMI sanitizer 构建走 CMake 原生开关
+- 用法：`cmake -DTP_SANITIZER=<off|asan|lsan|ubsan|ausan|...>`；build_san.sh 仅薄 launcher（build/run/restore 转调 + 目录定位），flags 单一真源 = cmake/TPSanitizer.cmake。
+- 约束：san 模式切必须全量重编（插桩在目标码里）——launcher 已自动删陈旧 QML 插件产物；QML 插件 POST_BUILD qmlplugindump 在 san 模式必须跳过（QEXT_SKIP_QMLPLUGINDUMP=ON 自动）；libasan preload 必须与链接版本同源（TPSanitizer 从链接目录派生）。
+- 报告：`<构建目录>/san_reports/<name>.<PID>`（正常退出落盘，kill -9 丢失）；lsan.supp 已沉淀第三方良性——报告只剩 TPHMI 自有代码泄漏。
+- 检查：`grep '^TP_SANITIZER:' <构建目录>/CMakeCache.txt` 核对生效模式；Qt 窗口查找用 xwininfo root 树（勿用 xdotool --pid，Qt 不设 _NET_WM_PID）。

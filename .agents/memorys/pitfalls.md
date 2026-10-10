@@ -1727,3 +1727,74 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: build bindings 引入 `target/bindings-staging/`（gitignore 区）：.node 拷 staging；python wheel 构建=staging 镜像层（copytree 剥产物/缓存→_libs 与 pip build 全在 staging，pip wheel cwd=staging 根）。装配读 staging+源码（package.json/index.mjs 等真源码仍读源码树）。
 - **验证**: 构建后 `git status bindings/` 零 diff、`bindings/node/mediaservo.node` 不存在、无 build/_libs/egg-info；staging 有物；out/bindings 交付完整（.node/whl/site-packages/docs 四面）。
 - **禁止**: 新绑定构建流程往 `bindings/` 源码树写任何产物；用 `.gitignore` 盖产物路径当"卫生方案"（掩盖不解决）。
+
+## PIT-211: DashMap 同 shard 写锁内重入读锁 = 同任务自锁死 (2026-10-08)
+- **症状**: server 收到带 label 的 Produce 后整体 hang——进程活、CPU 0%、全部 tokio 任务 sleep、TCP accept 后 HTTP 不处理、CLOSE-WAIT 堆积；100% 复现于 producer 建立即刻。
+- **根因**: create_producer 内已持 `self.rooms.get_mut()`（DashMap 同 shard 写守卫），producer-label 功能首版在其作用域内重入 `self.rooms.get()`（同 shard 读锁）——DashMap 锁不可重入，同任务自死锁；该 shard 被永久持锁后所有 SFU 操作（rooms 任意访问）排队挂起，表现为"server 全任务 park"。
+- **解法**: 复用作用域内已持有的守卫（`room.producer_labels.insert(...)` 直接用 `room` 变量）；跨 map 操作时严格审视守卫持有链。
+- **验证**: hang 场景复现脚本（agent+capturer+streamer 三进程 + e2e_labeled 消费探针）全绿——producer 建立、http 持续 401 不挂、C++ 端 wait_video_labeled("fl") 匹配 + I420 帧持续到达。
+- **禁止**: DashMap 任何守卫（get/get_mut/iter）作用域内再触碰同一 DashMap；跨 DashMap 操作需文档化锁序。
+
+## PIT-212: 设备房多流同 peer_id="host" 互相顶替 → produce "Peer host not found" (2026-10-09)
+- **症状**: producer-label 设备房形态下 6 路 host-streamer 随机 2 路黑屏；server 日志 `SFU: Producer creation failed: Peer host not found in room vehicle`；掉线路 ICE Connected→Failed 后不再自愈（编码器空转，bytes_sent 假增长）。
+- **根因**: `mediaservo-field` session.rs `peer_id(role)` 按角色返回静态名——6 路 streamer 全部 `peer_id="host"` join 同一 vehicle 房。server `join_room` 的 Host 槽单值（后 join 顶掉先 join），被顶者 transport/producer 连坐失效，后续 produce 报 Peer not found。**PIT-65 的 host 侧翻版**（client 侧多网页同 peer_id 早已修过：随机后缀）——设备房聚合让旧派生房"同名不同房"的隐性安全失效。
+- **解法**: `PushConfig.peer_suffix`（Option<String>）+ `peer_id(role, cfg)` 拼接；host-streamer 传 `stream.id`（`host-generator3`）——同流重启顶替自己的旧会话（接管语义正确），异流互不冲突。Pull 侧保持纯 role 名（pull_peer_id）。
+- **验证**: build:deploy host + start → vehicle producers=6/6、6 路 streamer bytes_sent 全涨、headless 浏览器 6/6 video readyState=4。
+- **禁止**: 任何"同房多会话"设计允许静态 peer_id；新增 peer 维度功能（label/DC/resume）时必须先过 peer_id 唯一性审计——角色名只是 P2P 单会话时代的遗产。
+
+## PIT-213: announced=loopback 同机测试假阳性 — 远端浏览器黑屏而本机全绿 (2026-10-09)
+- **症状**: admin web play 在用户远程浏览器（VPN 10.144.x）黑屏，但同机 headless Chrome 6/6 出帧——两轮会话"修复后验证通过"与用户实测矛盾。
+- **根因**: out/server/etc/server.yaml 被手工改为 `announced_ips: [127.0.0.1]`（gitignore 无法追溯 actor）；`use_bare_metal_listen` 判定 loopback∈本机接口 → bind 127.0.0.1:20000 → 浏览器收到 candidate 127.0.0.1:20000 = **它自己机器**的回环 → 远端 ICE 永远 Failed；信令走 TCP 8080 正常故状态"已 connected"——假象完好。同机 headless 的 127.0.0.1 恰好就是 server → 假阳性全绿。
+- **解法**: announced_ips 恢复宿主可达 IP（本拓扑 10.144.0.7 VPN）。三重防线已列 config-unification P2：①doctor 值级校验（announced∈loopback → WARN "远端 ICE 必败"）②启动期 listen 0.0.0.0 + announced loopback 矛盾 tracing::warn ③/api/admin/config 暴露 effective announced。
+- **验证**: `ss -ulnp | grep 20000` bind 地址 == announced_ips[0] 且非 127.0.0.1；远程浏览器 ICE Connected。
+- **禁止**: **同机 headless 测试不能作为跨机 WebRTC 的验收依据**——candidate 可达性必须在"消费方视角"验证（远程浏览器/console 读 ice_candidates）；loopback 公告在任何多机拓扑下都是错的。
+- **关联**: PIT-58 同族（本机可达地址公告）；检测缺口修复归 config-unification P2 provenance。
+
+## PIT-214: mediasoup worker 丢失无健康探测 — server park 但 /health 全绿 (2026-10-09)
+- **症状**: server 主进程存活、HTTP/信令/admin API 全部正常，但 mediasoup-worker 子进程消失 → 20000 端口 bind 在但对 STUN 零应答 → 全部推流/消费 ICE 失败；`/health` 只探 signaling 报 healthy——黑屏期间观测面全绿，排障被迫人肉抓包。
+- **根因**: worker 创建失败/退出后 server park（PIT-140 族），健康检查组件清单缺 SFU 项；`pgrep mediasoup-worker` 为空 + STUN 探测无应答是仅有的两个可靠判据。
+- **解法**: ①即时判据：`pgrep -af mediasoup-worker`（空=worker 死）+ python STUN binding request 打 announced:20000（无应答=ICE 层死）；②恢复处方：server 完全 stop → 端口释放确认（ss 20000/9800 空）→ start（restart 有 worker 竞态复发风险）。
+- **验证**: `/api/admin/sfu/stats` producer packet_count 增长 + STUN 探测有应答。
+- **禁止**: /health 组件清单不含 SFU/worker 存活 → P2 必补（黑屏 40min 靠抓包定位的成本不可接受）。
+
+## PIT-215: deploy 条件打包硬依赖 oxmgr = "PATH 有才打包"部署陷阱 (2026-10-09)
+- **症状**: build:deploy 成功 exit 0 → 实例 start/stop 全部 `oxmgr: No such file or directory`——错误离根因隔一个完整 deploy 周期。
+- **根因**: deploy server/host 只从 `shutil.which("oxmgr")` 打包，缺失时"非致命提示"继续——但 oxmgr 是进程簇硬依赖（无它 start/stop/daemon 全废）。本机 PATH 无 oxmgr → bin/ 缺件。
+- **解法**: 三层固化（方案 Y，对齐主仓 msrtc.sh）：①`3rdparty/oxmgr/` 档案层（上游 tar.gz+.sha256，x86_64/aarch64）②`mediaservo.sh` sha256 对账解包 .cache/oxmgr → PATH 前置 ③CLI `_resolve_oxmgr_or_die()`：PATH → 缓存回收 → 缺失 exit 2（硬门）。
+- **验证**: `ls out/server/bin/oxmgr` 存在；deploy 日志含 "oxmgr 已打包: oxmgr 0.5.0"。
+- **禁止**: 硬依赖二进制"找不到仅提示"——必须阻断 deploy 或从已知缓存自愈；新增强依赖先问"缺它 deploy 该成功吗"。
+
+## PIT-216: on_qoe 在非 runtime 线程注册 panic——Handle::current() 调用点陷阱 (2026-10-10)
+- **症状**: TPHMI 真流测试 consume 建立后 0 帧，日志 `panicked at consumer.rs: there is no reactor running`——consumer task 全灭（panic 杀掉整个 spawn 链）。
+- **根因**: `on_qoe_inner` 在**调用点**取 `tokio::runtime::Handle::current()`——C++ worker 是普通线程无 runtime → panic。单测全在 `#[tokio::test]` 内跑 → 盲区（PASS 但真实集成炸）。
+- **解法**: Handle 在 `Consumer::new`（async consume() 上下文=必在 runtime 内）构造时捕获存 struct，`on_qoe_inner` 用 `self.rt.clone()`。教训：**Handle 捕获点=构造点，不是 API 调用点**；FFI 暴露的同步方法禁止触碰 thread-local runtime。
+- **验证**: `grep -c "PIT-216" crates/mediaservo-client/src/consumer.rs` ≥2；TPHMI 真流 3/3（QOE_Fps=30）。
+- **禁止**: 同步 FFI 方法内 `Handle::current()`/`block_on`；新增 async 桥接时必须审计调用线程模型（单测 runtime 内跑 ≠ 生产线程模型）。
+
+## PIT-217: ICE-lite 被动端 currentRoundTripTime 恒 0——RTT 口径陷阱 (2026-10-10)
+- **症状**: connection_stats 按 W3C 标准取 candidate-pair.currentRoundTripTime，真流实测恒 0（probe 实证 totalRoundTripTime=0.001s/responsesReceived=5 存在真值）。
+- **根因**: client 为 ICE-lite 被动端（requestsReceived:0/responsesSent:0）——consent/response 不计 currentRoundTripTime，libwebrtc 只在主动发 request 方报该字段。
+- **解法**: 口径回退链 currentRoundTripTime>0 → totalRoundTripTime/responsesReceived（平均 RTT）→ ceil 到 1ms（亚毫秒 round 抹零）。
+- **验证**: `grep -c "totalRoundTripTime" crates/mediaservo-webrtc/src/backend/webrtc_sys.rs` ≥1；真流 QOE_Rtt=1ms（内网）。
+- **禁止**: 直接信任 currentRoundTripTime 单字段；亚毫秒指标用 round（改 ceil/at-least-1）。
+
+## PIT-218: QOE_Decd 语义撞车——"Decd" 字面义与历史契约冲突 (2026-10-10)
+- **症状**: TPHMI 码率修复后"解码耗时"UI 一直递增——实际显示的是 decoded_total 累计帧数。
+- **根因**: `QOE_Decd` 字面像 "decoded 帧数"（AI 切换 consumer-qoe 时按字面直觉喂 decoded_total），但项目历史契约 = 解码耗时 ms（TRRO tpMediaTrroRemoteBackend.cpp:478 "decd 解帧耗时ms" + DTH 30ms + unit "ms"）。字面直觉≠项目契约。
+- **解法**: 裁决全迁 `QOE_Vdec`（名实相符 + 告警链 Warning_VdecElapsedAbnormal 已接 + V 系列耗时组一致），Decd 枚举/告警位/4 case 全删，QOEEnumNum 21→20。TRRO SDK 形参名 decd 保留（ABI）。
+- **验证**: `grep -rn "QOE_Decd" src/TPHMI/src --include=*.cpp --include=*.h | grep -v 已退役 | wc -l` = 0；真流 Vdec≈2ms 稳定不递增。
+- **禁止**: 接手既有枚举行位时凭字面义推语义——必须 grep 该枚举的全部历史喂值点（喂什么、DTH、unit）三方互证后再接。
+
+## PIT-219: sanitizer 构建三连环——QML 插件 TLS 崩/模式切换陈旧产物/验证方法学 (2026-10-10)
+- **症状**: TPHMI san 构建后进程存活但无窗口；`qmlplugindump` 构建期崩 `libasan.so.8/liblsan.so.0 无法在静态 TLS 块中分配内存`；模式切换（asan↔lusan）后旧产物运行崩。
+- **根因**: ① QExt QML 插件 POST_BUILD 用非插桩 qmlplugindump dlopen 插桩 .so → 静态 TLS 崩 → 插件 target 失败；② 模式切换增量构建不重编 QML 插件 → 陈旧插桩产物（asan 插件带 liblsan）运行崩；③ libasan 版本错位（gcc-10=so.6, gcc-11+/pixi libsanitizer14=so.8——preload 必须与链接版本同源）。
+- **解法**: ① QExt 加 `QEXT_SKIP_QMLPLUGINDUMP` option（san 模式 TPSanitizer.cmake 自动 FORCE ON——qmltypes 仅 IDE 元数据）；② launcher 补建/刷新分支（.so 缺失或 mtime 早于构建系统文件=过期）；③ preload 从链接目录派生（-L 路径/pixi env），禁用编译器 print-file-name（版本错位实证）。
+- **验证**: lusan/asan 双模式 build rc=0 + run 窗口在位（xwininfo root 树 "TPHMI" 5760x1050）+ QML 零错误。
+- **禁止**: 修改构建产物文件（build.ninja/build.make）期望持久——re-configure 必冲；用 `xdotool search --pid` 找 Qt 窗口（Qt 不设 _NET_WM_PID 必漏报）；凭窗口尺寸历史值判窗（分辨率会变）。
+
+## PIT-220: QOE on_qoe 回调三层泄漏——FFI 闭包生命周期收口 (2026-10-10)
+- **症状**: lsan 报告 64B×2 泄漏，栈指向 C++ 桥 `client.hpp:420 on_qoe`（`new std::function` 拷贝）——B'' 每次重开注册一份，车机 7×24 重连累积。
+- **根因**: 三层各漏一环：① Rust on_qoe task 只在 slot.is_dead() 退出，进程退出时 tokio runtime 不 shutdown → Box<dyn Fn> 残留；② C ABI handle 无 qoe task 槽 → close 无法 abort；③ C++ 桥 ctx 指针无释放路径（move 未转移 + close 未 delete）。
+- **解法**: Rust on_qoe 返回 JoinHandle；C ABI handle +qoe_task 槽（on_qoe 存/close abort/重复注册替换）；C++ Consumer +qoe_ctx_ 成员（on_qoe 存/close 删/move 双向转移）。
+- **验证**: `lsan.supp` 沉淀第三方良性后，正常退出报告 on_qoe 命中 = 0。
+- **禁止**: FFI 回调注册只存不收——必须有对称释放路径（abort/free/delete）且 move 语义全字段转移。
