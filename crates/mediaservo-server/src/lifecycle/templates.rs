@@ -95,6 +95,10 @@ room_capacity: 50
 rate_limit: 100
 consumer_limit_per_stream: 50
 
+# WS 单条消息字节上限（信令帧最大尺寸）。缺省 65536=64KB。重启生效
+# （main.rs 建服时读入 SignalingServer::new，无 admin 热更路径）。
+# ws_max_message_size: 65536
+
 # ── 鉴权凭据（init 自举，文件 0600；本文件含密钥，勿入库）──
 # PSK: config 优先 + env MEDIASERVO_PSK 兜底（C35）；轮换 POST /api/admin/psk 热生效（C33）。
 psk: "__PSK__"
@@ -102,20 +106,39 @@ psk: "__PSK__"
 jwt_secret: "__JWT__"
 admin_jwt_secret: "__JWT__"
 
+# TLS（可选）——配置后 server 以 WSS/HTTPS 监听（main.rs:363 bind_rustls）。
+# 缺省=整段不配=纯 HTTP/WS。生效：重启（启动时读，无热更）。子键均无 serde 缺省，tls 一旦启用
+# 则两文件必配、缺失即启动报错：
+#   cert_path  必配  PEM 证书链路径
+#   key_path   必配  PEM 私钥路径
+# tls:
+#   cert_path: "/etc/certs/server.crt"
+#   key_path: "/etc/certs/server.key"
+
 # 注册表相对路径 = 相对本文件所在目录解析（main.rs resolve_path）。
 # 管理面：/api/admin/devices* /api/admin/accounts* 热生效（C33），禁止手改+重启。
 devices_file: "devices.yaml"
 accounts_file: "accounts.yaml"
 
+# API-key 免账号凭证（accountless-client-auth T1，POST /api/auth/exchange 换短 JWT 的源）。
+# 缺省=本文件同目录 api_keys.yaml；文件缺失=空注册表（exchange 恒 401，账号/PSK/设备通路零影响）。
+# 生效：路径重启（main.rs 建服加载）；表内容经 /api/admin API-key 端点热生效（C33 同纪律）。
+# api_keys_file: "api_keys.yaml"
+# exchange 签发 JWT 存活秒数。缺省 43200=12h（对齐账号登录 TTL；吊销粒度=已发 JWT 至 exp 自然死 F10）。
+# 生效：重启（main.rs 读入 state.api_token_ttl_secs）。
+# api_token_ttl_secs: 43200
+
 # SFU 对外公告地址（mediasoup 0.0.0.0 必须配 announced——PIT-44/58/138；C38 排查层①）。
-# 优先级: env MEDIASERVO_SFU_ANNOUNCED_IP（逗号分隔多 IP）> 此处 > 自动探测（容器内不可达）。
+# 不配 = 自动探测出网 IP（裸机可整段省略本 sfu 段）；容器内探测不可达 = 必配（PIT-44/58/138）。
+# 优先级: env MEDIASERVO_SFU_ANNOUNCED_IP（逗号分隔多 IP）> 此处 > 自动探测。
 # sfu:
 #   announced_ips:
 #     - "192.168.0.10"
 
 # Web 静态层（caddy）——缺省 8080 / 实例 web/；env MEDIASERVO_WEB_PORT 兜底（yaml 配置优先，C35 同形）。
+# 生效：渲染期一次性——改 port 后需删 etc/Caddyfile 重 init（Caddyfile 是渲染产物，不随 yaml 自动重生成）。
 # web:
-#   port: 8080
+#   port: 8080              # 缺省 8080（env MEDIASERVO_WEB_PORT 兜底）
 #   static_root: "/abs/web"
 
 # SFU/weaknet 端口 —— 缺省 20000 / 9810（env MEDIASERVO_SFU_PORT 兜底 sfu.port）。
@@ -864,6 +887,11 @@ mod tests {
         assert_eq!(cfg.web.static_root, None);
         assert_eq!(cfg.sfu.port, None);
         assert_eq!(cfg.sfu.weaknet_port, None);
+        // T6a 注释补全四字段解析后取 serde 缺省（注释示例不得被激活）
+        assert!(cfg.tls.is_none(), "tls 注释示例不应被激活");
+        assert!(cfg.api_keys_file.is_none());
+        assert_eq!(cfg.ws_max_message_size, 65536);
+        assert_eq!(cfg.api_token_ttl_secs, 43200);
         let re: ServerConfig =
             serde_yaml::from_str(&serde_yaml::to_string(&cfg).unwrap()).expect("roundtrip");
         assert_eq!(re.web, cfg.web);
@@ -871,5 +899,59 @@ mod tests {
         // 模板含注释形新键示例（R5 防漂移锚点）
         assert!(yaml.contains("web:"));
         assert!(yaml.contains("weaknet_port:"));
+    }
+
+    /// ServerConfig 全部 pub 字段名——与 mediaservo-common/src/config.rs `ServerConfig`
+    /// 现场逐一对表（10-12 清点 = 16 个，见数组）。**新增 pub 字段必须同笔入本数组 + 模板
+    /// 注释**，漏则本审计门红（PLAN §2.6 防注释再腐烂）。config.rs 无 `#[serde(rename)]`
+    /// （亲验），字段名 = YAML 键名逐字相等。
+    const SERVER_CONFIG_PUB_FIELDS: &[&str] = &[
+        "version",
+        "listen",
+        "room_capacity",
+        "psk",
+        "jwt_secret",
+        "admin_jwt_secret",
+        "rate_limit",
+        "ws_max_message_size",
+        "consumer_limit_per_stream",
+        "tls",
+        "devices_file",
+        "accounts_file",
+        "api_keys_file",
+        "api_token_ttl_secs",
+        "sfu",
+        "web",
+    ];
+
+    /// 合法地只以说明文字（非 `键:` 行形）出现在模板的字段逃生阀 = (字段, 理由)。
+    /// 现 sfu/web 均以注释示例 `# sfu:`/`# web:` 承载键形，走常规遍历，故本表空。
+    const TEMPLATE_PROSE_ONLY_FIELDS: &[(&str, &str)] = &[];
+
+    /// 键边界判据：去 `#` 注释前缀后有行以 `field:` 起头 = 该字段有键形示例。
+    /// 比裸 `contains("field:")` 严——defeats `jwt_secret` ⊂ `admin_jwt_secret` 前缀假阳性
+    /// （PLAN 以 room ⊂ room_capacity 举例，同类前缀在此升级为行首锚定）。
+    fn template_has_key(field: &str) -> bool {
+        let want = format!("{field}:");
+        SERVER_YAML_TEMPLATE.lines().any(|l| {
+            let t = l.trim_start();
+            let t = t.strip_prefix('#').unwrap_or(t).trim_start();
+            t.starts_with(&want)
+        })
+    }
+
+    #[test]
+    fn server_yaml_template_covers_all_pub_fields() {
+        let mut missing = Vec::new();
+        for field in SERVER_CONFIG_PUB_FIELDS {
+            let excepted = TEMPLATE_PROSE_ONLY_FIELDS.iter().any(|(f, _)| f == field);
+            if !excepted && !template_has_key(field) {
+                missing.push(*field);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "SERVER_YAML_TEMPLATE 缺字段键形注释（新增 ServerConfig pub 字段须同笔补注释+入本表）: {missing:?}"
+        );
     }
 }

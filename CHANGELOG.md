@@ -15,6 +15,7 @@
   `video_stats` 会话 union。迁移 = 机械前缀替换 + 上述三签名点。
 
 ### 新增
+- [server] init 生成的 `server.yaml` 模板注释补全（T6a）：新增 `tls`/`ws_max_message_size`/`api_keys_file`/`api_token_ttl_secs` 四字段注释示例（功能/缺省值/生效阶段三要素，`tls` 附子键必配标注+yaml 形状），并澄清 `announced_ips`（不配=自动探测、裸机可整段省略、容器必配）与 `web.port`（改后需删 etc/Caddyfile 重 init，渲染期一次性）——仅看注释即可完成正确配置、无需读源码；配 ServerConfig 字段覆盖审计测试防注释再腐烂。
 - [server] 重新部署/重建后手工 `[apps.env]` 行不再丢：oxfile 重渲染时自动合并旧文件
   （live 缺失则取 run/oxfile.toml.bak 快照）中的手工 env 键——系统键 `MEDIASERVO_SFU_*`
   恒以本次渲染为准不复活旧值；手工键冲突时旧值优先（用户意图）；无法识别的旧文件退化为
