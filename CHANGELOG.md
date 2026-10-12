@@ -15,6 +15,7 @@
   `video_stats` 会话 union。迁移 = 机械前缀替换 + 上述三签名点。
 
 ### 新增
+- [server] doctor/contention 双 daemon 注册表分裂检测（T5，指认不杀戮）：doctor 新增 [warn]——共享/旧 daemon 注册表（$XDG_DATA_HOME 否则 ~/.local/share/oxmgr/state.json，计划原文 ~/.oxmgr 系误引）存在 cwd 属本实例的行即报出 name/id/pid 与「固定 OXMGR_DATA_DIR + `oxmgr list` 对账」收口指引（不计 failed）；start 端口占用且 /proc 未定位旧实例时同判据指认「占用者在旧共享 daemon 名下」。判据 = cwd 归属（status 无关），专治 2026-10-12「stop 说 stopped 但端口仍被占」事故形（实例表空+default 持全部）；不自动 kill/迁移（PIT-98）。
 - [server] doctor 新增两巡检（web 端口漂移 WARN：server.yaml/env 意图 vs Caddyfile 产物，D-A 改判后唯一漂移报警通道，parse 失败按契约 skip）与 `announced_ips` 腐烂 WARN（yaml 配置 IP ∉ 本机接口且裸机形态时告警，容器姿态 INFO 豁免；复用 sfu `use_bare_metal_listen`/`detect_all_ips` 同源判据，禁第二份枚举）——均为 WARN 不改 doctor 退出码契约。docker server.yaml 模板删零消费死键 `rtc_ports_range`；`DEFAULT_WEB_PORT`/`WEAKNET_SERVE_PORT` 缺省常量收编 `mediaservo-common::config` 单源（T6b②，与 `DEFAULT_SFU_PORT` 同模式；weaknet `DEFAULT_LISTEN` 不依赖 common 维持手抄+交叉注释锚）。
 - [server] init 生成的 `server.yaml` 模板注释补全（T6a）：新增 `tls`/`ws_max_message_size`/`api_keys_file`/`api_token_ttl_secs` 四字段注释示例（功能/缺省值/生效阶段三要素，`tls` 附子键必配标注+yaml 形状），并澄清 `announced_ips`（不配=自动探测、裸机可整段省略、容器必配）与 `web.port`（改后需删 etc/Caddyfile 重 init，渲染期一次性）——仅看注释即可完成正确配置、无需读源码；配 ServerConfig 字段覆盖审计测试防注释再腐烂。
 - [server] 重新部署/重建后手工 `[apps.env]` 行不再丢：oxfile 重渲染时自动合并旧文件

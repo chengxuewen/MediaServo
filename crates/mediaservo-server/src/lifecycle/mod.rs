@@ -512,7 +512,20 @@ fn contention_flow(verb: &str, dir: &Path, what: &str, port: u16, no_web: bool) 
     let old = inspect::find_other_server_dir(dir);
     match &old {
         Some(od) => eprintln!("  旧实例目录: {}", od.display()),
-        None => eprintln!("  （未能定位旧实例目录——端口可能被其他程序占用）"),
+        None => {
+            match inspect::strays_under(&inspect::read_default_registry(), dir).into_iter().next() {
+                // T5: /proc 扫不到 → 占用者可能在共享/旧 daemon 名下（非本实例注册表管辖
+                // ——2026-10-12 事故形）。指认不杀戮：接管路径仍拒（old=None 语义不变）。
+                Some(e) => eprintln!(
+                    "  端口占用者在旧共享 daemon 名下: name={} id={} pid={}（非本实例注册表管辖）—— {}",
+                    e.name,
+                    e.id,
+                    e.pid.map_or_else(|| "?".into(), |p| p.to_string()),
+                    inspect::SPLIT_GUIDANCE
+                ),
+                None => eprintln!("  （未能定位旧实例目录——端口可能被其他程序占用）"),
+            }
+        }
     }
     if !std::io::stdin().is_terminal() {
         eprintln!(

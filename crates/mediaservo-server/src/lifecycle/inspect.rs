@@ -251,6 +251,92 @@ pub(super) fn announced_stale_items(
     Some(announced.iter().filter(|ip| !local.contains(*ip)).cloned().collect())
 }
 
+// ── T5 oxmgr 双 daemon 注册表分裂检测（指认不杀戮——PLAN §2.5-3，PIT-98）──────────
+
+/// 收口指引句（doctor/contention 两处同源——同一句话只写一次）
+pub(super) const SPLIT_GUIDANCE: &str = "簇操作先固定一个 OXMGR_DATA_DIR 并 `oxmgr list` 对账；收口方式：经共享 daemon 停簇或迁移注册后重启（本检测不自动杀戮/迁移）";
+
+/// oxmgr `state.json` processes[] 条目的最小关注面（未知字段忽略；pid 在 stopped 形为 null）。
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(super) struct ManagedEntry {
+    #[serde(default)]
+    pub id: u64,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub pid: Option<u64>,
+    #[serde(default)]
+    pub cwd: PathBuf,
+}
+
+#[derive(serde::Deserialize)]
+struct OxmgrState {
+    #[serde(default)]
+    processes: Vec<ManagedEntry>,
+}
+
+/// 共享/旧 daemon 数据目录：$XDG_DATA_HOME（非空）否则 $HOME/.local/share，接 "oxmgr"。
+/// 计划原文 `~/.oxmgr` 系误引——实机 oxmgr 注册表落 XDG（2026-10-12 事故复盘亲验）。
+pub(super) fn default_data_dir() -> Option<PathBuf> {
+    default_data_dir_from(
+        std::env::var("XDG_DATA_HOME").ok().as_deref(),
+        std::env::var("HOME").ok().as_deref(),
+    )
+}
+
+fn default_data_dir_from(xdg: Option<&str>, home: Option<&str>) -> Option<PathBuf> {
+    // ponytail: Windows 无 HOME/XDG 语义 → None（检测整体静默）；此生命周期面是
+    // Linux/macOS 生产，读注册不为 Windows 引入 dirs 依赖。
+    let base = xdg.filter(|s| !s.is_empty()).map(PathBuf::from).or_else(|| {
+        home.filter(|s| !s.is_empty()).map(|h| PathBuf::from(h).join(".local/share"))
+    })?;
+    Some(base.join("oxmgr"))
+}
+
+/// 宽容解析：坏 json / 非 OxMgrState 形 → 空表（消费侧视同"无分裂"，不产噪音）。
+fn parse_state(text: &str) -> Vec<ManagedEntry> {
+    serde_json::from_str::<OxmgrState>(text).map(|s| s.processes).unwrap_or_default()
+}
+
+fn read_registry(path: &Path) -> Vec<ManagedEntry> {
+    std::fs::read_to_string(path).map(|t| parse_state(&t)).unwrap_or_default()
+}
+
+/// 共享 daemon 注册表（default_data_dir 缺位 / state.json 缺失 = 空表）。
+pub(super) fn read_default_registry() -> Vec<ManagedEntry> {
+    default_data_dir().map(|d| read_registry(&d.join("state.json"))).unwrap_or_default()
+}
+
+/// entries 中 cwd 位于 my_dir 之下的条目（双侧绝对化后按 Path 组件前缀——
+/// /dir/server-2 这类兄弟形不误入）。纯函数，doctor 与 contention 共用。
+pub(super) fn strays_under(entries: &[ManagedEntry], my_dir: &Path) -> Vec<ManagedEntry> {
+    let mine = absolute(my_dir);
+    entries.iter().filter(|e| absolute(&e.cwd).starts_with(&mine)).cloned().collect()
+}
+
+#[derive(Debug)]
+pub(super) struct SplitVerdict {
+    /// 共享/旧 daemon 名下、cwd 属本实例的行
+    pub strays: Vec<ManagedEntry>,
+    /// 本实例注册表条目数（文案对照用）
+    pub instance_count: usize,
+}
+
+/// 分裂判据：default 表含 cwd ∈ 我方目录的行即判。status 词汇无关——盘上仅观测到
+/// "running"，而注册在错误 daemon 名下本身就是混乱源（实例 CLI stop 管不到它
+/// = 2026-10-12"说 stopped 但端口仍被占"事故形）。**实例表为空不豁免**：事故恰是
+/// 实例表空 + default 持全部，"两表皆非空"规则必漏。
+pub(super) fn split_registry(
+    default: &[ManagedEntry],
+    instance: &[ManagedEntry],
+    my_dir: &Path,
+) -> Option<SplitVerdict> {
+    let strays = strays_under(default, my_dir);
+    (!strays.is_empty()).then_some(SplitVerdict { strays, instance_count: instance.len() })
+}
+
 pub(super) fn cmd_doctor(args: &mut dyn Iterator<Item = String>) -> i32 {
     let dir = match parse_dir(args) {
         Ok(d) => d,
@@ -340,6 +426,33 @@ pub(super) fn cmd_doctor(args: &mut dyn Iterator<Item = String>) -> i32 {
                     "[warn] announced_ips 腐烂: {stale:?} 已非本机接口 IP——两出口：裸机=清空 sfu.announced_ips 走自动探测 / 容器=更新为当前可达 IP（公告腐烂 IP=客户端 ICE 全败，C38 层①）"
                 ),
             }
+        }
+    }
+
+    // T5 双 daemon 注册表分裂巡检——[warn] 不计 failed（T6b 先例，退出码=失败数契约不变）
+    let default_reg = read_default_registry();
+    if !default_reg.is_empty() {
+        let instance_reg = read_registry(&dir.join("run").join("oxmgr").join("state.json"));
+        if let Some(v) = split_registry(&default_reg, &instance_reg, &dir) {
+            let items: Vec<String> = v
+                .strays
+                .iter()
+                .map(|e| {
+                    format!(
+                        "{}(id={} pid={})",
+                        e.name,
+                        e.id,
+                        e.pid.map_or_else(|| "?".into(), |p| p.to_string())
+                    )
+                })
+                .collect();
+            println!(
+                "[warn] oxmgr 双 daemon 分裂: {} 个本实例 app 注册在共享/旧 daemon 名下: {}（本实例注册表 {n} 条）—— {g}",
+                v.strays.len(),
+                items.join(", "),
+                n = v.instance_count,
+                g = SPLIT_GUIDANCE
+            );
         }
     }
 
@@ -518,5 +631,104 @@ mod tests {
         );
         // 空配置 → None（use_bare_metal_listen([]) = false）
         assert_eq!(announced_stale_items(&[], &ipset(&["192.168.2.127"])), None);
+    }
+
+    // ── T5 双 daemon 注册表分裂检测（fixture = 静态 json 串，不触 daemon/磁盘）──
+    fn entry(id: u64, name: &str, status: &str, cwd: &str) -> ManagedEntry {
+        ManagedEntry {
+            id,
+            name: name.into(),
+            status: status.into(),
+            pid: if status == "running" { Some(id * 10) } else { None },
+            cwd: cwd.into(),
+        }
+    }
+
+    const INCIDENT_STATE: &str = r#"{"next_id":128,"processes":[
+      {"id":124,"name":"msrtc-server","status":"running","pid":3419236,"cwd":"/deploy/out/server"},
+      {"id":125,"name":"msrtc-web","status":"running","pid":3419240,"cwd":"/deploy/out/server"}]}"#;
+
+    #[test]
+    fn parse_state_fixture_shape() {
+        let rows = parse_state(INCIDENT_STATE);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].name, "msrtc-server");
+        assert_eq!(rows[0].pid, Some(3419236));
+        // corrupt json / 非 oxmgr 形 → 空表（静默 pass，不产噪音）
+        assert!(parse_state("{oops").is_empty());
+        assert!(parse_state("{}").is_empty());
+        // 未知字段忽略 + pid 缺省/null 容忍（stopped 形）
+        let loose = parse_state(
+            r#"{"processes":[{"id":1,"name":"x","status":"stopped","pid":null,"cwd":"/a","whatever":42}]}"#,
+        );
+        assert_eq!(loose.len(), 1);
+        assert_eq!(loose[0].pid, None);
+    }
+
+    #[test]
+    fn split_registry_catches_incident_shape_default_holds_ours_instance_empty() {
+        // 2026-10-12 事故形：本实例 app 全在共享 daemon 名下、实例表空——
+        // "两表皆非空才判"的规则会漏它。判据 = cwd 归属，与实例表内容无关。
+        let default = parse_state(INCIDENT_STATE);
+        let v =
+            split_registry(&default, &[], Path::new("/deploy/out/server")).expect("事故形必须判出");
+        assert_eq!(v.strays.len(), 2);
+        assert_eq!(v.instance_count, 0);
+    }
+
+    #[test]
+    fn split_registry_clean_single_registry_none() {
+        // 正常态：本实例 app 在实例表、default 表无我方行
+        let default = vec![entry(1, "other-app", "running", "/opt/otherproject")];
+        let instance = vec![entry(2, "msrtc-server", "running", "/deploy/out/server")];
+        assert!(split_registry(&default, &instance, Path::new("/deploy/out/server")).is_none());
+        // default 表空 → None（无噪音）
+        assert!(split_registry(&[], &instance, Path::new("/deploy/out/server")).is_none());
+    }
+
+    #[test]
+    fn split_registry_foreign_prefix_lookalike_not_stray() {
+        // Path 组件级前缀判据：/deploy/out/server-2 ∉ /deploy/out/server 之下
+        let default = vec![entry(9, "sibling-instance", "running", "/deploy/out/server-2")];
+        assert!(split_registry(&default, &[], Path::new("/deploy/out/server")).is_none());
+    }
+
+    #[test]
+    fn split_registry_status_agnostic_pins_cwd_membership_rule() {
+        // 规则钉：default 表含 cwd∈我方目录的行即判，status 词汇无关
+        //（盘上仅见 "running"；stopped 残影同样是注册表归属混乱源）
+        let default = vec![entry(3, "msrtc-server", "stopped", "/deploy/out/server")];
+        let v = split_registry(&default, &[], Path::new("/deploy/out/server"))
+            .expect("stopped 残影同判");
+        assert_eq!(v.strays[0].status, "stopped");
+    }
+
+    #[test]
+    fn strays_under_pure_match_for_contention() {
+        // contention 侧判据：端口占用 + /proc 未命中 → default 表找我方目录行
+        let default = parse_state(INCIDENT_STATE);
+        let strays = strays_under(&default, Path::new("/deploy/out/server"));
+        assert_eq!(strays[0].name, "msrtc-server");
+        assert_eq!(strays[0].id, 124);
+        assert_eq!(strays[0].pid, Some(3419236));
+        assert!(strays_under(&default, Path::new("/somewhere/else")).is_empty());
+    }
+
+    #[test]
+    fn default_data_dir_prefers_xdg_then_home() {
+        // 纯参形钉判据（edition 2024 下 set_var 是 unsafe——不碰进程 env）
+        assert_eq!(
+            default_data_dir_from(Some("/x/data"), Some("/h")),
+            Some(PathBuf::from("/x/data/oxmgr"))
+        );
+        assert_eq!(
+            default_data_dir_from(None, Some("/h")),
+            Some(PathBuf::from("/h/.local/share/oxmgr"))
+        );
+        assert_eq!(
+            default_data_dir_from(Some(""), Some("/h")),
+            Some(PathBuf::from("/h/.local/share/oxmgr"))
+        );
+        assert_eq!(default_data_dir_from(None, None), None);
     }
 }
