@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use templates::{
-    DEFAULT_WEB_PORT, SYSTEM_ENV_KEYS, WEAKNET_APP, WEAKNET_SERVE_PORT, gen_secret,
+    DEFAULT_WEB_PORT, SFU_ENV_KEYS, WEAKNET_APP, WEAKNET_SERVE_PORT, gen_secret,
     instance_daemon_port, looks_like_oxfile, manual_env_keys, merge_manual_env, oxfile_has_weaknet,
     parse_listen_port, parse_weaknet_port, parse_web_port, render_admin_account, render_caddyfile,
     render_oxfile, render_server_yaml, resolve_port, server_product, server_web_app,
@@ -244,8 +244,8 @@ fn write_oxfile(run_dir: &Path) -> Result<(), String> {
 }
 
 /// PIT-160 提示行（纯函数可测）：无手工条目 → 旧指引文本逐字保留；有则「已合并 N 条
-/// 手工 env」变体 + 未并（新渲染无对应 app 条目）计数。系统键 MEDIASERVO_SFU_* 恒以
-/// 本次渲染为准、不计入 N。
+/// 手工 env」变体 + 未并（新渲染无对应 app 条目）计数。渲染器受管键（MEDIASERVO_SFU_*
+/// 与 WEAKNET_STATEDIR）恒以本次渲染为准（baked-wins）、不计入 N。
 fn pit160_note(merged: usize, lost: usize) -> String {
     if merged == 0 && lost == 0 {
         return "提示: 若本树此前存在手工 [apps.env] 行（ALLOW_DEV_*/RUST_LOG/WEAKNET_ADMIN_PASS），本次渲染不含它们——按 msrtc.sh -h「环境变量 [B]」回补".to_string();
@@ -256,7 +256,7 @@ fn pit160_note(merged: usize, lost: usize) -> String {
         String::new()
     };
     format!(
-        "提示: 已合并 {merged} 条手工 env（来源=上次渲染快照；MEDIASERVO_SFU_* 系统键以本次渲染为准）{tail}"
+        "提示: 已合并 {merged} 条手工 env（来源=上次渲染快照；受管键 MEDIASERVO_SFU_*/WEAKNET_STATEDIR 以本次渲染为准）{tail}"
     )
 }
 
@@ -270,13 +270,10 @@ fn weaknet_probe_port(oxfile: &Path) -> u16 {
 }
 
 /// init 时把 SFU 相关 env 烘进 oxfile [apps.env]（drill/多实例端口隔离入口）。
-/// 键集 = SYSTEM_ENV_KEYS 唯一真源（与 merge_manual_env 排除集同集——T4「恰为本函数
-/// emit 的键」在结构上成立，不再有第二份清单漂移面）。
+/// 透传键集 = SFU_ENV_KEYS 唯一真源；merge 排除集为 MANAGED_ENV_KEYS（本集 + weaknet
+/// 烘值键——尾刀 baked-wins 裁决：env 透传与模板烘值两族受管键分集命名，各自单源）。
 fn sfu_env_passthrough() -> Vec<(String, String)> {
-    SYSTEM_ENV_KEYS
-        .iter()
-        .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
-        .collect()
+    SFU_ENV_KEYS.iter().filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v))).collect()
 }
 
 /// caddy 命令探测链（2026-09-29 自适应化）：① PATH ② 本二进制同目录（out/server/bin

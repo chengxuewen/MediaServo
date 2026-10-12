@@ -239,16 +239,23 @@ pub fn render_oxfile(
         // 簇与 CLI 同 state 面（面板看得见 CLI 施压、clear 打得着、撤网撤全）。token-file/
         // statedir 绝对形 [mn6]（OxMgr 相对路径坑——push_logs 同训）；重渲模板值优先、
         // carried_env 只补缺键 [lck-F14]。
-        out.push_str(&format!("[apps.env]\nWEAKNET_STATEDIR = \"{dir}/run/weaknet\"\n"));
+        out.push_str(&format!("[apps.env]\n{WEAKNET_STATEDIR_KEY} = \"{dir}/run/weaknet\"\n"));
         push_logs(&mut out, WEAKNET_APP, &log_dir);
     }
     out
 }
 
-/// T4（PIT-160 根修）系统受管键集——唯一真源：sfu_env_passthrough() 恰按本清单渲染、
-/// merge_manual_env 按同集排除（结构级保证「exactly the keys that function emits」）。
-/// 本集键的旧值来自上次渲染而非用户手改，永不从旧文件复活（陈旧系统值压死新配置，§2.4 M1 裁决）。
-pub const SYSTEM_ENV_KEYS: [&str; 2] = ["MEDIASERVO_SFU_PORT", "MEDIASERVO_SFU_ANNOUNCED_IP"];
+/// SFU env 透传键集——`sfu_env_passthrough()` 恰按本清单读 env 渲染（drill/多实例端口隔离）。
+pub const SFU_ENV_KEYS: [&str; 2] = ["MEDIASERVO_SFU_PORT", "MEDIASERVO_SFU_ANNOUNCED_IP"];
+
+/// `WEAKNET_STATEDIR` 键名——render_oxfile 烘值行与本集共用此字面量（结构级防漂移）。
+pub const WEAKNET_STATEDIR_KEY: &str = "WEAKNET_STATEDIR";
+
+/// 渲染器受管键全集 = SFU 透传两键 + weaknet statedir 烘值——**merge 排除集**：本集键的
+/// 旧值 = 上次渲染输出而非用户手改，永不从旧/bak 文件复活（baked-wins；与 Python
+/// [lck-F14]「模板烘值优先、carried 只补缺」同构——T4 尾刀裁决），且不计入「已合并 N 条」。
+pub const MANAGED_ENV_KEYS: [&str; SFU_ENV_KEYS.len() + 1] =
+    [SFU_ENV_KEYS[0], SFU_ENV_KEYS[1], WEAKNET_STATEDIR_KEY];
 
 /// 文本是否 render_oxfile 形（`[[apps]]` 条目标记）？否 = 损坏/外来旧文件——调用方降级纯渲染 + WARN。
 pub fn looks_like_oxfile(text: &str) -> bool {
@@ -341,12 +348,12 @@ fn unescape_toml(s: &str) -> String {
     o
 }
 
-/// 参与合并的手工 env (app, key) 清单：SYSTEM_ENV_KEYS 排除、(app,key) 首现去重。
+/// 参与合并的手工 env (app, key) 清单：MANAGED_ENV_KEYS（渲染器受管全集）排除、(app,key) 首现去重。
 /// write_oxfile 用旧/新两侧本清单做头差 = 已合并 / 未并（新渲染无对应条目）计数。
 pub fn manual_env_keys(text: &str) -> Vec<(String, String)> {
     let mut seen: Vec<(String, String)> = Vec::new();
     for e in parse_env_entries(text) {
-        if SYSTEM_ENV_KEYS.contains(&e.key.as_str()) {
+        if MANAGED_ENV_KEYS.contains(&e.key.as_str()) {
             continue;
         }
         if !seen.iter().any(|(a, k)| a == &e.app && k == &e.key) {
@@ -357,14 +364,14 @@ pub fn manual_env_keys(text: &str) -> Vec<(String, String)> {
 }
 
 /// PIT-160 根修核心纯函数：旧（live 或 .bak）oxfile 的手工 [apps.env] 键并入新渲染文本。
-/// 规则（PLAN §2.4 裁决）：系统键不参与（旧值=上次渲染遗留，复活会压死新配置）；
-/// 非系统键冲突 **旧值优先**（用户手改=用户意图）；缺键追加所属 app 条目 env 表尾
+/// 规则（PLAN §2.4 + 尾刀裁决）：渲染器受管键（MANAGED_ENV_KEYS）不参与——旧值=上次渲染
+/// 遗留，复活压死新配置（baked-wins）；其余键冲突 **旧值优先**（用户手改=用户意图）；缺键追加所属 app 条目 env 表尾
 /// （无表则在 [apps.logs] 前新建——与 render 同槽位）；旧条目在新渲染缺位 → 不并
 /// （调用方提示行报「另有 N 条」）。新渲染其余行逐字保留。
 pub fn merge_manual_env(old_text: &str, new_text: &str) -> String {
     let entries: Vec<EnvEntry> = parse_env_entries(old_text)
         .into_iter()
-        .filter(|e| !SYSTEM_ENV_KEYS.contains(&e.key.as_str()))
+        .filter(|e| !MANAGED_ENV_KEYS.contains(&e.key.as_str()))
         .collect();
     if entries.is_empty() {
         return new_text.to_string();
@@ -809,6 +816,29 @@ mod tests {
             merged.contains(r#"RUST_LOG = "a\"b\\c""#),
             "转义往返变形（解转义/再转义破坏值）:\n{merged}"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn t4f_baked_statedir_wins_and_never_counted() {
+        // 尾刀裁决（baked-wins）：WEAKNET_STATEDIR=render_oxfile 每轮烘值，旧/bak 形
+        // 即便在场也不得复活旧值，且不计入「已合并 N 条手工 env」。
+        let tmp = tempfile::tempdir().expect("tempdir");
+        touch_exec_bin(tmp.path(), "mediaservo-weaknet");
+        let new = t4_render(tmp.path(), &[]);
+        let baked =
+            format!("{WEAKNET_STATEDIR_KEY} = \"{}/run/weaknet\"", tmp.path().to_string_lossy());
+        assert!(new.contains(&baked), "fixture: weaknet 条目烘值行在场");
+        let old = new
+            .replace(&baked, &format!("WEAKNET_STATEDIR = \"/old/tree/run/weaknet\""))
+            .replacen("[apps.logs]", "[apps.env]\nALLOW_X = \"1\"\n[apps.logs]", 1);
+        assert!(old.contains("/old/tree") && old.contains("ALLOW_X"), "fixture 注入失败");
+        let merged = merge_manual_env(&old, &new);
+        assert!(merged.contains(&baked), "烘值优先，旧 statedir 不得覆盖新烘值:\n{merged}");
+        assert!(!merged.contains("/old/tree/run/weaknet"), "旧 statedir 值不复活");
+        assert!(merged.contains("ALLOW_X = \"1\""), "真手工键照常合并");
+        let keys = manual_env_keys(&old);
+        assert_eq!(keys.len(), 1, "N 统计不收烘值键: {keys:?}");
     }
 
     #[test]
