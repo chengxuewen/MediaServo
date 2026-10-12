@@ -269,10 +269,14 @@ impl Consumer {
                     .unwrap_or_else(|e| e.into_inner())
                     .diff(&stats, now);
                 // rtt 连接级并采（后端无源/无 succeeded pair → None → 0）
-                if let Some(pc) = slot.pc.lock().unwrap_or_else(|e| e.into_inner()).clone() {
-                    if let Some(conn) = pc.connection_stats() {
-                        snap.rtt_ms = conn.rtt_ms.round() as u32;
-                    }
+                if let Some(conn) = slot
+                    .pc
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone()
+                    .and_then(|pc| pc.connection_stats())
+                {
+                    snap.rtt_ms = conn.rtt_ms.round() as u32;
                 }
                 cb(snap);
             }

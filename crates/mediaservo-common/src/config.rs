@@ -125,6 +125,7 @@ pub struct SfuConfig {
     pub weaknet_port: Option<u16>,
 }
 
+#[allow(clippy::derivable_impls)] // 勿改回 derive——见结构体 doc「手写 Default」决策 + 钉死测试
 impl Default for SfuConfig {
     fn default() -> Self {
         Self { announced_ips: Vec::new(), port: None, weaknet_port: None }
@@ -143,6 +144,7 @@ pub struct WebConfig {
     pub static_root: Option<String>,
 }
 
+#[allow(clippy::derivable_impls)] // 同 SfuConfig——手写 Default 项目决策
 impl Default for WebConfig {
     fn default() -> Self {
         Self { port: None, static_root: None }
