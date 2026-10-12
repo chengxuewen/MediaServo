@@ -33,10 +33,7 @@ impl ConflictReport {
             Some((ppid, pcmd)) => format!("，父={pcmd}({ppid})"),
             None => String::new(),
         };
-        format!(
-            "pid {}  {}{mark}  cmd={}{}",
-            self.pid, self.exe, self.cmd, parent
-        )
+        format!("pid {}  {}{mark}  cmd={}{}", self.pid, self.exe, self.cmd, parent)
     }
 }
 
@@ -97,22 +94,18 @@ fn proc_pid_owns_inodes(pid: u32, inodes: &BTreeSet<u64>) -> bool {
     for fd in fds.flatten() {
         let Ok(target) = std::fs::read_link(fd.path()) else { continue };
         let t = target.to_string_lossy();
-        if let Some(rest) = t.strip_prefix("socket:[") {
-            if let Ok(ino) = rest.trim_end_matches(']').parse::<u64>()
-                && inodes.contains(&ino)
-            {
-                return true;
-            }
+        if let Some(rest) = t.strip_prefix("socket:[")
+            && let Ok(ino) = rest.trim_end_matches(']').parse::<u64>()
+            && inodes.contains(&ino)
+        {
+            return true;
         }
     }
     false
 }
 
 fn report_of_pid(pid: u32) -> Option<ConflictReport> {
-    let exe = std::fs::read_link(format!("/proc/{pid}/exe"))
-        .ok()?
-        .to_string_lossy()
-        .into_owned();
+    let exe = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?.to_string_lossy().into_owned();
     let cmd = std::fs::read_to_string(format!("/proc/{pid}/cmdline"))
         .unwrap_or_default()
         .split('\0')
@@ -122,11 +115,9 @@ fn report_of_pid(pid: u32) -> Option<ConflictReport> {
         .take(80)
         .collect::<String>();
     let deleted = exe.contains("(deleted)");
-    let ppid = std::fs::read_to_string(format!("/proc/{pid}/status"))
-        .ok()
-        .and_then(|s| {
-            s.lines().find_map(|l| l.strip_prefix("PPid:")).and_then(|v| v.trim().parse::<u32>().ok())
-        });
+    let ppid = std::fs::read_to_string(format!("/proc/{pid}/status")).ok().and_then(|s| {
+        s.lines().find_map(|l| l.strip_prefix("PPid:")).and_then(|v| v.trim().parse::<u32>().ok())
+    });
     let parent = ppid.and_then(|pp| {
         let cmd = std::fs::read_to_string(format!("/proc/{pp}/cmdline"))
             .unwrap_or_default()
@@ -136,7 +127,7 @@ fn report_of_pid(pid: u32) -> Option<ConflictReport> {
             .chars()
             .take(60)
             .collect::<String>();
-        (!cmd.is_empty()).then(|| (pp, cmd))
+        (!cmd.is_empty()).then_some((pp, cmd))
     });
     Some(ConflictReport { pid, exe, cmd, deleted, parent })
 }
@@ -168,7 +159,10 @@ pub fn print_report(reports: &[ConflictReport], port: u16) {
     for r in reports {
         eprintln!("  {}", r.line());
         if r.deleted {
-            eprintln!("  → 该进程运行的是已删除的旧二进制（升级残留）；kill {} 后重跑 start", r.pid);
+            eprintln!(
+                "  → 该进程运行的是已删除的旧二进制（升级残留）；kill {} 后重跑 start",
+                r.pid
+            );
         }
     }
 }
@@ -198,7 +192,11 @@ mod tests {
         assert_eq!(tcp.len(), 1, "tcp 自占应恰 1 条: {tcp:?}");
         assert_eq!(tcp[0].pid, std::process::id());
         assert!(!tcp[0].deleted);
-        assert!(tcp[0].cmd.contains("conflict") || tcp[0].cmd.contains("mediaservo") || !tcp[0].cmd.is_empty());
+        assert!(
+            tcp[0].cmd.contains("conflict")
+                || tcp[0].cmd.contains("mediaservo")
+                || !tcp[0].cmd.is_empty()
+        );
         let udp = diagnose_port(udp_port);
         assert_eq!(udp.len(), 1, "udp 自占应恰 1 条: {udp:?}");
         assert_eq!(udp[0].pid, std::process::id());

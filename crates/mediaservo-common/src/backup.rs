@@ -7,8 +7,8 @@
 //! Writes are atomic: data is written to a temp file and renamed into place,
 //! so partial writes never corrupt the backup.
 
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -30,11 +30,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Debug> BackupManager<T> {
     /// `max_stale` — if set, `load()` returns `None` when the file is older
     /// than this duration. Pass `None` to always attempt recovery.
     pub fn new(path: impl Into<PathBuf>, max_stale: Option<Duration>) -> Self {
-        Self {
-            path: path.into(),
-            max_stale,
-            _marker: std::marker::PhantomData,
-        }
+        Self { path: path.into(), max_stale, _marker: std::marker::PhantomData }
     }
 
     /// Save state to disk atomically.
@@ -46,8 +42,7 @@ impl<T: Serialize + DeserializeOwned + Clone + Debug> BackupManager<T> {
             .map_err(|e| BackupError::Serialize(e.to_string()))?;
 
         let tmp_path = self.tmp_path();
-        std::fs::write(&tmp_path, &json)
-            .map_err(|e| BackupError::Write(e.to_string()))?;
+        std::fs::write(&tmp_path, &json).map_err(|e| BackupError::Write(e.to_string()))?;
 
         std::fs::rename(&tmp_path, &self.path)
             .map_err(|e| BackupError::AtomicSwap(e.to_string()))?;
@@ -71,10 +66,10 @@ impl<T: Serialize + DeserializeOwned + Clone + Debug> BackupManager<T> {
 
         // Staleness check
         if let Some(max_stale) = self.max_stale
-            && let Ok(modified) = metadata.modified() {
-            let age = std::time::SystemTime::now()
-                .duration_since(modified)
-                .unwrap_or(Duration::MAX);
+            && let Ok(modified) = metadata.modified()
+        {
+            let age =
+                std::time::SystemTime::now().duration_since(modified).unwrap_or(Duration::MAX);
             if age > max_stale {
                 tracing::info!(
                     path = %path.display(),
@@ -86,11 +81,11 @@ impl<T: Serialize + DeserializeOwned + Clone + Debug> BackupManager<T> {
             }
         }
 
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| BackupError::Read(e.to_string()))?;
+        let contents =
+            std::fs::read_to_string(path).map_err(|e| BackupError::Read(e.to_string()))?;
 
-        let state: T = serde_json::from_str(&contents)
-            .map_err(|e| BackupError::Deserialize(e.to_string()))?;
+        let state: T =
+            serde_json::from_str(&contents).map_err(|e| BackupError::Deserialize(e.to_string()))?;
 
         Ok(Some(state))
     }
@@ -148,10 +143,7 @@ pub struct BackupTask<T> {
 impl<T: Serialize + DeserializeOwned + Clone + Debug + Send + Sync + 'static> BackupTask<T> {
     /// Create a new backup task.
     pub fn new(path: impl Into<PathBuf>, period: Duration) -> Self {
-        Self {
-            manager: BackupManager::new(path, None),
-            period,
-        }
+        Self { manager: BackupManager::new(path, None), period }
     }
 
     /// Spawn a background task that persists `state_fn()` every `period`.
@@ -193,13 +185,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("backup.json");
 
-        let mgr: BackupManager<TestState> =
-            BackupManager::new(&path, None);
+        let mgr: BackupManager<TestState> = BackupManager::new(&path, None);
 
-        let state = TestState {
-            value: 42,
-            name: "test".into(),
-        };
+        let state = TestState { value: 42, name: "test".into() };
         mgr.save(&state).unwrap();
 
         let loaded = mgr.load().unwrap().unwrap();
@@ -222,10 +210,7 @@ mod tests {
         let mgr: BackupManager<TestState> =
             BackupManager::new(&path, Some(Duration::from_secs(3600)));
 
-        let state = TestState {
-            value: 1,
-            name: "fresh".into(),
-        };
+        let state = TestState { value: 1, name: "fresh".into() };
         mgr.save(&state).unwrap();
 
         let loaded = mgr.load().unwrap().unwrap();
@@ -237,15 +222,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("atomic.json");
 
-        let mgr: BackupManager<TestState> =
-            BackupManager::new(&path, None);
+        let mgr: BackupManager<TestState> = BackupManager::new(&path, None);
 
         // Write initial state
-        mgr.save(&TestState {
-            value: 100,
-            name: "initial".into(),
-        })
-        .unwrap();
+        mgr.save(&TestState { value: 100, name: "initial".into() }).unwrap();
 
         // Simulate crash by deleting temp file
         let tmp_path = path.with_extension("tmp");
@@ -263,13 +243,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("to_delete.json");
 
-        let mgr: BackupManager<TestState> =
-            BackupManager::new(&path, None);
-        mgr.save(&TestState {
-            value: 0,
-            name: "x".into(),
-        })
-        .unwrap();
+        let mgr: BackupManager<TestState> = BackupManager::new(&path, None);
+        mgr.save(&TestState { value: 0, name: "x".into() }).unwrap();
         assert!(path.exists());
 
         mgr.delete().unwrap();

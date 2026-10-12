@@ -14,7 +14,6 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum CoreError {
     // --- 1xxx: Connectivity ---
-
     /// WebSocket disconnect (Host/Remote ↔ Server signaling)
     #[error("[1001] WebSocket disconnected: {0}")]
     WebSocketDisconnect(String),
@@ -28,13 +27,11 @@ pub enum CoreError {
     PeerConnectionFailure(String),
 
     // --- 2xxx: Encoding ---
-
     /// Encoder initialization failed
     #[error("[2001] Encoder init failed: {0}")]
     EncoderInit(String),
 
     // --- 3xxx: Capture ---
-
     /// Capture source not found
     #[error("[3001] Capture source not found: {0}")]
     CaptureSourceNotFound(String),
@@ -44,7 +41,6 @@ pub enum CoreError {
     CaptureDisconnected,
 
     // --- 4xxx: Relay / Server ---
-
     /// Relay track binding failed
     #[error("[4001] Relay track bind failed: {0}")]
     RelayTrackBind(String),
@@ -58,19 +54,16 @@ pub enum CoreError {
     PskAuthFailed,
 
     // --- 5xxx: Decode / Render ---
-
     /// Decoder init failed
     #[error("[5001] Decoder init failed: {0}")]
     DecoderInit(String),
 
     // --- 6xxx: Control ---
-
     /// HMAC signature verification failed
     #[error("[6001] Control HMAC verification failed")]
     ControlHmacFailed,
 
     // --- 9xxx: System ---
-
     /// Out of memory
     #[error("[9001] Out of memory (RSS limit exceeded)")]
     OutOfMemory,

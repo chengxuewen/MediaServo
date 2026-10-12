@@ -250,7 +250,7 @@ async fn list_rooms(
                 && derived.iter().any(|(d, _, _)| d == id)
         }))
         .collect();
-    let mut rooms: Vec<RoomEntry> = state
+    let rooms: Vec<RoomEntry> = state
         .signaling
         .room_manager
         .list_rooms()
@@ -666,7 +666,11 @@ mod tests {
         assert_eq!(kind_of("ms-car1_test"), None, "{body} 派生流房不平铺");
         assert_eq!(kind_of("ms-car1_cam0-stream"), None, "{body} 离线流不出现");
         assert_eq!(kind_of("ms-car1").as_deref(), Some("control"), "{body} 整车房=控制面");
-        assert_eq!(streams_of("ms-car1"), Some(1), "{body} streams 内嵌在线流（test 在线/cam0 离线）");
+        assert_eq!(
+            streams_of("ms-car1"),
+            Some(1),
+            "{body} streams 内嵌在线流（test 在线/cam0 离线）"
+        );
         assert_eq!(kind_of("audio-ms-car1").as_deref(), Some("audio"), "{body}");
         // G16 正向不变量（流房面）：列表可见 ⇒ join 放行——流房 owner 未登记
         // （producer 不 RoomJoin）→ join_vehicle_room(None) 豁免族放行，成立。
@@ -728,9 +732,13 @@ mod tests {
     /// wire 契约：恰好 {room_id, kind} 二字段（多/少字段= serde 输出变化=本测先红）。
     #[test]
     fn wire_shape_exactly_two_fields() {
-        let json =
-            serde_json::to_value(RoomEntry { room_id: "vehicle_test1".into(), kind: "video", parent: None, streams: None })
-                .unwrap();
+        let json = serde_json::to_value(RoomEntry {
+            room_id: "vehicle_test1".into(),
+            kind: "video",
+            parent: None,
+            streams: None,
+        })
+        .unwrap();
         assert_eq!(json, serde_json::json!({ "room_id": "vehicle_test1", "kind": "video" }));
         assert_eq!(room_kind("audio-v1", false), "audio");
         assert_eq!(room_kind("vehicle_test1", true), "video");

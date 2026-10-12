@@ -103,16 +103,46 @@ mod tests {
         let metrics = CoreMetrics::new();
         let output = metrics.encode();
         // Prometheus text format should have HELP and TYPE for each metric
-        assert!(output.contains("# HELP mediaservo_active_connections"), "missing HELP mediaservo_active_connections");
-        assert!(output.contains("# TYPE mediaservo_active_connections gauge"), "missing TYPE mediaservo_active_connections");
-        assert!(output.contains("# HELP mediaservo_relayed_bytes"), "missing HELP mediaservo_relayed_bytes");
-        assert!(output.contains("# TYPE mediaservo_relayed_bytes counter"), "missing TYPE mediaservo_relayed_bytes");
-        assert!(output.contains("# HELP mediaservo_signaling_latency_us"), "missing HELP mediaservo_signaling_latency_us");
-        assert!(output.contains("# TYPE mediaservo_signaling_latency_us gauge"), "missing TYPE mediaservo_signaling_latency_us");
-        assert!(output.contains("# HELP mediaservo_error_count"), "missing HELP mediaservo_error_count");
-        assert!(output.contains("# TYPE mediaservo_error_count counter"), "missing TYPE mediaservo_error_count");
-        assert!(output.contains("# HELP mediaservo_rooms_active"), "missing HELP mediaservo_rooms_active");
-        assert!(output.contains("# HELP mediaservo_component_status"), "missing HELP mediaservo_component_status");
+        assert!(
+            output.contains("# HELP mediaservo_active_connections"),
+            "missing HELP mediaservo_active_connections"
+        );
+        assert!(
+            output.contains("# TYPE mediaservo_active_connections gauge"),
+            "missing TYPE mediaservo_active_connections"
+        );
+        assert!(
+            output.contains("# HELP mediaservo_relayed_bytes"),
+            "missing HELP mediaservo_relayed_bytes"
+        );
+        assert!(
+            output.contains("# TYPE mediaservo_relayed_bytes counter"),
+            "missing TYPE mediaservo_relayed_bytes"
+        );
+        assert!(
+            output.contains("# HELP mediaservo_signaling_latency_us"),
+            "missing HELP mediaservo_signaling_latency_us"
+        );
+        assert!(
+            output.contains("# TYPE mediaservo_signaling_latency_us gauge"),
+            "missing TYPE mediaservo_signaling_latency_us"
+        );
+        assert!(
+            output.contains("# HELP mediaservo_error_count"),
+            "missing HELP mediaservo_error_count"
+        );
+        assert!(
+            output.contains("# TYPE mediaservo_error_count counter"),
+            "missing TYPE mediaservo_error_count"
+        );
+        assert!(
+            output.contains("# HELP mediaservo_rooms_active"),
+            "missing HELP mediaservo_rooms_active"
+        );
+        assert!(
+            output.contains("# HELP mediaservo_component_status"),
+            "missing HELP mediaservo_component_status"
+        );
     }
 
     #[test]
@@ -120,12 +150,30 @@ mod tests {
         let metrics = CoreMetrics::new();
         let output = metrics.encode();
         // All metrics should start at 0
-        assert!(output.contains("mediaservo_active_connections 0"), "mediaservo_active_connections should be 0");
-        assert!(output.contains("mediaservo_relayed_bytes_total 0"), "mediaservo_relayed_bytes should be 0");
-        assert!(output.contains("mediaservo_signaling_latency_us 0"), "mediaservo_signaling_latency_us should be 0");
-        assert!(output.contains("mediaservo_error_count_total 0"), "mediaservo_error_count should be 0");
-        assert!(output.contains("mediaservo_rooms_active 0"), "mediaservo_rooms_active should be 0");
-        assert!(output.contains("mediaservo_component_status 0"), "mediaservo_component_status should be 0");
+        assert!(
+            output.contains("mediaservo_active_connections 0"),
+            "mediaservo_active_connections should be 0"
+        );
+        assert!(
+            output.contains("mediaservo_relayed_bytes_total 0"),
+            "mediaservo_relayed_bytes should be 0"
+        );
+        assert!(
+            output.contains("mediaservo_signaling_latency_us 0"),
+            "mediaservo_signaling_latency_us should be 0"
+        );
+        assert!(
+            output.contains("mediaservo_error_count_total 0"),
+            "mediaservo_error_count should be 0"
+        );
+        assert!(
+            output.contains("mediaservo_rooms_active 0"),
+            "mediaservo_rooms_active should be 0"
+        );
+        assert!(
+            output.contains("mediaservo_component_status 0"),
+            "mediaservo_component_status should be 0"
+        );
     }
 
     #[test]
@@ -134,8 +182,14 @@ mod tests {
         metrics.relayed_bytes.inc_by(1024);
         metrics.error_count.inc_by(3);
         let output = metrics.encode();
-        assert!(output.contains("mediaservo_relayed_bytes_total 1024"), "expected mediaservo_relayed_bytes_total 1024");
-        assert!(output.contains("mediaservo_error_count_total 3"), "expected mediaservo_error_count_total 3");
+        assert!(
+            output.contains("mediaservo_relayed_bytes_total 1024"),
+            "expected mediaservo_relayed_bytes_total 1024"
+        );
+        assert!(
+            output.contains("mediaservo_error_count_total 3"),
+            "expected mediaservo_error_count_total 3"
+        );
     }
 
     #[test]
@@ -146,10 +200,19 @@ mod tests {
         metrics.rooms_active.set(2);
         metrics.component_status.set(1);
         let output = metrics.encode();
-        assert!(output.contains("mediaservo_active_connections 5"), "expected mediaservo_active_connections 5");
-        assert!(output.contains("mediaservo_signaling_latency_us 1500"), "expected mediaservo_signaling_latency_us 1500");
+        assert!(
+            output.contains("mediaservo_active_connections 5"),
+            "expected mediaservo_active_connections 5"
+        );
+        assert!(
+            output.contains("mediaservo_signaling_latency_us 1500"),
+            "expected mediaservo_signaling_latency_us 1500"
+        );
         assert!(output.contains("mediaservo_rooms_active 2"), "expected mediaservo_rooms_active 2");
-        assert!(output.contains("mediaservo_component_status 1"), "expected mediaservo_component_status 1");
+        assert!(
+            output.contains("mediaservo_component_status 1"),
+            "expected mediaservo_component_status 1"
+        );
     }
 
     #[test]
@@ -158,7 +221,10 @@ mod tests {
         metrics.relayed_bytes.inc_by(100);
         metrics.relayed_bytes.inc_by(200);
         let output = metrics.encode();
-        assert!(output.contains("mediaservo_relayed_bytes_total 300"), "expected mediaservo_relayed_bytes_total 300");
+        assert!(
+            output.contains("mediaservo_relayed_bytes_total 300"),
+            "expected mediaservo_relayed_bytes_total 300"
+        );
     }
 
     #[test]

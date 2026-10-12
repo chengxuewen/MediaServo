@@ -4,10 +4,10 @@
 //! Server verifies. Used for WebSocket signaling auth.
 //! Phase 2+: JWT token auth as primary, PSK as fallback.
 
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
-use serde::{Deserialize, Serialize};
 use crate::error::CoreError;
+use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -28,8 +28,11 @@ pub enum AuthResult {
 #[async_trait::async_trait]
 pub trait PskAuthenticator: Send + Sync {
     /// Verify a signed challenge.
-    async fn verify_challenge(&self, challenge: &[u8], signature: &[u8])
-        -> Result<AuthResult, CoreError>;
+    async fn verify_challenge(
+        &self,
+        challenge: &[u8],
+        signature: &[u8],
+    ) -> Result<AuthResult, CoreError>;
 }
 
 /// Simple PSK authenticator that holds the key in memory.
@@ -44,15 +47,12 @@ pub struct SimplePskAuth {
 impl SimplePskAuth {
     /// Create from a PSK string (base64-encoded or raw).
     pub fn new(psk: impl AsRef<[u8]>) -> Self {
-        Self {
-            psk: psk.as_ref().to_vec(),
-        }
+        Self { psk: psk.as_ref().to_vec() }
     }
 
     /// Compute HMAC-SHA256(challenge, psk) → truncated to 8 bytes.
     pub fn sign(&self, challenge: &[u8]) -> Vec<u8> {
-        let mut mac = HmacSha256::new_from_slice(&self.psk)
-            .expect("HMAC key can be any length");
+        let mut mac = HmacSha256::new_from_slice(&self.psk).expect("HMAC key can be any length");
         mac.update(challenge);
         // ponytail: 8-byte tag is enough for Phase 1 challenge-response; full 32 bytes if collision rate rises
         mac.finalize().into_bytes()[..8].to_vec()
@@ -118,9 +118,7 @@ pub struct JwtAuth {
 impl JwtAuth {
     /// Create from a secret string (at least 256-bit entropy recommended).
     pub fn new(secret: impl Into<String>) -> Self {
-        Self {
-            secret: secret.into(),
-        }
+        Self { secret: secret.into() }
     }
 
     /// Create a signed JWT token for the given subject.
@@ -251,10 +249,9 @@ mod tests {
     fn jwt_verify_expired() {
         let auth = JwtAuth::new("secret");
         // ponytail: use direct claims construction for deterministic expiry test
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as usize;
+        let now =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+                as usize;
         let claims = JwtClaims {
             sub: "peer-1".into(),
             iat: now - 7200,
@@ -286,10 +283,9 @@ mod tests {
     fn jwt_claims_vehicles_roundtrip() {
         // G3: 账号 token 携带车辆白名单（serde additive，缺省 None）
         let auth = JwtAuth::new("my-jwt-secret-256-bit-minimum-key");
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as usize;
+        let now =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+                as usize;
         let claims = JwtClaims {
             sub: "carol".into(),
             iat: now,

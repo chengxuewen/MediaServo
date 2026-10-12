@@ -12,10 +12,10 @@
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::fmt;
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
 
 /// An opaque trace identifier — uuid v4 hex string.
 ///
@@ -85,11 +85,7 @@ fn default_format() -> LogFormat {
 
 impl Default for LoggingConfig {
     fn default() -> Self {
-        Self {
-            level: default_level(),
-            format: default_format(),
-            file: None,
-        }
+        Self { level: default_level(), format: default_format(), file: None }
     }
 }
 
@@ -98,8 +94,8 @@ impl Default for LoggingConfig {
 /// Reads `RUST_LOG` env var as override for the configured level.
 /// All spans with a `trace_id` field include it in structured output.
 pub fn init(config: LoggingConfig) {
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(&config.level));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.level));
 
     match config.format {
         LogFormat::Json => {
@@ -112,9 +108,7 @@ pub fn init(config: LoggingConfig) {
                 .with_file(true)
                 .with_line_number(true);
 
-            let subscriber = tracing_subscriber::registry()
-                .with(env_filter)
-                .with(layer);
+            let subscriber = tracing_subscriber::registry().with(env_filter).with(layer);
 
             subscriber.init();
         }
@@ -125,9 +119,7 @@ pub fn init(config: LoggingConfig) {
                 .with_target(false)
                 .with_thread_ids(false);
 
-            let subscriber = tracing_subscriber::registry()
-                .with(env_filter)
-                .with(layer);
+            let subscriber = tracing_subscriber::registry().with(env_filter).with(layer);
 
             subscriber.init();
         }

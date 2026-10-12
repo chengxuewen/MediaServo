@@ -387,6 +387,9 @@ mod imp {
         yaml.or(env).unwrap_or(mediaservo_common::config::DEFAULT_SFU_PORT)
     }
 
+    /// list_producers 返回 tuple 形（producer-label 轮加第 4 元；1.97 工具链 type_complexity 收口）。
+    type ProducerListing = Vec<(String, protocol::MediaKind, String, Option<String>)>;
+
     impl SfuManager {
         /// Create a new SfuManager with a single mediasoup Worker and WebRtcServer.
         /// SFU 监听口 = resolve_sfu_port(cfg.sfu.port, env)（D-B: yaml > env > 20000）—
@@ -1226,10 +1229,7 @@ mod imp {
 
         /// List all producers in a room. Returns (producer_id, kind, peer_id) tuples.
         /// Used for late-joiner sync to send existing producers to new consumers.
-        pub fn list_producers(
-            &self,
-            room_id: &str,
-        ) -> Option<Vec<(String, protocol::MediaKind, String, Option<String>)>> {
+        pub fn list_producers(&self, room_id: &str) -> Option<ProducerListing> {
             let room = self.rooms.get(room_id)?;
             let mut result = Vec::new();
             for entry in room.peers.iter() {

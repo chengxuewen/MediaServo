@@ -83,17 +83,10 @@ pub enum SignalingMessage {
     },
 
     /// A peer has left the room. Broadcast by Server.
-    RoomLeave {
-        room_id: String,
-        peer_id: String,
-    },
+    RoomLeave { room_id: String, peer_id: String },
 
     /// SDP offer/answer relayed through Server.
-    Sdp {
-        room_id: String,
-        target: Option<String>,
-        sdp: String,
-    },
+    Sdp { room_id: String, target: Option<String>, sdp: String },
 
     /// ICE candidate relayed through Server.
     /// PIT-106 (I2 review): `alias = "rtc_ice_candidate"` — 浏览器 W3C 惯例 wire 名
@@ -108,14 +101,9 @@ pub enum SignalingMessage {
     },
 
     // ── SFU transport negotiation (mediasoup) ────────────────────
-
     /// Request Server to create a WebRTC transport for this peer.
     /// The Server (SFU) creates the transport and returns parameters.
-    CreateWebRtcTransport {
-        room_id: String,
-        peer_id: String,
-        direction: TransportDirection,
-    },
+    CreateWebRtcTransport { room_id: String, peer_id: String, direction: TransportDirection },
 
     /// Server responds with transport parameters needed by the client.
     WebRtcTransportCreated {
@@ -144,16 +132,11 @@ pub enum SignalingMessage {
 
     /// P1 (client-dual-form): 客户端请求房间 Router 的 RTP capabilities —
     /// mediasoup-client Device.load() 的输入（C18 官方协商流程第一步）。
-    GetRouterRtpCapabilities {
-        room_id: String,
-    },
+    GetRouterRtpCapabilities { room_id: String },
 
     /// Server 回 Router RTP capabilities（mediasoup RtpCapabilitiesFinalized 序列化
     /// 原样透传 — opaque Value 循 rtp_parameters 先例，禁手拼）。
-    RouterRtpCapabilities {
-        room_id: String,
-        capabilities: serde_json::Value,
-    },
+    RouterRtpCapabilities { room_id: String, capabilities: serde_json::Value },
 
     /// P1: consumer 层级偏好（simulcast/SVC 选层 — 会议 P4a 带宽自适应的服务端入口）。
     /// ack 循 Error{code:0} 先例（transport_connected 同型）。
@@ -167,23 +150,13 @@ pub enum SignalingMessage {
     },
 
     /// Error response from Server.
-    Error {
-        code: u16,
-        message: String,
-    },
+    Error { code: u16, message: String },
 
     /// Encoded media frame relayed through Server.
     /// data_base64 is encoded as base64 (JSON-safe).
-    Frame {
-        room_id: String,
-        codec: String,
-        sequence: u64,
-        is_keyframe: bool,
-        data_base64: String,
-    },
+    Frame { room_id: String, codec: String, sequence: u64, is_keyframe: bool, data_base64: String },
 
     // ── SFU produce/consume (mediasoup) ─────────────────────────
-
     /// Peer asks to produce media on its send transport.
     /// rtp_parameters is opaque JSON — server passes it through to mediasoup.
     Produce {
@@ -204,10 +177,7 @@ pub enum SignalingMessage {
     },
 
     /// Server confirms producer created.
-    Produced {
-        room_id: String,
-        producer_id: String,
-    },
+    Produced { room_id: String, producer_id: String },
 
     /// Server broadcasts a new producer to all peers in the room.
     NewProducer {
@@ -237,7 +207,6 @@ pub enum SignalingMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         avg_encode_ms: Option<f64>,
     },
-
 
     /// v4 (E3 host-multiprocess): host-agent 整车状态上报 — 拓扑 + 数据流 + 信令
     /// 三快照聚合，经网关远端 WS 周期上报（默认 5s）。Server 直接消费存储
@@ -284,20 +253,12 @@ pub enum SignalingMessage {
     /// v5 (E4 云端配置闭环): Server → host-agent 整车配置下发。
     /// config 为 host.toml 全文；target = 整车 peer_id（房间内其他 peer 忽略）；
     /// version 与 StatusReport.config_version 关联（agent 应用成功后回报）。
-    ConfigPush {
-        room_id: String,
-        target: String,
-        config: String,
-        version: u64,
-    },
+    ConfigPush { room_id: String, target: String, config: String, version: u64 },
     /// G3 急停命令（舱端 → server → 车端房间）: 服务端强审计路径（D-H11 急停强审计）。
     /// 底盘/云台常规控制在 P2P DC（协商期已按角色授权，服务端不可见）; 急停必须
     /// 留痕（谁/何时/哪个车/什么命令）→ 经信令转发，host-agent 收下后转本地控制器。
     /// command 语义: 车端约定（如 "e-stop"），server 只透传 + 审计。
-    EmergencyCommand {
-        room_id: String,
-        command: String,
-    },
+    EmergencyCommand { room_id: String, command: String },
 
     /// H1 (SFU data 域): 对端在 send transport 上创建 DataProducer（SCTP DataChannel）。
     /// sctp_stream_parameters 为必填（SCTP producer 需要 stream_id; Option 仅为 wire 容错，
@@ -318,10 +279,7 @@ pub enum SignalingMessage {
     },
 
     /// Server confirms data producer created.
-    DataProducerCreated {
-        room_id: String,
-        data_producer_id: String,
-    },
+    DataProducerCreated { room_id: String, data_producer_id: String },
 
     /// Server broadcasts a new data producer to all peers in the room (late-joiner sync).
     NewDataProducer {
@@ -373,10 +331,7 @@ pub enum SignalingMessage {
 
     /// H2 (audio conference): 查询 SFU producer/consumer RTP 统计（媒体面证据 + 运维观测）。
     /// 携带 producer_id 或 consumer_id（任一）；server 回复 SfuStats。
-    SfuStatsRequest {
-        producer_id: Option<String>,
-        consumer_id: Option<String>,
-    },
+    SfuStatsRequest { producer_id: Option<String>, consumer_id: Option<String> },
 
     /// H2: SfuStatsRequest 的响应 — RTP 接收字节/包计数（mediasoup get_stats）。
     /// byte_count/packet_count: producer = 收到的入站 RTP; consumer = 路由转发的出站 RTP。
@@ -411,27 +366,18 @@ pub enum SignalingMessage {
 
     /// device-enroll §2 (server→host): 验签挑战。nonce = base64 32B 随机 (OsRng)；
     /// 每连接 0..1 次，仅对带 device_pubkey 的 RoomJoin 发出（secret 形/PSK 路径不发）。
-    DeviceAuthChallenge {
-        nonce: String,
-    },
+    DeviceAuthChallenge { nonce: String },
 
     /// device-enroll §2 (host→server): 挑战应答。
     /// 字节合同: sig = base64( Ed25519::sign( nonce_raw(32B) ‖ device_id ‖ room_id ) )，
     /// 钉死测试见 server devices.rs::sig_vector（host 侧批3 交叉复验同向量，D-E7 绑房防跨用）。
-    DeviceAuthResponse {
-        room_id: String,
-        sig: String,
-    },
+    DeviceAuthResponse { room_id: String, sig: String },
 
     /// device-enroll §2 (server→host): 手动档验签过但未批准（入 pending）。
     /// 设备沿用既有 retry 退避重连等待批准（日志「待管理员批准」）。
-    DeviceAuthPending {
-        device_id: String,
-    },
-
+    DeviceAuthPending { device_id: String },
     // ponytail: add frame ack/retransmit when reliability matters
 }
-
 
 /// E3 状态上报: 单 topic 数据流统计（wire 版，镜像 host monitor::flow::TopicFlow）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -634,9 +580,7 @@ pub fn control_hmac_key_from_file(path: &str) -> Result<String, String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("hmac key file {path}: {e}"))?;
     let mode = meta.permissions().mode() & 0o777;
     if mode & 0o077 != 0 {
-        return Err(format!(
-            "hmac key file {path}: mode {mode:04o} 过宽（须 0600 或更严，G13）"
-        ));
+        return Err(format!("hmac key file {path}: mode {mode:04o} 过宽（须 0600 或更严，G13）"));
     }
     let mut bytes = std::fs::read(path).map_err(|e| format!("hmac key file {path}: {e}"))?;
     while matches!(bytes.last(), Some(b'\n') | Some(b'\r')) {
@@ -651,16 +595,11 @@ pub fn control_hmac_key_from_file(path: &str) -> Result<String, String> {
 pub fn control_hmac_sign(key: &str, env: &ControlEnvelope) -> String {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
-    let mut mac = Hmac::<Sha256>::new_from_slice(key.as_bytes())
-        .expect("hmac accepts any key length");
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(key.as_bytes()).expect("hmac accepts any key length");
     mac.update(&canonical_envelope_bytes(env));
     // 全 32B → 64 hex（遥控语义足够；DC 帧预算友好）。
-    mac
-        .finalize()
-        .into_bytes()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// 恒时校验（hmac `verify_slice` = 内部 constant-time；hex 解码手写免增依赖）。
@@ -681,8 +620,8 @@ pub fn control_hmac_verify(key: &str, env: &ControlEnvelope, sig_hex: &str) -> b
     let Some(given) = from_hex(sig_hex) else {
         return false;
     };
-    let mut mac = Hmac::<Sha256>::new_from_slice(key.as_bytes())
-        .expect("hmac accepts any key length");
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(key.as_bytes()).expect("hmac accepts any key length");
     mac.update(&canonical_envelope_bytes(env));
     mac.verify_slice(&given).is_ok()
 }
@@ -702,10 +641,7 @@ impl ControlAck {
     }
 
     pub fn err(seq: u64, message: impl Into<String>) -> Self {
-        Self {
-            ack: seq,
-            result: serde_json::json!({ "error": message.into() }),
-        }
+        Self { ack: seq, result: serde_json::json!({ "error": message.into() }) }
     }
 }
 
@@ -767,7 +703,14 @@ mod tests {
 
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         match parsed {
-            SignalingMessage::RoomJoin { room_id, peer_role, stream_id, device_id, device_secret, .. } => {
+            SignalingMessage::RoomJoin {
+                room_id,
+                peer_role,
+                stream_id,
+                device_id,
+                device_secret,
+                ..
+            } => {
                 assert_eq!(room_id, "room-1");
                 assert_eq!(peer_role, PeerRole::Consumer);
                 assert_eq!(stream_id.as_deref(), Some("stream-42"));
@@ -854,26 +797,24 @@ mod tests {
                 r#""type":"device_auth_response""#,
             ),
             (
-                SignalingMessage::DeviceAuthPending {
-                    device_id: "ms-0a1b2c3d4e5f".into(),
-                },
+                SignalingMessage::DeviceAuthPending { device_id: "ms-0a1b2c3d4e5f".into() },
                 r#""type":"device_auth_pending""#,
             ),
         ];
         for (msg, wire_tag) in cases {
             let json = serde_json::to_string(&msg).unwrap();
             assert!(json.contains(wire_tag), "{json}");
-            let reparsed = serde_json::to_string(&serde_json::from_str::<SignalingMessage>(&json).unwrap()).unwrap();
+            let reparsed =
+                serde_json::to_string(&serde_json::from_str::<SignalingMessage>(&json).unwrap())
+                    .unwrap();
             assert_eq!(reparsed, json);
         }
     }
 
     #[test]
     fn serialize_error() {
-        let msg = SignalingMessage::Error {
-            code: 4003,
-            message: "PSK authentication failed".into(),
-        };
+        let msg =
+            SignalingMessage::Error { code: 4003, message: "PSK authentication failed".into() };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"error""#));
         assert!(json.contains("4003"));
@@ -941,10 +882,8 @@ mod tests {
 
     #[test]
     fn roundtrip_room_leave() {
-        let msg = SignalingMessage::RoomLeave {
-            room_id: "room-99".into(),
-            peer_id: "peer-3".into(),
-        };
+        let msg =
+            SignalingMessage::RoomLeave { room_id: "room-99".into(), peer_id: "peer-3".into() };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"room_leave""#));
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
@@ -998,11 +937,8 @@ mod tests {
 
     #[test]
     fn roundtrip_sdp_without_target() {
-        let msg = SignalingMessage::Sdp {
-            room_id: "room-x".into(),
-            target: None,
-            sdp: "v=0".into(),
-        };
+        let msg =
+            SignalingMessage::Sdp { room_id: "room-x".into(), target: None, sdp: "v=0".into() };
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         match parsed {
@@ -1163,10 +1099,8 @@ mod tests {
 
     #[test]
     fn roundtrip_produced() {
-        let msg = SignalingMessage::Produced {
-            room_id: "room-1".into(),
-            producer_id: "prod-1".into(),
-        };
+        let msg =
+            SignalingMessage::Produced { room_id: "room-1".into(), producer_id: "prod-1".into() };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"produced""#));
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
@@ -1200,10 +1134,7 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"producer_closed""#));
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
-        assert!(matches!(
-            parsed,
-            SignalingMessage::ProducerClosed { reason: Some(_), .. }
-        ));
+        assert!(matches!(parsed, SignalingMessage::ProducerClosed { reason: Some(_), .. }));
     }
 
     #[test]
@@ -1321,7 +1252,11 @@ mod tests {
             }],
             processes: vec![
                 ProcessStateJson { name: "host-agent".into(), running: true, expected: true },
-                ProcessStateJson { name: "host-capturer-cam0".into(), running: false, expected: true },
+                ProcessStateJson {
+                    name: "host-capturer-cam0".into(),
+                    running: false,
+                    expected: true,
+                },
             ],
             signal: SignalStatusJson {
                 remote_connected: true,
@@ -1387,7 +1322,8 @@ mod tests {
             max_packet_life_time: Some(100),
             max_retransmits: Some(5),
         };
-        let parsed2: SctpStreamParameters = serde_json::from_str(&serde_json::to_string(&sp2).unwrap()).unwrap();
+        let parsed2: SctpStreamParameters =
+            serde_json::from_str(&serde_json::to_string(&sp2).unwrap()).unwrap();
         assert_eq!(parsed2.max_packet_life_time, Some(100));
         assert_eq!(parsed2.max_retransmits, Some(5));
     }
@@ -1414,7 +1350,14 @@ mod tests {
         assert!(json.contains("transport-9"), "transport_id 必须上 wire: {json}");
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         match parsed {
-            SignalingMessage::CreateDataProducer { room_id, label, protocol, sctp_stream_parameters, transport_id, .. } => {
+            SignalingMessage::CreateDataProducer {
+                room_id,
+                label,
+                protocol,
+                sctp_stream_parameters,
+                transport_id,
+                ..
+            } => {
                 assert_eq!(room_id, "room-1");
                 assert_eq!(label, "control");
                 assert_eq!(protocol, "mediaservo.control");
@@ -1428,7 +1371,13 @@ mod tests {
         assert!(json.contains(r#"label":"control"#));
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         match parsed {
-            SignalingMessage::CreateDataProducer { room_id, label, protocol, sctp_stream_parameters, .. } => {
+            SignalingMessage::CreateDataProducer {
+                room_id,
+                label,
+                protocol,
+                sctp_stream_parameters,
+                ..
+            } => {
                 assert_eq!(room_id, "room-1");
                 assert_eq!(label, "control");
                 assert_eq!(protocol, "mediaservo.control");
@@ -1563,13 +1512,7 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""kind":"data""#), "wire snake_case: {json}");
         let back: SignalingMessage = serde_json::from_str(&json).unwrap();
-        assert!(matches!(
-            back,
-            SignalingMessage::ProducerClosed {
-                kind: MediaKind::Data,
-                ..
-            }
-        ));
+        assert!(matches!(back, SignalingMessage::ProducerClosed { kind: MediaKind::Data, .. }));
     }
 
     /// S2d 兼容钉：老 server 的 wire（无 sctpStreamParameters/label/protocol）必须可解析。
@@ -1696,9 +1639,13 @@ mod tests {
         let json = serde_json::to_string(&make(None)).unwrap();
         assert!(!json.contains("sctp_parameters"));
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
-        assert!(matches!(parsed, SignalingMessage::WebRtcTransportCreated { sctp_parameters: None, .. }));
+        assert!(matches!(
+            parsed,
+            SignalingMessage::WebRtcTransportCreated { sctp_parameters: None, .. }
+        ));
         // Some → 透传
-        let json_with = serde_json::to_string(&make(Some(serde_json::json!({ "port": 5000 })))).unwrap();
+        let json_with =
+            serde_json::to_string(&make(Some(serde_json::json!({ "port": 5000 })))).unwrap();
         assert!(json_with.contains(r#""sctp_parameters":{"port":5000}"#));
     }
 }

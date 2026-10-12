@@ -38,14 +38,14 @@ struct RawBrand {
     env_product: Option<&'static str>,
 }
 
-const DEFAULT_RAW: RawBrand = RawBrand {
-    product: "mediaservo",
-    env_product: option_env!("MEDIASERVO_BRAND"),
-};
+const DEFAULT_RAW: RawBrand =
+    RawBrand { product: "mediaservo", env_product: option_env!("MEDIASERVO_BRAND") };
 
 /// 合法品牌串字符：`[a-z0-9-]`（kebab-case）。
 fn valid_brand(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 32 && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    !s.is_empty()
+        && s.len() <= 32
+        && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// 读取当前品牌。env > 编译期 option_env > 默认 "mediaservo"。
@@ -94,14 +94,18 @@ fn instance() -> RawBrand {
             if valid_brand(&v) {
                 raw.env_product = Some(leak(v));
             } else {
-                tracing::warn!("MEDIASERVO_BRAND={v:?} 非法（须 [a-z0-9-]，≤32 字符）——回落默认品牌");
+                tracing::warn!(
+                    "MEDIASERVO_BRAND={v:?} 非法（须 [a-z0-9-]，≤32 字符）——回落默认品牌"
+                );
             }
         }
         if let Some(p) = raw.env_product {
             if p == "mediaservo" {
                 tracing::debug!("MEDIASERVO_BRAND=mediaservo——显式默认（等同缺省 legacy 映射）");
             } else {
-                tracing::info!("品牌化模式: product={p}（app/unit/device/namespace 前缀按 <brand>- 派生）");
+                tracing::info!(
+                    "品牌化模式: product={p}（app/unit/device/namespace 前缀按 <brand>- 派生）"
+                );
             }
             raw.product = p;
         }
