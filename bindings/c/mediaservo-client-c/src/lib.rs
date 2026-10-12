@@ -105,11 +105,24 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     RT.get_or_init(|| {
         init_tracing();
-        tokio::runtime::Builder::new_multi_thread()
+        let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
             .build()
-            .expect("client-c runtime")
+            .expect("client-c runtime");
+        // libwebrtc C++ 全家桶预热（flaky 初连根因）：首次 CreatePeerConnection
+        // 同步跑 VAAPI DRM 扫描/PulseAudio/X11 display，实测可 >15s——恰触发 link
+        // 心跳 15s 静默判死主动断链 → "初次拉流失败、重试才成"。后台空跑一次把
+        // 初始化成本摊到加载期；失败静默（预热只是缓存填充，非功能依赖）。
+        rt.spawn(async move {
+            use mediaservo_client::engine::Engine as _;
+            let engine = mediaservo_client::engine::SysEngine::new();
+            match engine.create_pc().await {
+                Ok(_pc) => tracing::debug!("libwebrtc warmup pc created"),
+                Err(e) => tracing::warn!("libwebrtc warmup failed (non-fatal): {e}"),
+            }
+        });
+        rt
     })
 }
 

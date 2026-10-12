@@ -1965,10 +1965,19 @@ impl WebrtcSysFactory {
             Arc::new(RealObserver { callbacks: callbacks.clone() }),
         );
 
-        let pc = self
-            .factory
-            .create_peer_connection(rtc_config, Box::new(observer))
-            .map_err(|e| RTCError::RTCPeerConnection(e.what().to_owned()))?;
+        // C++ CreatePeerConnection 首调含全量子系初始化（VAAPI DRM 扫描/PulseAudio/
+        // X11 display——实测可 >15s），同步执行会占死 tokio worker → 同 runtime 的
+        // ws 心跳任务饿死 → link 15s 静默判死主动断链 → 拉流"初次失败重试才成"
+        // （flaky 双端日志实证）。spawn_blocking 移出 worker：心跳/信令永不饿死。
+        // factory 是 Clone + Send（Arc 内部锁）——跨线程安全。
+        let factory = self.factory.clone();
+        let pc = tokio::task::spawn_blocking(move || {
+            factory
+                .create_peer_connection(rtc_config, Box::new(observer))
+                .map_err(|e| RTCError::RTCPeerConnection(e.what().to_owned()))
+        })
+        .await
+        .map_err(|e| RTCError::RTCPeerConnection(format!("create_pc task join: {e}")))??;
 
         Ok(WebrtcSysPc {
             pc,
