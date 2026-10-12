@@ -296,13 +296,11 @@ fn caddy_probe() -> Option<String> {
         }
     }
     // ③ 仓内 pixi 树（源码机直跑 target/debug 形态；构建期路径，跨机部署由 ② 接管）
-    for cand in
-        [PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.pixi/envs/default/bin/caddy")]
-    {
-        let p = cand.canonicalize().unwrap_or(cand.clone());
-        if p.is_file() {
-            return Some(p.to_string_lossy().into_owned());
-        }
+    // （单候选——原数组循环形，1.97 clippy single_element_loop 直线化，语义零差）
+    let cand = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.pixi/envs/default/bin/caddy");
+    let p = cand.canonicalize().unwrap_or(cand.clone());
+    if p.is_file() {
+        return Some(p.to_string_lossy().into_owned());
     }
     None
 }
@@ -517,9 +515,10 @@ fn contention_flow(verb: &str, dir: &Path, what: &str, port: u16, no_web: bool) 
                 // T5: /proc 扫不到 → 占用者可能在共享/旧 daemon 名下（非本实例注册表管辖
                 // ——2026-10-12 事故形）。指认不杀戮：接管路径仍拒（old=None 语义不变）。
                 Some(e) => eprintln!(
-                    "  端口占用者在旧共享 daemon 名下: name={} id={} pid={}（非本实例注册表管辖）—— {}",
+                    "  端口占用者在旧共享 daemon 名下: name={} id={} status={} pid={}（非本实例注册表管辖）—— {}",
                     e.name,
                     e.id,
+                    e.status,
                     e.pid.map_or_else(|| "?".into(), |p| p.to_string()),
                     inspect::SPLIT_GUIDANCE
                 ),

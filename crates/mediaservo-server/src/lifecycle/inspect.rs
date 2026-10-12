@@ -439,9 +439,10 @@ pub(super) fn cmd_doctor(args: &mut dyn Iterator<Item = String>) -> i32 {
                 .iter()
                 .map(|e| {
                     format!(
-                        "{}(id={} pid={})",
+                        "{}(id={} status={} pid={})",
                         e.name,
                         e.id,
+                        e.status,
                         e.pid.map_or_else(|| "?".into(), |p| p.to_string())
                     )
                 })
