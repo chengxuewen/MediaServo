@@ -105,6 +105,10 @@ pub struct ServerConfig {
     pub web: WebConfig,
 }
 
+/// mediasoup WebRtcServer 缺省监听口——`sfu.port` 解析链（yaml > env MEDIASERVO_SFU_PORT >
+/// 本值，D-B 10-12）的缺省位单源：sfu.rs 消费 + common lib.rs env-usage 渲染共引，禁再写字面量。
+pub const DEFAULT_SFU_PORT: u16 = 20000;
+
 /// SFU（mediasoup WebRtcServer）配置。
 ///
 /// ⚠️ 手写 Default（勿改回 derive）：`Option<u16>` 字段若 derive(Default)
@@ -632,7 +636,7 @@ sfu:
         assert_eq!(cfg.sfu.weaknet_port, None);
         assert_eq!(
             cfg.sfu.announced_ips,
-            vec!["192.168.2.127"].iter().map(|s| s.to_string()).collect::<Vec<String>>()
+            ["192.168.2.127"].iter().map(|s| s.to_string()).collect::<Vec<String>>()
         );
         // roundtrip 全等
         let re: ServerConfig = serde_yaml::from_str(&serde_yaml::to_string(&cfg).unwrap()).unwrap();

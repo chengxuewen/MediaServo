@@ -26,8 +26,8 @@ pub const ENV_USAGE_MD: &str = include_str!("../assets/env-usage.md");
 pub fn env_usage_text() -> String {
     let brand = std::env::var("MEDIASERVO_BRAND")
         .unwrap_or_else(|_| brand::media_brand().id.to_string());
-    let port =
-        std::env::var("MEDIASERVO_SFU_PORT").unwrap_or_else(|_| "20000".to_string());
+    let port = std::env::var("MEDIASERVO_SFU_PORT")
+        .unwrap_or_else(|_| config::DEFAULT_SFU_PORT.to_string());
     ENV_USAGE_MD
         .replace("${MEDIASERVO_BRAND}", &brand)
         .replace("${MEDIASERVO_SFU_PORT}", &port)

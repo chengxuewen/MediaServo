@@ -15,6 +15,10 @@
   `video_stats` 会话 union。迁移 = 机械前缀替换 + 上述三签名点。
 
 ### 新增
+- [server] `server.yaml` 的 `sfu.port` 正式生效（假键拆雷）：SFU 监听口解析序 =
+  yaml `sfu.port` > env `MEDIASERVO_SFU_PORT` > 缺省 20000（D-B 裁决，与 `web.port` 同形；
+  此前只认 env、yaml 配了被静默忽略）。缺省 20000 收敛为单一常量
+  `mediaservo_common::config::DEFAULT_SFU_PORT`，env 帮助总表渲染同引。
 - [deploy] `deploy bindings` prefix 缺省 = `<out>/bindings`（bindings 纯静态无状态；out 根随调用壳——msrtc.sh=主仓 out、mediaservo.sh/裸 CLI=子模块 out；`--prefix` 显式覆盖优先）。host/server 必填语义不变。
 - [host][server] start/stop 冲突体检（start-conflict-doctor）：端口被占用时自动指认占用者（pid/二进制路径/是否升级残留(exe 已删除)/父进程）并给处置建议；stop 完成后自证进程表归零（"自证清场 ✓"），防假成功毒化后续操作。指认不杀戮——处置决定留给运维。
 - [sdk-client] video_stats JSON 契约扩面（additive）：jitter/frame_dropped/nack_count/pli_count/fir_count 五字段——libwebrtc inbound-rtp 一直携带、此前抽象层只搬 10 字段；union 语义=抖动取 max、计数求和（对表 web play 详情层）。

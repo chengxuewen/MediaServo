@@ -376,16 +376,24 @@ mod imp {
             .collect()
     }
 
+    /// SFU 监听口解析（D-B 10-12 裁决）：yaml `sfu.port` > env `MEDIASERVO_SFU_PORT` >
+    /// `DEFAULT_SFU_PORT`。与 lifecycle/templates.rs `resolve_port` 同语义——该函数在 main.rs
+    /// 二进制侧模块，lib crate 不可达，此处为函数族第二实例（改动优先级序须两处同步）。
+    fn resolve_sfu_port(yaml: Option<u16>, env: Option<u16>) -> u16 {
+        yaml.or(env).unwrap_or(mediaservo_common::config::DEFAULT_SFU_PORT)
+    }
+
     impl SfuManager {
         /// Create a new SfuManager with a single mediasoup Worker and WebRtcServer.
-        /// SFU 端口取自 `MEDIASERVO_SFU_PORT`（缺省 20000）— 测试用 `new_with_port` 传随机端口。
+        /// SFU 监听口 = resolve_sfu_port(cfg.sfu.port, env)（D-B: yaml > env > 20000）—
+        /// 测试用 `new_with_port` 传随机端口。
         pub async fn new(
             config: Option<&mediaservo_common::config::ServerConfig>,
         ) -> Result<Self, String> {
-            let sfu_port = std::env::var("MEDIASERVO_SFU_PORT")
-                .ok()
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(20000);
+            let sfu_port = resolve_sfu_port(
+                config.and_then(|c| c.sfu.port),
+                std::env::var("MEDIASERVO_SFU_PORT").ok().and_then(|p| p.parse().ok()),
+            );
             Self::new_with_port_config(sfu_port, config).await
         }
 
@@ -1659,6 +1667,22 @@ mod imp {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        /// T3 拆雷三态钉：SFU 监听口解析序 = yaml sfu.port > env MEDIASERVO_SFU_PORT > 20000（D-B，
+        /// 10-12 裁决反转旧 env-only 行为；与 lifecycle/templates.rs resolve_port 同族形）。
+        #[test]
+        fn sfu_port_resolution_yaml_env_default_order() {
+            use mediaservo_common::config::DEFAULT_SFU_PORT;
+            // (a) yaml 设 + env 未设 → yaml（旧码此处=20000=假键实锤）
+            assert_eq!(resolve_sfu_port(Some(20005), None), 20005);
+            // (b) yaml 设 + env 设 → yaml 胜（D-B 序）
+            assert_eq!(resolve_sfu_port(Some(20005), Some(20006)), 20005);
+            // (c) 双未设 → 缺省常量单源
+            assert_eq!(resolve_sfu_port(None, None), DEFAULT_SFU_PORT);
+            assert_eq!(DEFAULT_SFU_PORT, 20000);
+            // 补形：yaml 未设 + env 设 → env 兜底存活
+            assert_eq!(resolve_sfu_port(None, Some(20006)), 20006);
+        }
 
         #[test]
         fn is_audio_room_recognizes_prefix() {
