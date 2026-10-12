@@ -15,6 +15,10 @@
   `video_stats` 会话 union。迁移 = 机械前缀替换 + 上述三签名点。
 
 ### 新增
+- [server] 重新部署/重建后手工 `[apps.env]` 行不再丢：oxfile 重渲染时自动合并旧文件
+  （live 缺失则取 run/oxfile.toml.bak 快照）中的手工 env 键——系统键 `MEDIASERVO_SFU_*`
+  恒以本次渲染为准不复活旧值；手工键冲突时旧值优先（用户意图）；无法识别的旧文件退化为
+  纯渲染并告警，永不阻塞 start。提示行同步报「已合并 N 条手工 env」（PIT-160 根修）。
 - [server] `server.yaml` 的 `sfu.port` 正式生效（假键拆雷）：SFU 监听口解析序 =
   yaml `sfu.port` > env `MEDIASERVO_SFU_PORT` > 缺省 20000（D-B 裁决，与 `web.port` 同形；
   此前只认 env、yaml 配了被静默忽略）。缺省 20000 收敛为单一常量

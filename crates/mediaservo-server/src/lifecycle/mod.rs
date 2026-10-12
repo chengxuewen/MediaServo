@@ -17,10 +17,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use templates::{
-    DEFAULT_WEB_PORT, WEAKNET_APP, WEAKNET_SERVE_PORT, gen_secret, instance_daemon_port,
-    oxfile_has_weaknet, parse_listen_port, parse_weaknet_port, parse_web_port,
-    render_admin_account, render_caddyfile, render_oxfile, render_server_yaml, resolve_port,
-    server_product, server_web_app, weaknet_listen,
+    DEFAULT_WEB_PORT, SYSTEM_ENV_KEYS, WEAKNET_APP, WEAKNET_SERVE_PORT, gen_secret,
+    instance_daemon_port, looks_like_oxfile, manual_env_keys, merge_manual_env, oxfile_has_weaknet,
+    parse_listen_port, parse_weaknet_port, parse_web_port, render_admin_account, render_caddyfile,
+    render_oxfile, render_server_yaml, resolve_port, server_product, server_web_app,
+    weaknet_listen,
 };
 
 /// 管理面子命令表（main.rs 派发判据）。`run` 不在此列——它走守护模式（显式形态）。
@@ -191,7 +192,11 @@ fn resolved_ports(
     (web_port, root, weaknet_port)
 }
 
-/// 写 run/oxfile.toml（init 与 start-缺文件兜底共用）。
+/// 写 run/oxfile.toml（init 与 start-缺文件兜底共用——Rust 侧唯一 oxfile 写点）。
+/// PIT-160 根修（PLAN §2.4）：重渲染不从零——合并源 = live oxfile 在场用之，否则
+/// .bak（上次成功渲染快照，覆盖「用户删文件后 start 重渲」与「Python deploy stale
+/// 备份后 init 重渲」两路），双缺 = 首渲纯渲染；写毕以终态刷新 .bak（多轮重渲 N 不
+/// 翻倍——快照随合并结果推进）。.bak 对 oxmgr 惰性（只读显式 oxfile 路径）。
 fn write_oxfile(run_dir: &Path) -> Result<(), String> {
     let dir = run_dir.parent().ok_or("oxfile 渲染需实例根目录")?;
     let bin = std::env::current_exe().map_err(|e| format!("current_exe 失败: {e}"))?;
@@ -199,16 +204,60 @@ fn write_oxfile(run_dir: &Path) -> Result<(), String> {
         .ok()
         .and_then(|c| serde_yaml::from_str::<mediaservo_common::config::ServerConfig>(&c).ok());
     let (_, _, weaknet_port) = resolved_ports(yaml_cfg.as_ref());
-    let ox =
+    let new_text =
         render_oxfile(&absolute(dir), &bin, &caddy_command(), &sfu_env_passthrough(), weaknet_port);
     let path = run_dir.join("oxfile.toml");
-    std::fs::write(&path, ox).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
+    let bak = run_dir.join("oxfile.toml.bak");
+    let (old, source) = match std::fs::read_to_string(&path) {
+        Ok(t) => (Some(t), "run/oxfile.toml"),
+        Err(_) => match std::fs::read_to_string(&bak) {
+            Ok(t) => (Some(t), "run/oxfile.toml.bak"),
+            Err(_) => (None, ""),
+        },
+    };
+    let corrupt = old.as_deref().is_some_and(|o| !o.trim().is_empty() && !looks_like_oxfile(o));
+    let text = match old.as_deref() {
+        Some(o) if !corrupt => merge_manual_env(o, &new_text),
+        _ => new_text,
+    };
+    let (merged, lost) = match old.as_deref() {
+        Some(o) if !corrupt => {
+            let want = manual_env_keys(o);
+            let have = manual_env_keys(&text);
+            let m = want.iter().filter(|k| have.contains(k)).count();
+            (m, want.len() - m)
+        }
+        _ => (0, 0),
+    };
+    std::fs::write(&path, &text).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
     println!("已生成 {}", path.display());
-    // 从零渲染（init 首建或整树重建后 start 兜底）= 手工 env 无从回吸收的静默点（PIT-160 实伤两回）。
-    eprintln!(
-        "提示: 若本树此前存在手工 [apps.env] 行（ALLOW_DEV_*/RUST_LOG/WEAKNET_ADMIN_PASS），本次渲染不含它们——按 msrtc.sh -h「环境变量 [B]」回补"
-    );
+    if let Err(e) = std::fs::write(&bak, &text) {
+        eprintln!("警告: {} 快照写入失败（{e}）——下次重渲染无手工 env 可回吸收", bak.display());
+    }
+    if corrupt {
+        eprintln!(
+            "警告: 旧 {source} 非本程序渲染形——本次退化为纯渲染，手工 env 未回吸收（PIT-160 兜底，不阻塞 start）"
+        );
+    }
+    eprintln!("{}", pit160_note(merged, lost));
     Ok(())
+}
+
+/// PIT-160 提示行（纯函数可测）：无手工条目 → 旧指引文本逐字保留；有则「已合并 N 条
+/// 手工 env」变体 + 未并（新渲染无对应 app 条目）计数。系统键 MEDIASERVO_SFU_* 恒以
+/// 本次渲染为准、不计入 N。
+fn pit160_note(merged: usize, lost: usize) -> String {
+    if merged == 0 && lost == 0 {
+        return "提示: 若本树此前存在手工 [apps.env] 行（ALLOW_DEV_*/RUST_LOG/WEAKNET_ADMIN_PASS），本次渲染不含它们——按 msrtc.sh -h「环境变量 [B]」回补".to_string();
+    }
+    let tail = if lost > 0 {
+        format!("；另有 {lost} 条因新渲染无对应 app 条目未并入——按 msrtc.sh -h「环境变量 [B]」回补")
+    } else {
+        String::new()
+    };
+    format!(
+        "提示: 已合并 {merged} 条手工 env（来源=上次渲染快照；MEDIASERVO_SFU_* 系统键以本次渲染为准）{tail}"
+    )
 }
 
 /// weaknet 探针口 = oxfile 反解（`serve --listen 127.0.0.1:NNNN`）——与渲染产物同源；
@@ -221,8 +270,10 @@ fn weaknet_probe_port(oxfile: &Path) -> u16 {
 }
 
 /// init 时把 SFU 相关 env 烘进 oxfile [apps.env]（drill/多实例端口隔离入口）。
+/// 键集 = SYSTEM_ENV_KEYS 唯一真源（与 merge_manual_env 排除集同集——T4「恰为本函数
+/// emit 的键」在结构上成立，不再有第二份清单漂移面）。
 fn sfu_env_passthrough() -> Vec<(String, String)> {
-    ["MEDIASERVO_SFU_PORT", "MEDIASERVO_SFU_ANNOUNCED_IP"]
+    SYSTEM_ENV_KEYS
         .iter()
         .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
         .collect()
@@ -788,5 +839,54 @@ mod tests {
             ox.contains("serve --listen 127.0.0.1:9811"),
             "weaknet_port 渲染进 oxfile --listen（两产物同源）"
         );
+    }
+
+    // ---- T4（PIT-160 根修）：write_oxfile 合并源 live→.bak + 提示行分叉 ----
+
+    #[test]
+    fn t4c_manual_env_survives_via_bak_when_live_deleted() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        init_instance(dir).expect("first init");
+        let ox = dir.join("run").join("oxfile.toml");
+        let bak = dir.join("run").join("oxfile.toml.bak");
+        let base = std::fs::read_to_string(&bak)
+            .expect("write_oxfile 必须同产 .bak 快照（PIT-160 重渲源）");
+        // 手工键注入 .bak（= Python deploy stale 备份后的形）；server 条目 env 表有/无形两路
+        let tampered = if base.contains("[apps.env]") {
+            base.replacen("[apps.env]", "[apps.env]\nALLOW_X = \"1\"", 1)
+        } else {
+            base.replacen("[apps.logs]", "[apps.env]\nALLOW_X = \"1\"\n[apps.logs]", 1)
+        };
+        assert_ne!(tampered, base, "fixture 注入失败");
+        std::fs::write(&bak, &tampered).expect("tamper bak");
+        std::fs::remove_file(&ox).expect("rm live oxfile");
+        write_oxfile(&dir.join("run")).expect("re-render（live 缺 → bak 合并源）");
+        let after = std::fs::read_to_string(&ox).expect("read ox");
+        assert!(after.contains("ALLOW_X = \"1\""), ".bak 手工 env 必须合并回:\n{after}");
+        assert_eq!(
+            std::fs::read_to_string(&bak).expect("read bak"),
+            after,
+            ".bak 应随写终态推进（多轮 N 不翻倍）"
+        );
+        // live 与 bak 双缺 → 纯渲染（无任何手工键）
+        std::fs::remove_file(&ox).expect("rm oxfile 2");
+        std::fs::remove_file(&bak).expect("rm bak");
+        write_oxfile(&dir.join("run")).expect("re-render（首渲形）");
+        let pure = std::fs::read_to_string(&ox).expect("read ox 2");
+        assert!(!pure.contains("ALLOW_X"), "live 与 bak 双缺 → 纯渲染");
+    }
+
+    #[test]
+    fn t4_pit160_note_variants() {
+        assert_eq!(
+            pit160_note(0, 0),
+            "提示: 若本树此前存在手工 [apps.env] 行（ALLOW_DEV_*/RUST_LOG/WEAKNET_ADMIN_PASS），本次渲染不含它们——按 msrtc.sh -h「环境变量 [B]」回补",
+            "N=0 必须逐字节保留旧指引文本"
+        );
+        let v = pit160_note(3, 0);
+        assert!(v.contains("已合并 3 条手工 env"), "N>0 变体: {v}");
+        let l = pit160_note(2, 1);
+        assert!(l.contains("另有 1 条"), "未并条目必须报数: {l}");
     }
 }

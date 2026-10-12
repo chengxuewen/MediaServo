@@ -245,6 +245,195 @@ pub fn render_oxfile(
     out
 }
 
+/// T4（PIT-160 根修）系统受管键集——唯一真源：sfu_env_passthrough() 恰按本清单渲染、
+/// merge_manual_env 按同集排除（结构级保证「exactly the keys that function emits」）。
+/// 本集键的旧值来自上次渲染而非用户手改，永不从旧文件复活（陈旧系统值压死新配置，§2.4 M1 裁决）。
+pub const SYSTEM_ENV_KEYS: [&str; 2] = ["MEDIASERVO_SFU_PORT", "MEDIASERVO_SFU_ANNOUNCED_IP"];
+
+/// 文本是否 render_oxfile 形（`[[apps]]` 条目标记）？否 = 损坏/外来旧文件——调用方降级纯渲染 + WARN。
+pub fn looks_like_oxfile(text: &str) -> bool {
+    text.contains("[[apps]]")
+}
+
+/// 一条 `[apps.env]` 条目——按 app 归属所属 `[[apps]]` 条目（放错=死变量：
+/// WEAKNET_ADMIN_PASS 只在 weaknet 条目下生效、dev 三行在 server 条目下——Python
+/// `_reapply_carried_env` 同款 per-app 合同）。
+#[derive(PartialEq, Eq)]
+struct EnvEntry {
+    app: String,
+    key: String,
+    value: String,
+}
+
+/// 同格式约定行形解析（= render_oxfile 输出形）：`[apps.env]` 块表内的
+/// `KEY = "VALUE"` 行，下一 `[` 起始行终止表；`[[apps]]` 头后首个 `name = "..."`
+/// 行认条目名。非此形行（数字/内联表/坏行）跳过——容错，永不报错。
+fn parse_env_entries(text: &str) -> Vec<EnvEntry> {
+    let mut out = Vec::new();
+    let mut app: Option<String> = None;
+    let mut in_env = false;
+    for line in text.lines() {
+        let t = line.trim();
+        if t == "[[apps]]" {
+            app = None;
+            in_env = false;
+            continue;
+        }
+        if t.starts_with('[') {
+            in_env = t == "[apps.env]";
+            continue;
+        }
+        if in_env {
+            if let Some((key, value)) = parse_quoted_kv(t)
+                && let Some(a) = &app
+            {
+                out.push(EnvEntry { app: a.clone(), key, value });
+            }
+        } else if app.is_none()
+            && let Some((k, v)) = parse_quoted_kv(t)
+            && k == "name"
+        {
+            app = Some(v);
+        }
+    }
+    out
+}
+
+/// `KEY = "quoted value"` → (key, 解转义 value)；非双引号基字符串形 → None。
+fn parse_quoted_kv(t: &str) -> Option<(String, String)> {
+    let (k, v) = t.split_once('=')?;
+    let inner = v.trim().strip_prefix('"')?.strip_suffix('"')?;
+    Some((k.trim().to_string(), unescape_toml(inner)))
+}
+
+/// TOML 基本串最小转义：仅 `\` 与 `"`（Task 4 步 5 裁决——不发明全 Unicode 转义族）。
+fn escape_toml(s: &str) -> String {
+    let mut o = String::with_capacity(s.len() + 2);
+    for c in s.chars() {
+        match c {
+            '\\' => o.push_str("\\\\"),
+            '"' => o.push_str("\\\""),
+            _ => o.push(c),
+        }
+    }
+    o
+}
+
+/// escape_toml 之逆：`\\`/`\"` → 字面字符；其余反斜杠序列按两字符原样保留。
+/// （render 地面形只产这两类；手写文件若用 `\\n` 形转义不承诺解释为换行——再转义时多叠一层，
+/// 值语义不变、文件不坏。）
+fn unescape_toml(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    let mut it = s.chars();
+    while let Some(c) = it.next() {
+        match c {
+            '\\' => match it.next() {
+                Some(n @ ('\\' | '"')) => o.push(n),
+                Some(n) => {
+                    o.push('\n');
+                    o.push(n);
+                }
+                None => o.push('\n'),
+            },
+            _ => o.push(c),
+        }
+    }
+    o
+}
+
+/// 参与合并的手工 env (app, key) 清单：SYSTEM_ENV_KEYS 排除、(app,key) 首现去重。
+/// write_oxfile 用旧/新两侧本清单做头差 = 已合并 / 未并（新渲染无对应条目）计数。
+pub fn manual_env_keys(text: &str) -> Vec<(String, String)> {
+    let mut seen: Vec<(String, String)> = Vec::new();
+    for e in parse_env_entries(text) {
+        if SYSTEM_ENV_KEYS.contains(&e.key.as_str()) {
+            continue;
+        }
+        if !seen.iter().any(|(a, k)| a == &e.app && k == &e.key) {
+            seen.push((e.app.clone(), e.key.clone()));
+        }
+    }
+    seen
+}
+
+/// PIT-160 根修核心纯函数：旧（live 或 .bak）oxfile 的手工 [apps.env] 键并入新渲染文本。
+/// 规则（PLAN §2.4 裁决）：系统键不参与（旧值=上次渲染遗留，复活会压死新配置）；
+/// 非系统键冲突 **旧值优先**（用户手改=用户意图）；缺键追加所属 app 条目 env 表尾
+/// （无表则在 [apps.logs] 前新建——与 render 同槽位）；旧条目在新渲染缺位 → 不并
+/// （调用方提示行报「另有 N 条」）。新渲染其余行逐字保留。
+pub fn merge_manual_env(old_text: &str, new_text: &str) -> String {
+    let entries: Vec<EnvEntry> = parse_env_entries(old_text)
+        .into_iter()
+        .filter(|e| !SYSTEM_ENV_KEYS.contains(&e.key.as_str()))
+        .collect();
+    if entries.is_empty() {
+        return new_text.to_string();
+    }
+    let mut lines: Vec<String> = new_text.lines().map(str::to_string).collect();
+    let mut done: Vec<(String, String)> = Vec::new();
+    for e in entries {
+        if done.iter().any(|(a, k)| a == &e.app && k == &e.key) {
+            continue; // 同条目重复键首现即得（合法 TOML 不产生，防手工损形双应用）
+        }
+        let Some((start, end)) = app_block(&lines, &e.app) else {
+            continue; // 新渲染无此 app 条目（品牌改名形态）→ 不并，计 lost
+        };
+        done.push((e.app.clone(), e.key.clone()));
+        let line = format!("{} = \"{}\"", e.key, escape_toml(&e.value));
+        match env_table(&lines, start, end) {
+            Some((header, tail)) => {
+                match (header + 1..tail)
+                    .find(|&i| line_key(&lines[i]).as_deref() == Some(e.key.as_str()))
+                {
+                    Some(idx) => lines[idx] = line,
+                    None => lines.insert(tail, line),
+                }
+            }
+            None => {
+                let anchor =
+                    (start..end).find(|&i| lines[i].trim() == "[apps.logs]").unwrap_or(end);
+                lines.insert(anchor, format!("[apps.env]\n{line}"));
+            }
+        }
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+/// 指定条目名的 [[apps]] 块行范围 [start,end)：判据=块内含 `name = "<app>"` 行（render 地面形精确）。
+fn app_block(lines: &[String], app: &str) -> Option<(usize, usize)> {
+    let want = format!("name = \"{app}\"");
+    let mut i = 0;
+    while i < lines.len() {
+        if lines[i].trim() != "[[apps]]" {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let end = (start + 1..lines.len())
+            .find(|&j| lines[j].trim() == "[[apps]]")
+            .unwrap_or(lines.len());
+        if lines[start..end].iter().any(|l| l.trim() == want) {
+            return Some((start, end));
+        }
+        i = end;
+    }
+    None
+}
+
+/// 条目内 [apps.env] 表：(头索引, 表尾索引)——表尾=头后首个 `[` 起始行，无则条目尾。
+fn env_table(lines: &[String], start: usize, end: usize) -> Option<(usize, usize)> {
+    let h = (start..end).find(|&i| lines[i].trim() == "[apps.env]")?;
+    let t = (h + 1..end).find(|&i| lines[i].trim().starts_with('[')).unwrap_or(end);
+    Some((h, t))
+}
+
+/// `KEY = ...` 行的键部分（merge 行定位；无 `=` → None）。
+fn line_key(line: &str) -> Option<String> {
+    line.split_once('=').map(|(k, _)| k.trim().to_string())
+}
+
 /// weaknet bin 在场扫描（条件渲染输入）：品牌派生名优先（= Python `_weaknet_bin_name` 同构：
 /// `{brand}-weaknet`，brand 读同一 MEDIASERVO_BRAND env/编译期值——deploy 装配产物名），
 /// 上游名 mediaservo-weaknet 兜底（keeper 双名 [BA-2①]；brand 空 = 两名同串）。
@@ -539,6 +728,87 @@ mod tests {
         let none = render_oxfile(tmp2.path(), Path::new("/x/bin/s"), "caddy", &[], 9810);
         assert_eq!(parse_weaknet_port(&none), None);
         assert_eq!(parse_weaknet_port("garbage"), None);
+    }
+
+    // ---- T4（PIT-160 根修）：merge_manual_env 纯函数组 ----
+
+    /// 真 render_oxfile 地面形（tempdir 无 bin/ → weaknet 条件渲染缺席路，确定性）。
+    fn t4_render(dir: &std::path::Path, server_env: &[(&str, &str)]) -> String {
+        render_oxfile(
+            dir,
+            std::path::Path::new("/x/bin/s"),
+            "caddy",
+            &server_env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<Vec<_>>(),
+            WEAKNET_SERVE_PORT,
+        )
+    }
+
+    /// server 条目 logs 表头两行——手工 env 表注入锚（render 的 [apps.env] 就位于 [apps.logs] 前）。
+    fn t4_logs_anchor(dir: &std::path::Path) -> String {
+        format!(
+            "[apps.logs]\nstdout = \"{}/run/logs/{}.out.log\"",
+            dir.to_string_lossy(),
+            server_product()
+        )
+    }
+
+    #[test]
+    fn t4a_manual_key_survives_system_key_does_not_resurrect() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        let new = t4_render(dir, &[]);
+        let anchor = t4_logs_anchor(dir);
+        assert!(new.contains(&anchor), "fixture 锚缺失（render 输出形已漂移）");
+        let old = new.replace(
+            &anchor,
+            &format!("[apps.env]\nALLOW_X = \"1\"\nMEDIASERVO_SFU_PORT = \"20012\"\n{anchor}"),
+        );
+        let merged = merge_manual_env(&old, &new);
+        assert!(merged.contains("ALLOW_X = \"1\""), "手工 env 键被重渲染丢失:\n{merged}");
+        assert!(!merged.contains("MEDIASERVO_SFU_PORT"), "系统键陈旧值复活压死了新渲染");
+    }
+
+    #[test]
+    fn t4b_conflict_non_system_key_old_value_wins() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        let new = t4_render(dir, &[("RUST_LOG", "system=new")]);
+        assert!(
+            new.contains("RUST_LOG = \"system=new\""),
+            "fixture: server_env 应渲染 RUST_LOG 行"
+        );
+        let old = new.replace("RUST_LOG = \"system=new\"", "RUST_LOG = \"user=old\"");
+        let merged = merge_manual_env(&old, &new);
+        assert!(merged.contains("RUST_LOG = \"user=old\""), "冲突应旧手工值优先:\n{merged}");
+        assert!(!merged.contains("system=new"), "旧值压制后不得残留新渲染值");
+    }
+
+    #[test]
+    fn t4d_foreign_old_degrades_to_pure_render() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        let new = t4_render(dir, &[]);
+        assert!(!looks_like_oxfile("!!! foreign @@@ not an oxfile"), "外来文本必须判不可识别");
+        assert!(looks_like_oxfile(&new), "render 本形必须可识别");
+        let merged = merge_manual_env("!!! foreign @@@ not an oxfile", &new);
+        assert_eq!(merged, new, "损坏/外来旧文件 → 纯渲染兜底，无 panic 无 error");
+    }
+
+    #[test]
+    fn t4e_toml_escape_roundtrip() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        let new = t4_render(dir, &[]);
+        let anchor = t4_logs_anchor(dir);
+        // 旧文本行形：RUST_LOG = "a\"b\\c"（值 = a"b\c）
+        let old =
+            new.replace(&anchor, &format!("[apps.env]\nRUST_LOG = \"a\\\"b\\\\c\"\n{anchor}"));
+        assert!(old.contains(r#"RUST_LOG = "a\"b\\c""#), "fixture 注入失败");
+        let merged = merge_manual_env(&old, &new);
+        assert!(
+            merged.contains(r#"RUST_LOG = "a\"b\\c""#),
+            "转义往返变形（解转义/再转义破坏值）:\n{merged}"
+        );
     }
 
     #[test]
