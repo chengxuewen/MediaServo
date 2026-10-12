@@ -419,11 +419,10 @@ public:
     Result<void> on_qoe(std::chrono::milliseconds period,
                         std::function<void(const QoeSnapshot&)> cb) {
         if (!h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
-        // 堆上悬挂保护：cb 存活期 = C 侧注册期（consumer_close 停回调后 C 侧
-        // 不再触发——trampoline 闭包随 Rust on_qoe task 结束而释放）。
-        auto* heap_cb = new std::function<void(const QoeSnapshot&)>(std::move(cb));
-        auto* ctx = new std::function<void(const QoeSnapshot&)>(*heap_cb);
-        delete heap_cb;
+        // 堆上悬挂保护：cb 存活期 = C 侧注册期。C 层 PIT-221 join 纪律：
+        // consumer_close/重复注册返回前已 abort+join 旧 task——delete qoe_ctx_
+        // 时序由 C 层硬保证（回调物理停发后才释放）。
+        auto* ctx = new std::function<void(const QoeSnapshot&)>(std::move(cb));
         static_assert(sizeof(QoeSnapshot) >= sizeof(mediaservo_client_qoe_snapshot_t) - sizeof(uint32_t),
                       "QoeSnapshot 字段序漂移——C ABI 兼容破坏");
         int rc = mediaservo_client_consumer_on_qoe(

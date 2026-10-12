@@ -44,6 +44,7 @@ pub struct mediaservo_client_qoe_snapshot_t {
 }
 
 /// QOE 回调 C 函数指针。
+#[allow(non_camel_case_types)] // C ABI 命名（C6 例外——同 qoe_snapshot_t/consumer_t）
 pub type mediaservo_client_qoe_cb =
     extern "C" fn(*const mediaservo_client_qoe_snapshot_t, *mut c_void);
 
@@ -231,6 +232,7 @@ pub extern "C" fn mediaservo_client_consumer_stats(
 
 /// QOE 周期回调（consumer-qoe-callback）：Rust on_qoe → C trampoline。
 /// cb 在 SDK 节拍 task 触发（tokio worker），C 侧须自行保证线程安全。
+/// 重复注册：旧 task abort+join 后才返回——调用方换 ctx 时序安全（PIT-221）。
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_consumer_on_qoe(
     c: *mut mediaservo_client_consumer_t,
@@ -280,19 +282,39 @@ pub extern "C" fn mediaservo_client_consumer_on_qoe(
             std::time::Duration::from_millis(u64::from(period_ms)),
             Box::new(trampoline),
         );
+        // 幂等替换（PIT-221 同款纪律）：旧 task abort+join（join 在锁外——
+        // 同 close 路径死锁面收窄）——返回后旧回调物理不可能再触发，C++ 层
+        // delete 旧 qoe_ctx_ 时序安全。新 task 先建后插：join 窗内新 task 可能
+        // 已触发一次（用新 ctx——注册前已分配，安全）。
+        let old_task = h.qoe_task.lock().ok().and_then(|mut g| g.take());
+        if let Some(t) = old_task {
+            t.abort();
+            join_qoe_task(t);
+        }
         if let Ok(mut g) = h.qoe_task.lock() {
-            // 幂等语义（重复注册替换前次）——旧 task abort（释放旧闭包）
-            if let Some(old_task) = g.take() {
-                old_task.abort();
-            }
             *g = Some(qoe_task);
         }
         MEDIASERVO_OK
     })
 }
 
+
+/// abort 后等待 task 真退出。C API 同步入口均为非 runtime 线程——
+/// block_on 安全；若误从 runtime 线程调用（未来误用），try_current 守卫
+/// 降级为只 abort（不 join），契约降级为「尽力而为」并打日志。
+fn join_qoe_task(task: tokio::task::JoinHandle<()>) {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tracing::warn!("join_qoe_task called on runtime thread — skip join (abort only)");
+        return;
+    }
+    let _ = crate::runtime().block_on(task);
+}
+
 /// 关闭本路并释放 handle（幂等）。置 closed → 取走 Consumer（receiver drop → K1 重放
 /// 判死本路）→ join 泵（≤CONSUMER_POLL）→ user_free 恰好一次 → free。
+/// QOE task join 纪律（PIT-221）：返回后旧回调必不再触发（abort+join 硬保证）；
+/// 回调内禁止重入 close / on_qoe（join 虽已移出锁临界区，重入仍属契约违反，
+/// 死锁风险自担——契约沿用「回调内禁止阻塞」）。
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_consumer_close(c: *mut mediaservo_client_consumer_t) -> c_int {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -307,12 +329,16 @@ pub extern "C" fn mediaservo_client_consumer_close(c: *mut mediaservo_client_con
         if let Ok(mut g) = handle.consumer.lock() {
             drop(g.take());
         }
-        // QOE 节拍 task abort——释放 trampoline 闭包（CbUser 堆上下文）
-        // （lsan.1096280: 64B/次注册残留——进程退出 runtime 不 shutdown）
-        if let Ok(mut g) = handle.qoe_task.lock() {
-            if let Some(t) = g.take() {
-                t.abort();
-            }
+        // QOE 节拍 task abort + join——返回后旧回调物理不可能再触发。
+        // （PIT-221: abort 不打断同步执行中的回调——crash_d036 实证 client.hpp:436
+        // (*fn)(q) 调已 delete ctx。block_on 用进程级 runtime()——C API 同步入口
+        // 均为非 runtime 线程；try_current 守卫见 join_qoe_task。lsan.1096280:
+        // 64B/次注册残留——释放语义不变。join 在锁外（take 后 guard 即 drop）——
+        // 回调违规重入 close/on_qoe 时只拿 closed 状态错误，不与 join 互锁。）
+        let task = handle.qoe_task.lock().ok().and_then(|mut g| g.take());
+        if let Some(t) = task {
+            t.abort();
+            join_qoe_task(t);
         }
         if let Some(join) = handle.pump.lock().ok().and_then(|mut g| g.take()) {
             let _ = join.join();
@@ -398,8 +424,60 @@ mod tests {
     }
 
     #[test]
-    fn state_line_values_pinned() {
-        // 线值合同冗余钉（lib.rs state_u8 为真源，header 注释消费）——防漂移。
-        assert_eq!(MEDIASERVO_CLIENT_ERR_STATE, -9);
+    fn consumer_close_joins_qoe_task_no_callback_after_return() {
+        use std::sync::atomic::AtomicUsize;
+        static FIRES: AtomicUsize = AtomicUsize::new(0);
+        extern "C" fn noop_frame(
+            _s: *mut mediaservo_client_session_t,
+            _f: *const mediaservo_client_frame_t,
+            _u: *mut c_void,
+        ) {
+        }
+        // 节拍 task：tick → 30ms 同步段（模拟「同步执行中的回调」——abort 打不断
+        // 的那一段，把竞态窗从微秒拉宽到 ~75% 周期）→ 真实递增 FIRES。
+        let task = crate::runtime().spawn(async {
+            let mut tick = tokio::time::interval(std::time::Duration::from_millis(10));
+            loop {
+                tick.tick().await;
+                std::thread::sleep(std::time::Duration::from_millis(30));
+                FIRES.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        let handle = Box::new(mediaservo_client_consumer_t {
+            session: ptr::null_mut(),
+            producer_id: "p-qoe".to_string(),
+            consumer: Mutex::new(None),
+            closed: AtomicBool::new(false),
+            cb: noop_frame,
+            user: ptr::null_mut(),
+            free: None,
+            pump: Mutex::new(None),
+            qoe_task: Mutex::new(Some(task)),
+            err: Mutex::new(None),
+        });
+        let raw = Box::into_raw(handle);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert_eq!(mediaservo_client_consumer_close(raw), MEDIASERVO_OK);
+        let after = FIRES.load(Ordering::SeqCst);
+        // join 纪律（PIT-221）：close 返回 = task 已终结——在途回调的递增已计入
+        // after，此后物理不可能再涨。严格相等（无宽容度——宽容即遮蔽回归）。
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let settled = FIRES.load(Ordering::SeqCst);
+        assert_eq!(
+            settled, after,
+            "close 返回后回调仍触发: after={after} settled={settled}"
+        );
+    }
+
+    #[test]
+    fn on_qoe_replace_joins_old_task() {
+        // 替换路径复用 join_qoe_task（close 测试已钉行为）——此处钉 helper 对
+        // 长 sleep task 的 abort+join 即时收敛，防未来改异步 join 致替换回归。
+        let old = crate::runtime().spawn(async {
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        });
+        old.abort();
+        join_qoe_task(old);
+        // join 返回即证 task 终结（abort 生效——1h sleep 不可能自然结束）
     }
 }

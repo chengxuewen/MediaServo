@@ -297,8 +297,9 @@ mediaservo_err_t mediaservo_client_consumer_stats(mediaservo_client_consumer_t* 
 
 /* QOE 周期回调（consumer-qoe-callback，2026-10-09；对齐 TRRO OnMediaState 形态）：
  * SDK 内置节拍/差分/换算——cb 收现成换算值。幂等：重复注册替换前次；
- * consumer_close 即停。cb 在 SDK 节拍线程触发——**禁止阻塞**。
- * 字段布局冻结（ABI 只增纪律）：后续新增字段只能尾部追加。 */
+ * consumer_close 即停（PIT-221 join 纪律：close/重复注册返回后旧 cb 必不再
+ * 触发——abort+join 硬保证）。cb 在 SDK 节拍线程触发——**禁止阻塞，禁止
+ * 重入 close/on_qoe**。字段布局冻结（ABI 只增纪律）：后续新增字段只能尾部追加。 */
 typedef struct mediaservo_client_qoe_snapshot {
     uint32_t struct_size;    /* sizeof 本结构（调用方填，演进护栏） */
     uint32_t fps;
