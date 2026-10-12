@@ -29,6 +29,39 @@ pub fn use_bare_metal_listen(
 ) -> bool {
     announced.first().is_some_and(|first| local.contains(first))
 }
+
+/// Detect the container's primary IP (zero-dependency UDP connect trick;
+/// connect() on UDP only sets the default route target, no packet is sent).
+/// 自动收集本机全部 IPv4（等价 ifconfig——多网卡/VPN 全公告；过滤 loopback）。
+/// 仅裸机有效：容器内看到的是容器网卡（172.x 不可达——容器场景必须 env/yaml 显式）。
+/// 公告多余候选无害（ICE 多候选，对端连不通自动跳过）。
+/// 单源两处：sfu 运行时 announced 兜底 + doctor announced_ips 腐烂巡检（T6b④，
+/// if_addrs 同源判据——禁止第二份接口枚举实现，PLAN §8）。if-addrs 为无条件依赖，
+/// stub 姿态同样可用。
+pub fn detect_all_ips() -> Vec<String> {
+    let mut ips: Vec<String> = Vec::new();
+    if let Ok(ifaces) = if_addrs::get_if_addrs() {
+        for iface in ifaces {
+            if let if_addrs::IfAddr::V4(v4) = iface.addr {
+                let ip = v4.ip.to_string();
+                if !ip.starts_with("127.") && !ips.contains(&ip) {
+                    ips.push(ip);
+                }
+            }
+        }
+    }
+    if ips.is_empty() {
+        // 兜底: 出网探测（原 detect_local_ip）
+        if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0")
+            && socket.connect("8.8.8.8:80").is_ok()
+            && let Ok(addr) = socket.local_addr()
+        {
+            return vec![addr.ip().to_string()];
+        }
+    }
+    ips
+}
+
 /// PIT-183（A 案根修，D274 遗留轮）：Router 销毁两判据——
 /// 消费者清零不再连坐销毁仍带 producer 的 Router，producer 全灭时刻由
 /// `announce_producers_closed` 尾部补毁 registry/owners。纯函数供双姿态
@@ -113,35 +146,6 @@ mod imp {
     use std::net::{IpAddr, Ipv4Addr};
     use std::num::{NonZeroU8, NonZeroU32};
     use std::sync::Arc;
-
-    /// Detect the container's primary IP (zero-dependency UDP connect trick;
-    /// connect() on UDP only sets the default route target, no packet is sent).
-    /// 自动收集本机全部 IPv4（等价 ifconfig——多网卡/VPN 全公告；过滤 loopback）。
-    /// 仅裸机有效：容器内看到的是容器网卡（172.x 不可达——容器场景必须 env/yaml 显式）。
-    /// 公告多余候选无害（ICE 多候选，对端连不通自动跳过）。
-    fn detect_all_ips() -> Vec<String> {
-        let mut ips: Vec<String> = Vec::new();
-        if let Ok(ifaces) = if_addrs::get_if_addrs() {
-            for iface in ifaces {
-                if let if_addrs::IfAddr::V4(v4) = iface.addr {
-                    let ip = v4.ip.to_string();
-                    if !ip.starts_with("127.") && !ips.contains(&ip) {
-                        ips.push(ip);
-                    }
-                }
-            }
-        }
-        if ips.is_empty() {
-            // 兜底: 出网探测（原 detect_local_ip）
-            if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0")
-                && socket.connect("8.8.8.8:80").is_ok()
-                && let Ok(addr) = socket.local_addr()
-            {
-                return vec![addr.ip().to_string()];
-            }
-        }
-        ips
-    }
 
     /// PIT-58: announced_address 解析 — 环境变量 MEDIASERVO_SFU_ANNOUNCED_IP，
     /// 支持逗号分隔多 IP（宿主多网卡）。fallback: 容器内探测（172.18.0.2 仅本机可用，
@@ -514,7 +518,11 @@ mod imp {
 
             self.rooms.insert(
                 room_id.to_string(),
-                SfuRoom { router: Arc::clone(&router), peers: DashMap::new(), producer_labels: DashMap::new() },
+                SfuRoom {
+                    router: Arc::clone(&router),
+                    peers: DashMap::new(),
+                    producer_labels: DashMap::new(),
+                },
             );
             Ok(router)
         }

@@ -109,6 +109,17 @@ pub struct ServerConfig {
 /// 本值，D-B 10-12）的缺省位单源：sfu.rs 消费 + common lib.rs env-usage 渲染共引，禁再写字面量。
 pub const DEFAULT_SFU_PORT: u16 = 20000;
 
+/// web(caddy) 对外口缺省——`web.port` 解析链（yaml > env MEDIASERVO_WEB_PORT > 本值）缺省位
+/// 单源（T6b②，DEFAULT_SFU_PORT 同模式）：templates.rs init 渲染 + start/doctor Caddyfile
+/// 反解漂移检测共引，禁再写字面量。
+pub const DEFAULT_WEB_PORT: u16 = 8080;
+
+/// weaknet-serve 面板口缺省——`sfu.weaknet_port` 解析链缺省位单源（T6b②）。
+/// 交叉锚（零新增依赖纪律）：weaknet crate 不依赖 common，其
+/// crates/mediaservo-weaknet/src/server.rs `DEFAULT_LISTEN` 字符串字面量的端口段与本值
+/// **手抄同步**——簇启动链恒传显式 --listen，两处字面量仅裸手起 serve 时生效。
+pub const WEAKNET_SERVE_PORT: u16 = 9810;
+
 /// SFU（mediasoup WebRtcServer）配置。
 ///
 /// ⚠️ 手写 Default（勿改回 derive）：`Option<u16>` 字段若 derive(Default)

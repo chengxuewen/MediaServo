@@ -29,9 +29,10 @@ pub fn server_web_app() -> String {
 /// inspect `ours[2]` / deploy keeper bin 白名单 / logs 目标三处稳定依赖此字面量，勿随品牌变）。
 pub const WEAKNET_APP: &str = "weaknet-serve";
 
-/// serve 缺省监听口（D2：ServeArgs 实证 127.0.0.1:9810）。模板常数——stale 判据无
-/// listen 漂移源 [BA-13]。多实例端口 env 化留注记，低优 [wF7/BA-9]。
-pub const WEAKNET_SERVE_PORT: u16 = 9810;
+/// 端口缺省常量单源于 mediaservo-common::config（T6b②，DEFAULT_SFU_PORT 同模式）——
+/// re-export 保持 templates:: 路径，mod.rs/inspect.rs 导入零改动。
+/// weaknet DEFAULT_LISTEN 手抄同步注记见 common 侧常量注释。
+pub use mediaservo_common::config::{DEFAULT_WEB_PORT, WEAKNET_SERVE_PORT};
 
 /// 读序解析纯函数（config-unification P1）：yaml(显式配置) > env(兜底) > default(殿后)。
 /// None = 未配置，由下一层生效。调用方负责读 env（本函数不碰进程环境——可测性）。
@@ -66,9 +67,6 @@ pub fn parse_weaknet_port(oxfile: &str) -> Option<u16> {
 pub fn server_namespace() -> String {
     server_product()
 }
-
-/// web 端口缺省（init 渲染进 Caddyfile；start/status 从 Caddyfile 反解，可被手工编辑覆盖）。
-pub const DEFAULT_WEB_PORT: u16 = 8080;
 
 /// 实例 daemon 端口派生基数 — host 用 18000..18399（API +1000 = 19000..19399），
 /// server 用 18500 基数避开同机 host 实例（API 19500..19899）。派生规则与 host 同源

@@ -10,7 +10,6 @@ jwt_secret: "__JWT_SECRET__"
 admin_jwt_secret: "__JWT_SECRET__"
 sfu:
   worker_path: /opt/mediaservo/sfu/worker
-  rtc_ports_range: [40000, 40100]
 
 # Web 静态层（caddy）——缺省 8080 / 实例 web/；env MEDIASERVO_WEB_PORT 兜底（yaml 配置优先，C35 同形）。
 # web:

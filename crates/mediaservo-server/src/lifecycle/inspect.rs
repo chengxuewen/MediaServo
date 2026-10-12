@@ -8,8 +8,8 @@ use std::process::Command;
 use std::time::Duration;
 
 use super::templates::{
-    WEAKNET_APP, effective_announced, parse_listen_port, parse_web_port, parse_web_root,
-    server_namespace, server_product, server_web_app,
+    DEFAULT_WEB_PORT, WEAKNET_APP, effective_announced, parse_listen_port, parse_web_port,
+    parse_web_root, resolve_port, server_namespace, server_product, server_web_app,
 };
 use super::{absolute, oxmgr_bin, oxmgr_list, parse_dir, run_oxmgr, which};
 
@@ -223,6 +223,34 @@ pub(super) fn list_registered_apps(dir: &Path) -> Result<Vec<String>, String> {
         .collect())
 }
 
+/// web 端口漂移判据（T6b①，D-A 改判后漂移的唯一报警通道=doctor）。intent = yaml > env >
+/// DEFAULT_WEB_PORT（与 init 渲染 resolved_ports 同链）；产物 = Caddyfile 反解（start 探活真值源）。
+/// 不一致 → Some((caddy, intent))。契约 §2.6：Caddyfile 缺席/parse 失败（古董/手破）→ None = skip 不告警。
+pub(super) fn web_port_drift(
+    cfg_web_port: Option<u16>,
+    env_web: Option<u16>,
+    caddyfile: Option<&str>,
+) -> Option<(u16, u16)> {
+    let caddy = caddyfile.and_then(parse_web_port)?;
+    let intent = resolve_port(cfg_web_port, env_web, DEFAULT_WEB_PORT);
+    (caddy != intent).then_some((caddy, intent))
+}
+
+/// announced_ips 腐烂判据（T6b④，纯函数：吃 yaml ips + 本机接口集，IO 留调用方）。
+/// 裸机/容器判定复用 use_bare_metal_listen（sfu.rs 同源，first-only）：
+/// false → 容器姿态 → None（INFO 豁免）；true → 裸机 → Some(腐烂项)，全健康 = Some(空)。
+/// ponytail: v1 盲区（PLAN §2.6 显式接受）——多 IP 裸机且首项已腐烂时 first-only 误判
+/// "容器"整体豁免；闭合判据 = announced ∩ 本机 = ∅ 时全检，偏离复用条款需用户裁。
+pub(super) fn announced_stale_items(
+    announced: &[String],
+    local: &std::collections::HashSet<String>,
+) -> Option<Vec<String>> {
+    if !mediaservo_server::sfu::use_bare_metal_listen(announced, local) {
+        return None;
+    }
+    Some(announced.iter().filter(|ip| !local.contains(*ip)).cloned().collect())
+}
+
 pub(super) fn cmd_doctor(args: &mut dyn Iterator<Item = String>) -> i32 {
     let dir = match parse_dir(args) {
         Ok(d) => d,
@@ -281,12 +309,39 @@ pub(super) fn cmd_doctor(args: &mut dyn Iterator<Item = String>) -> i32 {
         "Caddyfile root 目录缺失/为空（改 TS 后 build web；dev --no-web 形态可忽略本项）",
     );
 
-    let announced_in_yaml = parsed.is_some_and(|c| !c.sfu.announced_ips.is_empty());
+    let announced_in_yaml = parsed.as_ref().is_some_and(|c| !c.sfu.announced_ips.is_empty());
     check(
         effective_announced(announced_in_yaml),
         "announced IP 已配置",
         "env MEDIASERVO_SFU_ANNOUNCED_IP 与 sfu.announced_ips 均缺省——多网卡/容器环境黑帧高危（C38 层①）",
     );
+
+    // T6b①④ 漂移/腐烂巡检——[warn]/[info] 行不计入 failed（doctor 退出码=失败数契约不变）
+    if let Some(c) = parsed.as_ref() {
+        let env_web = std::env::var("MEDIASERVO_WEB_PORT").ok().and_then(|v| v.parse::<u16>().ok());
+        if let Some((caddy, intent)) = web_port_drift(c.web.port, env_web, cf.as_deref()) {
+            println!(
+                "[warn] Caddyfile(:{caddy}) 与 server.yaml/env(:{intent}) 漂移——start 探活以 Caddyfile 为准；欲 yaml 生效删 etc/Caddyfile 重 init"
+            );
+        }
+        // 腐烂检查仅在 yaml 值生效时跑（env 覆写态下 yaml=死配置，WARN 指向非生效值=误导）
+        if announced_in_yaml && std::env::var("MEDIASERVO_SFU_ANNOUNCED_IP").is_err() {
+            let local: std::collections::HashSet<String> =
+                mediaservo_server::sfu::detect_all_ips().into_iter().collect();
+            match announced_stale_items(&c.sfu.announced_ips, &local) {
+                None => println!(
+                    "[info] announced 腐烂检查豁免：首项 ∉ 本机接口 = 容器姿态（first-only 判据，多 IP 裸机首项腐烂属已接受盲区）"
+                ),
+                Some(stale) if stale.is_empty() => println!(
+                    "[ok] announced_ips 全部仍属本机接口（{} 项）",
+                    c.sfu.announced_ips.len()
+                ),
+                Some(stale) => println!(
+                    "[warn] announced_ips 腐烂: {stale:?} 已非本机接口 IP——两出口：裸机=清空 sfu.announced_ips 走自动探测 / 容器=更新为当前可达 IP（公告腐烂 IP=客户端 ICE 全败，C38 层①）"
+                ),
+            }
+        }
+    }
 
     if let Some(p) = cfg.as_deref().and_then(parse_listen_port) {
         println!(
@@ -405,5 +460,63 @@ mod tests {
         assert!(
             parse_server_cmdline("/opt/x/bin/msrtc-server --config /opt/x/server.yaml").is_none()
         );
+    }
+    fn cf_text(port: u16) -> String {
+        format!("state {{\n:{port} {{\n  root * /srv/web\n}}\n}}\n")
+    }
+
+    #[test]
+    fn web_drift_match_mismatch_and_skip() {
+        // 一致（yaml == Caddyfile）→ None 不漂移
+        assert_eq!(web_port_drift(Some(8080), None, Some(&cf_text(8080))), None);
+        // 缺省链一致：yaml/env 均无 = 8080 缺省，Caddyfile 8080 → None
+        assert_eq!(web_port_drift(None, None, Some(&cf_text(8080))), None);
+        // 漂移：yaml 8093 vs Caddyfile 8080 → Some((caddy, intent))
+        assert_eq!(web_port_drift(Some(8093), None, Some(&cf_text(8080))), Some((8080, 8093)));
+        // 意图链 yaml > env：env 8091 兜底（yaml None）
+        assert_eq!(web_port_drift(None, Some(8091), Some(&cf_text(8080))), Some((8080, 8091)));
+        // yaml 压制 env：yaml 8092 env 8091 vs Caddyfile 8092 → None
+        assert_eq!(web_port_drift(Some(8092), Some(8091), Some(&cf_text(8092))), None);
+        // 契约 §2.6：古董/手破 Caddyfile（parse None）→ skip 不 WARN
+        assert_eq!(web_port_drift(Some(8093), None, Some("no site block here")), None);
+        // Caddyfile 缺席（--no-web / 未 init）→ skip
+        assert_eq!(web_port_drift(Some(8093), None, None), None);
+    }
+
+    fn ips(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn ipset(v: &[&str]) -> std::collections::HashSet<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn announced_staleness_verdicts() {
+        // 裸机（首项 ∈ 本机）且有腐烂项 → Some(腐烂清单)
+        assert_eq!(
+            announced_stale_items(
+                &ips(&["192.168.2.127", "203.0.113.9"]),
+                &ipset(&["192.168.2.127"])
+            ),
+            Some(ips(&["203.0.113.9"]))
+        );
+        // 裸机健康：全属本机 → Some(空)（pass）
+        assert_eq!(
+            announced_stale_items(&ips(&["192.168.2.127"]), &ipset(&["192.168.2.127"])),
+            Some(vec![])
+        );
+        // 容器姿态（首项 ∉ 本机 = 宿主可达 IP 形）→ None INFO 豁免，不 WARN
+        assert_eq!(announced_stale_items(&ips(&["192.168.2.127"]), &ipset(&["172.18.0.2"])), None);
+        // ponytail v1 盲区钉（first-only 判据，PLAN §2.6 豁免分支）：多 IP 裸机首项腐烂 → 误判容器豁免
+        assert_eq!(
+            announced_stale_items(
+                &ips(&["203.0.113.9", "192.168.2.127"]),
+                &ipset(&["192.168.2.127"])
+            ),
+            None
+        );
+        // 空配置 → None（use_bare_metal_listen([]) = false）
+        assert_eq!(announced_stale_items(&[], &ipset(&["192.168.2.127"])), None);
     }
 }
