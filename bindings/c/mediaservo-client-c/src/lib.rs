@@ -92,12 +92,65 @@ const VIDEO_POLL: Duration = Duration::from_secs(2);
 /// 诊断 subscriber 惰性安装（runtime 同刻一次）：默认 mediaservo=info——
 /// "consume on_track 到达"/ICE 状态/client consume 建立 = 零帧问题的分水岭证据链。
 /// 宿主已有 subscriber → try_init Err 静默让位；RUST_LOG env 全程可覆盖级别。
+/// MSRTC.log 落盘目标（set_log_file 一次性设置；None = stdout 现状）。
+/// 宿主（TPHMI）在首个 runtime 使用前调用——init_tracing 惰性读。
+static LOG_FILE_PATH: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+
+/// C ABI: 设置 tracing 日志文件（MSRTC.log）。须在首个 runtime 使用前调用
+/// （首次 login/consume 等任意 API 前）；二次调用无效（OnceLock 语义）。
+/// 默认级别 env MSRTC_LOG_LEVEL（缺省 info）过滤；libwebrtc 噪音层
+/// （mediaservo_webrtc）独立挡 warn——需要深挖时 MSRTC_LOG_LEVEL=debug 全开。
+#[unsafe(no_mangle)]
+pub extern "C" fn mediaservo_client_set_log_file(path: *const std::ffi::c_char) -> std::ffi::c_int {
+    if path.is_null() {
+        return crate::errors::MEDIASERVO_CLIENT_ERR_INVALID_ARG;
+    }
+    let cstr = unsafe { std::ffi::CStr::from_ptr(path) };
+    let Ok(p) = cstr.to_str() else {
+        return crate::errors::MEDIASERVO_CLIENT_ERR_INVALID_ARG;
+    };
+    match LOG_FILE_PATH.set(Some(std::path::PathBuf::from(p))) {
+        Ok(()) => crate::errors::MEDIASERVO_OK,
+        Err(_) => crate::errors::MEDIASERVO_CLIENT_ERR_STATE, // 已设置过
+    }
+}
+
 fn init_tracing() {
     static DONE: std::sync::Once = std::sync::Once::new();
     DONE.call_once(|| {
-        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("mediaservo=info"));
-        let _ = tracing_subscriber::fmt().with_env_filter(filter).with_target(true).try_init();
+        // 级别：MSRTC_LOG_LEVEL 优先，缺省 info；webrtc_sys 噪音层独立抬到 warn
+        let level = std::env::var("MSRTC_LOG_LEVEL").unwrap_or_else(|_| "info".into());
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            tracing_subscriber::EnvFilter::new(format!(
+                "mediaservo_webrtc=warn,mediaservo={level}"
+            ))
+        });
+        let file_writer: Option<std::fs::File> = LOG_FILE_PATH
+            .get()
+            .and_then(|o| o.as_ref())
+            .and_then(|p| match std::fs::OpenOptions::new().create(true).append(true).open(p) {
+                Ok(f) => Some(f),
+                Err(e) => {
+                    eprintln!("[msrtc] log file open failed ({}): {e} — fallback stdout", p.display());
+                    None
+                }
+            });
+        match file_writer {
+            Some(f) => {
+                let _ = tracing_subscriber::fmt()
+                    .with_env_filter(filter)
+                    .with_target(true)
+                    .with_writer(std::sync::Mutex::new(f))
+                    .with_ansi(false)
+                    .try_init();
+            }
+            None => {
+                let _ = tracing_subscriber::fmt()
+                    .with_env_filter(filter)
+                    .with_target(true)
+                    .try_init();
+            }
+        }
     });
 }
 

@@ -333,6 +333,11 @@ mediaservo_err_t mediaservo_client_session_close(mediaservo_client_session_t* s)
  * session_last_error + session_error）。线程安全。 */
 mediaservo_err_t mediaservo_client_last_error(char* buf, size_t len);
 
+/* ⊘ tracing 日志落盘文件（MSRTC.log）。须在首个 runtime 消费点（任意 login/
+ * consume API）前调用一次；二次调用返 ERR_STATE。文件 append 打开，失败回退
+ * stdout。级别：env MSRTC_LOG_LEVEL（缺省 info），libwebrtc 噪音层默认 warn。 */
+mediaservo_err_t mediaservo_client_set_log_file(const char* path);
+
 /* SDK 版本 (MAJOR.MINOR.PATCH)。 */
 mediaservo_err_t mediaservo_client_version(char* buf, size_t len);
 
