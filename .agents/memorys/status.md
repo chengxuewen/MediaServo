@@ -1066,3 +1066,13 @@ install                        → 改名提示 + exit 2（退役）
 - QOE on_qoe 三层泄漏修复（PIT-220）：Rust JoinHandle → C ABI qoe_task abort → C++ qoe_ctx_ 生命周期。
 - lsan.supp 沉淀第三方良性（libva/FFmpeg/Qt/glib ~97KB）——报告只剩 TPHMI 自有代码。
 - 均未提交（C1）：TPHMI 5 文件 + QExt 1 文件 + MediaServo consumer.rs/client.hpp/lsan.supp。
+## 2026-10-12: qoe-callback-join-race（PIT-221）
+- crash_d036（SIGSEGV@0x1）修复落地：bindings/c close/on_qoe 替换两路径 abort+join（join_qoe_task + try_current 守卫 + 锁外 join）；client.hpp 死代码清理+契约注释；client.h/consumer.rs doc 同步。
+- 顺手清：mediaservo-common SfuConfig/WebConfig 手写 Default 加 allow(derivable_impls)（勿改回 derive——项目决策+钉死测试）；mediaservo-client consumer.rs collapsible_if；qoe_cb 补 allow(non_camel_case_types)。
+- 验证：46/46 + clippy 0 + deploy bindings 11:20 + TPHMI 真流 3/3（QOE_Fps=30）+ lusan qoe 零泄漏。
+- 全部未提交（C1）——MediaServo 5 文件（consumer.rs×2/config.rs/common consumer.rs/client.h/client.hpp）+ TPHMI CMakeLists（方案 B pixi 前置撤除）待授权。
+
+## 2026-10-12(2): flaky 初连三层修复（PIT-222）
+- 根因: libwebrtc C++ 首调 >15s 占死 2-worker runtime → ws 心跳饿死自断（双端日志毫秒对齐实证×3）。
+- 修复: ① webrtc_sys spawn_blocking 包 create_peer_connection ② client-c runtime() 后台预热 create_pc ③ tst break >=3。
+- 验证: 12 轮连锤 0 失败（基线 10-50%）。server 侧 debug 日志已用 oxfile env 注入（reload→delete+import 才生效——oxmgr reload 不重读 [apps.logs]，stdout 转发 bug 另案）。

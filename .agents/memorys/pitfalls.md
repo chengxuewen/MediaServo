@@ -1798,3 +1798,17 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: Rust on_qoe 返回 JoinHandle；C ABI handle +qoe_task 槽（on_qoe 存/close abort/重复注册替换）；C++ Consumer +qoe_ctx_ 成员（on_qoe 存/close 删/move 双向转移）。
 - **验证**: `lsan.supp` 沉淀第三方良性后，正常退出报告 on_qoe 命中 = 0。
 - **禁止**: FFI 回调注册只存不收——必须有对称释放路径（abort/free/delete）且 move 语义全字段转移。
+
+## PIT-221: on_qoe 回调上下文 use-after-free——abort 不等于 join (2026-10-12)
+- **症状**: TPHMI 真机长跑 SIGSEGV@0x1（crash_d036，Thread 27=msrtc worker），栈=client.hpp:436 `(*fn)(q)` 调已 delete 的 ctx——Rust qoe 节拍 task abort 后仍在途触发一次。
+- **根因**: tokio `abort()` 只保证 task 不再推进到下一 await 点，**不打断同步执行中的回调**；C++ 层 `delete qoe_ctx_` 不等旧 task 退出 → 悬垂 `std::function` 被 `(*fn)(q)` 调用跳飞。
+- **解法**: C 层（bindings/c）close/重复注册两路径 abort 后 `runtime().block_on(task)` join 真退出再返回（`join_qoe_task` 辅助 + `Handle::try_current` 守卫防 runtime 线程误用 panic；join 在锁外——take 后 guard 即 drop，防回调违规重入互锁）。
+- **验证**: 判别形测试（task 带 30ms 同步段+严格 `settled==after` 断言，未修代码实证 RED after=1 settled=4）+ cargo test 46/46 + clippy -D warnings 0 + TPHMI 真流 3/3 QOE_Fps=30 + lusan 报告 qoe/trampoline 零泄漏。
+- **禁止**: FFI 回调生命周期声称「close 后停」却只用 abort 实现；跨 FFI 的 delete-与-回调时序必须由「join 后返回」硬保证，不得靠调用方时序自律。
+
+## PIT-222: 拉流初次失败重试才成——C++ 全家桶首调饿死 ws 心跳 (2026-10-12)
+- **症状**: TPHMI msrtc 拉流时好时坏——初次/前两次失败（30s 黑洞或秒断），重试即成；失败率随连续重开/系统负载波动（实测 0%~50%）。
+- **根因**: libwebrtc C++ CreatePeerConnection 首调同步初始化全家桶（VAAPI DRM 扫描/PulseAudio/X11），实测可 >15s 且**直接占用 tokio worker（runtime 仅 2 worker）**→ 同 runtime 的 link ws 心跳任务饿死 → 15s 入站静默判死主动断链 → server 侧见 Close 后清理 peer → 客户端 consume 卡 broadcast 收不到响应。双端日志实证：server 发 GetRouter 响应后 1-2ms 见 Close，客户端零感知。
+- **解法**: 三层——① webrtc_sys create_peer_connection 包 spawn_blocking（重型 ffi 出 worker，心跳永不饿死——治本）；② client-c runtime() 初始化后后台预热空跑一次 create_pc（首调成本摊到加载期）；③ TPHMI tst break 条件 >0→>=3（连带修掉 502ms 型测试误报）。
+- **验证**: cargo test 18 result 全 ok + bindings 重部署 + TPHMI 12 轮连锤 0 失败（修复前同条件 10-50% 失败率）。
+- **禁止**: tokio worker 上直接调用可能秒级以上的 C/C++ 同步初始化（spawn_blocking 强制）；把「重试就成功」当网络抖动放过——自愈型失败先查本进程阻塞链。
