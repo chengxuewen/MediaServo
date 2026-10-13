@@ -13,6 +13,10 @@
   非 tty 拒绝并列双方 unit/实例目录/冲突端口明细；跨域撞（server↔host）：不跳过比对，交集弱化
   为警告确认（覆盖/取消/允许并行）；无交集=共存安装。卸对方动作明细前置；不识别的 `oxmgr-*`
   unit 仅 WARN 永不接管（TalkServo 同族误认防护）。
+- [host] startup 平台口径修正 + 非 Linux 薄适配（startup-hardening S4）：帮助文本「三端」改为
+  「Linux=systemd user unit；macOS/Windows=用 oxmgr 服务（未内置验证）」；非 Linux `startup on/off/status`
+  从提示桩改为转发 `oxmgr service install/uninstall/status --system auto`（退出码透传；单例形态——
+  实例 env 不注入、多实例自启仅 Linux，WARN 已标注）。
 - [server][host] `startup on` 装后健康探针（startup-hardening S3）：`enable --now` 后轮询
   `systemctl --user is-active` ≤5s（10×500ms，与 stop 自证同款步进），首个 active 后 2s 复核
   仍 active 才报「daemon 已拉起 ✓」；轮询期见 failed 立即失败（不空等，附端口冲突快猜行），

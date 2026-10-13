@@ -806,18 +806,18 @@ fn uninstall_unit(unit: &str) -> i32 {
 #[cfg(not(target_os = "linux"))]
 fn startup_install(_dir: &Path) -> i32 {
     eprintln!(
-        "startup on: 非 Linux——用 oxmgr service install（macOS launchd / Windows Task Scheduler）"
+        "startup on: 非 Linux——转发 oxmgr service install（单例形态：默认数据目录；多实例仅 Linux）"
     );
     1
 }
 #[cfg(not(target_os = "linux"))]
 fn startup_uninstall(_dir: &Path) -> i32 {
-    eprintln!("startup off: 非 Linux——用 oxmgr service uninstall");
+    eprintln!("startup off: 非 Linux——转发 oxmgr service uninstall");
     1
 }
 #[cfg(not(target_os = "linux"))]
 fn startup_status(_dir: &Path) -> i32 {
-    eprintln!("startup status: 非 Linux——用 oxmgr service status");
+    eprintln!("startup status: 非 Linux——转发 oxmgr service status");
     1
 }
 

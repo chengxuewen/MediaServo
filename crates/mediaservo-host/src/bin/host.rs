@@ -40,7 +40,7 @@ const USAGE: &str = "用法: mediaservo-host <init|start|apply|restart|stop|stat
   doctor [<dir>]     环境诊断（oxmgr/配置/翻译三检查，退出码=失败数）
   token issue --role R --node N [--topic T] --out O [<dir>]   签发链路令牌
   token --all [<dir>]  签发标准令牌集（相机/流/recorder/agent）
-  startup on/off/status [<dir>]             开机自启（on=启用/off=停用，三端: systemd/launchd/Task Scheduler）
+  startup on/off/status [<dir>]             开机自启（Linux=systemd user unit；macOS/Windows=用 oxmgr 服务，未内置验证）
   monit               打开 oxmgr TUI（进程监控/日志/重启——需 oxmgr 在 PATH）
   ps                  进程列表（oxmgr list——含 CPU/RAM/uptime 列）
   logs [<proc>]       oxmgr 日志查看（logs all = 全部进程）
@@ -1127,7 +1127,7 @@ fn dirs_log_dir() -> std::path::PathBuf {
         .unwrap_or_else(|_| std::path::PathBuf::from(".oxmgr/logs"))
 }
 
-/// 开机自启（三端: Linux systemd / macOS launchd / Windows Task Scheduler）。
+/// 开机自启（Linux=systemd user unit；macOS/Windows=用 oxmgr 服务，未内置验证）。
 /// `startup on` = oxmgr startup（注册系统集成）+ service install；`off` = service uninstall。
 /// OXMGR_DATA_DIR 注入使 daemon 状态在实例内（与 host start 同 env，服务自启后一致性）。
 /// unit 文本 ExecStart= 首 token（status bin 存活判据）——server startup.rs 同名镜像。
@@ -1703,24 +1703,45 @@ fn startup_status(dir: &std::path::Path) -> i32 {
     i32::from(!startup_unit_healthy(enabled.as_deref(), active.as_deref(), bin_alive))
 }
 
+// ── 非 Linux 薄适配（startup-hardening S4/项6）：转发 oxmgr service（跨平台装拆
+//    oxmgr 内置 systemd/launchd/Task Scheduler）。已知语义（本机侦察 10-13）：
+//    固定单例名、实例 env 不注入（默认数据目录形态）——单例 WARN + 退出码透传。
+
 #[cfg(not(target_os = "linux"))]
 fn startup_install(_dir: &std::path::Path) -> i32 {
-    eprintln!(
-        "startup on: 非 Linux 平台——请用 oxmgr service install（macOS launchd / Windows Task Scheduler）"
-    );
-    1
+    eprintln!("startup on: 非 Linux——转发 oxmgr service install（单例形态）");
+    eprintln!("  ⚠ 实例目录 env 不注入：daemon 用默认数据目录；多实例自启仅 Linux 形支持");
+    match Command::new(oxmgr_bin()).args(["service", "install", "--system", "auto"]).status() {
+        Ok(st) => st.code().unwrap_or(1),
+        Err(e) => {
+            eprintln!("startup on: oxmgr service 执行失败: {e}");
+            1
+        }
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
 fn startup_uninstall(_dir: &std::path::Path) -> i32 {
-    eprintln!("startup off: 非 Linux 平台——请用 oxmgr service uninstall");
-    1
+    eprintln!("startup off: 非 Linux——转发 oxmgr service uninstall");
+    match Command::new(oxmgr_bin()).args(["service", "uninstall", "--system", "auto"]).status() {
+        Ok(st) => st.code().unwrap_or(1),
+        Err(e) => {
+            eprintln!("startup off: oxmgr service 执行失败: {e}");
+            1
+        }
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
 fn startup_status(_dir: &std::path::Path) -> i32 {
-    eprintln!("startup status: 非 Linux 平台——请用 oxmgr service status");
-    1
+    eprintln!("startup status: 非 Linux——转发 oxmgr service status");
+    match Command::new(oxmgr_bin()).args(["service", "status", "--system", "auto"]).status() {
+        Ok(st) => st.code().unwrap_or(1),
+        Err(e) => {
+            eprintln!("startup status: oxmgr service 执行失败: {e}");
+            1
+        }
+    }
 }
 
 /// 探测 host-agent 本地网关端口是否被占用（[signaling] local_port 或默认 17980）。
