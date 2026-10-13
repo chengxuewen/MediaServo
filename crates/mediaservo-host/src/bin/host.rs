@@ -1645,9 +1645,25 @@ fn startup_install(dir: &std::path::Path) -> i32 {
     if !s3_probe_startup(&unit_name) {
         return 1;
     }
-    println!(
-        "startup on: 开机自启已启用 + daemon 已拉起 ✓（{unit_name}）——建议 loginctl enable-linger 保跨会话存活"
-    );
+    println!("startup on: 开机自启已启用 + daemon 已拉起 ✓（{unit_name}）");
+    // S5 实环勘误（与 server 侧同笔）：daemon 锚点不拉簇——apply oxfile 幂等唤醒。
+    let oxfile = dir.join("run").join("oxfile.toml");
+    if oxfile.exists() {
+        println!("startup on: 唤醒实例进程（apply {}）", oxfile.display());
+        if run_oxmgr_in(Some(dir), &["apply", &oxfile.to_string_lossy()]) != 0 {
+            eprintln!(
+                "startup on: apply 失败——unit/daemon 在位，实例未拉起（手工 start {}）",
+                dir.display()
+            );
+            return 1;
+        }
+    } else {
+        eprintln!(
+            "startup on: 无 {}（实例未 init/start 过）——仅 daemon 锚点在位",
+            oxfile.display()
+        );
+    }
+    println!("startup on: 建议 loginctl enable-linger 保跨会话存活");
     0
 }
 
