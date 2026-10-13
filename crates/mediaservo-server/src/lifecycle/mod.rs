@@ -9,6 +9,7 @@
 
 mod conflict;
 mod inspect;
+mod reap;
 mod startup;
 pub mod templates;
 

@@ -296,11 +296,11 @@ fn default_data_dir_from(xdg: Option<&str>, home: Option<&str>) -> Option<PathBu
 }
 
 /// 宽容解析：坏 json / 非 OxMgrState 形 → 空表（消费侧视同"无分裂"，不产噪音）。
-fn parse_state(text: &str) -> Vec<ManagedEntry> {
+pub(super) fn parse_state(text: &str) -> Vec<ManagedEntry> {
     serde_json::from_str::<OxmgrState>(text).map(|s| s.processes).unwrap_or_default()
 }
 
-fn read_registry(path: &Path) -> Vec<ManagedEntry> {
+pub(super) fn read_registry(path: &Path) -> Vec<ManagedEntry> {
     std::fs::read_to_string(path).map(|t| parse_state(&t)).unwrap_or_default()
 }
 
