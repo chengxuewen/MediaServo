@@ -598,7 +598,20 @@ fn startup_install(dir: &Path) -> i32 {
     if let Some(parent) = unit_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let oxmgr = oxmgr_bin().to_string_lossy().into_owned();
+    // S5 实环勘误②：systemd 无登录 PATH——ExecStart 裸名 `oxmgr` = unit 203/EXEC
+    // crash loop（journalctl 实证）。oxmgr_bin() 末级回退是裸名，此处强制绝对化：
+    // 同目录无 oxmgr → 拒装并指路（比装一个必炸的 unit 诚实）。
+    let oxmgr_path = oxmgr_bin();
+    if !oxmgr_path.is_absolute() {
+        eprintln!(
+            "startup on: 无法定位 oxmgr 绝对路径（{} 旁无 oxmgr 且 PATH 不可靠）——将 bin/oxmgr 就位后重试",
+            std::env::current_exe()
+                .map(|p| p.parent().map(|d| d.display().to_string()).unwrap_or_default())
+                .unwrap_or_default()
+        );
+        return 1;
+    }
+    let oxmgr = oxmgr_path.to_string_lossy().into_owned();
     if let Err(e) = std::fs::write(&unit_path, render_startup_unit(dir, &oxmgr)) {
         eprintln!("startup on: 写入 unit 失败: {e}");
         return 1;

@@ -1588,7 +1588,15 @@ fn startup_install(dir: &std::path::Path) -> i32 {
     let unit_path = std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
         .join(".config/systemd/user")
         .join(&unit_name);
-    let oxmgr = oxmgr_path();
+    // S5 实环勘误②（server 同笔）：systemd 无 PATH——ExecStart 裸名 = 203/EXEC crash loop。
+    let oxmgr = {
+        let p = oxmgr_path();
+        if !p.is_absolute() {
+            eprintln!("startup on: 无法定位 oxmgr 绝对路径（bin/ 旁无 oxmgr）——就位后重试");
+            return 1;
+        }
+        p
+    };
     let data_dir = dir.join("run").join("oxmgr");
     // 幂等: 覆盖自身 unit（同实例重跑 on = 刷新）
     let unit = format!(
