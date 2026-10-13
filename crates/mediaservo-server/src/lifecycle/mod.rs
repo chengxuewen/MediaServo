@@ -517,14 +517,18 @@ fn contention_flow(verb: &str, dir: &Path, what: &str, port: u16, no_web: bool) 
             match inspect::strays_under(&inspect::read_default_registry(), dir).into_iter().next() {
                 // T5: /proc 扫不到 → 占用者可能在共享/旧 daemon 名下（非本实例注册表管辖
                 // ——2026-10-12 事故形）。指认不杀戮：接管路径仍拒（old=None 语义不变）。
-                Some(e) => eprintln!(
-                    "  端口占用者在旧共享 daemon 名下: name={} id={} status={} pid={}（非本实例注册表管辖）—— {}",
-                    e.name,
-                    e.id,
-                    e.status,
-                    e.pid.map_or_else(|| "?".into(), |p| p.to_string()),
-                    inspect::SPLIT_GUIDANCE
-                ),
+                Some(e) => {
+                    eprintln!(
+                        "  端口占用者在旧共享 daemon 名下: name={} id={} status={} pid={}（非本实例注册表管辖）—— {}",
+                        e.name,
+                        e.id,
+                        e.status,
+                        e.pid.map_or_else(|| "?".into(), |p| p.to_string()),
+                        inspect::SPLIT_GUIDANCE
+                    );
+                    // global-reap T4：文案闭环——T5 指认后给一键出口
+                    eprintln!("  可用 msrtc-server stop -g 收口（全局按进程身份清场）");
+                }
                 None => eprintln!("  （未能定位旧实例目录——端口可能被其他程序占用）"),
             }
         }
