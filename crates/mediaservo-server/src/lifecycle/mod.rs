@@ -716,6 +716,21 @@ fn reap_under(dir: &Path) -> Vec<u32> {
     execute_steps(&plan).into_iter().map(|(pid, _)| pid).collect()
 }
 
+/// daemon 存活探测：DAEMON_ADDR 端口可连 = 活（§10 直杀闸判据①）。
+fn daemon_alive(daemon_data_dir: &Path) -> bool {
+    let home = absolute(daemon_data_dir);
+    std::net::TcpStream::connect(("127.0.0.1", instance_daemon_port(&home))).is_ok()
+}
+
+/// 注册表条目在否（§10 直杀闸判据②）：name 命中且 pid 相符（或 pid 陈旧但 name 在场
+/// ——daemon 活着重拉过 pid 的形态，M2 同源）。
+fn registry_has_entry(daemon_data_dir: &Path, name: &str, pid: &u32) -> bool {
+    let state = daemon_data_dir.join("state.json");
+    inspect::read_registry(&state)
+        .iter()
+        .any(|e| e.name == name && (e.pid == Some((*pid).into()) || e.pid.is_none()))
+}
+
 /// 收口步骤执行（T2/T3 共用薄壳；语义与 T2 内联形逐字节一致——daemon 不可达降级
 /// 直杀、直杀横幅、单次补杀上限）。返回 (pid, 结局) 序列供汇总计数。
 fn execute_steps(plan: &[ReapStep]) -> Vec<(u32, StepOutcome)> {
@@ -731,7 +746,18 @@ fn execute_steps(plan: &[ReapStep]) -> Vec<(u32, StepOutcome)> {
                 {
                     return (*pid, StepOutcome::ViaDaemon);
                 }
-                eprintln!("扫尾: daemon 收口未成功——绕过 daemon 直杀（daemon 不可达）");
+                // §10 直杀闸（10-13 二次事故）：收口失败 ≠ daemon 死——daemon 可能只是
+                // 短暂不可达/被 stop 收敛但条目仍在拉新 pid。直杀许可 = daemon 确认死亡
+                // 且注册表无该条目；否则只报告（-g/stop 均不越权，防 always 复活循环）。
+                if daemon_alive(daemon_data_dir)
+                    || registry_has_entry(daemon_data_dir, name, pid)
+                {
+                    eprintln!(
+                        "扫尾: pid {pid}（{name}）daemon 收口未成功且 daemon 仍活/条目在——跳过直杀（可经 stop <dir> 或修复 daemon 后重试）"
+                    );
+                    return (*pid, StepOutcome::Failed);
+                }
+                eprintln!("扫尾: daemon 收口未成功且 daemon 确认死亡——绕过 daemon 直杀");
                 kill_and_wait(*pid);
                 let ok = !pid_alive(*pid);
                 (*pid, if ok { StepOutcome::DirectKill } else { StepOutcome::Failed })
