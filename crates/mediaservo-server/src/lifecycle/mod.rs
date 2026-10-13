@@ -648,6 +648,11 @@ fn stop_cluster(dir: &Path) -> i32 {
             n = names.len(),
             prod = server_product()
         );
+        // T4-a 实环勘误：自证未过 = 本实例残留在场，语义即失败（RC=0 曾令假绿复活——
+        // 归因行如实报了 failed 但退出码没跟上）。failed 本身不为 0 的路径已按计数返 1。
+        if !verified {
+            failed = 1;
+        }
     }
     failed
 }
@@ -761,8 +766,23 @@ fn scan_all() -> i32 {
     }
     // 注册表快照：默认 daemon 表 + matched 进程各自 environ home 的实例表（reap_plan
     // 按 per-proc environ 排序配对——-g 传空实例列表即默认表，无需 dir 语义）。
+    // B3 姊妹（T4-b 实环揪出）：default_data_dir() 按 CLI 自身 env 解析，而
+    // run_oxmgr_default 给子进程剥 XDG_DATA_HOME——CLI 视角与执行视角的"默认 daemon"
+    // 会分叉（XDG 沙箱壳里 -g 误扫真默认 daemon 并直杀生产进程=事故形）。统一为
+    // 剥后语义：CLI 侧忽略 XDG_DATA_HOME，与执行子进程同源。
+    // （不绕 env 突改——直接按"剥 XDG_DATA_HOME 后"的解析形计算：HOME/.local/share，
+    //  与 default_data_dir 的 XDG 回退实现一致，零 unsafe）
+    let default_dir = std::env::var_os("XDG_DATA_HOME")
+        .filter(|v| !v.is_empty())
+        .is_some()
+        .then(|| {
+            std::env::var_os("HOME")
+                .map(|h| PathBuf::from(h).join(".local").join("share").join("oxmgr"))
+        })
+        .flatten()
+        .or_else(inspect::default_data_dir);
     let mut registries: Vec<(PathBuf, Vec<inspect::ManagedEntry>)> = Vec::new();
-    if let Some(dd) = inspect::default_data_dir() {
+    if let Some(dd) = default_dir {
         registries.push((dd.clone(), inspect::read_registry(&dd.join("state.json"))));
     }
     for home in matched.iter().filter_map(|p| p.environ_oxmgr_home.clone()) {
@@ -776,7 +796,7 @@ fn scan_all() -> i32 {
         registries.iter().map(|(d, e)| (d.clone(), e.as_slice())).collect();
     let plan = reap::reap_plan(&matched, &refs);
     let steps = execute_steps(&plan);
-    let (via, direct, failed) = reap::tally(&steps.iter().map(|(_, o)| *o).collect::<Vec<_>>());
+    let (via, direct, mut failed) = reap::tally(&steps.iter().map(|(_, o)| *o).collect::<Vec<_>>());
     // 终态（归因型端口终态打印的 -g 形——ports 逐实例各异不探，按签名二扫裁决）：
     let still: Vec<u32> = reap::scan_live_procs()
         .into_iter()
@@ -791,6 +811,9 @@ fn scan_all() -> i32 {
         println!("终态: 全部清场 ✓");
     } else {
         println!("终态: 仍有签名命中存活 pid: {still:?}");
+        // T4-b 勘误: 终态残货=未清干净，计入失败（曾只看 tally 的 Failed 步——
+        // "杀令已发但进程仍在"之外的复活/漏网形态不被 tally 覆盖）
+        failed += still.len();
     }
     println!("收口汇总: 经 daemon {via} 个 / 直杀 {direct} 个 / 失败 {failed} 个");
     println!("实例 daemon 未动（非目标）");
@@ -978,7 +1001,14 @@ pub(super) fn run_oxmgr(dir: Option<&Path>, args: &[&str]) -> i32 {
         // 操作者 shell 残留会把"默认 daemon"操作静默打到实例 daemon（错向同族）。
         None => {
             let mut c = Command::new(oxmgr_bin());
-            for k in ["OXMGR_HOME", "OXMGR_DATA_DIR", "OXMGR_DAEMON_ADDR", "OXMGR_API_ADDR"] {
+            for k in [
+                "OXMGR_HOME",
+                "OXMGR_DATA_DIR",
+                "OXMGR_DAEMON_ADDR",
+                "OXMGR_API_ADDR",
+                "XDG_DATA_HOME", // B3 姊妹（T4-a 实环揪出）：XDG 沙箱同样令 default_data_dir
+                                 // 解析到非默认 daemon——默认语义=完全无覆盖形态
+            ] {
                 c.env_remove(k);
             }
             c
