@@ -13,6 +13,13 @@
   非 tty 拒绝并列双方 unit/实例目录/冲突端口明细；跨域撞（server↔host）：不跳过比对，交集弱化
   为警告确认（覆盖/取消/允许并行）；无交集=共存安装。卸对方动作明细前置；不识别的 `oxmgr-*`
   unit 仅 WARN 永不接管（TalkServo 同族误认防护）。
+- [server][host] `startup status` 全量盘点 + `off` 无参形（startup-hardening S2）：`status` 无参
+  （新默认）逐 unit 输出四行健康面 enabled/daemon/linger/实例 bin 存活——linger 态经
+  `loginctl show-user $(id -u) -p Linger`（失败兑底 /var/lib/systemd/linger），disabled 附
+  enable-linger 指引；bin 已删除（legacy install-host 形）标「开机必失败」+清场指引；daemon failed
+  附 journalctl 诊断指引；未知 `oxmgr-*` 逐条 WARN。退出码脚本可消费：0=全部健康，1=任一僵尸/
+  failed/无 unit。`status <dir>` 保留为单实例过滤（同四行面）。`off` 无参：恰一 unit 直停；
+  多 unit tty 列选（含 [0] 全部）/ 非 tty 拒绝列清单；零 unit 幂等 0；`off <dir>` 不变。
 - [server] `stop -g|--all` 全局收口（global-reap T3）：按进程身份（argv 签名 + caddy 磁盘标记防
   跨产品误杀）跨目录跨 daemon 清场全部本产品 server 簇进程——实例 daemon 名下进程经其自家
   daemon 优雅收口（防 `restart_policy=always` 复活），孤儿直杀末路横幅；`-g` 与目录参数并给

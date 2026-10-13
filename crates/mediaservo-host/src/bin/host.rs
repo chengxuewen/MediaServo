@@ -1130,11 +1130,162 @@ fn dirs_log_dir() -> std::path::PathBuf {
 /// 开机自启（三端: Linux systemd / macOS launchd / Windows Task Scheduler）。
 /// `startup on` = oxmgr startup（注册系统集成）+ service install；`off` = service uninstall。
 /// OXMGR_DATA_DIR 注入使 daemon 状态在实例内（与 host start 同 env，服务自启后一致性）。
+/// unit 文本 ExecStart= 首 token（status bin 存活判据）——server startup.rs 同名镜像。
+fn startup_first_token(unit_text: &str) -> Option<String> {
+    unit_text
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("ExecStart="))
+        .and_then(|v| v.split_whitespace().next().map(String::from))
+}
+
+/// 单 unit 健康面四行（纯渲染）——server `status_line` 同语义镜像（S2 四形钉测）。
+fn startup_status_line(
+    unit: &str,
+    enabled: Option<&str>,
+    active: Option<&str>,
+    linger: bool,
+    bin_alive: bool,
+) -> Vec<String> {
+    let mut out = vec![unit.to_string()];
+    out.push(format!("  enabled: {}", enabled.unwrap_or("no")));
+    let mut daemon_line = format!("  daemon:  {}", active.unwrap_or("inactive"));
+    if active == Some("failed") {
+        daemon_line.push_str("  ⚠ 诊断: journalctl --user -u <unit> -n 20");
+    }
+    out.push(daemon_line);
+    let mut linger_line = format!("  linger:  {}", if linger { "enabled" } else { "disabled" });
+    if !linger {
+        linger_line.push_str("——重启后不会自拉：loginctl enable-linger");
+    }
+    out.push(linger_line);
+    out.push(if bin_alive {
+        "  实例: bin ✓".to_string()
+    } else {
+        "  ⚠ bin 已删除——开机必失败。清场: startup off <dir> 或 systemctl --user disable --now + rm"
+            .to_string()
+    });
+    out
+}
+
+/// unit 健康判定（exit 语义）：daemon failed / bin 缺失 / enabled 非 enabled = 不健康。
+fn startup_unit_healthy(enabled: Option<&str>, active: Option<&str>, bin_alive: bool) -> bool {
+    enabled == Some("enabled") && active == Some("active") && bin_alive
+}
+
+/// systemctl --user is-enabled（thin exec；失败/空输出 → None）。
+fn startup_systemctl_enabled(unit: &str) -> Option<String> {
+    let o = std::process::Command::new("systemctl")
+        .args(["--user", "is-enabled", unit])
+        .output()
+        .ok()?;
+    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// systemctl --user is-active（thin exec）。
+fn startup_systemctl_active(unit: &str) -> Option<String> {
+    let o = std::process::Command::new("systemctl")
+        .args(["--user", "is-active", unit])
+        .output()
+        .ok()?;
+    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// linger 态（§5 M2 钉形 `loginctl show-user $(id -u) -p Linger`，无 -U；失败兑底
+/// `/var/lib/systemd/linger/$USER` 存在性）——server linger_enabled 同语义镜像。
+fn startup_linger_enabled() -> bool {
+    let uid = std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let Some(uid) = uid
+        && let Ok(o) = std::process::Command::new("loginctl")
+            .args(["show-user", &uid, "-p", "Linger"])
+            .output()
+    {
+        let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if s.contains("Linger=") {
+            return s.ends_with("=yes");
+        }
+    }
+    std::env::var("USER")
+        .ok()
+        .is_some_and(|u| std::path::Path::new("/var/lib/systemd/linger").join(u).exists())
+}
+
+/// host 域 unit → bin 存活快照（IO 薄壳）。
+struct S2UnitHealth {
+    name: String,
+    enabled: Option<String>,
+    active: Option<String>,
+    bin_alive: bool,
+}
+
+/// 扫 host 域全部 unit（S1 classifier——Host 域收 legacy+品牌两形）。
+fn startup_scan_health() -> (Vec<S2UnitHealth>, Vec<String>) {
+    let units_dir = std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
+        .join(".config/systemd/user");
+    let mut out = Vec::new();
+    let mut unknown = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&units_dir) else {
+        return (out, unknown);
+    };
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.ends_with(".service") {
+            continue;
+        }
+        match startup_classify_unit(name) {
+            S1Foreign => continue,
+            S1Unknown => unknown.push(name.to_string()),
+            _ => out.push(S2UnitHealth {
+                name: name.to_string(),
+                enabled: startup_systemctl_enabled(name),
+                active: startup_systemctl_active(name),
+                bin_alive: std::fs::read_to_string(e.path())
+                    .ok()
+                    .and_then(|c| startup_first_token(&c))
+                    .is_none_or(|p| std::path::Path::new(&p).exists()),
+            }),
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    (out, unknown)
+}
+
+/// off 无参选择（纯）——server select_off 镜像。
+fn startup_select_off(count: usize, tty: bool) -> S2OffSelect {
+    match count {
+        0 => S2OffSelect::NoneInstalled,
+        1 => S2OffSelect::Single,
+        _ if tty => S2OffSelect::Prompt,
+        _ => S2OffSelect::RejectList,
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum S2OffSelect {
+    NoneInstalled,
+    Single,
+    Prompt,
+    RejectList,
+}
+
 fn cmd_startup(args: &mut impl Iterator<Item = String>) -> i32 {
     let sub = args.next().unwrap_or_default();
     if !matches!(sub.as_str(), "on" | "off" | "status") {
-        eprintln!("用法: mediaservo-host startup <on|off|status> [<dir>]");
+        eprintln!(
+            "用法: mediaservo-host startup <on|off|status> [<dir>]（status/off 无参=本机全量盘点）"
+        );
         return 2;
+    }
+    // S2: status/off 无参 = 全量盘点默认语义；带 <dir> = 既有过滤/定向卸载形。
+    if (sub == "status" || sub == "off") && args.next().is_none() {
+        return if sub == "status" { startup_status_all() } else { startup_off_all() };
     }
     let dir = match parse_dir(args) {
         Ok(d) => d,
@@ -1150,6 +1301,96 @@ fn cmd_startup(args: &mut impl Iterator<Item = String>) -> i32 {
         "off" => startup_uninstall(&dir),
         _ => startup_status(&dir),
     }
+}
+
+/// `startup status`（无参）：host 域全量盘点（server startup_status_all 镜像）。
+fn startup_status_all() -> i32 {
+    let (units, unknown) = startup_scan_health();
+    let linger = startup_linger_enabled();
+    for u in &unknown {
+        eprintln!(
+            "警告: 未知 oxmgr unit: {u}（非本产品命名——如需清场手工 systemctl --user disable --now + rm）"
+        );
+    }
+    if units.is_empty() {
+        if unknown.is_empty() {
+            let p = mediaservo_common::brand::media_brand().product;
+            println!("本机无 {p} 自启 unit——`{p} startup on <dir>` 启用");
+        }
+        return 1;
+    }
+    let mut unhealthy = 0;
+    for u in &units {
+        let e = u.enabled.as_deref();
+        let a = u.active.as_deref();
+        for line in startup_status_line(&u.name, e, a, linger, u.bin_alive) {
+            println!("{line}");
+        }
+        if !startup_unit_healthy(e, a, u.bin_alive) {
+            unhealthy += 1;
+        }
+    }
+    i32::from(unhealthy > 0)
+}
+
+/// `startup off`（无参）：零=幂等 0；恰一=直停；多=tty 列选 / 非 tty 拒。
+fn startup_off_all() -> i32 {
+    let (units, _unknown) = startup_scan_health();
+    let tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    match startup_select_off(units.len(), tty) {
+        S2OffSelect::NoneInstalled => {
+            println!("startup off: 未安装自启");
+            0
+        }
+        S2OffSelect::Single => startup_uninstall_unit(&units[0].name),
+        S2OffSelect::Prompt => {
+            for (i, u) in units.iter().enumerate() {
+                println!("[{}] {}（{}）", i + 1, u.name, u.active.as_deref().unwrap_or("?"));
+            }
+            println!("[0] 全部卸载 / 回车=取消");
+            let mut ans = String::new();
+            let _ = std::io::stdin().read_line(&mut ans);
+            let picked: Vec<String> = match ans.trim() {
+                "" => return 0,
+                "0" => units.iter().map(|u| u.name.clone()).collect(),
+                n => match n.parse::<usize>().ok().filter(|n| (1..=units.len()).contains(n)) {
+                    Some(i) => vec![units[i - 1].name.clone()],
+                    None => {
+                        eprintln!("无效选择: {n}");
+                        return 2;
+                    }
+                },
+            };
+            let mut rc = 0;
+            for name in picked {
+                rc |= startup_uninstall_unit(&name);
+            }
+            rc
+        }
+        S2OffSelect::RejectList => {
+            eprintln!(
+                "startup off: 本机有多个本产品自启 unit，非交互环境拒绝盲卸——用 `startup off <dir>` 定向:"
+            );
+            for u in &units {
+                eprintln!("  {}", u.name);
+            }
+            1
+        }
+    }
+}
+
+/// 单 unit 卸载（disable --now + rm + daemon-reload）。
+fn startup_uninstall_unit(unit: &str) -> i32 {
+    let _ =
+        std::process::Command::new("systemctl").args(["--user", "disable", "--now", unit]).status();
+    let _ = std::fs::remove_file(
+        std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
+            .join(".config/systemd/user")
+            .join(unit),
+    );
+    let _ = std::process::Command::new("systemctl").args(["--user", "daemon-reload"]).status();
+    println!("startup off: 已停用并移除 {unit}");
+    0
 }
 
 /// 自启 unit 名（按实例目录派生——多实例各自自启，天然无覆盖竞争）
@@ -1346,23 +1587,31 @@ fn startup_status(dir: &std::path::Path) -> i32 {
     let unit_path = std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
         .join(".config/systemd/user")
         .join(&unit_name);
-    if unit_path.exists() {
-        println!("startup: 已启用（{}）", unit_path.display());
-        let st = std::process::Command::new("systemctl")
-            .args(["--user", "is-active", unit_name.as_str()])
-            .output();
-        if let Ok(o) = st {
-            println!("  daemon 状态: {}", String::from_utf8_lossy(&o.stdout).trim());
-        }
-        0
-    } else {
+    if !unit_path.exists() {
         println!(
             "startup: 未启用（{} 无自启 unit——用 `{} startup on` 启用）",
             dir.display(),
             mediaservo_common::brand::media_brand().product
         );
-        1
+        return 1;
     }
+    println!("startup: 已启用（{}）", unit_path.display());
+    let enabled = startup_systemctl_enabled(&unit_name);
+    let active = startup_systemctl_active(&unit_name);
+    let bin_alive = std::fs::read_to_string(&unit_path)
+        .ok()
+        .and_then(|c| startup_first_token(&c))
+        .is_none_or(|p| std::path::Path::new(&p).exists());
+    for line in startup_status_line(
+        &unit_name,
+        enabled.as_deref(),
+        active.as_deref(),
+        startup_linger_enabled(),
+        bin_alive,
+    ) {
+        println!("{line}");
+    }
+    i32::from(!startup_unit_healthy(enabled.as_deref(), active.as_deref(), bin_alive))
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -1795,5 +2044,63 @@ mod s1_startup_gate_tests {
             other => panic!("期望双 peer Coexist，得 {other:?}"),
         }
         assert_eq!(s1_decide_v2(&[], true), S1Install);
+    }
+
+    // ── S2: status 四行健康面 / off 无参选择（server startup.rs 镜像钉测，零 spawn）──
+
+    const S2_ZOMBIE_UNIT: &str =
+        "[Service]\nEnvironment=OXMGR_HOME=/old/run/oxmgr\nExecStart=/old/bin/oxmgr daemon run\n";
+
+    #[test]
+    fn s2_first_token_execstart() {
+        assert_eq!(startup_first_token(S2_ZOMBIE_UNIT).as_deref(), Some("/old/bin/oxmgr"));
+        assert_eq!(startup_first_token("[Service]"), None);
+    }
+
+    #[test]
+    fn s2_status_line_four_shapes() {
+        // ① 健康
+        let healthy = startup_status_line("u.service", Some("enabled"), Some("active"), true, true);
+        assert_eq!(healthy[1], "  enabled: enabled");
+        assert_eq!(healthy[2], "  daemon:  active");
+        assert_eq!(healthy[3], "  linger:  enabled");
+        assert_eq!(healthy[4], "  实例: bin ✓");
+        // ② 僵尸 bin（legacy install-host 形——开机必失败）
+        let zombie = startup_status_line("u.service", Some("enabled"), Some("active"), true, false);
+        assert!(zombie[4].contains("bin 已删除"));
+        assert!(zombie[4].contains("startup off <dir>"));
+        // ③ daemon failed
+        let failed = startup_status_line("u.service", Some("enabled"), Some("failed"), true, true);
+        assert!(failed[2].contains("journalctl"));
+        // ④ linger off
+        let no_linger =
+            startup_status_line("u.service", Some("enabled"), Some("active"), false, true);
+        assert_eq!(no_linger[3], "  linger:  disabled——重启后不会自拉：loginctl enable-linger");
+    }
+
+    #[test]
+    fn s2_unit_healthy_exit_semantics() {
+        assert!(startup_unit_healthy(Some("enabled"), Some("active"), true));
+        assert!(!startup_unit_healthy(Some("enabled"), Some("failed"), true));
+        assert!(!startup_unit_healthy(Some("enabled"), Some("active"), false));
+        assert!(!startup_unit_healthy(None, None, true));
+    }
+
+    #[test]
+    fn s2_select_off_three_shapes() {
+        assert_eq!(startup_select_off(0, true), S2OffSelect::NoneInstalled);
+        assert_eq!(startup_select_off(1, false), S2OffSelect::Single, "恰一=直停");
+        assert_eq!(startup_select_off(2, true), S2OffSelect::Prompt);
+        assert_eq!(startup_select_off(3, false), S2OffSelect::RejectList);
+    }
+
+    #[test]
+    fn s2_systemctl_command_construction() {
+        // thin exec 层 argv 合同 = ["--user", <verb>, unit]（is-enabled/is-active 同序）
+        for verb in ["is-enabled", "is-active"] {
+            let argv = ["--user", verb, "oxmgr-host-x.service"];
+            assert_eq!(argv[0], "--user");
+            assert_eq!(argv[1], verb);
+        }
     }
 }

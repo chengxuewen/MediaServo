@@ -244,11 +244,121 @@ fn scan_product_units(dir: &Path) -> (Vec<(PathBuf, PathBuf, UnitIdentity)>, Vec
     (found, unknown)
 }
 
+/// unit 文本 ExecStart= 首个空白前 token（bin 路径——status 存活判据用）。
+fn first_token(unit_text: &str) -> Option<String> {
+    unit_text
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("ExecStart="))
+        .and_then(|v| v.split_whitespace().next().map(String::from))
+}
+
+/// 单 unit 健康面行组（纯渲染——S2 四形钉测唯一判据）。
+/// enabled: None = systemctl 未答（视为 no）；linger: false 追加 enable-linger 指引；
+/// bin_alive: false = ExecStart 指向已删除（僵尸——开机必失败 + 清场指引）。
+fn status_line(
+    unit: &str,
+    enabled: Option<&str>,
+    active: Option<&str>,
+    linger: bool,
+    bin_alive: bool,
+) -> Vec<String> {
+    let mut out = vec![unit.to_string()];
+    out.push(format!("  enabled: {}", enabled.unwrap_or("no")));
+    let mut daemon_line = format!("  daemon:  {}", active.unwrap_or("inactive"));
+    if active == Some("failed") {
+        daemon_line.push_str("  ⚠ 诊断: journalctl --user -u <unit> -n 20");
+    }
+    out.push(daemon_line);
+    let mut linger_line = format!("  linger:  {}", if linger { "enabled" } else { "disabled" });
+    if !linger {
+        linger_line.push_str("——重启后不会自拉：loginctl enable-linger");
+    }
+    out.push(linger_line);
+    out.push(if bin_alive {
+        "  实例: bin ✓".to_string()
+    } else {
+        "  ⚠ bin 已删除——开机必失败。清场: startup off <dir> 或 systemctl --user disable --now + rm"
+            .to_string()
+    });
+    out
+}
+
+/// unit 健康判定（exit-code 语义纯函数）：daemon failed 或 bin 缺失 = 不健康。
+fn unit_healthy(enabled: Option<&str>, active: Option<&str>, bin_alive: bool) -> bool {
+    enabled == Some("enabled") && active == Some("active") && bin_alive
+}
+
+/// 本机某 unit 的 enabled 态（thin exec 层——失败/异常 → None）。
+fn systemctl_enabled(unit: &str) -> Option<String> {
+    let o = Command::new("systemctl").args(["--user", "is-enabled", unit]).output().ok()?;
+    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// 本机某 unit 的 is-active 态（thin exec 层）。
+fn systemctl_active(unit: &str) -> Option<String> {
+    let o = Command::new("systemctl").args(["--user", "is-active", unit]).output().ok()?;
+    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// linger 态（§5 M2 钉形：`loginctl show-user $(id -u) -p Linger`，无 -U——本机
+/// `无效的选项 -- U` 取证；loginctl 整体失败 → 回落 `/var/lib/systemd/linger/$USER`
+/// 存在性）。读不到任何真值 → false（宁提示勿漏报）。
+fn linger_enabled() -> bool {
+    // §5 M2 钉形：`loginctl show-user $(id -u) -p Linger`（无 -U——本机 `无效的选项 -- U` 取证）。
+    let uid = Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let Some(uid) = uid
+        && let Ok(o) = Command::new("loginctl").args(["show-user", &uid, "-p", "Linger"]).output()
+    {
+        let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if s.contains("Linger=") {
+            return s.ends_with("=yes");
+        }
+    }
+    // 兜底（M2 fallback）：loginctl 整体失败 → /var/lib/systemd/linger/<USER> 存在性。
+    std::env::var("USER")
+        .ok()
+        .is_some_and(|u| Path::new("/var/lib/systemd/linger").join(u).exists())
+}
+
+/// off 无参选择（纯函数）：零 unit = 已装 idempotent、恰一 = 直停、多 = tty 列选
+/// / 非 tty 拒。
+fn select_off(count: usize, tty: bool) -> OffSelect {
+    match count {
+        0 => OffSelect::NoneInstalled,
+        1 => OffSelect::Single,
+        _ if tty => OffSelect::Prompt,
+        _ => OffSelect::RejectList,
+    }
+}
+
+/// `select_off` 的四态。
+#[derive(Debug, PartialEq, Eq)]
+enum OffSelect {
+    NoneInstalled,
+    Single,
+    Prompt,
+    RejectList,
+}
+
 pub(super) fn cmd_startup(args: &mut dyn Iterator<Item = String>) -> i32 {
     let sub = args.next().unwrap_or_default();
     if !matches!(sub.as_str(), "on" | "off" | "status") {
-        eprintln!("用法: {} startup <on|off|status> [<dir>]", server_product());
+        eprintln!(
+            "用法: {} startup <on|off|status> [<dir>]（status/off 无参=本机全量盘点）",
+            server_product()
+        );
         return 2;
+    }
+    // S2: status/off 无参 = 全量盘点默认语义；带 <dir> = 既有过滤/定向卸载形。
+    if (sub == "status" || sub == "off") && args.next().is_none() {
+        return if sub == "status" { startup_status_all() } else { startup_off_all() };
     }
     let dir = match parse_dir(args) {
         Ok(d) => d,
@@ -459,9 +569,146 @@ fn startup_status(dir: &Path) -> i32 {
         return 1;
     }
     println!("startup: 已安装（{}）", unit_path.display());
-    if let Ok(o) = Command::new("systemctl").args(["--user", "is-active", &unit_name]).output() {
-        println!("  daemon 状态: {}", String::from_utf8_lossy(&o.stdout).trim());
+    let enabled = systemctl_enabled(&unit_name);
+    let active = systemctl_active(&unit_name);
+    let bin_alive = std::fs::read_to_string(&unit_path)
+        .ok()
+        .and_then(|c| first_token(&c))
+        .is_none_or(|p| Path::new(&p).exists());
+    for line in
+        status_line(&unit_name, enabled.as_deref(), active.as_deref(), linger_enabled(), bin_alive)
+    {
+        println!("{line}");
     }
+    i32::from(!unit_healthy(enabled.as_deref(), active.as_deref(), bin_alive))
+}
+
+/// 扫本域全部 unit → 健康快照（IO 薄壳）。
+struct UnitHealth {
+    name: String,
+    enabled: Option<String>,
+    active: Option<String>,
+    bin_alive: bool,
+}
+
+fn scan_health() -> (Vec<UnitHealth>, Vec<String>) {
+    let mut out = Vec::new();
+    let mut unknown = Vec::new();
+    let Ok(entries) = std::fs::read_dir(units_dir()) else {
+        return (out, unknown);
+    };
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.ends_with(".service") {
+            continue;
+        }
+        match classify_unit(name) {
+            UnitIdentity::Foreign => continue,
+            UnitIdentity::Unknown => unknown.push(name.to_string()),
+            _ => out.push(UnitHealth {
+                name: name.to_string(),
+                enabled: systemctl_enabled(name),
+                active: systemctl_active(name),
+                bin_alive: std::fs::read_to_string(e.path())
+                    .ok()
+                    .and_then(|c| first_token(&c))
+                    .is_none_or(|p| Path::new(&p).exists()),
+            }),
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    (out, unknown)
+}
+
+/// `startup status`（无参）：全量盘点四行健康面（S2）。脚本消费退出码：
+/// 0=全部健康（enabled+active+bin ✓）；1=任一僵尸（bin 缺失）或 daemon failed。
+fn startup_status_all() -> i32 {
+    let (units, unknown) = scan_health();
+    let linger = linger_enabled();
+    for u in &unknown {
+        eprintln!(
+            "警告: 未知 oxmgr unit: {u}（非本产品命名——如需清场手工 systemctl --user disable --now + rm）"
+        );
+    }
+    if units.is_empty() {
+        if unknown.is_empty() {
+            println!(
+                "本机无 {} 自启 unit——`{} startup on <dir>` 启用",
+                server_product(),
+                server_product()
+            );
+        }
+        return 1;
+    }
+    let mut unhealthy = 0;
+    for u in &units {
+        let e = u.enabled.as_deref();
+        let a = u.active.as_deref();
+        for line in status_line(&u.name, e, a, linger, u.bin_alive) {
+            println!("{line}");
+        }
+        if !unit_healthy(e, a, u.bin_alive) {
+            unhealthy += 1;
+        }
+    }
+    i32::from(unhealthy > 0)
+}
+
+/// `startup off`（无参）：零 unit=幂等 0；恰一=直停；多=tty 列选 / 非 tty 拒列清单。
+fn startup_off_all() -> i32 {
+    let (units, _unknown) = scan_health();
+    let tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    match select_off(units.len(), tty) {
+        OffSelect::NoneInstalled => {
+            println!("startup off: 未安装自启");
+            0
+        }
+        OffSelect::Single => uninstall_unit(&units[0].name),
+        OffSelect::Prompt => {
+            for (i, u) in units.iter().enumerate() {
+                println!("[{}] {}（{}）", i + 1, u.name, u.active.as_deref().unwrap_or("?"));
+            }
+            println!("[0] 全部卸载 / 回车=取消");
+            eprint!("选择: ");
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            let mut ans = String::new();
+            let _ = std::io::stdin().read_line(&mut ans);
+            let picked: Vec<String> = match ans.trim() {
+                "" => return 0,
+                "0" => units.iter().map(|u| u.name.clone()).collect(),
+                n => match n.parse::<usize>().ok().filter(|n| (1..=units.len()).contains(n)) {
+                    Some(i) => vec![units[i - 1].name.clone()],
+                    None => {
+                        eprintln!("无效选择: {n}");
+                        return 2;
+                    }
+                },
+            };
+            let mut rc = 0;
+            for name in picked {
+                rc |= uninstall_unit(&name);
+            }
+            rc
+        }
+        OffSelect::RejectList => {
+            eprintln!(
+                "startup off: 本机有多个本产品自启 unit，非交互环境拒绝盲卸——用 `startup off <dir>` 定向:"
+            );
+            for u in &units {
+                eprintln!("  {}", u.name);
+            }
+            1
+        }
+    }
+}
+
+/// 单 unit 卸载（disable --now + rm + daemon-reload）。
+fn uninstall_unit(unit: &str) -> i32 {
+    let _ = Command::new("systemctl").args(["--user", "disable", "--now", unit]).status();
+    let _ = std::fs::remove_file(units_dir().join(unit));
+    let _ = Command::new("systemctl").args(["--user", "daemon-reload"]).status();
+    println!("startup off: 已停用并移除 {unit}");
     0
 }
 
@@ -654,5 +901,70 @@ ExecStart=/home/x/out/server/bin/oxmgr daemon run
     fn talkservo_family_never_same_domain() {
         assert_ne!(classify_unit("oxmgr-talkservo-server-x.service"), UnitIdentity::Server);
         assert_ne!(classify_unit("oxmgr-talkservo-server-x.service"), UnitIdentity::Host);
+    }
+    // ── S2: status 四行健康面 / off 无参选择（纯函数钉测，零 systemctl spawn）──
+
+    const ZOMBIE_UNIT: &str =
+        "[Service]\nEnvironment=OXMGR_HOME=/old/run/oxmgr\nExecStart=/old/bin/oxmgr daemon run\n";
+
+    #[test]
+    fn first_token_execstart() {
+        assert_eq!(first_token(ZOMBIE_UNIT).as_deref(), Some("/old/bin/oxmgr"));
+        assert_eq!(first_token("[Service]"), None);
+    }
+
+    #[test]
+    fn status_line_four_shapes() {
+        // ① 健康
+        let healthy = status_line("u.service", Some("enabled"), Some("active"), true, true);
+        assert_eq!(healthy[1], "  enabled: enabled");
+        assert_eq!(healthy[2], "  daemon:  active");
+        assert_eq!(healthy[3], "  linger:  enabled");
+        assert_eq!(healthy[4], "  实例: bin ✓");
+        assert!(!healthy.join("\n").contains("WARN"));
+        // ② 僵尸 bin（开机必失败）
+        let zombie = status_line("u.service", Some("enabled"), Some("active"), true, false);
+        assert!(zombie[4].contains("bin 已删除"));
+        assert!(zombie[4].contains("开机必失败"));
+        assert!(zombie[4].contains("startup off <dir>"));
+        // ③ daemon failed（附诊断指引）
+        let failed = status_line("u.service", Some("enabled"), Some("failed"), true, true);
+        assert!(failed[2].contains("failed"));
+        assert!(failed[2].contains("journalctl"));
+        // ④ linger off（附指引）
+        let no_linger = status_line("u.service", Some("enabled"), Some("active"), false, true);
+        assert_eq!(no_linger[3], "  linger:  disabled——重启后不会自拉：loginctl enable-linger");
+    }
+
+    #[test]
+    fn unit_healthy_exit_semantics() {
+        assert!(unit_healthy(Some("enabled"), Some("active"), true));
+        assert!(!unit_healthy(Some("enabled"), Some("failed"), true), "daemon failed = exit 1");
+        assert!(!unit_healthy(Some("enabled"), Some("active"), false), "僵尸 bin = exit 1");
+        assert!(!unit_healthy(Some("disabled"), Some("active"), true));
+        // systemctl 未答 → 视为不健康（宁报勿漏）
+        assert!(!unit_healthy(None, None, true));
+    }
+
+    #[test]
+    fn select_off_three_shapes() {
+        assert_eq!(select_off(0, true), OffSelect::NoneInstalled);
+        assert_eq!(select_off(0, false), OffSelect::NoneInstalled);
+        assert_eq!(select_off(1, false), OffSelect::Single, "恰一=直停（非 tty 也不拒）");
+        assert_eq!(select_off(2, true), OffSelect::Prompt);
+        assert_eq!(select_off(3, false), OffSelect::RejectList);
+    }
+
+    #[test]
+    fn systemctl_command_construction() {
+        // thin exec 层命令面钉：systemctl_enabled/active 的 argv 合同 = ["--user", <verb>, unit]
+        // （is-enabled/is-active 同序；is-active 形已被 startup_status 既有路径消费多年）。
+        let unit = startup_unit_name(Path::new("/opt/msr"));
+        for verb in ["is-enabled", "is-active"] {
+            let argv = ["--user", verb, unit.as_str()];
+            assert_eq!(argv[0], "--user");
+            assert_eq!(argv[1], verb);
+            assert_eq!(argv[2], unit);
+        }
     }
 }
