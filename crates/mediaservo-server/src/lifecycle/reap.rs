@@ -171,6 +171,48 @@ fn lookup<'a>(entries: &'a [ManagedEntry], p: &LiveProc) -> Option<&'a ManagedEn
     entries.iter().find(|e| e.cwd.starts_with(cwd))
 }
 
+// ── T3: -g 全局选择 + 汇总计数（纯判定；marker 谓词注入保 IO 切缝）────────────
+
+/// 单步执行结局（执行层产出，`tally` 消费）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StepOutcome {
+    /// 经所属 daemon stop+delete 成功。
+    ViaDaemon,
+    /// 直杀并观察到退场（含 daemon 不可达降级直杀）。
+    DirectKill,
+    /// 杀令已发但进程仍在（EPERM/D-state 等）。
+    Failed,
+}
+
+/// `-g` 全局选择（PLAN §2.4，纯判定）：/proc 全量快照 → 签名命中者，**无 dir 过滤、
+/// 无 cwd 假设**；caddy 候选必须过磁盘标记谓词（B1——泛匹配已否决，TalkServo 同构
+/// 布局实录在案）。返回 (选中, 被标记拒绝的 caddy 候选)——拒绝面供打印说明，不进杀集。
+pub(super) fn select_global(
+    procs: &[LiveProc],
+    caddy_ok: impl Fn(&Path) -> bool,
+) -> (Vec<LiveProc>, Vec<LiveProc>) {
+    let mut selected = Vec::new();
+    let mut rejected = Vec::new();
+    for p in procs {
+        match proc_kind(&p.argv, p.exe.as_deref()) {
+            Some(ProcKind::Caddy { config }) if caddy_ok(&config) => selected.push(p.clone()),
+            Some(ProcKind::Caddy { .. }) => rejected.push(p.clone()),
+            Some(_) => selected.push(p.clone()),
+            None => {}
+        }
+    }
+    (selected, rejected)
+}
+
+/// `-g` 汇总计数（纯函数）：返回 (经 daemon N, 直杀 M, 失败 K)。
+pub(super) fn tally(outcomes: &[StepOutcome]) -> (usize, usize, usize) {
+    (
+        outcomes.iter().filter(|o| **o == StepOutcome::ViaDaemon).count(),
+        outcomes.iter().filter(|o| **o == StepOutcome::DirectKill).count(),
+        outcomes.iter().filter(|o| **o == StepOutcome::Failed).count(),
+    )
+}
+
 // ── T2 扫描薄壳（IO 面；判定全在上方纯函数）─────────────────────────────────
 
 /// /proc 全扫 → 存活进程快照（argv NUL 切分、exe/cwd readlink、environ 反查）。
@@ -536,6 +578,65 @@ mod tests {
                 pid: 500
             }
         );
+    }
+
+    // ── T3: select_global / tally（fixture 全测，零 /proc）───────────────────
+
+    #[test]
+    fn select_global_keeps_ours_rejects_markerless_caddy() {
+        // 有标记 caddy（本产品布局形）
+        let tmp = tempfile::tempdir().unwrap();
+        let root = absolute(tmp.path());
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::write(root.join("bin").join("msrtc-server"), b"").unwrap();
+        let with_marker = LiveProc {
+            argv: vec![
+                "/usr/bin/caddy".to_string(),
+                "run".into(),
+                "--config".into(),
+                format!("{}/etc/Caddyfile", root.display()),
+            ],
+            exe: Some("/usr/bin/caddy".into()),
+            ..LiveProc::new(11, &[])
+        };
+        // 无标记 caddy（TalkServo 同构布局形）——同 tempdir 下未造 bin 的子目录
+        let talkservo = LiveProc {
+            argv: vec![
+                "/usr/bin/caddy".to_string(),
+                "run".into(),
+                "--config".into(),
+                format!("{}/talk/etc/Caddyfile", root.display()),
+            ],
+            exe: Some("/usr/bin/caddy".into()),
+            ..LiveProc::new(12, &[])
+        };
+        let ours_server = LiveProc::new(10, &["/opt/x/bin/msrtc-server", "run"]);
+        let ours_weaknet = LiveProc::new(15, &["/opt/x/bin/msrtc-weaknet", "serve"]);
+        // cargo test 形（exe 含 target/ 组件）与 host 族——-g 杀集之外
+        let target_exe = LiveProc {
+            exe: Some("/home/u/ms/target/debug/msrtc-server".into()),
+            ..LiveProc::new(13, &["/home/u/ms/target/debug/msrtc-server", "run"])
+        };
+        let host_proc = LiveProc::new(14, &["/opt/x/bin/msrtc-host", "run"]);
+        let procs = vec![ours_server, with_marker, talkservo, target_exe, host_proc, ours_weaknet];
+        let (sel, rej) = select_global(&procs, caddy_marker_ok);
+        let pids: Vec<u32> = sel.iter().map(|p| p.pid).collect();
+        assert_eq!(pids, vec![10, 11, 15], "-g 杀集=server/weaknet/有标记 caddy");
+        let rej_pids: Vec<u32> = rej.iter().map(|p| p.pid).collect();
+        assert_eq!(rej_pids, vec![12], "无标记 caddy 拒绝面（打印说明，不进杀集）");
+    }
+
+    #[test]
+    fn tally_counts_three_outcomes() {
+        let out = vec![
+            StepOutcome::ViaDaemon,
+            StepOutcome::DirectKill,
+            StepOutcome::Failed,
+            StepOutcome::ViaDaemon,
+            StepOutcome::DirectKill,
+        ];
+        assert_eq!(tally(&out), (2, 2, 1));
+        assert_eq!(tally(&[]), (0, 0, 0));
     }
 
     #[test]

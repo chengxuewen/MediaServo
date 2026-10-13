@@ -6,6 +6,11 @@
 ## Unreleased
 
 ### 新增
+- [server] `stop -g|--all` 全局收口（global-reap T3）：按进程身份（argv 签名 + caddy 磁盘标记防
+  跨产品误杀）跨目录跨 daemon 清场全部本产品 server 簇进程——实例 daemon 名下进程经其自家
+  daemon 优雅收口（防 `restart_policy=always` 复活），孤儿直杀末路横幅；`-g` 与目录参数并给
+  = exit 2。汇总表「经 daemon N / 直杀 M / 失败 K」+ 签名终态行 + 「实例 daemon 未动（非目标）」
+  注记；退出码 = 失败数语义与既有 stop 一致。目录 `stop`（含扫尾兜底与端口归因自证，T2）行为不变。
 - [server] `stop` 现在扫尾兜底+归属归因自证（global-reap T2）：注册表停货后 /proc 扫描本实例
   残留进程（含注册在共享/默认 daemon 名下的分裂形——2026-10-12「stop 说 stopped 但 9800 仍被占」
   事故形），经其所属 daemon 优雅收口（防 `restart_policy=always` 复活）；双注册表反查皆 miss

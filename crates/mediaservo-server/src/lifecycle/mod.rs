@@ -17,7 +17,7 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use reap::{DirectReason, LiveProc, ProcKind, ReapStep};
+use reap::{DirectReason, LiveProc, ProcKind, ReapStep, StepOutcome};
 
 use templates::{
     DEFAULT_WEB_PORT, SFU_ENV_KEYS, WEAKNET_APP, WEAKNET_SERVE_PORT, gen_secret,
@@ -551,16 +551,55 @@ fn contention_flow(verb: &str, dir: &Path, what: &str, port: u16, no_web: bool) 
     apply_oxfile(dir, &dir.join("run").join("oxfile.toml"), no_web, verb)
 }
 
+/// stop 参数形（纯解析，单测锚）：`stop` 默认目录 / `stop <dir>` / `stop -g|--all`；
+/// `-g` 与目录并给 = 参数非法（exit 2）。
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum StopArgs {
+    Dir(Option<String>),
+    Global,
+}
+
+pub(super) fn parse_stop_args(args: &mut dyn Iterator<Item = String>) -> Result<StopArgs, String> {
+    let mut global = false;
+    let mut positional: Vec<String> = Vec::new();
+    for a in &mut *args {
+        match a.as_str() {
+            "-g" | "--all" => global = true,
+            s if s.starts_with('-') => {
+                return Err(format!("未知参数: {s}"));
+            }
+            s => positional.push(s.to_string()),
+        }
+    }
+    if global {
+        if !positional.is_empty() {
+            return Err("stop -g 为全局收口，不接受目录参数".to_string());
+        }
+        return Ok(StopArgs::Global);
+    }
+    if positional.len() > 1 {
+        return Err("实例目录仅接受一个位置参数".to_string());
+    }
+    Ok(StopArgs::Dir(positional.into_iter().next()))
+}
+
 /// `stop [<dir>]`：按注册名 stop+delete + 实例 daemon 收敛（stop 后本实例无常驻进程）。
+/// `stop -g|--all`：跨目录跨 daemon 按进程身份全局收口（PLAN §2.4）。
 fn cmd_stop(args: &mut dyn Iterator<Item = String>) -> i32 {
-    let dir = match parse_dir(args) {
-        Ok(d) => d,
+    let parsed = match parse_stop_args(args) {
+        Ok(v) => v,
         Err(e) => {
             eprintln!("{e}");
             return 2;
         }
     };
-    stop_cluster(&dir)
+    match parsed {
+        StopArgs::Global => scan_all(),
+        StopArgs::Dir(None) => stop_cluster(
+            &parse_dir(&mut std::iter::empty()).unwrap_or_else(|_| PathBuf::from(".server")),
+        ),
+        StopArgs::Dir(Some(d)) => stop_cluster(&PathBuf::from(d)),
+    }
 }
 
 fn stop_cluster(dir: &Path) -> i32 {
@@ -665,30 +704,93 @@ fn reap_under(dir: &Path) -> Vec<u32> {
         registries.iter().map(|(d, e)| (d.clone(), e.as_slice())).collect();
     let plan =
         reap::reap_plan(&matched.iter().map(|(p, _)| (*p).clone()).collect::<Vec<_>>(), &refs);
-    let mut reaped = Vec::new();
-    for step in &plan {
-        match step {
+    execute_steps(&plan).into_iter().map(|(pid, _)| pid).collect()
+}
+
+/// 收口步骤执行（T2/T3 共用薄壳；语义与 T2 内联形逐字节一致——daemon 不可达降级
+/// 直杀、直杀横幅、单次补杀上限）。返回 (pid, 结局) 序列供汇总计数。
+fn execute_steps(plan: &[ReapStep]) -> Vec<(u32, StepOutcome)> {
+    plan.iter()
+        .map(|step| match step {
             ReapStep::ViaDaemon { daemon_data_dir, name, pid } => {
                 println!(
                     "扫尾: pid {pid}（{name}）→ 经所属 daemon 收口 {}",
                     daemon_data_dir.display()
                 );
-                if run_oxmgr_for_daemon(daemon_data_dir, &["stop", name]) != 0
-                    || run_oxmgr_for_daemon(daemon_data_dir, &["delete", name]) != 0
+                if run_oxmgr_for_daemon(daemon_data_dir, &["stop", name]) == 0
+                    && run_oxmgr_for_daemon(daemon_data_dir, &["delete", name]) == 0
                 {
-                    eprintln!("扫尾: daemon 收口未成功——绕过 daemon 直杀（daemon 不可达）");
-                    kill_and_wait(*pid);
+                    return (*pid, StepOutcome::ViaDaemon);
                 }
-                reaped.push(*pid);
+                eprintln!("扫尾: daemon 收口未成功——绕过 daemon 直杀（daemon 不可达）");
+                kill_and_wait(*pid);
+                let ok = !pid_alive(*pid);
+                (*pid, if ok { StepOutcome::DirectKill } else { StepOutcome::Failed })
             }
             ReapStep::DirectKill { pid, reason: DirectReason::NoRegistry } => {
                 println!("扫尾: pid {pid} → 绕过 daemon 直杀（无所属注册表）");
                 kill_and_wait(*pid);
-                reaped.push(*pid);
+                let ok = !pid_alive(*pid);
+                (*pid, if ok { StepOutcome::DirectKill } else { StepOutcome::Failed })
             }
-        }
+        })
+        .collect()
+}
+
+/// `stop -g`（PLAN §2.4）：/proc 全扫签名命中者（无 dir 过滤、无端口探查），逐个按
+/// 所属 daemon 优雅收口（environ 反查——实例 daemon 名下进程经其自家 home 收口，
+/// 注册表快照=默认 daemon 表 + 各 environ home 表），双查 miss 才直杀。汇总表 +
+/// 签名命中 pid 终态行 + 「实例 daemon 未动」注记（m4）。退出码 = 失败数语义与
+/// 既有 stop 一致（0/1）。
+fn scan_all() -> i32 {
+    println!("stop -g: 全局收口（按进程身份，跨目录跨 daemon；实例 daemon 本身不动）");
+    let live = reap::scan_live_procs();
+    let (matched, rejected) = reap::select_global(&live, reap::caddy_marker_ok);
+    for p in &rejected {
+        println!("stop -g: pid {} caddy 签名命中但磁盘标记缺失（非本产品布局）——跳过", p.pid);
     }
-    reaped
+    if matched.is_empty() {
+        println!("stop -g: 无本产品进程存活——收口汇总: 经 daemon 0 个 / 直杀 0 个 / 失败 0 个");
+        println!("终态: 全部清场 ✓");
+        println!("实例 daemon 未动（非目标）");
+        return 0;
+    }
+    // 注册表快照：默认 daemon 表 + matched 进程各自 environ home 的实例表（reap_plan
+    // 按 per-proc environ 排序配对——-g 传空实例列表即默认表，无需 dir 语义）。
+    let mut registries: Vec<(PathBuf, Vec<inspect::ManagedEntry>)> = Vec::new();
+    if let Some(dd) = inspect::default_data_dir() {
+        registries.push((dd.clone(), inspect::read_registry(&dd.join("state.json"))));
+    }
+    for home in matched.iter().filter_map(|p| p.environ_oxmgr_home.clone()) {
+        let home = absolute(&home);
+        if registries.iter().any(|(d, _)| *d == home) {
+            continue;
+        }
+        registries.push((home.clone(), inspect::read_registry(&home.join("state.json"))));
+    }
+    let refs: Vec<(PathBuf, &[inspect::ManagedEntry])> =
+        registries.iter().map(|(d, e)| (d.clone(), e.as_slice())).collect();
+    let plan = reap::reap_plan(&matched, &refs);
+    let steps = execute_steps(&plan);
+    let (via, direct, failed) = reap::tally(&steps.iter().map(|(_, o)| *o).collect::<Vec<_>>());
+    // 终态（归因型端口终态打印的 -g 形——ports 逐实例各异不探，按签名二扫裁决）：
+    let still: Vec<u32> = reap::scan_live_procs()
+        .into_iter()
+        .filter(|p| match reap::proc_kind(&p.argv, p.exe.as_deref()) {
+            Some(ProcKind::Caddy { config }) => reap::caddy_marker_ok(&config),
+            Some(_) => true,
+            None => false,
+        })
+        .map(|p| p.pid)
+        .collect();
+    if still.is_empty() {
+        println!("终态: 全部清场 ✓");
+    } else {
+        println!("终态: 仍有签名命中存活 pid: {still:?}");
+    }
+    println!("收口汇总: 经 daemon {via} 个 / 直杀 {direct} 个 / 失败 {failed} 个");
+    println!("实例 daemon 未动（非目标）");
+    i32::from(failed > 0)
 }
 
 /// 对**指定 daemon 数据目录**发 oxmgr stop/delete（env 四键按 oxmgr_cmd 同法派生）。
@@ -1167,6 +1269,36 @@ mod tests {
                 reason: super::reap::DirectReason::NoRegistry
             }]
         );
+    }
+
+    // ---- global-reap T3: stop 参数解析三形 ----
+
+    #[test]
+    fn stop_args_global_alone_and_with_dir_conflict() {
+        let mut a = ["-g".to_string()].into_iter();
+        assert_eq!(parse_stop_args(&mut a), Ok(StopArgs::Global));
+        let mut b = ["--all".to_string()].into_iter();
+        assert_eq!(parse_stop_args(&mut b), Ok(StopArgs::Global));
+        // -g + dir = 非法（exit 2 由 cmd_stop 映射）
+        let mut c = ["-g".to_string(), "/opt/x".to_string()].into_iter();
+        assert_eq!(parse_stop_args(&mut c), Err("stop -g 为全局收口，不接受目录参数".to_string()));
+        // dir 在前 -g 在后同拒（顺序无关）
+        let mut d = ["/opt/x".to_string(), "--all".to_string()].into_iter();
+        assert!(parse_stop_args(&mut d).is_err());
+        // 未知旗标拒
+        let mut e = ["--dir".to_string()].into_iter();
+        assert!(parse_stop_args(&mut e).is_err());
+    }
+
+    #[test]
+    fn stop_args_dir_forms_unchanged() {
+        // 裸 stop = 默认目录（既有行为）；显式 dir；dir 与未知 -- 开头参数同拒。
+        let mut a: Box<dyn Iterator<Item = String>> = Box::new(std::iter::empty());
+        assert_eq!(parse_stop_args(&mut a), Ok(StopArgs::Dir(None)));
+        let mut b = ["/opt/inst".to_string()].into_iter();
+        assert_eq!(parse_stop_args(&mut b), Ok(StopArgs::Dir(Some("/opt/inst".into()))));
+        let mut c = ["/a".to_string(), "/b".to_string()].into_iter();
+        assert!(parse_stop_args(&mut c).is_err());
     }
 
     #[test]

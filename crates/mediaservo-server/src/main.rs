@@ -17,7 +17,7 @@ const USAGE: &str = "用法: mediaservo-server <init|start|stop|restart|status|d
   start [<dir>] [--no-web]
                      oxmgr apply 拉起进程簇（mediaservo-server + caddy web）；端口竞争=交互接管/
                      非交互退出；--no-web=仅后端（dev 形态）；caddy 不在 PATH → warn 自动降级
-  stop [<dir>]       全簇停止（oxmgr stop+delete + 实例 daemon 收敛）
+  stop [<dir>] [--all|-g]  全簇停止（oxmgr stop+delete + 实例 daemon 收敛）；-g=全局按进程身份收口，跨目录跨 daemon
   restart [<dir>] [--no-web]  stop 后重新 apply
   status [<dir>]     进程表 + /ready 探针列（退出码 0 健康 / 1 降级 / 2 未运行或目录非法）
   doctor [<dir>]     环境诊断（oxmgr/caddy PATH、yaml、web dist、announced IP；退出码=失败数）
