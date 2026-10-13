@@ -436,15 +436,31 @@ fn cmd_stop(args: &mut impl Iterator<Item = String>) -> i32 {
         // start-conflict-doctor T4：stop 自证（≤5s 轮询家族归零）
         let mut verified = false;
         for _ in 0..10 {
-            let gone = ["host-agent", "host-streamer", "host-capturer", "host-recorder",
-                        "host-controller", "host-emergency", "host-audio"]
-                .iter()
-                .all(|app| mediaservo_host::conflict::diagnose_app_gone(app));
-            if gone { verified = true; break; }
+            let gone = [
+                "host-agent",
+                "host-streamer",
+                "host-capturer",
+                "host-recorder",
+                "host-controller",
+                "host-emergency",
+                "host-audio",
+            ]
+            .iter()
+            .all(|app| mediaservo_host::conflict::diagnose_app_gone(app));
+            if gone {
+                verified = true;
+                break;
+            }
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
-        println!("stop: 已停止全部 host 进程{}",
-                 if verified { "——自证清场 ✓" } else { "——⚠ 未能验证清场（残留见 ps）" });
+        println!(
+            "stop: 已停止全部 host 进程{}",
+            if verified {
+                "——自证清场 ✓"
+            } else {
+                "——⚠ 未能验证清场（残留见 ps）"
+            }
+        );
     }
     failed
 }
@@ -1153,71 +1169,95 @@ fn oxmgr_path() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("oxmgr"))
 }
 
-/// 扫描已安装的其他实例自启 unit（返回 (旧 unit 路径, 旧实例目录)）。
-/// 从 unit 的 Environment=OXMGR_DATA_DIR=<dir>/run/oxmgr 反推实例目录。
-fn other_startup_units(dir: &std::path::Path) -> Vec<(std::path::PathBuf, std::path::PathBuf)> {
-    let my_name = startup_unit_name(dir);
-    let units_dir = std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
-        .join(".config/systemd/user");
-    let mut found = Vec::new();
-    let Ok(entries) = std::fs::read_dir(&units_dir) else { return found };
-    for e in entries.flatten() {
-        let name = e.file_name();
-        let Some(name) = name.to_str() else { continue };
-        let is_ours = name.starts_with("oxmgr-host-")
-            || name.starts_with(mediaservo_common::brand::media_brand().unit_prefix);
-        if !is_ours || !name.ends_with(".service") || name == my_name {
-            continue;
-        }
-        let path = e.path();
-        let dir = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|c| {
-                c.lines().find_map(|l| {
-                    l.trim()
-                        .strip_prefix("Environment=OXMGR_DATA_DIR=")
-                        .map(|v| v.trim().to_string())
-                })
-            })
-            .map(|d| std::path::PathBuf::from(d).join("..").join(".."))
-            .unwrap_or_default();
-        found.push((path, dir));
-    }
-    found
-}
-
 #[cfg(target_os = "linux")]
 fn startup_install(dir: &std::path::Path) -> i32 {
-    // 全局唯一自启（相机等共享资源——多实例自启会抢设备）: 检测其他实例 unit → 交互接管
-    let others = other_startup_units(dir);
-    if !others.is_empty() {
-        for (p, od) in &others {
-            eprintln!("检测到其他实例已开启自启: {}（实例目录: {}）", p.display(), od.display());
-        }
-        if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-            eprintln!(
-                "  非交互环境——退出（只允许一个自启实例；先 `mediaservo-host startup off <旧dir>` 或手动接管）"
-            );
-            return 1;
-        }
-        eprint!("  输入 y 接管（停旧实例并改为当前实例自启）/ 其他键退出: ");
-        let _ = std::io::Write::flush(&mut std::io::stdout());
-        let mut ans = String::new();
-        let _ = std::io::stdin().read_line(&mut ans);
-        if !ans.trim().eq_ignore_ascii_case("y") {
-            return 1;
-        }
-        // 停旧实例（OXMGR_DATA_DIR 反推的 dir 可用则 stop+delete；unit 删除）
-        for (p, od) in &others {
-            if !od.as_os_str().is_empty() && od.join("run/oxfile.toml").exists() {
-                let ox = od.join("run/oxfile.toml").to_string_lossy().into_owned();
-                eprintln!("接管: 停止旧实例 {}", od.display());
-                let _ = run_oxmgr_in(Some(od), &["stop", &ox]);
-                let _ = run_oxmgr_in(Some(od), &["delete", &ox]);
+    // S1 v2 冲突闸：身份核对 + 端口比对（相机等共享资源——同类撞须处置）。
+    // 判定全在 s1_decide_v2 纯函数；此处只做扫描 IO + 交互执行。
+    let (conflicts, unknown) = startup_scan_conflicts(dir);
+    for u in &unknown {
+        eprintln!("警告: 检测到未知 oxmgr unit（不识别域，未处理）: {u}");
+    }
+    for c in &conflicts {
+        eprintln!(
+            "检测到本产品其他自启锚点: unit={} 实例={} 域={} 冲突端口={}",
+            c.peer_unit,
+            c.peer_dir.display(),
+            match c.peer_kind {
+                S1SameDomain => "同类",
+                S1CrossDomain => "跨域",
+            },
+            if c.overlapping.is_empty() {
+                "无".to_string()
+            } else {
+                format!("{:?}", c.overlapping)
             }
-            let _ = std::fs::remove_file(p);
+        );
+    }
+    let tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    match s1_decide_v2(&conflicts, tty) {
+        S1Abort => {
+            eprintln!("  非交互环境——退出（端口冲突需处置；先 `startup off <旧dir>` 或交互接管）");
+            return 1;
         }
-        let _ = std::process::Command::new("systemctl").args(["--user", "daemon-reload"]).status();
+        S1PromptTakeover => {
+            eprintln!("同类实例端口冲突——三选一: [1]算了不装 [2]卸对方接管 [3]手工处置");
+            match s1_prompt().as_str() {
+                "2" => {
+                    for c in conflicts.iter().filter(|c| c.peer_kind == S1SameDomain) {
+                        eprintln!(
+                            "  接管: 卸载 {}（实例 {}，端口明细见上）",
+                            c.peer_unit,
+                            c.peer_dir.display()
+                        );
+                        s1_takeover_peer(&c.peer_unit, &c.peer_dir);
+                    }
+                    let _ = std::process::Command::new("systemctl")
+                        .args(["--user", "daemon-reload"])
+                        .status();
+                }
+                "3" => {
+                    eprintln!("已退出——请手工处置上述冲突后重试");
+                    return 1;
+                }
+                _ => {
+                    println!("已取消");
+                    return 0;
+                }
+            }
+        }
+        S1PromptCrossDomainWarn => {
+            eprintln!("警告: 跨服务域端口重叠——不同服务域，通常为配置错误");
+            eprintln!("选择: [1]覆盖(卸对方) [2]取消本项 [3]允许并行(已知晓风险)");
+            match s1_prompt().as_str() {
+                "1" => {
+                    for c in conflicts
+                        .iter()
+                        .filter(|c| c.peer_kind == S1CrossDomain && !c.overlapping.is_empty())
+                    {
+                        eprintln!(
+                            "  覆盖: 卸载 {}（实例 {}，端口明细见上）",
+                            c.peer_unit,
+                            c.peer_dir.display()
+                        );
+                        s1_takeover_peer(&c.peer_unit, &c.peer_dir);
+                    }
+                    let _ = std::process::Command::new("systemctl")
+                        .args(["--user", "daemon-reload"])
+                        .status();
+                }
+                "3" => {
+                    eprintln!("警告: 允许并行——端口重叠风险已知晓");
+                }
+                _ => {
+                    println!("已取消");
+                    return 0;
+                }
+            }
+        }
+        S1Coexist(note) => {
+            println!("startup on: {note}");
+        }
+        S1Install => {}
     }
     let unit_name = startup_unit_name(dir);
     let unit_path = std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
@@ -1469,5 +1509,291 @@ mod instance_probe_tests {
             probe_agent_dir(cmdline).as_deref(),
             Some(std::path::Path::new("/opt/mediaservo-host"))
         );
+    }
+}
+
+// ── startup-hardening S1: 冲突闸 v2——身份核对+端口比对（§2.1/§5 钉形）────────
+// host 侧独立实现（host 是 standalone bin，PLAN §3 T4a 裁定共享下沉另立项）——
+// 与 server lifecycle/startup.rs 同语义镜像，测试 fixture 同族互证。
+
+/// unit 身份分类（host 视角）：Host=同类 / Server=跨域 / Unknown=本产品 oxmgr 前缀不识别
+/// （WARN 列表，永不静默永不做接管候选）/ Foreign=非 oxmgr。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum S1UnitIdentity {
+    Host,
+    Server,
+    Unknown,
+    Foreign,
+}
+use S1UnitIdentity::{
+    Foreign as S1Foreign, Host as S1Host, Server as S1Server, Unknown as S1Unknown,
+};
+
+/// unit 文件名 → 身份（精确前缀匹配——禁 contains；B1）。
+fn startup_classify_unit(name: &str) -> S1UnitIdentity {
+    let stem = name.strip_suffix(".service").unwrap_or(name);
+    let Some(rest) = stem.strip_prefix("oxmgr-").or((stem == "oxmgr").then_some("")) else {
+        return S1Foreign;
+    };
+    let brand = mediaservo_common::brand::media_brand();
+    // server 域（跨域对方）先判 = `oxmgr-{bin_prefix}server-` ∪ 默认品牌形
+    // （§6 minor#2 ∪ 规则；先于 host——`mediaservo-server-` ⊃ `mediaservo-` 前缀，
+    //   host 先判会把 server unit 吞进 Host 域）。
+    let mut server_forms = vec![format!("{}server-", brand.bin_prefix)];
+    if brand.bin_prefix != "mediaservo-" {
+        server_forms.push("mediaservo-server-".to_string());
+    }
+    if server_forms.iter().any(|f| rest.starts_with(f.as_str())) {
+        return S1Server;
+    }
+    // host 域 = unit_prefix（默认 `oxmgr-host-` 盖 legacy）∪ 品牌化 `oxmgr-{brand}-`
+    let host_forms =
+        [brand.unit_prefix.trim_start_matches("oxmgr-").to_string(), format!("{}-", brand.id)];
+    if host_forms.iter().any(|f| rest.starts_with(f.as_str())) {
+        return S1Host;
+    }
+    S1Unknown
+}
+
+/// unit 文本 → 实例目录（双键 OXMGR_HOME= 优先 miss 落 OXMGR_DATA_DIR=——reap.rs 先例；
+/// 值形 `<实例>/run/oxmgr` 上跳两级）。
+fn startup_unit_instance_dir(unit_text: &str) -> Option<std::path::PathBuf> {
+    let envs: Vec<&str> =
+        unit_text.lines().filter_map(|l| l.trim().strip_prefix("Environment=")).collect();
+    let val = envs
+        .iter()
+        .find_map(|l| l.strip_prefix("OXMGR_HOME=").map(|v| v.trim().to_string()))
+        .or_else(|| {
+            envs.iter()
+                .find_map(|l| l.strip_prefix("OXMGR_DATA_DIR=").map(|v| v.trim().to_string()))
+        })?;
+    let p = std::path::PathBuf::from(val);
+    Some(
+        p.parent().and_then(std::path::Path::parent).map(std::path::Path::to_path_buf).unwrap_or(p),
+    )
+}
+
+/// host 实例端口集（M3 域分形：host.yaml signaling local_port + oxfile `--port/--listen`
+/// 文本扫描。derived daemon port 不入——非 app 口）。parse 失败逐源 skip。
+fn startup_instance_ports(dir: &std::path::Path) -> Vec<u16> {
+    let mut ports = Vec::new();
+    if let Ok(cfg) = std::fs::read_to_string(dir.join("etc").join("host.yaml"))
+        && let Ok(Some(p)) = mediaservo_host::translate::signaling_local_port(&cfg)
+    {
+        ports.push(p);
+    }
+    // host oxfile 现无 weaknet 条目（weaknet 只随 server 簇部署）——文本扫描 `--port N`/
+    // `--listen 127.0.0.1:N` 兜将来条目形态；现网实例恒空集 = 零假阳。
+    if let Ok(ox) = std::fs::read_to_string(dir.join("run").join("oxfile.toml")) {
+        for line in ox.lines() {
+            let t = line.trim();
+            for key in ["--port ", "--listen 127.0.0.1:"] {
+                if let Some(rest) = t.split(key).nth(1) {
+                    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                    if let Ok(p) = digits.parse::<u16>() {
+                        ports.push(p);
+                    }
+                }
+            }
+        }
+    }
+    ports.sort();
+    ports.dedup();
+    ports
+}
+
+/// tty 行读入（trim 后；EOF/空 = ""）。
+fn s1_prompt() -> String {
+    eprint!("选择: ");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let mut ans = String::new();
+    let _ = std::io::stdin().read_line(&mut ans);
+    ans.trim().to_string()
+}
+
+/// 接管执行：daemon 停旧实例（oxfile 在场）→ unit disable+删文件（明细由调用方前置打印）。
+fn s1_takeover_peer(unit: &str, peer_dir: &std::path::Path) {
+    if !peer_dir.as_os_str().is_empty() && peer_dir.join("run/oxfile.toml").exists() {
+        let ox = peer_dir.join("run/oxfile.toml").to_string_lossy().into_owned();
+        let _ = run_oxmgr_in(Some(peer_dir), &["stop", &ox]);
+        let _ = run_oxmgr_in(Some(peer_dir), &["delete", &ox]);
+    }
+    let _ =
+        std::process::Command::new("systemctl").args(["--user", "disable", "--now", unit]).status();
+    let _ = std::fs::remove_file(
+        std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
+            .join(".config/systemd/user")
+            .join(unit),
+    );
+}
+
+/// 扫描本产品其他自启 unit → 冲突表（S1 v2：身份分类 + 双键反推 + 端口求交）。
+/// 返回 (冲突表, unknown unit 名集)。同 `startup_unit_name(dir)` 自身排除。
+fn startup_scan_conflicts(dir: &std::path::Path) -> (Vec<S1Conflict>, Vec<String>) {
+    let mine = startup_unit_name(dir);
+    let units_dir = std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
+        .join(".config/systemd/user");
+    let mut conflicts = Vec::new();
+    let mut unknown = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&units_dir) else {
+        return (conflicts, unknown);
+    };
+    let my_ports = startup_instance_ports(dir);
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.ends_with(".service") || name == mine {
+            continue;
+        }
+        match startup_classify_unit(name) {
+            S1Foreign => continue,
+            S1Unknown => {
+                unknown.push(name.to_string());
+                continue;
+            }
+            kind => {
+                let text = std::fs::read_to_string(e.path()).unwrap_or_default();
+                let peer_dir = startup_unit_instance_dir(&text).unwrap_or_default();
+                let peer_ports = if peer_dir.as_os_str().is_empty() {
+                    Vec::new()
+                } else {
+                    startup_instance_ports(&peer_dir)
+                };
+                conflicts.push(S1Conflict {
+                    peer_unit: name.to_string(),
+                    peer_dir,
+                    peer_kind: match kind {
+                        S1UnitIdentity::Host => S1SameDomain,
+                        _ => S1CrossDomain,
+                    },
+                    overlapping: s1_overlap(&my_ports, &peer_ports),
+                });
+            }
+        }
+    }
+    (conflicts, unknown)
+}
+
+fn s1_overlap(a: &[u16], b: &[u16]) -> Vec<u16> {
+    let mut out: Vec<u16> = a.iter().filter(|p| b.contains(p)).copied().collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct S1Conflict {
+    peer_unit: String,
+    peer_dir: std::path::PathBuf,
+    peer_kind: S1PeerKind,
+    overlapping: Vec<u16>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum S1PeerKind {
+    SameDomain,
+    CrossDomain,
+}
+use S1PeerKind::{CrossDomain as S1CrossDomain, SameDomain as S1SameDomain};
+
+#[derive(Debug, PartialEq, Eq)]
+enum S1Decision {
+    Install,
+    Coexist(String),
+    PromptTakeover,
+    PromptCrossDomainWarn,
+    Abort,
+}
+use S1Decision::{Abort as S1Abort, Coexist as S1Coexist, Install as S1Install};
+
+/// 聚合决策（§2.1，server decide_v2 镜像）：同类撞优先弹接管、否则跨域撞弹警告、
+/// 全空集共存安装；非 tty + 任何弹问 → Abort。
+fn s1_decide_v2(conflicts: &[S1Conflict], tty: bool) -> S1Decision {
+    let same_hit =
+        conflicts.iter().any(|c| c.peer_kind == S1SameDomain && !c.overlapping.is_empty());
+    let cross_hit =
+        conflicts.iter().any(|c| c.peer_kind == S1CrossDomain && !c.overlapping.is_empty());
+    if same_hit {
+        return if tty { S1PromptTakeover } else { S1Abort };
+    }
+    if cross_hit {
+        return if tty { S1PromptCrossDomainWarn } else { S1Abort };
+    }
+    let mut peers: Vec<String> =
+        conflicts.iter().map(|c| format!("{}（无端口交集）", c.peer_dir.display())).collect();
+    peers.sort();
+    peers.dedup();
+    match peers.len() {
+        0 => S1Install,
+        1 => S1Coexist(format!("与实例 {} 共存（无端口交集）", peers[0])),
+        _ => S1Coexist(format!("与实例 {} 共存（无端口交集）", peers.join("、"))),
+    }
+}
+use S1Decision::PromptCrossDomainWarn as S1PromptCrossDomainWarn;
+use S1Decision::PromptTakeover as S1PromptTakeover;
+
+#[cfg(test)]
+mod s1_startup_gate_tests {
+    use super::*;
+
+    /// legacy 形（motivating fixture）：`oxmgr-host-` 前缀 + OXMGR_DATA_DIR 键 + 死 bin。
+    const S1_LEGACY_HOST_UNIT: &str = "[Service]\nEnvironment=OXMGR_DATA_DIR=/home/maxsense/Documents/MediaServo/install/host/run/oxmgr\nExecStart=/old/bin/oxmgr daemon run\n";
+    /// current 形：OXMGR_HOME 键（双键优先级先例 reap.rs:274）。
+    const S1_CURRENT_HOST_UNIT: &str = "[Service]\nEnvironment=OXMGR_HOME=/opt/host2/run/oxmgr\nExecStart=/opt/host2/bin/oxmgr daemon run\n";
+
+    #[test]
+    fn s1_dual_key_extraction_home_first() {
+        assert_eq!(
+            startup_unit_instance_dir(S1_CURRENT_HOST_UNIT),
+            Some(std::path::PathBuf::from("/opt/host2"))
+        );
+        assert_eq!(
+            startup_unit_instance_dir(S1_LEGACY_HOST_UNIT),
+            Some(std::path::PathBuf::from("/home/maxsense/Documents/MediaServo/install/host"))
+        );
+        assert_eq!(startup_unit_instance_dir("[Service]\nExecStart=x\n"), None);
+    }
+
+    #[test]
+    fn s1_identity_classification() {
+        // host 域：legacy/默认 unit_prefix（brand 感知——默认品牌下即 oxmgr-host- 形；
+        // 品牌化 oxmgr-{brand}- 形由 host_forms[0]=unit_prefix 通吃，跨品牌钉测随品牌进程跑）
+        assert_eq!(startup_classify_unit("oxmgr-host-home-x.service"), S1Host);
+        // server 域（跨域对方）：bin_prefix ns 形 + 默认品牌形（默认品牌下同串）
+        assert_eq!(startup_classify_unit("oxmgr-mediaservo-server-x.service"), S1Server);
+        // TalkServo 同族 → Unknown（绝不误认——B1 反例）
+        assert_eq!(startup_classify_unit("oxmgr-talkservo-host-x.service"), S1Unknown);
+        assert_eq!(startup_classify_unit("oxmgr.service"), S1Unknown);
+        assert_eq!(startup_classify_unit("nginx.service"), S1Foreign);
+    }
+
+    #[test]
+    fn s1_overlap_and_decide_v2() {
+        assert!(s1_overlap(&[17980, 9810], &[9800, 8080]).is_empty());
+        assert_eq!(s1_overlap(&[17980], &[17980]), vec![17980]);
+        let same_hit = S1Conflict {
+            peer_unit: "oxmgr-host-a.service".into(),
+            peer_dir: "/a".into(),
+            peer_kind: S1SameDomain,
+            overlapping: vec![17980],
+        };
+        let cross_empty = S1Conflict {
+            peer_unit: "oxmgr-mediaservo-server-x.service".into(),
+            peer_dir: "/x".into(),
+            peer_kind: S1CrossDomain,
+            overlapping: vec![],
+        };
+        // 四态 + 非 tty 拒 + 聚合
+        assert_eq!(s1_decide_v2(&[same_hit.clone()], true), S1PromptTakeover);
+        assert_eq!(s1_decide_v2(&[same_hit.clone()], false), S1Abort);
+        assert!(matches!(s1_decide_v2(&[cross_empty.clone()], true), S1Coexist(_)));
+        match s1_decide_v2(
+            &[S1Conflict { overlapping: vec![], ..same_hit.clone() }, cross_empty],
+            true,
+        ) {
+            S1Coexist(ref n) if n.contains("/a") && n.contains("/x") => {}
+            other => panic!("期望双 peer Coexist，得 {other:?}"),
+        }
+        assert_eq!(s1_decide_v2(&[], true), S1Install);
     }
 }

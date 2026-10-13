@@ -658,24 +658,11 @@ fn stop_cluster(dir: &Path) -> i32 {
 }
 
 /// 本实例三探针口（parse 失败 → skip 该端口不假红，§2.3）。
+/// S1 起 = startup::instance_ports 共享实现（stop 自证与 startup 冲突闸同源——行为逐字节一致：
+/// 唯一差异 = weaknet 无条目时旧形压缺省常量、新形 skip；冲突闸语义下 skip 更诚实，stop 自证
+/// 面 no-oxfile 条目场景 server.yaml/Caddyfile 仍双口在场，验证面不缩水）。
 fn stop_ports(dir: &Path) -> Vec<u16> {
-    let mut ports = Vec::new();
-    if let Some(p) = std::fs::read_to_string(dir.join("etc").join("server.yaml"))
-        .ok()
-        .and_then(|c| parse_listen_port(&c))
-    {
-        ports.push(p);
-    }
-    if let Some(p) = std::fs::read_to_string(dir.join("etc").join("Caddyfile"))
-        .ok()
-        .and_then(|cf| parse_web_port(&cf))
-    {
-        ports.push(p);
-    }
-    ports.push(weaknet_probe_port(&dir.join("run").join("oxfile.toml")));
-    ports.sort();
-    ports.dedup();
-    ports
+    startup::instance_ports(dir)
 }
 
 /// 扫尾执行：签名命中且 dir 归属 ∈ 本实例的存活进程 → reap_plan → 逐个执行。

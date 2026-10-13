@@ -6,6 +6,13 @@
 ## Unreleased
 
 ### 新增
+- [server][host] startup 冲突闸 v2（startup-hardening S1）：`startup on` 现扫描本产品全部
+  自启锚点 unit（server+host 双域，brand 感知精确前缀——含 legacy `oxmgr-host-`+OXMGR_DATA_DIR
+  旧形与默认/品牌化两形），解析对方实例端口（server=server.yaml/Caddyfile/oxfile 三源；
+  host=host.yaml 网关口+oxfile）与本实例求交。同类撞：tty 三选一（不装/卸对方接管/手工处置），
+  非 tty 拒绝并列双方 unit/实例目录/冲突端口明细；跨域撞（server↔host）：不跳过比对，交集弱化
+  为警告确认（覆盖/取消/允许并行）；无交集=共存安装。卸对方动作明细前置；不识别的 `oxmgr-*`
+  unit 仅 WARN 永不接管（TalkServo 同族误认防护）。
 - [server] `stop -g|--all` 全局收口（global-reap T3）：按进程身份（argv 签名 + caddy 磁盘标记防
   跨产品误杀）跨目录跨 daemon 清场全部本产品 server 簇进程——实例 daemon 名下进程经其自家
   daemon 优雅收口（防 `restart_policy=always` 复活），孤儿直杀末路横幅；`-g` 与目录参数并给
