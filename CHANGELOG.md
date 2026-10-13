@@ -5,6 +5,15 @@
 
 ## Unreleased
 
+### 新增
+- [server] `stop` 现在扫尾兜底+归属归因自证（global-reap T2）：注册表停货后 /proc 扫描本实例
+  残留进程（含注册在共享/默认 daemon 名下的分裂形——2026-10-12「stop 说 stopped 但 9800 仍被占」
+  事故形），经其所属 daemon 优雅收口（防 `restart_policy=always` 复活）；双注册表反查皆 miss
+  才 SIGTERM→SIGKILL 直杀并打印横幅；daemon 收口失败自动降级直杀。完成判据升级为端口级归属
+  归因（9800/8080/9810）：本实例残留占口=失败并逐条指认；陌生者（其他目录本产品实例/无关进程）
+  占口=WARN+成功不假失败。实例 daemon 死亡/oxmgr 缺失不再早退——同样走扫尾。默认 daemon 操作
+  env 隔离：OXMGR_* 四键显式清除，操作者 shell 残留不再把"默认 daemon"操作静默打到实例 daemon。
+
 ### ⚠ 破坏性变更
 - [sdk-client] ⚠ breaking：舱端 C ABI 全量改名 `ms_client_*` → `mediaservo_client_*`（S6 批1b，零别名、
   旧名不保留）；`login` 转扁平参数形（旧 config 结构形退役，结构定义留一周期）；`control_on_ack`

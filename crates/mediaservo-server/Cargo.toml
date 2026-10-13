@@ -64,6 +64,8 @@ axum-server = { version = "0.7", features = ["tls-rustls"] }
 # Static file embedding (optional)
 rust-embed = { version = "8", optional = true }
 if-addrs = "0.15.0"
+# global-reap T2：SIGTERM/SIGKILL 直发（依赖树既有 19 处传递，无版本新增面）
+libc = "0.2"
 [features]
 default = ["sfu-mediasoup"]  # frontend-process-split T3: 默认=不嵌入分离变体；模式②(Dockerfile)显式 --features admin-dashboard 嵌入
 webrtc = ["dep:mediaservo-webrtc"]

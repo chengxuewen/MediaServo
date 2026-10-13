@@ -17,6 +17,8 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use reap::{DirectReason, LiveProc, ProcKind, ReapStep};
+
 use templates::{
     DEFAULT_WEB_PORT, SFU_ENV_KEYS, WEAKNET_APP, WEAKNET_SERVE_PORT, gen_secret,
     instance_daemon_port, looks_like_oxfile, manual_env_keys, merge_manual_env, oxfile_has_weaknet,
@@ -565,10 +567,11 @@ fn stop_cluster(dir: &Path) -> i32 {
     let names = match inspect::list_registered_apps(dir) {
         Ok(n) => n,
         Err(e) => {
-            // daemon 未起/oxmgr 缺失 → 无受管进程可停（幂等成功）
+            // 二审残余#1：daemon 未起/oxmgr 缺失**不早退**——该变体下残留进程恰可能
+            // 注册在别的 daemon 名下，必须继续走扫尾（幂等成功语义在尾部统一判定）。
             eprintln!("stop: {e}");
-            println!("stop: 视为无运行中实例（无已管理进程）");
-            return 0;
+            println!("stop: 视为无运行中实例（无已管理进程）——继续扫尾兜底");
+            Vec::new()
         }
     };
     let mut failed = 0;
@@ -580,37 +583,227 @@ fn stop_cluster(dir: &Path) -> i32 {
             failed = 1;
         }
     }
-    // 实例 daemon 收敛（best-effort——从未 apply 则无 daemon，正常）
+    // 扫尾兜底（global-reap T2，PLAN §2.2/§2.3）：实例表停货后 /proc 全扫本实例
+    // 残留（含注册在共享/默认 daemon 名下的分裂形），经所属 daemon 优雅收口防
+    // restart_policy=always 复活；双查 miss 才直杀。
+    let reaped_pids = reap_under(dir);
+    // 实例 daemon 收敛（M1：挪扫尾后——先收敛会让实例名下残货被迫走裸杀）
     if !names.is_empty() && run_oxmgr(Some(dir), &["daemon", "stop"]) != 0 {
         eprintln!("stop: 实例 daemon 停止命令未成功（可能已自行退出）");
     }
     if failed == 0 {
-        // start-conflict-doctor T4：stop 自证——轮询 ≤5s 至进程表归零才报"验证清场"。
-        // （C37 as-found 纪律自查面：stop 假成功会毒化后续 start/验证——今天的实录。）
-        let mut verified = false;
-        for _ in 0..10 {
-            let residual: Vec<String> =
-                names.iter().filter(|nm| !conflict::diagnose_app_gone(nm)).cloned().collect();
-            if residual.is_empty() {
-                verified = true;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            if !residual.is_empty() {
-                eprintln!(
-                    "stop: 残留进程 {} —— 可能 crash-restart 中，建议手动复核",
-                    residual.join(",")
-                );
-            }
-        }
+        // B2 归属归因自证：轮询 ≤5s 三端口——我方残留=失败，陌生者占口=WARN+成功。
+        let ports = stop_ports(dir);
+        let verified = verify_ports_attribution(&ports, &reaped_pids, dir);
         println!(
             "stop: 已停止 {n} 个进程并收敛实例 daemon（{prod} 簇）{}",
-            if verified { "——自证清场 ✓" } else { "——⚠ 未能验证清场" },
+            if verified {
+                "——自证清场 ✓（端口级）"
+            } else {
+                "——⚠ 端口仍被本实例残留占用"
+            },
             n = names.len(),
             prod = server_product()
         );
     }
     failed
+}
+
+/// 本实例三探针口（parse 失败 → skip 该端口不假红，§2.3）。
+fn stop_ports(dir: &Path) -> Vec<u16> {
+    let mut ports = Vec::new();
+    if let Some(p) = std::fs::read_to_string(dir.join("etc").join("server.yaml"))
+        .ok()
+        .and_then(|c| parse_listen_port(&c))
+    {
+        ports.push(p);
+    }
+    if let Some(p) = std::fs::read_to_string(dir.join("etc").join("Caddyfile"))
+        .ok()
+        .and_then(|cf| parse_web_port(&cf))
+    {
+        ports.push(p);
+    }
+    ports.push(weaknet_probe_port(&dir.join("run").join("oxfile.toml")));
+    ports.sort();
+    ports.dedup();
+    ports
+}
+
+/// 扫尾执行：签名命中且 dir 归属 ∈ 本实例的存活进程 → reap_plan → 逐个执行。
+/// 返回本轮收口的 pid 集（B2 归因用）。判定全在 reap 纯函数；此处只做 IO 薄壳。
+fn reap_under(dir: &Path) -> Vec<u32> {
+    let live = reap::scan_live_procs();
+    let matched: Vec<(&LiveProc, ProcKind)> = live
+        .iter()
+        .filter_map(|p| {
+            let kind = reap::proc_kind(&p.argv, p.exe.as_deref())?;
+            if !reap::kind_dir_within(&kind, &p.argv, dir) {
+                return None;
+            }
+            // caddy 磁盘标记（B1）——root 下须有本产品 bin
+            if let ProcKind::Caddy { config } = &kind
+                && !reap::caddy_marker_ok(config)
+            {
+                return None;
+            }
+            Some((p, kind))
+        })
+        .collect();
+    if matched.is_empty() {
+        println!("扫尾: 无残留进程");
+        return Vec::new();
+    }
+    // 注册表快照：实例 daemon 表（若目录可读）+ 默认 daemon 表（B3 清洗后读取）。
+    let mut registries: Vec<(PathBuf, Vec<inspect::ManagedEntry>)> = Vec::new();
+    let inst_dir = dir.join("run").join("oxmgr");
+    registries.push((inst_dir.clone(), inspect::read_registry(&inst_dir.join("state.json"))));
+    if let Some(dd) = inspect::default_data_dir() {
+        registries.push((dd.clone(), inspect::read_registry(&dd.join("state.json"))));
+    }
+    let refs: Vec<(PathBuf, &[inspect::ManagedEntry])> =
+        registries.iter().map(|(d, e)| (d.clone(), e.as_slice())).collect();
+    let plan =
+        reap::reap_plan(&matched.iter().map(|(p, _)| (*p).clone()).collect::<Vec<_>>(), &refs);
+    let mut reaped = Vec::new();
+    for step in &plan {
+        match step {
+            ReapStep::ViaDaemon { daemon_data_dir, name, pid } => {
+                println!(
+                    "扫尾: pid {pid}（{name}）→ 经所属 daemon 收口 {}",
+                    daemon_data_dir.display()
+                );
+                if run_oxmgr_for_daemon(daemon_data_dir, &["stop", name]) != 0
+                    || run_oxmgr_for_daemon(daemon_data_dir, &["delete", name]) != 0
+                {
+                    eprintln!("扫尾: daemon 收口未成功——绕过 daemon 直杀（daemon 不可达）");
+                    kill_and_wait(*pid);
+                }
+                reaped.push(*pid);
+            }
+            ReapStep::DirectKill { pid, reason: DirectReason::NoRegistry } => {
+                println!("扫尾: pid {pid} → 绕过 daemon 直杀（无所属注册表）");
+                kill_and_wait(*pid);
+                reaped.push(*pid);
+            }
+        }
+    }
+    reaped
+}
+
+/// 对**指定 daemon 数据目录**发 oxmgr stop/delete（env 四键按 oxmgr_cmd 同法派生）。
+fn run_oxmgr_for_daemon(daemon_data_dir: &Path, args: &[&str]) -> i32 {
+    let home = absolute(daemon_data_dir);
+    let port = instance_daemon_port(&home);
+    let mut cmd = Command::new(oxmgr_bin());
+    cmd.env("OXMGR_HOME", &home)
+        .env("OXMGR_DATA_DIR", &home)
+        .env("OXMGR_DAEMON_ADDR", format!("127.0.0.1:{port}"))
+        .env("OXMGR_API_ADDR", format!("127.0.0.1:{}", port + 1000));
+    match cmd.args(args).status() {
+        Ok(st) => st.code().unwrap_or(1),
+        Err(_) => 1,
+    }
+}
+
+/// SIGTERM → ≤3s 等退 → SIGKILL（§2.2 末路）。EPERM（跨用户）记失败不崩溃（m2）。
+fn kill_and_wait(pid: u32) {
+    unsafe {
+        if libc::kill(pid as i32, libc::SIGTERM) != 0 {
+            eprintln!(
+                "扫尾: SIGTERM pid {pid} 失败（{}）——可能跨用户进程",
+                std::io::Error::last_os_error()
+            );
+            return;
+        }
+    }
+    for _ in 0..30 {
+        if !pid_alive(pid) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    unsafe {
+        if libc::kill(pid as i32, libc::SIGKILL) == 0 {
+            eprintln!("扫尾: pid {pid} 3s 未退——已 SIGKILL");
+        }
+    }
+}
+
+fn pid_alive(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::path::Path::new(&format!("/proc/{pid}")).exists()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
+/// B2 归属归因端口自证三态（纯判定，单测锚）：Ok(()) = 清场/陌生者 pass，
+/// Err(残留报告集) = 本实例进程仍占口。
+pub(super) fn port_verdict(
+    listeners: &[conflict::ConflictReport],
+    ours: &[u32],
+) -> Result<(), Vec<conflict::ConflictReport>> {
+    let residue: Vec<conflict::ConflictReport> =
+        listeners.iter().filter(|r| ours.contains(&r.pid)).cloned().collect();
+    if residue.is_empty() { Ok(()) } else { Err(residue) }
+}
+
+/// 轮询 ≤5s（10×500ms）三端口归属归因。true = 全部清场或陌生者占口（WARN）。
+fn verify_ports_attribution(ports: &[u16], reaped: &[u32], dir: &Path) -> bool {
+    // 签名命中本实例 dir 的存活 pid 也算"我方"（sweep 匹配集，B2 归因并集）
+    let sweep_matched: Vec<u32> = reap::scan_live_procs()
+        .into_iter()
+        .filter(|p| {
+            reap::proc_kind(&p.argv, p.exe.as_deref())
+                .is_some_and(|k| reap::kind_dir_within(&k, &p.argv, dir))
+        })
+        .map(|p| p.pid)
+        .collect();
+    let ours: Vec<u32> = reaped.iter().chain(sweep_matched.iter()).copied().collect();
+    let mut verified = false;
+    for _ in 0..10 {
+        let mut verdict_ok = true;
+        for &port in ports {
+            if !inspect::port_in_use(port) {
+                continue;
+            }
+            let rep = conflict::diagnose_port(port);
+            match port_verdict(&rep, &ours) {
+                // B2：陌生者占口 ≠ 残留——WARN + pass（TalkServo 实录形不假失败）
+                Ok(()) => {
+                    for r in &rep {
+                        eprintln!(
+                            "[warn] 端口 {port} 由非本实例进程持有(pid {} exe {}；可能是另一目录本产品实例)",
+                            r.pid, r.exe
+                        );
+                    }
+                }
+                Err(residue) => {
+                    verdict_ok = false;
+                    if !residue.is_empty() {
+                        eprintln!("stop: 端口 {port} 仍被本实例残留占用:");
+                        for r in &residue {
+                            eprintln!("  {}", r.line());
+                        }
+                    }
+                }
+            }
+        }
+        if verdict_ok {
+            verified = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    if !verified {
+        eprintln!("stop: 端口级自证未过（本实例残留未清）——复核占用者后处置");
+    }
+    verified
 }
 
 fn stop_cluster_in(od: &Path) {
@@ -675,7 +868,15 @@ fn oxmgr_cmd(dir: &Path) -> Command {
 pub(super) fn run_oxmgr(dir: Option<&Path>, args: &[&str]) -> i32 {
     let mut cmd = match dir {
         Some(d) => oxmgr_cmd(d),
-        None => Command::new(oxmgr_bin()),
+        // B3（PLAN §2.2）：默认 daemon 语义 = 显式无 OXMGR_*——std Command 继承父 env，
+        // 操作者 shell 残留会把"默认 daemon"操作静默打到实例 daemon（错向同族）。
+        None => {
+            let mut c = Command::new(oxmgr_bin());
+            for k in ["OXMGR_HOME", "OXMGR_DATA_DIR", "OXMGR_DAEMON_ADDR", "OXMGR_API_ADDR"] {
+                c.env_remove(k);
+            }
+            c
+        }
     };
     match cmd.args(args).status() {
         Ok(st) => st.code().unwrap_or(1),
@@ -885,6 +1086,87 @@ mod tests {
         write_oxfile(&dir.join("run")).expect("re-render（首渲形）");
         let pure = std::fs::read_to_string(&ox).expect("read ox 2");
         assert!(!pure.contains("ALLOW_X"), "live 与 bak 双缺 → 纯渲染");
+    }
+
+    // ---- global-reap T2: B3 env 清洗 + B2 归因三态 + 扫尾计划 fixture ----
+
+    #[test]
+    fn run_oxmgr_default_strips_oxmgr_env() {
+        // B3：默认 daemon 语义 = 显式无 OXMGR_*。std Command 继承父 env——env_remove
+        // 后 get_envs 必含 (key, None) 覆盖删除项（父 shell 残留也不得漏进子进程）。
+        // （不 set_var 造父 env：edition 2024 unsafe + 并行测试 env 竞争——删除语义
+        // 对"继承值"同样生效，覆盖项即证明。）
+        let keys = ["OXMGR_HOME", "OXMGR_DATA_DIR", "OXMGR_DAEMON_ADDR", "OXMGR_API_ADDR"];
+        let mut cmd = Command::new(oxmgr_bin());
+        for k in keys {
+            cmd.env_remove(k);
+        }
+        for k in keys {
+            assert!(
+                cmd.get_envs().any(|(key, v)| key == std::ffi::OsStr::new(k) && v.is_none()),
+                "{k} 必须呈显式删除态"
+            );
+        }
+    }
+
+    #[test]
+    fn port_verdict_three_states() {
+        use super::conflict::ConflictReport;
+        let rep = |pid: u32| ConflictReport {
+            pid,
+            exe: "/x/bin/msrtc-server".into(),
+            cmd: "msrtc-server run".into(),
+            deleted: false,
+            parent: None,
+        };
+        // ① 空闲（无监听者）→ pass
+        assert!(port_verdict(&[], &[1, 2]).is_ok());
+        // ② 我方残留（pid ∈ 本轮 reap 名单）→ fail
+        let ours = vec![rep(101), rep(102)];
+        assert!(port_verdict(&ours, &[101]).is_err());
+        // ③ 陌生者占口 → pass（B2：TalkServo 实录形不假失败）
+        assert!(port_verdict(&ours, &[999]).is_ok());
+        // 边界：两侧全空 → pass
+        assert!(port_verdict(&[], &[]).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sweep_plan_fixture_direct_kill_when_no_registry() {
+        use super::reap::{LiveProc, ProcKind, ReapStep};
+        // fixture：tempdir 实例 root + 伪造 bin/msrtc-server 标记（marker 判据面）
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = absolute(tmp.path());
+        std::fs::create_dir_all(root.join("bin")).expect("mkdir bin");
+        std::fs::write(root.join("bin").join("msrtc-server"), b"").expect("marker");
+        // LiveProc 指向它：server 签名 + --config 归属本 root；注册表空 → DirectKill 计划
+        let p = LiveProc {
+            argv: vec![
+                format!("{}/bin/msrtc-server", root.display()),
+                "run".into(),
+                "--config".into(),
+                format!("{}/etc/server.yaml", root.display()),
+            ],
+            exe: Some(format!("{}/bin/msrtc-server", root.display())),
+            cwd: Some(root.clone()),
+            environ_oxmgr_home: None,
+            pid: 424242,
+        };
+        assert_eq!(
+            super::reap::proc_kind(&p.argv, p.exe.as_deref()),
+            Some(ProcKind::Server),
+            "fixture 必须过签名"
+        );
+        assert!(super::reap::kind_dir_within(&ProcKind::Server, &p.argv, &root));
+        // 空注册表（双表快照）→ 直杀计划（断言计划，不执行——单元测试零真实信号）
+        let plan = super::reap::reap_plan(&[p], &[(root.join("run").join("oxmgr"), &[])]);
+        assert_eq!(
+            plan,
+            vec![ReapStep::DirectKill {
+                pid: 424242,
+                reason: super::reap::DirectReason::NoRegistry
+            }]
+        );
     }
 
     #[test]

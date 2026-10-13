@@ -8,8 +8,9 @@
 //! 以 `(daemon_data_dir, entries)` 对传入；pid 优先、miss 回落 cwd 归属
 //! （`inspect::strays_under` 同法），双 miss = 孤儿直杀。
 //!
-//! T2/T3 接线前本组符号仅测试消费——dead_code 允许随接线摘除（expect 保底防陈旧）。
-#![allow(dead_code)]
+//! T2 扫描/执行薄壳（本文件尾部）：`scan_live_procs` 逐 pid 填充 LiveProc
+//! （argv NUL 切分/exe·cwd readlink/environ 反查 OXMGR_HOME|OXMGR_DATA_DIR），
+//! 不可读条目静默跳过（跨用户），自身 pid 排除；判定仍全在纯函数。
 
 use std::path::{Path, PathBuf};
 
@@ -132,10 +133,20 @@ pub(super) fn reap_plan(
     procs
         .iter()
         .map(|p| {
-            for (dir, entries) in registries {
+            // environ 归因（/proc 真值）：进程自称属某 daemon → 该表优先（防默认表
+            // cwd 兜底误吸走实例名下进程——双表 cwd 重叠形）。
+            let ordered: Vec<&(PathBuf, &[ManagedEntry])> = match &p.environ_oxmgr_home {
+                Some(home) => {
+                    let mut v: Vec<_> = registries.iter().collect();
+                    v.sort_by_key(|(d, _)| !matches_home(d, home));
+                    v
+                }
+                None => registries.iter().collect(),
+            };
+            for (dir, entries) in ordered {
                 if let Some(e) = lookup(entries, p) {
                     return ReapStep::ViaDaemon {
-                        daemon_data_dir: dir.clone(),
+                        daemon_data_dir: (*dir).clone(),
                         name: e.name.clone(),
                         pid: p.pid,
                     };
@@ -144,6 +155,11 @@ pub(super) fn reap_plan(
             ReapStep::DirectKill { pid: p.pid, reason: DirectReason::NoRegistry }
         })
         .collect()
+}
+
+/// environ home 与注册表目录同一性（absolute 归一比对）。
+fn matches_home(dir: &Path, home: &Path) -> bool {
+    super::absolute(dir) == super::absolute(home)
 }
 
 /// 注册表反查：pid 优先，miss 则 cwd 归属（双侧绝对化，组件级前缀）。
@@ -155,8 +171,107 @@ fn lookup<'a>(entries: &'a [ManagedEntry], p: &LiveProc) -> Option<&'a ManagedEn
     entries.iter().find(|e| e.cwd.starts_with(cwd))
 }
 
+// ── T2 扫描薄壳（IO 面；判定全在上方纯函数）─────────────────────────────────
+
+/// /proc 全扫 → 存活进程快照（argv NUL 切分、exe/cwd readlink、environ 反查）。
+/// 不可读条目静默跳过（跨用户）；自身 pid 排除（stop 不自残）。非 Linux → 空。
+pub(super) fn scan_live_procs() -> Vec<LiveProc> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut out = Vec::new();
+        let Ok(dir) = std::fs::read_dir("/proc") else { return out };
+        for e in dir.flatten() {
+            let Ok(pid) = e.file_name().to_string_lossy().parse::<u32>() else { continue };
+            if pid == std::process::id() {
+                continue;
+            }
+            if let Some(p) = fill_from_proc(pid) {
+                out.push(p);
+            }
+        }
+        out
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Vec::new()
+    }
+}
+
+/// 单 pid 快照填充。cmdline 不可读（跨用户/内核线程）→ None 静默跳过。
+fn fill_from_proc(pid: u32) -> Option<LiveProc> {
+    #[cfg(target_os = "linux")]
+    {
+        let argv: Vec<String> = std::fs::read_to_string(format!("/proc/{pid}/cmdline"))
+            .ok()?
+            .split('\0')
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
+        if argv.is_empty() {
+            return None;
+        }
+        let exe = std::fs::read_link(format!("/proc/{pid}/exe"))
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned());
+        let cwd = std::fs::read_link(format!("/proc/{pid}/cwd")).ok();
+        let environ_oxmgr_home = read_oxmgr_home(pid);
+        Some(LiveProc { pid, argv, exe, cwd, environ_oxmgr_home })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// /proc/<pid>/environ 里 OXMGR_HOME / OXMGR_DATA_DIR 的值（首个在场者）。
+fn read_oxmgr_home(pid: u32) -> Option<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        let env = std::fs::read_to_string(format!("/proc/{pid}/environ")).ok()?;
+        env.split('\0').find_map(|kv| kv.strip_prefix("OXMGR_HOME=").map(PathBuf::from)).or_else(
+            || env.split('\0').find_map(|kv| kv.strip_prefix("OXMGR_DATA_DIR=").map(PathBuf::from)),
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// 实例 root 派生 + 归属（dir 归属比对一律经 `absolute` 归一，§2.1/二审钉③）。
+/// server/caddy 按 `--config`（root = etc/ 上一级 = parent().parent()）；weaknet 按
+/// `--token-file <root>/run/weaknet.token`。不可派生（缺参）= 不归属。
+pub(super) fn kind_dir_within(kind: &ProcKind, argv: &[String], mine: &Path) -> bool {
+    let root = match kind {
+        ProcKind::Server => {
+            config_flag_value(argv, "--config").and_then(|c| derive_root_from_config(Path::new(&c)))
+        }
+        // m3：weaknet 按 --token-file <root>/run/weaknet.token 派生
+        ProcKind::Weaknet => config_flag_value(argv, "--token-file")
+            .and_then(|c| derive_root_from_config(Path::new(&c))),
+        ProcKind::Caddy { config } => derive_root_from_config(config),
+    };
+    let Some(root) = root else { return false };
+    let mine = super::absolute(mine);
+    super::absolute(&root).starts_with(&mine)
+}
+
+/// `--token-file <root>/run/weaknet.token` → root（run → root 两跳，token 在 run/
+/// 一级——等价 server.yaml/Caddyfile 的 etc/ 形）；server.yaml/Caddyfile 形 → 上两级。
+fn derive_root_from_config(path: &Path) -> Option<PathBuf> {
+    path.parent().and_then(Path::parent).map(Path::to_path_buf)
+}
+
+/// argv 中 `--flag` 的取值（无则 None）。
+fn config_flag_value(argv: &[String], flag: &str) -> Option<String> {
+    argv.iter().position(|a| a == flag).and_then(|i| argv.get(i + 1)).cloned()
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::absolute;
     use super::*;
 
     // ── proc_kind: server / weaknet ─────────────────────────────────────────
@@ -338,5 +453,95 @@ mod tests {
         let reg = vec![entry(4, "sibling", Some(1), "/deploy/out/server-2")];
         let plan = reap_plan(&[p], &[(PathBuf::from("/d"), &reg)]);
         assert_eq!(plan, vec![ReapStep::DirectKill { pid: 400, reason: DirectReason::NoRegistry }]);
+    }
+
+    // ── T2: kind_dir_within / derive_root_from_config（纯判定，tempdir IO 只在 marker）──
+
+    #[test]
+    fn kind_dir_within_server_and_weaknet_and_caddy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = absolute(tmp.path());
+        // server 形：--config <root>/etc/server.yaml
+        let srv_argv = vec![
+            format!("{}/bin/msrtc-server", root.display()),
+            "run".into(),
+            "--config".into(),
+            format!("{}/etc/server.yaml", root.display()),
+        ];
+        assert!(kind_dir_within(&ProcKind::Server, &srv_argv, &root));
+        assert!(!kind_dir_within(&ProcKind::Server, &srv_argv, Path::new("/elsewhere")));
+        // weaknet 形：--token-file <root>/run/weaknet.token（kind 签名是 serve）
+        let wn_argv = vec![
+            format!("{}/bin/msrtc-weaknet", root.display()),
+            "serve".into(),
+            "--listen".into(),
+            "127.0.0.1:9810".into(),
+            "--token-file".into(),
+            format!("{}/run/weaknet.token", root.display()),
+        ];
+        assert!(kind_dir_within(&ProcKind::Weaknet, &wn_argv, &root));
+        // weaknet 缺 --token-file → 不可派生 → 不归属（保守）
+        let wn_bare = vec![format!("{}/bin/msrtc-weaknet", root.display()), "serve".into()];
+        assert!(!kind_dir_within(&ProcKind::Weaknet, &wn_bare, &root));
+        // caddy 形：--config <root>/etc/Caddyfile → root = 上两级
+        let caddy =
+            ProcKind::Caddy { config: PathBuf::from(format!("{}/etc/Caddyfile", root.display())) };
+        assert!(kind_dir_within(&caddy, &[], &root));
+        // 兄弟目录形（/root-2）不误归属
+        assert!(!kind_dir_within(
+            &caddy,
+            &[],
+            &root
+                .parent()
+                .unwrap()
+                .join(format!("{}-2", root.file_name().unwrap().to_string_lossy()))
+        ));
+    }
+
+    #[test]
+    fn kind_dir_within_relative_proc_paths_normalized() {
+        // §2.1 钉：cmdline 相对路径 vs 传参绝对 → absolute 归一后仍归属
+        let tmp = tempfile::tempdir().unwrap();
+        let root = absolute(tmp.path());
+        let rel_argv =
+            vec!["msrtc-server".into(), "run".into(), "--config".into(), "etc/server.yaml".into()];
+        // 相对 "etc/server.yaml" 解析相对 cwd——absolute() 不带 cwd 语义，root 派生=
+        // "etc" 上两级不可得 → 不归属（保守方向正确，不误杀）
+        assert!(!kind_dir_within(&ProcKind::Server, &rel_argv, &root));
+    }
+
+    #[test]
+    fn reap_plan_environ_attribution_prefers_own_daemon() {
+        // /proc environ 真值：进程自称属 /inst/run/oxmgr → 实例表优先（即使默认表
+        // pid/cwd 也命中——cwd 重叠形不得被默认表吸走）
+        let p = LiveProc {
+            cwd: Some(PathBuf::from("/inst")),
+            environ_oxmgr_home: Some(PathBuf::from("/inst/run/oxmgr")),
+            ..LiveProc::new(500, &["/x/msrtc-server", "run"])
+        };
+        let default_tab = vec![entry(9, "msrtc-server", Some(500), "/inst")];
+        let inst_tab = vec![entry(8, "msrtc-server", Some(500), "/inst")];
+        let plan = reap_plan(
+            &[p],
+            &[
+                (PathBuf::from("/home/u/.local/share/oxmgr"), &default_tab),
+                (PathBuf::from("/inst/run/oxmgr"), &inst_tab),
+            ],
+        );
+        assert_eq!(
+            plan[0],
+            ReapStep::ViaDaemon {
+                daemon_data_dir: PathBuf::from("/inst/run/oxmgr"),
+                name: "msrtc-server".into(),
+                pid: 500
+            }
+        );
+    }
+
+    #[test]
+    fn scan_fill_unreadable_pid_is_none() {
+        // 跨用户/内核 pid（1 号通常 cmdline 可读但 environ 不可读——fill 不 panic 即可；
+        // 断言: fill 一个必然不可读的 pid（u32::MAX）→ None 静默
+        assert!(fill_from_proc(u32::MAX).is_none());
     }
 }

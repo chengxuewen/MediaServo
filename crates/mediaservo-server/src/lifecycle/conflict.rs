@@ -135,6 +135,9 @@ fn report_of_pid(pid: u32) -> Option<ConflictReport> {
 /// stop 自证（T4）：app 名对应的本族进程是否已归零。
 /// 依 oxmgr ps 语义过重——轻量形：进程表里 cmdline 含 `msrtc-<app>` 或
 /// `<app>` 且 exe 非本测试进程即视为残存。查无 = 归零。
+/// （global-reap T2 起 stop 主路径改用 B2 归属归因自证；本函数暂无他方调用——
+/// `#[allow(dead_code)]` 保留一周期观察后可删。）
+#[allow(dead_code)]
 pub fn diagnose_app_gone(app: &str) -> bool {
     let needles = [format!("msrtc-{app}"), format!("mediaservo-{app}"), app.to_string()];
     for pid in proc_pids() {

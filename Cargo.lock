@@ -4537,6 +4537,7 @@ dependencies = [
  "http",
  "if-addrs",
  "jsonwebtoken",
+ "libc",
  "mediaservo-common",
  "mediaservo-webrtc",
  "mediasoup",
