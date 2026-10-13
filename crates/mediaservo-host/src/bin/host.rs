@@ -1182,6 +1182,90 @@ fn startup_systemctl_enabled(unit: &str) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
+/// S3 装后探针样本（is-active 归一化）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum S3ProbeSample {
+    Active,
+    Failed,
+    Other,
+}
+
+/// S3 探针裁决：FailFast=轮询期见 failed；Ok=sustain 复核通过；
+/// FailLate=首 active 后复核掉链（迟发 bind 失败）；Timeout=5s 无 active。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum S3ProbeVerdict {
+    Ok,
+    FailFast,
+    FailLate,
+    Timeout,
+}
+
+/// S3 装后探针裁决（纯函数，§2.3+m1）：Failed 即刻快败；首个 Active 后等 sustain
+/// 复核样本：仍 Active=Ok，否则 FailLate；样本耗尽未见 active=Timeout。
+/// 复核期采样仍 is-active，故 [Active,Failed] 归 FailLate。与 server lifecycle 镜像。
+fn s3_probe_verdict(samples: &[S3ProbeSample]) -> S3ProbeVerdict {
+    let mut seen_active = false;
+    for &smp in samples {
+        match smp {
+            S3ProbeSample::Failed if !seen_active => return S3ProbeVerdict::FailFast,
+            S3ProbeSample::Failed => return S3ProbeVerdict::FailLate,
+            S3ProbeSample::Active if !seen_active => seen_active = true,
+            S3ProbeSample::Active => return S3ProbeVerdict::Ok,
+            S3ProbeSample::Other => {}
+        }
+    }
+    if seen_active { S3ProbeVerdict::FailLate } else { S3ProbeVerdict::Timeout }
+}
+
+/// journalctl 诊断指引行（命令面钉测点）。
+fn s3_probe_failure_hint(unit: &str) -> String {
+    format!("journalctl --user -u {unit} -n 20")
+}
+
+/// 轮询 ≤5s（10×500ms）+ sustain 2s 复核。I/O runner：采样 + sleep；裁决全在纯函数。
+fn s3_probe_startup(unit: &str) -> bool {
+    let mut samples: Vec<S3ProbeSample> = Vec::new();
+    let mut seen_active = false;
+    for _ in 0..10 {
+        let smp = match startup_systemctl_active(unit).as_deref() {
+            Some("active") => S3ProbeSample::Active,
+            Some("failed") => S3ProbeSample::Failed,
+            _ => S3ProbeSample::Other,
+        };
+        let hit = smp == S3ProbeSample::Active;
+        samples.push(smp);
+        if seen_active {
+            break; // sustain 复核样本已入列——一处采样即裁决（§2.3 "one more is-active"）
+        }
+        if hit {
+            seen_active = true;
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            continue;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    match s3_probe_verdict(&samples) {
+        S3ProbeVerdict::Ok => true,
+        v => {
+            let hint = s3_probe_failure_hint(unit);
+            match v {
+                S3ProbeVerdict::FailFast => {
+                    eprintln!("startup on: daemon 起后即 failed——查: {hint}");
+                    eprintln!("  快猜: 端口冲突? 查 doctor / 端口占用");
+                }
+                S3ProbeVerdict::FailLate => {
+                    eprintln!("警告: daemon 起后退出（可能迟发 bind 失败）——查: {hint}");
+                }
+                _ => {
+                    eprintln!("startup on: daemon 5s 内未进入 active——查: {hint}");
+                    eprintln!("  快猜: 端口冲突? 查 doctor / 端口占用");
+                }
+            }
+            false
+        }
+    }
+}
+
 /// systemctl --user is-active（thin exec）。
 fn startup_systemctl_active(unit: &str) -> Option<String> {
     let o = std::process::Command::new("systemctl")
@@ -1558,7 +1642,12 @@ fn startup_install(dir: &std::path::Path) -> i32 {
             }
         }
     }
-    println!("startup on: 开机自启已启用（systemd 用户服务 {}）", unit_name);
+    if !s3_probe_startup(&unit_name) {
+        return 1;
+    }
+    println!(
+        "startup on: 开机自启已启用 + daemon 已拉起 ✓（{unit_name}）——建议 loginctl enable-linger 保跨会话存活"
+    );
     0
 }
 
@@ -2092,6 +2181,36 @@ mod s1_startup_gate_tests {
         assert_eq!(startup_select_off(1, false), S2OffSelect::Single, "恰一=直停");
         assert_eq!(startup_select_off(2, true), S2OffSelect::Prompt);
         assert_eq!(startup_select_off(3, false), S2OffSelect::RejectList);
+    }
+
+    // ── S3: 装后探针裁决（表测驱动纯函数；真 systemctl/真 sleep 不进测试）──
+
+    use S3ProbeSample::{Active, Failed, Other};
+    use S3ProbeVerdict::{FailFast, FailLate, Ok as POk, Timeout};
+
+    #[test]
+    fn s3_probe_verdict_table() {
+        // 基形：first-active + sustain 通过
+        assert_eq!(s3_probe_verdict(&[Other, Active, Active]), POk);
+        assert_eq!(s3_probe_verdict(&[Active, Active]), POk);
+        // 装前即 failed = 快败
+        assert_eq!(s3_probe_verdict(&[Failed, Active]), FailFast);
+        // first-active 后复核掉链 = 迟发失败（[Active, Failed] 边形）
+        assert_eq!(s3_probe_verdict(&[Active, Failed]), FailLate);
+        assert_eq!(s3_probe_verdict(&[Active, Other]), FailLate);
+        // 轮询窗内无 active = 超时
+        assert_eq!(s3_probe_verdict(&[Other; 10]), Timeout);
+        assert_eq!(s3_probe_verdict(&[]), Timeout);
+        // active-then-other-then-active 边形：复核窗内 Other 抖动不判死（语义钉死防漂移）
+        assert_eq!(s3_probe_verdict(&[Active, Other, Active]), POk);
+    }
+
+    #[test]
+    fn s3_probe_failure_hint_command() {
+        assert_eq!(
+            s3_probe_failure_hint("oxmgr-host-x.service"),
+            "journalctl --user -u oxmgr-host-x.service -n 20"
+        );
     }
 
     #[test]

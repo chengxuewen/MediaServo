@@ -13,6 +13,11 @@
   非 tty 拒绝并列双方 unit/实例目录/冲突端口明细；跨域撞（server↔host）：不跳过比对，交集弱化
   为警告确认（覆盖/取消/允许并行）；无交集=共存安装。卸对方动作明细前置；不识别的 `oxmgr-*`
   unit 仅 WARN 永不接管（TalkServo 同族误认防护）。
+- [server][host] `startup on` 装后健康探针（startup-hardening S3）：`enable --now` 后轮询
+  `systemctl --user is-active` ≤5s（10×500ms，与 stop 自证同款步进），首个 active 后 2s 复核
+  仍 active 才报「daemon 已拉起 ✓」；轮询期见 failed 立即失败（不空等，附端口冲突快猜行），
+  复核掉链=迟发 bind 失败警告，5s 未 active=超时——三种失败均打 `journalctl --user -u <unit>
+  -n 20` 指引并 exit 1（不再假成功）。探针只探 unit 态非应用就绪（端口留给 doctor）。
 - [server][host] `startup status` 全量盘点 + `off` 无参形（startup-hardening S2）：`status` 无参
   （新默认）逐 unit 输出四行健康面 enabled/daemon/linger/实例 bin 存活——linger 态经
   `loginctl show-user $(id -u) -p Linger`（失败兑底 /var/lib/systemd/linger），disabled 附
