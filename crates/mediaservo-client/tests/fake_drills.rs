@@ -1,15 +1,15 @@
-//! K11 批0 确定性演练——FakeEngine + mock WS 信令全链（sfu_surface 的假引擎姿态）。
+//! K11 batch-0 deterministic drills -- FakeEngine + mock WS signaling over the full chain (the fake-engine posture of sfu_surface).
 //!
-//! 与 sfu_surface.rs 的分工：那边钉「上行信令形状」（真 libwebrtc 本地协商），
-//! 这边钉「引擎行为 → SDK 语义」映射（帧注入/ack 回程/故障/DC 态），CI 秒级、
-//! 无 OS 门（fake 不触 libwebrtc 运行时；crate 链接依赖与默认姿态相同）。
+//! The division of labor with sfu_surface.rs: that file pins "uplink signaling shapes" (real libwebrtc local negotiation),
+//! this file pins the "engine behavior -> SDK semantics" mapping (frame injection/ack return/failures/DC states), CI-second scale,
+//! no OS gate (the fake never touches the libwebrtc runtime; the crate's link deps match the default posture).
 //!
-//! 演练面（ticket 批0 验收 ②）：
-//! a) join→consume→帧回调→ack 往返全链
-//! b) 引擎故障 → ClientError::WebRtc 正确映射，会话续用不 panic
-//! c) DC open 前后 send 的状态拒绝（+ drop_dc_mid_send 假送达语义）
-//! d) 双 consumer 互不连坐（consume 面多路；ack 泵单路 = 批1 前置观察，见测试尾注）
-//! h) K5 就绪态聚合：ready_state 最差态映射（Connecting→Open→Closed 支配）+ buffered 求和
+//! Drill surface (ticket batch-0 acceptance (2)):
+//! a) join -> consume -> frame callback -> ack round trip, the full chain
+//! b) an engine failure -> correctly mapped to ClientError::WebRtc, the session stays usable without panicking
+//! c) send's state rejection before/after DC open (+ the drop_dc_mid_send fake-delivery semantics)
+//! d) two consumers never coupling (a multi-path consume surface; the ack pump single-path = the batch-1 precondition observation, see the test tail note)
+//! h) K5 ready-state aggregation: the worst-state mapping (the Connecting->Open->Closed dominance) + the buffered sum
 
 #![cfg(feature = "engine-fake")]
 
@@ -42,16 +42,16 @@ fn text(msg: &SignalingMessage) -> Message {
 }
 
 async fn send_msg(ws: &mut MockWs, msg: &SignalingMessage) {
-    ws.send(text(msg)).await.expect("mock: 写失败");
+    ws.send(text(msg)).await.expect("mock: write failed");
 }
 
 async fn read_msg(ws: &mut MockWs) -> SignalingMessage {
     let m = tokio::time::timeout(Duration::from_secs(8), ws.next())
         .await
-        .expect("mock: 等上行消息超时")
-        .expect("mock: ws 流结束")
-        .expect("mock: ws 读错误");
-    serde_json::from_str(m.to_text().expect("mock: 非文本帧")).expect("mock: 消息解析")
+        .expect("mock: timed out waiting for an uplink message")
+        .expect("mock: the ws stream ended")
+        .expect("mock: a ws read error");
+    serde_json::from_str(m.to_text().expect("mock: a non-text frame")).expect("mock: message parse")
 }
 
 fn transport_created(id: &str) -> SignalingMessage {
@@ -75,13 +75,13 @@ fn transport_created(id: &str) -> SignalingMessage {
 struct Harness {
     session: RoomSession,
     fake: FakeEngine,
-    /// 上行信令观察通道。
+    /// The uplink signaling observation channel.
     obs: mpsc::UnboundedReceiver<SignalingMessage>,
-    /// 下行推送通道（server 主动广播 NewProducer/NewDataProducer 用）。
+    /// The downlink push channel (for the server's proactive NewProducer/NewDataProducer broadcasts).
     push: mpsc::UnboundedSender<SignalingMessage>,
 }
 
-/// 起 mock WS server（握手 + 全 SFU 脚本应答 + 主动推送合流），fake 引擎入房。
+/// Start the mock WS server (handshake + the full SFU scripted replies + proactive pushes merged), joining with the fake engine.
 async fn pair_fake() -> Harness {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -92,7 +92,7 @@ async fn pair_fake() -> Harness {
         jwt: None,
         role: PeerRole::Consumer,
         hmac_key: None,
-    identity_dir: None,
+        identity_dir: None,
     };
     let (obs_tx, obs_rx) = mpsc::unbounded_channel();
     let (push_tx, mut push_rx) = mpsc::unbounded_channel::<SignalingMessage>();
@@ -100,16 +100,20 @@ async fn pair_fake() -> Harness {
         let (sock, _) = listener.accept().await.unwrap();
         let mut ws: MockWs = tokio_tungstenite::accept_async(sock).await.unwrap();
 
-        // ── 握手（sfu_surface 同形）
+        // -- handshake (same shape as sfu_surface)
         let frame = ws.next().await.unwrap().unwrap();
-        assert_eq!(frame.to_text().unwrap(), PSK, "直连形第一帧 = PSK 明文");
+        assert_eq!(
+            frame.to_text().unwrap(),
+            PSK,
+            "the direct shape's first frame = the PSK plaintext"
+        );
         send_msg(&mut ws, &SignalingMessage::Error { code: 0, message: "auth_ok".into() }).await;
         match read_msg(&mut ws).await {
             SignalingMessage::RoomJoin { room_id, peer_role, .. } => {
                 assert_eq!(room_id, ROOM);
                 assert_eq!(peer_role, PeerRole::Consumer);
             }
-            other => panic!("期望 RoomJoin, got {other:?}"),
+            other => panic!("expected RoomJoin, got {other:?}"),
         }
         send_msg(
             &mut ws,
@@ -123,7 +127,7 @@ async fn pair_fake() -> Harness {
         )
         .await;
 
-        // ── 脚本应答 + 推送合流（对端 drop 收敛）
+        // -- scripted replies + push merging (peer-drop convergence)
         let mut tseq = 0u32;
         loop {
             tokio::select! {
@@ -183,7 +187,7 @@ async fn pair_fake() -> Harness {
                                 protocol: "sctp".into(),
                             }
                         }
-                        other => panic!("mock: 意外上行消息 {other:?}"),
+                        other => panic!("mock: an unexpected uplink message {other:?}"),
                     };
                     send_msg(&mut ws, &reply).await;
                 }
@@ -196,12 +200,13 @@ async fn pair_fake() -> Harness {
 
     let fake = FakeEngine::new();
     let engine: Arc<dyn Engine> = Arc::new(fake.clone());
-    let session =
-        RoomSession::connect_with_engine(&cfg, engine).await.expect("fake 姿态 connect 应成功");
+    let session = RoomSession::connect_with_engine(&cfg, engine)
+        .await
+        .expect("the fake posture's connect should succeed");
     Harness { session, fake, obs: obs_rx, push: push_tx }
 }
 
-/// 观察上行直到命中谓词（中间消息跳过）。
+/// Observe uplinks until the predicate hits (intermediate messages skipped).
 async fn wait_uplink<F>(obs: &mut mpsc::UnboundedReceiver<SignalingMessage>, what: &str, pred: F)
 where
     F: Fn(&SignalingMessage) -> bool,
@@ -209,16 +214,16 @@ where
     for _ in 0..64 {
         let m = tokio::time::timeout(Duration::from_secs(5), obs.recv())
             .await
-            .unwrap_or_else(|_| panic!("等上行超时（{what}）"))
-            .expect("观察通道关闭");
+            .unwrap_or_else(|_| panic!("timed out waiting for an uplink ({what})"))
+            .expect("the observation channel closed");
         if pred(&m) {
             return;
         }
     }
-    panic!("未观察到 {what}（跳过窗耗尽）");
+    panic!("never observed {what} (the skip window exhausted)");
 }
 
-/// 向 fake 世界投递 DC 入程消息，直到 ack 泵的 consumer DC 建立（重试消化竞态）。
+/// Deliver DC ingress messages to the fake world until the ack pump's consumer DC is established (retrying through the race).
 async fn deliver_until_hit(fake: &FakeEngine, label: &str, bytes: Vec<u8>) {
     for _ in 0..100 {
         if fake.deliver_dc_message(label, bytes.clone()) {
@@ -226,18 +231,18 @@ async fn deliver_until_hit(fake: &FakeEngine, label: &str, bytes: Vec<u8>) {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    panic!("label={label} 的 consumer DC 始终未建立");
+    panic!("the consumer DC for label={label} was never established");
 }
 
-// ───────── 演练 ─────────
+// -------- drills --------
 
-/// a) join→consume→帧回调→ack 往返全链（fake 引擎 + mock 信令，零真 webrtc）。
+/// a) join -> consume -> frame callback -> ack round trip, the full chain (fake engine + mock signaling, zero real webrtc).
 #[tokio::test]
 async fn drill_a_join_consume_frames_ack_roundtrip() {
     let h = pair_fake().await;
     let Harness { mut session, fake, mut obs, push } = h;
 
-    // 发现 producer（server 广播 NewProducer）
+    // discover the producer (the server broadcasts NewProducer)
     push.send(SignalingMessage::NewProducer {
         room_id: ROOM.into(),
         producer_id: "prod-1".into(),
@@ -248,21 +253,21 @@ async fn drill_a_join_consume_frames_ack_roundtrip() {
     .unwrap();
     assert_eq!(session.wait_video_producer(Duration::from_secs(5)).await.unwrap(), "prod-1");
 
-    // consume → 引擎协商（fake）→ 注入 track + 帧 → VideoFrame 出流
+    // consume -> engine negotiation (fake) -> inject a track + frames -> VideoFrame out the stream
     let mut frames = session.consume_video("prod-1").await.expect("consume_video");
     fake.inject_video_track();
     fake.inject_frame(640, 360);
     let f = tokio::time::timeout(Duration::from_secs(2), frames.recv())
         .await
-        .expect("帧回调超时")
-        .expect("帧流关闭");
+        .expect("the frame callback timed out")
+        .expect("the frame stream closed");
     assert_eq!((f.width, f.height), (640, 360));
-    assert_eq!(f.data.len(), 640 * 360 * 3 / 2, "I420 尺寸");
+    assert_eq!(f.data.len(), 640 * 360 * 3 / 2, "the I420 size");
     let s = session.video_stats_summary();
-    assert_eq!(s.frames_decoded, 1, "注入帧应计入 stats");
+    assert_eq!(s.frames_decoded, 1, "an injected frame should count in the stats");
     assert_eq!(s.frame_width, 640);
 
-    // 控制面：出程 DC announce + ack 泵消费回程
+    // the control plane: egress DC announce + the ack pump consuming the return path
     let mut ctl = session.open_control(&["chassis"]).await.expect("open_control");
     push.send(SignalingMessage::NewDataProducer {
         room_id: ROOM.into(),
@@ -279,7 +284,7 @@ async fn drill_a_join_consume_frames_ack_roundtrip() {
     ctl.send("chassis", 7, "steer", env_json["payload"].clone()).await.expect("send");
     assert!(
         fake.sent_texts("chassis").first().is_some_and(|t| t.contains("\"seq\":7")),
-        "出程信封应被 fake 记账: {:?}",
+        "the egress envelope should be booked by the fake: {:?}",
         fake.sent_texts("chassis")
     );
 
@@ -292,7 +297,7 @@ async fn drill_a_join_consume_frames_ack_roundtrip() {
     assert_eq!(ack.result["ok"], serde_json::json!(true));
 }
 
-/// b) 引擎建连故障 → WebRtc typed 错误；会话不 panic、后续操作可成（无泄漏连坐）。
+/// b) an engine connect failure -> a WebRtc typed error; the session doesn't panic and later ops succeed (no leak coupling).
 #[tokio::test]
 async fn drill_b_engine_fault_maps_error_and_session_survives() {
     let h = pair_fake().await;
@@ -301,23 +306,24 @@ async fn drill_b_engine_fault_maps_error_and_session_survives() {
     fake.fail_next_connect(1);
     let e = session.consume_video("prod-x").await.unwrap_err();
     assert!(
-        matches!(&e, ClientError::WebRtc(m) if m.contains("故障注入")),
-        "引擎故障应映射 WebRtc, got {e:?}"
+        matches!(&e, ClientError::WebRtc(m) if m.contains("failure injected")),
+        "an engine failure should map to WebRtc, got {e:?}"
     );
 
-    // 旗标一次性消耗：同会话二次 consume 成功（无脏状态连坐）
-    let mut frames = session.consume_video("prod-x").await.expect("二次 consume 应成功");
+    // one-shot flag consumption: a second consume in the same session succeeds (no dirty-state coupling)
+    let mut frames =
+        session.consume_video("prod-x").await.expect("a second consume should succeed");
     fake.inject_video_track();
     fake.inject_frame(320, 240);
     assert!(tokio::time::timeout(Duration::from_secs(2), frames.recv()).await.is_ok());
 
-    // 控制面同点位故障：失败发生在 create_pc（transport 应答已消费），不 spawn 泵
+    // the same-slot control-plane failure: the failure happens at create_pc (the transport reply already consumed), no pump spawned
     fake.fail_next_connect(1);
     let e2 = session.open_control(&["chassis"]).await.unwrap_err();
     assert!(matches!(e2, ClientError::WebRtc(_)), "got {e2:?}");
 }
 
-/// c) DC open 前 send 拒、open 后放行；drop_dc_mid_send = 假送达（Ok 但不出账）。
+/// c) send rejected before DC open, allowed after; drop_dc_mid_send = a fake delivery (Ok but never booked).
 #[tokio::test]
 async fn drill_c_dc_send_state_and_mid_drop() {
     let h = pair_fake().await;
@@ -329,24 +335,26 @@ async fn drill_c_dc_send_state_and_mid_drop() {
     let e = ctl.send("chassis", 1, "steer", serde_json::json!({})).await.unwrap_err();
     assert!(
         matches!(&e, ClientError::WebRtc(m) if m.contains("not open")),
-        "未 open 应拒发, got {e:?}"
+        "a non-open DC must reject sends, got {e:?}"
     );
     assert!(fake.sent_texts("chassis").is_empty());
 
     fake.open_data_channels();
-    ctl.send("chassis", 2, "steer", serde_json::json!({})).await.expect("open 后应可发");
+    ctl.send("chassis", 2, "steer", serde_json::json!({}))
+        .await
+        .expect("after open, sending should work");
     assert_eq!(fake.sent_texts("chassis").len(), 1);
 
     fake.drop_dc_mid_send();
-    ctl.send("chassis", 3, "steer", serde_json::json!({})).await.expect("假送达 = Ok");
-    assert_eq!(fake.sent_texts("chassis").len(), 1, "丢弃注入不得入账");
+    ctl.send("chassis", 3, "steer", serde_json::json!({})).await.expect("a fake delivery = Ok");
+    assert_eq!(fake.sent_texts("chassis").len(), 1, "a dropped injection must not book");
 }
 
-/// d) 双 consumer 独立（K4 真多路）：各自帧流互不连坐；close 一路另一路续收；
-/// 单路 stats 与全会话并集分层可读。
+/// d) two consumers independent (the K4 true multi-path): each frame stream never coupling; closing one keeps the other receiving;
+/// a single path's stats vs the whole-session union readable in tiers.
 ///
-/// 批1 前置观察（在册，不硬造）：consume 面天然多路（slots 逐路注册），但
-/// **ack 泵每会话一次性**（pump_events.take()）——第二路控制域需批1 解除单路闸。
+/// The batch-1 precondition observation (on the ledger, not invented): the consume surface is naturally multi-path (slots registered per path), but
+/// **the ack pump is once-per-session** (pump_events.take()) -- a second path's control domain needs batch 1 to lift the single-path gate.
 #[tokio::test]
 async fn drill_d_two_consumers_independent() {
     let h = pair_fake().await;
@@ -355,30 +363,30 @@ async fn drill_d_two_consumers_independent() {
     let mut c1 = session.consume("p1").await.expect("consume p1");
     let mut c2 = session.consume("p2").await.expect("consume p2");
     assert_eq!((c1.id(), c2.id()), ("p1", "p2"));
-    fake.inject_video_track(); // 两路 pc 各得一 track
+    fake.inject_video_track(); // both pcs each get a track
     fake.inject_frame(160, 90);
     assert!(tokio::time::timeout(Duration::from_secs(2), c1.frames().recv()).await.is_ok());
     assert!(tokio::time::timeout(Duration::from_secs(2), c2.frames().recv()).await.is_ok());
 
-    // K4 增益：单路 stats（各自 pc 各 1 帧，互不串账）。
+    // the K4 gain: single-path stats (each pc holds 1 frame, never cross-booked).
     assert_eq!(c1.stats().frames_decoded, 1);
     assert_eq!(c2.stats().frames_decoded, 1);
 
-    c1.close(); // 一路消费者撤走（接收端 drop → slot 判死）
-    fake.inject_frame(160, 90); // 双 pc 都再投帧：c1 的 sink try_send 静默失败
+    c1.close(); // one consumer withdrew (the receiver dropped -> the slot declared dead)
+    fake.inject_frame(160, 90); // both pcs get more frames: c1's sink try_send fails silently
     let f = tokio::time::timeout(Duration::from_secs(2), c2.frames().recv())
         .await
-        .expect("c2 不得被 c1 连坐")
-        .expect("c2 流关闭");
+        .expect("c2 must not be dragged down by c1")
+        .expect("c2's stream closed");
     assert_eq!((f.width, f.height), (160, 90));
-    // 会话并集 = 全 slot 折叠（旧 _pcs 语义）：两路各 2 帧 = 4（帧投了两路 sink，
-    // close 只影响出流不影响 pc 计数）。
+    // the session union = folding all slots (the old _pcs semantics): two paths x 2 frames = 4 (frames went to both sinks;
+    // close only affects the outflow, not the pc count).
     assert_eq!(session.video_stats_summary().frames_decoded, 4);
-    assert_eq!(session.video_receiver_stats().len(), 2, "两路 pc 均在注册簿");
+    assert_eq!(session.video_receiver_stats().len(), 2, "both pcs in the ledger");
 }
 
-/// h) K5 聚合语义：ready_state = 全 DC 最差态（Connecting 支配 Open、Closed 支配一切）；
-/// buffered_amount = 全 DC 水位求和。
+/// h) K5 aggregation semantics: ready_state = the worst state across DCs (Connecting dominates Open, Closed dominates everything);
+/// buffered_amount = the summed waterline over all DCs.
 #[tokio::test]
 async fn drill_h_ready_state_worst_and_buffered_sum() {
     use mediaservo_client::RTCDataChannelState;
@@ -386,28 +394,36 @@ async fn drill_h_ready_state_worst_and_buffered_sum() {
     let h = pair_fake().await;
     let Harness { mut session, fake, obs: _obs, push: _push } = h;
 
-    // 未 open 窗：两通道 Connecting → 聚合 Connecting
+    // the not-yet-open window: both channels Connecting -> aggregated Connecting
     fake.set_dc_auto_open(false);
     let ctl = session.open_control(&["chassis", "gimbal"]).await.expect("open_control");
-    assert_eq!(ctl.ready_state(), RTCDataChannelState::Connecting, "未 open 应报 Connecting");
+    assert_eq!(
+        ctl.ready_state(),
+        RTCDataChannelState::Connecting,
+        "not-open should report Connecting"
+    );
 
-    // 全 open → Open；水位求和（set 覆写形：100 + 50 = 150）
+    // all open -> Open; the waterline sum (the set overwrite form: 100 + 50 = 150)
     fake.open_data_channels();
     assert_eq!(ctl.ready_state(), RTCDataChannelState::Open);
     fake.set_dc_buffered("chassis", 100);
     fake.set_dc_buffered("gimbal", 50);
-    assert_eq!(ctl.buffered_amount().await, 150, "求和 = 各通道水位合计");
+    assert_eq!(ctl.buffered_amount().await, 150, "the sum = each channel's waterline total");
 
-    // 单通道 Closed 支配：另一路仍 Open → 聚合 Closed
+    // one channel Closed dominates: the other still Open -> aggregated Closed
     fake.close_dc("gimbal");
-    assert_eq!(ctl.ready_state(), RTCDataChannelState::Closed, "任一通道关闭应支配整组");
+    assert_eq!(
+        ctl.ready_state(),
+        RTCDataChannelState::Closed,
+        "any channel closing should dominate the set"
+    );
 }
 
-// ═══════════════════ K1 韧性演练（S6/batch1a CUT3）═══════════════════
+// ================== K1 resilience drills (S6/batch1a CUT3) ==================
 
 use mediaservo_client::ConnectionState;
 
-/// 逐连接脚本应答（pair_fake 内联逻辑提取；复用 pair_fake_scripted）。
+/// Per-connection scripted replies (pair_fake's inline logic extracted; reuses pair_fake_scripted).
 fn scripted_reply(msg: &SignalingMessage, tseq: &mut u32) -> Option<SignalingMessage> {
     match msg {
         SignalingMessage::CreateWebRtcTransport { .. } => {
@@ -459,15 +475,15 @@ struct ScriptedHarness {
     fake: FakeEngine,
     obs: mpsc::UnboundedReceiver<SignalingMessage>,
     push: mpsc::UnboundedSender<SignalingMessage>,
-    /// 踢 ws 模拟断链——drop 接收端即 drop mock server 侧 ws。
+    /// Kicking the ws simulates a break -- dropping the receiver drops the mock-server-side ws.
     kick: mpsc::UnboundedSender<()>,
-    /// 服务器下发的 session_nonce 序列（downlink 观测——与 obs uplink 分离）。
+    /// The server-issued session_nonce sequence (downlink observation -- separate from the uplink obs).
     nonces: mpsc::UnboundedReceiver<Option<String>>,
 }
 
-/// 脚本化 mock：plan 按 join_seq 索引（越界 = Accept{nonce:None}）；
-/// 外层 accept loop 按 plan reject/accept 控制每代连接；inner select 处理
-/// ws 推送 + push + kick。
+/// The scripted mock: the plan indexed by join_seq (out of range = Accept{nonce:None});
+/// the outer accept loop controls each generation's connection per the plan's reject/accept; the inner select handles
+/// ws pushes + push + kick.
 async fn pair_fake_scripted(plan: Vec<JoinPlan>) -> ScriptedHarness {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -478,7 +494,7 @@ async fn pair_fake_scripted(plan: Vec<JoinPlan>) -> ScriptedHarness {
         jwt: None,
         role: PeerRole::Consumer,
         hmac_key: None,
-    identity_dir: None,
+        identity_dir: None,
     };
     let (obs_tx, obs_rx) = mpsc::unbounded_channel();
     let (push_tx, mut push_rx) = mpsc::unbounded_channel::<SignalingMessage>();
@@ -495,7 +511,7 @@ async fn pair_fake_scripted(plan: Vec<JoinPlan>) -> ScriptedHarness {
                 Err(_) => continue,
             };
 
-            // ── 握手 ──
+            // -- handshake --
             let frame = match ws.next().await {
                 Some(Ok(m)) => m,
                 _ => break,
@@ -508,28 +524,28 @@ async fn pair_fake_scripted(plan: Vec<JoinPlan>) -> ScriptedHarness {
 
             // ── RoomJoin ──
             let join = read_msg(&mut ws).await;
-            let _ = obs_tx.send(join.clone()); // 握手段 join 也是观察对象（首连/reject 连在此）
+            let _ = obs_tx.send(join.clone()); // the handshake-phase join is also observed (first connect/rejects land here)
             match join {
                 SignalingMessage::RoomJoin { room_id, peer_role, .. } => {
                     assert_eq!(room_id, ROOM);
                     assert_eq!(peer_role, PeerRole::Consumer);
                 }
-                other => panic!("期望 RoomJoin, got {other:?}"),
+                other => panic!("expected RoomJoin, got {other:?}"),
             }
             let seq = join_seq;
             join_seq += 1;
 
-            // ── plan 查找 ──
+            // -- plan lookup --
             let outcome = plan.get(seq).cloned().unwrap_or(JoinPlan::Accept { nonce: None });
             match outcome {
                 JoinPlan::Reject { code } => {
-                    tracing::info!(seq, code, "mock: reject 连接");
+                    tracing::info!(seq, code, "mock: rejected a connection");
                     send_msg(
                         &mut ws,
                         &SignalingMessage::Error { code, message: format!("reject-{code}") },
                     )
                     .await;
-                    // flush TCP 缓冲后关闭——裸 drop 可能发 RST 导致客户端读不到 Error 帧。
+                    // flush the TCP buffer before closing -- a bare drop may send an RST so the client can't read the Error frame.
                     let _ = ws.flush().await;
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     drop(ws);
@@ -551,7 +567,7 @@ async fn pair_fake_scripted(plan: Vec<JoinPlan>) -> ScriptedHarness {
                 }
             }
 
-            // ── inner select（与 pair_fake 同构）──
+            // -- the inner select (structurally identical to pair_fake) --
             let mut tseq = 0u32;
             loop {
                 tokio::select! {
@@ -582,13 +598,14 @@ async fn pair_fake_scripted(plan: Vec<JoinPlan>) -> ScriptedHarness {
 
     let fake = FakeEngine::new();
     let engine: Arc<dyn Engine> = Arc::new(fake.clone());
-    let session =
-        RoomSession::connect_with_engine(&cfg, engine).await.expect("scripted 姿态 connect 应成功");
+    let session = RoomSession::connect_with_engine(&cfg, engine)
+        .await
+        .expect("the scripted posture's connect should succeed");
     ScriptedHarness { session, fake, obs: obs_rx, push: push_tx, kick: kick_tx, nonces: nonce_rx }
 }
 
-/// 等 connection_state 变为 pred 预期值（watch subscription）。
-/// 跳过初始值（避免 Connected→Connected 直接命中）。
+/// Wait for connection_state to reach the pred-expected value (a watch subscription).
+/// Skips the initial value (avoiding a Connected -> Connected immediate hit).
 async fn wait_state(
     rx: &mut tokio::sync::watch::Receiver<ConnectionState>,
     pred: impl Fn(ConnectionState) -> bool,
@@ -596,16 +613,16 @@ async fn wait_state(
     for _ in 0..60 {
         tokio::time::timeout(Duration::from_secs(2), rx.changed())
             .await
-            .expect("state watch 超时")
-            .expect("state watch 关闭");
+            .expect("the state watch timed out")
+            .expect("the state watch closed");
         if pred(*rx.borrow()) {
             return;
         }
     }
-    panic!("connection_state 未达预期（last={:?}）", *rx.borrow());
+    panic!("connection_state never reached the expectation (last={:?})", *rx.borrow());
 }
 
-/// 最小化断链检测诊断——kick 后等 5s 看 state 是否变化。
+/// Minimized break-detection diagnostics -- after a kick, wait 5s and see whether the state changes.
 #[tokio::test]
 async fn drill_diag_disconnect_detection() {
     let h = pair_fake_scripted(vec![JoinPlan::Accept { nonce: None }]).await;
@@ -631,8 +648,8 @@ async fn drill_diag_disconnect_detection() {
     panic!("disconnect detection failed");
 }
 
-/// e) 重连 resume——断链后进 Reconnecting → 重连成功 → 重放消费路 → 帧续流
-///   + 一次性 nonce 三连命中（[None, Some("n1"), None]）。
+/// e) reconnect resume -- after a break, enter Reconnecting -> the reconnect succeeds -> replay the consumer path -> frames continue
+///   + the one-shot nonce triple-hit ([None, Some("n1"), None]).
 #[tokio::test]
 async fn drill_e_reconnect_resume_replay() {
     let h = pair_fake_scripted(vec![
@@ -643,7 +660,7 @@ async fn drill_e_reconnect_resume_replay() {
     .await;
     let ScriptedHarness { mut session, fake, mut obs, push, kick, nonces } = h;
 
-    // consume + control（第一代连接）
+    // consume + control (the first-generation connection)
     push.send(SignalingMessage::NewProducer {
         room_id: ROOM.into(),
         producer_id: "prod-1".into(),
@@ -655,25 +672,25 @@ async fn drill_e_reconnect_resume_replay() {
     let producer_id = session.wait_video_producer(Duration::from_secs(5)).await.unwrap();
     let mut c = session.consume(&producer_id).await.expect("consume prod-1");
 
-    // 首帧验证（第一代 pc）
+    // first-frame verification (the first-generation pc)
     fake.inject_video_track();
     fake.inject_frame(160, 120);
     let f = tokio::time::timeout(Duration::from_secs(2), c.frames().recv())
         .await
-        .expect("首帧超时")
-        .expect("流关闭");
+        .expect("the first frame timed out")
+        .expect("the stream closed");
     assert_eq!((f.width, f.height), (160, 120));
 
-    // ── kick（模拟断链）──
+    // -- kick (simulating the break) --
     let mut nonces = nonces;
     let mut state_rx = session.subscribe_connection_state();
     kick.send(()).unwrap();
 
-    // 等 Reconnecting → Connected（reconnect 重试 5001 后成功）
+    // wait for Reconnecting -> Connected (the reconnect succeeds after retrying 5001)
     wait_state(&mut state_rx, |s| s == ConnectionState::Connected).await;
 
-    // 三连 nonce 观察（downlink：mock server 在 RoomJoined 中下发的 session_nonce）
-    // 预期：[None(join-0), Some("nonce-epoch1")(join-1), None(join-2)]
+    // the nonce triple observation (downlink: the session_nonce the mock server issues in RoomJoined)
+    // expected: [None(join-0), Some("nonce-epoch1")(join-1), None(join-2)]
     let mut observed_nonces: Vec<Option<String>> = Vec::new();
     for _ in 0..64 {
         if let Ok(Some(n)) = tokio::time::timeout(Duration::from_secs(2), nonces.recv()).await {
@@ -685,21 +702,29 @@ async fn drill_e_reconnect_resume_replay() {
             break;
         }
     }
-    // 初始连接 Accept{n1} → nonce Some("n1")；kick 后 reconnect 5001(retry) → Accept{None} → nonce None。
-    assert_eq!(observed_nonces, vec![Some("nonce-epoch1".into()), None], "RoomJoined nonce 序列");
+    // the initial connection Accept{n1} -> nonce Some("n1"); after the kick the reconnect 5001(retry) -> Accept{None} -> nonce None.
+    assert_eq!(
+        observed_nonces,
+        vec![Some("nonce-epoch1".into()), None],
+        "the RoomJoined nonce sequence"
+    );
 
-    // ── 重放后帧续流 ──
+    // -- post-replay frame continuation --
     fake.inject_video_track();
     fake.inject_frame(160, 120);
     let f2 = tokio::time::timeout(Duration::from_secs(2), c.frames().recv())
         .await
-        .expect("重放后首帧超时")
-        .expect("重放后流关闭");
+        .expect("the first frame after replay timed out")
+        .expect("the post-replay stream closed");
     assert_eq!((f2.width, f2.height), (160, 120));
-    assert_eq!(c.stats().frames_decoded, 1, "pc swap 后帧计入新 pc 统计");
+    assert_eq!(
+        c.stats().frames_decoded,
+        1,
+        "after a pc swap the frame counts in the new pc's stats"
+    );
 }
 
-/// f) auth 族终态——Reject{4010} → Failed → supervisor 退出重连环 → 不再重试。
+/// f) the auth family terminal -- Reject{4010} -> Failed -> the supervisor exits the reconnect chain -> never retries.
 #[tokio::test]
 async fn drill_f_auth_fail_terminal_failed_state() {
     let h =
@@ -710,13 +735,13 @@ async fn drill_f_auth_fail_terminal_failed_state() {
     let mut state_rx = session.subscribe_connection_state();
     kick.send(()).unwrap();
 
-    // 等 Failed（4010 = auth 族终态，不重试）
+    // wait for Failed (4010 = the auth family terminal, no retry)
     wait_state(&mut state_rx, |s| s == ConnectionState::Failed).await;
 
-    // 睡 2s 验证不再重连（supervisor 已退出循环）
+    // sleep 2s verifying no more reconnects (the supervisor has exited its loop)
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    // 确认只发了 2 次 RoomJoin（首次 + 断链 1 次 reject，无第三次）
+    // confirm only 2 RoomJoins were sent (the first + 1 break-reject, no third)
     let mut join_count = 0u32;
     for _ in 0..32 {
         if let Ok(Some(m)) = tokio::time::timeout(Duration::from_millis(200), obs.recv()).await {
@@ -727,10 +752,10 @@ async fn drill_f_auth_fail_terminal_failed_state() {
             break;
         }
     }
-    assert_eq!(join_count, 2, "应恰好 2 次 RoomJoin（首次 + 1 次 reject 后退出）");
+    assert_eq!(join_count, 2, "exactly 2 RoomJoins (the first + 1 reject then exit)");
 }
 
-/// g) Drop 语义——drop(session) 后 session 可正常析构（ctx.shutdown 幂等；无 panic/hang）。
+/// g) Drop semantics -- after drop(session) the session destructs normally (ctx.shutdown idempotent; no panic/hang).
 #[tokio::test]
 async fn drill_g_drop_session_no_lingering_tasks() {
     let h = pair_fake_scripted(vec![JoinPlan::Accept { nonce: None }]).await;
@@ -744,24 +769,24 @@ async fn drill_g_drop_session_no_lingering_tasks() {
     } = h;
 
     // drop session → ctx.shutdown() → supervisor abort + forwarder signaled
-    // 超时 = hang 检测（正常 drop 应瞬间完成）
+    // timeout = hang detection (a normal drop completes instantly)
     let result = tokio::time::timeout(Duration::from_secs(3), async {
         drop(session);
     })
     .await;
-    assert!(result.is_ok(), "drop(session) 应在 3s 内完成（无 hang）");
+    assert!(result.is_ok(), "drop(session) should complete within 3s (no hang)");
 }
 
-// ───────── msrtc-stream-not-found 演练 ─────────
+// -------- msrtc-stream-not-found drills --------
 
-/// 快路径：join 回放收齐 label 全集后，等一个不在全集的 label → 3s 兜底窗内
-/// 判 StreamNotFound（区别于 30s 盲等 Timeout）。
+/// The fast path: after the join replay collects the full label set, wait for a label not in the set -> within the 3s fallback window
+/// StreamNotFound is judged (distinct from the 30s blind-wait Timeout).
 #[tokio::test]
 async fn drill_stream_not_found_fast_path() {
     let h = pair_fake().await;
     let Harness { mut session, fake: _fake, obs: _obs, push } = h;
 
-    // join 回放：generator1（有标签）到达 → 全集 = {generator1}
+    // the join replay: generator1 (labeled) arrives -> the full set = {generator1}
     push.send(SignalingMessage::NewProducer {
         room_id: ROOM.into(),
         producer_id: "prod-g1".into(),
@@ -771,29 +796,38 @@ async fn drill_stream_not_found_fast_path() {
     })
     .unwrap();
     assert_eq!(
-        session.wait_video_producer_labeled(Duration::from_secs(10), Some("generator1")).await.unwrap(),
+        session
+            .wait_video_producer_labeled(Duration::from_secs(10), Some("generator1"))
+            .await
+            .unwrap(),
         "prod-g1",
-        "全集内 label 正常匹配"
+        "a label in the full set matches normally"
     );
 
-    // 等不存在的 generator8：快路径 3s 兜底窗 → StreamNotFound（远小于 10s 上限）
+    // wait for the nonexistent generator8: the fast path's 3s fallback window -> StreamNotFound (far below the 10s cap)
     let t0 = std::time::Instant::now();
     let err = session
         .wait_video_producer_labeled(Duration::from_secs(30), Some("generator8"))
         .await
-        .expect_err("不存在 label 应报错");
-    assert!(matches!(err, ClientError::StreamNotFound { ref label } if label == "generator8"),
-        "应报 StreamNotFound，实际 {err:?}");
-    assert!(t0.elapsed() < Duration::from_secs(10), "快路径应在兜底窗内返回，实际 {:?}", t0.elapsed());
+        .expect_err("a nonexistent label should error");
+    assert!(
+        matches!(err, ClientError::StreamNotFound { ref label } if label == "generator8"),
+        "should report StreamNotFound, got {err:?}"
+    );
+    assert!(
+        t0.elapsed() < Duration::from_secs(10),
+        "the fast path should return within the fallback window, got {:?}",
+        t0.elapsed()
+    );
 }
 
-/// 竞态窗：全集不含目标 label，但 3s 兜底窗内新 producer 到达 → 等到（不误判）。
+/// The race window: the full set doesn't contain the target label, but a new producer arrives within the 3s fallback window -> it's waited for (no misjudgment).
 #[tokio::test]
 async fn drill_stream_not_found_grace_window_catches_late_producer() {
     let h = pair_fake().await;
     let Harness { mut session, fake: _fake, obs: _obs, push } = h;
 
-    // 全集先有 generator1
+    // the full set has generator1 first
     push.send(SignalingMessage::NewProducer {
         room_id: ROOM.into(),
         producer_id: "prod-g1".into(),
@@ -804,7 +838,7 @@ async fn drill_stream_not_found_grace_window_catches_late_producer() {
     .unwrap();
     let _ = session.wait_video_producer_labeled(Duration::from_secs(5), Some("generator1")).await;
 
-    // 250ms 后 generator8 才开始推流（模拟 consumer 先到）
+    // generator8 starts pushing 250ms later (simulating consumer-first)
     let push_late = push.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -817,10 +851,13 @@ async fn drill_stream_not_found_grace_window_catches_late_producer() {
         });
     });
 
-    // 兜底窗应接住迟到 producer
+    // the fallback window should catch the late producer
     assert_eq!(
-        session.wait_video_producer_labeled(Duration::from_secs(30), Some("generator8")).await.unwrap(),
+        session
+            .wait_video_producer_labeled(Duration::from_secs(30), Some("generator8"))
+            .await
+            .unwrap(),
         "prod-g8",
-        "3s 兜底窗内迟到的 producer 应被等到"
+        "a producer arriving within the 3s fallback window should be waited for"
     );
 }

@@ -1,17 +1,17 @@
-//! scenario.rs —— T8：剧本引擎（emit.py 文法解析 + tokio 调度 runner + job 旗标层）。
+//! scenario.rs -- T8: scenario engine (emit.py grammar parsing + tokio scheduling runner + job flag layer).
 //!
-//! 语义真值 = `scripts/weaknet.sh do_scenario` + `scripts/weaknet.d/emit.py scenario`（计划文法）
-//! 及 `judge.py` 事件白名单（`scenario*` ∪ {baseline-done, set}；恢复步判据 = set 事件 after
-//! 前缀 `rtt=0ms` ∧ 含 `loss=0%`）。PIT-187 纪律：bash 语义原样平移，偏离清单登记在
-//! T8 交付报告（rev-2.2 授权差异：每步瞬持锁 + job 独占层取代 bash 全程 flock）。
+//! Semantic truth = `scripts/weaknet.sh do_scenario` + `scripts/weaknet.d/emit.py scenario` (plan grammar)
+//! and the `judge.py` event whitelist (`scenario*` union {baseline-done, set}; recovery-step predicate = a set event whose after
+//! prefix is `rtt=0ms` AND contains `loss=0%`). PIT-187 discipline: bash semantics ported verbatim, deviations logged in the
+//! T8 delivery report (rev-2.2 authorized divergence: per-step transient locks + a job exclusivity layer replacing bash's full-run flock).
 //!
-//! rev-2.2 锁模型（design §server「scenario job 独占语义」）：
-//! - 物理写锁**每步瞬持**（保 stop 可达）；
-//! - 独占 = `state.job` 旗标层：job 活跃期（属主存活）外部 CLI/REST apply/set → 409/exit3；
-//! - 陈旧属主（pid+starttime 判亡，fuse 同法）→ 清旗标放行；
-//! - step 取锁失败 → `{ev:"scenario-end", note:"elapsed_s=…", aborted:"lock-busy"}` 终止
-//!   （**timeline 任一 scenario-end 带 aborted → 本轮 judge 判据作废**，W6 复验断言 aborted==0）；
-//! - stop 通路 = `scenario.cancel` 旗标文件（跨进程可达；属主亡时 [`stop`] 直接清 job 旗标）。
+//! rev-2.2 lock model (design §server: scenario job exclusivity semantics):
+//! - the physical write lock is held transiently per step (keeps stop reachable);
+//! - exclusivity = the `state.job` flag layer: while a job is active (owner alive), external CLI/REST apply/set -> 409/exit3;
+//! - stale owner (declared dead via pid+starttime, same method as the fuse) -> clear the flag and pass;
+//! - step lock failure -> `{ev:"scenario-end", note:"elapsed_s=...", aborted:"lock-busy"}` terminates
+//!   (any scenario-end with aborted invalidates that round's judge verdict; W6 re-verification asserts aborted==0);
+//! - stop channel = the `scenario.cancel` flag file (cross-process reachable; when the owner is dead [`stop`] clears the job flag directly).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,16 +25,16 @@ use crate::scope::Targeting;
 use crate::spec::{ImpairSpec, LossSpec};
 use crate::state::{self, Dirs, JobRef, State};
 
-/// bash do_scenario 恢复驻留窗（L603：log 文案 12s、实睡 25s——以 sleep 真值平移）。
+/// bash do_scenario recovery dwell window (L603: log text says 12s, actually sleeps 25s -- ported per the true sleep value).
 pub const RECOVERY_DWELL_SECS: u64 = 25;
-/// bash do_scenario 保险丝余量（L570：duration = baseline + steps_dur + 90）。
+/// bash do_scenario fuse margin (L570: duration = baseline + steps_dur + 90).
 pub const COVERING_MARGIN_SECS: u64 = 90;
-/// 跨进程 stop 旗标（runner 每检查点消费后删除）。
+/// Cross-process stop flag (consumed and deleted by the runner at each checkpoint).
 pub const CANCEL_FILE: &str = "scenario.cancel";
 
-// ---------- 解析（emit.py scenario 模式逐分支平移，fail-closed 白名单） ----------
+// ---------- Parsing (branch-by-branch port of emit.py scenario mode, fail-closed whitelist) ----------
 
-/// step/repeat 参数字典 → 覆盖项（bash flags 渲染的 typed 等价形；值域校验在 merge）。
+/// step/repeat param dict -> overrides (typed equivalent of the bash flags rendering; range validation in merge).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StepOverride {
     pub rtt_ms: Option<u64>,
@@ -49,11 +49,11 @@ pub struct StepOverride {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanLine {
     Step {
-        /// at_s 原值串（scenario-step note 的 `at_s=` 位——bash 直抄 plan 行）
+        /// at_s original string (the `at_s=` slot of the scenario-step note -- copied straight from the bash plan line)
         at_disp: String,
-        /// 目标秒（bash `target=${f2%.*}` 截断形）
+        /// target second (bash `target=${f2%.*}` truncation form)
         at_secs: u64,
-        /// 渲染 flags 串（恢复驻留 awk `--rtt 0` 子串判据源）
+        /// rendered flags string (source of the recovery-dwell awk `--rtt 0` substring predicate)
         flags: String,
         ov: StepOverride,
     },
@@ -72,32 +72,34 @@ pub enum PlanLine {
 pub struct ScenarioPlan {
     pub baseline_s: u64,
     pub lines: Vec<PlanLine>,
-    /// TOTAL 行（bash stepsdur；覆盖时长 = baseline + total_s + COVERING_MARGIN）
+    /// TOTAL line (bash stepsdur; covered duration = baseline + total_s + COVERING_MARGIN)
     pub total_s: u64,
-    /// CLEAR 行（sc.clear 真值，缺省 true → 收尾自动 clear）
+    /// CLEAR line (sc.clear truth, default true -> auto clear at the end)
     pub clear: bool,
 }
 
 type Y = serde_yaml::Value;
 type YM = serde_yaml::Mapping;
 
-/// python str(scalar) 同形（yaml 值渲染进 flags 串的口径）。
+/// Same shape as python str(scalar) (the convention for rendering yaml values into flags strings).
 fn py_str(v: &Y) -> String {
     match v {
         Y::Null => "None".into(),
-        Y::Bool(b) => if *b { "True".into() } else { "False".into() },
+        Y::Bool(b) => {
+            if *b {
+                "True".into()
+            } else {
+                "False".into()
+            }
+        }
         Y::Number(n) => {
             if let Some(i) = n.as_i64() {
                 i.to_string()
             } else if let Some(u) = n.as_u64() {
                 u.to_string()
             } else if let Some(f) = n.as_f64() {
-                // python str(4.0)="4.0"；Rust 4.0f64.to_string()="4" → 补 ".0"
-                if f.fract() == 0.0 && f.is_finite() {
-                    format!("{f:.1}")
-                } else {
-                    format!("{f}")
-                }
+                // python str(4.0)="4.0"; Rust 4.0f64.to_string()="4" -> append ".0"
+                if f.fract() == 0.0 && f.is_finite() { format!("{f:.1}") } else { format!("{f}") }
             } else {
                 n.to_string()
             }
@@ -116,7 +118,9 @@ fn as_num(v: &Y) -> Option<f64> {
 
 fn as_int(v: &Y) -> Option<i64> {
     match v {
-        Y::Number(n) => n.as_i64().or_else(|| n.as_u64().map(|u| i64::try_from(u).unwrap_or(i64::MAX))),
+        Y::Number(n) => {
+            n.as_i64().or_else(|| n.as_u64().map(|u| i64::try_from(u).unwrap_or(i64::MAX)))
+        }
         _ => None,
     }
 }
@@ -125,17 +129,29 @@ fn yk(k: &str) -> Y {
     Y::String(k.to_string())
 }
 
-/// emit.py check_params：白名单外键即拒（合法集逐字同 emit.py:21,47——FLAG 五键 + loss/gemodel/
-/// scope/clear + 宽容豁免 at_s/set/steps/repeat/scenario）。值校验同 emit.py:50-56。
+/// emit.py check_params: keys outside the whitelist are rejected (the legal set matches emit.py:21,47 verbatim -- the FLAG five keys + loss/gemodel/
+/// scope/clear + the lenient exemptions at_s/set/steps/repeat/scenario). Value validation matches emit.py:50-56.
 fn check_params(p: &YM, ctx: &str) -> Result<(), String> {
     const LEGAL: &[&str] = &[
-        "at_s", "clear", "gemodel", "jitter_ms", "loss", "rate_mbps", "reorder_pct", "repeat",
-        "rtt_ms", "scenario", "scope", "seed", "set", "steps",
+        "at_s",
+        "clear",
+        "gemodel",
+        "jitter_ms",
+        "loss",
+        "rate_mbps",
+        "reorder_pct",
+        "repeat",
+        "rtt_ms",
+        "scenario",
+        "scope",
+        "seed",
+        "set",
+        "steps",
     ];
     for k in p.keys() {
         let ks = k.as_str().unwrap_or_default();
         if !LEGAL.contains(&ks) {
-            return Err(format!("{ctx}: 未知键 [{ks}]（白名单 {LEGAL:?}）"));
+            return Err(format!("{ctx}: unknown keys [{ks}] (whitelist {LEGAL:?})"));
         }
     }
     if let Some(l) = p.get(yk("loss")) {
@@ -143,25 +159,25 @@ fn check_params(p: &YM, ctx: &str) -> Result<(), String> {
         let core = s.replace('.', "");
         let core = core.trim_end_matches('%');
         if core.is_empty() || !core.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(format!("{ctx}: loss 需数值/百分数，得 {s:?}"));
+            return Err(format!("{ctx}: loss must be a number/percentage, got {s:?}"));
         }
     }
     for k in ["rtt_ms", "jitter_ms", "reorder_pct", "seed"] {
         if let Some(v) = p.get(yk(k))
             && !as_num(v).is_some_and(|n| n >= 0.0)
         {
-            return Err(format!("{ctx}: {k} 需非负数值"));
+            return Err(format!("{ctx}: {k} must be a non-negative number"));
         }
     }
     if let Some(v) = p.get(yk("rate_mbps"))
         && !as_num(v).is_some_and(|n| n > 0.0)
     {
-        return Err(format!("{ctx}: rate_mbps 需正数"));
+        return Err(format!("{ctx}: rate_mbps must be positive"));
     }
     Ok(())
 }
 
-/// emit.py flags_from：dict 插入序 → CLI flag 串（gemodel 组合校验；scope/clear 静默剥离同祖先）。
+/// emit.py flags_from: dict insertion order -> CLI flag string (gemodel composition validation; scope/clear silently stripped like the ancestor).
 fn flags_from(p: &YM, ctx: &str) -> Result<String, String> {
     const FLAG: &[(&str, &str)] = &[
         ("rtt_ms", "--rtt"),
@@ -181,14 +197,14 @@ fn flags_from(p: &YM, ctx: &str) -> Result<String, String> {
             out.push(py_str(v));
         } else if ks == "gemodel" {
             let Some(m) = v.as_mapping() else {
-                return Err(format!("{ctx}: gemodel 需 dict{{r,h,k}}：{}", py_str(v)));
+                return Err(format!("{ctx}: gemodel needs dict{{r,h,k}}: {}", py_str(v)));
             };
             let mut trio = Vec::with_capacity(3);
             for key in ["r", "h", "k"] {
                 match m.get(yk(key)) {
                     Some(x) => trio.push(py_str(x)),
                     None => {
-                        return Err(format!("{ctx}: gemodel 需 dict{{r,h,k}}：{}", py_str(v)));
+                        return Err(format!("{ctx}: gemodel needs dict{{r,h,k}}: {}", py_str(v)));
                     }
                 }
             }
@@ -199,8 +215,8 @@ fn flags_from(p: &YM, ctx: &str) -> Result<String, String> {
     Ok(out.join(" "))
 }
 
-/// dict → StepOverride。bash 口径：--rtt/--jitter/--seed/--reorder 需整数字面量
-/// （str(4.0)="4.0" 会被 parse_opts regex 拒 rc=4）——浮点在此显式报因。
+/// dict -> StepOverride. bash convention: --rtt/--jitter/--seed/--reorder need integer literals
+/// (str(4.0)="4.0" is rejected by the parse_opts regex with rc=4) -- floats report cause explicitly here.
 fn override_from(p: &YM) -> Result<StepOverride, String> {
     let mut ov = StepOverride::default();
     let int_slot = |k: &str| -> Result<Option<u64>, String> {
@@ -208,7 +224,7 @@ fn override_from(p: &YM) -> Result<StepOverride, String> {
             None => Ok(None),
             Some(v) => match as_int(v) {
                 Some(i) if i >= 0 => Ok(Some(i as u64)),
-                _ => Err(format!("{k} 需整数值（bash flag 域），得 {}", py_str(v))),
+                _ => Err(format!("{k} must be an integer (bash flag domain), got {}", py_str(v))),
             },
         }
     };
@@ -226,14 +242,14 @@ fn override_from(p: &YM) -> Result<StepOverride, String> {
     }
     if let Some(g) = p.get(yk("gemodel")) {
         let Some(m) = g.as_mapping() else {
-            return Err(format!("gemodel 需 dict{{r,h,k}}：{}", py_str(g)));
+            return Err(format!("gemodel needs dict{{r,h,k}}: {}", py_str(g)));
         };
         let mut trio = Vec::with_capacity(3);
         for key in ["r", "h", "k"] {
             match m.get(yk(key)) {
                 Some(x) => trio.push(py_str(x)),
                 None => {
-                    return Err(format!("gemodel 需 dict{{r,h,k}}：{}", py_str(g)));
+                    return Err(format!("gemodel needs dict{{r,h,k}}: {}", py_str(g)));
                 }
             }
         }
@@ -242,7 +258,7 @@ fn override_from(p: &YM) -> Result<StepOverride, String> {
     Ok(ov)
 }
 
-/// emit.py scenario 主解析（doc 已 yaml 化）。计划行序 = STEP(s) 逐条 → REPEAT →（TOTAL/CLEAR 入结构体）。
+/// emit.py scenario main parsing (doc already yaml-typed). Plan line order = STEP(s) one by one -> REPEAT -> (TOTAL/CLEAR into the struct).
 pub fn parse_plan_doc(doc: &Y) -> Result<ScenarioPlan, String> {
     let empty_map = YM::new();
     let root = doc.as_mapping().unwrap_or(&empty_map);
@@ -251,20 +267,13 @@ pub fn parse_plan_doc(doc: &Y) -> Result<ScenarioPlan, String> {
         None => doc,
     }
     .as_mapping()
-    .ok_or_else(|| "scenario 需 mapping".to_string())?;
-    let steps: Vec<Y> = sc
-        .get(yk("steps"))
-        .and_then(|s| s.as_sequence().cloned())
-        .unwrap_or_default();
-    let repeat_map: YM = sc
-        .get(yk("repeat"))
-        .cloned()
-        .unwrap_or(Y::Null)
-        .as_mapping()
-        .cloned()
-        .unwrap_or_default();
+    .ok_or_else(|| "scenario must be a mapping".to_string())?;
+    let steps: Vec<Y> =
+        sc.get(yk("steps")).and_then(|s| s.as_sequence().cloned()).unwrap_or_default();
+    let repeat_map: YM =
+        sc.get(yk("repeat")).cloned().unwrap_or(Y::Null).as_mapping().cloned().unwrap_or_default();
     if steps.is_empty() && repeat_map.is_empty() {
-        return Err("scenario 需至少 steps 或 repeat".to_string());
+        return Err("scenario needs at least steps or repeat".to_string());
     }
     let mut lines = Vec::new();
     let mut prev = -1.0f64;
@@ -272,55 +281,50 @@ pub fn parse_plan_doc(doc: &Y) -> Result<ScenarioPlan, String> {
     for (i, st) in steps.iter().enumerate() {
         let ctx = format!("step{i}");
         let Some(stm) = st.as_mapping() else {
-            return Err(format!("{ctx}: 需 mapping"));
+            return Err(format!("{ctx}: must be a mapping"));
         };
         let at = stm.get(yk("at_s")).cloned().unwrap_or(Y::Null);
         let Some(atf) = as_num(&at) else {
-            return Err(format!("{ctx}: at_s 需非负数值"));
+            return Err(format!("{ctx}: at_s must be a non-negative number"));
         };
         if atf < 0.0 {
-            return Err(format!("{ctx}: at_s 需非负数值"));
+            return Err(format!("{ctx}: at_s must be a non-negative number"));
         }
         if atf <= prev {
-            return Err(format!("{ctx}: at_s 必须严格递增（{atf} <= {prev}）"));
+            return Err(format!("{ctx}: at_s must be strictly increasing ({atf} <= {prev})"));
         }
         let set_map = match stm.get(yk("set")).cloned().unwrap_or(Y::Null) {
             Y::Null => YM::new(),
             Y::Mapping(m) => m,
-            _ => return Err(format!("{ctx}: set 需 mapping")),
+            _ => return Err(format!("{ctx}: set must be a mapping")),
         };
         check_params(&set_map, &ctx)?;
         let flags = flags_from(&set_map, &ctx)?;
         let ov = override_from(&set_map)?;
-        lines.push(PlanLine::Step {
-            at_disp: py_str(&at),
-            at_secs: atf as u64,
-            flags,
-            ov,
-        });
+        lines.push(PlanLine::Step { at_disp: py_str(&at), at_secs: atf as u64, flags, ov });
         prev = atf;
-        total = total.max(atf + 15.0); // bash：末步留 15s 观察尾
+        total = total.max(atf + 15.0); // bash: leave a 15s observation tail after the last step
     }
     if !repeat_map.is_empty() {
         let num = |k: &str| repeat_map.get(yk(k)).cloned().unwrap_or_else(|| Y::Number(0.into()));
         let (Some(r), Some(on_s), Some(off_s)) =
             (as_int(&num("rounds")), as_int(&num("on_s")), as_int(&num("off_s")))
         else {
-            return Err("repeat 需 rounds>0 且 on_s/off_s≥5".to_string());
+            return Err("repeat needs rounds>0 and on_s/off_s>=5".to_string());
         };
         if r <= 0 || on_s < 5 || off_s < 5 {
-            return Err("repeat 需 rounds>0 且 on_s/off_s≥5".to_string());
+            return Err("repeat needs rounds>0 and on_s/off_s>=5".to_string());
         }
         let set_map = match repeat_map.get(yk("set")).cloned().unwrap_or(Y::Null) {
             Y::Null => YM::new(),
             Y::Mapping(m) => m,
-            _ => return Err("repeat.set 需 mapping".to_string()),
+            _ => return Err("repeat.set must be a mapping".to_string()),
         };
         check_params(&set_map, "repeat.set")?;
         let on_flags = flags_from(&set_map, "repeat.set")?;
         let on_ov = override_from(&set_map)?;
-        // emit.py:107 off = 固定零参集 {rtt_ms:0, jitter_ms:0, loss:"0%"}——恢复步 after 串
-        // 含 rtt=0ms + loss=0%（judge 恢复判据的生成源）。
+        // emit.py:107 off = the fixed zero-param set {rtt_ms:0, jitter_ms:0, loss:"0%"} -- the recovery step's after string
+        // contains rtt=0ms + loss=0% (the generation source of the judge recovery predicate).
         let off_ov = StepOverride {
             rtt_ms: Some(0),
             jitter_ms: Some(0),
@@ -340,7 +344,7 @@ pub fn parse_plan_doc(doc: &Y) -> Result<ScenarioPlan, String> {
         total = total.max(prev).max((r * (on_s + off_s)) as f64);
     }
     let baseline_s = match sc.get(yk("baseline_s")).and_then(as_num) {
-        Some(n) => n.max(0.0) as u64, // python int() 截断形
+        Some(n) => n.max(0.0) as u64, // python int() truncation form
         None => total.max(0.0) as u64,
     };
     // python truthiness（emit.py:115 `1 if sc.get('clear', True) else 0`）
@@ -351,40 +355,35 @@ pub fn parse_plan_doc(doc: &Y) -> Result<ScenarioPlan, String> {
         Some(Y::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0),
         Some(Y::String(s)) => !s.is_empty(),
         Some(Y::Sequence(_) | Y::Mapping(_)) => true,
-        Some(Y::Tagged(_)) => true, // py yaml tag 形超 emit 面：非空对象 truthy 缺省
+        Some(Y::Tagged(_)) => true, // py yaml tag forms exceed the emit surface: non-empty objects default truthy
     };
-    Ok(ScenarioPlan {
-        baseline_s,
-        lines,
-        total_s: total.max(0.0) as u64,
-        clear,
-    })
+    Ok(ScenarioPlan { baseline_s, lines, total_s: total.max(0.0) as u64, clear })
 }
 
-/// emit.py scenario 文法平移版（源 = scripts/weaknet.d/emit.py:81-115；白名单外键即拒，
-/// 报错含合法集全清单——fail-closed 与 emit.py:47-49 同口径）。文法：
+/// emit.py scenario grammar port (source = scripts/weaknet.d/emit.py:81-115; keys outside the whitelist rejected,
+/// the error lists the full legal set -- fail-closed with the same convention as emit.py:47-49). Grammar:
 ///
 /// ```yaml
-/// scenario:            # 顶层键可省（裸形直读，emit.py:81 `doc.get('scenario') or doc` 同构）
-///   baseline_s: 25     # no-fault twin 窗（缺省=按 steps/repeat 时长自动）
-///   clear: true        # 结束清场（false/0/"" = 保留；python truthiness 语义）
-///   steps:             # at_s 严格递增（相对 baseline 后 t0）；set 值域 = 白名单
+/// scenario:            # top-level key optional (bare form read directly, structurally same as emit.py:81 `doc.get('scenario') or doc`)
+///   baseline_s: 25     # no-fault twin window (default = auto from steps/repeat durations)
+///   clear: true        # teardown at the end (false/0/"" = keep; python truthiness semantics)
+///   steps:             # at_s strictly increasing (relative to t0 after baseline); set values = whitelist
 ///     - at_s: 30
 ///       set: {rtt_ms: 100, jitter_ms: 20, loss: "10%"}  # rtt_ms/jitter_ms/rate_mbps/reorder_pct/seed/loss/gemodel
 ///     - at_s: 75
-///       set: {rtt_ms: 0, loss: "0%"}   # 恢复步：judge 判据 = set.after 前缀 rtt=0ms ∧ 含 loss=0%
-///   repeat:            # 恢复性半判据（rounds>0 且 on_s/off_s>=5）
+///       set: {rtt_ms: 0, loss: "0%"}   # recovery step: judge predicate = set.after prefix rtt=0ms AND contains loss=0%
+///   repeat:            # recovery half-predicate (rounds>0 and on_s/off_s>=5)
 ///     rounds: 4
 ///     on_s: 30
 ///     off_s: 30
-///     set: {rtt_ms: 80, loss: "5%"}    # off 态固定零参 --rtt 0 --jitter 0 --loss 0%
+///     set: {rtt_ms: 80, loss: "5%"}    # off state fixed zero params --rtt 0 --jitter 0 --loss 0%
 /// ```
 pub fn parse_plan_yaml(src: &str) -> Result<ScenarioPlan, String> {
-    let doc: Y = serde_yaml::from_str(src).map_err(|e| format!("YAML 解析失败: {e}"))?;
+    let doc: Y = serde_yaml::from_str(src).map_err(|e| format!("YAML parse failed: {e}"))?;
     parse_plan_doc(&doc)
 }
 
-/// 基底 + 步覆盖 → 新 spec（bash do_set：state 基底 + 显式 flag，缺省字段继承）。
+/// Base + step override -> new spec (bash do_set: state base + explicit flags, default fields inherited).
 pub fn merge_step(base: &ImpairSpec, ov: &StepOverride) -> Result<ImpairSpec, String> {
     let mut s = base.clone();
     if let Some(v) = ov.rtt_ms {
@@ -409,14 +408,9 @@ pub fn merge_step(base: &ImpairSpec, ov: &StepOverride) -> Result<ImpairSpec, St
             _ => None,
         });
         let Some(loss) = loss else {
-            return Err("gemodel 需配 loss（p13，step 继承前值——基底也无 loss）".to_string());
+            return Err("gemodel needs loss (p13; the step inherits the previous value -- the base has no loss either)".to_string());
         };
-        s.loss = Some(LossSpec::GeModel {
-            loss,
-            r: r.clone(),
-            h: h.clone(),
-            k: k.clone(),
-        });
+        s.loss = Some(LossSpec::GeModel { loss, r: r.clone(), h: h.clone(), k: k.clone() });
     } else if let Some(p) = &ov.loss {
         s.loss = Some(LossSpec::Simple(p.clone()));
     }
@@ -424,7 +418,7 @@ pub fn merge_step(base: &ImpairSpec, ov: &StepOverride) -> Result<ImpairSpec, St
     Ok(s)
 }
 
-/// 首步参数（bash L566-568：首个 STEP flags，无则首个 REPEAT on_flags——steps 在前）。
+/// First-step params (bash L566-568: the first STEP flags, else the first REPEAT on_flags -- steps come first).
 fn first_override(plan: &ScenarioPlan) -> Option<&StepOverride> {
     plan.lines.first().map(|l| match l {
         PlanLine::Step { ov, .. } => ov,
@@ -432,10 +426,10 @@ fn first_override(plan: &ScenarioPlan) -> Option<&StepOverride> {
     })
 }
 
-/// 预演全计划（加载期拦非法值——bash 逐步到 set 才炸；提前 fail-closed 防半程施加，
-/// 偏离登记 T8 报告）。返回首步 spec（apply 打底形）。
+/// Dry-run the whole plan (rejects illegal values at load time -- bash only explodes step-by-step at set; failing early closes the door on half-applied state,
+/// deviation logged in the T8 report). Returns the first-step spec (the base apply shape).
 fn validate_full_plan(plan: &ScenarioPlan) -> Result<ImpairSpec, String> {
-    let ov = first_override(plan).ok_or_else(|| "scenario 无首步参数".to_string())?;
+    let ov = first_override(plan).ok_or_else(|| "scenario has no first-step params".to_string())?;
     let mut cur = merge_step(&ImpairSpec::default(), ov)?;
     for line in &plan.lines {
         let ovs: Vec<&StepOverride> = match line {
@@ -449,19 +443,19 @@ fn validate_full_plan(plan: &ScenarioPlan) -> Result<ImpairSpec, String> {
     Ok(cur)
 }
 
-// ---------- StepExec 抽象（生产=engine 门面；测试=记录形 Noop，零 tc 触达） ----------
+// ---------- StepExec abstraction (production = the engine facade; tests = the recording Noop, zero tc touching) ----------
 
-/// 剧本物理动作门面（runner 负责锁/旗标/时间线；impl 只做施加+事件，调用方持锁时同持）。
+/// Scenario physical-action facade (the runner owns locks/flags/timeline; the impl only applies + emits events, called while the caller holds the lock).
 pub trait StepExec: Send + Sync {
-    /// apply 形首步（impl 写 state + apply 事件）
+    /// apply-shaped first step (impl writes state + the apply event)
     fn apply(&self, req: &ApplyRequest, duration_secs: u64) -> Wn<()>;
-    /// set 形步（全量重放；state 保留 prior.job——done 进度经此流入落盘）
+    /// set-shaped step (full replay; state keeps prior.job -- done progress flows in through it and lands on disk)
     fn set(&self, req: &ApplyRequest, prior: State) -> Wn<()>;
-    /// 现场清除（免锁可达语义由 runner 保证；impl 幂等）
+    /// Site cleanup (lock-free reachability guaranteed by the runner; impl is idempotent)
     fn clear(&self) -> Wn<()>;
 }
 
-/// 生产门面：engine::replay(Verify::Inline) + engine::clear（bash do_apply/do_set 同构）。
+/// Production facade: engine::replay(Verify::Inline) + engine::clear (structurally identical to bash do_apply/do_set).
 #[derive(Debug, Clone)]
 pub struct EngineExec {
     pub dirs: Dirs,
@@ -484,10 +478,7 @@ impl StepExec for EngineExec {
         let before = state::param_summary(&prior.spec);
         engine::replay(
             req,
-            Replay::Set {
-                prior: Box::new(prior),
-                before,
-            },
+            Replay::Set { prior: Box::new(prior), before },
             &self.dirs,
             &self.env,
             Verify::Inline,
@@ -499,7 +490,7 @@ impl StepExec for EngineExec {
     }
 }
 
-// ---------- job 旗标层 ----------
+// ---------- job flag layer ----------
 
 pub fn cancel_path(dirs: &Dirs) -> PathBuf {
     dirs.statedir.join(CANCEL_FILE)
@@ -509,19 +500,19 @@ fn job_alive(j: &JobRef) -> bool {
     fuse::read_proc_starttime(j.pid) == Some(j.starttime)
 }
 
-/// 外部写（CLI/REST apply/set；含第二个 scenario run 互斥）独占门：属主存活 = 409/exit3。
+/// External writes (CLI/REST apply/set; incl. a second scenario run) exclusivity gate: owner alive = 409/exit3.
 pub fn job_gate(dirs: &Dirs) -> Wn<()> {
     let st = State::read_from(&dirs.state_json()).map_err(Fail::env)?;
     if let Some(j) = st.and_then(|s| s.job).filter(job_alive) {
         return Err(Fail::conflict(format!(
-            "scenario 进行中（先 stop）：job {} pid {}",
+            "scenario in progress (stop first): job {} pid {}",
             j.name, j.pid
         )));
     }
     Ok(())
 }
 
-/// runner 检查点：cancel 旗标 / 自有 job 被摘、易主（跨进程 stop 形）。
+/// runner checkpoint: cancel flag / own job removed or ownership changed (the cross-process stop form).
 fn cancel_reason(dirs: &Dirs, name: &str) -> Option<&'static str> {
     if cancel_path(dirs).exists() {
         return Some("user");
@@ -532,7 +523,7 @@ fn cancel_reason(dirs: &Dirs, name: &str) -> Option<&'static str> {
             _ => Some("user"),
         },
         Ok(None) => Some("user"),
-        Err(_) => None, // state 非法/并发写窗——下一步再判（C15：不静默中止，但留给重读）
+        Err(_) => None, // state invalid/concurrent write window -- judged again next step (C15: no silent abort, but left to the re-read)
     }
 }
 
@@ -540,12 +531,12 @@ fn remove_cancel(dirs: &Dirs) {
     if let Err(e) = std::fs::remove_file(cancel_path(dirs))
         && e.kind() != std::io::ErrorKind::NotFound
     {
-        eprintln!("weaknet(scenario): WARN 清 stop 旗标失败: {e}");
+        eprintln!("weaknet(scenario): WARN failed to clear the stop flag: {e}");
     }
 }
 
-/// 场景收尾兜底：state 若仍存且 job 属主=我方，则摘旗（serve 长驻进程防自锁——keep 形 /
-/// clear 失败路径下现场保留但独占必须解除；随现场 clear 掉的 job 自然无须处理=无 op）。
+/// Scenario finish fallback: if state still exists and the job owner is us, remove the flag (prevents a long-lived serve process self-locking -- the keep form /
+/// the clear-failure path keeps the site but exclusivity must be lifted; a job cleared with the site naturally needs no handling = no-op).
 fn clear_own_job(dirs: &Dirs, name: &str) {
     let Ok(Some(st)) = State::read_from(&dirs.state_json()) else {
         return;
@@ -559,7 +550,9 @@ fn clear_own_job(dirs: &Dirs, name: &str) {
         return;
     }
     let Ok(_lk) = engine::take_write_lock(dirs) else {
-        eprintln!("weaknet(scenario): WARN 收尾摘 job 旗取锁失败（属主亡后判活兜底仍可放行）");
+        eprintln!(
+            "weaknet(scenario): WARN failed to take the lock while removing the finish job flag (the dead-owner liveness fallback can still pass)"
+        );
         return;
     };
     if let Ok(Some(mut fresh)) = State::read_from(&dirs.state_json())
@@ -567,63 +560,64 @@ fn clear_own_job(dirs: &Dirs, name: &str) {
     {
         fresh.job = None;
         if let Err(e) = fresh.write_to(&dirs.state_json()) {
-            eprintln!("weaknet(scenario): WARN 收尾摘 job 旗写回失败: {e}");
+            eprintln!(
+                "weaknet(scenario): WARN failed to write back after removing the finish job flag: {e}"
+            );
         }
     }
 }
 
-/// timeline 中止标记面：全部带 aborted 的 scenario-end 原因串。消费合同：非空 ⇒ 该轮
-/// judge 判据作废（rev-2.2；W6/T10 门禁断言空集后才许采信 verdict）。
+/// timeline abort marker surface: the reason string of every scenario-end carrying aborted. Consumption contract: non-empty => that round's
+/// judge verdict is invalidated (rev-2.2; W6/T10 gates assert the empty set before any verdict may be trusted).
 pub fn aborted_in_timeline(dirs: &Dirs) -> Wn<Vec<String>> {
     let raw = match std::fs::read_to_string(dirs.timeline()) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(Fail::env(format!("读 timeline 失败: {e}"))),
+        Err(e) => return Err(Fail::env(format!("failed to read the timeline: {e}"))),
     };
     Ok(raw
         .lines()
         .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
         .filter(|e| e.get("ev").and_then(serde_json::Value::as_str) == Some("scenario-end"))
-        .filter_map(|e| {
-            e.get("aborted")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        })
+        .filter_map(|e| e.get("aborted").and_then(serde_json::Value::as_str).map(str::to_string))
         .collect())
 }
 
-/// `scenario stop` / POST /v1/scenario/stop（无锁可达，恒 exit0/200 语义）。
+/// `scenario stop` / POST /v1/scenario/stop (lock-free reachable, always exit0/200 semantics).
 ///
-/// 属主存活 → 写 cancel 旗标（runner ≤1s 内见点自终，scenario-end 由 runner 补）；
-/// 属主亡/无 job → 幂等零事件（陈旧旗标自清；deviation：崩溃现场不伪造 scenario-end 时刻）。
+/// Owner alive -> write the cancel flag (the runner self-terminates at the next checkpoint within 1s; the runner emits scenario-end);
+/// owner dead/no job -> idempotent zero events (stale flags self-clear; deviation: a crash site does not fabricate a scenario-end moment).
 pub fn stop(dirs: &Dirs) -> Wn<String> {
     let path = dirs.state_json();
     let st = State::read_from(&path).map_err(Fail::env)?;
     if st.as_ref().and_then(|s| s.job.clone()).is_some_and(|j| job_alive(&j)) {
         std::fs::write(cancel_path(dirs), "user\n")
-            .map_err(|e| Fail::env(format!("写 stop 旗标失败: {e}")))?;
-        return Ok("已请求停止（属主存活，最迟下一检查点生效）".into());
+            .map_err(|e| Fail::env(format!("failed to write the stop flag: {e}")))?;
+        return Ok(
+            "stop requested (owner alive, takes effect at the next checkpoint at the latest)"
+                .into(),
+        );
     }
     if let Some(j) = st.and_then(|s| s.job) {
-        // 陈旧属主：清旗标放行（rev-2.2 m1）。锁瞬持防并发写覆盖。
+        // stale owner: clear the flag and pass (rev-2.2 m1). Transient lock guards against concurrent-write overwrite.
         let _lk = engine::take_write_lock(dirs)?;
         if let Some(mut fresh) = State::read_from(&path).map_err(Fail::env)? {
             fresh.job = None;
             fresh.write_to(&path).map_err(Fail::env)?;
         }
         drop(_lk);
-        return Ok(format!("陈旧 job「{}」属主已亡——旗标已清", j.name));
+        return Ok(format!("stale job '{}' owner dead -- flag cleared", j.name));
     }
     remove_cancel(dirs);
-    Ok("无活跃 scenario job（幂等）".into())
+    Ok("no active scenario job (idempotent)".into())
 }
 
-// ---------- 调度器 ----------
+// ---------- Scheduler ----------
 
 #[derive(Debug, Clone)]
 pub struct RunSpec {
     pub name: String,
-    /// scenario-start note 的 `$file` 位（bash=展开后路径；serve inline="inline"）
+    /// the `$file` slot of the scenario-start note (bash = expanded path; serve inline = "inline")
     pub file_disp: String,
     pub plan: ScenarioPlan,
     pub no_baseline: bool,
@@ -631,7 +625,7 @@ pub struct RunSpec {
     pub targeting: Targeting,
     pub iface: String,
     pub sig_port: Option<u16>,
-    /// 测试注入（生产=None→常量 25s；非 bash 发明，仅为单测可跑）
+    /// test injection (production None -> constant 25s; not a bash invention, just so unit tests can run)
     pub recovery_dwell_secs: Option<u64>,
 }
 
@@ -639,7 +633,7 @@ pub struct RunOutcome {
     pub aborted: Option<String>,
     pub elapsed_s: u64,
     pub summary: String,
-    /// CLI 退出码映射：lock-busy→3 / user→0 / step-failed→原码 / 未启动→原码
+    /// CLI exit-code mapping: lock-busy -> 3 / user -> 0 / step-failed -> original code / not started -> original code
     pub exit_code: u32,
 }
 
@@ -656,17 +650,18 @@ fn req_for(spec: ImpairSpec, rs: &RunSpec) -> ApplyRequest {
 }
 
 fn log(msg: &str) {
-    // bash log() 同形：stderr + "weaknet: " 前缀
+    // bash log() same shape: stderr + "weaknet: " prefix
     eprintln!("weaknet: {msg}");
 }
 
-/// 阻塞相（CLI spawn_blocking / serve 同步响应前）：互斥门 → 预演校验 → 首步 apply →
-/// job 旗标落盘 → scenario-start 事件（bash 同序；scenario-start 在 apply 之后 L571）。
+/// Blocking phase (CLI spawn_blocking / serve before the synchronous response): exclusivity gate -> dry-run validation -> first-step apply ->
+/// job flag persistence -> scenario-start event (bash order; scenario-start comes after apply, L571).
 pub fn start_blocking(rs: &RunSpec, exec: &Arc<dyn StepExec>, dirs: &Dirs) -> Wn<()> {
     job_gate(dirs)?;
     remove_cancel(dirs);
     validate_full_plan(&rs.plan).map_err(Fail::bad_param)?;
-    let ov = first_override(&rs.plan).ok_or_else(|| Fail::bad_param("scenario 无首步参数"))?;
+    let ov = first_override(&rs.plan)
+        .ok_or_else(|| Fail::bad_param("scenario has no first-step params"))?;
     let spec = merge_step(&ImpairSpec::default(), ov).map_err(Fail::bad_param)?;
     let covering = rs.plan.baseline_s + rs.plan.total_s + COVERING_MARGIN_SECS;
     let req = req_for(spec, rs);
@@ -675,7 +670,7 @@ pub fn start_blocking(rs: &RunSpec, exec: &Arc<dyn StepExec>, dirs: &Dirs) -> Wn
         exec.apply(&req, covering)?;
         let mut st = State::read_from(&dirs.state_json())
             .map_err(Fail::env)?
-            .ok_or_else(|| Fail::env("scenario: apply 成功但 state 缺失"))?;
+            .ok_or_else(|| Fail::env("scenario: state missing after apply succeeded"))?;
         st.job = Some(JobRef {
             name: rs.name.clone(),
             pid: std::process::id(),
@@ -713,7 +708,7 @@ async fn sleep_checked(dirs: &Dirs, name: &str, secs: u64) -> Result<(), &'stati
     }
 }
 
-/// 等到 t0+target（bash while+sleep 1s 轮询）；返回 actual_s（整数秒，bash SECONDS 同口径）。
+/// Wait until t0+target (bash while+sleep 1s polling); returns actual_s (integer seconds, same convention as bash SECONDS).
 async fn wait_until(
     dirs: &Dirs,
     name: &str,
@@ -738,9 +733,9 @@ enum StepErr {
     Other(Fail),
 }
 
-/// 单步（瞬持锁内：读 state 验 job → done 进度入 prior → merge → exec.set（全量重放，
-/// job 随 prior 落盘）→ 时间线 note）。返新 cur spec（Ok）供调用方串接。
-// 8 参均为瞬持锁内必需上下文（dirs/exec/rs/cur/ov/done/note_ev/note）——拆 struct 反增噪声。
+/// Single step (inside the transient lock: read state and verify the job -> done progress into prior -> merge -> exec.set (full replay,
+/// job persisted with prior) -> timeline note). Returns the new cur spec (Ok) for the caller to chain.
+// all 8 params are required context inside the transient lock (dirs/exec/rs/cur/ov/done/note_ev/note) -- splitting into a struct only adds noise.
 #[allow(clippy::too_many_arguments)]
 fn step_sync(
     dirs: &Dirs,
@@ -755,7 +750,7 @@ fn step_sync(
     let _lk = engine::take_write_lock(dirs).map_err(|_| StepErr::LockBusy)?;
     let mut prior = State::read_from(&dirs.state_json())
         .map_err(|e| StepErr::Other(Fail::env(e)))?
-        .ok_or(StepErr::Cancelled("user"))?; // state 被外摘 = 跨进程 stop/clear 形
+        .ok_or(StepErr::Cancelled("user"))?; // state removed externally = the cross-process stop/clear form
     match &prior.job {
         Some(j) if j.name == rs.name && fuse::read_proc_starttime(j.pid) == Some(j.starttime) => {}
         _ => return Err(StepErr::Cancelled("user")),
@@ -771,9 +766,8 @@ fn step_sync(
     Ok(merged)
 }
 
-
-/// abort 收口：scenario-end + aborted 字段（judge 判据作废信号，rev-2.2）→ 现场清除（非 keep）→
-/// 旗标清理。bash 无 abort 事件形（进程直接 die）——补发是本仓授权合同（tasks T8 契约行）。
+/// abort wrap-up: scenario-end + aborted field (the judge-verdict-invalidation signal, rev-2.2) -> site cleanup (unless keep) ->
+/// flag cleanup. bash has no abort event shape (the process just dies) -- emitting one is this repo's authorized contract (the tasks T8 contract row).
 async fn finish_abort(
     dirs: &Arc<Dirs>,
     exec: &Arc<dyn StepExec>,
@@ -793,7 +787,10 @@ async fn finish_abort(
     if !rs.keep
         && let Err(e) = exec.clear()
     {
-        log(&format!("abort 后 clear 失败（现场残留，交 watchdog/手工 clear）: {}", e.msg));
+        log(&format!(
+            "clear after abort failed (site residue, left to the watchdog/manual clear): {}",
+            e.msg
+        ));
     }
     remove_cancel(dirs);
     clear_own_job(dirs, &rs.name);
@@ -805,8 +802,8 @@ async fn finish_abort(
     }
 }
 
-/// 调度主体（非阻塞相：baseline 窗 → steps/repeat → 恢复驻留 → scenario-end → 收尾 clear）。
-/// 前置：[`start_blocking`] 已过。t0 口径 = baseline 之后（bash L577，elapsed 不含 baseline）。
+/// Scheduling main body (non-blocking phase: baseline window -> steps/repeat -> recovery dwell -> scenario-end -> finish clear).
+/// Precondition: [`start_blocking`] passed. t0 convention = after the baseline (bash L577, elapsed excludes the baseline).
 pub async fn drive(
     rs: Arc<RunSpec>,
     exec: Arc<dyn StepExec>,
@@ -816,11 +813,12 @@ pub async fn drive(
     let plan = rs.plan.clone();
     if !rs.no_baseline && plan.baseline_s > 0 {
         log(&format!(
-            "基线窗 {}s（no-fault twin，保持比=fault/baseline J2>0.95 口径）",
+            "baseline window {}s (no-fault twin; keeps the retention ratio = fault/baseline J2>0.95 convention)",
             plan.baseline_s
         ));
         if let Err(r) = sleep_checked(&dirs, &rs.name, plan.baseline_s).await {
-            return finish_abort(&dirs, &exec, &rs, 0, r.into(), if r == "user" { 0 } else { 2 }).await;
+            return finish_abort(&dirs, &exec, &rs, 0, r.into(), if r == "user" { 0 } else { 2 })
+                .await;
         }
         if let Err(e) = state::timeline_append(
             &dirs,
@@ -838,87 +836,183 @@ pub async fn drive(
                     Ok(g) => g,
                     Err(r) => {
                         let code = if r == "user" { 0 } else { 2 };
-                        return finish_abort(&dirs, &exec, &rs, t0.elapsed().as_secs(), r.into(), code).await;
+                        return finish_abort(
+                            &dirs,
+                            &exec,
+                            &rs,
+                            t0.elapsed().as_secs(),
+                            r.into(),
+                            code,
+                        )
+                        .await;
                     }
                 };
                 let note = format!(
                     "at_s={at_disp} actual_s={got} drift_le_1s={}",
                     if got.saturating_sub(*at_secs) <= 1 { 1 } else { 0 }
                 );
-                let (dirs2, exec2, rs2, cur2) = (dirs.clone(), exec.clone(), rs.clone(), cur.clone());
+                let (dirs2, exec2, rs2, cur2) =
+                    (dirs.clone(), exec.clone(), rs.clone(), cur.clone());
                 let ov_owned = ov.clone();
                 let done_l = done;
                 let note_l = note.clone();
                 let res = tokio::task::spawn_blocking(move || {
-                    step_sync(&dirs2, &exec2, &rs2, cur2, &ov_owned, done_l, "scenario-step", note_l)
+                    step_sync(
+                        &dirs2,
+                        &exec2,
+                        &rs2,
+                        cur2,
+                        &ov_owned,
+                        done_l,
+                        "scenario-step",
+                        note_l,
+                    )
                 })
                 .await;
                 match res {
                     Ok(Ok(new_cur)) => cur = new_cur,
                     Ok(Err(StepErr::LockBusy)) => {
-                        return finish_abort(&dirs, &exec, &rs, t0.elapsed().as_secs(), "lock-busy".into(), 3).await;
+                        return finish_abort(
+                            &dirs,
+                            &exec,
+                            &rs,
+                            t0.elapsed().as_secs(),
+                            "lock-busy".into(),
+                            3,
+                        )
+                        .await;
                     }
                     Ok(Err(StepErr::Cancelled(r))) => {
-                        return finish_abort(&dirs, &exec, &rs, t0.elapsed().as_secs(), r.into(), if r == "user" { 0 } else { 2 }).await;
+                        return finish_abort(
+                            &dirs,
+                            &exec,
+                            &rs,
+                            t0.elapsed().as_secs(),
+                            r.into(),
+                            if r == "user" { 0 } else { 2 },
+                        )
+                        .await;
                     }
                     Ok(Err(StepErr::Other(f))) => {
-                        return finish_abort(&dirs, &exec, &rs, t0.elapsed().as_secs(), format!("step-failed: {}", f.msg), f.code).await;
+                        return finish_abort(
+                            &dirs,
+                            &exec,
+                            &rs,
+                            t0.elapsed().as_secs(),
+                            format!("step-failed: {}", f.msg),
+                            f.code,
+                        )
+                        .await;
                     }
                     Err(j) => {
-                        return finish_abort(&dirs, &exec, &rs, t0.elapsed().as_secs(), format!("step-failed: 任务崩溃 {j}"), 2).await;
+                        return finish_abort(
+                            &dirs,
+                            &exec,
+                            &rs,
+                            t0.elapsed().as_secs(),
+                            format!("step-failed: task crashed {j}"),
+                            2,
+                        )
+                        .await;
                     }
                 }
             }
             PlanLine::Repeat { rounds, on_s, off_s, on_ov, off_ov, .. } => {
                 log(&format!(
-                    "repeat：rounds={rounds} on={on_s}s off={off_s}s（恢复性半判据，CH 4×30s 哲学缩形）"
+                    "repeat: rounds={rounds} on={on_s}s off={off_s}s (recovery half-predicate, shrunk from the CH 4x30s philosophy)"
                 ));
                 for r in 1..=*rounds {
-                    for (phase, secs, ov) in [
-                        ("on", *on_s, on_ov),
-                        ("off", *off_s, off_ov),
-                    ] {
+                    for (phase, secs, ov) in [("on", *on_s, on_ov), ("off", *off_s, off_ov)] {
                         let (dirs2, exec2, rs2, cur2) =
                             (dirs.clone(), exec.clone(), rs.clone(), cur.clone());
                         let ov_owned = ov.clone();
                         let note = format!("r={r} phase={phase}");
                         let res = tokio::task::spawn_blocking(move || {
                             step_sync(
-                                &dirs2, &exec2, &rs2, cur2, &ov_owned, done, "repeat-round", note,
+                                &dirs2,
+                                &exec2,
+                                &rs2,
+                                cur2,
+                                &ov_owned,
+                                done,
+                                "repeat-round",
+                                note,
                             )
                         })
                         .await;
                         cur = match res {
                             Ok(Ok(c)) => c,
                             Ok(Err(StepErr::LockBusy)) => {
-                                return finish_abort(&dirs, &exec, &rs, t0.elapsed().as_secs(), "lock-busy".into(), 3).await;
+                                return finish_abort(
+                                    &dirs,
+                                    &exec,
+                                    &rs,
+                                    t0.elapsed().as_secs(),
+                                    "lock-busy".into(),
+                                    3,
+                                )
+                                .await;
                             }
                             Ok(Err(StepErr::Cancelled(r))) => {
                                 let code = if r == "user" { 0 } else { 2 };
-                                return finish_abort(&dirs, &exec, &rs, t0.elapsed().as_secs(), r.into(), code).await;
+                                return finish_abort(
+                                    &dirs,
+                                    &exec,
+                                    &rs,
+                                    t0.elapsed().as_secs(),
+                                    r.into(),
+                                    code,
+                                )
+                                .await;
                             }
                             Ok(Err(StepErr::Other(f))) => {
-                                return finish_abort(&dirs, &exec, &rs, t0.elapsed().as_secs(), format!("step-failed: {}", f.msg), f.code).await;
+                                return finish_abort(
+                                    &dirs,
+                                    &exec,
+                                    &rs,
+                                    t0.elapsed().as_secs(),
+                                    format!("step-failed: {}", f.msg),
+                                    f.code,
+                                )
+                                .await;
                             }
                             Err(j) => {
-                                return finish_abort(&dirs, &exec, &rs, t0.elapsed().as_secs(), format!("step-failed: 任务崩溃 {j}"), 2).await;
+                                return finish_abort(
+                                    &dirs,
+                                    &exec,
+                                    &rs,
+                                    t0.elapsed().as_secs(),
+                                    format!("step-failed: task crashed {j}"),
+                                    2,
+                                )
+                                .await;
                             }
                         };
                         if let Err(c) = sleep_checked(&dirs, &rs.name, secs).await {
                             let code = if c == "user" { 0 } else { 2 };
-                            return finish_abort(&dirs, &exec, &rs, t0.elapsed().as_secs(), c.into(), code).await;
+                            return finish_abort(
+                                &dirs,
+                                &exec,
+                                &rs,
+                                t0.elapsed().as_secs(),
+                                c.into(),
+                                code,
+                            )
+                            .await;
                         }
                     }
                 }
             }
         }
     }
-    // bash L602 awk 判据：任一 STEP flags 含 "--rtt 0" → 恢复驻留窗
-    if plan.lines.iter().any(|l| {
-        matches!(l, PlanLine::Step { flags, .. } if flags.contains("--rtt 0"))
-    }) {
+    // bash L602 awk predicate: any STEP flags containing "--rtt 0" -> recovery dwell window
+    if plan
+        .lines
+        .iter()
+        .any(|l| matches!(l, PlanLine::Step { flags, .. } if flags.contains("--rtt 0")))
+    {
         let dw = rs.recovery_dwell_secs.unwrap_or(RECOVERY_DWELL_SECS);
-        log(&format!("恢复驻留窗 {dw}s（recovery ratio 采样）"));
+        log(&format!("recovery dwell window {dw}s (recovery ratio sampling)"));
         if let Err(r) = sleep_checked(&dirs, &rs.name, dw).await {
             let code = if r == "user" { 0 } else { 2 };
             return finish_abort(&dirs, &exec, &rs, t0.elapsed().as_secs(), r.into(), code).await;
@@ -929,15 +1023,16 @@ pub async fn drive(
         &dirs,
         json!({"ev": "scenario-end", "note": format!("elapsed_s={elapsed_s}")}),
     ) {
-        return finish_abort(&dirs, &exec, &rs, elapsed_s, format!("timeline-failed: {e}"), 2).await;
+        return finish_abort(&dirs, &exec, &rs, elapsed_s, format!("timeline-failed: {e}"), 2)
+            .await;
     }
     let keep = rs.keep || !plan.clear;
     let mut code = 0u32;
     let mut extra = String::new();
     if keep {
-        log("scenario 结束：现场保留");
+        log("scenario finished: site kept");
     } else if let Err(e) = exec.clear() {
-        log(&format!("收尾 clear 失败: {}", e.msg));
+        log(&format!("finish clear failed: {}", e.msg));
         code = e.code;
         extra = " clear-failed".into();
     }
@@ -947,19 +1042,15 @@ pub async fn drive(
         aborted: None,
         elapsed_s,
         summary: format!(
-            "scenario 完成: elapsed_s={elapsed_s} steps={} keep={keep}{extra}",
+            "scenario done: elapsed_s={elapsed_s} steps={} keep={keep}{extra}",
             plan.lines.len(),
         ),
         exit_code: code,
     }
 }
 
-/// CLI 全链（start 阻塞相 + drive）；serve 分相直调 [`start_blocking`]+tokio::spawn([`drive`])。
-pub async fn run_full(
-    rs: RunSpec,
-    exec: Arc<dyn StepExec>,
-    dirs: Dirs,
-) -> RunOutcome {
+/// CLI full chain (start blocking phase + drive); serve splits phases and calls [`start_blocking`]+tokio::spawn([`drive`]) directly.
+pub async fn run_full(rs: RunSpec, exec: Arc<dyn StepExec>, dirs: Dirs) -> RunOutcome {
     let rs = Arc::new(rs);
     let dirs = Arc::new(dirs);
     let (rs2, exec2, dirs2) = (rs.clone(), exec.clone(), dirs.clone());
@@ -974,62 +1065,64 @@ pub async fn run_full(
             return RunOutcome {
                 aborted: None,
                 elapsed_s: 0,
-                summary: format!("启动任务崩溃: {j}"),
+                summary: format!("startup task crashed: {j}"),
                 exit_code: 2,
-            }
+            };
         }
     };
     if let Err(e) = sr {
         return RunOutcome {
             aborted: None,
             elapsed_s: 0,
-            summary: format!("启动失败: {}", e.msg),
+            summary: format!("startup failed: {}", e.msg),
             exit_code: e.code,
         };
     }
     drive(rs, exec, dirs, cur).await
 }
 
-/// [`run_full`] 的信号层包装（design §fuse『SIGINT/SIGTERM --auto-clear』的 CLI 侧补票——
-/// 不发明第二套撤损通道）：任一信号到达即写 [`stop`] 属主存活形的同一 cancel 旗标文件，
-/// 随后**继续等** run_full 至其下一检查点（sleep_checked/wait_until ≤1s 粒度，step_sync
-/// 锁窗内不可打断）自终。产物时间线形 = `scenario-end{aborted:"user"}` + 既有 abort 收尾
-/// （非 keep 时 exec.clear 现场清除），exit_code=0——与跨进程 `scenario stop` 逐字节同形
-/// （测试 F 已钉该路径；本函数只是旗标写入方的替换：信号 → 旗标）。
+/// Signal-layer wrapper around [`run_full`] (the CLI side of design §fuse SIGINT/SIGTERM --auto-clear --
+/// no second damage-control channel invented): any signal writes the same cancel flag file as [`stop`]'s owner-alive form,
+/// then **keeps waiting** for run_full to self-terminate at its next checkpoint (sleep_checked/wait_until at 1s granularity, not interruptible
+/// inside the step_sync lock window). Output timeline shape = `scenario-end{aborted:"user"}` + the existing abort wrap-up
+/// (exec.clear site cleanup when not keep), exit_code=0 -- byte-identical to cross-process `scenario stop`
+/// (test F pins this path; this function only swaps the flag writer: signal -> flag).
 ///
-/// 边界（minimal 语义，登记于此）：信号若落在 start_blocking 阻塞相（apply 落盘前），
-/// 入口 `remove_cancel` 会消费掉该旗标，run 照常进行——此时再按一次信号即走 abort 路径。
+/// Boundary (minimal semantics, logged here): if the signal lands during the start_blocking blocking phase (before apply persists),
+/// the entry `remove_cancel` consumes that flag and run proceeds as usual -- pressing the signal again then takes the abort path.
 ///
-/// serve 侧 `/v1/scenario/run` 不经此路（长驻进程 SIGINT=整服务下线，其停止面已有
-/// `/v1/scenario/stop` 端点）——行为保持原样，本包装仅供 CLI 前台 `scenario run` 使用。
+/// The serve-side /v1/scenario/run does not go through this path (in a long-lived process SIGINT = the whole service going down; its stop surface already has
+/// the /v1/scenario/stop endpoint) -- behavior unchanged, this wrapper only serves the CLI foreground `scenario run`.
 pub async fn run_full_auto_clear(rs: RunSpec, exec: Arc<dyn StepExec>, dirs: Dirs) -> RunOutcome {
-    let cancel = dirs.clone(); // Dirs: Clone（stop 写旗标用）
+    let cancel = dirs.clone(); // Dirs: Clone (used by stop to write the flag)
     let outcome = run_full(rs, exec, dirs);
     tokio::pin!(outcome);
-    // 常听 ctrl_c + SIGTERM 双路（signal feature 已在 Cargo.toml，无新增依赖）。
+    // listens on both ctrl_c + SIGTERM (the signal feature is already in Cargo.toml, no new dependency).
     let signals = async {
         match unix_signals().await {
             Ok(()) => request_stop(&cancel),
-            Err(e) => eprintln!("weaknet(scenario): WARN 信号监听建立失败（--auto-clear 失效，走原 Ctrl-C 默认终止）: {e}"),
+            Err(e) => eprintln!(
+                "weaknet(scenario): WARN failed to set up signal listening (--auto-clear inert, falls back to the default Ctrl-C kill): {e}"
+            ),
         }
     };
     tokio::pin!(signals);
-    // 单次 select：信号先至则写旗标后继续等 outcome（runner 下一检查点自终）；
-    // outcome 先完成则丢弃监听直接返回。无循环——避免重复轮询已完成 future。
+    // single select: if the signal arrives first, write the flag then keep waiting for the outcome (the runner self-terminates at the next checkpoint);
+    // if the outcome completes first, drop the listener and return. No loop -- avoids re-polling a completed future.
     tokio::select! {
-        biased; // run 完成优先退出，不留孤儿监听
-        o = &mut outcome => o,
-        () = &mut signals => {
-            // 旗标已写：继续等 run_full 到下一检查点自终
-            outcome.await
+            biased; // run completion exits with priority, no orphan listener left
+            o = &mut outcome => o,
+            () = &mut signals => {
+    // flag written: keep waiting for run_full to self-terminate at the next checkpoint
+                outcome.await
+            }
         }
-    }
 }
 
-/// 两个终止信号（SIGINT/SIGTERM）任一到达即返回。注册失败向上传（调用方降级 WARN，
-/// 不炸 run——信号层是便利面，非正确性依赖）。
+/// Returns when either termination signal (SIGINT/SIGTERM) arrives. Registration failure propagates up (the caller downgrades to WARN,
+/// does not kill run -- the signal layer is a convenience surface, not a correctness dependency).
 async fn unix_signals() -> Result<(), std::io::Error> {
-    use tokio::signal::unix::{signal, SignalKind};
+    use tokio::signal::unix::{SignalKind, signal};
     let mut sigint = signal(SignalKind::interrupt())?;
     let mut sigterm = signal(SignalKind::terminate())?;
     tokio::select! {
@@ -1039,31 +1132,26 @@ async fn unix_signals() -> Result<(), std::io::Error> {
     Ok(())
 }
 
-/// 旗标写入（与 [`stop`] 属主存活分支同一文件同一内容——run_full 期本进程即属主，
-/// 无需重读 state 判活；stop 的属主亡自清分支在此不可达）。
+/// Flag write (same file and content as [`stop`]'s owner-alive branch -- during run_full this process is the owner,
+/// no need to re-read state for liveness; stop's dead-owner self-clear branch is unreachable here).
 fn request_stop(dirs: &Dirs) {
     if let Err(e) = std::fs::write(cancel_path(dirs), "user\n") {
-        eprintln!("weaknet(scenario): WARN 写 stop 旗标失败: {e}");
+        eprintln!("weaknet(scenario): WARN failed to write the stop flag: {e}");
     }
 }
 
-/// start 后重读当前已安装 spec（drive 串接基座；以磁盘现场为准，防 start/驱动间外部变更漏判）。
+/// Re-read the currently installed spec after start (the base the drive chains onto; disk is authoritative, guarding against missed external changes between start and drive).
 fn read_start_spec(dirs: &Dirs) -> ImpairSpec {
-    State::read_from(&dirs.state_json())
-        .ok()
-        .flatten()
-        .map(|s| s.spec)
-        .unwrap_or_default()
+    State::read_from(&dirs.state_json()).ok().flatten().map(|s| s.spec).unwrap_or_default()
 }
 
+// ---------- File resolution (CLI/serve both entries; structurally identical to the bash L551 expansion rule) ----------
 
-// ---------- 文件寻径（CLI/serve 两入口；bash L551 展开规则同构） ----------
-
-/// serve：basename-only → scenarios/<名>.yaml + canonicalize 断言（rev-2.2 m-batch；
-/// 面板传 stem，.yaml 自动补全）。
+/// serve: basename-only -> scenarios/<name>.yaml + canonicalize containment assert (rev-2.2 m-batch;
+/// the panel passes the stem, .yaml auto-appended).
 pub fn resolve_serve_file(basename: &str) -> Wn<(std::path::PathBuf, String)> {
     let root = crate::scope::weaknet_d_root().ok_or_else(|| {
-        Fail::env("无 scenario 资产目录（WEAKNET_ASSETS_DIR / 二进制同级 weaknet.d / scripts/weaknet.d）")
+        Fail::env("no scenario asset dir (WEAKNET_ASSETS_DIR / weaknet.d next to the binary / scripts/weaknet.d)")
     })?;
     let sdir = root.join("scenarios");
     let fname = if basename.ends_with(".yaml") || basename.ends_with(".yml") {
@@ -1071,25 +1159,27 @@ pub fn resolve_serve_file(basename: &str) -> Wn<(std::path::PathBuf, String)> {
     } else {
         format!("{basename}.yaml")
     };
-    let rp = sdir.join(&fname).canonicalize().map_err(|e| {
-        Fail::bad_param(format!("无 scenario: {fname}（{}：{e}）", sdir.display()))
-    })?;
+    let rp = sdir
+        .join(&fname)
+        .canonicalize()
+        .map_err(|e| Fail::bad_param(format!("no scenario: {fname} ({}: {e})", sdir.display())))?;
     let rd = sdir
         .canonicalize()
-        .map_err(|e| Fail::env(format!("scenario 目录不可达 {}: {e}", sdir.display())))?;
+        .map_err(|e| Fail::env(format!("scenario dir unreachable {}: {e}", sdir.display())))?;
     if !rp.starts_with(&rd) {
-        return Err(Fail::bad_param("scenario 路径越界（canonicalize 后不在 scenarios/ 内）"));
+        return Err(Fail::bad_param(
+            "scenario path escapes the scenarios/ dir (after canonicalize)",
+        ));
     }
-    let stem = rp
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("scenario")
-        .to_string();
+    let stem = rp.file_stem().and_then(|s| s.to_str()).unwrap_or("scenario").to_string();
     Ok((rp, stem))
 }
 
-/// CLI：bash 展开形（*.yaml 直用；否则 scenarios 根/<名>.yaml）；--dir 覆写根。
-pub fn resolve_run_file(file: &str, dir_override: Option<&str>) -> Wn<(std::path::PathBuf, String)> {
+/// CLI: bash expansion form (*.yaml used directly; else scenarios root/<name>.yaml); --dir overrides the root.
+pub fn resolve_run_file(
+    file: &str,
+    dir_override: Option<&str>,
+) -> Wn<(std::path::PathBuf, String)> {
     let path = if file.ends_with(".yaml") || file.ends_with(".yml") {
         std::path::PathBuf::from(file)
     } else {
@@ -1097,25 +1187,21 @@ pub fn resolve_run_file(file: &str, dir_override: Option<&str>) -> Wn<(std::path
             Some(d) => std::path::PathBuf::from(d),
             None => crate::scope::weaknet_d_root()
                 .ok_or_else(|| {
-                    Fail::env("无 scenario 资产目录（--dir 指定，或 WEAKNET_ASSETS_DIR/weaknet.d 就位）")
+                    Fail::env("no scenario asset dir (--dir given, or WEAKNET_ASSETS_DIR/weaknet.d in place)")
                 })?
                 .join("scenarios"),
         };
         root.join(format!("{file}.yaml"))
     };
     if !path.is_file() {
-        return Err(Fail::bad_param(format!("无 scenario: {}", path.display())));
+        return Err(Fail::bad_param(format!("no scenario: {}", path.display())));
     }
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("scenario")
-        .to_string();
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("scenario").to_string();
     Ok((path, stem))
 }
 
-/// 内嵌源资产名守卫：basename-only（无路径分隔/通配/空/`..`）——§serve 安全
-/// 「scenario basename」合同对内嵌侧同样执行（rust-embed 键查表本就非 fs，显式单闸）。
+/// Embedded asset-name guard: basename-only (no path separators/wildcards/empty/`..`) -- the §serve security
+/// "scenario basename" contract applies to the embedded side too (rust-embed is a key lookup, not fs, but an explicit gate anyway).
 #[must_use]
 pub fn is_safe_asset_name(s: &str) -> bool {
     !s.is_empty()
@@ -1127,7 +1213,7 @@ pub fn is_safe_asset_name(s: &str) -> bool {
         && s != "."
 }
 
-/// 资产名 → 相对键（`<名>.yaml` 自动补全，同 resolve_serve_file fname 规则）。
+/// Asset name -> relative key (`<name>.yaml` auto-appended, same rule as resolve_serve_file fname).
 #[must_use]
 pub fn asset_rel(sub: &str, name: &str) -> String {
     if name.ends_with(".yaml") || name.ends_with(".yml") {
@@ -1137,13 +1223,14 @@ pub fn asset_rel(sub: &str, name: &str) -> String {
     }
 }
 
-/// CLI scenario 读取（T13 §车端面寻径单函数）：fs 寻径优先，bare 名形内嵌兜底。
-/// 返回 (raw, stem, disp)；fs 报因在「不可内嵌形」（带路径/通配/--dir 覆盖）时透传。
+/// CLI scenario read (T13 vehicle-side resolution, single function): fs resolution first, bare names fall back to embedded.
+/// Returns (raw, stem, disp); fs cause is passed through for "non-embeddable forms" (with paths/wildcards/--dir override).
 pub fn read_run_yaml(file: &str, dir_override: Option<&str>) -> Wn<(String, String, String)> {
     match resolve_run_file(file, dir_override) {
         Ok((path, stem)) => {
-            let raw = std::fs::read_to_string(&path)
-                .map_err(|e| Fail::env(format!("读 scenario {} 失败: {e}", path.display())))?;
+            let raw = std::fs::read_to_string(&path).map_err(|e| {
+                Fail::env(format!("failed to read scenario {}: {e}", path.display()))
+            })?;
             Ok((raw, stem, path.display().to_string()))
         }
         Err(fs_err) => {
@@ -1155,7 +1242,7 @@ pub fn read_run_yaml(file: &str, dir_override: Option<&str>) -> Wn<(String, Stri
                 Some(raw) => Ok((
                     raw,
                     file.trim_end_matches(".yaml").trim_end_matches(".yml").to_string(),
-                    format!("内嵌 {rel}"),
+                    format!("embedded {rel}"),
                 )),
                 None => Err(fs_err),
             }
@@ -1173,14 +1260,14 @@ mod tests {
         Dirs { statedir: d }
     }
 
-    // 真信号 E2E（自杀式 kill -TERM 本进程）刻意不设：信号 handler 是进程全局态
-    // （signal_hook 注册后同进程所有 listener 同时被唤醒），libtest 并行下任何注册
-    // unix_signals 的兄弟测试（如下 wrap 测走 run_full_auto_clear）都会被这份 SIGTERM
-    // 误触发——非确定性互污。unix_signals 本体是 tokio::signal 的 8 行直包装，其效果面
-    // （→ request_stop 落同一旗标 → runner 检查点自终）由下行幂等测 + wrap 测 +
-    // tests/scenario_engine.rs::I 三面钉住。
+    // real-signal E2E (self-killing kill -TERM this process) deliberately absent: a signal handler is process-global state
+    // (after signal_hook registration all listeners in the same process wake together); under libtest parallelism any sibling test registering
+    // unix_signals (e.g. the wrap test below going through run_full_auto_clear) would be spuriously triggered by this SIGTERM --
+    // nondeterministic cross-contamination. unix_signals itself is an 8-line direct wrapper of tokio::signal; its effect surface
+    // (-> request_stop lands the same flag -> the runner self-terminates at a checkpoint) is pinned by the idempotence test below + the wrap test +
+    // tests/scenario_engine.rs::I.
 
-    /// request_stop 幂等：旗标已存时重复写不报错（信号后 runner 未及消费的窗口）。
+    /// request_stop idempotence: writing again while the flag exists must not error (the window where the runner hasn't consumed it after a signal).
     #[test]
     fn request_stop_idempotent() {
         let dirs = tmp_dirs("idem");
@@ -1191,10 +1278,10 @@ mod tests {
         std::fs::remove_dir_all(&dirs.statedir).ok();
     }
 
-    /// F 路径的信号层等价形：并发任务写 cancel 旗标（= request_stop 的效果；handler 本身
-    /// 只是 unix_signals→request_stop 的细包装（真信号 E2E 不可并行测的理由见上行注释块），断言
-    /// run_full_auto_clear 继续等 run_full 到检查点自终、返 aborted:user 形 outcome。
-    /// 完整 teardown 面（clear 事件/现场归零）钉 tests/scenario_engine.rs::I（需 NoopExec 脚手架）。
+    /// The signal-layer equivalent of path F: a concurrent task writes the cancel flag (= request_stop's effect; the handler itself
+    /// is just a thin unix_signals -> request_stop wrapper; the reason real-signal E2E can't be parallel-tested is in the comment block above). Asserts
+    /// run_full_auto_clear keeps waiting for run_full to self-terminate at a checkpoint and returns the aborted:user outcome.
+    /// The full teardown surface (clear event / site zeroed) is pinned in tests/scenario_engine.rs::I (needs the NoopExec scaffold).
     #[tokio::test]
     async fn auto_clear_waits_checkpoint_after_flag_write() {
         struct Nop(Dirs);
@@ -1233,14 +1320,17 @@ mod tests {
         }
         let dirs = tmp_dirs("wrap");
         let exec = Arc::new(Nop(dirs.clone()));
-        // 单行短计划 + baseline 0：run 在 wait_until(60s) 窗内，旗标必在 ≤1s 检查点命中。
-        let plan = parse_plan_yaml("scenario:\n  baseline_s: 0\n  steps:\n    - at_s: 60\n      set: {rtt_ms: 80}\n").unwrap();
+        // single-line short plan + baseline 0: run is inside the wait_until(60s) window, the flag must be hit at a <=1s checkpoint.
+        let plan = parse_plan_yaml(
+            "scenario:\n  baseline_s: 0\n  steps:\n    - at_s: 60\n      set: {rtt_ms: 80}\n",
+        )
+        .unwrap();
         let rs = RunSpec {
             name: "wrap".into(),
             file_disp: "wrap.yaml".into(),
             plan,
             no_baseline: true,
-            keep: true, // 本例只验包装层等待形，现场清除面归 I 测
+            keep: true, // this case only validates the wrapper's waiting shape; site cleanup belongs to test I
             targeting: crate::scope::Targeting {
                 scope: crate::spec::ScopeSel::Media,
                 ports: vec![40010],
@@ -1262,11 +1352,13 @@ mod tests {
             run_full_auto_clear(rs, exec, dirs.clone()),
         )
         .await
-        .expect("包装层应在检查点自终，不得挂到 60s 步窗");
+        .expect(
+            "the wrapper should self-terminate at a checkpoint, not hang until the 60s step window",
+        );
         let _ = flagger.await;
         assert_eq!(out.aborted.as_deref(), Some("user"));
         assert_eq!(out.exit_code, 0);
-        assert!(!cancel_path(&dirs).exists(), "abort 收尾应消费旗标");
+        assert!(!cancel_path(&dirs).exists(), "abort wrap-up should consume the flag");
         std::fs::remove_dir_all(&dirs.statedir).ok();
     }
 }

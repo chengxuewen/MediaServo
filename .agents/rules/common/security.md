@@ -28,11 +28,11 @@ If security issue found:
 4. Rotate any exposed secrets
 5. Review entire codebase for similar issues
 
-## 可执行检查
+## Executable Checks
 
 ```bash
-# 验证：无明文密钥
+# Verify: no plaintext secrets
 grep -rn "sk-\|api_key\|password=" --include="*.rs" crates/ || true
-# 验证：无不安全依赖
+# Verify: no insecure dependencies
 cargo audit 2>/dev/null || echo "cargo audit not installed"
 ```

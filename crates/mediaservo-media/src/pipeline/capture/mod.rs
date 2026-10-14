@@ -127,7 +127,7 @@ impl TimestampMapper {
         self.to_epoch_ns(self.anchor_epoch + uptime)
     }
 
-    #[allow(clippy::wrong_self_convention)] // 状态查询语义非构造
+    #[allow(clippy::wrong_self_convention)] // state-query semantics, not construction
     fn to_epoch_ns(&self, t: SystemTime) -> u64 {
         t.duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0)
     }

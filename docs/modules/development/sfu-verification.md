@@ -6,7 +6,7 @@
 
 ```bash
 # All tests pass without SFU
-cargo test -p mediaservo-server --tests  # 67 lib + 32 e2e（实测 2026-08-13）
+cargo test -p mediaservo-server --tests  # 67 lib + 32 e2e (measured 2026-08-13)
 
 # SFU feature compiles but no runtime (mediasoup C++ Worker unavailable)
 cargo check -p mediaservo-server --features sfu-mediasoup  # clean
@@ -22,7 +22,7 @@ sudo apt-get install -y pkg-config cmake ninja-build libssl-dev libuv1-dev pytho
 pip3 install meson
 
 # Full test suite (4 new SFU E2E tests)
-cargo test -p mediaservo-server --features sfu-mediasoup  # 全量（mediasoup 构建需 Linux/Docker）
+cargo test -p mediaservo-server --features sfu-mediasoup  # full suite (mediasoup builds need Linux/Docker)
 
 # All workspace tests
 cargo test --workspace --features sfu-mediasoup

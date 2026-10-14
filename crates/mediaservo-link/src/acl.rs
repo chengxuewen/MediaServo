@@ -1,64 +1,72 @@
-//! 静态 ACL（D237：role 预置 + 节点覆盖；deny 审计日志）。
+//! Static ACL (D237: role presets + node overrides; denial audit log).
 
 use crate::id::{FrameTopic, NodeId};
 
-/// 节点角色。
+/// Node role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Role {
-    /// 出图节点：发布相机帧。
+    /// Capture node: publishes camera frames.
     Capture,
-    /// 处理节点：订阅相机帧、发布派生 topic（如拼接）。
+    /// Processor node: subscribes camera frames, publishes derived topics (e.g. stitched).
     Processor,
-    /// 推流节点：订阅帧、推 WebRTC、发布自身 stats（stats/*）。
+    /// Pusher node: subscribes frames, pushes WebRTC, publishes own stats (stats/*).
     Pusher,
-    /// 舱端拉流（本地总线无权限）。
+    /// Cockpit puller (no permission on the local bus).
     Puller,
-    /// 录制节点：订阅帧、录制。
+    /// Recorder node: subscribes frames, records.
     Recorder,
-    /// 控制节点：发布控制指令、订阅遥测/状态。
+    /// Control node: publishes control commands, subscribes telemetry/status.
     Control,
-    /// 感知节点：发布感知结果、订阅相机帧。
+    /// Perception node: publishes perception results, subscribes camera frames.
     Perception,
-    /// 监控节点（host-agent 数据面监控，E2）：订阅相机帧 + 推流状态，不发布。
+    /// Monitor node (host-agent data-plane monitoring, E2): subscribes camera frames + push stats, never publishes.
     Monitor,
 }
 
-/// 节点 ACL（静态，D237）。
+/// Node ACL (static, D237).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NodeAcl {
     pub node_id: NodeId,
     pub role: Role,
-    /// 允许发布的 topic 通配模式（如 `"camera/*"`）。
+    /// Wildcard patterns of publishable topics (e.g. `"camera/*"`).
     pub publish_allow: Vec<String>,
-    /// 允许订阅的 topic 通配模式。
+    /// Wildcard patterns of subscribable topics.
     pub subscribe_allow: Vec<String>,
 }
 
 impl NodeAcl {
-    /// D237 权限矩阵预置。
+    /// D237 permission-matrix presets.
     pub fn for_role(node_id: NodeId, role: Role) -> Self {
         let (publish_allow, subscribe_allow): (Vec<String>, Vec<String>) = match role {
             Role::Capture => (vec!["camera/*".into()], vec![]),
             Role::Processor => (vec!["video/*".into()], vec!["camera/*".into()]),
-            Role::Pusher => (vec!["stats/*".into()], vec!["camera/*".into(), "video/*".into(), "vision/*".into()]),
+            Role::Pusher => (
+                vec!["stats/*".into()],
+                vec!["camera/*".into(), "video/*".into(), "vision/*".into()],
+            ),
             Role::Puller => (vec![], vec![]),
-            // E2 推流状态上报: Recorder 订阅帧 + 发布 stats/*
-            // F3: 订阅视觉结果（vision/<camera-id>，D-H8 链路）
-            Role::Recorder => (vec!["stats/*".into()], vec!["camera/*".into(), "video/*".into(), "vision/*".into()]),
+            // E2 push-status reporting: Recorder subscribes frames + publishes stats/*
+            // F3: subscribe vision results (vision/<camera-id>, D-H8 chain)
+            Role::Recorder => (
+                vec!["stats/*".into()],
+                vec!["camera/*".into(), "video/*".into(), "vision/*".into()],
+            ),
             Role::Control => (
-                // S1 总线镜像：controller 发布 cmd/ack 双 topic；消费侧（ROS 节点/回放）订阅 cmd。
+                // S1 bus mirror: controller publishes cmd+ack topics; consumers (ROS nodes/replay) subscribe cmd.
                 vec!["control/cmd".into(), "control/ack".into()],
                 vec!["control/cmd".into(), "control/telemetry".into(), "status/*".into()],
             ),
-            // F3: ROS 视觉节点发布 vision/<camera-id>（D-H7/D-H8，桥接配置单一来源）
-            Role::Perception => (vec!["perception/*".into(), "vision/*".into()], vec!["camera/*".into()]),
+            // F3: ROS vision node publishes vision/<camera-id> (D-H7/D-H8, single-source bridge config)
+            Role::Perception => {
+                (vec!["perception/*".into(), "vision/*".into()], vec!["camera/*".into()])
+            }
             Role::Monitor => (vec![], vec!["camera/*".into(), "stats/*".into()]),
         };
         Self { node_id, role, publish_allow, subscribe_allow }
     }
 
-    /// 是否允许发布该 topic；越权记审计日志（D237 + C15）。
+    /// Whether publishing this topic is allowed; denials write an audit log (D237 + C15).
     pub fn can_publish(&self, topic: &FrameTopic) -> bool {
         let ok = self.publish_allow.iter().any(|p| topic.matches(p));
         if !ok {
@@ -71,7 +79,7 @@ impl NodeAcl {
         ok
     }
 
-    /// 是否允许订阅该 topic；越权记审计日志（D237 + C15）。
+    /// Whether subscribing this topic is allowed; denials write an audit log (D237 + C15).
     pub fn can_subscribe(&self, topic: &FrameTopic) -> bool {
         let ok = self.subscribe_allow.iter().any(|p| topic.matches(p));
         if !ok {

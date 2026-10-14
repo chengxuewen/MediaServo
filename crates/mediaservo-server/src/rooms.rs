@@ -1,23 +1,23 @@
-//! W2-A（p3-gui-viewer）：消费者面房间发现 `GET /api/rooms`。
+//! W2-A (p3-gui-viewer): consumer-facing room discovery `GET /api/rooms`.
 //!
-//! 契约 = `docs/plans/p3-gui-viewer/PLAN.md` §5-A（四席评审定稿）：
-//! - **独立 router + 独立角色门**：admin 面 auth_middleware 对 viewer/operator 恒拒
-//!   （admin.rs:831 实证），本端点必须共存但既不复用也不放宽那道门（F-S-1 BLOCKER 钉）。
-//! - 权限 = D-H11 实证矩阵：admin/dispatcher 全量在线房；viewer/operator 仅 allowlist
-//!   （`can_pull` 同一判定，roles.rs 现成，不新造第二实现）。
-//! - **G16/F-S-2 裁决**：无主房（车未上线/离线）对一切角色隐藏——不变量
-//!   「列表 ⊆ 可进；可进∖列表 仅允许 owner=None 一族」，单测双向钉。
-//! - 响应 serde 钉死 `{room_id, kind}` 二字段（admin/rooms 富字段不下放，F-S-6/9）。
-//!   W4d 增补（09-17）：**per-stream 流房派生**——媒体面 producer 活在
-//!   `<整车房>_<stream_id>`（PIT-140 v2）且不经 RoomJoin 注册，只看注册列表的 SDK
-//!   语义注记(2026-09-29): per-stream 房=底层隔离粒度，非产品语义——发现层表达
-//!   归属(整车主条+流派生，去重钉在 psk_discover)；UI 按 base 分组。详见 pitfalls PIT-140 注记。
-//!   消费者发现不到可播房（浏览器按流勾选天然免疫，web 未暴露）。派生源 =
-//!   StatusReport streams[].connected；owner 继承 base 房（可见性判定同向）。
-//!   kind 三面 = audio（C29 前缀）/ video（流房）/ control（整车房——无视频 producer）。
+//! Contract = `docs/plans/p3-gui-viewer/PLAN.md` S5-A (four-seat review final):
+//! - **Separate router + separate role gate**: the admin-plane auth_middleware always rejects viewer/operator
+//!   (proven at admin.rs:831); this endpoint must coexist but neither reuses nor relaxes that gate (F-S-1 BLOCKER pin).
+//! - Permissions = the D-H11 proven matrix: admin/dispatcher see all online rooms; viewer/operator only allowlist
+//!   (same check as `can_pull`, roles.rs as-is -- no second implementation).
+//! - **G16/F-S-2 ruling**: ownerless rooms (vehicle offline/unregistered) are hidden from every role -- the invariant
+//!   "listed subset-of joinable; joinable minus listed only allows the owner=None family", pinned by two-way unit tests.
+//! - Response serde pinned to the two fields `{room_id, kind}` (admin/rooms rich fields not handed down, F-S-6/9).
+//!   W4d addition (09-17): **per-stream room derivation** -- media-plane producers live in
+//!   `<vehicle-room>_<stream_id>` (PIT-140 v2) without RoomJoin registration, so SDK consumers reading only the registered list
+//!   Semantics note (2026-09-29): a per-stream room is the underlying isolation granularity, not product semantics -- the discovery layer
+//!   expresses ownership (vehicle main entry + derived streams; dedup pinned in psk_discover); the UI groups by base. See PIT-140 note.
+//!   cannot discover playable rooms (browsers pick by stream so they are naturally immune; web does not expose it). Derivation source =
+//!   StatusReport streams[].connected; owner inherits the base room (visibility checks in the same direction).
+//!   The three kinds = audio (C29 prefix) / video (stream room) / control (vehicle room -- no video producer inside).
 //!
-//! - 枚举源 = room_manager.list_rooms（与 admin 视图同源，禁第三份）；owner 权威源 =
-//!   signaling.room_owner_of（RoomJoin 门读同一 map，同源=不变量成立的前提）。
+//! - Enumeration source = room_manager.list_rooms (same source as the admin view; a third copy is forbidden); owner authority =
+//!   signaling.room_owner_of (the RoomJoin gate reads the same map; shared source is the premise of the invariant).
 
 use axum::Router;
 use axum::extract::State;
@@ -29,19 +29,19 @@ use serde::Serialize;
 use crate::admin::{AdminState, ErrorResponse, check_auth};
 use crate::audit::{AuditEvent, log_event};
 #[allow(unused_imports)]
-// clippy --fix cfg 盲区（09-18 N8 实录）：本姿态-unused 的项是 stub 姿态/tests 分支在用
+// clippy --fix cfg blind spot (09-18 N8 record): items unused in this posture are used by the stub posture/tests branches
 use crate::roles::{AccountIdentity, CockpitRole, SessionIdentity};
 
-/// 列表项（wire 契约——单测钉字段形，多字段=回归失败）。
+/// List item (wire contract -- unit test pins the field shape; extra fields = regression failure).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct RoomEntry {
     pub room_id: String,
     pub kind: &'static str,
-    /// room-grouping-semantics T1：归属整车房（流房反指；`Some` 仅派生流房/已注册
-    /// 流房——发现即全量）。`None` = 平铺单位（整车/普通/audio 房）。
+    /// room-grouping-semantics T1: the owning vehicle room (back-reference for stream rooms; `Some` only for derived/registered
+    /// stream rooms -- discovery is full). `None` = flat unit (vehicle/ordinary/audio rooms).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
-    /// 整车房内嵌在线流派生（`generator1..N` 流 id 列表；仅 control 房携带）。
+    /// Online streams embedded in the vehicle room (`generator1..N` stream id list; carried by control rooms only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub streams: Option<Vec<String>>,
 }
@@ -51,9 +51,9 @@ pub struct RoomsResponse {
     pub rooms: Vec<RoomEntry>,
 }
 
-/// 房间 kind 三面（W4d）：audio（C29 前缀）恒先；stream_room = 派生集合成员
-/// （`<整车房>_<流id>`，媒体面）；其余注册房 = control（整车房/控制面——其内
-/// 无视频 producer，标 video 是误导舱端消费者）。
+/// The three room kinds (W4d): audio (C29 prefix) always first; stream_room = a member of the derived set
+/// (`<vehicle-room>_<stream-id>`, media plane); remaining registered rooms = control (vehicle room/control plane -- no
+/// video producer inside; labeling video would mislead cockpit consumers).
 pub fn room_kind(room_id: &str, is_stream_room: bool) -> &'static str {
     if room_id.starts_with("audio-") {
         "audio"
@@ -64,7 +64,7 @@ pub fn room_kind(room_id: &str, is_stream_room: bool) -> &'static str {
     }
 }
 
-/// StatusReport 里 connected 的流 id（派生集与 admin 视图同源数据，只换投影）。
+/// Stream ids with connected=true in StatusReport (same source data as the admin view, only a different projection).
 fn online_stream_ids(status: &crate::status::StatusRegistry, room_id: &str) -> Vec<String> {
     use mediaservo_common::protocol::SignalingMessage;
     match status.get(room_id) {
@@ -75,9 +75,9 @@ fn online_stream_ids(status: &crate::status::StatusRegistry, room_id: &str) -> V
     }
 }
 
-/// 可见性判定纯函数（无 IO，双向单测覆盖 owner 在/无 × 四角色矩阵）。
+/// Visibility pure function (no IO; two-way unit tests cover owner present/absent x the four-role matrix).
 fn room_visible(role: &CockpitRole, allowed: &[String], owner: Option<&str>) -> bool {
-    // G16 严格档：无主房（车离线/未注册）一律隐藏——join 门对 owner=None 放行属豁免族。
+    // G16 strict mode: ownerless rooms (vehicle offline/unregistered) are always hidden -- the join gate allowing owner=None is the exempt family.
     let Some(owner) = owner else { return false };
     match role {
         CockpitRole::Admin | CockpitRole::Dispatcher => true,
@@ -87,10 +87,10 @@ fn room_visible(role: &CockpitRole, allowed: &[String], owner: Option<&str>) -> 
 
 type RoomsError = (StatusCode, Json<ErrorResponse>);
 
-/// PSK 发现认证：`Authorization: Psk <secret>`（scheme 区分账号 Bearer）。
-/// 命中 → Legacy 全量视角（所有在线房 + kind 派生，与 join 门能力对齐）；
-/// 未配 PSK/密钥错/缺凭证 → None（落回 JWT 链）或 401（带了 Psk scheme 但密钥错——
-/// 显式 401 防止静默滑进 JWT 链产生误导性错误语）。
+/// PSK discovery auth: `Authorization: Psk <secret>` (the scheme distinguishes account Bearer).
+/// Hit -> Legacy full view (all online rooms + kind derivation, aligned with join-gate capability);
+/// no PSK configured/wrong key/no credential -> None (falls back to the JWT chain) or 401 (Psk scheme present but wrong key --
+/// an explicit 401 prevents silently sliding into the JWT chain with a misleading error).
 fn psk_discover(
     req: &axum::extract::Request,
     state: &AdminState,
@@ -105,7 +105,7 @@ fn psk_discover(
     let Some(configured) = configured else {
         return Err(unauthorized_rooms("psk authentication failed"));
     };
-    // constant-time + dummy 垫（长度差也恒时——与 devices 同纪律）
+    // constant-time + dummy pad (length differences are also constant-time -- same discipline as devices)
     let a = configured.as_bytes();
     let b = secret.as_bytes();
     let lt = if a.len() < b.len() { a.len() } else { b.len() };
@@ -116,14 +116,14 @@ fn psk_discover(
     if diff != 0 {
         return Err(unauthorized_rooms("psk authentication failed"));
     }
-    // Legacy 全量视角（room-grouping-semantics T1）：先建派生集（base×在线流）——
-    // 整车房 streams 内嵌；流房以**流房条目**（kind=video + parent 反指）出现，
-    // **不再产生顶层 control 拷贝**（去重+归属一体——PIT-140 语义注记的 wire 落地）。
+    // Legacy full view (room-grouping-semantics T1): build the derived set first (base x online streams) --
+    // vehicle rooms embed streams; stream rooms appear as **stream-room entries** (kind=video + parent back-reference),
+    // **no top-level control copies anymore** (dedup + ownership unified -- the wire form of the PIT-140 semantics note).
     let mut streams_of: std::collections::HashMap<String, Vec<String>> =
         std::collections::HashMap::new();
     for r in state.signaling.room_manager.list_rooms() {
         if r.id.starts_with("audio-") || r.id.contains('_') {
-            continue; // audio 前缀房与流房（含 `_`）不做派生源
+            continue; // audio-prefix rooms and stream rooms (containing `_`) are not derivation sources
         }
         for sid in online_stream_ids(&state.signaling.status_registry, &r.id) {
             streams_of.entry(r.id.clone()).or_default().push(sid);
@@ -140,7 +140,7 @@ fn psk_discover(
             && let Some((parent, streams)) = streams_of.get_key_value(base)
             && streams.iter().any(|s| s == sid)
         {
-            // 真注册流房（consumer join 过）：kind=video + parent 反指——去重+归属。
+            // Truly registered stream room (a consumer joined): kind=video + parent back-reference -- dedup + ownership.
             rooms.push(RoomEntry {
                 room_id: r.id.clone(),
                 kind: "video",
@@ -161,7 +161,7 @@ fn psk_discover(
             for sid in ss {
                 let id = format!("{}_{}", r.id, sid);
                 if !emitted.contains(&id) {
-                    // 未注册的派生流房：发现即全量（video + parent）
+                    // Unregistered derived stream room: discovery is full (video + parent)
                     rooms.push(RoomEntry {
                         room_id: id,
                         kind: "video",
@@ -183,16 +183,16 @@ async fn list_rooms(
     State(state): State<AdminState>,
     req: axum::extract::Request,
 ) -> Result<Json<RoomsResponse>, RoomsError> {
-    // PSK 发现分支（psk-discover）：`Authorization: Psk <secret>` → Legacy 视角全量列表。
-    // 权限论证：PSK 本就在 join 门全放行（roles.rs Legacy 直通）——"能进不能看"是意外
-    // 产物非设计；打开发现不新增能力（能枚举≠能进入，进入已全通），只消除盲态。
-    // 比对 constant-time（与 devices/psk 认证同纪律）；错 PSK 与缺凭证同消息（防枚举）。
+    // PSK discovery branch (psk-discover): `Authorization: Psk <secret>` -> Legacy full view list.
+    // Permission argument: PSK already passes the join gate fully (roles.rs Legacy passthrough) -- "can join but not see" was an
+    // accident, not design; opening discovery adds no capability (enumeration != entry; entry is already fully allowed), it only removes the blind spot.
+    // Constant-time comparison (same discipline as devices/psk auth); wrong PSK and missing credential share a message (anti-enumeration).
     if let Some(psk_view) = psk_discover(&req, &state)? {
         return Ok(psk_view);
     }
-    let claims = check_auth(&req, &state)?; // token 提取/验签复用（同一发证链）
-    // 身份门：只放行合法账号角色的 JWT。无 role claim（Legacy 等）/未知角色 → 401。
-    // Device 身份不经 REST 发证，天然不在此面（显式拒=防未来 device token 混入）。
+    let claims = check_auth(&req, &state)?; // token extraction/verification reused (same issuance chain)
+    // Identity gate: only JWTs with valid account roles pass. No role claim (Legacy etc.)/unknown role -> 401.
+    // Device identities are not issued via REST and naturally never appear here (explicit reject = guards against future device tokens).
     let role = claims.role.as_deref().and_then(CockpitRole::parse).ok_or_else(|| {
         log_event(AuditEvent::AuthorizationDenied {
             action: "api_rooms".into(),
@@ -201,14 +201,14 @@ async fn list_rooms(
         });
         (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "account role required".into() }))
     })?;
-    // allowlist 以 accounts registry 现值为准（C33 热生效：改单即变）。特权角色
-    // （admin/dispatcher）不依赖 allowlist（roles.rs 语义），账号表缺席不拦——否则
-    // 内置 admin（不在 accounts.yaml 场景）也被误伤；viewer/operator token 而账号已删
-    // （吊销窗口）→ 空列表（不 401——连接语义与 admin 面一致，UI 侧「需重新登录」兜底，F-S-7）。
+    // The allowlist follows the accounts registry's current value (C33 hot effect: change the entry, the set changes). Privileged roles
+    // (admin/dispatcher) do not depend on the allowlist (roles.rs semantics); a missing account table does not block -- otherwise
+    // the built-in admin (not in accounts.yaml scenarios) would be caught too; a viewer/operator token whose account was deleted
+    // (revocation window) -> empty list (not 401 -- connection semantics match the admin plane; the UI's "please re-login" is the fallback, F-S-7).
     let account = state.accounts.list_accounts().into_iter().find(|a| a.username == claims.sub);
     let privileged = matches!(role, CockpitRole::Admin | CockpitRole::Dispatcher);
-    // apikey 形（T1/T2 exchange 发证，sub="apikey:<id>"）无账号行=设计使然：授权
-    // 完全内嵌 claims（与 RoomJoin 门同源；吊销=TTL 自然死 F10），vehicles 取 claims。
+    // apikey form (T1/T2 exchange issuance, sub="apikey:<id>") has no account row by design: authorization
+    // is fully embedded in the claims (same source as the RoomJoin gate; revoke = natural TTL death F10); vehicles come from the claims.
     let apikey_vehicles =
         claims.sub.starts_with("apikey:").then(|| claims.vehicles.clone().unwrap_or_default());
     let vehicles = match (&account, privileged, &apikey_vehicles) {
@@ -225,10 +225,10 @@ async fn list_rooms(
         (None, _, None) => Vec::new(),
     };
     if !privileged && account.is_none() && apikey_vehicles.is_none() {
-        return Ok(Json(RoomsResponse { rooms: Vec::new() })); // 吊销窗口：非特权且账号已删
+        return Ok(Json(RoomsResponse { rooms: Vec::new() })); // revocation window: non-privileged and account deleted
     }
-    // W4d 派生集：base 房（非 audio、有 owner）× 其 StatusReport connected 流。
-    // 已注册的流房（consumer join 过）并入同源判定，不重复、kind 一致。
+    // W4d derived set: base rooms (non-audio, with owner) x their StatusReport connected streams.
+    // Registered stream rooms (a consumer joined) merge into the same-source judgment; no duplicates, kind consistent.
     let mut derived: Vec<(String, String, String)> = Vec::new(); // (stream_room, owner, sid)
     for r in state.signaling.room_manager.list_rooms() {
         if r.id.starts_with("audio-") {
@@ -243,7 +243,7 @@ async fn list_rooms(
         .iter()
         .map(|(id, _, _)| id.clone())
         .chain(state.signaling.room_manager.list_rooms().into_iter().map(|r| r.id).filter(|id| {
-            // 注册房命中派生命名 = 流房被 consumer join 过（同源再判一次）
+            // A registered room matching the derived naming = the stream room was joined by a consumer (same-source re-check)
             let Some((base, _)) = id.rsplit_once('_') else { return false };
             !id.starts_with("audio-")
                 && !online_stream_ids(&state.signaling.status_registry, base).is_empty()
@@ -257,8 +257,8 @@ async fn list_rooms(
         .into_iter()
         .filter_map(|r| {
             let owner = state.signaling.room_owner_of(&r.id);
-            // room-grouping-semantics T1：流房（在派生集）→ video + parent 反指；
-            // 整车房 → control + streams 内嵌（成员级 owner 过滤后的可见流）。
+            // room-grouping-semantics T1: stream rooms (in the derived set) -> video + parent back-reference;
+            // vehicle rooms -> control + embedded streams (visible streams after member-level owner filtering).
             if let Some((base, sid)) = r.id.rsplit_once('_')
                 && !r.id.starts_with("audio-")
                 && let Some((_, owner_d, sid_d)) =
@@ -287,12 +287,12 @@ async fn list_rooms(
             })
         })
         .collect();
-    // 派生流房（多数未注册——producer 不 RoomJoin）：owner 继承 base。
-    // T1：未注册流房**不再平铺**——已并入上方整车房的 streams 内嵌（可见性成员级过滤）。
+    // Derived stream rooms (mostly unregistered -- producers do not RoomJoin): owner inherits base.
+    // T1: unregistered stream rooms are **no longer flattened** -- merged into the vehicle room's embedded streams above (member-level visibility filtering).
     Ok(Json(RoomsResponse { rooms }))
 }
 
-/// 独立装配（main.rs merge；**不得**挂进 admin_router 的 layer）。
+/// Separate assembly (main.rs merge; must **not** be mounted into admin_router's layer).
 pub fn rooms_router(state: AdminState) -> Router {
     Router::new().route("/api/rooms", get(list_rooms)).with_state(state)
 }
@@ -326,7 +326,7 @@ mod tests {
         }
     }
 
-    /// 不变量正向：列表可见 ⇒ join 门必放行（同 owner 输入下比对 roles.rs 现成判定）。
+    /// Invariant forward: listed visible => join gate must allow (compared under the same owner input against roles.rs's existing check).
     #[test]
     fn invariant_visible_implies_joinable() {
         for role in [
@@ -353,7 +353,7 @@ mod tests {
         }
     }
 
-    /// 不变量反向（豁免族显式化）：join 放行但列表隐藏的情形，**只允许** owner=None 一族。
+    /// Invariant reverse (exempt family made explicit): the only case where join allows but the list hides is the owner=None family.
     #[test]
     fn invariant_hidden_only_for_ownerless_or_denied() {
         let allowed = allowed(&["ms-car1"]);
@@ -363,16 +363,16 @@ mod tests {
                 role: role.clone(),
                 vehicles: allowed.clone(),
             });
-            // 有主但被 join 拒的房：列表同样拒（两向一致）
+            // Owned but join-denied room: the list denies it too (two-way consistent)
             assert!(ident.join_vehicle_room(Some("ms-car2")).is_some());
             assert!(!room_visible(&role, &allowed, Some("ms-car2")));
-            // 豁免族：owner=None join 放行、列表隐藏——G16 裁决钉死在此。
+            // Exempt family: owner=None joins allowed, list hidden -- the G16 ruling pinned here.
             assert!(ident.join_vehicle_room(None).is_none());
             assert!(!room_visible(&role, &allowed, None));
         }
     }
 
-    // ── axum 栈内集成（tower oneshot，admin.rs:1459 先例同法）──
+    // -- integration through the axum stack (tower oneshot, same method as admin.rs:1459) --
 
     use axum::body::Body;
     use axum::http::{Method, Request, StatusCode};
@@ -392,8 +392,8 @@ mod tests {
 
     #[tokio::test]
     async fn psk_discover_no_duplicate_for_joined_stream_rooms() {
-        // 2026-09-29 实盘钉：consumer join 过的流房（真注册房）不得以 control 与
-        // 派生 video 重复出现（同名两遍→viewer 去重丢 video 项）。
+        // 2026-09-29 live pin: a stream room joined by a consumer (a truly registered room) must not appear twice as control and
+        // derived video (the same name twice -> viewer dedup drops the video item).
         let state = crate::admin::tests::make_state().await;
         *state.psk_state.write().unwrap() = Some("psk".into());
         state
@@ -402,7 +402,7 @@ mod tests {
             .join_room("vehicle", "c-1", &mediaservo_common::protocol::PeerRole::Host)
             .unwrap();
         state.signaling.set_room_owner_for_test("vehicle", "ms-car1");
-        // 流房被 consumer join 过 = 真注册房
+        // A stream room joined by a consumer = truly registered room
         state
             .signaling
             .room_manager
@@ -427,13 +427,13 @@ mod tests {
         let mut sorted = ids.clone();
         sorted.sort();
         sorted.dedup();
-        assert_eq!(ids.len(), sorted.len(), "同名房不得重复: {ids:?}");
+        assert_eq!(ids.len(), sorted.len(), "no duplicate room names: {ids:?}");
         assert!(ids.contains(&"vehicle_gen1"), "{ids:?}");
     }
 
     #[tokio::test]
     async fn http_psk_discover_full_visibility_and_401_paths() {
-        // psk-discover：PSK 持者=Legacy 全能（join 门全放行）→ 发现面同样全量。
+        // psk-discover: a PSK holder = Legacy omnipotent (join gate fully allowed) -> discovery equally full.
         let state = crate::admin::tests::make_state().await;
         *state.psk_state.write().unwrap() = Some("sekrit-psk".into());
         state
@@ -449,7 +449,7 @@ mod tests {
             .unwrap();
         state.signaling.set_room_owner_for_test("audio-ms-car1", "ms-car1");
 
-        // 命中 → 200 全量（含 audio 前缀三面 kind）
+        // Hit -> 200 full (including the three audio-prefix kinds)
         let app = rooms_router(state.clone());
         let resp = app
             .oneshot(
@@ -470,7 +470,7 @@ mod tests {
         assert!(ids.contains(&"vehicle_x"), "{ids:?}");
         assert!(ids.contains(&"audio-ms-car1"), "{ids:?}");
 
-        // 错密钥 → 401（不滑进 JWT 链给误导语）
+        // Wrong key -> 401 (no slide into the JWT chain with a misleading message)
         let app = rooms_router(state.clone());
         let resp = app
             .oneshot(
@@ -488,10 +488,10 @@ mod tests {
         assert_eq!(
             String::from_utf8_lossy(&b),
             r#"{"error":"psk authentication failed"}"#,
-            "错 PSK 语与未知 key 同形（防枚举）"
+            "wrong-PSK message matches unknown key (anti-enumeration)"
         );
 
-        // 未配 PSK 的服务器：带 Psk scheme 也 401（不静默放行）
+        // Server without PSK: Psk scheme still gets 401 (no silent pass)
         let state2 = crate::admin::tests::make_state().await;
         let app = rooms_router(state2);
         let resp = app
@@ -517,7 +517,7 @@ mod tests {
 
     #[tokio::test]
     async fn http_apikey_token_visibility_uses_claims_vehicles() {
-        // T5 实盘同形回归钉：apikey 形无账号行，可见性=claims.vehicles 直裁（非空列表旁路）。
+        // T5 live same-shape regression pin: apikey form has no account row; visibility = direct claims.vehicles check (non-empty list bypass).
         use mediaservo_common::auth::JwtClaims;
         let state = crate::admin::tests::make_state().await;
         let now =
@@ -545,24 +545,27 @@ mod tests {
             .join_room("vehicle_demo", "c-1", &mediaservo_common::protocol::PeerRole::Host)
             .unwrap();
         state.signaling.set_room_owner_for_test("vehicle_demo", "ms-car1");
-        // 白名单不含 owner → 空（非全放）。
+        // Allowlist excludes the owner -> empty (not everything).
         let (_, body) = get_rooms(&state, Some(&mk(vec!["ms-other".into()]))).await;
-        assert_eq!(body, r#"{"rooms":[]}"#, "claims 白名单未命中必须空");
-        // 命中 → 可见（含派生 kind）。
+        assert_eq!(body, r#"{"rooms":[]}"#, "claims allowlist miss must be empty");
+        // Hit -> visible (including derived kind).
         let (_, body) = get_rooms(&state, Some(&mk(vec!["ms-car1".into()]))).await;
         assert!(body.contains(r#""room_id":"vehicle_demo""#), "{body}");
-        assert!(body.contains(r#""kind":"control""#), "base 房无在线流=control kind");
+        assert!(
+            body.contains(r#""kind":"control""#),
+            "base room without online streams = control kind"
+        );
     }
 
     #[tokio::test]
     async fn http_empty_rooms_shape_and_owned_visibility() {
         let state = crate::admin::tests::make_state().await;
         let tok = crate::admin::tests::token_of_role(&state, "admin", Some("admin"));
-        // 无房 → 空列表 + wire 形状
+        // No rooms -> empty list + wire shape
         let (code, body) = get_rooms(&state, Some(&tok)).await;
         assert_eq!(code, StatusCode::OK, "{body}");
         assert_eq!(body, r#"{"rooms":[]}"#);
-        // 建房但未登记 owner（车离线族）→ admin 也看不到（G16）
+        // Room built but owner not registered (vehicle-offline family) -> even admin cannot see it (G16)
         state
             .signaling
             .room_manager
@@ -570,7 +573,7 @@ mod tests {
             .unwrap();
         let (_, body) = get_rooms(&state, Some(&tok)).await;
         assert_eq!(body, r#"{"rooms":[]}"#, "ownerless hidden even for admin (G16)");
-        // 登记 owner → admin 全量可见，含 kind 派生
+        // Owner registered -> admin sees everything, including kind derivation
         state.signaling.set_room_owner_for_test("vehicle_t1", "ms-car1");
         state
             .signaling
@@ -580,7 +583,7 @@ mod tests {
         state.signaling.set_room_owner_for_test("audio-ms-car1", "ms-car1");
         let (_, body) = get_rooms(&state, Some(&tok)).await;
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        // DashMap 迭代序无保证：按 room_id 检索，不断言数组序。
+        // DashMap iteration order is not guaranteed: look up by room_id; never assert array order.
         let kind_of = |id: &str| {
             v["rooms"]
                 .as_array()
@@ -593,9 +596,9 @@ mod tests {
         assert_eq!(kind_of("audio-ms-car1").as_deref(), Some("audio"), "{body}");
     }
 
-    /// W4d：per-stream 流房派生——producer 不 RoomJoin，注册列表看不见 = SDK
-    /// 消费者发现不到可播房。流房由 base 房 StatusReport(connected) 合成，
-    /// owner 继承 base；离线流不派生；已注册的同名流房不重复；audio 房不派生。
+    /// W4d: per-stream room derivation -- producers do not RoomJoin, so the registered list cannot see them = SDK
+    /// consumers cannot discover playable rooms. Stream rooms are synthesized from the base room's StatusReport(connected),
+    /// owner inherited from base; offline streams not derived; registered same-name stream rooms not duplicated; audio rooms not derived.
     #[tokio::test]
     async fn http_stream_rooms_derived_from_status_report() {
         use mediaservo_common::protocol::{SignalStatusJson, SignalingMessage, StreamFlowJson};
@@ -624,7 +627,7 @@ mod tests {
             frame_height: 720,
             connected,
         };
-        // 整车房注册 + owner；流 test 在线 / 流 cam0 离线
+        // Vehicle room registered + owner; stream test online / stream cam0 offline
         state
             .signaling
             .room_manager
@@ -635,7 +638,7 @@ mod tests {
             .signaling
             .status_registry
             .store("ms-car1", report(vec![flow("test", true), flow("cam0-stream", false)]));
-        // audio 房不参与派生
+        // audio rooms do not participate in derivation
         state
             .signaling
             .room_manager
@@ -653,8 +656,8 @@ mod tests {
                 .find(|e| e["room_id"] == id)
                 .map(|e| e["kind"].as_str().unwrap().to_string())
         };
-        // room-grouping-semantics T1：派生流房**不平铺**——经整车房 streams 内嵌表达；
-        // 离线流不进 streams。整车房=control + streams 内嵌可见流。
+        // room-grouping-semantics T1: derived stream rooms are **not flattened** -- expressed via the vehicle room's embedded streams;
+        // offline streams do not enter streams. Vehicle room = control + embedded visible streams.
         let streams_of = |id: &str| {
             v["rooms"]
                 .as_array()
@@ -663,24 +666,31 @@ mod tests {
                 .find(|e| e["room_id"] == id)
                 .map(|e| e["streams"].as_array().map(|a| a.len()).unwrap_or(0))
         };
-        assert_eq!(kind_of("ms-car1_test"), None, "{body} 派生流房不平铺");
-        assert_eq!(kind_of("ms-car1_cam0-stream"), None, "{body} 离线流不出现");
-        assert_eq!(kind_of("ms-car1").as_deref(), Some("control"), "{body} 整车房=控制面");
+        assert_eq!(kind_of("ms-car1_test"), None, "{body} derived stream rooms not flattened");
+        assert_eq!(kind_of("ms-car1_cam0-stream"), None, "{body} offline streams do not appear");
+        assert_eq!(
+            kind_of("ms-car1").as_deref(),
+            Some("control"),
+            "{body} vehicle room = control plane"
+        );
         assert_eq!(
             streams_of("ms-car1"),
             Some(1),
-            "{body} streams 内嵌在线流（test 在线/cam0 离线）"
+            "{body} streams embed online streams (test online/cam0 offline)"
         );
         assert_eq!(kind_of("audio-ms-car1").as_deref(), Some("audio"), "{body}");
-        // G16 正向不变量（流房面）：列表可见 ⇒ join 放行——流房 owner 未登记
-        // （producer 不 RoomJoin）→ join_vehicle_room(None) 豁免族放行，成立。
+        // G16 forward invariant (stream-room side): listed visible => join allowed -- stream room owner unregistered
+        // (producers do not RoomJoin) -> join_vehicle_room(None) exempt family allows, holds.
         let ident = SessionIdentity::Account(AccountIdentity {
             username: "v".into(),
             role: CockpitRole::Viewer,
             vehicles: vec!["ms-car1".into()],
         });
-        assert!(ident.join_vehicle_room(None).is_none(), "stream-room join 豁免族 = 列表⊆可进");
-        // viewer allowlist 命中 base owner → 流房同样可见（owner 继承同向）
+        assert!(
+            ident.join_vehicle_room(None).is_none(),
+            "stream-room join exempt family = listed subset-of joinable"
+        );
+        // viewer allowlist hits the base owner -> stream room equally visible (owner inheritance, same direction)
         state
             .accounts
             .create_account("v2", "pw", "viewer", &["ms-car1".to_string()].to_vec())
@@ -689,16 +699,16 @@ mod tests {
         let (_, body) = get_rooms(&state, Some(&vt)).await;
         assert!(
             body.contains(r#""streams":["test"]"#) || body.contains(r#""streams": ["test"]"#),
-            "{body} viewer 白名单内车的流经整车房 streams 内嵌"
+            "{body} streams of allowlisted vehicles embedded via the vehicle room"
         );
-        // 不在 allowlist → 流房不可见
+        // Not in the allowlist -> stream room not visible
         state
             .accounts
             .create_account("v3", "pw", "viewer", &["ms-car2".to_string()].to_vec())
             .unwrap();
         let vt3 = crate::admin::tests::token_of_role(&state, "v3", Some("viewer"));
         let (_, body) = get_rooms(&state, Some(&vt3)).await;
-        assert!(!body.contains("ms-car1_test"), "{body} 越权流房必须隐藏");
+        assert!(!body.contains("ms-car1_test"), "{body} unauthorized stream room must be hidden");
     }
 
     #[tokio::test]
@@ -719,17 +729,17 @@ mod tests {
         }
         let (_, body) = get_rooms(&state, Some(&tok)).await;
         assert!(body.contains("vehicle_t1") && !body.contains("vehicle_t2"), "{body}");
-        // C33 热生效：改 allowlist 即变可见集
+        // C33 hot effect: changing the allowlist changes the visible set
         state.accounts.update_account("v1", None, Some(&["ms-car2".to_string()]), None).unwrap();
         let (_, body) = get_rooms(&state, Some(&tok)).await;
         assert!(body.contains("vehicle_t2") && !body.contains("vehicle_t1"), "{body} (hot)");
-        // 未知/缺失 role token 一律 401（Legacy 面）
+        // Unknown/missing role tokens always 401 (Legacy side)
         let bad = crate::admin::tests::token_of_role(&state, "v1", None);
         let (code, _) = get_rooms(&state, Some(&bad)).await;
         assert_eq!(code, StatusCode::UNAUTHORIZED);
     }
 
-    /// wire 契约：恰好 {room_id, kind} 二字段（多/少字段= serde 输出变化=本测先红）。
+    /// Wire contract: exactly the two fields {room_id, kind} (an extra/missing field = serde output change = this test goes red first).
     #[test]
     fn wire_shape_exactly_two_fields() {
         let json = serde_json::to_value(RoomEntry {

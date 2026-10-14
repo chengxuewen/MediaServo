@@ -1,15 +1,15 @@
-//! SFU 媒体协商纯函数（镜像 host sfu_media.rs，C18 对齐官方 answerer 协商路径）。
+//! SFU media negotiation pure functions (mirrors host sfu_media.rs, aligned with the official answerer path per C18).
 //!
-//! 标准 answerer 协商（对齐 libmediasoupclient SdpUtils / host e2e_sfu 验证路径）：
-//! 用 mediasoup transport 参数构造 remote SDP → set_remote_description →
-//! create_answer；produce 的 rtp_parameters 从协商结果（get_sending_rtp_parameters）
-//! 推导，非手工硬编码。
+//! Standard answerer negotiation (mirrors libmediasoupclient SdpUtils / the host e2e_sfu verified path):
+//! build the remote SDP from mediasoup transport params → set_remote_description →
+//! create_answer; produce's rtp_parameters derive from the negotiation result (get_sending_rtp_parameters),
+//! not hand-hardcoded.
 
 use mediaservo_common::protocol::{DtlsParameters, IceCandidate, IceParameters};
 use mediaservo_webrtc::rtp::RTCRtpParameters;
 use serde_json::{Value, json};
 
-/// codec 规格（SDP PT/名称/时钟/fmtp，与 mediasoup router 默认对齐——
+/// Codec spec (SDP PT/name/clock/fmtp; aligned with the mediasoup router defaults —
 /// sfu.rs default_router_options: VP8 96 / H264 101 / VP9 99 / AV1 97）。
 pub struct CodecSpec {
     pub payload_type: u16,
@@ -18,7 +18,7 @@ pub struct CodecSpec {
     pub fmtp: Option<&'static str>,
 }
 
-/// 按配置 codec 名解析 SDP 规格；未知回退 VP8（router 序 VP8 优先）。
+/// Resolve the SDP spec by configured codec name; unknown falls back to VP8 (VP8 first in the router order).
 pub fn codec_spec(codec: &str) -> CodecSpec {
     match codec {
         "h264" => CodecSpec {
@@ -33,20 +33,20 @@ pub fn codec_spec(codec: &str) -> CodecSpec {
     }
 }
 
-/// 用 mediasoup transport 参数构造 remote SDP (ICE-Lite server offer)。
-/// PIT-48: a=candidate 行必须位于 m= 行之后（media section 内）。
-/// remote SDP 的 media 方向。
-/// - `ServerSendonly`（默认）: server 发送、本地接收（Pull 消费侧）
-/// - `ServerRecvonly`（push）: server 接收、本地发送（Push 推流侧）
+/// Build the remote SDP from mediasoup transport params (ICE-Lite server offer).
+/// PIT-48: a=candidate lines must come after the m= lines (inside the media section).
+/// Media direction of the remote SDP.
+/// - `ServerSendonly` (default): server sends, local receives (Pull consumer side)
+/// - `ServerRecvonly` (push): server receives, local sends (Push publisher side)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteDirection {
-    /// server 侧 a=sendonly（我们接收）
+    /// Server-side a=sendonly (we receive)
     ServerSendonly,
-    /// server 侧 a=recvonly（我们发送）
+    /// Server-side a=recvonly (we send)
     ServerRecvonly,
 }
 
-#[allow(clippy::too_many_arguments)] // C18 存量债（P1 标准协商重写在册），债务战不动重构面
+#[allow(clippy::too_many_arguments)] // C18 legacy debt (P1 standard-negotiation rewrite on record); the debt war does not refactor
 pub fn build_remote_sdp(
     ice_parameters: &IceParameters,
     dtls_parameters: &DtlsParameters,
@@ -83,16 +83,16 @@ pub fn build_remote_sdp(
         format!("m=video 7 UDP/TLS/RTP/SAVPF {}", payload_type),
         format!("c=IN IP4 {}", conn_ip),
         "a=rtcp-mux".to_string(),
-        "a=rtcp-rsize".to_string(), // 对齐 libmediasoupclient recv offer（rtcp reduced size）
+        "a=rtcp-rsize".to_string(), // matches the libmediasoupclient recv offer (rtcp reduced size)
         match direction {
-            // mediasoup consumer 的 RTP mid 固定为 "0" — 接收侧 answer 必须对齐
-            // （不匹配 → libwebrtc demux 丢弃 RTP → 收不到帧）
+            // The mediasoup consumer's RTP mid is fixed to "0" — the receiving-side answer must match
+            // (mismatch → libwebrtc demux drops RTP → no frames received)
             RemoteDirection::ServerSendonly => "a=mid:0".to_string(),
             RemoteDirection::ServerRecvonly => "a=mid:video".to_string(),
         },
-        // extmap 声明（对齐 mediasoup 默认配置）:
-        //   id=1 mid（BUNDLE demux 关键 — consumer RTP 带 mid 扩展, 不声明则 libwebrtc 无法解析）
-        //   id=3 transport-cc, id=5 abs-capture-time（BWE 反馈链路必需）
+        // extmap declarations (aligned with mediasoup defaults):
+        //   id=1 mid (critical for BUNDLE demux — consumer RTP carries the mid extension; without declaring it libwebrtc cannot parse)
+        //   id=3 transport-cc, id=5 abs-capture-time (required for the BWE feedback loop)
         "a=extmap:1 urn:ietf:params:rtp-hdrext:sdes:mid".to_string(),
         "a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
             .to_string(),
@@ -140,8 +140,8 @@ pub fn build_remote_sdp(
     lines.join("\r\n")
 }
 
-/// 将 consumer 的 rtp_parameters（Consumed 返回）中的 ssrc 注入 remote SDP。
-/// libwebrtc demux 需要 remote offer 声明接收 ssrc，否则丢弃 RTP。
+/// Inject the ssrc from the consumer's rtp_parameters (returned by Consumed) into the remote SDP.
+/// libwebrtc demux needs the remote offer to declare the received ssrc, otherwise RTP is dropped.
 pub fn inject_remote_ssrc(remote_sdp: &str, consumer_rtp: &serde_json::Value) -> String {
     let ssrc = consumer_rtp
         .get("encodings")
@@ -152,7 +152,7 @@ pub fn inject_remote_ssrc(remote_sdp: &str, consumer_rtp: &serde_json::Value) ->
     let Some(ssrc) = ssrc else {
         return remote_sdp.to_string();
     };
-    // 在 a=mid 行后追加 a=ssrc 行（保留原 CRLF 分隔，避免破坏 SDP）
+    // Append a=ssrc lines after the a=mid line (keep the original CRLF separators, avoid breaking the SDP)
     let sep = if remote_sdp.contains("\r\n") { "\r\n" } else { "\n" };
     let lines: Vec<&str> = remote_sdp.split(sep).collect();
     let mut out = Vec::with_capacity(lines.len() + 2);
@@ -166,14 +166,14 @@ pub fn inject_remote_ssrc(remote_sdp: &str, consumer_rtp: &serde_json::Value) ->
         }
     }
     if !injected {
-        // 无 mid 行（异常）→ 追加到末尾
+        // No mid line (anomaly) → append at the end
         out.push(format!("a=ssrc:{ssrc} cname:mediaservo-pull"));
     }
     out.join(sep)
 }
 
-/// 从协商结果 (RTCRtpParameters) 构造 mediasoup produce 的 rtp_parameters。
-/// 数据来自 transceiver.sender.get_parameters()，非手工硬编码（C18/P3 v2）。
+/// Build mediasoup produce rtp_parameters from the negotiation result (RTCRtpParameters).
+/// Data comes from transceiver.sender.get_parameters(), not hand-hardcoded (C18/P3 v2).
 pub fn build_produce_rtp_parameters_from_rtp(params: &RTCRtpParameters) -> Value {
     let codecs: Vec<Value> = params
         .codecs
@@ -194,7 +194,7 @@ pub fn build_produce_rtp_parameters_from_rtp(params: &RTCRtpParameters) -> Value
                     Value::Object(map)
                 })
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-            // rtcpFeedback 必须声明 transport-cc（mediasoup TCCS 启用条件）
+            // rtcpFeedback must declare transport-cc (mediasoup TCCS enable condition)
             json!({
                 "mimeType": c.mime_type,
                 "payloadType": c.payload_type,

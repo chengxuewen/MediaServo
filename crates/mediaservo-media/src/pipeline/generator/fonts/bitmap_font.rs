@@ -116,7 +116,7 @@ impl BitmapFont {
 
     /// Render one scaled glyph into the Y plane at absolute pixel coordinates `(ox, oy)`.
     /// Pixels outside the frame are silently clipped.
-    #[allow(clippy::too_many_arguments)] // 字形栅格化内部函数，参数打包 = 独立重构
+    #[allow(clippy::too_many_arguments)] // glyph rasterization internal fn; bundling params = separate refactor
     pub fn draw_glyph(
         &self,
         y: &mut [u8],
@@ -169,7 +169,7 @@ impl BitmapFont {
 
     /// Render a string of glyphs into the Y plane starting at `(ox, oy)`.
     /// Returns the x-offset after the last glyph drawn (for chaining).
-    #[allow(clippy::too_many_arguments)] // 同上：字形渲染链参数，独立重构
+    #[allow(clippy::too_many_arguments)] // ditto: glyph render chain params, separate refactor
     pub fn draw_text(
         &self,
         y: &mut [u8],

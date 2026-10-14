@@ -1,559 +1,510 @@
-# AnyDesk 参考分析
-> 生成日期：2026-07-16 | 分类：远程桌面
+# AnyDesk Reference Analysis
 
-## 1. 产品画像
-- **名称**：AnyDesk
-- **开发者**：AnyDesk Software GmbH（德国斯图加特，2014 年由前 TeamViewer 核心成员创立）；2024 年被德国企业集团收购，产品技术体系和管理团队得以保留
-- **首次发布**：2014 年
-- **产品定位**：以极致轻量和超低延迟著称的远程桌面解决方案。核心差异化来自自研 DeskRT 视频编解码器——专为计算机图形（GUI）传输设计，非通用视频编解码器。定位为 TeamViewer 的"更快、更轻、更便宜"替代品，强调性能优先和部署灵活性。客户端仅 3.7MB，在 100kbps 带宽下仍可流畅操作
-- **目标用户群体**：
-  - 个人用户（免费版，无需安装即可 ad-hoc 远程支持）
-  - 中小企业 IT 支持团队（远程支持和维护，MSP/Help Desk 场景）
-  - 大型企业 IT 管理部门（On-Premises 部署满足数据主权需求）
-  - 医疗机构（HIPAA 合规远程医疗，低带宽场景适配）
-  - 制造业和工程（远程访问 CAD/PLM 工作站，不传输 GB 级文件）
-  - 教育培训（远程教学和虚拟实验室，3.7MB 客户端适合学生设备）
-  - 政府部门（数据主权 + On-Premises 合规需求）
-  - 极低带宽场景用户（2G/3G 移动网络、卫星链路、受限国际互联网线路）
-- **许可 / 商业模式**：Freemium 订阅制；免费版（个人非商业用途）→ Essentials（$14.90/月/许可）→ Performance（$29.90/月）→ Enterprise（$59.90/月，含 On-Premises 选项和 SSO）；800M+ 全球下载量，180,000+ 付费客户，覆盖 190 个国家；约 500+ 员工（2025 年）；声称比 TeamViewer 同等功能便宜约 40%
+> Generated: 2026-07-16 | Category: Remote Desktop
 
-## 2. 技术特性
-### 整体架构
+## 1. Product Profile
+
+- **Name**: AnyDesk
+- **Developer**: AnyDesk Software GmbH (Stuttgart, Germany; founded 2014 by ex-TeamViewer core members); acquired by a German industrial group in 2024, with the product's technology stack and management team retained
+- **First release**: 2014
+- **Positioning**: a remote-desktop solution renowned for extreme lightness and ultra-low latency. The core differentiator is the in-house DeskRT video codec — designed specifically for computer graphics (GUI) transmission, not a general-purpose video codec. Positioned as a "faster, lighter, cheaper" alternative to TeamViewer, emphasizing performance-first and deployment flexibility. The client is only 3.7MB and streams at 100kbps
+- **Target user groups**:
+  - Individual users (the free tier; ad-hoc remote support with no installation)
+  - SMB IT support teams (remote support and maintenance; MSP/Help Desk scenarios)
+  - Large-enterprise IT departments (On-Premises deployment for data sovereignty)
+  - Healthcare (HIPAA-compliant telemedicine; low-bandwidth adaptability)
+  - Manufacturing and engineering (remote access to CAD/PLM workstations without moving GB-scale files)
+  - Education and training (remote teaching and virtual labs; a 3.7MB client suits student devices)
+  - Government (data sovereignty + On-Premises compliance)
+  - Extremely-low-bandwidth users (2G/3G mobile networks, satellite links, constrained international routes)
+- **Licensing / business model**: Freemium subscription; free (personal non-commercial) → Essentials ($14.90/mo/license) → Performance ($29.90/mo) → Enterprise ($59.90/mo, incl. On-Premises option and SSO); 800M+ downloads worldwide, 180,
+
+## 2. Technical Characteristics
+
+### Overall Architecture
+
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                      AnyDesk 多进程分离架构                        │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │              AnyDesk Global Relay Infrastructure               ││
-│  │                                                                 ││
-│  │  Erlang/OTP 后端（电信级可靠性）:                                  ││
-│  │  ┌────────────────────┐  ┌────────────────────┐                 ││
-│  │  │   AnyNet 中继网络   │  │   信令与认证服务    │                 ││
-│  │  │                    │  │                    │                 ││
-│  │  │  · Cowboy HTTP     │  │  · Mnesia 分布式DB │                 ││
-│  │  │    RESTful API     │  │  · ETS 内存表      │                 ││
-│  │  │  · PostgreSQL 持久 │  │  · 设备注册/发现   │                 ││
-│  │  │  · 热更新无停机    │  │  · License 管理    │                 ││
-│  │  │  · 10k+ 并发设备   │  │  · 在线状态维护    │                 ││
-│  │  └────────┬───────────┘  └────────┬───────────┘                 ││
-│  └───────────┼───────────────────────┼─────────────────────────────┘│
-│              │                       │                               │
-│  ┌───────────┴───────────────────────┴───────────────────────────┐  │
-│  │              AnyDesk Client (C++/Qt, 3.7MB)                    │  │
-│  │                                                                  │  │
-│  │  ┌──────────────────────────┐   ┌──────────────────────────┐   │  │
-│  │  │    GUI 进程（用户身份）    │   │  Service 进程（SYSTEM）  │   │  │
-│  │  │                          │   │                          │   │  │
-│  │  │  · Qt 图形界面           │   │  · 网络 I/O 处理         │   │  │
-│  │  │  · 屏幕捕获（DXGI/GDI）  │   │  · NAT 穿透探测         │   │  │
-│  │  │  · DeskRT 编码          │   │  · TLS 1.3 加密通道     │   │  │
-│  │  │  · 用户交互处理         │   │  · 中继连接管理          │   │  │
-│  │  │  · 输入事件捕获/注入    │   │  · 端口绑定（6568）      │   │  │
-│  │  └───────────┬──────────────┘   └───────────┬──────────────┘   │  │
-│  │              │                               │                   │  │
-│  │              └─────────── IPC ───────────────┘                   │  │
-│  │                  命名共享内存 (qipc_shm_*)                       │  │
-│  │                  · CaptureFileMappingW                           │  │
-│  │                  · shm_svc_mtx (互斥锁)                          │  │
-│  │                  · ret_evt (返回事件)                            │  │
-│  │                  · qipcshm_%u_%u_%u (进程间数据通道)             │  │
-│  │                                                                  │  │
-│  │  AnyNet 序列化引擎 (570+ 边界检查)                                │  │
-│  │  ┌───────────────────────────────────────────────────────────┐  │  │
-│  │  │  所有入站协议数据经 AnyNet 解析，每个字段边界检查            │  │  │
-│  │  │  · 消息类型：Network Layer / Session / IPC / TCP Tunnel    │  │  │
-│  │  │  · RPC 方法：rt_register / rt_login / rt_session_create   │  │  │
-│  │  │  · 30+ 错误码，8+ HRESULT 映射                             │  │  │
-│  │  └───────────────────────────────────────────────────────────┘  │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│                                                                        │
-│  连接策略（中继优先，与行业惯例相反）:                                    │
-│  Layer 1: TLS 中继 (443)  ─── 优先走中继（信任 Erlang 网络）            │
-│  Layer 2: TLS 中继 (80)   ─── 443 被封锁时                              │
-│  Layer 3: SOCKS 代理 (443) ── 企业代理环境                              │
-│  Layer 4: P2P 直连 (443)  ─── 最后尝试 P2P                              │
-│  Layer 5: P2P 直连 (80)   ─── 备用端口                                  │
-│  Layer 6: P2P 直连 (6568) ── AnyDesk 专用端口                            │
-└──────────────────────────────────────────────────────────────────┘
+│                      The AnyDesk multiprocess separated architecture            │
+│  │  Erlang/OTP backend (carrier-grade reliability):                            ││
+│  │  │   AnyNet relay network  │  │   Signaling & auth services   │             ││
+│  │  │  · Cowboy HTTP           │  │  · Mnesia distributed DB      │             ││
+│  │  │    RESTful API           │  │  · ETS in-memory tables       │             ││
+│  │  │  · PostgreSQL persistence│  │  · Device registration/discovery │          ││
+│  │  │  · Hot upgrades, no downtime │ │ · License management      │             ││
+│  │  │  · 10k+ concurrent devices│ │  · Presence maintenance      │             ││
+│  │  │    GUI process (user identity) │   │  Service process (SYSTEM) │   │  │
+│  │  │  · Qt graphical UI       │   │  · Network I/O handling     │   │  │
+│  │  │  · Screen capture (DXGI/GDI) │ │  · NAT traversal probing  │   │  │
+│  │  │  · DeskRT encoding       │   │  · TLS 1.3 encrypted channel │  │  │
+│  │  │  · User interaction      │   │  · Relay connection management│  │  │
+│  │  │  · Input capture/inject  │   │  · Port binding (6568)      │   │  │
+│  │                  Named shared memory (qipc_shm_*)                       │  │
+│  │                  · shm_svc_mtx (mutex)                                   │  │
+│  │                  · ret_evt (return event)                                │  │
+│  │                  · qipcshm_%u_%u_%u (inter-process data channel)         │  │
+│  │  The AnyNet serialization engine (570+ bounds checks)                    │  │
+│  │  │  All inbound protocol data goes through AnyNet parsing, per-field     │  │  │
+│  │  │    bounds checks                                                      │  │  │
+│  │  │  · Message types: Network Layer / Session / IPC / TCP Tunnel         │  │  │
+│  │  │  · RPC methods: rt_register / rt_login / rt_session_create           │  │  │
+│  │  │  · 30+ error codes, 8+ HRESULT mappings                              │  │  │
+│  Connection strategy (relay-first, opposite of industry convention):          │
+│  Layer 1: TLS relay (443)  ─── relay preferred (trust the Erlang network)    │
+│  Layer 2: TLS relay (80)   ─── when 443 is blocked                           │
+│  Layer 3: SOCKS proxy (443) ── corporate proxy environments                  │
+│  Layer 4: P2P direct (443)  ─── P2P tried last                               │
+│  Layer 5: P2P direct (80)   ─── backup port                                  │
+│  Layer 6: P2P direct (6568) ── the AnyDesk dedicated port                     │
 ```
 
-### 连接建立流程（AnyDesk 的中继优先策略）
+### Connection Establishment (AnyDesk's relay-first strategy)
+
 ```
-控制端                          AnyNet 中继网络                      被控端
-  │                                  │                                │
-  │── 1. TLS 连接 + 设备认证 ───────►│◄── 1. 长连接 + 心跳 ──────────│
-  │     · 通过中继注册设备            │     · 设备 ID + 密码/Token     │
-  │     · 交换 RSA/ECC 密钥           │     · 10k+ 并发由 Erlang 管理 │
-  │                                  │                                │
-  │── 2. 查询目标在线状态 ───────────►│                                │
-  │◄── 3. 返回：在线 + 路由信息 ─────│                                │
-  │                                  │                                │
-  │── 4. 请求中继转发连接 ───────────►│◄── 4. 通知入站连接 ──────────│
-  │     [AnyDesk 默认优先走中继]      │                                │
-  │◄══════ TLS 1.3 中继通道 ════════►│◄═════ TLS 1.3 中继 ═════════│
-  │                                  │                                │
-  │     [可选：尝试 P2P 直连]         │                                │
-  │── 5. P2P 协商请求 ───────────────►│◄── 5. P2P 协商 ─────────────│
-  │── 6. UDP/TCP 打洞 ────────────────────────────────────────────►│
-  │     [打洞成功]                     │                                │
-  │◄══════ P2P AES-256 直连 ════════════════════════════════════════►│
-  │     [打洞失败：继续使用中继]       │                                │
-  │◄══ 中继 AES-256 (TLS 1.3 包装) ══►│◄══ 中继 AES-256 ═══════════│
-  │                                  │                                │
-  │  视频流：DeskRT 编码 ── 60fps ── <16ms 延迟 ── 低至 100kbps       │
-└──────────────────────────────────┴────────────────────────────────┘
+Controller                          AnyNet relay network                 Controlled end
+  │── 1. TLS connect + device auth ───────►│◄── 1. long-lived connection + heartbeat ──│
+  │     · registers the device via the relay │     · device ID + password/token          │
+  │     · exchanges RSA/ECC keys             │     · 10k+ concurrency managed by Erlang │
+  │── 2. Query the target's presence ───────►│                                          │
+  │◄── 3. Returns: online + routing info ────│                                          │
+  │── 4. Request a relayed connection ──────►│◄── 4. Notify an inbound connection ──────│
+  │     [AnyDesk defaults to the relay first]│                                          │
+  │◄══════ TLS 1.3 relay channel ════════►│◄═════ TLS 1.3 relay ═════════│
+  │     [Optional: attempt P2P direct]        │                                          │
+  │── 5. P2P negotiation request ────────────►│◄── 5. P2P negotiation ─────────────│
+  │── 6. UDP/TCP hole punching ───────────────────────────────────────────►│
+  │     [Punch succeeds]                      │                                          │
+  │◄══════ P2P AES-256 direct ════════════════════════════════════════►│
+  │     [Punch fails: keep using the relay]    │                                         │
+  │◄══ Relay AES-256 (TLS 1.3 wrapped) ══►│◄══ Relay AES-256 ═══════════│
+  │  Video: DeskRT encoding ── 60fps ── <16ms latency ── as low as 100kbps       │
 ```
 
-### DeskRT 编解码器详解
+### The DeskRT Codec in Detail
+
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│            DeskRT — 专为计算机图形传输设计的编解码器               │
-│                                                                  │
-│  设计理念：                                                        │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │ 通用视频编解码器 (H.264/H.265/VP9):                           ││
-│  │ · 设计目标：自然视频（摄像头拍摄的电影/电视）                  ││
-│  │ · 优化方向：运动估计 + DCT 频域变换 + 运动补偿                 ││
-│  │ · 对 GUI 的弱点：文字边缘模糊、色块伪影、大面积纯色浪费码率   ││
-│  │                                                              ││
-│  │ DeskRT:                                                       ││
-│  │ · 设计目标：计算机生成图形（GUI 窗口/文字/图标/菜单）          ││
-│  │ · 优化方向：文本清晰度、大面积纯色压缩、鼠标光标精准渲染       ││
-│  │ · 核心优势：                                                   ││
-│  │   - 文字和线条保持清晰锐利（无 DCT 压缩伪影）                   ││
-│  │   - 对桌面 GUI 内容压缩率远高于通用编码器                      ││
-│  │   - 带宽极低场景（100kbps）仍可用                             ││
-│  │   - 60fps 高帧率下编码延迟 <16ms                             ││
-│  └──────────────────────────────────────────────────────────────┘│
-│                                                                  │
-│  工作原理（基于公开信息和逆向分析）:                                 │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │  1. 屏幕差分检测                                              ││
-│  │     · 比较相邻帧的屏幕区域变化                                ││
-│  │     · 仅编码发生变化的矩形区域（类似 RDP RemoteFX）            ││
-│  │                                                              ││
-│  │  2. 内容分类与模式识别                                        ││
-│  │     · 文本区域（高对比度、锐利边缘）→ 游程编码 + 差分        ││
-│  │     · 图形区域（UI 组件、图标、窗口边框）→ 有损但保持边缘     ││
-│  │     · 图像区域（照片、缩略图）→ JPEG/WebP-like 压缩          ││
-│  │     · 视频区域（动画、视频播放）→ 帧间预测 + 运动估计        ││
-│  │                                                              ││
-│  │  3. 自适应压缩策略                                            ││
-│  │     · 带宽充足（>1Mbps）：无损或接近无损文字 + 高质量图像     ││
-│  │     · 带宽受限（<500kbps）：有损文字 + 降低色深               ││
-│  │     · 极低带宽（100kbps）：8色调色板 + 最低帧率 10fps         ││
-│  │                                                              ││
-│  │  4. 桌面 GUI 内容特定优化                                     ││
-│  │     · 窗口边框/阴影：缓存复用（位置变化但样式不变）            ││
-│  │     · 鼠标光标：独立通道传输（不占用编码码率）                 ││
-│  │     · 文本输入区域：局部更新（仅传输变化的文本行）             ││
-│  └──────────────────────────────────────────────────────────────┘│
-│                                                                  │
-│  性能指标:                                                        │
-│  · 编码延迟: <16ms (端到端)                                      │
-│  · 帧率: 最高 60fps                                              │
-│  · 最低带宽: 100kbps（仍可操作）                                  │
-│  · 典型带宽: 1-5Mbps（日常办公场景达到 30fps+）                  │
-│  · 静态画面: 0 带宽（无变化时不发送数据）                         │
-│  · GUI 压缩率: 比 H.264 I帧节省 50-70% 带宽                      │
-└──────────────────────────────────────────────────────────────────┘
+│            DeskRT — a codec designed specifically for computer-graphics transmission │
+│  Design philosophy:                                                            │
+│  │ General-purpose video codecs (H.264/H.265/VP9):                            ││
+│  │ · Design target: natural video (camera-shot movies/TV)                     ││
+│  │ · Optimization: motion estimation + DCT frequency transform + motion compensation ││
+│  │ · Weakness on GUI: blurred text edges, color-block artifacts, wasted bitrate on large flat areas ││
+│  │ DeskRT:                                                                     ││
+│  │ · Design target: computer-generated graphics (GUI windows/text/icons/menus) ││
+│  │ · Optimization: text sharpness, large-flat-area compression, precise cursor rendering ││
+│  │ · Core strengths:                                                           ││
+│  │   - Text and lines stay crisp (no DCT compression artifacts)                ││
+│  │   - Compression of desktop GUI content far exceeds general encoders         ││
+│  │   - Usable in extremely low bandwidth (100kbps)                             ││
+│  │   - Encode latency <16ms at 60fps                                           ││
+│  How it works (based on public information and reverse engineering):           │
+│  │  1. Screen diff detection                                                   ││
+│  │     · Compares changed screen regions between adjacent frames               ││
+│  │     · Encodes only the changed rectangles (like RDP RemoteFX)               ││
+│  │  2. Content classification & pattern recognition                            ││
+│  │     · Text regions (high contrast, sharp edges) → run-length + differential ││
+│  │     · Graphics regions (UI widgets, icons, borders) → lossy but edge-preserving ││
+│  │     · Image regions (photos, thumbnails) → JPEG/WebP-like compression       ││
+│  │     · Video regions (animation, playback) → inter prediction + motion estimation ││
+│  │  3. Adaptive compression strategy                                           ││
+│  │     · Ample bandwidth (>1Mbps): lossless or near-lossless text + high-quality images ││
+│  │     · Constrained bandwidth (<500kbps): lossy text + reduced color depth    ││
+│  │     · Extremely low bandwidth (100kbps): an 8-tone palette + a minimum 10fps ││
+│  │  4. Desktop-GUI-specific optimizations                                      ││
+│  │     · Window borders/shadows: cache reuse (position changes, style doesn't) ││
+│  │     · Mouse cursor: a separate channel (not consuming encode bitrate)       ││
+│  │     · Text input areas: partial updates (only changed text lines)           ││
+│  Performance metrics:                                                           │
+│  · Encode latency: <16ms (end to end)                                           │
+│  · Frame rate: up to 60fps                                                      │
+│  · Minimum bandwidth: 100kbps (still operable)                                   │
+│  · Typical bandwidth: 1-5Mbps (30fps+ in everyday office scenarios)             │
+│  · Static screens: 0 bandwidth (nothing sent when nothing changes)              │
+│  · GUI compression: 50-70% bandwidth saved vs H.264 I-frames                    │
 ```
 
-### AnyNet 协议解析器（逆向工程揭示）
+### The AnyNet Protocol Parser (revealed by reverse engineering)
+
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│        AnyNet 序列化引擎 — 570+ 边界检查的协议安全实现             │
-│                                                                  │
-│  协议层（按消息类型分类）:                                          │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │  Network Layer Messages:                                      ││
-│  │  · 设备注册 (rt_register)                                     ││
-│  │  · 用户认证 (rt_login)                                        ││
-│  │  · 会话创建 (rt_session_create)                               ││
-│  │  · 会话加入 (rt_session_join)                                 ││
-│  │  · 连接保活 (ping/pong)                                       ││
-│  │                                                              ││
-│  │  Session Messages:                                            ││
-│  │  · 视频帧传输（DeskRT 编码数据）                               ││
-│  │  · 音频数据传输                                               ││
-│  │  · 输入事件转发（键盘/鼠标/触控）                              ││
-│  │  · 剪贴板同步                                                 ││
-│  │  · 文件传输控制                                               ││
-│  │                                                              ││
-│  │  IPC Forwarding:                                              ││
-│  │  · GUI → Service 进程消息转发                                ││
-│  │  · Service → GUI 事件通知                                    ││
-│  │                                                              ││
-│  │  TCP Tunneling:                                               ││
-│  │  · 端口转发（TCP 隧道）                                       ││
-│  │  · VPN 模式隧道                                              ││
-│  └──────────────────────────────────────────────────────────────┘│
-│                                                                  │
-│  检查类型明细:                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │  · 长度字段验证：确保声明长度 ≤ 包实际大小                     ││
-│  │  · 范围检查：验证偏移值在有效范围内                             ││
-│  │  · 完整性校验：检查数据块完整性标记                             ││
-│  │  · 类型检查：验证序列化字段类型与预期一致                       ││
-│  │  · 递归深度限制：防止嵌套结构导致的栈溢出                       ││
-│  │  · 空指针检查：验证指针不为 null 后进行解引用                    ││
-│  │  · 边界对齐：确保数据访问的内存对齐                             ││
-│  │  · 总计 570+ 项检查覆盖整个序列化流水线                         ││
-│  └──────────────────────────────────────────────────────────────┘│
-│                                                                  │
-│  安全评估:                                                         │
-│  ✅ 强项：深度防御（各消息类型独立校验，非通用解析器）               │
-│  ✅ 30+ 错误码精确分类（网络/认证/会话/系统错误）                   │
-│  ⚠️ .itext 代码段标记为 RWC (Read/Write/Execute)                   │
-│  ⚠️ 整个 30MB 代码页在运行时保持可写入（二进制解压必需）             │
-│  ⚠️ IPC 共享内存 NULL 安全属性（依赖 Session 隔离）                │
-└──────────────────────────────────────────────────────────────────┘
+│        The AnyNet serialization engine — a protocol-safe implementation with 570+ bounds checks │
+│  Protocol layers (by message type):                                            │
+│  Session control:                                                               │
+│  │  · Device registration (rt_register)                                        ││
+│  │  · User authentication (rt_login)                                           ││
+│  │  · Session creation (rt_session_create)                                     ││
+│  │  · Session join (rt_session_join)                                           ││
+│  │  · Keep-alive (ping/pong)                                                   ││
+│  Media channels:                                                                │
+│  │  · Video frame transport (DeskRT-encoded data)                              ││
+│  │  · Audio data transport                                                     ││
+│  │  · Input event forwarding (keyboard/mouse/touch)                            ││
+│  │  · Clipboard sync                                                           ││
+│  │  · File transfer control                                                    ││
+│  IPC messages:                                                                  │
+│  │  · GUI → Service message forwarding                                         ││
+│  │  · Service → GUI event notification                                         ││
+│  Tunneling:                                                                     │
+│  │  · Port forwarding (TCP tunnels)                                            ││
+│  │  · VPN-mode tunnels                                                         ││
+│  Check-type inventory:                                                          │
+│  │  · Length-field validation: the declared length must be ≤ the packet's real size ││
+│  │  · Range checks: offsets must fall within valid ranges                      ││
+│  │  · Integrity checks: verifying data-block integrity markers                 ││
+│  │  · Type checks: serialized field types must match expectations              ││
+│  │  · Recursion depth limits: preventing stack overflow from nested structures ││
+│  │  · Null checks: pointers validated non-null before dereference              ││
+│  │  · Alignment: memory alignment of data accesses ensured                     ││
+│  │  · 570+ checks in total cover the whole serialization pipeline              ││
+│  Security assessment:                                                           │
+│  ✅ Strength: defense in depth (per-message-type validation, not one generic parser) │
+│  ✅ 30+ precisely classified error codes (network/auth/session/system)          │
+│  ⚠️ the .itext code section is marked RWC (Read/Write/Execute)                  │
+│  ⚠️ the whole 30MB code page stays writable at runtime (needed for binary unpacking) │
+│  ⚠️ the IPC shared memory uses NULL security attributes (relies on Session isolation) │
 ```
 
-### 进程权限分离模型
+### The Process-Privilege Separation Model
+
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                  AnyDesk 多进程权限分离架构                        │
-│                                                                  │
-│  Session 0 (隔离会话)               Session 1+ (用户交互会话)     │
-│  ┌─────────────────────────┐       ┌─────────────────────────┐   │
-│  │ AnyDesk Service (SYSTEM) │       │ AnyDesk GUI (用户身份)   │   │
-│  │                         │       │                         │   │
-│  │  · 网络 I/O 全部由此    │  IPC  │  · Qt 图形界面          │   │
-│  │    进程处理             │◄─────►│  · 屏幕捕获（DXGI/GDI）│   │
-│  │  · TLS 加密/解密        │ 共享  │  · DeskRT 编码          │   │
-│  │  · AnyNet 协议解析      │ 内存  │  · 用户授权弹窗         │   │
-│  │  · 中继连接管理         │       │  · 输入事件捕获/注入    │   │
-│  │  · NAT 穿透探测         │       │  · 剪贴板管理           │   │
-│  │  · 文件传输网络层       │       │                         │   │
-│  │  · 端口绑定(6568/7070)  │       │  无法直接访问网络       │   │
-│  │  · 更新程序执行         │       │  (所有网络I/O经IPC转发) │   │
-│  │                         │       │                         │   │
-│  │  无法访问桌面/用户界面  │       │                         │   │
-│  └─────────────────────────┘       └─────────────────────────┘   │
-│                                                                  │
-│  安全边界:                                                        │
-│  · Session 0 ↔ Session 1+ 由 Windows Session Isolation 天然隔离  │
-│  · Service 虽为 SYSTEM，但无法直接读取用户桌面内容                 │
-│  · GUI 虽能捕获屏幕，但无法直接发起网络连接                        │
-│  · 两条进程链必须合作才能完成远程桌面会话                          │
-│  · 攻击者必须同时攻破两个进程才能获取完整控制权                     │
-└──────────────────────────────────────────────────────────────────┘
+│                  The AnyDesk multiprocess privilege-separation architecture     │
+│  Session 0 (isolated session)             Session 1+ (user interaction session) │
+│  │ AnyDesk Service (SYSTEM) │             │ AnyDesk GUI (user identity)         │
+│  │  · All network I/O here  │  IPC        │  · The Qt graphical UI              │
+│  │    in this process       │◄─────►│    │  · Screen capture (DXGI/GDI)        │
+│  │  · TLS encrypt/decrypt   │ shared │   │  · DeskRT encoding                  │
+│  │  · AnyNet protocol parsing│ memory│   │  · User authorization dialogs       │
+│  │  · Relay connection mgmt │        │   │  · Input event capture/injection    │
+│  │  · NAT traversal probing │        │   │  · Clipboard management             │
+│  │  · File-transfer network layer │   │  │                                    │
+│  │  · Port binding (6568/7070) │    │   │  Cannot access the network directly │
+│  │  · Updater execution     │        │   │  (all network I/O forwarded via IPC)│
+│  │  Cannot access the desktop/user UI │  │                                     │
+│  Security boundaries:                                                           │
+│  · Session 0 ↔ Session 1+ isolated naturally by Windows Session Isolation       │
+│  · The Service, though SYSTEM, cannot read the user's desktop content directly  │
+│  · The GUI, though it can capture the screen, cannot open network connections directly │
+│  · Both process chains must cooperate to complete a remote-desktop session      │
+│  · An attacker must break both processes to gain full control                    │
 ```
 
-### 关键技术能力
-| 能力 | 详情 |
-|------|------|
-| 视频编码 | **DeskRT 自研编解码器**：专为计算机图形（GUI 内容）传输设计，非通用视频编解码器。100kbps 带宽可流畅传输，60fps 帧率，<16ms 编码延迟，自适应分辨率。静态画面 0 带宽 |
-| 传输协议 | **AnyNet 专有协议**：自研序列化引擎（570+ 边界检查），TLS 1.3 传输加密，中继优先策略（默认走中继，可选 P2P 直连）。端口策略：443 → 80 → SOCKS 代理 → P2P 6568 |
-| 安全机制 | TLS 1.3 + AES-256 传输加密 + RSA-4096（On-Premises）/ ECC-256（Cloud）密钥交换 + PFS（前向安全性）；双因素认证（2FA）；ISO 27001 认证 + SOC 2 Type II + GDPR 合规 + NIS 2 指令 |
-| 连接策略 | **中继优先（非 P2P 优先！）**：TLS 中继 443 → TLS 中继 80 → SOCKS 代理 443 → P2P 直连 443/80/6568。信任 Erlang 中继网络的高可用性和低延迟，而非依赖不稳定的 P2P 打洞 |
-| 平台支持 | Windows / macOS / Linux / iOS / Android / ChromeOS / Raspberry Pi / FreeBSD，共 9 个操作系统平台 |
-| 客户端大小 | 仅 3.7MB（Windows），约 TeamViewer 的 1/10 |
-| 部署方式 | 云部署（默认）+ On-Premises（企业版），便携免安装运行、MSI 静默安装、GPO 策略管理 |
-| 权限控制 | 设备白名单、会话权限分离（查看/完全控制/文件传输各独立授权）、无人值守密码、一次性临时密码 |
+### Key Technical Capabilities
 
-### 编解码器对比分析
-| 特性 | DeskRT (AnyDesk) | H.264/H.265 (通用) | RemoteFX (RDP) | VP8/VP9 (WebRTC) |
-|------|-----------------|-------------------|----------------|-----------------|
-| 设计目标 | 计算机图形（GUI） | 自然视频（摄像头） | 桌面内容 | 通用（视频+桌面） |
-| 文字清晰度 | ★★★★★ 极锐利 | ★★★☆☆ DCT 模糊 | ★★★★☆ 较清晰 | ★★★☆☆ DCT 模糊 |
-| 大面积纯色压缩 | ★★★★★ 极高 | ★★★☆☆ 一般 | ★★★★☆ 高 | ★★★☆☆ 一般 |
-| 视频内容处理 | ★★★☆☆ 勉强 | ★★★★★ 优秀 | ★★★☆☆ 勉强 | ★★★★★ 优秀 |
-| 超低带宽 (100kbps) | ★★★★☆ 可用 | ★★☆☆☆ 困难 | ★★★☆☆ 勉强 | ★★★☆☆ 勉强 |
-| 编码延迟 | <16ms | 5-50ms | 10-30ms | 5-40ms |
-| 免版税 | ❌ 专有闭源 | ❌ MPEG LA 收费 | ❌ 微软专有 | ✅ 完全免费 |
-| 开源实现 | ❌ 不可审计 | ✅ x264/openh264 | ❌ | ✅ libvpx |
-| GPU 硬件加速 | ❌ 纯软件 | ✅ 全厂商 GPU | ✅ Windows GPU | ✅ 部分支持 |
-| GUI 压缩效率 | ★★★★★ 最优 | ★★★☆☆ | ★★★★☆ | ★★★☆☆ |
+| Capability | Details |
+|------------|---------|
+| Video encoding | **The in-house DeskRT codec**: designed for computer graphics (GUI content), not general video. Streams smoothly at 100kbps, 60fps, <16ms encode latency, adaptive resolution. Zero bandwidth on static screens |
+| Transport protocol | **The proprietary AnyNet protocol**: an in-house serialization engine (570+ bounds checks), TLS 1.3 transport encryption, a relay-first strategy (relay by default, optional P2P direct). Port strategy: 443 → 80 → SOCKS proxy → P2P 6568 |
+| Security | TLS 1.3 + AES-256 transport encryption + RSA-4096 (On-Premises) / ECC-256 (Cloud) key exchange + PFS; two-factor auth (2FA); ISO 27001 + SOC 2 Type II + GDPR + NIS 2 compliance |
+| Connection strategy | **Relay-first (not P2P-first!)**: TLS relay 443 → TLS relay 80 → SOCKS proxy 443 → P2P direct 443/80/6568. Trusting the Erlang relay network's availability and low latency rather than unreliable P2P hole punching |
+| Platform support | Windows / macOS / Linux / iOS / Android / ChromeOS / Raspberry Pi / FreeBSD — 9 OS platforms |
+| Client size | Only 3.7MB (Windows), about 1/10 of TeamViewer's |
+| Deployment | Cloud (default) + On-Premises (enterprise); portable no-install runs, MSI silent installs, GPO policy management |
+| Permission control | Device allowlists, per-session privilege separation (view/full-control/file-transfer each independently authorized), unattended passwords, one-time temporary passwords |
 
-### 技术栈
-- **后端（AnyNet 基础设施）**：
-  - 语言：Erlang/OTP（电信级可靠性，热更新不停机，10k+ 并发设备管理）
-  - Web 框架：Cowboy（高性能 Erlang HTTP 服务器，实现 RESTful API）
-  - 数据库：PostgreSQL（持久化存储）+ Mnesia（分布式存储）+ ETS（内存表，高速缓存）
-  - 架构模式：Actor 模型并发 + 监督树故障隔离 + 水平可扩展（Erlang 的标准分布式模型）
-- **客户端**：
-  - 语言：C++/Qt（跨平台 GUI + 网络 I/O + 屏幕捕获）
-  - 尺寸：3.7MB（极致轻量，约 TeamViewer 客户端的 1/10）
-  - 最小化依赖：Qt 核心模块（仅加载需要的），无 Electron、无 WebView 依赖
-- **协议栈**：
-  - 序列化：自研 AnyNet 协议引擎（570+ 边界检查的自定义二进制协议）
-  - 传输加密：TLS 1.3
-  - 会话加密：AES-256
-  - 密钥交换：RSA-4096（On-Premises）/ ECC-256（Cloud）
-  - 前向安全性：PFS 完整支持
-  - 端口策略：443/80/6568/7070（多端口 + 协议多路复用）
-- **视频编码**：DeskRT 自研编解码器（专为计算机图形传输设计）
-- **屏幕捕获**：Windows DXGI Desktop Duplication（GPU 直接帧复制）
-- **加密库**：OpenSSL（约 1/4 二进制为 OpenSSL 代码，近 12,000 函数）
-- **进程间通信**：命名共享内存（CreateFileMappingW），约 1,500 行 IPC 管理代码
-- **输入模拟**：Windows SendInput + Linux X11 XTest + macOS CGEvent
+### Codec Comparison
 
-## 3. 功能概览
-### 核心功能模块
-- **远程桌面控制**：完整的远程桌面体验，支持多显示器切换、4K 分辨率、60fps 高帧率、DeskRT 自适应画质和帧率、真彩色、鼠标光标独立通道（不占编码码率）、系统级快捷键透传（Alt+Tab 等）
-- **文件传输**：双向文件传输，支持拖拽操作、文件夹同步、传输队列管理、断点续传、带宽限制设置
-- **远程打印**：从远程主机直接在本地打印机输出文档，无需先传输文件到本地。支持彩色/黑白选择和多打印机配置
-- **TCP 隧道（端口转发）**：将远程主机的任意 TCP 端口映射到本地，实现内网服务（HTTP/SSH/RDP/数据库等）代理访问。AnyNet 协议内置 TCP tunneling 消息类型
-- **剪贴板同步**：双向剪贴板同步，支持文本和图片格式（同步延迟极低，<100ms）
-- **会话录制**：完整录制远程会话为视频文件（企业版功能），满足合规审计需求。支持基于角色的访问控制（谁可以查看/下载录制）
-- **语音通话（VoIP）**：内置语音通信，支持会话内实时语音对话（不依赖第三方音频会议工具）
-- **白板标注**：在远程屏幕上直接绘制标注，适合培训和演示场景
-- **Wake-on-LAN**：通过局域网唤醒远程计算机（需目标设备硬件支持）
+| Property | DeskRT (AnyDesk) | H.264/H.265 (general) | RemoteFX (RDP) | VP8/VP9 (WebRTC) |
+|----------|------------------|-----------------------|----------------|-------------------|
+| Design target | Computer graphics (GUI) | Natural video (cameras) | Desktop content | General (video+desktop) |
+| Text sharpness | ★★★★★ razor-sharp | ★★★☆☆ DCT blur | ★★★★☆ fairly sharp | ★★★☆☆ DCT blur |
+| Large-flat-area compression | ★★★★★ excellent | ★★★☆☆ average | ★★★★☆ high | ★★★☆☆ average |
+| Video content handling | ★★★☆☆ passable | ★★★★★ excellent | ★★★☆☆ passable | ★★★★★ excellent |
+| Ultra-low bandwidth (100kbps) | ★★★★☆ usable | ★★☆☆☆ difficult | ★★★☆☆ passable | ★★★☆☆ passable |
+| Encode latency | <16ms | 5-50ms | 10-30ms | 5-40ms |
+| Royalty-free | ❌ proprietary closed | ❌ MPEG LA fees | ❌ Microsoft proprietary | ✅ fully free |
+| Open implementations | ❌ unauditable | ✅ x264/openh264 | ❌ | ✅ libvpx |
+| GPU hardware acceleration | ❌ pure software | ✅ all vendors' GPUs | ✅ Windows GPUs | ✅ partially supported |
+| GUI compression efficiency | ★★★★★ optimal | ★★★☆☆ | ★★★★☆ | ★★★☆☆ |
 
-### 特色功能
-- **DeskRT 极低带宽传输能力**：核心差异化能力。在 100kbps 带宽下仍可流畅操作远程桌面。对移动网络（3G/4G 限速）、卫星链路、欠发达地区互联网等场景有不可替代的优势。H.264/H.265 在同样带宽下无法维持可用的帧率和文字清晰度
-- **3.7MB 极致轻量客户端**：全球最小的全功能远程桌面客户端之一。IT 支持场景中从下载到进入远程会话仅需 5-10 秒，大幅提升 Help Desk 响应效率。便携模式无需安装、不留注册表残留。纯 C++/Qt 构建，非 Electron 打包（避免 100MB+ 的 Chromium 捆绑）
-- **Erlang/OTP 电信级后端**：AnyNet 基础设施使用 Erlang 语言构建，这是电信行业（如爱立信移动交换机）验证过的大规模并发处理方案。Actor 模型让每个连接是独立轻量进程（而非 OS 线程），监督树让崩溃不影响其他连接，热代码升级无需停机。可靠性目标 99.999%，是全球远程桌面中最高的基础设施可靠性标准
-- **中继优先连接策略的独特设计**：与 TeamViewer/RustDesk 的"P2P 优先"策略不同，AnyDesk 默认走 Erlang 中继网络。这一设计基于两个判断：1) P2P 打洞在真实网络环境中成功率有限（约 50-70%）；2) Erlang 基础设施的延迟已经很低（中继路径在很多场景下 <10ms 增量）。结果是 AnyDesk 的连接建立速度通常快于"先试 P2P 再 fallback 中继"的方案。但代价是媒体数据经过 AnyDesk 服务器（仅 TLS 传输加密保护，服务器端可见明文）
-- **多进程权限分离 + IPC 共享内存**：GUI 进程（用户身份）和 Network Service 进程（SYSTEM 身份）作为两个独立进程。网络进程无法直接访问桌面内容，但通过命名共享内存高效传递屏幕捕获数据（零拷贝开销，比 socket IPC 快）。这是安全隔离 + 高性能通信的典范设计
-- **On-Premises 完整部署**（企业版）：企业可将整个 AnyDesk 基础设施（信令 + 中继 + 管理后台）部署在内部网络。支持 Windows/Linux 服务器部署。满足政府、金融、军工等严格数据主权要求。提供自定义命名空间（如 `device@company.internal`）和 LDAP/Active Directory 集成
-- **AnyNet 序列化引擎的极致安全投入**：协议逆向分析揭示 AnyDesk 在协议解析器上投入了 570+ 边界检查，是远程桌面产品中对协议层安全性投入最深的产品之一。每个入站消息的每个字段都经过独立验证——不是用一个通用校验函数覆盖所有消息类型。在 Log4Shell/Heartbleed 时代，这种"不信任任何入站数据"的设计哲学代表正确的安全工程方向
-- **品牌白标（White Label）**：企业客户可将 AnyDesk 客户端以自己的品牌发布（自定义 Logo、主题色、安装包名称）。对 MSP 和大型企业 IT 部门而言，远程支持工具的品牌统一性直接影响终端用户的技术感知和信任度
+### Technology Stack
 
-### 扩展性 / 插件机制
-- **RESTful API**：通过 Cowboy HTTP 服务器暴露的设备管理、会话控制、用户管理接口。支持第三方 PSA/RMM 集成（ConnectWise/Autotask 等）
-- **AnyDesk Deployment Tool**：企业批量部署和管理工具，支持 MSI 静默安装和 GPO 策略下发
-- **my.anydesk.com**：Web 管理控制台，提供设备管理、用户权限、会话日志和 License 管理
-- **自定义命名空间**（企业版）：企业可使用自定义地址簿（如 `desk01@company.internal`）替代 AnyDesk 默认的公共 ID 系统
-- **自定义客户端品牌**（企业版）：Logo、主题色、安装包名称可按企业品牌完全定制
-- **LDAP/AD 集成**（企业版）：用户和组同步 + 单点登录认证，支持 Active Directory 和 OpenLDAP
-- **SAML 2.0 SSO**（企业版）：与企业统一身份认证系统对接
-- **CI/CD 自动化脚本**：CLI 参数 `--set-password`、`--with-password`、`--install`、`--remove`、`--get-id`、`--start-service` 等 40+ 标志支持完全脚本化部署和配置
-- **URL Handler 协议注册**：`anydesk://` 协议处理器允许第三方应用通过 URL scheme 发起远程连接。可嵌入 CRM/Help Desk 系统的工单流程
-- **自定义端口配置**：企业可按需配置客户端通信端口（避免与内部防火墙策略冲突）
+- **Backend (the AnyNet infrastructure)**:
+  - Language: Erlang/OTP (carrier-grade reliability, hot upgrades with no downtime, 10k+ concurrent device management)
+  - Web framework: Cowboy (a high-performance Erlang HTTP server implementing the RESTful API)
+  - Databases: PostgreSQL (persistent) + Mnesia (distributed) + ETS (in-memory tables, fast cache)
+  - Architecture pattern: the Actor model for concurrency + supervision-tree fault isolation + horizontal scalability (Erlang's standard distributed model)
+- **Client**:
+  - Language: C++/Qt (cross-platform GUI + network I/O + screen capture)
+  - Size: 3.7MB (extremely light; about 1/10 of TeamViewer's client)
+  - Minimal dependencies: Qt core modules only (loading what's needed); no Electron, no WebView dependency
+- **Protocol stack**:
+  - Serialization: the in-house AnyNet protocol engine (a custom binary protocol with 570+ bounds checks)
+  - Transport encryption: TLS 1.3
+  - Session encryption: AES-256
+  - Key exchange: RSA-4096 (On-Premises) / ECC-256 (Cloud)
+  - Forward secrecy: full PFS support
+  - Port strategy: 443/80/6568/7070 (multi-port + protocol multiplexing)
+- **Video encoding**: the in-house DeskRT codec (designed for computer-graphics transmission)
+- **Screen capture**: Windows DXGI Desktop Duplication (direct GPU frame copy)
+- **Crypto library**: OpenSSL (about 1/4 of the binary is OpenSSL code, nearly 12,000 functions)
+- **IPC**: named shared memory (CreateFileMappingW); about 1,500 lines of IPC management code
+- **Input simulation**: Windows SendInput + Linux X11 XTest + macOS CGEvent
 
-## 4. 现状与生态
-- **当前版本**：v8.x 系列（2025-2026 持续更新），各平台独立版本号，保持月度/季度更新节奏
-- **用户规模**：
-  - 全球 800M+ 次下载（自 2014 年累计）
-  - 180,000+ 付费客户
-  - 覆盖 190 个国家和地区
-  - 50 个德国增长最快企业之一（2020-2025）
-  - 500+ 员工（2025 年）
-  - 世界知名 Fortune 500 品牌客户
-  - 10k+ 并发设备连接能力（单个 Erlang 集群）
-- **关键发展时间线**：
-  - **2014**：公司成立。创始团队来自前 TeamViewer 核心成员，经历过 TeamViewer 从 0 到 3 亿月活的完整周期。发布首个 DeskRT 编解码器原型，以"比 TeamViewer 更快"为营销切入点
-  - **2015-2016**：首个公开发布版本，快速扩大用户基础。C++/Qt 客户端持续优化，3.7MB 体积完成定型
-  - **2017**：引入 Erlang/OTP 后端（AnyNet 基础设施），将后端从单体服务升级为分布式的电信级平台。这是 AnyDesk 技术架构最重要的升级——Erlang 的 Actor 模型和热更新能力成为 AnyDesk 技术实力的核心体现
-  - **2018-2019**：推出 On-Premises 企业版，开始从个人市场向企业市场渗透。发布 REST API 和管理控制台（my.anydesk.com）
-  - **2020**：COVID-19 疫情期间下载量爆发式增长。远程办公需求推动用户基数从 2 亿跃升至 5 亿下载量。引入 2FA 双因素认证
-  - **2021**：用户数突破 5 亿下载。成为德国科技独角兽候选企业。扩展企业功能（SSO/LDAP/Session Recording）
-  - **2022-2023**：持续增长至 7 亿+ 下载。引入更多安全合规认证（SOC 2 Type II / NIS 2）。扩展至 Raspberry Pi 和更多嵌入式平台
-  - **2024**：被德国企业集团收购（收购方和金额未公开）。产品技术体系和管理团队得以保留，继续独立运营
-  - **2025**：达到 800M+ 下载里程碑。发布 AI 信息页面（`anydesk.com/ai-info`），暗示 AI 驱动的功能在开发中
-  - **2026**：协议逆向工程详细报告公开发布（Daniele Berardinelli 2026年4月），揭示了 AnyDesk 内部架构的大量技术细节，成为安全研究社区的热门分析对象
-- **社区规模**：
-  - 官方支持社区和知识库：support.anydesk.com（多语言，活跃用户互助）
-  - 安全透明度中心：trust.anydesk.com（独立子域名，展示所有安全认证和合规文档）
-  - 技术博客和产品更新日志：anydesk.com/blog
-  - 安全研究社区高度关注：DeskRT 编解码器和 AnyNet 协议的逆向工程是热门研究课题（Frida/Ida Pro/Ghidra 分析报告多篇）
-  - Reddit r/AnyDesk：用户互助社区
-  - Stack Overflow：anydesk 标签有活跃的技术问答
-- **文档 / SDK / API 生态**：
-  - 官方帮助中心和知识库（多语言，含中文）
-  - REST API 完整文档（设备管理、用户管理、会话控制）
-  - API 后端使用 Cowboy（Erlang HTTP 框架）+ PostgreSQL
-  - 安全合规文档集：ISO 27001 / SOC 2 Type II / HIPAA / GDPR / NIS 2
-  - my.anydesk.com Web 管理门户使用指南
-  - On-Premises 部署指南（Windows Server / Linux 服务器）
-  - MSI 部署和 Active Directory 集成详细文档
-  - 无正式 SDK，但 REST API 可被任意语言调用
-- **已知缺陷或限制**：
-  1. **更新不验证软件签名**（严重）：逆向分析揭示 AnyDesk 每 9 小时通过 AnyNet 中继协议下载更新，但**不验证软件签名**——仅依赖 TLS 传输安全。如果中继网络被攻破，恶意更新可被注入到数百万设备。虽 TLS 提供传输安全且 Windows Installer 验证 MSI 包完整性，但缺少独立的数字签名验证不符合安全最佳实践
-  2. **代码段缺少 DEP 保护**（安全架构缺陷）：逆向分析揭示 `.itext` 段标记为 RWC（Read/Write/Execute），整个 30MB 代码页在运行时保持可写入。这是二进制解压（LZMA 解压缩 + keystream 解密）的技术需要，但意味着不在现代操作系统的 W^X 保护策略下
-  3. **内存中密码明文存储**（运行时安全）：DPAPI 解密后，密码和 RSA 私钥以明文形式存在于 `service.conf` 和相关内存中。Frida 可通过 hook `CryptUnprotectData()` 在运行时获取解密后的敏感数据
-  4. **IPC 共享内存使用 NULL 安全属性**：`CreateFileMappingW` 使用 `NULL` 安全描述符创建共享内存对象。依赖 Windows Session Isolation 提供跨会话保护，但未使用显式 ACL 加固。与 570+ 边界检查的协议安全投入形成对比
-  5. **中继优先策略的隐私隐患**：默认走中继意味着所有媒体数据经过 AnyDesk 服务器。虽经 TLS 1.3 加密，但数据在服务器端对 AnyDesk 运营商可见（传输加密 ≠ 端到端加密）。与 RustDesk 的 NaCl 端到端加密模型（中继无法解密）有本质差距
-  6. **DeskRT 编解码器的闭源不可审计性**：专有编解码器无法被第三方安全审计或性能独立验证。所有性能指标依赖厂商声明。在安全敏感场景（政府/金融/军事）中，这是重大合规障碍
-  7. **纯 TCP 策略在弱网下的性能损失**：依赖 TCP 传输（中继优先 + P2P TCP），在高丢包率（>5%）场景下 TCP 拥塞控制导致明显的卡顿和延迟抖动。UDP 方案（如 WebRTC/Parsec BUD）在高丢包网络中的表现优于 TCP
-  8. **Erlang 人才稀缺风险**：维护和扩展 Erlang 基础设施需要稀有的 Erlang/OTP 工程师。Erlang 虽在电信和金融领域有稳定市场，但开发者数量远少于 Rust/Go/Java/TypeScript，长期维护成本高
-  9. **被收购后的战略不确定性**：2024 年被收购后，虽然当前团队和产品体系得以保留，但长期路线图受母公司战略影响。类似事件（LogMeIn 收购后产品走向变化、Citrix 收购后的定位漂移）对用户信任有负面影响
+## 3. Feature Overview
 
-## 5. 市场定位
-- **主要应用行业**：
-  - IT 支持与远程运维（MSP/Help Desk 的核心场景：快速启动 + 跨平台 + 低带宽不可靠网络场景）
-  - 制造业与工程（远程访问 CAD/PLM/CAM 工作站，无需传输 GB 级模型文件）
-  - 医疗健康（远程医疗会诊，HIPAA 合规，低带宽环境仍可用——偏远诊所的卫星互联网）
-  - 教育（远程教学和虚拟实验室，3.7MB 客户端适合学生的各种设备）
-  - 政府部门（数据主权 + On-Premises 部署，满足国家数据安全法规）
-  - 金融服务（安全合规要求严格但需要低延迟远程访问交易终端，中继优先的快速连接是关键）
-  - 呼叫中心和 BPO（需要快速响应的远程 IT 支持，中继优先策略减少每次会话的建立等待时间）
-  - 嵌入式/物联网（Raspberry Pi / ARM 设备远程管理，轻量客户端适合资源受限设备）
-- **竞品对比简表**：
+### Core Feature Modules
 
-| 竞品 | 优势 | 劣势 |
-|------|------|------|
-| TeamViewer | 全球最大用户基础（3 亿+设备/月）、企业功能最完整、IoT/AR 生态、1000+ 全球节点 | 客户端 10 倍体积、费用更高（约 40%）、2016 年安全事件信任受损、延迟通常高于 AnyDesk |
-| RustDesk | 完全开源、支持自托管、NaCl E2E 加密（中继无法解密）、零费用 | DeskRT 级低带宽性能无等效实现、TCP 打洞成功率更低、企业功能（SSO/LDAP）需 Pro 版 |
-| Splashtop | 多产品线细化、On-Premises 部署 + 多 Provider 冗余、AI 优化编解码器 | 品牌影响力不如 AnyDesk、无 DeskRT 级专有编码器突破、客户端 >15MB |
-| Parsec | 7ms 游戏级延迟标杆、GPU 零拷贝、虚拟手柄多人游戏创新 | 仅硬件编码（排除老旧设备）、仅 Windows Host、核心场景是游戏而非远程桌面 |
+- **Remote desktop control**: a complete remote-desktop experience with multi-monitor switching, 4K resolution, 60fps high frame rate, DeskRT adaptive quality/framerate, true color, a dedicated mouse-cursor channel (not consuming encode bitrate), and system-level hotkey passthrough (Alt+Tab etc.)
+- **File transfer**: bidirectional file transfer with drag-and-drop, folder sync, transfer queues, resume, and bandwidth limits
+- **Remote printing**: print documents from the remote host directly on a local printer without first transferring the file; color/BW selection and multi-printer configuration
+- **TCP tunneling (port forwarding)**: maps any remote TCP port to local, proxying access to intranet services (HTTP/SSH/RDP/databases etc.). The AnyNet protocol has built-in TCP tunneling message types
+- **Clipboard sync**: bidirectional clipboard sync for text and images (very low sync latency, <100ms)
+- **Session recording**: full session recording to video (an enterprise feature) for compliance audits, with role-based access control (who may view/download recordings)
+- **Voice calls (VoIP)**: built-in voice communication for in-session real-time talk (no third-party audio conferencing needed)
+- **Whiteboard annotation**: draw annotations directly on the remote screen; suited to training and demos
+- **Wake-on-LAN**: wake a remote computer over the LAN (requires target hardware support)
 
-- **定价 / 许可**：
-  - **免费版**：个人非商业使用，核心远程桌面功能，单会话有水印，限制约 30 分钟
-  - **Essentials**：$14.90/月/许可（1 用户，最多管理 3 台设备，1 并发会话）
-  - **Performance**：$29.90/月/许可（不限设备数、会话录制、MSI 部署、移动设备支持）
-  - **Enterprise**：$59.90/月/许可（不限设备、品牌定制、自建中继节点、SAML SSO、LDAP/AD 集成、API 全访问、SLA 保障）
-  - 以上为 2025 年参考价格，按年订阅约享 15-20% 折扣
-  - AnyDesk 声称比 TeamViewer 同等功能便宜约 40%
+### Distinctive Features
 
-## 6. 产品特色
-1. **DeskRT 编解码器——专为 GUI 传输而生的技术壁垒**：DeskRT 是 AnyDesk 最核心的差异化能力。它并非通用视频编解码器，而是专门针对计算机图形（窗口、文字、图标、按钮、菜单）设计。这种设计带来两个关键优势：1) 对 GUI 内容的压缩率远超 H.264/H.265（文字保持锐利，无 DCT 压缩伪影）；2) 在 100kbps 的极端低带宽下仍可流畅操作。这两个优势在卫星链路、移动数据限速、数字鸿沟场景下无法被通用编解码器替代。对 MediaServo 而言，DeskRT 的存在证明了**针对特定内容设计专用编解码器**的商业价值——不仅是技术优化，更是市场定位的核心支柱
-2. **中继优先的连接策略——对"P2P 优先教条"的挑战**：几乎所有远程桌面产品都遵循"P2P 优先 + 中继 fallback"模式，但 AnyDesk 选择反其道而行——默认通过 TLS 中继连接，P2P 直连作为可选 fallback。这是基于两个判断：1) Erlang 全球中继网络的延迟极低（<10ms 增量在许多场景下）；2) P2P 打洞在真实网络中成功率不可控。对企业 IT 管理员而言，连接建立速度通常更快（不需要等待 P2P 失败后切换）。但代价是数据经过 AnyDesk 服务器——隐私保护模型是 TLS 传输加密而非端到端加密
-3. **Erlang/OTP 电信级基础设施——用电话交换机的可靠性构建远程桌面服务**：AnyDesk 是唯一大规模使用 Erlang/OTP 的远程桌面产品。Erlang 是为电信交换机设计的语言，原生支持：热更新（无停机升级，这是行业最高标准的持续运行能力）、Actor 模型并发（每个连接是独立轻量进程，资源开销远低于 OS 线程）、监督树故障隔离（一个会话崩溃自动重启，不影响其他用户）、分布式集群（Mnesia 分布式数据库 + ETS 内存表实现全局状态一致）
-4. **3.7MB 客户端的工程美学——"做减法"的极致**：AnyDesk 的 3.7MB 客户端体积是行业异常值（TeamViewer 30MB+，RustDesk 10MB+，ToDesk 50MB+）。这种极致轻量来自 C++/Qt 最小化、按需加载模块、拒绝不必要的第三方依赖。这不仅意味着更快的下载和部署，更重要的是降低了攻击面——体积小 = 代码量少 = 潜在的漏洞少 = 审计成本低
-5. **AnyNet 序列化引擎——协议解析器的安全性标杆**：逆向分析揭示 AnyDesk 在协议解析器安全上投入了 570+ 边界检查，这是所有远程桌面产品中最深的安全投入。每个入站消息的每个字段都经过独立验证——不是用一个通用校验函数覆盖所有消息类型，而是为各消息类型实现单独的校验逻辑。这体现了"不信任任何入站数据"的设计哲学，在网络安全领域代表正确的工程方向。但与这种安全投入形成反差的是代码段 DEP 缺失和 IPC 共享内存的 NULL 安全属性
-6. **多进程权限分离——"分段防御"的安全架构**：GUI（用户身份）和 Service（SYSTEM 身份）作为两个独立进程，通过命名共享内存通信。这种架构实现了两个安全目标：1) 网络层和用户层的权限隔离——网络进程无法直接访问桌面，GUI 进程无法直接访问网络；2) 攻击者必须同时攻破两个进程才能完成远程控制。这是远程桌面安全架构的最佳实践之一
+- **DeskRT's ultra-low-bandwidth capability**: the core differentiator. Smooth remote desktop at 100kbps. An irreplaceable advantage for mobile networks (throttled 3G/4G), satellite links, and underdeveloped internet routes. H.264/H.265 cannot sustain usable frame rates and text sharpness at the same bandwidth
+- **The 3.7MB ultra-light client**: one of the world's smallest full-featured remote-desktop clients. In IT support, download-to-session takes only 5-10 seconds, greatly improving Help Desk responsiveness. Portable mode needs no install and leaves no registry residue. Pure C++/Qt, not Electron-packaged (avoiding a 100MB+ Chromium bundle)
+- **The Erlang/OTP carrier-grade backend**: the AnyNet infrastructure is built in Erlang, the large-scale concurrency approach proven by telecom (e.g. Ericsson mobile switches). The Actor model makes each connection an independent lightweight process (not an OS thread); supervision trees isolate crashes; hot code upgrading needs no downtime. The reliability target is 99.999%
+- **The distinctive relay-first connection strategy**: unlike TeamViewer/RustDesk's "P2P-first" strategy, AnyDesk defaults to the Erlang relay network. The design rests on two judgments: 1) P2P hole punching has limited real-world success (~50-70%); 2) the Erlang infrastructure's latency is already low (the relayed path)
+- **Multiprocess privilege separation + IPC shared memory**: the GUI process (user identity) and the Network Service process (SYSTEM identity) run as two independent processes. The network process cannot touch the desktop directly, but screen-capture data moves efficiently through named shared memory (zero-copy, faster than socket IPC). A canonical example of security isolation + high-performance communication
+- **Complete On-Premises deployment** (enterprise): the whole AnyDesk infrastructure (signaling + relay + admin console) can run inside a corporate network; Windows/Linux server support; satisfies the strict data-sovereignty demands of government, finance, and defense; provides custom namespaces (e.g. `device@company.internal`)
+- **The AnyNet serialization engine's extreme security investment**: protocol reverse engineering revealed 570+ bounds checks in the parser — one of the deepest protocol-layer security investments among remote-desktop products. Every field of every inbound message is independently validated — not one generic validation function covering all message types. This is the Log4Shell/Heartbleed-era lesson embodied
+- **White labeling**: enterprise customers can ship the AnyDesk client under their own brand (custom logo, theme colors, installer name). For MSPs and large-enterprise IT, brand consistency of the support tool directly shapes end users' perception and trust
 
-## 7. 对 MediaServo 的参考价值
-### [Adopt] 可直接借鉴
-- **进程权限分离架构**：网络 I/O 独立进程 + 屏幕捕获独立进程 + 权限隔离。MediaServo 的 Plugin 体系天然支持这种分离——ScreenCapture/NetworkTransport/InputInjector 可以各自独立的 Plugin Worker 承载，通过 mediaservo-core 的消息总线通信。这比 AnyDesk 的命名共享内存更解耦，但核心思想（权限分段）完全一致
-- **DeskRT 的设计理念——针对 GUI 内容而非通用视频的专用编码**：MediaServo 应在通用编解码器（H.264/HEVC/AV1）基础上，探索设计一个针对桌面 GUI 内容的轻量优化层。不需要从零开始造轮子——可以是一个"预处理器"，在通用编码器之前对 GUI 帧做内容分类、文字区域无损处理、纯色区域压缩、缓存复用等优化。参考 RDP RemoteFX 的 Tile DWT + RLGR 和 DeskRT 的内容分类思路
-- **570+ 边界检查的协议安全设计哲学**：MediaServo 的 ProtocolBroker 应对所有入站消息实现字段级边界检查。Protobuf 本身提供基础的序列化安全，但需要额外验证业务逻辑约束。每个消息类型应有独立的校验函数，不共用通用解析器。将"不信任任何入站数据"作为架构层面的安全原则写入设计文档
-- **Erlang/OTP 的热更新和故障隔离能力**：MediaServo 核心用 Rust，但信令服务的可靠性要求极高。无停机升级可通过"双实例滚动升级 + 连接迁移"实现（类似 Erlang OTP 的 release handling）。故障隔离可通过 Rust tokio task 边界实现（一个 session 崩溃不影响其他 task）
-- **中继优先策略的场景化思考**：在 MediaServo 的某些部署场景（如车端→云端推流、弱网环境），中继优先可能比 P2P 优先更适合。连接策略应可配置："P2P 优先" / "中继优先" / "智能自动选择"（Phase 2+ 基于历史数据决策）
-- **3.7MB 最小化客户端的依赖管理哲学**：MediaServo 的 Native 层应遵循类似原则——核心 SDK 的所有非标准库依赖应有明确的性能/安全理由，每个依赖的引入需要评审和文档化
-- **Cowboy HTTP + RESTful API 的管理接口设计模式**：信令服务的管理 API 设计（设备 CRUD、会话控制、权限管理）与 MediaServo 的管理 API 需求高度一致
-- **静态画面零带宽的优化思想**：无屏幕变化时停止发送数据，这是 DeskRT 和 RDP 共享的优化策略。MediaServo 的 Encoder Plugin 应在编码前检查帧差分——如果整帧无变化，跳过编码和传输
+### Extensibility / Plugin Mechanisms
 
-### [Adapt] 需修改后采用
-- **命名共享内存 IPC → mediaservo-core 消息总线 + Plugin Workers**：AnyDesk 使用 `CreateFileMappingW` + `NULL` 安全属性的 IPC 在安全性上有瑕疵。MediaServo 应使用更安全的 IPC：Unix Domain Socket（Unix）+ 命名管道（Windows）配合显式权限控制，或通过 mediaservo-core 的消息总线实现 Plugin 间安全通信
-- **DeskRT 专有闭源编解码器 → 分层编解码策略**：MediaServo 不能复刻 DeskRT（专有闭源），但可以设计分层编码管线：Layer 1（通用编码器）：H.264/HEVC/AV1 硬件编码（性能优先）；Layer 2（软件 fallback）：VP8/VP9/AV1 软件编码（兼容性优先）；Layer 3（GUI 优化预处理）：在编码前进行屏幕内容分类和处理（文字锐化 + 纯色压缩 + 缓存复用）
-- **TLS 1.3 传输加密（中继可见）→ NaCl/DTLS-SRTP 端到端加密**：MediaServo 应从设计上保证信令和中继服务器都不可解密媒体内容。WebRTC 的 DTLS-SRTP 或 RustDesk 的 NaCl (xsalsa20-poly1305) 是比 TLS 传输加密更合适的端到端方案
-- **更新不验证签名 → 双签名验证 + TUF Framework**：MediaServo 的更新系统必须独立于传输安全进行数字签名验证。使用 The Update Framework (TUF) 或自定义的双签名验证（代码签名 + 部署签名），确保即使 CDN 或中继网络被攻破，恶意更新也无法被安装。从 Phase 0 就以 AnyDesk 的这个教训为设计约束
-- **代码段 RWC（可写 + 可执行）→ 严格执行 W^X 策略**：MediaServo 二进制必须严格分离代码段（RX）和数据段（RW），绝不允许同时具有写和执行权限。编译时启用 `-C link-arg=-Wl,-z,relro -C link-arg=-Wl,-z,now`（Rust）确保 RELRO + 代码段只读
-- **中继优先的隐私问题 → 可配置连接策略 + 明确的隐私声明**：如果特定场景需要中继优先（如车端推流），应在设计文档中明确说明数据在服务器端的可见性边界。提供 E2E 加密作为增强选项。让"传输加密"和"端到端加密"的边界对用户透明可理解
-- **Erlang 后端的技能门槛 → Rust 异步 + PostgreSQL + 消息队列**：MediaServo 的信令服务使用 Rust（与核心一致），用 PostgreSQL（持久化）或 Redis（高速缓存）替代 Mnesia/ETS 的功能。Rust 的 tokio 异步模型可以处理类似的并发需求（10k+ 并发连接）
+- **RESTful API**: device management, session control, and user management interfaces exposed via the Cowboy HTTP server; supports third-party PSA/RMM integrations (ConnectWise/Autotask etc.)
+- **The AnyDesk Deployment Tool**: enterprise batch deployment/management with MSI silent installs and GPO policy distribution
+- **my.anydesk.com**: the web admin console for device management, user permissions, session logs, and license management
+- **Custom namespaces** (enterprise): enterprises can use custom address books (e.g. `desk01@company.internal`) instead of AnyDesk's default public ID system
+- **Custom client branding** (enterprise): logo, theme colors, and installer name fully brandable
+- **LDAP/AD integration** (enterprise): user/group sync + SSO, supporting Active Directory and OpenLDAP
+- **SAML 2.0 SSO** (enterprise): integrates with enterprise identity providers
+- **CI/CD automation scripts**: CLI flags like `--set-password`, `--with-password`, `--install`, `--remove`, `--get-id`, `--start-service` — 40+ flags supporting fully scripted deployment and configuration
+- **URL handler registration**: the `anydesk://` protocol handler lets third-party apps initiate remote connections via URL scheme; embeddable in CRM/Help Desk ticket flows
+- **Custom port configuration**: enterprises can configure client communication ports as needed (avoiding conflicts with internal firewall policy)
 
-### [Avoid] 已知坑 / 不适用场景
-- **更新不验证软件签名的设计缺陷**：AnyDesk 最严重的安全隐患——每 9 小时通过中继下载更新但只依赖 TLS 传输安全。MediaServo 必须从 Phase 0 实现独立的数字签名验证。任何"先上线再补签名验证"的做法都不可接受
-- **代码段 DEP 缺失**：二进制不得在任何情况下允许代码页可写入。这是操作系统级别的安全基础，不应因性能或部署便利而妥协
-- **IPC 共享内存使用 NULL 安全属性**：所有 IPC 通道必须有显式 ACL 或权限验证。Unix 下 Unix Socket 使用文件权限限制（0600），Windows 下命名管道设置安全描述符
-- **DeskRT 的专有封闭性**：MediaServo 的协议和编解码器必须是 RFC 标准或公开文档化。专有编解码器不可审计（政府/金融/军事场景的合规障碍），而且被厂商锁定（AnyDesk 如果改变许可或停止支持，DeskRT 成为技术孤岛）
-- **中继优先导致第三方可见媒体数据**：对自托管场景提供 E2E 加密 + 中继不透明选项。对委托场景（由 AUDEBase 管理），审计要求可能需数据在服务器端可见——这应作为配置选项而非硬编码
-- **纯 TCP 策略在弱网下的性能损失**：TCP 的队头阻塞和慢启动在高丢包率场景是致命的。MediaServo 的媒体传输必须基于 UDP（RTP/WebRTC RTCDataChannel），TCP 仅用于信令。这是 Parsec、ToDesk、RustDesk 的共识
-- **Erlang 人才稀缺的长期维护风险**：MediaServo 的基础设施组件应选择与核心技术栈一致的 Rust/C++/TypeScript，避免引入需要稀缺人才的技术孤岛
-- **被动接受中继的加密方案**：不要将"加密了"等同于"安全了"——TLS 1.3 传输加密保护了链路层，但数据在服务器端对运营商可见。必须在架构文档中明确区分"传输加密"（TLS，保护中间人攻击）和"端到端加密"（WebRTC DTLS-SRTP / NaCl，保护服务器运营商），并在设计上支持两种模式的可配置切换
+## 4. Status & Ecosystem
 
-**总体评分**：★★★★☆ (4/5)
-**评语**：DeskRT 编解码器的专有性和 Erlang 后端的电信级可靠性是 AnyDesk 的技术支柱。进程权限分离架构和协议解析器的深度安全投入（570+ 边界检查）是 MediaServo 架构设计的直接参考。但中继优先策略的隐私隐患、更新不验证签名、代码段 DEP 缺失是需要吸取的安全教训。MediaServo 应取其精华（进程隔离、协议安全设计、GUI 优化编码思想），避免其陷阱（闭源编解码器锁定、传输加密不等于端到端安全）。
-<!-- -->
-**相关决策**: D2, D77
-## 附录：AnyDesk 逆向工程关键发现（2026 年 4 月公开）
+- **Current version**: the v8.x series (continuously updated 2025-2026), per-platform version numbers, monthly/quarterly cadence
+- **Scale**:
+  - 800M+ downloads worldwide (cumulative since 2014)
+  - 180,000+ paying customers
+  - Present in 190 countries and regions
+  - One of Germany's 50 fastest-growing companies (2020-2025)
+  - 500+ employees (2025)
+  - Fortune 500 brand customers
+  - 10k+ concurrent device connections per Erlang cluster
+- **Key development timeline**:
+  - **2014**: founded. The founding team came from TeamViewer's core, having lived through TeamViewer's 0-to-300M-MAU arc; released the first DeskRT codec prototype, marketing "faster than TeamViewer"
+  - **2015-2016**: first public release; rapid user growth. The C++/Qt client kept optimizing; the 3.7MB size was finalized
+  - **2017**: introduced the Erlang/OTP backend (the AnyNet infrastructure), upgrading the backend from a monolith to a distributed carrier-grade platform — AnyDesk's most important architectural upgrade; Erlang's Actor model and hot-upgrade capability became the core of its technical story
+  - **2018-2019**: launched the On-Premises enterprise edition, penetrating from consumer into enterprise; released the REST API and admin console (my.anydesk.com)
+  - **2020**: explosive download growth during COVID-19; remote work pushed the user base from 200M to 500M downloads; introduced 2FA
+  - **2021**: passed 500M downloads; a German tech-unicorn candidate; expanded enterprise features (SSO/LDAP/Session Recording)
+  - **2022-2023**: growth to 700M+ downloads; more security certifications (SOC 2 Type II / NIS 2); expanded to Raspberry Pi and more embedded platforms
+  - **2024**: acquired by a German industrial group (acquirer and amount undisclosed); the product's technology and management team retained, operating independently
+  - **2025**: passed the 800M-download milestone; published an AI info page (`anydesk.com/ai-info`), hinting AI-driven features in development
+  - **2026**: a detailed protocol reverse-engineering report published publicly (Daniele Berardinelli, April 2026), revealing extensive internal architecture details and becoming a hot subject in the security-research community
+- **Community**:
+  - The official support community and knowledge base: support.anydesk.com (multilingual, active peer help)
+  - The security transparency center: trust.anydesk.com (a dedicated subdomain listing all certifications and compliance docs)
+  - Tech blog and product changelog: anydesk.com/blog
+  - High security-research attention: DeskRT and AnyNet reverse engineering are popular research subjects (multiple Frida/Ida Pro/Ghidra reports)
+  - Reddit r/AnyDesk: a user-help community
+  - Stack Overflow: an active `anydesk` tag
+- **Docs / SDK / API ecosystem**:
+  - The official help center and knowledge base (multilingual, incl. Chinese)
+  - Complete REST API docs (device management, user management, session control)
+  - The API backend uses Cowboy (the Erlang HTTP framework) + PostgreSQL
+  - The security compliance doc set: ISO 27001 / SOC 2 Type II / HIPAA / GDPR / NIS 2
+  - The my.anydesk.com web admin portal guide
+  - On-Premises deployment guides (Windows Server / Linux servers)
+  - Detailed MSI deployment and Active Directory integration docs
+  - No formal SDK, but the REST API is callable from any language
+- **Known defects or limitations**:
+  1. **Updates don't verify software signatures** (severe): reverse engineering revealed that AnyDesk downloads updates every 9 hours over the AnyNet relay protocol **without verifying signatures** — relying only on TLS transport security. If the relay network were compromised, a malicious update could be injected into millions of devices. Though TLS provides transport security and the Windows Installer verifies the package
+  2. **The code section lacks DEP protection** (a security-architecture defect): reverse engineering revealed the `.itext` section marked RWC (Read/Write/Execute); the whole 30MB code page stays writable at runtime. This is a technical need of binary unpacking (LZMA decompression + keystream decryption), but it means the binary doesn't live under modern operating systems' W^X policies
+  3. **Passwords stored in plaintext in memory** (runtime security): after DPAPI decryption, passwords and RSA private keys exist in plaintext in `service.conf` and related memory. Frida can hook `CryptUnprotectData()` to extract the decrypted secrets at runtime
+  4. **IPC shared memory uses NULL security attributes**: `CreateFileMappingW` creates the shared-memory object with a `NULL` security descriptor, relying on Windows Session Isolation for cross-session protection, with no explicit ACL hardening — a contrast to the 570+-bounds-check protocol security investment
+  5. **The relay-first strategy's privacy implication**: relaying by default means all media passes AnyDesk's servers. Though TLS 1.3-encrypted, the data is visible to the operator at the server side (transport encryption ≠ end-to-end encryption). An essential gap vs RustDesk's NaCl E2E model (the relay cannot decrypt)
+  6. **DeskRT's closed-source unauditability**: the proprietary codec cannot be third-party audited or independently performance-verified; all performance claims rest on the vendor. In security-sensitive scenarios (government/finance/defense) this is a major compliance obstacle
+  7. **The pure-TCP strategy's performance loss on weak networks**: relying on TCP transport (relay-first + P2P TCP), high loss (>5%) causes TCP congestion control to produce obvious stutter and jitter. UDP approaches (WebRTC / Parsec's BUD) outperform TCP on high-loss networks
+  8. **Erlang talent-scarcity risk**: maintaining and extending the Erlang infrastructure requires rare Erlang/OTP engineers. Erlang has a stable market in telecom and finance but far fewer developers than Rust/Go/Java/TypeScript — a high long-term maintenance cost
+  9. **Post-acquisition strategic uncertainty**: after the 2024 acquisition, though the team and product system were retained, the long-term roadmap is influenced by the parent's strategy. Similar events (LogMeIn's post-acquisition drift, Citrix's repositioning) have hurt user trust
 
-### 二进制结构分析
+## 5. Market Positioning
+
+- **Primary industries**:
+  - IT support and remote ops (the MSP/Help Desk core scenario: fast start + cross-platform + low-bandwidth unreliable networks)
+  - Manufacturing and engineering (remote CAD/PLM/CAM workstation access without moving GB-scale model files)
+  - Healthcare (telemedicine consults, HIPAA compliance, usable on low bandwidth — rural clinics on satellite internet)
+  - Education (remote teaching and virtual labs; a 3.7MB client suits students' varied devices)
+  - Government (data sovereignty + On-Premises deployment for national data-security regulations)
+  - Financial services (strict compliance but needing low-latency access to trading terminals; the relay-first fast connection is key)
+  - Call centers and BPO (fast-response remote IT support; relay-first reduces per-session setup waits)
+  - Embedded/IoT (Raspberry Pi / ARM device remote management; the light client suits resource-constrained devices)
+- **Competitor quick comparison**:
+
+| Competitor | Strengths | Weaknesses |
+|------------|-----------|------------|
+| TeamViewer | the largest user base (300M+ devices/mo), the most complete enterprise features, an IoT/AR ecosystem, 1000+ global nodes | 10x the client size, ~40% pricier, trust damaged by the 2016 security incident, latency usually above AnyDesk's |
+| RustDesk | fully open source, self-hostable, NaCl E2E encryption (the relay can't decrypt), zero cost | no DeskRT-grade low-bandwidth equivalent, lower TCP punch success, enterprise features (SSO/LDAP) need the Pro edition |
+| Splashtop | refined product lines, On-Premises + multi-provider redundancy, AI-optimized codecs | weaker brand than AnyDesk, no DeskRT-grade proprietary encoding breakthrough, client >15MB |
+| Parsec | the 7ms game-grade latency benchmark, GPU zero-copy, virtual-gamepad multiplayer innovation | hardware encoding only (excludes older machines), Windows Host only, its core scenario is gaming not remote desktop |
+
+- **Pricing / licensing**:
+  - **Free**: personal non-commercial use, core remote desktop, watermarked single session, limited to ~30 minutes
+  - **Essentials**: $14.90/mo/license (1 user, up to 3 managed devices, 1 concurrent session)
+  - **Performance**: $29.90/mo/license (unlimited devices, session recording, MSI deployment, mobile support)
+  - **Enterprise**: $59.90/mo/license (unlimited devices, white labeling, self-hosted relays, SAML SSO, LDAP/AD integration, full API access, SLA)
+  - The above are 2025 reference prices; annual subscriptions get roughly 15-20% off
+  - AnyDesk claims to be ~40% cheaper than TeamViewer for equivalent features
+
+## 6. Product Highlights
+
+1. **DeskRT — a technical moat purpose-built for GUI transmission**: DeskRT is AnyDesk's core differentiator. It is not a general-purpose video codec but one designed specifically for computer graphics (windows, text, icons, buttons, menus). This brings two key advantages: 1) GUI compression far exceeding H.264/H.265 (text
+2. **The relay-first connection strategy — challenging the "P2P-first dogma"**: nearly every remote-desktop product follows "P2P-first + relay fallback"; AnyDesk deliberately went the other way — TLS relayed connections by default, P2P direct as an optional fallback. Based on two judgments: 1) the Erlang global relay network's
+3. **Erlang/OTP carrier-grade infrastructure — building a remote-desktop service with a telephone switch's reliability**: AnyDesk is the only remote-desktop product using Erlang/OTP at scale. Erlang was designed for telecom switches and natively supports: hot upgrades (no-downtime upgrades, the industry's highest continuous-availability standard), Actor-model concurrency (each connection as an
+4. **The 3.7MB client's engineering aesthetics — subtraction taken to the extreme**: AnyDesk's 3.7MB client is an industry outlier (TeamViewer 30MB+, RustDesk 10MB+, ToDesk 50MB+). The extreme lightness comes from a minimal C++/Qt, on-demand module loading, and refusing unnecessary third-party dependencies. This means not only
+5. **The AnyNet serialization engine — the security benchmark for protocol parsers**: reverse engineering revealed 570+ bounds checks invested in parser security — the deepest such investment among remote-desktop products. Every field of every inbound message is validated independently — not one generic validator covering all message types but per-type validation logic. This is
+6. **Multiprocess privilege separation — a "compartmentalized defense" security architecture**: the GUI (user identity) and the Service (SYSTEM identity) run as two independent processes communicating via named shared memory. This achieves two security goals: 1) privilege isolation between the network layer and the user layer — the network process cannot touch the desktop and the GUI process cannot touch the network; 2) an attacker must break both
+
+## 7. Reference Value for MediaServo
+
+### [Adopt] Directly Adoptable
+
+- **The process-privilege separation architecture**: a dedicated network-I/O process + a dedicated screen-capture process with privilege isolation. MediaServo's Plugin system naturally supports this — ScreenCapture/NetworkTransport/InputInjector can each live in their own Plugin Worker, communicating through
+- **DeskRT's design philosophy — GUI-specific rather than general-video encoding**: MediaServo should, on top of general codecs (H.264/HEVC/AV1), explore a lightweight optimization layer for desktop GUI content. No need to reinvent the wheel — it can be a "preprocessor" that classifies GUI frames before the general encoder, handles text
+- **The 570+-bounds-check protocol security philosophy**: MediaServo's ProtocolBroker should implement field-level bounds checks on all inbound messages. Protobuf itself provides basic serialization safety, but business-logic constraints need extra validation. Each message type should have its own validator, never sharing a generic parser. Treat "never trust inbound data" as an architectural
+- **Erlang/OTP's hot upgrades and fault isolation**: MediaServo's core is Rust, but the signaling service's reliability bar is extremely high. No-downtime upgrades can be achieved via "dual-instance rolling upgrades + connection migration" (similar to Erlang OTP's release handling); fault isolation can ride Rust tokio task boundaries
+- **Scenario-based thinking about relay-first**: in some MediaServo deployments (vehicle→cloud push, weak networks), relay-first may beat P2P-first. The connection strategy should be configurable: "P2P first" / "relay first" / "smart auto-select" (Phase 2+ deciding from historical data)
+- **The 3.7MB minimal client's dependency-management philosophy**: MediaServo's native layer should follow the same principle — every non-stdlib dependency of the core SDK needs an explicit performance/security justification, reviewed and documented per dependency
+- **The Cowboy HTTP + RESTful API management-interface pattern**: the design of management APIs for the signaling service (device CRUD, session control, permission management) aligns closely with MediaServo's admin API needs
+- **The zero-bandwidth static-screen optimization idea**: stop sending when the screen hasn't changed — an optimization DeskRT shares with RDP. MediaServo's encoder plugin should check frame diffs before encoding — if the whole frame is unchanged, skip encode and transmit
+
+### [Adapt] Needs Modification Before Adoption
+
+- **Named shared memory IPC → the mediaservo-core message bus + Plugin Workers**: AnyDesk's `CreateFileMappingW` + `NULL`-security-attribute IPC has security flaws. MediaServo should use safer IPC: Unix domain
+- **DeskRT's proprietary closed codec → a layered codec strategy**: MediaServo cannot clone DeskRT (proprietary, closed), but can design a layered encode pipeline: Layer 1 (general encoders): H.264/HEVC/AV1 hardware encoding (performance-first); Layer 2 (software fallback): VP8/VP9/AV1 software encode
+- **TLS 1.3 transport encryption (relay-visible) → NaCl/DTLS-SRTP end-to-end encryption**: MediaServo should guarantee by design that neither the signaling nor the relay server can decrypt media. WebRTC's DTLS-SRTP or RustDesk's NaCl (xsalsa20-poly1305) beats TLS transport encryption
+- **Unsigned updates → dual-signature verification + the TUF framework**: MediaServo's update system must verify digital signatures independently of transport security. Use The Update Framework (TUF) or custom dual-signature verification (code signing + deployment signing) so that even a compromised CDN or relay network cannot inject a malicious update
+- **RWC code sections (writable + executable) → a strict W^X policy**: MediaServo binaries must strictly separate code (RX) from data (RW); write+execute together is never acceptable. Enable `-C link-arg=-Wl,-z,relro -C link-arg=-Wl,-z,now` (Rust) at compile time to ensure
+- **Relay-first's privacy problem → a configurable connection strategy + explicit privacy statements**: where relay-first is genuinely needed (e.g. vehicle push), the design doc should state the data-visibility boundary at the server explicitly. Offer E2E encryption as an enhancement. Make the boundary between "transport encryption" and "end-to-end encryption" transparent to users
+- **The Erlang backend's skill barrier → Rust async + PostgreSQL + message queues**: MediaServo's signaling service uses Rust (consistent with the core), with PostgreSQL (persistence) or Redis (fast cache) replacing Mnesia/ETS roles. Rust's tokio async model can handle
+
+### [Avoid] Known Pitfalls / Non-Applicable
+
+- **The unsigned-update design flaw**: AnyDesk's most serious security liability — downloading updates every 9 hours over the relay while relying only on TLS. MediaServo must implement independent signature verification from Phase 0. Any "ship first, add signature checks later" is unacceptable
+- **Missing code-section DEP**: the binary must never, under any circumstance, allow a writable code page. This is OS-level security hygiene, not something to trade for performance or deployment convenience
+- **IPC shared memory with NULL security attributes**: every IPC channel needs an explicit ACL or permission validation. On Unix, Unix sockets use file permissions (0600); on Windows, named pipes get a security descriptor
+- **DeskRT's proprietary closedness**: MediaServo's protocols and codecs must be RFC standards or publicly documented. Proprietary codecs are unauditable (a compliance obstacle for government/finance/defense) and create vendor lock-in (if AnyDesk changes its license or drops support, DeskRT becomes a technical dead end)
+- **Relay-first exposing media to a third party**: for self-hosted scenarios provide E2E encryption + a relay-opaque option. For delegated scenarios (managed by AUDEBase), audit requirements may need server-side visibility — make that a configuration option, not a hardcode
+- **The pure-TCP strategy's weak-network losses**: TCP's head-of-line blocking and slow start are fatal at high loss. MediaServo's media transport must ride UDP (RTP/WebRTC RTCDataChannel); TCP is for signaling only. This is the Parsec/ToDesk/RustDesk consensus
+- **Erlang talent scarcity's long-term maintenance risk**: MediaServo's infrastructure components should stay within the core stack (Rust/C++/TypeScript), avoiding technology islands that need scarce talent
+- **Passively accepting a relayed encryption scheme**: don't equate "encrypted" with "secure" — TLS 1.3 protects the link, but data is visible to the operator at the server. The architecture doc must explicitly distinguish "transport encryption" (TLS, protecting against man-in-the-middle) from "end-to-end encryption" (WebRTC DTLS-SRTP / NaCl, protecting against the server operator), and the design must support
+
+**Overall rating**: ★★★★☆ (4/5)
+**Comment**: DeskRT's proprietary codec and the Erlang backend's carrier-grade reliability are AnyDesk's technical pillars. The process-privilege separation architecture and the parser's deep security investment (570+ bounds checks) are direct references for MediaServo's design. But the relay-first privacy implication, the unsigned updates, and the missing code-section DEP are security lessons to absorb
+
+**Related decisions**: D2, D77
+
+## Appendix: Key Findings of the AnyDesk Reverse Engineering (published April 2026)
+
+### Binary Structure Analysis
+
 ```
-anydesk.exe 结构分析:
-├── .data 段
-│   └── 加密载荷 → 线性同余生成器 (LCG) 生成 keystream 解密
-│       └── LZMA 解压缩 → 30MB x86 机器码（真正的 AnyDesk 二进制）
-│           └── 写入 .itext 段 (标记为 Read/Write/Execute)
-│
-├── .itext 段 (RWC — 同时可读/写/执行)
-│   ├── OpenSSL 代码 (~12,000 函数，约 1/4 二进制)*
-│   │   └── 通过断言字符串识别 (crypto/*.c, ssl/*.c 文件名引用)
-│   ├── Qt 框架代码 (~1/5 二进制)
-│   │   └── GUI 事件处理、Qt 控件渲染、SendMessageW (516 次调用)
-│   ├── CRT/STL 样板代码
-│   ├── AnyNet 协议实现 (0x102FB550)
-│   │   └── 570+ 边界检查、消息序列化/反序列化、错误码映射
-│   ├── 屏幕捕获/渲染代码
-│   │   └── capture_pool_%u_shm 对象创建与销毁
-│   └── Service/IPC 层
-│       └── CreateFileMappingW、CreateProcessAsUserW 等系统调用封装
-│
-└── 关键函数地址及功能
-    ├── 0x102FB550: AnyNet 序列化引擎（570+ 边界检查）
-    ├── 0x108F9970: CLI 参数解析器（40+ 标志: --set-password 等）
-    ├── 0x101F68D0: HRESULT 错误码映射（30+ 错误码, 8+ HRESULT）
-    ├── 0x10ACF350: 共享内存管理器（CreateFileMappingW + NULL 属性）
-    ├── 0x10812770: CreateProcessAsUserW（Service→GUI 进程创建）
-    ├── 0x10A383E0: SetSecurityInfo 包装器（静默失败点）
-    └── 0x108038C0: anydesk:// URL 协议注册器
+Structure analysis of anydesk.exe:
+├── the .data section
+│   └── an encrypted payload → a linear congruential generator (LCG) produces the keystream for decryption
+│       └── LZMA decompression → 30MB of x86 machine code (the real AnyDesk binary)
+│           └── written into the .itext section (marked Read/Write/Execute)
 
-*通过二进制中硬编码的 OpenSSL 源文件路径（crypto/evp/e_aes.c 等）和证书、X.509、TLS 相关函数识别。AnyDesk 静态链接了 OpenSSL 库
-```
+├── the .itext section (RWC — readable/writable/executable simultaneously)
+│   ├── OpenSSL code (~12,000 functions, about 1/4 of the binary)*
+│   │   └── identified via assertion strings (crypto/*.c, ssl/*.c filename references)
+│   ├── Qt framework code (~1/5 of the binary)
+│   │   └── GUI event handling, widget rendering, SendMessageW (516 calls)
+│   ├── CRT/STL boilerplate
+│   ├── the AnyNet protocol implementation (0x102FB550)
+│   │   └── 570+ bounds checks, message serialization/deserialization, error-code mapping
+│   ├── screen capture/rendering code
+│   │   └── capture_pool_%u_shm object creation and destruction
+│   └── the Service/IPC layer
+│       └── wrappers over CreateFileMappingW, CreateProcessAsUserW etc.
 
-### Frida 运行时追踪揭示的安全问题
-```
-DPAPI 数据流:
-1. service.conf 文件包含 DPAPI 加密的配置数据
-2. AnyDesk 启动时调用 CryptUnprotectData() 解密
-3. 解密后数据（含密码明文和 RSA 私钥）存在于进程内存中
-4. 重新用 DPAPI 加密（使用新的随机填充参数）写入磁盘
+└── key function addresses and roles
+    ├── 0x102FB550: the AnyNet serialization engine (570+ bounds checks)
+    ├── 0x108F9970: the CLI argument parser (40+ flags: --set-password etc.)
+    ├── 0x101F68D0: the HRESULT error-code mapping (30+ codes, 8+ HRESULTs)
+    ├── 0x10ACF350: the shared-memory manager (CreateFileMappingW + NULL attributes)
+    ├── 0x10812770: CreateProcessAsUserW (Service→GUI process creation)
+    ├── 0x10A383E0: a SetSecurityInfo wrapper (a silent failure point)
+    └── 0x108038C0: the anydesk:// URL protocol registrar
 
-关键发现:
-· 密码和 RSA 私钥以明文存储在 service.conf（DPAPI 解密后状态）
-· DPAPI 重加密引入随机填充 → 每次启动后 service.conf 内容改变
-· 但底层数据不变（同一密码/同一私钥）—— 重加密仅改变密文外观
-· 问题：内存中的明文缺乏额外保护层（无内存区域加密、无及时清零）
-· Frida hook CryptUnprotectData() → 可获取解密后的完整敏感数据
-
-影响:
-· 如果攻击者能访问运行中的 AnyDesk 进程内存 → 提取密码和私钥
-· 但需本地物理访问或管理员权限 → 实际威胁取决于环境安全
-· 应用内存加密（如 Windows enclave/VBS）可缓解但复杂度和性能代价高
+*Identified via hardcoded OpenSSL source paths in the binary (crypto/evp/e_aes.c etc.) and
+certificate/X.509/TLS-related functions. AnyDesk statically links OpenSSL.
 ```
 
-### 更新机制的安全分析
+### Security Issues Revealed by Frida Runtime Tracing
+
 ```
-更新检查流程:
-┌──────────────────────────────────────────────────────────┐
-│ 每 9 小时                                                    │
-│  ┌──────────────────┐                                     │
-│  │ AnyDesk Client   │──→ https://anydesk.com/update       │
-│  └────────┬─────────┘    (通过 AnyNet 中继协议, TLS 加密)   │
-│           │                                                │
-│           ▼                                                │
-│  ┌──────────────────┐                                     │
-│  │ 更新包下载        │                                     │
-│  │ · 通过中继传输    │                                     │
-│  │ · TLS 1.3 保护    │                                     │
-│  └────────┬─────────┘                                     │
-│           │                                                │
-│           ▼                                                │
-│  ┌──────────────────┐                                     │
-│  │ 安装执行          │                                     │
-│  │ · msiexec.exe    │                                     │
-│  │ · AnyDesk.exe    │                                     │
-│  │   --install       │                                     │
-│  └──────────────────┘                                     │
-│                                                            │
-│  安全评估:                                                  │
-│  ✅ TLS 传输加密保护下载链路                                 │
-│  ✅ Windows Installer 验证 MSI 包完整性                     │
-│  ❌ 无独立的数字签名验证 —— 这是关键缺失                      │
-│  ⚠️ 完全信任中继服务器提供的内容                              │
-│  ⚠️ 如果中继被攻破，恶意更新可注入到所有客户端                 │
-│  💡 最佳实践: 应独立验证更新包的代码签名证书 (Authenticode)    │
-└──────────────────────────────────────────────────────────┘
+The DPAPI data flow:
+1. service.conf contains DPAPI-encrypted configuration data
+2. At startup AnyDesk calls CryptUnprotectData() to decrypt
+3. The decrypted data (plaintext passwords and the RSA private key) lives in process memory
+4. Re-encrypted with DPAPI (fresh random padding parameters) and written back to disk
+
+Key findings:
+· Passwords and the RSA private key are stored in plaintext in service.conf (post-DPAPI state)
+· DPAPI re-encryption introduces random padding → service.conf's content changes every start
+· But the underlying data is unchanged (the same password/the same private key) — re-encryption only changes the ciphertext's appearance
+· Problem: the in-memory plaintext lacks an extra protection layer (no memory-region encryption, no prompt zeroization)
+· Hooking CryptUnprotectData() with Frida → the complete decrypted secrets are obtainable
+
+Impact:
+· An attacker who can read the running AnyDesk process's memory → extracts passwords and the private key
+· But that requires local physical access or admin rights → the practical threat depends on environment security
+· Application-memory encryption (Windows enclave/VBS) could mitigate, at high complexity and performance cost
 ```
 
-## 附录：AnyDesk 对 MediaServo 功能规划的启示
+### A Security Analysis of the Update Mechanism
 
-### 场景驱动的连接策略设计
-AnyDesk 的中继优先策略虽与行业惯例相悖，但揭示了一个重要事实：**不同场景下最优的连接策略不同**。MediaServo 应考虑三种连接模式：
+```
+The update-check flow:
+│ every 9 hours                                                 │
+│  └────────┬─────────┘    (over the AnyNet relay protocol, TLS-encrypted) │
+│  │ the update package download  │                              │
+│  │ · transported via the relay   │                              │
+│  │ · protected by TLS 1.3        │                              │
+│  │ install & execute             │                              │
+│  Security assessment:                                       │
+│  ✅ TLS transport encryption protects the download path     │
+│  ✅ the Windows Installer verifies the MSI's integrity      │
+│  ❌ no independent digital-signature verification — the key gap │
+│  ⚠️ full trust in the content served by the relay           │
+│  ⚠️ a compromised relay could inject malicious updates to all clients │
+│  💡 best practice: independently verify the update package's code-signing certificate (Authenticode) │
+```
 
-| 模式 | 适用场景 | 策略 |
-|------|---------|------|
-| P2P 优先 | 局域网办公室、家庭远程、同运营商网络 | ICE/STUN 打洞优先，超时后 fallback 中继 |
-| 中继优先 | 车端推流、弱网环境、临时技术支持、企业防火墙严格环境 | 直接通过 TURN/中继，避免打洞等待（连接速度优先） |
-| 智能选择 | 通用场景 | 基于历史连接数据和当前网络探测结果动态决策（Phase 2+ 机器学习优化） |
+## Appendix: What AnyDesk Teaches MediaServo's Feature Planning
 
-### DeskRT 的启示——GUI 优化预处理层
-DeskRT 的商用成功证明针对 GUI 内容设计专用编解码器具有明确的市场价值和技术合理性。MediaServo 不需要复刻 DeskRT（专有闭源，存在法律和合规风险），但可以设计一个"智能预处理层"：
-- 在硬件/软件编码器之前对原始帧进行内容分类
-- 文字区域：保持无损或近无损清晰度（不适合 DCT 量化）
-- 窗口边框/图标：缓存复用（变化频率极低，位置改变但样式不变）
-- 纯色区域：压缩为颜色值 + 矩形坐标（而非像素矩阵，效率极高）
-- 图像/视频区域：通过标准编码器（H.264/HEVC/AV1）处理
-- 与标准编码器完全兼容——预处理层输出标准格式帧到编码器
+### Scenario-Driven Connection Strategy Design
 
-这一层可以在 Phase 2+ 作为可选的优化 Plugin 实现。实现复杂度低于从零开始的编解码器，但性能收益显著。
+AnyDesk's relay-first strategy, though contrary to industry convention, reveals an important truth: **the optimal connection strategy differs per scenario**. MediaServo should consider three connection modes:
 
-### 许可证边界警告
-AnyDesk 的 DeskRT 编解码器和 AnyNet 协议是完全闭源的（受专利和商业机密保护）。MediaServo 不得采用逆向工程或协议兼容方式实现 AnyDesk 兼容层（法律风险极高）。AnyDesk 的架构思想（进程分离、协议安全设计、GUI 优化编码理念、中继优先的场景化思考）是合法的学习对象，但代码实现必须独立。尤其是更新不验证签名的教训——从 Phase 0 就在架构文档中明确要求更新签名验证，这是不应妥协的安全底线。
+| Mode | Suited scenarios | Strategy |
+|------|------------------|----------|
+| P2P first | LAN offices, home remote, same-carrier networks | ICE/STUN hole punching first, falling back to the relay after a timeout |
+| Relay first | vehicle push, weak networks, ad-hoc tech support, strict corporate firewalls | go straight through TURN/the relay, avoiding punch waits (connection speed first) |
+| Smart select | general scenarios | dynamic decisions from historical connection data + current network probes (Phase 2+ ML optimization) |
 
-> 以上分析基于公开资料、安全研究社区逆向工程报告（Daniele Berardinelli 2026年4月公开）、官方产品文档和技术信息。所有技术细节截至 2026 年 7 月。
+### DeskRT's Lesson — a GUI-Optimized Preprocessing Layer
+
+DeskRT's commercial success proves that a GUI-content-specific codec has clear market value and technical validity. MediaServo doesn't need to clone DeskRT (proprietary, closed; legal/compliance risk) but can design a "smart preprocessing layer":
+- classify frame content before the hardware/software encoders
+- Text regions: keep lossless or near-lossless sharpness (unsuited to DCT quantization)
+- Window borders/icons: cache reuse (extremely low change frequency; position changes, style doesn't)
+- Flat-color regions: compress to a color value + rectangle coordinates (not a pixel matrix; extremely efficient)
+- Image/video regions: hand to the standard encoders (H.264/HEVC/AV1)
+- Fully compatible with standard encoders — the preprocessing layer emits standard-format frames to the encoder
+
+This layer can land in Phase 2+ as an optional optimization plugin. Its complexity is far below building a codec from scratch, with significant performance upside.
+
+### A Licensing Boundary Warning
+
+AnyDesk's DeskRT codec and AnyNet protocol are fully closed-source (protected by patents and trade secrets). MediaServo must not build an AnyDesk compatibility layer via reverse engineering or protocol mimicry (extreme legal risk). AnyDesk's architectural ideas (process separation, protocol security design, GUI-optimized encoding, scenario-based relay-first thinking) are legitimate learning material, but the implementation must be independent. Especially the unsigned-update lesson — from Phase 0 the architecture doc must mandate update-signature verification; this is a security baseline not to be compromised.
+
+> The analysis above is based on public materials, security-community reverse-engineering reports (published by Daniele Berardinelli, April 2026), official product documentation, and technical information. All technical details are as of July 2026.

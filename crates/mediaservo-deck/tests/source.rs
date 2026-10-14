@@ -1,15 +1,12 @@
-//! deck 采集域（source）测试。
+//! Deck capture domain (source) tests.
 
-use mediaservo_deck::source::{CameraSource, CaptureOptions, MediaDeviceKind, MediaDevices};
-use mediaservo_deck::source::DeviceId;
 use mediaservo_deck::DeckError;
+use mediaservo_deck::source::DeviceId;
+use mediaservo_deck::source::{CameraSource, CaptureOptions, MediaDeviceKind, MediaDevices};
 
 fn open_cam() -> CameraSource {
-    CameraSource::open(
-        DeviceId("stub:test-camera".into()),
-        CaptureOptions::default(),
-    )
-    .unwrap_or_else(|e| panic!("open failed: {e}"))
+    CameraSource::open(DeviceId("stub:test-camera".into()), CaptureOptions::default())
+        .unwrap_or_else(|e| panic!("open failed: {e}"))
 }
 
 #[test]
@@ -31,10 +28,7 @@ fn open_unknown_device_errors() {
 
 #[test]
 fn open_known_device_ok() {
-    match CameraSource::open(
-        DeviceId("stub:test-camera".into()),
-        CaptureOptions::default(),
-    ) {
+    match CameraSource::open(DeviceId("stub:test-camera".into()), CaptureOptions::default()) {
         Ok(_) => {}
         Err(e) => panic!("known device should open, got {e}"),
     }
@@ -43,14 +37,10 @@ fn open_known_device_ok() {
 #[tokio::test]
 async fn start_produces_i420_frames() {
     let mut src = open_cam();
-    let opts = CaptureOptions {
-        resolution: Some((640, 360)),
-        framerate: Some(30),
-        format: None,
-    };
+    let opts = CaptureOptions { resolution: Some((640, 360)), framerate: Some(30), format: None };
     let mut frames = src.start(&opts).unwrap_or_else(|e| panic!("start failed: {e}"));
 
-    // 采样几帧：应有 I420 3-plane 帧，尺寸匹配
+    // Sample a few frames: expect an I420 3-plane frame with matching dimensions
     let first = tokio::time::timeout(std::time::Duration::from_secs(2), frames.recv())
         .await
         .expect("first frame arrives (no timeout)")
@@ -61,7 +51,7 @@ async fn start_produces_i420_frames() {
     assert_eq!(first.planes[0].stride, 640);
     assert_eq!(first.planes[1].stride, 320);
 
-    // 再来一帧验证持续产帧
+    // One more frame to verify continuous frame production
     let second = tokio::time::timeout(std::time::Duration::from_secs(2), frames.recv())
         .await
         .expect("second frame arrives")
@@ -74,11 +64,7 @@ async fn start_produces_i420_frames() {
 #[tokio::test]
 async fn start_twice_errors() {
     let mut src = open_cam();
-    let opts = CaptureOptions {
-        resolution: Some((320, 240)),
-        framerate: Some(15),
-        format: None,
-    };
+    let opts = CaptureOptions { resolution: Some((320, 240)), framerate: Some(15), format: None };
     src.start(&opts).unwrap_or_else(|e| panic!("first start failed: {e}"));
     match src.start(&opts) {
         Err(DeckError::InvalidState(_)) => {}

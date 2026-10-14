@@ -3,8 +3,8 @@
 //! Provides convenience functions to register standard metrics
 //! used by all three components.
 //!
-//! 命名规范 (H4, doc-audit): 所有指标 `mediaservo_` 前缀 — Prometheus namespace
-//! 惯例 + D209 改名一致 + 避免 host/server/client 三进程同名冲突。
+//! Naming convention (H4, doc-audit): all metrics carry the `mediaservo_` prefix - Prometheus namespace
+//! convention + D209 rename consistency + avoids name collisions across host/server/client processes.
 
 use prometheus_client::encoding::text::encode;
 use prometheus_client::metrics::counter::Counter;

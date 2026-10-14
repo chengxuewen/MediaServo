@@ -1,6 +1,6 @@
-//! 品牌化 ID（防串参）。
+//! Branded IDs (prevent cross-argument mix-ups).
 
-/// 节点 ID。
+/// Node ID.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct NodeId(String);
 
@@ -13,7 +13,7 @@ impl NodeId {
     }
 }
 
-/// 帧 topic（如 `"camera/front/raw"`）。
+/// Frame topic (e.g. `"camera/front/raw"`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct FrameTopic(String);
 
@@ -25,7 +25,7 @@ impl FrameTopic {
         &self.0
     }
 
-    /// 通配匹配：pattern `"camera/*"` 匹配 `"camera/front/raw"`；精确匹配也成立。
+    /// Wildcard match: pattern `"camera/*"` matches `"camera/front/raw"`; exact match also holds.
     pub fn matches(&self, pattern: &str) -> bool {
         if let Some(pfx) = pattern.strip_suffix("/*") {
             self.0.starts_with(&format!("{pfx}/"))

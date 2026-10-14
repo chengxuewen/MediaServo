@@ -1,5 +1,5 @@
-// panels/login — 登录面（未登录时 main 渲染的唯一面板）。
-// 面板约定（模板页）：无状态渲染函数；输入写进 AppModel，动作调 sessions——不 import SDK。
+// panels/login — the login face (the only panel main renders while logged out).
+// Panel convention (the template page): stateless render functions; inputs write into AppModel, actions call sessions — never import the SDK.
 #ifndef MSRTC_VIEWER_PANELS_LOGIN_HPP
 #define MSRTC_VIEWER_PANELS_LOGIN_HPP
 

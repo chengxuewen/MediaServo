@@ -124,7 +124,7 @@ mod sdp_tests {
 
     #[test]
     fn create_answer_returns_answer_type() {
-        // 真 libwebrtc 要求先有 remote offer 才能 create_answer（状态机）
+        // real libwebrtc requires a remote offer before create_answer (the state machine)
         let factory = RTCPeerConnectionFactory::new();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let pc = rt
@@ -151,7 +151,7 @@ mod sdp_tests {
 
     #[test]
     fn set_remote_description_succeeds() {
-        // 修正: 用 offer 当 remote description（真 libwebrtc 不能把 answer 当 remote 无 offer）
+        // fix: use the offer as the remote description (real libwebrtc cannot take an answer as remote without an offer)
         let factory = RTCPeerConnectionFactory::new();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let pc = rt
@@ -205,29 +205,29 @@ mod ice_tests {
 
     #[test]
     fn add_ice_candidate_succeeds() {
-        // 真 libwebrtc 要求先有 remote description 才能 add_ice_candidate
+        // real libwebrtc requires a remote description before add_ice_candidate
         let factory = RTCPeerConnectionFactory::new();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let pc = rt
             .block_on(factory.create_peer_connection(RTCConfiguration::default()))
             .expect("create pc");
-        // offer_to_receive_video: 生成含 m=video 段的 offer，candidate 的 mline_index=0 才匹配
+        // offer_to_receive_video: produce an offer containing an m=video segment; the candidate's mline_index=0 must match
         let options = RTCOfferOptions { offer_to_receive_video: true, ..Default::default() };
         let offer = rt.block_on(pc.create_offer(&options)).expect("create offer");
         rt.block_on(pc.set_remote_description(&offer)).expect("set remote offer");
-        // candidate 格式与 m-line 对应由 libwebrtc 严格校验（Err 也是合法行为）—
-        // 测试目的是验证 API 调用路径 + 状态机前置（有 remote description）
+        // candidate/m-line correspondence is strictly validated by libwebrtc (an Err is also legal behavior) --
+        // the test's purpose is verifying the API call path + the state-machine precondition (having a remote description)
         let candidate = RTCIceCandidate {
             candidate: "candidate:1 1 UDP 2130706431 192.168.1.1 12345 typ host".into(),
             sdp_mid: Some("0".into()),
             sdp_mline_index: Some(0),
         };
-        let _ = rt.block_on(pc.add_ice_candidate(&candidate)); // Ok 或 Err 均可，不 panic
+        let _ = rt.block_on(pc.add_ice_candidate(&candidate)); // Ok or Err both fine, no panic
     }
 
     #[test]
     fn add_multiple_ice_candidates() {
-        // 真 libwebrtc 要求先有 remote description 才能 add_ice_candidate
+        // real libwebrtc requires a remote description before add_ice_candidate
         let factory = RTCPeerConnectionFactory::new();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let pc = rt
@@ -245,7 +245,7 @@ mod ice_tests {
                 sdp_mid: Some("0".into()),
                 sdp_mline_index: Some(0),
             };
-            let _ = rt.block_on(pc.add_ice_candidate(&candidate)); // Ok 或 Err 均可
+            let _ = rt.block_on(pc.add_ice_candidate(&candidate)); // Ok or Err both fine
         }
     }
 }
@@ -448,7 +448,7 @@ mod stats_and_rtp_tests {
     }
 }
 
-// ── T1: W3C transceiver/capabilities 类型单测 (v2) ──
+// -- T1: W3C transceiver/capabilities type unit tests (v2) --
 #[cfg(test)]
 mod transceiver_types_tests {
     use mediaservo_webrtc::rtp::{
@@ -550,13 +550,13 @@ mod transceiver_types_tests {
     }
 }
 
-// ── T3: 包装层测试（v2）──
+// -- T3: wrapper-layer tests (v2) --
 #[cfg(test)]
 mod wrapper_tests {
     use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
     use mediaservo_webrtc::peer_connection::RTCConfiguration;
     #[cfg(not(any(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys")))]
-    use mediaservo_webrtc::rtp::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit}; // stub 姿态门测在用（clippy --fix 姿态盲区第三例）
+    use mediaservo_webrtc::rtp::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit}; // the stub-posture gate test uses it (the third clippy --fix posture blind-spot case)
 
     use mediaservo_webrtc::track::TrackKind;
     use mediaservo_webrtc::traits::PeerConnectionApi;
@@ -581,7 +581,7 @@ mod wrapper_tests {
             send_encodings: vec![],
             stream_ids: vec![],
         };
-        // track 版 (stub + sys 都支持；kind 版 sys 下 NotSupported)
+        // the track variant (both stub + sys support it; the kind variant is NotSupported under sys)
         let tc = pc.add_transceiver_with_track(&track, init).unwrap();
         assert_eq!(tc.kind, TrackKind::Video);
         assert_eq!(tc.direction, RTCRtpTransceiverDirection::Sendonly);
@@ -597,14 +597,14 @@ mod wrapper_tests {
         let before = pc.get_transceivers().unwrap();
         pc.add_transceiver_with_track(&track, RTCRtpTransceiverInit::default()).unwrap();
         let after = pc.get_transceivers().unwrap();
-        // stub/sys 都应反映新增（sys 可能包含其他 transceiver，断言 >= before+1）
-        assert!(after.len() >= before.len() + 1, "get_transceivers 应反映新增");
+        // both stub/sys should reflect the addition (sys may hold other transceivers; assert >= before+1)
+        assert!(after.len() >= before.len() + 1, "get_transceivers should reflect the addition");
     }
 
     #[test]
     fn sender_get_parameters_via_pc() {
         let pc = new_pc();
-        // stub 返回默认空；sys 返回真实 codecs — 断言不 panic 即可
+        // stub returns the default empty; sys returns real codecs -- asserting no panic is enough
         let _ = pc.get_sending_rtp_parameters("t1");
     }
 
@@ -617,7 +617,7 @@ mod wrapper_tests {
     #[test]
     fn capabilities_via_pc() {
         let pc = new_pc();
-        // stub 返回 None；sys 返回真实 capabilities — 断言不 panic
+        // stub returns None; sys returns real capabilities -- asserting no panic
         let _ = pc.get_sender_capabilities(TrackKind::Video);
         let _ = pc.get_receiver_capabilities(TrackKind::Audio);
     }
@@ -656,7 +656,7 @@ mod wrapper_tests {
         };
         let tc = pc.add_transceiver_with_track(&track, init).unwrap();
         assert_eq!(tc.kind, TrackKind::Video);
-        // 写帧不 panic（锁死 P3 写帧链路）
+        // writing frames doesn't panic (pinning the P3 frame-write chain)
         let rt = tokio::runtime::Runtime::new().unwrap();
         let _ = rt.block_on(track.write_raw_i420(&vec![0u8; 640 * 480 * 3 / 2], 640, 480));
     }
@@ -667,6 +667,6 @@ mod wrapper_tests {
         pc.add_track("v1", TrackKind::Video).unwrap();
         let senders = pc.get_senders();
         assert_eq!(senders.len(), 1);
-        let _ = senders[0].get_parameters(); // 不 panic 即可
+        let _ = senders[0].get_parameters(); // no panic is enough
     }
 }

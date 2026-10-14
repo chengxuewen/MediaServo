@@ -1,35 +1,35 @@
 # SFU — mediasoup Integration
 
- 状态：Phase 3 实施 | 关联决策：D138, D198 | 更新日期: 2026-07-31
+ Status: Phase 3 implemented | Related decisions: D138, D198 | Updated: 2026-07-31
 
- 设计演变: Phase 2 曾设计 Host 使用 PlainRtp (RTP/UDP 直传，见下文)，Phase 3 统一为 WebRtcTransport。
-## 概述
+ Design evolution: Phase 2 once designed the Host to use PlainRtp (RTP/UDP direct, see below); Phase 3 unified on WebRtcTransport.
+## Overview
 
-mediasoup-sys v0.22 作为 MediaServo SFU 服务器，负责 Room 内 Host→Server→Remote 的媒体流转发。所有操作封装在 `SfuComponent` 中。
+mediasoup-sys v0.22 serves as the MediaServo SFU server, forwarding media streams Host→Server→Remote within a Room. All operations are encapsulated in `SfuComponent`.
 
-## 核心概念映射
+## Core Concept Mapping
 
 | mediasoup | MediaServo Component |
-|-----------|-------------------|
+|-----------|----------------------|
 | Worker | SfuComponent::WorkerPool |
 | Router | RoomRouter (per-room) |
-| Transport (WebRtc) | HostWebRtcTransport (ICE/DTLS/SRTP 推流) |
-| Transport (WebRtc) | RemoteWebRtcTransport (ICE/DTLS/SRTP 分发) |
-| Producer | TrackProducer (上行) |
-| Consumer | TrackConsumer (下行) |
-| SDP ↔ RtpParameters | SdpAdapter (双向 codec) |
+| Transport (WebRtc) | HostWebRtcTransport (ICE/DTLS/SRTP push) |
+| Transport (WebRtc) | RemoteWebRtcTransport (ICE/DTLS/SRTP distribution) |
+| Producer | TrackProducer (uplink) |
+| Consumer | TrackConsumer (downlink) |
+| SDP ↔ RtpParameters | SdpAdapter (two-way codec) |
 
-## Worker 生命周期
+## Worker Lifecycle
 
 ```
 SfuComponent::init()
-  ├─ WorkerPool (CPU 核数个 Worker)
+  ├─ WorkerPool (one Worker per CPU core)
   ├─ Worker::create({ rtcMinPort: 40000, rtcMaxPort: 49999 })
-  └─ 监听 "died" → 自动重启
+  └─ Listen on "died" → auto restart
 ```
-崩溃恢复：标记 Router dead → RoomManager 通知 Remote 重连 → WorkerPool::respawn → Remote 重建 Transport + Consumer。
+Crash recovery: mark the Router dead → RoomManager notifies Remotes to reconnect → WorkerPool::respawn → Remotes rebuild Transport + Consumer.
 
-## Router 配置
+## Router Configuration
 
 ```rust
 worker.create_router(RouterOptions {
@@ -41,23 +41,23 @@ worker.create_router(RouterOptions {
 });
 ```
 
-每 Room 一个 Router，`room_id` 索引。Room 关闭时销毁。
+One Router per Room, indexed by `room_id`. Destroyed when the Room closes.
 
-## Transport 创建
+## Transport Creation
 
 **Host→Server (WebRtcTransport, ICE/DTLS/SRTP)**:
 ```
 Server: router.create_webrtc_transport(WebRtcTransportOptions::new_with_server(webRtcServer))
-  → 返回 { id, ice_parameters, ice_candidates, dtls_parameters }
+  → returns { id, ice_parameters, ice_candidates, dtls_parameters }
 
-Host: 用 ice_candidates + ice_parameters + dtls_parameters 构造 SDP remote offer
+Host: builds the SDP remote offer from ice_candidates + ice_parameters + dtls_parameters
   → pc.set_remote_description(SDP)
   → pc.create_answer() → pc.set_local_description(answer)
-  → 提取 DTLS fingerprint → ws.send(ConnectWebRtcTransport{dtls})
+  → extracts the DTLS fingerprint → ws.send(ConnectWebRtcTransport{dtls})
   → Server: transport.connect(remote_dtls)
-  → ICE handshake (Host=控制方, mediasoup=ICE-Lite 响应方)
-  → DTLS handshake → SRTP key derived
-  → 连接建立
+  → ICE handshake (Host = controlling, mediasoup = ICE-Lite answering)
+  → DTLS handshake → SRTP keys derived
+  → Connection established
 ```
 
 **Server→Browser (WebRtcTransport, Server-Offer)**:
@@ -66,10 +66,10 @@ Server: router.create_webrtc_transport({
     webRtcServer, enable_udp: true, enable_tcp: true,
     iceConsentTimeout: 20
 }) → { id, iceParameters, iceCandidates, dtlsParameters }
-→ Browser: device.createRecvTransport(params) → 自动 ICE/DTLS
+→ Browser: device.createRecvTransport(params) → ICE/DTLS automatic
 ```
 
-> 设计演变: Phase 2 曾设计 Host 使用 PlainRtp (RTP/UDP 直传)，Phase 3 因部署场景 (车端→云端) 需要 NAT 穿透和 SRTP 加密，改为统一 WebRtcTransport。各端点使用相同 ICE/DTLS 协议，对称简化。
+> Design evolution: Phase 2 once designed the Host to use PlainRtp (RTP/UDP direct); Phase 3 moved to the unified WebRtcTransport because the deployment scenario (vehicle → cloud) requires NAT traversal and SRTP encryption. All endpoints use the same ICE/DTLS protocols, simplifying symmetrically.
 
 ## Producer / Consumer
 
@@ -77,11 +77,11 @@ Server: router.create_webrtc_transport({
 Host:  transport.produce({kind, rtpParameters}) → Producer {id, kind}
 Remote: transport.consume({producer_id, rtp_capabilities}) → Consumer {id, paused: false}
 ```
-Consumer pause/resume 控制带宽。
+Consumer pause/resume controls bandwidth.
 
 ## SdpAdapter (S8)
 
-双向 SDP ↔ mediasoup RtpParameters：
+Bidirectional SDP ↔ mediasoup RtpParameters:
 
 ```rust
 trait SdpAdapter {
@@ -91,180 +91,180 @@ trait SdpAdapter {
 }
 ```
 
-内部使用 `webrtc-sdp` crate 解析，编解码器映射。
+Internally uses the `webrtc-sdp` crate for parsing and codec mapping.
 
-## Observer 集成
+## Observer Integration
 
-- **AudioLevelObserver**: 每 Router 挂一个，音量跟踪 → 自动静音
-- **ActiveSpeakerObserver**: 活跃说话者检测 → 画中画切换 → RoomManager
+- **AudioLevelObserver**: one per Router, volume tracking → auto mute
+- **ActiveSpeakerObserver**: active-speaker detection → picture-in-picture switch → RoomManager
 
-## 崩溃恢复流程
+## Crash Recovery Flow
 
 ```
-1. Worker "died" → 标记 dead
+1. Worker "died" → marked dead
 2. Router → RoomEvent::WorkerLost { room_id }
 3. RoomManager → broadcast RejoinRequired
 4. WorkerPool::respawn
-5. Remote join → 重建 Transport + Consumer
+5. Remote join → rebuild Transport + Consumer
 ```
 
-> 已实施完成（Phase 3, S1-S18）
+> Implementation complete (Phase 3, S1-S18)
 
-## Transport 故障场景与恢复
+## Transport Failure Scenarios & Recovery
 
-> 错误码定义与分层见 `error-model.md` §SFU 媒体面错误 (40xx, 实时协议)（doc-audit L6 统一）。
+> Error-code definitions and layering: see `error-model.md` §SFU media-plane errors (40xx, real-time protocol) (unified per doc-audit L6).
 
-### 1. transport.connect() 超时
+### 1. transport.connect() timeout
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| 超时时间 | 10s | mediasoup transport.connect() 默认超时 |
-| 错误码 | 4000 | ConnectionFailed |
-| 恢复策略 | 重新创建 transport | 不可恢复的连接需重建 transport + re-offer |
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| Timeout | 10s | mediasoup transport.connect() default timeout |
+| Error code | 4000 | ConnectionFailed |
+| Recovery | Recreate the transport | Unrecoverable connections require transport rebuild + re-offer |
 
 ```
 connect_transport() → timeout → send error 4000 → browser creates new transport → re-offer
 ```
 
-### 2. DTLS 握手失败
+### 2. DTLS handshake failure
 
-| 故障 | 原因 | 恢复 |
-|------|------|------|
-| DTLS 指纹不匹配 | 浏览器 DTLS 签名与 transport 不一致 | 重新创建 transport（新 DTLS 参数） |
-| SRTP 加密失败 | 浏览器与 mediasoup 协商失败 | 检查 crypto suite 配置（默认 AES_CM_128_HMAC_SHA1_80） |
+| Failure | Cause | Recovery |
+|---------|-------|----------|
+| DTLS fingerprint mismatch | Browser DTLS signature inconsistent with the transport | Recreate the transport (new DTLS parameters) |
+| SRTP encryption failure | Browser/mediasoup negotiation failure | Check the crypto suite configuration (default AES_CM_128_HMAC_SHA1_80) |
 
-### 3. ICE 重启
+### 3. ICE restart
 
-ICE 连接断开后，浏览器端应触发 ICE restart：
+After the ICE connection drops, the browser side should trigger an ICE restart:
 ```
 pc.restartIce()  →  new ICE candidates  →  server re-gathers  →  new candidate pair
 ```
-- ICE restart 保留 transport 和 producer/consumer 不变
-- 超过 30s 无新 candidate pair → 认为 transport 失败
+- ICE restart keeps the transport and producer/consumer unchanged
+- No new candidate pair within 30s → treat the transport as failed
 
-### 4. produce() / consume() 失败
+### 4. produce() / consume() failure
 
-| 故障 | 原因 | 恢复 |
-|------|------|------|
-| Producer 创建失败 | RTP 参数不匹配 | 返回错误 4001，浏览器检查 RTP codec |
-| Consumer 创建失败 | RTP capabilities 不匹配 | 返回错误 4002，浏览器检查 receiver capabilities |
-| Producer 断开 | Host 端采集停止 | 广播 ProducerClosed，浏览器显示黑屏 |
-| Consumer 断开 | SFU 主动暂停 | 触发 pause/resume，浏览器显示缓冲状态 |
+| Failure | Cause | Recovery |
+|---------|-------|----------|
+| Producer creation failure | RTP parameter mismatch | Return error 4001; browser checks RTP codecs |
+| Consumer creation failure | RTP capabilities mismatch | Return error 4002; browser checks receiver capabilities |
+| Producer disconnected | Host-side capture stopped | Broadcast ProducerClosed; browser shows black screen |
+| Consumer disconnected | SFU paused proactively | Trigger pause/resume; browser shows buffering state |
 
-### 5. Worker 崩溃（已有）
+### 5. Worker crash (existing)
 
-见上方「崩溃恢复流程」。Worker 崩溃是 transport 级别的终极失败——所有 transport + producer + consumer 全部销毁。
+See "Crash Recovery Flow" above. A worker crash is the ultimate transport-level failure — all transports + producers + consumers are destroyed.
 
-## Transport 安全
+## Transport Security
 
 ### DTLS
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| 指纹算法 | SHA-256 | mediasoup 默认使用 SHA-256 证书指纹 |
-| 协商模式 | ICE-Lite | SFU 侧简化 ICE（server-side only） |
-| DTLS 角色 | auto | 根据 ICE controlling/controlled 角色自动协商 |
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| Fingerprint algorithm | SHA-256 | mediasoup uses SHA-256 certificate fingerprints by default |
+| Negotiation mode | ICE-Lite | Simplified SFU-side ICE (server-side only) |
+| DTLS role | auto | Auto-negotiated per ICE controlling/controlled role |
 
 ### SRTP
 
-| 参数 | 说明 |
-|------|------|
-| 加密套件 | AES_CM_128_HMAC_SHA1_80（默认） |
-| 密钥协商 | 通过 DTLS 握手派生 SRTP 密钥 |
-| 重放保护 | 启用（SSRC + ROC 计数器） |
+| Parameter | Description |
+|-----------|-------------|
+| Crypto suite | AES_CM_128_HMAC_SHA1_80 (default) |
+| Key agreement | SRTP keys derived from the DTLS handshake |
+| Replay protection | Enabled (SSRC + ROC counters) |
 
-### 安全加固建议
+### Security Hardening Recommendations
 
-1. **ICE credentials**: 每个 transport 使用独立的 ice-ufrag/ice-pwd（mediasoup 默认行为）
-2. **RTCP feedback**: 启用 NACK/FIR/PLI 确保丢包恢复，不依赖上层重传
-3. **transport 认证**: 每个 SFU 消息携带 room_id + peer_id 做路由级认证（PIT-08）
-4. **端口范围限制**: mediasoup `rtcPortsRange` 收窄到最小 UDP 范围（默认 40000-40100）
-5. **消费者隔离**: 不同 consumer 的 RTP 流互不可见，仅通过 mediasoup Router 内部转发
+1. **ICE credentials**: each transport uses independent ice-ufrag/ice-pwd (mediasoup default behavior)
+2. **RTCP feedback**: enable NACK/FIR/PLI for packet-loss recovery, not relying on upper-layer retransmission
+3. **Transport auth**: every SFU message carries room_id + peer_id for route-level authentication (PIT-08)
+4. **Port range restriction**: narrow mediasoup `rtcPortsRange` to the minimal UDP range (default 40000-40100)
+5. **Consumer isolation**: different consumers' RTP streams are mutually invisible; forwarded only inside the mediasoup Router
 
 
-## 编码降级策略
+## Encoding Degradation Strategy
 
-### 降级触发条件
+### Degradation Trigger Conditions
 
-| 指标 | 阈值 | 动作 |
-|------|------|------|
-| 丢包率 > 5% | 持续 3s | 切换到低码率层 |
-| RTT > 300ms | 持续 5s | 降低分辨率 |
-| 丢包率 > 15% | 持续 10s | 切换到最低层或暂停 |
-| 带宽 < 500kbps | 即时 | 停止视频，保留音频 |
+| Metric | Threshold | Action |
+|--------|-----------|--------|
+| Packet loss > 5% | Sustained 3s | Switch to a lower bitrate layer |
+| RTT > 300ms | Sustained 5s | Reduce resolution |
+| Packet loss > 15% | Sustained 10s | Switch to the lowest layer or pause |
+| Bandwidth < 500kbps | Immediate | Stop video, keep audio |
 
-### 码率降级步骤（720p → 360p → 停止）
+### Bitrate Degradation Steps (720p → 360p → stop)
 
 ```
-正常: 720p@30  H.264   2-4 Mbps
- ↓ 丢包 >5%
-降级1: 480p@30  H.264   0.8-1.5 Mbps
- ↓ 丢包 >15%
-降级2: 360p@15  H.264   0.3-0.5 Mbps
- ↓ 带宽 <500kbps
-降级3: 停止视频，保留音频 (<50kbps)
+Normal:    720p@30  H.264   2-4 Mbps
+ ↓ loss >5%
+Degrade 1: 480p@30  H.264   0.8-1.5 Mbps
+ ↓ loss >15%
+Degrade 2: 360p@15  H.264   0.3-0.5 Mbps
+ ↓ bandwidth <500kbps
+Degrade 3: stop video, keep audio (<50kbps)
 ```
 
-### 质量层切换（Simulcast）
+### Quality Layer Switching (Simulcast)
 
-| 层 | 分辨率 | 帧率 | 码率 | 用途 |
-|---|--------|------|------|------|
-| High | 720p | 30 | 2-4 Mbps | 全屏播放 |
-| Medium | 480p | 30 | 0.8-1.5 Mbps | 缩略图/中屏 |
-| Low | 360p | 15 | 0.3-0.5 Mbps | 画中画/预览 |
+| Layer | Resolution | Frame rate | Bitrate | Use |
+|-------|------------|------------|---------|-----|
+| High | 720p | 30 | 2-4 Mbps | Full-screen playback |
+| Medium | 480p | 30 | 0.8-1.5 Mbps | Thumbnail/mid-size |
+| Low | 360p | 15 | 0.3-0.5 Mbps | Picture-in-picture/preview |
 
-切换逻辑：
-1. SFU 检测 consumer 带宽 → 主动切换 spatial layer
-2. 浏览器 receiver 检测 packet loss → 触发 PLI → SFU 切换
-3. 手动切换：用户点击"低带宽模式" → 发送 consume 指定 spatial layer
+Switching logic:
+1. The SFU detects consumer bandwidth → proactively switches the spatial layer
+2. The browser receiver detects packet loss → triggers PLI → the SFU switches
+3. Manual switch: the user clicks "low-bandwidth mode" → sends consume specifying the spatial layer
 
 ---
 
-## DTLS-SRTP 媒体面安全
+## DTLS-SRTP Media-Plane Security
 
-### DTLS 握手
+### DTLS Handshake
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| 指纹算法 | SHA-256 | mediasoup 默认使用 SHA-256 证书指纹 |
-| DTLS 角色 | auto | 根据 ICE controlling/controlled 自动协商 |
-| 协商模式 | ICE-Lite | SFU 侧简化 ICE（server-side only） |
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| Fingerprint algorithm | SHA-256 | mediasoup uses SHA-256 certificate fingerprints by default |
+| DTLS role | auto | Auto-negotiated per ICE controlling/controlled |
+| Negotiation mode | ICE-Lite | Simplified SFU-side ICE (server-side only) |
 
-握手流程：
+Handshake flow:
 ```
 Client                          mediasoup (ICE-Lite)
   │                                    │
-  │── STUN Binding Request ───────────→│ ICE 连通性检查
+  │── STUN Binding Request ───────────→│ ICE connectivity check
   │←── STUN Binding Response ─────────│
   │                                    │
-  │── DTLS ClientHello ───────────────→│ DTLS 握手开始
+  │── DTLS ClientHello ───────────────→│ DTLS handshake begins
   │←── DTLS ServerHello + Certificate │
   │── DTLS ClientKeyExchange ─────────→│
   │←── DTLS Finished ─────────────────│
   │                                    │
-  │═══════ SRTP key derived ═══════════│ 从 DTLS 握手派生 SRTP 密钥
+  │═══════ SRTP key derived ═══════════│ SRTP keys derived from the DTLS handshake
 ```
 
-### SRTP 加密
+### SRTP Encryption
 
-| 参数 | 值 |
-|------|-----|
-| 加密套件 | AES_CM_128_HMAC_SHA1_80（默认） |
-| 密钥协商 | 通过 DTLS 握手派生 SRTP 密钥 |
-| 重放保护 | 启用（SSRC + ROC 计数器） |
-| 密钥轮换 | DTLS re-handshake 触发 SRTP 密钥更新 |
+| Parameter | Value |
+|-----------|-------|
+| Crypto suite | AES_CM_128_HMAC_SHA1_80 (default) |
+| Key agreement | SRTP keys derived from the DTLS handshake |
+| Replay protection | Enabled (SSRC + ROC counters) |
+| Key rotation | DTLS re-handshake triggers SRTP key update |
 
-### SCTP 加密（DataChannel）
+### SCTP Encryption (DataChannel)
 
-当启用 DataChannel 时，SCTP over DTLS 提供相同的 DTLS 加密保护。SCTP 关联在 DTLS 握手完成后建立。
+When the DataChannel is enabled, SCTP over DTLS receives the same DTLS encryption protection. The SCTP association is established after the DTLS handshake completes.
 
-### Host 端安全
+### Host-Side Security
 
-Host 通过 mediaservo-webrtc (webrtc-sys/libwebrtc) 建立连接，libwebrtc 自动处理 DTLS-SRTP 加密。Host 端无需额外配置。
+The Host connects through mediaservo-webrtc (webrtc-sys/libwebrtc); libwebrtc handles DTLS-SRTP encryption automatically. No extra Host-side configuration needed.
 
-### 安全加固建议
+### Security Hardening Recommendations
 
-1. **ICE credentials**: 每个 transport 使用独立的 ice-ufrag/ice-pwd（mediasoup 默认）
-2. **DTLS 指纹验证**: Server 端 `transport.connect()` 时验证客户端 DTLS 指纹
-3. **SRTP 重放保护**: 默认启用，防止 RTP 包重放攻击
-4. **端口范围限制**: 缩窄 UDP 端口范围减少攻击面
+1. **ICE credentials**: each transport uses independent ice-ufrag/ice-pwd (mediasoup default)
+2. **DTLS fingerprint validation**: the Server validates the client DTLS fingerprint at `transport.connect()`
+3. **SRTP replay protection**: enabled by default, preventing RTP packet replay attacks
+4. **Port range restriction**: narrow the UDP port range to reduce the attack surface

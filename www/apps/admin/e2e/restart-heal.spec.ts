@@ -2,17 +2,17 @@ import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 
-// H1/H6 免刷新自愈回归（PIT-161/162 固化为 Hyrum 防线）。
-// 前置: 部署实例 out/host（msrtc-host）+ native server 9800 + host 已在推流。
-// 常规 CI 无部署实例 → 环境变量 RUN_HOST_HEAL=1 显式开启。
+// H1/H6 refresh-free self-heal regression (PIT-161/162 codified as a Hyrum guard).
+// Prereq: deployed instance out/host (msrtc-host) + native server 9800 + host already streaming.
+// Regular CI has no deployed instance → set env RUN_HOST_HEAL=1 to opt in.
 const HOST_DIR = process.env.HOST_DIR ?? '/home/maxsense/Documents/ms_rtc/out/host';
 test.describe('restart heal (no refresh)', () => {
-  test.skip(process.env.RUN_HOST_HEAL !== '1', '需要 out/host 部署实例（RUN_HOST_HEAL=1 开启）');
+  test.skip(process.env.RUN_HOST_HEAL !== '1', 'requires a deployed out/host instance (set RUN_HOST_HEAL=1)');
   test.setTimeout(180_000);
   const frames = (page) => page.evaluate(() => [...document.querySelectorAll('video')].map(v => ({
     rs: v.readyState, w: v.videoWidth, fr: v.getVideoPlaybackQuality().totalVideoFrames,
   })));
-  test('host restart → 画面自动恢复，无需刷新', async ({ page }) => {
+  test('host restart → picture recovers automatically without refresh', async ({ page }) => {
     await page.goto('/');
     await page.locator('input.login-input[placeholder="username"]').fill('admin');
     await page.locator('input.login-input[placeholder="password"]').fill('admin123');

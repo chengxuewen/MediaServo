@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "MediaServo 座舱端/消费端 SDK（TS）— transport + auth + wire types（D270-R1 / client-dual-form P0）",
+  "description": "MediaServo cockpit/consumer-side SDK (TS) — transport + auth + wire types (D270-R1 / client-dual-form P0)",
   "exports": {
     ".": "./src/index.ts"
   },

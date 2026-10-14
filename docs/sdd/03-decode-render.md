@@ -1,12 +1,12 @@
 # SDD 03: Decode + Render
 
-## 1. 概述
+## 1. Overview
 
-视频解码 + 渲染模块。从 WebRTC 接收编码帧，解码为 I420，转换为 GPU 纹理输出到屏幕。
+Video decode + render module. Receives encoded frames from WebRTC, decodes to I420, converts to GPU textures, and outputs to screen.
 
-**决策引用**: D46 (VideoDecode trait), D47 (VideoRender trait), D75 (I420 标准)
+**Decision refs**: D46 (VideoDecode trait), D47 (VideoRender trait), D75 (I420 standard)
 
-## 2. 接口定义
+## 2. Interface Definition
 
 ```rust
 pub trait VideoDecoder: Send {
@@ -30,7 +30,7 @@ bitflags! {
         const VP8       = 1 << 2;
         const VP9       = 1 << 3;
         const GPU_TEXTURE = 1 << 4;
-        const ADAPTIVE  = 1 << 5;  // 丢包恢复
+        const ADAPTIVE  = 1 << 5;  // Packet-loss recovery
     }
 }
 
@@ -42,23 +42,23 @@ bitflags! {
 }
 ```
 
-### 帧结构
+### Frame Structure
 
 ```rust
 pub struct RawFrame {
-    pub data: FrameData,         // I420 data 或 GPU texture handle
+    pub data: FrameData,         // I420 data or GPU texture handle
     pub width: u32,
     pub height: u32,
     pub pts: u64,
 }
 
 pub enum FrameData {
-    I420(Vec<u8>),               // Phase 1 CPU 路径
-    Texture(TextureHandle),      // Phase 2 GPU 路径
+    I420(Vec<u8>),               // Phase 1 CPU path
+    Texture(TextureHandle),      // Phase 2 GPU path
 }
 ```
 
-## 3. 管线流程
+## 3. Pipeline Flow
 
 ```
 WebRTC on_message
@@ -67,39 +67,39 @@ WebRTC on_message
 VideoDecoder::decode (GStreamer decodebin)
     │ RawFrame (I420)
     ▼
-I420 → YUV→RGB 转换 (CPU Phase 1 / shader Phase 2)
+I420 → YUV→RGB conversion (CPU Phase 1 / shader Phase 2)
     │ RGBA buffer
     ▼
-VideoRenderer::render → 输出到窗口/Canvas
+VideoRenderer::render → output to window/Canvas
 ```
 
-Phase 1 CPU 回读路径: `appsink → CPU buffer → Canvas 2D`
+Phase 1 CPU readback path: `appsink → CPU buffer → Canvas 2D`
 
-## 4. 后端策略
+## 4. Backend Strategy
 
-| 后端 | 场景 | 备注 |
-|------|------|------|
-| GStreamer decodebin | Phase 1 通用 | appsrc → h264parse → decodebin → videoconvert → appsink |
-| FFmpeg libavcodec | remote SDK 静态链接 | 仅 backend-str0m 场景 |
-| WebCodecs | 浏览器 | 跳过 codec crate |
+| Backend | Scenario | Notes |
+|---------|----------|-------|
+| GStreamer decodebin | Phase 1 general | appsrc → h264parse → decodebin → videoconvert → appsink |
+| FFmpeg libavcodec | Remote SDK static link | Only in the backend-str0m scenario |
+| WebCodecs | Browser | Skips the codec crate |
 
-## 5. 错误处理
+## 5. Error Handling
 
-| 条件 | 分类 | 错误码 | 恢复 |
-|------|------|--------|------|
-| 解码器初始化失败 | Fatal | 5001 | 退出并提示修改配置 |
-| 解码帧格式无效 | Recoverable | 5002 | 丢弃该帧, request_keyframe |
-| 渲染 surface 无效 | Recoverable | 5002 | 跳过渲染, 等待新 surface |
+| Condition | Category | Error Code | Recovery |
+|-----------|----------|------------|----------|
+| Decoder init failure | Fatal | 5001 | Exit and prompt config change |
+| Invalid decoded frame format | Recoverable | 5002 | Drop the frame, request_keyframe |
+| Invalid render surface | Recoverable | 5002 | Skip render, wait for new surface |
 
-## 6. 测试计划
+## 6. Test Plan
 
-| 测试 | 类型 | 描述 |
-|------|------|------|
-| decode_h264_baseline | 集成 | 输入 H.264 Annex-B, 输出 I420 帧完整 |
-| decode_latency_budget | 集成 | 单帧解码延迟 <50ms (720p) |
-| frame_integrity | 集成 | 解码后帧 YUV 各平面大小正确, PSNR > 40dB |
-| keyframe_request | 单元 | request_keyframe 后收到 IDR 帧 |
-| decoder_reset | 单元 | reset 后解码器状态清除, 可重新解码 |
-| render_rgba_output | 集成 | render 后输出 RGBA buffer 尺寸正确 |
-| phase1_cpu_path | 集成 | CPU fallback 路径帧率 > 20fps |
-| format_conversion | 单元 | I420 → RGBA 转换色值正确 |
+| Test | Type | Description |
+|------|------|-------------|
+| decode_h264_baseline | Integration | H.264 Annex-B input, complete I420 frames out |
+| decode_latency_budget | Integration | Per-frame decode latency <50ms (720p) |
+| frame_integrity | Integration | Post-decode YUV plane sizes correct, PSNR > 40dB |
+| keyframe_request | Unit | IDR frame received after request_keyframe |
+| decoder_reset | Unit | Decoder state cleared after reset, can decode again |
+| render_rgba_output | Integration | RGBA buffer dimensions correct after render |
+| phase1_cpu_path | Integration | CPU fallback path > 20fps |
+| format_conversion | Unit | I420 → RGBA color values correct |

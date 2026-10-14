@@ -1,15 +1,15 @@
-//! spec.rs —— 损伤参数语义本体（CLI 是本体、serve/UI 是壳；design.md §dir 腿定义表为唯一真值源）。
+//! spec.rs -- impairment parameter semantic core (the CLI is the core, serve/UI are shells; design.md §dir leg-definition table is the sole truth source).
 //!
-//! 渲染合同 = `scripts/weaknet.sh` 的 `render_netem_spec` / `rate_arg` 逐字符平移
-//! （golden fixture 9 继承案钉死，dir=both 基准）；dir 新契约 3 案由 `build_filter_legs` 承接。
-//! 退出码 4（参数非法）语义由本模块校验函数镜像（表抄自 weaknet.sh parse_opts）。
+//! Rendering contract = character-by-character port of `scripts/weaknet.sh` `render_netem_spec` / `rate_arg`
+//! (pinned by the 9 inherited golden-fixture cases, dir=both baseline); the 3 new dir-contract cases are carried by `build_filter_legs`.
+//! Exit code 4 (invalid params) semantics are mirrored by this module's validation functions (table copied from weaknet.sh parse_opts).
 //!
-//! 注意（bash 平移保真）：`render_netem_spec` **恒对半折算** rtt/jitter（lo 双向各过一次
-//! qdisc 的口径）；dir 感知的单腿全额规则在 [`effective_leg_delay_ms`]，安装层（T3/T5）取用。
+//! Note (bash-port fidelity): `render_netem_spec` **always halves** rtt/jitter (the lo two-pass-per-direction
+//! convention); the dir-aware single-leg full-amount rule lives in [`effective_leg_delay_ms`], consumed by the install layer (T3/T5).
 
 use serde::{Deserialize, Serialize};
 
-/// 方向（与 clap 面同形；lib 语义源，main.rs 的 CLI enum 向其转换）。
+/// Direction (same shape as the clap surface; lib semantic source, main.rs's CLI enum converts into it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Dir {
@@ -19,20 +19,20 @@ pub enum Dir {
     Both,
 }
 
-/// 作用域选择（§dir 表行维；Ports 逃生门在 T3 scope.rs 归一为 Media 形）。
+/// Scope selection (§dir table row dimension; Ports as escape hatch normalized to the Media form in T3 scope.rs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ScopeSel {
-    /// 段级：本地媒体口集（server listen/local ports）
+    /// room level: the local media port set (server listen/local ports)
     Media,
-    /// 流级：有序对 (local, remote)——单 filter 双 match AND
+    /// stream level: ordered pairs (local, remote) -- single filter, dual-match AND
     Stream,
-    /// 设备级：该 owner 全部流 remote_port 并集（无配对的 Stream 形）
+    /// device level: the union of remote_ports over all streams of that owner (the pairless Stream form)
     Device,
 }
 
-/// 接口种类。逻辑腿形状与 iface 无关（同一函数产出）；差别在**安装点**——
-/// 物理网卡 dir=in 改走 ifb 镜像 ingress（design §ifb 合同，T9），lo 恒端口腿。
+/// Interface kind. Logical leg shape is iface-independent (the same function produces it); the difference is the **install point** --
+/// a physical NIC with dir=in moves to ifb mirror ingress (design §ifb contract, T9); lo is always a port leg.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IfaceKind {
@@ -40,11 +40,11 @@ pub enum IfaceKind {
     Physical,
 }
 
-/// 丢包模式（Simple 携带原始百分串——"2%" 或 "0.5%"；"0"/"0%" 渲染时跳过）。
+/// Loss mode (Simple carries the raw percentage string -- "2%" or "0.5%"; "0"/"0%" skipped at render).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LossSpec {
     Simple(String),
-    /// 四值皆原始串（允许 "25%" 形态，tc 侧一律裸数 = 渲染时剥 %）。
+    /// All four values are raw strings ("25%" allowed; the tc side always takes bare numbers = % stripped at render).
     GeModel {
         loss: String,
         r: String,
@@ -53,13 +53,13 @@ pub enum LossSpec {
     },
 }
 
-/// 完整损伤规格。limit 缺省 100000（bash NETEM_LIMIT：netem 默认 100 包，配 delay 会静默自伤丢包）。
+/// Full impairment spec. limit defaults to 100000 (bash NETEM_LIMIT: netem defaults to 100 packets, which with delay silently self-harms with drops).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImpairSpec {
     pub rtt_ms: u64,
     pub jitter_ms: u64,
     pub loss: Option<LossSpec>,
-    /// 乱序百分比裸整数串（渲染时补 '%'，bash `reorder ${REORDER_PCT}%` 同构）。
+    /// Reorder percentage as a bare integer string ('%' appended at render, structurally same as bash `reorder ${REORDER_PCT}%`).
     pub reorder_pct: Option<String>,
     pub rate_mbps: Option<f64>,
     pub seed: Option<u64>,
@@ -83,41 +83,47 @@ impl Default for ImpairSpec {
 }
 
 pub const DEFAULT_NETEM_LIMIT: u64 = 100_000;
-/// 未设速率时 htb 哨兵（不限速=天文带宽；bash SENTINEL_RATE）。
+/// htb sentinel when rate unset (no limit = astronomic bandwidth; bash SENTINEL_RATE).
 pub const SENTINEL_RATE: &str = "1000gbit";
 
 impl ImpairSpec {
-    /// 从 flat JSON（golden fixture `input` 形 / CLI 合并后形）解析。
-    /// 键：rtt_ms, jitter_ms, loss, loss_mode("simple"|"gemodel"), gemodel([r,h,k]),
+    /// Parse from flat JSON (the golden fixture `input` shape / the post-CLI-merge shape).
+    /// Keys: rtt_ms, jitter_ms, loss, loss_mode("simple"|"gemodel"), gemodel([r,h,k]),
     /// reorder, rate_mbps, seed, limit, dir("out"|"in"|"both")。
-    /// 校验镜像 bash exit-4 表；未知键拒绝（typos 显性化，禁静默吞）。
+    /// Validation mirrors the bash exit-4 table; unknown keys rejected (typos surface loudly, never silently swallowed).
     pub fn from_flat_json(v: &serde_json::Value) -> Result<Self, String> {
-        let obj = v
-            .as_object()
-            .ok_or_else(|| format!("spec input 不是对象: {v}"))?;
+        let obj = v.as_object().ok_or_else(|| format!("spec input is not an object: {v}"))?;
         const KNOWN: &[&str] = &[
-            "rtt_ms", "jitter_ms", "loss", "loss_mode", "gemodel", "reorder", "rate_mbps",
-            "seed", "limit", "dir",
+            "rtt_ms",
+            "jitter_ms",
+            "loss",
+            "loss_mode",
+            "gemodel",
+            "reorder",
+            "rate_mbps",
+            "seed",
+            "limit",
+            "dir",
         ];
         for key in obj.keys() {
             if !KNOWN.contains(&key.as_str()) {
-                return Err(format!("spec input 未知键 \"{key}\"（合法集: {KNOWN:?}）"));
+                return Err(format!("spec input unknown key \"{key}\" (legal set: {KNOWN:?})"));
             }
         }
         let get_u64 = |k: &str| -> Result<u64, String> {
             match obj.get(k) {
                 None | Some(serde_json::Value::Null) => Ok(0),
-                Some(serde_json::Value::Number(n)) => n
-                    .as_u64()
-                    .ok_or_else(|| format!("{k} 需非负整数，得 {n}")),
-                Some(other) => Err(format!("{k} 需数字，得 {other}")),
+                Some(serde_json::Value::Number(n)) => {
+                    n.as_u64().ok_or_else(|| format!("{k} must be a non-negative integer, got {n}"))
+                }
+                Some(other) => Err(format!("{k} must be a number, got {other}")),
             }
         };
         let get_opt_str = |k: &str| -> Result<Option<String>, String> {
             match obj.get(k) {
                 None | Some(serde_json::Value::Null) => Ok(None),
                 Some(serde_json::Value::String(s)) => Ok(Some(s.clone())),
-                Some(other) => Err(format!("{k} 需字符串，得 {other}")),
+                Some(other) => Err(format!("{k} must be a string, got {other}")),
             }
         };
         let rtt_ms = get_u64("rtt_ms")?;
@@ -130,10 +136,10 @@ impl ImpairSpec {
                 let vals: Option<Vec<&str>> = a.iter().map(Value::as_str).collect();
                 match vals {
                     Some(v) if v.len() == 3 => Some(v),
-                    _ => return Err(format!("gemodel 需 3 个字符串 [r,h,k]，得 {}", a.len())),
+                    _ => return Err(format!("gemodel needs 3 strings [r,h,k], got {}", a.len())),
                 }
             }
-            Some(other) => return Err(format!("gemodel 需数组，得 {other}")),
+            Some(other) => return Err(format!("gemodel must be an array, got {other}")),
         };
         let loss_spec = match loss_mode.as_str() {
             "simple" | "uniform" => loss.map(LossSpec::Simple),
@@ -144,24 +150,25 @@ impl ImpairSpec {
                     h: g[1].to_string(),
                     k: g[2].to_string(),
                 }),
-                _ => return Err("gemodel 模式需 loss + gemodel[r,h,k]".to_string()),
+                _ => return Err("gemodel mode needs loss + gemodel[r,h,k]".to_string()),
             },
-            other => return Err(format!("loss_mode 需 simple|gemodel，得 {other:?}")),
+            other => return Err(format!("loss_mode must be simple|gemodel, got {other:?}")),
         };
         let rate_mbps = match obj.get("rate_mbps") {
             None | Some(serde_json::Value::Null) => None,
             Some(serde_json::Value::Number(n)) => {
-                let f = n.as_f64().ok_or_else(|| format!("rate_mbps 需数值，得 {n}"))?;
+                let f = n.as_f64().ok_or_else(|| format!("rate_mbps must be numeric, got {n}"))?;
                 Some(f)
             }
-            Some(other) => return Err(format!("rate_mbps 需数字，得 {other}")),
+            Some(other) => return Err(format!("rate_mbps must be a number, got {other}")),
         };
         let seed = match obj.get("seed") {
             None | Some(serde_json::Value::Null) => None,
-            Some(serde_json::Value::Number(n)) => {
-                Some(n.as_u64().ok_or_else(|| format!("seed 需非负整数，得 {n}"))?)
-            }
-            Some(other) => return Err(format!("seed 需数字，得 {other}")),
+            Some(serde_json::Value::Number(n)) => Some(
+                n.as_u64()
+                    .ok_or_else(|| format!("seed must be a non-negative integer, got {n}"))?,
+            ),
+            Some(other) => return Err(format!("seed must be a number, got {other}")),
         };
         let limit = match obj.get("limit") {
             None | Some(serde_json::Value::Null) => DEFAULT_NETEM_LIMIT,
@@ -173,9 +180,9 @@ impl ImpairSpec {
                 "out" => Dir::Out,
                 "in" => Dir::In,
                 "both" => Dir::Both,
-                other => return Err(format!("dir 需 out|in|both，得 {other:?}")),
+                other => return Err(format!("dir must be out|in|both, got {other:?}")),
             },
-            Some(other) => return Err(format!("dir 需字符串，得 {other}")),
+            Some(other) => return Err(format!("dir must be a string, got {other}")),
         };
         let spec = Self {
             rtt_ms,
@@ -191,7 +198,7 @@ impl ImpairSpec {
         Ok(spec)
     }
 
-    /// 值域校验（镜像 weaknet.sh parse_opts 的 exit-4 表；消息含越界值与合法域）。
+    /// Range validation (mirrors the weaknet.sh parse_opts exit-4 table; messages include the offending value and the legal domain).
     pub fn validate(&self) -> Result<(), String> {
         validate_rtt(self.rtt_ms)?;
         validate_jitter(self.jitter_ms)?;
@@ -215,10 +222,10 @@ impl ImpairSpec {
         Ok(())
     }
 
-    /// 单腿安装延迟毫秒（design §dir「rtt 标定规则」：both → 各腿 rtt/2；
-    /// 单腿 out|in → 全额——保「观测 RTT ≈ rtt_ms」跨 dir 恒定）。
-    /// 与 [`render_netem_spec`]（恒折半的 bash 继承基准）解耦：netem 字符串本身仍走
-    /// render + 安装层覆盖 delay 段的路线（T3/T5 argv 组装取此值）。
+    /// Per-leg installed delay ms (design §dir "rtt calibration rule": both -> rtt/2 per leg;
+    /// single out|in -> full amount -- keeps "observed RTT ~ rtt_ms" constant across dirs).
+    /// Decoupled from [`render_netem_spec`] (the always-halving bash inherited baseline): the netem string itself still goes the
+    /// render + install-layer-overrides-the-delay-segment route (T3/T5 argv assembly takes this value).
     #[must_use]
     pub fn effective_leg_delay_ms(&self) -> u64 {
         match self.dir {
@@ -227,7 +234,7 @@ impl ImpairSpec {
         }
     }
 
-    /// jitter 同规则对半（both 折半承袭 bash `j=$((JITTER_MS/2))`；单腿全额）。
+    /// jitter halves by the same rule (both halves inherit bash `j=$((JITTER_MS/2))`; single leg = full amount).
     #[must_use]
     pub fn effective_leg_jitter_ms(&self) -> u64 {
         match self.dir {
@@ -239,17 +246,17 @@ impl ImpairSpec {
 
 use serde_json::Value;
 
-/// netem 参数串（bash `render_netem_spec` 逐字符平移：limit → delay → loss → reorder → seed）。
-/// 保真注：恒对半折算（dir=both 基准）；jitter 段与 delay 段同法单空格拼接（rtt=0 时
-/// jitter 直接跟 limit——bash `spec="$spec ${j}ms ..."` 同构）。dir 感知延迟见
-/// [`ImpairSpec::effective_leg_delay_ms`]（安装层 T3/T5 取用）。
+/// netem parameter string (bash `render_netem_spec` character-by-character port: limit -> delay -> loss -> reorder -> seed).
+/// Fidelity note: always halves (dir=both baseline); the jitter segment concatenates with single spaces like the delay segment (rtt=0:
+/// jitter follows limit directly -- structurally same as bash `spec="$spec ${j}ms ..."`). Dir-aware delay in
+/// [`ImpairSpec::effective_leg_delay_ms`] (consumed by the install layer T3/T5).
 #[must_use]
 pub fn render_netem_spec(s: &ImpairSpec) -> String {
     render_netem_spec_with(s, s.rtt_ms / 2, s.jitter_ms / 2)
 }
 
-/// dir 感知叶形（design §dir rtt 标定：both=对半基准（= render_netem_spec）；
-/// 单腿 out|in=全额——观测 RTT 跨 dir 恒定）。golden 9 案只钉 legacy 形。
+/// dir-aware leaf form (design §dir rtt calibration: both = halved baseline (= render_netem_spec);
+/// single out|in = full -- observed RTT constant across dirs). The 9 golden cases pin only the legacy form.
 #[must_use]
 pub fn render_netem_spec_leg(s: &ImpairSpec) -> String {
     match s.dir {
@@ -266,7 +273,7 @@ fn render_netem_spec_with(s: &ImpairSpec, d: u64, j: u64) -> String {
     if j > 0 {
         spec.push_str(&format!(" {j}ms distribution normal"));
     }
-    // gemodel 且 loss=0 → 降级 "loss 0%"（内核「无 delay 即 reset」怪癖规避，bash 头注 3）
+    // gemodel with loss=0 -> downgrade to "loss 0%" (works around the kernel "no delay means reset" quirk, bash header note 3)
     match &s.loss {
         Some(LossSpec::GeModel { loss, r, h, k }) => {
             if loss == "0" || loss == "0%" {
@@ -284,7 +291,7 @@ fn render_netem_spec_with(s: &ImpairSpec, d: u64, j: u64) -> String {
         Some(LossSpec::Simple(p)) if !p.is_empty() && strip_pct(p) != "0" => {
             spec.push_str(&format!(" loss {p}"));
         }
-        // "0"/"0%"/空 = 无损伤跳段（bash elif 同义）；GeModel 已在上方分支穷尽
+        // "0"/"0%"/empty = skip the impairment segment (bash elif synonym); GeModel already exhausted in the branch above
         Some(_) | None => {}
     }
     if let Some(rp) = &s.reorder_pct
@@ -302,8 +309,8 @@ fn strip_pct(v: &str) -> &str {
     v.strip_suffix('%').unwrap_or(v)
 }
 
-/// htb rate 实参（bash `rate_arg`）：未设 → 哨兵；设了 → "{n}mbit"，
-/// f64 回打整数不带小数点（4.0 → "4mbit"；4.5 → "4.5mbit"）。
+/// htb rate argument (bash `rate_arg`): unset -> sentinel; set -> "{n}mbit",
+/// an integral f64 prints without a decimal point (4.0 -> "4mbit"; 4.5 -> "4.5mbit").
 #[must_use]
 pub fn render_rate_arg(rate_mbps: Option<f64>) -> String {
     match rate_mbps {
@@ -313,18 +320,18 @@ pub fn render_rate_arg(rate_mbps: Option<f64>) -> String {
     }
 }
 
-// ---------- §dir 腿定义表（rev-2.1 核心合同） ----------
+// ---------- §dir leg-definition table (rev-2.1 core contract) ----------
 
-/// 所有媒体腿的 protocol 合取（UDP；TCP 临时端口碰撞防御）。信令 TCP 腿（protocol 6）
-/// 是 bash --signaling 承接位，T3 单列——不在本媒体腿集合内。
+/// protocol conjunction for all media legs (UDP; TCP ephemeral-port collision defense). The signaling TCP leg (protocol 6)
+/// carries the bash --signaling slot, listed separately at T3 -- not part of this media-leg set.
 pub const UDP_PROTOCOL: u8 = 17;
-/// 全部媒体腿的目标 class（build_skeleton 的 1:10）。
+/// Target class of all media legs (build_skeleton's 1:10).
 pub const MEDIA_FLOWID: &str = "1:10";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LegFilter {
     pub protocol: u8,
-    /// 同 filter 内多 match = 合取(AND)；("sport"/"dport", port)。禁拆两条单 match filter（=OR 连坐）。
+    /// multiple matches inside one filter = conjunction (AND); ("sport"/"dport", port). Never split into two single-match filters (= OR cross-hit).
     pub matches: Vec<(MatchKind, u16)>,
     pub flowid: String,
 }
@@ -336,15 +343,15 @@ pub enum MatchKind {
     Dport,
 }
 
-/// 按 §dir 表装配方向腿：
-/// - Media：out → sport∈P（每口一 filter）；in → dport∈P
-/// - Stream/Device（rev-2.2 统一）：有序对集 (L,R)，Device=owner 全部流的 (L,R) 由调用方拍平；
-///   out=(sport=L ∧ dport=R) / in=(sport=R ∧ dport=L) 每对单 filter 双 match AND——
-///   remote-union 单 match 形废弃（最松合同，Momus 歧义#1/#3 并案裁决）
-/// - both = 两向各装（=bash 现状等价）；协议 17 合取恒在。
+/// Assemble direction legs per the §dir table:
+/// - Media: out -> sport in P (one filter per port); in -> dport in P
+/// - Stream/Device (rev-2.2 unified): the ordered-pair set (L,R), Device = (L,R) over all streams of the owner, flattened by the caller;
+///   out=(sport=L AND dport=R) / in=(sport=R AND dport=L), single filter with dual-match AND per pair --
+///   the remote-union single-match form retired (loosest contract; Momus ambiguities #1/#3 adjudicated together)
+/// - both = install both directions (equivalent to current bash); protocol 17 conjunction always present.
 ///
-/// iface 不改变逻辑腿形状（物理网卡 dir=in 的安装点改 ifb ingress，§ifb 合同 T9——
-/// 本函数即 design 所称「dir-aware 纯函数」，T5/W1 dry-run 快照的判据源）。
+/// iface does not change the logical leg shape (a physical NIC with dir=in installs at ifb ingress, §ifb contract T9 --
+/// this function is the design's "dir-aware pure function", the predicate source of the T5/W1 dry-run snapshots).
 pub fn build_filter_legs(
     scope: ScopeSel,
     iface: IfaceKind,
@@ -374,7 +381,7 @@ pub fn build_filter_legs(
                 push_media_leg(MatchKind::Dport, local_ports);
             }
         }
-        // Stream/Device 统一有序对 AND 腿（rev-2.2）
+        // Stream/Device unified ordered-pair AND legs (rev-2.2)
         ScopeSel::Stream | ScopeSel::Device => {
             for &(l, r) in pairs {
                 if out {
@@ -388,7 +395,7 @@ pub fn build_filter_legs(
     }
     if legs.is_empty() {
         return Err(format!(
-            "腿集合为空（scope={scope:?} dir={dir:?} 端口/配对未解析——stats 空集报因 exit2，禁静默全口）"
+            "leg set is empty (scope={scope:?} dir={dir:?} ports/pairs unresolved -- empty stats reports cause exit2, never silently all ports)"
         ));
     }
     Ok(legs)
@@ -402,69 +409,66 @@ fn and_leg(matches: &[(MatchKind, u16)]) -> LegFilter {
     }
 }
 
-// ---------- 值域校验（exit-4 表；消息含越界值 + 合法域） ----------
+// ---------- Range validation (exit-4 table; messages include the offending value + legal domain) ----------
 
 pub fn validate_rtt(v: u64) -> Result<(), String> {
     if v > 2000 {
-        return Err(format!("rtt 非法: {v}（合法域 0-2000ms 整数）"));
+        return Err(format!("rtt invalid: {v} (legal domain 0-2000ms integer)"));
     }
     Ok(())
 }
 
 pub fn validate_jitter(v: u64) -> Result<(), String> {
-    // bash：非负整数即过（u64 天然非负）；仅类型占位防未来改型。
-    // ponytail: 不设上界 = bash 原样；若内核上限要收，归 T3 一并。
+    // bash: any non-negative integer passes (u64 is inherently non-negative); type placeholder only, against future reshaping.
+    // ponytail: no upper bound = bash as-is; if a kernel cap is needed, fold into T3.
     let _ = v;
     Ok(())
 }
 
 pub fn validate_loss(s: &str) -> Result<(), String> {
     if parse_pct_bounded(s).is_none() {
-        return Err(format!("loss 非法: {s:?}（合法域 0-100%，可小数）"));
+        return Err(format!("loss invalid: {s:?} (legal domain 0-100%, decimals allowed)"));
     }
     Ok(())
 }
 
 pub fn validate_gemodel_value(s: &str) -> Result<(), String> {
-    // bash 容忍 "25%" 形态、profile 可读性优先；数值域文档口径 0-100。
+    // bash tolerates the "25%" shape, profile readability first; the numeric domain convention is 0-100.
     if parse_pct_bounded(s).is_none() {
-        return Err(format!("gemodel 参数非法: {s:?}（合法域 0-100，可带%）"));
+        return Err(format!("gemodel params invalid: {s:?} (legal domain 0-100, % allowed)"));
     }
     Ok(())
 }
 
 pub fn validate_reorder(s: &str) -> Result<(), String> {
     if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(format!("reorder 非法: {s:?}（需非负整数%）"));
+        return Err(format!("reorder invalid: {s:?} (needs a non-negative integer %)"));
     }
     Ok(())
 }
 
 pub fn validate_rate(v: f64) -> Result<(), String> {
     if !v.is_finite() || v <= 0.0 {
-        return Err(format!("rate 非法: {v}（需 > 0 的 Mbps 数值）"));
+        return Err(format!("rate invalid: {v} (needs a numeric Mbps > 0)"));
     }
     Ok(())
 }
 
 pub fn validate_duration(secs: u64) -> Result<(), String> {
     if secs < 5 {
-        return Err(format!("duration 非法: {secs}（需 ≥5 秒；0 不接受）"));
+        return Err(format!("duration invalid: {secs} (needs >=5 seconds; 0 not accepted)"));
     }
     Ok(())
 }
 
-/// "100" | "0.5%" 形态（bash `^(100|[0-9]{1,2})(\.[0-9]+)?%?$`）且 ≤100。
+/// "100" | "0.5%" shape (bash `^(100|[0-9]{1,2})(\.[0-9]+)?%?$`) and <=100.
 fn parse_pct_bounded(s: &str) -> Option<f64> {
     let core = s.strip_suffix('%').unwrap_or(s);
     let (int_part, frac_part) = match core.split_once('.') {
         Some((i, f)) => (i, Some(f)),
         None => (core, None),
     };
-    if int_part.is_empty()
-        || int_part.len() > 3
-        || !int_part.bytes().all(|b| b.is_ascii_digit())
-    {
+    if int_part.is_empty() || int_part.len() > 3 || !int_part.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
     if let Some(f) = frac_part
@@ -472,7 +476,7 @@ fn parse_pct_bounded(s: &str) -> Option<f64> {
     {
         return None;
     }
-    // 整数部分 ≤ 2 位（0-99）或恰为 "100"（bash 正则同义）
+    // integer part <= 2 digits (0-99) or exactly "100" (bash-regex synonym)
     if int_part.len() > 2 && int_part != "100" {
         return None;
     }
@@ -495,7 +499,7 @@ mod tests {
 
     #[test]
     fn leg_delay_table_dir_aware() {
-        // design §dir rtt 标定：both=对半，单腿=全额（render_netem_spec 不受 dir 影响）
+        // design §dir rtt calibration: both = halves, single leg = full (render_netem_spec unaffected by dir)
         let mut s = simple(80, 15, None);
         s.dir = Dir::Both;
         assert_eq!(s.effective_leg_delay_ms(), 40);
@@ -505,11 +509,8 @@ mod tests {
         assert_eq!(s.effective_leg_jitter_ms(), 15);
         s.dir = Dir::In;
         assert_eq!(s.effective_leg_delay_ms(), 80);
-        // render 基准恒折半（dir 不改 legacy 渲染，fixture 9 案 dir=both 口径）
-        assert_eq!(
-            render_netem_spec(&s),
-            "limit 100000 delay 40ms 7ms distribution normal"
-        );
+        // the render baseline always halves (dir doesn't change the legacy render; the 9-fixture case uses the dir=both convention)
+        assert_eq!(render_netem_spec(&s), "limit 100000 delay 40ms 7ms distribution normal");
     }
 
     #[test]
@@ -544,11 +545,8 @@ mod tests {
 
     #[test]
     fn jitter_without_rtt_renders_like_bash_single_space() {
-        // bash 平移保真：`spec="$spec ${j}ms ..."` 恒单空格拼接（rtt=0 时 jitter 段直接跟 limit）。
-        assert_eq!(
-            render_netem_spec(&simple(0, 15, None)),
-            "limit 100000 7ms distribution normal"
-        );
+        // bash-port fidelity: `spec="$spec ${j}ms ..."` always concatenates with single spaces (rtt=0: the jitter segment follows limit directly).
+        assert_eq!(render_netem_spec(&simple(0, 15, None)), "limit 100000 7ms distribution normal");
     }
 
     #[test]
@@ -558,28 +556,24 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ok, simple(80, 15, Some("2%")));
-        // 未知键拒绝
-        assert!(ImpairSpec::from_flat_json(
-            &serde_json::json!({"rtt_m": 80})
-        )
-        .is_err());
-        // rtt 越界（exit-4 表）
+        // unknown keys rejected
+        assert!(ImpairSpec::from_flat_json(&serde_json::json!({"rtt_m": 80})).is_err());
+        // rtt out of range (exit-4 table)
         let e = ImpairSpec::from_flat_json(&serde_json::json!({"rtt_ms": 3000})).unwrap_err();
         assert!(e.contains("3000") && e.contains("0-2000"), "{e}");
-        // loss 非数字
-        assert!(ImpairSpec::from_flat_json(
-            &serde_json::json!({"loss": "abc%"})
-        )
-        .is_err());
-        // loss 上界 100 含、100.1 拒
+        // loss not a number
+        assert!(ImpairSpec::from_flat_json(&serde_json::json!({"loss": "abc%"})).is_err());
+        // loss upper bound 100 included, 100.1 rejected
         assert!(validate_loss("100").is_ok());
         assert!(validate_loss("100.1").is_err());
         assert!(validate_loss("99.99%").is_ok());
-        // gemodel 缺参
-        assert!(ImpairSpec::from_flat_json(&serde_json::json!({
-            "loss": "5%", "loss_mode": "gemodel", "gemodel": ["1", "2"]
-        }))
-        .is_err());
+        // gemodel missing params
+        assert!(
+            ImpairSpec::from_flat_json(&serde_json::json!({
+                "loss": "5%", "loss_mode": "gemodel", "gemodel": ["1", "2"]
+            }))
+            .is_err()
+        );
     }
 
     #[test]
@@ -596,22 +590,19 @@ mod tests {
 
     #[test]
     fn legs_stream_rejects_empty_and_media_keeps_port_order() {
-        // 空集报因（禁静默全口）
-        assert!(build_filter_legs(ScopeSel::Media, IfaceKind::Loopback, Dir::Both, &[], &[]).is_err());
-        // Media out 每口一 filter，按输入序
-        let legs = build_filter_legs(
-            ScopeSel::Media,
-            IfaceKind::Loopback,
-            Dir::Out,
-            &[9, 3, 7],
-            &[],
-        )
-        .unwrap();
+        // empty set reports cause (never silently all ports)
+        assert!(
+            build_filter_legs(ScopeSel::Media, IfaceKind::Loopback, Dir::Both, &[], &[]).is_err()
+        );
+        // Media out: one filter per port, in input order
+        let legs =
+            build_filter_legs(ScopeSel::Media, IfaceKind::Loopback, Dir::Out, &[9, 3, 7], &[])
+                .unwrap();
         let ports: Vec<u16> = legs
             .iter()
             .map(|l| match l.matches.as_slice() {
                 [(MatchKind::Sport, p)] => *p,
-                other => panic!("期望单 sport match，得 {other:?}"),
+                other => panic!("expected a single sport match, got {other:?}"),
             })
             .collect();
         assert_eq!(ports, vec![9, 3, 7]);
@@ -619,7 +610,7 @@ mod tests {
 
     #[test]
     fn legs_device_uses_ordered_pair_and_like_stream() {
-        // rev-2.2：Device 与 Stream 同形——每对双 match AND，缺省空集报因
+        // rev-2.2: Device same shape as Stream -- dual-match AND per pair, empty set reports cause
         let legs = build_filter_legs(
             ScopeSel::Device,
             IfaceKind::Physical,
@@ -632,32 +623,41 @@ mod tests {
         assert_eq!(legs[0].matches, vec![(MatchKind::Sport, 40010), (MatchKind::Dport, 5000)]);
         assert_eq!(legs[1].matches, vec![(MatchKind::Sport, 5000), (MatchKind::Dport, 40010)]);
         assert_eq!(legs[3].matches, vec![(MatchKind::Sport, 5001), (MatchKind::Dport, 40010)]);
-        assert!(build_filter_legs(ScopeSel::Device, IfaceKind::Physical, Dir::Both, &[], &[]).is_err());
+        assert!(
+            build_filter_legs(ScopeSel::Device, IfaceKind::Physical, Dir::Both, &[], &[]).is_err()
+        );
     }
 
-    /// T12C 反锁死规则层钉（design §车端面①）：全部媒体腿 protocol 17 合取 +
-    /// 端口精确匹配（无通配形：match 非空、端口非 0、flowid 恒 1:10）——
-    /// TCP/SSH/DNS 结构性不进 netem 的 builder 层保证，vehicle netns e2e 另证行为面。
+    /// T12C anti-deadlock rule-layer pin (design §vehicle 1): all media legs with protocol 17 conjunction +
+    /// exact port matching (no wildcard shape: match non-empty, port non-0, flowid always 1:10) --
+    /// a builder-layer guarantee that TCP/SSH/DNS never enter netem; the vehicle netns e2e proves the behavior surface.
     #[test]
     fn legs_anti_lockout_pins_protocol_and_exact_ports() {
         for scope in [ScopeSel::Media, ScopeSel::Stream, ScopeSel::Device] {
             for dir in [Dir::Out, Dir::In, Dir::Both] {
                 for iface in [IfaceKind::Loopback, IfaceKind::Physical] {
-                    let legs = build_filter_legs(scope, iface, dir, &[40010, 40012], &[(40020, 5000)])
-                        .unwrap_or_else(|e| panic!("{scope:?}/{dir:?}/{iface:?}: {e}"));
+                    let legs =
+                        build_filter_legs(scope, iface, dir, &[40010, 40012], &[(40020, 5000)])
+                            .unwrap_or_else(|e| panic!("{scope:?}/{dir:?}/{iface:?}: {e}"));
                     assert!(!legs.is_empty());
                     for leg in &legs {
-                        assert_eq!(leg.protocol, UDP_PROTOCOL, "媒体腿必须 protocol 17（UDP）");
+                        assert_eq!(
+                            leg.protocol, UDP_PROTOCOL,
+                            "media legs must be protocol 17 (UDP)"
+                        );
                         assert_eq!(leg.flowid, MEDIA_FLOWID);
-                        assert!(!leg.matches.is_empty(), "禁空 match（通配形）");
+                        assert!(
+                            !leg.matches.is_empty(),
+                            "empty matches forbidden (wildcard shape)"
+                        );
                         for (kind, port) in &leg.matches {
-                            assert!(*port > 0, "端口 0 = 通配形，禁");
+                            assert!(*port > 0, "port 0 = wildcard shape, forbidden");
                             assert!(
                                 matches!(kind, MatchKind::Sport | MatchKind::Dport),
-                                "仅端口匹配维度（无地址/前缀形）"
+                                "port-match dimension only (no address/prefix shapes)"
                             );
                         }
-                        // 形状钉：Media=单 match（每口一腿）；Stream/Device=双 match AND
+                        // shape pin: Media = single match (one leg per port); Stream/Device = dual-match AND
                         match scope {
                             ScopeSel::Media => assert_eq!(leg.matches.len(), 1),
                             _ => assert_eq!(leg.matches.len(), 2),
@@ -665,7 +665,7 @@ mod tests {
                     }
                     if dir == Dir::Both {
                         let expect = if scope == ScopeSel::Media { 4 } else { 2 };
-                        assert_eq!(legs.len(), expect, "{scope:?} both 腿数");
+                        assert_eq!(legs.len(), expect, "{scope:?} both leg count");
                     }
                 }
             }

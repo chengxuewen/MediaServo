@@ -3,7 +3,7 @@ name = "mediaservo-field-c"
 build = "build.rs"
 version.workspace = true
 edition.workspace = true
-description = "MediaServo Field C ABI — ms_field_* opaque handle bindings (推流面)"
+description = "MediaServo Field C ABI — ms_field_* opaque handle bindings (push plane)"
 license.workspace = true
 
 [lib]

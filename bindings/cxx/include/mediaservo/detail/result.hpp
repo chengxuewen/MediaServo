@@ -1,17 +1,17 @@
-/* MediaServo 共享 C++ Result 类型 — 三 SDK 头文件的公共基座（D248 单一事实源）。
+/* MediaServo shared C++ Result type — the common foundation for the three SDK headers (the D248 single source of truth).
  *
- * mediaservo::Result<T> 为 tl::expected<T, Error> 的 alias（完全迁移，2026-08-18，
- * C++11 起步）——原生 API: has_value()/value()/error()/value_or()；无 operator bool；
- * 误用 value()/error() 抛 tl::bad_expected_access<Error>（std::exception 子类，
- * what() 为通用文案，细节经异常 .error().code/.message 获取）。
+ * mediaservo::Result<T> is an alias for tl::expected<T, Error> (fully migrated 2026-08-18,
+ * C++11 baseline) — native API: has_value()/value()/error()/value_or(); no operator bool;
+ * misusing value()/error() throws tl::bad_expected_access<Error> (a std::exception subclass;
+ * what() is generic text; details come from .error().code/.message on the exception).
  *
- * 契约变更声明（source-breaking）: 2026-08-18 前误用抛 std::logic_error（手写
- * variant 实现）；D241 仅锁 C ABI，C++ header API 无 ABI 承诺。catch(std::exception)
- * 兼容新旧两代。
+ * Contract change declaration (source-breaking): before 2026-08-18 misuse threw std::logic_error (the hand-written
+ * variant implementation); D241 pins only the C ABI, and the C++ header API carries no ABI promise. catch(std::exception)
+ * handles both the old and new generations.
  *
- * 未来 std::expected swap 路径: 编译器升 C++23 后，本文件两行 alias 改为
- * `template<typename T> using Result = std::expected<T, Error>;`（API 同构），
- * 契约测试（bindings/cxx/tests/test_result_common.cpp）为回归锚。
+ * Future std::expected swap path: once the compiler reaches C++23, change this file's two-line alias to
+ * `template<typename T> using Result = std::expected<T, Error>;` (same API shape),
+ * with the contract tests (bindings/cxx/tests/test_result_common.cpp) as the regression anchor.
  */
 #ifndef MEDIASERVO_RESULT_HPP
 #define MEDIASERVO_RESULT_HPP
@@ -23,13 +23,13 @@
 
 namespace mediaservo {
 
-/// 错误详情（code 为对应 SDK C 头 MEDIASERVO_<SDK>_ERR_* 值；message 读自 last_error）。
+/// Error details (code is the corresponding SDK C header's MEDIASERVO_<SDK>_ERR_* value; message read from last_error).
 ///
-/// S6 批1b 追加机读位（client 家族填充；link/deck/field 恒 0/false）：
-/// wire_code = server 线码回读（0=本地/无码域）；retryable = 可重试族
-/// （D273 分类的 C++ 镜像）。构造器形保持全部既有 `Error{code, msg}` 两参
-/// brace-init 源兼容且不触发 -Wmissing-field-initializers（C++11 起步编译面）；
-/// header-only 无 ABI 承诺（D241 仅锁 C ABI）。
+/// Machine-readable bits added in S6 batch 1b (filled by the client family; always 0/false for link/deck/field):
+/// wire_code = server wire-code readback (0 = local / no code domain); retryable = the retryable family
+/// (the C++ mirror of the D273 classification). The constructor keeps every existing two-argument `Error{code, msg}`
+/// brace-init source compatible and does not trigger -Wmissing-field-initializers (the C++11-baseline compile surface);
+/// header-only, no ABI promise (D241 pins only the C ABI).
 struct Error {
     int code;
     std::string message;
@@ -42,8 +42,8 @@ struct Error {
         : code(c), message(std::move(m)), wire_code(w), retryable(r) {}
 };
 
-/// 原生 tl::expected API（has_value()/value()/error()/value_or()，无 operator bool）。
-/// Result<void> 即 tl::expected<void, Error>（alias 对 T=void 直接实例化，无需特化）。
+/// Native tl::expected API (has_value()/value()/error()/value_or(), no operator bool).
+/// Result<void> is just tl::expected<void, Error> (the alias instantiates directly for T=void; no specialization needed).
 template <typename T>
 using Result = tl::expected<T, Error>;
 

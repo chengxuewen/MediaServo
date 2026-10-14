@@ -1,49 +1,49 @@
-# 16. Admin Dashboard — 管理控制台
+# 16. Admin Dashboard
 
-> 状态：Phase 4 设计 | 关联决策：D87, D136 Phase 1b | Phase 标签：plan.md Phase 4 (原 D136 Phase 1b)
+> Status: Phase 4 design | Related decisions: D87, D136 Phase 1b | Phase label: plan.md Phase 4 (formerly D136 Phase 1b)
 
-## 架构概览
+## Architecture Overview
 
-React 19 + Ant Design 5 SPA，通过 rust-embed 嵌入 Server 二进制。
+React 19 + Ant Design 5 SPA, embedded into the Server binary via rust-embed.
 
 ```
 ┌──────────────────────────────────────┐
 │  Server                              │
 │  ┌────────────────────────────────┐  │
 │  │  Gateway Component (:9800)     │  │
-│  │  /admin/api/* → REST → Admin  │  │
-│  │  /admin/*      → SPA fallback │  │
-│  │  /health       → Monitor      │  │
+│  │  /admin/api/* → REST → Admin   │  │
+│  │  /admin/*      → SPA fallback  │  │
+│  │  /health       → Monitor       │  │
 │  └────────────────────────────────┘  │
-│              │                        │
+│              │                       │
 │  ┌───────────▼────────────────────┐  │
 │  │  rust-embed: admin-ui/dist/    │  │
 │  └────────────────────────────────┘  │
 └──────────────────────────────────────┘
 ```
 
-## 技术栈
+## Technology Stack
 
-| 层 | 选型 | 说明 |
-|----|------|------|
-| 框架 | React 19 | D87 确认 |
-| 组件库 | Ant Design 5 | 企业级中后台标准 |
-| 构建 | Vite | 快速 HMR + tree-shaking |
-| 状态管理 | React Query (TanStack) | SWR 模式，自动缓存失效 |
-| 路由 | React Router v7 | SPA 路由 |
-| 嵌入 | rust-embed | 编译期嵌入 dist/ |
-| 认证 | JWT Bearer + Basic Auth fallback | D88 RBAC |
+| Layer | Choice | Notes |
+|-------|--------|-------|
+| Framework | React 19 | Confirmed by D87 |
+| Component library | Ant Design 5 | Enterprise admin-console standard |
+| Build | Vite | Fast HMR + tree-shaking |
+| State management | React Query (TanStack) | SWR pattern, automatic cache invalidation |
+| Routing | React Router v7 | SPA routing |
+| Embedding | rust-embed | Compile-time embedding of dist/ |
+| Auth | JWT Bearer + Basic Auth fallback | D88 RBAC |
 
-## 路由设计
+## Route Design
 
-| 路径 | 组件 | 权限 |
-|------|------|------|
-| `/` | Dashboard (仪表盘) | read |
-| `/rooms` | Rooms (会话列表) | read |
-| `/rooms/:id` | RoomDetail (会话详情) | read |
-| `/sessions` | SessionLog (事件日志) | read |
-| `/settings` | Settings (配置) | write |
-| `/login` | LoginPage (登录) | — |
+| Path | Component | Permission |
+|------|-----------|------------|
+| `/` | Dashboard | read |
+| `/rooms` | Rooms (session list) | read |
+| `/rooms/:id` | RoomDetail (session detail) | read |
+| `/sessions` | SessionLog (event log) | read |
+| `/settings` | Settings | write |
+| `/login` | LoginPage | — |
 
 ## Admin API Contract (JSON)
 
@@ -63,7 +63,7 @@ React 19 + Ant Design 5 SPA，通过 rust-embed 嵌入 Server 二进制。
 → { "token": "eyJ...", "expires_at": "..." }
 ```
 
-## Auth Guard 流
+## Auth Guard Flow
 
 ```
 User → LoginPage → POST /admin/api/auth/login → JWT token
@@ -71,27 +71,27 @@ User → LoginPage → POST /admin/api/auth/login → JWT token
      → 401 → redirect to /login
 ```
 
-## rust-embed 集成
+## rust-embed Integration
 
 - Vite build → `admin-ui/dist/`
-- Cargo build: `rust-embed` 宏嵌入 dist/ 到二进制
-- Gateway C7: `admin/*` 路由 → 静态文件 fallback (index.html)
+- Cargo build: the `rust-embed` macro embeds dist/ into the binary
+- Gateway C7: `admin/*` routes → static file fallback (index.html)
 
-## Phase 依赖
+## Phase Dependencies
 
-| 依赖 | Phase | 说明 |
-|------|-------|------|
-| Gateway Component (C7) | Phase 3 | 路由 + JWT middleware |
+| Dependency | Phase | Notes |
+|------------|-------|-------|
+| Gateway Component (C7) | Phase 3 | Routing + JWT middleware |
 | AuthComponent (C8) | Phase 3 | login/validate API |
 | MonitorComponent | Phase 3 | /health + stats |
-| SQLite (D89) | Phase 3 | 用户/会话持久化 |
+| SQLite (D89) | Phase 3 | User/session persistence |
 
-## 实施计划 (plan.md Phase 4)
+## Implementation Plan (plan.md Phase 4)
 
-- A1: Vite + React 脚手架
-- A2: 路由 + Auth Guard
-- A3: Ant Design 布局
+- A1: Vite + React scaffolding
+- A2: Routing + Auth Guard
+- A3: Ant Design layout
 - A4: Dashboard API
-- A5: Rooms 页面
-- A6: Sessions 页面
-- A7: Settings 页面
+- A5: Rooms page
+- A6: Sessions page
+- A7: Settings page

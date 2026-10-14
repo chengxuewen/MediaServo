@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# package e2e — dist/ 双包发布回归（D-H13）: host 包版本顶层目录断言 → 解包 doctor/start/status/stop
-# 冒烟 → SDK 包版本顶层目录关键文件断言 → 版本契约文件 → dist/ gitignore。C22: 宿主原生执行。
-# 前置: target/debug 8 host 二进制 + 3 SDK .so + node 绑定（缺失自动构建）。
+# package e2e — dist/ dual-package release regression (D-H13): host package versioned top-level dir asserts -> unpack
+# doctor/start/status/stop smoke -> SDK package versioned top-level dir key-file asserts -> version contract files -> dist/ gitignore. C22: runs natively on the host.
+# Prereq: the 8 host binaries in target/debug + 3 SDK .so + node binding (built automatically if missing).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -10,14 +10,14 @@ export PATH="$HOME/.pixi/bin:$PATH"
 FAIL=0
 note() { echo "== $1"; }
 
-# workspace 版本（与 mediaservo_cli.py _workspace_version 同源: Cargo.toml [workspace.package]）
-# V1a 后四源独立：现四值同数故读 workspace 仍正确；V1b 四包名化时必须改 per-target
-# 域读取（与 cli _TARGET_CRATE 表同源）——host 包验 host crate、sdk 包验 field crate。
+# Workspace version (same source as mediaservo_cli.py _workspace_version: Cargo.toml [workspace.package])
+# After V1a the four sources are independent: reading workspace is still correct while all four values match; when V1b
+# splits the four package names this must switch to per-target domain reads (same source as the cli _TARGET_CRATE table) — host package checks the host crate, sdk package checks the field crate.
 VER=$(sed -n '/\[workspace.package\]/,/^\[/p' Cargo.toml | sed -n 's/^version *= *"\(.*\)"/\1/p' | head -1)
-[ -n "$VER" ] || { echo "FAIL: 无法解析 workspace version"; exit 1; }
+[ -n "$VER" ] || { echo "FAIL: cannot resolve workspace version"; exit 1; }
 MAJOR=${VER%%.*}
 
-# ── 0. 前置构建（缺啥补啥, 与 e2e-deploy-host.sh 同模式）──────
+# ── 0. Prereq build (build whatever is missing, same pattern as e2e-deploy-host.sh) ──
 if [ ! -x target/debug/mediaservo-host ]; then
     note "building mediaservo-host (debug)"
     pixi run cargo build -p mediaservo-host
@@ -36,82 +36,82 @@ HOST_ROOT="mediaservo-host-$VER"
 SDK_TGZ="dist/mediaservo-sdk-$VER.tar.gz"
 SDK_ROOT="mediaservo-sdk-$VER"
 
-# ── 1. package host ─────────────────────────────────────────
+# ── 1. package host ─────────────────────────────────────
 note "package host (ver=$VER)"
 env MEDIASERVO_BRAND=mediaservo pixi run python3 scripts/mediaservo_cli.py package host
-[ -f "$HOST_TGZ" ] || { echo "FAIL: 缺少 $HOST_TGZ"; FAIL=1; }
+[ -f "$HOST_TGZ" ] || { echo "FAIL: missing $HOST_TGZ"; FAIL=1; }
 
-# ── 2. host 包内容断言（版本顶层目录 + D-H13 布局 + host-version.txt）────────
+# ── 2. host package content asserts (versioned top dir + D-H13 layout + host-version.txt) ────
 note "host tar contents"
 LIST=$(tar tzf "$HOST_TGZ" || true)
-[ -n "$LIST" ] || { echo "FAIL: $HOST_TGZ 无法读取"; FAIL=1; }
-echo "$LIST" | grep -q "^$HOST_ROOT/$" || { echo "FAIL: 包内缺版本顶层目录 $HOST_ROOT/"; FAIL=1; }
+[ -n "$LIST" ] || { echo "FAIL: cannot read $HOST_TGZ"; FAIL=1; }
+echo "$LIST" | grep -q "^$HOST_ROOT/$" || { echo "FAIL: package lacks versioned top dir $HOST_ROOT/"; FAIL=1; }
 for b in mediaservo-host host-agent host-capturer host-streamer host-recorder \
          host-controller host-emergency host-audio; do
-    echo "$LIST" | grep -q "^$HOST_ROOT/bin/$b$" || { echo "FAIL: 包内缺 $HOST_ROOT/bin/$b"; FAIL=1; }
+    echo "$LIST" | grep -q "^$HOST_ROOT/bin/$b$" || { echo "FAIL: package lacks $HOST_ROOT/bin/$b"; FAIL=1; }
 done
-# 根快捷（host + mediaservo-host）— bin/ 里是 mediaservo-host, 版本顶层目录根挂快捷
-echo "$LIST" | grep -q "^$HOST_ROOT/host$" || { echo "FAIL: 包内缺 $HOST_ROOT/host"; FAIL=1; }
-# oxmgr 条件断言（I2 review 修）: 打包时 PATH 有 oxmgr → 包内必须含 $HOST_ROOT/bin/oxmgr;
-# 环境缺 oxmgr → install 未打包（cli 明确报错）, 跳过并说明
+# Root shortcuts (host + mediaservo-host) — bin/ holds mediaservo-host; shortcuts hang at the versioned top-dir root
+echo "$LIST" | grep -q "^$HOST_ROOT/host$" || { echo "FAIL: package lacks $HOST_ROOT/host"; FAIL=1; }
+# Conditional oxmgr assert (fixed in I2 review): oxmgr on PATH at packaging time → package must contain $HOST_ROOT/bin/oxmgr;
+# environment without oxmgr → not packaged (cli errors explicitly), skip and explain
 if command -v oxmgr >/dev/null 2>&1; then
-    echo "$LIST" | grep -q "^$HOST_ROOT/bin/oxmgr$" || { echo "FAIL: PATH 有 oxmgr 但包内缺 $HOST_ROOT/bin/oxmgr"; FAIL=1; }
+    echo "$LIST" | grep -q "^$HOST_ROOT/bin/oxmgr$" || { echo "FAIL: oxmgr on PATH but package lacks $HOST_ROOT/bin/oxmgr"; FAIL=1; }
 else
-    echo "NOTE: PATH 无 oxmgr — 跳过 bin/oxmgr 断言（deploy host 未打包, doctor 预期报错）"
+    echo "NOTE: no oxmgr on PATH — skipping the bin/oxmgr assert (deploy host did not package it; doctor failure expected)"
 fi
 for f in etc/host.yaml etc/link/signing.pem etc/link/cam0.token etc/link/cam0-stream-stream.token \
          etc/link/recorder.token etc/link/agent.token etc/link/ros_bridge.yaml \
          etc/link/issuance.jsonl identity.json host-version.txt CHANGES.md; do
-    echo "$LIST" | grep -q "^$HOST_ROOT/$f$" || { echo "FAIL: 包内缺 $HOST_ROOT/$f"; FAIL=1; }
+    echo "$LIST" | grep -q "^$HOST_ROOT/$f$" || { echo "FAIL: package lacks $HOST_ROOT/$f"; FAIL=1; }
 done
-echo "$LIST" | grep -q "^$HOST_ROOT/run/logs/$" || { echo "FAIL: 包内缺 $HOST_ROOT/run/logs/"; FAIL=1; }
-echo "$LIST" | grep -q "^$HOST_ROOT/recordings/$" || { echo "FAIL: 包内缺 $HOST_ROOT/recordings/"; FAIL=1; }
-echo "OK: host 包布局完整（版本顶层目录 $HOST_ROOT/ + bin 8 + oxmgr + etc/link 凭据 + run/logs + recordings + identity.json + host-version.txt）"
+echo "$LIST" | grep -q "^$HOST_ROOT/run/logs/$" || { echo "FAIL: package lacks $HOST_ROOT/run/logs/"; FAIL=1; }
+echo "$LIST" | grep -q "^$HOST_ROOT/recordings/$" || { echo "FAIL: package lacks $HOST_ROOT/recordings/"; FAIL=1; }
+echo "OK: host package layout complete (versioned top dir $HOST_ROOT/ + bin 8 + oxmgr + etc/link credentials + run/logs + recordings + identity.json + host-version.txt)"
 
-# ── 3. 解包到干净目录 → doctor + start/status/stop 冒烟 ──────
+# ── 3. extract to a clean dir → doctor + start/status/stop smoke ──────
 note "extract + smoke"
 mkdir -p "$TMP/extract"
 tar xzf "$HOST_TGZ" -C "$TMP/extract"
 PKG_DIR="$TMP/extract/$HOST_ROOT"
 BIN="$PKG_DIR/bin"
 if [ ! -d "$PKG_DIR" ]; then
-    echo "FAIL: 解包后缺版本顶层目录 $PKG_DIR"; FAIL=1
+    echo "FAIL: versioned top dir missing after extraction: $PKG_DIR"; FAIL=1
 elif [ ! -x "$BIN/mediaservo-host" ]; then
-    echo "FAIL: 解包后缺可执行 $BIN/mediaservo-host"; FAIL=1
+    echo "FAIL: executable missing after extraction: $BIN/mediaservo-host"; FAIL=1
 else
-    echo "OK: host tar 解包生成版本顶层目录 $HOST_ROOT/"
+    echo "OK: host tar extracts to a versioned top dir $HOST_ROOT/"
 fi
 if command -v oxmgr >/dev/null 2>&1 && [ -x "$BIN/mediaservo-host" ]; then
     out=$(env MEDIASERVO_BRAND=mediaservo PATH="$BIN:$PATH" "$BIN/mediaservo-host" doctor "$PKG_DIR" 2>&1 || true)
-    echo "$out" | grep -q "全部通过" || { echo "FAIL: 解包后 doctor 未全过"; echo "$out" | tail -8; FAIL=1; }
-    rm -rf /tmp/iceoryx2 /dev/shm/iox2_*   # C25: 清 iceoryx2 残留
+    echo "$out" | grep -q "all checks passed" || { echo "FAIL: doctor not all-passed after extraction"; echo "$out" | tail -8; FAIL=1; }
+    rm -rf /tmp/iceoryx2 /dev/shm/iox2_*   # C25: clear iceoryx2 residue
     out=$(env MEDIASERVO_BRAND=mediaservo PATH="$BIN:$PATH" "$BIN/mediaservo-host" start "$PKG_DIR" 2>&1 || true)
-    if ! echo "$out" | grep -q "已启动\|started\|start"; then
-        echo "FAIL: 解包后 host start"; echo "$out" | tail -8; FAIL=1
+    if ! echo "$out" | grep -q "start"; then
+        echo "FAIL: host start after extraction"; echo "$out" | tail -8; FAIL=1
     fi
     sleep 4
     out=$(env MEDIASERVO_BRAND=mediaservo PATH="$BIN:$PATH" "$BIN/mediaservo-host" status "$PKG_DIR" 2>&1 || true)
-    echo "$out" | grep -q "host-agent" || { echo "FAIL: status 无 host-agent"; echo "$out" | tail -8; FAIL=1; }
+    echo "$out" | grep -q "host-agent" || { echo "FAIL: no host-agent in status"; echo "$out" | tail -8; FAIL=1; }
     out=$(env MEDIASERVO_BRAND=mediaservo PATH="$BIN:$PATH" "$BIN/mediaservo-host" stop "$PKG_DIR" 2>&1 || true)
-    if ! echo "$out" | grep -q "已停止\|stopped\|stop"; then
+    if ! echo "$out" | grep -q "stop"; then
         echo "FAIL: host stop"; echo "$out" | tail -8; FAIL=1
     fi
     out=$(env MEDIASERVO_BRAND=mediaservo PATH="$BIN:$PATH" "$BIN/mediaservo-host" status "$PKG_DIR" 2>&1 || true)
-    echo "$out" | grep -q "无已管理进程" || { echo "FAIL: stop 后仍有进程"; echo "$out" | tail -8; FAIL=1; }
-    echo "OK: 解包后 doctor → start(host-agent) → stop 冒烟通过"
+    echo "$out" | grep -q "no managed processes" || { echo "FAIL: processes still remain after stop"; echo "$out" | tail -8; FAIL=1; }
+    echo "OK: post-extraction doctor → start(host-agent) → stop smoke passed"
 else
-    echo "NOTE: PATH 无 oxmgr — 跳过 host doctor/start/status/stop 运行冒烟"
+    echo "NOTE: no oxmgr on PATH — skipping the host doctor/start/status/stop runtime smoke"
 fi
 
-# ── 4. package bindings ─────────────────────────────────────
+# ── 4. package bindings ──────────────────────────────
 note "package bindings (ver=$VER)"
 env MEDIASERVO_BRAND=mediaservo pixi run python3 scripts/mediaservo_cli.py package bindings
-[ -f "$SDK_TGZ" ] || { echo "FAIL: 缺少 $SDK_TGZ"; FAIL=1; }
+[ -f "$SDK_TGZ" ] || { echo "FAIL: missing $SDK_TGZ"; FAIL=1; }
 
-# ── 5. SDK 包关键文件断言 ────────────────────────────────────
+# ── 5. SDK package key-file asserts ────────────────────────
 note "sdk tar contents"
 LIST=$(tar tzf "$SDK_TGZ" || true)
-[ -n "$LIST" ] || { echo "FAIL: $SDK_TGZ 无法读取"; FAIL=1; }
+[ -n "$LIST" ] || { echo "FAIL: cannot read $SDK_TGZ"; FAIL=1; }
 MINOR=$(echo "$VER" | cut -d. -f2); PATCH=$(echo "$VER" | cut -d. -f3)
 for f in \
     lib/libmediaservo_field.so.$MAJOR.$MINOR.$PATCH \
@@ -127,17 +127,17 @@ for f in \
     node/mediaservo/package.json node/mediaservo/mediaservo.node node/mediaservo/lib/index.mjs \
     docs/sdk-cxx/field.md docs/sdk-cxx/link.md docs/sdk-cxx/deck.md \
     sdk-version.txt manifest.json CHANGES.md; do
-    echo "$LIST" | grep -q "^$SDK_ROOT/$f$" || { echo "FAIL: SDK 包缺 $f"; FAIL=1; }
+    echo "$LIST" | grep -q "^$SDK_ROOT/$f$" || { echo "FAIL: SDK package lacks $f"; FAIL=1; }
 done
-echo "$LIST" | grep -qE "^$SDK_ROOT/lib/python3\.[0-9]+/site-packages/mediaservo/" || { echo "FAIL: SDK 包缺 python 包"; FAIL=1; }
-echo "$LIST" | grep -qE "^$SDK_ROOT/wheel/mediaservo-.*\.whl$" || { echo "FAIL: SDK 包缺 wheel"; FAIL=1; }
-echo "$LIST" | grep -q "^$SDK_ROOT/docs/sdk-cxx/client.md$" && { echo "FAIL: sdk-field 包混入舱端面文档"; FAIL=1; }
-echo "OK: SDK 包关键文件完整（版本顶层目录 $SDK_ROOT/ + lib 三件套实体+符号链接 + include + python + wheel + node + .pc + cmake + sdk-version.txt）"
+echo "$LIST" | grep -qE "^$SDK_ROOT/lib/python3\.[0-9]+/site-packages/mediaservo/" || { echo "FAIL: SDK package lacks the python package"; FAIL=1; }
+echo "$LIST" | grep -qE "^$SDK_ROOT/wheel/mediaservo-.*\.whl$" || { echo "FAIL: SDK package lacks the wheel"; FAIL=1; }
+echo "$LIST" | grep -q "^$SDK_ROOT/docs/sdk-cxx/client.md$" && { echo "FAIL: sdk-field package polluted by cockpit-side docs"; FAIL=1; }
+echo "OK: SDK package key files complete (versioned top dir $SDK_ROOT/ + lib triplet real files+symlinks + include + python + wheel + node + .pc + cmake + sdk-version.txt)"
 
-# ── V1b 舱端半区包（sdk-client 独立形态）──
-"$MSRTC_CLI" package sdk-client --dist "$TMP/dist" >/dev/null 2>&1 || { echo "FAIL: package sdk-client 失败"; exit 1; }
+# ── V1b cockpit-half package (sdk-client standalone form) ──
+"$MSRTC_CLI" package sdk-client --dist "$TMP/dist" >/dev/null 2>&1 || { echo "FAIL: package sdk-client failed"; exit 1; }
 CLI_TGZ=$(ls "$TMP/dist"/mediaservo-sdk-client-*.tar.gz | head -1)
-[ -n "$CLI_TGZ" ] || { echo "FAIL: sdk-client tar 未生成"; exit 1; }
+[ -n "$CLI_TGZ" ] || { echo "FAIL: sdk-client tar not generated"; exit 1; }
 CLI_ROOT=$(tar tzf "$CLI_TGZ" | head -1 | cut -d/ -f1)
 tar tzf "$CLI_TGZ" > "$TMP/cli-list.txt"
 for f in lib/libmediaservo_client.so "lib/libmediaservo_client.so.$MAJOR" \
@@ -145,13 +145,13 @@ for f in lib/libmediaservo_client.so "lib/libmediaservo_client.so.$MAJOR" \
          lib/pkgconfig/mediaservo-client.pc lib/cmake/mediaservo/mediaservoConfig.cmake \
          docs/sdk-cxx/client.md \
          sdk-client-version.txt CHANGES.md; do
-    grep -q "^$CLI_ROOT/$f$" "$TMP/cli-list.txt" || { echo "FAIL: sdk-client 包缺 $f"; FAIL=1; }
+    grep -q "^$CLI_ROOT/$f$" "$TMP/cli-list.txt" || { echo "FAIL: sdk-client package lacks $f"; FAIL=1; }
 done
-grep -qE "libmediaservo_(field|link|deck)" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client 包混入设备面 lib"; FAIL=1; }
-grep -q "site-packages" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client 包混入 python 设备面"; FAIL=1; }
-grep -qE "^$CLI_ROOT/docs/sdk-cxx/(field|link|deck).md$" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client 包混入设备面文档"; FAIL=1; }
-echo "OK: sdk-client 半区包成型（client-only + 零设备面混入）"
-# N2 manifest 内容抽查：client 包 components 唯一且 ffmpeg=false（读elf实据形）
+grep -qE "libmediaservo_(field|link|deck)" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client package polluted by device-side libs"; FAIL=1; }
+grep -q "site-packages" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client package polluted by the python device side"; FAIL=1; }
+grep -qE "^$CLI_ROOT/docs/sdk-cxx/(field|link|deck).md$" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client package polluted by device-side docs"; FAIL=1; }
+echo "OK: sdk-client half-package shaped (client-only + zero device-side contamination)"
+# N2 manifest content spot-check: the client package lists exactly one cmake component and ffmpeg=false (readelf-backed)
 tar xzf "$CLI_TGZ" -C "$TMP/cli" "$CLI_ROOT/manifest.json" 2>/dev/null
 python3 - "$TMP/cli/$CLI_ROOT/manifest.json" <<'PYV'
 import json, sys
@@ -160,31 +160,31 @@ assert d["package"] == "sdk-client" and d["schema"] == 1
 c = [x for x in d["components"] if "cmake_component" in x]
 assert [x["cmake_component"] for x in c] == ["client"], c
 assert c[0]["requires_ffmpeg"] in (False, None), c
-assert d["protocol"]["frame_meta_wire_version"] == 0, "wire 版本必须=源生成实值"
-print("OK: manifest.json 内容对账（client-only/ffmpeg 实据/wire=0）")
+assert d["protocol"]["frame_meta_wire_version"] == 0, "wire version must equal the generated source value"
+print("OK: manifest.json content reconciled (client-only / ffmpeg evidence / wire=0)")
 PYV
 
-# ── 6. 版本契约文件内容（D-H14 最小版: workspace + FrameMeta wire 版本）──
+# ── 6. Version contract file content (D-H14 minimal: workspace + FrameMeta wire version) ──
 note "version contract file"
 mkdir -p "$TMP/sdk"
 tar xzf "$SDK_TGZ" -C "$TMP/sdk" "$SDK_ROOT/sdk-version.txt"
-grep -q "workspace_version: $VER" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt 缺 workspace_version=$VER"; FAIL=1; }
+grep -q "workspace_version: $VER" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt lacks workspace_version=$VER"; FAIL=1; }
 FW=$(grep -oE "pub const WIRE_VERSION: u8 = [0-9]+" crates/mediaservo-link/src/frame.rs | grep -oE "[0-9]+$")
-grep -q "^frame_meta_version: $FW$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt frame_meta_version != 源实值 $FW（漂浮号钉）"; FAIL=1; }
+grep -q "^frame_meta_version: $FW$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt frame_meta_version != source value $FW (floating-number pin)"; FAIL=1; }
 TV=$(grep -oE "pub const VERSION: u8 = [0-9]+" crates/mediaservo-link/src/token.rs | grep -oE "[0-9]+$")
-grep -q "^token_schema_version: $TV$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: token_schema_version != 源实值 $TV（漂浮号钉）"; FAIL=1; }
-grep -q "^token_schema_version: 1$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt 缺 token_schema_version"; FAIL=1; }
-grep -q "workspace_version: $VER" <(tar xzf "$HOST_TGZ" -O "$HOST_ROOT/host-version.txt") || { echo "FAIL: host-version.txt 缺 workspace_version=$VER"; FAIL=1; }
-echo "OK: 版本契约文件（host-version.txt + sdk-version.txt）内容正确"
+grep -q "^token_schema_version: $TV$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: token_schema_version != source value $TV (floating-number pin)"; FAIL=1; }
+grep -q "^token_schema_version: 1$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt lacks token_schema_version"; FAIL=1; }
+grep -q "workspace_version: $VER" <(tar xzf "$HOST_TGZ" -O "$HOST_ROOT/host-version.txt") || { echo "FAIL: host-version.txt lacks workspace_version=$VER"; FAIL=1; }
+echo "OK: version contract files (host-version.txt + sdk-version.txt) content correct"
 
-# ── 7. dist/ gitignore ──────────────────────────────────────
+# ── 7. dist/ gitignore ──────────────────────────────
 note "dist/ gitignore"
-git check-ignore dist/ >/dev/null || { echo "FAIL: dist/ 未被 gitignore"; FAIL=1; }
-echo "OK: dist/ 已 gitignore"
+git check-ignore dist/ >/dev/null || { echo "FAIL: dist/ is not gitignored"; FAIL=1; }
+echo "OK: dist/ is gitignored"
 
 echo
 if [ "$FAIL" = 0 ]; then
-    echo "PASS: package e2e 全绿（$HOST_TGZ + $SDK_TGZ）"
+    echo "PASS: package e2e all green ($HOST_TGZ + $SDK_TGZ)"
 else
-    echo "FAIL: $FAIL 项失败"; exit 1
+    echo "FAIL: $FAIL checks failed"; exit 1
 fi

@@ -24,7 +24,7 @@ test.describe('Admin Layout', () => {
 
 test.describe('Dashboard Page', () => {
   test('shows dashboard content on load', async ({ page }) => {
-    // storageState（global-setup 登录）提供 admin token — PIT-103 鉴权后仍需登录态。
+    // storageState (global-setup login) provides the admin token — PIT-103: a signed-in state is still required after auth.
     await page.goto('/');
     await page.goto('/');
     // The dashboard shows "No active devices" when empty, or stats cards when live

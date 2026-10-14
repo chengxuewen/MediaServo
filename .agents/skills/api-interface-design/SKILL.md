@@ -207,32 +207,32 @@ No circular dependencies. The protocol crate has zero internal deps.
 
 ---
 
-## Hyrum's Law（海勒姆定律）
+## Hyrum's Law
 
 > With a sufficient number of users of an API, it does not matter what you promise in the contract: all observable behaviors of your system will be depended on by somebody.
 >
 > — Hyrum Wright, Google
 
-**每一个可观察行为都会成为事实契约。** 在 MediaServo 中这尤其重要：
+**Every observable behavior becomes a de-facto contract.** This is especially important in MediaServo:
 
-| 边界 | 可观察行为（隐性契约） | 防护 |
+| Boundary | Observable behavior (implicit contract) | Guard |
 |------|----------------------|------|
-| WS 协议 | 消息顺序、字段出现时机、连接重试间隔 | E2E 脚本固化行为 → 改了就跑不过 |
-| Rust trait | 方法调用顺序、Send/Sync 实现、错误类型 | `#[non_exhaustive]` + 默认实现 |
-| REST API | 响应时间（~P50）、JSON key 排序、空数组 vs null | OpenAPI spec 锁定 contract |
-| Cargo features | 哪些 crate 依赖哪些 feature 组合 | CI matrix 测试所有组合 |
+| WS protocol | message ordering, field-appearance timing, connection retry interval | E2E scripts pin the behavior → a change fails the run |
+| Rust trait | method call order, Send/Sync impls, error types | `#[non_exhaustive]` + default impls |
+| REST API | response time (~P50), JSON key ordering, empty array vs null | OpenAPI spec locks the contract |
+| Cargo features | which crates depend on which feature combos | CI matrix tests all combos |
 
-**原则**: API 改了用户就会断 — 无论你是否认为那是"内部细节"。做加法，不做减法。
+**Principle**: change the API and users break — whether or not you consider it an "internal detail". Add, never subtract.
 
 ---
 
-## One-Version Rule（唯一版本规则）
+## One-Version Rule
 
 > In a crate workspace, every dependency should resolve to exactly one semver-incompatible version. Never allow diamond dependencies.
 
-### 本项目约束
+### Project constraints
 
-MediaServo 是 7 crate workspace：
+MediaServo is a 7-crate workspace:
 
 ```
 mediaservo-common  ← leaf, no workspace deps
@@ -242,24 +242,24 @@ mediaservo-media / mediaservo-codec / mediaservo-webrtc
 mediaservo-host / mediaservo-client / mediaservo-server
 ```
 
-规则：
+Rules:
 
-| 规则 | 原因 |
+| Rule | Why |
 |------|------|
-| 所有 workspace crates 使用同一个 `[workspace.dependencies]` 版本 | 避免 `serde 1.0` vs `serde 2.0` 同时链接 |
-| 禁止 `[dependencies]` 中写具体版本号 | 版本号只在 workspace root `Cargo.toml` 定义 |
-| 新增外部依赖前检查 `cargo tree -d` | 确认不引入重复（duplicate）依赖 |
-| 第三方 crate 版本升级必须全 workspace 一致 | 升级 `tokio` 就全 workspace 一起升 |
+| All workspace crates use the single `[workspace.dependencies]` version set | avoid linking `serde 1.0` and `serde 2.0` together |
+| No concrete version numbers inside `[dependencies]` | versions are defined only in the workspace root `Cargo.toml` |
+| Check `cargo tree -d` before adding an external dependency | confirm no duplicate dependencies are introduced |
+| Third-party crate upgrades must be workspace-wide | upgrading `tokio` means upgrading it for the whole workspace |
 
-**检查命令**: `cargo tree -d --workspace` — 空输出 = 通过。
+**Check command**: `cargo tree -d --workspace` — empty output = pass.
 
 ---
 
-## Branded Type IDs（品牌化类型 ID）
+## Branded Type IDs
 
 > Use wrapper types instead of raw `String`/`u64` for domain identifiers to prevent accidental misuse at the type level.
 
-### 模式
+### Pattern
 
 ```rust
 // ✅ CORRECT: branded types — no accidental RoomId → PeerId swap
@@ -273,7 +273,7 @@ pub struct PeerId(String);
 pub struct TransportId(String);
 
 fn connect(room: RoomId, peer: PeerId, transport: TransportId) { /* ... */ }
-// RoomId, PeerId, TransportId 不能互换 — 编译器阻止误用
+// RoomId, PeerId, TransportId cannot be swapped — the compiler prevents misuse
 ```
 
 ```rust
@@ -281,17 +281,17 @@ fn connect(room: RoomId, peer: PeerId, transport: TransportId) { /* ... */ }
 fn connect(room_id: String, peer_id: String, transport_id: String) { /* ... */ }
 ```
 
-### 收益
+### Benefits
 
-| 无品牌化 | 品牌化 |
+| Without branding | With branding |
 |----------|--------|
-| `fn route(room_id: String, peer_id: String)` — 传反静默出错 | `fn route(room_id: RoomId, peer_id: PeerId)` — 编译器拒绝 |
-| `HashMap<String, Transport>` — key 模糊 | `HashMap<TransportId, Transport>` — key 明确 |
-| 序列化时 ID 语义丢失 | Display/Serialize 保留类型语义 |
+| `fn route(room_id: String, peer_id: String)` — swapped args fail silently | `fn route(room_id: RoomId, peer_id: PeerId)` — compiler rejects |
+| `HashMap<String, Transport>` — ambiguous key | `HashMap<TransportId, Transport>` — explicit key |
+| ID semantics lost during serialization | Display/Serialize retain type semantics |
 
-### 本项目约定
+### Project convention
 
-MediaServo 关键 ID 类型（推荐品牌化）：
+Key MediaServo ID types (branding recommended):
 
 ```
 mediaservo-common/src/protocol.rs:  RoomId, PeerId, SessionId
@@ -299,4 +299,4 @@ mediaservo-media/src/engine/:      StreamId, TrackId
 mediaservo-server/src/sfu/:        TransportId, ProducerId, ConsumerId
 ```
 
-> **ponytail**: 仅对跨模块传递的 ID 做品牌化。内部一次性局部变量不需要。
+> **ponytail**: Only brand IDs that cross module boundaries. Throwaway internal locals don't need it.

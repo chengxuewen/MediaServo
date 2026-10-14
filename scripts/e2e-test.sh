@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E2E verification: Host -> Docker Server -> Client video flow
-# 用法: bash scripts/e2e-test.sh [--legacy]
-#   --legacy: 回退旧单进程 host-legacy（P2P 信令断言）; 默认多进程 host（C4: capturer+streamer, oxmgr）
+# Usage: bash scripts/e2e-test.sh [--legacy]
+#   --legacy: fall back to the old single-process host-legacy (P2P signaling asserts); default: multi-process host (C4: capturer+streamer, oxmgr)
 set -u
 
 HOST_PID=""
@@ -20,7 +20,7 @@ cleanup() {
     kill $HOST_PID 2>/dev/null || true
     kill $CLIENT_PID 2>/dev/null || true
     if [ -z "$HOST_PID" ] && [ -z "$LEGACY" ]; then
-        # 多进程 host: oxmgr 管理——手动停止（CLI stop host 已移除 D266）
+        # Multi-process host: managed by oxmgr — stop manually (CLI stop host removed, D266)
         target/debug/mediaservo-host stop . 2>/dev/null || true
     fi
     echo ""
@@ -64,7 +64,7 @@ if [ -n "$LEGACY" ]; then
         [ $i -eq 4 ] && { fail "Host connect timeout"; head -10 "$TMPDIR/host.log"; }
     done
 else
-    # 多进程: 内联四步（CLI start host 已移除 D266）——清残留 → init → token → start（oxmgr; 日志 ~/.local/share/oxmgr/logs）
+    # Multi-process: four inline steps (CLI start host removed, D266) — clear residue → init → token → start (oxmgr; logs in ~/.local/share/oxmgr/logs)
     rm -rf /tmp/iceoryx2
     rm -f /dev/shm/iox2_* 2>/dev/null || true
     target/debug/mediaservo-host init . >/dev/null 2>&1 || true
@@ -74,7 +74,7 @@ else
     info "streamer log: $OXLOG"
     for i in 1 2 3 4 5 6; do
         sleep 5
-        # SFU produce 证据（D4 模式）: bytes_sent>0 = server 已收帧（capturer→FrameBus→streamer 全链路）
+        # SFU produce evidence (D4 mode): bytes_sent>0 = server received frames (full capturer→FrameBus→streamer chain)
         if grep -q "streamer stats: bytes_sent=[1-9]" "$OXLOG" 2>/dev/null; then
             pass "Host producing (capturer+streamer, bytes_sent>0)"
             grep "streamer stats:" "$OXLOG" | tail -1
@@ -99,7 +99,7 @@ for i in 1 2 3 4; do
     [ $i -eq 4 ] && { fail "Client connect timeout"; head -10 "$TMPDIR/client.log"; }
 done
 
-# 5. SDP exchange（多进程 host 无 P2P 信令 — SDP 断言仅 legacy）
+# 5. SDP exchange (multi-process host has no P2P signaling — SDP asserts are legacy-only)
 info "5. SDP exchange..."
 if [ -n "$LEGACY" ]; then
     sleep 5
@@ -109,7 +109,7 @@ fi
 grep -qi "Sdp\|SDP\|offer\|answer" "$TMPDIR/client.log" 2>/dev/null && \
     pass "Client SDP" || fail "Client SDP"
 
-# 6. Data channel（多进程 host 无 P2P DC — DC 断言仅 legacy）
+# 6. Data channel (multi-process host has no P2P DC — DC asserts are legacy-only)
 info "6. Data channel..."
 if [ -n "$LEGACY" ]; then
     sleep 5

@@ -1,4 +1,4 @@
-//! 观测: PullSession subscribe 后监控 inbound RTP（bytes_received 增长验证）
+//! Observe: monitor inbound RTP after PullSession subscribe (verify bytes_received growth)
 #![cfg(target_os = "linux")]
 use std::time::Duration;
 
@@ -17,7 +17,7 @@ async fn main() {
     let psk = std::env::var("SFU_E2E_PSK").expect("SFU_E2E_PSK");
     let room = format!("pull-obs-{}", std::process::id());
 
-    // Pull 先入房
+    // Pull joins the room first
     let pull_cfg = PullConfig {
         url: url.clone(),
         psk: psk.clone(),
@@ -28,13 +28,13 @@ async fn main() {
     let (mut pull, mut pull_events) =
         PullSession::connect(pull_cfg.clone()).await.expect("pull connect");
 
-    // Push publish + 帧
+    // Push publish + frames
     let push_cfg = PushConfig::new(url, psk, room);
     let (mut push, _pe) = PushSession::connect(push_cfg.clone()).await.expect("push connect");
     let _ = push.publish_video(&push_cfg, &PublishOptions::default()).await.expect("publish");
     push.start_video_frames(&push_cfg).expect("frames");
 
-    // 等 NewProducer
+    // Wait for NewProducer
     let producer_id = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             match pull_events.recv().await {
@@ -56,7 +56,7 @@ async fn main() {
             .expect("subscribe failed");
     println!("subscribed to {producer_id}");
 
-    // 监控: 每 1s 打点（确认进程存活 + server 转发持续）
+    // Monitor: log a line every 1s (confirm the process is alive + server forwarding continues)
     let pc = pull.peer_connection().expect("pc");
     for i in 0..60 {
         tokio::time::sleep(Duration::from_secs(1)).await;

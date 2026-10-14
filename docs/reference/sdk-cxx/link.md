@@ -1,157 +1,161 @@
-# MediaServo link C++ SDK 手册（设备侧 IPC：信令 + 帧总线）
+# MediaServo link C++ SDK Manual (Device-Side IPC: Signaling + Frame Bus)
 
-> 状态: active · 2026-09-23 · 事实源 = `bindings/cxx/mediaservo-link-cxx/include/mediaservo/link.hpp`
-> 与 `bindings/c/mediaservo-link-c/include/mediaservo/link.h`（12 函数 C 面，本文逐名核对）
+> Status: active · 2026-09-23 · Source of truth = `bindings/cxx/mediaservo-link-cxx/include/mediaservo/link.hpp`
+> and `bindings/c/mediaservo-link-c/include/mediaservo/link.h` (the 12-function C face; cross-checked name by name)
 
-## 1. 定位与适用场景
+## 1. Positioning & Applicable Scenarios
 
-`mediaservo::link`（C++ header-only RAII 绑定，over `mediaservo_link_*` C ABI）是**设备侧
-IPC SDK**，覆盖两条独立能力：
+`mediaservo::link` (a C++ header-only RAII binding over the `mediaservo_link_*` C ABI) is the
+**device-side IPC SDK**, covering two independent capabilities:
 
-- **信令会话**（`SignalSession`）：WebSocket 连 mediaservo-server（默认 :9800 `/ws`），
-  PSK 认证 + 房间收发 `SignalingMessage`（JSON）。
-- **帧总线**（`Bus` / `Stream`）：iceoryx2 共享内存 FrameBus 的进程间 publish/subscribe，
-  Ed25519 能力令牌（JWT）验签 + ACL 裁决，同机多进程零拷贝传帧（如 host-agent → host-streamer）。
+- **Signaling sessions** (`SignalSession`): a WebSocket connection to mediaservo-server (default :9800 `/ws`),
+  PSK auth + room join, sending/receiving `SignalingMessage` (JSON).
+- **Frame bus** (`Bus` / `Stream`): inter-process publish/subscribe over the iceoryx2 shared-memory FrameBus,
+  Ed25519 capability-token (JWT) verification + ACL adjudication, zero-copy frame passing across same-machine
+  processes (e.g. host-agent → host-streamer).
 
-典型场景：
+Typical scenarios:
 
-| 场景 | 用法 |
-|------|------|
-| 车端/设备推流侧信令 | `SignalSession::connect`（role=Pusher）→ `on_event` 事件泵 → `send` |
-| 同机帧分发 | 采集进程 `Bus::publish` → 编码/推流进程 `Bus::subscribe` + `Stream::recv` |
-| 三方设备接入 | 直接用 C ABI（`link.h`），或本 header-only C++ 面 |
+| Scenario | Usage |
+|----------|-------|
+| Vehicle/device push-side signaling | `SignalSession::connect` (role=Pusher) → the `on_event` event pump → `send` |
+| Same-machine frame distribution | the capture process `Bus::publish` → the encode/push process `Bus::subscribe` + `Stream::recv` |
+| Third-party device integration | use the C ABI (`link.h`) directly, or this header-only C++ face |
 
-不适用：网络媒体传输（WebRTC/SFU 消费在 `mediaservo::client`）、编解码/采集（`mediaservo::deck`、
-`mediaservo::field`）。link 只管"信令到 server"与"帧在同机进程间"。
+Not applicable: network media transport (WebRTC/SFU consumption lives in `mediaservo::client`),
+codec/capture (`mediaservo::deck`, `mediaservo::field`). link handles only "signaling to the server"
+and "frames between same-machine processes".
 
-## 2. 原理与架构
+## 2. Principles & Architecture
 
-三层结构：C++ RAII 薄层（header-only，零编译）→ C ABI 稳定面（12 符号，`extern "C"`）→
-Rust `mediaservo-link` crate（cdylib `libmediaservo_link.so`）。
+Three layers: the C++ RAII thin layer (header-only, zero compilation) → the stable C ABI face
+(12 symbols, `extern "C"`) → the Rust `mediaservo-link` crate (the cdylib `libmediaservo_link.so`).
 
 ```mermaid
 flowchart LR
-    APP[设备侧应用 C++11/C++17]
-    subgraph CXX[cxx 层 header-only]
+    APP[Device-side application C++11/C++17]
+    subgraph CXX[cxx layer, header-only]
         H[mediaservo/link.hpp<br/>SignalSession / Bus / Stream<br/>Result&lt;T&gt; = tl::expected&lt;T, Error&gt;]
     end
     subgraph CAB[bindings/c/mediaservo-link-c]
-        C[link.h 12 符号 mediaservo_link_*<br/>opaque handle + struct_size 门 R3<br/>+ last_error 全局错误槽]
+        C[link.h 12 symbols mediaservo_link_*<br/>opaque handle + struct_size gate R3<br/>+ last_error global error slot]
     end
     subgraph RS[Rust crates/mediaservo-link]
         SIG[signal.rs<br/>SignalClient/SignalSession]
         BUS[bus/framebus.rs<br/>FrameBus / FrameStream]
     end
-    ICE[iceoryx2 ipc_threadsafe<br/>SHM pub/sub<br/>/tmp/iceoryx2 运行时]
-    SRV[mediaservo-server<br/>WS 信令 :9800]
+    ICE[iceoryx2 ipc_threadsafe<br/>SHM pub/sub<br/>/tmp/iceoryx2 runtime]
+    SRV[mediaservo-server<br/>WS signaling :9800]
 
     APP --> H --> C -->|FFI| RS
     SIG -->|WebSocket + PSK| SRV
     BUS -->|loan/send/recv| ICE
 ```
 
-要点（均出自头文件/实现契约注释）：
+Key points (all from the header/implementation contract comments):
 
-- **命名空间** `mediaservo::link`；错误类型复用 `mediaservo::Error` / `mediaservo::Result`
-  （`bindings/cxx/include/mediaservo/detail/result.hpp`，D248 单一事实源）。
-- **生命周期契约**（link.hpp 头注释，自 C ABI 翻译成 RAII）：`SignalSession`/`Bus`/`Stream`
-  均 move-only；析构自动 close（幂等）；默认构造 = 已关闭（null handle），对已关闭对象调
-  API 返回 `Error{INVALID_ARG, "closed"}`，**不触碰 C ABI**。
-- **事件回调**在内部泵线程触发；`std::function` 堆对象在 close（join 泵线程）后统一释放，
-  防 use-after-free；回调内禁止调用 close/on_event（C 契约 = UB）。
-- **错误通道为 Result（非异常）**；误用 `value()`/`error()` 抛
-  `tl::bad_expected_access<Error>`（std::exception 子类，细节经 `.error().code/.message`）。
-- C ABI 侧 `close(NULL)` 幂等返回 OK；handle 单线程属主，close 后再调任何 API 为 UB
-  （link.h 生命周期契约 R2）。
+- **Namespace** `mediaservo::link`; the error types reuse `mediaservo::Error` / `mediaservo::Result`
+  (`bindings/cxx/include/mediaservo/detail/result.hpp`, the D248 single source of truth).
+- **Lifecycle contract** (link.hpp header comments, translated from the C ABI into RAII): `SignalSession`/`Bus`/`Stream`
+  are all move-only; the destructor closes automatically (idempotent); default construction = already closed
+  (a null handle); calling any API on a closed object returns `Error{INVALID_ARG, "closed"}` and **never
+  touches the C ABI**.
+- **Event callbacks** fire on the internal pump thread; the `std::function` heap objects are released after
+  close (which joins the pump thread), preventing use-after-free; calling close/on_event inside a callback
+  is forbidden (the C contract = UB).
+- **The error channel is Result (not exceptions)**; misusing `value()`/`error()` throws
+  `tl::bad_expected_access<Error>` (a std::exception subclass; details via `.error().code/.message`).
+- On the C ABI side, `close(NULL)` is idempotent and returns OK; handles are single-thread-owned, and
+  calling any API after close is UB (the link.h lifecycle contract R2).
 
-## 3. 生命周期时序
+## 3. Lifecycle Sequences
 
-### 3.1 信令（connect → on_event → send → close）
+### 3.1 Signaling (connect → on_event → send → close)
 
 ```mermaid
 sequenceDiagram
-    participant A as 应用线程
+    participant A as Application thread
     participant S as SignalSession (cxx)
-    participant P as 事件泵线程 (Rust)
+    participant P as Event pump thread (Rust)
     participant V as mediaservo-server
 
-    A->>S: connect(cfg)  阻塞
-    S->>V: WS 握手 + PSK 认证 + 入房
-    V-->>S: session（内部已订阅事件广播）
+    A->>S: connect(cfg)  blocking
+    S->>V: WS handshake + PSK auth + room join
+    V-->>S: session (already subscribed to the event broadcast internally)
     A->>S: on_event(cb)
-    Note over S,P: 首次注册启动泵线程<br/>合成补发 {"type":"connected","room_id":...}
-    P-->>A: cb(event_json)（拷贝后才可留存）
+    Note over S,P: The first registration starts the pump thread<br/>which synthesizes {"type":"connected","room_id":...}
+    P-->>A: cb(event_json) (copy it if you need to keep it)
     A->>S: send("{\"type\":\"get_status\"}")
-    S->>V: WS 帧
-    V-->>P: message / disconnected / error 事件
-    A->>S: close()（或析构）
-    S->>P: 置 closed → 释放会话 → join 泵
-    Note over S: join 后才释放回调对象
+    S->>V: WS frame
+    V-->>P: message / disconnected / error events
+    A->>S: close() (or destruction)
+    S->>P: sets closed → releases the session → joins the pump
+    Note over S: Callback objects are released only after the join
 ```
 
-### 3.2 帧总线（双进程：发布端 + 订阅端）
+### 3.2 Frame bus (two processes: publisher + subscriber)
 
 ```mermaid
 sequenceDiagram
-    participant PUB as 发布进程
-    participant SUB as 订阅进程
+    participant PUB as Publisher process
+    participant SUB as Subscriber process
     participant X as iceoryx2 SHM
 
-    PUB->>PUB: Bus::attach("", token_pem, vk_pem)  验签+ACL+建节点
+    PUB->>PUB: Bus::attach("", token_pem, vk_pem)  verify + ACL + create node
     SUB->>SUB: Bus::attach("", token_pem, vk_pem)
     SUB->>X: subscribe(topic) → Stream
-    Note over SUB: 订阅必须先于发布<br/>（新订阅者不重放历史帧）
-    PUB->>X: publish(topic, payload, meta)  ACL 检查 + loan + send
-    X-->>SUB: 帧（latest-frame 覆盖语义）
-    SUB->>SUB: stream.recv()  阻塞 → Frame{meta,data}
-    SUB->>SUB: stream.close()（唤醒阻塞中的 recv → CLOSED）
-    PUB->>PUB: bus.close()（shutdown 全部流）
+    Note over SUB: Subscribe must precede publish<br/>(new subscribers don't replay history)
+    PUB->>X: publish(topic, payload, meta)  ACL check + loan + send
+    X-->>SUB: frame (latest-frame overwrite semantics)
+    SUB->>SUB: stream.recv()  blocks → Frame{meta,data}
+    SUB->>SUB: stream.close() (wakes a blocked recv → CLOSED)
+    PUB->>PUB: bus.close() (shuts down all streams)
     SUB->>SUB: bus.close()
 ```
 
-## 4. API 一览（签名逐字抄自 link.hpp / link.h）
+## 4. API Inventory (signatures copied verbatim from link.hpp / link.h)
 
-### 4.1 C++ 自由函数与配置
+### 4.1 C++ Free Functions & Config
 
-| 签名（link.hpp 原文） | 语义 |
-|---|---|
-| `inline Result<std::string> version()` | SDK 版本 `MAJOR.MINOR.PATCH`（= mediaservo-link crate 版本） |
-| `struct SignalConfig { std::string url; std::string psk; std::string room; std::string role; }` | `role`: `"Host"/"Pusher"` → Host，`"Client"/"Puller"` → Remote；**空串 = Host**（C 侧 NULL 同义） |
+| Signature (verbatim from link.hpp) | Semantics |
+|-------------------------------------|-----------|
+| `inline Result<std::string> version()` | The SDK version `MAJOR.MINOR.PATCH` (= the mediaservo-link crate version) |
+| `struct SignalConfig { std::string url; std::string psk; std::string room; std::string role; }` | `role`: `"Host"/"Pusher"` → Host, `"Client"/"Puller"` → Remote; **empty string = Host** (equivalent to NULL on the C side) |
 
-### 4.2 `class SignalSession`（move-only RAII）
+### 4.2 `class SignalSession` (move-only RAII)
 
-| 签名（原文） | 语义 |
-|---|---|
-| `static Result<SignalSession> connect(const SignalConfig& cfg)` | 连接信令 + 创建会话（阻塞；失败返回错误，不抛异常）。url/psk/room 必填（cxx 空串→C NULL→`INVALID_ARG`）；role 非法值 → `INVALID_ARG`；连接失败 → `CONNECT` |
-| `SignalSession() noexcept = default` | 默认构造 = 已关闭 |
-| `~SignalSession()` | 析构自动 `(void)close()` |
-| `SignalSession(const SignalSession&) = delete` / `operator=(const SignalSession&) = delete` | 禁拷贝 |
-| `SignalSession(SignalSession&& other) noexcept` / `operator=(SignalSession&&)` | move 后源对象 = 已关闭 |
-| `explicit operator bool() const noexcept` | 是否持有有效会话 |
-| `Result<void> send(const std::string& json)` | 发送一条信令消息（JSON；SignalingMessage type 标签 snake_case）。空串 → C 侧 `INVALID_ARG`；JSON 解析失败 → `SEND`；已关闭对象 → `Error{INVALID_ARG,"closed"}` |
-| `void on_event(std::function<void(const std::string&)> cb)` | 注册事件回调（connect 后任意时刻；重复注册替换；回调在内部泵线程触发，事件串仅在回调内有效，需保留请拷贝；回调内禁止调用本对象任何方法）。已关闭对象 = no-op |
-| `Result<void> close() noexcept` | 关闭会话并释放 handle（幂等；join 事件泵后才释放回调对象） |
+| Signature (verbatim) | Semantics |
+|----------------------|-----------|
+| `static Result<SignalSession> connect(const SignalConfig& cfg)` | Connects signaling + creates the session (blocking; returns an error on failure, throws nothing). url/psk/room required (a cxx empty string → C NULL → `INVALID_ARG`); an invalid role → `INVALID_ARG`; connect failure → `CONNECT` |
+| `SignalSession() noexcept = default` | Default construction = already closed |
+| `~SignalSession()` | The destructor performs `(void)close()` automatically |
+| `SignalSession(const SignalSession&) = delete` / `operator=(const SignalSession&) = delete` | Non-copyable |
+| `SignalSession(SignalSession&& other) noexcept` / `operator=(SignalSession&&)` | After a move the source object = closed |
+| `explicit operator bool() const noexcept` | Whether a live session is held |
+| `Result<void> send(const std::string& json)` | Sends one signaling message (JSON; SignalingMessage type tags are snake_case). An empty string → C-side `INVALID_ARG`; JSON parse failure → `SEND`; a closed object → `Error{INVALID_ARG,"closed"}` |
+| `void on_event(std::function<void(const std::string&)> cb)` | Registers the event callback (any time after connect; re-registering replaces; callbacks fire on the internal pump thread, the event string is valid only inside the callback — copy to keep; calling any method of this object inside a callback is forbidden). A closed object = no-op |
+| `Result<void> close() noexcept` | Closes the session and releases the handle (idempotent; the callback objects are released only after the event pump joins) |
 
-### 4.3 `class Bus`（move-only RAII）
+### 4.3 `class Bus` (move-only RAII)
 
-| 签名（原文） | 语义 |
-|---|---|
-| `static Result<Bus> attach(const std::string& endpoint, const std::string& token_pem, const std::string& vk_pem)` | 附加帧总线（验签 + ACL + iceoryx2 节点，阻塞）。`endpoint` 为 Phase 1 预留（**空串即可但必须传参**——C++ 面传 `std::string`，C 面 NULL 会被拒）。`token_pem` = Ed25519 能力令牌 **JWT 字符串**（实现：`CapabilityToken::from_raw`，命名有误导性）；`vk_pem` = Ed25519 验证密钥 PEM。验签/建节点失败 → `BUS` |
-| `Bus() noexcept = default` / `~Bus()` / 拷贝 delete / move 两式 / `explicit operator bool()` | 同 SignalSession 惯例 |
-| `Result<void> publish(const std::string& topic, const std::vector<uint8_t>& payload, const mediaservo_frame_meta_t& meta)` | 发布一帧（ACL 检查 + SHM loan + send，阻塞）。空 payload 时 C 侧按 `NULL + len==0` 传（纯元数据帧合法）。meta.version 非 WIRE_VERSION(=0) → C 侧 `INVALID_ARG`（"invalid meta"） |
-| `Result<class Stream> subscribe(const std::string& topic)` | 订阅 topic 创建帧流（阻塞）。失败 → `BUS` |
-| `Result<void> close() noexcept` | 关闭总线（幂等；shutdown 全部流，stream recv 返回 CLOSED） |
+| Signature (verbatim) | Semantics |
+|----------------------|-----------|
+| `static Result<Bus> attach(const std::string& endpoint, const std::string& token_pem, const std::string& vk_pem)` | Attaches the frame bus (verify + ACL + an iceoryx2 node; blocking). `endpoint` is reserved for Phase 1 (**an empty string is fine but the argument must be passed** — the C++ face takes a `std::string`; a C-side NULL is rejected). `token_pem` = the Ed25519 capability token **as a JWT string** (implementation: `CapabilityToken::from_raw`; the name is misleading); `vk_pem` = the Ed25519 verifying key PEM. Verify/node-creation failure → `BUS` |
+| `Bus() noexcept = default` / `~Bus()` / copy deleted / both moves / `explicit operator bool()` | Same conventions as SignalSession |
+| `Result<void> publish(const std::string& topic, const std::vector<uint8_t>& payload, const mediaservo_frame_meta_t& meta)` | Publishes a frame (ACL check + SHM loan + send; blocking). An empty payload passes `NULL + len==0` on the C side (a pure-metadata frame is legal). meta.version ≠ WIRE_VERSION(=0) → C-side `INVALID_ARG` ("invalid meta") |
+| `Result<class Stream> subscribe(const std::string& topic)` | Subscribes to a topic, creating a frame stream (blocking). Failure → `BUS` |
+| `Result<void> close() noexcept` | Closes the bus (idempotent; shuts down all streams; stream recvs return CLOSED) |
 
-### 4.4 `struct Frame` 与 `class Stream`（move-only RAII）
+### 4.4 `struct Frame` and `class Stream` (move-only RAII)
 
-| 签名（原文） | 语义 |
-|---|---|
-| `struct Frame { mediaservo_frame_meta_t meta{}; std::vector<uint8_t> data; }` | 一帧（元数据 + 载荷拷贝） |
-| `Stream() noexcept = default` / `~Stream()` / 拷贝 delete / move 两式 / `explicit operator bool()` | 同上惯例；仅 `Bus::subscribe` 可造（构造 private，`friend class Bus`） |
-| `Result<Frame> recv()` | 阻塞取帧（元数据 + 载荷拷贝）。内部单缓冲 **16 MiB**（覆盖 4K I420 = 12.4 MiB）；C ABI 无法探测截断，更大帧会静默截到 cap。关停后 → `CLOSED`；已关闭对象 → `Error{INVALID_ARG,"closed"}` |
-| `Result<void> close() noexcept` | 关闭帧流（幂等；唤醒阻塞中的 recv 使其返回 CLOSED） |
+| Signature (verbatim) | Semantics |
+|----------------------|-----------|
+| `struct Frame { mediaservo_frame_meta_t meta{}; std::vector<uint8_t> data; }` | One frame (metadata + a payload copy) |
+| `Stream() noexcept = default` / `~Stream()` / copy deleted / both moves / `explicit operator bool()` | Same conventions; constructible only by `Bus::subscribe` (a private constructor, `friend class Bus`) |
+| `Result<Frame> recv()` | Blocks taking a frame (metadata + a payload copy). The internal single buffer is **16 MiB** (covers 4K I420 = 12.4 MiB); the C ABI cannot detect truncation, so larger frames silently truncate to the cap. After shutdown → `CLOSED`; a closed object → `Error{INVALID_ARG,"closed"}` |
+| `Result<void> close() noexcept` | Closes the frame stream (idempotent; wakes a blocked recv so it returns CLOSED) |
 
-### 4.5 C ABI 面（link.h，12 函数；C++ 层逐一对应）
+### 4.5 The C ABI Face (link.h, 12 functions; the C++ layer maps one-to-one)
 
 ```c
 mediaservo_err_t mediaservo_link_signal_connect(const mediaservo_link_signal_config_t* cfg, mediaservo_link_signal_t** out);
@@ -168,30 +172,30 @@ mediaservo_err_t mediaservo_link_last_error(char* buf, size_t len);
 mediaservo_err_t mediaservo_link_version(char* buf, size_t len);
 ```
 
-C 面差异注：`signal_on_event` 的 `cb = NULL` 为**取消注册**（仅 C 面；C++ 未暴露）；
-C 面对已 close（置 closed 标志）的 handle 调用返回 `STATE`/`CLOSED`，而 C++ 已关闭对象
-本地短路返回 `INVALID_ARG,"closed"`；`bus_recv` 的 `out_data`/`cap` 在 C 面要求非 NULL 且
-`cap > 0`。
+C-face differences: `signal_on_event` with `cb = NULL` **deregisters** (C face only; not exposed in C++);
+the C face returns `STATE`/`CLOSED` when calling on an already-closed (closed-flag set) handle, while the
+C++ closed object short-circuits locally with `INVALID_ARG,"closed"`; the C face requires `bus_recv`'s
+`out_data`/`cap` to be non-NULL with `cap > 0`.
 
-### 4.6 共享类型（common.h / result.hpp）
+### 4.6 Shared Types (common.h / result.hpp)
 
-| 项 | 说明 |
-|---|---|
-| `struct Error { int code; std::string message; uint16_t wire_code; bool retryable; }` | link 面 `wire_code`/`retryable` **恒 0/false**（client 家族专用机读位，S6 批1b） |
-| `template <typename T> using Result = tl::expected<T, Error>` | 原生 API：`has_value()/value()/error()/value_or()` |
-| `mediaservo_frame_meta_t` | 36B 字段袋（`#pragma pack(1)`，LE）：`seq(8) width(4) height(4) format(1) version(1) is_keyframe(1) reserved(1) ts_mono_ns(8) ts_epoch_ns(8)`；`format`: 0=未知 1=I420 2=NV12 3=RGBA；`version` 必须 = 0（WIRE_VERSION，N4 拒未知）；`reserved` 必须填 0；编译期尺寸断言 36B |
-| `MEDIASERVO_LINK_SIGNAL_CONFIG_DEFAULT` | `{ sizeof(mediaservo_link_signal_config_t), NULL, NULL, NULL, NULL }`——C 面初始化宏（struct_size 门） |
+| Item | Notes |
+|------|-------|
+| `struct Error { int code; std::string message; uint16_t wire_code; bool retryable; }` | On the link face `wire_code`/`retryable` are **always 0/false** (machine-readable bits reserved for the client family, S6 batch 1b) |
+| `template <typename T> using Result = tl::expected<T, Error>` | Native API: `has_value()/value()/error()/value_or()` |
+| `mediaservo_frame_meta_t` | A 36B field bag (`#pragma pack(1)`, LE): `seq(8) width(4) height(4) format(1) version(1) is_keyframe(1) reserved(1) ts_mono_ns(8) ts_epoch_ns(8)`; `format`: 0=unknown 1=I420 2=NV12 3=RGBA; `version` must = 0 (WIRE_VERSION; N4 rejects unknowns); `reserved` must be 0; a compile-time 36B size assertion |
+| `MEDIASERVO_LINK_SIGNAL_CONFIG_DEFAULT` | `{ sizeof(mediaservo_link_signal_config_t), NULL, NULL, NULL, NULL }` — the C-side initialization macro (the struct_size gate) |
 
-## 5. 使用示例
+## 5. Usage Examples
 
-### 5.1 信令全链（真实代码，节选自示例程序）
+### 5.1 Full Signaling Chain (real code, excerpted from an example program)
 
 ```cpp
 SignalConfig cfg;
-cfg.url = url;                       // 环境变量读取（禁止硬编码密钥/地址）
+cfg.url = url;                       // read from env vars (hardcoded keys/addresses forbidden)
 cfg.psk = psk;
 cfg.room = room;
-cfg.role = "Pusher";                 // 车端推流角色
+cfg.role = "Pusher";                 // the vehicle-side push role
 
 auto result = SignalSession::connect(cfg);
 if (!result) {
@@ -202,7 +206,7 @@ if (!result) {
 auto session = std::move(result).value();
 
 session.on_event([](const std::string& event_json) {
-    std::cout << "event: " << event_json << "\n"; // 事件串仅在回调内有效（已拷贝）
+    std::cout << "event: " << event_json << "\n"; // the event string is valid only inside the callback (already copied)
 });
 
 auto sent = session.send("{\"type\":\"get_status\"}");
@@ -213,111 +217,114 @@ if (!sent) {
 }
 ```
 
-> 来源：`bindings/cxx/mediaservo-link-cxx/examples/vehicle_link.cpp`（完整程序含
-> `std::getenv` 配置读取与 `session.close()` 收尾；需运行中 server 才能全流程跑通）。
+> Source: `bindings/cxx/mediaservo-link-cxx/examples/vehicle_link.cpp` (the full program includes
+> `std::getenv` config reads and a `session.close()` ending; a running server is needed for the full flow).
 
-### 5.2 错误路径与已关闭语义（真实测试代码）
+### 5.2 Error Paths & Closed Semantics (real test code)
 
 ```cpp
-// 空配置 → C ABI 快速 INVALID_ARG（url/psk/room 必填），不触网
+// Empty config → the C ABI fails fast with INVALID_ARG (url/psk/room required), no network touched
 auto r = SignalSession::connect(SignalConfig{});
 assert(!r.has_value());
 assert(r.error().code == MEDIASERVO_LINK_ERR_INVALID_ARG);
 assert(!r.error().message.empty());
 
-SignalSession s;                     // 默认构造 = 已关闭
+SignalSession s;                     // default construction = closed
 assert(!s);
 auto send = s.send("{\"type\":\"ping\"}");
 assert(send.error().code == MEDIASERVO_LINK_ERR_INVALID_ARG);
 assert(send.error().message == "closed");
-s.on_event([](const std::string&) {}); // 已关闭 no-op，不崩
-assert(s.close().has_value());       // 幂等
+s.on_event([](const std::string&) {}); // closed = no-op, no crash
+assert(s.close().has_value());       // idempotent
 assert(s.close().has_value());
 
-// 空 token/vk → JWT 验签快速失败（BUS 错误，不建 iceoryx 节点）
+// Empty token/vk → JWT verification fails fast (a BUS error, no iceoryx node created)
 auto b = Bus::attach("", "", "");
 assert(b.error().code == MEDIASERVO_LINK_ERR_BUS);
 ```
 
-> 来源：`bindings/cxx/mediaservo-link-cxx/tests/test_link.cpp`（另含 `version()` 前缀
-> 断言 `"0.1."`、Result 误用抛 `tl::bad_expected_access<Error>`、三类句柄 move 语义测试）。
+> Source: `bindings/cxx/mediaservo-link-cxx/tests/test_link.cpp` (also asserting the `version()`
+> prefix `"0.1."`, that Result misuse throws `tl::bad_expected_access<Error>`, and the move
+> semantics of all three handle types).
 
-### 5.3 帧总线 publish/subscribe（cxx 形假代码——仓内无 cxx bus 示例，按 §5.2 同款
-### API 从 C 单测转写，未编译验证）
+### 5.3 Frame bus publish/subscribe (hypothetical cxx code — no cxx bus example exists in the repo; rewritten from the C unit test per the same §5.2 API, not compile-verified)
 
 ```cpp
-// 假代码（未编译验证）：语义锚 = bindings/c/mediaservo-link-c/src/lib.rs
-// 单测 bus_attach_publish_subscribe_recv_roundtrip（双节点 token/ACL、订阅先于发布）。
+// Hypothetical (not compile-verified); semantic anchors = bindings/c/mediaservo-link-c/src/lib.rs
+// unit test bus_attach_publish_subscribe_recv_roundtrip (two nodes with tokens/ACL, subscribe before publish).
 Bus publisher = Bus::attach("", token_pem_capture, vk_pem).value();
 Bus subscriber = Bus::attach("", token_pem_processor, vk_pem).value();
 
-Stream st = subscriber.subscribe("camera/ct/front/raw").value(); // 订阅先于发布
+Stream st = subscriber.subscribe("camera/ct/front/raw").value(); // subscribe before publish
 
 mediaservo_frame_meta_t meta{};
 meta.seq = 7; meta.width = 640; meta.height = 480; meta.format = 1; // I420
-meta.version = 0;              // WIRE_VERSION，非 0 会被 publish 拒（INVALID_ARG）
+meta.version = 0;              // WIRE_VERSION; non-zero is rejected by publish (INVALID_ARG)
 meta.is_keyframe = 1; meta.reserved = 0;
 meta.ts_mono_ns = 1000; meta.ts_epoch_ns = 2000;
 std::vector<uint8_t> payload(64, 0xAA);
 publisher.publish("camera/ct/front/raw", payload, meta).value();
 
-Frame f = st.recv().value();   // 阻塞；meta/payload 为拷贝
+Frame f = st.recv().value();   // blocking; meta/payload are copies
 assert(f.meta.seq == 7 && f.data == payload);
-st.close();                    // 唤醒他线程阻塞中的 recv → CLOSED
+st.close();                    // wakes another thread's blocked recv → CLOSED
 ```
 
-> C 面正向链路（已验证）在 `bindings/c/mediaservo-link-c/src/lib.rs` 的
-> `bus_attach_publish_subscribe_recv_roundtrip`：Capture 节点仅发布 `camera/*`、
-> Processor 仅订阅 `camera/*`（ACL 矩阵），双 token 由测试密钥对签发。
+> The verified C-face positive chain lives in `bindings/c/mediaservo-link-c/src/lib.rs`'s
+> `bus_attach_publish_subscribe_recv_roundtrip`: a Capture node may only publish `camera/*`,
+> a Processor may only subscribe to `camera/*` (the ACL matrix), with both tokens signed by the test keypair.
 
-## 6. 错误与边界语义
+## 6. Error & Boundary Semantics
 
-### 6.1 错误码（link.h；0 = OK，<0 = 错误）
+### 6.1 Error Codes (link.h; 0 = OK, <0 = error)
 
-| 宏 | 值 | 触发（实测于 lib.rs） |
-|---|---|---|
-| `MEDIASERVO_LINK_ERR_INVALID_ARG` | -1 | null/缺参/struct_size 过小/非法 UTF-8/role 未知/空消息；**C++ 已关闭对象本地短路** |
-| `MEDIASERVO_LINK_ERR_CONNECT` | -2 | WS 连接/认证/入房失败 |
-| `MEDIASERVO_LINK_ERR_SEND` | -3 | send JSON 解析失败或发送失败 |
-| `MEDIASERVO_LINK_ERR_BUS` | -4 | bus_attach 验签失败 / publish / subscribe / bus_close 的总线侧错误 |
-| `MEDIASERVO_LINK_ERR_STATE` | -5 | C 面对已 close（closed 标志）handle 调 send/publish/subscribe |
-| `MEDIASERVO_LINK_ERR_INTERNAL` | -6 | Rust panic 兜底（catch_unwind）/ 锁中毒 |
-| `MEDIASERVO_LINK_ERR_CLOSED` | -7 | recv 时流/总线已关停 |
+| Macro | Value | Trigger (measured in lib.rs) |
+|-------|-------|------------------------------|
+| `MEDIASERVO_LINK_ERR_INVALID_ARG` | -1 | null/missing args/struct_size too small/invalid UTF-8/unknown role/empty message; **the C++ closed object short-circuits locally** |
+| `MEDIASERVO_LINK_ERR_CONNECT` | -2 | WS connect/auth/room-join failure |
+| `MEDIASERVO_LINK_ERR_SEND` | -3 | send JSON parse failure or send failure |
+| `MEDIASERVO_LINK_ERR_BUS` | -4 | bus_attach verification failure / publish / subscribe / bus_close bus-side errors |
+| `MEDIASERVO_LINK_ERR_STATE` | -5 | the C face receiving send/publish/subscribe on an already-closed (closed-flag) handle |
+| `MEDIASERVO_LINK_ERR_INTERNAL` | -6 | a Rust panic backstop (catch_unwind) / a poisoned lock |
+| `MEDIASERVO_LINK_ERR_CLOSED` | -7 | recv on a stream/bus already shut down |
 
-### 6.2 last_error 通道
+### 6.2 The last_error Channel
 
-- C 面：每次 `<0` 返回可用 `mediaservo_link_last_error(buf, len)` 读详情；实现为**进程级全局
-  `static LAST_ERROR`（Mutex）**——头注释"线程安全"指读写不竞破，**不是 per-thread 语义**；
-  并发调用方互相覆写（C 单测为此整文件 TEST_LOCK 串行，PIT-205 族）。
-- C++ 面：`detail::make_error` 在每次 C 调用失败后**立即**把 message 拷进 `Error`，正常消费
-  `result.error().message` 即可，无需也不应再调 last_error。
+- C face: after every `<0` return, `mediaservo_link_last_error(buf, len)` reads the details; implemented as a
+  **process-global `static LAST_ERROR` (Mutex)** — the header's "thread-safe" means reads/writes don't race,
+  **not per-thread semantics**; concurrent callers overwrite each other (the C unit test serializes the whole
+  file with TEST_LOCK for this reason, the PIT-205 family).
+- C++ face: `detail::make_error` copies the message into `Error` **immediately** after each failed C call;
+  just consume `result.error().message` — there is no need, and it would be wrong, to call last_error again.
 
-### 6.3 struct_size 门（R3，仅 C 面 config）
+### 6.3 The struct_size Gate (R3, C-face configs only)
 
-`mediaservo_link_signal_config_t.struct_size` 必须 `>= sizeof(库已知结构)`，超长忽略——
-结构加字段不破坏二进制兼容（D241：MAJOR 内只加法）。旧头文件编译的调用方传小值 →
-`INVALID_ARG`（last_error 提示 "rebuild with current header"）。C++ 包装自动填，无感。
+`mediaservo_link_signal_config_t.struct_size` must be `>= sizeof(the library-known struct)`; extra length is
+ignored — adding struct fields doesn't break binary compatibility (D241: additive within a MAJOR). Callers
+compiled against an old header passing a small value → `INVALID_ARG` (last_error hints "rebuild with current
+header"). The C++ wrapper fills it automatically; invisible to users.
 
-### 6.4 事件 JSON（opaque v1，link.h 头注释）
+### 6.4 Event JSON (opaque v1, the link.h header comments)
 
 `{"type":"connected","room_id":...}` / `{"type":"message","message":{...SignalingMessage}}` /
-`{"type":"disconnected","reason":...}` / `{"type":"error","error":...}`。
-注册回调前发生的事件可能丢失；首次注册时泵**合成补发 connected**。广播溢出（Lagged）时
-泵跳过丢弃继续（事件会漏，媒体帧面不受影响）。
+`{"type":"disconnected","reason":...}` / `{"type":"error","error":...}`.
+Events occurring before the callback registers may be lost; at first registration the pump **synthesizes
+and replays connected**. On broadcast overflow (Lagged) the pump skips and continues (events may drop;
+the media-frame face is unaffected).
 
-## 7. 构建与链接
+## 7. Build & Linking
 
-### 7.1 CMake（发布树，D248 单包多组件，OpenCV/Boost 模式）
+### 7.1 CMake (the release tree, D248 one-package-multi-component, the OpenCV/Boost pattern)
 
 ```cmake
-find_package(mediaservo COMPONENTS link REQUIRED)   # -DCMAKE_PREFIX_PATH=<sdk 安装前缀>
+find_package(mediaservo COMPONENTS link REQUIRED)   # -DCMAKE_PREFIX_PATH=<the sdk install prefix>
 target_link_libraries(app PRIVATE mediaservo::link)
 ```
 
-`mediaservo::link` 为 INTERFACE imported target：include 目录 `<prefix>/include` +
-链接 `<prefix>/lib/libmediaservo_link.so`。组件名校验：未知 COMPONENTS 直接
-`FATAL_ERROR`；版本兼容由 `mediaservoConfigVersion.cmake`（SameMajorVersion 语义，
-`mediaservo_SDK_ABI_MAJOR`）自动裁决。
+`mediaservo::link` is an INTERFACE imported target: the include dir `<prefix>/include` + linking
+`<prefix>/lib/libmediaservo_link.so`. Component-name validation: unknown COMPONENTS `FATAL_ERROR`
+directly; version compatibility is adjudicated automatically by `mediaservoConfigVersion.cmake`
+(SameMajorVersion semantics, `mediaservo_SDK_ABI_MAJOR`).
 
 ### 7.2 pkg-config
 
@@ -325,12 +332,12 @@ target_link_libraries(app PRIVATE mediaservo::link)
 pkg-config --cflags --libs mediaservo-link   # -I${prefix}/include -L${prefix}/lib -lmediaservo_link
 ```
 
-`.pc` 用 `${pcfiledir}` 推导前缀，可重定位（不绑定绝对安装路径）。
+The `.pc` derives the prefix via `${pcfiledir}` and is relocatable (not bound to an absolute install path).
 
-### 7.3 仓内直接编译（test-cxx.sh 实形，C++11 起步）
+### 7.3 Direct In-Repo Compilation (the actual test-cxx.sh form; C++11 baseline)
 
 ```bash
-export LD_LIBRARY_PATH="$PWD/target/debug"           # 跑前必设（或 rpath）
+export LD_LIBRARY_PATH="$PWD/target/debug"           # required before running (or use rpath)
 g++ -std=c++11 -Wall -Wextra \
     -I bindings/cxx/mediaservo-link-cxx/include -I bindings/cxx/include \
     -I bindings/c/mediaservo-link-c/include -I bindings/c/include \
@@ -338,82 +345,91 @@ g++ -std=c++11 -Wall -Wextra \
     -L target/debug -lmediaservo_link -o /tmp/test_link_cxx
 ```
 
-> 来源：`scripts/test-cxx.sh`（四 SDK 循环之一；前置 `pixi run build-c` 产出三 cdylib +
-> dev `.so.<MAJOR>` symlink）。
+> Source: `scripts/test-cxx.sh` (one of the four-SDK loops; prerequisite `pixi run build-c` producing the
+> three cdylibs + dev `.so.<MAJOR>` symlinks).
 
-### 7.4 out/bindings 交付树（`./mediaservo.sh build bindings` 组装）
+### 7.4 The out/bindings Delivery Tree (assembled by `./mediaservo.sh build bindings`)
 
 ```
 out/bindings/
 ├── lib/
-│   ├── libmediaservo_link.so.0.1.x   # 实体（SONAME 文件名，D241 三件套）
-│   ├── libmediaservo_link.so.0       # → soname 符号链接
-│   ├── libmediaservo_link.so         # → 开发链接符号链接
+│   ├── libmediaservo_link.so.0.1.x   # the real file (a SONAME filename, the D241 trio)
+│   ├── libmediaservo_link.so.0       # → the soname symlink
+│   ├── libmediaservo_link.so         # → the dev-link symlink
 │   ├── pkgconfig/mediaservo-link.pc
 │   └── cmake/mediaservo/{mediaservoConfig,mediaservoConfigVersion}.cmake
 └── include/mediaservo/
-    ├── common.h  link.h              # C 面
-    ├── link.hpp                      # cxx 面（另含 field/deck/client.hpp）
+    ├── common.h  link.h              # the C face
+    ├── link.hpp                      # the cxx face (plus field/deck/client.hpp)
     └── detail/ 3rdparty/             # result.hpp + tl::expected
 ```
 
-`version()` 返回的 `MAJOR.MINOR.PATCH` 即本 crate 版本（C43：交付 crate 独立版本源）；
-soname MAJOR（`.so.0`）= ABI 代际，MAJOR 内只加法。
+The `MAJOR.MINOR.PATCH` returned by `version()` is this crate's version (C43: delivery crates have
+independent version sources); the soname MAJOR (`.so.0`) = the ABI generation, additive within a MAJOR.
 
-## 8. 已知坑 / FAQ（均经代码核实）
+## 8. Known Pitfalls / FAQ (all code-verified)
 
-1. **每 topic 订阅者上限 32**（`MAX_SUBSCRIBERS_PER_TOPIC`，
-   `crates/mediaservo-link/src/bus/framebus.rs:14`）。09-20 事故：iceoryx2 默认 8 时
-   8 路流共享单 topic 顶格、确定性失败。**上限在服务创建时定死**且服务元数据持久于
-   `/tmp/iceoryx2/services`——旧上限跨 restart 存活，升级后需清运行时目录重建（见下条）。
-2. **iceoryx2 残留运行时目录**：`/tmp/iceoryx2`（nodes/services）+ `/dev/shm/iox2_*`。
-   僵尸节点占订阅槽、残留 service 状态导致 subscribe/open 持久 `SystemInFlux`（重试无效）。
-   恢复处方（C25）：`stop → rm -rf /tmp/iceoryx2 /dev/shm/iox2_* → start`。Rust 侧对
-   `open_or_create` 的 SystemInFlux **瞬态**有重试，但跨 run 残留属持久态，重试救不了。
-3. **订阅先于发布、历史帧不重放**：iceoryx2 新订阅者只收订阅之后的样本；服务配置
-   `buffer_size=1 + enable_safe_overflow(true)` = **latest-frame 覆盖语义**（慢消费者只留
-   最新帧），`max_publishers(1)` 单发布者由 iceoryx2 强制（D239）——同 topic 第二个发布端
-   `publish` 报 `BUS`。
-4. **topic 命名**：斜杠分层字符串（如 `camera/<id>/raw`、host 内部 topic `camera/<id>`）；
-   必须能转成合法 iceoryx2 ServiceId，非法名 → `BUS`（"invalid topic name"）。ACL 通配
-   仅支持尾缀 `/*` 前缀匹配（`FrameTopic::matches`：`camera/*` 匹配 `camera/front/raw`）。
-5. **token_pem 实为 JWT 字符串**：`bus_attach` 参数名叫 `token_pem`，实现走
-   `CapabilityToken::from_raw`（JWT 文本），只有 `vk_pem` 是真 Ed25519 PEM。签发形见
-   C 单测（`CapabilityToken::sign(&acl, 3600, &sk)`）；host 部署实例的令牌在
-   `<prefix>/etc/link/*.token`（C40：加流后 `token issue --all` 补签）。
-6. **回调纪律**：回调在泵线程触发且**必须快速返回**；回调内调用任何 `mediaservo_link_signal_*`
-   （含 close）= UB；close 会 join 泵线程——若回调正阻塞，close 跟着阻塞。事件串仅在回调内
-   有效，需保留请拷贝（C++ 层已自动拷成 `std::string`）。
-7. **C++ `on_event` 无法取消注册**：C 面 `cb=NULL` 取消在 C++ 未暴露（传空 lambda 只替换
-   不注销）。重复注册的旧回调对象留到 close 才释放（泵线程可能在执行，防 UAF）——高频
-   重注册会累积（上界 = 注册次数）。
-8. **大帧静默截断**：C++ `recv()` 固定 16 MiB 缓冲；C 面 `cap` 不足时截到 cap 且**不报错**
-   （meta 仅取帧后可知，ABI 无法探测截断）。超 4K I420 的帧需自行扩缓冲（C++ 面暂不可配）。
-9. **SignalConfig 空串 = 必填缺失**：url/psk/room 任一为空 → cxx 转 NULL → `INVALID_ARG`
-   （快速失败不触网）；role 空串是唯一合法的可选空值（默认 Host）。role 大小写敏感，
-   仅 `Host/Pusher/Client/Puller` 四值。
-10. **last_error 是进程级全局**：多线程并发调 link C ABI 时错误详情互相覆写（§6.2）。
-    C++ 消费面无此患（Error 即时拷贝）；纯 C 消费方若需精确错误归因，自行串行化或
-    只信返回码。
+1. **A per-topic subscriber cap of 32** (`MAX_SUBSCRIBERS_PER_TOPIC`,
+   `crates/mediaservo-link/src/bus/framebus.rs:14`). The 09-20 incident: with iceoryx2's default of 8,
+   8 streams sharing one topic hit the cap and failed deterministically. **The cap is fixed at service
+   creation** and the service metadata persists in `/tmp/iceoryx2/services` — the old cap survives
+   restarts; after an upgrade, clear the runtime directory and recreate (next item).
+2. **The iceoryx2 residual runtime directory**: `/tmp/iceoryx2` (nodes/services) + `/dev/shm/iox2_*`.
+   Zombie nodes occupy subscriber slots, and residual service state causes persistent `SystemInFlux` on
+   subscribe/open (retries don't help). Recovery prescription (C25):
+   `stop → rm -rf /tmp/iceoryx2 /dev/shm/iox2_* → start`. The Rust side retries the **transient**
+   SystemInFlux of `open_or_create`, but cross-run residue is persistent state; retries can't fix it.
+3. **Subscribe before publish; history is not replayed**: an iceoryx2 new subscriber receives only samples
+   after subscribing; the service config `buffer_size=1 + enable_safe_overflow(true)` = **latest-frame
+   overwrite semantics** (a slow consumer keeps only the newest frame), and `max_publishers(1)` is enforced
+   by iceoryx2 (D239) — a second publisher on the same topic gets `BUS` from `publish`.
+4. **Topic naming**: slash-hierarchical strings (e.g. `camera/<id>/raw`; the host-internal topic is
+   `camera/<id>`); must convert to a legal iceoryx2 ServiceId, an illegal name → `BUS` ("invalid topic
+   name"). ACL wildcards support only the trailing-`/*` prefix match (`FrameTopic::matches`:
+   `camera/*` matches `camera/front/raw`).
+5. **token_pem is actually a JWT string**: the `bus_attach` parameter is named `token_pem` but the
+   implementation goes through `CapabilityToken::from_raw` (JWT text); only `vk_pem` is a real Ed25519 PEM.
+   For the issuance form see the C unit test (`CapabilityToken::sign(&acl, 3600, &sk)`); a deployed host
+   instance's tokens live at `<prefix>/etc/link/*.token` (C40: after adding streams, `token issue --all`).
+6. **Callback discipline**: callbacks fire on the pump thread and **must return quickly**; calling any
+   `mediaservo_link_signal_*` (including close) inside a callback = UB; close joins the pump thread — if a
+   callback is blocking, close blocks with it. The event string is valid only inside the callback; copy it
+   to keep it (the C++ layer already copies into a `std::string`).
+7. **C++ `on_event` cannot deregister**: the C face's `cb=NULL` cancellation isn't exposed in C++ (passing
+   an empty lambda only replaces, never deregisters). Old callback objects from re-registration stay alive
+   until close (the pump thread may be executing them; prevents UAF) — high-frequency re-registration
+   accumulates (bounded by the registration count).
+8. **Silent truncation of large frames**: the C++ `recv()` uses a fixed 16 MiB buffer; when the C face's
+   `cap` is insufficient it truncates to cap **without error** (meta is known only after receiving a frame;
+   the ABI cannot detect truncation). Frames over 4K I420 need a bigger buffer (not yet configurable on the
+   C++ face).
+9. **An empty SignalConfig string = a missing required field**: if any of url/psk/room is empty → cxx turns
+   it into NULL → `INVALID_ARG` (fails fast, no network); an empty role is the only legal optional empty
+   value (defaults to Host). Role is case-sensitive; only `Host/Pusher/Client/Puller` are valid.
+10. **last_error is process-global**: when multiple threads call the link C ABI concurrently, error details
+    overwrite each other (§6.2). The C++ consumption face has no such issue (Error is copied immediately);
+    pure-C consumers needing precise error attribution must serialize themselves or trust only return codes.
 
-### 头文件 vs 旧文档/注释差异（本轮逐名核对发现）
+### Header vs Older Doc/Comment Divergences (found in this round's name-by-name cross-check)
 
-- `detail/result.hpp` 注释"无 operator bool"仅指 **Result 本身**；link.hpp 三个句柄类各有
-  `explicit operator bool()`——两种 bool 语义并存，勿混读。
-- `link.hpp:37` 有一个孤立 `;`（删除残留注释块的痕迹，namespace 级合法 no-op）——无害，
-  建议顺手清（本文档不改码）。
-- `link.h` 未记载 `signal_on_event(cb=NULL)` 的取消注册行为（实现在 lib.rs 有文档 + 单测）。
-- `link.h` last_error 注释"线程安全"易误读为 per-thread（实为进程级全局锁保护，§6.2）。
-- `test_link.cpp` 头注释编译示例用 `-std=c++17`，`scripts/test-cxx.sh` 实跑 `-std=c++11`
-  ——以 test-cxx.sh 为准（C++11 起步兼容是交付合同）。
-- bus 正向链路在 cxx tests/examples 目录**无实码**（仅 C 单测覆盖，binding-guide 在册
-  "⚠️ e2e 无（单测覆盖 SHM 往返）"）——§5.3 因此标假代码。
+- `detail/result.hpp`'s comment "no operator bool" refers only to **Result itself**; link.hpp's three handle
+  classes each have `explicit operator bool()` — two bool semantics coexist; don't conflate them.
+- `link.hpp:37` has a stray `;` (a leftover from a deleted comment block; a legal namespace-level no-op) —
+  harmless; suggest cleaning it up (this doc doesn't change code).
+- `link.h` doesn't document `signal_on_event(cb=NULL)`'s deregistration behavior (it is documented in
+  lib.rs + unit-tested).
+- `link.h`'s last_error comment "thread-safe" is easy to misread as per-thread (it's actually a process-global
+  under a lock, §6.2).
+- `test_link.cpp`'s header comment compiles the example with `-std=c++17` while `scripts/test-cxx.sh` actually
+  runs `-std=c++11` — test-cxx.sh is authoritative (the C++11 baseline is the delivery contract).
+- The bus positive chain has **no real code** in the cxx tests/examples directories (C unit tests only;
+  the binding-guide notes "⚠️ no e2e (unit tests cover the SHM roundtrip)") — hence §5.3 is marked hypothetical.
 
-## 9. 参见
+## 9. See Also
 
-- C ABI 权威面：`bindings/c/mediaservo-link-c/include/mediaservo/link.h`（头注释含完整
-  用法与生命周期契约 R2/R3）
-- 实现与全部错误文案：`bindings/c/mediaservo-link-c/src/lib.rs`（含 C 单测）
-- Rust 本体：`crates/mediaservo-link/`（signal.rs / bus/framebus.rs / token.rs / acl.rs）
-- 绑定矩阵总览：`docs/modules/23-binding-guide.md`
-- 姊妹手册：`docs/reference/sdk-cxx/deck.md`、`docs/reference/sdk-cxx/client.md`
+- The authoritative C ABI face: `bindings/c/mediaservo-link-c/include/mediaservo/link.h` (header comments
+  include the full usage and lifecycle contracts R2/R3)
+- The implementation and all error strings: `bindings/c/mediaservo-link-c/src/lib.rs` (with the C unit tests)
+- The Rust body: `crates/mediaservo-link/` (signal.rs / bus/framebus.rs / token.rs / acl.rs)
+- The binding matrix overview: `docs/modules/23-binding-guide.md`
+- Sibling manuals: `docs/reference/sdk-cxx/deck.md`, `docs/reference/sdk-cxx/client.md`

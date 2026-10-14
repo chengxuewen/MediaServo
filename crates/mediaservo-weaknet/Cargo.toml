@@ -2,24 +2,24 @@
 name = "mediaservo-weaknet"
 version.workspace = true
 edition = "2024"
-description = "tc/netem 弱网模拟 agent（双端面单二进制：server 面 CLI/serve/面板 + 车端面 CLI/config）——产品仓 dev 工具，lib 面不进 bindings/package"
+description = "tc/netem weak-network emulation agent (dual-surface single binary: server surface CLI/serve/panel + vehicle surface CLI/config) -- a product-repo dev tool; the lib surface stays out of bindings/package"
 license = "Apache-2.0"
 
 [dependencies]
-# 全部取 Cargo.lock 现件（T0 已核零新增）；axum/rust-embed 随 T6/T7 到场
+# all taken as-is from Cargo.lock (T0 verified zero additions); axum/rust-embed arrive with T6/T7
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
-# T6 控制面（design §Dependencies 三条件门：axum0.7.9/futures-core0.3.32 均为 lock 现件、纯 Rust、既有树边）
+# T6 control plane (design §Dependencies three-condition gate: axum0.7.9/futures-core0.3.32 are both lock-present, pure Rust, existing tree edges)
 axum = "0.7"
 futures-core = "0.3"
-# T7 内嵌面板（design §Files rust-embed）：lock 现件 8.12.0（mediaservo-server 已用）；debug-embed=调试构建同样内嵌（二进制自足，§车端面 scp 单文件语义）
+# T7 embedded panel (design §Files rust-embed): lock-present 8.12.0 (already used by mediaservo-server); debug-embed = debug builds embed too (self-contained binary, the vehicle-surface scp single-file semantics)
 rust-embed = { version = "8", features = ["debug-embed"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "process", "sync", "net"] }
 
 [dev-dependencies]
-tower = { version = "0.4", features = ["util"] }  # 钉 0.4：lock 存 0.4/0.5 双版本，axum 0.7 路由 oneshot 契约走 0.4（T6 api_matrix；util=ServiceExt 非缺省须显开）
+tower = { version = "0.4", features = ["util"] }  # pinned 0.4: the lock holds both 0.4/0.5; axum 0.7's routing oneshot contract goes through 0.4 (T6 api_matrix; util = ServiceExt, non-default, must be explicit)
 
 [[bin]]
 name = "mediaservo-weaknet"

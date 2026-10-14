@@ -1,46 +1,46 @@
-# 客户端鉴权指南（auth-guide）— 四种凭证方式
+# Client Auth Guide (auth-guide) — The Four Credential Types
 
-> 单点真源：本文。sdk-cxx 四册只留指针；代码示例与判据数字来自
-> viewer-auth-matrix 无头矩阵实测（2026-09-29）。
+> Single source of truth: this document. The four sdk-cxx volumes keep only pointers; code examples and
+> threshold numbers come from the viewer-auth-matrix headless matrix measurements (2026-09-29).
 
-## 1. 选型表（10 秒决策）
+## 1. Selection Table (10-second decision)
 
-| 你是谁 | 用哪种 | 管理员怎么发卡 |
-|---|---|---|
-| 第三方集成 / 临时给同事看流 | **API-Key** | 管理台「API Keys」页（或 `POST /api/admin/apikeys`）→ secret 一次明文 → 拷给对方 |
-| 自家的车 / 相机等边缘设备 | **设备公钥**（D283） | 设备 `init` 自动收录（`ALLOW_DEV_ENROLL=1`）或管理台「待批准」一键批准 |
-| 有账号体系的正式用户 | **账号密码** | 管理台「Accounts」页建号 |
-| 封闭内网快速联调 | **PSK** | server.yaml `psk:`（⚠ 全能钥匙：全权限、无法按人吊销，勿出内网） |
+| Who you are | Which to use | How the admin issues it |
+|-------------|--------------|--------------------------|
+| Third-party integration / showing a stream to a colleague | **API-Key** | The admin console "API Keys" page (or `POST /api/admin/apikeys`) → the secret is shown in plaintext once → hand it over |
+| Your own vehicle / camera edge devices | **Device public key** (D283) | The device is auto-enrolled by `init` (`ALLOW_DEV_ENROLL=1`) or approved in one click from the console "Pending" list |
+| Formal users with an account system | **Username+password** | Create accounts in the console "Accounts" page |
+| Closed-intranet quick bring-up | **PSK** | server.yaml `psk:` (⚠ a master key: full permissions, cannot be revoked per person; never leave the intranet) |
 
-## 2. 连接时序（前三种同形；PSK/设备路见 §4 变体）
+## 2. Connection Sequence (the first three share one shape; PSK/device paths see §4 variants)
 
 ```
-┌────────┐  login(账号) 或 exchange(key)   ┌────────┐
-│ Client │ ──────────────────────────────→ │ Server │  POST /api/auth/{login,exchange}
-│  SDK   │ ←───────── JWT ─────────────── │        │  （角色+车辆白名单+过期，签发即焊死）
-│        │                                 │        │
-│        │  GET /api/rooms + JWT           │        │  发现：只列在线且白名单内的房
-│        │ ──────────────────────────────→ │        │
-│        │ ←── [{room_id,kind},...] ────── │        │  kind: video=可拉 / control=遥控
-│        │                                 │        │
-│        │  WS /ws + JWT（子协议头）        │        │  入房拉流/控制（每个 join 独立鉴权）
-│        │ ──────────────────────────────→ │        │
-└────────┘                                 └────────┘
+┌────────┐  login(account) or exchange(key)   ┌────────┐
+│ Client │ ──────────────────────────────→    │ Server │  POST /api/auth/{login,exchange}
+│  SDK   │ ←───────── JWT ───────────────     │        │  (role + vehicle allowlist + expiry, baked in at issue)
+│        │                                    │        │
+│        │  GET /api/rooms + JWT              │        │  Discovery: lists only online rooms in the allowlist
+│        │ ──────────────────────────────→    │        │
+│        │ ←── [{room_id,kind},...] ──────    │        │  kind: video=pullable / control=remote control
+│        │                                    │        │
+│        │  WS /ws + JWT (subprotocol header) │        │  Room join for pull/control (each join authed separately)
+│        │ ──────────────────────────────→    │        │
+└────────┘                                    └────────┘
 ```
 
-## 3. 各语言片段
+## 3. Snippets per Language
 
 ### Rust
 
 ```rust
-// 换通行证（二选一：账号 or key）
+// Exchange for a pass (pick one: account or key)
 let token = mediaservo_client::exchange("http://server:9800", "my-key", "secret").await?;
-// 或 mediaservo_client::login(base, user, pass).await?
+// or mediaservo_client::login(base, user, pass).await?
 
-// 发现
+// Discovery
 let rooms = mediaservo_client::list_rooms("http://server:9800", &token.jwt).await?;
 
-// 入房拉流
+// Join a room and pull
 let cfg = ClientConfig {
     signaling_url: "ws://server:9800/ws".into(),
     room_id: "vehicle_demo_test-stream".into(),
@@ -50,7 +50,7 @@ let cfg = ClientConfig {
 let session = RoomSession::connect(&cfg).await?;
 ```
 
-设备身份（Rust 独有入口）：
+Device identity (Rust-only entry):
 
 ```rust
 let cfg = ClientConfig {
@@ -67,8 +67,8 @@ mediaservo_client_list_rooms("http://server:9800", jwt, rooms, sizeof rooms, NUL
 mediaservo_client_config_t cfg = MEDIASERVO_CLIENT_CONFIG_DEFAULT;
 cfg.signaling_url = "ws://server:9800/ws";
 cfg.room = "vehicle_demo_test-stream";
-cfg.jwt = jwt;                    /* 与 psk 二选一 */
-/* cfg.identity_dir = "/path/to/instance";  设备路（additive 字段，老代码不写=不启用） */
+cfg.jwt = jwt;                    /* or psk — pick one */
+/* cfg.identity_dir = "/path/to/instance";  device path (additive field; old code omitting it = not enabled) */
 mediaservo_client_session_create(&cfg, &session);
 ```
 
@@ -80,67 +80,66 @@ ms::Config cfg;
 cfg.signaling_url = "ws://server:9800/ws";
 cfg.room = "vehicle_demo_test-stream";
 cfg.jwt = *tok;
-cfg.identity_dir = "/path/to/instance";   // 设备路（空=不启用）
+cfg.identity_dir = "/path/to/instance";   // device path (empty = not enabled)
 auto session = ms::Session::connect(cfg);
 auto label = ms::identity_label(session);  // "Device(ms-...)" / "jwt" / "legacy-psk"
 ```
 
-### imgui_viewer（GUI，测试面板）
+### imgui_viewer (GUI, test panel)
 
-登录面板五个 Radio：Account / API-Key / PSK / Device / JWT。选模式→填框→连接；
-底部 `identity:` 行即生效身份。无头等价注入：
+The login panel has five radios: Account / API-Key / PSK / Device / JWT. Pick a mode → fill the boxes → connect;
+the bottom `identity:` line shows the effective identity. Headless-equivalent injection:
 
 ```bash
-MSRTC_AUTH_MODE=apikey MSRTC_KEY_ID=.. MSRTC_KEY_SECRET=.. MSRTC_ROOM=<video房> \
+MSRTC_AUTH_MODE=apikey MSRTC_KEY_ID=.. MSRTC_KEY_SECRET=.. MSRTC_ROOM=<video room> \
   SDL_VIDEODRIVER=dummy MSRTC_RUN_SECS=20 ./imgui_viewer
-# 判据行 [frame] t=..s cb=597/20s ≈ 满帧；坏 token（JWT 模式贴错）→ [tile] join: auth rejected [4013]
+# Criteria line [frame] t=..s cb=597/20s ≈ full frame rate; a bad token (JWT mode with the wrong value) → [tile] join: auth rejected [4013]
 ```
 
-## 4. 变体与发现能力
+## 4. Variants & Discovery Capability
 
-| 变体 | 发现面 | 说明 |
-|---|---|---|
-| **PSK** | ✅ **全量发现**（`Authorization: Psk <psk>` → psk-discover）——与 join 门能力对齐（Legacy 全放行），**跨房间拉流**的主路：树勾几路连几路 | viewer M3 留空房名即走发现；填房名=直连覆盖 |
-| **设备身份** | ❌ 直连（Device 无 REST 发证面，公钥挑战只在 WS join 面） | 房名手填 |
+| Variant | Discovery surface | Notes |
+|---------|-------------------|-------|
+| **PSK** | ✅ **Full discovery** (`Authorization: Psk <psk>` → psk-discover) — aligned with the join-gate capability (Legacy allows all); the main route for **cross-room pulling**: check as many tree rows as you connect | viewer M3 leaves the room name empty to use discovery; filling a room name = direct-connect override |
+| **Device identity** | ❌ Direct connect only (Device has no REST issuance face; the public-key challenge exists only on the WS join face) | Fill the room name manually |
 
-Rust：`list_rooms_psk(base, psk)`；C/C++：`list_rooms_psk(...)`；viewer：PSK 模式留空房名。
+Rust: `list_rooms_psk(base, psk)`; C/C++: `list_rooms_psk(...)`; viewer: PSK mode with an empty room name.
 
-## 4.5 房间模型语义（重要——避免误读）
+## 4.5 Room Model Semantics (important — avoid misreading)
 
-`GET /api/rooms` 返回的 `room_id` 分两类：**整车房**（`vehicle`，遥控面）与**流房**
-（`vehicle_generatorN`，每路流一条）。流房是 **SFU 底层隔离粒度**（每流独立
-produce/consume/权限），**不是"一台车一个房间"**——产品语义上它们归属同一台车。
+The `room_id` values returned by `GET /api/rooms` fall into two classes: **whole-vehicle rooms** (`vehicle`,
+the remote-control face) and **stream rooms** (`vehicle_generatorN`, one per stream). Stream rooms are the
+**SFU's underlying isolation granularity** (per-stream produce/consume/permissions), **not "one room per
+vehicle"** — in product semantics they all belong to the same vehicle.
 
-- 消费端 UI 应按 **base 房分组**（`vehicle_*` 前缀归组到 `vehicle`），流为子项
-- 底层 join/produce 仍按流房粒度（本语义不影响 API 调用方式）
-- wire 的归属关系表达（streams 内嵌/parent 字段）= additive 演进在册
+- Consumer UIs should group by the **base room** (`vehicle_*` prefixes group under `vehicle`), with streams as children
+- Underlying join/produce still happens at stream-room granularity (this semantics doesn't affect how the API is called)
+- Expressing the ownership relationship on the wire (streams embedded/parent field) = an additive evolution on the books
 
-## 5. 运维要点
+## 5. Ops Notes
 
-- **吊销**：API-Key 删除后**新** exchange 立即 401；已发 JWT 到期自然死（TTL 默认 12h，
-  `api_token_ttl_secs` 可调）。设备吊销=管理台删除条目，下次接入 4010。
-- **4013 红牌** = token 坏/过期被拒（fail-closed）。**重试无义**——换新凭证。
-  客户端 SDK 已把 4013 归终态（不重连风暴）。
-- **login vs exchange**（对偶表）：
+- **Revocation**: after an API-Key is deleted, **new** exchanges immediately 401; already-issued JWTs die naturally at expiry (TTL default 12h, tunable via `api_token_ttl_secs`). Device revocation = delete the entry in the console; the next connection gets 4010.
+- **4013 red card** = the token is bad/expired and rejected (fail-closed). **Retrying is pointless** — get a new credential.
+  The client SDK already treats 4013 as terminal (no reconnect storm).
+- **login vs exchange** (duality table):
 
 | | login | exchange |
 |---|---|---|
-| 凭证 | 账号+密码 | key_id+secret |
-| 权限跟谁走 | 账号（管理员改表即变） | 卡（发卡时焊死，与账号无关） |
-| 吊销 | 删账号 | 删 key |
-| 适用 | 有账号体系的正式用户 | 分发/集成 |
+| Credential | account+password | key_id+secret |
+| Permissions follow | the account (admin table edits apply immediately) | the key (baked at issuance, independent of accounts) |
+| Revocation | delete the account | delete the key |
+| Suited for | formal users with an account system | distribution/integration |
 
-- **PSK 注意**：全权限（矩阵旁路）+ 无审计归属 + 全量可见（psk-discover）——只用于封闭内网/可信环境。
+- **PSK caution**: full permissions (matrix bypass) + no audit attribution + full visibility (psk-discover) — use only in closed intranets / trusted environments.
 
 ## 6. FAQ
 
-**Q: token 过期能自动续吗？**
-不能（在册开放项）。重新调 login/exchange 换新的。长会话请评估 TTL 配置。
+**Q: Can an expired token auto-renew?**
+No (an open item on the books). Call login/exchange again for a fresh one. For long sessions, evaluate the TTL configuration.
 
-**Q: JWT 可以和 PSK 一起给吗？**
-可以（C ABI 恰一规则：jwt/psk 二选一；叠加语义已从 SDK 面移除，server 端 jwt 验签失败
-直接 4013 不会滑向 PSK）。设备身份与任一可叠（server 设备认证优先）。
+**Q: Can JWT and PSK be provided together?**
+Yes (the C ABI has a pick-one rule: jwt/psk are mutually exclusive; the combined semantics were removed from the SDK surface; on the server a jwt verification failure 4013s directly without sliding to PSK). Device identity may combine with either (server device auth takes precedence).
 
-**Q: 怎么确认我的会话走的哪种鉴权？**
-C/C++：`identity_label(session)`；viewer：面板底部行；server 侧：日志 peer 前缀
-（`apikey:` / device-id / `legacy-psk`）。
+**Q: How do I confirm which auth my session is using?**
+C/C++: `identity_label(session)`; viewer: the bottom panel line; server-side: the log peer prefix
+(`apikey:` / device-id / `legacy-psk`).

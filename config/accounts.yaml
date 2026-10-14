@@ -1,16 +1,16 @@
-# G3 舱端账号注册表 — 操作员账号（D-H11 双类身份之操作员侧）。
-# 存储决策同 devices.yaml: 仅单向哈希 sha256(username + ":" + password)，
-# username 充当盐（与 G2 设备一致）; 未知用户与错误密码 wire 响应逐字一致（防枚举）。
-# 配发流程:
-#   1. 生成哈希: echo -n "carol:s3cret" | sha256sum  → 64 hex
-#   2. 填入 password_hash: "sha256:<64 hex>"
-#   3. role: viewer|operator|admin|dispatcher（未知角色 → 账号不可用）
-#   4. vehicles: 车×舱白名单 device_id（viewer/operator 生效; admin/dispatcher 任意车可省略）
-#   5. 重启 server（`./mediaservo.sh restart server`）— 注册表启动时加载
-# 登录: POST /api/auth/login {username, password} → JWT {sub, role, vehicles, iat, exp}
-#       （HS256, 与 admin_jwt_secret 同 secret; 12h 会话）
-# 急停: operator/admin 可发（强审计: 谁/何时/哪个车/什么命令）; viewer/dispatcher 无。
-# 示例（占位 — 请删除或替换）:
+# G3 cockpit account registry — operator accounts (D-H11 dual-identity model, operator side).
+# Storage decision same as devices.yaml: one-way hash sha256(username + ":" + password) only,
+# username acts as the salt (consistent with G2 devices); unknown user vs wrong password produce byte-identical wire responses (anti-enumeration).
+# Provisioning flow:
+#   1. Generate the hash: echo -n "carol:s3cret" | sha256sum  → 64 hex
+#   2. Fill in password_hash: "sha256:<64 hex>"
+#   3. role: viewer|operator|admin|dispatcher (unknown role → account unusable)
+#   4. vehicles: vehicle×cockpit allowlist of device_ids (enforced for viewer/operator; admin/dispatcher may omit — any vehicle)
+#   5. Restart the server (`./mediaservo.sh restart server`) — the registry loads at startup
+# Login: POST /api/auth/login {username, password} → JWT {sub, role, vehicles, iat, exp}
+#       (HS256, same secret as admin_jwt_secret; 12h session)
+# Emergency stop: operator/admin may send (strong audit: who/when/which vehicle/what command); viewer/dispatcher may not.
+# Example (placeholder — delete or replace):
 # accounts:
 #   carol:
 #     password_hash: "sha256:<64 hex>"
@@ -19,10 +19,10 @@
 #   admin:
 #     password_hash: "sha256:<64 hex>"
 #     role: admin
-# 开发用账号（占位 — 部署前请替换）: 仅用于本地 Docker dev + H3 前端 e2e。
-#   admin:      admin123     → role admin（全部能力）
-#   dispatcher: dispatch123 → role dispatcher（音频/状态/视频监控只读）
-#   operator:   operator123 → role operator（I1: 无 admin REST 准入 → 前端不显示监控导航）
+# Development accounts (placeholder — replace before deployment): local Docker dev + H3 frontend e2e only.
+#   admin:      admin123     → role admin (all capabilities)
+#   dispatcher: dispatch123 → role dispatcher (audio/status/video-monitoring read-only)
+#   operator:   operator123 → role operator (I1: no admin REST access → the frontend hides monitoring navigation)
 accounts:
   admin:
     password_hash: "sha256:bf6b5bdb74c79ece9fc0ad0ac9fb0359f9555d4f35a83b2e6ec69ae99e09603d"

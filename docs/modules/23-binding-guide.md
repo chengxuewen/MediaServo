@@ -1,49 +1,48 @@
-# 绑定矩阵使用指引（link / deck / field × C / C++ / Python）
+# Binding Matrix Usage Guide (link / deck / field × C / C++ / Python)
 
-> **定位**: MediaServo 三 SDK（link 设备侧 IPC、deck 媒体数据面、field 组合推流面）的
-> 多语言消费层。**C ABI 为契约基座**，C++/Python 为其上的薄包装（D227）。
+> **Positioning**: the multi-language consumption layer of MediaServo's three SDKs (link device-side IPC, deck media data surface, field composed push surface). **The C ABI is the contract foundation**; C++/Python are thin wrappers on top (D227).
 >
-> **关联**: [20-sdk-api-contract.md](../modules/20-sdk-api-contract.md) §7、[22-field-guide.md](../modules/22-field-guide.md)、
-> D227（绑定族 c/cxx/py）、D240（单动态库）、D241（soname + ABI 稳定）、D247（mediaservo_ 前缀）、D248（头文件策略）
+> **Related**: [20-sdk-api-contract.md](../modules/20-sdk-api-contract.md) §7, [22-field-guide.md](../modules/22-field-guide.md),
+> D227 (binding family c/cxx/py), D240 (single dynamic library), D241 (soname + ABI stability), D247 (mediaservo_ prefix), D248 (header strategy)
 
-## 布局
+## Layout
 
 ```
 bindings/
 ├── c/
-│   ├── include/mediaservo/common.h        # 共享 C 类型（err_t/frame_meta_t 36B/frame_t）
+│   ├── include/mediaservo/common.h        # Shared C types (err_t/frame_meta_t 36B/frame_t)
 │   ├── mediaservo-field-c/                # cdylib → libmediaservo_field.so
-│   │   └── include/mediaservo/field.h     #   头文件（手工维护，D248）
-│   ├── mediaservo-link-c/                 # → libmediaservo_link.so（signal + bus）
+│   │   └── include/mediaservo/field.h     #   headers (hand-maintained, D248)
+│   ├── mediaservo-link-c/                 # → libmediaservo_link.so (signal + bus)
 │   │   └── include/mediaservo/link.h
-│   └── mediaservo-deck-c/                 # → libmediaservo_deck.so（camera/recorder/player）
+│   └── mediaservo-deck-c/                 # → libmediaservo_deck.so (camera/recorder/player)
 │       └── include/mediaservo/deck.h
 ├── cxx/
-│   ├── include/mediaservo/detail/result.hpp     # 共享 Result（alias tl::expected, C++11 起步）
-│   ├── include/mediaservo/3rdparty/tl/expected.hpp + NOTICE  # vendored（CC0, 不可修改）
-│   └── mediaservo-{field,link,deck}-cxx/  # header-only RAII（namespace mediaservo::{field,link,deck}）
-└── python/mediaservo/                     # ctypes 包（非 cargo member，D228）
+│   ├── include/mediaservo/detail/result.hpp     # Shared Result (alias tl::expected, C++11 baseline)
+│   ├── include/mediaservo/3rdparty/tl/expected.hpp + NOTICE  # vendored (CC0, do not modify)
+│   └── mediaservo-{field,link,deck}-cxx/  # header-only RAII (namespace mediaservo::{field,link,deck})
+└── python/mediaservo/                     # ctypes package (not a cargo member, D228)
     └── mediaservo/{_ffi,field,link,deck}.py
 ```
 
-## 构建与测试（pixi tasks）
+## Build & Test (pixi tasks)
 
 ```bash
-pixi run build-c          # 三 cdylib + dev .so.<MAJOR> symlink（D241 DT_NEEDED）
-pixi run test-cxx         # C++ 三 SDK 测试（g++ 编译 + 断言）
-pixi run test-py          # Python unittest（需 MEDIASERVO_LIB_DIR 或 env 继承）
-pixi run parity-bindings  # 跨语言一致性（version/错误路径三端断言）
-pixi run abi-drift        # ABI 漂移门禁（header 声明 ↔ .so 导出对照，D248）
+pixi run build-c          # Three cdylibs + dev .so.<MAJOR> symlinks (D241 DT_NEEDED)
+pixi run test-cxx         # C++ three-SDK tests (g++ compile + assertions)
+pixi run test-py          # Python unittest (needs MEDIASERVO_LIB_DIR or env inheritance)
+pixi run parity-bindings  # Cross-language consistency (version/error-path assertions across all three)
+pixi run abi-drift        # ABI drift gate (header declarations ↔ .so exports cross-check, D248)
 ```
 
-## 各语言集成
+## Per-Language Integration
 
-### C（契约基座）
+### C (contract foundation)
 
 ```c
-#include <mediaservo/field.h>          /* 或 link.h / deck.h */
+#include <mediaservo/field.h>          /* or link.h / deck.h */
 
-mediaservo_push_config_t cfg = MEDIASERVO_PUSH_CONFIG_DEFAULT;  /* struct_size 自动 */
+mediaservo_push_config_t cfg = MEDIASERVO_PUSH_CONFIG_DEFAULT;  /* struct_size automatic */
 cfg.url = "ws://host:9800/ws"; cfg.psk = "..."; cfg.room = "room";
 mediaservo_field_push_t* s = NULL;
 if (mediaservo_field_push_connect(&cfg, &s) != MEDIASERVO_OK) {
@@ -51,26 +50,26 @@ if (mediaservo_field_push_connect(&cfg, &s) != MEDIASERVO_OK) {
 }
 ```
 
-编译: `gcc app.c -I bindings/c/mediaservo-field-c/include -I bindings/c/include \
-       -L target/debug -lmediaservo_field`（运行 `LD_LIBRARY_PATH=target/debug`）
+Compile: `gcc app.c -I bindings/c/mediaservo-field-c/include -I bindings/c/include \
+       -L target/debug -lmediaservo_field` (run with `LD_LIBRARY_PATH=target/debug`)
 
-### C++（header-only RAII）
+### C++ (header-only RAII)
 
 ```cpp
-#include <mediaservo/field.hpp>        /* 或 link.hpp / deck.hpp */
+#include <mediaservo/field.hpp>        /* or link.hpp / deck.hpp */
 using mediaservo::field::PushConfig;
 using mediaservo::field::PushSession;
 
 auto s = PushSession::connect(PushConfig{"ws://host:9800/ws", "psk", "room"});
 if (!s) { /* s.error().code / s.error().message */ }
-s.value().start_video_frames();        /* RAII: 析构自动 close */
+s.value().start_video_frames();        /* RAII: destructor closes automatically */
 ```
 
-编译: `g++ -std=c++11 app.cpp -I bindings/cxx/mediaservo-field-cxx/include -I bindings/cxx/include \
+Compile: `g++ -std=c++11 app.cpp -I bindings/cxx/mediaservo-field-cxx/include -I bindings/cxx/include \
        -I bindings/c/mediaservo-field-c/include -I bindings/c/include \
        -L target/debug -lmediaservo_field`
 
-### Python（ctypes）
+### Python (ctypes)
 
 ```python
 from mediaservo.field import PushConfig, PushSession
@@ -78,143 +77,143 @@ s = PushSession.connect(PushConfig(url="ws://host:9800/ws", psk="...", room="roo
 s.publish_video()
 ```
 
-运行: `export MEDIASERVO_LIB_DIR=$PWD/target/debug && python3 app.py`
-（或 `LD_LIBRARY_PATH=target/debug`；三 SDK 子模块 `mediaservo.{field,link,deck}`）
+Run: `export MEDIASERVO_LIB_DIR=$PWD/target/debug && python3 app.py`
+(or `LD_LIBRARY_PATH=target/debug`; the three SDK submodules are `mediaservo.{field,link,deck}`)
 
-## 版本与 soname 链（V1a 四独立源后的全景规则）
+## Version & soname Chain (the panorama rules after V1a's four independent sources)
 
-| 环节 | 规则 | 单一真源 |
-|---|---|---|
-| crate 版本 | 交付四目标（host/server/field/client）各自独立 `version`；内部 crate 继承 `[workspace.package]`（F12/C43） | 各 `Cargo.toml` |
-| 交付域映射 | package/装配的版本读取按 `_TARGET_CRATE` 表：host 包←mediaservo-host · server 包←server · sdk(bindings) 包←**field** | cli 同表（V1b 四包名续用） |
-| soname 三件套 | `libmediaservo_<sdk>.so.<M.m.p>` 实体 + `.so.<MAJOR>`（DT_SONAME/加载器）+ `.so`（链接期）；MAJOR 取自 **field 域版本**（bindings 域=交付 sdk 包的版本源） | D241 + `_crate_version` |
-| py/node 手抄面 | `pyproject.toml`/`__init__.py`/`package.json` 对齐 **field** 版本；CI fmt job parity 门（cargo metadata 真值比对，漂移=红） | C43③ + ci 步骤 |
-| FrameMeta 线版本 | `WIRE_VERSION=0`（decode 拒未知版本=N4）；version.txt 内 `frame_meta_version` **由 Rust 源生成**（禁手抄漂浮） | `link/src/frame.rs` |
-| 发布包切分 | 设备半区 sdk-field（field/link/deck+py+node）/ 舱端半区 sdk-client（client-only）两包独立版本源；`bindings` = 一周期 alias（更名 WARN）（F12/V1b） | cli `_stage_sdk_package` |
-| 包内版本声明 | `<target>-version.txt` = 域版本 + 协议配对（D-H13）；`token_schema_version` 仍手抄（N2 生成化待做） | cli `_write_version_file` |
+| Aspect | Rule | Single source of truth |
+|--------|------|------------------------|
+| Crate version | The four delivery targets (host/server/field/client) each carry an independent `version`; internal crates inherit `[workspace.package]` (F12/C43) | Each `Cargo.toml` |
+| Delivery-domain mapping | package/assembly reads versions per the `_TARGET_CRATE` table: host package←mediaservo-host · server package←server · sdk(bindings) package←**field** | cli, same table (V1b keeps the four package names) |
+| soname trio | `libmediaservo_<sdk>.so.<M.m.p>` real file + `.so.<MAJOR>` (DT_SONAME/loader) + `.so` (link time); MAJOR comes from the **field domain version** (the bindings domain = the version source of the delivered sdk package) | D241 + `_crate_version` |
+| py/node hand-copied surface | `pyproject.toml`/`__init__.py`/`package.json` align with the **field** version; CI fmt job parity gate (cargo metadata truth comparison, drift = red) | C43③ + CI step |
+| FrameMeta wire version | `WIRE_VERSION=0` (decode rejects unknown versions = N4); `frame_meta_version` inside version.txt is **generated from the Rust source** (hand-copied floating numbers forbidden) | `link/src/frame.rs` |
+| Release package split | Device half sdk-field (field/link/deck+py+node) / cockpit half sdk-client (client-only), two packages with independent version sources; `bindings` = one-cycle alias (rename WARN) (F12/V1b) | cli `_stage_sdk_package` |
+| In-package version declaration | `<target>-version.txt` = domain version + protocol pairing (D-H13); `token_schema_version` still hand-copied (N2 generation pending) | cli `_write_version_file` |
 
-## 契约要点（跨语言一致）
+## Contract Essentials (cross-language consistency)
 
-| 项 | 规则 |
-|---|---|
-| 前缀 | 符号/类型/宏 `mediaservo_*`（D247）；C++ 命名空间 `mediaservo::<sdk>`；Python 模块同名 |
-| soname | `libmediaservo_<sdk>.so.<MAJOR>`（D241，MAJOR = C ABI 版本）|
-| struct_size | 所有跨 FFI 配置结构体首字段 `size_t struct_size`（R3，调用方填 sizeof）|
-| 生命周期 | handle 单线程属主；close 后任何 API 调用为 UB；close 幂等 |
-| 回调 | 仅在泵线程触发；回调内禁止调 close；指针/事件字符串仅回调内有效（需保留请拷贝）|
-| 错误 | `mediaservo_<sdk>_last_error(buf, len)` 线程安全；0 = ok，<0 = 错误码 |
-| 版本 | `mediaservo_<sdk>_version(buf, len)` → MAJOR.MINOR.PATCH |
-| 兼容 | within MAJOR 只加法（D241）；头文件改动 = ABI 变更，须过 `abi-drift` |
+| Item | Rule |
+|------|------|
+| Prefix | Symbols/types/macros `mediaservo_*` (D247); C++ namespace `mediaservo::<sdk>`; Python module of the same name |
+| soname | `libmediaservo_<sdk>.so.<MAJOR>` (D241; MAJOR = C ABI version) |
+| struct_size | Every cross-FFI config struct starts with `size_t struct_size` (R3; the caller fills sizeof) |
+| Lifecycle | Handles are single-thread-owned; any API call after close is UB; close is idempotent |
+| Callbacks | Fired only on the pump thread; calling close inside a callback is forbidden; pointers/event strings are valid only inside the callback (copy if you need to keep them) |
+| Errors | `mediaservo_<sdk>_last_error(buf, len)` is thread-safe; 0 = ok, <0 = error code |
+| Version | `mediaservo_<sdk>_version(buf, len)` → MAJOR.MINOR.PATCH |
+| Compatibility | Within a MAJOR, additive-only (D241); header changes = ABI changes, must pass `abi-drift` |
 
-## 已验证能力（2026-08-18）
+## Verified Capabilities (2026-08-18)
 
-| 语言 | 验证 |
-|---|---|
-| C | field/link/deck 三端 live e2e（真实 server 收帧 / 事件泵 / 91 帧闭环录制）|
-| C++ | 三 SDK 测试（version/错误路径/move 语义/Result 误用）+ parity |
-| Python | 22 tests + field push live e2e（connected/published/frames）|
-| 全矩阵 | `parity-bindings` 三端一致 + `abi-drift` 声明=导出（7/12/15）|
+| Language | Verification |
+|----------|--------------|
+| C | field/link/deck live e2e on all three (real server frame receipt / event pump / 91-frame closed-loop recording) |
+| C++ | Three-SDK tests (version/error paths/move semantics/Result misuse) + parity |
+| Python | 22 tests + field push live e2e (connected/published/frames) |
+| Full matrix | `parity-bindings` consistent across all three + `abi-drift` declarations=exports (7/12/15) |
 
-## 已知限制
+## Known Limitations
 
-- **PullSession 收帧挂起**（见 22-field-guide 已知限制）：消费方是 client，未在绑定层暴露
-- **deck Player**：C 面仅 open/frames/close（seek/set_rate YAGNI 押后，N2 标注）
-- **Python**：ctypes 首版（D227 两步走）；pyo3 加速后端待触发条件（帧路径 >10% 预算等）
-- **Windows/macOS**：soname 仅 Linux（R8 门控）；macOS 用默认 dylib 命名；Python `_lib_filename` 已按平台分派
+- **PullSession frame receive is pending** (see 22-field-guide known limitations): the consumer is client; not exposed in the binding layer
+- **deck Player**: the C face has only open/frames/close (seek/set_rate deferred as YAGNI, noted N2)
+- **Python**: first ctypes version (D227 two-step plan); pyo3 acceleration backend awaits its trigger conditions (frame path >10% of budget etc.)
+- **Windows/macOS**: soname is Linux-only (R8 gated); macOS uses default dylib naming; Python `_lib_filename` already dispatches per platform
 
-## 附录 A — SDD 追溯矩阵（函数 × 测试覆盖，2026-08-18）
+## Appendix A — SDD Traceability Matrix (functions × test coverage, 2026-08-18)
 
-> 单测 = cargo test（c crate 内）；e2e = scripts/e2e-bindings.sh（真实 server/FFmpeg）；parity = parity-bindings。
-> ⚠️ = 覆盖缺口（见下）。错误路径/状态机未逐函数列出（c crate 内统一模式）。
+> Unit tests = cargo test (inside the c crate); e2e = scripts/e2e-bindings.sh (real server/FFmpeg); parity = parity-bindings.
+> ⚠️ = coverage gap (see below). Error paths/state machines not listed per function (uniform pattern inside the c crate).
 
-### field（7 函数）
-| 函数 | 单测 | 正向 e2e |
-|---|---|---|
-| push_connect | ✓（null/small-size/missing-required）| ✓ vehicle_push |
-| push_publish_video | ✓（null handle）| ✓ vehicle_push（track=video）|
-| push_start_video_frames | ✓（null 失败）| ✓ vehicle_push（frames running）|
-| push_stop_video_frames | ✓（null noop）| ✓ vehicle_push（close 前调用）|
-| push_close | ✓（null/幂等）| ✓ vehicle_push |
-| last_error（+deprecated 别名）| ✓ roundtrip ×2 | ✓ parity |
-| version | ✓ roundtrip | ✓ parity（三端一致）|
+### field (7 functions)
+| Function | Unit test | Positive e2e |
+|----------|-----------|--------------|
+| push_connect | ✓ (null/small-size/missing-required) | ✓ vehicle_push |
+| push_publish_video | ✓ (null handle) | ✓ vehicle_push (track=video) |
+| push_start_video_frames | ✓ (null failure) | ✓ vehicle_push (frames running) |
+| push_stop_video_frames | ✓ (null noop) | ✓ vehicle_push (called before close) |
+| push_close | ✓ (null/idempotent) | ✓ vehicle_push |
+| last_error (+deprecated alias) | ✓ roundtrip ×2 | ✓ parity |
+| version | ✓ roundtrip | ✓ parity (consistent across all three) |
 
-### link（12 函数）
-| 函数 | 单测 | 正向 e2e |
-|---|---|---|
-| signal_connect | ✓（null/small-size/missing-required/bad-role）| ✓ vehicle_signal |
-| signal_send | ✓（null/empty/未连接/closed）| ✓ vehicle_signal（encoder_status 回显）|
-| signal_on_event | ✓（null noop）| ✓ vehicle_signal（event 泵）|
-| signal_close | ✓（null）| ✓ vehicle_signal |
-| bus_attach | ✓（null）+ 正向（双节点验签）| ⚠️ e2e 无（单测覆盖 SHM 往返）|
-| bus_publish | ✓（null/未连接/closed）+ 正向 | ⚠️ e2e 无（单测覆盖）|
-| bus_subscribe | ✓（null）+ 正向 | ⚠️ e2e 无（单测覆盖）|
-| bus_recv | ✓（null）+ 正向（meta/payload 断言）| ⚠️ e2e 无（单测覆盖）|
-| stream_close | ✓（null）| — |
-| bus_close | ✓（null）| — |
+### link (12 functions)
+| Function | Unit test | Positive e2e |
+|----------|-----------|--------------|
+| signal_connect | ✓ (null/small-size/missing-required/bad-role) | ✓ vehicle_signal |
+| signal_send | ✓ (null/empty/disconnected/closed) | ✓ vehicle_signal (encoder_status echo) |
+| signal_on_event | ✓ (null noop) | ✓ vehicle_signal (event pump) |
+| signal_close | ✓ (null) | ✓ vehicle_signal |
+| bus_attach | ✓ (null) + positive (two-node signature verify) | ⚠️ no e2e (unit tests cover the SHM roundtrip) |
+| bus_publish | ✓ (null/disconnected/closed) + positive | ⚠️ no e2e (unit-test covered) |
+| bus_subscribe | ✓ (null) + positive | ⚠️ no e2e (unit-test covered) |
+| bus_recv | ✓ (null) + positive (meta/payload assertions) | ⚠️ no e2e (unit-test covered) |
+| stream_close | ✓ (null) | — |
+| bus_close | ✓ (null) | — |
 | last_error | ✓ roundtrip | ✓ parity |
 | version | ✓ roundtrip | ✓ parity |
 
-### deck（15 函数）
-| 函数 | 单测 | 正向 e2e |
-|---|---|---|
-| devices_enumerate | ✓（双调用/空/非法 kind）| ✓ record_playback |
-| camera_open | ✓（null/small-size/未知设备/roundtrip）| ✓ record_playback |
-| camera_start | ✓（double-start）| ✓ record_playback（帧泵）|
-| camera_frames_cb | ✓（null）| ✓ record_playback（90+ 帧回调）|
-| camera_stop | ✓（close roundtrip 内）| ✓ record_playback |
+### deck (15 functions)
+| Function | Unit test | Positive e2e |
+|----------|-----------|--------------|
+| devices_enumerate | ✓ (double call/empty/invalid kind) | ✓ record_playback |
+| camera_open | ✓ (null/small-size/unknown device/roundtrip) | ✓ record_playback |
+| camera_start | ✓ (double-start) | ✓ record_playback (frame pump) |
+| camera_frames_cb | ✓ (null) | ✓ record_playback (90+ frame callbacks) |
+| camera_stop | ✓ (inside the close roundtrip) | ✓ record_playback |
 | camera_close | ✓ | ✓ record_playback |
-| recorder_new | ✓（null/父目录缺失）| ✓ record_playback |
-| recorder_record | ✓（null/未 start 相机）| ✓ record_playback（mp4 产物）|
-| recorder_stop | ✓（null 失败）| ✓ record_playback |
-| recorder_close | ✓（null）| ✓ record_playback |
-| player_open | ✓（null/文件缺失）| ✓ record_playback |
-| player_frames_cb | ✓（null 失败）| ✓ record_playback（91 帧解码）|
-| player_close | ✓（null）| ✓ record_playback |
+| recorder_new | ✓ (null/missing parent dir) | ✓ record_playback |
+| recorder_record | ✓ (null/camera not started) | ✓ record_playback (mp4 artifact) |
+| recorder_stop | ✓ (null failure) | ✓ record_playback |
+| recorder_close | ✓ (null) | ✓ record_playback |
+| player_open | ✓ (null/missing file) | ✓ record_playback |
+| player_frames_cb | ✓ (null failure) | ✓ record_playback (91 frames decoded) |
+| player_close | ✓ (null) | ✓ record_playback |
 | last_error | ✓ roundtrip | ✓ parity |
 | version | ✓ roundtrip | ✓ parity |
 
-### 跨语言
-- parity-bindings: version + 空配置 connect 错误路径（C/C++/Python 断言一致）✓
-- abi-drift: 34 声明 == 34 导出 ✓
+### Cross-Language
+- parity-bindings: version + empty-config connect error paths (C/C++/Python assert identically) ✓
+- abi-drift: 34 declarations == 34 exports ✓
 
-### 已补齐（2026-08-18，二次收尾）
-1. ✅ link bus 正向链路单测（双节点 token/ACL 验签 → subscribe → publish → recv 断言 meta/payload，真实 SHM 往返）
-2. ✅ field start/stop、link stream_close/bus_close、deck recorder_stop/player_frames_cb null 单测
-3. ✅ C++ live e2e（e2e-bindings 第 6 步，vehicle_field.cpp 连真实 server）
+### Completed (2026-08-18, second sweep)
+1. ✅ link bus positive-chain unit tests (two-node token/ACL verification → subscribe → publish → recv asserting meta/payload, real SHM roundtrip)
+2. ✅ field start/stop, link stream_close/bus_close, deck recorder_stop/player_frames_cb null unit tests
+3. ✅ C++ live e2e (step 6 of e2e-bindings, vehicle_field.cpp against a real server)
 
-### 剩余缺口（可接受）
-- link bus 的 e2e 级覆盖依赖单测（无真实跨进程 server 场景）；cxx/py 其余 SDK 正向依赖 C 层已验证链路
+### Remaining Gaps (acceptable)
+- link bus's e2e-level coverage rests on unit tests (no real cross-process server scenario); cxx/py's remaining SDKs rely on the C layer's already-verified chains for positive coverage
 
-## CLI 集成（mediaservo.sh，统一入口）
+## CLI Integration (mediaservo.sh, unified entry)
 
 ```bash
-./mediaservo.sh build bindings                # 构建三 cdylib + dev .so.<MAJOR> symlink
+./mediaservo.sh build bindings                # Builds the three cdylibs + dev .so.<MAJOR> symlinks
 ./mediaservo.sh deploy bindings --prefix /usr/local
-  # lib/    libmediaservo_{field,link,deck}.so.0.1.0 + .so.0 + .so（D241 三件套）
-  # include/mediaservo/  {common,field,link,deck}.h + {field,link,deck}.hpp（D248）
-# 消费方式（三选一）:
+  # lib/    libmediaservo_{field,link,deck}.so.0.1.0 + .so.0 + .so (the D241 trio)
+  # include/mediaservo/  {common,field,link,deck}.h + {field,link,deck}.hpp (D248)
+# Consumption (pick one):
 #   pkg-config:  PKG_CONFIG_PATH=<prefix>/lib/pkgconfig cc app.c $(pkg-config --cflags --libs mediaservo-field)
 #   CMake:       find_package(mediaservo COMPONENTS field REQUIRED) → target_link_libraries(app mediaservo::field)
-#                （单包多组件，OpenCV/Boost 模式；仅需 link: COMPONENTS link → mediaservo::link；-DCMAKE_PREFIX_PATH=<prefix>）
-#   gcc 直链:    gcc app.c -I <prefix>/include -L <prefix>/lib -lmediaservo_field
-# Python: pip install bindings/python/mediaservo（薄包；运行时 .so 定位: LD_LIBRARY_PATH 或 ldconfig）
+#                (one package, multiple components, the OpenCV/Boost pattern; link only: COMPONENTS link → mediaservo::link; -DCMAKE_PREFIX_PATH=<prefix>)
+#   gcc direct:  gcc app.c -I <prefix>/include -L <prefix>/lib -lmediaservo_field
+# Python: pip install bindings/python/mediaservo (thin package; .so location at runtime: LD_LIBRARY_PATH or ldconfig)
 ```
 
-## Node.js 绑定（napi-rs，livekit rtc-ffi-bindings 同构，2026-08-18）
+## Node.js Bindings (napi-rs, isomorphic to livekit rtc-ffi-bindings, 2026-08-18)
 
-- **架构**: `bindings/node/rust/mediaservo-node`（napi 3 cdylib → .node）直绑 Rust SDK async API；TS 薄包装 `lib/index.mjs`（PushSession/SignalSession/CameraSource/Recorder/Player）；事件/帧经 ThreadsafeFunction → JS 主线程（livekit async_queue 同构）
-- **构建/安装**: `./mediaservo.sh build bindings`（含 mediaservo.node）+ `deploy bindings` → `<prefix>/node/mediaservo/`
-- **使用**: `import { PushSession } from '<prefix>/node/mediaservo/lib/index.mjs'`（或 NODE_PATH）
-- **运行前置**: LD_LIBRARY_PATH 含 pixi lib（FFmpeg 动态库 libavformat.so.63 等——conda 工具链）；测试 `npm test`（bindings/node/）
-- **已验证**: 真 server 推流（connected/published/frames）+ 信令事件桥 + 录制回放闭环（node:test 5/5）
-- **契约**: napi 方法 camelCase（publishVideo）；元组参数 → JS 数组（[meta, data]）；`Function<T,()>` + `build_threadsafe_function::<T>().build()`
+- **Architecture**: `bindings/node/rust/mediaservo-node` (napi 3 cdylib → .node) binds the Rust SDK async API directly; thin TS wrapper `lib/index.mjs` (PushSession/SignalSession/CameraSource/Recorder/Player); events/frames cross over ThreadsafeFunction → the JS main thread (isomorphic to livekit's async_queue)
+- **Build/install**: `./mediaservo.sh build bindings` (includes mediaservo.node) + `deploy bindings` → `<prefix>/node/mediaservo/`
+- **Usage**: `import { PushSession } from '<prefix>/node/mediaservo/lib/index.mjs'` (or NODE_PATH)
+- **Runtime prerequisites**: LD_LIBRARY_PATH includes the pixi lib (FFmpeg dynamic libs libavformat.so.63 etc. — the conda toolchain); tests via `npm test` (bindings/node/)
+- **Verified**: real-server push (connected/published/frames) + signaling event bridge + record-playback closed loop (node:test 5/5)
+- **Contract**: napi methods camelCase (publishVideo); tuple parameters → JS arrays ([meta, data]); `Function<T,()>` + `build_threadsafe_function::<T>().build()`
 
-## C++11 承诺与 Result 契约（2026-08-18）
+## C++11 Promise & the Result Contract (2026-08-18)
 
-- **C++11 起步可用**: 三 SDK header-only 绑定 + 共享 Result 全部 `-std=c++11` 编译零警告（test-cxx 全量门禁）
-- **Result 定义**: `mediaservo::Result<T> = tl::expected<T, mediaservo::Error>`（alias，`detail/result.hpp`）
-  - 原生 API: `has_value()/value()/error()/value_or()`；**无 operator bool**；`Result<void>` 即 `tl::expected<void, Error>`
-  - **契约变更（source-breaking, 2026-08-18）**: 误用 `value()` 抛 `tl::bad_expected_access<Error>`（std::exception 子类，what() 通用文案，细节经异常 `.error().code/.message`）；旧 `std::logic_error` 断言需改 catch 类型（`catch(std::exception)` 兼容新旧）；`error()` on success 为标准 UB（旧版抛异常）
-  - 绑定刚交付零真实消费者，变更无外部破坏记录
-- **CC0 归属**: `tl/expected.hpp` vendored from TartanLlama/expected v1.2.0（CC0-1.0），见 `3rdparty/NOTICE`（不可修改，升级走重新 vendor）
-- **未来 std::expected swap 路径**: 编译器升 C++23 后 `detail/result.hpp` 两行 alias 改为 `std::expected<T, Error>`（API 同构），契约测试 `bindings/cxx/tests/test_result_common.cpp` 为回归锚
+- **C++11 baseline works**: the three SDK header-only bindings + the shared Result all compile under `-std=c++11` with zero warnings (test-cxx full gate)
+- **Result definition**: `mediaservo::Result<T> = tl::expected<T, mediaservo::Error>` (alias, `detail/result.hpp`)
+  - Native API: `has_value()/value()/error()/value_or()`; **no operator bool**; `Result<void>` is just `tl::expected<void, Error>`
+  - **Contract change (source-breaking, 2026-08-18)**: misusing `value()` throws `tl::bad_expected_access<Error>` (a std::exception subclass; what() is generic text; details via the exception's `.error().code/.message`); old `std::logic_error` assertions must change the catch type (`catch(std::exception)` covers old and new); `error()` on success is standard UB (the old version threw)
+  - The bindings shipped with zero real consumers, so the change has no external breakage on record
+- **CC0 attribution**: `tl/expected.hpp` vendored from TartanLlama/expected v1.2.0 (CC0-1.0), see `3rdparty/NOTICE` (do not modify; upgrades re-vendor)
+- **Future std::expected swap path**: after the compiler reaches C++23, two alias lines in `detail/result.hpp` become `std::expected<T, Error>` (API-isomorphic); the contract test `bindings/cxx/tests/test_result_common.cpp` is the regression anchor

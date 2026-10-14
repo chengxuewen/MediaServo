@@ -1,5 +1,5 @@
-// panels/video_grid — Tiles 页签体：列数选择 + tile 网格 + mini-stats 行（T3 逐字迁居）。
-// 注意：Columns 循环结构为搬迁原样——布局精修归 T4（docking 后整窗即网格宿主）。
+// panels/video_grid — the Tiles pane body: column-count selection + the tile grid + the mini-stats line (relocated verbatim in T3).
+// Note: the Columns loop structure is as-relocated — layout polish belongs to T4 (after docking, the whole window is the grid host).
 #ifndef MSRTC_VIEWER_PANELS_VIDEO_GRID_HPP
 #define MSRTC_VIEWER_PANELS_VIDEO_GRID_HPP
 

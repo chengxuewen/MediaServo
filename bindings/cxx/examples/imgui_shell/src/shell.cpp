@@ -2,25 +2,25 @@
 
 #include <SDL3/SDL.h>
 #include <cstring>
-#include <filesystem>  // exists（布局存档探测）  // std::strcmp（dummy 判）
+#include <filesystem>  // exists (layout-archive probe)  // std::strcmp (dummy check)
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlrenderer3.h>
 #include <imgui.h>
 
 #ifdef MSRTC_X11
-#include <X11/Xlib.h>  // 仅 X11 形态：安装非 exit 的 error handler（见 CreateWindow 处注）
+#include <X11/Xlib.h>  // X11 form only: install a non-exiting error handler (see the CreateWindow note)
 namespace {
 int x11_tolerant_error_handler(Display*, XErrorEvent* ev) {
-    // Xlib 默认 handler 对任何 X error exit(1)。SDL 3.4.16 无全局 handler，Xwayland
-    // selection/property 协商的 None 原子触发 BadAtom 会直接杀进程（09-20 出窗轮实录，
-    // 见 patches/sdl3-x11-none-guard.py）。此 handler 记日志并 return 0 = 让失败调用返回
-    // NULL 后 SDL 按返回值处理继续；与 events.c 的 None/NULL 守护配合（缺一即二阶崩）。
-    // 去重：同 error_code 只首播 + 每 100 次汇总一条（Xwayland 剪贴板协商风暴是良性常态，
-    // 刷屏会让"示例即模板"看起来像坏了——09-24 用户实跑 20+ 条/分钟实录）
+    // The default Xlib handler exit(1)s on any X error. SDL 3.4.16 has no global handler, and the None atoms
+    // negotiated by Xwayland selection/property trigger BadAtom and kill the process outright (recorded in the 09-20 window round;
+    // see patches/sdl3-x11-none-guard.py). This handler logs and returns 0 = the failing call returns
+    // NULL and SDL continues based on the return value; works together with the events.c None/NULL guards (missing either means a second-order crash).
+    // Dedup: log an error_code once on first occurrence + one summary line per 100 occurrences (the Xwayland clipboard negotiation storm is a benign constant,
+    // but a flood makes "examples as templates" look broken — a live 09-24 user run recorded 20+ lines/minute)
     static int seen[32] = {0};
     const int slot = ev->error_code & 31;
     if (++seen[slot] == 1 || seen[slot] % 100 == 0)
-        SDL_Log("imgui_shell: 忽略非致命 X11 error code=%d req=%d（第 %d 次，Xwayland 协商常态）",
+        SDL_Log("imgui_shell: ignoring non-fatal X11 error code=%d req=%d (occurrence %d; routine Xwayland negotiation)",
                 ev->error_code, ev->request_code, seen[slot]);
     return 0;
 }
@@ -33,30 +33,30 @@ struct App::Impl {
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
     bool running = false;
-    bool backends_ready = false;  // imgui context/后端 init 全成才置位（析构门）
-    std::string ini_name;         // io.IniFilename 指它——生命周期必须随 Impl（imgui 只存裸指针）
-    bool had_saved_layout = false;  // 构造期探测结果（App::had_saved_layout 转发）
+    bool backends_ready = false;  // set only when the imgui context/backends all init (the destructor gate)
+    std::string ini_name;         // io.IniFilename points at it — the lifetime must follow Impl (imgui stores only a raw pointer)
+    bool had_saved_layout = false;  // the construction-time probe result (forwarded by App::had_saved_layout)
 };
 
 App::App(const WindowSpec& spec, const ShellOptions& opt) : impl_(new Impl) {
     #ifdef MSRTC_X11
-    // 须在 SDL_Init 前装：CreateWindow 期间 SDL 已订阅 clipboard 属性，早期 BadAtom 会撞
-    // Xlib 默认 handler(=exit)。libX11 为 DT_NEEDED，XSetErrorHandler 进程级、不依赖 display。
+    // Must be installed before SDL_Init: SDL already subscribes to clipboard properties during CreateWindow, so an early BadAtom would hit
+    // the default Xlib handler (= exit). libX11 is a DT_NEEDED; XSetErrorHandler is process-level and does not depend on the display.
     XSetErrorHandler(x11_tolerant_error_handler);
     #endif
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("imgui_shell: SDL_Init(video) failed: %s", SDL_GetError());
-        return; // running()=false → 主循环零圈直接收摊（无显示环境=CI 编译面可过）
+        return; // running()=false → the main loop runs zero iterations and winds down (no display environment = the CI compile surface still passes)
     }
-    // 自适应初始尺寸：主显示 80% 取整（SDL_GetDisplayBounds 失败/零尺寸=dummy 无头形，
-    // 回退固定 1280x720——无头判据路径零依赖显示环境）。
+    // Adaptive initial size: floor at 80% of the primary display (SDL_GetDisplayBounds failure / zero size = the dummy headless form,
+    // fall back to a fixed 1280x720 — the headless-judgment path never depends on a display environment).
     int w = spec.width, h = spec.height;
     bool adaptive = (w <= 0 || h <= 0);
     SDL_Rect usable{};
     if (adaptive) {
-        // UsableBounds=扣掉 GNOME 顶栏/dock 的工作区（GetDisplayBounds 是全屏边界——
-        // 拿它算 80% 仍会被 dock 遮，09-24 用户实锤 1280x768 桌面）。失败回退 bounds，
-        // 再失败（dummy 无头）回退 1280x720。
+        // UsableBounds = the work area excluding the GNOME top bar/dock (GetDisplayBounds is the full-screen bounds —
+        // computing 80% from it still gets occluded by the dock; proven live by a user on a 1280x768 desktop, 09-24). On failure fall back to bounds,
+        // and on failure (dummy headless) fall back to 1280x720.
         if (!SDL_GetDisplayUsableBounds(0, &usable) || usable.w <= 0 || usable.h <= 0) {
             if (!SDL_GetDisplayBounds(0, &usable) || usable.w <= 0 || usable.h <= 0) {
                 usable.x = usable.y = 0;
@@ -67,11 +67,11 @@ App::App(const WindowSpec& spec, const ShellOptions& opt) : impl_(new Impl) {
         w = usable.w * 4 / 5;
         h = usable.h * 4 / 5;
     }
-    // RESIZABLE：SDL3 窗口默认不可拖拽改大小（SDL2 同——旧注记「本就可拖」翻案）；
-    // 缺此旗 WM 不给缩放/最大化按钮。初始尺寸自适应（主显工作区 80%+居中）另计。
+    // RESIZABLE: SDL3 windows are not draggable-resizable by default (same as SDL2 — the old "already resizable" note is overturned);
+    // without this flag the WM provides no resize/maximize buttons. The adaptive initial size (80% of the primary work area + centered) is handled separately.
     impl_->window = SDL_CreateWindow(spec.title.c_str(), w, h, SDL_WINDOW_RESIZABLE);
     if (adaptive && impl_->window) {
-        // 居中于工作区（含原点偏移——dock 在左侧时 (0,0) 不是视觉中心；本档期 SDL 无 Center API）
+        // Center within the work area (including the origin offset — with a dock on the left, (0,0) is not the visual center; SDL has no Center API in this version)
         SDL_SetWindowPosition(impl_->window, usable.x + (usable.w - w) / 2,
                                usable.y + (usable.h - h) / 2);
     }
@@ -79,7 +79,7 @@ App::App(const WindowSpec& spec, const ShellOptions& opt) : impl_(new Impl) {
         SDL_Log("imgui_shell: CreateWindow failed: %s", SDL_GetError());
         return;
     }
-    impl_->renderer = SDL_CreateRenderer(impl_->window, nullptr); // 官方默认驱动选择
+    impl_->renderer = SDL_CreateRenderer(impl_->window, nullptr); // the official default driver selection
     if (!impl_->renderer) {
         SDL_Log("imgui_shell: CreateRenderer failed: %s", SDL_GetError());
         return;
@@ -87,18 +87,18 @@ App::App(const WindowSpec& spec, const ShellOptions& opt) : impl_(new Impl) {
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
 
-    // —— docking 与布局持久化纪律（语义解释在 shell.hpp ShellOptions 注释）——
+    // -- docking and layout-persistence discipline (semantics explained in the shell.hpp ShellOptions comments) --
     ImGuiIO& io = ImGui::GetIO();
     if (opt.docking) io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     const char* drv = SDL_GetCurrentVideoDriver();
     const bool headless = !drv || std::strcmp(drv, "dummy") == 0;
     if (!opt.ini_path.empty() && !headless) {
-        std::error_code ec;  // 非抛出 exists——只读探测，成败都不拦启动
+        std::error_code ec;  // the non-throwing exists — a read-only probe; success or failure never blocks startup
         impl_->had_saved_layout = std::filesystem::exists(opt.ini_path, ec);
-        impl_->ini_name = opt.ini_path;            // 拷贝归 Impl，io 持 c_str()
+        impl_->ini_name = opt.ini_path;            // copy into Impl; io holds the c_str()
         io.IniFilename = impl_->ini_name.c_str();
     } else {
-        io.IniFilename = nullptr;  // 禁写盘：防 CWD 污染（09-23 活证=子仓根 imgui.ini 曾被跟踪）
+        io.IniFilename = nullptr;  // writing disabled: prevents CWD pollution (live proof 09-23 = an imgui.ini at the submodule root was once tracked)
     }
     if (!ImGui_ImplSDL3_InitForSDLRenderer(impl_->window, impl_->renderer) ||
         !ImGui_ImplSDLRenderer3_Init(impl_->renderer)) {
@@ -121,7 +121,7 @@ App::~App() {
     }
     if (impl_->renderer) SDL_DestroyRenderer(impl_->renderer);
     if (impl_->window) SDL_DestroyWindow(impl_->window);
-    SDL_Quit(); // 幂等（SDL3）；init 失败路径亦安全
+    SDL_Quit(); // idempotent (SDL3); also safe on the init-failure path
     delete impl_;
 }
 
@@ -146,7 +146,7 @@ void App::begin_frame() {
 
 void App::end_frame() {
     ImGui::Render();
-    SDL_SetRenderDrawColor(impl_->renderer, 0x10, 0x10, 0x14, 0xFF); // 黑底（§7 视频主区底色）
+    SDL_SetRenderDrawColor(impl_->renderer, 0x10, 0x10, 0x14, 0xFF); // black base (§7's video main-area background)
     SDL_RenderClear(impl_->renderer);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), impl_->renderer);
     SDL_RenderPresent(impl_->renderer);

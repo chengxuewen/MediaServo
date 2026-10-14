@@ -25,7 +25,7 @@ async fn integration_signaling_pipeline() {
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
     let mut server = SignalingServer::new(65536, None);
-    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；裸 JSON 读环不吃控制帧
+    server.ws_ping_secs = 0; // the a1 heartbeat has its dedicated pins in heartbeat_e2e; the raw JSON read loop must not eat control frames
     let mut server = server;
     server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));
     let app = signaling_router(server);
@@ -157,7 +157,7 @@ fn test_room_manager_signaling_flow() {
     // RoomFull for second Host
     assert!(rm.join_room("room-1", "host-2", &PeerRole::Host).is_err());
 
-    // 全 SFU（2026-08-25）: 多 Remote（舱端 consumer）可共存
+    // All-SFU (2026-08-25): multiple Remotes (cockpit consumers) can coexist
     rm.join_room("room-1", "remote-2", &PeerRole::Remote).unwrap();
     assert_eq!(rm.get_peer_count(), 3);
 
@@ -259,7 +259,7 @@ async fn test_auth_failure_integration() {
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
     let mut server = SignalingServer::new(65536, None);
-    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；裸 JSON 读环不吃控制帧
+    server.ws_ping_secs = 0; // the a1 heartbeat has its dedicated pins in heartbeat_e2e; the raw JSON read loop must not eat control frames
     let mut server = server;
     server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));
     let app = signaling_router(server);
@@ -310,7 +310,7 @@ async fn e2e_video_frame_relay() {
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
     let mut server = SignalingServer::new(65536, None);
-    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；裸 JSON 读环不吃控制帧
+    server.ws_ping_secs = 0; // the a1 heartbeat has its dedicated pins in heartbeat_e2e; the raw JSON read loop must not eat control frames
     let mut server = server;
     server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));
     let app = signaling_router(server);
@@ -420,12 +420,12 @@ async fn e2e_video_frame_relay() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// G2: 设备认证（D-H11 连接级身份）— 注册表匹配 → 绑定；失败 → Error 4010；
-// 双缺 → PSK 路径不变（回归）。
+// G2: device auth (D-H11 connection-level identity) -- registry match -> binding; failure -> Error 4010;
+// both missing -> the PSK path unchanged (regression).
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// 启动带设备注册表的测试 server，返回 (server, ws_url)。
-/// registry_yaml: `devices:` 下的条目文本（None = 空注册表）。
+/// Starts a test server with a device registry, returns (server, ws_url).
+/// registry_yaml: entry text under `devices:` (None = empty registry).
 async fn spawn_server_with_devices(registry_yaml: Option<&str>) -> (SignalingServer, String) {
     unsafe { std::env::set_var("MEDIASERVO_PSK", PSK) };
 
@@ -449,7 +449,7 @@ async fn spawn_server_with_devices(registry_yaml: Option<&str>) -> (SignalingSer
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
     let mut server = SignalingServer::new(65536, None);
-    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；裸 JSON 读环不吃控制帧
+    server.ws_ping_secs = 0; // the a1 heartbeat has its dedicated pins in heartbeat_e2e; the raw JSON read loop must not eat control frames
     server.device_registry = std::sync::Arc::new(registry);
 
     let mut server = server;
@@ -464,7 +464,7 @@ async fn spawn_server_with_devices(registry_yaml: Option<&str>) -> (SignalingSer
     (server, format!("ws://{}/ws", addr))
 }
 
-/// PSK 认证 + 发一条 RoomJoin，返回 server 响应文本。
+/// PSK auth + one RoomJoin, returns the server's response text.
 async fn psk_join_and_recv(ws_url: &str, join: &SignalingMessage) -> String {
     let (mut ws, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
     ws.send(WsMsg::Text(PSK.into())).await.unwrap();
@@ -476,7 +476,7 @@ async fn psk_join_and_recv(ws_url: &str, join: &SignalingMessage) -> String {
     resp.to_text().unwrap().to_string()
 }
 
-/// 同 `psk_join_and_recv` 但保持连接存活（返回 ws + 响应）— 绑定生命周期断言需要。
+/// Like `psk_join_and_recv` but keeps the connection alive (returns ws + response) -- needed for binding lifecycle assertions.
 type KeepAliveWs =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 async fn connect_join_keepalive(ws_url: &str, join: &SignalingMessage) -> (KeepAliveWs, String) {
@@ -493,7 +493,7 @@ const TEST_DEVICE: &str = "ms-car1";
 const TEST_DEVICE_SECRET: &str = "car1-secret";
 
 fn test_device_yaml() -> String {
-    // sha256("ms-car1:car1-secret") — 与 mediaservo_server::devices::hash_secret 一致
+    // sha256("ms-car1:car1-secret") -- consistent with mediaservo_server::devices::hash_secret
     let hash = mediaservo_server::devices::hash_secret(TEST_DEVICE, TEST_DEVICE_SECRET);
     format!("  {TEST_DEVICE}:\n    secret_hash: \"{hash}\"\n")
 }
@@ -515,7 +515,7 @@ fn device_join(device_id: Option<&str>, device_secret: Option<&str>) -> Signalin
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn g2_device_auth_success_binds_and_unbinds_on_disconnect() {
     let (server, ws_url) = spawn_server_with_devices(Some(&test_device_yaml())).await;
-    // 保持连接存活（绑定是连接级生命周期 — 见 review #2 语义）。
+    // keep the connection alive (the binding is connection-scoped -- see the review #2 semantics).
     let (ws, resp) =
         connect_join_keepalive(&ws_url, &device_join(Some(TEST_DEVICE), Some(TEST_DEVICE_SECRET)))
             .await;
@@ -524,17 +524,17 @@ async fn g2_device_auth_success_binds_and_unbinds_on_disconnect() {
         SignalingMessage::RoomJoined { peer_id, .. } => peer_id,
         other => panic!("expected RoomJoined, got {other:?}"),
     };
-    // D-H11: 连接级身份 — 会话绑定 device_id，G3 可经 server.device_id_of(peer) 读取。
+    // D-H11: connection-level identity -- the session binds device_id; G3 can read it via server.device_id_of(peer).
     assert_eq!(
         server.device_id_of(&peer_id).as_deref(),
         Some(TEST_DEVICE),
-        "peer_id 必须绑定 device_id"
+        "peer_id must be bound to device_id"
     );
     assert_eq!(server.device_binding_count(), 1);
-    // 断开 → cleanup 必须解除绑定（review #2: 断开清理验证）。
+    // disconnect -> cleanup must unbind (review #2: disconnect-cleanup verification).
     drop(ws);
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    assert_eq!(server.device_id_of(&peer_id), None, "断开后绑定必须解除");
+    assert_eq!(server.device_id_of(&peer_id), None, "the binding must be unbound after disconnect");
     assert_eq!(server.device_binding_count(), 0);
 }
 
@@ -545,7 +545,7 @@ async fn g2_device_auth_unknown_device_rejected() {
     let msg: SignalingMessage = serde_json::from_str(&resp).unwrap();
     match msg {
         SignalingMessage::Error { code, message } => {
-            assert_eq!(code, 4010, "未知设备必须 4010");
+            assert_eq!(code, 4010, "an unknown device must get 4010");
             assert!(message.contains("invalid device credentials"), "message: {message}");
         }
         other => panic!("expected Error, got {other:?}"),
@@ -560,7 +560,7 @@ async fn g2_device_auth_wrong_secret_rejected() {
     let msg: SignalingMessage = serde_json::from_str(&resp).unwrap();
     match msg {
         SignalingMessage::Error { code, message } => {
-            assert_eq!(code, 4010, "错误 secret 必须 4010");
+            assert_eq!(code, 4010, "a wrong secret must get 4010");
             assert!(message.contains("invalid device credentials"), "message: {message}");
         }
         other => panic!("expected Error, got {other:?}"),
@@ -569,7 +569,7 @@ async fn g2_device_auth_wrong_secret_rejected() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn g2_device_auth_half_present_rejected() {
-    // G4 review Minor 1: 形状检查 — 只带 id 不带 secret 必须拒绝（不留歧义）。
+    // G4 review Minor 1: shape check -- carrying only the id without the secret must be refused (no ambiguity).
     let (_server, ws_url) = spawn_server_with_devices(Some(&test_device_yaml())).await;
     for join in [device_join(Some(TEST_DEVICE), None), device_join(None, Some(TEST_DEVICE_SECRET))]
     {
@@ -577,7 +577,7 @@ async fn g2_device_auth_half_present_rejected() {
         let msg: SignalingMessage = serde_json::from_str(&resp).unwrap();
         match msg {
             SignalingMessage::Error { code, message } => {
-                assert_eq!(code, 4010, "半带凭证必须 4010");
+                assert_eq!(code, 4010, "half-present credentials must get 4010");
                 assert!(message.contains("both device_id"), "message: {message}");
             }
             other => panic!("expected Error, got {other:?}"),
@@ -587,7 +587,7 @@ async fn g2_device_auth_half_present_rejected() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn g2_psk_path_regression_with_registry_loaded() {
-    // 旧 client / 不带设备字段: 注册表在场也必须走 PSK 路径（additive 双向兼容）。
+    // old client / no device fields: with the registry present it must still take the PSK path (additive two-way compat).
     let (server, ws_url) = spawn_server_with_devices(Some(&test_device_yaml())).await;
     let resp = psk_join_and_recv(&ws_url, &device_join(None, None)).await;
     let joined: SignalingMessage = serde_json::from_str(&resp).unwrap();
@@ -595,13 +595,17 @@ async fn g2_psk_path_regression_with_registry_loaded() {
         SignalingMessage::RoomJoined { peer_id, .. } => peer_id,
         other => panic!("expected RoomJoined, got {other:?}"),
     };
-    assert_eq!(server.device_id_of(&peer_id), None, "PSK 路径不得产生设备绑定");
+    assert_eq!(
+        server.device_id_of(&peer_id),
+        None,
+        "the PSK path must not produce a device binding"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn g2_unknown_vs_wrong_secret_wire_identical() {
-    // review #1 TDD: 未知设备与错误 secret 的完整 wire 响应必须逐字节一致
-    // （同 code 4010 + 同消息 — 防枚举; 内部区分仅进审计日志）。
+    // review #1 TDD: the full wire response for unknown device and wrong secret must be byte-identical
+    // (same code 4010 + same message -- anti-enumeration; the internal distinction goes to the audit log only).
     let (_server, ws_url) = spawn_server_with_devices(Some(&test_device_yaml())).await;
     let r_unknown =
         psk_join_and_recv(&ws_url, &device_join(Some("ms-not-registered"), Some("x"))).await;
@@ -609,7 +613,7 @@ async fn g2_unknown_vs_wrong_secret_wire_identical() {
         psk_join_and_recv(&ws_url, &device_join(Some(TEST_DEVICE), Some("wrong-secret"))).await;
     assert_eq!(
         r_unknown, r_bad,
-        "未知设备与错误 secret 的 wire 响应必须逐字节一致（防枚举/防时序）"
+        "the wire responses for unknown device and wrong secret must be byte-identical (anti-enumeration / anti-timing)"
     );
     let msg: SignalingMessage = serde_json::from_str(&r_unknown).unwrap();
     match msg {
@@ -623,9 +627,9 @@ async fn g2_unknown_vs_wrong_secret_wire_identical() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn g2_join_failure_leaves_no_binding() {
-    // review #2: 绑定必须发生在 join 成功之后 — RoomFull(4002) 不得产生残留绑定。
+    // review #2: the binding must happen after join succeeds -- RoomFull(4002) must leave no residual binding.
     let (server, ws_url) = spawn_server_with_devices(Some(&test_device_yaml())).await;
-    // conn1: 第一个 Host 加入成功（保持连接）→ 绑定建立。
+    // conn1: the first Host joins successfully (keeps the connection) -> the binding is established.
     let (ws1, resp1) =
         connect_join_keepalive(&ws_url, &device_join(Some(TEST_DEVICE), Some(TEST_DEVICE_SECRET)))
             .await;
@@ -634,28 +638,38 @@ async fn g2_join_failure_leaves_no_binding() {
         SignalingMessage::RoomJoined { peer_id, .. } => peer_id,
         other => panic!("expected RoomJoined, got {other:?}"),
     };
-    assert_eq!(server.device_id_of(&peer1).as_deref(), Some(TEST_DEVICE), "conn1 绑定应建立");
+    assert_eq!(
+        server.device_id_of(&peer1).as_deref(),
+        Some(TEST_DEVICE),
+        "conn1's binding should be established"
+    );
     assert_eq!(server.device_binding_count(), 1);
-    // conn2: 同房间第二个 Host → RoomFull(4002)，认证通过但 join 失败。
+    // conn2: a second Host in the same room -> RoomFull(4002); auth passed but join failed.
     let resp2 =
         psk_join_and_recv(&ws_url, &device_join(Some(TEST_DEVICE), Some(TEST_DEVICE_SECRET))).await;
     let msg: SignalingMessage = serde_json::from_str(&resp2).unwrap();
     match msg {
-        SignalingMessage::Error { code, .. } => assert_eq!(code, 4002, "第二 Host 应 RoomFull"),
+        SignalingMessage::Error { code, .. } => {
+            assert_eq!(code, 4002, "the second Host should get RoomFull")
+        }
         other => panic!("expected Error, got {other:?}"),
     }
-    assert_eq!(server.device_binding_count(), 1, "join 失败不得残留绑定（review #2）");
+    assert_eq!(
+        server.device_binding_count(),
+        1,
+        "a failed join must leave no residual binding (review #2)"
+    );
     drop(ws1);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// G3: 舱端分级授权（D-H11 矩阵 + 租户隔离 + 急停强审计 + 配置单向）
+// G3: cockpit tiered authorization (the D-H11 matrix + tenant isolation + emergency-stop strong audit + one-way config)
 // ═══════════════════════════════════════════════════════════════════════════
 
 const JWT_SECRET: &str = "g3-test-jwt-secret-32-bytes-min!!";
 
-/// 审计环形缓冲是进程全局 — 并行测试的 clear_recent() 会互相清掉对方的事件。
-/// 凡 clear/断言 audit::recent() 的 WS 测试必须持此锁串行（其余测试不受影响）。
+/// The audit ring buffer is process-global -- parallel tests' clear_recent() would wipe each other's events.
+/// Any WS test that clears/asserts audit::recent() must hold this lock to run serially (other tests unaffected).
 static AUDIT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn account_token(username: &str, role: &str, vehicles: &[&str]) -> String {
@@ -676,14 +690,14 @@ fn account_token(username: &str, role: &str, vehicles: &[&str]) -> String {
     .unwrap()
 }
 
-/// 双车注册表（ms-car1 / ms-car2）— 租户隔离测试用。
+/// Dual-vehicle registry (ms-car1 / ms-car2) -- for tenant-isolation tests.
 fn two_devices_yaml() -> String {
     let h1 = mediaservo_server::devices::hash_secret("ms-car1", "car1-secret");
     let h2 = mediaservo_server::devices::hash_secret("ms-car2", "car2-secret");
     format!("  ms-car1:\n    secret_hash: \"{h1}\"\n  ms-car2:\n    secret_hash: \"{h2}\"\n")
 }
 
-/// G3 测试 server: JWT 认证（JWT_SECRET）+ 设备注册表。
+/// G3 test server: JWT auth (JWT_SECRET) + the device registry.
 async fn spawn_server_g3(devices_yaml: &str) -> (SignalingServer, String) {
     unsafe { std::env::set_var("MEDIASERVO_PSK", PSK) };
     let registry = mediaservo_server::devices::DeviceRegistry::from_yaml(&format!(
@@ -704,7 +718,7 @@ async fn spawn_server_g3(devices_yaml: &str) -> (SignalingServer, String) {
     #[cfg(not(feature = "sfu-mediasoup"))]
     let mut server =
         SignalingServer::new(65536, Some(mediaservo_common::auth::JwtAuth::new(JWT_SECRET)));
-    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉
+    server.ws_ping_secs = 0; // the a1 heartbeat has its dedicated pins in heartbeat_e2e
     server.device_registry = std::sync::Arc::new(registry);
     let mut server = server;
     server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));
@@ -746,8 +760,8 @@ fn legacy_join(room: &str, role: PeerRole) -> SignalingMessage {
     }
 }
 
-/// 账号 JWT 认证 + RoomJoin（sec-websocket-protocol 传 token — 与生产浏览器一致）。
-/// 返回 (ws, 响应文本)；调用方持有 ws 保持会话存活。
+/// Account JWT auth + RoomJoin (token via sec-websocket-protocol -- same as the production browser).
+/// Returns (ws, response text); the caller holds ws to keep the session alive.
 async fn account_join(
     ws_url: &str,
     token: &str,
@@ -798,17 +812,17 @@ async fn g3_room_join_matrix_and_tenant_isolation() {
     mediaservo_server::audit::clear_recent();
     let _ring_guard = AUDIT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-    // 车 A / 车 B 上线（各自房间登记主车）。
+    // vehicles A/B online (each registers its room's owner vehicle).
     let (_veh_a, resp) =
         connect_join_keepalive(&ws_url, &device_join_room("car1-room", "ms-car1", "car1-secret"))
             .await;
-    assert!(resp.contains("room_joined"), "车 A 上线: {resp}");
+    assert!(resp.contains("room_joined"), "vehicle A online: {resp}");
     let (_veh_b, resp) =
         connect_join_keepalive(&ws_url, &device_join_room("car2-room", "ms-car2", "car2-secret"))
             .await;
-    assert!(resp.contains("room_joined"), "车 B 上线: {resp}");
+    assert!(resp.contains("room_joined"), "vehicle B online: {resp}");
 
-    // operator carol（白名单 [ms-car1]）: 授权车放行 ✅
+    // operator carol (allowlist [ms-car1]): the allowlisted vehicle is allowed OK
     let (ws, resp) = account_join(
         &ws_url,
         &account_token("carol", "operator", &["ms-car1"]),
@@ -816,10 +830,10 @@ async fn g3_room_join_matrix_and_tenant_isolation() {
         PeerRole::Consumer,
     )
     .await;
-    assert!(resp.contains("room_joined"), "operator 授权车必须放行: {resp}");
+    assert!(resp.contains("room_joined"), "operator on an allowlisted vehicle must pass: {resp}");
     drop(ws);
 
-    // 租户隔离: carol → 车 B 房间 ❌ 4031
+    // tenant isolation: carol -> vehicle B's room DENIED 4031
     let (_ws, resp) = account_join(
         &ws_url,
         &account_token("carol", "operator", &["ms-car1"]),
@@ -827,9 +841,12 @@ async fn g3_room_join_matrix_and_tenant_isolation() {
         PeerRole::Consumer,
     )
     .await;
-    assert!(resp.contains(r#""code":4031"#), "operator 非授权车必须拒绝: {resp}");
+    assert!(
+        resp.contains(r#""code":4031"#),
+        "operator on a non-allowlisted vehicle must be denied: {resp}"
+    );
 
-    // viewer 空白名单: 授权车也看不了 ❌
+    // viewer with an empty allowlist: cannot even watch the allowlisted vehicle DENIED
     let (_ws, resp) = account_join(
         &ws_url,
         &account_token("vic", "viewer", &[]),
@@ -837,9 +854,12 @@ async fn g3_room_join_matrix_and_tenant_isolation() {
         PeerRole::Consumer,
     )
     .await;
-    assert!(resp.contains(r#""code":4031"#), "viewer 空白名单必须拒绝: {resp}");
+    assert!(
+        resp.contains(r#""code":4031"#),
+        "viewer with an empty allowlist must be denied: {resp}"
+    );
 
-    // dispatcher: 任意车 ✅（拉流+状态）
+    // dispatcher: any vehicle OK (pull + status)
     let (ws, resp) = account_join(
         &ws_url,
         &account_token("d1", "dispatcher", &[]),
@@ -847,23 +867,26 @@ async fn g3_room_join_matrix_and_tenant_isolation() {
         PeerRole::Consumer,
     )
     .await;
-    assert!(resp.contains("room_joined"), "dispatcher 任意车必须放行: {resp}");
+    assert!(resp.contains("room_joined"), "dispatcher on any vehicle must pass: {resp}");
     drop(ws);
 
-    // 车 A 不可见车 B: ms-car2 加入 car1-room（车 B 主车房间）❌
+    // vehicle A cannot see vehicle B: ms-car2 joins car1-room (vehicle B's owner room) DENIED
     let (_ws, resp) =
         connect_join_keepalive(&ws_url, &device_join_room("car1-room", "ms-car2", "car2-secret"))
             .await;
-    assert!(resp.contains(r#""code":4031"#), "车 A 不可见车 B（租户隔离）: {resp}");
+    assert!(
+        resp.contains(r#""code":4031"#),
+        "vehicle A cannot see vehicle B (tenant isolation): {resp}"
+    );
 
-    // legacy PSK 不受矩阵限制（additive 回归: 未配置账号的部署行为不变）。
+    // legacy PSK is not constrained by the matrix (additive regression: deployments without accounts behave the same).
     let resp = psk_join_and_recv(&ws_url, &legacy_join("car1-room", PeerRole::Consumer)).await;
-    assert!(resp.contains("room_joined"), "legacy PSK 路径回归: {resp}");
+    assert!(resp.contains("room_joined"), "legacy PSK path regression: {resp}");
 
-    // C15: 全部 denial 已审计。
+    // C15: all denials audited.
     let audit = mediaservo_server::audit::recent();
-    assert!(has_denial(&audit, "room_join"), "room_join denials 必须审计: {audit:?}");
-    assert!(has_denial(&audit, "room_join"), "tenant-isolation denials 必须审计");
+    assert!(has_denial(&audit, "room_join"), "room_join denials must be audited: {audit:?}");
+    assert!(has_denial(&audit, "room_join"), "tenant-isolation denials must be audited");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -878,7 +901,7 @@ async fn g3_emergency_audit_and_matrix() {
         connect_join_keepalive(&ws_url, &device_join_room("car2-room", "ms-car2", "car2-secret"))
             .await;
 
-    // operator carol 授权车急停 → 转发 + 强审计（who/when/vehicle/command）。
+    // operator carol emergency stop on an allowlisted vehicle -> forwarded + strong audit (who/when/vehicle/command).
     let (mut ws, resp) = account_join(
         &ws_url,
         &account_token("carol", "operator", &["ms-car1"]),
@@ -908,11 +931,11 @@ async fn g3_emergency_audit_and_matrix() {
                 && vehicle == "ms-car1"
                 && command == "e-stop"
         )),
-        "急停强审计必须含 谁/何时/哪个车/什么命令: {events:?}"
+        "the emergency-stop strong audit must contain who/when/which vehicle/what command: {events:?}"
     );
     drop(ws);
 
-    // dispatcher 可拉流任意车但急停被拒（矩阵: dispatcher 无急停）❌ 4031 + 审计。
+    // dispatcher can pull any vehicle but emergency stop is denied (matrix: dispatcher has no emergency stop) DENIED 4031 + audit.
     let (mut ws, resp) = account_join(
         &ws_url,
         &account_token("d1", "dispatcher", &[]),
@@ -930,13 +953,16 @@ async fn g3_emergency_audit_and_matrix() {
         .unwrap();
     assert!(
         resp.to_text().unwrap().contains(r#""code":4031"#),
-        "dispatcher 急停必须拒绝: {}",
+        "dispatcher emergency stop must be denied: {}",
         resp.to_text().unwrap()
     );
-    assert!(has_denial(&mediaservo_server::audit::recent(), "emergency"), "急停拒绝必须审计");
+    assert!(
+        has_denial(&mediaservo_server::audit::recent(), "emergency"),
+        "an emergency-stop denial must be audited"
+    );
     drop(ws);
 
-    // viewer 可拉流但急停被拒 ❌。
+    // viewer can pull but emergency stop is denied DENIED.
     let (mut ws, resp) = account_join(
         &ws_url,
         &account_token("vic", "viewer", &["ms-car1"]),
@@ -954,7 +980,7 @@ async fn g3_emergency_audit_and_matrix() {
         .unwrap();
     assert!(
         resp.to_text().unwrap().contains(r#""code":4031"#),
-        "viewer 急停必须拒绝: {}",
+        "viewer emergency stop must be denied: {}",
         resp.to_text().unwrap()
     );
 }
@@ -970,7 +996,7 @@ async fn g3_config_push_inbound_rejected() {
     assert!(resp.contains("room_joined"));
     mediaservo_server::audit::clear_recent();
 
-    // 客户端入站 ConfigPush（即使来自车端）→ 拒绝 + 审计（server 单向下发）。
+    // a client-inbound ConfigPush (even from a vehicle) -> denied + audited (the server pushes one-way).
     let cfg = SignalingMessage::ConfigPush {
         room_id: "car1-room".into(),
         target: "self".into(),
@@ -985,12 +1011,12 @@ async fn g3_config_push_inbound_rejected() {
         .unwrap();
     assert!(
         resp.to_text().unwrap().contains(r#""code":4031"#),
-        "ConfigPush 入站必须拒绝: {}",
+        "an inbound ConfigPush must be denied: {}",
         resp.to_text().unwrap()
     );
     assert!(
         has_denial(&mediaservo_server::audit::recent(), "config_push"),
-        "ConfigPush 拒绝必须审计"
+        "a ConfigPush denial must be audited"
     );
 }
 
@@ -1009,13 +1035,13 @@ async fn g3_jwt_unknown_role_rejected_at_handshake() {
         .unwrap();
     assert!(
         resp.to_text().unwrap().contains(r#""code":4011"#),
-        "未知角色必须在握手期拒绝: {}",
+        "an unknown role must be refused at the handshake: {}",
         resp.to_text().unwrap()
     );
 }
 
-/// T0 fail-closed 钉：JWT 已呈现且验签失败（异签密钥伪造）→ 4013 断连；
-/// 拒绝后补发正确 PSK 也不得获得 authenticated（旧形会落 PSK → Legacy 矩阵旁路）。
+/// T0 fail-closed pin: a JWT presented with failed verification (forged with a different signing key) -> a 4013 disconnect;
+/// after the refusal, presenting the correct PSK must not gain authenticated (the old shape fell to PSK -> the Legacy matrix bypass).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn bad_jwt_rejects_4013_and_never_degrades_to_psk_legacy() {
     let (_server, ws_url) = spawn_server_g3(&two_devices_yaml()).await;
@@ -1039,26 +1065,26 @@ async fn bad_jwt_rejects_4013_and_never_degrades_to_psk_legacy() {
     let (mut ws, _) = tokio_tungstenite::connect_async(req).await.unwrap();
     let resp = tokio::time::timeout(std::time::Duration::from_secs(3), ws.next())
         .await
-        .expect("应即时收到 4013 拒（非静默挂起）")
+        .expect("the 4013 refusal should arrive immediately (not hang silently)")
         .unwrap()
         .unwrap();
     assert!(
         resp.to_text().unwrap().contains(r#""code":4013"#),
-        "坏 JWT 必须 4013 拒绝: {}",
+        "a bad JWT must be refused with 4013: {}",
         resp.to_text().unwrap()
     );
-    // 拒后再递真 PSK：连接已死，任何 authenticated 语义 = 降级回归。
+    // presenting the real PSK after the refusal: the connection is dead; any authenticated semantics = a downgrade regression.
     let _ = ws.send(WsMsg::Text(PSK.into())).await;
     match tokio::time::timeout(std::time::Duration::from_secs(3), ws.next()).await {
-        Err(_) => {}                              // 无响应（连接僵死）——可接受终形
-        Ok(None) | Ok(Some(Err(_))) => {}          // 关闭
-        Ok(Some(Ok(m))) => panic!("4013 后不应再有帧: {}", m.to_text().unwrap()),
+        Err(_) => {} // no response (the connection is zombified) -- an acceptable end state
+        Ok(None) | Ok(Some(Err(_))) => {} // closed
+        Ok(Some(Ok(m))) => panic!("no more frames after 4013: {}", m.to_text().unwrap()),
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// G3 review I1: P2P 路径控制列强制 — Remote 角色 join 门（can_control）+
-// P2P 房间 SDP/ICE 中继门（防 viewer/dispatcher 经 SDP 协商控制）。
+// G3 review I1: control-column enforcement on the P2P path -- the Remote-role join gate (can_control) +
+// the P2P room SDP/ICE relay gate (prevents viewer/dispatcher negotiating control over SDP).
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1067,9 +1093,9 @@ async fn g3_review_i1_remote_role_join_requires_control() {
     let (_veh_a, resp) =
         connect_join_keepalive(&ws_url, &device_join_room("car1-room", "ms-car1", "car1-secret"))
             .await;
-    assert!(resp.contains("room_joined"), "车 A 上线: {resp}");
+    assert!(resp.contains("room_joined"), "vehicle A online: {resp}");
 
-    // viewer（可拉流但无控制）: Remote join ❌ 4031（Remote = P2P 控制位）
+    // viewer (can pull but has no control): Remote join DENIED 4031 (Remote = the P2P control slot)
     let (_ws, resp) = account_join(
         &ws_url,
         &account_token("vic", "viewer", &["ms-car1"]),
@@ -1077,9 +1103,12 @@ async fn g3_review_i1_remote_role_join_requires_control() {
         PeerRole::Remote,
     )
     .await;
-    assert!(resp.contains(r#""code":4031"#), "viewer Remote join 必须拒绝（无控制）: {resp}");
+    assert!(
+        resp.contains(r#""code":4031"#),
+        "viewer Remote join must be denied (no control): {resp}"
+    );
 
-    // dispatcher（任意车拉流但无控制）: Remote join ❌ 4031
+    // dispatcher (pulls any vehicle but has no control): Remote join DENIED 4031
     let (_ws, resp) = account_join(
         &ws_url,
         &account_token("d1", "dispatcher", &[]),
@@ -1089,10 +1118,10 @@ async fn g3_review_i1_remote_role_join_requires_control() {
     .await;
     assert!(
         resp.contains(r#""code":4031"#),
-        "dispatcher Remote join 必须拒绝（矩阵无控制）: {resp}"
+        "dispatcher Remote join must be denied (the matrix grants no control): {resp}"
     );
 
-    // operator（授权车 + 控制）: Remote join ✅（P2P 控制协商位）
+    // operator (allowlisted vehicle + control): Remote join OK (the P2P control-negotiation slot)
     let (ws, resp) = account_join(
         &ws_url,
         &account_token("carol", "operator", &["ms-car1"]),
@@ -1100,10 +1129,10 @@ async fn g3_review_i1_remote_role_join_requires_control() {
         PeerRole::Remote,
     )
     .await;
-    assert!(resp.contains("room_joined"), "operator Remote join 必须放行: {resp}");
+    assert!(resp.contains("room_joined"), "operator Remote join must pass: {resp}");
     drop(ws);
 
-    // viewer 以 Consumer join 仍可（SFU 媒体拉流不受影响）
+    // viewer joining as Consumer is still fine (SFU media pulling unaffected)
     let (ws, resp) = account_join(
         &ws_url,
         &account_token("vic", "viewer", &["ms-car1"]),
@@ -1111,18 +1140,18 @@ async fn g3_review_i1_remote_role_join_requires_control() {
         PeerRole::Consumer,
     )
     .await;
-    assert!(resp.contains("room_joined"), "viewer Consumer 拉流不受影响: {resp}");
+    assert!(resp.contains("room_joined"), "viewer Consumer pulling unaffected: {resp}");
     drop(ws);
 
-    // legacy PSK Remote 不受矩阵限制（additive 回归）
+    // legacy PSK Remote is not constrained by the matrix (additive regression)
     let resp = psk_join_and_recv(&ws_url, &legacy_join("car1-room", PeerRole::Remote)).await;
-    assert!(resp.contains("room_joined"), "legacy Remote 回归: {resp}");
+    assert!(resp.contains("room_joined"), "legacy Remote regression: {resp}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn g3_review_i1_sdp_relay_never_in_device_rooms() {
     let (_server, ws_url) = spawn_server_g3(&two_devices_yaml()).await;
-    // 车端 host 会话：收房间广播，观察 SDP 是否被中继。
+    // the vehicle host session: receives room broadcasts, watches whether SDP gets relayed.
     let _ring_guard = AUDIT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
     let (mut veh_ws, resp) =
@@ -1130,7 +1159,7 @@ async fn g3_review_i1_sdp_relay_never_in_device_rooms() {
             .await;
     assert!(resp.contains("room_joined"));
 
-    // viewer Consumer 加入（拉流可）但发 SDP → 不得中继到车端。
+    // viewer Consumer joins (pulling is fine) but sends SDP -> it must not be relayed to the vehicle.
     let (mut vic_ws, resp) = account_join(
         &ws_url,
         &account_token("vic", "viewer", &["ms-car1"]),
@@ -1146,7 +1175,7 @@ async fn g3_review_i1_sdp_relay_never_in_device_rooms() {
     };
     vic_ws.send(WsMsg::Text(serde_json::to_string(&viewer_sdp).unwrap())).await.unwrap();
 
-    // 车端在 500ms 内不应收到任何 SDP（viewer 的控制协商被服务端拦截）。
+    // the vehicle must not receive any SDP within 500ms (the viewer's control negotiation is intercepted server-side).
     let mut blocked = true;
     if let Ok(Some(Ok(msg))) =
         tokio::time::timeout(std::time::Duration::from_millis(500), veh_ws.next()).await
@@ -1156,10 +1185,13 @@ async fn g3_review_i1_sdp_relay_never_in_device_rooms() {
             blocked = false;
         }
     }
-    assert!(blocked, "viewer 的 SDP 不得中继到车端（P2P 控制协商拦截）");
+    assert!(
+        blocked,
+        "the viewer's SDP must not be relayed to the vehicle (P2P control-negotiation interception)"
+    );
     drop(vic_ws);
 
-    // operator Consumer 加入并发 SDP → 中继到车端（控制协商放行）。
+    // operator Consumer joins and sends SDP -> relayed to the vehicle (the control negotiation is allowed).
     let (mut op_ws, resp) = account_join(
         &ws_url,
         &account_token("carol", "operator", &["ms-car1"]),
@@ -1187,8 +1219,8 @@ async fn g3_review_i1_sdp_relay_never_in_device_rooms() {
             }
         }
     }
-    // 全 SFU（2026-08-25）: 所有房间 DeviceStream——Sdp 一律不中继（无 P2P 控制协商，
-    // 媒体走 SFU 消息驱动，控制 DC 经 SFU data 域 Phase B）。operator 的 SDP 同样拦截。
-    assert!(!relayed, "全 SFU: operator 的 SDP 也不得中继到车端");
+    // All-SFU (2026-08-25): every room is a DeviceStream -- SDP is never relayed (no P2P control negotiation,
+    // media goes over SFU message-driven flows, and control DC goes through the SFU data domain Phase B). The operator's SDP is intercepted too.
+    assert!(!relayed, "all-SFU: the operator's SDP must not be relayed to the vehicle either");
     drop(op_ws);
 }

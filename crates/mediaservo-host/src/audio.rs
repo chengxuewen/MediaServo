@@ -1,22 +1,22 @@
-//! H2 音频会议共享工具（host-audio 进程与音频 e2e 共用）:
-//! opus remote SDP 构造、produce rtp_parameters 构造、tone PCM 生成。
+//! H2 audio-meeting shared utilities (shared by the host-audio process and audio e2e):
+//! opus remote SDP construction, produce rtp_parameters construction, tone PCM generation.
 //!
-//! 纯函数、无 I/O — 保持可单测（C18: 对齐官方 answerer 协商路径）。
+//! Pure functions, no I/O -- kept unit-testable (C18: aligned with the official answerer negotiation path).
 
 use mediaservo_common::protocol::{DtlsParameters, IceCandidate, IceParameters};
 use mediaservo_webrtc::rtp::RTCRtpParameters;
 use serde_json::{Value, json};
 
-/// opus 标准 PT（server default_router_options: opus 111/48000/2ch）。
+/// Standard opus PT (server default_router_options: opus 111/48000/2ch).
 pub const OPUS_PT: u16 = 111;
-/// 采样率（libwebrtc AudioTrackSource 固定 48kHz）。
+/// Sample rate (libwebrtc AudioTrackSource is fixed at 48kHz).
 pub const SAMPLE_RATE: u32 = 48_000;
-/// 10ms 帧样本数（48kHz / 100）。
+/// Samples per 10ms frame (48kHz / 100).
 pub const FRAME_SAMPLES: usize = 480;
 
-/// 用 mediasoup transport 参数构造音频 remote SDP（opus，ICE-Lite server）。
-/// `sendonly` = server 发送、本地接收（消费侧）; `recvonly` = server 接收、本地发送（生产侧）。
-/// `ssrc` 仅在 sendonly 时注入（consumer 的 encodings[0].ssrc — libwebrtc demux 必需）。
+/// Builds the audio remote SDP from mediasoup transport parameters (opus, ICE-Lite server).
+/// `sendonly` = server sends and local receives (consumer side); `recvonly` = server receives and local sends (producer side).
+/// `ssrc` is injected only for sendonly (the consumer's encodings[0].ssrc -- required for libwebrtc demux).
 pub fn build_remote_audio_sdp(
     ice_parameters: &IceParameters,
     dtls_parameters: &DtlsParameters,
@@ -85,8 +85,8 @@ pub fn build_remote_audio_sdp(
     lines.join("\r\n")
 }
 
-/// 从协商结果 (RTCRtpParameters) 构造 mediasoup produce 的 rtp_parameters。
-/// opus 必须带 channels（mediasoup codec 匹配含 channels — 2ch 与 router 一致）。
+/// Builds mediasoup produce rtp_parameters from the negotiation result (RTCRtpParameters).
+/// opus must carry channels (mediasoup codec matching includes channels -- 2ch matches the router).
 pub fn build_audio_produce_rtp_parameters(params: &RTCRtpParameters) -> Value {
     let codecs: Vec<Value> = params
         .codecs
@@ -149,8 +149,8 @@ pub fn build_audio_produce_rtp_parameters(params: &RTCRtpParameters) -> Value {
     })
 }
 
-/// 正弦 tone 帧（10ms i16 单声道 PCM，LE 字节序; freq_hz 任意频率）。
-/// 有实际载荷 → opus 不静音压缩（防 DTX 零包）；替代硬件麦克风的合成源（stub source）。
+/// Sine tone frame (10ms i16 mono PCM, LE byte order; freq_hz is any frequency).
+/// Real payload -> opus will not silence-compress (prevents DTX zero-packets); a synthetic source standing in for a hardware microphone (stub source).
 pub fn tone_frame(phase: &mut f64, freq_hz: f64) -> Vec<u8> {
     let step = 2.0 * std::f64::consts::PI * freq_hz / SAMPLE_RATE as f64;
     let mut out = Vec::with_capacity(FRAME_SAMPLES * 2);
@@ -239,7 +239,7 @@ mod tests {
         };
         let v = build_audio_produce_rtp_parameters(&params);
         assert_eq!(v["codecs"][0]["mimeType"], "audio/opus");
-        assert_eq!(v["codecs"][0]["channels"], 2, "opus 必须带 channels（mediasoup 匹配）");
+        assert_eq!(v["codecs"][0]["channels"], 2, "opus must carry channels (mediasoup matching)");
         assert_eq!(v["encodings"][0]["ssrc"], 3_721_454_228u64);
     }
 
@@ -248,9 +248,9 @@ mod tests {
         let mut phase = 0.0;
         let frame = tone_frame(&mut phase, 440.0);
         assert_eq!(frame.len(), FRAME_SAMPLES * 2);
-        assert_ne!(frame, vec![0u8; FRAME_SAMPLES * 2], "tone 非零载荷");
+        assert_ne!(frame, vec![0u8; FRAME_SAMPLES * 2], "tone is non-zero payload");
         let mut phase2 = 0.0;
         tone_frame(&mut phase2, 880.0);
-        assert!(phase2 > 0.0, "相位推进");
+        assert!(phase2 > 0.0, "phase advances");
     }
 }

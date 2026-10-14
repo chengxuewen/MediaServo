@@ -52,7 +52,7 @@ impl RTCPeerConnectionFactory {
         self.backend.create_video_track()
     }
     /// Create an audio track with a real audio track backend (H2).
-    /// 48kHz mono AudioTrackSource — write_frame 推 PCM i16，libwebrtc 内部 opus 编码。
+    /// 48kHz mono AudioTrackSource -- write_frame pushes PCM i16, libwebrtc encodes opus internally.
     #[cfg(feature = "backend-webrtc-sys")]
     pub fn create_audio_track(&self, track_id: &str) -> TrackSender {
         let (backend, _media_track) = self.backend.create_audio_track();

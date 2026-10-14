@@ -1,4 +1,4 @@
-// panels/log_view — 实现。
+// panels/log_view — implementation.
 #include "log_view.hpp"
 
 #include <imgui.h>
@@ -10,10 +10,10 @@ namespace viewer {
 
 void render_log_view() {
     ImGui::Begin(dock::kLog);
-    static bool follow = true;  // 自动滚底（IDE console 惯例；手动上翻= ImGui 滚动条，勾选关掉跟随）
+    static bool follow = true;  // auto-scroll to bottom (the IDE console convention; scrolling up = the ImGui scrollbar; unchecking turns follow off)
     ImGui::Checkbox("follow", &follow);
     ImGui::SameLine();
-    if (ImGui::Button("reset layout")) dock::request_reset_layout();  // 清 ini + 下帧重建（要素⑤）
+    if (ImGui::Button("reset layout")) dock::request_reset_layout();  // clear the ini + rebuild next frame (element ⑤)
     ImGui::Separator();
 
     const auto lines = log().snapshot();
@@ -23,7 +23,7 @@ void render_log_view() {
         else                   ImGui::TextColored({.55f, .85f, 1, 1},  "[%6.1fs] %s", l.t_s, l.msg.c_str());
     }
     if (follow && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f)
-        ImGui::SetScrollHereY(1.0f);  // 阈值内才滚——用户上翻阅读时不强拉回底部
+        ImGui::SetScrollHereY(1.0f);  // scroll only within the threshold — never yank the user back to the bottom while they read upward
     ImGui::EndChild();
     ImGui::End();
 }

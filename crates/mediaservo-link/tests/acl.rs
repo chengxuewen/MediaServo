@@ -1,4 +1,4 @@
-//! Task 2: 静态 ACL 权限矩阵测试（D237 + E2 扩展）。
+//! Task 2: static ACL permission-matrix tests (D237 + E2 extension).
 
 use mediaservo_link::{FrameTopic, NodeAcl, NodeId, Role};
 
@@ -11,14 +11,14 @@ fn capture_pub_camera_not_control_no_sub() {
     let a = acl(Role::Capture);
     assert!(a.can_publish(&FrameTopic::new("camera/front/raw")));
     assert!(!a.can_publish(&FrameTopic::new("control/cmd")));
-    assert!(!a.can_subscribe(&FrameTopic::new("camera/front/raw")), "capture 不订阅");
+    assert!(!a.can_subscribe(&FrameTopic::new("camera/front/raw")), "capture must not subscribe");
 }
 
 #[test]
 fn processor_sub_camera_pub_video() {
     let a = acl(Role::Processor);
     assert!(a.can_subscribe(&FrameTopic::new("camera/front/raw")));
-    assert!(a.can_publish(&FrameTopic::new("video/stitched")), "派生 topic(D239)");
+    assert!(a.can_publish(&FrameTopic::new("video/stitched")), "derived topic (D239)");
     assert!(!a.can_publish(&FrameTopic::new("control/cmd")));
 }
 
@@ -27,15 +27,15 @@ fn pusher_sub_not_pub() {
     let a = acl(Role::Pusher);
     assert!(a.can_subscribe(&FrameTopic::new("camera/front/raw")));
     assert!(a.can_subscribe(&FrameTopic::new("video/stitched")));
-    // F3: 推流节点订阅视觉结果（vision/<camera-id>，D-H8 链路）
+    // F3: pusher node subscribes vision results (vision/<camera-id>, D-H8 chain)
     assert!(a.can_subscribe(&FrameTopic::new("vision/cam0")));
-    // stats/* 发布权限（推流状态上报，E2 设计）
+    // stats/* publish permission (push-status reporting, E2 design)
     assert!(a.can_publish(&FrameTopic::new("stats/stream-s0")));
     assert!(a.can_publish(&FrameTopic::new("stats/x")));
-    // 无 camera/video/vision 发布权
+    // no camera/video/vision publish rights
     assert!(!a.can_publish(&FrameTopic::new("camera/front/raw")));
     assert!(!a.can_publish(&FrameTopic::new("video/x")));
-    // 单方向契约（host.rs build_acl 显式 --topic 支持订阅型角色）
+    // one-way contract (host.rs build_acl passes explicit --topic for subscriber roles)
     assert!(!a.can_subscribe(&FrameTopic::new("control/cmd")));
 }
 
@@ -44,10 +44,10 @@ fn recorder_sub_not_pub() {
     let a = acl(Role::Recorder);
     assert!(a.can_subscribe(&FrameTopic::new("camera/front/raw")));
     assert!(a.can_subscribe(&FrameTopic::new("video/stitched")));
-    // F3: streamer 令牌缺省 Recorder（C2 遗留）→ 订阅视觉结果（D-H8）
+    // F3: streamer token defaults to Recorder (C2 legacy) -> subscribes vision results (D-H8)
     assert!(a.can_subscribe(&FrameTopic::new("vision/cam0")));
     assert!(!a.can_publish(&FrameTopic::new("camera/front/raw")));
-    // E2 推流状态上报（streamer 令牌缺省 Recorder，C2 遗留）
+    // E2 push-status reporting (streamer token defaults to Recorder, C2 legacy)
     assert!(a.can_publish(&FrameTopic::new("stats/stream-s0")));
 }
 
@@ -65,7 +65,7 @@ fn control_pub_cmd_sub_telemetry_status() {
 fn perception_pub_perception_sub_camera() {
     let a = acl(Role::Perception);
     assert!(a.can_publish(&FrameTopic::new("perception/objects")));
-    // F3: ROS 视觉节点发布 vision/<camera-id>（D-H7/D-H8，桥接配置单一来源）
+    // F3: ROS vision node publishes vision/<camera-id> (D-H7/D-H8, single-source bridge config)
     assert!(a.can_publish(&FrameTopic::new("vision/cam0")));
     assert!(a.can_subscribe(&FrameTopic::new("camera/front/raw")));
     assert!(!a.can_publish(&FrameTopic::new("video/x")));

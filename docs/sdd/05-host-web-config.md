@@ -1,18 +1,18 @@
 # SDD 05: Host Web Config
 
-## 1. 概述
+## 1. Overview
 
-Host 内嵌 Web 配置页面。通过浏览器本地配置 Host 设备，无需 GUI。
+Embedded web configuration page inside the Host. Configure the Host device locally via a browser, no GUI needed.
 
-**决策引用**: D81 (内嵌 Web), D84 (SSE 推送), D85 (HTTP Basic Auth), D114 (host.conf)
+**Decision refs**: D81 (embedded web), D84 (SSE push), D85 (HTTP Basic Auth), D114 (host.conf)
 
-## 2. 接口定义
+## 2. Interface Definition
 
 ```rust
 pub struct WebConfig {
-    pub bind: SocketAddr,         // 默认 127.0.0.1:9800
+    pub bind: SocketAddr,         // Default 127.0.0.1:9800
     pub username: String,
-    pub password: String,         // SHA256 哈希存储
+    pub password: String,         // Stored as SHA256 hash
 }
 
 pub enum WebRoute {
@@ -20,11 +20,11 @@ pub enum WebRoute {
     Health,
     #[get("/ready")]
     Ready,
-    #[get("/")]                   // 配置页面 (HTML)
+    #[get("/")]                   // Config page (HTML)
     Index,
-    #[post("/api/config")]        // 提交配置
+    #[post("/api/config")]        // Submit configuration
     UpdateConfig,
-    #[get("/api/status")]         // SSE 实时状态
+    #[get("/api/status")]         // SSE live status
     StatusStream,
 }
 ```
@@ -54,52 +54,52 @@ turn:
   credential: "pass"
 ```
 
-## 3. 技术栈
+## 3. Technology Stack
 
-| 组件 | 选型 | 说明 |
-|------|------|------|
-| HTTP 框架 | axum | `include_str!` 嵌入 HTML |
-| 前端 | Vanilla JS | ~100KB, 无框架依赖 |
-| 实时推送 | SSE | 每秒推送 CPU/GPU/fps/bitrate/rtt |
-| 认证 | HTTP Basic Auth | 浏览器原生支持 |
-| 配置读写 | serde_yaml | 持久化到 host.conf |
+| Component | Choice | Notes |
+|-----------|--------|-------|
+| HTTP framework | axum | HTML embedded via `include_str!` |
+| Frontend | Vanilla JS | ~100KB, no framework dependency |
+| Live push | SSE | Pushes CPU/GPU/fps/bitrate/rtt every second |
+| Authentication | HTTP Basic Auth | Native browser support |
+| Config read/write | serde_yaml | Persisted to host.conf |
 
-## 4. 安全性
+## 4. Security
 
-| 防护 | 机制 |
-|------|------|
-| 绑定地址 | 默认 127.0.0.1 (仅本机) |
-| 局域网访问 | 配置 `web.bind: "0.0.0.0:9800"` + 密码 |
-| 认证 | HTTP Basic Auth, 密码 SHA256 哈希比对 |
-| CSRF | 无状态 API (非 cookie), SameSite 无须担心 |
+| Protection | Mechanism |
+|------------|-----------|
+| Bind address | Default 127.0.0.1 (local only) |
+| LAN access | Set `web.bind: "0.0.0.0:9800"` + password |
+| Authentication | HTTP Basic Auth, SHA256 hash comparison |
+| CSRF | Stateless API (not cookie-based); SameSite not a concern |
 
-## 5. SSE 状态推送
+## 5. SSE Status Push
 
 ```
 Event: status
 Data: {"fps":29.5,"bitrate":2048,"rtt":45,"gpu_util":67,"camera":"ok","encoder":"ok"}
 ```
 
-每秒推送, 浏览器配置页实时展示。
+Pushed every second; the browser config page displays it live.
 
-## 6. 错误处理
+## 6. Error Handling
 
-| 条件 | 分类 | 响应 |
-|------|------|------|
-| 配置格式错误 | Recoverable | 400 Bad Request + 错误字段标注 |
-| 认证失败 | Recoverable | 401 Unauthorized |
-| 配置写入失败 | Fatal | 500 + 日志记录, 保留旧配置 |
-| 必填字段缺失 | Recoverable | 400 + 缺失字段列表 |
+| Condition | Category | Response |
+|-----------|----------|----------|
+| Malformed config | Recoverable | 400 Bad Request + offending field flagged |
+| Authentication failure | Recoverable | 401 Unauthorized |
+| Config write failure | Fatal | 500 + log entry, old config preserved |
+| Missing required field | Recoverable | 400 + list of missing fields |
 
-## 7. 测试计划
+## 7. Test Plan
 
-| 测试 | 类型 | 描述 |
-|------|------|------|
-| config_parse_valid | 单元 | 完整 host.conf 解析为 WebConfig |
-| config_parse_invalid | 单元 | 缺失字段/类型错误返回错误 |
-| auth_success | 集成 | 正确凭据返回 200 |
-| auth_failure | 集成 | 错误凭据返回 401 |
-| auth_bypass | 安全 | 无 Authorization header 返回 401 |
-| sse_push | 集成 | SSE 连接后每秒收到 status 事件 |
-| config_update_persist | 集成 | POST 配置后 host.conf 文件更新 |
-| health_ready_endpoints | 集成 | /health /ready 返回 200 |
+| Test | Type | Description |
+|------|------|-------------|
+| config_parse_valid | Unit | Complete host.conf parses into WebConfig |
+| config_parse_invalid | Unit | Missing field / wrong type returns error |
+| auth_success | Integration | Correct credentials return 200 |
+| auth_failure | Integration | Wrong credentials return 401 |
+| auth_bypass | Security | Missing Authorization header returns 401 |
+| sse_push | Integration | status event received every second on SSE connection |
+| config_update_persist | Integration | host.conf file updated after POST config |
+| health_ready_endpoints | Integration | /health /ready return 200 |

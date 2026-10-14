@@ -1,4 +1,4 @@
-//! `host -h` / `--help` CLI 测试。
+//! Tests for the `host -h` / `--help` CLI.
 
 use std::process::Command;
 
@@ -9,37 +9,23 @@ fn host_bin() -> &'static str {
 #[test]
 fn host_no_args_prints_usage_exits_0() {
     let out = Command::new(host_bin()).output().unwrap();
-    assert!(
-        out.status.success(),
-        "host (no args) 应 exit 0，实际 {:?}",
-        out.status.code()
-    );
+    assert!(out.status.success(), "host (no args) should exit 0, got {:?}", out.status.code());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("用法: mediaservo-host"),
-        "stdout 应含用法: {stdout}"
-    );
+    assert!(stdout.contains("Usage: mediaservo-host"), "stdout should contain usage: {stdout}");
 }
 
 #[test]
 fn host_help_flag_exits_0() {
     for flag in ["-h", "--help"] {
         let out = Command::new(host_bin()).arg(flag).output().unwrap();
-        assert!(
-            out.status.success(),
-            "host {flag} 应 exit 0，实际 {:?}",
-            out.status.code()
-        );
+        assert!(out.status.success(), "host {flag} should exit 0, got {:?}", out.status.code());
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(
-            stdout.contains("用法: mediaservo-host"),
-            "host {flag} stdout 应含用法: {stdout}"
+            stdout.contains("Usage: mediaservo-host"),
+            "host {flag} stdout should contain usage: {stdout}"
         );
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(
-            stderr.is_empty(),
-            "host {flag} stderr 应为空: {stderr}"
-        );
+        assert!(stderr.is_empty(), "host {flag} stderr should be empty: {stderr}");
     }
 }
 
@@ -50,13 +36,13 @@ fn host_unknown_subcommand_exits_2() {
         assert_eq!(
             out.status.code(),
             Some(2),
-            "host {cmd} 应 exit 2，实际 {:?}",
+            "host {cmd} should exit 2, got {:?}",
             out.status.code()
         );
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            stderr.contains("未知子命令"),
-            "host {cmd} stderr 应含'未知子命令': {stderr}"
+            stderr.contains("unknown subcommand"),
+            "host {cmd} stderr should contain 'unknown subcommand': {stderr}"
         );
     }
 }

@@ -1,16 +1,16 @@
-//! client v2 最小闭环样例（兼编排方活体链路验收载体）。
+//! The client v2 minimal-loop example (also the orchestration-side live-chain acceptance vehicle).
 //!
-//! 流程：登录（REST JWT）→ 入房 → 等视频 producer → 消费 1 帧 →
-//! 开控制通道发 steer(seq=1) → 等回执 5s → 退出。
+//! Flow: login (REST JWT) -> join -> wait for a video producer -> consume 1 frame ->
+//! open the control channel, send steer(seq=1) -> wait 5s for the receipt -> exit.
 //!
-//! 全部端点/凭证经环境变量传入（无默认值纪律）：
-//!   MSRTC_WS_URL   ws://<server>:<port>/ws   （必需）
-//!   MSRTC_ROOM     房间 ID                    （必需）
-//!   MSRTC_USER     账号                       （必需）
-//!   MSRTC_PASS     口令                       （必需）
-//!   MSRTC_LABEL    控制通道 label             （可选，默认 "chassis"）
+//! All endpoints/credentials come via environment variables (the no-defaults discipline):
+//!   MSRTC_WS_URL   ws://<server>:<port>/ws   (required)
+//!   MSRTC_ROOM     room ID                    (required)
+//!   MSRTC_USER     account                    (required)
+//!   MSRTC_PASS     password                   (required)
+//!   MSRTC_LABEL    control channel label      (optional, default "chassis")
 //!
-//! 成功 exit 0；任何一步失败打日志 exit 1。
+//! Success exit 0; any step failing logs and exits 1.
 
 use std::time::Duration;
 
@@ -42,27 +42,27 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let pass = required_env("MSRTC_PASS")?;
     let label = std::env::var("MSRTC_LABEL").unwrap_or_else(|_| "chassis".to_string());
 
-    // 1. 登录换 JWT（http_base 由 ws URL 派生）
+    // 1. login for the JWT (http_base derived from the ws URL)
     let http_base = http_base_from_signaling(&signaling_url)?;
     let token = login(&http_base, &user, &pass).await?;
     println!("login ok: user={} role={}", token.username, token.role);
 
-    // 2. 入房（JWT 经 Sec-WebSocket-Protocol 头，link 承载）
+    // 2. join (JWT via the Sec-WebSocket-Protocol header, carried by link)
     let cfg = ClientConfig {
         signaling_url,
         room_id,
         psk: None,
         jwt: Some(token.jwt),
         role: PeerRole::Consumer,
-        // S4/T3.5：急停 HMAC 预共享密钥（车端 MEDIASERVO_CONTROL_HMAC_KEY 同值）。
+        // S4/T3.5: the e-stop HMAC pre-shared key (same value as the vehicle's MEDIASERVO_CONTROL_HMAC_KEY).
         hmac_key: std::env::var("MEDIASERVO_CONTROL_HMAC_KEY").ok().filter(|v| !v.is_empty()),
-    identity_dir: None,
+        identity_dir: None,
     };
     let mut session = RoomSession::connect(&cfg).await?;
     println!("joined room={} negotiated={}", session.room_id(), session.negotiated());
 
-    // 3. 消费一路视频并取首帧（late-join NewProducer 回放 ≤30s）。
-    //    MSRTC_SKIP_VIDEO=1：纯控制回路验证（整车房间——controller  producers/消费皆在此）。
+    // 3. consume one video path and take the first frame (the late-join NewProducer replay window <= 30s).
+    //    MSRTC_SKIP_VIDEO=1: a pure control-loop verification (the vehicle room -- controller producers/consumption all live here).
     let skip_video = std::env::var("MSRTC_SKIP_VIDEO").is_ok_and(|v| v == "1");
     let producer = if skip_video {
         String::new()
@@ -78,8 +78,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             Ok(Some(f)) => f,
             Ok(None) => return Err("frame stream closed".into()),
             Err(_) => {
-                // S2c 二分判据：超时即 dump 收侧 stats（packetsReceived>0 而不解码=解码/mid 面；
-                // 0 包=到达性/SRTP 面）。
+                // S2c bisection predicate: on timeout dump the receive-side stats (packetsReceived>0 without decoding = the decode/mid surface;
+                // 0 packets = the arrival/SRTP surface).
                 for s in session.video_receiver_stats() {
                     println!("receiver-stats {s:?}");
                 }
@@ -89,15 +89,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         println!("first frame {}x{} ({}B I420)", frame.width, frame.height, frame.data.len());
     }
 
-    // 4. 控制出程：open → send → ack
+    // 4. control egress: open -> send -> ack
     let mut ctl = session.open_control(&[label.as_str()]).await?;
     println!("control open: labels={:?} producers={:?}", ctl.labels(), ctl.producer_ids());
-    // 对端（车端 controller）消费舱端 producer 有事件链时延 = 同 seq 重发幂等
-    // （attach 前消息 mediasoup 不缓存；D-H3 seq 配对）；recv_ack_for 跳过旧 ack。
+    // the peer's (vehicle controller) consumption of the cockpit producer has event-chain latency = the same-seq resend is idempotent
+    // (mediasoup does not buffer messages sent before attach; the D-H3 seq pairing); recv_ack_for skips stale acks.
     let seq = 1u64;
     let mut ack_opt = None;
-    // S4 弱网还账计量：每 attempt 记录 send→ack 延迟（ms，未回记 -1），
-    // 末行 `[rtt] a,b,c` 供脚本抓取（remote-burst/基线分布对照）。
+    // S4 weaknet repayment metering: each attempt logs the send->ack latency (ms, -1 when unrecorded),
+    // the last line `[rtt] a,b,c` is for scripts to grab (remote-burst/baseline distribution comparison).
     let mut rtts: Vec<i64> = Vec::new();
     for attempt in 0..12u64 {
         if attempt > 0 {
@@ -117,7 +117,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("[rtt] {}", rtts.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","));
     let ack = ack_opt.ok_or("timed out waiting for ControlAck (12 retries)")?;
     println!("ack seq={} result={}", ack.ack, ack.result);
-    // S4/a4：急停双路演示（MSRTC_ESTOP=1 触发；DC sig + WS 审计副本 + 车端 actuation 留痕）。
+    // S4/a4: the e-stop dual-path demo (triggered by MSRTC_ESTOP=1; the DC sig + WS audit copy + the vehicle actuation record).
     if std::env::var("MSRTC_ESTOP").is_ok_and(|v| v == "1") {
         session.emergency_stop(&mut ctl, &label, 900, serde_json::json!({"reason":"demo"})).await?;
         println!(

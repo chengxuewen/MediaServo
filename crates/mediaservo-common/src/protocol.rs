@@ -6,21 +6,21 @@
 
 use serde::{Deserialize, Serialize};
 
-// ── S0: 协议版本协商（不变式 I5：能力门只看协商后的整数；包版本/协议整数/schema·ABI
-// 三平面分离）。v1 = wire 无 protocol 字段（老形逐字节不变）；v2 = datachannel.control
-// 域（F8 控制 DC 门）开放；v3 = 会话续期（S0.5：resume/session_nonce——整数单调性是
-// 「方言精确」的载体：resume 必须占代际，否则同一方言号两套语义）。
-/// 本仓端点支持的最高方言。
+// ── S0: protocol version negotiation (invariant I5: capability gates only look at the negotiated integer;
+// package version / protocol integer / schema-ABI stay on three separate planes). v1 = no protocol field on the wire
+// (legacy shape byte-identical); v2 = the datachannel.control domain (F8 control DC gate) opens;
+// v3 = session resume (S0.5: resume/session_nonce - integer monotonicity is what makes dialect exact:
+/// Highest dialect supported by the endpoints in this repo.
 pub const SIGNALING_PROTOCOL_VERSION: u32 = 3;
-/// 可接受连接的最低方言（不声明 protocol 的旧客户端 = v1；低于此值 → Error 4101）。
+/// Lowest dialect accepted for a connection (legacy clients that do not declare protocol = v1; below this -> Error 4101).
 pub const SIGNALING_PROTOCOL_MIN_SUPPORTED: u32 = 1;
-/// 开控制 DC 域（create_data_producer）所需最低方言。
+/// Lowest dialect needed to open the control DC domain (create_data_producer).
 pub const PROTOCOL_MIN_CONTROL_DC: u32 = 2;
-/// 会话续期（resume 请求被受理）所需最低方言。
+/// Lowest dialect needed for session resume (resume request accepted).
 pub const PROTOCOL_MIN_RESUME: u32 = 3;
 
-/// 协商结果 = min(客户端声明（None = v1），server 最高)。拒低形态由调用方先行
-/// （claim < MIN_SUPPORTED → 4101），此处只收敛。
+/// Negotiation result = min(client claim (None = v1), server max). The reject-low shape is handled up front by the
+/// caller (claim < MIN_SUPPORTED -> 4101); this function only converges.
 #[must_use]
 pub fn negotiate_protocol(claim: Option<u32>) -> u32 {
     claim.unwrap_or(1).min(SIGNALING_PROTOCOL_VERSION)
@@ -42,26 +42,26 @@ pub enum SignalingMessage {
         peer_role: PeerRole,
         #[serde(skip_serializing_if = "Option::is_none")]
         stream_id: Option<String>,
-        /// G4 设备凭证（additive，D-H11）：携带时 server 走设备认证（G2 起校验）；
-        /// 缺省 = PSK 认证路径。旧 server 忽略未知字段、旧 client 不带字段 —— 双向兼容。
+        /// G4 device credential (additive, D-H11): when present the server uses device authentication (verified since G2);
+        /// absent = PSK auth path. Old servers ignore unknown fields and old clients omit them - both directions compatible.
         #[serde(skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         device_secret: Option<String>,
-        /// device-enroll 公钥准入（additive，D-E3 与 secret 共存一周期）：base64 32B Ed25519
-        /// verifying key，与 device_id 同现同缺；携带时触发 server 验签挑战链（design §5.2）。
-        /// 缺省 = 旧 secret/PSK 路径逐字节不变；旧 server 忽略未知字段 = 不劣化。
+        /// device-enroll public-key admission (additive, D-E3 coexists with secret for one cycle): base64 32B Ed25519
+        /// verifying key, present or absent together with device_id; when present it triggers the server signature challenge chain (design §5.2).
+        /// absent = the legacy secret/PSK path, byte-identical; old servers ignore unknown fields = no degradation.
         #[serde(skip_serializing_if = "Option::is_none")]
         device_pubkey: Option<String>,
-        /// S0 协议协商（additive）：缺省 = v1（2026-09-14 前 wire 逐字节不变，
-        /// 旧 server/旧 host 双向无感——升级顺序无约束）。server 按 min(claim, max) 入会话。
+        /// S0 protocol negotiation (additive): absent = v1 (wire byte-identical before 2026-09-14;
+        /// old server / old host are mutually unaware - no upgrade ordering constraint). Server joins the session with min(claim, max).
         #[serde(skip_serializing_if = "Option::is_none")]
         protocol: Option<u32>,
-        /// 观测位：客户端自身版本串，不参与任何门控判定。
+        /// Observation slot: the client own version string; takes part in no gate decision.
         #[serde(skip_serializing_if = "Option::is_none")]
         client_version: Option<String>,
-        /// a2 会话续期（additive，仅 negotiated≥3 被消费）：携带上次下发的 session_nonce
-        /// 作重挂索引——**不是凭证**，认证链照常重跑（D283 吊销即刻生效）。缺省 = 全量 join。
+        /// a2 session resume (additive, only consumed at negotiated>=3): carries the session_nonce
+        /// issued last time as a reattach index - **not a credential**; the auth chain always reruns (D283 revocation takes effect immediately). Absent = full join.
         #[serde(skip_serializing_if = "Option::is_none")]
         resume: Option<String>,
     },
@@ -70,14 +70,14 @@ pub enum SignalingMessage {
     RoomJoined {
         room_id: String,
         peer_id: String,
-        /// S0：server 回显谈成值（缺省 = 旧 server，端按 v1）。
+        /// S0: server echoes the agreed value (absent = old server, endpoints fall back to v1).
         #[serde(skip_serializing_if = "Option::is_none")]
         protocol: Option<u32>,
-        /// 观测位：server 版本串。
+        /// Observation slot: server version string.
         #[serde(skip_serializing_if = "Option::is_none")]
         server_version: Option<String>,
-        /// a2：一次性重挂票（≥32B CSPRNG base64；仅 negotiated≥3 下发）。只索引重挂会话
-        /// 快照——不绑源 IP（换 IP = 设计场景），即发即用、消费即焚。
+        /// a2: one-time reattach ticket (>=32B CSPRNG base64; only issued at negotiated>=3). It only indexes the
+        /// resume session snapshot - not bound to a source IP (changing IP is a designed scenario); use immediately, burn on use.
         #[serde(skip_serializing_if = "Option::is_none")]
         session_nonce: Option<String>,
     },
@@ -89,8 +89,8 @@ pub enum SignalingMessage {
     Sdp { room_id: String, target: Option<String>, sdp: String },
 
     /// ICE candidate relayed through Server.
-    /// PIT-106 (I2 review): `alias = "rtc_ice_candidate"` — 浏览器 W3C 惯例 wire 名
-    /// （sfu-client.ts 发送）; 规范名 r_t_c_ice_candidate 保持向后兼容（host/Rust 客户端）。
+    /// PIT-106 (I2 review): `alias = "rtc_ice_candidate"` - the wire name browsers conventionally use
+    /// (sent by sfu-client.ts); the canonical name r_t_c_ice_candidate is kept for backward compatibility (host/Rust clients).
     #[serde(alias = "rtc_ice_candidate")]
     RTCIceCandidate {
         room_id: String,
@@ -115,9 +115,9 @@ pub enum SignalingMessage {
         /// ICE candidates for the transport (None for backward compat).
         #[serde(skip_serializing_if = "Option::is_none")]
         ice_candidates: Option<Vec<IceCandidate>>,
-        /// P1 (client-dual-form): transport 级 SCTP 参数（mediasoup SctpParameters 序列化
-        /// 原样透传；None = 向后兼容）。opaque Value 循 rtp_parameters 先例——浏览器侧
-        /// 字段映射（OS/MIS/maxMessageSize）归 TS proto handler 单点。
+        /// P1 (client-dual-form): transport-level SCTP parameters (mediasoup SctpParameters serialization
+        /// passed through as-is; None = backward compatible). Opaque Value following the rtp_parameters precedent - browser-side
+        /// field mapping (OS/MIS/maxMessageSize) belongs to the single TS proto handler.
         #[serde(skip_serializing_if = "Option::is_none")]
         sctp_parameters: Option<serde_json::Value>,
     },
@@ -130,16 +130,16 @@ pub enum SignalingMessage {
         dtls_parameters: DtlsParameters,
     },
 
-    /// P1 (client-dual-form): 客户端请求房间 Router 的 RTP capabilities —
-    /// mediasoup-client Device.load() 的输入（C18 官方协商流程第一步）。
+    /// P1 (client-dual-form): the client asks for the room Router RTP capabilities -
+    /// the input of mediasoup-client Device.load() (C18 official negotiation flow, first step).
     GetRouterRtpCapabilities { room_id: String },
 
-    /// Server 回 Router RTP capabilities（mediasoup RtpCapabilitiesFinalized 序列化
-    /// 原样透传 — opaque Value 循 rtp_parameters 先例，禁手拼）。
+    /// Server returns Router RTP capabilities (mediasoup RtpCapabilitiesFinalized serialization
+    /// passed through as-is - opaque Value following the rtp_parameters precedent; hand-building is forbidden).
     RouterRtpCapabilities { room_id: String, capabilities: serde_json::Value },
 
-    /// P1: consumer 层级偏好（simulcast/SVC 选层 — 会议 P4a 带宽自适应的服务端入口）。
-    /// ack 循 Error{code:0} 先例（transport_connected 同型）。
+    /// P1: consumer layer preference (simulcast/SVC layer selection - server-side entry for conference P4a bandwidth adaptation).
+    /// ack follows the Error{code:0} precedent (same shape as transport_connected).
     SetPreferredLayers {
         room_id: String,
         peer_id: String,
@@ -165,13 +165,13 @@ pub enum SignalingMessage {
         transport_direction: TransportDirection,
         kind: MediaKind,
         rtp_parameters: serde_json::Value,
-        /// C1 (D-H14 顺序无关): 绑定目标 send transport（CreateWebRtcTransport 返回的
-        /// transport_id）。None = legacy 单槽回退（最近创建的 send transport）。
+        /// C1 (D-H14 order-independent): bind the target send transport (the
+        /// transport_id returned by CreateWebRtcTransport). None = legacy single-slot fallback (most recently created send transport).
         #[serde(skip_serializing_if = "Option::is_none")]
         transport_id: Option<String>,
-        /// producer-label T1（设备房+流标签, PIT-140 v2 退役前置）: 流业务标签（如 "fl"/"fm"）。
-        /// additive: 旧 server 忽略未知字段、旧 client 不带字段——双向兼容（G4 device_id 先例）。
-        /// None = 无标签（旧 host 形）——消费端按"房内第一路"回退匹配。
+        /// producer-label T1 (device room + stream label, prerequisite for PIT-140 v2 retirement): stream business label (e.g. "fl"/"fm").
+        /// additive: old servers ignore unknown fields, old clients omit them - both directions compatible (G4 device_id precedent).
+        /// None = no label (old host shape) - the consumer side falls back to matching "the first stream in the room".
         #[serde(skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
@@ -185,13 +185,13 @@ pub enum SignalingMessage {
         producer_id: String,
         peer_id: String,
         kind: MediaKind,
-        /// producer-label T1: Produce.label 透传（None = 旧 host 无标签形）。
+        /// producer-label T1: Produce.label passthrough (None = old host shape without a label).
         #[serde(skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
 
-    /// v2 (web-stream-stats T1): Host 周期上报编码状态（room 广播 relay 到浏览器）。
-    /// encoder_implementation: libwebrtc outbound-rtp 实际编码器名（软编/硬编识别）; None = 不可用。
+    /// v2 (web-stream-stats T1): Host periodically reports encoder status (relayed by room broadcast to the browser).
+    /// encoder_implementation: the actual libwebrtc outbound-rtp encoder name (software vs hardware encoder detection); None = unavailable.
     EncoderStatus {
         room_id: String,
         peer_id: String,
@@ -202,29 +202,29 @@ pub enum SignalingMessage {
         frames_per_second: f64,
         frame_width: u32,
         frame_height: u32,
-        /// v3 (encode-time-stats T1): 平均每帧编码耗时（ms/帧, Host 增量计算）—
-        /// ΔtotalEncodeTime / ΔframesEncoded × 1000; None = 不可用（旧 host / 首周期）。
+        /// v3 (encode-time-stats T1): average encode time per frame (ms/frame, incrementally computed on the Host) -
+        /// Delta totalEncodeTime / Delta framesEncoded * 1000; None = unavailable (old host / first window).
         #[serde(skip_serializing_if = "Option::is_none")]
         avg_encode_ms: Option<f64>,
     },
 
-    /// v4 (E3 host-multiprocess): host-agent 整车状态上报 — 拓扑 + 数据流 + 信令
-    /// 三快照聚合，经网关远端 WS 周期上报（默认 5s）。Server 直接消费存储
-    /// （非 relay 消息，不广播房间；旧 Server 解析失败静默丢弃 = 可容忍，
-    /// 周期性上报下一周期自愈）。
+    /// v4 (E3 host-multiprocess): host-agent whole-vehicle status report - topology + data flow + signaling
+    /// three snapshots aggregated and periodically reported over the gateway remote WS (default 5s). The Server consumes and stores it directly
+    /// (not a relay message, not broadcast in the room; an old Server failing to parse silently drops it = tolerable,
+    /// periodic reporting self-heals in the next window).
     StatusReport {
         room_id: String,
-        /// 数据面: 各 camera topic 数据流统计（E2 快照）。
+        /// Data plane: data flow statistics per camera topic (E2 snapshot).
         topics: Vec<TopicFlowJson>,
-        /// 数据面: 各 streamer 推流状态（E2 快照）。
+        /// Data plane: push status per streamer (E2 snapshot).
         streams: Vec<StreamFlowJson>,
-        /// 拓扑面: 期望 + 实际进程并集（E1 快照）。
+        /// Topology plane: union of expected and actual processes (E1 snapshot).
         processes: Vec<ProcessStateJson>,
-        /// 信令面: 网关视角连接状态（E3 快照）。
+        /// Signaling plane: connection state from the gateway perspective (E3 snapshot).
         signal: SignalStatusJson,
-        /// 上报时刻（unix 秒）。
+        /// Report timestamp (unix seconds).
         ts: u64,
-        /// host.toml 配置版本（E4 ConfigPush 关联；当前恒 0）。
+        /// host.toml config version (tied to E4 ConfigPush; currently always 0).
         config_version: u64,
     },
 
@@ -235,8 +235,8 @@ pub enum SignalingMessage {
         peer_id: String,
         producer_id: String,
         rtp_capabilities: serde_json::Value,
-        /// C1: 绑定目标 recv transport。None = legacy 单槽回退（最近创建的 recv transport）
-        /// ——修复多连接共享 peer_id 时 recv_transport 互相覆盖 → consumer 挂错 transport 黑屏。
+        /// C1: bind the target recv transport. None = legacy single-slot fallback (most recently created recv transport)
+        /// - fixes recv_transport being overwritten across multiple connections sharing a peer_id -> consumer attached to the wrong transport, black screen.
         #[serde(skip_serializing_if = "Option::is_none")]
         transport_id: Option<String>,
     },
@@ -250,30 +250,30 @@ pub enum SignalingMessage {
         /// RTP parameters needed by the consumer to decode the stream.
         rtp_parameters: serde_json::Value,
     },
-    /// v5 (E4 云端配置闭环): Server → host-agent 整车配置下发。
-    /// config 为 host.toml 全文；target = 整车 peer_id（房间内其他 peer 忽略）；
-    /// version 与 StatusReport.config_version 关联（agent 应用成功后回报）。
+    /// v5 (E4 cloud config loop): Server -> host-agent whole-vehicle config delivery.
+    /// config is the full host.toml text; target = whole-vehicle peer_id (other peers in the room ignore it);
+    /// version ties to StatusReport.config_version (the agent reports it back after applying).
     ConfigPush { room_id: String, target: String, config: String, version: u64 },
-    /// G3 急停命令（舱端 → server → 车端房间）: 服务端强审计路径（D-H11 急停强审计）。
-    /// 底盘/云台常规控制在 P2P DC（协商期已按角色授权，服务端不可见）; 急停必须
-    /// 留痕（谁/何时/哪个车/什么命令）→ 经信令转发，host-agent 收下后转本地控制器。
-    /// command 语义: 车端约定（如 "e-stop"），server 只透传 + 审计。
+    /// G3 emergency-stop command (cockpit -> server -> vehicle room): server-side strongly audited path (D-H11 estop strong audit).
+    /// Chassis/gimbal regular control stays on the P2P DC (authorized by role during negotiation, invisible to the server); estop must
+    /// leave a trace (who / when / which vehicle / which command) -> forwarded over signaling, then the host-agent hands it to the local controller.
+    /// command semantics: vehicle-side convention (e.g. "e-stop"); the server only forwards and audits.
     EmergencyCommand { room_id: String, command: String },
 
-    /// H1 (SFU data 域): 对端在 send transport 上创建 DataProducer（SCTP DataChannel）。
-    /// sctp_stream_parameters 为必填（SCTP producer 需要 stream_id; Option 仅为 wire 容错，
-    /// 服务端缺失时明确报错）。label/protocol 用于区分 control/vision 等 DataChannel。
+    /// H1 (SFU data domain): the peer created a DataProducer on its send transport (SCTP DataChannel).
+    /// sctp_stream_parameters is required (an SCTP producer needs a stream_id; Option only for wire tolerance,
+    /// the server reports an explicit error when it is missing). label/protocol distinguish DataChannels such as control/vision.
     CreateDataProducer {
         room_id: String,
         peer_id: String,
         transport_direction: TransportDirection,
-        /// DataChannel label（如 "control" / "vision"）。
+        /// DataChannel label (e.g. "control" / "vision").
         label: String,
-        /// DataChannel 子协议名（如 "mediaservo.control"）。
+        /// DataChannel sub-protocol name (e.g. "mediaservo.control").
         protocol: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         sctp_stream_parameters: Option<SctpStreamParameters>,
-        /// C1: 绑定目标 send transport。None = legacy 单槽回退。
+        /// C1: bind the target send transport. None = legacy single-slot fallback.
         #[serde(skip_serializing_if = "Option::is_none")]
         transport_id: Option<String>,
     },
@@ -296,45 +296,46 @@ pub enum SignalingMessage {
         peer_id: String,
         transport_direction: TransportDirection,
         data_producer_id: String,
-        /// C1: 绑定目标 recv transport。None = legacy 单槽回退。
+        /// C1: bind the target recv transport. None = legacy single-slot fallback.
         #[serde(skip_serializing_if = "Option::is_none")]
         transport_id: Option<String>,
     },
 
     /// Server confirms data consumer created.
-    /// S2d：官方契约（mediasoup-client Chrome74.receiveDataChannel）= consumer 侧必须以
-    /// negotiated DC（id=streamId, 带外协商）建通道接收 worker 转发消息——DCEP 带内
-    /// 握手 worker 从不代发。故回执携带 consumer 的 sctp 参数/label/protocol。
-    /// Option+default 保旧 wire 可读（缺字段 = 老 server；新 client 明确报错不静默降级）。
+    /// S2d: official contract (mediasoup-client Chrome74.receiveDataChannel) = the consumer side must create the channel as a
+    /// negotiated DC (id=streamId, negotiated out of band) to receive worker-forwarded messages - the worker never
+    /// emits the in-band DCEP handshake. So the ack carries the consumer sctp parameters / label / protocol.
+    /// Option+default keeps the old wire readable (missing fields = old server; a new client reports an explicit error instead of degrading silently).
     DataConsumed {
         room_id: String,
         data_consumer_id: String,
         data_producer_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")] // S2d: 老 server 缺省兼容
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        // S2d: tolerant of old servers omitting the field
         sctp_stream_parameters: Option<SctpStreamParameters>,
-        #[serde(default)] // S2d: consumer DC label（建通道用）
+        #[serde(default)] // S2d: consumer DC label (used to build the channel)
         label: String,
         #[serde(default)] // S2d: consumer DC sub-protocol
         protocol: String,
     },
 
-    /// S4/a4：急停 WS 审计副本（舱端 send_estop 与 DC 快路径同发，best-effort）。
-    /// 审计主落点 = host 执行器 actuation log（DC 不经 server，副本可丢——PLAN §11.6
-    /// 席3 裁决）；server 侧仅落 audit 环 + WARN 留痕，不转发不裁决执行。
+    /// S4/a4: emergency-stop WS audit copy (the cockpit sends it alongside the DC fast path, best-effort).
+    /// Primary audit sink = the host actuator actuation log (the DC does not pass through the server, so the copy may be lost - PLAN §11.6
+    /// slot-3 verdict); the server side only writes the audit ring plus a WARN trace, and neither forwards nor adjudicates execution.
     ControlAudit {
         room_id: String,
         seq: u64,
         cmd: String,
-        /// 签名存在位（载荷不复制——审计体积与 payload 隐私）。
+        /// Signature-present flag (the payload is not copied - audit size and payload privacy).
         sig_present: bool,
     },
 
-    /// H2 (audio conference): 查询 SFU producer/consumer RTP 统计（媒体面证据 + 运维观测）。
-    /// 携带 producer_id 或 consumer_id（任一）；server 回复 SfuStats。
+    /// H2 (audio conference): query SFU producer/consumer RTP statistics (media-plane evidence + ops observability).
+    /// Carries producer_id or consumer_id (either one); the server replies with SfuStats.
     SfuStatsRequest { producer_id: Option<String>, consumer_id: Option<String> },
 
-    /// H2: SfuStatsRequest 的响应 — RTP 接收字节/包计数（mediasoup get_stats）。
-    /// byte_count/packet_count: producer = 收到的入站 RTP; consumer = 路由转发的出站 RTP。
+    /// H2: response to SfuStatsRequest - RTP received bytes/packets (mediasoup get_stats).
+    /// byte_count/packet_count: producer = inbound RTP received; consumer = outbound RTP routed and forwarded.
     SfuStats {
         producer_id: Option<String>,
         consumer_id: Option<String>,
@@ -343,9 +344,9 @@ pub enum SignalingMessage {
         packet_count: u64,
         score: u8,
     },
-    /// H1 (session-recovery T1): producer 死亡通知（房间级广播）——peer WS 关闭时 server 广播。
-    /// web 收到后停旧 track 并等新轮 new_producer 自动重订（免刷新自愈）。
-    /// reason 当前唯一来源 = peer_disconnected；producer 中途死检测依赖 worker 通知（H3 不可靠，本期不做）。
+    /// H1 (session-recovery T1): producer death notice (room-level broadcast) - the server broadcasts when a peer WS closes.
+    /// On receipt the web side stops the old track and waits for the new new_producer round to auto-resubscribe (self-healing without a page refresh).
+    /// reason currently has a single source = peer_disconnected; mid-flight producer death detection depends on worker notifications (unreliable for H3, out of scope this round).
     ProducerClosed {
         room_id: String,
         peer_id: String,
@@ -354,94 +355,94 @@ pub enum SignalingMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
-    /// F1/T4: 网关上报下游子会话消亡（单 streamer 退出/crash——整车会话不断，
-    /// agent 断开反查只覆盖整车粒度，此消息提供流粒度）。server 按 (room_id, peer_id)
-    /// 精确清理并广播 ProducerClosed。additive：旧 server 解析失败静默丢弃 = 与无前行为一致。
+    /// F1/T4: gateway reports a downstream sub-session dying (one streamer exiting/crashing - the whole-vehicle session does not;
+    /// the reverse lookup on agent disconnect only covers whole-vehicle granularity, this message provides stream granularity). The server cleans up
+    /// exactly by (room_id, peer_id) and broadcasts ProducerClosed. additive: an old server failing to parse silently drops it = same as if the message did not exist.
     DownstreamGone {
-        /// 子进程自报 peer 键（= SFU 层 producer 宿主键，视频流常为字面 "host"）。
+        /// Peer key self-reported by the sub-process (= the SFU-layer producer host key, literally "host" for video streams).
         peer_id: String,
-        /// 子进程 RoomJoin 的流子房间。
+        /// Stream sub-room from the sub-process RoomJoin.
         room_id: String,
     },
 
-    /// device-enroll §2 (server→host): 验签挑战。nonce = base64 32B 随机 (OsRng)；
-    /// 每连接 0..1 次，仅对带 device_pubkey 的 RoomJoin 发出（secret 形/PSK 路径不发）。
+    /// device-enroll §2 (server -> host): signature challenge. nonce = base64 32B random (OsRng);
+    /// at most once per connection, and only for RoomJoins carrying device_pubkey (never for the secret shape / PSK path).
     DeviceAuthChallenge { nonce: String },
 
-    /// device-enroll §2 (host→server): 挑战应答。
-    /// 字节合同: sig = base64( Ed25519::sign( nonce_raw(32B) ‖ device_id ‖ room_id ) )，
-    /// 钉死测试见 server devices.rs::sig_vector（host 侧批3 交叉复验同向量，D-E7 绑房防跨用）。
+    /// device-enroll §2 (host -> server): challenge response.
+    /// Byte contract: sig = base64( Ed25519::sign( nonce_raw(32B) ‖ device_id ‖ room_id ) );
+    /// pinned test in server devices.rs::sig_vector (the host side batch 3 cross-checks the same vector; D-E7 binds the room to prevent cross-use).
     DeviceAuthResponse { room_id: String, sig: String },
 
-    /// device-enroll §2 (server→host): 手动档验签过但未批准（入 pending）。
-    /// 设备沿用既有 retry 退避重连等待批准（日志「待管理员批准」）。
+    /// device-enroll §2 (server -> host): manual mode, signature verified but not yet approved (moved to pending).
+    /// The device keeps its existing retry backoff and reconnects while waiting for approval (log: "awaiting admin approval").
     DeviceAuthPending { device_id: String },
     // ponytail: add frame ack/retransmit when reliability matters
 }
 
-/// E3 状态上报: 单 topic 数据流统计（wire 版，镜像 host monitor::flow::TopicFlow）。
+/// E3 status report: data flow statistics for a single topic (wire version, mirrors host monitor::flow::TopicFlow).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TopicFlowJson {
     pub topic: String,
-    /// 窗口内帧率（<2 帧或窗口为零 → 0）。
+    /// Frame rate within the window (<2 frames or a zero-length window -> 0).
     pub fps: f64,
-    /// 窗口内字节率。
+    /// Byte rate within the window.
     pub bps: u64,
-    /// 最近一帧发布端单调时间戳（ns；从未收到 → 0）。
+    /// Monotonic publisher timestamp of the most recent frame (ns; 0 = never received).
     pub last_ts_mono_ns: u64,
-    /// 窗口内收到帧数。
+    /// Frames received within the window.
     pub frames: u64,
-    /// 停滞（距最近到达超阈值；从未收到帧也视为停滞）。
+    /// Stalled (the last arrival is older than the threshold; never received also counts as stalled).
     pub stalled: bool,
 }
 
-/// E3 状态上报: 单流推流状态（wire 版，镜像 host monitor::flow::StreamFlow）。
+/// E3 status report: push status for a single stream (wire version, mirrors host monitor::flow::StreamFlow).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StreamFlowJson {
     pub id: String,
-    /// 最近一次 stats 的 bytes_sent（webrtc OutboundRtp，累计）。
+    /// bytes_sent of the most recent stats (webrtc OutboundRtp, cumulative).
     pub bytes_sent: u64,
-    /// 最近一次 stats 的 frames_encoded（libwebrtc u32，累计）。
+    /// frames_encoded of the most recent stats (libwebrtc u32, cumulative).
     pub frames_encoded: u32,
     pub frame_width: u32,
     pub frame_height: u32,
-    /// 最近 stats 是否在新鲜窗口内。
+    /// Whether the most recent stats fall inside the freshness window.
     pub connected: bool,
 }
 
-/// E3 状态上报: 单进程拓扑状态（期望 + 实际并集；running = oxmgr running）。
+/// E3 status report: topology status of a single process (union of expected and actual; running = oxmgr running).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProcessStateJson {
     pub name: String,
     pub running: bool,
-    /// host.toml 期望进程（实际发现的非期望进程 = false）。
+    /// Process expected by host.toml (a discovered non-expected process = false).
     pub expected: bool,
 }
 
-/// E3 状态上报: 信令平面（网关视角）。
+/// E3 status report: signaling plane (gateway perspective).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignalStatusJson {
-    /// 远端 server WS 是否已连接并入房。
+    /// Whether the remote server WS is connected and has joined the room.
     pub remote_connected: bool,
-    /// 本次远端会话建立至今秒数（未连接 = None）。
+    /// Seconds since the current remote session was established (None = not connected).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_since_secs: Option<u64>,
-    /// 整车 peer_id（未连接 = 空串）。
+    /// Whole-vehicle peer_id (empty string = not connected).
     pub remote_peer_id: String,
-    /// 本地子进程 WS 连接列表。
+    /// List of local sub-process WS connections.
     pub children: Vec<ChildSignalJson>,
-    /// host-agent 启动至今秒数。
+    /// Seconds since host-agent startup.
     pub agent_uptime_secs: u64,
 }
 
-/// E3 状态上报: 单子进程 WS 连接。
+/// E3 status report: one sub-process WS connection.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChildSignalJson {
-    /// 子进程标识（LocalEnvelope.src）。
+    /// Sub-process identifier (LocalEnvelope.src).
     pub src: String,
-    /// 连接中（快照仅含在途连接，恒 true；字段保留供 H 阶段渲染）。
+    /// Connected (the snapshot only holds in-flight connections, always true; the field is kept for the H-phase renderer).
     pub connected: bool,
-    /// 距最近一条上行消息的秒数（0 = 刚收到；u64::MAX = 未发过消息）。
+    /// Seconds since the most recent upstream message (0 = just received; u64::MAX = never sent).
     pub last_msg_secs: u64,
 }
 
@@ -510,19 +511,19 @@ pub enum PeerRole {
 pub enum MediaKind {
     Audio,
     Video,
-    /// S4′: SCTP DataProducer（ProducerClosed 广播用；produce wire 面不出现此值）。
+    /// S4′: SCTP DataProducer (used by ProducerClosed broadcasts; never appears on the produce wire face).
     Data,
 }
 
-/// H1 (SFU data 域): SCTP stream parameters for a DataChannel (wire 版，
-/// 镜像 mediasoup SctpStreamParameters — 官方文档 sctp-parameters 节)。
-/// camelCase 序列化（JS/mediasoup 惯例: streamId/ordered/maxPacketLifeTime/maxRetransmits）。
+/// H1 (SFU data domain): SCTP stream parameters for a DataChannel (wire version,
+/// mirrors mediasoup SctpStreamParameters - official docs sctp-parameters section).
+/// camelCase serialization (JS/mediasoup convention: streamId/ordered/maxPacketLifeTime/maxRetransmits).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SctpStreamParameters {
-    /// SCTP stream id（端点 DataChannel 的 negotiated id）。
+    /// SCTP stream id (the negotiated id of the endpoint DataChannel).
     pub stream_id: u16,
-    /// 有序可靠传输（true = ordered; false 时可选 maxPacketLifeTime/maxRetransmits）。
+    /// Ordered reliable transport (true = ordered; false may add maxPacketLifeTime/maxRetransmits).
     pub ordered: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_packet_life_time: Option<u16>,
@@ -530,37 +531,37 @@ pub struct SctpStreamParameters {
     pub max_retransmits: Option<u16>,
 }
 
-/// 控制请求信封（client-dual-form T1.3 自 mediaservo-host 提仓——四方单一真源：
-/// host-controller/host-emergency/TS 镜像/夹具共用 `{seq, cmd, payload}` 现网活形）。
-/// 通道边界 = DC label（chassis/gimbal/light），信封内不重复携带通道名；
-/// `seq` 发送方单调递增，回执 `ack` 原样回传配对（D-H3 语义）。
+/// Control request envelope (extracted from mediaservo-host by client-dual-form T1.3 - four-way single source of truth:
+/// host-controller / host-emergency / TS mirror / fixtures all share the live `{seq, cmd, payload}` shape).
+/// Channel boundary = DC label (chassis/gimbal/light); the envelope does not repeat the channel name;
+/// `seq` increments monotonically on the sender, and the reply `ack` echoes it back unchanged for pairing (D-H3 semantics).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControlEnvelope {
-    /// 发送方单调递增序号（回执配对用）。
+    /// Monotonic sender sequence number (used to pair with the reply).
     pub seq: u64,
-    /// 执行器命令（如 "steer"/"pan"/"on"；语义由执行器实现定义）。
+    /// Actuator command (e.g. "steer"/"pan"/"on"; semantics defined by the actuator implementation).
     pub cmd: String,
-    /// 命令参数（缺省 = 空对象）。
+    /// Command arguments (absent = empty object).
     #[serde(default = "default_control_payload")]
     pub payload: serde_json::Value,
-    /// S4/T3.5(R-B HMAC 方案)：e-stop 类命令必带签名——
-    /// `hex(HMAC-SHA256(key, canonical_envelope_json))`；key=部署预共享
-    /// （env `MEDIASERVO_CONTROL_HMAC_KEY`，车舱双侧配置一致）。
-    /// additive：旧端 serde 忽略（其 estop 会被新车端拒 = 版本墙非破坏）。
-    /// 威胁模型注记：HMAC 共享密钥 = 无不可否认性（中间形态），
-    /// Ed25519/PKI 签名面归 P3′ 威胁模型裁决（PLAN §2 P3′ 行）。
+    /// S4/T3.5 (R-B HMAC scheme): estop-class commands must carry a signature -
+    /// `hex(HMAC-SHA256(key, canonical_envelope_json))`; key = the deployment pre-shared
+    /// (env `MEDIASERVO_CONTROL_HMAC_KEY`, configured identically on the vehicle and cockpit sides).
+    /// additive: old endpoints ignore it via serde (their estop will be rejected by a new vehicle = a non-breaking version wall).
+    /// Threat model note: an HMAC shared key gives no non-repudiation (interim shape);
+    /// the Ed25519/PKI signature face is decided by the P3′ threat model (PLAN §2 P3′ row).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sig: Option<String>,
 }
 
-/// e-stop 命令族判定（前缀合同：`estop` / `estop_*` / `estop-*`）。
+/// estop command-family check (prefix contract: `estop` / `estop_*` / `estop-*`).
 #[must_use]
 pub fn is_estop_cmd(cmd: &str) -> bool {
     cmd == "estop" || cmd.starts_with("estop_") || cmd.starts_with("estop-")
 }
 
-/// S4/T3.5 HMAC 签名的 canonical 消息 = 不含 sig 的信封 JSON
-/// （发送/校验两侧同一函数构造 = 字节稳定；sig=None 序列化即无该字段）。
+/// Canonical message for the S4/T3.5 HMAC signature = the envelope JSON without sig
+/// (the same function builds it on the send and verify sides = byte-stable; sig=None serializes as if the field were absent).
 fn canonical_envelope_bytes(env: &ControlEnvelope) -> Vec<u8> {
     let base = ControlEnvelope {
         seq: env.seq,
@@ -571,25 +572,27 @@ fn canonical_envelope_bytes(env: &ControlEnvelope) -> Vec<u8> {
     serde_json::to_vec(&base).expect("ControlEnvelope is infallible to serialize")
 }
 
-/// `hex(HMAC-SHA256(key, canonical))`（车舱共用构造函数）。
-/// 急停 HMAC 密钥文件读取（G13 文件通道的**双端共用真源**：舱端 client-c
-/// `hmac_key_file` 与车端 `MEDIASERVO_CONTROL_HMAC_KEY_FILE` 同纪律）。
-/// 权限门 0600（组/他可读即拒——弱文件权限=密钥泄露面）、尾换行剥离、非空、UTF-8。
+/// `hex(HMAC-SHA256(key, canonical))` (constructor shared by vehicle and cockpit).
+/// Emergency-stop HMAC key file read (G13 file channel **shared source of truth on both sides**: cockpit client-c
+/// `hmac_key_file` and vehicle `MEDIASERVO_CONTROL_HMAC_KEY_FILE` follow the same discipline).
+/// Permission gate 0600 (group/other read is rejected - a weak file mode is a key-leak surface), trailing newline stripped, non-empty, UTF-8.
 pub fn control_hmac_key_from_file(path: &str) -> Result<String, String> {
     use std::os::unix::fs::PermissionsExt;
     let meta = std::fs::metadata(path).map_err(|e| format!("hmac key file {path}: {e}"))?;
     let mode = meta.permissions().mode() & 0o777;
     if mode & 0o077 != 0 {
-        return Err(format!("hmac key file {path}: mode {mode:04o} 过宽（须 0600 或更严，G13）"));
+        return Err(format!(
+            "hmac key file {path}: mode {mode:04o} too permissive (must be 0600 or stricter, G13)"
+        ));
     }
     let mut bytes = std::fs::read(path).map_err(|e| format!("hmac key file {path}: {e}"))?;
     while matches!(bytes.last(), Some(b'\n') | Some(b'\r')) {
         bytes.pop();
     }
     if bytes.is_empty() {
-        return Err(format!("hmac key file {path}: 空密钥"));
+        return Err(format!("hmac key file {path}: empty key"));
     }
-    String::from_utf8(bytes).map_err(|_| format!("hmac key file {path}: 非 UTF-8 密钥"))
+    String::from_utf8(bytes).map_err(|_| format!("hmac key file {path}: key is not UTF-8"))
 }
 
 pub fn control_hmac_sign(key: &str, env: &ControlEnvelope) -> String {
@@ -598,11 +601,11 @@ pub fn control_hmac_sign(key: &str, env: &ControlEnvelope) -> String {
     let mut mac =
         Hmac::<Sha256>::new_from_slice(key.as_bytes()).expect("hmac accepts any key length");
     mac.update(&canonical_envelope_bytes(env));
-    // 全 32B → 64 hex（遥控语义足够；DC 帧预算友好）。
+    // Full 32B -> 64 hex (enough for remote-control semantics; friendly to the DC frame budget).
     mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// 恒时校验（hmac `verify_slice` = 内部 constant-time；hex 解码手写免增依赖）。
+/// Constant-time verification (hmac `verify_slice` = internally constant-time; hex decoding hand-written to avoid a new dependency).
 #[must_use]
 pub fn control_hmac_verify(key: &str, env: &ControlEnvelope, sig_hex: &str) -> bool {
     use hmac::{Hmac, Mac};
@@ -626,12 +629,12 @@ pub fn control_hmac_verify(key: &str, env: &ControlEnvelope, sig_hex: &str) -> b
     mac.verify_slice(&given).is_ok()
 }
 
-/// 控制回执（与请求同通道发回）。
+/// Control reply (sent back on the same channel as the request).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControlAck {
-    /// 回执对应的请求 seq。
+    /// Sequence of the request this reply answers.
     pub ack: u64,
-    /// 执行器结果；失败时 `{"error": "<原因>"}`。
+    /// Actuator result; on failure `{"error": "<reason>"}`.
     pub result: serde_json::Value,
 }
 
@@ -645,12 +648,12 @@ impl ControlAck {
     }
 }
 
-/// 从 DC 字节解析请求信封。
+/// Parse a request envelope from DC bytes.
 pub fn parse_envelope(data: &[u8]) -> Result<ControlEnvelope, serde_json::Error> {
     serde_json::from_slice(data)
 }
 
-/// 缺省 payload = 空对象（`Value::default()` 是 Null，语义不符）。
+/// Absent payload = empty object (`Value::default()` is Null, which does not fit the semantics).
 fn default_control_payload() -> serde_json::Value {
     serde_json::json!({})
 }
@@ -676,7 +679,7 @@ mod tests {
         assert!(json.contains(r#""type":"room_join""#));
         assert!(json.contains(r#""room_id":"room-1""#));
         assert!(json.contains(r#""peer_role":"host""#));
-        // stream_id/device 字段 None 时不出现在 JSON（additive 契约：旧 server 无感知）
+        // stream_id/device fields are absent from the JSON when None (additive contract: old servers are unaware)
         assert!(!json.contains("stream_id"));
         assert!(!json.contains("device_"));
     }
@@ -729,7 +732,7 @@ mod tests {
             stream_id: None,
             device_id: Some("ms-0a1b2c3d4e5f".into()),
             device_secret: None,
-            // seed=bytes(0..32) 派生的真 vk，与 devices.rs sig_vector 测试同值（跨 crate 锚）
+            // A real vk derived from seed=bytes(0..32), the same value as the devices.rs sig_vector test (cross-crate anchor)
             device_pubkey: Some("A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=".into()),
             protocol: None,
             client_version: None,
@@ -737,7 +740,7 @@ mod tests {
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""device_pubkey":"A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=""#));
-        // pubkey 形与 secret 互斥：secret None 不出 wire
+        // The pubkey shape and secret are mutually exclusive: secret None does not go on the wire
         assert!(!json.contains("device_secret"));
 
         match serde_json::from_str::<SignalingMessage>(&json).unwrap() {
@@ -754,7 +757,7 @@ mod tests {
 
     #[test]
     fn room_join_without_pubkey_omits_field_on_wire() {
-        // additive 钉①：None → JSON 不含 device_pubkey 键（旧 server 无感知）
+        // additive pin 1: None -> the JSON has no device_pubkey key (old servers are unaware)
         let msg = SignalingMessage::RoomJoin {
             room_id: "room-1".into(),
             peer_role: PeerRole::Host,
@@ -769,7 +772,7 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert!(!json.contains("device_pubkey"));
 
-        // additive 钉②：旧 wire（缺键 JSON）照 parse = 新 server 兼容旧 host（升级序先 server 后 host）
+        // additive pin 2: an old wire (JSON missing the key) still parses = a new server is compatible with an old host (upgrade server first, then host)
         let old_wire = r#"{"type":"room_join","room_id":"room-1","peer_role":"host","device_id":"ms-0a1b2c3d4e5f","device_secret":"s3cr3t"}"#;
         match serde_json::from_str::<SignalingMessage>(old_wire).unwrap() {
             SignalingMessage::RoomJoin { device_pubkey, device_secret, .. } => {
@@ -836,8 +839,8 @@ mod tests {
 
     #[test]
     fn room_join_protocol_absent_is_v1_byte_stable() {
-        // S0 硬门①：v1 wire（无 protocol/client_version）序列化前后逐字节不变——
-        // 旧端点行为等价是 additive 承诺的全部含义。
+        // S0 hard gate 1: v1 wire (no protocol/client_version) is byte-identical before and after serialization -
+        // behavior equivalence for old endpoints is the entire meaning of the additive promise.
         let old = r#"{"type":"room_join","room_id":"vehicle_test","peer_role":"host"}"#;
         let parsed: SignalingMessage = serde_json::from_str(old).unwrap();
         assert_eq!(serde_json::to_string(&parsed).unwrap(), old);
@@ -852,7 +855,7 @@ mod tests {
 
     #[test]
     fn negotiate_protocol_matrix() {
-        // S0 硬门②：协商纯函数矩阵（缺省=1 / 同代=2 / 超宣钳 server max）。
+        // S0 hard gate 2: negotiation pure-function matrix (absent=1 / same generation=2 / overclaim clamped to the server max).
         assert_eq!(negotiate_protocol(None), 1);
         assert_eq!(negotiate_protocol(Some(1)), 1);
         assert_eq!(negotiate_protocol(Some(2)), 2);
@@ -898,7 +901,7 @@ mod tests {
 
     #[test]
     fn roundtrip_downstream_gone() {
-        // F1/T4 additive 契约钉住：snake_case type 标签 + 两字段
+        // F1/T4 additive contract pinned: snake_case type tag + the two fields
         let msg = SignalingMessage::DownstreamGone {
             peer_id: "host".into(),
             room_id: "vehicle_test2".into(),
@@ -1075,7 +1078,7 @@ mod tests {
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"produce""#));
-        assert!(json.contains("transport-9"), "transport_id 必须上 wire: {json}");
+        assert!(json.contains("transport-9"), "transport_id must go on the wire: {json}");
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         match parsed {
             SignalingMessage::Produce { room_id, kind, transport_id, .. } => {
@@ -1152,8 +1155,8 @@ mod tests {
         assert!(matches!(parsed, SignalingMessage::Consume { .. }));
     }
 
-    /// C1: transport_id 缺省（legacy 客户端 wire 无该字段）→ 解析为 None（向后兼容）；
-    /// None 不序列化该字段（旧 server 也可解析）。
+    /// C1: transport_id absent (legacy client wire has no such field) -> parses as None (backward compatible);
+    /// None is not serialized (old servers can parse it too).
     #[test]
     fn roundtrip_consume_legacy_without_transport_id() {
         let json = serde_json::json!({
@@ -1168,9 +1171,9 @@ mod tests {
             SignalingMessage::Consume { ref transport_id, .. } => assert_eq!(transport_id, &None),
             other => panic!("expected Consume, got {other:?}"),
         }
-        // 反向: None 不序列化该字段（legacy server 也可解析）
+        // Reverse: None is not serialized (a legacy server can parse it too)
         let out = serde_json::to_string(&parsed).unwrap();
-        assert!(!out.contains("transport_id"), "None transport_id 不得上 wire: {out}");
+        assert!(!out.contains("transport_id"), "None transport_id must not go on the wire: {out}");
     }
 
     #[test]
@@ -1300,7 +1303,7 @@ mod tests {
         }
     }
 
-    // ── H1 SFU data 域 ────────────────────────────────────────────────
+    // ── H1 SFU data domain ────────────────────────────────────────────────
 
     #[test]
     fn roundtrip_sctp_stream_parameters() {
@@ -1347,7 +1350,7 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#"type":"create_data_producer"#));
         assert!(json.contains(r#"label":"control"#));
-        assert!(json.contains("transport-9"), "transport_id 必须上 wire: {json}");
+        assert!(json.contains("transport-9"), "transport_id must go on the wire: {json}");
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         match parsed {
             SignalingMessage::CreateDataProducer {
@@ -1425,7 +1428,10 @@ mod tests {
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#"type":"consume_data"#));
-        assert!(!json.contains("transport_id"), "None transport_id 不得上 wire: {json}");
+        assert!(
+            !json.contains("transport_id"),
+            "None transport_id must not go on the wire: {json}"
+        );
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         match parsed {
             SignalingMessage::ConsumeData { transport_id, .. } => assert_eq!(transport_id, None),
@@ -1439,7 +1445,7 @@ mod tests {
 
     #[test]
     fn s4_envelope_wire_backcompat_no_sig() {
-        // 旧线形（无 sig 字段）必须可读；新发送带 sig 也回读对称。
+        // An old wire shape (no sig field) must remain readable; a new sender with sig also round-trips symmetrically.
         let old_wire = r#"{"seq":7,"cmd":"steer","payload":{"deg":1.0}}"#;
         let env: ControlEnvelope = serde_json::from_str(old_wire).unwrap();
         assert_eq!(env.sig, None);
@@ -1465,7 +1471,9 @@ mod tests {
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert_eq!(control_hmac_key_from_file(p.to_str().unwrap()).unwrap(), "secret");
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o640)).unwrap();
-        assert!(control_hmac_key_from_file(p.to_str().unwrap()).unwrap_err().contains("过宽"));
+        assert!(
+            control_hmac_key_from_file(p.to_str().unwrap()).unwrap_err().contains("too permissive")
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1499,7 +1507,7 @@ mod tests {
         assert!(matches!(parsed, SignalingMessage::DataConsumed { .. }));
     }
 
-    /// S4′: ProducerClosed 的 data kind wire 值钉（TS 媒体面过滤依赖 "data" 字面）。
+    /// S4′: pin the data kind wire value of ProducerClosed (the TS media-plane filter depends on the literal "data").
     #[test]
     fn producer_closed_serializes_data_kind() {
         let msg = SignalingMessage::ProducerClosed {
@@ -1515,7 +1523,7 @@ mod tests {
         assert!(matches!(back, SignalingMessage::ProducerClosed { kind: MediaKind::Data, .. }));
     }
 
-    /// S2d 兼容钉：老 server 的 wire（无 sctpStreamParameters/label/protocol）必须可解析。
+    /// S2d compatibility pin: wire from an old server (no sctpStreamParameters/label/protocol) must still parse.
     #[test]
     fn data_consumed_parses_legacy_wire_without_sctp_fields() {
         let legacy = r#"{"type":"data_consumed","room_id":"r","data_consumer_id":"c","data_producer_id":"p"}"#;
@@ -1551,8 +1559,8 @@ mod tests {
         assert!(matches!(parsed2, SignalingMessage::SfuStats { .. }));
     }
 
-    /// PIT-106 (I2 review): 浏览器 W3C 惯例发 `rtc_ice_candidate`（sfu-client.ts:236），
-    /// 规范 wire 名是 `r_t_c_ice_candidate`（serde snake_case）→ 服务端 alias 兼容。
+    /// PIT-106 (I2 review): browsers send the W3C conventional `rtc_ice_candidate` (sfu-client.ts:236),
+    /// the canonical wire name is `r_t_c_ice_candidate` (serde snake_case) -> the server aliases for compatibility.
     #[test]
     fn ice_candidate_alias_parses_browser_wire_name() {
         let json = r#"{"type":"rtc_ice_candidate","room_id":"r1","target":null,"candidate":"candidate:1 1 UDP 2130706431 10.0.0.1 8000 typ host","sdp_mid":"0","sdp_mline_index":0}"#;
@@ -1567,7 +1575,7 @@ mod tests {
         }
     }
 
-    // ── P1 (client-dual-form): mediasoup-client 标准协商面 ──────────────────
+    // ── P1 (client-dual-form): mediasoup-client standard negotiation face ──────────────────
 
     #[test]
     fn roundtrip_get_router_rtp_capabilities() {
@@ -1613,7 +1621,7 @@ mod tests {
             parsed,
             SignalingMessage::SetPreferredLayers { spatial_layer: 2, temporal_layer: Some(1), .. }
         ));
-        // temporal_layer None → 不上 wire（additive 容错）
+        // temporal_layer None -> not on the wire (additive tolerance)
         let msg2 = SignalingMessage::SetPreferredLayers {
             room_id: "r1".into(),
             peer_id: "p1".into(),
@@ -1635,7 +1643,7 @@ mod tests {
             ice_candidates: None,
             sctp_parameters: sctp,
         };
-        // None → 字段不上 wire；缺字段 wire → 解析 None（双向兼容钉）
+        // None -> the field does not go on the wire; a wire missing the field -> parses as None (two-way compatibility pin)
         let json = serde_json::to_string(&make(None)).unwrap();
         assert!(!json.contains("sctp_parameters"));
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
@@ -1643,7 +1651,7 @@ mod tests {
             parsed,
             SignalingMessage::WebRtcTransportCreated { sctp_parameters: None, .. }
         ));
-        // Some → 透传
+        // Some -> passthrough
         let json_with =
             serde_json::to_string(&make(Some(serde_json::json!({ "port": 5000 })))).unwrap();
         assert!(json_with.contains(r#""sctp_parameters":{"port":5000}"#));

@@ -3,7 +3,7 @@ name = "mediaservo-client-c"
 build = "build.rs"
 version.workspace = true
 edition.workspace = true
-description = "MediaServo client C ABI — mediaservo_client_* opaque handle bindings (舱端消费 + 控制)"
+description = "MediaServo client C ABI — mediaservo_client_* opaque handle bindings (cockpit consumption + control)"
 license.workspace = true
 
 [lib]
@@ -15,8 +15,8 @@ mediaservo-common = { path = "../../../crates/mediaservo-common" }
 mediaservo-client = { path = "../../../crates/mediaservo-client" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 serde_json = "1"
-# C 桥诊断面：宿主 C++ 进程零 subscriber 时，on_track/ICE 等分水岭日志全哑火
-# （09-24 排障实锤）——runtime 惰性装一层，RUST_LOG 可关。
+# C-bridge diagnostics: when the host C++ process has zero subscribers, on_track/ICE watershed logs are all silent
+# (confirmed in 09-24 troubleshooting) — the runtime installs a lazy tracing layer; RUST_LOG can turn it off.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

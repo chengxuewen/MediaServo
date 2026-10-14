@@ -1,5 +1,5 @@
-// mediaservo-link-cxx 信令 + 事件示例（骨架；需运行中 server 才能全流程跑通）。
-// 编译示例: g++ -std=c++17 -I bindings/cxx/mediaservo-link-cxx/include -I bindings/c/mediaservo-link-c/include
+// mediaservo-link-cxx signaling + events example (skeleton; needs a running server for the full flow).
+// Build example: g++ -std=c++17 -I bindings/cxx/mediaservo-link-cxx/include -I bindings/c/mediaservo-link-c/include
 //           -I bindings/c/include examples/vehicle_link.cpp -L target/debug -lmediaservo_link
 
 #include <cstdlib>
@@ -12,7 +12,7 @@ int main() {
     using mediaservo::link::SignalConfig;
     using mediaservo::link::SignalSession;
 
-    // 配置从环境变量读取（禁止硬编码密钥/地址）
+    // Configuration comes from environment variables (hardcoded keys/addresses are forbidden)
     const char* url = std::getenv("MEDIASERVO_SIGNAL_URL");
     const char* psk = std::getenv("MEDIASERVO_PSK");
     const char* room = std::getenv("MEDIASERVO_ROOM");
@@ -25,10 +25,10 @@ int main() {
     cfg.url = url;
     cfg.psk = psk;
     cfg.room = room;
-    cfg.role = "Pusher"; // 车端推流角色
+    cfg.role = "Pusher"; // the vehicle-side push role
 
-    // 先注册事件回调再发连接？—— 回调在 connect 后任意时刻注册即可；
-    // 首次注册时泵合成补发 {"type":"connected"} 事件（C ABI 契约）。
+    // Register the event callback before connecting? — the callback can be registered any time after connect;
+    // on first registration the pump re-synthesizes the {"type":"connected"} event (the C ABI contract).
     auto result = SignalSession::connect(cfg);
     if (!result) {
         std::cerr << "connect failed: code=" << result.error().code
@@ -38,7 +38,7 @@ int main() {
     auto session = std::move(result).value();
 
     session.on_event([](const std::string& event_json) {
-        std::cout << "event: " << event_json << "\n"; // 事件串仅在回调内有效（已拷贝）
+        std::cout << "event: " << event_json << "\n"; // the event string is valid only inside the callback (already copied)
     });
 
     auto sent = session.send("{\"type\":\"get_status\"}");

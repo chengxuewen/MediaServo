@@ -1,7 +1,7 @@
-//! SFU 纯函数——SDP 构造 + codec 解析 + DC 通道参数。
+//! SFU pure functions -- SDP construction + codec parsing + DC channel params.
 //!
-//! 镜像 field::sfu + controller::channel_init（C12 dep boundary：client 禁依 field/host）。
-//! 签名钉 server 已验证形状（unit test 交叉）。
+//! Mirrors field::sfu + controller::channel_init (the C12 dep boundary: client must not depend on field/host).
+//! Signatures pin server-verified shapes (cross-checked by unit tests).
 
 use mediaservo_common::protocol::{
     DtlsParameters, IceCandidate, IceParameters, SctpStreamParameters,
@@ -9,9 +9,9 @@ use mediaservo_common::protocol::{
 use mediaservo_webrtc::data_channel::RTCDataChannelInit;
 use serde_json::Value;
 
-// ── DC 通道参数（mirror controller::channel_init）──────────
+// -- DC channel params (mirror controller::channel_init) --
 
-/// 出程 DC 可靠性参数（D-H3：gimbal = partial-reliable，其余 = reliable ordered）。
+/// Egress DC reliability params (D-H3: gimbal = partial-reliable, the rest = reliable ordered).
 #[must_use]
 pub fn channel_init(label: &str) -> RTCDataChannelInit {
     match label {
@@ -22,13 +22,13 @@ pub fn channel_init(label: &str) -> RTCDataChannelInit {
     }
 }
 
-/// 回执回程通道 label（mirror host controller::ACK_LABEL——单向对模型契约：
-/// 回执 = 舱端消费车端 ack DataProducer，consumer 反向回声 worker 不透传）。
+/// The receipt return-channel label (mirror host controller::ACK_LABEL -- the unidirectional-pair model contract:
+/// the receipt = the cockpit consuming the vehicle's ack DataProducer; the worker does not relay a consumer's reverse echo).
 pub const ACK_LABEL: &str = "ack";
 
-/// S2d consumer 侧 negotiated DC 参数（官方 Chrome74.receiveDataChannel 契约：
-/// id = server 回执分配的 stream_id，带外协商——mediasoup 代理域 in-band DCEP
-/// 永不触发，inbound 通道只能以此形建）。
+/// The S2d consumer-side negotiated DC params (the official Chrome74.receiveDataChannel contract:
+/// id = the stream_id assigned in the server receipt, negotiated out-of-band -- an in-band DCEP in the mediasoup proxy domain
+/// never fires; an inbound channel can only be created this way).
 #[must_use]
 pub fn negotiated_init(sp: &SctpStreamParameters, protocol: &str) -> RTCDataChannelInit {
     RTCDataChannelInit {
@@ -41,8 +41,8 @@ pub fn negotiated_init(sp: &SctpStreamParameters, protocol: &str) -> RTCDataChan
     }
 }
 
-/// DC 的 SCTP 流参数（mirror controller::sctp_stream_params）。
-/// stream_id 取 libwebrtc 实配 DC id。
+/// The DC's SCTP stream params (mirror controller::sctp_stream_params).
+/// stream_id takes the libwebrtc real-config DC id.
 pub fn sctp_stream_params(label: &str, id: i32) -> Result<SctpStreamParameters, String> {
     let stream_id = u16::try_from(id)
         .map_err(|_| format!("DC {label} id={id} unavailable as SCTP stream_id"))?;
@@ -57,7 +57,7 @@ pub fn sctp_stream_params(label: &str, id: i32) -> Result<SctpStreamParameters, 
 
 // ── DC-only remote SDP（mirror controller::build_dc_remote_sdp）──────────
 
-/// 用 mediasoup transport 参数合成 DC-only remote offer（application m-line）。
+/// Synthesize a DC-only remote offer (the application m-line) from mediasoup transport params.
 pub fn build_dc_remote_sdp(
     ice: &IceParameters,
     dtls: &DtlsParameters,
@@ -96,7 +96,7 @@ pub fn build_dc_remote_sdp(
 
 // ── Video recv remote SDP（mirror field::sfu::build_remote_sdp ServerSendonly）──────────
 
-/// 用 mediasoup transport 参数合成 video recv remote SDP（server sendonly -> 本地 recv）。
+/// Synthesize a video-recv remote SDP from mediasoup transport params (server sendonly -> local recv).
 pub fn build_recv_video_sdp(
     ice: &IceParameters,
     dtls: &DtlsParameters,
@@ -149,9 +149,9 @@ pub fn build_recv_video_sdp(
     lines.join("\r\n")
 }
 
-// ── SSRC 注入（mirror field::sfu::inject_remote_ssrc）──────────
+// -- SSRC injection (mirror field::sfu::inject_remote_ssrc) --
 
-/// 将 consumer rtp_parameters 的 ssrc 注入 remote SDP（libwebrtc demux 需要）。
+/// Inject the consumer rtp_parameters' ssrc into the remote SDP (libwebrtc demux needs it).
 pub fn inject_remote_ssrc(remote_sdp: &str, consumer_rtp: &Value) -> String {
     let ssrc = consumer_rtp
         .get("encodings")
@@ -180,10 +180,10 @@ pub fn inject_remote_ssrc(remote_sdp: &str, consumer_rtp: &Value) -> String {
     out.join(sep)
 }
 
-// ── Codec 解析（从 Consumed.rtp_parameters 提取）──────────
+// -- Codec parsing (extracted from Consumed.rtp_parameters) --
 
-/// 从 Consumed 返回的 rtp_parameters 解析首个 video codec（非 rtx）。
-/// 返回 (pt, name, clock_rate, fmtp_option)。
+/// Parse the first video codec (non-rtx) from the rtp_parameters the Consumed returned.
+/// Returns (pt, name, clock_rate, fmtp_option).
 pub fn codec_from_consumer(rtp: &Value) -> Option<(u16, String, u32, Option<String>)> {
     let codecs = rtp.get("codecs")?.as_array()?;
     let codec = codecs.iter().find(|c| {
@@ -327,7 +327,7 @@ mod tests_negotiated {
 
     #[test]
     fn ack_label_mirrors_host_controller() {
-        // 车端 controller::ACK_LABEL = "ack"（跨 crate 字面值钉，S 批不合并牌位）。
+        // the vehicle controller::ACK_LABEL = "ack" (a cross-crate literal pin; the S batch does not merge the plaques).
         assert_eq!(ACK_LABEL, "ack");
     }
 }

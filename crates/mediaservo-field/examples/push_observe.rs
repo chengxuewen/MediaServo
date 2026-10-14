@@ -1,4 +1,4 @@
-//! 观测: PushSession 推帧 10s — 监控 outbound-rtp 网络级统计
+//! Observe: PushSession pushes frames for 10s — watch outbound-rtp network-level stats
 #![cfg(target_os = "linux")]
 use std::time::Duration;
 
@@ -14,10 +14,7 @@ async fn main() {
     let cfg = PushConfig::new(url, psk, room);
     let (mut s, _ev) = PushSession::connect(cfg.clone()).await.expect("connect");
     let opts = PublishOptions::default();
-    let _ = s
-        .publish_video(&cfg, &opts)
-        .await
-        .expect("publish");
+    let _ = s.publish_video(&cfg, &opts).await.expect("publish");
     s.start_video_frames(&cfg).expect("frames");
     let pc = s.peer_connection().expect("pc");
     for i in 0..10 {

@@ -1,7 +1,7 @@
-//! 回放域（playback）— Player：demux + decode，逐帧产出解码帧。
+//! Playback domain — Player: demux + decode, yielding decoded frames one by one.
 //!
-//! MVP: FFmpeg 后端（ffmpeg-the-third 6.0），H264 → I420/原始格式解码。
-//! 入口参考契约 §6：`Player::open(path)` → `next_frame()` 逐帧消费。
+//! MVP: FFmpeg backend (ffmpeg-the-third 6.0), H264 → I420/raw-format decoding.
+//! Entry point per contract §6: `Player::open(path)` → `next_frame()` consumed frame by frame.
 
 use std::path::PathBuf;
 
@@ -9,8 +9,8 @@ use mediaservo_codec::frame::{Plane, VideoFrame};
 
 use crate::DeckError;
 
-/// 回放器：打开媒体文件，逐帧产出解码帧。
-#[allow(dead_code)] // path/w/h 在非 ffmpeg 后端姿态不读（cfg 差异 = PIT-203 族）
+/// Player: opens a media file and yields decoded frames one by one.
+#[allow(dead_code)] // path/w/h unread in the non-ffmpeg backend posture (cfg drift = PIT-203 family)
 pub struct Player {
     path: PathBuf,
     #[cfg(feature = "backend-ffmpeg")]
@@ -20,7 +20,7 @@ pub struct Player {
 }
 
 impl Player {
-    /// 打开媒体文件（demux 初始化 + 首个视频流解码器就绪）。
+    /// Opens a media file (demux init + first video stream decoder ready).
     #[cfg(feature = "backend-ffmpeg")]
     pub fn open(path: impl Into<PathBuf>) -> Result<Self, DeckError> {
         let path = path.into();
@@ -34,7 +34,7 @@ impl Player {
         Ok(Self { path, inner: Some(inner) })
     }
 
-    /// 取下一帧；None = 文件解码完毕。
+    /// Returns the next frame; None = file fully decoded.
     #[cfg(feature = "backend-ffmpeg")]
     pub fn next_frame(&mut self) -> Result<Option<VideoFrame>, DeckError> {
         match self.inner.as_mut() {
@@ -43,7 +43,7 @@ impl Player {
         }
     }
 
-    /// 文件时长（秒）。
+    /// File duration (seconds).
     #[cfg(feature = "backend-ffmpeg")]
     pub fn duration_secs(&self) -> Result<f64, DeckError> {
         self.inner
@@ -52,7 +52,7 @@ impl Player {
             .duration_secs()
     }
 
-    /// 打开媒体文件（无 FFmpeg 后端时明确报错）。
+    /// Opens a media file (explicit error when no FFmpeg backend).
     #[cfg(not(feature = "backend-ffmpeg"))]
     pub fn open(path: impl Into<PathBuf>) -> Result<Self, DeckError> {
         let path = path.into();
@@ -66,9 +66,9 @@ impl Player {
     }
 }
 
-/// 播放器内部状态（demux + decoder）。
+/// Player internal state (demux + decoder).
 #[cfg(feature = "backend-ffmpeg")]
-#[allow(dead_code)] // w/h 在解码器重建路径备用（ffmpeg 姿态未读 = 设计保留位）
+#[allow(dead_code)] // w/h kept for the decoder rebuild path (unread in the ffmpeg posture = reserved by design)
 struct PlayerInner {
     input: ffmpeg_the_third::format::context::Input,
     stream_index: usize,
@@ -86,7 +86,7 @@ impl PlayerInner {
         let input = ffmpeg::format::input(path)
             .map_err(|e| DeckError::Io(std::io::Error::other(format!("open input: {e}"))))?;
 
-        // 找第一个视频流
+        // Find the first video stream
         let mut stream_index = None;
         for (idx, stream) in input.streams().enumerate() {
             if stream.parameters().medium() == ffmpeg::media::Type::Video {
@@ -97,14 +97,14 @@ impl PlayerInner {
         let stream_index =
             stream_index.ok_or_else(|| DeckError::Codec("no video stream found".into()))?;
 
-        // 在借用 input 的块内取出全部标量后再释放借用（input 将被 move 进结构）
+        // Extract all scalars from the borrowed input inside the borrow scope before releasing it (input is moved into the struct)
         let (codec_id, w, h) = {
             let stream = input.stream(stream_index).expect("stream exists");
             let p = stream.parameters();
             (p.id(), p.width(), p.height())
         };
 
-        // 创建解码器（video codec 从流参数识别）
+        // Create the decoder (video codec identified from stream parameters)
         let codec = ffmpeg::decoder::find(codec_id)
             .ok_or_else(|| DeckError::Codec(format!("no decoder for codec {codec_id:?}")))?;
         let mut ctx = ffmpeg::codec::context::Context::new_with_codec(codec);
@@ -114,7 +114,7 @@ impl PlayerInner {
             ctx.set_parameters(params)
                 .map_err(|e| DeckError::Codec(format!("set parameters: {e}")))?;
         }
-        // decoder::Video(pub Opened) 即 open 后解码器（send_packet/receive_frame 经 Deref）
+        // decoder::Video(pub Opened) is the post-open decoder (send_packet/receive_frame via Deref)
         let decoder =
             ctx.decoder().video().map_err(|e| DeckError::Codec(format!("create decoder: {e}")))?;
 
@@ -125,7 +125,7 @@ impl PlayerInner {
         use ffmpeg_the_third as ffmpeg;
         let mut decoded = None;
 
-        // 循环取包直到解码出一帧或 EOF。
+        // Loop over packets until a frame decodes or EOF.
         // PacketIter<Item = Result<(Stream, Packet), Error>>
         for item in self.input.packets() {
             let (stream, packet) =
@@ -141,15 +141,15 @@ impl PlayerInner {
             match self.decoder.receive_frame(&mut avframe) {
                 Ok(()) => {
                     decoded = Some(self.video_frame(&avframe));
-                    break; // 出一帧即返回（逐帧消费）
+                    break; // One frame decoded: return (frame-by-frame consumption)
                 }
-                Err(ffmpeg::Error::Other { errno: 11, .. }) => continue, // EAGAIN 等更多包
+                Err(ffmpeg::Error::Other { errno: 11, .. }) => continue, // EAGAIN: wait for more packets
                 Err(e) => return Err(DeckError::Codec(format!("receive frame: {e}"))),
             }
         }
 
         if decoded.is_none() {
-            // flush 解码器残留帧（文件尾部）
+            // Flush residual decoder frames (end of file)
             self.decoder.send_eof().map_err(|e| DeckError::Codec(format!("send_eof: {e}")))?;
             let mut avframe = ffmpeg::util::frame::Video::empty();
             if let Ok(()) = self.decoder.receive_frame(&mut avframe) {
@@ -162,7 +162,7 @@ impl PlayerInner {
     fn video_frame(&self, avframe: &ffmpeg_the_third::util::frame::Video) -> VideoFrame {
         let w = avframe.width();
         let h = avframe.height();
-        // 平面格式（I420/P010 等）：逐平面复制（仅有效平面数）
+        // Planar formats (I420/P010 etc.): copy plane by plane (valid plane count only)
         let plane_count = avframe.planes();
         let mut planes = Vec::new();
         for i in 0..plane_count {

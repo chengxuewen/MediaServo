@@ -1,48 +1,48 @@
-//! MediaServo client C ABI — 舱端/消费侧 SDK（登录 + SFU 视频消费 + 控制 DataChannel）。
+//! MediaServo client C ABI — cockpit/consumer-side SDK (login + SFU video consumption + control DataChannel).
 //!
-//! 契约 §7（D109/D240/D241）：opaque handle + int 错误码 + 回调。
-//! 模式基准 = bindings/c/mediaservo-link-c（生命周期/struct_size/pump 纪律同形）。
-//! Rust 侧全部能力来自 `mediaservo-client` v2（本 crate 只做 FFI 形，零业务逻辑）。
+//! Contract §7 (D109/D240/D241): opaque handles + int error codes + callbacks.
+//! Pattern baseline = bindings/c/mediaservo-link-c (same-shape lifecycle/struct_size/pump discipline).
+//! All Rust-side capability comes from `mediaservo-client` v2 (this crate is FFI shaping only, zero business logic).
 //!
-//! S6 批1b（R1 改名 + K3 句柄错误 + 多路 Consumer + 状态观测）：
-//! - 全量前缀 `mediaservo_client_*`（零别名，旧 `ms_client_*` 退役）；
-//! - 错误双轨 = 句柄槽（`session_error`/`session_last_error`，机读 code/wire/retryable）
-//!   + 进程全局 ⊘ 双写一周期（K3 裁决：最小改动形）；
-//! - `session_consume` 多路形（每 consumer 一帧泵，互不连坐）；旧 `consume_video` ⊘
-//!   行为重映射（wait(30s)+consume+into_receiver，一次性闸保持）；
-//! - `session_state`/`session_on_state`（累积注册，ConnectionState 0..3 线值）；
-//! - `control_on_ack` 累积形 + token（`control_off_ack` 注销），旧替换形退役。
+//! S6 batch 1b (R1 rename + K3 handle errors + multi-consumer + state observation):
+//! - full `mediaservo_client_*` prefix (zero aliases; the old `ms_client_*` is retired);
+//! - dual error track = handle slots (`session_error`/`session_last_error`, machine-readable code/wire/retryable)
+//!   + process-global ⊘ dual write for one period (K3 ruling: minimal-change form);
+//! - multi-consumer `session_consume` (one frame pump per consumer, no cross coupling); the old `consume_video` ⊘ is
+//!   behavior-remapped (wait(30s)+consume+into_receiver, the one-shot gate kept);
+//! - `session_state`/`session_on_state` (cumulative registration, ConnectionState 0..3 wire values);
+//! - cumulative `control_on_ack` + token (`control_off_ack` unregisters); the old replacement form is retired.
 //!
-//! # 生命周期契约（承 link-c R2）
-//! - handle 单线程属主；close 后任何 API 调用为 UB（幂等 close 同 link 纪律）。
-//! - session_close = 置 closed 标志 → 关会话（帧通道随之消亡）→ join 视频泵 →
-//!   join 状态泵 → 逐条回调 user_free → 才 free。
-//! - consumer handle 独立关闭（close 撤本路接收端，泵 join 有界 ≤CONSUMER_POLL）；
-//!   session_close 不隐式关 consumer（与 control 同纪律）。
-//! - 控制 handle 独立关闭；ack 泵每轮 recv_ack 有界（1s），closed 标志 ≤1s 内生效。
-//! - 帧/ack/状态回调仅在各自泵线程触发；回调调用期间不持任何锁；回调内禁止调用
-//!   任何 mediaservo_client_* API（含 close）——未定义行为。
-//! - 回调内 JSON 字符串与 frame.data 指针仅在回调内有效（需保留请拷贝）。
-//! - user_free 契约：每条注册（on_state/consume/on_ack）携带可选 user_free，
-//!   **恰好调用一次**——on_state 在 session_close；consume 在 consumer_close；
-//!   on_ack 在 off_ack 后的泵回收轮或 control_close（未 off_ack 的随 close 释放）。
+//! # Lifecycle contract (inheriting link-c R2)
+//! - Each handle is single-thread-owner; any API call after close is UB (idempotent close, same as link).
+//! - session_close = set the closed flag → close the session (frame channels die with it) → join the video pump →
+//!   join the state pump → invoke each registration's user_free → only then free.
+//! - consumer handles close independently (close withdraws that consumer's receiver; the pump join is bounded ≤CONSUMER_POLL);
+//!   session_close does not implicitly close consumers (same discipline as control).
+//! - The control handle closes independently; each ack-pump recv_ack is bounded (1s), so the closed flag takes effect within 1s.
+//! - Frame/ack/state callbacks fire only on their own pump threads; no lock is held during a callback; calling
+//!   any mediaservo_client_* API (including close) from within a callback is forbidden — undefined behavior.
+//! - JSON strings and frame.data pointers inside callbacks are valid only during the callback (copy if you need to keep them).
+//! - user_free contract: each registration (on_state/consume/on_ack) carries an optional user_free,
+//!   **invoked exactly once** — on_state at session_close; consume at consumer_close;
+//!   on_ack at the pump reclamation round after off_ack or at control_close (entries never off_ack'ed are released at close).
 //!
-//! # runtime（审核 R1 的 client 形态）
-//! `RoomSession::open_control` 内部 `tokio::spawn(ack_consumer_pump)`（session.rs），
-//! link `SignalClient::connect` spawn WS 读循环——后台任务必须存活于任何单次
-//! block_on 之外，故进程级共享 multi_thread runtime（OnceLock，C28 模式）。与
-//! link-c 的 per-handle runtime 不同：client 后台任务与会话句柄跨调用共生，
-//! 共享实例天然覆盖且省线程。
+//! # runtime (the client form of audit R1)
+//! `RoomSession::open_control` internally does `tokio::spawn(ack_consumer_pump)` (session.rs), and link's
+//! `SignalClient::connect` spawns the WS read loop — background tasks must outlive any single
+//! block_on, hence a process-level shared multi_thread runtime (OnceLock, the C28 pattern). Unlike
+//! link-c's per-handle runtime: client background tasks co-own the session handle across calls,
+//! so one shared instance naturally covers everything and saves threads.
 //!
-//! # 错误映射
-//! `ClientError` 全 14 变体 → `MEDIASERVO_CLIENT_ERR_*` 穷尽 match（单测钉，
-//! 新变体入 enum 即编译红，静默漏映射不可能）。机读位 wire_code/retryable 经
-//! [`mediaservo_client_error_t`] 透传（K2 Rust 面的 C 镜像）。
+//! # Error mapping
+//! All 14 `ClientError` variants → `MEDIASERVO_CLIENT_ERR_*` exhaustive match (pinned by unit tests;
+//! adding a new variant turns the build red, so silent missed mappings are impossible). The machine-readable wire_code/retryable bits pass through
+//! [`mediaservo_client_error_t`] (the C mirror of the K2 Rust surface).
 //!
-//! C ABI 面 raw pointer 参数是签名刚需：全部解引用点先 null 校验、包
-//! catch_unwind，头文件载明属主/生命周期契约——clippy 的 safe-API 误用模型
-//! 不适用于本 crate（link-c/field-c 同族问题系存量债，工作区 lint 红在 HEAD
-//! 已登记另案；本 crate 以显式 allow 保持自身零告警）。
+//! Raw pointer parameters are a signature requirement of the C ABI surface: every dereference point null-checks first and is wrapped in
+//! catch_unwind, and the header documents the ownership/lifetime contracts — clippy's safe-API misuse model
+//! does not apply to this crate (the same-family issues in link-c/field-c are existing debt; the workspace lint red at HEAD
+//! is filed separately; this crate uses explicit allows to keep itself warning-free).
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 mod config;
@@ -50,8 +50,8 @@ mod consumer;
 mod control;
 mod errors;
 
-use std::os::raw::{c_char, c_int, c_void};
 use std::ffi::CStr;
+use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -81,25 +81,25 @@ pub use errors::{
     MEDIASERVO_CLIENT_ERR_UNAUTHORIZED, mediaservo_client_error_t,
 };
 
-/// 等房间内首路视频 producer 上限（basic.rs 同值：late-join NewProducer 回放窗）。
+/// Upper bound for waiting on the room's first video producer (same value as basic.rs: the late-join NewProducer replay window).
 const VIDEO_PRODUCER_WAIT: Duration = Duration::from_secs(30);
-/// ack 泵单轮 recv_ack 窗（closed 标志生效上界 = 本值）。
+/// Ack-pump per-round recv_ack window (the upper bound for the closed flag to take effect = this value).
 pub(crate) const ACK_POLL: Duration = Duration::from_secs(1);
-/// ⊘ 视频泵空转复查窗（closed / 通道消亡的轮询粒度）。
+/// ⊘ video-pump idle re-check window (polling granularity for closed / channel death).
 const VIDEO_POLL: Duration = Duration::from_secs(2);
 
-/// 进程级共享 multi_thread runtime（见模块头 runtime 节）。
-/// 诊断 subscriber 惰性安装（runtime 同刻一次）：默认 mediaservo=info——
-/// "consume on_track 到达"/ICE 状态/client consume 建立 = 零帧问题的分水岭证据链。
-/// 宿主已有 subscriber → try_init Err 静默让位；RUST_LOG env 全程可覆盖级别。
-/// MSRTC.log 落盘目标（set_log_file 一次性设置；None = stdout 现状）。
-/// 宿主（TPHMI）在首个 runtime 使用前调用——init_tracing 惰性读。
+/// Process-level shared multi_thread runtime (see the runtime section in the module header).
+/// Lazily installs the diagnostics subscriber (once, at the same moment as the runtime): default mediaservo=info —
+/// "consume on_track arrival"/ICE state/client consume setup form the watershed evidence chain for zero-frame problems.
+/// If the host already has a subscriber, try_init Err yields silently; the RUST_LOG env can override levels at any time.
+/// MSRTC.log file target (set once via set_log_file; None = keep the current stdout behavior).
+/// The host (TPHMI) calls this before the first runtime use — init_tracing reads it lazily.
 static LOG_FILE_PATH: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
 
-/// C ABI: 设置 tracing 日志文件（MSRTC.log）。须在首个 runtime 使用前调用
-/// （首次 login/consume 等任意 API 前）；二次调用无效（OnceLock 语义）。
-/// 默认级别 env MSRTC_LOG_LEVEL（缺省 info）过滤；libwebrtc 噪音层
-/// （mediaservo_webrtc）独立挡 warn——需要深挖时 MSRTC_LOG_LEVEL=debug 全开。
+/// C ABI: set the tracing log file (MSRTC.log). Must be called before the first runtime use
+/// (before any API such as the first login/consume); repeat calls are no-ops (OnceLock semantics).
+/// Level filtering via the env MSRTC_LOG_LEVEL (default info); the libwebrtc noise layer
+/// (mediaservo_webrtc) is independently capped at warn — set MSRTC_LOG_LEVEL=debug to open everything when deep-diving.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_set_log_file(path: *const std::ffi::c_char) -> std::ffi::c_int {
     if path.is_null() {
@@ -111,19 +111,17 @@ pub extern "C" fn mediaservo_client_set_log_file(path: *const std::ffi::c_char) 
     };
     match LOG_FILE_PATH.set(Some(std::path::PathBuf::from(p))) {
         Ok(()) => crate::errors::MEDIASERVO_OK,
-        Err(_) => crate::errors::MEDIASERVO_CLIENT_ERR_STATE, // 已设置过
+        Err(_) => crate::errors::MEDIASERVO_CLIENT_ERR_STATE, // already set
     }
 }
 
 fn init_tracing() {
     static DONE: std::sync::Once = std::sync::Once::new();
     DONE.call_once(|| {
-        // 级别：MSRTC_LOG_LEVEL 优先，缺省 info；webrtc_sys 噪音层独立抬到 warn
+        // Levels: MSRTC_LOG_LEVEL takes priority, default info; the webrtc_sys noise layer is independently raised to warn
         let level = std::env::var("MSRTC_LOG_LEVEL").unwrap_or_else(|_| "info".into());
         let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            tracing_subscriber::EnvFilter::new(format!(
-                "mediaservo_webrtc=warn,mediaservo={level}"
-            ))
+            tracing_subscriber::EnvFilter::new(format!("mediaservo_webrtc=warn,mediaservo={level}"))
         });
         let file_writer: Option<std::fs::File> = LOG_FILE_PATH
             .get()
@@ -131,7 +129,10 @@ fn init_tracing() {
             .and_then(|p| match std::fs::OpenOptions::new().create(true).append(true).open(p) {
                 Ok(f) => Some(f),
                 Err(e) => {
-                    eprintln!("[msrtc] log file open failed ({}): {e} — fallback stdout", p.display());
+                    eprintln!(
+                        "[msrtc] log file open failed ({}): {e} — fallback stdout",
+                        p.display()
+                    );
                     None
                 }
             });
@@ -145,10 +146,8 @@ fn init_tracing() {
                     .try_init();
             }
             None => {
-                let _ = tracing_subscriber::fmt()
-                    .with_env_filter(filter)
-                    .with_target(true)
-                    .try_init();
+                let _ =
+                    tracing_subscriber::fmt().with_env_filter(filter).with_target(true).try_init();
             }
         }
     });
@@ -163,10 +162,10 @@ fn runtime() -> &'static tokio::runtime::Runtime {
             .enable_all()
             .build()
             .expect("client-c runtime");
-        // libwebrtc C++ 全家桶预热（flaky 初连根因）：首次 CreatePeerConnection
-        // 同步跑 VAAPI DRM 扫描/PulseAudio/X11 display，实测可 >15s——恰触发 link
-        // 心跳 15s 静默判死主动断链 → "初次拉流失败、重试才成"。后台空跑一次把
-        // 初始化成本摊到加载期；失败静默（预热只是缓存填充，非功能依赖）。
+        // Warm up the libwebrtc C++ stack (root cause of flaky first connections): the first CreatePeerConnection
+        // synchronously runs VAAPI DRM scans/PulseAudio/X11 display probing, measured at >15s — exactly enough to trigger link
+        // heartbeat's 15s silent-death active disconnect → "first pull fails, retry succeeds". One background dry run spreads
+        // the init cost into load time; failures are silent (the warm-up only fills caches, it is not a functional dependency).
         rt.spawn(async move {
             use mediaservo_client::engine::Engine as _;
             let engine = mediaservo_client::engine::SysEngine::new();
@@ -179,17 +178,17 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
-/// 带句柄 FFI 的统一 catch 尾：panic → 句柄错误槽（句柄非 null 时）+ 全局双写。
+/// Unified catch tail for handle-carrying FFI: panic → the handle error slot (when the handle is non-null) + the global dual write.
 ///
-/// close 族不用本形（Box::from_raw 后句柄所有权存疑，panic 兜底仅写全局）。
+/// The close family does not use this form (after Box::from_raw handle ownership is in doubt; the panic net writes only the global).
 fn ffi_catch<T: HandleErr + ?Sized>(
     name: &'static str,
     h: *const T,
     body: impl FnOnce() -> c_int,
 ) -> c_int {
     catch_unwind(AssertUnwindSafe(body)).unwrap_or_else(|_| {
-        // SAFETY: 仅在指针非 null 时解引用；panic 不释放句柄（close 族除外，
-        // 其 panic 尾走 ffi_global）。锁中毒由 note 的 try-lock 消化。
+        // SAFETY: dereferences only non-null pointers; a panic does not free the handle (except in the close family,
+        // whose panic tail goes through ffi_global). Lock poisoning is absorbed by note's try-lock.
         match unsafe { h.as_ref() } {
             Some(x) => x.fail_panic(name),
             None => set_last_error(format!("{name}: panic")),
@@ -198,7 +197,7 @@ fn ffi_catch<T: HandleErr + ?Sized>(
     })
 }
 
-/// 无句柄自由函数的 catch 尾（仅全局 last_error）。
+/// Catch tail for handle-less free functions (global last_error only).
 fn ffi_global(name: &'static str, body: impl FnOnce() -> c_int) -> c_int {
     catch_unwind(AssertUnwindSafe(body)).unwrap_or_else(|_| {
         set_last_error(format!("{name}: panic"));
@@ -206,29 +205,29 @@ fn ffi_global(name: &'static str, body: impl FnOnce() -> c_int) -> c_int {
     })
 }
 
-// ── 回调类型 + 结构镜像 ──
+// -- Callback types + struct mirrors --
 
-/// 视频帧回调（⊘ consume_video 与多路 consume 共用；各自泵线程触发，
-/// frame 指针仅回调内有效；第一参数 = 所属会话句柄）。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
+/// Video frame callback (⊘ shared by consume_video and multi-consume; fires on each one's own pump thread;
+/// the frame pointer is valid only inside the callback; the first parameter = the owning session handle).
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception)
 pub type mediaservo_client_frame_cb =
     extern "C" fn(*mut mediaservo_client_session_t, *const mediaservo_client_frame_t, *mut c_void);
 
-/// ack 回调（仅在 ack 泵线程触发；ack_json 仅回调内有效）。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
+/// Ack callback (fires only on the ack pump thread; ack_json is valid only inside the callback).
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception)
 pub type mediaservo_client_ack_cb =
     extern "C" fn(*mut mediaservo_client_control_t, *const c_char, *mut c_void);
 
-/// 会话连接态回调（仅在状态泵线程触发；state 线值见 header 枚举注释）。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
+/// Session connection-state callback (fires only on the state pump thread; see the header enum comment for state wire values).
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception)
 pub type mediaservo_client_state_cb =
     extern "C" fn(*mut mediaservo_client_session_t, u8 /*state*/, *mut c_void);
 
-/// user 指针释放器（NULL = 不释放；每条注册恰好调用一次，时机见模块头）。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
+/// user pointer deallocator (NULL = do not free; invoked exactly once per registration, timing in the module header).
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception)
 pub type mediaservo_client_user_free = extern "C" fn(*mut c_void);
 
-/// C 侧帧描述（自然对齐，与 client.h 一致；data 仅回调内有效）。
+/// C-side frame description (naturally aligned, matching client.h; data is valid only inside the callback).
 #[allow(non_camel_case_types)]
 #[repr(C)]
 pub struct mediaservo_client_frame_t {
@@ -239,9 +238,9 @@ pub struct mediaservo_client_frame_t {
     pub len: usize,
 }
 
-// ── 自由函数 ──
+// -- Free functions --
 
-/// SDK 版本 (MAJOR.MINOR.PATCH — D241 soname 语义)。
+/// SDK version (MAJOR.MINOR.PATCH — D241 soname semantics).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_version(buf: *mut c_char, len: usize) -> c_int {
     ffi_global("mediaservo_client_version", || {
@@ -252,10 +251,10 @@ pub extern "C" fn mediaservo_client_version(buf: *mut c_char, len: usize) -> c_i
     })
 }
 
-/// 账号登录换 JWT（阻塞；扁平参数形，批1b 签名升形——旧 config 结构形退役）。
+/// Account login for a JWT (blocking; flat parameter form, the batch-1b signature upgrade — the old config struct form is retired).
 ///
-/// 出参 = jwt 文本（NUL 结尾）。needed 溢出合同同 [`mediaservo_client_list_rooms`]
-/// （先写 needed 两态；jwt 常规 <2KiB，建议 cap ≥ 4096）。
+/// Out-param = the jwt text (NUL-terminated). Same needed overflow contract as [`mediaservo_client_list_rooms`]
+/// (needed is written first in both states; jwts are typically <2KiB, cap ≥ 4096 recommended).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_login(
     http_base: *const c_char,
@@ -296,10 +295,10 @@ pub extern "C" fn mediaservo_client_login(
     })
 }
 
-/// API-key 换短 JWT（`POST {http_base}/api/auth/exchange`，阻塞；会话前自由函数，
-/// accountless-client-auth T2）。成功 out_jwt = NUL 结尾 JWT（后续原样填
-/// `mediaservo_client_config_t.jwt`——凭证来源换、消费面不变）。401（未知 key 或
-/// 错 secret，server 逐字同消息防枚举）→ ERR_UNAUTHORIZED；needed 溢出合同同 login。
+/// Exchange an API key for a short JWT (`POST {http_base}/api/auth/exchange`, blocking; a pre-session free function,
+/// accountless-client-auth T2). On success out_jwt = a NUL-terminated JWT (fill it verbatim into
+/// `mediaservo_client_config_t.jwt` — the credential source changes, the consumption surface does not). 401 (unknown key or
+/// wrong secret; the server uses the identical message verbatim to prevent enumeration) → ERR_UNAUTHORIZED; same needed overflow contract as login.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_exchange(
     http_base: *const c_char,
@@ -340,9 +339,9 @@ pub extern "C" fn mediaservo_client_exchange(
     })
 }
 
-/// PSK 房间发现（`GET {http_base}/api/rooms` + `Authorization: Psk <psk>`，
-/// 阻塞；psk-discover 路——Legacy 全量视角，跨房间拉流的发现面）。非 2xx →
-/// ERR_UNAUTHORIZED（详情 last_error）；out_json 形同 list_rooms。
+/// PSK room discovery (`GET {http_base}/api/rooms` + `Authorization: Psk <psk>`,
+/// blocking; the psk-discover path — the Legacy full view, the discovery surface for cross-room pulls). Non-2xx →
+/// ERR_UNAUTHORIZED (details in last_error); out_json has the same shape as list_rooms.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_list_rooms_psk(
     http_base: *const c_char,
@@ -389,11 +388,11 @@ pub extern "C" fn mediaservo_client_list_rooms_psk(
     })
 }
 
-/// 房间发现（`GET {http_base}/api/rooms`，阻塞；**会话前自由函数**——不依赖任何
-/// handle，F-T-8）。out_json = JSON 数组 `[{"room_id":..,"kind":..}]`（服务端 wire
-/// 原样透传，本层不解析内容）。溢出合同（producer_ids cap 盲点的修正形）：cap 不足时
-/// `*needed` 写入必需字节数（含 NUL）并返回 ERR_INVALID_ARG；成功时 `*needed` = 实际
-/// 长度。`needed` 可 NULL（不需要反馈）。非 2xx → ERR_UNAUTHORIZED（详情 last_error）。
+/// Room discovery (`GET {http_base}/api/rooms`, blocking; a **pre-session free function** — depends on no handle, F-T-8).
+/// out_json = the JSON array `[{"room_id":..,"kind":..}]` (the server wire
+/// passed through verbatim; this layer does not parse the content). Overflow contract (the corrected form of the producer_ids cap blind spot): when cap is insufficient,
+/// `*needed` receives the required byte count (including NUL) and ERR_INVALID_ARG is returned; on success `*needed` = the actual
+/// length. `needed` may be NULL (no feedback wanted). Non-2xx → ERR_UNAUTHORIZED (details in last_error).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_list_rooms(
     http_base: *const c_char,
@@ -437,54 +436,54 @@ pub extern "C" fn mediaservo_client_list_rooms(
     })
 }
 
-/// 错误码 → 静态文案（表源 = ClientError Display 模板 + header 错误码注释，
-/// 无新文案发明；未知码固定兜底串）。拷贝语义 = 截断不报错。
+/// Error code → static text (table source = the ClientError Display templates + the header error-code comments,
+/// no new wording invented; unknown codes get the fixed fallback string). Copy semantics = truncate without erroring.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_strerror(code: c_int, buf: *mut c_char, cap: usize) -> c_int {
     ffi_global("mediaservo_client_strerror", || copy_out_str(strerror_text(code), buf, cap))
 }
 
-/// 最近错误详情（⊘ 进程全局形，保留一周期；K3 后新代码用句柄级
+/// Last error details (⊘ process-global form, kept for one period; after K3 new code uses the handle-level
 /// [`mediaservo_client_session_last_error`] / [`mediaservo_client_error_t`]）。
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_last_error(buf: *mut c_char, len: usize) -> c_int {
     ffi_global("mediaservo_client_last_error", || last_error_impl(buf, len))
 }
 
-// ── 会话 ──
+// -- Session --
 
-/// 一条状态回调注册（累积形；user_free 随 session_close 恰好调用一次）。
+/// One state-callback registration (cumulative form; user_free is invoked exactly once at session_close).
 struct StateReg {
     cb: mediaservo_client_state_cb,
     user: *mut c_void,
     free: Option<mediaservo_client_user_free>,
 }
 
-/// 房间会话 opaque handle。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
+/// Room session opaque handle.
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception)
 pub struct mediaservo_client_session_t {
-    /// close 时 take 出并消费（RoomSession::close(self) 签名形态）。
+    /// Taken out and consumed at close (the RoomSession::close(self) signature shape).
     session: std::sync::Mutex<Option<RoomSession>>,
-    /// connect 时快照（negotiated 会话期恒定）。
+    /// Snapshot at connect (constant for the negotiated session's lifetime).
     negotiated: u32,
-    /// T4/F6 身份标签（create 期本地推导，静态；session_identity 符号读出）。
+    /// T4/F6 identity label (derived locally at create, static; read via session_identity).
     identity_label: String,
     closed: AtomicBool,
-    /// ⊘ consume_video 一次性闸门（首调用置位；失败路径回滚）。
+    /// ⊘ consume_video one-shot gate (set on first call; rolled back on failure paths).
     video_started: AtomicBool,
-    /// ⊘ 帧回调（泵线程每轮读取；user 指针存于句柄内不跨线程搬运——link-c 同形）。
+    /// ⊘ frame callback (read by the pump thread each cycle; the user pointer lives inside the handle and is never moved across threads — same shape as link-c).
     video_cb: std::sync::Mutex<Option<(mediaservo_client_frame_cb, *mut c_void)>>,
     video_pump: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
-    /// 状态回调注册表（累积；注销 API 不设——与 on_ack 的 token 形区分命名）。
+    /// State-callback registry (cumulative; no unregister API by design — named distinctly from on_ack's token form).
     state_regs: std::sync::Mutex<Vec<StateReg>>,
     state_pump: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
-    /// K3 句柄错误槽。
+    /// K3 handle error slot.
     err: ErrSlot,
 }
 
-// SAFETY: 内部 Mutex<Option<RoomSession>> 序列化访问；泵线程仅经该锁与原子标志读取。
+// SAFETY: inner Mutex<Option<RoomSession>> serializes access; pump threads read only through that lock and the atomic flags.
 unsafe impl Send for mediaservo_client_session_t {}
-// SAFETY: 所有字段访问经 Mutex/AtomicBool。
+// SAFETY: all field access goes through Mutex/AtomicBool.
 unsafe impl Sync for mediaservo_client_session_t {}
 
 impl HandleErr for mediaservo_client_session_t {
@@ -493,7 +492,7 @@ impl HandleErr for mediaservo_client_session_t {
     }
 }
 
-/// ConnectionState → 线值（0..3，头文件 enum 注释钉；新 Rust 变体编译红=穷尽 match）。
+/// ConnectionState → wire value (0..3, pinned by the header enum comment; a new Rust variant turns the build red = exhaustive match).
 fn state_u8(st: ConnectionState) -> u8 {
     match st {
         ConnectionState::Disconnected => 0,
@@ -503,13 +502,13 @@ fn state_u8(st: ConnectionState) -> u8 {
     }
 }
 
-/// 状态泵线程：watch 变化 → 全部注册回调（每轮重读注册表——注册即生效）。
+/// State pump thread: on watch changes → invoke all registered callbacks (the registry is re-read every cycle — registration takes effect immediately).
 fn state_pump_loop(raw: usize) {
     let s = raw as *mut mediaservo_client_session_t;
     let h = unsafe { &*s };
     let rt = runtime();
-    // 观测源 = 会话 watch 订阅（会话缺失/poisoned = 无源，泵直接退出；
-    // 注册表保留，close 时统一 user_free）。
+    // The observation source = the session's watch subscription (missing/poisoned session = no source, the pump exits directly;
+    // the registry is kept, and close does a uniform user_free pass).
     let rx = match h.session.lock() {
         Ok(g) => g.as_ref().map(|sess| sess.subscribe_connection_state()),
         Err(_) => None,
@@ -531,12 +530,12 @@ fn state_pump_loop(raw: usize) {
                     cb(s, st, user);
                 }
             }
-            Err(_) => break, // RoomSession drop → watch sender 消亡（close 正常收敛）
+            Err(_) => break, // RoomSession drop → the watch sender dies (close converges normally)
         }
     }
 }
 
-/// ⊘ 视频泵线程：帧通道 → C 回调（首路专用；多路见 consumer 模块）。
+/// ⊘ video pump thread: frame channel → C callback (first-consumer only; see the consumer module for multi-consumer).
 fn video_pump(s: *mut mediaservo_client_session_t, mut rx: mpsc::Receiver<VideoFrame>) {
     let h = unsafe { &*s };
     let rt = runtime();
@@ -544,12 +543,12 @@ fn video_pump(s: *mut mediaservo_client_session_t, mut rx: mpsc::Receiver<VideoF
         if h.closed.load(Ordering::SeqCst) {
             break;
         }
-        // 注意: `timeout(..)` 若作 block_on 的外侧实参会在**无 context 的本线程**构造
-        //        （Sleep::new_timeout → Handle::current panic，spike 实锤）——必须在 async 块内构造。
+        // Note: if `timeout(..)` is used as an outside argument of block_on it is constructed **on this context-less thread**
+        //        (Sleep::new_timeout → Handle::current panics, proven in the spike) — it must be constructed inside the async block.
         match rt.block_on(async { timeout(VIDEO_POLL, rx.recv()).await }) {
             Ok(Some(frame)) => {
                 let Some((cb, user)) = h.video_cb.lock().ok().and_then(|g| *g) else {
-                    continue; // 未注册/已取消注册：帧丢弃（latest 语义泵）
+                    continue; // not registered / already unregistered: drop the frame (latest-value pump semantics)
                 };
                 let cframe = mediaservo_client_frame_t {
                     width: frame.width,
@@ -560,13 +559,13 @@ fn video_pump(s: *mut mediaservo_client_session_t, mut rx: mpsc::Receiver<VideoF
                 };
                 cb(s, &cframe, user);
             }
-            Ok(None) => break,  // 会话 drop → 帧通道消亡（正常收敛）
-            Err(_) => continue, // VIDEO_POLL 空转，复查 closed
+            Ok(None) => break, // session dropped → the frame channel died (normal convergence)
+            Err(_) => continue, // VIDEO_POLL idle tick; re-check closed
         }
     }
 }
 
-/// 信令连接 + 入房（阻塞）。成功 `*out` = 新 handle（调用方 close）。
+/// Connect signaling and join the room (blocking). On success `*out` = the new handle (the caller closes).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_session_create(
     cfg: *const mediaservo_client_config_t,
@@ -588,21 +587,21 @@ pub extern "C" fn mediaservo_client_session_create(
             psk: parts.psk.map(str::to_string),
             jwt: parts.jwt.map(str::to_string),
             role: parts.role,
-            // W4b：急停密钥文件通道（G13=密钥永不 argv/env 明文）。路径无效**不拦建会话**
-            // ——steer/consume 等非安全面照常工作，estop 调用点才报 INVALID_ARG
-            // （建会话期硬拦会让一个坏路径拖垮整个 SDK 会话=可用性反噬；车端无 key
-            // 时本字段本就无关）。
+            // W4b: the emergency-stop key file channel (G13 = keys never travel as plaintext argv/env). An invalid path does **not block session setup**
+            // — non-safety surfaces like steer/consume keep working; only the estop call site reports INVALID_ARG
+            // (hard-blocking at session setup would let one bad path take down the whole SDK session = an availability backfire; without a key on the vehicle
+            // this field is irrelevant anyway).
             hmac_key: parts.hmac_key_file.and_then(|p| {
                 config::load_hmac_key_file(p)
                     .map_err(|e| set_last_error(format!("mediaservo_client_session_create: {e}")))
                     .ok()
             }),
-            // viewer-auth-matrix T1：C ABI additive 字段（struct_size 判界读取）。
+            // viewer-auth-matrix T1: the C ABI additive field (read with a struct_size bound check).
             identity_dir: parts.identity_dir.map(std::path::PathBuf::from),
         };
-        // viewer-auth-matrix T4/F6：连接前由**本地配置**推导身份标签（零网络）。
-        // 语义与 server 判序一致：Device(公钥齐备) > jwt > psk；jwt 形 sub 不可知
-        // （SDK 不解 token），标 "jwt:<n> chars"。三者皆无 = "(no credential)"。
+        // viewer-auth-matrix T4/F6: derive the identity label from **local config** before connecting (zero network).
+        // Semantics match the server's ordering: Device (public key present) > jwt > psk; in the jwt form the sub is unknowable
+        // (the SDK does not decode tokens), so it is labeled "jwt:<n> chars". None of the three = "(no credential)".
         let identity_label = match (parts.identity_dir, parts.jwt, parts.psk) {
             (Some(dir), _, _) => format!("Device({})", device_id_of_dir(dir)),
             (_, Some(_), _) => "jwt".to_string(),
@@ -642,9 +641,9 @@ fn fallback_name(dir: &str) -> String {
         .unwrap_or_else(|| dir.to_string())
 }
 
-/// M4 身份标签的 device_id 提取：读 `<dir>/identity.json`（失败回退目录名尾段）。
+/// device_id extraction for the M4 identity label: read `<dir>/identity.json` (falls back to the directory name's tail on failure).
 fn device_id_of_dir(dir: &str) -> String {
-    // 手工解固定键（避免为此引入 serde derive 依赖；identity.json 形状由 D-H13 钉死）。
+    // Parse the fixed key manually (avoiding a serde derive dependency just for this; the identity.json shape is pinned by D-H13).
     let parse_device_id = |raw: &[u8]| -> Option<String> {
         let v: serde_json::Value = serde_json::from_slice(raw).ok()?;
         v.get("device_id")?.as_str().map(str::to_string)
@@ -655,7 +654,7 @@ fn device_id_of_dir(dir: &str) -> String {
     }
 }
 
-/// 谈成的方言版本（S0；旧 server = 1）。
+/// The negotiated dialect version (S0; an old server = 1).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_session_negotiated(
     s: *const mediaservo_client_session_t,
@@ -680,9 +679,9 @@ pub extern "C" fn mediaservo_client_session_negotiated(
     })
 }
 
-/// 生效身份标签（viewer-auth-matrix T4/F6；create 期本地推导静态值，零网络）。
-/// 形如 "Device(ms-a1b2...)" / "jwt" / "legacy-psk" / "(no credential)"。
-/// needed 溢出合同同 list_rooms；closed 会话仍可读（标签是静态快照）。
+/// The effective identity label (viewer-auth-matrix T4/F6; a static value derived locally at create, zero network).
+/// Forms like "Device(ms-a1b2...)" / "jwt" / "legacy-psk" / "(no credential)".
+/// Same needed overflow contract as list_rooms; readable even on a closed session (the label is a static snapshot).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_session_identity(
     s: *const mediaservo_client_session_t,
@@ -708,7 +707,7 @@ pub extern "C" fn mediaservo_client_session_identity(
     })
 }
 
-/// 会话连接态快照（out_state: 0=Disconnected 1=Connected 2=Reconnecting 3=Failed）。
+/// Session connection-state snapshot (out_state: 0=Disconnected 1=Connected 2=Reconnecting 3=Failed).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_session_state(
     s: *const mediaservo_client_session_t,
@@ -737,11 +736,11 @@ pub extern "C" fn mediaservo_client_session_state(
     })
 }
 
-/// 注册会话连接态回调（**累积形**：多次注册 = 状态每次变化逐个回调全部注册项；
-/// 不可注销，随 session_close 统一释放并逐条 user_free）。
+/// Register a session connection-state callback (**cumulative form**: multiple registrations = every state change invokes each registered entry;
+/// no unregister; released together at session_close with per-entry user_free).
 ///
-/// 泵在首次注册且会话存活时启动；只报**变化**（注册后的初始态用
-/// [`mediaservo_client_session_state`] 自取）。回调内禁止调用本 SDK API（C 契约）。
+/// The pump starts on first registration while the session is alive; it reports only **changes** (fetch the initial state after registering with
+/// [`mediaservo_client_session_state`]). Calling this SDK's API from within a callback is forbidden (C contract).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_session_on_state(
     s: *mut mediaservo_client_session_t,
@@ -759,7 +758,7 @@ pub extern "C" fn mediaservo_client_session_on_state(
         };
         let Some(cb) = cb else {
             return h.fail_arg(
-                "mediaservo_client_session_on_state: cb required (off 不提供，随 close 释放)",
+                "mediaservo_client_session_on_state: cb required (no off form; released with close)",
             );
         };
         if h.closed.load(Ordering::SeqCst) {
@@ -774,8 +773,8 @@ pub extern "C" fn mediaservo_client_session_on_state(
             };
             guard.push(StateReg { cb, user, free: user_free });
         }
-        // 首次注册且会话存活 → 启动状态泵（同 link on_event 纪律；会话已关则
-        // 注册保留但无观测源，close 时照常 user_free）。
+        // First registration with a live session → start the state pump (same discipline as link's on_event; with the session already closed,
+        // the registration is kept but has no observation source; close still does user_free).
         let mut pump_guard = match h.state_pump.lock() {
             Ok(g) => g,
             Err(_) => {
@@ -794,10 +793,10 @@ pub extern "C" fn mediaservo_client_session_on_state(
     })
 }
 
-/// 纯等待房间内的视频 producer（无副作用——不 consume；多路编排的定向入口）。
+/// Purely wait for a video producer in the room (no side effects — does not consume; the directed entry point for multi-consumer orchestration).
 ///
-/// 成功 out_pid = producer id（NUL 结尾），needed 溢出合同同 list_rooms。
-/// 超时 → ERR_TIMEOUT；断链/事件流关闭 → ERR_STATE。
+/// On success out_pid = the producer id (NUL-terminated); same needed overflow contract as list_rooms.
+/// Timeout → ERR_TIMEOUT; disconnect / closed event stream → ERR_STATE.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_session_wait_video(
     s: *mut mediaservo_client_session_t,
@@ -869,7 +868,8 @@ pub extern "C" fn mediaservo_client_session_wait_video_labeled(
         let mut guard = match h.session.lock() {
             Ok(g) => g,
             Err(_) => {
-                return h.fail_internal("mediaservo_client_session_wait_video_labeled: lock poisoned");
+                return h
+                    .fail_internal("mediaservo_client_session_wait_video_labeled: lock poisoned");
             }
         };
         let Some(session) = guard.as_mut() else {
@@ -883,29 +883,30 @@ pub extern "C" fn mediaservo_client_session_wait_video_labeled(
                 _ => None,
             }
         };
-        let produced = match runtime()
-            .block_on(session.wait_video_producer_labeled(
+        let produced =
+            match runtime().block_on(session.wait_video_producer_labeled(
                 Duration::from_millis(timeout_ms),
                 label_opt.as_deref(),
-            ))
-        {
-            Ok(p) => p,
-            Err(e) => return h.fail_client("mediaservo_client_session_wait_video_labeled", &e),
-        };
+            )) {
+                Ok(p) => p,
+                Err(e) => return h.fail_client("mediaservo_client_session_wait_video_labeled", &e),
+            };
         let rc = copy_out_needed(NAME, &produced, out_pid, cap, needed);
         if rc != MEDIASERVO_OK {
-            h.fail_arg("mediaservo_client_session_wait_video_labeled: buffer too small (see needed)");
+            h.fail_arg(
+                "mediaservo_client_session_wait_video_labeled: buffer too small (see needed)",
+            );
         }
         rc
     })
 }
 
-/// 订阅一路视频 producer（多路新形，K4）：每路一个独立帧泵 + consumer 句柄，
-/// 互不连坐。建立序列 = wait 由调用方显式化（先 [`mediaservo_client_session_wait_video`]
-/// 或已知 id），本调用直达 consume。
+/// Subscribe to one video producer (the new multi-consumer form, K4): one independent frame pump + consumer handle per producer,
+/// no cross coupling. The setup sequence makes waiting explicit for the caller (first [`mediaservo_client_session_wait_video`]
+/// or a known id); this call goes straight to consume.
 ///
-/// `**out_consumer` = 新 handle（调用方 `mediaservo_client_consumer_close`，
-/// session_close 不隐式关）。user_free 在 consumer_close 时恰好调用一次。
+/// `**out_consumer` = the new handle (the caller owns `mediaservo_client_consumer_close`;
+/// session_close does not implicitly close it). user_free is invoked exactly once at consumer_close.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_session_consume(
     s: *mut mediaservo_client_session_t,
@@ -956,9 +957,9 @@ pub extern "C" fn mediaservo_client_session_consume(
     })
 }
 
-/// ⊘ 消费房间第一路视频（首路形，保留一周期）：内部 = wait(≤30s)+consume+
-/// into_receiver 重映射，行为与旧形逐字节一致（一次性闸：二次调用 → ERR_STATE）。
-/// 新代码用 wait_video + consume 多路形。
+/// ⊘ Consume the room's first video (first-consumer form, kept for one period): internally = wait(≤30s)+consume+
+/// into_receiver remap, byte-for-byte identical to the old form (one-shot gate: a second call → ERR_STATE).
+/// New code should use the wait_video + consume multi-consumer form.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_session_consume_video(
     s: *mut mediaservo_client_session_t,
@@ -993,7 +994,7 @@ pub extern "C" fn mediaservo_client_session_consume_video(
                 .fail_state("mediaservo_client_session_consume_video: video pump already started");
         }
         let rt = runtime();
-        // 建立期持会话锁（单线程属主契约内）；泵线程不再触碰会话。
+        // The session lock is held during setup (within the single-thread-owner contract); pump threads never touch the session again.
         let frames = {
             let mut guard = match h.session.lock() {
                 Ok(g) => g,
@@ -1015,8 +1016,8 @@ pub extern "C" fn mediaservo_client_session_consume_video(
                         .fail_client("mediaservo_client_session_consume_video: wait producer", &e);
                 }
             };
-            // 行为重映射（合同 §2）：consume+into_receiver ≡ 旧 consume_video
-            // （Rust 面 consume_video 即该组合的薄桥，逐字节等价）。
+            // Behavior remap (contract §2): consume+into_receiver ≡ the old consume_video
+            // (the Rust-side consume_video is exactly the thin bridge over that composition, byte-for-byte equivalent).
             match rt.block_on(session.consume(&produced)).map(Consumer::into_receiver) {
                 Ok(rx) => rx,
                 Err(e) => {
@@ -1028,8 +1029,8 @@ pub extern "C" fn mediaservo_client_session_consume_video(
         if let Ok(mut g) = h.video_cb.lock() {
             *g = Some((cb, user));
         }
-        // 裸指针非 Send：句柄经 usize 传递（值语义，仅地址搬运），回调存于句柄内
-        // 每轮读取 —— 同 link-c 泵纪律。
+        // Raw pointers are not Send: pass the handle as usize (value semantics, address move only); the callback lives inside the handle
+        // and is read each cycle — same pump discipline as link-c.
         let raw = s as usize;
         let join =
             std::thread::spawn(move || video_pump(raw as *mut mediaservo_client_session_t, frames));
@@ -1040,10 +1041,10 @@ pub extern "C" fn mediaservo_client_session_consume_video(
     })
 }
 
-/// ⊘ 视频统计汇总 JSON（会话级 union，W3 mini-stats 源；与旧 `_pcs` 折叠语义一致，
-/// 1a 已对表）。对象形 `{"bytes_received":..,"packets_received":..,"packets_lost":..,
+/// ⊘ video stats aggregate JSON (session-level union, the W3 mini-stats source; same fold semantics as the old `_pcs`,
+/// reconciled in 1a). The object has the shape `{"bytes_received":..,"packets_received":..,"packets_lost":..,
 /// "frames_decoded":..,"frame_width":..,"frame_height":..,"frames_per_second":..}`。
-/// needed 溢出合同同 list_rooms。多路精确读数用 consumer_stats。
+/// Same needed overflow contract as list_rooms. Use consumer_stats for precise per-consumer readings.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_session_video_stats(
     s: *const mediaservo_client_session_t,
@@ -1087,10 +1088,10 @@ pub extern "C" fn mediaservo_client_session_video_stats(
     })
 }
 
-/// K3 句柄级机读错误（本句柄最近一次失败调用；无错 = code 0）。
+/// K3 handle-level machine-readable error (this handle's most recent failed call; no error = code 0).
 ///
-/// 覆盖状态/传输/映射类失败；缓冲溢出（needed 合同）只走返回码+全局 last_error。
-/// out.struct_size 须 ≥ sizeof(mediaservo_client_error_t)（R3 演进纪律）。
+/// Covers state/transport/mapping-class failures; buffer overflow (the needed contract) only produces a return code + the global last_error.
+/// out.struct_size must be ≥ sizeof(mediaservo_client_error_t) (the R3 evolution discipline).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_session_error(
     s: *const mediaservo_client_session_t,
@@ -1131,8 +1132,8 @@ pub extern "C" fn mediaservo_client_session_error(
     })
 }
 
-/// K3 句柄级错误文本（本句柄最近一次失败调用的详情；无错 = 空串）。
-/// 拷贝语义 = 截断不报错（同 last_error ⊘）。
+/// K3 handle-level error text (details of this handle's most recent failed call; no error = empty string).
+/// Copy semantics = truncate without erroring (same as the ⊘ last_error).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_session_last_error(
     s: *const mediaservo_client_session_t,
@@ -1153,11 +1154,11 @@ pub extern "C" fn mediaservo_client_session_last_error(
     })
 }
 
-/// 急停双路投递（W4b·S4 语义的 C 面化）：DC 快路径（会话建会话时经
-/// `hmac_key_file` 加载的密钥签名；未配置=未签形）+ 信令审计副本。
-/// 前置：mediaservo_client_open_control 已成功（ctl 句柄来自该调用）。payload_json
-/// NULL/空 = Null 载荷。返回 OK 仅表示**投递**成功（车端裁决看 ack——
-/// recv_ack 收 seq 回执），非"已执行"。
+/// Emergency-stop dual-path delivery (the C face of W4b·S4 semantics): the DC fast path (signed with the key loaded
+/// via `hmac_key_file` at session creation; unconfigured = unsigned form) + the signaling audit copy.
+/// Precondition: mediaservo_client_open_control has succeeded (the ctl handle comes from that call). payload_json
+/// NULL/empty = a Null payload. Returning OK only means the **delivery** succeeded (the vehicle's adjudication is the ack —
+/// recv_ack receives the seq receipt), not "it executed".
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_session_emergency_stop(
     s: *mut mediaservo_client_session_t,
@@ -1197,7 +1198,7 @@ pub extern "C" fn mediaservo_client_session_emergency_stop(
             return sh
                 .fail_state("mediaservo_client_session_emergency_stop: session or control closed");
         }
-        // 锁序 session→ctl（与所有组合操作一致；无逆序路径=无死锁面）。
+        // Lock order session→ctl (consistent with all compound operations; no reverse-order path = no deadlock surface).
         let mut sg = match sh.session.lock() {
             Ok(g) => g,
             Err(_) => {
@@ -1224,7 +1225,7 @@ pub extern "C" fn mediaservo_client_session_emergency_stop(
     })
 }
 
-/// 开出程控制通道集（每会话一次性——ack 泵每会话一条，Rust 侧闸门）。
+/// Open the outbound control channel set (once per session — one ack pump per session, gated on the Rust side).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_open_control(
     s: *mut mediaservo_client_session_t,
@@ -1278,10 +1279,10 @@ pub extern "C" fn mediaservo_client_open_control(
     })
 }
 
-/// 关闭会话并释放 handle（幂等）。顺序：closed 标志 → 关会话（帧通道随之消亡唤醒
-/// ⊘ 泵；watch sender 消亡唤醒状态泵）→ join 视频泵 → join 状态泵 → 逐条
-/// user_free → free。泵正在回调中时 join 阻塞——回调必须快速返回。
-/// consumer/control 句柄不受本调用回收（独立 close 纪律）。
+/// Close the session and release the handle (idempotent). Order: the closed flag → close the session (frame channels die with it, waking
+/// the ⊘ pump; the watch sender dying wakes the state pump) → join the video pump → join the state pump → then
+/// user_free → free. join blocks while a pump is inside a callback — callbacks must return quickly.
+/// consumer/control handles are not reclaimed by this call (independent close discipline).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_session_close(s: *mut mediaservo_client_session_t) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -1290,7 +1291,7 @@ pub extern "C" fn mediaservo_client_session_close(s: *mut mediaservo_client_sess
         }
         let handle = unsafe { Box::from_raw(s) };
         if handle.closed.swap(true, Ordering::SeqCst) {
-            return MEDIASERVO_OK; // 幂等（同 link-c 双 close 纪律）
+            return MEDIASERVO_OK; // idempotent (same double-close discipline as link-c)
         }
         let session = handle.session.lock().ok().and_then(|mut g| g.take());
         if let Some(session) = session
@@ -1304,7 +1305,7 @@ pub extern "C" fn mediaservo_client_session_close(s: *mut mediaservo_client_sess
         if let Some(join) = handle.state_pump.lock().ok().and_then(|mut g| g.take()) {
             let _ = join.join();
         }
-        // 状态回调回收：user_free 每条恰好一次（泵已 join，无并发触发）。
+        // State-callback reclamation: user_free exactly once per entry (the pump has been joined, no concurrent firing).
         let regs =
             handle.state_regs.lock().ok().map(|mut g| std::mem::take(&mut *g)).unwrap_or_default();
         for r in regs {
@@ -1329,10 +1330,10 @@ mod tests {
     use std::ptr;
     use std::sync::atomic::AtomicUsize;
 
-    // ── FFI 入口 null 守卫（不触网）──
+    // -- FFI entry null guards (no network) --
     #[test]
     fn exchange_null_args_fail() {
-        // accountless-client-auth T2：三面缺失 + null out 均本地拒（不出网）。
+        // accountless-client-auth T2: all three surfaces missing + null out are rejected locally (no network).
         let mut buf = [0u8; 64];
         let mut need = 0usize;
         let rc = mediaservo_client_exchange(
@@ -1377,7 +1378,7 @@ mod tests {
             &mut need,
         );
         assert_eq!(rc, MEDIASERVO_CLIENT_ERR_INVALID_ARG);
-        // 空串按缺失处理（旧 validate_login_cfg 语义保持）。
+        // Empty strings are treated as missing (the old validate_login_cfg semantics preserved).
         let rc = mediaservo_client_login(
             c"".as_ptr(),
             c"u".as_ptr(),
@@ -1387,7 +1388,7 @@ mod tests {
             &mut need,
         );
         assert_eq!(rc, MEDIASERVO_CLIENT_ERR_INVALID_ARG);
-        // null out_jwt / cap 0 —— 本地拒（不出网）。
+        // null out_jwt / cap 0 — rejected locally (no network).
         let rc = mediaservo_client_login(
             c"http://127.0.0.1:9".as_ptr(),
             c"u".as_ptr(),
@@ -1404,8 +1405,8 @@ mod tests {
         let mut buf = [0u8; 128];
         let base = std::ffi::CString::new("http://127.0.0.1:9").unwrap();
         let jwt = std::ffi::CString::new("j").unwrap();
-        // null http_base / null jwt / null out / cap 0——全部本地拒（不出网，
-        // 断言点先于 block_on：若出网则是 Io/Timeout 而非 INVALID_ARG）。
+        // null http_base / null jwt / null out / cap 0 — all rejected locally (no network;
+        // the assertion point precedes block_on: if it hit the network we would see Io/Timeout rather than INVALID_ARG).
         let cases = [
             (ptr::null(), jwt.as_ptr(), buf.as_mut_ptr() as *mut c_char, buf.len()),
             (base.as_ptr(), ptr::null(), buf.as_mut_ptr() as *mut c_char, buf.len()),
@@ -1453,7 +1454,7 @@ mod tests {
             ),
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         );
-        // 非 null 但 cap 0：句柄不合法也不许触网/解引用——先参数守卫。
+        // Non-null but cap 0: an invalid handle still may not touch the network or dereference — parameter guard first.
         assert_eq!(
             mediaservo_client_session_video_stats(
                 ptr::null(),
@@ -1478,7 +1479,7 @@ mod tests {
             ),
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         );
-        // label 空指针（session 侧不合法同样先参数守卫）。
+        // label null pointer (an invalid session side also gets the parameter guard first).
         let dummy_ctl = ptr::null_mut::<mediaservo_client_control_t>();
         assert_eq!(
             mediaservo_client_session_emergency_stop(
@@ -1509,7 +1510,7 @@ mod tests {
     fn open_control_null_fails() {
         let rc = mediaservo_client_open_control(ptr::null_mut(), ptr::null(), 0, ptr::null_mut());
         assert_eq!(rc, MEDIASERVO_CLIENT_ERR_INVALID_ARG);
-        // labels 非空但 len=0 → 拒
+        // labels non-null but len=0 → reject
         let labels = [c"chassis".as_ptr()];
         let rc =
             mediaservo_client_open_control(ptr::null_mut(), labels.as_ptr(), 0, ptr::null_mut());
@@ -1541,10 +1542,10 @@ mod tests {
         assert_eq!(rc, MEDIASERVO_OK);
     }
 
-    // ── 批1b: K3 句柄错误槽（session=None 的确定失败形，免触网）──
+    // -- batch 1b: K3 handle error slots (the deterministic session=None failure form, no network needed) --
 
-    /// 测试专用：无会话的裸句柄（session=None = "已关"形——状态/统计类调用
-    /// 确定失败，走句柄槽路径，免真 server）。
+    /// Test-only: a bare handle with no session (session=None = the "closed" form — state/stats calls
+    /// fail deterministically, exercising the handle-slot path without a real server).
     fn test_session_handle() -> *mut mediaservo_client_session_t {
         Box::into_raw(Box::new(mediaservo_client_session_t {
             session: std::sync::Mutex::new(None),
@@ -1565,7 +1566,7 @@ mod tests {
     #[test]
     fn session_error_t_roundtrip_and_double_write() {
         let s = test_session_handle();
-        // 确定失败：session=None → STATE（句柄槽 + 全局双写）。
+        // Deterministic failure: session=None → STATE (handle slot + global dual write).
         let mut st = 9u8;
         assert_eq!(mediaservo_client_session_state(s, &mut st), MEDIASERVO_CLIENT_ERR_STATE);
         let mut e = mediaservo_client_error_t {
@@ -1576,9 +1577,9 @@ mod tests {
         };
         assert_eq!(mediaservo_client_session_error(s, &mut e), MEDIASERVO_OK);
         assert_eq!(e.code, MEDIASERVO_CLIENT_ERR_STATE);
-        assert_eq!(e.wire_code, 0); // 本地状态错无 wire 码
+        assert_eq!(e.wire_code, 0); // a local state error has no wire code
         assert_eq!(e.retryable, 0);
-        // 句柄级文本非空（含失败上下文）。
+        // Handle-level text is non-empty (carries the failure context).
         let mut buf = [0u8; 128];
         assert_eq!(
             mediaservo_client_session_last_error(s, buf.as_mut_ptr() as *mut c_char, buf.len()),
@@ -1587,7 +1588,7 @@ mod tests {
         let msg =
             unsafe { std::ffi::CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap();
         assert!(msg.contains("session closed"), "handle msg: {msg}");
-        // ⊘ 全局兜底双写（K3 一周期合同）。
+        // ⊘ the global fallback dual write (the K3 one-period contract).
         let mut gbuf = [0u8; 128];
         assert_eq!(
             mediaservo_client_last_error(gbuf.as_mut_ptr() as *mut c_char, gbuf.len()),
@@ -1626,8 +1627,8 @@ mod tests {
             FREES.fetch_add(1, Ordering::SeqCst);
         }
         let s = test_session_handle();
-        // 累积注册：三条（两条带 free，一条 NULL free）。session=None → 泵不启动，
-        // 注册仍成功（语义=登记待 close 回收）；活体转换面 = 1c。
+        // Cumulative registration: three entries (two with free, one NULL free). session=None → the pump does not start,
+        // but registration still succeeds (semantics = register for close-time reclamation); the live conversion surface = 1c.
         for _ in 0..2 {
             assert_eq!(
                 mediaservo_client_session_on_state(
@@ -1643,21 +1644,21 @@ mod tests {
             mediaservo_client_session_on_state(s, Some(noop_state_cb), ptr::null_mut(), None),
             MEDIASERVO_OK
         );
-        // cb=NULL → 拒（累积形无"取消注册"语义）。
+        // cb=NULL → reject (the cumulative form has no "unregister" semantics).
         assert_eq!(
             mediaservo_client_session_on_state(s, None, ptr::null_mut(), None),
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         );
         let before = FREES.load(Ordering::SeqCst);
         assert_eq!(mediaservo_client_session_close(s), MEDIASERVO_OK);
-        // user_free 恰好每条一次（两条带 free 的注册）。
+        // user_free exactly once per entry (the two registrations that carry free).
         assert_eq!(FREES.load(Ordering::SeqCst), before + 2);
     }
 
     #[test]
     fn consume_video_second_call_hits_gate() {
-        // ⊘ 一次性闸钉：video_started 已置位 → STATE（闸检查先于会话访问，
-        // session=None 句柄即可测）。
+        // ⊘ one-shot gate pin: video_started already set → STATE (the gate is checked before session access,
+        // so a session=None handle suffices to test it).
         let s = test_session_handle();
         unsafe { &*s }.video_started.store(true, Ordering::SeqCst);
         assert_eq!(
@@ -1679,7 +1680,7 @@ mod tests {
     #[test]
     fn wait_video_guards_before_network() {
         let mut buf = [0u8; 64];
-        // null handle → 全局 INVALID_ARG（不出网）。
+        // null handle → global INVALID_ARG (no network).
         assert_eq!(
             mediaservo_client_session_wait_video(
                 ptr::null_mut(),
@@ -1690,7 +1691,7 @@ mod tests {
             ),
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         );
-        // 句柄在但会话已关 → STATE（先于任何等待）。
+        // Handle present but the session is closed → STATE (before any waiting).
         let s = test_session_handle();
         unsafe { &*s }.closed.store(true, Ordering::SeqCst);
         assert_eq!(
@@ -1703,7 +1704,7 @@ mod tests {
             ),
             MEDIASERVO_CLIENT_ERR_STATE
         );
-        // closed 句柄不 free（close 语义由其他用例覆盖），此处泄漏仅测试进程内。
+        // The closed handle is not freed (close semantics are covered by other cases); this leak stays inside the test process.
     }
 
     #[test]
@@ -1711,7 +1712,7 @@ mod tests {
         let s = test_session_handle();
         let mut out: *mut mediaservo_client_consumer_t = ptr::null_mut();
         let pid = c"p1";
-        // cb 必填（累积多路形无"取消"语义）。
+        // cb is required (the cumulative multi-consumer form has no "cancel" semantics).
         assert_eq!(
             mediaservo_client_session_consume(
                 s,
@@ -1723,7 +1724,7 @@ mod tests {
             ),
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         );
-        // producer_id 必填。
+        // producer_id is required.
         assert_eq!(
             mediaservo_client_session_consume(
                 s,
@@ -1735,7 +1736,7 @@ mod tests {
             ),
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         );
-        // out 必填。
+        // out is required.
         assert_eq!(
             mediaservo_client_session_consume(
                 s,

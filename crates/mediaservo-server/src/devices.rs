@@ -1,27 +1,27 @@
-//! G2 设备注册表 — server 侧设备凭证校验（D-H11 连接级身份）。
+//! G2 device registry -- server-side device credential verification (D-H11 connection-level identity).
 //!
-//! 注册表为文件型配置（YAML，与 server.yaml 同构），格式：
+//! The registry is file-based config (YAML, same shape as server.yaml), format:
 //! ```yaml
 //! devices:
 //!   ms-0a1b2c3d4e5f:
-//!     secret_hash: "sha256:<hex>"   # sha256(device_id + ":" + device_secret) — legacy secret 形
+//!     secret_hash: "sha256:<hex>"   # sha256(device_id + ":" + device_secret) -- legacy secret form
 //!   ms-c3d4e5f6a7b8:
-//!     public_key: "ed25519:<b64>"   # device-enroll 公钥形（base64 32B Ed25519 vk）
-//!     name: "jetson-7"              # 可选显示名
+//!     public_key: "ed25519:<b64>"   # device-enroll public-key form (base64 32B Ed25519 vk)
+//!     name: "jetson-7"              # optional display name
 //! ```
-//! device-enroll（design §5.1）: 条目双形共存（D-E3 一周期），读哪个走哪条验证，save 回写保形。
-//! 存储决策（G2）: 客户端经 TLS 在 wire 上明文携带 secret，注册表仅存单向哈希；
-//! `sha256(device_id + ":" + device_secret)` — device_id 充当每设备盐（无需额外存储）。
-//! 升级路径（H 阶段）: argon2id 替换 sha256，格式前缀 `argon2:<encoded>`。
-//! 配发流程（G2 文档）: `host init` 生成 identity.json → 运维把 device_id/secret
-//! 拷入 server 的 devices.yaml（`ms-field hash` 之类工具 H 阶段提供；当前用
-//! `sha256sum` 手工算或本模块测试向量）。
+//! device-enroll (design S5.1): the two entry forms coexist (D-E3 one cycle); whichever is read drives which verification, save preserves the form.
+//! Storage decision (G2): the client carries the secret in the clear on the wire over TLS; the registry stores only a one-way hash;
+//! `sha256(device_id + ":" + device_secret)` -- device_id acts as the per-device salt (no extra storage needed).
+//! Upgrade path (phase H): argon2id replaces sha256, format prefix `argon2:<encoded>`.
+//! Provisioning flow (G2 doc): `host init` generates identity.json -> ops copies the device_id/secret
+//! into the server's devices.yaml (`ms-field hash` and similar tools come in phase H; for now compute
+//! by hand with `sha256sum` or use this module's test vectors).
 //!
-//! 热重载（unified-device-admin）: 注册表内部 `RwLock<Inner>` 化 — 外部签名
-//! （`Arc<DeviceRegistry>` / `&DeviceRegistry`）不变，signaling 鉴权调用点零改动；
-//! 管理操作（register/revoke/reset/list/save）运行时生效，无需重启 server。
-//! 写回策略：磁盘为单一事实源 — `save` 先序列化（短临界区）后 atomic 写盘
-//! （temp + fsync + rename），失败返回 Err 且内存不变。
+//! Hot reload (unified-device-admin): the registry internals become `RwLock<Inner>` -- the external signatures
+//! (`Arc<DeviceRegistry>` / `&DeviceRegistry`) are unchanged, so signaling auth call sites need no changes;
+//! management operations (register/revoke/reset/list/save) take effect at runtime with no server restart.
+//! Write-back strategy: disk is the single source of truth -- `save` serializes first (short critical section), then writes atomically
+//! (temp + fsync + rename); on failure returns Err with memory unchanged.
 
 use base64::Engine as _;
 use mediaservo_common::error::CoreError;
@@ -33,22 +33,22 @@ use std::path::Path;
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 use subtle::ConstantTimeEq;
 
-/// 设备认证失败原因（错误码统一 4010，见 signaling.rs 认证点注释）。
+/// Device auth failure reason (error code unified as 4010, see the auth-point comment in signaling.rs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceAuthError {
-    /// device_id/device_secret 恰好只带了一个（形状检查，G4 review Minor 1）。
+    /// device_id/device_secret with exactly one present (shape check, G4 review Minor 1).
     Incomplete,
-    /// device_id 不在注册表中。
+    /// device_id is not in the registry.
     Unknown,
-    /// secret 哈希不匹配。
+    /// secret hash mismatch.
     BadSecret,
 }
 
 impl DeviceAuthError {
-    /// 面向客户端的可读消息（C15: 错误响应必须信息充分）。
-    /// 防枚举（review #1）: 未知设备与错误 secret 必须返回**逐字一致**的消息 —
-    /// 区分会泄漏注册表成员资格。内部区分（Unknown/BadSecret）仅保留在审计日志。
-    /// 4010 单一错误码（signaling.rs 认证点常量）+ 此单一消息。
+    /// Client-facing readable message (C15: error responses must be informative).
+    /// Anti-enumeration (review #1): unknown device and wrong secret must return a **byte-identical** message --
+    /// distinguishing them leaks registry membership. The internal distinction (Unknown/BadSecret) is kept in the audit log only.
+    /// A single error code 4010 (the signaling.rs auth-point constant) + this single message.
     pub fn message(&self) -> &'static str {
         match self {
             DeviceAuthError::Incomplete => {
@@ -61,16 +61,16 @@ impl DeviceAuthError {
     }
 }
 
-/// 注册表管理操作错误（管理 API 用；400/404/409 映射见 admin.rs）。
+/// Registry management operation errors (admin API; 400/404/409 mapping in admin.rs).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeviceRegError {
-    /// 注册时 device_id 已存在。
+    /// device_id already exists on register.
     Duplicate,
-    /// 吊销/重置时 device_id 不存在。
+    /// device_id does not exist on revoke/reset.
     Unknown,
-    /// 管理员提供的 secret 不合规（非空、8-128 字符、无空白）。
+    /// Admin-provided secret is non-compliant (non-empty, 8-128 chars, no whitespace).
     InvalidSecret(String),
-    /// enroll 收录的 public_key 不合规（非 base64(32B) 规范 Ed25519 vk）。
+    /// enroll-admitted public_key is non-compliant (not a canonical base64(32B) Ed25519 vk).
     InvalidPublicKey(String),
 }
 
@@ -82,32 +82,32 @@ struct RegistryFile {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct DeviceEntry {
-    /// legacy secret 形（D-E3 共存一周期）。
+    /// legacy secret form (D-E3 coexistence for one cycle).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     secret_hash: Option<String>,
-    /// 公钥形: "ed25519:<base64 32B vk>"。
+    /// Public-key form: "ed25519:<base64 32B vk>".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     public_key: Option<String>,
-    /// 公钥形可选显示名（auto 收录为 None）。
+    /// Optional display name for the public-key form (auto-admission -> None).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
 }
 
-/// 注册表条目双形（device-enroll design §5.1）。
+/// Registry entry dual form (device-enroll design S5.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Entry {
-    /// secret 形: "sha256:<hex>"。
+    /// secret form: "sha256:<hex>".
     Secret(String),
-    /// 公钥形: vk = base64(32B Ed25519 verifying key)。
+    /// Public-key form: vk = base64(32B Ed25519 verifying key).
     PublicKey { vk: String, name: Option<String> },
 }
 
-/// 注册表内部态（RwLock 包裹；方法均为内部分发）。
+/// Registry internal state (wrapped in RwLock; methods all dispatch internally).
 #[derive(Debug)]
 struct RegistryInner {
     devices: HashMap<String, Entry>, // device_id → Secret("sha256:<hex>") | PublicKey{vk,name}
-    /// 未知设备的固定比较目标（启动时随机生成, 与真实哈希同长, 永不匹配）。
-    /// review #1: 未知设备也必须走完整 sha256 + ct_eq 路径, 响应时间不可区分。
+    /// Fixed comparison target for unknown devices (randomly generated at startup, same length as a real hash, never matches).
+    /// review #1: unknown devices must also walk the full sha256 + ct_eq path; response time is indistinguishable.
     dummy_hash: String,
 }
 
@@ -118,9 +118,9 @@ impl RegistryInner {
 
     fn verify(&self, device_id: &str, secret: &str) -> Result<(), DeviceAuthError> {
         let known = self.devices.contains_key(device_id);
-        // review #1 防时序: 未知设备也用 dummy_hash 走完整 sha256 + ct_eq（无提前返回）。
-        // 已知/未知的响应时间不可区分; 匹配与否经 same-length ct_eq 判定。
-        // 公钥形条目对 secret 比较走 dummy（与未知设备同路径——不泄漏条目形态，review #1 纪律）。
+        // review #1 anti-timing: unknown devices also walk the full sha256 + ct_eq with dummy_hash (no early return).
+        // Known/unknown response times are indistinguishable; matching is decided by same-length ct_eq.
+        // Public-key entries use the dummy for secret comparison (same path as unknown devices -- does not leak entry form, review #1 discipline).
         let stored: &String = match self.devices.get(device_id) {
             Some(Entry::Secret(h)) => h,
             _ => &self.dummy_hash,
@@ -129,17 +129,17 @@ impl RegistryInner {
         let matched: bool = stored.as_bytes().ct_eq(want.as_bytes()).into();
         match (matched, known) {
             (true, _) => Ok(()),
-            // 内部区分保留（审计用）; 对外 wire 响应两者完全一致（见 message()）。
+            // Internal distinction kept (for audit); the external wire response is fully identical for both (see message()).
             (false, true) => Err(DeviceAuthError::BadSecret),
             (false, false) => Err(DeviceAuthError::Unknown),
         }
     }
 }
 
-/// 设备注册表（启动时加载；运行期可读热重载，管理操作经 RwLock 生效）。
-/// 注意: 不实现 Default — dummy_hash 必须启动时随机生成（Default 会给空串,
-/// 长度与真实哈希不同 → 未知设备比较路径的时序与已知设备可区分, 重开侧信道）。
-/// 注意: 不再 derive Clone（std RwLock 非 Clone）— 共享一律走 Arc，使用点已确认无克隆。
+/// Device registry (loaded at startup; read hot-reload at runtime, management ops via RwLock).
+/// Note: no Default impl -- dummy_hash must be randomly generated at startup (Default would give an empty string,
+/// a different length from a real hash -> the unknown-device comparison path would be timing-distinguishable from known devices, reopening the side channel).
+/// Note: no longer derives Clone (std RwLock is not Clone) -- sharing always goes through Arc; usage sites confirmed clone-free.
 #[derive(Debug)]
 pub struct DeviceRegistry {
     inner: RwLock<RegistryInner>,
@@ -150,7 +150,7 @@ impl DeviceRegistry {
         Self { inner: RwLock::new(RegistryInner::new(HashMap::new())) }
     }
 
-    /// 从 YAML 文件加载；文件缺失视为空注册表（PSK 路径不受影响）。
+    /// Load from a YAML file; a missing file is treated as an empty registry (PSK path unaffected).
     pub fn load(path: impl AsRef<Path>) -> Result<Self, CoreError> {
         let content = std::fs::read_to_string(path.as_ref()).map_err(|e| {
             CoreError::ConfigParse(format!("devices file {}: {e}", path.as_ref().display()))
@@ -160,7 +160,7 @@ impl DeviceRegistry {
         })
     }
 
-    /// 从 YAML 文本解析（测试与加载共用）。
+    /// Parse from YAML text (shared by tests and load).
     pub fn from_yaml(content: &str) -> Result<Self, String> {
         let file: RegistryFile =
             serde_yaml::from_str(content).map_err(|e| format!("YAML parse error: {e}"))?;
@@ -200,7 +200,7 @@ impl DeviceRegistry {
         Ok(Self { inner: RwLock::new(RegistryInner::new(devices)) })
     }
 
-    /// 锁 poison 恢复标准做法：unpoisoned 读锁；poison 时取回写者遗留的一致值。
+    /// Standard lock-poison recovery: unpoisoned read lock; on poison take the consistent value left by the writer.
     fn lock_read(&self) -> RwLockReadGuard<'_, RegistryInner> {
         self.inner.read().unwrap_or_else(|e| e.into_inner())
     }
@@ -217,7 +217,7 @@ impl DeviceRegistry {
         self.lock_read().devices.is_empty()
     }
 
-    /// registry 内全部 device_id（管理列表用）。
+    /// All device_ids in the registry (for the admin list).
     pub fn device_ids(&self) -> Vec<String> {
         self.lock_read().devices.keys().cloned().collect()
     }
@@ -226,7 +226,7 @@ impl DeviceRegistry {
         self.lock_read().verify(device_id, secret)
     }
 
-    /// 序列化为 YAML 文件内容（与 from_yaml 格式互逆，round-trip 稳定）。
+    /// Serialize to YAML file content (inverse of from_yaml format, stable round-trip).
     fn to_yaml(&self) -> Result<String, CoreError> {
         let inner = self.lock_read();
         let file = RegistryFile {
@@ -254,9 +254,9 @@ impl DeviceRegistry {
             .map_err(|e| CoreError::ConfigParse(format!("devices serialize: {e}")))
     }
 
-    /// Atomic 写回 devices.yaml（temp + fsync + rename）。
-    /// **内存不变**：仅在序列化与写盘全部成功后返回 Ok；失败清理 temp 并返回 Err。
-    /// 调用方（管理 API 层）持有此函数的调用权 — 写路径低频、短临界区。
+    /// Atomic write-back of devices.yaml (temp + fsync + rename).
+    /// **Memory unchanged**: Ok only when serialization and disk write both succeed; on failure clean up temp and return Err.
+    /// The caller (admin API layer) owns the right to call this -- the write path is low-frequency with a short critical section.
     pub fn save(&self, path: impl AsRef<Path>) -> Result<(), CoreError> {
         let path = path.as_ref();
         let yaml = self.to_yaml()?;
@@ -272,7 +272,7 @@ impl DeviceRegistry {
         match res {
             Ok(()) => Ok(()),
             Err(e) => {
-                let _ = std::fs::remove_file(&tmp); // 清理残留（成功路径无 tmp）
+                let _ = std::fs::remove_file(&tmp); // clean up residue (the success path leaves no tmp)
                 Err(CoreError::ConfigParse(format!(
                     "devices file {}: write failed: {e}",
                     path.display()
@@ -280,17 +280,17 @@ impl DeviceRegistry {
             }
         }
     }
-    /// sha256(device_id + ":" + device_secret)，hex 编码，`sha256:` 前缀。
-    /// 注册新设备：默认生成随机 secret。
-    /// 返回 `(secret_hash, secret)` — secret 是**唯一一次明文**，调用方负责传递；
-    /// 后续仅可经 reset_secret 更换。落盘由管理 API 层调 `save` 完成。
+    /// sha256(device_id + ":" + device_secret), hex encoded, `sha256:` prefix.
+    /// Register a new device: generates a random secret by default.
+    /// Returns `(secret_hash, secret)` -- the secret is the **one and only plaintext**, the caller hands it over;
+    /// it can only be changed afterward via reset_secret. Persisting is done by the admin API layer calling `save`.
     pub fn register(&self, device_id: &str) -> Result<(String, String), DeviceRegError> {
         self.register_with_secret(device_id, None)
     }
 
-    /// 注册新设备：`secret` 为 `Some` 时使用管理员提供的 secret（配发流程可先配置
-    /// host 再注册，secret 全程管理员掌控、不丢失 — 方案 A）; `None` 则服务器生成。
-    /// 校验：非空、8-128 字符、无空白（质量由管理员负责，仅拦明显错误）。
+    /// Register a new device: with `secret` = `Some` use the admin-provided secret (the provisioning flow can configure
+    /// host first then register; the secret stays under admin control throughout, never lost -- option A); `None` = server-generated.
+    /// Validation: non-empty, 8-128 chars, no whitespace (quality is the admin's responsibility; only obvious errors are caught).
     pub fn register_with_secret(
         &self,
         device_id: &str,
@@ -308,7 +308,7 @@ impl DeviceRegistry {
                     || s.chars().any(|c| c.is_whitespace())
                 {
                     return Err(DeviceRegError::InvalidSecret(
-                        "secret: 8-128 字符且不含空白".into(),
+                        "secret: 8-128 chars, no whitespace".into(),
                     ));
                 }
                 s.to_string()
@@ -320,18 +320,18 @@ impl DeviceRegistry {
         Ok((hash, secret))
     }
 
-    /// 吊销设备：从注册表移除（内存）。下次接入鉴权即 Unknown → 4010。
-    /// 存量在线连接不受影响（鉴权仅发生在接入时）— 运营语义见 proposal。
+    /// Revoke a device: remove from the registry (memory). The next access auth is Unknown -> 4010.
+    /// Existing online connections are unaffected (auth happens only at access time) -- operational semantics in the proposal.
     pub fn revoke(&self, device_id: &str) -> Result<(), DeviceRegError> {
         let mut inner = self.lock_write();
         inner.devices.remove(device_id).map(|_| ()).ok_or(DeviceRegError::Unknown)
     }
 
-    /// 重置设备 secret：旧 secret 立即失效，返回新 secret（唯一一次明文）。
+    /// Reset a device secret: the old secret is invalidated immediately; returns the new secret (one-time plaintext).
     pub fn reset_secret(&self, device_id: &str) -> Result<(String, String), DeviceRegError> {
         let mut inner = self.lock_write();
-        // 公钥形条目无 secret 可重置 → 按未注册（404）处理；迁移处置 = web 删除重录（§8）。
-        // 不拦截则 reset 会把公钥形静默改写回 secret 形（准入语义被旁路）。
+        // Public-key entries have no secret to reset -> treat as unregistered (404); migration handling = web delete + re-enroll (S8).
+        // Without this guard, reset would silently rewrite the public-key form back to the secret form (admission semantics bypassed).
         if !matches!(inner.devices.get(device_id), Some(Entry::Secret(_))) {
             return Err(DeviceRegError::Unknown);
         }
@@ -341,15 +341,15 @@ impl DeviceRegistry {
         Ok((hash, secret))
     }
 
-    // ── device-enroll: 公钥准入面（design §5.1）─────────────────────────────
+    // -- device-enroll: public-key admission surface (design S5.1) ---------------------------------
 
-    /// 条目查询（signaling 状态机分形决策 / admin 断言用）。
+    /// Entry lookup (signaling state-machine form dispatch / admin assertions).
     pub fn entry_of(&self, device_id: &str) -> Option<Entry> {
         self.lock_read().devices.get(device_id).cloned()
     }
 
-    /// 公钥形设备验签（§5.3，登记 vk 为准）。未知 → Unknown；secret 形 → BadSecret
-    /// （signaling 在发挑战前已拒 secret 形接入，此处防御性兜底）。
+    /// Public-key device verification (S5.3, registered vk wins). Unknown -> Unknown; secret form -> BadSecret
+    /// (signaling already rejects secret-form access before issuing the challenge; this is a defensive fallback).
     pub fn verify_pubkey(
         &self,
         device_id: &str,
@@ -365,17 +365,18 @@ impl DeviceRegistry {
         verify_signature(&vk, nonce_b64, device_id, room_id, sig_b64)
     }
 
-    /// 验签通过后收录（enroll_auto = 手动档 admin approve 与 auto 档共用入口）：入
-    /// registry public_key 形（name 可缺省）。落盘由调用方 save（同一 Arc = C33 热生效链）。
-    /// vk 来自 wire → 边界校验（base64 32B 规范 key）。
+    /// Admit after verify passes (enroll_auto = shared entry for manual admin approve and auto mode): enters an
+    /// entry in the registry public-key form (name optional). Persisting is done by the caller's save (same Arc = C33 hot-effect chain).
+    /// vk comes from the wire -> boundary validation (canonical base64 32B key).
     pub fn enroll_auto(
         &self,
         device_id: &str,
         vk_b64: &str,
         name: Option<&str>,
     ) -> Result<(), DeviceRegError> {
-        decode_vk(vk_b64)
-            .map_err(|e| DeviceRegError::InvalidPublicKey(format!("public_key 不合规: {e}")))?;
+        decode_vk(vk_b64).map_err(|e| {
+            DeviceRegError::InvalidPublicKey(format!("public_key not canonical: {e}"))
+        })?;
         let mut inner = self.lock_write();
         if inner.devices.contains_key(device_id) {
             return Err(DeviceRegError::Duplicate);
@@ -388,13 +389,13 @@ impl DeviceRegistry {
     }
 }
 
-/// 生成新设备 secret：uuid v4（122-bit CSPRNG 熵）36 字符 — 与 G2 哈希格式兼容，
-/// 无需新增依赖（design: uuid 兜底方案；H 阶段如需更强熵换 getrandom + 32B hex）。
+/// Generate a new device secret: uuid v4 (122-bit CSPRNG entropy), 36 chars -- compatible with the G2 hash format,
+/// no new dependency needed (design: uuid fallback; in phase H switch to getrandom + 32B hex if stronger entropy is needed).
 fn new_secret() -> String {
     uuid::Uuid::new_v4().to_string()
 }
-/// sha256(device_id + ":" + device_secret)，hex 编码，`sha256:` 前缀。
-/// device_id 充当每设备盐 — 无需额外 salt 存储（G2 存储决策，文档见模块头）。
+/// sha256(device_id + ":" + device_secret), hex encoded, `sha256:` prefix.
+/// device_id acts as the per-device salt -- no extra salt storage needed (G2 storage decision, see the module header).
 pub fn hash_secret(device_id: &str, secret: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(device_id.as_bytes());
@@ -405,13 +406,13 @@ pub fn hash_secret(device_id: &str, secret: &str) -> String {
     format!("sha256:{hex}")
 }
 
-/// 启动时生成一次的 dummy 比较目标（review #1）: 随机 device_id 保证与任何
-/// 注册设备不冲突（uuid v4），长度与真实哈希一致（71 字符）保证 ct_eq 路径恒等。
+/// Dummy comparison target generated once at startup (review #1): a random device_id guarantees
+/// no collision with any registered device (uuid v4), and a length equal to a real hash (71 chars) keeps the ct_eq path identical.
 fn new_dummy_hash() -> String {
     hash_secret(&format!("ms-dummy-{}", uuid::Uuid::new_v4()), "dummy")
 }
 
-/// base64 → 32B Ed25519 vk 解码校验（wire 输入边界；design §3: base64 standard 无换行）。
+/// base64 -> 32B Ed25519 vk decode validation (wire input boundary; design S3: base64 standard, no newlines).
 fn decode_vk(vk_b64: &str) -> Result<[u8; 32], &'static str> {
     let raw =
         base64::engine::general_purpose::STANDARD.decode(vk_b64).map_err(|_| "not valid base64")?;
@@ -420,9 +421,9 @@ fn decode_vk(vk_b64: &str) -> Result<[u8; 32], &'static str> {
     Ok(arr)
 }
 
-/// device-enroll §3 密码合同: sig = Ed25519( nonce_raw(32B) ‖ device_id ‖ room_id )，
-/// verify_strict 防签名可延展。登记/陌生共用同一函数（§5.3）。
-/// 一切失败映射 BadSecret（wire 统一消息——防枚举纪律同 review #1，区分只在调用方日志）。
+/// device-enroll S3 crypto contract: sig = Ed25519( nonce_raw(32B) || device_id || room_id ),
+/// verify_strict defends against signature malleability. Registered/unknown share the same function (S5.3).
+/// Every failure maps to BadSecret (uniform wire message -- anti-enumeration discipline same as review #1; distinction only in caller logs).
 pub fn verify_signature(
     vk_b64: &str,
     nonce_b64: &str,
@@ -447,32 +448,36 @@ pub fn verify_signature(
         .map_err(|_| DeviceAuthError::BadSecret)
 }
 
-/// 待批准条目（design §5.1；D-E5 内存不落盘——重启即清、设备重连自然重报）。
+/// Pending entry (design S5.1; D-E5 memory-only, not persisted -- cleared on restart, devices re-report naturally on reconnect).
 #[derive(Debug, Clone)]
 pub struct PendingEntry {
     pub vk: String,
-    /// 首见时刻（unix ms）。
+    /// First-seen time (unix ms).
     pub first_seen_ms: u64,
-    /// 验签是否已过（当前唯一写入点在验签通过后 → 恒 true；字段保留 pending 语义面）。
+    /// Whether verification has passed (currently the only write point is after verify succeeds -> always true; the field keeps a pending semantic surface).
     pub verified: bool,
 }
 
-/// 手动档待批准表：陌生 pubkey 验签过、未 admin approve 期间的等待队列。
-/// 同 device_id 换 vk 重报 → 覆盖 + WARN（design §5.1）。
+/// Manual-mode pending table: the wait queue while an unknown pubkey has passed verification but no admin approve yet.
+/// Same device_id reporting a new vk -> overwrite + WARN (design S5.1).
 #[derive(Debug, Default, Clone)]
 pub struct PendingTable {
     inner: Arc<dashmap::DashMap<String, PendingEntry>>,
 }
 
 impl PendingTable {
-    /// 登记/覆盖（verified 由调用方裁决——当前唯一调用点在验签通过后传 true）。
+    /// Register/overwrite (verified is decided by the caller -- currently the only call site passes true after verify succeeds).
     pub fn insert(&self, device_id: &str, vk: &str, verified: bool) {
         let entry = PendingEntry { vk: vk.to_string(), first_seen_ms: now_ms(), verified };
         let prev = self.inner.insert(device_id.to_string(), entry);
         if let Some(prev) = prev
             && prev.vk != vk
         {
-            tracing::warn!("pending device {device_id} 换钥重报（覆盖）: {} → {}", prev.vk, vk);
+            tracing::warn!(
+                "pending device {device_id} re-reported with a new key (overwrite): {} -> {}",
+                prev.vk,
+                vk
+            );
         }
     }
 
@@ -484,7 +489,7 @@ impl PendingTable {
         self.inner.remove(device_id).map(|(_, v)| v)
     }
 
-    /// 全部待批准（admin 列表；按 device_id 稳定排序）。
+    /// All pending entries (admin list; stably sorted by device_id).
     pub fn list(&self) -> Vec<(String, PendingEntry)> {
         let mut out: Vec<(String, PendingEntry)> =
             self.inner.iter().map(|e| (e.key().clone(), e.value().clone())).collect();
@@ -508,11 +513,11 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// 设备认证决策点（RoomJoin 处理调用；纯函数便于单测）。
+/// Device auth decision point (called by RoomJoin handling; pure function for easy unit testing).
 ///
-/// 返回 `None` = 未携带任何设备凭证 → PSK 路径（保持原流程）。
-/// `Some(Err)` = 形状不完整或凭证校验失败 → Error 4010（见 `DeviceAuthError::message`）。
-/// `Some(Ok)` = 设备认证通过 → 连接级身份绑定（peer_id → device_id，D-H11）。
+/// Returns `None` = no device credential carried -> PSK path (keeps the original flow).
+/// `Some(Err)` = incomplete shape or credential verification failed -> Error 4010 (see `DeviceAuthError::message`).
+/// `Some(Ok)` = device auth passed -> connection-level identity binding (peer_id -> device_id, D-H11).
 pub fn authenticate(
     registry: &DeviceRegistry,
     device_id: Option<&str>,
@@ -545,9 +550,9 @@ mod tests {
     fn hash_secret_uses_device_id_as_salt() {
         let a = hash_secret("ms-a", "same-secret");
         let b = hash_secret("ms-b", "same-secret");
-        assert_ne!(a, b, "device_id 必须参与哈希（盐）");
+        assert_ne!(a, b, "device_id must take part in the hash (salt)");
         assert!(a.starts_with("sha256:") && a.len() == "sha256:".len() + 64);
-        // 稳定向量: sha256("ms-a:same-secret")
+        // Stable vector: sha256("ms-a:same-secret")
         let mut h = Sha256::new();
         h.update(b"ms-a:same-secret");
         let expected: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
@@ -575,9 +580,9 @@ mod tests {
     #[test]
     fn authenticate_shape_checks() {
         let reg = test_registry();
-        // 双缺 = PSK 路径（None）
+        // Both missing = PSK path (None)
         assert_eq!(authenticate(&reg, None, None), None);
-        // 半带 = Incomplete
+        // Half present = Incomplete
         assert_eq!(
             authenticate(&reg, Some("ms-0a1b2c3d4e5f"), None),
             Some(Err(DeviceAuthError::Incomplete))
@@ -586,7 +591,7 @@ mod tests {
             authenticate(&reg, None, Some("s3cret")),
             Some(Err(DeviceAuthError::Incomplete))
         );
-        // 全带 = 校验
+        // Both present = verify
         assert_eq!(authenticate(&reg, Some("ms-0a1b2c3d4e5f"), Some("s3cret")), Some(Ok(())));
         assert_eq!(
             authenticate(&reg, Some("ms-nope"), Some("s3cret")),
@@ -620,18 +625,18 @@ mod tests {
 
     #[test]
     fn error_messages_informative_and_unknown_badsecret_identical() {
-        // C15: 消息可读；4010 单一错误码（signaling.rs 常量）+ 单一消息。
+        // C15: message readable; single error code 4010 (signaling.rs constant) + single message.
         assert!(DeviceAuthError::Incomplete.message().contains("both device_id"));
         assert!(DeviceAuthError::Incomplete.message().contains("device authentication failed"));
-        // review #1: 未知设备与错误 secret 的 wire 消息必须逐字一致（防枚举）。
+        // review #1: the wire message for unknown device and wrong secret must be byte-identical (anti-enumeration).
         assert_eq!(DeviceAuthError::Unknown.message(), DeviceAuthError::BadSecret.message());
         assert!(DeviceAuthError::Unknown.message().contains("invalid device credentials"));
     }
 
     #[test]
     fn unknown_vs_bad_secret_wire_response_identical() {
-        // review #1 TDD: 两种失败路径的完整 wire 响应（code=4010 + message）必须一致。
-        // code 由 signaling.rs 认证点统一为 4010；此处锁定 message 层等价。
+        // review #1 TDD: the full wire response (code=4010 + message) for both failure paths must match.
+        // code is unified as 4010 at the signaling.rs auth point; here the message-layer equivalence is pinned.
         let reg = test_registry();
         let e_unknown =
             authenticate(&reg, Some("ms-nope"), Some("x")).expect("creds present").unwrap_err();
@@ -640,22 +645,26 @@ mod tests {
             .unwrap_err();
         assert_eq!(e_unknown, DeviceAuthError::Unknown);
         assert_eq!(e_bad, DeviceAuthError::BadSecret);
-        // 内部错误类型不同（审计可区分）但 wire 消息相同 — 防枚举。
+        // Internal error types differ (audit can distinguish) but the wire message is the same -- anti-enumeration.
         assert_ne!(e_unknown, e_bad);
         assert_eq!(e_unknown.message(), e_bad.message());
-        // 两路径都必须走"设备认证失败"家族消息（客户端按 4010+前缀识别）。
+        // Both paths must use the "device auth failed" family message (client identifies by 4010 + prefix).
         assert!(e_unknown.message().starts_with("device authentication failed"));
     }
 
     #[test]
     fn dummy_hash_is_per_instance_random_and_same_length() {
-        // review #1: dummy 每次启动生成、与真实哈希同长（ct_eq 路径恒等）。
+        // review #1: dummy is generated each startup, same length as a real hash (identical ct_eq path).
         let a = DeviceRegistry::empty();
         let b = DeviceRegistry::empty();
-        assert_ne!(dummy_hash_of(&a), dummy_hash_of(&b), "dummy 必须每实例随机");
-        assert_eq!(dummy_hash_of(&a).len(), "sha256:".len() + 64, "dummy 与真实哈希同长");
+        assert_ne!(dummy_hash_of(&a), dummy_hash_of(&b), "dummy must be random per instance");
+        assert_eq!(
+            dummy_hash_of(&a).len(),
+            "sha256:".len() + 64,
+            "dummy is the same length as a real hash"
+        );
         assert_eq!(dummy_hash_of(&a).len(), hash_secret("ms-x", "s").len());
-        // 未知设备仍走 verify 全路径（返回 Unknown 但内部已完成 sha256+ct_eq）。
+        // Unknown devices still walk the full verify path (returns Unknown but sha256+ct_eq already ran internally).
         assert_eq!(a.verify("ms-anyone", "x"), Err(DeviceAuthError::Unknown));
     }
 
@@ -665,9 +674,9 @@ mod tests {
         let path = dir.join(format!("ms-devices-test-{}.yaml", uuid::Uuid::new_v4()));
         let reg = test_registry();
         reg.save(&path).unwrap();
-        // 无 temp 残留
-        assert!(!path.with_extension("yaml.tmp").exists(), "temp 文件必须被清理");
-        // reload round-trip 保持鉴权语义
+        // No temp residue
+        assert!(!path.with_extension("yaml.tmp").exists(), "temp file must be cleaned up");
+        // reload round-trip preserves auth semantics
         let reloaded = DeviceRegistry::load(&path).unwrap();
         assert_eq!(reloaded.len(), 1);
         assert_eq!(authenticate(&reloaded, Some("ms-0a1b2c3d4e5f"), Some("s3cret")), Some(Ok(())));
@@ -683,8 +692,8 @@ mod tests {
         let reg = DeviceRegistry::empty();
         let (hash, secret) = reg.register("ms-new-1").unwrap();
         assert!(hash.starts_with("sha256:") && hash.len() == "sha256:".len() + 64);
-        assert_eq!(secret.len(), 36, "uuid v4 36 字符");
-        // 注册后立即 authenticate（无重启 = 热重载语义）
+        assert_eq!(secret.len(), 36, "uuid v4 36 chars");
+        // authenticate immediately after register (no restart = hot-reload semantics)
         assert_eq!(authenticate(&reg, Some("ms-new-1"), Some(&secret)), Some(Ok(())));
         assert_eq!(reg.device_ids(), vec!["ms-new-1".to_string()]);
     }
@@ -740,7 +749,7 @@ mod tests {
         let reg = DeviceRegistry::empty();
         let (hash, secret) =
             reg.register_with_secret("ms-prov-1", Some("admin-chosen-secret-1")).unwrap();
-        assert_eq!(secret, "admin-chosen-secret-1", "自备 secret 原样返回");
+        assert_eq!(secret, "admin-chosen-secret-1", "self-supplied secret returned as-is");
         assert_eq!(hash, hash_secret("ms-prov-1", "admin-chosen-secret-1"));
         assert_eq!(
             authenticate(&reg, Some("ms-prov-1"), Some("admin-chosen-secret-1")),
@@ -756,35 +765,35 @@ mod tests {
             let err = reg.register_with_secret("ms-bad", Some(bad)).unwrap_err();
             assert_eq!(
                 err,
-                DeviceRegError::InvalidSecret("secret: 8-128 字符且不含空白".into()),
+                DeviceRegError::InvalidSecret("secret: 8-128 chars, no whitespace".into()),
                 "{bad:?}"
             );
         }
-        // 合法边界：8 字符
+        // Valid boundary: 8 chars
         assert!(reg.register_with_secret("ms-ok8", Some("12345678")).is_ok());
-        // 128 字符
+        // 128 chars
         assert!(reg.register_with_secret("ms-ok128", Some(&"x".repeat(128))).is_ok());
     }
 
     #[test]
     fn register_with_provided_secret_duplicate_priority() {
         let reg = test_registry();
-        // 已存在 → Duplicate 优先于校验
+        // Already exists -> Duplicate takes priority over validation
         assert_eq!(
             reg.register_with_secret("ms-0a1b2c3d4e5f", Some("bad-short")).unwrap_err(),
             DeviceRegError::Duplicate
         );
     }
 
-    // ─── device-enroll T2: 签名字节合同（design §3）─────────────────────────────
-    // sig = base64( Ed25519::sign( nonce_raw(32B) ‖ device_id ‖ room_id ) )；验签 verify_strict。
-    // 本向量 = host/server 交叉复验锚：批3 host 侧（T6）以 seed=bytes(0..=31)、
-    // nonce=bytes(0x40..=0x5f)、同 device_id/room_id 复现同一签名。
+    // --- device-enroll T2: signature byte contract (design S3) -------------------------------
+    // sig = base64( Ed25519::sign( nonce_raw(32B) || device_id || room_id ) ); verify via verify_strict.
+    // This vector = the host/server cross-verification anchor: batch 3 on the host side (T6) with seed=bytes(0..=31),
+    // nonce=bytes(0x40..=0x5f), same device_id/room_id reproduces the same signature.
 
     #[test]
     fn sig_vector_binds_nonce_device_room_and_verifies_strict() {
         use base64::Engine as _;
-        use ed25519_dalek::Signer; // verify_strict = VerifyingKey 内建方法，无需 Verifier trait
+        use ed25519_dalek::Signer; // verify_strict is a VerifyingKey built-in; no Verifier trait needed
 
         let b64 = base64::engine::general_purpose::STANDARD;
         let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
@@ -798,28 +807,28 @@ mod tests {
         msg.extend_from_slice(device_id.as_bytes());
         msg.extend_from_slice(room_id.as_bytes());
 
-        // 钉①: vk base64 = devices.yaml public_key 形指纹（与 protocol.rs pubkey 用例同值）
+        // Pin 1: vk base64 = devices.yaml public_key form fingerprint (same value as the protocol.rs pubkey case)
         assert_eq!(b64.encode(vk.to_bytes()), "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=");
 
-        // 钉②: 字节合同签名钉死（host 批3 交叉复验同向量 = 两侧同 seed/nonce/ids 必出此值）
+        // Pin 2: byte-contract signature pinned (host batch 3 cross-verification with the same vector = same seed/nonce/ids on both sides must produce this value)
         let sig = signing.sign(&msg);
         assert_eq!(
             b64.encode(sig.to_bytes()),
             "Gnz2kGCFH6igsOfv5QW0+8aRyu/lP5ytAa8fJA0CPYP3fIX5UsYr6uTjFjqOEEFBUB2scnDffIZ1WfP9O2ECCg=="
         );
 
-        // 钉③: 登记 vk 验签过（verify_strict —— §3 防签名 malleability 批注）
+        // Pin 3: registered vk verifies (verify_strict -- S3 anti signature-malleability note)
         vk.verify_strict(&msg, &sig).unwrap();
 
-        // 钉④: 换 room_id 重放 = D-E7 跨房间绑定 → 拒
+        // Pin 4: replay with a changed room_id = D-E7 cross-room binding -> reject
         let mut other_room = nonce.clone();
         other_room.extend_from_slice(device_id.as_bytes());
         other_room.extend_from_slice(b"vehicle_cam1");
         assert!(vk.verify_strict(&other_room, &sig).is_err());
     }
 
-    // ─── device-enroll T3: 双形 registry / verify_pubkey / PendingTable / enroll_auto ──
-    // 复用 sig_vector 常量（seed=bytes(0..=31) 的 vk/nonce/sig，批3 host 交叉复验同锚）。
+    // --- device-enroll T3: dual-form registry / verify_pubkey / PendingTable / enroll_auto ---
+    // Reuses the sig_vector constants (seed=bytes(0..=31) vk/nonce/sig; batch 3 host cross-verification uses the same anchor).
 
     const TEST_VK: &str = "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=";
     const TEST_SIG_CAM0: &str =
@@ -856,7 +865,7 @@ mod tests {
                 && text.contains("name: jetson-7"),
             "{text}"
         );
-        // 回写保形: 双形不互窜（public_key 条目不得长出 secret_hash 行）
+        // Write-back preserves form: the two forms do not bleed (a public_key entry must not grow a secret_hash line)
         let re = DeviceRegistry::load(&path).unwrap();
         assert_eq!(authenticate(&re, Some("ms-sec000000000"), Some("s3cret")), Some(Ok(())));
         assert_eq!(re.entry_of("ms-pub000000000"), reg.entry_of("ms-pub000000000"));
@@ -888,18 +897,18 @@ mod tests {
         let reg = DeviceRegistry::from_yaml(&pubkey_yaml()).unwrap();
         let n = test_nonce_b64();
         assert_eq!(reg.verify_pubkey("ms-0a1b2c3d4e5f", &n, "vehicle_cam0", TEST_SIG_CAM0), Ok(()));
-        // 换房间重放（D-E7 绑房）→ 拒
+        // Replay with a changed room (D-E7 binding) -> reject
         assert_eq!(
             reg.verify_pubkey("ms-0a1b2c3d4e5f", &n, "vehicle_cam1", TEST_SIG_CAM0),
             Err(DeviceAuthError::BadSecret)
         );
-        // 换 nonce（一次一用的跨连接重放面）→ 拒
+        // Changed nonce (single-use cross-connection replay surface) -> reject
         let other_nonce = base64::engine::general_purpose::STANDARD.encode([0xABu8; 32]);
         assert_eq!(
             reg.verify_pubkey("ms-0a1b2c3d4e5f", &other_nonce, "vehicle_cam0", TEST_SIG_CAM0),
             Err(DeviceAuthError::BadSecret)
         );
-        // 未登记 → Unknown；secret 形条目 → BadSecret（wire 消息同家族，防枚举）
+        // Unregistered -> Unknown; secret-form entry -> BadSecret (same-family wire message, anti-enumeration)
         assert_eq!(
             reg.verify_pubkey("ms-nope", &n, "vehicle_cam0", TEST_SIG_CAM0),
             Err(DeviceAuthError::Unknown)
@@ -913,7 +922,7 @@ mod tests {
 
     #[test]
     fn verify_signature_accepts_offered_vk_for_unknown_device() {
-        // 陌生设备: 验签用其上报 vk（enroll 前置，§5.3 同一函数）。
+        // Unknown device: verification uses the reported vk (pre-enroll, S5.3 same function).
         assert_eq!(
             verify_signature(
                 TEST_VK,
@@ -924,7 +933,7 @@ mod tests {
             ),
             Ok(())
         );
-        // 垃圾 vk / 垃圾 sig → 统一 BadSecret（不外泄失败种类）。
+        // Garbage vk / garbage sig -> uniform BadSecret (no failure kind leaked).
         assert_eq!(
             verify_signature(
                 "!!!",
@@ -949,7 +958,7 @@ mod tests {
 
     #[test]
     fn enroll_auto_persists_and_rejects_bad_inputs() {
-        // ms-0a1b2c3d4e5f = sig_vector 绑定设备（sig 消息含 device_id，D-E7）。
+        // ms-0a1b2c3d4e5f = sig_vector-bound device (the sig message includes device_id, D-E7).
         let reg = DeviceRegistry::empty();
         reg.enroll_auto("ms-0a1b2c3d4e5f", TEST_VK, Some("cam-9")).unwrap();
         assert_eq!(
@@ -962,9 +971,9 @@ mod tests {
         );
         assert_eq!(
             reg.enroll_auto("ms-badvk", "zzz", None).unwrap_err(),
-            DeviceRegError::InvalidPublicKey("public_key 不合规: not valid base64".into())
+            DeviceRegError::InvalidPublicKey("public_key not canonical: not valid base64".into())
         );
-        // save+reload 后公钥形仍可直接验签（热生效链 = 同一 Arc 实例运行期即生效，落盘保重启）
+        // After save+reload the public-key form still verifies directly (hot-effect chain = same Arc instance live at runtime, persisted across restart)
         let path = format!("/tmp/ms-devices-enroll-{}.yaml", uuid::Uuid::new_v4());
         reg.save(&path).unwrap();
         let re = DeviceRegistry::load(&path).unwrap();
@@ -987,7 +996,7 @@ mod tests {
             t.list().iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
             vec!["ms-p1", "ms-p2"]
         );
-        // 同 id 换 vk 重报 → 覆盖 + WARN（first_seen 刷新 = 重报时刻，D-E5 语义）
+        // Same id re-reported with a new vk -> overwrite + WARN (first_seen refreshed to the re-report time, D-E5 semantics)
         std::thread::sleep(std::time::Duration::from_millis(3));
         t.insert("ms-p1", "vk-C", true);
         assert_eq!(t.len(), 2);
@@ -1001,7 +1010,7 @@ mod tests {
 
     #[test]
     fn pubkey_entry_isolated_from_secret_surface() {
-        // secret 面对公钥形条目: authenticate=BadSecret 家族 / reset_secret=Unknown / register=Duplicate
+        // secret path against a public-key entry: authenticate=BadSecret family / reset_secret=Unknown / register=Duplicate
         let reg = DeviceRegistry::from_yaml(&pubkey_yaml()).unwrap();
         assert_eq!(
             authenticate(&reg, Some("ms-0a1b2c3d4e5f"), Some("whatever")),
@@ -1009,7 +1018,7 @@ mod tests {
         );
         assert_eq!(reg.reset_secret("ms-0a1b2c3d4e5f").unwrap_err(), DeviceRegError::Unknown);
         assert_eq!(reg.register("ms-0a1b2c3d4e5f").unwrap_err(), DeviceRegError::Duplicate);
-        // 时序面: 未知设备与公钥形条目都走 dummy 全路径（响应时间不可区分，review #1）
+        // Timing surface: unknown devices and public-key entries both walk the full dummy path (response times indistinguishable, review #1)
         assert_eq!(
             authenticate(&reg, Some("ms-ghost"), Some("x")),
             Some(Err(DeviceAuthError::Unknown))

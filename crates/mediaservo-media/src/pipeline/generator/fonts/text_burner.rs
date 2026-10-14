@@ -23,25 +23,14 @@ pub struct TextBurner {
 impl TextBurner {
     /// Create a new TextBurner with the given font, background fill mode, and anchor.
     pub fn new(font: BitmapFont, bg_fill: bool, anchor: Anchor) -> Self {
-        Self {
-            font,
-            bg_fill,
-            anchor,
-        }
+        Self { font, bg_fill, anchor }
     }
 
     /// Render `text` into the Y-plane buffer at the anchor position.
     ///
     /// When `bg_fill` is true, the text background rectangle is filled with Y=80
     /// (dark gray) before drawing the glyphs.
-    pub fn burn(
-        &self,
-        y: &mut [u8],
-        stride_y: usize,
-        text: &str,
-        width: u32,
-        height: u32,
-    ) {
+    pub fn burn(&self, y: &mut [u8], stride_y: usize, text: &str, width: u32, height: u32) {
         let (ox, oy) = self.resolve_anchor(width, height);
 
         if self.bg_fill && !text.is_empty() {
@@ -80,7 +69,9 @@ impl TextBurner {
                 let y = height.saturating_sub(self.font.glyph_height_px() + MARGIN);
                 (MARGIN, y)
             }
-            Anchor::Position { x, y } => (x.min(width.saturating_sub(1)), y.min(height.saturating_sub(1))),
+            Anchor::Position { x, y } => {
+                (x.min(width.saturating_sub(1)), y.min(height.saturating_sub(1)))
+            }
         }
     }
 }

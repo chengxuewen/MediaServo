@@ -1,20 +1,20 @@
-//! 数据流监控核心（Task E2，D-H4 数据面维度）。
+//! Data-flow monitoring core (Task E2, the D-H4 data-plane dimension).
 //!
-//! 观测机制（选择理由见 task-E2-report）：iceoryx2 0.9.3 注册表动态详情
-//! （[`ServiceDynamicDetails`]）仅暴露节点存活列表（`nodes`，无消息计数器，
-//! 源码 iceoryx2-0.9.3 `src/service/mod.rs:378`）→ 零消费监控不可行。
-//! 采用订阅式观测：monitor 对每个 `camera/<id>`（host.yaml 声明）attach 一个
-//! latest-slot 订阅者（buffer=1 覆盖语义，`FrameBus::subscribe`）——iceoryx2
-//! 每订阅者独立拷贝，不从 streamer/recorder 抢帧；慢消费自动跳帧（统计可接受）。
+//! Observation mechanism (rationale in task-E2-report): iceoryx2 0.9.3 registry dynamic details
+//! ([`ServiceDynamicDetails`]) expose only the live node list (`nodes`, no message counters,
+//! source iceoryx2-0.9.3 `src/service/mod.rs:378`) -> zero-consumption monitoring is not viable.
+//! Subscription-based observation is used instead: the monitor attaches one
+//! latest-slot subscriber (buffer=1 overwrite semantics, `FrameBus::subscribe`) per `camera/<id>` (declared in host.yaml) -- iceoryx2
+//! copies per subscriber, so it never steals frames from streamer/recorder; slow consumption drops frames automatically (acceptable for statistics).
 //!
-//! 帧率/字节率: 窗口内帧数 + `FrameMeta.ts_mono_ns` 增量（发布端时钟，C17 单调）。
-//! 停滞: 距最近到达 > `max(stall_floor, 2×期望帧间隔)`（期望 fps 来自 host.yaml
-//! camera_configs）。无 grace —— 停滞是数据面事实（D-H14 的 grace 仅用于拓扑
-//! 启动窗口 vs 故障区分，不适用于数据面）。
+//! Frame rate / byte rate: frame count within the window + `FrameMeta.ts_mono_ns` deltas (publisher clock, C17 monotonic).
+//! Stalled: time since the last arrival > `max(stall_floor, 2 x the expected frame interval)` (expected fps comes from host.yaml
+//! camera_configs). No grace -- a stall is a data-plane fact (D-H14 grace only separates the topology
+//! startup window from a fault, and does not apply to the data plane).
 //!
-//! streamer 推流状态: streamer（additive）每 2s 向 `stats/stream-<id>` 发布
-//! [`StreamerStats`] JSON（FrameMeta::FORMAT_JSON 标记）→ monitor 订阅解析。
-//! `connected` = 最近一条 stats 在 [`STATS_FRESHNESS`] 内（3× streamer 2s 间隔）。
+//! Streamer publish status: the streamer (additive) publishes to `stats/stream-<id>` every 2s
+//! a [`StreamerStats`] JSON (marked with FrameMeta::FORMAT_JSON) -> the monitor subscribes and parses it.
+//! `connected` = the most recent stats is within [`STATS_FRESHNESS`] (3 x the streamer 2s interval).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -24,94 +24,94 @@ use mediaservo_link::{CapabilityToken, Ed25519VerifyingKey, FrameBus, FrameStrea
 
 use crate::translate;
 
-/// 默认停滞阈值下限（E2 约定: max(2s, 2×期望帧间隔)；fps≥0.5 时 2s 生效）。
+/// Default lower bound of the stall threshold (E2 convention: max(2s, 2 x the expected frame interval); the 2s bound applies when fps >= 0.5).
 pub const DEFAULT_STALL_FLOOR: Duration = Duration::from_secs(2);
-/// 推流状态新鲜窗口（3× streamer 2s 发布间隔，容忍一次漏发）。
+/// Freshness window of the publish status (3 x the streamer 2s publish interval, tolerating one missed publish).
 pub const STATS_FRESHNESS: Duration = Duration::from_secs(6);
 
-/// 单 topic 数据流统计（E2 快照条目，E3 上报 Server 用）。
+/// Per-topic data-flow statistics (E2 snapshot entry, reported to the Server in E3).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TopicFlow {
-    /// 相机 topic 名（`camera/<id>`）。
+    /// Camera topic name (`camera/<id>`).
     pub topic: String,
-    /// 窗口内帧率（ts_mono 增量推导；<2 帧或窗口为零 → 0）。
+    /// Frame rate within the window (derived from ts_mono deltas; <2 frames or a zero window -> 0).
     pub fps: f64,
-    /// 窗口内字节率（payload 字节 / ts_mono 窗口；无窗口 → 0）。
+    /// Byte rate within the window (payload bytes / ts_mono window; no window -> 0).
     pub bps: u64,
-    /// 最近一帧的发布端单调时间戳（ns；从未收到 → 0）。
+    /// Publisher monotonic timestamp of the most recent frame (ns; 0 if never received).
     pub last_ts_mono_ns: u64,
-    /// 窗口内收到的帧数。
+    /// Frames received within the window.
     pub frames: u64,
-    /// 停滞（距最近到达超过阈值；从未收到帧也视为停滞——数据面事实）。
+    /// Stalled (time since the last arrival exceeds the threshold; never having received a frame also counts as stalled -- a data-plane fact).
     pub stalled: bool,
 }
 
-/// 单流推流状态（E2 快照条目）。
+/// Per-stream publish status (E2 snapshot entry).
 #[derive(Debug, Clone, PartialEq)]
 pub struct StreamFlow {
-    /// 流 id（host.yaml streams[].id）。
+    /// Stream id (host.yaml streams[].id).
     pub id: String,
-    /// 最近一次 stats 的 bytes_sent（webrtc OutboundRtp，累计）。
+    /// bytes_sent of the most recent stats (webrtc OutboundRtp, cumulative).
     pub bytes_sent: u64,
-    /// 最近一次 stats 的 frames_encoded（libwebrtc u32，累计）。
+    /// frames_encoded of the most recent stats (libwebrtc u32, cumulative).
     pub frames_encoded: u32,
     pub frame_width: u32,
     pub frame_height: u32,
-    /// 最近 stats 是否在新鲜窗口内。
+    /// Whether the most recent stats is inside the freshness window.
     pub connected: bool,
-    /// 协商编解码器（host.yaml streams[].codec）。
+    /// Negotiated codec (host.yaml streams[].codec).
     pub codec: String,
-    /// 平均编码耗时 ms（web stats 面板——EncoderStatus 转发）。
+    /// Average encoding time in ms (web stats panel -- forwarded from EncoderStatus).
     pub avg_encode_ms: Option<f64>,
-    /// 实际编码器实现（软编/硬编——EncoderStatus 转发）。
+    /// Actual encoder implementation (software/hardware -- forwarded from EncoderStatus).
     pub encoder_implementation: Option<String>,
 }
 
-/// 数据流快照（E2 数据面；与 E1 [`crate::monitor::topology::TopologySnapshot`] 并行）。
+/// Data-flow snapshot (E2 data plane; alongside the E1 [`crate::monitor::topology::TopologySnapshot`]).
 #[derive(Debug, Clone, Default)]
 pub struct FlowSnapshot {
     pub topics: Vec<TopicFlow>,
     pub streams: Vec<StreamFlow>,
 }
 
-/// streamer 推流状态线格式（`stats/stream-<id>` JSON payload）。
+/// Wire format of the streamer publish-status line (the `stats/stream-<id>` JSON payload).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StreamerStats {
     pub bytes_sent: u64,
-    /// 与 libwebrtc RTCOutboundRtpStreamStats 对齐（u32）。
+    /// Aligned with libwebrtc RTCOutboundRtpStreamStats (u32).
     pub frames_encoded: u32,
     pub frame_width: u32,
     pub frame_height: u32,
-    /// 协商编解码器（config.codec——h264/vp8）。
+    /// Negotiated codec (config.codec -- h264/vp8).
     #[serde(default)]
     pub codec: String,
-    /// 平均编码耗时 ms（增量 ΔtotalEncodeTime/ΔframesEncoded——web stats 面板）。
+    /// Average encoding time in ms (incremental delta totalEncodeTime / delta framesEncoded -- web stats panel).
     #[serde(default)]
     pub avg_encode_ms: Option<f64>,
-    /// 实际编码器实现（软编/硬编识别——libwebrtc get_stats）。
+    /// Actual encoder implementation (software/hardware identification -- libwebrtc get_stats).
     #[serde(default)]
     pub encoder_implementation: Option<String>,
 }
 
-/// 单 topic 采集窗口状态（drain 任务写入；collect 读取并重置窗口）。
+/// Per-topic capture window state (written by the drain task; read and reset by collect).
 #[derive(Default)]
 struct TopicState {
     frames: u64,
     bytes: u64,
     first_ts: Option<u64>,
     last_ts: Option<u64>,
-    /// 最近一帧到达时刻（墙钟，monitor 侧；跨窗口保留——停滞是绝对事实）。
+    /// When the most recent frame arrived (wall clock, monitor side; kept across windows -- a stall is an absolute fact).
     last_arrival: Option<Instant>,
 }
 
-/// 单流 stats 状态（drain 任务写入；collect 读取，保留最近值）。
+/// Per-stream stats state (written by the drain task; read by collect, keeping the most recent value).
 #[derive(Default)]
 struct StreamState {
     last: Option<StreamerStats>,
     last_stats: Option<Instant>,
 }
 
-/// 数据流监控器：host.yaml 声明 topic 的订阅 + 统计（E2）。
+/// Data-flow monitor: subscribes to the topics declared in host.yaml and collects statistics (E2).
 pub struct FlowMonitor {
     topics: HashMap<String, (Arc<Mutex<TopicState>>, Duration)>,
     streams: HashMap<String, Arc<Mutex<StreamState>>>,
@@ -128,7 +128,7 @@ impl Drop for FlowMonitor {
 }
 
 impl FlowMonitor {
-    /// 默认停滞下限（2s）attach。
+    /// Attach with the default stall lower bound (2s).
     pub fn attach(
         host_toml: String,
         token: &CapabilityToken,
@@ -137,7 +137,7 @@ impl FlowMonitor {
         Self::attach_with_stall(host_toml, token, verifying_key, DEFAULT_STALL_FLOOR)
     }
 
-    /// 显式停滞下限 attach（测试注入短窗口）。
+    /// Attach with an explicit stall lower bound (short-window injection for tests).
     pub fn attach_with_stall(
         host_toml: String,
         token: &CapabilityToken,
@@ -146,11 +146,11 @@ impl FlowMonitor {
     ) -> Result<Self, String> {
         let bus = FrameBus::attach("", token, verifying_key).map_err(|e| e.to_string())?;
         let sources = translate::camera_configs(&host_toml).unwrap_or_else(|e| {
-            tracing::warn!("host.yaml 视频源解析失败: {e}");
+            tracing::warn!("failed to parse the host.yaml video sources: {e}");
             Vec::new()
         });
         let streams = translate::stream_configs(&host_toml).unwrap_or_else(|e| {
-            tracing::warn!("host.yaml 流解析失败: {e}");
+            tracing::warn!("failed to parse the host.yaml streams: {e}");
             Vec::new()
         });
 
@@ -159,7 +159,7 @@ impl FlowMonitor {
         let mut tasks = Vec::new();
         for src in sources {
             let topic = FrameTopic::new(format!("camera/{}", src.id));
-            // 停滞阈值 = max(stall_floor, 2×期望帧间隔)（fps 已知时）
+            // Stall threshold = max(stall_floor, 2 x the expected frame interval) (when the fps is known)
             let threshold = stall_threshold(stall_floor, src.fps);
             match bus.subscribe(&topic) {
                 Ok(stream) => {
@@ -167,7 +167,7 @@ impl FlowMonitor {
                     topics.insert(topic.as_str().to_string(), (Arc::clone(&state), threshold));
                     tasks.push(spawn_frame_drain(stream, state));
                 }
-                Err(e) => tracing::error!("订阅 {} 失败: {e}", topic.as_str()),
+                Err(e) => tracing::error!("failed to subscribe to {}: {e}", topic.as_str()),
             }
         }
         for s in streams {
@@ -178,13 +178,13 @@ impl FlowMonitor {
                     stream_states.insert(s.id.clone(), Arc::clone(&state));
                     tasks.push(spawn_stats_drain(stream, state));
                 }
-                Err(e) => tracing::error!("订阅 {} 失败: {e}", topic.as_str()),
+                Err(e) => tracing::error!("failed to subscribe to {}: {e}", topic.as_str()),
             }
         }
         Ok(Self { topics, streams: stream_states, tasks, _bus: bus })
     }
 
-    /// 采集一次数据流快照：窗口统计（重置帧窗口）+ 停滞/连接判定。
+    /// Capture one data-flow snapshot: window statistics (resetting the frame window) + stall/connection decisions.
     pub fn collect(&self) -> FlowSnapshot {
         let mut out = FlowSnapshot::default();
         for (name, (state, threshold)) in &self.topics {
@@ -207,7 +207,7 @@ impl FlowMonitor {
                 frames: st.frames,
                 stalled,
             });
-            // 重置帧窗口（last_arrival 保留——停滞是绝对事实，不随窗口重置）
+            // Reset the frame window (last_arrival is kept -- a stall is an absolute fact and does not reset with the window)
             st.frames = 0;
             st.bytes = 0;
             st.first_ts = None;
@@ -245,7 +245,7 @@ impl FlowMonitor {
     }
 }
 
-/// 停滞阈值: max(floor, 2×期望帧间隔)。fps=0 防御（translate 已拒绝，双保险）。
+/// Stall threshold: max(floor, 2 x the expected frame interval). fps=0 defense (translate already rejects it, belt and braces).
 fn stall_threshold(floor: Duration, fps: u32) -> Duration {
     if fps == 0 {
         return floor;
@@ -253,7 +253,7 @@ fn stall_threshold(floor: Duration, fps: u32) -> Duration {
     floor.max(Duration::from_secs_f64(2.0 / f64::from(fps)))
 }
 
-/// 帧 drain 任务：latest-slot 到达 → 窗口状态更新（计数/字节/ts/到达时刻）。
+/// Frame drain task: a latest-slot arrival -> update the window state (count/bytes/ts/arrival time).
 fn spawn_frame_drain(
     stream: FrameStream,
     state: Arc<Mutex<TopicState>>,
@@ -271,7 +271,7 @@ fn spawn_frame_drain(
     })
 }
 
-/// stats drain 任务：JSON 解析失败打日志（C15，不静默）。
+/// Stats drain task: log a JSON parse failure (C15, never silent).
 fn spawn_stats_drain(
     stream: FrameStream,
     state: Arc<Mutex<StreamState>>,
@@ -284,7 +284,7 @@ fn spawn_stats_drain(
                     st.last = Some(stats);
                     st.last_stats = Some(Instant::now());
                 }
-                Err(e) => tracing::warn!("stats payload 解析失败: {e}"),
+                Err(e) => tracing::warn!("failed to parse the stats payload: {e}"),
             }
         }
     })
@@ -296,13 +296,13 @@ mod tests {
 
     #[test]
     fn stall_threshold_uses_floor_at_high_fps() {
-        // 30fps: 2×33ms < 2s → floor
+        // 30fps: 2 x 33ms < 2s -> the floor
         assert_eq!(stall_threshold(Duration::from_secs(2), 30), Duration::from_secs(2));
     }
 
     #[test]
     fn stall_threshold_scales_for_low_fps() {
-        // 0.25fps: 2×4s = 8s > 2s floor
+        // 0.25fps: 2 x 4s = 8s > the 2s floor
         assert_eq!(stall_threshold(Duration::from_secs(2), 1), Duration::from_secs(2));
         assert_eq!(stall_threshold(Duration::from_secs(2), 1), Duration::from_secs(2));
     }

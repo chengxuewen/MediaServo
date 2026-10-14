@@ -1,3 +1,3 @@
-//! 帧总线（iceoryx2 SHM 零拷贝）。
+//! Frame bus (iceoryx2 SHM zero-copy).
 
 pub mod framebus;

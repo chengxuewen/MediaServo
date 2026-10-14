@@ -1,20 +1,20 @@
-//! S1: host-controller SFU-DC 信令面 e2e —— mock 本地网关 WS（夹具复用
-//! gateway_e2e.rs 的 accept_async + LocalEnvelope 形，无外部 server / 无 mediasoup）。
+//! S1: host-controller SFU-DC signaling e2e - a mock local gateway WS (fixture reuses
+//! gateway_e2e.rs's accept_async + LocalEnvelope shape, no external server / no mediasoup).
 //!
-//! 拓扑：controller 走生产路径（SignalClient::new_gateway → control_loop），其
-//! "网关"由测试内 mock WS 扮演：断言上行请求形状、按 mediasoup 语义回响应。
+//! Topology: the controller takes the production path (SignalClient::new_gateway -> control_loop) with its
+//! "gateway" played by an in-test mock WS: asserts upstream request shapes, answers with mediasoup semantics.
 //!
-//! 断言（信令层 = 无 worker 环境下的可达最高层，实盘 DTLS/SCTP 归活体一圈）：
-//! ① RoomJoin/RoomJoined 信封握手（D2 网关形）
-//! ② CreateWebRtcTransport(Send) → ConnectWebRtcTransport（DTLS 指纹 role=client）
-//!    → CreateDataProducer ×{chassis,gimbal,light,ack}：protocol=sctp、
-//!    transport_id 显式绑定、gimbal ordered=false/max_retransmits=5（D-H3 与
-//!    channel_init 同源）、stream_id 唯一（= libwebrtc 实配 DC id）
-//! ③ CreateWebRtcTransport(Recv) → Connect → 注入 NewDataProducer →
-//!    ConsumeData{dp, transport_id=recv}；自建 producer 的广播回声不得触发消费
-//! ④ DataConsumed 后主循环存活（不因未知消息崩环）；mock 关链 → 自愈退出码 1
+//! Assertions (the signaling layer = the highest reachable layer without a worker environment; live DTLS/SCTP is a separate round):
+//! (1) RoomJoin/RoomJoined envelope handshake (D2 gateway shape)
+//! (2) CreateWebRtcTransport(Send) -> ConnectWebRtcTransport (DTLS fingerprint role=client)
+//!    -> CreateDataProducer x{chassis,gimbal,light,ack}: protocol=sctp,
+//!    explicit transport_id binding, gimbal ordered=false/max_retransmits=5 (D-H3 same source as
+//!    channel_init), unique stream_id (= the DC id libwebrtc actually assigned)
+//! (3) CreateWebRtcTransport(Recv) -> Connect -> inject NewDataProducer ->
+//!    ConsumeData{dp, transport_id=recv}; the broadcast echo of one's own producer must not trigger consumption
+//! (4) the main loop stays alive after DataConsumed (no crash-loop on unknown messages); mock closes the link -> self-heal exit code 1
 //!
-//! 前置：mediaservo-webrtc backend-webrtc-sys（真 libwebrtc 本地协商，无网络 IO）。
+//! Prerequisite: mediaservo-webrtc backend-webrtc-sys (real libwebrtc local negotiation, no network IO).
 
 #![cfg(target_os = "linux")]
 
@@ -34,17 +34,14 @@ use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 
 const ROOM: &str = "control";
-/// libwebrtc 对畸形 fingerprint 直接拒绝 setRemoteDescription——给足 32 字节
-/// 冒号十六进制（值本身无意义，DTLS 永远不会与 mock 完成握手）。
+/// libwebrtc rejects malformed fingerprints at setRemoteDescription outright - give it a full 32 bytes of
+/// colon-hex (the value is meaningless; DTLS will never complete a handshake with the mock).
 const FAKE_FP: &str = "01:02:03:04:05:06:07:08:09:0A:0B:0C:0D:0E:0F:10:11:12:13:14:15:16:17:18:19:1A:1B:1C:1D:1E:1F:20";
 
 fn env_text(msg: SignalingMessage) -> Message {
-    let text = serde_json::to_string(&LocalEnvelope {
-        src: "server".into(),
-        msg,
-    })
-    .expect("信封序列化");
-    // (useless_conversion 钉：tungstenite From<String> for Message)
+    let text = serde_json::to_string(&LocalEnvelope { src: "server".into(), msg })
+        .expect("envelope serializes");
+    // (useless_conversion pin: tungstenite From<String> for Message)
     text.into()
 }
 
@@ -56,48 +53,38 @@ fn transport_created(transport_id: &str, ufrag: &str) -> SignalingMessage {
         sctp_parameters: None,
         ice_parameters: mediaservo_common::protocol::IceParameters {
             username_fragment: ufrag.into(),
-            password: "pwdpwdpwdpwdpwdpwdpwdpwdpwdpwdpwd".into(), // libwebrtc 下限 22 字符
+            password: "pwdpwdpwdpwdpwdpwdpwdpwdpwdpwdpwd".into(), // libwebrtc lower bound is 22 chars
         },
         dtls_parameters: DtlsParameters {
-            fingerprints: vec![Fingerprint {
-                algorithm: "sha-256".into(),
-                value: FAKE_FP.into(),
-            }],
+            fingerprints: vec![Fingerprint { algorithm: "sha-256".into(), value: FAKE_FP.into() }],
             role: "auto".into(),
         },
-        // candidates=None：合成 SDP 无远端候选 → ICE 不发起检查 → 测试窗内必不
-        // Failed（真 server 内联候选的实盘路径归活体验收，见文件头④）。
+        // candidates=None: the synthetic SDP has no remote candidates -> ICE starts no checks -> never
+        // Failed within the test window (the live path with a real server's inline candidates is live acceptance, see file header (4)).
         ice_candidates: None,
     }
 }
 
-/// 收一条上行信封消息（10s 超时，超时即 panic 定位）。
+/// Receive one upstream envelope message (10s timeout; a timeout panics with location).
 async fn read_msg(ws: &mut WebSocketStream<tokio::net::TcpStream>) -> SignalingMessage {
     let m = tokio::time::timeout(Duration::from_secs(10), ws.next())
         .await
-        .expect("mock: 等待上行消息超时")
-        .expect("mock: ws 流结束")
-        .expect("mock: ws 读错误");
-    let env: LocalEnvelope = serde_json::from_str(m.to_text().expect("mock: 非文本帧"))
-        .expect("mock: 信封解析");
+        .expect("mock: timed out waiting for an upstream message")
+        .expect("mock: ws stream ended")
+        .expect("mock: ws read error");
+    let env: LocalEnvelope = serde_json::from_str(m.to_text().expect("mock: non-text frame"))
+        .expect("mock: envelope parses");
     env.msg
 }
 
-fn expect_create_transport(
-    msg: SignalingMessage,
-    direction: TransportDirection,
-) {
+fn expect_create_transport(msg: SignalingMessage, direction: TransportDirection) {
     match msg {
-        SignalingMessage::CreateWebRtcTransport {
-            room_id,
-            peer_id,
-            direction: d,
-        } => {
-            assert_eq!(room_id, ROOM, "CreateWebRtcTransport 房间");
-            assert_eq!(peer_id, "host", "SFU peer 键 = host（C1 惯例）");
-            assert_eq!(d, direction, "transport 方向");
+        SignalingMessage::CreateWebRtcTransport { room_id, peer_id, direction: d } => {
+            assert_eq!(room_id, ROOM, "the CreateWebRtcTransport room");
+            assert_eq!(peer_id, "host", "SFU peer key = host (C1 convention)");
+            assert_eq!(d, direction, "transport direction");
         }
-        other => panic!("期望 CreateWebRtcTransport({direction:?}), got {other:?}"),
+        other => panic!("expected CreateWebRtcTransport({direction:?}), got {other:?}"),
     }
 }
 
@@ -109,16 +96,19 @@ fn expect_connect(msg: SignalingMessage, transport_id: &str) {
             peer_id,
             ..
         } => {
-            assert_eq!(tid, transport_id, "Connect 绑定的 transport_id");
+            assert_eq!(tid, transport_id, "the transport_id bound by Connect");
             assert_eq!(peer_id, "host");
-            assert_eq!(dtls_parameters.role, "client", "端点=DTLS client（mediasoup server 侧）");
+            assert_eq!(
+                dtls_parameters.role, "client",
+                "endpoint = DTLS client (mediasoup server side)"
+            );
             assert_eq!(dtls_parameters.fingerprints.len(), 1);
             assert!(
                 dtls_parameters.fingerprints[0].value.len() > 32,
-                "指纹应为本地 PC 真值（sha-256 冒号十六进制）"
+                "the fingerprint should be the local PC's real value (sha-256 colon-hex)"
             );
         }
-        other => panic!("期望 ConnectWebRtcTransport, got {other:?}"),
+        other => panic!("expected ConnectWebRtcTransport, got {other:?}"),
     }
 }
 
@@ -140,17 +130,33 @@ fn expect_data_producer(
             ..
         } => {
             assert_eq!(room_id, ROOM);
-            assert_eq!(transport_direction, TransportDirection::Send, "{label} 必须走 send transport");
+            assert_eq!(
+                transport_direction,
+                TransportDirection::Send,
+                "{label} must use the send transport"
+            );
             assert_eq!(l, label, "announce label");
-            assert_eq!(protocol, "sctp", "v1 子协议名");
-            assert_eq!(transport_id.as_deref(), Some("t-send"), "C1 显式绑定 send transport");
-            sctp_stream_parameters.expect("sctp_stream_parameters 必填（server 缺之必拒）")
+            assert_eq!(protocol, "sctp", "the v1 sub-protocol name");
+            assert_eq!(
+                transport_id.as_deref(),
+                Some("t-send"),
+                "C1 explicit binding to the send transport"
+            );
+            sctp_stream_parameters
+                .expect("sctp_stream_parameters is required (the server must reject without it)")
         }
-        other => panic!("期望 CreateDataProducer({label}), got {other:?}"),
+        other => panic!("expected CreateDataProducer({label}), got {other:?}"),
     };
-    assert_eq!(dp.ordered, ordered, "{label} ordered 与 channel_init 同源");
-    assert_eq!(dp.max_retransmits, max_retransmits, "{label} 重传参数与 channel_init 同源");
-    assert!(!seen_stream_ids.contains(&dp.stream_id), "stream_id 唯一（DC id 不重号）: {seen_stream_ids:?} + {}", dp.stream_id);
+    assert_eq!(dp.ordered, ordered, "{label} ordered is the same source as channel_init");
+    assert_eq!(
+        dp.max_retransmits, max_retransmits,
+        "{label} retransmit params are the same source as channel_init"
+    );
+    assert!(
+        !seen_stream_ids.contains(&dp.stream_id),
+        "stream_id unique (no duplicate DC ids): {seen_stream_ids:?} + {}",
+        dp.stream_id
+    );
     seen_stream_ids.push(dp.stream_id);
     dp
 }
@@ -166,18 +172,18 @@ async fn controller_sfu_dc_signaling_sequence() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
 
-    // ── mock 网关：按 S1 契约应答并逐项断言上行形状 ──
+    // -- mock gateway: answer per the S1 contract and assert each upstream shape --
     let mock = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.expect("mock accept");
         let mut ws = tokio_tungstenite::accept_async(stream).await.expect("mock ws");
 
-        // ① RoomJoin → RoomJoined（网关本地合成，protocol=3 S0.5 方言）
+        // (1) RoomJoin -> RoomJoined (synthesized locally by the gateway, protocol=3 S0.5 dialect)
         match read_msg(&mut ws).await {
             SignalingMessage::RoomJoin { room_id, peer_role, .. } => {
                 assert_eq!(room_id, ROOM);
                 assert_eq!(peer_role, PeerRole::Host);
             }
-            other => panic!("期望 RoomJoin, got {other:?}"),
+            other => panic!("expected RoomJoin, got {other:?}"),
         }
         ws.send(env_text(SignalingMessage::RoomJoined {
             room_id: ROOM.into(),
@@ -189,11 +195,9 @@ async fn controller_sfu_dc_signaling_sequence() {
         .await
         .unwrap();
 
-        // ② 出程：Send transport → connect → 4× CreateDataProducer announce
+        // (2) outbound: Send transport -> connect -> 4x CreateDataProducer announce
         expect_create_transport(read_msg(&mut ws).await, TransportDirection::Send);
-        ws.send(env_text(transport_created("t-send", "ufragSend1")))
-            .await
-            .unwrap();
+        ws.send(env_text(transport_created("t-send", "ufragSend1"))).await.unwrap();
         expect_connect(read_msg(&mut ws).await, "t-send");
         ws.send(env_text(SignalingMessage::Error {
             code: 0,
@@ -211,7 +215,13 @@ async fn controller_sfu_dc_signaling_sequence() {
         ];
         let mut own_ids: Vec<String> = Vec::new();
         for (i, (label, ordered, retrans)) in cases.iter().enumerate() {
-            expect_data_producer(read_msg(&mut ws).await, label, *ordered, *retrans, &mut stream_ids);
+            expect_data_producer(
+                read_msg(&mut ws).await,
+                label,
+                *ordered,
+                *retrans,
+                &mut stream_ids,
+            );
             let id = format!("dp-{i}-{label}");
             own_ids.push(id.clone());
             ws.send(env_text(SignalingMessage::DataProducerCreated {
@@ -222,11 +232,9 @@ async fn controller_sfu_dc_signaling_sequence() {
             .unwrap();
         }
 
-        // ③ 入程：Recv transport → connect → 注入舱端 producer + 自建回声
+        // (3) inbound: Recv transport -> connect -> inject the cockpit producer + the own echo
         expect_create_transport(read_msg(&mut ws).await, TransportDirection::Recv);
-        ws.send(env_text(transport_created("t-recv", "ufragRecv1")))
-            .await
-            .unwrap();
+        ws.send(env_text(transport_created("t-recv", "ufragRecv1"))).await.unwrap();
         expect_connect(read_msg(&mut ws).await, "t-recv");
         ws.send(env_text(SignalingMessage::Error {
             code: 0,
@@ -235,8 +243,8 @@ async fn controller_sfu_dc_signaling_sequence() {
         .await
         .unwrap();
 
-        // 自建 announce 的房间广播回声（server 语义广播给全房含自己）——
-        // controller 必须按 id 跳过，绝不自消费
+        // The room broadcast echo of one's own announce (server semantics: broadcast to the whole room including self) -
+        // the controller must skip it by id and never consume its own
         for id in &own_ids {
             ws.send(env_text(SignalingMessage::NewDataProducer {
                 room_id: ROOM.into(),
@@ -248,7 +256,7 @@ async fn controller_sfu_dc_signaling_sequence() {
             .await
             .unwrap();
         }
-        // 舱端 control producer（v1 单 label 约定）
+        // the cockpit's control producer (v1 single-label convention)
         ws.send(env_text(SignalingMessage::NewDataProducer {
             room_id: ROOM.into(),
             data_producer_id: "dp-cockpit".into(),
@@ -259,7 +267,7 @@ async fn controller_sfu_dc_signaling_sequence() {
         .await
         .unwrap();
 
-        // 恰有一条 ConsumeData：舱端 producer、Recv、绑定 t-recv
+        // exactly one ConsumeData: the cockpit producer, Recv, bound to t-recv
         let mut consumed_seen = false;
         for _ in 0..8 {
             let msg = read_msg(&mut ws).await;
@@ -273,14 +281,21 @@ async fn controller_sfu_dc_signaling_sequence() {
                 } => {
                     assert_eq!(room_id, ROOM);
                     assert_eq!(transport_direction, TransportDirection::Recv);
-                    assert_eq!(data_producer_id, "dp-cockpit", "只消费舱端 producer（自建回声不自消费）");
-                    assert_eq!(transport_id.as_deref(), Some("t-recv"), "C1 显式绑定 recv transport");
+                    assert_eq!(
+                        data_producer_id, "dp-cockpit",
+                        "consume only the cockpit producer (no self-consumption of the own echo)"
+                    );
+                    assert_eq!(
+                        transport_id.as_deref(),
+                        Some("t-recv"),
+                        "C1 explicit binding to the recv transport"
+                    );
                     consumed_seen = true;
                     ws.send(env_text(SignalingMessage::DataConsumed {
                         room_id: ROOM.into(),
                         data_consumer_id: "dc-cockpit".into(),
                         data_producer_id,
-                        // S2d: 带外 negotiated DC 参数（真机由 worker 分配；此处夹具值）。
+                        // S2d: out-of-band negotiated DC params (assigned by the worker on real machines; fixture values here).
                         sctp_stream_parameters: Some(SctpStreamParameters {
                             stream_id: 9,
                             ordered: true,
@@ -294,19 +309,19 @@ async fn controller_sfu_dc_signaling_sequence() {
                     .unwrap();
                     break;
                 }
-                // 建立期 DataProducerCreated 的网关广播回声可能后到——忽略
+                // the gateway broadcast echo of DataProducerCreated during setup may arrive late - ignore it
                 SignalingMessage::DataProducerCreated { .. } => continue,
-                other => panic!("期望 ConsumeData, got {other:?}"),
+                other => panic!("expected ConsumeData, got {other:?}"),
             }
         }
-        assert!(consumed_seen, "NewDataProducer 注入后必须收到 ConsumeData");
+        assert!(consumed_seen, "ConsumeData must arrive after the NewDataProducer injection");
 
-        // ④ 存活一拍（DataConsumed 后主循环不得崩环），再断链触发自愈退出
+        // (4) stay alive one beat (the main loop must not crash-loop after DataConsumed), then cut the link to trigger the self-heal exit
         tokio::time::sleep(Duration::from_millis(300)).await;
         ws.close(None).await.expect("mock close");
     });
 
-    // ── controller：生产客户端链（new_gateway + control_loop）──
+    // -- controller: the production client chain (new_gateway + control_loop) --
     let signal = SignalClient::new_gateway(
         &format!("ws://127.0.0.1:{port}/ws"),
         "host-controller",
@@ -315,15 +330,24 @@ async fn controller_sfu_dc_signaling_sequence() {
     )
     .connect()
     .await
-    .expect("controller 信令连接（mock 网关）");
+    .expect("controller signaling connect (mock gateway)");
 
     let code = tokio::time::timeout(
         Duration::from_secs(30),
-        control_loop(signal, ControllerConfig::default(), Arc::new(StubActuator), None, Default::default()),
+        control_loop(
+            signal,
+            ControllerConfig::default(),
+            Arc::new(StubActuator),
+            None,
+            Default::default(),
+        ),
     )
     .await
-    .expect("control_loop 30s 未退出");
-    // mock 主动断链 = 生产自愈语义（退出非 0 待 restart_policy 拉起）
-    assert_eq!(code, 1, "信令断开应走自愈退出码 1（PIT-87 惯例）");
-    mock.await.expect("mock 网关断言失败（见 panic 溯源）");
+    .expect("control_loop did not exit within 30s");
+    // the mock drops the link on purpose = production self-heal semantics (non-zero exit awaits restart_policy)
+    assert_eq!(
+        code, 1,
+        "a signaling disconnect should use self-heal exit code 1 (PIT-87 convention)"
+    );
+    mock.await.expect("mock gateway assertion failed (see the panic trace)");
 }

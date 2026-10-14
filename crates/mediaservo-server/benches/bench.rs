@@ -13,7 +13,7 @@
 use std::time::{Duration, Instant};
 
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
-use mediaservo_server::monitor::{monitor_router, SharedMetrics};
+use mediaservo_server::monitor::{SharedMetrics, monitor_router};
 use mediaservo_server::signaling::SignalingServer;
 
 // ── Benchmark runner (stdlib, no framework) ────────────────────────────────
@@ -37,8 +37,8 @@ fn main() {
     println!("=== MediaServo Server Benchmarks ===\n");
 
     // 1. SignalingServer construction
-    // sfu-mediasoup 特征下构造函数需活体 SfuManager（mediasoup worker），bench 无法构造 —
-    // 该 bench 仅在无 mediasoup 特征下运行（G2 顺手修 --tests --benches 编译挂）。
+    // under the sfu-mediasoup feature the constructor needs a live SfuManager (mediasoup worker), which a bench cannot build --
+    // this bench only runs without the mediasoup feature (G2 also fixes the --tests --benches compile break).
     #[cfg(not(feature = "sfu-mediasoup"))]
     run_bench("SignalingServer::new(65536)", Duration::from_millis(200), || {
         let _server = SignalingServer::new(65536, None);
@@ -85,24 +85,18 @@ fn main() {
         metrics.encode();
     });
 
-    // 6. Health endpoint request round-trip（同 #1: sfu-mediasoup 特征下跳过）
+    // 6. Health endpoint request round-trip (same as #1: skipped under sfu-mediasoup)
     #[cfg(not(feature = "sfu-mediasoup"))]
     run_bench("/health GET round-trip", Duration::from_millis(200), || {
         let signaling = SignalingServer::new(65536, None);
         let app = monitor_router(signaling);
-        use http::Request;
         use axum::body::Body;
+        use http::Request;
         use tower::util::ServiceExt;
 
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let _result = rt.block_on(async {
-            let req = Request::builder()
-                .uri("/health")
-                .body(Body::empty())
-                .unwrap();
+            let req = Request::builder().uri("/health").body(Body::empty()).unwrap();
             let resp = app.oneshot(req).await;
             drop(resp);
         });

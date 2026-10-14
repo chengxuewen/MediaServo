@@ -17,7 +17,7 @@ export default function Accounts() {
   const [actionMsg, setActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const currentUsername = getUsername();
 
-  // 创建账号弹窗
+  // create-account modal
   const [createOpen, setCreateOpen] = useState(false);
   const [createUsername, setCreateUsername] = useState('');
   const [createPassword, setCreatePassword] = useState('');
@@ -26,7 +26,7 @@ export default function Accounts() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // 编辑账号弹窗
+  // edit-account modal
   const [editing, setEditing] = useState<AdminAccount | null>(null);
   const [editRole, setEditRole] = useState<AccountRole>('viewer');
   const [editVehicles, setEditVehicles] = useState('');

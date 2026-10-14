@@ -1,6 +1,6 @@
-//! 多进程崩溃恢复测试子进程：持续向指定 topic 发布帧（默认 10fps 小帧）直到被杀死。
+//! Multiproc crash-recovery test child: keeps publishing frames to the given topic (default 10fps small frames) until killed.
 //!
-//! 用法：framebus_pub_loop <topic> [frame_bytes] [fps]
+//! Usage: framebus_pub_loop <topic> [frame_bytes] [fps]
 
 use mediaservo_link::{
     CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, FrameBus, FrameMeta, FrameTopic,
@@ -12,10 +12,7 @@ const PUB_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgXprEbnahCZoZ
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let topic = args
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "camera/crash/raw".to_string());
+    let topic = args.first().cloned().unwrap_or_else(|| "camera/crash/raw".to_string());
     let frame_bytes: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(64);
     let fps: u64 = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(10);
     let interval = std::time::Duration::from_millis(1000 / fps);
@@ -40,8 +37,7 @@ fn main() {
             ts_mono_ns: seq,
             ts_epoch_ns: 0,
         };
-        bus.publish(&FrameTopic::new(topic.as_str()), &payload, &meta)
-            .expect("publish");
+        bus.publish(&FrameTopic::new(topic.as_str()), &payload, &meta).expect("publish");
         std::thread::sleep(interval);
     }
 }

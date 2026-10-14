@@ -1,7 +1,7 @@
-//! 账号登录——POST {base}/api/auth/login（手写 HTTP/1.1，零新增外部依赖）。
+//! Account login -- POST {base}/api/auth/login (hand-written HTTP/1.1, zero new external dependencies).
 //!
-//! **v1 安全约束**：仅明文 http；TLS 面归 S4+ 裁决（避免 Cargo 生态 TLS 栈冲突面）。
-//! **设计取舍**：hyper 会引入 TLS+http 传递依赖，当前手写 TCP 足以覆盖 v1 面。
+//! **v1 security constraint**: plaintext http only; the TLS surface is an S4+ decision (avoiding a Cargo-ecosystem TLS-stack conflict surface).
+//! **Design tradeoff**: hyper would drag in TLS+http transitive deps; the current hand-written TCP covers the v1 surface.
 
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -10,18 +10,18 @@ use tokio::time::timeout;
 
 use crate::error::ClientError;
 
-/// 连接超时（手写 TCP——link 的 WS 面由 SignalClient 控制，此为 REST 面）。
+/// Connect timeout (hand-written TCP -- the link WS surface is controlled by SignalClient; this is the REST surface).
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-/// 读写超时。
+/// Read/write timeout.
 const IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-/// login path——只用于测试断言；生产直接拼入 `http_base`。
+/// The login path -- used only by test asserts; production concatenates it into `http_base` directly.
 pub(crate) const LOGIN_PATH: &str = "/api/auth/login";
-/// rooms 发现 path（GET /api/rooms——server 侧 p3 W2-A 端点）。
+/// The rooms discovery path (GET /api/rooms -- the server-side p3 W2-A endpoint).
 pub(crate) const ROOMS_PATH: &str = "/api/rooms";
-/// `POST /api/auth/exchange` 路径（accountless-client-auth T2：API-key 换短 JWT）。
+/// The `POST /api/auth/exchange` path (accountless-client-auth T2: an API key exchanged for a short JWT).
 const EXCHANGE_PATH: &str = "/api/auth/exchange";
 
-/// 登录成功返回（精简 shape——server `admin.rs:163` LoginResponse）。
+/// The login success return (a minimal shape -- server `admin.rs:163` LoginResponse).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoginOutcome {
     pub jwt: String,
@@ -30,7 +30,7 @@ pub struct LoginOutcome {
     pub expires_in_secs: u64,
 }
 
-// ───────── wire 形状（私有，测试断言走 LoginOutcome）─────────
+// -------- wire shapes (private; test asserts go through LoginOutcome) --------
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -44,16 +44,16 @@ struct LoginWire {
     expires_in_secs: u64,
 }
 
-/// 消费面发现的房间（server wire = `{room_id, kind}` 二字段，serde 钉同源）。
+/// The rooms discovered on the consumption surface (server wire = the two fields `{room_id, kind}`, serde pinned same-source).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomInfo {
     pub room_id: String,
-    /// "video" | "audio"（server 按房间名前缀派生，未知前缀透传——客户端不判型）。
+    /// "video" | "audio" (the server derives it from the room-name prefix, unknown prefixes pass through -- the client doesn't type-check).
     pub kind: String,
-    /// 归属整车房（流房反指；room-grouping-semantics T2 additive，老 server 缺省 None）。
+    /// The owning vehicle room (the stream room's back-reference; room-grouping-semantics T2 additive, old servers default None).
     #[serde(default)]
     pub parent: Option<String>,
-    /// 整车房内嵌在线流（仅 control 房携带；老 server 缺省 None）。
+    /// The vehicle room's embedded online streams (control rooms only; old servers default None).
     #[serde(default)]
     pub streams: Option<Vec<String>>,
 }
@@ -69,9 +69,9 @@ struct ErrorWire {
     error: Option<String>,
 }
 
-// ───────── 纯函数（单元测试）─────────
+// -------- pure functions (unit tests) --------
 
-/// 构造 HTTP/1.1 POST 请求报文。
+/// Build an HTTP/1.1 POST request message.
 pub(crate) fn build_request(host: &str, port: u16, path: &str, body: &[u8]) -> Vec<u8> {
     let mut req = format!(
         "POST {path} HTTP/1.1\r\n\
@@ -87,7 +87,7 @@ pub(crate) fn build_request(host: &str, port: u16, path: &str, body: &[u8]) -> V
     req
 }
 
-/// 同上，但 Authorization 值由调用方给（`Psk <secret>` = PSK 发现路，psk-discover）。
+/// Same, but the Authorization value is given by the caller (`Psk <secret>` = the PSK discovery path, psk-discover).
 pub(crate) fn build_get_request_authed(host: &str, port: u16, path: &str, auth: &str) -> Vec<u8> {
     format!(
         "GET {path} HTTP/1.1\r\n\
@@ -100,7 +100,7 @@ pub(crate) fn build_get_request_authed(host: &str, port: u16, path: &str, auth: 
     .into_bytes()
 }
 
-/// 解析 `http_base`（仅 http scheme）。
+/// Parse `http_base` (http scheme only).
 fn parse_http_base(url: &str) -> Result<(String, u16), ClientError> {
     let rest = url
         .strip_prefix("http://")
@@ -123,7 +123,7 @@ fn parse_http_base(url: &str) -> Result<(String, u16), ClientError> {
     Ok((host, port))
 }
 
-/// 解析 HTTP 响应：`("HTTP/1.1 200 OK\r\n...", body_bytes)` → (status, body)。
+/// Parse an HTTP response: `("HTTP/1.1 200 OK\r\n...", body_bytes)` -> (status, body).
 pub(crate) fn parse_response(raw: &[u8]) -> Result<(u16, &[u8]), ClientError> {
     let header_end = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or_else(|| {
         ClientError::MalformedResponse(format!(
@@ -156,9 +156,9 @@ fn parse_status_line(line: &[u8]) -> Result<u16, ClientError> {
         .map_err(|e| ClientError::MalformedResponse(format!("bad status code {code_str}: {e}")))
 }
 
-// ───────── async 入口─────────
+// -------- async entries --------
 
-/// 账号密码登录，返回 [`LoginOutcome`]（v1 scope = 基础 token + 角色）。
+/// Account/password login, returning [`LoginOutcome`] (the v1 scope = the basic token + role).
 pub async fn login(
     http_base: &str,
     username: &str,
@@ -168,10 +168,10 @@ pub async fn login(
     auth_post(http_base, LOGIN_PATH, &body, username, "login").await
 }
 
-/// API-key 换短 JWT（accountless-client-auth T2；server = POST /api/auth/exchange，
-/// LiveKit apikey/apiSecret 同型）。返回形与 [`login`] 完全一致（同一 `LoginWire`），
-/// 拿到 jwt 后注入 [`ClientConfig::jwt`] 走既有 `/ws` 门——凭证来源换、消费面不变。
-/// 401（未知 key 或错 secret，server 侧逐字同消息防枚举）→ `InvalidCredentials` 终态。
+/// API key -> short JWT exchange (accountless-client-auth T2; server = POST /api/auth/exchange,
+/// the same type as LiveKit apikey/apiSecret). The return shape is identical to [`login`] (the same `LoginWire`),
+/// and once the jwt is in hand it injects into [`ClientConfig::jwt`] through the existing /ws gate -- the credential source swaps, the consumption surface unchanged.
+/// 401 (unknown key or wrong secret, the server's verbatim same-message anti-enumeration) -> `InvalidCredentials` terminal.
 pub async fn exchange(
     http_base: &str,
     key_id: &str,
@@ -181,7 +181,7 @@ pub async fn exchange(
     auth_post(http_base, EXCHANGE_PATH, &body, key_id, "exchange").await
 }
 
-/// login 与 exchange 共用的 POST→LoginOutcome 链（手写 HTTP/1.1，S2 零新依赖）。
+/// The POST -> LoginOutcome chain shared by login and exchange (hand-written HTTP/1.1, zero new deps at S2).
 async fn auth_post(
     http_base: &str,
     path: &str,
@@ -232,8 +232,8 @@ async fn auth_post(
     }
 }
 
-/// 单请求单响应（Connection: close → read_to_end 以 EOF 终止）。
-/// login 与 list_rooms 共用——同一手写 TCP 面，零第二实现。
+/// One request, one response (Connection: close -> read_to_end terminates at EOF).
+/// Shared by login and list_rooms -- one hand-written TCP surface, no second implementation.
 async fn request_raw(
     host: &str,
     port: u16,
@@ -256,8 +256,8 @@ async fn request_raw(
             tracing::warn!(error = %e, "http write failed");
             ClientError::Io(e)
         })?;
-    // 不做写半关（S2b 实锤：hyper 对"body 未读全即遇 half-close"的请求
-    // 直接静默断连 = 0 字节）。响应由 Connection: close 保证服务端发完即关。
+    // no write half-close (S2b field proof: hyper, on a request "whose body isn't fully read when a half-close arrives",
+    // silently disconnects = 0 bytes). The response is guaranteed complete by Connection: close before the server closes.
 
     let mut raw = Vec::with_capacity(4096);
     timeout(IO_TIMEOUT, stream.read_to_end(&mut raw))
@@ -268,14 +268,14 @@ async fn request_raw(
     parse_response(&raw).map(|(code, body)| (code, body.to_vec()))
 }
 
-/// 消费面房间发现（p3 W2-B）：`GET {base}/api/rooms`，账号 JWT（login 签发）。
+/// Consumption-surface room discovery (p3 W2-B): `GET {base}/api/rooms`, the account JWT (issued by login).
 ///
-/// 权限矩阵以 server 为准（admin/dispatcher 全量，viewer/operator allowlist），
-/// 客户端不做二次过滤。非 2xx（token 失效/过期/角色不符）→ [`ClientError::RestRejected`]
-/// ——不是 InvalidCredentials：凭证曾有效，此处是授权面拒绝。
-/// PSK 发现（psk-discover；server /api/rooms 的 `Authorization: Psk <secret>` 分支）。
-/// Legacy 视角全量列表（与 PSK join 门能力对齐——跨房间拉流的发现面）。
-/// 401（错 PSK/未配）→ `InvalidCredentials` 终态。
+/// The permission matrix is the server's call (admin/dispatcher full, viewer/operator allowlist),
+/// the client does no secondary filtering. Non-2xx (token invalid/expired/role mismatch) -> [`ClientError::RestRejected`]
+/// -- not InvalidCredentials: the credential was once valid; this is an authorization-surface rejection.
+/// PSK discovery (psk-discover; the `Authorization: Psk <secret>` branch of the server's /api/rooms).
+/// The Legacy-view full list (aligned with the PSK join gate's capability -- the discovery surface for cross-room pulls).
+/// 401 (wrong PSK/unconfigured) -> `InvalidCredentials` terminal.
 pub async fn list_rooms_psk(http_base: &str, psk: &str) -> Result<Vec<RoomInfo>, ClientError> {
     list_rooms_authed(http_base, &format!("Psk {psk}"), "psk discover").await
 }
@@ -308,7 +308,7 @@ pub async fn list_rooms(http_base: &str, jwt: &str) -> Result<Vec<RoomInfo>, Cli
     list_rooms_authed(http_base, &auth, "http list_rooms").await
 }
 
-/// 200 body → RoomInfo 列表（RoomsWire 共用解析）。
+/// A 200 body -> the RoomInfo list (parsed by the shared RoomsWire).
 async fn parse_rooms_body(body: &[u8], tag: &'static str) -> Result<Vec<RoomInfo>, ClientError> {
     serde_json::from_slice::<RoomsWire>(body).map(|w| w.rooms).map_err(|e| {
         tracing::warn!(body_len = body.len(), error = %e, "{tag} 200 body parse failed");
@@ -381,7 +381,7 @@ mod tests {
         assert!(req.contains("Connection: close\r\n"));
         assert!(!req.contains("Content-Length"));
         assert!(req.ends_with("\r\n\r\n"));
-        // psk-discover 变体（scheme=Psk）
+        // the psk-discover variant (scheme=Psk)
         let psk_req =
             String::from_utf8(build_get_request_authed("h", 9800, "/api/rooms", "Psk sekrit"))
                 .unwrap();
@@ -390,7 +390,7 @@ mod tests {
 
     #[test]
     fn rooms_wire_parses_server_shape() {
-        // server wire 钉（rooms.rs 集成测同源形）：恰好二字段，多字段忽略不炸。
+        // server wire pin (the same-source shape in the rooms.rs integration test): exactly two fields, extra fields ignored without blowing up.
         let w: RoomsWire = serde_json::from_str(
             r#"{"rooms":[{"room_id":"vehicle_t1","kind":"video"},{"room_id":"audio-c1","kind":"audio"}]}"#,
         )
@@ -398,8 +398,18 @@ mod tests {
         assert_eq!(
             w.rooms,
             vec![
-                RoomInfo { room_id: "vehicle_t1".into(), kind: "video".into(), parent: None, streams: None },
-                RoomInfo { room_id: "audio-c1".into(), kind: "audio".into(), parent: None, streams: None },
+                RoomInfo {
+                    room_id: "vehicle_t1".into(),
+                    kind: "video".into(),
+                    parent: None,
+                    streams: None
+                },
+                RoomInfo {
+                    room_id: "audio-c1".into(),
+                    kind: "audio".into(),
+                    parent: None,
+                    streams: None
+                },
             ]
         );
     }

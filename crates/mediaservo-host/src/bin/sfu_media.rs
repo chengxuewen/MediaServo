@@ -1,16 +1,16 @@
-//! SFU 媒体协商的纯函数构造 — 从 main.rs 抽出以便单测。
+//! Pure construction functions for SFU media negotiation -- extracted from main.rs so they can be unit tested.
 //!
-//! P3 (v2)+P2 修复: Host 走标准 answerer 协商 — 用 server transport 参数构造 remote SDP
-//! → set_remote_description → create_answer (对齐 libmediasoupclient SdpUtils / e2e_sfu 验证路径)。
-//! 本模块提供 remote SDP 构造 + 从协商结果 RTCRtpParameters 构造 produce 请求。
+//! P3 (v2) + P2 fix: the Host goes through the standard answerer negotiation -- build the remote SDP from the server transport parameters
+//! -> set_remote_description -> create_answer (aligned with the libmediasoupclient SdpUtils / e2e_sfu verification path).
+//! This module provides the remote SDP construction + building the produce request from the negotiated RTCRtpParameters.
 
 use mediaservo_common::protocol::{DtlsParameters, IceCandidate, IceParameters};
 use mediaservo_webrtc::rtp::RTCRtpParameters;
 use serde_json::{Value, json};
 
-/// 用 mediasoup transport 参数构造 remote SDP (ICE-Lite server offer)。
-/// PIT-48: a=candidate 行必须位于 m= 行之后（media section 内）——
-/// 会话级 candidate 被 libwebrtc 忽略 → remote candidate 丢失 → ICE 不发起 STUN
+/// Build the remote SDP (ICE-Lite server offer) from the mediasoup transport parameters.
+/// PIT-48: the a=candidate lines must come after the m= line (inside the media section) --
+/// a session-level candidate is ignored by libwebrtc -> the remote candidates are lost -> ICE never starts STUN
 pub fn build_remote_sdp(
     ice_parameters: &IceParameters,
     dtls_parameters: &DtlsParameters,
@@ -44,17 +44,17 @@ pub fn build_remote_sdp(
         format!("c=IN IP4 {}", conn_ip),
         "a=rtcp-mux".to_string(),
         "a=mid:video".to_string(),
-        // v3 (sfu-negotiation-completion T1): extmap 声明 transport-cc + abs-capture-time —
-        // BWE 反馈链路必需（mediasoup 端按 produce headerExtensions 映射, 生成/转发
-        // transport-cc feedback 给 host）; id 3/5 对齐官方 libmediasoupclient 惯例。
-        // RFC 8285: answer 只能收 offer 集合 → 自构 offer 必须先声明。
+        // v3 (sfu-negotiation-completion T1): declare the transport-cc + abs-capture-time extmap --
+        // required for the BWE feedback path (the mediasoup side maps the produce headerExtensions, generates/forwards
+        // the transport-cc feedback to the host); ids 3/5 follow the official libmediasoupclient convention.
+        // RFC 8285: an answer can only contain the offer's set -> a self-built offer must declare them first.
         "a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
             .to_string(),
         "a=extmap:5 http://www.webrtc.org/experiments/rtp-hdrext/abs-capture-time".to_string(),
         "a=recvonly".to_string(),
         format!("a=rtpmap:{} {}/{}", payload_type, codec_name, clock_rate),
-        // rtcp-fb: 完整协商语义（nack/pli/fir）— libwebrtc answerer 回带,
-        // 丢包重传 + 关键帧请求正式声明。
+        // rtcp-fb: the full negotiation semantics (nack/pli/fir) -- carried back by the libwebrtc answerer,
+        // formally declaring packet retransmission and key-frame requests.
         format!("a=rtcp-fb:{} nack", payload_type),
         format!("a=rtcp-fb:{} nack pli", payload_type),
         format!("a=rtcp-fb:{} ccm fir", payload_type),
@@ -93,16 +93,16 @@ pub fn build_remote_sdp(
     lines.join("\r\n")
 }
 
-/// P3 (v2): 从协商结果 (RTCRtpParameters) 构造 mediasoup produce 的 rtp_parameters。
-/// 对齐官方客户端 — 数据来自 transceiver.sender.get_parameters()，非手工硬编码。
+/// P3 (v2): build the mediasoup produce rtp_parameters from the negotiation result (RTCRtpParameters).
+/// Aligned with the official client -- the data comes from transceiver.sender.get_parameters(), not from hand-coded constants.
 pub fn build_produce_rtp_parameters_from_rtp(params: &RTCRtpParameters) -> Value {
     let codecs: Vec<Value> = params
         .codecs
         .iter()
         .map(|c| {
-            // v2 (encoder-backend-codec-config T4 实证): H264 必须带 parameters（PIT-54 严格匹配）—
-            // VP8 router parameters 为空侥幸匹配; H264 router 有 profile/packetization 参数, 缺失必败
-            // (Unsupported codec). sdp_fmtp_line "k=v;k=v" → mediasoup parameters JSON。
+            // v2 (encoder-backend-codec-config T4 evidence): H264 must carry parameters (PIT-54 strict match) --
+            // the empty VP8 router parameters matched by luck; the H264 router has profile/packetization parameters, and omitting them always fails
+            // (Unsupported codec). sdp_fmtp_line "k=v;k=v" -> the mediasoup parameters JSON.
             let parameters: Value = c
                 .sdp_fmtp_line
                 .as_deref()
@@ -110,7 +110,7 @@ pub fn build_produce_rtp_parameters_from_rtp(params: &RTCRtpParameters) -> Value
                     let mut map = serde_json::Map::new();
                     for kv in line.split(';') {
                         if let Some((k, v)) = kv.split_once('=') {
-                            // 数字参数转 number（mediasoup 参数类型敏感）
+                            // Convert numeric parameters to numbers (mediasoup is sensitive to the parameter type)
                             let val: Value =
                                 v.parse::<i64>().map(|n| json!(n)).unwrap_or_else(|_| json!(v));
                             map.insert(k.trim().to_string(), val);
@@ -119,10 +119,10 @@ pub fn build_produce_rtp_parameters_from_rtp(params: &RTCRtpParameters) -> Value
                     Value::Object(map)
                 })
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-            // v3 (sfu-negotiation-completion T4): rtcpFeedback 必须声明 transport-cc —
-            // mediasoup Transport.cpp:699-724 TCCS 启用条件 = headerExtension transportWideCc01
-            // + codecs rtcpFeedback 含 "transport-cc"（缺失 → 不生成 transport-cc feedback
-            // → host BWE 无输入）。nack/pli/fir 与 host answer 协商结果一致。
+            // v3 (sfu-negotiation-completion T4): rtcpFeedback must declare transport-cc --
+            // the mediasoup Transport.cpp:699-724 TCCS enable condition = the headerExtension transportWideCc01
+            // + codecs rtcpFeedback containing "transport-cc" (omitting it -> no transport-cc feedback is generated
+            // -> the host BWE has no input). nack/pli/fir match the host answer negotiation result.
             json!({
                 "mimeType": c.mime_type,
                 "payloadType": c.payload_type,
@@ -151,10 +151,10 @@ pub fn build_produce_rtp_parameters_from_rtp(params: &RTCRtpParameters) -> Value
             enc
         })
         .collect();
-    // v3 (sfu-negotiation-completion T2): headerExtensions 从协商结果推导（非硬编码 []）—
-    // T1 自构 offer 声明 transport-cc 后, answer 协商成功 → sender.get_parameters()
-    // header_extensions 含 transport-cc → mediasoup 端获得 transport-cc 上下文,
-    // 生成/转发 feedback 给 host（BWE 自适应链路）。
+    // v3 (sfu-negotiation-completion T2): derive headerExtensions from the negotiation result (not a hard-coded []) --
+    // after T1's self-built offer declares transport-cc, the answer negotiation succeeds -> sender.get_parameters()
+    // header_extensions includes transport-cc -> the mediasoup side gets the transport-cc context and
+    // generates/forwards the feedback to the host (the adaptive BWE path).
     let header_extensions: Vec<Value> = params
         .header_extensions
         .iter()
@@ -204,12 +204,12 @@ mod tests {
             rtcp: RTCRtcpParameters { cname: None, reduced_size: true },
         };
         let v = build_produce_rtp_parameters_from_rtp(&params);
-        // 协商结果: ssrc + codec 字段来自 get_sending_rtp_parameters
+        // Negotiation result: the ssrc + codec fields come from get_sending_rtp_parameters
         assert_eq!(v["codecs"][0]["mimeType"], "video/H264");
         assert_eq!(v["codecs"][0]["payloadType"], 101);
         assert_eq!(v["codecs"][0]["clockRate"], 90000);
         assert_eq!(v["encodings"][0]["ssrc"], 1949911776);
-        // v3 (T4): rtcpFeedback 含 transport-cc（mediasoup TCCS 启用条件）
+        // v3 (T4): rtcpFeedback includes transport-cc (the mediasoup TCCS enable condition)
         let fb: Vec<&str> = v["codecs"][0]["rtcpFeedback"]
             .as_array()
             .unwrap()
@@ -231,8 +231,8 @@ mod tests {
 
     #[test]
     fn produce_from_rtp_reflects_header_extensions() {
-        // v3 (sfu-negotiation-completion T2): transport-cc extmap 协商后 → produce
-        // headerExtensions 反射（不再硬编码 []）, mediasoup 获得 transport-cc 上下文。
+        // v3 (sfu-negotiation-completion T2): after the transport-cc extmap negotiation, the produce
+        // headerExtensions reflects it (no longer hard-coded []), so mediasoup gets the transport-cc context.
         let params = RTCRtpParameters {
             transaction_id: "tx1".into(),
             mid: "0".into(),
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn remote_sdp_has_extmap_and_rtcp_fb() {
         // v3 (sfu-negotiation-completion T1): transport-cc + abs-capture-time extmap,
-        // nack/pli/fir rtcp-fb — PT 动态跟随 payload_type。
+        // nack/pli/fir rtcp-fb -- the PT follows the negotiated payload_type dynamically.
         let dtls = DtlsParameters {
             fingerprints: vec![Fingerprint {
                 algorithm: "sha-256".into(),
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn remote_sdp_rtcp_fb_pt_follows_payload_type() {
-        // H264 (101): rtcp-fb 行必须跟随协商 PT, 非硬编码 96
+        // H264 (101): the rtcp-fb lines must follow the negotiated PT, not a hard-coded 96
         let dtls = DtlsParameters {
             fingerprints: vec![Fingerprint {
                 algorithm: "sha-256".into(),

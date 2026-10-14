@@ -36,7 +36,7 @@ async fn e2e_sfu_lifecycle() {
 
     // Create signaling server with SFU
     let mut server = SignalingServer::new(Arc::clone(&sfu), 65536, None);
-    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；本套件裸 JSON 读环不吃控制帧
+    server.ws_ping_secs = 0; // the a1 heartbeat has its dedicated pins in heartbeat_e2e; this suite's raw JSON read loop must not eat control frames
     let app = signaling_router(server);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -195,7 +195,7 @@ async fn e2e_sfu_cleanup_on_disconnect() {
     let initial_count = sfu.room_count();
 
     let mut server = SignalingServer::new(Arc::clone(&sfu), 65536, None);
-    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；本套件裸 JSON 读环不吃控制帧
+    server.ws_ping_secs = 0; // the a1 heartbeat has its dedicated pins in heartbeat_e2e; this suite's raw JSON read loop must not eat control frames
     let app = signaling_router(server);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -224,7 +224,7 @@ async fn e2e_sfu_cleanup_on_disconnect() {
         device_id: None,
         device_secret: None,
         device_pubkey: None,
-        // S0: 本 helper 代表新端点发声（data_domain/F8 门控需 negotiated>=2）。
+        // S0: this helper speaks for the new endpoint (data_domain/F8 gating requires negotiated>=2).
         protocol: Some(2),
         client_version: None,
         resume: None,
@@ -275,7 +275,7 @@ async fn e2e_sfu_consume_pipeline() {
             .expect("Failed to create SFU manager"),
     );
     let mut server = SignalingServer::new(Arc::clone(&sfu), 65536, None);
-    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；本套件裸 JSON 读环不吃控制帧
+    server.ws_ping_secs = 0; // the a1 heartbeat has its dedicated pins in heartbeat_e2e; this suite's raw JSON read loop must not eat control frames
     let app = signaling_router(server);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -363,7 +363,7 @@ async fn e2e_sfu_consume_pipeline() {
             transport_direction: mediaservo_common::protocol::TransportDirection::Send,
             kind: mediaservo_common::protocol::MediaKind::Video,
             rtp_parameters: serde_json::json!({"mid": "0", "codecs": [{"mimeType": "video/VP8", "payloadType": 100, "clockRate": 90000}], "headerExtensions": [], "encodings": [{"ssrc": 12345}], "rtcp": {"reducedSize": true}}),
-            transport_id: Some(send_tid.clone()), // C1: 指名绑定本会话 transport
+            transport_id: Some(send_tid.clone()), // C1: bind to this session's transport by name
 
             label: None,}).unwrap();
         ws.send(WsMsg::Text(produce)).await.unwrap();
@@ -430,8 +430,8 @@ async fn e2e_sfu_consume_pipeline() {
         })
         .unwrap();
         ws.send(WsMsg::Text(create)).await.unwrap();
-        // late-joiner 同步会把 pending NewProducer 重放广播 — 先于直接响应到达，
-        // 必须 drain 到目标消息（PIT-103 顺手修: 该测试在 test-server 编译挂期间从未跑过）。
+        // the late-joiner sync replays pending NewProducer broadcasts -- they arrive before the direct response,
+        // so drain until the target message (a PIT-103 side fix: this test never ran during the test-server compile break).
         let created = loop {
             let resp = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next())
                 .await
@@ -477,7 +477,7 @@ async fn e2e_sfu_consume_pipeline() {
                 "codecs": [{"mimeType": "video/VP8", "clockRate": 90000, "kind": "video"}],
                 "headerExtensions": []
             }),
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
         })
         .unwrap();
         ws.send(WsMsg::Text(consume)).await.unwrap();
@@ -517,8 +517,8 @@ async fn e2e_sfu_consume_pipeline() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// G3: SFU 面角色强制 — 车端 produce 自动允许（回归）+ 账号 produce 拒绝 +
-// 授权账号 consume 放行 + 非授权账号 join 拒绝（租户隔离）。
+// G3: role enforcement on the SFU plane -- vehicle produce auto-allowed (regression) + account produce denied +
+// authorized account consume allowed + unauthorized account join denied (tenant isolation).
 // ═══════════════════════════════════════════════════════════════════════════
 
 const G3_JWT: &str = "e2e-sfu-g3-jwt-secret-32-bytes-min!";
@@ -567,7 +567,7 @@ async fn g3_auth_and_join(ws: &mut KeepAliveWs, room: &str, role: PeerRole) {
         device_id: None,
         device_secret: None,
         device_pubkey: None,
-        // S0: 本 helper 代表新端点发声（data_domain/F8 门控需 negotiated>=2）。
+        // S0: this helper speaks for the new endpoint (data_domain/F8 gating requires negotiated>=2).
         protocol: Some(2),
         client_version: None,
         resume: None,
@@ -604,7 +604,7 @@ async fn g3_create_recv_transport(
             SignalingMessage::WebRtcTransportCreated { transport_id, dtls_parameters, .. } => {
                 return (transport_id, dtls_parameters);
             }
-            SignalingMessage::NewProducer { .. } => continue, // late-joiner 重放
+            SignalingMessage::NewProducer { .. } => continue, // late-joiner replay
             other => panic!("Expected WebRtcTransportCreated, got: {other:?}"),
         }
     }
@@ -624,7 +624,7 @@ async fn e2e_sfu_role_enforcement() {
         65536,
         Some(mediaservo_common::auth::JwtAuth::new(G3_JWT)),
     );
-    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；本套件裸 JSON 读环不吃控制帧
+    server.ws_ping_secs = 0; // the a1 heartbeat has its dedicated pins in heartbeat_e2e; this suite's raw JSON read loop must not eat control frames
     let hash = mediaservo_server::devices::hash_secret("ms-car1", "car1-secret");
     server.device_registry = std::sync::Arc::new(
         mediaservo_server::devices::DeviceRegistry::from_yaml(&format!(
@@ -641,7 +641,7 @@ async fn e2e_sfu_role_enforcement() {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let ws_url = format!("ws://{}/ws", addr);
 
-    // ── ① 车端（device auth）: produce 自动允许（D-H11 回归）────────────────
+    // -- 1. vehicle (device auth): produce auto-allowed (D-H11 regression) ------------------
     let host_url = ws_url.clone();
     let host_handle = tokio::spawn(async move {
         let (mut ws, _) = tokio_tungstenite::connect_async(&host_url).await.unwrap();
@@ -715,14 +715,14 @@ async fn e2e_sfu_role_enforcement() {
             .unwrap();
         assert!(conn.to_text().unwrap().contains("transport_connected"));
 
-        // produce — 车端必须自动允许
+        // produce -- the vehicle must be auto-allowed
         let produce = serde_json::to_string(&SignalingMessage::Produce {
             room_id: G3_ROOM.into(),
             peer_id: "host".into(),
             transport_direction: mediaservo_common::protocol::TransportDirection::Send,
             kind: mediaservo_common::protocol::MediaKind::Video,
             rtp_parameters: serde_json::json!({"mid": "0", "codecs": [{"mimeType": "video/VP8", "payloadType": 100, "clockRate": 90000}], "headerExtensions": [], "encodings": [{"ssrc": 12345}], "rtcp": {"reducedSize": true}}),
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
 
             label: None,})
         .unwrap();
@@ -735,13 +735,13 @@ async fn e2e_sfu_role_enforcement() {
         let producer_id =
             match serde_json::from_str::<SignalingMessage>(prod.to_text().unwrap()).unwrap() {
                 SignalingMessage::Produced { producer_id, .. } => producer_id,
-                other => panic!("车端 produce 必须放行, got: {other:?}"),
+                other => panic!("vehicle produce must be allowed, got: {other:?}"),
             };
         (ws, producer_id)
     });
     let (host_ws, producer_id) = host_handle.await.unwrap();
 
-    // ── ② 授权 operator（carol, [ms-car1]）: join + consume → Consumed ✅ ────
+    // -- 2. authorized operator (carol, [ms-car1]): join + consume -> Consumed OK -----------
     let carol_url = ws_url.clone();
     let pid = producer_id.clone();
     let carol_handle = tokio::spawn(async move {
@@ -772,7 +772,7 @@ async fn e2e_sfu_role_enforcement() {
                 "codecs": [{"mimeType": "video/VP8", "clockRate": 90000, "kind": "video"}],
                 "headerExtensions": []
             }),
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
         })
         .unwrap();
         ws.send(WsMsg::Text(consume)).await.unwrap();
@@ -783,21 +783,21 @@ async fn e2e_sfu_role_enforcement() {
             .unwrap();
         match serde_json::from_str::<SignalingMessage>(resp.to_text().unwrap()).unwrap() {
             SignalingMessage::Consumed { producer_id: pid_resp, .. } => {
-                assert_eq!(pid_resp, pid, "授权 operator consume 必须放行")
+                assert_eq!(pid_resp, pid, "authorized operator consume must be allowed")
             }
-            other => panic!("授权 consume 必须 Consumed, got: {other:?}"),
+            other => panic!("authorized consume must be Consumed, got: {other:?}"),
         }
         ws
     });
     let _carol_ws = carol_handle.await.unwrap();
 
-    // ── ③ operator 尝试 produce → 4031（账号只消费）─────────────────────────
+    // -- 3. operator attempts produce -> 4031 (accounts only consume) -----------------------
     let prod_url = ws_url.clone();
     let prod_handle = tokio::spawn(async move {
         let mut ws =
             g3_account_connect(&prod_url, &g3_token("carol", "operator", &["ms-car1"])).await;
         g3_auth_and_join(&mut ws, G3_ROOM, PeerRole::Consumer).await;
-        // send transport（produce 门在方向校验之后 — 需先建 send transport 才可达）
+        // send transport (the produce gate sits behind the direction check -- a send transport must exist first to reach it)
         let create = serde_json::to_string(&SignalingMessage::CreateWebRtcTransport {
             room_id: G3_ROOM.into(),
             peer_id: "carol-prod".into(),
@@ -845,7 +845,7 @@ async fn e2e_sfu_role_enforcement() {
             transport_direction: mediaservo_common::protocol::TransportDirection::Send,
             kind: mediaservo_common::protocol::MediaKind::Video,
             rtp_parameters: serde_json::json!({"mid": "0", "codecs": [{"mimeType": "video/VP8", "payloadType": 100, "clockRate": 90000}], "headerExtensions": [], "encodings": [{"ssrc": 999}], "rtcp": {"reducedSize": true}}),
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
 
             label: None,})
         .unwrap();
@@ -857,14 +857,14 @@ async fn e2e_sfu_role_enforcement() {
             .unwrap();
         assert!(
             resp.to_text().unwrap().contains(r#""code":4031"#),
-            "账号 produce 必须拒绝: {}",
+            "account produce must be denied: {}",
             resp.to_text().unwrap()
         );
         ws
     });
     let _prod_ws = prod_handle.await.unwrap();
 
-    // ── ④ 非授权 operator（mallory, 空白名单）: join 即拒（租户隔离）─────────
+    // -- 4. unauthorized operator (mallory, empty allowlist): join refused (tenant isolation) --
     let mallory_url = ws_url.clone();
     let mallory_handle = tokio::spawn(async move {
         let mut ws = g3_account_connect(&mallory_url, &g3_token("mallory", "operator", &[])).await;
@@ -894,7 +894,7 @@ async fn e2e_sfu_role_enforcement() {
             .unwrap();
         assert!(
             resp.to_text().unwrap().contains(r#""code":4031"#),
-            "非授权账号 join 必须拒绝: {}",
+            "unauthorized account join must be denied: {}",
             resp.to_text().unwrap()
         );
         ws
@@ -906,13 +906,13 @@ async fn e2e_sfu_role_enforcement() {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 }
 
-// ── H1: SFU data 域 e2e — DataProducer/DataConsumer 经 WS 信令 + G3 角色门 ──────
+// -- H1: SFU data-domain e2e -- DataProducer/DataConsumer over WS signaling + the G3 role gate --
 
-/// H1: 车端(device) produce_data → 授权 operator consume_data 全链路;
-/// 账号 produce_data 拒绝(4031); NewDataProducer 广播到达消费方。
-/// 消息内容流转为 mediasoup worker 内部（端点 SCTP → worker → 端点），
-/// server 只做接线 — 端到端消息接收证明见 sfu.rs data_message_roundtrip_direct (#[ignore],
-/// 被 mediasoup-rs 通知通道 bug 阻塞); 此处证明协议/门/实体创建全链路。
+/// H1: vehicle (device) produce_data -> authorized operator consume_data, the full chain;
+/// account produce_data denied (4031); the NewDataProducer broadcast reaches the consumer.
+/// Message content flows inside the mediasoup worker (endpoint SCTP -> worker -> endpoint);
+/// the server only wires -- for end-to-end message-receipt proof see sfu.rs data_message_roundtrip_direct (#[ignore],
+/// blocked by the mediasoup-rs notification-channel bug); this proves the protocol/gate/entity-creation chain.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn e2e_sfu_data_domain() {
     unsafe { std::env::set_var("MEDIASERVO_PSK", PSK) };
@@ -927,7 +927,7 @@ async fn e2e_sfu_data_domain() {
         65536,
         Some(mediaservo_common::auth::JwtAuth::new(G3_JWT)),
     );
-    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；本套件裸 JSON 读环不吃控制帧
+    server.ws_ping_secs = 0; // the a1 heartbeat has its dedicated pins in heartbeat_e2e; this suite's raw JSON read loop must not eat control frames
     let hash = mediaservo_server::devices::hash_secret("ms-car1", "car1-secret");
     server.device_registry = std::sync::Arc::new(
         mediaservo_server::devices::DeviceRegistry::from_yaml(&format!(
@@ -944,7 +944,7 @@ async fn e2e_sfu_data_domain() {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let ws_url = format!("ws://{}/ws", addr);
 
-    // ── ① 车端（device auth）: send transport + produce_data（自动允许）────────
+    // -- 1. vehicle (device auth): send transport + produce_data (auto-allowed) --------------
     let host_url = ws_url.clone();
     let host_handle = tokio::spawn(async move {
         let (mut ws, _) = tokio_tungstenite::connect_async(&host_url).await.unwrap();
@@ -1013,7 +1013,7 @@ async fn e2e_sfu_data_domain() {
             .unwrap();
         assert!(conn.to_text().unwrap().contains("transport_connected"));
 
-        // produce_data — 车端自动允许
+        // produce_data -- the vehicle is auto-allowed
         let produce_data = serde_json::to_string(&SignalingMessage::CreateDataProducer {
             room_id: G3_ROOM.into(),
             peer_id: "host".into(),
@@ -1026,7 +1026,7 @@ async fn e2e_sfu_data_domain() {
                 max_packet_life_time: None,
                 max_retransmits: None,
             }),
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
         })
         .unwrap();
         ws.send(WsMsg::Text(produce_data)).await.unwrap();
@@ -1043,7 +1043,7 @@ async fn e2e_sfu_data_domain() {
                         SignalingMessage::DataProducerCreated { data_producer_id, .. } => {
                             data_producer_id
                         }
-                        other => panic!("车端 produce_data 必须放行, got: {other:?}"),
+                        other => panic!("vehicle produce_data must be allowed, got: {other:?}"),
                     }
                 }
             };
@@ -1051,14 +1051,14 @@ async fn e2e_sfu_data_domain() {
     });
     let (host_ws, data_producer_id) = host_handle.await.unwrap();
 
-    // ── ② 授权 operator（carol, [ms-car1]）: recv transport + consume_data → 放行 ──
+    // -- 2. authorized operator (carol, [ms-car1]): recv transport + consume_data -> allowed --
     let carol_url = ws_url.clone();
     let dp_id = data_producer_id.clone();
     let carol_handle = tokio::spawn(async move {
         let mut ws =
             g3_account_connect(&carol_url, &g3_token("carol", "operator", &["ms-car1"])).await;
         g3_auth_and_join(&mut ws, G3_ROOM, PeerRole::Consumer).await;
-        // 应收到车端 NewDataProducer 广播（late-joiner 同步 + 广播）
+        // should receive the vehicle's NewDataProducer broadcast (late-joiner sync + broadcast)
         let mut saw_new_data_producer = false;
         let mut recv_tid = None;
         let mut recv_dtls = None;
@@ -1092,7 +1092,7 @@ async fn e2e_sfu_data_domain() {
                 other => panic!("Unexpected: {other:?}"),
             }
         }
-        assert!(saw_new_data_producer, "消费方必须收到 NewDataProducer 广播");
+        assert!(saw_new_data_producer, "the consumer must receive the NewDataProducer broadcast");
         let recv_tid = recv_tid.expect("recv transport");
         let recv_dtls = recv_dtls.expect("recv dtls");
         let connect = serde_json::to_string(&SignalingMessage::ConnectWebRtcTransport {
@@ -1110,13 +1110,13 @@ async fn e2e_sfu_data_domain() {
             .unwrap();
         assert!(conn.to_text().unwrap().contains("transport_connected"));
 
-        // consume_data — 授权 operator 放行
+        // consume_data -- authorized operator allowed
         let consume_data = serde_json::to_string(&SignalingMessage::ConsumeData {
             room_id: G3_ROOM.into(),
             peer_id: "carol".into(),
             transport_direction: mediaservo_common::protocol::TransportDirection::Recv,
             data_producer_id: dp_id,
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
         })
         .unwrap();
         ws.send(WsMsg::Text(consume_data)).await.unwrap();
@@ -1129,22 +1129,22 @@ async fn e2e_sfu_data_domain() {
             SignalingMessage::DataConsumed { data_producer_id: dp_resp, .. } => {
                 assert!(
                     !dp_resp.is_empty(),
-                    "consume_data 必须返回 data_consumer_id 关联的 producer"
+                    "consume_data must return the producer associated with the data_consumer_id"
                 )
             }
-            other => panic!("授权 consume_data 必须 DataConsumed, got: {other:?}"),
+            other => panic!("authorized consume_data must be DataConsumed, got: {other:?}"),
         }
         ws
     });
     let _carol_ws = carol_handle.await.unwrap();
 
-    // ── ③ P1/F8 契约改判: operator(can_control) 建控制 DC → role 门放行 ────────
+    // -- 3. the P1/F8 contract re-judgment: operator (can_control) creates the control DC -> the role gate allows --
     let prod_url = ws_url.clone();
     let prod_handle = tokio::spawn(async move {
         let mut ws =
             g3_account_connect(&prod_url, &g3_token("carol", "operator", &["ms-car1"])).await;
         g3_auth_and_join(&mut ws, G3_ROOM, PeerRole::Consumer).await;
-        // 先建 send transport 才可达 produce_data 门
+        // a send transport must exist first to reach the produce_data gate
         let create = serde_json::to_string(&SignalingMessage::CreateWebRtcTransport {
             room_id: G3_ROOM.into(),
             peer_id: "carol-prod".into(),
@@ -1195,7 +1195,7 @@ async fn e2e_sfu_data_domain() {
                 max_packet_life_time: None,
                 max_retransmits: None,
             }),
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
         })
         .unwrap();
         ws.send(WsMsg::Text(produce_data)).await.unwrap();
@@ -1204,16 +1204,18 @@ async fn e2e_sfu_data_domain() {
             .unwrap()
             .unwrap()
             .unwrap();
-        // P1/F8（有意契约变更，原 4031 全禁）: operator 有控制能力 → role 门放行 → SFU data 域创建。
+        // P1/F8 (a deliberate contract change; the old shape denied all with 4031): operator has the control capability -> the role gate allows -> SFU data-domain creation.
         match serde_json::from_str::<SignalingMessage>(resp.to_text().unwrap()).unwrap() {
             SignalingMessage::DataProducerCreated { .. } => {}
-            other => panic!("operator 控制 DC 必须放行（F8 role 门）, got: {other:?}"),
+            other => {
+                panic!("operator control DC must be allowed (the F8 role gate), got: {other:?}")
+            }
         }
         ws
     });
     let _prod_ws = prod_handle.await.unwrap();
 
-    // ── ④ P1/F8 负例: dispatcher 无控制能力 → 建控制 DC → 4012 显式拒（D273 terminal 可见）──
+    // -- 4. the P1/F8 negative: dispatcher lacks the control capability -> control DC -> explicit 4012 (the D273 terminal is visible) --
     let dis_url = ws_url.clone();
     let dis_handle = tokio::spawn(async move {
         let mut ws = g3_account_connect(&dis_url, &g3_token("dave", "dispatcher", &[])).await;
@@ -1244,7 +1246,7 @@ async fn e2e_sfu_data_domain() {
         };
         assert!(
             matches!(&resp, SignalingMessage::Error { code: 4012, .. }),
-            "dispatcher 控制 DC 必须 4012 显式拒, got: {resp:?}"
+            "dispatcher control DC must get an explicit 4012, got: {resp:?}"
         );
     });
     dis_handle.await.unwrap();
@@ -1255,13 +1257,13 @@ async fn e2e_sfu_data_domain() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// H2 (I3 review): 音频房间设备身份路径 — device auth join audio-<vehicle>
-// 成功 + 成员归属登记 + 跨车租户隔离 + 音频房间视频 produce 拒绝（设备路径）。
+// H2 (I3 review): the audio room device-identity path -- device auth join audio-<vehicle>
+// succeeds + member ownership registered + cross-vehicle tenant isolation + video produce in an audio room denied (device path).
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// 设备身份加入音频房间（G2 模式: device_registry + RoomJoin 携带凭证）。
-/// 断言: ① join 成功 ② room_owners["audio-ms-car1"] == "ms-car1"（成员归属）
-/// ③ 他车设备 join 同音频房间 → 4031（租户隔离）④ 设备在音频房间 produce 视频 → 4031。
+/// Device identity joins an audio room (the G2 pattern: device_registry + RoomJoin carrying credentials).
+/// Asserts: 1. join succeeds 2. room_owners["audio-ms-car1"] == "ms-car1" (member ownership)
+/// 3. another vehicle's device joining the same audio room -> 4031 (tenant isolation) 4. the device producing video in the audio room -> 4031.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn e2e_audio_room_device_identity() {
     unsafe { std::env::set_var("MEDIASERVO_PSK", PSK) };
@@ -1272,7 +1274,7 @@ async fn e2e_audio_room_device_identity() {
             .expect("Failed to create SFU manager"),
     );
     let mut server = SignalingServer::new(Arc::clone(&sfu), 65536, None);
-    server.ws_ping_secs = 0; // a1 心跳归 heartbeat_e2e 专钉；本套件裸 JSON 读环不吃控制帧
+    server.ws_ping_secs = 0; // the a1 heartbeat has its dedicated pins in heartbeat_e2e; this suite's raw JSON read loop must not eat control frames
     let hash1 = mediaservo_server::devices::hash_secret("ms-car1", "car1-secret");
     let hash2 = mediaservo_server::devices::hash_secret("ms-car2", "car2-secret");
     server.device_registry = std::sync::Arc::new(
@@ -1290,7 +1292,7 @@ async fn e2e_audio_room_device_identity() {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let ws_url = format!("ws://{}/ws", addr);
 
-    // ── ① 车端 device auth 加入音频房间 audio-ms-car1 ──
+    // -- 1. vehicle device auth joins the audio room audio-ms-car1 --
     let url = ws_url.clone();
     let veh_handle = tokio::spawn(async move {
         let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
@@ -1322,16 +1324,16 @@ async fn e2e_audio_room_device_identity() {
             .unwrap();
         assert!(
             joined.to_text().unwrap().contains("room_joined"),
-            "设备身份加入音频房间必须成功: {}",
+            "device identity joining the audio room must succeed: {}",
             joined.to_text().unwrap()
         );
         ws
     });
     let mut veh_ws = veh_handle.await.unwrap();
 
-    // 成员归属: room_owners["audio-ms-car1"] 已登记为 ms-car1（G3 登记路径）
-    // — 间证: 后续他车 join 被租户隔离拒绝（owner 匹配生效）+ 自车 produce 放行路径。
-    // ── ② 他车设备加入同音频房间 → 4031（租户隔离）──
+    // Member ownership: room_owners["audio-ms-car1"] registered as ms-car1 (the G3 registration path)
+    // -- indirect evidence: a later other-vehicle join is refused by tenant isolation (owner matching works) + the own-vehicle produce path is allowed.
+    // -- 2. another vehicle's device joins the same audio room -> 4031 (tenant isolation) --
     let url2 = ws_url.clone();
     let other_handle = tokio::spawn(async move {
         let (mut ws, _) = tokio_tungstenite::connect_async(&url2).await.unwrap();
@@ -1362,13 +1364,13 @@ async fn e2e_audio_room_device_identity() {
             .unwrap();
         assert!(
             resp.to_text().unwrap().contains("4031"),
-            "他车设备加入音频房间必须 4031: {}",
+            "another vehicle's device joining the audio room must get 4031: {}",
             resp.to_text().unwrap()
         );
     });
     other_handle.await.unwrap();
 
-    // ── ③ 设备在音频房间 produce 视频 → 4031（H2 音频房间门, 设备路径）──
+    // -- 3. the device produces video in the audio room -> 4031 (the H2 audio-room gate, device path) --
     veh_ws
         .send(WsMsg::Text(
             serde_json::to_string(&SignalingMessage::Produce {
@@ -1383,7 +1385,7 @@ async fn e2e_audio_room_device_identity() {
                     "encodings": [{"ssrc": 12345}],
                     "rtcp": {"reducedSize": true}
                 }),
-                transport_id: None, // legacy 路径回归
+                transport_id: None, // legacy path regression
 
                 label: None,
             })
@@ -1398,7 +1400,7 @@ async fn e2e_audio_room_device_identity() {
         .unwrap();
     assert!(
         resp.to_text().unwrap().contains("4031"),
-        "设备在音频房间 produce 视频必须 4031: {}",
+        "a device producing video in an audio room must get 4031: {}",
         resp.to_text().unwrap()
     );
 

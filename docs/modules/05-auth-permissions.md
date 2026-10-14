@@ -1,10 +1,10 @@
-# 权限认证参考
+# Auth & Permissions Reference
 
-> MediaServo 提供双模式认证：Local（独立部署）和平台模式。
+> MediaServo provides dual-mode authentication: Local (standalone deployment) and platform mode.
 
 ---
 
-## 一、AuthProvider 模式
+## 1. AuthProvider Modes
 
 ```rust
 #[async_trait]
@@ -14,29 +14,29 @@ trait AuthProvider: Send + Sync {
     async fn authorize(&self, user_id: &str, permission: &Permission) -> Result<bool, AuthError>;
 }
 
-两种实现：
-- **Local**：SQLite + JWT，独立部署使用
-- **平台模式**：gRPC LDAP，Docker 平台模块使用
+Two implementations:
+- **Local**: SQLite + JWT, used in standalone deployment
+- **Platform mode**: gRPC LDAP, used by the Docker platform module
 
 ---
 
-## 二、双模式对比
+## 2. Dual-Mode Comparison
 
-| 维度 | Local（独立模式） | 平台模式 |
-|------|------------------|---------------------|
-| **用户存储** | 内嵌 SQLite | 委托平台 RBAC |
-| **认证** | 本地 JWT | 宿主平台签发 token |
-| **权限** | 本地 RBAC 表 | 宿主平台 LDAP 组映射 |
-| **配置** | `auth.mode: "local"` | `auth.mode: "aude"` |
-| **场景** | 独立部署 | Docker 平台模块 |
+| Dimension | Local (standalone) | Platform mode |
+|-----------|--------------------|---------------|
+| **User storage** | Embedded SQLite | Delegated to platform RBAC |
+| **Authentication** | Local JWT | Host-platform-issued token |
+| **Permissions** | Local RBAC table | Host-platform LDAP group mapping |
+| **Config** | `auth.mode: "local"` | `auth.mode: "aude"` |
+| **Scenario** | Standalone deployment | Docker platform module |
 
 ---
 
-## 三、权限模型
+## 3. Permission Model
 
 ```typescript
 interface Permission {
-  // 功能开关
+  // Feature switches
   capabilities: {
     streaming:    { push: boolean; pull: boolean };
     remote:       { control: boolean; controllable: boolean };
@@ -45,47 +45,47 @@ interface Permission {
     teleop:       { operator: boolean; vehicle: boolean };
   };
 
-  // 配额限制
+  // Quota limits
   quotas: {
-    max_streams:    number;        // 最大流数
-    max_bitrate:    number;        // 最大码率 (kbps)
+    max_streams:    number;        // Max stream count
+    max_bitrate:    number;        // Max bitrate (kbps)
     max_resolution: "720p" | "1080p" | "4k";
-    max_duration:   number;        // 最长会话时长 (秒)
+    max_duration:   number;        // Max session duration (seconds)
   };
 
   // License
   license: {
     type:        "trial" | "standard" | "enterprise";
     expires_at:  string;          // ISO 8601
-    features:    string[];        // 高级特性列表
+    features:    string[];        // Premium feature list
   };
 }
 ```
 
 ---
 
-## 四、权限流
+## 4. Permission Flow
 
 ```
-客户端 SDK 启动
+Client SDK starts
        ↓
-从后台拉取权限配置
+Pulls the permission config from the backend
        ↓
-缓存在本地
+Caches locally
        ↓
-License Manager 在每个管线操作前校验
+License Manager validates before each pipeline operation
 ```
 
 ---
 
-## 五、参考模型
+## 5. Reference Model
 
-类比群晖 DSM：MediaServo 作为 Docker 模块安装在宿主平台上，使用宿主平台的用户/权限系统（类似 Jira 安装在群晖上使用 DSM 的 LDAP 账户）。
+Analogous to Synology DSM: MediaServo installed as a Docker module on a host platform, using the host platform's user/permission system (like Jira installed on a Synology using DSM's LDAP accounts).
 
 
-## 六、gRPC Auth 合约 (D57)
+## 6. gRPC Auth Contract (D57)
 
-当 MediaServo 运行在平台模块模式下，AuthProvider 通过 gRPC 调用宿主平台：
+When MediaServo runs in platform-module mode, the AuthProvider calls the host platform via gRPC:
 
 ### Proto
 
@@ -107,14 +107,14 @@ message ValidateTokenResponse {
   string user_id = 2;
   string user_name = 3;
   repeated string roles = 4;
-  repeated string permissions = 5;   // 宿主平台预解析权限列表
+  repeated string permissions = 5;   // Pre-resolved permission list from the host platform
   int64 expires_at = 6;              // Unix timestamp
   string error = 7;
 }
 
 message CheckPermissionRequest {
   string user_id = 1;
-  string permission = 2;             // MediaServo 权限字符串
+  string permission = 2;             // MediaServo permission string
 }
 
 message CheckPermissionResponse {
@@ -123,45 +123,45 @@ message CheckPermissionResponse {
 }
 ```
 
-### 调用流程
+### Call Flow
 
 ```
-客户端请求 → MediaServo axum 收到 JWT
+Client request → MediaServo axum receives the JWT
                            │
                            ▼
               AuthProvider.authenticate(token)
                            │
-              平台模式       ▼
-              gRPC ValidateToken(token) → 宿主平台
+              Platform mode ▼
+              gRPC ValidateToken(token) → host platform
                            │
                            ▼
-              返回 user_id + permissions[]
+              Returns user_id + permissions[]
                            │
                            ▼
-              LicenseManager 检查 features[]
+              LicenseManager checks features[]
               Permission::StreamingStart ∈ permissions[]
 ```
 
-### 缓存策略
+### Caching Policy
 
-- `validateToken`: 结果缓存在内存 5 分钟（JWT 过期时间以下）
-- `checkPermission`: 优先查 `validateToken` 返回的 permissions[] 列表
-- 权限变更: 宿主平台需要通知 MediaServo 清除缓存 → Phase 2 Channel
+- `validateToken`: results cached in memory for 5 minutes (below the JWT expiry)
+- `checkPermission`: prefers the permissions[] list returned by `validateToken`
+- Permission changes: the host platform must notify MediaServo to clear the cache → Phase 2 channel
 
-### MediaServo Permission 枚举
+### MediaServo Permission Enum
 
-MediaServo 自维护权限字符串，宿主平台 RBAC 做字符串→角色映射：
+MediaServo maintains its own permission strings; the host platform's RBAC does string→role mapping:
 
-| 权限 | 说明 |
-|------|------|
-| `RemoteDesktop.Connect` | 发起远程桌面连接 |
-| `RemoteDesktop.Host` | 作为被控端运行 |
-| `Streaming.Start` | 启动推流 |
-| `Streaming.Stop` | 停止推流 |
-| `Teleop.Connect` | 遥控连接 |
-| `Teleop.Control` | 发送控制指令 |
-| `Conference.Create` | 创建会议室 |
-| `Conference.Join` | 加入会议室 |
-| `Conference.Record` | 会议录制 |
-| `Surveillance.View` | 查看监控画面 |
-| `Admin.Manage` | 后台管理权限 |
+| Permission | Description |
+|------------|-------------|
+| `RemoteDesktop.Connect` | Initiate a remote desktop connection |
+| `RemoteDesktop.Host` | Run as the controlled end |
+| `Streaming.Start` | Start pushing a stream |
+| `Streaming.Stop` | Stop pushing a stream |
+| `Teleop.Connect` | Remote-control connection |
+| `Teleop.Control` | Send control commands |
+| `Conference.Create` | Create a meeting room |
+| `Conference.Join` | Join a meeting room |
+| `Conference.Record` | Record a meeting |
+| `Surveillance.View` | View surveillance feeds |
+| `Admin.Manage` | Backend administration permission |

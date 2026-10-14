@@ -8,7 +8,7 @@
 //! 5. Wait for `RoomJoined { room_id, peer_id }`
 //! 6. Return split sender/receiver for SDP/ICE relay
 
-#![allow(dead_code, clippy::redundant_guards)] // legacy mod 形态占位件（host-legacy 在用 mod 声明，本文件面 = 在册死面）
+#![allow(dead_code, clippy::redundant_guards)] // legacy mod-form stub (used via host-legacy mod declaration; standalone bin surface = known dead)
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use mediaservo_common::error::CoreError;
@@ -96,7 +96,7 @@ impl SignalingClient {
             room_id: self.room_id.clone(),
             peer_role: PeerRole::Host,
             stream_id: None,
-            // legacy HMAC 对自洽：保持 v1 发声（不声明方言）。
+            // legacy HMAC pair self-consistency: keep v1 silent (no dialect declared).
             protocol: None,
             client_version: None,
             resume: None,

@@ -1,5 +1,5 @@
-use crate::signaling::SignalingServer;
 use crate::health::{HealthChecker, HealthStatus, ReadinessChecker};
+use crate::signaling::SignalingServer;
 use axum::Router;
 use axum::extract::State;
 use axum::response::Json;
@@ -58,11 +58,7 @@ pub fn monitor_router(signaling: SignalingServer) -> Router {
         .route("/ready", get(ready_handler))
         .route("/stats", get(stats_handler))
         .route("/metrics", get(metrics_handler))
-        .with_state(MonitorState {
-            signaling,
-            metrics,
-            start_time,
-        })
+        .with_state(MonitorState { signaling, metrics, start_time })
 }
 
 // ── Health check helpers ─────────────────────────────────────────────────────
@@ -70,19 +66,13 @@ pub fn monitor_router(signaling: SignalingServer) -> Router {
 /// Gather component health from all registered checkers.
 fn gather_health(state: &MonitorState) -> Vec<ComponentHealth> {
     let checker: &dyn HealthChecker = &state.signaling;
-    vec![ComponentHealth {
-        component: checker.name(),
-        status: checker.check_health(),
-    }]
+    vec![ComponentHealth { component: checker.name(), status: checker.check_health() }]
 }
 
-/// Gather readiness（worker 存活纳入——T7）：/ready 专用；/health 仍纯 liveness。
+/// Gather readiness (worker liveness included -- T7): used by /ready; /health stays pure liveness.
 fn gather_readiness(state: &MonitorState) -> Vec<ComponentHealth> {
     let checker: &dyn ReadinessChecker = &state.signaling;
-    vec![ComponentHealth {
-        component: checker.name(),
-        status: checker.check_readiness(),
-    }]
+    vec![ComponentHealth { component: checker.name(), status: checker.check_readiness() }]
 }
 
 /// Compute overall health: worst status wins (unhealthy > degraded > healthy).
@@ -106,11 +96,7 @@ async fn health_handler(State(state): State<MonitorState>) -> Json<HealthRespons
     let overall = overall_health(&components);
     let uptime_seconds = state.start_time.elapsed().as_secs();
 
-    Json(HealthResponse {
-        overall,
-        components,
-        uptime_seconds,
-    })
+    Json(HealthResponse { overall, components, uptime_seconds })
 }
 
 /// /ready — startup readiness probe.
@@ -128,14 +114,7 @@ async fn ready_handler(
         axum::http::StatusCode::SERVICE_UNAVAILABLE
     };
 
-    (
-        status,
-        Json(HealthResponse {
-            overall,
-            components,
-            uptime_seconds,
-        }),
-    )
+    (status, Json(HealthResponse { overall, components, uptime_seconds }))
 }
 
 async fn stats_handler(State(state): State<MonitorState>) -> Json<StatsResponse> {
@@ -143,31 +122,21 @@ async fn stats_handler(State(state): State<MonitorState>) -> Json<StatsResponse>
     let connected_peers = state.signaling.room_manager.get_peer_count();
     let uptime_seconds = state.start_time.elapsed().as_secs();
 
-    Json(StatsResponse {
-        active_rooms,
-        connected_peers,
-        uptime_seconds,
-    })
+    Json(StatsResponse { active_rooms, connected_peers, uptime_seconds })
 }
 
 async fn metrics_handler(State(state): State<MonitorState>) -> String {
     // Update gauges from live state
     let connected_peers = state.signaling.room_manager.get_peer_count() as i64;
 
-    state
-        .metrics
-        .active_connections
-        .set(connected_peers);
+    state.metrics.active_connections.set(connected_peers);
 
-    // H4: 补注册的有数据源 gauge — rooms_active / component_status
+    // H4: extra gauges registered with real data sources -- rooms_active / component_status
     let rooms = state.signaling.room_manager.active_rooms() as i64;
     state.metrics.rooms_active.set(rooms);
 
     let health = state.signaling.check_health();
-    state
-        .metrics
-        .component_status
-        .set(if health.is_alive() { 1 } else { 0 });
+    state.metrics.component_status.set(if health.is_alive() { 1 } else { 0 });
 
     // Encode all metrics in Prometheus text format
     state.metrics.encode()
@@ -187,9 +156,10 @@ mod tests {
             #[cfg(feature = "sfu-mediasoup")]
             {
                 let sfu = std::sync::Arc::new(
-                crate::sfu::SfuManager::new_with_port(crate::sfu::random_udp_port())
-                    .await
-                    .unwrap());
+                    crate::sfu::SfuManager::new_with_port(crate::sfu::random_udp_port())
+                        .await
+                        .unwrap(),
+                );
                 crate::signaling::SignalingServer::new(sfu, 65536, None)
             }
             #[cfg(not(feature = "sfu-mediasoup"))]
@@ -200,20 +170,13 @@ mod tests {
         let app = monitor_router(signaling);
 
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/health")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let health: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
         // Must have components array
@@ -227,9 +190,10 @@ mod tests {
             #[cfg(feature = "sfu-mediasoup")]
             {
                 let sfu = std::sync::Arc::new(
-                crate::sfu::SfuManager::new_with_port(crate::sfu::random_udp_port())
-                    .await
-                    .unwrap());
+                    crate::sfu::SfuManager::new_with_port(crate::sfu::random_udp_port())
+                        .await
+                        .unwrap(),
+                );
                 crate::signaling::SignalingServer::new(sfu, 65536, None)
             }
             #[cfg(not(feature = "sfu-mediasoup"))]
@@ -240,12 +204,7 @@ mod tests {
         let app = monitor_router(signaling);
 
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/ready")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/ready").body(Body::empty()).unwrap())
             .await
             .unwrap();
 

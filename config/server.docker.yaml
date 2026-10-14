@@ -1,6 +1,6 @@
 version: 1
-# frontend-process-split D-2=B：保持 0.0.0.0（host-agent 直连 /ws）。
-# 迁「全收敛 A」前置：admin API 配发 signaling.url + protocol_version 握手就绪后改 127.0.0.1（仅 Caddy 反代进入）。
+# frontend-process-split D-2=B: keep 0.0.0.0 (host-agent connects /ws directly).
+# Precondition for moving to full-convergence A: once the admin API provisions signaling.url and the protocol_version handshake is ready, switch to 127.0.0.1 (Caddy reverse proxy becomes the only entry).
 listen:
   host: "0.0.0.0"
   port: 9800
@@ -8,29 +8,29 @@ room_capacity: 50
 rate_limit: 100
 consumer_limit_per_stream: 50
 psk: "mediaservo-dev"
-jwt_secret: "docker-admin-secret-with-32-plus-bytes!!"  # PIT-49: signaling JWT 认证（与 admin 同 secret）
+jwt_secret: "docker-admin-secret-with-32-plus-bytes!!"  # PIT-49: signaling JWT auth (same secret as admin)
 admin_jwt_secret: "docker-admin-secret-with-32-plus-bytes!!"
 devices_file: "/opt/mediaservo/etc/devices.yaml"
 accounts_file: "/opt/mediaservo/etc/accounts.yaml"
-# API-key 免账号凭证（accountless-client-auth T1）：api_keys.yaml 缺省=本文件同目录；
-# exchange 端点 POST /api/auth/exchange {key_id, secret} → 短 JWT（TTL 秒，缺省 12h）。
-# 管理面一键注册：./msrtc.sh 管理页 /apikeys 或 POST /api/admin/apikeys。
+# Accountless API-key credentials (accountless-client-auth T1): api_keys.yaml defaults to this file's directory;
+# the exchange endpoint POST /api/auth/exchange {key_id, secret} → short-lived JWT (TTL seconds, default 12h).
+# One-click registration from the admin surface: ./msrtc.sh admin page /apikeys or POST /api/admin/apikeys.
 #api_keys_file: "/opt/mediaservo/etc/api_keys.yaml"
 #api_token_ttl_secs: 43200
 
-# SFU 对外公告地址（多网卡/多网络可达 IP；优先级: env MEDIASERVO_SFU_ANNOUNCED_IP > 此处 > 自动探测）
-# mediasoup 要求 0.0.0.0 必须配 announced（容器内探测不可达——PIT-44/58/138）
+# SFU announced address (reachable IP across NICs/networks; precedence: env MEDIASERVO_SFU_ANNOUNCED_IP > here > auto-detect)
+# mediasoup requires announced config when listening on 0.0.0.0 (in-container detection is unreachable — PIT-44/58/138)
 sfu:
   announced_ips:
     - "192.168.2.127"
     - "10.144.0.3"
 
-# Web 静态层（caddy）——缺省 8080 / 实例 web/；env MEDIASERVO_WEB_PORT 兜底（yaml 配置优先，C35 同形）。
+# Web static layer (caddy) — default 8080 / instance web/; env MEDIASERVO_WEB_PORT as fallback (yaml config wins, same shape as C35).
 # web:
 #   port: 8080
 #   static_root: "/abs/web"
 #
-# SFU/weaknet 端口 —— 缺省 20000 / 9810（env MEDIASERVO_SFU_PORT 兜底 sfu.port）。
+# SFU/weaknet ports — defaults 20000 / 9810 (env MEDIASERVO_SFU_PORT falls back for sfu.port).
 # sfu:
 #   port: 20000
 #   weaknet_port: 9811

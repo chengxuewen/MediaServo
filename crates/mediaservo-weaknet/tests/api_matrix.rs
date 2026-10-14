@@ -1,20 +1,20 @@
-//! api_matrix —— T6 安全栈 + 错误族矩阵（design §Testing「tower(0.4)::oneshot——401/403
-//! (Origin 和 Host)/200/400(含 scenario ../ 与绝对路径)/409 + SSE：无 token 401、query
-//! token 200、首帧含 streams+spec 字段」）。
+//! api_matrix -- T6 security stack + error-family matrix (design §Testing "tower(0.4)::oneshot -- 401/403
+//! (Origin and Host)/200/400 (incl. scenario ../ and absolute paths)/409 + SSE: no token 401, query
+//! token 200, the first frame carries the streams+spec fields").
 //!
-//! 零真实 bind、零引擎触达：Router 由注入 ServeConfig（固定 token + 临时 statedir +
-//! caps_override）直构；apply/set 的 400/409 案都在解析/锁层终结（replay 不可达）。
-//! 锁占用案用「本测试进程 pid+starttime 伪装载」——state::acquire_write_lock 的判活
-//! 语义直接消费，钉住 REST×CLI 互斥面。
+//! Zero real bind, zero engine touching: the Router is built directly from an injected ServeConfig (fixed token + temp statedir +
+//! caps_override); the apply/set 400/409 cases all end at the parsing/lock layers (replay unreachable).
+//! The lock-occupied case forges the holder with "this test process's pid+starttime" -- consuming state::acquire_write_lock's
+//! liveness semantics directly, pinning the REST x CLI mutual-exclusion surface.
 
 use std::time::Duration;
 
-use axum::body::{to_bytes, Body};
-use axum::http::{header, Method, Request, StatusCode};
+use axum::body::{Body, to_bytes};
+use axum::http::{Method, Request, StatusCode, header};
 use mediaservo_weaknet::engine::Env;
 use mediaservo_weaknet::fuse;
 use mediaservo_weaknet::scope::Capabilities;
-use mediaservo_weaknet::server::{build_router, ServeConfig};
+use mediaservo_weaknet::server::{ServeConfig, build_router};
 use mediaservo_weaknet::state::Dirs;
 use tower::ServiceExt;
 
@@ -35,17 +35,14 @@ fn cfg(tag: &str) -> ServeConfig {
             seed: true,
             dir_lo: true,
             ifb_ingress: false,
-            ifb_reason: "test 注入".into(),
+            ifb_reason: "test injection".into(),
         }),
         sse_frames_limit: None,
     }
 }
 
 fn req(method: Method, uri: &str, host: &str, bearer: Option<&str>, body: Body) -> Request<Body> {
-    let mut b = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header(header::HOST, host);
+    let mut b = Request::builder().method(method).uri(uri).header(header::HOST, host);
     if let Some(t) = bearer {
         b = b.header(header::AUTHORIZATION, format!("Bearer {t}"));
     }
@@ -57,18 +54,12 @@ fn get(uri: &str, bearer: Option<&str>) -> Request<Body> {
 }
 
 fn post(uri: &str, json_body: &str) -> Request<Body> {
-    req(
-        Method::POST,
-        uri,
-        "127.0.0.1:19999",
-        Some(TOKEN),
-        Body::from(json_body.to_string()),
-    )
+    req(Method::POST, uri, "127.0.0.1:19999", Some(TOKEN), Body::from(json_body.to_string()))
 }
 
 async fn body_json(resp: axum::response::Response) -> serde_json::Value {
     let bytes = to_bytes(resp.into_body(), 256 * 1024).await.unwrap();
-    serde_json::from_slice(&bytes).unwrap_or_else(|e| panic!("响应非 JSON: {e}: {bytes:?}"))
+    serde_json::from_slice(&bytes).unwrap_or_else(|e| panic!("response not JSON: {e}: {bytes:?}"))
 }
 
 #[tokio::test]
@@ -83,7 +74,7 @@ async fn bearer_gate_401_missing_and_wrong() {
 
 #[tokio::test]
 async fn evil_host_403_precedes_auth() {
-    // 门序钉案：Host 门槛在 token 校验之前——rebinding 流量不泄露 token 对/错信号。
+    // gate-order pinned case: the Host gate precedes token validation -- rebinding traffic leaks no token right/wrong signal.
     let router = build_router(cfg("host403"));
     let r = router
         .oneshot(req(Method::GET, "/v1/state", "evil.com", Some(TOKEN), Body::empty()))
@@ -99,7 +90,7 @@ async fn lan_mode_origin_whitelist() {
     c.listen_host = "10.1.2.3".into();
     let router = build_router(c);
     let good_host = "10.1.2.3:19999";
-    // 错 Origin → 403
+    // wrong Origin -> 403
     let r = router
         .clone()
         .oneshot(
@@ -115,7 +106,7 @@ async fn lan_mode_origin_whitelist() {
         .await
         .unwrap();
     assert_eq!(r.status(), StatusCode::FORBIDDEN);
-    // 对 Origin → 200
+    // right Origin -> 200
     let r = router
         .clone()
         .oneshot(
@@ -131,7 +122,7 @@ async fn lan_mode_origin_whitelist() {
         .await
         .unwrap();
     assert_eq!(r.status(), StatusCode::OK);
-    // 无 Origin（curl 形）放行——design 裁决：Origin 只约束浏览器跨源（文档化）。
+    // no Origin (the curl shape) passes -- design ruling: Origin only constrains browser cross-origin (documented).
     let r = router
         .oneshot(req(Method::GET, "/v1/state", good_host, Some(TOKEN), Body::empty()))
         .await
@@ -142,23 +133,16 @@ async fn lan_mode_origin_whitelist() {
 #[tokio::test]
 async fn sse_query_token_exemption_and_first_frame() {
     let mut c = cfg("sse");
-    c.sse_frames_limit = Some(1); // 发一帧即收口断 body（to_bytes 可完结）
+    c.sse_frames_limit = Some(1); // one frame then close and assert the body (to_bytes can finish)
     let router = build_router(c);
-    // 无 token → 401
+    // no token -> 401
     let r = router.clone().oneshot(get("/v1/events", None)).await.unwrap();
     assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
-    // 错 query token → 401
-    let r = router
-        .clone()
-        .oneshot(get("/v1/events?token=wrong", None))
-        .await
-        .unwrap();
+    // wrong query token -> 401
+    let r = router.clone().oneshot(get("/v1/events?token=wrong", None)).await.unwrap();
     assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
-    // query token → 200 + 首帧含 spec/streams（interval 首拍即发，文档化「秒开」）
-    let r = router
-        .oneshot(get(&format!("/v1/events?token={TOKEN}"), None))
-        .await
-        .unwrap();
+    // query token -> 200 + the first frame carries spec/streams (interval fires on the first tick, documented "instant open")
+    let r = router.oneshot(get(&format!("/v1/events?token={TOKEN}"), None)).await.unwrap();
     assert_eq!(r.status(), StatusCode::OK);
     assert_eq!(
         r.headers().get(header::CONTENT_TYPE).unwrap().to_str().unwrap(),
@@ -166,28 +150,25 @@ async fn sse_query_token_exemption_and_first_frame() {
     );
     let raw = tokio::time::timeout(Duration::from_secs(10), to_bytes(r.into_body(), 1 << 20))
         .await
-        .expect("首帧应在超时前送达")
+        .expect("the first frame should arrive before the timeout")
         .unwrap();
     let text = String::from_utf8_lossy(&raw);
     let data = text
         .lines()
         .find_map(|l| l.strip_prefix("data:"))
-        .expect("SSE data 行必在");
+        .expect("an SSE data line must be present");
     let frame: serde_json::Value = serde_json::from_str(data.trim()).unwrap();
     for key in ["spec", "scope", "dir", "expires_at", "job", "tc", "streams"] {
-        assert!(frame.get(key).is_some(), "状态帧缺字段 {key}: {frame}");
+        assert!(frame.get(key).is_some(), "state frame missing field {key}: {frame}");
     }
-    assert_eq!(frame["spec"], serde_json::Value::Null, "无 state = spec null（键恒在）");
+    assert_eq!(frame["spec"], serde_json::Value::Null, "no state = spec null (key always present)");
     assert_eq!(frame["streams"], serde_json::json!([]));
-    assert!(frame.get("ev").is_none(), "无新事件不带 ev（design §API）");
+    assert!(frame.get("ev").is_none(), "no new events = no ev (design §API)");
 }
 
 #[tokio::test]
 async fn state_inactive_shape() {
-    let r = build_router(cfg("state0"))
-        .oneshot(get("/v1/state", Some(TOKEN)))
-        .await
-        .unwrap();
+    let r = build_router(cfg("state0")).oneshot(get("/v1/state", Some(TOKEN))).await.unwrap();
     assert_eq!(r.status(), StatusCode::OK);
     assert_eq!(body_json(r).await, serde_json::json!({"active": false}));
 }
@@ -198,68 +179,61 @@ async fn profiles_and_capabilities_shapes() {
     let r = router.clone().oneshot(get("/v1/profiles", Some(TOKEN))).await.unwrap();
     assert_eq!(r.status(), StatusCode::OK);
     assert!(body_json(r).await["profiles"].is_array());
-    let r = router
-        .clone()
-        .oneshot(get("/v1/capabilities", Some(TOKEN)))
-        .await
-        .unwrap();
+    let r = router.clone().oneshot(get("/v1/capabilities", Some(TOKEN))).await.unwrap();
     assert_eq!(
         body_json(r).await,
-        serde_json::json!({"seed": true, "dir_lo": true, "ifb_ingress": false, "ifb_reason": "test 注入"})
+        serde_json::json!({"seed": true, "dir_lo": true, "ifb_ingress": false, "ifb_reason": "test injection"})
     );
 }
 
 #[tokio::test]
 async fn streams_graceful_empty_when_unconfigured() {
-    let r = build_router(cfg("streams"))
-        .oneshot(get("/v1/streams", Some(TOKEN)))
-        .await
-        .unwrap();
+    let r = build_router(cfg("streams")).oneshot(get("/v1/streams", Some(TOKEN))).await.unwrap();
     assert_eq!(r.status(), StatusCode::OK);
     let v = body_json(r).await;
-    assert_eq!(v["streams"], serde_json::json!([]), "server_url 不可得 = 200 + 空表 + note（禁 500）");
+    assert_eq!(
+        v["streams"],
+        serde_json::json!([]),
+        "server_url unobtainable = 200 + empty list + note (never 500)"
+    );
     assert!(v["note"].as_str().unwrap().contains("stats"), "{v}");
 }
 
 #[tokio::test]
 async fn set_without_state_is_409_with_guide() {
-    let r = build_router(cfg("set409"))
-        .oneshot(post("/v1/set", r#"{"rtt_ms":20}"#))
-        .await
-        .unwrap();
+    let r = build_router(cfg("set409")).oneshot(post("/v1/set", r#"{"rtt_ms":20}"#)).await.unwrap();
     assert_eq!(r.status(), StatusCode::CONFLICT);
     let v = body_json(r).await;
-    assert_eq!(v["error"], "no active spec — 先 apply/开总闸", "UI 引导文案钉死（design §UI 写路径）");
+    assert_eq!(
+        v["error"], "no active spec -- apply first",
+        "the UI guidance copy is pinned (design §UI write path)"
+    );
 }
 
 #[tokio::test]
 async fn apply_param_validation_400s() {
     let router = build_router(cfg("400"));
     let cases: &[&str] = &[
-        "[1,2]",                                        // 非对象
-        r#"{"duration":"abc"}"#,                        // 类型错
-        r#"{"duration":1}"#,                            // <5（validate_duration 表）
-        r#"{"rtt_ms":"80"}"#,                           // 数字键给字符串
-        r#"{"bogus_key":1}"#,                           // 未知 spec 键（typos 显性化）
-        r#"{"loss":"2","loss_mode":"bogus"}"#,          // loss_mode 域外
-        r#"{"ports":"notarray"}"#,                      // ports 型错
-        r#"{"stream_scope":{"rooms":[]}}"#,             // 空集
+        "[1,2]",                               // not an object
+        r#"{"duration":"abc"}"#,               // type error
+        r#"{"duration":1}"#,                   // <5 (the validate_duration table)
+        r#"{"rtt_ms":"80"}"#,                  // a numeric key given a string
+        r#"{"bogus_key":1}"#,                  // unknown spec key (typos surface loudly)
+        r#"{"loss":"2","loss_mode":"bogus"}"#, // loss_mode out of domain
+        r#"{"ports":"notarray"}"#,             // ports type error
+        r#"{"stream_scope":{"rooms":[]}}"#,    // empty set
     ];
     for body in cases {
-        let r = router
-            .clone()
-            .oneshot(post("/v1/apply", body))
-            .await
-            .unwrap();
-        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "case {body:?} 应 400");
-        assert!(body_json(r).await.get("error").is_some(), "错误体 {{error}} 形（{body:?}）");
+        let r = router.clone().oneshot(post("/v1/apply", body)).await.unwrap();
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "case {body:?} should be 400");
+        assert!(body_json(r).await.get("error").is_some(), "error body {{error}} shape ({body:?})");
     }
 }
 
-/// 活跃 job 态的 state.json（alive=true 用本进程 pid+starttime = 判活必真；false 用不可存在 pid）。
+/// A state.json with an active job (alive=true uses this process's pid+starttime = liveness certainly true; false uses an impossible pid).
 fn write_live_job(dirs: &Dirs, alive: bool) {
-    use mediaservo_weaknet::state::{ChannelSer, JobRef, State, STATE_SCHEMA, Teardown};
     use mediaservo_weaknet::spec::{Dir, ImpairSpec, ScopeSel};
+    use mediaservo_weaknet::state::{ChannelSer, JobRef, STATE_SCHEMA, State, Teardown};
     let pid = if alive { std::process::id() } else { u32::MAX };
     let st = State {
         schema: STATE_SCHEMA.to_string(),
@@ -283,19 +257,15 @@ fn write_live_job(dirs: &Dirs, alive: bool) {
             done: 1,
             total: 3,
         }),
-        teardown: Teardown {
-            channel: ChannelSer::LocalRoot,
-            sidecar: None,
-            steps: vec![],
-        },
+        teardown: Teardown { channel: ChannelSer::LocalRoot, sidecar: None, steps: vec![] },
     };
     st.write_to(&dirs.state_json()).unwrap();
 }
 
 #[tokio::test]
 async fn scenario_run_stop_t8_semantics() {
-    // T8 真实面（旧 501 桩已退）：400 门不变；合法 plan → start 相在 stats 定向处
-    // 报因 500（闭口端口注入 = 零 tc/docker 触达的确定性）；stop = 200/幂等/陈旧自清。
+    // the T8 real surface (the old 501 stub retired): the 400 gate unchanged; a legal plan -> the start phase reports
+    // cause 500 at stats targeting (a closed-port injection = deterministic zero tc/docker touching); stop = 200/idempotent/stale self-clear.
     let mut c = cfg("scen");
     let dead = {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -304,18 +274,24 @@ async fn scenario_run_stop_t8_semantics() {
     c.server_url = Some(format!("http://127.0.0.1:{dead}"));
     let dirs = c.dirs.clone();
     let router = build_router(c);
-    for bad in [r#"{"file":"../evil.yaml"}"#, r#"{"file":"/etc/passwd"}"#, r#"{"file":"sub/dir.yaml"}"#, r#"{"inline":1}"#, "{}"] {
-        let r = router
-            .clone()
-            .oneshot(post("/v1/scenario/run", bad))
-            .await
-            .unwrap();
-        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "case {bad:?} 应 400（穿越/绝对/型错/缺参——start 相前置真校验）");
+    for bad in [
+        r#"{"file":"../evil.yaml"}"#,
+        r#"{"file":"/etc/passwd"}"#,
+        r#"{"file":"sub/dir.yaml"}"#,
+        r#"{"inline":1}"#,
+        "{}",
+    ] {
+        let r = router.clone().oneshot(post("/v1/scenario/run", bad)).await.unwrap();
+        assert_eq!(
+            r.status(),
+            StatusCode::BAD_REQUEST,
+            "case {bad:?} should be 400 (traversal/absolute/type/missing param -- the start phase's up-front real validation)"
+        );
     }
     let big = format!(r#"{{"inline":"{}"}}"#, "x".repeat(33 * 1024));
     let r = router.clone().oneshot(post("/v1/scenario/run", &big)).await.unwrap();
     assert_eq!(r.status(), StatusCode::BAD_REQUEST, "inline >32KB → 400");
-    // 合法 inline（文法过）→ 定向 stats 不可达 = 诚实 500，且零副作用（未触锁/未写 state）
+    // a legal inline (grammar passes) -> targeted stats unreachable = an honest 500, zero side effects (no lock touched/no state written)
     let r = router
         .clone()
         .oneshot(post(
@@ -324,10 +300,17 @@ async fn scenario_run_stop_t8_semantics() {
         ))
         .await
         .unwrap();
-    assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR, "合法 plan + stats 不可达 → 500（旧 501 桩退役）");
-    assert!(body_json(r).await["error"].as_str().is_some(), "错误体 {{error}} 形");
-    assert!(!dirs.state_json().exists() && !dirs.lock().exists(), "start 相前置失败 = 零落盘");
-    // 测试注入 scenario 根（WEAKNET_ASSETS_DIR）：合法 file → 盘上解析命中 → 同一 500 报因
+    assert_eq!(
+        r.status(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "legal plan + stats unreachable -> 500 (the old 501 stub retired)"
+    );
+    assert!(body_json(r).await["error"].as_str().is_some(), "error body {{error}} shape");
+    assert!(
+        !dirs.state_json().exists() && !dirs.lock().exists(),
+        "start-phase precondition failure = zero disk writes"
+    );
+    // a test-injected scenario root (WEAKNET_ASSETS_DIR): a legal file -> resolved on disk -> the same 500 cause
     let assets = std::env::temp_dir().join(format!("wnet-scen-{}", std::process::id()));
     std::fs::create_dir_all(assets.join("scenarios")).unwrap();
     std::fs::write(
@@ -335,59 +318,56 @@ async fn scenario_run_stop_t8_semantics() {
         "scenario:\n  baseline_s: 1\n  steps:\n    - at_s: 5\n      set: {rtt_ms: 50}\n",
     )
     .unwrap();
-    // SAFETY: 本 binary 仅此测试读 WEAKNET_ASSETS_DIR（/v1/scenarios 无并发案），请求串行发出
+    // SAFETY: only this test reads WEAKNET_ASSETS_DIR (no concurrent case on /v1/scenarios); requests sent serially
     unsafe { std::env::set_var("WEAKNET_ASSETS_DIR", &assets) };
-    let r = router
-        .clone()
-        .oneshot(post("/v1/scenario/run", r#"{"file":"mini.yaml"}"#))
-        .await
-        .unwrap();
-    // SAFETY: 请求已完成，回收窗口
+    let r =
+        router.clone().oneshot(post("/v1/scenario/run", r#"{"file":"mini.yaml"}"#)).await.unwrap();
+    // SAFETY: the request has completed, reclamation window
     unsafe { std::env::remove_var("WEAKNET_ASSETS_DIR") };
-    assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR, "file 解析命中后同一 start 相报因（非 400/404/501）");
-    // stop：无活跃 job → 200 幂等
+    assert_eq!(
+        r.status(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "after the file resolves, the same start-phase cause (not 400/404/501)"
+    );
+    // stop: no active job -> 200 idempotent
     let r = router.clone().oneshot(post("/v1/scenario/stop", "{}")).await.unwrap();
     assert_eq!(r.status(), StatusCode::OK);
-    assert!(body_json(r).await["detail"].as_str().unwrap().contains("幂等"));
-    // stop：属主存活（本进程 pid）→ 200 + cancel 旗标落盘
+    assert!(body_json(r).await["detail"].as_str().unwrap().contains("idempotent"));
+    // stop: owner alive (this process's pid) -> 200 + the cancel flag on disk
     write_live_job(&dirs, true);
     let r = router.clone().oneshot(post("/v1/scenario/stop", "{}")).await.unwrap();
     assert_eq!(r.status(), StatusCode::OK);
-    assert!(body_json(r).await["detail"].as_str().unwrap().contains("已请求停止"));
-    assert!(mediaservo_weaknet::scenario::cancel_path(&dirs).exists(), "存活属主 → 写 stop 旗标");
+    assert!(body_json(r).await["detail"].as_str().unwrap().contains("stop requested"));
+    assert!(
+        mediaservo_weaknet::scenario::cancel_path(&dirs).exists(),
+        "live owner -> the stop flag written"
+    );
     std::fs::remove_file(mediaservo_weaknet::scenario::cancel_path(&dirs)).unwrap();
-    // stop：死主（pid 不可存在）→ 200 + 盘上 job 旗标自清
+    // stop: dead owner (an impossible pid) -> 200 + the job flag self-clears on disk
     write_live_job(&dirs, false);
     let r = router.clone().oneshot(post("/v1/scenario/stop", "{}")).await.unwrap();
     assert_eq!(r.status(), StatusCode::OK);
-    assert!(body_json(r).await["detail"].as_str().unwrap().contains("陈旧"));
+    assert!(body_json(r).await["detail"].as_str().unwrap().contains("stale"));
     let st = mediaservo_weaknet::state::State::read_from(&dirs.state_json()).unwrap().unwrap();
-    assert!(st.job.is_none(), "死主旗标落盘自清");
+    assert!(st.job.is_none(), "a dead owner's flag self-clears on disk");
     std::fs::remove_dir_all(&dirs.statedir).ok();
     std::fs::remove_dir_all(&assets).ok();
 }
 
 #[tokio::test]
 async fn live_scenario_job_gates_apply_set_409() {
-    // rev-2.2 独占门 REST 面：job 存活期 apply/set 均在 replay 之前 409（零 tc 触达）。
+    // the rev-2.2 exclusivity gate REST surface: while a job is alive, apply/set both 409 before replay (zero tc touching).
     let c = cfg("job409");
     let dirs = c.dirs.clone();
     write_live_job(&dirs, true);
     let router = build_router(c);
-    let r = router
-        .clone()
-        .oneshot(post("/v1/apply", r#"{"rtt_ms":80,"duration":40}"#))
-        .await
-        .unwrap();
-    assert_eq!(r.status(), StatusCode::CONFLICT, "job 活跃期 apply = 409");
+    let r =
+        router.clone().oneshot(post("/v1/apply", r#"{"rtt_ms":80,"duration":40}"#)).await.unwrap();
+    assert_eq!(r.status(), StatusCode::CONFLICT, "apply while a job is active = 409");
     assert!(body_json(r).await["error"].as_str().unwrap().contains("scenario"));
-    let r = router
-        .clone()
-        .oneshot(post("/v1/set", r#"{"rtt_ms":40}"#))
-        .await
-        .unwrap();
-    assert_eq!(r.status(), StatusCode::CONFLICT, "job 活跃期 set = 409（对称）");
-    // 死主旗标不拦：apply 放行到下一层（stats 不可达 500，而非 409）
+    let r = router.clone().oneshot(post("/v1/set", r#"{"rtt_ms":40}"#)).await.unwrap();
+    assert_eq!(r.status(), StatusCode::CONFLICT, "set while a job is active = 409 (symmetric)");
+    // a dead owner's flag doesn't block: apply passes to the next layer (stats unreachable 500, not 409)
     let mut c2 = cfg("job409b");
     let dead2 = {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -400,25 +380,31 @@ async fn live_scenario_job_gates_apply_set_409() {
         .oneshot(post("/v1/apply", r#"{"rtt_ms":80,"duration":40}"#))
         .await
         .unwrap();
-    assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR, "陈旧 job 判亡放行（gate 过后再报 env 因）");
+    assert_eq!(
+        r.status(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "a stale job declared dead passes (the env cause reported after the gate)"
+    );
     std::fs::remove_dir_all(&dirs.statedir).ok();
     std::fs::remove_dir_all(&dirs2.statedir).ok();
 }
 
 #[tokio::test]
 async fn apply_conflicts_with_held_write_lock_409() {
-    // REST×CLI 互斥面：锁文件伪装载（本进程 pid+starttime → holder_alive 判活为真）。
-    // 合法 spec 但锁忙 = 409（engine::take_write_lock 在 resolve/replay 之前，零副作用）。
+    // the REST x CLI mutual-exclusion surface: a forged lock holder (this process's pid+starttime -> holder_alive liveness true).
+    // a legal spec but a busy lock = 409 (engine::take_write_lock runs before resolve/replay, zero side effects).
     let c = cfg("lock409");
     let dirs = c.dirs.clone();
     let pid = std::process::id();
-    let st = fuse::read_proc_starttime(pid).expect("自身 starttime 必可读");
+    let st = fuse::read_proc_starttime(pid).expect("own starttime must be readable");
     std::fs::write(dirs.lock(), format!("{pid} {st}\n")).unwrap();
-    let r = build_router(c)
-        .oneshot(post("/v1/apply", r#"{"rtt_ms":80,"duration":40}"#))
-        .await
-        .unwrap();
-    assert_eq!(r.status(), StatusCode::CONFLICT, "锁占用 → 409（Fail::conflict 映射）");
+    let r =
+        build_router(c).oneshot(post("/v1/apply", r#"{"rtt_ms":80,"duration":40}"#)).await.unwrap();
+    assert_eq!(
+        r.status(),
+        StatusCode::CONFLICT,
+        "lock occupied -> 409 (the Fail::conflict mapping)"
+    );
     std::fs::remove_file(dirs.lock()).ok();
     std::fs::remove_dir_all(&dirs.statedir).ok();
 }

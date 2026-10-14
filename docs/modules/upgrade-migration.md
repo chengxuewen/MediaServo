@@ -1,41 +1,41 @@
-# Upgrade & Migration — 升级与迁移
+# Upgrade & Migration
 
-> 状态：Phase 3 前设计 | 关联决策：D118 (版本兼容), D-OPS-10 (Host 升级) | 创建依据：doc-audit H8
+> Status: pre-Phase 3 design | Related decisions: D118 (version compatibility), D-OPS-10 (Host upgrade) | Created per doc-audit H8
 
-## 版本兼容矩阵 (D118)
+## Version Compatibility Matrix (D118)
 
 ```
 Host/Server: MAJOR.minor.patch
-  - MAJOR 号不同 = 不兼容，必须同步升级
-  - minor/patch 可独立滚动
+  - Different MAJOR = incompatible, must upgrade in sync
+  - minor/patch can roll independently
 
 Remote (Client): MAJOR.minor.patch
-  - 向后兼容前一个 MAJOR（即 v2 Remote 可连 v1 Server）
-  - 当前 MAJOR 与 Server 一致时推荐升级
+  - Backward-compatible with the previous MAJOR (i.e. a v2 Remote can connect to a v1 Server)
+  - Recommended to upgrade once the current MAJOR matches the Server
 ```
 
-## Crate 版本策略 (doc-audit L7)
+## Crate Version Strategy (doc-audit L7)
 
-> 7-crate workspace 被 Rust 静态链接消费方与 napi 绑定消费方（第三方平台/宿主平台）使用，需独立于二进制矩阵的 crate 级版本策略。
+> The 7-crate workspace is consumed by Rust static-link consumers and napi-binding consumers (third-party platforms / host platforms), requiring a crate-level version strategy independent of the binary matrix.
 
-### 分级 API 面
+### Tiered API Surface
 
-| 层 | crates | 变更语义 |
-|----|--------|---------|
-| 契约层 | mediaservo-common（protocol/auth/config） | **任何 wire 格式变更 = 所有消费者 breaking** |
-| 能力层 | mediaservo-media / mediaservo-webrtc / mediaservo-codec | feature 化能力（见三后端矩阵） |
-| 应用层 | mediaservo-host / mediaservo-client / mediaservo-server | 沿用 D118 二进制矩阵 |
+| Layer | crates | Change semantics |
+|-------|--------|------------------|
+| Contract layer | mediaservo-common (protocol/auth/config) | **Any wire-format change = breaking for all consumers** |
+| Capability layer | mediaservo-media / mediaservo-webrtc / mediaservo-codec | Feature-gated capabilities (see the three-backend matrix) |
+| Application layer | mediaservo-host / mediaservo-client / mediaservo-server | Follows the D118 binary matrix |
 
-### 规则
+### Rules
 
-1. **独立 semver**：7 crate 各自版本，0.1.x 阶段允许 breaking（minor 递增）；进入 1.0 后严格 semver。`version.workspace = true` 仅用于同步发布节奏的 crate（当前 media/codec），不强制全 workspace 同步——mediaservo-common 0.2 不必拖带 server 0.2。
-2. **mediaservo-webrtc 三后端 feature 矩阵**（C12）：stub/webrtc-rs/webrtc-sys 属 feature 级兼容；新增后端 = minor，后端行为变更 = major。
-3. **MSRV**：rust-toolchain.toml 固定；[规划] CI 加 `cargo-semver-checks` 门禁（PR 检测公共 API breaking）。
-4. **消费方锁定**：第三方平台 pin `=x.y.z` 或 commit 引用；宿主平台（napi）由 mediaservo-common 版本决定 ABI 面，发布时同版本记录。
-5. **变更通知**：breaking 变更在 decisions.md + CHANGELOG 双记录（[规划] cargo release 或 per-crate changelog 生成）。
-## 配置迁移
+1. **Independent semver**: 7 crates versioned individually; breaking changes allowed during 0.1.x (minor increments); strict semver after 1.0. `version.workspace = true` applies only to crates synchronized in release cadence (currently media/codec); full-workspace sync is not enforced — mediaservo-common 0.2 need not drag server to 0.2.
+2. **mediaservo-webrtc three-backend feature matrix** (C12): stub/webrtc-rs/webrtc-sys are feature-level compatibility; a new backend = minor, a backend behavior change = major.
+3. **MSRV**: pinned in rust-toolchain.toml; [planned] CI adds a `cargo-semver-checks` gate (detects public API breaking changes on PRs).
+4. **Consumer pinning**: third-party platforms pin `=x.y.z` or a commit reference; host platforms (napi) have their ABI surface determined by the mediaservo-common version, recorded at the same version on release.
+5. **Change notification**: breaking changes recorded in both decisions.md + CHANGELOG ([planned] cargo release or per-crate changelog generation).
+## Config Migration
 
-host.conf 使用 JSON Schema 加 `version` 字段：
+host.conf uses a JSON Schema with a `version` field:
 
 ```json
 {
@@ -44,76 +44,76 @@ host.conf 使用 JSON Schema 加 `version` 字段：
 }
 ```
 
-- 启动时读取 `version`，执行迁移链：v1→v2→v3→...
-- 每步迁移是纯函数 `fn migrate(config: Value) -> Value`
-- serde `#[serde(default)]` 保证新增字段无需手动填充
+- On startup, read `version` and run the migration chain: v1→v2→v3→...
+- Each migration step is a pure function `fn migrate(config: Value) -> Value`
+- serde `#[serde(default)]` means new fields need no manual backfill
 
-## 二进制升级 (Host, D-OPS-10)
+## Binary Upgrade (Host, D-OPS-10)
 
-systemd service 控制：
+systemd service control:
 
 ```
 1. systemctl stop mediaservo-host
-2. 替换 /usr/local/bin/mediaservo-host
+2. Replace /usr/local/bin/mediaservo-host
 3. systemctl start mediaservo-host
 ```
 
-Host 启动时检查 `version` 字段，自动执行 schema 迁移。Remote 通过 `mediaservo-server` 推送更新包。
+On startup the Host checks the `version` field and runs the schema migration automatically. Remotes receive update packages pushed by `mediaservo-server`.
 
-## 容器镜像升级 (Server, Docker)
+## Container Image Upgrade (Server, Docker)
 
-> 关联：C13 (Server 统一 Docker 构建), D208 (构建优化), PIT-39 (冒烟门禁) | 创建依据：doc-audit M6
+> Related: C13 (unified Server Docker build), D208 (build optimization), PIT-39 (smoke gate) | Created per doc-audit M6
 
-Server 是唯一 Docker 部署的组件（C13），镜像由 CI 发布，无手工构建/上传流程。
+The Server is the only Docker-deployed component (C13); images are published by CI with no manual build/upload flow.
 
-### 镜像 tag 约定 (docker.yml)
+### Image tag convention (docker.yml)
 
-| Tag | 含义 | 更新时机 |
-|-----|------|---------|
-| `ghcr.io/org/mediaservo-server:latest` | 滚动最新 | 每次 main push |
-| `ghcr.io/org/mediaservo-server:sha-<commit>` | 精确版本，可回滚锚点 | 每次 main push |
+| Tag | Meaning | Updated |
+|-----|---------|---------|
+| `ghcr.io/org/mediaservo-server:latest` | Rolling latest | Every main push |
+| `ghcr.io/org/mediaservo-server:sha-<commit>` | Exact version, rollback anchor | Every main push |
 
-CI（`.github/workflows/docker.yml`）流程：push main → 构建 runtime stage → 打双 tag → **冒烟门禁**（run 镜像 30s 内 `/health` 返回 200，失败则 push 失败，PIT-39）。
+CI (`.github/workflows/docker.yml`) flow: push main → build the runtime stage → tag both → **smoke gate** (run the image, `/health` must return 200 within 30s, else the push fails — PIT-39).
 
-### 升级步骤
-
-```
-1. docker compose pull                       # 拉取新 latest
-2. docker compose up -d                      # 滚动重建 server（proxy 不变）
-3. docker compose ps | grep healthy          # 等待 healthcheck 通过
-4. curl -sf http://localhost:9800/health     # 最终确认
-```
-
-健康检查门禁：compose healthcheck（30s 间隔/3s 超时/3 次重试，`docker-compose.yml:18-22`）与 Dockerfile HEALTHCHECK 双份存在；容器不健康时 compose 不会自动回滚，需人工介入。
-
-### 回滚
+### Upgrade Steps
 
 ```
-docker compose pull                          # 或跳过：直接指定旧 tag
-docker compose up -d ghcr.io/org/mediaservo-server:sha-<旧commit>
-docker compose up -d                          # 恢复 compose 文件默认 latest
+1. docker compose pull                       # Pull the new latest
+2. docker compose up -d                      # Rolling rebuild of server (proxy unchanged)
+3. docker compose ps | grep healthy          # Wait for the healthcheck to pass
+4. curl -sf http://localhost:9800/health     # Final confirmation
 ```
 
-保留策略：`sha-` tag 随 main push 累积，建议每 N 个 release 清理旧 tag（ghcr 手动删除）。
+Health-check gates: the compose healthcheck (30s interval / 3s timeout / 3 retries, `docker-compose.yml:18-22`) and the Dockerfile HEALTHCHECK both exist; compose does not auto-rollback an unhealthy container — manual intervention required.
 
-### 配置与数据迁移
+### Rollback
 
-- 配置：`./config/server.docker.yaml` 挂载只读（`docker-compose.yml:24`），镜像升级不触碰配置；新字段经 serde `#[serde(default)]` 兼容（见上文 §配置迁移）。
-- 数据库：sqlx migrate 启动时自动执行（见下节 §数据库迁移）；升级前备份 `mediaservo.db`（operations.md §备份）。
-- 版本兼容：遵循 §版本兼容矩阵 (D118)——MAJOR 不同必须同步升级 Host/Remote。
+```
+docker compose pull                          # Or skip: pin the old tag directly
+docker compose up -d ghcr.io/org/mediaservo-server:sha-<old-commit>
+docker compose up -d                         # Restore the compose file's default latest
+```
 
-### 与 Host 升级的差异
+Retention policy: `sha-` tags accumulate with main pushes; clean old tags every N releases (manual deletion on ghcr).
 
-| 维度 | Host (D-OPS-10) | Server (Docker) |
-|------|----------------|-----------------|
-| 分发 | Server WS 推送 tarball + SHA256 校验 | CI 推 ghcr 镜像 |
-| 执行 | systemctl stop/start | compose pull + up -d |
-| 验证 | GET /health → 200 | 冒烟门禁 + compose healthcheck |
-| 回滚 | 恢复旧二进制 | 切回 `sha-<commit>` tag |
-| 自动回滚 | Phase 2 (60s 健康检查失败) | 未实现，人工回滚 |
-## 数据库迁移 (Server)
+### Config & Data Migration
 
-sqlx migrate 管理 SQLite schema：
+- Config: `./config/server.docker.yaml` mounted read-only (`docker-compose.yml:24`); image upgrades never touch config; new fields are compatible via serde `#[serde(default)]` (see §Config Migration above).
+- Database: sqlx migrate runs automatically at startup (see §Database Migration below); back up `mediaservo.db` before upgrading (operations.md §Backup).
+- Version compatibility: follow the §Version Compatibility Matrix (D118) — different MAJORs must upgrade Host/Remote in sync.
+
+### Differences vs Host Upgrade
+
+| Dimension | Host (D-OPS-10) | Server (Docker) |
+|-----------|-----------------|-----------------|
+| Distribution | Server WS pushes a tarball + SHA256 verification | CI pushes a ghcr image |
+| Execution | systemctl stop/start | compose pull + up -d |
+| Verification | GET /health → 200 | Smoke gate + compose healthcheck |
+| Rollback | Restore the old binary | Switch back to the `sha-<commit>` tag |
+| Auto rollback | Phase 2 (health check failing for 60s) | Not implemented; manual rollback |
+## Database Migration (Server)
+
+sqlx migrate manages the SQLite schema:
 
 ```
 migrations/
@@ -121,11 +121,11 @@ migrations/
   20260715000002_add_room_config.sql
 ```
 
-Server 启动时自动执行未应用的迁移。生产环境需先备份 `mediaservo.db`。
+The Server automatically applies unapplied migrations at startup. In production, back up `mediaservo.db` first.
 
-## 功能开关迁移
+## Feature Flag Migration
 
-新增功能通过 feature flag 控制灰度：
+New features roll out behind feature flags:
 
 ```toml
 [features]
@@ -135,64 +135,65 @@ h265 = []        # Phase 2
 srttransport = []# Phase 3
 ```
 
-Phase 切换策略：flag 默认关闭 2 个 release → beta 默认开启 → stable 默认开启并移除 flag。
+Phase switch policy: flag off by default for 2 releases → beta defaults on → stable defaults on and the flag is removed.
 
-## 运行时状态迁移
+## Runtime State Migration
 
-### 零停机部署
+### Zero-Downtime Deployment
 
-#### 蓝绿部署（单实例）
+#### Blue-Green Deployment (single instance)
 
 ```
-当前实例 (blue)                    新实例 (green)
-├── 健康检查: OK                   ├── 启动完成
-├── 活跃连接: 50 peers             ├── 健康检查: OK
-│                                  ├── 开始接收新连接
-├── 收到 SIGTERM                   │
-├── 停止接受新连接                 ├── 活跃连接: 12 peers
-├── Drain: 等待现有连接结束        │
-├── 活跃连接: 0 → 进程退出         │
-└── blue 实例移除                  └── green 接管全部流量
+Current instance (blue)             New instance (green)
+├── Health check: OK                ├── Startup complete
+├── Active connections: 50 peers    ├── Health check: OK
+│                                   ├── Begins accepting new connections
+├── Receives SIGTERM                │
+├── Stops accepting new connections ├── Active connections: 12 peers
+├── Drain: waits for existing       │
+│   connections to end              │
+├── Active: 0 → process exits       │
+└── blue instance removed           └── green takes over all traffic
 ```
 
 #### Connection Draining
 
-| 阶段 | 时间 | 动作 |
-|------|------|------|
-| SIGTERM 收到 | 0s | 停止接受新 WS 连接，健康检查返回 503 |
-| Drain 中 | 0-30s | 现有连接继续，Host 重新协商到新实例 |
-| 超时 | 30s | 强制关闭所有连接，进程退出 |
-| 失败回滚 | 60s | 新实例健康检查失败 → systemd 回滚到旧版本 |
+| Stage | Time | Action |
+|-------|------|--------|
+| SIGTERM received | 0s | Stop accepting new WS connections; health check returns 503 |
+| Draining | 0-30s | Existing connections continue; Hosts renegotiate to the new instance |
+| Timeout | 30s | Force-close all connections; process exits |
+| Failure rollback | 60s | New instance health check fails → systemd rolls back to the old version |
 
-#### SFU 状态迁移
+#### SFU State Migration
 
-| 组件 | 迁移方式 |
-|------|---------|
-| mediasoup Router | 新实例重新创建（不迁移） |
-| 活跃 transport | Drain 期间保持，Host 重新连接到新实例 |
-| 生产者/消费者 | 不迁移，Host 重新 produce，浏览器重新 consume |
-| 会话状态 | JSON 文件持久化，新实例加载 |
+| Component | Migration approach |
+|-----------|--------------------|
+| mediasoup Router | Recreated on the new instance (not migrated) |
+| Active transports | Held during drain; Hosts reconnect to the new instance |
+| Producers/consumers | Not migrated; Hosts re-produce, browsers re-consume |
+| Session state | JSON file persisted; loaded by the new instance |
 
-#### Rolling Update（多实例）
+#### Rolling Update (multi-instance)
 
 ```
-实例 1: blue → green (drain 30s)
-实例 2: blue → green (等实例 1 green 就绪后启动)
-实例 3: blue → green (等实例 2 green 就绪后启动)
+Instance 1: blue → green (drain 30s)
+Instance 2: blue → green (starts after instance 1's green is ready)
+Instance 3: blue → green (starts after instance 2's green is ready)
 ```
 
-- 并行度：最多 1 个实例同时升级（确保最小容量）
-- 健康检查：新实例必须通过 `/health` 后才升级下一个
-- 回滚：任一实例健康检查失败 → 停止 rolling，回滚当前实例
+- Parallelism: at most 1 instance upgrades at a time (guarantees minimum capacity)
+- Health check: a new instance must pass `/health` before the next one upgrades
+- Rollback: any instance's health check failing → stop rolling, roll back the current instance
 
 ### Graceful Drain
-- SIGTERM → 停止接受新连接 → 等待现有连接自然结束 (max 30s) → 超时后强制关闭。
+- SIGTERM → stop accepting new connections → wait for existing connections to end naturally (max 30s) → force-close on timeout.
 
-### WebRTC 连接
-- Drain 期间保持活跃，通过 ICE consent freshness 检测对端存活。
+### WebRTC Connections
+- Held alive during drain; peer liveness detected via ICE consent freshness.
 
 
-### 自动回滚 (Phase 2)
-- 新二进制启动后 60s 内健康检查失败 → systemd 回滚到旧版本。
+### Auto Rollback (Phase 2)
+- If the health check fails within 60s of the new binary starting → systemd rolls back to the old version.
 
-> 已实施完成（Phase 3）
+> Implementation complete (Phase 3)

@@ -1,9 +1,9 @@
-//! 采集域（source）— CameraSource / MediaDevices / 帧流。
+//! Capture domain — CameraSource / MediaDevices / frame streams.
 //!
-//! MVP 形态: stub 帧源（彩条/方块图案，经 mediaservo-media 的
-//! `VideoFrameGenerator` 产帧），为 field 组合 SDK 的推流链路与本地
-//! 录制闭环提供统一采集入口。真实设备采集（GStreamer v4l2src）为
-//! deck 后续版本（见 `docs/modules/04-sdk-layers.md` §十）。
+//! MVP form: stub frame sources (color bars / squares pattern, frames produced via mediaservo-media's
+//! `VideoFrameGenerator`), providing a unified capture entry for the field composition SDK's push
+//! pipeline and local recording loop. Real device capture (GStreamer v4l2src) lands in a
+//! later deck version (see `docs/modules/04-sdk-layers.md` §10).
 
 use std::sync::Arc;
 
@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 
 use crate::DeckError;
 
-/// 设备种类（契约 §6: Camera/Audio/Screen）。
+/// Device kinds (contract §6: Camera/Audio/Screen).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaDeviceKind {
     Camera,
@@ -28,11 +28,11 @@ pub enum MediaDeviceKind {
     Screen,
 }
 
-/// 设备标识（不透明句柄）。
+/// Device identity (opaque handle).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceId(pub String);
 
-/// 采集选项（契约 §6）。
+/// Capture options (contract §6).
 #[derive(Debug, Clone)]
 pub struct CaptureOptions {
     pub resolution: Option<(u32, u32)>,
@@ -50,7 +50,7 @@ impl Default for CaptureOptions {
     }
 }
 
-/// 设备枚举（stub：固定设备表）。
+/// Device enumeration (stub: fixed device table).
 pub struct MediaDevices;
 
 impl MediaDevices {
@@ -62,26 +62,29 @@ impl MediaDevices {
     }
 }
 
-/// 帧流（有界 channel，latest 丢弃防积压）。
+/// Frame stream (bounded channel; latest-frame drop to prevent backlog).
 #[derive(Debug)]
 pub struct FrameStream {
     rx: mpsc::Receiver<VideoFrame>,
 }
 
 impl FrameStream {
-    /// 异步取下一帧。
+    /// Asynchronously receive the next frame.
     pub async fn recv(&mut self) -> Option<VideoFrame> {
         self.rx.recv().await
     }
 }
 
-/// 监帧 sink：generator 线程 → channel（满则丢 = latest-frame 语义）。
+/// Frame watch sink: generator thread → channel (drop when full = latest-frame semantics).
 struct ChannelSink {
     tx: mpsc::Sender<VideoFrame>,
 }
 
 impl VideoSink<BoxVideoFrame> for ChannelSink {
-    fn on_frame(&self, frame: &BoxVideoFrame) -> Result<VideoSinkWants, mediaservo_media::error::MediaError> {
+    fn on_frame(
+        &self,
+        frame: &BoxVideoFrame,
+    ) -> Result<VideoSinkWants, mediaservo_media::error::MediaError> {
         let buf = frame.buffer.as_i420().ok_or_else(|| {
             mediaservo_media::error::MediaError::Internal("frame buffer not I420".into())
         })?;
@@ -99,12 +102,12 @@ impl VideoSink<BoxVideoFrame> for ChannelSink {
             pts: frame.timestamp_us.max(0) as u64,
             keyframe: false,
         };
-        let _ = self.tx.try_send(frame); // 满则丢（latest-frame，防积压）
+        let _ = self.tx.try_send(frame); // Drop when full (latest-frame, prevents backlog)
         Ok(VideoSinkWants::default())
     }
 }
 
-/// 相机采集源（stub 帧源）。
+/// Camera capture source (stub frame source).
 pub struct CameraSource {
     _dev: DeviceId,
     generator: Arc<VideoFrameGenerator>,
@@ -126,21 +129,17 @@ impl CameraSource {
         })
     }
 
-    /// 开始产帧；返回帧流（每生成一帧送入流）。只允许 start 一次。
+    /// Start producing frames; returns the frame stream (each generated frame is pushed into it). start is allowed only once.
     pub fn start(&mut self, opts: &CaptureOptions) -> Result<FrameStream, DeckError> {
         if self.started {
             return Err(DeckError::InvalidState("already started".into()));
         }
-        let (width, height) = opts
-            .resolution
-            .ok_or_else(|| DeckError::InvalidState("resolution required".into()))?;
+        let (width, height) =
+            opts.resolution.ok_or_else(|| DeckError::InvalidState("resolution required".into()))?;
         let fps = opts.framerate.unwrap_or(30);
         let (tx, rx) = mpsc::channel(8);
         self._tx = Some(tx.clone());
-        self.generator.add_or_update_sink(
-            Box::new(ChannelSink { tx }),
-            VideoSinkWants::default(),
-        );
+        self.generator.add_or_update_sink(Box::new(ChannelSink { tx }), VideoSinkWants::default());
         self.generator.start(
             fps,
             PatternMode::Squares(SquaresConfig {
@@ -158,7 +157,7 @@ impl CameraSource {
         Ok(FrameStream { rx })
     }
 
-    /// 停止产帧。
+    /// Stop producing frames.
     pub fn stop(&self) {
         self.generator.stop();
     }

@@ -1,14 +1,14 @@
-//! WebRtcTrackSink — 同步 VideoSource 广播 → 异步 TrackSender 发送的桥接。
+//! WebRtcTrackSink -- the bridge from a synchronous VideoSource broadcast to an asynchronous TrackSender send.
 //!
-//! 设计来源: 计划 `docs/plans/video-source-unification/plan.md` (v2, 双审核通过)。
+//! Design source: plan `docs/plans/video-source-unification/plan.md` (v2, dual-review passed).
 //!
-//! - **放置**: mediaservo-webrtc（media 为 plain dependency，镜像 webrtc → codec 模式）
-//! - **帧所有权** (v2 BLOCKER-2): `on_frame` 收到共享引用 `&BoxVideoFrame`（不可 move）
-//!   → 拷贝组装 I420 连续布局（640×480 ≈ 460KB/帧, 30fps ≈ 13.8MB/s memcpy — 可接受）
-//! - **背压** (v2): bounded(3) + try_send drop-new（延迟不堆积）
-//! - **运行时**: 构造必须处于 tokio 运行时上下文（`Handle::try_current` 失败返回 Err）
-//! - **生命周期** (v2 BLOCKER-4): 后台任务在 channel closed / 连续写错误超阈值时退出；
-//!   帧源线程由调用方（Host）显式 stop
+//! - **placement**: mediaservo-webrtc (media is a plain dependency, mirroring the webrtc -> codec pattern)
+//! - **frame ownership** (v2 BLOCKER-2): `on_frame` receives a shared reference `&BoxVideoFrame` (cannot move)
+//!   -> copy-assemble the I420 contiguous layout (640x480 ~ 460KB/frame, 30fps ~ 13.8MB/s memcpy -- acceptable)
+//! - **backpressure** (v2): bounded(3) + try_send drop-new (latency never accumulates)
+//! - **runtime**: construction must be inside a tokio runtime context (`Handle::try_current` failing returns Err)
+//! - **lifetime** (v2 BLOCKER-4): the background task exits on channel closed / write errors exceeding the threshold;
+//!   the frame-source thread is explicitly stopped by the caller (Host)
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -24,14 +24,14 @@ use mediaservo_media::pipeline::sink::{VideoSink, VideoSinkWants};
 use crate::RTCError;
 use crate::track::TrackSender;
 
-/// Channel 容量 — 3 帧 ≈ 100ms @30fps。满则 drop-new（v2 修订）。
+/// Channel capacity -- 3 frames ~ 100ms @30fps. Full = drop-new (the v2 revision).
 const CHANNEL_CAPACITY: usize = 3;
-/// 连续写错误阈值 — 超过则停止发送任务（对齐 B5 break 语义）。
+/// The consecutive-write-error threshold -- beyond it the sending task stops (aligned with the B5 break semantics).
 const MAX_CONSECUTIVE_ERRORS: u64 = 30;
-/// 限频日志 — 每 N 次错误打一条 warn。
+/// Log rate limiting -- one warn per N errors.
 const WARN_EVERY_N_ERRORS: u64 = 10;
 
-/// 经 channel 传递的已组装 I420 帧（Y+U+V 连续布局, tight strides）。
+/// The assembled I420 frame passed through the channel (Y+U+V contiguous, tight strides).
 struct OwnedI420Frame {
     data: Vec<u8>,
     width: u32,
@@ -39,10 +39,10 @@ struct OwnedI420Frame {
     ts_us: i64,
 }
 
-/// 桥接 sink: 帧源（VideoFrameGenerator / 未来 camera/desktop/compositor）经
-/// `VideoSource::add_or_update_sink` 注册；`on_frame` 在源线程同步调用，
-/// 拷贝组装后 try_send 到 bounded channel，后台任务 await 发送
-/// （PIT-63: 帧捕获时间戳透传 `write_raw_i420_with_ts`）。
+/// The bridging sink: a frame source (VideoFrameGenerator / future camera/desktop/compositor) registers via
+/// `VideoSource::add_or_update_sink`; `on_frame` is called synchronously on the source thread,
+/// copy-assembles then try_sends into the bounded channel, and the background task awaits the send
+/// (PIT-63: the frame capture timestamp passes through `write_raw_i420_with_ts`).
 #[derive(Debug)]
 pub struct WebRtcTrackSink {
     tx: mpsc::Sender<OwnedI420Frame>,
@@ -50,10 +50,10 @@ pub struct WebRtcTrackSink {
 }
 
 impl WebRtcTrackSink {
-    /// 创建桥接 sink 并启动后台发送任务。
+    /// Create the bridging sink and start the background sending task.
     ///
     /// # Errors
-    /// 非 tokio 运行时上下文时返回 `RTCError::Internal`（须在 runtime 内构造）。
+    /// Outside a tokio runtime context returns `RTCError::Internal` (must be constructed inside a runtime).
     pub fn new(track: TrackSender) -> Result<Self, RTCError> {
         let handle = Handle::try_current().map_err(|_| {
             RTCError::Internal("WebRtcTrackSink requires tokio runtime context".into())
@@ -94,7 +94,7 @@ impl WebRtcTrackSink {
         Ok(Self { tx, consecutive_errors })
     }
 
-    /// 当前连续写错误数（可观测性/测试）。
+    /// The current consecutive-write-error count (observability/tests).
     pub fn consecutive_errors(&self) -> u64 {
         self.consecutive_errors.load(Ordering::Relaxed)
     }
@@ -102,7 +102,7 @@ impl WebRtcTrackSink {
 
 impl VideoSink<BoxVideoFrame> for WebRtcTrackSink {
     fn on_frame(&self, frame: &BoxVideoFrame) -> Result<VideoSinkWants, MediaError> {
-        // 帧所有权: 共享引用不可 move → 拷贝组装（v2 BLOCKER-2）。
+        // frame ownership: a shared reference cannot move -> copy-assemble (v2 BLOCKER-2).
         let buf = frame.buffer.as_i420().ok_or_else(|| {
             MediaError::Internal("WebRtcTrackSink only accepts I420 frames".into())
         })?;
@@ -112,8 +112,8 @@ impl VideoSink<BoxVideoFrame> for WebRtcTrackSink {
         let y_size = (width * height) as usize;
         let uv_size = ((width / 2) * (height / 2)) as usize;
 
-        // I420Buffer::new 保证 tight strides（stride == width / width/2）；
-        // 未来非 tight 源（相机/桌面 padding）需 de-stride 行拷贝（ponytail: 见计划 §4）。
+        // I420Buffer::new guarantees tight strides (stride == width / width/2);
+        // future non-tight sources (camera/desktop padding) need de-stride row copies (ponytail: see plan §4).
         debug_assert_eq!(buf.stride_y as usize, width as usize, "tight Y stride");
         debug_assert_eq!(buf.stride_u as usize, (width / 2) as usize, "tight U stride");
         debug_assert_eq!(buf.stride_v as usize, (width / 2) as usize, "tight V stride");
@@ -127,12 +127,12 @@ impl VideoSink<BoxVideoFrame> for WebRtcTrackSink {
         match self.tx.try_send(item) {
             Ok(()) => Ok(VideoSinkWants::default()),
             Err(mpsc::error::TrySendError::Full(_)) => {
-                // 背压: 满则丢弃新帧（drop-new），延迟不堆积（v2 修订）。
+                // backpressure: full = drop the new frame (drop-new), latency never accumulates (the v2 revision).
                 tracing::debug!("WebRtcTrackSink channel full — dropping frame");
                 Ok(VideoSinkWants::default())
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
-                // 接收端已退出 → 通知源停止广播本 sink。
+                // the receiver exited -> notify the source to stop broadcasting to this sink.
                 tracing::debug!("WebRtcTrackSink channel closed — deactivating");
                 Ok(VideoSinkWants { is_active: false, ..Default::default() })
             }
@@ -140,8 +140,8 @@ impl VideoSink<BoxVideoFrame> for WebRtcTrackSink {
     }
 }
 
-// stub 后端专属测试（TrackSender.backend 记录方法仅 StubTrack 有）—
-// backend-webrtc-sys/rs 下这些测试无意义（真实 FFI 由集成测试覆盖）。
+// stub-backend-only tests (the TrackSender.backend recording methods exist only on StubTrack) --
+// meaningless under backend-webrtc-sys/rs (real FFI covered by integration tests).
 #[cfg(all(test, not(any(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys"))))]
 mod tests {
     use super::*;
@@ -155,7 +155,7 @@ mod tests {
         VideoFrame::new(buf).with_timestamp(ts_us)
     }
 
-    /// stub 后端帧数观测（TrackSender.backend 与任务内 clone 共享 Arc 记录）。
+    /// the stub backend's frame-count observation (TrackSender.backend and the in-task clone share a recording Arc).
     fn written(track: &TrackSender) -> u64 {
         track.backend.frames_written()
     }
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn sink_requires_runtime() {
-        // 非 tokio 上下文（普通 #[test]）→ 构造必须失败。
+        // not a tokio context (a plain #[test]) -> construction must fail.
         let track = TrackSender::new("t-no-runtime".into(), TrackKind::Video);
         let err = WebRtcTrackSink::new(track).unwrap_err();
         assert!(matches!(err, RTCError::Internal(_)), "got {err:?}");
@@ -177,7 +177,7 @@ mod tests {
         let track = TrackSender::new("t1".into(), TrackKind::Video);
         let sink = WebRtcTrackSink::new(track.clone()).unwrap();
 
-        // 30fps 语义: 相邻帧 ts 间隔 ≈ 33.3ms（C17 契约贯穿 sink）。
+        // 30fps semantics: adjacent frame ts spacing ~ 33.3ms (the C17 contract runs through the sink).
         let mut ts = 1_700_000_000_000i64;
         let step = 33_333i64;
         for i in 0..3 {
@@ -190,9 +190,9 @@ mod tests {
         assert_eq!(written(&track), 3, "all frames written");
         let history = ts_history(&track);
         assert_eq!(history.len(), 3);
-        // 透传断言: 输出 ts 与输入完全一致。
+        // passthrough assert: the output ts is exactly the input ts.
         assert_eq!(history[0], 1_700_000_000_000);
-        // C17 断言: 相邻帧差值 ≈ 33.3ms ± 5ms。
+        // the C17 assert: the adjacent frame delta ~ 33.3ms +/- 5ms.
         let delta = history[1] - history[0];
         assert!((33_333 - delta).abs() <= 5_000, "expected ~33.3ms delta, got {delta}µs");
         let delta2 = history[2] - history[1];
@@ -204,14 +204,14 @@ mod tests {
         let track = TrackSender::new("t2".into(), TrackKind::Video);
         let sink = WebRtcTrackSink::new(track.clone()).unwrap();
 
-        // current_thread runtime: 同步 on_frame 期间后台任务无法被 poll →
-        // 容量 3 的 channel 在第 4 帧起 drop-new。
+        // a current_thread runtime: the background task can't be polled during a synchronous on_frame ->
+        // the capacity-3 channel starts drop-new from the 4th frame.
         for i in 0..5 {
             sink.on_frame(&test_frame(1_000_000 + i * 33_333, 64, 48)).unwrap();
         }
 
         tokio::time::sleep(Duration::from_millis(100)).await;
-        // 仅 3 帧被发送，2 帧被 drop（背压生效）。
+        // only 3 frames sent, 2 dropped (backpressure in effect).
         assert_eq!(written(&track), 3, "channel capacity exceeded");
     }
 }

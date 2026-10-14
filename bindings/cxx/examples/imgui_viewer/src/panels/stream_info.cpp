@@ -1,4 +1,4 @@
-// panels/stream_info — 实现。
+// panels/stream_info — implementation.
 #include "stream_info.hpp"
 
 #include <vector>
@@ -23,7 +23,7 @@ void render_stream_info(AppModel& m) {
     Tile& t = *m.tiles[static_cast<size_t>(m.sel_info)];
     ImGui::SeparatorText(t.room.c_str());
 
-    // 传输面（poll_stats 每 ~1s 刷新；这里只读展示）
+    // The transport face (poll_stats refreshes about once per second; this panel is read-only display)
     ImGui::Text("decoded fps     %.0f", t.fps);
     ImGui::Text("resolution      %ux%u", t.w, t.h);
     ImGui::Text("media bitrate   %.0f kbps", t.bytes_rate.kbps());
@@ -32,7 +32,7 @@ void render_stream_info(AppModel& m) {
                 static_cast<unsigned long long>(t.tex.frames()));
     if (t.rtt_ms >= 0.0) ImGui::Text("control rtt     %.0f ms", t.rtt_ms);
 
-    // 09-24 对表 web play 详情层：抖动/丢包/丢帧/反馈计数（SDK stats 扩面直读）
+    // The 09-24 web-play-aligned details layer: jitter/loss/dropped frames/feedback counters (read straight from the SDK stats extensions)
     const double lost_pct = (t.st_packets + t.packets_lost) > 0
         ? 100.0 * static_cast<double>(t.packets_lost) / static_cast<double>(t.st_packets + t.packets_lost)
         : 0.0;

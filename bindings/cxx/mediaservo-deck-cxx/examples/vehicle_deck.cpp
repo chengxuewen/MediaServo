@@ -1,5 +1,5 @@
-// mediaservo-deck-cxx 采集→录制→回放闭环示例（骨架；需 deck backend 依赖就绪才能跑通）。
-// 编译示例: g++ -std=c++17 -I bindings/cxx/mediaservo-deck-cxx/include -I bindings/c/mediaservo-deck-c/include
+// mediaservo-deck-cxx capture→record→playback closed-loop example (skeleton; needs the deck backend dependencies ready to run).
+// Build example: g++ -std=c++17 -I bindings/cxx/mediaservo-deck-cxx/include -I bindings/c/mediaservo-deck-c/include
 //           -I bindings/c/include examples/vehicle_deck.cpp -L target/debug -lmediaservo_deck
 
 #include <cstdlib>
@@ -22,7 +22,7 @@ int main() {
         return 1;
     }
 
-    // 枚举 → 打开第一台相机
+    // Enumerate → open the first camera
     auto cams = mediaservo::deck::enumerate_devices(DeviceKind::Camera);
     if (cams.empty()) {
         std::cerr << "no camera devices\n";
@@ -30,7 +30,7 @@ int main() {
     }
     std::cout << "camera: " << cams[0] << "\n";
 
-    CaptureOptions opts; // 默认 1280x720@30
+    CaptureOptions opts; // default 1280x720@30
     auto cam_result = CameraSource::open(cams[0], opts);
     if (!cam_result) {
         std::cerr << "camera open failed: code=" << cam_result.error().code
@@ -39,7 +39,7 @@ int main() {
     }
     auto cam = std::move(cam_result).value();
 
-    // 帧回调（泵线程；frame 指针仅回调内有效——此处只打印，不保留）
+    // Frame callback (pump thread; the frame pointer is valid only inside the callback — print only, never keep it)
     auto cb = cam.on_frame([](const mediaservo_frame_t& frame) {
         std::cout << "frame " << frame.width << "x" << frame.height << "\n";
     });
@@ -53,7 +53,7 @@ int main() {
         return 1;
     }
 
-    // 录制（camera 必须已 start 且活到录制结束 → recorder 先 close）
+    // Record (the camera must be started and outlive the recording → close the recorder first)
     auto rec_result = Recorder::open(out_path);
     if (!rec_result) {
         std::cerr << "recorder open failed: code=" << rec_result.error().code << "\n";
@@ -69,12 +69,12 @@ int main() {
     std::cout << "recording to " << out_path << " (Ctrl-C to stop)...\n";
     std::cin.get();
 
-    (void)rec.stop();   // 请求停止
-    (void)rec.close();  // 先关 recorder（flush + trailer）
-    (void)cam.stop();   // 后关 camera
+    (void)rec.stop();   // request stop
+    (void)rec.close();  // close the recorder first (flush + trailer)
+    (void)cam.stop();   // then close the camera
     (void)cam.close();
 
-    // 回放
+    // Playback
     auto play_result = Player::open(out_path);
     if (!play_result) {
         std::cerr << "player open failed: code=" << play_result.error().code << "\n";
@@ -88,7 +88,7 @@ int main() {
         std::cerr << "playback on_frame failed: code=" << frames_cb.error().code << "\n";
         return 1;
     }
-    (void)player.close(); // 阻塞 join 解码泵至 EOF
+    (void)player.close(); // blocking join of the decode pump until EOF
     std::cout << "playback done\n";
     return 0;
 }

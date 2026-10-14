@@ -1,29 +1,23 @@
-//! translate.rs 翻译器测试（Task A2 + C1）：host.yaml → oxfile.toml 文本。
+//! translate.rs renderer tests (Task A2 + C1): host.yaml -> oxfile.toml text.
 //!
-//! C1 增补：camera_config(s) 富解析（source/fps 缺省）+ to_oxfile_in_dir 的
-//! capturer 实例追加 --config/--token 绝对路径。
+//! C1 additions: rich camera_config(s) parsing (source/fps defaults) + to_oxfile_in_dir's
+//! capturer instances appending absolute --config/--token paths.
 //!
-//! 视频源模型定稿（2026-08）: cameras → sources（serde alias 兼容旧键）、
-//! stream.camera → stream.source（alias 兼容）、Source mode 四类 + width/height。
+//! Video source model finalized (2026-08): cameras -> sources (serde alias keeps the old key),
+//! stream.camera -> stream.source (alias), Source mode in four kinds + width/height.
 
 #[test]
 fn to_oxfile_emits_all_placeholder_apps() {
     let cfg = "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\nstreams:\n  - id: \"cam0-stream\"\n    source: \"cam0\"\n    codec: \"h264\"\nrecord:\n  enabled: false\n";
     let ox = mediaservo_host::translate::to_oxfile(cfg).unwrap();
-    for app in [
-        "host-agent",
-        "host-recorder",
-        "host-controller",
-        "host-emergency",
-        "host-audio",
-    ] {
+    for app in ["host-agent", "host-recorder", "host-controller", "host-emergency", "host-audio"] {
         assert!(ox.contains(&format!("name = \"{app}\"")), "missing {app}");
     }
-    assert!(ox.contains("name = \"host-capturer-cam0\""), "missing capturer 实例");
-    assert!(ox.contains("name = \"host-streamer-cam0-stream\""), "missing streamer 实例");
-    assert!(ox.contains("--camera cam0")); // 参数化实例（name 与 command 分行）
+    assert!(ox.contains("name = \"host-capturer-cam0\""), "missing capturer instance");
+    assert!(ox.contains("name = \"host-streamer-cam0-stream\""), "missing streamer instance");
+    assert!(ox.contains("--camera cam0")); // parameterized instance (name and command on separate lines)
     assert!(ox.contains("--stream cam0-stream"));
-    // [defaults] 固定字段（A2 审查 M4 补强）
+    // [defaults] fixed fields (A2 review M4 hardening)
     assert!(ox.contains("version = 1"));
     assert!(ox.contains("namespace = \"mediaservo-host\""));
     assert!(ox.contains("restart_policy = \"always\""));
@@ -31,7 +25,7 @@ fn to_oxfile_emits_all_placeholder_apps() {
 
 #[test]
 fn camera_config_defaults_and_explicit() {
-    // 缺省: 无 mode → generator（原 stub 语义）、width/height 1280x720、fps 30
+    // defaults: no mode -> generator (former stub semantics), width/height 1280x720, fps 30
     let cfg = "sources:\n  - id: \"cam0\"\n";
     let cams = mediaservo_host::translate::camera_configs(cfg).unwrap();
     assert_eq!(cams.len(), 1);
@@ -40,21 +34,21 @@ fn camera_config_defaults_and_explicit() {
     assert_eq!(cams[0].width, 1280);
     assert_eq!(cams[0].height, 720);
     assert_eq!(cams[0].fps, 30);
-    // 显式值
+    // explicit value
     let cfg = "sources:\n  - id: \"cam1\"\n    mode: \"camera\"\n    backend: \"v4l2\"\n    width: 1920\n    height: 1080\n    fps: 15\n";
     let cams = mediaservo_host::translate::camera_configs(cfg).unwrap();
     assert_eq!(cams[0].mode, mediaservo_host::translate::SourceMode::Camera);
     assert_eq!(cams[0].width, 1920);
     assert_eq!(cams[0].height, 1080);
     assert_eq!(cams[0].fps, 15);
-    // 单个查找
+    // single lookup
     assert!(mediaservo_host::translate::camera_config(cfg, "cam1").unwrap().is_some());
     assert!(mediaservo_host::translate::camera_config(cfg, "nope").unwrap().is_none());
-    // 坏配置 → Err
+    // bad config -> Err
     assert!(mediaservo_host::translate::camera_configs("not yaml [[[").is_err());
 }
 
-/// 旧键兼容：cameras / camera 引用 / source="stub" 字段 → 新模式解析（alias 门）。
+/// Old-key compatibility: cameras / camera references / source="stub" fields -> parse in the new model (alias gate).
 #[test]
 fn legacy_cameras_and_camera_keys_still_parse() {
     let cfg = "cameras:\n  - id: \"cam0\"\n    source: \"stub\"\n    fps: 30\nstreams:\n  - id: \"s0\"\n    camera: \"cam0\"\n";
@@ -62,11 +56,16 @@ fn legacy_cameras_and_camera_keys_still_parse() {
     assert_eq!(cams[0].mode, mediaservo_host::translate::SourceMode::Generator);
     assert_eq!(cams[0].fps, 30);
     let streams = mediaservo_host::translate::stream_configs(cfg).unwrap();
-    assert_eq!(streams[0].source, "cam0", "旧 camera 键应经 alias 解析为 source");
+    assert_eq!(
+        streams[0].source, "cam0",
+        "the old camera key should resolve to source via the alias"
+    );
     assert!(mediaservo_host::translate::to_oxfile(cfg).unwrap().contains("host-capturer-cam0"));
-    // 旧 source≠stub → 明确拒绝（迁移提示）
+    // old source != stub -> explicit rejection (migration hint)
     let old_v4l2 = "cameras:\n  - id: \"cam0\"\n    source: \"v4l2\"\n";
-    assert!(mediaservo_host::translate::camera_configs(old_v4l2).unwrap_err().contains("未支持"));
+    assert!(
+        mediaservo_host::translate::camera_configs(old_v4l2).unwrap_err().contains("unsupported")
+    );
 }
 
 #[test]
@@ -74,16 +73,22 @@ fn to_oxfile_in_dir_appends_config_and_token_paths() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n";
     let ox = mediaservo_host::translate::to_oxfile_in_dir(cfg, dir.path()).unwrap();
-    // 绝对路径 + 每 source token 文件
+    // absolute paths + per-source token file
     let abs = std::path::absolute(dir.path()).unwrap();
     assert!(ox.contains(&format!("--config {}/etc/host.yaml", abs.display())));
     assert!(ox.contains(&format!("--token {}/etc/link/cam0.token", abs.display())));
-    // streamer 行追加 --gateway/--config/--token（D2 网关 + C2 同形）。--gateway 与
-    // --config 之间可插入编码 flag（D282 缺省 h264 → --encoder-backend software）故分钉。
-    assert!(ox.contains("--stream s0 --gateway ws://127.0.0.1:17980/ws"), "gateway 紧邻 --stream");
-    assert!(ox.contains(&format!("--token {}/etc/link/s0-stream.token", abs.display())), "流令牌名 = <stream>-stream.token（C40）");
-    assert!(ox.contains("--config"), "streamer 行应带 --config");
-    // 无路径变体保持 A2 形态
+    // streamer lines append --gateway/--config/--token (D2 gateway + C2 same shape). Between --gateway and
+    // --config encoding flags may be inserted (D282 default h264 -> --encoder-backend software), hence separate pins.
+    assert!(
+        ox.contains("--stream s0 --gateway ws://127.0.0.1:17980/ws"),
+        "gateway immediately after --stream"
+    );
+    assert!(
+        ox.contains(&format!("--token {}/etc/link/s0-stream.token", abs.display())),
+        "stream token name = <stream>-stream.token (C40)"
+    );
+    assert!(ox.contains("--config"), "the streamer line should carry --config");
+    // the no-paths variant keeps the A2 shape
     let ox = mediaservo_host::translate::to_oxfile(cfg).unwrap();
     assert!(ox.contains("--camera cam0"));
     assert!(!ox.contains("--config"));
@@ -91,60 +96,60 @@ fn to_oxfile_in_dir_appends_config_and_token_paths() {
 
 #[test]
 fn camera_config_rejects_zero_fps() {
-    // C1 审查发现: fps=0 → generator.start 线程内 panic → 死线程 + 主线程永久阻塞
-    // （C15 "failure as hang" 类）——必须在配置解析层拒绝。
+    // C1 review finding: fps=0 -> panic inside the generator.start thread -> dead thread + main thread blocked forever
+    // (C15 "failure as hang" class) - must be rejected at the config-parsing layer.
     let cfg = "sources:\n  - id: \"cam0\"\n    fps: 0\n";
     let err = mediaservo_host::translate::camera_configs(cfg).unwrap_err();
-    assert!(err.contains("fps"), "错误信息应指明 fps, got: {err}");
-    assert!(err.contains("cam0"), "错误信息应含源 id, got: {err}");
+    assert!(err.contains("fps"), "the error should mention fps, got: {err}");
+    assert!(err.contains("cam0"), "the error should contain the source id, got: {err}");
     assert!(mediaservo_host::translate::camera_config(cfg, "cam0").is_err());
 }
 
 #[test]
 fn stream_config_defaults_and_explicit() {
-    // 缺省 source/codec → id/h264（D282）
+    // default source/codec -> id/h264 (D282)
     let cfg = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n";
     let streams = mediaservo_host::translate::stream_configs(cfg).unwrap();
     assert_eq!(streams.len(), 1);
     assert_eq!(streams[0].id, "s0");
     assert_eq!(streams[0].source, "s0");
     assert_eq!(streams[0].codec, "h264");
-    // 显式值（source 引用 sources[].id）
+    // explicit value (source references sources[].id)
     let cfg = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s1\"\n    source: \"cam0\"\n    codec: \"h264\"\n";
     let streams = mediaservo_host::translate::stream_configs(cfg).unwrap();
     assert_eq!(streams[0].source, "cam0");
     assert_eq!(streams[0].codec, "h264");
-    // 单个查找
+    // single lookup
     assert!(mediaservo_host::translate::stream_config(cfg, "s1").unwrap().is_some());
     assert!(mediaservo_host::translate::stream_config(cfg, "nope").unwrap().is_none());
-    // 坏配置 → Err
+    // bad config -> Err
     assert!(mediaservo_host::translate::stream_configs("not yaml [[[").is_err());
 }
 
 #[test]
 fn record_config_defaults_and_explicit() {
-    // 缺省: disabled + 默认输出目录（C3）
+    // default: disabled + the default output directory (C3)
     let cfg = "sources:\n  - id: \"cam0\"\n";
     let rec = mediaservo_host::translate::record_config(cfg).unwrap();
-    assert!(!rec.enabled, "缺省应 disabled");
+    assert!(!rec.enabled, "default should be disabled");
     assert_eq!(rec.out_dir, std::path::PathBuf::from("/tmp/mediaservo-recordings"));
-    // 显式值（YAML 嵌套 record 段）
+    // explicit value (nested YAML record section)
     let cfg = "sources:\n  - id: \"cam0\"\nrecord:\n  enabled: true\n  out_dir: \"/var/rec\"\n";
     let rec = mediaservo_host::translate::record_config(cfg).unwrap();
-    assert!(rec.enabled, "显式 enabled=true 应生效");
+    assert!(rec.enabled, "explicit enabled=true must take effect");
     assert_eq!(rec.out_dir, std::path::PathBuf::from("/var/rec"));
-    // 缺 out_dir → 默认目录
+    // missing out_dir -> default directory
     let cfg = "record:\n  enabled: true\n";
     let rec = mediaservo_host::translate::record_config(cfg).unwrap();
     assert!(rec.enabled);
     assert_eq!(rec.out_dir, std::path::PathBuf::from("/tmp/mediaservo-recordings"));
-    // 坏配置 → Err
+    // bad config -> Err
     assert!(mediaservo_host::translate::record_config("not yaml [[[").is_err());
 }
 
 #[test]
 fn to_oxfile_in_dir_recorder_appends_config_and_token_paths() {
-    // C3: recorder 固定 app 与 capturer/streamer 同形追加 --config/--token
+    // C3: the recorder fixed app appends --config/--token in the same shape as capturer/streamer
     let dir = tempfile::tempdir().unwrap();
     let cfg = "sources:\n  - id: \"cam0\"\nrecord:\n  enabled: true\n";
     let ox = mediaservo_host::translate::to_oxfile_in_dir(cfg, dir.path()).unwrap();
@@ -152,7 +157,7 @@ fn to_oxfile_in_dir_recorder_appends_config_and_token_paths() {
     assert!(ox.contains("host-recorder --config"));
     assert!(ox.contains(&format!("--config {}/etc/host.yaml", abs.display())));
     assert!(ox.contains(&format!("--token {}/etc/link/recorder.token", abs.display())));
-    // 无路径变体保持 A2 形态（无参数）
+    // the no-paths variant keeps the A2 shape(no args)
     let ox = mediaservo_host::translate::to_oxfile(cfg).unwrap();
     assert!(ox.contains("name = \"host-recorder\""));
     assert!(!ox.contains("host-recorder --config"));
@@ -160,53 +165,63 @@ fn to_oxfile_in_dir_recorder_appends_config_and_token_paths() {
 
 #[test]
 fn signaling_local_port_passed_to_host_agent() {
-    // [signaling] local_port 配置 → host-agent 命令追加 --port
+    // [signaling] local_port config -> the host-agent command appends --port
     let cfg = "sources:\n  - id: \"cam0\"\nsignaling:\n  local_port: 17980\n";
     let ox = mediaservo_host::translate::to_oxfile(cfg).unwrap();
-    assert!(ox.contains("host-agent --port 17980"), "agent 命令应带 --port, got:\n{ox}");
-    // 缺省：不追加（agent 内置默认 17980）
+    assert!(
+        ox.contains("host-agent --port 17980"),
+        "the agent command should carry --port, got:\n{ox}"
+    );
+    // default: not appended (agent has a built-in default 17980)
     let ox = mediaservo_host::translate::to_oxfile("sources:\n  - id: \"cam0\"\n").unwrap();
-    assert!(ox.contains("host-agent\"") && !ox.contains("host-agent --port"), "缺省不追加 --port");
+    assert!(
+        ox.contains("host-agent\"") && !ox.contains("host-agent --port"),
+        "default does not append --port"
+    );
     assert_eq!(mediaservo_host::translate::signaling_local_port(cfg).unwrap(), Some(17980));
     assert_eq!(mediaservo_host::translate::signaling_local_port("").unwrap(), None);
 }
 
 #[test]
 fn signaling_gateway_url_resolution_and_streamer_arg() {
-    // D2: [signaling] local_port → 子进程网关 URL；缺省 17980
+    // D2: [signaling] local_port -> child-process gateway URL; default 17980
     let cfg = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\nsignaling:\n  local_port: 18000\n";
     assert_eq!(
         mediaservo_host::translate::signaling_gateway_url(cfg).unwrap(),
         "ws://127.0.0.1:18000/ws"
     );
-    // 缺省（无 [signaling] 段）→ 17980
+    // default (no [signaling] section) -> 17980
     assert_eq!(
         mediaservo_host::translate::signaling_gateway_url("sources:\n  - id: \"cam0\"\n").unwrap(),
         "ws://127.0.0.1:17980/ws"
     );
-    // streamer 命令追加 --gateway（with paths 与无 paths 变体一致）
-    let ox = mediaservo_host::translate::to_oxfile_in_dir(cfg, std::path::Path::new("/tmp/x")).unwrap();
+    // the streamer command appends --gateway (consistent across with-paths and no-paths variants)
+    let ox =
+        mediaservo_host::translate::to_oxfile_in_dir(cfg, std::path::Path::new("/tmp/x")).unwrap();
     assert!(
         ox.contains("--stream s0 --gateway ws://127.0.0.1:18000/ws") && ox.contains("--config"),
-        "streamer 行应带 --gateway, got:\n{ox}"
+        "the streamer line should carry --gateway, got:\n{ox}"
     );
     let ox = mediaservo_host::translate::to_oxfile(cfg).unwrap();
     assert!(
         ox.contains("--stream s0 --gateway ws://127.0.0.1:18000/ws"),
-        "无路径变体也应带 --gateway, got:\n{ox}"
+        "the no-paths variant should also carry --gateway, got:\n{ox}"
     );
 }
 
 #[test]
 fn to_oxfile_in_dir_passes_config_to_host_agent() {
-    // E1: agent 拓扑监控期望态数据源 — 与 recorder 同形追加 --config
+    // E1: agent topology-monitor desired-state data source - appends --config in the same shape as recorder
     let dir = tempfile::tempdir().unwrap();
     let cfg = "sources:\n  - id: \"cam0\"\n";
     let ox = mediaservo_host::translate::to_oxfile_in_dir(cfg, dir.path()).unwrap();
     let abs = std::path::absolute(dir.path()).unwrap();
-    assert!(ox.contains("host-agent --config"), "agent 命令应带 --config, got:\n{ox}");
+    assert!(
+        ox.contains("host-agent --config"),
+        "the agent command should carry --config, got:\n{ox}"
+    );
     assert!(ox.contains(&format!("--config {}/etc/host.yaml", abs.display())));
-    // 无路径变体保持 A2 形态（无参数）
+    // the no-paths variant keeps the A2 shape(no args)
     let ox = mediaservo_host::translate::to_oxfile(cfg).unwrap();
     assert!(!ox.contains("host-agent --config"));
 }

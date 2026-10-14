@@ -1,4 +1,4 @@
-// app_log — 实现。
+// app_log — implementation.
 #include "app_log.hpp"
 
 #include <cstdarg>

@@ -2,7 +2,7 @@
 name = "mediaservo-node"
 version.workspace = true
 edition.workspace = true
-description = "MediaServo Node.js 绑定 — napi-rs 直绑 Rust SDK（livekit rtc-ffi-bindings 同构）"
+description = "MediaServo Node.js bindings — napi-rs direct bindings to the Rust SDK (same shape as livekit rtc-ffi-bindings)"
 license.workspace = true
 
 [lib]

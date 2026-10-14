@@ -4,7 +4,7 @@
 //! - GstCaptureSource: wraps crate::pipeline::Pipeline as MediaSource<InternalPacket>
 //! - WebrtcOutputSink: wraps crate::webrtc_transport::WebrtcTransport as MediaSink<InternalPacket>
 
-#![allow(dead_code)] // 双身份文件：host-legacy bin 的 `mod` 形态在用（T1.3 翻案），独立 bin 编译形态全 dead = 结构噪音
+#![allow(dead_code)] // Dual-identity file: the `mod` form of the host-legacy bin is in use (T1.3 reversal); the standalone bin compile form is entirely dead = structural noise
 use std::sync::Arc;
 
 use mediaservo_media::error::MediaError;

@@ -10,9 +10,9 @@ rust = ">=1.85.0,<2"
 flatbuffers = ">=24.3.25,<26"
 python = "3.12.*"
 pip = ">=24.0,<26"
-pyyaml = ">=6.0,<7"  # build-cli: mediaservo config validate (PIT-76 审核 BLOCKER-2)
-pnpm = ">=10.32,<11"  # www 前端构建（build web / build server 装配步；packageManager 字段同线——2026-09-29 新机缺 pnpm 报错收编 pixi）
-caddy = ">=2.10"       # web 入口反代（msrtc-web 簇条目；缺=deploy 静默降级无前端——2026-09-29 新机补）
+pyyaml = ">=6.0,<7"  # build-cli: mediaservo config validate (PIT-76 review BLOCKER-2)
+pnpm = ">=10.32,<11"  # www frontend build (build web / build server assembly step; packageManager field on the same line — 2026-09-29: new machine failed without pnpm, moved into pixi)
+caddy = ">=2.10"       # web entry reverse proxy (msrtc-web cluster entry; missing = deploy silently degrades to no frontend — added 2026-09-29 for new machines)
 ripgrep = ">=14.1.0,<15"
 # GStreamer 1.24+ (gstreamer-rs 0.23 min=1.14, tested=1.24)
 gstreamer = ">=1.24.0,<2"
@@ -37,38 +37,38 @@ ninja = ">=1.11,<2"
 openssl = ">=3,<4"
 
 [feature.dev.tasks]
-# === Cargo tasks ═════════════════════════════════════════════════
-# 不需要 mediasoup 的 crate — 原生编译 (所有平台)
+# === Cargo tasks ═════════════════════════════════════════════
+# Crates not needing mediasoup — native build (all platforms)
 check = "cargo check --workspace --exclude mediaservo-server"
 build = "cargo build --workspace --exclude mediaservo-server"
 test = "cargo test --workspace --exclude mediaservo-server"
 lint = "cargo clippy --workspace --all-targets -- -D warnings"
-# === Bindings tasks（绑定矩阵, link/deck/field × c/cxx/py）===
-# cdylib 构建 + dev .so.<MAJOR> symlink（D241: DT_NEEDED 解析）
+# === Bindings matrix (link/deck/field × c/cxx/py) ===
+# cdylib build + dev .so.<MAJOR> symlink (D241: DT_NEEDED resolution)
 build-c = "cargo build -p mediaservo-field-c -p mediaservo-link-c -p mediaservo-deck-c -p mediaservo-client-c && ln -sf libmediaservo_field.so target/debug/libmediaservo_field.so.0 && ln -sf libmediaservo_link.so target/debug/libmediaservo_link.so.0 && ln -sf libmediaservo_deck.so target/debug/libmediaservo_deck.so.0 && ln -sf libmediaservo_client.so target/debug/libmediaservo_client.so.0"
-# C++ header-only 绑定测试（g++ 编译 + 运行断言）
+# C++ header-only binding tests (g++ compile + run asserts)
 test-cxx = "bash scripts/test-cxx.sh"
-# Python ctypes 绑定测试（stdlib unittest）
+# Python ctypes binding tests (stdlib unittest)
 test-py = "MEDIASERVO_LIB_DIR=$PWD/target/debug python3 -m unittest discover -s bindings/python/mediaservo/tests"
-# 跨语言 parity（D227 ⑤: 同序列三端断言一致）
+# Cross-language parity (D227 ⑤: same sequence asserted consistent across three surfaces)
 parity-bindings = "bash scripts/parity_bindings.sh"
-# ABI 漂移门禁（D248/L2: header 声明 ↔ .so 导出对照）
+# ABI drift gate (D248/L2: header declarations ↔ .so exports comparison)
 abi-drift = "bash scripts/check-abi-drift.sh"
-# 绑定层 live e2e（三语言正向链路回归, 需 server）
+# Binding-layer live e2e (positive-path regression across three languages; needs server)
 e2e-bindings = "bash scripts/e2e-bindings.sh"
 
-# mediaservo-server — Docker 编译 (mediasoup C++ Worker 需要 Linux + meson)
+# mediaservo-server — Docker build (mediasoup C++ Worker needs Linux + meson)
 check-server = "sh -c 'scripts/docker-cargo.sh check -p mediaservo-server --features sfu-mediasoup'"
 build-server = "sh -c 'scripts/docker-cargo.sh build -p mediaservo-server --features sfu-mediasoup'"
 test-server = "sh -c 'scripts/docker-cargo.sh test -p mediaservo-server --features sfu-mediasoup'"
 
-# mediaservo-server — 原生编译（unset MESON_ARGS/MESON: conda gcc 注入 -Dbuildtype=release 与 tasks.py --buildtype 冲突；unset MESON 让 tasks.py 回落官方 pip 自装 meson==1.11.2+ninja，首次联网 pip 后续缓存）
+# mediaservo-server — native build (unset MESON_ARGS/MESON: conda gcc injects -Dbuildtype=release which conflicts with tasks.py --buildtype; unsetting MESON lets tasks.py fall back to the official pip-managed meson==1.11.2+ninja — first run needs network for pip, cached afterwards)
 check-server-native = "sh -c 'unset MESON_ARGS; unset MESON; cargo check -p mediaservo-server'"
 build-server-native = "sh -c 'unset MESON_ARGS; unset MESON; cargo build -p mediaservo-server'"
 test-server-native = "sh -c 'unset MESON_ARGS; unset MESON; cargo test -p mediaservo-server'"
 
 
-# 工具 (无变更)
+# Tooling (unchanged)
 format = "cargo fmt --all -- --check"
 format-fix = "cargo fmt --all"
 audit = "cargo deny check"
@@ -84,7 +84,7 @@ server-dev = "docker compose -f docker-compose.dev.yml up"
 
 [feature.test.dependencies]
 
-# test env 依赖（空表声明，dev 已含测试所需）
+# test-env dependencies (empty table declared; the dev feature already includes what tests need)
 
 [feature.ci.tasks]
 ci-check = "cargo check --workspace"
@@ -95,12 +95,12 @@ ci-test = "cargo test --workspace"
 [activation]
 env = { MESON = "$CONDA_PREFIX/bin/meson", NINJA = "$CONDA_PREFIX/bin/ninja", LIBCLANG_PATH = "$CONDA_PREFIX/lib", PKG_CONFIG_PATH = "$CONDA_PREFIX/lib/pkgconfig", PATH = "$CONDA_PREFIX/bin:$PATH" }
 
-# Jetson (linux-aarch64): 统一使用 JetPack 系统工具链 (gcc 10.5) 构建 host/client。
-# conda 交叉编译器 (GCC 14.4) 无法干净链接 JetPack 系统库 (glibc 2.35 冲突 +
-# tegra 传递依赖 libEGL/libv4lconvert 仅在系统 multiarch 目录) — 上游 livekit
-# 官方 Jetson 流程即为系统工具链。CARGO_TARGET_*_LINKER 必须显式覆盖:
-# conda rust.sh 会设置它指向 conda cc, 优先级高于 .cargo/config.toml (PIT-85)。
-# CFLAGS/CXXFLAGS/LDFLAGS 清空: 移除 conda 注入的 -isystem/-L, 保证全链路一致。
+# Jetson (linux-aarch64): build host/client with the unified JetPack system toolchain (gcc 10.5).
+# The conda cross compiler (GCC 14.4) cannot cleanly link JetPack system libraries (glibc 2.35 conflicts +
+# tegra transitive deps libEGL/libv4lconvert live only in the system multiarch dirs) — upstream livekit's
+# official Jetson flow uses the system toolchain. CARGO_TARGET_*_LINKER must be overridden explicitly:
+# conda's rust.sh sets it to the conda cc, which outranks .cargo/config.toml (PIT-85).
+# CFLAGS/CXXFLAGS/LDFLAGS cleared: removes conda-injected -isystem/-L so the whole chain stays consistent.
 [target.linux-aarch64.activation.env]
 CC = "/usr/bin/gcc"
 CXX = "/usr/bin/g++"

@@ -12,13 +12,13 @@ import ApiKeys from './pages/ApiKeys';
 import { hasToken } from './api/client';
 import { useAuth } from './hooks/useAuth';
 
-/** 路由守卫 — 无 token 重定向 /login（登录页公开）。 */
+/** Route guard — redirect to /login when no token (login page is public). */
 function RequireAuth({ children }: { children: ReactNode }) {
   if (!hasToken()) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
 
-/** 路由守卫 — 非 admin 访问设备/账号管理重定向 / 并提示。 */
+/** Route guard — non-admin hitting device/account management is redirected to / with a notice. */
 function RequireAdmin({ children }: { children: ReactNode }) {
   const { isAdmin } = useAuth();
   if (!isAdmin) return <Navigate to="/" replace state={{ notice: 'Admin access required' }} />;

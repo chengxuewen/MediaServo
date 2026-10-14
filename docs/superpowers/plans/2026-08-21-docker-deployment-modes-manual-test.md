@@ -1,86 +1,86 @@
-# docker-deployment-modes 人工测试计划
+# docker-deployment-modes Manual Test Plan
 
-> 配套 `docs/superpowers/plans/2026-08-21-docker-deployment-modes.md` 的验证文档。
-> 目的：人工逐步验证改造产物（CLI 命令面 / entrypoint 自举 / prod compose / 回归），
-> 覆盖自动化未覆盖的交互/时序/持久化面。
-> 状态：✅ = 通过 / ❌ = 失败（记录现象）/ ⏳ = 待执行
+> Companion verification document for `docs/superpowers/plans/2026-08-21-docker-deployment-modes.md`.
+> Purpose: manually verify the rework deliverables step by step (CLI command surface / entrypoint bootstrap / prod compose / regression),
+> covering interaction/timing/persistence aspects not covered by automation.
+> Status: ✅ = pass / ❌ = fail (record symptoms) / ⏳ = pending
 
-## 前置
+## Prerequisites
 
-- [ ] dev server 容器可用（`./mediaservo.sh up --env dev`）
-- [ ] runtime 镜像构建完成（`./mediaservo.sh build server --image runtime`——基线数字记录）
-- [ ] 环境负载正常（`uptime`——load < 4，构建类任务结束后测回归组）
+- [ ] dev server container available (`./mediaservo.sh up --env dev`)
+- [ ] runtime image built (`./mediaservo.sh build server --image runtime` — record baseline numbers)
+- [ ] Normal environment load (`uptime` — load < 4; run the regression group after build-type tasks finish)
 
 ---
 
-## A 组：CLI 命令面（不依赖镜像——先行）
+## Group A: CLI command surface (no image needed — run first)
 
-| # | 命令 | 预期结果 | 实际 |
-|---|---|---|---|
-| A1 | `./mediaservo.sh -h` | 目标命令面：build/up/down/restart/logs/exec/e2e/test/ci/install/package/clean/config/data/doctor/version + `build --image` 与 `e2e <suite>` 帮助 | |
-| A2 | `./mediaservo.sh doctor` | pixi/cargo/docker/node 版本输出（4 行）| |
-| A3 | `./mediaservo.sh up --env dev server` | 幂等（已有容器 → Started；无报错）| |
-| A4 | `./mediaservo.sh ps` | compose ps 表格——server 行含 9800/20000/40000-40100 映射 | |
-| A5 | `./mediaservo.sh logs server --follow` | 日志跟踪（Ctrl-C 退出）| |
-| A6 | `./mediaservo.sh exec server -- sh -c 'echo ok'` | 输出 `ok` | |
-| A7 | `./mediaservo.sh config set signaling.psk test123` | 写 `config/host.conf` + 提示（dev 轨道）| |
-| A8 | `./mediaservo.sh data inspect` | 卷列表（含 mediaservo_mediaservo-data）| |
+| # | Command | Expected | Actual |
+|---|---------|----------|--------|
+| A1 | `./mediaservo.sh -h` | Target command surface: build/up/down/restart/logs/exec/e2e/test/ci/install/package/clean/config/data/doctor/version + `build --image` and `e2e <suite>` help | |
+| A2 | `./mediaservo.sh doctor` | pixi/cargo/docker/node version output (4 lines) | |
+| A3 | `./mediaservo.sh up --env dev server` | Idempotent (existing container → Started; no errors) | |
+| A4 | `./mediaservo.sh ps` | compose ps table — server row shows 9800/20000/40000-40100 mappings | |
+| A5 | `./mediaservo.sh logs server --follow` | Log follow (Ctrl-C to exit) | |
+| A6 | `./mediaservo.sh exec server -- sh -c 'echo ok'` | Prints `ok` | |
+| A7 | `./mediaservo.sh config set signaling.psk test123` | Writes `config/host.conf` + prompt (dev track) | |
+| A8 | `./mediaservo.sh data inspect` | Volume list (includes mediaservo_mediaservo-data) | |
 
-## B 组：entrypoint 自举（需 runtime 镜像）
+## Group B: entrypoint bootstrap (needs runtime image)
 
-| # | 命令 | 预期结果 | 实际 |
-|---|---|---|---|
-| B1 | `docker run --rm -v ms-data-test:/opt/mediaservo/etc -v ms-rec-test:/opt/mediaservo/recordings -e MEDIASERVO_ADMIN_PASSWORD=test123 -p 9800:9800 mediaservo-server:runtime-baseline` | 日志顺序：`generated fresh secrets` → `created bootstrap admin` → `psk_set=true` → `Listening on 0.0.0.0:9800` → `Server ready` | |
-| B2 | `docker exec <c> ls -la /opt/mediaservo/etc/` | `.env` + `server.yaml` 权限 600、属主 mediaservo；accounts.yaml/devices.yaml 存在 | |
-| B3 | `docker exec <c> cat /opt/mediaservo/etc/.env` | `MEDIASERVO_PSK=<64hex>`（**非** mediaservo-dev）| |
-| B4 | 浏览器/curl `http://127.0.0.1:9800/admin` + 登录 `admin`/`test123` | 200 + 登录成功（引导账号生效）| |
-| B5 | `docker restart <c>` → `docker exec <c> cat /opt/mediaservo/etc/.env` | PSK **不变**（卷持久）；配置不覆盖（可在重启前改 devices.yaml 验证）| |
-| B6 | `docker run --rm -v ms-data-test2:... -p 9801:9800 mediaservo-server:runtime-baseline` | **新密钥**（与 B3 不同——每实例独立）| |
-| B7 | 负例：卷内 `.env` 缺失（`docker exec <c> rm .env` 后重启）| 日志 `init incomplete` → exit 1（不启 server——幂等保护）| |
+| # | Command | Expected | Actual |
+|---|---------|----------|--------|
+| B1 | `docker run --rm -v ms-data-test:/opt/mediaservo/etc -v ms-rec-test:/opt/mediaservo/recordings -e MEDIASERVO_ADMIN_PASSWORD=test123 -p 9800:9800 mediaservo-server:runtime-baseline` | Log order: `generated fresh secrets` → `created bootstrap admin` → `psk_set=true` → `Listening on 0.0.0.0:9800` → `Server ready` | |
+| B2 | `docker exec <c> ls -la /opt/mediaservo/etc/` | `.env` + `server.yaml` mode 600, owner mediaservo; accounts.yaml/devices.yaml present | |
+| B3 | `docker exec <c> cat /opt/mediaservo/etc/.env` | `MEDIASERVO_PSK=<64hex>` (**not** mediaservo-dev) | |
+| B4 | Browser/curl `http://127.0.0.1:9800/admin` + login `admin`/`test123` | 200 + login succeeds (bootstrap account works) | |
+| B5 | `docker restart <c>` → `docker exec <c> cat /opt/mediaservo/etc/.env` | PSK **unchanged** (volume persistence); config not overwritten (optionally edit devices.yaml before restart to verify) | |
+| B6 | `docker run --rm -v ms-data-test2:... -p 9801:9800 mediaservo-server:runtime-baseline` | **New keys** (different from B3 — per-instance isolation) | |
+| B7 | Negative: `.env` missing from the volume (restart after `docker exec <c> rm .env`) | Log `init incomplete` → exit 1 (server does not start — idempotent guard) | |
 
-## C 组：prod compose（需镜像）
+## Group C: prod compose (needs image)
 
-| # | 命令 | 预期结果 | 实际 |
-|---|---|---|---|
-| C1 | `MEDIASERVO_ADMIN_PASSWORD=test123 ./mediaservo.sh up --env prod` | 根 compose 起 server（命名卷首启初始化）——admin 200 | |
-| C2 | 登录 admin/test123 → Settings → Provision Device（note: smoke-manual）| 配发成功；`docker logs` **无** "falling back to direct write"（命名卷原子写）| |
-| C3 | `./mediaservo.sh ps --env prod` + `./mediaservo.sh logs server --follow` | ps 显示 prod 容器；日志无 `mediaservo-dev`（密钥非默认）| |
-| C4 | `./mediaservo.sh down --env prod` → `./mediaservo.sh up --env prod` | **卷持久化**：登录仍成功（账号在）+ devices.yaml 含 smoke-manual 设备 | |
-| C5 | `./mediaservo.sh data backup /tmp/ms-backup` | `mediaservo_mediaservo-data.tar.gz` + `...recordings.tar.gz` 生成 | |
-| C6 | `./mediaservo.sh data reset --force` → `./mediaservo.sh up --env prod` | 卷清空 → 重新初始化（新密钥 + 空注册表）| |
+| # | Command | Expected | Actual |
+|---|---------|----------|--------|
+| C1 | `MEDIASERVO_ADMIN_PASSWORD=test123 ./mediaservo.sh up --env prod` | Root compose starts server (named volume initialized on first start) — admin 200 | |
+| C2 | Login admin/test123 → Settings → Provision Device (note: smoke-manual) | Provisioning succeeds; `docker logs` has **no** "falling back to direct write" (named-volume atomic write) | |
+| C3 | `./mediaservo.sh ps --env prod` + `./mediaservo.sh logs server --follow` | ps shows the prod container; logs have no `mediaservo-dev` (secret not default) | |
+| C4 | `./mediaservo.sh down --env prod` → `./mediaservo.sh up --env prod` | **Volume persistence**: login still succeeds (account present) + devices.yaml contains the smoke-manual device | |
+| C5 | `./mediaservo.sh data backup /tmp/ms-backup` | `mediaservo_mediaservo-data.tar.gz` + `...recordings.tar.gz` generated | |
+| C6 | `./mediaservo.sh data reset --force` → `./mediaservo.sh up --env prod` | Volumes cleared → re-initialized (new keys + empty registry) | |
 
-## D 组：回归（load 正常时）
+## Group D: regression (when load is normal)
 
-| # | 命令 | 预期结果 | 实际 |
-|---|---|---|---|
+| # | Command | Expected | Actual |
+|---|---------|----------|--------|
 | D1 | `./mediaservo.sh e2e sfu` | 4 passed | |
-| D2 | `./mediaservo.sh e2e push` | 6 passed（此前高负载环境干扰——构建后应恢复）| |
+| D2 | `./mediaservo.sh e2e push` | 6 passed (previously polluted by high load — should recover after builds) | |
 | D3 | `./mediaservo.sh e2e host` | e2e-install-host PASS | |
 | D4 | `./mediaservo.sh e2e package` | e2e-package PASS | |
 | D5 | `./mediaservo.sh e2e brand` | e2e-brand PASS | |
-| D6 | `./mediaservo.sh e2e ui` | Playwright（device-provisioning spec）1 passed | |
-| D7 | `./mediaservo.sh e2e smoke` | prod smoke PASS（= C 组自动化断言）| |
+| D6 | `./mediaservo.sh e2e ui` | Playwright (device-provisioning spec) 1 passed | |
+| D7 | `./mediaservo.sh e2e smoke` | prod smoke PASS (= Group C automated assertions) | |
 
-## E 组：清理
+## Group E: cleanup
 
-| # | 命令 | 预期 |
-|---|---|---|
-| E1 | `./mediaservo.sh down --env prod` | prod 容器停止（卷保留）|
-| E2 | `docker volume rm ms-data-test ms-data-test2 ms-rec-test` | 测试卷删除 |
-| E3 | `./mediaservo.sh up --env dev` | 恢复 dev 环境 |
+| # | Command | Expected |
+|---|---------|----------|
+| E1 | `./mediaservo.sh down --env prod` | prod containers stopped (volumes kept) |
+| E2 | `docker volume rm ms-data-test ms-data-test2 ms-rec-test` | Test volumes removed |
+| E3 | `./mediaservo.sh up --env dev` | dev environment restored |
 
 ---
 
-## 结果记录
+## Results Log
 
-| 日期 | 组 | 结果 | 备注 |
-|---|---|---|---|
+| Date | Group | Result | Notes |
+|------|-------|--------|-------|
 | | | | |
 | | | | |
 
-## 失败排查提示
+## Failure Troubleshooting Tips
 
-- **B 组 init 失败**：`docker logs <c>` 看 entrypoint 输出（生成/权限/模板路径）；检查卷属主（`docker run --rm -v ms-data-test:/d alpine ls -la /d`）
-- **C2 配发 EBUSY**：命名卷下 rename 应成功——若出现 fallback 日志 → 卷挂载异常（`docker inspect` 确认卷类型）
-- **D2 帧测试挂**：先查 `uptime`（load >5 时编码器停摆——环境干扰，stash 对照证非代码）；再查 `docker logs` 有无 RTP/worker 错误
-- **smoke 登录失败**：MEDIASERVO_ADMIN_PASSWORD 需在**首次** up 时设置（引导只首启生效）
+- **Group B init failure**: check `docker logs <c>` for entrypoint output (generation/permissions/template path); check volume ownership (`docker run --rm -v ms-data-test:/d alpine ls -la /d`)
+- **C2 provisioning EBUSY**: rename under a named volume should succeed — if fallback logs appear → volume mount issue (confirm volume type via `docker inspect`)
+- **D2 frame test hangs**: check `uptime` first (encoder stalls when load >5 — environment interference, stash comparison proved not code); then check `docker logs` for RTP/worker errors
+- **smoke login failure**: MEDIASERVO_ADMIN_PASSWORD must be set at the **first** `up` (bootstrap only takes effect on first start)

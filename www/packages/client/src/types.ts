@@ -1,4 +1,4 @@
-// ── server wire 类型（P0/D270-R1 自 apps/admin api/client.ts 提纯——逐字迁移，零逻辑面）──
+// ── server wire types (P0/D270-R1: extracted verbatim from apps/admin api/client.ts — zero logic surface) ──
 
 // Types
 export interface Consumer { peer_id: string; connected_since: string; }
@@ -7,7 +7,7 @@ export interface DeviceSnapshot { device_id: string; online_since: string; strea
 export interface DeviceListResponse { devices: DeviceSnapshot[]; total_devices: number; }
 export interface StatsResponse { active_rooms: number; total_peers: number; active_connections: number; }
 
-// H3: SFU 房间摘要（音频会议面板数据源）。
+// H3: SFU room summary (data source for the audio conference panel).
 export interface SfuRoom {
   room_id: string;
   participants: number;
@@ -19,7 +19,7 @@ export interface SfuRoom {
 }
 export interface SfuRoomsResponse { rooms: SfuRoom[]; }
 
-// H3: SfuStats（镜像 WS 信令 SfuStats — H2 协议的管理面）。
+// H3: SfuStats (mirrors the WS signaling SfuStats — the H2 protocol admin surface).
 export interface SfuStats {
   producer_id?: string;
   consumer_id?: string;
@@ -29,7 +29,7 @@ export interface SfuStats {
   score: number;
 }
 
-// H3: 多车状态上报（StatusReport wire 镜像 — E3）。
+// H3: multi-vehicle status report (StatusReport wire mirror — E3).
 export interface TopicFlow { topic: string; fps: number; bps: number; last_ts_mono_ns: number; frames: number; stalled: boolean; }
 export interface StreamFlow { id: string; bytes_sent: number; frames_encoded: number; frame_width: number; frame_height: number; connected: boolean; }
 export interface ProcessState { name: string; running: boolean; expected: boolean; }
@@ -51,12 +51,12 @@ export interface StatusReport {
   config_version: number;
 }
 export interface VehicleStatusResponse { vehicles: { room_id: string; report: StatusReport }[]; }
-// Device/account admin（AdminState — 授权设备与账号管理端点）
+// Device/account admin (AdminState — authorized device and account management endpoints)
 export interface AdminDevice { device_id: string; }
 export interface AdminDeviceListResponse { devices: AdminDevice[]; count: number; }
 export interface AdminDeviceSecret { device_id: string; secret: string; secret_hash: string; note: string; }
 export interface AdminDeviceRevoked { device_id: string; revoked: boolean; }
-// device-enroll §5.4: 待批准队列（验签过、未入册；内存表重启即清）
+// device-enroll §5.4: pending approval queue (signature verified, not yet enrolled; in-memory table cleared on restart)
 export interface PendingDevice { device_id: string; public_key: string; first_seen_ms: number; verified: boolean; }
 export interface PendingDeviceListResponse { pending: PendingDevice[]; count: number; }
 export interface PendingDeviceApproved { device_id: string; public_key: string; name: string | null; note: string; }
@@ -67,7 +67,7 @@ export interface AdminAccountCreated { created: string; }
 export interface AdminAccountUpdated { updated: string; }
 export interface AdminAccountDeleted { deleted: string; }
 
-// ── PSK 管理（psk-admin-management — admin-only 端点）──────────────────────
+// ── PSK management (psk-admin-management — admin-only endpoints) ──────────
 
 export interface PskResponse {
   psk: string;

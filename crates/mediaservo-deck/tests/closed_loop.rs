@@ -1,7 +1,7 @@
-//! deck 闭环 e2e：CameraSource → FrameBus 传输 → Recorder 落盘。
+//! Deck closed-loop e2e: CameraSource → FrameBus transport → Recorder to disk.
 //!
-//! 验证最小闭环"采集→传输→落盘"（用户确认的 Phase 2 范围）。
-//! 需要 `backend-ffmpeg` + link FrameBus 能力。
+//! Verifies the minimal loop "capture → transport → record" (user-confirmed Phase 2 scope).
+//! Requires `backend-ffmpeg` + link FrameBus capability.
 
 #![cfg(feature = "backend-ffmpeg")]
 
@@ -26,7 +26,7 @@ fn token(role: Role, node_id: &str) -> (CapabilityToken, Ed25519VerifyingKey) {
     (CapabilityToken::sign(&acl, 3600, &sk).unwrap(), vk)
 }
 
-/// VideoFrame(I420) → 扁平 payload（YkV+kU+kV 连续）。
+/// VideoFrame(I420) → flat payload (Y+U+V contiguous).
 fn frame_to_payload(f: &VideoFrame) -> Vec<u8> {
     let mut out = Vec::with_capacity(f.plane_data(0).unwrap().len() * 3 / 2);
     for i in 0..3 {
@@ -35,7 +35,7 @@ fn frame_to_payload(f: &VideoFrame) -> Vec<u8> {
     out
 }
 
-/// payload → VideoFrame（flat I420，假设紧凑 stride == width）。
+/// payload → VideoFrame (flat I420, assumes compact stride == width).
 fn payload_to_frame(meta: &FrameMeta, payload: &[u8]) -> VideoFrame {
     let w = meta.width as usize;
     let h = meta.height as usize;
@@ -72,7 +72,7 @@ async fn camera_framebus_recorder_roundtrip() {
     let path = dir.join("loop.mp4");
     let _ = std::fs::remove_file(&path);
 
-    // ── 采集侧（Capture）────────────────────────────
+    // ── Capture side ─────────────────────────────────
     let (tok_cap, vk_cap) = token(Role::Capture, "deck-capture");
     let cap_bus = FrameBus::attach("", &tok_cap, &vk_cap).expect("capture attach");
     let mut cam =
@@ -81,9 +81,9 @@ async fn camera_framebus_recorder_roundtrip() {
     let opts = CaptureOptions { resolution: Some((320, 240)), framerate: Some(30), format: None };
     let mut cam_frames = cam.start(&opts).expect("cam start");
 
-    // 帧发布泵：CameraSource 帧 → FrameBus publish（flat I420）。
-    // FrameBus 非 Clone — 发布泵持有 Arc（publish 是 &self）。
-    // 结束条件：源帧结束 OR 停止信号（与 recorder 同模式）。
+    // Frame publish pump: CameraSource frames → FrameBus publish (flat I420).
+    // FrameBus is not Clone — the publish pump holds an Arc (publish is &self).
+    // End condition: source frames end OR stop signal (same pattern as the recorder).
     let pub_bus = std::sync::Arc::new(cap_bus);
     let pub_topic = topic.clone();
     let pub_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -119,17 +119,17 @@ async fn camera_framebus_recorder_roundtrip() {
         }
     });
 
-    // ── 录制侧（Recorder 角色，订阅 topic + 落盘）────────
-    // 说明：设置中 define Recorder 消费的 Frames 来自 FrameBus 订阅。
-    // 用自定义 Frames 实现（link FrameStream 是同步 recv — 需转 async）。
-    let (tok_rec, vk_rec) = token(Role::Pusher, "deck-recorder"); // Pusher 订阅 video/* camera/*
+    // ── Record side (Recorder role: subscribe topic + write to disk) ────────
+    // Note: in this setup the Frames consumed by the Recorder come from a FrameBus subscription.
+    // Uses a custom Frames impl (link FrameStream recv is sync — needs an async adapter).
+    let (tok_rec, vk_rec) = token(Role::Pusher, "deck-recorder"); // Pusher subscribes to video/* camera/*
     let rec_bus = FrameBus::attach("", &tok_rec, &vk_rec).expect("recorder attach");
     let link_stream = rec_bus.subscribe(&topic).expect("subscribe");
 
-    // async 帧桥：link FrameStream（tokio receiver, async recv）→
-    // deck Recorder 的 Frames 接口。delegate 一次取一帧转 VideoFrame。
-    // Recorder::record 消费 impl Frames（async next()）——
-    // 桥接直接复用 mediaservo-link FrameStream 的 as_async。
+    // Async frame bridge: link FrameStream (tokio receiver, async recv) →
+    // the deck Recorder Frames interface. The delegate fetches one frame at a time into a VideoFrame.
+    // Recorder::record consumes an impl Frames (async next()) —
+    // the bridge reuses mediaservo-link FrameStream's as_async directly.
     let mut recorder = Recorder::new(
         &path,
         RecordOptions {
@@ -145,11 +145,11 @@ async fn camera_framebus_recorder_roundtrip() {
         recorder.record(LinkFrames::new(link_stream)).await.expect("record ok");
     });
 
-    // ── 驱动 1.5s → 停止 ──────────────────────────────
+    // ── Drive 1.5s → stop ──────────────────────────────
     tokio::time::sleep(Duration::from_millis(1800)).await;
     cam.stop();
-    pub_stop.store(true, std::sync::atomic::Ordering::SeqCst); // 发布泵退出
-    stop.stop(); // recorder pump 退出 → flush + trailer
+    pub_stop.store(true, std::sync::atomic::Ordering::SeqCst); // Publish pump exits
+    stop.stop(); // Recorder pump exits → flush + trailer
 
     tokio::time::timeout(Duration::from_secs(10), pub_task)
         .await
@@ -160,7 +160,7 @@ async fn camera_framebus_recorder_roundtrip() {
         .expect("recorder finishes")
         .expect("recorder panicked");
 
-    // ── 验证：MP4 完整有效 ─────────────────────────────
+    // ── Verify: MP4 complete and valid ─────────────────
     let size = std::fs::metadata(&path).expect("file exists").len();
     assert!(size > 1_000, "mp4 size {size}");
 
@@ -171,7 +171,7 @@ async fn camera_framebus_recorder_roundtrip() {
     }
 }
 
-/// link FrameStream 封装成 deck Frames（async next() 适配）。
+/// Wraps a link FrameStream into deck Frames (async next() adapter).
 struct LinkFrames {
     stream: mediaservo_link::FrameStream,
 }

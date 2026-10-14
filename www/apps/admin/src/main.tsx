@@ -7,7 +7,7 @@ import './App.css';
 // When served at /admin, set basename for proper routing
 const basename = window.location.pathname.startsWith('/admin') ? '/admin' : '/';
 
-// 品牌化标题（vite define 编译期注入——运行时改 env 无效，需 pnpm build + server 重建，C24）
+// Branded title (injected at compile time via vite define — changing env at runtime has no effect; needs pnpm build + server rebuild, C24)
 declare const __APP_TITLE__: string;
 document.title = __APP_TITLE__;
 

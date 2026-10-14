@@ -1,13 +1,13 @@
-//! MediaServo Field C ABI — 推流面（车端 SDK 消费）。
+//! MediaServo Field C ABI — push plane (vehicle-side SDK consumption).
 //!
-//! 契约 §7（D109/D240/D241）：opaque handle + int 错误码 + 回调。
-//! 同步阻塞式（内部共享 multi_thread runtime）— 车端嵌入式场景简化集成。
+//! Contract §7 (D109/D240/D241): opaque handles + int error codes + callbacks.
+//! Synchronous blocking style (internally a shared multi_thread runtime) — simplifies integration for vehicle embedded scenarios.
 //!
-//! # 生命周期契约（审核 R2）
-//! - handle 单线程属主；close 后任何 API 调用为 UB（除幂等 close）。
-//! - close = 置 closed 标志 → 释放会话 → drop runtime（取消后台任务）。
+//! # Lifecycle contract (audit R2)
+//! - Each handle is single-thread-owner; any API call after close is UB (except idempotent close).
+//! - close = set the closed flag → release the session → drop the runtime (cancels background tasks).
 //!
-//! # C ABI 面（cbindgen 导出, MAJOR 内稳定）
+//! # C ABI surface (cbindgen exports, stable within MAJOR)
 //! ```c
 //! typedef struct mediaservo_field_push_t mediaservo_field_push_t;   /* opaque */
 //! typedef int mediaservo_err_t;                              /* 0=ok, <0=error */
@@ -17,12 +17,12 @@
 //! mediaservo_err_t mediaservo_field_push_start_video_frames(mediaservo_field_push_t* s);
 //! void     mediaservo_field_push_stop_video_frames(mediaservo_field_push_t* s);
 //! mediaservo_err_t mediaservo_field_push_close(mediaservo_field_push_t* s);
-//! mediaservo_err_t mediaservo_field_last_error(char* buf, size_t len);   /* mediaservo_last_error 为 deprecated 别名 */
+//! mediaservo_err_t mediaservo_field_last_error(char* buf, size_t len);   /* mediaservo_last_error is a deprecated alias */
 //! mediaservo_err_t mediaservo_field_version(char* buf, size_t len);
 //! ```
 
-#![allow(clippy::not_unsafe_ptr_arg_deref)] // C ABI 门面（deck-c/link-c 同形先例）
-#![allow(non_camel_case_types)] // C 可见 *_t 类型名镜像
+#![allow(clippy::not_unsafe_ptr_arg_deref)] // C ABI facade (same-shape precedent as deck-c/link-c)
+#![allow(non_camel_case_types)] // C-visible *_t type-name mirrors
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -31,7 +31,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use mediaservo_field::{PublishOptions, PushConfig, PushSession};
 
-/// 错误码（<0；0 = ok）。MEDIASERVO_FIELD_ERR_* 为现行前缀，MEDIASERVO_ERR_* 保留兼容别名。
+/// Error codes (<0; 0 = ok). MEDIASERVO_FIELD_ERR_* is the current prefix; MEDIASERVO_ERR_* are retained compatibility aliases.
 pub const MEDIASERVO_OK: c_int = 0;
 pub const MEDIASERVO_ERR_INVALID_ARG: c_int = -1;
 pub const MEDIASERVO_ERR_CONNECT: c_int = -2;
@@ -44,7 +44,7 @@ pub const MEDIASERVO_FIELD_ERR_PUBLISH: c_int = -3;
 pub const MEDIASERVO_FIELD_ERR_STATE: c_int = -4;
 pub const MEDIASERVO_FIELD_ERR_INTERNAL: c_int = -5;
 
-/// 全局最近错误信息（mediaservo_field_last_error 读取）。
+/// Global last-error message (read via mediaservo_field_last_error).
 static LAST_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 fn set_last_error(msg: impl Into<String>) {
@@ -53,33 +53,33 @@ fn set_last_error(msg: impl Into<String>) {
     }
 }
 
-/// 推流配置（C 结构 — 与 PushConfig 一一映射）。
+/// Push configuration (C struct — one-to-one mapping with PushConfig).
 ///
-/// 首字段 `struct_size`（审核 R3）：调用方填 `sizeof(mediaservo_push_config_t)`，
-/// 库校验 `>= sizeof(已知结构)`、超长忽略 —— 结构演进不破坏二进制兼容。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外：mediaservo_* 前缀）
+/// First field `struct_size` (audit R3): the caller fills `sizeof(mediaservo_push_config_t)`;
+/// the library validates `>= sizeof(known struct)` and ignores extra length — struct evolution does not break binary compatibility.
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception: mediaservo_* prefix)
 #[repr(C)]
 pub struct mediaservo_push_config_t {
     pub struct_size: usize,
-    /// 信令 WS 地址（如 "ws://host:9800/ws"）。
+    /// Signaling WS address (e.g. "ws://host:9800/ws").
     pub url: *const c_char,
-    /// PSK 认证密钥。
+    /// PSK authentication key.
     pub psk: *const c_char,
-    /// 房间 ID。
+    /// Room ID.
     pub room: *const c_char,
-    /// 视频宽（默认 1280）。
+    /// Video width (default 1280).
     pub width: u32,
-    /// 视频高（默认 720）。
+    /// Video height (default 720).
     pub height: u32,
-    /// 帧率（默认 30）。
+    /// Framerate (default 30).
     pub framerate: u32,
-    /// 编码码率 kbps（默认 2000）。
+    /// Encoder bitrate kbps (default 2000).
     pub bitrate_kbps: u32,
-    /// 关键帧间隔秒（默认 2）。
+    /// Keyframe interval in seconds (default 2).
     pub keyframe_interval: u64,
 }
 
-/// C 结构已知前缀尺寸（版本演进时的最小合法值）。
+/// Known prefix size of the C struct (the minimum legal value across version evolution).
 pub const MEDIASERVO_PUSH_CONFIG_MIN_SIZE: usize = size_of::<mediaservo_push_config_t>();
 
 impl Default for mediaservo_push_config_t {
@@ -98,26 +98,26 @@ impl Default for mediaservo_push_config_t {
     }
 }
 
-/// 推流会话 opaque handle。
+/// Push session opaque handle.
 pub struct mediaservo_field_push_t {
     inner: std::sync::Mutex<Option<PushSession>>,
     cfg: PushConfig,
-    /// 共享 multi_thread runtime（审核 R1）：session 后台任务（WS 读循环）
-    /// 存活于本 runtime，全部 C 调用 block_on 同一实例 —— per-call runtime
-    /// 会在返回时取消 spawn 任务导致会话死亡。
+    /// Shared multi_thread runtime (audit R1): the session background task (WS read loop)
+    /// lives on this runtime; all C calls block_on the same instance — a per-call runtime
+    /// would cancel the spawned task on return, killing the session.
     rt: tokio::runtime::Runtime,
-    /// 已关闭标志（close 幂等 + 入口校验）。
+    /// Closed flag (close idempotence + entry validation).
     closed: AtomicBool,
 }
 
-// SAFETY: handle 内部为 Mutex<Option<PushSession>>（线程安全）+ 不可变 cfg + Send runtime。
+// SAFETY: the handle holds Mutex<Option<PushSession>> (thread-safe) + an immutable cfg + a Send runtime.
 unsafe impl Send for mediaservo_field_push_t {}
-// SAFETY: 所有方法经 Mutex 序列化访问内部会话。
+// SAFETY: all methods access the inner session serialized through the Mutex.
 unsafe impl Sync for mediaservo_field_push_t {}
 
-// ── 内部辅助 ──
+// -- Internal helpers --
 
-/// 提取 C 字符串（null → None）。非法 UTF-8 → 错误。
+/// Extract a C string (null → None). Invalid UTF-8 → error.
 fn cstr<'a>(ptr: *const c_char) -> Result<Option<&'a str>, ()> {
     if ptr.is_null() {
         return Ok(None);
@@ -125,7 +125,7 @@ fn cstr<'a>(ptr: *const c_char) -> Result<Option<&'a str>, ()> {
     unsafe { CStr::from_ptr(ptr) }.to_str().map(Some).map_err(|_| ())
 }
 
-/// 新建共享 multi_thread runtime（每个 handle 一个）。
+/// Create a shared multi_thread runtime (one per handle).
 fn new_runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -136,11 +136,11 @@ fn new_runtime() -> tokio::runtime::Runtime {
 
 // ── C ABI ──
 
-/// 连接信令并创建推流会话（阻塞）。
+/// Connect signaling and create the push session (blocking).
 ///
-/// `cfg` 不可为 null；`url/psk/room` 必填；`cfg.struct_size` 必须
-/// `>= sizeof(mediaservo_push_config_t)`（旧头文件编译的调用方会得到明确错误）。
-/// 成功后 `*out` 指向新 handle（调用方负责 `mediaservo_field_push_close`）。
+/// `cfg` must not be null; `url/psk/room` are required; `cfg.struct_size` must be
+/// `>= sizeof(mediaservo_push_config_t)` (callers compiled against an older header get an explicit error).
+/// On success `*out` points to the new handle (the caller owns `mediaservo_field_push_close`).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_field_push_connect(
     cfg: *const mediaservo_push_config_t,
@@ -225,9 +225,9 @@ pub extern "C" fn mediaservo_field_push_connect(
     })
 }
 
-/// 发布视频轨（阻塞协商；成功返回 track id 字符串到 `out_track` 缓冲）。
+/// Publish the video track (blocking negotiation; on success writes the track id string into the `out_track` buffer).
 ///
-/// `out_track` 需至少 `out_track_len` 字节（track id 短, 64 足够）。
+/// `out_track` needs at least `out_track_len` bytes (track ids are short; 64 is enough).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_field_push_publish_video(
     s: *mut mediaservo_field_push_t,
@@ -279,7 +279,7 @@ pub extern "C" fn mediaservo_field_push_publish_video(
     })
 }
 
-/// 启动视频帧生成（Squares + 时间戳水印；阻塞仅本地启动）。
+/// Start video frame generation (squares + timestamp watermark; blocking, local start only).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_field_push_start_video_frames(
     s: *mut mediaservo_field_push_t,
@@ -305,8 +305,8 @@ pub extern "C" fn mediaservo_field_push_start_video_frames(
             set_last_error("mediaservo_field_push_start_video_frames: session closed");
             return MEDIASERVO_FIELD_ERR_STATE;
         };
-        // WebRtcTrackSink 需要 tokio runtime context（Handle::try_current）——
-        // 同步方法经共享 rt block_on 提供 context（审核 R1 延续）。
+        // WebRtcTrackSink needs a tokio runtime context (Handle::try_current) —
+        // the sync method provides it via shared-rt block_on (continuing audit R1).
         match handle.rt.block_on(async { session.start_video_frames(&handle.cfg) }) {
             Ok(()) => MEDIASERVO_OK,
             Err(e) => {
@@ -321,7 +321,7 @@ pub extern "C" fn mediaservo_field_push_start_video_frames(
     })
 }
 
-/// 停止视频帧生成（幂等）。
+/// Stop video frame generation (idempotent).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_field_push_stop_video_frames(s: *mut mediaservo_field_push_t) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
@@ -340,10 +340,10 @@ pub extern "C" fn mediaservo_field_push_stop_video_frames(s: *mut mediaservo_fie
     }));
 }
 
-/// 关闭推流会话并释放 handle（幂等）。
+/// Close the push session and release the handle (idempotent).
 ///
-/// 顺序（审核 R2）：置 closed 标志 → 释放会话（block_on close）→
-/// drop runtime（取消残留后台任务）→ 释放 handle 内存。
+/// Order (audit R2): set the closed flag → release the session (block_on close) →
+/// drop the runtime (cancels leftover background tasks) → free the handle memory.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_field_push_close(s: *mut mediaservo_field_push_t) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -352,7 +352,7 @@ pub extern "C" fn mediaservo_field_push_close(s: *mut mediaservo_field_push_t) -
         }
         let handle = unsafe { Box::from_raw(s) };
         if handle.closed.swap(true, Ordering::SeqCst) {
-            return MEDIASERVO_OK; // 幂等：已关闭
+            return MEDIASERVO_OK; // idempotent: already closed
         }
         let session = handle.inner.lock().ok().and_then(|mut g| g.take());
         if let Some(session) = session {
@@ -373,7 +373,7 @@ pub extern "C" fn mediaservo_field_push_close(s: *mut mediaservo_field_push_t) -
     })
 }
 
-/// 最近一次错误的详情（线程安全；无错误时返回空串）。
+/// Details of the last error (thread-safe; returns an empty string when no error).
 fn last_error_impl(buf: *mut c_char, len: usize) -> c_int {
     if buf.is_null() || len == 0 {
         return MEDIASERVO_FIELD_ERR_INVALID_ARG;
@@ -388,21 +388,21 @@ fn last_error_impl(buf: *mut c_char, len: usize) -> c_int {
     MEDIASERVO_OK
 }
 
-/// 最近错误详情（现行前缀，推荐使用）。
+/// Last error details (current prefix; recommended).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_field_last_error(buf: *mut c_char, len: usize) -> c_int {
     catch_unwind(AssertUnwindSafe(|| last_error_impl(buf, len)))
         .unwrap_or(MEDIASERVO_FIELD_ERR_INTERNAL)
 }
 
-/// 最近错误详情（deprecated 别名，additive-only 保留）。
+/// Last error details (deprecated alias, kept additive-only).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_last_error(buf: *mut c_char, len: usize) -> c_int {
     catch_unwind(AssertUnwindSafe(|| last_error_impl(buf, len)))
         .unwrap_or(MEDIASERVO_FIELD_ERR_INTERNAL)
 }
 
-/// 版本信息（MAJOR.MINOR.PATCH — D241 soname 语义）。
+/// Version info (MAJOR.MINOR.PATCH — D241 soname semantics).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_field_version(buf: *mut c_char, len: usize) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -423,15 +423,15 @@ pub extern "C" fn mediaservo_field_version(buf: *mut c_char, len: usize) -> c_in
 
 #[cfg(test)]
 mod tests {
-    /// 本文件测试共享进程级 static LAST_ERROR（C ABI 语义如此）——凡走 API 错误路径的
-    /// 测试都会隐式写它（null-handle 形 ×N），并跑互踩 = flaky（09-21 gate 实抓：
-    /// 显式守护合并成单测仍被竞跑 null-handle 测试覆写）。全文件测试经此锁串行。
+    /// Tests in this file share the process-level static LAST_ERROR (C ABI semantics) — any test that walks an API error path
+    /// writes it implicitly (null-handle forms xN), and parallel runs stomp on each other = flaky (caught by the 09-21 gate:
+    /// the explicit-guard merged test was still overwritten by a racing null-handle test). All tests in this file serialize through this lock.
     static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     use super::*;
 
-    /// 全局 last_error = 进程级状态，两测试并跑必竞态（09-18 gate 实抓）。
-    /// 合并为单测串行验证新名+别名两条路径。
+    /// Global last_error is process-level state; two tests running in parallel always race (caught by the 09-18 gate).
+    /// Merged into one test that serially verifies both the new name and the alias paths.
     #[test]
     fn last_error_roundtrip_and_alias() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn connect_small_struct_size_fails() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // 旧头文件编译的调用方：struct_size 过小 → 明确错误（R3）
+        // Caller compiled against an older header: struct_size too small → explicit error (R3)
         let cfg = mediaservo_push_config_t { struct_size: 1, ..Default::default() };
         let mut out: *mut mediaservo_field_push_t = ptr::null_mut();
         let rc = mediaservo_field_push_connect(&cfg, &mut out);
@@ -483,7 +483,7 @@ mod tests {
     #[test]
     fn connect_missing_required_fails() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // struct_size 合法但 url/psk/room 为空 → 必填错误
+        // struct_size valid but url/psk/room empty → required-field error
         let cfg = mediaservo_push_config_t::default();
         let mut out: *mut mediaservo_field_push_t = ptr::null_mut();
         let rc = mediaservo_field_push_connect(&cfg, &mut out);
@@ -519,6 +519,6 @@ mod tests {
     #[test]
     fn stop_video_frames_null_noop() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        mediaservo_field_push_stop_video_frames(ptr::null_mut()); // void: 不崩即过
+        mediaservo_field_push_stop_video_frames(ptr::null_mut()); // void: passing = no crash
     }
 }

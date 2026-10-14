@@ -11,9 +11,9 @@ import VideoPlayer from '../components/VideoPlayer';
 import './Dashboard.css';
 import { ChevronRight, Play, Video, Eye } from 'lucide-react';
 
-// 播放路数上限（浏览器软解资源护栏）：16 = 4 列 × 4 行网格尺度；超出忽略并提示
+// Playback cap (browser soft-decode guard): 16 = a 4x4 grid scale; beyond that, drop and hint
 const MAX_PLAYING = 16;
-// 列数控制（play-layout-stats）：默认 3、最多 4，localStorage 持久化 + 脏值防御
+// Column control (play-layout-stats): default 3, max 4, persisted in localStorage with dirty-value defense
 const PLAY_COLS_KEY = "mediaservo_play_cols";
 const MAX_COLS = 4;
 const DEFAULT_COLS = 3;
@@ -24,15 +24,15 @@ export default function Dashboard() {
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [expanded, setExpanded] = useState(new Set());
   const [selectedStream, setSelectedStream] = useState<{ deviceId: string; stream: StreamSnapshot } | null>(null);
-  // multi-stream P3: 勾选集 + 播放中列表。
-  // §12-1 设备房+流标签：键 `device_stream` 仅作 UI 状态键（勾选/去重/关闭），
-  // 信令寻址 = VideoPlayer 内拆解（roomId=device 房 + streamLabel=stream_id）。
-  // 旧派生房 `${device}_${stream}` 直连已废弃（host 只推设备房，派生房永远空）。
+  // multi-stream P3: selection set + currently-playing list.
+  // §12-1 device room + stream label: the `device_stream` key is only a UI state key (select/dedupe/close);
+  // signaling addressing is unpacked inside VideoPlayer (roomId=device room + streamLabel=stream_id).
+  // the old derived-room `${device}_${stream}` direct join is retired (host only pushes device rooms; derived rooms are always empty).
   const [selectedRooms, setSelectedRooms] = useState<Set<string>>(new Set());
   const [playingRooms, setPlayingRooms] = useState<string[]>([]);
-  // tile 双击→大窗播放（产品方案②）：独立 modal 实例，关闭即弃
+  // tile double-click → large-window playback (product option 2): standalone modal instance, discarded on close
   const [modalRoom, setModalRoom] = useState<string | null>(null);
-  // 播放被 MAX_PLAYING 截断时的提示（每次点 Play 刷新）
+  // hint shown when playback is truncated by MAX_PLAYING (refreshed on every Play click)
   const [playHint, setPlayHint] = useState("");
   const [cols, setCols] = useState<number>(() => {
     let v: number;
@@ -41,7 +41,7 @@ export default function Dashboard() {
   });
   const applyCols = (n: number) => {
     setCols(n);
-    try { localStorage.setItem(PLAY_COLS_KEY, String(n)); } catch { /* 无痕降级（隐私模式） */ }
+    try { localStorage.setItem(PLAY_COLS_KEY, String(n)); } catch { /* silent degrade (private mode) */ }
   };
 
   const fetchStats = useCallback(async () => {
@@ -52,7 +52,7 @@ export default function Dashboard() {
 
   useAdminWS(() => {
     fetchStats();
-    // 列表秒级刷新: admin 事件（StreamCreate/StreamDestroy 等）→ 立即重拉设备/流快照。
+    // second-level list refresh: admin events (StreamCreate/StreamDestroy etc.) → immediately re-pull device/stream snapshots.
     refetchDevices();
   });
 
@@ -74,7 +74,7 @@ export default function Dashboard() {
 
   const roomIdOf = (deviceId: string, streamId: string) => `${deviceId}_${streamId}`;
 
-  // 播放勾选集（空勾选 = 播放全部流，上限 MAX_PLAYING）
+  // playback selection set (empty selection = play all streams, capped at MAX_PLAYING)
   const playSelected = (deviceId: string) => {
     const device = devices.find(d => d.device_id === deviceId);
     if (!device) return;
@@ -91,7 +91,7 @@ export default function Dashboard() {
     const merged = [...playingRooms, ...fresh].slice(0, MAX_PLAYING);
     const dropped = fresh.length - (merged.length - playingRooms.length);
     setPlayingRooms(merged);
-    setPlayHint(dropped > 0 ? `已达播放上限 ${MAX_PLAYING} 路，本次忽略 ${dropped} 路（关闭部分卡片后可再播）` : "");
+    setPlayHint(dropped > 0 ? `Playback cap of ${MAX_PLAYING} reached; skipped ${dropped} this time (close some tiles to play more)` : "");
   };
 
   const toggleAllDevice = (device: DeviceSnapshot, checked: boolean) => {
@@ -154,7 +154,7 @@ export default function Dashboard() {
       {playingRooms.length > 0 && (
         <>
           <div className="video-toolbar">
-            <span className="vt-label">列数</span>
+            <span className="vt-label">Columns</span>
             {[1, 2, 3, 4].map((n) => (
               <button key={n} className={n === cols ? "vt-btn active" : "vt-btn"} aria-pressed={n === cols} onClick={() => applyCols(n)}>
                 {n}
@@ -166,7 +166,7 @@ export default function Dashboard() {
           </div>
           <div className="video-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
             {playingRooms.map((key) => {
-              // §12-1: UI 键 `device_stream` → 设备房 + 流标签（host 只推设备房）
+              // §12-1: UI key `device_stream` → device room + stream label (host only pushes device rooms)
               const sep = key.indexOf('_');
               const deviceId = sep > 0 ? key.slice(0, sep) : key;
               const streamId = sep > 0 ? key.slice(sep + 1) : '';

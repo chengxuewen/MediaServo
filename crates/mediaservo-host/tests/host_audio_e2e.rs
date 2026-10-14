@@ -1,12 +1,12 @@
-//! Task H2: host-audio 进程测试 — 音频会议参与者进程（tone 合成源，stub 麦克风）。
+//! Task H2: host-audio process tests - audio conference participant process (tone synth source, stub mic).
 //!
-//! - `bad_args_exit_2_with_usage`: 缺参/坏参（非 audio- 房间）→ exit 2 + stderr 用法
-//! - `audio_process_publishes_and_exits_clean`: 直连外部 mediasoup server → 加入
-//!   `audio-<id>` 房间 → publish 1 路 opus（tone）→ `--duration` 到期优雅退出 0；
-//!   server 侧房间存在（间接证据: 进程日志 published producer + 退出码 0）。
-//!   PIT-105: libwebrtc 音频编码不产包 — RTP 字节断言待修复后启用。
+//! - `bad_args_exit_2_with_usage`: missing/bad args (non audio- room) -> exit 2 + usage on stderr
+//! - `audio_process_publishes_and_exits_clean`: connect directly to an external mediasoup server -> join
+//!   the `audio-<id>` room -> publish 1 opus track (tone) -> graceful exit 0 when `--duration` expires;
+//!   the room exists server-side (indirect evidence: process log "published producer" + exit code 0).
+//!   PIT-105: libwebrtc audio encoding produces no packets - the RTP byte assertion waits for a fix.
 //!
-//! 前置: `SFU_E2E_WS_URL` 指向外部 mediasoup server（C21）+ `SFU_E2E_PSK`。
+//! Prerequisite: `SFU_E2E_WS_URL` pointing at an external mediasoup server (C21) + `SFU_E2E_PSK`.
 
 #![cfg(target_os = "linux")]
 
@@ -23,11 +23,11 @@ fn psk() -> String {
 
 fn ws_url() -> String {
     std::env::var("SFU_E2E_WS_URL").unwrap_or_else(|_| {
-        panic!("SFU_E2E_WS_URL 未设置 — host-audio e2e 需连外部 mediasoup server (C21)")
+        panic!("SFU_E2E_WS_URL not set - host-audio e2e needs an external mediasoup server (C21)")
     })
 }
 
-/// 跑 host-audio 并返回 (exit_code, 日志文本)。stdout/stderr 合并捕获。
+/// Runs host-audio and returns (exit_code, log text). stdout/stderr captured merged.
 fn run_audio(args: &[&str], timeout_secs: u64) -> (i32, String) {
     let mut child = Command::new(bin())
         .args(args)
@@ -52,7 +52,7 @@ fn run_audio(args: &[&str], timeout_secs: u64) -> (i32, String) {
         }
         if std::time::Instant::now() > deadline {
             let _ = child.kill();
-            panic!("host-audio 超时未退出（{timeout_secs}s）");
+            panic!("host-audio timed out without exiting ({timeout_secs}s)");
         }
         std::thread::sleep(Duration::from_millis(100));
     };
@@ -62,49 +62,52 @@ fn run_audio(args: &[&str], timeout_secs: u64) -> (i32, String) {
 
 #[test]
 fn bad_args_exit_2_with_usage() {
-    // 缺 --room
+    // missing --room
     let (code, log) = run_audio(&[], 10);
-    assert_eq!(code, 2, "缺参必须 exit 2: {log}");
-    assert!(log.contains("用法"), "必须输出用法: {log}");
+    assert_eq!(code, 2, "missing args must exit 2: {log}");
+    assert!(log.contains("Usage"), "must print usage: {log}");
 
-    // 非 audio- 房间
+    // non audio- room
     let (code, log) =
         run_audio(&["--room", "ms-car1", "--server", "ws://127.0.0.1:1/ws", "--psk", "x"], 10);
-    assert_eq!(code, 2, "非 audio- 房间必须 exit 2: {log}");
-    assert!(log.contains("audio-<vehicle>"), "必须提示房间约定: {log}");
+    assert_eq!(code, 2, "a non audio- room must exit 2: {log}");
+    assert!(log.contains("audio-<vehicle>"), "must hint the room convention: {log}");
 }
 
-/// 直连 server: join → publish（tone）→ --duration 到期 → exit 0。
-/// PIT-105: RTP 字节>0 断言待 libwebrtc 音频编码修复后启用。
+/// Direct server connect: join -> publish (tone) -> --duration expires -> exit 0.
+/// PIT-105: the RTP bytes>0 assertion waits for the libwebrtc audio-encoding fix.
 #[test]
 fn audio_process_publishes_and_exits_clean() {
     let url = ws_url();
     let room = format!("audio-e2e-proc-{}", std::process::id());
     let (code, log) =
         run_audio(&["--server", &url, "--psk", &psk(), "--room", &room, "--duration", "6"], 30);
-    assert_eq!(code, 0, "host-audio 必须优雅退出 0: {log}");
-    assert!(log.contains(&format!("已加入音频房间 {room}")), "必须加入音频房间: {log}");
-    assert!(log.contains("published producer"), "必须成功 publish opus: {log}");
-    // I4 re-review: PCM 推流成功计数（stats 日志 pushed_pcm=N）— tone 任务静默
-    // 失败（write_frame 全 Err）→ pushed_pcm=0 → 测试失败。
+    assert_eq!(code, 0, "host-audio must exit gracefully with 0: {log}");
+    assert!(log.contains(&format!("joined audio room {room}")), "must join the audio room: {log}");
+    assert!(log.contains("published producer"), "must publish opus successfully: {log}");
+    // I4 re-review: PCM push success counter (stats log pushed_pcm=N) - a silently failing tone task
+    // (all write_frame Err) -> pushed_pcm=0 -> the test fails.
     let pushed_line = log
         .lines()
         .find(|l| l.contains("pushed_pcm="))
-        .unwrap_or_else(|| panic!("stats 日志必须含 pushed_pcm: {log}"));
+        .unwrap_or_else(|| panic!("the stats log must contain pushed_pcm: {log}"));
     let pushed: u64 = pushed_line
         .split("pushed_pcm=")
         .nth(1)
         .and_then(|v| v.split(|c: char| !c.is_ascii_digit()).next())
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    assert!(pushed > 0, "pushed_pcm 必须 > 0（PCM 帧成功推入 libwebrtc）: {pushed_line}");
-    assert!(log.contains("--duration 到期"), "必须按 duration 退出: {log}");
+    assert!(
+        pushed > 0,
+        "pushed_pcm must be > 0 (PCM frames successfully pushed into libwebrtc): {pushed_line}"
+    );
+    assert!(log.contains("--duration elapsed"), "must exit on schedule per duration: {log}");
 }
 
-/// I3 review: 音频房间经本地网关（host-agent）直通 — 网关 rewrite_room 对 audio-
-/// 房间跳过重写。证据链: ① 网关模式 probe（SignalClient 直连网关）在 audio- 房间
-/// produce 视频 → server 4031（音频房间门在服务端生效 = 房间语义未被并入整车房间）
-/// ② host-audio --gateway 全流程（join + publish + 优雅退出 0）③ 整车房间含 host。
+/// I3 review: audio rooms pass straight through the local gateway (host-agent) - gateway rewrite_room
+/// skips rewriting for audio- rooms. Evidence chain: (1) gateway-mode probe (SignalClient direct to the gateway)
+/// produces video in an audio- room -> server 4031 (the audio-room gate enforced server-side = room semantics not merged into the vehicle room)
+/// (2) full host-audio --gateway flow (join + publish + graceful exit 0) (3) the vehicle room contains host.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn audio_through_gateway_reaches_audio_room() {
     use mediaservo_common::protocol::{MediaKind, SignalingMessage, TransportDirection};
@@ -115,18 +118,18 @@ async fn audio_through_gateway_reaches_audio_room() {
     let vehicle_room = format!("vehicle-{}", std::process::id());
     let audio_room = format!("audio-{}", vehicle_room);
 
-    // host-agent（本地网关）: 随机端口 + 远端指真 server
+    // host-agent (local gateway): random port + remote pointing at the real server
     let mut agent = Command::new(env!("CARGO_BIN_EXE_host-agent"))
         .args(["--port", &gw_port.to_string(), "--remote", &url, "--room", &vehicle_room])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .expect("spawn host-agent");
-    // 等 agent 网关就绪（端口可连; 远端 join 未完成时 probe 的
-    // RoomJoin 会收到 "gateway not connected" 明确报错 — 见下方 expect）
+    // wait for the agent gateway to be ready (port connectable; while the remote join is pending the probe's
+    // RoomJoin gets an explicit "gateway not connected" error - see the expect below)
     wait_for_gateway_port(gw_port, 20);
 
-    // ① 网关模式 probe: audio- 房间 produce 视频 → 4031（服务端音频房间门生效）
+    // (1) gateway-mode probe: produce video in an audio- room -> 4031 (server-side audio-room gate in effect)
     let gw_url = format!("ws://127.0.0.1:{gw_port}/ws");
     let probe = SignalClient::new_gateway(
         &gw_url,
@@ -136,7 +139,7 @@ async fn audio_through_gateway_reaches_audio_room() {
     )
     .connect()
     .await
-    .expect("probe 经网关 join 音频房间");
+    .expect("probe joins the audio room via the gateway");
     probe
         .send(SignalingMessage::CreateWebRtcTransport {
             room_id: audio_room.clone(),
@@ -154,7 +157,7 @@ async fn audio_through_gateway_reaches_audio_room() {
             Ok(SignalEvent::Message(SignalingMessage::Error { code, message })) => {
                 panic!("probe transport error {code}: {message}")
             }
-            Ok(SignalEvent::Disconnected { reason }) => panic!("probe 断开: {reason}"),
+            Ok(SignalEvent::Disconnected { reason }) => panic!("probe disconnected: {reason}"),
             _ => continue,
         }
     };
@@ -172,7 +175,7 @@ async fn audio_through_gateway_reaches_audio_room() {
                 "encodings": [{"ssrc": 12345}],
                 "rtcp": {"reducedSize": true}
             }),
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
 
             label: None,
         })
@@ -184,37 +187,40 @@ async fn audio_through_gateway_reaches_audio_room() {
             Ok(SignalEvent::Message(SignalingMessage::Error { code, message })) => {
                 assert_eq!(
                     code, 4031,
-                    "经网关的音频房间视频 produce 必须 4031（服务端音频房间门）: {message}"
+                    "video produce in an audio room via the gateway must be 4031 (server-side audio-room gate): {message}"
                 );
                 assert!(
                     message.contains("audio rooms allow audio producers only"),
-                    "错误信息: {message}"
+                    "error message: {message}"
                 );
                 denied = true;
                 break;
             }
             Ok(SignalEvent::Message(SignalingMessage::Produced { .. })) => {
-                panic!("经网关的音频房间视频 produce 必须被拒")
+                panic!("video produce in an audio room via the gateway must be rejected")
             }
             Ok(SignalEvent::Message(_)) => continue,
-            Ok(SignalEvent::Disconnected { reason }) => panic!("probe 断开: {reason}"),
+            Ok(SignalEvent::Disconnected { reason }) => panic!("probe disconnected: {reason}"),
             _ => continue,
         }
     }
-    assert!(denied, "未收到 4031");
+    assert!(denied, "4031 not received");
     probe.close().await.expect("probe close");
 
-    // ② host-audio 经网关全流程
+    // (2) full host-audio flow via the gateway
     let (code, log) =
         run_audio(&["--gateway", &gw_url, "--room", &audio_room, "--duration", "6"], 30);
-    assert_eq!(code, 0, "host-audio 经网关必须优雅退出 0: {log}");
-    assert!(log.contains(&format!("已加入音频房间 {audio_room}")), "经网关必须加入音频房间: {log}");
-    assert!(log.contains("published producer"), "经网关必须 publish: {log}");
+    assert_eq!(code, 0, "host-audio via the gateway must exit gracefully with 0: {log}");
+    assert!(
+        log.contains(&format!("joined audio room {audio_room}")),
+        "must join the audio room via the gateway: {log}"
+    );
+    assert!(log.contains("published producer"), "must publish via the gateway: {log}");
 
-    // SIGTERM → 网关优雅退出 0
+    // SIGTERM -> gateway graceful exit 0
     unsafe { libc::kill(agent.id() as i32, libc::SIGTERM) };
     let st = agent.wait().expect("wait agent");
-    assert_eq!(st.code(), Some(0), "agent 应优雅退出 0, got {st:?}");
+    assert_eq!(st.code(), Some(0), "agent should exit gracefully with 0, got {st:?}");
 }
 
 fn free_local_port() -> u16 {
@@ -222,7 +228,7 @@ fn free_local_port() -> u16 {
     l.local_addr().expect("probe addr").port()
 }
 
-/// 轮询网关 WS 端口直到 host-agent 就绪（≤20s）。
+/// Poll the gateway WS port until host-agent is ready (<=20s).
 fn wait_for_gateway_port(port: u16, tries: u32) {
     for _ in 0..tries {
         if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
@@ -230,5 +236,5 @@ fn wait_for_gateway_port(port: u16, tries: u32) {
         }
         std::thread::sleep(Duration::from_millis(500));
     }
-    panic!("host-agent 网关未就绪 (port {port})");
+    panic!("host-agent gateway not ready (port {port})");
 }

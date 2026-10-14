@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
-# sdk-client 安装面（libmediaservo_client + mediaservo/client.hpp + .pc）
+# sdk-client installed surface (libmediaservo_client + mediaservo/client.hpp + the .pc)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(MEDIASERVO_CLIENT REQUIRED mediaservo-client)
 

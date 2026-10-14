@@ -1,16 +1,16 @@
-//! Task C5: 崩溃重启故障注入 e2e — 架构核心价值验证（Momus MEDIUM-3）。
+//! Task C5: crash-restart fault-injection e2e - validating the architecture's core value (Momus MEDIUM-3).
 //!
-//! 杀 capturer（SIGKILL = 崩溃，非 SIGTERM 优雅退出）→ oxmgr 按
-//! `restart_policy = "always"` 自动拉起 → **同 topic 重发布成功**
-//! （max_publishers(1) + iceoryx2 残留 service 不阻塞 — C25 根因路径）→
-//! 订阅端（进程内 subscriber + host-recorder）恢复收帧。
+//! Kill the capturer (SIGKILL = crash, not a SIGTERM graceful exit) -> oxmgr auto-respawns per
+//! `restart_policy = "always"` -> **republishing on the same topic succeeds**
+//! (max_publishers(1) + leftover iceoryx2 services do not block - the C25 root-cause path) ->
+//! subscribers (the in-process subscriber + host-recorder) resume receiving frames.
 //!
-//! 全生产路径：`host init` → `host token issue` → `host start`（translate →
-//! oxfile → `oxmgr apply`）→ `oxmgr` 管理 capturer → kill -9 → oxmgr 重启 →
-//! FrameBus 订阅端实证帧恢复。不含 streamer（需外部 SFU server，C2/C4 已覆盖）。
+//! The all-production path: `host init` -> `host token issue` -> `host start` (translate ->
+//! oxfile -> `oxmgr apply`) -> `oxmgr` manages the capturer -> kill -9 -> oxmgr restarts ->
+//! FrameBus subscribers prove frame recovery. No streamer (needs an external SFU server; covered by C2/C4).
 //!
-//! 前置: oxmgr 0.5.0 在 PATH（~/.local/bin）且 daemon 运行；C25: 跑前清
-//! `/tmp/iceoryx2` + `/dev/shm/iox2_*`（本测试自带清理，见 `cleanup_iceoryx`）。
+//! Prerequisites: oxmgr 0.5.0 on PATH (~/.local/bin) with the daemon running; C25: clean
+//! `/tmp/iceoryx2` + `/dev/shm/iox2_*` before running (this test cleans up itself, see `cleanup_iceoryx`).
 
 #![cfg(target_os = "linux")]
 
@@ -23,7 +23,7 @@ use mediaservo_link::{
     Role,
 };
 
-// 测试用 Ed25519 密钥对（openssl 生成，仅测试用；与 link/deck/capturer 测试同源）。
+// Test Ed25519 keypair (generated with openssl, test-only; same source as link/deck/capturer tests).
 const PRIV_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIObCg8b+Le6kKOI/+pE+4+YhXUlr6X6h7q8p/MjvHmXT\n-----END PRIVATE KEY-----\n";
 const PUB_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgXprEbnahCZoZtLpiUqR0ruqtzEfRXk/Gl/6F6PEm4o=\n-----END PUBLIC KEY-----\n";
 
@@ -34,7 +34,7 @@ fn token(role: Role, node_id: &str) -> (CapabilityToken, Ed25519VerifyingKey) {
     (CapabilityToken::sign(&acl, 3600, &sk).unwrap(), vk)
 }
 
-/// C25: 清 iceoryx2 0.9.3 运行时残留（/tmp/iceoryx2 + /dev/shm/iox2_*）。
+/// C25: clean iceoryx2 0.9.3 runtime residue (/tmp/iceoryx2 + /dev/shm/iox2_*).
 fn cleanup_iceoryx() {
     let _ = std::fs::remove_dir_all("/tmp/iceoryx2");
     if let Ok(entries) = std::fs::read_dir("/dev/shm") {
@@ -46,7 +46,7 @@ fn cleanup_iceoryx() {
     }
 }
 
-/// oxmgr 在 PATH 中（host CLI 内部调 `oxmgr`；测试进程可能没有 ~/.local/bin）。
+/// oxmgr is on PATH (the host CLI invokes `oxmgr` internally; the test process may lack ~/.local/bin).
 fn path_with_oxmgr() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     let mut path = format!("{home}/.local/bin");
@@ -57,9 +57,9 @@ fn path_with_oxmgr() -> String {
     path
 }
 
-/// `oxmgr list --json` → host 命名空间进程列表（name/status/pid）。
-/// oxmgr 实例 daemon env（与 translate::oxmgr_apply 同源: OXMGR_HOME 派生端口隔离
-/// daemon——`oxmgr list` 不带此 env 会连默认 daemon（空），看不到实例进程）。
+/// `oxmgr list --json` -> the host-namespace process list (name/status/pid).
+/// The oxmgr instance-daemon env (same source as translate::oxmgr_apply: OXMGR_HOME derives port-isolated
+/// daemons - `oxmgr list` without this env connects the default daemon (empty) and cannot see instance processes).
 fn oxmgr_env(dir: &std::path::Path) -> Vec<(String, String)> {
     let home = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).join("run").join("oxmgr");
     let sum: u32 = home.to_string_lossy().bytes().map(u32::from).sum();
@@ -79,13 +79,13 @@ fn oxmgr_host_procs(dir: &std::path::Path) -> Vec<(String, String, u64)> {
         .expect("oxmgr list");
     assert!(
         out.status.success(),
-        "oxmgr list 失败（oxmgr 0.5.0 需在 PATH 且 daemon 运行）: {}",
+        "oxmgr list failed (oxmgr 0.5.0 must be on PATH with the daemon running): {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let procs: serde_json::Value = serde_json::from_slice(&out.stdout).expect("oxmgr json");
     procs
         .as_array()
-        .expect("oxmgr list 应为数组")
+        .expect("oxmgr list should be an array")
         .iter()
         .filter(|p| p.get("namespace").and_then(|n| n.as_str()) == Some("mediaservo-host"))
         .map(|p| {
@@ -97,7 +97,7 @@ fn oxmgr_host_procs(dir: &std::path::Path) -> Vec<(String, String, u64)> {
         .collect()
 }
 
-/// 测试起点幂等: 清掉上次崩溃运行可能残留的 host 进程（stop+delete 按名）。
+/// Idempotent test start: clears host processes a previous crashed run may have left (stop+delete by name).
 fn cleanup_oxmgr_host(dir: &std::path::Path) {
     let names: Vec<String> = oxmgr_host_procs(dir).into_iter().map(|(n, _, _)| n).collect();
     for name in names {
@@ -114,7 +114,7 @@ fn cleanup_oxmgr_host(dir: &std::path::Path) {
     }
 }
 
-/// 运行 host CLI（PATH 注入 ~/.local/bin 使 oxmgr 可解析），返回 exit code。
+/// Runs the host CLI (PATH gets ~/.local/bin so oxmgr resolves) and returns the exit code.
 fn host_cli(args: &[&str]) -> i32 {
     let out = Command::new(env!("CARGO_BIN_EXE_mediaservo-host"))
         .env("PATH", path_with_oxmgr())
@@ -123,12 +123,16 @@ fn host_cli(args: &[&str]) -> i32 {
         .expect("spawn host CLI");
     let code = out.status.code().unwrap_or(-1);
     if code != 0 {
-        eprintln!("host {} 失败 (exit {code}): {}", args[0], String::from_utf8_lossy(&out.stderr));
+        eprintln!(
+            "host {} failed (exit {code}): {}",
+            args[0],
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
     code
 }
 
-/// Drop 保证: 测试失败/panic 时也执行 `host stop [<dir>]`（oxmgr 不留孤儿进程）。
+/// Drop guarantee: also runs `host stop [<dir>]` when the test fails/panics (no orphan processes left in oxmgr).
 struct OxmgrGuard {
     dir: PathBuf,
     done: bool,
@@ -142,11 +146,11 @@ impl Drop for OxmgrGuard {
     }
 }
 
-/// 等待 host.yaml 出现（host init 生成后立即改写）。
+/// Waits for host.yaml to appear (rewritten right after host init generates it).
 fn write_host_toml(dir: &Path) {
-    // recorder 驻留（[record] enabled + out_dir 于实例内）→ 真实长生命周期订阅端
-    // （host-recorder 设计上跨发布端崩溃续录）；capturer 崩溃重启期间 recorder
-    // 必须全程存活（pid 不变）且同句柄恢复收帧。
+    // the recorder stays resident ([record] enabled + out_dir inside the instance) -> a real long-lived subscriber
+    // (host-recorder is designed to keep recording across publisher crashes); during the capturer crash-restart the recorder
+    // must survive throughout (same pid) and resume receiving frames on the same handle.
     let cfg = format!(
         "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\nrecord:\n  enabled: true\n  out_dir: \"{}\"\n",
         dir.join("recordings").display()
@@ -154,7 +158,7 @@ fn write_host_toml(dir: &Path) {
     std::fs::write(dir.join("etc").join("host.yaml"), cfg).expect("write host.yaml");
 }
 
-/// 等订阅端收到 ≥n 帧，返回期间看到的最大 seq。
+/// Waits until the subscriber has received >= n frames, returning the max seq seen meanwhile.
 async fn wait_frames(stream: &mediaservo_link::FrameStream, n: u32, timeout: Duration) -> u64 {
     let deadline = std::time::Instant::now() + timeout;
     let mut seen = 0u32;
@@ -168,32 +172,32 @@ async fn wait_frames(stream: &mediaservo_link::FrameStream, n: u32, timeout: Dur
                     return max_seq;
                 }
             }
-            Ok(None) => panic!("订阅流关停"),
-            Err(_) => {} // 超时继续等
+            Ok(None) => panic!("the subscription stream closed"),
+            Err(_) => {} // keep waiting on timeout
         }
     }
-    panic!("{timeout:?} 内只收到 {seen} 帧 (需 ≥{n})");
+    panic!("only {seen} frames received within {timeout:?} (need >= {n})");
 }
 
-/// E2E 核心: 杀 capturer（SIGKILL）→ oxmgr 重启 → 同 topic 重发布 → 订阅恢复。
+/// E2E core: kill the capturer (SIGKILL) -> oxmgr restarts -> republish on the same topic -> subscription recovers.
 ///
-/// 实证结论（2026-08-19）: iceoryx2 0.9.3 发布端崩溃重启后，旧订阅端连接自动
-/// 重建（seq 在重启点归零且后续连续）；所谓"旧订阅端 stale"是测试断言工件——
-/// latest-slot 语义 + 重启探测轮询（500ms）会错过重启后头几帧（seq 0/1），
-/// 之后取到的全是 seq≥基线 的帧。判别改为: 杀前等 ≥30 帧（基线 seq ≥29），
-/// 后台 drainer 全程记录 seq，重启后断言出现 seq < 基线（归零必可捕获）。
+/// Empirical conclusion (2026-08-19): after an iceoryx2 0.9.3 publisher crashes and restarts, old subscribers
+/// rebuild their connections automatically (seq resets at the restart point and runs continuous afterwards); the so-called "stale old subscriber"
+/// is a test-assertion artifact - the latest-slot semantics + restart-probe polling (500ms) miss the first frames after the restart (seq 0/1),
+/// and everything fetched afterwards has seq >= baseline. Discriminate instead: wait >= 30 frames before the kill (baseline seq >= 29),
+/// a background drainer records seq throughout, and after the restart assert a seq < baseline appears (the zero-reset must be catchable).
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // 轮询持锁窗极短且显式 drop；await 仅 sleep（测试域）
+#[allow(clippy::await_holding_lock)] // the polling lock window is tiny with an explicit drop; the await only sleeps (test domain)
 async fn capturer_kill9_restart_resumes_frames_to_subscribers() {
     cleanup_iceoryx();
-    // 测试进程内启用 tracing，使 FrameBus 订阅线程的 receive 错误可见（调试用）
+    // enable tracing inside the test process so the FrameBus subscriber threads' receive errors are visible (debug)
     mediaservo_common::logging::init(mediaservo_common::logging::LoggingConfig::default());
     let dir = tempfile::tempdir().expect("tempdir");
     let dir_path = dir.path().to_path_buf();
     cleanup_oxmgr_host(&dir_path);
 
-    // ① host init（位置参数形态）+ 改写 host.yaml（cam0 + record enabled, 无 streams
-    //    —— streamer 需外部 SFU server，C2/C4 覆盖） + 签发令牌
+    // (1) host init (positional form) + rewrite host.yaml (cam0 + record enabled, no streams
+    //    - the streamer needs an external SFU server, covered by C2/C4) + issue tokens
     assert_eq!(host_cli(&["init", dir_path.to_str().expect("dir utf8")]), 0);
     write_host_toml(&dir_path);
     assert_eq!(
@@ -225,38 +229,38 @@ async fn capturer_kill9_restart_resumes_frames_to_subscribers() {
         0
     );
 
-    // ② 进程内订阅端（Recorder 角色可订阅 camera/*）— 先于 capturer 挂载
-    //    （与 recorder 进程同时序；验证“先订阅后发布”时序下崩溃重启恢复）
+    // (2) in-process subscriber (the Recorder role may subscribe camera/*) - attached before the capturer
+    //    (same sequencing as the recorder process; verifies crash-restart recovery under the subscribe-first/publish-later order)
     let (sub_tok, sub_vk) = token(Role::Recorder, "crash-test-sub");
     let bus = FrameBus::attach("", &sub_tok, &sub_vk).expect("subscriber attach");
     let stream = bus.subscribe(&FrameTopic::new("camera/cam0")).expect("subscribe");
 
-    // ③ host start（translate → run/oxfile.toml → oxmgr apply）→ 全部进程 running
+    // (3) host start (translate -> run/oxfile.toml -> oxmgr apply) -> all processes running
     assert_eq!(host_cli(&["start", dir_path.to_str().expect("dir utf8")]), 0);
     let mut guard = OxmgrGuard { dir: dir_path.clone(), done: false };
     let procs = oxmgr_host_procs(&dir_path);
-    assert_eq!(procs.len(), 6, "预期 6 进程 (5 fixed + capturer), got: {procs:?}");
+    assert_eq!(procs.len(), 6, "expected 6 processes (5 fixed + capturer), got: {procs:?}");
     let capturer_pid = procs
         .iter()
         .find(|(n, _, _)| n == "host-capturer-cam0")
         .map(|(_, _, pid)| *pid)
-        .expect("host-capturer 在 oxmgr 中");
+        .expect("host-capturer is in oxmgr");
     let recorder_pid = procs
         .iter()
         .find(|(n, _, _)| n == "host-recorder")
         .map(|(_, _, pid)| *pid)
-        .expect("host-recorder 在 oxmgr 中");
+        .expect("host-recorder is in oxmgr");
     let recorder_running = recorder_pid != 0;
-    assert!(capturer_pid != 0, "pid 应非 0: {procs:?}");
+    assert!(capturer_pid != 0, "the pid should be non-zero: {procs:?}");
 
-    // ④ 杀前基线: 等 ≥30 帧（≥1s @30fps）→ 基线 seq ≥29。杀后重启实例 seq 从 0
-    //    重新开始；基线越高，重启后"归零帧"可判别窗口越长（latest-slot 会跳过
-    //    部分低 seq 帧，判别靠 drainer 全量记录，见 ⑦）。
+    // (4) pre-kill baseline: wait >= 30 frames (>= 1s @30fps) -> baseline seq >= 29. After the kill the restarted instance
+    //    starts seq from 0 again; the higher the baseline, the longer the window where post-restart "zero-reset frames"
+    //    stay distinguishable (latest-slot skips some low-seq frames; discrimination relies on the drainer's full record, see (7)).
     let last_seq_before = wait_frames(&stream, 30, Duration::from_secs(20)).await;
-    eprintln!("[crash_recovery] kill 前最后 seq={last_seq_before}");
+    eprintln!("[crash_recovery] last seq before kill={last_seq_before}");
 
-    // ④b 后台 drainer: 从此刻起全量记录流上 seq（latest-slot 下消费者轮询会漏帧，
-    //     drainer 连续取保证捕获重启点归零帧）
+    // (4b) background drainer: from this point on, record every seq on the stream (under latest-slot consumers miss frames,
+    //     the continuous drainer guarantees catching the restart-point zero-reset frames)
     let drained: std::sync::Arc<std::sync::Mutex<Vec<u64>>> = std::sync::Arc::default();
     {
         let drain_stream = stream.clone();
@@ -272,11 +276,11 @@ async fn capturer_kill9_restart_resumes_frames_to_subscribers() {
         });
     }
 
-    // ⑤ SIGKILL（崩溃路径，非 SIGTERM 优雅退出）
+    // (5) SIGKILL (the crash path, not a SIGTERM graceful exit)
     unsafe { libc::kill(capturer_pid as i32, libc::SIGKILL) };
     eprintln!("[crash_recovery] SIGKILL capturer pid={capturer_pid}");
 
-    // ⑥ 等 oxmgr 重启（新 pid + running）
+    // (6) wait for the oxmgr restart (new pid + running)
     let mut new_pid = 0u64;
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     while std::time::Instant::now() < deadline {
@@ -288,16 +292,22 @@ async fn capturer_kill9_restart_resumes_frames_to_subscribers() {
             .unwrap_or_default();
         if cur.1 != 0 && cur.1 != capturer_pid {
             new_pid = cur.1;
-            eprintln!("[crash_recovery] oxmgr 重启 capturer: pid={} status={}", cur.1, cur.0);
+            eprintln!(
+                "[crash_recovery] oxmgr restarted the capturer: pid={} status={}",
+                cur.1, cur.0
+            );
             break;
         }
     }
-    assert!(new_pid != 0, "20s 内 oxmgr 未重启 capturer (pid 仍 {capturer_pid})");
+    assert!(
+        new_pid != 0,
+        "oxmgr did not restart the capturer within 20s (pid still {capturer_pid})"
+    );
 
-    // ⑦ 核心断言: 同 topic 重发布成功 — 同一订阅端句柄恢复收帧。
-    //    判据: drainer 记录中出现 seq < last_seq_before（重启实例 seq 归零）。
-    //    （"20s 内看旧句柄是否还出帧"不可靠：latest-slot 下消费者可能永远取到
-    //     seq≥基线 的帧而误判 stale——2026-08-19 实证。）
+    // (7) core assertion: republishing on the same topic succeeds - the same subscriber handle resumes frames.
+    //    criterion: the drainer's records show seq < last_seq_before (the restarted instance zero-reset).
+    //    ("whether the old handle still emits frames within 20s" is unreliable: under latest-slot a consumer may
+    //     forever fetch seq>=baseline frames and be misjudged as stale - proven 2026-08-19.)
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     while std::time::Instant::now() < deadline {
         let drained_guard = drained.lock().expect("drain lock");
@@ -309,42 +319,48 @@ async fn capturer_kill9_restart_resumes_frames_to_subscribers() {
     }
     let reset_seen = drained.lock().expect("drain lock").iter().any(|&s| s < last_seq_before);
     eprintln!(
-        "[crash_recovery] resumed={reset_seen} drained_total={} (基线 seq ≥{last_seq_before})",
+        "[crash_recovery] resumed={reset_seen} drained_total={} (baseline seq >= {last_seq_before})",
         drained.lock().expect("drain lock").len()
     );
     if !reset_seen {
-        // 探针: 新建第二个订阅端 — 判别"连接未恢复" vs "发布端整体没在发布"
+        // probe: create a second subscriber - discriminate "connection not recovered" vs "the publisher is not publishing at all"
         let probe = bus.subscribe(&FrameTopic::new("camera/cam0")).expect("probe subscribe");
         match tokio::time::timeout(Duration::from_secs(5), probe.recv()).await {
-            Ok(Some(f)) => eprintln!("[crash_recovery] PROBE: 新订阅端收到帧 seq={}", f.meta().seq),
-            Ok(None) => eprintln!("[crash_recovery] PROBE: 新订阅端流关停"),
-            Err(_) => eprintln!("[crash_recovery] PROBE: 新订阅端 5s 无帧"),
+            Ok(Some(f)) => eprintln!(
+                "[crash_recovery] PROBE: the new subscriber received a frame seq={}",
+                f.meta().seq
+            ),
+            Ok(None) => eprintln!("[crash_recovery] PROBE: the new subscriber's stream closed"),
+            Err(_) => eprintln!("[crash_recovery] PROBE: the new subscriber saw no frames in 5s"),
         }
     }
     assert!(
         reset_seen,
-        "20s 内同一订阅端句柄未见重启后归零帧（seq 应 < {last_seq_before}）— \
-         发布端未重启/未重发布? log: 见 oxmgr logs/host-capturer-cam0.out.log"
+        "the same subscriber handle saw no zero-reset frames within 20s after the restart (seq should be < {last_seq_before}) - \
+         publisher not restarted / not republished? log: see oxmgr logs/host-capturer-cam0.out.log"
     );
 
-    // ⑦ 崩溃隔离: recorder 全程存活（pid 不变 + running）— 无 crash-loop（仅 recorder 驻留时）
+    // (7) crash isolation: the recorder survives throughout (same pid + running) - no crash-loop (only while the recorder resides)
     if recorder_running {
         let recorder_now = oxmgr_host_procs(&dir_path)
             .into_iter()
             .find(|(n, _, _)| n == "host-recorder")
-            .expect("recorder 仍在 oxmgr 中");
-        assert_eq!(recorder_now.2, recorder_pid, "recorder 不应因 capturer 崩溃而重启");
-        assert_eq!(recorder_now.1, "running", "recorder 应保持 running: {recorder_now:?}");
+            .expect("the recorder is still in oxmgr");
+        assert_eq!(
+            recorder_now.2, recorder_pid,
+            "the recorder must not be restarted because of the capturer crash"
+        );
+        assert_eq!(recorder_now.1, "running", "the recorder should stay running: {recorder_now:?}");
     }
     eprintln!(
-        "[crash_recovery] OK: capturer {capturer_pid}→{new_pid} 重启后同 topic 重发布, \
-         subscriber 恢复收帧, recorder {} 存活",
+        "[crash_recovery] OK: capturer {capturer_pid}->{new_pid} republished on the same topic after the restart, \
+         the subscriber resumed receiving frames, recorder {} survived",
         recorder_pid
     );
 
-    // ⑧ 清理: host stop（oxmgr stop + delete）→ host 命名空间清空
+    // (8) cleanup: host stop (oxmgr stop + delete) -> the host namespace empties
     assert_eq!(host_cli(&["stop", dir_path.to_str().expect("dir utf8")]), 0);
     guard.done = true;
     let remaining = oxmgr_host_procs(&dir_path);
-    assert!(remaining.is_empty(), "stop 后应无 host 进程: {remaining:?}");
+    assert!(remaining.is_empty(), "no host processes should remain after stop: {remaining:?}");
 }

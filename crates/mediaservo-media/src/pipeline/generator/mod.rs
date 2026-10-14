@@ -1,8 +1,8 @@
 // ── Generator — multi-mode video frame generator ───────
 
 pub mod fonts;
-pub mod squares;
 pub mod smpte_bars;
+pub mod squares;
 pub mod timestamp;
 
 use std::sync::{
@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 
 // Re-exports
 pub use fonts::{Anchor, BitmapFont, TextBurner};
-pub use squares::{ColorStrategy, SquaresConfig, SquaresPattern};
 pub use smpte_bars::SmpteBarsPattern;
+pub use squares::{ColorStrategy, SquaresConfig, SquaresPattern};
 pub use timestamp::{TimestampFormat, TimestampOverlay};
 
 use super::sink::{SinkId, VideoSink, VideoSinkWants};
@@ -51,7 +51,6 @@ pub trait FramePattern: Send + Sync {
     );
 }
 
-
 // ── PatternMode ─────────────────────────────────────────
 
 /// Which pattern to generate. Used by [`VideoFrameGenerator::start`].
@@ -61,7 +60,6 @@ pub enum PatternMode {
     /// SMPTE 75% color bars plus grayscale gradient.
     SmpteBars,
 }
-
 
 // ── VideoFrameGenerator ─────────────────────────────────
 
@@ -127,7 +125,9 @@ impl VideoFrameGenerator {
 
         // Create the pattern from the mode
         let mut pattern: Box<dyn FramePattern> = match mode {
-            PatternMode::Squares(config) => Box::new(SquaresPattern::with_config(width, height, config)),
+            PatternMode::Squares(config) => {
+                Box::new(SquaresPattern::with_config(width, height, config))
+            }
             PatternMode::SmpteBars => Box::new(SmpteBarsPattern::new()),
         };
 
@@ -171,8 +171,7 @@ impl VideoFrameGenerator {
                     }
 
                     let vb: Box<dyn VideoBuffer> = Box::new(buf);
-                    let frame = VideoFrame::new(vb)
-                        .with_timestamp(timestamp_us());
+                    let frame = VideoFrame::new(vb).with_timestamp(timestamp_us());
                     frame_id = frame_id.wrapping_add(1);
 
                     // ── Broadcast ────────────────────
@@ -227,8 +226,8 @@ impl VideoFrameGenerator {
     }
 }
 
-/// v2 (计划 video-source-unification BLOCKER-4): Drop 时停止生成线程，
-/// 防止帧源生命周期结束后 30fps 空转烧 CPU。stop() 幂等，join 在锁外（无死锁）。
+/// v2 (planned video-source-unification BLOCKER-4): stop the generator thread on Drop,
+/// preventing 30fps idle CPU burn after the frame source's lifetime ends. stop() is idempotent; join happens outside the lock (deadlock-free).
 impl Drop for VideoFrameGenerator {
     fn drop(&mut self) {
         self.stop();
@@ -305,10 +304,8 @@ mod tests {
         assert_eq!(generator.sink_count(), 0);
 
         let count = Arc::new(Mutex::new(0u32));
-        let sink = Box::new(CountingSink {
-            count: count.clone(),
-            wants: VideoSinkWants::default(),
-        });
+        let sink =
+            Box::new(CountingSink { count: count.clone(), wants: VideoSinkWants::default() });
         generator.add_or_update_sink(sink, VideoSinkWants::default());
         assert_eq!(generator.sink_count(), 1);
 
@@ -325,10 +322,7 @@ mod tests {
         let frames = *count.lock().unwrap();
         // ponytail: scheduler jitter means we might get fewer frames,
         // but anything >= 5 in 200ms proves the generator works
-        assert!(
-            frames >= 5,
-            "expected at least 5 frames in 200ms at 60fps, got {}", frames
-        );
+        assert!(frames >= 5, "expected at least 5 frames in 200ms at 60fps, got {}", frames);
     }
 
     #[test]
@@ -343,13 +337,9 @@ mod tests {
     #[test]
     fn squares_mode_creates_configured_pattern() {
         let generator = VideoFrameGenerator::new();
-        let config = SquaresConfig {
-            count: 3,
-            ..Default::default()
-        };
+        let config = SquaresConfig { count: 3, ..Default::default() };
         generator.start(10, PatternMode::Squares(config), None, 32, 24);
         assert!(generator.is_running());
         generator.stop();
     }
-
 }

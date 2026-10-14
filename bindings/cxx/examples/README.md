@@ -1,100 +1,98 @@
-# mediaservo C++ SDK 例子（聚合构建）
+# mediaservo C++ SDK examples (aggregated build)
 
-Rust SDK 三家族之一（`mediaservo::client` / C shim / 本目录 C++17 header-only）的
-可运行例子面。聚合根 `CMakeLists.txt` 以 `MEDIASERVO_SDK_DIR` 守卫消费
-`target/{debug,release}/` 的 `libmediaservo_client_c.*` + `include/mediaservo/client.h`；
-SDL3/ImGui 走仓内档案（`3rdparty/*.zip` file:// FetchContent，CI 零联网）。
-ImGui 档案 = `v1.92.9b-docking`（第一方 docking 分支，imgui_viewer 的四区 IDE 布局依赖）。
+Runnable examples for one of the three Rust SDK families (`mediaservo::client` / C shim / this directory's C++17 header-only).
+The aggregation root `CMakeLists.txt` consumes `target/{debug,release}/`'s `libmediaservo_client_c.*` +
+`include/mediaservo/client.h` guarded by `MEDIASERVO_SDK_DIR`; SDL3/ImGui use in-repo archives
+(`3rdparty/*.zip` file:// FetchContent; zero network in CI).
+The ImGui archive = `v1.92.9b-docking` (the first-party docking branch; imgui_viewer's four-pane IDE layout depends on it).
 
-## IN（本目录保证的）
+## IN (what this directory guarantees)
 
-| 例子 | 形态 | 判据 |
+| Example | Form | Judgment |
 |---|---|---|
-| `imgui_viewer` | 舱端 GUI 验收件（**docking 四区**，见下） | `ctest -R core` + dummy 无头 `[frame] cb=/tex=` 双计数 |
-| `imgui_shell` | 渲染壳（SDL3+ImGui 帧循环，`ShellOptions{docking, ini_path}`）+ `viewer_core`（RateEstimator/JSON 提取）+ `FrameStaging`/`VideoTexture`（I420→纹理零搬移） | 无显示环境 fail-soft exit 0；dummy 驱动下 ini 禁写 |
-| `control_demo` | 无头遥控闭环（login→join→open_control→steer→ack） | `build example` 编译门 + device-day 活体 |
+| `imgui_viewer` | The cockpit GUI acceptance piece (**docking four panes**, see below) | `ctest -R core` + the dummy headless `[frame] cb=/tex=` double count |
+| `imgui_shell` | The rendering shell (an SDL3+ImGui frame loop, `ShellOptions{docking, ini_path}`) + `viewer_core` (RateEstimator/JSON extraction) + `FrameStaging`/`VideoTexture` (I420→texture with zero re-packing) | fail-soft exit 0 without a display; ini writing disabled under the dummy driver |
+| `control_demo` | A headless teleop closed loop (login→join→open_control→steer→ack) | the `build example` compile gate + the device-day live run |
 
-## imgui_viewer 布局（docking 四区，IDE 形）
+## imgui_viewer layout (docking four panes, IDE form)
 
 ```
 ┌───────────┬──────────────────────────┬──────────────┐
 │ Streams   │      Video Grid          │ Stream Info  │
-│ 设备▸流树  │   （1-6 列，等比 fit）     │ (聚焦流详情)  │
-│ 点选→Pull  │                          ├──────────────┤
+│ device▸   │   (1-6 columns, fit)     │ (stream      │
+│ stream tree│                         │  details)    │
+│ click→Pull│                          ├──────────────┤
 │           │                          │   Control    │
 ├───────────┴──────────────────────────┴──────────────┤
-│ Log（进程日志环 500 行 · follow 自动滚 · reset layout）│
+│ Log (500-line process ring · follow auto-scroll · reset layout) │
 └──────────────────────────────────────────────────────┘
 ```
 
-拖分栏=抓边界；双击标题=该窗最大化/还原；拖标题出画布=浮动窗；位置与分栏宽
-存 `imgui_viewer.ini`（删文件或 Log 区「reset layout」=恢复四区出厂形）。
-dummy 无头模式下 ini 不写盘（CI 构建目录零污染）。
+Dragging panes = grab a border; double-click a title = maximize/restore that window; drag a title out of the canvas = a floating window.
+Positions and pane widths are stored in `imgui_viewer.ini` (deleting the file or the Log area's "reset layout" = restore the factory four-pane form).
+Under dummy headless mode the ini is never written (zero pollution of CI build directories).
 
-### 当模板抄时的导读
+### Reading guide when copying as a template
 
-1. **`imgui_viewer/src/app_model.hpp` 头注** = 分层铁律（main 节拍/模型/sessions 动作/panels 无状态渲染，依赖单向）。
-2. **`imgui_viewer/src/dock_layout.hpp` 头注** = docking 五要素速查（开关/画布/DockBuilder/首版守卫/持久化），三条实战坑全标：`DockBuilder*` 在 `imgui_internal.h`；`SetNodeSize` 必先于 Split；首版守卫用 **ini 探测**（`App::had_saved_layout()`）而非网传 WasActive（那是窗口的不是节点的）。
-3. **`imgui_viewer/src/app_log.{hpp,cpp}`** = GUI 接多线程日志的最小形（mutex+环+add_fmt；stdout 机器判据行与 UI 日志行分工）。
+1. **The `imgui_viewer/src/app_model.hpp` header note** = the layering iron rules (main beats / model / sessions actions / stateless panel rendering; one-way dependencies).
+2. **The `imgui_viewer/src/dock_layout.hpp` header note** = the five docking elements at a glance (switch/canvas/DockBuilder/first-run guard/persistence), with all three real-world pitfalls flagged: `DockBuilder*` lives in `imgui_internal.h`; `SetNodeSize` must precede Split; the first-run guard uses an **ini probe** (`App::had_saved_layout()`) rather than the folk WasActive form (that belongs to the window, not the node).
+3. **`imgui_viewer/src/app_log.{hpp,cpp}`** = the minimal form for GUI-side multi-threaded logging (mutex + ring + add_fmt; the split of duties between stdout machine-judgment lines and UI log lines).
 
-### 手测单（首轮验收，5 分钟）
+### Manual test checklist (first-round acceptance, 5 minutes)
 
-- [ ] 网格格右上 x / 树 live 行 x → 该会话关闭、格消失、树行回可选；再勾选可重新 Pull
-- [ ] 登录 → 左树出现设备分组；**点行/勾盒多选**（选中行黄高亮）→ 点「Pull selected ▶」→ 中格出画、右上详情有 fps/kbps、树内转 live 灰缀
-- [ ] cols 下拉切 1/2/3/6 列 → **网格真实变列**（legacy Columns 单列 bug 已根修）；拖大/小 Video Grid 窗格 → 格宽自适应
-- [ ] Pull 流房自动并入整车控制房（树里 `●` 组 + 网格窗底 "1 control session (auto-paired)" 说明行；**控制房不占画面格**），Control 右下 steer→ack RTT 现值
-- [ ] 抓任意分栏边界拖动 → 退出重开 → **宽度保持**（ini 生效）
-- [ ] 双击 Video Grid 标题=最大化，再双击=还原；拖 Streams 标题出画布=浮动
-- [ ] Log 区「reset layout」→ 四区回出厂切分
-- [ ] **鉴权五模式**（viewer-auth-matrix）：Radio 切换互斥、无关域灰显；Account/API-Key 登录出画；
-  PSK 填 psk+房名点「Connect」直达（无发现步骤）；Device 填 identity 目录同形；JWT 贴坏 token →
-  红牌 4013 不风暴；登录后底部 `identity:` 行与 server 日志身份一致
+- [ ] The grid cell's top-right x / a live tree row's x → that session closes, the cell disappears, the tree row becomes selectable again; re-checking can Pull again
+- [ ] Login → the left tree shows device groups; **click rows/checkboxes to multi-select** (selected rows highlight yellow) → press "Pull selected ▶" → the center cells show video, the right-top details show fps/kbps, the tree rows turn live-grey
+- [ ] Switch the cols dropdown to 1/2/3/6 columns → **the grid really changes columns** (the legacy Columns single-column bug is root-fixed); drag the Video Grid pane bigger/smaller → cell widths adapt
+- [ ] Pulling a stream room auto-pairs the whole-vehicle control room (the `●` group in the tree + the "1 control session (auto-paired)" note line at the grid window's bottom; **the control room takes no video cell**), and Control (right-bottom) steer→ack shows a live RTT
+- [ ] Grab any pane border and drag → exit and reopen → **the widths persist** (the ini working)
+- [ ] Double-click the Video Grid title = maximize, double-click again = restore; drag the Streams title out of the canvas = floating
+- [ ] The Log area's "reset layout" → the four panes return to the factory split
+- [ ] **The five auth modes** (viewer-auth-matrix): the Radio switch is mutually exclusive, irrelevant fields grey out; Account/API-Key logins show video;
+  PSK fills psk + room name and presses "Connect" to go straight in (no discovery step); Device fills the identity directory the same way; pasting a bad JWT →
+  the red card 4013 without a reconnect storm; after login the bottom `identity:` line matches the server log's identity
 
-## 运行
+## Run
 
 ```bash
-# 构建（CLI 自动补 build-c；改过 Rust 绑定面需先 cargo build -p mediaservo-client-c）
+# Headless acceptance (CI/server machines): the dummy driver + a timed self-exit + env injection (the viewer-auth-matrix five modes)
+# Common: SDL_VIDEODRIVER=dummy MSRTC_RUN_SECS=<N> MSRTC_WS_URL=ws://<s>:9800/ws MSRTC_HTTP_BASE=http://<s>:9800
+#   Judgment line: [frame] t=..s cb=<callback frames> tex=<texture frames> WxH — at steady state both are equal and grow at ~30fps
+# M1 account: MSRTC_AUTH_MODE=account MSRTC_USER=<u> MSRTC_PASS=<p> MSRTC_ROOM=<video room>
+# M2 API-Key: MSRTC_AUTH_MODE=apikey MSRTC_KEY_ID=<id> MSRTC_KEY_SECRET=<s> MSRTC_ROOM=<video room>
+# M3 PSK (full discovery; check tree rows to pull across rooms): MSRTC_AUTH_MODE=psk MSRTC_PSK=<psk> (no ROOM needed; the server needs a same-batch upgrade including psk-discover)
+# M4 device identity (identity_dir joins directly): MSRTC_AUTH_MODE=device MSRTC_IDENTITY_DIR=<instance dir> MSRTC_ROOM=<room name>
+# M5a/M5b paste a JWT: MSRTC_AUTH_MODE=jwt MSRTC_JWT=<token> MSRTC_ROOM=<room name>
+#   The M5b bad-token judgment = [tile] join: auth rejected [4013] (a fail-closed red card, no reconnect storm)
+# The GUI face's five Radios mirror these five paths (the login panel's bottom identity: line = the effective-identity echo)
+
+# Build (the CLI auto-runs build-c; if the Rust binding surface changed, first cargo build -p mediaservo-client-c)
 ./mediaservo.sh build example && ./mediaservo.sh test example
 
-# GUI（真显示；Xwayland 会话内 DISPLAY 已带）
+# GUI (a real display; DISPLAY is already set inside an Xwayland session)
 ./target/examples/bin/imgui_viewer
-#   口令走 UI/stdin（G13 永不 argv）；勾选流房（kind=video）自动并入整车控制房
-
-# 无头验收（CI/服务器机）：dummy 驱动 + 定时自退 + env 注入（viewer-auth-matrix 五模式）
-# 公共：SDL_VIDEODRIVER=dummy MSRTC_RUN_SECS=<N> MSRTC_WS_URL=ws://<s>:9800/ws MSRTC_HTTP_BASE=http://<s>:9800
-#   判据行：[frame] t=..s cb=<回调帧> tex=<纹理帧> WxH —— 稳态两者相等且 ~30fps 增长
-#
-# M1 账号：MSRTC_AUTH_MODE=account MSRTC_USER=<u> MSRTC_PASS=<p> MSRTC_ROOM=<video房>
-# M2 API-Key：MSRTC_AUTH_MODE=apikey MSRTC_KEY_ID=<id> MSRTC_KEY_SECRET=<s> MSRTC_ROOM=<video房>
-# M3 PSK（全量发现，树勾选跨房拉流）：MSRTC_AUTH_MODE=psk MSRTC_PSK=<psk>（无需 ROOM；server 需同批升级含 psk-discover）
-# M4 设备身份（identity_dir 直 join）：MSRTC_AUTH_MODE=device MSRTC_IDENTITY_DIR=<实例目录> MSRTC_ROOM=<房名>
-# M5a/M5b 直贴 JWT：MSRTC_AUTH_MODE=jwt MSRTC_JWT=<token> MSRTC_ROOM=<房名>
-#   M5b 坏 token 判据 = [tile] join: auth rejected [4013]（fail-closed 红牌，不重连风暴）
-# GUI 面五 Radio 同此五路（登录面板底部 identity: 行 = 生效身份回显）
-
-# 急停签名（可选）：预共享密钥文件（0600，车舱同值；无文件 = 不签名形）
+# Emergency-stop signing (optional): a pre-shared key file (0600, the same value on vehicle and cockpit; no file = the unsigned form)
 export MSRTC_ESTOP_KEY_FILE=/path/to/control-hmac.key
 ```
 
-## 舱端双房约定（读 API 前先读这段）
+## The cockpit dual-room convention (read this before the API)
 
-媒体面与控制面**不同房间**（PIT-140 v2 + W4c 定性；语义注记 2026-09-29：per-stream 房=底层隔离粒度非产品语义——UI/发现层应按整车房分组、流为子项，见 pitfalls PIT-140 注记）：
+The media plane and the control plane use **different rooms** (PIT-140 v2 + the W4c ruling; a semantics note from 2026-09-29: the per-stream room = the underlying isolation granularity, not product semantics — the UI/discovery layer should group by the whole-vehicle room with streams as children; see the pitfalls PIT-140 note):
 
-| 面 | 房间 | 发现方式 |
+| Plane | Room | Discovery |
 |---|---|---|
-| 视频/音频流 | `<整车房>_<流id>`（如 `vehicle_test`） | `GET /api/rooms` 派生条目，`kind:"video"/"audio"` |
-| 遥控/急停 | `<整车房>`（如 `vehicle`） | 同列表 `kind:"control"` |
+| Video/audio streams | `<vehicle room>_<stream id>` (e.g. `vehicle_test`) | A `GET /api/rooms` derived entry, `kind:"video"/"audio"` |
+| Teleop/e-stop | `<vehicle room>` (e.g. `vehicle`) | The same list, `kind:"control"` |
 
-单房间打两边 = 一边必空（流房无 chassis producer / 整车房无视频 producer）。
-本 viewer 已按双房配对；自研舱端请照此接线。
+Hitting both planes from one room = one side is always empty (a stream room has no chassis producer / a vehicle room has no video producer).
+This viewer already implements the dual-room pairing; home-grown cockpits should wire it the same way.
 
-## OUT（刻意不做/未做）
+## OUT (deliberately not done / not yet done)
 
-- 触屏/竖屏专属布局与 GPU 纹理后端（sdlgpu3）——docking 后拖拽已覆盖桌面手感需求，触屏另轮
-- Android/Windows 装配——device-day（CI = Linux `test-gui` job + mac 待建）
-- 音频会议面（`audio-` 房 kind 已可发现，消费未接）
+- Touch/portrait-specific layouts and the GPU texture backend (sdlgpu3) — after docking, dragging already covers the desktop feel; touch is another round
+- Android/Windows assembly — device-day (CI = the Linux `test-gui` job; mac pending)
+- The audio-conference face (the `audio-` room kind is discoverable; consumption is not wired)
 
 ## CI
 
-`test-gui` job（Linux）= `build example` + `ctest -R core`；活体出画与 mac/win/Android
-= self-hosted/device-day（需活 server + producer）。见 `.github/workflows/ci.yml`。
+The `test-gui` job (Linux) = `build example` + `ctest -R core`; live video and mac/win/Android
+= self-hosted/device-day (needs a live server + producer). See `.github/workflows/ci.yml`.

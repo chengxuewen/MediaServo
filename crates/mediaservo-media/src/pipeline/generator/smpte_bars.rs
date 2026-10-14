@@ -54,11 +54,7 @@ impl FramePattern for SmpteBarsPattern {
         for bar_idx in 0..7u32 {
             let (bar_y, bar_u, bar_v) = BAR_COLORS[bar_idx as usize];
             let start_x = bar_idx * bar_width;
-            let end_x = if bar_idx == 6 {
-                width
-            } else {
-                ((bar_idx + 1) * bar_width).min(width)
-            };
+            let end_x = if bar_idx == 6 { width } else { ((bar_idx + 1) * bar_width).min(width) };
 
             // Y plane
             for row in 0..bar_height {
@@ -86,11 +82,7 @@ impl FramePattern for SmpteBarsPattern {
         if gradient_h > 0 {
             for row in 0..gradient_h {
                 // Linear interpolation: Y from 16 (top of gradient) to 235 (bottom)
-                let t = if gradient_h > 1 {
-                    row as f32 / (gradient_h - 1) as f32
-                } else {
-                    0.0
-                };
+                let t = if gradient_h > 1 { row as f32 / (gradient_h - 1) as f32 } else { 0.0 };
                 let gray = (16.0 + t * (235.0 - 16.0)) as u8;
                 let py = gradient_top + row;
                 let y_off = py as usize * stride_y;
@@ -126,11 +118,7 @@ mod tests {
         let mut u = vec![0u8; ((w / 2) * (h / 2)) as usize];
         let mut v = vec![0u8; ((w / 2) * (h / 2)) as usize];
 
-        pattern.draw(
-            &mut y, &mut u, &mut v,
-            w as usize, (w / 2) as usize, (w / 2) as usize,
-            w, h,
-        );
+        pattern.draw(&mut y, &mut u, &mut v, w as usize, (w / 2) as usize, (w / 2) as usize, w, h);
 
         // Bar area (top 2/3) should have white bar pixel at start
         let bar_height = (h * 2) / 3;
@@ -142,7 +130,11 @@ mod tests {
         // Gradient area (bottom 1/3) should start dark
         if bar_height < h {
             let grad_y_off = bar_height as usize * w as usize;
-            assert!(y[grad_y_off] <= 30, "gradient top should be near black, got {}", y[grad_y_off]);
+            assert!(
+                y[grad_y_off] <= 30,
+                "gradient top should be near black, got {}",
+                y[grad_y_off]
+            );
         }
 
         // Last row of gradient should be near white
@@ -159,19 +151,14 @@ mod tests {
         let mut u = vec![0u8; ((w / 2) * (h / 2)) as usize];
         let mut v = vec![0u8; ((w / 2) * (h / 2)) as usize];
 
-        pattern.draw(
-            &mut y, &mut u, &mut v,
-            w as usize, (w / 2) as usize, (w / 2) as usize,
-            w, h,
-        );
+        pattern.draw(&mut y, &mut u, &mut v, w as usize, (w / 2) as usize, (w / 2) as usize, w, h);
 
         let bar_w = w / 7;
         let expected_y_values: [u8; 7] = [235, 210, 170, 145, 106, 81, 41];
         for (i, &expected) in expected_y_values.iter().enumerate() {
             let px = (i as u32 * bar_w) as usize;
             assert_eq!(
-                y[px],
-                expected,
+                y[px], expected,
                 "bar {} at x={}: expected Y={}, got Y={}",
                 i, px, expected, y[px]
             );

@@ -1,22 +1,22 @@
 # 19. TLS Reverse Proxy & CORS Configuration
 
-> Phase 1 — 部署参考 | 2026-07-24
-> 关联文档: [security-architecture.md](security-architecture.md) §mTLS, [operations.md](operations.md) §TLS, [13-server-architecture.md](13-server-architecture.md) §部署
-> 关联 crate: mediaservo-server
+> Phase 1 — deployment reference | 2026-07-24
+> Related docs: [security-architecture.md](security-architecture.md) §mTLS, [operations.md](operations.md) §TLS, [13-server-architecture.md](13-server-architecture.md) §Deployment
+> Related crate: mediaservo-server
 
-## 19.1 概述
+## 19.1 Overview
 
-MediaServo Phase 1 采用**外部 TLS 终止**策略：服务进程本身只监听 plain HTTP/WS，TLS 由前置的 reverse proxy（nginx/Caddy/Traefik）处理。这遵循 operations.md 的设计决策：「Phase 1: systemd socket activation + 外部 TLS 终止 (nginx/Caddy)」。
+MediaServo Phase 1 uses an **external TLS termination** strategy: the service process itself listens on plain HTTP/WS only; TLS is handled by a fronting reverse proxy (nginx/Caddy/Traefik). This follows operations.md's design decision: "Phase 1: systemd socket activation + external TLS termination (nginx/Caddy)".
 
-本文档提供：
-- Reverse proxy 配置示例（nginx / Caddy / Traefik）
-- CORS 中间件在 axum 中的正确配置
-- WebSocket 代理的注意事项
-- 证书管理（自签开发 vs Let's Encrypt 生产）
+This document provides:
+- Reverse proxy configuration examples (nginx / Caddy / Traefik)
+- Correct CORS middleware configuration in axum
+- Notes on WebSocket proxying
+- Certificate management (self-signed dev vs Let's Encrypt production)
 
-**当前代码状态**：`tower-http` 的 `cors` feature 已在 Cargo.toml 中声明但**未在任何 .rs 文件中使用**。CORS 中间件需要在 `main.rs` 中显式配置。服务端无 TLS 依赖（无 rustls/openssl），服务监听 plain TCP。
+**Current code status**: `tower-http`'s `cors` feature is declared in Cargo.toml but **not used in any .rs file**. The CORS middleware must be configured explicitly in `main.rs`. The server has no TLS dependency (no rustls/openssl) and listens on plain TCP.
 
-## 19.2 架构概览
+## 19.2 Architecture Overview
 
 ```
 Client (browser/GUI)
@@ -41,37 +41,37 @@ Client (browser/GUI)
 └─────────────────────────────┘
 ```
 
-## 19.3 CORS 配置
+## 19.3 CORS Configuration
 
-### 19.3.1 为什么需要 CORS
+### 19.3.1 Why CORS Is Needed
 
-当 Web UI (React) 从不同 origin 访问 Server API 时，浏览器会发送跨域请求。以下场景需要 CORS：
+When the Web UI (React) accesses the Server API from a different origin, the browser sends cross-origin requests. CORS is needed in these scenarios:
 
-| 场景 | Origin A | Origin B | 需要 CORS |
-|------|----------|----------|-----------|
-| 开发环境 | `localhost:5173` (Vite dev) | `localhost:9800` (Server) | ✅ 是 |
-| 生产同域 | `app.example.com` | `app.example.com/api` | ❌ 不需要 |
-| 生产子域 | `web.example.com` | `api.example.com` | ✅ 是 |
-| 嵌入场景 | `aude.example.com` | `mediaservo.example.com` | ✅ 是 |
+| Scenario | Origin A | Origin B | CORS needed |
+|----------|----------|----------|-------------|
+| Dev environment | `localhost:5173` (Vite dev) | `localhost:9800` (Server) | ✅ yes |
+| Production same-domain | `app.example.com` | `app.example.com/api` | ❌ no |
+| Production subdomains | `web.example.com` | `api.example.com` | ✅ yes |
+| Embedding scenario | `aude.example.com` | `mediaservo.example.com` | ✅ yes |
 
-### 19.3.2 当前状态
+### 19.3.2 Current Status
 
 `crates/mediaservo-server/Cargo.toml` (line 25):
 ```toml
 tower-http = { version = "0.5", features = ["trace", "cors"] }
 ```
 
-`cors` feature 已编译但**未被使用**。`crates/mediaservo-server/src/main.rs` 的 axum router 仅配置了 `GovernorLayer`：
+The `cors` feature is compiled but **unused**. The axum router in `crates/mediaservo-server/src/main.rs` only configures `GovernorLayer`:
 
 ```rust
-// 当前: 无 CORS
+// Current: no CORS
 let app = Router::new()
     .nest("/", api_router)
     .layer(GovernorLayer {
         config: Box::leak(governor_config),
     });
 
-// 应改为: 添加 CorsLayer
+// Should become: add CorsLayer
 use tower_http::cors::{CorsLayer, AllowOrigin, AllowMethods, AllowHeaders};
 
 let cors = CorsLayer::new()
@@ -91,16 +91,16 @@ let app = Router::new()
     });
 ```
 
-### 19.3.3 推荐配置
+### 19.3.3 Recommended Configuration
 
-**开发环境** (宽松):
+**Dev environment** (permissive):
 ```rust
 use tower_http::cors::{CorsLayer, AllowOrigin};
 
-let cors = CorsLayer::permissive(); // 允许所有 origin
+let cors = CorsLayer::permissive(); // allow all origins
 ```
 
-**生产环境** (严格):
+**Production** (strict):
 ```rust
 use tower_http::cors::{CorsLayer, AllowOrigin};
 use http::header;
@@ -131,33 +131,33 @@ fn create_cors_layer(allowed_origins: &[&str]) -> CorsLayer {
 }
 ```
 
-### 19.3.4 CORS 与 Reverse Proxy 的关系
+### 19.3.4 CORS vs the Reverse Proxy
 
-CORS 可以在**两层**处理：
+CORS can be handled at **two layers**:
 
-| 层 | 适用性 | 推荐 |
-|----|--------|------|
-| Reverse proxy (nginx/Caddy) | 简单，外部配置 | 不推荐：WebSocket preflight 复杂，跨域 cookie 困难 |
-| Application (axum CorsLayer) | 精确，类型安全 | **推荐**：与 JWT 认证协同，preflight 处理正确 |
+| Layer | Suitability | Recommendation |
+|-------|-------------|----------------|
+| Reverse proxy (nginx/Caddy) | Simple, external config | Not recommended: WebSocket preflight is complex, cross-domain cookies are painful |
+| Application (axum CorsLayer) | Precise, type-safe | **Recommended**: cooperates with JWT auth, handles preflight correctly |
 
-**推荐策略**：CORS 在应用层处理（axum），reverse proxy 仅做 TLS 终止 + WebSocket 代理，不添加 CORS 头。双重 CORS 头会导致浏览器报错。
+**Recommended strategy**: handle CORS at the application layer (axum); the reverse proxy does only TLS termination + WebSocket proxying, adding no CORS headers. Double CORS headers cause browser errors.
 
-### 19.3.5 Config 化
+### 19.3.5 Configurable
 
-在 `ServerConfig` 中添加 CORS 配置：
+Add the CORS config to `ServerConfig`:
 
 ```rust
 // crates/mediaservo-common/src/config.rs
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CorsConfig {
-    /// 允许的 origins (逗号分隔)
-    /// 开发: "*"
-    /// 生产: "https://app.example.com,https://admin.example.com"
+    /// Allowed origins (comma-separated)
+    /// dev: "*"
+    /// production: "https://app.example.com,https://admin.example.com"
     #[serde(default = "default_cors_allowed_origins")]
     pub allowed_origins: Vec<String>,
 
-    /// 是否允许 credentials (cookies, Authorization header)
+    /// Whether to allow credentials (cookies, Authorization header)
     #[serde(default = "default_true")]
     pub allow_credentials: bool,
 }
@@ -167,21 +167,21 @@ fn default_cors_allowed_origins() -> Vec<String> {
 }
 ```
 
-## 19.4 Reverse Proxy 配置
+## 19.4 Reverse Proxy Configuration
 
-### 19.4.1 端口规划
+### 19.4.1 Port Planning
 
-| 服务 | 内部端口 | 外部端口 | 协议 | 说明 |
-|------|---------|---------|------|------|
-| Server API | `9800` | `443` (HTTPS) | HTTP/1.1 + WS upgrade | TLS terminated by proxy |
-| Host 信令 | `9801` | `9801` (直连) | WS | Host-side, 通常不与浏览器交互 |
-| Client UI | `9101` | 不暴露 | HTTP | 本地 GUI |
+| Service | Internal port | External port | Protocol | Notes |
+|---------|---------------|---------------|----------|-------|
+| Server API | `9800` | `443` (HTTPS) | HTTP/1.1 + WS upgrade | TLS terminated by the proxy |
+| Host signaling | `9801` | `9801` (direct) | WS | Host-side, usually not browser-facing |
+| Client UI | `9101` | not exposed | HTTP | Local GUI |
 | TURN/STUN | `3478-3480` | `3478-3480` | UDP+TCP | coturn |
 | WebRTC media | `49152-65535` | `49152-65535` | UDP | ephemeral |
 
 ### 19.4.2 Nginx
 
-**最小配置** (`/etc/nginx/sites-available/mediaservo`):
+**Minimal configuration** (`/etc/nginx/sites-available/mediaservo`):
 
 ```nginx
 upstream mediaservo_server {
@@ -245,7 +245,7 @@ server {
     location /metrics {
         proxy_pass http://mediaservo_server;
         proxy_http_version 1.1;
-        # 生产环境建议 IP 白名单或 basic auth:
+        # In production, consider an IP allowlist or basic auth:
         # allow 10.0.0.0/8;
         # deny all;
     }
@@ -259,14 +259,14 @@ server {
 }
 ```
 
-**WebSocket 代理关键点**:
-- `Upgrade` 和 `Connection` header 必须传递
-- `proxy_read_timeout` 需设置足够长（WS 是长连接，默认 60s 不够）
-- Nginx 1.3+ 原生支持 WebSocket proxy
+**WebSocket proxy key points**:
+- The `Upgrade` and `Connection` headers must be forwarded
+- `proxy_read_timeout` must be long enough (WS is long-lived; the 60s default is insufficient)
+- Nginx 1.3+ supports WebSocket proxying natively
 
 ### 19.4.3 Caddy
 
-**最小配置** (`/etc/caddy/Caddyfile`):
+**Minimal configuration** (`/etc/caddy/Caddyfile`):
 
 ```caddyfile
 mediaservo.example.com {
@@ -302,11 +302,11 @@ mediaservo.example.com {
 }
 ```
 
-Caddy 优势：
-- **自动 TLS**：无需手动配置证书，自动从 Let's Encrypt 获取和续期
-- **自动 HTTP→HTTPS 重定向**
-- **WebSocket 自动检测**：无需特殊配置
-- 配置简洁，适合小规模部署
+Caddy advantages:
+- **Automatic TLS**: no manual certificate configuration; fetches and renews from Let's Encrypt automatically
+- **Automatic HTTP→HTTPS redirect**
+- **Automatic WebSocket detection**: no special configuration needed
+- Concise config; suits small deployments
 
 ### 19.4.4 Traefik (Docker Compose)
 
@@ -340,47 +340,47 @@ services:
       - "traefik.http.services.mediaservo.loadbalancer.server.port=9800"
 ```
 
-## 19.5 证书管理
+## 19.5 Certificate Management
 
-### 19.5.1 Phase 1: 自签证书（开发/内网）
+### 19.5.1 Phase 1: Self-Signed Certificates (dev/intranet)
 
 ```bash
-# 生成自签 CA
+# Generate a self-signed CA
 openssl req -x509 -newkey rsa:4096 -days 365 -nodes \
   -keyout ca-key.pem -out ca-cert.pem \
   -subj "/CN=MediaServo Dev CA"
 
-# 生成服务端证书
+# Generate the server certificate
 openssl req -newkey rsa:4096 -nodes \
   -keyout server-key.pem -out server-req.pem \
   -subj "/CN=mediaservo.example.com"
 
-# 用 CA 签名
+# Sign with the CA
 openssl x509 -req -in server-req.pem -days 90 \
   -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
   -out server-cert.pem
 ```
 
-安全策略：
-- 私钥权限 `0600`
-- 证书 90 天有效期
-- 开发环境可导入 CA 证书到系统信任锚
+Security policy:
+- Private key mode `0600`
+- Certificate valid 90 days
+- In dev, the CA certificate can be imported into the system trust store
 
-### 19.5.2 Phase 2: Let's Encrypt (生产)
+### 19.5.2 Phase 2: Let's Encrypt (production)
 
-| 工具 | 集成方式 | 适用场景 |
-|------|---------|---------|
-| certbot (nginx) | `certbot --nginx` 自动配置 | 裸金属 nginx |
-| Caddy 内建 | 自动获取+续期，零配置 | 小规模部署 |
-| Traefik ACME | Docker labels 配置 | Docker 部署 |
-| rustls-acme (Phase 3) | 内建 ACME 客户端 | MediaServo 自身处理 |
+| Tool | Integration | Suitable for |
+|------|-------------|--------------|
+| certbot (nginx) | `certbot --nginx` auto-config | Bare-metal nginx |
+| Caddy built-in | Automatic fetch + renewal, zero config | Small deployments |
+| Traefik ACME | Docker labels | Docker deployments |
+| rustls-acme (Phase 3) | Built-in ACME client | Handled by MediaServo itself |
 
-证书策略：
-- 90 天有效期，自动续期（剩余 30 天时触发）
-- 使用 `EC secp256r1` (ECDSA P-256) 密钥
-- 私钥文件权限 `0600`
+Certificate policy:
+- 90-day validity, auto-renewal (triggered with 30 days remaining)
+- `EC secp256r1` (ECDSA P-256) keys
+- Private key file mode `0600`
 
-## 19.6 Docker Compose 完整示例
+## 19.6 Full Docker Compose Example
 
 ```yaml
 # docker-compose.prod.yml
@@ -484,33 +484,33 @@ mediaservo.example.com {
 }
 ```
 
-## 19.7 Phase 演进
+## 19.7 Phase Evolution
 
-| Phase | TLS 策略 | CORS 策略 | 证书管理 |
-|-------|---------|----------|---------|
-| Phase 1 | 外部终止 (nginx/Caddy) | axum CorsLayer | 自签/手动 Let's Encrypt |
-| Phase 2 | 外部终止 + SFU DTLS | axum CorsLayer + config | certbot/Caddy 自动续期 |
-| Phase 3 | 内建 rustls (可选) | axum CorsLayer (保留) | rustls-acme 集成 |
-| Phase 4 | mTLS + 内建 rustls | 保留 | 内建 ACME client |
+| Phase | TLS strategy | CORS strategy | Certificate management |
+|-------|--------------|---------------|------------------------|
+| Phase 1 | External termination (nginx/Caddy) | axum CorsLayer | Self-signed / manual Let's Encrypt |
+| Phase 2 | External termination + SFU DTLS | axum CorsLayer + config | certbot/Caddy auto-renewal |
+| Phase 3 | Built-in rustls (optional) | axum CorsLayer (kept) | rustls-acme integration |
+| Phase 4 | mTLS + built-in rustls | Kept | Built-in ACME client |
 
-## 19.8 检查清单
+## 19.8 Checklist
 
-部署前验证：
+Verify before deployment:
 
-- [ ] TLS 证书有效期中（`openssl s_client -connect host:443`）
-- [ ] HTTP → HTTPS 重定向工作
-- [ ] WebSocket 连接可升级（浏览器 DevTools → Network → WS）
-- [ ] CORS preflight 通过（OPTIONS 请求返回 200）
-- [ ] `/health` 端点在 proxy 后可访问
-- [ ] `/metrics` 端点在 production 中受保护
-- [ ] 安全 header 已设置（HSTS, X-Content-Type-Options）
-- [ ] 私钥文件权限为 0600
-- [ ] 证书自动续期 cron/systemd timer 已配置
+- [ ] TLS certificate within validity (`openssl s_client -connect host:443`)
+- [ ] HTTP → HTTPS redirect works
+- [ ] WebSocket connection can upgrade (browser DevTools → Network → WS)
+- [ ] CORS preflight passes (OPTIONS returns 200)
+- [ ] `/health` endpoint reachable behind the proxy
+- [ ] `/metrics` endpoint protected in production
+- [ ] Security headers set (HSTS, X-Content-Type-Options)
+- [ ] Private key file mode is 0600
+- [ ] Certificate auto-renewal cron/systemd timer configured
 
-## 19.9 交叉引用
+## 19.9 Cross References
 
-- 认证架构: [security-architecture.md](security-architecture.md)
-- 运维设计: [operations.md](operations.md)
-- Server 架构: [13-server-architecture.md](13-server-architecture.md)
-- 部署模式: [02-deployment-modes.md](02-deployment-modes.md)
-- 信令架构: [10-signaling-architecture.md](10-signaling-architecture.md)
+- Auth architecture: [security-architecture.md](security-architecture.md)
+- Ops design: [operations.md](operations.md)
+- Server architecture: [13-server-architecture.md](13-server-architecture.md)
+- Deployment modes: [02-deployment-modes.md](02-deployment-modes.md)
+- Signaling architecture: [10-signaling-architecture.md]

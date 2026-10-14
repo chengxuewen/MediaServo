@@ -1,11 +1,11 @@
-# 13. Server 架构
+# 13. Server Architecture
 
-> Phase 0 — 架构定义 | 2026-07-17
-> 关联决策: D86-D91, D98-D101, D118 + 主文档引用: [架构文档](../architecture.md) §2, §10
+> Phase 0 — architecture definition | 2026-07-17
+> Related decisions: D86-D91, D98-D101, D118 + main doc reference: [architecture doc](../architecture.md) §2, §10
 
-## 13.1 概述
+## 13.1 Overview
 
-mediaservo-server 是 Phase 1 MVP 的中央中继节点，承担信令中继、媒体转发和运行监控三项职责。Server 不解码也不重编码视频帧，纯 RTP 包转发，延迟增量控制在 30ms 以内。
+mediaservo-server is the Phase 1 MVP's central relay node, handling three responsibilities: signaling relay, media forwarding, and operational monitoring. The Server never decodes or re-encodes video frames — pure RTP packet forwarding with latency overhead capped at 30ms.
 
 ```
 Host (macOS/Linux/Windows)
@@ -15,22 +15,25 @@ Host (macOS/Linux/Windows)
 mediaservo-server
   ┌──────────────────────────────────────┐
   │  Signaling Relay (axum WS)           │
-  │  /ws endpoint, JSON SDP/ICE 中继     │
+  │  /ws endpoint, JSON SDP/ICE relay    │
   │  room management, PSK auth           │
   ├──────────────────────────────────────┤
   │  Relay Engine                        │
   │  Host PC ↔ Remote PC track bridging  │
-  │  纯转发 无转码，不解码不重编码       │
+  │  pure forwarding, no transcoding —   │
+  │  no decode, no re-encode             │
   ├──────────────────────────────────────┤
   │  Monitoring                          │
   │  /health /ready /metrics             │
   │  session stats, rate limiting        │
   ├──────────────────────────────────────┤
   │  Web UI (React + Ant Design)         │
-  │  运营面板：设备列表、会话监控        │
+  │  Ops panel: device list, session     │
+  │  monitoring                          │
   ├──────────────────────────────────────┤
   │  Auth (JWT + role RBAC)              │
-  │  SQLite users 表, PSK pre-shared key │
+  │  SQLite users table, PSK pre-shared  │
+  │  key                                 │
   └──────────────────────────────────────┘
   │ WebRTC forward (RTP/SRTP)
   │ Signaling (WS /ws, JSON SDP/ICE)
@@ -39,81 +42,81 @@ Remote (macOS/Linux/Windows)
   decode + render + RTCDataChannel control
 ```
 
-## 13.2 核心组件
+## 13.2 Core Components
 
-| 组件 | 职责 | 决策 |
-|------|------|------|
-| Signaling Relay | WebSocket /ws，Host/Remote 之间中继 SDP/ICE，不修改内容 | D52, D118 |
-| Relay Engine | WebRTC 轨道桥接：Host 推流接入 → Remote 拉流转发 | D86, D118 |
-| Room Manager | 单房间 create/join/leave，房间状态管理 (DashMap) | D86 design |
-| Auth | PSK 认证 + JWT 签发 + 角色 RBAC (admin/operator/auditor) | D88, D100 |
-| Monitoring | /health + /ready + /metrics + 会话统计 | D86, D99 |
-| Web UI | React 19 + Ant Design 5，运营人员管理面板 | D87 |
+| Component | Responsibility | Decisions |
+|-----------|----------------|-----------|
+| Signaling Relay | WebSocket /ws; relays SDP/ICE between Host and Remote, never modifying content | D52, D118 |
+| Relay Engine | WebRTC track bridging: Host push ingest → Remote pull forward | D86, D118 |
+| Room Manager | Single-room create/join/leave, room state management (DashMap) | D86 design |
+| Auth | PSK auth + JWT issuance + role RBAC (admin/operator/auditor) | D88, D100 |
+| Monitoring | /health + /ready + /metrics + session stats | D86, D99 |
+| Web UI | React 19 + Ant Design 5, ops management panel | D87 |
 
-**Relay Engine 核心原则** (Phase 1): Server 不解码也不重编码视频帧。Relay 引擎在 RTP 层面做 track bridging，两条 RTCPeerConnection 之间直接转发 RTP packet。延迟增量 ≤30ms。
+**Relay Engine core principle** (Phase 1): the Server never decodes or re-encodes video frames. The relay engine does track bridging at the RTP level, forwarding RTP packets directly between two RTCPeerConnections. Latency overhead ≤30ms.
 
-### 13.2.1 mediasoup SFU 集成 (Phase 2)
+### 13.2.1 mediasoup SFU Integration (Phase 2)
 
-Phase 2 引入 mediasoup SFU 替代 Phase 1 的同进程 RTCPeerConnection bridge，提升多参与方场景的媒体转发效率。
+Phase 2 introduces the mediasoup SFU to replace Phase 1's same-process RTCPeerConnection bridge, improving media forwarding efficiency for multi-participant scenarios.
 
-**架构**:
+**Architecture**:
 
 ```
 mediaservo-server (Rust)
   ├── Signaling Relay (axum + SignalHandler)
-  │     SDP adapter → mediasoup 参数转换
+  │     SDP adapter → mediasoup parameter conversion
   │
   ├── Mediasoup Manager (mediasoup-rust FFI)
-  │     ├── Worker 管理 (1 worker per server process)
-  │     │     └── crash recovery: Worker SIGKILL 后 5s 内重启
+  │     ├── Worker management (1 worker per server process)
+  │     │     └── crash recovery: worker restarted within 5s of SIGKILL
   │     ├── Router (1 per room)
-  │     │     └── codec 协商: H.264/VP9, simulcast 分支
+  │     │     └── codec negotiation: H.264/VP9, simulcast branches
   │     ├── WebRtcTransport (per participant)
-  │     │     └── ICE/DTLS 管理, 继承 Router 的证书
+  │     │     └── ICE/DTLS management, inherits the Router's certificate
   │     ├── PlainTransport (per non-WebRTC stream)
-  │     │     └── RTMP/SRT 推流接入
+  │     │     └── RTMP/SRT push ingest
   │     ├── Producer (created by Host)
-  │     │     └── RTP 轨道: video (H.264/VP9) + audio (Opus)
+  │     │     └── RTP tracks: video (H.264/VP9) + audio (Opus)
   │     └── Consumer (created by Remote)
-  │           └── 订阅 Router 中的指定 Producer
+  │           └── Subscribes to a specified Producer in the Router
   │
   └── Monitoring (Prometheus + Grafana)
 ```
 
-**关键实体流转**:
+**Key entity flow**:
 
 ```
-Host 推流:
+Host push:
   Host → Signaling → SDP adapter → mediasoup::Transport::createProducer()
-  → Router 注册 Producer{track_id, kind, rtp_parameters}
+  → Router registers Producer{track_id, kind, rtp_parameters}
 
-Remote 拉流:
+Remote pull:
   Remote → Signaling → SDP adapter → mediasoup::Transport::createConsumer(producer_id)
-  → Router::pipeTransport() 转发 RTP → Consumer 输出到 Remote
+  → Router::pipeTransport() forwards RTP → Consumer outputs to Remote
 ```
 
-**崩溃恢复**: mediasoup Worker 由 Manager 监控，崩溃时 5s 内自动重启。重启时：
-1. 重建 Worker → 重建 Router → 通知所有 participant 重新协商 SDP
-2. Participant 重新 createOffer/answer → 重建 Producer/Consumer
-3. Signaling 层透明 — participant 仅感知到短暂的 ICE restart
+**Crash recovery**: the mediasoup Worker is supervised by the Manager and auto-restarts within 5s of a crash. On restart:
+1. Rebuild the Worker → rebuild the Router → notify all participants to renegotiate SDP
+2. Participants re-createOffer/answer → rebuild Producer/Consumer
+3. The signaling layer stays transparent — participants only perceive a brief ICE restart
 
-## 13.3 技术栈
+## 13.3 Technology Stack
 
-| 组件 | 选型 | 理由 |
-|------|------|------|
-| HTTP/WS 框架 | axum 0.7 | WS 同进程，JWT middleware 共享 |
-| 数据库 | sqlx + SQLite (编译期 SQL 校验) | 轻量，仅 users 表，无需独立 DB 服务 |
-| 配置 | serde_yaml + 环境变量覆盖 | 敏感值 (JWT_SECRET) 通过 env 注入 |
-| 日志 | tracing + tracing-subscriber (JSON stdout) | Docker logs 收集 |
-| 指标 | prometheus-client (GET /metrics) | Prometheus 格式，Grafana 面板 |
-| SFU 指标 | prometheus-client + mediasoup observer | SFU Worker/Router/Transport/Producer/Consumer 指标 |
-| 中间件 | tower-http (CORS, rate-limit, trace) | 生产级 HTTP 中间件 |
-| 认证 | jsonwebtoken (JWT) + argon2 (密码哈希) | 自包含 token，无外部认证服务 |
-| Web UI | React 19 + Ant Design 5 + recharts | 与 mediaservo-client 共享组件生态 |
+| Component | Choice | Rationale |
+|-----------|--------|-----------|
+| HTTP/WS framework | axum 0.7 | WS in-process; JWT middleware shared |
+| Database | sqlx + SQLite (compile-time SQL validation) | Lightweight, users table only, no separate DB service |
+| Config | serde_yaml + env-var override | Sensitive values (JWT_SECRET) injected via env |
+| Logging | tracing + tracing-subscriber (JSON stdout) | Collected via Docker logs |
+| Metrics | prometheus-client (GET /metrics) | Prometheus format, Grafana panels |
+| SFU metrics | prometheus-client + mediasoup observer | SFU Worker/Router/Transport/Producer/Consumer metrics |
+| Middleware | tower-http (CORS, rate-limit, trace) | Production-grade HTTP middleware |
+| Auth | jsonwebtoken (JWT) + argon2 (password hashing) | Self-contained tokens, no external auth service |
+| Web UI | React 19 + Ant Design 5 + recharts | Shares the component ecosystem with mediaservo-client |
 
-## 13.4 房间与中继
+## 13.4 Rooms & Relay
 
-Server 使用简单房间模型。一个房间包含一个 Host（推流方）和一个或多个 Remote（拉流方）。
+The Server uses a simple room model. A room contains one Host (pusher) and one or more Remotes (pullers).
 
 ```
 Room {
@@ -125,58 +128,58 @@ Room {
 }
 ```
 
-Host 加入房间后 → Waiting。Remote 加入后 → Relaying。Remote 离开后 → Waiting。所有参与者离开 → Closed。
+Host joins → Waiting. A Remote joins → Relaying. The Remote leaves → Waiting. All participants leave → Closed.
 
-## 13.5 认证
+## 13.5 Authentication
 
-两层认证:
+Two layers of auth:
 
-1. **PSK (Pre-Shared Key)**: WebSocket upgrade 阶段验证，所有 client (Host/Remote) 共享同一 PSK。PSK 保存在 server.conf，部署时配置。
+1. **PSK (Pre-Shared Key)**: validated at WebSocket upgrade; all clients (Host/Remote) share one PSK. Stored in server.conf, configured at deployment.
 
-2. **JWT (Phase 1 可选)**: SQLite users 表存储用户，argon2 哈希密码。JWT 携带 role 字段（admin/operator/auditor），axum middleware 提取到 Extensions<CurrentUser>。
+2. **JWT (optional in Phase 1)**: SQLite users table stores users; argon2-hashed passwords. The JWT carries a role field (admin/operator/auditor); axum middleware extracts it into Extensions\<CurrentUser\>.
 
-## 13.6 可观测性
+## 13.6 Observability
 
-| 端点 | 用途 | 说明 |
-|------|------|------|
-| GET /health | 存活探针 | 轻量，仅返回 200 OK |
-| GET /ready | 就绪探针 | 检查信令和 relay 状态 |
-| GET /metrics | Prometheus 端点 | HTTP 请求计数/延迟、WS 连接数、转码带宽、会话时长 |
+| Endpoint | Purpose | Notes |
+|----------|---------|-------|
+| GET /health | Liveness probe | Lightweight, returns 200 OK only |
+| GET /ready | Readiness probe | Checks signaling and relay state |
+| GET /metrics | Prometheus endpoint | HTTP request counts/latency, WS connection count, forwarding bandwidth, session duration |
 
-日志全部输出 JSON 到 stdout/stderr，由 Docker logs driver 收集。tower-http TraceLayer 注入 traceId 到每个请求。
+All logs output JSON to stdout/stderr, collected by the Docker logs driver. tower-http TraceLayer injects a traceId into every request.
 
-## 13.7 状态机
+## 13.7 State Machine
 
 ```
-INIT → WAITING (等待Host+Remote加入) → RELAYING (转发中) → WAITING (Remote离开)
-  │                                                               │
-  └── shutdown ──────────────────────────────────────────────────┘
+INIT → WAITING (awaiting Host+Remote join) → RELAYING (forwarding) → WAITING (Remote left)
+  │                                                                      │
+  └── shutdown ──────────────────────────────────────────────────────────┘
 ```
 
-## 13.8 部署
+## 13.8 Deployment
 
-Phase 1: 单二进制 + Docker Compose（server + monitoring stack）。
+Phase 1: single binary + Docker Compose (server + monitoring stack).
 
 ```
 docker-compose.yml:
-  mediaservo-server   # 主服务
-  prometheus        # 指标收集
-  grafana           # 监控面板
+  mediaservo-server   # main service
+  prometheus          # metrics collection
+  grafana             # monitoring dashboards
 ```
 
-server.conf 配置端口、PSK、数据库路径。Docker 部署时通过环境变量注入敏感值。
+server.conf configures ports, PSK, and the database path. Sensitive values are injected via env vars in Docker deployment.
 
-## 13.9 Phase 演进
+## 13.9 Phase Evolution
 
-| Phase | 架构 | 说明 |
-|-------|------|------|
-| Phase 1 | 单二进制 (axum + relay 同进程) | 信令、转发、监控合一，~800 行 |
-| Phase 2 | mediasoup SFU 集成 | 多参与方 SFU relay, Worker 管理, crash recovery <5s, SDP adapter |
-| Phase 2+ | 多节点扩缩容 | relay 可独立水平扩展，信令分离为独立服务 |
+| Phase | Architecture | Notes |
+|-------|--------------|-------|
+| Phase 1 | Single binary (axum + relay in one process) | Signaling, forwarding, monitoring unified, ~800 lines |
+| Phase 2 | mediasoup SFU integration | Multi-participant SFU relay, worker management, crash recovery <5s, SDP adapter |
+| Phase 2+ | Multi-node scaling | The relay scales horizontally independently; signaling splits into its own service |
 
-## 13.10 交叉引用
+## 13.10 Cross References
 
-- 信令协议和消息格式: [信令架构](10-signaling-architecture.md)
-- 整体三层架构: [架构文档](../architecture.md) §2
-- 部署形态: [部署模式](02-deployment-modes.md)
-- Host 端采集与推流: [客户端与 Host](03-client-host.md)
+- Signaling protocol and message formats: [signaling architecture](10-signaling-architecture.md)
+- Overall three-layer architecture: [architecture doc](../architecture.md) §2
+- Deployment forms: [deployment modes](02-deployment-modes.md)
+- Host-side capture and push: [client & host](03-client-host.md)

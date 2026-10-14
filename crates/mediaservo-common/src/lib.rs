@@ -18,11 +18,11 @@ pub mod logging;
 pub mod metrics;
 pub mod protocol;
 
-/// 部署侧 env 帮助**单一真源**（msrtc.sh 运行时 cat 同一文件；server/host -h 编译期内嵌）。
-/// `${...}` 占位符由 env_usage_text 解析，保证三面键表逐字节同源、漂移结构上不可能。
+/// **Single source of truth** for deploy-side env help (msrtc.sh cats the same file at runtime; server/host -h embeds it at compile time).
+/// `${...}` placeholders are resolved by env_usage_text, keeping the three key tables byte-identical (drift is structurally impossible).
 pub const ENV_USAGE_MD: &str = include_str!("../assets/env-usage.md");
 
-/// 渲染 env 总表：品牌（env MEDIASERVO_BRAND > 编译期品牌 id）、SFU 媒体端口（env > 20000）。
+/// Render the env table: brand (env MEDIASERVO_BRAND > compile-time brand id), SFU media port (env > 20000).
 pub fn env_usage_text() -> String {
     let brand =
         std::env::var("MEDIASERVO_BRAND").unwrap_or_else(|_| brand::media_brand().id.to_string());
@@ -38,7 +38,7 @@ mod deploy_help_tests {
     #[test]
     fn env_usage_text_resolves_all_placeholders() {
         let t = env_usage_text();
-        assert!(!t.contains("${"), "残留未解析占位符: {t}");
+        assert!(!t.contains("${"), "unresolved placeholder left: {t}");
         assert!(t.contains("ALLOW_DEV_ENROLL") && t.contains("MEDIASERVO_PSK"));
         assert!(t.contains("20000"));
     }

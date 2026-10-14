@@ -1,13 +1,13 @@
-//! 信令状态监控 + 状态上报核心（Task E3，D-H4 信令面维度 + 上报 Server）。
+//! Signaling-state monitoring + status reporting core (Task E3, the D-H4 signaling-plane dimension + reporting to the Server).
 //!
-//! 信令平面数据源 = 网关（`gateway::GatewayHandle::snapshot`，连接状态唯一
-//! 持有者）：本地子进程 WS 连接（src/最近消息时刻）+ 远端 server WS 状态
-//! （joined/since/peer_id）。本模块负责采集（[`SignalMonitor`]）与聚合上报
-//! （[`build_status_report`] → `SignalingMessage::StatusReport`）。
+//! The signaling-plane data source = the gateway (`gateway::GatewayHandle::snapshot`, the sole
+//! holder of the connection state): local child-process WS connections (most recent message time) + the remote server WS state
+//! (joined/since/peer_id). This module collects ([`SignalMonitor`]) and aggregates the report
+//! ([`build_status_report`] -> `SignalingMessage::StatusReport`)).
 //!
-//! 上报路径: reporter 任务持有网关句柄，`send_remote` 直发远端 WS（joined
-//! 检查在源头，C15：失败打日志不静默）。上报为周期性幂等消息——断线窗口
-//! 丢弃/发送失败均可由下一周期自愈。
+//! Reporting path: the reporter task holds the gateway handle and `send_remote` sends straight over the remote WS (the joined
+//! check is at the source, C15: failures are logged, never silent). The report is a periodic idempotent message -- a dropped report inside a disconnect window
+//! or a send failure both self-heal in the next cycle.
 
 use mediaservo_common::protocol::{
     ChildSignalJson, ProcessStateJson, SignalStatusJson, SignalingMessage, StreamFlowJson,
@@ -22,30 +22,30 @@ use crate::gateway::{ChildStatus, GatewayHandle, GatewayStatus};
 use crate::monitor::flow::{FlowMonitor, FlowSnapshot, StreamFlow, TopicFlow};
 use crate::monitor::topology::{DEFAULT_GRACE, Mismatch, TopologyMonitor, TopologySnapshot};
 
-/// 上报间隔（5s，与监控采集同 tick；报告 <2KB JSON，WS 流量可忽略。
-/// 10s 减半流量的选项被否——与采集解耦无收益，仅增加状态窗口漂移）。
+/// Reporting interval (5s, the same tick as the monitoring collection; the report is <2KB JSON, so the WS traffic is negligible.
+/// The 10s option that halves the traffic was rejected -- decoupling from the collection buys nothing and only adds state-window drift).
 pub const STATUS_INTERVAL: Duration = Duration::from_secs(5);
-/// 信令平面快照（E3；数据源 = 网关连接状态 + agent 运行时长）。
+/// Signaling-plane snapshot (E3; data source = the gateway connection state + the agent uptime).
 #[derive(Debug, Clone)]
 pub struct SignalSnapshot {
     pub gateway: GatewayStatus,
-    /// host-agent 启动至今秒数。
+    /// Seconds since the host-agent started.
     pub agent_uptime_secs: u64,
 }
 
-/// 信令状态监控器：从网关快照采集（E3）。
+/// Signaling-state monitor: collects from the gateway snapshot (E3).
 pub struct SignalMonitor {
     gateway: GatewayHandle,
     started: Instant,
 }
 
 impl SignalMonitor {
-    /// `started` = agent 进程启动时刻（E1 审查: 与拓扑 grace 起点一致）。
+    /// `started` = the agent process start time (E1 review: consistent with the topology grace start point).
     pub fn new(gateway: GatewayHandle, started: Instant) -> Self {
         Self { gateway, started }
     }
 
-    /// 采集一次信令平面快照。
+    /// Capture one signaling-plane snapshot.
     pub fn collect(&self) -> SignalSnapshot {
         SignalSnapshot {
             gateway: self.gateway.snapshot(),
@@ -54,18 +54,18 @@ impl SignalMonitor {
     }
 }
 
-/// 状态上报任务（E3）：单循环持有三监控器，每 tick 采集 + 日志（E1/E2
-/// 行为迁移）+ 聚合上报。上报节奏由 `interval` 决定（生产 5s）。
+/// Status reporting task (E3): a single loop holding the three monitors, collecting each tick + logging (E1/E2
+/// behavior migration) + aggregated reporting. The reporting cadence is set by `interval` (5s in production).
 ///
-/// 上报内容: 拓扑 + 数据流 + 信令三快照 + ts + config_version（E4 关联）。
-/// C15: 发送失败打 warn 日志，不静默丢弃（周期性上报，下一周期自愈）。
+/// Report content: the topology + data-flow + signaling snapshots + ts + config_version (E4 association).
+/// C15: a send failure is logged as warn, never dropped silently (periodic report, self-heals next cycle).
 pub fn spawn_status_reporter(
     host_toml: String,
     started: Instant,
     token: Option<(CapabilityToken, Ed25519VerifyingKey)>,
     gateway: GatewayHandle,
     interval: Duration,
-    // E4: 配置版本（ConfigPush 应用后由 agent 更新；StatusReport.config_version 数据源）。
+    // E4: the config version (updated by the agent after a ConfigPush apply; data source of StatusReport.config_version).
     config_version: Arc<AtomicU64>,
 ) {
     tokio::spawn(async move {
@@ -74,7 +74,9 @@ pub fn spawn_status_reporter(
             Some((tok, vk)) => match FlowMonitor::attach(host_toml, &tok, &vk) {
                 Ok(m) => Some(m),
                 Err(e) => {
-                    tracing::error!("数据流监控 attach 失败: {e} — 跳过（拓扑/信令监控不受影响）");
+                    tracing::error!(
+                        "failed to attach the data-flow monitor: {e} -- skipping (topology/signaling monitoring is unaffected)"
+                    );
                     None
                 }
             },
@@ -82,32 +84,32 @@ pub fn spawn_status_reporter(
         };
         let signal = SignalMonitor::new(gateway.clone(), started);
         let room = gateway.vehicle_room();
-        // web stats 面板数据源: streamer 编码信息（StreamerStats 扩展字段）→ EncoderStatus 信令
-        // 上报（server relay 广播 → 浏览器 sfu-client emitMetrics——旧 host EncoderStatus 同链路）
+        // Data source of the web stats panel: streamer encoding info (the extra StreamerStats fields) -> the EncoderStatus signaling
+        // report (server relay broadcast -> the browser sfu-client emitMetrics -- the old host EncoderStatus used the same path)
         let _last_enc: std::collections::HashMap<String, (f64, u64)> =
             std::collections::HashMap::new();
         let mut tick = tokio::time::interval(interval);
-        tick.tick().await; // 消费首个立即 tick（对齐 E1/E2 行为）
+        // consume the first immediate tick (aligned with the E1/E2 behavior)
         loop {
             tick.tick().await;
             let topo = topology.collect();
-            // E1 日志（行为与 E1 一致：计数 + grace 内抑制 mismatch 告警）
+            // E1 logging (behavior identical to E1: counting + suppressing mismatch warnings inside grace)
             tracing::info!(
                 expected = topo.expected_processes.len(),
                 actual_procs = topo.actual_processes.len(),
                 actual_topics = topo.actual_topics.len(),
                 mismatches = topo.mismatches.len(),
                 grace = topo.grace_active,
-                "拓扑快照"
+                "topology snapshot"
             );
             if !topo.grace_active {
                 for m in &topo.mismatches {
                     match m {
                         Mismatch::ProcessMissing { name } => {
-                            tracing::warn!(process = %name, "拓扑差异: 期望进程缺失/未运行");
+                            tracing::warn!(process = %name, "topology mismatch: the expected process is missing/not running");
                         }
                         Mismatch::PublisherMissing { topic } => {
-                            tracing::warn!(topic = %topic, "拓扑差异: 期望相机无活跃发布者");
+                            tracing::warn!(topic = %topic, "topology mismatch: the expected camera has no active publisher");
                         }
                     }
                 }
@@ -122,7 +124,7 @@ pub fn spawn_status_reporter(
                             bps = tf.bps,
                             frames = tf.frames,
                             stalled = tf.stalled,
-                            "数据流 topic 统计"
+                            "data-flow topic statistics"
                         );
                     }
                     for sf in &snap.streams {
@@ -131,7 +133,7 @@ pub fn spawn_status_reporter(
                             bytes_sent = sf.bytes_sent,
                             frames_encoded = sf.frames_encoded,
                             connected = sf.connected,
-                            "推流状态"
+                            "publish status"
                         );
                     }
                     snap
@@ -142,7 +144,7 @@ pub fn spawn_status_reporter(
             tracing::info!(
                 children = sig.gateway.children.len(),
                 remote_connected = sig.gateway.remote.connected,
-                "信令快照"
+                "signaling snapshot"
             );
             let report = build_status_report(
                 &room,
@@ -152,14 +154,14 @@ pub fn spawn_status_reporter(
                 config_version.load(Ordering::Relaxed),
             );
             if let Err(e) = gateway.send_remote(report) {
-                tracing::warn!("StatusReport 发送失败: {e}"); // C15
+                tracing::warn!("failed to send the StatusReport: {e}"); // C15
             }
-            // 编码信息上报: 每路 stream 的编码字段 → EncoderStatus（浏览器 web stats 面板）
+            // Encoding-info report: the encoding fields of each stream -> EncoderStatus (the browser web stats panel)
             for sf in flow_snap.streams.iter() {
                 if sf.avg_encode_ms.is_none() && sf.encoder_implementation.is_none() {
-                    continue; // 无编码信息（旧字段/未采集）跳过
+                    continue; // no encoding info (old fields / not collected), skip
                 }
-                // avg_encode_ms 已由 streamer 增量计算（ΔtotalEncodeTime/ΔframesEncoded），直接透传
+                // avg_encode_ms is already computed incrementally by the streamer (delta totalEncodeTime / delta framesEncoded), passed through as is
                 let avg = sf.avg_encode_ms;
                 let msg = mediaservo_common::protocol::SignalingMessage::EncoderStatus {
                     room_id: room.clone(),
@@ -173,14 +175,14 @@ pub fn spawn_status_reporter(
                     avg_encode_ms: avg,
                 };
                 if let Err(e) = gateway.send_remote(msg) {
-                    tracing::warn!("EncoderStatus 发送失败: {e}"); // C15
+                    tracing::warn!("failed to send the EncoderStatus: {e}"); // C15
                 }
             }
         }
     });
 }
 
-/// 聚合三快照 → StatusReport 信令消息（纯函数，E3 单测覆盖）。
+/// Aggregate the three snapshots -> the StatusReport signaling message (pure function, covered by the E3 unit tests).
 fn build_status_report(
     room_id: &str,
     topology: &TopologySnapshot,
@@ -200,7 +202,7 @@ fn build_status_report(
     }
 }
 
-/// 拓扑快照 → wire 进程列表（期望 + 实际并集；running = oxmgr running）。
+/// Topology snapshot -> the wire process list (union of expected and actual; running = oxmgr running).
 fn processes_to_json(snap: &TopologySnapshot) -> Vec<ProcessStateJson> {
     let mut out: Vec<ProcessStateJson> = snap
         .expected_processes
@@ -330,11 +332,11 @@ mod tests {
         let procs = processes_to_json(&topo_snap());
         assert_eq!(procs.len(), 3);
         let agent = procs.iter().find(|p| p.name == "host-agent").unwrap();
-        assert!(agent.running && agent.expected, "期望进程在跑: {agent:?}");
+        assert!(agent.running && agent.expected, "the expected process is running: {agent:?}");
         let cap = procs.iter().find(|p| p.name == "host-capturer-cam0").unwrap();
-        assert!(!cap.running && cap.expected, "期望进程缺失: {cap:?}");
+        assert!(!cap.running && cap.expected, "the expected process is missing: {cap:?}");
         let stray = procs.iter().find(|p| p.name == "stray-proc").unwrap();
-        assert!(stray.running && !stray.expected, "非期望进程: {stray:?}");
+        assert!(stray.running && !stray.expected, "an unexpected process: {stray:?}");
     }
 
     #[test]
@@ -359,7 +361,7 @@ mod tests {
                 assert_eq!(signal.remote_peer_id, "veh-peer");
                 assert_eq!(signal.children[0].src, "host-streamer");
                 assert_eq!(signal.agent_uptime_secs, 123);
-                assert!(ts > 0, "ts 应为 unix 秒");
+                assert!(ts > 0, "ts should be unix seconds");
                 assert_eq!(config_version, 0);
             }
             other => panic!("expected StatusReport, got {other:?}"),
@@ -389,7 +391,7 @@ mod tests {
                 assert!(!topics[0].stalled);
                 assert_eq!(streams[0].bytes_sent, 999);
                 assert_eq!(streams[0].frame_width, 640);
-                assert_eq!(config_version, 3, "config_version 透传");
+                assert_eq!(config_version, 3, "config_version is passed through");
             }
             other => panic!("expected StatusReport, got {other:?}"),
         }

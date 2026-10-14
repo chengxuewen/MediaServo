@@ -1,167 +1,167 @@
 ---
 name: test-harness
-description: "MediaServo 多语言自动化测试工具架。从 SDD 规范生成测试骨架 (Rust/TS/Python/C++/C)、AAA 模式强制执行、测试→规范反向追溯、覆盖率报告。交互式菜单驱动。支持 Phase 感知 (跳过未就绪模块)。"
+description: "MediaServo multi-language automated test harness. Generates test skeletons from SDD specs (Rust/TS/Python/C++/C), enforces AAA pattern, test→spec reverse tracing, coverage reports. Interactive menu-driven. Supports Phase awareness (skips not-ready modules)."
 ---
 
-# 测试工具架 (Test Harness)
+# Test Harness
 
-为 MediaServo 多语言项目提供自动化测试生成与验证。从 SDD 规范直接产出测试代码，确保 AAA 模式、Phase 对齐、语言惯例一致。
+Automated test generation and verification for the multilingual MediaServo project. Test code is produced directly from SDD specs, ensuring AAA pattern, Phase alignment, and consistent language conventions.
 
-**哲学**: 测试不是写完代码再补的东西，是从规范直接长出来的。一个好测试文件 = 规范的可执行副本。
+**Philosophy**: tests are not an afterthought bolted onto code — they grow directly from the spec. A good test file = an executable copy of the spec.
 
 ---
 
-## 入口：测试任务类型
+## Entry: Test Task Types
 
-### `/test-harness`（无参数）
-弹出任务类型菜单：
+### `/test-harness` (no arguments)
+Pops the task-type menu:
 
 ```
-[1] SDD→测试 — 从规范生成测试文件 (stubs / AAA骨架 / 完整填充)
-[2] 测试→规范 — 反向追溯 (验证覆盖 / 缺失场景)
-[3] 用例执行 — 运行测试并修复失败用例
-[4] 增量测试 — 从当前 git diff 产生增量测试
-[5] 项目初始化 — 为新模块搭建测试基础设施
-[6] 覆盖率报告 — 生成覆盖分析与缺口
-[7] 选择性测试 — 仅运行变更影响的测试 (git diff 驱动)
+[1] SDD→tests — generate test files from specs (stubs / AAA skeletons / full fill)
+[2] tests→spec — reverse tracing (verify coverage / missing scenarios)
+[3] run & fix — run tests and fix failing cases
+[4] incremental tests — generate incremental tests from the current git diff
+[5] project init — set up test infrastructure for a new module
+[6] coverage report — generate coverage analysis and gaps
+[7] selective testing — run only tests affected by changes (git diff driven)
 ```
 
 ### `/test-harness generate`
-跳过菜单，直接进入 SDD→测试生成模式。
+Skip the menu, go straight to SDD→test generation mode.
 
 ### `/test-harness run`
-跳过菜单，直接运行测试。
+Skip the menu, run tests directly.
 
 ### `/test-harness quick`
-仅修复当前失败的测试，不生成新测试。
+Only fix currently failing tests; do not generate new ones.
 
 ---
 
-## 多语言策略
+## Multi-Language Strategy
 
-MediaServo 是一个多语言项目 (D19, D21)。测试生成必须适配各语言惯例。
+MediaServo is a multi-language project (D19, D21). Test generation must adapt to each language's conventions.
 
-### 语言检测
+### Language Detection
 
-自动从项目结构检测目标语言：
+Auto-detect the target language from project structure:
 
-| 信号 | 判定语言 |
+| Signal | Detected language |
 |------|---------|
-| `Cargo.toml` 存在 | Rust |
+| `Cargo.toml` present | Rust |
 | `package.json` + `tsconfig.json` | TypeScript |
 | `pyproject.toml` / `setup.py` | Python |
 | `CMakeLists.txt` + `.cpp`/`.hpp` | C++ |
-| `CMakeLists.txt` + `.c`/`.h` (无 .cpp) | C |
-| 多信号 | 交互选择 |
+| `CMakeLists.txt` + `.c`/`.h` (no .cpp) | C |
+| multiple signals | interactive choice |
 
-### 各语言测试惯例
+### Per-Language Test Conventions
 
 #### Rust
-- **单元测试**: `#[cfg(test)] mod tests { ... }` 内联于源文件
-- **集成测试**: `tests/` 目录，每个文件独立 crate
-- **Mock**: `mockall` crate，`mock!` 宏
-- **断言**: `assert_eq!` / `assert!` / `assert!(matches!(...))`
-- **运行**: `cargo test`
-- **惯例**:
-  - 函数命名: `test_<module>_<scenario>`
-  - 禁止 `unwrap()` / `expect()` — 使用 `?` 或 `assert!(result.is_ok())`
-  - 测试模块 `use super::*;`
+- **Unit tests**: `#[cfg(test)] mod tests { ... }` inline in source files
+- **Integration tests**: `tests/` directory, each file a separate crate
+- **Mocks**: `mockall` crate, `mock!` macro
+- **Assertions**: `assert_eq!` / `assert!` / `assert!(matches!(...))`
+- **Run**: `cargo test`
+- **Conventions**:
+  - function naming: `test_<module>_<scenario>`
+  - `unwrap()` / `expect()` forbidden — use `?` or `assert!(result.is_ok())`
+  - test modules start with `use super::*;`
 
 #### TypeScript
-- **单元测试**: `*.test.ts` 或 `*.spec.ts` 与源文件同目录
-- **框架**: Vitest (首选) / Jest
-- **Mock**: `vi.mock()` / `jest.mock()`
-- **断言**: `expect(x).toBe(y)` / `expect(x).toEqual(y)`
-- **运行**: `npx vitest` / `npx jest`
-- **惯例**:
+- **Unit tests**: `*.test.ts` or `*.spec.ts` alongside source files
+- **Framework**: Vitest (preferred) / Jest
+- **Mocks**: `vi.mock()` / `jest.mock()`
+- **Assertions**: `expect(x).toBe(y)` / `expect(x).toEqual(y)`
+- **Run**: `npx vitest` / `npx jest`
+- **Conventions**:
   - `describe('ModuleName', () => { it('should ...', () => { ... }) })`
-  - AAA 注释: `// Arrange` / `// Act` / `// Assert`
+  - AAA comments: `// Arrange` / `// Act` / `// Assert`
 
 #### Python
-- **单元测试**: `test_*.py` 与源文件同目录或 `tests/`
-- **框架**: pytest
-- **Mock**: `unittest.mock` / `pytest-mock`
-- **断言**: 纯 `assert` (pytest 风格)
-- **运行**: `pytest`
-- **惯例**:
-  - 函数命名: `test_<module>_<scenario>`
-  - 类组织: `class Test<Module>:`
-  - Fixture: `@pytest.fixture`
+- **Unit tests**: `test_*.py` alongside source or in `tests/`
+- **Framework**: pytest
+- **Mocks**: `unittest.mock` / `pytest-mock`
+- **Assertions**: plain `assert` (pytest style)
+- **Run**: `pytest`
+- **Conventions**:
+  - function naming: `test_<module>_<scenario>`
+  - class organization: `class Test<Module>:`
+  - fixtures: `@pytest.fixture`
 
 #### C++
-- **单元测试**: `*_test.cpp` 在 `tests/` 目录
-- **框架**: GoogleTest (gtest/gmock)
-- **Mock**: `MOCK_METHOD` 宏
-- **断言**: `EXPECT_EQ` / `ASSERT_TRUE`
-- **运行**: `ctest` 或 `cmake --build build && ctest --test-dir build`
-- **惯例**:
+- **Unit tests**: `*_test.cpp` in `tests/`
+- **Framework**: GoogleTest (gtest/gmock)
+- **Mocks**: `MOCK_METHOD` macro
+- **Assertions**: `EXPECT_EQ` / `ASSERT_TRUE`
+- **Run**: `ctest` or `cmake --build build && ctest --test-dir build`
+- **Conventions**:
   - `TEST(TestSuiteName, TestName) { ... }`
-  - AAA 注释
+  - AAA comments
 
 #### C
-- **单元测试**: `test_*.c` 在 `tests/` 目录
-- **框架**: Unity / CMock
-- **运行**: `ctest` 或 `make test`
-- **惯例**:
+- **Unit tests**: `test_*.c` in `tests/`
+- **Framework**: Unity / CMock
+- **Run**: `ctest` or `make test`
+- **Conventions**:
   - `TEST_ASSERT_EQUAL(expected, actual)`
-  - `setUp() / tearDown()` 生命周期
+  - `setUp() / tearDown()` lifecycle
 
 ---
 
-## 工作流
+## Workflow
 
-### 模式 1: SDD → 测试生成
+### Mode 1: SDD → Test Generation
 
 ```
 /test-harness generate
 ```
 
-#### 生成层级 (每次询问)
+#### Generation Levels (asked every time)
 
-1. **stubs**: 仅函数签名 + `todo!()` / `fail()` / `pytest.fail()` — 编译通过，测试失败
-2. **AAA 骨架**: Arrange/Act/Assert 注释 + 占位 → 结构就绪，断言待填
-3. **完整填充**: 从规范提取具体值，断言完整可运行 — 预期直接通过
+1. **stubs**: function signatures only + `todo!()` / `fail()` / `pytest.fail()` — compiles, tests fail
+2. **AAA skeletons**: Arrange/Act/Assert comments + placeholders → structure ready, assertions to fill
+3. **full fill**: concrete values extracted from the spec, runnable complete assertions — expected to pass directly
 
-#### Step 1: 识别规范源
+#### Step 1: Identify Spec Sources
 
-自动扫描 `openspec/specs/` 目录：
+Auto-scan the `openspec/specs/` directory:
 ```
 openspec/specs/
-├── hal-type-system-spec.md       → 30 项 (S-TYPE-*)
-├── hal-qos-spec.md               → 30 项 (S-QOS-*)
-├── config-barrier-spec.md        → 24 项 (S-CB-*)
-└── hal-protocol-spec.md          → 37 项 (S-PROTO-*)
+├── hal-type-system-spec.md       → 30 items (S-TYPE-*)
+├── hal-qos-spec.md               → 30 items (S-QOS-*)
+├── config-barrier-spec.md        → 24 items (S-CB-*)
+└── hal-protocol-spec.md          → 37 items (S-PROTO-*)
 ```
 
-让用户选择规范文件 (单选或多选)。
+Let the user choose spec files (single or multi-select).
 
-#### Step 2: Phase 感知过滤
+#### Step 2: Phase-Aware Filtering
 
-读取 `docs/plans/p0-milestone-roadmap.md`，判定当前 Phase：
+Read `docs/plans/p0-milestone-roadmap.md`, determine the current Phase:
 
-| Phase | 可用规范 |
+| Phase | Available specs |
 |-------|---------|
-| Phase 0 (CI) | 类型系统 (S-TYPE) — 纯逻辑，无 trait 依赖 |
-| Phase 1 (hal-core) | S-TYPE + S-QOS + S-CB + S-PROTO — trait 就绪 |
-| Phase 2+ | 全部 |
+| Phase 0 (CI) | type system (S-TYPE) — pure logic, no trait dependencies |
+| Phase 1 (hal-core) | S-TYPE + S-QOS + S-CB + S-PROTO — traits ready |
+| Phase 2+ | everything |
 
-自动过滤规范项：
-- 当前 Phase 未就绪的规范 → 标记 ⏭️ 跳过，生成注释说明
-- A 优先级 (P0) → 优先生成，完整填充
-- B/B+/C 优先级 → stubs 或 AAA 骨架
+Auto-filter spec items:
+- items whose Phase isn't ready → mark ⏭️ skip, generate an explanatory comment
+- priority A (P0) → generate first, full fill
+- priority B/B+/C → stubs or AAA skeletons
 
-#### Step 3: 生成测试文件
+#### Step 3: Generate Test Files
 
-对每个规范项，生成对应语言的测试函数：
+For each spec item, generate a test function in the matching language:
 
 ```
-输入: S-TYPE-001
-  - 前置条件: Bool = true / false
-  - 操作: 编码 → 解码
-  - 期望: true ↔ true, false ↔ false
-  - 测试映射: test_type_01_bool_roundtrip
+Input: S-TYPE-001
+  - preconditions: Bool = true / false
+  - operation: encode → decode
+  - expected: true ↔ true, false ↔ false
+  - test mapping: test_type_01_bool_roundtrip
 
-输出 (Rust):
+Output (Rust):
   #[test]
   fn test_type_01_bool_roundtrip() {
       // Arrange
@@ -176,177 +176,177 @@ openspec/specs/
   }
 ```
 
-#### Step 4: 写入并验证
+#### Step 4: Write and Verify
 
-1. 写入测试文件 (单元测试内联 / 集成测试新文件)
-2. 运行编译检查 (无语法错误)
-3. 运行测试 (预期: 部分通过，部分失败 → 标记待实现)
-4. 报告: `生成 N 个测试函数 → M 通过 / K 失败 / P 跳转`
+1. write the test files (unit tests inline / integration tests in new files)
+2. run compile check (no syntax errors)
+3. run tests (expected: some pass, some fail → mark pending implementation)
+4. report: `generated N test functions → M pass / K fail / P skip`
 
 ---
 
-### 模式 2: 测试 → 规范反向追溯
+### Mode 2: Tests → Spec Reverse Tracing
 
 ```
 /test-harness trace
 ```
 
-检查现有测试覆盖，与 SDD 规范交叉比对：
+Check existing test coverage, cross-referenced against SDD specs:
 
-1. 扫描所有测试文件
-2. 提取测试函数名 → 映射到规范 ID (如 `test_type_01_*` → S-TYPE-001)
-3. 产生覆盖矩阵:
+1. scan all test files
+2. extract test function names → map to spec IDs (e.g. `test_type_01_*` → S-TYPE-001)
+3. produce a coverage matrix:
 
 ```
-规范 ID     | 测试函数                            | 状态
+Spec ID     | Test function                          | Status
 -----------|------------------------------------|------
 S-TYPE-001 | test_type_01_bool_roundtrip        | ✅
 S-TYPE-002 | test_type_02_s8_roundtrip          | ✅
-S-TYPE-003 | —                                  | ❌ 缺失
-S-CB-007   | test_cb_07_partial_failure          | ⚠️ 不完整
+S-TYPE-003 | —                                  | ❌ missing
+S-CB-007   | test_cb_07_partial_failure          | ⚠️ incomplete
 ```
 
-4. 标记:
-   - ❌ 缺失 → 推荐从 SDD 生成
-   - ⚠️ 不完整 → 边界条件未覆盖
-   - ✅ 完整
+4. mark:
+   - ❌ missing → recommend generating from SDD
+   - ⚠️ incomplete → boundary conditions not covered
+   - ✅ complete
 
 ---
 
-### 模式 3: 用例执行与修复
+### Mode 3: Run & Fix Failing Cases
 
 ```
 /test-harness run
 ```
 
-1. 运行当前项目测试套件
-2. 收集失败列表
-3. 对每个失败:
-   - 读取测试源码
-   - 读取对应实现源码
-   - 判定根因: 测试错误 vs 实现错误
-   - 自动修复测试错误 (错误断言、缺失 mock)
-   - 标记实现错误 → 报告给用户
+1. run the current project test suite
+2. collect the failure list
+3. for each failure:
+   - read the test source
+   - read the corresponding implementation source
+   - determine root cause: test bug vs implementation bug
+   - auto-fix test bugs (wrong assertions, missing mocks)
+   - flag implementation bugs → report to the user
 
-**根因判定规则**:
-- 测试函数逻辑与规范不一致 → 测试错误
-- 断言值错误 (期望 1 但规范说应为 2) → 测试错误
-- 实现未完成 / 接口变更 → 实现错误
+**Root-cause rules**:
+- test logic disagrees with the spec → test bug
+- wrong assertion value (expects 1 but the spec says 2) → test bug
+- implementation incomplete / interface changed → implementation bug
 
-**绝不**: 修改实现代码来让测试通过 (除非用户明确要求)。
+**Never**: modify implementation code to make a test pass (unless the user explicitly asks).
 
 ---
 
-### 模式 4: 增量测试
+### Mode 4: Incremental Tests
 
 ```
 /test-harness incremental
 ```
 
-从 `git diff` 识别变更 → 生成对应测试：
+Identify changes from `git diff` → generate matching tests:
 
-1. `git diff --name-only` 获取变更文件
-2. 反向映射到 SDD 规范 (文件路径 → 模块 → 规范 ID)
-3. 仅对变更相关的规范生成增量测试
-4. 如果变更文件还没有测试 → 初始化测试文件
-（注：Mode 7 用于运行受影响测试，Mode 4 用于生成增量测试）
+1. `git diff --name-only` to get changed files
+2. reverse-map to SDD specs (file path → module → spec ID)
+3. generate incremental tests only for spec items related to the changes
+4. if a changed file has no tests yet → initialize a test file
+(note: Mode 7 runs affected tests; Mode 4 generates incremental tests)
 
 ---
 
-### 模式 5: 项目初始化
+### Mode 5: Project Initialization
 
 ```
 /test-harness init
 ```
 
-为新模块创建测试基础设施:
+Create test infrastructure for a new module:
 
 **Rust**:
-- `tests/` 目录 + 集成测试入口
-- crate-level `#[cfg(test)]` helper 模块
-- `mockall` 依赖检查
+- `tests/` directory + integration-test entry points
+- crate-level `#[cfg(test)]` helper module
+- `mockall` dependency check
 
 **TypeScript**:
 - `vitest.config.ts` / `jest.config.ts`
-- `__tests__/` 目录
-- test setup 文件
+- `__tests__/` directory
+- test setup files
 
 **Python**:
 - `tests/__init__.py` + `conftest.py`
-- pytest 配置 (pyproject.toml)
+- pytest config (pyproject.toml)
 
 **C++**:
-- `CMakeLists.txt` 测试目标
-- `tests/` 目录 + CMakeLists.txt
-- gtest 集成
+- `CMakeLists.txt` test targets
+- `tests/` directory + CMakeLists.txt
+- gtest integration
 
 **C**:
-- `CMakeLists.txt` 测试目标
-- Unity/CMock 框架下载
+- `CMakeLists.txt` test targets
+- Unity/CMock framework download
 
 ---
 
-### 模式 6: 覆盖率报告
+### Mode 6: Coverage Report
 
 ```
 /test-harness coverage
 ```
 
-1. 运行带覆盖率的测试
-2. 按模块聚合并展示:
+1. run tests with coverage
+2. aggregate and display per module:
 
 ```
-模块                | 行覆盖    | 分支覆盖   | 规范覆盖
+Module              | Line cov  | Branch cov | Spec cov
 -------------------|----------|----------|----------
 hal-type-system    | 92%      | 85%      | 28/30
 hal-qos            | 78%      | 71%      | 22/30
 config-barrier     | 65%      | 58%      | 18/24
 hal-protocol       | 88%      | 82%      | 34/37
 ───────────────────|──────────|──────────|────────
-总计               | 81%      | 74%      | 102/121
+Total              | 81%      | 74%      | 102/121
 ```
 
-3. 缺口排序: 未覆盖规范项 / 低分支覆盖函数
-4. 推荐: 优先补充的 N 项测试
+3. rank gaps: uncovered spec items / low-branch-coverage functions
+4. recommend: the N tests to add first
 
 ---
 
-### 模式 7: 选择性测试运行 (Selective Test Runner)
+### Mode 7: Selective Test Runner
 
 ```
 /test-harness selective
 ```
 
-> 注：mediaservo 和 hal-flatbuffers 为 Phase 1 stub crates（M0.3），当前无实际测试目标。Mode 7 使用 `cargo metadata` 检查 crate 存在性后再建议测试命令。
-从 `git diff` 识别变更 → 仅运行受影响的测试（非门禁，调度工具）：
+> Note: mediaservo and hal-flatbuffers are Phase 1 stub crates (M0.3) with no real test targets today. Mode 7 uses `cargo metadata` to check crate existence before suggesting test commands.
+Identify changes from `git diff` → run only the affected tests (not a gate — a scheduling tool):
 
-1. `git diff --name-only HEAD` 获取变更文件
-2. 映射文件到测试目标:
+1. `git diff --name-only HEAD` to get changed files
+2. map files to test targets:
 
-| 变更路径匹配 | 测试命令 |
+| Changed path matches | Test command |
 |---|---|
 | `crates/mediaservo-common/` | `cargo test -p mediaservo-common` |
-| `crates/mediaservo/` | `cargo test -p mediaservo`（Phase 1, stub only） |
-| `crates/hal-flatbuffers/` | `cargo test -p hal-flatbuffers`（Phase 1, stub only） |
+| `crates/mediaservo/` | `cargo test -p mediaservo` (Phase 1, stub only) |
+| `crates/hal-flatbuffers/` | `cargo test -p hal-flatbuffers` (Phase 1, stub only) |
 | `*.fbs` (FlatBuffers schema) | `cargo test -p hal-flatbuffers` |
 | `Cargo.toml` or `Cargo.lock` | `cargo test --workspace` |
-| 跨 crate (3+ crates) | `./scripts/qa-fast.sh` |
+| cross-crate (3+ crates) | `./scripts/qa-fast.sh` |
 
-3. 运行测试（一次一层，避免 cargo 锁冲突）
-4. 报告: 层 / 命令 / 测试数 / 通过 / 失败 / 耗时
+3. run tests (one layer at a time, avoid cargo lock contention)
+4. report: layer / command / test count / passed / failed / duration
 
-**绝不**: 同时运行 cargo test 多个 crate。不诊断失败 — 仅报告。>20 文件变更 → 建议 `cargo test --workspace`。
+**Never**: run `cargo test` for multiple crates simultaneously. Do not diagnose failures — report only. >20 changed files → suggest `cargo test --workspace`.
 
 ---
 
-## MediaServo 特定测试模式
+## MediaServo-Specific Test Patterns
 
-### HAL Trait 测试
+### HAL Trait Tests
 
-所有 HAL 核心 trait 测试使用 `MockHalTransport` (`mediaservo`)：
+All HAL core trait tests use `MockHalTransport` (`mediaservo`):
 
 ```rust
-// Rust 模式
+// Rust pattern
 #[test]
 fn test_signal_write_read() {
     // Arrange
@@ -362,7 +362,7 @@ fn test_signal_write_read() {
 }
 ```
 
-### HalQoS 安全域标签
+### HalQoS Security-Domain Tags
 
 ```rust
 #[test]
@@ -374,7 +374,7 @@ fn test_qos_security_domain_hierarchical() {
 }
 ```
 
-### Config Barrier 状态机
+### Config Barrier State Machine
 
 ```rust
 #[test]
@@ -409,67 +409,67 @@ fn test_halvalue_fbs_roundtrip() {
 
 ---
 
-## 交互模式
+## Interactive Mode
 
-所有测试生成操作在写入文件前展现 diff 预览，由用户确认：
+All test-generation operations show a diff preview before writing files, for user confirmation:
 
 ```
-将生成以下变更:
-  crates/mediaservo-common/src/types.rs +45 (内联测试模块)
-  tests/integration/test_type_roundtrip.rs (新文件, 150行)
-  tests/integration/test_qos_security.rs (新文件, 80行)
+Will generate the following changes:
+  crates/mediaservo-common/src/types.rs +45 (inline test module)
+  tests/integration/test_type_roundtrip.rs (new file, 150 lines)
+  tests/integration/test_qos_security.rs (new file, 80 lines)
 
-总计: 3 文件, +275 行, 30 测试函数
+Total: 3 files, +275 lines, 30 test functions
 
-执行? [Y/n]
+Execute? [Y/n]
 ```
 
 ---
 
-## Phase 感知规则
+## Phase-Awareness Rules
 
-自动读取 `docs/plans/p0-milestone-roadmap.md` 确认当前里程碑。
+Auto-read `docs/plans/p0-milestone-roadmap.md` to confirm the current milestone.
 
-| 检查点 | 行为 |
+| Checkpoint | Behavior |
 |--------|------|
-| 规范所需 trait 尚未定义 | 生成 stub 或跳过，标注 "⏭️ Phase 2" |
-| 优先级 A (P0 必须) | 完整填充 + 断言 |
-| 优先级 B/B+ | AAA 骨架 |
-| 优先级 C | stub 占位 |
+| trait required by the spec not yet defined | generate a stub or skip, mark "⏭️ Phase 2" |
+| priority A (P0 mandatory) | full fill + assertions |
+| priority B/B+ | AAA skeleton |
+| priority C | stub placeholder |
 
-Phase 变化时，重新运行 `generate` → 之前跳过的测试自动填充。
-
----
-
-## 质量规则
-
-1. **每个测试一个断言目标** — 一个 test 函数验证一个规范项
-2. **AAA 注释必须显式** — `// Arrange` / `// Act` / `// Assert` 不可省略
-3. **不修改测试让实现通过** — 规范 > 测试 > 实现 (优先级)
-4. **禁止 unwrap/expect** — 测试中也避免，用 `assert!(result.is_ok())`
-5. **边界条件优先** — 规范中 `边界条件` 字段的每个条目 → 独立测试
-6. **命名可追溯** — 测试函数名包含规范 ID (如 `test_type_01_*`)
-7. **Phase 对齐** — 不生成当前 Phase 无法运行的测试
+When the Phase changes, re-run `generate` → previously skipped tests get auto-filled.
 
 ---
 
-## 快速参考
+## Quality Rules
+
+1. **One assertion target per test** — one test function validates one spec item
+2. **AAA comments must be explicit** — `// Arrange` / `// Act` / `// Assert` are not optional
+3. **Never bend a test to fit the implementation** — spec > test > implementation (precedence)
+4. **No unwrap/expect** — avoid them in tests too; use `assert!(result.is_ok())`
+5. **Boundary conditions first** — every entry in the spec's boundary-conditions field → its own test
+6. **Traceable naming** — test function names include the spec ID (e.g. `test_type_01_*`)
+7. **Phase alignment** — never generate tests that can't run in the current Phase
+
+---
+
+## Quick Reference
 
 ```
-/test-harness               → 选择任务类型
-/test-harness generate      → SDD→测试生成
-/test-harness run           → 运行并修复测试
-/test-harness trace         → 测试→规范反向追溯
-/test-harness incremental   → 增量测试 (git diff)
-/test-harness init          → 初始化测试基础设施
-/test-harness coverage      → 覆盖率报告
-/test-harness selective    → 选择性测试运行 (git diff)
+/test-harness               → choose task type
+/test-harness generate      → SDD→test generation
+/test-harness run           → run and fix tests
+/test-harness trace         → tests→spec reverse tracing
+/test-harness incremental   → incremental tests (git diff)
+/test-harness init          → initialize test infrastructure
+/test-harness coverage      → coverage report
+/test-harness selective    → selective test runner (git diff)
 ```
 
-### 语言命令速查
+### Language Command Cheat Sheet
 
-| 语言 | 运行测试 | 覆盖率 | Mock 库 |
-|------|---------|--------|---------|
+| Language | Run tests | Coverage | Mock library |
+|------|---------|---------|---------|
 | Rust | `cargo test` | `cargo tarpaulin` | mockall |
 | TS | `npx vitest` | `npx vitest --coverage` | vi.mock() |
 | Python | `pytest` | `pytest --cov` | pytest-mock |

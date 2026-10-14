@@ -1,15 +1,15 @@
-/* weaknet 控制台 v1 设计令牌（工程控制台：暗中性、紧凑、键盘可达；契约 design §UI「功能密度优先」） */
+/* weaknet console v1 design tokens (engineering console: dark neutral, compact, keyboard-reachable; contract design §UI "function density first") */
 :root {
-  --bg: #14161a;      /* 页底 */
-  --bg2: #1a1e24;     /* 栏卡 */
-  --bg3: #232830;     /* 控件底 */
-  --line: #2d333b;    /* 分隔 */
-  --fg: #d6dae1;      /* 主文字 */
-  --dim: #8b949e;     /* 次要 */
-  --acc: #4f9cf9;     /* 强调/链接 */
-  --ok: #3fb950;      /* live/连接 */
-  --warn: #e3b341;    /* 注意/toast */
-  --err: #f85149;     /* 失败 */
+  --bg: #14161a;      /* page base */
+  --bg2: #1a1e24;     /* column cards */
+  --bg3: #232830;     /* control base */
+  --line: #2d333b;    /* separators */
+  --fg: #d6dae1;      /* primary text */
+  --dim: #8b949e;     /* secondary */
+  --acc: #4f9cf9;     /* accent/link */
+  --ok: #3fb950;      /* live/connected */
+  --warn: #e3b341;    /* notice/toast */
+  --err: #f85149;     /* failure */
   --mono: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
   --fs: 13px;
 }
@@ -82,7 +82,7 @@ legend { font-size: 11px; color: var(--dim); padding: 0 4px; }
 .err { color: var(--err); }
 .note { font-family: var(--mono); font-size: 11px; word-break: break-all; }
 
-/* 中栏流表 */
+/* mid-column stream table */
 .grp { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 8px; background: var(--bg2); }
 .grp > header { display: flex; align-items: center; gap: 8px; height: auto; padding: 5px 9px; background: none; border: none; border-bottom: 1px solid var(--line); }
 .grp .owner { font-weight: 600; font-family: var(--mono); font-size: 12px; }
@@ -100,14 +100,14 @@ legend { font-size: 11px; color: var(--dim); padding: 0 4px; }
 .play:hover { text-decoration: underline; }
 .empty { color: var(--dim); padding: 8px 2px; }
 
-/* 右栏 */
+/* right column */
 #kbps, #drop { margin-bottom: 10px; }
 .uplot { border: 1px solid var(--line); border-radius: 8px; background: var(--bg2); }
 #evlog { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 11px; color: var(--dim); }
 #evlog li { padding: 2px 4px; border-bottom: 1px dashed var(--line); }
 #evlog .evname { color: var(--fg); }
 
-/* S 页签 */
+/* scenarios tab */
 #scenlist { list-style: none; margin: 0 0 10px; padding: 0; }
 #scenlist li { padding: 0; }
 #scenlist label { display: flex; gap: 8px; align-items: center; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 4px; background: var(--bg2); cursor: pointer; }
@@ -122,14 +122,14 @@ legend { font-size: 11px; color: var(--dim); padding: 0 4px; }
 }
 #toast.bad { border-color: var(--err); }
 
-/* 401 引导 */
+/* 401 onboarding */
 #gate { position: fixed; inset: 0; background: var(--bg); z-index: 50; display: grid; place-items: center; }
 #gate[hidden] { display: none; }
 .gate-card { max-width: 560px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg2); padding: 26px 30px; }
 .gate-card h1 { font-size: 16px; margin: 0 0 12px; }
 .gate-form { display: flex; gap: 8px; margin: 14px 0 6px; }
 .gate-form input { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12px; }
-/* 401 抖动：showGate(bad) 加类，offsetWidth 重启（app.js） */
+/* 401 shake: showGate(bad) adds the class, offsetWidth restarts it (app.js) */
 .gate-card.shake { animation: gate-shake .3s; }
 @keyframes gate-shake {
   20% { transform: translateX(-6px); } 40% { transform: translateX(5px); }

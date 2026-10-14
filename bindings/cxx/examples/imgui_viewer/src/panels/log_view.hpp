@@ -1,4 +1,4 @@
-// panels/log_view — 底区：AppLog 环渲染 + 「恢复默认布局」钮（docking 要素⑤的出口）。
+// panels/log_view — the bottom area: AppLog ring rendering + the "restore default layout" button (the exit hatch for docking element ⑤).
 #ifndef MSRTC_VIEWER_PANELS_LOG_VIEW_HPP
 #define MSRTC_VIEWER_PANELS_LOG_VIEW_HPP
 

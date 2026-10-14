@@ -1,10 +1,10 @@
-# CI/CD Pipeline — 持续集成/部署
+# CI/CD Pipeline — Continuous Integration/Deployment
 
-> 状态：Phase 2 前设计 | 关联决策：D-CI-01, D112 | 创建依据：doc-audit M8
+> Status: pre-Phase 2 design | Related decisions: D-CI-01, D112 | Created per doc-audit M8
 
-## 3 阶段流水线 (D-CI-01)
+## 3-Stage Pipeline (D-CI-01)
 
-GitHub Actions 单 workflow，三阶段串联，阶段间传递 artifact：
+A single GitHub Actions workflow, three chained stages, artifacts handed between stages:
 
 ```
 Check → Test → Build (Package)
@@ -12,44 +12,44 @@ Check → Test → Build (Package)
 
 ### Stage 1 — Check
 
-运行快、无外部依赖，先行失败快速反馈：
+Fast, no external dependencies, fail-early feedback:
 
 - **rustfmt**: `cargo fmt --all -- --check`
 - **clippy**: `cargo clippy --workspace --all-targets -- -D warnings`
 - **cargo deny**: `cargo deny check bans licenses sources`
 
-工具链版本由 `rust-toolchain.toml` 固定，无需矩阵。
+Toolchain versions pinned by `rust-toolchain.toml`; no matrix needed.
 
 ### Stage 2 — Test
 
-并行矩阵，覆盖全 workspace：
+Parallel matrix covering the whole workspace:
 
-- `cargo test --workspace` (默认 target)
-- 覆盖率采集: `cargo tarpaulin --workspace --out xml`
-- Coverage report 上传到 Codecov，门禁 80%
+- `cargo test --workspace` (default target)
+- Coverage collection: `cargo tarpaulin --workspace --out xml`
+- Coverage report uploaded to Codecov, gate at 80%
 
 ### Stage 3 — Build & Package
 
 - `cargo build --workspace --release`
-- 3 crate 分别打包 tarball:
+- The 3 crates packaged into tarballs individually:
   - `mediaservo-host-{version}-{target}.tar.gz`
   - `mediaservo-client-{version}-{target}.tar.gz`
   - `mediaservo-server-{version}-{target}.tar.gz`
-- Artifact 上传为 workflow run attachment
+- Artifacts uploaded as workflow run attachments
 
-## Phase 2 扩展
+## Phase 2 Extensions
 
-- **Cross-compile**: aarch64-unknown-linux-gnu (Jetson Orin) 矩阵
-- **Docker**: `mediaservo-server` 构建 multi-arch Docker 镜像 (linux/amd64 + linux/arm64)
-- **Integration test**: 启动 docker-compose (server + 2 mock hosts)，运行 E2E 场景
-- **Release automation**: tag push → 自动发布 GitHub Release + crates.io publish
+- **Cross-compile**: aarch64-unknown-linux-gnu (Jetson Orin) matrix
+- **Docker**: `mediaservo-server` builds multi-arch images (linux/amd64 + linux/arm64)
+- **Integration test**: boots docker-compose (server + 2 mock hosts) and runs E2E scenarios
+- **Release automation**: tag push → publishes a GitHub Release + crates.io automatically
 
-## 触发规则
+## Trigger Rules
 
-| 触发器 | Stage 1-2 | Stage 3 |
+| Trigger | Stages 1-2 | Stage 3 |
 |--------|-----------|---------|
 | PR → main | ✅ | ❌ |
 | push → main | ✅ | ✅ |
 | tag v* | ✅ | ✅ (release mode) |
 
-> 详见 `.github/workflows/ci.yml`
+> See `.github/workflows/ci.yml` for details

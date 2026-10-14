@@ -30,9 +30,9 @@ Use a consistent envelope for all API responses:
 - Include an error message field (nullable on success)
 - Include metadata for paginated responses (total, page, limit)
 
-## 可执行检查
+## Executable Checks
 
 ```bash
-# 验证：无大文件
+# Verify: no large files
 find crates/ -name "*.rs" -exec wc -l {} + | awk "$1>800{print}"
 ```

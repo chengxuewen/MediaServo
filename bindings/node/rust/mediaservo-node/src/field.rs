@@ -1,4 +1,4 @@
-//! field 推流面 napi 绑定 — PushSession（async 全流程）。
+//! field push-plane napi bindings — PushSession (fully async flow).
 
 use std::sync::Arc;
 
@@ -6,7 +6,7 @@ use mediaservo_field::{PublishOptions, PushConfig, PushSession};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-/// 推流配置（对应 Rust PushConfig；width 等省略时用默认值）。
+/// Push configuration (mirrors the Rust PushConfig; omitted fields such as width use defaults).
 #[napi(object)]
 pub struct JsPushConfig {
     pub url: String,
@@ -24,14 +24,14 @@ pub struct JsPushConfig {
     pub keyframe_interval: Option<i64>,
 }
 
-/// 推流会话（async；内部 tokio Mutex 序列化——field-c C ABI 同款包装先例）。
+/// Push session (async; internally serialized through a tokio Mutex — same wrapper precedent as the field-c C ABI).
 #[napi]
 pub struct JsPushSession {
     inner: Arc<tokio::sync::Mutex<Option<PushSession>>>,
     cfg: PushConfig,
 }
 
-// SAFETY: 所有方法经 tokio Mutex 序列化访问内部会话（field-c 同款先例，跨线程安全）。
+// SAFETY: all methods access the inner session through a tokio Mutex (same precedent as field-c, thread-safe).
 unsafe impl Send for JsPushSession {}
 unsafe impl Sync for JsPushSession {}
 
@@ -41,7 +41,7 @@ fn closed_err() -> napi::Error {
 
 #[napi]
 impl JsPushSession {
-    /// 连接信令 + 创建会话（async）。
+    /// Connect signaling and create the session (async).
     #[napi(factory)]
     pub async fn connect(cfg: JsPushConfig) -> Result<Self> {
         let mut push_cfg = PushConfig::new(&cfg.url, &cfg.psk, &cfg.room);
@@ -66,7 +66,7 @@ impl JsPushSession {
         Ok(Self { inner: Arc::new(tokio::sync::Mutex::new(Some(session))), cfg: push_cfg })
     }
 
-    /// 发布视频轨（SFU 协商；返回 track id）。
+    /// Publish the video track (SFU negotiation; returns the track id).
     #[napi]
     pub async fn publish_video(&self) -> Result<String> {
         let mut guard = self.inner.lock().await;
@@ -79,7 +79,7 @@ impl JsPushSession {
             .map_err(|e| napi::Error::from_reason(format!("publish_video: {e}")))
     }
 
-    /// 启动视频帧生成（Squares + 时间戳水印）。
+    /// Start video frame generation (squares + timestamp watermark).
     #[napi]
     pub async fn start_video_frames(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;
@@ -90,7 +90,7 @@ impl JsPushSession {
             .map_err(|e| napi::Error::from_reason(format!("start_video_frames: {e}")))
     }
 
-    /// 停止视频帧生成（幂等）。
+    /// Stop video frame generation (idempotent).
     #[napi]
     pub async fn stop_video_frames(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;
@@ -100,7 +100,7 @@ impl JsPushSession {
         Ok(())
     }
 
-    /// 关闭会话（幂等；此后任何调用报错）。
+    /// Close the session (idempotent; any later call errors).
     #[napi]
     pub async fn close(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;

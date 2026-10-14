@@ -1,6 +1,6 @@
-// ── admin REST 面（/api/admin 前缀消费方）──
-// P0/D270-R1: auth/JWT 纯面与 wire 类型已提纯至 @mediaservo/client（单一真源），
-// 本文件 re-export 保持全部既有消费方 import 路径零改动；request()/REST 函数为 admin 专属留此。
+// ── admin REST surface (consumer of the /api/admin prefix) ──
+// P0/D270-R1: the auth/JWT pure surface and wire types were extracted to @mediaservo/client (single source),
+// this file re-exports them so existing consumer import paths stay unchanged; request()/REST functions stay admin-only here.
 import { getToken, isTokenExpired, clearToken } from '@mediaservo/client';
 import type {
   DeviceListResponse,
@@ -32,7 +32,7 @@ function headers(): Record<string, string> {
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { ...opts, headers: { ...headers(), ...opts?.headers } });
   if (res.status === 401) {
-    // 401 自愈: 仅对失效/过期 token 清登录态跳转（valid-but-denied 如 operator 保留错误态 — roles-operator.spec）
+    // 401 self-heal: only clear the login state for invalid/expired tokens (valid-but-denied e.g. operator keeps the error state — roles-operator.spec)
     const token = getToken();
     if (!token || isTokenExpired(token)) {
       clearToken();
@@ -41,7 +41,7 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
     }
     throw new Error('Authentication required — please sign in');
   }
-      // 非 2xx: 后端错误体为 {error} — 直接抛消息，让调用方可见错误分支（C15）
+      // non-2xx: backend error body is {error} — throw the message so callers can see the error branch (C15)
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(body?.error ?? `Request failed (${res.status})`);
@@ -76,7 +76,7 @@ export async function getSfuStats(producerId?: string, consumerId?: string): Pro
 export async function getVehicleStatus(): Promise<VehicleStatusResponse> {
   return request('/status');
 }
-// ── 设备管理（AdminState）──────────────────────────────────────────────
+// ── Device management (AdminState) ──────────────────────────────────────
 export async function getAdminDevices(): Promise<AdminDeviceListResponse> {
   return request('/devices');
 }
@@ -95,7 +95,7 @@ export async function resetDeviceSecret(deviceId: string): Promise<AdminDeviceSe
   return request(`/devices/${encodeURIComponent(deviceId)}/reset-secret`, { method: 'POST' });
 }
 
-// ── 待批准队列（device-enroll 手动档）──────────────────────────────────
+// ── Pending approval queue (device-enroll manual mode) ─────────────────
 export async function getPendingDevices(): Promise<PendingDeviceListResponse> {
   return request('/devices/pending');
 }
@@ -106,7 +106,7 @@ export async function approvePendingDevice(deviceId: string, name?: string): Pro
   return request('/devices/approve', { method: 'POST', body: JSON.stringify(body) });
 }
 
-// ── 账号管理（AdminState）──────────────────────────────────────────────
+// ── Account management (AdminState) ─────────────────────────────────────
 export async function getAdminAccounts(): Promise<AdminAccountListResponse> {
   return request('/accounts');
 }
@@ -123,7 +123,7 @@ export async function deleteAccount(username: string): Promise<AdminAccountDelet
   return request(`/accounts/${encodeURIComponent(username)}`, { method: 'DELETE' });
 }
 
-// ── API Keys 管理（accountless-client-auth T1；wire 类型 admin 专属留此）──
+// ── API Keys management (accountless-client-auth T1; wire types stay admin-only here) ──
 export interface AdminApiKey {
   key_id: string;
   role: string;
@@ -147,7 +147,7 @@ export async function revokeApiKey(keyId: string): Promise<AdminApiKeyRevoked> {
   return request(`/apikeys/${encodeURIComponent(keyId)}`, { method: 'DELETE' });
 }
 
-// ── PSK 管理（psk-admin-management — admin-only 端点）──────────────────────
+// ── PSK management (psk-admin-management — admin-only endpoints) ──────────
 
 export async function getPsk(): Promise<PskResponse> {
   return request('/psk');

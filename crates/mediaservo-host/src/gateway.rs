@@ -1,35 +1,35 @@
-//! host-agent 信令网关（Task D1，D-H6「一车一会话」核心）。
+//! host-agent signaling gateway (Task D1, D-H6 "one vehicle one session" core).
 //!
-//! 拓扑：
+//! Topology:
 //! ```text
-//! 子进程 (host-streamer 等) ──WS {src, msg}──▶ host-agent ◀──WS 纯 SignalingMessage── Server
+//! child processes (host-streamer etc.) ──WS {src, msg}──▶ host-agent ◀──WS pure SignalingMessage── Server
 //! ```
 //!
-//! 协议语义（Momus HIGH-1，实证于 signaling.rs）：
-//! - (a) **RoomJoin 拦截**：各子进程的 RoomJoin 由 agent 拦截（server 只在建连阶段
-//!   处理 RoomJoin，relay 循环内再收会被静默丢弃）；agent 以整车身份单次 join，
-//!   子进程本地合成 `RoomJoined`（携带整车 peer_id）。
-//! - (b) **响应路由**：SFU 消息（CreateWebRtcTransport/ConnectWebRtcTransport/
-//!   Produce/Consume）每请求恰好一响应，server 单 WS 严格顺序处理（forward 循环
-//!   await `handle_sfu_message` 后才读下一条）→ agent 维护**待决请求 FIFO**
-//!   （conn id），响应到达即弹出匹配发起者。并发协商正确（与"按序复用"拒绝项不同
-//!   ——不串行化协商，只按序配对在途请求）。FIFO 的三个边界不变量（D1 审查修复）：
-//!   ① joined 检查先于 push（断线窗口 5001 不留陈旧槽）；② push 与远端 send 同一
-//!   临界区（wire 顺序 ≡ pending 顺序）；③ 断连连接不位移队列（mark-dead 严格
-//!   FIFO 消费——死槽被其自身响应弹出丢弃）。P2P relay 的 Sdp/RTCIceCandidate 无
-//!   transport 标识 → 按**协商归属**追踪（最后一个上行 Sdp/ICE 的本地连接；
-//!   Frame/EncoderStatus 等媒体/状态消息不更新归属），单协商串行语义。
-//! - (c) 拒绝项均未实现："远端 from 前缀"（破坏 Server 零改动）/"按序复用"（并发
-//!   协商必错乱）。
+//! Protocol semantics (Momus HIGH-1, verified against signaling.rs):
+//! - (a) **RoomJoin interception**: each child process's RoomJoin is intercepted by the agent (the server only
+//!   handles RoomJoin during connection setup; one received again inside the relay loop is silently dropped); the agent joins once
+//!   with the whole-vehicle identity, and child processes get a locally synthesized `RoomJoined` (carrying the vehicle peer_id).
+//! - (b) **Response routing**: SFU messages (CreateWebRtcTransport/ConnectWebRtcTransport/
+//!   Produce/Consume) get exactly one response per request, and the single server WS is processed strictly in order (the forward loop
+//!   awaits `handle_sfu_message` before reading the next) → the agent maintains a **pending-request FIFO**
+//!   (conn ids); when a response arrives it pops the matching sender. Concurrent negotiation is correct (unlike the rejected "sequential reuse" option
+//!   — negotiations are not serialized, only in-flight requests are paired in order). The three FIFO boundary invariants (D1 review fixes):
+//!   1) the joined check precedes the push (the disconnect window's 5001 leaves no stale slot); 2) push and remote send share one
+//!   critical section (wire order ≡ pending order); 3) a disconnected connection does not shift the queue (mark-dead strict
+//!   FIFO consumption — a dead slot is popped and discarded by its own response). P2P relay's Sdp/RTCIceCandidate carry no
+//!   transport id → tracked by **negotiation ownership** (the local connection of the last upstream Sdp/ICE;
+//!   media/status messages like Frame/EncoderStatus do not update ownership), single-negotiation serial semantics.
+//! - (c) Rejected options (none implemented): "remote from prefix" (breaks zero-change Server) / "sequential reuse" (concurrent
+//!   negotiations must scramble).
 //!
-//! 额外语义：
-//! - **房间重写**：子进程消息 room_id → 整车房间上行；下行按目标子进程自己声明
-//!   的房间改写。多 streamer（各自 `stream-<id>` 房间）聚合进同一整车会话。
-//! - **回显去重**：server 将 relay 白名单消息（Sdp/ICE/Frame/EncoderStatus）广播给
-//!   房间全员（含发送者自身）→ agent 按文本匹配丢弃自己转发的回显。
-//! - **子进程 RoomLeave 拦截**：单进程 leave 若上行会让 server 断开整车会话。
-//! - **断线**：远端断开 → 清空待决 FIFO/协商归属/回显缓存（server 已回收全部
-//!   transport），本地连接保持，B1 重连后转发恢复。
+//! Additional semantics:
+//! - **Room rewriting**: child-process message room_id → upstream vehicle room; downstream is rewritten to the room each target child process
+//!   itself declared. Multiple streamers (each with a `stream-<id>` room) aggregate into one vehicle session.
+//! - **Echo dedup**: the server broadcasts relay-whitelist messages (Sdp/ICE/Frame/EncoderStatus) to everyone in the
+//!   room (including the sender itself) → the agent drops echoes of its own forwarded traffic by text match.
+//! - **Child-process RoomLeave interception**: a single process's leave, forwarded upstream, would make the server drop the whole vehicle session.
+//! - **Disconnect**: remote drop → clear the pending FIFO / negotiation ownership / echo cache (the server has reclaimed all
+//!   transports); local connections stay up, and forwarding resumes after B1 reconnect.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -43,26 +43,26 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 
-/// 本地协议信封：`{src, msg}` — 仅本地 wire；远端为纯 SignalingMessage（零改动）。
-/// 类型定义在 mediaservo-link（D2 I1: 单一来源，防 wire 漂移——子进程经 field 复用同型）。
+/// Local protocol envelope: `{src, msg}` — local wire only; the remote side is a pure SignalingMessage (zero change).
+/// Type defined in mediaservo-link (D2 I1: single source, prevents wire drift — child processes reuse the same shape via field).
 pub use mediaservo_link::signal::LocalEnvelope;
 
-/// 网关配置。
+/// Gateway configuration.
 #[derive(Debug, Clone)]
 pub struct GatewayConfig {
-    /// 本地监听端口（0 = 临时端口，测试用）。
+    /// Local listen port (0 = ephemeral port, for tests).
     pub local_port: u16,
-    /// 远端 Server WS 地址（SignalClient 直连）。
+    /// Remote server WS address (SignalClient direct connect).
     pub remote_url: String,
-    /// PSK（每连接重认证，B1 语义）。
+    /// PSK (per-connection re-authentication, B1 semantics).
     pub psk: String,
-    /// device-enroll 设备身份（公钥指纹）：Some = 远端 Join 携带 device_pubkey 走验签链
-    /// （未批准 = EnrollPending → 「待管理员批准」日志 + 既有退避）；None = PSK 路径。
-    /// host-agent 从 identity.json + etc/link/signing.pem 装配。
+    /// device-enroll device identity (public-key fingerprint): Some = the remote Join carries device_pubkey through the signature chain
+    /// (not approved = EnrollPending → "awaiting admin approval" log + the existing backoff); None = PSK path.
+    /// host-agent assembles it from identity.json + etc/link/signing.pem.
     pub device: Option<mediaservo_link::DeviceIdentity>,
-    /// 整车房间（agent 单次 join 的房间）。
+    /// Vehicle room (the room the agent joins once).
     pub room: String,
-    /// 远端连接重试配置（断线重连复用）。
+    /// Remote connection retry config (reused for reconnect after disconnect).
     pub retry: RetryConfig,
 }
 
@@ -73,68 +73,68 @@ impl Default for GatewayConfig {
             remote_url: "ws://127.0.0.1:9800/ws".into(),
             psk: "mediaservo-dev".into(),
             device: None,
-            // I1 review (D3 TODO 关闭): 整车房间由 host.yaml [signaling] room 配置 —
-            // translate 转译为 agent --room；此处为 CLI 缺省（host-agent 内置默认）。
+            // I1 review (D3 TODO closed): the vehicle room is configured via host.yaml [signaling] room —
+            // translate renders it into agent --room; this is the CLI default (host-agent builtin).
             room: "vehicle".into(),
             retry: RetryConfig::default(),
         }
     }
 }
 
-/// 默认本地端口（host.yaml [signaling] local_port 可覆盖，translate 传 --port）。
+/// Default local port (overridable by host.yaml [signaling] local_port; translate passes --port).
 pub const DEFAULT_LOCAL_PORT: u16 = 17980;
-/// 网关未连上远端 server 时对子进程的应答码（子进程可重试）。
+/// Response code toward child processes while the gateway has no remote server connection (child processes may retry).
 const ERR_GATEWAY_DISCONNECTED: u16 = 5001;
-/// 回显缓存容量（最近转发的 relay 消息文本，FIFO）。
+/// Echo cache capacity (recently forwarded relay message texts, FIFO).
 const ECHO_CACHE_CAP: usize = 256;
 
-/// 单个本地子进程连接。
+/// A single local child-process connection.
 #[derive(Clone)]
-#[allow(dead_code)] // id = 诊断/审计位（E3 快照扩展预留）
+#[allow(dead_code)] // id = diagnostics/audit field (reserved for the E3 snapshot extension)
 struct Conn {
     id: u64,
-    /// 子进程 RoomJoin 声明（拦截时记录；下行响应房间改写目标）。
+    /// The child process's RoomJoin declaration (recorded at interception; target of downstream room rewriting).
     room: String,
-    /// 子进程标识（LocalEnvelope.src，最近一条上行消息的声明；E3 快照数据源）。
+    /// Child-process identifier (LocalEnvelope.src, the declaration on the most recent upstream message; E3 snapshot data source).
     src: String,
-    /// 最近一条上行消息到达时刻（E3 快照数据源；None = 尚未收到消息）。
+    /// Arrival time of the most recent upstream message (E3 snapshot data source; None = no message yet).
     last_msg: Option<Instant>,
-    /// F1/T4: 本下游 produce 的 SFU 宿主真实键 (消息自报 peer, room)——env.src 会随
-    /// 最后一条消息漂移（如 vision 子连接 src=xx-vision），清理必须用 produce 实键。
+    /// F1/T4: the real SFU host key (peer, room self-reported by the message) this downstream produced with — env.src drifts
+    /// with the last message (e.g. a vision sub-connection src=xx-vision); cleanup must use produce's real key.
     producer_key: Option<(String, String)>,
     tx: mpsc::UnboundedSender<LocalEnvelope>,
 }
 
-/// 路由状态（两个后台任务共享，短临界区 std Mutex 足够）。
+/// Routing state (shared by two background tasks; a short-critical-section std Mutex suffices).
 struct State {
     conns: HashMap<u64, Conn>,
     next_id: u64,
-    /// 待决 SFU 请求 FIFO（conn id；响应按序弹出匹配）。
+    /// Pending SFU request FIFO (conn ids; responses pop in order to match).
     pending: VecDeque<u64>,
-    /// 最近转发的 relay 消息文本（回显去重）。
+    /// Recently forwarded relay message texts (echo dedup).
     echo_cache: VecDeque<String>,
-    /// 整车 peer_id（真实 RoomJoined 取得，子进程合成应答使用）。
+    /// Vehicle peer_id (taken from the real RoomJoined; used in child-process synthetic replies).
     vehicle_peer_id: String,
-    /// S0：上游(agent↔server)协商谈成的方言版本（1 = 旧 server）。合成子进程
-    /// RoomJoined 时填 min(子声明, 本值)——子进程看见全链上限。
+    /// S0: the dialect version negotiated on the upstream (agent↔server) link (1 = old server). When synthesizing a child's
+    /// RoomJoined it fills min(child claim, this value) — the child sees the end-to-end cap.
     upstream_negotiated: u32,
-    /// a2（S0.5）：上游会话断开时可携带的一次性重挂票（server 下发；取走即清）。
+    /// a2 (S0.5): the one-shot resume ticket the upstream session may carry when it drops (issued by the server; cleared on take).
     pending_resume: Option<String>,
-    /// 远端会话是否在途。
+    /// Whether the remote session is live.
     joined: bool,
-    /// 本次远端会话建立时刻（E3 快照数据源；reset_remote 清空）。
+    /// Establishment time of the current remote session (E3 snapshot data source; cleared by reset_remote).
     remote_since: Option<Instant>,
-    /// 整车房间（不可变）。
+    /// Vehicle room (immutable).
     vehicle_room: String,
-    /// 待应用 ConfigPush（E4：server 云端配置下发；agent 轮询消费，最新覆盖旧值）。
+    /// ConfigPush pending application (E4: server-side cloud config push; the agent polls to consume, newest overwrites older).
     pending_config: Option<SignalingMessage>,
 }
 
 impl State {
-    /// 子进程上行消息 → 动作（转发 / 本地应答 / 丢弃）。
+    /// Child-process upstream message → action (forward / reply locally / drop).
     fn upstream(&mut self, conn_id: u64, msg: SignalingMessage) -> UpstreamAction {
-        // F1/T4: 记录本下游 producer 宿主实键（produce 消息自报 peer——视频流常为
-        // 字面 "host"，与 env.src 不同源）。断开上报 DownstreamGone 以此为准。
+        // F1/T4: record this downstream's producer host key (produce messages self-report peer — video streams are often
+        // the literal "host", a different source from env.src). Disconnect reporting sends DownstreamGone based on this.
         if let SignalingMessage::Produce { room_id, peer_id, .. } = &msg
             && let Some(c) = self.conns.get_mut(&conn_id)
         {
@@ -142,7 +142,7 @@ impl State {
         }
         match msg {
             SignalingMessage::RoomJoin { room_id, protocol: child_claim, .. } => {
-                // (a) 拦截：整车 join 由 agent 完成；子进程本地合成 RoomJoined
+                // (a) interception: the vehicle join is done by the agent; child processes get a locally synthesized RoomJoined
                 if let Some(c) = self.conns.get_mut(&conn_id) {
                     c.room = room_id.clone();
                 }
@@ -150,13 +150,16 @@ impl State {
                     UpstreamAction::Reply(SignalingMessage::RoomJoined {
                         room_id,
                         peer_id: self.vehicle_peer_id.clone(),
-                        // S0: 子进程看到全链上限 = min(子声明(缺省 v1), 上游谈成)。
+                        // S0: the child sees the end-to-end cap = min(child claim (default v1), upstream negotiated).
                         protocol: Some(child_claim.unwrap_or(1).min(self.upstream_negotiated)),
                         server_version: None,
                         session_nonce: None,
                     })
                 } else {
-                    tracing::warn!(conn_id, "RoomJoin 拦截时网关尚未连上 server");
+                    tracing::warn!(
+                        conn_id,
+                        "RoomJoin intercepted but the gateway has not connected to the server yet"
+                    );
                     UpstreamAction::Reply(SignalingMessage::Error {
                         code: ERR_GATEWAY_DISCONNECTED,
                         message: "gateway not connected to server".into(),
@@ -164,16 +167,16 @@ impl State {
                 }
             }
             SignalingMessage::RoomLeave { .. } => {
-                // 单进程 leave 上行会让 server 断开整车会话 — 拦截丢弃
+                // forwarding a single-process upstream leave would make the server drop the vehicle session — intercept and discard
                 tracing::warn!(
                     conn_id,
-                    "子进程 RoomLeave 被网关拦截（整车会话不因单进程离开而断）"
+                    "child RoomLeave intercepted by the gateway (the vehicle session does not break on one process leaving)"
                 );
                 UpstreamAction::Drop
             }
-            // 流诊断消息（web-stream-stats host 侧补齐）：保留 streamer 声明的流子房间——
-            // server 按消息内 room 路由（relay_target_room）才能到达浏览器消费者；若改写成
-            // 整车房间则广播进浏览器不在的频道。无 pending 槽/无需 echo 缓存。
+            // Stream-diagnostic messages (web-stream-stats host-side completion): keep the stream sub-room declared by the streamer —
+            // the server reaches browser consumers only when routing by the in-message room (relay_target_room); rewriting it into
+            // the vehicle room would broadcast into a channel no browser is on. No pending slot / no echo-cache entry needed.
             m @ SignalingMessage::EncoderStatus { .. } => {
                 if !self.joined {
                     return UpstreamAction::Reply(SignalingMessage::Error {
@@ -185,9 +188,9 @@ impl State {
             }
             mut m => {
                 rewrite_room(&mut m, &self.vehicle_room);
-                // CRITICAL-1: joined 检查先于一切状态记录 — 断线窗口内的请求
-                // 不得留下 pending 槽（否则重连后 [A陈旧, C真实] → C 的响应弹 A
-                // → 串线；单客户端自愈掩盖了该缺陷）
+                // CRITICAL-1: the joined check precedes all state recording — requests inside the disconnect window
+                // must not leave pending slots (otherwise after reconnect [A stale, C real] → C's response pops A
+                // → crossed wires; single-client self-healing masked this defect)
                 if !self.joined {
                     return UpstreamAction::Reply(SignalingMessage::Error {
                         code: ERR_GATEWAY_DISCONNECTED,
@@ -197,7 +200,7 @@ impl State {
                 if is_sfu_request(&m) {
                     self.pending.push_back(conn_id);
                 }
-                // 全 SFU（D 决策 2026-08-25）: 无 P2P 协商归属——Sdp 下行按房间路由
+                // all-SFU (D decision 2026-08-25): no P2P negotiation ownership — downstream Sdp routes by room
                 if is_relay_msg(&m) {
                     let text = serde_json::to_string(&m).unwrap_or_default();
                     self.echo_cache.push_back(text);
@@ -210,9 +213,9 @@ impl State {
         }
     }
 
-    /// server 下行消息 → 目标子进程列表（房间已按各目标改写）。
+    /// Server downstream message → target child-process list (rooms already rewritten per target).
     fn downstream(&mut self, msg: SignalingMessage) -> Vec<(u64, SignalingMessage)> {
-        // 回显去重：自己上行转发的 relay 消息被 server 房间广播回整车，文本一致即丢弃
+        // echo dedup: a relay message we forwarded upstream is broadcast back by the server to the whole vehicle room; drop on identical text
         if is_relay_msg(&msg) {
             let text = serde_json::to_string(&msg).unwrap_or_default();
             if self.echo_cache.contains(&text) {
@@ -220,15 +223,15 @@ impl State {
             }
         }
         match msg {
-            // SFU 响应：按 FIFO 匹配发起者（server 单 WS 顺序处理）
+            // SFU response: match the sender via FIFO (the single server WS processes in order)
             SignalingMessage::WebRtcTransportCreated { .. }
             | SignalingMessage::Produced { .. }
             | SignalingMessage::Consumed { .. }
             | SignalingMessage::Error { .. }
             | SignalingMessage::SfuStats { .. } => {
-                // H2: SfuStats 响应同 FIFO 路由
+                // H2: SfuStats responses use the same FIFO routing
                 let Some(conn_id) = self.pending.pop_front() else {
-                    tracing::warn!("SFU 响应无对应待决请求，丢弃");
+                    tracing::warn!("SFU response has no matching pending request; dropping");
                     return Vec::new();
                 };
                 match self.conns.get(&conn_id) {
@@ -238,13 +241,13 @@ impl State {
                         vec![(conn_id, m)]
                     }
                     None => {
-                        tracing::warn!("SFU 响应目标连接已断开");
+                        tracing::warn!("SFU response target connection already closed");
                         Vec::new()
                     }
                 }
             }
-            // Sdp/ICE 下行：全 SFU 模式按房间路由（rewrite 后 room 一致的所有 conn）
-            // — 多流并发协商各自房间互不干扰；无匹配丢弃（C15 日志）。
+            // Sdp/ICE downstream: all-SFU mode routes by room (all conns whose post-rewrite room matches)
+            // — concurrent multi-stream negotiations are isolated per room; no match → drop (C15 logging).
             SignalingMessage::Sdp { .. } | SignalingMessage::RTCIceCandidate { .. } => {
                 let mut m = msg;
                 rewrite_room(&mut m, &self.vehicle_room);
@@ -256,12 +259,12 @@ impl State {
                     .map(|(id, _)| (*id, m.clone()))
                     .collect();
                 if room_matches.is_empty() {
-                    tracing::warn!(room = %target_room, "Sdp/ICE 下行无房间匹配连接，丢弃");
+                    tracing::warn!(room = %target_room, "Sdp/ICE downstream has no room-matched connection; dropping");
                 }
                 room_matches
             }
-            // E4: 云端配置下发 — 整车 agent 专属消息（房间 + 目标 peer 匹配），
-            // 不入子进程路由；存入待应用槽（agent 轮询 take_config_push）。
+            // E4: cloud config push — a message exclusive to the vehicle agent (room + target peer match),
+            // not routed to child processes; stored in the pending-apply slot (the agent polls take_config_push).
             SignalingMessage::ConfigPush { ref room_id, ref target, .. } => {
                 if *room_id != self.vehicle_room || *target != self.vehicle_peer_id {
                     tracing::warn!(
@@ -269,15 +272,15 @@ impl State {
                         target = %target,
                         vehicle_room = %self.vehicle_room,
                         vehicle_peer = %self.vehicle_peer_id,
-                        "ConfigPush 目标不匹配，丢弃"
+                        "ConfigPush target mismatch; dropping"
                     );
                     return Vec::new();
                 }
-                tracing::info!(room_id = %room_id, peer = %target, "ConfigPush 接收（待应用）");
+                tracing::info!(room_id = %room_id, peer = %target, "ConfigPush received (pending apply)");
                 self.pending_config = Some(msg);
                 Vec::new()
             }
-            // 房间级广播（NewProducer/RoomLeave/RoomJoined 等）→ 全员
+            // room-level broadcasts (NewProducer/RoomLeave/RoomJoined etc.) → everyone
             other => {
                 let targets: Vec<(u64, SignalingMessage)> = self
                     .conns
@@ -295,12 +298,12 @@ impl State {
 
     fn remove_conn(&mut self, conn_id: u64) {
         self.conns.remove(&conn_id);
-        // IMPORTANT-4: 不在 pending 中移除（mark-dead，严格 FIFO 消费）— 断连
-        // 连接的请求可能仍在 server 在途，其响应必须按序弹出死槽丢弃；若移除
-        // 槽位造成位移（[A,B] 移 A → [B]），A 的响应会弹走 B → 串线
+        // IMPORTANT-4: do not remove from pending (mark-dead, strict FIFO consumption) — a disconnected
+        // connection's request may still be in flight at the server, and its response must pop the dead slot in order; removing
+        // the slot would shift the queue ([A,B] minus A → [B]), and A's response would pop B → crossed wires
     }
 
-    /// 远端断线：清空一切与远端会话绑定的状态（server 已回收全部 transport）。
+    /// Remote disconnect: clear everything bound to the remote session (the server has reclaimed all transports).
     fn reset_remote(&mut self) {
         self.joined = false;
         self.remote_since = None;
@@ -313,9 +316,9 @@ impl State {
 }
 
 enum UpstreamAction {
-    /// 转发到远端（调用方负责 joined 检查与发送）。
+    /// Forward to the remote (the caller handles the joined check and sending).
     Forward(SignalingMessage),
-    /// 直接回给该子进程。
+    /// Reply directly to this child process.
     Reply(SignalingMessage),
     Drop,
 }
@@ -327,11 +330,11 @@ fn is_sfu_request(msg: &SignalingMessage) -> bool {
             | SignalingMessage::ConnectWebRtcTransport { .. }
             | SignalingMessage::Produce { .. }
             | SignalingMessage::Consume { .. }
-            | SignalingMessage::SfuStatsRequest { .. } // H2: SFU 统计查询（FIFO 响应路由）
+            | SignalingMessage::SfuStatsRequest { .. } // H2: SFU stats query (FIFO response routing)
     )
 }
 
-/// server relay 白名单消息（signaling.rs 实证）——回显去重与 P2P 归属跟踪范围。
+/// Server relay whitelist messages (verified in signaling.rs) — the scope of echo dedup and P2P ownership tracking.
 fn is_relay_msg(msg: &SignalingMessage) -> bool {
     matches!(
         msg,
@@ -342,7 +345,7 @@ fn is_relay_msg(msg: &SignalingMessage) -> bool {
     )
 }
 
-/// 消息自身的房间 id（无房间字段的变体返回 None）。
+/// The message's own room id (variants without a room field return None).
 fn msg_room_id(msg: &SignalingMessage) -> Option<&str> {
     use SignalingMessage::*;
     match msg {
@@ -376,17 +379,17 @@ fn msg_room_id(msg: &SignalingMessage) -> Option<&str> {
     }
 }
 
-/// room_id 改写（整车房间 ↔ 子进程房间；Error 无房间字段）。
+/// room_id rewriting (vehicle room ↔ child-process room; Error has no room field).
 fn rewrite_room(msg: &mut SignalingMessage, room: &str) {
     use SignalingMessage::*;
-    // H2: 音频房间（audio-<vehicle>）消息不改写 — 判定**消息自身**的 room_id
-    // （upstream 方向 room 参数 = 整车房间而非消息房间，用错值会把音频房间请求
-    // 并入整车视频房间 — I3 review 网关探针实证 4031 未触发）。
+    // H2: audio-room (audio-<vehicle>) messages are NOT rewritten — judge the message's **own** room_id
+    // (in the upstream direction the room parameter = the vehicle room, not the message room; using the wrong value
+    // folded audio-room requests into the vehicle video room — the I3 review gateway probe proved 4031 never fired).
     if msg_room_id(msg).is_some_and(|r| r.starts_with("audio-")) {
         return;
     }
-    // multi-stream P3: per-stream 房间（<整车>_<stream>）直通——推流端按流隔离房间
-    // （PIT-140 v2），网关不并入整车（与 audio- 同原则：消息自身 room_id 语义优先）。
+    // multi-stream P3: per-stream rooms (<vehicle>_<stream>) pass through — publishers isolate a room per stream
+    // (PIT-140 v2); the gateway does not fold them into the vehicle room (same principle as audio-: the message's own room_id semantics wins).
     if msg_room_id(msg).is_some_and(|r| r.starts_with(&format!("{room}_"))) {
         return;
     }
@@ -412,59 +415,59 @@ fn rewrite_room(msg: &mut SignalingMessage, room: &str) {
         | NewDataProducer { room_id, .. }
         | ConsumeData { room_id, .. }
         | DataConsumed { room_id, .. }
-        // P1 (client-dual-form): mediasoup-client 协商面消息 — 与 CreateWebRtcTransport 同组改写
+        // P1 (client-dual-form): mediasoup-client negotiation-surface messages — rewritten in the same group as CreateWebRtcTransport
         | GetRouterRtpCapabilities { room_id, .. }
         | RouterRtpCapabilities { room_id, .. }
         | SetPreferredLayers { room_id, .. } => *room_id = room.to_string(),
         Error { .. } => {}
         StatusReport { .. } => {}
-        // H2: 无房间字段的 SFU 统计消息 — 无需改写（下游按 FIFO 路由）
+        // H2: SFU stats messages without a room field — no rewrite needed (downstream routes by FIFO)
         SfuStatsRequest { .. } => {}
         SfuStats { .. } => {}
-        ConfigPush { .. } => {} // E4: agent 专属，不入子进程路由，无需房间改写
-        DownstreamGone { .. } => {} // F1/T4: 网关自身上报消息，不经下游路由，无需房间改写
-        // device-enroll: 验签三态由网关自身消化，不入子进程路由（真实应答链在批3/T7 接线）
+        ConfigPush { .. } => {} // E4: agent-exclusive, never routed to child processes, no room rewrite needed
+        DownstreamGone { .. } => {} // F1/T4: the gateway's own upstream report, never downstream-routed, no room rewrite needed
+        // device-enroll: the three verification states are digested by the gateway itself, not routed to child processes (the real reply chain lands in batch 3/T7)
         DeviceAuthChallenge { .. } | DeviceAuthResponse { .. } | DeviceAuthPending { .. } => {}
-        EmergencyCommand { room_id, .. } => *room_id = room.to_string(), // G3: 急停房间级广播
-        // S4/a4: 急停 WS 审计副本（若经网关 = 与 EmergencyCommand 同组重写；舱端直连时不经过）。
+        EmergencyCommand { room_id, .. } => *room_id = room.to_string(), // G3: estop room-level broadcast
+        // S4/a4: estop WS audit copy (if it passes through the gateway = rewritten in the same group as EmergencyCommand; cockpit direct connections bypass it).
         ControlAudit { room_id, .. } => *room_id = room.to_string(),
     }
 }
 
-/// 信令平面快照（E3 监控数据源；连接状态唯一持有者 = 网关）。
+/// Signaling-plane snapshot (E3 monitoring data source; the sole holder of connection state = the gateway).
 #[derive(Debug, Clone, Default)]
 pub struct GatewayStatus {
-    /// 本地子进程 WS 连接（按 src 排序，确定性）。
+    /// Local child-process WS connections (sorted by src, deterministic).
     pub children: Vec<ChildStatus>,
-    /// 远端 server WS 连接状态。
+    /// Remote server WS connection state.
     pub remote: RemoteStatus,
 }
 
-/// 单个本地子进程连接状态。
+/// Status of a single local child-process connection.
 #[derive(Debug, Clone)]
 pub struct ChildStatus {
-    /// 子进程标识（LocalEnvelope.src；未发过消息 = 空串）。
+    /// Child-process identifier (LocalEnvelope.src; never sent a message = empty string).
     pub src: String,
-    /// 连接中（快照仅含在途连接，恒 true）。
+    /// Connecting (the snapshot only contains live connections, always true).
     pub connected: bool,
-    /// 距最近一条上行消息的秒数（0 = 刚收到；u64::MAX = 未发过消息）。
+    /// Seconds since the most recent upstream message (0 = just received; u64::MAX = never sent).
     pub last_msg_secs: u64,
 }
 
-/// 远端 server WS 连接状态。
+/// Remote server WS connection state.
 #[derive(Debug, Clone, Default)]
 pub struct RemoteStatus {
-    /// 已连接并入房。
+    /// Connected and joined.
     pub connected: bool,
-    /// 本次远端会话建立至今秒数（未连接 = None）。
+    /// Seconds since the current remote session was established (not connected = None).
     pub since_secs: Option<u64>,
-    /// 整车 peer_id（未连接 = 空串）。
+    /// Vehicle peer_id (not connected = empty string).
     pub peer_id: String,
 }
 
-/// a3（S0.5）：上行双队列。hi = 无界（认证/控制/终态——量小且有界增长，不丢）；
-/// lo = 有界尽力（封闭白名单 {StatusReport}，满=丢弃+计数——丢点放**入口**才有新鲜度，
-/// 积压在网关内存同样过期）。网络拥塞背压下的真丢点在 link session 的 lo（同形）。
+/// a3 (S0.5): dual upstream queues. hi = unbounded (auth/control/terminal — small volume with bounded growth, never dropped);
+/// lo = bounded best-effort (closed whitelist {StatusReport}, full = drop + count — dropping at the **entry** is what preserves freshness;
+/// backlog in gateway memory goes stale just the same). The real drop point under network-congestion backpressure is the link session's lo (same shape).
 #[derive(Clone)]
 struct UpstreamQueue {
     hi: mpsc::UnboundedSender<SignalingMessage>,
@@ -480,13 +483,15 @@ impl UpstreamQueue {
         (Self { hi, lo, dropped: Arc::new(std::sync::atomic::AtomicU64::new(0)) }, hi_rx, lo_rx)
     }
 
-    /// 路由入队：白名单 → lo try_send（满丢+计数）；其余 → hi（无界，仅断链 Err）。
+    /// Route into a queue: whitelist → lo try_send (full = drop + count); everything else → hi (unbounded, only Err on a closed channel).
     fn push(&self, msg: SignalingMessage) -> Result<(), String> {
         if matches!(msg, SignalingMessage::StatusReport { .. }) {
             if self.lo.try_send(msg).is_err() {
                 let n = self.dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                 if n == 1 || n.is_multiple_of(64) {
-                    tracing::warn!("a3: 网关低优队列满，StatusReport 丢弃（累计 {n}）");
+                    tracing::warn!(
+                        "a3: gateway low-priority queue full, StatusReport dropped (cumulative {n})"
+                    );
                 }
             }
             return Ok(());
@@ -495,7 +500,7 @@ impl UpstreamQueue {
     }
 }
 
-/// 网关运行期句柄（E3）— 监控快照 + 远端上报通道。
+/// Gateway runtime handle (E3) — monitoring snapshot + remote reporting channel.
 #[derive(Clone)]
 pub struct GatewayHandle {
     state: Arc<Mutex<State>>,
@@ -503,7 +508,7 @@ pub struct GatewayHandle {
 }
 
 impl GatewayHandle {
-    /// 信令平面快照（E3 监控数据源）。
+    /// Signaling-plane snapshot (E3 monitoring data source).
     pub fn snapshot(&self) -> GatewayStatus {
         let st = lock_state(&self.state);
         let now = Instant::now();
@@ -529,9 +534,9 @@ impl GatewayHandle {
         }
     }
 
-    /// 经网关远端 WS 发送（joined 检查 + 失败返回 Err —— 调用方必须打日志, C15）。
-    /// 未 joined 时拒绝入通道：断线窗口的消息会被 remote_loop 的 drain 静默丢弃，
-    /// 故在源头拦截。
+    /// Send via the gateway's remote WS (joined check + Err on failure — the caller must log, C15).
+    /// When not joined, refuse entry to the channel: messages in the disconnect window would be silently drained away by
+    /// remote_loop, so they are intercepted at the source.
     pub fn send_remote(&self, msg: SignalingMessage) -> Result<(), String> {
         let st = lock_state(&self.state);
         if !st.joined {
@@ -540,12 +545,12 @@ impl GatewayHandle {
         self.upstream.push(msg).map_err(|_| "remote session closed".into())
     }
 
-    /// 取走待应用 ConfigPush（E4；None = 无待应用；最新覆盖旧值）。
+    /// Take the pending ConfigPush (E4; None = nothing pending; newest overwrites older).
     pub fn take_config_push(&self) -> Option<SignalingMessage> {
         lock_state(&self.state).pending_config.take()
     }
 
-    /// 整车房间（上报 room_id 数据源）。
+    /// Vehicle room (the data source for reported room_id).
     pub fn vehicle_room(&self) -> String {
         lock_state(&self.state).vehicle_room.clone()
     }
@@ -555,12 +560,12 @@ fn lock_state(state: &Arc<Mutex<State>>) -> MutexGuard<'_, State> {
     state.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// 信封 JSON 序列化（理论不可失败：SignalingMessage 全部字段可序列化；失败即丢弃并告警）。
+/// Envelope JSON serialization (theoretically infallible: all SignalingMessage fields are serializable; on failure drop and warn).
 fn env_json(env: &LocalEnvelope) -> Option<String> {
     match serde_json::to_string(env) {
         Ok(t) => Some(t),
         Err(e) => {
-            tracing::error!("信封序列化失败: {e}");
+            tracing::error!("envelope serialization failed: {e}");
             None
         }
     }
@@ -573,12 +578,12 @@ fn gateway_disconnected_error() -> SignalingMessage {
     }
 }
 
-/// 启动网关：绑定本地端口 + 常驻后台任务（本地 accept / 远端连接+重连）。
+/// Start the gateway: bind the local port + resident background tasks (local accept / remote connect + reconnect).
 ///
-/// 返回实际绑定端口（`local_port = 0` 时为临时端口）。调用方持有运行期
-/// （bin 等待信号；测试直接随 runtime 结束）。
-/// 返回 (实际绑定端口, 运行期句柄)。调用方持有运行期
-/// （bin 等待信号；测试直接随 runtime 结束）。
+/// Returns the actually bound port (`local_port = 0` → ephemeral). The caller holds the runtime
+/// (bins wait for signals; tests simply end with the runtime).
+/// Returns (actually bound port, runtime handle). The caller holds the runtime
+/// (bins wait for signals; tests simply end with the runtime).
 pub async fn run_gateway(config: GatewayConfig) -> Result<(u16, GatewayHandle), String> {
     let listener = TcpListener::bind(("127.0.0.1", config.local_port))
         .await
@@ -601,7 +606,7 @@ pub async fn run_gateway(config: GatewayConfig) -> Result<(u16, GatewayHandle), 
     let (upstream, remote_hi_rx, remote_lo_rx) = UpstreamQueue::new();
     let handle = GatewayHandle { state: Arc::clone(&state), upstream: upstream.clone() };
 
-    // 本地 accept 循环
+    // local accept loop
     let accept_state = Arc::clone(&state);
     let accept_tx = upstream.clone();
     tokio::spawn(async move {
@@ -609,7 +614,7 @@ pub async fn run_gateway(config: GatewayConfig) -> Result<(u16, GatewayHandle), 
             let (stream, peer) = match listener.accept().await {
                 Ok(v) => v,
                 Err(e) => {
-                    tracing::error!("本地 accept 失败: {e}");
+                    tracing::error!("local accept failed: {e}");
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     continue;
                 }
@@ -617,7 +622,7 @@ pub async fn run_gateway(config: GatewayConfig) -> Result<(u16, GatewayHandle), 
             let ws = match tokio_tungstenite::accept_async(stream).await {
                 Ok(w) => w,
                 Err(e) => {
-                    tracing::warn!("本地 WS 握手失败 {peer}: {e}");
+                    tracing::warn!("local WS handshake failed {peer}: {e}");
                     continue;
                 }
             };
@@ -639,20 +644,20 @@ pub async fn run_gateway(config: GatewayConfig) -> Result<(u16, GatewayHandle), 
                 );
                 (id, rx)
             };
-            tracing::info!(conn_id, peer = %peer, "本地子进程接入");
+            tracing::info!(conn_id, peer = %peer, "local child process connected");
             let st = Arc::clone(&accept_state);
             let rtx = accept_tx.clone();
             tokio::spawn(conn_task(conn_id, ws, out_rx, st, rtx));
         }
     });
 
-    // 远端连接 + 重连循环
+    // remote connect + reconnect loop
     tokio::spawn(remote_loop(config, state, remote_hi_rx, remote_lo_rx));
 
     Ok((port, handle))
 }
 
-/// 单本地连接任务：读信封 → 路由 → 转发/应答；写下发信封。
+/// One local connection task: read envelope → route → forward/reply; write downstream envelopes.
 async fn conn_task(
     conn_id: u64,
     ws: WebSocketStream<TcpStream>,
@@ -669,18 +674,18 @@ async fn conn_task(
                         let env: LocalEnvelope = match serde_json::from_str(&text) {
                             Ok(e) => e,
                             Err(e) => {
-                                tracing::warn!(conn_id, "本地信封解析失败: {e}");
+                                tracing::warn!(conn_id, "local envelope parse failed: {e}");
                                 continue;
                             }
                         };
-                        // CRITICAL-2: push（upstream 内）与 send（此处）必须在同一
-                        // 临界区 — 两个 conn_task 若交错（A push, B push, B send, A
-                        // send）则 wire 顺序 ≠ pending 顺序 → 响应错配。Unbounded
-                        // Sender 同步发送、无 await，锁内安全。
+                        // CRITICAL-2: push (inside upstream) and send (here) must share one
+                        // critical section — two conn_tasks interleaving (A push, B push, B send, A
+                        // send) makes wire order ≠ pending order → response mismatch. The Unbounded
+                        // Sender sends synchronously with no await, safe inside the lock.
                         let mut reply: Option<SignalingMessage> = None;
                         {
                             let mut st = lock_state(&state);
-                            // E3: 快照数据源 — src 声明 + 最近消息时刻（同一临界区）
+                            // E3: snapshot data source — src declaration + last-message time (same critical section)
                             if let Some(c) = st.conns.get_mut(&conn_id) {
                                 c.src = env.src.clone();
                                 c.last_msg = Some(Instant::now());
@@ -688,10 +693,10 @@ async fn conn_task(
                             match st.upstream(conn_id, env.msg) {
                                 UpstreamAction::Forward(msg) => {
                                     if remote_tx.push(msg).is_err() {
-                                        // 远端任务已退出（网关关闭）：回滚本请求的
-                                        // pending 槽（锁内唯一 push，pop_back 安全）
+                                        // the remote task has exited (gateway closing): roll back this request's
+                                        // pending slot (the only push inside the lock, pop_back is safe)
                                         st.pending.pop_back();
-                                        tracing::warn!(conn_id, "远端任务已退出");
+                                        tracing::warn!(conn_id, "remote task exited");
                                         break;
                                     }
                                 }
@@ -708,7 +713,7 @@ async fn conn_task(
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(_)) => {}
                     Some(Err(e)) => {
-                        tracing::warn!(conn_id, "本地 WS 读错误: {e}");
+                        tracing::warn!(conn_id, "local WS read error: {e}");
                         break;
                     }
                 }
@@ -726,26 +731,29 @@ async fn conn_task(
             }
         }
     }
-    // F1/T4: 下游子进程消亡→上报 server 流粒度精确清理（producer 宿主键跨房间共用，
-    // 只有 (src, room) 配对能定位；整车粒度的断开反查由既有链路兜底，互不干扰）。
+    // F1/T4: a downstream child process died → report to the server for stream-granular cleanup (producer host keys span
+    // rooms; only the (src, room) pairing pinpoints one; whole-vehicle-granularity disconnect lookups are backstopped by the existing chain, no interference).
     let gone = {
         let st = lock_state(&state);
         st.conns.get(&conn_id).and_then(|c| c.producer_key.clone())
     };
     if let Some((peer, room)) = gone {
-        tracing::info!(conn_id, "DownstreamGone 上报: peer={peer} room={room}");
+        tracing::info!(conn_id, "DownstreamGone reported: peer={peer} room={room}");
         if remote_tx
             .push(SignalingMessage::DownstreamGone { peer_id: peer, room_id: room })
             .is_err()
         {
-            tracing::debug!(conn_id, "DownstreamGone 丢弃（上游已断，整车反查将兜底）");
+            tracing::debug!(
+                conn_id,
+                "DownstreamGone dropped (upstream down; the vehicle-wide reverse lookup will backstop)"
+            );
         }
     }
     lock_state(&state).remove_conn(conn_id);
-    tracing::info!(conn_id, "本地子进程断开");
+    tracing::info!(conn_id, "local child process disconnected");
 }
 
-/// 远端单 WS 循环：connect（B1 重连）→ 双向转发 → 断线清理 → 重连。
+/// Single remote WS loop: connect (B1 reconnect) → bidirectional forwarding → disconnect cleanup → reconnect.
 async fn remote_loop(
     config: GatewayConfig,
     state: Arc<Mutex<State>>,
@@ -754,31 +762,31 @@ async fn remote_loop(
 ) {
     let mut client =
         SignalClient::new(&config.remote_url, &config.psk, &config.room, PeerRole::Host);
-    // device-enroll T7: 设备身份随 Join 携带 device_pubkey（None = PSK 路径）
+    // device-enroll T7: the device identity rides on Join via device_pubkey (None = PSK path)
     if let Some(ident) = config.device.clone() {
         client = client.with_device_identity(ident);
     }
-    // H6（时机修正）: 上游"断开→恢复"的重连标记——通知只在重连成功后下发。
-    // 断线瞬间通知会让 streamer 在 server 宕机窗口 1-2s 一轮重启 → 触发 oxmgr
-    // crash-loop 熔断（3次/5min）→ 永不恢复。重连成功后通知 = server 就绪，一发即中。
+    // H6 (timing fix): the upstream "down→recovered" reconnect flag — the notification is emitted only after a successful reconnect.
+    // Notifying at the moment of disconnection makes streamers restart every 1-2s during the server-outage window → the oxmgr
+    // crash-loop circuit breaker (3 times/5min) trips → never recovers. Notifying after a successful reconnect = server ready, one shot hits.
     let mut reconnected = false;
     loop {
         let session = match client.connect_with_retry(config.retry).await {
             Ok(s) => s,
             Err(LinkError::EnrollPending { device_id }) => {
                 tracing::warn!(
-                    "设备待管理员批准 device_id={device_id}（公钥已入 pending），10s 后重连"
+                    "device awaiting admin approval device_id={device_id} (public key already pending), reconnecting in 10s"
                 );
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 continue;
             }
             Err(e) => {
-                tracing::error!("远端信令连接失败: {e}，10s 后重试");
+                tracing::error!("remote signaling connect failed: {e}, retrying in 10s");
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 continue;
             }
         };
-        tracing::info!(room = %config.room, "agent 已加入整车房间");
+        tracing::info!(room = %config.room, "agent joined the vehicle room");
         {
             let mut st = lock_state(&state);
             st.joined = true;
@@ -795,26 +803,29 @@ async fn remote_loop(
             for (tx, src) in &notify {
                 let env = LocalEnvelope { src: "server".into(), msg: gateway_disconnected_error() };
                 if tx.send(env).is_err() {
-                    tracing::warn!(src = %src, "上游恢复通知目标连接已断开");
+                    tracing::warn!(src = %src, "upstream-recovery notify target connection already closed");
                 }
             }
-            tracing::info!(children = notify.len(), "H6: 上游已恢复，要求下游重建 SFU 会话");
-            let _ = reconnected; // 复位位保留语义，当前分支无后续读（clippy unused_assignments）
+            tracing::info!(
+                children = notify.len(),
+                "H6: upstream recovered, asking downstream to rebuild SFU sessions"
+            );
+            let _ = reconnected; // keep the reset-bit semantics; the current branch has no later read (clippy unused_assignments)
         }
-        // a2：本会话结束 = 断线。把 server 下发的重挂票转交给 client（下一次
-        // connect_with_retry 携带 resume；命中失败自然回落全量 join——票一次性）。
+        // a2: this session ending = disconnection. Hand the server-issued resume ticket to the client (the next
+        // connect_with_retry carries resume; a miss naturally falls back to a full join — the ticket is one-shot).
         client.set_resume_ticket(lock_state(&state).pending_resume.take());
         run_session(session, &state, &mut remote_hi_rx, &mut remote_lo_rx).await;
-        // 断线：清空与远端会话绑定的状态 + 丢弃在途上行（重连后按新会话处理）
+        // disconnect: clear state bound to the remote session + drop in-flight upstreams (handled as a new session after reconnect)
         lock_state(&state).reset_remote();
         while remote_hi_rx.try_recv().is_ok() {}
         while remote_lo_rx.try_recv().is_ok() {}
         reconnected = true;
-        tracing::info!("远端断开，重新连接…");
+        tracing::info!("remote disconnected, reconnecting...");
     }
 }
 
-/// 单次远端会话：events → 下行路由；上行通道 → session.send。
+/// A single remote session: events → downstream routing; upstream channels → session.send.
 async fn run_session(
     session: SignalSession,
     state: &Arc<Mutex<State>>,
@@ -823,7 +834,7 @@ async fn run_session(
 ) {
     let mut events = session.events();
     loop {
-        // 公平 poll（勿 biased——events 洪泛会饿死上行；hi>lo 序约在 link 网络出口层）。
+        // fair poll (do NOT biased — an events flood would starve upstream; the hi>lo ordering lives at the link network egress).
         tokio::select! {
             ev = events.recv() => match ev {
                 Ok(SignalEvent::Message(msg)) => {
@@ -833,36 +844,36 @@ async fn run_session(
                         if let Some(tx) = tx {
                             let env = LocalEnvelope { src: "server".into(), msg: m };
                             if tx.send(env).is_err() {
-                                tracing::warn!(conn_id, "下发目标连接已断开");
+                                tracing::warn!(conn_id, "downstream target connection already closed");
                             }
                         }
                     }
                 }
                 Ok(SignalEvent::Disconnected { reason }) => {
-                    tracing::warn!("远端断开: {reason}");
+                    tracing::warn!("remote disconnected: {reason}");
                     break;
                 }
-                Ok(SignalEvent::Error(e)) => tracing::warn!("远端信令错误: {e}"),
+                Ok(SignalEvent::Error(e)) => tracing::warn!("remote signaling error: {e}"),
                 Ok(_) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!("远端事件滞后 {n} 条");
+                    tracing::warn!("remote event stream lagged by {n}");
                 }
-                Err(_) => break, // 会话通道关闭 = 断开
+                Err(_) => break, // session channel closed = disconnected
             },
-            // a3：hi 先于 lo 出队（与 link 层同序约）；lo 关闭不终结会话。
+            // a3: hi drains before lo (same order contract as the link layer); lo closing does not end the session.
             msg = remote_hi_rx.recv(), if !remote_hi_rx.is_closed() => match msg {
                 Some(m) => {
                     if let Err(e) = session.send(m).await {
-                        tracing::warn!("远端发送失败: {e}");
+                        tracing::warn!("remote send failed: {e}");
                         break;
                     }
                 }
-                None => return, // 网关关闭
+                None => return, // gateway closing
             },
             msg = remote_lo_rx.recv(), if !remote_lo_rx.is_closed() => {
                 if let Some(m) = msg
                     && let Err(e) = session.send(m).await {
-                        tracing::warn!("远端发送失败: {e}");
+                        tracing::warn!("remote send failed: {e}");
                         break;
                     }
             },
@@ -874,8 +885,8 @@ async fn run_session(
 mod tests {
     use super::*;
 
-    /// H2 (I3 review): 音频房间消息不改写 — 判定消息自身 room_id（upstream
-    /// 方向 room 参数 = 整车房间，早期实现误用它导致音频房间被并入整车房间）。
+    /// H2 (I3 review): audio-room messages are not rewritten — the check uses the message's own room_id (in the upstream
+    /// direction the room parameter = the vehicle room; an early implementation misused it and folded audio rooms into the vehicle room).
     #[test]
     fn rewrite_room_passthrough_audio_rooms() {
         use mediaservo_common::protocol::TransportDirection;
@@ -887,12 +898,12 @@ mod tests {
         rewrite_room(&mut msg, "vehicle");
         match &msg {
             SignalingMessage::CreateWebRtcTransport { room_id, .. } => {
-                assert_eq!(room_id, "audio-ms-car1", "音频房间必须原样（不改写）")
+                assert_eq!(room_id, "audio-ms-car1", "the audio room must stay as-is (no rewrite)")
             }
-            other => panic!("意外变体: {other:?}"),
+            other => panic!("unexpected variant: {other:?}"),
         }
 
-        // 非音频房间照常改写
+        // non-audio rooms are rewritten as usual
         let mut msg2 = SignalingMessage::CreateWebRtcTransport {
             room_id: "stream-cam0".into(),
             peer_id: "s".into(),
@@ -901,12 +912,15 @@ mod tests {
         rewrite_room(&mut msg2, "vehicle");
         match &msg2 {
             SignalingMessage::CreateWebRtcTransport { room_id, .. } => {
-                assert_eq!(room_id, "vehicle", "非音频房间必须改写为整车房间")
+                assert_eq!(
+                    room_id, "vehicle",
+                    "non-audio rooms must be rewritten to the vehicle room"
+                )
             }
-            other => panic!("意外变体: {other:?}"),
+            other => panic!("unexpected variant: {other:?}"),
         }
 
-        // multi-stream P3: per-stream 房间（<整车>_<stream>）直通
+        // multi-stream P3: per-stream rooms (<vehicle>_<stream>) pass through
         let mut msg3 = SignalingMessage::CreateWebRtcTransport {
             room_id: "vehicle_test-30fps".into(),
             peer_id: "s".into(),
@@ -915,9 +929,9 @@ mod tests {
         rewrite_room(&mut msg3, "vehicle");
         match &msg3 {
             SignalingMessage::CreateWebRtcTransport { room_id, .. } => {
-                assert_eq!(room_id, "vehicle_test-30fps", "per-stream 房间必须直通")
+                assert_eq!(room_id, "vehicle_test-30fps", "per-stream rooms must pass through")
             }
-            other => panic!("意外变体: {other:?}"),
+            other => panic!("unexpected variant: {other:?}"),
         }
     }
 
@@ -941,8 +955,8 @@ mod tests {
         state: Arc<Mutex<State>>,
     ) -> (GatewayHandle, mpsc::UnboundedReceiver<SignalingMessage>) {
         let (upstream, hi_rx, lo_rx) = UpstreamQueue::new();
-        // 同步测试无 runtime 合并双队列：本组测试只喂 hi（Sdp/终态族）；
-        // lo receiver 持活避免 try_send Closed 假计数。
+        // synchronous tests without a runtime merge the dual queues: this group only feeds hi (Sdp/terminal families);
+        // the lo receiver is kept alive to avoid a spurious try_send Closed count.
         std::mem::forget(lo_rx);
         (GatewayHandle { state, upstream }, hi_rx)
     }
@@ -980,13 +994,13 @@ mod tests {
         }
         let (handle, _rx) = handle_for(state);
         let snap = handle.snapshot();
-        // children 按 src 排序（确定性）
+        // children sorted by src (deterministic)
         assert_eq!(snap.children.len(), 2);
         assert_eq!(snap.children[0].src, "host-capturer");
         assert!(snap.children[0].connected);
-        assert_eq!(snap.children[0].last_msg_secs, u64::MAX, "未发消息 = u64::MAX");
+        assert_eq!(snap.children[0].last_msg_secs, u64::MAX, "never sent = u64::MAX");
         assert_eq!(snap.children[1].src, "host-streamer");
-        assert_eq!(snap.children[1].last_msg_secs, 0, "刚收到消息 = 0");
+        assert_eq!(snap.children[1].last_msg_secs, 0, "just received = 0");
         assert!(snap.remote.connected);
         assert_eq!(snap.remote.since_secs, Some(0));
         assert_eq!(snap.remote.peer_id, "veh-peer");
@@ -1004,8 +1018,8 @@ mod tests {
                 sdp: "v=0".into(),
             })
             .unwrap_err();
-        assert!(err.contains("not connected"), "未 joined 必须拒绝: {err}");
-        assert!(rx.try_recv().is_err(), "拒绝的消息不得进入远端通道");
+        assert!(err.contains("not connected"), "must refuse when not joined: {err}");
+        assert!(rx.try_recv().is_err(), "a refused message must not reach the remote channel");
     }
 
     #[test]
@@ -1014,7 +1028,7 @@ mod tests {
         lock_state(&state).joined = true;
         let (handle, mut rx) = handle_for(state);
         let msg = SignalingMessage::Sdp { room_id: "r".into(), target: None, sdp: "v=0".into() };
-        handle.send_remote(msg.clone()).expect("joined 时应发送成功");
+        handle.send_remote(msg.clone()).expect("should send when joined");
         assert!(matches!(rx.try_recv(), Ok(m) if matches!(m, SignalingMessage::Sdp { .. })));
     }
     #[test]
@@ -1028,13 +1042,13 @@ mod tests {
             version: 3,
         };
         let targets = lock_state(&state).downstream(push.clone());
-        assert!(targets.is_empty(), "ConfigPush 不入子进程路由: {targets:?}");
+        assert!(targets.is_empty(), "ConfigPush must not enter child-process routing: {targets:?}");
         let handle = handle_for(state).0;
         match handle.take_config_push() {
             Some(SignalingMessage::ConfigPush { version, .. }) => assert_eq!(version, 3),
-            other => panic!("期望 ConfigPush, got {other:?}"),
+            other => panic!("expected ConfigPush, got {other:?}"),
         }
-        assert!(handle.take_config_push().is_none(), "take 后应清空");
+        assert!(handle.take_config_push().is_none(), "take should clear");
     }
 
     #[test]
@@ -1056,6 +1070,9 @@ mod tests {
         };
         assert!(lock_state(&state).downstream(wrong_room).is_empty());
         let handle = handle_for(state).0;
-        assert!(handle.take_config_push().is_none(), "不匹配的 push 不得入待应用槽");
+        assert!(
+            handle.take_config_push().is_none(),
+            "a mismatched push must not enter the pending slot"
+        );
     }
 }

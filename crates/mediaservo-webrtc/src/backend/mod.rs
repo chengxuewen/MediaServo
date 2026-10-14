@@ -20,7 +20,7 @@ use crate::track::{RTCAudioTrackConfig, TrackKind, TrackReceiver, TrackSender};
 
 // ── Traits ──
 
-#[allow(dead_code)] // W3C API 镜像默认方法位（PIT-65 官方对齐保留，包装层未消费 = C18）
+#[allow(dead_code)] // the W3C API mirror's default-method slot (kept for PIT-65 official alignment; unconsumed by the wrapper = C18)
 pub(crate) trait PcBackend: Send + Sync + 'static {
     async fn create_offer(
         &self,
@@ -56,24 +56,24 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
     fn get_stats(&self) -> Vec<RTCStats> {
         vec![]
     }
-    /// 连接级统计（candidate-pair rtt）——仅 webrtc_sys 实现，其余 None。
+    /// connection-level stats (the candidate-pair rtt) -- only webrtc_sys implements; the rest None.
     fn connection_stats(&self) -> Option<crate::stats::ConnectionStats> {
         None
     }
-    /// 旧版 add_transceiver (str, str) — v2 重命名，避免与 W3C 签名同名冲突（零调用方）
+    /// the legacy add_transceiver (str, str) -- renamed in v2, avoiding a same-name clash with the W3C signature (zero callers)
     #[allow(dead_code)]
     fn add_transceiver_legacy(&self, _media_type: &str, _direction: &str) -> Result<(), RTCError> {
         Err(RTCError::Internal("not supported".into()))
     }
 
-    /// W3C getTransceivers — 返回所有 transceiver 的纯数据视图（v2）
-    /// 默认 Err(NotSupported) + warn（C15 防静默降级），stub 覆盖为 Ok(vec![])
+    /// W3C getTransceivers -- returns a pure-data view of all transceivers (v2)
+    /// default Err(NotSupported) + warn (C15 guards against silent degradation); stub overrides to Ok(vec![])
     fn get_transceivers(&self) -> Result<Vec<RTCRtpTransceiver>, RTCError> {
         tracing::warn!("get_transceivers: not supported by backend");
         Err(RTCError::NotSupported("get_transceivers".into()))
     }
 
-    /// W3C addTransceiver(kind, init) — kind 版（同步，v2）
+    /// W3C addTransceiver(kind, init) -- the kind variant (sync, v2)
     fn add_transceiver(
         &self,
         _kind: TrackKind,
@@ -83,7 +83,7 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Err(RTCError::NotSupported("add_transceiver".into()))
     }
 
-    /// W3C addTransceiver(track, init) — track 版重载（v2，P3 核心：kind 版会产生无法写帧的空 track）
+    /// W3C addTransceiver(track, init) -- the track-variant overload (v2, the P3 core: the kind variant produces an empty track that cannot receive frames)
     fn add_transceiver_with_track(
         &self,
         _track: &TrackSender,
@@ -93,19 +93,19 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Err(RTCError::NotSupported("add_transceiver_with_track".into()))
     }
 
-    /// W3C RTCRtpSender.getParameters — 经 track_id 分派（同步）
+    /// W3C RTCRtpSender.getParameters -- dispatched via track_id (sync)
     fn sender_get_parameters(&self, _track_id: &str) -> Result<RTCRtpParameters, RTCError> {
         tracing::warn!("sender_get_parameters: not supported by backend");
         Err(RTCError::NotSupported("sender_get_parameters".into()))
     }
 
-    /// W3C RTCRtpReceiver.getParameters — 经 track_id 分派（同步）
+    /// W3C RTCRtpReceiver.getParameters -- dispatched via track_id (sync)
     fn receiver_get_parameters(&self, _track_id: &str) -> Result<RTCRtpParameters, RTCError> {
         tracing::warn!("receiver_get_parameters: not supported by backend");
         Err(RTCError::NotSupported("receiver_get_parameters".into()))
     }
 
-    /// W3C RTCRtpSender.setParameters — v2 补
+    /// W3C RTCRtpSender.setParameters -- added in v2
     fn sender_set_parameters(
         &self,
         _track_id: &str,
@@ -115,8 +115,8 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Err(RTCError::NotSupported("sender_set_parameters".into()))
     }
 
-    /// v2 (encoder-bitrate): 设置发送编码器 min/max 码率（bps）。
-    /// 默认 NotSupported + warn（C15）; webrtc-sys 后端 override 为 cxx 保真往返。
+    /// v2 (encoder-bitrate): set the sending encoder's min/max bitrate (bps).
+    /// default NotSupported + warn (C15); the webrtc-sys backend overrides as a cxx-faithful round trip.
     fn sender_set_encoding_bitrate(
         &self,
         _track_id: &str,
@@ -127,8 +127,8 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Err(RTCError::NotSupported("sender_set_encoding_bitrate".into()))
     }
 
-    /// v2 (multi-stream P1): 设置发送编码器帧率上限（fps）。
-    /// 默认 NotSupported + warn（C15）; webrtc-sys 后端 override（复制 bitrate 模式，
+    /// v2 (multi-stream P1): set the sending encoder's framerate cap (fps).
+    /// default NotSupported + warn (C15); the webrtc-sys backend overrides (copying the bitrate pattern,
     /// get_parameters → enc[].max_framerate → set_parameters）。
     fn sender_set_encoding_framerate(
         &self,
@@ -139,9 +139,9 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Err(RTCError::NotSupported("sender_set_encoding_framerate".into()))
     }
 
-    /// v2 (encoder-backend-codec-config T1): 设置发送编码器后端（软/硬实现选择）。
-    /// 经 track_id 分派（sender.track().id() 匹配, request_key_frame 同模式）。
-    /// 默认 NotSupported + warn（C15: 错误分支必须打日志）。
+    /// v2 (encoder-backend-codec-config T1): set the sending encoder backend (the soft/hard implementation choice).
+    /// dispatched via track_id (matched on sender.track().id(), the same pattern as request_key_frame).
+    /// default NotSupported + warn (C15: error branches must log).
     fn sender_set_video_encoder_backend(
         &self,
         track_id: &str,
@@ -153,8 +153,8 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Err(RTCError::NotSupported("sender_set_video_encoder_backend".into()))
     }
 
-    /// v2 (qos-framerate-priority): 设置发送端降级偏好（RtpParameters 级）。
-    /// 默认 NotSupported + warn（C15）; webrtc-sys 后端 override 为 cxx 保真往返。
+    /// v2 (qos-framerate-priority): set the sender-side degradation preference (at the RtpParameters level).
+    /// default NotSupported + warn (C15); the webrtc-sys backend overrides as a cxx-faithful round trip.
     fn sender_set_degradation_preference(
         &self,
         track_id: &str,
@@ -166,8 +166,8 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Err(RTCError::NotSupported("sender_set_degradation_preference".into()))
     }
 
-    /// v2 (qos-framerate-priority): 设置发送端视频 track 内容 hint。
-    /// 默认 NotSupported + warn（C15）; webrtc-sys 后端 override（media_to_video → set_content_hint）。
+    /// v2 (qos-framerate-priority): set the sender-side video track's content hint.
+    /// default NotSupported + warn (C15); the webrtc-sys backend overrides (media_to_video -> set_content_hint).
     fn sender_set_content_hint(
         &self,
         track_id: &str,
@@ -177,12 +177,12 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Err(RTCError::NotSupported("sender_set_content_hint".into()))
     }
 
-    /// W3C RTCRtpSender.requestKeyFrame — 周期关键帧触发（PIT-76）。
+    /// W3C RTCRtpSender.requestKeyFrame -- periodic keyframe triggering (PIT-76).
     ///
-    /// 默认实现: get → 全 encodings 设 request_key_frame=true → set（上层往返）。
-    /// webrtc-sys 后端 override 为 cxx 保真往返（libwebrtc SetParameters 校验
-    /// codecs/encodings 数量/transaction_id 与内部一致，上层映射有信息损失）。
-    /// libwebrtc 每次消费后内部清标志：每次调用传 true 恰好触发一次，无需复位。
+    /// default impl: get -> set request_key_frame=true on all encodings -> set (an upper-layer round trip).
+    /// the webrtc-sys backend overrides as a cxx-faithful round trip (libwebrtc's SetParameters validation
+    /// of codecs/encodings counts/transaction_id against its internal state; the upper mapping loses information).
+    /// libwebrtc clears the flag internally after each consumption: passing true per call triggers exactly one, no reset needed.
     fn request_key_frame(&self, track_id: &str) -> Result<(), RTCError> {
         let mut params = self.sender_get_parameters(track_id)?;
         for enc in &mut params.encodings {
@@ -191,20 +191,20 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         self.sender_set_parameters(track_id, &params)
     }
 
-    /// W3C RTCRtpSender.replaceTrack — v2 补
+    /// W3C RTCRtpSender.replaceTrack -- added in v2
     fn sender_replace_track(&self, _track_id: &str, _new_track_id: &str) -> Result<(), RTCError> {
         tracing::warn!("sender_replace_track: not supported by backend");
         Err(RTCError::NotSupported("sender_replace_track".into()))
     }
 
-    /// W3C RTCRtpSender.setStreams — v2 补
+    /// W3C RTCRtpSender.setStreams -- added in v2
     fn sender_set_streams(&self, _track_id: &str, _stream_ids: &[String]) -> Result<(), RTCError> {
         tracing::warn!("sender_set_streams: not supported by backend");
         Err(RTCError::NotSupported("sender_set_streams".into()))
     }
 
-    /// W3C RTCRtpSender.getStats（出站统计，可选）
-    /// S2c：收侧 stats（packetsReceived/framesDecoded 二分）；默认空面 = stub/webrtc-rs 零成本。
+    /// W3C RTCRtpSender.getStats (outbound stats, optional)
+    /// S2c: the receive-side stats (the packetsReceived/framesDecoded bisection); an empty default surface = zero cost for stub/webrtc-rs.
     fn receiver_get_stats(&self, _track_id: &str) -> Vec<RTCStats> {
         Vec::new()
     }
@@ -213,7 +213,7 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         vec![]
     }
 
-    /// W3C 静态 RTCRtpSender.getCapabilities(kind)
+    /// W3C static RTCRtpSender.getCapabilities(kind)
     fn get_sender_capabilities(
         &self,
         _kind: TrackKind,
@@ -222,7 +222,7 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Err(RTCError::NotSupported("get_sender_capabilities".into()))
     }
 
-    /// W3C 静态 RTCRtpReceiver.getCapabilities(kind)
+    /// W3C static RTCRtpReceiver.getCapabilities(kind)
     fn get_receiver_capabilities(
         &self,
         _kind: TrackKind,
@@ -231,7 +231,7 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Err(RTCError::NotSupported("get_receiver_capabilities".into()))
     }
 
-    /// W3C restartIce — no-op 类默认 Ok + warn
+    /// W3C restartIce -- a no-op-class default Ok + warn
     fn restart_ice(&self) -> Result<(), RTCError> {
         tracing::warn!("restart_ice: not supported by backend (no-op)");
         Ok(())
@@ -259,7 +259,7 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Err(RTCError::NotSupported("current_remote_description".into()))
     }
 
-    /// W3C RTCRtpTransceiver.setDirection — v2 补（经 mid 分派）
+    /// W3C RTCRtpTransceiver.setDirection -- added in v2 (dispatched via mid)
     fn transceiver_set_direction(
         &self,
         _mid: &str,
@@ -269,13 +269,13 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Err(RTCError::NotSupported("transceiver_set_direction".into()))
     }
 
-    /// W3C RTCRtpTransceiver.stop — v2 补
+    /// W3C RTCRtpTransceiver.stop -- added in v2
     fn transceiver_stop(&self, _mid: &str) -> Result<(), RTCError> {
         tracing::warn!("transceiver_stop: not supported by backend");
         Err(RTCError::NotSupported("transceiver_stop".into()))
     }
 
-    /// W3C RTCRtpTransceiver.setCodecPreferences — v2 补
+    /// W3C RTCRtpTransceiver.setCodecPreferences -- added in v2
     fn transceiver_set_codec_preferences(
         &self,
         _track_id: &str,
@@ -292,8 +292,8 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
         Ok(())
     }
 
-    /// Register callback for trickled local ICE candidates (P2P 需要完整转发).
-    /// 默认空实现（webrtc-rs 后端如有需要自行实现）。
+    /// Register callback for trickled local ICE candidates (P2P needs full forwarding).
+    /// default empty impl (the webrtc-rs backend implements it itself if needed).
     fn set_on_ice_candidate(&self, _cb: Box<dyn Fn(RTCIceCandidate) + Send + Sync + 'static>) {}
     /// Register callback for ICE connection state changes (monitoring).
     fn set_on_ice_connection_state_change(
@@ -317,7 +317,7 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
 
 pub(crate) trait DcBackend: Send + Sync + 'static {
     fn state(&self) -> RTCDataChannelState;
-    /// S6/K5: 待发队列字节数（背压可观测；W3 bufferedAmount 语义）。
+    /// S6/K5: the outbound queue byte count (observable backpressure; the W3C bufferedAmount semantics).
     async fn buffered_amount(&self) -> u64;
     async fn send(&self, data: &[u8]) -> Result<(), RTCError>;
     async fn send_text(&self, text: &str) -> Result<(), RTCError>;
@@ -338,14 +338,14 @@ pub trait TrackWriteBackend: Send + Sync + 'static {
     /// For webrtc-rs: use mediaservo-codec crate to encode I420→H.264, then write_frame().
     ///
     /// `data` layout: Y plane (w*h) + U plane (w*h/4) + V plane (w*h/4).
-    /// 默认方法委托 with_ts(None) — 单入口避免双实现漂移 (PIT-54 教训)。
+    /// the default method delegates to with_ts(None) -- a single entry avoids dual-implementation drift (the PIT-54 lesson).
     async fn write_raw_i420(&self, data: &[u8], width: u32, height: u32) -> Result<(), RTCError> {
         self.write_raw_i420_with_ts(data, width, height, None).await
     }
 
-    /// PIT-63/相机: 时间戳参数化 — `ts_us` 为帧捕获时刻 (µs, wall-clock 语义)。
-    /// None → 后端内部默认时间戳 (webrtc-sys: 锚定单调 wall-clock; webrtc-rs: pts=0)。
-    /// 相机接入时传入 V4L2 buffer timestamp (µs)。
+    /// PIT-63/camera: timestamp parameterization -- `ts_us` is the frame capture moment (us, wall-clock semantics).
+    /// None -> the backend's internal default timestamp (webrtc-sys: anchored monotonic wall-clock; webrtc-rs: pts=0).
+    /// camera integration passes the V4L2 buffer timestamp (us).
     async fn write_raw_i420_with_ts(
         &self,
         _data: &[u8],

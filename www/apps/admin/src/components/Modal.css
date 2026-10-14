@@ -4,7 +4,7 @@
 .modal-header h3 { font-size: 1rem; }
 .modal-body { padding: 1.25rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; }
 
-/* 表单原语（模态表单共用 — Design System: 8px 网格 / token 色） */
+/* Form primitives (shared by modal forms — Design System: 8px grid / token colors) */
 .form-row { display: flex; align-items: center; gap: 0.75rem; font-size: 0.9rem; }
 .form-label { width: 130px; color: #555; flex-shrink: 0; }
 .form-field { flex: 1; padding: 0.5rem 0.75rem; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem; outline: none; }

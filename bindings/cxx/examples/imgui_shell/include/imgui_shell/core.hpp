@@ -1,7 +1,7 @@
-/* viewer_core — GUI 无关纯函数层（p3 W3a：stats 差分推导 + JSON 标量提取）。
+/* viewer_core — the GUI-agnostic pure-function layer (p3 W3a: stats diff derivation + JSON scalar extraction).
  *
- * 归属 imgui_shell 目录（PLAN §3 A+B 同库），命名空间独立=可被任意例子复用/单测。
- * 设计红线：不持 SDL/ImGui 类型；时间由调用方注入（now_ms 参数=可测形，无墙钟依赖）。
+ * Lives in the imgui_shell directory (the PLAN §3 A+B same-library plan); an independent namespace = reusable/unit-testable by any example.
+ * Design red line: no SDL/ImGui types; time is injected by the caller (the now_ms parameter = the testable form, no wall-clock dependency).
  */
 #ifndef MEDIASERVO_VIEWER_CORE_HPP
 #define MEDIASERVO_VIEWER_CORE_HPP
@@ -11,20 +11,20 @@
 
 namespace viewer_core {
 
-/// 累计计数器 → 速率估计器（inbound-rtp 语义：喂 bytesReceived / framesDecoded 累计值）。
-/// 钉（ctest -R core）：
-/// - 首次 update 只锚基线，速率 0；
-/// - Δt<=0（同毫秒/时钟回退）→ 保持上一窗值，不除零、不假清零；
-/// - counter < base（会话重置/流重启）→ 重锚 + 当前窗 0——**绝不输出负速率**；
-/// - 正常窗 = (Δcount/Δt) 滚动基线。
+/// Cumulative counter → rate estimator (inbound-rtp semantics: feed the bytesReceived / framesDecoded cumulative values).
+/// Pins (ctest -R core):
+/// - the first update only anchors the baseline, rate 0;
+/// - Δt<=0 (same millisecond / clock regression) → keep the previous window's value; no divide-by-zero, no fake zeroing;
+/// - counter < base (session reset / stream restart) → re-anchor + current window 0 — **never outputs a negative rate**;
+/// - a normal window = (Δcount/Δt) over a rolling baseline.
 class RateEstimator {
 public:
     void update(int64_t now_ms, uint64_t total);
 
-    /// 每秒增量（帧计数用此；无数据/未成窗 = 0）。
+    /// Per-second delta (use this for frame counts; no data / window not formed = 0).
     double per_sec() const;
 
-    /// 字节计数专用：每秒字节 → kbit/s（bytes/ms 斜率 ×8）。
+    /// Bytes-specific: bytes per second → kbit/s (the bytes/ms slope ×8).
     double kbps() const;
 
     void reset();
@@ -36,9 +36,9 @@ private:
     double last_per_ms_ = 0.0;
 };
 
-/// 扁平 JSON 对象里提取数值标量：扫描 `"key"` : <number>（无第三方库的壳层依赖）。
-/// 支持整数与小数（webrtc stats 数值域；不支持带引号数字/科学计数=命中即 false
-/// 由调用方走缺省）。`out` 可 NULL = 仅存在性判断。
+/// Extract a numeric scalar from a flat JSON object: scan `"key"` : <number> (no third-party library dependency in this shell layer).
+/// Supports integers and decimals (the webrtc stats numeric domain; quoted numbers / scientific notation are unsupported = false on match,
+/// the caller uses the default). `out` may be NULL = an existence check only.
 bool json_u64(const std::string& json, const std::string& key, uint64_t* out);
 bool json_f64(const std::string& json, const std::string& key, double* out);
 

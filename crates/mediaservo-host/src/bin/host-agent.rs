@@ -1,23 +1,23 @@
-//! host-agent: 信令网关（Task D1，D-H6）— 各 host 进程 WS 连本地端口，
-//! agent 聚合单 WS 上 Server（一车一会话）。协议语义见 [`mediaservo_host::gateway`]。
+//! host-agent: signaling gateway (Task D1, D-H6) -- each host process connects to the local port over WS,
+//! the agent aggregates them onto a single WS to the server (one session per vehicle). Protocol semantics: [`mediaservo_host::gateway`].
 //!
-//! 用法: `host-agent [--port <本地端口>] [--remote <ws url>] [--psk <psk>] [--room <整车房间>]`
-//! 缺省: 端口 17980；remote/psk 走 `SFU_E2E_WS_URL`/`SFU_E2E_PSK`（缺省
-//! `ws://127.0.0.1:9800/ws` / `mediaservo-dev`，对齐 streamer/e2e 约定）；room 缺省
-//! `vehicle`（D3 起由 host.yaml 配置接入）。
+//! Usage: `host-agent [--port <local port>] [--remote <ws url>] [--psk <psk>] [--room <vehicle room>]`
+//! Defaults: port 17980; remote/psk come from `SFU_E2E_WS_URL`/`SFU_E2E_PSK` (default
+//! `ws://127.0.0.1:9800/ws` / `mediaservo-dev`, aligned with the streamer/e2e convention); room defaults to
+//! `vehicle` (wired in through the host.yaml config since D3).
 //!
-//! E1-E3 监控（拓扑/数据流/信令 + 状态上报）统一由 [`spawn_status_reporter`]
-//! 单循环驱动（E3 起替换 E1/E2 独立循环；行为与日志不变）。
+//! E1-E3 monitoring (topology/data-flow/signaling + status reporting) is driven by [`spawn_status_reporter`]
+//! as a single loop (since E3 it replaces the standalone E1/E2 loops; behavior and logs unchanged).
 
-use mediaservo_host::gateway::{run_gateway, GatewayConfig, GatewayHandle};
+use mediaservo_host::gateway::{GatewayConfig, GatewayHandle, run_gateway};
 use mediaservo_host::init_logging;
-use mediaservo_host::monitor::signal::{spawn_status_reporter, STATUS_INTERVAL};
+use mediaservo_host::monitor::signal::{STATUS_INTERVAL, spawn_status_reporter};
 use mediaservo_link::{CapabilityToken, Ed25519VerifyingKey};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-const USAGE: &str = "用法: host-agent [--port <本地端口>] [--remote <ws url>] [--psk <psk>] [--room <房间>] [--config <host.yaml>] [--token <令牌文件>]";
+const USAGE: &str = "Usage: host-agent [--port <local port>] [--remote <ws url>] [--psk <psk>] [--room <room>] [--config <host.yaml>] [--token <token file>]";
 fn parse_args() -> Result<(GatewayConfig, Option<String>, Option<String>), String> {
     let mut cfg = GatewayConfig::default();
     let mut config_path: Option<String> = None;
@@ -28,22 +28,21 @@ fn parse_args() -> Result<(GatewayConfig, Option<String>, Option<String>), Strin
             "--port" => {
                 cfg.local_port = args
                     .next()
-                    .ok_or("--port 缺值")?
+                    .ok_or("--port missing value")?
                     .parse()
-                    .map_err(|e| format!("--port 无效: {e}"))?
+                    .map_err(|e| format!("--port invalid: {e}"))?
             }
-            "--remote" => cfg.remote_url = args.next().ok_or("--remote 缺值")?,
-            "--psk" => cfg.psk = args.next().ok_or("--psk 缺值")?,
-            "--room" => cfg.room = args.next().ok_or("--room 缺值")?,
-            "--config" => config_path = Some(args.next().ok_or("--config 缺值")?),
-            "--token" => token_path = Some(args.next().ok_or("--token 缺值")?),
-            _ => return Err(format!("未知参数: {arg}\n{USAGE}")),
+            "--remote" => cfg.remote_url = args.next().ok_or("--remote missing value")?,
+            "--psk" => cfg.psk = args.next().ok_or("--psk missing value")?,
+            "--room" => cfg.room = args.next().ok_or("--room missing value")?,
+            "--config" => config_path = Some(args.next().ok_or("--config missing value")?),
+            "--token" => token_path = Some(args.next().ok_or("--token missing value")?),
+            _ => return Err(format!("unknown argument: {arg}\n{USAGE}")),
         }
     }
-    // 环境变量缺省（对齐 field/e2e_sfu 外部 server 约定）
+    // Environment variable defaults (aligned with the field/e2e_sfu external-server convention)
     if cfg.remote_url == "ws://127.0.0.1:9800/ws" {
-        cfg.remote_url =
-            std::env::var("SFU_E2E_WS_URL").unwrap_or_else(|_| cfg.remote_url.clone());
+        cfg.remote_url = std::env::var("SFU_E2E_WS_URL").unwrap_or_else(|_| cfg.remote_url.clone());
     }
     if cfg.psk == "mediaservo-dev" {
         cfg.psk = std::env::var("SFU_E2E_PSK").unwrap_or_else(|_| cfg.psk.clone());
@@ -61,86 +60,103 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(2);
         }
     };
-    // G4: 实例目录（--config <dir>/etc/host.yaml → <dir>；oxfile/备份/身份基准）
-    let config_dir = config_path.as_deref().map(PathBuf::from).and_then(|p| {
-        p.parent().and_then(|etc| etc.parent().map(Path::to_path_buf))
-    });
-    // device-enroll T6: 设备身份 = identity.json(device_id) + signing.pem(公钥指纹)。
-    // 齐备则远端 Join 走验签链；identity.json 缺失 / PEM 缺失或损坏 →
-    // warn 退 PSK-only（行为 = 旧版无 identity.json）。
+    // G4: the instance directory (--config <dir>/etc/host.yaml -> <dir>; basis for oxfile/backup/identity)
+    let config_dir = config_path
+        .as_deref()
+        .map(PathBuf::from)
+        .and_then(|p| p.parent().and_then(|etc| etc.parent().map(Path::to_path_buf)));
+    // device-enroll T6: device identity = identity.json(device_id) + signing.pem (public key fingerprint).
+    // When both are present, the remote Join goes through the signature-verification chain; missing identity.json / missing or corrupt PEM ->
+    // warn and fall back to PSK only (behavior = the old version without identity.json).
     if let Some(dir) = &config_dir {
         match mediaservo_host::identity::load_device_identity(dir) {
             Ok(Some(ident)) => {
-                tracing::info!(device_id = %ident.device_id, pubkey = %ident.pubkey_b64, "已加载设备身份（公钥指纹准入）");
+                tracing::info!(device_id = %ident.device_id, pubkey = %ident.pubkey_b64, "device identity loaded (public key fingerprint admission)");
                 cfg.device = Some(ident);
             }
-            Ok(None) => tracing::warn!(path = %dir.join(mediaservo_host::identity::IDENTITY_FILE).display(), "设备身份缺失 — 远端连接走 PSK 认证"),
-            Err(e) => tracing::warn!("{e} — 设备身份不可用，远端连接走 PSK 认证"),
+            Ok(None) => {
+                tracing::warn!(path = %dir.join(mediaservo_host::identity::IDENTITY_FILE).display(), "device identity missing -- the remote connection uses PSK auth")
+            }
+            Err(e) => tracing::warn!(
+                "{e} -- device identity unavailable, the remote connection uses PSK auth"
+            ),
         }
     } else {
-        tracing::warn!("未提供 --config（实例目录不可推导）— 设备身份未加载，远端连接走 PSK 认证");
+        tracing::warn!(
+            "--config not provided (the instance directory cannot be derived) -- device identity not loaded, the remote connection uses PSK auth"
+        );
     }
-    // E1 拓扑监控: host.yaml 期望态（缺省空 → 仅固定进程期望 + 告警）
+    // E1 topology monitoring: the expected state from host.yaml (empty by default -> fixed-process expectations only + a warning)
     let host_toml = match &config_path {
         Some(p) => match std::fs::read_to_string(p) {
             Ok(c) => c,
             Err(e) => {
-                tracing::warn!(path = %p, "host.yaml 读取失败: {e} — 拓扑期望仅固定进程");
+                tracing::warn!(path = %p, "failed to read host.yaml: {e} -- topology expectations are fixed processes only");
                 String::new()
             }
         },
         None => {
-            tracing::warn!("未提供 --config，拓扑期望仅固定进程（capturer/streamer 期望需 host.yaml）");
+            tracing::warn!(
+                "--config not provided, topology expectations are fixed processes only (capturer/streamer expectations need host.yaml)"
+            );
             String::new()
         }
     };
-    // E1 审查: grace 起点 = 进程启动（main 入口，含网关慢连窗口），非 monitor 任务启动后
+    // E1 review: the grace window starts at process startup (the main entry, including the slow gateway-connect window), not after the monitor task starts
     let monitor_started = std::time::Instant::now();
     let (port, gateway) = run_gateway(cfg).await.map_err(std::io::Error::other)?;
-    tracing::info!(port, "host-agent 网关就绪");
-    // E2 数据流监控令牌（缺省 → 跳过；部署侧 oxfile 签发 Monitor 角色令牌后启用）
+    tracing::info!(port, "host-agent gateway ready");
+    // E2 data-flow monitoring token (default -> skipped; enabled once the deployed oxfile issues a Monitor-role token)
     let token: Option<(CapabilityToken, Ed25519VerifyingKey)> = match &token_path {
         Some(p) => match std::fs::read(p) {
             Ok(b) => match mediaservo_link::TokenFile::decode(&b) {
                 Ok((vk, tok)) => Some((tok, vk)),
                 Err(e) => {
-                    tracing::warn!(path = %p, "令牌无效: {e} — 数据流监控跳过");
+                    tracing::warn!(path = %p, "invalid token: {e} -- data-flow monitoring skipped");
                     None
                 }
             },
             Err(e) => {
-                tracing::warn!(path = %p, "令牌读取失败: {e} — 数据流监控跳过");
+                tracing::warn!(path = %p, "failed to read token: {e} -- data-flow monitoring skipped");
                 None
             }
         },
         None => {
-            tracing::warn!("未提供 --token，数据流监控跳过（拓扑监控不受影响）");
+            tracing::warn!(
+                "--token not provided, data-flow monitoring skipped (topology monitoring is unaffected)"
+            );
             None
         }
     };
-    // E1-E3: 拓扑 + 数据流 + 信令监控 + StatusReport 上报（单循环, 5s）
-    // E4: 配置版本（成功应用后 = 最近 ConfigPush.version；StatusReport 关联）
-    // F1: 启动时从 etc/host.yaml.bak-<version> 备份恢复——agent 被 oxfile watch
-    // 重启后版本不归零（磁盘上已应用版本与上报关联契约）。
+    // E1-E3: topology + data-flow + signaling monitoring + StatusReport reporting (single loop, 5s)
+    // E4: the config version (= the most recent ConfigPush.version after a successful apply; associated in StatusReport)
+    // F1: restore from the etc/host.yaml.bak-<version> backup at startup -- the agent is watched by oxfile
+    // and the version must not reset to zero after a restart (contract binding the applied on-disk version to the report).
     let config_version = Arc::new(AtomicU64::new(
-        config_dir
-            .as_deref()
-            .map(mediaservo_host::translate::recover_config_version)
-            .unwrap_or(0),
+        config_dir.as_deref().map(mediaservo_host::translate::recover_config_version).unwrap_or(0),
     ));
-    // E4: 云端配置应用循环（500ms 轮询网关待应用 ConfigPush；最新覆盖旧值）
+    // E4: the cloud config apply loop (polls the gateway every 500ms for a pending ConfigPush; the latest wins over older)
     match &config_dir {
         Some(dir) => spawn_config_applier(gateway.clone(), dir.clone(), config_version.clone()),
-        None => tracing::warn!("未提供 --config（<dir>/etc/host.yaml 不可推导）— 云端配置下发停用"),
+        None => tracing::warn!(
+            "--config not provided (<dir>/etc/host.yaml cannot be derived) -- cloud config push disabled"
+        ),
     }
-    spawn_status_reporter(host_toml, monitor_started, token, gateway, STATUS_INTERVAL, config_version);
+    spawn_status_reporter(
+        host_toml,
+        monitor_started,
+        token,
+        gateway,
+        STATUS_INTERVAL,
+        config_version,
+    );
     wait_shutdown().await;
     Ok(())
 }
 
-/// E4: 云端配置应用循环 — 轮询网关待应用 ConfigPush（500ms；最新覆盖旧值）。
-/// 应用成功 → 版本记入 StatusReport.config_version；拒绝 → handle_config_push 已打
-/// warn 审计（C15）；oxmgr apply 失败 → error 审计（应用已落盘，下轮进程重启自愈）。
+/// E4: the cloud config apply loop -- polls the gateway for a pending ConfigPush (500ms; the latest wins over older).
+/// A successful apply -> the version goes into StatusReport.config_version; a rejection -> handle_config_push already
+/// logged the warn audit (C15); an oxmgr apply failure -> the error audit (the apply already hit disk, and the next process restart self-heals).
 fn spawn_config_applier(handle: GatewayHandle, dir: PathBuf, config_version: Arc<AtomicU64>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(500));
@@ -154,18 +170,18 @@ fn spawn_config_applier(handle: GatewayHandle, dir: PathBuf, config_version: Arc
             ) {
                 config_version.store(v, Ordering::Relaxed);
                 if let Err(e) = mediaservo_host::translate::oxmgr_apply(&dir) {
-                    tracing::error!(version = v, "ConfigPush oxmgr apply 失败: {e}");
+                    tracing::error!(version = v, "ConfigPush oxmgr apply failed: {e}");
                 }
-            } // 拒绝原因已由 handle_config_push 打 warn 审计
+            } // the rejection reason is already logged as a warn audit by handle_config_push
         }
     });
 }
 
-/// 等待 SIGINT/SIGTERM（unix 主路径；其他平台仅 ctrl_c）。
+/// Wait for SIGINT/SIGTERM (the unix main path; other platforms only get ctrl_c).
 async fn wait_shutdown() {
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}

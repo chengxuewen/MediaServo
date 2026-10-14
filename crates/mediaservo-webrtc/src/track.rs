@@ -145,7 +145,7 @@ impl TrackSender {
         self.backend.write_raw_i420(data, width, height).await
     }
 
-    /// PIT-63: 时间戳参数化 — ts_us 为帧捕获时刻 (µs); None → 后端默认 (锚定单调 wall-clock)。
+    /// PIT-63: timestamp parameterization -- ts_us is the frame capture moment (us); None -> the backend default (anchored monotonic wall-clock).
     pub async fn write_raw_i420_with_ts(
         &self,
         data: &[u8],

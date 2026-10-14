@@ -1,9 +1,9 @@
-//! a1 心跳/pre-auth 超时（S0.5-B2）集成验证：进程内 server + 裸 WS 客户端。
-//! 参数全走 SignalingServer pub 字段覆写（1s 级），预算判定矩阵在 signaling.rs 单测钉。
-use mediaservo_server::signaling::{signaling_router, SignalingServer};
+//! a1 heartbeat / pre-auth timeout (S0.5-B2) integration verification: an in-process server + a raw WS client.
+//! All parameters go through SignalingServer pub-field overrides (1s scale); the budget-decision matrix is pinned in the signaling.rs unit tests.
+use futures_util::{SinkExt, StreamExt};
+use mediaservo_server::signaling::{SignalingServer, signaling_router};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
-use futures_util::{SinkExt, StreamExt};
 
 async fn spawn_server(ping_secs: u64, psk_wait: u64, join_wait: u64) -> String {
     #[cfg(feature = "sfu-mediasoup")]
@@ -32,18 +32,18 @@ async fn spawn_server(ping_secs: u64, psk_wait: u64, join_wait: u64) -> String {
     format!("ws://{addr}/ws")
 }
 
-/// ① 心跳正向：ping=1s 下 client 认证并持续读，3s 内应收到 ≥2 个 Message::Ping
-/// 且连接存活（tokio-tungstenite 自动 pong 维持活性——browser 同理零改动）。
+/// 1. heartbeat positive: with ping=1s the client authenticates and keeps reading; within 3s it should see >=2 Message::Pings
+/// and the connection stays alive (tokio-tungstenite's auto-pong maintains liveness -- the browser likewise, zero changes).
 #[tokio::test]
 async fn server_pings_and_alive_connection_survives() {
     let url = spawn_server(1, 10, 30).await;
     let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     ws.send(Message::Text("test-psk".into())).await.unwrap();
-    // 心跳仅在会话建立后启动（握手窗口零控制帧——device-enroll 状态机读序保护）：
-    // 先 auth ack → room_join → joined，再开计数窗。
+    // the heartbeat starts only after the session is established (zero control frames in the handshake window -- protecting the device-enroll state machine's read order):
+    // auth ack first -> room_join -> joined, then open the counting window.
     let mut joined_ok = false;
     let mut pings = 0;
-    // 读满 ack（code:0）
+    // read the ack (code:0)
     while !joined_ok {
         match ws.next().await.unwrap().unwrap() {
             Message::Text(t) if t.contains("\"code\":0") => {
@@ -54,7 +54,9 @@ async fn server_pings_and_alive_connection_survives() {
                 .unwrap();
             }
             Message::Text(t) if t.contains("room_joined") => joined_ok = true,
-            Message::Ping(p) => { let _ = ws.send(Message::Pong(p)).await; }
+            Message::Ping(p) => {
+                let _ = ws.send(Message::Pong(p)).await;
+            }
             _ => {}
         }
     }
@@ -66,16 +68,16 @@ async fn server_pings_and_alive_connection_survives() {
             f = ws.next() => match f {
                 Some(Ok(Message::Ping(_))) => pings += 1,
                 Some(Ok(Message::Text(t))) if t.contains("\"code\":0") => {}
-                Some(Err(e)) => panic!("连接不应被打断: {e}"),
-                None => panic!("server 不应在存活 pong 下断链"),
+                Some(Err(e)) => panic!("the connection must not be interrupted: {e}"),
+                None => panic!("the server must not drop a connection that keeps answering pongs"),
                 _ => {}
             }
         }
     }
-    assert!(pings >= 2, "3s 内应见 ≥2 心跳 ping（实得 {pings}）");
+    assert!(pings >= 2, "within 3s at least 2 heartbeat pings should be seen (got {pings})");
 }
 
-/// ② pre-auth 裸等加固：连接后不发 PSK → psk_wait=1s 超时断链（3s 内读到终结）。
+/// 2. pre-auth bare-wait hardening: connecting without sending PSK -> the psk_wait=1s timeout disconnects (a terminal read within 3s).
 #[tokio::test]
 async fn preauth_psk_wait_times_out() {
     let url = spawn_server(0, 1, 30).await;
@@ -84,25 +86,30 @@ async fn preauth_psk_wait_times_out() {
         loop {
             match ws.next().await {
                 None | Some(Ok(Message::Close(_))) | Some(Err(_)) => return true,
-                Some(Ok(_)) => continue, // 其他帧不算终结
+                Some(Ok(_)) => continue, // other frames are not terminal
             }
         }
     })
     .await;
-    assert!(matches!(r, Ok(true)), "PSK 超时必须按时断链（收到 Close/EOF/Err）");
+    assert!(
+        matches!(r, Ok(true)),
+        "the PSK timeout must disconnect on time (Close/EOF/Err received)"
+    );
 }
 
-/// ③ 已认证未 join 超时：auth ack 后沉默 → join_wait=1s 断链。
+/// 3. authenticated-but-not-joined timeout: silence after the auth ack -> the join_wait=1s disconnect.
 #[tokio::test]
 async fn authed_without_join_times_out() {
     let url = spawn_server(0, 10, 1).await;
     let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     ws.send(Message::Text("test-psk".into())).await.unwrap();
-    // 读 auth ack
+    // read the auth ack
     loop {
         match ws.next().await.unwrap().unwrap() {
             Message::Text(t) if t.contains("\"code\":0") => break,
-            Message::Ping(p) => { let _ = ws.send(Message::Pong(p)).await; }
+            Message::Ping(p) => {
+                let _ = ws.send(Message::Pong(p)).await;
+            }
             _ => continue,
         }
     }
@@ -116,5 +123,5 @@ async fn authed_without_join_times_out() {
         }
     })
     .await;
-    assert!(matches!(r, Ok(true)), "已认证未 join 必须超时断链");
+    assert!(matches!(r, Ok(true)), "authenticated-but-not-joined must time out and disconnect");
 }

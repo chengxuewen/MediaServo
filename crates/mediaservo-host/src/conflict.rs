@@ -1,43 +1,43 @@
-//! start 冲突体检（start-conflict-doctor T3——host 侧镜像（与 server conflict.rs 形态一致，F3 不抽象）。
+//! start conflict doctoring (start-conflict-doctor T3 -- host-side mirror (same shape as the server conflict.rs, F3 does not abstract it).
 //!
-//! 数据源（Linux /proc，纯只读）：
-//!   ① `/proc/net/tcp|tcp6|udp|udp6` 反查 `port` 的 socket inode
-//!   ② `/proc/<pid>/fd/*` 扫 `socket:[inode]` → 占用 pid 集
-//!   ③ `/proc/pid/{exe,cmdline,status}` → 报告体（exe 含 "(deleted)" = 升级残留铁证）
+//! Data sources (Linux /proc, read-only):
+//!   (1) reverse-lookup the socket inode of `port` from `/proc/net/tcp|tcp6|udp|udp6`
+//!   (2) scan `/proc/<pid>/fd/*` for `socket:[inode]` -> the set of occupying pids
+//!   (3) `/proc/pid/{exe,cmdline,status}` -> the report body (exe containing "(deleted)" = hard evidence of an upgrade leftover)
 //!
-//! 原则（F1）：**指认不杀戮**——只产出人话报告，进程处置留给调用方/人。
-//! 非 Linux（/proc 缺失）→ 空报告（调用方维持现降级语义，F6）。
+//! Principle (F1): **name it, do not kill it** -- only produce a human-readable report; disposition is left to the caller/person.
+//! Non-Linux (/proc missing) -> empty report (callers keep the current degraded semantics, F6).
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-/// 单个占用进程的体检报告。
+/// Doctoring report for a single occupying process.
 #[derive(Debug, Clone)]
 pub struct ConflictReport {
     pub pid: u32,
-    /// `readlink /proc/pid/exe`（可能带内核后缀 "(deleted)"）。
+    /// `readlink /proc/pid/exe` (may carry the kernel suffix "(deleted)").
     pub exe: String,
-    /// cmdline 首段（截断 80 字符）。
+    /// First segment of cmdline (truncated to 80 chars).
     pub cmd: String,
-    /// exe 已删除 = 二进制被替换后进程仍存活（升级残留铁证，F4）。
+    /// exe deleted = the process survived a binary replacement (hard evidence of an upgrade leftover, F4).
     pub deleted: bool,
-    /// (ppid, 父进程 cmd 首段)——daemon 归属指认。
+    /// (ppid, first segment of the parent process cmd) -- daemon ownership identification.
     pub parent: Option<(u32, String)>,
 }
 
 impl ConflictReport {
-    /// 人话行（eprintln 用）。
+    /// Human-readable line (for eprintln).
     pub fn line(&self) -> String {
-        let mark = if self.deleted { " ⚠ 升级残留(exe 已删除)" } else { "" };
+        let mark = if self.deleted { " ⚠ upgrade leftover (exe deleted)" } else { "" };
         let parent = match &self.parent {
-            Some((ppid, pcmd)) => format!("，父={pcmd}({ppid})"),
+            Some((ppid, pcmd)) => format!(", parent={pcmd}({ppid})"),
             None => String::new(),
         };
         format!("pid {}  {}{mark}  cmd={}{}", self.pid, self.exe, self.cmd, parent)
     }
 }
 
-/// 诊断 `port`（tcp+udp 双面，IPv4+IPv6）。无占用/非 Linux → 空 Vec。
+/// Diagnose `port` (tcp+udp both, IPv4+IPv6). Unoccupied / non-Linux -> empty Vec.
 pub fn diagnose_port(port: u16) -> Vec<ConflictReport> {
     let inodes = port_inodes(port);
     if inodes.is_empty() {
@@ -52,13 +52,13 @@ pub fn diagnose_port(port: u16) -> Vec<ConflictReport> {
     out.into_iter().filter_map(report_of_pid).collect()
 }
 
-/// `/proc/net/{tcp,tcp6,udp,udp6}` 中本地端口 == `port` 的 socket inode 集。
+/// The set of socket inodes in `/proc/net/{tcp,tcp6,udp,udp6}` whose local port == `port`.
 fn port_inodes(port: u16) -> BTreeSet<u64> {
     let mut inodes = BTreeSet::new();
     for f in ["tcp", "tcp6", "udp", "udp6"] {
         let Ok(text) = std::fs::read_to_string(format!("/proc/net/{f}")) else { continue };
         for line in text.lines().skip(1) {
-            // 格式: sl local_address rem_address st ... inode
+            // format: sl local_address rem_address st ... inode
             let cols: Vec<&str> = line.split_whitespace().collect();
             if cols.len() < 10 {
                 continue;
@@ -132,9 +132,9 @@ fn report_of_pid(pid: u32) -> Option<ConflictReport> {
     Some(ConflictReport { pid, exe, cmd, deleted, parent })
 }
 
-/// stop 自证（T4）：app 名对应的本族进程是否已归零。
-/// 依 oxmgr ps 语义过重——轻量形：进程表里 cmdline 含 `msrtc-<app>` 或
-/// `<app>` 且 exe 非本测试进程即视为残存。查无 = 归零。
+/// stop self-verification (T4): whether the processes of this family for the app name have reached zero.
+/// Relying on oxmgr ps semantics would be too heavy -- lightweight form: anything in the process table whose cmdline contains `msrtc-<app>` or
+/// `<app>` and whose exe is not this test process counts as a leftover. Nothing found = zeroed.
 pub fn diagnose_app_gone(app: &str) -> bool {
     let needles = [format!("msrtc-{app}"), format!("mediaservo-{app}"), app.to_string()];
     for pid in proc_pids() {
@@ -144,23 +144,23 @@ pub fn diagnose_app_gone(app: &str) -> bool {
         let Ok(cmd) = std::fs::read_to_string(format!("/proc/{pid}/cmdline")) else { continue };
         let first = cmd.split('\0').next().unwrap_or("");
         if needles.iter().any(|n| first.contains(n.as_str())) {
-            return false; // 有残存
+            return false; // leftovers present
         }
     }
     true
 }
 
-/// 人话报告输出（eprintln；占用者含升级残留时给处置建议，F1 指认不杀戮）。
+/// Human-readable report output (eprintln; gives a disposition suggestion when an occupier is an upgrade leftover, F1 name-don-t-kill).
 pub fn print_report(reports: &[ConflictReport], port: u16) {
     if reports.is_empty() {
         return;
     }
-    eprintln!("端口 {port} 被占用——冲突体检:");
+    eprintln!("port {port} is occupied -- conflict doctoring:");
     for r in reports {
         eprintln!("  {}", r.line());
         if r.deleted {
             eprintln!(
-                "  → 该进程运行的是已删除的旧二进制（升级残留）；kill {} 后重跑 start",
+                "  -> this process runs a deleted old binary (upgrade leftover); rerun start after kill {}",
                 r.pid
             );
         }
@@ -171,17 +171,17 @@ pub fn print_report(reports: &[ConflictReport], port: u16) {
 mod tests {
     use super::*;
 
-    /// 未占用端口 → 空报告（快测；选高位冷端口，撞占用概率可忽略）。
+    /// Unoccupied port -> empty report (fast test; a high cold port is chosen, so collision odds are negligible).
     #[test]
     fn unoccupied_port_yields_empty() {
-        // 找一个确实没被监听的端口：临时 bind 再 drop 后立即诊断
+        // find a port that really is not listening: bind temporarily, drop, then diagnose immediately
         let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = l.local_addr().unwrap().port();
         drop(l);
-        assert!(diagnose_port(port).is_empty(), "drop 后无占用者");
+        assert!(diagnose_port(port).is_empty(), "no occupier after drop");
     }
 
-    /// 本测试进程自占端口（TCP+UDP）→ 恰 1 条报告且 pid=自己、deleted=false。
+    /// This test process occupying its own port (TCP+UDP) -> exactly 1 report with pid=self, deleted=false.
     #[test]
     fn self_occupied_port_reports_self() {
         let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -189,7 +189,7 @@ mod tests {
         let tcp_port = l.local_addr().unwrap().port();
         let udp_port = u.local_addr().unwrap().port();
         let tcp = diagnose_port(tcp_port);
-        assert_eq!(tcp.len(), 1, "tcp 自占应恰 1 条: {tcp:?}");
+        assert_eq!(tcp.len(), 1, "tcp self-occupancy should be exactly 1: {tcp:?}");
         assert_eq!(tcp[0].pid, std::process::id());
         assert!(!tcp[0].deleted);
         assert!(
@@ -198,11 +198,11 @@ mod tests {
                 || !tcp[0].cmd.is_empty()
         );
         let udp = diagnose_port(udp_port);
-        assert_eq!(udp.len(), 1, "udp 自占应恰 1 条: {udp:?}");
+        assert_eq!(udp.len(), 1, "udp self-occupancy should be exactly 1: {udp:?}");
         assert_eq!(udp[0].pid, std::process::id());
     }
 
-    /// 人话行格式钉（deleted 标记与建议语）。
+    /// Human-readable line format pin (deleted marker and suggestion wording).
     #[test]
     fn report_line_marks_deleted() {
         let r = ConflictReport {
@@ -213,7 +213,11 @@ mod tests {
             parent: Some((7, "oxmgr daemon run".into())),
         };
         let line = r.line();
-        assert!(line.contains("pid 42") && line.contains("(deleted)") && line.contains("升级残留"));
+        assert!(
+            line.contains("pid 42")
+                && line.contains("(deleted)")
+                && line.contains("upgrade leftover")
+        );
         assert!(line.contains("oxmgr daemon run(7)"));
     }
 }

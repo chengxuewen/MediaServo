@@ -1,30 +1,30 @@
-//! stop 兜底扫尾纯函数组（server-stop-global-reap T1，PLAN §2.1/§2.2/§2.5）。
+//! stop fallback-sweep pure-function group (server-stop-global-reap T1, PLAN S2.1/S2.2/S2.5).
 //!
-//! 职责边界（§2.5）：**判定与计划**，零 IO——/proc 扫描、environ 读取、信号、
-//! oxmgr 调用全在 T2/T3 执行层薄壳。跨用户（kill EPERM）与 daemon 已死降级
-//! 均为运行时关注面，不在纯计划里表达。
+//! Duty boundary (S2.5): **judgment and planning**, zero IO -- /proc scanning, environ reads, signals,
+//! oxmgr calls all live in the T2/T3 executor thin shells. Cross-user (kill EPERM) and daemon-already-dead degradation
+//! are runtime concerns, not expressed in the pure plan.
 //!
-//! 合同（`reap_plan`）：调用方先解析"哪个目录的注册表快照归哪个 daemon"，
-//! 以 `(daemon_data_dir, entries)` 对传入；pid 优先、miss 回落 cwd 归属
-//! （`inspect::strays_under` 同法），双 miss = 孤儿直杀。
+//! Contract (`reap_plan`): the caller first resolves "which daemon owns which dir's registry snapshot"
+//! and passes (daemon_data_dir, entries) pairs; pid first, miss falls back to cwd ownership
+//! (same method as `inspect::strays_under`); both missing = orphan direct kill.
 //!
-//! T2 扫描/执行薄壳（本文件尾部）：`scan_live_procs` 逐 pid 填充 LiveProc
-//! （argv NUL 切分/exe·cwd readlink/environ 反查 OXMGR_HOME|OXMGR_DATA_DIR），
-//! 不可读条目静默跳过（跨用户），自身 pid 排除；判定仍全在纯函数。
+//! T2 scan/execute thin shells (bottom of this file): `scan_live_procs` fills a LiveProc per pid
+//! (argv NUL split / exe-cwd readlink / environ reverse lookup of OXMGR_HOME|OXMGR_DATA_DIR);
+//! unreadable entries are skipped silently (cross-user), self pid excluded; judgment stays in the pure functions.
 
 use std::path::{Path, PathBuf};
 
 use super::inspect::ManagedEntry;
-// ── 进程身份签名（§2.1，唯一真值 = /proc，本函数只做纯判定）─────────────────
+// -- Process identity signature (S2.1; the only ground truth = /proc; this function only judges) --
 
-/// 存活进程快照（T2 扫描层的填充物；T1 只定义形状 + 测试构造器）。
+/// Live process snapshot (what the T2 scan layer fills; T1 defines the shape + test constructors).
 #[derive(Debug, Clone)]
 pub(super) struct LiveProc {
     pub pid: u32,
     pub argv: Vec<String>,
     pub exe: Option<String>,
     pub cwd: Option<PathBuf>,
-    /// /proc/<pid>/environ 里 OXMGR_HOME/OXMGR_DATA_DIR 的值——Some = 实例 daemon 名下。
+    /// The OXMGR_HOME/OXMGR_DATA_DIR value in /proc/<pid>/environ -- Some = under an instance daemon.
     pub environ_oxmgr_home: Option<PathBuf>,
 }
 
@@ -41,12 +41,12 @@ impl LiveProc {
     }
 }
 
-/// 进程身份三分类（签名判定输出；caddy 的磁盘标记是独立 IO 步，见 `caddy_marker_ok`）。
+/// Process identity three-way classification (signature output; caddy's disk marker is a separate IO step, see `caddy_marker_ok`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ProcKind {
     Server,
     Weaknet,
-    /// `config` = argv 中 `--config` 的取值（实例 root 派生源，§2.1 m3）。
+    /// `config` = the value of `--config` in argv (the instance root derivation source, S2.1 m3).
     Caddy {
         config: PathBuf,
     },
@@ -56,14 +56,14 @@ fn basename(p: &str) -> Option<&str> {
     Path::new(p).file_name().and_then(|s| s.to_str())
 }
 
-/// exe 路径含 `target/` 路径**组件**（非子串）→ cargo test/dev 二进制，排除（Q1 裁决）。
+/// exe path contains `target/` as a path **component** (not a substring) -> a cargo test/dev binary, excluded (the Q1 ruling).
 fn exe_is_target(exe: &str) -> bool {
     Path::new(exe).components().any(|c| c.as_os_str() == "target")
 }
 
-/// argv 签名判定（纯函数，无 IO）。空 argv / 非本产品名 / argv[1] 非 run|serve / exe
-/// 出 target/ 组件 → None。caddy 候选在此产出（含 --config 取值），磁盘标记由
-/// 调用方以 `caddy_marker_ok` 补验——IO 与纯判定在此切缝，双侧均可无 /proc 单测。
+/// argv signature judgment (pure, no IO). Empty argv / not this product's name / argv[1] not run|serve / exe
+/// with a target/ component -> None. caddy candidates are produced here (including the --config value); the disk marker
+/// is verified by the caller via `caddy_marker_ok` -- IO and pure judgment are cut apart here; both sides are unit-testable without /proc.
 pub(super) fn proc_kind(argv: &[String], exe: Option<&str>) -> Option<ProcKind> {
     if let Some(e) = exe
         && exe_is_target(e)
@@ -92,10 +92,10 @@ pub(super) fn proc_kind(argv: &[String], exe: Option<&str>) -> Option<ProcKind> 
     None
 }
 
-/// caddy 磁盘标记（B1，唯一 IO 切面）：`<root>/bin/<server-bin-name>` 存在才认——
-/// root = Caddyfile（etc/）上一级（§2.1 二审钉：config_path.parent().parent()）。
-/// 防 TalkServo 同构布局误杀。bin 名集两枚字面量（不读品牌：测试进程与部署进程
-/// 品牌编译期可不同，marker 判据必须进程无关——本次会话实锚）。
+/// caddy disk marker (B1, the only IO facet): recognized only if `<root>/bin/<server-bin-name>` exists --
+/// root = one level above the Caddyfile (etc/) (S2.1 second-review pin: config_path.parent().parent()).
+/// Guards against mis-killing TalkServo-style isomorphic layouts. The bin name set is two literals (no brand read: test processes and deployed
+/// processes may be compiled with different brands; the marker predicate must be process-independent -- anchored live this session).
 pub(super) fn caddy_marker_ok(config: &Path) -> bool {
     let Some(root) = config.parent().and_then(Path::parent) else { return false };
     SERVER_NAMES.iter().any(|n| root.join("bin").join(n).is_file())
@@ -104,11 +104,11 @@ pub(super) fn caddy_marker_ok(config: &Path) -> bool {
 const SERVER_NAMES: &[&str] = &["msrtc-server", "mediaservo-server"];
 const WEAKNET_NAMES: &[&str] = &["msrtc-weaknet", "mediaservo-weaknet"];
 
-// ── 收口计划（§2.2 纯形：经哪个 daemon / 直杀）──────────────────────────────
+// -- Reap plan (S2.2 pure shape: via which daemon / direct kill) -------------------------------
 
-/// 单进程收口步骤。`ViaDaemon.daemon_data_dir` = 目标 daemon 的 OXMGR_DATA_DIR
-/// （执行层据此设 env 调 oxmgr stop+delete）；直杀只剩 NoRegistry——daemon 已死
-/// 降级是运行时关注面，不进纯计划。
+/// A single process's reap step. `ViaDaemon.daemon_data_dir` = the target daemon's OXMGR_DATA_DIR
+/// (the executor sets env and calls oxmgr stop+delete from it); direct kill remains only for NoRegistry -- the daemon-dead
+/// degradation is a runtime concern, not part of the pure plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ReapStep {
     ViaDaemon { daemon_data_dir: PathBuf, name: String, pid: u32 },
@@ -117,15 +117,15 @@ pub(super) enum ReapStep {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum DirectReason {
-    /// 实例/默认两表 pid+cwd 双查皆 miss（孤儿 / nohup 直启）。
+    /// Both instance/default tables miss on pid+cwd (orphan / nohup direct start).
     NoRegistry,
 }
 
-/// 收口计划（纯函数）。**合同**：`registries` 由调用方预解析为 (daemon_data_dir,
-/// 该目录下读出的注册表快照) 对——本函数不做磁盘读取、不做 default_data_dir()
-/// env 解析。命中规则：pid 精确匹配优先；miss 后按 cwd 归属兜底（条目 cwd 绝对化
-/// 后 starts_with 进程 cwd，`inspect::strays_under` 同法，M2: daemon 重启后 pid
-/// 陈旧形态）。双查皆 miss → `DirectKill(NoRegistry)`。
+/// The reap plan (pure function). **Contract**: `registries` is pre-resolved by the caller into (daemon_data_dir,
+/// registry snapshot read under that dir) pairs -- this function does no disk reads and no default_data_dir()
+/// env resolution. Match rule: exact pid match first; on miss, cwd-ownership fallback (entry cwd absolutized,
+/// then starts_with against the process cwd, same method as `inspect::strays_under`, M2: the stale-pid shape after a daemon restart).
+/// Both lookups miss -> `DirectKill(NoRegistry)`.
 pub(super) fn reap_plan(
     procs: &[LiveProc],
     registries: &[(PathBuf, &[ManagedEntry])],
@@ -133,8 +133,8 @@ pub(super) fn reap_plan(
     procs
         .iter()
         .map(|p| {
-            // environ 归因（/proc 真值）：进程自称属某 daemon → 该表优先（防默认表
-            // cwd 兜底误吸走实例名下进程——双表 cwd 重叠形）。
+            // environ attribution (the /proc ground truth): the process claims membership in some daemon -> that table first (prevents the default
+            // table's cwd fallback from swallowing an instance-daemon-owned process -- the overlapping-cwd shape of the two tables).
             let ordered: Vec<&(PathBuf, &[ManagedEntry])> = match &p.environ_oxmgr_home {
                 Some(home) => {
                     let mut v: Vec<_> = registries.iter().collect();
@@ -157,12 +157,12 @@ pub(super) fn reap_plan(
         .collect()
 }
 
-/// environ home 与注册表目录同一性（absolute 归一比对）。
+/// environ home vs registry dir identity (compared after absolute normalization).
 fn matches_home(dir: &Path, home: &Path) -> bool {
     super::absolute(dir) == super::absolute(home)
 }
 
-/// 注册表反查：pid 优先，miss 则 cwd 归属（双侧绝对化，组件级前缀）。
+/// Registry reverse lookup: pid first, cwd ownership on miss (both sides absolutized, component-level prefix).
 fn lookup<'a>(entries: &'a [ManagedEntry], p: &LiveProc) -> Option<&'a ManagedEntry> {
     if entries.iter().any(|e| e.pid == Some(p.pid as u64)) {
         return entries.iter().find(|e| e.pid == Some(p.pid as u64));
@@ -171,25 +171,25 @@ fn lookup<'a>(entries: &'a [ManagedEntry], p: &LiveProc) -> Option<&'a ManagedEn
     entries.iter().find(|e| e.cwd.starts_with(cwd))
 }
 
-// ── T3: -g 全局选择 + 汇总计数（纯判定；marker 谓词注入保 IO 切缝）────────────
+// -- T3: -g global selection + tally counts (pure judgment; the marker predicate is injected to keep the IO seam) --
 
-/// 单步执行结局（执行层产出，`tally` 消费）。
+/// Single-step execution outcome (produced by the executor, consumed by `tally`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum StepOutcome {
-    /// 经所属 daemon stop+delete 成功。
+    /// stop+delete via the owning daemon succeeded.
     ViaDaemon,
-    /// 直杀并观察到退场（含 daemon 不可达降级直杀）。
+    /// Killed directly and exit observed (including the daemon-unreachable degraded direct kill).
     DirectKill,
-    /// 直杀闸跳过（daemon 仍活/条目在——杀之必复活，只报告不越权）。
-    /// 非失败：不入 failed，不影响 RC（终态干净=RC 0）。
+    /// Skipped by the direct-kill gate (daemon alive/entry present -- killing it would revive; report only, never overstep).
+    /// Not a failure: not counted in failed, does not affect RC (a clean final state = RC 0).
     Skipped,
-    /// 杀令已发但进程仍在（EPERM/D-state 等）。
+    /// Kill signal sent but the process still lives (EPERM/D-state etc.).
     Failed,
 }
 
-/// `-g` 全局选择（PLAN §2.4，纯判定）：/proc 全量快照 → 签名命中者，**无 dir 过滤、
-/// 无 cwd 假设**；caddy 候选必须过磁盘标记谓词（B1——泛匹配已否决，TalkServo 同构
-/// 布局实录在案）。返回 (选中, 被标记拒绝的 caddy 候选)——拒绝面供打印说明，不进杀集。
+/// `-g` global selection (PLAN S2.4, pure judgment): a full /proc snapshot -> signature hits, **no dir filter,
+/// no cwd assumption**; caddy candidates must pass the disk-marker predicate (B1 -- generic matching was vetoed; the TalkServo
+/// isomorphic layout is on record). Returns (selected, marker-rejected caddy candidates) -- the rejection list is for printing explanations, not for the kill set.
 pub(super) fn select_global(
     procs: &[LiveProc],
     caddy_ok: impl Fn(&Path) -> bool,
@@ -207,7 +207,7 @@ pub(super) fn select_global(
     (selected, rejected)
 }
 
-/// `-g` 汇总计数（纯函数）：返回 (经 daemon N, 直杀 M, 跳过 S, 失败 K)。
+/// `-g` tally counts (pure function): returns (via daemon N, direct kill M, skipped S, failed K).
 pub(super) fn tally(outcomes: &[StepOutcome]) -> (usize, usize, usize, usize) {
     (
         outcomes.iter().filter(|o| **o == StepOutcome::ViaDaemon).count(),
@@ -217,10 +217,10 @@ pub(super) fn tally(outcomes: &[StepOutcome]) -> (usize, usize, usize, usize) {
     )
 }
 
-// ── T2 扫描薄壳（IO 面；判定全在上方纯函数）─────────────────────────────────
+// -- T2 scan thin shell (the IO face; all judgment in the pure functions above) ------------------
 
-/// /proc 全扫 → 存活进程快照（argv NUL 切分、exe/cwd readlink、environ 反查）。
-/// 不可读条目静默跳过（跨用户）；自身 pid 排除（stop 不自残）。非 Linux → 空。
+/// Full /proc scan -> live process snapshots (argv NUL split, exe/cwd readlink, environ reverse lookup).
+/// Unreadable entries skipped silently (cross-user); self pid excluded (stop never self-harms). Non-Linux -> empty.
 pub(super) fn scan_live_procs() -> Vec<LiveProc> {
     #[cfg(target_os = "linux")]
     {
@@ -243,7 +243,7 @@ pub(super) fn scan_live_procs() -> Vec<LiveProc> {
     }
 }
 
-/// 单 pid 快照填充。cmdline 不可读（跨用户/内核线程）→ None 静默跳过。
+/// Fill one pid's snapshot. cmdline unreadable (cross-user/kernel thread) -> None, skipped silently.
 fn fill_from_proc(pid: u32) -> Option<LiveProc> {
     #[cfg(target_os = "linux")]
     {
@@ -270,7 +270,7 @@ fn fill_from_proc(pid: u32) -> Option<LiveProc> {
     }
 }
 
-/// /proc/<pid>/environ 里 OXMGR_HOME / OXMGR_DATA_DIR 的值（首个在场者）。
+/// The OXMGR_HOME / OXMGR_DATA_DIR value in /proc/<pid>/environ (the first present).
 fn read_oxmgr_home(pid: u32) -> Option<PathBuf> {
     #[cfg(target_os = "linux")]
     {
@@ -286,15 +286,15 @@ fn read_oxmgr_home(pid: u32) -> Option<PathBuf> {
     }
 }
 
-/// 实例 root 派生 + 归属（dir 归属比对一律经 `absolute` 归一，§2.1/二审钉③）。
-/// server/caddy 按 `--config`（root = etc/ 上一级 = parent().parent()）；weaknet 按
-/// `--token-file <root>/run/weaknet.token`。不可派生（缺参）= 不归属。
+/// Instance root derivation + ownership (dir-ownership comparisons always go through `absolute` normalization, S2.1/second-review pin 3).
+/// server/caddy per `--config` (root = one level above etc/ = parent().parent()); weaknet per
+/// `--token-file <root>/run/weaknet.token`. Underivable (missing args) = not owned.
 pub(super) fn kind_dir_within(kind: &ProcKind, argv: &[String], mine: &Path) -> bool {
     let root = match kind {
         ProcKind::Server => {
             config_flag_value(argv, "--config").and_then(|c| derive_root_from_config(Path::new(&c)))
         }
-        // m3：weaknet 按 --token-file <root>/run/weaknet.token 派生
+        // m3: weaknet derives from --token-file <root>/run/weaknet.token
         ProcKind::Weaknet => config_flag_value(argv, "--token-file")
             .and_then(|c| derive_root_from_config(Path::new(&c))),
         ProcKind::Caddy { config } => derive_root_from_config(config),
@@ -304,13 +304,13 @@ pub(super) fn kind_dir_within(kind: &ProcKind, argv: &[String], mine: &Path) -> 
     super::absolute(&root).starts_with(&mine)
 }
 
-/// `--token-file <root>/run/weaknet.token` → root（run → root 两跳，token 在 run/
-/// 一级——等价 server.yaml/Caddyfile 的 etc/ 形）；server.yaml/Caddyfile 形 → 上两级。
+/// `--token-file <root>/run/weaknet.token` -> root (run -> root is two hops, the token sits directly in run/
+/// -- equivalent to the etc/ shape of server.yaml/Caddyfile); the server.yaml/Caddyfile shape -> two levels up.
 fn derive_root_from_config(path: &Path) -> Option<PathBuf> {
     path.parent().and_then(Path::parent).map(Path::to_path_buf)
 }
 
-/// argv 中 `--flag` 的取值（无则 None）。
+/// The value of `--flag` in argv (None if absent).
 fn config_flag_value(argv: &[String], flag: &str) -> Option<String> {
     argv.iter().position(|a| a == flag).and_then(|i| argv.get(i + 1)).cloned()
 }
@@ -341,10 +341,10 @@ mod tests {
     #[test]
     fn wrong_subcommand_is_none() {
         let a = vec!["/opt/x/bin/msrtc-server".to_string(), "serve".into()];
-        assert_eq!(proc_kind(&a, None), None, "server 进程用 serve = 不匹配");
+        assert_eq!(proc_kind(&a, None), None, "a server process using serve = no match");
         let b = vec!["/opt/x/bin/msrtc-weaknet".to_string(), "run".into()];
         assert_eq!(proc_kind(&b, None), None);
-        // 没有 argv[1]
+        // no argv[1]
         let c = vec!["/opt/x/bin/msrtc-server".to_string()];
         assert_eq!(proc_kind(&c, None), None);
     }
@@ -353,7 +353,7 @@ mod tests {
     fn non_server_products_are_none() {
         for name in ["msrtc-host", "mediaservo-host", "msrtc-agent", "msrtc-streamer", "oxmgr"] {
             let argv = vec![format!("/opt/x/bin/{name}"), "run".into()];
-            assert_eq!(proc_kind(&argv, Some(&argv[0])), None, "{name} 不得命中");
+            assert_eq!(proc_kind(&argv, Some(&argv[0])), None, "{name} must not hit");
         }
     }
 
@@ -370,21 +370,21 @@ mod tests {
 
     #[test]
     fn target_component_exe_excluded_but_lookalike_kept() {
-        // 组件形：target/ 出现在路径中 → 排除（cargo test 二进制）
+        // Component shape: target/ appears in the path -> excluded (a cargo test binary)
         let argv = vec!["/home/u/ms/target/debug/msrtc-server".to_string(), "run".into()];
         assert_eq!(proc_kind(&argv, Some(argv[0].as_str())), None);
-        // 形近子串：/opt/targets/bin 不是 target/ 组件 → 不排除
+        // Look-alike substring: /opt/targets/bin is not a target/ component -> not excluded
         let lookalike = vec!["/opt/targets/bin/msrtc-server".to_string(), "run".into()];
         assert_eq!(proc_kind(&lookalike, Some(lookalike[0].as_str())), Some(ProcKind::Server));
     }
 
-    // ── proc_kind: caddy（argv 面）+ 磁盘标记（tempdir IO 面）───────────────
+    // -- proc_kind: caddy (argv face) + disk marker (tempdir IO face) --
 
     #[test]
     fn caddy_argv_candidate_without_config_value_is_none() {
         let a = vec!["/usr/bin/caddy".to_string(), "run".into()];
         assert_eq!(proc_kind(&a, Some("/usr/bin/caddy")), None);
-        // config 值不以 /etc/Caddyfile 结尾
+        // the config value does not end with /etc/Caddyfile
         let b = vec![
             "/usr/bin/caddy".to_string(),
             "run".into(),
@@ -400,7 +400,7 @@ mod tests {
         let root = tmp.path();
         std::fs::create_dir_all(root.join("bin")).unwrap();
         let cfg = root.join("etc").join("Caddyfile");
-        // marker 缺失（TalkServo 同构布局形）→ argv 命中但标记拒
+        // marker missing (the TalkServo isomorphic-layout shape) -> argv hits but the marker rejects
         std::fs::create_dir_all(root.join("etc")).unwrap();
         assert!(!caddy_marker_ok(&cfg));
         let argv = vec![
@@ -413,7 +413,7 @@ mod tests {
             proc_kind(&argv, Some("/usr/bin/caddy")),
             Some(ProcKind::Caddy { config: cfg.clone() })
         );
-        // marker 在（品牌形 + 上游形都认）→ 采纳
+        // marker present (both the brand form and the upstream form recognized) -> accepted
         std::fs::write(root.join("bin").join("msrtc-server"), b"").unwrap();
         assert!(caddy_marker_ok(&cfg));
         std::fs::remove_file(root.join("bin").join("msrtc-server")).unwrap();
@@ -421,7 +421,7 @@ mod tests {
         assert!(caddy_marker_ok(&cfg));
     }
 
-    // ── reap_plan 四形态 + M2 pid-陈旧-cwd-兜底 ─────────────────────────────
+    // -- reap_plan four shapes + M2 stale-pid-cwd fallback --
 
     fn entry(id: u64, name: &str, pid: Option<u64>, cwd: &str) -> ManagedEntry {
         ManagedEntry { id, name: name.into(), status: "running".into(), pid, cwd: cwd.into() }
@@ -450,7 +450,7 @@ mod tests {
 
     #[test]
     fn default_daemon_managed_routes_via_default_daemon() {
-        let p = LiveProc::new(200, &["/x/msrtc-server", "run"]); // environ 无 OXMGR_*
+        let p = LiveProc::new(200, &["/x/msrtc-server", "run"]); // no OXMGR_* in environ
         let default = vec![entry(2, "msrtc-server", Some(200), "/deploy/out/server")];
         let plan = reap_plan(&[p], &[(PathBuf::from("/home/u/.local/share/oxmgr"), &default)]);
         assert_eq!(
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn stale_pid_falls_back_to_cwd_membership() {
-        // M2: daemon 崩溃重启后注册表 pid 陈旧（≠ 活进程 pid），cwd 归属兜底仍经 daemon
+        // M2: after a daemon crash-restart the registry pid is stale (!= the live pid); cwd ownership still routes via the daemon
         let p = LiveProc {
             cwd: Some(PathBuf::from("/deploy/out/server")),
             ..LiveProc::new(999, &["/x/msrtc-server", "run"])
@@ -491,7 +491,7 @@ mod tests {
 
     #[test]
     fn cwd_sibling_prefix_not_matched() {
-        // /deploy/out/server-2 不是 /deploy/out/server 之下（strays_under 同训）
+        // /deploy/out/server-2 is not under /deploy/out/server (same lesson as strays_under)
         let p = LiveProc {
             cwd: Some(PathBuf::from("/deploy/out/server")),
             ..LiveProc::new(400, &["/x/msrtc-server", "run"])
@@ -501,13 +501,13 @@ mod tests {
         assert_eq!(plan, vec![ReapStep::DirectKill { pid: 400, reason: DirectReason::NoRegistry }]);
     }
 
-    // ── T2: kind_dir_within / derive_root_from_config（纯判定，tempdir IO 只在 marker）──
+    // -- T2: kind_dir_within / derive_root_from_config (pure judgment; tempdir IO only in the marker) --
 
     #[test]
     fn kind_dir_within_server_and_weaknet_and_caddy() {
         let tmp = tempfile::tempdir().unwrap();
         let root = absolute(tmp.path());
-        // server 形：--config <root>/etc/server.yaml
+        // server shape: --config <root>/etc/server.yaml
         let srv_argv = vec![
             format!("{}/bin/msrtc-server", root.display()),
             "run".into(),
@@ -516,7 +516,7 @@ mod tests {
         ];
         assert!(kind_dir_within(&ProcKind::Server, &srv_argv, &root));
         assert!(!kind_dir_within(&ProcKind::Server, &srv_argv, Path::new("/elsewhere")));
-        // weaknet 形：--token-file <root>/run/weaknet.token（kind 签名是 serve）
+        // weaknet shape: --token-file <root>/run/weaknet.token (the kind signature is serve)
         let wn_argv = vec![
             format!("{}/bin/msrtc-weaknet", root.display()),
             "serve".into(),
@@ -526,14 +526,14 @@ mod tests {
             format!("{}/run/weaknet.token", root.display()),
         ];
         assert!(kind_dir_within(&ProcKind::Weaknet, &wn_argv, &root));
-        // weaknet 缺 --token-file → 不可派生 → 不归属（保守）
+        // weaknet missing --token-file -> underivable -> not owned (conservative)
         let wn_bare = vec![format!("{}/bin/msrtc-weaknet", root.display()), "serve".into()];
         assert!(!kind_dir_within(&ProcKind::Weaknet, &wn_bare, &root));
-        // caddy 形：--config <root>/etc/Caddyfile → root = 上两级
+        // caddy shape: --config <root>/etc/Caddyfile -> root = two levels up
         let caddy =
             ProcKind::Caddy { config: PathBuf::from(format!("{}/etc/Caddyfile", root.display())) };
         assert!(kind_dir_within(&caddy, &[], &root));
-        // 兄弟目录形（/root-2）不误归属
+        // sibling-dir shape (/root-2) is not misattributed
         assert!(!kind_dir_within(
             &caddy,
             &[],
@@ -546,20 +546,20 @@ mod tests {
 
     #[test]
     fn kind_dir_within_relative_proc_paths_normalized() {
-        // §2.1 钉：cmdline 相对路径 vs 传参绝对 → absolute 归一后仍归属
+        // S2.1 pin: cmdline relative path vs an absolute arg -> still owned after absolute normalization
         let tmp = tempfile::tempdir().unwrap();
         let root = absolute(tmp.path());
         let rel_argv =
             vec!["msrtc-server".into(), "run".into(), "--config".into(), "etc/server.yaml".into()];
-        // 相对 "etc/server.yaml" 解析相对 cwd——absolute() 不带 cwd 语义，root 派生=
-        // "etc" 上两级不可得 → 不归属（保守方向正确，不误杀）
+        // the relative "etc/server.yaml" resolves against cwd -- absolute() carries no cwd semantics, so root derivation
+        // cannot go two levels above "etc" -> not owned (conservative direction is correct, no mis-kill)
         assert!(!kind_dir_within(&ProcKind::Server, &rel_argv, &root));
     }
 
     #[test]
     fn reap_plan_environ_attribution_prefers_own_daemon() {
-        // /proc environ 真值：进程自称属 /inst/run/oxmgr → 实例表优先（即使默认表
-        // pid/cwd 也命中——cwd 重叠形不得被默认表吸走）
+        // the /proc environ ground truth: the process claims /inst/run/oxmgr -> the instance table first (even if the default
+        // table's pid/cwd also hit -- the overlapping-cwd shape must not be swallowed by the default table)
         let p = LiveProc {
             cwd: Some(PathBuf::from("/inst")),
             environ_oxmgr_home: Some(PathBuf::from("/inst/run/oxmgr")),
@@ -584,11 +584,11 @@ mod tests {
         );
     }
 
-    // ── T3: select_global / tally（fixture 全测，零 /proc）───────────────────
+    // -- T3: select_global / tally (fixture-tested, zero /proc) --
 
     #[test]
     fn select_global_keeps_ours_rejects_markerless_caddy() {
-        // 有标记 caddy（本产品布局形）
+        // marked caddy (this product's layout shape)
         let tmp = tempfile::tempdir().unwrap();
         let root = absolute(tmp.path());
         std::fs::create_dir_all(root.join("bin")).unwrap();
@@ -603,7 +603,7 @@ mod tests {
             exe: Some("/usr/bin/caddy".into()),
             ..LiveProc::new(11, &[])
         };
-        // 无标记 caddy（TalkServo 同构布局形）——同 tempdir 下未造 bin 的子目录
+        // unmarked caddy (the TalkServo isomorphic-layout shape) -- a subdirectory of the same tempdir without a faked bin
         let talkservo = LiveProc {
             argv: vec![
                 "/usr/bin/caddy".to_string(),
@@ -616,7 +616,7 @@ mod tests {
         };
         let ours_server = LiveProc::new(10, &["/opt/x/bin/msrtc-server", "run"]);
         let ours_weaknet = LiveProc::new(15, &["/opt/x/bin/msrtc-weaknet", "serve"]);
-        // cargo test 形（exe 含 target/ 组件）与 host 族——-g 杀集之外
+        // the cargo test shape (exe contains a target/ component) and the host family -- outside the -g kill set
         let target_exe = LiveProc {
             exe: Some("/home/u/ms/target/debug/msrtc-server".into()),
             ..LiveProc::new(13, &["/home/u/ms/target/debug/msrtc-server", "run"])
@@ -625,9 +625,13 @@ mod tests {
         let procs = vec![ours_server, with_marker, talkservo, target_exe, host_proc, ours_weaknet];
         let (sel, rej) = select_global(&procs, caddy_marker_ok);
         let pids: Vec<u32> = sel.iter().map(|p| p.pid).collect();
-        assert_eq!(pids, vec![10, 11, 15], "-g 杀集=server/weaknet/有标记 caddy");
+        assert_eq!(pids, vec![10, 11, 15], "-g kill set = server/weaknet/marked caddy");
         let rej_pids: Vec<u32> = rej.iter().map(|p| p.pid).collect();
-        assert_eq!(rej_pids, vec![12], "无标记 caddy 拒绝面（打印说明，不进杀集）");
+        assert_eq!(
+            rej_pids,
+            vec![12],
+            "the unmarked caddy rejection list (printed, not in the kill set)"
+        );
     }
 
     #[test]
@@ -647,8 +651,8 @@ mod tests {
 
     #[test]
     fn scan_fill_unreadable_pid_is_none() {
-        // 跨用户/内核 pid（1 号通常 cmdline 可读但 environ 不可读——fill 不 panic 即可；
-        // 断言: fill 一个必然不可读的 pid（u32::MAX）→ None 静默
+        // cross-user/kernel pid (pid 1 usually has readable cmdline but unreadable environ -- fill must not panic;
+        // assert: fill an unreadable-by-construction pid (u32::MAX) -> None silently
         assert!(fill_from_proc(u32::MAX).is_none());
     }
 }

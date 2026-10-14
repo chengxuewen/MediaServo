@@ -1,6 +1,6 @@
-//! 车端推流示例 — PushSession 完整流程（连接→发布→帧生成→停止）。
+//! Vehicle-side push example — full PushSession flow (connect → publish → frame generation → stop).
 //!
-//! 前置: mediaservo server 运行中（`./mediaservo.sh start server`）。
+//! Prerequisite: a mediaservo server is running (`./mediaservo.sh start server`).
 //!
 //! ```bash
 //! SFU_E2E_WS_URL=ws://127.0.0.1:9800/ws SFU_E2E_PSK=mediaservo-dev \
@@ -13,7 +13,7 @@ use mediaservo_field::{PublishOptions, PushConfig, PushSession, SessionEvent};
 
 #[tokio::main]
 async fn main() {
-    // 1. 配置（车端: 相机分辨率/帧率/码率）
+    // 1. Configure (vehicle side: camera resolution/fps/bitrate)
     let url = std::env::var("SFU_E2E_WS_URL").unwrap_or_else(|_| "ws://127.0.0.1:9800/ws".into());
     let psk = std::env::var("SFU_E2E_PSK").unwrap_or_else(|_| "mediaservo-dev".into());
     let room = format!("vehicle-{}", std::process::id());
@@ -25,25 +25,21 @@ async fn main() {
     cfg.bitrate_kbps = 2000;
     cfg.keyframe_interval = 2;
 
-    // 2. 连接信令 + 加入房间
-    let (mut session, mut events) = PushSession::connect(cfg.clone())
-        .await
-        .expect("connect failed");
+    // 2. Connect signaling + join the room
+    let (mut session, mut events) =
+        PushSession::connect(cfg.clone()).await.expect("connect failed");
     println!("connected to room {}", cfg.room);
 
-    // 3. 发布视频轨（SFU 协商: transport→answer→Connect→Produce）
+    // 3. Publish the video track (SFU negotiation: transport→answer→Connect→Produce)
     let opts = PublishOptions::default(); // VP8 / auto backend
-    let track = session
-        .publish_video(&cfg, &opts)
-        .await
-        .expect("publish failed");
+    let track = session.publish_video(&cfg, &opts).await.expect("publish failed");
     println!("video published: track={track}");
 
-    // 4. 启动帧生成（Squares 彩条 + 时间戳水印, C17 时间戳语义）
+    // 4. Start frame generation (Squares color bars + timestamp watermark, C17 timestamp semantics)
     session.start_video_frames(&cfg).expect("start frames failed");
     println!("frames running ({}x{}@{}fps)", cfg.width, cfg.height, cfg.framerate);
 
-    // 5. 事件监控 + 运行 30s
+    // 5. Monitor events + run for 30s
     let run = tokio::time::timeout(Duration::from_secs(30), async {
         while let Some(ev) = events.recv().await {
             match ev {
@@ -64,7 +60,7 @@ async fn main() {
     });
     let _ = run.await;
 
-    // 6. 停止 + 关闭
+    // 6. Stop + close
     session.stop_video_frames();
     session.close().await.expect("close failed");
     println!("done");

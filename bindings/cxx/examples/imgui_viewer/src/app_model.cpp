@@ -1,4 +1,4 @@
-// app_model — 数据工具实现（T3 自 main.cpp 匿名 namespace 迁居，逐字保真）。
+// app_model — the data utility implementation (relocated from main.cpp's anonymous namespace in T3, verbatim-faithful).
 #include "app_model.hpp"
 #include <tuple>
 
@@ -11,15 +11,15 @@ const char* env_or(const char* k, const char* dflt) {
     return (v && *v) ? v : dflt;
 }
 
-/// list_rooms JSON 数组的逐项提取（键均字符串形，手工扫描零依赖）。
-/// room-grouping-semantics T3：三元组 (room_id, kind, parent)；parent additive
-/// （"parent":"vehicle"，老 wire 缺省空——树走 _ 前缀兜底分组）。
+/// Item-by-item extraction from a list_rooms JSON array (all keys are strings; a hand-rolled zero-dependency scan).
+/// room-grouping-semantics T3: the triple (room_id, kind, parent); parent is additive
+/// ("parent":"vehicle"; the old wire defaults to empty — the tree falls back to grouping by the _ prefix).
 static std::vector<std::tuple<std::string, std::string, std::string>> parse_rooms_ex(
     const std::string& json) {
     std::vector<std::tuple<std::string, std::string, std::string>> out;
     std::string::size_type pos = 0;
     while ((pos = json.find("\"room_id\"", pos)) != std::string::npos) {
-        auto q1 = json.find('"', pos + 9);  // pat 尾后起（+8 会自撞 pat 闭引号=空串 bug）
+        auto q1 = json.find('"', pos + 9);  // start after the pat tail (+8 would collide with pat's closing quote = the empty-string bug)
         auto q2 = json.find('"', q1 + 1);
         if (q1 == std::string::npos || q2 == std::string::npos) break;
         std::string room = json.substr(q1 + 1, q2 - q1 - 1);
@@ -27,7 +27,7 @@ static std::vector<std::tuple<std::string, std::string, std::string>> parse_room
         auto kp = json.find("\"kind\"", q2);
         auto next_room = json.find("\"room_id\"", q2);
         if (kp != std::string::npos && (next_room == std::string::npos || kp < next_room)) {
-            auto k1 = json.find('"', kp + 7);  // "kind" 长 7
+            auto k1 = json.find('"', kp + 7);  // "kind" is 7 chars
             auto k2 = json.find('"', k1 + 1);
             if (k1 != std::string::npos && k2 != std::string::npos)
                 kind = json.substr(k1 + 1, k2 - k1 - 1);
@@ -35,7 +35,7 @@ static std::vector<std::tuple<std::string, std::string, std::string>> parse_room
         std::string parent;
         auto pp = json.find("\"parent\"", q2);
         if (pp != std::string::npos && (next_room == std::string::npos || pp < next_room)) {
-            auto p1 = json.find('"', pp + 9);  // "parent" 长 8
+            auto p1 = json.find('"', pp + 9);  // "parent" is 8 chars
             auto p2 = json.find('"', p1 + 1);
             if (p1 != std::string::npos && p2 != std::string::npos)
                 parent = json.substr(p1 + 1, p2 - p1 - 1);

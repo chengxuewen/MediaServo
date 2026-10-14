@@ -1,17 +1,17 @@
-//! Task E4: 云端配置闭环 e2e — ConfigPush 接收 → 校验 → host.yaml 更新（备份）→
-//! oxfile 重生成 → OxMgr 热生效（增量 apply + file-watch 重启）。
+//! Task E4: cloud-config closed loop e2e - ConfigPush receive -> validate -> host.yaml update (backup) ->
+//! oxfile regeneration -> OxMgr hot activation (incremental apply + file-watch restart).
 //!
-//! ① mock server 下发 ConfigPush → 网关 → 应用: host.yaml 更新 + 备份 + oxfile 重生成
-//!    + 版本记入（StatusReport.config_version 关联数据源）
-//! ② 非法配置拒绝: host.yaml 不变 + 无备份 + 审计日志（tracing 捕获断言）
-//! ③ OxMgr 热生效实证（Linux + oxmgr 前置）: host start → 推新配置（加相机）→
-//!    新 capturer 进程出现（apply 增量 Start）+ 既有 capturer pid 变更
-//!    （host.yaml 内容指纹 → file-watch 重启——命令未变时 apply 为 Noop，
-//!     pid 变更只可能来自 watch）；再推删相机配置 → 对应 app 被清理（removal）
+//! (1) the mock server sends ConfigPush -> gateway -> apply: host.yaml updated + backup + oxfile regenerated
+//!    + version recorded (the correlated data source of StatusReport.config_version)
+//! (2) illegal config rejected: host.yaml unchanged + no backup + audit log (tracing-captured assertion)
+//! (3) OxMgr hot-activation proof (Linux + oxmgr prerequisite): host start -> push new config (add a camera) ->
+//!    the new capturer process appears (incremental apply Start) + the existing capturer's pid changes
+//!    (host.yaml content fingerprint -> file-watch restart; when the command is unchanged apply is a Noop,
+//!     so the pid change can only come from watch); then push a config removing the camera -> that app is cleaned up (removal)
 //!
-//! 前置（C25）: 测试自带 iceoryx2 清理（/tmp/iceoryx2 + /dev/shm/iox2_*）。
+//! Prerequisite (C25): the test cleans iceoryx2 itself (/tmp/iceoryx2 + /dev/shm/iox2_*).
 
-#![allow(clippy::doc_lazy_continuation, clippy::await_holding_lock, unused_assignments)] // 头注释 ` +` 散文续行 + 轮询哨兵初值 0（break 路径必覆盖）
+#![allow(clippy::doc_lazy_continuation, clippy::await_holding_lock, unused_assignments)] // header-doc list continuation with ` +` + polling sentinel initial 0 (the break path always covers it)
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -26,8 +26,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 
-/// 最近一次应用结果（Err 拒绝原因 = handle_config_push 审计日志 warn 载荷；
-/// 测试断言审计内容的确定性通道——日志经 tracing 输出, 内容与 Err 文本一致）。
+/// The most recent apply outcome (Err rejection reason = the warn payload of handle_config_push's audit log;
+/// the test's deterministic channel for asserting audit content - the tracing-emitted log text matches the Err text).
 type Outcome = Arc<Mutex<Option<String>>>;
 
 const VEHICLE_ROOM: &str = "vehicle-1";
@@ -42,8 +42,8 @@ fn write_host_toml(dir: &Path, cfg: &str) {
     std::fs::write(dir.join("etc").join("host.yaml"), cfg).expect("write host.yaml");
 }
 
-/// 与 host-agent 同形的应用循环（轮询网关待应用 ConfigPush；测试用 100ms 轮询）。
-/// outcome 记录最近一次结果（成功版本 / 拒绝原因——与 handle_config_push 审计日志同文）。
+/// An apply loop shaped like host-agent's (polls the gateway for pending ConfigPush; 100ms polling in tests).
+/// outcome records the latest result (applied version / rejection reason - same text as handle_config_push's audit log).
 fn spawn_applier(handle: GatewayHandle, dir: PathBuf, version: Arc<AtomicU64>, outcome: Outcome) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(100));
@@ -65,12 +65,12 @@ fn spawn_applier(handle: GatewayHandle, dir: PathBuf, version: Arc<AtomicU64>, o
     });
 }
 
-/// mock server 完整握手（对齐 link::SignalClient 协议流程）。
+/// Full mock-server handshake (aligned with the link::SignalClient protocol flow).
 async fn mock_handshake(listener: &TcpListener) -> WebSocketStream<TcpStream> {
     let (stream, _) = listener.accept().await.expect("mock accept");
     let mut ws = tokio_tungstenite::accept_async(stream).await.expect("mock ws handshake");
     let psk = ws.next().await.unwrap().unwrap();
-    assert!(matches!(psk, Message::Text(_)), "首条应为 PSK 文本");
+    assert!(matches!(psk, Message::Text(_)), "first message should be PSK text");
     ws.send(Message::Text(
         serde_json::to_string(&SignalingMessage::Error { code: 0, message: String::new() })
             .unwrap(),
@@ -100,7 +100,7 @@ async fn mock_handshake(listener: &TcpListener) -> WebSocketStream<TcpStream> {
     ws
 }
 
-/// 启动网关（临时本地端口）+ 应用循环，返回句柄。
+/// Start the gateway (ephemeral local port) + the apply loop; returns handles.
 async fn start_gateway_and_applier(
     addr: &str,
     dir: PathBuf,
@@ -134,7 +134,7 @@ async fn config_push_via_mock_server_updates_host_toml_backs_up_and_regenerates_
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         let mut ws = mock_handshake(&listener).await;
-        // 入房后立即下发 ConfigPush（v1 配置, version 7）
+        // send ConfigPush right after joining (v1 config, version 7)
         ws.send(Message::Text(
             serde_json::to_string(&SignalingMessage::ConfigPush {
                 room_id: VEHICLE_ROOM.into(),
@@ -146,7 +146,7 @@ async fn config_push_via_mock_server_updates_host_toml_backs_up_and_regenerates_
         ))
         .await
         .unwrap();
-        // 保持连接（网关侧正常；测试结束时 task 随 runtime 终止）
+        // keep the connection open (the gateway side is normal; the task ends with the runtime when the test finishes)
         loop {
             if ws.next().await.is_none() {
                 break;
@@ -160,20 +160,23 @@ async fn config_push_via_mock_server_updates_host_toml_backs_up_and_regenerates_
         start_gateway_and_applier(&addr.to_string(), dir_path.clone(), version.clone(), outcome)
             .await;
 
-    // 轮询应用结果（host.yaml 更新 + 备份 + oxfile 重生成 + 版本记入）
+    // poll the apply result (host.yaml updated + backup + oxfile regenerated + version recorded)
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let toml = std::fs::read_to_string(dir_path.join("etc").join("host.yaml")).unwrap();
         let bak = dir_path.join("etc").join("host.yaml.bak-7");
         let ox = std::fs::read_to_string(dir_path.join("run").join("oxfile.toml"));
         if toml == CFG_V1 && bak.exists() && version.load(Ordering::Relaxed) == 7 {
-            let ox = ox.expect("oxfile 应已生成");
-            assert!(ox.contains("host-capturer-cam1"), "新相机实例应入 oxfile: {ox}");
+            let ox = ox.expect("the oxfile should have been generated");
+            assert!(
+                ox.contains("host-capturer-cam1"),
+                "the new camera instance should land in the oxfile: {ox}"
+            );
             break;
         }
         if std::time::Instant::now() > deadline {
             panic!(
-                "10s 内未完成应用: yaml_updated={} bak={} version={}",
+                "apply not completed within 10s: yaml_updated={} bak={} version={}",
                 toml == CFG_V1,
                 bak.exists(),
                 version.load(Ordering::Relaxed)
@@ -184,16 +187,20 @@ async fn config_push_via_mock_server_updates_host_toml_backs_up_and_regenerates_
     assert_eq!(
         std::fs::read_to_string(dir_path.join("etc").join("host.yaml.bak-7")).unwrap(),
         CFG_V0,
-        "备份应为旧配置"
+        "the backup should hold the old config"
     );
-    // F1 关联契约: 模拟 agent 重启 — 新实例（新 Arc）从备份恢复版本，不归零
+    // F1 correlation contract: simulate an agent restart - the new instance (new Arc) restores the version from disk, not zeroed
     let restarted =
         Arc::new(AtomicU64::new(mediaservo_host::translate::recover_config_version(&dir_path)));
-    assert_eq!(restarted.load(Ordering::Relaxed), 7, "重启后应从磁盘恢复版本 7（关联契约）");
+    assert_eq!(
+        restarted.load(Ordering::Relaxed),
+        7,
+        "after restart the version should be restored from disk to 7 (correlation contract)"
+    );
     assert_eq!(
         std::fs::read_to_string(dir_path.join("etc").join("host.yaml.bak-7")).unwrap(),
         CFG_V0,
-        "备份应为旧配置"
+        "the backup should hold the old config"
     );
     server.abort();
 }
@@ -236,40 +243,49 @@ async fn invalid_config_push_rejected_with_audit_log_and_unchanged_files() {
     )
     .await;
 
-    // 等拒绝结果（outcome 记录 = handle_config_push 审计日志 warn 的同一载荷）
+    // wait for the rejection outcome (the record = the same payload handle_config_push's audit warn logs)
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let guard = outcome.lock().expect("outcome lock");
         if let Some(reason) = guard.as_deref() {
-            assert!(reason.contains("解析失败"), "拒绝原因应含解析失败（审计载荷）: {reason}");
+            assert!(
+                reason.contains("parse failed"),
+                "the rejection reason should contain the parse failure (audit payload): {reason}"
+            );
             break;
         }
         drop(guard);
         if std::time::Instant::now() > deadline {
-            panic!("10s 内未出现拒绝结果（应用循环未处理 ConfigPush）");
+            panic!("no rejection outcome within 10s (the apply loop did not handle ConfigPush)");
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
     server.abort();
 
-    // 文件不变 + 无备份 + 版本未推进
+    // file unchanged + no backup + version not advanced
     assert_eq!(
         std::fs::read_to_string(dir_path.join("etc").join("host.yaml")).unwrap(),
         CFG_V0,
-        "非法配置不得改写 host.yaml"
+        "an illegal config must not rewrite host.yaml"
     );
-    assert!(!dir_path.join("etc").join("host.yaml.bak-9").exists(), "非法配置不得产生备份");
-    assert!(!dir_path.join("run").join("oxfile.toml").exists(), "非法配置不得改写 oxfile");
-    assert_eq!(version.load(Ordering::Relaxed), 0, "版本不得推进");
+    assert!(
+        !dir_path.join("etc").join("host.yaml.bak-9").exists(),
+        "an illegal config must not create a backup"
+    );
+    assert!(
+        !dir_path.join("run").join("oxfile.toml").exists(),
+        "an illegal config must not rewrite the oxfile"
+    );
+    assert_eq!(version.load(Ordering::Relaxed), 0, "the version must not advance");
 }
 
-// ── ③ OxMgr 热生效实证（真实 oxmgr + host 进程） ─────────────────────────────
+// -- (3) OxMgr hot-activation proof (real oxmgr + host processes) --───────────────────────────
 
 #[cfg(target_os = "linux")]
 mod oxmgr_hot_reload {
     use super::*;
 
-    /// C25: 清 iceoryx2 0.9.3 运行时残留（/tmp/iceoryx2 + /dev/shm/iox2_*）。
+    /// C25: clean iceoryx2 0.9.3 runtime residue (/tmp/iceoryx2 + /dev/shm/iox2_*).
     fn cleanup_iceoryx() {
         let _ = std::fs::remove_dir_all("/tmp/iceoryx2");
         if let Ok(entries) = std::fs::read_dir("/dev/shm") {
@@ -291,8 +307,8 @@ mod oxmgr_hot_reload {
         path
     }
 
-    /// oxmgr 实例 daemon env（与 translate::oxmgr_apply 同源: OXMGR_HOME 派生端口隔离
-    /// daemon——`oxmgr list` 不带此 env 会连默认 daemon（空），看不到实例进程）。
+    /// The oxmgr instance-daemon env (same source as translate::oxmgr_apply: OXMGR_HOME derives port-isolated
+    /// daemons - `oxmgr list` without this env connects the default daemon (empty) and cannot see instance processes).
     fn oxmgr_env(dir: &std::path::Path) -> Vec<(String, String)> {
         let home =
             dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).join("run").join("oxmgr");
@@ -313,13 +329,13 @@ mod oxmgr_hot_reload {
             .expect("oxmgr list");
         assert!(
             out.status.success(),
-            "oxmgr list 失败（oxmgr 0.5.0 需在 PATH 且 daemon 运行）: {}",
+            "oxmgr list failed (oxmgr 0.5.0 must be on PATH with the daemon running): {}",
             String::from_utf8_lossy(&out.stderr)
         );
         let procs: serde_json::Value = serde_json::from_slice(&out.stdout).expect("oxmgr json");
         procs
             .as_array()
-            .expect("oxmgr list 应为数组")
+            .expect("oxmgr list should be an array")
             .iter()
             .filter(|p| p.get("namespace").and_then(|n| n.as_str()) == Some("mediaservo-host"))
             .map(|p| {
@@ -347,7 +363,7 @@ mod oxmgr_hot_reload {
         }
     }
 
-    /// 运行 host CLI（PATH 注入 ~/.local/bin 使 oxmgr 可解析），返回 exit code。
+    /// Runs the host CLI (PATH gets ~/.local/bin so oxmgr resolves) and returns the exit code.
     fn host_cli(args: &[&str]) -> i32 {
         let out = Command::new(env!("CARGO_BIN_EXE_mediaservo-host"))
             .env("PATH", path_with_oxmgr())
@@ -357,7 +373,7 @@ mod oxmgr_hot_reload {
         let code = out.status.code().unwrap_or(-1);
         if code != 0 {
             eprintln!(
-                "host {} 失败 (exit {code}): {}",
+                "host {} failed (exit {code}): {}",
                 args[0],
                 String::from_utf8_lossy(&out.stderr)
             );
@@ -402,35 +418,35 @@ mod oxmgr_hot_reload {
         let dir_path = dir.path().to_path_buf();
         cleanup_oxmgr_host(&dir_path);
 
-        // ① host init + v0 配置（cam0）+ 令牌（capture cam0 + recorder）
+        // (1) host init + v0 config (cam0) + tokens (capture cam0 + recorder)
         assert_eq!(host_cli(&["init", dir_path.to_str().expect("dir utf8")]), 0);
         write_host_toml(&dir_path, CFG_V0);
         issue_token(&dir_path, "capture", "capture-cam0", "cam0.token");
         issue_token(&dir_path, "recorder", "recorder-cam0", "recorder.token");
 
-        // ② host start → 6 进程（5 fixed + host-capturer-cam0）running
+        // (2) host start -> 6 processes (5 fixed + host-capturer-cam0) running
         assert_eq!(host_cli(&["start", dir_path.to_str().expect("dir utf8")]), 0);
         let mut guard = OxmgrGuard { dir: dir_path.clone(), done: false };
         let procs = oxmgr_host_procs(&dir_path);
-        assert_eq!(procs.len(), 6, "预期 6 进程 (5 fixed + capturer), got: {procs:?}");
+        assert_eq!(procs.len(), 6, "expected 6 processes (5 fixed + capturer), got: {procs:?}");
         let old_pid = procs
             .iter()
             .find(|(n, _, _)| n == "host-capturer-cam0")
             .map(|(_, _, pid)| *pid)
-            .expect("host-capturer-cam0 在 oxmgr 中");
-        assert!(old_pid != 0, "capturer pid 应非 0");
+            .expect("host-capturer-cam0 is in oxmgr");
+        assert!(old_pid != 0, "the capturer pid should be non-zero");
 
-        // ③ 推新配置（加 cam1）+ cam1 令牌 — 与 host-agent 相同的落盘→apply 序列
-        //    （agent 写 host.yaml + 重生成 oxfile → oxmgr apply；测试经 host CLI 执行
-        //     apply——测试进程 current_exe 在 deps/ 下无法解析产物路径；watch 重启
-        //     经 daemon 异步触发）
+        // (3) push the new config (add cam1) + the cam1 token - the same write-to-disk -> apply sequence as host-agent
+        //    (the agent writes host.yaml + regenerates the oxfile -> oxmgr apply; the test runs apply via the host CLI
+        //     because the test process's current_exe lives under deps/ and cannot resolve artifact paths; the watch restart
+        //     is triggered asynchronously through the daemon)
         issue_token(&dir_path, "capture", "capture-cam1", "cam1.token");
         write_host_toml(&dir_path, CFG_V1);
         assert_eq!(host_cli(&["apply", dir_path.to_str().expect("dir utf8")]), 0);
 
-        // ④ 实证 1（apply 增量 Start）: host-capturer-cam1 出现并 running
-        //    实证 2（file-watch 重启）: host-capturer-cam0（命令未变 → apply Noop）
-        //      pid 变更 — 只可能来自 host.yaml 内容指纹 → watch 重启
+        // (4) proof 1 (incremental apply Start): host-capturer-cam1 appears and is running
+        //    proof 2 (file-watch restart): host-capturer-cam0 (command unchanged -> apply is Noop)
+        //      pid changed - can only come from the host.yaml content fingerprint -> watch restart
         let mut new_pid = 0u64;
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
@@ -445,24 +461,24 @@ mod oxmgr_hot_reload {
             {
                 new_pid = *p0;
                 eprintln!(
-                    "[config_push_e2e] OK: cam1 running + cam0 watch 重启 {old_pid}→{new_pid}"
+                    "[config_push_e2e] OK: cam1 running + cam0 watch-restarted {old_pid}->{new_pid}"
                 );
                 break;
             }
             if std::time::Instant::now() > deadline {
                 panic!(
-                    "30s 内未达成热生效: cam1={cam1:?} cam0={cam0:?} (旧 pid {old_pid})",
+                    "hot activation not achieved within 30s: cam1={cam1:?} cam0={cam0:?} (old pid {old_pid})",
                     cam1 = cam1,
                     cam0 = cam0
                 );
             }
             std::thread::sleep(Duration::from_millis(500));
         }
-        assert!(new_pid != 0, "watch 重启后 pid 应非 0");
+        assert!(new_pid != 0, "the pid should be non-zero after the watch restart");
 
-        // ④b 删除路径实证: 推 v2（cam0 单相机, fps 15）→ cam1 app 被清理
-        //    （oxmgr_apply removal 同步；删除 = oxmgr delete），cam0 命令未变 →
-        //    再次 watch 重启（pid 又变）
+        // (4b) removal-path proof: push v2 (cam0 only, fps 15) -> the cam1 app is cleaned up
+        //    (oxmgr_apply removal is synchronous; removal = oxmgr delete); cam0's command is unchanged ->
+        //    another watch restart (pid changes again)
         write_host_toml(&dir_path, CFG_V2);
         assert_eq!(host_cli(&["apply", dir_path.to_str().expect("dir utf8")]), 0);
         let mut pid_after_remove = 0u64;
@@ -478,23 +494,26 @@ mod oxmgr_hot_reload {
             {
                 pid_after_remove = *p0;
                 eprintln!(
-                    "[config_push_e2e] OK: cam1 已删除 + cam0 watch 重启 {new_pid}→{pid_after_remove}"
+                    "[config_push_e2e] OK: cam1 deleted + cam0 watch-restarted {new_pid}->{pid_after_remove}"
                 );
                 break;
             }
             if std::time::Instant::now() > deadline {
                 panic!(
-                    "30s 内未达成删除+重启: cam1={cam1:?} cam0={cam0:?}",
+                    "removal + restart not achieved within 30s: cam1={cam1:?} cam0={cam0:?}",
                     cam1 = cam1,
                     cam0 = cam0
                 );
             }
             std::thread::sleep(Duration::from_millis(500));
         }
-        assert!(pid_after_remove != 0, "删除后 watch 重启 pid 应非 0");
+        assert!(
+            pid_after_remove != 0,
+            "the pid should be non-zero after the removal-triggered watch restart"
+        );
 
-        // ⑤ 清理: host stop → host 命名空间清空（watch 重启与 stop 存在竞态——",
-        //    停后复查，残留再停，最多 15s）
+        // (5) cleanup: host stop -> the host namespace empties (a race exists between watch restarts and stop -",
+        //    re-check after stopping, stop again on residue, up to 15s)
         let deadline = std::time::Instant::now() + Duration::from_secs(15);
         loop {
             if oxmgr_host_procs(&dir_path).is_empty() {
@@ -508,6 +527,6 @@ mod oxmgr_hot_reload {
         }
         guard.done = true;
         let remaining = oxmgr_host_procs(&dir_path);
-        assert!(remaining.is_empty(), "stop 后应无 host 进程: {remaining:?}");
+        assert!(remaining.is_empty(), "no host processes should remain after stop: {remaining:?}");
     }
 }

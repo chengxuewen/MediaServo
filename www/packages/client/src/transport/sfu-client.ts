@@ -1,23 +1,23 @@
-// SFU Consumer Client — mediasoup-client 内核（P1/D270-R2 换心）
+// SFU Consumer Client — mediasoup-client core (P1/D270-R2 core swap)
 // Flow: get_router_rtp_capabilities → Device.load → create_web_rtc_transport(recv)
 //       → device.createRecvTransport(opts) → 'connect'→connect_web_rtc_transport(dtls)
 //       → new_producer → consume(rtp_capabilities=device.rtpCapabilities) → consumed
 //       → transport.consume → track。
-// 韧性层（W1-W5/F2/H1/H3/V2）与旧实现逐段同构——SDP/ORTC 手拼逻辑（拼 offer/硬编码 PT/
-// videoRtpCapabilities，PIT-173/PIT-55/PIT-56 债群）由 mediasoup-client 官方实现接管（C18）。
-// P2P 回退移除：全 SFU 决策（2026-08-25，server 房间统一 DeviceStream、SDP/ICE 中继丢弃）
-// 使旧 P2P 通路本就不通——sdp/ice 广播静默忽略（噪音），协商失败走轮次引擎。
+// The resilience layer (W1-W5/F2/H1/H3/V2) stays structurally isomorphic to the old implementation — hand-rolled SDP/ORTC logic (hand-built offers / hardcoded PT /
+// videoRtpCapabilities, the PIT-173/PIT-55/PIT-56 debt cluster) is now handled by the official mediasoup-client implementation (C18).
+// P2P fallback removed: the all-SFU decision (2026-08-25 — server rooms are uniformly DeviceStream, SDP/ICE relay dropped)
+// means the old P2P path never worked anyway — sdp/ice broadcasts are silently ignored (noise); negotiation failures go through the round engine.
 
 import { Device } from 'mediasoup-client';
 import type { Consumer, Transport as MsTransport } from 'mediasoup-client/types';
 import type { DtlsParameters as MsDtlsParameters, RtpParameters } from 'mediasoup-client/types';
 
-// ── server wire（snake_case SignalingMessage）↔ mediasoup-client（camel）映射纯函数 ──
-// 单点收敛（design §3）：vitest 直接回放 P1.1 新消息 wire 形。
+// ── server wire (snake_case SignalingMessage) ↔ mediasoup-client (camel) mapping pure functions ──
+// Single convergence point (design §3): vitest replays the P1.1 message wire shapes directly.
 
 interface WireIceParams { username_fragment: string; password: string }
 interface WireDtlsParams { fingerprints: { algorithm: string; value: string }[]; role: string }
-// 服务端 IceCandidate 结构体 rename_all=camelCase（candidateType）；兼容手写 candidate_type。
+// The server IceCandidate struct uses rename_all=camelCase (candidateType); handwritten candidate_type kept for compatibility.
 interface WireIceCandidate {
   ip: string; port: number; protocol: string; foundation: string; priority: number;
   candidateType?: string; candidate_type?: string;
@@ -30,9 +30,9 @@ interface TransportCreated {
 }
 
 export function mapIceParameters(p: WireIceParams): { usernameFragment: string; password: string; iceLite: true } {
-  // iceLite 恒真 = mediasoup server 传输的设计不变量（worker 侧 ICE-Lite）；server wire 的
-  // IceParameters 不带该旗，handler 据 iceParameters.iceLite 在 remote SDP 输出 a=ice-lite——
-  // 缺失则浏览器按 full-ICE 对待对端，STUN 检查方向/时机错位（A/B 抓包定位：req 95/resp 0）。
+  // iceLite always true = a design invariant of mediasoup server transports (worker-side ICE-Lite); the server wire's
+  // IceParameters does not carry the flag; the handler emits a=ice-lite in the remote SDP based on iceParameters.iceLite —
+  // if missing, the browser treats the peer as full-ICE and STUN checks get misdirected/mistimed (located via A/B packet capture: req 95/resp 0).
   return { usernameFragment: p.username_fragment, password: p.password, iceLite: true };
 }
 
@@ -57,18 +57,18 @@ export function mapIceCandidates(list: WireIceCandidate[]): Array<Record<string,
 type StreamCallback = (stream: MediaStream) => void;
 type StatusCallback = (status: 'connecting' | 'connected' | 'playing' | 'stalled' | 'disconnected' | 'error') => void;
 type MetricsCallback = (metrics: StreamMetrics) => void;
-/// F2: 连续零增长 tick 数（2s/tick）判「源离线」——≈6s，保守于 fps 最慢流且不早于任何信令自愈。
+/// F2: consecutive zero-growth ticks (2s/tick) before declaring 'source offline' — ~6s, conservative for the slowest-fps stream and never earlier than any signaling self-heal.
 const STALL_TICKS = 3;
-/// W2: 首帧轮次 watchdog——30s 无首帧计一轮失败，restartStream 最多 3 轮，耗尽→「源离线」等待。
+/// W2: first-frame round watchdog — 30s without a first frame counts as a failed round; restartStream gets at most 3 rounds, then 'source offline' waiting.
 const PLAY_WATCHDOG_MS = 30000;
 const PLAY_ROUNDS_MAX = 3;
-/// PIT-76 观测：logT 默认静默（T1.2 调试输出清账），localStorage 开关 `mediaservo_sfu_debug=1` 还原。
+/// PIT-76 observability: logT is silent by default (T1.2 debug-output cleanup); re-enable with the localStorage switch `mediaservo_sfu_debug=1`.
 const SFU_DEBUG = typeof localStorage !== 'undefined' && localStorage.getItem('mediaservo_sfu_debug') === '1';
 
-/// W4: 错误码分流——auth/授权族=终态（红牌唯一合法源）；4031（权限可热改，C33）、
-/// 5000（SFU 内部失败，server 重启窗口典型码）、5001（网关上游切换，host 侧发射经转发）=可重试。
-/// P1/T1.2 有意变更（design §1）：4012（控制 DC 拒权，F8 role 门显式拒）入 terminal 族。
-/// accountless-client-auth T0：4013（JWT 呈现而验签失败=auth 族终态，红牌提示重登录）。
+/// W4: error-code routing — auth/authorization family = terminal (the only legal source of the red banner); 4031 (permissions hot-editable, C33),
+/// 5000 (SFU internal failure, typical during server restarts) and 5001 (gateway upstream switch, host-emitted via forwarding) = retryable.
+/// P1/T1.2 intentional change (design §1): 4012 (control DC denial, F8 role-gate explicit rejection) joins the terminal family.
+/// accountless-client-auth T0: 4013 (JWT presented but signature failed = auth-family terminal; red banner prompts re-login).
 export function classifySfuError(code: number): 'terminal' | 'retry' {
   switch (code) {
     case 4000: case 4001: case 4002: case 4003: case 4010: case 4011: case 4012: case 4013: case 4101:
@@ -77,7 +77,7 @@ export function classifySfuError(code: number): 'terminal' | 'retry' {
       return 'retry';
   }
 }
-/// W1: 指数退避序列 1s→封顶（默认 30s）纯函数；jitter 由调用方外置（可断言）。
+/// W1: exponential backoff sequence 1s→cap (default 30s) pure function; jitter is applied by the caller (assertable).
 export function nextBackoff(attempt: number, cap = 30000): number {
   const base = Math.max(1, Math.floor(attempt));
   return Math.min(1000 * 2 ** (base - 1), cap);
@@ -90,42 +90,42 @@ export interface StreamMetrics {
   bitrate: number;      // kbps
   jitter: number;       // ms
   resolution: string;
-  // v2 (web-stream-stats T4): 编解码诊断 — 浏览器侧 + Host EncoderStatus 上报合并
-  decoderImplementation?: string;   // 浏览器解码器（inbound-rtp, 真实 Chrome 有; headless 缺失）
-  decoderCodec?: string;            // 降级: getStats codec 报告 mimeType（浏览器实际解码格式）
-  codec?: string;                   // 编码模式（Host EncoderStatus, e.g. video/H264）
-  encoderBackend?: string;          // Host backend 请求值（auto/software/hardware...）
-  encoderImplementation?: string;   // Host 实际编码器（get_stats, e.g. OpenH264/libvpx）
+  // v2 (web-stream-stats T4): codec diagnostics — merged from browser side + Host EncoderStatus reports
+  decoderImplementation?: string;   // browser decoder (inbound-rtp; real Chrome has it, headless lacks it)
+  decoderCodec?: string;            // fallback: getStats codec report mimeType (the format the browser actually decodes)
+  codec?: string;                   // encode format (Host EncoderStatus, e.g. video/H264)
+  encoderBackend?: string;          // Host backend requested value (auto/software/hardware...)
+  encoderImplementation?: string;   // Host encoder actually in use (get_stats, e.g. OpenH264/libvpx)
   hostFps?: number;                 // Host outbound fps
-  hostResolution?: string;          // Host 编码分辨率
-  avgEncodeMs?: number;             // v3 (encode-time-stats T4): Host 平均每帧编码耗时（ms/帧）
+  hostResolution?: string;          // Host encode resolution
+  avgEncodeMs?: number;             // v3 (encode-time-stats T4): Host average encode time per frame (ms/frame)
 }
 
 export class SfuConsumerClient {
   private ws: WebSocket | null = null;
-  private closed = false;  // PIT-50: close() 后禁止重连（StrictMode 双挂载竞争）
-  // P1 换心：媒体面归 mediasoup-client（Transport 自带 getStats/connectionstatechange）。
+  private closed = false;  // PIT-50: no reconnect after close() (StrictMode double-mount race)
+  // P1 core swap: the media plane belongs to mediasoup-client (Transport provides getStats/connectionstatechange).
   private device: Device | null = null;
   private transport: MsTransport | null = null;
   private consumer: Consumer | null = null;
-  // v2 (web-stream-stats 修复): 双数据源合并累加器 — getStats 与 encoder_status 交替
-  // 覆盖导致面板闪烁（一会数值一会 "-"）; 统一合并后回调
+  // v2 (web-stream-stats fix): dual-source merged accumulator — getStats and encoder_status alternated
+  // overwrote each other and made the panel flicker (values one second, "-" the next); merged uniformly before the callback
   private mergedMetrics: StreamMetrics | null = null;
-  // 码率增量计算: 累计 bytesReceived 当瞬时值是单位错误根因
+  // bitrate delta computation: treating cumulative bytesReceived as an instantaneous value was the unit-error root cause
   private lastBytes = 0;
-  private mutedTicks = 0; // H1: muted 连续 tick 计数（2s tick）
-  // F2: 媒体新鲜度 watchdog（主流双保险第二柱——信令全丢也不假 LIVE）
+  private mutedTicks = 0; // H1: consecutive muted tick counter (2s tick)
+  // F2: media freshness watchdog (second pillar of the double guarantee — no fake LIVE even if signaling is fully lost)
   private playingSeen = false;
-  /** S0: 与 server 协商谈成的方言版本（room_joined.protocol；缺省 = 1 旧 server）。 */
+  /** S0: dialect version negotiated with the server (room_joined.protocol; default = 1 for old servers). */
   private negotiatedProtocol = 1;
 
-  /** S0 协商结果的公开读面（控制 DC 能力位/S0.5 resume 门消费）。 */
+  /** Public read surface of the S0 negotiation result (consumed by control-DC capability bits / the S0.5 resume gate). */
   get negotiated(): number {
     return this.negotiatedProtocol;
   }
   private stallTicks = 0;
   private stalled = false;
-  // W1/W2: 韧性状态机字段
+  // W1/W2: resilience state-machine fields
   private playTimer: ReturnType<typeof setTimeout> | null = null;
   private playRounds = 0;
   private waitingForProducer = false;
@@ -135,19 +135,19 @@ export class SfuConsumerClient {
   private onStatus: StatusCallback;
   private onMetrics: MetricsCallback;
   private transportId: string | null = null;
-  /** SFU 模式标志: startPlay 发出 create_web_rtc_transport 即置位——
-      房间内历史 P2P 协商广播（sdp/rtc_ice_candidate）一律静默忽略。 */
+  /** SFU mode flag: set as soon as startPlay sends create_web_rtc_transport —
+      legacy P2P negotiation broadcasts in the room (sdp/rtc_ice_candidate) are always silently ignored. */
   private sfuMode = false;
-  // PIT-65: 每连接唯一 SFU peer_id — 多网页同 peer_id 导致 SfuManager recv_transport 互相覆盖
+  // PIT-65: unique SFU peer_id per connection — multiple pages sharing a peer_id make SfuManager recv_transports overwrite each other
   private sfuPeerId: string;
   private transportResolver: ((params: TransportCreated) => void) | null = null;
-  // P1 换心 RPC 单发旁路（handleMessage 优先消费；一次一个在途请求——协商本就串行）：
+  // P1 core-swap RPC single-shot side channel (consumed first by handleMessage; one in-flight request at a time — negotiation is inherently serial):
   private capsResolver: ((caps: unknown) => void) | null = null;
   private consumeResolver: ((msg: { consumer_id: string; producer_id: string; kind: string; rtp_parameters: unknown }) => void) | null = null;
-  /** H1: producer_closed 自愈重入守卫（广播风暴/连续消息只 restart 一次）。 */
+  /** H1: producer_closed self-heal re-entry guard (broadcast storms/consecutive messages restart only once). */
   private restarting = false;
   private metricsTimer: ReturnType<typeof setInterval> | null = null;
-  // PIT-76: 首帧/渲染时间戳观测 — 从 startPlay 起计时（SFU_DEBUG 开关，默认静默）
+  // PIT-76: first-frame/render timestamp observability — timed from startPlay (SFU_DEBUG switch, silent by default)
   private t0 = 0;
   private logT(msg: string): void {
     if (!SFU_DEBUG) return;
@@ -155,8 +155,8 @@ export class SfuConsumerClient {
     console.info(`[T+${Math.round(t - this.t0)}ms] ${msg}`);
   }
 
-  /** producer-label（§12-1 设备房+流标签）：只消费 label===expectedLabel 的 producer。
-   *  未设 = 旧行为（派生房形态：房内所有 producer 全消费），全兼容。 */
+  /** producer-label (§12-1 device room + stream label): only consume producers with label===expectedLabel.
+   *  Unset = legacy behavior (derived-room mode: consume every producer in the room), fully compatible. */
   private expectedLabel: string | undefined;
   private pendingProducer: { producer_id: string; kind: string } | null = null;
 
@@ -175,15 +175,15 @@ export class SfuConsumerClient {
     this.onStatus = callbacks.onStatus;
     this.onMetrics = callbacks.onMetrics;
     this.expectedLabel = options?.expectedLabel;
-    // PIT-65: 每连接唯一 SFU peer_id (多网页同 peer_id → SfuManager transport 覆盖)
+    // PIT-65: unique SFU peer_id per connection (pages sharing a peer_id → SfuManager transports overwrite each other)
     this.sfuPeerId = `${this.roomId}-consumer-${Math.random().toString(36).slice(2, 8)}`;
   }
 
   async connect(): Promise<void> {
-    this.closed = false;  // PIT-50: 每次 connect 重置关闭标志
+    this.closed = false;  // PIT-50: reset the closed flag on every connect
     this.onStatus('connecting');
 
-    // W1: 建连前摘除旧 socket 与其 onclose 重连语义——防重连成功后旧 socket 又触发 reconnect 振荡。
+    // W1: detach the old socket and its onclose-reconnect semantics before connecting — prevents the old socket from re-triggering reconnect oscillation after a successful reconnect.
     if (this.ws) {
       try {
         this.ws.onclose = null;
@@ -198,11 +198,11 @@ export class SfuConsumerClient {
     const host = this.serverUrl.replace(/^wss?:\/\//, '');
     const wsUrl = `${protocol}//${host}/ws`;
 
-    // Auth: JWT 经 sec-websocket-protocol 子协议（RFC 6455 token 禁止空格——不能带 "Bearer " 前缀）
-    // PIT-49: 浏览器子协议 = 纯 JWT；server 解析时兼容 "Bearer " 前缀
-    // fail-closed（accountless-client-auth T4；PIT-171 族硬编码清理）：无 token=不建连，
-    // 原 'mediaservo-dev' 共享 PSK 兜底退役——浏览器面认证 = 登录凭证唯一，server 端
-    // T0 语义（PSK 只留给真持 key 的 host/link 客户端）对齐。
+    // Auth: JWT via the sec-websocket-protocol subprotocol (RFC 6455 tokens cannot contain spaces — no "Bearer " prefix allowed)
+    // PIT-49: browser subprotocol = raw JWT; the server parser accepts a "Bearer " prefix for compatibility
+    // fail-closed (accountless-client-auth T4; PIT-171-family hardcoded-value cleanup): no token = no connection;
+    // the old 'mediaservo-dev' shared-PSK fallback is retired — browser-side auth = login credentials are the only path; the server's
+    // T0 semantics (PSK reserved for host/link clients that truly hold a key) are aligned.
     if (!this.token) {
       throw new Error('sfu-terminal:no-token');
     }
@@ -210,7 +210,7 @@ export class SfuConsumerClient {
 
     const authPromise = new Promise<void>((resolve, reject) => {
       this.ws!.onopen = () => {
-        // JWT 走 sec-websocket-protocol 子协议，无 PSK 帧可发
+        // JWT goes via the sec-websocket-protocol subprotocol; no PSK frame to send
       };
       this.ws!.onmessage = (event) => {
         try {
@@ -219,7 +219,7 @@ export class SfuConsumerClient {
             this.onStatus('connected');
             resolve();
           } else if (typeof msg.code === 'number' && msg.code !== 0) {
-            // W4: 握手期错误——auth/授权族=终态（重试无义）；5000/5001 族=继续等 ack（Auth timeout 10s 兜底重连）
+            // W4: handshake-phase errors — auth/authorization family = terminal (retrying is pointless); 5000/5001 family = keep waiting for ack (Auth timeout 10s backstops the reconnect)
             if (classifySfuError(msg.code) === 'terminal') {
               reject(new Error(`sfu-terminal:${msg.code}`));
             }
@@ -244,12 +244,12 @@ export class SfuConsumerClient {
       type: 'room_join',
       room_id: this.roomId,
       peer_role: 'consumer',
-      protocol: 3, // S0.5: 声明本端方言上限（v3 = resume 域；server 取 min 谈成）
+      protocol: 3, // S0.5: declare this endpoint's dialect ceiling (v3 = resume domain; server negotiates the min)
     }));
 
     // Reconnect on WS close
     this.ws.onclose = () => {
-      if (this.closed) return;  // PIT-50: close() 后不重连
+      if (this.closed) return;  // PIT-50: no reconnect after close()
       this.onStatus('disconnected');
       this.stopMetrics();
       this.reconnect();
@@ -257,14 +257,14 @@ export class SfuConsumerClient {
   }
 
   async startPlay(): Promise<void> {
-    this.sfuMode = true; // 进入 SFU 流程: 之后到达的 sdp/ice 广播一律忽略
+    this.sfuMode = true; // entering the SFU flow: all later-arriving sdp/ice broadcasts are ignored
     if (!this.ws) throw new Error('Not connected');
 
     this.t0 = performance.now();
     this.logT('startPlay: Device.load(routerRtpCapabilities)');
 
-    // 换心第一步：P1.1 server 面拉 router caps → Device.load（官方协商序 C18；
-    // 旧 videoRtpCapabilities 硬编码 PT 面自此消亡）。失败与协商失败同路径→轮次引擎。
+    // Core-swap step one: pull router caps from the P1.1 server surface → Device.load (official negotiation order, C18;
+    // the old hardcoded-PT videoRtpCapabilities surface dies here). Failures share the negotiation-failure path → round engine.
     this.device = new Device();
     try {
       const caps = await this.rpcRouterRtpCapabilities();
@@ -273,42 +273,42 @@ export class SfuConsumerClient {
       this.device = null;
       const m = String((err as Error)?.message ?? err);
       if (m.startsWith('sfu-terminal:')) { this.device = null; throw err; }
-      this.logT(`Device.load 失败 → 轮次推进: ${m}`);
+      this.logT(`Device.load failed → advance round: ${m}`);
       void this.playDeadlineHit();
       return;
     }
 
-    // recv transport：server create → 选项映射 → device.createRecvTransport。
-    // resolver 先挂后发（旧竞态教训）；3s 无响应=轮次失败（P2P 回退已随全 SFU 现实移除）。
+    // recv transport: server create → option mapping → device.createRecvTransport.
+    // resolver armed before sending (lesson from an old race); no response in 3s = round failure (the P2P fallback was removed with the all-SFU reality).
     const sfuPromise = new Promise<TransportCreated | null>((r) => { this.transportResolver = r; });
-    this.logT('发送 create_web_rtc_transport');
+    this.logT('sending create_web_rtc_transport');
     this.ws.send(JSON.stringify({ type: 'create_web_rtc_transport', room_id: this.roomId, peer_id: this.sfuPeerId, direction: 'recv' }));
-    this.armPlayWatchdog(); // W2: 首帧轮次截止
+    this.armPlayWatchdog(); // W2: first-frame round deadline
     const sfuResult = await Promise.race([
       sfuPromise,
       new Promise<null>((r) => setTimeout(() => r(null), 3000)),
     ]);
     if (!sfuResult) {
       this.transportResolver = null;
-      this.logT('SFU create 无响应 → 轮次推进');
+      this.logT('SFU create got no response → advance round');
       void this.playDeadlineHit();
       return;
     }
 
-    this.logT('收到 web_rtc_transport_created, id: ' + sfuResult.transport_id);
+    this.logT('received web_rtc_transport_created, id: ' + sfuResult.transport_id);
     this.transportId = sfuResult.transport_id;
     const transport = this.device.createRecvTransport({
       id: sfuResult.transport_id,
       iceParameters: mapIceParameters(sfuResult.ice_parameters),
       iceCandidates: mapIceCandidates(sfuResult.ice_candidates ?? []) as never,
       dtlsParameters: mapDtlsParameters(sfuResult.dtls_parameters),
-      // sctpParameters 省略——P1 无浏览器 SFU-DC（控制面随 P2 host-controller 迁移接入）。
+      // sctpParameters omitted — P1 has no browser SFU-DC (the control plane joins with the P2 host-controller migration).
     });
     this.transport = transport;
-    // PIT-64 观测面（headless 调试）：debug 开关下暴露 transport。
+    // PIT-64 observability surface (headless debugging): expose the transport under the debug switch.
     if (SFU_DEBUG) ((window as unknown as { __sfuTransports?: MsTransport[] }).__sfuTransports ??= []).push(transport);
 
-    // 'connect' 事件 = mediasoup-client 生成本地 DTLS 指纹（旧手拼 answer 提取指纹的 PIT-56 债群消亡）。
+    // The 'connect' event = mediasoup-client generates the local DTLS fingerprint (the old hand-spliced-answer fingerprint-extraction PIT-56 debt dies).
     transport.on('connect', ({ dtlsParameters }, ok, fail) => {
       this.logT('transport connect → connect_web_rtc_transport');
       const ws = this.ws;
@@ -325,8 +325,8 @@ export class SfuConsumerClient {
       }));
       ok();
     });
-    // ICE/DTLS 汇聚状态（旧 pc.oniceconnectionstatechange 语义等价迁移）
-    let iceEver = false; // 曾连通标记——区分"初次建联失败"与"已连通后断开"语义
+    // ICE/DTLS aggregate state (semantics-equivalent migration from the old pc.oniceconnectionstatechange)
+    let iceEver = false; // ever-connected marker — distinguishes "initial connect failed" from "dropped after connecting"
     transport.on('connectionstatechange', (state) => {
       this.logT(`connectionstatechange = ${state}`);
       if (state === 'connected') iceEver = true;
@@ -334,13 +334,13 @@ export class SfuConsumerClient {
         this.onStatus(iceEver ? 'disconnected' : 'error');
         this.stopMetrics();
       } else if (state === 'disconnected' && iceEver) {
-        // 建联完成前的瞬态忽略——30s 建联 watchdog 兜底
+        // ignore transients before the connection completes — the 30s connect watchdog backstops
         this.onStatus('disconnected');
         this.stopMetrics();
       }
     });
 
-    // transport 就绪：排队 producer（transport 前到达）即刻消费；后续 new_producer 走 handleMessage。
+    // transport ready: queued producers (arrived before the transport) are consumed immediately; later new_producer goes through handleMessage.
     if (this.pendingProducer) {
       const p = this.pendingProducer;
       this.pendingProducer = null;
@@ -348,7 +348,7 @@ export class SfuConsumerClient {
     }
   }
 
-  /** get_router_rtp_capabilities → router_rtp_capabilities 单发旁路（handleMessage 路由）。 */
+  /** get_router_rtp_capabilities → router_rtp_capabilities single-shot side channel (routed by handleMessage). */
   private rpcRouterRtpCapabilities(): Promise<unknown> {
     const ws = this.ws;
     if (!ws) return Promise.reject(new Error('Not connected'));
@@ -359,15 +359,15 @@ export class SfuConsumerClient {
     });
   }
 
-  /** consume 请求+consumed 响应（server Consumer 落参）→ 本地 transport.consume 落轨
-   *  （协商完成点 = 旧 ontrack 语义锚）。rtp_capabilities 用 Device 协商结果——
-   *  旧 PIT-55 完整 codec 字段手拼债随换心消亡。 */
+  /** consume request + consumed response (server Consumer parameters land) → local transport.consume attaches the track
+   *  (the negotiation completion point = the old ontrack semantic anchor). rtp_capabilities uses the Device negotiation result —
+   *  the old PIT-55 hand-spliced full-codec-field debt dies with the core swap. */
   private async consumeProducer(producerId: string, kind: string): Promise<void> {
     const transport = this.transport;
     const device = this.device;
     const ws = this.ws;
     if (!transport || !device || !ws) return;
-    this.logT(`发送 consume（producer=${producerId}）`);
+    this.logT(`sending consume (producer=${producerId})`);
     const result = await new Promise<{ consumer_id: string; producer_id: string; kind: string; rtp_parameters: unknown } | 'timeout'>((resolve) => {
       const timer = setTimeout(() => { this.consumeResolver = null; resolve('timeout'); }, 8000);
       this.consumeResolver = (msg) => { clearTimeout(timer); this.consumeResolver = null; resolve(msg); };
@@ -382,7 +382,7 @@ export class SfuConsumerClient {
       }));
     });
     if (result === 'timeout') {
-      this.logT('consume 超时 → 轮次推进');
+      this.logT('consume timeout → advance round');
       if (!this.playingSeen && !this.restarting && !this.waitingForProducer) void this.playDeadlineHit();
       return;
     }
@@ -409,7 +409,7 @@ export class SfuConsumerClient {
     }
   }
 
-  /** v2: 合并式 metrics 上报 — 部分字段只覆盖, 不重置其他字段（闪烁修复） */
+  /** v2: merged metrics reporting — partial fields overwrite only their own keys, never reset the others (flicker fix) */
   private emitMetrics(partial: Partial<StreamMetrics>): void {
     this.mergedMetrics = { ...(this.mergedMetrics ?? { rtt: 0, packetLoss: 0, fps: 0, bitrate: 0, jitter: 0, resolution: '' }), ...partial };
     this.onMetrics(this.mergedMetrics);
@@ -419,10 +419,10 @@ export class SfuConsumerClient {
     try {
       const msg = JSON.parse(data);
 
-      // S0: 协商结果落存（缺 protocol = v1）——控制 DC/(未来)resume 门控读点。
+      // S0: store the negotiation result (missing protocol = v1) — read point for control-DC / (future) resume gating.
       if (msg.type === 'room_joined' && typeof msg.protocol === 'number') this.negotiatedProtocol = msg.protocol;
 
-      // RPC 单发旁路优先（caps/consumed）——消费后即摘。
+      // RPC single-shot side channel takes priority (caps/consumed) — removed immediately after consumption.
       if (msg.type === 'router_rtp_capabilities' && this.capsResolver) { this.capsResolver(msg.capabilities); return; }
       if (msg.type === 'consumed' && this.consumeResolver) { this.consumeResolver(msg); return; }
 
@@ -435,17 +435,17 @@ export class SfuConsumerClient {
         });
         this.transportResolver = null;
       } else if (msg.type === 'new_producer') {
-        // producer-label 过滤（§12-1）：expectedLabel 设定时，非目标流一律忽略
-        // （设备房形态下同房多流广播——每路 VideoPlayer 只吃自己的 label）。
+        // producer-label filter (§12-1): when expectedLabel is set, non-target streams are always ignored
+        // (in device-room mode, multiple streams broadcast in one room — each VideoPlayer consumes only its own label).
         if (this.expectedLabel !== undefined && msg.label !== this.expectedLabel) {
-          this.logT(`new_producer label=${msg.label} ≠ expected=${this.expectedLabel} — 忽略`);
+          this.logT(`new_producer label=${msg.label} ≠ expected=${this.expectedLabel} — ignored`);
           return;
         }
-        // W2: 「源离线等待」态收到 producer 信号 → 唤醒重开轮次预算（全量重走协商，含 late-join）。
+        // W2: producer signal while in the 'source offline waiting' state → wake up and reopen the round budget (full re-negotiation, including late-join).
         if (this.waitingForProducer) {
           this.waitingForProducer = false;
           this.playRounds = 0;
-          this.logT('new_producer → 唤醒源离线等待');
+          this.logT('new_producer → waking source-offline wait');
           void this.restartStream();
           return;
         }
@@ -456,16 +456,16 @@ export class SfuConsumerClient {
           this.pendingProducer = { producer_id: msg.producer_id, kind: msg.kind };
         }
       } else if (msg.type === 'producer_closed') {
-        // S4′: data producer（遥控 DC 域）死亡与视频流无关——不触发媒体面 restart，
-        // 否则每次舱端/车端 DC 翻转全 dashboard 假重启。
+        // S4′: data-producer (remote-control DC domain) death is unrelated to the video stream — do not trigger a media-plane restart,
+        // otherwise every cockpit/vehicle DC flip fake-restarts the whole dashboard.
         if (msg.kind === 'data') {
-          this.logT('producer_closed(data) — 媒体面无涉，忽略');
+          this.logT('producer_closed(data) — unrelated to the media plane, ignored');
         } else if ((this.sfuMode || this.waitingForProducer) && !this.closed && !this.restarting) {
-          this.logT('producer_closed → 自动重订阅（免刷新自愈）');
+          this.logT('producer_closed → auto resubscribe (refresh-free self-heal)');
           void this.restartStream();
         }
       } else if (msg.type === 'encoder_status') {
-        // v2 (web-stream-stats T4): Host 编码状态（room 广播）→ 合并进 metrics（不覆盖浏览器字段）
+        // v2 (web-stream-stats T4): Host encoder status (room broadcast) → merged into metrics (browser fields untouched)
         this.emitMetrics({
           codec: msg.codec,
           encoderBackend: msg.encoder_backend,
@@ -475,38 +475,38 @@ export class SfuConsumerClient {
           avgEncodeMs: msg.avg_encode_ms ?? undefined,
         });
       } else if (msg.type === 'error' && msg.code === 0) {
-        // transport_connected / RPC ack——协商节拍由 consumed/track 驱动，此处仅观测。
+        // transport_connected / RPC ack — negotiation cadence is driven by consumed/track; observation only here.
         this.logT('ack code:0 ' + msg.message);
       } else if (msg.type === 'error') {
-        // W4 (C16 客户端合规): server 失败不得静默——分类驱动状态机。
+        // W4 (C16 client compliance): server failures must not be silent — classification drives the state machine.
         const code = Number(msg.code) || 0;
         console.warn('SfuClient: error', code, msg.message);
         if (classifySfuError(code) === 'terminal') {
           this.clearPlayWatchdog();
           this.onStatus('error');
         } else if (!this.playingSeen && !this.waitingForProducer && !this.restarting) {
-          this.logT(`可重试错误 ${code} → 轮次推进`);
+          this.logT(`retryable error ${code} → advance round`);
           void this.playDeadlineHit();
         }
       } else if (msg.type === 'sdp' || msg.type === 'rtc_ice_candidate' || msg.type === 'r_t_c_ice_candidate') {
-        // 全 SFU 决策（2026-08-25）后 server 丢弃 P2P 中继——房间内历史协商广播静默忽略（噪音）。
+        // After the all-SFU decision (2026-08-25) the server drops P2P relay — legacy negotiation broadcasts in the room are silently ignored (noise).
       }
     } catch (err) {
       console.warn('SfuClient: message handling failed', err);
     }
   }
 
-  // startMetrics polls Transport.getStats()（= underlying RTCPeerConnection 原始报告）every 2s
+  // startMetrics polls Transport.getStats() (= the underlying RTCPeerConnection raw report) every 2s
   private startMetrics(): void {
     this.stopMetrics();
     this.metricsTimer = setInterval(async () => {
       const transport = this.transport;
       if (!transport) return;
-      // H1 兜底观测: producer 中途死且 ProducerClosed 不可达（H3 worker 通知静默）→ muted 持续 10s 告警
+      // H1 backstop observability: producer dies mid-stream and ProducerClosed never arrives (H3 worker-notification silence) → warn after 10s of muted
       const track = this.consumer?.track;
       if (track?.muted) {
         this.mutedTicks++;
-        if (this.mutedTicks === 5) console.warn('SfuClient: video track muted ≥10s — producer 可能已死且无 ProducerClosed 通知');
+        if (this.mutedTicks === 5) console.warn('SfuClient: video track muted ≥10s — producer may have died with no ProducerClosed notification');
       } else {
         this.mutedTicks = 0;
       }
@@ -514,31 +514,31 @@ export class SfuConsumerClient {
         const stats = await transport.getStats();
         let rtt = 0, packetsLost = 0, packetsReceived = 0, fps = 0, bitrate = 0, jitter = 0;
         let width = 0, height = 0, decoderImpl: string | undefined, decoderCodec: string | undefined;
-        let growing = false; // F2: 本 tick 字节增量即媒体新鲜信号
+        let growing = false; // F2: any byte growth this tick is a media-freshness signal
         const pendingInbound: (RTCInboundRtpStreamStats & { decoderImplementation?: string })[] = [];
 
         stats.forEach((report) => {
           if (report.type === 'candidate-pair' && report.state === 'succeeded') {
             rtt = Math.round((report as unknown as { currentRoundTripTime?: number }).currentRoundTripTime ?? 0 * 1000) || 0;
           }
-          // v2 (解码器修复): headless shell inbound-rtp 无 decoderImplementation 字段 →
-          // 降级用 codec 报告 mimeType（浏览器实际解码格式）
+          // v2 (decoder fix): headless shell inbound-rtp lacks the decoderImplementation field →
+          // fall back to the codec report mimeType (the format the browser actually decodes)
           if (report.type === 'codec') {
             const mime = (report as unknown as { mimeType?: string }).mimeType;
             if (mime?.startsWith('video/')) decoderCodec = mime;
           }
           if (report.type === 'inbound-rtp' && report.kind === 'video') {
-            // PIT-212 续：双行并存（冻结旧行+活行）——静态锁首见 id 会锁死到冻结行。
-            // 动态选行：只处理 timestamp 比已见同 id 行新的，且跨行取 timestamp 全场最新。
-            // 简化为两遍：先收集，后选 timestamp 最大的行。
+            // PIT-212 continued: two rows coexist (frozen old row + live row) — statically locking the first-seen id would lock onto the frozen row.
+            // Dynamic row selection: only process rows whose timestamp is newer than the seen row with the same id, and across rows take the globally latest timestamp.
+            // Simplified to two passes: collect first, then pick the row with the max timestamp.
             pendingInbound.push(report as RTCInboundRtpStreamStats & { decoderImplementation?: string });
             return;
           }
         });
 
-        // 选行（PIT-212 终形）：实测同 pc 多行中真视频行的 ssrc/id **每次采样都变**
-        // （mediasoup 动态 demux），id/ssrc/timestamp 判据全部失效。活性判据：
-        // framesDecoded>0 优先（只有真解码行>0）；同活性取 bytes 最大（累计单调）。
+        // Row selection (PIT-212 final form): measured — among multiple rows on one pc, the real video row's ssrc/id **changes on every sample**
+        // (mediasoup dynamic demux), so id/ssrc/timestamp criteria all fail. Liveness criteria:
+        // framesDecoded>0 first (only the truly-decoding row is >0); on equal liveness take the largest bytes (cumulative monotonic).
         let r: (RTCInboundRtpStreamStats & { decoderImplementation?: string }) | null = null;
         for (const cand of pendingInbound) {
           if (!r) { r = cand; continue; }
@@ -551,7 +551,7 @@ export class SfuConsumerClient {
           packetsLost = r.packetsLost || 0;
           packetsReceived = r.packetsReceived || 0;
           fps = r.framesPerSecond || 0;
-          // v2 (单位修复): 码率 = 字节增量/时间窗
+          // v2 (unit fix): bitrate = byte delta / time window
           const bytes = r.bytesReceived || 0;
           const now = performance.now();
           if (this.lastTs > 0 && bytes >= this.lastBytes) {
@@ -577,16 +577,16 @@ export class SfuConsumerClient {
           decoderImplementation: decoderImpl,
           decoderCodec,
         });
-        // F2: 新鲜度判定——连续 STALL_TICKS 次零增长 → 'stalled'（源离线）；恢复增长 → 'playing'。
+        // F2: freshness verdict — STALL_TICKS consecutive zero-growth ticks → 'stalled' (source offline); growth resumes → 'playing'.
         if (this.playingSeen) {
           if (growing) {
             this.stallTicks = 0;
-            if (this.stalled) { this.stalled = false; this.logT('媒体恢复增长 → playing'); this.onStatus('playing'); }
+            if (this.stalled) { this.stalled = false; this.logT('media growth resumed → playing'); this.onStatus('playing'); }
           } else {
             this.stallTicks++;
             if (!this.stalled && this.stallTicks >= STALL_TICKS) {
               this.stalled = true;
-              this.logT(`媒体 ${STALL_TICKS * 2}s 零增长 → 源离线(stalled)`);
+              this.logT(`media ${STALL_TICKS * 2}s zero growth → source offline (stalled)`);
               this.onStatus('stalled');
             }
           }
@@ -598,7 +598,7 @@ export class SfuConsumerClient {
     }, 2000);
   }
 
-  /** W2: 首帧 watchdog 装填/清除 + 轮次推进（超时/可重试错误共用入口）。 */
+  /** W2: first-frame watchdog arm/clear + round advance (shared entry for timeouts/retryable errors). */
   private armPlayWatchdog(): void {
     this.clearPlayWatchdog();
     this.playTimer = setTimeout(() => { void this.playDeadlineHit(); }, PLAY_WATCHDOG_MS);
@@ -606,19 +606,19 @@ export class SfuConsumerClient {
   private clearPlayWatchdog(): void {
     if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; }
   }
-  /** W2: 轮次耗尽→「源离线(等待流)」：补发一次 room_join 拿 late-join 回放
-   *  （堵住"producer 恰在轮次窗口内上线错过广播"的死锁），后续 new_producer/producer_closed 唤醒。 */
+  /** W2: rounds exhausted → 'source offline (waiting for stream)': re-send one room_join to get the late-join replay
+   *  (plugging the deadlock of "producer came online exactly inside the round window and the broadcast was missed"); later new_producer/producer_closed events wake it. */
   private async playDeadlineHit(): Promise<void> {
     if (this.closed || this.playingSeen || this.restarting || this.waitingForProducer) return;
     this.playRounds++;
     if (this.playRounds >= PLAY_ROUNDS_MAX) {
       this.waitingForProducer = true;
       this.ws?.send(JSON.stringify({ type: 'room_join', room_id: this.roomId, peer_role: 'consumer', protocol: 3 }));
-      this.logT(`连续 ${PLAY_ROUNDS_MAX} 轮无首帧 → 源离线（等待流唤醒）`);
+      this.logT(`${PLAY_ROUNDS_MAX} consecutive rounds without a first frame → source offline (waiting for a stream to wake it)`);
       this.onStatus('stalled');
       return;
     }
-    this.logT(`首帧超时（轮次 ${this.playRounds}/${PLAY_ROUNDS_MAX}）→ restartStream`);
+    this.logT(`first-frame timeout (round ${this.playRounds}/${PLAY_ROUNDS_MAX}) → restartStream`);
     await this.restartStream();
   }
 
@@ -630,16 +630,16 @@ export class SfuConsumerClient {
   }
 
   /**
-   * W1: 无限退避重连——多 host 压测下 server 崩溃-复活（oxmgr 退避可达分钟级）禁止永久红牌。
-   *  出口仅两个：组件卸载（closed）/ auth 终态。*/
+   * W1: unlimited backoff reconnect — under multi-host stress the server crash-revive cycle (oxmgr backoff can reach minutes) must never leave a permanent red banner.
+   *  Only two exits: unmount (closed) / auth terminal.*/
   async reconnect(): Promise<void> {
-    if (this.reconnecting) return; // 多路 onclose/重试并发防双循环
+    if (this.reconnecting) return; // guard against double loops from concurrent onclose/retries
     this.reconnecting = true;
     try {
       let attempt = 0;
       while (!this.closed) {
         attempt++;
-        const delay = nextBackoff(attempt) * (0.75 + Math.random() * 0.5); // jitter：防 server 复活瞬间 8 tile 对齐惊群
+        const delay = nextBackoff(attempt) * (0.75 + Math.random() * 0.5); // jitter: prevents a thundering herd of 8 aligned tiles the instant the server revives
         this.logT(`reconnecting (attempt ${attempt}, ~${Math.round(delay)}ms)...`);
         await new Promise(r => setTimeout(r, delay));
         if (this.closed) return;
@@ -650,12 +650,12 @@ export class SfuConsumerClient {
         } catch (err) {
           const m = String((err as Error)?.message ?? err);
           if (m.startsWith('sfu-terminal:')) {
-            console.error('SfuClient: auth 终态，停止重试:', m);
+            console.error('SfuClient: auth terminal, stopping retries:', m);
             this.onStatus('error');
             return;
           }
           console.warn(`SfuClient: reconnect attempt ${attempt} failed (keep retrying):`, m);
-          // connect 失败时若 play-watchdog 未挂（无首帧在途）→ 重启轮次引擎，防"无限 connecting 无退出"死锁
+          // on connect failure, if the play-watchdog is not armed (no first frame in flight) → restart the round engine, preventing the "infinite connecting, no exit" deadlock
           if (!this.playTimer && !this.restarting) void this.playDeadlineHit();
           continue;
         }
@@ -665,8 +665,8 @@ export class SfuConsumerClient {
     }
   }
 
-  /** W1: 直连重跑——旧 socket 振荡已由 connect() 内「摘 handlers + close」消除；server 宕机时
-   *  connect 毫秒级快拒（onerror→WS error），半死时 Auth timeout 10s，退避循环全吸收。 */
+  /** W1: direct re-run — old-socket oscillation is already eliminated by "detach handlers + close" inside connect(); when the server is down,
+   *  connect fails in milliseconds (onerror→WS error), when half-dead the Auth timeout is 10s; the backoff loop absorbs everything. */
   private async connectAndDrive(): Promise<void> {
     await this.connect();
     if (this.closed) return;
@@ -676,9 +676,9 @@ export class SfuConsumerClient {
   }
 
   /**
-   * H1: producer_closed 自愈 — 拆媒体面（transport/device 全弃重造）后重跑完整 startPlay
-   * （等价页面刷新，但保留用户视角无感）。重发 room_join 触发 server late-join 回放 existing
-   * producers（否则 host 先于本端完成 re-produce 时无 new_producer 广播可收）。
+   * H1: producer_closed self-heal — tear down the media plane (transport/device fully discarded and rebuilt) then re-run the complete startPlay
+   * (equivalent to a page refresh, but invisible to the user). Re-sending room_join triggers the server late-join replay of existing
+   * producers (otherwise, when the host finishes re-producing before us, there is no new_producer broadcast to receive).
    */
   private async restartStream(): Promise<void> {
     this.restarting = true;
@@ -692,27 +692,27 @@ export class SfuConsumerClient {
       this.pendingProducer = null;
       this.capsResolver = null;
       this.consumeResolver = null;
-      // PIT-65: 新 peer_id——旧 SfuPeer 残留随 server 端 producer 死亡已失效。
+      // PIT-65: new peer_id — the old SfuPeer remnant was invalidated when the server-side producer died.
       this.sfuPeerId = `${this.roomId}-consumer-${Math.random().toString(36).slice(2, 8)}`;
       this.onStatus('connecting');
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        await this.connect(); // WS 也断了（罕见）→ 先全量重连
+        await this.connect(); // the WS also dropped (rare) → do a full reconnect first
       }
       this.ws?.send(JSON.stringify({
         type: 'room_join', room_id: this.roomId, peer_role: 'consumer', protocol: 3,
       }));
-      this.playingSeen = false; this.stalled = false; this.stallTicks = 0; // F2: 重置 watchdog 至新首帧
-      this.waitingForProducer = false; // W2: 主动重走即脱离等待态
+      this.playingSeen = false; this.stalled = false; this.stallTicks = 0; // F2: reset the watchdog for the new first frame
+      this.waitingForProducer = false; // W2: proactively re-running exits the waiting state
       await this.startPlay();
     } catch (err) {
       const m = String((err as Error)?.message ?? err);
       if (m.startsWith('sfu-terminal:')) {
-        console.error('SfuClient: restartStream auth 终态:', m);
+        console.error('SfuClient: restartStream auth terminal:', m);
         this.onStatus('error');
       } else {
-        console.warn('SfuClient: restartStream failed（推进轮次）:', m);
+        console.warn('SfuClient: restartStream failed (advancing round):', m);
         this.onStatus('connecting');
-        // W2: 失败也烧轮次——finally 清 restarting 后执行，防事件丢失式死锁
+        // W2: failures also burn a round — executed in finally after restarting is cleared, preventing lost-event deadlocks
         setTimeout(() => { void this.playDeadlineHit(); }, 1000);
       }
     } finally {
@@ -721,8 +721,8 @@ export class SfuConsumerClient {
   }
 
   close(): void {
-    this.closed = true;  // PIT-50: 先设标志防 onclose 重连
-    if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; } // W2: 卸载即拆 watchdog（防幽灵轮次）
+    this.closed = true;  // PIT-50: set the flag first to prevent onclose reconnect
+    if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; } // W2: tear down the watchdog on unmount (prevents ghost rounds)
     this.stopMetrics();
     this.transport?.close();
     this.transport = null;
@@ -739,14 +739,14 @@ export class SfuConsumerClient {
 }
 
 /**
- * P1/T1.2 上行最小面（会议麦根，D270-R2 验收「会议」的 SDK 前置）：
- * send transport + produce(track)。server 门 = audio-* 房账号豁免（D-H11 修订/P1.1 已落）。
- * 控制面 data-produce 随 P2 host-controller SFU-DC 迁移接入（design §4）——本类不掺。
+ * P1/T1.2 minimal uplink surface (the meeting-mic root; SDK prerequisite for the D270-R2 'meeting' acceptance):
+ * send transport + produce(track). Server gate = account exemption in audio-* rooms (D-H11 revision / landed in P1.1).
+ * Control-plane data-produce joins with the P2 host-controller SFU-DC migration (design §4) — out of scope for this class.
  */
 export class SfuMicProducer {
   private ws: WebSocket | null = null;
   private transport: MsTransport | null = null;
-  /** 响应类型键 → 一次性 resolver（auth/join/caps/transport/produced 串行流程够用）。 */
+  /** Response type key → one-shot resolver (enough for the serial auth/join/caps/transport/produced flow). */
   private pending = new Map<string, (m: Record<string, unknown>) => void>();
 
   constructor(
@@ -763,24 +763,24 @@ export class SfuMicProducer {
   }
 
   private route(m: Record<string, unknown>): void {
-    // error code:0 = ack（transport_connected/produced 例外——produced 是独立 type）；终态错误打断在途 RPC。
+    // error code:0 = ack (transport_connected/produced are exceptions — produced is its own type); terminal errors interrupt the in-flight RPC.
     if (m.type === 'error' && Number(m.code) !== 0 && classifySfuError(Number(m.code)) === 'terminal') {
       for (const [, cb] of this.pending) { void cb; }
-      this.pending.clear(); // 语义：调用方以 timeout/抛错感知（本类流程短，接受 timeout 形）
+      this.pending.clear(); // semantics: callers perceive it via timeout/throw (this class's flow is short; the timeout form is accepted)
     }
     const type = String(m.type ?? '');
     const cb = this.pending.get(type);
     if (cb) { this.pending.delete(type); cb(m); }
   }
 
-  /** 完整上行链：auth → join → caps → load → send transport → produce(track)。 */
+  /** Full uplink chain: auth → join → caps → load → send transport → produce(track). */
   async produceAudio(track: MediaStreamTrack): Promise<void> {
     const protocol = this.serverUrl.startsWith('wss:') ? 'wss:' : 'ws:';
     const host = this.serverUrl.replace(/^wss?:\/\//, '');
     const ws = new WebSocket(`${protocol}//${host}/ws`, this.token ? [this.token] : []);
     this.ws = ws;
     ws.onmessage = (ev) => {
-      try { this.route(JSON.parse(String(ev.data))); } catch { /* 忽略非 JSON */ }
+      try { this.route(JSON.parse(String(ev.data))); } catch { /* ignore non-JSON */ }
     };
     const send = (m: Record<string, unknown>) => ws.send(JSON.stringify(m));
     await new Promise<void>((resolve, reject) => {
@@ -833,7 +833,7 @@ export class SfuMicProducer {
     await transport.produce({ track });
   }
 
-  /** 撤麦（幂等）：关 producer 所在 transport 与 WS——会议 P4a 若需细粒度改走 producer.pause()。 */
+  /** Un-mic (idempotent): close the transport hosting the producer plus the WS — if meeting P4a needs finer granularity, switch to producer.pause(). */
   close(): void {
     this.transport?.close();
     this.transport = null;

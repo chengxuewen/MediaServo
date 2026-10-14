@@ -11,7 +11,7 @@ pub fn add_admin_routes(router: Router) -> Router {
     {
         use axum::body::Body;
         use axum::extract::Path;
-        use axum::http::{header, HeaderValue, Response, StatusCode};
+        use axum::http::{HeaderValue, Response, StatusCode, header};
         use axum::response::Redirect;
         use axum::response::{Html, IntoResponse};
         use axum::routing::get;
@@ -28,22 +28,16 @@ pub fn add_admin_routes(router: Router) -> Router {
         );
 
         async fn serve_file(path: &str) -> Response<Body> {
-            // matchit catch-all (/*path) 捕获值 = assets 后的剩余路径（实测: "index.js"）
-            // FILES key 形如 "assets/index.js" — 需拼回 assets/ 前缀
+            // matchit catch-all (/*path) captured value = the remainder after "assets" (observed: "index.js")
+            // FILES keys look like "assets/index.js" -- need to re-prepend the assets/ prefix
             let trimmed = path.trim_start_matches('/');
-            let candidates: [String; 2] = [
-                format!("assets/{trimmed}"),
-                trimmed.to_string(),
-            ];
+            let candidates: [String; 2] = [format!("assets/{trimmed}"), trimmed.to_string()];
 
-            if let Some((_, data)) = candidates
-                .iter()
-                .find_map(|k| FILES.iter().find(|(name, _)| *name == k))
+            if let Some((_, data)) =
+                candidates.iter().find_map(|k| FILES.iter().find(|(name, _)| *name == k))
             {
-                let matched = candidates
-                    .iter()
-                    .find(|k| FILES.iter().any(|(name, _)| name == k))
-                    .unwrap();
+                let matched =
+                    candidates.iter().find(|k| FILES.iter().any(|(name, _)| name == k)).unwrap();
                 let content_type = if matched.ends_with(".js") {
                     "application/javascript"
                 } else if matched.ends_with(".css") {
@@ -60,16 +54,11 @@ pub fn add_admin_routes(router: Router) -> Router {
                     "application/octet-stream"
                 };
                 let mut resp = Response::new(Body::from(data.to_vec()));
-                resp.headers_mut().insert(
-                    header::CONTENT_TYPE,
-                    HeaderValue::from_static(content_type),
-                );
+                resp.headers_mut()
+                    .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
                 resp
             } else {
-                Response::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .body(Body::empty())
-                    .unwrap()
+                Response::builder().status(StatusCode::NOT_FOUND).body(Body::empty()).unwrap()
             }
         }
 
@@ -96,8 +85,8 @@ pub fn add_admin_routes(router: Router) -> Router {
                 "/admin/assets/*path",
                 get(|Path(path): Path<String>| async move { serve_file(&path).await }),
             )
-            // v3 (encode-time-stats T0): SPA fallback — React Router 路径刷新 (如 /admin/rooms)
-            // 返回 index.html; 必须在 /admin/assets/*path 之后注册 (matchit 前缀匹配顺序)
+            // v3 (encode-time-stats T0): SPA fallback -- React Router route refresh (e.g. /admin/rooms)
+            // serves index.html; must be registered AFTER /admin/assets/*path (matchit prefix-match order)
             .route(
                 "/admin/*path",
                 get(move || {

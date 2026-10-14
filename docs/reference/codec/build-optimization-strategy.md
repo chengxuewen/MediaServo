@@ -1,251 +1,251 @@
-# MediaServo 构建优化策略
+# MediaServo Build Optimization Strategy
 
-**生成**: 2026-08-03 | **来源**: 团队模式分析（4 并行分析师: docker-cache / mirror / prebake / workflow）+ 团队审核修正（fact-check / tech-review / risk-review / consistency-review，4 审核员） | **状态**: 已审核修正，待实施（关联 D208）
+**Generated**: 2026-08-03 | **Source**: team-mode analysis (4 parallel analysts: docker-cache / mirror / prebake / workflow) + team-review corrections (fact-check / tech-review / risk-review / consistency-review, 4 reviewers) | **Status**: reviewed and corrected, pending implementation (related D208)
 
-> 本文档沉淀"构建容器时间太长"问题的完整分析结论：时间分解、审计发现、方案对比（C1 格式）、执行路线图。所有镜像可达性结论均经 curl 实测验证。
+> This document captures the complete analysis of the "container builds take too long" problem: time breakdown, audit findings, option comparison (C1 format), and the execution roadmap. All mirror-reachability conclusions were verified by live curl tests.
 
-## 1. 背景
+## 1. Background
 
-mediaservo-server 依赖 mediasoup-sys（C++ Worker，meson/ninja 编译，Linux x86_64 only），首次 Docker 构建需 **15-30 分钟**。本地开发（macOS）通过 `docker compose` 构建 server，痛苦集中在：
+mediaservo-server depends on mediasoup-sys (a C++ Worker built with meson/ninja, Linux x86_64 only); the first Docker build takes **15-30 minutes**. Local development (macOS) builds the server via `docker compose`; the pain concentrates on:
 
-- 首次构建（新机器 / `docker volume rm` 后）全量编译
-- dev 镜像不含预编译依赖，`cargo-cache` 卷首次填充 = 全量编译
-- CI 的 gha cache 本地不可达（`type=gha` 只能 GitHub Actions 消费）
+- The first build (new machine / after `docker volume rm`) is a full compile
+- The dev image contains no precompiled dependencies; filling the `cargo-cache` volume the first time = a full compile
+- CI's gha cache is unreachable locally (`type=gha` can only be consumed by GitHub Actions)
 
-## 2. 时间分解（dev 路径）
+## 2. Time Breakdown (dev path)
 
-| 阶段 | 对应层 | 预估耗时 | 占比 |
-|------|--------|---------|------|
-| apt 安装（tuna 镜像） | Dockerfile L7-12 | 1-2 min | ~7% |
-| rustup 安装（tuna 镜像） | Dockerfile L19 | 1-2 min | ~7% |
+| Stage | Layer | Est. time | Share |
+|-------|-------|-----------|-------|
+| apt install (tuna mirror) | Dockerfile L7-12 | 1-2 min | ~7% |
+| rustup install (tuna mirror) | Dockerfile L19 | 1-2 min | ~7% |
 | pip meson | Dockerfile L26 | ~0.5 min | ~2% |
 | COPY . . + cargo fetch | dev L31-32 | 1-3 min | ~8% |
-| mediasoup-sys C++ Worker（meson 子项目 + ninja ~100 C++ 文件 + flatbuffers codegen） | 容器内首次编译 | **8-15 min** | **~45%** |
-| Rust 依赖编译（~300 crates，axum/tokio/mediasoup-rs 等） | 容器内首次编译 | **5-10 min** | **~35%** |
-| 应用 crate 自身 | 同上 | 0.5-1 min | ~3% |
+| mediasoup-sys C++ Worker (meson subprojects + ninja ~100 C++ files + flatbuffers codegen) | first in-container compile | **8-15 min** | **~45%** |
+| Rust dependency compile (~300 crates: axum/tokio/mediasoup-rs etc.) | first in-container compile | **5-10 min** | **~35%** |
+| The application crates themselves | same | 0.5-1 min | ~3% |
 
-**关键结论**：builder 阶段已把全部依赖烤进镜像层（CI 增量构建仅 1-2 min）；15-30 min 的痛苦全部集中在 (a) dev 容器首次 `cargo run`（空卷全量编译）和 (b) 卷清空之后。CI 的 gha cache 与本地构建完全脱节。
+**Key conclusion**: the builder stage already bakes all dependencies into image layers (CI incremental builds are only 1-2 min); the 15-30 min of pain concentrates entirely on (a) the dev container's first `cargo run` (empty volume, full compile) and (b) after the volume is wiped. CI's gha cache is fully disconnected from local builds.
 
-## 3. 审计发现（curl 实测）
+## 3. Audit Findings (live curl tests)
 
-### 3.1 配置 bug（P0，镜像层未真正生效）
+### 3.1 Configuration bugs (P0 — the mirror layers never actually took effect)
 
-| # | 问题 | 实测 | 影响 |
-|---|------|------|------|
-| 1 | `scripts/pixi-init.sh` 的 rsproxy sparse URL 失效：`sparse+https://rsproxy.cn/crates.io-index/` → 404 | rsproxy sparse 协议必须用 `sparse+https://rsproxy.cn/index/`（200）；`/crates.io-index/` 是 **git 协议**地址（未废弃，pixi-init.sh L34 `[registries.rsproxy]` 仍合法），只是不提供 sparse 布局 | cargo 国内镜像实际未生效 |
-| 2 | Dockerfile 用 tuna 作 cargo 镜像不合格：tuna 只镜像 index，`.crate` 二进制仍走 static.crates.io | tuna dl 404；static.crates.io 实测 52KB/s；rsproxy/ustc index+二进制全通 | 依赖下载慢 |
-| 3 | pixi 无国内镜像配置：`channels = ["conda-forge"]` 直连 conda.anaconda.org | ustc/tuna conda 镜像实测 8.2MB/s | 最慢且唯一未配镜像的层 |
+| # | Problem | Finding | Impact |
+|---|---------|---------|--------|
+| 1 | `scripts/pixi-init.sh`'s rsproxy sparse URL is broken: `sparse+https://rsproxy.cn/crates.io-index/` → 404 | the rsproxy sparse protocol requires `sparse+https://rsproxy.cn/index/` (200); `/crates.io-index/` is the **git-protocol** address (not deprecated; pixi-init.sh L34 `[registries.rsproxy]` remains valid) — it just doesn't serve the sparse layout | the cargo mirror was never actually in effect |
+| 2 | Using tuna as the cargo mirror in the Dockerfile is inadequate: tuna mirrors only the index; `.crate` binaries still go to static.crates.io | tuna dl 404; static.crates.io measured at 52KB/s; rsproxy/ustc index+binaries both pass | slow dependency downloads |
+| 3 | pixi has no China mirror configured: `channels = ["conda-forge"]` goes straight to conda.anaconda.org | ustc/tuna conda mirrors measured at 8.2MB/s | the slowest layer and the only unmirrored one |
 
-### 3.2 配置 bug（P1，脚本/编排失效）
+### 3.2 Configuration bugs (P1 — scripts/orchestration broken)
 
-| # | 问题 | 位置 |
-|---|------|------|
-| 4 | `docker-cargo.sh` 引用服务名 `dev`，compose 实际只有 `server`/`proxy` → 脚本必失败 | scripts/docker-cargo.sh L10/L13 |
-| 5 | 生产 compose 挂 `cargo-cache:/workspace/target` — runtime 镜像无 /workspace，纯 dev compose 复制残留 | docker-compose.yml L25 + L38-39 |
-| 6 | devcontainer.json 指向生产 compose（无 build:）→ devcontainer 拉到 runtime 镜像，无工具链 | .devcontainer/devcontainer.json L3 |
-| 7 | `mirror.ghproxy.com` 已停运（2024 年项目终止），pixi-install.sh 回退失效 | scripts/pixi-install.sh L85 |
+| # | Problem | Location |
+|---|---------|----------|
+| 4 | `docker-cargo.sh` references the service name `dev`, but compose actually has only `server`/`proxy` → the script always fails | scripts/docker-cargo.sh L10/L13 |
+| 5 | The production compose mounts `cargo-cache:/workspace/target` — the runtime image has no /workspace; a leftover from pure-dev compose | docker-compose.yml L25 + L38-39 |
+| 6 | devcontainer.json points at the production compose (no `build:`) → devcontainer pulls the runtime image, no toolchain | .devcontainer/devcontainer.json L3 |
+| 7 | `mirror.ghproxy.com` is defunct (project terminated 2024); the pixi-install.sh fallback is broken | scripts/pixi-install.sh L85 |
 
-### 3.3 结构性不一致
+### 3.3 Structural Inconsistencies
 
-| 问题 | 影响 |
-|------|------|
-| builder `--features sfu-mediasoup` 构建（无 `--no-default-features`） | cargo `--features` 是**加性**的：builder 实际 = defaults + sfu-mediasoup = **与 dev 完全一致**（server Cargo.toml L59 default = sfu-mediasoup + admin-dashboard）。无 feature 不一致问题。**真实缺口**：admin **dist 产物**未构建——build.rs L27 在 `www/apps/admin/dist` 缺失时回退 `ADMIN_DIST_DIR=/nonexistent/admin/dist`，编译通过但 /admin 运行时 404（PIT-23） |
-| builder dummy src 只覆盖 2/7 crates（common+server） | Phase 2+ server 依赖 media/webrtc/codec 后构建会炸 |
-| dev stage `COPY . .` 在 `cargo fetch` 前 | 任意源码变更使 fetch 层失效，每天重复几十次无效下载 |
-| Cargo.toml L12-13 `lto=true + codegen-units=1` | **仅影响 release 构建**（builder/CI/生产镜像路径）被拖慢 2-3x；dev 的 debug 路径（`[profile.release]` 对 debug 零影响）不受此配置影响 |
-| Dockerfile L19 rustup 未固定版本 + L26 pip meson 未固定 | 工具链升级使 base 层意外失效 |
+| Problem | Impact |
+|---------|--------|
+| The builder builds with `--features sfu-mediasoup` (without `--no-default-features`) | cargo `--features` is **additive**: the builder actually builds defaults + sfu-mediasoup = **identical to dev** (server Cargo.toml L59 default = sfu-mediasoup + admin-dashboard). No feature mismatch. **The real gap**: the admin **dist artifacts** aren't built — build.rs L27 falls back to `ADMIN_DIST_DIR=/nonexistent/admin/dist` when `www/apps/admin/dist` is missing; it compiles but /admin 404s at runtime (PIT-23) |
+| The builder dummy src covers only 2/7 crates (common+server) | once Phase 2+ server depends on media/webrtc/codec the build will explode |
+| The dev stage `COPY . .` comes before `cargo fetch` | any source change invalidates the fetch layer, repeating dozens of pointless downloads daily |
+| Cargo.toml L12-13 `lto=true + codegen-units=1` | **affects only release builds** (builder/CI/production image paths), slowing them 2-3x; dev's debug path (`[profile.release]` has zero effect on debug) is unaffected |
+| Dockerfile L19 rustup version unpinned + L26 pip meson unpinned | toolchain upgrades unexpectedly invalidate the base layer |
 
-## 4. 方案对比与推荐
+## 4. Option Comparison & Recommendation
 
-### 4.1 预设容器环境（pre-baked image）— 推荐，最大单点收益
+### 4.1 Pre-Baked Container Images — recommended, the biggest single win
 
-| 方案 | 做法 | 优点 | 缺点 | 推荐 |
-|------|------|------|------|:----:|
-| A. 只推 dev 镜像 | dev stage 烘焙 target/debug + CI 推送 | 改动最小，覆盖 90% 本地开发 | runtime 构建不受益 | |
-| **B. dev + builder 双镜像** | dev 烘焙 debug 依赖；builder 推 registry cache | 本地开发 + 生产构建双覆盖；registry cache 本地可达 | 镜像体积 +2.5-3.5GB；CI 每 commit 多 ~15-25 min | ✅ |
-| C. 只烘焙 registry cache | cargo fetch 产物进镜像 | 体积小（~300-400MB） | 只省下载不省编译（编译才是大头） | |
-| D. 仅依赖 gha cache | 现状 | 零改动 | 本地不可达，对本地预设零帮助 | |
+| Option | Approach | Pros | Cons | Recommendation |
+|--------|----------|------|------|:--------------:|
+| A. Push only the dev image | dev stage bakes target/debug + CI pushes | smallest change; covers 90% of local development | runtime builds gain nothing | |
+| **B. dev + builder dual images** | dev bakes debug deps; builder pushes a registry cache | covers both local dev and production builds; the registry cache is locally reachable | +2.5-3.5GB image size; ~15-25 min more CI per commit | ✅ |
+| C. Bake only the registry cache | cargo fetch artifacts into the image | small (~300-400MB) | saves download but not compile (compile is the bulk) | |
+| D. Rely on gha cache only | current state | zero change | locally unreachable; no help for local pre-baking | |
 
-**来源**：docker/build-push-action + `type=registry` cache 标准实践；OpenVidu 生产/开发 compose 分离模式（同 PIT-32 教训）。
+**Source**: docker/build-push-action + `type=registry` cache standard practice; OpenVidu's prod/dev compose split (same as the PIT-32 lesson).
 
-**方案 B 具体改动**：
+**Option B concrete changes**:
 
-1. **Dockerfile dev stage 重写**（L28-33）：
-   - manifests-first（7 个 crate 全列）+ dummy src 全建
-   - `cargo fetch && cargo build --bin mediaservo-server`（**debug**，features 与 dev compose command 完全一致：`sfu-mediasoup,admin-dashboard`）
-   - 删除 dummy src 后 `COPY . .`（bind mount 覆盖；target/ 被 .dockerignore 排除）
-   - mediasoup-sys C++ 产物按 build-script 输入哈希缓存 → **workspace 源码变更不触发 C++ 重编**；仅 mediasoup-sys 版本、其依赖解析或 feature 变更时重跑（~10 min），由 CI 新 sha 镜像兜底（build.rs 无 rerun-if-changed → cargo 按包目录文件跟踪，registry 源码不可变 → 稳态不重跑）
-2. **docker-compose.dev.yml**：`build:` → `image: ghcr.io/org/mediaservo-server-dev:latest` + `pull_policy: always`（⚠️ 用 `always` 而非 `missing`：missing 是 compose 默认行为，对已存在的 `:latest` 不刷新——CI 每 commit 推新镜像，本地旧镜像会一直用到显式 pull；`always` 或 `newer`（compose 2.30+）才保证拉到最新烘焙产物）
-   - ⚠️ **卷刷新语义（H2）**：`cargo-cache:/workspace/target` 命名卷的 copy-on-first-use **只在卷首次创建且为空时**把镜像内 target/debug 灌入。对**已存在的非空卷不触发**——升级路径上烘焙缓存会被静默忽略。落地时必须显式 `docker volume rm mediaservo_cargo-cache`（或换新卷名），该命令写进执行步骤而非依赖自动灌入。Docker 只会把镜像内容拷入空卷，此后卷内容与镜像完全独立
-   - command 保持与烘焙 feature 集一致，否则缓存失效
-3. **新建 `docker-compose.dev.build.yml`**（回退 override，遵守 PIT-32）：
+1. **Dockerfile dev stage rewrite** (L28-33):
+   - manifests-first (all 7 crates listed) + dummy src fully created
+   - `cargo fetch && cargo build --bin mediaservo-server` (**debug**; features exactly matching the dev compose command: `sfu-mediasoup,admin-dashboard`)
+   - Remove the dummy src then `COPY . .` (bind mount overlays; target/ excluded by .dockerignore)
+   - The mediasoup-sys C++ artifacts are cached by build-script input hash → **workspace source changes don't retrigger the C++ build**; it reruns (~10 min) only when the mediasoup-sys version, its dependency resolution, or features change — backstopped by the CI's new-sha images (build.rs has no rerun-if-changed → cargo tracks by package directory files; registry sources are immutable → no reruns in steady state)
+2. **docker-compose.dev.yml**: `build:` → `image: ghcr.io/org/mediaservo-server-dev:latest` + `pull_policy: always` (⚠️ use `always` rather than `missing`: missing is compose's default and won't refresh an existing `:latest` — CI pushes a new image per commit, so a stale local image would be used forever until an explicit pull; only `always` or `newer` (compose 2.30+) guarantees the latest baked artifacts)
+   - ⚠️ **Volume refresh semantics (H2)**: the `cargo-cache:/workspace/target` named volume's copy-on-first-use **only populates image target/debug into the volume the first time it is created and empty**. It does **not trigger for an existing non-empty volume** — on the upgrade path the baked cache would be silently ignored. Landing this must explicitly `docker volume rm mediaservo_cargo-cache` (or use a new volume name); write the command into the runbook rather than relying on auto-population. Docker copies image content into empty volumes only; after that the volume's content is fully independent of the image
+   - The command must stay consistent with the baked feature set, or the cache misses
+3. **New `docker-compose.dev.build.yml`** (fallback override, honoring PIT-32):
    ```yaml
    services:
      server:
        build: { context: ., target: dev }
    ```
-   用法：`docker compose -f docker-compose.dev.yml -f docker-compose.dev.build.yml up -d --build`
-4. **docker.yml 推送双镜像**（推送顺序：**dev 先推、runtime 最后**，避免中途失败导致双镜像 feature/依赖漂移）：
-   - builder 步骤 `push: true`，tags `ghcr.io/org/mediaservo-builder:latest` + `:sha-${{ github.sha }}`，cache-to 加 `type=registry,ref=...,mode=max`
-   - runtime 步骤 cache-from 加 registry ref；cache-to 也需加 `type=registry`（否则 runtime 自身新层不进入 registry cache）
-   - 新增 dev 推送 step（`target: dev`）
-   - PIT-32 gate 加一条：dev.yml 不得含 `build:`
-5. **标签/刷新**：`latest`（滚动）+ `sha-${{ github.sha }}`（精确）；每 main push 刷新（沿用现有 trigger）
-6. **存储与 CI 配额治理（H4）**：
-   - **GHCR 清理 workflow**：sha 标签永不清除 → 每 commit 新增 dev(2.5-3.5GB)+builder+runtime ≈ 5-7GB，免费档（500MB-2GB）几天即爆。新增 cleanup job（`gh api` 删除旧 sha tag，保留最近 N=10）
-   - **path-filter**：仅当 `Cargo.lock` / `Cargo.toml` / `Dockerfile` / `crates/**` / `pixi.toml` 变更才跑 dev 镜像推送（大部分 commit 跳过，同时砍出口流量）
-   - CI 总时长预算：现 docker.yml ~15-20 min/commit，加 dev bake 后 35-45 min，叠加 ci.yml matrix 需核算免费档 2000 min/月
-   - 回退 override（docker-compose.dev.build.yml）可加 `cache_from: [type=registry, ref=ghcr.io/org/mediaservo-server-builder:latest]` 让本地 --build 路径也吃到 registry cache
-7. **前置条件（H3 — ghcr 可达性）**：方案价值链依赖本地拉取 2.5-3.5GB 预烘焙镜像。本项目环境 GitHub/ghcr 直连不稳（PIT-14/31，daemon 需镜像加速 + 代理兜底）：
-   - 实施前实测 ghcr 拉取可达性与速度（daemon 代理已配置的前提下）
-   - 私有仓库：本地首次 pull 需 `gh auth token | docker login ghcr.io -u <user> --password-stdin`，镜像可见性 = 仓库可见性
-   - 若 ghcr 实测不可达：改用国内可达 registry（阿里 ACR / 腾讯 TCR）承载 dev 镜像与 registry cache ref
-8. **平台（M4）**：烘焙镜像在 ubuntu-22.04 runner 构建 = **linux/amd64 only**。Apple Silicon 开发者拉取后走 qemu 仿真（与现状本地 build 的 amd64 仿真无回归，但烘焙收益在仿真下打折）。dev service 显式声明 `platform: linux/amd64`，README 文档化仿真前提
-9. **决策承接（M5）**：本方案**承接并扩展 D207**（预构建 dev 镜像），机制从 D207 的 FROM 预构建 base 改为 **compose `image:` + pull**（本地零构建），镜像命名统一为 `mediaservo-server-dev` / `mediaservo-server-builder`（与现有 prod `mediaservo-server` 前缀一致），D207 相应修订（另见 D208）
+   Usage: `docker compose -f docker-compose.dev.yml -f docker-compose.dev.build.yml up -d --build`
+4. **docker.yml pushes both images** (push order: **dev first, runtime last**, so a mid-way failure doesn't leave the two images with drifted features/deps):
+   - the builder step `push: true`, tags `ghcr.io/org/mediaservo-builder:latest` + `:sha-${{ github.sha }}`, cache-to adds `type=registry,ref=...,mode=max`
+   - the runtime step's cache-from adds the registry ref; cache-to also needs `type=registry` (otherwise the runtime's own new layers never enter the registry cache)
+   - a new dev push step (`target: dev`)
+   - the PIT-32 gate gains one rule: dev.yml must not contain `build:`
+5. **Tags/refresh**: `latest` (rolling) + `sha-${{ github.sha }}` (exact); refreshed on every main push (keeping the existing trigger)
+6. **Storage & CI quota governance (H4)**:
+   - **A GHCR cleanup workflow**: sha tags are never removed → each commit adds dev(2.5-3.5GB)+builder+runtime ≈ 5-7GB; the free tier (500MB-2GB) blows up within days. Add a cleanup job (`gh api` deletes old sha tags, keeping the most recent N=10)
+   - **path-filter**: the dev image push runs only when `Cargo.lock` / `Cargo.toml` / `Dockerfile` / `crates/**` / `pixi.toml` change (most commits skip it, also cutting egress)
+   - Total CI time budget: docker.yml is now ~15-20 min/commit; with the dev bake it's 35-45 min; combined with the ci.yml matrix, check against the free tier's 2000 min/month
+   - The fallback override (docker-compose.dev.build.yml) can add `cache_from: [type=registry, ref=ghcr.io/org/mediaservo-server-builder:latest]` so the local --build path also benefits from the registry cache
+7. **Precondition (H3 — ghcr reachability)**: the option's value chain depends on pulling a 2.5-3.5GB pre-baked image locally. In this project's environment direct GitHub/ghcr is unreliable (PIT-14/31; the daemon needs a mirror accelerator + proxy fallback):
+   - Before implementing, measure ghcr pull reachability and speed (assuming the daemon proxy is configured)
+   - Private repos: the first local pull needs `gh auth token | docker login ghcr.io -u <user> --password-stdin`; image visibility = repo visibility
+   - If ghcr proves unreachable: switch to a domestically reachable registry (Ali ACR / Tencent TCR) to host the dev image and the registry cache ref
+8. **Platform (M4)**: the baked image builds on an ubuntu-22.04 runner = **linux/amd64 only**. Apple Silicon developers pull and run under qemu emulation (no regression vs today's local-build amd64 emulation, but the bake's benefit is discounted under emulation). The dev service should declare `platform: linux/amd64` explicitly; document the emulation precondition in the README
+9. **Decision continuity (M5)**: this plan **continues and extends D207** (pre-built dev images), changing D207's FROM-prebuilt-base mechanism to **compose `image:` + pull** (zero local builds); image names unified as `mediaservo-server-dev` / `mediaservo-server-builder` (consistent with the existing prod `mediaservo-server` prefix); D207 revised accordingly (see also D208)
 
-**时间对比（估算）**：
+**Time comparison (estimated)**:
 
-| 场景 | 现状（本地 build） | 预烘焙（pull） |
-|------|------|------|
-| 首次 | 15-30 min | pull 2.5-3.5GB（**ghcr 可达性需实测，代理下可能 30min+**）+ 重编 workspace crates 1-3 min |
-| 日常增量 | 1-5 min（卷已缓存） | 同左（首次需 `docker volume rm` 让烘焙产物灌入，之后增量） |
-| Cargo.lock 变更 | 全量重编 15-30 min | **已有卷不会被新镜像刷新**（copy-on-first-use 仅空卷）→ `docker volume rm` 后 pull 新 sha 镜像 |
+| Scenario | Today (local build) | Pre-baked (pull) |
+|----------|---------------------|------------------|
+| First time | 15-30 min | pull 2.5-3.5GB (**ghcr reachability needs testing; possibly 30min+ behind a proxy**) + recompile workspace crates 1-3 min |
+| Daily incremental | 1-5 min (volume cached) | same (the first time needs `docker volume rm` so the baked artifacts populate; incremental after) |
+| Cargo.lock change | full recompile 15-30 min | **an existing volume won't be refreshed by a new image** (copy-on-first-use only fills empty volumes) → `docker volume rm` then pull the new sha image |
 
-**镜像体积估算**：base ~1.2-1.5GB + registry ~300-400MB + target/debug ~800MB-1.2GB ≈ **2.5-3.5GB**。
+**Image size estimate**: base ~1.2-1.5GB + registry ~300-400MB + target/debug ~800MB-1.2GB ≈ **2.5-3.5GB**.
 
-### 4.2 国内镜像 — 立即修复，成本最低
+### 4.2 China Mirrors — fix immediately, lowest cost
 
-**pixi/conda**（消灭最慢层，不改 lockfile）——`~/.pixi/config.toml`：
+**pixi/conda** (eliminates the slowest layer, no lockfile change) — `~/.pixi/config.toml`:
 
 ```toml
-# pixi 官方 [mirrors] 表 — 拉取时透明替换，lockfile 不变
+# The official pixi [mirrors] table — transparent substitution at fetch time; the lockfile is unchanged
 [mirrors]
 "https://conda.anaconda.org/conda-forge" = [
-    "https://mirrors.ustc.edu.cn/anaconda/cloud/conda-forge",   # 主, 8.2MB/s（repodata 取首个镜像）
-    "https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge",  # 备
-    "https://conda.anaconda.org/conda-forge",  # 原 URL 兜底（官方细则：不显式列出则原频道被完全替换）
+    "https://mirrors.ustc.edu.cn/anaconda/cloud/conda-forge",   # primary, 8.2MB/s (repodata uses the first mirror)
+    "https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge",  # backup
+    "https://conda.anaconda.org/conda-forge",  # original-URL fallback (official rule: if not listed explicitly, the original channel is fully replaced)
 ]
 ```
 
-替代（不推荐）：改 pixi.toml channels 为镜像 URL → 需 `pixi update` 重生成 lockfile 并全员提交；镜像为字节级同步副本，sha256 不变，安全但产生锁变更。
+Alternative (not recommended): point pixi.toml channels at mirror URLs → requires `pixi update` to regenerate the lockfile and everyone to commit it; mirrors are byte-identical syncs so sha256 is unchanged — safe but produces a lock change.
 
-**cargo**（rsproxy 主 + ustc 备）——本地与 Dockerfile 统一：
+**cargo** (rsproxy primary + ustc backup) — unified between local and the Dockerfile:
 
 ```toml
 [source.crates-io]
 replace-with = "rsproxy-sparse"
 
 [source.rsproxy-sparse]
-registry = "sparse+https://rsproxy.cn/index/"    # 注意: 不是 /crates.io-index/（旧 URL 404）
+registry = "sparse+https://rsproxy.cn/index/"    # note: not /crates.io-index/ (the old URL 404s)
 
 [source.ustc-sparse]
 registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
 ```
 
-> cargo `replace-with` 不支持自动回退列表；rsproxy 自身为 CDN 多节点（每分钟同步），ustc 作手动切换备选。
+> cargo `replace-with` doesn't support automatic fallback lists; rsproxy is itself a multi-node CDN (synced every minute) with ustc as the manual-switch backup.
 
-**rustup 本地**：
+**rustup local**:
 
 ```bash
 export RUSTUP_DIST_SERVER="https://rsproxy.cn"
 export RUSTUP_UPDATE_ROOT="https://rsproxy.cn/rustup"
 ```
 
-**镜像实测矩阵**：
+**Measured mirror matrix**:
 
-| 层 | 可用镜像（实测） | 不可用（实测） |
-|----|----------------|---------------|
-| conda | ustc 8.2MB/s、tuna 8.2MB/s | sjtu 403、aliyun 404 |
-| cargo | rsproxy（CDN 最快）、ustc 765KB/s、sjtu 242KB/s | **tuna（只镜像 index，二进制 404）** |
-| rustup | tuna、ustc、rsproxy | sjtu 301 未达 |
+| Layer | Working mirrors (measured) | Not working (measured) |
+|-------|----------------------------|-------------------------|
+| conda | ustc 8.2MB/s, tuna 8.2MB/s | sjtu 403, aliyun 404 |
+| cargo | rsproxy (CDN, fastest), ustc 765KB/s, sjtu 242KB/s | **tuna (index only; binaries 404)** |
+| rustup | tuna, ustc, rsproxy | sjtu 301 unreachable |
 
-**CI vs 本地边界**：GitHub Actions 跑在 GitHub 基础设施，不受国内网络影响；CI 加速 = gha cache；镜像配置只服务本地/自建 Docker。
+**CI vs local boundary**: GitHub Actions runs on GitHub infrastructure, unaffected by China's network; CI acceleration = the gha cache; mirror config serves only local/self-hosted Docker.
 
-### 4.3 定制构建镜像 — 与 4.1 合并实施
+### 4.3 Custom Build Image — implement merged with 4.1
 
-- builder 阶段即"定制构建镜像"（manifest-first + dummy build + deps 编译）
-- **features 统一已无必要（H1）**：cargo `--features` 是加性的，builder 实际已含 admin-dashboard（defaults = 两 feature 全开），与 dev 一致。**真正的修复**：Docker 构建流程加 `pnpm build:admin` + COPY dist 步骤（见 §7；PIT-23 顺序约束：dist 必须先于 cargo build 构建，编译期嵌入）
-- **CI 两步构建合并为单步**（docker.yml L33-41 + L42-51）：`target: runtime, push: true, cache-to: type=gha + type=registry` 一次构建即缓存全部中间层；第二步只是重复 cache-restore
-- builder dummy src 泛化：`for d in crates/*/; do mkdir -p $d/src; touch $d/src/lib.rs; done`（幂等）
-- 推送 `ghcr.io/org/mediaservo-builder:buildcache` 作 registry cache → **本地首建 15-30 min → 分钟级**（本地可达，替代 gha）
+- The builder stage effectively is the "custom build image" (manifest-first + dummy build + deps compiled)
+- **Feature unification is no longer necessary (H1)**: cargo `--features` is additive; the builder already includes admin-dashboard (defaults = both features on), matching dev. **The real fix**: add `pnpm build:admin` + a COPY dist step to the Docker build flow (see §7; the PIT-23 ordering constraint: dist must be built before cargo build, since embedding happens at compile time)
+- **Merge CI's two build steps into one** (docker.yml L33-41 + L42-51): `target: runtime, push: true, cache-to: type=gha + type=registry` builds and caches all intermediate layers at once; the second step is just a repeated cache restore
+- Generalize the builder dummy src: `for d in crates/*/; do mkdir -p $d/src; touch $d/src/lib.rs; done` (idempotent)
+- Push `ghcr.io/org/mediaservo-builder:buildcache` as a registry cache → **local first-build 15-30 min → minutes** (locally reachable, replacing gha)
 
-### 4.4 其他优化（ROI 排序）
+### 4.4 Other Optimizations (ROI-ordered)
 
-| # | 优化项 | 预估节省 | 工作量 | 风险 | 状态 (doc-audit L8, 2026-08-03) |
-|---|--------|---------|--------|------|------|
-| 1 | dev stage manifests-first（去掉 COPY . . 前置 fetch） | 每次构建省 30-60s | S | 低 | ✅ 已完成 |
-| 2 | Docker 资源配额 ≥8GB RAM / 6+ CPU（文档化） | 全量编译 2-3x | S | 无 | ✅ 已完成（operations.md §Docker 资源限额） |
-| 3 | warm-dev.sh 后台预热脚本（早晨跑一次） | 首调 15-28 min 后台化 | S | 低 | ✅ 已存在 |
-| 4 | `lto="thin" + codegen-units=16`（**仅影响 release**：builder/CI/生产镜像路径；dev debug 路径无收益，debug profile 独立） | release 依赖编译 2-3x（代价 1-2% 体积/性能） | S | 低 | ✅ 已完成 |
-| 5 | sccache 双路（原生 + 容器卷） | 依赖冷变更 8-15 → 2-4 min | M | 中 — daemon 内存 ~1GB；mediasoup C++ 部分收益受限 | ❌ 按需（触发：Cargo.lock 变更频率上升） |
-| 6 | mediasoup 预编译 worker（OpenVidu 思路） | 每构建省 4-8 min | M-L | 中 — mediasoup-sys 需 patch；版本/glibc 严格绑定 | ❌ 未做 |
-| 7 | BuildKit cache mount（registry + meson OUT_DIR） | fetch 3 min → 5s；meson 重编秒级 | S-M | 低 | ❌ 未做 |
-| 8 | .dockerignore 补 `.pixi/ .omo/ .sisyphus/ .codegraph/` | 上下文上传减小 | S | 无 | ✅ 已完成（+ .env*/*.key） |
-| 9 | pixi 环境瘦身：gst-plugins-ugly/gst-libav/llvm 移入 test feature | 环境创建省 1-2 min | S-M | 低 | ❌ 未做 |
-| 10 | CI：docker.yml 加 PR 触发 build-only 校验 | 提前发现 Dockerfile 破坏 | S | 低 | ✅ 已完成（PIT-39 gate 一并） |
+| # | Item | Est. saving | Effort | Risk | Status (doc-audit L8, 2026-08-03) |
+|---|------|-------------|--------|------|-----------------------------------|
+| 1 | dev stage manifests-first (drop the pre-COPY fetch) | 30-60s per build | S | low | ✅ done |
+| 2 | Docker resource quota ≥8GB RAM / 6+ CPU (documented) | 2-3x full builds | S | none | ✅ done (operations.md §Docker resource limits) |
+| 3 | warm-dev.sh background warm-up script (run each morning) | the first 15-28 min moved to background | S | low | ✅ exists |
+| 4 | `lto="thin" + codegen-units=16` (**release-only**: builder/CI/production image paths; no benefit on dev's debug path — the debug profile is independent) | release dependency compile 2-3x (at the cost of 1-2% size/perf) | S | low | ✅ done |
+| 5 | sccache dual-path (native + container volume) | cold dependency changes 8-15 → 2-4 min | M | medium — the daemon holds ~1GB; limited benefit for the mediasoup C++ part | ❌ on demand (trigger: Cargo.lock change frequency rising) |
+| 6 | Precompiled mediasoup workers (the OpenVidu idea) | 4-8 min per build | M-L | medium — mediasoup-sys needs patching; version/glibc tightly bound | ❌ not done |
+| 7 | BuildKit cache mounts (registry + meson OUT_DIR) | fetch 3 min → 5s; meson rebuilds in seconds | S-M | low | ❌ not done |
+| 8 | .dockerignore adds `.pixi/ .omo/ .sisyphus/ .codegraph/` | smaller context upload | S | none | ✅ done (+ .env*/*.key) |
+| 9 | pixi env slimming: move gst-plugins-ugly/gst-libav/llvm into a test feature | 1-2 min per env creation | S-M | low | ❌ not done |
+| 10 | CI: docker.yml gains a PR-triggered build-only check | catches Dockerfile breakage earlier | S | low | ✅ done (with the PIT-39 gate) |
 
-**明确不做/低价值**：
-- **跨平台 target 共享不可行**：macOS native（aarch64-apple-darwin）与容器（aarch64/x86_64-unknown-linux-gnu）产物按 triple 分键；mediasoup worker 按 arch+OS 编译；sccache 同样按 compiler+target 分键。唯一跨平台机会 = 预编译 worker 二进制（Linux x64）
-- sccache 优先级分析师分歧：docker-cache 认为当前收益低（层缓存已覆盖）建议 P3 暂缓；workflow 排本月。**建议按触发条件上**：Cargo.lock 变更频率上升或 CI 加 feature 矩阵时再引入
+**Explicitly not doing / low value**:
+- **Cross-platform target sharing is infeasible**: macOS native (aarch64-apple-darwin) and container (aarch64/x86_64-unknown-linux-gnu) artifacts key by triple; the mediasoup worker compiles per arch+OS; sccache keys by compiler+target too. The only cross-platform opportunity = precompiled worker binaries (Linux x64)
+- The analysts disagreed on sccache priority: docker-cache argued today's benefit is low (layer cache already covers it) and suggested deferring to P3; workflow ranked it this month. **Recommend trigger-based adoption**: introduce when Cargo.lock change frequency rises or CI adds a feature matrix
 
-## 5. 执行路线图
+## 5. Execution Roadmap
 
-### 本周（纯修复，全部 <1 天）
+### This Week (pure fixes, all <1 day)
 
-1. 修 `pixi-init.sh` rsproxy URL（`/crates.io-index/` → `/index/`）
-2. 新增 `~/.pixi/config.toml` `[mirrors]`（ustc 主 + tuna 备 + 原 URL 兜底）
-3. Dockerfile cargo 镜像 tuna → rsproxy（index+二进制全通）；**修订 D206**（apt/rustup 清华保留，cargo 换 rsproxy）
-4. 修 `docker-cargo.sh` 服务名 `dev` → `server`；修 devcontainer.json 指向 dev compose
-5. 删 docker-compose.yml 生产版 cargo-cache volume 误用
-6. dev stage manifests-first + `lto="thin"` + `codegen-units=16`（release 限定）+ .dockerignore 补充（含 `.env*`、`*.key` 等密钥类）
-7. 修 `pixi-install.sh` ghproxy 回退（ghproxy.com 已停运）→ 换 `gh-proxy.com` 或从 conda 镜像装 pixi
-8. warm-dev.sh + 基线测量落档
-9. 实测 ghcr.io 可达性（H3 前置条件）；固定 rustup/meson 版本（防 base 层意外失效）
+1. Fix `pixi-init.sh`'s rsproxy URL (`/crates.io-index/` → `/index/`)
+2. Add `~/.pixi/config.toml` `[mirrors]` (ustc primary + tuna backup + the original URL as fallback)
+3. Dockerfile cargo mirror tuna → rsproxy (index+binaries both pass); **revise D206** (keep apt/rustup on Tsinghua, switch cargo to rsproxy)
+4. Fix `docker-cargo.sh`'s service name `dev` → `server`; fix devcontainer.json to point at the dev compose
+5. Remove the production docker-compose.yml's misuse of the cargo-cache volume
+6. dev stage manifests-first + `lto="thin"` + `codegen-units=16` (release-only) + .dockerignore additions (incl. `.env*`, `*.key` and other secret patterns)
+7. Fix `pixi-install.sh`'s ghproxy fallback (ghproxy.com is defunct) → switch to `gh-proxy.com` or install pixi from the conda mirror
+8. warm-dev.sh + record the baseline measurement
+9. Test ghcr.io reachability (H3 precondition); pin rustup/meson versions (preventing unexpected base-layer invalidation)
 
-### 本月（结构性）
+### This Month (structural)
 
-10. Dockerfile dev stage 烘焙 debug 依赖（4.1-1）
-11. CI 推 dev/builder 双镜像（4.1-4）+ 两步构建合并 + registry cache（4.3）+ **GHCR 清理 workflow + path-filter（H4）**
-12. compose image 化（`pull_policy: always`）+ `docker-compose.dev.build.yml` 回退 override（含 `cache_from` registry）
-13. CI PR 构建校验 job + 构建时长软 gate
-14. **admin dist 修复**：Docker 构建流程加 `pnpm build:admin` + COPY dist（PIT-23 顺序约束）
+10. Dockerfile dev stage bakes the debug dependencies (4.1-1)
+11. CI pushes the dev/builder dual images (4.1-4) + merge the two build steps + the registry cache (4.3) + **the GHCR cleanup workflow + path-filter (H4)**
+12. Compose image-ization (`pull_policy: always`) + the `docker-compose.dev.build.yml` fallback override (with a registry `cache_from`)
+13. The CI PR build-check job + a soft gate on build duration
+14. **The admin dist fix**: the Docker build flow adds `pnpm build:admin` + COPY dist (the PIT-23 ordering constraint)
 
-### 下月（按需）
+### Next Month (as needed)
 
-15. sccache（触发条件见 4.4）
-16. mediasoup 预编译 worker
-17. pixi 环境瘦身、BuildKit cache mount
+15. sccache (trigger conditions in 4.4)
+16. Precompiled mediasoup workers
+17. pixi env slimming, BuildKit cache mounts
 
-**预计总收益**：本地首次构建 15-28 min → 2-5 min（预烘焙 + 镜像）；日常增量每轮省 30-60s（manifests-first）；依赖冷变更日 8-15 → 2-4 min（sccache）。
+**Expected total benefit**: local first build 15-28 min → 2-5 min (pre-bake + mirrors); daily incremental saves 30-60s per round (manifests-first); cold dependency-change days 8-15 → 2-4 min (sccache).
 
-## 6. 测量与回归门禁
+## 6. Measurement & Regression Gates
 
-**基线方法**（每项优化前后各测一次，记录到 status.md）：
+**Baseline method** (measure once before and after each optimization; record in status.md):
 
 ```bash
-# per-stage 时间（buildx 每层 DONE x.xs）
+# per-stage times (buildx per-layer DONE x.xs)
 docker compose -f docker-compose.dev.yml build --progress=plain server
 
-# 依赖 vs 自身编译拆分
+# dependency vs own-code compile split
 docker compose exec server cargo build --timings -p mediaservo-server --features sfu-mediasoup
 
-# 端到端（连续 3 次取中位）
+# end-to-end (median of 3 consecutive runs)
 time scripts/docker-cargo.sh check -p mediaservo-server --features sfu-mediasoup
 ```
 
-**门禁**：
-- 软 gate：CI 以 `--progress=plain` 构建 builder 并解析 per-stage 时间；>12 min 且 gha 命中 → 告警注释（网络抖动误报率高，不硬失败）
-- per-stage 时间打进 build summary/artifact，人工周查
-- 规则：任何 Dockerfile/pixi.toml 变更必须附构建时长实测
+**Gates**:
+- Soft gate: CI builds the builder with `--progress=plain` and parses the per-stage times; >12 min with gha hits → a warning comment (network jitter causes high false-positive rates; no hard failure)
+- Per-stage times land in the build summary/artifact; reviewed manually weekly
+- Rule: any Dockerfile/pixi.toml change must attach a measured build duration
 
-## 7. 附带发现（非构建优化）
+## 7. Incidental Findings (not build optimization)
 
-- **prod 镜像功能缺口（H1 修正）**：builder 与 dev 的 feature 集实际一致（均含 admin-dashboard，cargo `--features` 加性叠加）；真实缺口是 admin **dist 产物**未构建——build.rs L27 在 dist 缺失时回退 `ADMIN_DIST_DIR=/nonexistent/admin/dist`，编译通过但 /admin 运行时 404（PIT-23）。修复需在 Docker 构建流程加 `pnpm build:admin`（**必须先于 cargo build**）+ COPY dist 步骤（超出本文档范围，仅记录）
-- docs/modules/development/docker-workflow.md 中 `docker volume rm mediaservo_cargo-cache` 命令随方案落地后需同步更新
+- **The prod image feature gap (H1 correction)**: the builder's and dev's feature sets are actually identical (both include admin-dashboard; cargo `--features` is additive); the real gap is that the admin **dist artifacts** aren't built — build.rs L27 falls back to `ADMIN_DIST_DIR=/nonexistent/admin/dist` when dist is missing; it compiles but /admin 404s at runtime (PIT-23). Fixing requires adding `pnpm build:admin` (**before cargo build**) + a COPY dist step to the Docker build flow (outside this document's scope; recorded only)
+- `docs/modules/development/docker-workflow.md`'s `docker volume rm mediaservo_cargo-cache` command needs a sync update once this plan lands
 
-## 参考
+## References
 
-- [docker-workflow.md](../modules/development/docker-workflow.md) — Docker 开发工作流
-- [ffmpeg-static-build-strategy.md](./ffmpeg-static-build-strategy.md) — 构建策略参考（同类）
-- 项目记忆: PIT-11/12/13/19/31/32/33（mediasoup 构建、代理、Docker 教训）
-- 决策: D206（cargo 镜像修订）、D207（预构建镜像承接）、D208（构建优化策略实施）
+- [docker-workflow.md](../modules/development/docker-workflow.md) — the Docker development workflow
+- [ffmpeg-static-build-strategy.md](./ffmpeg-static-build-strategy.md) — a build strategy reference (same kind)
+- Project memory: PIT-11/12/13/19/31/32/33 (mediasoup builds, proxies, Docker lessons)
+- Decisions: D206 (cargo mirror revision), D207 (pre-built image continuation), D208 (build-optimization strategy implementation)

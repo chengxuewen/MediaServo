@@ -1,6 +1,6 @@
-# remote-burst —— 遥控判别档：突发丢包（真实无线形态），配合 D274 三档做对照
-# 参数语义：loss gemodel p r (1-h) (1-k)，p=1-H 进入坏态概率、k=1-K 留在坏态
-# 数值来源：mediasoup-client #1105 社区实证 burst 形态（8% 均值、~4 包突发）+ 160ms RTT
+# remote-burst -- teleop discriminative tier: bursty loss (the real wireless shape), paired with the D274 tiers as control
+# param semantics: loss gemodel p r (1-h) (1-k); p = 1-H probability of entering the bad state, k = 1-K staying in it
+# value source: mediasoup-client #1105 community-proven burst shape (8% mean, ~4-packet bursts) + 160ms RTT
 rtt_ms: 160
 jitter_ms: 30
 loss: "8%"

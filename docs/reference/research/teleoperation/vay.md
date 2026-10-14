@@ -1,455 +1,484 @@
-# Vay 参考分析
-> 生成日期：2026-07-16 | 分类：遥操作
+# Vay Reference Analysis
+> Generated: 2026-07-16 | Category: Teleoperation
 
-## 1. 产品画像
-- **名称**：Vay
-- **开发者**：Vay Technology GmbH（德国柏林，2018 年成立）
-- **首次发布**：2024 年 1 月（拉斯维加斯商业运营）
-- **产品定位**：全球首个获得公共道路无安全员远程驾驶许可的商业化"无人代驾租车"服务。远程驾驶员将车辆开到用户位置，用户上车后自行驾驶，实现"按需用车，无人代送"。核心技术栈为自研远程驾驶系统 + 汽车级安全控制器 + 端到端 AI 训练数据闭环
-- **目标用户群体**：城市出行用户（按需租车）、车队运营商、自动驾驶公司（远程接管配套方案）
-- **许可 / 商业模式**：B2C 租车服务（按分钟计费）+ B2B 技术授权（远程驾驶技术栈授权给其他自动驾驶公司）
+## 1. Product Profile
+- **Name**: Vay
+- **Developer**: Vay Technology GmbH (Berlin, Germany, founded 2018)
+- **First Release**: January 2024 (commercial operation in Las Vegas)
+- **Product Positioning**: The world's first commercialized "unmanned chauffeur car-rental" service to obtain a public-road safety-operator-free remote-driving permit. A remote driver brings the vehicle to the user's location; the user then drives it themselves — "on-demand mobility, unmanned chauffeur-delivery". The core tech stack is a self-developed remote-driving system + automotive-grade safety controller + end-to-end AI training data loop
+- **Target User Groups**: Urban mobility users (on-demand rental), fleet operators, autonomous-driving companies (remote-takeover companion solution)
+- **License / Business Model**: B2C car-rental service (per-minute billing) + B2B technology licensing (remote-driving stack licensed to other autonomous-driving companies)
 
-## 2. 技术特性
-### 整体架构
+## 2. Technical Features
+### Overall Architecture
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                     Vay 远程驾驶站 (Remote Driving Station)           │
+│                     Vay Remote Driving Station                        │
 │  ┌────────────────────────────────┐ ┌──────────────────────────────┐│
-│  │ 汽车级物理控制器                │ │ 多屏 360° 环境感知显示       ││
-│  │ · 力反馈方向盘 (电机模拟)      │ │ · 多摄像头实时拼接          ││
-│  │ · 液压制动踏板 (真实力度)      │ │ · 前向/左前/右前/左后/右后/  ││
-│  │ · 电子油门踏板                │ │   后向 — 6 路视频合成       ││
-│  │ · 档位选择器 (P-R-N-D)        │ │ · 延迟可视化叠加层          ││
-│  │ · 转向灯/喇叭/灯光控制        │ │   - 位置偏移 (shape)         ││
-│  │ · 紧急制动按钮 (物理)         │ │   - 不确定性区域 (size)      ││
-│  │                                │ │   - 透明度变化 (opacity)     ││
-│  └────────────────────────────────┘ │ · 车外麦克风环境音频输出    ││
-│  ┌────────────────────────────────┐ └──────────────────────────────┘│
-│  │ Safety Controller (操控站端)    │                                  │
+│  │ Automotive-grade physical      │ │ Multi-screen 360° situational ││
+│  │  controller                    │ │  awareness display            ││
+│  │ · Force-feedback steering wheel│ │ · Multi-camera real-time       ││
+│  │   (motor-simulated)            │ │   stitching                   ││
+│  │ · Hydraulic brake pedal        │ │ · Front / front-left /         ││
+│  │   (real force feel)            │ │   front-right / rear-left /    ││
+│  │ · Electronic throttle pedal    │ │   rear-right / rear — 6-way    ││
+│  │ · Gear selector (P-R-N-D)      │ │   video compositing            ││
+│  │ · Turn signal / horn / lights  │ │ · Latency-visualization        ││
+│  │   control                      │ │   overlay                      ││
+│  │ · Emergency brake button       │ │   - positional offset (shape)  ││
+│  │   (physical)                   │ │   - uncertainty region (size)  ││
+│  │                                │ │   - transparency change        ││
+│  │                                │ │     (opacity)                  ││
+│  └────────────────────────────────┘ │ · Exterior-mic ambient audio   ││
+│  ┌────────────────────────────────┐ │   output                       ││
+│  │ Safety Controller (station side)│ └──────────────────────────────┘│
 │  │ ┌────────────────────────────┐ │                                  │
-│  │ │ 多核汽车级 MCU              │ │                                  │
-│  │ │ 航空/汽车级安全 RTOS       │ │                                  │
-│  │ │ ASIL-D 功能安全等级        │ │                                  │
+│  │ │ Multi-core automotive MCU  │ │                                  │
+│  │ │ Aero/automotive safety RTOS│ │                                  │
+│  │ │ ASIL-D functional-safety   │ │                                  │
+│  │ │  integrity level           │ │                                  │
 │  │ ├────────────────────────────┤ │                                  │
-│  │ │ 独立安全边界计算            │ │                                  │
-│  │ │ · 根据位置/地图/传感器     │ │                                  │
-│  │ │ · 计算允许的转向角上限     │ │                                  │
-│  │ │ · 计算允许的偏航率上限     │ │                                  │
-│  │ │ · 计算允许的加速度上限     │ │                                  │
+│  │ │ Independent safety-boundary│ │                                  │
+│  │ │  computation               │ │                                  │
+│  │ │ · From position/map/sensor │ │                                  │
+│  │ │ · Compute allowed steering-│ │                                  │
+│  │ │   angle upper limit        │ │                                  │
+│  │ │ · Compute allowed yaw-rate │ │                                  │
+│  │ │   upper limit              │ │                                  │
+│  │ │ · Compute allowed accel    │ │                                  │
+│  │ │   upper limit              │ │                                  │
 │  │ ├────────────────────────────┤ │                                  │
-│  │ │ 操控指令合法性校验          │ │                                  │
-│  │ │ · 指令是否在安全包络内     │ │                                  │
-│  │ │ · 超出 = 拒绝发送 + 告警   │ │                                  │
+│  │ │ Control-command legality   │ │                                  │
+│  │ │  validation                │ │                                  │
+│  │ │ · Is command within safety │ │                                  │
+│  │ │   envelope?                │ │                                  │
+│  │ │ · Out of bounds = reject   │ │                                  │
+│  │ │   send + alarm             │ │                                  │
 │  │ └────────────────────────────┘ │                                  │
 │  ├────────────────────────────────┤                                  │
-│  │ 远程驾驶员疲劳管理             │                                  │
-│  │ · 面部特征追踪 (PERCLOS)      │                                  │
-│  │ · 操控行为分析 (转向熵)       │                                  │
-│  │ · 持续时长限制 (<2h 连续)     │                                  │
-│  │ · 强制休息机制 (15min/2h)     │                                  │
+│  │ Remote-driver fatigue manage-  │                                  │
+│  │  ment                          │                                  │
+│  │ · Facial-feature tracking      │                                  │
+│  │   (PERCLOS)                    │                                  │
+│  │ · Control-behavior analysis    │                                  │
+│  │   (steering entropy)           │                                  │
+│  │ · Duration limit (<2h continuo-│                                  │
+│  │   us)                          │                                  │
+│  │ · Forced-break mechanism       │                                  │
+│  │   (15min/2h)                   │                                  │
 │  └────────────────────────────────┘                                  │
 └──────────────────────────────────┬───────────────────────────────────┘
                                    │
-                                   │ 端到端加密通道
-                                   │ 多运营商 4G/5G 蜂窝并行 (bonding)
+                                   │ End-to-end encrypted channel
+                                   │ Multi-carrier 4G/5G cellular parallel (bonding)
                                    │ ┌─────────────────────────────────┐
                                    │ │ SIM 1: T-Mobile (4G/5G)        │
                                    │ │ SIM 2: Vodafone (4G/5G)        │
                                    │ │ SIM 3: O2/Telefonica (4G)      │
-                                   │ │ SIM 4: 本地运营商 (备用)        │
-                                   │ │ 策略: 所有 SIM 同时活跃发送      │
-                                   │ │ 接收: 取最先到达的包 (去重)     │
+                                   │ │ SIM 4: Local carrier (backup)  │
+                                   │ │ Policy: all SIMs active        │
+                                   │ │   simultaneously for sending   │
+                                   │ │ Receive: take first-arriving   │
+                                   │ │   packet (dedup)               │
                                    │ └─────────────────────────────────┘
                                    ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                          Vay 车端系统                                 │
+│                          Vay Vehicle-side System                      │
 │  ┌─────────────────────────────────┐ ┌─────────────────────────────┐ │
-│  │ 传感器 & 感知系统               │ │ 执行器系统                   │ │
-│  │ · 6+ 摄像头 (360°环绕)         │ │ · Drive-by-Wire 执行器       │ │
-│  │ · 车外麦克风阵列 (4ch)         │ │ · 转向执行器 (EPS 接口)      │ │
-│  │ · 激光雷达 (LiDAR, 感知)       │ │ · 制动执行器 (ESP 接口)      │ │
-│  │ · 毫米波雷达 (前向+后向)       │ │ · 油门执行器 (ECU 接口)      │ │
-│  │ · 超声波传感器 (12ch)          │ │ · 档位/灯光/喇叭执行器       │ │
-│  │ · 高精度 GNSS + IMU            │ │                              │ │
-│  └─────────────────────────────────┘ └─────────────────────────────┘ │
-│  ┌─────────────────────────────────┐ ┌─────────────────────────────┐ │
-│  │ 视频编码 & 传输                 │ │ Safety Controller (车端)     │ │
-│  │ · 多路 GPU 硬件 H.264/H.265    │ │ ┌─────────────────────────┐ │ │
-│  │ · 延迟感知编码策略              │ │ │ 多核汽车级 MCU          │ │ │
-│  │   - 低延迟 → GOP=1 (全I帧)     │ │ │ 航空/汽车级安全 RTOS   │ │ │
-│  │   - 高延迟 → GOP=4 + B帧      │ │ │ ASIL-D 功能安全等级     │ │ │
-│  │ · 每帧注入 NTP 时间戳          │ │ ├─────────────────────────┤ │ │
-│  │ · 多 SIM 并行推流               │ │ │ Safety Tunnel:           │ │ │
-│  │                                  │ │ │ · 实时计算操控安全边界  │ │ │
-│  └─────────────────────────────────┘ │ │ · 转向/偏航/加速上限    │ │ │
-│  ┌─────────────────────────────────┐ │ │ · 超出边界 → 拦截指令   │ │ │
-│  │ MRM 机制 (最小风险操作)         │ │ │ · 触发 MRM 降速停车     │ │ │
-│  │ · 检测延迟超出安全阈值          │ │ ├─────────────────────────┤ │ │
-│  │ · Phase 1: 通知驾驶员          │ │ │ Fail-Safe 协议:          │ │ │
-│  │ · Phase 2: 减速至 15 km/h      │ │ │ · 连接丢失自动安全停车  │ │ │
-│  │ · Phase 3: 安全停车 + 双闪     │ │ │ · 心跳中断 3s → MRM     │ │ │
-│  │ · Phase 4: 远程诊断 & 恢复      │ │ │ · 异常指令 → MRM        │ │ │
-│  └─────────────────────────────────┘ │ └─────────────────────────┘ │ │
-│                                       └─────────────────────────────┘ │
-│  ┌───────────────────────────────────────────────────────────────────┐│
-│  │                      AI 训练数据闭环                              ││
-│  │  每次远程驾驶 → 传感器数据 + 操控数据 + HMI 操作记录              ││
-│  │  → 脱敏 + 标注 → RLHF 训练 (强化学习人类反馈)                    ││
-│  │  → 端到端自动驾驶模型 (视觉→控制)                                ││
-│  │  → 逐步降低远程人工介入比例                                      ││
-│  └───────────────────────────────────────────────────────────────────┘│
+│  │ Sensors & perception system     │ │ Actuator system             │ │
+│  │ · 6+ cameras (360° surround)    │ │ · Drive-by-Wire actuators   │ │
+│  │ · Exterior-mic array (4ch)      │ │ · Steering actuator         │ │
+│  │ · LiDAR (perception)            │ │   (EPS interface)           │ │
+│  │ · Millimeter-wave radar         │ │ · Brake actuator            │ │
+│  │   (front + rear)                │ │   (ESP interface)           │ │
+│  │ · Ultrasonic sensors (12ch)     │ │ · Throttle actuator         │ │
+│  │ · High-precision GNSS + IMU     │ │   (ECU interface)           │ │
+│  └─────────────────────────────────┘ │ · Gear/lights/horn actuator │ │
+│  ┌─────────────────────────────────┐ └─────────────────────────────┘ │
+│  │ Video encoding & transport      │ ┌─────────────────────────────┐ │
+│  │ · Multi-stream GPU HW H.264/    │ │ Safety Controller (vehicle) │ │
+│  │   H.265                         │ │ ┌─────────────────────────┐ │ │
+│  │ · Latency-aware encoding policy │ │ │ Multi-core automotive MCU│ │ │
+│  │   - low latency → GOP=1 (all-I) │ │ │ Aero/automotive safety  │ │ │
+│  │   - high latency → GOP=4 + B-frm│ │ │  RTOS                   │ │ │
+│  │ · NTP timestamp injected per frm│ │ │ ASIL-D functional safety │ │ │
+│  │ · Multi-SIM parallel streaming   │ │ ├─────────────────────────┤ │ │
+│  │                                │ │ │ Safety Tunnel:           │ │ │
+│  └─────────────────────────────────┘ │ │ · Real-time safety-bound │ │ │
+│  ┌─────────────────────────────────┐ │ │   computation           │ │ │
+│  │ MRM mechanism (Minimal Risk     │ │ │ · Steering/yaw/accel    │ │ │
+│  │   Maneuver)                     │ │ │   upper limits          │ │ │
+│  │ · Detect latency exceeding      │ │ │ · Out of bounds → block │ │ │
+│  │   safe threshold                │ │ │   command               │ │ │
+│  │ · Phase 1: notify driver        │ │ │ · Trigger MRM slowdown  │ │ │
+│  │ · Phase 2: decelerate to 15km/h │ │ │   & stop                │ │ │
+│  │ · Phase 3: safe stop + hazards  │ │ ├─────────────────────────┤ │ │
+│  │ · Phase 4: remote diag & recover│ │ │ Fail-Safe protocol:     │ │ │
+│  └─────────────────────────────────┘ │ │ · Auto safe-stop on     │ │ │
+│                                       │ │   connection loss       │ │ │
+│  ┌───────────────────────────────────┐│ │ · Heartbeat break 3s →  │ │ │
+│  │        AI training data loop      ││ │   MRM                   │ │ │
+│  │  Each remote drive → sensor data  ││ │ · Abnormal command → MRM│ │ │
+│  │  + control data + HMI op records  ││ ├─────────────────────────┤ │ │
+│  │  → de-identify + annotate → RLHF  ││ │                         │ │ │
+│  │  training (RL from human feedback)││ │                         │ │ │
+│  │  → end-to-end autonomous-driving  ││ │                         │ │ │
+│  │    model (vision → control)       ││ │                         │ │ │
+│  │  → progressively lower remote-    ││ │                         │ │ │
+│  │    human-intervention ratio       ││ └─────────────────────────┘ │ │
+│  └───────────────────────────────────┘└─────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-### 关键技术能力
-| 能力 | 详情 |
+### Key Technical Capabilities
+| Capability | Details |
 |------|------|
-| 视频传输延迟 | 持续测量视频延迟（帧头 NTP 时间戳），G2G 延迟量化为 HMI 层可视化提示（形状、大小、颜色、清晰度）；通过多路 4G/5G 蜂窝网络同时传输，接收端取最先到达者 |
-| 控制协议 | 端到端加密控制通道（双向）；操控站 → 车端：方向盘/油门/刹车/档位/灯光等完整车辆控制；车端 → 操控站：传感器数据、系统状态、QoS 指标 |
-| RTCDataChannel | 自研协议或 WebRTC 变体（未公开），推测基于 WebRTC RTCDataChannel 或类似帧结构；双向辅助数据通道（QoS 反馈、系统状态、操控情境信号） |
-| 安全冗余 | 双 Safety Controller（车端 ASIL-D + 操控站端 ASIL-D）+ 多层蜂窝冗余（多运营商并行 bond）+ 独立 MRM 机制 + 物理急停按钮 |
-| 编码 | 多摄像头 360° 视频采集，GPU 硬件编码（H.264/H.265）；延迟感知编码策略：低延迟 → 全 I 帧，高延迟 → GOP=4 + B 帧降码率 |
-| 安全认证 | ISO 26262:2018 功能安全（ASIL-D 等级）、ISO/SAE 21434:2021 网络安全，经 TÜV 独立第三方评估认证 |
-| 操控站人因工程 | 力反馈方向盘（电机模拟真实转向阻力）、液压踏板（模拟刹车踏板力度）、多屏融合 360° 视野、车外麦克风环境音频输出 |
-| 驾驶员管理 | 多阶段培训（理论 + 模拟器 + 实车）、延迟适应训练、疲劳检测（面部 PERCLOS + 操控行为分析）、强制休息、绩效监控 |
+| Video transport latency | Continuously measures video latency (NTP timestamp in frame header), quantifies G2G latency into HMI-layer visual cues (shape, size, color, clarity); transmits simultaneously over multiple 4G/5G cellular networks, receiver takes the first-arriving one |
+| Control protocol | End-to-end encrypted control channel (bidirectional); station → vehicle: full vehicle control (steering/throttle/brake/gear/lights etc.); vehicle → station: sensor data, system status, QoS metrics |
+| RTCDataChannel | Self-developed protocol or WebRTC variant (undisclosed), speculated to be based on WebRTC RTCDataChannel or a similar frame structure; bidirectional auxiliary data channels (QoS feedback, system status, control-context signals) |
+| Safety redundancy | Dual Safety Controller (vehicle ASIL-D + station ASIL-D) + multi-layer cellular redundancy (multi-carrier parallel bond) + independent MRM mechanism + physical emergency-stop button |
+| Encoding | Multi-camera 360° video capture, GPU hardware encoding (H.264/H.265); latency-aware encoding policy: low latency → all-I frames, high latency → GOP=4 + B-frames for lower bitrate |
+| Safety certification | ISO 26262:2018 functional safety (ASIL-D level), ISO/SAE 21434:2021 cybersecurity, independently assessed and certified by TÜV third party |
+| Station human-factors engineering | Force-feedback steering wheel (motor-simulated real steering resistance), hydraulic pedals (simulated brake-pedal force), multi-screen fused 360° field of view, exterior-mic ambient audio output |
+| Driver management | Multi-stage training (theory + simulator + real vehicle), latency-adaptation training, fatigue detection (facial PERCLOS + control-behavior analysis), forced breaks, performance monitoring |
 
-### 技术栈
-- **操作系统**：安全端 — 航空/汽车级 RTOS（符合 DO-178C/ISO 26262-6）；应用端 — Linux (Yocto/Buildroot) 或 QNX
-- **控制器**：多核汽车级 MCU（Infineon Aurix TC4xx / NXP S32G 等级），锁步双核（Lockstep），ASIL-D 功能安全
-- **网络**：多运营商 4G/5G 蜂窝模块（Quectel RM500/520 系列），多 SIM 卡并行 bonding module
-- **视频**：自研多摄像头 360° 拼接引擎 + GPU 硬件编码器（NVIDIA Jetson Orin / TI TDA4VM 推测）
-- **加密**：端到端加密通道（TLS 1.3 + DTLS-SRTP），疑似基于 WebRTC 或自研协议栈
-- **安全标准**：ISO 26262:2018（功能安全）— ASIL-D 等级；ISO/SAE 21434:2021（网络安全工程）；ISO 21448:2022（SOTIF — 预期功能安全）
-- **AI 训练**：远程驾驶数据闭环 → RLHF（Reinforcement Learning from Human Feedback）→ 端到端自动驾驶模型
-- **人因工程**：延迟可视化补偿系统（专利 US 12,537,921 B2）、Safety Tunnel 机制（专利 US 12,443,182 B2）、远程驾驶员疲劳检测
-- **导航定位**：高精度 GNSS（RTK 厘米级定位）+ IMU 紧耦合 + 轮速计 + 视觉里程计（多传感器融合定位）
+### Tech Stack
+- **OS**: Safety side — aero/automotive-grade RTOS (compliant with DO-178C/ISO 26262-6); application side — Linux (Yocto/Buildroot) or QNX
+- **Controller**: Multi-core automotive-grade MCU (Infineon Aurix TC4xx / NXP S32G class), lockstep dual-core (Lockstep), ASIL-D functional safety
+- **Network**: Multi-carrier 4G/5G cellular modules (Quectel RM500/520 series), multi-SIM parallel bonding module
+- **Video**: Self-developed multi-camera 360° stitching engine + GPU hardware encoder (NVIDIA Jetson Orin / TI TDA4VM speculated)
+- **Encryption**: End-to-end encrypted channel (TLS 1.3 + DTLS-SRTP), suspected to be based on WebRTC or a self-developed protocol stack
+- **Safety standards**: ISO 26262:2018 (functional safety) — ASIL-D level; ISO/SAE 21434:2021 (cybersecurity engineering); ISO 21448:2022 (SOTIF — safety of the intended functionality)
+- **AI training**: Remote-driving data loop → RLHF (Reinforcement Learning from Human Feedback) → end-to-end autonomous-driving model
+- **Human-factors engineering**: Latency-visualization compensation system (patent US 12,537,921 B2), Safety Tunnel mechanism (patent US 12,443,182 B2), remote-driver fatigue detection
+- **Navigation/positioning**: High-precision GNSS (RTK centimeter-level positioning) + IMU tight coupling + wheel-speed odometry + visual odometry (multi-sensor fusion positioning)
 
-### 端到端延迟模型
+### End-to-End Latency Model
 
-Vay 通过 1000+ 次私有场地测试建立的延迟分解模型：
+Vay's latency-decomposition model, established over 1000+ private-venue tests:
 
-| 延迟阶段 | 估算值 | 占比 | 说明 |
+| Latency Stage | Estimate | Share | Notes |
 |---------|--------|------|------|
-| 摄像头曝光 + ISP | ~10-15ms | 5-10% | 全局快门 CMOS + ISP 管线 |
-| 多路 GPU 编码 (H.264/H.265) | ~8-12ms | 4-7% | GPU 硬件编码器，延迟感知策略动态调整 |
-| 多 SIM 并行发送排队 | ~5-15ms | 3-8% | bonding 模块帧级分发至各基带 |
-| 蜂窝上行 (UL) | ~10-30ms | 6-17% | 取决于 4G/5G 网络和信号质量 |
-| Internet 传输 | ~15-50ms | 8-28% | 取决于回程距离和运营商间 peering |
-| 蜂窝下行 (DL) | ~10-20ms | 6-11% | 操控站多 SIM 接收 |
-| 操控站解码 + 拼接 | ~10-15ms | 6-8% | GPU 解码 + 360° 图像拼接 |
-| 操控站渲染 + 延迟可视化叠加 | ~5-8ms | 3-4% | HMI 层可视化叠加 |
-| **总 G2G 延迟** | **~100-200ms** | **100%** | 取决于网络条件和编码策略 |
+| Camera exposure + ISP | ~10-15ms | 5-10% | Global-shutter CMOS + ISP pipeline |
+| Multi-stream GPU encoding (H.264/H.265) | ~8-12ms | 4-7% | GPU hardware encoder, latency-aware policy dynamically adjusts |
+| Multi-SIM parallel send queuing | ~5-15ms | 3-8% | Bonding module frame-level dispatch to each baseband |
+| Cellular uplink (UL) | ~10-30ms | 6-17% | Depends on 4G/5G network and signal quality |
+| Internet transport | ~15-50ms | 8-28% | Depends on backhaul distance and inter-carrier peering |
+| Cellular downlink (DL) | ~10-20ms | 6-11% | Station multi-SIM reception |
+| Station decode + stitching | ~10-15ms | 6-8% | GPU decode + 360° image stitching |
+| Station render + latency-visualization overlay | ~5-8ms | 3-4% | HMI-layer visual overlay |
+| **Total G2G latency** | **~100-200ms** | **100%** | Depends on network conditions and encoding policy |
 
-**延迟阈值分级**（Vay 内部安全等级）：
-- **绿色** (<100ms)：全方位正常操控，延迟可视化叠加透明/正常，驾驶员无补偿行为
-- **黄色** (100-200ms)：提示驾驶员注意，延迟可视化叠加变为半透明放大状态
-- **橙色** (200-400ms)：触发 Phase 1 警告，操控站 HMI 显示红色边框，音频告警
-- **红色** (>400ms)：触发 Phase 2 自动减速至 15km/h
-- **紫红** (>800ms)：触发 Phase 3 安全停车流程
+**Latency-threshold tiers** (Vay internal safety levels):
+- **Green** (<100ms): full normal control, latency-visualization overlay transparent/normal, driver exhibits no compensating behavior
+- **Yellow** (100-200ms): prompt driver to pay attention, latency-visualization overlay becomes semi-transparent and enlarged
+- **Orange** (200-400ms): trigger Phase 1 warning, station HMI shows a red border, audio alarm
+- **Red** (>400ms): trigger Phase 2 auto-decelerate to 15km/h
+- **Magenta** (>800ms): trigger Phase 3 safe-stop sequence
 
-### 多运营商 bonding 数据流模型
+### Multi-Carrier Bonding Data-Flow Model
 
 ```
-编码后的视频帧 (H.264 NAL) → 帧级分发器（每帧复制 N 份，附序列号）
+Encoded video frame (H.264 NAL) → frame-level dispatcher (each frame copied N times, with sequence number)
   → SIM 1 (T-Mobile) → Internet
   → SIM 2 (Vodafone) → Internet
   → SIM 3 (O2) → Internet
-  → SIM 4 (备用) → Internet
-  → 接收端去重（操控站）：序列号滑动窗口，仅处理首个到达，丢弃重复/迟到
-  → GPU 解码 + 360° 拼接
+  → SIM 4 (backup) → Internet
+  → Receiver dedup (station): sequence-number sliding window, process only the first arrival, drop duplicates/late
+  → GPU decode + 360° stitching
 ```
 
-此方案的优势在于不依赖单一运营商链路质量。实测表明在信号弱区（如隧道入口、高层建筑密集区），单一运营商信号可能骤降 10-20dB，但 4 条链路同时发生骤降的概率极低。即使 3 条链路丢包 >10%，第 4 条链路仍可能保持 <5% 丢包率。
+The advantage of this scheme is that it does not depend on any single carrier link's quality. Measurements show that in weak-signal areas (e.g. tunnel entrances, dense high-rise zones), a single carrier's signal may drop 10-20dB, but the probability of all 4 links dropping simultaneously is extremely low. Even if 3 links lose >10% of packets, the 4th link may still keep a <5% packet-loss rate.
 
-### 自研协议栈假设分析
+### Self-Developed Protocol Stack Hypothetical Analysis
 
-基于 Vay 公开的专利文件和技术描述，推测其协议栈设计：
+Based on Vay's published patent filings and technical descriptions, a speculation of its protocol-stack design:
 
-| 层级 | 方案 | 推测依据 |
+| Layer | Scheme | Speculation Basis |
 |------|------|---------|
-| 传输层 | UDP + SCTP (混合) | 需同时支持实时视频（UDP）和可靠控制（SCTP-like） |
-| 会话层 | DTLS 1.3 加密 | 专利中"端到端加密通道"，DTLS 1.3 是唯一合理选择 |
-| 应用层视频 | 自定义 RTP 扩展（带 NTP 时间戳） | 帧头 NTP 时间戳注入专利描述 |
-| 应用层控制 | 自定义二进制协议 | 基于控制通道高频率低开销的需求 |
-| 冗余层 | 帧级多路径分发 + 接收端去重 | Phantom Auto 类似方案，Vay 专利详细描述 |
-| 安全层 | Safety Tunnel 双端校验 | 专利 US 12,443,182 B2 详细描述 |
+| Transport layer | UDP + SCTP (hybrid) | Needs to support real-time video (UDP) and reliable control (SCTP-like) simultaneously |
+| Session layer | DTLS 1.3 encryption | "End-to-end encrypted channel" in the patent, DTLS 1.3 is the only reasonable choice |
+| Application-layer video | Custom RTP extension (with NTP timestamp) | Frame-header NTP timestamp injection described in patent |
+| Application-layer control | Custom binary protocol | Based on the control channel's high-frequency, low-overhead requirements |
+| Redundancy layer | Frame-level multipath dispatch + receiver dedup | Similar to Phantom Auto's approach, described in detail in Vay's patent |
+| Security layer | Safety Tunnel dual-end validation | Described in detail in patent US 12,443,182 B2 |
 
-### 功能安全等级与硬件成本分析
+### Functional-Safety Level & Hardware Cost Analysis
 
-| 安全等级 | 失效概率 (FIT) | 典型硬件成本增量 | 适用场景 |
+| Safety Level | Failure Probability (FIT) | Typical Hardware Cost Delta | Applicable Scenario |
 |---------|---------------|----------------|---------|
-| QM (质量管理) | 无硬性要求 | +0% | 非安全功能 |
-| ASIL-A | <100 FIT | +10-20% | 轻微伤害风险 |
-| ASIL-B | <100 FIT | +20-40% | 中等伤害风险 |
-| ASIL-C | <100 FIT | +50-80% | 严重伤害但可能存活 |
-| ASIL-D | <10 FIT | +100-300% | 致命伤害风险 |
+| QM (quality-managed) | No hard requirement | +0% | Non-safety functions |
+| ASIL-A | <100 FIT | +10-20% | Light injury risk |
+| ASIL-B | <100 FIT | +20-40% | Moderate injury risk |
+| ASIL-C | <100 FIT | +50-80% | Severe injury but survivable |
+| ASIL-D | <10 FIT | +100-300% | Fatal injury risk |
 
-Vay 的 ASIL-D 硬件成本包括：多核锁步 MCU（Infineon Aurix TC4xx 系列，~$30-50/片 vs 普通 ~$5-10）、航空/汽车级 RTOS 认证成本（数百万美元级）、独立 Safety Controller 双倍硬件（额外 BOM $200-500）、TÜV 第三方认证（12-24 个月，数十万欧元）
+Vay's ASIL-D hardware cost includes: multi-core lockstep MCU (Infineon Aurix TC4xx series, ~$30-50/piece vs ordinary ~$5-10), aero/automotive-grade RTOS certification cost (millions-of-dollars scale), independent Safety Controller double hardware (extra BOM $200-500), TÜV third-party certification (12-24 months, hundreds of thousands of euros)
 
-### Vay 安全认证详细解读
+### Detailed Reading of Vay's Safety Certification
 
-ISO 26262:2018 功能安全等级在 Vay 系统中的具体应用：
+How ISO 26262:2018 functional-safety levels are concretely applied in the Vay system:
 
-| 系统组件 | 安全等级 | 实现方式 | 冗余策略 |
+| System Component | Safety Level | Implementation | Redundancy Strategy |
 |---------|---------|---------|---------|
-| Safety Controller (车端) | ASIL-D | 多核锁步 MCU + 航空级 RTOS | 双核锁步 (Lockstep) |
-| Safety Controller (操控站) | ASIL-D | 同型号 MCU + 独立供电 | 与车端互为冗余 |
-| 转向执行器接口 | ASIL-D | EPS 接口双通道 | 双路 CAN 信号 |
-| 制动执行器接口 | ASIL-D | ESP 接口双通道 | 双路 CAN + 模拟备份 |
-| 油门执行器接口 | ASIL-C | ECU 接口单通道 | 闭环监测 |
-| 视频编码器 | QM (非安全) | GPU 硬件编码 | 无（故障仅影响视频质量）|
-| 摄像头系统 | QM (非安全) | 标准摄像头模组 | 多路物理冗余（6+摄像头）|
+| Safety Controller (vehicle) | ASIL-D | Multi-core lockstep MCU + aero-grade RTOS | Dual-core lockstep (Lockstep) |
+| Safety Controller (station) | ASIL-D | Same-model MCU + independent power supply | Mutual redundancy with vehicle side |
+| Steering actuator interface | ASIL-D | EPS interface dual-channel | Dual CAN signals |
+| Brake actuator interface | ASIL-D | ESP interface dual-channel | Dual CAN + analog backup |
+| Throttle actuator interface | ASIL-C | ECU interface single-channel | Closed-loop monitoring |
+| Video encoder | QM (non-safety) | GPU hardware encoding | None (fault only affects video quality) |
+| Camera system | QM (non-safety) | Standard camera module | Multi-path physical redundancy (6+ cameras) |
 
-"非安全"并不意味着不重要——QM 等级的组件故障不会直接导致安全风险，但会导致降级或不可操控。例如摄像头故障触发的是"不可操控→MRM 安全停车"，而非"操控指令错误→事故"。
+"Non-safety" does not mean unimportant — a QM-level component's fault won't directly cause a safety risk, but it will cause degradation or uncontrollability. For example, a camera fault triggers "uncontrollable → MRM safe stop", not "wrong control command → accident".
 
-### Vay 的延迟感知编码策略
+### Vay's Latency-Aware Encoding Policy
 
-Vay 的专利（US 12,537,921 B2）描述了基于网络测量的编码参数自适应策略：
+Vay's patent (US 12,537,921 B2) describes a network-measurement-based encoding-parameter adaptation policy:
 
-| 网络条件 | GOP 配置 | 编码器模式 | 码率分配 | 渲染延迟补偿 |
+| Network Condition | GOP Config | Encoder Mode | Bitrate Allocation | Render-Latency Compensation |
 |---------|---------|-----------|---------|------------|
-| 低延迟 (<100ms) | GOP=1 (全 I 帧) | 高质量模式 | 视频 80% + 余量 20% | 无补偿 |
-| 中等延迟 (100-200ms) | GOP=4 (每 4 帧一个 I) | 标准模式 | 视频 70% + 控制 10% + 余量 20% | 轻度可视化 |
-| 高延迟 (200-400ms) | GOP=4 + B 帧 | 带宽节省模式 | 视频 60% + 控制 10% + 余量 30% | 中度可视化 |
-| 极高延迟 (>400ms) | GOP=8 + B 帧 | 最低延迟模式 | 视频 40% + 控制 10% + 余量 50% | 强烈可视化 |
+| Low latency (<100ms) | GOP=1 (all-I frames) | High-quality mode | Video 80% + headroom 20% | No compensation |
+| Moderate latency (100-200ms) | GOP=4 (one I per 4 frames) | Standard mode | Video 70% + control 10% + headroom 20% | Light visualization |
+| High latency (200-400ms) | GOP=4 + B-frames | Bandwidth-saving mode | Video 60% + control 10% + headroom 30% | Moderate visualization |
+| Extreme latency (>400ms) | GOP=8 + B-frames | Minimum-latency mode | Video 40% + control 10% + headroom 50% | Strong visualization |
 
-此策略的核心：不在网络已差时还追求高视频质量，而是主动降低编码复杂度以留出网络余量（headroom），确保控制指令在有限带宽中优先穿行。
+The core of this policy: when the network is already bad, don't keep chasing high video quality; instead proactively lower encoding complexity to leave network headroom, ensuring control commands get priority passage within the limited bandwidth.
 
-## 3. 功能概览
-### 核心功能模块
+## 3. Feature Overview
+### Core Feature Modules
 
-**远程驾驶核心系统**
-- 远程驾驶站硬件：汽车级物理控制器（力反馈方向盘、液压制动踏板、电子油门、档位选择器、转向灯/喇叭控制）
-- 多屏 360° 环境感知显示 — 6 路摄像头实时拼接，前向 + 左前/右前 + 左后/右后 + 后向覆盖
-- 延迟可视化补偿系统：根据测量到的视频延迟和车辆状态信息，在屏幕上的车辆位置指示器上施加可视化变换
-  - 延迟小（<100ms）：位置指示器保持正常形状和颜色
-  - 延迟中（100-200ms）：位置指示器变大，颜色变为黄色
-  - 延迟大（>200ms）：指示器显著放大，红色边框，伴随闪烁和透明度降低
-  - 目的：帮助驾驶员形成补偿心理模型，无意识地调整操控行为
-- 车外麦克风阵列采集环境声音（4ch 定向音频），传输到驾驶站音频系统（空间音频输出），提供环境感知的听觉维度
+**Remote-driving core system**
+- Remote-driving station hardware: automotive-grade physical controller (force-feedback steering wheel, hydraulic brake pedal, electronic throttle, gear selector, turn-signal/horn control)
+- Multi-screen 360° situational-awareness display — 6-way camera real-time stitching, front + front-left/front-right + rear-left/rear-right + rear coverage
+- Latency-visualization compensation system: based on the measured video latency and vehicle-state information, applies a visualization transform to the on-screen vehicle-position indicator
+  - Small latency (<100ms): position indicator keeps normal shape and color
+  - Medium latency (100-200ms): position indicator grows larger, color turns yellow
+  - Large latency (>200ms): indicator grows markedly, red border, with blinking and reduced transparency
+  - Purpose: help the driver form a compensating mental model, unconsciously adjusting control behavior
+- Exterior-mic array captures ambient sound (4ch directional audio), transmitted to the driving-station audio system (spatial-audio output), providing the auditory dimension of situational awareness
 
-**双 Safety Controller 系统**
-- **操控站端 Safety Controller**：独立于驾驶站主控计算机。接收地图/位置/车辆传感器数据，实时计算操控参数安全边界（最大转向角、最大偏航率、最大加速度/减速度）。所有操控指令在发出前通过 Safety Controller 校验，超出边界 → 拒绝发送 + 告警
-- **车端 Safety Controller**：独立于车端主控计算机。接收相同的输入数据，运行相同的安全边界计算。验证接收到的所有指令是否在边界内。验证失败 → 拦截指令 + 触发 MRM。即使操控站被攻破，车端 Safety Controller 仍可独立确保安全
-- **Safety Tunnel 机制**：安全边界计算逻辑从控制回路中完全独立。安全边界的计算不依赖操控指令内容，仅依赖物理约束（位置、地图道路曲率、路面μ估计、当前速度）。这保证了即使在软件故障或网络攻击下，安全边界仍然成立
+**Dual Safety Controller system**
+- **Station-side Safety Controller**: independent of the station's main control computer. Receives map/position/vehicle-sensor data, computes control-parameter safety boundaries in real time (max steering angle, max yaw rate, max acceleration/deceleration). All control commands pass Safety Controller validation before being sent; out of bounds → reject send + alarm
+- **Vehicle-side Safety Controller**: independent of the vehicle's main control computer. Receives the same input data, runs the same safety-boundary computation. Validates whether all received commands are within bounds. Validation failure → block command + trigger MRM. Even if the station is compromised, the vehicle-side Safety Controller can still independently ensure safety
+- **Safety Tunnel mechanism**: the safety-boundary computation logic is fully independent from the control loop. The safety-boundary computation does not depend on the control-command content, only on physical constraints (position, map road curvature, road-surface μ estimate, current speed). This guarantees that even under software fault or network attack, the safety boundary still holds
 
-**MRM 机制（最小风险操作）**
-- 检测触发条件：视频延迟 > 安全阈值、控制指令丢失 > 阈值、Safety Controller 检测到异常指令、驾驶员疲劳告警未响应
-- 四级逐步降级：
-  - Phase 1：HMI 通知驾驶员延迟/异常，期望驾驶员主动降速
-  - Phase 2：系统自动减速至 15 km/h，保持车道
-  - Phase 3：自动寻找安全停车位置，靠边停车，开启双闪灯
-  - Phase 4：远程诊断，判断是否可恢复操控或需要现场救援
+**MRM mechanism (Minimal Risk Maneuver)**
+- Detect trigger conditions: video latency > safe threshold, control-command loss > threshold, Safety Controller detects abnormal command, driver-fatigue alarm unacknowledged
+- Four-level progressive degradation:
+  - Phase 1: HMI notifies driver of latency/anomaly, expects driver to proactively slow down
+  - Phase 2: system auto-decelerates to 15 km/h, maintains lane
+  - Phase 3: auto-search a safe stopping spot, pull over, turn on hazard lights
+  - Phase 4: remote diagnosis, decide whether control can be recovered or on-site rescue is needed
 
-**多运营商网络冗余**
-- 车端配备 3-4 个蜂窝基带模块，各插不同运营商 SIM 卡
-- **并行发送**：所有 SIM 同时活跃，视频和控制数据在所有通道上同时发送（非 failover 切换）
-- **接收端去重**：操控站端接收所有通道到达的数据包，以序列号去重，取最先到达者
-- **运营商级 bonding**：本质是网络层的 multi-path redundancy，不依赖任何单一运营商
-- 单运营商故障（信号弱、断网）：其他运营商通道无缝继续，丢包增加但不断流
+**Multi-carrier network redundancy**
+- Vehicle is equipped with 3-4 cellular baseband modules, each with a different carrier's SIM card
+- **Parallel send**: all SIMs active simultaneously, video and control data sent on all channels at once (not failover switching)
+- **Receiver dedup**: station-side receives packets arriving on all channels, dedups by sequence number, takes the first-arriving one
+- **Carrier-level bonding**: essentially network-layer multi-path redundancy, does not depend on any single carrier
+- Single-carrier failure (weak signal, network outage): other carrier channels continue seamlessly, packet loss increases but no stream interruption
 
-**AI 训练数据闭环**
-- 每次远程驾驶产生的全量数据：6 路摄像头视频、传感器数据（LiDAR/Radar/IMU/GNSS）、操控指令序列、Safety Controller 干预记录、HMI 操作记录
-- 数据处理：脱敏（人脸/车牌模糊）+ 自动标注（场景分类、行为标注、安全事件标注）
-- RLHF 训练：将远程驾驶员的操作作为"人类反馈"，训练端到端自动驾驶模型（视觉输入 → 控制输出）
-- 目标：通过积累驾驶里程数据，逐步提升 AI 自主驾驶的能力，降低远程人工介入的比例
-- 形成正向飞轮：运营 → 数据 → 模型提升 → 减少人工 → 扩展运营 → 更多数据
+**AI training data loop**
+- Full data produced by each remote drive: 6-way camera video, sensor data (LiDAR/Radar/IMU/GNSS), control-command sequences, Safety Controller intervention records, HMI operation records
+- Data processing: de-identification (face/license-plate blurring) + auto-annotation (scene classification, behavior annotation, safety-event annotation)
+- RLHF training: uses the remote driver's operations as "human feedback" to train an end-to-end autonomous-driving model (visual input → control output)
+- Goal: by accumulating driving-mileage data, progressively improve the AI's autonomous-driving capability, lowering the ratio of remote human intervention
+- Forms a positive flywheel: operation → data → model improvement → less human → expand operation → more data
 
-### 特色功能
-- **延迟可视化补偿**（专利）：不隐藏网络延迟，而是将其量化为 HMI 层可感知的视觉提示，帮助驾驶员形成补偿心理模型。形状变化、大小缩放、颜色渐变、透明度衰减——多维度编码延迟信息
-- **Safety Tunnel**（专利）：将安全边界计算从控制回路中独立出来，确保即使控制指令被篡改也无法超出车辆物理安全包络。提供数学上可验证的安全保证——安全边界的计算仅依赖物理约束，不依赖指令内容
-- **多运营商并行传输**：工业界唯一的 3-4 SIM 卡并行 bonding（非 failover 或负载均衡）。4 条蜂窝链路同时活跃，冗余度 ×4
-- **双 Safety Controller 对等架构**：操控站和车端各自独立运行相同的安全边界计算，互相校验，形成交叉验证
-- **RLHF 数据闭环**：将商业运营直接转化为 AI 训练数据，每次远程驾驶都是模型的一次训练迭代
+### Distinctive Features
+- **Latency-visualization compensation** (patent): doesn't hide network latency, but quantifies it into HMI-layer perceivable visual cues, helping the driver form a compensating mental model. Shape change, size scaling, color gradient, transparency decay — multi-dimensional encoding of latency information
+- **Safety Tunnel** (patent): decouples the safety-boundary computation from the control loop, ensuring that even if control commands are tampered with, they cannot exceed the vehicle's physical safety envelope. Provides a mathematically verifiable safety guarantee — the safety-boundary computation depends only on physical constraints, not on command content
+- **Multi-carrier parallel transport**: the industry's only 3-4 SIM parallel bonding (not failover or load balancing). 4 cellular links active simultaneously, redundancy ×4
+- **Dual Safety Controller peer architecture**: station and vehicle each independently run the same safety-boundary computation, cross-validating each other, forming mutual verification
+- **RLHF data loop**: converts commercial operation directly into AI training data, each remote drive is one training iteration of the model
 
-### 扩展性
-- 技术栈可授权给其他自动驾驶公司（远程接管方案），不限于 Vay 自身的租车业务
-- 支持不同车型适配（通过配置驱动，类似 TUM 的 YAML Vehicle Interface）
-- 远程驾驶站设计可扩展为多车型通用操控台（物理控制器参数可调）
-- AI 训练数据闭环可扩展为多车队数据融合训练
-- ODD 扩展策略：先覆盖高密度城区（蜂窝信号良好），逐步扩展到郊区/高速
+### Extensibility
+- Tech stack can be licensed to other autonomous-driving companies (remote-takeover solution), not limited to Vay's own rental business
+- Supports different vehicle-model adaptation (config-driven, similar to TUM's YAML Vehicle Interface)
+- The remote-driving station design can scale to a multi-model universal console (physical controller parameters adjustable)
+- The AI training data loop can scale to multi-fleet data-fusion training
+- ODD expansion strategy: first cover high-density urban areas (good cellular coverage), progressively expand to suburbs/highways
 
-## 4. 现状与生态
-- **当前版本**：2024 年 1 月起拉斯维加斯商业运营，2025 年持续扩展运营区域。未公开版本号
-- **GitHub Stars / 活跃度**：非开源项目，无 GitHub 仓库
-- **社区规模**：非社区驱动，内部研发团队（规模未公开），核心团队有汽车电子和自动驾驶背景
-- **文档 / SDK / API 生态**：
-  - 技术细节主要公开来源：美国专利商标局（USPTO）专利 — US 12,443,182 B2（Safety Tunnel 机制）、US 12,537,921 B2（延迟感知视频可视化）
-  - TÜV 安全评估报告中描述的系统架构（部分公开）
-  - 官方网站（vay.io）提供产品概述和技术白皮书摘要
-  - 行业会议演讲资料（Automotive World、ITS World Congress 等）
-  - **无公开 SDK/API**：控制协议、网络协议和编码传输细节未公开
-- **已知缺陷或限制**：
-  - ODD（运行设计域）以网络覆盖为首要约束条件：4G 覆盖不足区域无法运营（如地下停车场、偏远区域）
-  - ASIL-D 硬件 + 航空级 RTOS 导致单车改造成本极高（估计 >$50K/车），不适合大规模车队部署
-  - 远程驾驶员培训体系复杂，驾驶员招募和留存是规模化瓶颈
-  - 商业模式受监管环境显著影响：每城市/国家需单独审批（类似 Waymo/Cruise 的部署模式）
-  - 延迟可视化是 HMI 层补偿，物理延迟风险仍然存在——不能替代网络优化
-  - 多运营商蜂窝并行传输增加硬件成本（3-4 个基带模块）+ 月费（多 SIM 卡数据套餐）
-  - 功耗增加：多基带模块同时活跃导致车端功耗上升，对电动车续航有影响
-  - 业务局限：仅限城市低速场景（ODD 限速一般 <50 km/h），不适合高速遥控驾驶
+## 4. Current Status & Ecosystem
+- **Current Version**: Commercial operation in Las Vegas since January 2024, continued operating-area expansion through 2025. Version number not disclosed
+- **GitHub Stars / Activity**: Not an open-source project, no GitHub repository
+- **Community Size**: Not community-driven, internal R&D team (size undisclosed), core team has automotive-electronics and autonomous-driving backgrounds
+- **Docs / SDK / API Ecosystem**:
+  - Main public source of technical details: USPTO patents — US 12,443,182 B2 (Safety Tunnel mechanism), US 12,537,921 B2 (latency-aware video visualization)
+  - System architecture described in the TÜV safety-assessment report (partially public)
+  - Official website (vay.io) provides a product overview and technical-whitepaper summary
+  - Industry-conference talk materials (Automotive World, ITS World Congress, etc.)
+  - **No public SDK/API**: control protocol, network protocol, and encoding-transport details are not disclosed
+- **Known Deficiencies or Limitations**:
+  - ODD (Operational Design Domain) takes network coverage as its primary constraint: areas with insufficient 4G coverage cannot operate (e.g. underground parking, remote areas)
+  - ASIL-D hardware + aero-grade RTOS makes per-vehicle retrofit cost extremely high (estimated >$50K/vehicle), unsuitable for large-scale fleet deployment
+  - Complex remote-driver training system, driver recruitment and retention is a scaling bottleneck
+  - Business model significantly affected by regulatory environment: each city/country needs separate approval (similar to Waymo/Cruise's deployment model)
+  - Latency visualization is an HMI-layer compensation, the physical-latency risk still exists — it cannot replace network optimization
+  - Multi-carrier cellular parallel transport increases hardware cost (3-4 baseband modules) + monthly fees (multi-SIM data plans)
+  - Increased power draw: multiple baseband modules active simultaneously raise vehicle-side power consumption, affecting EV range
+  - Business limitation: urban low-speed scenarios only (ODD speed limit generally <50 km/h), unsuitable for high-speed remote driving
 
-### 商业化运营里程碑
+### Commercialization Operation Milestones
 
-| 时间 | 事件 | 意义 |
+| Time | Event | Significance |
 |------|------|------|
-| 2018 | Vay 在柏林成立 | 创始团队来自柏林工业大学自动驾驶研究组 |
-| 2020 | 内华达州远程驾驶测试许可 | 首次获准在美国公共道路进行远程驾驶测试 |
-| 2021 | 与 TÜV Süd 启动安全认证流程 | 第三方功能安全与网络安全评估启动 |
-| 2022 | 内华达州无安全员远程驾驶许可 | 全球首个面向消费者的无安全员远程驾驶许可 |
-| 2023 | 拉斯维加斯 ODD 定义与验证 | ODD 以网络覆盖定义：仅限 4G/5G 覆盖密集的城区 |
-| 2024-01 | 拉斯维加斯商业运营启动 | "无人代驾租车"服务上线，按分钟计费 |
-| 2024-12 | ODD 扩展 | 扩展至周边更多城区，运营区域扩大约 50% |
-| 2025 | 持续扩展 | 新增更多 Las Vegas 区域，与更多车队合作 |
-| 2025-2026 | B2B 技术授权拓展 | 启动远程驾驶技术栈对外授权业务 |
+| 2018 | Vay founded in Berlin | Founding team from TU Berlin's autonomous-driving research group |
+| 2020 | Nevada remote-driving test permit | First approval to conduct remote-driving tests on US public roads |
+| 2021 | Started safety-certification process with TÜV Süd | Third-party functional-safety and cybersecurity assessment began |
+| 2022 | Nevada safety-operator-free remote-driving permit | World's first consumer-facing safety-operator-free remote-driving permit |
+| 2023 | Las Vegas ODD definition and validation | ODD defined by network coverage: only 4G/5G-coverage-dense urban areas |
+| 2024-01 | Las Vegas commercial operation launch | "Unmanned chauffeur car-rental" service online, per-minute billing |
+| 2024-12 | ODD expansion | Expanded to more surrounding urban areas, operating zone grew ~50% |
+| 2025 | Continued expansion | Added more Las Vegas areas, partnered with more fleets |
+| 2025-2026 | B2B technology-licensing expansion | Started external licensing of the remote-driving tech stack |
 
-### 融资历史与财务背景
+### Financing History & Financial Background
 
-| 轮次 | 金额 | 领投方 | 时间 |
+| Round | Amount | Lead Investor | Time |
 |------|------|--------|------|
-| Seed | €500 万 | Atlantic Labs | 2018 |
-| Series A | €3000 万 | 未确认 | 2019-2020 |
-| Series B | €6000 万 | 未公开 | 2022 |
-| Series C | $4000 万 (推测) | 未公开 | 2024 |
+| Seed | €5M | Atlantic Labs | 2018 |
+| Series A | €30M | Unconfirmed | 2019-2020 |
+| Series B | €60M | Undisclosed | 2022 |
+| Series C | $40M (speculated) | Undisclosed | 2024 |
 
-Vay 至今融资总额估计超过 $1.5 亿美元。其商业模式可持续性仍面临挑战：拉斯维加斯的运营范围有限（城区网络覆盖良好区域），每辆车需配备整套 ASIL-D 远程驾驶设备（成本 >$50K），加上远程驾驶员的培训与薪酬成本，单次远驾驶送车成本远高于传统代驾。
+Vay's total financing to date is estimated at over $150 million. Its business-model sustainability still faces challenges: Las Vegas operating scope is limited (urban areas with good network coverage), each vehicle needs a full set of ASIL-D remote-driving equipment (cost >$50K), plus remote-driver training and salary costs — the cost of a single chauffeur-delivery trip is far higher than a traditional chauffeur.
 
-### 监管与合规背景
+### Regulatory & Compliance Background
 
-- **内华达州 DMW**：远程驾驶测试许可 → 无安全员运营许可，每 12 个月续期
-- **TÜV Süd**：ISO 26262 ASIL-D + ISO/SAE 21434 双重认证，首次认证耗时约 24 个月
-- **FCC**：多 SIM 并行传输设备的无线电频谱合规
-- **ODD 限制**：明确定义网络覆盖要求（4G/5G 信号阈值 + 运营商冗余数），超出 ODD 自动触发 MRM
-- **隐私合规**：远程驾驶过程中所有摄像头数据的处理需符合内华达州和加州隐私法规
+- **Nevada DMV**: remote-driving test permit → safety-operator-free operation permit, renewed every 12 months
+- **TÜV Süd**: ISO 26262 ASIL-D + ISO/SAE 21434 dual certification, first certification took ~24 months
+- **FCC**: radio-spectrum compliance of multi-SIM parallel-transport devices
+- **ODD restrictions**: clearly defined network-coverage requirements (4G/5G signal threshold + carrier redundancy count), exceeding the ODD auto-triggers MRM
+- **Privacy compliance**: processing of all camera data during remote driving must comply with Nevada and California privacy regulations
 
-### 行业影响与认可
+### Industry Impact & Recognition
 
-- 2024 年：获选为 CES 2024 创新产品
-- 2024-2025：被 SAE International 在远程驾驶分级标准制定过程中引用为商业实例
-- 专利组合：已获授权超过 20 项美国专利，涵盖 Safety Tunnel、延迟感知视频可视化、多运营商 bonding、远程驾驶员疲劳管理等核心技术领域
+- 2024: selected as a CES 2024 Innovation Award product
+- 2024-2025: cited by SAE International as a commercial case during the development of remote-driving grading standards
+- Patent portfolio: over 20 granted US patents, covering core technology areas such as Safety Tunnel, latency-aware video visualization, multi-carrier bonding, remote-driver fatigue management
 
-## 5. 市场定位
-- **主要应用行业**：城市出行（按需租车，无人代送）、自动驾驶远程接管（L4 Robotaxi 配套服务）、最后一公里物流配送、车队远程管理
-- **竞品对比简表**：
+## 5. Market Positioning
+- **Main Application Industries**: urban mobility (on-demand rental, unmanned chauffeur-delivery), autonomous-driving remote takeover (L4 Robotaxi companion service), last-mile logistics delivery, fleet remote management
+- **Competitor Comparison Summary**:
 
-| 维度 | Vay | 百度 Apollo 5G 云代驾 | Tesla Remote Assistance | Phantom Auto（已停运）|
+| Dimension | Vay | Baidu Apollo 5G Cloud Chauffeur | Tesla Remote Assistance | Phantom Auto (defunct) |
 |------|-----|----------------------|------------------------|------------------------|
-| 目标场景 | 无人代驾租车 | L4 Robotaxi 远程接管 | L2+ 辅助驾驶远程协助 | 物流/工业远程操控 |
-| 操控模式 | 专业远程驾驶员直接操控 | 多模式（同步/预警/调度/云服务） | 分层干预（建议→指令→直接操控） | 远程操控 + 实时 QoS |
-| 安全认证 | ISO 26262 + ISO 21434 (TÜV) | 安全分层设计 | ISO 21434 | 专利技术方案（无认证）|
-| 驾驶员需求 | 专业远程驾驶员 | 安全员集中监控 | RAO (Remote Assistance Operator) | 专业操作员 |
-| 网络方案 | 多运营商并行 bonding | 5G 单运营商 | 自研连接（推测 Starlink） | 多路径冗余（专利） |
-| 运营时间 | 2024-（拉斯维加斯） | 2020-（中国多城市） | 2025-（Austin） | 2018-2023（已停运） |
-| 商业化 | 有限区域 B2C 服务 | 规模化 Robotaxi 配套 | Robotaxi 附属服务 | 未能持续运营 |
-| 视频延迟方案 | 延迟可视化补偿 (专利) | 多联屏 360° 展示 | 未公开 | 多路径去重 (专利) |
+| Target scenario | Unmanned-chauffeur rental | L4 Robotaxi remote takeover | L2+ assisted-driving remote assist | Logistics/industrial remote control |
+| Control mode | Professional remote driver direct control | Multi-mode (sync/warn/dispatch/cloud service) | Layered intervention (suggest→command→direct control) | Remote control + real-time QoS |
+| Safety certification | ISO 26262 + ISO 21434 (TÜV) | Layered safety design | ISO 21434 | Patented technical solution (no certification) |
+| Driver requirement | Professional remote driver | Safety operator centralized monitoring | RAO (Remote Assistance Operator) | Professional operator |
+| Network scheme | Multi-carrier parallel bonding | 5G single carrier | Self-developed connection (Starlink speculated) | Multipath redundancy (patented) |
+| Operation time | 2024- (Las Vegas) | 2020- (multiple Chinese cities) | 2025- (Austin) | 2018-2023 (defunct) |
+| Commercialization | Limited-zone B2C service | Scaled Robotaxi companion | Robotaxi ancillary service | Failed to sustain operations |
+| Video-latency scheme | Latency-visualization compensation (patented) | Multi-screen 360° display | Undisclosed | Multipath dedup (patented) |
 
-- **定价 / 许可**：B2C 按分钟计费租车（具体价格未公开，推测 $0.5-1.0/min）；B2B 技术授权模式（费用未公开，推测按车辆/年或里程计费）
+- **Pricing / Licensing**: B2C per-minute rental billing (specific price undisclosed, speculated $0.5-1.0/min); B2B technology-licensing model (fee undisclosed, speculated per-vehicle/year or per-mileage billing)
 
-## 6. 产品特色
-1. **全球首个通过 TÜV 安全认证的无安全员远程驾驶许可**：达到 ISO 26262:2018 ASIL-D 功能安全和 ISO/SAE 21434:2021 网络安全双重认证，为行业树立了远程驾驶的合规标杆。这是"可认证的遥操作安全架构"的唯一量产参考
-2. **Safety Tunnel 独立安全边界计算**（专利）：将操控参数的安全物理上限计算从控制回路中完全独立出来——即使软件被攻破、指令被篡改、网络丢包严重，只要物理约束（道路曲率、路面μ、当前速度）不变，安全边界始终成立。提供数学上可验证的安全保证
-3. **延迟可视化补偿系统**（专利）：不试图消除延迟，而是通过 HMI 层多维度视觉编码（形状、大小、颜色、透明度、闪烁频率）将延迟信息传递给驾驶员，帮助驾驶员形成补偿心理模型。这是人因工程在遥操作中最高水平的应用
-4. **双 Safety Controller 对等架构**：操控站和车端各有一个独立的 Safety Controller，运行相同的安全边界计算，互相校验。即使操控站被黑客完全控制，车端 Safety Controller 仍可独立确保安全——这是防御纵深在遥操作安全中的最高实现
-5. **远程驾驶 RLHF 数据闭环**：将商业运营产生的每一英里远程驾驶数据用于训练端到端自动驾驶模型。形成"人工驾驶 → 数据收集 → AI 训练 → 减少人工介入 → 扩展运营 → 更多数据"的正向飞轮
+## 6. Product Distinctions
+1. **World's first safety-operator-free remote-driving permit to pass TÜV safety certification**: reached ISO 26262:2018 ASIL-D functional safety and ISO/SAE 21434:2021 cybersecurity dual certification, setting the compliance benchmark for remote driving in the industry. This is the only mass-production reference for a "certifiable teleoperation safety architecture"
+2. **Safety Tunnel independent safety-boundary computation** (patent): fully decouples the safety physical upper-limit computation of control parameters from the control loop — even if the software is compromised, commands are tampered with, or network packet loss is severe, as long as the physical constraints (road curvature, road-surface μ, current speed) remain unchanged, the safety boundary always holds. Provides a mathematically verifiable safety guarantee
+3. **Latency-visualization compensation system** (patent): doesn't try to eliminate latency, but conveys latency information to the driver via HMI-layer multi-dimensional visual encoding (shape, size, color, transparency, blink rate), helping the driver form a compensating mental model. This is the highest-level application of human-factors engineering in teleoperation
+4. **Dual Safety Controller peer architecture**: the station and the vehicle each have an independent Safety Controller, running the same safety-boundary computation and cross-validating. Even if the station is fully taken over by a hacker, the vehicle-side Safety Controller can still independently ensure safety — this is the highest implementation of defense-in-depth in teleoperation safety
+5. **Remote-driving RLHF data loop**: uses every mile of remote-driving data produced by commercial operation to train the end-to-end autonomous-driving model. Forms a positive flywheel: "manual driving → data collection → AI training → less human intervention → expand operation → more data"
 
-## 7. 对 MediaServo 的参考价值
-### [Adopt] 可直接借鉴
-- **Safety Tunnel 安全边界计算模式**：将操控参数安全上限的计算从指令执行管道中完全独立。MediaServo teleop SDK 应定义 `SafetyEnvelope` trait，在每条控制指令到达车端执行器前通过 `validateInEnvelope()` 校验
-- **双端安全校验**：操控站端 `CommandSanitizer`（发前校验）+ 车端 `SafetyValidator`（收后校验），车端拥有最终否决权。两端独立运行相同逻辑，互为验证
-- **多运营商蜂窝并行传输策略**：`MultiPathTransport` 支持 bonding 模式（并行发送 + 去重），而非 failover
-- **延迟可视化理念**：MediaServo Client 遥操作 UI 模块应将网络延迟量化为 HMI 层可视化提示，而非仅显示数字
-- **Fail-Safe + MRM 四级降级**：连接丢失 → Phase1 通知 → Phase2 减速 → Phase3 停车 → Phase4 恢复
-- **MRM 触发条件明确化**：延迟阈值、丢包阈值、心跳超时、异常指令检测——所有触发条件可配置且可独立启用
-- **端到端加密 + Token 双向认证**：DTLS-SRTP + 应用层 Token 验证
+## 7. Reference Value for MediaServo
+### [Adopt] Directly Borrowable
+- **Safety Tunnel safety-boundary computation pattern**: fully decouple the safety-upper-limit computation of control parameters from the command-execution pipeline. The MediaServo teleop SDK should define a `SafetyEnvelope` trait, validating every control command via `validateInEnvelope()` before it reaches the vehicle-side actuator
+- **Dual-end safety validation**: station-side `CommandSanitizer` (pre-send validation) + vehicle-side `SafetyValidator` (post-receive validation), with the vehicle holding final veto power. Both ends independently run the same logic, mutually verifying
+- **Multi-carrier cellular parallel transport strategy**: `MultiPathTransport` supports bonding mode (parallel send + dedup), not failover
+- **Latency-visualization concept**: the MediaServo Client teleoperation UI module should quantify network latency into HMI-layer visual cues, not just display a number
+- **Fail-Safe + MRM four-level degradation**: connection loss → Phase1 notify → Phase2 decelerate → Phase3 stop → Phase4 recover
+- **Explicit MRM trigger conditions**: latency threshold, packet-loss threshold, heartbeat timeout, abnormal-command detection — all trigger conditions configurable and independently enableable
+- **End-to-end encryption + bidirectional Token auth**: DTLS-SRTP + application-layer Token validation
 
-### [Adapt] 需修改后采用
-- **ASIL-D → 功能安全分级**：Vay 的 ASIL-D 硬件成本极高。MediaServo 需定义自己的 QM/A/B/C/D 功能安全等级，根据部署场景选择适当的安全等级
-- **延迟感知视频编码**：Vay 的自研编码器 → MediaServo 使用 WebRTC GCC + 编码参数动态调整（GOP 1→4、码率 1M→4Mbps、分辨率 480p→1080p）
-- **远程驾驶员培训 → 操作员认证**：Vay 的专业驾驶员培训体系 → MediaServo 的操作员分级认证（Operator Level 0-4：观察员/路径引导/慢速操控/城市操控/全场景操控）
-- **疲劳管理 → 会话时长管理**：Vay 的 <2h 连续操控 + 15min 强制休息 → MediaServo 的 `SessionDurationPolicy`，可配置不同操作等级的时长上限
-- **360° 拼接 → 多路独立视频**：Vay 的多摄像头拼接方案 → MediaServo 采用多路独立视频 + 前端画布合成（而非 GPU 融合），更灵活且降低车端算力要求
-- **RLHF 数据闭环 → 遥操作数据记录**：Vay 的 AI 训练闭环 → MediaServo 实现操作日志记录、回放分析和操作质量评估，不要求达到 AI 训练级别
+### [Adapt] Adopt After Modification
+- **ASIL-D → functional-safety grading**: Vay's ASIL-D hardware cost is extremely high. MediaServo needs to define its own QM/A/B/C/D functional-safety levels, choosing the appropriate safety level per deployment scenario
+- **Latency-aware video encoding**: Vay's self-developed encoder → MediaServo uses WebRTC GCC + dynamic encoding-parameter adjustment (GOP 1→4, bitrate 1M→4Mbps, resolution 480p→1080p)
+- **Remote-driver training → operator certification**: Vay's professional-driver training system → MediaServo's tiered operator certification (Operator Level 0-4: observer / path guidance / low-speed control / urban control / full-scenario control)
+- **Fatigue management → session-duration management**: Vay's <2h continuous control + 15min forced break → MediaServo's `SessionDurationPolicy`, configurable duration limits per operation level
+- **360° stitching → multi independent video streams**: Vay's multi-camera stitching scheme → MediaServo uses multiple independent video streams + front-end canvas compositing (rather than GPU fusion), more flexible and lowering vehicle-side compute requirements
+- **RLHF data loop → teleoperation data recording**: Vay's AI training loop → MediaServo implements operation-log recording, replay analysis, and operation-quality assessment, without requiring AI-training-grade fidelity
 
-### [Avoid] 已知坑 / 不适用场景
-- **ASIL-D 硬件成本过高**：Vay 的单车改造成本（>$50K）对于 MediaServo 的通用多媒体平台不可接受。MediaServo 仅应在关键功能（紧急制动）上达到高安全等级
-- **TÜV 认证耗时级年**：独立第三方安全评估需要 12-24 个月。MediaServo 初期仅需功能正确性验证，安全认证留待商业化阶段
-- **多 SIM 卡硬件 + 月费成本**：3-4 SIM 卡并行方案增加单车成本和月费。MediaServo 应提供可配置的冗余级别（单卡/双卡/多卡）
-- **每城市单独审批**：Vay 的商业模式受各地监管显著影响。MediaServo 作为技术平台，责任边界在软件/协议层面，不涉及道路运营许可
-- **ODD 以网络为第一约束**：Vay 的经验说明网络覆盖是遥操作硬天花板。MediaServo 的设计必须将 `NetworkQualityProfile` 作为功能降级的第一决策因素
-- **延迟可视化不能替代网络优化**：HMI 层的延迟补偿是最后手段，MediaServo 必须在网络层（TURN 中继选优/多路径）、编码层（GCC 自适应/SVC）、HMI 层三管齐下
-- **商业机密限制**：Vay 的核心实现（具体协议格式、双 Safety Controller 通信机制、AI 训练流程）未公开，MediaServo 只能借鉴其公开的架构级别设计原则
-- **功耗与散热**：多基带 + 多 GPU 编码在南半球/夏季车端可能过热，MediaServo 的硬件适配需要关注散热设计
+### [Avoid] Known Pitfalls / Inapplicable Scenarios
+- **ASIL-D hardware cost too high**: Vay's per-vehicle retrofit cost (>$50K) is unacceptable for MediaServo's universal multimedia platform. MediaServo should reach a high safety level only on critical functions (emergency braking)
+- **TÜV certification takes years**: independent third-party safety assessment needs 12-24 months. MediaServo initially needs only functional-correctness verification; safety certification is deferred to the commercialization stage
+- **Multi-SIM hardware + monthly-fee cost**: the 3-4 SIM parallel scheme increases per-vehicle cost and monthly fees. MediaServo should offer configurable redundancy levels (single-card / dual-card / multi-card)
+- **Per-city separate approval**: Vay's business model is significantly affected by local regulation. As a technology platform, MediaServo's responsibility boundary is at the software/protocol layer, not road-operation permits
+- **ODD taking network as the first constraint**: Vay's experience shows network coverage is teleoperation's hard ceiling. MediaServo's design must make `NetworkQualityProfile` the first decision factor for feature degradation
+- **Latency visualization cannot replace network optimization**: HMI-layer latency compensation is the last resort; MediaServo must work on all three layers — network layer (TURN relay selection/multipath), encoding layer (GCC adaptation/SVC), HMI layer
+- **Trade-secret limitations**: Vay's core implementation (specific protocol format, dual Safety Controller communication mechanism, AI training flow) is undisclosed; MediaServo can only borrow its publicly-disclosed architecture-level design principles
+- **Power draw and heat dissipation**: multi-baseband + multi-GPU encoding may overheat the vehicle in the southern hemisphere / summer; MediaServo's hardware adaptation needs attention to thermal design
 
-### [Adopt] 可直接借鉴 (补充)
+### [Adopt] Directly Borrowable (supplement)
 
-- **SafetyEnvelope 安全边界计算独立化**：将操控参数物理上限的计算从指令执行管道中完全独立——安全边界仅依赖物理约束（道路曲率、路面μ估计、当前速度），不依赖指令内容。MediaServo 的 `SafetyValidator` 模块应在控制回路之外独立运行
-- **双端安全校验互为冗余**：操控站端 `CommandSanitizer` 负责发前校验，车端 `SafetyValidator` 负责收后校验。两端独立运行相同的 SafetyEnvelope 计算逻辑，车端拥有最终否决权
-- **多运营商 bonding 而非 failover**：MediaServo 的 `MultiPathTransport` 组件应支持 bonding 模式（并行发送 + 接收端去重），延迟由最快路径决定，而非 failover 的切换开销
-- **延迟可视化的 HMI 编码**：通过颜色、形状、透明度等多维度编码在车辆位置指示器上。MediaServo Client 遥操作 UI 的 `TeleopHmiOverlay` 组件应采用类似的多维度延迟编码策略
-- **MRM 四级降级标准化**：Phase 1(警告) → Phase 2(减速) → Phase 3(停车) → Phase 4(诊断) 作为 MediaServo SDK 的默认 `EmergencyHandler` 实现
-- **DTLS 1.3 + 双向 Token 认证**：所有媒体和控制通道必须经过 DTLS 1.3 加密 + 应用层双向 Token 验证
+- **SafetyEnvelope safety-boundary computation independence**: fully decouple the computation of control parameters' physical upper limits from the command-execution pipeline — the safety boundary depends only on physical constraints (road curvature, road-surface μ estimate, current speed), not on command content. MediaServo's `SafetyValidator` module should run independently outside the control loop
+- **Dual-end safety validation as mutual redundancy**: the station-side `CommandSanitizer` handles pre-send validation, the vehicle-side `SafetyValidator` handles post-receive validation. Both ends independently run the same SafetyEnvelope computation logic, with the vehicle holding final veto power
+- **Multi-carrier bonding, not failover**: MediaServo's `MultiPathTransport` component should support bonding mode (parallel send + receiver dedup), with latency determined by the fastest path rather than failover's switching overhead
+- **Latency-visualization HMI encoding**: encode via color, shape, transparency and other dimensions onto the vehicle-position indicator. MediaServo Client teleoperation UI's `TeleopHmiOverlay` component should adopt a similar multi-dimensional latency-encoding strategy
+- **MRM four-level degradation standardization**: Phase 1(warning) → Phase 2(decelerate) → Phase 3(stop) → Phase 4(diagnose) as the default `EmergencyHandler` implementation in the MediaServo SDK
+- **DTLS 1.3 + bidirectional Token auth**: all media and control channels must pass DTLS 1.3 encryption + application-layer bidirectional Token validation
 
-### [Adapt] 需修改后采用 (补充)
+### [Adapt] Adopt After Modification (supplement)
 
-- **ASIL-D → 分级功能安全**：定义 QM/A/B/C/D 多个功能安全等级，不同部署场景选择适当等级。低速室内机器人用 QM，公共道路低速车辆用 ASIL-B，高速场景用 ASIL-C/D
-- **360° GPU 拼接 → 前端画布合成**：传输多路独立视频，在操控端用 WebGL/Canvas 2D 合成 360° 视图。降低车端算力要求，前端可按需切换显示布局
-- **延迟感知编码策略 → WebRTC GCC 动态码率**：利用 WebRTC 内置 GCC，结合 Transport-CC RTP 扩展实现码率自适应。编码插件应支持 `EncoderDynamicConfig` trait
-- **RLHF 数据闭环 → TeleopDataCollector + ReplayAnalyzer**：MediaServo 初期实现操作日志记录、回放分析和操作质量评估的轻量版本。`TeleopDataCollector` 按时间戳对齐记录视频+控制+遥测数据
-- **专业驾驶员培训 → OperatorLevel 分级认证**：Operator Level 0(观察员) / 1(路径引导) / 2(低速操控 <30km/h) / 3(城市全速) / 4(全场景)
-- **疲劳管理 → SessionDurationPolicy**：可配置的策略——不同 OperatorLevel 有不同的时长上限，可根据操控场景调整
+- **ASIL-D → graded functional safety**: define multiple functional-safety levels QM/A/B/C/D, choosing the appropriate level per deployment scenario. Low-speed indoor robots use QM, public-road low-speed vehicles use ASIL-B, high-speed scenarios use ASIL-C/D
+- **360° GPU stitching → front-end canvas compositing**: transmit multiple independent video streams, composite a 360° view on the operator side with WebGL/Canvas 2D. Lowers vehicle-side compute requirements; front-end can switch display layout on demand
+- **Latency-aware encoding policy → WebRTC GCC dynamic bitrate**: leverage WebRTC's built-in GCC, combined with the Transport-CC RTP extension for bitrate adaptation. The encoding plugin should support an `EncoderDynamicConfig` trait
+- **RLHF data loop → TeleopDataCollector + ReplayAnalyzer**: MediaServo initially implements a lightweight version of operation-log recording, replay analysis, and operation-quality assessment. `TeleopDataCollector` records video + control + telemetry data aligned by timestamp
+- **Professional-driver training → OperatorLevel tiered certification**: Operator Level 0(observer) / 1(path guidance) / 2(low-speed control <30km/h) / 3(urban full-speed) / 4(full-scenario)
+- **Fatigue management → SessionDurationPolicy**: a configurable policy — different OperatorLevels have different duration limits, adjustable per control scenario
 
-### [Avoid] 已知坑 / 不适用场景 (补充)
+### [Avoid] Known Pitfalls / Inapplicable Scenarios (supplement)
 
-- **TÜV 安全认证耗时不可承受**：独立第三方安全评估需要 12-24 个月，费用数十万至数百万欧元。MediaServo 初期仅需功能正确性验证，安全认证留待商业化阶段
-- **多 SIM 卡硬件成本不可推广**：3-4 个蜂窝基带模块 + 数据套餐月费大幅增加单车成本。MediaServo 应提供可配置的冗余级别：单卡/双卡/多卡
-- **每城市单独审批模式不可扩展**：Vay 的商业模式受各地监管显著影响。MediaServo 是技术平台，责任边界在软件/协议层面，不涉及道路运营许可
-- **延迟可视化不能替代网络优化**：HMI 层的延迟补偿是最后防线。MediaServo 必须在网络层（TURN 中继选优）、传输层（WebRTC GCC）、HMI 层三管齐下
-- **ODD 以网络为第一约束**：MediaServo 的 `NetworkQualityProfile` 必须作为功能降级的第一决策因素
-- **商业机密限制**：Vay 核心实现未公开，MediaServo 只能借鉴架构设计原则，具体实现必须自主设计
-- **功耗与散热不可忽视**：多基带模块 + GPU 编码在夏季高温环境中可能导致车端过热
+- **TÜV safety-certification time cost unbearable**: independent third-party safety assessment needs 12-24 months, costing hundreds of thousands to millions of euros. MediaServo initially needs only functional-correctness verification; safety certification is deferred to the commercialization stage
+- **Multi-SIM hardware cost not generalizable**: 3-4 cellular baseband modules + data-plan monthly fees greatly increase per-vehicle cost. MediaServo should offer configurable redundancy levels: single-card / dual-card / multi-card
+- **Per-city separate-approval model not scalable**: Vay's business model is significantly affected by local regulation. MediaServo is a technology platform, its responsibility boundary is at the software/protocol layer, not road-operation permits
+- **Latency visualization cannot replace network optimization**: HMI-layer latency compensation is the last line of defense. MediaServo must work on all three layers — network layer (TURN relay selection), transport layer (WebRTC GCC), HMI layer
+- **ODD taking network as the first constraint**: MediaServo's `NetworkQualityProfile` must be the first decision factor for feature degradation
+- **Trade-secret limitations**: Vay's core implementation is undisclosed; MediaServo can only borrow architecture-design principles, the specific implementation must be self-designed
+- **Power draw and heat dissipation cannot be ignored**: multi-baseband modules + GPU encoding may overheat the vehicle in hot summer environments
 
-### [Adopt] 可直接借鉴 (补充二)
+### [Adopt] Directly Borrowable (supplement two)
 
-- **控制指令四级超时响应**：Phase 1(50-100ms 保持最后指令) → Phase 2(100-300ms 方向盘回中+油门归零) → Phase 3(300-2000ms 全功率制动) → Phase 4(>2000ms 安全停车+双闪)。MediaServo 的 `TimeoutHandler` 组件应实现此四级超时作为默认安全策略
-- **车端看门狗定时器**：独立于主控制器的硬件看门狗，在安全控制器无响应时触发车辆安全停车。MediaServo Vehicle Agent 应实现 `HardwareWatchdog` 与 `SoftwareWatchdog` 双级看门狗
-- **操控指令来源认证**：每条控制指令携带唯一操作员标识和序列号，车端校验来源合法性。MediaServo 的 `ControlCommand` 结构体应包含 `operator_id` 字段
+- **Control-command four-level timeout response**: Phase 1(50-100ms hold last command) → Phase 2(100-300ms steering-center + throttle-zero) → Phase 3(300-2000ms full-power braking) → Phase 4(>2000ms safe stop + hazards). MediaServo's `TimeoutHandler` component should implement this four-level timeout as the default safety policy
+- **Vehicle-side watchdog timer**: a hardware watchdog independent of the main controller, triggering a vehicle safe-stop when the safety controller is unresponsive. The MediaServo Vehicle Agent should implement a two-level watchdog of `HardwareWatchdog` and `SoftwareWatchdog`
+- **Control-command source authentication**: each control command carries a unique operator ID and sequence number, with the vehicle validating source legitimacy. MediaServo's `ControlCommand` struct should include an `operator_id` field
 
-### [Adapt] 需修改后采用 (补充二)
+### [Adapt] Adopt After Modification (supplement two)
 
-- **Vay 的 6 摄像头 360° 方案 → MediaServo 的模块化多摄像头架构**：Vay 使用固定 6 路摄像头（前向+左前/右前+左后/右后+后向）。MediaServo 应设计 `CameraConfig` 可配置的摄像头布局，支持 2-8 路摄像头，布局由部署场景决定
-- **Vay 的专用硬件操控站 → MediaServo 的通用 Client 操控模式**：Vay 使用定制的力反馈方向盘+液压踏板+多联屏。MediaServo Client 应支持多种操控模式——游戏手柄（入门）、键盘+鼠标（标准）、方向盘+踏板（专业）、触屏手势（移动端）
-- **Vay 的 Safety Controller 双端心跳 → MediaServo 的 RTCDataChannel 心跳通道**：双 Safety Controller 之间的专用心跳信号（安全关键）。MediaServo 使用独立的 RTCDataChannel 心跳通道（2Hz, 5 字节最小包），在应用层实现同等功能
+- **Vay's 6-camera 360° scheme → MediaServo's modular multi-camera architecture**: Vay uses a fixed 6-way camera setup (front + front-left/front-right + rear-left/rear-right + rear). MediaServo should design a configurable `CameraConfig` camera layout, supporting 2-8 cameras, layout determined by the deployment scenario
+- **Vay's dedicated hardware driving station → MediaServo's universal Client control mode**: Vay uses a custom force-feedback steering wheel + hydraulic pedals + multi-screen. MediaServo Client should support multiple control modes — gamepad (entry), keyboard+mouse (standard), wheel+pedals (professional), touchscreen gestures (mobile)
+- **Vay's Safety Controller dual-end heartbeat → MediaServo's RTCDataChannel heartbeat channel**: a dedicated heartbeat signal between the dual Safety Controllers (safety-critical). MediaServo uses an independent RTCDataChannel heartbeat channel (2Hz, 5-byte minimum packet), achieving equivalent functionality at the application layer
 
-### [Avoid] 已知坑 / 不适用场景 (补充二)
+### [Avoid] Known Pitfalls / Inapplicable Scenarios (supplement two)
 
-- **Vay 的 ASIL-D 安全控制器不可直接采购**：Infineon Aurix TC4xx 系列 MCU 的采购周期长（12-20 周）、批量价格高（$30-50/片）、开发工具链复杂。MediaServo 初期应优先使用工业级 MCU（STM32H7/NXP i.MX RT 系列）实现功能安全子集
-- **Vay 的远程驾驶员培训体系不可复制**：多阶段培训（理论+模拟器+实车+延迟适应训练）需要数周时间和专用场地。MediaServo 的操作员认证应基于模拟器评估和在线培训，降低培训门槛
-- **Vay 的商业模式受保险和法律约束**：远程驾驶的保险定价和事故责任认定在全球范围内尚无统一标准。MediaServo 作为技术平台，需在服务协议中明确责任边界
+- **Vay's ASIL-D safety controller cannot be directly procured**: Infineon Aurix TC4xx series MCUs have long procurement lead times (12-20 weeks), high volume prices ($30-50/piece), and a complex dev toolchain. MediaServo should initially prioritize industrial-grade MCUs (STM32H7 / NXP i.MX RT series) to implement a functional-safety subset
+- **Vay's remote-driver training system cannot be replicated**: multi-stage training (theory + simulator + real vehicle + latency-adaptation training) needs weeks and dedicated venues. MediaServo's operator certification should be based on simulator assessment and online training, lowering the training barrier
+- **Vay's business model is bound by insurance and law**: remote-driving insurance pricing and accident-liability determination have no unified global standard. As a technology platform, MediaServo must clearly define the responsibility boundary in its service agreements
 
-**总体评分**：★★★★★ (5/5)
-— 作为商业化远程驾驶的行业标杆，Vay 提供了最完整的遥操作安全架构参考。Safety Tunnel 的独立安全边界计算、双 Safety Controller 对等校验、多运营商并行传输和延迟可视化补偿是 MediaServo 遥操作安全设计的核心参考来源。唯一遗憾是核心技术闭源，具体实现无法直接复用。
-**相关决策**: D73, D77, D15, D96, D117, D62-D63
+**Overall Rating**: ★★★★★ (5/5)
+— As the industry benchmark for commercialized remote driving, Vay provides the most complete teleoperation safety-architecture reference. The Safety Tunnel's independent safety-boundary computation, dual Safety Controller peer validation, multi-carrier parallel transport, and latency-visualization compensation are the core reference sources for MediaServo's teleoperation safety design. The only regret is that the core technology is closed-source, so the specific implementation cannot be directly reused.
+**Related Decisions**: D73, D77, D15, D96, D117, D62-D63
 
 
-## 附录
-### A. Safety Tunnel 安全边界计算模型
+## Appendix
+### A. Safety Tunnel Safety-Boundary Computation Model
 ```
-输入: 位置 (lat, lon), 地图数据 (道路曲率), 车辆状态 (速度, 偏航率), 路面估计 (μ)
-输出: SafetyEnvelope { max_steering_angle, max_yaw_rate, max_acceleration, max_deceleration }
+Input: position (lat, lon), map data (road curvature), vehicle state (speed, yaw rate), road-surface estimate (μ)
+Output: SafetyEnvelope { max_steering_angle, max_yaw_rate, max_acceleration, max_deceleration }
 
-计算逻辑 (独立于控制指令内容):
+Computation logic (independent of command content):
   1. max_steering_angle = f(road_curvature) × μ_factor × speed_factor
-     ─ 道路越弯 → 允许的转向角越小
-     ─ 路面越滑 → 安全裕度越大 (μ 系数)
-     ─ 速度越高 → 允许的转向角越小 (v² 反比)
+     — The curvier the road → the smaller the allowed steering angle
+     — The more slippery the surface → the larger the safety margin (μ factor)
+     — The higher the speed → the smaller the allowed steering angle (∝ 1/v²)
   2. max_yaw_rate = sqrt(max_lateral_acc × road_curvature)
-     ─ 基于横向加速度上限 (默认 3.0 m/s², 雨天 1.5 m/s²)
+     — Based on lateral-acceleration upper limit (default 3.0 m/s², rainy 1.5 m/s²)
   3. max_acceleration = min(engine_torque_curve, μ × g × weight_transfer)
-     ─ 不超过路面摩擦力上限和发动机扭矩曲线
+     — Not exceeding road-surface friction limit and engine torque curve
   4. max_deceleration = min(brake_capacity, μ × g × weight_transfer)
-     ─ 不超过制动系统能力和路面附着力
+     — Not exceeding brake-system capacity and road-surface grip
 
-校验流程:
+Validation flow:
   for each command:
     if |command.steering_angle| > envelope.max_steering_angle → REJECT
     if |command.yaw_rate| > envelope.max_yaw_rate → REJECT
@@ -458,16 +487,16 @@ Vay 至今融资总额估计超过 $1.5 亿美元。其商业模式可持续性�
     else → FORWARD (with envelope-bounded values if LIMIT mode)
 ```
 
-### B. MRM 四级降级时序
-| Phase | 触发条件 | 动作 | 持续时间 | 恢复条件 |
+### B. MRM Four-Level Degradation Timing
+| Phase | Trigger Condition | Action | Duration | Recovery Condition |
 |-------|---------|------|---------|---------|
-| Phase 0 | 正常操控 | 全功能操控 | 无限 | N/A |
-| Phase 1 | 延迟 >200ms 或 丢包>2% | HMI 黄色告警 + 音频提醒 | 持续至恢复或升级 | 延迟恢复 <100ms 且丢包<1% |
-| Phase 2 | 延迟 >400ms 或 丢包>5% (持续3s) | 自动减速至15km/h, 保持车道 | 10-30s | 延迟恢复 <200ms |
-| Phase 3 | 延迟 >800ms 或 丢包>10% (持续1s) | 寻找安全位置停车 + 双闪 | 20-60s | 现场救援或远程诊断 |
-| Phase 4 | 停车完成 | 远程诊断 + 尝试恢复 + 呼叫现场 | 至恢复 | 远程诊断通过且网络恢复 |
+| Phase 0 | Normal control | Full-function control | Unlimited | N/A |
+| Phase 1 | Latency >200ms or loss >2% | HMI yellow alarm + audio prompt | Until recovery or escalation | Latency recovers <100ms and loss <1% |
+| Phase 2 | Latency >400ms or loss >5% (sustained 3s) | Auto-decelerate to 15km/h, maintain lane | 10-30s | Latency recovers <200ms |
+| Phase 3 | Latency >800ms or loss >10% (sustained 1s) | Find safe spot to stop + hazards | 20-60s | On-site rescue or remote diagnosis |
+| Phase 4 | Stop complete | Remote diagnosis + attempt recovery + call on-site | Until recovery | Remote diagnosis passed and network recovered |
 
-### C. 多运营商并行传输去重算法
+### C. Multi-Carrier Parallel Transport Dedup Algorithm
 ```rust
 struct MultiPathReceiver {
     last_seq: u16,
@@ -475,18 +504,18 @@ struct MultiPathReceiver {
 }
 
 fn on_packet(&mut self, seq: u16, data: &[u8]) -> Option<&[u8]> {
-    // 取最先到达的包，以序列号去重
+    // Take the first-arriving packet, dedup by sequence number
     if self.dedup_window.contains(&seq) {
-        return None; // 已接收过 (其他通道更早到达)
+        return None; // Already received (arrived earlier on another channel)
     }
-    // 处理序列号回绕 (u16 0-65535)
+    // Handle sequence-number wraparound (u16 0-65535)
     let is_newer = seq.wrapping_sub(self.last_seq) < 32768;
     if !is_newer && seq != self.last_seq {
-        return None; // 旧包，丢弃
+        return None; // Old packet, drop
     }
     self.last_seq = seq;
     self.dedup_window.insert(seq);
-    // 滑动窗口清理 (保留最近 1000 个序列号)
+    // Sliding-window cleanup (keep the most recent 1000 sequence numbers)
     if self.dedup_window.len() > 1000 {
         let oldest = seq.wrapping_sub(500);
         self.dedup_window.retain(|&s| s.wrapping_sub(oldest) < 500);
@@ -495,14 +524,14 @@ fn on_packet(&mut self, seq: u16, data: &[u8]) -> Option<&[u8]> {
 }
 ```
 
-### D. Vay vs MediaServo 安全架构映射
-| Vay 组件 | MediaServo 对应 | 实现优先级 |
+### D. Vay vs MediaServo Safety-Architecture Mapping
+| Vay Component | MediaServo Correspondent | Implementation Priority |
 |----------|---------------|-----------|
-| Safety Tunnel | SafetyEnvelope trait | P0 (核心安全) |
-| 双 Safety Controller | CommandSanitizer (操控站) + SafetyValidator (车端) | P0 (双端校验) |
-| MRM 四级降级 | SessionManager + EmergencyHandler | P0 (故障处理) |
-| 延迟可视化 | TeleopHMI Overlay (延迟→颜色/形状/透明度) | P1 (UX 增强) |
-| 多运营商并行 | MultiPathTransport (bonding 模式) | P1 (可靠性) |
-| RLHF 数据闭环 | TeleopDataCollector + ReplayAnalyzer | P2 (质量分析) |
-| 驾驶员疲劳管理 | OperatorSessionPolicy | P2 (操作员管理) |
-| 多摄像头 360° 拼接 | MultiStreamCompositor (前端画布合成) | P2 (视觉体验) |
+| Safety Tunnel | SafetyEnvelope trait | P0 (core safety) |
+| Dual Safety Controller | CommandSanitizer (station) + SafetyValidator (vehicle) | P0 (dual-end validation) |
+| MRM four-level degradation | SessionManager + EmergencyHandler | P0 (fault handling) |
+| Latency visualization | TeleopHMI Overlay (latency → color/shape/transparency) | P1 (UX enhancement) |
+| Multi-carrier parallel | MultiPathTransport (bonding mode) | P1 (reliability) |
+| RLHF data loop | TeleopDataCollector + ReplayAnalyzer | P2 (quality analysis) |
+| Driver fatigue management | OperatorSessionPolicy | P2 (operator management) |
+| Multi-camera 360° stitching | MultiStreamCompositor (front-end canvas compositing) | P2 (visual experience) |

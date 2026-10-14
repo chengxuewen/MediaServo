@@ -32,7 +32,7 @@ pub(crate) struct WebrtcSysPc {
     pc: cxx::SharedPtr<webrtc_sys::peer_connection::ffi::PeerConnection>,
     callbacks: Arc<ObserverCallbacks>,
     local_sdp: Arc<std::sync::Mutex<Option<String>>>,
-    /// v2: factory 引用（capabilities 查询需要）
+    /// v2: the factory reference (capabilities queries need it)
     factory: cxx::SharedPtr<webrtc_sys::peer_connection_factory::ffi::PeerConnectionFactory>,
 }
 
@@ -50,7 +50,7 @@ fn make_ctx<T: Send + 'static>(
 }
 
 /// Helper: extract a oneshot sender from a PeerContext via downcast.
-#[allow(clippy::boxed_local)] // Box<PeerContext> = ffi 回调签名定（类型擦除），不收口
+#[allow(clippy::boxed_local)] // Box<PeerContext> is fixed by the ffi callback signature (type erasure), not collapsible
 fn extract_tx<T: Send + 'static>(
     ctx: Box<webrtc_sys::peer_connection::PeerContext>,
 ) -> tokio::sync::oneshot::Sender<T> {
@@ -59,10 +59,10 @@ fn extract_tx<T: Send + 'static>(
         .unwrap_or_else(|_| panic!("PeerContext downcast failed"))
 }
 
-/// 解析 libwebrtc getStats ToJson（数组）→ outbound-rtp RTCStats。
-/// 字段: framesEncoded/framesPerSecond/frameWidth/frameHeight/encoderImplementation（Oracle F2 实证）。
-/// S2c：libwebrtc inbound-rtp 记录解析（收侧二分判据：packetsReceived vs framesDecoded）。
-#[allow(clippy::unnecessary_filter_map)] // 解析闭包恒 Some = 字面直观，改 map 需动收尾括号组
+/// Parse a libwebrtc getStats ToJson (array) -> outbound-rtp RTCStats.
+/// Fields: framesEncoded/framesPerSecond/frameWidth/frameHeight/encoderImplementation (proven by Oracle F2).
+/// S2c: libwebrtc inbound-rtp record parsing (the receive-side bisection predicate: packetsReceived vs framesDecoded).
+#[allow(clippy::unnecessary_filter_map)] // the parse closure is always Some = literally obvious; changing to map means touching the closing brace group
 fn parse_inbound_stats_json(json: &str) -> Vec<crate::stats::RTCStats> {
     use crate::stats::{RTCInboundRtpStreamStats, RTCStats};
     let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(json) else {
@@ -88,10 +88,7 @@ fn parse_inbound_stats_json(json: &str) -> Vec<crate::stats::RTCStats> {
                 frame_height: v.get("frameHeight").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
                 frames_per_second: v.get("framesPerSecond").and_then(|x| x.as_f64()).unwrap_or(0.0),
                 jitter: v.get("jitter").and_then(|x| x.as_f64()).unwrap_or(0.0),
-                total_decode_time: v
-                    .get("totalDecodeTime")
-                    .and_then(|x| x.as_f64())
-                    .unwrap_or(0.0),
+                total_decode_time: v.get("totalDecodeTime").and_then(|x| x.as_f64()).unwrap_or(0.0),
                 frame_dropped: v.get("frameDropped").and_then(|x| x.as_u64()).unwrap_or(0),
                 nack_count: v.get("nackCount").and_then(|x| x.as_u64()).unwrap_or(0),
                 pli_count: v.get("pliCount").and_then(|x| x.as_u64()).unwrap_or(0),
@@ -101,7 +98,7 @@ fn parse_inbound_stats_json(json: &str) -> Vec<crate::stats::RTCStats> {
         .collect()
 }
 
-#[allow(clippy::unnecessary_filter_map)] // 同上
+#[allow(clippy::unnecessary_filter_map)] // same as above
 fn parse_outbound_stats_json(json: &str) -> Vec<crate::stats::RTCStats> {
     use crate::stats::{RTCOutboundRtpStreamStats, RTCStats};
     let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(json) else {
@@ -125,7 +122,7 @@ fn parse_outbound_stats_json(json: &str) -> Vec<crate::stats::RTCStats> {
                 frame_width: v.get("frameWidth").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
                 frame_height: v.get("frameHeight").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
                 frames_per_second: v.get("framesPerSecond").and_then(|x| x.as_f64()).unwrap_or(0.0),
-                // v3 (encode-time-stats T2): W3C outbound-rtp 标准字段 totalEncodeTime（秒）
+                // v3 (encode-time-stats T2): the W3C outbound-rtp standard field totalEncodeTime (seconds)
                 total_encode_time: v.get("totalEncodeTime").and_then(|x| x.as_f64()),
             }))
         })
@@ -143,7 +140,7 @@ fn map_sdp_type(st: webrtc_sys::jsep::ffi::SdpType) -> RTCSdpType {
     }
 }
 
-// ── v2: webrtc-sys RtpParameters → crate RTCRtpParameters 映射 ──
+// -- v2: webrtc-sys RtpParameters -> crate RTCRtpParameters mapping --
 fn map_rtp_parameters(
     p: webrtc_sys::rtp_parameters::ffi::RtpParameters,
 ) -> crate::rtp::RTCRtpParameters {
@@ -159,7 +156,7 @@ fn map_rtp_parameters(
             payload_type: c.payload_type as u8,
             clock_rate: c.clock_rate.max(0) as u32,
             channels: if c.has_num_channels { Some(c.num_channels as u16) } else { None },
-            // PIT-54: mediasoup 严格按 codec parameters 匹配 (packetization-mode/profile-level-id)
+            // PIT-54: mediasoup matches strictly on codec parameters (packetization-mode/profile-level-id)
             // webrtc-sys RtpCodecParameters.parameters (Vec<StringKeyValue>) -> sdp_fmtp_line
             sdp_fmtp_line: if c.parameters.is_empty() {
                 None
@@ -223,7 +220,7 @@ fn map_rtp_parameters(
     }
 }
 
-// ── qos-framerate-priority: crate 枚举 → vendor 枚举映射（私有，vendor 类型不出边界） ──
+// -- qos-framerate-priority: crate enum -> vendor enum mapping (private; vendor types never cross the boundary) --
 fn map_pref(
     p: crate::rtp::RTCDegradationPreference,
 ) -> webrtc_sys::rtp_parameters::ffi::DegradationPreference {
@@ -246,7 +243,7 @@ fn map_hint(h: crate::rtp::RTCRtpContentHint) -> webrtc_sys::video_track::ffi::C
     }
 }
 
-// ── v2: webrtc-sys RtpCapabilities → crate RTCRtpCapabilities 映射 ──
+// -- v2: webrtc-sys RtpCapabilities -> crate RTCRtpCapabilities mapping --
 fn map_rtp_capabilities(
     c: webrtc_sys::rtp_parameters::ffi::RtpCapabilities,
 ) -> crate::rtp::RTCRtpCapabilities {
@@ -258,8 +255,8 @@ fn map_rtp_capabilities(
             mime_type: cc.mime_type.clone(),
             clock_rate: if cc.has_clock_rate { Some(cc.clock_rate.max(0) as u32) } else { None },
             channels: if cc.has_num_channels { Some(cc.num_channels as u16) } else { None },
-            // v2 (set-codec-preferences T2): fmtp 还原 — 复用 map_rtp_parameters:84-91 序列化模式,
-            // libwebrtc 匹配是精确 map 相等 (MatchesCapability), 往返必须字节精确。
+            // v2 (set-codec-preferences T2): fmtp restoration -- reuses map_rtp_parameters:84-91's serialization pattern;
+            // libwebrtc matching is exact map equality (MatchesCapability); the round trip must be byte-exact.
             sdp_fmtp_line: if cc.parameters.is_empty() {
                 None
             } else {
@@ -284,7 +281,7 @@ fn map_rtp_capabilities(
     crate::rtp::RTCRtpCapabilities { codecs, header_extensions }
 }
 
-/// 解析 "k=v;k=v" fmtp 行 → webrtc-sys StringKeyValue 列表（setCodecPreferences 输入）。
+/// Parse a "k=v;k=v" fmtp line -> a webrtc-sys StringKeyValue list (the setCodecPreferences input).
 fn parse_fmtp_line(line: &str) -> Vec<webrtc_sys::rtp_parameters::ffi::StringKeyValue> {
     line.split(';')
         .filter(|s| !s.trim().is_empty())
@@ -298,8 +295,8 @@ fn parse_fmtp_line(line: &str) -> Vec<webrtc_sys::rtp_parameters::ffi::StringKey
         .collect()
 }
 
-// ── v2 (set-codec-preferences T1): crate RTCRtpCodecCapability → webrtc-sys RtpCodecCapability 映射 ──
-// 注意: webrtc-sys to_native 忽略 mime_type（rtp_parameters.cpp:47 实证）→ 必须显式填 name + kind。
+// -- v2 (set-codec-preferences T1): crate RTCRtpCodecCapability -> webrtc-sys RtpCodecCapability mapping --
+// note: webrtc-sys to_native ignores mime_type (proven at rtp_parameters.cpp:47) -> name + kind must be filled explicitly.
 fn map_codec_capability_to_sys(
     c: &crate::rtp::RTCRtpCodecCapability,
 ) -> webrtc_sys::rtp_parameters::ffi::RtpCodecCapability {
@@ -310,7 +307,7 @@ fn map_codec_capability_to_sys(
                 if c.mime_type.starts_with("video/") { MediaType::Video } else { MediaType::Audio };
             (name.to_string(), kind)
         }
-        // ponytail: 无斜杠的 mime 按 video 处理（调用方应传完整 mime）
+        // ponytail: a slashless mime is treated as video (callers should pass a full mime)
         None => (c.mime_type.clone(), MediaType::Video),
     };
     let parameters = c.sdp_fmtp_line.as_deref().map(parse_fmtp_line).unwrap_or_default();
@@ -655,8 +652,8 @@ impl PcBackend for WebrtcSysPc {
         Ok(out)
     }
 
-    /// W3C addTransceiver(kind, init) — 无 track 版（消费侧 recvonly 必需）。
-    /// libwebrtc 原生 AddTransceiver(MediaType, init) 支持 recvonly 纯接收。
+    /// W3C addTransceiver(kind, init) -- the no-track variant (required by the consume side's recvonly).
+    /// libwebrtc's native AddTransceiver(MediaType, init) supports pure-receive recvonly.
     fn add_transceiver(
         &self,
         kind: crate::track::TrackKind,
@@ -691,7 +688,7 @@ impl PcBackend for WebrtcSysPc {
                 kind2,
             ),
         ));
-        // 无 track → 无 sender
+        // no track -> no sender
         let sender = crate::rtp::RTCRtpSender::new(crate::track::TrackRef::Receiver(
             crate::track::TrackReceiver::new(
                 format!("sys-send-{}", mid.as_deref().unwrap_or("")),
@@ -715,7 +712,7 @@ impl PcBackend for WebrtcSysPc {
         init: &crate::rtp::RTCRtpTransceiverInit,
     ) -> Result<crate::rtp::RTCRtpTransceiver, RTCError> {
         use webrtc_sys::rtp_transceiver::ffi::RtpTransceiverDirection as SysDir;
-        // 从 staged 队列取出 media_track（create_track_sender 时 stage 的）
+        // take the media_track out of the staged queue (staged at create_track_sender time)
         let media_track =
             self.callbacks.staged_media_tracks.lock().unwrap().pop().ok_or_else(|| {
                 RTCError::Track("no staged media track for add_transceiver_with_track".into())
@@ -758,7 +755,7 @@ impl PcBackend for WebrtcSysPc {
         &self,
         track_id: &str,
     ) -> Result<crate::rtp::RTCRtpParameters, RTCError> {
-        // 遍历 transceivers，按 sender track_id 匹配
+        // iterate the transceivers, matching on the sender's track_id
         for tc in self.pc.get_transceivers() {
             let t = &tc.ptr;
             let sender = t.sender();
@@ -770,14 +767,14 @@ impl PcBackend for WebrtcSysPc {
         Err(RTCError::Track(format!("sender not found: {track_id}")))
     }
 
-    /// PIT-76: 周期关键帧触发 — cxx 保真往返（override 默认实现）。
+    /// PIT-76: periodic keyframe triggering -- a cxx-faithful round trip (overriding the default impl).
     ///
-    /// 必须走 cxx 原样往返（不经 map_rtp_parameters 上层映射）：
-    /// libwebrtc RtpSenderBase::SetParameters 校验 codecs / encodings 数量 /
-    /// transaction_id 与内部存储一致，上层映射丢弃 codec name/kind/rtcp_feedback，
-    /// 重建必然 INVALID_MODIFICATION。get 原样 → 只改 request_key_frame → set，
-    /// 三个校验全部天然满足。libwebrtc 每次消费后内部清标志：每次调用传 true
-    /// 恰好触发一次 GenerateKeyFrame（Oracle 已确认，无需复位）。
+    /// Must go through the cxx verbatim round trip (not the upper map_rtp_parameters mapping):
+    /// libwebrtc's RtpSenderBase::SetParameters validates that codecs / encodings counts /
+    /// transaction_id match its internal storage; the upper mapping drops codec name/kind/rtcp_feedback,
+    /// so a rebuild is always INVALID_MODIFICATION. get verbatim -> change only request_key_frame -> set;
+    /// all three validations naturally hold. libwebrtc clears the flag internally after each consumption: passing true per call
+    /// triggers exactly one GenerateKeyFrame (Oracle confirmed, no reset needed).
     fn request_key_frame(&self, track_id: &str) -> Result<(), RTCError> {
         for tc in self.pc.get_transceivers() {
             let t = &tc.ptr;
@@ -795,8 +792,8 @@ impl PcBackend for WebrtcSysPc {
         }
         Err(RTCError::Track(format!("sender not found: {track_id}")))
     }
-    /// v2 (encoder-backend-codec-config T1): 编码器后端选择 — SetEncoderSelector 机制。
-    /// 遍历 transceivers 匹配 sender.track().id()（request_key_frame 同模式）。
+    /// v2 (encoder-backend-codec-config T1): encoder backend selection -- the SetEncoderSelector mechanism.
+    /// Iterate the transceivers matching sender.track().id() (the same pattern as request_key_frame).
     fn sender_set_video_encoder_backend(
         &self,
         track_id: &str,
@@ -839,11 +836,11 @@ impl PcBackend for WebrtcSysPc {
         }
         Err(RTCError::Track(format!("sender not found: {track_id}")))
     }
-    /// v2 (encoder-bitrate): min/max 码率设置 — cxx 保真往返（request_key_frame 同模式）。
-    /// 只改 enc[].min/max_bitrate_bps 字段, 天然满足 SetParameters 的 codecs/encodings
-    /// 数量/transaction_id 校验（PIT-76: 禁 lossy roundtrip）。
-    /// min 为受限链路 best-effort 下限（libwebrtc 分配层生效, 编码器无硬下限）;
-    /// max 为可靠硬上限。None → has_*_bitrate_bps=false（不限制）。
+    /// v2 (encoder-bitrate): min/max bitrate setting -- a cxx-faithful round trip (the same pattern as request_key_frame).
+    /// Only touches the enc[].min/max_bitrate_bps fields, naturally satisfying SetParameters' codecs/encodings
+    /// count/transaction_id validation (PIT-76: lossy roundtrips forbidden).
+    /// min = the best-effort floor on constrained links (effective at the libwebrtc allocation layer, no hard encoder floor);
+    /// max = the reliable hard ceiling. None -> has_*_bitrate_bps=false (unlimited).
     fn sender_set_encoding_bitrate(
         &self,
         track_id: &str,
@@ -873,10 +870,10 @@ impl PcBackend for WebrtcSysPc {
         Err(RTCError::Track(format!("sender not found: {track_id}")))
     }
 
-    /// v2 (qos-framerate-priority): 降级偏好 — cxx 保真往返（bitrate 同模式）。
-    /// degradation_preference 在 **RtpParameters 级**（vendor rtp_parameters.rs:191-192，
-    /// 非 per-enc）：get 原样 → has/preference 两字段 → set，天然满足 SetParameters
-    /// 校验（PIT-76）。Fixed → vendor MaintainFramerateAndResolution。
+    /// v2 (qos-framerate-priority): degradation preference -- a cxx-faithful round trip (the same pattern as bitrate).
+    /// degradation_preference sits at the **RtpParameters level** (vendor rtp_parameters.rs:191-192,
+    /// not per-enc): get verbatim -> the has/preference two fields -> set, naturally satisfying SetParameters'
+    /// validation (PIT-76). Fixed -> vendor MaintainFramerateAndResolution.
     fn sender_set_degradation_preference(
         &self,
         track_id: &str,
@@ -902,9 +899,9 @@ impl PcBackend for WebrtcSysPc {
         Err(RTCError::Track(format!("sender not found: {track_id}")))
     }
 
-    /// v2 (qos-framerate-priority): 内容 hint — track 级属性（非 SetParameters）。
-    /// sender.track() → media_to_video 下转型（:1444 VideoSink 先例同法）→ set_content_hint；
-    /// 非视频 track 转型失败 → Err（调用方 warn，C15）。
+    /// v2 (qos-framerate-priority): content hint -- a track-level property (not SetParameters).
+    /// sender.track() -> media_to_video downcast (the :1444 VideoSink precedent's method) -> set_content_hint;
+    /// a non-video track failing the downcast -> Err (the caller warns, C15).
     fn sender_set_content_hint(
         &self,
         track_id: &str,
@@ -916,8 +913,8 @@ impl PcBackend for WebrtcSysPc {
             let sender = t.sender();
             let track = sender.track();
             if track.id() == track_id {
-                // track_id 命中即调用方 add_track("video") 建的视频 track（publish 路径保证）；
-                // 非视频 track 下转型属未定义行为，故仅 video kind 路径调用（:1490 VideoSink 先例同法）。
+                // a track_id hit = the video track built by the caller's add_track("video") (guaranteed by the publish path);
+                // downcasting a non-video track would be undefined behavior, so only the video-kind path calls it (the :1490 VideoSink precedent's method).
                 unsafe {
                     let video_track = webrtc_sys::video_track::ffi::media_to_video(track);
                     video_track.set_content_hint(sys_hint);
@@ -929,11 +926,11 @@ impl PcBackend for WebrtcSysPc {
         Err(RTCError::Track(format!("sender not found: {track_id}")))
     }
 
-    /// v2 (multi-stream P1): 编码帧率上限（fps）— cxx 保真往返（bitrate 同模式）。
-    /// 只改 enc[].has_max_framerate/max_framerate 字段, 天然满足 SetParameters 的
-    /// codecs/encodings 数量/transaction_id 校验（PIT-76）。
-    /// libwebrtc 收到 SetParameters 后对编码器 reconfigure（官方行为）;
-    /// 帧时间戳由 C17 单调锚定（与 fps 无关）。None → has_max_framerate=false（不限制）。
+    /// v2 (multi-stream P1): the encoded-framerate cap (fps) -- a cxx-faithful round trip (the same pattern as bitrate).
+    /// Only touches the enc[].has_max_framerate/max_framerate fields, naturally satisfying SetParameters'
+    /// codecs/encodings count/transaction_id validation (PIT-76).
+    /// libwebrtc reconfigures the encoder upon receiving SetParameters (official behavior);
+    /// frame timestamps are anchored monotonically per C17 (independent of fps). None -> has_max_framerate=false (unlimited).
     fn sender_set_encoding_framerate(
         &self,
         track_id: &str,
@@ -960,9 +957,9 @@ impl PcBackend for WebrtcSysPc {
         Err(RTCError::Track(format!("sender not found: {track_id}")))
     }
 
-    /// v2 (web-stream-stats T1.5): W3C RTCRtpSender.getStats（出站统计）。
-    /// 调 webrtc-sys FFI（RtpSender::get_stats → ToJson, 同步回调）→ 解析 outbound-rtp 字段。
-    /// 纯 Rust 零 C++ 改动（Oracle F2: libwebrtc ToJson 已含 framesEncoded/encoderImplementation 等）。
+    /// v2 (web-stream-stats T1.5): W3C RTCRtpSender.getStats (outbound stats).
+    /// Calls the webrtc-sys FFI (RtpSender::get_stats -> ToJson, a synchronous callback) -> parses the outbound-rtp fields.
+    /// Pure Rust with zero C++ changes (Oracle F2: libwebrtc's ToJson already carries framesEncoded/encoderImplementation etc.).
     fn receiver_get_stats(&self, track_id: &str) -> Vec<crate::stats::RTCStats> {
         for tc in self.pc.get_transceivers() {
             let receiver = tc.ptr.receiver();
@@ -972,7 +969,7 @@ impl PcBackend for WebrtcSysPc {
             let (tx, rx) = std::sync::mpsc::sync_channel::<String>(1);
             let ctx = Box::new(webrtc_sys::rtp_receiver::ReceiverContext(Box::new(tx)));
             receiver.get_stats(ctx, |ctx, json| {
-                // 同步回调（C++ OnStatsDelivered 同线程）— mpsc 立即投递（sender 同形）。
+                // synchronous callback (the C++ OnStatsDelivered same thread) -- the mpsc delivers immediately (the sender's same shape).
                 if let Some(tx) = ctx.0.downcast_ref::<std::sync::mpsc::SyncSender<String>>() {
                     let _ = tx.send(json);
                 }
@@ -985,8 +982,8 @@ impl PcBackend for WebrtcSysPc {
         vec![]
     }
 
-    /// qoe-full-metrics S1: pc 级 getStats 全表 → candidate-pair(succeeded) 的
-    /// currentRoundTripTime（秒→ms）。nominated 优先，否则第一条 succeeded。
+    /// qoe-full-metrics S1: the pc-level getStats full table -> candidate-pair(succeeded)'s
+    /// currentRoundTripTime (seconds -> ms). nominated first, else the first succeeded.
     fn connection_stats(&self) -> Option<crate::stats::ConnectionStats> {
         let (tx, rx) = std::sync::mpsc::sync_channel::<String>(1);
         let ctx = Box::new(webrtc_sys::peer_connection::PeerContext(Box::new(tx)));
@@ -995,14 +992,12 @@ impl PcBackend for WebrtcSysPc {
                 let _ = tx.send(json);
             }
         });
-        let json = rx
-            .recv_timeout(std::time::Duration::from_millis(200))
-            .ok()?;
+        let json = rx.recv_timeout(std::time::Duration::from_millis(200)).ok()?;
         let arr = serde_json::from_str::<Vec<serde_json::Value>>(&json).ok()?;
-        // RTT 口径（2026-10-10 实测）：client 为 ICE-lite 被动端时
-        // currentRoundTripTime 恒 0（响应不发 request 不计）——实证可用真值 =
-        // totalRoundTripTime / responsesReceived（平均 RTT，同 libwebrtc 内部口径）。
-        // 优先 currentRoundTripTime（标准主动端），回退平均口径。
+        // the RTT convention (measured 2026-10-10): when client is an ICE-lite passive end
+        // currentRoundTripTime is always 0 (no request sent, no response counted) -- the proven usable truth =
+        // totalRoundTripTime / responsesReceived (the average RTT, the same convention as libwebrtc internally).
+        // currentRoundTripTime preferred (the standard active end), falling back to the average convention.
         let mut best: Option<crate::stats::ConnectionStats> = None;
         for v in arr.iter() {
             if v.get("type").and_then(|t| t.as_str()) != Some("candidate-pair") {
@@ -1017,14 +1012,11 @@ impl PcBackend for WebrtcSysPc {
                 .filter(|r| *r > 0.0)
                 .or_else(|| {
                     let total = v.get("totalRoundTripTime").and_then(|x| x.as_f64())?;
-                    let n = v
-                        .get("responsesReceived")
-                        .and_then(|x| x.as_u64())?
-                        .max(1);
+                    let n = v.get("responsesReceived").and_then(|x| x.as_u64())?.max(1);
                     (total > 0.0).then(|| total / n as f64)
                 });
             let Some(rtt) = rtt_s else { continue };
-            // ceil：内网亚毫秒（0.2ms 级）round 会抹成 0——至少显示 1ms
+            // ceil: sub-millisecond intranet rounds (0.2ms scale) would wipe to 0 -- show at least 1ms
             let c = crate::stats::ConnectionStats { rtt_ms: (rtt * 1000.0).ceil() };
             if v.get("nominated").and_then(|x| x.as_bool()) == Some(true) {
                 return Some(c);
@@ -1043,7 +1035,7 @@ impl PcBackend for WebrtcSysPc {
                 let (tx, rx) = std::sync::mpsc::sync_channel::<String>(1);
                 let ctx = Box::new(webrtc_sys::rtp_sender::SenderContext(Box::new(tx)));
                 sender.get_stats(ctx, |ctx, json| {
-                    // 同步回调（C++ OnStatsDelivered 同线程）— mpsc 立即投递
+                    // synchronous callback (the C++ OnStatsDelivered same thread) -- the mpsc delivers immediately
                     if let Some(tx) = ctx.0.downcast_ref::<std::sync::mpsc::SyncSender<String>>() {
                         let _ = tx.send(json);
                     }
@@ -1145,10 +1137,10 @@ impl PcBackend for WebrtcSysPc {
         Err(RTCError::Track(format!("transceiver not found: {mid}")))
     }
 
-    /// v2 (set-codec-preferences T3+T5 实证修正): W3C setCodecPreferences。
-    /// 按 sender.track().id() 匹配 transceiver（协商前 mid 不存在 — offerer 核心场景；
-    /// request_key_frame 同模式）。answerer 场景协商后设置对 answer 无效（libwebrtc
-    /// 按 offer 序取交集）— T5 实测结论，固定 codec 走 reduceCodecs。
+    /// v2 (set-codec-preferences T3+T5 field-proven revision): W3C setCodecPreferences.
+    /// Matches a transceiver by sender.track().id() (mid doesn't exist pre-negotiation -- the offerer's core scenario;
+    /// the same pattern as request_key_frame). Setting it post-negotiation on the answerer has no effect on the answer (libwebrtc
+    /// takes the intersection in offer order) -- the T5 measured conclusion; fixed codecs go through reduceCodecs.
     fn transceiver_set_codec_preferences(
         &self,
         track_id: &str,
@@ -1218,9 +1210,9 @@ impl WebrtcSysPc {
 #[derive(Clone)]
 pub(crate) struct WebrtcSysDc {
     dc: cxx::SharedPtr<webrtc_sys::data_channel::ffi::DataChannel>,
-    /// 接收观察者缓存（F1 审查 #1）: register-once — 首次 spool() 注册观察者并
-    /// 存入 broadcast Sender；后续 spool() 只 subscribe，绝不再注册。
-    /// Clone 共享同一 Arc（同一底层 DataChannel）。
+    /// The receive-observer cache (F1 review #1): register-once -- the first spool() registers the observer and
+    /// stores the broadcast Sender; later spool() calls only subscribe, never re-registering.
+    /// Clone shares the same Arc (the same underlying DataChannel).
     rx: std::sync::Arc<
         std::sync::OnceLock<
             tokio::sync::broadcast::Sender<crate::data_channel::RTCDataChannelEvent>,
@@ -1245,7 +1237,7 @@ impl DcBackend for WebrtcSysDc {
         }
     }
 
-    /// S6/K5: libwebrtc 原生同步读（FFI 已含 buffered_amount，补最后一段封装）。
+    /// S6/K5: libwebrtc's native synchronous read (the FFI already carries buffered_amount; this adds the last wrapper segment).
     async fn buffered_amount(&self) -> u64 {
         self.dc.buffered_amount()
     }
@@ -1272,15 +1264,15 @@ impl DcBackend for WebrtcSysDc {
     }
 
     async fn spool(&self) -> RTCDataChannelRx {
-        // F1 审查 #1（FFI 线程约束）: libwebrtc 要求 RegisterObserver/
-        // UnregisterObserver 在其内部信令线程执行（DCHECK_RUN_ON，release 编译掉
-        // 后为静默数据竞争），且每次重注册会 reset 前一个观察者（unique_ptr）—
-        // 网络线程可能正 mid-OnMessage → rust::Box use-after-free。
-        // 故**每个通道只注册一次**（首次 spool()，OnceLock 保证；upstream livekit
-        // 在 configure() 一次性注册同模式）；后续 spool() 仅 subscribe 已缓存事件流。
-        // 注册线程仍可能是首次调用者（tokio worker）——DCHECK 约束的完全满足需要
-        // 把注册调度到信令线程（livekit configure 时点即信令线程），此处以
-        // register-once 消除重注册 UAF；跨线程注册治理留给后续专项。
+        // F1 review #1 (the FFI thread constraint): libwebrtc requires RegisterObserver/
+        // UnregisterObserver to run on its internal signaling thread (DCHECK_RUN_ON, compiled out in release
+        // leaving a silent data race), and each re-registration resets the previous observer (unique_ptr) --
+        // the network thread may be mid-OnMessage -> rust::Box use-after-free.
+        // hence **register exactly once per channel** (the first spool(), OnceLock-guaranteed; upstream livekit
+        // registers once in configure() the same way); later spool() calls only subscribe the cached event stream.
+        // the registering thread may still be the first caller (a tokio worker) -- fully satisfying the DCHECK would need
+        // scheduling registration onto the signaling thread (livekit's configure moment IS the signaling thread); here
+        // register-once eliminates the re-registration UAF; cross-thread registration governance is deferred to a dedicated task.
         let tx = self.rx.get_or_init(|| {
             let (tx, _rx) = tokio::sync::broadcast::channel(256);
             let observer = std::sync::Arc::new(DcObserver { tx: tx.clone() });
@@ -1296,10 +1288,10 @@ impl DcBackend for WebrtcSysDc {
     }
 }
 
-/// libwebrtc DataChannel observer：转发消息/状态到 broadcast（Task F1 接收路径）。
-/// 回调在 libwebrtc 信令线程触发；仅做无锁 send，快速返回。
-/// 注意: 观察者 Box 移交给 C++ 侧持有（register_observer），本 struct 仅借出
-/// Sender 克隆 — 观察者生命周期 = C++ unique_ptr，不被 Rust 侧释放。
+/// The libwebrtc DataChannel observer: forwards messages/state to broadcast (Task F1's receive path).
+/// Callbacks fire on the libwebrtc signaling thread; only a lock-free send, returning quickly.
+/// note: the observer Box is handed to the C++ side (register_observer); this struct only lends
+/// Sender clones -- the observer's lifetime = the C++ unique_ptr, never freed by the Rust side.
 struct DcObserver {
     tx: tokio::sync::broadcast::Sender<crate::data_channel::RTCDataChannelEvent>,
 }
@@ -1315,7 +1307,7 @@ impl webrtc_sys::data_channel::DataChannelObserver for DcObserver {
                 Some(crate::data_channel::RTCDataChannelEvent::Closed)
             }
             webrtc_sys::data_channel::ffi::DataState::Connecting => None,
-            // ponytail: cxx 非穷尽 enum 未知态兜底（同 state() 惯例）
+            // ponytail: the cxx non-exhaustive enum's unknown-state fallback (same as the state() convention)
             _ => None,
         };
         if let Some(ev) = ev {
@@ -1342,9 +1334,9 @@ impl webrtc_sys::data_channel::DataChannelObserver for DcObserver {
 pub(crate) struct WebrtcSysTrack {
     video_source: Mutex<Option<SharedPtr<webrtc_sys::video_track::ffi::VideoTrackSource>>>,
     audio_source: Mutex<Option<SharedPtr<webrtc_sys::audio_track::ffi::AudioTrackSource>>>,
-    // PIT-63: 锚定单调 wall-clock 时间戳 — BASE(SystemTime 锚点) + Instant::elapsed()(单调增量)。
-    // 裸 SystemTime::now() 非单调 (NTP 跳变/挂起恢复 → ts 倒退 → aligned 倒退 → FramerateController 重置);
-    // 假时钟 (+33333us/次) 与 libwebrtc 时间域不一致 (PIT-61 实验史)。
+    // PIT-63: an anchored monotonic wall-clock timestamp -- BASE(SystemTime anchor) + Instant::elapsed() (a monotonic increment).
+    // bare SystemTime::now() is not monotonic (NTP jumps/suspend-resume -> ts regressing -> aligned regressing -> FramerateController resets);
+    // a fake clock (+33333us/each) disagrees with libwebrtc's time domain (the PIT-61 experiment history).
     ts_base_us: i64,
     ts_anchor: std::time::Instant,
 }
@@ -1419,7 +1411,7 @@ impl WebrtcSysTrack {
     }
 }
 
-/// capture_frame 完成回调（queue 模式 backpressure 通知）— H2 无背压需求，no-op。
+/// The capture_frame completion callback (queue-mode backpressure notification) -- H2 has no backpressure need, no-op.
 extern "C" fn noop_audio_complete(_ctx: *const webrtc_sys::audio_track::SourceContext) {}
 
 impl TrackWriteBackend for WebrtcSysTrack {
@@ -1460,11 +1452,11 @@ impl TrackWriteBackend for WebrtcSysTrack {
             .clone()
             .ok_or_else(|| RTCError::Track("video source not initialized".into()))?;
 
-        // PIT-76 诊断: PLI 到达检测 — libwebrtc 收到 PLI 时置位共享 flag
-        // （VideoStreamEncoder → RtpVideoSender → EncoderRtcpFeedback 链路）
+        // PIT-76 diagnostics: PLI arrival detection -- libwebrtc sets a shared flag on receiving a PLI
+        // (the VideoStreamEncoder -> RtpVideoSender -> EncoderRtcpFeedback chain)
         if source.take_keyframe_request() {
             tracing::warn!(
-                "PLI/KeyFrameRequest 到达 VideoTrackSource (take_keyframe_request=true)"
+                "PLI/KeyFrameRequest reached VideoTrackSource (take_keyframe_request=true)"
             );
         }
 
@@ -1493,8 +1485,8 @@ impl TrackWriteBackend for WebrtcSysTrack {
 
         // Build VideoFrame and push to source
         let mut builder = vf::new_video_frame_builder();
-        // PIT-63: 锚定单调 wall-clock — 与 livekit TimestampAligner 期望一致 (帧 ts 与 wall-clock 可比)
-        // ts_us 参数: Some(捕获时刻) 相机时间源; None → 内部锚定单调
+        // PIT-63: anchored monotonic wall-clock -- consistent with livekit TimestampAligner's expectation (frame ts comparable with wall-clock)
+        // the ts_us param: Some(the capture moment) for a camera time source; None -> internally anchored monotonic
         let ts_us =
             ts_us.unwrap_or_else(|| self.ts_base_us + self.ts_anchor.elapsed().as_micros() as i64);
         builder.pin_mut().set_timestamp_us(ts_us);
@@ -1517,8 +1509,8 @@ impl TrackWriteBackend for WebrtcSysTrack {
 }
 
 impl WebrtcSysTrack {
-    /// H2: 推 PCM i16（交织）到 AudioTrackSource — libwebrtc 内部 opus 编码后走 RTP。
-    /// 帧长必须恰 10ms（48000Hz/100 = 480 样本/通道）— livekit capture_frame 语义。
+    /// H2: push PCM i16 (interleaved) into AudioTrackSource -- libwebrtc encodes opus internally then sends RTP.
+    /// The frame length must be exactly 10ms (48000Hz/100 = 480 samples/channel) -- livekit capture_frame semantics.
     fn write_pcm(&self, data: &[u8], cfg: &RTCAudioTrackConfig) -> Result<(), RTCError> {
         let source = self
             .audio_source
@@ -1538,8 +1530,8 @@ impl WebrtcSysTrack {
                 "audio capture_frame requires 10ms frames ({frames_10ms} samples/ch), got {frames}"
             )));
         }
-        // SAFETY: 调用方（tone generator / e2e）保证 data 来自 i16 对齐缓冲（Vec<i16> 即 2 字节对齐）;
-        // 帧长已按 10ms 校验; capture_frame 内部加锁拷贝，无生命周期逃逸。
+        // SAFETY: the caller (tone generator / e2e) guarantees data comes from an i16-aligned buffer (Vec<i16> is 2-byte aligned);
+        // the frame length is validated as 10ms; capture_frame locks and copies internally, no lifetime escape.
         let pcm = unsafe { std::slice::from_raw_parts(data.as_ptr() as *const i16, samples_total) };
         let ok = unsafe {
             source.capture_frame(
@@ -1555,7 +1547,7 @@ impl WebrtcSysTrack {
             tracing::warn!("audio capture_frame rejected (queue full)");
             return Err(RTCError::Track("audio capture_frame rejected (source queue full)".into()));
         }
-        // 临时诊断（H2）: capture_frame 成功计数
+        // temporary diagnostics (H2): a capture_frame success counter
         static PCM_PUSHED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = PCM_PUSHED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if n.is_multiple_of(50) {
@@ -1571,14 +1563,14 @@ impl WebrtcSysTrack {
 // ── RealObserver ──
 
 /// Holds user-registered callbacks and active video sinks.
-#[allow(clippy::type_complexity)] // 回调容器五字段（Fn+SharedPtr 形）——别名收益 < 噪音
+#[allow(clippy::type_complexity)] // the callback container's five fields (Fn+SharedPtr shapes) -- an alias's benefit < the noise
 pub(crate) struct ObserverCallbacks {
     pub on_track: Mutex<Option<Box<dyn Fn(TrackReceiver) + Send + Sync + 'static>>>,
-    /// R3b 根修：**add_sink 所在 wrapper 与 sink 成对持有**。
-    /// webrtc-sys 的 `~VideoTrack` 会对该 wrapper 注册过的每个 sink 执行
-    /// `track()->RemoveSink()`——`receiver().track()` 每次调用新建 wrapper，
-    /// 只存 sink 不存 wrapper = wrapper 出 scope 即连坐摘除刚挂的 sink
-    /// （PIT-197 断流 = 29 帧窗口其实是 on_track 入参 wrapper 的暂存引用寿命）。
+    /// R3b root fix: **the wrapper that added the sink and the sink are held as a pair**.
+    /// webrtc-sys's `~VideoTrack` runs `track()->RemoveSink()` on every sink that wrapper registered --
+    /// `receiver().track()` builds a new wrapper per call;
+    /// storing only the sink without the wrapper = the wrapper leaving scope drags the just-attached sink with it
+    /// (the PIT-197 stream break = the 29-frame window was really the staging-reference lifetime of the on_track argument wrapper).
     pub video_sinks: Mutex<
         Vec<(
             cxx::SharedPtr<webrtc_sys::media_stream_track::ffi::MediaStreamTrack>,
@@ -1590,7 +1582,7 @@ pub(crate) struct ObserverCallbacks {
     pub on_peer_connection_state_change:
         Mutex<Option<Box<dyn Fn(RTCPeerConnectionState) + Send + Sync + 'static>>>,
     pub on_ice_candidate: Mutex<Option<Box<dyn Fn(RTCIceCandidate) + Send + Sync + 'static>>>,
-    /// v2: incoming data channel callback (通用 on_data_channel)
+    /// v2: incoming data channel callback (generic on_data_channel)
     pub on_data_channel:
         Mutex<Option<Box<dyn Fn(crate::data_channel::RTCDataChannel) + Send + Sync + 'static>>>,
     /// Staged media tracks awaiting register_track consumption (webrtc-sys only).
@@ -1697,7 +1689,7 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
         tracing::debug!("ICE gathering state: {}", s);
     }
     fn on_ice_candidate(&self, candidate: cxx::SharedPtr<webrtc_sys::jsep::ffi::IceCandidate>) {
-        // PIT-43/52: 完整转发 trickled 本地候选（P2P 路径必需）
+        // PIT-43/52: fully forward trickled local candidates (required by the P2P path)
         let rtc_candidate = crate::peer_connection::RTCIceCandidate {
             candidate: candidate.candidate(),
             sdp_mid: Some(candidate.sdp_mid()),
@@ -1753,7 +1745,7 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
             kind
         );
 
-        // PIT 诊断: receiver 协商参数（确认 ssrc/PT 是否配置到接收流）
+        // PIT diagnostics: the receiver's negotiated params (confirming whether ssrc/PT made it onto the receive stream)
         {
             let params = receiver.get_parameters();
             tracing::info!(
@@ -1767,7 +1759,7 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
             }
         }
 
-        // PIT 诊断: 远端 track 状态（Live/Ended + enabled）— 判断解码流是否绑定
+        // PIT diagnostics: the remote track state (Live/Ended + enabled) -- judging whether the decoded stream is bound
         let track_state = match track.state() {
             webrtc_sys::media_stream_track::ffi::TrackState::Live => "Live",
             webrtc_sys::media_stream_track::ffi::TrackState::Ended => "Ended",
@@ -1856,7 +1848,7 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
                 let wrapper =
                     webrtc_sys::video_track::VideoSinkWrapper::new(std::sync::Arc::new(adapter));
 
-                // Register sink with the video track（立即一次——若 channel 已就绪即通）
+                // Register sink with the video track (once immediately -- if the channel is already ready it goes straight through)
                 tracing::debug!(
                     "VideoSinkAdapter: attaching native sink to video track 0x{:x}",
                     &*track as *const _ as usize
@@ -1881,7 +1873,7 @@ pub(crate) struct WebrtcSysFactory {
 
 impl Default for WebrtcSysFactory {
     fn default() -> Self {
-        // 注册 libwebrtc 内部日志（RTC_LOG → tracing）— PIT-45 调试：ICE gathering 内部状态
+        // register libwebrtc's internal logging (RTC_LOG -> tracing) -- PIT-45 debugging: the ICE gathering internal state
         let log_sink = webrtc_sys::webrtc::ffi::new_log_sink(|message, severity| {
             let line = message.trim_end().to_string();
             match severity {
@@ -1965,11 +1957,11 @@ impl WebrtcSysFactory {
             Arc::new(RealObserver { callbacks: callbacks.clone() }),
         );
 
-        // C++ CreatePeerConnection 首调含全量子系初始化（VAAPI DRM 扫描/PulseAudio/
-        // X11 display——实测可 >15s），同步执行会占死 tokio worker → 同 runtime 的
-        // ws 心跳任务饿死 → link 15s 静默判死主动断链 → 拉流"初次失败重试才成"
-        // （flaky 双端日志实证）。spawn_blocking 移出 worker：心跳/信令永不饿死。
-        // factory 是 Clone + Send（Arc 内部锁）——跨线程安全。
+        // the C++ CreatePeerConnection first call carries full subsystem init (VAAPI DRM scan/PulseAudio/
+        // X11 display -- measured can exceed 15s); running it synchronously would hog a tokio worker -> the same runtime's
+        // ws heartbeat task starves -> link's 15s silence judge kills the connection -> pulling streams "fails on the first try and succeeds on retry"
+        // (flaky, proven by both sides' logs). spawn_blocking moves it off the worker: heartbeat/signaling never starve.
+        // the factory is Clone + Send (an Arc-internal lock) -- cross-thread safe.
         let factory = self.factory.clone();
         let pc = tokio::task::spawn_blocking(move || {
             factory
@@ -2010,7 +2002,7 @@ impl WebrtcSysFactory {
     /// Create an audio track with a new AudioTrackSource (H2).
     /// Returns (WebrtcSysTrack, SharedPtr<MediaStreamTrack>) —
     /// the media track can be added to the RTCPeerConnection via add_track.
-    /// 48kHz mono, queue_size_ms=100（容忍 10ms 节奏抖动; 0 = fast path 需严格 10ms）。
+    /// 48kHz mono, queue_size_ms=100 (tolerating 10ms cadence jitter; 0 = the fast path needs a strict 10ms).
     pub(crate) fn create_audio_track(
         &self,
     ) -> (WebrtcSysTrack, cxx::SharedPtr<webrtc_sys::media_stream_track::ffi::MediaStreamTrack>)
@@ -2042,18 +2034,18 @@ mod tests {
 
     #[test]
     fn anchored_timestamp_is_monotonic_and_wallclock_magnitude() {
-        // PIT-63: 锚定单调 — 单调递增 + wall-clock 量级 (~1.78e15 µs @2026)
+        // PIT-63: anchored monotonic -- monotonically increasing + wall-clock magnitude (~1.78e15 us @2026)
         let (base, anchor) = WebrtcSysTrack::new_clock_anchor();
         let t1 = base + anchor.elapsed().as_micros() as i64;
         std::thread::sleep(std::time::Duration::from_millis(2));
         let t2 = base + anchor.elapsed().as_micros() as i64;
-        assert!(t2 > t1, "时间戳必须单调递增");
-        assert!(t1 > 1_000_000_000_000, "wall-clock 量级 (µs): {t1}");
+        assert!(t2 > t1, "timestamps must increase monotonically");
+        assert!(t1 > 1_000_000_000_000, "wall-clock magnitude (us): {t1}");
     }
 
     #[test]
     fn map_rtp_parameters_codec_fmtp_mapping() {
-        // PIT-54: mediasoup 严格按 codec parameters 匹配 — 验证 map_rtp_parameters 映射 H264 fmtp
+        // PIT-54: mediasoup matches strictly on codec parameters -- verifying map_rtp_parameters maps the H264 fmtp
         use webrtc_sys::rtp_parameters::ffi::{
             RtcpParameters, RtpCodecParameters, RtpEncodingParameters, RtpExtension, RtpParameters,
             StringKeyValue,
@@ -2101,7 +2093,7 @@ mod tests {
                 active: true,
                 rid: String::new(),
                 adaptive_ptime: false,
-                request_key_frame: true, // PIT-76: 验证透传
+                request_key_frame: true, // PIT-76: verifying passthrough
             }],
             rtcp: RtcpParameters {
                 has_ssrc: false,
@@ -2117,17 +2109,17 @@ mod tests {
         let mapped = map_rtp_parameters(params);
         assert_eq!(mapped.codecs.len(), 1);
         let fmtp = mapped.codecs[0].sdp_fmtp_line.as_deref().unwrap_or("");
-        // PIT-54: 必须含 packetization-mode 和 profile-level-id
+        // PIT-54: must contain packetization-mode and profile-level-id
         assert!(fmtp.contains("packetization-mode=1"), "fmtp: {fmtp}");
         assert!(fmtp.contains("profile-level-id=42e01f"), "fmtp: {fmtp}");
         assert_eq!(mapped.encodings[0].ssrc, Some(1949911776));
-        // PIT-76: request_key_frame 字段必须透传
+        // PIT-76: the request_key_frame field must pass through
         assert_eq!(mapped.encodings[0].request_key_frame, true);
     }
 
     #[test]
     fn map_rtp_parameters_request_key_frame_false() {
-        // PIT-76: request_key_frame 默认 false 也必须透传（非默认值依赖）
+        // PIT-76: request_key_frame default false must also pass through (non-default-value dependence)
         use webrtc_sys::rtp_parameters::ffi::{
             RtcpParameters, RtpEncodingParameters, RtpParameters,
         };
@@ -2175,7 +2167,7 @@ mod tests {
 
     #[test]
     fn map_codec_capability_to_sys_h264() {
-        // v2 (set-codec-preferences T4): W3C → sys — name/kind 必须显式填（mime_type 被 to_native 忽略）
+        // v2 (set-codec-preferences T4): W3C -> sys -- name/kind must be filled explicitly (mime_type is ignored by to_native)
         use crate::rtp::RTCRtpCodecCapability;
         let cap = RTCRtpCodecCapability {
             mime_type: "video/H264".into(),
@@ -2189,7 +2181,7 @@ mod tests {
         assert!(sys.has_clock_rate);
         assert_eq!(sys.clock_rate, 90000);
         assert!(!sys.has_num_channels, "channels=None → has_num_channels=false");
-        // fmtp 解析: 顺序保留（libwebrtc 精确 map 匹配）
+        // fmtp parsing: order preserved (libwebrtc's exact map matching)
         assert_eq!(sys.parameters.len(), 2);
         assert_eq!(sys.parameters[0].key, "profile-level-id");
         assert_eq!(sys.parameters[0].value, "42e01f");
@@ -2200,7 +2192,7 @@ mod tests {
     #[test]
     fn map_codec_capability_to_sys_audio_and_empty_fmtp() {
         use crate::rtp::RTCRtpCodecCapability;
-        // 音频: kind 正确；无 fmtp → parameters 空
+        // audio: kind correct; no fmtp -> empty parameters
         let cap = RTCRtpCodecCapability {
             mime_type: "audio/opus".into(),
             clock_rate: Some(48000),
@@ -2217,7 +2209,7 @@ mod tests {
 
     #[test]
     fn map_rtp_capabilities_restores_fmtp() {
-        // v2 (set-codec-preferences T2): sys → W3C fmtp 还原（字节精确）
+        // v2 (set-codec-preferences T2): sys -> W3C fmtp restoration (byte-exact)
         use webrtc_sys::rtp_parameters::ffi::{
             RtpCapabilities, RtpCodecCapability, RtpHeaderExtensionCapability, StringKeyValue,
         };
@@ -2258,7 +2250,7 @@ mod stats_tests {
 
     #[test]
     fn parses_outbound_rtp_with_encoder_implementation() {
-        // v2 (web-stream-stats T1.5): libwebrtc ToJson outbound-rtp 字段解析
+        // v2 (web-stream-stats T1.5): libwebrtc ToJson outbound-rtp field parsing
         let json = r#"[{
             "type": "outbound-rtp",
             "id": "RTC_rtp_video_1",
@@ -2287,7 +2279,7 @@ mod stats_tests {
                 assert_eq!(o.frame_height, 720);
                 assert_eq!(o.frames_per_second, 30.0);
                 assert_eq!(o.ssrc, 12345);
-                // v3 (encode-time-stats T2): totalEncodeTime 解析 — 120 帧 × 30ms = 3.6s
+                // v3 (encode-time-stats T2): totalEncodeTime parsing -- 120 frames x 30ms = 3.6s
                 assert_eq!(o.total_encode_time, Some(3.6));
             }
             other => panic!("expected OutboundRtp, got {other:?}"),
@@ -2299,7 +2291,7 @@ mod stats_tests {
         assert!(parse_outbound_stats_json("not-json").is_empty());
         assert!(parse_outbound_stats_json("[]").is_empty());
         let json = r#"[{"type": "outbound-rtp", "id": "x", "timestamp": 0.0, "ssrc": 1, "kind": "video"}]"#;
-        // v3: totalEncodeTime 缺失 → None（旧版 libwebrtc / 字段不可用）
+        // v3: totalEncodeTime missing -> None (an older libwebrtc / the field unavailable)
         let stats = parse_outbound_stats_json(json);
         match &stats[0] {
             RTCStats::OutboundRtp(o) => assert_eq!(o.total_encode_time, None),

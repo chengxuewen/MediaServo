@@ -32,7 +32,7 @@ export default function Vehicles() {
   }, []);
 
   useEffect(() => { fetchStatus(); }, [fetchStatus]);
-  // ponytail: 5s 轮询（与 useDevices 同节奏）
+  // ponytail: 5s polling (same cadence as useDevices)
   useEffect(() => {
     const interval = setInterval(fetchStatus, 5000);
     return () => clearInterval(interval);

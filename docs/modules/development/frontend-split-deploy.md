@@ -1,69 +1,69 @@
-# 前端分离形态部署与运行手册（frontend-process-split 终态）
+# Frontend-Split Deployment & Operations Manual (frontend-process-split end state)
 
-> 2026-08-31 | 关联：D262/D268、C24 修订、PIT-163~170 | 计划档 `docs/plans/_archive/frontend-process-split/`
+> 2026-08-31 | Related: D262/D268, C24 revision, PIT-163~170 | Plan archive `docs/plans/_archive/frontend-process-split/`
 
-## 1. 拓扑速览
+## 1. Topology at a Glance
 
 ```
-浏览器 ──HTTPS──▶ caddy（web 层）──┬── /            静态 out/server/web（vite dist）
-                                    └── /api /ws 等  反代 127.0.0.1:9800 → server 实例
-host-agent ──/ws 直连 9800（D-2=B 一期姿势，不经过 caddy）
-媒体面 RTP/UDP 直连 server（不受 web 层影响，不可代理）
+Browser ──HTTPS──▶ caddy (web layer) ──┬── /            static out/server/web (vite dist)
+                                       └── /api /ws etc. reverse-proxy 127.0.0.1:9800 → server instance
+host-agent ──/ws direct to 9800 (D-2=B phase-one posture, bypasses caddy)
+Media plane RTP/UDP direct to server (unaffected by the web layer; not proxyable)
 ```
 
-三模式：① native 分离（主路径）② 单容器 all-in-one（嵌入，`--image runtime`）③ compose dev（vite 即前端）。
+Three modes: ① native split (main path) ② single-container all-in-one (embedded, `--image runtime`) ③ compose dev (vite is the frontend).
 
-## 2. 构建
+## 2. Building
 
 ```bash
-./msrtc.sh build server        # 后端（不嵌入变体）+ 自动装配 out/server/{bin,etc,web}
-./msrtc.sh build web           # 仅刷 out/server/web（改 TS 快速通道，秒级，无 cargo）
-./msrtc.sh build server --image runtime   # 模式②镜像（Dockerfile 显式 admin-dashboard 嵌入）
+./msrtc.sh build server        # Backend (non-embedded variant) + auto-assembly of out/server/{bin,etc,web}
+./msrtc.sh build web           # Refresh only out/server/web (fast path for TS edits, seconds, no cargo)
+./msrtc.sh build server --image runtime   # Mode ② image (Dockerfile embeds admin-dashboard explicitly)
 ```
 
-前端改一行 TS → `build web` → 浏览器刷新即生效（无需重编译/重启 Rust——C24 收窄至模式②）。
+A one-line TS change → `build web` → browser refresh takes effect (no Rust recompile/restart — C24 narrowed to mode ②).
 
-## 3. 部署（有状态落地，D266 同构）
+## 3. Deployment (stateful landing, isomorphic to D266)
 
 ```bash
-export MEDIASERVO_ADMIN_PASSWORD='***'      # 生产首启必设（dev 模板账号裸机 fail-fast，C35 守卫）
-./msrtc.sh deploy server --prefix /opt/msrtc-server      # /opt 需 root；幂等重跑保 etc 凭据（PIT-160）
-# 落地树：<prefix>/{bin/<brand>-server,bin/oxmgr,etc/*,web/,run/{oxfile.toml,oxmgr/,logs/},<brand>-server→bin/（D269 品牌物理名+根级快捷）}
-<prefix>/<brand>-server startup on /opt/msrtc-server  # 开机锚点（systemd user unit → oxmgr daemon）
-loginctl enable-linger                                   # 建议：无登录会话也存活
-<prefix>/<brand>-server status /opt/msrtc-server      # 0=健康 1=降级 2=未运行（脚本可消费）
-<prefix>/<brand>-server doctor /opt/msrtc-server      # 退出码=失败数（PATH/端口/yaml/web dist/announced IP）
+export MEDIASERVO_ADMIN_PASSWORD='***'      # Required on first production start (dev-template accounts fail fast on bare metal, C35 guard)
+./msrtc.sh deploy server --prefix /opt/msrtc-server      # /opt needs root; idempotent re-runs preserve etc credentials (PIT-160)
+# Landed tree: <prefix>/{bin/<brand>-server,bin/oxmgr,etc/*,web/,run/{oxfile.toml,oxmgr/,logs/},<brand>-server→bin/ (D269 branded physical name + root-level shortcut)}
+<prefix>/<brand>-server startup on /opt/msrtc-server  # Boot anchor (systemd user unit → oxmgr daemon)
+loginctl enable-linger                                   # Recommended: survives without a login session
+<prefix>/<brand>-server status /opt/msrtc-server      # 0=healthy 1=degraded 2=not running (script-consumable)
+<prefix>/<brand>-server doctor /opt/msrtc-server      # Exit code = failure count (PATH/ports/yaml/web dist/announced IP)
 ```
 
-端口非默认时：改 `etc/server.yaml listen.port` 后，**手工同步** `etc/Caddyfile` 的
-`:8080` 站点与 `127.0.0.1:<port>` 上游、`run/oxfile.toml` `[apps.env]`（`MEDIASERVO_SFU_PORT`
-等）——init 渲染是一次性快照（改进项：`init --port`）。
+Non-default ports: after changing `etc/server.yaml listen.port`, **manually sync** the `etc/Caddyfile`
+`:8080` site and the `127.0.0.1:<port>` upstream, plus `run/oxfile.toml` `[apps.env]` (`MEDIASERVO_SFU_PORT`
+etc.) — init rendering is a one-time snapshot (improvement item: `init --port`).
 
-## 4. 日常运维（实例命令面 = msrtc-host 同款）
+## 4. Day-to-Day Ops (instance command surface = same as msrtc-host)
 
 ```bash
-<brand>-server start [dir] [--no-web]   # oxmgr 整簇/仅后端；端口占用交互接管；caddy 缺→自动降级
-<brand>-server stop|restart [dir]       # 全簇收敛（幂等；只按作用域地址操作本实例 daemon）
-<brand>-server status [dir]             # server/web 两行 + /ready 探针列
+<brand>-server start [dir] [--no-web]   # Whole oxmgr cluster / backend only; interactive takeover on port conflict; caddy missing → auto degrade
+<brand>-server stop|restart [dir]       # Full cluster convergence (idempotent; operates only on this instance's daemon by scoped address)
+<brand>-server status [dir]             # server/web two lines + /ready probe column
 <brand>-server logs [server|web|all] [dir]
-<brand>-server monit|ps [dir]           # oxmgr TUI / 资源列
+<brand>-server monit|ps [dir]           # oxmgr TUI / resource columns
 ```
 
-Python CLI 的 `run/start/stop/restart server` 已退役→指引（C39）；`run web` 保留过渡。
+The Python CLI's `run/start/stop/restart server` are retired → guidance (C39); `run web` remains transitional.
 
-## 5. 故障定位
+## 5. Troubleshooting
 
-| 现象 | 首查 | 参照 |
-|------|------|------|
-| /ready 503 但 /health 200 | mediasoup worker 线程死（C++ 崩溃=进程亡会被 oxmgr 拉起；线程优雅死需 `restart`） | PIT-167/165 |
-| 有信令无画面 | sfu/rooms producer 计数 → streamer 日志 → C38 三层链；注意 **bytes_sent 增长≠链路健康** | PIT-168 |
-| 浏览器 502 | caddy 在但后端死（`status`）| — |
-| 部署重跑后 host 簇失踪 | 勿再手工 `oxmgr stop`；deploy 守卫已 inode 精确化 | PIT-170/166 |
-| 账号 produce 未被拒 | psk 未配+JWT 已配组合的旁路已修，回归 e2e_sfu | PIT-163 |
+| Symptom | First check | Reference |
+|---------|-------------|-----------|
+| /ready 503 but /health 200 | mediasoup worker thread dead (a C++ crash = dead process gets restarted by oxmgr; a graceful thread death needs `restart`) | PIT-167/165 |
+| Signaling but no picture | sfu/rooms producer count → streamer logs → the C38 three-layer chain; note **growing bytes_sent ≠ healthy link** | PIT-168 |
+| Browser 502 | caddy up but backend dead (`status`) | — |
+| host cluster missing after deploy re-run | Never hand-run `oxmgr stop`; the deploy guard is inode-precise | PIT-170/166 |
+| Account produce not rejected | The psk-unset + JWT-set combination bypass is fixed; regression via e2e_sfu | PIT-163 |
 
-## 6. 回滚
+## 6. Rollback
 
-- web 层：`stop` 后改回 `run server` 旧姿势 = 直接跑**嵌入变体**二进制
-  （`cargo build -p mediaservo-server --features admin-dashboard`）→ `:9800/admin` 本体出 SPA；
-  根 Caddyfile（全透传）保持原样即模式② ingress。
-- 整轨：模式②镜像一切如旧（本次变更未触碰其语义，仅修复构建法 PIT-169）。
+- Web layer: after `stop`, return to the old `run server` posture = run the **embedded variant** binary directly
+  (`cargo build -p mediaservo-server --features admin-dashboard`) → the SPA appears at `:9800/admin`;
+  keep the root Caddyfile (full passthrough) as-is and it serves as the mode ② ingress.
+- Whole track: mode ② images unchanged (this change never touched their semantics; only the build method was fixed, PIT-169).

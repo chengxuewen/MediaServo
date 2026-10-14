@@ -115,7 +115,7 @@ fn auth_request(method: Method, uri: &str, token: Option<&str>, body: Body) -> R
         b = b.header("Authorization", format!("Bearer {t}"));
     }
     if is_post {
-        // axum Json<T> extractor 要求 content-type
+        // the axum Json<T> extractor requires the content-type
         b = b.header("content-type", "application/json");
     }
     b.body(body).unwrap()
@@ -144,7 +144,7 @@ async fn devices_requires_auth() {
 async fn devices_dispatcher_read_only() {
     let state = make_state(temp_devices_path("dispatcher")).await;
     let app = admin_router(state.clone());
-    // GET 允许
+    // GET allowed
     let res = app
         .clone()
         .oneshot(auth_request(
@@ -156,7 +156,7 @@ async fn devices_dispatcher_read_only() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    // POST（注册）拒绝 — dispatcher 只读
+    // POST (register) denied -- dispatcher is read-only
     let res = app
         .clone()
         .oneshot(auth_request(
@@ -167,7 +167,7 @@ async fn devices_dispatcher_read_only() {
         ))
         .await
         .unwrap();
-    assert_ne!(res.status(), StatusCode::OK, "dispatcher 写操作必须被拒");
+    assert_ne!(res.status(), StatusCode::OK, "dispatcher write operations must be denied");
 }
 
 // ── CRUD + hot-reload ────────────────────────────────────────────────────────
@@ -212,13 +212,13 @@ async fn devices_register_and_hot_authenticate() {
     assert_eq!(body["device_id"], "ms-hot-1");
     assert!(body["secret_hash"].as_str().unwrap().starts_with("sha256:"));
 
-    // 热重载实证：同一进程内（未重启）注册后鉴权立即通过
+    // hot-reload proof: within the same process (no restart), auth passes immediately after registering
     assert_eq!(
         devices::authenticate(&state.device_registry, Some("ms-hot-1"), Some(&secret),),
         Some(Ok(()))
     );
 
-    // 列表包含新设备
+    // the list includes the new device
     let res = app
         .clone()
         .oneshot(auth_request(
@@ -236,7 +236,7 @@ async fn devices_register_and_hot_authenticate() {
         .iter()
         .map(|d| d["device_id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, vec!["ms-hot-1"], "列表应含新注册设备");
+    assert_eq!(ids, vec!["ms-hot-1"], "the list should contain the newly registered device");
 }
 
 #[tokio::test]
@@ -259,7 +259,7 @@ async fn devices_register_duplicate_409() {
     let res1 = post(&app, &token).await;
     assert_eq!(res1.status(), StatusCode::CREATED);
     let res2 = post(&app, &token).await;
-    assert_eq!(res2.status(), StatusCode::CONFLICT, "重复注册 → 409");
+    assert_eq!(res2.status(), StatusCode::CONFLICT, "duplicate registration -> 409");
 }
 
 #[tokio::test]
@@ -289,7 +289,7 @@ async fn devices_revoke_then_auth_fails() {
     let app = admin_router(state.clone());
     let token = admin_token(&state);
 
-    // 注册
+    // register
     let res = app
         .clone()
         .clone()
@@ -305,7 +305,7 @@ async fn devices_revoke_then_auth_fails() {
     let body = json_of(res).await;
     let secret = body["secret"].as_str().unwrap().to_string();
 
-    // 吊销
+    // revoke
     let res = app
         .clone()
         .oneshot(auth_request(
@@ -318,7 +318,7 @@ async fn devices_revoke_then_auth_fails() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // 热重载实证：吊销后立即 4010（Unknown）
+    // hot-reload proof: immediately 4010 (Unknown) after revocation
     assert_eq!(
         devices::authenticate(&state.device_registry, Some("ms-rev-1"), Some(&secret)),
         Some(Err(devices::DeviceAuthError::Unknown))
@@ -378,7 +378,7 @@ async fn devices_reset_secret_rotates() {
     let new_secret = body["secret"].as_str().unwrap().to_string();
     assert_ne!(old_secret, new_secret);
 
-    // 旧密钥失效（BadSecret），新密钥生效（热重载）
+    // old key invalidated (BadSecret), new key effective (hot reload)
     assert_eq!(
         devices::authenticate(&state.device_registry, Some("ms-rot-1"), Some(&old_secret)),
         Some(Err(devices::DeviceAuthError::BadSecret))
@@ -404,7 +404,7 @@ async fn devices_register_with_provided_secret() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::CREATED);
     let body = json_of(res).await;
-    assert_eq!(body["secret"], "admin-chosen-1", "自带 secret 原样返回");
+    assert_eq!(body["secret"], "admin-chosen-1", "the self-supplied secret returned as-is");
     assert_eq!(
         body["secret_hash"],
         serde_json::Value::String(format!("sha256:{}", {
@@ -414,7 +414,7 @@ async fn devices_register_with_provided_secret() {
             h.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
         }))
     );
-    // 热重载实证：带自备 secret 注册后可立即鉴权
+    // hot-reload proof: after registering with a self-supplied secret, auth works immediately
     assert_eq!(
         devices::authenticate(&state.device_registry, Some("ms-prov-1"), Some("admin-chosen-1")),
         Some(Ok(()))
@@ -441,17 +441,18 @@ async fn devices_register_invalid_provided_secret_400() {
     }
 }
 
-// ── make_state_loaded: 从 devices.yaml 加载注册表（持久化/重载闭环测试用）──
+// -- make_state_loaded: load the registry from devices.yaml (for persistence/reload closed-loop tests) --
 
 #[cfg(feature = "sfu-mediasoup")]
 async fn make_state_loaded(devices_path: String) -> AdminState {
-    let sfu = std::sync::Arc::new(
-        mediaservo_server::sfu::SfuManager::new_with_port(
-            mediaservo_server::sfu::random_udp_port(),
-        )
-        .await
-        .unwrap(),
-    );
+    let sfu =
+        std::sync::Arc::new(
+            mediaservo_server::sfu::SfuManager::new_with_port(
+                mediaservo_server::sfu::random_udp_port(),
+            )
+            .await
+            .unwrap(),
+        );
     let signaling = SignalingServer::new(sfu.clone(), 65536, None);
     let (event_tx, _) = broadcast::channel(256);
     AdminState {
@@ -501,15 +502,15 @@ async fn make_state_loaded(devices_path: String) -> AdminState {
     }
 }
 
-// ── 增删改查补齐（secret 语义 + 列表联动 + 持久化闭环）────────────────
+// -- CRUD completion (secret semantics + list interplay + the persistence loop) --
 
 #[tokio::test]
 async fn devices_reset_secret_unknown_404() {
-    // Arrange: 空注册表
+    // Arrange: empty registry
     let state = make_state(temp_devices_path("reset-unknown")).await;
     let app = admin_router(state.clone());
 
-    // Act: 对不存在设备 reset-secret
+    // Act: reset-secret on a nonexistent device
     let res = app
         .oneshot(auth_request(
             Method::POST,
@@ -520,13 +521,13 @@ async fn devices_reset_secret_unknown_404() {
         .await
         .unwrap();
 
-    // Assert: 404（对称 revoke_unknown_404）
-    assert_eq!(res.status(), StatusCode::NOT_FOUND, "未知设备 reset-secret → 404");
+    // Assert: 404 (symmetric with revoke_unknown_404)
+    assert_eq!(res.status(), StatusCode::NOT_FOUND, "reset-secret on an unknown device -> 404");
 }
 
 #[tokio::test]
 async fn devices_list_never_leaks_secret() {
-    // Arrange: 注册 ms-leak-1（生成 secret）——明文只应出现在注册响应（C33 一次性语义）
+    // Arrange: register ms-leak-1 (generates a secret) -- the plaintext should only ever appear in the register response (the C33 one-time semantics)
     let state = make_state(temp_devices_path("no-leak")).await;
     let app = admin_router(state.clone());
     let token = admin_token(&state);
@@ -542,20 +543,15 @@ async fn devices_list_never_leaks_secret() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::CREATED);
     let reg_body = json_of(res).await;
-    assert!(reg_body["secret"].is_string(), "注册响应含一次明文");
+    assert!(reg_body["secret"].is_string(), "the register response contains one-time plaintext");
 
-    // Act: 列表查询
+    // Act: list query
     let res = app
-        .oneshot(auth_request(
-            Method::GET,
-            "/api/admin/devices",
-            Some(&token),
-            Body::empty(),
-        ))
+        .oneshot(auth_request(Method::GET, "/api/admin/devices", Some(&token), Body::empty()))
         .await
         .unwrap();
 
-    // Assert: 列表条目绝不包含 secret/secret_hash（后续任何查询不可再见明文）
+    // Assert: list entries never contain secret/secret_hash (no later query can see the plaintext again)
     let body = json_of(res).await;
     let entries = body["devices"].as_array().unwrap();
     assert_eq!(entries.len(), 1);
@@ -563,14 +559,14 @@ async fn devices_list_never_leaks_secret() {
     assert_eq!(entry["device_id"], "ms-leak-1");
     assert!(
         entry.get("secret").is_none() && entry.get("secret_hash").is_none(),
-        "列表不得泄露 secret/secret_hash: {entry}"
+        "the list must not leak secret/secret_hash: {entry}"
     );
-    assert!(body.get("secret").is_none(), "顶层也不得含 secret");
+    assert!(body.get("secret").is_none(), "the top level must not contain secret either");
 }
 
 #[tokio::test]
 async fn devices_revoked_removed_from_list() {
-    // Arrange: 注册 ms-a + ms-b
+    // Arrange: register ms-a + ms-b
     let state = make_state(temp_devices_path("revoke-list")).await;
     let app = admin_router(state.clone());
     let token = admin_token(&state);
@@ -588,7 +584,7 @@ async fn devices_revoked_removed_from_list() {
         assert_eq!(res.status(), StatusCode::CREATED);
     }
 
-    // Act: 吊销 ms-a
+    // Act: revoke ms-a
     let res = app
         .clone()
         .oneshot(auth_request(
@@ -601,14 +597,9 @@ async fn devices_revoked_removed_from_list() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // Assert: 列表只含存活的 ms-b
+    // Assert: the list contains only the surviving ms-b
     let res = app
-        .oneshot(auth_request(
-            Method::GET,
-            "/api/admin/devices",
-            Some(&token),
-            Body::empty(),
-        ))
+        .oneshot(auth_request(Method::GET, "/api/admin/devices", Some(&token), Body::empty()))
         .await
         .unwrap();
     let body = json_of(res).await;
@@ -618,12 +609,12 @@ async fn devices_revoked_removed_from_list() {
         .iter()
         .map(|d| d["device_id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, vec!["ms-b"], "吊销后列表应移除该设备");
+    assert_eq!(ids, vec!["ms-b"], "after revocation the list should have dropped the device");
 }
 
 #[tokio::test]
 async fn devices_register_persists_across_reload() {
-    // Arrange: 注册 ms-persist-1（自带 secret）→ save 落盘
+    // Arrange: register ms-persist-1 (self-supplied secret) -> save to disk
     let path = temp_devices_path("persist");
     let state = make_state(path.clone()).await;
     let app = admin_router(state.clone());
@@ -636,16 +627,20 @@ async fn devices_register_persists_across_reload() {
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::CREATED, "注册应 201");
+    assert_eq!(res.status(), StatusCode::CREATED, "registration should be 201");
 
-    // Act: 用同一 devices.yaml 重建 state（模拟进程重启——从文件加载）
+    // Act: rebuild state from the same devices.yaml (simulating a process restart -- loading from file)
     let state2 = make_state_loaded(path).await;
 
-    // Assert: 重载后鉴权通过 + 列表可见（save→load 闭环）
+    // Assert: after reload auth passes + the list shows it (the save->load closed loop)
     assert_eq!(
-        devices::authenticate(&state2.device_registry, Some("ms-persist-1"), Some("persist-secret-1")),
+        devices::authenticate(
+            &state2.device_registry,
+            Some("ms-persist-1"),
+            Some("persist-secret-1")
+        ),
         Some(Ok(())),
-        "重载后原 secret 应可鉴权"
+        "after reload the original secret should still authenticate"
     );
     let app2 = admin_router(state2.clone());
     let res = app2
@@ -664,12 +659,16 @@ async fn devices_register_persists_across_reload() {
         .iter()
         .map(|d| d["device_id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, vec!["ms-persist-1"], "重载后列表应含持久化设备");
+    assert_eq!(
+        ids,
+        vec!["ms-persist-1"],
+        "after reload the list should contain the persisted device"
+    );
 }
 
 #[tokio::test]
 async fn devices_register_generated_secret_is_uuid_v4() {
-    // Arrange/Act: 服务器生成 secret（不提供 secret 字段）
+    // Arrange/Act: server-generated secret (no secret field provided)
     let state = make_state(temp_devices_path("gen-secret")).await;
     let app = admin_router(state.clone());
     let res = app
@@ -683,9 +682,9 @@ async fn devices_register_generated_secret_is_uuid_v4() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::CREATED);
 
-    // Assert: uuid v4 形态（36 字符 + 4 连字符）——配发侧可复制可用
+    // Assert: uuid v4 shape (36 chars + 4 hyphens) -- copyable and usable by the provisioning side
     let body = json_of(res).await;
     let secret = body["secret"].as_str().unwrap();
-    assert_eq!(secret.len(), 36, "生成 secret 应为 uuid v4: {secret}");
-    assert_eq!(secret.chars().filter(|c| *c == '-').count(), 4, "uuid 连字符数: {secret}");
+    assert_eq!(secret.len(), 36, "the generated secret should be a uuid v4: {secret}");
+    assert_eq!(secret.chars().filter(|c| *c == '-').count(), 4, "uuid hyphen count: {secret}");
 }

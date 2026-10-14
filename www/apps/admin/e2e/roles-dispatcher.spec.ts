@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
-// H3: dispatcher 角色只读视图（storageState 已登录 dispatcher — global-setup）。
-// 断言: 音频/车辆可见 + admin-only REST 拒绝（服务端强制）+ 音频面板渲染。
+// H3: dispatcher role read-only view (storageState signed in as dispatcher — global-setup).
+// Asserts: audio/vehicles visible + admin-only REST rejected (server-enforced) + audio panel renders.
 
 test.describe('H3 dispatcher role-aware views', () => {
   test('dispatcher sees audio + vehicles nav, header shows role', async ({ page }) => {
@@ -14,19 +14,19 @@ test.describe('H3 dispatcher role-aware views', () => {
   test('dispatcher admin-only REST denied, read-only allowed', async ({ page }) => {
     await page.goto('/');
     const token = await page.evaluate(() => localStorage.getItem('mediaservo_admin_token'));
-    // config = admin 专属
+    // config = admin only
     const configStatus = await page.evaluate(async (tok) => {
       const res = await fetch('/api/admin/config', { headers: { Authorization: `Bearer ${tok}` } });
       return res.status;
     }, token);
     expect(configStatus).toBe(401);
-    // 写操作（删房间）拒绝
+    // write op (delete room) rejected
     const deleteStatus = await page.evaluate(async (tok) => {
       const res = await fetch('/api/admin/rooms/nope', { method: 'DELETE', headers: { Authorization: `Bearer ${tok}` } });
       return res.status;
     }, token);
     expect(deleteStatus).toBe(401);
-    // 只读端点放行
+    // read-only endpoint allowed
     const statusStatus = await page.evaluate(async (tok) => {
       const res = await fetch('/api/admin/status', { headers: { Authorization: `Bearer ${tok}` } });
       return res.status;

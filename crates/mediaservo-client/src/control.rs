@@ -1,9 +1,9 @@
-//! 控制面 SFU DataChannel 句柄（S2 重写——旧 HMAC-P2P 形随 main.rs 一并退役）。
+//! The control-plane SFU DataChannel handle (the S2 rewrite -- the old HMAC-P2P form retired with main.rs).
 //!
-//! wire 形 = [`ControlEnvelope`]/[`ControlAck`]（common::protocol 单一真源，
-//! 与 host S1 `mediaservo-host::controller` 配对）。回执经**同 label DC 回声**
-//! 回来（host `DcAckSink` 双写：ack 主路 DC + 入站 DC 回声——client 侧只需回声，
-//! 免建 Recv 消费链）。零 HMAC、零 PSK 签名。
+//! The wire shape = [`ControlEnvelope`]/[`ControlAck`] (the single truth source in common::protocol,
+//! paired with host S1's `mediaservo-host::controller`). Receipts come back via the **same-label DC echo**
+//! (host `DcAckSink` dual-writes: the ack main-path DC + an inbound DC echo -- client only needs the echo,
+//! sparing a Recv consumption chain). Zero HMAC, zero PSK signatures.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,16 +26,16 @@ impl std::fmt::Debug for ControlChannel {
     }
 }
 
-/// 一次 `open_control` 建立的出程控制通道集。
+/// The egress control channel set established by one `open_control`.
 ///
-/// 构造仅由 [`crate::RoomSession::open_control`] 完成（transport/DC/announce 序列
-/// 在 session 侧）；本类型只做收发与保活（持 pc 引用防其提前释放）。
+/// Construction happens only via [`crate::RoomSession::open_control`] (the transport/DC/announce sequence
+/// lives on the session side); this type only sends/receives and keeps things alive (holding the pc reference prevents early release).
 pub struct ControlChannel {
     dcs: HashMap<String, Arc<dyn DcHandle>>,
     labels: Vec<String>,
     ack_rx: mpsc::Receiver<ControlAck>,
     producer_ids: Vec<String>,
-    /// 出程 transport 的 PC——句柄存活期间持有，drop 即断 DC。
+    /// The egress transport's PC -- held while the handle lives; dropping it disconnects the DCs.
     _pc: Arc<dyn PcHandle>,
 }
 
@@ -50,19 +50,19 @@ impl ControlChannel {
         Self { dcs, labels, ack_rx, producer_ids, _pc: pc }
     }
 
-    /// 已建立的通道 label（按 open_control 入参序）。
+    /// The established channel labels (in open_control input order).
     #[must_use]
     pub fn labels(&self) -> &[String] {
         &self.labels
     }
 
-    /// server 分配的 data producer id（审计/排查用）。
+    /// The server-assigned data producer id (for auditing/debugging).
     #[must_use]
     pub fn producer_ids(&self) -> &[String] {
         &self.producer_ids
     }
 
-    /// 在指定 label 通道发一条命令信封（seq 由调用方自增维护）。
+    /// Send one command envelope on the given label's channel (seq maintained by the caller).
     pub async fn send(
         &self,
         label: &str,
@@ -74,33 +74,34 @@ impl ControlChannel {
             .await
     }
 
-    /// 信封直发（已持有 [`ControlEnvelope`] 时的低层入口）。
+    /// Envelope send (the low-level entry when already holding a [`ControlEnvelope`]).
     pub async fn send_envelope(
         &self,
         label: &str,
         env: &ControlEnvelope,
     ) -> Result<(), ClientError> {
-        let dc = self
-            .dcs
-            .get(label)
-            .ok_or_else(|| ClientError::InvalidState(format!("control DC \"{label}\" 未开启")))?;
+        let dc = self.dcs.get(label).ok_or_else(|| {
+            ClientError::InvalidState(format!("control DC \"{label}\" is not open"))
+        })?;
         let text = serde_json::to_string(env)
             .map_err(|e| ClientError::MalformedResponse(format!("envelope serialize: {e}")))?;
-        // 错误映射在引擎侧（SysDc="DC {label} send: {e}" / Fake 同型）。
+        // error mapping lives on the engine side (SysDc="DC {label} send: {e}" / Fake same shape).
         dc.send_text(&text).await
     }
 
-    /// 取下一条回执（host 回声/ack 广播同队），`wait` 内无回执 →
+    /// Take the next receipt (host echo/ack broadcast share the queue); no receipt within `wait` ->
     /// [`ClientError::Timeout`]。
     pub async fn recv_ack(&mut self, wait: Duration) -> Result<ControlAck, ClientError> {
         tokio::time::timeout(wait, self.ack_rx.recv())
             .await
             .map_err(|_| ClientError::Timeout { what: "ControlAck" })?
-            .ok_or_else(|| ClientError::InvalidState("ack 流已关闭（DC 断开）".into()))
+            .ok_or_else(|| {
+                ClientError::InvalidState("the ack stream closed (DC disconnected)".into())
+            })
     }
 
-    /// S6/K5: 就绪态聚合——全部出程 DC 的**最差**态（Closed > Closing > Connecting > Open）。
-    /// 判据：任一通道劣化即整组不可乐观发送（急停/命令前置预检的单一读点）。
+    /// S6/K5: ready-state aggregation -- the **worst** state across all egress DCs (Closed > Closing > Connecting > Open).
+    /// Predicate: any channel degraded = the whole set must not optimistically send (the single readout for e-stop/command preflight).
     #[must_use]
     pub fn ready_state(&self) -> RTCDataChannelState {
         fn rank(s: RTCDataChannelState) -> u8 {
@@ -124,8 +125,8 @@ impl ControlChannel {
             .unwrap_or(RTCDataChannelState::Open)
     }
 
-    /// S6/K5: 待发队列水位总和（全通道 buffered_amount 求和）。
-    /// 用途：大批量命令/急停投递前的背压预检（水位高 = 先降载或等待，勿盲灌）。
+    /// S6/K5: the summed outbound-queue waterline (buffered_amount summed over all channels).
+    /// Use: backpressure preflight before dispatching bulk commands/an e-stop (a high waterline = shed load or wait first, never blind-pour).
     pub async fn buffered_amount(&self) -> u64 {
         let mut total = 0u64;
         for dc in self.dcs.values() {
@@ -134,8 +135,8 @@ impl ControlChannel {
         total
     }
 
-    /// 取配对 `want_seq` 的回执——更早的过期 ack（丢包重发窗口的产物）丢弃跳过。
-    /// `wait` = 整窗超时（非单条）。
+    /// Take the receipt paired with `want_seq` -- earlier stale acks (products of the retransmit window) are dropped and skipped.
+    /// `wait` = the whole-window timeout (not per-message).
     pub async fn recv_ack_for(
         &mut self,
         want_seq: u64,
@@ -150,11 +151,17 @@ impl ControlChannel {
             let ack = tokio::time::timeout(remain, self.ack_rx.recv())
                 .await
                 .map_err(|_| ClientError::Timeout { what: "ControlAck" })?
-                .ok_or_else(|| ClientError::InvalidState("ack 流已关闭（DC 断开）".into()))?;
+                .ok_or_else(|| {
+                    ClientError::InvalidState("the ack stream closed (DC disconnected)".into())
+                })?;
             if ack.ack == want_seq {
                 return Ok(ack);
             }
-            tracing::debug!(got = ack.ack, want = want_seq, "过期 ack 跳过（重发窗产物）");
+            tracing::debug!(
+                got = ack.ack,
+                want = want_seq,
+                "stale ack skipped (a retransmit-window product)"
+            );
         }
     }
 }

@@ -2,23 +2,23 @@
 
 ## Superpowers
 
-通过 `superpowers` 插件加载的通用技能，适用于所有项目。
+General skills loaded via the `superpowers` plugin; applicable to all projects.
 
 ## Project Skills
 
-MediaServo 项目专属技能，位于 `.agents/skills/`：
+MediaServo project-specific skills, located in `.agents/skills/`:
 
-| Skill | 类型 | 说明 |
+| Skill | Type | Description |
 |-------|------|------|
-| `book-to-skill` | 工具 | 将书籍/文档转换为技能文件 |
-| `doc-audit` | 工具 | 文档审计与一致性检查 |
-| `openspec-propose` | 规范 | 创建 OpenSpec 变更提案 |
-| `openspec-apply-change` | 规范 | 应用 OpenSpec 变更 |
-| `openspec-explore` | 规范 | 探索已有 Spec 和变更 |
-| `openspec-archive-change` | 规范 | 归档已完成的变更 |
-| `openspec-sync-specs` | 规范 | 同步 Spec 与归档变更 |
-| `test-harness` | 测试 | 多语言测试框架（Rust/TS/Python/C++/C） |
+| `book-to-skill` | Tooling | Convert books/documents into skill files |
+| `doc-audit` | Tooling | Documentation audit and consistency checks |
+| `openspec-propose` | Spec workflow | Create OpenSpec change proposals |
+| `openspec-apply-change` | Spec workflow | Apply OpenSpec changes |
+| `openspec-explore` | Spec workflow | Explore existing specs and changes |
+| `openspec-archive-change` | Spec workflow | Archive completed changes |
+| `openspec-sync-specs` | Spec workflow | Sync specs and archive changes |
+| `test-harness` | Testing | Multi-language test framework (Rust/TS/Python/C++/C) |
 
-## 使用方式
+## Usage
 
-技能由 AI 代理根据任务上下文自动激活。无需手动调用。
+Skills are auto-activated by AI agents based on task context. No manual invocation needed.

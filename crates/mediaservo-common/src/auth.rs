@@ -103,8 +103,8 @@ pub struct JwtClaims {
     #[serde(default)]
     pub role: Option<String>,
 
-    /// G3 车×舱授权白名单: 该账号可访问的车端 device_id 列表（viewer/operator 用;
-    /// admin/dispatcher 忽略 = 任意车）。additive — 旧 token 缺省空。
+    /// G3 vehicle x cockpit authorization allowlist: vehicle device_id list this account may access (viewer/operator only;
+    /// admin/dispatcher ignore it = any vehicle). additive - old tokens default to empty.
     #[serde(default)]
     pub vehicles: Option<Vec<String>>,
 }
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn jwt_claims_vehicles_roundtrip() {
-        // G3: 账号 token 携带车辆白名单（serde additive，缺省 None）
+        // G3: account token carries the vehicle allowlist (serde additive, defaults to None)
         let auth = JwtAuth::new("my-jwt-secret-256-bit-minimum-key");
         let now =
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
@@ -302,7 +302,7 @@ mod tests {
         let parsed = auth.verify(&token).unwrap();
         assert_eq!(parsed.role.as_deref(), Some("operator"));
         assert_eq!(parsed.vehicles.as_deref(), Some(&["ms-car1".to_string()][..]));
-        // 旧 token（无 vehicles 字段）缺省 None
+        // Old token (no vehicles field) defaults to None
         let legacy = JwtClaims {
             sub: "old".into(),
             iat: now,

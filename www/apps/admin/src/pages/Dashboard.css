@@ -1,4 +1,4 @@
-/* play-layout-stats: 解除 960px 锁，自适应全宽（列表区如需控宽见预案 .device-list） */
+/* play-layout-stats: unlock the 960px cap, adaptive full width (see the planned .device-list if the list area needs width control) */
 
 .stats-bar { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
 
@@ -39,8 +39,8 @@
 .error { color: #e74c3c; }
 .btn-play { padding: .25rem .5rem; font-size: .75rem; background: #e74c3c; color: #fff; border: none; border-radius: 4px; cursor: pointer; margin-left: auto; } .btn-play:hover { background: #c0392b; }
 
-/* multi-stream P3 + play-layout-stats: 多路播放网格（列数 inline 控制，此处为兜底 3 列）
-   裁切修复：16:9 归 .vp-body（VideoPlayer.css），整卡不再锁 aspect 致底部溢出 */
+/* multi-stream P3 + play-layout-stats: multi-stream playback grid (column count set inline; this is the fallback of 3 columns) */
+   Cropping fix: 16:9 belongs to .vp-body (VideoPlayer.css); the whole card no longer locks aspect-ratio causing bottom overflow */
 .video-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

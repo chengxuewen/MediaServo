@@ -1,4 +1,4 @@
-//! C 配置结构镜像 + 校验纯函数（struct_size 前向兼容 / 必填 / 凭证恰一 / role 表）。
+//! C config struct mirrors + validation pure functions (struct_size forward compat / required fields / exactly-one credential / role table).
 
 use std::os::raw::c_int;
 use std::ptr;
@@ -9,9 +9,9 @@ use crate::errors::{
     MEDIASERVO_CLIENT_ERR_INVALID_ARG, check_struct_size, cstr, parse_role, set_last_error,
 };
 
-/// 登录配置（⊘ 保留一周期：批1b 起 login 转扁平参数形，本结构不再被消费；
-/// struct_size 演进纪律下的存量形状，批2 随 ⊘ 清单一并移除）。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
+/// Login config (⊘ kept for one period: since batch 1b login uses flat parameters, this struct is no longer consumed;
+/// a legacy shape under the struct_size evolution discipline; batch 2 removes it with the ⊘ list).
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception)
 #[repr(C)]
 pub struct mediaservo_client_login_config_t {
     pub struct_size: usize,
@@ -34,8 +34,8 @@ impl Default for mediaservo_client_login_config_t {
     }
 }
 
-/// 会话配置。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
+/// Session configuration.
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception)
 #[repr(C)]
 pub struct mediaservo_client_config_t {
     pub struct_size: usize,
@@ -44,26 +44,26 @@ pub struct mediaservo_client_config_t {
     pub jwt: *const std::os::raw::c_char,
     pub psk: *const std::os::raw::c_char,
     pub role: *const std::os::raw::c_char,
-    /// 急停 HMAC 密钥文件路径（W4b；G13 语义=密钥永不走 argv/env 明文）。
-    /// 文件须 0600 且非空；NULL/空 = estop 不签名（车端未配 key = 迁移放行形，
-    /// 车端已配 key = 拒签正确裁决）。载荷 = 原始密钥字节（trim 尾换行）。
+    /// Emergency-stop HMAC key file path (W4b; G13 semantics = keys never travel as plaintext argv/env).
+    /// The file must be 0600 and non-empty; NULL/empty = estop is not signed (no key on the vehicle = migration-allow form;
+    /// key present = refusing to sign is the correct ruling). Payload = the raw key bytes (trailing newline trimmed).
     pub hmac_key_file: *const std::os::raw::c_char,
-    /// 设备身份实例目录（viewer-auth-matrix T1，accountless T3 布局：identity.json +
-    /// etc/link/signing.pem）。**尾部 additive**：MIN_SIZE = 旧形状（本字段在覆盖区外），
-    /// 老调用方 struct_size 校验照过；读取必须按 `cfg.struct_size` 判界（见
-    /// [`identity_dir_of`]——老二进制传小结构 = 字段不存在，非解引用垃圾）。
-    /// NULL/空 = 不启用。与 jwt/psk 可叠（server 设备认证优先，D-E3）；防呆=三凭证
-    /// 齐给 INVALID_ARG。
+    /// Device identity instance directory (viewer-auth-matrix T1, accountless T3 layout: identity.json +
+    /// etc/link/signing.pem). **Trailing additive**: MIN_SIZE = the old shape (this field is outside the covered region),
+    /// so old callers still pass the struct_size check; reads must bound-check against `cfg.struct_size` (see
+    /// [`identity_dir_of`] — an old binary passing the small struct means the field is absent, not garbage to dereference).
+    /// NULL/empty = disabled. Composable with jwt/psk (server device auth takes priority, D-E3); a safety rule = all three credentials
+    /// together → INVALID_ARG.
     pub identity_dir: *const std::os::raw::c_char,
 }
 
-/// 新调用方（含 identity_dir 字段）的完整尺寸。MIN_SIZE 保持旧形状值——
-/// check_struct_size(actual < MIN) 拒，[MIN, FULL) = 老形状（identity_dir 缺席）。
+/// Full size for new callers (including the identity_dir field). MIN_SIZE keeps the old-shape value —
+/// check_struct_size(actual < MIN) rejects; [MIN, FULL) = old shape (identity_dir absent).
 pub const MEDIASERVO_CLIENT_CONFIG_FULL_SIZE: usize = size_of::<mediaservo_client_config_t>();
 pub const MEDIASERVO_CLIENT_CONFIG_MIN_SIZE: usize =
     MEDIASERVO_CLIENT_CONFIG_FULL_SIZE - size_of::<*const std::os::raw::c_char>();
 
-/// additive 字段安全读取：调用方 struct_size ≥ FULL 才有该字段（返回 None = 缺席）。
+/// Safe read of the additive field: the field exists only when the caller's struct_size ≥ FULL (None = absent).
 pub(crate) fn identity_dir_of(cfg: &mediaservo_client_config_t) -> Option<&str> {
     if cfg.struct_size < MEDIASERVO_CLIENT_CONFIG_FULL_SIZE {
         return None;
@@ -89,7 +89,7 @@ impl Default for mediaservo_client_config_t {
     }
 }
 
-/// 会话配置校验产物。
+/// Session config validation output.
 #[derive(Debug)]
 pub(crate) struct SessionCfg<'a> {
     pub signaling_url: &'a str,
@@ -101,7 +101,7 @@ pub(crate) struct SessionCfg<'a> {
     pub identity_dir: Option<&'a str>,
 }
 
-/// 会话配置校验（纯函数，单测钉）：url/room 必填；jwt/psk 恰一非空；role 可空。
+/// Session config validation (pure function, pinned by unit tests): url/room required; exactly one of jwt/psk non-empty; role optional.
 pub(crate) fn validate_session_cfg(
     cfg: &mediaservo_client_config_t,
 ) -> Result<SessionCfg<'_>, c_int> {
@@ -117,7 +117,7 @@ pub(crate) fn validate_session_cfg(
         match cstr(p) {
             Ok(Some(s)) if !s.is_empty() => Some(s),
             Ok(_) => None,
-            Err(()) => Some("\u{0}invalid-utf8"), // 哨兵：区分「缺失」与「非法」
+            Err(()) => Some("\u{0}invalid-utf8"), // sentinel: distinguishes "missing" from "invalid"
         }
     };
     let (Some(url), Some(room)) = (required(cfg.signaling_url), required(cfg.room)) else {
@@ -126,10 +126,10 @@ pub(crate) fn validate_session_cfg(
     };
     let jwt = opt_nonempty(cfg.jwt);
     let psk = opt_nonempty(cfg.psk);
-    // additive 字段按 struct_size 判界读取（老调用方无此字段=None，非垃圾）。
+    // The additive field is read with a struct_size bound check (old callers have no such field → None, not garbage).
     let identity_dir = identity_dir_of(cfg);
-    // 防呆（T1 合同）：三凭证齐给 = INVALID_ARG。jwt/psk 仍恰一（不变）；
-    // identity_dir 与任一可叠（server 设备认证优先，D-E3）。
+    // Safety rule (T1 contract): all three credentials at once = INVALID_ARG. jwt/psk still exactly-one (unchanged);
+    // identity_dir composes with either (server device auth takes priority, D-E3).
     if identity_dir.is_some() && jwt.is_some() && psk.is_some() {
         set_last_error(
             "mediaservo_client_session_create: identity_dir with both jwt and psk (pick two at most)",
@@ -182,15 +182,15 @@ pub(crate) fn validate_session_cfg(
 }
 
 fn session_hmac_key_file(cfg: &mediaservo_client_config_t) -> Option<&str> {
-    // cstr 生命周期 = cfg 借用期（SessionCfg 生命周期随 cfg）。非法 UTF-8 与缺失同路
-    // = 该路径在会话建立期不报错（可选字段），estop 使用时按"文件不可读"暴露。
+    // cstr lifetime = the cfg borrow lifetime (SessionCfg lifetime follows cfg). Invalid UTF-8 and missing share a path
+    // = this path does not error at session setup (optional field); it surfaces as "file unreadable" when estop uses it.
     match cstr(cfg.hmac_key_file) {
         Ok(Some(s)) if !s.is_empty() => Some(s),
         _ => None,
     }
 }
 
-/// W4b：读急停密钥文件——薄转调 common 真源（车舱同纪律，防双实现漂移）。
+/// W4b: read the emergency-stop key file — thin delegation to the common source of truth (same discipline on vehicle and cockpit, preventing dual-implementation drift).
 pub(crate) fn load_hmac_key_file(path: &str) -> Result<String, String> {
     mediaservo_common::protocol::control_hmac_key_from_file(path)
 }
@@ -203,7 +203,7 @@ fn session_role(cfg: &mediaservo_client_config_t) -> Result<PeerRole, c_int> {
             ));
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         }),
-        Ok(Some(_)) | Ok(None) => Ok(PeerRole::Consumer), // NULL/空 = "Client" 缺省
+        Ok(Some(_)) | Ok(None) => Ok(PeerRole::Consumer), // NULL/empty = "Client" default
         Err(()) => {
             set_last_error("mediaservo_client_session_create: invalid UTF-8 in role");
             Err(MEDIASERVO_CLIENT_ERR_INVALID_ARG)
@@ -230,17 +230,17 @@ mod tests {
                 identity_dir: ptr::null(),
             }
         };
-        // 双凭证 → 拒
+        // Both credentials → reject
         let both = mk(c"j".as_ptr(), c"p".as_ptr());
         assert_eq!(validate_session_cfg(&both).unwrap_err(), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
-        // 无凭证 → 拒
+        // No credentials → reject
         let none = mk(ptr::null(), ptr::null());
         assert_eq!(validate_session_cfg(&none).unwrap_err(), MEDIASERVO_CLIENT_ERR_INVALID_ARG);
-        // jwt 单 → 过
+        // jwt only → pass
         let jwt = mk(c"j".as_ptr(), ptr::null());
         let parts = validate_session_cfg(&jwt).expect("valid");
         assert_eq!(parts.jwt, Some("j"));
-        assert_eq!(parts.role, PeerRole::Consumer); // NULL role = "Client" 缺省
+        assert_eq!(parts.role, PeerRole::Consumer); // NULL role = "Client" default
     }
 
     #[test]
@@ -264,12 +264,12 @@ mod tests {
         let p = dir.join("k.key");
         std::fs::write(&p, b"s3cret\n").unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
-        assert_eq!(load_hmac_key_file(p.to_str().unwrap()).unwrap(), "s3cret"); // trim 钉
+        assert_eq!(load_hmac_key_file(p.to_str().unwrap()).unwrap(), "s3cret"); // trim pin
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(load_hmac_key_file(p.to_str().unwrap()).unwrap_err().contains("过宽"));
+        assert!(load_hmac_key_file(p.to_str().unwrap()).unwrap_err().contains("too permissive"));
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
         std::fs::write(&p, b"\n").unwrap();
-        assert!(load_hmac_key_file(p.to_str().unwrap()).unwrap_err().contains("空密钥"));
+        assert!(load_hmac_key_file(p.to_str().unwrap()).unwrap_err().contains("empty key"));
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -288,7 +288,7 @@ mod tests {
         assert_eq!(validate_session_cfg(&cfg).unwrap().hmac_key_file, Some("/tmp/k"));
     }
 
-    // ── viewer-auth-matrix T1: identity_dir additive 字段判别 ──
+    // -- viewer-auth-matrix T1: identity_dir additive field discrimination --
     fn base_cfg() -> mediaservo_client_config_t {
         mediaservo_client_config_t {
             struct_size: MEDIASERVO_CLIENT_CONFIG_FULL_SIZE,
@@ -304,10 +304,10 @@ mod tests {
 
     #[test]
     fn identity_dir_absent_on_legacy_struct_size() {
-        // 老调用方（MIN_SIZE）传小结构：字段槽不存在 → None（非解引用垃圾）。
+        // An old caller (MIN_SIZE) passing the small struct: the field slot does not exist → None (not garbage to dereference).
         let mut cfg = base_cfg();
         cfg.struct_size = MEDIASERVO_CLIENT_CONFIG_MIN_SIZE;
-        cfg.identity_dir = c"/evil".as_ptr(); // 槽外内存——必须被忽略
+        cfg.identity_dir = c"/evil".as_ptr(); // memory outside the slot — must be ignored
         let parts = validate_session_cfg(&cfg).expect("legacy shape still valid");
         assert_eq!(parts.identity_dir, None);
     }
@@ -318,8 +318,8 @@ mod tests {
         cfg.identity_dir = c"/tmp/inst".as_ptr();
         let parts = validate_session_cfg(&cfg).expect("valid");
         assert_eq!(parts.identity_dir, Some("/tmp/inst"));
-        // 空串 = 不启用
-        cfg.identity_dir = c"".as_ptr(); // 空串 = 不启用（identity_dir_of 过滤）
+        // Empty string = disabled
+        cfg.identity_dir = c"".as_ptr(); // empty string = disabled (filtered by identity_dir_of)
         let parts = validate_session_cfg(&cfg).expect("valid");
         assert_eq!(parts.identity_dir, None);
     }

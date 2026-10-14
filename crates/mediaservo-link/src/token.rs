@@ -1,9 +1,9 @@
-//! 能力令牌（D238：ACL 签进 JWT，Ed25519 非对称——设备私钥签、各节点公钥验）。
+//! Capability tokens (D238: ACL signed into the JWT; Ed25519 asymmetric - device key signs, nodes verify with the public key).
 
 use crate::acl::{NodeAcl, Role};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 
-/// Ed25519 签名密钥（私钥 PEM，设备权威持有）。
+/// Ed25519 signing key (private PEM, held by the device authority).
 #[derive(Debug, Clone)]
 pub struct Ed25519SigningKey(Vec<u8>);
 
@@ -16,7 +16,7 @@ impl Ed25519SigningKey {
     }
 }
 
-/// Ed25519 验证密钥（公钥 PEM，各校验点持有；来源 `MEDIASERVO_DEVICE_PUBKEY` env / 设备配置）。
+/// Ed25519 verifying key (public PEM, held at each check point; from `MEDIASERVO_DEVICE_PUBKEY` env / device config).
 #[derive(Debug, Clone)]
 pub struct Ed25519VerifyingKey(Vec<u8>);
 
@@ -29,23 +29,27 @@ impl Ed25519VerifyingKey {
     }
 }
 
-/// 令牌 claims：node_id + role + acl + exp。
+/// Token claims: node_id + role + acl + exp.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Claims {
     pub node_id: String,
     pub role: Role,
-    /// ACL 签进令牌（D238）。
+    /// ACL embedded in the token (D238).
     pub acl: NodeAcl,
     pub exp: u64,
 }
 
-/// 能力令牌（JWT 字符串）。
+/// Capability token (JWT string).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityToken(String);
 
 impl CapabilityToken {
-    /// Ed25519 签名（jsonwebtoken `Algorithm::EdDSA`）。**禁止 HS256**（对称，持钥可伪造，D238）。
-    pub fn sign(acl: &NodeAcl, ttl_secs: u64, signing_key: &Ed25519SigningKey) -> Result<Self, crate::LinkError> {
+    /// Ed25519 signature (jsonwebtoken `Algorithm::EdDSA`). **HS256 is forbidden** (symmetric - the key holder can forge, D238).
+    pub fn sign(
+        acl: &NodeAcl,
+        ttl_secs: u64,
+        signing_key: &Ed25519SigningKey,
+    ) -> Result<Self, crate::LinkError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| crate::LinkError::Token(e.to_string()))?
@@ -56,69 +60,71 @@ impl CapabilityToken {
             acl: acl.clone(),
             exp: now + ttl_secs,
         };
-        let key =
-            EncodingKey::from_ed_pem(signing_key.pem()).map_err(|e| crate::LinkError::Token(e.to_string()))?;
+        let key = EncodingKey::from_ed_pem(signing_key.pem())
+            .map_err(|e| crate::LinkError::Token(e.to_string()))?;
         let token = encode(&Header::new(Algorithm::EdDSA), &claims, &key)
             .map_err(|e| crate::LinkError::Token(e.to_string()))?;
         Ok(Self(token))
     }
 
-    /// 公钥验签 + 校验 exp。
+    /// Verify the signature with the public key + check exp.
     pub fn verify(&self, verifying_key: &Ed25519VerifyingKey) -> Result<Claims, crate::LinkError> {
-        let key =
-            DecodingKey::from_ed_pem(verifying_key.pem()).map_err(|e| crate::LinkError::Token(e.to_string()))?;
+        let key = DecodingKey::from_ed_pem(verifying_key.pem())
+            .map_err(|e| crate::LinkError::Token(e.to_string()))?;
         let mut validation = Validation::new(Algorithm::EdDSA);
         validation.validate_exp = true;
-        validation.leeway = 0; // exp 精确生效（能力令牌无宽限）
-        let data =
-            decode::<Claims>(&self.0, &key, &validation).map_err(|e| crate::LinkError::Token(e.to_string()))?;
+        validation.leeway = 0; // exp enforced exactly (capability tokens get no leeway)
+        let data = decode::<Claims>(&self.0, &key, &validation)
+            .map_err(|e| crate::LinkError::Token(e.to_string()))?;
         Ok(data.claims)
     }
 
-    /// 原始 JWT 字符串。
+    /// Raw JWT string.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// 从原始 JWT 字符串构造（诊断/测试用）。
+    /// Construct from a raw JWT string (diagnostics/tests).
     pub fn from_raw(s: impl Into<String>) -> Self {
         Self(s.into())
     }
-    /// 序列化为自描述单文件字节（D-H10：部署分发一个文件，SDK 侧 `from_file` 加载即验签）。
+    /// Serialize into self-describing single-file bytes (D-H10: deploy ships one file; SDK-side `from_file` loads and verifies).
     pub fn to_file(&self, verifying_key: &Ed25519VerifyingKey) -> Vec<u8> {
         TokenFile::encode(self, verifying_key)
     }
 
-    /// 从自描述单文件字节加载并验签（篡改 / 错误 key / 过期均失败）。
-    pub fn from_file(bytes: &[u8]) -> Result<(Ed25519VerifyingKey, CapabilityToken), crate::LinkError> {
+    /// Load and verify from self-describing single-file bytes (tampered / wrong key / expired all fail).
+    pub fn from_file(
+        bytes: &[u8],
+    ) -> Result<(Ed25519VerifyingKey, CapabilityToken), crate::LinkError> {
         TokenFile::decode(bytes)
     }
 }
 
-/// 单文件自描述令牌（D-H10/D-H13）：verifying key + claims + signature 合并为一份文件，
-/// 部署分发一个文件，SDK 经 [`CapabilityToken::from_file`] 加载即完成验签，无需外部 key。
+/// Self-describing single-file token (D-H10/D-H13): verifying key + claims + signature merged into one file;
+/// deploy ships one file and [`CapabilityToken::from_file`] completes verification on load - no external key needed.
 ///
-/// 字节布局（全部 little-endian）：
+/// Byte layout (all little-endian):
 /// ```text
 /// magic    4B   "MSTK"
 /// version  1B   0x01
-/// key_len  2B   verifying key PEM 长度
+/// key_len  2B   verifying-key PEM length
 /// key      key_len B
-/// tok_len  2B   JWT 长度
-/// token    tok_len B（完整 JWT: header.payload.signature，其 Ed25519 签名即文件级完整性）
+/// tok_len  2B   JWT length
+/// token    tok_len B (full JWT: header.payload.signature; its Ed25519 signature = file-level integrity)
 /// ```
-/// 无独立文件级签名：`encode` 仅持 verifying key（无私钥，无法另签），而内嵌 JWT 的 Ed25519
-/// 签名覆盖全文件——篡改 key 区域使内嵌验签失败、篡改 claims/signature 使 JWT 验签失败。
+/// No separate file-level signature: `encode` holds only the verifying key (no private key, cannot re-sign); the embedded JWT's Ed25519
+/// signature covers the whole file - tampering the key region breaks embedded verification, tampering claims/signature breaks JWT verification.
 #[derive(Debug, Clone, Copy)]
 pub struct TokenFile;
 
 impl TokenFile {
-    /// 文件 magic（`b"MSTK"`）。
+    /// File magic (`b"MSTK"`).
     pub const MAGIC: &[u8; 4] = b"MSTK";
-    /// 文件格式版本。
+    /// File format version.
     pub const VERSION: u8 = 1;
 
-    /// 编码：verifying key PEM + 完整 JWT 合并为单文件字节。
+    /// Encode: merge the verifying-key PEM + full JWT into single-file bytes.
     pub fn encode(token: &CapabilityToken, key: &Ed25519VerifyingKey) -> Vec<u8> {
         let pem = key.pem();
         let raw = token.as_str().as_bytes();
@@ -132,9 +138,11 @@ impl TokenFile {
         out
     }
 
-    /// 解码并验签：用文件内嵌 key 校验 JWT 签名 + exp（与 `CapabilityToken::verify` 同语义）。
-    /// 篡改 key/claims/signature 任一区域、截断/多余字节、错误 key、过期均返回错误。
-    pub fn decode(bytes: &[u8]) -> Result<(Ed25519VerifyingKey, CapabilityToken), crate::LinkError> {
+    /// Decode and verify: check the JWT signature + exp with the embedded key (same semantics as `CapabilityToken::verify`).
+    /// Tampering any region (key/claims/signature), truncation/extra bytes, wrong key, and expiry all return errors.
+    pub fn decode(
+        bytes: &[u8],
+    ) -> Result<(Ed25519VerifyingKey, CapabilityToken), crate::LinkError> {
         let err = |m: String| crate::LinkError::Token(format!("token file: {m}"));
         if bytes.len() < 9 || &bytes[..4] != Self::MAGIC {
             return Err(err("bad magic or too short".into()));
@@ -156,7 +164,7 @@ impl TokenFile {
         let token_str = String::from_utf8(rest.to_vec()).map_err(|e| err(e.to_string()))?;
         let key = Ed25519VerifyingKey::from_pem(key_pem);
         let token = CapabilityToken::from_raw(token_str);
-        token.verify(&key)?; // 内嵌验签覆盖全文件（key/claims/sig 任一篡改均失败）+ exp
+        token.verify(&key)?; // embedded verification covers the whole file (any key/claims/sig tamper fails) + exp
         Ok((key, token))
     }
 }

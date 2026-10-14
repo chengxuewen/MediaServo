@@ -1,41 +1,41 @@
-# SDK 接口契约（link / field / client / deck）
+# SDK Interface Contract (link / field / client / deck)
 
-> **状态**: link/deck/field 已实现（client 设计定稿）| **日期**: 2026-08-14（更新 2026-08-17）
-> **关联**: D233（API 形态=单层会话型）、D222-D232（四 SDK 架构）、04-sdk-layers.md、api-interface-design 技能
-> **边界**: 本文是四 SDK 的**公开 Rust 接口契约** + C ABI 绑定形态。内部协商遵循 mediasoup 标准 offer/answer（C18，反 PIT-65）。
+> **Status**: link/deck/field implemented (client design finalized) | **Date**: 2026-08-14 (updated 2026-08-17)
+> **Related**: D233 (API shape = single-layer session style), D222-D232 (four-SDK architecture), 04-sdk-layers.md, the api-interface-design skill
+> **Boundary**: this document is the four SDKs' **public Rust interface contract** + C ABI binding forms. Internal negotiation follows the standard mediasoup offer/answer (C18, against PIT-65).
 
 ---
 
-## 0. 已定决策（契约依据）
+## 0. Settled Decisions (contract basis)
 
-| 决策 | 内容 | 出处 |
-|---|---|---|
-| **API 形态** | 单层会话型（`PushSession`/`PullSession`），不暴露 mediasoup 细粒度对象；高级需求走富 Options；底层控制走 mediaservo-webrtc 逃生舱 | D233 |
-| **事件模型** | Rust = enum + channel/Stream；C/C++ = 回调函数指针 | D234 |
-| **品牌化 ID** | `RoomId/PeerId/TrackId/SessionId/StreamId/NodeId/DeviceId` 包装类型 | D234 |
-| **错误模型** | 每 SDK 一个 thiserror enum + `#[non_exhaustive]` | D234 |
-| **选项风格** | 纯 struct + `Default`（`..Default::default()`），不用 builder | D234 |
-| **帧注入** | 保留 `write_raw_i420_with_ts` 为注入点；deck source 对象产帧喂入 | D234 |
-| **async** | Rust 核心全 async（tokio），返回 `Result<T, XxxError>` | D234 |
+| Decision | Content | Source |
+|----------|---------|--------|
+| **API shape** | Single-layer session style (`PushSession`/`PullSession`); no fine-grained mediasoup objects exposed; advanced needs go through rich Options; low-level control goes through the mediaservo-webrtc escape hatch | D233 |
+| **Event model** | Rust = enum + channel/Stream; C/C++ = callback function pointers | D234 |
+| **Branded IDs** | `RoomId/PeerId/TrackId/SessionId/StreamId/NodeId/DeviceId` wrapper types | D234 |
+| **Error model** | One thiserror enum per SDK + `#[non_exhaustive]` | D234 |
+| **Options style** | Plain struct + `Default` (`..Default::default()`), no builder | D234 |
+| **Frame injection** | `write_raw_i420_with_ts` kept as the injection point; deck source objects produce frames to feed it | D234 |
+| **async** | The Rust core is fully async (tokio), returning `Result<T, XxxError>` | D234 |
 
-## 1. 统一调用约定
+## 1. Unified Calling Conventions
 
-| 约定 | 规则 |
-|---|---|
-| async | 所有 I/O/协商方法 `async fn`；本地状态切换（pause/resume）同步 |
-| 错误 | `Result<T, XxxError>`；库用 thiserror；错误 enum `#[non_exhaustive]` |
-| 参数 | `&str` 优于 `String`；`&[T]` 优于 `Vec<T>`；ID 用品牌化类型 |
-| 选项 | 纯 struct + `Default`；可选字段 `Option<T>` |
-| 事件 | Rust 返回 `UnboundedReceiver<Event>`（或 `Stream`）；C/C++ 注册回调 |
-| 所有权 | Rust `Arc` 内部共享；会话/源对象 owned；C++ RAII handle |
-| 兼容 | **只加法**：新 variant 追加 enum 末尾、新字段 `Option<T>`、新方法默认实现；禁改/删既有签名 |
+| Convention | Rule |
+|------------|------|
+| async | All I/O/negotiation methods are `async fn`; local state flips (pause/resume) are sync |
+| Errors | `Result<T, XxxError>`; libraries use thiserror; error enums are `#[non_exhaustive]` |
+| Parameters | `&str` over `String`; `&[T]` over `Vec<T>`; IDs use branded types |
+| Options | Plain struct + `Default`; optional fields are `Option<T>` |
+| Events | Rust returns `UnboundedReceiver<Event>` (or a `Stream`); C/C++ register callbacks |
+| Ownership | Rust shares internally via `Arc`; sessions/sources are owned objects; C++ uses RAII handles |
+| Compatibility | **Additive-only**: new variants append to the enum tail, new fields are `Option<T>`, new methods get default impls; changing/deleting existing signatures is forbidden |
 
-## 2. 共享类型（mediaservo-common / 约定）
+## 2. Shared Types (mediaservo-common / conventions)
 
-> ✅ `SignalingMessage`/`PeerRole`/`RoomId` 等在 mediaservo-common 已实现；link SignalClient 复用。
+> ✅ `SignalingMessage`/`PeerRole`/`RoomId` etc. are already implemented in mediaservo-common; the link SignalClient reuses them.
 
 ```rust
-// 品牌化 ID（防串参）—— #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+// Branded IDs (preventing argument mix-ups) — #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RoomId(String);
 pub struct PeerId(String);
 pub struct TrackId(String);
@@ -44,22 +44,22 @@ pub struct StreamId(String);
 pub struct NodeId(String);
 pub struct DeviceId(String);
 
-// 帧（复用 mediaservo-media）
-pub struct FrameRef;                 // I420/NV12/RGBA + 宽高 + 时间戳（monotonic/epoch 双时钟）
+// Frames (reusing mediaservo-media)
+pub struct FrameRef;                 // I420/NV12/RGBA + width/height + timestamps (monotonic/epoch dual clocks)
 pub type FrameStream = UnboundedReceiver<FrameRef>;
 
-// 认证（复用 common auth）
+// Auth (reusing common auth)
 #[non_exhaustive]
 pub enum AuthCredential { Psk(PskCredential), Jwt(JwtCredential) }
 
-// 信令消息（复用 common protocol.rs 的 SignalingMessage，serde tag=type）
+// Signaling messages (reusing common protocol.rs's SignalingMessage, serde tag=type)
 ```
 
 ---
 
-## 3. link — 连接面
+## 3. link — Connection Surface
 
-> **设备侧 IPC 专题**（FrameBus 总线 / Registry 注册 / ACL 权限 / 能力令牌）**已实现**（iceoryx2），见 [21-link-ipc.md](/docs/modules/21-link-ipc.md)。本节为 link 对 server 的信令（SignalClient）与共享类型。
+> **The device-side IPC special topic** (FrameBus bus / Registry registration / ACL permissions / capability tokens) **is implemented** (iceoryx2), see [21-link-ipc.md](/docs/modules/21-link-ipc.md). This section covers link's signaling toward the server (SignalClient) and shared types.
 
 ```rust
 #[derive(Debug, thiserror::Error)]
@@ -74,22 +74,22 @@ pub enum LinkError {
     #[error("closed")]                      Closed,
 }
 
-// ── 信令客户端（WS，复用 common SignalingMessage）────────────
-// ✅ 已实现 (D244, 2026-08-17): SignalClient/SignalSession + mock WS 测试
+// ── Signaling client (WS, reusing common SignalingMessage) ────────────────
+// ✅ Implemented (D244, 2026-08-17): SignalClient/SignalSession + mock WS tests
 pub struct SignalClient;
 impl SignalClient {
-    // 实现: new(url, psk, room_id, role) + connect(&self)（PSK 认证 + RoomJoin 内建）
+    // Implementation: new(url, psk, room_id, role) + connect(&self) (PSK auth + built-in RoomJoin)
     pub fn new(url: &str, psk: &str, room_id: &str, role: PeerRole) -> SignalClient;
     pub async fn connect(&self) -> Result<SignalSession, LinkError>;
 }
 
-pub struct SignalSession;                       // Arc 内部
+pub struct SignalSession;                       // Arc internally
 impl SignalSession {
-    pub fn events(&self) -> broadcast::Receiver<SignalEvent>; // 实现为 tokio broadcast
+    pub fn events(&self) -> broadcast::Receiver<SignalEvent>; // Implemented as a tokio broadcast
     pub async fn send(&self, msg: SignalingMessage) -> Result<(), LinkError>;
-    // request() req/resp 尚未实现（Phase 2，信令无请求/响应对）
+    // request() req/resp not yet implemented (Phase 2; signaling has no request/response pairs)
     pub fn room_id(&self) -> &str;
-    pub async fn close(&self);                                   // 实现: close() 通道转发
+    pub async fn close(&self);                                   // Implementation: close() forwards on the channel
 }
 
 #[non_exhaustive]
@@ -100,21 +100,21 @@ pub enum SignalEvent {
     Error(LinkError),
 }
 
-// ── 帧总线（跨进程 SHM，iceoryx2，D242/D239/D235）────────
-// buffer_size=1 + enable_safe_overflow → latest-frame；max_publishers(1) → 单发布者
+// ── Frame bus (cross-process SHM, iceoryx2, D242/D239/D235) ────────────────
+// buffer_size=1 + enable_safe_overflow → latest-frame; max_publishers(1) → single publisher
 pub struct FrameBus;
 impl FrameBus {
     pub fn attach(endpoint: &str, token: &CapabilityToken, vk: &Ed25519VerifyingKey)
-        -> Result<FrameBus, LinkError>;                       // 验签→载ACL→register
+        -> Result<FrameBus, LinkError>;                       // verify→load ACL→register
     pub fn publish(&self, topic: &FrameTopic, payload: &[u8], meta: &FrameMeta)
-        -> Result<(), LinkError>;                              // ACL+单发布者→send
+        -> Result<(), LinkError>;                              // ACL+single publisher→send
     pub fn subscribe(&self, topic: &FrameTopic) -> Result<FrameStream, LinkError>;
     pub fn close(self) -> Result<(), LinkError>;
 }
 pub struct FrameTopic(String);
-pub struct FrameMeta { seq, width, height, format, version, is_keyframe, ts_mono_ns, ts_epoch_ns } // 定长 LE, D243
+pub struct FrameMeta { seq, width, height, format, version, is_keyframe, ts_mono_ns, ts_epoch_ns } // fixed-length LE, D243
 
-// ── 节点注册/发现（iceoryx2 内建活性, 无 daemon）──────────
+// ── Node registration/discovery (iceoryx2 built-in liveness, no daemon) ───
 pub struct Registry;
 impl Registry {
     pub fn register(info: &NodeInfo) -> Result<(), LinkError>;
@@ -123,19 +123,19 @@ impl Registry {
     pub fn topic_publisher(topic: &FrameTopic) -> Result<Option<NodeId>, LinkError>;
 }
 
-// ── DataChannel（Phase 2，webrtc-rs）─────────────────────
-// pub struct ControlChannel;  // Phase2 定稿
+// ── DataChannel (Phase 2, webrtc-rs) ─────────────────────
+// pub struct ControlChannel;  // finalized in Phase 2
 ```
 
 ---
 
-## 4. field — 组合 SDK（会话 facade，唯一公开层）
+## 4. field — Composed SDK (session facade, the only public layer)
 
-> 🟡 **MVP 已实现**（2026-08-17，4 tests）：error + re-export 闭环 + 会话类型骨架。
-> 差异：① `PushSession`/`PullSession` 的 `connect` 明确报"Phase 2 未实现"（防静默，
-> 避免调用方误以为已工作）；② `publish_video/audio`、`subscribe`、`control_channel`、
-> `stats` 等媒体方法未实现——需 webrtc-sys 真传输（Linux 构建注意）；③ 配置类型
-> `PushConfig/PullConfig` 尚未落地（connect 无参占位）。
+> 🟡 **MVP implemented** (2026-08-17, 4 tests): error + re-export closed loop + session type skeletons.
+> Deltas: ① `PushSession`/`PullSession` `connect` explicitly reports "Phase 2 not implemented" (no silence —
+> callers must not think it already works); ② media methods like `publish_video/audio`, `subscribe`,
+> `control_channel`, `stats` are not implemented — they need the real webrtc-sys transport (mind Linux
+> builds); ③ config types `PushConfig/PullConfig` have not landed (connect has a no-arg placeholder).
 
 ```rust
 #[derive(Debug, thiserror::Error)]
@@ -148,25 +148,25 @@ pub enum FieldError {
     #[error("closed")]         Closed,
 }
 
-// ── 推流会话（采集→编码→推流，信令内建）────────────────────
+// ── Push session (capture→encode→push, signaling built in) ────────────────
 pub struct PushSession;
 impl PushSession {
     pub async fn connect(cfg: PushConfig) -> Result<(PushSession, SessionEvents), FieldError>;
     pub async fn publish_video(&self, src: VideoSourceRef, opts: PublishOptions) -> Result<TrackId, FieldError>;
     pub async fn publish_audio(&self, src: AudioSourceRef, opts: PublishOptions) -> Result<TrackId, FieldError>;
     pub async fn unpublish(&self, track: TrackId) -> Result<(), FieldError>;
-    pub fn control_channel(&self) -> Result<ControlChannel, FieldError>;  // 控制/遥测（DC 或 relay）
+    pub fn control_channel(&self) -> Result<ControlChannel, FieldError>;  // Control/telemetry (DC or relay)
     pub async fn stats(&self) -> Result<SessionStats, FieldError>;
     pub async fn close(self) -> Result<(), FieldError>;
 }
 
-// ── 拉流会话（订阅→解码→出帧）────────────────────────────
+// ── Pull session (subscribe→decode→frame output) ──────────────────────────
 pub struct PullSession;
 impl PullSession {
     pub async fn connect(cfg: PullConfig) -> Result<(PullSession, SessionEvents), FieldError>;
     pub async fn subscribe(&self, producer: ProducerRef, opts: SubscribeOptions) -> Result<FrameStream, FieldError>;
     pub async fn unsubscribe(&self, track: TrackId) -> Result<(), FieldError>;
-    pub fn control_channel(&self) -> Result<ControlChannel, FieldError>;  // 发送控制
+    pub fn control_channel(&self) -> Result<ControlChannel, FieldError>;  // Send control
     pub async fn close(self) -> Result<(), FieldError>;
 }
 
@@ -177,12 +177,12 @@ pub enum SessionEvent {
     StateChanged(SessionState),
     TrackPublished { track: TrackId },
     TrackSubscribed { track: TrackId },
-    ProducerAvailable { producer: ProducerRef },     // 供 subscribe
+    ProducerAvailable { producer: ProducerRef },     // For subscribe
     Disconnected { reason: DisconnectReason },
     Error(FieldError),
 }
 
-// ── 配置 / 富 Options（承接高级需求，D233）────────────────
+// ── Config / rich Options (absorbing advanced needs, D233) ────────────────
 pub struct PushConfig {
     pub url: String,
     pub auth: AuthCredential,
@@ -210,16 +210,16 @@ impl Default for PublishOptions { /* codec=VP8, backend=Auto, simulcast=false */
 pub struct SubscribeOptions { pub priority: u8, pub max_resolution: Option<Resolution> }
 impl Default for SubscribeOptions { /* ... */ }
 
-// ── 组合 re-export（一行依赖闭环）────────────────────────
+// ── Composed re-exports (one-line dependency closed loop) ──────────────────
 pub use mediaservo_link::{SignalClient, FrameBus, AuthCredential};
 pub use mediaservo_deck::{MediaDevices, CameraSource, AudioSource, ScreenSource, VideoSource};
 ```
 
-> **逃生舱**：需底层控制（SDP/transceiver/RTP 细粒度）者直接依赖 `mediaservo-webrtc`（RTCPeerConnection/TrackSender/PeerConnectionApi），field 不 re-expose。
+> **Escape hatch**: those needing low-level control (SDP/transceivers/fine-grained RTP) should depend directly on `mediaservo-webrtc` (RTCPeerConnection/TrackSender/PeerConnectionApi); field does not re-expose it.
 
 ---
 
-## 5. client — 舱端消费编排
+## 5. client — Cockpit-Side Consumption Orchestration
 
 ```rust
 #[derive(Debug, thiserror::Error)]
@@ -230,7 +230,7 @@ pub enum ClientError {
     #[error("playback: {0}")] Playback(String),
 }
 
-// ── 渲染器（D47: CPU buffer → GPU interop）────────────────
+// ── Renderer (D47: CPU buffer → GPU interop) ────────────────
 pub struct Renderer;
 impl Renderer {
     pub fn new(surface: Surface, opts: RenderOptions) -> Result<Renderer, ClientError>;
@@ -240,10 +240,10 @@ impl Renderer {
 pub struct RenderOptions { pub backend: RenderBackend /* Auto/Cpu/GpuDirect */, pub zero_copy: bool }
 impl Default for RenderOptions { /* backend=Auto */ }
 
-// ── 多路编排：复用 field::PullSession（每路一个）+ Renderer ──
-// 舱端 App = N × PullSession.subscribe() → FrameStream → Renderer.render()
+// ── Multi-stream orchestration: reuse field::PullSession (one each) + Renderer ──
+// A cockpit app = N × PullSession.subscribe() → FrameStream → Renderer.render()
 
-// ── 回放 / 快放（deck playback 集成）─────────────────────
+// ── Playback / fast-forward (deck playback integration) ────
 pub struct Playback;
 impl Playback {
     pub fn open(path: &str) -> Result<Playback, ClientError>;
@@ -251,19 +251,20 @@ impl Playback {
     pub fn play(&self) -> Result<(), ClientError>;
     pub fn pause(&self) -> Result<(), ClientError>;
     pub fn seek(&self, ts_us: i64) -> Result<(), ClientError>;
-    pub fn set_rate(&self, rate: f32) -> Result<(), ClientError>;   // 快放/慢放
+    pub fn set_rate(&self, rate: f32) -> Result<(), ClientError>;   // Fast/slow playback
 }
 ```
 
 ---
 
-## 6. deck — 媒体数据面
+## 6. deck — Media Data Surface
 
-> ✅ **已实现**（source/record/playback 三域，2026-08-17，10 tests + ffprobe 实证）。
-> 差异：① 方法为 async（`recv()`/`record()` 等）；② `FrameStream` 为 deck 自有类型
-> （有界 channel latest 丢弃，非 link FrameStream）；③ `AudioSource`/`ScreenSource` 未实现
-> （MVP 仅 CameraSource stub）；④ `Recorder::record` 消费 `impl Frames` 而非具体 FrameStream
-> 类型参数；⑤ `Player::next_frame()` 同步逐帧；⑥ `SeekOptions`/`set_rate` 未实现（Phase 3）。
+> ✅ **Implemented** (source/record/playback domains, 2026-08-17, 10 tests + ffprobe evidence).
+> Deltas: ① methods are async (`recv()`/`record()` etc.); ② `FrameStream` is deck's own type
+> (bounded channel with latest-frame dropping, not link's FrameStream); ③ `AudioSource`/`ScreenSource`
+> not implemented (MVP has only the CameraSource stub); ④ `Recorder::record` consumes `impl Frames`
+> rather than a concrete FrameStream type parameter; ⑤ `Player::next_frame()` is synchronous, frame by
+> frame; ⑥ `SeekOptions`/`set_rate` not implemented (Phase 3).
 
 ```rust
 #[derive(Debug, thiserror::Error)]
@@ -275,7 +276,7 @@ pub enum DeckError {
     #[error("not_found: {0}")] NotFound(String),
 }
 
-// ── 采集（source 域，GStreamer 后端）────────────────────
+// ── Capture (source domain, GStreamer backend) ───────────────
 pub struct MediaDevices;
 impl MediaDevices {
     pub fn enumerate(kind: DeviceKind) -> Vec<DeviceId>;   // Camera/Audio/Screen
@@ -288,26 +289,26 @@ impl CameraSource {
     pub fn start(&self) -> Result<(), DeckError>;
     pub fn stop(&self) -> Result<(), DeckError>;
 }
-pub struct AudioSource;   // 同型：open/frames/start/stop
-pub struct ScreenSource;  // 同型
+pub struct AudioSource;   // Same shape: open/frames/start/stop
+pub struct ScreenSource;  // Same shape
 
 pub struct CaptureOptions { pub resolution: Option<Resolution>, pub framerate: Option<u32>, pub format: Option<PixelFormat> }
-impl Default for CaptureOptions { /* 设备默认 */ }
+impl Default for CaptureOptions { /* device defaults */ }
 
-// VideoSource：帧注入抽象（field publish_video 的入参类型）
-pub struct VideoSource;   // CameraSource/文件/自定义帧源 的统一句柄
-// 产帧内部经 mediaservo-webrtc TrackSender::write_raw_i420_with_ts 注入
+// VideoSource: the frame-injection abstraction (input type of field publish_video)
+pub struct VideoSource;   // A unified handle over CameraSource/files/custom frame sources
+// Frames produced internally are injected via mediaservo-webrtc TrackSender::write_raw_i420_with_ts
 
-// ── 录制（record 域，FFmpeg mux）────────────────────────
+// ── Recording (record domain, FFmpeg mux) ────────────────────
 pub struct Recorder;
 impl Recorder {
     pub fn new(path: &str, opts: RecordOptions) -> Result<Recorder, DeckError>;
-    pub fn record(&self, stream: FrameStream) -> Result<(), DeckError>;   // 或 record_topic(FrameTopic)
+    pub fn record(&self, stream: FrameStream) -> Result<(), DeckError>;   // or record_topic(FrameTopic)
     pub fn stop(self) -> Result<(), DeckError>;
 }
 pub struct RecordOptions { pub codec: VideoCodec, pub container: Container /* Mp4/Mkv */, pub keyframe_align: bool }
 
-// ── 回放（playback 域，demux + decode）─────────────────
+// ── Playback (playback domain, demux + decode) ───────────────
 pub struct Player;
 impl Player {
     pub fn open(path: &str) -> Result<Player, DeckError>;
@@ -316,58 +317,58 @@ impl Player {
     pub fn set_rate(&self, rate: f32) -> Result<(), DeckError>;
 }
 
-// ── codec（复用 mediaservo-codec 引擎，facade 不吞并）──
-pub use mediaservo_codec::{Encoder, Decoder};   // D229: deck 依赖 codec，不合并
+// ── codec (reusing the mediaservo-codec engine; facade, no merger) ──
+pub use mediaservo_codec::{Encoder, Decoder};   // D229: deck depends on codec, no merger
 ```
 
 ---
 
-## 7. C ABI 绑定形态（c / cxx / py）
+## 7. C ABI Binding Forms (c / cxx / py)
 
-延续 D109：**opaque handle + int 错误码 + 回调**。每 SDK 一套 `mediaservo_<sdk>_*` 前缀。
+Continuing D109: **opaque handles + int error codes + callbacks**. One `mediaservo_<sdk>_*` prefix per SDK.
 
 ```c
-/* 示例：link 信令 */
+/* Example: link signaling */
 typedef struct mediaservo_link_signal_t mediaservo_link_signal_t;   /* opaque */
 typedef int mediaservo_err_t;                                /* 0 = ok, <0 = error code */
 
 mediaservo_err_t mediaservo_link_signal_connect(const char* url, const mediaservo_auth_t* auth, mediaservo_link_signal_t** out);
 mediaservo_err_t mediaservo_link_signal_send(mediaservo_link_signal_t* s, const uint8_t* msg, size_t len);
-void     mediaservo_link_signal_on_event(mediaservo_link_signal_t* s, mediaservo_signal_event_cb cb, void* user);  /* 事件回调 */
+void     mediaservo_link_signal_on_event(mediaservo_link_signal_t* s, mediaservo_signal_event_cb cb, void* user);  /* event callback */
 mediaservo_err_t mediaservo_link_signal_close(mediaservo_link_signal_t* s);
-mediaservo_err_t mediaservo_last_error(char* buf, size_t len);       /* 最近错误详情 */
+mediaservo_err_t mediaservo_last_error(char* buf, size_t len);       /* details of the most recent error */
 
-/* field 推流（async → handle + 完成回调，或阻塞式，绑定层二选一） */
+/* field push (async → handle + completion callback, or blocking; the binding layer picks one) */
 typedef struct mediaservo_field_push_t mediaservo_field_push_t;
 mediaservo_err_t mediaservo_field_push_connect(const mediaservo_push_config_t* cfg, mediaservo_field_push_t** out);
 mediaservo_err_t mediaservo_field_push_publish_video(mediaservo_field_push_t* s, mediaservo_video_source_t* src,
                                      const mediaservo_publish_options_t* opts, mediaservo_track_id_t* out_track);
 ```
 
-- **C++（`-cxx`）**：header-only RAII 包装 C ABI（`FfiHandle` 式析构 + `Result<T,E>`）
-- **Python（`-py`）**：首版 ctypes 加载 cdylib（LiveKit 模式）；瓶颈时 pyo3 加速后端（D227 两步走）
-- **事件**：C 侧回调函数指针 + user data；async 操作用 handle + 完成回调
-- **帧**：跨 FFI 传帧用指针 + 元数据 struct（零拷贝优先），避免序列化
+- **C++ (`-cxx`)**: header-only RAII wrapping the C ABI (`FfiHandle`-style destructor + `Result<T,E>`)
+- **Python (`-py`)**: first version loads the cdylib via ctypes (LiveKit pattern); a pyo3 acceleration backend when bottlenecked (D227 two-step plan)
+- **Events**: C-side callback function pointers + user data; async operations use a handle + completion callback
+- **Frames**: frames cross FFI as pointers + a metadata struct (zero-copy preferred), avoiding serialization
 
-### 7.1 交付形态（D240）
-**单动态库（.so/cdylib）为主**，不预建静态 .a（嵌入式自包含需求出现再加，additive）。
-- 交付物：`link.so` / `field.so`（打包 link+deck）/ `client.so` / `deck.so`（+ `deck-full.so` OTA 插件）
-- C++（-cxx）：header-only RAII over `.so`；Python（-py）：ctypes 加载 `.so`；Rust 内部走 rlib
+### 7.1 Delivery Form (D240)
+**Single dynamic library (.so/cdylib) as the main form**; no pre-built static .a (added later, additively, when embedded self-contained needs appear).
+- Deliverables: `link.so` / `field.so` (packaging link+deck) / `client.so` / `deck.so` (+ the `deck-full.so` OTA plugin)
+- C++ (-cxx): header-only RAII over the `.so`; Python (-py): ctypes loads the `.so`; Rust internal use goes through the rlib
 
-### 7.2 版本与 C ABI 稳定（D241）
-- **soname**：`libmediaservo_<sdk>.so.<MAJOR>`（如 `libmediaservo_field.so.1`）；实体 `.so.<MAJOR>.<MINOR>.<PATCH>`；开发 symlink 无版本号
-- **MAJOR = C ABI 版本**：破坏性 ABI 变更才 bump MAJOR；MINOR/PATCH = additive/fix
-- **within MAJOR 稳定承诺**：只加法（既有签名/语义不变）+ opaque handle 隐藏内部布局 + 仅 C 兼容类型；需演进的结构用 version/size 字段或 `_v2` 函数
-- **兼容规则**：同 MAJOR 二进制兼容（换 .so 免重链）；跨 MAJOR 需重链 + 迁移指南
-- **cbindgen 纪律**：只导出稳定 C ABI；Rust 内部 API 可 semver 演进，C ABI 面 within MAJOR 稳定
+### 7.2 Versioning & C ABI Stability (D241)
+- **soname**: `libmediaservo_<sdk>.so.<MAJOR>` (e.g. `libmediaservo_field.so.1`); the real file `.so.<MAJOR>.<MINOR>.<PATCH>`; dev symlinks unversioned
+- **MAJOR = the C ABI version**: bump MAJOR only for breaking ABI changes; MINOR/PATCH = additive/fix
+- **Within-MAJOR stability promise**: additive-only (existing signatures/semantics unchanged) + opaque handles hiding internal layout + C-compatible types only; structures needing evolution use version/size fields or `_v2` functions
+- **Compatibility rules**: within a MAJOR, binary-compatible (swap the .so without relinking); across MAJORs, relink + a migration guide
+- **cbindgen discipline**: export the stable C ABI only; the Rust internal API may evolve via semver while the C ABI surface stays stable within a MAJOR
 
-## 8. 向后兼容纪律（Hyrum's Law）
+## 8. Backward-Compatibility Discipline (Hyrum's Law)
 
-| 规则 | 落实 |
-|---|---|
-| 公开 enum 全 `#[non_exhaustive]` | `SignalEvent/SessionEvent/*Error` |
-| 新 variant 追加末尾、新字段 `Option<T>` | 禁改/删既有 variant/字段 |
-| 新方法优先默认实现 | trait 演进不破坏实现方 |
-| ID 品牌化 | 防 `RoomId`↔`TrackId` 串参 |
-| E2E 固化行为 | 消息顺序/重试间隔等可观察行为进 E2E 脚本 |
-| 检查 | `cargo doc --no-deps`、serde roundtrip 测试、`cargo tree -d` 空 |
+| Rule | Enforcement |
+|------|-------------|
+| Public enums all `#[non_exhaustive]` | `SignalEvent/SessionEvent/*Error` |
+| New variants append at the tail; new fields `Option<T>` | Changing/deleting existing variants/fields forbidden |
+| New methods prefer default implementations | Trait evolution doesn't break implementors |
+| Branded IDs | Prevents `RoomId`↔`TrackId` argument mix-ups |
+| E2E pins behavior | Observable behaviors like message order/retry intervals go into E2E scripts |
+| Checks | `cargo doc --no-deps`, serde roundtrip tests, `cargo tree -d` empty |

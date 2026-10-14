@@ -4,7 +4,7 @@
 //! (backend-webrtc-sys) and Server-side mediasoup SFU.
 //!
 //! Runs on Linux only — connects to an external mediasoup server (C21).
-//! mediasoup 仅限 mediaservo-server；本测试仅通过 WS 信令协议交互。
+//! mediasoup is confined to mediaservo-server; this test interacts only via the WS signaling protocol.
 //!
 //! Tests:
 //! - D1: Host creates RTCPeerConnection, negotiates with SFU, connects
@@ -29,9 +29,9 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 
-// v2: PSK 可配置 — 外部 Docker server 模式用 SFU_E2E_PSK env 覆盖（server 用 MEDIASERVO_PSK=mediaservo-dev）
+// v2: PSK configurable - external Docker server mode overrides via SFU_E2E_PSK env (server uses MEDIASERVO_PSK=mediaservo-dev)
 fn psk() -> String {
-    std::env::var("SFU_E2E_PSK").unwrap_or_else(|_| "mediaservo-dev".to_string()) // 对齐 dev server (MEDIASERVO_PSK)
+    std::env::var("SFU_E2E_PSK").unwrap_or_else(|_| "mediaservo-dev".to_string()) // aligned with dev server (MEDIASERVO_PSK)
 }
 const ROOM: &str = "host-sfu-test-room";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -71,8 +71,8 @@ fn build_remote_sdp(
         "a=setup:actpass".to_string(), // ICE-Lite responder expects client to initiate
     ];
 
-    // PIT-48: a=candidate 行必须位于 m= 行之后（media section 内）——
-    // 会话级 candidate 被 libwebrtc 忽略 → remote candidate 丢失 → ICE 不发起 STUN
+    // PIT-48: a=candidate lines must come after the m= line (inside the media section) -
+    // session-level candidates are ignored by libwebrtc -> remote candidates lost -> ICE never sends STUN
     lines.extend_from_slice(&[
         format!("m=video 7 UDP/TLS/RTP/SAVPF {}", payload_type),
         format!("c=IN IP4 {}", conn_ip),
@@ -116,21 +116,21 @@ fn build_remote_sdp(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Test harness: 纯外部模式 — 连外部 mediasoup server（C21）
+// Test harness: pure external mode - connect to an external mediasoup server (C21)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// SfuTestHarness — 纯外部模式：连外部 mediasoup server（C21）。
-/// mediasoup 仅限 mediaservo-server；测试仅通过 WS 信令协议交互，不 import server 类型。
+/// SfuTestHarness - pure external mode: connect to an external mediasoup server (C21).
+/// mediasoup is confined to mediaservo-server; the test interacts only via the WS signaling protocol, without importing server types.
 struct SfuTestHarness {
     ws_url: String,
 }
 
 impl SfuTestHarness {
     async fn new() -> Self {
-        // 缺省 dev server（docker compose 9800）——仍连外部 server（C21）; 生产/CI 用 env 覆盖
+        // default dev server (docker compose 9800) - still an external server (C21); production/CI override via env
         let url = std::env::var("SFU_E2E_WS_URL")
             .unwrap_or_else(|_| "ws://127.0.0.1:9800/ws".to_string());
-        tracing::info!("SfuTestHarness: 外部 mediasoup server 模式 ({url})");
+        tracing::info!("SfuTestHarness: external mediasoup server mode ({url})");
         Self { ws_url: url }
     }
 }
@@ -416,7 +416,7 @@ async fn e2e_sfu_host_produce() {
                 "encodings": [{"ssrc": 12345}],
                 "rtcp": {"reducedSize": true}
             }),
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
             label: None,
         };
         ws.send(WsMsg::Text(serde_json::to_string(&produce).unwrap())).await.unwrap();
@@ -524,7 +524,7 @@ async fn e2e_sfu_host_produce() {
                 "codecs": [{"mimeType": "video/VP8", "clockRate": 90000, "kind": "video"}],
                 "headerExtensions": []
             }),
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
         };
         ws.send(WsMsg::Text(serde_json::to_string(&consume).unwrap())).await.unwrap();
 
@@ -693,7 +693,7 @@ async fn e2e_sfu_full_pipeline() {
                 "encodings": [{"ssrc": 12345}],
                 "rtcp": {"reducedSize": true}
             }),
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
             label: None,
         };
         ws.send(WsMsg::Text(serde_json::to_string(&produce).unwrap())).await.unwrap();
@@ -843,7 +843,7 @@ async fn e2e_sfu_full_pipeline() {
                 "codecs": [{"mimeType": "video/VP8", "clockRate": 90000, "kind": "video"}],
                 "headerExtensions": []
             }),
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
         };
         ws.send(WsMsg::Text(serde_json::to_string(&consume).unwrap())).await.unwrap();
         let consumed_resp = tokio::time::timeout(Duration::from_secs(5), ws.next())

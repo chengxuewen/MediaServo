@@ -8,13 +8,13 @@ interface Props {
   roomId: string;
   serverUrl: string;
   token: string;
-  /** producer-label（§12-1 设备房+流标签）：传 stream_id → 只消费该 label 的 producer。
-   *  缺省 = 旧行为（派生房形态）。 */
+  /** producer-label (§12-1 device room + stream label): pass stream_id → only consume the producer with that label.
+   *  Unset = legacy behavior (derived-room mode). */
   streamLabel?: string;
   onClose: () => void;
-  /** modal=全屏浮层（默认）；tile=网格单元（多流并排，multi-stream P3） */
+  /** modal = fullscreen overlay (default); tile = grid cell (multiple streams side by side, multi-stream P3) */
   variant?: 'modal' | 'tile';
-  /** tile 双击画面→外部打开大窗（产品方案②，2026-09-02） */
+  /** tile: double-click the video → open the large window externally (product option 2, 2026-09-02) */
   onExpand?: () => void;
 }
 
@@ -41,8 +41,8 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
   const popRef = useRef<HTMLDivElement>(null);
   const [popPos, setPopPos] = useState<{ left: number; top: number } | null>(null);
 
-  // 详情浮层（portal→body，浮在卡旁，与 tile 尺寸解耦——产品方案① 2026-09-02）：
-  // 锚点=播放器矩形右侧，无空间翻左；点外部/ESC 收起；resize/scroll 跟随。
+  // Detail popover (portal→body, floats beside the card, decoupled from tile size — product option 1, 2026-09-02):
+  // anchored to the right of the player rect, flips left only if there is no space; closes on outside click/ESC; follows resize/scroll.
   useEffect(() => {
     if (!showStats) return;
     const place = () => {
@@ -75,29 +75,29 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
   }, [showStats]);
 
   useEffect(() => {
-    // PIT-76: 首帧渲染时间观测
+    // PIT-76: first-frame render timing observability
     const t0 = performance.now();
     const logT = (msg: string) => console.log(`[T+${Math.round(performance.now() - t0)}ms] [VideoPlayer] ${msg}`);
     const client = new SfuConsumerClient(serverUrl, roomId, token, {
       onTrack: (stream) => {
-        logT('onTrack 收到 stream');
+        logT('onTrack received stream');
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.play().catch(() => {});
-          // 首帧检测: loadedmetadata 触发时 videoWidth > 0
+          // first-frame detection: videoWidth > 0 when loadedmetadata fires
           videoRef.current.onloadedmetadata = () => logT('video loadedmetadata (videoWidth=' + videoRef.current?.videoWidth + ')');
           videoRef.current.onplaying = () => logT('video onplaying');
-          // 轮询 videoWidth 确认首帧实际渲染（计时内聚组件——挂载→首帧，
-          // 避免多路时 window.__playT0 串路，multi-stream P3）
+          // poll videoWidth to confirm the first frame actually rendered (timing kept inside the component — mount→first frame,
+          // avoiding window.__playT0 cross-talk when multiple streams play, multi-stream P3)
           const poll = setInterval(() => {
             const v = videoRef.current;
             if (v && v.videoWidth > 0) {
-              logT('首帧渲染确认 videoWidth=' + v.videoWidth + 'x' + v.videoHeight);
-              console.log(`[挂载→首帧] ${Math.round(performance.now() - t0)}ms`);
+              logT('first frame rendered, videoWidth=' + v.videoWidth + 'x' + v.videoHeight);
+              console.log(`[mount→first frame] ${Math.round(performance.now() - t0)}ms`);
               clearInterval(poll);
             }
           }, 100);
-          setTimeout(() => clearInterval(poll), 30000); // 30s 上限
+          setTimeout(() => clearInterval(poll), 30000); // 30s cap
         }
       },
       onStatus: (s) => { logT('status = ' + s); setStatus(s); },
@@ -105,8 +105,8 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
     }, streamLabel ? { expectedLabel: streamLabel } : undefined);
 
     clientRef.current = client;
-    logT('connect() 调用');
-    // W1: 无限退避重连（connecting 不红牌，auth 终态除外）；W2: 首帧轮次 watchdog 已下沉 SfuClient。
+    logT('connect() called');
+    // W1: unlimited backoff reconnect (connecting shows no red banner, except auth terminal); W2: first-frame round watchdog moved down into SfuClient.
     client.connect().then(() => client.startPlay()).catch(() => { void client.reconnect(); });
 
     return () => {
@@ -153,7 +153,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
         {/* Video */}
         <div className="vp-body">
           <video ref={videoRef} autoPlay playsInline muted />
-          {status === 'connecting' && <div className="vp-status-msg">连接中…</div>}
+          {status === 'connecting' && <div className="vp-status-msg">Connecting…</div>}
           {isTile && (status === 'connected' || status === 'playing' || status === 'stalled') && (
             <MiniStatsCard status={status} metrics={metrics} onExpand={() => setShowStats(true)} />
           )}
@@ -169,7 +169,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
           </div>
         )}
 
-        {/* Metrics bar — modal-only（tile 速览入口已并入左上 mini 卡；断联展示统一走遮罩） */}
+        {/* Metrics bar — modal-only (the tile quick-view entry moved into the top-left mini card; disconnect display goes through the overlay) */}
         {!isTile && metrics && !isDisconnected && (
           <div className="vp-metrics-bar" onClick={() => setShowStats(!showStats)}>
             <span><Zap size={12} /> {metrics.rtt}ms</span>
@@ -188,21 +188,21 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
           onClick={(e) => e.stopPropagation()}
         >
           <h4>Stream Details · {streamLabel ? `${roomId} · ${streamLabel}` : roomId}</h4>
-          <h5>编解码器</h5>
+          <h5>Codecs</h5>
           <div className="stats-grid">
-            <div><label>编码</label><span>{metrics.encoderImplementation ? (metrics.encoderImplementation.toLowerCase().includes('libvpx') || metrics.encoderImplementation.toLowerCase().includes('openh264') || metrics.encoderImplementation.toLowerCase().includes('libaom') ? '软编' : '硬编') : (metrics.encoderBackend === 'software' ? '软编' : metrics.encoderBackend && metrics.encoderBackend !== 'auto' ? '硬编' : '未知')}</span></div>
-            <div><label>实际编码器</label><span>{metrics.encoderImplementation || metrics.encoderBackend || '—'}</span></div>
-            <div><label>编码模式</label><span>{metrics.codec ? metrics.codec.replace('video/', '') : '—'}</span></div>
-            <div><label>解码器</label><span>{metrics.decoderImplementation || metrics.decoderCodec || '—'}</span></div>
-            <div><label>色度采样</label><span>4:2:0</span></div>
-            <div><label>HDR</label><span>已关闭</span></div>
+            <div><label>Encode</label><span>{metrics.encoderImplementation ? (metrics.encoderImplementation.toLowerCase().includes('libvpx') || metrics.encoderImplementation.toLowerCase().includes('openh264') || metrics.encoderImplementation.toLowerCase().includes('libaom') ? 'Software' : 'Hardware') : (metrics.encoderBackend === 'software' ? 'Software' : metrics.encoderBackend && metrics.encoderBackend !== 'auto' ? 'Hardware' : 'Unknown')}</span></div>
+            <div><label>Actual encoder</label><span>{metrics.encoderImplementation || metrics.encoderBackend || '—'}</span></div>
+            <div><label>Encode format</label><span>{metrics.codec ? metrics.codec.replace('video/', '') : '—'}</span></div>
+            <div><label>Decoder</label><span>{metrics.decoderImplementation || metrics.decoderCodec || '—'}</span></div>
+            <div><label>Chroma</label><span>4:2:0</span></div>
+            <div><label>HDR</label><span>Off</span></div>
           </div>
-          <h5>系统性能</h5>
+          <h5>System performance</h5>
           <div className="stats-grid">
-            <div><label>Host 帧率</label><span>{metrics.hostFps ? `${metrics.hostFps}fps` : '—'}</span></div>
-            <div><label>Host 分辨率</label><span>{metrics.hostResolution || '—'}</span></div>
-            <div><label>平均编码耗时</label><span>{metrics.avgEncodeMs != null ? `${metrics.avgEncodeMs.toFixed(1)}ms/帧` : '—'}</span></div>
-            <div><label>CPU/GPU</label><span>待 P3</span></div>
+            <div><label>Host FPS</label><span>{metrics.hostFps ? `${metrics.hostFps}fps` : '—'}</span></div>
+            <div><label>Host resolution</label><span>{metrics.hostResolution || '—'}</span></div>
+            <div><label>Avg encode time</label><span>{metrics.avgEncodeMs != null ? `${metrics.avgEncodeMs.toFixed(1)}ms/frame` : '—'}</span></div>
+            <div><label>CPU/GPU</label><span>Pending P3</span></div>
           </div>
           <button className="vp-stats-close" onClick={() => setShowStats(false)}><X size={14} /></button>
         </div>, document.body)}
@@ -213,27 +213,27 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
 function MiniStatsCard({ status, metrics, onExpand }: {
   status: ConnectionStatus; metrics: StreamMetrics | null; onExpand: () => void;
 }) {
-  // T1-a 消解：connected 即渲染，不等首个 getStats tick（2s）；metrics null → 占位。
-  // 产品精化（2026-09-01 采纳）：核心六指标 2列×3行常驻，编解码/系统详情走大面板二次点击。
+  // T1-a resolution: render as soon as connected, do not wait for the first getStats tick (2s); metrics null → placeholders.
+  // Product refinement (adopted 2026-09-01): the core six metrics stay resident in a 2x3 grid; codec/system details live in the large panel behind a second click.
   const fmtKbps = (k: number) => (k >= 1000 ? `${(k / 1000).toFixed(1)}M` : `${Math.round(k)}K`);
   const live = status === 'playing';
-  const offline = status === 'stalled'; // F2: 链路活但媒体零增长——非红屏，灰标降级
+  const offline = status === 'stalled'; // F2: link alive but media not growing — not a red screen, degrade to a gray badge
   const cells: Array<[string, string]> | null = metrics && (live || offline)
     ? [
-        ['帧率', `${metrics.fps}fps`],
-        ['分辨率', metrics.resolution === 'unknown' ? '—' : metrics.resolution],
-        ['码率', fmtKbps(metrics.bitrate)],
-        ['抖动', `${metrics.jitter}ms`],
-        ['延时', `${metrics.rtt}ms`],
-        ['丢包', `${metrics.packetLoss}%`],
+        ['FPS', `${metrics.fps}fps`],
+        ['Resolution', metrics.resolution === 'unknown' ? '—' : metrics.resolution],
+        ['Bitrate', fmtKbps(metrics.bitrate)],
+        ['Jitter', `${metrics.jitter}ms`],
+        ['Latency', `${metrics.rtt}ms`],
+        ['Loss', `${metrics.packetLoss}%`],
       ]
     : null;
   return (
-    <div className="vp-mini-stats" onClick={(e) => { e.stopPropagation(); onExpand(); }} title={status === 'stalled' ? '源离线（等待流恢复或媒体停止更新；点击展开详情）' : '点击展开详细统计'}>
+    <div className="vp-mini-stats" onClick={(e) => { e.stopPropagation(); onExpand(); }} title={status === 'stalled' ? 'Source offline (waiting for the stream to recover or media stopped updating; click for details)' : 'Click for detailed stats'}>
       <div className="ms-head">
         <span className={`ms-dot ms-${status}`} />
-        <span>{live ? 'LIVE' : offline ? '源离线' : '…'}</span>
-        {!cells && <span className="ms-vals">等待数据…</span>}
+        <span>{live ? 'LIVE' : offline ? 'Source offline' : '…'}</span>
+        {!cells && <span className="ms-vals">Waiting for data…</span>}
       </div>
       {cells && (
         <div className="ms-grid">
@@ -247,13 +247,13 @@ function MiniStatsCard({ status, metrics, onExpand }: {
 }
 
 function DisconnectedOverlay({ status }: { status: ConnectionStatus }) {
-  // 双态语义（T7）：error=建联失败 / disconnected=流中断——判障一眼分流。
+  // Dual-state semantics (T7): error = connection failed / disconnected = stream interrupted — splits troubleshooting at a glance.
   const failed = status === 'error';
   return (
     <div className="vp-discon-overlay">
       <div className="vp-discon-card">
-        <p className="vp-discon-title">{failed ? '连接失败' : '连接已断开'}</p>
-        <p className="vp-discon-sub">{failed ? '无法建立 WebRTC 连接' : '视频流已中断'}</p>
+        <p className="vp-discon-title">{failed ? 'Connection failed' : 'Connection lost'}</p>
+        <p className="vp-discon-sub">{failed ? 'Unable to establish the WebRTC connection' : 'The video stream was interrupted'}</p>
       </div>
     </div>
   );

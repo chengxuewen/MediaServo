@@ -1,7 +1,7 @@
-/* MediaServo 共享 C 类型 — 所有 SDK 头文件的公共基座。
+/* MediaServo shared C types — the common foundation for all SDK headers.
  *
- * MAJOR = C ABI 版本 (D241)：within MAJOR 只加法，二进制兼容。
- * 本头文件手工维护（稳定导出面，等价 cbindgen 输出纪律）。
+ * MAJOR = C ABI version (D241): additive-only within a MAJOR, binary compatible.
+ * This header is hand-maintained (stable export surface, same discipline as cbindgen output).
  */
 #ifndef MEDIASERVO_COMMON_H
 #define MEDIASERVO_COMMON_H
@@ -13,49 +13,49 @@
 extern "C" {
 #endif
 
-/* ── 错误码 ──
- * 每 SDK 头文件按 MEDIASERVO_<SDK>_ERR_* 前缀展开值空间（防多 header 同 include 宏冲突）：
- *   field: MEDIASERVO_FIELD_ERR_*（保留历史 MEDIASERVO_ERR_* 别名）
+/* -- Error codes --
+ * Each SDK header expands its value space under the MEDIASERVO_<SDK>_ERR_* prefix (avoids macro collisions when multiple headers are included together):
+ *   field: MEDIASERVO_FIELD_ERR_* (legacy MEDIASERVO_ERR_* aliases retained)
  *   link:  MEDIASERVO_LINK_ERR_*
  *   deck:  MEDIASERVO_DECK_ERR_*
- * 0 = ok，<0 = 错误码。
+ * 0 = ok, <0 = error code.
  */
 typedef int mediaservo_err_t;
 #define MEDIASERVO_OK 0
 
-/* ── 帧元数据（link 帧总线线格式，定长 36B LE，D243）────────
- * 布局与 Rust FrameMeta::encode 逐字节一致：
+/* -- Frame metadata (link frame-bus wire format, fixed 36B LE, D243) --------
+ * Layout is byte-for-byte identical to Rust FrameMeta::encode:
  *   seq(8) + width(4) + height(4) + format(1) + version(1)
  *   + is_keyframe(1) + reserved(1) + ts_mono_ns(8) + ts_epoch_ns(8)
  *
- * 注意：#pragma pack(1) 强制 36B —— 自然对齐会因尾部 u64 对齐产生
- * 4B 填充（40B），与线格式不符。C 结构只是字段袋：Rust 侧逐字段
- * 读取构造 FrameMeta，禁止整块 reinterpret（填充/字节序风险）。
+ * Note: #pragma pack(1) forces 36B — natural alignment would add padding
+ * for the trailing u64 (40B total), which does not match the wire format. The C struct is just a field bag: the Rust side
+ * reads it field-by-field to build FrameMeta; never reinterpret the whole block (padding/endianness risk).
  */
 #pragma pack(push, 1)
 typedef struct mediaservo_frame_meta_t {
     uint64_t seq;
     uint32_t width;
     uint32_t height;
-    uint8_t  format;        /* 0=未知, 1=I420, 2=NV12, 3=RGBA */
-    uint8_t  version;       /* 元数据版本（演进用，D243） */
+    uint8_t  format;        /* 0=unknown, 1=I420, 2=NV12, 3=RGBA */
+    uint8_t  version;       /* metadata version (for evolution, D243) */
     uint8_t  is_keyframe;   /* 0/1 */
-    uint8_t  reserved;      /* 必须填 0 */
-    uint64_t ts_mono_ns;    /* 单调时钟 ns */
-    uint64_t ts_epoch_ns;   /* 墙上时钟 ns */
+    uint8_t  reserved;      /* must be 0 */
+    uint64_t ts_mono_ns;    /* monotonic clock ns */
+    uint64_t ts_epoch_ns;   /* wall-clock ns */
 } mediaservo_frame_meta_t;
 #pragma pack(pop)
 
-/* 编译期尺寸断言（C/C++ 通用，避免 _Static_assert 的 C11 依赖） */
+/* Compile-time size assertions (C/C++ portable; avoids the C11 _Static_assert dependency) */
 typedef char mediaservo_frame_meta_size_check[(sizeof(mediaservo_frame_meta_t) == 36) ? 1 : -1];
 
-/* ── 内存帧描述（deck 采集/回放回调，I420 三平面）────────
- * data_* 指针仅在回调内有效 —— 需要保留必须拷贝（文档契约）。
+/* -- In-memory frame description (deck capture/playback callbacks, I420 three planes) --------
+ * data_* pointers are valid only inside the callback — copy if you need to keep them (documented contract).
  */
 typedef struct mediaservo_frame_t {
     uint32_t width;
     uint32_t height;
-    uint64_t pts_us;        /* 演示时间戳 µs */
+    uint64_t pts_us;        /* presentation timestamp µs */
     uint32_t stride_y;
     uint32_t stride_u;
     uint32_t stride_v;

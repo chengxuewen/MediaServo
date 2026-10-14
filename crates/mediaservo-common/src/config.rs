@@ -75,91 +75,91 @@ pub struct ServerConfig {
     #[serde(default)]
     pub tls: Option<TlsConfig>,
 
-    /// G2 设备注册表文件（YAML: `devices: {<id>: {secret_hash}}`）。
-    /// 缺省 = `/opt/mediaservo/etc/devices.yaml`；文件缺失 = 空注册表（PSK 路径不受影响）。
+    /// G2 device registry file (YAML: `devices: {<id>: {secret_hash}}`).
+    /// Default = `/opt/mediaservo/etc/devices.yaml`; missing file = empty registry (PSK path unaffected).
     #[serde(default)]
     pub devices_file: Option<String>,
 
-    /// G3 舱端账号文件（YAML: `accounts: {<username>: {password_hash, role, vehicles}}`）。
-    /// 缺省 = `/opt/mediaservo/etc/accounts.yaml`；文件缺失 = 无账号（仅 PSK/设备路径）。
+    /// G3 cockpit account file (YAML: `accounts: {<username>: {password_hash, role, vehicles}}`).
+    /// Default = `/opt/mediaservo/etc/accounts.yaml`; missing file = no accounts (PSK/device paths only).
     #[serde(default)]
     pub accounts_file: Option<String>,
 
-    /// API-key 注册表文件（accountless-client-auth T1，YAML: `api_keys: {<id>: {secret_hash,
-    /// role, vehicles}}`）——`POST /api/auth/exchange` 免账号换短 JWT 的凭证源。
-    /// 缺省 = server.yaml 同目录 `api_keys.yaml`；文件缺失 = 空注册表（exchange 恒 401，
-    /// 不影响账号/PSK/设备通路）。
+    /// API-key registry file (accountless-client-auth T1, YAML: `api_keys: {<id>: {secret_hash,
+    /// role, vehicles}}`) - credential source for the account-free `POST /api/auth/exchange` short JWT.
+    /// Default = `api_keys.yaml` next to server.yaml; missing file = empty registry (exchange always 401,
+    /// accounts/PSK/device paths unaffected).
     #[serde(default)]
     pub api_keys_file: Option<String>,
 
-    /// exchange 签发 JWT 的存活秒数（缺省 43200=12h，对齐账号登录 TTL；吊销粒度见 F10）。
+    /// TTL in seconds of JWTs minted by exchange (default 43200=12h, aligned with account login TTL; revocation granularity see F10).
     #[serde(default = "default_api_token_ttl")]
     pub api_token_ttl_secs: u64,
 
-    /// SFU 配置（mediasoup WebRtcServer）。
+    /// SFU config (mediasoup WebRtcServer).
     #[serde(default)]
     pub sfu: SfuConfig,
 
-    /// Web 静态层（caddy）配置。缺省全 None = 现行为（8080 + 实例 `web/`）。
+    /// Web static layer (caddy) config. All-None default = current behavior (8080 + instance `web/`).
     #[serde(default)]
     pub web: WebConfig,
 }
 
-/// mediasoup WebRtcServer 缺省监听口——`sfu.port` 解析链（yaml > env MEDIASERVO_SFU_PORT >
-/// 本值，D-B 10-12）的缺省位单源：sfu.rs 消费 + common lib.rs env-usage 渲染共引，禁再写字面量。
+/// Default listen port of the mediasoup WebRtcServer - single source of the `sfu.port`
+/// resolution chain (yaml > env MEDIASERVO_SFU_PORT > this value, D-B 10-12): shared by sfu.rs and the common lib.rs env-usage renderer; do not repeat the literal.
 pub const DEFAULT_SFU_PORT: u16 = 20000;
 
-/// web(caddy) 对外口缺省——`web.port` 解析链（yaml > env MEDIASERVO_WEB_PORT > 本值）缺省位
-/// 单源（T6b②，DEFAULT_SFU_PORT 同模式）：templates.rs init 渲染 + start/doctor Caddyfile
-/// 反解漂移检测共引，禁再写字面量。
+/// Default port of the web(caddy) front end - single source of the `web.port`
+/// resolution chain (yaml > env MEDIASERVO_WEB_PORT > this value) (T6b, same pattern as DEFAULT_SFU_PORT):
+/// shared by templates.rs init rendering and start/doctor Caddyfile drift detection; do not repeat the literal.
 pub const DEFAULT_WEB_PORT: u16 = 8080;
 
-/// weaknet-serve 面板口缺省——`sfu.weaknet_port` 解析链缺省位单源（T6b②）。
-/// 交叉锚（零新增依赖纪律）：weaknet crate 不依赖 common，其
-/// crates/mediaservo-weaknet/src/server.rs `DEFAULT_LISTEN` 字符串字面量的端口段与本值
-/// **手抄同步**——簇启动链恒传显式 --listen，两处字面量仅裸手起 serve 时生效。
+/// Default port of the weaknet-serve panel - single source of the `sfu.weaknet_port` chain (T6b).
+/// Cross anchor (zero-new-dependency discipline): the weaknet crate does not depend on common, so the
+/// port segment of the `DEFAULT_LISTEN` string literal in crates/mediaservo-weaknet/src/server.rs and this value
+/// are **hand-synced** - the cluster startup chain always passes an explicit --listen; the two literals only matter when serve is started by hand.
 pub const WEAKNET_SERVE_PORT: u16 = 9810;
 
-/// SFU（mediasoup WebRtcServer）配置。
+/// SFU (mediasoup WebRtcServer) config.
 ///
-/// ⚠️ 手写 Default（勿改回 derive）：`Option<u16>` 字段若 derive(Default)
-/// 不会出问题，但历史教训是 u16 数值字段 derive 会得 0；手写集中管控，
-/// 钉死测试 `default_impl_matches_serde_absent`。
+/// Hand-written Default (do not revert to derive): an `Option<u16>` field is fine with derive(Default),
+/// but the historical lesson is that deriving u16 numeric fields yields 0; hand-writing keeps it centralized,
+/// pinned by the test `default_impl_matches_serde_absent`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct SfuConfig {
-    /// 对外公告地址（多网卡/多网络可达 IP，如 `["192.168.2.127", "10.144.0.3"]`）。
-    /// 优先级: env `MEDIASERVO_SFU_ANNOUNCED_IP` > 本字段 > 自动探测（出网 IP）。
-    /// mediasoup 要求 0.0.0.0 必须配 announced（PIT-44/58/138——容器内探测不可达）。
+    /// Announced outbound addresses (reachable IPs across NICs/networks, e.g. `["192.168.2.127", "10.144.0.3"]`).
+    /// Priority: env `MEDIASERVO_SFU_ANNOUNCED_IP` > this field > auto-detection (public IP).
+    /// mediasoup requires an announced address when binding 0.0.0.0 (PIT-44/58/138 - in-container detection is unreachable).
     #[serde(default)]
     pub announced_ips: Vec<String>,
-    /// mediasoup WebRtcServer 监听口。None = env `MEDIASERVO_SFU_PORT` 兜底 → 20000。
+    /// Listen port of the mediasoup WebRtcServer. None = env `MEDIASERVO_SFU_PORT` fallback -> 20000.
     #[serde(default)]
     pub port: Option<u16>,
-    /// weaknet-serve 面板口。None = 9810（`WEAKNET_SERVE_PORT` 常量）。仅改端口数字，恒 loopback。
+    /// weaknet-serve panel port. None = 9810 (`WEAKNET_SERVE_PORT`). Only the port number changes; always loopback.
     #[serde(default)]
     pub weaknet_port: Option<u16>,
 }
 
-#[allow(clippy::derivable_impls)] // 勿改回 derive——见结构体 doc「手写 Default」决策 + 钉死测试
+#[allow(clippy::derivable_impls)] // do not revert to derive - see the struct doc "hand-written Default" decision + pinned test
 impl Default for SfuConfig {
     fn default() -> Self {
         Self { announced_ips: Vec::new(), port: None, weaknet_port: None }
     }
 }
 
-/// Web 静态层（caddy）配置 — server.yaml `web:` 段（init 渲染 Caddyfile 的单一来源）。
+/// Web static layer (caddy) config - the `web:` section of server.yaml (single source of the init-rendered Caddyfile).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebConfig {
-    /// Caddy 对外端口。None = env `MEDIASERVO_WEB_PORT` 兜底 → 8080。
-    /// Option 而非带值缺省的原因：区分“用户写 8080”与“serde 填 8080”，保 env 兜底语义存活。
+    /// Public Caddy port. None = env `MEDIASERVO_WEB_PORT` fallback -> 8080.
+    /// Option rather than a defaulted value: distinguishes "user wrote 8080" from "serde filled 8080", keeping the env fallback semantics alive.
     #[serde(default)]
     pub port: Option<u16>,
-    /// 静态站点根目录。None = 实例目录 `web/`。相对路径按实例根目录解析。
+    /// Static site root. None = instance `web/` directory. Relative paths resolve against the instance root.
     #[serde(default)]
     pub static_root: Option<String>,
 }
 
-#[allow(clippy::derivable_impls)] // 同 SfuConfig——手写 Default 项目决策
+#[allow(clippy::derivable_impls)] // same as SfuConfig - hand-written Default by project decision
 impl Default for WebConfig {
     fn default() -> Self {
         Self { port: None, static_root: None }
@@ -247,39 +247,39 @@ pub struct EncoderConfig {
     #[serde(default = "default_encoder")]
     pub backend: String,
 
-    /// Target bitrate in kbps — ⚠️ 仅作用于 GStreamer 捕获/编码管线（pipeline.rs）;
-    /// SFU 主路径（test_pattern→WebRtcTrackSink→libwebrtc 编码器）不经过 GStreamer 编码,
-    /// 对 WebRTC 编码器零影响 — 用 min/max_bitrate_kbps 控制 WebRTC 编码码率。
+    /// Target bitrate in kbps - only affects the GStreamer capture/encode pipeline (pipeline.rs);
+    /// the SFU main path (test_pattern -> WebRtcTrackSink -> libwebrtc encoder) does not run GStreamer encoding,
+    /// so it has zero effect on the WebRTC encoder - use min/max_bitrate_kbps to control WebRTC encode bitrate.
     #[serde(default = "default_bitrate")]
     pub bitrate_kbps: u32,
 
-    /// Keyframe interval in **seconds**（PIT-76: 周期 request_key_frame 触发，
-    /// 语义从 GOP 帧数改为秒；0 视为 1 防御）。
+    /// Keyframe interval in **seconds** (PIT-76: periodic request_key_frame trigger;
+    /// semantics changed from GOP frame count to seconds; 0 treated as 1 as a guard).
     #[serde(default = "default_gop")]
     pub keyframe_interval: u32,
 
-    /// 编码 codec 偏好（v2, encoder-backend-codec-config）: "auto"/"vp8"/"h264"/"vp9"/"av1"。
-    /// auto = router 决定（现状）; 指定值 = 构造远程 offer 时只声明目标 codec
-    /// （libwebrtc 实际编码 = 协商交集 = offer codec, 三者一致）。
+    /// Encode codec preference (v2, encoder-backend-codec-config): "auto"/"vp8"/"h264"/"vp9"/"av1".
+    /// auto = router decides (current state); explicit value = only the target codec is declared when building the remote offer
+    /// (libwebrtc actual encode = negotiated intersection = offer codec, the three agree).
     #[serde(default = "default_codec")]
     pub codec: String,
-    /// 最高码率 (kbps) — v2 (encoder-bitrate): libwebrtc 可靠硬上限, None=不限制
+    /// Max bitrate (kbps) - v2 (encoder-bitrate): libwebrtc hard ceiling, None = unlimited
     pub max_bitrate_kbps: Option<u32>,
-    /// 最低码率 (kbps) — v2 (encoder-bitrate): 受限链路 best-effort 下限, None=不限制
+    /// Min bitrate (kbps) - v2 (encoder-bitrate): best-effort floor on constrained links, None = unlimited
     pub min_bitrate_kbps: Option<u32>,
 }
 
 impl EncoderConfig {
-    /// 码率区间校验（encoder-bitrate）: 若同时设置, 必须 0 < min < max,
-    /// 否则 libwebrtc 双失效（video_stream_encoder.cc:444 min>=max → 两者都不应用）。
+    /// Bitrate range validation (encoder-bitrate): when both are set, 0 < min < max is required,
+    /// otherwise libwebrtc disables both (video_stream_encoder.cc:444 min>=max -> neither is applied).
     pub fn validate_bitrate(&self) -> Result<(), String> {
         if let (Some(min), Some(max)) = (self.min_bitrate_kbps, self.max_bitrate_kbps) {
             if min == 0 {
-                return Err("encoder.min_bitrate_kbps 必须 > 0".into());
+                return Err("encoder.min_bitrate_kbps must be > 0".into());
             }
             if min >= max {
                 return Err(format!(
-                    "encoder.min_bitrate_kbps({min}) 必须 < max_bitrate_kbps({max}), 否则 libwebrtc 双失效"
+                    "encoder.min_bitrate_kbps({min}) must be < max_bitrate_kbps({max}), otherwise libwebrtc disables both"
                 ));
             }
         }
@@ -337,7 +337,7 @@ fn default_codec() -> String {
     "auto".to_string()
 }
 fn default_gop() -> u32 {
-    // PIT-76: 语义从帧改为秒（周期关键帧触发间隔）
+    // PIT-76: semantics changed from frames to seconds (periodic keyframe trigger interval)
     2
 }
 fn default_room_capacity() -> usize {
@@ -400,7 +400,7 @@ webrtc:
         assert_eq!(parsed.capture.device.as_deref(), Some("/dev/video0"));
         assert_eq!(parsed.encoder.backend, "nvenc");
         assert_eq!(parsed.encoder.bitrate_kbps, 4000);
-        assert_eq!(parsed.encoder.keyframe_interval, 2); // PIT-76: 秒
+        assert_eq!(parsed.encoder.keyframe_interval, 2); // PIT-76: seconds
         assert_eq!(parsed.psk.as_deref(), Some("secret123"));
         assert_eq!(parsed.webrtc.as_ref().unwrap().ice_timeout_secs, 45);
 
@@ -517,7 +517,7 @@ backend: "software"
         let parsed: EncoderConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(parsed.backend, "software");
         assert_eq!(parsed.bitrate_kbps, 2000);
-        assert_eq!(parsed.keyframe_interval, 2); // PIT-76: 秒
+        assert_eq!(parsed.keyframe_interval, 2); // PIT-76: seconds
     }
 
     #[test]
@@ -581,7 +581,7 @@ consumer_limit_per_stream: 100
 
     #[test]
     fn encoder_bitrate_validate() {
-        // 默认（无 min/max）→ OK
+        // default (no min/max) -> Ok
         let cfg = EncoderConfig {
             backend: "auto".into(),
             bitrate_kbps: 2000,
@@ -592,7 +592,7 @@ consumer_limit_per_stream: 100
         };
         assert!(cfg.validate_bitrate().is_ok());
 
-        // 只设 max → OK
+        // only max set -> Ok
         let cfg = EncoderConfig { max_bitrate_kbps: Some(4000), ..cfg.clone() };
         assert!(cfg.validate_bitrate().is_ok());
 
@@ -604,7 +604,7 @@ consumer_limit_per_stream: 100
         };
         assert!(cfg.validate_bitrate().is_ok());
 
-        // min >= max → Err（防双失效）
+        // min >= max -> Err (guard against double-disabling)
         let cfg = EncoderConfig {
             min_bitrate_kbps: Some(4000),
             max_bitrate_kbps: Some(4000),
@@ -621,11 +621,11 @@ consumer_limit_per_stream: 100
         assert!(cfg.validate_bitrate().is_err());
     }
 
-    // ---- config-unification P1: web/sfu 端口键（additive, 旧 yaml 零改动） ----
+    // ---- config-unification P1: web/sfu port keys (additive, zero change to old yaml) ----
 
     #[test]
     fn server_config_old_yaml_backward_compat() {
-        // 1.1 版前的完整旧 yaml（含 sfu 旧形）→ 新键全 None = env/default 兜底存活
+        // full pre-1.1 legacy yaml (including the old sfu shape) -> new keys all None = env/default fallback survives
         let yaml = r#"
 version: 1
 listen: {host: "0.0.0.0", port: 9800}
@@ -649,7 +649,7 @@ sfu:
             cfg.sfu.announced_ips,
             ["192.168.2.127"].iter().map(|s| s.to_string()).collect::<Vec<String>>()
         );
-        // roundtrip 全等
+        // roundtrip fully equal
         let re: ServerConfig = serde_yaml::from_str(&serde_yaml::to_string(&cfg).unwrap()).unwrap();
         assert_eq!(re.sfu.weaknet_port, None);
         assert_eq!(re.sfu.port, None);
@@ -665,18 +665,18 @@ sfu:
         // empty
         let empty: WebConfig = serde_yaml::from_str("{}").unwrap();
         assert_eq!(empty, WebConfig::default());
-        // absent → ServerConfig 层 default
+        // absent -> ServerConfig-level default
         let parsed: ServerConfig = serde_yaml::from_str("listen: {}").unwrap();
         assert_eq!(parsed.web, WebConfig::default());
     }
 
     #[test]
     fn sfu_config_port_keys() {
-        // 两端口键同时解析
+        // both port keys parsed together
         let sfu: SfuConfig = serde_yaml::from_str("{port: 21000, weaknet_port: 9811}").unwrap();
         assert_eq!(sfu.port, Some(21000));
         assert_eq!(sfu.weaknet_port, Some(9811));
-        // announced_ips 单独在场 → 两端口仍 None（per-field 缺省不串味）
+        // announced_ips present alone -> both ports still None (per-field defaults do not leak)
         let sfu: SfuConfig = serde_yaml::from_str("{announced_ips: [x]}").unwrap();
         assert_eq!(sfu.port, None);
         assert_eq!(sfu.weaknet_port, None);
@@ -684,7 +684,7 @@ sfu:
 
     #[test]
     fn default_impl_matches_serde_absent() {
-        // 防未来有人改回 derive(Default) 引入 port=0 回归
+        // guard against a future revert to derive(Default) reintroducing the port=0 regression
         let parsed: SfuConfig = serde_yaml::from_str("{}").unwrap();
         assert_eq!(parsed, SfuConfig::default());
         assert_eq!(parsed.port, None);

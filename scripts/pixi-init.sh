@@ -25,14 +25,14 @@ else
     cat >> "${CARGO_CONFIG}" << 'CARGO_EOF'
 
 # MediaServo: crates.io mirror for China (rsproxy.cn by ByteDance)
-# D208: sparse 协议必须用 /index/ 路径（/crates.io-index/ 是 git 协议地址，sparse 下 404）
+# D208: the sparse protocol requires the /index/ path (/crates.io-index/ is the git-protocol address, 404 under sparse)
 [source.crates-io]
 replace-with = 'rsproxy-sparse'
 
 [source.rsproxy-sparse]
 registry = "sparse+https://rsproxy.cn/index/"
 
-# 备选：rsproxy 故障时手动切换 replace-with 到 ustc-sparse
+# Fallback: if rsproxy is down, switch replace-with to ustc-sparse manually
 # [source.ustc-sparse]
 # registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
 

@@ -3,8 +3,8 @@ import { login } from './helpers';
 
 const TOKEN_KEY = 'mediaservo_admin_token';
 
-// 匿名套件（playwright.config anon project，无 storageState）— 路由守卫 + 登录页 + 401 自愈。
-// 前置: Docker server (9800) + vite dev (5173) + accounts.docker.yaml dev 账号。
+// Anonymous suite (playwright.config anon project, no storageState) — route guards + login page + 401 self-heal.
+// Prereq: Docker server (9800) + vite dev (5173) + accounts.docker.yaml dev account.
 test.describe('Auth Guard', () => {
   test('unauthenticated visit redirects to /login without API spam', async ({ page }) => {
     const apiRequests: string[] = [];
@@ -19,7 +19,7 @@ test.describe('Auth Guard', () => {
   });
 
   test('expired/invalid token self-heals: 401 clears token and redirects to login', async ({ page }) => {
-    // addInitScript 每次导航重跑 → sessionStorage 门控，避免 redirect 后重新注入
+    // addInitScript re-runs on every navigation → sessionStorage gate avoids re-injecting after redirect
     await page.addInitScript((key) => {
       if (!sessionStorage.getItem('test-token-injected')) {
         localStorage.setItem(key, 'invalid-token');

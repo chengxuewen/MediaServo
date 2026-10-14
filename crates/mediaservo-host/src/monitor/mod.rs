@@ -1,4 +1,4 @@
-//! 监控（Task E1 拓扑 + E2 数据流）— 声明式期望 vs 发现式实际 + 数据面统计。
+//! Monitoring (Task E1 topology + E2 flow) — declarative expectations vs discovered reality + data-plane stats.
 
 pub mod flow;
 pub mod signal;

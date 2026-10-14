@@ -1,106 +1,106 @@
 # Docker Development Workflow
 
-> 状态：Phase 3 完成 | 关联：SFU mediasoup 集成、D208 构建优化
+> Status: Phase 3 complete | Related: SFU mediasoup integration, D208 build optimization
 
-## 概述
+## Overview
 
-MediaServo 使用多阶段 Dockerfile (base → dev → builder → runtime) 和 docker-compose 简化开发环境搭建。mediasoup SFU 仅支持 Linux，macOS 开发者需通过 Docker 容器编译。
+MediaServo uses a multi-stage Dockerfile (base → dev → builder → runtime) and docker-compose to simplify the dev environment. The mediasoup SFU supports Linux only; macOS developers must compile via a Docker container.
 
-## macOS Docker 工作流
+## macOS Docker Workflow
 
-### 前置条件
+### Prerequisites
 
-- Docker Desktop 4.x 或 Colima
-- VS Code + Dev Containers 扩展（可选）
+- Docker Desktop 4.x or Colima
+- VS Code + the Dev Containers extension (optional)
 
-### 使用 docker-compose
+### Using docker-compose
 
 ```bash
-# 启动开发容器（挂载源码 + cargo 缓存）
+# Start the dev container (source mounted + cargo cache)
 docker compose up -d
 
-# 进入容器
+# Enter the container
 docker compose exec server bash
 
-# 容器内编译（含 mediasoup SFU）
+# Compile inside the container (incl. the mediasoup SFU)
 cargo check --features sfu-mediasoup
 
-# 运行服务器
+# Run the server
 cargo run --bin mediaservo-server
 ```
 
-### 使用 VS Code Dev Container
+### Using the VS Code Dev Container
 
-1. 安装 `Dev Containers` 扩展
-2. 打开项目根目录
+1. Install the `Dev Containers` extension
+2. Open the project root
 3. `Ctrl+Shift+P` → `Dev Containers: Reopen in Container`
-4. rust-analyzer 自动识别 workspace，启用 `sfu-mediasoup` feature
+4. rust-analyzer detects the workspace automatically, with the `sfu-mediasoup` feature enabled
 
-### 编译加速
+### Build Acceleration
 
-docker-compose.yml 已配置 `cargo-cache` named volume，避免重复下载依赖：
+docker-compose.yml already configures a `cargo-cache` named volume to avoid re-downloading dependencies:
 
 ```bash
-# 清理 cargo 缓存（如遇缓存损坏）
+# Clear the cargo cache (if corrupted)
 docker volume rm mediaservo_cargo-cache
 ```
 
-## Linux 原生工作流
+## Linux Native Workflow
 
-Linux 可直接本地编译，无需 Docker（mediasoup 原生支持）：
+Linux compiles natively, no Docker needed (mediasoup is natively supported):
 
 ```bash
-# 安装依赖（Debian/Ubuntu）
+# Install dependencies (Debian/Ubuntu)
 sudo apt-get install -y \
   pkg-config cmake ninja-build \
   libssl-dev libuv1-dev \
   python3 python3-pip
 
-# 安装 meson（mediasoup Worker 编译需要）
+# Install meson (needed by the mediasoup Worker build)
 pip3 install meson
 
-# 拉取依赖
+# Fetch dependencies
 cargo fetch
 
-# 编译含 SFU 的服务器
+# Build the server with the SFU
 cargo build --features sfu-mediasoup --bin mediaservo-server
 
-# 运行
+# Run
 cargo run --features sfu-mediasoup --bin mediaservo-server
 ```
 
-### clippy 检查
+### clippy check
 
 ```bash
 cargo clippy --features sfu-mediasoup --all-targets -- -D warnings
 ```
 
-## Docker 命令参考
+## Docker Command Reference
 
-| 命令 | 说明 |
-|------|------|
-| `docker compose up -d` | 后台启动开发容器 |
-| `docker compose down` | 停止并移除容器 |
-| `docker compose exec server bash` | 进入运行中容器 |
-| `docker compose logs -f server` | 查看服务器日志 |
-| `docker compose build --no-cache` | 重新构建镜像 |
-| `docker compose run --rm server cargo test` | 一次性运行测试 |
-| `docker compose run --rm server cargo clippy --features sfu-mediasoup` | 容器内 clippy |
+| Command | Description |
+|---------|-------------|
+| `docker compose up -d` | Start the dev container in the background |
+| `docker compose down` | Stop and remove containers |
+| `docker compose exec server bash` | Enter the running container |
+| `docker compose logs -f server` | View server logs |
+| `docker compose build --no-cache` | Rebuild the image |
+| `docker compose run --rm server cargo test` | Run tests one-off |
+| `docker compose run --rm server cargo clippy --features sfu-mediasoup` | clippy inside the container |
 
-## Dockerfile 构建阶段
+## Dockerfile Build Stages
 
-| 阶段 | 用途 | 基础镜像 |
-|------|------|----------|
-| `base` | Rust + 系统依赖 + meson | ubuntu:22.04 |
-| `dev` | 开发环境（源码 + cargo fetch） | base |
-| `builder` | release 编译 | base |
-| `runtime` | 最小运行时 | ubuntu:22.04 |
+| Stage | Purpose | Base image |
+|-------|---------|------------|
+| `base` | Rust + system deps + meson | ubuntu:22.04 |
+| `dev` | Dev environment (source + cargo fetch) | base |
+| `builder` | release build | base |
+| `runtime` | Minimal runtime | ubuntu:22.04 |
 
-## 端口映射
+## Port Mappings
 
-| 端口 | 用途 |
-|------|------|
-| 8000 | HTTP/信令 |
+| Port | Purpose |
+|------|---------|
+| 8000 | HTTP/signaling |
 | 40000-40100/udp | mediasoup RTP/RTCP |
 
-> 详见 [SFU mediasoup Integration](../sfu-mediasoup-integration.md)
+> See [SFU mediasoup Integration](../sfu-mediasoup-integration.md)

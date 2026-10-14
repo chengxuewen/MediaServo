@@ -1,11 +1,11 @@
-# 14. Remote 应用架构
+# 14. Remote Application Architecture
 
-> Phase 0 — 架构定义 | 2026-07-17
-> 关联决策: D66-D69, D70-D72, D76, D80, D118 + 主文档引用: [架构文档](../architecture.md) §2, §7
+> Phase 0 — architecture definition | 2026-07-17
+> Related decisions: D66-D69, D70-D72, D76, D80, D118 + main doc reference: [architecture doc](../architecture.md) §2, §7
 
-## 14.1 概述
+## 14.1 Overview
 
-mediaservo-client 是座舱侧应用程序，从 Server 拉取视频流，解码渲染到屏幕，同时通过 RTCDataChannel 发送控制指令。Remote 只拉流和控制，不推流。
+mediaservo-client is the cockpit-side application: it pulls the video stream from the Server, decodes and renders it to screen, and sends control commands over RTCDataChannel. Remote only pulls and controls; it never pushes.
 
 ```
 Server (mediaservo-server)
@@ -15,111 +15,114 @@ Server (mediaservo-server)
 mediaservo-client
   ┌────────────────────────────────────────────┐
   │  Signaling Client                          │
-  │  axum WS, join room, SDP/ICE 交换          │
+  │  axum WS, join room, SDP/ICE exchange      │
   ├────────────────────────────────────────────┤
-  │  Pull Engine (libwebrtc RTCPeerConnection)    │
-  │  订阅 Server 转发的 Host 视频流            │
+  │  Pull Engine (libwebrtc RTCPeerConnection) │
+  │  Subscribes to the Host stream the Server  │
+  │  forwards                                  │
   │  H.264/H.265 RTP stream                    │
   ├────────────────────────────────────────────┤
   │  Decoder Pipeline                          │
-  │  libwebrtc 内置(codec) / FFmpeg (str0m)    │
-  │  硬件解码: NVDEC/VAAPI/VideoToolbox        │
-  │  软件 fallback: VP8 libvpx / H.264 openh264│
+  │  libwebrtc built-in (codec) / FFmpeg       │
+  │  (str0m)                                   │
+  │  HW decode: NVDEC/VAAPI/VideoToolbox       │
+  │  SW fallback: VP8 libvpx / H.264 openh264  │
   ├────────────────────────────────────────────┤
   │  Render                                    │
-  │  Phase 1: CPU 回读 → Canvas                │
+  │  Phase 1: CPU readback → Canvas            │
   │  Phase 2: GPU direct (wgpu interop)        │
   ├────────────────────────────────────────────┤
-  │  RTCDataChannel Control                       │
-  │  控制指令发送 (转向/刹车/油门)             │
-  │  HMAC-SHA256 签名, unordered=0 重传        │
+  │  RTCDataChannel Control                    │
+  │  Control command sending (steer/brake/     │
+  │  throttle)                                 │
+  │  HMAC-SHA256 signed, unordered=0 retrans   │
   ├────────────────────────────────────────────┤
   │  Monitoring                                │
   │  /health /ready /metrics                   │
-  │  解码性能、控制帧丢率                      │
+  │  Decode performance, control-frame loss    │
   └────────────────────────────────────────────┘
 ```
 
-## 14.2 核心组件
+## 14.2 Core Components
 
-| 组件 | 职责 | 决策 |
-|------|------|------|
-| Signaling Client | 连接 Server WS，SDP/ICE 交换，房间管理 | D52, D54 |
-| Pull Engine | libwebrtc RTCPeerConnection 拉流，订阅 Host 视频 | D66, D118 |
-| Decoder | 解码 H.264/H.265 帧。libwebrtc 内置 codec 或 FFmpeg | D70-D72 |
-| Render | 渲染解码后帧到屏幕。Phase 1 CPU 回读，Phase 2 GPU direct | D47 |
-| RTCDataChannel Control | 发送控制指令 (转向/刹车/油门)，HMAC-SHA256 签名 | D66, D117 |
-| Config | remote.conf (YAML)，只读本地配置 | D80 |
+| Component | Responsibility | Decisions |
+|-----------|----------------|-----------|
+| Signaling Client | Connects the Server WS, SDP/ICE exchange, room management | D52, D54 |
+| Pull Engine | libwebrtc RTCPeerConnection pull, subscribing to the Host video | D66, D118 |
+| Decoder | Decodes H.264/H.265 frames. libwebrtc built-in codecs or FFmpeg | D70-D72 |
+| Render | Renders decoded frames to screen. Phase 1 CPU readback, Phase 2 GPU direct | D47 |
+| RTCDataChannel Control | Sends control commands (steer/brake/throttle), HMAC-SHA256 signed | D66, D117 |
+| Config | remote.conf (YAML), read-only local config | D80 |
 
-## 14.3 技术栈
+## 14.3 Technology Stack
 
-| 组件 | 选型 | 理由 |
-|------|------|------|
-| WebRTC 拉流 | libwebrtc (via webrtc-sys) | 内置 VP8/VP9/H.264 编解码，弱网抗性 |
-| 解码 | libwebrtc 内置 codec (默认) / FFmpeg (str0m 后端) | D70-D72 |
-| 渲染 | CPU 回读 appsink → Canvas (Phase 1) | 极简实现 |
-| 控制 | RTCDataChannel (unordered, maxRetransmits=0) | 低延迟控制指令 |
-| 签名 | HMAC-SHA256, DTLS-SRTP 派生密钥 | D117 |
-| HTTP | axum 0.7 (/health /ready /metrics) | 与 Server/Host 统一 |
-| 配置 | serde_yaml + env 覆盖 | 全局统一模式 |
-| 日志 | tracing-subscriber (JSON stdout) | 与 Server/Host 统一 |
-| 平台 | macOS / Linux / Windows | D118 跨平台桌面基线 |
+| Component | Choice | Rationale |
+|-----------|--------|-----------|
+| WebRTC pull | libwebrtc (via webrtc-sys) | Built-in VP8/VP9/H.264 codecs, weak-network resilience |
+| Decode | libwebrtc built-in codecs (default) / FFmpeg (str0m backend) | D70-D72 |
+| Render | CPU readback appsink → Canvas (Phase 1) | Minimal implementation |
+| Control | RTCDataChannel (unordered, maxRetransmits=0) | Low-latency control commands |
+| Signing | HMAC-SHA256, DTLS-SRTP derived key | D117 |
+| HTTP | axum 0.7 (/health /ready /metrics) | Unified with Server/Host |
+| Config | serde_yaml + env override | Global unified pattern |
+| Logging | tracing-subscriber (JSON stdout) | Unified with Server/Host |
+| Platforms | macOS / Linux / Windows | D118 cross-platform desktop baseline |
 
-## 14.4 数据流
+## 14.4 Data Flow
 
 ```
 Server → WebRTC RTP (H.264/H.265)
   │
   ▼
 libwebrtc RTCPeerConnection (pull)
-  │ 解码后帧 (I420/NV12)
+  │ Decoded frames (I420/NV12)
   ▼
-Decoder (libwebrtc 内置 / FFmpeg)
-  │ 解码后 RGBA buffer
+Decoder (libwebrtc built-in / FFmpeg)
+  │ Decoded RGBA buffer
   ▼
 Render (CPU fallback → GPU direct Phase 2)
-  │ 帧显示到窗口
+  │ Frame displayed in the window
   │
-  ─── RTCDataChannel (控制指令, 反向流向 Host)
+  ─── RTCDataChannel (control commands, flowing back to Host)
        steering / brake / throttle
        HMAC-SHA256 signed
 ```
 
 ## 14.5 Remote vs Client
 
-| 维度 | mediaservo-client | mediaservo-client |
-|------|----------------|-----------------|
-| GUI | 无 GUI (纯 SDK) / 简单渲染窗口 | Tauri v2 全功能桌面应用 |
-| SDK 形态 | mediaservo-client-c (.a + .so + .h) | 直接依赖 Rust crate |
-| 场景 | C/C++ 嵌入 (ROS/自驾/移动端) | 操作员桌面应用 |
-| 解码 | libwebrtc 内置 / FFmpeg | 同 remote |
-| 控制 | RTCDataChannel 控制指令 | 全功能 GUI 操作 |
-| 配置 | remote.conf (只读本地) | GUI 设置面板 |
+| Dimension | mediaservo-client (remote/SDK) | mediaservo-client (GUI) |
+|-----------|--------------------------------|--------------------------|
+| GUI | No GUI (pure SDK) / simple render window | Tauri v2 full-featured desktop app |
+| SDK form | mediaservo-client-c (.a + .so + .h) | Direct Rust crate dependency |
+| Scenario | C/C++ embedding (ROS/autonomous driving/mobile) | Operator desktop app |
+| Decode | libwebrtc built-in / FFmpeg | Same as remote |
+| Control | RTCDataChannel control commands | Full-featured GUI operation |
+| Config | remote.conf (read-only local) | GUI settings panel |
 
-## 14.6 平台支持
+## 14.6 Platform Support
 
-| 平台 | 采集 | 解码 | 硬件加速 |
-|------|------|------|---------|
+| Platform | Capture | Decode | HW acceleration |
+|----------|---------|--------|-----------------|
 | macOS | — | VideoToolbox | VT H.264/H.265 |
 | Linux | — | VAAPI / NVDEC | VAAPI H.264, NVDEC |
 | Windows | — | D3D11VA / NVDEC | NVDEC H.264/H.265 |
 
-Remote 不需要采集。解码优先使用硬件加速，GPU 不可用时 fallback 到软件解码 (libvpx VP8 / openh264 H.264)。
+Remote needs no capture. Decoding prefers hardware acceleration; when no GPU is available it falls back to software decoding (libvpx VP8 / openh264 H.264).
 
-## 14.7 状态机
+## 14.7 State Machine
 
 ```
-INIT → CONNECTING (连接 Server) → RECEIVING (接收+渲染)
-  │                                    │
-  └── shutdown ──────────────────────┘
-                                      │
-                                (断连) → CONNECTING (指数退避重连)
+INIT → CONNECTING (connecting to Server) → RECEIVING (receiving + rendering)
+  │                                             │
+  └── shutdown ────────────────────────────────┘
+                                                │
+                          (disconnect) → CONNECTING (exponential backoff reconnect)
 ```
 
-## 14.8 交叉引用
+## 14.8 Cross References
 
-- Remote 作为 SDK 层: [SDK 分层](04-sdk-layers.md)
-- Client 与 Host 对比: [客户端与 Host](03-client-host.md)
-- 信令协议: [信令架构](10-signaling-architecture.md)
-- 安全模型: [架构文档](../architecture.md) §3 (Auth)
-- Server 中继: [Server 架构](13-server-architecture.md)
+- Remote as the SDK layer: [SDK layers](04-sdk-layers.md)
+- Client vs Host comparison: [client & host](03-client-host.md)
+- Signaling protocol: [signaling architecture](10-signaling-architecture.md)
+- Security model: [architecture doc](../architecture.md) §3 (Auth)
+- Server relay: [server architecture](13-server-architecture.md)

@@ -1,9 +1,9 @@
-//! MediaServo Deck — 媒体数据面 SDK。
+//! MediaServo Deck — media data plane SDK.
 //!
-//! 独立部署场景（本地监控/NVR）直采直录，无 WebRTC 依赖：
-//! - [`source`]: 采集（CameraSource/AudioSource/ScreenSource + MediaDevices 枚举）
-//! - [`record`]: 录制（Recorder，FFmpeg mux 落盘）
-//! - [`playback`]: 回放（Player，demux + decode）— Phase 3
+//! Standalone deployment scenarios (local monitoring/NVR) capture and record directly, with no WebRTC dependency:
+//! - [`source`] — capture (CameraSource/AudioSource/ScreenSource + MediaDevices enumeration)
+//! - [`record`] — recording (Recorder, FFmpeg mux to disk)
+//! - [`playback`] — playback (Player, demux + decode) — Phase 3
 
 pub mod error;
 pub mod playback;
@@ -12,7 +12,7 @@ pub mod source;
 
 pub use error::DeckError;
 pub use playback::Player;
-pub use record::{Container, Recorder, RecordOptions, VideoCodec};
+pub use record::{Container, RecordOptions, Recorder, VideoCodec};
 pub use source::{
-    CameraSource, CaptureOptions, DeviceId, FrameStream, MediaDevices, MediaDeviceKind,
+    CameraSource, CaptureOptions, DeviceId, FrameStream, MediaDeviceKind, MediaDevices,
 };

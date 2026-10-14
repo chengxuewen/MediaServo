@@ -1,49 +1,49 @@
 # SDD 04: DataChannel Control
 
-## 1. 概述
+## 1. Overview
 
-DataChannel 控制模块。通过 WebRTC DataChannel 双向传输控制指令（键盘、鼠标、触控），附带 HMAC 安全签名。
+DataChannel control module. Transmits control commands (keyboard, mouse, touch) bidirectionally over the WebRTC DataChannel, with HMAC security signatures.
 
-**决策引用**: D65 (field DataChannel), D66 (remote DataChannel), D117 (控制安全)
+**Decision refs**: D65 (field DataChannel), D66 (remote DataChannel), D117 (control security)
 
-## 2. 接口定义
+## 2. Interface Definition
 
 ```rust
-/// 控制指令类型 (二进制协议)
+/// Control command type (binary protocol)
 pub enum ControlCommand {
-    // 键盘
+    // Keyboard
     KeyDown { key: KeyCode, modifiers: Modifiers },
     KeyUp { key: KeyCode },
-    // 鼠标
+    // Mouse
     MouseMove { x: f32, y: f32 },
     MouseDown { button: MouseButton },
     MouseUp { button: MouseButton },
     MouseWheel { delta: f32 },
-    // 触控
+    // Touch
     Touch { id: u32, x: f32, y: f32, phase: TouchPhase },
-    // 遥操作专有
+    // Teleoperation-specific
     Steering(f32),         // -1.0 ~ 1.0
     Throttle(f32),         // 0.0 ~ 1.0
     Brake(f32),            // 0.0 ~ 1.0
-    // 系统
+    // System
     Heartbeat(u64),
     EmergencyStop,
 }
 ```
 
-### 二进制帧格式
+### Binary Frame Format
 
 ```
 | length: u32 (4) | seq: u32 (4) | cmd: u8 (1) | payload (var) | hmac: [u8; 8] |
 ```
 
-- `length`: 整帧长度 (包括 hmAc)
-- `seq`: 递增序列号, 防重放
-- `cmd`: ControlCommand 枚举 tag
-- `payload`: 指令具体参数 (bincode 序列化)
-- `hmac`: 8 字节 truncated HMAC-SHA256
+- `length`: Total frame length (including hmac)
+- `seq`: Monotonically increasing sequence number, anti-replay
+- `cmd`: ControlCommand enum tag
+- `payload`: Command-specific parameters (bincode-serialized)
+- `hmac`: 8-byte truncated HMAC-SHA256
 
-### DataChannel 配置
+### DataChannel Configuration
 
 ```
 unordered: true
@@ -51,21 +51,21 @@ maxRetransmits: 0
 label: "control"
 ```
 
-## 3. HMAC 安全 (D117)
+## 3. HMAC Security (D117)
 
-- 密钥: `DTLS-SRTP export_keying_material("mediaservo-control")`
-- 算法: HMAC-SHA256, truncate 前 8 字节
-- 接收端: 验证 HMAC, 序列号单调递增, seq > last_seq + 窗口
-- 发送端: 队列 > 3 帧时丢弃最旧帧, 只发最新
+- Key: `DTLS-SRTP export_keying_material("mediaservo-control")`
+- Algorithm: HMAC-SHA256, truncated to first 8 bytes
+- Receiver: verifies HMAC, sequence number strictly increasing, seq > last_seq + window
+- Sender: when queue > 3 frames, drops the oldest and sends only the newest
 
 ```rust
 pub fn sign_command(key: &[u8], seq: u32, cmd: &ControlCommand) -> Vec<u8>;
 pub fn verify_command(key: &[u8], data: &[u8]) -> Result<ControlCommand>;
 ```
 
-## 4. 紧急停止通道 (D117)
+## 4. Emergency Stop Channel (D117)
 
-独立于 DataChannel 的 UDP 紧急停止路径:
+A UDP emergency stop path independent of the DataChannel:
 
 ```rust
 pub trait EmergencyControl: Send {
@@ -75,28 +75,28 @@ pub trait EmergencyControl: Send {
 }
 ```
 
-- 协议: 纯 UDP, 不含 WebRTC 栈
-- 数据: 单字节 `0xFF` = 紧急停止
-- 目标延迟: <20ms
-- 车控器独立 listener, 不经过 Host 进程 (Phase 2)
+- Protocol: raw UDP, no WebRTC stack
+- Data: single byte `0xFF` = emergency stop
+- Target latency: <20ms
+- Standalone listener on the vehicle controller, bypassing the Host process (Phase 2)
 
-## 5. 错误处理
+## 5. Error Handling
 
-| 条件 | 分类 | 错误码 | 恢复 |
-|------|------|--------|------|
-| HMAC 验证失败 | Recoverable | 4002 | 丢弃指令, 记录告警 |
-| 序列号乱序 | Recoverable | 4002 | 丢弃旧 seq 指令 |
-| DataChannel 断连 | Recoverable | 1003 | 等待 WebRTC 恢复 |
-| 紧急停止 UDP 丢包 | Transient | - | 重复发送 3 次, 50ms 间隔 |
+| Condition | Category | Error Code | Recovery |
+|-----------|----------|------------|----------|
+| HMAC verification failure | Recoverable | 4002 | Drop the command, log a warning |
+| Out-of-order sequence number | Recoverable | 4002 | Drop commands with older seq |
+| DataChannel disconnect | Recoverable | 1003 | Wait for WebRTC recovery |
+| Emergency stop UDP packet loss | Transient | - | Resend 3 times at 50ms intervals |
 
-## 6. 测试计划
+## 6. Test Plan
 
-| 测试 | 类型 | 描述 |
-|------|------|------|
-| hmac_sign_verify | 单元 | 签名后验证通过, 篡改后验证失败 |
-| seq_replay_protection | 单元 | 旧 seq 指令被丢弃 |
-| control_latency | 集成 | 端到端控制延迟 <50ms |
-| queue_overflow_drop | 单元 | 队列 > 3 帧时丢弃最旧帧 |
-| emergency_stop_latency | 集成 | UDP 紧急停止 <20ms |
-| emergency_independence | 集成 | WebRTC 断开时 UDP 停止仍可用 |
-| keyboard_mouse_roundtrip | E2E | 键盘按下 → 发送 → 接收 → 事件注入 |
+| Test | Type | Description |
+|------|------|-------------|
+| hmac_sign_verify | Unit | Verification passes after signing, fails after tampering |
+| seq_replay_protection | Unit | Commands with old seq are dropped |
+| control_latency | Integration | End-to-end control latency <50ms |
+| queue_overflow_drop | Unit | Oldest frame dropped when queue > 3 frames |
+| emergency_stop_latency | Integration | UDP emergency stop <20ms |
+| emergency_independence | Integration | UDP stop still works when WebRTC is down |
+| keyboard_mouse_roundtrip | E2E | Key press → send → receive → event injection |

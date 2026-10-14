@@ -1,20 +1,20 @@
-# Conference SDK API 参考
+# Conference SDK API Reference
 
-## 1. 概述
+## 1. Overview
 
-Conference SDK 提供创建和管理视频会议的完整 API。通过 napi-rs 绑定暴露给 TypeScript/JavaScript，同时提供 Rust crate 原生接口。
+The Conference SDK provides a complete API for creating and managing video conferences. It is exposed to TypeScript/JavaScript via napi-rs bindings and also offers a native Rust crate interface.
 
-### 安装
+### Installation
 
 ```bash
-# npm (through 宿主平台)
+# npm (through the host platform)
 npm install @mediaservo/conference-sdk
 
-# Rust (through 第三方平台)
+# Rust (through third-party platforms)
 cargo add mediaservo-conference
 ```
 
-### 初始化
+### Initialization
 
 ```typescript
 import { ConferenceClient } from "@mediaservo/conference-sdk";
@@ -27,10 +27,10 @@ const client = new ConferenceClient({
 
 ## 2. ConferenceClient
 
-### 2.1 房间管理
+### 2.1 Room Management
 
 ```typescript
-// 创建房间
+// Create a room
 const room = await client.rooms.create({
   name: "Team Standup",
   maxParticipants: 16,
@@ -41,34 +41,34 @@ const room = await client.rooms.create({
 });
 // → Room { id, name, status, createdAt, ... }
 
-// 加入房间
+// Join a room
 const joinResult = await client.rooms.join(room.id);
 // → JoinResult { room, routerRtpCapabilities }
 
-// 离开房间
+// Leave a room
 await client.rooms.leave(room.id);
 
-// 结束房间
+// End a room
 await client.rooms.end(room.id);
 
-// 获取房间信息
+// Get room info
 const roomInfo = await client.rooms.get(room.id);
 
-// 列出房间
+// List rooms
 const rooms = await client.rooms.list({ status: "active" });
 ```
 
-### 2.2 媒体发布
+### 2.2 Media Publishing
 
 ```typescript
-// 创建发送 Transport
+// Create a send transport
 const sendTransport = await client.transports.create({
   roomId: room.id,
   direction: "send",
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
 });
 
-// 发布视频
+// Publish video
 const videoProducer = await sendTransport.produce({
   track: localVideoTrack,     // MediaStreamTrack
   encodings: [
@@ -80,71 +80,71 @@ const videoProducer = await sendTransport.produce({
 });
 // → Producer { id, kind, stats }
 
-// 发布音频
+// Publish audio
 const audioProducer = await sendTransport.produce({
   track: localAudioTrack,
 });
 
-// 暂停/恢复发布
+// Pause/resume publishing
 await videoProducer.pause();
 await videoProducer.resume();
 
-// 关闭发布
+// Close the publication
 await videoProducer.close();
 ```
 
-### 2.3 媒体订阅
+### 2.3 Media Subscription
 
 ```typescript
-// 创建接收 Transport
+// Create a recv transport
 const recvTransport = await client.transports.create({
   roomId: room.id,
   direction: "recv",
 });
 
-// 订阅特定音视频
+// Subscribe to specific audio/video
 const consumer = await recvTransport.consume({
-  producerId: videoProducer.id,  // 远程 participant 的 producer ID
+  producerId: videoProducer.id,  // A remote participant's producer ID
   rtpCapabilities: routerRtpCapabilities,
 });
 // → Consumer { id, track, kind, type (simulcast/svc), producerPaused }
 
-// 将 remote track 挂载到 <video> 元素
+// Attach the remote track to a <video> element
 videoElement.srcObject = new MediaStream([consumer.track]);
 
-// 切换编码层 (Simulcast)
+// Switch the encoding layer (Simulcast)
 await consumer.setPreferredLayers({ rid: "r1" });
 
-// 切换编码层 (SVC)
+// Switch the encoding layer (SVC)
 await consumer.setPreferredLayers({
   spatialLayer: 1,
   temporalLayer: 2,
 });
 
-// 暂停/恢复订阅
+// Pause/resume the subscription
 await consumer.pause();
 await consumer.resume();
 
-// 关闭订阅
+// Close the subscription
 await consumer.close();
 ```
 
-### 2.4 参与者管理
+### 2.4 Participant Management
 
 ```typescript
-// 获取参与者列表
+// Get the participant list
 const participants = await client.participants.list(room.id);
 
-// 静音参与者 (Host only)
+// Mute a participant (Host only)
 await client.participants.mute({ roomId: room.id, participantId: "id", kind: "audio" });
 
-// 取消静音
+// Unmute
 await client.participants.unmute({ roomId: room.id, participantId: "id", kind: "audio" });
 
-// 移除参与者
+// Remove a participant
 await client.participants.kick({ roomId: room.id, participantId: "id" });
 
-// 设置角色
+// Set a role
 await client.participants.setRole({
   roomId: room.id,
   participantId: "id",
@@ -152,62 +152,62 @@ await client.participants.setRole({
 });
 ```
 
-### 2.5 录制
+### 2.5 Recording
 
 ```typescript
-// 开始录制
+// Start recording
 const recording = await client.recording.start({
   roomId: room.id,
   mode: "individual",  // "individual" | "composite"
-  layout: "grid",      // composite 布局
+  layout: "grid",      // composite layout
 });
 // → RecordingStatus { id, startedAt, format }
 
-// 停止录制
+// Stop recording
 await client.recording.stop(room.id);
 
-// 查询状态
+// Query status
 const status = await client.recording.status(room.id);
 ```
 
-## 3. 事件监听
+## 3. Event Listening
 
 ```typescript
-// 参与者加入
+// Participant joined
 client.on("participant.joined", (event) => {
   console.log(`${event.participant.displayName} joined`);
 });
 
-// 参与者离开
+// Participant left
 client.on("participant.left", (event) => {
   console.log(`${event.participantId} left: ${event.reason}`);
 });
 
-// 新音轨加入 (自动订阅)
+// New track added (auto-subscribe)
 client.on("track.added", async (event) => {
   const consumer = await recvTransport.consume({
     producerId: event.track.producerId,
     rtpCapabilities: routerRtpCapabilities,
   });
-  // 挂载到 UI
+  // Attach to the UI
 });
 
-// 音轨移除
+// Track removed
 client.on("track.removed", (event) => {
-  // 清理 UI
+  // Clean up the UI
 });
 
-// 活跃发言人切换
+// Dominant speaker changed
 client.on("dominant.speaker.changed", (event) => {
-  // 高亮当前发言人
+  // Highlight the current speaker
 });
 
-// 连接状态
+// Connection state
 client.on("connection.state", (event) => {
   console.log(`State: ${event.state}`);
 });
 
-// 错误
+// Errors
 client.on("error", (event) => {
   console.error(`Error: ${event.code} - ${event.message}`);
 });
@@ -217,7 +217,7 @@ client.on("error", (event) => {
 
 ```rust
 // Crate: mediaservo-conference
-// 通过 napi-rs 绑定暴露给 Node.js，同时提供原生 Rust API
+// Exposed to Node.js via napi-rs bindings, plus a native Rust API
 
 use mediaservo_conference::{ConferenceClient, ConferenceConfig, Room};
 
@@ -242,30 +242,30 @@ async fn main() -> Result<()> {
 }
 ```
 
-## 5. 配置
+## 5. Configuration
 
 ```typescript
 interface ConferenceConfig {
-  // 必须
-  endpoint: string;           // 信令端点
-  token: string;              // 认证 Token
+  // Required
+  endpoint: string;           // Signaling endpoint
+  token: string;              // Auth token
 
-  // 可选
-  iceServers?: RTCIceServer[];   // ICE 服务器
-  videoCodec?: string;        // 默认视频编码
-  audioCodec?: string;        // 默认音频编码
+  // Optional
+  iceServers?: RTCIceServer[];   // ICE servers
+  videoCodec?: string;        // Default video codec
+  audioCodec?: string;        // Default audio codec
   simulcast?: boolean;        // Simulcast
   svc?: boolean;              // SVC
-  maxBitrate?: number;        // 最大码率 (kbps)
-  maxResolution?: string;     // 最大分辨率
+  maxBitrate?: number;        // Max bitrate (kbps)
+  maxResolution?: string;     // Max resolution
 
-  // 调试
+  // Debugging
   logLevel?: "error" | "warn" | "info" | "debug";
-  statsInterval?: number;     // 统计上报间隔 (ms)
+  statsInterval?: number;     // Stats reporting interval (ms)
 }
 ```
 
-## 6. 错误处理
+## 6. Error Handling
 
 ```typescript
 import { ConferenceError } from "@mediaservo/conference-sdk";
@@ -276,16 +276,16 @@ try {
   if (error instanceof ConferenceError) {
     switch (error.code) {
       case "ROOM_NOT_FOUND":
-        // 房间不存在
+        // Room does not exist
         break;
       case "ROOM_FULL":
-        // 房间已满
+        // Room is full
         break;
       case "FORBIDDEN":
-        // 无权限
+        // No permission
         break;
       default:
-        // 其他错误
+        // Other errors
     }
   }
 }

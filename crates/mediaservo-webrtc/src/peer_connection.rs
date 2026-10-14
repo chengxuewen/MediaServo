@@ -83,7 +83,7 @@ pub struct RTCIceCandidate {
     pub sdp_mline_index: Option<u16>,
 }
 
-/// W3C RTCIceCandidateError — onicecandidateerror 事件参数 (v2)
+/// W3C RTCIceCandidateError -- the onicecandidateerror event payload (v2)
 #[derive(Debug, Clone, Default)]
 pub struct RTCIceCandidateError {
     pub error_code: i32,
@@ -209,7 +209,7 @@ impl crate::traits::PeerConnectionApi for RTCPeerConnection {
         }));
     }
 
-    // ── v2: W3C API 实现 ──
+    // -- v2: W3C API implementation --
 
     fn get_transceivers(&self) -> Result<Vec<crate::rtp::RTCRtpTransceiver>, RTCError> {
         self.backend.get_transceivers()
@@ -307,21 +307,21 @@ impl crate::traits::PeerConnectionApi for RTCPeerConnection {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        // v2: backend 无 negotiation callback 接口，暂空实现（可后续接 on_renegotiation_needed）
+        // v2: the backend has no negotiation callback interface; empty for now (on_renegotiation_needed could be wired later)
     }
 
     fn on_ice_gathering_state_change<F>(&self, _callback: F)
     where
         F: Fn(RTCIceGatheringState) + Send + Sync + 'static,
     {
-        // v2: webrtc-sys observer 有 on_ice_gathering_change，可后续暴露
+        // v2: the webrtc-sys observer has on_ice_gathering_change; can be exposed later
     }
 
     fn on_ice_candidate_error<F>(&self, _callback: F)
     where
         F: Fn(RTCIceCandidateError) + Send + Sync + 'static,
     {
-        // v2: webrtc-sys observer 有 on_ice_candidate_error，可后续暴露
+        // v2: the webrtc-sys observer has on_ice_candidate_error; can be exposed later
     }
 }
 
@@ -349,8 +349,8 @@ impl RTCPeerConnection {
                 return TrackSender { id: track_id.to_string(), kind, audio_config: None, backend };
             }
         }
-        // H2: 音频 track（webrtc-sys）— AudioTrackSource + AudioTrack，stage 供
-        // add_transceiver_with_track 使用；write_frame 推 PCM i16（libwebrtc 内部 opus 编码）。
+        // H2: the audio track (webrtc-sys) -- AudioTrackSource + AudioTrack, staged for
+        // add_transceiver_with_track; write_frame pushes PCM i16 (libwebrtc encodes opus internally).
         #[cfg(feature = "backend-webrtc-sys")]
         if kind == TrackKind::Audio {
             let (track_backend, media_track) = self.factory.create_audio_track();
@@ -397,7 +397,7 @@ impl RTCPeerConnection {
         self.backend.set_on_peer_connection_state_change(Box::new(callback));
     }
 
-    /// Register callback for trickled local ICE candidates (P2P 必需).
+    /// Register callback for trickled local ICE candidates (required by P2P).
     /// Available on all backends — non cfg-gated.
     pub fn on_ice_candidate<F>(&self, callback: F)
     where
@@ -406,8 +406,8 @@ impl RTCPeerConnection {
         self.backend.set_on_ice_candidate(Box::new(callback));
     }
 
-    /// v2: 通用 incoming data channel 回调（三后端）。
-    /// 替代 webrtc-rs cfg 版 on_data_channel（现在 webrtc-sys 也支持）。
+    /// v2: the generic incoming data channel callback (all three backends).
+    /// Replaces the webrtc-rs-cfg on_data_channel (now webrtc-sys supports it too).
     pub fn on_data_channel<F>(&self, callback: F)
     where
         F: Fn(RTCDataChannel) + Send + Sync + 'static,
@@ -420,7 +420,7 @@ impl RTCPeerConnection {
 
 #[cfg(feature = "backend-webrtc-rs")]
 impl RTCPeerConnection {
-    /// webrtc-rs 原生候选回调 (P2P 路径) — 与通用 trickle 版 (on_ice_candidate) 区分命名。
+    /// The webrtc-rs native candidate callback (the P2P path) -- named distinctly from the generic trickle variant (on_ice_candidate).
     pub fn on_ice_candidate_native(
         &self,
         f: Box<

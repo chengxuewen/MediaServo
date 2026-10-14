@@ -1,11 +1,11 @@
-/* imgui_shell 纹理层 — I420 帧 → SDL texture 的跨线程搬运件（W3b）。
+/* imgui_shell texture layer — the cross-thread carrier from I420 frames to an SDL texture (W3b).
  *
- * 线程模型（对齐 SDK frame 回调「仅回调内有效」合同）：
- *   泵线程 → FrameStaging::push()   （latest-only：新帧覆盖未消费的旧帧=天然丢帧不死等）
- *   主线程 → pop() → VideoTexture::update() → texture_id() 给 ImGui::Image
+ * Threading model (aligned with the SDK frame callback's "valid only inside the callback" contract):
+ *   pump thread → FrameStaging::push()   (latest-only: a new frame overwrites an unconsumed old one = natural frame dropping, never blocking)
+ *   main thread → pop() → VideoTexture::update() → texture_id() for ImGui::Image
  *
- * 仅 SDL_Renderer 路径（imgui_impl_sdlrenderer3 以 SDL_Texture* 作 ImTextureID）。
- * 头文件刻意不依赖 SDL 类型（void* 句柄），include 顺序自由。
+ * SDL_Renderer path only (imgui_impl_sdlrenderer3 uses SDL_Texture* as ImTextureID).
+ * The header deliberately does not depend on SDL types (void* handles), so include order is free.
  */
 #ifndef MEDIASERVO_IMGUI_SHELL_TEXTURE_HPP
 #define MEDIASERVO_IMGUI_SHELL_TEXTURE_HPP
@@ -17,12 +17,12 @@
 
 namespace imgui_shell {
 
-/// 泵线程→主线程的最新帧槽（一帧拷贝上限，无队列无背压）。
+/// The latest-frame slot from the pump thread to the main thread (bounded at one frame copy; no queue, no backpressure).
 class FrameStaging {
 public:
     void push(const void* i420, size_t len, uint32_t w, uint32_t h);
 
-    /// 取走未消费帧（无新帧 = false）。out 复用容量（每帧零稳态分配）。
+    /// Take the unconsumed frame (false = no new frame). Reuses out's capacity (zero steady-state allocation per frame).
     bool pop(std::vector<uint8_t>& out, uint32_t* w, uint32_t* h);
 
     uint64_t pushed() const { return pushed_.load(std::memory_order_relaxed); }
@@ -35,7 +35,7 @@ private:
     std::atomic<uint64_t> pushed_{0};
 };
 
-/// 主线程视频纹理工位（update 尺寸变化即重建；黑帧不画只报 id=0）。
+/// The main-thread video texture station (update rebuilds on size change; black frames are not drawn — it just reports id=0).
 class VideoTexture {
 public:
     VideoTexture() = default;
@@ -43,11 +43,11 @@ public:
     VideoTexture(const VideoTexture&) = delete;
     VideoTexture& operator=(const VideoTexture&) = delete;
 
-    /// renderer = 主线程 SDL_Renderer*（App::sdl_renderer()）。
-    /// i420 = 平面连续 Y(w*h)+U(w*h/4)+V(w*h/4)（SDL IYUV 布局零拷贝直喂）。
+    /// renderer = the main-thread SDL_Renderer* (App::sdl_renderer()).
+    /// i420 = contiguous planes Y(w*h)+U(w*h/4)+V(w*h/4) (fed directly in the SDL IYUV layout, zero copy).
     bool update(void* renderer, const void* i420, size_t len, uint32_t w, uint32_t h);
 
-    /// ImGui::Image 用的纹理句柄（SDL_Texture*；未建立 = nullptr）。
+    /// The texture handle for ImGui::Image (SDL_Texture*; nullptr until established).
     void* texture_id() const { return tex_; }
     uint32_t width() const { return w_; }
     uint32_t height() const { return h_; }
@@ -56,7 +56,7 @@ public:
 private:
     void destroy();
 
-    void* tex_ = nullptr; // SDL_Texture*（renderer 由主线程 SDL_GetRenderer 现取）
+    void* tex_ = nullptr; // SDL_Texture* (the renderer is fetched live on the main thread via SDL_GetRenderer)
     uint32_t w_ = 0, h_ = 0;
     uint64_t frames_ = 0;
 };

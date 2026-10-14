@@ -20,7 +20,7 @@ bool FrameStaging::pop(std::vector<uint8_t>& out, uint32_t* w, uint32_t* h) {
     std::lock_guard<std::mutex> lk(mu_);
     if (!ready_) return false;
     ready_ = false;
-    out.swap(slot_); // 主线程缓冲复用（swap 后 slot_ 持旧容量，下次 push 零分配）
+    out.swap(slot_); // main-thread buffer reuse (after the swap slot_ keeps the old capacity; the next push allocates nothing)
     if (w) *w = w_;
     if (h) *h = h_;
     return true;

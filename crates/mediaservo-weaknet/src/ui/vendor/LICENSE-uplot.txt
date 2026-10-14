@@ -22,4 +22,4 @@ THE SOFTWARE.
 --- vendored note (2026-09-09, weaknet T7) ---
 File: uPlot.iife.min.js + uPlot.min.css from https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/
 uPlot is MIT (text above). Upstream max release = 1.6.32 (plan text said "v3"; uPlot has no 3.x line).
-docs 登记 lands T11 per W-plan.
+docs registration lands T11 per W-plan.

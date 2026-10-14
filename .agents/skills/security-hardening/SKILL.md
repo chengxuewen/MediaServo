@@ -3,45 +3,45 @@ name: security-hardening
 description: "MediaServo security audit and hardening. OWASP Top 10 checks, hardcoded secrets/ports/URLs scan (merged review-hardcode), PSK/JWT auth flow review, WebSocket security, secrets management (PIT-10 lesson), mediasoup SFU transport security. Use before release, after auth changes, or when onboarding new PSK keys. Also accessible via /review-hardcode."
 ---
 
-# security-hardening — 安全加固
+# security-hardening — Security Hardening
 
 > OWASP Top 10 + PSK/JWT auth + WebSocket security + secrets management.
-> 每一条规则都有检查命令。每个检查都必须通过。
+> Every rule has a check command. Every check must pass.
 
-## 触发条件
+## Trigger Conditions
 
-- 发布前（release candidate）
-- Auth 模块修改后
-- 新增 WebSocket endpoint
-- 新增 PSK key / JWT secret
-- 用户说 "security review" / "安全审计"
-- 新增 FFI 边界（C/ObjC bridge）
+- before a release (release candidate)
+- after auth-module changes
+- new WebSocket endpoint
+- new PSK key / JWT secret
+- user says "security review" / "安全审计" (security audit) <!-- c49:trigger -->
+- new FFI boundary (C/ObjC bridge)
 
-## Mode A: 审计模式 (audit)
+## Mode A: Audit Mode
 
-完整安全审计，手动触发。运行所有 6 个 Phase，生成审计报告。
+Full security audit, manually triggered. Runs all 6 Phases and generates an audit report.
 
 ## Mode B: Guard-while-building (PreToolUse)
 
-> 代码变更时自动触发，阻断不安全提交。轻量级，目标 <5s。
-> 参考: JoeyPatricio/security-hardening-skill — PreToolUse guard pattern
+> Auto-triggered on code changes, blocking insecure commits. Lightweight, target <5s.
+> Reference: JoeyPatricio/security-hardening-skill — PreToolUse guard pattern
 
-### B1: cargo-audit 快速扫描
+### B1: cargo-audit Quick Scan
 
 ```bash
-# 仅检查新出现的漏洞（非完整审计）
+# check only newly-appeared vulnerabilities (not a full audit)
 cargo audit --quiet --deny unsound 2>&1 | head -20
 ```
 
-| 检查项 | 命令 | 通过标准 |
+| Check | Command | Pass criteria |
 |--------|------|---------|
-| 已知漏洞 | `cargo audit --quiet` | 0 RUSTSEC warnings |
-| 拒绝 unsound | `cargo audit --deny unsound` | exit 0 |
+| known vulnerabilities | `cargo audit --quiet` | 0 RUSTSEC warnings |
+| deny unsound | `cargo audit --deny unsound` | exit 0 |
 
-### B2: unsafe 块扫描
+### B2: Unsafe Block Scan
 
 ```bash
-# 每个 unsafe 块必须有 // SAFETY: 注释
+# every unsafe block must carry a // SAFETY: comment
 UNSAFE_NO_COMMENT=$(grep -rn 'unsafe' crates/ --include='*.rs' | grep -v '// SAFETY:' || true)
 if [ -n "$UNSAFE_NO_COMMENT" ]; then
   echo "ERROR: unsafe block without SAFETY comment:"
@@ -50,37 +50,37 @@ if [ -n "$UNSAFE_NO_COMMENT" ]; then
 fi
 ```
 
-### B3: gitleaks 密钥检测
+### B3: gitleaks Secret Detection
 
 ```bash
-# 安装 (one-time)
+# install (one-time)
 # brew install gitleaks  # macOS
 # or: go install github.com/gitleaks/gitleaks/v8@latest
 
-# PreToolUse 检查：扫描暂存区变更
+# PreToolUse check: scan staged changes
 gitleaks detect --source . --no-git --redact --verbose 2>&1 | head -30
 ```
 
-### B4: 硬编码快速扫描 (lightweight)
+### B4: Hardcode Quick Scan (lightweight)
 
 ```bash
-# 仅扫描变更文件（非全仓库）
+# scan only changed files (not the whole repo)
 git diff --cached --name-only -- '*.rs' | xargs -I{} grep -n 'token.*=\|password.*=\|api[_-]key' {} 2>/dev/null || true
 ```
 
-### Guard 执行顺序
+### Guard Execution Order
 
 ```text
 PreToolUse (on edit .rs/.toml):
-  1. unsafe 块注释检查  (<0.5s)
-  2. 硬编码快速扫描     (<1s)
-  3. gitleaks 检测     (<2s)
-  4. cargo audit       (<3s)
+  1. unsafe-block comment check  (<0.5s)
+  2. hardcode quick scan         (<1s)
+  3. gitleaks detect             (<2s)
+  4. cargo audit                 (<3s)
 
-任一失败 → 阻断操作
+any failure → block the operation
 ```
 
-### gitleaks 配置 (.gitleaks.toml)
+### gitleaks Config (.gitleaks.toml)
 
 ```toml
 # .gitleaks.toml — project-level config
@@ -102,20 +102,20 @@ description = "MediaServo PSK keys"
 regex = '''(?i)(psk|pre_shared_key)\s*=\s*["'][A-Za-z0-9+/]{32,}["']'''
 ```
 
-### gitleaks pre-commit hook (.git/hooks/pre-commit)
+### gitleaks pre-commit Hook (.git/hooks/pre-commit)
 
-> 参考 D201: 现有 pre-commit hook 运行 `cargo fmt --check` + `cargo clippy -- -D warnings`。
-> 以下为 gitleaks 集成到同一 hook 的扩展：
+> Reference D201: the existing pre-commit hook runs `cargo fmt --check` + `cargo clippy -- -D warnings`.
+> Below is the extension integrating gitleaks into the same hook:
 
 ```bash
 #!/usr/bin/env bash
-# .git/hooks/pre-commit — Rust 质量门禁 + gitleaks 密钥检测
+# .git/hooks/pre-commit — Rust quality gate + gitleaks secret detection
 set -euo pipefail
 
 STAGED_RS=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs' || true)
 STAGED_TOML=$(git diff --cached --name-only --diff-filter=ACM -- '*.toml' || true)
 
-# ---- gitleaks 密钥检测 (全仓库，仅当 .rs/.toml 变更时) ----
+# ---- gitleaks secret detection (whole repo, only when .rs/.toml changed) ----
 if [ -n "$STAGED_RS" ] || [ -n "$STAGED_TOML" ]; then
   if command -v gitleaks &>/dev/null; then
     echo "→ gitleaks: scanning staged changes..."
@@ -131,7 +131,7 @@ if [ -n "$STAGED_RS" ] || [ -n "$STAGED_TOML" ]; then
   fi
 fi
 
-# ---- Rust 质量门禁 (仅 .rs 变更时) ----
+# ---- Rust quality gate (only when .rs changed) ----
 if [ -n "$STAGED_RS" ]; then
   echo "→ cargo fmt: checking..."
   cargo fmt --check
@@ -142,117 +142,117 @@ fi
 echo "✅ pre-commit checks passed"
 ```
 
-### gitleaks 安装
+### gitleaks Installation
 
-| 平台 | 命令 |
+| Platform | Command |
 |------|------|
 | macOS | `brew install gitleaks` |
-| Linux | `go install github.com/gitleaks/gitleaks/v8@latest` 或下载 [release binary](https://github.com/gitleaks/gitleaks/releases) |
+| Linux | `go install github.com/gitleaks/gitleaks/v8@latest` or download a [release binary](https://github.com/gitleaks/gitleaks/releases) |
 | Docker | `docker run -v $(pwd):/path zricethezav/gitleaks detect --source /path` |
 
-## Phase 1: 密钥扫描 (PIT-10 enforced)
+## Phase 1: Secrets Scan (PIT-10 enforced)
 
 ```bash
-# 运行硬编码扫描
+# run the hardcode scan
 ./scripts/scan-hardcode.sh
 
-# 手动补充检查
+# supplementary manual checks
 grep -rn 'api[_-]key\|api[_-]secret\|token.*=\|password.*="' crates/ --include='*.rs' | grep -v '//.*TODO' | grep -v 'env::var'
 grep -rn 'sk-\|pk-\|AKID\|SecretId' crates/ --include='*.rs'
 grep -rn 'apiKey\|api_key\|API_KEY' .opencode/ --include='*.json' --include='*.jsonc'
 ```
 
-### PIT-10 规则
+### PIT-10 Rule
 
-> 全局配置中的硬编码 API Key 存在泄露风险。使用环境变量插值：`"apiKey": "{env:NEW_API_KEY}"`。
+> Hardcoded API keys in global config leak. Use environment-variable interpolation: `"apiKey": "{env:NEW_API_KEY}"`.
 
-| 检查项 | 命令 | 通过标准 |
+| Check | Command | Pass criteria |
 |--------|------|---------|
-| 无硬编码密钥 | `scripts/scan-hardcode.sh` | 0 CRITICAL |
-| env var 插值 | `grep -rn '{env:' .opencode/` | 所有 apiKey 使用插值 |
-| .gitignore 覆盖 | `grep '\.env' .gitignore` | 包含 .env, .env.local |
-| 示例文件占位 | `grep 'EXAMPLE_KEY\|your-key-here' .env.example` | 无真实密钥 |
+| no hardcoded secrets | `scripts/scan-hardcode.sh` | 0 CRITICAL |
+| env-var interpolation | `grep -rn '{env:' .opencode/` | every apiKey uses interpolation |
+| .gitignore coverage | `grep '\.env' .gitignore` | includes .env, .env.local |
+| example-file placeholders | `grep 'EXAMPLE_KEY\|your-key-here' .env.example` | no real keys |
 
-### 硬编码值严重性（原 review-hardcode）
+### Hardcoded-Value Severity (formerly review-hardcode)
 
-本技能吸收了 `review-hardcode` 的完整扫描能力。`/review-hardcode` 命令指向此处。
+This skill absorbed the full scanning capability of `review-hardcode`. The `/review-hardcode` command points here.
 
-| 模式 | 严重性 | 说明 |
+| Pattern | Severity | Notes |
 |------|--------|------|
-| `token="..."` / `password="..."` / `secret="..."` / `api_key="..."` | 🔴 CRITICAL | 硬编码密钥/令牌 |
-| `:9800` 等硬编码端口 | 🟠 HIGH | 生产端口不应硬编码 |
-| `localhost:PORT` / `127.0.0.1:PORT` | 🟠 HIGH | 地址+端口应配置化 |
-| `http://IP` 硬编码 IP URL | 🟡 MEDIUM | 应使用配置或 DNS |
+| `token="..."` / `password="..."` / `secret="..."` / `api_key="..."` | 🔴 CRITICAL | hardcoded secrets/tokens |
+| hardcoded ports like `:9800` | 🟠 HIGH | production ports must not be hardcoded |
+| `localhost:PORT` / `127.0.0.1:PORT` | 🟠 HIGH | address+port should come from config |
+| `http://IP` hardcoded-IP URLs | 🟡 MEDIUM | use config or DNS instead |
 
-### 排除规则
+### Exclusion Rules
 
-扫描自动排除: `target/`, `node_modules/`, `.git/`, `.pixi-cache/`。
-标记 `TODO:` 的硬编码值（允许临时存在）应手动审核后决定是否忽略。
+The scan auto-excludes: `target/`, `node_modules/`, `.git/`, `.pixi-cache/`.
+Hardcoded values marked with `TODO:` (tolerated temporarily) require manual review to decide whether to ignore.
 
-## Phase 2: Auth 流审计
+## Phase 2: Auth Flow Audit
 
-### PSK 认证 (Host↔Server)
+### PSK Authentication (Host↔Server)
 
 ```rust
 // MediaServo PSK flow:
 // Host ──[PSK in WS header]──> Server ──[validate]──> Session token
 
-// 检查点:
-// 1. PSK 是否通过环境变量注入？(不是 config file 明文)
-// 2. PSK 是否 ≥32 字节？
-// 3. Server 是否限速 PSK 验证？(防暴力破解)
-// 4. Session token 是否有过期时间？
-// 5. PSK 错误响应是否模糊？(不泄露"用户存在"或"密钥接近")
+// checkpoints:
+// 1. Is the PSK injected via environment variable? (not plaintext in a config file)
+// 2. Is the PSK >= 32 bytes?
+// 3. Does the server rate-limit PSK validation? (brute-force protection)
+// 4. Does the session token expire?
+// 5. Are PSK-error responses vague? (never leak "user exists" or "key is close")
 ```
 
 ```bash
-# 检查命令
+# check commands
 grep -rn 'pre_shared_key\|psk' crates/mediaservo-server/src/ --include='*.rs'
 grep -rn 'env::var.*PSK\|env::var.*SECRET' crates/ --include='*.rs'
 grep -rn 'session.*ttl\|token.*expir\|jwt.*exp' crates/mediaservo-common/src/auth/ --include='*.rs'
 grep -rn 'rate.limit\|429\|too.many' crates/mediaservo-server/src/ --include='*.rs'
 ```
 
-### JWT 认证 (Admin UI)
+### JWT Authentication (Admin UI)
 
 ```bash
-# 检查命令
-# 1. JWT secret 是否 ≥256 bit？
+# check commands
+# 1. is the JWT secret >= 256 bit?
 grep -rn 'jwt.*secret\|JWT_SECRET' crates/ --include='*.rs' | grep -v env::var
 
-# 2. 确认算法是 HS256 或 RS256 (不是 none)
+# 2. confirm the algorithm is HS256 or RS256 (never none)
 grep -rn 'Algorithm\|alg.*HS\|alg.*RS' crates/mediaservo-common/src/auth/ --include='*.rs'
 
-# 3. 确认有 exp 声明
+# 3. confirm an exp claim exists
 grep -rn 'exp\|expir' crates/mediaservo-common/src/auth/ --include='*.rs'
 
-# 4. 确认有 refresh token 轮换
+# 4. confirm refresh-token rotation exists
 grep -rn 'refresh_token\|refresh' crates/mediaservo-server/src/ --include='*.rs'
 ```
 
-## Phase 3: WebSocket 安全
+## Phase 3: WebSocket Security
 
 ```bash
-# 检查命令
-# 1. 消息大小限制 (防 OOM)
+# check commands
+# 1. message-size limit (OOM protection)
 grep -rn 'max.*message\|max.*frame\|message.*size' crates/mediaservo-server/src/ --include='*.rs'
 
-# 2. 连接速率限制
+# 2. connection rate limiting
 grep -rn 'connection.*limit\|max_connections\|concurrent' crates/mediaservo-server/src/ --include='*.rs'
 
-# 3. Origin 验证
+# 3. Origin validation
 grep -rn 'origin\|allowed_origin\|verify_origin' crates/mediaservo-server/src/ --include='*.rs'
 
-# 4. TLS (生产环境)
+# 4. TLS (production)
 grep -rn 'wss://\|tls\|ssl_config' crates/mediaservo-server/src/ --include='*.rs'
 ```
 
-### 消息注入防护
+### Message Injection Defense
 
 ```rust
-// 所有 WS 消息反序列化必须使用 serde 严格模式
-// 禁止: serde_json::from_str(&raw) — 未验证额外字段
-// 正确: serde_json::from_str::<StrictSchema>(&raw) 或 deny_unknown_fields
+// all WS message deserialization must use serde strict mode
+// WRONG: serde_json::from_str(&raw) — extra fields unvalidated
+// CORRECT: serde_json::from_str::<StrictSchema>(&raw) or deny_unknown_fields
 ```
 
 ```bash
@@ -260,106 +260,106 @@ grep -rn '#\[serde(deny_unknown_fields)\|unknown_fields\|additional_properties' 
 grep -rn 'serde_json::from_slice\|serde_json::from_str' crates/mediaservo-server/src/ --include='*.rs' --include='*.rs'
 ```
 
-## Phase 4: mediasoup SFU 安全
+## Phase 4: mediasoup SFU Security
 
 ```bash
-# 检查命令
-# 1. RTP 端口范围是否受控 (非 0-65535)
+# check commands
+# 1. is the RTP port range bounded (not 0-65535)?
 grep -rn 'rtc_min_port\|rtc_max_port\|rtp_port' crates/mediaservo-server/src/ --include='*.rs'
 
-# 2. WebRTC transport 是否需要 auth
+# 2. do WebRTC transports require auth?
 grep -rn 'web_rtc_server\|webRtcTransport\|transport.*auth' crates/mediaservo-server/src/ --include='*.rs'
 
-# 3. Room 创建是否需要权限
+# 3. does room creation require permission?
 grep -rn 'create_room\|router.*create' crates/mediaservo-server/src/sfu/ --include='*.rs'
 
-# 4. Producer/Consumer 权限隔离
+# 4. producer/consumer permission isolation
 grep -rn 'peer_id\|producer.*peer\|consumer.*peer' crates/mediaservo-server/src/sfu/ --include='*.rs'
 ```
 
-## Phase 5: 依赖审计
+## Phase 5: Dependency Audit
 
 ```bash
-# 运行 cargo-deny 检查已知漏洞
+# run cargo-deny for known advisories
 cargo deny check advisories
 
-# 运行 cargo-audit
+# run cargo-audit
 cargo audit
 
-# 检查 unsafe 使用
+# check unsafe usage
 grep -rn 'unsafe' crates/ --include='*.rs' | grep -v '// SAFETY:'
-# 规则: 每个 unsafe 块必须有 // SAFETY: 注释说明为何安全
+# rule: every unsafe block must carry a // SAFETY: comment explaining why it is sound
 ```
 
-## Phase 6: Admin UI 安全
+## Phase 6: Admin UI Security
 
 ```bash
-# 检查命令
-# 1. Dashboard 是否要求认证
+# check commands
+# 1. does the Dashboard require authentication?
 grep -rn 'auth\|login\|redirect.*login' crates/mediaservo-server/src/admin/ --include='*.rs'
 
-# 2. 是否有 CSRF 防护
+# 2. is there CSRF protection?
 grep -rn 'csrf\|xsrf\|same_site' crates/mediaservo-server/src/ --include='*.rs'
 
-# 3. CORS 是否严格
+# 3. is CORS strict?
 grep -rn 'access-control\|allow_origin\|cors' crates/mediaservo-server/src/ --include='*.rs'
 
 # 4. Content Security Policy
 grep -rn 'content-security\|CSP\|frame-ancestors' crates/mediaservo-server/src/admin/ --include='*.rs'
 ```
 
-## 安全清单 (OWASP Top 10 aligned)
+## Security Checklist (OWASP Top 10 aligned)
 
-| # | 检查项 | MediaServo 对应 | 命令 | 必须 |
+| # | Check | MediaServo counterpart | Command | Required |
 |---|--------|-------------|------|:---:|
-| A01 | 访问控制失效 | Auth trait 实现完整 | `grep -rn 'TODO\|FIXME' crates/*/src/auth/` | ✅ |
-| A02 | 加密失败 | PSK ≥32B, TLS wss:// | `grep -rn 'wss://' crates/` (生产检查) | ✅ |
-| A03 | 注入 | WS 消息 strict deser | `grep -rn 'deny_unknown' crates/` | ✅ |
-| A04 | 不安全设计 | 速率限制 + 超时 | `grep -rn 'rate.limit\|timeout' crates/` | ✅ |
-| A05 | 安全配置错误 | 无 debug 模式生产 | `grep -rn 'debug_assert\|cfg(debug)' crates/` | ✅ |
-| A06 | 脆弱组件 | cargo-audit 通过 | `cargo audit` | ✅ |
-| A07 | 认证失败 | PSK + JWT 双模式 | Phase 2 全部检查 | ✅ |
-| A08 | 软件数据完整性 | FlatBuffers 验证 | (Phase 2+) | ✅ |
-| A09 | 日志监控失败 | 审计日志 | `grep -rn 'audit\|security.log' crates/` | ⚠️ |
-| A10 | SSRF | 无服务端 HTTP 拉取 | `grep -rn 'reqwest\|hyper::Client' crates/mediaservo-server/` | ✅ |
+| A01 | broken access control | Auth trait impls complete | `grep -rn 'TODO\|FIXME' crates/*/src/auth/` | ✅ |
+| A02 | cryptographic failures | PSK >=32B, TLS wss:// | `grep -rn 'wss://' crates/` (production check) | ✅ |
+| A03 | injection | WS messages strict deserialization | `grep -rn 'deny_unknown' crates/` | ✅ |
+| A04 | insecure design | rate limiting + timeouts | `grep -rn 'rate.limit\|timeout' crates/` | ✅ |
+| A05 | misconfiguration | no debug mode in production | `grep -rn 'debug_assert\|cfg(debug)' crates/` | ✅ |
+| A06 | vulnerable components | cargo-audit passes | `cargo audit` | ✅ |
+| A07 | authentication failures | PSK + JWT dual mode | all Phase 2 checks | ✅ |
+| A08 | software/data integrity | FlatBuffers verification | (Phase 2+) | ✅ |
+| A09 | logging/monitoring failure | audit log | `grep -rn 'audit\|security.log' crates/` | ⚠️ |
+| A10 | SSRF | no server-side HTTP fetches | `grep -rn 'reqwest\|hyper::Client' crates/mediaservo-server/` | ✅ |
 
-## 报告格式
+## Report Format
 
 ```
-## 安全审计报告 — [日期]
+## Security Audit Report — [date]
 
-### Phase 1: 密钥扫描
-✅ 扫描通过: 0 CRITICAL, 0 HIGH, 0 MEDIUM
+### Phase 1: Secrets Scan
+✅ scan passed: 0 CRITICAL, 0 HIGH, 0 MEDIUM
 
-### Phase 2: Auth 流
-✅ PSK 来自环境变量 (OMSP_PSK)
-✅ PSK 长度: 64 字节
-⚠️ Session TTL: 24h (建议 2h)
-❌ 无速率限制 (P0)
+### Phase 2: Auth Flow
+✅ PSK comes from env var (OMSP_PSK)
+✅ PSK length: 64 bytes
+⚠️ Session TTL: 24h (recommend 2h)
+❌ no rate limiting (P0)
 
 ### Phase 3: WebSocket
-✅ 消息大小限制: 1MB
-❌ 无 Origin 验证 (可被 CSWSH 攻击)
-⚠️ TLS 仅 Docker 环境启用
+✅ message size limit: 1MB
+❌ no Origin validation (CSWSH-attackable)
+⚠️ TLS enabled only in Docker environments
 
 ### Phase 4: mediasoup
-✅ RTP 端口: 40000-40100
-✅ Room 需 auth token
-⚠️ Producer 无带宽限制
+✅ RTP ports: 40000-40100
+✅ Room requires auth token
+⚠️ Producer has no bandwidth cap
 
-### Phase 5: 依赖
+### Phase 5: Dependencies
 ✅ cargo-audit: 0 vulnerabilities
 ✅ cargo-deny: 0 unlicensed
 
-### 总结
+### Summary
 CRITICAL: 0 | HIGH: 1 | MEDIUM: 2
-修复建议: [按严重性排序]
+Fix plan: [sorted by severity]
 ```
 
-## 禁止
+## Forbidden
 
-- 跳过 PIT-10 反模式：决不允许硬编码密钥
-- 静默吞错误：auth 失败必须日志但不泄露密钥
-- 忽略 cargo-audit 警告：任何 RUSTSEC 必须有决策记录
-- 生产环境使用 debug 配置：debug_assert! 在 release 中不执行
-- HTTP 明文 WS：生产必须 wss:// 或受控内网
+- skipping the PIT-10 anti-pattern: hardcoded keys are never acceptable
+- silently swallowing errors: auth failures must be logged but must never leak the secret
+- ignoring cargo-audit warnings: every RUSTSEC advisory requires a decision record
+- using debug configuration in production: `debug_assert!` doesn't execute in release builds
+- plaintext HTTP WebSockets: production must use `wss://` or a controlled internal network

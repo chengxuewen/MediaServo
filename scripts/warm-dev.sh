@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# warm-dev.sh — 后台预热 Docker dev 环境（早晨跑一次，全天零等待）
-# D208 构建优化: 预热 dev 镜像层 + cargo-cache 卷
+# warm-dev.sh — pre-warm the Docker dev environment in the background (run once in the morning, zero waits all day)
+# D208 build optimization: warm the dev image layers + cargo-cache volume
 # Usage: scripts/warm-dev.sh
-# 说明: 预烘焙镜像落地后此脚本退役（届时 docker compose up 直接 pull）
+# Note: retired once pre-baked images land (then docker compose up just pulls)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -10,11 +10,11 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 
 log() { echo "[warm-dev] $*"; }
 
-# 1. 构建 dev 镜像（层缓存命中时 ~1-2 min；Cargo.lock 变更日全量 15-30 min）
+# 1. Build the dev image (~1-2 min on layer-cache hits; full 15-30 min on Cargo.lock-change days)
 log "Building dev image..."
 docker compose -f "$PROJECT_ROOT/docker-compose.dev.yml" build server
 
-# 2. 预热 target 卷：编译一次 server 依赖（首次 15-28 min，之后秒级增量）
+# 2. Warm the target volume: compile server deps once (15-28 min first time, seconds-long increments after)
 log "Warming cargo-cache volume (first run compiles deps)..."
 docker compose -f "$PROJECT_ROOT/docker-compose.dev.yml" run --rm server \
     cargo check --bin mediaservo-server --features sfu-mediasoup,admin-dashboard

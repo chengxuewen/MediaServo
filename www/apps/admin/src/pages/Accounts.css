@@ -12,7 +12,7 @@
 .account-col-actions { display: flex; gap: 0.5rem; justify-content: flex-end; flex: 1; }
 .account-vehicles { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* 角色徽标 — Design System token：viewer 灰 / operator 主蓝 / admin 红 / dispatcher 绿 */
+/* Role badges — Design System tokens: viewer gray / operator primary blue / admin red / dispatcher green */
 .role-badge { display: inline-block; font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
 .role-viewer { background: #f0f0f0; color: #666; }
 .role-operator { background: #eef1ff; color: #4361ee; }

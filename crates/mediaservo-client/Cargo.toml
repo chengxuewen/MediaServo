@@ -1,8 +1,8 @@
 [package]
 name = "mediaservo-client"
-version = "0.1.1"  # 交付面独立版本源（F12/N1——内部 crate 仍继承 workspace）
+version = "0.1.1"  # the delivery-surface independent version source (F12/N1 -- internal crates still inherit the workspace)
 edition = "2024"
-description = "MediaServo Client SDK v2 — 舱端/监控侧最小消费与控制库（SFU consume + ControlEnvelope 控制 DC，登录 JWT）"
+description = "MediaServo Client SDK v2 -- the cockpit/monitoring-side minimal consumption and control library (SFU consume + ControlEnvelope control DC, login JWT)"
 license = "Apache-2.0"
 
 [lib]
@@ -11,9 +11,9 @@ path = "src/lib.rs"
 
 [dependencies]
 mediaservo-common = { path = "../mediaservo-common" }
-# 信令面单一真源：WS/PSK/协商/心跳/重挂全部走 link（S2 拆解归位，禁私有 tungstenite）
+# the signaling surface's single truth source: WS/PSK/negotiation/heartbeat/re-mount all go through link (the S2 teardown, no private tungstenite)
 mediaservo-link = { path = "../mediaservo-link" }
-# C12：WebRTC 仅经 mediaservo-webrtc 抽象层（libwebrtc 后端），禁直依 webrtc-rs
+# C12: WebRTC only via the mediaservo-webrtc abstraction layer (the libwebrtc backend); direct webrtc-rs dependency forbidden
 mediaservo-webrtc = { path = "../mediaservo-webrtc", default-features = false, features = ["backend-webrtc-sys"] }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
@@ -24,7 +24,7 @@ thiserror = "2"
 async-trait = "0.1"
 
 [dev-dependencies]
-# 测试 mock server（sfu_surface）= 直连 WS 形：服务端侧 accept_async 需tungstenite。
+# the test mock server (sfu_surface) = the direct-WS shape: the server side's accept_async needs tungstenite.
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
 tokio = { version = "1", features = ["full"] }
@@ -32,5 +32,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [features]
 default = []
-# S6 批0/K11：FakeEngine 测试基座（发布构建不含；仅测试/CI 演练开启）
+# S6 batch 0/K11: the FakeEngine test foundation (absent from release builds; enabled only for test/CI drills)
 engine-fake = []

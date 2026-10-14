@@ -1,18 +1,18 @@
-// mediaservo-client-cxx 控制闭环 demo（S3 批；live e2e 载体，CI 门 = 编译+链接）。
+// mediaservo-client-cxx control closed-loop demo (batch S3; the live-e2e vehicle; the CI gate = compile + link).
 //
-// 流程镜像 crates/mediaservo-client/examples/basic.rs：
-//   login → Session::connect → open_control({"chassis"}) → on_ack → 12× send(同 seq 重发)
-//   任一 ack 到达 → exit 0；全部重试无 ack → exit 1。
+// The flow mirrors crates/mediaservo-client/examples/basic.rs:
+//   login → Session::connect → open_control({"chassis"}) → on_ack → 12x send (same-seq re-sends)
+//   Any ack arriving → exit 0; all retries exhausted without an ack → exit 1.
 //
-// 编译示例（单行）:
+// Build example (single line):
 //   g++ -std=c++17 -I bindings/c/include -I bindings/cxx/include -I bindings/c/mediaservo-client-c/include -I bindings/cxx/mediaservo-client-cxx/include bindings/cxx/mediaservo-client-cxx/examples/control_demo.cpp -L target/debug -lmediaservo_client -Wl,-rpath,$PWD/target/debug -o /tmp/opencode/control_demo
 //
-// 环境变量（无默认端点/凭证纪律，同 basic.rs）：
-//   MSRTC_HTTP_BASE  http://<server>:9800        （必需）
-//   MSRTC_WS_URL     ws://<server>:9800/ws       （必需）
-//   MSRTC_ROOM       房间 ID                      （必需）
-//   MSRTC_USER / MSRTC_PASS  账号口令             （必需）
-//   MSRTC_LABEL      控制通道 label（可选，默认 "chassis"）
+// Environment variables (no default endpoint/credentials discipline, same as basic.rs):
+//   MSRTC_HTTP_BASE  http://<server>:9800        (required)
+//   MSRTC_WS_URL     ws://<server>:9800/ws       (required)
+//   MSRTC_ROOM       room ID                      (required)
+//   MSRTC_USER / MSRTC_PASS  account password     (required)
+//   MSRTC_LABEL      control channel label (optional, default "chassis")
 
 #include <atomic>
 #include <chrono>
@@ -49,12 +49,12 @@ int main() {
     const char* label_env = std::getenv("MSRTC_LABEL");
     const std::string label = (label_env && *label_env) ? label_env : "chassis";
 
-    // 1. 登录换 JWT
+    // 1. Login for a JWT
     auto token = ms::login(http_base, user, pass);
     if (!token) { fail("login", token.error()); return 1; }
     std::printf("login ok\n");
 
-    // 2. 入房（Client 角色 = 消费形，控制权限由 server 账号 can_control 裁决）
+    // 2. Join the room (the Client role = the consumer form; control permissions are adjudicated by the server account's can_control gate)
     ms::Config cfg;
     cfg.signaling_url = ws_url;
     cfg.room = room;
@@ -67,7 +67,7 @@ int main() {
     if (!neg) { fail("negotiated", neg.error()); return 1; }
     std::printf("joined room=%s negotiated=%u\n", room.c_str(), neg.value());
 
-    // 3. 控制出程（车端 consumer attach 有 ~20s 事件链时延——同 seq 重发幂等安全）
+    // 3. Send control outbound (the vehicle-side consumer attach has a ~20s event-chain delay — same-seq re-sends are idempotent-safe)
     auto ctl = session->open_control({label});
     if (!ctl) { fail("open_control", ctl.error()); return 1; }
     auto ids = ctl->producer_ids();
@@ -91,5 +91,5 @@ int main() {
         return 1;
     }
     std::printf("control_demo OK\n");
-    return 0; // RAII: ctl → session 逆序析构即正序 close
+    return 0; // RAII: ctl → session destroyed in reverse order = closed in the correct order
 }

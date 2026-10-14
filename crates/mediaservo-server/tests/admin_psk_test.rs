@@ -151,7 +151,7 @@ async fn psk_endpoints_require_auth() {
 async fn psk_dispatcher_denied() {
     let (state, _) = make_state(temp_path("disp", "yaml")).await;
     let app = admin_router(state.clone());
-    // dispatcher 只读也不放行 — psk 为 admin 专属端点
+    // dispatcher is read-only and still barred -- psk is an admin-only endpoint
     let res = app
         .clone()
         .oneshot(auth_request(
@@ -162,7 +162,7 @@ async fn psk_dispatcher_denied() {
         ))
         .await
         .unwrap();
-    assert_ne!(res.status(), StatusCode::OK, "dispatcher 禁止查看 psk");
+    assert_ne!(res.status(), StatusCode::OK, "dispatcher is barred from viewing the psk");
     let res = app
         .oneshot(auth_request(
             Method::POST,
@@ -172,7 +172,7 @@ async fn psk_dispatcher_denied() {
         ))
         .await
         .unwrap();
-    assert_ne!(res.status(), StatusCode::OK, "dispatcher 禁止轮换 psk");
+    assert_ne!(res.status(), StatusCode::OK, "dispatcher is barred from rotating the psk");
 }
 
 // ── config hint ──────────────────────────────────────────────────────────────
@@ -192,9 +192,9 @@ async fn config_contains_masked_hint_not_plaintext() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body = json_of(res).await;
-    assert_eq!(body["psk_hint"], "ol··", "掩码 = 前两字符 + ··");
+    assert_eq!(body["psk_hint"], "ol··", "the mask = the first two chars + ..");
     let raw = serde_json::to_string(&body).unwrap();
-    assert!(!raw.contains("old-secret-123"), "hint 响应不得含明文: {raw}");
+    assert!(!raw.contains("old-secret-123"), "the hint response must not contain plaintext: {raw}");
 }
 
 // ── one-time view + audit ────────────────────────────────────────────────────
@@ -216,11 +216,11 @@ async fn psk_view_returns_plaintext_once_and_audits() {
     let body = json_of(res).await;
     assert_eq!(body["psk"], "old-secret-123");
     assert_eq!(body["hint"], "ol··");
-    // audit 落库
+    // audit recorded
     let recent = audit::recent();
     assert!(
         recent.iter().any(|e| matches!(e, AuditEvent::PskViewed { actor } if actor == "admin")),
-        "PskViewed 应入 audit 环: {recent:?}"
+        "PskViewed should enter the audit ring: {recent:?}"
     );
 }
 
@@ -238,16 +238,16 @@ async fn psk_view_404_when_unset() {
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::NOT_FOUND, "未配置 psk → 404");
+    assert_eq!(res.status(), StatusCode::NOT_FOUND, "psk not configured -> 404");
 }
 
-// ── rotation（热生效 + 写回 + audit）──────────────────────────────────────────
+// -- rotation (hot effect + write-back + audit) ---------------------------------------------
 
 #[tokio::test]
 async fn psk_rotate_hot_effective_and_persists() {
     let cfg_path = temp_path("rotate", "yaml");
     let (state, _) = make_state(cfg_path.clone()).await;
-    // 预置 server.yaml（含 inline 注释）
+    // pre-seed server.yaml (with an inline comment)
     std::fs::write(&cfg_path, "listen:\n  host: \"0.0.0.0\"\npsk: \"old-secret-123\"   # PIT-49\n")
         .unwrap();
 
@@ -265,21 +265,24 @@ async fn psk_rotate_hot_effective_and_persists() {
     let body = json_of(res).await;
     assert_eq!(body["psk"], "brand-new-secret-9");
 
-    // 热生效：内存共享态已更新
+    // hot effect: the in-memory shared state is updated
     assert_eq!(
         *state.psk_state.read().unwrap_or_else(|e| e.into_inner()),
         Some("brand-new-secret-9".to_string())
     );
-    // 落盘 + 注释保留
+    // disk write + comment preserved
     let on_disk = std::fs::read_to_string(&cfg_path).unwrap();
-    assert!(on_disk.contains("psk: \"brand-new-secret-9\"  # PIT-49"), "写回保留注释: {on_disk}");
-    assert!(!on_disk.contains("old-secret-123"), "旧值清除: {on_disk}");
+    assert!(
+        on_disk.contains("psk: \"brand-new-secret-9\"  # PIT-49"),
+        "the write-back preserves the comment: {on_disk}"
+    );
+    assert!(!on_disk.contains("old-secret-123"), "the old value cleared: {on_disk}");
     // audit
     assert!(
         audit::recent()
             .iter()
             .any(|e| matches!(e, AuditEvent::PskRotated { actor } if actor == "admin")),
-        "PskRotated 应入 audit 环"
+        "PskRotated should enter the audit ring"
     );
 }
 
@@ -301,7 +304,7 @@ async fn psk_rotate_invalid_value_400() {
             .unwrap();
         assert_eq!(res.status(), StatusCode::BAD_REQUEST, "bad psk {bad:?} → 400");
     }
-    // 轮换失败不得改变现有 psk
+    // a failed rotation must not change the existing psk
     assert_eq!(
         *state.psk_state.read().unwrap_or_else(|e| e.into_inner()),
         Some("old-secret-123".to_string())
@@ -326,8 +329,8 @@ async fn psk_rotate_generates_when_absent() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = json_of(res).await;
     let generated = body["psk"].as_str().unwrap();
-    assert_eq!(generated.len(), 32, "随机 32B hex（uuid v4 去横线）");
+    assert_eq!(generated.len(), 32, "random 32B hex (a uuid v4 with hyphens stripped)");
     assert!(!generated.contains('-'));
     let on_disk = std::fs::read_to_string(&cfg_path).unwrap();
-    assert!(on_disk.contains(&format!("psk: \"{generated}\"")), "追加写回: {on_disk}");
+    assert!(on_disk.contains(&format!("psk: \"{generated}\"")), "appended write-back: {on_disk}");
 }

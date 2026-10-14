@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 绑定矩阵 live e2e — 三语言正向链路回归（C field/link/deck + Python field）。
-# 验证过的能力固化为可重复门禁（之前仅会话内手动实证）。
-# 前置: pixi run build-c + docker 可用；server 未运行会自动拉起。
+# Bindings matrix live e2e — positive-path regression across three languages (C field/link/deck + Python field).
+# Freezes verified capabilities into a repeatable gate (previously session-only manual proof).
+# Prereq: pixi run build-c + docker available; if the server is not running it is started automatically.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -13,7 +13,7 @@ export PYTHONPATH="$PWD/bindings/python/mediaservo${PYTHONPATH:+:$PYTHONPATH}"
 FAIL=0
 note() { echo "== $1"; }
 
-# ── 1. server 前置 ─────────────────────────────────────────
+# ── 1. server prereq ───────────────────────────────────────
 if ! ss -tln 2>/dev/null | grep -q ":9800"; then
     note "server not running, starting..."
     timeout 60 ./mediaservo.sh up --env dev server >/dev/null 2>&1 || true
@@ -22,8 +22,8 @@ fi
 ss -tln 2>/dev/null | grep -q ":9800" || { echo "FAIL: server not up on :9800"; exit 1; }
 note "server up"
 
-# ── 2. 通用 check helper ────────────────────────────────────
-# check <label> <grep-pattern> <cmd...>  — timeout 杀后仍按输出断言
+# ── 2. shared check helper ─────────────────────────────────
+# check <label> <grep-pattern> <cmd...>  — asserts on output even after a timeout kill
 check() {
     local label="$1" pattern="$2"; shift 2
     local out
@@ -35,7 +35,7 @@ check() {
     fi
 }
 
-# ── 3. C field: 真实 server 推流 ────────────────────────────
+# ── 3. C field: push to a real server ───────────────────────
 note "C field push"
 gcc bindings/c/mediaservo-field-c/examples/vehicle_push.c \
     -I bindings/c/mediaservo-field-c/include -I bindings/c/include \
@@ -43,7 +43,7 @@ gcc bindings/c/mediaservo-field-c/examples/vehicle_push.c \
 check "C field: connected + published + frames" "frames running" \
     env LD_LIBRARY_PATH="$PWD/target/debug" /tmp/opencode/e2e_vp
 
-# ── 4. C link: 信令 + 事件泵 ────────────────────────────────
+# ── 4. C link: signaling + event pump ───────────────────────
 note "C link signal"
 gcc bindings/c/mediaservo-link-c/examples/vehicle_signal.c \
     -I bindings/c/mediaservo-link-c/include -I bindings/c/include \
@@ -51,7 +51,7 @@ gcc bindings/c/mediaservo-link-c/examples/vehicle_signal.c \
 check "C link: connected + event echo" '"type":"message"' \
     env LD_LIBRARY_PATH="$PWD/target/debug" /tmp/opencode/e2e_vs
 
-# ── 5. C deck: 采集→录制→回放闭环 ───────────────────────────
+# ── 5. C deck: capture→record→playback closed loop ──────────
 note "C deck record/playback"
 gcc bindings/c/mediaservo-deck-c/examples/record_playback.c \
     -I bindings/c/mediaservo-deck-c/include -I bindings/c/include \
@@ -68,7 +68,7 @@ else
     echo "FAIL: C deck closed-loop"; echo "$out" | tail -5; FAIL=1
 fi
 
-# ── 6. C++ field: 真实 server 推流（header-only RAII）────────
+# ── 6. C++ field: push to a real server (header-only RAII) ───
 note "C++ field push"
 g++ -std=c++11 -Wall -Wextra \
     -I bindings/cxx/mediaservo-field-cxx/include -I bindings/cxx/include \
@@ -81,7 +81,7 @@ check "C++ field: published" "published track" \
         MEDIASERVO_PSK="mediaservo-dev" MEDIASERVO_ROOM="vehicle-cxx-e2e" \
         /tmp/opencode/e2e_cxx < /dev/null
 
-# ── 7. Python field: 真实 server 推流 ───────────────────────
+# ── 7. Python field: push to a real server ──────────────────
 note "Python field push"
 check "Python field: connected + published" "frames running" \
     python3 -c "
@@ -92,10 +92,10 @@ t = s.publish_video(); print('published:', t)
 s.start_video_frames(); print('frames running')
 s.stop_video_frames(); s.close()"
 
-# ── 8. server 侧收帧证据 ────────────────────────────────────
+# ── 8. server-side key-frame evidence ───────────────────────
 note "server key-frame evidence"
 KF=$(docker logs mediaservo-server-1 2>&1 | grep -c "ReceiveRtpPacket.*key frame" || true)
 if [ "${KF:-0}" -ge 1 ]; then echo "OK: server received key frames ($KF)"; else echo "FAIL: no key frames in server log"; FAIL=1; fi
 
-# ── 聚合 ────────────────────────────────────────────────────
+# ── Summary ─────────────────────────────────────────────────
 if [ "$FAIL" -eq 0 ]; then echo "BINDINGS E2E PASS"; else echo "BINDINGS E2E FAIL"; exit 1; fi

@@ -1,49 +1,49 @@
 # 18. Codec Crate — mediaservo-codec
 
-> 状态：Phase 2 规划中 | 关联决策：D43, D46, D70, D71, D82, C5
+> Status: Phase 2 planned | Related decisions: D43, D46, D70, D71, D82, C5
 
-## 定位
+## Positioning
 
-`mediaservo-codec` 是 MediaServo 的统一编解码层，提供 `VideoEncoder` / `VideoDecoder` trait，后端通过编译期 feature gate 支持 GStreamer 和 FFmpeg 双后端。遵循 C5 `&[u8]` 字节边界——不依赖 `mediaservo-media` 的类型体系。
+`mediaservo-codec` is MediaServo's unified codec layer, providing the `VideoEncoder` / `VideoDecoder` traits with backends dispatched via compile-time feature gates across GStreamer and FFmpeg. It follows the C5 `&[u8]` byte boundary — no dependency on `mediaservo-media`'s type system.
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                 mediaservo-codec                      │
+│                 mediaservo-codec                    │
 │                                                     │
 │  CodecFactory::create_encoder()                     │
-│    └→ Box<dyn VideoEncoder>                        │
+│    └→ Box<dyn VideoEncoder>                         │
 │                                                     │
 │  CodecFactory::create_decoder()                     │
-│    └→ Box<dyn VideoDecoder>                        │
+│    └→ Box<dyn VideoDecoder>                         │
 │                                                     │
 │  ┌─────────────────────────────────────────────┐    │
-│  │              后端 trait 层                   │    │
-│  │  GstEncoder    │    FfmpegEncoder            │    │
-│  │  GstDecoder    │    FfmpegDecoder            │    │
+│  │            backend trait layer              │    │
+│  │  GstEncoder    │    FfmpegEncoder           │    │
+│  │  GstDecoder    │    FfmpegDecoder           │    │
 │  └──────────────┬──────────────────────────────┘ │
 │                 ▼                                  │
 │  ┌─────────────────────────────────────────────┐    │
-│  │    backend-gstreamer  │  backend-ffmpeg     │   │
-│  │   (动态 .so)          │  (静态 .a)          │   │
+│  │    backend-gstreamer  │  backend-ffmpeg     │    │
+│  │   (dynamic .so)       │  (static .a)        │    │
 │  └───────────────────────┴─────────────────────┘   │
 └─────────────────────────────────────────────────────┘
 ```
 
-## 命名规范
+## Naming Convention
 
-| 类型 | 命名 | 说明 |
-|------|------|------|
-| 工厂 | `CodecFactory` | 编码器/解码器创建入口 |
-| 编码 trait | `VideoEncoder` | push-pull 同步接口 |
-| 解码 trait | `VideoDecoder` | push-pull 同步接口 |
-| 编码配置 | `EncoderConfig` | builder 模式 |
-| 解码配置 | `DecoderConfig` | builder 模式 |
-| 后端 ID | `BackendId::GStreamer` / `BackendId::FFmpeg` | 运行时后端标识 |
-| 编解码 ID | `CodecId::H264` / `CodecId::VP8` / ... | RFC 6381 对齐 |
-| 像素格式 | `PixelFormat::Yuv420p` / `PixelFormat::Nv12` / ... | 内部格式，不与 media 耦合 |
-| 错误 | `CodecError` | 10 variants |
+| Type | Name | Notes |
+|------|------|-------|
+| Factory | `CodecFactory` | Encoder/decoder creation entry |
+| Encode trait | `VideoEncoder` | Push-pull sync interface |
+| Decode trait | `VideoDecoder` | Push-pull sync interface |
+| Encode config | `EncoderConfig` | Builder pattern |
+| Decode config | `DecoderConfig` | Builder pattern |
+| Backend ID | `BackendId::GStreamer` / `BackendId::FFmpeg` | Runtime backend identifier |
+| Codec ID | `CodecId::H264` / `CodecId::VP8` / ... | RFC 6381 aligned |
+| Pixel format | `PixelFormat::Yuv420p` / `PixelFormat::Nv12` / ... | Internal format, decoupled from media |
+| Error | `CodecError` | 10 variants |
 
-## Trait 设计
+## Trait Design
 
 ### VideoEncoder
 
@@ -57,10 +57,10 @@ pub trait VideoEncoder: Send {
 }
 ```
 
-push-pull 模式（FFmpeg `avcodec_send_frame` / `avcodec_receive_packet` 对齐）：
-- `push_frame` 送入原始帧 → `pull_packet` 拉取编码包
-- B 帧重排：一次 push 可能产出 0-N 个包
-- `flush()` 清空缓冲，EOF 信号
+Push-pull model (aligned with FFmpeg `avcodec_send_frame` / `avcodec_receive_packet`):
+- `push_frame` feeds a raw frame → `pull_packet` pulls encoded packets
+- B-frame reordering: one push may yield 0-N packets
+- `flush()` drains the buffer, signaling EOF
 
 ### VideoDecoder
 
@@ -73,26 +73,26 @@ pub trait VideoDecoder: Send {
 }
 ```
 
-编码镜像：`push_packet` → `pull_frame`。
+Mirror of encoding: `push_packet` → `pull_frame`.
 
-## 后端矩阵
+## Backend Matrix
 
-| 后端 | Feature | 链接 | 场景 |
-|------|---------|------|------|
-| GStreamer | `backend-gstreamer` | 动态 .so | Host 编码默认 |
-| FFmpeg | `backend-ffmpeg` | 静态 .a | Remote 解码（str0m 后端，D72）；Host 编码备选（D43 修订） |
-| Stub | 无 feature | 无 | 开发/测试/编译检查 |
+| Backend | Feature | Linking | Scenario |
+|---------|---------|---------|----------|
+| GStreamer | `backend-gstreamer` | Dynamic .so | Host encode default |
+| FFmpeg | `backend-ffmpeg` | Static .a | Remote decode (str0m backend, D72); Host encode alternative (D43 revision) |
+| Stub | No feature | None | Dev/test/compile checks |
 
-Host 端双后端可切换：
+The Host can switch between the two backends:
 ```toml
 # Cargo.toml (mediaservo-host)
-mediaservo-codec = { features = ["backend-ffmpeg"] }   # 生产/edge 静态分发
-# mediaservo-codec = { features = ["backend-gstreamer"] } # 开发机默认
+mediaservo-codec = { features = ["backend-ffmpeg"] }     # production/edge static distribution
+# mediaservo-codec = { features = ["backend-gstreamer"] } # dev-machine default
 ```
 
-## 编码/解码链路
+## Encode/Decode Paths
 
-### Host 编码
+### Host encoding
 
 ```
 Capture → VideoFrame(I420) → CodecFactory::create_encoder()
@@ -100,7 +100,7 @@ Capture → VideoFrame(I420) → CodecFactory::create_encoder()
   → TrackSender::write_frame(packet.data) → WebRTC RTP → Server
 ```
 
-### Remote 解码
+### Remote decoding
 
 ```
 TrackReceiver → EncodedPacket(H.264 bytes)
@@ -109,15 +109,15 @@ TrackReceiver → EncodedPacket(H.264 bytes)
   → Renderer
 ```
 
-## 数据边界 (C5)
+## Data Boundary (C5)
 
-codec crate **不依赖** `mediaservo-media`。所有数据交换通过 `&[u8]`：
+The codec crate **does not depend** on `mediaservo-media`. All data exchange goes through `&[u8]`:
 
-- `VideoFrame`（codec 自有类型，不同于 media 的 `VideoFrame<T>`）
-- `EncodedPacket`（纯 `Vec<u8>` + 元数据）
-- 调用方负责 media ↔ codec 类型转换（展平 I420Buffer 或包装 EncodedFragment）
+- `VideoFrame` (codec's own type, distinct from media's `VideoFrame<T>`)
+- `EncodedPacket` (pure `Vec<u8>` + metadata)
+- Callers handle media ↔ codec type conversion (flattening I420Buffer planes or wrapping EncodedFragments)
 
-## 工厂入口
+## Factory Entry
 
 ```rust
 pub struct CodecFactory;
@@ -141,7 +141,7 @@ impl CodecFactory {
 }
 ```
 
-使用示例：
+Usage example:
 
 ```rust
 use mediaservo_codec::{CodecFactory, EncoderConfig, CodecId, BackendId};
@@ -152,7 +152,7 @@ let mut encoder = factory.create_encoder(
         .bitrate(Bitrate::Vbr { target: 4000, max: 8000 })
         .preset(EncoderPreset::VeryFast)
         .build(),
-    Some(BackendId::FFmpeg),  // 强制 FFmpeg 静态后端
+    Some(BackendId::FFmpeg),  // Force the static FFmpeg backend
 )?;
 
 for raw_frame in capture_source {
@@ -164,7 +164,7 @@ for raw_frame in capture_source {
 encoder.flush()?;
 ```
 
-## 文件结构
+## File Structure
 
 ```
 crates/mediaservo-codec/
@@ -192,87 +192,87 @@ crates/mediaservo-codec/
 └── benches/
     └── encode_bench.rs
 ```
-## API 边界与类型映射
+## API Boundary & Type Mapping
 
-codec crate 不依赖 mediaservo-media，通过 &[u8] 交换数据（C5）。
+The codec crate does not depend on mediaservo-media; data is exchanged via &[u8] (C5).
 
-| codec 类型 | media/webrtc 类型 | 转换方向 |
-|-----------|-------------------|---------|
-| codec::VideoFrame | media::VideoFrame<I420Buffer> | media→codec: 展平 I420Buffer plane |
-| codec::EncodedPacket | webrtc::TrackSender::write_frame(&[u8]) | codec→webrtc: 编码包字节 → 传输 |
-| codec::EncodedPacket | webrtc::TrackReceiver (原始字节) | webrtc→codec: 接收编码字节 → 解码器 |
+| codec type | media/webrtc type | Conversion direction |
+|------------|-------------------|----------------------|
+| codec::VideoFrame | media::VideoFrame\<I420Buffer\> | media→codec: flatten I420Buffer planes |
+| codec::EncodedPacket | webrtc::TrackSender::write_frame(&[u8]) | codec→webrtc: encoded packet bytes → transport |
+| codec::EncodedPacket | webrtc::TrackReceiver (raw bytes) | webrtc→codec: received encoded bytes → decoder |
 
-**注**: webrtc crate 当前未暴露原始编码包接收 API（Phase 2 预留）。
+**Note**: the webrtc crate currently exposes no raw encoded-packet receive API (reserved for Phase 2).
 
-## 错误处理
+## Error Handling
 
-CodecError (thiserror)，关键变体：
+CodecError (thiserror), key variants:
 
-| 变体 | 说明 |
-|------|------|
-| InvalidConfig(String) | 无效编码器配置 |
-| UnsupportedCodec | 后端不支持该编解码器 |
-| NoBackend(CodecId) | 无后端编译（缺少 feature flag） |
-| Encoder(String) | 编码运行时错误 |
-| Decoder(String) | 解码运行时错误 |
-| InvalidState(String) | 非法状态转换 |
-| ResourceExhausted(String) | 内部队列满 |
-| InvalidInput(String) | 输入数据格式不匹配 |
+| Variant | Description |
+|---------|-------------|
+| InvalidConfig(String) | Invalid encoder configuration |
+| UnsupportedCodec | The backend does not support this codec |
+| NoBackend(CodecId) | No backend compiled (missing feature flag) |
+| Encoder(String) | Encoding runtime error |
+| Decoder(String) | Decoding runtime error |
+| InvalidState(String) | Illegal state transition |
+| ResourceExhausted(String) | Internal queue full |
+| InvalidInput(String) | Input data format mismatch |
 
-## 跨平台
+## Cross-Platform
 
-| 后端 | macOS x64 | macOS ARM | Linux x64 | Linux ARM | Windows |
-|------|:---:|:---:|:---:|:---:|:---:|
+| Backend | macOS x64 | macOS ARM | Linux x64 | Linux ARM | Windows |
+|---------|:---------:|:---------:|:---------:|:---------:|:-------:|
 | GStreamer | brew | brew | apt | apt | MSYS2 |
-| FFmpeg 静态 | 预构建 | 预构建 | 预构建 | 交叉编译 | vcpkg |
-| FFmpeg 动态 | brew | brew | apt | apt | vcpkg |
+| FFmpeg static | prebuilt | prebuilt | prebuilt | cross-compile | vcpkg |
+| FFmpeg dynamic | brew | brew | apt | apt | vcpkg |
 
-详见 docs/reference/codec/ffmpeg-static-build-strategy.md。
+See docs/reference/codec/ffmpeg-static-build-strategy.md.
 
 
-## 测试覆盖 (69 tests, 规划中)
+## Test Coverage (69 tests, planned)
 
-| 类 | 测试数 | 说明 |
-|-----|--------|------|
+| Class | Count | Notes |
+|-------|-------|-------|
 | Unit: encoder config/lifecycle | 15 | configure, push/pull, flush, error |
-| Unit: push-pull loop | 10 | 30 frame encode, PTS monotonic |
+| Unit: push-pull loop | 10 | 30-frame encode, PTS monotonic |
 | Unit: decoder | 11 | decode lifecycle, reset, close |
 | Unit: codec selection | 3 | probe, auto-select, fallback |
 | Integration: roundtrip | 5 | I420→H.264→I420, PSNR >40dB |
-| Integration: pipeline | 2 | as MediaProcessor in PipelineEngine |
+| Integration: pipeline | 2 | as a MediaProcessor in PipelineEngine |
 | Cross-backend | 4 | GStreamer vs FFmpeg output comparison |
 | Performance | 5 | encode latency p99 <33ms, throughput ≥30fps |
-| Static build | 4 | nm verify no undefined symbols, size <14MB |
+| Static build | 4 | nm verifies no undefined symbols, size <14MB |
 | Fuzz | 6 | random I420 input, random bitstream, concurrent |
 | Property | 5 | keyframe interval, PTS monotonic |
 
-## 当前状态
+## Current Status
 
-| 能力 | 状态 |
-|------|------|
-| VideoEncoder trait 定义 | 🔲 规划中 |
-| VideoDecoder trait 定义 | 🔲 规划中 |
-| CodecFactory | 🔲 规划中 |
-| FFmpeg 后端 | 🔲 规划中 |
-| GStreamer 后端 | 🔲 规划中 |
-| Stub 后端 | 🔲 规划中 |
-| TDD 测试 | 🔲 69 tests 规划中 |
-| E2E 验收 | 🔲 8 scenarios 规划中 |
-| 静态 FFmpeg 构建 | 🔲 策略已设计 |
+| Capability | Status |
+|------------|--------|
+| VideoEncoder trait definition | 🔲 Planned |
+| VideoDecoder trait definition | 🔲 Planned |
+| CodecFactory | 🔲 Planned |
+| FFmpeg backend | 🔲 Planned |
+| GStreamer backend | 🔲 Planned |
+| Stub backend | 🔲 Planned |
+| TDD tests | 🔲 69 tests planned |
+| E2E acceptance | 🔲 8 scenarios planned |
+| Static FFmpeg build | 🔲 Strategy designed |
 
-## 关联文档
+## Related Documents
 
-- [17. WebRTC Crate](17-webrtc-crate.md) — WebRTC 传输层，编码后输出目标
-- [08. 管线模型参考](08-pipeline-model.md) — PipelineEngine 集成
-- [决策记录 D43/D46/D70/D71/D82](../.agents/memorys/decisions.md) — 编码架构决策链
-- [FFmpeg 静态构建策略](../reference/codec/ffmpeg-static-build-strategy.md) — 构建方案
-- [SDD 验收标准](../../docs/plans/mediaservo-codec/acceptance-criteria.md) — 具体阈值
-- [验收矩阵 §10](../../docs/plans/mediaservo-codec/acceptance-criteria.md#10-test-matrix) — 20 场景 AC 矩阵
+- [17. WebRTC Crate](17-webrtc-crate.md) — the WebRTC transport layer, target of encoder output
+- [08. Pipeline Model Reference](08-pipeline-model.md) — PipelineEngine integration
+- [Decision records D43/D46/D70/D71/D82](../.agents/memorys/decisions.md) — the codec architecture decision chain
+- [FFmpeg static build strategy](../reference/codec/ffmpeg-static-build-strategy.md) — build plan
+- [SDD acceptance criteria](../../docs/plans/mediaservo-codec/acceptance-criteria.md) — concrete thresholds
+- [Acceptance matrix §10](../../docs/plans/mediaservo-codec/acceptance-criteria.md#10-test-matrix) — 20-scenario AC matrix
 
-## 交叉引用
+## Cross References
 
-以下文档链接回本文档：
-- [17. WebRTC Crate](17-webrtc-crate.md) — Phase 2 预留 write_frame / on_encoded_packet API
-- [SDD 验收标准](../../docs/plans/mediaservo-codec/acceptance-criteria.md) — 对齐 push-pull trait API
-- [FFmpeg 静态构建策略](../reference/codec/ffmpeg-static-build-strategy.md) — 预构建 + CI 集成
-- [验收矩阵 §10](../../docs/plans/mediaservo-codec/acceptance-criteria.md#10-test-matrix) — 8+ 场景测试矩阵
+The following documents link back to this one:
+- [17. WebRTC Crate](17-webrtc-crate.md) — Phase 2 reserved write_frame / on_encoded_packet API
+- [SDD acceptance criteria](../../docs/plans/mediaservo-codec/acceptance-criteria.md) — aligned with the push-pull trait API
+- [FFmpeg static build strategy](../reference/codec/ffmpeg-static-build-strategy.md) — prebuilt + CI integration
+- [Acceptance matrix §10](../../docs/plans/mediaservo-codec/acceptance-criteria.md#10-test-matrix) — 8+ scenario test matrix

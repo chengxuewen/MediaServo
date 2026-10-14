@@ -1,15 +1,15 @@
 # SDD 06: Server Monitoring
 
-## 1. 概述
+## 1. Overview
 
-Server 监控与可观测性模块。提供健康检查、Prometheus 指标、告警规则。
+Server monitoring and observability module. Provides health checks, Prometheus metrics, and alert rules.
 
-**决策引用**: D86-D91 (Server 架构), D99 (tracing + prometheus), D-OPS-09 (告警规则), D111 (健康检查)
+**Decision refs**: D86-D91 (server architecture), D99 (tracing + prometheus), D-OPS-09 (alert rules), D111 (health check)
 
-## 2. 接口定义
+## 2. Interface Definition
 
 ```rust
-/// Prometheus 指标注册
+/// Prometheus metric registry
 pub struct ServerMetrics {
     // HTTP
     pub http_requests_total: Counter,
@@ -22,12 +22,12 @@ pub struct ServerMetrics {
     pub relay_bitrate_kbps: Gauge,
     pub relay_rtt_ms: Gauge,
     pub relay_packets_lost: Counter,
-    // 系统
+    // System
     pub session_duration_seconds: Histogram,
     pub process_rss_mb: Gauge,
 }
 
-/// 健康检查
+/// Health check
 pub struct HealthResponse {
     pub status: String,       // "ok"
 }
@@ -38,35 +38,35 @@ pub struct ReadyResponse {
 }
 ```
 
-### 端点
+### Endpoints
 
-| 端点 | 方法 | 用途 |
-|------|------|------|
-| /health | GET | K8s livenessProbe, 轻量存活检查 |
-| /ready  | GET | K8s readinessProbe, 全组件状态 |
-| /metrics | GET | Prometheus 抓取 |
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| /health | GET | K8s livenessProbe, lightweight liveness check |
+| /ready  | GET | K8s readinessProbe, full component status |
+| /metrics | GET | Prometheus scrape |
 
-## 3. 指标设计 (D99)
+## 3. Metric Design (D99)
 
 ```
-# HELP mediaservo_http_requests_total HTTP 请求总数
+# HELP mediaservo_http_requests_total Total HTTP requests
 # TYPE mediaservo_http_requests_total counter
 mediaservo_http_requests_total{method="GET",path="/health"} 1024
 
-# HELP mediaservo_ws_connections WebSocket 连接数
+# HELP mediaservo_ws_connections WebSocket connection count
 # TYPE mediaservo_ws_connections gauge
 mediaservo_ws_connections 2
 
-# HELP mediaservo_relay_rtt_ms 中继 RTT 毫秒
+# HELP mediaservo_relay_rtt_ms Relay RTT in milliseconds
 # TYPE mediaservo_relay_rtt_ms gauge
 mediaservo_relay_rtt_ms{peer="host-001"} 45
 mediaservo_relay_rtt_ms{peer="remote-001"} 52
 ```
 
-## 4. 告警规则 (D-OPS-09)
+## 4. Alert Rules (D-OPS-09)
 
-| 告警名 | 条件 | 级别 |
-|--------|------|------|
+| Alert Name | Condition | Level |
+|------------|-----------|-------|
 | push_rtt_high | rtt_ms > 500 for 30s | warning |
 | push_rtt_critical | rtt_ms > 1000 for 10s | critical |
 | camera_lost | fps == 0 for 5s | critical |
@@ -76,23 +76,23 @@ mediaservo_relay_rtt_ms{peer="remote-001"} 52
 | host_restart_loop | restart count > 5 in 5min | critical |
 | frame_dropped_rate | control_frames_dropped / total > 0.1 | warning |
 
-## 5. 日志 (D99)
+## 5. Logging (D99)
 
-- 框架: tracing + tracing-subscriber
-- 格式: JSON stdout, Docker logs 收集
-- traceId: axum TraceLayer 自动注入
-- 轮转: Docker json-file (max-size: 10m, max-file: 3)
+- Framework: tracing + tracing-subscriber
+- Format: JSON stdout, collected via Docker logs
+- traceId: auto-injected by axum TraceLayer
+- Rotation: Docker json-file (max-size: 10m, max-file: 3)
 
-## 6. 测试计划
+## 6. Test Plan
 
-| 测试 | 类型 | 描述 |
-|------|------|------|
-| metric_accuracy | 集成 | HTTP 请求后 counter 递增 |
-| metric_persistence | 集成 | /metrics 返回 Prometheus 格式文本 |
-| health_endpoint | 集成 | /health 返回 200 {"status":"ok"} |
-| ready_all_green | 集成 | 所有组件正常时 /ready 返回 ready:true |
-| ready_partial_fail | 集成 | 某组件异常时 /ready 返回 ready:false |
-| alert_firing | 集成 | 模拟高 RTT 触发 push_rtt_high 告警 |
-| alert_resolve | 集成 | RTT 恢复后告警自动解决 |
-| ws_connection_gauge | 集成 | WS 连接数随客户端增减变化 |
-| tracing_json_format | 单元 | 日志输出为合法 JSON 行 |
+| Test | Type | Description |
+|------|------|-------------|
+| metric_accuracy | Integration | Counter increments after HTTP requests |
+| metric_persistence | Integration | /metrics returns Prometheus-format text |
+| health_endpoint | Integration | /health returns 200 {"status":"ok"} |
+| ready_all_green | Integration | /ready returns ready:true when all components are healthy |
+| ready_partial_fail | Integration | /ready returns ready:false when a component is degraded |
+| alert_firing | Integration | Simulated high RTT fires the push_rtt_high alert |
+| alert_resolve | Integration | Alert auto-resolves after RTT recovers |
+| ws_connection_gauge | Integration | WS connection gauge follows client connect/disconnect |
+| tracing_json_format | Unit | Log output is valid JSON lines |

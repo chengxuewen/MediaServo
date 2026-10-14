@@ -1,11 +1,11 @@
-//! 生命周期模板与纯渲染函数（frontend-process-split T16 — 模板单一来源 M4）。
+//! Lifecycle templates and pure render functions (frontend-process-split T16 -- single template source M4).
 //!
-//! **整合点（后续工作，编排者处理）**：`scripts/mediaservo_cli.py::_cmd_build_server`
-//! 的 etc/ 组装段（现从 `config/server.docker.yaml` 派生 + 拷贝 `config/{accounts,devices}.yaml`）
-//! 应改为委托 `mediaservo-server init <out/server>`（或共享本模块常量），消灭第二份模板漂移。
-//! 在委托落地前，本模块与服务端运行时模板以注释锚定同一 schema。
+//! **Integration point (follow-up, for the orchestrator)**: the etc/ assembly section of
+//! `scripts/mediaservo_cli.py::_cmd_build_server` (currently derived from `config/server.docker.yaml` + copying
+//! `config/{accounts,devices}.yaml`) should delegate to `mediaservo-server init <out/server>` (or share this module's constants),
+//! eliminating the second copy of template drift. Until delegation lands, this module and the server runtime templates anchor the same schema via comments.
 //!
-//! 本模块**零进程副作用**（不 spawn、不读 env 之外状态），全部纯函数可确定性单测。
+//! This module has **zero process side effects** (no spawn, no state read beyond env); all pure functions are deterministically unit-testable.
 
 use std::path::Path;
 
@@ -14,45 +14,45 @@ use uuid::Uuid;
 
 use mediaservo_common::brand;
 
-/// 品牌化产品名（USAGE/oxfile app 名同源）。默认 bin_prefix="mediaservo-" →
-/// "mediaservo-server"；品牌 msrtc → "msrtc-server"（与 host 派生规则对称）。
+/// Branded product name (same source as the USAGE/oxfile app name). Default bin_prefix="mediaservo-" ->
+/// "mediaservo-server"; brand msrtc -> "msrtc-server" (symmetric with the host derivation rule).
 pub fn server_product() -> String {
     format!("{}server", brand::media_brand().bin_prefix)
 }
 
-/// web（caddy）进程 app 名 — 同 bin_prefix 派生。
+/// web (caddy) process app name -- derived from the same bin_prefix.
 pub fn server_web_app() -> String {
     format!("{}web", brand::media_brand().bin_prefix)
 }
 
-/// weaknet-serve app 名——**有意品牌无关字面量**（weaknet-server-integration [mn10]：
-/// inspect `ours[2]` / deploy keeper bin 白名单 / logs 目标三处稳定依赖此字面量，勿随品牌变）。
+/// weaknet-serve app name -- **deliberately brand-independent literal** (weaknet-server-integration [mn10]:
+/// inspect `ours[2]` / the deploy keeper bin allowlist / the logs target all stably depend on this literal; do not let it follow the brand).
 pub const WEAKNET_APP: &str = "weaknet-serve";
 
-/// 端口缺省常量单源于 mediaservo-common::config（T6b②，DEFAULT_SFU_PORT 同模式）——
-/// re-export 保持 templates:: 路径，mod.rs/inspect.rs 导入零改动。
-/// weaknet DEFAULT_LISTEN 手抄同步注记见 common 侧常量注释。
+/// Port default constants are single-sourced from mediaservo-common::config (T6b 2, same pattern as DEFAULT_SFU_PORT) --
+/// the re-export keeps the templates:: path; mod.rs/inspect.rs imports unchanged.
+/// For the weaknet DEFAULT_LISTEN hand-copy sync note, see the constant comment on the common side.
 pub use mediaservo_common::config::{DEFAULT_WEB_PORT, WEAKNET_SERVE_PORT};
 
-/// 读序解析纯函数（config-unification P1）：yaml(显式配置) > env(兜底) > default(殿后)。
-/// None = 未配置，由下一层生效。调用方负责读 env（本函数不碰进程环境——可测性）。
+/// Read-order resolution pure function (config-unification P1): yaml (explicit config) > env (fallback) > default (last).
+/// None = not configured, the next layer takes effect. Callers read env (this function never touches the process env -- testability).
 pub fn resolve_port(yaml: Option<u16>, env: Option<u16>, default: u16) -> u16 {
     yaml.or(env).unwrap_or(default)
 }
 
-/// weaknet serve 监听渲染字面量（恒 loopback——D5-2 不变式：IP 恒 127.0.0.1 不变，
-/// 端口可配 = server.yaml `sfu.weaknet_port`，None 缺省 9810。语义见 render_oxfile 注释）。
+/// The weaknet serve listen render literal (always loopback -- the D5-2 invariant: IP always 127.0.0.1,
+/// port configurable = server.yaml `sfu.weaknet_port`, None defaults to 9810. Semantics in the render_oxfile comment).
 pub fn weaknet_listen(port: u16) -> String {
     format!("127.0.0.1:{port}")
 }
 
-/// 已渲染 oxfile 文本是否含 weaknet-serve 条目（start 探针 / --no-web 白名单共用的纯判据）。
+/// Whether rendered oxfile text contains the weaknet-serve entry (the pure predicate shared by the start probe / --no-web allowlist).
 pub fn oxfile_has_weaknet(text: &str) -> bool {
     text.contains(&format!("name = \"{WEAKNET_APP}\""))
 }
 
-/// oxfile 文本 → weaknet serve 监听口（`serve --listen 127.0.0.1:NNNN` 行；
-/// 与 parse_web_port 同构纯函数——start 探针与渲染同源，漂移时以产物为准）。
+/// oxfile text -> weaknet serve listen port (the `serve --listen 127.0.0.1:NNNN` line;
+/// a pure function isomorphic to parse_web_port -- the start probe and the render share a source; on drift the product wins).
 pub fn parse_weaknet_port(oxfile: &str) -> Option<u16> {
     oxfile.lines().find_map(|l| {
         let t = l.trim();
@@ -63,14 +63,14 @@ pub fn parse_weaknet_port(oxfile: &str) -> Option<u16> {
     })
 }
 
-/// oxfile [defaults].namespace（status/stop 过滤锚点）。
+/// oxfile [defaults].namespace (the status/stop filter anchor).
 pub fn server_namespace() -> String {
     server_product()
 }
 
-/// 实例 daemon 端口派生基数 — host 用 18000..18399（API +1000 = 19000..19399），
-/// server 用 18500 基数避开同机 host 实例（API 19500..19899）。派生规则与 host 同源
-/// （路径字节和 % 400，跨进程稳定——C32 实例隔离）。
+/// Instance daemon port derivation base -- host uses 18000..18399 (API +1000 = 19000..19399);
+/// server uses the 18500 base to avoid same-machine host instances (API 19500..19899). Derivation rule same source as host
+/// (path byte sum % 400, stable across processes -- C32 instance isolation).
 pub const DAEMON_PORT_BASE: u32 = 18500;
 
 pub fn instance_daemon_port(home: &Path) -> u16 {
@@ -78,14 +78,14 @@ pub fn instance_daemon_port(home: &Path) -> u16 {
     DAEMON_PORT_BASE as u16 + (sum % 400) as u16
 }
 
-// ── 模板 ─────────────────────────────────────────────────────────────────────
+// -- Templates ------------------------------------------------------------------
 
-/// server.yaml 实例模板（PIT-160：init 只在缺失时写入，永不覆盖）。
-/// 凭据占位符 init 渲染一次；轮换走 admin API（C33/C35 热生效）。
+/// server.yaml instance template (PIT-160: init writes only when missing, never overwrites).
+/// Credential placeholders are rendered once at init; rotation goes through the admin API (C33/C35 hot effect).
 pub const SERVER_YAML_TEMPLATE: &str = r#"version: 1
-# MSRTC server 实例配置（mediaservo-server init 生成——已存在不覆盖，PIT-160）
-# D-2=B：host-agent 直连 9800 /ws，保持 0.0.0.0；
-#   迁「全收敛 A」（仅 Caddy 进入）前置 = admin API 配发 url + protocol_version 握手 → 改 "127.0.0.1"。
+# MSRTC server instance config (generated by mediaservo-server init -- never overwritten if present, PIT-160)
+# D-2=B: host-agent connects directly to 9800 /ws; keep 0.0.0.0;
+#   the "full convergence A" move (Caddy-only entry) requires the admin API to provision the url + a protocol_version handshake -> change to "127.0.0.1".
 listen:
   host: "0.0.0.0"
   port: 9800
@@ -93,80 +93,80 @@ room_capacity: 50
 rate_limit: 100
 consumer_limit_per_stream: 50
 
-# WS 单条消息字节上限（信令帧最大尺寸）。缺省 65536=64KB。重启生效
-# （main.rs 建服时读入 SignalingServer::new，无 admin 热更路径）。
+# WS single-message byte cap (max signaling frame size). Default 65536 = 64KB. Takes effect on restart
+# (read into SignalingServer::new when main.rs builds the server; no admin hot-update path).
 # ws_max_message_size: 65536
 
-# ── 鉴权凭据（init 自举，文件 0600；本文件含密钥，勿入库）──
-# PSK: config 优先 + env MEDIASERVO_PSK 兜底（C35）；轮换 POST /api/admin/psk 热生效（C33）。
+# -- Auth credentials (init bootstrap, file 0600; this file holds secrets, keep it out of VCS) --
+# PSK: config first + env MEDIASERVO_PSK fallback (C35); rotation via POST /api/admin/psk hot effect (C33).
 psk: "__PSK__"
-# jwt 与 admin_jwt 同值 = accounts token 验签配对（main.rs fail-fast 门）。
+# jwt and admin_jwt sharing a value = account token verification pairing (the main.rs fail-fast gate).
 jwt_secret: "__JWT__"
 admin_jwt_secret: "__JWT__"
 
-# TLS（可选）——配置后 server 以 WSS/HTTPS 监听（main.rs:363 bind_rustls）。
-# 缺省=整段不配=纯 HTTP/WS。生效：重启（启动时读，无热更）。子键均无 serde 缺省，tls 一旦启用
-# 则两文件必配、缺失即启动报错：
-#   cert_path  必配  PEM 证书链路径
-#   key_path   必配  PEM 私钥路径
+# TLS (optional) -- when configured the server listens with WSS/HTTPS (main.rs:363 bind_rustls).
+# Default = the whole section absent = pure HTTP/WS. Effective on restart (read at startup, no hot updates). No serde defaults on sub-keys; once tls is enabled
+# both files are required and a missing file fails at startup:
+#   cert_path  required  PEM certificate chain path
+#   key_path   required  PEM private key path
 # tls:
 #   cert_path: "/etc/certs/server.crt"
 #   key_path: "/etc/certs/server.key"
 
-# 注册表相对路径 = 相对本文件所在目录解析（main.rs resolve_path）。
-# 管理面：/api/admin/devices* /api/admin/accounts* 热生效（C33），禁止手改+重启。
+# Registry relative paths resolve relative to this file's directory (main.rs resolve_path).
+# Management plane: /api/admin/devices* /api/admin/accounts* hot effect (C33); manual edits + restart forbidden.
 devices_file: "devices.yaml"
 accounts_file: "accounts.yaml"
 
-# API-key 免账号凭证（accountless-client-auth T1，POST /api/auth/exchange 换短 JWT 的源）。
-# 缺省=本文件同目录 api_keys.yaml；文件缺失=空注册表（exchange 恒 401，账号/PSK/设备通路零影响）。
-# 生效：路径重启（main.rs 建服加载）；表内容经 /api/admin API-key 端点热生效（C33 同纪律）。
+# API-key credential path without accounts (accountless-client-auth T1, the source exchanged via POST /api/auth/exchange for a short JWT).
+# Default = api_keys.yaml next to this file; missing file = empty registry (exchange always 401; account/PSK/device paths unaffected).
+# Effective: the path on restart (main.rs loads it when building the server); table content hot via /api/admin API-key endpoints (C33 discipline).
 # api_keys_file: "api_keys.yaml"
-# exchange 签发 JWT 存活秒数。缺省 43200=12h（对齐账号登录 TTL；吊销粒度=已发 JWT 至 exp 自然死 F10）。
-# 生效：重启（main.rs 读入 state.api_token_ttl_secs）。
+# exchange-issued JWT lifetime in seconds. Default 43200 = 12h (aligned with account login TTL; revocation granularity = issued JWTs die naturally at exp, F10).
+# Effective: restart (main.rs reads into state.api_token_ttl_secs).
 # api_token_ttl_secs: 43200
 
-# SFU 对外公告地址（mediasoup 0.0.0.0 必须配 announced——PIT-44/58/138；C38 排查层①）。
-# 不配 = 自动探测出网 IP（裸机可整段省略本 sfu 段）；容器内探测不可达 = 必配（PIT-44/58/138）。
-# 优先级: env MEDIASERVO_SFU_ANNOUNCED_IP（逗号分隔多 IP）> 此处 > 自动探测。
+# SFU advertised address (mediasoup on 0.0.0.0 requires announced -- PIT-44/58/138; C38 triage layer 1).
+# Unset = auto-detect the outbound IP (bare metal may omit the whole sfu section); in-container detection unreachable = must configure (PIT-44/58/138).
+# Priority: env MEDIASERVO_SFU_ANNOUNCED_IP (comma-separated multi-IP) > here > auto-detect.
 # sfu:
 #   announced_ips:
 #     - "192.168.0.10"
 
-# Web 静态层（caddy）——缺省 8080 / 实例 web/；env MEDIASERVO_WEB_PORT 兜底（yaml 配置优先，C35 同形）。
-# 生效：渲染期一次性——改 port 后需删 etc/Caddyfile 重 init（Caddyfile 是渲染产物，不随 yaml 自动重生成）。
+# Web static layer (caddy) -- default 8080 / instance web/; env MEDIASERVO_WEB_PORT fallback (yaml config wins, same shape as C35).
+# Effective: one-shot at render time -- after changing the port, delete etc/Caddyfile and re-init (the Caddyfile is a render product and is not auto-regenerated from yaml).
 # web:
-#   port: 8080              # 缺省 8080（env MEDIASERVO_WEB_PORT 兜底）
+#   port: 8080              # default 8080 (env MEDIASERVO_WEB_PORT fallback)
 #   static_root: "/abs/web"
 
-# SFU/weaknet 端口 —— 缺省 20000 / 9810（env MEDIASERVO_SFU_PORT 兜底 sfu.port）。
+# SFU/weaknet ports -- default 20000 / 9810 (env MEDIASERVO_SFU_PORT falls back to sfu.port).
 # sfu:
 #   port: 20000
 #   weaknet_port: 9811
 "#;
 
-/// devices.yaml 空注册表模板（prod-safe——无占位设备；注册走 admin API C33）。
-pub const DEVICES_TEMPLATE: &str = r#"# MSRTC G2 设备注册表（mediaservo-server init 生成——已存在不覆盖，PIT-160）
-# 注册/吊销/重置：Admin Dashboard /devices 或 POST /api/admin/devices*（热生效，C33）。
-# 手工格式：devices: {<device_id>: {secret_hash: "sha256:<64hex>"}}，
-#   secret_hash = sha256("<device_id>:<device_secret>")。
+/// devices.yaml empty-registry template (prod-safe -- no placeholder devices; registration goes through the admin API, C33).
+pub const DEVICES_TEMPLATE: &str = r#"# MSRTC G2 device registry (generated by mediaservo-server init -- never overwritten if present, PIT-160)
+# Register/revoke/reset: Admin Dashboard /devices or POST /api/admin/devices* (hot effect, C33).
+# Manual format: devices: {<device_id>: {secret_hash: "sha256:<64hex>"}},
+#   secret_hash = sha256("<device_id>:<device_secret>").
 devices: {}
 "#;
 
-/// accounts.yaml 空账号表模板（prod-safe——禁 dev 占位，对齐 entrypoint ③ 语义）。
-pub const ACCOUNTS_TEMPLATE: &str = r#"# MSRTC G3 舱端账号注册表（mediaservo-server init 生成——已存在不覆盖，PIT-160）
-# 建号/角色：Admin Dashboard /accounts 或 POST /api/admin/accounts*（热生效，C33）。
-# 首启登录：server 日志的 setup-token 行（admin_jwt_secret 派生）。
-# 手工格式：accounts: {<user>: {password_hash: "sha256:<64hex>", role: <admin|dispatcher|operator|viewer>, vehicles: []}}，
-#   password_hash = sha256("<user>:<password>")。
+/// accounts.yaml empty account table template (prod-safe -- no dev placeholders, aligned with entrypoint 3 semantics).
+pub const ACCOUNTS_TEMPLATE: &str = r#"# MSRTC G3 cockpit account registry (generated by mediaservo-server init -- never overwritten if present, PIT-160)
+# Create accounts/roles: Admin Dashboard /accounts or POST /api/admin/accounts* (hot effect, C33).
+# First-boot login: the setup-token line in the server log (derived from admin_jwt_secret).
+# Manual format: accounts: {<user>: {password_hash: "sha256:<64hex>", role: <admin|dispatcher|operator|viewer>, vehicles: []}},
+#   password_hash = sha256("<user>:<password>").
 accounts: {}
 "#;
 
-/// web 层 Caddyfile 模板（与 deploy/caddy/Caddyfile.native 同源，T4 产出）。
-/// 占位符 init 渲染为具体值（oxmgr 拉起的 caddy 不继承 CLI env，必须去 env 占位）。
-pub const CADDYFILE_TEMPLATE: &str = r#"# MSRTC server 实例 web 层（mediaservo-server init 生成——已存在不覆盖，PIT-160）
-# 静态 __WEB_ROOT__ + API/WS/探针反代 __BACKEND__（D-2=B：本代理只服务浏览器，host 直连 9800 不变）
-# flush_interval -1 = WS 长连不被掐（T11 门）；SPA fallback + 缓存头（T4）
+/// web-layer Caddyfile template (same source as deploy/caddy/Caddyfile.native, T4 output).
+/// Placeholders are rendered to concrete values at init (the caddy started by oxmgr does not inherit CLI env, so env placeholders must go).
+pub const CADDYFILE_TEMPLATE: &str = r#"# MSRTC server instance web layer (generated by mediaservo-server init -- never overwritten if present, PIT-160)
+# Static __WEB_ROOT__ + API/WS/probe reverse proxy __BACKEND__ (D-2=B: this proxy serves the browser only; host direct-connect on 9800 unchanged)
+# flush_interval -1 = WS long connections are not cut (the T11 gate); SPA fallback + cache headers (T4)
 __WEB_ADDR__ {
 	@api path /api/* /ws /health /ready /stats /metrics
 	handle @api {
@@ -174,10 +174,10 @@ __WEB_ADDR__ {
 			flush_interval -1
 		}
 	}
-	# weaknet 面板反代（D3.1 实测定稿形，Caddy 2.9.1——`uri replace_prefix` 不存在故 handle_path）。
-	# 上游 = __WEAKNET_BACKEND__ 渲染字面量（生成形不吃 env [w批2 F3②]：oxmgr 拉的 caddy 不继承
-	# CLI env，{$VAR} 占位会被当主机名字面量）。header_up Host 重写 = serve Host 白名单放行
-	# （sF1 BLOCKER 修；rebinding 防御职责转移 token 门）。裸 /weaknet 经 @wnroot redir 保 query [wW4]。
+	# weaknet panel reverse proxy (D3.1 live-tested shape, Caddy 2.9.1 -- handle_path because `uri replace_prefix` does not exist).
+	# Upstream = the __WEAKNET_BACKEND__ render literal (generated form must not eat env [w batch2 F3 2]: the caddy started by oxmgr does not inherit
+	# CLI env, so {$VAR} placeholders would be taken as host-name literals). The header_up Host rewrite = the serve Host allowlist pass
+	# (the sF1 BLOCKER fix; rebinding defense shifts to the token gate). A bare /weaknet goes through the @wnroot redir preserving the query [wW4].
 	@wnroot path /weaknet
 	redir @wnroot "/weaknet/?{query}" 308
 	handle_path /weaknet/* {
@@ -205,9 +205,9 @@ __WEB_ADDR__ {
 }
 "#;
 
-/// oxfile 静态模板（2~3 进程——web/weaknet 可选，免翻译层，design.md「修正版」）。
-/// 无 watch：server.yaml 变更 = 人工 restart（热生效项走 admin API C33——psk 轮换会重写
-/// server.yaml，watch 会触发重启风暴，此处刻意不加）。
+/// oxfile static template (2~3 processes -- web/weaknet optional, no translation layer, design.md "revised").
+/// No watch: a server.yaml change = manual restart (hot-effect items go through the admin API C33 -- psk rotation rewrites
+/// server.yaml, and a watch would trigger a restart storm; deliberately omitted here).
 pub fn render_oxfile(
     dir_abs: &Path,
     server_bin: &Path,
@@ -221,8 +221,8 @@ pub fn render_oxfile(
     let server_app = server_product();
     let web_app = server_web_app();
     let mut out = format!(
-        "# mediaservo-server init 生成——静态模板（2~3 条目，weaknet 条件渲染；变更拓扑=改本文件+restart）\n\
-         # 注意: 本文件 init 后不自动重渲染（手工 env 编辑保留），删掉后 start 会重新生成\n\
+        "# generated by mediaservo-server init -- static template (2~3 entries, weaknet conditional render; topology change = edit this file + restart)\n\
+         # note: this file is NOT auto re-rendered after init (manual env edits preserved); delete it and start regenerates\n\
          version = 1\n\n[defaults]\nnamespace = \"{}\"\nrestart_policy = \"always\"\ncwd = \"{dir}\"\n",
         server_namespace()
     );
@@ -241,51 +241,51 @@ pub fn render_oxfile(
         "\n[[apps]]\nname = \"{web_app}\"\ncommand = \"{caddy_cmd} run --config {dir}/etc/Caddyfile --adapter caddyfile\"\nrestart_policy = \"always\"\n"
     ));
     push_logs(&mut out, &web_app, &log_dir);
-    // weaknet-serve 第三条目（D2）——**条件渲染职责钉死于此 [M-1]**：在场判定单点=扫
-    // {dir}/bin（fresh-init 与 .bak 重渲两路共用本函数；Python 只拷贝+WARN 无渲染杠杆）。
-    // 缺位不写条目——杜绝 restart_policy=always 对缺文件的空转风暴 [bF1]。
-    // 不变式两行（[sF3/D5-2]，unit 与代码注释同款）：
-    //   ① 恒 loopback —— IP 恒 127.0.0.1 不变（端口可配 = server.yaml `sfu.weaknet_port`，
-    //      config-unification P1；缺省 9810）；
-    //   ② 恒禁 --lan —— Origin 门按 listen 地址比对浏览器 Origin，反代下必失配
-    //      （curl 通/浏览器死的排障黑洞）；对外唯一路径 = Caddy 同源反代 + Host 重写。
+    // weaknet-serve third entry (D2) -- **conditional-rendering duty pinned here [M-1]**: the single presence check = scanning
+    // {dir}/bin (the fresh-init and .bak re-render paths share this function; Python only copies + WARNs, no rendering leverage).
+    // Missing bin -> no entry written -- forestalling the restart_policy=always idle storm on missing files [bF1].
+    // Two invariant lines ([sF3/D5-2], same wording as the unit and code comments):
+    //   1. always loopback -- the IP is always 127.0.0.1 (port configurable = server.yaml `sfu.weaknet_port`,`
+    //      config-unification P1; default 9810);
+    //   2. --lan always forbidden -- the Origin gate compares the browser Origin against the listen address; under a reverse proxy it always mismatches
+    //      (the "curl works / browser dead" triage black hole); the only external path = the Caddy same-origin reverse proxy + Host rewrite.
     if let Some(wnet) = discover_weaknet_bin(&dir_abs.join("bin")) {
         let wnet_path = wnet.to_string_lossy();
         out.push_str(&format!(
             "\n[[apps]]\nname = \"{WEAKNET_APP}\"\ncommand = \"{wnet_path} serve --listen {} --token-file {dir}/run/weaknet.token\"\nrestart_policy = \"always\"\n",
             weaknet_listen(weaknet_port)
         ));
-        // 单 state 合同 [bF8/lck-F3]：oxmgr unit 不继承 CLI env——WEAKNET_STATEDIR（weaknet
-        // state.rs 解析链首位 env 真名，非 WEAKNET_HOME [BA-5 勘误]）烘 {dir}/run/weaknet，
-        // 簇与 CLI 同 state 面（面板看得见 CLI 施压、clear 打得着、撤网撤全）。token-file/
-        // statedir 绝对形 [mn6]（OxMgr 相对路径坑——push_logs 同训）；重渲模板值优先、
-        // carried_env 只补缺键 [lck-F14]。
+        // Single-state contract [bF8/lck-F3]: the oxmgr unit does not inherit CLI env -- WEAKNET_STATEDIR (the first env in weaknet
+        // state.rs's resolution chain, not WEAKNET_HOME [BA-5 correction]) is baked to {dir}/run/weaknet,
+        // so the cluster and the CLI share one state surface (the panel sees CLI pressure, clear reaches it, teardown tears it all). token-file/
+        // statedir absolute forms [mn6] (the OxMgr relative-path trap -- same lesson as push_logs); on re-render the template value wins,
+        // carried_env only fills missing keys [lck-F14].
         out.push_str(&format!("[apps.env]\n{WEAKNET_STATEDIR_KEY} = \"{dir}/run/weaknet\"\n"));
         push_logs(&mut out, WEAKNET_APP, &log_dir);
     }
     out
 }
 
-/// SFU env 透传键集——`sfu_env_passthrough()` 恰按本清单读 env 渲染（drill/多实例端口隔离）。
+/// SFU env passthrough key set -- `sfu_env_passthrough()` reads env and renders exactly per this list (drill/multi-instance port isolation).
 pub const SFU_ENV_KEYS: [&str; 2] = ["MEDIASERVO_SFU_PORT", "MEDIASERVO_SFU_ANNOUNCED_IP"];
 
-/// `WEAKNET_STATEDIR` 键名——render_oxfile 烘值行与本集共用此字面量（结构级防漂移）。
+/// The `WEAKNET_STATEDIR` key name -- the render_oxfile baked-value line and this set share the literal (structural drift prevention).
 pub const WEAKNET_STATEDIR_KEY: &str = "WEAKNET_STATEDIR";
 
-/// 渲染器受管键全集 = SFU 透传两键 + weaknet statedir 烘值——**merge 排除集**：本集键的
-/// 旧值 = 上次渲染输出而非用户手改，永不从旧/bak 文件复活（baked-wins；与 Python
-/// [lck-F14]「模板烘值优先、carried 只补缺」同构——T4 尾刀裁决），且不计入「已合并 N 条」。
+/// The renderer's full managed-key set = the two SFU passthrough keys + the weaknet statedir baked value -- the **merge exclusion set**: old values of
+/// keys in this set are last-render output, not user edits, and are never revived from old/bak files (baked-wins; isomorphic with the Python
+/// [lck-F14] "template baked values win, carried only fills gaps" -- the T4 final-cut ruling), and they are not counted in the "merged N entries" count.
 pub const MANAGED_ENV_KEYS: [&str; SFU_ENV_KEYS.len() + 1] =
     [SFU_ENV_KEYS[0], SFU_ENV_KEYS[1], WEAKNET_STATEDIR_KEY];
 
-/// 文本是否 render_oxfile 形（`[[apps]]` 条目标记）？否 = 损坏/外来旧文件——调用方降级纯渲染 + WARN。
+/// Is the text render_oxfile-shaped (an `[[apps]]` entry marker)? No = corrupt/foreign old file -- the caller degrades to pure render + WARN.
 pub fn looks_like_oxfile(text: &str) -> bool {
     text.contains("[[apps]]")
 }
 
-/// 一条 `[apps.env]` 条目——按 app 归属所属 `[[apps]]` 条目（放错=死变量：
-/// WEAKNET_ADMIN_PASS 只在 weaknet 条目下生效、dev 三行在 server 条目下——Python
-/// `_reapply_carried_env` 同款 per-app 合同）。
+/// An `[apps.env]` entry -- must belong to its owning `[[apps]]` entry (misplaced = dead variable:
+/// WEAKNET_ADMIN_PASS only works under the weaknet entry, the dev three lines under the server entry -- the Python
+/// `_reapply_carried_env` per-app contract, same shape).
 #[derive(PartialEq, Eq)]
 struct EnvEntry {
     app: String,
@@ -293,9 +293,9 @@ struct EnvEntry {
     value: String,
 }
 
-/// 同格式约定行形解析（= render_oxfile 输出形）：`[apps.env]` 块表内的
-/// `KEY = "VALUE"` 行，下一 `[` 起始行终止表；`[[apps]]` 头后首个 `name = "..."`
-/// 行认条目名。非此形行（数字/内联表/坏行）跳过——容错，永不报错。
+/// Same-format convention line parsing (= the render_oxfile output form): `KEY = "VALUE"` lines inside
+/// an `[apps.env]` block table, terminated by the next line starting with `[`; the entry name is the first `name = "..."`
+/// line after an `[[apps]]` header. Lines of other shapes (numbers/inline tables/broken lines) are skipped -- tolerant, never errors.
 fn parse_env_entries(text: &str) -> Vec<EnvEntry> {
     let mut out = Vec::new();
     let mut app: Option<String> = None;
@@ -327,14 +327,14 @@ fn parse_env_entries(text: &str) -> Vec<EnvEntry> {
     out
 }
 
-/// `KEY = "quoted value"` → (key, 解转义 value)；非双引号基字符串形 → None。
+/// `KEY = "quoted value"` -> (key, unescaped value); non-double-quoted basic-string shapes -> None.
 fn parse_quoted_kv(t: &str) -> Option<(String, String)> {
     let (k, v) = t.split_once('=')?;
     let inner = v.trim().strip_prefix('"')?.strip_suffix('"')?;
     Some((k.trim().to_string(), unescape_toml(inner)))
 }
 
-/// TOML 基本串最小转义：仅 `\` 与 `"`（Task 4 步 5 裁决——不发明全 Unicode 转义族）。
+/// Minimal TOML basic-string escaping: only `\` and `"` (the Task 4 step 5 ruling -- no invented full-Unicode escape family).
 fn escape_toml(s: &str) -> String {
     let mut o = String::with_capacity(s.len() + 2);
     for c in s.chars() {
@@ -347,9 +347,9 @@ fn escape_toml(s: &str) -> String {
     o
 }
 
-/// escape_toml 之逆：`\\`/`\"` → 字面字符；其余反斜杠序列按两字符原样保留。
-/// （render 地面形只产这两类；手写文件若用 `\\n` 形转义不承诺解释为换行——再转义时多叠一层，
-/// 值语义不变、文件不坏。）
+/// The inverse of escape_toml: `\\`/`\"` -> literal chars; other backslash sequences kept verbatim as two chars.
+/// (The render ground form only produces these two; handwritten files using `\\n`-style escapes are not promised to decode as newlines -- re-escaping adds one more layer,
+/// the value semantics are unchanged and the file is not corrupted.)
 fn unescape_toml(s: &str) -> String {
     let mut o = String::with_capacity(s.len());
     let mut it = s.chars();
@@ -369,8 +369,8 @@ fn unescape_toml(s: &str) -> String {
     o
 }
 
-/// 参与合并的手工 env (app, key) 清单：MANAGED_ENV_KEYS（渲染器受管全集）排除、(app,key) 首现去重。
-/// write_oxfile 用旧/新两侧本清单做头差 = 已合并 / 未并（新渲染无对应条目）计数。
+/// The manual env (app, key) list participating in the merge: MANAGED_ENV_KEYS (the renderer's full managed set) excluded, (app,key) deduped on first occurrence.
+/// write_oxfile diffs this list old vs new to produce the merged / not-merged (new render lacks the entry) counts.
 pub fn manual_env_keys(text: &str) -> Vec<(String, String)> {
     let mut seen: Vec<(String, String)> = Vec::new();
     for e in parse_env_entries(text) {
@@ -384,11 +384,11 @@ pub fn manual_env_keys(text: &str) -> Vec<(String, String)> {
     seen
 }
 
-/// PIT-160 根修核心纯函数：旧（live 或 .bak）oxfile 的手工 [apps.env] 键并入新渲染文本。
-/// 规则（PLAN §2.4 + 尾刀裁决）：渲染器受管键（MANAGED_ENV_KEYS）不参与——旧值=上次渲染
-/// 遗留，复活压死新配置（baked-wins）；其余键冲突 **旧值优先**（用户手改=用户意图）；缺键追加所属 app 条目 env 表尾
-/// （无表则在 [apps.logs] 前新建——与 render 同槽位）；旧条目在新渲染缺位 → 不并
-/// （调用方提示行报「另有 N 条」）。新渲染其余行逐字保留。
+/// The PIT-160 root-fix core pure function: merge the old (live or .bak) oxfile's manual [apps.env] keys into the new render text.
+/// Rules (PLAN S2.4 + final-cut ruling): the renderer's managed keys (MANAGED_ENV_KEYS) do not participate -- old values are last-render
+/// leftovers and would revive over the new config (baked-wins); for other keys, conflicts take **the old value first** (a user edit = user intent); missing keys are appended to the owning app entry's env table tail
+/// (or a new table is created before [apps.logs] -- the same slot as render); old entries absent from the new render are not merged
+/// (the caller's note line reports "additionally N entries"). All other new-render lines are preserved verbatim.
 pub fn merge_manual_env(old_text: &str, new_text: &str) -> String {
     let entries: Vec<EnvEntry> = parse_env_entries(old_text)
         .into_iter()
@@ -401,10 +401,10 @@ pub fn merge_manual_env(old_text: &str, new_text: &str) -> String {
     let mut done: Vec<(String, String)> = Vec::new();
     for e in entries {
         if done.iter().any(|(a, k)| a == &e.app && k == &e.key) {
-            continue; // 同条目重复键首现即得（合法 TOML 不产生，防手工损形双应用）
+            continue; // first occurrence wins for duplicate keys in the same entry (legal TOML would not produce it; guards against double-apply of a mangled hand edit)
         }
         let Some((start, end)) = app_block(&lines, &e.app) else {
-            continue; // 新渲染无此 app 条目（品牌改名形态）→ 不并，计 lost
+            continue; // the new render has no entry for this app (brand-rename shape) -> not merged, counted as lost
         };
         done.push((e.app.clone(), e.key.clone()));
         let line = format!("{} = \"{}\"", e.key, escape_toml(&e.value));
@@ -429,7 +429,7 @@ pub fn merge_manual_env(old_text: &str, new_text: &str) -> String {
     out
 }
 
-/// 指定条目名的 [[apps]] 块行范围 [start,end)：判据=块内含 `name = "<app>"` 行（render 地面形精确）。
+/// The [[apps]] block line range [start,end) for a named entry: predicate = the block contains a `name = "<app>"` line (exact for the render ground form).
 fn app_block(lines: &[String], app: &str) -> Option<(usize, usize)> {
     let want = format!("name = \"{app}\"");
     let mut i = 0;
@@ -450,23 +450,23 @@ fn app_block(lines: &[String], app: &str) -> Option<(usize, usize)> {
     None
 }
 
-/// 条目内 [apps.env] 表：(头索引, 表尾索引)——表尾=头后首个 `[` 起始行，无则条目尾。
+/// The entry's [apps.env] table: (header index, table end index) -- table end = the first line starting with `[` after the header, else the entry end.
 fn env_table(lines: &[String], start: usize, end: usize) -> Option<(usize, usize)> {
     let h = (start..end).find(|&i| lines[i].trim() == "[apps.env]")?;
     let t = (h + 1..end).find(|&i| lines[i].trim().starts_with('[')).unwrap_or(end);
     Some((h, t))
 }
 
-/// `KEY = ...` 行的键部分（merge 行定位；无 `=` → None）。
+/// The key part of a `KEY = ...` line (merge line location; no `=` -> None).
 fn line_key(line: &str) -> Option<String> {
     line.split_once('=').map(|(k, _)| k.trim().to_string())
 }
 
-/// weaknet bin 在场扫描（条件渲染输入）：品牌派生名优先（= Python `_weaknet_bin_name` 同构：
-/// `{brand}-weaknet`，brand 读同一 MEDIASERVO_BRAND env/编译期值——deploy 装配产物名），
-/// 上游名 mediaservo-weaknet 兜底（keeper 双名 [BA-2①]；brand 空 = 两名同串）。
-/// 不 glob 任意 `*-weaknet`——旧品牌残件由 deploy 白名单清理，指过去=死路径。
-/// `-x` 判定（is_executable 与 lifecycle::which 同源），防非可执行残档假在场。
+/// weaknet bin presence scan (conditional-render input): the brand-derived name first (= isomorphic to Python `_weaknet_bin_name`:
+/// `{brand}-weaknet`, brand read from the same MEDIASERVO_BRAND env/compile-time value -- the deploy assembly product name),
+/// upstream name mediaservo-weaknet as fallback (keeper dual names [BA-2 1]; empty brand = both names the same string).
+/// No globbing of arbitrary `*-weaknet` -- old-brand leftovers are cleaned by the deploy allowlist; pointing at them = a dead path.
+/// The `-x` check (is_executable same source as lifecycle::which) prevents a non-executable stale file from faking presence.
 fn discover_weaknet_bin(dir_bin: &Path) -> Option<std::path::PathBuf> {
     let exe = std::env::consts::EXE_SUFFIX;
     let branded = format!("{}weaknet{exe}", brand::media_brand().bin_prefix);
@@ -477,7 +477,7 @@ fn discover_weaknet_bin(dir_bin: &Path) -> Option<std::path::PathBuf> {
         .find(|p| p.is_file() && super::is_executable(p))
 }
 
-/// 日志绝对路径（实例 run/logs——OxMgr 按 daemon cwd 解析相对路径的坑，host translate 同训）。
+/// Absolute log paths (instance run/logs -- the OxMgr pitfall of resolving relative paths against the daemon's cwd; same lesson as host translate).
 fn push_logs(out: &mut String, name: &str, log_dir: &str) {
     out.push_str(&format!(
         "[apps.logs]\nstdout = \"{log_dir}/{name}.out.log\"\nstderr = \"{log_dir}/{name}.err.log\"\n"
@@ -488,8 +488,8 @@ pub fn render_server_yaml(psk: &str, jwt: &str) -> String {
     SERVER_YAML_TEMPLATE.replace("__PSK__", psk).replace("__JWT__", jwt)
 }
 
-/// 渲染 web Caddyfile。`weaknet_backend` = 面板上游 host:port 字面量（init 传
-/// `weaknet_listen(port)`（config-unification P1 端口可配）；生成形不吃 env [w批2 F3②]）。
+/// Render the web Caddyfile. `weaknet_backend` = the panel upstream host:port literal (init passes
+/// `weaknet_listen(port)` (config-unification P1 port configurable); the generated form must not eat env [w batch2 F3 2]).
 pub fn render_caddyfile(
     web_port: u16,
     backend_port: u16,
@@ -503,12 +503,12 @@ pub fn render_caddyfile(
         .replace("__WEB_ROOT__", &web_root.to_string_lossy())
 }
 
-/// 凭据生成（compose entrypoint `openssl rand -hex 32` 的原生等价——uuid v4 双拼 = 64 hex）。
+/// Credential generation (the native equivalent of the compose entrypoint's `openssl rand -hex 32` -- uuid v4 doubled = 64 hex).
 pub fn gen_secret() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
-/// admin 引导账号行（entrypoint ⑤ 语义归位：sha256("<user>:<password>")）。
+/// admin bootstrap account line (entrypoint 5 semantics folded in: sha256("<user>:<password>")).
 pub fn render_admin_account(user: &str, password: &str) -> String {
     let mut h = Sha256::new();
     h.update(format!("{user}:{password}").as_bytes());
@@ -516,16 +516,16 @@ pub fn render_admin_account(user: &str, password: &str) -> String {
     format!("  {user}:\n    password_hash: \"sha256:{hex}\"\n    role: admin\n")
 }
 
-// ── 解析（status/doctor 消费；纯函数）───────────────────────────────────────
+// -- Parsing (consumed by status/doctor; pure functions) ------------------------------------
 
-/// server.yaml 文本 → listen.port（解析失败 None——调用方决定回退/报错）。
+/// server.yaml text -> listen.port (parse failure None -- the caller decides fallback/error).
 pub fn parse_listen_port(yaml: &str) -> Option<u16> {
     serde_yaml::from_str::<mediaservo_common::config::ServerConfig>(yaml)
         .ok()
         .map(|c| c.listen.port)
 }
 
-/// Caddyfile 文本 → 站点端口（首个 `:NNNN` 行；渲染/手工编辑双兼容）。
+/// Caddyfile text -> site port (the first `:NNNN` line; compatible with both render and hand edits).
 pub fn parse_web_port(caddyfile: &str) -> Option<u16> {
     caddyfile.lines().find_map(|l| {
         let t = l.trim();
@@ -535,7 +535,7 @@ pub fn parse_web_port(caddyfile: &str) -> Option<u16> {
     })
 }
 
-/// Caddyfile 文本 → 静态 root 路径（`root * <path>` 行——doctor dist 检查用）。
+/// Caddyfile text -> static root path (the `root * <path>` line -- used by the doctor dist check).
 pub fn parse_web_root(caddyfile: &str) -> Option<String> {
     caddyfile.lines().find_map(|l| {
         let t = l.trim();
@@ -543,7 +543,7 @@ pub fn parse_web_root(caddyfile: &str) -> Option<String> {
     })
 }
 
-/// 解析后的配置 → env 优先合并（与 main.rs 兜底序一致：env > yaml，C35 注释锚定）。
+/// Parsed config -> env-first merge (same order as the main.rs fallback: env > yaml, C35 comment anchor).
 pub fn effective_announced(present_in_yaml: bool) -> bool {
     present_in_yaml || std::env::var("MEDIASERVO_SFU_ANNOUNCED_IP").is_ok()
 }
@@ -568,13 +568,13 @@ mod tests {
             &[("MEDIASERVO_SFU_PORT".to_string(), "20012".to_string())],
             WEAKNET_SERVE_PORT,
         );
-        assert_eq!(a, b, "同输入必须逐字节一致");
+        assert_eq!(a, b, "same input must be byte-identical");
         assert!(a.contains("namespace = \"mediaservo-server\""));
         assert!(a.contains("run --config /opt/ms/etc/server.yaml"));
         assert!(a.contains("caddy run --config /opt/ms/etc/Caddyfile --adapter caddyfile"));
         assert!(a.contains("MEDIASERVO_SFU_PORT = \"20012\""));
         assert!(a.contains("/opt/ms/run/logs/mediaservo-server.out.log"));
-        // 不同目录 → 不同内容
+        // Different dirs -> different content
         let c = render_oxfile(
             Path::new("/other"),
             Path::new("/opt/ms/bin/mediaservo-server"),
@@ -610,7 +610,7 @@ mod tests {
         assert_ne!(s, gen_secret());
         let line = render_admin_account("admin", "pw");
         assert!(line.contains("role: admin"));
-        // sha256("admin:pw") 已知值（echo -n admin:pw | sha256sum）
+        // the known value of sha256("admin:pw") (echo -n admin:pw | sha256sum)
         assert!(line.contains("8f1e1766352d1c014616beb9dab85f1facd44b87affa68275744274967bf9fec"));
     }
 
@@ -618,7 +618,7 @@ mod tests {
     fn daemon_port_derivation_in_server_range() {
         for i in 0..50u32 {
             let p = instance_daemon_port(Path::new(&format!("/tmp/x{i}/run/oxmgr")));
-            assert!((18500..18900).contains(&p), "避开 host 18000-18399: {p}");
+            assert!((18500..18900).contains(&p), "must avoid host 18000-18399: {p}");
         }
     }
 
@@ -636,36 +636,39 @@ mod tests {
     #[test]
     fn oxfile_weaknet_conditional_render_present_absent() {
         let srv = Path::new("/x/bin/mediaservo-server");
-        // 缺位形：无 bin/ → 不写条目（防 restart_policy=always 空转风暴 [bF1]）
+        // Absent shape: no bin/ -> no entry (forestalling the restart_policy=always idle storm [bF1])
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path();
         let absent = render_oxfile(dir, srv, "caddy", &[], WEAKNET_SERVE_PORT);
-        assert!(!absent.contains(WEAKNET_APP), "bin 缺位必须无条件渲染为无条目");
+        assert!(
+            !absent.contains(WEAKNET_APP),
+            "missing bin must render unconditionally as no entry"
+        );
         assert!(!oxfile_has_weaknet(&absent));
-        // 在场形：上游名（默认品牌 mediaservo → branded==upstream 同串）
+        // Present shape: upstream name (default brand mediaservo -> branded == upstream, same string)
         touch_exec_bin(dir, "mediaservo-weaknet");
         let yes = render_oxfile(dir, srv, "caddy", &[], WEAKNET_SERVE_PORT);
         let d = dir.to_string_lossy().to_string();
-        assert!(oxfile_has_weaknet(&yes), "在场判定单点=render_oxfile [M-1]");
+        assert!(oxfile_has_weaknet(&yes), "presence check single point = render_oxfile [M-1]");
         assert!(
             yes.contains(&format!(
                 "command = \"{d}/bin/mediaservo-weaknet serve --listen {} --token-file {d}/run/weaknet.token\"",
                 weaknet_listen(WEAKNET_SERVE_PORT)
             )),
-            "全绝对形 [mn6] + token-file"
+            "fully absolute form [mn6] + token-file"
         );
         assert!(yes.contains(&format!("[apps.env]\nWEAKNET_STATEDIR = \"{d}/run/weaknet\"")));
         assert!(yes.contains(&format!("{d}/run/logs/{WEAKNET_APP}.out.log")));
-        assert!(!yes.contains("--lan"), "恒禁 --lan 硬门 [sF3]");
-        assert!(!yes.contains("{$"), "生成形不吃 env 占位");
-        // ours[2]：weaknet 必须排第三（server→web→weaknet——inspect ours 索引稳定 [mn10]）
+        assert!(!yes.contains("--lan"), "--lan always forbidden hard gate [sF3]");
+        assert!(!yes.contains("{$"), "the generated form must not eat env placeholders");
+        // ours[2]: weaknet must be third (server->web->weaknet -- stable inspect ours index [mn10])
         let (i_srv, i_web, i_wn) = (
             yes.find("name = \"mediaservo-server\"").unwrap(),
             yes.find("name = \"mediaservo-web\"").unwrap(),
             yes.find(&format!("name = \"{WEAKNET_APP}\"")).unwrap(),
         );
-        assert!(i_srv < i_web && i_web < i_wn, "条目序 = ours 序");
-        // restart_policy 同 server 条目
+        assert!(i_srv < i_web && i_web < i_wn, "entry order = ours order");
+        // restart_policy matches the server entry
         let blk = &yes[i_wn..];
         assert!(blk.contains("restart_policy = \"always\""));
     }
@@ -678,7 +681,7 @@ mod tests {
         let bin = dir.join("bin");
         std::fs::create_dir_all(&bin).expect("mkdir");
         std::fs::write(bin.join("mediaservo-weaknet"), b"x").expect("write");
-        // 0644 非可执行 → 不算在场
+        // 0644 non-executable -> not present
         let out = render_oxfile(
             dir,
             Path::new("/x/bin/mediaservo-server"),
@@ -686,7 +689,10 @@ mod tests {
             &[],
             WEAKNET_SERVE_PORT,
         );
-        assert!(!out.contains(WEAKNET_APP), "-x 判定：非可执行残档不得触发条目");
+        assert!(
+            !out.contains(WEAKNET_APP),
+            "the -x check: a non-executable stale file must not trigger the entry"
+        );
     }
 
     #[test]
@@ -701,15 +707,18 @@ mod tests {
         assert!(cf.contains("redir @wnroot \"/weaknet/?{query}\" 308"));
         assert!(cf.contains("handle_path /weaknet/*"));
         assert!(cf.contains("header_up Host {upstream_hostport}"));
-        assert!(cf.contains("reverse_proxy 127.0.0.1:9810"), "渲染字面量（缺省口）");
-        // 生成形不吃 env 占位 [w批2 F3②]（模板注释含 dollar-brace 字样是说明文，非指令）
-        assert!(!cf.contains(r"{$MSRTC"), "生成的反代上游必须是渲染字面量");
+        assert!(cf.contains("reverse_proxy 127.0.0.1:9810"), "render literal (default port)");
+        // the generated form must not eat env placeholders [w batch2 F3 2] (the template comment's dollar-brace text is prose, not an instruction)
+        assert!(
+            !cf.contains(r"{$MSRTC"),
+            "the generated reverse-proxy upstream must be a render literal"
+        );
         assert_eq!(weaknet_listen(WEAKNET_SERVE_PORT), "127.0.0.1:9810");
-        // 段序：@api 之后、静态 handle 之前
+        // Section order: after @api, before the static handle
         let i_api = cf.find("handle @api").unwrap();
         let i_wn = cf.find("handle_path /weaknet").unwrap();
         let i_static = cf.find("root * /opt/ms/web").unwrap();
-        assert!(i_api < i_wn && i_wn < i_static, "段序 @api → @weaknet → 静态");
+        assert!(i_api < i_wn && i_wn < i_static, "section order @api -> @weaknet -> static");
     }
 
     #[test]
@@ -736,13 +745,13 @@ mod tests {
 
     #[test]
     fn parse_weaknet_port_from_oxfile() {
-        // render → parse 闭环（自定义端口贯通）
+        // render -> parse round trip (custom port flows through)
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path();
         touch_exec_bin(dir, "mediaservo-weaknet");
         let out = render_oxfile(dir, Path::new("/x/bin/mediaservo-server"), "caddy", &[], 9811);
         assert_eq!(parse_weaknet_port(&out), Some(9811));
-        // 缺省口
+        // default port
         let out = render_oxfile(
             dir,
             Path::new("/x/bin/mediaservo-server"),
@@ -751,16 +760,16 @@ mod tests {
             WEAKNET_SERVE_PORT,
         );
         assert_eq!(parse_weaknet_port(&out), Some(9810));
-        // 无 weaknet 条目 → None
+        // no weaknet entry -> None
         let tmp2 = tempfile::tempdir().expect("tempdir");
         let none = render_oxfile(tmp2.path(), Path::new("/x/bin/s"), "caddy", &[], 9810);
         assert_eq!(parse_weaknet_port(&none), None);
         assert_eq!(parse_weaknet_port("garbage"), None);
     }
 
-    // ---- T4（PIT-160 根修）：merge_manual_env 纯函数组 ----
+    // ---- T4 (PIT-160 root fix): the merge_manual_env pure-function group ----
 
-    /// 真 render_oxfile 地面形（tempdir 无 bin/ → weaknet 条件渲染缺席路，确定性）。
+    /// A true render_oxfile ground form (tempdir without bin/ -> the weaknet-conditional-render-absent path, deterministic).
     fn t4_render(dir: &std::path::Path, server_env: &[(&str, &str)]) -> String {
         render_oxfile(
             dir,
@@ -771,7 +780,7 @@ mod tests {
         )
     }
 
-    /// server 条目 logs 表头两行——手工 env 表注入锚（render 的 [apps.env] 就位于 [apps.logs] 前）。
+    /// The server entry's logs-table first two lines -- the manual env table injection anchor (render puts [apps.env] before [apps.logs]).
     fn t4_logs_anchor(dir: &std::path::Path) -> String {
         format!(
             "[apps.logs]\nstdout = \"{}/run/logs/{}.out.log\"",
@@ -786,14 +795,23 @@ mod tests {
         let dir = tmp.path();
         let new = t4_render(dir, &[]);
         let anchor = t4_logs_anchor(dir);
-        assert!(new.contains(&anchor), "fixture 锚缺失（render 输出形已漂移）");
+        assert!(
+            new.contains(&anchor),
+            "fixture anchor missing (the render output form has drifted)"
+        );
         let old = new.replace(
             &anchor,
             &format!("[apps.env]\nALLOW_X = \"1\"\nMEDIASERVO_SFU_PORT = \"20012\"\n{anchor}"),
         );
         let merged = merge_manual_env(&old, &new);
-        assert!(merged.contains("ALLOW_X = \"1\""), "手工 env 键被重渲染丢失:\n{merged}");
-        assert!(!merged.contains("MEDIASERVO_SFU_PORT"), "系统键陈旧值复活压死了新渲染");
+        assert!(
+            merged.contains("ALLOW_X = \"1\""),
+            "the manual env key was lost in re-render:\n{merged}"
+        );
+        assert!(
+            !merged.contains("MEDIASERVO_SFU_PORT"),
+            "a stale system key revived and crushed the new render"
+        );
     }
 
     #[test]
@@ -803,12 +821,18 @@ mod tests {
         let new = t4_render(dir, &[("RUST_LOG", "system=new")]);
         assert!(
             new.contains("RUST_LOG = \"system=new\""),
-            "fixture: server_env 应渲染 RUST_LOG 行"
+            "fixture: server_env should render the RUST_LOG line"
         );
         let old = new.replace("RUST_LOG = \"system=new\"", "RUST_LOG = \"user=old\"");
         let merged = merge_manual_env(&old, &new);
-        assert!(merged.contains("RUST_LOG = \"user=old\""), "冲突应旧手工值优先:\n{merged}");
-        assert!(!merged.contains("system=new"), "旧值压制后不得残留新渲染值");
+        assert!(
+            merged.contains("RUST_LOG = \"user=old\""),
+            "conflicts take the old manual value first:\n{merged}"
+        );
+        assert!(
+            !merged.contains("system=new"),
+            "after the old value wins, the new render value must not linger"
+        );
     }
 
     #[test]
@@ -816,10 +840,16 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path();
         let new = t4_render(dir, &[]);
-        assert!(!looks_like_oxfile("!!! foreign @@@ not an oxfile"), "外来文本必须判不可识别");
-        assert!(looks_like_oxfile(&new), "render 本形必须可识别");
+        assert!(
+            !looks_like_oxfile("!!! foreign @@@ not an oxfile"),
+            "foreign text must be judged unrecognized"
+        );
+        assert!(looks_like_oxfile(&new), "the render's own form must be recognized");
         let merged = merge_manual_env("!!! foreign @@@ not an oxfile", &new);
-        assert_eq!(merged, new, "损坏/外来旧文件 → 纯渲染兜底，无 panic 无 error");
+        assert_eq!(
+            merged, new,
+            "corrupt/foreign old file -> pure-render fallback, no panic no error"
+        );
     }
 
     #[test]
@@ -828,43 +858,49 @@ mod tests {
         let dir = tmp.path();
         let new = t4_render(dir, &[]);
         let anchor = t4_logs_anchor(dir);
-        // 旧文本行形：RUST_LOG = "a\"b\\c"（值 = a"b\c）
+        // Old text line: RUST_LOG = "a\"b\\c" (value = a"b\c)
         let old =
             new.replace(&anchor, &format!("[apps.env]\nRUST_LOG = \"a\\\"b\\\\c\"\n{anchor}"));
-        assert!(old.contains(r#"RUST_LOG = "a\"b\\c""#), "fixture 注入失败");
+        assert!(old.contains(r#"RUST_LOG = "a\"b\\c""#), "fixture injection failed");
         let merged = merge_manual_env(&old, &new);
         assert!(
             merged.contains(r#"RUST_LOG = "a\"b\\c""#),
-            "转义往返变形（解转义/再转义破坏值）:\n{merged}"
+            "escape round-trip mangled the value (unescape/re-escape broke it):\n{merged}"
         );
     }
 
     #[cfg(unix)]
     #[test]
     fn t4f_baked_statedir_wins_and_never_counted() {
-        // 尾刀裁决（baked-wins）：WEAKNET_STATEDIR=render_oxfile 每轮烘值，旧/bak 形
-        // 即便在场也不得复活旧值，且不计入「已合并 N 条手工 env」。
+        // Final-cut ruling (baked-wins): WEAKNET_STATEDIR is baked by render_oxfile every round; even if present in the old/bak form
+        // it must not revive the old value, and it is not counted in "merged N manual env entries".
         let tmp = tempfile::tempdir().expect("tempdir");
         touch_exec_bin(tmp.path(), "mediaservo-weaknet");
         let new = t4_render(tmp.path(), &[]);
         let baked =
             format!("{WEAKNET_STATEDIR_KEY} = \"{}/run/weaknet\"", tmp.path().to_string_lossy());
-        assert!(new.contains(&baked), "fixture: weaknet 条目烘值行在场");
+        assert!(new.contains(&baked), "fixture: the weaknet entry's baked-value line is present");
         let old = new
             .replace(&baked, &format!("WEAKNET_STATEDIR = \"/old/tree/run/weaknet\""))
             .replacen("[apps.logs]", "[apps.env]\nALLOW_X = \"1\"\n[apps.logs]", 1);
-        assert!(old.contains("/old/tree") && old.contains("ALLOW_X"), "fixture 注入失败");
+        assert!(old.contains("/old/tree") && old.contains("ALLOW_X"), "fixture injection failed");
         let merged = merge_manual_env(&old, &new);
-        assert!(merged.contains(&baked), "烘值优先，旧 statedir 不得覆盖新烘值:\n{merged}");
-        assert!(!merged.contains("/old/tree/run/weaknet"), "旧 statedir 值不复活");
-        assert!(merged.contains("ALLOW_X = \"1\""), "真手工键照常合并");
+        assert!(
+            merged.contains(&baked),
+            "baked values win; the old statedir must not override the new baked value:\n{merged}"
+        );
+        assert!(
+            !merged.contains("/old/tree/run/weaknet"),
+            "the old statedir value does not revive"
+        );
+        assert!(merged.contains("ALLOW_X = \"1\""), "genuine manual keys still merge");
         let keys = manual_env_keys(&old);
-        assert_eq!(keys.len(), 1, "N 统计不收烘值键: {keys:?}");
+        assert_eq!(keys.len(), 1, "the N tally does not accept baked keys: {keys:?}");
     }
 
     #[test]
     fn sfu_defaults_match_templates() {
-        // 常量与 serde 缺省互证（防漂移）
+        // Constants cross-verified against serde defaults (drift prevention)
         assert_eq!(WEAKNET_SERVE_PORT, 9810);
         assert_eq!(DEFAULT_WEB_PORT, 8080);
         use mediaservo_common::config::{ServerConfig, SfuConfig, WebConfig};
@@ -877,7 +913,7 @@ mod tests {
 
     #[test]
     fn new_template_roundtrip() {
-        // 模板（含新注释块）解析 ✓ 且新键全 None + 往返全等
+        // The template (with the new comment block) parses OK and all new keys are None + round-trip equal
         use mediaservo_common::config::ServerConfig;
         let yaml = render_server_yaml("p", "j");
         let cfg: ServerConfig = serde_yaml::from_str(&yaml).expect("template must parse");
@@ -885,8 +921,8 @@ mod tests {
         assert_eq!(cfg.web.static_root, None);
         assert_eq!(cfg.sfu.port, None);
         assert_eq!(cfg.sfu.weaknet_port, None);
-        // T6a 注释补全四字段解析后取 serde 缺省（注释示例不得被激活）
-        assert!(cfg.tls.is_none(), "tls 注释示例不应被激活");
+        // T6a: after parsing the four newly-commented fields, take the serde defaults (commented examples must not be activated)
+        assert!(cfg.tls.is_none(), "the tls commented example must not be activated");
         assert!(cfg.api_keys_file.is_none());
         assert_eq!(cfg.ws_max_message_size, 65536);
         assert_eq!(cfg.api_token_ttl_secs, 43200);
@@ -894,15 +930,15 @@ mod tests {
             serde_yaml::from_str(&serde_yaml::to_string(&cfg).unwrap()).expect("roundtrip");
         assert_eq!(re.web, cfg.web);
         assert_eq!(re.sfu, cfg.sfu);
-        // 模板含注释形新键示例（R5 防漂移锚点）
+        // The template contains commented example shapes of the new keys (the R5 drift-prevention anchor)
         assert!(yaml.contains("web:"));
         assert!(yaml.contains("weaknet_port:"));
     }
 
-    /// ServerConfig 全部 pub 字段名——与 mediaservo-common/src/config.rs `ServerConfig`
-    /// 现场逐一对表（10-12 清点 = 16 个，见数组）。**新增 pub 字段必须同笔入本数组 + 模板
-    /// 注释**，漏则本审计门红（PLAN §2.6 防注释再腐烂）。config.rs 无 `#[serde(rename)]`
-    /// （亲验），字段名 = YAML 键名逐字相等。
+    /// All pub field names of ServerConfig -- checked one by one against mediaservo-common/src/config.rs `ServerConfig`
+    /// in the field (the 10-12 count = 16, see the array). **A newly added pub field must enter this array + the template
+    /// comments in the same commit**, else this audit gate goes red (PLAN S2.6 guards against comment rot). config.rs has no `#[serde(rename)]`
+    /// (verified by hand), so field names = YAML key names verbatim.
     const SERVER_CONFIG_PUB_FIELDS: &[&str] = &[
         "version",
         "listen",
@@ -922,13 +958,13 @@ mod tests {
         "web",
     ];
 
-    /// 合法地只以说明文字（非 `键:` 行形）出现在模板的字段逃生阀 = (字段, 理由)。
-    /// 现 sfu/web 均以注释示例 `# sfu:`/`# web:` 承载键形，走常规遍历，故本表空。
+    /// The escape valve for fields legally appearing in the template only as prose (not as `key:` lines) = (field, reason).
+    /// Currently sfu/web both carry key shapes via commented examples `# sfu:`/`# web:`, so they take the regular traversal and this table is empty.
     const TEMPLATE_PROSE_ONLY_FIELDS: &[(&str, &str)] = &[];
 
-    /// 键边界判据：去 `#` 注释前缀后有行以 `field:` 起头 = 该字段有键形示例。
-    /// 比裸 `contains("field:")` 严——defeats `jwt_secret` ⊂ `admin_jwt_secret` 前缀假阳性
-    /// （PLAN 以 room ⊂ room_capacity 举例，同类前缀在此升级为行首锚定）。
+    /// Key-boundary predicate: after stripping the `#` comment prefix, a line starting with `field:` = that field has a key-shaped example.
+    /// Strictly stronger than a bare `contains("field:")` -- defeats the `jwt_secret` subset-of `admin_jwt_secret` prefix false positive
+    /// (PLAN used room subset-of room_capacity as the example; same-family prefixes are upgraded to line-start anchoring here).
     fn template_has_key(field: &str) -> bool {
         let want = format!("{field}:");
         SERVER_YAML_TEMPLATE.lines().any(|l| {
@@ -949,7 +985,7 @@ mod tests {
         }
         assert!(
             missing.is_empty(),
-            "SERVER_YAML_TEMPLATE 缺字段键形注释（新增 ServerConfig pub 字段须同笔补注释+入本表）: {missing:?}"
+            "SERVER_YAML_TEMPLATE missing a field key-shape comment (a new ServerConfig pub field must add a comment + enter this table in the same commit): {missing:?}"
         );
     }
 }

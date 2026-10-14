@@ -161,7 +161,7 @@ async fn accounts_dispatcher_read_only() {
         ))
         .await
         .unwrap();
-    assert_ne!(res.status(), StatusCode::OK, "dispatcher 写操作必须被拒");
+    assert_ne!(res.status(), StatusCode::OK, "dispatcher write operations must be denied");
 }
 
 // ── CRUD + hot-reload ────────────────────────────────────────────────────────
@@ -183,7 +183,7 @@ async fn accounts_create_then_login_hot() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::CREATED, "{:?}", res.status());
 
-    // 热重载实证：建号后不经重启，/api/auth/login 立即成功
+    // hot-reload proof: without a restart, /api/auth/login succeeds immediately after creating the account
     let login_app = login_router(state.clone());
     let res = login_app
         .oneshot(auth_request(
@@ -197,14 +197,14 @@ async fn accounts_create_then_login_hot() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = json_of(res).await;
     assert_eq!(body["role"], "operator");
-    assert!(!body["token"].as_str().unwrap().is_empty(), "应签发 JWT");
+    assert!(!body["token"].as_str().unwrap().is_empty(), "a JWT should be issued");
 }
 
 #[tokio::test]
 async fn accounts_list_excludes_password_hash() {
     let state = make_state(temp_path("list", "yaml"), temp_path("list", "yaml")).await;
     let app = admin_router(state.clone());
-    // 创建两个账号
+    // create two accounts
     for u in ["carol", "dave"] {
         let payload =
             format!(r#"{{"username":"{u}","password":"pw","role":"viewer","vehicles":[]}}"#);
@@ -231,9 +231,9 @@ async fn accounts_list_excludes_password_hash() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body = json_of(res).await;
-    // 无哈希外泄
+    // no hash leaks
     let raw = serde_json::to_string(&body).unwrap();
-    assert!(!raw.contains("password_hash"), "password_hash 绝不外泄: {raw}");
+    assert!(!raw.contains("password_hash"), "password_hash must never leak: {raw}");
     let accounts = body["accounts"].as_array().unwrap();
     assert_eq!(accounts.len(), 2);
     assert_eq!(body["count"], 2);
@@ -254,7 +254,7 @@ async fn accounts_create_duplicate_409() {
     let res1 = post(&app).await.unwrap();
     assert_eq!(res1.status(), StatusCode::CREATED);
     let res2 = post(&app).await.unwrap();
-    assert_eq!(res2.status(), StatusCode::CONFLICT, "重复创建 → 409");
+    assert_eq!(res2.status(), StatusCode::CONFLICT, "duplicate creation -> 409");
 }
 
 #[tokio::test]
@@ -291,7 +291,7 @@ async fn accounts_update_role_hot() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::CREATED);
 
-    // 提升角色
+    // promote the role
     let res = app
         .clone()
         .oneshot(auth_request(
@@ -304,7 +304,7 @@ async fn accounts_update_role_hot() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // 热重载实证：登录后角色已变（新登录拿 dispatcher 角色）
+    // hot-reload proof: after logging in again the role has changed (a new login gets the dispatcher role)
     let login_app = login_router(state.clone());
     let res = login_app
         .oneshot(auth_request(
@@ -316,7 +316,7 @@ async fn accounts_update_role_hot() {
         .await
         .unwrap();
     let body = json_of(res).await;
-    assert_eq!(body["role"], "dispatcher", "角色更新应立即生效");
+    assert_eq!(body["role"], "dispatcher", "a role update should take effect immediately");
 }
 
 #[tokio::test]
@@ -349,7 +349,7 @@ async fn accounts_delete_makes_login_fail() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // 热重载实证：删除后立即登录 401
+    // hot-reload proof: login is 401 immediately after deletion
     let login_app = login_router(state.clone());
     let res = login_app
         .oneshot(auth_request(
@@ -377,7 +377,7 @@ async fn accounts_self_delete_denied() {
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "不能删除登录中的自己");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "cannot delete yourself while logged in");
 }
 
 #[tokio::test]

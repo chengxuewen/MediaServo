@@ -29,9 +29,9 @@ Todo list reveals:
 - Wrong granularity
 - Misinterpreted requirements
 
-## 可执行检查
+## Executable Checks
 
 ```bash
-# 验证：hooks 配置有效
+# Verify: hooks config is valid
 cat .opencode/opencode.json | python3 -m json.tool > /dev/null && echo "config valid"
 ```

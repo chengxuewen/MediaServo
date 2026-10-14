@@ -1076,3 +1076,10 @@ install                        → 改名提示 + exit 2（退役）
 - 根因: libwebrtc C++ 首调 >15s 占死 2-worker runtime → ws 心跳饿死自断（双端日志毫秒对齐实证×3）。
 - 修复: ① webrtc_sys spawn_blocking 包 create_peer_connection ② client-c runtime() 后台预热 create_pc ③ tst break >=3。
 - 验证: 12 轮连锤 0 失败（基线 10-50%）。server 侧 debug 日志已用 oxfile env 注入（reload→delete+import 才生效——oxmgr reload 不重读 [apps.logs]，stdout 转发 bug 另案）。
+
+### 2026-10-14: english-only-migration — all artifacts converted to English (C49)
+- Scope: 509→0 files-with-CJK across 678 tracked artifacts (crates/bindings/www/scripts/docs incl. plans+archive/CHANGELOG/skills/rules/configs/ci). Guard = `scripts/check-english-only.sh` (line pragma `c49:trigger` exempts functional CJK trigger keywords — 51 audited lines). Exempt: .agents/memorys ledgers, git history.
+- Method: 12 batch waves × parallel deep workers; worker attrition (rps/quota) resumed by guard-truth sweep, not self-reports (C37 re-verified: several "completed" reports were partial).
+- Translation-introduced regressions (all found by gates, all fixed): ① doctor.rs string-continuation split (`"..."` + stray `\n`); ② deck lib.rs `[\`x\`]:` = rustdoc link-definition collision (→ `] —`); ③ startup.rs linger hint lost leading space (fullwidth-dash absorbed) breaking status-shape test; ④ link.h lost `/*` opener + dropped clause; ⑤ 223 files re-rustfmt (line-width shrink).
+- Pre-existing debt caught: [sdk-client] client.hpp missing `#include <chrono>` — test-cxx broken since 2026-10-09 QOE merge, never gated locally (fixed; CHANGELOG entry).
+- Gates: all-gates --full 15/15 PASS + mediasoup skip-by-design (PIT-192); www build + vitest 28/28; guard PASS 0 CJK.

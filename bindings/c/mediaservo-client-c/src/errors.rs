@@ -1,8 +1,8 @@
-//! 错误码 / last_error / 句柄级错误槽（K3）/ error_t / strerror 表 / 纯映射函数。
+//! Error codes / last_error / handle-level error slots (K3) / error_t / strerror table / pure mapping functions.
 //!
-//! K3 合同（批1b §2）：错误文本从进程全局迁至句柄内（session/control/consumer 各一
-//! `Mutex<Option<HandleError>>`）；`mediaservo_client_last_error` ⊘ 保留全局一周期——
-//! 裁决=最小改动形：新代码路径一律**句柄槽 + 全局兜底双写**（[`HandleErr::note`] 单点）。
+//! K3 contract (batch 1b §2): error text moved from the process global into each handle (one
+//! `Mutex<Option<HandleError>>` each for session/control/consumer); `mediaservo_client_last_error` ⊘ stays global for one period —
+//! ruling = minimal-change form: new code paths always **write the handle slot + the global fallback** ([`HandleErr::note`] is the single write point).
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
@@ -10,7 +10,7 @@ use std::os::raw::{c_char, c_int};
 use mediaservo_client::error::ClientError;
 use mediaservo_common::protocol::{ControlEnvelope, PeerRole};
 
-// ── 错误码（0 = ok, <0 = error；MEDIASERVO_CLIENT_ERR_*，D241 前缀化）──
+// -- Error codes (0 = ok, <0 = error; MEDIASERVO_CLIENT_ERR_*, prefixed per D241) --
 pub const MEDIASERVO_OK: c_int = 0;
 pub const MEDIASERVO_CLIENT_ERR_INVALID_ARG: c_int = -1;
 pub const MEDIASERVO_CLIENT_ERR_LOGIN: c_int = -2;
@@ -23,7 +23,7 @@ pub const MEDIASERVO_CLIENT_ERR_MALFORMED: c_int = -8;
 pub const MEDIASERVO_CLIENT_ERR_STATE: c_int = -9;
 pub const MEDIASERVO_CLIENT_ERR_INTERNAL: c_int = -10;
 
-/// 全局最近错误信息（⊘ `mediaservo_client_last_error` 读取；K3 双写兜底保一周期）。
+/// Global last-error message (read via ⊘ `mediaservo_client_last_error`; the K3 dual-write keeps the global alive for one period).
 pub(crate) static LAST_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 pub(crate) fn set_last_error(msg: impl Into<String>) {
@@ -32,9 +32,9 @@ pub(crate) fn set_last_error(msg: impl Into<String>) {
     }
 }
 
-// ── K3: 句柄级错误槽 ──
+// -- K3: handle-level error slots --
 
-/// 一次句柄级错误记录（error_t 线形 + 文本源的存储形）。
+/// One handle-level error record (storage form of the error_t wire shape + its text source).
 pub(crate) struct HandleError {
     pub code: c_int,
     pub wire: u32,
@@ -42,11 +42,11 @@ pub(crate) struct HandleError {
     pub msg: String,
 }
 
-/// 句柄错误槽（session/control/consumer 各持一个）。
+/// Handle error slot (one each for session/control/consumer).
 pub(crate) type ErrSlot = std::sync::Mutex<Option<HandleError>>;
 
-/// error_t 线形（C 出参；struct_size 前向兼容纪律同 config 结构）。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
+/// The error_t wire shape (C out-param; same struct_size forward-compatibility discipline as the config structs).
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception)
 #[repr(C)]
 pub struct mediaservo_client_error_t {
     pub struct_size: usize,
@@ -55,14 +55,14 @@ pub struct mediaservo_client_error_t {
     pub retryable: u8,
 }
 
-/// error_t 的已知最小尺寸（当前 = 全字段；演进时旧调用方报旧值）。
+/// Known minimum size of error_t (currently all fields; older callers report the old value when it evolves).
 pub(crate) const CLIENT_ERROR_T_SIZE: usize = size_of::<mediaservo_client_error_t>();
 
-/// 句柄错误写入的统一入口（trait——session/control/consumer 三形共享）。
+/// Unified entry point for handle-error writes (trait shared by the session/control/consumer forms).
 pub(crate) trait HandleErr {
     fn err_slot(&self) -> &ErrSlot;
 
-    /// 唯一写点：句柄槽 + 全局 LAST_ERROR 双写（K3 裁决形）。
+    /// The single write point: handle slot + global LAST_ERROR dual write (K3 ruling form).
     fn note(&self, err: HandleError) {
         set_last_error(err.msg.clone());
         if let Ok(mut g) = self.err_slot().lock() {
@@ -70,7 +70,7 @@ pub(crate) trait HandleErr {
         }
     }
 
-    /// ClientError → 槽（code=error_code 穷尽映射；wire/retryable 机读位透传）。
+    /// ClientError → slot (code = exhaustive error_code mapping; wire/retryable machine-readable bits passed through).
     fn fail_client(&self, ctx: &str, e: &ClientError) -> c_int {
         let code = error_code(e);
         self.note(HandleError {
@@ -82,7 +82,7 @@ pub(crate) trait HandleErr {
         code
     }
 
-    /// 任意码入槽（表外码走此门，禁发明新负数码——复用既有值域）。
+    /// Put any code into the slot (off-table codes go through this gate; inventing new negative codes is forbidden — reuse the existing value space).
     fn fail(&self, code: c_int, msg: &str) -> c_int {
         self.note(HandleError { code, wire: 0, retryable: false, msg: msg.to_string() });
         code
@@ -100,19 +100,19 @@ pub(crate) trait HandleErr {
         self.fail(MEDIASERVO_CLIENT_ERR_INTERNAL, msg)
     }
 
-    /// panic 兜底（catch_unwind 尾；句柄仍有效时经 ffi_catch 调用）。
+    /// panic safety net (end of catch_unwind; invoked via ffi_catch while the handle is still valid).
     fn fail_panic(&self, name: &str) {
         self.fail_internal(&format!("{name}: panic"));
     }
 }
 
-/// 无句柄自由函数的错误写入（仅全局——login/list_rooms/strerror/version 族）。
+/// Error write for handle-less free functions (global only — the login/list_rooms/strerror/version families).
 pub(crate) fn fail_global(msg: impl Into<String>, code: c_int) -> c_int {
     set_last_error(msg);
     code
 }
 
-/// 提取 C 字符串（null → None）。非法 UTF-8 → Err。
+/// Extract a C string (null → None). Invalid UTF-8 → Err.
 pub(crate) fn cstr<'a>(ptr: *const c_char) -> Result<Option<&'a str>, ()> {
     if ptr.is_null() {
         return Ok(None);
@@ -120,7 +120,7 @@ pub(crate) fn cstr<'a>(ptr: *const c_char) -> Result<Option<&'a str>, ()> {
     unsafe { CStr::from_ptr(ptr) }.to_str().map(Some).map_err(|_| ())
 }
 
-/// 字符串拷入调用方缓冲（NUL 结尾）。cap 不足 → INVALID_ARG（不写半截）。
+/// Copy a string into the caller's buffer (NUL-terminated). Insufficient cap → INVALID_ARG (never writes a partial string).
 pub(crate) fn copy_out_str(s: &str, buf: *mut c_char, cap: usize) -> c_int {
     if buf.is_null() || cap == 0 {
         set_last_error("output buffer is null or cap is 0");
@@ -141,9 +141,9 @@ pub(crate) fn copy_out_str(s: &str, buf: *mut c_char, cap: usize) -> c_int {
     MEDIASERVO_OK
 }
 
-/// needed 溢出反馈合同（login/list_rooms/wait_video/consumer_id/consumer_stats/
-/// producer_ids/video_stats 共用）：**needed 先写**（溢出/成功两态都有值——调用方
-/// 凭此决定重试尺寸），再拷贝。`needed` 可 NULL（不需要反馈）。纯缓冲逻辑，单测钉。
+/// needed overflow-feedback contract (shared by login/list_rooms/wait_video/consumer_id/consumer_stats/
+/// producer_ids/video_stats): **needed is written first** (it has a value in both the overflow and success states — the caller
+/// uses it to pick the retry size), then the copy. `needed` may be NULL (no feedback wanted). Pure buffer logic, pinned by unit tests.
 pub(crate) fn copy_out_needed(
     name: &str,
     s: &str,
@@ -153,7 +153,7 @@ pub(crate) fn copy_out_needed(
 ) -> c_int {
     let need = s.len() + 1;
     if !needed.is_null() {
-        // SAFETY: 已判非 null；指向调用方 usize 存储。
+        // SAFETY: already checked non-null; points at caller-owned usize storage.
         unsafe { *needed = need };
     }
     let rc = copy_out_str(s, buf, cap);
@@ -163,7 +163,7 @@ pub(crate) fn copy_out_needed(
     rc
 }
 
-/// 截断式文本拷贝（last_error 族语义：读多少算多少，恒 OK——缓冲不足截断不报错）。
+/// Truncating text copy (last_error-family semantics: read as much as fits, always OK — a short buffer truncates without erroring).
 pub(crate) fn copy_out_text(msg: &str, buf: *mut c_char, len: usize) -> c_int {
     if buf.is_null() || len == 0 {
         return MEDIASERVO_CLIENT_ERR_INVALID_ARG;
@@ -177,7 +177,7 @@ pub(crate) fn copy_out_text(msg: &str, buf: *mut c_char, len: usize) -> c_int {
     MEDIASERVO_OK
 }
 
-/// [`ClientError`] → C 错误码（穷尽 match——新变体编译期强制归类）。
+/// [`ClientError`] → C error code (exhaustive match — new variants are forced to be classified at compile time).
 pub(crate) fn error_code(e: &ClientError) -> c_int {
     match e {
         ClientError::Login(_) => MEDIASERVO_CLIENT_ERR_LOGIN,
@@ -185,8 +185,8 @@ pub(crate) fn error_code(e: &ClientError) -> c_int {
         | ClientError::AuthRejected { .. }
         | ClientError::RestRejected { .. } => MEDIASERVO_CLIENT_ERR_UNAUTHORIZED,
         ClientError::ControlDenied(_) => MEDIASERVO_CLIENT_ERR_DENIED,
-        // StreamNotFound 归 TIMEOUT 码域（§0 裁决：不加 ABI 码——message 已含
-        // "stream not found: <label>"，C 侧语义由 message 承载）
+        // StreamNotFound maps into the TIMEOUT code domain (§0 ruling: no new ABI code — the message already contains
+        // "stream not found: <label>"; the C-side semantics are carried by the message)
         ClientError::Timeout { .. } | ClientError::StreamNotFound { .. } => {
             MEDIASERVO_CLIENT_ERR_TIMEOUT
         }
@@ -198,18 +198,18 @@ pub(crate) fn error_code(e: &ClientError) -> c_int {
             MEDIASERVO_CLIENT_ERR_MALFORMED
         }
         ClientError::InvalidState(_) => MEDIASERVO_CLIENT_ERR_STATE,
-        // Server 通用承载（4012/4101/4003/4010/4011 已被 from_wire_error 分入
-        // ControlDenied/ProtocolUnsupported/AuthRejected，不会落到这里）+ 兜底族。
+        // Generic server carrier (4012/4101/4003/4010/4011 were already split by from_wire_error into
+        // ControlDenied/ProtocolUnsupported/AuthRejected and never reach here) + the fallback family.
         ClientError::Server { .. } | ClientError::WebRtc(_) | ClientError::Io(_) => {
             MEDIASERVO_CLIENT_ERR_INTERNAL
         }
     }
 }
 
-/// code → 静态文案（`mediaservo_client_strerror` 表源）。
+/// code → static text (the `mediaservo_client_strerror` table source).
 ///
-/// 禁新文案发明：每条取自既有真源——`ClientError` Display 模板（error.rs）与
-/// client.h 错误码注释的并集，剥去动态参数位。未知码 → 固定兜底串。
+/// Inventing new wording is forbidden: every entry comes from the existing sources — the union of the `ClientError` Display templates (error.rs) and
+/// the client.h error-code comments, with dynamic parameter slots stripped. Unknown code → fixed fallback string.
 #[must_use]
 pub(crate) fn strerror_text(code: c_int) -> &'static str {
     match code {
@@ -228,9 +228,9 @@ pub(crate) fn strerror_text(code: c_int) -> &'static str {
     }
 }
 
-/// C 侧角色字符串 → PeerRole。
-/// Client/Consumer → Consumer（cockpit 消费形，basic.rs 实盘同值）；
-/// Viewer → Consumer（消费权限差异由 server 账号 can_control 门裁决，本地同形）；
+/// C-side role string → PeerRole.
+/// Client/Consumer → Consumer (the cockpit consumption form; same value as the live basic.rs);
+/// Viewer → Consumer (consumption-permission differences are adjudicated by the server account can_control gate; locally the same form);
 /// Remote → Remote。
 pub(crate) fn parse_role(s: &str) -> Result<PeerRole, ()> {
     match s {
@@ -241,7 +241,7 @@ pub(crate) fn parse_role(s: &str) -> Result<PeerRole, ()> {
     }
 }
 
-/// struct_size 前向兼容校验（R3）。
+/// struct_size forward-compatibility check (R3).
 pub(crate) fn check_struct_size(actual: usize, min: usize, fn_name: &str) -> Result<(), c_int> {
     if actual < min {
         set_last_error(format!(
@@ -252,8 +252,8 @@ pub(crate) fn check_struct_size(actual: usize, min: usize, fn_name: &str) -> Res
     Ok(())
 }
 
-/// 信封构造（NEVER 字符串拼接——serde 序列化由 ControlChannel::send_envelope 承担）。
-/// payload_json None/"" → Null；非法 JSON → INVALID_ARG。纯函数，单测钉。
+/// Envelope construction (NEVER string concatenation — serde serialization is handled by ControlChannel::send_envelope).
+/// payload_json None/"" → Null; invalid JSON → INVALID_ARG. Pure function, pinned by unit tests.
 pub(crate) fn build_envelope(
     seq: u64,
     cmd: &str,
@@ -270,11 +270,11 @@ pub(crate) fn build_envelope(
         seq,
         cmd: cmd.to_string(),
         payload,
-        sig: None, // C 面暂不产急停签名（W2-C 增票与 hmac_key 同批；见 lib.rs ClientConfig 注）
+        sig: None, // the C surface does not yet produce emergency-stop signatures (the W2-C follow-up lands with hmac_key; see the lib.rs ClientConfig note)
     })
 }
 
-/// last_error 实现（⊘ 全局形，mediaservo_client_last_error 与单测共用）。
+/// last_error implementation (⊘ global form; shared by mediaservo_client_last_error and the unit tests).
 pub(crate) fn last_error_impl(buf: *mut c_char, len: usize) -> c_int {
     let msg = LAST_ERROR.lock().ok().and_then(|g| g.clone()).unwrap_or_default();
     copy_out_text(&msg, buf, len)
@@ -286,7 +286,7 @@ mod tests {
     use mediaservo_link::LinkError;
     use std::ptr;
 
-    // ── (a) ClientError → 错误码 穷尽映射表 ──
+    // -- (a) ClientError → error code exhaustive mapping table --
     #[test]
     fn error_code_covers_every_variant() {
         let cases: Vec<(ClientError, c_int)> = vec![
@@ -320,25 +320,25 @@ mod tests {
         }
     }
 
-    // ── strerror 表（全码覆盖 + 兜底）──
+    // -- strerror table (full code coverage + fallback) --
     #[test]
     fn strerror_covers_all_codes_and_falls_back() {
         let codes = [-1, -2, -3, -4, -5, -6, -7, -8, -9, -10, 0];
         for c in codes {
-            assert!(!strerror_text(c).is_empty(), "code {c} 无文案");
+            assert!(!strerror_text(c).is_empty(), "code {c} has no text");
         }
-        // 同码稳定（表源静态，非随机/动态）。
+        // Stable for the same code (the table source is static, not random/dynamic).
         assert_eq!(strerror_text(-9), strerror_text(MEDIASERVO_CLIENT_ERR_STATE));
         assert_eq!(strerror_text(12345), "unknown error code");
         assert_eq!(strerror_text(1), "unknown error code");
     }
 
-    // ── needed 溢出合同两态（先写 needed，溢出/成功都有值）──
+    // -- The two states of the needed overflow contract (needed written first, with values in both overflow and success states) --
     #[test]
     fn copy_out_needed_two_states() {
         let mut buf = [0u8; 8];
         let mut need = 0usize;
-        // 溢出态：needed = 必需字节数（含 NUL），不写半截，rc=INVALID_ARG。
+        // Overflow state: needed = required byte count (including NUL), no partial write, rc=INVALID_ARG.
         let rc = copy_out_needed(
             "t",
             "abcdefghij",
@@ -348,7 +348,7 @@ mod tests {
         );
         assert_eq!(rc, MEDIASERVO_CLIENT_ERR_INVALID_ARG);
         assert_eq!(need, 11);
-        // 成功态：needed = 实际长度，缓冲 NUL 结尾。
+        // Success state: needed = actual length, buffer NUL-terminated.
         let rc = copy_out_needed("t", "abc", buf.as_mut_ptr() as *mut c_char, buf.len(), &mut need);
         assert_eq!(rc, MEDIASERVO_OK);
         assert_eq!(need, 4);
@@ -356,14 +356,14 @@ mod tests {
             unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().unwrap(),
             "abc"
         );
-        // needed 可 NULL。
+        // needed may be NULL.
         assert_eq!(
             copy_out_needed("t", "ab", buf.as_mut_ptr() as *mut c_char, buf.len(), ptr::null_mut()),
             MEDIASERVO_OK
         );
     }
 
-    // ── 信封构造纯函数 ──
+    // -- Envelope construction pure functions --
     #[test]
     fn build_envelope_null_payloads() {
         for p in [None, Some("")] {
@@ -378,7 +378,7 @@ mod tests {
     fn build_envelope_object_payload() {
         let env = build_envelope(1, "steer", Some("{\"deg\":10.5}")).expect("valid");
         assert_eq!(env.payload["deg"], serde_json::json!(10.5));
-        // 线形 = ControlEnvelope serde（seq/cmd/payload）
+        // The wire shape = ControlEnvelope serde (seq/cmd/payload)
         let text = serde_json::to_string(&env).unwrap();
         let back: ControlEnvelope = serde_json::from_str(&text).unwrap();
         assert_eq!(back.seq, 1);
@@ -415,12 +415,12 @@ mod tests {
 
     #[test]
     fn last_error_roundtrip() {
-        // 全局状态跨测试竞争: 设独有标记后立即读（同 link-c 接受窗口）
+        // Global state races across tests: set a unique marker and read immediately (same acceptance window as link-c)
         set_last_error("client-c errors test error");
         let mut buf = [0u8; 64];
         let rc = last_error_impl(buf.as_mut_ptr() as *mut c_char, buf.len());
         assert_eq!(rc, MEDIASERVO_OK);
-        // 内容竞争容忍: 读得回合法 C 串即达标（link-c 同纪律，独有标记可能被并发测试覆写）
+        // Content-race tolerance: getting back a valid C string is the bar (same discipline as link-c; a unique marker may be overwritten by concurrent tests)
         let s =
             unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_str().expect("valid utf8");
         assert!(!s.is_empty());
@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn copy_out_text_truncates_not_rejects() {
         let mut buf = [0u8; 4];
-        // 截断语义（last_error 族）：短缓冲不报错，读 len-1 字节 + NUL。
+        // Truncation semantics (last_error family): a short buffer does not error; read len-1 bytes + NUL.
         assert_eq!(
             copy_out_text("abcdefgh", buf.as_mut_ptr() as *mut c_char, buf.len()),
             MEDIASERVO_OK

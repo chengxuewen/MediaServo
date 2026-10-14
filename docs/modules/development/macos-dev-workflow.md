@@ -1,18 +1,18 @@
 # macOS Development Workflow
 
-> 状态：Phase 3 完成 | 关联：Docker SFU 架构、Native Host/Client
+> Status: Phase 3 complete | Related: Docker SFU architecture, Native Host/Client
 
-## 架构概览
+## Architecture Overview
 
-macOS 开发采用**混合架构**：Host 和 Client 原生运行，Server (SFU) 通过 Docker 运行。
+macOS development uses a **hybrid architecture**: Host and Client run natively; the Server (SFU) runs via Docker.
 
 ```
 ┌───────────────────────────────────────────────┐
 │                  Docker (Linux)               │
 │  ┌─────────────────────────────────────────┐  │
-│  │         mediaservo-server                 │  │
+│  │         mediaservo-server               │  │
 │  │  ┌──────────┐  ┌────────────────────┐   │  │
-│  │  │ Signaling │  │  mediasoup Worker  │   │  │
+│  │  │ Signaling│  │  mediasoup Worker  │   │  │
 │  │  │  (WS)    │  │  (RTP relay)       │   │  │
 │  │  └────┬─────┘  └────────┬───────────┘   │  │
 │  └───────┼────────────────┼────────────────┘  │
@@ -27,67 +27,67 @@ macOS 开发采用**混合架构**：Host 和 Client 原生运行，Server (SFU)
      └──────────┘     └──────────┘
 ```
 
-- **Server**：仅 Linux 支持（mediasoup C++ Worker 依赖 Linux epoll + libuv）。macOS 下必须通过 Docker 运行。
-- **Host / Client**：纯 Rust，macOS 原生编译运行。Host 负责采集+编码+推流，Client 负责拉流+解码。
+- **Server**: Linux only (the mediasoup C++ Worker depends on Linux epoll + libuv). Under macOS it must run via Docker.
+- **Host / Client**: pure Rust, compiled and run natively on macOS. The Host handles capture+encode+push; the Client handles pull+decode.
 
-## 快速开始
+## Quick Start
 
-### 前置条件
+### Prerequisites
 
-- macOS 13+ (Intel 或 Apple Silicon)
-- Docker Desktop 4.x 或 Colima
-- pixi (通过 `curl -fsSL https://pixi.sh/install.sh | bash`)
+- macOS 13+ (Intel or Apple Silicon)
+- Docker Desktop 4.x or Colima
+- pixi (via `curl -fsSL https://pixi.sh/install.sh | bash`)
 
-第一次使用：
+First use:
 
 ```bash
-source bootstrap.sh   # 安装 pixi + GStreamer + Rust 工具链
+source bootstrap.sh   # Installs pixi + GStreamer + the Rust toolchain
 ```
 
-之后每次：
+Every time after that:
 
 ```bash
-source pixi.sh        # 仅激活 pixi 环境
+source pixi.sh        # Activates the pixi environment only
 ```
 
-### 三步启动
+### Three-Step Startup
 
 ```bash
-# 1. 启动 Docker SFU 服务器
+# 1. Start the Docker SFU server
 docker compose up -d
-# 验证：docker compose logs -f server
+# Verify: docker compose logs -f server
 
-# 2. 启动 Host（macOS 原生）
+# 2. Start the Host (macOS native)
 cargo run --bin mediaservo-host -- --config config/host.conf
 
-# 3. 启动 Client（macOS 原生，新终端）
+# 3. Start the Client (macOS native, new terminal)
 source pixi.sh
 cargo run --bin mediaservo-client -- --config crates/mediaservo-client/config/remote.conf
 ```
 
-## 配置文件
+## Configuration Files
 
 ### host.conf
 
-路径：`config/host.conf`（默认 `/opt/mediaservo/etc/host.conf`）
+Path: `config/host.conf` (default `/opt/mediaservo/etc/host.conf`)
 
 ```yaml
 host:
   id: "host-001"
 
 signaling:
-  ws_url: "ws://localhost:9800/ws"   # 指向 Docker 中的 Server
+  ws_url: "ws://localhost:9800/ws"   # Points at the Server in Docker
 
 media:
-  camera: "/dev/video0"              # macOS 摄像头设备
+  camera: "/dev/video0"              # macOS camera device
   width: 1280
   height: 720
   fps: 30
   bitrate_kbps: 2000
-  encoder: "auto"                    # 或 "nvh264enc" / "x264enc"
+  encoder: "auto"                    # or "nvh264enc" / "x264enc"
   format: "I420"
 
-# 可选：TURN 服务器
+# Optional: TURN server
 # turn:
 #   urls: "turn:192.168.1.100:3478"
 #   username: "user"
@@ -96,7 +96,7 @@ media:
 
 ### remote.conf
 
-路径：`crates/mediaservo-client/config/remote.conf`（默认 `/opt/mediaservo/etc/remote.conf`）
+Path: `crates/mediaservo-client/config/remote.conf` (default `/opt/mediaservo/etc/remote.conf`)
 
 ```yaml
 version: 1
@@ -104,129 +104,129 @@ version: 1
 server:
   signaling_url: "ws://localhost:9800/ws"
 
-# psk: "mediaservo-dev"        # 信号认证预共享密钥（默认值）
+# psk: "mediaservo-dev"        # Signaling auth pre-shared key (default value)
 ```
 
-## 日常开发流程
+## Day-to-Day Development Flow
 
 ```
-编辑代码 → 编译检查 → 运行测试 → 集成测试
+Edit code → compile check → run tests → integration tests
 ```
 
-### 编辑-编译循环
+### Edit-Compile Loop
 
 ```bash
-# 增量检查（最快）
+# Incremental check (fastest)
 cargo check --workspace
 
-# 只检查 Host
+# Check only the Host
 cargo check --bin mediaservo-host
 
-# 完整构建（含 SFU feature，需在 Docker 内）
+# Full build (with the SFU feature, must run inside Docker)
 docker compose exec server cargo build --features sfu-mediasoup --bin mediaservo-server
 ```
 
-### 运行测试
+### Running Tests
 
 ```bash
-# 全部测试（排除 SFU，macOS 不支持 mediasoup）
+# All tests (excluding SFU; mediasoup unsupported on macOS)
 cargo test --workspace
 
-# 仅 Host 测试
+# Host tests only
 cargo test -p mediaservo-host
 
-# Docker 内运行 SFU 测试
+# SFU tests inside Docker
 docker compose exec server cargo test -p mediaservo-server --features sfu-mediasoup
 
-# Lint 检查
+# Lint check
 cargo clippy --workspace --all-targets -- -D warnings
 
-# 格式化检查
+# Format check
 cargo fmt --all -- --check
 ```
 
-### 集成测试流程
+### Integration Test Flow
 
 ```bash
-# 1. 重启 Server（应用改动）
+# 1. Restart the Server (applies changes)
 docker compose restart server
 
-# 2. 新终端：启动 Host
+# 2. New terminal: start the Host
 cargo run --bin mediaservo-host -- --config config/host.conf
 
-# 3. 新终端：启动 Client
+# 3. New terminal: start the Client
 cargo run --bin mediaservo-client -- --config crates/mediaservo-client/config/remote.conf
 
-# 4. 查看日志
-docker compose logs -f server          # Server 日志
-# Host/Client 日志输出到各自终端（JSON 格式）
+# 4. View logs
+docker compose logs -f server          # Server logs
+# Host/Client logs print to their own terminals (JSON format)
 ```
 
-## 端口说明
+## Port Notes
 
-| 端口 | 进程 | 用途 |
-|------|------|------|
-| 8000 | Server (Docker) | WebSocket 信令 |
+| Port | Process | Purpose |
+|------|---------|---------|
+| 8000 | Server (Docker) | WebSocket signaling |
 | 9801 | Host (macOS) | metrics HTTP |
 | 9101 | Client (macOS) | health/config/metrics HTTP |
-| 40000-40100/udp | Server (Docker) | mediasoup RTP/RTCP 媒体流 |
-| 9999 | Host (macOS) | 紧急控制 UDP |
+| 40000-40100/udp | Server (Docker) | mediasoup RTP/RTCP media streams |
+| 9999 | Host (macOS) | Emergency control UDP |
 
-macOS 本机端口 8000 由 Docker 端口映射转发到容器内，Host/Client 连接 `ws://localhost:9800/ws` 即可。
+The macOS-local port 8000 is forwarded to the container by the Docker port mapping; Host/Client just connect to `ws://localhost:9800/ws`.
 
-## 编译加速
+## Build Acceleration
 
-### Cargo 缓存
+### Cargo Cache
 
-docker-compose.yml 已配置 `cargo-cache` named volume，避免重复下载：
+docker-compose.yml already configures a `cargo-cache` named volume to avoid re-downloads:
 
 ```bash
-# 清理缓存（如遇损坏）
+# Clear the cache (if corrupted)
 docker volume rm mediaservo_cargo-cache
 ```
 
-### macOS 本机编译
+### macOS Native Compilation
 
-- 使用 `sccache` 加速：
+- Speed up with `sccache`:
   ```bash
   brew install sccache
-  # 在 .cargo/config.toml 添加：
+  # Add to .cargo/config.toml:
   # [build]
   # rustc-wrapper = "sccache"
   ```
-- 使用 `lld` 链接器（已由 pixi 安装）：比默认 ld 快 3-5x
+- Use the `lld` linker (installed by pixi): 3-5x faster than the default ld
 
-## 故障排查
+## Troubleshooting
 
-### Docker 网络
+### Docker Networking
 
-**问题**：Host/Client 无法连接 `ws://localhost:9800`
+**Problem**: Host/Client cannot connect to `ws://localhost:9800`
 
 ```bash
-# 检查 Server 是否运行
+# Check whether the Server is running
 docker compose ps
 
-# 查看 Server 日志
+# View Server logs
 docker compose logs server --tail 20
 
-# 测试端口连通性
+# Test port connectivity
 curl -v http://localhost:9800/ 2>&1 | head -5
 
-# 如果端口冲突：
+# If the port conflicts:
 sudo lsof -i :9800
-# 修改 docker-compose.yml 左侧端口映射，如 "18000:9800"
+# Change the left-side port mapping in docker-compose.yml, e.g. "18000:9800"
 ```
 
-### STUN / NAT 穿透
+### STUN / NAT Traversal
 
-**问题**：WebRTC ICE 连接失败，日志出现 `ICE connection failed`
+**Problem**: WebRTC ICE connection fails; logs show `ICE connection failed`
 
 ```bash
-# 1. 确认双方在同网络（本机开发默认 localhost，无需 STUN）
-# 2. 跨网络开发：在 host.conf 和 remote.conf 添加 STUN/TURN
+# 1. Confirm both ends are on the same network (localhost by default in local dev; no STUN needed)
+# 2. Cross-network development: add STUN/TURN to host.conf and remote.conf
 ```
 
-host.conf 中取消注释：
+Uncomment in host.conf:
 ```yaml
 turn:
   urls: "turn:your-turn-server:3478"
@@ -234,48 +234,48 @@ turn:
   credential: "pass"
 ```
 
-### Cargo 缓存损坏
+### Cargo Cache Corruption
 
 ```bash
-# macOS 本机
+# macOS native
 cargo clean
 
 # Docker
 docker compose down -v && docker compose up -d
 ```
 
-### GStreamer 缺失
+### GStreamer Missing
 
-macOS 下 pixi 自动安装 GStreamer。如遇到 pipeline 初始化失败：
+Under macOS, pixi installs GStreamer automatically. If pipeline initialization fails:
 
 ```bash
-# 验证 GStreamer 可用
+# Verify GStreamer is available
 gst-inspect-1.0 --version
 
-# 如未安装，通过 pixi 重装
+# If not installed, reinstall via pixi
 pixi install
 ```
 
-Host 在 GStreamer 不可用时会自动降级为 headless 模式（无实际采集输出），专为 E2E 测试设计。
+When GStreamer is unavailable the Host automatically degrades to headless mode (no actual capture output), designed for E2E testing.
 
 ### Apple Silicon vs Intel
 
-pixi.toml 已声明 `osx-64` 和 `osx-arm64` 两个平台，pixi 自动选择匹配的 conda 包。无需手动切换。
+pixi.toml declares both `osx-64` and `osx-arm64` platforms; pixi selects the matching conda packages automatically. No manual switching needed.
 
-## Docker 命令参考
+## Docker Command Reference
 
-| 命令 | 说明 |
-|------|------|
-| `docker compose up -d` | 后台启动 Server 容器 |
-| `docker compose down` | 停止并移除容器 |
-| `docker compose restart server` | 重启 Server（应用代码改动后） |
-| `docker compose exec server bash` | 进入容器 shell |
-| `docker compose logs -f server` | 实时查看 Server 日志 |
-| `docker compose build --no-cache` | 完整重建镜像 |
-| `docker compose exec server cargo check --features sfu-mediasoup` | 容器内编译检查 |
-| `docker compose exec server cargo test -p mediaservo-server --features sfu-mediasoup` | 容器内运行 SFU 测试 |
+| Command | Description |
+|---------|-------------|
+| `docker compose up -d` | Start the Server container in the background |
+| `docker compose down` | Stop and remove containers |
+| `docker compose restart server` | Restart the Server (after code changes) |
+| `docker compose exec server bash` | Enter the container shell |
+| `docker compose logs -f server` | Follow Server logs |
+| `docker compose build --no-cache` | Full image rebuild |
+| `docker compose exec server cargo check --features sfu-mediasoup` | Compile check inside the container |
+| `docker compose exec server cargo test -p mediaservo-server --features sfu-mediasoup` | Run SFU tests inside the container |
 
-## 相关文档
+## Related Documents
 
-- [Docker Development Workflow](docker-workflow.md) — Docker 镜像构建阶段、Dev Container、Linux 原生工作流
-- [Architecture](../../architecture.md) — 整体架构设计
+- [Docker Development Workflow](docker-workflow.md) — Docker image build stages, Dev Container, Linux native workflow
+- [Architecture](../../architecture.md) — overall architecture design

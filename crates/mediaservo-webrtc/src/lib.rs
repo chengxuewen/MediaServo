@@ -7,8 +7,8 @@
 //! - default (no feature): stub for compilation without WebRTC
 
 #![allow(async_fn_in_trait)]
-// W3C 镜像 trait 的 async 签名 = 设计形（auto-trait-bound 限制随上游 async trait 稳定退役）
-#![allow(private_interfaces)] // backend 访问器返回 cfg 姿态 opaque 类型（Active*）；'进包≠公开面' F12 裁定，不公开后端类型名
+// the W3C mirror trait's async signatures = the designed shape (the auto-trait-bound limitation retires as upstream async traits stabilize)
+#![allow(private_interfaces)] // the backend accessors return cfg-posture opaque types (Active*); the 'in the package != public surface' F12 ruling -- backend type names stay unpublished
 pub mod backend;
 pub mod data_channel;
 pub mod engine;

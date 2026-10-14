@@ -1,17 +1,17 @@
-//! field 组合 SDK 测试：re-export 完整性 + 错误代理 + 会话 stub 行为。
+//! Field composition SDK tests: re-export completeness + error delegation + session stub behavior.
 
 use mediaservo_field::{
-    CameraSource, CaptureOptions, DeviceId, FieldError, FrameBus, MediaDevices, MediaDeviceKind,
+    CameraSource, CaptureOptions, DeviceId, FieldError, FrameBus, MediaDeviceKind, MediaDevices,
     NodeAcl, Player, Recorder, Role, SignalClient,
 };
 
 #[test]
 fn reexports_bring_entire_closed_loop() {
-    // link 面：信令 + 帧总线类型可达
+    // Link surface: signaling + frame bus types reachable
     let _: Option<SignalClient> = None;
     let _: Option<FrameBus> = None;
 
-    // deck 面：采集/录制/回放类型可达
+    // Deck surface: capture/record/playback types reachable
     let cams = MediaDevices::enumerate(MediaDeviceKind::Camera);
     assert_eq!(cams.len(), 1);
     let _ = CameraSource::open(DeviceId("stub:test-camera".into()), CaptureOptions::default());
@@ -21,14 +21,14 @@ fn reexports_bring_entire_closed_loop() {
 
 #[test]
 fn link_error_flows_into_field_error() {
-    // FieldError: From<LinkError> 代理（坏 token 触发 LinkError::Attach）
+    // FieldError: From<LinkError> delegation (a bad token triggers LinkError::Attach)
     let err: FieldError = mediaservo_link::LinkError::Attach("bad token".into()).into();
     assert!(matches!(err, FieldError::Link(_)));
 }
 
 #[tokio::test]
 async fn session_connect_requires_cfg() {
-    // connect 现在需要 PushConfig/PullConfig（信令连接必须知道 server/房间）
+    // connect now requires PushConfig/PullConfig (the signaling connection must know the server/room)
     use mediaservo_field::{PullConfig, PushConfig};
 
     let push_cfg = PushConfig::new("ws://127.0.0.1:9800/ws", "psk", "room");
@@ -38,7 +38,7 @@ async fn session_connect_requires_cfg() {
     let pull_cfg = PullConfig::default();
     assert!(pull_cfg.auto_subscribe);
 
-    // 连接失败路径: 无 server 时 LinkError（非 InvalidState Phase 2）
+    // Connection-failure path: LinkError when no server (not InvalidState, Phase 2)
     let err = mediaservo_field::PushSession::connect(push_cfg).await;
     assert!(matches!(err, Err(FieldError::Link(_))), "got {err:?}");
     let _ = pull_cfg;
@@ -46,7 +46,7 @@ async fn session_connect_requires_cfg() {
 
 #[test]
 fn link_token_types_reexported() {
-    // 能力令牌 API 经 link 可达（组合 SDK 认证面）
+    // Capability token API reachable via link (composition SDK auth surface)
     let node = mediaservo_field::NodeId::new("field-test");
     let acl = NodeAcl::for_role(node.clone(), Role::Pusher);
     assert!(acl.can_subscribe(&mediaservo_field::FrameTopic::new("camera/*")));

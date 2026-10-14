@@ -57,7 +57,7 @@ fn main() {
 }
 
 /// Recursively collect (relative_path, absolute_path) for all files under root.
-#[allow(dead_code)] // 仅 admin-dashboard feature 路径使用；默认姿态无引用（clippy -D 债清偿 09-18）
+#[allow(dead_code)] // only used on the admin-dashboard feature path; unreferenced in the default posture (clippy -D debt payoff 09-18)
 fn collect_files(root: &PathBuf, dir: &PathBuf, out: &mut Vec<(String, String)>) {
     if let Ok(rd) = fs::read_dir(dir) {
         for entry in rd.flatten() {

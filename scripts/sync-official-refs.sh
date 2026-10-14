@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# sync-official-refs.sh — 拉取/更新官方 mediasoup 客户端参考源码（跨平台/跨主机开发用）
+# sync-official-refs.sh — fetch/update the official mediasoup client reference sources (for cross-platform/cross-host development)
 #
-# 用途: 为 AI 分析参考提供稳定的官方源码基准（config 目录 .refinfo/，git-ignored）。
-#       不依赖 /tmp 临时目录（跨主机/重启丢失），浅克隆 (--depth 1) 只取源码不要历史。
+# Purpose: a stable official-source baseline for AI analysis reference (config dir .refinfo/, git-ignored).
+#       Avoids /tmp scratch dirs (lost across hosts/reboots); shallow clone (--depth 1), sources only, no history.
 #
-# 仓库: 仅 3 个官方客户端基准（协商流程的唯一权威对照）。
-#       - mediasoup-client (JS)     — Chrome74.ts send(): 标准 produce 协商流程官方基准
-#       - libmediasoupclient (C++)   — Handler.cpp Send(): 官方 C++ 客户端基准
-#       - mediasoup-demo            — RoomClient.js: 官方 demo 端到端流程
-#       刻意排除: mediasoup(server, 只调不改) 与 mediasoup-client-android(第三方 fork, 无关)。
+# Repos: only the 3 official client baselines (the sole authoritative comparison for the negotiation flow).
+#       - mediasoup-client (JS)     — Chrome74.ts send(): standard produce-negotiation baseline
+#       - libmediasoupclient (C++)   — Handler.cpp Send(): official C++ client baseline
+#       - mediasoup-demo            — RoomClient.js: official demo end-to-end flow
+#       Deliberately excluded: mediasoup (server — consumed as-is, never modified) and mediasoup-client-android (third-party fork, irrelevant).
 #
-# 网络: 国内 GitHub 干扰 (PIT-14) → 优先 git 原生, 失败回退 --http1.1 / 代理。
+# Network: GitHub interference in mainland China (PIT-14) → prefer native git, fall back to --http1.1 / proxy on failure.
 #
-# 幂等: 目录已存在则跳过 (不覆盖), 可用 --force 强制重拉。
-# 用法: bash scripts/sync-official-refs.sh [--force]
+# Idempotent: skips existing directories (never overwrites); use --force to re-fetch.
+# Usage: bash scripts/sync-official-refs.sh [--force]
 
 set -euo pipefail
 
@@ -26,11 +26,11 @@ REPOS=(
   "https://github.com/versatica/mediasoup-client    mediasoup-client"
   "https://github.com/versatica/libmediasoupclient  libmediasoupclient"
   "https://github.com/versatica/mediasoup-demo      mediasoup-demo"
-  "https://github.com/eclipse-iceoryx/iceoryx2      iceoryx2"  # PIT-14: 仅用于分析, 非官方依赖, 可选
-  "https://github.com/livekit/rust-sdks             livekit-sdk-rust"  # PIT-14: 仅用于分析, 非官方依赖, 可选
-  "https://github.com/livekit/client-sdk-cpp        livekit-sdk-cpp"  # PIT-14: 仅用于分析, 非官方依赖, 可选
-  "https://github.com/livekit/node-sdks             livekit-sdk-node"  # PIT-14: 仅用于分析, 非官方依赖, 可选
-  "https://github.com/livekit/python-sdks           livekit-sdk-python"  # PIT-14: 仅用于分析, 非官方依赖, 可选
+  "https://github.com/eclipse-iceoryx/iceoryx2      iceoryx2"  # PIT-14: analysis only, not an official dependency, optional
+  "https://github.com/livekit/rust-sdks             livekit-sdk-rust"  # PIT-14: analysis only, not an official dependency, optional
+  "https://github.com/livekit/client-sdk-cpp        livekit-sdk-cpp"  # PIT-14: analysis only, not an official dependency, optional
+  "https://github.com/livekit/node-sdks             livekit-sdk-node"  # PIT-14: analysis only, not an official dependency, optional
+  "https://github.com/livekit/python-sdks           livekit-sdk-python"  # PIT-14: analysis only, not an official dependency, optional
 )
 
 mkdir -p "$REFS_DIR"
@@ -39,21 +39,21 @@ clone_with_fallback() {
   local url="$1" dir="$2"
   local target="$REFS_DIR/$dir"
   if [[ -d "$target/.git" && $FORCE -eq 0 ]]; then
-    echo "✓ $dir — 已存在, 跳过 (--force 强制重拉)"
+    echo "✓ $dir — already present, skipping (--force to re-fetch)"
     return 0
   fi
   if [[ -d "$target/.git" ]]; then
-    echo "→ $dir — 强制重拉"
+    echo "→ $dir — forced re-fetch"
     rm -rf "$target"
   fi
-  echo "→ 拉取 $dir ..."
-  # 尝试 git 原生, 失败回退 --http1.1 (PIT-14: HTTP/2 被干扰)
+  echo "→ fetching $dir ..."
+  # Try native git first, fall back to --http1.1 on failure (PIT-14: HTTP/2 gets interfered)
   if git clone --depth 1 --single-branch "$url" "$target" 2>/dev/null; then
-    echo "  ✓ $dir 完成"
+    echo "  ✓ $dir done"
   elif git clone --depth 1 --single-branch --config http.version=HTTP/1.1 "$url" "$target" 2>/dev/null; then
-    echo "  ✓ $dir 完成 (http1.1 回退)"
+    echo "  ✓ $dir done (http1.1 fallback)"
   else
-    echo "  ✗ $dir 拉取失败 (网络问题, 参考 PIT-14: 设 HTTPS_PROXY 或重试)"
+    echo "  ✗ $dir fetch failed (network issue — see PIT-14: set HTTPS_PROXY or retry)"
     return 1
   fi
 }
@@ -66,7 +66,7 @@ for entry in "${REPOS[@]}"; do
 done
 
 echo ""
-echo "── 参考源码目录 ──────────────────────────────"
+echo "── reference source directory ─────────────────"
 echo "  $REFS_DIR"
 for entry in "${REPOS[@]}"; do
   dir="${entry##* }"
@@ -75,9 +75,9 @@ for entry in "${REPOS[@]}"; do
     echo "  • $dir @ $commit"
   fi
 done
-echo "  导航: docs/reference/webrtc/mediasoup-refs.md"
-echo "  清理: rm -rf $REFS_DIR"
+  echo "  navigation: docs/reference/webrtc/mediasoup-refs.md"
+  echo "  cleanup: rm -rf $REFS_DIR"
 echo "──────────────────────────────────────────────"
 
-[[ $fail -eq 0 ]] || echo "警告: 部分仓库拉取失败, 请检查网络后重试"
+[[ $fail -eq 0 ]] || echo "warning: some repositories failed to fetch — check the network and retry"
 exit $fail

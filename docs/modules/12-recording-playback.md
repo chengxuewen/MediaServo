@@ -1,73 +1,80 @@
-# 录制与回放架构
+# Recording & Playback Architecture
 
-> 状态: Phase 0 架构设计
-> 关联决策: D34–D40
-> 依赖模块: 08-pipeline-model.md, 09-transport-architecture.md
+> Status: Phase 0 architecture design
+> Related decisions: D34–D40
+> Depends on: 08-pipeline-model.md, 09-transport-architecture.md
 
-## 概述
+## Overview
 
-录制与回放是 MediaServo 跨场景的基础能力，覆盖远程桌面、视频会议、监控相机、推拉流、遥操作五个产品领域。录制回放复用 PipelineEngine 的 `MediaSource → MediaProcessor → MediaSink` 模型——Recording 是 Sink 的一种实现，Playback 是 Source 的一种实现。
+Recording and playback are MediaServo's cross-scenario foundational capabilities, covering five product areas: remote desktop, video conferencing, surveillance cameras, streaming push/pull, and teleoperation. Recording/playback reuse the PipelineEngine's `MediaSource → MediaProcessor → MediaSink` model — Recording is one implementation of a Sink; Playback is one implementation of a Source.
 
-## 1. 录制位置三形态
+## 1. Three Recording Locations
 
 ```
-                 录制位置
-                 ════════
+                 Recording location
+                 ══════════════════
 
   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-  │ Pipeline 内       │  │ SFU Egress       │  │ 客户端本地        │
-  │ (RecordingSink)   │  │ (SFU 旁路 hook)  │  │ (本地编码+存储)   │
+  │ In-pipeline      │  │ SFU egress       │  │ Client local     │
+  │ (RecordingSink)  │  │ (SFU side hook)  │  │ (local encode +  │
+  │                  │  │                  │  │  storage)        │
   ├──────────────────┤  ├──────────────────┤  ├──────────────────┤
-  │ 复用 PipelineEngine│  │ SFU 内部直接旁路  │  │ 录制不依赖服务端   │
-  │ 任何经过管线的流   │  │ 同进程零开销拷贝  │  │ 本地磁盘优先      │
-  │ 都能录制          │  │ 不走 WebRTC 握手  │  │ 可选异步上传 S3   │
+  │ Reuses the       │  │ Direct bypass    │  │ Recording does   │
+  │ PipelineEngine;  │  │ inside the SFU;  │  │ not depend on    │
+  │ any stream that  │  │ same-process     │  │ the server;      │
+  │ passes through   │  │ zero-overhead    │  │ local disk first;│
+  │ the pipeline can │  │ copy; no WebRTC  │  │ optional async   │
+  │ be recorded      │  │ handshake        │  │ upload to S3     │
   ├──────────────────┤  ├──────────────────┤  ├──────────────────┤
-  │ 适用:             │  │ 适用:             │  │ 适用:             │
-  │ 远程桌面录屏      │  │ 视频会议录制      │  │ 远程桌面本地录屏  │
-  │ 遥操作记录        │  │ 推流 DVR          │  │ 遥操作本地记录    │
-  │ 监控相机录制      │  │                  │  │                  │
+  │ Suitable for:    │  │ Suitable for:    │  │ Suitable for:    │
+  │ Remote desktop   │  │ Conference       │  │ Local remote-    │
+  │ screen recording │  │ recording        │  │ desktop capture  │
+  │ Teleoperation    │  │ Streaming DVR    │  │ Local teleop     │
+  │ logs             │  │                  │  │ logs             │
+  │ Surveillance     │  │                  │  │                  │
+  │ camera recording │  │                  │  │                  │
   └──────────────────┘  └──────────────────┘  └──────────────────┘
 ```
 
-**SFU 旁路录制架构** (区别于 LiveKit 的 "隐藏 Peer" 模式):
+**SFU bypass recording architecture** (distinct from LiveKit's "hidden peer" mode):
 
 ```
 SfuRelayPlugin (PipelineNode)
     │
-    ├──▶ 转发给各参会者 WebRTC peer
+    ├──▶ Forwards to each participant's WebRTC peer
     │
-    └──▶ RecordingEgress (同 Pipeline)
+    └──▶ RecordingEgress (same pipeline)
          │
-         ├── Compositor (合流场景)  → GStreamer compositor
-         ├── Encoder               → NVENC/VAAPI H.264
-         └── splitmuxsink          → fMP4 segments → S3/MinIO
+         ├── Compositor (mixed scenarios)   → GStreamer compositor
+         ├── Encoder                        → NVENC/VAAPI H.264
+         └── splitmuxsink                   → fMP4 segments → S3/MinIO
 ```
 
-## 2. 录制粒度
+## 2. Recording Granularity
 
-| 场景 | 默认粒度 | 可选 |
-|------|---------|------|
-| 视频会议 | 合流 MP4（画廊/演讲者布局） | 单流原始 |
-| 远程桌面 | 单流录屏 | — |
-| 监控相机 | 单流 per-camera | — |
-| 推流接收 | 单流 DVR | — |
-| 遥操作 | MP4 视频 + JSONL 控制日志 | SEI 嵌入（证据级） |
+| Scenario | Default granularity | Optional |
+|----------|---------------------|----------|
+| Video conference | Mixed MP4 (gallery/speaker layout) | Per-stream raw |
+| Remote desktop | Single-stream screen recording | — |
+| Surveillance camera | Single stream per camera | — |
+| Stream receiving | Single-stream DVR | — |
+| Teleoperation | MP4 video + JSONL control log | SEI embedding (evidence-grade) |
 
-## 3. 容器格式: fMP4 + splitmuxsink
+## 3. Container Format: fMP4 + splitmuxsink
 
-全线使用 fMP4 (Fragmented MP4)，由 GStreamer `splitmuxsink` 原生支持。
+fMP4 (Fragmented MP4) is used across the board, natively supported by GStreamer's `splitmuxsink`.
 
 ```
-Pipeline 输出 → splitmuxsink
+Pipeline output → splitmuxsink
                     │
-                    ├── max-size-time: 3600s (1h Segment)
+                    ├── max-size-time: 3600s (1h segment)
                     ├── muxer-factory: mp4mux
                     ├── sink-factory: filesink
-                    ├── async-finalize: true (零间隙分片)
+                    ├── async-finalize: true (gapless segmentation)
                     └── location: session_%d.mp4
 ```
 
-### Part-Segment 两层模型 (借鉴 MediaMTX)
+### Part-Segment Two-Layer Model (modeled on MediaMTX)
 
 ```
 session_1730000000/
@@ -76,31 +83,31 @@ session_1730000000/
 └── 003.mp4    ← Segment 3 (2:00–3:00)
 ```
 
-- **Part**: 最小录制单元 (~1s)，崩溃后最多丢失 1 秒
-- **Segment**: 文件组织单元 (~1h)，方便清理、上传和回放
-- **splitmuxsink 行为**: 每个 Segment 结束时 async-finalize 当前 muxer，启动新 muxer，零间隙
+- **Part**: the smallest recording unit (~1s); a crash loses at most 1 second
+- **Segment**: the file-organization unit (~1h), easing cleanup, upload, and playback
+- **splitmuxsink behavior**: at each segment end it async-finalizes the current muxer and starts a new one, gapless
 
-## 4. 合流架构
+## 4. Compositing Architecture
 
 ```
-参会者 A ──▶ SFU ─┐
-参会者 B ──▶ SFU ─┤
-参会者 C ──▶ SFU ─┼──▶ GStreamer compositor
-                   │     ├── 解码 N 路 H.264 → YUV
-                   │     ├── 画面合成（画廊/演讲者布局）
-                   │     ├── 叠加水印（时间戳、参会者名）
-                   │     └── NVENC/VAAPI → H.264 合流
-                   │
-                   └──▶ splitmuxsink → fMP4 segments
+Participant A ──▶ SFU ─┐
+Participant B ──▶ SFU ─┤
+Participant C ──▶ SFU ─┼──▶ GStreamer compositor
+                       │     ├── Decode N H.264 streams → YUV
+                       │     ├── Compose frames (gallery/speaker layout)
+                       │     ├── Overlay watermarks (timestamp, participant name)
+                       │     └── NVENC/VAAPI → mixed H.264
+                       │
+                       └──▶ splitmuxsink → fMP4 segments
 ```
 
-- `compositor` 元素支持 GPU 加速（CUDA 零拷贝路径：decode→compose→encode 全程 GPU 显存）
-- 合成延迟：~10ms（硬件路径）
-- 布局配置：画廊 (N×N grid) / 演讲者 (speaker + thumbnails)
+- The `compositor` element supports GPU acceleration (CUDA zero-copy path: decode→compose→encode entirely in GPU memory)
+- Composition latency: ~10ms (hardware path)
+- Layout config: gallery (N×N grid) / speaker (speaker + thumbnails)
 
-## 5. WebRTC 录制截取点
+## 5. WebRTC Recording Tap Point
 
-录制发生在 **MediaTransport trait 输出之后**，即媒体层而非传输层。
+Recording happens **after the MediaTransport trait output**, i.e. at the media layer, not the transport layer.
 
 ```
 MediaTransport::poll_output()
@@ -108,84 +115,85 @@ MediaTransport::poll_output()
     ▼ TransportOutput::Media(frame)
     │
     ▼ PipelineEngine
-        ├── MediaProcessor: 缩放/颜色转换（如果需要）
-        ├── MediaProcessor: SEI 注入（遥操作场景）
-        └── RecordingSink: MediaSink 实现
+        ├── MediaProcessor: scale/color convert (if needed)
+        ├── MediaProcessor: SEI injection (teleoperation scenario)
+        └── RecordingSink: a MediaSink implementation
 ```
 
-**选择媒体层的理由**:
-- 与传输后端解耦（str0m / libwebrtc / webrtc-rs 无感）
-- 自动处理 Simulcast（只录最高层）、FEC/RTX（不录重传包）
-- SVC 流保留完整 bitstream（回放时可降层）
-- 录制从 keyframe 对齐开始（前几秒丢弃，标准行为）
+**Why the media layer**:
+- Decoupled from the transport backend (invisible to str0m / libwebrtc / webrtc-rs)
+- Handles Simulcast automatically (records only the highest layer) and FEC/RTX (retransmitted packets not recorded)
+- SVC streams keep the full bitstream (layers can be dropped at playback)
+- Recording starts aligned to a keyframe (first seconds dropped, standard behavior)
 
-## 6. 遥操作多轨录制
+## 6. Teleoperation Multi-Track Recording
 
-### 默认: 分离文件
+### Default: separated files
 
 ```
 session_001/
-├── video_001.mp4          ← H.264 视频流
-└── control_001.jsonl      ← 控制指令日志
+├── video_001.mp4          ← H.264 video stream
+└── control_001.jsonl      ← Control command log
 ```
 
-JSONL 格式:
+JSONL format:
 ```jsonl
 {"ts": 1730000000001, "type": "steering", "angle": 15.2, "speed": 30.0}
 {"ts": 1730000000050, "type": "brake", "pressure": 0.7}
 {"ts": 1730000000100, "type": "throttle", "value": 45.0}
 ```
 
-### 可选: SEI 嵌入 (证据级)
+### Optional: SEI Embedding (evidence-grade)
 
 ```
 H.264 bitstream:
   [SPS][PPS][SEI: control_state][IDR][SEI: control_state][P][SEI: control_state]...
       ↑                      ↑
-  每帧附带控制状态快照       帧精确绑定，无法分离篡改
+  control-state snapshot    frame-exact binding, impossible to separate or tamper
+  attached to every frame
 ```
 
-- SEI NAL 单元类型 6，标准播放器忽略
-- 专用回放工具可提取 SEI 实现逐帧同步
-- SEI 注入作为 `SeiInjector` MediaProcessor，不改架构
+- SEI NAL unit type 6, ignored by standard players
+- Dedicated replay tooling can extract the SEI for frame-accurate sync
+- SEI injection is a `SeiInjector` MediaProcessor; no architecture change
 
-## 7. 回放架构
-
-```
-录制产物                    回放方式                    播放端
-────────                   ────────                   ──────
-fMP4 segments ──────▶ HLS playlist ─────────▶ 浏览器 <video>
-                      (nginx/S3 静态服务)      管理后台 web 端
-
-本地 fMP4 文件 ────▶ FrameServer ──────────▶ Client App
-                      (精确 seek)             远程桌面录屏回放
-                                              遥操作事故回溯
-```
-
-- **HLS 流式**: segments 即 HLS 分片，`m3u8` playlist 由 nginx/S3 拼接，浏览器原生 `<video>` 播放
-- **本地回放**: FrameServer 提供时间轴 seek，支持变速播放和帧步进
-- **不需要按需转码**: Phase 1 无此需求，未来可用 Cloudflare Stream 等方案
-
-## 8. 存储与生命周期
+## 7. Playback Architecture
 
 ```
-存储: S3 / MinIO / 本地磁盘
-路径模板: recordings/{room_id}/{timestamp}_{seq}.mp4
-保留策略: 按场景可配置
-  - 视频会议: 默认 30 天
-  - 监控: 7 天循环覆盖
-  - 遥操作: 事故会话永久保留
-  - 远程桌面: 用户自行管理
+Recording artifacts          Playback method               Playing end
+──────────────              ───────────────               ──────────
+fMP4 segments ──────▶ HLS playlist ────────────▶ Browser <video>
+                      (nginx/S3 static serving)  Admin web portal
+
+Local fMP4 files ───▶ FrameServer ────────────▶ Client App
+                      (precise seek)            Remote-desktop screen replay
+                                                Teleoperation incident review
 ```
 
-## 9. 项目参考
+- **HLS streaming**: segments are HLS fragments directly; the `m3u8` playlist is assembled by nginx/S3 and played natively in the browser's `<video>`
+- **Local playback**: FrameServer provides timeline seek, variable-speed playback, and frame stepping
+- **No on-demand transcoding needed**: no Phase 1 requirement; Cloudflare Stream or similar can serve later
 
-| 参考产品 | 借鉴点 |
-|---------|--------|
-| LiveKit Egress | GStreamer compositor 合流、模板文件名、多输出格式 |
-| mediasoup | PlainTransport 录制模式（SFU 旁路验证） |
-| GStreamer splitmuxsink | 零间隙分片、async-finalize、mp4mux 工厂 |
-| MediaMTX | Part-Segment 模型、路径模板、自动清理 |
-| OBS Studio | 子进程隔离 muxer、replay buffer（未来参考） |
+## 8. Storage & Lifecycle
 
-**Phase 2+ 补充**：fMP4 + splitmuxsink recording 作为一等公民的 pipeline 路径（D34-D40）。Phase 1 录制为 MediaSink 简单实现；Phase 2+ 将录制提升为独立的、可组合的一级管道节点，支持合流、SEI 嵌入、多轨并行录制等高级能力。
+```
+Storage: S3 / MinIO / local disk
+Path template: recordings/{room_id}/{timestamp}_{seq}.mp4
+Retention policy: configurable per scenario
+  - Video conference: 30 days default
+  - Surveillance: 7-day rolling overwrite
+  - Teleoperation: incident sessions retained permanently
+  - Remote desktop: user-managed
+```
+
+## 9. Project References
+
+| Reference Product | What We Borrow |
+|-------------------|----------------|
+| LiveKit Egress | GStreamer compositor compositing, template filenames, multi-output formats |
+| mediasoup | PlainTransport recording mode (SFU bypass validated) |
+| GStreamer splitmuxsink | Gapless segmentation, async-finalize, mp4mux factory |
+| MediaMTX | Part-Segment model, path templates, auto cleanup |
+| OBS Studio | Subprocess-isolated muxer, replay buffer (future reference) |
+
+**Phase 2+ addition**: fMP4 + splitmuxsink recording as a first-class pipeline path (D34-D40). Phase 1 recording is a simple MediaSink implementation; Phase 2+ promotes recording into an independent, composable first-class pipeline node supporting compositing, SEI embedding, multi-track parallel recording, and other advanced capabilities.

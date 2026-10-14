@@ -1,18 +1,18 @@
-//! G3 舱端账号注册表（D-H11 双类身份之操作员侧）— 登录认证 + token 签发。
+//! G3 cockpit account registry (D-H11 dual-class identity, operator side) -- login auth + token issuance.
 //!
-//! 文件型配置（YAML，与 devices.yaml 同构），格式:
+//! File-based config (YAML, same shape as devices.yaml), format:
 //! ```yaml
 //! accounts:
-//!   carol:                       # 用户名（JWT sub）
+//!   carol:                       # username (JWT sub)
 //!     password_hash: "sha256:<hex>"   # sha256(username + ":" + password)
 //!     role: operator             # viewer|operator|admin|dispatcher
-//!     vehicles: ["ms-car1"]      # 车×舱白名单（admin/dispatcher 可省略）
+//!     vehicles: ["ms-car1"]      # vehicle x cockpit allowlist (omittable for admin/dispatcher)
 //! ```
-//! 存储决策同 G2 devices: 仅单向哈希（username 充当盐）；subtle 常量时间比较；
-//! 未知用户与错误密码 wire 响应逐字一致（防枚举）。升级路径同 G2: argon2id 前缀。
-//! token 设计（G3 采用 D-H11 选项②）: 登录成功签发 JWT
-//! `{sub: username, role, vehicles, iat, exp}`，与 admin JWT 同 secret（admin_jwt_secret）
-//! 同算法（HS256）— 复用既有 JwtAuth/中间件机制，无第二套签名体系。
+//! Storage decision same as G2 devices: one-way hash only (username as salt); subtle constant-time comparison;
+//! unknown-user and wrong-password wire responses are byte-identical (anti-enumeration). Upgrade path same as G2: argon2id prefix.
+//! Token design (G3 adopts D-H11 option 2): on login a JWT is issued
+//! `{sub: username, role, vehicles, iat, exp}`, same secret as the admin JWT (admin_jwt_secret)
+//! and same algorithm (HS256) -- reuses the existing JwtAuth/middleware machinery, no second signing system.
 
 use mediaservo_common::auth::JwtClaims;
 use mediaservo_common::error::CoreError;
@@ -26,17 +26,17 @@ use subtle::ConstantTimeEq;
 
 use crate::roles::{AccountIdentity, CockpitRole};
 
-/// 账号认证失败原因（wire 统一 401，内部区分仅进审计日志 — 防枚举）。
+/// Account auth failure reason (wire returns a uniform 401; internal distinction goes to the audit log only -- anti-enumeration).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountAuthError {
-    /// 用户不在注册表中。
+    /// User is not in the registry.
     Unknown,
-    /// 密码哈希不匹配。
+    /// Password hash mismatch.
     BadPassword,
 }
 
 impl AccountAuthError {
-    /// 面向客户端的可读消息 — 未知用户与错误密码必须逐字一致（防枚举，同 G2）。
+    /// Client-facing readable message -- unknown-user and wrong-password must be byte-identical (anti-enumeration, same as G2).
     pub fn message(&self) -> &'static str {
         match self {
             AccountAuthError::Unknown | AccountAuthError::BadPassword => {
@@ -46,20 +46,20 @@ impl AccountAuthError {
     }
 }
 
-/// 账号注册表管理操作错误（管理 API 用；400/404/409 映射见 admin.rs）。
+/// Registry management operation errors (admin API; 400/404/409 mapping in admin.rs).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccountRegError {
-    /// 创建时用户名已存在。
+    /// Username already exists on create.
     Duplicate,
-    /// 更新/删除时用户名不存在。
+    /// Username does not exist on update/delete.
     Unknown,
-    /// 角色不是 viewer|operator|admin|dispatcher。
+    /// Role is not one of viewer|operator|admin|dispatcher.
     InvalidRole(String),
-    /// vehicles 含空项或非法字符。
+    /// vehicles contains an empty item or invalid characters.
     InvalidVehicles(String),
 }
 
-/// 管理列表视图（不含 password_hash — 密码哈希绝不外泄）。
+/// Admin list view (no password_hash -- the password hash never leaks).
 #[derive(Debug, Clone, Serialize)]
 pub struct AccountView {
     pub username: String,
@@ -88,8 +88,8 @@ struct AccountEntry {
     vehicles: Vec<String>,
 }
 
-/// 舱端账号注册表（启动时加载，只读；空 = 无账号，PSK/设备路径不受影响）。
-/// 注册表内部态（RwLock 包裹）。
+/// Cockpit account registry (loaded at startup, read-only; empty = no accounts, PSK/device path unaffected).
+/// Registry internal state (wrapped in RwLock).
 #[derive(Debug)]
 struct AccountRegistryInner {
     accounts: HashMap<String, AccountEntry>,
@@ -101,8 +101,8 @@ impl AccountRegistryInner {
     }
 }
 
-/// 舱端账号注册表（启动时加载；运行期可读写热重载）。
-/// 空 = 无账号，PSK/设备路径不受影响。
+/// Cockpit account registry (loaded at startup; hot-reloadable read/write at runtime).
+/// Empty = no accounts, PSK/device path unaffected.
 #[derive(Debug)]
 pub struct AccountRegistry {
     inner: RwLock<AccountRegistryInner>,
@@ -119,7 +119,7 @@ impl AccountRegistry {
         Self::default()
     }
 
-    /// 锁 poison 恢复标准做法：unpoisoned 读锁；poison 时取回写者遗留的一致值。
+    /// Standard lock-poison recovery: unpoisoned read lock; on poison take the consistent value left by the writer.
     fn lock_read(&self) -> RwLockReadGuard<'_, AccountRegistryInner> {
         self.inner.read().unwrap_or_else(|e| e.into_inner())
     }
@@ -128,11 +128,11 @@ impl AccountRegistry {
         self.inner.write().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// 从 YAML 文件加载。
+    /// Load from a YAML file.
     ///
-    /// 文件**缺失** → 空注册表（`Ok` — PSK/设备路径不受影响，I4 review 维持）；
-    /// 文件**存在但损坏** → `Err`（fail-fast: 启动方必须拒绝继续——损坏的注册表
-    /// 静默降级 = 授权强制被静默禁用，与 identity.json 损坏显式报错同纪律）。
+    /// File **missing** -> empty registry (`Ok` -- PSK/device path unaffected, kept per I4 review);
+    /// file **exists but is corrupt** -> `Err` (fail-fast: the starter must refuse to continue -- a silently degraded registry
+    /// = authorization enforcement silently disabled; same discipline as identity.json corruption reporting loudly).
     pub fn load(path: impl AsRef<Path>) -> Result<Self, CoreError> {
         let content = match std::fs::read_to_string(path.as_ref()) {
             Ok(c) => c,
@@ -151,7 +151,7 @@ impl AccountRegistry {
         })
     }
 
-    /// 从 YAML 文本解析（测试与加载共用）。未知角色 → 解析错误（账号不可用）。
+    /// Parse from YAML text (shared by tests and load). Unknown role -> parse error (account unusable).
     pub fn from_yaml(content: &str) -> Result<Self, String> {
         let file: AccountsFile =
             serde_yaml::from_str(content).map_err(|e| format!("YAML parse error: {e}"))?;
@@ -187,12 +187,12 @@ impl AccountRegistry {
         self.lock_read().accounts.is_empty()
     }
 
-    /// 认证决策（login 处理调用）: 校验通过返回账号身份（进 JWT claims）。
+    /// Authentication decision (called by the login handler): validation returns the account identity (goes into JWT claims).
     fn verify(&self, username: &str, password: &str) -> Result<AccountIdentity, AccountAuthError> {
         let inner = self.lock_read();
         let known = inner.accounts.contains_key(username);
-        // 未知用户也走完整 sha256 + ct_eq 路径（防时序，同 G2 dummy 机制 —
-        // 此处以固定字符串为目标，长度与真实哈希一致）。
+        // Unknown users also walk the full sha256 + ct_eq path (anti-timing, same as the G2 dummy mechanism --
+        // here a fixed string is the target, length equal to a real hash).
         let stored =
             inner.accounts.get(username).map(|e| e.password_hash.as_str()).unwrap_or(
                 "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -213,7 +213,7 @@ impl AccountRegistry {
         }
     }
 
-    /// 登录入口（admin.rs login handler 调用）。
+    /// Login entry point (called by the admin.rs login handler).
     pub fn authenticate(
         &self,
         username: &str,
@@ -222,7 +222,7 @@ impl AccountRegistry {
         self.verify(username, password)
     }
 
-    /// I2 review: 检测注册表是否含已知开发占位哈希（命中用户名列表）。
+    /// I2 review: detect whether the registry contains known dev placeholder hashes (matched usernames returned).
     pub fn dev_credentials_present(&self) -> Vec<&'static str> {
         let inner = self.lock_read();
         DEV_CREDENTIAL_HASHES
@@ -232,8 +232,8 @@ impl AccountRegistry {
             .collect()
     }
 
-    /// I2 review: 启动守卫 — 含开发占位账号 → Err（fail-fast，同损坏注册表纪律）；
-    /// `allow_dev` = 显式覆盖（env MEDIASERVO_ALLOW_DEV_CREDENTIALS=1，仅 dev compose 设置）。
+    /// I2 review: startup guard -- contains dev placeholder accounts -> Err (fail-fast, same as the corrupt-registry discipline);
+    /// `allow_dev` = explicit override (env MEDIASERVO_ALLOW_DEV_CREDENTIALS=1, set only in dev compose).
     pub fn check_dev_credentials(&self, allow_dev: bool) -> Result<(), String> {
         let found = self.dev_credentials_present();
         if found.is_empty() || allow_dev {
@@ -245,7 +245,7 @@ impl AccountRegistry {
         ))
     }
 
-    /// 序列化为 YAML 文件内容（与 from_yaml 格式互逆）。
+    /// Serialize to YAML file content (inverse of from_yaml format).
     fn to_yaml(&self) -> Result<String, CoreError> {
         let inner = self.lock_read();
         let accounts = inner
@@ -267,8 +267,8 @@ impl AccountRegistry {
             .map_err(|e| CoreError::ConfigParse(format!("accounts serialize: {e}")))
     }
 
-    /// Atomic 写回 accounts.yaml（temp + fsync + rename）。
-    /// 内存不变：序列化与写盘全部成功才返回 Ok；失败清理 temp 并返回 Err。
+    /// Atomic write-back of accounts.yaml (temp + fsync + rename).
+    /// Memory unchanged: Ok only when serialization and disk write both succeed; on failure clean up temp and return Err.
     pub fn save(&self, path: impl AsRef<Path>) -> Result<(), CoreError> {
         let path = path.as_ref();
         let yaml = self.to_yaml()?;
@@ -293,7 +293,7 @@ impl AccountRegistry {
         }
     }
 
-    /// vehicles 校验：非空列表项、每项非空且仅 [A-Za-z0-9-_]（与 device_id 同字符集）。
+    /// vehicles validation: non-empty list, each item non-empty and only [A-Za-z0-9-_] (same charset as device_id).
     fn validate_vehicles(vehicles: &[String]) -> Result<(), AccountRegError> {
         if vehicles.iter().any(|v| {
             v.is_empty()
@@ -301,13 +301,13 @@ impl AccountRegistry {
                 || !v.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         }) {
             return Err(AccountRegError::InvalidVehicles(
-                "vehicles: 每项 1-64 字符 [A-Za-z0-9-_]".into(),
+                "vehicles: each item 1-64 chars [A-Za-z0-9-_]".into(),
             ));
         }
         Ok(())
     }
 
-    /// 创建账号：hash_password + 插入（内存）。落盘由管理 API 层调 `save` 完成。
+    /// Create account: hash_password + insert (in memory). Persisting is done by the admin API layer calling `save`.
     pub fn create_account(
         &self,
         username: &str,
@@ -333,7 +333,7 @@ impl AccountRegistry {
         Ok(())
     }
 
-    /// 更新账号（role/vehicles/密码按需）：None 字段保持原值。
+    /// Update account (role/vehicles/password as requested): None fields keep their old value.
     pub fn update_account(
         &self,
         username: &str,
@@ -364,13 +364,13 @@ impl AccountRegistry {
         Ok(())
     }
 
-    /// 删除账号。
+    /// Delete account.
     pub fn delete_account(&self, username: &str) -> Result<(), AccountRegError> {
         let mut inner = self.lock_write();
         inner.accounts.remove(username).map(|_| ()).ok_or(AccountRegError::Unknown)
     }
 
-    /// 管理列表（不含 password_hash）。
+    /// Admin list (no password_hash).
     pub fn list_accounts(&self) -> Vec<AccountView> {
         let mut views: Vec<AccountView> = self
             .lock_read()
@@ -387,17 +387,17 @@ impl AccountRegistry {
     }
 }
 
-/// I2 review: 已知开发占位账号哈希（config/accounts.yaml 的 admin123/
-/// dispatch123/operator123）— 哈希即 sha256(username:password)，含 username 盐。
-/// 生产部署启动守卫（check_dev_credentials）拒绝；dev compose 经
-/// MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 显式豁免。
+/// I2 review: known dev placeholder account hashes (config/accounts.yaml admin123/
+/// dispatch123/operator123) -- hash = sha256(username:password), with the username salt included.
+/// The production startup guard (check_dev_credentials) rejects; dev compose explicitly exempts via
+/// MEDIASERVO_ALLOW_DEV_CREDENTIALS=1.
 pub const DEV_CREDENTIAL_HASHES: &[(&str, &str)] = &[
     ("admin", "sha256:bf6b5bdb74c79ece9fc0ad0ac9fb0359f9555d4f35a83b2e6ec69ae99e09603d"),
     ("dispatcher", "sha256:51f00e625e5fb3aff1c5a55eff96d1f2f03273afd8b0bc2514961e33dd82f8b2"),
     ("operator", "sha256:21cfc6b0fe8e257247937406f1ee83ae8acd3dc447c38b8431abecaf6d7ea437"),
 ];
 
-/// sha256(username + ":" + password)，hex 编码，`sha256:` 前缀（username 充当盐）。
+/// sha256(username + ":" + password), hex encoded, `sha256:` prefix (username as salt).
 pub fn hash_password(username: &str, password: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(username.as_bytes());
@@ -408,8 +408,8 @@ pub fn hash_password(username: &str, password: &str) -> String {
     format!("sha256:{hex}")
 }
 
-/// 为账号身份签发 JWT（HS256，admin_jwt_secret — 与 admin 中间件同 secret 同算法）。
-/// claims: {sub: username, role, vehicles, iat, exp}。
+/// Issue a JWT for an account identity (HS256, admin_jwt_secret -- same secret and algorithm as the admin middleware).
+/// claims: {sub: username, role, vehicles, iat, exp}.
 pub fn issue_account_token(
     secret: &str,
     identity: &AccountIdentity,
@@ -434,20 +434,20 @@ pub fn issue_account_token(
     .map_err(|e| format!("JWT encode error: {e}"))
 }
 
-/// 启动期密钥配对校验（I2 review — fail-open 修复）:
-/// 账号 token 由 login 用 `admin_jwt_secret` 签发，但 /ws 握手用 `jwt_secret` 验签 —
-/// 两者不一致时账号 token 验签失败 → 静默回退 PSK/Legacy → 矩阵强制被绕过。
-/// 有账号配置时必须一致（不相等 → Err，启动方 fail-fast）。
+/// Startup key-pairing check (I2 review -- fail-open fix):
+/// account tokens are signed by login with `admin_jwt_secret`, but the /ws handshake verifies with `jwt_secret` --
+/// when they differ, account token verification fails -> silent PSK/Legacy fallback -> matrix enforcement bypassed.
+/// With accounts configured they must be equal (not equal -> Err, starter fail-fast).
 pub fn validate_secret_pairing(
     accounts_configured: bool,
     jwt_secret: Option<&str>,
     admin_jwt_secret: Option<&str>,
 ) -> Result<(), String> {
     if !accounts_configured {
-        return Ok(()); // 无账号 → 无矩阵可绕过（PSK/设备路径不受影响）
+        return Ok(()); // no accounts -> no matrix to bypass (PSK/device path unaffected)
     }
     match (jwt_secret, admin_jwt_secret) {
-        (Some(a), Some(b)) if a != b => Err("jwt_secret 与 admin_jwt_secret 不一致: 账号 token 经 admin_jwt_secret 签发、             /ws 握手经 jwt_secret 验签，不一致会使账号认证静默失败并回退 PSK（矩阵绕过）。             请配置为同一 secret".to_string()),
+        (Some(a), Some(b)) if a != b => Err("jwt_secret and admin_jwt_secret differ: account tokens are signed with admin_jwt_secret and             the /ws handshake verifies with jwt_secret; a mismatch makes account auth fail silently and fall back to PSK (matrix bypass).             Configure the same secret".to_string()),
         _ => Ok(()),
     }
 }
@@ -480,10 +480,14 @@ mod tests {
         let reg = test_registry();
         let e_unknown = reg.authenticate("nobody", "s3cret").unwrap_err();
         let e_bad = reg.authenticate("carol", "wrong").unwrap_err();
-        assert_ne!(e_unknown, e_bad, "内部区分保留（审计）");
-        assert_eq!(e_unknown.message(), e_bad.message(), "wire 必须逐字一致（防枚举）");
+        assert_ne!(e_unknown, e_bad, "internal distinction kept (audit)");
+        assert_eq!(
+            e_unknown.message(),
+            e_bad.message(),
+            "wire must be byte-identical (anti-enumeration)"
+        );
         assert!(e_unknown.message().starts_with("account authentication failed"));
-        // 空注册表: 任何用户都失败
+        // Empty registry: every user fails
         assert_eq!(
             AccountRegistry::empty().authenticate("carol", "s3cret").unwrap_err(),
             AccountAuthError::Unknown
@@ -510,7 +514,7 @@ mod tests {
     fn hash_password_uses_username_as_salt() {
         assert_ne!(hash_password("a", "same"), hash_password("b", "same"));
         assert!(hash_password("a", "p").starts_with("sha256:"));
-        // 稳定向量
+        // Stable vectors
         let mut h = Sha256::new();
         h.update(b"carol:s3cret");
         let expected: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
@@ -535,15 +539,15 @@ mod tests {
 
     #[test]
     fn secret_pairing_validation() {
-        // I2 review: 账号配置 + 密钥分歧 → Err（fail-fast）; 一致/无账号 → Ok
+        // I2 review: accounts configured + key divergence -> Err (fail-fast); equal/no accounts -> Ok
         assert!(
             validate_secret_pairing(true, Some("aaa"), Some("bbb")).is_err(),
-            "有账号 + 密钥分歧必须报错"
+            "accounts + key divergence must error"
         );
         let err = validate_secret_pairing(true, Some("aaa"), Some("bbb")).unwrap_err();
         assert!(err.contains("jwt_secret") && err.contains("admin_jwt_secret"), "{err}");
         assert_eq!(validate_secret_pairing(true, Some("aaa"), Some("aaa")), Ok(()));
-        // 无账号 → 分歧无害（无矩阵可绕过）; 单边缺失 → 无法分歧
+        // No accounts -> divergence harmless (no matrix to bypass); one side missing -> cannot diverge
         assert_eq!(validate_secret_pairing(false, Some("aaa"), Some("bbb")), Ok(()));
         assert_eq!(validate_secret_pairing(true, None, Some("bbb")), Ok(()));
         assert_eq!(validate_secret_pairing(true, Some("aaa"), None), Ok(()));
@@ -552,10 +556,10 @@ mod tests {
 
     #[test]
     fn load_missing_file_ok_empty_and_malformed_err() {
-        // I4 review: 缺失 → 空（不阻断）; 损坏 → Err（fail-fast，禁静默降级）
+        // I4 review: missing -> empty (non-blocking); corrupt -> Err (fail-fast, silent degradation forbidden)
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("nope.yaml");
-        assert!(AccountRegistry::load(&missing).unwrap().is_empty(), "缺失=空注册表");
+        assert!(AccountRegistry::load(&missing).unwrap().is_empty(), "missing = empty registry");
 
         let bad = dir.path().join("bad.yaml");
         std::fs::write(&bad, "accounts: [not-a-map").unwrap();
@@ -583,13 +587,13 @@ mod tests {
         let reg = AccountRegistry::from_yaml(&yaml).unwrap();
         assert_eq!(reg.authenticate("adm", "p").unwrap().role, CockpitRole::Admin);
         assert_eq!(reg.authenticate("disp", "p").unwrap().role, CockpitRole::Dispatcher);
-        // vehicles 缺省空
+        // vehicles defaults to empty
         assert!(reg.authenticate("adm", "p").unwrap().vehicles.is_empty());
     }
 
-    // ── I2 review: 开发占位账号守卫 ──────────────────────────────────────────
+    // -- I2 review: dev placeholder account guard --------------------------------------------
 
-    /// 含 dev 占位哈希的注册表（accounts.yaml 同构）
+    /// Registry containing dev placeholder hashes (same shape as accounts.yaml)
     fn dev_registry() -> AccountRegistry {
         AccountRegistry::from_yaml(
             "accounts:\n  admin:\n    password_hash: \"sha256:bf6b5bdb74c79ece9fc0ad0ac9fb0359f9555d4f35a83b2e6ec69ae99e09603d\"\n    role: admin\n  operator:\n    password_hash: \"sha256:21cfc6b0fe8e257247937406f1ee83ae8acd3dc447c38b8431abecaf6d7ea437\"\n    role: operator\n",
@@ -601,10 +605,10 @@ mod tests {
     fn dev_credentials_detected_by_hash_membership() {
         let reg = dev_registry();
         let found = reg.dev_credentials_present();
-        assert_eq!(found.len(), 2, "应命中 admin + operator: {found:?}");
+        assert_eq!(found.len(), 2, "should hit admin + operator: {found:?}");
         assert!(found.contains(&"admin"));
         assert!(found.contains(&"operator"));
-        // 非 dev 注册表 → 空
+        // Non-dev registry -> empty
         assert!(test_registry().dev_credentials_present().is_empty());
         assert!(AccountRegistry::empty().dev_credentials_present().is_empty());
     }
@@ -615,23 +619,23 @@ mod tests {
         let err = reg.check_dev_credentials(false).unwrap_err();
         assert!(
             err.contains("DEVELOPMENT CREDENTIALS DETECTED"),
-            "启动必须拒绝开发占位账号: {err}"
+            "startup must reject dev placeholder accounts: {err}"
         );
-        assert!(err.contains("admin123"), "错误应点名 dev 账号: {err}");
-        // 显式覆盖（dev compose env）→ 放行
+        assert!(err.contains("admin123"), "error must name the dev account: {err}");
+        // Explicit override (dev compose env) -> allowed
         assert_eq!(reg.check_dev_credentials(true), Ok(()));
-        // 非 dev / 空注册表 → 恒放行
+        // Non-dev / empty registry -> always allowed
         assert_eq!(test_registry().check_dev_credentials(false), Ok(()));
         assert_eq!(AccountRegistry::empty().check_dev_credentials(false), Ok(()));
     }
 
-    // ── unified-device-admin T5: 热重载原语 ────────────────────────────────
+    // -- unified-device-admin T5: hot-reload primitives -------------------------------------
 
     #[test]
     fn create_account_then_authenticate_hot() {
         let reg = AccountRegistry::empty();
         reg.create_account("bob", "pw", "operator", &["ms-car2".to_string()]).unwrap();
-        // 无需重启即登录成功（热重载语义）
+        // login succeeds without a restart (hot-reload semantics)
         let id = reg.authenticate("bob", "pw").unwrap();
         assert_eq!(id.role, CockpitRole::Operator);
         assert_eq!(id.vehicles, vec!["ms-car2".to_string()]);
@@ -697,7 +701,7 @@ mod tests {
         let reg = AccountRegistry::empty();
         reg.create_account("bob", "pw", "dispatcher", &[]).unwrap();
         reg.save(&path).unwrap();
-        assert!(!path.with_extension("yaml.tmp").exists(), "temp 必须清理");
+        assert!(!path.with_extension("yaml.tmp").exists(), "temp must be cleaned up");
         let reloaded = AccountRegistry::load(&path).unwrap();
         let id = reloaded.authenticate("bob", "pw").unwrap();
         assert_eq!(id.role, CockpitRole::Dispatcher);

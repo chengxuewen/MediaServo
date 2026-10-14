@@ -43,7 +43,7 @@ No user prompt needed:
 Before executing ANY plan or todo list, use the `question` tool for interactive confirmation:
 
 ```
-question(header="确认执行", options=[{label:"确认执行", description:"开始执行计划"}])
+question(header="Confirm execution", options=[{label:"Confirm execution", description:"Start executing the plan"}])
 ```
 
 **NEVER execute without user's explicit affirmative response.**

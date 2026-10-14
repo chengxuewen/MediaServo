@@ -10,10 +10,10 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const notices = (location.state as { notice?: string } | null)?.notice;
-  // T8 弱网面板入口卡：每 mount 探活一次（HEAD /weaknet/v1/capabilities），无轮询。
-  // 桶表(design D4，2026-09-11 消噪刀修订)：capabilities 无凭证只读豁免后 2xx+json=活；
-  // 2xx+html=SPA fallback 假亮(反代段缺位) / 其余 4xx(老版 serve 仍 401/Host 门 403)=也证明活着 / 5xx|reject=down。
-  // DEV 隐藏：vite 无 /weaknet 代理（按 5173 端口判据，工程未类型化 import.meta.env）。
+  // T8 weaknet panel entry card: probe once per mount (HEAD /weaknet/v1/capabilities), no polling.
+  // Bucket table (design D4, revised in the 2026-09-11 de-noise pass): after the read-only capabilities exemption, 2xx+json = alive;
+  // 2xx+html = SPA fallback false-positive (reverse-proxy block missing) / other 4xx (old serve 401/Host gate 403) = also alive / 5xx|reject = down.
+  // Hidden in DEV: vite has no /weaknet proxy (judged by port 5173; import.meta.env is not typed in this project).
   const [wnet, setWnet] = useState<'ok' | 'no-proxy' | 'down' | null>(null);
   const showWnet = isAdmin && window.location.port !== '5173';
   useEffect(() => {
@@ -51,7 +51,7 @@ export default function Layout() {
           <NavLink to="/" end className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
             <LayoutDashboard size={15} /> Dashboard
           </NavLink>
-          {/* H3: 音频会议 + 多车监控 = G3 can_status 角色（operator/admin/dispatcher） */}
+          {/* H3: audio conference + multi-vehicle monitoring = G3 can_status roles (operator/admin/dispatcher) */}
           {canMonitor && (
             <NavLink to="/audio" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               <Mic size={15} /> Audio Conference
@@ -62,7 +62,7 @@ export default function Layout() {
               <Car size={15} /> Vehicles
             </NavLink>
           )}
-          {/* Devices/Accounts/ApiKeys 管理 = 仅 admin（与 RequireAdmin 守卫一致） */}
+          {/* Devices/Accounts/ApiKeys management = admin only (matches the RequireAdmin guard) */}
           {isAdmin && (
             <NavLink to="/devices" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               <MonitorCog size={15} /> Device Management
@@ -78,12 +78,12 @@ export default function Layout() {
               <KeyRound size={15} /> API Keys
             </NavLink>
           )}
-          {/* 弱网面板 = 纯外链（App.tsx 路由表不加 path），新标签打开 serve 面板 */}
+          {/* weaknet panel = pure external link (no path added to the App.tsx route table); opens the serve panel in a new tab */}
           {showWnet && (
             <a href="/weaknet/" target="_blank" rel="noopener noreferrer"
                className={wnet ? 'nav-item dim' : 'nav-item'}
-               title={wnet === 'no-proxy' ? '反代段缺位（检查 Caddy）' : wnet === 'down' ? 'weaknet serve 未运行' : undefined}>
-              <Sliders size={15} /> 弱网面板
+               title={wnet === 'no-proxy' ? 'Reverse-proxy block missing (check Caddy)' : wnet === 'down' ? 'weaknet serve not running' : undefined}>
+              <Sliders size={15} /> Weaknet Panel
             </a>
           )}
           <NavLink to="/settings" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>

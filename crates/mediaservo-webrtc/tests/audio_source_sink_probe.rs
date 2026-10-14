@@ -1,14 +1,14 @@
-//! PIT-105 证据探针（H2 I4 review 提交）: AudioTrackSource → capture_frame → AudioTrack
-//! sink 交付链 — 源侧接入实证。
+//! The PIT-105 evidence probe (the H2 I4 review commit): AudioTrackSource -> capture_frame -> AudioTrack
+//! sink delivery chain -- the source-side hookup field-proven.
 //!
-//! 背景（PIT-105）: 音频发送链路五段中，本探针证明"源→轨道 sink"段工作
-//! （capture_frame 成功 + sink 回调 70 次/20 帧 + 静音填充）; 丢失点在 libwebrtc
-//! 音频发送通道（LocalAudioSinkAdapter 挂载 / channel StartSend 状态）— vendor 域。
-//! `#[ignore]`: 探针不依赖 PIT-105 修复（sink 链本来就通），但保持低频运行
-//! （FFI 探针语义 + 修复验证时的判别式）。
+//! Background (PIT-105): of the five segments of the audio send chain, this probe proves the "source -> track sink" segment works
+//! (capture_frame succeeding + the sink callback firing 70 times for 20 frames + silence fill); the loss point sits in libwebrtc's
+//! audio send channel (the LocalAudioSinkAdapter mount / the channel StartSend state) -- the vendor domain.
+//! `#[ignore]`: the probe does not depend on the PIT-105 fix (the sink chain was always working), but keeps running at low frequency
+//! (FFI-probe semantics + the discriminator when the fix is verified).
 
-// 仅 backend-webrtc-sys 有 webrtc_sys 依赖（default = stub 后端, 无 FFI 面）—
-// 无此门 default 构建编译失败（I1 re-review blocker）。
+// only backend-webrtc-sys has the webrtc_sys dependency (default = the stub backend, no FFI surface) --
+// without this gate the default build fails to compile (the I1 re-review blocker).
 #![cfg(feature = "backend-webrtc-sys")]
 #![cfg(target_os = "linux")]
 
@@ -20,22 +20,16 @@ extern "C" fn noop_complete(_ctx: *const webrtc_sys::audio_track::SourceContext)
 struct Counter(Arc<AtomicU64>);
 
 impl webrtc_sys::audio_track::AudioSink for Counter {
-    fn on_data(
-        &self,
-        _data: &[i16],
-        _sample_rate: i32,
-        _nb_channels: usize,
-        _nb_frames: usize,
-    ) {
+    fn on_data(&self, _data: &[i16], _sample_rate: i32, _nb_channels: usize, _nb_frames: usize) {
         self.0.fetch_add(1, Ordering::Relaxed);
     }
 }
 
-/// capture_frame 推入的 PCM 必须到达 AudioTrack 的 sink（源→轨道链证据）。
-/// 修复 PIT-105 时保留: 若此测试失败 = 源侧接线回归; 若通过但 e2e byte_count=0
-/// = 丢失点仍在 libwebrtc 发送通道。
+/// The PCM pushed by capture_frame must reach the AudioTrack's sink (the source -> track chain evidence).
+/// Kept when fixing PIT-105: if this test fails = a source-side wiring regression; if it passes but e2e byte_count=0
+/// = the loss point is still in libwebrtc's send channel.
 #[test]
-#[ignore = "PIT-105 证据探针: 低频运行; 依赖 webrtc-sys FFI 运行时"]
+#[ignore = "the PIT-105 evidence probe: low-frequency runs; depends on the webrtc-sys FFI runtime"]
 fn audio_source_sink_probe() {
     use webrtc_sys::audio_track::ffi as at;
 
@@ -61,7 +55,7 @@ fn audio_source_sink_probe() {
     );
     track.add_sink(&sink);
 
-    // 推 20 帧 10ms PCM（模拟 tone 节奏）
+    // push 20 frames of 10ms PCM (mimicking the tone cadence)
     let pcm: Vec<i16> = vec![0i16; 480];
     for i in 0..20 {
         let ok = unsafe {
@@ -77,9 +71,12 @@ fn audio_source_sink_probe() {
         assert!(ok, "capture_frame[{i}] rejected");
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    // 等 queue 任务排空
+    // wait for the queue task to drain
     std::thread::sleep(std::time::Duration::from_millis(500));
     let n = counter.load(Ordering::Relaxed);
     eprintln!("audio_source_sink_probe: sink callbacks = {n}");
-    assert!(n > 0, "capture_frame 的数据必须到达 track sink（源→轨道线断裂）");
+    assert!(
+        n > 0,
+        "capture_frame's data must reach the track sink (the source -> track line is broken)"
+    );
 }

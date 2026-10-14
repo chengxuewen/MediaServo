@@ -1,12 +1,12 @@
-//! S6/K4：Consumer 对象模型——每路订阅一个句柄，多路互不连坐。
+//! S6/K4: the Consumer object model -- one handle per subscription path, no cross-path coupling.
 //!
-//! 形状对账（frozen design）：
-//! - [`ConsumerSlot`] = 会话侧登记簿条目（帧出口 + 当前 recv pc），K1 重挂重放
-//!   换 pc 不换 slot——app 手里的 [`Consumer::frames`] 接收端跨重连连续；
-//! - [`Consumer`] = app 侧句柄（**无 Drop impl**）：`close(self)` 消费自身即
-//!   撤走接收端，注册簿槽经 `frame_tx.is_closed()` 判死（重放跳过该路）。
+//! Shape reconciliation (frozen design):
+//! - [`ConsumerSlot`] = the session-side ledger entry (frame outlet + current recv pc); the K1 re-mount replay
+//!   swaps the pc not the slot -- the [`Consumer::frames`] receiver the app holds keeps streaming across reconnects;
+//! - [`Consumer`] = the app-side handle (**no Drop impl**): `close(self)` consumes itself, which
+//!   removes the receiver; the ledger slot is declared dead via `frame_tx.is_closed()` (the replay skips that path).
 //!
-//! 旧形 `consume_video` 保留为桥（返回裸 receiver），行为逐字节不变（R3）。
+//! The legacy `consume_video` form stays as a bridge (returns the bare receiver), byte-identical behavior (R3).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -18,33 +18,33 @@ use tokio::sync::mpsc;
 use crate::engine::PcHandle;
 use crate::session::{VideoFrame, VideoStreamStats, fold_inbound_stats};
 
-/// 换算完毕的 QOE 快照（consumer-qoe-callback：单位与 TRRO OnMediaState 对齐）。
+/// The converted QOE snapshot (consumer-qoe-callback: units aligned with TRRO OnMediaState).
 ///
-/// `epoch` = 差分基线代——重协商/pc 切换后首轮回 0 值并递增代，消费方仅作
-/// 断点识别，**不做业务判断**（plan §5 守门）。
+/// `epoch` = the differential-baseline generation -- the first round after a renegotiation/pc swap returns 0s and bumps the generation; consumers use it only
+/// for break identification, **never for business decisions** (plan §5 gate).
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct QoeSnapshot {
     pub fps: u32,
-    /// 码率 kbps（SDK 内差分 bytesReceived，四舍五入；首轮占位 0）
+    /// bitrate kbps (differential bytesReceived inside the SDK, rounded; first round placeholder 0)
     pub kbps: u32,
-    /// 丢包率 %（packets_lost / (lost + received) × 100，received=0 时 0）
+    /// loss % (packets_lost / (lost + received) x 100; 0 when received=0)
     pub lost_percent: f32,
     pub decoded_total: u64,
-    /// 平均解码耗时 ms/帧（ΔtotalDecodeTime×1000/ΔframesDecoded；首轮/无增量=0）
+    /// average decode ms/frame (delta totalDecodeTime x 1000 / delta framesDecoded; first round/no increment = 0)
     pub avg_decode_ms: u32,
-    /// 抖动 ms（inbound jitter 秒×1000 取整；多路 max）
+    /// jitter ms (inbound jitter seconds x 1000, rounded; max across paths)
     pub jitter_ms: u32,
-    /// 往返时延 ms（candidate-pair currentRoundTripTime；后端无源=0）
+    /// RTT ms (candidate-pair currentRoundTripTime; 0 when the backend has no source)
     pub rtt_ms: u32,
     pub width: u32,
     pub height: u32,
     pub epoch: u32,
 }
 
-/// 差分状态机（slot 内独占——plan §2.2）。
+/// The differential state machine (exclusive within the slot -- plan §2.2).
 ///
-/// `last_ts == 0` = 基线未建（首轮回 0 占位）；pc 切换（K1 重放）由
-/// `ConsumerSlot::set_pc` 调 `bump_epoch` 递增代并重置基线。
+/// `last_ts == 0` = baseline not built (first round returns 0 placeholders); a pc swap (the K1 replay) goes through
+/// `ConsumerSlot::set_pc`, which calls `bump_epoch`, bumping the generation and resetting the baseline.
 #[derive(Debug, Default)]
 pub(crate) struct QoeDiffer {
     last_bytes: u64,
@@ -55,7 +55,7 @@ pub(crate) struct QoeDiffer {
 }
 
 impl QoeDiffer {
-    /// 折叠最新 stats → 快照。`now_ms` 由调用方时钟注入（可测性）。
+    /// Fold the latest stats -> snapshot. `now_ms` injected by the caller's clock (testability).
     pub(crate) fn diff(&mut self, stats: &VideoStreamStats, now_ms: u64) -> QoeSnapshot {
         let mut kbps = 0u32;
         let mut avg_decode_ms = 0u32;
@@ -63,13 +63,12 @@ impl QoeDiffer {
             let elapsed_s = (now_ms - self.last_ts_ms) as f64 / 1000.0;
             let delta = stats.bytes_received.saturating_sub(self.last_bytes);
             kbps = ((delta as f64 * 8.0 / elapsed_s) / 1000.0).round() as u32;
-            // 解码耗时差分比值（同 host-streamer avg_encode_ms 口径）：
-            // ΔtotalDecodeTime×1000 / ΔframesDecoded；重协商清零/无增量 → 0。
+            // the decode-time differential ratio (same convention as host-streamer avg_encode_ms):
+            // delta totalDecodeTime x 1000 / delta framesDecoded; renegotiation reset/no increment -> 0.
             let delta_decoded = stats.frames_decoded.saturating_sub(self.last_frames_decoded);
             if delta_decoded > 0 {
                 let delta_decode_s = (stats.total_decode_time - self.last_decode_time).max(0.0);
-                avg_decode_ms =
-                    (delta_decode_s * 1000.0 / delta_decoded as f64).round() as u32;
+                avg_decode_ms = (delta_decode_s * 1000.0 / delta_decoded as f64).round() as u32;
             }
         }
         self.last_bytes = stats.bytes_received;
@@ -85,7 +84,7 @@ impl QoeDiffer {
             decoded_total: stats.frames_decoded,
             avg_decode_ms,
             jitter_ms: (stats.jitter * 1000.0).round() as u32,
-            rtt_ms: 0, // tick 处并采 connection_stats 填充（保持 diff 签名可测）
+            rtt_ms: 0, // connection_stats sampled at the tick fills this (keeps the diff signature testable)
             width: stats.frame_width,
             height: stats.frame_height,
             epoch: self.epoch,
@@ -94,22 +93,22 @@ impl QoeDiffer {
 
     pub(crate) fn bump_epoch(&mut self) {
         self.epoch = self.epoch.wrapping_add(1);
-        self.last_ts_ms = 0; // 下一轮重新占位（断点识别）
+        self.last_ts_ms = 0; // the next round re-placeholders (break identification)
         self.last_decode_time = 0.0;
         self.last_frames_decoded = 0;
     }
 }
 
-/// 一路 consumer 的共享骨架（会话登记簿持有 Arc，app 句柄亦持有一份）。
+/// One consumer path's shared skeleton (the session ledger holds an Arc; the app handle holds one too).
 ///
-/// 死活判据 = `frame_tx` 的接收端全部 drop（Consumer drop / 裸 receiver drop
-/// 同形）；slot 本体随会话注册簿回收（无单路摘除，与旧 `_pcs` 语义一致）。
+/// Liveness predicate = every receiver of `frame_tx` dropped (Consumer drop / bare receiver drop,
+/// same shape); the slot itself is reclaimed with the session ledger (no per-path removal, same semantics as the old `_pcs`).
 pub struct ConsumerSlot {
     producer_id: String,
     frame_tx: mpsc::Sender<VideoFrame>,
-    /// 当前 recv pc——重放（K1）成功即整体替换；None = 建立中/已死。
+    /// The current recv pc -- replaced wholesale once a replay (K1) succeeds; None = establishing/dead.
     pc: Mutex<Option<Arc<dyn PcHandle>>>,
-    /// QOE 差分状态（consumer-qoe-callback）——pc 切换时 bump epoch。
+    /// The QOE differential state (consumer-qoe-callback) -- bumps the epoch on pc swap.
     pub(crate) qoe_differ: Mutex<QoeDiffer>,
 }
 
@@ -125,7 +124,7 @@ impl ConsumerSlot {
 
     pub(crate) fn set_pc(&self, pc: Arc<dyn PcHandle>) {
         *self.pc.lock().unwrap_or_else(|e| e.into_inner()) = Some(pc);
-        // 重协商 = 媒体路径断点：差分基线重置 + 代递增（下一轮回 0 占位）。
+        // renegotiation = a media-path break: the differential baseline resets + the generation bumps (the next round returns 0 placeholders).
         self.qoe_differ.lock().unwrap_or_else(|e| e.into_inner()).bump_epoch();
     }
 
@@ -134,18 +133,18 @@ impl ConsumerSlot {
         &self.producer_id
     }
 
-    /// 接收端已全 drop = 该路 app 侧已撤走（K1 重放跳过判据）。
+    /// All receivers dropped = this path's app side has withdrawn (the K1 replay skip predicate).
     #[must_use]
     pub(crate) fn is_dead(&self) -> bool {
         self.frame_tx.is_closed()
     }
 
-    /// 帧出口克隆（重放新 pc 的 on_track sink 供料；槽持有原件 = 存续锚）。
+    /// The frame outlet clone (feeds the replayed new pc's on_track sinks; the slot holds the original = the persistence anchor).
     pub(crate) fn frame_tx(&self) -> mpsc::Sender<VideoFrame> {
         self.frame_tx.clone()
     }
 
-    /// 当前 pc 的 "video" inbound-rtp 读数（无 pc = 空表）。
+    /// The current pc's "video" inbound-rtp readout (no pc = empty table).
     pub(crate) fn receiver_stats(&self) -> Vec<RTCStats> {
         let guard = self.pc.lock().unwrap_or_else(|e| e.into_inner());
         match guard.as_ref() {
@@ -155,18 +154,18 @@ impl ConsumerSlot {
     }
 }
 
-/// app 侧单路视频消费句柄（[`crate::RoomSession::consume`] 的输出）。
+/// The app-side single-path video consumption handle (the output of [`crate::RoomSession::consume`]).
 ///
-/// 帧流与 stats 同源于注册簿 slot：重连重放后帧从**同一个** receiver 续流
-/// （app 无感），stats 自动切到新 pc。无 Drop impl——撤走即 `close(self)`
-/// 或直接 drop 句柄/裸 receiver（语义同：接收端 closed → 重放判死）。
+/// The frame stream and stats share the ledger slot as their source: after a reconnect replay frames continue from the **same** receiver
+/// (imperceptible to the app), stats automatically switch to the new pc. No Drop impl -- withdrawing means `close(self)`
+/// or directly dropping the handle/bare receiver (same semantics: receivers closed -> the replay declares it dead).
 pub struct Consumer {
     producer_id: String,
     slot: Arc<ConsumerSlot>,
     frames: mpsc::Receiver<VideoFrame>,
-    /// 构造时（async consume() 内=runtime 上下文）捕获——on_qoe 可从任意
-    /// 非 runtime 线程（C++ worker）安全注册。PIT-216: Handle::current()
-    /// 在调用点取会 panic（TPHMI worker 无 runtime）。
+    /// Captured at construction (inside async consume() = runtime context) -- on_qoe can then safely register from any
+    /// non-runtime thread (a C++ worker). PIT-216: Handle::current() taken at the call site would panic (the TPHMI worker has no runtime).
+    /// taken at the call site would panic (the TPHMI worker has no runtime).
     rt: tokio::runtime::Handle,
 }
 
@@ -176,43 +175,38 @@ impl Consumer {
         slot: Arc<ConsumerSlot>,
         frames: mpsc::Receiver<VideoFrame>,
     ) -> Self {
-        Self {
-            producer_id,
-            slot,
-            frames,
-            rt: tokio::runtime::Handle::current(),
-        }
+        Self { producer_id, slot, frames, rt: tokio::runtime::Handle::current() }
     }
 
-    /// 被消费的 producer id。
+    /// The consumed producer id.
     #[must_use]
     pub fn id(&self) -> &str {
         &self.producer_id
     }
 
-    /// 帧接收端借用（latest 语义，容量 3——满丢由泵侧 try_send 承载）。
+    /// The frame receiver borrow (latest-wins semantics, capacity 3 -- overflow drops carried by the pump's try_send).
     pub fn frames(&mut self) -> &mut mpsc::Receiver<VideoFrame> {
         &mut self.frames
     }
 
-    /// 移交裸 receiver（旧 `consume_video` 返回形的等价物）。
+    /// Hand over the bare receiver (the equivalent of the old `consume_video` return shape).
     ///
-    /// 重放 deregistration 语义：本方法消费句柄并交出接收端——注册簿槽的
-    /// 死活判据是 `frame_tx` **接收端 closed**，即交出的 receiver 被 drop 之刻
-    /// 该路才判死（交出本身不脱挂；持有 receiver = 保持重放资格）。
+    /// Replay-deregistration semantics: this method consumes the handle and hands over the receiver -- the ledger slot's
+    /// liveness predicate is `frame_tx` **receivers closed**, i.e. this path is declared dead the moment the handed-over
+    /// receiver drops (handing over does not detach; holding the receiver = staying replay-eligible).
     #[must_use]
     pub fn into_receiver(self) -> mpsc::Receiver<VideoFrame> {
         self.frames
     }
 
-    /// 本路视频统计（K4 增益：单路读数，不经会话汇总）。
-    /// 不触碰 QOE 差分状态（qoe_snapshot/on_qoe 独占——拉取与推送基线互不污染）。
+    /// This path's video stats (the K4 gain: single-path readout, without the session summary).
+    /// Never touches the QOE differential state (qoe_snapshot/on_qoe own it exclusively -- pulling and pushing never pollute each other's baselines).
     #[must_use]
     pub fn stats(&self) -> VideoStreamStats {
         fold_inbound_stats(self.slot.receiver_stats())
     }
 
-    /// 当前 QOE 快照（与 [`Self::on_qoe`] 共享差分状态；拉取即一次 tick）。
+    /// The current QOE snapshot (shares the differential state with [`Self::on_qoe`]; a pull is one tick).
     #[must_use]
     pub fn qoe_snapshot(&self) -> QoeSnapshot {
         let stats = fold_inbound_stats(self.slot.receiver_stats());
@@ -220,18 +214,14 @@ impl Consumer {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        self.slot
-            .qoe_differ
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .diff(&stats, now)
+        self.slot.qoe_differ.lock().unwrap_or_else(|e| e.into_inner()).diff(&stats, now)
     }
 
-    /// QOE 周期回调（consumer-qoe-callback：对齐 TRRO OnMediaState 形态）。
+    /// The QOE periodic callback (consumer-qoe-callback: mirrors the TRRO OnMediaState shape).
     ///
-    /// SDK 内置节拍/差分/换算——回调给现成 [`QoeSnapshot`]。幂等：重复注册
-    /// 替换前次回调；drop Consumer 或 `close(self)` 即停。回调在 SDK 内部
-    /// 节拍 task 触发——**回调内禁止阻塞**（plan §5 守门）。
+    /// The SDK's built-in cadence/differentials/conversion -- the callback receives a ready [`QoeSnapshot`]. Idempotent: re-registering
+    /// replaces the previous callback; dropping the Consumer or `close(self)` stops it. The callback fires inside the SDK's
+    /// cadence task -- **blocking inside the callback is forbidden** (plan §5 gate).
     pub fn on_qoe(
         &self,
         period: Duration,
@@ -245,8 +235,8 @@ impl Consumer {
         period: Duration,
         cb: Box<dyn Fn(QoeSnapshot) + Send + Sync>,
     ) -> tokio::task::JoinHandle<()> {
-        // 同步 fn——C++/FFI 侧在任意线程调用。Handle 已在 Consumer::new
-        // （async consume() 上下文）捕获——此处不再取 current()（PIT-216）。
+        // a sync fn -- the C++/FFI side calls it from any thread. The Handle was captured in Consumer::new
+        // (the async consume() context) -- never taking current() here (PIT-216).
         let handle = self.rt.clone();
         let slot = Arc::clone(&self.slot);
         handle.spawn(async move {
@@ -254,7 +244,7 @@ impl Consumer {
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tick.tick().await;
-                // 槽死（app 侧 receiver 全 drop）→ 停节拍
+                // the slot dead (all app-side receivers dropped) -> stop the cadence
                 if slot.is_dead() {
                     break;
                 }
@@ -263,12 +253,9 @@ impl Consumer {
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0);
-                let mut snap = slot
-                    .qoe_differ
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .diff(&stats, now);
-                // rtt 连接级并采（后端无源/无 succeeded pair → None → 0）
+                let mut snap =
+                    slot.qoe_differ.lock().unwrap_or_else(|e| e.into_inner()).diff(&stats, now);
+                // rtt connection-level sample (no backend source/no succeeded pair -> None -> 0)
                 if let Some(conn) = slot
                     .pc
                     .lock()
@@ -283,13 +270,12 @@ impl Consumer {
         })
     }
 
-    /// 主动撤走本路（消费 self → 接收端 drop → slot 判死，重放不再续此路）。
-    /// pc 随会话回收（与旧 `_pcs` 生命周期语义一致）。
+    /// Actively withdraw this path (consumes self -> the receiver drops -> the slot declared dead, the replay no longer continues it).
+    /// The pc is reclaimed with the session (same lifecycle semantics as the old `_pcs`).
     pub fn close(self) {
-        // 无操作体：self 出作用域即 drop frames 接收端 + slot Arc 引用。
+        // an empty body: self leaving scope drops the frames receiver + the slot Arc reference.
     }
 }
-
 
 #[cfg(test)]
 mod qoe_tests {
@@ -310,11 +296,7 @@ mod qoe_tests {
         }
     }
 
-    fn stats_with_decode(
-        decoded: u64,
-        total_decode_s: f64,
-        jitter_s: f64,
-    ) -> VideoStreamStats {
+    fn stats_with_decode(decoded: u64, total_decode_s: f64, jitter_s: f64) -> VideoStreamStats {
         VideoStreamStats {
             frames_decoded: decoded,
             total_decode_time: total_decode_s,
@@ -325,19 +307,19 @@ mod qoe_tests {
 
     #[test]
     fn qoe_first_tick_emits_zero_placeholder() {
-        // PIT-2026-10-09 钉：基线未建（last_ts=0）首轮回 0 占位——消费端 UI
-        // 管道首轮即认识该键（旧拉取式首轮缺席+整除截断 = 码率恒 0 假象根因）。
+        // the PIT-2026-10-09 pin: baseline not built (last_ts=0), the first round returns 0 placeholders -- the consumer UI
+        // pipeline recognizes the key on its first round (the old pull-style first-round absence + integer truncation = the root cause of the stuck-at-0 bitrate illusion).
         let mut d = QoeDiffer::default();
         let snap = d.diff(&stats_of(100_000, 30.0, 0, 1000, 60), 1_000);
-        assert_eq!(snap.kbps, 0, "首轮占位 0");
-        assert_eq!(snap.fps, 30, "瞬态值首轮即真实");
+        assert_eq!(snap.kbps, 0, "first round placeholder 0");
+        assert_eq!(snap.fps, 30, "instantaneous values are real from the first round");
         assert_eq!(snap.decoded_total, 60);
         assert_eq!(snap.epoch, 0);
     }
 
     #[test]
     fn qoe_diff_rounds_and_scales() {
-        // 300KB/1s = 2400 kbps；丢包率 2%
+        // 300KB/1s = 2400 kbps; loss 2%
         let mut d = QoeDiffer::default();
         let _ = d.diff(&stats_of(0, 30.0, 0, 0, 0), 1_000);
         let snap = d.diff(&stats_of(300_000, 30.0, 20, 980, 120), 2_000);
@@ -348,7 +330,7 @@ mod qoe_tests {
 
     #[test]
     fn qoe_epoch_bump_resets_baseline() {
-        // K1 重放换 pc → bump_epoch：下一轮回 0 占位（断点识别）
+        // the K1 replay swapping the pc -> bump_epoch: the next round returns 0 placeholders (break identification)
         let mut d = QoeDiffer::default();
         let _ = d.diff(&stats_of(0, 30.0, 0, 0, 0), 1_000);
         let mid = d.diff(&stats_of(300_000, 30.0, 0, 0, 0), 2_000);
@@ -356,32 +338,32 @@ mod qoe_tests {
         d.bump_epoch();
         let after = d.diff(&stats_of(900_000, 30.0, 0, 0, 0), 3_000);
         assert_eq!(after.epoch, 1);
-        assert_eq!(after.kbps, 0, "重协商后首轮回 0 占位");
+        assert_eq!(after.kbps, 0, "first round returns 0 placeholders after renegotiation");
         let next = d.diff(&stats_of(1_200_000, 30.0, 0, 0, 0), 4_000);
         assert_eq!(next.kbps, 2400);
     }
 
     #[test]
     fn qoe_jitter_passes_through_ms() {
-        // qoe-full-metrics: jitter 秒→ms 透传取整（0.0037s → 4ms）
+        // qoe-full-metrics: jitter seconds -> ms passthrough rounded (0.0037s -> 4ms)
         let mut d = QoeDiffer::default();
         let _ = d.diff(&stats_with_decode(60, 1.0, 0.0037), 1_000);
         let snap = d.diff(&stats_with_decode(120, 2.0, 0.0037), 2_000);
-        assert_eq!(snap.jitter_ms, 4, "jitter*1000 四舍五入");
+        assert_eq!(snap.jitter_ms, 4, "jitter*1000 rounded");
     }
 
     #[test]
     fn qoe_avg_decode_ratio() {
-        // Δdecode=1.0s / Δframes=100 → 10ms/帧；首轮占位 0
+        // delta decode=1.0s / delta frames=100 -> 10ms/frame; first-round placeholder 0
         let mut d = QoeDiffer::default();
         let first = d.diff(&stats_with_decode(0, 0.0, 0.0), 1_000);
-        assert_eq!(first.avg_decode_ms, 0, "首轮占位");
+        assert_eq!(first.avg_decode_ms, 0, "first-round placeholder");
         let snap = d.diff(&stats_with_decode(100, 1.0, 0.0), 2_000);
         assert_eq!(snap.avg_decode_ms, 10);
-        // 无帧增量 → 0（除零防护）
+        // no frame increments -> 0 (divide-by-zero guard)
         let flat = d.diff(&stats_with_decode(100, 1.5, 0.0), 3_000);
         assert_eq!(flat.avg_decode_ms, 0);
-        // 重协商清零（totalDecodeTime 回退）→ 负差分钳 0
+        // renegotiation reset (totalDecodeTime regressed) -> negative differentials clamped to 0
         d.bump_epoch();
         let _ = d.diff(&stats_with_decode(200, 0.5, 0.0), 4_000);
         let after = d.diff(&stats_with_decode(300, 0.7, 0.0), 5_000);
@@ -390,7 +372,7 @@ mod qoe_tests {
 
     #[test]
     fn qoe_rtt_none_yields_zero() {
-        // diff 层 rtt 恒 0（tick 处由 connection_stats 填充）；None → 保持 0
+        // the diff layer's rtt stays 0 (connection_stats fills it at the tick); None -> stays 0
         let mut d = QoeDiffer::default();
         let snap = d.diff(&stats_of(300_000, 30.0, 0, 1000, 60), 2_000);
         assert_eq!(snap.rtt_ms, 0);

@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    # PR 构建校验只跑构建相关变更（防 Dockerfile/compose 破坏合入，PIT-39 教训）
+    # PR build validation runs only on build-related changes (guards Dockerfile/compose breakage from merging, PIT-39 lesson)
     paths:
       - 'Dockerfile'
       - 'docker-compose.yml'
@@ -42,7 +42,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # PR: build-only 校验（不推送）；push: 构建并写入 gha cache 供 runtime 步骤复用
+      # PR: build-only validation (no push); push: build and write the gha cache for the runtime step to reuse
       - name: Build builder stage
         uses: docker/build-push-action@v6
         with:
@@ -64,7 +64,7 @@ jobs:
           cache-from: type=gha
           cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
 
-      # PIT-39 gate: 构建通过 ≠ 产物可运行 — push 后必须冒烟验证 runtime 镜像
+      # PIT-39 gate: a green build ≠ a runnable artifact — after push the runtime image must pass a smoke test
       - name: Smoke test runtime image (PIT-39 gate)
         if: github.event_name == 'push'
         run: |

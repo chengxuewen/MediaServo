@@ -1,23 +1,24 @@
-//! host-emergency: 紧急停车进程（Task F2）— 独立 PC + DC "emergency" + 本地兜底。
+//! host-emergency: emergency-stop process (Task F2) — dedicated PC + "emergency" DC + local fallback.
 //!
-//! 用法: `host-emergency [--gateway <本地网关 ws url>] [--audit <审计文件>]`
-//! 缺省: 网关 `ws://127.0.0.1:17980/ws`（D2 本地网关）；审计
-//! `/tmp/mediaservo-emergency-audit.jsonl`（D-H11 强审计本地侧）。
+//! Usage: `host-emergency [--gateway <local gateway ws url>] [--audit <audit file>]`
+//! Defaults: gateway `ws://127.0.0.1:17980/ws` (D2 local gateway); audit file
+//! `/tmp/mediaservo-emergency-audit.jsonl` (D-H11 strong-audit, local side).
 //!
-//! 结构 = host-controller（F1）的兄弟进程，三处差异（task-F2-brief）:
-//! 1. 单 DC label "emergency"（reliable-ordered — D-H3 急停必须可靠有序）
-//! 2. 命令语义唯一: `{"seq":N,"cmd":"stop"}` → `EmergencyActuator::trigger`
-//!    （概念一次性闩锁: 首次 armed，重复触发仍审计 + 回执 latched=false）
-//! 3. 本地兜底（D-H3 网络无关）: SIGUSR1 → 同一 trigger()（source=local）
+//! Structure = sibling process of host-controller (F1), three differences (task-F2-brief):
+//! 1. Single DC label "emergency" (reliable-ordered — D-H3: emergency stop must be reliable + ordered)
+//! 2. Sole command semantics: `{"seq":N,"cmd":"stop"}` → `EmergencyActuator::trigger`
+//!    (one-shot latch by design: first trigger arms; repeats still audit + ack with latched=false)
+//! 3. Local fallback (D-H3 network-independent): SIGUSR1 → same trigger() (source=local)
 //!
-//! 协商: **emergency 为 offerer**（legacy webrtc_transport 惯例，与 controller
-//! 相同）；与 controller 各自独立 PC（D-H3: PC 崩不影响急停）。网关
-//! `p2p_owner` 单槽归属在两次**顺序**协商下安全移交（已完成协商不再上行
-//! Sdp/ICE；并发协商不在 F2 范围，见 task-F2-report）。
+//! Negotiation: **emergency is the offerer** (legacy webrtc_transport convention, same as
+//! controller); separate PC from controller (D-H3: a PC crash must not affect emergency stop).
+//! The gateway `p2p_owner` single-slot handover is safe under two **sequential** negotiations
+//! (a completed negotiation no longer forwards Sdp/ICE upstream; concurrent negotiation is out
+//! of F2 scope, see task-F2-report).
 //!
-//! 失败语义（C15 + PIT-87 自愈惯例）：信令断开 / ICE Failed / 会话错误 →
-//! 打日志退出 1，部署侧 restart_policy=always 拉起。审计文件不可写 →
-//! 启动即退出 2（强审计不可用不可运行）。
+//! Failure semantics (C15 + PIT-87 self-heal convention): signaling disconnect / ICE Failed /
+//! session error → log and exit 1; deployment-side restart_policy=always relaunches.
+//! Audit file unwritable → exit 2 at startup (cannot run without strong audit).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -37,27 +38,28 @@ use mediaservo_webrtc::traits::PeerConnectionApi;
 use mediaservo_webrtc::{RTCPeerConnection, RTCPeerConnectionFactory};
 use tokio::sync::mpsc;
 
-/// 本地房间名（网关拦截并重写为整车房间；与 controller 同房间，各持独立 PC）。
+/// Local room name (gateway intercepts and rewrites to the vehicle room; same room as controller, each with its own PC).
 const ROOM: &str = "control";
-/// 本地信封 src（网关子进程标识）。
+/// Local envelope src (identifies the gateway child process).
 const SRC: &str = "host-emergency";
 const DEFAULT_GATEWAY: &str = "ws://127.0.0.1:17980/ws";
 const DEFAULT_AUDIT: &str = "/tmp/mediaservo-emergency-audit.jsonl";
-/// ICE Failed 自愈退出前等待（PIT-87 同款：状态收敛后退出待拉起）。
+/// Wait before self-heal exit on ICE Failed (same as PIT-87: exit after state settles, restart relaunches).
 const ICE_FAILED_WAIT: Duration = Duration::from_secs(1);
 
-const USAGE: &str = "用法: host-emergency [--gateway <本地网关 ws url>] [--audit <审计文件>]";
+const USAGE: &str =
+    "Usage: host-emergency [--gateway <local gateway ws url>] [--audit <audit file>]";
 
-/// 纯参数解析（可单测）：`--gateway <url>` / `--audit <path>`，均带缺省。
+/// Pure arg parsing (unit-testable): `--gateway <url>` / `--audit <path>`, both with defaults.
 fn args_from(args: impl Iterator<Item = String>) -> Result<(String, PathBuf), String> {
     let mut args = args.peekable();
     let mut gateway: Option<String> = None;
     let mut audit: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--gateway" => gateway = Some(args.next().ok_or("--gateway 缺值")?),
-            "--audit" => audit = Some(args.next().ok_or("--audit 缺值")?.into()),
-            _ => return Err(format!("未知参数: {arg}\n{USAGE}")),
+            "--gateway" => gateway = Some(args.next().ok_or("--gateway missing value")?),
+            "--audit" => audit = Some(args.next().ok_or("--audit missing value")?.into()),
+            _ => return Err(format!("unknown arg: {arg}\n{USAGE}")),
         }
     }
     Ok((
@@ -70,7 +72,7 @@ fn parse_args() -> Result<(String, PathBuf), String> {
     args_from(std::env::args().skip(1))
 }
 
-/// 等待 SIGINT/SIGTERM（unix 主路径；其他平台仅 ctrl_c）。
+/// Wait for SIGINT/SIGTERM (unix main path; other platforms only ctrl_c).
 async fn shutdown_signal() -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -86,13 +88,13 @@ async fn shutdown_signal() -> std::io::Result<()> {
     Ok(())
 }
 
-/// DC 信封 → 急停执行器 → ACK（纯函数可单测）。
-/// 命令语义唯一: `cmd == EMERGENCY_STOP` → trigger；其余拒绝（回执 Err）。
+/// DC envelope → emergency actuator → ACK (pure function, unit-testable).
+/// Sole command semantics: `cmd == EMERGENCY_STOP` → trigger; anything else rejected (Err ack).
 fn handle_envelope(actuator: &dyn EmergencyActuator, env: &ControlEnvelope) -> ControlAck {
     if env.cmd != EMERGENCY_STOP {
         return ControlAck::err(
             env.seq,
-            format!("unknown cmd {:?}（仅接受 {EMERGENCY_STOP:?}）", env.cmd),
+            format!("unknown cmd {:?} (only {EMERGENCY_STOP:?} accepted)", env.cmd),
         );
     }
     match actuator.trigger(EmergencySource::Dc, Some(env.seq)) {
@@ -116,11 +118,11 @@ fn handle_envelope(actuator: &dyn EmergencyActuator, env: &ControlEnvelope) -> C
     }
 }
 
-/// 单通道路由：spool 接收 → 解析信封 → handle_envelope → 同通道回 ACK。
+/// Single-channel route: spool receive → parse envelope → handle_envelope → ACK on the same channel.
 async fn route_channel(dc: RTCDataChannel, actuator: Arc<dyn EmergencyActuator>) {
     let label = dc.label().to_string();
     let mut rx = dc.spool().await;
-    tracing::info!(label, "DC 路由启动");
+    tracing::info!(label, "DC route started");
     while let Some(ev) = rx.recv().await {
         match ev {
             RTCDataChannelEvent::Open => tracing::info!(label, "DC open"),
@@ -133,7 +135,7 @@ async fn route_channel(dc: RTCDataChannel, actuator: Arc<dyn EmergencyActuator>)
                 let env = match parse_envelope(&m.data) {
                     Ok(e) => e,
                     Err(e) => {
-                        tracing::warn!(label, len = m.data.len(), "信封解析失败: {e}");
+                        tracing::warn!(label, len = m.data.len(), "envelope parse failed: {e}");
                         continue;
                     }
                 };
@@ -141,20 +143,20 @@ async fn route_channel(dc: RTCDataChannel, actuator: Arc<dyn EmergencyActuator>)
                 if let Ok(json) = serde_json::to_string(&ack)
                     && let Err(e) = dc.send_text(&json).await
                 {
-                    tracing::warn!(label, seq = env.seq, "ACK 发送失败: {e}");
+                    tracing::warn!(label, seq = env.seq, "ACK send failed: {e}");
                 }
             }
         }
     }
 }
 
-/// 建立纯 DC PC：注册回调、创建 "emergency" 通道（reliable-ordered）、发起 offer。
+/// Build a DC-only PC: register callbacks, create the "emergency" channel (reliable-ordered), send the offer.
 async fn setup_pc(
     pc: &RTCPeerConnection,
     actuator: Arc<dyn EmergencyActuator>,
     ice_tx: mpsc::UnboundedSender<RTCIceCandidate>,
 ) -> Result<(), String> {
-    // 对端创建的通道（offerer 路径不预期，防御性路由）
+    // Peer-created channel (not expected on the offerer path; defensive routing)
     let a = actuator.clone();
     pc.on_data_channel(move |dc| {
         tokio::spawn(route_channel(dc, a.clone()));
@@ -170,16 +172,16 @@ async fn setup_pc(
     Ok(())
 }
 
-/// 本地兜底（D-H3 网络无关）: SIGUSR1 → 同一 EmergencyActuator（source=local）。
+/// Local fallback (D-H3 network-independent): SIGUSR1 → same EmergencyActuator (source=local).
 async fn local_trigger(actuator: &dyn EmergencyActuator) {
     match actuator.trigger(EmergencySource::Local, None) {
         Ok(t) => tracing::info!(
             latched = t.latched,
             trigger_count = t.trigger_count,
-            "本地兜底急停触发（SIGUSR1）"
+            "local fallback emergency stop triggered (SIGUSR1)"
         ),
-        // C15: 错误分支必须打日志
-        Err(e) => tracing::error!("本地急停执行器失败: {e}"),
+        // C15: error branches must log
+        Err(e) => tracing::error!("local emergency actuator failed: {e}"),
     }
 }
 
@@ -194,7 +196,7 @@ async fn main() -> ExitCode {
         }
     };
 
-    // 强审计（D-H11 本地侧）: 文件不可用 = 不可运行（启动即失败）
+    // Strong audit (D-H11 local side): file unavailable = cannot run (fail at startup)
     let actuator: Arc<dyn EmergencyActuator> = match StubEmergencyActuator::new(&audit_path) {
         Ok(a) => Arc::new(a),
         Err(e) => {
@@ -202,94 +204,85 @@ async fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    tracing::info!(audit = %audit_path.display(), "强审计文件就绪");
+    tracing::info!(audit = %audit_path.display(), "strong-audit file ready");
 
-    // 本地兜底信号尽早注册 — handler 注册前到达的 SIGUSR1 = 默认终止进程
+    // Register the local fallback signal early — SIGUSR1 arriving before handler registration = default terminate
     #[cfg(unix)]
     let mut usr1 =
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1()) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("emergency: SIGUSR1 注册失败: {e}");
+                eprintln!("emergency: SIGUSR1 registration failed: {e}");
                 return ExitCode::from(1);
             }
         };
 
-    // 信令：经本地网关（D2 信封 wire；网关拦截 RoomJoin 合成 RoomJoined）
-    let signal = match SignalClient::new_gateway(&gateway, SRC, ROOM, PeerRole::Host)
-        .connect()
-        .await
-    {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("emergency: 信令连接失败: {e}");
-            return ExitCode::from(1);
-        }
-    };
-    tracing::info!(room = %signal.room_id(), "emergency 已加入本地房间");
+    // Signaling: via local gateway (D2 envelope wire; gateway intercepts RoomJoin and synthesizes RoomJoined)
+    let signal =
+        match SignalClient::new_gateway(&gateway, SRC, ROOM, PeerRole::Host).connect().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("emergency: signaling connect failed: {e}");
+                return ExitCode::from(1);
+            }
+        };
+    tracing::info!(room = %signal.room_id(), "emergency joined local room");
 
-    // 纯 DC PC（无 track）— 独立于 controller 的 PC（D-H3）
+    // DC-only PC (no tracks) — independent of controller's PC (D-H3)
     let factory = RTCPeerConnectionFactory::new();
-    let pc = match factory
-        .create_peer_connection(RTCConfiguration::default())
-        .await
-    {
+    let pc = match factory.create_peer_connection(RTCConfiguration::default()).await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("emergency: create_peer_connection 失败: {e}");
+            eprintln!("emergency: create_peer_connection failed: {e}");
             return ExitCode::from(1);
         }
     };
 
-    // ICE 候选上行通道（回调同步线程 → 主循环异步发送）
+    // ICE candidate uplink channel (sync callback thread → async send in main loop)
     let (ice_tx, mut ice_rx) = mpsc::unbounded_channel::<RTCIceCandidate>();
     if let Err(e) = setup_pc(&pc, actuator.clone(), ice_tx).await {
         eprintln!("emergency: {e}");
         return ExitCode::from(1);
     }
 
-    // ICE Failed 自愈（PIT-87 模式：状态收敛后退出待拉起）
+    // ICE Failed self-heal (PIT-87 pattern: exit after state settles, wait for restart)
     let (fail_tx, mut fail_rx) = mpsc::unbounded_channel::<()>();
     pc.on_ice_connection_state_change(move |state| {
         if state == mediaservo_webrtc::peer_connection::RTCIceConnectionState::Failed {
-            tracing::error!("ICE Failed — 退出待重启（PIT-87 自愈）");
+            tracing::error!("ICE Failed — exiting for restart (PIT-87 self-heal)");
             let _ = fail_tx.send(());
         }
     });
 
-    // 标准 offerer 协商（legacy 惯例：host 发起 offer）
+    // Standard offerer negotiation (legacy convention: host initiates the offer)
     let offer = match pc.create_offer(&Default::default()).await {
         Ok(o) => o,
         Err(e) => {
-            eprintln!("emergency: create_offer 失败: {e}");
+            eprintln!("emergency: create_offer failed: {e}");
             return ExitCode::from(1);
         }
     };
     if let Err(e) = pc.set_local_description(&offer).await {
-        eprintln!("emergency: set_local_description 失败: {e}");
+        eprintln!("emergency: set_local_description failed: {e}");
         return ExitCode::from(1);
     }
     let offer_json = match serde_json::to_string(&offer) {
         Ok(j) => j,
         Err(e) => {
-            eprintln!("emergency: 序列化 offer 失败: {e}");
+            eprintln!("emergency: serialize offer failed: {e}");
             return ExitCode::from(1);
         }
     };
     if let Err(e) = signal
-        .send(SignalingMessage::Sdp {
-            room_id: ROOM.into(),
-            target: None,
-            sdp: offer_json,
-        })
+        .send(SignalingMessage::Sdp { room_id: ROOM.into(), target: None, sdp: offer_json })
         .await
     {
-        eprintln!("emergency: 发送 offer 失败: {e}");
+        eprintln!("emergency: send offer failed: {e}");
         return ExitCode::from(1);
     }
-    tracing::info!("offer 已发送（等待舱端 answer）");
+    tracing::info!("offer sent (awaiting cockpit answer)");
 
-    // 远端候选在 answer 落地前缓存（libwebrtc 协商前 add_ice_candidate 不可靠）
+    // Buffer remote candidates until the answer lands (libwebrtc add_ice_candidate before negotiation is unreliable)
     let mut pending_ice: Vec<RTCIceCandidate> = Vec::new();
     let mut remote_set = false;
     let mut signal_events = signal.events();
@@ -305,13 +298,13 @@ async fn main() -> ExitCode {
             sig = shutdown_signal() => match sig {
                 Ok(()) => break 'run,
                 Err(e) => {
-                    eprintln!("emergency: 信号处理失败: {e}");
+                    eprintln!("emergency: signal handling failed: {e}");
                     exit_code = 1;
                     break 'run;
                 }
             },
             _ = fail_rx.recv() => {
-                // ICE Failed：短暂等待状态收敛后退出（PIT-87）
+                // ICE Failed: brief wait for state to settle, then exit (PIT-87)
                 tokio::time::sleep(ICE_FAILED_WAIT).await;
                 exit_code = 1;
                 break 'run;
@@ -321,17 +314,17 @@ async fn main() -> ExitCode {
                     let desc = match serde_json::from_str::<RTCSessionDescription>(&sdp) {
                         Ok(d) => d,
                         Err(e) => {
-                            tracing::warn!("answer 解析失败: {e}");
+                            tracing::warn!("answer parse failed: {e}");
                             continue;
                         }
                     };
                     if desc.sdp_type != RTCSdpType::Answer {
-                        tracing::warn!(sdp_type = %desc.sdp_type, "非 answer Sdp，忽略");
+                        tracing::warn!(sdp_type = %desc.sdp_type, "non-answer Sdp, ignored");
                         continue;
                     }
                     match pc.set_remote_description(&desc).await {
                         Ok(()) => {
-                            tracing::info!("answer 已设置 — P2P 协商完成");
+                            tracing::info!("answer set — P2P negotiation complete");
                             remote_set = true;
                             for c in pending_ice.drain(..) {
                                 if let Err(e) = pc.add_ice_candidate(&c).await {
@@ -340,7 +333,7 @@ async fn main() -> ExitCode {
                             }
                         }
                         Err(e) => {
-                            tracing::error!("set_remote_description 失败: {e}");
+                            tracing::error!("set_remote_description failed: {e}");
                             exit_code = 1;
                             break 'run;
                         }
@@ -362,22 +355,22 @@ async fn main() -> ExitCode {
                         pending_ice.push(c);
                     }
                 }
-                Ok(SignalEvent::Message(_)) => {} // RoomJoined/其他透传忽略
+                Ok(SignalEvent::Message(_)) => {} // RoomJoined/others: passthrough ignored
                 Ok(SignalEvent::Error(e)) => {
-                    tracing::error!("信令错误: {e}");
+                    tracing::error!("signaling error: {e}");
                     exit_code = 1;
                     break 'run;
                 }
                 Ok(SignalEvent::Disconnected { reason }) => {
-                    tracing::error!("信令断开: {reason} — 退出待重启");
+                    tracing::error!("signaling disconnected: {reason} — exiting for restart");
                     exit_code = 1;
                     break 'run;
                 }
                 Ok(SignalEvent::Connected { .. }) => {}
-                // SignalEvent non_exhaustive 兜底
+                // SignalEvent non_exhaustive catch-all
                 Ok(_) => {}
                 Err(_) => {
-                    tracing::error!("信令事件流关闭");
+                    tracing::error!("signaling event stream closed");
                     exit_code = 1;
                     break 'run;
                 }
@@ -393,11 +386,11 @@ async fn main() -> ExitCode {
                     })
                     .await
                 {
-                    tracing::warn!("ICE 候选上行失败: {e}");
+                    tracing::warn!("ICE candidate uplink failed: {e}");
                 }
             }
             _ = async {
-                // 本地兜底（SIGUSR1）；非 unix 平台无本地兜底路径（仅 DC 急停）
+                // Local fallback (SIGUSR1); non-unix platforms have no local fallback path (DC stop only)
                 #[cfg(unix)]
                 usr1.recv().await;
                 #[cfg(not(unix))]
@@ -468,9 +461,13 @@ mod tests {
         };
         let ack = handle_envelope(&a, &env);
         assert_eq!(ack.ack, 9);
-        let err = ack.result["error"].as_str().expect("拒绝必须带 error");
+        let err = ack.result["error"].as_str().expect("rejection must carry error");
         assert!(err.contains("unknown cmd"), "err: {err}");
-        assert_eq!(std::fs::read_to_string(f.path()).unwrap(), "", "拒绝的命令不得触发/审计");
+        assert_eq!(
+            std::fs::read_to_string(f.path()).unwrap(),
+            "",
+            "rejected commands must not trigger/audit"
+        );
     }
 
     #[test]
@@ -486,18 +483,18 @@ mod tests {
         let ack1 = handle_envelope(&a, &env(1));
         assert_eq!(ack1.result["ok"], true);
         assert_eq!(ack1.result["source"], "dc");
-        assert_eq!(ack1.result["latched"], true, "首次必须 armed");
+        assert_eq!(ack1.result["latched"], true, "first trigger must arm");
         assert_eq!(ack1.result["trigger_count"], 1);
         assert_eq!(ack1.result["audit"], "ok");
         let ack2 = handle_envelope(&a, &env(2));
         assert_eq!(ack2.result["ok"], true);
-        assert_eq!(ack2.result["latched"], false, "重复不重复 armed");
+        assert_eq!(ack2.result["latched"], false, "repeats must not re-arm");
         assert_eq!(ack2.result["trigger_count"], 2);
     }
 
     #[test]
     fn audit_failure_surfaces_in_ack() {
-        // 不可写审计（/dev/full，Linux）→ 回执 audit 带 error，但急停仍 ok
+        // Unwritable audit (/dev/full, Linux) → ack audit carries error, but the stop is still ok
         #[cfg(target_os = "linux")]
         {
             let a = StubEmergencyActuator::new(Path::new("/dev/full")).unwrap();
@@ -505,17 +502,17 @@ mod tests {
                 seq: 1,
                 cmd: EMERGENCY_STOP.into(),
                 payload: serde_json::json!({}),
-            sig: None,
+                sig: None,
             };
             let ack = handle_envelope(&a, &env);
-            assert_eq!(ack.result["ok"], true, "急停本身不受审计失败影响");
-            assert!(ack.result["audit"]["error"].is_string(), "审计错误必须回执");
+            assert_eq!(ack.result["ok"], true, "the stop itself is unaffected by audit failure");
+            assert!(ack.result["audit"]["error"].is_string(), "audit error must surface in ack");
         }
     }
 
     #[test]
     fn local_trigger_uses_same_latch() {
-        // 本地兜底与 DC 共享同一闩锁（EmergencyTrigger 形状一致）
+        // Local fallback shares the same latch as DC (identical EmergencyTrigger shape)
         let f = tempfile::NamedTempFile::new().unwrap();
         let a = actuator(&f);
         let t: EmergencyTrigger = a.trigger(EmergencySource::Local, None).unwrap();

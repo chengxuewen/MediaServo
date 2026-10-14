@@ -1,10 +1,10 @@
-//! Task E3: StatusReport 上报 e2e — host-agent 网关 + 状态上报任务 → mock server。
+//! Task E3: StatusReport upload e2e - host-agent gateway + status reporter task -> mock server.
 //!
-//! 覆盖: ① 网关远端入房后，reporter 周期聚合三快照 → StatusReport 上行；
-//! ② 内容断言: room_id/ts/config_version + 拓扑进程（期望并集）+ 信令平面
-//! （remote_connected/peer_id）+ 空数据流段（无 token → FlowMonitor 缺席）。
+//! Covers: (1) after the gateway joins remotely, the reporter periodically aggregates three snapshots -> StatusReport upstream;
+//! (2) content assertions: room_id/ts/config_version + topology processes (expected union) + signaling plane
+//! (remote_connected/peer_id) + empty stream sections (no token -> FlowMonitor absent).
 //!
-//! 前置（C25）: `rm -rf /tmp/iceoryx2 /dev/shm/iox2_*`（FrameBus 发现残留）。
+//! Prerequisite (C25): `rm -rf /tmp/iceoryx2 /dev/shm/iox2_*` (FrameBus discovery residue).
 
 use std::time::{Duration, Instant};
 
@@ -26,12 +26,12 @@ sources:
     fps: 30
 "#;
 
-/// mock server 完整握手（对齐 link::SignalClient 协议流程）。
+/// Full mock-server handshake (aligned with the link::SignalClient protocol flow).
 async fn mock_handshake(listener: &TcpListener) -> WebSocketStream<TcpStream> {
     let (stream, _) = listener.accept().await.expect("mock accept");
     let mut ws = tokio_tungstenite::accept_async(stream).await.expect("mock ws handshake");
     let psk = ws.next().await.unwrap().unwrap();
-    assert!(matches!(psk, Message::Text(_)), "首条应为 PSK 文本");
+    assert!(matches!(psk, Message::Text(_)), "first message should be PSK text");
     ws.send(Message::Text(
         serde_json::to_string(&SignalingMessage::Error { code: 0, message: String::new() })
             .unwrap(),
@@ -69,14 +69,14 @@ async fn status_report_reaches_mock_server_with_expected_content() {
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         let mut ws = mock_handshake(&listener).await;
-        // 入房后第一条应用层消息应为 StatusReport（reporter 首个周期）
+        // The first app-layer message after joining should be StatusReport (the reporter's first cycle)
         let msg = tokio::time::timeout(Duration::from_secs(10), ws.next())
             .await
-            .expect("10s 内应收到 StatusReport")
-            .expect("ws 关闭")
-            .expect("ws 错误");
+            .expect("StatusReport should arrive within 10s")
+            .expect("ws closed")
+            .expect("ws error");
         let msg: SignalingMessage =
-            serde_json::from_str(msg.to_text().unwrap()).expect("StatusReport 解析");
+            serde_json::from_str(msg.to_text().unwrap()).expect("StatusReport parses");
         match msg {
             SignalingMessage::StatusReport {
                 room_id,
@@ -87,23 +87,38 @@ async fn status_report_reaches_mock_server_with_expected_content() {
                 ts,
                 config_version,
             } => {
-                assert_eq!(room_id, VEHICLE_ROOM, "上报 room_id 应为整车房间");
-                assert!(topics.is_empty(), "无 token → 数据流段应为空: {topics:?}");
-                assert!(streams.is_empty(), "无 token → 数据流段应为空: {streams:?}");
+                assert_eq!(
+                    room_id, VEHICLE_ROOM,
+                    "the reported room_id should be the vehicle room"
+                );
+                assert!(
+                    topics.is_empty(),
+                    "no token -> the stream section should be empty: {topics:?}"
+                );
+                assert!(
+                    streams.is_empty(),
+                    "no token -> the stream section should be empty: {streams:?}"
+                );
                 assert!(
                     processes.iter().any(|p| p.name == "host-agent" && p.expected),
-                    "固定进程 host-agent 应在期望并集中: {processes:?}"
+                    "the fixed process host-agent should be in the expected union: {processes:?}"
                 );
                 assert!(
                     processes.iter().any(|p| p.name == "host-capturer-cam0" && p.expected),
-                    "host.yaml 视频源实例应在期望并集中（单源无 id 后缀）: {processes:?}"
+                    "host.yaml video-source instances should be in the expected union (single source: no id suffix): {processes:?}"
                 );
-                assert!(signal.remote_connected, "网关已入房, remote 应 connected");
-                assert_eq!(signal.remote_peer_id, VEHICLE_PEER, "peer_id 应来自 RoomJoined");
-                assert!(ts > 0, "ts 应为 unix 秒: {ts}");
-                assert_eq!(config_version, 0, "E4 前 config_version 恒 0");
+                assert!(
+                    signal.remote_connected,
+                    "the gateway joined the room, remote should be connected"
+                );
+                assert_eq!(
+                    signal.remote_peer_id, VEHICLE_PEER,
+                    "peer_id should come from RoomJoined"
+                );
+                assert!(ts > 0, "ts should be unix seconds: {ts}");
+                assert_eq!(config_version, 0, "config_version is always 0 before E4");
             }
-            other => panic!("期望 StatusReport, got {other:?}"),
+            other => panic!("expected StatusReport, got {other:?}"),
         }
     });
 

@@ -17,7 +17,7 @@ export default function ApiKeys() {
   const [error, setError] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // 创建弹窗
+  // create modal
   const [createOpen, setCreateOpen] = useState(false);
   const [newKeyId, setNewKeyId] = useState('');
   const [newRole, setNewRole] = useState('viewer');
@@ -26,12 +26,12 @@ export default function ApiKeys() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
-  // 一次性 secret 展示（注册后弹出，关闭即弃 — 仿 Devices secretModal）
+  // one-time secret display (shown after creation, discarded on close — mirrors the Devices secretModal)
   const [secretModal, setSecretModal] = useState<{ title: string; secret: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
 
-  // 吊销进行中的行（防重复点击）
+  // row currently being revoked (guards double clicks)
   const [busy, setBusy] = useState<string | null>(null);
 
   const fetchKeys = useCallback(async () => {
@@ -97,7 +97,7 @@ export default function ApiKeys() {
       await navigator.clipboard.writeText(secretModal.secret);
       setCopied(true);
     } catch {
-      // fallback: secret 以只读框展示可全选手动复制 — 不假设 clipboard 可用
+      // fallback: show the secret in a read-only box that can be fully selected and copied manually — do not assume clipboard is available
       setCopyError('Clipboard unavailable — select the secret manually');
     }
   };

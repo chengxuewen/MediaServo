@@ -1,64 +1,69 @@
-# mediasoup 参考分析
-> 生成日期：2026-07-16 | 分类：视频会议
+# mediasoup Reference Analysis
+> Generated: 2026-07-16 | Category: Video Conferencing
 
-## 1. 产品画像
-- **名称**：mediasoup
-- **开发者**：Versatica（社区驱动项目，核心维护者 Iñaki Baz Castillo、José Luis Millán、Nazar Mokrynskyi）
-- **核心维护者**：ibc（Iñaki Baz Castillo，项目创始人）、jmillan（José Luis Millán）、nazar-pc（Nazar Mokrynskyi）
-- **首次发布**：2014 年 12 月（GitHub 首次提交）。v3 主线于 2018 年成为主流
-- **产品定位**：极简主义 SFU（Selective Forwarding Unit）库。严格限定于「只处理媒体层」——不绑定任何信令协议，不提供任何开箱即用的视频会议功能。定位为嵌入大型应用的基础设施组件，而非独立产品
-- **目标用户群体**：需要自建实时音视频基础设施的开发者与架构师。要求团队具备 WebRTC 协议栈（SDP/ICE/DTLS/SRTP）深度知识、信令系统开发能力、分布式系统运维经验。典型用户：BigBlueButton（全球最大在线教育开源平台）的 SFU 后端、Topology（企业协作平台）
-- **许可 / 商业模式**：ISC License（ISC — Internet Systems Consortium）。是现有开源许可中最宽松的之一（比 MIT 更短，比 Apache 2.0 更少限制）。纯社区项目，无商业 SaaS 或企业版。无任何商业服务。社区完全依赖开源贡献和赞助
-- **npm 周下载量**：33.2K 次/周（2026 年 7 月）
+## 1. Product Profile
+- **Name**: mediasoup
+- **Developer**: Versatica (community-driven project; core maintainers Iñaki Baz Castillo, José Luis Millán, Nazar Mokrynskyi)
+- **Core maintainers**: ibc (Iñaki Baz Castillo, project founder), jmillan (José Luis Millán), nazar-pc (Nazar Mokrynskyi)
+- **First release**: December 2014 (first GitHub commit). The v3 line became mainstream in 2018
+- **Product positioning**: A minimalist SFU (Selective Forwarding Unit) library. Strictly scoped to "media layer only" — it binds no signaling protocol and ships no out-of-the-box video-conferencing features. Positioned as an infrastructure component embedded in larger applications, not a standalone product
+- **Target user groups**: developers and architects who need to build their own real-time AV infrastructure. Requires deep team knowledge of the WebRTC stack (SDP/ICE/DTLS/SRTP), signaling-system development capability, and distributed-systems operations experience. Typical users: BigBlueButton (the world's largest open-source online-education platform) as an SFU backend, Topology (enterprise collaboration platform)
+- **License / business model**: ISC License (ISC — Internet Systems Consortium). One of the most permissive open-source licenses around (shorter than MIT, fewer restrictions than Apache 2.0). Pure community project, no commercial SaaS or enterprise edition. No commercial services of any kind. The community relies entirely on open-source contributions and sponsorship
+- **npm weekly downloads**: 33.2K/week (July 2026)
 
-## 2. 技术特性
+## 2. Technical Features
 
-### 2.1 整体架构设计
+### 2.1 Overall Architecture Design
 
-mediasoup 采用经典的「C++ Worker 核心 + 上层语言绑定」双层架构。这是其高性能和灵活性的基础。
+mediasoup uses the classic two-tier "C++ Worker core + upper-language bindings" architecture. This is the foundation of its high performance and flexibility.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                    应用层 (Node.js / Rust)                │
+│              Application layer (Node.js / Rust)           │
 │                                                           │
 │  ┌────────────────────────────────────────────────────┐  │
-│  │          自研信令层 (开发者完全自主实现)              │  │
+│  │     Custom signaling layer (fully developer-owned)  │  │
 │  │                                                     │  │
 │  │  ┌──────────────┐  ┌──────────────┐                │  │
-│  │  │  房间管理     │  │  参与者管理   │                │  │
-│  │  │  · 创建/销毁  │  │  · 加入/离开  │                │  │
-│  │  │  · 配置管理   │  │  · 角色权限    │                │  │
-│  │  │  · 生命周期   │  │  · 断线重连    │                │  │
+│  │  │ Room mgmt    │  │ Participant  │                │  │
+│  │  │ · create/    │  │ mgmt         │                │  │
+│  │  │   destroy    │  │ · join/leave │                │  │
+│  │  │ · config mgmt│  │ · roles/perms│                │  │
+│  │  │ · lifecycle  │  │ · reconnect  │                │  │
 │  │  └──────────────┘  └──────────────┘                │  │
 │  │  ┌──────────────┐  ┌──────────────┐                │  │
-│  │  │  负载均衡     │  │  录制调度     │                │  │
-│  │  │  · Worker分配 │  │  · RTP导出    │                │  │
-│  │  │  · Router选择 │  │  · 存储管理    │                │  │
-│  │  │  · 健康检查   │  │  · 后处理合成  │                │  │
+│  │  │ Load         │  │ Recording    │                │  │
+│  │  │ balancing    │  │ scheduling   │                │  │
+│  │  │ · Worker     │  │ · RTP export │                │  │
+│  │  │   assign     │  │ · storage    │                │  │
+│  │  │ · Router sel.│  │   mgmt       │                │  │
+│  │  │ · health chk │  │ · post-proc  │                │  │
+│  │  │              │  │   composite  │                │  │
 │  │  └──────────────┘  └──────────────┘                │  │
 │  └────────────────────────────────────────────────────┘  │
 │                          │                                │
 │  ┌────────────────────────────────────────────────────┐  │
-│  │         mediasoup Node.js / Rust API 模块            │  │
+│  │      mediasoup Node.js / Rust API module            │  │
 │  │                                                      │  │
-│  │  API 接口:                                           │  │
-│  │  · createWorker()     — 创建 C++ Worker 子进程       │  │
-│  │  · createRouter()     — 在 Worker 中创建 Router      │  │
-│  │  · createWebRtcTransport() — 创建 WebRTC 连接端点    │  │
-│  │  · createPlainTransport()  — 创建裸 RTP 连接端点     │  │
-│  │  · createPipeTransport()   — 创建 Router 间级联端点  │  │
-│  │  · createProducer()  — 创建媒体发布者                 │  │
-│  │  · createConsumer()  — 创建媒体订阅者                 │  │
-│  │  · pipeToRouter()    — Router 间级联                  │  │
+│  │  API surface:                                        │  │
+│  │  · createWorker()     — spawn C++ Worker process     │  │
+│  │  · createRouter()     — create Router in Worker      │  │
+│  │  · createWebRtcTransport() — WebRTC endpoint         │  │
+│  │  · createPlainTransport()  — raw RTP endpoint        │  │
+│  │  · createPipeTransport()   — Router cascade endpoint │  │
+│  │  · createProducer()  — create media publisher        │  │
+│  │  · createConsumer()  — create media subscriber       │  │
+│  │  · pipeToRouter()    — cascade between Routers       │  │
 │  └──────────────────┬───────────────────────────────┘    │
+│                     │                                    │
 └─────────────────────┼────────────────────────────────────┘
                       │ Unix Domain Socket / TCP (Channel Protocol)
-                      │ 基于 libuv pipe 的二进制通信协议
+                      │ libuv-pipe-based binary communication protocol
 ┌─────────────────────┼────────────────────────────────────┐
-│                     │  C++ Worker 层                      │
+│                     │  C++ Worker layer                   │
 │                                                           │
 │  ┌──────────────────┴───────────────────────────────┐    │
-│  │  Worker 1 (C++ 子进程)    Worker 2 (C++ 子进程)    │    │
+│  │  Worker 1 (C++ subprocess)  Worker 2 (C++ subproc)│   │
 │  │  PID: 12345               PID: 12346               │    │
 │  │  CPU: 0                   CPU: 1                   │    │
 │  │                                                    │    │
@@ -86,314 +91,316 @@ mediasoup 采用经典的「C++ Worker 核心 + 上层语言绑定」双层架�
 │  │  │  └────────────┘        └────────────┘           │    │
 │  │  └──────────────────┘    └──────────────────┘     │    │
 │  │                                                    │    │
-│  │    libuv (C 事件循环)      libuv (C 事件循环)       │    │
+│  │    libuv (C event loop)    libuv (C event loop)    │    │
 │  │    · epoll/kqueue/IOCP     · epoll/kqueue/IOCP      │    │
-│  │    · 单线程无锁             · 单线程无锁             │    │
-│  │    · 零上下文切换           · 零上下文切换           │    │
+│  │    · single-threaded,      · single-threaded,       │    │
+│  │      lock-free               lock-free              │    │
+│  │    · zero context          · zero context           │    │
+│  │      switches                switches               │    │
 │  └──────────────────────────────────────────────────┘    │
 │                                                           │
-│  依赖库:                                                  │
-│  · OpenSSL 3.x — DTLS 握手 + SRTP 加解密                 │
-│  · libuv 1.x  — 跨平台异步 I/O + 事件循环                 │
-│  · 自研 SCTP 栈 — 替代 usrsctp（v3.20+）                 │
-│  · Google Abseil — C++ 工具库                             │
-│  · FlatBuffers — 内部序列化（可选）                        │
+│  Dependencies:                                            │
+│  · OpenSSL 3.x — DTLS handshake + SRTP encrypt/decrypt   │
+│  · libuv 1.x   — cross-platform async I/O + event loop    │
+│  · Custom SCTP stack — replaces usrsctp (v3.20+)          │
+│  · Google Abseil — C++ utility library                    │
+│  · FlatBuffers — internal serialization (optional)        │
 └──────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Worker 模型与性能
+### 2.2 Worker Model & Performance
 
-**Worker 创建与绑定**：
-每个 Worker 是独立的操作系统进程（通过 fork 创建，非线程）。主进程通过 `createWorker()` 创建 Worker，可指定：
-- `logLevel`：日志级别
-- `rtcMinPort` / `rtcMaxPort`：ICE 端口范围
-- `dtlsCertificateFile` / `dtlsPrivateKeyFile`：自定义 TLS 证书
-- `libwebrtcFieldTrials`：WebRTC 实验特性开关
+**Worker creation & binding**:
+Each Worker is an independent OS process (created via fork, not a thread). The main process creates Workers via `createWorker()`, with options:
+- `logLevel`: log level
+- `rtcMinPort` / `rtcMaxPort`: ICE port range
+- `dtlsCertificateFile` / `dtlsPrivateKeyFile`: custom TLS certificate
+- `libwebrtcFieldTrials`: WebRTC experimental feature switches
 
-**性能公式与约束**：
-- 1 Worker ≈ 1 CPU 核满负荷 ≈ 最多约 500 个 Consumer（同时活跃的 RTP 下行流）
-- N 人全互动会议室 Consumer 数量 = N × (N-1) × 2（每人消费所有其他人的音频+视频）
-- 8 核服务器理论最大 Consumer = 8 × 500 = 4,000
-- 典型负载：数十场中小会议（2-20 人/场），而非单一大型会议
-- 社区明确建议：全互动大房间（>50 人全视频）不适合纯 SFU 模式
+**Performance formulas & constraints**:
+- 1 Worker ≈ 1 CPU core at full load ≈ at most ~500 Consumers (concurrently active RTP downlink streams)
+- Consumer count in an N-person fully-interactive room = N × (N-1) × 2 (each person consumes everyone else's audio + video)
+- Theoretical maximum Consumers on an 8-core server = 8 × 500 = 4,000
+- Typical load: dozens of small/medium meetings (2-20 people each), not a single large meeting
+- The community explicitly advises: large fully-interactive rooms (>50 people, all video) do not suit pure SFU mode
 
-**进程隔离优势**：
-- 崩溃隔离：SIGSEGV 只杀死当前 Worker，其他 Worker 上会议不受影响
-- 内存隔离：无野指针跨 Worker 破坏风险
-- CPU 亲和性：每个 Worker 绑定到特定 CPU 核（CPU affinity）
-- 资源配额：可通过 Linux cgroups 独立限制每个 Worker 的 CPU/内存
-- 主进程监控：健康检查、心跳监测、异常自动重启
+**Process-isolation advantages**:
+- Crash isolation: a SIGSEGV kills only the current Worker; meetings on other Workers are unaffected
+- Memory isolation: no risk of stray pointers corrupting across Workers
+- CPU affinity: each Worker pinned to a specific CPU core (CPU affinity)
+- Resource quotas: per-Worker CPU/memory independently limited via Linux cgroups
+- Main-process supervision: health checks, heartbeat monitoring, automatic restart on anomalies
 
-### 2.3 关键技术能力表
+### 2.3 Key Technical Capabilities
 
-| 能力 | 详情 |
+| Capability | Details |
 |------|------|
-| 架构模式 | 纯 SFU（Selective Forwarding Unit）。严格不解码不转码——纯 RTP 包级别选择性转发。与 MCU 对比：CPU 消耗降低 5-10 倍，延迟降低 50-80ms |
-| 视频编码 | VP8、VP9、H.264、AV1 全部支持。Simulcast 3 层同时编码（高/中/低分辨率独立流）。SVC 空间/时间分层（VP9/AV1）。每个 Consumer 可独立选择空间层和时间层 |
-| 传输协议 | WebRTC Transport（ICE/DTLS/SRTP over UDP/TCP）；Plain RTP Transport（裸 RTP over UDP，无加密）；Pipe Transport（Router 间级联，同机 Unix Socket 或跨机 TCP）；SCTP RTCDataChannel over DTLS 或 over UDP |
-| 录制能力 | 不内置录制。需通过 Plain RTP Transport 将流转发到外部录制服务（FFmpeg/GStreamer/自研录制管线） |
-| 平台支持 | 服务端：Linux（主要生产平台）、macOS（开发测试）、Windows（实验性）。客户端：浏览器（mediasoup-client v3，TypeScript 编写）、原生（libmediasoupclient，C++ 编写）、Python（mediasoup-client-aiortc）。双语言服务端绑定：Node.js 和 Rust |
-| 级联路由 | pipeToRouter() API — 单个方法调用连接两个 Router。支持同机（Unix Socket，零网络开销）和跨机（TCP/TLS Socket）。应用层负责传输层的连接参数管理 |
-| Worker 隔离 | 每个 Worker 独立 C++ 进程，崩溃不互相影响。主进程负责生命周期管理 |
-| 关键帧聚合 | 多个 Consumer 同时请求 PLI/FIR 时自动聚合成单个上游请求。500ms~1s 的 debounce 窗口内忽略后续重复请求。避免 N 个订阅者同时请求关键帧导致编码器瞬间过载 |
-| 自适应码率 | 基于 REMB（接收端带宽估计）和 TWCC（Transport-Wide Congestion Control）。每个 Consumer 独立运行带宽估计，自动选择最优视频层 |
-| 安全 | SRTP 多加密套件（AES_CM_128、AEAD_AES_256_GCM、AEAD_AES_128_GCM）。DTLS 1.2 握手。支持 E2EE（Insertable Streams API，需应用层实现密钥交换） |
+| Architecture pattern | Pure SFU (Selective Forwarding Unit). Strictly no decoding, no transcoding — pure RTP-packet-level selective forwarding. Versus MCU: 5-10× lower CPU consumption, 50-80ms lower latency |
+| Video codecs | VP8, VP9, H.264, AV1 all supported. Simulcast 3-layer concurrent encoding (high/medium/low resolution independent streams). SVC spatial/temporal layering (VP9/AV1). Each Consumer independently selects its spatial and temporal layer |
+| Transport protocols | WebRTC Transport (ICE/DTLS/SRTP over UDP/TCP); Plain RTP Transport (raw RTP over UDP, unencrypted); Pipe Transport (Router-to-Router cascade, Unix Socket on the same host or TCP across hosts); SCTP RTCDataChannel over DTLS or over UDP |
+| Recording | No built-in recording. Streams must be forwarded via Plain RTP Transport to external recording services (FFmpeg/GStreamer/custom recording pipeline) |
+| Platform support | Server: Linux (primary production platform), macOS (dev/testing), Windows (experimental). Clients: browsers (mediasoup-client v3, written in TypeScript), native (libmediasoupclient, written in C++), Python (mediasoup-client-aiortc). Dual-language server bindings: Node.js and Rust |
+| Cascading routing | pipeToRouter() API — a single method call connects two Routers. Supports same-host (Unix Socket, zero network overhead) and cross-host (TCP/TLS Socket). The application layer owns the transport connection-parameter management |
+| Worker isolation | Each Worker is an independent C++ process; crashes do not affect one another. The main process owns lifecycle management |
+| Keyframe aggregation | When multiple Consumers request PLI/FIR simultaneously, requests are automatically merged into one upstream request. Subsequent duplicate requests within a 500ms~1s debounce window are ignored. Prevents N subscribers simultaneously demanding keyframes from overloading the encoder |
+| Adaptive bitrate | Based on REMB (receiver bandwidth estimation) and TWCC (Transport-Wide Congestion Control). Each Consumer runs its own bandwidth estimate and automatically picks the optimal video layer |
+| Security | Multiple SRTP cipher suites (AES_CM_128, AEAD_AES_256_GCM, AEAD_AES_128_GCM). DTLS 1.2 handshake. E2EE supported (Insertable Streams API, key exchange implemented at the application layer) |
 
-### 2.4 技术栈详情
+### 2.4 Tech Stack Details
 
-**语言分布**：
-- C++（67.6%）：Worker 核心引擎，基于 libuv 事件循环
-- Rust（20.4%）：mediasoup-rust crate。2023 年启动，提供与 Node.js 绑定等效的 Rust API
-- TypeScript（10.1%）：Node.js API 层 + 浏览器客户端 SDK（mediasoup-client）
-- JavaScript（0.8%）：构建工具链、测试辅助
-- 其他（CMake/Meson/Python）：构建系统和 CI/CD 配置
+**Language distribution**:
+- C++ (67.6%): the Worker core engine, built on the libuv event loop
+- Rust (20.4%): the mediasoup-rust crate. Started in 2023, providing a Rust API equivalent to the Node.js binding
+- TypeScript (10.1%): the Node.js API layer + the browser client SDK (mediasoup-client)
+- JavaScript (0.8%): build toolchain, test helpers
+- Other (CMake/Meson/Python): build-system and CI/CD configuration
 
-**核心依赖库**：
-- **libuv 1.x**：跨平台异步 I/O 库。提供事件循环（epoll/kqueue/IOCP 封装）、TCP/UDP socket、pipe、timer、signal、子进程管理等。是 Node.js 同款事件驱动引擎
-- **OpenSSL 3.x**：DTLS 握手（客户端和服务端证书管理）和 SRTP 加解密（支持多加密套件）
-- **自研 SCTP 栈**（v3.20+）：替代 usrsctp（C 库，FFI 调用）。优势：消除 FFI 开销、支持 DirectTransport 模式（进程内收发 SCTP 消息）、精细配置（maxSendMessageSize、maxReceiveMessageSize）
-- **Google Abseil**：C++ 工具库，提供 string、status、time 等基础组件
-- **Meson**：跨平台 C++ 构建系统。替代 CMake 的现代化选择
+**Core dependency libraries**:
+- **libuv 1.x**: cross-platform async I/O library. Provides the event loop (epoll/kqueue/IOCP wrappers), TCP/UDP sockets, pipes, timers, signals, subprocess management, etc. The same event-driven engine that powers Node.js
+- **OpenSSL 3.x**: DTLS handshake (client and server certificate management) and SRTP encrypt/decrypt (multiple cipher suites)
+- **Custom SCTP stack** (v3.20+): replaces usrsctp (a C library called via FFI). Advantages: no FFI overhead, DirectTransport mode supported (in-process SCTP message send/receive), fine-grained configuration (maxSendMessageSize, maxReceiveMessageSize)
+- **Google Abseil**: C++ utility library providing string, status, time and other base components
+- **Meson**: cross-platform C++ build system. A modern alternative to CMake
 
-**协议覆盖完整度**：
-- ICE-Lite（服务端模式，推荐）和 ICE-Full（客户端模式）双模式
-- DTLS 1.2（自签名或自定义证书）全自动握手管理
-- SRTP 多加密套件（AES_CM_128_HMAC_SHA1_80、AES_CM_128_HMAC_SHA1_32、AEAD_AES_256_GCM、AEAD_AES_128_GCM）
-- STUN（Binding Request/Response、Keepalive）
-- TURN（客户端模式，连接外部 TURN 服务）
-- RTP/RTCP 完整协议栈（RTP 包解析、SSRC 管理、RTCP SR/RR、NACK、PLI、FIR、REMB、TWCC）
-- SCTP over DTLS 和 SCTP over UDP 双模式
+**Protocol coverage**:
+- ICE-Lite (server mode, recommended) and ICE-Full (client mode) dual modes
+- DTLS 1.2 (self-signed or custom certificates) fully automatic handshake management
+- Multiple SRTP cipher suites (AES_CM_128_HMAC_SHA1_80, AES_CM_128_HMAC_SHA1_32, AEAD_AES_256_GCM, AEAD_AES_128_GCM)
+- STUN (Binding Request/Response, Keepalive)
+- TURN (client mode, connecting to external TURN services)
+- Full RTP/RTCP stack (RTP packet parsing, SSRC management, RTCP SR/RR, NACK, PLI, FIR, REMB, TWCC)
+- SCTP over DTLS and SCTP over UDP dual modes
 
-## 3. 功能概览
+## 3. Feature Overview
 
-### 3.1 核心领域模型
+### 3.1 Core Domain Model
 
-mediasoup 的核心抽象是四个实体：Worker → Router → Transport → Producer/Consumer。这是一个纯净的领域模型——每个实体职责单一，层次清晰。
+mediasoup's core abstraction is four entities: Worker → Router → Transport → Producer/Consumer. A pure domain model — each entity has a single responsibility in a clear hierarchy.
 
-**Worker**：代表一个操作系统进程。每个 CPU 核一个。管理 Router 的创建和销毁。不处理任何媒体业务逻辑。
+**Worker**: represents an OS process. One per CPU core. Manages Router creation and destruction. Handles no media business logic itself.
 
-**Router**：代表一个独立的媒体路由空间。维护 Producer Map 和 Consumer Map。执行 RTP 包选择性转发。内置三个关键子系统：
-1. **RTP 重传缓存**：每个 Producer 维护按 SSRC + Sequence Number 索引的环形缓冲区。默认缓存约 1000+ 个 RTP 包。Consumer 通过 RTCP NACK 请求丢失包时从缓存直接回复——无需询问上游 Producer
-2. **PLI/FIR 请求聚合器**：同一 Producer 的多个 Consumer 同时请求关键帧时自动合并为单个 PLI/FIR 请求。500ms~1s debounce 窗口内忽略后续重复请求。避免 100 个订阅者同时请求关键帧导致编码器瞬间峰值过载
-3. **带宽估计引擎**：每个 Consumer 独立运行 REMB 或 TWCC 带宽估计算法。Router 自动为每个 Consumer 选择最优的 Simulcast/SVC 层。应用层可通过 `setConsumerPreferredLayers()` 手动干预
+**Router**: represents an independent media routing space. Maintains a Producer Map and a Consumer Map. Performs selective RTP packet forwarding. Three key subsystems built in:
+1. **RTP retransmission buffer**: each Producer keeps a ring buffer indexed by SSRC + sequence number, caching ~1000+ RTP packets by default. When a Consumer reports a lost packet via RTCP NACK, the buffer answers directly — no need to consult the upstream Producer
+2. **PLI/FIR request aggregator**: simultaneous keyframe requests from multiple Consumers of the same Producer are merged into one PLI/FIR request. Subsequent duplicate requests within a 500ms~1s debounce window are ignored. Prevents 100 subscribers simultaneously requesting keyframes from spiking the encoder into overload
+3. **Bandwidth estimation engine**: each Consumer independently runs a REMB or TWCC estimator. The Router automatically selects the best Simulcast/SVC layer for each Consumer. The application layer can intervene manually via `setConsumerPreferredLayers()`
 
-**Transport**：三种类型：
-1. **WebRtcTransport**：标准 WebRTC 连接端点。完整的 ICE-Lite/ICE-Full、DTLS 握手、SRTP 加解密。v3.20 新增 WebRtcServer 模式（单端口多路复用——通过 ICE ufrag 区分不同连接，大幅减少防火墙端口需求）
-2. **PlainTransport**：裸 RTP over UDP。不走 ICE/DTLS/SRTP。支持 comedia 模式（自动学习对端地址）。可选手动 SRTP 模式。典型场景：FFmpeg 录制管线、GStreamer 处理链、外部 RTP 流注入
-3. **PipeTransport**：Router 间级联专用。API：`routerA.pipeToRouter({ producerId, router: routerB })`。同机走 Unix Socket（零拷贝），跨机走 TCP/TLS Socket。应用层负责传输连接参数（IP:Port）
+**Transport**: three types:
+1. **WebRtcTransport**: standard WebRTC connection endpoint. Full ICE-Lite/ICE-Full, DTLS handshake, SRTP encrypt/decrypt. v3.20 added WebRtcServer mode (single-port multiplexing — distinct connections differentiated by ICE ufrag, greatly reducing firewall port requirements)
+2. **PlainTransport**: raw RTP over UDP. No ICE/DTLS/SRTP. Supports comedia mode (auto-learns the peer address). Manual SRTP mode optional. Typical scenarios: FFmpeg recording pipelines, GStreamer processing chains, external RTP stream injection
+3. **PipeTransport**: dedicated to Router-to-Router cascading. API: `routerA.pipeToRouter({ producerId, router: routerB })`. Same host uses a Unix Socket (zero-copy); cross-host uses TCP/TLS Sockets. The application layer owns transport connection parameters (IP:Port)
 
-**Producer**：代表一个上游媒体源。客户端通过 Transport 创建。Router 记录 RTP 参数（SSRC、Payload Type、编码格式、Simulcast 层结构或 SVC 结构）。支持 paused 状态——不断开连接但暂停 RTP 包转发
+**Producer**: represents one upstream media source. Created by a client through a Transport. The Router records the RTP parameters (SSRC, payload type, codec, Simulcast layer structure or SVC structure). Supports the paused state — connection stays up while RTP packet forwarding pauses
 
-**Consumer**：代表一个下游媒体订阅。服务端调用 `createConsumer()` 为每个订阅者创建。Router 自动开始转发匹配格式的 RTP 包。每个 Consumer 独立管理自己的 RTCP 收发——SR/RR、REMB、NACK、PLI、FIR。Consumer 是 SFU 扩展性瓶颈——N 人会议最多 N×(N-1)×2 个 Consumer
+**Consumer**: represents one downstream media subscription. The server calls `createConsumer()` per subscriber. The Router automatically starts forwarding RTP packets matching the negotiated format. Each Consumer independently manages its own RTCP send/receive — SR/RR, REMB, NACK, PLI, FIR. The Consumer is the SFU scalability bottleneck — an N-person room yields up to N×(N-1)×2 Consumers
 
-### 3.2 特色功能
+### 3.2 Signature Features
 
-- **Simulcast + SVC 层独立选择**：这是 mediasoup 的杀手级特性。每个 Consumer 基于自己的带宽估计独立选择视频层。空间层（720p/360p/180p）和时间层（30fps/15fps/7.5fps）可正交选择。同一会议中不同参与者接收完全不同的质量层——张三可能在手机 4G 上看 180p/7.5fps，李四在桌面 WiFi 上看 720p/30fps。互不影响。
-- **pipeToRouter() 管道哲学**：Unix pipe 的设计哲学在 WebRTC 世界中的实现。`routerA.pipeToRouter({ producerId, router: routerB })`——一个 API 调用连接两个 Router（不管他们在同一台机器还是跨数据中心）。支持三种拓扑：树形（大房间拆分子房间）、星形（中心 Router + 各区域就近接入）、链式（多机房转发链）
-- **WebRtcServer 单端口多路复用**（v3.20 里程碑特性）：传统 WebRTC 每个 Transport 需要独立端口对（RTP + RTCP）。大规模部署意味着数千个开放端口和复杂的防火墙规则。WebRtcServer 用单一 UDP 端口承载所有 Transport——通过 ICE ufrag 区分不同连接。防火墙只需开放 1 个端口。这是运维友好的关键改进
-- **PLI/FIR 智能聚合**：这是大规模 SFU 部署中「隐形成本杀手」的解决方案。I-frame（关键帧）尺寸是 P-frame 的 5-20 倍。100 个参与者同时在 500ms 内请求关键帧 → 编码器瞬间过载（需要编码 100 个 I-frame）→ 网络拥塞 → 更多丢包 → 更多 PLI 请求 → 恶性循环。mediasoup 的聚合器：自动合并 → debounce 500ms-1s → 只发一个 PLI。任何实现 Simulcast/SVC 的生产级 SFU 都必须有类似机制
-- **自研 SCTP 栈**（v3.20）：告别 usrsctp（外部 C 库，FFI 调用）。性能更优（消除跨 FFI 边界的数据拷贝）。支持 DirectTransport 模式——在 Node.js/Rust 进程内直接收发 SCTP 消息，无需经过网络栈。支持精细配置：maxSendMessageSize、maxReceiveMessageSize、sendBufferSize
+- **Simulcast + SVC independent layer selection**: mediasoup's killer feature. Each Consumer selects its video layer independently based on its own bandwidth estimate. Spatial layers (720p/360p/180p) and temporal layers (30fps/15fps/7.5fps) can be chosen orthogonally. Different participants in the same meeting receive completely different quality layers — Zhang San may be on mobile 4G watching 180p/7.5fps while Li Si is on desktop WiFi at 720p/30fps. No mutual interference.
+- **pipeToRouter() pipeline philosophy**: the Unix pipe design philosophy realized in the WebRTC world. `routerA.pipeToRouter({ producerId, router: routerB })` — one API call connects two Routers (whether on the same machine or across data centers). Three topologies supported: tree (split a large room into sub-rooms), star (central Router + per-region nearest access), chain (multi-datacenter forwarding chain)
+- **WebRtcServer single-port multiplexing** (v3.20 milestone feature): traditionally each WebRTC Transport needed its own port pair (RTP + RTCP). Large-scale deployment meant thousands of open ports and complex firewall rules. WebRtcServer carries all Transports on a single UDP port — connections differentiated by ICE ufrag. The firewall needs only 1 open port. A key ops-friendly improvement
+- **PLI/FIR intelligent aggregation**: the answer to the "invisible cost killer" in large-scale SFU deployments. I-frame (keyframe) size is 5-20× that of a P-frame. 100 participants simultaneously requesting keyframes within 500ms → instant encoder overload (100 I-frames to encode) → network congestion → more loss → more PLI requests → vicious cycle. mediasoup's aggregator: auto-merge → 500ms-1s debounce → send a single PLI. Any production-grade SFU implementing Simulcast/SVC must have a similar mechanism
+- **Custom SCTP stack** (v3.20): farewell to usrsctp (external C library, FFI calls). Better performance (no cross-FFI-boundary data copies). DirectTransport mode — SCTP messages sent/received directly inside the Node.js/Rust process without touching the network stack. Fine-grained configuration: maxSendMessageSize, maxReceiveMessageSize, sendBufferSize
 
-### 3.3 部署与扩展模式
+### 3.3 Deployment & Scaling Patterns
 
-**水平扩展三种策略**：
-1. **同主机多 Worker**：Worker 数 = CPU 核数（通过 `os.cpus().length` 自动检测）。Router 按房间 ID hash 分配到不同 Worker。最简单有效的同机扩展方式
-2. **跨主机 pipeToRouter**：不同主机上的 Router 通过 pipeToRouter() 级联。应用层负责跨主机信令中介（Redis Pub/Sub、etcd、NATS）。需要自定义编排系统
-3. **大房间分区级联**：单一 Router 保守限制约 16 人全互动。超出限制时创建新 Router 并 pipeToRouter 级联。每个分区内 Consumer 数 = N_partition × (N_partition-1) × 2，级联链路 Consumer = N_partition × N_other_partitions × 2。有效降低单 Router 负载
+**Three horizontal-scaling strategies**:
+1. **Multiple Workers on one host**: Worker count = CPU core count (auto-detected via `os.cpus().length`). Routers assigned to Workers by room-ID hash. The simplest, most effective same-host scaling approach
+2. **Cross-host pipeToRouter**: Routers on different hosts cascaded via pipeToRouter(). The application layer owns cross-host signaling mediation (Redis Pub/Sub, etcd, NATS). Requires a custom orchestration system
+3. **Large-room partitioned cascading**: a single Router is conservatively limited to ~16 people fully interactive. Beyond the limit, create a new Router and cascade via pipeToRouter. Consumers within each partition = N_partition × (N_partition-1) × 2; cascade-link Consumers = N_partition × N_other_partitions × 2. Effectively reduces single-Router load
 
-**信令不可知的代价与收益**：
-- 收益：完全自由选择信令协议（WebSocket/gRPC/HTTP REST/MQTT/XMPP）；深度集成现有系统（如 MediaServo C-FFI、AUDEBase napi-rs）；不受任何协议厂商锁定
-- 代价：生产级信令层至少 2-3 人月开发量（房间管理、ICE 协商、参与者状态机、重连逻辑、认证鉴权、监控指标）；信令层的任何 bug 都是全栈 bug——需要同时理解 WebRTC 协议和 mediasoup API
+**Cost and benefit of signaling-agnosticism**:
+- Benefit: complete freedom to choose the signaling protocol (WebSocket/gRPC/HTTP REST/MQTT/XMPP); deep integration with existing systems (e.g. MediaServo C-FFI, AUDEBase napi-rs); no protocol vendor lock-in
+- Cost: a production-grade signaling layer is at least 2-3 person-months of development (room management, ICE negotiation, participant state machine, reconnect logic, authentication/authorization, monitoring metrics); any signaling-layer bug is a full-stack bug — requires understanding both WebRTC protocol and the mediasoup API
 
-## 4. 现状与生态
+## 4. Current Status & Ecosystem
 
-### 4.1 版本与活跃度
+### 4.1 Version & Activity
 
-- **当前版本**：v3.21.1（2026-07-14 发布）。累计 119 个 release 自 v3 主线
-- **更新节奏**：平均每月 1-2 个小版本。持续积极维护
-- **GitHub Stars**：7,290。Forks：1,242
-- **贡献者**：约 60 位。核心维护者约 5 人
-- **Open Issues**：29（极低水平——Issues 管理非常严格）
-- **npm 总版本**：405 个包版本发布
-- **npm 周下载**：33,215 次
-- **最后提交**：2026-07-16（持续活跃开发中）
+- **Current version**: v3.21.1 (released 2026-07-14). 119 cumulative releases since the v3 line
+- **Release cadence**: averaging 1-2 minor versions per month. Actively maintained
+- **GitHub Stars**: 7,290. Forks: 1,242
+- **Contributors**: ~60. Core maintainers ~5
+- **Open Issues**: 29 (extremely low — issue management is very strict)
+- **npm total versions**: 405 published package versions
+- **npm weekly downloads**: 33,215
+- **Last commit**: 2026-07-16 (continuously active development)
 
-### 4.2 版本演化历程
+### 4.2 Version Evolution History
 
-- **v3.0-v3.10（2018-2021）——核心稳定期**：确立 Router/Transport/Producer/Consumer 四层领域模型。浏览器 WebRTC 兼容性持续跟进。Simulcast 基础支持。基本的带宽估计和层选择
-- **v3.11-v3.15（2022-2024）——Simulcast/SVC 增强期**：VP9 SVC 空间/时间分层支持。带宽估计算法成熟。服务端性能持续优化。PlainTransport comedia 模式
-- **v3.16-v3.21（2025-2026）——现代化改造期**：SCTP 栈自研替换（v3.20）。WebRtcServer 单端口复用（v3.20）。Rust crate 绑定正式发布并趋于稳定。CI 矩阵扩展到 arm64 和 Windows 2025。AV1 编码支持。RTCDataChannel 增强（DirectTransport SCTP）
+- **v3.0-v3.10 (2018-2021) — core stabilization**: established the Router/Transport/Producer/Consumer four-layer domain model. Continuous browser WebRTC compatibility follow-up. Basic Simulcast support. Basic bandwidth estimation and layer selection
+- **v3.11-v3.15 (2022-2024) — Simulcast/SVC enhancement period**: VP9 SVC spatial/temporal layer support. Bandwidth estimation algorithms matured. Continuous server-side performance optimization. PlainTransport comedia mode
+- **v3.16-v3.21 (2025-2026) — modernization period**: custom SCTP stack replacement (v3.20). WebRtcServer single-port multiplexing (v3.20). The Rust crate binding officially released and maturing. CI matrix extended to arm64 and Windows 2025. AV1 codec support. RTCDataChannel enhancements (DirectTransport SCTP)
 
-### 4.3 社区与文档
+### 4.3 Community & Documentation
 
-- **Discourse 论坛**：`mediasoup.discourse.group` — 社区问答和技术讨论主渠道
-- **Bluesky**：`@mediasoup-sfu.bsky.social` — 官方社交媒体账号
-- **GitHub Discussions**：版本发布公告、特性讨论、社区支持
-- **官方文档 `mediasoup.org`**：v3 API 文档完整——每个类、每个方法、每个参数、每个事件、每种类型定义都有详细说明
-- **CHANGELOG.md**：从 v3.1 到 v3.21 共 830+ 行详细变更记录
-- **Demo 项目**：`mediasoup-demo`（官方）、`demo.mediasoup.org`（在线体验）
-- **客户端 SDK**：`mediasoup-client`（TypeScript 浏览器）、`libmediasoupclient`（C++ 原生）、`mediasoup-client-aiortc`（Python）
-- **第三方生态**：GStreamer 插件（社区）、FFmpeg Plain RTP 对接方案（社区文档）、React Native 适配（社区）
-- **中文支持**：无中文社区。全部文档仅英文。对中文团队有额外的学习成本
+- **Discourse forum**: `mediasoup.discourse.group` — the main channel for community Q&A and technical discussion
+- **Bluesky**: `@mediasoup-sfu.bsky.social` — official social media account
+- **GitHub Discussions**: release announcements, feature discussions, community support
+- **Official docs `mediasoup.org`**: complete v3 API documentation — every class, every method, every parameter, every event, every type definition documented in detail
+- **CHANGELOG.md**: 830+ lines of detailed change records from v3.1 to v3.21
+- **Demo project**: `mediasoup-demo` (official), `demo.mediasoup.org` (online experience)
+- **Client SDKs**: `mediasoup-client` (TypeScript browser), `libmediasoupclient` (C++ native), `mediasoup-client-aiortc` (Python)
+- **Third-party ecosystem**: GStreamer plugin (community), FFmpeg Plain RTP interop recipes (community docs), React Native adaptation (community)
+- **Chinese support**: none. All documentation is English-only. Adds extra learning cost for Chinese-speaking teams
 
-### 4.4 已知缺陷与限制
+### 4.4 Known Deficiencies & Limitations
 
-1. **不提供信令层**——这是 mediasoup 最大的矛盾点：最强的 SFU 引擎，却需要开发者从零建设整个控制面。房间管理、参与认证、ICE 协商、断线重连——至少 2-3 人月开发量
-2. **全互动大房间能力受限**——Consumer 数量 N×(N-1)×2 二次增长是 SFU 架构的本质约束，不是 mediasoup 特有的问题。但 mediasoup 没有提供 MCU 混流作为 fallback 方案
-3. **扩容需自建编排系统**——没有内置负载均衡、健康检查、自动扩缩容、服务发现。在多主机部署中，应用层需要完整的编排逻辑
-4. **Node.js FFI 开销**——C++ Worker 与 Node.js 主进程之间的 Channel 通信存在序列化/反序列化开销。高负载下（数千 Consumer 同时发生状态变化）可能成为瓶颈
-5. **仅英语文档**——所有文档、论坛、Issues 均为英文。对中文开发团队有额外的语言和理解成本
-6. **无内置录制**——录制方案需完全自建。虽然 PlainTransport 提供了 RTP 导出能力，但从 RTP 包到可播放的 MP4 文件之间有大量工程工作
-7. **Rust crate 相对年轻**——2023 年启动，API 稳定性、文档完整性、社区案例都不如 Node.js 版本成熟
+1. **No signaling layer provided** — mediasoup's biggest paradox: the strongest SFU engine, yet developers must build the entire control plane from scratch. Room management, participant authentication, ICE negotiation, reconnection — at least 2-3 person-months of work
+2. **Limited large fully-interactive rooms** — the Consumer count N×(N-1)×2 quadratic growth is an inherent constraint of the SFU architecture, not a mediasoup-specific problem. But mediasoup offers no MCU mixing as a fallback
+3. **Scaling requires a self-built orchestration system** — no built-in load balancing, health checking, auto-scaling, or service discovery. For multi-host deployments the application layer needs complete orchestration logic
+4. **Node.js FFI overhead** — serialization/deserialization overhead exists on the Channel between the C++ Worker and the Node.js main process. Under heavy load (thousands of Consumers changing state simultaneously) it can become a bottleneck
+5. **English-only documentation** — all docs, forums, and issues are in English. Extra language and comprehension cost for Chinese-speaking teams
+6. **No built-in recording** — recording must be entirely DIY. PlainTransport provides RTP export, but there is a lot of engineering between RTP packets and a playable MP4 file
+7. **Rust crate relatively young** — started in 2023; API stability, documentation completeness, and community case studies all trail the maturity of the Node.js version
 
-## 5. 市场定位
+## 5. Market Positioning
 
-### 5.1 主要应用行业
+### 5.1 Primary Industries of Application
 
-- **在线教育**：BigBlueButton 3.0（全球最大开源在线教育平台）的官方 SFU 后端。这是 mediasoup 最大规模的生产部署案例
-- **企业通信平台**：数据主权和合规驱动的自建视频会议需求（对标 Jitsi 但性能更优）
-- **互动直播**：PlainRTP → FFmpeg → RTMP/HLS 的二次开发方案。适合需要极低延迟连麦互动的直播场景
-- **Web3/去中心化视频**：ISC 许可 + 无中心化依赖 + 可与区块链信令结合
-- **IoT/边缘视频**：PlainRTP 支持非浏览器来源的流（RTSP 相机、无人机图传、工业传感器视频流）
+- **Online education**: the official SFU backend of BigBlueButton 3.0 (the world's largest open-source online-education platform). mediasoup's largest production deployment case
+- **Enterprise communication platforms**: self-hosted video conferencing driven by data sovereignty and compliance (benchmarking Jitsi but with better performance)
+- **Interactive live streaming**: PlainRTP → FFmpeg → RTMP/HLS second-development recipes. Suits live scenarios requiring extremely low-latency interactive co-streaming
+- **Web3/decentralized video**: ISC license + no centralized dependencies + combinable with blockchain signaling
+- **IoT/edge video**: PlainRTP supports non-browser sources (RTSP cameras, drone video links, industrial sensor streams)
 
-### 5.2 竞品对比简表
+### 5.2 Competitor Comparison Summary
 
-| 维度 | mediasoup | Janus Gateway | Jitsi JVB | LiveKit |
+| Dimension | mediasoup | Janus Gateway | Jitsi JVB | LiveKit |
 |------|-----------|---------------|-----------|---------|
-| 核心语言 | C++ / Rust / TypeScript | C | Kotlin / Java | Go |
-| 许可证 | ISC（最宽松） | GPLv3 | Apache 2.0 | Apache 2.0 |
-| 信令 | 无（开发者自建） | HTTP/WS/RabbitMQ/MQTT 等多协议 | Colibri2 + XMPP | 内置 WebSocket 二进制协议 |
-| 开箱即用 | 否（纯库） | 需开发（有插件框架） | 是（完整全栈产品） | 是（半全栈产品） |
-| Simulcast | ✅ 完整支持 | ✅ VideoRoom 插件 | ✅ | ✅ |
-| SVC | ✅ VP9/AV1 完整 | ❌ | ✅ VP9 | ✅ VP9/AV1 |
-| 级联 | ✅ pipeToRouter | ❌ | ✅ Secure Octo | ✅ Redis Router |
-| 进程隔离 | ✅ Worker 进程 | ❌ | ❌ | ❌ |
-| CPU 效率 | ★★★★★ | ★★★★☆ | ★★★☆☆ | ★★★★☆ |
-| 部署复杂度 | 最高（需自建一切） | 较高 | 中等 | 最低 |
-| Rust 支持 | 官方 Rust crate | 无 | 无 | 客户端 Rust SDK |
-| 录制支持 | 需自建 | RTP Forward | Jibri (Chrome) | 内置 Egress |
-| AI Agent | ❌ | ❌ | ❌ | ✅ 一等公民 |
-| 社区规模 | 中（7.3k Stars） | 中 | 大（29.6k Stars） | 快速增长（19.7k Stars） |
+| Core language | C++ / Rust / TypeScript | C | Kotlin / Java | Go |
+| License | ISC (most permissive) | GPLv3 | Apache 2.0 | Apache 2.0 |
+| Signaling | None (developer-built) | HTTP/WS/RabbitMQ/MQTT etc. multi-protocol | Colibri2 + XMPP | Built-in WebSocket binary protocol |
+| Out of the box | No (pure library) | Needs development (plugin framework exists) | Yes (complete full-stack product) | Yes (semi-full-stack product) |
+| Simulcast | ✅ Full support | ✅ VideoRoom plugin | ✅ | ✅ |
+| SVC | ✅ VP9/AV1 full | ❌ | ✅ VP9 | ✅ VP9/AV1 |
+| Cascading | ✅ pipeToRouter | ❌ | ✅ Secure Octo | ✅ Redis Router |
+| Process isolation | ✅ Worker processes | ❌ | ❌ | ❌ |
+| CPU efficiency | ★★★★★ | ★★★★☆ | ★★★☆☆ | ★★★★☆ |
+| Deployment complexity | Highest (build everything) | Fairly high | Medium | Lowest |
+| Rust support | Official Rust crate | None | None | Client Rust SDK |
+| Recording support | DIY required | RTP Forward | Jibri (Chrome) | Built-in Egress |
+| AI Agent | ❌ | ❌ | ❌ | ✅ first-class citizen |
+| Community size | Medium (7.3k Stars) | Medium | Large (29.6k Stars) | Fast growing (19.7k Stars) |
 
-### 5.3 定价与许可
+### 5.3 Pricing & Licensing
 
-- **许可证**：ISC License —— 几乎等价于 Public Domain。允许商用、修改、闭源再分发、专利使用。仅需保留原始版权声明。是现有开源许可中最宽松的之一
-- **费用**：完全免费。无 SaaS 云服务。无企业版。无任何商业收费
-- **TCO（总拥有成本）**：服务器费用（VPS/裸金属，按需选配）+ 运维人力（1-2 名熟悉 WebRTC 的工程师）+ 带宽费用（按流量计费）
+- **License**: ISC License — nearly equivalent to public domain. Permits commercial use, modification, closed-source redistribution, patent use. Only requires retaining the original copyright notice. One of the most permissive open-source licenses around
+- **Cost**: completely free. No SaaS cloud service. No enterprise edition. No commercial charges of any kind
+- **TCO (total cost of ownership)**: server costs (VPS/bare metal, configured as needed) + ops headcount (1-2 engineers familiar with WebRTC) + bandwidth (usage-based billing)
 
-## 6. 产品特色
+## 6. Product Highlights
 
-1. **信令不可知提供最大灵活性**——同类产品中唯一不绑定任何信令协议的设计。开发者可用 WebSocket/gRPC/HTTP/MQTT/XMPP 中任意一种或多种。MediaServo 可用 Rust 实现专属信令，通过 napi-rs 或 C-FFI 与 MediaServo 和 AUDEBase 深度原生集成。这是 LiveKit（绑定私有二进制协议）或 Jitsi（绑定 XMPP）无法提供的灵活度
+1. **Signaling-agnosticism delivers maximum flexibility** — the only design in its class that binds no signaling protocol whatsoever. Developers may use WebSocket/gRPC/HTTP/MQTT/XMPP, any or all. MediaServo can implement dedicated signaling in Rust and integrate natively and deeply with MediaServo and AUDEBase through napi-rs or C-FFI. This is a degree of flexibility that LiveKit (bound to a proprietary binary protocol) or Jitsi (bound to XMPP) cannot offer
 
-2. **极致性能来自 C++ Worker + libuv 事件循环**——单线程无锁设计 + 独立进程隔离。Worker 内部零上下文切换——所有 RTP 包的接收、路由、转发在同一个 libuv 事件循环中完成。CPU 效率远超 JVM（Jitsi JVB，GC 停顿）和 Go（LiveKit，goroutine 调度开销）。单个 Worker 崩溃不影响其他 Worker（进程隔离 > 线程隔离）
+2. **Extreme performance from C++ Worker + libuv event loop** — single-threaded lock-free design + independent process isolation. Zero context switches inside the Worker — all RTP packet receive, route, and forward work completes in one libuv event loop. CPU efficiency far exceeds the JVM (Jitsi JVB, GC pauses) and Go (LiveKit, goroutine scheduling overhead). A single Worker crash does not affect other Workers (process isolation > thread isolation)
 
-3. **pipeToRouter() 的 Unix 管道哲学**——`routerA.pipeToRouter({ producerId, router: routerB })` ——这是 Unix 设计哲学（每个工具做好一件事，通过管道连接）在 WebRTC 世界的完美体现。一个 API 调用实现跨 CPU 核/跨主机/跨数据中心级联。支持树形/星形/链式三种拓扑任意组合。应用层完全控制级联拓扑——没有黑盒路由，没有供应商锁定
+3. **pipeToRouter()'s Unix pipeline philosophy** — `routerA.pipeToRouter({ producerId, router: routerB })` — the Unix design philosophy (each tool does one thing well, connected by pipes) perfectly realized in the WebRTC world. One API call achieves cross-core / cross-host / cross-datacenter cascading. Tree/star/chain topologies combined freely. The application layer fully controls cascade topology — no black-box routing, no vendor lock-in
 
-4. **Rust crate 路径与 MediaServo 战略完全一致**——mediasoup 的 Rust crate（2023 年启动）验证了「C++ 核心 + Rust 安全绑定 + 上层语言封装」的技术路径。MediaServo 的 native-core（Rust → napi-rs → Node.js、Rust → FFI → C）可以直接复用这套模式。mediasoup-rust 证明了这个三层架构的可行性和性能优势
+4. **The Rust crate path aligns exactly with MediaServo's strategy** — mediasoup's Rust crate (started 2023) validates the "C++ core + Rust safe binding + upper-language wrapper" technology path. MediaServo's native-core (Rust → napi-rs → Node.js, Rust → FFI → C) can reuse this pattern directly. mediasoup-rust proved this three-tier architecture's feasibility and performance advantage
 
-5. **PLI/FIR 智能聚合——生产级 SFU 的必需品**——这是一个看似微小但实际至关重要的特性。100 个参与者同时在 500ms 内请求关键帧 = 编码器要在极短时间内产出 100 个 I-frame = 编码器瞬间 CPU 过载 + 网络拥塞。mediasoup 的聚合器自动合并 + debounce = 只发一个 PLI/FIR = 编码器只产出一个 I-frame。任何自研 SFU（无论用哪种语言或框架）都必须实现等价逻辑——这是生产经验，不是可选优化
+5. **PLI/FIR intelligent aggregation — a necessity for production-grade SFUs** — a feature that looks tiny but is actually critical. 100 participants all requesting keyframes within 500ms = the encoder must produce 100 I-frames in an extremely short time = instant CPU overload + network congestion. mediasoup's aggregator auto-merges + debounces = one PLI/FIR sent = one I-frame produced. Any self-built SFU (in any language or framework) must implement equivalent logic — this is production experience, not an optional optimization
 
-## 7. 对 MediaServo 的参考价值
+## 7. Reference Value for MediaServo
 
-### [Adopt] 可直接借鉴
+### [Adopt] Directly Borrowable
 
-1. **Worker 进程隔离模式**：MediaServo 的 SFU Worker 应采用类似设计——每个 CPU 核一个独立 Rust 进程（通过 `std::process::Command` spawn），IPC 通信使用 Unix Domain Socket。这比单进程多线程方案的稳定性和可运维性高一个量级
-2. **Router → Transport → Producer/Consumer 三层领域模型**：直接作为 `mediaservo-conference` crate 的 domain model 设计蓝图。Producer = 源、Consumer = 订阅、Transport = 连接类型——这个抽象的简洁性已被 mediasoup 多年验证
-3. **PLI/FIR 聚合 + 500ms-1s debounce**：`SfuRouter` 内置此逻辑。这是生产级 SFU 的第一道防线——没有这个，100 人会议在任何一个参与者网络抖动时都会触发级联关键帧请求风暴
-4. **信令与媒体彻底分离的设计哲学**：MediaServo 的 architecture.md 已有此设计——mediasoup 以完整项目证明了「分离可以在极限性能下工作」这一前提
-5. **Rust crate 绑定模式**：mediasoup-rust 验证了双语言服务端绑定的可行性。MediaServo 的 napi-rs（Node.js）和 C-FFI（MediaServo）两条路径可以直接参照这套 API 映射规则
+1. **Worker process isolation pattern**: MediaServo's SFU Workers should adopt a similar design — one independent Rust process per CPU core (spawned via `std::process::Command`), IPC over Unix Domain Sockets. An order of magnitude better in stability and operability than a single-process multi-threaded design
+2. **Router → Transport → Producer/Consumer three-tier domain model**: use directly as the domain-model design blueprint of the `mediaservo-conference` crate. Producer = source, Consumer = subscription, Transport = connection type — the elegance of this abstraction has been validated by mediasoup over many years
+3. **PLI/FIR aggregation + 500ms-1s debounce**: built into `SfuRouter`. The first line of defense for a production-grade SFU — without it, any participant's network jitter in a 100-person meeting triggers a cascading keyframe-request storm
+4. **The design philosophy of fully separating signaling and media**: MediaServo's architecture.md already embodies this — mediasoup proves with a complete project that "separation works at extreme performance"
+5. **Rust crate binding pattern**: mediasoup-rust validates the feasibility of dual-language server bindings. MediaServo's two paths — napi-rs (Node.js) and C-FFI (MediaServo) — can follow its API-mapping rules directly
 
-### [Adapt] 需修改后采用
+### [Adapt] Adopt With Modifications
 
-1. **Simulcast 层选择算法**：mediasoup 的 REMB/TWCC 基础带宽估计可适配到 MediaServo PipelineEngine。但需要增加场景感知——远程桌面（稳定高带宽）vs 视频会议（波动中带宽）vs 车端推流（极不稳定带宽）vs 遥操作（延迟敏感带宽）——不同场景使用不同的层选择策略
-2. **pipeToRouter() 级联协议**：mediasoup 用简单的 TCP/UDP Socket 连接实现级联。MediaServo 的级联信令需要在传输层之上增加控制面——拓扑管理、路由表同步、健康检查、断路器、熔断恢复。gRPC 比纯 Socket 更适合做控制面通信
-3. **WebRtcServer 单端口复用**：这个 v3.20 新增的特性对 MediaServo 的网络策略设计有直接参考价值。大规模部署时防火墙只需开放极少端口。但适配到 Rust 生态需要自研等价设计（str0m 或 webrtc-rs 目前不内置单端口复用）
-4. **RTCDataChannel → mediaservo-teleop 控制链路**：mediasoup 的 DataProducer/DataConsumer 是通用 SCTP 数据通道。MediaServo 的 teleop 模块需要在此之上封装控制协议——unordered、maxRetransmits=0 的低延迟模式 + 有序可靠模式双通道
+1. **Simulcast layer-selection algorithm**: mediasoup's REMB/TWCC baseline bandwidth estimation can be adapted into MediaServo PipelineEngine. But scenario awareness must be added — remote desktop (steady high bandwidth) vs video conferencing (fluctuating medium bandwidth) vs vehicle push (highly unstable bandwidth) vs teleoperation (latency-sensitive bandwidth) — different scenarios use different layer-selection strategies
+2. **pipeToRouter() cascade protocol**: mediasoup implements cascading with plain TCP/UDP socket connections. MediaServo's cascade signaling needs a control plane above the transport — topology management, routing-table synchronization, health checks, circuit breakers, recovery from tripped breakers. gRPC is better suited than raw sockets for control-plane communication
+3. **WebRtcServer single-port multiplexing**: this feature added in v3.20 has direct reference value for MediaServo's network policy design. At large scale the firewall opens very few ports. But porting it to the Rust ecosystem requires a self-built equivalent design (str0m and webrtc-rs do not currently include single-port multiplexing)
+4. **RTCDataChannel → mediaservo-teleop control link**: mediasoup's DataProducer/DataConsumer are generic SCTP data channels. MediaServo's teleop module must layer a control protocol on top — an unordered, maxRetransmits=0 low-latency mode plus an ordered reliable mode, dual channels
 
-### [Avoid] 已知坑与不适用场景
+### [Avoid] Known Pitfalls & Non-Applicable Scenarios
 
-1. **不可用作开箱即用服务**——mediasoup 不是产品，是引擎。它假设你的团队有能力自建信令、录制、监控、编排。如果期望三行命令启动视频会议服务，请用 Jitsi 或 LiveKit
-2. **全互动大房间（>50 人全视频）不可行**——Consumer 二次增长是 SFU 架构的数学约束，不是实现问题。解决方案：限制同时发言人数（类似 Jitsi Last-N）+ Webinar 模式（类似 Zoom CDN 分流）
-3. **全连接 Router mesh 不可扩展**——Jitsi 2020 年的教训同样适用于 mediasoup 部署。多节点 Router 互联必须使用 Pools 星型拓扑，永远不要全互联
-4. **Node.js FFI 开销需量化评估**——在高负载场景（数千 Consumer 同时状态变化）下，Node.js 主进程与 C++ Worker 之间的 Channel 通信可能成为瓶颈。优先使用 Rust crate 路径（零 FFI 开销）
-5. **无 MCU 混流 = 需独立服务**——PSTN 电话桥接、录制合成、多流融合混屏——这些都需要 MCU 能力。MediaServo 需要独立的混流/合成服务（基于 GStreamer 或自定义渲染管线）
+1. **Not usable as an out-of-the-box service** — mediasoup is not a product, it is an engine. It assumes your team can build signaling, recording, monitoring and orchestration themselves. If you expect a video-conferencing service in three commands, use Jitsi or LiveKit
+2. **Large fully-interactive rooms (>50 people all video) are infeasible** — quadratic Consumer growth is a mathematical constraint of the SFU architecture, not an implementation issue. Solutions: limit concurrent speakers (Jitsi Last-N style) + webinar mode (Zoom CDN distribution style)
+3. **Fully-connected Router mesh does not scale** — Jitsi's 2020 lesson applies equally to mediasoup deployments. Multi-node Routers must cascade in a Pools star topology; never fully interconnect
+4. **Node.js FFI overhead must be quantified** — under heavy load (thousands of Consumers changing state simultaneously), the Channel between the Node.js main process and the C++ Worker can become the bottleneck. Prefer the Rust crate path (zero FFI overhead)
+5. **No MCU mixing = an independent service needed** — PSTN bridging, recording compositing, multi-stream blended layouts — these all need MCU capability. MediaServo needs a separate mixing/compositing service (GStreamer-based or a custom rendering pipeline)
 
-**总体评分**：★★★★☆ (4/5)
+**Overall rating**: ★★★★☆ (4/5)
 
-> 评价：mediasoup 是 MediaServo 选定的核心 SFU 参考引擎。其在性能、灵活性、代码质量上的优势无可替代。但「信令不可知」既是最强大的武器也是最陡峭的门槛——它要求 MediaServo 团队在 WebRTC 工程能力上达到能独立设计完整控制面的水平。只要这个前提成立，mediasoup 的参考价值在四个选项中是最高的。
+> Verdict: mediasoup is the core SFU reference engine selected by MediaServo. Its advantages in performance, flexibility and code quality are irreplaceable. But "signaling-agnostic" is both its most powerful weapon and its steepest barrier — it demands that the MediaServo team reach the WebRTC engineering level of designing a complete control plane independently. As long as that premise holds, mediasoup's reference value is the highest among the four options.
 
 ---
 
-> **参考来源**
+> **Sources**
 > GitHub: versatica/mediasoup (7,290 Stars, ISC License, v3.21.1)
 > npm: mediasoup (33.2K weekly downloads, 405 versions)
-> 官网: mediasoup.org（含完整 v3 API 文档）
-> 社区: mediasoup.discourse.group
+> Official site: mediasoup.org (complete v3 API docs)
+> Community: mediasoup.discourse.group
 > Bluesky: @mediasoup-sfu.bsky.social
-> CHANGELOG.md: v3.1 到 v3.21 共 830+ 行记录
+> CHANGELOG.md: 830+ lines of records from v3.1 to v3.21
 > mediasoup-rust crate: github.com/versatica/mediasoup-rust
 > MediaServo: docs/research/video-conference.md
 
 ---
-**相关决策**: D97, D138, D-SFU-WORKER, D-SIMULCAST, D50
+**Related decisions**: D97, D138, D-SFU-WORKER, D-SIMULCAST, D50
 
-## 附录 A：mediasoup Demo 部署步骤
+## Appendix A: mediasoup Demo Deployment Steps
 
-mediasoup-demo 是官方提供的完整参考实现，包含 Node.js 信令层。以下是部署步骤概览：
+mediasoup-demo is the official complete reference implementation, including a Node.js signaling layer. Deployment overview:
 
 ```bash
-# 1. 克隆 demo 项目
+# 1. Clone the demo project
 git clone https://github.com/versatica/mediasoup-demo.git
 cd mediasoup-demo
 
-# 2. 安装依赖（服务端 + 客户端 + 浏览器端）
+# 2. Install dependencies (server + client + browser)
 cd server && npm install
 cd ../app && npm install
 
-# 3. 配置
+# 3. Configure
 cp server/config.example.js server/config.js
-# 编辑 config.js：配置 TLS 证书路径、监听 IP/Port、公告 IP
+# Edit config.js: set TLS cert paths, listen IP/Port, announced IP
 
-# 4. 启动服务端
+# 4. Start the server
 cd server && node server.js
 
-# 5. 构建并启动浏览器客户端
-cd ../app && npm start  # 开发模式，默认 http://localhost:3000
+# 5. Build and start the browser client
+cd ../app && npm start  # dev mode, default http://localhost:3000
 ```
 
-Demo 的核心价值是提供了一个可工作的信令层参考实现——信令基于 WebSocket + JSON 消息格式，房间管理、ICE 协商、Producer/Consumer 创建流程完整可追踪。MediaServo 的信令层可从 demo 的信令消息格式和状态机设计中获取灵感。
+The demo's core value is a working reference implementation of the signaling layer — signaling based on WebSocket + JSON message format, with fully traceable room management, ICE negotiation, and Producer/Consumer creation flows. MediaServo's signaling layer can draw inspiration from the demo's signaling message formats and state-machine design.
 
-关键信令消息类型：
-- `getRouterRtpCapabilities` → 获取 Router 能处理的所有 RTP 能力
-- `createWebRtcTransport` → 创建 WebRTC 传输端点
-- `connectWebRtcTransport` → 完成 DTLS 握手后连接传输层
-- `produce` → 发布媒体流（音频/视频/屏幕共享）
-- `consume` → 订阅其他参与者的媒体流
-- `resumeConsumer` → 恢复暂停的订阅
-- `changeProducerPause` → 暂停/恢复发布
+Key signaling message types:
+- `getRouterRtpCapabilities` → obtain all RTP capabilities the Router can handle
+- `createWebRtcTransport` → create a WebRTC transport endpoint
+- `connectWebRtcTransport` → connect the transport after the DTLS handshake completes
+- `produce` → publish a media stream (audio/video/screen share)
+- `consume` → subscribe to other participants' media streams
+- `resumeConsumer` → resume a paused subscription
+- `changeProducerPause` → pause/resume publishing
 
 ---
 
-## 附录 B：mediasoup Rust crate 使用示例
+## Appendix B: mediasoup Rust Crate Usage Example
 
-mediasoup-rust crate（2023 年启动）提供与 Node.js 版本等价的 Rust API：
+The mediasoup-rust crate (started 2023) provides a Rust API equivalent to the Node.js version:
 
 ```rust
 use mediasoup::worker::{Worker, WorkerSettings};
 use mediasoup::router::{Router, RouterOptions};
 use mediasoup::webrtc_transport::{WebRtcTransportOptions, TransportListenIps};
 
-// 1. 创建 Worker（C++ 子进程）
+// 1. Create the Worker (C++ subprocess)
 let worker = Worker::new(WorkerSettings {
     log_level: Some(LogLevel::Debug),
     rtc_ports_range: Some((10000, 10100)),
     ..Default::default()
 })?;
 
-// 2. 创建 Router
+// 2. Create a Router
 let router = worker.create_router(RouterOptions::default())?;
 
-// 3. 创建 WebRtcTransport
+// 3. Create a WebRtcTransport
 let transport = router.create_webrtc_transport(
     WebRtcTransportOptions {
         listen_ips: vec![TransportListenIp { ip: "0.0.0.0".parse()?, announced_ip: Some("1.2.3.4".parse()?) }],
@@ -401,27 +408,27 @@ let transport = router.create_webrtc_transport(
     }
 )?;
 
-// 4. 获取 DTLS 参数和 ICE 候选（发送给客户端完成 SDP 协商）
+// 4. Get DTLS parameters and ICE candidates (send to the client to complete SDP negotiation)
 let dtls_params = transport.dtls_parameters();
 let ice_candidates = transport.ice_candidates();
 let ice_params = transport.ice_parameters();
 
-// 5. 客户端连接后创建 Producer
-// （在 transport 的 connect 事件处理后）
+// 5. After the client connects, create a Producer
+// (after handling the transport's connect event)
 let producer = transport.create_producer(ProducerOptions {
     kind: MediaKind::Video,
     rtp_parameters: client_provided_rtp_params,
     ..Default::default()
 })?;
 
-// 6. 为其他参与者创建 Consumer
+// 6. Create a Consumer for another participant
 let consumer = transport2.create_consumer(ConsumerOptions {
     producer_id: producer.id(),
     rtp_capabilities: client2_rtp_capabilities,
     ..Default::default()
 })?;
 
-// 7. Router 间级联
+// 7. Cascade between Routers
 let pipe = router_a.pipe_to_router(
     PipeToRouterOptions {
         producer_id: some_producer_id,
@@ -430,97 +437,96 @@ let pipe = router_a.pipe_to_router(
 )?;
 ```
 
-MediaServo 的 native-core 应参考此 API 设计——Rust crate 中的 Worker/Router/Transport/Producer/Consumer 类型系统直接映射到 MediaServo 的 domain model。
+MediaServo's native-core should follow this API design — the Worker/Router/Transport/Producer/Consumer type system in the Rust crate maps directly onto MediaServo's domain model.
 
 ---
 
-## 附录 C：与 LiveKit / Jitsi / Janus 的深度对比
+## Appendix C: Deep Comparison with LiveKit / Jitsi / Janus
 
-**选择 mediasoup 的场景**：
-- 需要完全自定义信令协议（可选 WebSocket/gRPC/MQTT/XMPP 任一）
-- 团队有深厚的 WebRTC 工程能力（SDP/ICE/DTLS/SRTP 协议栈经验）
-- 对性能有极致要求（C++ 核心 + Worker 进程隔离）
-- 需要 Rust 绑定（与 MediaServo napi-rs 集成）
-- 坚持「媒体层与控制层完全分离」的架构哲学
+**Scenarios where mediasoup is the right choice**:
+- Fully custom signaling protocol needed (any of WebSocket/gRPC/MQTT/XMPP)
+- The team has deep WebRTC engineering capability (SDP/ICE/DTLS/SRTP stack experience)
+- Extreme performance demands (C++ core + Worker process isolation)
+- Rust binding needed (integration with MediaServo napi-rs)
+- Firm on the "media layer and control layer fully separated" architecture philosophy
 
-**不选择 mediasoup 的场景**：
-- 需要快速上线（2 周 vs 2 月开发周期差异）→ 选 LiveKit
-- 没有信令层开发资源 → 选 Jitsi Meet（开源全栈）
-- 需要 MCU 混流能力 → 选 Janus + AudioBridge 插件
-- 需要全托管 → 选 Agora / LiveKit Cloud
+**Scenarios where mediasoup is the wrong choice**:
+- Need to ship fast (2 weeks vs 2 months development-cycle gap) → pick LiveKit
+- No signaling-layer development resources → pick Jitsi Meet (open-source full stack)
+- MCU mixing capability needed → pick Janus + the AudioBridge plugin
+- Fully hosted needed → pick Agora / LiveKit Cloud
 
-**混合策略**（MediaServo 推荐）：
-mediasoup 作为核心 SFU 引擎 + 自研信令（借鉴 Colibri2 RESTful 设计 + LiveKit PSRPC + Zoom MMR 三层调度）+ Rust 绑定（napi-rs → AUDEBase + C-FFI → MediaServo）。取每个参考项目中最好的部分，避免任何单一项目的全套依赖。
+**Hybrid strategy** (recommended for MediaServo):
+mediasoup as the core SFU engine + custom signaling (borrowing Colibri2's RESTful design + LiveKit PSRPC + Zoom MMR three-tier scheduling) + Rust bindings (napi-rs → AUDEBase + C-FFI → MediaServo). Take the best of each reference project while avoiding any single project's full dependency set.
 
-
----
-
-## 附录 D：mediasoup 性能调优实践
-
-以下是生产环境部署 mediasoup 的关键调优参数：
-
-**Worker 配置优化**：
-- `rtcMinPort` / `rtcMaxPort`：限制 ICE 端口范围，减少防火墙规则。推荐 40000-41000
-- `dtlsCertificateFile` / `dtlsPrivateKeyFile`：使用长期有效证书（而非自生成临时证书），避免 DTLS 握手中的证书验证开销
-- CPU affinity：通过 `taskset` 将 Worker 进程绑定到特定 CPU 核，减少 L1/L2 cache missing
-
-**Router 配置优化**：
-- 每个 Router 维护的房间数：建议 ≤ 100 个房间/Router。超限创建新 Router
-- 每个房间的最大参与者数：保守 16 人全互动。如预期 50+ 人会议，配置 Last-N=5（只转发 5 个活跃发言人的视频）
-- `rtpRetransmissionBufferSize`：默认 1000 包。高丢包网络（>5%）建议增加到 2000
-
-**Transport 配置优化**：
-- WebRtcTransport 使用 ICE-Lite（服务端模式）——减少一个 ICE 握手回合
-- 生产环境 `enableUdp: true, enableTcp: false`（TCP fallback 仅在企业防火墙场景需要）
-- WebRtcServer 单端口复用（v3.20+）——大规模部署最佳实践
-
-**Producer/Consumer 调优**：
-- Simulcast 使用 3 层（1080p/720p/360p 或 720p/360p/180p）。避免 4 层——第 4 层的 CPU 开销与带宽节省不成比例
-- Consumer 的 `setPreferredLayers(spatialLayer, temporalLayer)` 应在带宽估计回调中动态调用
-- PLI 间隔：默认 1s debounce。丢包率高的网络可降到 500ms
-
-**网络层调优**：
-- Linux 内核 `net.core.rmem_max` / `net.core.wmem_max` 增加到 26214400（25MB）
-- `net.core.netdev_max_backlog` 增加到 5000
-- 禁用 `tcp_slow_start_after_idle`（WebRTC 场景 TCP fallback 不需要慢启动）
-
-**Node.js 主进程调优**：
-- 使用 `--max-old-space-size` 限制 V8 堆大小
-- 使用 `--optimize-for-size` 减少 JIT 编译的内存占用
-- 避免在主进程做 CPU 密集计算——所有媒体处理在 C++ Worker 中完成
-
-**监控指标**：
-- Worker 进程 CPU/内存使用率
-- Router 级别的 Consumer 数量（预测扩展需求）
-- Transport 级别的丢包率、Jitter、RTT
-- PLI/FIR 请求频率（高频 = 编码器或网络问题）
-- 每 Consumer 的带宽估计值（定位带宽异常）
 
 ---
 
-## 附录 E：mediasoup 与 MediaServo WebRTC 栈集成路径
+## Appendix D: mediasoup Performance-Tuning Practices
 
-MediaServo 有两种技术路径集成 mediasoup 的媒体处理能力：
+Key tuning parameters for production mediasoup deployments:
 
-**路径 A：直接使用 mediasoup**
-- Node.js 调用 mediasoup npm 包 → C++ Worker 子进程
-- 优势：零研发成本获取完整的 SFU 能力。BigBlueButton 验证的生产级方案
-- 劣势：Node.js FFI 开销；信令层（Node.js）与 MediaServo 后台（Rust/Golang）不在同一运行时
-- 适用：AUDEBase 通过 napi-rs 调用 Node.js 版本的 mediasoup
+**Worker configuration tuning**:
+- `rtcMinPort` / `rtcMaxPort`: bound the ICE port range to shrink firewall rules. Recommended 40000-41000
+- `dtlsCertificateFile` / `dtlsPrivateKeyFile`: use long-lived certificates (instead of self-generated ephemeral ones) to avoid certificate-verification overhead in the DTLS handshake
+- CPU affinity: pin Worker processes to specific CPU cores via `taskset`, reducing L1/L2 cache misses
 
-**路径 B：Rust 二次封装（推荐）**
-- mediasoup-rust crate → Rust Worker 封装 → MediaServo native-core
-- 优势：与 MediaServo Rust 技术栈一致。零 FFI 开销。信令层（Rust）与媒体层在同一运行时
-- 劣势：mediasoup-rust crate 成熟度不如 Node.js 版本（2023 年启动）
-- 适用：MediaServo 通过 C-FFI 静态链接 + AUDEBase 通过 napi-rs 调用
+**Router configuration tuning**:
+- Rooms per Router: recommended ≤ 100 rooms/Router. Create new Routers beyond that
+- Max participants per room: conservatively 16 fully interactive. If 50+ meetings are expected, configure Last-N=5 (forward only 5 active speakers' video)
+- `rtpRetransmissionBufferSize`: default 1000 packets. On high-loss networks (>5%) raise it to 2000
 
-**路径 C：借鉴设计，自研实现**
-- 借鉴 mediasoup 的 Worker/Router/Transport/Producer/Consumer 领域模型
-- 使用 str0m (sans-I/O WebRTC) 或 webrtc-rs 作为 WebRTC 协议栈
-- 自己实现 SFU 路由逻辑
-- 优势：完全自主可控。无外部 C++ 依赖。纯 Rust 生态
-- 劣势：研发周期最长。str0m/webrtc-rs 的 Simulcast/SVC 支持不及 mediasoup 成熟
-- 适用：Phase 1.0+ 长期目标
+**Transport configuration tuning**:
+- Use ICE-Lite (server mode) for WebRtcTransport — saves one ICE handshake round trip
+- Production: `enableUdp: true, enableTcp: false` (TCP fallback is only needed behind corporate firewalls)
+- WebRtcServer single-port multiplexing (v3.20+) — the large-deployment best practice
 
-Phase 0 推荐路径：路径 B（Rust 二次封装）为主，路径 C（自研设计）为长期储备。
+**Producer/Consumer tuning**:
+- Simulcast with 3 layers (1080p/720p/360p or 720p/360p/180p). Avoid 4 layers — the 4th layer's CPU cost does not pay for its bandwidth savings
+- Call Consumer `setPreferredLayers(spatialLayer, temporalLayer)` dynamically from the bandwidth-estimation callback
+- PLI interval: default 1s debounce. On high-loss networks it can be lowered to 500ms
 
+**Network-layer tuning**:
+- Raise Linux kernel `net.core.rmem_max` / `net.core.wmem_max` to 26214400 (25MB)
+- Raise `net.core.netdev_max_backlog` to 5000
+- Disable `tcp_slow_start_after_idle` (TCP fallback in WebRTC scenarios needs no slow start)
+
+**Node.js main-process tuning**:
+- Use `--max-old-space-size` to bound the V8 heap size
+- Use `--optimize-for-size` to reduce JIT compilation memory footprint
+- Never run CPU-heavy work in the main process — all media processing happens in the C++ Workers
+
+**Monitoring metrics**:
+- Worker process CPU/memory usage
+- Router-level Consumer counts (forecast scaling needs)
+- Transport-level packet loss, jitter, RTT
+- PLI/FIR request frequency (high frequency = encoder or network problem)
+- Per-Consumer bandwidth estimate (locate bandwidth anomalies)
+
+---
+
+## Appendix E: Integration Paths Between mediasoup and the MediaServo WebRTC Stack
+
+MediaServo has technology paths for integrating mediasoup's media capability:
+
+**Path A: use mediasoup directly**
+- Node.js calls the mediasoup npm package → C++ Worker subprocess
+- Pro: full SFU capability at zero R&D cost. A production-grade recipe validated by BigBlueButton
+- Con: Node.js FFI overhead; the signaling layer (Node.js) and MediaServo's backend (Rust/Golang) are not in the same runtime
+- Fit: AUDEBase calls the Node.js version of mediasoup through napi-rs
+
+**Path B: Rust secondary wrapper (recommended)**
+- mediasoup-rust crate → Rust Worker wrapper → MediaServo native-core
+- Pro: consistent with MediaServo's Rust stack. Zero FFI overhead. Signaling layer (Rust) and media layer in the same runtime
+- Con: the mediasoup-rust crate is less mature than the Node.js version (started 2023)
+- Fit: MediaServo via C-FFI static linking + AUDEBase via napi-rs
+
+**Path C: borrow the design, build your own**
+- Borrow mediasoup's Worker/Router/Transport/Producer/Consumer domain model
+- Use str0m (sans-I/O WebRTC) or webrtc-rs as the WebRTC stack
+- Implement the SFU routing logic yourself
+- Pro: fully self-controlled. No external C++ dependency. Pure Rust ecosystem
+- Con: the longest R&D cycle. str0m/webrtc-rs Simulcast/SVC support is not as mature as mediasoup's
+- Fit: Phase 1.0+ long-term goal
+
+Phase 0 recommended path: mainly Path B (Rust secondary wrapper), with Path C (custom design) as the long-term reserve.

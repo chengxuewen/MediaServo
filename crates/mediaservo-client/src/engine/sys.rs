@@ -1,8 +1,8 @@
-//! 真实现：mediaservo-webrtc（backend-webrtc-sys）直通壳。
+//! The real impl: a mediaservo-webrtc (backend-webrtc-sys) passthrough shell.
 //!
-//! **重构非重写**——每个方法体 = 现码原样搬入（含错误上下文串），零逻辑改。
-//! 错误映射保持 `ClientError::WebRtc("<原调用点前缀>: <RTCError>")` 逐字形状，
-//! 观测面（日志/错误串）与重构前一致。
+//! **A refactor, not a rewrite** -- each method body = the current code moved in verbatim (incl. error-context strings), zero logic changes.
+//! Error mapping keeps the `ClientError::WebRtc("<original call-site prefix>: <RTCError>")` verbatim shape;
+//! the observation surface (logs/error strings) matches the pre-refactor state.
 
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ use mediaservo_webrtc::traits::PeerConnectionApi;
 use super::{DcHandle, Engine, EngineDcEvent, EngineTrack, PcHandle, TrackHandle};
 use crate::error::ClientError;
 
-/// 直通引擎：每次 `create_pc` 现建 factory（与重构前 `create_pc()` 逐字同形）。
+/// The passthrough engine: each `create_pc` builds the factory fresh (verbatim-identical to pre-refactor `create_pc()`).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SysEngine;
 
@@ -49,7 +49,7 @@ impl Engine for SysEngine {
     }
 }
 
-/// 真 PC 句柄（RTCPeerConnection 本身 Arc 语义 Clone，句柄存活 = 连接存活）。
+/// The real PC handle (RTCPeerConnection itself is Arc-semantics Clone; handle alive = connection alive).
 struct SysPc {
     pc: RTCPeerConnection,
 }
@@ -58,8 +58,8 @@ struct SysPc {
 impl PcHandle for SysPc {
     fn on_track(&self, cb: Box<dyn Fn(EngineTrack) + Send + Sync + 'static>) {
         self.pc.on_track(move |receiver: RTCRtpReceiver| {
-            // 现码语义：仅 Receiver 形挂 sink；Sender 形（本域不出现）透传空句柄，
-            // 回调照常触发保持观测日志点位不变。
+            // current-code semantics: only Receiver shapes attach a sink; Sender shapes (never seen in this domain) pass an empty handle,
+            // the callback still firing to keep the observation log points unchanged.
             let handle: Arc<dyn TrackHandle> = match receiver.track {
                 TrackRef::Receiver(r) => Arc::new(SysTrack { receiver: r }),
                 TrackRef::Sender(_) => Arc::new(SysTrack {
@@ -108,7 +108,7 @@ impl PcHandle for SysPc {
     }
 
     fn connection_stats(&self) -> Option<mediaservo_webrtc::stats::ConnectionStats> {
-        // RTCPeerConnection 公共包装已转发（PcBackend pub(crate) 不可直接引）
+        // the RTCPeerConnection common wrapper already forwards (PcBackend is pub(crate), not directly referenceable)
         mediaservo_webrtc::traits::PeerConnectionApi::connection_stats(&self.pc)
     }
 
@@ -130,7 +130,7 @@ impl PcHandle for SysPc {
     }
 }
 
-/// 真 track：委托 libwebrtc receiver 的 sink 注册（set_frame_sink 语义不变）。
+/// The real track: delegates sink registration to the libwebrtc receiver (set_frame_sink semantics unchanged).
 struct SysTrack {
     receiver: TrackReceiver,
 }
@@ -141,7 +141,7 @@ impl TrackHandle for SysTrack {
     }
 }
 
-/// 真 DC：spool→events 转发任务保持「每订阅端独立」的 broadcast 语义。
+/// The real DC: the spool -> events forwarder task preserves the "one subscriber per call" broadcast semantics.
 struct SysDc {
     dc: RTCDataChannel,
 }
@@ -184,7 +184,7 @@ impl DcHandle for SysDc {
                     RTCDataChannelEvent::Error(e) => EngineDcEvent::Error(e),
                 };
                 if tx.send(mapped).is_err() {
-                    break; // 订阅端 drop = 泵退出（同旧 rx 丢弃语义）
+                    break; // the subscriber dropped = the pump exits (same as the old rx-drop semantics)
                 }
             }
         });

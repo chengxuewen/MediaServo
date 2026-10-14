@@ -92,7 +92,7 @@ fn stub_decode_flush_noop() {
 
 #[test]
 fn stub_encoder_and_decoder_are_send() {
-    #[allow(dead_code)] // 编译期断言文档位
+    #[allow(dead_code)] // compile-time assertion documentation slot
     fn assert_send<T: Send>() {}
     let factory = CodecFactory::new();
     let encoder = factory.create_encoder(make_test_config(), None).unwrap();

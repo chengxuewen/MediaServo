@@ -1,31 +1,31 @@
-# mediasoup Rust API 参考 (v0.24.2)
+# mediasoup Rust API Reference (v0.24.2)
 
-> **来源**: [versatica/mediasoup v3/rust](https://github.com/versatica/mediasoup)  
-> **生成日期**: 2026-07-31  
-> **适用版本**: mediasoup 0.24.x (Rust crate)
+> **Source**: [versatica/mediasoup v3/rust](https://github.com/versatica/mediasoup)  
+> **Generated**: 2026-07-31  
+> **Applies to**: mediasoup 0.24.x (Rust crate)
 
 ---
 
-## 1. 架构概览
+## 1. Architecture Overview
 
 ```
 WorkerManager
-  └── Worker (C++ thread, 单 CPU 核, 处理 Router 实例)
-       ├── WebRtcServer (单端口承载多个 WebRtcTransport, ICE Lite)
-       └── Router (媒体路由)
-            ├── WebRtcTransport (ICE/DTLS 网络路径, 收发媒体)
-            │    ├── Producer (注入音视频源)
-            │    └── Consumer (转发到终端)
+  └── Worker (C++ thread, one CPU core, hosts Router instances)
+       ├── WebRtcServer (carries multiple WebRtcTransports on one port, ICE Lite)
+       └── Router (media routing)
+            ├── WebRtcTransport (ICE/DTLS network path, sends/receives media)
+            │    ├── Producer (injects audio/video sources)
+            │    └── Consumer (forwards to endpoints)
             ├── PlainTransport (RTP/RTCP plain)
-            ├── PipeTransport (同 Host Router 间通信)
-            └── DirectTransport (进程内直传)
+            ├── PipeTransport (communication between Routers on the same host)
+            └── DirectTransport (in-process direct transfer)
 ```
 
-mediasoup Rust API 是 **ICE Lite** (服务端), 不主动发起 ICE 连接, 等待客户端 Binding Request.
+The mediasoup Rust API is **ICE Lite** (server side); it does not initiate ICE connections and waits for the client's Binding Request.
 
 ---
 
-## 2. Worker 创建
+## 2. Worker Creation
 
 ### 2.1 WorkerSettings
 
@@ -47,8 +47,8 @@ let worker_settings = WorkerSettings {
         WorkerLogTag::Rtcp,
         // ...
     ],
-    rtc_port_range: 10000..=59999,  // ICE/DTLS/RTP 端口范围
-    dtls_files: None,  // None = 自动生成证书
+    rtc_port_range: 10000..=59999,  // ICE/DTLS/RTP port range
+    dtls_files: None,  // None = auto-generated certificates
     libwebrtc_field_trials: None,
     thread_initializer: None,
     app_data: AppData::default(),
@@ -60,18 +60,18 @@ let worker = worker_manager
     .expect("Failed to create worker");
 ```
 
-### 2.2 Worker 生命周期回调
+### 2.2 Worker Lifecycle Callbacks
 
 ```rust
-worker.on_new_router(|router| { /* Router 创建 */ });
-worker.on_new_webrtc_server(|server| { /* WebRtcServer 创建 */ });
-worker.on_dead(|result| { /* Worker 线程意外退出 */ });
-worker.on_close(|| { /* Worker 关闭 */ });
+worker.on_new_router(|router| { /* Router created */ });
+worker.on_new_webrtc_server(|server| { /* WebRtcServer created */ });
+worker.on_dead(|result| { /* Worker thread exited unexpectedly */ });
+worker.on_close(|| { /* Worker closed */ });
 ```
 
 ---
 
-## 3. Router 创建 & RouterOptions
+## 3. Router Creation & RouterOptions
 
 ### 3.1 RouterOptions + media_codecs
 
@@ -85,10 +85,10 @@ use std::num::{NonZeroU32, NonZeroU8};
 
 fn media_codecs() -> Vec<RtpCodecCapability> {
     vec![
-        // Opus 音频
+        // Opus audio
         RtpCodecCapability::Audio {
             mime_type: MimeTypeAudio::Opus,
-            preferred_payload_type: None,  // None = 自动分配
+            preferred_payload_type: None,  // None = auto-assigned
             clock_rate: NonZeroU32::new(48000).unwrap(),
             channels: NonZeroU8::new(2).unwrap(),
             parameters: RtpCodecParametersParameters::from([
@@ -96,7 +96,7 @@ fn media_codecs() -> Vec<RtpCodecCapability> {
             ]),
             rtcp_feedback: vec![],
         },
-        // VP8 视频
+        // VP8 video
         RtpCodecCapability::Video {
             mime_type: MimeTypeVideo::Vp8,
             preferred_payload_type: None,
@@ -104,7 +104,7 @@ fn media_codecs() -> Vec<RtpCodecCapability> {
             parameters: RtpCodecParametersParameters::default(),
             rtcp_feedback: vec![],
         },
-        // H264 视频
+        // H264 video
         RtpCodecCapability::Video {
             mime_type: MimeTypeVideo::H264,
             preferred_payload_type: None,
@@ -125,13 +125,13 @@ let router = worker
     .expect("Failed to create router");
 ```
 
-**关键**: `RouterOptions::default()` 创建 `media_codecs: vec![]` → **空 codec 列表**, produce 会报 "Unsupported codec"。必须显式传入 `RouterOptions::new(media_codecs)`。
+**Key**: `RouterOptions::default()` creates `media_codecs: vec![]` → an **empty codec list**, and produce will report "Unsupported codec". You must pass `RouterOptions::new(media_codecs)` explicitly.
 
-### 3.2 Router rtp_capabilities (返回客户端)
+### 3.2 Router rtp_capabilities (returned to the client)
 
 ```rust
 let rtp_capabilities = router.rtp_capabilities();
-// 将 rtp_capabilities 序列化发送给客户端, 客户端用于 computeSendingRtpParameters
+// Serialize rtp_capabilities and send it to the client, which uses it for computeSendingRtpParameters
 ```
 
 ### 3.3 Router::can_consume
@@ -144,7 +144,7 @@ let can_consume = router.can_consume(&producer.id(), &client_rtp_capabilities);
 
 ## 4. WebRtcTransport
 
-### 4.1 方式 A: Individual (独立端口)
+### 4.1 Option A: Individual (independent ports)
 
 ```rust
 use mediasoup::webrtc_transport::{
@@ -158,9 +158,9 @@ let transport = router
         WebRtcTransportListenInfos::new(ListenInfo {
             protocol: Protocol::Udp,
             ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            announced_address: Some("公网IP或域名".to_string()),
+            announced_address: Some("public IP or domain".to_string()),
             expose_internal_ip: false,
-            port: None,               // None = 自动分配
+            port: None,               // None = auto-assigned
             port_range: None,         // Some(40000..=40100)
             flags: None,
             send_buffer_size: None,
@@ -170,12 +170,12 @@ let transport = router
     .await?;
 ```
 
-### 4.2 方式 B: WebRtcServer (共享单端口) — 推荐
+### 4.2 Option B: WebRtcServer (shared single port) — recommended
 
 ```rust
 use mediasoup::webrtc_server::{WebRtcServerOptions, WebRtcServerListenInfos};
 
-// 1. 创建 WebRtcServer (Worker 级别)
+// 1. Create the WebRtcServer (Worker level)
 let webrtc_server = worker
     .create_webrtc_server(WebRtcServerOptions::new(
         WebRtcServerListenInfos::new(ListenInfo {
@@ -183,7 +183,7 @@ let webrtc_server = worker
             ip: IpAddr::V4(Ipv4Addr::UNSPECIFIED),  // 0.0.0.0
             announced_address: None,
             expose_internal_ip: false,
-            port: Some(20000),  // 固定单端口!
+            port: Some(20000),  // Fixed single port!
             port_range: None,
             flags: None,
             send_buffer_size: None,
@@ -192,7 +192,7 @@ let webrtc_server = worker
     ))
     .await?;
 
-// 2. 使用 WebRtcServer 创建 Transport
+// 2. Create the Transport using the WebRtcServer
 let transport = router
     .create_webrtc_transport(
         WebRtcTransportOptions::new_with_server(webrtc_server.clone())
@@ -201,26 +201,26 @@ let transport = router
 ```
 
 `new_with_server()` vs `new()`:
-- `new_with_server`: `enable_tcp: true` (默认), `enable_udp: true`
-- `new`: `enable_tcp: false` (默认), `enable_udp: true`
+- `new_with_server`: `enable_tcp: true` (default), `enable_udp: true`
+- `new`: `enable_tcp: false` (default), `enable_udp: true`
 
-### 4.3 ICE/DTLS 参数获取 (发送给客户端)
+### 4.3 Retrieving ICE/DTLS Parameters (sent to the client)
 
 ```rust
-// Transport 创建后立即获取参数发给浏览器
+// Fetch the parameters immediately after creating the Transport and send them to the browser
 let id = transport.id();
 let ice_parameters = transport.ice_parameters();  // usernameFragment + password
 let ice_candidates = transport.ice_candidates();  // Vec<IceCandidate>
 let dtls_parameters = transport.dtls_parameters(); // role + fingerprints
 ```
 
-### 4.4 ICE State 变化回调
+### 4.4 ICE State Change Callbacks
 
 ```rust
 transport.on_ice_state_change(|ice_state| {
     match ice_state {
         IceState::New => {},
-        IceState::Connected => { /* ICE 连通! */ },
+        IceState::Connected => { /* ICE connected! */ },
         IceState::Completed => {},
         IceState::Disconnected => {},
         IceState::Failed => {},
@@ -230,23 +230,23 @@ transport.on_ice_state_change(|ice_state| {
 
 transport.on_dtls_state_change(|dtls_state| {
     match dtls_state {
-        DtlsState::Connected => { /* DTLS 握手完成! */ },
+        DtlsState::Connected => { /* DTLS handshake complete! */ },
         _ => {},
     }
 });
 ```
 
-### 4.5 客户端 DTLS 参数连接 (connect)
+### 4.5 Connecting with Client DTLS Parameters (connect)
 
 ```rust
 use mediasoup::webrtc_transport::WebRtcTransportRemoteParameters;
 use mediasoup_types::data_structures::{DtlsParameters, DtlsRole, DtlsFingerprint};
 
-// 浏览器发送其 DTLS 参数后, 调用 connect:
+// After the browser sends its DTLS parameters, call connect:
 transport
     .connect(WebRtcTransportRemoteParameters {
         dtls_parameters: DtlsParameters {
-            role: DtlsRole::Client,  // 浏览器端
+            role: DtlsRole::Client,  // Browser side
             fingerprints: vec![
                 DtlsFingerprint::Sha256 {
                     value: [/* 32 bytes of SHA-256 hash */],
@@ -257,30 +257,30 @@ transport
     .await
     .expect("Failed to connect WebRTC transport");
 
-// connect 只能调用一次, 重复调用返回 Err(RequestError::Response{..})
+// connect can only be called once; a repeated call returns Err(RequestError::Response{..})
 ```
 
-### 4.6 带宽控制
+### 4.6 Bandwidth Control
 
 ```rust
 transport.set_max_incoming_bitrate(1_000_000).await?;  // bps
 transport.set_max_outgoing_bitrate(2_000_000).await?;
 transport.set_min_outgoing_bitrate(100_000).await?;
-// 传入 0 移除限制
+// Pass 0 to remove the limit
 ```
 
 ### 4.7 ICE Restart
 
 ```rust
 let new_ice_params = transport.restart_ice().await?;
-// 返回新的 IceParameters, 需转发给客户端
+// Returns new IceParameters, which must be forwarded to the client
 ```
 
 ---
 
-## 5. Producer — RtpParameters 完整格式
+## 5. Producer — Full RtpParameters Format
 
-### 5.1 音频 Producer (Opus)
+### 5.1 Audio Producer (Opus)
 
 ```rust
 use mediasoup::producer::ProducerOptions;
@@ -297,7 +297,7 @@ let audio_producer = transport.produce(ProducerOptions::new(
         codecs: vec![
             RtpCodecParameters::Audio {
                 mime_type: MimeTypeAudio::Opus,
-                payload_type: 0,  // 必须匹配 Router 中 Opus payloadType
+                payload_type: 0,  // Must match the Opus payloadType assigned in the Router
                 clock_rate: NonZeroU32::new(48000).unwrap(),
                 channels: NonZeroU8::new(2).unwrap(),
                 parameters: RtpCodecParametersParameters::from([
@@ -334,7 +334,7 @@ let audio_producer = transport.produce(ProducerOptions::new(
 )).await?;
 ```
 
-### 5.2 视频 Producer (H264 + Simulcast)
+### 5.2 Video Producer (H264 + Simulcast)
 
 ```rust
 let video_producer = transport.produce(ProducerOptions::new(
@@ -405,15 +405,15 @@ let video_producer = transport.produce(ProducerOptions::new(
 )).await?;
 ```
 
-### 5.3 Producer Type 判定
+### 5.3 Producer Type Determination
 
-| encodings 数 | scalability_mode | ProducerType |
+| Number of encodings | scalability_mode | ProducerType |
 |-------------|-----------------|--------------|
 | 1 | None | `Simple` |
-| 1 | `"L1T3"` 等 | `Svc` |
-| ≥2 | 任意 | `Simulcast` |
+| 1 | `"L1T3"` etc. | `Svc` |
+| ≥2 | any | `Simulcast` |
 
-### 5.4 Producer 事件
+### 5.4 Producer Events
 
 ```rust
 producer.on_pause(|| {});
@@ -428,9 +428,9 @@ producer.on_close(|| {});
 
 ---
 
-## 6. Consumer — RtpCapabilities 完整格式
+## 6. Consumer — Full RtpCapabilities Format
 
-### 6.1 RtpCapabilities (客户端设备能力)
+### 6.1 RtpCapabilities (client device capabilities)
 
 ```rust
 use mediasoup_types::rtp_parameters::{
@@ -443,7 +443,7 @@ let device_capabilities = RtpCapabilities {
     codecs: vec![
         RtpCodecCapability::Audio {
             mime_type: MimeTypeAudio::Opus,
-            preferred_payload_type: Some(100),  // 客户端偏好 payloadType
+            preferred_payload_type: Some(100),  // Client-preferred payloadType
             clock_rate: NonZeroU32::new(48000).unwrap(),
             channels: NonZeroU8::new(2).unwrap(),
             parameters: RtpCodecParametersParameters::default(),
@@ -506,41 +506,41 @@ let device_capabilities = RtpCapabilities {
 };
 ```
 
-### 6.2 Consumer 创建
+### 6.2 Consumer Creation
 
 ```rust
 use mediasoup::consumer::{ConsumerOptions, ConsumerLayers};
 
 let consumer = transport.consume(ConsumerOptions::new(
-    producer.id(),                    // 要消费的 Producer ID
-    device_capabilities,              // 客户端 RTP 能力
+    producer.id(),                    // The Producer ID to consume
+    device_capabilities,              // Client RTP capabilities
 )).await?;
 
-// 带选项:
+// With options:
 let consumer = transport.consume({
     let mut options = ConsumerOptions::new(producer.id(), device_capabilities);
-    options.paused = true;                           // 先暂停, 等客户端就绪
+    options.paused = true;                           // Pause first, wait for the client to be ready
     options.preferred_layers = Some(ConsumerLayers {
         spatial_layer: 0,
         temporal_layer: Some(1),
     });
-    options.enable_rtx = Some(true);                 // 启用 NACK 重传
-    options.mid = Some("custom-mid".to_owned());     // 自定义 MID
-    options.pipe = false;                            // PipeTransport 模式
-    options.ignore_dtx = false;                      // DTX 包处理
+    options.enable_rtx = Some(true);                 // Enable NACK retransmission
+    options.mid = Some("custom-mid".to_owned());     // Custom MID
+    options.pipe = false;                            // PipeTransport mode
+    options.ignore_dtx = false;                      // DTX packet handling
     options
 }).await?;
 ```
 
-### 6.3 Consumer RtpParameters (转发给客户端)
+### 6.3 Consumer RtpParameters (forwarded to the client)
 
 ```rust
 let consumer_rtp_params = consumer.rtp_parameters();
-// 包含: mid, codecs, header_extensions, encodings, rtcp
-// 浏览器用此创建本地 RTCRtpReceiver
+// Contains: mid, codecs, header_extensions, encodings, rtcp
+// The browser uses this to create the local RTCRtpReceiver
 ```
 
-### 6.4 Consumer 控制
+### 6.4 Consumer Control
 
 ```rust
 consumer.pause().await?;
@@ -548,14 +548,14 @@ consumer.resume().await?;
 consumer.set_preferred_layers(ConsumerLayers {
     spatial_layer: 2, temporal_layer: Some(3),
 }).await?;
-consumer.set_priority(2).await?;   // 1-255, 默认 1
+consumer.set_priority(2).await?;   // 1-255, default 1
 consumer.request_key_frame().await?;
 consumer.get_stats().await?;       // ConsumerStat
 ```
 
 ---
 
-## 7. DtlsParameters 结构
+## 7. DtlsParameters Structure
 
 ```rust
 pub struct DtlsParameters {
@@ -571,7 +571,7 @@ pub enum DtlsFingerprint {
     Sha512 { value: [u8; 64] },
 }
 
-// 客户端发送用于 connect:
+// Sent by the client for connect:
 // {
 //   "role": "client",
 //   "fingerprints": [{ "algorithm": "sha-256", "value": "82:5A:68:..." }]
@@ -580,13 +580,13 @@ pub enum DtlsFingerprint {
 
 ---
 
-## 8. WebRtcServer 单端口模式 (完整流程)
+## 8. WebRtcServer Single-Port Mode (Full Flow)
 
 ```rust
 use mediasoup::webrtc_server::{WebRtcServerOptions, WebRtcServerListenInfos};
 use mediasoup::webrtc_transport::WebRtcTransportOptions;
 
-// Step 1: Worker 创建 WebRtcServer (端口 20000)
+// Step 1: Worker creates the WebRtcServer (port 20000)
 let webrtc_server = worker
     .create_webrtc_server(WebRtcServerOptions::new(
         WebRtcServerListenInfos::new(ListenInfo {
@@ -603,7 +603,7 @@ let webrtc_server = worker
     ))
     .await?;
 
-// Step 2: 每个 Peer 创建 Transport 复用同一端口
+// Step 2: Each Peer creates a Transport reusing the same port
 let transport_1 = router
     .create_webrtc_transport(WebRtcTransportOptions::new_with_server(webrtc_server.clone()))
     .await?;
@@ -612,12 +612,12 @@ let transport_2 = router
     .create_webrtc_transport(WebRtcTransportOptions::new_with_server(webrtc_server))
     .await?;
 
-// WebRtcServer 通过 local_ice_username_fragment 区分不同 Transport
+// WebRtcServer distinguishes different Transports via local_ice_username_fragment
 ```
 
 ---
 
-## 9. 完整信令流程
+## 9. Complete Signaling Flow
 
 ```
 Browser                          Server (Rust/mediasoup)
@@ -632,97 +632,97 @@ Browser                          Server (Rust/mediasoup)
   │     iceCandidates +                │
   │     dtlsParameters ────────────────│
   │                                    │
-  │─── WebRTC setRemoteDescription ───→│ (browser 本地)
+  │─── WebRTC setRemoteDescription ───→│ (browser local)
   │←── createAnswer ──────────────────│
   │─── WebRTC setLocalDescription ────│
   │                                    │
   │──── WS: connectWebRtcTransport ────→│
   │       {dtlsParameters: browser}    │ transport.connect(remote_dtls_params)
-  │←── "transport connected" ──────── │ (DTLS + ICE 完成)
+  │←── "transport connected" ──────── │ (DTLS + ICE complete)
   │                                    │
   │──── WS: produce ──────────────────→│
   │       {kind, rtpParameters}        │ transport.produce(producer_options)
   │←── producer.id() ──────────────────│
   │                                    │
-  │──── WS: consume ───────────────────→│ (另一 Peer)
+  │──── WS: consume ───────────────────→│ (another Peer)
   │       {producerId, rtpCapabilities}│ transport.consume(consumer_options)
-  │←── consumer.rtp_parameters() ─────│ → 用于创建 RTCRtpReceiver
+  │←── consumer.rtp_parameters() ─────│ → used to create the RTCRtpReceiver
 ```
 
 ---
 
-## 10. 常见错误 & 解决方案
+## 10. Common Errors & Solutions
 
-### E1: `RouterOptions::default()` 创建空 codec 列表
+### E1: `RouterOptions::default()` creates an empty codec list
 
-**症状**: `produce()` 返回 "Unsupported codec"
+**Symptom**: `produce()` returns "Unsupported codec"
 
-**根因**: `RouterOptions::default()` 产生 `media_codecs: vec![]`
+**Root cause**: `RouterOptions::default()` yields `media_codecs: vec![]`
 
-**解决**: 必须使用 `RouterOptions::new(media_codecs)` 显式传入 codec 列表
+**Solution**: You must use `RouterOptions::new(media_codecs)` to pass the codec list explicitly
 
-### E2: `RtpCodecParameters` untagged enum 反序列化失败
+### E2: `RtpCodecParameters` untagged enum deserialization failure
 
-**症状**: "data did not match any variant of untagged enum RtpCodecParameters"
+**Symptom**: "data did not match any variant of untagged enum RtpCodecParameters"
 
-**根因**: `RtpCodecParameters` 是 `#[serde(untagged)]` enum, 有 `Audio` 和 `Video` 变体。每个变体需要特定字段。Video 不需要 `channels`, Audio 需要。字段缺失导致匹配失败。
+**Root cause**: `RtpCodecParameters` is a `#[serde(untagged)]` enum with `Audio` and `Video` variants. Each variant requires specific fields. Video does not need `channels`, Audio does. Missing fields cause variant matching to fail.
 
-**解决**: 确保构造时 type-safe 使用 `RtpCodecParameters::Audio{...}` / `RtpCodecParameters::Video{...}` 而非 JSON 反序列化。
+**Solution**: Ensure type-safe construction with `RtpCodecParameters::Audio{...}` / `RtpCodecParameters::Video{...}` rather than JSON deserialization.
 
-### E3: payloadType 不匹配
+### E3: payloadType mismatch
 
-**症状**: produce 成功但客户端无法解码
+**Symptom**: produce succeeds but the client cannot decode
 
-**解决**: Producer RtpParameters 中的 payloadType 必须匹配 Router media_codecs 中该 codec 分配的值。可以从 Consumer rtp_parameters 中获取实际使用的 payloadType。
+**Solution**: The payloadType in the Producer RtpParameters must match the value assigned to that codec in the Router media_codecs. You can get the payloadType actually in use from the Consumer rtp_parameters.
 
-### E4: RTX codec 的 apt 参数错误
+### E4: Incorrect apt parameter on the RTX codec
 
-**症状**: `ProduceError::FailedRtpParametersMapping`
+**Symptom**: `ProduceError::FailedRtpParametersMapping`
 
-**根因**: RTX codec 的 `apt` 参数必须指向关联的主 codec payloadType
+**Root cause**: The RTX codec's `apt` parameter must point at the associated primary codec payloadType
 
-**解决**: 
+**Solution**:
 ```rust
 RtpCodecParameters::Video {
     mime_type: MimeTypeVideo::Rtx,
     payload_type: 113,
     // ...
     parameters: RtpCodecParametersParameters::from([("apt", 112u32.into())]),
-    // apt 必须 = 主 H264 codec 的 payloadType
+    // apt must = the primary H264 codec's payloadType
 }
 ```
 
-### E5: Router 间 pipe 必须不同 Router
+### E5: Inter-Router pipe must use different Routers
 
-**症状**: `PipeProducerToRouterError::SameRouter`
+**Symptom**: `PipeProducerToRouterError::SameRouter`
 
-**解决**: 目标 Router 必须与源 Router 不同
+**Solution**: The target Router must differ from the source Router
 
-### E6: WebRtcTransport 二次 connect 失败
+### E6: Second connect on a WebRtcTransport fails
 
-**症状**: `RequestError::Response { reason: "..." }`
+**Symptom**: `RequestError::Response { reason: "..." }`
 
-**解决**: `transport.connect()` 只能调用一次, 重复调用会报错
+**Solution**: `transport.connect()` can only be called once; repeated calls raise an error
 
-### E7: encodings 为空导致 produce 失败 (视频)
+### E7: Empty encodings cause produce to fail (video)
 
-**症状**: `ProduceError::Request`
+**Symptom**: `ProduceError::Request`
 
-**解决**: 视频 Producer 必须提供至少 1 个 encoding, 且每个 encoding 必须有 ssrc 或 rid
+**Solution**: A video Producer must provide at least 1 encoding, and each encoding must have an ssrc or rid
 
-### E8: MID 冲突
+### E8: MID conflict
 
-**症状**: MID 重复导致 produce 失败
+**Symptom**: A duplicate MID causes produce to fail
 
-**解决**: 每个 Producer 的 `mid` 在同一 Transport 内必须唯一
+**Solution**: Each Producer's `mid` must be unique within the same Transport
 
 ---
 
-## 11. Serde JSON 映射
+## 11. Serde JSON Mapping
 
-mediasoup Rust types 使用 `#[serde(rename_all = "camelCase")]`, 序列化为 JSON 时字段名自动转 camelCase:
+mediasoup Rust types use `#[serde(rename_all = "camelCase")]`; field names are automatically converted to camelCase when serialized to JSON:
 
-| Rust 字段 | JSON 字段 |
+| Rust field | JSON field |
 |-----------|----------|
 | `payload_type` | `payloadType` |
 | `clock_rate` | `clockRate` |
@@ -734,13 +734,13 @@ mediasoup Rust types 使用 `#[serde(rename_all = "camelCase")]`, 序列化为 J
 | `preferred_payload_type` | `preferredPayloadType` |
 | `scalability_mode` | `scalabilityMode` |
 
-**注意**: `RtpCodecParameters` 的 `Audio`/`Video` 变体使用 `#[serde(untagged)]`, 不做 tagging — 序列化时不包含 `"type": "audio"` 字段, mediasoup-worker 通过 `mimeType` 和是否存在 `channels` 字段区分。
+**Note**: The `Audio`/`Video` variants of `RtpCodecParameters` use `#[serde(untagged)]`, with no tagging — serialization does not include a `"type": "audio"` field; the mediasoup worker distinguishes them by `mimeType` and the presence of the `channels` field.
 
 ---
 
-## 12. 关键类型路径速查
+## 12. Key Type Path Quick Reference
 
-| 类型 | 导入路径 |
+| Type | Import path |
 |------|---------|
 | `WorkerManager` | `mediasoup::worker_manager::WorkerManager` |
 | `Worker` | `mediasoup::worker::Worker` |
@@ -766,25 +766,25 @@ mediasoup Rust types 使用 `#[serde(rename_all = "camelCase")]`, 序列化为 J
 
 ---
 
-## 13. prelude 快捷导入
+## 13. prelude Shortcut Imports
 
 ```rust
 use mediasoup::prelude::*;
 ```
 
-覆盖: `WorkerManager`, `Worker`, `Router`, `Transport`, `Producer`, `Consumer`, `WebRtcTransport`, `WebRtcServer`, 以及相关 types 的常用导出。
+Covers: `WorkerManager`, `Worker`, `Router`, `Transport`, `Producer`, `Consumer`, `WebRtcTransport`, `WebRtcServer`, and the common exports of the related types.
 
-## 14. mediasoup-sys 构建要求
+## 14. mediasoup-sys Build Requirements
 
-- **Linux x86_64 only** — mediasoup C++ Worker 不构建于 macOS/Windows
-- `cargo check --features sfu-mediasoup` 在 macOS 可通过 (仅类型检查)
-- `cargo build` / `cargo test` 需要 Linux 环境
-- 需要 meson, ninja-build, libuv1-dev, libssl-dev
-- `rtc_port_range` 默认 10000-59999, Docker 需映射相应 UDP 端口范围
+- **Linux x86_64 only** — the mediasoup C++ Worker does not build on macOS/Windows
+- `cargo check --features sfu-mediasoup` passes on macOS (type checking only)
+- `cargo build` / `cargo test` require a Linux environment
+- Requires meson, ninja-build, libuv1-dev, libssl-dev
+- `rtc_port_range` defaults to 10000-59999; Docker must map the corresponding UDP port range
 
 ---
 
-**参见**:
-- [mediasoup 官方文档](https://mediasoup.org/documentation/v3/)
+**See also**:
+- [mediasoup official docs](https://mediasoup.org/documentation/v3/)
 - [RTP Parameters and Capabilities](https://mediasoup.org/documentation/v3/mediasoup/rtp-parameters-and-capabilities/)
-- [GitHub 集成测试](https://github.com/versatica/mediasoup/tree/v3/rust/tests/integration)
+- [GitHub integration tests](https://github.com/versatica/mediasoup/tree/v3/rust/tests/integration)

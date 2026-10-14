@@ -5,7 +5,7 @@
 //! - macOS: vt264enc (VideoToolbox)
 //! - Other: x264enc (software, universal fallback)
 
-#![allow(dead_code)] // 同上：legacy 引擎管线演示件（真管线在 mediaservo-deck）
+#![allow(dead_code)] // Same as above: legacy engine pipeline demo (the real pipeline lives in mediaservo-deck)
 #[cfg(feature = "gstreamer")]
 mod imp {
     use gstreamer::prelude::*;

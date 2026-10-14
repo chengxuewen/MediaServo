@@ -1,18 +1,18 @@
-// weaknet 控制台 v1（T7）。契约 = docs/plans/weaknet-agent/design.md §UI 信息架构 + §serve 安全栈 5。
-// 零框架/零打包器/零路由库/零 localStorage。本文件永不向控制台输出任何访问凭证（W7 grep 门）。
-// 写路径协议：控件变更 → debounce 400ms → POST /v1/set（滑块 pointerup 即发）；无活跃 spec → 409
-// toast 引导开总闸；一切回显（含本端 set）只吃 SSE 状态帧——面板不自造乐观更新。
+// weaknet console v1 (T7). Contract = docs/plans/weaknet-agent/design.md §UI information architecture + §serve security stack 5.
+// Zero frameworks/zero bundler/zero router lib/zero localStorage. This file never prints any access credential to the console (W7 grep gate).
+// Write-path protocol: control change -> debounce 400ms -> POST /v1/set (sliders fire on pointerup); no active spec -> a 409
+// toast guides opening the master switch; all echo (including our own set) consumes only SSE state frames -- the panel never invents optimistic updates.
 
-// ---------- 凭证生命周期（design §serve 安全栈 5） ----------
-// sessionStorage = 全仓 storage 唯一豁免（显式注记）：横幅 URL 的凭证剥出后只存本标签页，
-// 关闭即弃；不用 localStorage（持久落盘反而扩大泄露面）。
+// ---------- credential lifecycle (design §serve security stack 5) ----------
+// sessionStorage = the repo-wide sole storage exemption (noted explicitly): the credential is stripped from the banner URL and stored only in this tab,
+// discarded on close; localStorage avoided (persisting would only widen the leak surface).
 const AUTH_KEY = "wnet-auth";
 const qs = new URLSearchParams(location.search);
 if (qs.get("token")) sessionStorage.setItem(AUTH_KEY, qs.get("token"));
-history.replaceState(null, "", location.pathname); // 地址栏剥 query（进历史/截屏不留凭证）
+history.replaceState(null, "", location.pathname); // strip the query from the address bar (no credential left in history/screenshots)
 const auth = sessionStorage.getItem(AUTH_KEY) || "";
 
-// ---------- DOM 助手 ----------
+// ---------- DOM helpers ----------
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const el = (tag, cls, html) => {
@@ -40,12 +40,12 @@ function showGate(bad) {
   if (bad) {
     const card = g.querySelector(".gate-card");
     card.classList.remove("shake");
-    void card.offsetWidth; // 重启动画（连续 401 每轮都抖）
+    void card.offsetWidth; // restart the animation (every round of consecutive 401s shakes)
     card.classList.add("shake");
   }
 }
 
-// ---------- REST 小封装 ----------
+// ---------- thin REST wrapper ----------
 async function api(path, opts = {}) {
   const headers = Object.assign({}, opts.headers);
   if (auth) headers.Authorization = "Bearer " + auth;
@@ -53,16 +53,16 @@ async function api(path, opts = {}) {
   try {
     res = await fetch(path, Object.assign({}, opts, { headers }));
   } catch {
-    toast(`请求失败：${path}（serve 已退出/断网？）`, true);
+    toast(`request failed: ${path} (serve exited/offline?)`, true);
     return { status: 0, body: null };
   }
   let body = null;
-  try { body = await res.json(); } catch { /* 非 JSON 响应体：忽略解析 */ }
-  if (res.status === 401) showGate(!!auth); // 全屏引导：横幅整行复制或 gate 输入框粘贴（有 token 仍 401 = 抖）
+  try { body = await res.json(); } catch { /* non-JSON body: ignore the parse */ }
+  if (res.status === 401) showGate(!!auth); // fullscreen onboarding: copy the whole banner line or paste in the gate input (still 401 with a token = shake)
   return { status: res.status, body };
 }
 
-// ---------- 模型（唯一写源=本对象；唯一读源=SSE 帧） ----------
+// ---------- model (sole write source = this object; sole read source = SSE frames) ----------
 const ui = {
   spec: {
     rtt_ms: 0, jitter_ms: 0, loss: "0", loss_mode: "simple",
@@ -75,17 +75,17 @@ const ui = {
   selDevices: new Set(),
 };
 let caps = null;         // /v1/capabilities
-let frame = null;        // 最近一帧（oracle 面也走 __wnet）
-let streamsNote = "";    // /v1/streams 报因（降级模式素材）
+let frame = null;        // most recent frame (the oracle surface also goes through __wnet)
+let streamsNote = "";    // the /v1/streams cause (material for degraded mode)
 let scenarios = [];
 let scenPick = "";
 let es = null;           // EventSource
 
-// 测试钩（构造注入，PIT-174 法）：Playwright oracle 读同帧数据（含图表序列），消 WS 拦截不可达问题。
+// test hook (constructed injection, the PIT-174 method): the Playwright oracle reads the same-frame data (incl. chart series), sidestepping WS interception.
 window.__wnet = { ready: false, frameCount: 0, lastFrame: null, ui };
 
-// ---------- 左栏：spec 行 ↔ 模型 ↔ 后端 flat 形 ----------
-const nz = (v) => { // CLI 语义对齐：0/空 = 未设（null）——"0" 串会进指纹 token 集致回读必不符（apply 500 实证）
+// ---------- left column: spec inputs <-> model <-> backend flat form ----------
+const nz = (v) => { // CLI semantics alignment: 0/empty = unset (null) -- a "0" string would enter the fingerprint token set and make read-back always mismatch (proven by apply 500)
   const t = String(v ?? "").trim();
   return t === "" || Number(t) === 0 ? null : t;
 };
@@ -109,9 +109,9 @@ function scopeFields() {
   return {};
 }
 
-// ---------- 写路径 ----------
+// ---------- write path ----------
 let setTimer = null;
-function scheduleSet(immediate) { // debounce 400ms；滑块 pointerup/离散勾选即发
+function scheduleSet(immediate) { // debounce 400ms; sliders fire on pointerup / discrete checks fire immediately
   clearTimeout(setTimer);
   if (immediate) { sendSet(); return; }
   setTimer = setTimeout(sendSet, 400);
@@ -120,17 +120,17 @@ async function sendSet(retry = true) {
   const body = Object.assign(specFields(), scopeFields());
   const r = await api("v1/set", { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
   const err = r.body?.error || "";
-  if (r.status === 409 && err.includes("锁持有")) {
-    // serve×CLI/连发写 = 合法并态排队（design §Error handling）；一次性延后重发，仍忙才报
+  if (r.status === 409 && err.includes("holds the lock")) {
+// serve x CLI/bursty writes = a legitimate queued concurrent state (design §Error handling); re-send once deferred, report only if still busy
     if (retry) { setTimeout(() => sendSet(false), 1200); return; }
-    toast("写锁忙（另一操作进行中）——重发一次仍被占，稍后再试", true);
-  } else if (r.status === 409 && (err.includes("no active spec") || err.includes("先 apply"))) {
-    toast("无活跃损伤（409）——先开总闸，控件值已保留、开闸即生效");
+    toast("write lock busy (another operation in progress) -- one re-send still occupied, try again later", true);
+  } else if (r.status === 409 && (err.includes("no active spec") || err.includes("apply first"))) {
+    toast("no active impairment (409) -- open the master switch first; control values kept, they take effect once opened");
   } else if (r.status === 409) {
-    toast(`409：${err || "?"}（scenario 进行中先 stop）`, true);
-  } else if (r.status === 400) toast(`参数被拒（400）：${err}`, true);
-  else if (r.status !== 200 && r.status !== 0) toast(`set 失败（${r.status}）：${err}`, true);
-  // 200 也只当「已下发」：字段回显等 SSE 帧，不乐观更新
+    toast(`409: ${err || "?"} (scenario in progress, stop first)`, true);
+  } else if (r.status === 400) toast(`params rejected (400): ${err}`, true);
+  else if (r.status !== 200 && r.status !== 0) toast(`set failed (${r.status}): ${err}`, true);
+// 200 also only means "dispatched": field echo waits for the SSE frame, no optimistic update
 }
 async function toggleMaster(on) {
   const sw = $("#master");
@@ -138,30 +138,30 @@ async function toggleMaster(on) {
     const dur = Math.round(Number($("#duration").value) || 300);
     const body = Object.assign(specFields(), scopeFields(), { duration: dur, iface: ui.iface.trim() || "lo" });
     const r = await api("v1/apply", { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
-    if (r.status === 409) { toast("scenario 进行中（409）——先 stop", true); sw.checked = false; }
+    if (r.status === 409) { toast("scenario in progress (409) -- stop first", true); sw.checked = false; }
     else if (!r.ok && r.status !== 0) {
-      toast(`apply 失败（${r.status}）：${r.body?.error ?? "?"}——多为 stats 不可达/媒体口为空，见中栏报因`, true);
+      toast(`apply failed (${r.status}): ${r.body?.error ?? "?"} -- usually stats unreachable/empty media ports, see the mid-column cause`, true);
       sw.checked = false;
     }
   } else {
     const r = await api("v1/clear", { method: "POST" });
-    if (r.status !== 200 && r.status !== 0) toast(`clear 失败（${r.status}）：${r.body?.error ?? "?"}`, true);
+    if (r.status !== 200 && r.status !== 0) toast(`clear failed (${r.status}): ${r.body?.error ?? "?"}`, true);
   }
-  // 开关的最终视觉位置由状态帧决定（spec!=null ⇔ 总闸 on）
+// the switch's final visual position is decided by the state frame (spec!=null <=> master on)
 }
 
-// ---------- 方向真值表（§dir 腿定义表 × capabilities） ----------
+// ---------- direction truth table (§dir leg table x capabilities) ----------
 const isPhysical = (iface) => iface && iface.toLowerCase() !== "lo";
 function dirGateReason() {
-  const why = caps?.ifb_reason || "ifb 探测未到场";
-  return why.includes("未加载")
-    ? `物理口入向需 ifb 镜像：${why}`
-    : `结构性不支持：${why}`;
+  const why = caps?.ifb_reason || "ifb probe not yet available";
+  return why.includes("not loaded")
+    ? `physical-port ingress needs an ifb mirror: ${why}`
+    : `structurally unsupported: ${why}`;
 }
 function refreshDirGate() {
   const blocked = isPhysical(ui.iface) && caps && !caps.ifb_ingress;
   for (const radio of $$('input[name="dir"]')) {
-    const off = blocked && radio.value !== "out"; // in/both 的下行腿依赖 ifb；out 恒可用；lo 全可用（dir_lo 恒真）
+    const off = blocked && radio.value !== "out"; // the egress legs of in/both depend on ifb; out always usable; lo fully usable (dir_lo always true)
     radio.disabled = off;
     const lab = radio.closest("label");
     lab.classList.toggle("grey", off);
@@ -170,49 +170,49 @@ function refreshDirGate() {
   if (blocked && ($('input[name="dir"]:checked') || {}).value !== "out") {
     const out = $('input[name="dir"][value="out"]');
     out.checked = true;
-    toast("物理口下行不可用（ifb 灰显）——方向已切 out");
+    toast("physical-port ingress unavailable (ifb greyed) -- direction switched to out");
     scheduleSet(true);
   }
 }
 function renderCapsLine() {
   const c = $("#capsline");
-  if (!caps) { c.textContent = "capabilities 加载中…"; return; }
-  c.innerHTML = `caps：seed=${caps.seed ? "✓" : "✗（tc -V<6.6 灰显）"} · dir_lo=${caps.dir_lo ? "✓" : "✗"} · `
+  if (!caps) { c.textContent = "capabilities loading..."; return; }
+  c.innerHTML = `caps: seed=${caps.seed ? "OK" : "X (tc -V<6.6 greyed)"} · dir_lo=${caps.dir_lo ? "OK" : "X"} · `;
     + `ifb_ingress=${caps.ifb_ingress ? "✓" : "✗"}`
     + (caps.ifb_ingress ? "" : ` <span class="note">${esc(caps.ifb_reason)}</span>`);
   const seed = $("#seed");
   seed.disabled = !caps.seed;
-  seed.title = caps.seed ? "" : "seed 需 iproute2 tc -V ≥6.6（当前宿主不支持）";
+  seed.title = caps.seed ? "" : "seed needs iproute2 tc -V >= 6.6 (this host does not support it)";
 }
 
-// ---------- 中栏：owner 分组流表 ----------
-const PLAY_PORT = 8080; // 文档化常量：浏览器面入口（Caddy，deploy/caddy/Caddyfile.native）；跨端口天然可用
-// T6 grep 豁免（wW9）：面板 :9810 播 server :8080 流是跨 origin 拼接，绝对形是有意的——
-// 随本文件其余 URL 一起相对化会打到面板自身，反成 bug。
+// ---------- mid column: owner-grouped stream table ----------
+const PLAY_PORT = 8080; // documented constant: the browser-surface entry (Caddy, deploy/caddy/Caddyfile.native); naturally works cross-port
+// T6 grep exemption (wW9): the panel on :9810 playing server :8080 streams is a deliberate cross-origin absolute URL --
+// relativizing it with the rest of this file's URLs would hit the panel itself and become a bug.
 function playUrl(room) {
   return `http://${location.hostname}:${PLAY_PORT}/?room=${encodeURIComponent(room)}`;
 }
 function renderStreams() {
   const host = $("#streams");
   host.textContent = "";
-  if (!frame) { host.append(el("p", "empty", "等待首帧状态…")); return; }
+  if (!frame) { host.append(el("p", "empty", "waiting for the first state frame...")); return; }
   const rows = frame.streams || [];
   if (rows.length === 0) {
-    if (streamsNote) { // 降级模式：整列替换（后端规则=scope 非空 ∧ stats 不可达 → 拒绝报因，禁静默转全口）
-      const p = el("p", "warn", `stats 不可达：仅按 <b>${esc(ui.iface)}</b>/媒体口集整形。报因：<span class="note">${esc(streamsNote)}</span>`);
-      const retry = el("a", "play", "↻重试");
+    if (streamsNote) { // degraded mode: replace the whole column (backend rule = scope non-empty AND stats unreachable -> reject with cause, never silently all ports)
+      const p = el("p", "warn", `stats unreachable: shaping only by <b>${esc(ui.iface)}</b>/the media port set. Cause: <span class="note">${esc(streamsNote)}</span>`);
+      const retry = el("a", "play", "retry");
       retry.href = "#";
       retry.addEventListener("click", (ev) => { ev.preventDefault(); fetchStreamsNote(); });
       p.append(" ", retry);
       host.append(p);
     } else {
-      host.append(el("p", "empty", "无活性流（server 无 producer？host 未推流？）"));
+      host.append(el("p", "empty", "no live streams (server without producers? host not pushing?)"));
     }
     return;
   }
   const groups = new Map();
   for (const s of rows) {
-    const k = s.owner || "（无主）";
+    const k = s.owner || "(unowned)";
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(s);
   }
@@ -221,10 +221,10 @@ function renderStreams() {
     const head = el("header");
     const gcb = el("input");
     gcb.type = "checkbox";
-    gcb.checked = ui.selDevices.has(owner) || (owner !== "（无主）" && list.every((s) => ui.selRooms.has(s.room)));
-    if (owner === "（无主）") {
+    gcb.checked = ui.selDevices.has(owner) || (owner !== "(unowned)" && list.every((s) => ui.selRooms.has(s.room)));
+    if (owner === "(unowned)") {
       gcb.disabled = true;
-      gcb.title = "无主房间不可按设备定向（owner 缺失；旧 server 经 peer_id 兜底仅限 --device 命令行）";
+      gcb.title = "unowned rooms cannot be targeted by device (owner missing; old servers fall back to peer_id, CLI --device only)";
     } else {
       gcb.addEventListener("change", () => {
         if (gcb.checked) { ui.selDevices.add(owner); ui.selRooms.clear(); }
@@ -232,7 +232,7 @@ function renderStreams() {
         scheduleSet(false);
       });
     }
-    head.append(gcb, el("span", "owner", esc(owner)), el("span", "cnt", `${list.length} 流`));
+    head.append(gcb, el("span", "owner", esc(owner)), el("span", "cnt", `${list.length} streams`));
     box.append(head);
     for (const s of list) {
       const row = el("div", "srow" + (s.live ? "" : " old"));
@@ -244,7 +244,7 @@ function renderStreams() {
         else {
           ui.selRooms.delete(s.room);
           if (ui.selRooms.size === 0 && ui.selDevices.size === 0)
-            toast("已清空勾选：定向保持上次施加值（set 不收空集）；回段级整形请关闸后无勾选重开");
+            toast("selection cleared: targeting keeps the last applied values (set takes no empty set); to reshape at room level close the switch and re-open with no selections");
         }
         scheduleSet(false);
       });
@@ -253,14 +253,14 @@ function renderStreams() {
         cb,
         el("span", "room", esc(s.room)),
         el("span", "kb", kb),
-        el("span", "badge " + (s.live ? "live" : "age"), s.live ? "live" : "老化窗内"),
+        el("span", "badge " + (s.live ? "live" : "age"), s.live ? "live" : "in aging window"),
         s.stale ? el("span", "badge stale", "stale") : "",
       );
-      const a = el("a", "play", "↗播放");
+      const a = el("a", "play", "play");
       a.href = playUrl(s.room);
       a.target = "_blank";
       a.rel = "noopener";
-      a.title = `新标签打开播放页（:${PLAY_PORT} 入口 · room=${s.room}）`;
+      a.title = `open the play page in a new tab (:${PLAY_PORT} entry · room=${s.room})`;
       row.append(a);
       box.append(row);
     }
@@ -268,12 +268,12 @@ function renderStreams() {
   }
 }
 
-// ---------- 右栏：uPlot（kbps 断线缺口 + dropped 阶梯 + 事件竖线） ----------
+// ---------- right column: uPlot (kbps disconnection gaps + dropped tiers + event verticals) ----------
 const PALETTE = ["#4f9cf9", "#3fb950", "#e3b341", "#f85149", "#bc8cff", "#39c5cf", "#ff7b72", "#d2a8ff", "#7ee787", "#ffa657"];
-const chartState = { t: [], rooms: [], y: new Map(), drop: [], evs: [] }; // evs 环上限 200（design §UI 落码注记）
+const chartState = { t: [], rooms: [], y: new Map(), drop: [], evs: [] }; // evs ring cap 200 (design §UI coding note)
 let kbpsChart = null, dropChart = null;
 
-window.__wnet.charts = chartState; // 同帧 oracle 数据面（序列对齐状态）
+window.__wnet.charts = chartState; // same-frame oracle data surface (series aligned with state)
 function feedCharts(f) {
   const t = Date.now() / 1000;
   chartState.t.push(t);
@@ -281,7 +281,7 @@ function feedCharts(f) {
   for (const s of f.streams || []) {
     seen.add(s.room);
     if (!chartState.y.has(s.room)) chartState.y.set(s.room, new Array(chartState.t.length - 1).fill(null));
-    // 两语义（首点 null / stale）都渲染为缺口；行内 badge 区分来源——禁混 0（design §API 状态帧）
+// both semantics (first-sample null / stale) render as gaps; the inline badge distinguishes the source -- never conflated with 0 (design §API state frame)
     chartState.y.get(s.room).push(s.stale || s.kbps == null ? null : s.kbps);
   }
   for (const [room, arr] of chartState.y) if (!seen.has(room)) arr.push(null);
@@ -290,7 +290,7 @@ function feedCharts(f) {
     chartState.evs.push(Object.assign({ _t: t }, e));
     if (chartState.evs.length > 200) chartState.evs.shift();
   }
-  // ponytail: 每帧 setData（2s 节拍）+ rooms 集合变化才重建；uPlot 增量 addSeries 未用——流数 <20，重建成本可忽略
+// ponytail: setData each frame (2s cadence) + rebuild only when the rooms set changes; uPlot incremental addSeries unused -- <20 streams, rebuild cost negligible
   const rooms = [...chartState.y.keys()].sort();
   if (rooms.join("|") !== chartState.rooms.join("|")) {
     chartState.rooms = rooms;
@@ -307,7 +307,7 @@ function pushData() {
   if (kbpsChart) kbpsChart.setData(chartData());
   if (dropChart) dropChart.setData([chartState.t, chartState.drop]);
 }
-function eventLines(u) { // 事件竖线 draw hook 自绘（时间轴秒单位，与 x=time 同域）
+function eventLines(u) { // event verticals drawn by a draw hook (seconds on the time axis, same domain as x=time)
   const { ctx, bbox } = u;
   ctx.save();
   ctx.strokeStyle = "rgba(227,179,65,.55)";
@@ -328,7 +328,7 @@ function rebuildCharts() {
   kbpsChart = new uPlot({
     width: rightWidth(), height: 220,
     scales: { x: { time: true }, y: { label: "kbps" } },
-    series: [{ label: "时间" }, ...chartState.rooms.map((r, i) => ({
+    series: [{ label: "time" }, ...chartState.rooms.map((r, i) => ({
       label: r, stroke: PALETTE[i % PALETTE.length], width: 1.5, fill: "transparent",
     }))],
     axes: [{}, { size: 52, values: (u, v) => v.map(String) }],
@@ -340,7 +340,7 @@ function rebuildCharts() {
   dropChart = new uPlot({
     width: rightWidth(), height: 130,
     scales: { x: { time: true }, y: {} },
-    series: [{ label: "时间" }, { label: "dropped", stroke: "#f85149", fill: "rgba(248,81,73,.12)", spanGaps: false }],
+    series: [{ label: "time" }, { label: "dropped", stroke: "#f85149", fill: "rgba(248,81,73,.12)", spanGaps: false }],
     hooks: { draw: [eventLines] },
   }, [chartState.t, chartState.drop], $("#drop"));
 }
@@ -357,7 +357,7 @@ function renderEvLog() {
   }
 }
 
-// ---------- 帧渲染（一切回显的唯一通路） ----------
+// ---------- frame rendering (the sole echo channel) ----------
 function renderRing(f) {
   const txt = $("#ring-txt"), fg = $("#ring-fg");
   const exp = f.expires_at;
@@ -365,18 +365,18 @@ function renderRing(f) {
   const rem = Math.max(0, exp - Date.now());
   if (exp === 0) { txt.textContent = "∞"; fg.style.strokeDashoffset = 0; return; }
   txt.textContent = Math.ceil(rem / 1000) + "s";
-  // ponytail: 环比例参照缺省 300s（帧不含总时长字段）；纯视觉，文字才是判据
+// ponytail: ring ratio references the default 300s (the frame carries no total-duration field); purely visual, the text is the predicate
   fg.style.strokeDashoffset = 119.4 * Math.min(1, rem / 300000);
 }
 function renderHeader(f) {
   const h = $("#hstat");
   h.textContent = "";
   const chip = (k, v, cls) => h.append(el("span", "chip" + (cls ? " " + cls : ""), `${k} <b>${esc(v)}</b>`));
-  if (f.spec) { chip("损伤", "ACTIVE", "act"); chip("scope", f.scope ?? "?"); chip("dir", f.dir ?? "?"); }
+  if (f.spec) { chip("impairment", "ACTIVE", "act"); chip("scope", f.scope ?? "?"); chip("dir", f.dir ?? "?"); }
   if (f.job) chip("job", f.job.name ?? "?");
   if (f.tc?.dropped != null) chip("dropped", f.tc.dropped);
 }
-function echoSpecInputs(f) { // 外部 CLI/其他端写 → 帧回显（聚焦控件不打断输入）
+function echoSpecInputs(f) { // external CLI/other-surface writes -> frame echo (focused inputs are not interrupted)
   const s = f.spec;
   if (!s) return;
   const set = (sel, val) => {
@@ -402,12 +402,12 @@ function echoSpecInputs(f) { // 外部 CLI/其他端写 → 帧回显（聚焦�
   const dir = typeof s.dir === "string" ? s.dir : "both";
   const radio = $(`input[name="dir"][value="${dir}"]`);
   const cur = $('input[name="dir"]:checked');
-  // 真值表灰显优先：帧值指向被灰显(disabled)项时不打断本地选择（如物理口期帧仍带旧 dir=both）
+// truth-table greying first: when the frame value points at a greyed (disabled) option, don't interrupt the local selection (e.g. a physical port awaiting a frame still carrying the old dir=both)
   if (radio && !radio.disabled && document.activeElement !== radio) radio.checked = true;
   else if (radio && radio.disabled && cur && !cur.disabled) void cur;
 }
-/// 定向名字回显（E2 ledger）：state.names 是勾选的唯一真值通路——面板禁乐观更新，
-/// 一切以帧为准；唯用户 400ms debounce 在途（setTimer 未决）时让位本地新勾选，免竞态互擦。
+/// targeted-name echo (E2 ledger): state.names is the sole truth channel for checkboxes -- the panel forbids optimistic updates,
+// frames are the authority; only while the user's 400ms debounce is in flight (setTimer pending) does a fresh local selection win, avoiding mutual race-erasure.
 function echoScopeNames(f) {
   if (setTimer) return;
   ui.selRooms = new Set(f.names?.rooms ?? []);
@@ -418,9 +418,9 @@ function onFrame(f) {
   window.__wnet.lastFrame = f;
   window.__wnet.ready = true;
   frame = f;
-  if (f.frame_error) { toast(`状态帧错误：${f.frame_error}`, true); return; }
+  if (f.frame_error) { toast(`state-frame error: ${f.frame_error}`, true); return; }
   $("#conn").className = "conn on";
-  $("#conn").textContent = "● 帧流 2s";
+  $("#conn").textContent = "● frames at 2s";
   $("#master").checked = f.spec != null;
   renderRing(f);
   renderHeader(f);
@@ -432,29 +432,29 @@ function onFrame(f) {
 }
 function renderScenJob(f) {
   $("#scen-job").textContent = f.job
-    ? `运行中：${f.job.name}（pid ${f.job.pid}） ${f.job.done ?? 0}/${f.job.total ?? "?"}`
-    : "无活跃 job";
+    ? `running: ${f.job.name} (pid ${f.job.pid}) ${f.job.done ?? 0}/${f.job.total ?? "?"}`
+    : "no active job";
 }
 
 // ---------- SSE ----------
 function connectSSE() {
-  es = new EventSource("v1/events?token=" + encodeURIComponent(auth)); // query-token 唯一豁免面
+  es = new EventSource("v1/events?token=" + encodeURIComponent(auth)); // query-token is the sole exemption surface
   es.onmessage = (m) => {
     let f;
-    try { f = JSON.parse(m.data); } catch { toast("状态帧 JSON 解析失败", true); return; }
+    try { f = JSON.parse(m.data); } catch { toast("state-frame JSON parse failed", true); return; }
     onFrame(f);
   };
   es.onerror = () => {
     $("#conn").className = "conn off";
-    $("#conn").textContent = "● 断线（EventSource 自动重连中）";
+    $("#conn").textContent = "● disconnected (EventSource auto-reconnecting)";
   };
 }
 
-// ---------- S 页签 ----------
+// ---------- scenarios tab ----------
 function renderScenList() {
   const ul = $("#scenlist");
   ul.textContent = "";
-  if (scenarios.length === 0) { ul.append(el("li", "empty", "无剧本（weaknet.d/scenarios 或 /v1/scenarios 报因）")); return; }
+  if (scenarios.length === 0) { ul.append(el("li", "empty", "no scenarios (weaknet.d/scenarios or the /v1/scenarios cause)")); return; }
   for (const name of scenarios) {
     const li = el("li");
     const lab = el("label", name === scenPick ? "on" : "");
@@ -475,18 +475,18 @@ async function loadScenarios() {
   renderScenList();
 }
 async function scenRun() {
-  if (!scenPick) { toast("先选一个剧本"); return; }
+  if (!scenPick) { toast("select a scenario first"); return; }
   const r = await api("v1/scenario/run", { method: "POST", body: JSON.stringify({ file: scenPick }), headers: { "Content-Type": "application/json" } });
-  if (r.status === 501) toast(`剧本引擎未到场（501）：${r.body?.error ?? "随 T8"}`);
-  else if (r.status !== 200 && r.status !== 0) toast(`run 失败（${r.status}）：${r.body?.error ?? "?"}`, true);
+  if (r.status === 501) toast(`scenario engine not yet available (501): ${r.body?.error ?? "arrives with T8"}`);
+  else if (r.status !== 200 && r.status !== 0) toast(`run failed (${r.status}): ${r.body?.error ?? "?"}`, true);
 }
 async function scenStop() {
   const r = await api("v1/scenario/stop", { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } });
-  if (r.status === 501) toast(`stop 同随 T8（501）：${r.body?.error ?? ""}`);
-  else if (r.status !== 200 && r.status !== 0) toast(`stop 失败（${r.status}）：${r.body?.error ?? "?"}`, true);
+  if (r.status === 501) toast(`stop likewise arrives with T8 (501): ${r.body?.error ?? ""}`);
+  else if (r.status !== 200 && r.status !== 0) toast(`stop failed (${r.status}): ${r.body?.error ?? "?"}`, true);
 }
 
-// ---------- 引导加载 ----------
+// ---------- boot / onboarding ----------
 async function fetchStreamsNote() {
   const r = await api("v1/streams");
   streamsNote = r.body?.note || "";
@@ -499,7 +499,7 @@ async function boot() {
     location.replace(location.pathname);
   });
   const [c, p] = await Promise.all([api("v1/capabilities"), api("v1/profiles")]);
-  if (c.status === 401 || p.status === 401) return; // gate 已由 api() 呈现
+  if (c.status === 401 || p.status === 401) return; // the gate is already presented by api()
   caps = c.body;
   renderCapsLine();
   refreshDirGate();
@@ -515,12 +515,12 @@ async function boot() {
 }
 function bind() {
   $("#master").addEventListener("change", (e) => toggleMaster(e.target.checked));
-  // spec 行：input → debounce 400；range 额外 pointerup 即发（风暴案）
+// spec inputs: input -> debounce 400; range additionally fires on pointerup (the storm case)
   for (const i of $$("#spec-rows input, #spec-rows select")) {
     i.addEventListener("input", () => {
       if (i.type === "range") $("#loss-num").value = i.value;
       if (i.id === "loss-num") $("#loss-range").value = i.value;
-      scheduleSet(false); // 含滑块：拖动期 400ms 收敛，pointerup 即发兜底
+      scheduleSet(false); // incl. sliders: 400ms convergence while dragging, pointerup fires as backstop
     });
     if (i.type === "range") i.addEventListener("pointerup", () => scheduleSet(true));
   }
@@ -528,12 +528,12 @@ function bind() {
     $("#gem").hidden = $("#loss-mode").value !== "gemodel";
     scheduleSet(true);
   });
-  // iface 只改本地真值表面板灰显；不进 set（物理口误下发=真实网卡受损；换 iface 走关闸→重开 apply）
+// iface only changes the local truth-table panel greying; never enters set (accidentally pushing a physical port = real NIC impairment; switching iface goes through close-switch -> re-open apply)
   $("#iface").addEventListener("input", () => { ui.iface = $("#iface").value.trim(); refreshDirGate(); renderStreams(); });
   for (const r of $$('input[name="dir"]')) r.addEventListener("change", () => scheduleSet(true));
   $("#profile").addEventListener("change", () => {
     const v = $("#profile").value;
-    if (v) toast(`profile「${v}」是 CLI 预设（weaknet apply --profile ${v}）；面板施加通道未接（T7 边界），下方手工编辑等效`);
+    if (v) toast(`profile "${v}" is a CLI preset (weaknet apply --profile ${v}); the panel apply channel is not wired (T7 boundary); manual editing below is equivalent`);
   });
   for (const b of $$("#tabs .tab")) b.addEventListener("click", () => {
     for (const t of $$("#tabs .tab")) t.classList.toggle("on", t === b);
@@ -544,14 +544,14 @@ function bind() {
   $("#scen-stop").addEventListener("click", scenStop);
   addEventListener("resize", () => { if (kbpsChart) rebuildCharts(); });
 }
-// ---------- gate token 输入（首用动线 UI 承接）----------
-// 复用上方凭证生命周期存取（AUTH_KEY/sessionStorage）；提交即带凭证重载，
-// 地址栏零凭证——与文件头 replaceState 剥 query 策略并存。绑定置于 EOF：$ 助手已定义。
+// ---------- gate token input (first-use onboarding UI) ----------
+// reuses the credential lifecycle above (AUTH_KEY/sessionStorage); submit reloads with the credential,
+// zero credential in the address bar -- coexists with the file-header replaceState strip-query policy. Binding at EOF: the $ helper is defined by then.
 function applyGateToken() {
   const v = $("#gate-token").value.trim();
   if (!v) return;
   sessionStorage.setItem(AUTH_KEY, v);
-  location.replace(location.pathname); // 重载后 boot() 直接吃新 token
+  location.replace(location.pathname); // after reload boot() consumes the new token directly
 }
 $("#gate-apply").addEventListener("click", applyGateToken);
 $("#gate-token").addEventListener("keydown", (e) => { if (e.key === "Enter") applyGateToken(); });

@@ -1,4 +1,4 @@
-# mediaservoConfigVersion.cmake — 请求版本 ≤ 安装版本（write_basic_package_version_file 等价手工版）
+# mediaservoConfigVersion.cmake — requested version ≤ installed version (hand-maintained equivalent of write_basic_package_version_file)
 set(PACKAGE_VERSION "@VERSION@")
 if(PACKAGE_FIND_VERSION VERSION_GREATER PACKAGE_VERSION)
     set(PACKAGE_VERSION_COMPATIBLE FALSE)

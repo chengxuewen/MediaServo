@@ -14,14 +14,14 @@ void RateEstimator::update(int64_t now_ms, uint64_t total) {
     }
     const int64_t dt = now_ms - t0_;
     if (total < base_) {
-        // 计数器倒退（重订阅/进程侧重置）：重锚，当前窗归零。
+        // Counter regression (re-subscription / process-side reset): re-anchor, zero the current window.
         t0_ = now_ms;
         base_ = total;
         last_per_ms_ = 0.0;
         return;
     }
     if (dt <= 0) {
-        return; // 同窗/回退：保持上一窗值（钉：不除零不假清零）
+        return; // same window / regression: keep the previous window's value (pin: no divide-by-zero, no fake zeroing)
     }
     last_per_ms_ = static_cast<double>(total - base_) / static_cast<double>(dt);
     t0_ = now_ms;
@@ -36,7 +36,7 @@ void RateEstimator::reset() { *this = RateEstimator{}; }
 
 namespace {
 
-// `"key"` 后扫过 `:` 与空白到数字起点；返回数字串起始下标，失败 npos。
+// After `"key"`, scan past `:` and whitespace to the number start; returns the index of the digit run, npos on failure.
 std::string::size_type find_number(const std::string& json, const std::string& key) {
     const std::string pat = "\"" + key + "\"";
     std::string::size_type pos = json.find(pat);
@@ -60,7 +60,7 @@ std::string::size_type find_number(const std::string& json, const std::string& k
 bool json_u64(const std::string& json, const std::string& key, uint64_t* out) {
     const auto pos = find_number(json, key);
     if (pos == std::string::npos) return false;
-    // 拒绝小数/科学计数（stats 计数域为整数；带小数点=形不符，宁缺毋错）。
+    // Reject decimals / scientific notation (the stats counter domain is integers; a decimal point = the wrong shape; prefer missing over wrong).
     auto end = pos;
     while (end < json.size() && ((json[end] >= '0' && json[end] <= '9'))) end++;
     if (end == pos || (end < json.size() && (json[end] == '.' || json[end] == 'e' || json[end] == 'E'))) {

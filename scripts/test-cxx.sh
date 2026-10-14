@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# C++ header-only 绑定测试: 编译并运行 field/link/deck/client 四 SDK 测试程序。
-# 前置: 三个 cdylib 已构建（pixi run build-c，含 .so.0 dev symlink）。
+# C++ header-only binding tests: compile and run the field/link/deck/client SDK test programs.
+# Prereq: the three cdylibs are built (pixi run build-c, incl. .so.0 dev symlink).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -18,7 +18,7 @@ for sdk in field link deck client; do
     echo "$sdk-cxx tests PASS"
 done
 
-echo "=== common-cxx (shared Result 契约, C++11) ==="
+echo "=== common-cxx (shared Result contract, C++11) ==="
 g++ -std=c++11 -Wall -Wextra -I bindings/cxx/include \
     -I bindings/cxx/mediaservo-field-cxx/include -I bindings/cxx/mediaservo-link-cxx/include -I bindings/cxx/mediaservo-deck-cxx/include \
     -I bindings/c/mediaservo-field-c/include -I bindings/c/mediaservo-link-c/include -I bindings/c/mediaservo-deck-c/include \

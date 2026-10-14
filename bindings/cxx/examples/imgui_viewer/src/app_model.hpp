@@ -1,11 +1,11 @@
-// app_model — imgui_viewer 状态模型（T3 自 main.cpp 原样迁居，零行为变化）。
+// app_model — the imgui_viewer state model (relocated verbatim from main.cpp in T3, zero behavior change).
 //
-// 本例分层铁律（把这份代码当模板抄时的第一页，全项目同规）：
-//   main.cpp     帧循环/线程属主/节拍（不写面板细节）
-//   app_model.*  纯状态与数据工具（不碰 ImGui、不碰 SDL）
-//   sessions.*   SDK 动作面（login/join/consume/control——**永不 include imgui.h**）
-//   panels/*     无状态渲染函数（不建会话、不碰 SDL——要触发动作就调 sessions）
-// 依赖方向单向：panels → sessions → app_model；main 装配全部。
+// This example's layering iron rules (page one for anyone copying this code as a template; the same rules project-wide):
+//   main.cpp     the frame loop / thread ownership / beats (no panel details)
+//   app_model.*  pure state and data utilities (no ImGui, no SDL)
+//   sessions.*   the SDK action surface (login/join/consume/control — **never includes imgui.h**)
+//   panels/*     stateless render functions (no session creation, no SDL — call sessions to trigger actions)
+// The dependency direction is one-way: panels → sessions → app_model; main assembles everything.
 #ifndef MSRTC_VIEWER_APP_MODEL_HPP
 #define MSRTC_VIEWER_APP_MODEL_HPP
 
@@ -24,25 +24,25 @@
 
 namespace viewer {
 
-/// 启动环境（main 一次性解析，此后只读——凭据走 env/stdin，G13 永不 argv）。
+/// Startup environment (parsed once by main, read-only afterwards — credentials go via env/stdin; G13: never argv).
 struct Env {
     std::string ws;             // MSRTC_WS_URL
     std::string http_base;      // MSRTC_HTTP_BASE
-    std::string room_hint;      // MSRTC_ROOM（无头 auto-join 目标，空=首个视频房）
-    std::string key_file;       // MSRTC_ESTOP_KEY_FILE（空=不签名形）
-    int run_secs = 0;           // MSRTC_RUN_SECS（0=常开）
+    std::string room_hint;      // MSRTC_ROOM (the headless auto-join target; empty = the first video room)
+    std::string key_file;       // MSRTC_ESTOP_KEY_FILE (empty = the unsigned form)
+    int run_secs = 0;           // MSRTC_RUN_SECS (0 = run forever)
 };
 
 const char* env_or(const char* k, const char* dflt);
 
 struct RoomRow {
     std::string room_id, kind;
-    std::string parent; // T3：整车房归属（空=平铺单位/老 wire）
-    bool video = false; // kind 提示（vehicle-* 含视频；audio-* 仅音频）
-    bool checked = false; // 直存 bool（vector<bool> 代理引用不可 &）
+    std::string parent; // T3: the owning whole-vehicle room (empty = a flat unit / old wire)
+    bool video = false; // a kind hint (vehicle-* has video; audio-* is audio-only)
+    bool checked = false; // a plain bool (a vector<bool> proxy reference cannot be taken by address)
 };
 
-/// 一路已勾选房间 = 一个会话（G11：房间=流，退订=close 会话）。
+/// One checked room = one session (G11: room = stream; unsubscribing = closing the session).
 struct Tile {
     explicit Tile(std::string room_) : room(std::move(room_)) {}
 
@@ -53,23 +53,23 @@ struct Tile {
     imgui_shell::VideoTexture tex;
     std::atomic<uint64_t> cb{0};
 
-    // mini-stats（W3a 资产消费端）
+    // mini-stats (a W3a asset consumer)
     ::viewer_core::RateEstimator bytes_rate;
     uint64_t bytes_prev = 0, frames_prev = 0;
     double fps = 0.0;
     uint32_t w = 0, h = 0;
-    // stats 扩面（09-24 对表 web play；键=SDK 会话级 union JSON additive 字段）
+    // stats extensions (reconciled with web play on 09-24; keys = additive fields of the SDK session-level union JSON)
     double st_jitter = 0.0;
     uint64_t st_packets = 0, packets_lost = 0, st_dropped = 0, st_nack = 0, st_pli = 0, st_fir = 0;
 
-    // 控制室（仅视频房开 chassis）
+    // the control room (chassis opened only for video rooms)
     std::unique_ptr<mediaservo::client::Control> ctl;
     std::mutex ack_mu;
-    std::string ack_last;      // 最近 ack json（面板展示）
-    uint64_t want_seq = 0;     // 最近一发 seq（RTT 对齐用）
+    std::string ack_last;      // the most recent ack json (shown in the panel)
+    uint64_t want_seq = 0;     // the most recently sent seq (for RTT alignment)
     std::atomic<int64_t> sent_us{0};
     double rtt_ms = -1.0;
-    std::string err;          // 建立期失败原因（面板红行）
+    std::string err;          // the setup-failure reason (a red line in the panel)
 
     void poll_stats() {
         auto js = sess.video_stats();
@@ -91,8 +91,8 @@ struct Tile {
         ::viewer_core::json_f64(*js, "jitter", &st_jitter);
         w = static_cast<uint32_t>(uw);
         h = static_cast<uint32_t>(uh);
-        // RateEstimator 要**绝对时间戳+累计值**，斜率/重锚/倒退防其内部自理——
-        // 曾喂"距上次毫秒差"致 dt 恒负、码率永久 0（09-24 用户实锤，09-01 web 同族）。
+        // RateEstimator wants **absolute timestamps + cumulative values**; the slope/re-anchor/regression handling is internal —
+        // feeding "the ms delta since last time" once made dt permanently negative and the bitrate forever 0 (proven by a user on 09-24; the same family as 09-01 on web).
         const auto now = std::chrono::steady_clock::now();
         bytes_rate.update(
             std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
@@ -116,46 +116,46 @@ struct Tile {
     }
 };
 
-/// 鉴权模式（viewer-auth-matrix T2；F1 五选一 Radio）。语义表见 PLAN §2.1：
-/// Account/ApiKey=换发型（login/exchange→发现→join）；Psk=跳发现直 join（Legacy
-/// 发现 401）；Device=identity_dir 公钥链；JwtPaste=直贴 token（坏 token→4013 测试点）。
+/// Auth modes (viewer-auth-matrix T2; the F1 five-way Radio). For the semantics table see PLAN §2.1:
+/// Account/ApiKey = the exchange forms (login/exchange → discovery → join); Psk = skip discovery, join directly (the Legacy
+/// discovery 401s); Device = the identity_dir public-key chain; JwtPaste = paste a token directly (a bad token → the 4013 test point).
 enum class AuthMode { Account, ApiKey, Psk, Device, JwtPaste };
 
-/// 全应用状态（T3 前的旧名 Ui；字段逐字保留=搬迁可 diff 审）。
+/// The application-wide state (the old pre-T3 name Ui; fields kept verbatim = the relocation is diff-auditable).
 struct AppModel {
-    bool key_signed = false; // estop 签名态（面板措辞；W4b）
+    bool key_signed = false; // the estop signing state (panel wording; W4b)
     char user[64] = "admin";
     char pass[256] = "";
     bool pass_shown = false;
-    // server 地址（main 以 env 预置；登录面板可改——env 缺省/演示机场景）
+    // The server address (preset by main from env; editable in the login panel — for env-less defaults / demo machines)
     char url_ws[256] = "";
     char url_http[256] = "";
-    // 鉴权五模式（T2；G13 纪律：凭证走输入框或 env，永不 argv）。
+    // The five auth modes (T2; the G13 discipline: credentials go via input fields or env, never argv).
     AuthMode auth = AuthMode::Account;
     char key_id[64] = "";           // M2
     char key_secret[256] = "";      // M2
     char psk[256] = "";             // M3
-    char direct_room[128] = "";     // M3 专属：跳发现直 join 的目标房
-    char identity_dir[512] = "";    // M4：设备身份实例目录
-    char jwt_paste[2048] = "";      // M5：直贴 JWT（坏 token 测试点）
-    std::string identity_label;     // T4/F6：连接后回显（"Device(ms-x)"/"legacy-psk"/…）
-    std::string status;               // 登录/列举错误行
+    char direct_room[128] = "";     // M3 only: the target room for joining directly, skipping discovery
+    char identity_dir[512] = "";    // M4: the device identity instance directory
+    char jwt_paste[2048] = "";      // M5: paste a JWT directly (the bad-token test point)
+    std::string identity_label;     // T4/F6: echoed after connecting ("Device(ms-x)"/"legacy-psk"/...)
+    std::string status;               // the login/listing error line
     std::vector<RoomRow> rooms;
     bool logged_in = false;
     std::string jwt;
-    bool auto_join = false;           // 无头 CI 通道标志（原 main 局部，入模后 panels 无状态化）
+    bool auto_join = false;           // the headless CI channel flag (formerly a main local; stateless panels after moving into the model)
     std::vector<std::unique_ptr<Tile>> tiles;
-    int sel_control = -1;             // 控制室选中的 tile 下标
-    int sel_info = 0;                 // 右区详情聚焦的 tile 下标
+    int sel_control = -1;             // the index of the selected control-room tile
+    int sel_info = 0;                 // the index of the tile focused in the right details area
     float steer_deg = 0.0f;
-    uint64_t seq = 1;                 // 舱端自增（D-H3 会话内单调）
+    uint64_t seq = 1;                 // the cockpit-side counter (D-H3: monotonic within a session)
     bool estop_sent = false;
     int cols = 2;
 };
 
-/// list_rooms JSON 数组的逐项提取（键均字符串形，手工扫描零依赖）。
+/// Item-by-item extraction from a list_rooms JSON array (all keys are strings; a hand-rolled zero-dependency scan).
 std::vector<std::pair<std::string, std::string>> parse_rooms(const std::string& json);
-/// room-grouping-semantics T3：三元组形（room_id, kind, parent）——树按 parent 归组。
+/// room-grouping-semantics T3: the triple form (room_id, kind, parent) — the tree groups by parent.
 std::vector<std::tuple<std::string, std::string, std::string>> parse_rooms_full(
     const std::string& json);
 

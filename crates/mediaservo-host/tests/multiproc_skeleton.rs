@@ -1,12 +1,12 @@
-//! Multiprocess 骨架测试（Task A1）：9 个 bin 声明 + 占位进程生命周期。
+//! Multiprocess skeleton tests (Task A1): 9 bin declarations + placeholder process lifecycle.
 //!
-//! - all_bins_declared: Cargo.toml 必须声明 mediaservo-host / host-agent / host-capturer /
+//! - all_bins_declared: Cargo.toml must declare mediaservo-host / host-agent / host-capturer /
 //!   host-streamer / host-recorder / host-controller / host-emergency / host-audio / host-legacy
-//! - placeholder_blocks_and_exits_on_signal: host-agent 网关就绪 →
-//!   阻塞存活 → SIGTERM → 退出码 0
+//! - placeholder_blocks_and_exits_on_signal: host-agent gateway ready ->
+//!   blocks alive -> SIGTERM -> exit code 0
 //!
-//! C1 修订: host-capturer 已替换为真实实现（需 --camera/--config/--token 参数），
-//! 占位生命周期测试改用 host-agent（仍为占位）。
+//! C1 revision: host-capturer has been replaced by a real implementation (needs --camera/--config/--token args),
+//! the placeholder lifecycle test now uses host-agent (still a placeholder).
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -14,7 +14,7 @@ use std::time::Duration;
 
 #[test]
 fn all_bins_declared() {
-    // 读取 Cargo.toml [[bin]] 段：必须含 mediaservo-host, host-agent, host-capturer,
+    // Read the Cargo.toml [[bin]] section: must contain mediaservo-host, host-agent, host-capturer,
     // host-streamer, host-recorder, host-controller, host-emergency, host-audio, host-legacy
     let manifest =
         std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
@@ -29,24 +29,21 @@ fn all_bins_declared() {
         "host-audio",
         "host-legacy",
     ] {
-        assert!(
-            manifest.contains(&format!("name = \"{bin}\"")),
-            "missing bin {bin}"
-        );
+        assert!(manifest.contains(&format!("name = \"{bin}\"")), "missing bin {bin}");
     }
 }
 
 #[test]
 fn placeholder_blocks_and_exits_on_signal() {
-    // D1 起 host-agent 为真实信令网关（本地 accept + 远端重连循环）——占位生命周期
-    // 测试更新为网关语义：spawn → 等 200ms → 进程存活（日志含网关就绪）
-    // → SIGTERM → 退出码 0。默认远端无 server 在线：连接失败走 10s 重试，不退出。
+    // Since D1 host-agent is a real signaling gateway (local accept + remote reconnect loop) - the placeholder lifecycle
+    // test is updated to gateway semantics: spawn -> wait 200ms -> process alive (log shows gateway ready)
+    // -> SIGTERM -> exit code 0. By default no remote server is online: connect failures retry every 10s, no exit.
     let log = tempfile::NamedTempFile::new().unwrap();
     let child = Command::new(env!("CARGO_BIN_EXE_host-agent"))
         .stdout(Stdio::from(log.reopen().unwrap()))
         .spawn()
         .expect("spawn host-agent");
-    // 断言失败也必须回收子进程（早期失败会遗留占 17980 的 agent 污染后续测试）
+    // The child must be reaped even on assertion failure (an early failure would leave an agent holding 17980, polluting later tests)
     struct Reap(Option<std::process::Child>);
     impl Drop for Reap {
         fn drop(&mut self) {
@@ -66,12 +63,9 @@ fn placeholder_blocks_and_exits_on_signal() {
 
     let mut out = String::new();
     log.reopen().unwrap().read_to_string(&mut out).unwrap();
-    assert!(
-        out.contains("网关就绪"),
-        "stdout missing ready line, got: {out:?}"
-    );
+    assert!(out.contains("gateway ready"), "stdout missing ready line, got: {out:?}");
 
-    // SIGTERM → 优雅退出（退出码 0）；正常路径取出 child（guard 不再 kill）
+    // SIGTERM -> graceful exit (exit code 0); the happy path takes the child out (guard no longer kills)
     unsafe { libc::kill(reap.0.as_ref().unwrap().id() as i32, libc::SIGTERM) };
     let status = reap.0.take().unwrap().wait().expect("wait host-agent");
     assert_eq!(status.code(), Some(0), "expected graceful exit 0, got {status:?}");

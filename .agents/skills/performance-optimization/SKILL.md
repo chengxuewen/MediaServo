@@ -3,49 +3,49 @@ name: performance-optimization
 description: "MediaServo performance profiling and optimization. WebRTC latency tracing, mediasoup SFU throughput, Admin UI React render profiling, cargo bench regression detection. Use when latency spikes, after media pipeline changes, or before release."
 ---
 
-# performance-optimization — 性能优化
+# performance-optimization — Performance Optimization
 
-> WebRTC 延迟 + mediasoup 吞吐 + React 渲染 + cargo bench.
-> 先测量，再优化。不优化猜测。
+> WebRTC latency + mediasoup throughput + React rendering + cargo bench.
+> Measure first, optimize second. Never optimize on guesses.
 
-## 触发条件
+## Trigger Conditions
 
-- 延迟 >100ms (MediaServo 目标: <100ms E2E)
-- 吞吐下降 >10%
-- Admin UI 渲染掉帧
-- 媒体管线代码变更后
-- 用户说 "performance" / "latency" / "slow" / "优化性能"
-- 发布前基准回归
+- latency >100ms (MediaServo target: <100ms E2E)
+- throughput dropped >10%
+- Admin UI rendering drops frames
+- after media pipeline code changes
+- user says "performance" / "latency" / "slow" / "优化性能" (optimize performance) <!-- c49:trigger -->
+- pre-release benchmark regression
 
-## 黄金法则
+## Golden Rules
 
 ```
-1. 测量基线 (cargo bench / Playwright trace)
-2. 定位瓶颈 (flamegraph / perf / Chrome DevTools)
-3. 单变量优化 (一次只改一个变量)
-4. 验证回归 (重新测量，对比基线)
-5. 记录决策 (decisions.md)
+1. measure the baseline (cargo bench / Playwright trace)
+2. locate the bottleneck (flamegraph / perf / Chrome DevTools)
+3. optimize one variable at a time
+4. verify against regression (re-measure, compare with baseline)
+5. record the decision (decisions.md)
 ```
 
-## Phase 1: Rust 层 — 基准测试
+## Phase 1: Rust Layer — Benchmarking
 
 ### cargo bench
 
 ```bash
-# 运行所有基准
+# run all benchmarks
 cargo bench --workspace
 
-# 特定 crate
+# specific crate
 cargo bench -p mediaservo-codec
 cargo bench -p mediaservo-webrtc
 
-# 对比 pre/post-change
+# compare pre/post-change
 cargo bench -- --save-baseline before
 # ... make changes ...
 cargo bench -- --baseline before
 ```
 
-### 关键基线设置
+### Key Baseline Setup
 
 ```rust
 // crates/mediaservo-media/benches/pipeline_bench.rs
@@ -60,16 +60,16 @@ fn bench_encode_1080p(c: &mut Criterion) {
 }
 ```
 
-### 性能剖析
+### Profiling
 
 ```bash
-# flamegraph (Linux, 需要 perf)
+# flamegraph (Linux, requires perf)
 cargo flamegraph --bin mediaservo-host -- --capture test-video
 
 # valgrind / cachegrind
 valgrind --tool=cachegrind cargo run -p mediaservo-host --release
 
-# 代码级计时 (项目中已有 metrics 模块)
+# code-level timing (project already has a metrics module)
 # crates/mediaservo-common/src/metrics.rs
 use std::time::Instant;
 let start = Instant::now();
@@ -77,48 +77,48 @@ let start = Instant::now();
 metrics::record("encode_latency_us", start.elapsed().as_micros());
 ```
 
-## Phase 2: WebRTC 延迟分析
+## Phase 2: WebRTC Latency Analysis
 
-### 测量点
+### Measurement Points
 
 ```
-[Host 采集] ──t1──> [编码] ──t2──> [RTP打包] ──t3──> [网络发送]
-                                                             │
-[Client 渲染] <──t6── [解码] <──t5── [RTP解包] <──t4── [网络接收]
+[Host capture] ──t1──> [Encode] ──t2──> [RTP packetize] ──t3──> [Network send]
+                                                                        │
+[Client render] <──t6── [Decode] <──t5── [RTP depacketize] <──t4── [Network recv]
 ```
 
 ```bash
-# 检查现有的 metrics 打点
+# check existing metrics instrumentation
 grep -rn 'metrics::record\|latency\|Instant::now' crates/mediaservo-webrtc/src/ --include='*.rs'
 grep -rn 'metrics::record\|latency\|Instant::now' crates/mediaservo-media/src/ --include='*.rs'
 ```
 
-### DataChannel 延迟
+### DataChannel Latency
 
 ```rust
-// DataChannel echo 测试
-// ponytail: 使用已有的 E2E 测试脚本
-// scripts/e2e/macos-e2e.sh 已验证 DataChannel relay
-// 延迟: 574 bytes, <1ms localhost
+// DataChannel echo test
+// ponytail: reuse the existing E2E test script
+// scripts/e2e/macos-e2e.sh already verifies DataChannel relay
+// latency: 574 bytes, <1ms localhost
 ```
 
 ```bash
-# 运行 E2E DataChannel 延迟测试
+# run E2E DataChannel latency test
 bash scripts/e2e/macos-e2e.sh  # macOS
 pixi run test-sfu               # Linux/Docker SFU
 ```
 
-### 优化模式
+### Optimization Patterns
 
 ```rust
-// BEFORE: 每个 RTP 包 alloc
+// BEFORE: allocation per RTP packet
 fn send_frame(&mut self, frame: &Frame) {
     let rtp_packet = self.packetizer.packetize(frame); // alloc
     self.transport.send(rtp_packet);
 }
 
-// AFTER: 预分配 buffer pool
-// chesterton: buffer pool 是 PIT-01/PIT-03 分析后的必要权衡
+// AFTER: pre-allocated buffer pool
+// chesterton: the buffer pool is a necessary trade-off from the PIT-01/PIT-03 analysis
 fn send_frame(&mut self, frame: &Frame) {
     let buf = self.buffer_pool.acquire(frame.len());
     self.packetizer.packetize_into(frame, &mut buf);
@@ -126,93 +126,93 @@ fn send_frame(&mut self, frame: &Frame) {
 }
 ```
 
-## Phase 3: mediasoup SFU 吞吐
+## Phase 3: mediasoup SFU Throughput
 
-### 基线命令
+### Baseline Commands
 
 ```bash
-# Docker 环境
+# Docker environment
 docker compose exec server cargo bench -p mediaservo-server -- --bench sfu_throughput
 
-# 或使用 mediasoup 内置 stats
-# 检查 worker resource usage
+# or use mediasoup built-in stats
+# check worker resource usage
 grep -rn 'rtp_listener\|max_income_bitrate\|producer.*stats' crates/mediaservo-server/src/sfu/ --include='*.rs'
 ```
 
-### mediasoup 调优参数
+### mediasoup Tuning Parameters
 
 ```javascript
-// mediasoup WebRtcTransport 配置参考
+// mediasoup WebRtcTransport config reference
 {
   initialAvailableOutgoingBitrate: 1_000_000,  // 1Mbps
   maxIncomingBitrate: 1_500_000,               // 1.5Mbps
-  // 降低以获得更低延迟:
+  // lower these for lower latency:
   // initialAvailableOutgoingBitrate: 300_000,  // 300kbps
 }
 ```
 
 ```bash
-# 检查当前 MediaServo transport 配置
+# check current MediaServo transport config
 grep -rn 'availableOutgoingBitrate\|maxIncomingBitrate\|initial' crates/mediaservo-server/src/sfu/ --include='*.rs'
 ```
 
-### SFU 健康监控
+### SFU Health Monitoring
 
 ```bash
-# 运行时指标 (通过 Admin WebSocket)
+# runtime metrics (via Admin WebSocket)
 # GET /api/admin/sfu/stats
 curl -s http://localhost:9800/api/admin/sfu/stats | jq '.rooms[].peers[].transports[]'
 
-# 关键指标:
-# - bytesReceived / bytesSent (带宽使用)
-# - producerScore (编码器质量, 0-10)
-# - packetLoss (丢包率, target <0.1%)
+# key metrics:
+# - bytesReceived / bytesSent (bandwidth usage)
+# - producerScore (encoder quality, 0-10)
+# - packetLoss (loss rate, target <0.1%)
 # - roundTripTime (RTT, target <50ms)
 ```
 
-## Phase 4: Admin UI — React 渲染优化
+## Phase 4: Admin UI — React Render Optimization
 
-### Playwright 性能追踪
+### Playwright Performance Tracing
 
 ```bash
-# 启动 Admin UI + Playwright trace
-# 使用 local-playwright MCP 工具:
+# launch Admin UI + Playwright trace
+# use the local-playwright MCP tools:
 # 1. browser_navigate → Admin UI
 # 2. browser_evaluate → performance.mark('start')
-# 3. 交互操作
+# 3. perform interactions
 # 4. browser_evaluate → performance.measure('render', 'start')
 
-# 代码级检查
+# code-level check
 grep -rn 'useState\|useEffect\|useMemo\|useCallback\|React.memo' crates/mediaservo-server/src/admin/ --include='*.tsx' --include='*.ts'
 ```
 
-### React 优化清单
+### React Optimization Checklist
 
-| 问题 | 检测 | 修复 |
+| Problem | Detection | Fix |
 |------|------|------|
-| 递归重渲染 | React DevTools Profiler → 火焰图 | `React.memo` + `useCallback` |
-| 昂贵计算 in render | `console.time` 包裹 render 体 | `useMemo` |
-| 大列表无虚拟化 | Items >100 且未使用 `react-window` | `FixedSizeList` |
-| WebSocket 消息轰炸 | 每秒 >60 条更新 | 批量更新 (requestAnimationFrame throttle) |
-| 未清理的订阅 | 无 useEffect cleanup | return `() => ws.close()` |
-| 不必要 Context 扩散 | Context value 包含频繁变化对象 | 拆分 Context / 用 ref |
+| cascading re-renders | React DevTools Profiler → flame chart | `React.memo` + `useCallback` |
+| expensive compute in render | wrap render body with `console.time` | `useMemo` |
+| large list without virtualization | items >100 and no `react-window` | `FixedSizeList` |
+| WebSocket message floods | >60 updates per second | batch updates (requestAnimationFrame throttle) |
+| uncleaned subscriptions | no useEffect cleanup | return `() => ws.close()` |
+| unnecessary Context spread | Context value contains frequently-changing objects | split the Context / use a ref |
 
-### 检查命令
+### Check Commands
 
 ```bash
-# 检查 React 项目中重组件
+# count heavy components in the React project
 grep -rn 'export.*function.*Component\|export.*default function' crates/mediaservo-server/src/admin/ --include='*.tsx' | wc -l
 
-# 检查缺少 memoization
+# check missing memoization
 grep -rn 'useState\|useEffect' crates/mediaservo-server/src/admin/ --include='*.tsx' | wc -l
 grep -rn 'useMemo\|useCallback\|memo' crates/mediaservo-server/src/admin/ --include='*.tsx' | wc -l
-# ponytail: ratio useMemo+useCallback+React.memo / useState+useEffect 应 >0.5
+# ponytail: ratio useMemo+useCallback+React.memo / useState+useEffect should be >0.5
 ```
 
-### Playwright 验证脚本
+### Playwright Verification Script
 
 ```javascript
-// 在 Playwright MCP 中执行:
+// execute in Playwright MCP:
 // 1. browser_navigate → http://localhost:9800/admin
 // 2. browser_evaluate:
 () => {
@@ -226,16 +226,16 @@ grep -rn 'useMemo\|useCallback\|memo' crates/mediaservo-server/src/admin/ --incl
   observer.observe({ entryTypes: ['measure', 'longtask'] });
   performance.mark('monitoring-start');
 }
-// 3. 操作 UI
+// 3. operate the UI
 // 4. browser_evaluate: () => performance.getEntriesByType('measure')
 ```
 
-## Phase 5: CI 回归检测
+## Phase 5: CI Regression Detection
 
-### 添加 CI 性能门禁
+### Add a CI Performance Gate
 
 ```yaml
-# .github/workflows/ci.yml 添加:
+# add to .github/workflows/ci.yml:
 perf-regression:
   runs-on: ubuntu-latest
   steps:
@@ -247,55 +247,55 @@ perf-regression:
         output-file-path: bench-output.txt
         github-token: ${{ secrets.GITHUB_TOKEN }}
         auto-push: true
-        alert-threshold: '130%'  # >30% 退化则告警
+        alert-threshold: '130%'  # alert on >30% regression
 ```
 
-### 本地 pre-bench 检查
+### Local Pre-Bench Checks
 
 ```bash
-# 快速检查是否有明显退化
-cargo check --workspace --all-features  # 编译检查
-cargo clippy --workspace --all-features -- -D warnings  # 不引入不必要的 alloc/clone
-cargo bench --workspace -- --quick  # 快速基准 (采样不足，仅快速验证)
+# quick check for obvious regressions
+cargo check --workspace --all-features  # compile check
+cargo clippy --workspace --all-features -- -D warnings  # no gratuitous alloc/clone
+cargo bench --workspace -- --quick  # quick bench (under-sampled, sanity check only)
 ```
 
-## 热点参考 (MediaServo 已知)
+## Hotspot Reference (MediaServo Known)
 
-| 热点 | 位置 | 预期 | 监控 |
+| Hotspot | Location | Expectation | Monitoring |
 |------|------|------|------|
-| H.264 编码 | `mediaservo-codec/src/ffmpeg/encoder.rs` | <5ms 1080p | metrics: `encode_latency_us` |
-| RTP 打包 | `mediaservo-webrtc/src/backend/*/track.rs` | <1ms | metrics: `rtp_packetize_us` |
+| H.264 encoding | `mediaservo-codec/src/ffmpeg/encoder.rs` | <5ms 1080p | metrics: `encode_latency_us` |
+| RTP packetize | `mediaservo-webrtc/src/backend/*/track.rs` | <1ms | metrics: `rtp_packetize_us` |
 | WebSocket relay | `mediaservo-server/src/signaling/ws.rs` | <1ms per message | metrics: `ws_relay_us` |
-| GStreamer appsink | `mediaservo-host/src/capture/gst.rs` | <3ms frame pull | 丢帧计数器 |
+| GStreamer appsink | `mediaservo-host/src/capture/gst.rs` | <3ms frame pull | dropped-frame counter |
 | mediasoup transport | `mediaservo-server/src/sfu/transport.rs` | <50ms connect | room stats |
 
-## 报告格式
+## Report Format
 
 ```
-## 性能分析报告 — [日期]
+## Performance Analysis Report — [date]
 
-### 基准对比
-| 基准 | Before | After | Delta |
+### Baseline Comparison
+| Benchmark | Before | After | Delta |
 |------|--------|-------|-------|
 | encode_h264_1080p30 | 3.2ms | 3.1ms | -3% |
 | rtp_packetize | 0.8ms | 0.4ms | -50% ✅ |
 | ws_relay_1kb | 0.3ms | 0.3ms | 0% |
 
-### 发现
-- [热点] rtp_packetize 优化: 预分配 buffer pool, -50%
-- [回归] 无
-- [瓶颈] mediasoup transport connect ~45ms (PTH-07 已知, deferred)
+### Findings
+- [hotspot] rtp_packetize optimization: pre-allocated buffer pool, -50%
+- [regression] none
+- [bottleneck] mediasoup transport connect ~45ms (known PTH-07, deferred)
 
-### 建议
-- [P0] 无
-- [P1] SFU transport.connect actual call (见 pitfall PIT-07)
+### Recommendations
+- [P0] none
+- [P1] SFU transport.connect actual call (see pitfall PIT-07)
 ```
 
-## 禁止
+## Forbidden
 
-- 不测量就优化 (猜测优化通常引入新问题)
-- 多变量同时优化 (无法归因)
-- 优化牺牲可读性而无显著收益
-- micro-benchmark 脱离真实使用场景
-- 忽略 CI 性能退化告警
-- `unsafe` 换性能而无验证
+- optimizing without measuring (guess-optimizing usually introduces new problems)
+- optimizing multiple variables at once (attribution becomes impossible)
+- sacrificing readability for insignificant gains
+- micro-benchmarks detached from real usage scenarios
+- ignoring CI performance-regression alerts
+- trading `unsafe` for performance without verification

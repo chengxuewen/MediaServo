@@ -1,5 +1,5 @@
-// sessions — SDK 动作面（login / join / consume / control 建立）。
-// 本文件**永不 include imgui.h**：会话建立失败要进红行=写模型，不由这里画。
+// sessions — the SDK action surface (login / join / consume / control setup).
+// This file **never includes imgui.h**: session-setup failures become red lines = a model write, not drawn here.
 #ifndef MSRTC_VIEWER_SESSIONS_HPP
 #define MSRTC_VIEWER_SESSIONS_HPP
 
@@ -9,20 +9,20 @@
 
 namespace viewer {
 
-/// 登录 + list_rooms 填房间表；auto_join 置位时并勾入目标房（原 main 登录按钮分支迁居）。
+/// Login + list_rooms fills the room table; when auto_join is set it also checks the target room (relocated from main's old login-button branch).
 void perform_login(AppModel& m, const Env& env);
-/// T4/F6：活动会话身份标签回填 m.identity_label（无会话=清空）。
+/// T4/F6: back-fills the active session's identity label into m.identity_label (no session = cleared).
 void refresh_identity_label(AppModel& m);
 
-/// 勾选一路房间 = 建一个会话（含 W4d 双房配对递归，见函数内注）。
+/// Checking one room = creating one session (including the W4d dual-room pairing recursion; see the in-function note).
 void join_room(AppModel& m, const Env& env, const std::string& room_id, bool video);
 
-/// 控制通道惰性建立（一次性；含 ack→RTT 挂点）。失败记 tile.err 红行。
+/// Lazily sets up the control channel (one-shot; includes the ack→RTT hook). Failures are recorded as a red tile.err line.
 void ensure_control(Tile& t);
 
-/// 关闭单路会话（网格里 ✕ / 树行 ✕）：摘出注册表即毁——Tile RAII 收场
-/// （ctl 泵先停、Session 后关），与 Reconnect 全清同机制；日志进环。
-/// 只关指定房：流房关闭不牵连同 base 控制房（各自独立可关，配对在树里显形）。
+/// Close a single session (the grid ✕ / tree-row ✕): removing it from the registry destroys it — the Tile RAII wraps up
+/// (the ctl pump stops first, the Session closes after), the same mechanism as Reconnect's full clear; logged into the ring.
+/// Close only the given room: closing a stream room does not drag down the paired base control room (each closes independently; the pairing is visible in the tree).
 void close_room(AppModel& m, const std::string& room);
 
 } // namespace viewer

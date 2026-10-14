@@ -1,10 +1,10 @@
-//! 控制通道 C handle + ack 泵（S6 批1b：on_ack 累积形 + token/off_ack 注销、
-//! ready_state/buffered_amount 观测面、producer_ids needed 升形）。
+//! Control channel C handle + ack pump (S6 batch 1b: cumulative on_ack + token/off_ack unregistration,
+//! the ready_state/buffered_amount observation surface, and the producer_ids needed upgrade).
 //!
-//! 泵纪律承 lib.rs 头注：回调仅在 ack 泵线程触发、不持锁、快速返回。
-//! user_free 恰好一次合同：off_ack 只标 retired，**泵在下一轮开头统一回收并在锁外
-//! 调用 free**（此刻无并发触发，消 UAF 竞态）；泵未回收的（含泵已死/从未 off）随
-//! control_close 全量释放——两条回收路径按"是否仍在注册表"互斥，恰好一次。
+//! Pump discipline per the lib.rs header note: callbacks fire only on the ack pump thread, hold no lock, and return quickly.
+//! user_free exactly-once contract: off_ack only marks entries retired; **the pump reclaims them uniformly at the start of the next round and calls free outside the lock**
+//! (no concurrent firing at that moment, eliminating the UAF race); entries the pump never reclaims (pump dead / never off'ed) are
+//! all released by control_close — the two reclamation paths are mutually exclusive by "still in the registry", giving exactly once.
 
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_void};
@@ -23,18 +23,18 @@ use crate::errors::{
 };
 use crate::{ffi_catch, mediaservo_client_ack_cb, mediaservo_client_user_free, runtime};
 
-/// 一条 ack 回调注册（累积形；token 单调自增，0 = 保留无效值）。
+/// One ack-callback registration (cumulative form; token is monotonically increasing, 0 = reserved invalid value).
 struct AckReg {
     token: u64,
     cb: mediaservo_client_ack_cb,
     user: *mut c_void,
     free: Option<mediaservo_client_user_free>,
-    /// off_ack 标记：泵下轮回收（锁外 free），close 兜底。
+    /// off_ack marker: reclaimed by the pump next round (freed outside the lock), with close as the backstop.
     retired: bool,
 }
 
-/// 出程控制通道集 opaque handle。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
+/// Outbound control channel set opaque handle.
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception)
 pub struct mediaservo_client_control_t {
     pub(crate) ctl: Mutex<ControlChannel>,
     closed: AtomicBool,
@@ -44,9 +44,9 @@ pub struct mediaservo_client_control_t {
     err: ErrSlot,
 }
 
-// SAFETY: 内部 Mutex<ControlChannel>（libwebrtc DC/PC 句柄线程安全，livekit 惯例）。
+// SAFETY: inner Mutex<ControlChannel> (libwebrtc DC/PC handles are thread-safe, the livekit convention).
 unsafe impl Send for mediaservo_client_control_t {}
-// SAFETY: 所有方法经 Mutex/AtomicBool 序列化。
+// SAFETY: all methods are serialized through Mutex/AtomicBool.
 unsafe impl Sync for mediaservo_client_control_t {}
 
 impl HandleErr for mediaservo_client_control_t {
@@ -56,7 +56,7 @@ impl HandleErr for mediaservo_client_control_t {
 }
 
 impl mediaservo_client_control_t {
-    /// 组合操作（emergency_stop）用的闭包检查 + 锁访问器（锁序 session→ctl 由调用方维持）。
+    /// Closure check + lock accessors for compound operations (emergency_stop); the caller maintains the lock order session→ctl.
     pub(crate) fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
     }
@@ -81,7 +81,7 @@ pub(crate) fn into_raw(handle: mediaservo_client_control_t) -> *mut mediaservo_c
     Box::into_raw(Box::new(handle))
 }
 
-/// RTCDataChannelState → 线值（0..3，头文件枚举注释钉；穷尽 match=新变体编译红）。
+/// RTCDataChannelState → wire value (0..3, pinned by the header enum comment; exhaustive match = a new variant turns the build red).
 fn dc_state_u8(st: RTCDataChannelState) -> u8 {
     match st {
         RTCDataChannelState::Connecting => 0,
@@ -91,8 +91,8 @@ fn dc_state_u8(st: RTCDataChannelState) -> u8 {
     }
 }
 
-/// ack 泵线程：每轮开头回收 retired（锁外 free）→ 快照 active → recv_ack(1s) →
-/// 逐个回调（累积形：一条 ack 触发全部 active）。
+/// Ack pump thread: each round reclaims retired entries first (free outside the lock) → snapshot active → recv_ack(1s) →
+/// invoke callbacks one by one (cumulative form: one ack triggers all active entries).
 fn ack_pump(raw: usize) {
     let c = raw as *mut mediaservo_client_control_t;
     let h = unsafe { &*c };
@@ -101,7 +101,7 @@ fn ack_pump(raw: usize) {
         if h.closed.load(Ordering::SeqCst) {
             break;
         }
-        // retired 回收（off_ack 已标但仍在表）——此刻不持回调锁，free 安全。
+        // Reclaim retired entries (off_ack marked but still in the table) — the callback lock is not held here, so freeing is safe.
         let reaped: Vec<AckReg> = match h.regs.lock() {
             Ok(mut g) => {
                 if !g.iter().any(|r| r.retired) {
@@ -120,7 +120,7 @@ fn ack_pump(raw: usize) {
                     dead
                 }
             }
-            Err(_) => break, // poisoned = 有线程 panic 在临界区，收敛退出
+            Err(_) => break, // poisoned = a thread panicked inside the critical section; converge and exit
         };
         for r in reaped {
             if let Some(f) = r.free {
@@ -136,7 +136,7 @@ fn ack_pump(raw: usize) {
         match item {
             Ok(ack) => {
                 let json = serde_json::to_string(&ack).unwrap_or_default();
-                // CString 存活至回调返回（serde_json 输出无内嵌 NUL）。
+                // The CString lives until the callback returns (serde_json output has no embedded NUL).
                 if let Ok(cstr) = CString::new(json) {
                     for (cb, user) in &actives {
                         cb(c, cstr.as_ptr(), *user);
@@ -145,20 +145,20 @@ fn ack_pump(raw: usize) {
             }
             Err(e) => {
                 if matches!(e, ClientError::Timeout { .. }) {
-                    continue; // 单轮窗空，正常续
+                    continue; // empty round window; keep going normally
                 }
                 h.fail_client("ack pump", &e);
-                break; // InvalidState（DC 断开）等终态
+                break; // terminal states like InvalidState (DC disconnected)
             }
         }
     }
 }
 
-/// 注册 ack 回调（**累积形**：多次注册 = 每条 ack 逐个回调；首次注册启动泵）。
+/// Register an ack callback (**cumulative form**: multiple registrations = each ack invokes them one by one; the first registration starts the pump).
 ///
-/// out_token 回传注销凭据（可 NULL；0 = 无效值）。cb=NULL → 拒（注销走
-/// [`mediaservo_client_control_off_ack`]，本形无"取消全部"语义）。user_free 在
-/// off_ack 后的泵回收轮（≤ACK_POLL）或 control_close 时恰好调用一次。
+/// out_token returns the unregistration credential (may be NULL; 0 = invalid value). cb=NULL → reject (unregistration goes through
+/// [`mediaservo_client_control_off_ack`]; this form has no "cancel all" semantics). user_free runs
+/// exactly once at the pump reclamation round after off_ack (≤ACK_POLL) or at control_close.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_control_on_ack(
     c: *mut mediaservo_client_control_t,
@@ -177,7 +177,7 @@ pub extern "C" fn mediaservo_client_control_on_ack(
         };
         let Some(cb) = cb else {
             return h.fail_arg(
-                "mediaservo_client_control_on_ack: cb required (off_ack 注销，NULL 无取消语义)",
+                "mediaservo_client_control_on_ack: cb required (unregister via off_ack; NULL has no cancel semantics)",
             );
         };
         if h.closed.load(Ordering::SeqCst) {
@@ -194,10 +194,10 @@ pub extern "C" fn mediaservo_client_control_on_ack(
             guard.push(AckReg { token, cb, user, free: user_free, retired: false });
         }
         if !out_token.is_null() {
-            // SAFETY: 已判非 null；指向调用方 u64 存储。
+            // SAFETY: already checked non-null; points at caller-owned u64 storage.
             unsafe { *out_token = token };
         }
-        // 首次注册启动 ack 泵（同 link on_event 纪律）。
+        // The first registration starts the ack pump (same discipline as link's on_event).
         let mut pump_guard = match h.pump.lock() {
             Ok(g) => g,
             Err(_) => {
@@ -213,8 +213,8 @@ pub extern "C" fn mediaservo_client_control_on_ack(
     })
 }
 
-/// 按 token 注销 ack 回调（标记 retired，泵下轮回收并调用其 user_free；对**下一轮
-/// 之后**到达的 ack 不再生效——在途轮次可能仍触发一次，属有界宽限）。未知 token →
+/// Unregister an ack callback by token (marks it retired; the pump reclaims it next round and invokes its user_free; acks arriving **after the next
+/// round** no longer trigger it — an in-flight round may still fire once, which is bounded grace). Unknown token →
 /// ERR_INVALID_ARG。
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_control_off_ack(
@@ -246,7 +246,7 @@ pub extern "C" fn mediaservo_client_control_off_ack(
     })
 }
 
-/// 发送一条命令信封（serde 构造，非拼接）。payload_json NULL/"" = null payload。
+/// Send one command envelope (serde-built, never concatenated). payload_json NULL/"" = a null payload.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_control_send(
     c: *mut mediaservo_client_control_t,
@@ -291,8 +291,8 @@ pub extern "C" fn mediaservo_client_control_send(
     })
 }
 
-/// DC 就绪态（out_state: 0=Connecting 1=Open 2=Closing 3=Closed；=RTCDataChannelState
-/// 稳定线值，K5 背压/发送前门禁用）。
+/// DC ready state (out_state: 0=Connecting 1=Open 2=Closing 3=Closed; = the RTCDataChannelState
+/// stable wire values; used by K5 backpressure and the pre-send gate).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_control_ready_state(
     c: *const mediaservo_client_control_t,
@@ -323,8 +323,8 @@ pub extern "C" fn mediaservo_client_control_ready_state(
     })
 }
 
-/// SCTP 背压水位（字节数；0 = 可安全追加。阻塞取 DC 状态，≤ACK_POLL 窗内与 ack 泵
-/// 争锁——单线程属主契约内可接受）。
+/// SCTP backpressure water level (bytes; 0 = safe to append). Blocks to fetch the DC state, contending with the ack pump for ≤ACK_POLL
+/// — acceptable within the single-thread-owner contract).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_control_buffered_amount(
     c: *mut mediaservo_client_control_t,
@@ -356,8 +356,8 @@ pub extern "C" fn mediaservo_client_control_buffered_amount(
     })
 }
 
-/// producer id JSON 数组（观测面，镜像 ControlChannel::producer_ids()）。
-/// needed 溢出合同同 list_rooms（批1b 升形：旧固定 buf 盲点修正）。
+/// producer id JSON array (observation surface, mirroring ControlChannel::producer_ids()).
+/// Same needed overflow contract as list_rooms (the batch-1b upgrade: fixes the old fixed-buffer blind spot).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_control_producer_ids(
     c: *const mediaservo_client_control_t,
@@ -401,8 +401,8 @@ pub extern "C" fn mediaservo_client_control_producer_ids(
     })
 }
 
-/// 关闭控制通道并释放 handle（幂等；置 closed → join ack 泵 → 全量回收注册表：
-/// 未被泵回收的条目在此逐条 user_free——含 retired-未及回收与从未 off 的活跃项）。
+/// Close the control channel and release the handle (idempotent; sets closed → joins the ack pump → reclaims the whole registry:
+/// entries the pump never reclaimed get user_free here one by one — including retired-but-unreclaimed and active entries never off'ed).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_control_close(c: *mut mediaservo_client_control_t) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -411,13 +411,13 @@ pub extern "C" fn mediaservo_client_control_close(c: *mut mediaservo_client_cont
         }
         let handle = unsafe { Box::from_raw(c) };
         if handle.closed.swap(true, Ordering::SeqCst) {
-            return MEDIASERVO_OK; // 幂等
+            return MEDIASERVO_OK; // idempotent
         }
         if let Some(join) = handle.pump.lock().ok().and_then(|mut g| g.take()) {
-            let _ = join.join(); // 泵单轮 ≤ACK_POLL，join 有界
+            let _ = join.join(); // one pump round is ≤ACK_POLL, so the join is bounded
         }
-        // 泵 join 后无并发触发：表内残留条目（retired 未回收 or 活跃从未 off）
-        // 全部在此释放——泵已回收的条目已出表，恰好一次总账成立。
+        // After the pump join there is no concurrent firing: leftover registry entries (retired-but-unreclaimed or active-never-offed)
+        // are all released here — entries the pump reclaimed are already out of the table, so the exactly-once ledger holds.
         let regs = handle.regs.lock().ok().map(|mut g| std::mem::take(&mut *g)).unwrap_or_default();
         for r in regs {
             if let Some(f) = r.free {
@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn dc_state_line_values_pinned() {
-        // 线值合同（header 注释钉）：改动即红。
+        // Wire-value contract (pinned by the header comments): any change turns it red.
         assert_eq!(dc_state_u8(RTCDataChannelState::Connecting), 0);
         assert_eq!(dc_state_u8(RTCDataChannelState::Open), 1);
         assert_eq!(dc_state_u8(RTCDataChannelState::Closing), 2);
@@ -510,9 +510,9 @@ mod tests {
 
     #[test]
     fn on_ack_requires_cb_and_closed_control_state() {
-        // ControlChannel 无公开构造（真 DC 依赖），本层只钉守卫形：
-        // closed 句柄不可得（new() 需真 channel）——null 守卫 + 线值表已覆盖
-        // 可确定面；注册/回收活体语义 = 1c（对真 server）。
+        // ControlChannel has no public constructor (needs a real DC); this layer only pins the guard forms:
+        // a closed handle is unobtainable (new() needs a real channel) — the null guard + the wire-value table cover
+        // the determinable surface; live registration/reclamation semantics = 1c (against a real server).
         let mut token = 0u64;
         assert_eq!(
             mediaservo_client_control_on_ack(
@@ -524,7 +524,7 @@ mod tests {
             ),
             MEDIASERVO_CLIENT_ERR_INVALID_ARG
         );
-        // STATE 码通路上面的 off_ack(null) 已钉 INVALID_ARG 形；closed 形归 1c。
+        // The STATE-code path above already pinned off_ack(null) as INVALID_ARG; the closed form belongs to 1c.
         let _ = MEDIASERVO_CLIENT_ERR_STATE;
     }
 }

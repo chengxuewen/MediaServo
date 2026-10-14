@@ -1,19 +1,19 @@
-//! host.yaml → oxfile.toml 翻译器（Task A2 + C1）。
+//! host.yaml → oxfile.toml translator (Task A2 + C1).
 //!
-//! 输入 host.yaml 文本，输出 OxMgr oxfile.toml 文本（`version = 1` + `[defaults]` +
-//! `[[apps]]`，字段对齐官方 [OXFILE.md](https://github.com/Vladimir-Urik/OxMgr)）。
-//! apps 含 7 类 host 进程 + 每 source 一个 capturer 实例 + 每 stream 一个 streamer
-//! 实例（command 参数化）。Phase A 输出占位进程骨架；C1 起 capturer 实例追加
+//! Input: host.yaml text. Output: OxMgr oxfile.toml text (`version = 1` + `[defaults]` +
+//! `[[apps]]`, fields aligned with the official [OXFILE.md](https://github.com/Vladimir-Urik/OxMgr).
+//! apps cover the 7 host process kinds + one capturer instance per source + one streamer
+//! instance per stream (parameterized command). Phase A emits placeholder process skeletons; from C1 the capturer instance appends
 
 use std::path::{Path, PathBuf};
 
 use mediaservo_common::protocol::SignalingMessage;
 use serde::Deserialize;
 
-/// host.yaml 解析模型（Phase A 子集：只需 sources/streams 做实例化）。
+/// host.yaml parse model (Phase A subset: only sources/streams needed for instantiation).
 #[derive(Debug, Default, Deserialize)]
 struct HostConfig {
-    /// 视频源列表（替代旧 cameras 键；旧键名 `cameras` 兼容解析）。
+    /// Video source list (replaces the legacy cameras key; old key name `cameras` still parsed).
     #[serde(default, alias = "cameras")]
     sources: Vec<Source>,
     #[serde(default)]
@@ -22,41 +22,41 @@ struct HostConfig {
     record: Option<RecordSection>,
     #[serde(default)]
     signaling: Option<SignalingSection>,
-    /// 公共缺省段（`defaults.streams` / `defaults.sources`）——合并链
-    /// **逐条配置 > defaults.<子节> > 内置默认**（D282）。缺段 = 零注入：不改变任何
-    /// resolved 值（内置缺省本身由 D282 单独改判）。
+    /// Shared defaults section (`defaults.streams` / `defaults.sources`) — merge chain
+    /// **per-entry config > defaults.<subsection> > builtin default** (D282). Missing section = zero injection: changes no
+    /// resolved value (the builtin defaults themselves were separately revised by D282).
     #[serde(default)]
     defaults: DefaultsCfg,
-    /// 遥控执行域（V5）：急停验签密钥文件等 controller 进程配置。
+    /// Remote-control execution domain (V5): estop signature key file and other controller process config.
     #[serde(default)]
     control: Option<ControlSection>,
 }
 
-/// [control] 节（V5/F11 部署面收口）。
+/// [control] section (V5/F11 deployment-surface closure).
 #[derive(Debug, Default, Deserialize)]
 struct ControlSection {
-    /// 急停命令 HMAC 验签密钥文件（相对路径按实例根解析；渲染为
-    /// controller `--hmac-key-file`，0600 权限门由加载器强制）。
-    /// 缺省 = dev 迁移形（controller 放行 + WARN，S4 estop_verdict 矩阵）。
+    /// Estop command HMAC signature key file (relative paths resolved against the instance root; rendered as
+    /// controller `--hmac-key-file`; the 0600 permission gate is enforced by the loader).
+    /// Default = dev migration form (controller passes through + WARN, S4 estop_verdict matrix).
     #[serde(default)]
     hmac_key_file: Option<String>,
 }
-/// 视频源逻辑类别（mode 四类；`backend`/`input` 按 mode 生效）。
+/// Logical category of a video source (4 mode kinds; `backend`/`input` take effect per mode).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceMode {
-    /// 真实相机采集（backend v4l2/mipi；采集后端本期未实现）。
+    /// Real camera capture (backend v4l2/mipi; capture backend not implemented this phase).
     Camera,
-    /// 测试/演示彩条生成（VideoFrameGenerator 真实产帧）。
+    /// Test/demo color-bar generation (VideoFrameGenerator produces real frames).
     Generator,
-    /// 屏幕采集（本期未实现）。
+    /// Desktop capture (not implemented this phase).
     Desktop,
-    /// 订阅外部源（FrameBus/ROS topic；本期未实现）。
+    /// Subscribe to an external source (FrameBus/ROS topic; not implemented this phase).
     Subscriber,
 }
 
 impl SourceMode {
-    /// 配置字面（capturer 错误/ready 日志显示）。
+    /// Config literal (shown in capturer error/ready logs).
     pub fn as_str(&self) -> &'static str {
         match self {
             SourceMode::Camera => "camera",
@@ -70,30 +70,30 @@ impl SourceMode {
 #[derive(Debug, Deserialize)]
 struct Source {
     id: String,
-    /// 逻辑类别（缺省 generator —— 旧配置无 mode 字段 = 原 stub 生成语义）。
+    /// Logical category (default generator — legacy configs without a mode field = original stub generation semantics).
     #[serde(default)]
     mode: Option<SourceMode>,
-    /// 采集后端（仅 mode=camera 生效：v4l2 | mipi）。
+    /// Capture backend (effective only for mode=camera: v4l2 | mipi).
     #[serde(default)]
     #[allow(dead_code)]
-    // C36 字段就位（后端选择经 select_backend 消费链，struct 侧未读 = 在册形态）
+    // C36 field in place (backend selection is consumed via the select_backend chain; unread on the struct side = on-record shape)
     backend: Option<String>,
-    /// 源地址统一字段：v4l2=设备路径 / subscriber=FrameBus/ROS topic / desktop=显示标识（可空）。
+    /// Unified source address field: v4l2=device path / subscriber=FrameBus/ROS topic / desktop=display id (optional).
     #[serde(default)]
     input: Option<String>,
-    /// 帧宽（缺省 1280；subscriber 可省略——帧自带元数据）。
+    /// Frame width (default 1280; subscriber may omit — frames carry their own metadata).
     #[serde(default)]
     width: Option<u32>,
-    /// 帧高（缺省 720；subscriber 可省略）。
+    /// Frame height (default 720; subscriber may omit).
     #[serde(default)]
     height: Option<u32>,
-    /// 帧率（缺省 30）。
+    /// Frame rate (default 30).
     #[serde(default)]
     fps: Option<u32>,
-    /// 相机重连间隔 ms（预留；本期未消费）。
+    /// Camera reconnect interval ms (reserved; not consumed this phase).
     #[serde(default)]
     reconnect_ms: Option<u64>,
-    /// 旧字段（旧 `camera.source: "stub"` 兼容吞掉；非 "stub" 拒绝——迁移提示）。
+    /// Legacy field (swallowed for compat with old `camera.source: "stub"`; non-"stub" rejected — migration hint).
     #[serde(default)]
     source: Option<String>,
 }
@@ -101,39 +101,39 @@ struct Source {
 #[derive(Debug, Deserialize)]
 struct Stream {
     id: String,
-    /// 引用的源 id（缺省 = 流 id 自身，topic camera/<id> 直连）。旧键名 `camera` 兼容。
+    /// Referenced source id (default = the stream id itself, topic camera/<id> direct). Old key name `camera` compatible.
     #[serde(default, alias = "camera")]
     source: Option<String>,
-    /// 编码格式（缺省 h264——host 层裁决，D282；field PublishOptions 自身默认仍是 vp8，
-    /// 仅供未经 host 合并的直接调用方回落）。
+    /// Codec (default h264 — decided at the host layer, D282; field PublishOptions own default is still vp8,
+    /// only as a fallback for direct callers that bypass host merging).
     #[serde(default)]
     codec: Option<String>,
-    /// 编码器后端（auto/software/hardware/nvenc/vaapi；缺省 auto 运行时选择）。
+    /// Encoder backend (auto/software/hardware/nvenc/vaapi; default auto = runtime selection).
     #[serde(default)]
     encoder_backend: Option<String>,
-    /// 编码码率 kbps（缺省 2000——field PushConfig 默认）。
+    /// Encode bitrate kbps (default 2000 — field PushConfig default).
     #[serde(default)]
     bitrate_kbps: Option<u32>,
-    /// 弱网策略档（smooth|balanced|quality；缺省 balanced=现状行为，qos-framerate-priority）。
+    /// Weak-network policy preset (smooth|balanced|quality; default balanced = current behavior, qos-framerate-priority).
     #[serde(default)]
     stream_mode: Option<String>,
-    /// 码率地板 kbps（显式覆盖位；缺省随 stream_mode bundle 填充）。
+    /// Bitrate floor kbps (explicit override slot; default follows the stream_mode bundle fill).
     #[serde(default)]
     min_bitrate_kbps: Option<u32>,
-    /// 关键帧间隔秒（GOP；缺省 2——field PushConfig 默认）。
+    /// Keyframe interval seconds (GOP; default 2 — field PushConfig default).
     #[serde(default)]
     keyframe_interval: Option<u32>,
 }
 
-/// `defaults:` 段（host-stream-defaults D282）——streams / sources 两子节公共缺省。
+/// `defaults:` section (host-stream-defaults D282) — shared defaults for the streams / sources subsections.
 ///
-/// 合并链 **逐条配置 > defaults.<子节> > 内置默认**，只在两个唯一解析点各落一次
-/// （`camera_configs()` / `stream_configs()`），下游（oxfile 裁决段、capturer/streamer
-/// 进程内解析）只见合并完毕的 resolved 值。
+/// Merge chain **per-entry config > defaults.<subsection> > builtin default**, applied exactly once at each of the two
+/// single parse points (`camera_configs()` / `stream_configs()`); downstream (the oxfile decision section, in-process
+/// parsing in capturer/streamer) only ever sees fully merged resolved values.
 ///
-/// deny 姿态：两子结构带 `deny_unknown_fields`（新键无历史包袱，typo 在 deploy 期
-/// 报错——最易写错的层恰恰最严）；顶层 [`HostConfig`] **不加**（存量 yaml 带弃用键，
-/// 如 `host:` / `control:` 段与旧 `source: "stub"` 兼容面，加了就咬）。
+/// Deny stance: both sub-structs carry `deny_unknown_fields` (new keys with no legacy baggage — typos error at deploy time,
+/// the layer most easily mistyped is the strictest); the top-level [`HostConfig`] does **not** (existing yamls carry
+/// deprecated keys like `host:` / `control:` sections and the old `source: "stub"` compat surface — deny would bite).
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DefaultsCfg {
@@ -143,8 +143,8 @@ struct DefaultsCfg {
     streams: StreamDefaults,
 }
 
-/// `defaults.streams` —— 键名与 `streams[]` 条目原键一致（不含 id/source：写了由
-/// deny_unknown_fields 在 deploy 期拒掉，公共层无身份语义）。
+/// `defaults.streams` — key names identical to the `streams[]` entry keys (excludes id/source: writing them is
+/// rejected at deploy time by deny_unknown_fields; the shared layer has no identity semantics).
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StreamDefaults {
@@ -162,16 +162,16 @@ struct StreamDefaults {
     keyframe_interval: Option<u32>,
 }
 
-/// `defaults.sources` —— 平台/调参键（width/height/fps/reconnect_ms/backend）。
-/// **身份/拓扑键不入公共层**（D282 修订裁决）：`mode`（源类型）与 `input`（源地址）
-/// 属每源身份属性，写在条目上——公共化会让"新源忘配身份"静默落入错误形态
-/// （如全局 generator 下新相机漏写 mode → 彩条顶替真实画面）。写了直接 deny 报错。
+/// `defaults.sources` — platform/tuning keys (width/height/fps/reconnect_ms/backend).
+/// **Identity/topology keys stay out of the shared layer** (D282 revision): `mode` (source type) and `input` (source address)
+/// are per-source identity attributes written on entries — making them shared lets "new source missing identity config"
+/// silently fall into the wrong shape (e.g. under a global generator a new camera missing mode → color bars replace real video). Writing them errors out via deny.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SourceDefaults {
-    /// 平台统一采集后端声明——整台机同后端是合法公共语义（x86 全 v4l2 / Jetson 全 mipi）。
-    /// 注：**预留位**（条目层同口径）——当前 capturer 按 mode+input 自动选型，v4l2 为
-    /// 唯一实现；mipi 后端接线时条目+公共层一并生效。
+    /// Platform-wide capture backend declaration — one backend for the whole machine is legal shared semantics (x86 all v4l2 / Jetson all mipi).
+    /// Note: **reserved slot** (entry layer same policy) — the current capturer auto-selects by mode+input and v4l2 is
+    /// the only implementation; when the mipi backend is wired, entry + shared layers activate together.
     #[serde(default)]
     #[allow(dead_code)]
     backend: Option<String>,
@@ -193,85 +193,85 @@ struct RecordSection {
     out_dir: Option<String>,
 }
 
-/// `[signaling]` 段（D1: agent 网关本地端口; I1 review: 整车房间）。
+/// `[signaling]` section (D1: agent gateway local port; I1 review: vehicle-wide room).
 #[derive(Debug, Deserialize)]
 struct SignalingSection {
     #[serde(default)]
     local_port: Option<u16>,
-    /// 整车房间（D3 TODO 关闭 — host-agent --room；缺省 = agent 内置 "vehicle"）。
+    /// Vehicle-wide room (D3 TODO closed — host-agent --room; default = agent builtin "vehicle").
     #[serde(default)]
     room: Option<String>,
-    /// 远程 MediaServo server WS URL（缺省 agent 内置 ws://127.0.0.1:9800/ws）。
+    /// Remote MediaServo server WS URL (default agent builtin ws://127.0.0.1:9800/ws).
     #[serde(default)]
     server_url: Option<String>,
-    /// 信令 PSK（缺省 agent 内置 mediaservo-dev）。
+    /// Signaling PSK (default agent builtin mediaservo-dev).
     #[serde(default)]
     psk: Option<String>,
 }
 
-/// 网关本地端口（[signaling] local_port；缺省 None → agent 内置 17980）。
+/// Gateway local port ([signaling] local_port; default None → agent builtin 17980).
 pub fn signaling_local_port(cfg: &str) -> Result<Option<u16>, String> {
     let cfg: HostConfig =
-        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml parse failed: {e}"))?;
     Ok(cfg.signaling.and_then(|s| s.local_port))
 }
 
-/// 整车房间（[signaling] room；缺省 None → host-agent 内置默认 "vehicle"）。
-/// D3 TODO（gateway.rs Default）关闭 — translate 负责把配置翻译进 oxfile。
+/// Vehicle-wide room ([signaling] room; default None → host-agent builtin default "vehicle").
+/// Closes the D3 TODO (gateway.rs Default) — translate is responsible for rendering the config into the oxfile.
 pub fn signaling_room(cfg: &str) -> Result<Option<String>, String> {
     let cfg: HostConfig =
-        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml parse failed: {e}"))?;
     Ok(cfg.signaling.and_then(|s| s.room))
 }
 
-/// [control].hmac_key_file（V5；缺省 None → controller 零扰动）。
+/// [control].hmac_key_file (V5; default None → controller zero perturbation).
 pub fn control_hmac_key_file(cfg: &str) -> Result<Option<String>, String> {
     let cfg: HostConfig =
-        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml parse failed: {e}"))?;
     Ok(cfg.control.and_then(|c| c.hmac_key_file))
 }
 
-/// 远程 server URL（[signaling] server_url；缺省 None → host-agent 内置默认）。
+/// Remote server URL ([signaling] server_url; default None → host-agent builtin default).
 pub fn signaling_server_url(cfg: &str) -> Result<Option<String>, String> {
     let cfg: HostConfig =
-        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml parse failed: {e}"))?;
     Ok(cfg.signaling.and_then(|s| s.server_url))
 }
 
-/// 信令 PSK（[signaling] psk；缺省 None → host-agent 内置默认）。
+/// Signaling PSK ([signaling] psk; default None → host-agent builtin default).
 pub fn signaling_psk(cfg: &str) -> Result<Option<String>, String> {
     let cfg: HostConfig =
-        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml parse failed: {e}"))?;
     Ok(cfg.signaling.and_then(|s| s.psk))
 }
 
-/// 子进程网关 URL（D2）：`ws://127.0.0.1:{port}/ws`，port = [signaling] local_port
-/// 或缺省 17980（与 host-agent 内置默认一致）。
+/// Child-process gateway URL (D2): `ws://127.0.0.1:{port}/ws`, port = [signaling] local_port
+/// or the default 17980 (matching the host-agent builtin default).
 pub fn signaling_gateway_url(cfg: &str) -> Result<String, String> {
     let port = signaling_local_port(cfg)?.unwrap_or(crate::gateway::DEFAULT_LOCAL_PORT);
     Ok(format!("ws://127.0.0.1:{port}/ws"))
 }
 
-/// 固定 5 类进程 base 名（无品牌前缀——默认品牌映射 legacy "host-*"，见 brand.rs）。
+/// Fixed 5 process base names (no brand prefix — the default brand maps to legacy "host-*", see brand.rs).
 const FIXED_APP_BASES: [&str; 5] = ["agent", "recorder", "controller", "emergency", "audio"];
 
-/// app 名 = 品牌前缀 + base（默认 "host-" → "host-agent"；品牌化 "cp-agent"）。
+/// app name = brand prefix + base (default "host-" → "host-agent"; branded "cp-agent").
 fn app_name(base: &str) -> String {
     format!("{}{}", mediaservo_common::brand::media_brand().app_prefix, base)
 }
 
-/// host.yaml → oxfile.toml 文本。
+/// host.yaml → oxfile.toml text.
 ///
-/// 实例名一律 `类型-id`（如 `host-capturer-cam0`）——E4 配置演进下 app 身份稳定：
-/// 增删相机/流不得改名既有实例（1↔N 边界 rename 会丢 oxmgr 历史 + 留残留进程）。
-/// ——OxMgr validate 拒绝重复 app 名（CLI.md "duplicate app name" 硬错误）。
-/// 无路径变体：capturer 实例仅 `--camera <id>`（A2 形态，doctor/测试用）。
+/// Instance names are always `type-id` (e.g. `host-capturer-cam0`) — E4 keeps app identity stable across config evolution:
+/// adding/removing cameras/streams must never rename existing instances (a 1↔N boundary rename loses oxmgr history + leaves residual processes).
+/// OxMgr validate rejects duplicate app names (CLI.md "duplicate app name" hard error).
+/// Pathless variant: capturer instances get only `--camera <id>` (A2 shape, for doctor/tests).
 pub fn to_oxfile(cfg: &str) -> Result<String, String> {
     to_oxfile_with_paths(cfg, Path::new(""), Path::new(""))
 }
 
-/// host.yaml → oxfile.toml，capturer 实例追加 `--config <dir>/etc/host.yaml`
-/// 与 `--token <dir>/etc/link/<cam>.token` 绝对路径（Task C1）。
+/// host.yaml → oxfile.toml; capturer instances get absolute `--config <dir>/etc/host.yaml`
+/// and `--token <dir>/etc/link/<cam>.token` paths appended (Task C1).
 pub fn to_oxfile_in_dir(cfg: &str, dir: &Path) -> Result<String, String> {
     let config_path = std::path::absolute(dir.join("etc").join("host.yaml"))
         .unwrap_or_else(|_| dir.join("etc").join("host.yaml"));
@@ -280,12 +280,12 @@ pub fn to_oxfile_in_dir(cfg: &str, dir: &Path) -> Result<String, String> {
     to_oxfile_with_paths(cfg, &config_path, &token_dir)
 }
 
-// ── E4 云端配置闭环: 校验/备份/写入/apply 共享实现（host CLI 与 host-agent 同源） ──
+// ── E4 cloud config loop: shared validate/backup/write/apply implementation (host CLI and host-agent same source) ──
 
-/// 校验 host.yaml（与各消费进程同一解析路径：camera/stream/record/signaling；
-/// 另含重复 id 守卫——重复 → oxfile app 名重复 → oxmgr apply 硬错误）。
-/// F2: id 字符集守卫 [A-Za-z0-9_-]+ —— 非法字符（引号/换行/路径穿越）会产出
-/// 畸形 oxfile（push_app 未转义）或投毒令牌路径，必须拒绝。
+/// Validate host.yaml (the same parse path each consuming process uses: camera/stream/record/signaling;
+/// plus a duplicate-id guard — duplicates → duplicate oxfile app names → oxmgr apply hard error).
+/// F2: id charset guard [A-Za-z0-9_-]+ — illegal characters (quotes/newlines/path traversal) would produce
+/// malformed oxfile (push_app does not escape) or poison token paths; must reject.
 pub fn validate(cfg: &str) -> Result<(), String> {
     let sources = camera_configs(cfg)?;
     let streams = stream_configs(cfg)?;
@@ -294,60 +294,65 @@ pub fn validate(cfg: &str) -> Result<(), String> {
     signaling_room(cfg)?;
     let mut seen = std::collections::HashSet::new();
     for c in &sources {
-        check_id("视频源", &c.id)?;
+        check_id("source", &c.id)?;
         if !seen.insert(c.id.clone()) {
-            return Err(format!("host.yaml 解析失败: 视频源 id 重复: {}", c.id));
+            return Err(format!("host.yaml parse failed: duplicate video source id: {}", c.id));
         }
     }
     let mut seen = std::collections::HashSet::new();
     for s in &streams {
-        check_id("流", &s.id)?;
+        check_id("stream", &s.id)?;
         if !seen.insert(s.id.clone()) {
-            return Err(format!("host.yaml 解析失败: 流 id 重复: {}", s.id));
+            return Err(format!("host.yaml parse failed: duplicate stream id: {}", s.id));
         }
     }
     Ok(())
 }
 
-/// F2: id 字符集守卫——仅允许 [A-Za-z0-9_-]+（oxfile app 名/令牌文件名/
-/// FrameBus topic 均直接拼入 id，非法字符导致畸形输出或路径穿越）。
+/// F2: id charset guard — only [A-Za-z0-9_-]+ allowed (the oxfile app name / token file name /
+/// FrameBus topic all interpolate the id directly; illegal chars cause malformed output or path traversal).
 fn check_id(kind: &str, id: &str) -> Result<(), String> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
-        return Err(format!("host.yaml 解析失败: {kind} id 非法: {id:?}（仅允许 [A-Za-z0-9_-]+）"));
+        return Err(format!(
+            "host.yaml parse failed: {kind} id invalid: {id:?} (only [A-Za-z0-9_-]+ allowed)"
+        ));
     }
     Ok(())
 }
 
-/// 原子写（tmp + rename）— oxmgr file-watch 只见完整文件，读端不见半写状态。
+/// Atomic write (tmp + rename) — oxmgr file-watch only ever sees complete files; readers never see half-written state.
 fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, content).map_err(|e| format!("写入 {} 失败: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("写入 {} 失败: {e}", path.display()))
+    std::fs::write(&tmp, content).map_err(|e| format!("write {} failed: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("write {} failed: {e}", path.display()))
 }
 
-/// 校验 + 翻译 + 原子写 run/oxfile.toml，返回 oxfile 路径。
+/// Validate + translate + atomic write to run/oxfile.toml; returns the oxfile path.
 pub fn write_oxfile(cfg: &str, dir: &Path) -> Result<PathBuf, String> {
     validate(cfg)?;
-    // V5 部署期守卫：配置了验签密钥但文件缺失 = 渲染拦下（早死优于 controller
-    // crash-loop×restart_policy 风暴——读失败 panic 是执行侧纪律，部署侧更前应拦）。
+    // V5 deploy-time guard: a configured signature key with a missing file = blocked at render (dying early beats the
+    // controller crash-loop × restart_policy storm — a read-failure panic is executor-side discipline; the deploy side should block sooner).
     if let Some(rel) = control_hmac_key_file(cfg)? {
-        let p = dir.join(&rel); // rel 绝对形时 join 直取
+        let p = dir.join(&rel); // when rel is absolute, join takes it directly
         if !p.exists() {
-            return Err(format!("[control].hmac_key_file 指向的文件不存在: {}", p.display()));
+            return Err(format!(
+                "[control].hmac_key_file points to a missing file: {}",
+                p.display()
+            ));
         }
     }
     let ox = to_oxfile_in_dir(cfg, dir)?;
     let run_dir = dir.join("run");
     std::fs::create_dir_all(&run_dir)
-        .map_err(|e| format!("创建 {} 失败: {e}", run_dir.display()))?;
+        .map_err(|e| format!("create {} failed: {e}", run_dir.display()))?;
     let oxfile = run_dir.join("oxfile.toml");
     atomic_write(&oxfile, &ox)?;
     Ok(oxfile)
 }
 
-/// F1: 从 etc/host.yaml.bak-<version> 备份恢复最近应用版本（取最大版本）。
-/// agent 被 oxfile [defaults].watch 重启后 config_version 不归零——磁盘上已应用
-/// 的版本与 StatusReport.config_version 的关联契约。无备份 → 0。
+/// F1: recover the most recently applied version from etc/host.yaml.bak-<version> backups (take the max version).
+/// After the agent is restarted via the oxfile [defaults].watch, config_version does not reset to zero — the association
+/// contract between the version applied on disk and StatusReport.config_version. No backup → 0.
 pub fn recover_config_version(dir: &Path) -> u64 {
     let Ok(entries) = std::fs::read_dir(dir.join("etc")) else { return 0 };
     entries
@@ -360,18 +365,18 @@ pub fn recover_config_version(dir: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// 备份当前 host.yaml → etc/host.yaml.bak-<version>（ConfigPush 应用前置）。
-/// 备份当前 host.yaml → etc/host.yaml.bak-<version>（ConfigPush 应用前置）。
+/// Back up the current host.yaml → etc/host.yaml.bak-<version> (pre-step of applying a ConfigPush).
+/// Back up the current host.yaml → etc/host.yaml.bak-<version> (pre-step of applying a ConfigPush).
 pub fn backup_host_config(dir: &Path, version: u64) -> Result<PathBuf, String> {
     let cfg_path = dir.join("etc").join("host.yaml");
     let bak = dir.join("etc").join(format!("host.yaml.bak-{version}"));
     std::fs::copy(&cfg_path, &bak)
-        .map_err(|e| format!("备份 {} → {} 失败: {e}", cfg_path.display(), bak.display()))?;
+        .map_err(|e| format!("backup {} → {} failed: {e}", cfg_path.display(), bak.display()))?;
     Ok(bak)
 }
 
-/// E4 ConfigPush 应用（agent 侧；纯进程内可单测）：校验 → 备份 → 写 host.yaml →
-/// 重生成 oxfile。任一失败返回 Err（拒绝原因；文件未被部分改写——校验先行）。
+/// E4 ConfigPush apply (agent side; pure in-process, unit-testable): validate → backup → write host.yaml →
+/// regenerate the oxfile. Any failure returns Err (rejection reason; files are never partially rewritten — validation first).
 pub fn apply_config_push(dir: &Path, config: &str, version: u64) -> Result<(), String> {
     validate(config)?;
     backup_host_config(dir, version)?;
@@ -380,8 +385,8 @@ pub fn apply_config_push(dir: &Path, config: &str, version: u64) -> Result<(), S
     Ok(())
 }
 
-/// oxmgr apply <run/oxfile.toml>（CLI 与 agent 共享；增量: 新增 Start/变更 Recreate/未变 Noop）。
-/// oxmgr 二进制：host CLI 同目录优先（install 打包于 bin/），回落 PATH。
+/// oxmgr apply <run/oxfile.toml> (shared by CLI and agent; incremental: new Start / changed Recreate / unchanged Noop).
+/// oxmgr binary: the host CLI's own directory first (installed into bin/ by packaging), falling back to PATH.
 fn oxmgr_cmd() -> std::process::Command {
     let bin = std::env::current_exe()
         .ok()
@@ -391,15 +396,15 @@ fn oxmgr_cmd() -> std::process::Command {
     std::process::Command::new(bin)
 }
 
-/// 实例 daemon env（OXMGR_HOME 派生端口隔离 daemon——多实例/测试并行不互斥）。
-/// oxmgr_apply 与 live_host_apps/delete 必须同源，否则 list 连默认 daemon 为空。
+/// Instance daemon env (OXMGR_HOME-derived port-isolated daemon — multi-instance / parallel tests do not collide).
+/// oxmgr_apply, live_host_apps and delete must share this source, otherwise list hits the default daemon and comes back empty.
 pub fn oxmgr_env(dir: &Path) -> Vec<(String, String)> {
     let home = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).join("run").join("oxmgr");
     let sum: u32 = home.to_string_lossy().bytes().map(u32::from).sum();
     let port = 18000 + (sum % 400);
     vec![
         ("OXMGR_HOME".to_string(), home.to_string_lossy().into_owned()),
-        // C32 记忆用名——双设兼容（server oxmgr_cmd :1011 同形）
+        // C32 legacy name oxmgr remembers — set both for compat (same shape as server oxmgr_cmd :1011)
         ("OXMGR_DATA_DIR".to_string(), home.to_string_lossy().into_owned()),
         ("OXMGR_DAEMON_ADDR".to_string(), format!("127.0.0.1:{port}")),
         ("OXMGR_API_ADDR".to_string(), format!("127.0.0.1:{}", port + 1000)),
@@ -417,62 +422,61 @@ fn oxmgr_cmd_with_env(env: &[(String, String)]) -> std::process::Command {
 pub fn oxmgr_apply(dir: &Path) -> Result<(), String> {
     let oxfile = dir.join("run").join("oxfile.toml");
     if !oxfile.exists() {
-        return Err(format!("{} 不存在 — 先 write_oxfile/host apply", oxfile.display()));
+        return Err(format!("{} missing — run write_oxfile/host apply first", oxfile.display()));
     }
     let env = oxmgr_env(dir);
-    let out = oxmgr_cmd_with_env(&env)
-        .arg("apply")
-        .arg(&oxfile)
-        .output()
-        .map_err(|e| format!("oxmgr 执行失败: {e} — 请先安装 OxMgr 并加入 PATH"))?;
+    let out =
+        oxmgr_cmd_with_env(&env).arg("apply").arg(&oxfile).output().map_err(|e| {
+            format!("oxmgr exec failed: {e} — install OxMgr and put it on PATH first")
+        })?;
     if !out.status.success() {
         return Err(format!(
-            "oxmgr apply 失败 (exit {}): {}",
+            "oxmgr apply failed (exit {}): {}",
             out.status.code().unwrap_or(1),
             String::from_utf8_lossy(&out.stderr).trim()
         ));
     }
-    // 删除路径: 清理不再存在于新 oxfile 的 host 命名空间 app。oxmgr apply 默认只
-    // 增量不动缺省 app，而 --prune 是全量跨命名空间（实证会误杀其他工具 app）——
-    // 故按名逐个 delete 精确同步。
+    // Removal path: clean up host-namespace apps no longer present in the new oxfile. oxmgr apply defaults to
+    // incremental-only (never removes), while --prune is a full cross-namespace sweep (empirically kills other tools apps) —
+    // so delete by name one by one for precise sync.
     for name in removed_apps(&live_host_apps(&env)?, &oxfile_app_names(&oxfile)?) {
         match oxmgr_cmd_with_env(&env).arg("delete").arg(&name).output() {
             Ok(out) if out.status.success() => {
-                tracing::info!(app = %name, "oxmgr delete 已移除配置外 app");
+                tracing::info!(app = %name, "oxmgr delete: removed app absent from config");
             }
             Ok(out) => tracing::warn!(
                 app = %name,
-                "oxmgr delete 失败: {}",
+                "oxmgr delete failed: {}",
                 String::from_utf8_lossy(&out.stderr).trim()
             ),
-            Err(e) => tracing::warn!(app = %name, "oxmgr delete 执行失败: {e}"),
+            Err(e) => tracing::warn!(app = %name, "oxmgr delete exec failed: {e}"),
         }
     }
     Ok(())
 }
 
-/// 待删除 app = live host 命名空间 − 新 oxfile 内 app（纯函数，可单测）。
+/// Apps to delete = live host namespace minus the apps in the new oxfile (pure function, unit-testable).
 fn removed_apps(live: &[String], desired: &[String]) -> Vec<String> {
     live.iter().filter(|n| !desired.contains(n)).cloned().collect()
 }
 
-/// oxmgr list --json 中 host 命名空间 app 名列表（removal 清理 + host stop 兜底）。
-/// env 与 oxmgr_apply 同源（per-instance daemon 端口隔离）——不带 env 会连默认 daemon
-/// （空列表 → 删除路径静默失效，PIT-121 同类实证）。
+/// App names in the host namespace from oxmgr list --json (removal cleanup + host stop fallback).
+/// env shares its source with oxmgr_apply (per-instance daemon port isolation) — without env it connects to the default daemon
+/// (empty list → the removal path silently no-ops; PIT-121 same-class proven).
 pub fn live_host_apps(env: &[(String, String)]) -> Result<Vec<String>, String> {
     let out = oxmgr_cmd_with_env(env)
         .args(["list", "--json"])
         .output()
-        .map_err(|e| format!("oxmgr 执行失败: {e} — 请先安装 OxMgr 并加入 PATH"))?;
+        .map_err(|e| format!("oxmgr exec failed: {e} — install OxMgr and put it on PATH first"))?;
     if !out.status.success() {
         return Err(format!(
-            "oxmgr list 失败 (exit {}): {}",
+            "oxmgr list failed (exit {}): {}",
             out.status.code().unwrap_or(1),
             String::from_utf8_lossy(&out.stderr).trim()
         ));
     }
     let val: serde_json::Value = serde_json::from_slice(&out.stdout)
-        .map_err(|e| format!("oxmgr list --json 解析失败: {e}"))?;
+        .map_err(|e| format!("oxmgr list --json parse failed: {e}"))?;
     Ok(val
         .as_array()
         .map(|arr| {
@@ -487,12 +491,12 @@ pub fn live_host_apps(env: &[(String, String)]) -> Result<Vec<String>, String> {
         .unwrap_or_default())
 }
 
-/// 解析 oxfile [[apps]].name（removal 对比的期望侧）。
+/// Parse the oxfile [[apps]].name list (the desired side of the removal diff).
 fn oxfile_app_names(path: &Path) -> Result<Vec<String>, String> {
-    let text =
-        std::fs::read_to_string(path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("read {} failed: {e}", path.display()))?;
     let val: toml::Value =
-        toml::from_str(&text).map_err(|e| format!("解析 {} 失败: {e}", path.display()))?;
+        toml::from_str(&text).map_err(|e| format!("parse {} failed: {e}", path.display()))?;
     Ok(val
         .get("apps")
         .and_then(|a| a.as_array())
@@ -504,28 +508,28 @@ fn oxfile_app_names(path: &Path) -> Result<Vec<String>, String> {
         .unwrap_or_default())
 }
 
-/// `host apply` 共享实现: 读 host.yaml → 校验 → 翻译 → 写 oxfile → oxmgr apply。
+/// `host apply` shared implementation: read host.yaml → validate → translate → write oxfile → oxmgr apply.
 pub fn apply_config(dir: &Path) -> Result<(), String> {
     let cfg = std::fs::read_to_string(dir.join("etc").join("host.yaml"))
-        .map_err(|e| format!("读取 host.yaml 失败: {e} — 先运行 host init <dir>"))?;
+        .map_err(|e| format!("read host.yaml failed: {e} — run host init <dir> first"))?;
     write_oxfile(&cfg, dir)?;
     oxmgr_apply(dir)
 }
 
-/// E4 agent 应用体（应用 + 审计日志；oxmgr apply 由调用方执行——测试/CLI 可分离）。
-/// 返回成功应用的版本号；失败 Err(拒绝原因)（审计日志已打 warn，C15）。
-/// F1 stale guard: version <= current_version 拒绝（旧/重复下发；审计 warn 载荷）。
+/// E4 agent apply body (apply + audit log; oxmgr apply is run by the caller — tests/CLI can separate it).
+/// Returns the successfully applied version number; on failure Err(rejection reason) (the audit warn is already logged, C15).
+/// F1 stale guard: version <= current_version rejected (stale/duplicate push; audit warn payload).
 pub fn handle_config_push(
     dir: &Path,
     current_version: u64,
     push: &SignalingMessage,
 ) -> Result<u64, String> {
     let SignalingMessage::ConfigPush { config, version, .. } = push else {
-        return Err("网关待应用消息非 ConfigPush".into());
+        return Err("gateway pending message is not ConfigPush".into());
     };
     if *version <= current_version {
         return Err(format!(
-            "ConfigPush 版本 {version} 已过期（当前 {current_version}）— 拒绝旧/重复下发"
+            "ConfigPush version {version} expired (current {current_version}) — reject stale/duplicate push"
         ));
     }
     match apply_config_push(dir, config, *version) {
@@ -533,33 +537,33 @@ pub fn handle_config_push(
             tracing::info!(
                 version,
                 dir = %dir.display(),
-                "ConfigPush 应用成功 — host.yaml 已更新 + oxfile 已重生成"
+                "ConfigPush applied — host.yaml updated + oxfile regenerated"
             );
             Ok(*version)
         }
         Err(e) => {
-            tracing::warn!(version, "ConfigPush 拒绝: {e} — host.yaml 未变更");
+            tracing::warn!(version, "ConfigPush rejected: {e} — host.yaml unchanged");
             Err(e)
         }
     }
 }
 
-/// smooth 档码率地板 = 每帧字节恒定（3.33 kbps/fps），下限 50：锚点 15fps→50 /
-/// 30fps→100，24→80 / 60→200 自然导出；封顶不设（高帧率本应高地板）。D282 取代
-/// D274 的固定 400kbps（极弱网下过保守）。
+/// smooth preset bitrate floor = constant bytes per frame (3.33 kbps/fps), minimum 50: anchors 15fps→50 /
+/// 30fps→100, 24→80 / 60→200 fall out naturally; no cap (high fps deserves a high floor). D282 supersedes
+/// D274's fixed 400kbps (too conservative under extreme loss).
 fn smooth_bitrate_floor_kbps(fps: u32) -> u32 {
     (fps * 100 / 30).max(50)
 }
 
-/// 编码器后端裁决真值表（D282 / PIT-156 根治；codec = 三层合并后的 resolved 值）：
+/// Encoder backend decision truth table (D282 / PIT-156 root fix; codec = the resolved value after the 3-layer merge):
 ///
-/// | backend（合并后）             | codec=h264                   | 其他 codec      |
+/// | backend (merged)                 | codec=h264                   | other codec   |
 /// |-------------------------------|------------------------------|-----------------|
-/// | None / "auto"                 | 钉 `software`                | 原样（不干预）  |
-/// | 显式 software/hardware/nvenc/vaapi | 原样透传（尊重显式）     | 原样            |
+/// | None / "auto"                    | pinned `software`            | as-is (no touch)|
+/// | explicit software/hardware/nvenc/vaapi | passed through (respected) | as-is         |
 ///
-/// h264 的硬件路径在本链路从未可用（Jetson auto 选中 MMAPI → 协商不匹配黑屏），故 auto
-/// 语义修正为"h264 时选已验证路径"；用户显式指定的后端永不改写。
+/// The h264 hardware path has never been usable in this chain (Jetson auto picks MMAPI → negotiation mismatch → black screen), so auto
+/// semantics are corrected to "pick the verified path when h264"; a user-explicit backend is never rewritten.
 fn resolved_encoder_backend<'a>(codec: &str, backend: Option<&'a str>) -> Option<&'a str> {
     match backend {
         None | Some("auto") if codec == "h264" => Some("software"),
@@ -568,7 +572,7 @@ fn resolved_encoder_backend<'a>(codec: &str, backend: Option<&'a str>) -> Option
 }
 
 fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Result<String, String> {
-    // capturer 实例需完整源配置（reconnect_ms 透传）；流仅需 id。
+    // capturer instances need the full source config (reconnect_ms passthrough); streams need only their id.
     let sources = camera_configs(cfg)?;
     let (_, streams) = camera_and_stream_ids(cfg)?;
 
@@ -577,11 +581,11 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
         mediaservo_common::brand::media_brand().namespace
     );
 
-    // E4 热生效: [defaults] watch = host.yaml（内容指纹）— agent/CLI 写入新配置后
-    // oxmgr file-watch 重启受影响进程（进程启动时重读 host.yaml 生效）；
-    // 增删 app（相机/流）由 `oxmgr apply` 增量处理（Start/Recreate），watch 兜底
-    // 纯内容变更（如 fps，命令不变 → apply Noop）。cwd 是 watch 前置要求（OxMgr
-    // 源码 watch_fingerprint_for_process 实证）；无路径变体（doctor）不带 watch。
+    // E4 hot-apply: [defaults] watch = host.yaml (content fingerprint) — after agent/CLI write new config,
+    // oxmgr file-watch restarts affected processes (the process re-reads host.yaml at startup to apply it);
+    // app add/remove (cameras/streams) is handled incrementally by `oxmgr apply` (Start/Recreate), and watch covers
+    // pure content changes (e.g. fps, command unchanged → apply Noop). cwd is a watch precondition (proven in the OxMgr
+    // source watch_fingerprint_for_process); the pathless variant (doctor) carries no watch.
     let inst_root =
         config_path.parent().and_then(|p| p.parent()).map(|d| d.to_string_lossy().into_owned());
     if let (Some(cwd), Some(watch)) = (
@@ -591,15 +595,15 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
         out.push_str(&format!("cwd = \"{cwd}\"\nwatch = [\"{watch}\"]\nwatch_delay_secs = 1\n"));
     }
     out.push('\n');
-    // PIT: 日志路径绝对化（实例 run/logs）——OxMgr 按 daemon cwd 解析相对路径，残留 daemon
-    // 复用错位（cwd 指向已删临时目录）会 failed to create ./run/logs；绝对路径与 daemon cwd 无关。
+    // PIT: absolute log paths (instance run/logs) — OxMgr resolves relative paths against the daemon cwd, and a leftover
+    // daemon with misaligned reuse (cwd pointing at a deleted temp dir) yields failed to create ./run/logs; absolute paths are daemon-cwd independent.
     let log_dir = inst_root.as_deref().map(|d| format!("{d}/run/logs"));
 
     for base in FIXED_APP_BASES {
         let name = app_name(base);
         let mut cmd = exe_cmd(&name);
-        // C3: recorder 固定 app 与 capturer/streamer 同形追加 --config/--token
-        // （订阅 camera/* 录制; 令牌文件 recorder.token）。
+        // C3: the fixed recorder app gets --config/--token appended like capturer/streamer
+        // (subscribes camera/* for recording; token file recorder.token).
         if name == app_name("recorder") && !config_path.as_os_str().is_empty() {
             cmd.push_str(&format!(
                 " --config {} --token {}/recorder.token",
@@ -607,18 +611,18 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
                 token_dir.display()
             ));
         }
-        // D1: agent 网关本地端口（[signaling] local_port 配置；缺省 agent 内置 17980）
-        // E1: agent 追加 --config（拓扑监控期望态数据源，与 recorder 同形）。
-        // G1: agent 追加 --token agent.token（Monitor ACL）——数据流监控不再 tokenless。
+        // D1: agent gateway local port ([signaling] local_port config; default = agent builtin 17980)
+        // E1: agent gets --config appended (topology-monitor desired-state data source, same shape as recorder).
+        // G1: agent gets --token agent.token appended (Monitor ACL) — data-flow monitoring is no longer tokenless.
         if name == app_name("agent") {
             if let Some(port) = signaling_local_port(cfg)? {
                 cmd.push_str(&format!(" --port {port}"));
             }
-            // I1 review (D3 TODO 关闭): [signaling] room → --room（缺省 agent 内置 "vehicle"）
+            // I1 review (D3 TODO closed): [signaling] room → --room (default = agent builtin "vehicle")
             if let Some(room) = signaling_room(cfg)? {
                 cmd.push_str(&format!(" --room {room}"));
             }
-            // 远程 server 配置: [signaling] server_url/psk → --remote/--psk（缺省 agent 内置）
+            // Remote server config: [signaling] server_url/psk → --remote/--psk (default = agent builtin)
             if let Some(url) = signaling_server_url(cfg)? {
                 cmd.push_str(&format!(" --remote {url}"));
             }
@@ -630,11 +634,11 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
                 cmd.push_str(&format!(" --token {}/agent.token", token_dir.display()));
             }
         }
-        // C4: recorder [record] enabled=false 时按设计 exit 0 — 在 oxmgr
-        // restart_policy=always 下会重启风暴; 改 on_failure（崩溃重启，干净退出不重启）。
+        // C4: with recorder [record] enabled=false it exits 0 by design — under oxmgr
+        // restart_policy=always that becomes a restart storm; use on_failure (restart on crash, not on clean exit).
         let policy = if name == app_name("recorder") { "on_failure" } else { "always" };
-        // V5: [control].hmac_key_file → controller --hmac-key-file（未配置零加参=
-        // 逐字节不变；相对路径按实例根绝对化——apply 期不依赖 controller cwd）。
+        // V5: [control].hmac_key_file → controller --hmac-key-file (unset = zero added args =
+        // byte-identical; relative paths are absolutized against the instance root — no controller-cwd dependency at apply time).
         if name == app_name("controller")
             && let Some(rel) = control_hmac_key_file(cfg)?
         {
@@ -646,7 +650,7 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
             };
             cmd.push_str(&format!(" --hmac-key-file {abs}"));
         }
-        // H2: host-audio 必须带 --room audio-<room>（[signaling] room 或缺省 vehicle）。
+        // H2: host-audio must carry --room audio-<room> ([signaling] room or the default vehicle).
         if name == app_name("audio") {
             let room = signaling_room(cfg)?.unwrap_or_else(|| "vehicle".to_string());
             cmd.push_str(&format!(" --room audio-{room}"));
@@ -656,7 +660,7 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
     for src in &sources {
         let name = instance_name(&app_name("capturer"), &src.id);
         let mut cmd = format!("{} --camera {}", exe_cmd(&app_name("capturer")), src.id);
-        // T7: mode=camera 且配置 reconnect_ms → 透传 --reconnect-ms（generator 不加）
+        // T7: mode=camera with reconnect_ms configured → pass through --reconnect-ms (generator: never)
         if src.mode == SourceMode::Camera
             && let Some(ms) = src.reconnect_ms
         {
@@ -672,25 +676,25 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
         }
         push_app(&mut out, &name, &cmd, "always", log_dir.as_deref());
     }
-    // 流 id → 配置映射（编码参数透传；streams 循环是 id 列表）
+    // stream id → config map (encoder-param passthrough; the streams loop works on an id list)
     let stream_cfgs: std::collections::HashMap<String, StreamConfig> =
         stream_configs(cfg)?.into_iter().map(|s| (s.id.clone(), s)).collect();
-    // 源 id → resolved fps（smooth 地板经 stream→source 关联取值；查不到按内置缺省 30）
+    // source id → resolved fps (the smooth floor takes its value via the stream→source link; not found → builtin default 30)
     let source_fps: std::collections::HashMap<&str, u32> =
         sources.iter().map(|s| (s.id.as_str(), s.fps)).collect();
     for stream in &streams {
         let name = instance_name(&app_name("streamer"), stream);
         let mut cmd = format!("{} --stream {}", exe_cmd(&app_name("streamer")), stream);
-        // D2: 子进程 WS 目标 = 本地网关（[signaling] local_port 或缺省 17980）
+        // D2: child-process WS target = local gateway ([signaling] local_port or default 17980)
         cmd.push_str(&format!(" --gateway {}", signaling_gateway_url(cfg)?));
-        // 编码参数透传（streams 配置面——encoder_backend/bitrate/gop；缺省 streamer 侧回落）
+        // encoder-param passthrough (streams config surface — encoder_backend/bitrate/gop; defaults fall back on the streamer side)
         if let Some(sc) = stream_cfgs.get(stream) {
-            // 后端裁决（真值表）：h264 × 未配置/auto → 显式钉 software（PIT-156 根治）
+            // backend decision (truth table): h264 × unset/auto → pin explicit software (PIT-156 root fix)
             if let Some(b) = resolved_encoder_backend(&sc.codec, sc.encoder_backend.as_deref()) {
                 cmd.push_str(&format!(" --encoder-backend {b}"));
             }
-            // qos-framerate-priority AD-2：唯一合并裁决点——显式键 > stream_mode bundle；
-            // stream_mode 合法性已在 stream_configs() 拦截，此处 expect 仅防舞。
+            // qos-framerate-priority AD-2: the single merge decision point — explicit keys > stream_mode bundle;
+            // stream_mode legality was already enforced in stream_configs(), so this expect is only a guard.
             let mode = sc
                 .stream_mode
                 .as_deref()
@@ -700,7 +704,7 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
                 .unwrap_or(mediaservo_field::StreamMode::Balanced);
             let bundle = mode.bundle();
             let bitrate = sc.bitrate_kbps.or(bundle.bitrate_kbps);
-            // smooth 地板：显式 > fps 联动地板 > bundle（smooth 档 bundle 已让位 None）
+            // smooth floor: explicit > fps-linked floor > bundle (the smooth bundle already yields None)
             let floor = (mode == mediaservo_field::StreamMode::Smooth).then(|| {
                 let fps = source_fps.get(sc.source.as_str()).copied().unwrap_or(DEFAULT_SOURCE_FPS);
                 smooth_bitrate_floor_kbps(fps)
@@ -744,12 +748,12 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
     Ok(out)
 }
 
-/// 期望进程名列表（E1 拓扑监控期望态；与 oxfile 生成同一实例命名来源，DRY）。
+/// Expected process names (E1 topology-monitor desired state; same instance-naming source as oxfile generation, DRY).
 pub fn expected_process_names(cfg: &str) -> Result<Vec<String>, String> {
     let (sources, streams) = camera_and_stream_ids(cfg)?;
     let mut out: Vec<String> = FIXED_APP_BASES.iter().map(|b| app_name(b)).collect();
-    // [record] enabled=false（缺省）→ host-recorder 按设计 exit 0（host-recorder.rs）
-    // 且 oxmgr on_failure 不重启 → 不列入期望，否则默认配置永久 ProcessMissing 误报。
+    // [record] enabled=false (default) → host-recorder exits 0 by design (host-recorder.rs)
+    // and oxmgr on_failure does not restart → exclude it from expected, otherwise the default config false-alarms ProcessMissing forever.
     if !record_config(cfg)?.enabled {
         out.retain(|n| n != &app_name("recorder"));
     }
@@ -762,17 +766,17 @@ pub fn expected_process_names(cfg: &str) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-/// 提取 sources/streams 的 id 列表（host init 生成 ros_bridge.yaml 复用，单一解析点）。
+/// Extract the sources/streams id lists (reused by host init to generate ros_bridge.yaml; single parse point).
 pub fn camera_and_stream_ids(cfg: &str) -> Result<(Vec<String>, Vec<String>), String> {
     let cfg: HostConfig =
-        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml parse failed: {e}"))?;
     Ok((
         cfg.sources.into_iter().map(|c| c.id).collect(),
         cfg.streams.into_iter().map(|s| s.id).collect(),
     ))
 }
 
-/// 源配置（capturer/recorder/monitor 消费；mode/width/height/fps 已落默认值）。
+/// Source config (consumed by capturer/recorder/monitor; mode/width/height/fps already fall back to defaults).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceConfig {
     pub id: String,
@@ -780,27 +784,27 @@ pub struct SourceConfig {
     pub width: u32,
     pub height: u32,
     pub fps: u32,
-    /// v4l2 设备路径（mode=camera 必填；其余 mode 可空）。
+    /// v4l2 device path (required for mode=camera; optional for other modes).
     pub input: Option<String>,
-    /// 采集失败重连间隔 ms（mode=camera 透传 capturer --reconnect-ms；缺省 capturer 侧 5000）。
+    /// Reconnect interval ms after capture failure (passed through as capturer --reconnect-ms for mode=camera; default 5000 on the capturer side).
     pub reconnect_ms: Option<u64>,
 }
 
-/// 帧宽缺省（width 未配置；原 capturer DEFAULT_WIDTH）。
+/// Default frame width (when width is unset; formerly capturer DEFAULT_WIDTH).
 const DEFAULT_SOURCE_WIDTH: u32 = 1280;
-/// 帧高缺省（height 未配置；原 capturer DEFAULT_HEIGHT）。
+/// Default frame height (when height is unset; formerly capturer DEFAULT_HEIGHT).
 const DEFAULT_SOURCE_HEIGHT: u32 = 720;
-/// 帧率缺省（fps 未配置；亦为 smooth 地板查不到关联源 fps 时的回落值）。
+/// Default frame rate (when fps is unset; also the fallback the smooth floor uses when the linked source fps cannot be found).
 const DEFAULT_SOURCE_FPS: u32 = 30;
 
-/// 解析全部视频源配置（原职能 camera_configs——函数名保留，消费面不变）。
-/// 旧 `source` 字段非 "stub" 拒绝（迁移提示）；fps=0 拒绝（generator.start(0) 线程内
-/// panic → 静默挂起，C1 审查发现）。
+/// Parse all video source configs (formerly camera_configs' duty — function name kept, consumer surface unchanged).
+/// The old `source` field other than "stub" is rejected (migration hint); fps=0 is rejected (generator.start(0) panics inside the
+/// thread → silent hang, found in the C1 review).
 ///
-/// `defaults.sources` 在此逐键合并（逐条 > defaults > 内置，D282）——源配置唯一解析点。
+/// `defaults.sources` is merged key-by-key here (entry > defaults > builtin, D282) — the single source-config parse point.
 pub fn camera_configs(cfg: &str) -> Result<Vec<SourceConfig>, String> {
-    let HostConfig { sources, defaults, .. } =
-        serde_yaml::from_str::<HostConfig>(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+    let HostConfig { sources, defaults, .. } = serde_yaml::from_str::<HostConfig>(cfg)
+        .map_err(|e| format!("host.yaml parse failed: {e}"))?;
     let d = defaults.sources;
     let mut out = Vec::with_capacity(sources.len());
     for c in sources {
@@ -808,44 +812,50 @@ pub fn camera_configs(cfg: &str) -> Result<Vec<SourceConfig>, String> {
             && src != "stub"
         {
             return Err(format!(
-                "host.yaml 解析失败: 视频源 {} 旧字段 source={src} 未支持（仅 stub；v4l2/mipi 请改用 mode: camera + backend）",
+                "host.yaml parse failed: video source {} uses the legacy field source={src}, unsupported (stub only; for v4l2/mipi switch to mode: camera + backend)",
                 c.id
             ));
         }
         let fps = c.fps.or(d.fps).unwrap_or(DEFAULT_SOURCE_FPS);
         if fps == 0 {
-            return Err(format!("host.yaml 解析失败: 视频源 {} fps=0 无效（须 > 0）", c.id));
+            return Err(format!(
+                "host.yaml parse failed: video source {} fps=0 invalid (must be > 0)",
+                c.id
+            ));
         }
         if fps > 60 {
-            return Err(format!("host.yaml 解析失败: 视频源 {} fps={fps} 超上限（<=60）", c.id));
+            return Err(format!(
+                "host.yaml parse failed: video source {} fps={fps} exceeds the cap (<=60)",
+                c.id
+            ));
         }
         out.push(SourceConfig {
             id: c.id,
-            // mode 身份键仅条目层（D282 修订）；均无 → generator（原 stub 生成语义，存量兼容）
+            // the mode identity key lives on entries only (D282 revision); neither set → generator (original stub generation semantics, existing compat)
             mode: c.mode.unwrap_or(SourceMode::Generator),
             width: c.width.or(d.width).unwrap_or(DEFAULT_SOURCE_WIDTH),
             height: c.height.or(d.height).unwrap_or(DEFAULT_SOURCE_HEIGHT),
             fps,
-            input: c.input, // 源地址属身份键，仅条目层（D282 修订）
+            input: c.input, // the source address is an identity key, entry layer only (D282 revision)
             reconnect_ms: c.reconnect_ms.or(d.reconnect_ms),
         });
     }
     Ok(out)
 }
-/// 录制配置（recorder 进程消费；[record] 段缺省 disabled + 默认输出目录）。
+/// Record config (consumed by the recorder process; the [record] section defaults to disabled + a default output dir).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordConfig {
     pub enabled: bool,
     pub out_dir: PathBuf,
 }
 
-/// 默认录制输出目录（host.yaml [record] out_dir 可覆盖；开发缺省在 /tmp）。
+/// Default recording output dir (overridable via host.yaml [record] out_dir; the dev default lives under /tmp).
 const DEFAULT_RECORD_DIR: &str = "/tmp/mediaservo-recordings";
 
-/// 解析录制配置（C3 recorder 用）。缺省: disabled + /tmp/mediaservo-recordings。
+/// Parse the record config (for the C3 recorder). Defaults: disabled + /tmp/mediaservo-recordings.
 pub fn record_config(cfg: &str) -> Result<RecordConfig, String> {
     let cfg: HostConfig =
-        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml parse failed: {e}"))?;
     let rec = cfg.record.unwrap_or(RecordSection { enabled: None, out_dir: None });
     Ok(RecordConfig {
         enabled: rec.enabled.unwrap_or(false),
@@ -853,38 +863,38 @@ pub fn record_config(cfg: &str) -> Result<RecordConfig, String> {
     })
 }
 
-/// 按 id 查单个视频源配置（不存在 → Ok(None)）。
+/// Look up a single video source config by id (not found → Ok(None)).
 pub fn camera_config(cfg: &str, id: &str) -> Result<Option<SourceConfig>, String> {
     Ok(camera_configs(cfg)?.into_iter().find(|c| c.id == id))
 }
 
-/// 流配置（streamer 消费；source/codec 缺省 id/h264）。
+/// Stream config (consumed by streamer; source/codec default to id/h264).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamConfig {
     pub id: String,
-    /// 引用的源 id（决定 FrameBus topic camera/<id>）。
+    /// Referenced source id (determines the FrameBus topic camera/<id>).
     pub source: String,
-    /// 编码格式（对齐 field sfu::codec_spec: vp8/h264/vp9/av1；缺省 h264，D282）。
+    /// Codec (aligned with field sfu::codec_spec: vp8/h264/vp9/av1; default h264, D282).
     pub codec: String,
-    /// 编码器后端（auto/software/hardware/nvenc/vaapi；None=auto）。
+    /// Encoder backend (auto/software/hardware/nvenc/vaapi; None=auto).
     pub encoder_backend: Option<String>,
-    /// 编码码率 kbps（None=field 默认 2000）。
+    /// Encode bitrate kbps (None=field default 2000).
     pub bitrate_kbps: Option<u32>,
-    /// 弱网策略档原文（None=balanced；合法性在 stream_configs() 校验，AD-2）。
+    /// Weak-network preset raw string (None=balanced; legality checked in stream_configs(), AD-2).
     pub stream_mode: Option<String>,
-    /// 码率地板 kbps（None=随 bundle；显式 > preset 在 oxfile 拼接处裁决）。
+    /// Bitrate floor kbps (None=follows the bundle; explicit > preset is decided at the oxfile assembly site).
     pub min_bitrate_kbps: Option<u32>,
-    /// 关键帧间隔秒 GOP（None=field 默认 2）。
+    /// Keyframe interval seconds GOP (None=field default 2).
     pub keyframe_interval: Option<u32>,
 }
 
-/// 解析全部流配置（C2 streamer 用）。
+/// Parse all stream configs (for the C2 streamer).
 ///
-/// `defaults.streams` 在此逐键合并（逐条 > defaults > 内置，D282）——流配置唯一解析点；
-/// 合法性门在合并**之后**，故三源同检（错值无论写在哪层都 deploy 期报出）。
+/// `defaults.streams` is merged key-by-key here (entry > defaults > builtin, D282) — the single stream-config parse point;
+/// the legality gate runs **after** the merge, so all three sources are checked (a bad value surfaces at deploy wherever it is written).
 pub fn stream_configs(cfg: &str) -> Result<Vec<StreamConfig>, String> {
-    let HostConfig { streams, defaults, .. } =
-        serde_yaml::from_str::<HostConfig>(cfg).map_err(|e| format!("host.yaml 解析失败: {e}"))?;
+    let HostConfig { streams, defaults, .. } = serde_yaml::from_str::<HostConfig>(cfg)
+        .map_err(|e| format!("host.yaml parse failed: {e}"))?;
     let d = &defaults.streams;
     streams
         .into_iter()
@@ -892,18 +902,18 @@ pub fn stream_configs(cfg: &str) -> Result<Vec<StreamConfig>, String> {
             let id = s.id.clone();
             let codec = s.codec.or_else(|| d.codec.clone()).unwrap_or_else(|| "h264".into());
             let stream_mode = s.stream_mode.or_else(|| d.stream_mode.clone());
-            // qos-framerate-priority AD-2：非法 stream_mode 在此拦截（deploy/build 期 Err，
-            // 错误信息含合法集；不进 streamer 防 oxmgr 重启风暴）。
+            // qos-framerate-priority AD-2: an illegal stream_mode is intercepted here (Err at deploy/build time,
+            // the error message lists the legal set; it never reaches the streamer, avoiding oxmgr restart storms).
             if let Some(m) = &stream_mode
                 && m.parse::<mediaservo_field::StreamMode>().is_err()
             {
-                return Err(format!("host.yaml 解析失败: 流 {id} stream_mode={m} 非法（合法: smooth|balanced|quality）"));
+                return Err(format!("host.yaml parse failed: stream {id} stream_mode={m} illegal (legal: smooth|balanced|quality)"));
             }
-            // 合法集对齐 field sfu::codec_spec——未知值在 field 层静默回落 VP8，
-            // typo 只有拦在这里才看得见（deploy 期报错，不进 streamer）。
+            // The legal set aligns with field sfu::codec_spec — unknown values silently fall back to VP8 at the field layer,
+            // so a typo is only visible when blocked here (deploy-time error, not inside the streamer).
             if !matches!(codec.as_str(), "vp8" | "h264" | "vp9" | "av1") {
                 return Err(format!(
-                    "host.yaml 解析失败: 流 {id} codec={codec} 非法（合法: vp8|h264|vp9|av1）"
+                    "host.yaml parse failed: stream {id} codec={codec} illegal (legal: vp8|h264|vp9|av1)"
                 ));
             }
             Ok(StreamConfig {
@@ -920,20 +930,20 @@ pub fn stream_configs(cfg: &str) -> Result<Vec<StreamConfig>, String> {
         .collect()
 }
 
-/// 按 id 查单个流配置（不存在 → Ok(None)）。
+/// Look up a single stream config by id (not found → Ok(None)).
 pub fn stream_config(cfg: &str, id: &str) -> Result<Option<StreamConfig>, String> {
     Ok(stream_configs(cfg)?.into_iter().find(|s| s.id == id))
 }
 
-/// 实例 app 名统一 `类型-id`（E4 稳定身份：配置增删不 rename 既有实例，
-/// oxmgr 重启历史/健康记录连续；拓扑期望态同源）。
+/// Instance app names are uniformly `type-id` (E4 stable identity: config add/remove never renames existing instances,
+/// oxmgr restart history / health records stay continuous; the topology desired state shares the same source).
 fn instance_name(kind: &str, id: &str) -> String {
     format!("{kind}-{id}")
 }
 
-/// 进程可执行文件路径：与 host CLI 同目录（同 target 产物）；测试运行时
-/// current_exe 在 deps/ 下，回落裸名（test 仅断言命令行子串）。
-// ponytail: 裸名依赖 PATH；部署阶段（A4 脚本/打包）再固化绝对路径。
+/// Process executable path: the host CLI's own directory (same target artifacts); under test current_exe lives
+/// in deps/, so fall back to the bare name (tests only assert command-line substrings).
+// ponytail: the bare name relies on PATH; pin absolute paths at the deployment stage (A4 script/packaging).
 fn exe_cmd(name: &str) -> String {
     std::env::current_exe()
         .ok()
@@ -951,9 +961,9 @@ fn push_app(
     out.push_str(&format!(
         "[[apps]]\nname = \"{name}\"\ncommand = \"{command}\"\nrestart_policy = \"{restart_policy}\"\n"
     ));
-    // D-H13 + PIT: 日志路径绝对化（实例 run/logs）——OxMgr 按 daemon cwd 解析相对路径，
-    // 残留 daemon 复用错位会 failed to create ./run/logs；无路径变体（doctor）保持相对。
-    // 轮转由 OxMgr daemon env 控制（OXMGR_LOG_MAX_SIZE_MB/MAX_FILES/MAX_DAYS——默认 20MB×5×14d）
+    // D-H13 + PIT: absolute log paths (instance run/logs) — OxMgr resolves relative paths against the daemon cwd,
+    // and a leftover daemon with misaligned reuse yields failed to create ./run/logs; the pathless variant (doctor) keeps them relative.
+    // Rotation is controlled by the OxMgr daemon env (OXMGR_LOG_MAX_SIZE_MB/MAX_FILES/MAX_DAYS — default 20MB×5×14d)
     let (stdout, stderr) = match log_dir {
         Some(d) => (format!("{d}/{name}.out.log"), format!("{d}/{name}.err.log")),
         None => (format!("logs/{name}.out.log"), format!("logs/{name}.err.log")),
@@ -965,7 +975,7 @@ fn push_app(
 mod tests {
     use super::*;
 
-    /// 新模式配置（sources / streams.source）。
+    /// New-style config (sources / streams.source).
     const CFG_V0: &str = r#"
 sources:
   - id: "cam0"
@@ -977,7 +987,7 @@ streams:
     source: "cam0"
 "#;
 
-    /// 旧模式配置（cameras / source 字段 / streams.camera）——alias 兼容门。
+    /// Old-style config (cameras / source field / streams.camera) — alias-compat gate.
     const CFG_LEGACY: &str = r#"
 cameras:
   - id: "cam0"
@@ -995,24 +1005,27 @@ streams:
         std::fs::write(etc.join("host.yaml"), cfg).unwrap();
     }
 
-    // ── 解析：新旧键 + 字段语义 ──
+    // ── parsing: new/old keys + field semantics ──
 
     #[test]
     fn legacy_cameras_and_camera_keys_still_parse() {
-        // 已部署旧 host.yaml（cameras / source 字段 / streams.camera）无破坏地按新模式解析
+        // deployed old host.yaml (cameras / source field / streams.camera) parses into the new shape without breakage
         let cams = camera_configs(CFG_LEGACY).unwrap();
         assert_eq!(cams.len(), 1);
         assert_eq!(cams[0].id, "cam0");
         assert_eq!(
             cams[0].mode,
             SourceMode::Generator,
-            "旧配置无 mode → generator（原 stub 语义）"
+            "legacy config without mode → generator (original stub semantics)"
         );
-        assert_eq!(cams[0].width, 1280, "旧配置缺 width → 默认 1280");
-        assert_eq!(cams[0].height, 720, "旧配置缺 height → 默认 720");
+        assert_eq!(cams[0].width, 1280, "legacy config missing width → default 1280");
+        assert_eq!(cams[0].height, 720, "legacy config missing height → default 720");
         assert_eq!(cams[0].fps, 30);
         let streams = stream_configs(CFG_LEGACY).unwrap();
-        assert_eq!(streams[0].source, "cam0", "旧 camera 键应经 alias 解析为 source");
+        assert_eq!(
+            streams[0].source, "cam0",
+            "the legacy camera key should resolve to source via alias"
+        );
         assert!(validate(CFG_LEGACY).is_ok());
         assert!(to_oxfile(CFG_LEGACY).unwrap().contains("host-capturer-cam0"));
     }
@@ -1021,7 +1034,7 @@ streams:
     fn legacy_source_non_stub_rejected() {
         let old_v4l2 = "cameras:\n  - id: \"cam0\"\n    source: \"v4l2\"\n    fps: 30\n";
         let err = camera_configs(old_v4l2).unwrap_err();
-        assert!(err.contains("v4l2") && err.contains("未支持"), "{err}");
+        assert!(err.contains("v4l2") && err.contains("unsupported"), "{err}");
     }
 
     #[test]
@@ -1046,10 +1059,10 @@ sources:
         assert_eq!(cams[0].height, 1080);
         assert_eq!(cams[0].fps, 15);
         assert_eq!(cams[1].mode, SourceMode::Generator);
-        assert_eq!(cams[1].width, 1280, "缺省 width 1280");
-        assert_eq!(cams[1].height, 720, "缺省 height 720");
+        assert_eq!(cams[1].width, 1280, "default width 1280");
+        assert_eq!(cams[1].height, 720, "default height 720");
         assert_eq!(cams[1].fps, 30);
-        // 单个查找
+        // single lookup
         assert!(camera_config(cfg, "cam0").unwrap().is_some());
         assert!(camera_config(cfg, "nope").unwrap().is_none());
         assert!(camera_configs("not yaml [[[").is_err());
@@ -1063,7 +1076,7 @@ sources:
 
     #[test]
     fn camera_config_rejects_zero_fps() {
-        // C1 审查发现: fps=0 → generator.start 线程内 panic → 死线程 + 主线程永久阻塞
+        // C1 review finding: fps=0 → panic inside the generator.start thread → dead thread + main thread blocked forever
         let cfg = "sources:\n  - id: \"cam0\"\n    fps: 0\n";
         let err = camera_configs(cfg).unwrap_err();
         assert!(err.contains("fps") && err.contains("cam0"), "{err}");
@@ -1072,24 +1085,24 @@ sources:
 
     #[test]
     fn camera_config_rejects_fps_over_60() {
-        // multi-stream P1: fps>60 上限（缺省 30 / 零值拒绝已有）
+        // multi-stream P1: fps>60 cap (default 30 / zero-value rejection already exists)
         let cfg = "sources:\n  - id: \"cam0\"\n    fps: 61\n";
         let err = camera_configs(cfg).unwrap_err();
         assert!(err.contains("60") && err.contains("cam0"), "{err}");
         assert!(camera_config(cfg, "cam0").is_err());
-        // 边界 60 合法
+        // boundary 60 is legal
         let ok = "sources:\n  - id: \"cam0\"\n    fps: 60\n";
         assert_eq!(camera_configs(ok).unwrap()[0].fps, 60);
     }
 
     #[test]
     fn stream_source_refers_to_sources_id() {
-        // 缺省 source = 流 id 自身；显式引用 sources[].id（旧 camera 键 alias 见 legacy 测试）
+        // default source = the stream id itself; explicit references sources[].id (the legacy camera key alias is covered by the legacy test)
         let cfg = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n  - id: \"s1\"\n    source: \"cam0\"\n    codec: \"h264\"\n";
         let streams = stream_configs(cfg).unwrap();
         assert_eq!(streams.len(), 2);
-        assert_eq!(streams[0].source, "s0", "缺省 = 流 id 自身");
-        assert_eq!(streams[0].codec, "h264", "host 层缺省编码 = h264（D282）");
+        assert_eq!(streams[0].source, "s0", "default = the stream id itself");
+        assert_eq!(streams[0].codec, "h264", "host-layer default codec = h264 (D282)");
         assert_eq!(streams[1].source, "cam0");
         assert_eq!(streams[1].codec, "h264");
         assert!(stream_config(cfg, "s1").unwrap().is_some());
@@ -1097,47 +1110,62 @@ sources:
         assert!(stream_configs("not yaml [[[").is_err());
     }
 
-    // ── 校验 ──
+    // ── validation ──
 
     #[test]
     fn validate_rejects_invalid_yaml() {
         let err = validate("host: \"unterminated").unwrap_err();
-        assert!(err.contains("解析失败"), "{err}");
+        assert!(err.contains("parse failed"), "{err}");
     }
 
     #[test]
     fn validate_rejects_duplicate_ids() {
         let dup_src = "sources:\n  - id: \"cam0\"\n  - id: \"cam0\"\n";
-        assert!(validate(dup_src).unwrap_err().contains("重复"), "sources 重复 id 必须拒绝");
+        assert!(
+            validate(dup_src).unwrap_err().contains("duplicate"),
+            "duplicate sources id must be rejected"
+        );
         let dup_stream = "streams:\n  - id: \"s0\"\n  - id: \"s0\"\n";
-        assert!(validate(dup_stream).unwrap_err().contains("重复"), "流 id 重复必须拒绝");
+        assert!(
+            validate(dup_stream).unwrap_err().contains("duplicate"),
+            "duplicate stream id must be rejected"
+        );
     }
 
     #[test]
     fn validate_accepts_wellformed_config() {
-        validate(CFG_V0).expect("新结构合法配置应通过");
-        validate(CFG_LEGACY).expect("旧结构（alias）也应通过");
+        validate(CFG_V0).expect("well-formed new-shape config should pass");
+        validate(CFG_LEGACY).expect("legacy shape (alias) should also pass");
     }
 
     #[test]
     fn validate_rejects_non_alnum_source_and_stream_ids() {
-        // F2: YAML 合法但含引号/换行/路径穿越的 id → oxfile 畸形（push_app 未转义）
-        // 或令牌路径投毒 → 必须拒绝（仅允许 [A-Za-z0-9_-]+）
+        // F2: YAML-legal but ids containing quotes/newlines/path traversal → malformed oxfile (push_app unescaped)
+        // or token-path poisoning → must reject (only [A-Za-z0-9_-]+ allowed)
         let quote_src = "sources:\n  - id: \"cam\\\"0\"\n";
         let err = validate(quote_src).unwrap_err();
-        assert!(err.contains("非法"), "引号 source id 必须拒绝: {err}");
+        assert!(err.contains("invalid"), "quoted source id must be rejected: {err}");
         let path_src = "sources:\n  - id: \"../evil\"\n";
-        assert!(validate(path_src).unwrap_err().contains("非法"), "路径穿越 source id 必须拒绝");
+        assert!(
+            validate(path_src).unwrap_err().contains("invalid"),
+            "path-traversal source id must be rejected"
+        );
         let newline_src = "sources:\n  - id: \"cam0\\n1\"\n";
-        assert!(validate(newline_src).unwrap_err().contains("非法"), "换行 source id 必须拒绝");
+        assert!(
+            validate(newline_src).unwrap_err().contains("invalid"),
+            "newline source id must be rejected"
+        );
         let quote_stream = "streams:\n  - id: \"s\\\"0\"\n";
-        assert!(validate(quote_stream).unwrap_err().contains("非法"), "引号流 id 必须拒绝");
-        // 正常 id（字母数字 + 连字符/下划线）通过
+        assert!(
+            validate(quote_stream).unwrap_err().contains("invalid"),
+            "quoted stream id must be rejected"
+        );
+        // normal ids (alphanumeric + hyphen/underscore) pass
         validate("sources:\n  - id: \"cam-A_1\"\nstreams:\n  - id: \"s-2_0\"\n")
-            .expect("合法字符 id 应通过");
+            .expect("legal-charset id should pass");
     }
 
-    // ── oxfile 翻译 ──
+    // ── oxfile translation ──
 
     #[test]
     fn oxfile_wires_remote_server_and_psk() {
@@ -1145,7 +1173,7 @@ sources:
         let ox = to_oxfile(cfg).unwrap();
         assert!(ox.contains("--remote ws://192.168.2.127:9800/ws"));
         assert!(ox.contains("--psk prod-psk"));
-        // 未配置 → 不生成（agent 内置默认）
+        // unset → not generated (agent builtin default)
         let ox2 = to_oxfile("host:\n  device_id: \"x\"\nsources:\n  - id: \"cam0\"\nstreams:\n  - id: \"cam0-stream\"\n    source: \"cam0\"\n").unwrap();
         assert!(!ox2.contains("--remote"));
         assert!(!ox2.contains("--psk"));
@@ -1153,13 +1181,13 @@ sources:
 
     #[test]
     fn defaults_namespace_is_concrete_not_placeholder() {
-        // PIT-118 回归门: namespace 曾残留 "{ns}" 字面——oxmgr 拒收 → apply 挂起
+        // PIT-118 regression gate: the namespace once retained a literal "{ns}" — oxmgr rejects it → apply hangs
         let ox = to_oxfile(CFG_V0).unwrap();
         assert!(
             ox.contains("namespace = \"mediaservo-host\""),
-            "默认品牌 namespace 应为 mediaservo-host: {ox}"
+            "default-brand namespace should be mediaservo-host: {ox}"
         );
-        assert!(!ox.contains("{ns}"), "禁止占位符残留: {ox}");
+        assert!(!ox.contains("{ns}"), "no placeholder residue allowed: {ox}");
     }
 
     #[test]
@@ -1168,8 +1196,8 @@ sources:
         let oxfile = write_oxfile(CFG_V0, dir.path()).expect("write_oxfile");
         assert_eq!(oxfile, dir.path().join("run").join("oxfile.toml"));
         let ox = std::fs::read_to_string(&oxfile).unwrap();
-        assert!(ox.contains("host-capturer"), "source 实例应入 oxfile: {ox}");
-        assert!(ox.contains("host-streamer"), "流实例应入 oxfile");
+        assert!(ox.contains("host-capturer"), "source instances should be in the oxfile: {ox}");
+        assert!(ox.contains("host-streamer"), "stream instances should be in the oxfile");
     }
 
     #[test]
@@ -1178,15 +1206,21 @@ sources:
         let ox = to_oxfile_in_dir(CFG_V0, dir.path()).expect("to_oxfile_in_dir");
         let expected_watch =
             format!("watch = [\"{}\"]", dir.path().join("etc").join("host.yaml").display());
-        assert!(ox.contains(&expected_watch), "oxfile 应 watch host.yaml 实现热生效: {ox}");
-        assert!(ox.contains("watch_delay_secs"), "watch 应带防抖: {ox}");
-        assert!(ox.contains("cwd = \""), "watch 前置要求 cwd: {ox}");
-        // 无路径变体（doctor 用）不带 watch
-        assert!(!to_oxfile(CFG_V0).unwrap().contains("watch"), "to_oxfile 无路径变体不应 watch");
+        assert!(
+            ox.contains(&expected_watch),
+            "the oxfile should watch host.yaml for hot-apply: {ox}"
+        );
+        assert!(ox.contains("watch_delay_secs"), "watch should carry debounce: {ox}");
+        assert!(ox.contains("cwd = \""), "watch precondition cwd: {ox}");
+        // the pathless variant (for doctor) carries no watch
+        assert!(
+            !to_oxfile(CFG_V0).unwrap().contains("watch"),
+            "the to_oxfile pathless variant should not watch"
+        );
     }
 
-    /// G1: host-agent 与 recorder 同形携带 --token（agent.token，Monitor ACL）——
-    /// oxfile 全进程凭据完备，agent 数据流监控不再 tokenless。
+    /// G1: host-agent carries --token like the recorder (agent.token, Monitor ACL) —
+    /// every oxfile process is fully credentialed; agent data-flow monitoring is no longer tokenless.
     #[test]
     fn oxfile_wires_agent_token() {
         let dir = tempfile::tempdir().unwrap();
@@ -1194,14 +1228,14 @@ sources:
         let agent_line = ox
             .lines()
             .find(|l| l.contains("command") && l.contains("host-agent"))
-            .expect("agent 命令行: {ox}");
+            .expect("agent command line: {ox}");
         assert!(
             agent_line.contains("--token") && agent_line.contains("agent.token"),
-            "host-agent 应带 --token agent.token: {agent_line}"
+            "host-agent should carry --token agent.token: {agent_line}"
         );
     }
 
-    /// I1 review (D3 TODO 关闭): [signaling] room → agent --room；缺省不 emit（agent 内置 "vehicle"）。
+    /// I1 review (D3 TODO closed): [signaling] room → agent --room; unset → no emit (agent builtin "vehicle").
     #[test]
     fn oxfile_wires_signaling_room_to_agent() {
         let with_room = format!("{CFG_V0}signaling:\n  room: \"ms-car7\"\n");
@@ -1209,22 +1243,25 @@ sources:
         let agent_line = ox
             .lines()
             .find(|l| l.contains("command") && l.contains("host-agent"))
-            .expect("agent 命令行: {ox}");
+            .expect("agent command line: {ox}");
         assert!(
             agent_line.contains("--room ms-car7"),
-            "host-agent 应带 --room ms-car7: {agent_line}"
+            "host-agent should carry --room ms-car7: {agent_line}"
         );
         assert_eq!(signaling_room(&with_room).unwrap().as_deref(), Some("ms-car7"));
-        let ox2 = to_oxfile(CFG_V0).expect("to_oxfile 默认");
+        let ox2 = to_oxfile(CFG_V0).expect("to_oxfile default");
         let agent_line2 = ox2
             .lines()
             .find(|l| l.contains("command") && l.contains("host-agent"))
-            .expect("agent 命令行: {ox2}");
-        assert!(!agent_line2.contains("--room"), "未配置 room 时不得 emit --room: {agent_line2}");
+            .expect("agent command line: {ox2}");
+        assert!(
+            !agent_line2.contains("--room"),
+            "must not emit --room when room is unset: {agent_line2}"
+        );
         assert_eq!(signaling_room(CFG_V0).unwrap(), None);
     }
 
-    /// H2: host-audio 必须带 --room audio-<vehicle>（音频房间约定）。
+    /// H2: host-audio must carry --room audio-<vehicle> (the audio room convention).
     #[test]
     fn oxfile_wires_audio_room_to_host_audio() {
         let with_room = format!("{CFG_V0}signaling:\n  room: \"ms-deploy-car1\"\n");
@@ -1232,19 +1269,19 @@ sources:
         let audio_line = ox
             .lines()
             .find(|l| l.contains("command") && l.contains("host-audio"))
-            .expect("host-audio 命令行: {ox}");
+            .expect("host-audio command line: {ox}");
         assert!(
             audio_line.contains("--room audio-ms-deploy-car1"),
-            "host-audio 应带 --room audio-ms-deploy-car1: {audio_line}"
+            "host-audio should carry --room audio-ms-deploy-car1: {audio_line}"
         );
-        let ox2 = to_oxfile(CFG_V0).expect("to_oxfile 默认");
+        let ox2 = to_oxfile(CFG_V0).expect("to_oxfile default");
         let audio_line2 = ox2
             .lines()
             .find(|l| l.contains("command") && l.contains("host-audio"))
-            .expect("host-audio 命令行: {ox2}");
+            .expect("host-audio command line: {ox2}");
         assert!(
             audio_line2.contains("--room audio-vehicle"),
-            "host-audio 未配置 room 时默认 audio-vehicle: {audio_line2}"
+            "host-audio defaults to audio-vehicle when room is unset: {audio_line2}"
         );
     }
 
@@ -1255,15 +1292,18 @@ sources:
         let cfg_v1 = "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\n  - id: \"cam1\"\n    mode: \"generator\"\n    fps: 15\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
         apply_config_push(dir.path(), cfg_v1, 7).expect("apply_config_push");
 
-        // host.yaml 已更新
+        // host.yaml updated
         let now = std::fs::read_to_string(dir.path().join("etc").join("host.yaml")).unwrap();
-        assert_eq!(now, cfg_v1, "host.yaml 应为新配置");
-        // 备份含旧配置
+        assert_eq!(now, cfg_v1, "host.yaml should hold the new config");
+        // the backup holds the old config
         let bak = std::fs::read_to_string(dir.path().join("etc").join("host.yaml.bak-7")).unwrap();
-        assert_eq!(bak, CFG_V0, "备份应为旧配置");
-        // oxfile 重新生成（新 source 实例）
+        assert_eq!(bak, CFG_V0, "the backup should hold the old config");
+        // oxfile regenerated (new source instance)
         let ox = std::fs::read_to_string(dir.path().join("run").join("oxfile.toml")).unwrap();
-        assert!(ox.contains("host-capturer-cam1"), "新 source 实例应入 oxfile: {ox}");
+        assert!(
+            ox.contains("host-capturer-cam1"),
+            "the new source instance should be in the oxfile: {ox}"
+        );
     }
 
     #[test]
@@ -1272,14 +1312,23 @@ sources:
         write_host_yaml(dir.path(), CFG_V0);
 
         let err = apply_config_push(dir.path(), "host: \"unterminated", 9).unwrap_err();
-        assert!(err.contains("解析失败"), "拒绝原因应含解析失败: {err}");
+        assert!(
+            err.contains("parse failed"),
+            "the rejection reason should mention the parse failure: {err}"
+        );
         assert_eq!(
             std::fs::read_to_string(dir.path().join("etc").join("host.yaml")).unwrap(),
             CFG_V0,
-            "非法配置不得改写 host.yaml"
+            "an invalid config must not rewrite host.yaml"
         );
-        assert!(!dir.path().join("etc").join("host.yaml.bak-9").exists(), "非法配置不得产生备份");
-        assert!(!dir.path().join("run").join("oxfile.toml").exists(), "非法配置不得改写 oxfile");
+        assert!(
+            !dir.path().join("etc").join("host.yaml.bak-9").exists(),
+            "an invalid config must not create a backup"
+        );
+        assert!(
+            !dir.path().join("run").join("oxfile.toml").exists(),
+            "an invalid config must not rewrite the oxfile"
+        );
     }
 
     #[test]
@@ -1288,41 +1337,48 @@ sources:
             vec!["host-agent".into(), "host-capturer-cam0".into(), "host-capturer-cam1".into()];
         let desired = vec!["host-agent".into(), "host-capturer-cam0".into()];
         assert_eq!(removed_apps(&live, &desired), vec!["host-capturer-cam1"]);
-        // 全部在期望内 → 无删除
+        // everything is within the desired set → nothing to delete
         assert!(removed_apps(&live, &live).is_empty());
     }
 
     #[test]
     fn instance_names_stable_across_count_change() {
-        // 单源也带 id 后缀 — 增源后 cam0 的 app 名不变（身份稳定）
+        // a single source still carries the id suffix — after adding sources cam0's app name is unchanged (stable identity)
         let ox1 = to_oxfile(CFG_V0).unwrap();
-        assert!(ox1.contains("name = \"host-capturer-cam0\""), "单源: {ox1}");
+        assert!(ox1.contains("name = \"host-capturer-cam0\""), "single source: {ox1}");
         let v2 = "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\n  - id: \"cam1\"\n    mode: \"generator\"\n    fps: 15\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
         let ox2 = to_oxfile(v2).unwrap();
-        assert!(ox2.contains("name = \"host-capturer-cam0\""), "双源 cam0 名不变: {ox2}");
-        assert!(ox2.contains("name = \"host-capturer-cam1\""), "双源 cam1 入 oxfile: {ox2}");
+        assert!(
+            ox2.contains("name = \"host-capturer-cam0\""),
+            "dual-source cam0 name unchanged: {ox2}"
+        );
+        assert!(ox2.contains("name = \"host-capturer-cam1\""), "dual-source cam1 in oxfile: {ox2}");
     }
 
     #[test]
     fn recover_config_version_returns_max_backup_version_after_restart() {
-        // F1 关联契约: agent 被 [defaults].watch 重启后 config_version 必须从磁盘
-        // 恢复（备份文件取最大版本），不得归零
+        // F1 association contract: after the agent is restarted via [defaults].watch, config_version must recover from disk
+        // (the max version among the backups), never reset to zero
         let dir = tempfile::tempdir().unwrap();
         write_host_yaml(dir.path(), CFG_V0);
         let v7 = "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\n  - id: \"cam1\"\n    mode: \"generator\"\n    fps: 15\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
         let v10 = "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\n  - id: \"cam1\"\n    mode: \"generator\"\n    fps: 15\n  - id: \"cam2\"\n    mode: \"generator\"\n    fps: 30\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
         apply_config_push(dir.path(), v7, 7).unwrap();
         apply_config_push(dir.path(), v10, 10).unwrap();
-        assert_eq!(recover_config_version(dir.path()), 10, "重启后应从备份恢复最大版本");
-        // 无备份 → 0
+        assert_eq!(
+            recover_config_version(dir.path()),
+            10,
+            "after a restart it should recover the max version from backups"
+        );
+        // no backups → 0
         let fresh = tempfile::tempdir().unwrap();
         write_host_yaml(fresh.path(), CFG_V0);
-        assert_eq!(recover_config_version(fresh.path()), 0, "无备份时版本为 0");
+        assert_eq!(recover_config_version(fresh.path()), 0, "version is 0 with no backups");
     }
 
     #[test]
     fn handle_config_push_rejects_stale_or_duplicate_versions() {
-        // F1 stale guard: version <= current 拒绝（审计 warn 载荷；文件不改写）
+        // F1 stale guard: version <= current rejected (audit warn payload; files unchanged)
         let dir = tempfile::tempdir().unwrap();
         write_host_yaml(dir.path(), CFG_V0);
         let push = |version: u64| SignalingMessage::ConfigPush {
@@ -1333,19 +1389,23 @@ sources:
         };
         assert_eq!(handle_config_push(dir.path(), 0, &push(7)).unwrap(), 7);
         let dup = handle_config_push(dir.path(), 7, &push(7)).unwrap_err();
-        assert!(dup.contains("已过期"), "同版本重复必须拒绝: {dup}");
+        assert!(dup.contains("expired"), "a same-version duplicate must be rejected: {dup}");
         let stale = handle_config_push(dir.path(), 7, &push(6)).unwrap_err();
-        assert!(stale.contains("已过期"), "旧版本必须拒绝: {stale}");
-        assert_eq!(handle_config_push(dir.path(), 7, &push(8)).unwrap(), 8, "新版本应接受");
-        // 拒绝不得改写文件（重复推 v7 后 host.yaml 仍为初始配置）
+        assert!(stale.contains("expired"), "an older version must be rejected: {stale}");
+        assert_eq!(
+            handle_config_push(dir.path(), 7, &push(8)).unwrap(),
+            8,
+            "a newer version should be accepted"
+        );
+        // rejection must not rewrite files (host.yaml stays at the initial config after re-pushing v7)
         assert_eq!(
             std::fs::read_to_string(dir.path().join("etc").join("host.yaml")).unwrap(),
             CFG_V0,
-            "拒绝不得改写 host.yaml"
+            "rejection must not rewrite host.yaml"
         );
     }
-    /// T7: mode=camera + reconnect_ms → capturer 命令行透传 --reconnect-ms；generator 不加；
-    /// 未配置 reconnect_ms 的 camera 源不 emit（capturer 侧缺省 5000）。
+    /// T7: mode=camera + reconnect_ms → the capturer command line passes --reconnect-ms; generator never;
+    /// camera sources without reconnect_ms configured emit nothing (capturer-side default 5000).
     #[test]
     fn oxfile_passes_reconnect_ms_for_camera_mode_only() {
         let cfg = r#"
@@ -1370,31 +1430,34 @@ streams:
         let cam_line = ox
             .lines()
             .find(|l| l.contains("command") && l.contains("--camera cam0"))
-            .expect("cam0 capturer 命令行");
+            .expect("cam0 capturer command line");
         assert!(
             cam_line.contains("--reconnect-ms 3000"),
-            "camera 源应透传 reconnect_ms: {cam_line}"
+            "a camera source should pass reconnect_ms through: {cam_line}"
         );
         let gen_line = ox
             .lines()
             .find(|l| l.contains("command") && l.contains("--camera gen0"))
-            .expect("gen0 capturer 命令行");
+            .expect("gen0 capturer command line");
         assert!(
             !gen_line.contains("--reconnect-ms"),
-            "generator 源不得加 --reconnect-ms: {gen_line}"
+            "a generator source must not add --reconnect-ms: {gen_line}"
         );
-        // 未配置 reconnect_ms 的 camera 源 → 不 emit（capturer 侧缺省 5000）
+        // a camera source without reconnect_ms configured → emit nothing (capturer-side default 5000)
         let no_reconnect =
             "sources:\n  - id: \"cam1\"\n    mode: \"camera\"\n    input: \"/dev/video0\"\n";
         let ox2 = to_oxfile(no_reconnect).unwrap();
         let cam1_line = ox2
             .lines()
             .find(|l| l.contains("command") && l.contains("--camera cam1"))
-            .expect("cam1 capturer 命令行");
-        assert!(!cam1_line.contains("--reconnect-ms"), "未配置 reconnect_ms 不 emit: {cam1_line}");
+            .expect("cam1 capturer command line");
+        assert!(
+            !cam1_line.contains("--reconnect-ms"),
+            "unset reconnect_ms emits nothing: {cam1_line}"
+        );
     }
 
-    /// T7: camera_configs 解析 input / reconnect_ms（缺省 None——capturer 侧回落 5000）。
+    /// T7: camera_configs parses input / reconnect_ms (default None — the capturer side falls back to 5000).
     #[test]
     fn camera_config_resolves_input_and_reconnect_ms() {
         let cfg = "sources:\n  - id: \"cam0\"\n    mode: \"camera\"\n    input: \"/dev/v4l/by-id/cam0\"\n    reconnect_ms: 2500\n";
@@ -1406,8 +1469,8 @@ streams:
         assert_eq!(camera_configs(def).unwrap()[0].input, None);
     }
 
-    /// 编码参数透传: streams 配置 encoder_backend/bitrate_kbps/keyframe_interval → oxfile 命令追加；
-    /// 未配置不 emit（streamer 侧回落 field 缺省 auto/2000/2）。
+    /// encoder-param passthrough: streams config encoder_backend/bitrate_kbps/keyframe_interval → oxfile command appends;
+    /// unset emits nothing (the streamer side falls back to field defaults auto/2000/2).
     #[test]
     fn oxfile_wires_stream_encoder_params() {
         let cfg = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n    codec: \"h264\"\n    encoder_backend: \"hardware\"\n    bitrate_kbps: 3500\n    keyframe_interval: 4\n  - id: \"s1\"\n    source: \"cam0\"\n";
@@ -1415,29 +1478,32 @@ streams:
         let s0_line = ox
             .lines()
             .find(|l| l.contains("command") && l.contains("--stream s0"))
-            .expect("s0 streamer 命令行");
+            .expect("s0 streamer command line");
         assert!(
             s0_line.contains("--encoder-backend hardware"),
-            "应透传 encoder_backend: {s0_line}"
+            "encoder_backend should pass through: {s0_line}"
         );
-        assert!(s0_line.contains("--bitrate-kbps 3500"), "应透传 bitrate: {s0_line}");
-        assert!(s0_line.contains("--keyframe-interval 4"), "应透传 gop: {s0_line}");
+        assert!(s0_line.contains("--bitrate-kbps 3500"), "bitrate should pass through: {s0_line}");
+        assert!(s0_line.contains("--keyframe-interval 4"), "gop should pass through: {s0_line}");
         let s1_line = ox
             .lines()
             .find(|l| l.contains("command") && l.contains("--stream s1"))
-            .expect("s1 streamer 命令行");
-        // s1 未写 codec → 缺省 h264 → 真值表钉 software（D282；显式后端仍原样透传）
-        assert!(s1_line.contains("--encoder-backend software"), "缺省 h264 钉 software: {s1_line}");
-        assert!(!s1_line.contains("--bitrate-kbps"), "未配置不 emit: {s1_line}");
-        assert!(!s1_line.contains("--keyframe-interval"), "未配置不 emit: {s1_line}");
+            .expect("s1 streamer command line");
+        // s1 writes no codec → default h264 → the truth table pins software (D282; explicit backends are still passed through)
+        assert!(
+            s1_line.contains("--encoder-backend software"),
+            "default h264 pins software: {s1_line}"
+        );
+        assert!(!s1_line.contains("--bitrate-kbps"), "unset emits nothing: {s1_line}");
+        assert!(!s1_line.contains("--keyframe-interval"), "unset emits nothing: {s1_line}");
     }
 
-    // ── qos-framerate-priority T4: stream_mode bundle 合并/flag 下发（表驱动） ──
+    // ── qos-framerate-priority T4: stream_mode bundle merge / flag emission (table-driven) ──
 
     fn streamer_cmd(ox: &str, stream: &str) -> String {
         ox.lines()
             .find(|l| l.contains("command") && l.contains(&format!("--stream {stream}")))
-            .expect("streamer 命令行")
+            .expect("streamer command line")
             .to_string()
     }
 
@@ -1453,9 +1519,9 @@ streams:
         let line = streamer_cmd(&ox, "s0");
         assert!(line.contains("--degradation framerate"), "smooth → framerate: {line}");
         assert!(line.contains("--content-hint fluid"), "smooth → Fluid: {line}");
-        // 源 cam0 无 fps → resolved 30 → 地板 100（D282 线性口径，替代固定 400）
-        assert!(line.contains("--min-bitrate-kbps 100"), "smooth → fps 联动地板: {line}");
-        assert!(!line.contains("--bitrate-kbps"), "smooth 不动天花板: {line}");
+        // source cam0 has no fps → resolved 30 → floor 100 (D282 linear rule, replaces the fixed 400)
+        assert!(line.contains("--min-bitrate-kbps 100"), "smooth → fps-linked floor: {line}");
+        assert!(!line.contains("--bitrate-kbps"), "smooth does not move the ceiling: {line}");
     }
 
     #[test]
@@ -1464,67 +1530,76 @@ streams:
         let line = streamer_cmd(&ox, "s0");
         assert!(line.contains("--degradation resolution"), "quality → resolution: {line}");
         assert!(line.contains("--bitrate-kbps 3000"), "quality → bundle 3000 (AD-3): {line}");
-        assert!(!line.contains("--content-hint"), "quality 无 hint: {line}");
-        assert!(!line.contains("--min-bitrate-kbps"), "quality 无地板: {line}");
+        assert!(!line.contains("--content-hint"), "quality has no hint: {line}");
+        assert!(!line.contains("--min-bitrate-kbps"), "quality has no floor: {line}");
     }
 
     #[test]
     fn oxfile_balanced_explicit_emits_no_qos_flags() {
         let ox = to_oxfile(&qos_cfg("    stream_mode: \"balanced\"\n")).unwrap();
         let line = streamer_cmd(&ox, "s0");
-        assert!(!line.contains("--degradation"), "balanced 不发 degradation: {line}");
-        assert!(!line.contains("--content-hint"), "balanced 不发 hint: {line}");
-        assert!(!line.contains("--min-bitrate-kbps"), "balanced 不发 min: {line}");
-        assert!(!line.contains("--bitrate-kbps"), "balanced 不填天花板: {line}");
+        assert!(!line.contains("--degradation"), "balanced emits no degradation: {line}");
+        assert!(!line.contains("--content-hint"), "balanced emits no hint: {line}");
+        assert!(!line.contains("--min-bitrate-kbps"), "balanced emits no min: {line}");
+        assert!(!line.contains("--bitrate-kbps"), "balanced fills no ceiling: {line}");
     }
 
     #[test]
     fn oxfile_explicit_keys_win_bundle() {
-        // 显式 bitrate/min 覆盖 bundle（smooth 写 bitrate 不被抹、quality 写 bitrate 赢 3000、
-        // smooth 写 min 赢 fps 联动地板）
+        // explicit bitrate/min override the bundle (smooth writing bitrate is not erased, quality writing bitrate wins over 3000,
+        // smooth writing min wins over the fps-linked floor)
         let ox = to_oxfile(&qos_cfg(
             "    stream_mode: \"smooth\"\n    bitrate_kbps: 2500\n    min_bitrate_kbps: 800\n",
         ))
         .unwrap();
         let line = streamer_cmd(&ox, "s0");
-        assert!(line.contains("--bitrate-kbps 2500"), "显式 bitrate 赢: {line}");
-        assert!(line.contains("--min-bitrate-kbps 800"), "显式 min 赢地板 100: {line}");
-        assert!(line.contains("--degradation framerate"), "bundle 原语仍在: {line}");
+        assert!(line.contains("--bitrate-kbps 2500"), "explicit bitrate wins: {line}");
+        assert!(
+            line.contains("--min-bitrate-kbps 800"),
+            "explicit min wins over floor 100: {line}"
+        );
+        assert!(
+            line.contains("--degradation framerate"),
+            "bundle primitives still present: {line}"
+        );
         let ox2 =
             to_oxfile(&qos_cfg("    stream_mode: \"quality\"\n    bitrate_kbps: 5000\n")).unwrap();
         assert!(
             streamer_cmd(&ox2, "s0").contains("--bitrate-kbps 5000"),
-            "quality 显式赢 bundle 3000"
+            "quality explicit wins over bundle 3000"
         );
     }
 
     #[test]
     fn oxfile_legacy_yaml_emits_no_qos_flags() {
-        // 无 stream_mode 的旧 yaml：不发 --degradation/--content-hint/--*-bitrate-kbps
-        // （balanced 零扰动不变量）。既有 flag（gateway）不受影响。
-        // 注：D282 起缺省 codec=h264 会钉 --encoder-backend software —— 属后端门既定行为，
-        //     非 QoS 扰动（该键的显式透传面见 oxfile_wires_stream_encoder_params）。
+        // a legacy yaml without stream_mode: no --degradation/--content-hint/--*-bitrate-kbps
+        // (the balanced zero-perturbation invariant). Existing flags (gateway) are unaffected.
+        // Note: since D282 the default codec=h264 pins --encoder-backend software — established backend-gate behavior,
+        //     not a QoS perturbation (its explicit-passthrough surface: oxfile_wires_stream_encoder_params).
         let ox = to_oxfile(CFG_V0).unwrap();
         let line = streamer_cmd(&ox, "s0");
-        assert!(!line.contains("--degradation"), "现状不变: {line}");
-        assert!(!line.contains("--content-hint"), "现状不变: {line}");
-        assert!(!line.contains("--min-bitrate-kbps"), "现状不变: {line}");
-        assert!(!line.contains("--bitrate-kbps"), "现状不变: {line}");
-        assert!(line.contains("--gateway"), "既有 flag 保留: {line}");
+        assert!(!line.contains("--degradation"), "status quo unchanged: {line}");
+        assert!(!line.contains("--content-hint"), "status quo unchanged: {line}");
+        assert!(!line.contains("--min-bitrate-kbps"), "status quo unchanged: {line}");
+        assert!(!line.contains("--bitrate-kbps"), "status quo unchanged: {line}");
+        assert!(line.contains("--gateway"), "existing flag retained: {line}");
     }
 
     #[test]
     fn invalid_stream_mode_rejected_at_translate() {
         let e = stream_configs(&qos_cfg("    stream_mode: \"turbo\"\n")).unwrap_err();
-        assert!(e.contains("smooth|balanced|quality"), "错误信息含合法集: {e}");
-        assert!(e.contains("turbo"), "错误信息含非法值: {e}");
-        // to_oxfile（deploy 主路径）同步拦截
+        assert!(
+            e.contains("smooth|balanced|quality"),
+            "the error message contains the legal set: {e}"
+        );
+        assert!(e.contains("turbo"), "the error message contains the illegal value: {e}");
+        // to_oxfile (the deploy main path) blocks in sync
         assert!(to_oxfile(&qos_cfg("    stream_mode: \"turbo\"\n")).is_err());
     }
 
-    // ── host-stream-defaults T1: defaults 分层合并（逐条 > defaults > 内置） ──
+    // ── host-stream-defaults T1: defaults layered merge (entry > defaults > builtin) ──
 
-    /// 全键 defaults（streams 6 键 + sources 平台键 5 个）——优先级矩阵的"公共层"输入。
+    /// All-keys defaults (streams 6 keys + sources platform 5) — the shared-layer input of the priority matrix.
     const ALL_DEFAULTS: &str = r#"
 defaults:
   streams:
@@ -1542,14 +1617,14 @@ defaults:
     reconnect_ms: 4000
 "#;
 
-    /// defaults 全键 + 单源 cam0 + 单流 s0（stream_body 可空 = 该键走 defaults/内置）。
+    /// All-keys defaults + single source cam0 + single stream s0 (stream_body may be empty = that key comes from defaults/builtin).
     fn defaults_streams(stream_body: &str) -> String {
         format!(
             "{ALL_DEFAULTS}\nsources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n{stream_body}"
         )
     }
 
-    /// 同上，条目体挂在 source 条目下（source_body 可空）。
+    /// Same, with the entry body under the source entry (source_body may be empty).
     fn defaults_sources(source_body: &str) -> String {
         format!(
             "{ALL_DEFAULTS}\nsources:\n  - id: \"cam0\"\n{source_body}streams:\n  - id: \"s0\"\n    source: \"cam0\"\n"
@@ -1566,23 +1641,27 @@ defaults:
         assert_eq!(s.min_bitrate_kbps, Some(300));
         assert_eq!(s.keyframe_interval, Some(5));
         let c = &camera_configs(&defaults_sources("")).unwrap()[0];
-        assert_eq!(c.mode, SourceMode::Generator, "mode 身份键不入 defaults——条目缺省落内置");
+        assert_eq!(
+            c.mode,
+            SourceMode::Generator,
+            "the mode identity key stays out of defaults — entry default falls to builtin"
+        );
         assert_eq!(c.width, 640);
         assert_eq!(c.height, 480);
         assert_eq!(c.fps, 24);
-        assert_eq!(c.input, None, "input 身份键不入 defaults");
+        assert_eq!(c.input, None, "the input identity key stays out of defaults");
         assert_eq!(c.reconnect_ms, Some(4000));
     }
 
     #[test]
     fn identity_keys_are_denied_in_defaults_sources() {
-        // D282 修订：mode/input 属源身份——误写公共层必须 deploy 期报错而非静默忽略。
+        // D282 revision: mode/input are source identity — mis-writing them into the shared layer must error at deploy, never be silently ignored.
         for bad in ["mode: \"generator\"", "input: \"/dev/video0\""] {
             let cfg = format!(
                 "sources:\n  - id: \"cam0\"\n    mode: camera\ndefaults:\n  sources:\n    {bad}\nstreams: []\n"
             );
             let e = camera_configs(&cfg).unwrap_err();
-            assert!(e.contains("unknown field"), "deny 应点名未知字段: {e}");
+            assert!(e.contains("unknown field"), "deny should name the unknown field: {e}");
         }
     }
 
@@ -1612,25 +1691,29 @@ defaults:
 
     #[test]
     fn merge_is_per_key_not_per_section() {
-        // 条目只写一个键 → 该键取条目、其余仍取 defaults
-        // （整段替换 = 分层配置最常见的实现错误，此钉逐键合并）
+        // an entry writing only one key → that key takes the entry value, the rest still take defaults
+        // (whole-section replacement = the most common layered-config implementation bug; this pins per-key merge)
         let s = &stream_configs(&defaults_streams("    codec: \"vp8\"\n")).unwrap()[0];
-        assert_eq!(s.codec, "vp8", "条目键生效");
-        assert_eq!(s.encoder_backend.as_deref(), Some("vaapi"), "其余键回落 defaults");
+        assert_eq!(s.codec, "vp8", "the entry key applies");
+        assert_eq!(
+            s.encoder_backend.as_deref(),
+            Some("vaapi"),
+            "the remaining keys fall back to defaults"
+        );
         assert_eq!(s.bitrate_kbps, Some(1500));
         assert_eq!(s.stream_mode.as_deref(), Some("quality"));
         assert_eq!(s.min_bitrate_kbps, Some(300));
         assert_eq!(s.keyframe_interval, Some(5));
         let c = &camera_configs(&defaults_sources("    fps: 60\n")).unwrap()[0];
-        assert_eq!(c.fps, 60, "条目键生效");
-        assert_eq!(c.width, 640, "其余键回落 defaults");
+        assert_eq!(c.fps, 60, "the entry key applies");
+        assert_eq!(c.width, 640, "the remaining keys fall back to defaults");
         assert_eq!(c.mode, SourceMode::Generator);
         assert_eq!(c.reconnect_ms, Some(4000));
     }
 
     #[test]
     fn defaults_section_absent_equals_builtin_resolution() {
-        // 缺段 = 零注入：resolved 值与内置缺省逐字节一致（balanced 零扰动不变量延伸）
+        // missing section = zero injection: resolved values are byte-identical to the builtin defaults (extension of the balanced zero-perturbation invariant)
         let cfg = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
         assert_eq!(
             camera_configs(cfg).unwrap(),
@@ -1643,7 +1726,7 @@ defaults:
                 input: None,
                 reconnect_ms: None,
             }],
-            "无 defaults 段必须等于内置逐字段缺省"
+            "an absent defaults section must equal the builtin per-field defaults"
         );
         assert_eq!(
             stream_configs(cfg).unwrap(),
@@ -1657,46 +1740,49 @@ defaults:
                 min_bitrate_kbps: None,
                 keyframe_interval: None,
             }],
-            "无 defaults 段必须等于内置逐字段缺省"
+            "an absent defaults section must equal the builtin per-field defaults"
         );
-        // 空 defaults 段（`defaults: {}`）与缺段渲染逐字节等
+        // an empty defaults section (`defaults: {}`) renders byte-identical to an absent one
         assert_eq!(
             to_oxfile(cfg).unwrap(),
             to_oxfile(&format!("{cfg}\ndefaults: {{}}\n")).unwrap(),
-            "空 defaults 段不得改变 oxfile 渲染"
+            "an empty defaults section must not change oxfile rendering"
         );
     }
 
     #[test]
     fn illegal_mode_and_codec_rejected_from_every_layer() {
-        // ① 逐条层
+        // 1) entry layer
         assert!(stream_configs(&qos_cfg("    stream_mode: \"turbo\"\n")).is_err());
         let e = stream_configs(&qos_cfg("    codec: \"h265\"\n")).unwrap_err();
-        assert!(e.contains("vp8|h264|vp9|av1") && e.contains("h265"), "错误信息含合法集: {e}");
-        // ② defaults 层（合并后同检 → 错值不静默进 streamer）
+        assert!(
+            e.contains("vp8|h264|vp9|av1") && e.contains("h265"),
+            "the error message contains the legal set: {e}"
+        );
+        // 2) defaults layer (checked after the merge → bad values never silently reach the streamer)
         let d_mode = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\ndefaults:\n  streams:\n    stream_mode: \"turbo\"\n";
         let e = stream_configs(d_mode).unwrap_err();
         assert!(e.contains("smooth|balanced|quality") && e.contains("turbo"), "{e}");
         let d_codec = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\ndefaults:\n  streams:\n    codec: \"H264\"\n";
         assert!(
             stream_configs(d_codec).unwrap_err().contains("codec=H264"),
-            "大小写敏感=合法集精确匹配"
+            "case sensitivity = exact legal-set match"
         );
-        // ③ 内置层（无条目键无 defaults → 缺省值天然合法）
+        // 3) builtin layer (no entry key, no defaults → default values are inherently legal)
         assert!(stream_configs(&qos_cfg("")).is_ok());
-        // 条目合法值覆盖 defaults 非法值 → 证门在合并之后
+        // an entry legal value overriding a defaults illegal value → proves the gate runs after the merge
         let ok = "sources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    stream_mode: \"smooth\"\ndefaults:\n  streams:\n    stream_mode: \"turbo\"\n";
         assert_eq!(stream_configs(ok).unwrap()[0].stream_mode.as_deref(), Some("smooth"));
-        // deploy 主路径同步拦截
+        // the deploy main path blocks in sync
         assert!(to_oxfile(d_mode).is_err());
         assert!(validate(d_codec).is_err());
     }
 
-    // ── host-stream-defaults T2: smooth fps 地板 + h264 缺省 + auto×h264 裁决 ──
+    // ── host-stream-defaults T2: smooth fps floor + h264 default + auto×h264 decision ──
 
     #[test]
     fn smooth_floor_is_linear_in_fps_with_50_kbps_minimum() {
-        // 每帧字节恒定 → fps 线性；用户裁决锚点 15→50 / 30→100（0 兜底 50）
+        // constant bytes per frame → linear in fps; user-ruled anchors 15→50 / 30→100 (0 floors at 50)
         for (fps, expect) in [(0u32, 50u32), (15, 50), (24, 80), (30, 100), (60, 200)] {
             assert_eq!(smooth_bitrate_floor_kbps(fps), expect, "fps={fps}");
         }
@@ -1712,28 +1798,32 @@ defaults:
         let floor_of = |fps: u32| streamer_cmd(&to_oxfile(&cfg(fps)).unwrap(), "s0");
         assert!(
             floor_of(60).contains("--min-bitrate-kbps 200"),
-            "源 fps=60 → 200: {}",
+            "source fps=60 → 200: {}",
             floor_of(60)
         );
-        assert!(floor_of(15).contains("--min-bitrate-kbps 50"), "源 fps=15 → 50: {}", floor_of(15));
-        // 源未写 fps（resolved 30）→ 100
+        assert!(
+            floor_of(15).contains("--min-bitrate-kbps 50"),
+            "source fps=15 → 50: {}",
+            floor_of(15)
+        );
+        // the source writes no fps (resolved 30) → 100
         assert!(
             streamer_cmd(&to_oxfile(&qos_cfg("    stream_mode: \"smooth\"\n")).unwrap(), "s0")
                 .contains("--min-bitrate-kbps 100"),
-            "源缺省 fps → 100"
+            "source default fps → 100"
         );
-        // 流引用的源不存在 → 按 30 口径（现有报错路径不新增语义）
+        // the stream references a nonexistent source → the 30 rule (the existing error path adds no new semantics)
         let orphan = "streams:\n  - id: \"s0\"\n    stream_mode: \"smooth\"\n";
         assert!(
             streamer_cmd(&to_oxfile(orphan).unwrap(), "s0").contains("--min-bitrate-kbps 100"),
-            "查不到源按 30 计"
+            "a missing source is counted as 30"
         );
-        // defaults.sources.fps 参与地板（合并先于关联）
+        // defaults.sources.fps participates in the floor (the merge precedes the linking)
         let via_defaults = "defaults:\n  sources:\n    fps: 60\n  streams:\n    stream_mode: \"smooth\"\nsources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
         assert!(
             streamer_cmd(&to_oxfile(via_defaults).unwrap(), "s0")
                 .contains("--min-bitrate-kbps 200"),
-            "defaults.sources.fps 进地板"
+            "defaults.sources.fps enters the floor"
         );
     }
 
@@ -1744,29 +1834,29 @@ defaults:
                 "    codec: \"{codec}\"\n    encoder_backend: \"{backend}\"\n"
             )))
         };
-        // ① h264 × auto → 钉 software（PIT-156 根治）
+        // 1) h264 × auto → pin software (PIT-156 root fix)
         assert!(
             streamer_cmd(&cell("auto", "h264").unwrap(), "s0")
                 .contains("--encoder-backend software"),
             "h264×auto → software"
         );
-        // ② h264 × 显式后端 → 原样透传（含"明知硬件不可用仍要试"）
+        // 2) h264 × explicit backend → passed through as-is (incl. knowingly trying hardware even though it is unavailable)
         for b in ["software", "hardware", "nvenc", "vaapi"] {
             let line = streamer_cmd(&cell(b, "h264").unwrap(), "s0");
-            assert!(line.contains(&format!("--encoder-backend {b}")), "h264×{b} 原样: {line}");
+            assert!(line.contains(&format!("--encoder-backend {b}")), "h264×{b} as-is: {line}");
         }
-        // ③ 其他 codec × auto → 原样（不干预 streamer auto 现状）
+        // 3) other codecs × auto → as-is (no interference with the streamer auto status quo)
         assert!(
             streamer_cmd(&cell("auto", "vp8").unwrap(), "s0").contains("--encoder-backend auto"),
-            "vp8×auto 原样"
+            "vp8×auto as-is"
         );
-        // ④ 其他 codec × 未配置 → 不 emit
+        // 4) other codecs × unset → emit nothing
         assert!(
             !streamer_cmd(&to_oxfile(&qos_cfg("    codec: \"vp8\"\n")).unwrap(), "s0")
                 .contains("--encoder-backend"),
-            "vp8 未配置不 emit"
+            "vp8 unset emits nothing"
         );
-        // 纯函数侧四格
+        // pure-function side: four cells
         assert_eq!(resolved_encoder_backend("h264", None), Some("software"));
         assert_eq!(resolved_encoder_backend("h264", Some("auto")), Some("software"));
         assert_eq!(resolved_encoder_backend("vp8", None), None);
@@ -1776,36 +1866,45 @@ defaults:
 
     #[test]
     fn codec_default_h264_flows_into_backend_pin() {
-        // 三层都未写 codec → 内置 h264（D282 改判）→ 顺带被真值表钉 software
+        // all three layers write no codec → builtin h264 (D282 revision) → incidentally pinned software by the truth table
         assert_eq!(stream_configs(&qos_cfg("")).unwrap()[0].codec, "h264");
         let line = streamer_cmd(&to_oxfile(&qos_cfg("")).unwrap(), "s0");
-        assert!(line.contains("--encoder-backend software"), "缺省 h264 走真值表: {line}");
-        // defaults 层写 codec 同样进真值表（resolved 口径）
+        assert!(
+            line.contains("--encoder-backend software"),
+            "default h264 goes through the truth table: {line}"
+        );
+        // a codec written at the defaults layer also enters the truth table (resolved rule)
         let via_defaults = "defaults:\n  streams:\n    codec: \"vp9\"\nsources:\n  - id: \"cam0\"\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";
         assert_eq!(stream_configs(via_defaults).unwrap()[0].codec, "vp9");
         assert!(
             !streamer_cmd(&to_oxfile(via_defaults).unwrap(), "s0").contains("--encoder-backend"),
-            "vp9 不干预"
+            "vp9 left alone"
         );
     }
 
     #[test]
     fn defaults_rejects_unknown_and_identity_keys() {
-        // 公共层带 deny_unknown_fields：typo / 身份键 deploy 期指名报错
+        // the shared layer carries deny_unknown_fields: typos / identity keys error by name at deploy time
         let typo = "sources:\n  - id: \"cam0\"\ndefaults:\n  streams:\n    bitrate_kbps: 1000\n    bitrates: 1000\n";
         let e = camera_configs(typo).unwrap_err();
-        assert!(e.contains("bitrates"), "未知键必须指名: {e}");
+        assert!(e.contains("bitrates"), "an unknown key must be named: {e}");
         let ident = "sources:\n  - id: \"cam0\"\ndefaults:\n  streams:\n    id: \"x\"\n";
-        assert!(camera_configs(ident).unwrap_err().contains("id"), "id 不入公共层");
+        assert!(
+            camera_configs(ident).unwrap_err().contains("id"),
+            "id stays out of the shared layer"
+        );
         let legacy = "defaults:\n  sources:\n    source: \"stub\"\n";
-        assert!(camera_configs(legacy).unwrap_err().contains("source"), "旧兼容键不入公共层");
-        // 顶层不加 deny：存量 yaml 的 host:/control: 等非 HostConfig 键必须继续可解析
+        assert!(
+            camera_configs(legacy).unwrap_err().contains("source"),
+            "the legacy compat key stays out of the shared layer"
+        );
+        // the top level does not deny: existing yaml keys outside HostConfig (host:/control: etc.) must still parse
         assert!(
             camera_configs("host:\n  device_id: \"x\"\ncontrol:\n  enabled: false\nsources: []\n")
                 .is_ok()
         );
     }
-    // ── V5 [control].hmac_key_file 渲染注入 ──
+    // ── V5 [control].hmac_key_file render injection ──
 
     const CFG_CONTROL: &str = r#"
 sources:
@@ -1821,14 +1920,14 @@ control:
     #[test]
     fn control_key_file_injected_into_controller_app() {
         let ox = to_oxfile_in_dir(CFG_CONTROL, Path::new("/opt/h")).unwrap();
-        // 相对路径按实例根绝对化，仅 controller app 带参
+        // the relative path is absolutized against the instance root; only the controller app carries the arg
         assert!(ox.contains("--hmac-key-file /opt/h/etc/control.hmac.key"), "{ox}");
         assert_eq!(ox.matches("--hmac-key-file").count(), 1);
     }
 
     #[test]
     fn control_absent_means_byte_identical_oxfile() {
-        // 缺段零扰动（stream_mode balanced 同款可证形）：老配置渲染不含新参数
+        // absent-section zero perturbation (same provable shape as stream_mode balanced): the old config renders without the new arg
         let ox = to_oxfile_in_dir(CFG_V0, Path::new("/opt/h")).unwrap();
         assert!(!ox.contains("--hmac-key-file"));
         assert!(!ox.contains("hmac"));
@@ -1836,9 +1935,9 @@ control:
 
     #[test]
     fn control_key_file_missing_rejects_at_render() {
-        // 部署期守卫：配置指向不存在文件 = write_oxfile Err（早于 controller 进程拉起）
+        // deploy-time guard: config pointing at a missing file = write_oxfile Err (earlier than the controller process launch)
         let e = write_oxfile(CFG_CONTROL, Path::new("/nonexistent-v5-guard-dir"))
-            .expect_err("缺密钥文件必须拒渲染");
-        assert!(e.contains("hmac_key_file 指向的文件不存在"), "{e}");
+            .expect_err("a missing key file must reject rendering");
+        assert!(e.contains("hmac_key_file points to a missing file"), "{e}");
     }
 }

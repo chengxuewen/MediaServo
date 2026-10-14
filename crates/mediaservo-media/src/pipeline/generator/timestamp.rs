@@ -7,7 +7,7 @@ use super::fonts::TextBurner;
 /// Format for the timestamp overlay text.
 #[derive(Clone, Copy, Debug)]
 pub enum TimestampFormat {
-        /// YYYY-MM-DD HH:MM:SS.mmm (wall clock from µs timestamp).
+    /// YYYY-MM-DD HH:MM:SS.mmm (wall clock from µs timestamp).
     DateTime,
     /// Frame counter: zero-padded 6 digits.
     FrameCount,
@@ -90,9 +90,7 @@ impl TimestampOverlay {
         // Draw each line
         for (i, line) in lines.iter().enumerate() {
             let line_oy = oy + i as u32 * glyph_h;
-            self.burner
-                .font()
-                .draw_text(y, stride_y, line, ox, line_oy, width, height);
+            self.burner.font().draw_text(y, stride_y, line, ox, line_oy, width, height);
         }
     }
 
@@ -125,8 +123,8 @@ impl TimestampOverlay {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::fonts::{Anchor, BitmapFont};
+    use super::*;
 
     #[test]
     fn datetime_format_produces_iso_style_string() {
@@ -174,9 +172,16 @@ mod tests {
         let mut v = vec![200u8; ((w / 2) * (h / 2)) as usize];
 
         overlay.burn_i420(
-            &mut y, &mut u, &mut v,
-            w as usize, (w / 2) as usize, (w / 2) as usize,
-            0, 0, w, h,
+            &mut y,
+            &mut u,
+            &mut v,
+            w as usize,
+            (w / 2) as usize,
+            (w / 2) as usize,
+            0,
+            0,
+            w,
+            h,
         );
 
         // U/V in the text region should be cleared to 128

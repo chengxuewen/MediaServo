@@ -1,10 +1,10 @@
-//! C5 核心: FrameBus 订阅端跨发布端崩溃重启恢复（同句柄收帧）。
+//! C5 core: FrameBus subscriber recovery across publisher crash-restart (same handle keeps receiving).
 //!
-//! 场景（生产等价）: 长生命周期订阅端（host-streamer/host-recorder）挂载后，
-//! 发布端（capturer）被 SIGKILL（崩溃路径）→ 新发布端进程同 topic 重发布 →
-//! **旧订阅端句柄必须恢复收帧**（不是新建订阅端才收得到）。
+//! Scenario (production-equivalent): after a long-lived subscriber (host-streamer/host-recorder) attaches,
+//! the publisher (capturer) is SIGKILLed (crash path) -> a new publisher process re-publishes the same topic ->
+//! **the old subscriber handle must resume receiving** (not only a freshly-created subscriber).
 //!
-//! C25: 跑前清 /tmp/iceoryx2 + /dev/shm/iox2_*（本测试自带清理）。
+//! C25: clean /tmp/iceoryx2 + /dev/shm/iox2_* before running (this test cleans up itself).
 
 use std::process::Command;
 use std::time::Duration;
@@ -28,7 +28,7 @@ fn cleanup_iceoryx() {
     }
 }
 
-/// 等流上收到 ≥n 帧（返回期间最大 seq）。
+/// Wait until >= n frames arrive on the stream (returns the max seq seen so far).
 async fn wait_frames(stream: &FrameStream, n: u32, timeout: Duration) -> u64 {
     let deadline = std::time::Instant::now() + timeout;
     let mut seen = 0u32;
@@ -42,14 +42,14 @@ async fn wait_frames(stream: &FrameStream, n: u32, timeout: Duration) -> u64 {
                     return max_seq;
                 }
             }
-            Ok(None) => panic!("订阅流关停"),
+            Ok(None) => panic!("subscriber stream closed"),
             Err(_) => {}
         }
     }
-    panic!("{timeout:?} 内只收到 {seen} 帧 (需 ≥{n}), max_seq={max_seq}");
+    panic!("only {seen} frames within {timeout:?} (need >= {n}), max_seq={max_seq}");
 }
 
-/// 启动发布子进程（新进程 = 新 node + 新 publisher port），返回 Child。
+/// Spawn the publishing child process (new process = new node + new publisher port); returns the Child.
 fn spawn_pub_loop(topic: &str, frame_bytes: usize, fps: u64) -> std::process::Child {
     Command::new(env!("CARGO_BIN_EXE_framebus_pub_loop"))
         .arg(topic)
@@ -62,18 +62,18 @@ fn spawn_pub_loop(topic: &str, frame_bytes: usize, fps: u64) -> std::process::Ch
 fn kill9(child: &mut std::process::Child) {
     let pid = child.id();
     let st = Command::new("kill").args(["-9", &pid.to_string()]).status().expect("kill");
-    assert!(st.success(), "kill -9 {pid} 失败");
+    assert!(st.success(), "kill -9 {pid} failed");
 }
 
 #[tokio::test]
 async fn same_subscriber_recovers_across_publisher_sigkill() {
-    // 生产参数: 1080p I420 帧 (3.1MB) @ 30fps（host-capturer 同规格）
+    // production parameters: 1080p I420 frames (3.1MB) @ 30fps (same spec as host-capturer)
     crash_recovery_run(3_110_400, 30).await;
 }
 
 #[tokio::test]
 async fn same_subscriber_recovers_across_publisher_sigkill_small_frames() {
-    // 小帧对照（低配环境快速回归）
+    // small-frame control (fast regression on low-spec environments)
     crash_recovery_run(64, 10).await;
 }
 
@@ -81,27 +81,27 @@ async fn crash_recovery_run(frame_bytes: usize, fps: u64) {
     cleanup_iceoryx();
     let sk = Ed25519SigningKey::from_pem(PRIV_PEM.as_bytes());
     let vk = Ed25519VerifyingKey::from_pem(PUB_PEM.as_bytes());
-    // Recorder 角色可订阅 camera/*
+    // Recorder role may subscribe camera/*
     let acl = NodeAcl::for_role(NodeId::new("crash-sub"), Role::Recorder);
     let tok = CapabilityToken::sign(&acl, 3600, &sk).unwrap();
     let bus = FrameBus::attach("", &tok, &vk).unwrap();
-    // 唯一 topic（跨 run 隔离）
+    // unique topic (cross-run isolation)
     let topic = FrameTopic::new(format!("camera/crash/{}/raw", std::process::id()));
 
-    // ① 订阅端先挂载（生产时序：streamer/recorder 先于/同时于 capturer）
+    // (1) subscriber attaches first (production ordering: streamer/recorder before/with capturer)
     let stream = bus.subscribe(&topic).unwrap();
 
-    // ② 发布端 v1 收帧基线
+    // (2) publisher v1: establish the receiving baseline
     let mut pub1 = spawn_pub_loop(topic.as_str(), frame_bytes, fps);
     let seq_before = wait_frames(&stream, 3, Duration::from_secs(10)).await;
 
-    // ③ SIGKILL 发布端 v1（崩溃路径）
+    // (3) SIGKILL publisher v1 (crash path)
     kill9(&mut pub1);
     let _ = pub1.wait();
-    // 给 iceoryx2 一点时间让残留可见（新节点创建时清理）
+    // give iceoryx2 a moment so residue becomes visible (cleaned at new-node creation)
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    // ④ 发布端 v2 同 topic 重发布 → 同一订阅端句柄必须恢复收帧
+    // (4) publisher v2 re-publishes the same topic -> the same subscriber handle must resume receiving
     let mut pub2 = spawn_pub_loop(topic.as_str(), frame_bytes, fps);
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     let mut resumed = false;
@@ -110,7 +110,7 @@ async fn crash_recovery_run(frame_bytes: usize, fps: u64) {
         match tokio::time::timeout(Duration::from_millis(500), stream.recv()).await {
             Ok(Some(frame)) => {
                 if frame.meta().seq < seq_before {
-                    // 新实例 seq 归零（pub_loop 从 1 开始）→ 非旧连接残留帧
+                    // the new instance's seq resets (pub_loop starts at 1) -> not stale frames from the old connection
                     resumed = true;
                 }
                 seen += 1;
@@ -118,30 +118,32 @@ async fn crash_recovery_run(frame_bytes: usize, fps: u64) {
                     break;
                 }
             }
-            Ok(None) => panic!("订阅流关停"),
+            Ok(None) => panic!("subscriber stream closed"),
             Err(_) => {}
         }
     }
     assert!(
         resumed,
-        "发布端 SIGKILL 重启后同一订阅端句柄未恢复收帧（seq_before={seq_before}）— 订阅端 stale"
+        "subscriber handle did not resume after publisher SIGKILL restart (seq_before={seq_before}) - subscriber stale"
     );
-    eprintln!("[crash_recovery] OK: 同句柄跨发布端崩溃恢复 (seq {seq_before} → 重启后新帧)");
+    eprintln!(
+        "[crash_recovery] OK: same-handle recovery across publisher crash (seq {seq_before} -> fresh frames after restart)"
+    );
 
     kill9(&mut pub2);
     let _ = pub2.wait();
 }
 
-/// C5 重建兜底路径覆盖: 发布端被杀后空闲 >5s（> REBUILD_IDLE）→ 订阅线程重建
-/// subscriber → 新发布端重发布 → 同一句柄恢复收帧。
+/// C5 rebuild-backstop coverage: after the publisher is killed, idle >5s (> REBUILD_IDLE) -> the subscriber thread rebuilds
+/// the subscriber -> a new publisher re-publishes -> the same handle resumes receiving.
 ///
-/// 时间线（30s 冷却不触发）: kill t=0 → 重建 t≈5.0（空闲跨 5s 阈值，首次冷却满足）
-/// → 重发布 t≈6.0 → 收帧 t≈6.1。断言: 恢复帧与杀前最后一帧间隔 >5s（只有
-/// idle>5s 分支能桥接该间隔）；重建 warn 经 logging::init 打到 stderr 作证据
-/// （--nocapture 可见 "subscriber 重建完成"）。
+/// Timeline (the 30s cooldown never fires): kill t=0 -> rebuild t~5.0 (idle crosses the 5s threshold, first cooldown satisfied)
+/// -> republish t~6.0 -> receive t~6.1. Assert: the gap between the resumed frame and the last pre-kill frame is >5s (only the
+/// idle>5s branch can bridge that gap); the rebuild warn goes to stderr via logging::init as evidence
+/// ("subscriber rebuilt" visible with --nocapture).
 #[tokio::test]
 async fn same_subscriber_recovers_after_long_gap_via_rebuild() {
-    // 重建 warn（tracing::warn!）默认 level=info 会输出 → 测试证据
+    // the rebuild warn (tracing::warn!) prints at the default level=info -> test evidence
     mediaservo_common::logging::init(mediaservo_common::logging::LoggingConfig::default());
     cleanup_iceoryx();
     let sk = Ed25519SigningKey::from_pem(PRIV_PEM.as_bytes());
@@ -151,20 +153,20 @@ async fn same_subscriber_recovers_after_long_gap_via_rebuild() {
     let bus = FrameBus::attach("", &tok, &vk).unwrap();
     let topic = FrameTopic::new(format!("camera/crash/gap/{}/raw", std::process::id()));
 
-    // 订阅端先挂载
+    // subscriber attaches first
     let stream = bus.subscribe(&topic).unwrap();
 
-    // 发布端 v1 → 收帧基线（记录最后一帧时间）
+    // publisher v1 -> receiving baseline (record the last frame's time)
     let mut pub1 = spawn_pub_loop(topic.as_str(), 64, 10);
     let seq_before = wait_frames(&stream, 3, Duration::from_secs(10)).await;
     let last_frame_before = std::time::Instant::now();
 
-    // SIGKILL 发布端 v1 → 空闲 > REBUILD_IDLE(5s): 订阅线程在 t≈5.0 重建 subscriber
+    // SIGKILL publisher v1 -> idle > REBUILD_IDLE(5s): the subscriber thread rebuilds at t~5.0
     kill9(&mut pub1);
     let _ = pub1.wait();
     tokio::time::sleep(Duration::from_secs(6)).await;
 
-    // 发布端 v2 重发布 → 同一句柄恢复收帧（间隔 >5s → 由重建路径桥接）
+    // publisher v2 republishes -> same handle resumes (gap >5s -> bridged by the rebuild path)
     let mut pub2 = spawn_pub_loop(topic.as_str(), 64, 10);
     let deadline = std::time::Instant::now() + Duration::from_secs(15);
     let mut resumed = false;
@@ -178,15 +180,17 @@ async fn same_subscriber_recovers_after_long_gap_via_rebuild() {
                     break;
                 }
             }
-            Ok(None) => panic!("订阅流关停"),
+            Ok(None) => panic!("subscriber stream closed"),
             Err(_) => {}
         }
     }
-    let gap = resumed_gap.expect("恢复帧间隔");
-    eprintln!("[crash_recovery] 长间隔变体: seq_before={seq_before} 恢复帧间隔={gap:?} (>5s 重建路径)");
+    let gap = resumed_gap.expect("resumed-frame gap");
+    eprintln!(
+        "[crash_recovery] long-gap variant: seq_before={seq_before} resumed gap={gap:?} (>5s rebuild path)"
+    );
     assert!(
         resumed && gap > Duration::from_secs(5),
-        "同一句柄恢复帧与杀前最后一帧间隔应 >5s（重建路径）: gap={gap:?} resumed={resumed}"
+        "same-handle resumed frame must be >5s after the last pre-kill frame (rebuild path): gap={gap:?} resumed={resumed}"
     );
 
     kill9(&mut pub2);

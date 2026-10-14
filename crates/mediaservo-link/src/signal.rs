@@ -1,18 +1,18 @@
-//! 信令客户端（WS 连 server，复用 common `SignalingMessage`，PSK 认证）。
+//! Signaling client (WS to the server, reuses common `SignalingMessage`, PSK auth).
 //!
-//! 协议流程（与 host 一致）：
-//! 1. 连接 `{url}/ws`
-//! 2. 发送原始 PSK 作为首条文本消息
-//! 3. 等待认证确认（`Error { code: 0 }`）
-//! 4. 发送 `RoomJoin { room_id, peer_role, stream_id }`
-//! 5. 等待 `RoomJoined { room_id, peer_id }`
+//! Protocol flow (same as host):
+//! 1. Connect to `{url}/ws`
+//! 2. Send the raw PSK as the first text message
+//! 3. Wait for the auth ack (`Error { code: 0 }`).
+//! 4. Send `RoomJoin { room_id, peer_role, stream_id }`
+//! 5. Wait for `RoomJoined { room_id, peer_id }`
 //!
-//! Phase B (B1)：`connect_with_retry` 指数退避重连（重试走完整 connect →
-//! PSK 认证按连接重做）；`SignalSession::on_disconnect` 断线通知（供上层
-//! 触发重连；主动 `close()` 不触发）。
+//! Phase B (B1): `connect_with_retry` reconnects with exponential backoff (each retry runs a
+//! full connect -> PSK auth redone per connection); `SignalSession::on_disconnect` notifies
+//! drops for upper layers to trigger reconnect; an explicit `close()` does not fire it).
 //!
-//! D2 网关模式（`SignalClient::new_gateway`）：本地 wire 包 `LocalEnvelope`
-//! （无 PSK 挑战——网关本地侧不认证，整车 PSK 在 agent 的远端连接）。
+//! D2 gateway mode (`SignalClient::new_gateway`): the local wire wraps `LocalEnvelope`
+//! (no PSK challenge - the gateway local side is unauthenticated; the vehicle PSK lives on the agent's remote connection).
 use base64::Engine as _;
 use ed25519_dalek::Signer as _;
 use futures_util::{SinkExt, StreamExt};
@@ -29,40 +29,40 @@ use crate::error::LinkError;
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-/// 本地网关信封（D2: 子进程 ↔ host-agent 本地 wire；下发方向 src 固定 "server"）。
-/// 语义见 mediaservo-host::gateway（D1）：RoomJoin 拦截/响应路由/房间重写。
+/// Local gateway envelope (D2: subprocess <-> host-agent local wire; downstream src is fixed "server").
+/// Semantics in mediaservo-host::gateway (D1): RoomJoin interception / response routing / room rewrite.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalEnvelope {
-    /// 子进程标识（如 "host-streamer-cam0"）；下发方向固定为 "server"。
+    /// Subprocess ID (e.g. "host-streamer-cam0"); fixed "server" in the downstream direction.
     pub src: String,
     pub msg: SignalingMessage,
 }
 
-/// 断线回调槽（会话与后台任务共享；注册后至多触发一次）。
+/// Disconnect-callback slot (shared by session and background task; fires at most once after registration).
 type DisconnectSlot = std::sync::Arc<std::sync::Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
 
-/// 信令事件。
+/// Signaling events.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum SignalEvent {
-    /// 已连接并加入房间。
+    /// Connected and joined the room.
     Connected { room_id: String },
-    /// 收到一条信令消息。
+    /// A signaling message arrived.
     Message(SignalingMessage),
-    /// 连接断开。
+    /// Connection dropped.
     Disconnected { reason: String },
-    /// 错误（解析失败等）。
+    /// Error (parse failure etc.).
     Error(String),
 }
 
-/// 重连配置（coding-style retry_with_backoff 模式：base 100ms → max 30s，±25% jitter）。
+/// Reconnect config (coding-style retry_with_backoff pattern: base 100ms -> max 30s, ±25% jitter).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RetryConfig {
-    /// 最大重试次数（初试之外；总尝试 = max_retries + 1）。
+    /// Max retries after the first attempt (total attempts = max_retries + 1).
     pub max_retries: u32,
-    /// 首次重试基础退避。
+    /// Base backoff for the first retry.
     pub base_delay: std::time::Duration,
-    /// 退避上限（指数增长封顶）。
+    /// Backoff ceiling (caps exponential growth).
     pub max_delay: std::time::Duration,
 }
 
@@ -76,67 +76,65 @@ impl Default for RetryConfig {
     }
 }
 
-/// 信令客户端（每节点一个；connect 建立会话）。
+/// Signaling client (one per node; connect establishes a session).
 #[derive(Debug, Clone)]
 pub struct SignalClient {
     url: String,
     psk: String,
     room_id: String,
     role: PeerRole,
-    /// D2 本地网关模式：Some(src) = 信封 wire（无 PSK 挑战，信任边界 127.0.0.1）；
-    /// None = 直连 server（PSK 认证）。
+    /// D2 local gateway mode: Some(src) = envelope wire (no PSK challenge, trust boundary 127.0.0.1);
+    /// None = direct server connection (PSK auth).
     gateway_src: Option<String>,
-    /// G4 设备凭证（D-H11）：Some = RoomJoin 携带 device_id/device_secret（additive），
-    /// G2 起 server 校验；None = PSK 认证路径（现状保持）。
+    /// G4 device credential (D-H11): Some = RoomJoin carries device_id/device_secret (additive),
+    /// verified by the server since G2; None = PSK auth path (status quo).
     device: Option<DeviceCredential>,
-    /// device-enroll T7：公钥指纹身份（Some = Join 带 device_pubkey 走验签链，
-    /// 优先于 device）。gateway/host-agent 装配透传。
+    /// device-enroll T7: public-key fingerprint identity (Some = Join carries device_pubkey into the
+    /// signature chain, taking precedence over device). Passed through by gateway/host-agent assembly.
     identity: Option<DeviceIdentity>,
-    /// S2（client v2）：账号 JWT。Some = 握手经 `Sec-WebSocket-Protocol` 头透传
-    /// （server signaling::ws_handler 从该头读取，兼容 "Bearer <jwt>" 与纯 <jwt>；
-    /// **非 query 参数**——/ws 路由无 Query 提取器），并跳过 PSK 文本帧阶段
-    /// （server JWT 验签后会话即已认证，再发 PSK 帧会污染 RoomJoin 读取）。
+    /// S2 (client v2): account JWT. Some = carried in the handshake via the `Sec-WebSocket-Protocol`
+    /// header (server signaling::ws_handler reads it there, accepting "Bearer <jwt>" and bare <jwt>;
+    /// **not a query parameter** - the /ws route has no Query extractor), and the PSK text-frame phase is
+    /// skipped (the session is already authenticated once the server verifies the JWT; a PSK frame would pollute the RoomJoin read).
     jwt: Option<String>,
-    /// a2（S0.5）：上次会话的一次性重挂票（server RoomJoined.session_nonce）。
-    /// Some = 下一次 connect 的 RoomJoin 带 resume（仅 v3 被 server 受理）；
-    /// 取出即焚（消费/失败都不复用——重放由 server 端 burn 保证）。
+    /// a2 (S0.5): one-shot re-attach ticket from the last session (server RoomJoined.session_nonce).
+    /// Some = the next connect's RoomJoin carries resume (only v3 is accepted by the server);
+    /// take-and-burn (never reused after consume or failure - replay protection is the server-side burn).
     resume_ticket: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
-/// 设备凭证（identity.json 格式 + RoomJoin wire 载体，G4/D-H13）。
+/// Device credential (identity.json format + RoomJoin wire carrier, G4/D-H13).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceCredential {
-    /// 设备 ID（host init 生成，如 `ms-<12 hex>`）。
+    /// Device ID (generated by host init, e.g. `ms-<12 hex>`).
     pub device_id: String,
-    /// 设备密钥（32 随机字节 hex）。
+    /// Device secret (32 random bytes, hex).
     pub device_secret: String,
 }
 
-/// device-enroll 验签链单跳超时（design §1：challenge 5s 未达/未答 = 断连错误）。
+/// device-enroll signature-chain per-hop timeout (design §1: challenge unreached/unanswered for 5s = disconnect error).
 const DEVICE_AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// 运行期设备身份（device-enroll T6/T7，公钥指纹路径）：gateway 持有；RoomJoin 携带
-/// `pubkey_b64`，DeviceAuthChallenge 以 [`DeviceIdentity::sign_device_auth`] 应答。
-/// 与 secret 形 [`DeviceCredential`] 共存一个周期（D-E3）。
+/// Runtime device identity (device-enroll T6/T7, public-key fingerprint path): held by the gateway; RoomJoin carries
+/// `pubkey_b64`; DeviceAuthChallenge is answered via [`DeviceIdentity::sign_device_auth`].
+/// coexists with the secret form [`DeviceCredential`] for one cycle (D-E3).
 #[derive(Clone)]
 pub struct DeviceIdentity {
-    /// 设备 ID（identity.json `device_id`，server 注册键）。
+    /// Device ID (identity.json `device_id`, the server registry key).
     pub device_id: String,
-    /// Ed25519 私钥（`etc/link/signing.pem` PKCS#8 读出，D-E1 一钥两用）。
+    /// Ed25519 private key (loaded from `etc/link/signing.pem` PKCS#8; one key two uses, D-E1).
     pub signing: ed25519_dalek::SigningKey,
-    /// 验签公钥 32B 的 base64 standard 形（无换行）= RoomJoin.device_pubkey wire 值。
+    /// Standard base64 (no newline) of the 32B verifying key = the RoomJoin.device_pubkey wire value.
     pub pubkey_b64: String,
 }
 
 impl DeviceIdentity {
-    /// 从实例目录装配公钥指纹身份（device-enroll T6 布局，D-H13）：
-    /// `identity.json`(device_id) + `etc/link/signing.pem`(Ed25519 PKCS#8)。
-    /// identity.json 缺失 → `Ok(None)`（PSK 回落，D-E3 共存周期）；有身份但
-    /// PEM 缺失/损坏 → 显式 Err（C15，不静默降 PSK）。
-    /// host-agent 装配与 client SDK（accountless-client-auth T3）共用本单源。
-    pub fn load_from_instance_dir(
-        dir: &std::path::Path,
-    ) -> Result<Option<Self>, String> {
+    /// Assemble the public-key fingerprint identity from an instance dir (device-enroll T6 layout, D-H13):
+    /// `identity.json` (device_id) + `etc/link/signing.pem` (Ed25519 PKCS#8).
+    /// Missing identity.json -> `Ok(None)` (PSK fallback, D-E3 coexistence cycle); identity present but
+    /// PEM missing/corrupt -> explicit Err (C15, no silent PSK downgrade).
+    /// Shared single source for host-agent assembly and the client SDK (accountless-client-auth T3).
+    pub fn load_from_instance_dir(dir: &std::path::Path) -> Result<Option<Self>, String> {
         #[derive(serde::Deserialize)]
         struct IdentityFile {
             device_id: String,
@@ -145,28 +143,30 @@ impl DeviceIdentity {
         let raw = match std::fs::read(&id_path) {
             Ok(r) => r,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(format!("读取 {} 失败: {e}", id_path.display())),
+            Err(e) => return Err(format!("read failed {}: {e}", id_path.display())),
         };
         let id: IdentityFile = serde_json::from_slice(&raw)
-            .map_err(|e| format!("{} 解析失败: {e}", id_path.display()))?;
+            .map_err(|e| format!("parse failed {}: {e}", id_path.display()))?;
         use ed25519_dalek::pkcs8::DecodePrivateKey as _;
         let pem_path = dir.join("etc").join("link").join("signing.pem");
         let pem = std::fs::read(&pem_path)
-            .map_err(|e| format!("读取 {} 失败: {e}", pem_path.display()))?;
+            .map_err(|e| format!("read failed {}: {e}", pem_path.display()))?;
         let signing = ed25519_dalek::SigningKey::from_pkcs8_pem(&String::from_utf8_lossy(&pem))
-            .map_err(|e| format!("{} 解析失败（Ed25519 PKCS#8 PEM）: {e}", pem_path.display()))?;
+            .map_err(|e| {
+                format!("parse failed {} (Ed25519 PKCS#8 PEM): {e}", pem_path.display())
+            })?;
         Ok(Some(Self::new(id.device_id, signing)))
     }
 
-    /// 由私钥构建并派生公钥指纹。
+    /// Build from the private key and derive the public-key fingerprint.
     pub fn new(device_id: impl Into<String>, signing: ed25519_dalek::SigningKey) -> Self {
         let pubkey_b64 =
             base64::engine::general_purpose::STANDARD.encode(signing.verifying_key().to_bytes());
         Self { device_id: device_id.into(), signing, pubkey_b64 }
     }
 
-    /// 字节合同（design §3）：sig = base64( Ed25519::sign( nonce_raw(32B) ‖ device_id ‖ room_id ) )。
-    /// 交叉复验锚 = server devices.rs::sig_vector（同常量必出同 sig）。
+    /// Byte contract (design §3): sig = base64( Ed25519::sign( nonce_raw(32B) || device_id || room_id ) ).
+    /// Cross-verify anchor = server devices.rs::sig_vector (same constants must produce the same sig).
     pub fn sign_device_auth(&self, nonce_raw: &[u8], room_id: &str) -> String {
         let mut msg = Vec::with_capacity(nonce_raw.len() + self.device_id.len() + room_id.len());
         msg.extend_from_slice(nonce_raw);
@@ -177,7 +177,7 @@ impl DeviceIdentity {
 }
 
 impl std::fmt::Debug for DeviceIdentity {
-    /// 私钥不落日志：signing 以占位呈现。
+    /// Never log the private key: signing is shown as a placeholder.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeviceIdentity")
             .field("device_id", &self.device_id)
@@ -202,8 +202,8 @@ impl SignalClient {
         }
     }
 
-    /// 本地网关模式（D2）：WS 连 host-agent，无 PSK 挑战（网关本地侧不认证，
-    /// 整车 PSK 在 agent 的远端连接）；全部消息包 LocalEnvelope {src, msg}。
+    /// Local gateway mode (D2): WS to host-agent, no PSK challenge (the gateway local side is
+    /// unauthenticated; the vehicle PSK lives on the agent's remote connection); every message is wrapped in LocalEnvelope {src, msg}.
     pub fn new_gateway(url: &str, src: &str, room_id: &str, role: PeerRole) -> Self {
         Self {
             url: url.trim_end_matches('/').to_string(),
@@ -218,40 +218,40 @@ impl SignalClient {
         }
     }
 
-    /// 附加设备凭证（G4）：RoomJoin 携带 device_id/device_secret（additive，PSK 并存）。
+    /// Attach device credential (G4): RoomJoin carries device_id/device_secret (additive, coexists with PSK).
     pub fn with_device_credentials(mut self, device: DeviceCredential) -> Self {
         self.device = Some(device);
         self
     }
 
-    /// a2：设置重挂票（gateway 断线时回灌上次 nonce；None = 清票走全量 join）。
+    /// a2: set the re-attach ticket (gateway refills the last nonce on drop; None = clear, full join).
     pub fn set_resume_ticket(&self, nonce: Option<String>) {
         if let Ok(mut g) = self.resume_ticket.lock() {
             *g = nonce;
         }
     }
 
-    /// a2：取出并清空（一次性）。
+    /// a2: take and clear (one-shot).
     fn take_resume_ticket(&self) -> Option<String> {
         self.resume_ticket.lock().ok().and_then(|mut g| g.take())
     }
 
-    /// 附加设备身份（device-enroll T7）：RoomJoin 携带 device_pubkey，challenge 到达时
-    /// 以私钥签 DeviceAuthResponse；未批准（手动档）→ `LinkError::EnrollPending`。
+    /// Attach device identity (device-enroll T7): RoomJoin carries device_pubkey; when the challenge arrives,
+    /// sign DeviceAuthResponse with the private key; not approved (manual mode) -> `LinkError::EnrollPending`.
     pub fn with_device_identity(mut self, identity: DeviceIdentity) -> Self {
         self.identity = Some(identity);
         self
     }
 
-    /// S2：附加账号 JWT（登录 REST 输出）。握手请求带 `Sec-WebSocket-Protocol: <jwt>`，
-    /// 连接阶段跳过 PSK 文本帧（JWT 即认证凭证，D273 红牌族中 auth 终态由 server 4011 表达）。
-    /// 仅适用明文 `ws://`（wss 需 TLS connector，归 S4+ 裁决——同 login v1 口径）。
+    /// S2: attach the account JWT (from the login REST). The handshake sends `Sec-WebSocket-Protocol: <jwt>`,
+    /// skipping the PSK text frame during connect (the JWT is the credential; per D273 the auth terminal state is server 4011).
+    /// Plain `ws://` only (wss needs a TLS connector, an S4+ decision - same scope as login v1).
     pub fn with_jwt(mut self, token: impl Into<String>) -> Self {
         self.jwt = Some(token.into());
         self
     }
 
-    /// 连接 server、PSK 认证、加入房间，返回会话。
+    /// Connect to the server, PSK-auth, join the room, return the session.
     pub async fn connect(&self) -> Result<SignalSession, LinkError> {
         let ws_stream = match &self.jwt {
             None => {
@@ -261,7 +261,7 @@ impl SignalClient {
                     .0
             }
             Some(token) => {
-                // JWT 走子协议头（server 只认这个通道）。手工 request 只为插这一头。
+                // JWT rides the subprotocol header (the server only accepts this channel). The hand-built request exists just to inject it.
                 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
                 let mut request = self
                     .url
@@ -292,8 +292,8 @@ impl SignalClient {
         };
         let (mut sender, mut receiver) = ws_stream.split();
 
-        // Phase 1: PSK 认证 — 仅直连 server 模式；网关本地侧不认证（D2，
-        // 信任边界 127.0.0.1，整车 PSK 在 agent 的远端连接）
+        // Phase 1: PSK auth - direct-server mode only; the gateway local side is unauthenticated (D2,
+        // trust boundary 127.0.0.1; the vehicle PSK lives on the agent's remote connection)
         if self.gateway_src.is_none() && self.jwt.is_none() {
             sender
                 .send(Message::Text(self.psk.clone()))
@@ -318,9 +318,9 @@ impl SignalClient {
                 _ => return Err(LinkError::Signal("unexpected auth message".into())),
             }
         }
-        // JWT 子协议认证的连接，server 照发 auth ack（无条件一行）——本侧必须消费
-        // 该帧，否则它会漏进 RoomJoined 读窗被当 join 响应（S2b 活体实锤：
-        // "room join failed [0]: authenticated"）。
+        // For JWT-subprotocol connections the server still sends the auth ack (unconditional line) -
+        // this side must consume it, or it leaks into the RoomJoined read window as a join reply (S2b live proof:
+        // "room join failed [0]: authenticated").
         if self.gateway_src.is_none() && self.jwt.is_some() {
             let auth_msg = receiver
                 .next()
@@ -345,7 +345,7 @@ impl SignalClient {
             }
         }
 
-        // Phase 2: 加入房间（网关模式包 LocalEnvelope）
+        // Phase 2: join the room (gateway mode wraps LocalEnvelope)
         let join = SignalingMessage::RoomJoin {
             room_id: self.room_id.clone(),
             peer_role: self.role.clone(),
@@ -357,10 +357,10 @@ impl SignalClient {
                 .or_else(|| self.device.as_ref().map(|d| d.device_id.clone())),
             device_secret: self.device.as_ref().map(|d| d.device_secret.clone()),
             device_pubkey: self.identity.as_ref().map(|i| i.pubkey_b64.clone()),
-            // S0: 声明本端方言上限（server 取 min 回谈成值）。
+            // S0: declare this side's dialect ceiling (server takes min and returns the negotiated value).
             protocol: Some(SIGNALING_PROTOCOL_VERSION),
             client_version: None,
-            // a2: 有一次性票则声明重挂（server 侧 negotiated≥3 + 认证重跑 + nonce 校验）。
+            // a2: with a one-shot ticket, declare resume (server side: negotiated>=3 + full re-auth + nonce check).
             resume: self.take_resume_ticket(),
         };
         let (join_json, unwrap) = match &self.gateway_src {
@@ -380,7 +380,7 @@ impl SignalClient {
             .await
             .map_err(|e| LinkError::Signal(format!("send RoomJoin: {e}")))?;
         let joined = if self.identity.is_some() {
-            // device-enroll §1：pubkey 形 Join 后每一跳响应（challenge/终态）≤5s，静默 = 断连错误
+            // device-enroll §1: after a pubkey Join, every hop's reply (challenge/terminal) must be <=5s; silence = disconnect error
             tokio::time::timeout(DEVICE_AUTH_TIMEOUT, read_join_response(&mut receiver, unwrap))
                 .await
                 .map_err(|_| {
@@ -401,8 +401,8 @@ impl SignalClient {
         match joined {
             SignalingMessage::RoomJoined { room_id, peer_id, protocol, session_nonce, .. } => {
                 let (events_tx, _) = broadcast::channel(64);
-                // a3（S0.5）：双有界队列——hi（认证/控制/一切非白名单）背压不丢；
-                // lo（封闭白名单 {StatusReport}）尽力而为，满=丢弃+计数。
+                // a3 (S0.5): two bounded queues - hi (auth/control/everything not whitelisted) backpressures without dropping;
+                // lo (closed whitelist {StatusReport}) is best-effort, full = drop + count.
                 let (hi_tx, hi_rx) = mpsc::channel(64);
                 let (lo_tx, lo_rx) = mpsc::channel(16);
                 let dropped = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -437,9 +437,9 @@ impl SignalClient {
         }
     }
 
-    /// 验签应答链（device-enroll §4 修订）：challenge→签发 DeviceAuthResponse→（再）读，
-    /// RoomJoined/Error 等终态放行给调用方 match；DeviceAuthPending → typed EnrollPending。
-    /// 调用方保证 identity = Some；每跳 5s 超时 = 断连错误（§1）。
+    /// Signature reply chain (device-enroll §4 revision): challenge -> sign DeviceAuthResponse -> (re)read;
+    /// terminal states (RoomJoined/Error) pass through to the caller's match; DeviceAuthPending -> typed EnrollPending.
+    /// Caller guarantees identity = Some; 5s per-hop timeout = disconnect error (§1).
     async fn run_device_auth(
         &self,
         first: SignalingMessage,
@@ -496,10 +496,10 @@ impl SignalClient {
         }
     }
 
-    /// 连接并自动重试（指数退避 + ±25% jitter）。
+    /// Connect with automatic retries (exponential backoff + ±25% jitter).
     ///
-    /// 每次重试都走完整 `connect()`（WS 连接 → PSK 认证 → 入房），
-    /// 故重连后认证自动重做（PSK 挑战按连接计，无需额外状态）。
+    /// Every retry runs a full `connect()` (WS connect -> PSK auth -> join room),
+    /// so auth is redone automatically on reconnect (PSK challenge is per connection, no extra state).
     pub async fn connect_with_retry(&self, cfg: RetryConfig) -> Result<SignalSession, LinkError> {
         let mut attempt = 0u32;
         loop {
@@ -532,18 +532,18 @@ impl SignalClient {
     }
 }
 
-/// 信令会话：send 发送消息，events 接收事件。
+/// Signaling session: send pushes messages, events receives them.
 pub struct SignalSession {
     room_id: String,
-    /// RoomJoined 返回的 peer_id（D1 网关合成子进程应答使用）。
+    /// peer_id from RoomJoined (used by the D1 gateway to synthesize subprocess replies).
     peer_id: String,
-    /// S0：协商谈成的方言版本（server RoomJoined.protocol；缺省 = v1）。
+    /// S0: negotiated dialect version (server RoomJoined.protocol; default = v1).
     negotiated: u32,
-    /// a2：一次性重挂票（negotiated≥3 时 server 下发；消费即焚由 server 端保证）。
+    /// a2: one-shot re-attach ticket (server issues when negotiated>=3; the server-side burn guarantees one use).
     session_nonce: Option<String>,
-    /// a3：高优有界队列（认证/控制/一切非白名单）。
+    /// a3: high-priority bounded queue (auth/control/everything not whitelisted).
     hi_tx: mpsc::Sender<SignalingMessage>,
-    /// a3：低优尽力队列（封闭白名单 {StatusReport}）——满即丢，dropped 计数。
+    /// a3: low-priority best-effort queue (closed whitelist {StatusReport}) - full means dropped, counted.
     lo_tx: mpsc::Sender<SignalingMessage>,
     dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
     events_tx: broadcast::Sender<SignalEvent>,
@@ -561,28 +561,30 @@ impl std::fmt::Debug for SignalSession {
 }
 
 impl SignalSession {
-    /// 订阅信令事件（返回新接收器）。
+    /// Subscribe to signaling events (returns a new receiver).
     pub fn events(&self) -> broadcast::Receiver<SignalEvent> {
         self.events_tx.subscribe()
     }
 
-    /// 注册断线回调：WS 断开（对端 Close/网络错误）时触发一次，供上层触发重连。
-    /// 注意：`close()` 主动关闭不触发。
+    /// Register a disconnect callback: fires once when the WS drops (peer Close / network error), letting upper layers reconnect.
+    /// Note: an explicit `close()` does not fire it.
     pub fn on_disconnect(&self, cb: Box<dyn Fn() + Send + Sync>) {
         if let Ok(mut slot) = self.on_disconnect.lock() {
             *slot = Some(cb);
         }
     }
 
-    /// 发送一条信令消息（JSON 序列化后经 WS 发出）。
-    /// a3 路由：白名单（StatusReport）→ lo try_send（满 = 丢弃+计数，拥塞期保新鲜度）；
-    /// 其余 → hi await 背压（认证/控制/终态永不丢）。
+    /// Send one signaling message (JSON-serialized, written to the WS).
+    /// a3 routing: whitelist (StatusReport) -> lo try_send (full = drop + count, keeps freshness under congestion);
+    /// everything else -> hi await backpressure (auth/control/terminal never dropped).
     pub async fn send(&self, msg: SignalingMessage) -> Result<(), LinkError> {
         if is_low_priority(&msg) {
             if self.lo_tx.try_send(msg).is_err() {
                 let n = self.dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                 if n == 1 || n.is_multiple_of(64) {
-                    tracing::warn!("a3: 低优队列满，StatusReport 丢弃（累计 {n}）");
+                    tracing::warn!(
+                        "a3: low-priority queue full, StatusReport dropped (cumulative {n})"
+                    );
                 }
             }
             return Ok(());
@@ -590,43 +592,43 @@ impl SignalSession {
         self.hi_tx.send(msg).await.map_err(|_| LinkError::Signal("session closed".into()))
     }
 
-    /// 当前房间 ID。
+    /// Current room ID.
     pub fn room_id(&self) -> &str {
         &self.room_id
     }
 
-    /// 当前会话的 peer_id（RoomJoined 时 server 分配；D1 网关合成子进程应答）。
+    /// Current session peer_id (assigned by the server at RoomJoined; D1 gateway synthesizes subprocess replies).
     pub fn peer_id(&self) -> &str {
         &self.peer_id
     }
 
-    /// S0 方言协商结果（min(client claim, server max)；1 = 旧对端/旧 server）。
+    /// S0 dialect negotiation result (min(client claim, server max); 1 = legacy peer/server).
     #[must_use]
     pub fn negotiated_protocol(&self) -> u32 {
         self.negotiated
     }
 
-    /// a2: 上次会话下发的重挂票（None = 未谈成 v3；使用方 B3 resume 链接线）。
+    /// a2: re-attach ticket issued by the last session (None = v3 not negotiated; consumer: the B3 resume link).
     #[must_use]
     pub fn session_nonce(&self) -> Option<&str> {
         self.session_nonce.as_deref()
     }
 
-    /// a3: 低优累计丢弃数（SLA 测量面；StatusReport 透传位届时接）。
+    /// a3: cumulative low-priority drops (SLA measurement surface; StatusReport passthrough wired when needed).
     #[must_use]
     pub fn dropped_low(&self) -> u64 {
         self.dropped.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// 关闭会话：停止发送通道并等待后台任务退出。
+    /// Close the session: stop the send channels and await background-task exit.
     pub async fn close(self) -> Result<(), LinkError> {
-        drop((self.hi_tx, self.lo_tx)); // 双通道齐关 → writer 退出；单端 None 不误判
+        drop((self.hi_tx, self.lo_tx)); // both channels closed -> writer exits; a single None is not misjudged
         let _ = self.task.await;
         Ok(())
     }
 }
 
-/// RoomJoin 首响应：一帧 WS 读 +（信封）JSON 解析（逻辑自 connect 原路径原样迁入）。
+/// First RoomJoin response: one WS frame read + (envelope) JSON parse (moved verbatim from connect's original path).
 async fn read_join_response(
     receiver: &mut futures_util::stream::SplitStream<WsStream>,
     unwrap: bool,
@@ -652,15 +654,15 @@ async fn read_join_response(
     }
 }
 
-/// a3（S0.5）：封闭丢弃白名单——v1 仅 {StatusReport}（高频、丢一条无硬害、下一条覆盖）。
-/// 新条目必须显式列入并复核「可丢」论证。
+/// a3 (S0.5): closed drop whitelist - v1 only {StatusReport} (high-frequency, one drop is harmless, the next overwrites).
+/// New entries must be listed explicitly with a reviewed "droppable" justification.
 #[must_use]
 fn is_low_priority(msg: &SignalingMessage) -> bool {
     matches!(msg, SignalingMessage::StatusReport { .. })
 }
 
-/// 后台任务：WS 读 → events；双上行队列（hi 优先出队 / lo 尽力）→ WS 写。
-/// D2 网关模式：gateway_src = Some(src) 时收发均包 LocalEnvelope 信封。
+/// Background task: WS read -> events; dual upstream queues (hi dequeued first / lo best-effort) -> WS write.
+/// D2 gateway mode: with gateway_src = Some(src), both directions wrap the LocalEnvelope envelope.
 async fn session_task(
     mut ws_rx: futures_util::stream::SplitStream<WsStream>,
     mut ws_tx: futures_util::stream::SplitSink<WsStream, Message>,
@@ -670,15 +672,15 @@ async fn session_task(
     on_disconnect: DisconnectSlot,
     gateway_src: Option<String>,
 ) {
-    // a1 client 侧：定期 ping（split-sink 下自动 pong 须有写 poll 驱动冲刷——双向 ping
-    // 是免误杀的诚实解）+ 入站静默 15s 判死（预算与 server 侧 interval×(miss+1) 对齐；
-    // 措辞纪律：非「秒级」承诺）。网关本地环回不做心跳（断开即时可见）。
+    // a1 client side: periodic ping (under a split sink, auto pong needs a write poll to flush it -
+    // two-way ping is the honest no-false-kill solution) + 15s inbound silence kills (budget aligned with
+    // the server's interval*(miss+1); wording discipline: not a "seconds-level" promise). The gateway local loopback skips heartbeats (drops show instantly).
     let mut hb = tokio::time::interval(std::time::Duration::from_secs(5));
-    hb.tick().await; // 吞掉 interval 的 t=0 就绪拍（刚建连即 ping = 无谓帧）
+    hb.tick().await; // swallow interval's t=0 ready tick (pinging right after connect = pointless frame)
     let mut last_rx = std::time::Instant::now();
     loop {
-        // biased：读最优先（饿读 = 活性误判 + pong 不冲刷）；hi 先于 lo（应用层 HoL 解药，
-        // 边界见 PLAN §11.2 a3——kernel/TCP 归急停双路，死链归本心跳）。
+        // biased: read first (starving reads = false liveness death + pong never flushed); hi before lo (app-layer HoL antidote,
+        // boundaries in PLAN §11.2 a3 - kernel/TCP belongs to the e-stop dual path, dead links to this heartbeat).
         let outbound = tokio::select! {
             biased;
             ws = ws_rx.next() => {
@@ -702,12 +704,12 @@ async fn session_task(
                         fire_disconnect(&on_disconnect);
                         break;
                     }
-                    Some(Ok(_)) => {} // 忽略非文本（含入站 pong——tokio-tungstenite 已自动应答）
+                    Some(Ok(_)) => {} // ignore non-text (incl. inbound pong - tokio-tungstenite already answered it)
                     Some(Err(e)) => {
                         let _ = events_tx.send(SignalEvent::Error(e.to_string()));
-                        // S6/K1 根修：读错误 = 连接已死（与 Close/None 支同事实）——
-                        // 只发 Error 不发 Disconnected 使 RST 形断链（对端裸 drop）在
-                        // 下游永久失声（client supervisor 等不到 dead 信，drill e/f 实抓）。
+                        // S6/K1 root fix: a read error = dead connection (same fact as the Close/None arms) -
+                        // emitting only Error without Disconnected left RST-style drops (bare peer kill)
+                        // permanently silent downstream (client supervisor never saw dead, caught live by drills e/f).
                         let _ = events_tx.send(SignalEvent::Disconnected {
                             reason: format!("ws read error: {e}"),
                         });
@@ -721,10 +723,10 @@ async fn session_task(
             m = lo_rx.recv() => m,
             _ = hb.tick() => {
                 if gateway_src.is_some() {
-                    continue; // 本地环回模式：不心跳
+                    continue; // local loopback mode: no heartbeat
                 }
                 if last_rx.elapsed() > std::time::Duration::from_secs(15) {
-                    tracing::warn!("a1: 入站静默 15s → 判死，主动断开走既有重连");
+                    tracing::warn!("a1: 15s inbound silence -> declaring dead, proactive disconnect into the existing reconnect");
                     let _ = events_tx.send(SignalEvent::Disconnected {
                         reason: "heartbeat silent >15s".into(),
                     });
@@ -738,7 +740,7 @@ async fn session_task(
                 continue;
             }
         };
-        let Some(m) = outbound else { break }; // 双 sender 同坠 = 会话主动关闭，不触发断线回调
+        let Some(m) = outbound else { break }; // both senders gone = session closed on purpose, no disconnect callback
         let json = match &gateway_src {
             Some(src) => serde_json::to_string(&LocalEnvelope { src: src.clone(), msg: m })
                 .map_err(|e| format!("serialize envelope: {e}")),
@@ -758,7 +760,7 @@ async fn session_task(
     }
 }
 
-/// 触发一次断线回调（take 后调用，保证只触发一次；锁外执行用户代码防毒化）。
+/// Fire the disconnect callback once (after take, guaranteed single fire; user code runs outside the lock to avoid poisoning).
 fn fire_disconnect(slot: &DisconnectSlot) {
     let cb = match slot.lock() {
         Ok(mut g) => g.take(),
@@ -769,7 +771,7 @@ fn fire_disconnect(slot: &DisconnectSlot) {
     }
 }
 
-/// 指数退避 × ±25% jitter（xorshift32 种子取自时钟，避免引入 RNG 依赖）。
+/// Exponential backoff x ±25% jitter (xorshift32 seeded from the clock, avoiding an RNG dependency).
 fn jittered(backoff: std::time::Duration) -> std::time::Duration {
     let mut seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -785,13 +787,14 @@ fn jittered(backoff: std::time::Duration) -> std::time::Duration {
 #[cfg(test)]
 mod tests {
 
-    // ── T3 loader 钉（accountless-client-auth：单一实例目录装配）──
+    // -- T3 loader pin (accountless-client-auth: single instance-dir assembly) --
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!("ms-link-ident-{tag}-{nanos}-{}", std::process::id()));
+        let dir = std::env::temp_dir()
+            .join(format!("ms-link-ident-{tag}-{nanos}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("mkdir temp");
         dir
     }
@@ -814,28 +817,25 @@ mod tests {
         let sk = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
         let pem = sk.to_pkcs8_pem(LineEnding::LF).expect("pem encode");
         std::fs::write(link.join("signing.pem"), pem.as_bytes()).unwrap();
-        let ident = DeviceIdentity::load_from_instance_dir(&dir)
-            .expect("load ok")
-            .expect("Some");
+        let ident = DeviceIdentity::load_from_instance_dir(&dir).expect("load ok").expect("Some");
         assert_eq!(ident.device_id, "ms-test-01");
         assert_eq!(
             ident.pubkey_b64,
-            base64::engine::general_purpose::STANDARD
-                .encode(sk.verifying_key().to_bytes()),
-            "指纹必须 = 同一私钥派生"
+            base64::engine::general_purpose::STANDARD.encode(sk.verifying_key().to_bytes()),
+            "fingerprint must derive from the same private key"
         );
-        // 坏 PEM 显式 Err（不静默降 PSK，C15）。
+        // corrupt PEM -> explicit Err (no silent PSK downgrade, C15).
         std::fs::write(link.join("signing.pem"), b"-----BEGIN PRIVATE KEY-----\nbroken\n").unwrap();
         let err = DeviceIdentity::load_from_instance_dir(&dir).expect_err("corrupt pem must err");
-        assert!(err.contains("signing.pem 解析失败"), "{err}");
+        assert!(err.contains("parse failed") && err.contains("signing.pem"), "{err}");
         std::fs::remove_dir_all(&dir).ok();
     }
 
     use super::*;
 
-    /// 裸 TCP mock：读握手头 → 断言子协议 → 完成 101（回显子协议，server ws_handler 同形）
-    /// → 延迟关闭。jwt 形 connect 应过握手、在 RoomJoin 读处报 closed（= 握手过成功的判据），
-    /// 且握手后即进 join（= PSK 帧阶段被跳过——若未跳过，mock 关前收不到 join 响应行为不同）。
+    /// Bare TCP mock: read the handshake headers -> assert the subprotocol -> finish 101 (echo the subprotocol, same shape as the server ws_handler)
+    /// -> delayed close. A jwt-form connect should pass the handshake and report closed at the RoomJoin read (= proof the handshake passed),
+    /// and go straight to join (the PSK frame phase was skipped - otherwise behavior before mock close differs).
     async fn jwt_handshake_mock() -> std::net::SocketAddr {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -851,17 +851,17 @@ mod tests {
             }
             let raw = String::from_utf8_lossy(&buf).to_string();
             let text = raw.to_lowercase();
-            // key 大小写敏感（base64）——必须从原文提取，勿用 to_lowercase 后的 text。
+            // the key is case-sensitive (base64) - extract from the raw text, never the to_lowercase'd copy.
             let key = raw
                 .lines()
                 .find_map(|l| {
                     let (name, v) = l.split_once(':')?;
                     (name.eq_ignore_ascii_case("sec-websocket-key")).then(|| v.trim().to_string())
                 })
-                .expect("mock: 握手缺 key");
+                .expect("mock: handshake missing key");
             assert!(
                 text.contains("sec-websocket-protocol: jwt.tok.en"),
-                "握手必须带子协议头，实得:\n{text}"
+                "handshake must carry the subprotocol header, got:\n{text}"
             );
             let accept =
                 tokio_tungstenite::tungstenite::handshake::derive_accept_key(key.as_bytes());
@@ -869,8 +869,8 @@ mod tests {
                 "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\nSec-WebSocket-Protocol: jwt.tok.en\r\n\r\n"
             );
             let _ = tokio::io::AsyncWriteExt::write_all(&mut sock, resp.as_bytes()).await;
-            // 真 server 对 JWT 连接也无条件先发 auth ack（S2b 教训）——mock 补这一帧：
-            // 单帧非掩码 text（FIN|opcode1, len<126 无扩展长），消费掉才轮到 RoomJoin。
+            // the real server unconditionally sends the auth ack first even for JWT connections (S2b lesson) - the mock adds it:
+            // one unmasked text frame (FIN|opcode1, len<126, no extended length); consuming it hands the read to RoomJoin.
             let payload = br#"{"type":"error","code":0,"message":"authenticated"}"#;
             let mut frame = vec![0x81u8, payload.len() as u8];
             frame.extend_from_slice(payload);
@@ -890,14 +890,15 @@ mod tests {
             PeerRole::Consumer,
         )
         .with_jwt("jwt.tok.en");
-        let err =
-            client.connect().await.expect_err("mock 握手后即关 → join 读必败（握手成功的判据）");
-        // 必须死在 RoomJoin 读——说明握手过且 PSK 帧阶段被跳过（未走「auth denied/
-        // unexpected auth response」路径）。
+        let err = client.connect().await.expect_err(
+            "mock closes after handshake -> the join read must fail (proof the handshake passed)",
+        );
+        // must die at the RoomJoin read - the handshake passed and the PSK frame phase was skipped (not the "auth denied/
+        // unexpected auth response" paths).
         let text = err.to_string();
         assert!(
             text.contains("RoomJoin"),
-            "期望 RoomJoin 阶段错误（= PSK 阶段已跳过），实得: {err}"
+            "expected a RoomJoin-phase error (= PSK phase skipped), got: {err}"
         );
     }
 

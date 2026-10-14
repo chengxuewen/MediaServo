@@ -412,7 +412,7 @@ impl DcBackend for WebrtcRsDc {
         }
     }
 
-    /// S6/K5: webrtc-rs buffered_amount 为 async（内部锁）——u64 拓宽透传。
+    /// S6/K5: webrtc-rs's buffered_amount is async (an internal lock) -- widened through as u64.
     async fn buffered_amount(&self) -> u64 {
         self.inner.buffered_amount().await as u64
     }
@@ -432,7 +432,7 @@ impl DcBackend for WebrtcRsDc {
 
     async fn spool(&self) -> RTCDataChannelRx {
         let dc = self.inner.clone();
-        // broadcast（F1 审查 #1）: 多订阅端共享事件流；Sender 克隆进各回调
+        // broadcast (F1 review #1): multiple subscriber ends share the event stream; a Sender clone goes into each callback
         let (tx, rx) = tokio::sync::broadcast::channel(64);
         let tx2 = tx.clone();
         dc.on_open(Box::new(move || {
@@ -560,7 +560,7 @@ impl TrackWriteBackend for WebrtcRsTrack {
                     stride: width / 2,
                 },
             ],
-            pts: ts_us.unwrap_or(0) as u64, // PIT-63: 时间戳参数化 (None → 保持 0)
+            pts: ts_us.unwrap_or(0) as u64, // PIT-63: timestamp parameterization (None -> stays 0)
             keyframe: false,
         };
         // Push frame under lock, release before writing

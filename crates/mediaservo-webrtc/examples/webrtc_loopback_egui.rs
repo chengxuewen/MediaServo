@@ -13,10 +13,10 @@
 
 use eframe::egui;
 use egui::ColorImage;
-use mediaservo_webrtc::peer_connection::*;
-use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
-use mediaservo_webrtc::track::{TrackKind, TrackRef};
 use mediaservo_webrtc::TrackWriteBackend;
+use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
+use mediaservo_webrtc::peer_connection::*;
+use mediaservo_webrtc::track::{TrackKind, TrackRef};
 use mediaservo_webrtc::traits::PeerConnectionApi;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -75,11 +75,7 @@ fn main() -> Result<(), eframe::Error> {
             ..Default::default()
         },
         Box::new(move |_cc| {
-            Ok(Box::new(LoopbackApp {
-                p: p_clone,
-                sender_tex: None,
-                receiver_tex: None,
-            }))
+            Ok(Box::new(LoopbackApp { p: p_clone, sender_tex: None, receiver_tex: None }))
         }),
     )
 }
@@ -146,8 +142,7 @@ fn video_preview(
     if let Some((rgba, w, h)) = frame_lock.lock().unwrap().as_ref() {
         let img = ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], rgba);
         let handle = tex.get_or_insert_with(|| {
-            ui.ctx()
-                .load_texture("video-preview", img.clone(), Default::default())
+            ui.ctx().load_texture("video-preview", img.clone(), Default::default())
         });
         handle.set(img, Default::default());
         ui.image(egui::load::SizedTexture::new(handle.id(), [*w as f32, *h as f32]));
@@ -166,23 +161,18 @@ fn run_p2p(p: Arc<Pipeline>) {
         // ponytail: use the SAME factory for both PC and video track —
         // libwebrtc requires tracks to be created by the PC's factory.
 
-        let pc_sender = factory
-            .create_peer_connection(RTCConfiguration::default())
-            .await
-            .expect("sender pc");
-        let pc_receiver = factory
-            .create_peer_connection(RTCConfiguration::default())
-            .await
-            .expect("receiver pc");
+        let pc_sender =
+            factory.create_peer_connection(RTCConfiguration::default()).await.expect("sender pc");
+        let pc_receiver =
+            factory.create_peer_connection(RTCConfiguration::default()).await.expect("receiver pc");
 
         // ── Create video track with real VideoTrackSource ──
-        // add_track 内部创建真实 backend 的 TrackSender（webrtc-sys: VideoTrackSource + media_track）
-        // 并通过 get_track 取回写帧（T0 修复: 替代已删除的 create_video_track_custom/accept_video_track）
-        pc_sender.add_track("loopback-video", TrackKind::Video)
-            .expect("add track");
+        // add_track internally creates the real backend's TrackSender (webrtc-sys: VideoTrackSource + media_track)
+        // and the frame write is retrieved via get_track (the T0 fix: replaces the deleted create_video_track_custom/accept_video_track)
+        pc_sender.add_track("loopback-video", TrackKind::Video).expect("add track");
         let track_sender = match pc_sender.get_track("loopback-video").unwrap() {
             TrackRef::Sender(s) => s,
-            _ => unreachable!("add_track 注册的是 Sender"),
+            _ => unreachable!("add_track registered a Sender"),
         };
 
         // on_track callback — fires when remote track arrives after SDP negotiation
@@ -201,7 +191,7 @@ fn run_p2p(p: Arc<Pipeline>) {
                     self.tx.send((data.to_vec(), width, height)).ok();
                 }
             }
-            // 通过 receiver.track (TrackRef::Receiver) 注册 FrameSink
+            // register the FrameSink via receiver.track (TrackRef::Receiver)
             if let TrackRef::Receiver(tr) = &receiver.track {
                 tr.set_frame_sink(Box::new(ChannelSink { tx: frame_tx.clone() }));
             }
@@ -218,23 +208,11 @@ fn run_p2p(p: Arc<Pipeline>) {
             .await
             .expect("offer");
         pc_sender.set_local_description(&offer).await.expect("set local");
-        pc_receiver
-            .set_remote_description(&offer)
-            .await
-            .expect("set remote");
+        pc_receiver.set_remote_description(&offer).await.expect("set remote");
 
-        let answer = pc_receiver
-            .create_answer(&RTCAnswerOptions::default())
-            .await
-            .expect("answer");
-        pc_receiver
-            .set_local_description(&answer)
-            .await
-            .expect("set local");
-        pc_sender
-            .set_remote_description(&answer)
-            .await
-            .expect("set remote");
+        let answer = pc_receiver.create_answer(&RTCAnswerOptions::default()).await.expect("answer");
+        pc_receiver.set_local_description(&answer).await.expect("set local");
+        pc_sender.set_remote_description(&answer).await.expect("set remote");
         let s = format!("{:?}", pc_sender.connection_state());
         let r = format!("{:?}", pc_receiver.connection_state());
         *p.p2p_state.lock().unwrap() = P2pState::Connected;
@@ -262,7 +240,7 @@ fn run_p2p(p: Arc<Pipeline>) {
             p.sender_count.fetch_add(1, Ordering::Relaxed);
 
             // Write raw I420 frame to the webrtc track
-            // 用 TrackSender 公开方法写帧（不暴露私有 backend 类型）
+            // write frames through the TrackSender's public methods (private backend types never exposed)
             let _ = track_sender.write_raw_i420(&i420, W, H).await;
 
             frame_idx += 1;

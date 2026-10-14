@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""C43③: bindings 手抄三处 == mediaservo-field 交付域版本（与 ci.yml 同步形）。"""
+"""C43③: the three hand-copied bindings versions == mediaservo-field delivery-domain version (synced with ci.yml)."""
 import json, subprocess, sys
 out = subprocess.run(["cargo","metadata","--no-deps","--format-version","1"],
                      capture_output=True, text=True).stdout

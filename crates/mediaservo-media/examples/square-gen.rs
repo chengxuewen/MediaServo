@@ -28,7 +28,7 @@ struct StatsSink {
 }
 
 impl StatsSink {
-    #[allow(clippy::type_complexity)] // 样例三通道回执元组，不值得起别名
+    #[allow(clippy::type_complexity)] // The example's three-channel receipt tuple; not worth an alias
     fn new() -> (Self, Arc<Mutex<u32>>, Arc<Mutex<Option<u32>>>, Arc<Mutex<Option<u32>>>) {
         let count = Arc::new(Mutex::new(0u32));
         let first_width = Arc::new(Mutex::new(None));

@@ -1,64 +1,64 @@
-# Testing Strategy — 测试策略
+# Testing Strategy
 
-> 状态：Phase 3 前设计 | 关联决策：D113 (4-layer), D-TEST-01 | 创建依据：doc-audit M6
+> Status: pre-Phase 3 design | Related decisions: D113 (4-layer), D-TEST-01 | Created per doc-audit M6
 
-## 4 层测试架构 (D113)
+## The 4-Layer Test Architecture (D113)
 
 ```
 Layer 1: Unit         → per-crate #[cfg(test)] + #[test]
-Layer 2: Component    → crate 内集成测试，依赖被 mock
-Layer 3: Integration  → 多 crate 组合，真实 transport
-Layer 4: E2E          → Host→Server→Remote 全链路
+Layer 2: Component    → in-crate integration tests, dependencies mocked
+Layer 3: Integration  → multi-crate composition, real transport
+Layer 4: E2E          → Host→Server→Remote full chain
 ```
 
-当前测试分布 (2026-07-20): 147 workspace tests。Unit: core 58, webrtc 21 (w3c-api)。Integration: webrtc-sys loopback 13, host E2E 21, server 37, remote 13, PipelineEngine 11。
+Current test distribution (2026-07-20): 147 workspace tests. Unit: core 58, webrtc 21 (w3c-api). Integration: webrtc-sys loopback 13, host E2E 21, server 37, remote 13, PipelineEngine 11.
 
 ### Layer 1: Unit
 
-- 位置：`crates/*/src/**/*.rs` 内 `#[cfg(test)] mod tests`
-- 覆盖：纯函数、类型转换、序列化、配置解析
-- 框架：`#[test]` + `assert_eq!`，无外部依赖
+- Location: `#[cfg(test)] mod tests` inside `crates/*/src/**/*.rs`
+- Coverage: pure functions, type conversions, serialization, config parsing
+- Framework: `#[test]` + `assert_eq!`, no external dependencies
 
 ### Layer 2: Component
 
-- 位置：`crates/*/tests/component_*.rs`
-- 覆盖：单个 crate 内部模块集成（Pipeline 链路、信令状态机、编解码器封装）
-- Fixtures：
-  - `MockTrackLocal` — 模拟本地视频轨道，注入固定帧
-  - `LoopbackTransport` — 内存 channel 模拟 RTP 收发
-  - `TestConfig` — 内联 toml，不依赖文件系统
+- Location: `crates/*/tests/component_*.rs`
+- Coverage: integration of modules within a single crate (pipeline chains, signaling state machine, codec wrappers)
+- Fixtures:
+  - `MockTrackLocal` — mocks a local video track, injecting fixed frames
+  - `LoopbackTransport` — in-memory channels simulating RTP send/receive
+  - `TestConfig` — inline toml, no filesystem dependency
 
 ### Layer 3: Integration
 
-- 位置：`crates/mediaservo-server/tests/integration_*.rs`（server 作为协调点）
-- 场景：
-  - Host 注册 → Server 确认 → Remote 发现 Host 列表
-  - RTP relay 环路：Host → Server → Remote → Server → Host
-  - 断线重连：kill transport → 自动 reconnect + 会话恢复
-- 需要：tokio runtime + 真实 WebSocket/QUIC transport（localhost）
+- Location: `crates/mediaservo-server/tests/integration_*.rs` (the server is the coordination point)
+- Scenarios:
+  - Host registers → Server confirms → Remote discovers the Host list
+  - RTP relay loop: Host → Server → Remote → Server → Host
+  - Disconnect/reconnect: kill a transport → automatic reconnect + session resume
+- Requires: tokio runtime + real WebSocket/QUIC transport (localhost)
 
 ### Layer 4: E2E
 
-- 位置：`tests/e2e/`（workspace root）
-- 场景：
-  - 远程桌面全链路：Host 采集 mock 帧 → Remote 渲染 mock 帧
-  - 多方会议：1 Server + 3 Host 推流 + 3 Remote 拉流
-  - mediasoup SFU 多对等点：4+ producer/consumer 并发
-- 基础设施：docker-compose 编排，Playwright 验证 Remote GUI
+- Location: `tests/e2e/` (workspace root)
+- Scenarios:
+  - Remote desktop full chain: Host captures mock frames → Remote renders mock frames
+  - Multi-party conference: 1 Server + 3 Hosts pushing + 3 Remotes pulling
+  - mediasoup SFU multi-peer: 4+ concurrent producers/consumers
+- Infrastructure: docker-compose orchestration, Playwright verifying the Remote GUI
 
-## 覆盖率目标 (D-TEST-01)
+## Coverage Targets (D-TEST-01)
 
-| Crate | Unit | Component | 合计 |
-|-------|------|-----------|------|
+| Crate | Unit | Component | Total |
+|-------|------|-----------|-------|
 | mediaservo-host | 60% | 80% | 80% |
 | mediaservo-client | 50% | 75% | 75% |
 | mediaservo-server | 60% | 80% | 80% |
 | mediaservo-common (Phase 2) | 70% | 85% | 85% |
 
-工具：`cargo tarpaulin --workspace --out xml`
+Tooling: `cargo tarpaulin --workspace --out xml`
 
-## SDD 追溯
+## SDD Traceability
 
-每个 SDD 验收标准 → 对应 `#[test]`。用例命名：`test_{sdd_id}_{scenario}`。AAA 模式 (Arrange/Act/Assert) 强制。
+Every SDD acceptance criterion maps to a `#[test]`. Naming: `test_{sdd_id}_{scenario}`. AAA pattern (Arrange/Act/Assert) enforced.
 
-> 已实施完成（Phase 3）
+> Implementation complete (Phase 3)

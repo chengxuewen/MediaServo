@@ -11,18 +11,18 @@
 use dashmap::DashMap;
 use mediaservo_common::protocol;
 
-/// H2: 音频房间判定 — room_id 前缀约定 `audio-<vehicle-id>`。
-/// 音频房间 = 全互连 opus 会议（车端 host-audio 进程 + 舱端 viewer+ + dispatcher）；
-/// 与视频/控制房间（RoomType 无关，SFU room 由 room_id 字符串隔离）同机共存。
+/// H2: audio room predicate -- the room_id prefix convention `audio-<vehicle-id>`.
+/// Audio room = a fully-interconnected opus conference (vehicle host-audio process + cockpit viewer+ / dispatcher);
+/// coexists on the same machine with video/control rooms (RoomType-independent; SFU rooms are isolated by the room_id string).
 pub fn is_audio_room(room_id: &str) -> bool {
     room_id.starts_with("audio-")
 }
 
-/// PIT-143 裸机判定: 首 announced IP 是否属本机接口 IP 列表。
-/// 容器内 announced = 宿主可达 IP（不在容器接口列表）→ false；
-/// 裸机（announced 自动探测或 env/yaml 为本机 IP）→ true。
-/// true  → 全部 ListenInfo bind 各自具体 IP（0.0.0.0 通配 + 具体 IP 同端口 = EADDRINUSE，T3 实证）；
-/// false → 0.0.0.0 通配 + 首 announced（容器/注入场景）。
+/// PIT-143 bare-metal predicate: whether the first announced IP belongs to a local interface IP.
+/// In a container, announced = a host-reachable IP (not among the container's interfaces) -> false;
+/// bare metal (announced auto-detected or env/yaml being a local IP) -> true.
+/// true  -> all ListenInfos bind their own concrete IP (0.0.0.0 wildcard + concrete IP on the same port = EADDRINUSE, T3 evidence);
+/// false -> 0.0.0.0 wildcard + first announced (container/injection scenarios).
 pub fn use_bare_metal_listen(
     announced: &[String],
     local: &std::collections::HashSet<String>,
@@ -32,12 +32,12 @@ pub fn use_bare_metal_listen(
 
 /// Detect the container's primary IP (zero-dependency UDP connect trick;
 /// connect() on UDP only sets the default route target, no packet is sent).
-/// 自动收集本机全部 IPv4（等价 ifconfig——多网卡/VPN 全公告；过滤 loopback）。
-/// 仅裸机有效：容器内看到的是容器网卡（172.x 不可达——容器场景必须 env/yaml 显式）。
-/// 公告多余候选无害（ICE 多候选，对端连不通自动跳过）。
-/// 单源两处：sfu 运行时 announced 兜底 + doctor announced_ips 腐烂巡检（T6b④，
-/// if_addrs 同源判据——禁止第二份接口枚举实现，PLAN §8）。if-addrs 为无条件依赖，
-/// stub 姿态同样可用。
+/// Auto-collect all local IPv4s (equivalent to ifconfig -- advertises every NIC/VPN; loopback filtered).
+/// Valid on bare metal only: a container sees the container NICs (172.x unreachable -- container scenarios must set env/yaml explicitly).
+/// Advertising extra candidates is harmless (ICE multi-candidate; unreachable peers are skipped automatically).
+/// One source, two consumers: the sfu runtime announced fallback + the doctor announced_ips rot inspection (T6b 4,
+/// same-source criterion as if_addrs -- a second interface-enumeration implementation is forbidden, PLAN S8). if-addrs is an unconditional dependency,
+/// usable in the stub posture too.
 pub fn detect_all_ips() -> Vec<String> {
     let mut ips: Vec<String> = Vec::new();
     if let Ok(ifaces) = if_addrs::get_if_addrs() {
@@ -51,7 +51,7 @@ pub fn detect_all_ips() -> Vec<String> {
         }
     }
     if ips.is_empty() {
-        // 兜底: 出网探测（原 detect_local_ip）
+        // fallback: outbound probing (the former detect_local_ip)
         if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0")
             && socket.connect("8.8.8.8:80").is_ok()
             && let Ok(addr) = socket.local_addr()
@@ -62,17 +62,17 @@ pub fn detect_all_ips() -> Vec<String> {
     ips
 }
 
-/// PIT-183（A 案根修，D274 遗留轮）：Router 销毁两判据——
-/// 消费者清零不再连坐销毁仍带 producer 的 Router，producer 全灭时刻由
-/// `announce_producers_closed` 尾部补毁 registry/owners。纯函数供双姿态
-/// 共享与表驱动单测（决策面集中一处，防分支漂移——F1/D272 同款纪律）。
-/// 房间 WS 成员清零时，是否执行 SFU/registry/owners 连坐拆除。
-/// 带 producer 的 Router 必须存活（黑洞根因，PIT-183）。
+/// PIT-183 (option-A root fix, D274 leftover round): the two Router-teardown criteria --
+/// consumers dropping to zero no longer drags a Router that still has producers into teardown; the moment producers are all gone,
+/// `announce_producers_closed` performs the deferred teardown of registry/owners at its tail. Pure functions shared by both postures
+/// with table-driven unit tests (the decision surface in one place, guarding against branch drift -- the F1/D272 discipline).
+/// When a room's WS membership drops to zero, should the SFU/registry/owners be torn down with it.
+/// A Router carrying producers must survive (the black-hole root cause, PIT-183).
 pub fn should_teardown(room_removed: bool, has_producers: bool) -> bool {
     room_removed && !has_producers
 }
 
-/// producer 全灭通告后，是否补做延迟清理（房已无 WS 成员且确无 producer 才清）。
+/// After the all-producers-gone announcement, should deferred cleanup run (only when the room has no WS members and truly no producers).
 pub fn should_deferred_cleanup(room_gone: bool, has_producers: bool) -> bool {
     room_gone && !has_producers
 }
@@ -83,19 +83,31 @@ mod router_guard_tests {
 
     #[test]
     fn teardown_truth_table() {
-        // 真值表：仅「WS 清零 且 无 producer」连坐（第二列=has_producers）
-        assert!(!should_teardown(false, false), "房未清零不拆");
-        assert!(!should_teardown(false, true), "房未清零不拆（带 producer）");
-        assert!(should_teardown(true, false), "清零且无 producer → 拆");
-        assert!(!should_teardown(true, true), "PIT-183 主案：清零但 producer 活 → 保留");
+        // Truth table: teardown only for "WS empty AND no producers" (second column = has_producers)
+        assert!(!should_teardown(false, false), "room not empty: no teardown");
+        assert!(!should_teardown(false, true), "room not empty: no teardown (with producers)");
+        assert!(should_teardown(true, false), "empty and no producers -> teardown");
+        assert!(
+            !should_teardown(true, true),
+            "PIT-183 main case: empty but producers alive -> keep"
+        );
     }
 
     #[test]
     fn deferred_cleanup_truth_table() {
-        assert!(!should_deferred_cleanup(false, false), "K2：房内还有消费者→留给 leave 路径");
-        assert!(!should_deferred_cleanup(false, true), "房在与 producer 活→不动");
-        assert!(should_deferred_cleanup(true, false), "K1：房已散且 producer 全灭→补毁");
-        assert!(!should_deferred_cleanup(true, true), "房散但 producer 残→不毁");
+        assert!(
+            !should_deferred_cleanup(false, false),
+            "K2: consumers remain -> leave it to the leave path"
+        );
+        assert!(!should_deferred_cleanup(false, true), "room alive with producers -> no-op");
+        assert!(
+            should_deferred_cleanup(true, false),
+            "K1: room dispersed and producers gone -> deferred teardown"
+        );
+        assert!(
+            !should_deferred_cleanup(true, true),
+            "room dispersed but producers remain -> do not destroy"
+        );
     }
 }
 
@@ -116,14 +128,14 @@ mod bare_metal_tests {
 
     #[test]
     fn container_announced_not_local() {
-        // 容器接口为 172.x，不含宿主 IP → 非裸机
+        // container interfaces are 172.x, not including the host IP -> not bare metal
         let announced = ["10.144.0.3".to_string()];
         assert!(!use_bare_metal_listen(&announced, &local(&["172.18.0.2"])));
     }
 
     #[test]
     fn mixed_first_local_rest_not() {
-        // 首 IP 本机 = 裸机语义（后续非本机地址跳过）
+        // first IP local = bare-metal semantics (later non-local addresses are skipped)
         let announced = ["192.168.2.127".to_string(), "10.144.0.3".to_string()];
         assert!(use_bare_metal_listen(&announced, &local(&["192.168.2.127"])));
     }
@@ -132,7 +144,7 @@ mod bare_metal_tests {
     fn empty_announced_falls_back() {
         assert!(
             !use_bare_metal_listen(&[], &local(&["192.168.2.127"])),
-            "空 announced 回退 0.0.0.0"
+            "empty announced falls back to 0.0.0.0"
         );
     }
 }
@@ -147,12 +159,12 @@ mod imp {
     use std::num::{NonZeroU8, NonZeroU32};
     use std::sync::Arc;
 
-    /// PIT-58: announced_address 解析 — 环境变量 MEDIASERVO_SFU_ANNOUNCED_IP，
-    /// 支持逗号分隔多 IP（宿主多网卡）。fallback: 容器内探测（172.18.0.2 仅本机可用，
-    /// 部署方应经 CLI/外部注入真实宿主 IP）。
-    /// announced 解析（三层优先级，PIT-138 修正）:
-    /// env `MEDIASERVO_SFU_ANNOUNCED_IP`（逗号分隔多 IP）> server.yaml `sfu.announced_ips`
-    /// > 自动探测（出网 IP——容器内不可靠，仅兜底）。
+    /// PIT-58: announced_address resolution -- env MEDIASERVO_SFU_ANNOUNCED_IP,
+    /// supports comma-separated multi-IP (multi-NIC hosts). fallback: in-container probing (172.18.0.2 is only reachable locally;
+    /// deployers must inject the real host IP via CLI/external means).
+    /// announced resolution (three-tier priority, PIT-138 revision):
+    /// env `MEDIASERVO_SFU_ANNOUNCED_IP` (comma-separated multi-IP) > server.yaml `sfu.announced_ips`
+    /// > auto-detect (outbound IP -- unreliable in containers, fallback only).
     fn announced_ips(config: Option<&mediaservo_common::config::ServerConfig>) -> Vec<String> {
         if let Ok(raw) = std::env::var("MEDIASERVO_SFU_ANNOUNCED_IP") {
             let ips: Vec<String> =
@@ -174,7 +186,7 @@ mod imp {
         RouterOptions::new(vec![
             RtpCodecCapability::Audio {
                 mime_type: MimeTypeAudio::Opus,
-                preferred_payload_type: Some(111), // Opus 显式（防与视频冲突）
+                preferred_payload_type: Some(111), // Opus explicit (prevents collision with video)
                 clock_rate: NonZeroU32::new(48000).unwrap(),
                 channels: NonZeroU8::new(2).unwrap(),
                 parameters: RtpCodecParametersParameters::default(),
@@ -182,34 +194,34 @@ mod imp {
             },
             RtpCodecCapability::Video {
                 mime_type: MimeTypeVideo::Vp8,
-                preferred_payload_type: Some(96), // VP8 显式（防与 H264 101 冲突）
+                preferred_payload_type: Some(96), // VP8 explicit (prevents conflict with H264 101)
                 clock_rate: NonZeroU32::new(90000).unwrap(),
                 parameters: RtpCodecParametersParameters::default(),
                 rtcp_feedback: vec![],
             },
             RtpCodecCapability::Video {
                 mime_type: MimeTypeVideo::H264,
-                preferred_payload_type: Some(101), // PIT-51: 与 Host produce 的 payloadType 101 匹配（None=自动分配≠101 → produce 失败）
+                preferred_payload_type: Some(101), // PIT-51: must match the payloadType 101 the Host produces with (None=auto-assign != 101 -> produce fails)
                 clock_rate: NonZeroU32::new(90000).unwrap(),
                 parameters: RtpCodecParametersParameters::from([
                     ("level-asymmetry-allowed", 1_u32.into()),
                     ("packetization-mode", 1_u32.into()),
-                    ("profile-level-id", "42e01f".into()), // v2: 4d0032→42e01f（浏览器解码兼容性, encoder-backend-codec-config T7 实证）
+                    ("profile-level-id", "42e01f".into()), // v2: 4d0032->42e01f (browser decode compat, encoder-backend-codec-config T7 evidence)
                 ]),
                 rtcp_feedback: vec![],
             },
-            // v2 (2026-08-11): 用户要求 264/265/vp8/vp9/av1 — VP9/AV1 启用;
-            // H265 不可用: mediasoup-rs 0.24 MimeTypeVideo 无 H265 绑定（worker 不支持, 需新版/自定义）
+            // v2 (2026-08-11): user requested 264/265/vp8/vp9/av1 -- VP9/AV1 enabled;
+            // H265 unavailable: mediasoup-rs 0.24 MimeTypeVideo has no H265 binding (worker unsupported; needs a newer/custom build)
             RtpCodecCapability::Video {
                 mime_type: MimeTypeVideo::Vp9,
-                preferred_payload_type: Some(99), // 防冲突: 96/101 已用, 100 被 mediasoup 自动分配占用
+                preferred_payload_type: Some(99), // conflict avoidance: 96/101 in use, 100 is claimed by mediasoup auto-assignment
                 clock_rate: NonZeroU32::new(90000).unwrap(),
                 parameters: RtpCodecParametersParameters::default(),
                 rtcp_feedback: vec![],
             },
             RtpCodecCapability::Video {
                 mime_type: MimeTypeVideo::AV1,
-                preferred_payload_type: Some(97), // 池尾动态 PT（96/99/101 已用; 100-102 池首与 mediasoup 分配冲突, 实测）
+                preferred_payload_type: Some(97), // dynamic PT at the pool tail (96/99/101 used; 100-102 pool head conflicts with mediasoup allocation, verified live)
                 clock_rate: NonZeroU32::new(90000).unwrap(),
                 parameters: RtpCodecParametersParameters::default(),
                 rtcp_feedback: vec![],
@@ -222,7 +234,7 @@ mod imp {
         pub ice_parameters: protocol::IceParameters,
         pub dtls_parameters: protocol::DtlsParameters,
         pub ice_candidates: Vec<protocol::IceCandidate>,
-        /// P1: transport 级 SCTP 参数（mediasoup SctpParameters 序列化透传；序列化失败=None）。
+        /// P1: transport-level SCTP parameters (mediasoup SctpParameters serialized passthrough; serialization failure = None).
         pub sctp_parameters: Option<serde_json::Value>,
     }
 
@@ -251,8 +263,8 @@ mod imp {
     pub struct DataConsumeResult {
         pub data_consumer_id: String,
         pub data_producer_id: String,
-        /// S2d：worker 分配的 consumer SCTP 流参数——官方契约 consumer 端必须以此
-        /// 建 negotiated DC（Chrome74.receiveDataChannel: id=streamId）。
+        /// S2d: worker-assigned consumer SCTP stream parameters -- per the official contract the consumer side must use these
+        /// to build the negotiated DC (Chrome74.receiveDataChannel: id=streamId).
         pub sctp_stream_parameters: Option<protocol::SctpStreamParameters>,
         pub label: String,
         pub protocol: String,
@@ -260,27 +272,27 @@ mod imp {
 
     /// Per-peer state: send/recv transports and active producers/consumers.
     pub struct SfuPeer {
-        /// C1 (D-H14 顺序无关): send transport 注册表 — 多 host 子进程共享 peer_id
-        /// （如 "host"），并发 CreateWebRtcTransport 不得互相覆盖（旧单槽: 后建覆盖
-        /// 先建 → produce 挂错 transport → 静默流丢失）。`.last()` = legacy 单槽回退。
+        /// C1 (D-H14 order-independence): the send transport registry -- multiple host subprocesses share a peer_id
+        /// (e.g. "host"); concurrent CreateWebRtcTransports must not overwrite each other (old single slot: the later one
+        /// overwrote the earlier -> produce attached to the wrong transport -> silent stream loss). `.last()` = legacy single-slot fallback.
         pub send_transports: Vec<WebRtcTransport>,
-        /// C1: recv transport 注册表（多连接共享 peer_id 场景同缺陷 — consumer 挂错
-        /// transport → 黑屏，见 signaling.rs 注释）。`.last()` = legacy 单槽回退。
+        /// C1: the recv transport registry (same defect in multi-connection shared peer_id scenarios -- consumer
+        /// attached to the wrong transport -> black screen, see the signaling.rs comment). `.last()` = legacy single-slot fallback.
         pub recv_transports: Vec<WebRtcTransport>,
         pub producers: Vec<Producer>,
         pub consumers: Vec<Consumer>,
-        /// H1 (SFU data 域): SCTP DataChannel producers/consumers（mediasoup 原生 data 域）。
+        /// H1 (SFU data domain): SCTP DataChannel producers/consumers (the mediasoup-native data domain).
         pub data_producers: Vec<DataProducer>,
         pub data_consumers: Vec<DataConsumer>,
-        /// C1: producer_id → transport_id 绑定（produce 时记录；bind 断言/诊断访问器）。
+        /// C1: producer_id -> transport_id binding (recorded at produce; bind assertions/diagnostic accessor).
         pub producer_transports: std::collections::HashMap<String, String>,
-        /// C1: data_producer_id → transport_id 绑定。
+        /// C1: data_producer_id -> transport_id binding.
         pub data_producer_transports: std::collections::HashMap<String, String>,
     }
 
     impl SfuPeer {
-        /// 按 transport_id 定位 send transport；None = 最近创建（legacy 单槽语义，
-        /// 单 transport 客户端行为不变）。
+        /// Locate the send transport by transport_id; None = most recently created (legacy single-slot semantics;
+        /// single-transport client behavior unchanged).
         fn send_transport(&self, transport_id: Option<&str>) -> Option<&WebRtcTransport> {
             match transport_id {
                 Some(id) => self.send_transports.iter().find(|t| t.id().to_string() == id),
@@ -288,7 +300,7 @@ mod imp {
             }
         }
 
-        /// 按 transport_id 定位 recv transport；None = 最近创建（legacy 单槽语义）。
+        /// Locate the recv transport by transport_id; None = most recently created (legacy single-slot semantics).
         fn recv_transport(&self, transport_id: Option<&str>) -> Option<&WebRtcTransport> {
             match transport_id {
                 Some(id) => self.recv_transports.iter().find(|t| t.id().to_string() == id),
@@ -300,27 +312,27 @@ mod imp {
     pub struct SfuRoom {
         pub router: Arc<Router>,
         pub peers: DashMap<String, SfuPeer>,
-        /// producer-label T1.3: producer_id → 业务标签（Produce.label; late-join 回放源;
-        /// 空 map 兼容旧 host 无标签形）
+        /// producer-label T1.3: producer_id -> business label (Produce.label; the late-join replay source;
+        /// empty map for compatibility with label-less old hosts)
         pub producer_labels: DashMap<String, String>,
     }
 
-    /// H3: 管理面板房间列表摘要（音频会议面板数据源）。
+    /// H3: the admin panel room list summary (the audio-conference panel data source).
     #[derive(Debug, Clone, serde::Serialize)]
     #[serde(rename_all = "snake_case")]
     pub struct SfuRoomSummary {
         pub room_id: String,
-        /// 已连接参与者（peer）数。
+        /// Number of connected participants (peers).
         pub participants: usize,
-        /// 房间内 producer 总数。
+        /// Total producers in the room.
         pub producers: usize,
-        /// 房间内 consumer 总数。
+        /// Total consumers in the room.
         pub consumers: usize,
-        /// H2 音频房间（audio- 前缀）。
+        /// H2 audio room (audio- prefix).
         pub audio: bool,
-        /// 房间内 producer id 列表（SfuStats 查询用）。
+        /// Producer id list in the room (for SfuStats queries).
         pub producer_ids: Vec<String>,
-        /// 房间内 consumer id 列表（SfuStats 查询用）。
+        /// Consumer id list in the room (for SfuStats queries).
         pub consumer_ids: Vec<String>,
     }
 
@@ -380,20 +392,20 @@ mod imp {
             .collect()
     }
 
-    /// SFU 监听口解析（D-B 10-12 裁决）：yaml `sfu.port` > env `MEDIASERVO_SFU_PORT` >
-    /// `DEFAULT_SFU_PORT`。与 lifecycle/templates.rs `resolve_port` 同语义——该函数在 main.rs
-    /// 二进制侧模块，lib crate 不可达，此处为函数族第二实例（改动优先级序须两处同步）。
+    /// SFU listen port resolution (the D-B 10-12 ruling): yaml `sfu.port` > env `MEDIASERVO_SFU_PORT` >
+    /// `DEFAULT_SFU_PORT`. Same semantics as lifecycle/templates.rs `resolve_port` -- that function lives in the
+    /// main.rs binary-side module, unreachable from the lib crate; this is the function family's second instance (priority-order changes must sync both).
     fn resolve_sfu_port(yaml: Option<u16>, env: Option<u16>) -> u16 {
         yaml.or(env).unwrap_or(mediaservo_common::config::DEFAULT_SFU_PORT)
     }
 
-    /// list_producers 返回 tuple 形（producer-label 轮加第 4 元；1.97 工具链 type_complexity 收口）。
+    /// list_producers returns a tuple shape (a 4th element added in the producer-label round; the 1.97 toolchain type_complexity cleanup).
     type ProducerListing = Vec<(String, protocol::MediaKind, String, Option<String>)>;
 
     impl SfuManager {
         /// Create a new SfuManager with a single mediasoup Worker and WebRtcServer.
-        /// SFU 监听口 = resolve_sfu_port(cfg.sfu.port, env)（D-B: yaml > env > 20000）—
-        /// 测试用 `new_with_port` 传随机端口。
+        /// SFU listen port = resolve_sfu_port(cfg.sfu.port, env) (D-B: yaml > env > 20000) --
+        /// tests use `new_with_port` with a random port.
         pub async fn new(
             config: Option<&mediaservo_common::config::ServerConfig>,
         ) -> Result<Self, String> {
@@ -404,12 +416,12 @@ mod imp {
             Self::new_with_port_config(sfu_port, config).await
         }
 
-        /// 指定 WebRtcServer 监听端口（测试隔离: 多测试并行各绑独立端口）。
+        /// Specify the WebRtcServer listen port (test isolation: parallel tests each bind a distinct port).
         pub async fn new_with_port(sfu_port: u16) -> Result<Self, String> {
             Self::new_with_port_config(sfu_port, None).await
         }
 
-        /// 内部实现: 端口 + 配置（announced 三层解析入口）。
+        /// Internal implementation: port + config (the announced three-tier resolution entry).
         async fn new_with_port_config(
             sfu_port: u16,
             config: Option<&mediaservo_common::config::ServerConfig>,
@@ -422,14 +434,14 @@ mod imp {
             tracing::info!("mediasoup Worker created (id: {:?})", worker.id());
 
             // Create WebRtcServer with single port (port 20000)
-            // PIT-44: listen 0.0.0.0 必须设 announced_address（mediasoup 官方要求），
-            // 否则 candidate=0.0.0.0 对端无法 ICE；容器内探测本机 IP。
-            // PIT-58: 容器内探测 = 172.18.0.2 (内网地址, 其他主机不可达 → Signal Lost);
-            // 必须用宿主可达 IP — 环境变量 MEDIASERVO_SFU_ANNOUNCED_IP 配置 (宿主机网卡 IP)
-            // 多 announced IP（PIT-143 修正）: 仅**裸机**支持多 ListenInfo——每个
-            // ListenInfo **listen 各自具体 IP**（0.0.0.0 重复 bind 同端口 = 冲突）；
-            // 容器内（announced 宿主 IP 不在容器接口列表）→ 单 ListenInfo
-            // （0.0.0.0 + 首 announced——容器无法公告多地址）。
+            // PIT-44: listen 0.0.0.0 must set announced_address (a mediasoup official requirement);
+            // otherwise candidate=0.0.0.0 is unusable by peers over ICE; in-container probing detects the container IP.
+            // PIT-58: in-container probing = 172.18.0.2 (an internal address unreachable by other hosts -> Signal Lost);
+            // a host-reachable IP is required -- configure via env MEDIASERVO_SFU_ANNOUNCED_IP (the host NIC IP).
+            // Multi-announced-IP (PIT-143 revision): only **bare metal** supports multiple ListenInfos -- each
+            // ListenInfo **listens on its own concrete IP** (re-binding 0.0.0.0 on the same port = conflict);
+            // in a container (the announced host IP not among the container's interfaces) -> a single ListenInfo
+            // (0.0.0.0 + first announced -- containers cannot advertise multiple addresses).
             let announced_ips = announced_ips(config);
             let local_ips: std::collections::HashSet<String> = if_addrs::get_if_addrs()
                 .map(|ifaces| {
@@ -442,16 +454,16 @@ mod imp {
                         .collect()
                 })
                 .unwrap_or_default();
-            // 首 ListenInfo 选择（PIT-143 修正 + T3 §3.2 实证）:
-            // 裸机（首 announced ∈ 本机接口）→ bind 具体 IP：0.0.0.0 通配先占端口,
-            // 之后具体 IP 同端口 bind = Linux EADDRINUSE（uv_udp_bind ... address already in use）;
-            // 容器/注入（announced 宿主 IP 非本机接口）→ 0.0.0.0 + 首 announced（mediasoup 要求）。
+            // First ListenInfo selection (PIT-143 revision + T3 S3.2 evidence):
+            // bare metal (first announced in local interfaces) -> bind the concrete IP: the 0.0.0.0 wildcard grabs the port first,
+            // then binding the concrete IP on the same port = Linux EADDRINUSE (uv_udp_bind ... address already in use);
+            // container/injection (the announced host IP is not a local interface) -> 0.0.0.0 + first announced (mediasoup's requirement).
             let first_listen_ip = if use_bare_metal_listen(&announced_ips, &local_ips) {
                 match announced_ips[0].parse::<IpAddr>() {
                     Ok(ip) => ip,
                     Err(_) => {
                         tracing::warn!(
-                            "bare-metal announced IP 非法 ({}), 回退 0.0.0.0 通配",
+                            "bare-metal announced IP invalid ({}), falling back to the 0.0.0.0 wildcard",
                             announced_ips[0]
                         );
                         IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
@@ -475,11 +487,11 @@ mod imp {
                 first_listen_ip,
                 announced_ips.first().cloned(),
             ));
-            // 其余 announced: 本机接口 → 各建 ListenInfo（listen 具体 IP）;
-            // 非本机（容器注入的宿主 IP 等）→ 跳过。
+            // Remaining announced IPs: local interfaces -> one ListenInfo each (listening on the concrete IP);
+            // non-local (host IPs injected for containers etc.) -> skipped.
             for ip in announced_ips.iter().skip(1) {
                 if !local_ips.contains(ip) {
-                    continue; // 容器注入的宿主 IP——容器内无该接口，跳过
+                    continue; // a host IP injected for a container -- no such interface inside the container, skip
                 }
                 let Ok(listen_ip) = ip.parse::<IpAddr>() else { continue };
                 listen_infos = listen_infos.insert(make_info(listen_ip, Some(ip.clone())));
@@ -500,8 +512,8 @@ mod imp {
             })
         }
 
-        /// P1: 房间 Router 懒创建（create_webrtc_transport / router_rtp_capabilities 共用——
-        /// mediasoup-client 协商流程先要 caps 后建 transport，两处必须同路径）。
+        /// P1: lazy per-room Router creation (shared by create_webrtc_transport / router_rtp_capabilities --
+        /// the mediasoup-client negotiation flow wants caps before transport; both must take the same path).
         async fn ensure_router(&self, room_id: &str) -> Result<Arc<Router>, String> {
             if let Some(room) = self.rooms.get(room_id) {
                 return Ok(Arc::clone(&room.router));
@@ -509,7 +521,7 @@ mod imp {
             // No room yet — create one
             let router =
                 self.worker.create_router(default_router_options()).await.map_err(|e| {
-                    // v2 诊断: 打印 codec 列表定位 PT 冲突
+                    // v2 diagnostics: print the codec list to locate PT conflicts
                     tracing::error!(
                         "Router create failed; media_codecs={:?}",
                         default_router_options()
@@ -537,13 +549,13 @@ mod imp {
             peer_id: &str,
             direction: &str,
         ) -> Result<TransportCreated, String> {
-            // Get or create room（P1: 提取 ensure_router — caps 请求同路径懒建）
+            // Get or create room (P1: extracted ensure_router -- the caps request lazily creates on the same path)
             let router = self.ensure_router(room_id).await?;
 
             // Create transport using shared WebRtcServer (single port)
-            // H1 (SFU data 域): enable_sctp = true — SCTP/DataChannel 协商必需（mediasoup
-            // 官方: WebRtcTransportOptions.enableSctp 默认 false）。仅当对端 SDP 含
-            // m=application 时才建 SCTP association — 纯媒体流不受影响（additive）。
+            // H1 (SFU data domain): enable_sctp = true -- required for SCTP/DataChannel negotiation (mediasoup
+            // official: WebRtcTransportOptions.enableSctp defaults to false). The SCTP association is only established when the
+            // peer's SDP contains m=application -- pure media streams unaffected (additive).
             let mut options =
                 WebRtcTransportOptions::new_with_server(self.webrtc_server.as_ref().clone());
             options.enable_sctp = true;
@@ -556,10 +568,10 @@ mod imp {
             let ice = transport.ice_parameters().clone();
             let dtls = transport.dtls_parameters();
             let ice_candidates = convert_ice_candidates(transport.ice_candidates());
-            // P1: transport 级 SCTP 参数透传（enable_sctp 恒开 → 常态 Some；失败=None+warn, C15）。
+            // P1: transport-level SCTP parameter passthrough (enable_sctp always on -> normally Some; failure = None + warn, C15).
             let sctp_parameters = transport.sctp_parameters().and_then(|p| {
                 serde_json::to_value(p)
-                    .map_err(|e| tracing::warn!("sctp_parameters 序列化失败: {e}"))
+                    .map_err(|e| tracing::warn!("sctp_parameters serialization failed: {e}"))
                     .ok()
             });
 
@@ -578,7 +590,7 @@ mod imp {
 
                 match direction {
                     "send" => {
-                        // C1: 追加进注册表（不覆盖 — 并发子进程各自 transport 并存）
+                        // C1: append to the registry (no overwrite -- concurrent subprocesses keep their own transports)
                         peer.send_transports.push(transport);
                     }
                     "recv" => {
@@ -597,19 +609,20 @@ mod imp {
             })
         }
 
-        /// P1 (client-dual-form): 房间 Router RTP capabilities — mediasoup-client
-        /// Device.load() 输入（C18）。房间不存在则懒建 Router（协商先于 transport）。
+        /// P1 (client-dual-form): the room Router's RTP capabilities -- the input to mediasoup-client
+        /// Device.load() (C18). If the room does not exist the Router is lazily created (negotiation before transport).
         pub async fn router_rtp_capabilities(
             &self,
             room_id: &str,
         ) -> Result<serde_json::Value, String> {
             let router = self.ensure_router(room_id).await?;
             let caps = router.rtp_capabilities();
-            serde_json::to_value(&caps).map_err(|e| format!("rtp_capabilities 序列化失败: {e}"))
+            serde_json::to_value(&caps)
+                .map_err(|e| format!("rtp_capabilities serialization failed: {e}"))
         }
 
-        /// P1: consumer 层级偏好（simulcast/SVC 选层）。未知 room/peer/consumer → Err
-        /// （C15: 调用方 warn+Error 回发）。Consumer 句柄先 clone 释放 DashMap guard 再 await。
+        /// P1: consumer layer preference (simulcast/SVC layer selection). Unknown room/peer/consumer -> Err
+        /// (C15: the caller warns + sends Error back). The Consumer handle is cloned and the DashMap guard released before awaiting.
         pub async fn set_preferred_layers(
             &self,
             room_id: &str,
@@ -656,10 +669,10 @@ mod imp {
             }
         }
 
-        /// H1 修正: 跨房间按 peer_id 清除（producer 按流注册在各 stream 房间的 sfu peers，
-        /// 而 signaling 会话的 relay_room=整车房间——旧单房间版 remove_peer 清不到 stream 房间的
-        /// producer，造成重连后死 producer 泄漏 + 无 ProducerClosed 广播）。
-        /// 返回 (room_id, [(producer_id, kind)]) 供逐房间广播。房间清空则销毁 Router。
+        /// H1 fix: clear across rooms by peer_id (producers register per-stream under their stream rooms' sfu peers,
+        /// while the signaling session's relay_room = the vehicle room -- the old single-room remove_peer could not reach stream-room
+        /// producers, causing dead-producer leaks after reconnect with no ProducerClosed broadcast).
+        /// Returns (room_id, [(producer_id, kind)]) for per-room broadcasts. An emptied room destroys its Router.
         pub fn remove_peer_global(
             &self,
             peer_id: &str,
@@ -692,16 +705,16 @@ mod imp {
                     out.push((rid, closed));
                 }
             }
-            // (iter_mut 守卫随 for 循环结束已释放——下方删除安全)
+            // (iter_mut guards released when the for loop ends -- the deletion below is safe)
             for rid in empty_rooms {
                 self.remove_room(&rid);
             }
             out
         }
 
-        /// F1/T4: 单房间精确移除（视频 producer 宿主键为自报 peer_id，多流常为同一
-        /// 字面值——按键全局 remove 会误杀其他活流，必须 (room, peer) 粒度）。
-        /// 返回被关 producers 供 ProducerClosed 广播；房间清空则销毁 Router。
+        /// F1/T4: precise single-room removal (video producer host keys are the self-reported peer_id, usually the same literal
+        /// across streams -- a global key remove would wrongly kill other live streams; must be (room, peer) granularity).
+        /// Returns the closed producers for the ProducerClosed broadcast; an emptied room destroys its Router.
         pub fn remove_peer_in_room(
             &self,
             room_id: &str,
@@ -731,15 +744,15 @@ mod imp {
             closed
         }
 
-        /// H1 修正: 按 producer_id 列表跨房间清理（各 stream 房间的 sfu peer 键为
-        /// 自报 peer_id，会话 id 清理漏删——泄漏）。返回 (room, producer_id, kind) 供广播。
+        /// H1 fix: clear across rooms by producer_id list (each stream room's sfu peer key is the self-reported
+        /// peer_id; session-id cleanup missed them -- the leak). Returns (room, producer_id, kind) for broadcasting.
         pub fn remove_producers_by_ids(
             &self,
             producer_ids: &[String],
         ) -> Vec<(String, String, protocol::MediaKind)> {
             let mut out = Vec::new();
-            // 第一遍：按 id 关闭 producers（media + data 对称）。facade Drop = close
-            // （mediasoup-rs 所有权语义），返回清单供 ProducerClosed 广播。
+            // First pass: close producers by id (media + data symmetric). facade Drop = close
+            // (mediasoup-rs ownership semantics); the manifest is returned for the ProducerClosed broadcast.
             let mut gone_dps: std::collections::HashSet<String> = std::collections::HashSet::new();
             for mut entry in self.rooms.iter_mut() {
                 let rid = entry.key().clone();
@@ -759,7 +772,7 @@ mod imp {
                             true
                         }
                     });
-                    // S4′: 设备名下 DataProducer 同路清理（旧版只收 media = dp 漏网）。
+                    // S4': DataProducers under the device name get the same cleanup (the old version only collected media = dp escaped).
                     peer.data_producers.retain(|p| {
                         let pid = p.id().to_string();
                         if producer_ids.contains(&pid) {
@@ -780,9 +793,9 @@ mod imp {
                     out.extend(hits.into_iter().map(|(pid, kind)| (rid.clone(), pid, kind)));
                 }
             }
-            // 第二遍（rooms 借用已过）：连坐关闭绑定到死亡 dp 的 data consumers——
-            // 否则对端 consumer 占位 + worker used_sctp_stream_ids 永不释放
-            // = `StreamId reserved` 消费天花板根因（2026-09-15 活体实锤）。
+            // Second pass (the rooms borrow is over): drag along the data consumers bound to dead dps --
+            // otherwise the peer consumer occupies a slot and the worker's used_sctp_stream_ids never frees
+            // = the root cause of the `StreamId reserved` consumption ceiling (confirmed live 2026-09-15).
             if !gone_dps.is_empty() {
                 for mut entry in self.rooms.iter_mut() {
                     let room_label = entry.key().clone();
@@ -812,7 +825,7 @@ mod imp {
             existed
         }
         /// Create a producer for a peer on its send transport.
-        /// C1: transport_id 指名绑定 transport；None = legacy 单槽回退（最近创建）。
+        /// C1: bind the transport named by transport_id; None = legacy single-slot fallback (most recently created).
         pub async fn create_producer(
             &self,
             room_id: &str,
@@ -829,7 +842,7 @@ mod imp {
             let ms_kind = match kind {
                 protocol::MediaKind::Audio => MediaKind::Audio,
                 protocol::MediaKind::Video => MediaKind::Video,
-                // S4′ 广播 kind 值域；produce wire 面不出现（媒体面拒收）。
+                // S4' broadcast kind value domain; never appears on the produce wire (rejected by the media plane).
                 protocol::MediaKind::Data => {
                     return Err("MediaKind::Data is broadcast-only, not producible".to_string());
                 }
@@ -864,13 +877,13 @@ mod imp {
                 room_id
             );
 
-            // C1: 记录 producer→transport 绑定（bind 断言/诊断）— 先取 id 结束 transport 借用。
+            // C1: record the producer->transport binding (bind assertions/diagnostics) -- take the id first to end the transport borrow.
             let bound_transport_id = transport.id().to_string();
             peer.producers.push(producer);
             peer.producer_transports.insert(producer_id.clone(), bound_transport_id);
-            // producer-label T1.3: 记录业务标签（late-join 回放源; None 不记）。
-            // 死锁教训（PIT）: 必须复用已持有的 room 守卫（get_mut 写锁中）——重入
-            // self.rooms.get() 同 shard 读锁 = 同任务自锁死（DashMap 不可重入）。
+            // producer-label T1.3: record the business label (the late-join replay source; None not recorded).
+            // Deadlock lesson (PIT): must reuse the already-held room guard (inside the get_mut write lock) -- re-entering
+            // self.rooms.get() on the same shard's read lock = same-task self-deadlock (DashMap is not re-entrant).
             if let Some(l) = label {
                 room.producer_labels.insert(producer_id.clone(), l);
             }
@@ -879,7 +892,7 @@ mod imp {
 
         /// Create a consumer for a peer on its recv transport,
         /// subscribing to an existing producer in the room.
-        /// C1: transport_id 指名绑定 recv transport；None = legacy 单槽回退。
+        /// C1: bind the recv transport named by transport_id; None = legacy single-slot fallback.
         pub async fn create_consumer(
             &self,
             room_id: &str,
@@ -947,7 +960,7 @@ mod imp {
                 protocol_kind
             );
 
-            // PIT-65 观测: Consumer RTP trace (每包处理/丢弃原因)
+            // PIT-65 observation: Consumer RTP trace (per-packet handling/drop reasons)
             {
                 let cid = consumer_id.clone();
                 let _ = consumer.on_trace(
@@ -960,7 +973,7 @@ mod imp {
                     .await;
             }
 
-            // PIT-65 观测: Consumer dump (rtp_streams score — IsActive 判定依据)
+            // PIT-65 observation: Consumer dump (rtp_streams score -- the IsActive criterion)
             {
                 let cid = consumer_id.clone();
                 if let Ok(dump) = consumer.dump().await {
@@ -969,9 +982,9 @@ mod imp {
                 }
             }
 
-            // PIT-76: consume 后立即请求关键帧 — 绕过 libwebrtc 99s GOP（x-google-
-            // max-keyframe-interval 注入对软件 VP8 编码器不生效，实测仍 99s）。
-            // mediasoup request_key_frame → producer 侧发送关键帧请求 → 编码器立即出 IDR
+            // PIT-76: request a keyframe right after consume -- bypasses the libwebrtc 99s GOP (the x-google-
+            // max-keyframe-interval injection has no effect on the software VP8 encoder; still 99s in practice).
+            // mediasoup request_key_frame -> the producer side sends a keyframe request -> the encoder emits an IDR immediately
             if protocol_kind == protocol::MediaKind::Video {
                 match consumer.request_key_frame().await {
                     Ok(()) => tracing::info!(
@@ -994,10 +1007,10 @@ mod imp {
         }
 
         /// Create a data producer (SCTP DataChannel) for a peer on its send transport.
-        /// H1 (SFU data 域): mediasoup 原生 data 域 — DataProducerOptions::new_sctp
-        /// (官方 DataProducerOptions.sctpStreamParameters + label + protocol)。
-        /// 消息流转是 mediasoup worker 内部的（端点 SCTP → worker → DataConsumers），
-        /// server 只负责 produce/consume 接线（官方文档 transport.produceData）。
+        /// H1 (SFU data domain): the mediasoup-native data domain -- DataProducerOptions::new_sctp
+        /// (official DataProducerOptions.sctpStreamParameters + label + protocol).
+        /// Message flow happens inside the mediasoup worker (endpoint SCTP -> worker -> DataConsumers);
+        /// the server only wires produce/consume (official docs transport.produceData).
         pub async fn create_data_producer(
             &self,
             room_id: &str,
@@ -1045,7 +1058,7 @@ mod imp {
                 peer_id,
                 room_id
             );
-            // C1: 记录 data producer→transport 绑定（bind 断言/诊断）— 先取 id 结束 transport 借用。
+            // C1: record the data producer->transport binding (bind assertions/diagnostics) -- take the id first to end the transport borrow.
             let bound_transport_id = transport.id().to_string();
             peer.data_producers.push(producer);
             peer.data_producer_transports.insert(data_producer_id.clone(), bound_transport_id);
@@ -1054,7 +1067,7 @@ mod imp {
 
         /// Create a data consumer (SCTP DataChannel) for a peer on its recv transport,
         /// subscribing to an existing data producer in the room.
-        /// DataConsumerOptions::new_sctp 继承 producer 的 ordered/可靠性参数（官方 API）。
+        /// DataConsumerOptions::new_sctp inherits the producer's ordered/reliability parameters (official API).
         pub async fn create_data_consumer(
             &self,
             room_id: &str,
@@ -1109,14 +1122,14 @@ mod imp {
                 room_id
             );
 
-            // H1 观测: 消费端 on_message — SCTP DataConsumer 的消息事件（端点经 SCTP
-            // association 接收; Direct 型消息在 Rust 侧触发; 官方 dataConsumer 事件）。
+            // H1 observation: the consuming-side on_message -- the SCTP DataConsumer message event (received over the
+            // endpoint's SCTP association; Direct-type messages fire on the Rust side; an official dataConsumer event).
             let cid = data_consumer_id.clone();
             let _ = consumer.on_message(move |msg: &WebRtcMessage<'_>| {
                 tracing::debug!("DATA-CONS {}: {:?}", cid, msg);
             });
 
-            // S2d: push 前取 worker 实配参数（mediasoup→wire 同构映射，镜像 produce 侧）。
+            // S2d: take the worker's actual parameters before push (a mediasoup->wire isomorphic mapping, mirroring the produce side).
             let (ms_sctp, c_label, c_protocol) = (
                 consumer.sctp_stream_parameters(),
                 consumer.label().clone(),
@@ -1178,7 +1191,7 @@ mod imp {
                 .get_mut(peer_id)
                 .ok_or_else(|| format!("Peer {peer_id} not found in room {room_id}"))?;
 
-            // C1: 在 send/recv 注册表中按 id 查找（旧单槽: 后建覆盖先建 → 先建 connect 失败）
+            // C1: look up by id in the send/recv registries (old single slot: later overwrote earlier -> the earlier connect failed)
             let transport = peer
                 .send_transports
                 .iter()
@@ -1193,7 +1206,7 @@ mod imp {
                 .await
                 .map_err(|e| format!("Failed to connect transport: {e}"))?;
 
-            // PIT 观测: dump transport selected tuple（server 学到的客户端地址 — RTP 发送目标）
+            // PIT observation: dump the transport's selected tuple (the client address the server learned -- the RTP send target)
             if let Ok(dump) = transport.dump().await {
                 tracing::info!(
                     "SFU: transport {transport_id} dump: ice={:?} dtls={:?} selected_tuple={:?}",
@@ -1209,7 +1222,7 @@ mod imp {
             Ok(())
         }
 
-        /// C1: producer → transport 绑定访问器（bind 断言/诊断；produce 时记录）。
+        /// C1: the producer -> transport binding accessor (bind assertions/diagnostics; recorded at produce).
         pub fn producer_transport_id(&self, producer_id: &str) -> Option<String> {
             self.rooms.iter().find_map(|room| {
                 room.peers
@@ -1218,7 +1231,7 @@ mod imp {
             })
         }
 
-        /// C1: data producer → transport 绑定访问器（bind 断言/诊断）。
+        /// C1: the data producer -> transport binding accessor (bind assertions/diagnostics).
         pub fn data_producer_transport_id(&self, data_producer_id: &str) -> Option<String> {
             self.rooms.iter().find_map(|room| {
                 room.peers
@@ -1242,7 +1255,7 @@ mod imp {
                     result.push((producer.id().to_string(), kind, peer_id.clone()));
                 }
             }
-            // producer-label T1.3: 收集完再查 labels（避免 DashMap 双重 get 借用冲突）
+            // producer-label T1.3: collect first, then look up labels (avoids a double-get borrow conflict on DashMap)
             let labeled: Vec<_> = result
                 .into_iter()
                 .map(|(pid, kind, peer)| {
@@ -1253,8 +1266,8 @@ mod imp {
             Some(labeled)
         }
 
-        /// PIT-183：该房是否仍有活 producer（守卫连坐销毁用）。
-        /// 遍历形态同 `list_producers`（DashMap iter → SfuPeer.producers）。
+        /// PIT-183: whether the room still has live producers (guards against dragged-along teardown).
+        /// Same traversal shape as `list_producers` (DashMap iter -> SfuPeer.producers).
         pub fn room_has_producers(&self, room_id: &str) -> bool {
             self.rooms.get(room_id).is_some_and(|r| r.peers.iter().any(|p| !p.producers.is_empty()))
         }
@@ -1269,9 +1282,9 @@ mod imp {
         }
 
         /// Number of active rooms.
-        /// worker 子进程存活。mediasoup-rs reaper 对**任意退出**（崩溃/正常）翻转
-        /// closed（worker.rs:445 swap(true)）→ `!closed()` 是安全同步 liveness 探测
-        /// （frontend-process-split T7，喂 /ready）。
+        /// Worker subprocess liveness. The mediasoup-rs reaper flips closed on **any exit** (crash or normal)
+        /// (worker.rs:445 swap(true)) -> `!closed()` is a safe synchronous liveness probe
+        /// (frontend-process-split T7, feeds /ready).
         pub fn worker_alive(&self) -> bool {
             !self.worker.closed()
         }
@@ -1280,7 +1293,7 @@ mod imp {
             self.rooms.len()
         }
 
-        /// H3: 全部房间摘要（管理面板房间列表）— 含 producer/consumer id 供 SfuStats 查询。
+        /// H3: all-room summaries (the admin panel room list) -- including producer/consumer ids for SfuStats queries.
         pub fn list_rooms(&self) -> Vec<SfuRoomSummary> {
             self.rooms
                 .iter()
@@ -1308,8 +1321,8 @@ mod imp {
                 .collect()
         }
 
-        /// H2: 查询 producer 的入站 RTP 统计（get_stats）— 媒体面证据（音频房间 e2e）。
-        /// 返回 (kind, byte_count, packet_count, score)。
+        /// H2: query a producer's inbound RTP stats (get_stats) -- media-plane evidence (audio room e2e).
+        /// Returns (kind, byte_count, packet_count, score).
         pub async fn producer_stats(
             &self,
             producer_id: &str,
@@ -1328,7 +1341,7 @@ mod imp {
                 MediaKind::Video => protocol::MediaKind::Video,
             };
             let stats = producer.get_stats().await.map_err(|e| format!("Producer stats: {e}"))?;
-            // 无 RTP 到达时 mediasoup 不建 RtpStream → 空 vec（合法零值语义）。
+            // with no RTP arriving, mediasoup does not create an RtpStream -> empty vec (legal zero-value semantics).
             let (bytes, packets, score) = match stats.first() {
                 Some(s) => (s.byte_count, s.packet_count, s.score),
                 None => (0, 0, 0),
@@ -1336,8 +1349,8 @@ mod imp {
             Ok((kind, bytes, packets, score))
         }
 
-        /// H2: 查询 consumer 的出站 RTP 统计（get_stats）— 路由转发证据（音频房间 e2e）。
-        /// 返回 (kind, byte_count, packet_count, score)。
+        /// H2: query a consumer's outbound RTP stats (get_stats) -- forwarding evidence (audio room e2e).
+        /// Returns (kind, byte_count, packet_count, score).
         pub async fn consumer_stats(
             &self,
             consumer_id: &str,
@@ -1360,13 +1373,13 @@ mod imp {
             Ok((kind, s.byte_count, s.packet_count, s.score))
         }
 
-        /// weaknet-harness T1（刀 A）：全流 transport 级观测列表（可按 room 过滤）。
-        /// producer=上行（推流端 transport）、consumer=下行（消费端 transport）。
-        /// **remote_port 是流级可辨键**——本项目 WebRtcServer 固定单口（local_port 全同值）。
-        /// transport stats 失败/查无 → 对应字段 null，不丢整行（C15 warn 留痕）。
-        /// 小刀 C（weaknet T5/D276）：`owner_of` = room→注册设备 ID 反查（signaling.room_owners
-        /// 经调用方注入，本模块不持句柄——无主房 owner=null（wire 键恒在，见 stream_stat_row）。
-        /// 泛形闭包形（非 &dyn Fn）：保 handler future 的 Send 推导（axum 0.7 Handler 硬要求）。
+        /// weaknet-harness T1 (cut A): a transport-level observation list for all streams (filterable by room).
+        /// producer = upstream (publisher transport), consumer = downstream (consumer transport).
+        /// **remote_port is a stream-distinguishable key** -- this project's WebRtcServer is fixed to a single port (all local_port values equal).
+        /// transport stats failure/not found -> the field is null, the whole row is not dropped (C15 warn trail).
+        /// Cut C (weaknet T5/D276): `owner_of` = the room -> registered device id reverse lookup (signaling.room_owners
+        /// injected by the caller; this module holds no handle -- ownerless room owner=null (the wire key is always present, see stream_stat_row)).
+        /// Generic-closure shape (not &dyn Fn): preserves the Send derivation of the handler future (a hard axum 0.7 Handler requirement).
         pub async fn list_stream_stats(
             &self,
             room: Option<&str>,
@@ -1382,15 +1395,15 @@ mod imp {
                 for peer_entry in sfu_room.peers.iter() {
                     let (peer_id, peer) = peer_entry.pair();
                     for producer in peer.producers.iter() {
-                        // 快路径：句柄已关直接跳（T2 主谓词在 transport_stat_fields 的
-                        // stats 可达性——断开泄漏场景 closed() 不会置真，见 PIT-185）。
+                        // Fast path: an already-closed handle skips directly (the T2 main predicate lives in transport_stat_fields
+                        // stats reachability -- in the disconnect-leak scenario closed() never turns true, see PIT-185).
                         if producer.transport().closed() {
                             continue;
                         }
                         let pid = producer.id().to_string();
                         let tid = producer.transport().id().to_string();
                         let Some(tfields) = Self::transport_stat_fields(peer, &tid).await else {
-                            continue; // 死 transport（断开泄漏行）——见 PIT-185，根因另案
+                            continue; // dead transport (a disconnect-leak row) -- see PIT-185; root cause is a separate case
                         };
                         let (bytes, packets, score) = match producer.get_stats().await {
                             Ok(s) => s
@@ -1460,10 +1473,10 @@ mod imp {
             rows
         }
 
-        /// transport stats（WebRtcTransportStat 单结构含 tuple/fractionLost/BWE）→ 观测字段集。
-        /// **None = 非活行**（注册表查无 / stats RPC 失败 / 空 vec）——列表模式据此跳行，
-        /// 保证「表内即活」。T2 实盘修正谓词：closed() 在 consumer 键漂移泄漏场景不可信
-        /// （句柄从未被关），stats 可达性才是存活真值。
+        /// transport stats (the WebRtcTransportStat single struct with tuple/fractionLost/BWE) -> the observation field set.
+        /// **None = a non-live row** (not in the registry / stats RPC failed / empty vec) -- list mode skips rows on this,
+        /// guaranteeing "in the table = alive". The T2 live-verified predicate revision: closed() is untrustworthy in the
+        /// consumer-key-drift leak scenario (the handle was never closed); stats reachability is the liveness ground truth.
         async fn transport_stat_fields(
             peer: &SfuPeer,
             transport_id: &str,
@@ -1477,11 +1490,11 @@ mod imp {
                 Ok(stats) => match stats.into_iter().next() {
                     Some(s) => {
                         let tp = s.ice_selected_tuple.as_ref();
-                        // 活性谓词（T1「表内即活」契约，G/E 轮 35min 实证）：tuple 未选定
-                        // = 未连通或死后老化清除（~10s 内）→ 不计活行。注意 transport
-                        // 对象本身永不自关（UDP ICE 不判死，IceState 注释），stats 可达
-                        // 也非活性（G2 +150s 假活），closed() 同样不可信——tuple 是唯一
-                        // 与「可被 weaknet 定向」严格等价的读侧信号。PIT-185 根因另案。
+                        // Liveness predicate (the T1 "in the table = alive" contract, verified over 35min in the G/E rounds): an unselected tuple
+                        // = not connected or aged out after death (~10s) -> not counted as live. Note the transport
+                        // object itself never self-closes (UDP ICE never judges death, IceState comment), stats reachability
+                        // is not liveness either (G2 +150s fake-live), and closed() is equally untrustworthy -- the tuple is the only
+                        // read-side signal strictly equivalent to "can be targeted by weaknet". PIT-185 root cause is a separate case.
                         tp?;
                         Some(Self::transport_stat_fields_json(
                             transport_id,
@@ -1506,8 +1519,8 @@ mod imp {
             }
         }
 
-        /// 纯函数（wire shape 单测钉住）：transport 观测字段构造。
-        /// loss = **fractionLost 0-1 比例（f64，Momus M1：禁整型化——8% 截 0 假绿）**。
+        /// Pure function (pinned by wire-shape unit tests): transport observation field construction.
+        /// loss = **the fractionLost 0-1 ratio (f64, Momus M1: integer truncation forbidden -- 8% truncating to 0 would fake a pass)**.
         fn transport_stat_fields_json(
             transport_id: &str,
             local_port: Option<u16>,
@@ -1531,10 +1544,10 @@ mod imp {
             .unwrap_or_default()
         }
 
-        /// 纯函数（wire shape 单测钉住）：producer/consumer 基础字段 ∪ transport 观测字段。
-        /// `owner`=房间注册设备 ID（小刀 C）：未知/无主 = **null 且键恒在**——与本模块
-        /// transport 观测字段同一 wire 契约（「wire key must always exist / unmeasured = null」，
-        /// transport_fields_absent_values_stay_present_as_null 钉住），消费端单判据免分叉。
+        /// Pure function (pinned by wire-shape unit tests): producer/consumer base fields union transport observation fields.
+        /// `owner` = the room's registered device id (cut C): unknown/ownerless = **null with the key always present** -- the same wire
+        /// contract as this module's transport observation fields ("wire key must always exist / unmeasured = null",
+        /// pinned by transport_fields_absent_values_stay_present_as_null); a single consumer-side criterion, no forking.
         #[allow(clippy::too_many_arguments)]
         fn stream_stat_row(
             room: &str,
@@ -1598,13 +1611,13 @@ mod imp {
             assert_eq!(row["owner"], "dev-a");
             assert_eq!(row["local_port"], 20000);
             assert_eq!(row["remote_port"], 54321);
-            // fractionLost 保持浮点比例（0.08 不被整型化）；缺侧为 null。
+            // fractionLost stays a floating ratio (0.08 must not be integer-truncated); the missing side is null.
             assert_eq!(row["rtp_packet_loss_sent"].as_f64(), Some(0.08));
             assert!(row["rtp_packet_loss_received"].is_null());
         }
 
-        /// 小刀 C 钉测试：无主房 owner = null 且键恒在（与有主房同一 wire 形，
-        /// 消费端按 `row["owner"].as_str()` 单判即可）。
+        /// Cut C pin test: ownerless room owner = null with the key always present (the same wire shape as owned rooms;
+        /// consumers judge with the single `row["owner"].as_str()` check).
         #[test]
         fn stream_stat_row_owner_key_always_present_null_when_unowned() {
             let fields = SfuManager::transport_stat_fields_json(
@@ -1627,8 +1640,11 @@ mod imp {
                 None,
                 &fields,
             );
-            assert!(row.get("owner").is_some(), "owner 键必须恒在（null 形，非省略形）");
-            assert!(row["owner"].is_null(), "无主房 owner=null");
+            assert!(
+                row.get("owner").is_some(),
+                "the owner key must always be present (null form, not omitted)"
+            );
+            assert!(row["owner"].is_null(), "ownerless room owner=null");
             let owned = SfuManager::stream_stat_row(
                 "vehicle_test1",
                 "peer-b",
@@ -1676,53 +1692,56 @@ mod imp {
     mod tests {
         use super::*;
 
-        /// T3 拆雷三态钉：SFU 监听口解析序 = yaml sfu.port > env MEDIASERVO_SFU_PORT > 20000（D-B，
-        /// 10-12 裁决反转旧 env-only 行为；与 lifecycle/templates.rs resolve_port 同族形）。
+        /// T3 mine-removal three-state pin: the SFU listen port resolution order = yaml sfu.port > env MEDIASERVO_SFU_PORT > 20000 (D-B,
+        /// the 10-12 ruling reversing the old env-only behavior; the same family shape as lifecycle/templates.rs resolve_port).
         #[test]
         fn sfu_port_resolution_yaml_env_default_order() {
             use mediaservo_common::config::DEFAULT_SFU_PORT;
-            // (a) yaml 设 + env 未设 → yaml（旧码此处=20000=假键实锤）
+            // (a) yaml set + env unset -> yaml (the old code's 20000 here = hard evidence of a fake key)
             assert_eq!(resolve_sfu_port(Some(20005), None), 20005);
-            // (b) yaml 设 + env 设 → yaml 胜（D-B 序）
+            // (b) yaml set + env set -> yaml wins (the D-B order)
             assert_eq!(resolve_sfu_port(Some(20005), Some(20006)), 20005);
-            // (c) 双未设 → 缺省常量单源
+            // (c) both unset -> the default constant, single-sourced
             assert_eq!(resolve_sfu_port(None, None), DEFAULT_SFU_PORT);
             assert_eq!(DEFAULT_SFU_PORT, 20000);
-            // 补形：yaml 未设 + env 设 → env 兜底存活
+            // Extra shape: yaml unset + env set -> the env fallback survives
             assert_eq!(resolve_sfu_port(None, Some(20006)), 20006);
         }
 
         #[test]
         fn is_audio_room_recognizes_prefix() {
-            assert!(is_audio_room("audio-ms-car1"), "audio- 前缀 = 音频房间");
-            assert!(!is_audio_room("ms-car1"), "普通整车房间不是音频房间");
-            assert!(!is_audio_room("room-1"), "无前缀房间不是音频房间");
+            assert!(is_audio_room("audio-ms-car1"), "the audio- prefix = audio room");
+            assert!(!is_audio_room("ms-car1"), "an ordinary vehicle room is not an audio room");
+            assert!(!is_audio_room("room-1"), "a prefix-less room is not an audio room");
         }
 
-        /// PIT-58: announced_address 必须优先环境变量 (宿主可达 IP) —
-        /// 容器内探测 (172.18.0.2) 仅本机可用, 其他主机 ICE 不可达 → Signal Lost。
+        /// PIT-58: announced_address must prefer the env variable (a host-reachable IP) --
+        /// in-container probing (172.18.0.2) is only locally reachable; other hosts' ICE cannot reach it -> Signal Lost.
         #[test]
         fn detect_all_ips_collects_interfaces_no_loopback() {
             let ips = detect_all_ips();
-            assert!(!ips.is_empty(), "裸机至少一个非 loopback IPv4");
-            assert!(ips.iter().all(|ip| !ip.starts_with("127.")), "不得含 loopback: {ips:?}");
-            // 去重
+            assert!(!ips.is_empty(), "bare metal has at least one non-loopback IPv4");
+            assert!(
+                ips.iter().all(|ip| !ip.starts_with("127.")),
+                "must not contain loopback: {ips:?}"
+            );
+            // dedupe
             let mut sorted = ips.clone();
             sorted.sort();
             sorted.dedup();
-            assert_eq!(ips.len(), sorted.len(), "IP 列表去重");
+            assert_eq!(ips.len(), sorted.len(), "the IP list is deduped");
         }
 
         fn announced_ips_prefers_env_and_falls_back() {
-            // env 优先 (宿主 IP 场景)
-            // SAFETY: 测试内串行设置/恢复, 无并发读
+            // env priority (the host IP scenario)
+            // SAFETY: set/restored serially inside the test; no concurrent readers
             unsafe {
                 std::env::set_var("MEDIASERVO_SFU_ANNOUNCED_IP", "192.168.2.127");
             }
             assert_eq!(announced_ips(None), vec!["192.168.2.127".to_string()]);
 
-            // 多 IP 逗号分隔
-            // SAFETY: 同上
+            // multi-IP comma-separated
+            // SAFETY: same as above
             unsafe {
                 std::env::set_var("MEDIASERVO_SFU_ANNOUNCED_IP", "192.168.2.127,10.0.0.5");
             }
@@ -1731,22 +1750,22 @@ mod imp {
                 vec!["192.168.2.127".to_string(), "10.0.0.5".to_string()]
             );
 
-            // 逗号 + 空格容错
-            // SAFETY: 同上
+            // comma + whitespace tolerance
+            // SAFETY: same as above
             unsafe {
                 std::env::set_var("MEDIASERVO_SFU_ANNOUNCED_IP", " 192.168.2.127 , 10.0.0.5 ");
             }
             assert_eq!(announced_ips(None).len(), 2);
 
-            // fallback 探测 (未配置场景)
-            // SAFETY: 同上
+            // fallback probing (the unconfigured scenario)
+            // SAFETY: same as above
             unsafe {
                 std::env::remove_var("MEDIASERVO_SFU_ANNOUNCED_IP");
             }
             let fallback = announced_ips(None);
 
-            // server.yaml sfu.announced_ips（env 未设时生效）
-            // SAFETY: 同上
+            // server.yaml sfu.announced_ips (in effect when env is unset)
+            // SAFETY: same as above
             unsafe {
                 std::env::remove_var("MEDIASERVO_SFU_ANNOUNCED_IP");
             }
@@ -1755,18 +1774,18 @@ mod imp {
         )
         .unwrap();
             assert_eq!(announced_ips(Some(&cfg)), vec!["10.144.0.3".to_string()]);
-            assert!(!fallback.is_empty(), "fallback 探测应返回非空 IP");
+            assert!(!fallback.is_empty(), "the fallback probe should return a non-empty IP list");
 
-            // 恢复环境, 避免污染其他测试
-            // SAFETY: 同上
+            // restore the environment to avoid polluting other tests
+            // SAFETY: same as above
             unsafe {
                 std::env::remove_var("MEDIASERVO_SFU_ANNOUNCED_IP");
             }
         }
 
-        /// H1: WebRtcTransport 必须带 SCTP 创建（enable_sctp）— DataChannel 协商的前置条件。
-        /// 断言 transport dump 的 sctp_parameters 非空（mediasoup 官方: enableSctp 默认 false，
-        /// 未启用时 dump 无 sctp 段）。
+        /// H1: WebRtcTransport must be created with SCTP (enable_sctp) -- the precondition of DataChannel negotiation.
+        /// Asserts the transport dump's sctp_parameters is non-empty (mediasoup official: enableSctp defaults to false;
+        /// without it the dump has no sctp section).
         #[tokio::test]
         async fn transport_sctp_enabled() {
             let sfu = SfuManager::new_with_port(random_udp_port()).await.expect("sfu");
@@ -1777,17 +1796,17 @@ mod imp {
                 peer.send_transports.last().expect("send transport").dump().await.expect("dump");
             assert!(
                 dump.sctp_parameters.is_some(),
-                "WebRtcTransport 必须启用 SCTP（enable_sctp）: sctp_parameters={:?}",
+                "WebRtcTransport must enable SCTP (enable_sctp): sctp_parameters={:?}",
                 dump.sctp_parameters
             );
         }
 
-        /// H1: data 域实体创建 + worker 侧投递指标（消息接收证明的上限）—
-        /// DataProducer/DataConsumer 接线成功 + DataProducer.send() 后 consumer stats
-        /// messages_sent>0（worker 内部路由到 DataConsumer，官方 Router::OnTransportDataProducerMessageReceived）。
-        /// 注: worker→app 通知通道（DataConsumer.on_message / on_data_producer_close）在本部署
-        /// 整体失效（官方 mediasoup-rs 测试同构复刻亦失败 — 见 data_message_roundtrip_direct
-        /// 的 #[ignore] 文档），消息接收证明见该测试。
+        /// H1: data-domain entity creation + worker-side delivery metric (the upper bound of proof of message receipt) --
+        /// DataProducer/DataConsumer wiring succeeds + after DataProducer.send() the consumer stats
+        /// messages_sent>0 (the worker routes internally to the DataConsumer, official Router::OnTransportDataProducerMessageReceived).
+        /// Note: the worker->app notification channels (DataConsumer.on_message / on_data_producer_close) are entirely dead in
+        /// this deployment (an isomorphic reproduction of the official mediasoup-rs test fails the same way -- see data_message_roundtrip_direct
+        ///'s #[ignore] doc); for proof of message receipt see that test.
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn data_domain_entity_creation() {
             use mediasoup::prelude::*;
@@ -1806,7 +1825,7 @@ mod imp {
                 .await
                 .expect("direct transport 2");
 
-            // producer (Direct) + consumer (Direct) 接线
+            // producer (Direct) + consumer (Direct) wiring
             let producer =
                 t1.produce_data(DataProducerOptions::new_direct()).await.expect("produce_data");
             let consumer = t2
@@ -1817,7 +1836,7 @@ mod imp {
             assert!(matches!(consumer, DataConsumer::Direct(_)));
             assert!(!consumer.closed());
 
-            // DirectDataProducer.send() → worker 路由（consumer stats 证明）
+            // DirectDataProducer.send() -> worker routing (proven by consumer stats)
             let data_producer = match producer {
                 DataProducer::Direct(d) => d,
                 _ => unreachable!(),
@@ -1839,20 +1858,20 @@ mod imp {
                 .expect("one stat");
             assert_eq!(
                 stats.messages_sent, 1,
-                "worker 必须已把消息路由到 DataConsumer (messages_sent=1)"
+                "the worker must have routed the message to the DataConsumer (messages_sent=1)"
             );
             assert_eq!(stats.bytes_sent, 13);
         }
 
-        /// S4′: `remove_producers_by_ids` 必须收割 DataProducer（kind=Data 回报）并
-        /// 连坐关闭绑定死亡 dp 的其他 peer data consumer——`found N data producers`
-        /// 单调泄漏 + `StreamId reserved` 消费天花板的根修钉（2026-09-15 活体实锤）。
+        /// S4': `remove_producers_by_ids` must reap DataProducers (kind=Data reported) and
+        /// drag along the other-peer data consumers bound to dead dps -- the root-fix pin of the
+        /// monotonic `found N data producers` leak + the `StreamId reserved` consumption ceiling (confirmed live 2026-09-15).
         #[tokio::test]
         async fn remove_producers_by_ids_reaps_data_plane() {
             let sfu = SfuManager::new_with_port(random_udp_port()).await.expect("sfu");
-            // 舱端出程（producer 方 send transport 需先 connect 才 produce——沿用
-            // produce_data_on_unconnected_transport_graceful 同款仅建不断言 connect 的路径；
-            // create_data_producer 在 transport 未 connect 时仍成功注册 = 现有宽容行为）。
+            // cockpit outbound (the producer side's send transport must connect before produce -- reusing
+            // the produce_data_on_unconnected_transport_graceful path that only creates without asserting connect;
+            // create_data_producer still registers successfully on an unconnected transport = the existing tolerant behavior).
             sfu.create_webrtc_transport("room-reap", "cockpit", "send").await.expect("t-send");
             let dp = sfu
                 .create_data_producer(
@@ -1871,7 +1890,7 @@ mod imp {
                 .await
                 .expect("data producer")
                 .data_producer_id;
-            // 车端消费方
+            // vehicle-side consumer
             sfu.create_webrtc_transport("room-reap", "host", "recv").await.expect("t-recv");
             let dc = sfu
                 .create_data_consumer("room-reap", "host", &dp, None)
@@ -1882,27 +1901,27 @@ mod imp {
             let closed = sfu.remove_producers_by_ids(&[dp.clone()]);
             assert!(
                 closed.iter().any(|(_, id, kind)| id == &dp && *kind == protocol::MediaKind::Data),
-                "dp 必须被 id 定向收割且 kind=Data（旧版只遍历 media = 舱端泄漏根因）"
+                "the dp must be reaped by id and kind=Data (the old version only iterated media = the cockpit-leak root cause)"
             );
             let room = sfu.rooms.get("room-reap").expect("room");
             assert!(
                 room.peers.get("cockpit").expect("cp").data_producers.is_empty(),
-                "dp 台账必须清空"
+                "the dp ledger must be emptied"
             );
             let host = room.peers.get("host").expect("hp");
             assert!(
                 host.data_consumers.iter().all(|c| c.id().to_string() != dc),
-                "绑定死亡 dp 的孤儿 consumer 必须连坐回收（used sid 释放前提）"
+                "orphan consumers bound to dead dps must be reaped (the precondition for freeing used sids)"
             );
         }
 
-        /// H1: DataProducer.send() → DataConsumer.on_message() 端到端消息接收证明。
-        /// #[ignore]: 被 mediasoup-rs 0.24.1 部署级 bug 阻塞 — worker→app 通知通道整体失效
-        /// （on_message / on_data_producer_close / worker_close 全部静默丢失; 官方 mediasoup-rs
-        /// data_consumer::tests::data_producer_close_event 同构复刻在本部署同样失败）。
-        /// 已证实: 请求/响应正常（dump/get_stats），worker 侧路由正常（messages_sent=1），
-        /// 丢失点 = mediasoup-rs channel 通知分发（缓冲/订阅生命周期，疑似 buffer guard 竞态）。
-        /// 归属: mediasoup-rs upstream（H1 报告 PIT）；host 侧 SFU-DC 接线依赖修复后验证。
+        /// H1: DataProducer.send() -> DataConsumer.on_message() end-to-end proof of message receipt.
+        /// #[ignore]: blocked by a mediasoup-rs 0.24.1 deployment-level bug -- the worker->app notification channels are dead
+        /// (on_message / on_data_producer_close / worker_close all silently lost; an isomorphic reproduction of the official mediasoup-rs
+        /// data_consumer::tests::data_producer_close_event fails in this deployment too).
+        /// Proven: request/response work (dump/get_stats), worker-side routing works (messages_sent=1);
+        /// the loss point = mediasoup-rs channel notification dispatch (buffer/subscription lifecycle, suspected buffer-guard race).
+        /// Ownership: mediasoup-rs upstream (the H1 report PIT); the host-side SFU-DC wiring waits for the fix to verify.
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         #[ignore = "mediasoup-rs notification channel bug in this deployment (PIT H1)"]
         async fn data_message_roundtrip_direct() {
@@ -1930,7 +1949,7 @@ mod imp {
                 .await
                 .expect("consume_data");
 
-            // on_message: worker → Rust 回调（消息投递证明）
+            // on_message: worker -> Rust callback (proof of message delivery)
             let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(4);
             consumer.on_message(move |msg: &WebRtcMessage<'_>| {
                 if let WebRtcMessage::String(payload) = msg {
@@ -1950,7 +1969,7 @@ mod imp {
                 )
                 .expect("send");
 
-            // worker 侧投递证明（即使 on_message 失效也成立）
+            // worker-side delivery proof (holds even when on_message is dead)
             let stats = consumer
                 .get_stats()
                 .await
@@ -1958,20 +1977,23 @@ mod imp {
                 .into_iter()
                 .next()
                 .expect("one stat");
-            assert_eq!(stats.messages_sent, 1, "worker 必须已路由消息到 DataConsumer");
+            assert_eq!(
+                stats.messages_sent, 1,
+                "the worker must have routed the message to the DataConsumer"
+            );
 
             let got = std::thread::spawn(move || {
                 rx.recv_timeout(Duration::from_secs(5))
-                    .expect("on_message 回调必须收到消息（mediasoup worker→app 通知通道）")
+                    .expect("the on_message callback must receive the message (the mediasoup worker->app notification channel)")
             })
             .join()
             .expect("waiter thread");
             assert_eq!(got, b"sfu-data-echo".to_vec());
         }
 
-        /// H1: SfuManager 级 data producer 创建 — 未完成 DTLS 的 WebRtcTransport 上
-        /// produce_data 的结果（worker 行为探测: mediasoup SCTP association 需 DTLS
-        /// 连接后创建）。断言: 返回 Err（优雅失败, 无 panic/挂起）或 Ok（worker 允许）。
+        /// H1: SfuManager-level data producer creation -- the result of produce_data on a WebRtcTransport
+        /// whose DTLS is not yet complete (worker behavior probe: mediasoup's SCTP association is created only after
+        /// DTLS connects). Assert: returns Err (graceful, no panic/hang) or Ok (worker allows).
         #[tokio::test]
         async fn produce_data_on_unconnected_transport_graceful() {
             let sfu = SfuManager::new_with_port(random_udp_port()).await.expect("sfu");
@@ -2001,12 +2023,12 @@ mod imp {
                 }
                 Err(e) => {
                     tracing::info!("produce_data on unconnected transport graceful error: {e}");
-                    assert!(e.contains("data"), "错误应说明 data/SCTP 原因: {e}");
+                    assert!(e.contains("data"), "the error should state the data/SCTP reason: {e}");
                 }
             }
         }
 
-        /// H1: 缺 sctp_stream_parameters 必须明确报错（SCTP producer 必需, 官方文档）。
+        /// H1: missing sctp_stream_parameters must error explicitly (required for an SCTP producer, per official docs).
         #[tokio::test]
         async fn produce_data_requires_sctp_params() {
             let sfu = SfuManager::new_with_port(random_udp_port()).await.expect("sfu");
@@ -2021,15 +2043,15 @@ mod imp {
                     None,
                 )
                 .await
-                .expect_err("缺 sctp_stream_parameters 必须报错");
-            assert!(err.contains("sctp_stream_parameters"), "错误信息: {err}");
+                .expect_err("missing sctp_stream_parameters must error");
+            assert!(err.contains("sctp_stream_parameters"), "error message: {err}");
         }
 
-        // ── C1: per-peer transport 注册表（D-H14 顺序无关 — host 子进程并发建 transport）──
+        // -- C1: per-peer transport registry (D-H14 order-independence -- host subprocesses create transports concurrently) --
 
-        /// C1 关键回归: 并发 CreateWebRtcTransport(send)（boot storm / 并行 crash-recovery）
-        /// 后，Produce 必须绑定到 transport_id 命名的 transport，而非"最近创建"（旧单槽
-        /// 覆盖 → producer 挂错 transport → 静默流丢失）。
+        /// C1 key regression: after concurrent CreateWebRtcTransport(send) (boot storm / parallel crash-recovery),
+        /// Produce must bind to the transport named by transport_id, not "most recently created" (the old single-slot
+        /// overwrite -> producer attached to the wrong transport -> silent stream loss).
         #[tokio::test]
         async fn transport_registry_binds_produce_to_named_transport() {
             let sfu = SfuManager::new_with_port(random_udp_port()).await.expect("sfu");
@@ -2048,7 +2070,7 @@ mod imp {
                 .await
                 .expect("t3")
                 .transport_id;
-            // 三个 send transport 并存（旧实现: t3 覆盖 t1/t2 单槽）
+            // three send transports coexist (old impl: t3 overwrote the t1/t2 single slot)
             let rtp = serde_json::json!({"mid": "0", "codecs": [{"mimeType": "video/VP8", "payloadType": 100, "clockRate": 90000}], "headerExtensions": [], "encodings": [{"ssrc": 12345}], "rtcp": {"reducedSize": true}});
             let p1 = sfu
                 .create_producer(
@@ -2075,14 +2097,14 @@ mod imp {
             assert_eq!(
                 sfu.producer_transport_id(&p1.producer_id).as_deref(),
                 Some(t1.as_str()),
-                "P1 必须绑定到 t1（非最近创建的 t3）"
+                "P1 must bind to t1 (not the most recently created t3)"
             );
             assert_eq!(
                 sfu.producer_transport_id(&p2.producer_id).as_deref(),
                 Some(t2.as_str()),
-                "P2 必须绑定到 t2（非最近创建的 t3）"
+                "P2 must bind to t2 (not the most recently created t3)"
             );
-            // legacy 客户端回退: 无 transport_id → 最近创建（单槽语义保持）
+            // legacy client fallback: no transport_id -> most recently created (single-slot semantics preserved)
             let p3 = sfu
                 .create_producer("room-c1", "host", &protocol::MediaKind::Video, rtp, None, None)
                 .await
@@ -2090,12 +2112,12 @@ mod imp {
             assert_eq!(
                 sfu.producer_transport_id(&p3.producer_id).as_deref(),
                 Some(t3.as_str()),
-                "legacy（无 transport_id）必须回退最近创建 transport"
+                "legacy (no transport_id) must fall back to the most recently created transport"
             );
         }
 
-        /// C1: data producer 同语义 — 绑定 transport_id 命名的 send transport；
-        /// connect_transport 在注册表中按 id 查找（旧单槽: 先建 transport 被覆盖后无法连接）。
+        /// C1: the data producer has the same semantics -- binds to the send transport named by transport_id;
+        /// connect_transport looks up by id in the registry (old single slot: the first transport was overwritten and became unconnectable).
         #[tokio::test]
         async fn transport_registry_binds_data_producer_and_connects_by_id() {
             let sfu = SfuManager::new_with_port(random_udp_port()).await.expect("sfu");
@@ -2124,9 +2146,9 @@ mod imp {
             assert_eq!(
                 sfu.data_producer_transport_id(&dp.data_producer_id).as_deref(),
                 Some(t1.as_str()),
-                "DataProducer 必须绑定到 t1（非最近创建的 t2）"
+                "the DataProducer must bind to t1 (not the most recently created t2)"
             );
-            // connect: t1 在 t2 创建后仍可按 id 找到（旧单槽: t1 被覆盖 → not found）
+            // connect: t1 remains findable by id even after t2 was created (old single slot: t1 overwritten -> not found)
             let dtls = protocol::DtlsParameters {
             fingerprints: vec![protocol::Fingerprint {
                 algorithm: "sha-256".into(),
@@ -2134,12 +2156,14 @@ mod imp {
             }],
             role: "client".into(),
         };
-            // 命中注册表（不报 not found）；mediasoup 侧成功/失败均证明查找路径正确
+            // hit the registry (no not found); mediasoup-side success/failure both prove the lookup path is correct
             match sfu.connect_transport("room-c1d", "host", &t1, dtls).await {
                 Ok(()) => {}
-                Err(e) => assert!(!e.contains("not found"), "t1 必须在注册表中找到: {e}"),
+                Err(e) => {
+                    assert!(!e.contains("not found"), "t1 must be found in the registry: {e}")
+                }
             }
-            // 未知 id → 明确报错（注册表查找路径的反向断言）
+            // unknown id -> an explicit error (the reverse assertion of the registry lookup path)
             let err = sfu
                 .connect_transport(
                     "room-c1d",
@@ -2148,8 +2172,8 @@ mod imp {
                     protocol::DtlsParameters { fingerprints: vec![], role: "client".into() },
                 )
                 .await
-                .expect_err("未知 transport_id 必须报错");
-            assert!(err.contains("not found"), "错误信息: {err}");
+                .expect_err("an unknown transport_id must error");
+            assert!(err.contains("not found"), "error message: {err}");
         }
     }
 }
@@ -2269,7 +2293,7 @@ mod imp {
             false
         }
 
-        /// Stub — no-op in non-SFU builds (F1/T4 单房间移除).
+        /// Stub -- no-op in non-SFU builds (F1/T4 single-room removal).
         pub fn remove_peer_in_room(
             &self,
             _room_id: &str,
@@ -2283,7 +2307,7 @@ mod imp {
             false
         }
 
-        /// Stub — PIT-183 守卫在无 SFU 姿态下恒 false（行为等价现状直拆）。
+        /// Stub -- the PIT-183 guard is always false in the no-SFU posture (behaviorally equal to the current direct teardown).
         pub fn room_has_producers(&self, _room_id: &str) -> bool {
             false
         }
@@ -2323,9 +2347,9 @@ pub use imp::{
     SfuRoom, TransportCreated,
 };
 
-/// 测试用: 进程内唯一的 SFU 测试端口（原子计数器，每次调用 +1）。
-/// 曾用 bind :0 探空闲端口 — 并行测试 TOCTOU 竞态会拿到同一端口（PIT-103 实证），
-/// 计数器保证单进程内绝不重复；不同测试二进制=不同进程，cargo 串行跑 → 无冲突。
+/// For tests: the process-unique SFU test port (an atomic counter, incremented per call).
+/// Once used bind :0 to probe free ports -- parallel-test TOCTOU races could get the same port (PIT-103 evidence);
+/// the counter guarantees no repeats within one process; different test binaries = different processes, cargo runs them serially -> no conflict.
 pub fn random_udp_port() -> u16 {
     static NEXT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(31000);
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)

@@ -1,5 +1,5 @@
-// ── 认证/JWT 纯面（P0/D270-R1 自 apps/admin api/client.ts 提纯——逻辑零改动）──
-// 键名/语义与原实现逐字一致；login 增可选 baseUrl 参数（默认同源，admin 行为不变）。
+// ── Auth/JWT pure surface (P0/D270-R1: extracted from apps/admin api/client.ts — logic unchanged) ──
+// Keys/semantics are verbatim from the original; login gains an optional baseUrl parameter (defaults to same-origin; admin behavior unchanged).
 
 const LOGIN_URL = '/api/auth/login';
 const TOKEN_KEY = 'mediaservo_admin_token';
@@ -8,13 +8,13 @@ export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
-/** JWT exp（秒）是否已过期；无 exp/解析失败视为失效。 */
+/** Whether the JWT exp (seconds) has passed; missing exp or a parse failure counts as expired. */
 export function isTokenExpired(token: string): boolean {
   const claims = parseToken(token);
   return !claims?.exp || claims.exp * 1000 <= Date.now();
 }
 
-// ── JWT claims + auth 状态（H3: dispatcher 角色感知渲染）──────────────────────
+// ── JWT claims + auth state (H3: dispatcher role-aware rendering) ─────────────
 
 export interface JwtClaims {
   sub?: string;
@@ -24,7 +24,7 @@ export interface JwtClaims {
   exp?: number;
 }
 
-/** base64url 解码 JWT payload（无库依赖; 结构异常 → null）。 */
+/** base64url-decode the JWT payload (no library dependency; malformed structure → null). */
 export function parseToken(token: string): JwtClaims | null {
   try {
     const payload = token.split('.')[1];
@@ -45,7 +45,7 @@ export function getUsername(): string | null {
   return token ? (parseToken(token)?.sub ?? null) : null;
 }
 
-/** 同标签页内 token 变更通知（login/logout 后 Layout/nav 重渲染）。 */
+/** Same-tab token change notification (Layout/nav re-render after login/logout). */
 const authListeners = new Set<() => void>();
 function notifyAuth() { authListeners.forEach((fn) => fn()); }
 export function subscribeAuth(fn: () => void): () => void {

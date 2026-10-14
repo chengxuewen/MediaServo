@@ -32,24 +32,24 @@ pub struct AdminState {
     pub rate_limit: u32,
     pub room_capacity: usize,
     pub consumer_limit_per_stream: usize,
-    /// G3 舱端账号注册表（登录认证用; 空 = 无账号，登录一律 401）。
+    /// G3 cockpit account registry (for login auth; empty = no accounts, login always 401).
     pub accounts: Arc<AccountRegistry>,
-    /// 设备注册表（unified-device-admin 管理端点热生效; signaling 与 admin 共享同一 Arc）。
+    /// Device registry (unified-device-admin hot effect on management endpoints; signaling and admin share the same Arc).
     pub device_registry: std::sync::Arc<DeviceRegistry>,
-    /// devices.yaml 绝对路径（管理写回用，main.rs 装配）。
+    /// devices.yaml absolute path (for management write-back, assembled in main.rs).
     pub devices_path: String,
-    /// accounts.yaml 绝对路径（账号管理写回用，main.rs 装配）。
+    /// accounts.yaml absolute path (for account write-back, assembled in main.rs).
     pub accounts_path: String,
-    /// API-key 注册表（accountless-client-auth T1：exchange 发证与 /api/admin/apikeys
-    /// 管理共享同一 Arc — devices 同款热生效纪律；空 = exchange 恒 401）。
+    /// API-key registry (accountless-client-auth T1: exchange issuance and /api/admin/apikeys
+    /// management share the same Arc -- same hot-effect discipline as devices; empty = exchange always 401).
     pub api_registry: Arc<crate::apikeys::ApiKeyRegistry>,
-    /// api_keys.yaml 绝对路径（管理写回用，main.rs 装配）。
+    /// api_keys.yaml absolute path (for management write-back, assembled in main.rs).
     pub api_keys_path: String,
-    /// exchange 签发 TTL 秒（config api_token_ttl_secs，缺省 43200）。
+    /// exchange issue TTL in seconds (config api_token_ttl_secs, default 43200).
     pub api_token_ttl_secs: u64,
-    /// PSK 共享态（psk-admin-management）：与 signaling 同一 Arc；轮换经此热更新。
+    /// PSK shared state (psk-admin-management): same Arc as signaling; rotation hot-updates through this.
     pub psk_state: std::sync::Arc<std::sync::RwLock<Option<String>>>,
-    /// 配置文件绝对路径（PSK 轮换写回用，main.rs 装配）。
+    /// Config file absolute path (for PSK rotation write-back, assembled in main.rs).
     pub config_path: String,
     #[cfg(feature = "sfu-mediasoup")]
     pub sfu_manager: Arc<crate::sfu::SfuManager>,
@@ -105,8 +105,8 @@ pub fn admin_router(state: AdminState) -> Router {
             "/api/admin/devices/:device_id/reset-secret",
             axum::routing::post(reset_device_secret),
         )
-        // device-enroll §5.4: 手动档待批准队列（pending=GET 列表 / approve=POST 入册）。
-        // 角色门 = 既有 auth_middleware（admin 全权; dispatcher 只读——POST 被拒）。
+        // device-enroll S5.4: manual-mode pending queue (pending=GET list / approve=POST admit).
+        // Role gate = the existing auth_middleware (admin full; dispatcher read-only -- POST denied).
         .route("/api/admin/devices/pending", get(list_pending_devices))
         .route("/api/admin/devices/approve", axum::routing::post(approve_pending_device))
         .route("/api/admin/accounts", get(list_accounts).post(create_account))
@@ -114,13 +114,13 @@ pub fn admin_router(state: AdminState) -> Router {
             "/api/admin/accounts/:username",
             axum::routing::put(update_account).delete(delete_account),
         )
-        // accountless-client-auth T1: API-key 管理面（admin 全权；dispatcher 只读——
-        // POST/DELETE 被既有 auth_middleware 拒，同 devices 纪律）。
+        // accountless-client-auth T1: API-key management plane (admin full; dispatcher read-only --
+        // POST/DELETE denied by the existing auth_middleware, same discipline as devices).
         .route("/api/admin/apikeys", get(list_api_keys).post(register_api_key))
         .route("/api/admin/apikeys/:key_id", delete(revoke_api_key))
         .route("/api/admin/psk", get(get_psk).post(rotate_psk))
         .route("/api/admin/events", get(ws_events));
-    // H3: SFU 管理端点（仅 sfu-mediasoup 构建存在 — 原生构建无 SfuManager）。
+    // H3: SFU management endpoints (exist only in the sfu-mediasoup build -- the native build has no SfuManager).
     #[cfg(feature = "sfu-mediasoup")]
     {
         router = router
@@ -129,15 +129,15 @@ pub fn admin_router(state: AdminState) -> Router {
     }
     router
         .with_state(state.clone())
-        // PIT-103 (G2 顺手修): admin API 此前完全无鉴权（check_auth 死代码）—
-        // 客户端（www admin）REST 已带 Bearer、events WS 已带 ?token=，此处补服务端强制。
+        // PIT-103 (G2 side fix): the admin API previously had no auth at all (check_auth dead code) --
+        // clients (www admin) already sent Bearer on REST and ?token= on the events WS; this adds the server-side enforcement.
         .layer(axum::middleware::from_fn_with_state(state, auth_middleware))
 }
 
-// ── 登录（G3 账号体系）───────────────────────────────────────────────────────
-// 独立 router: 登录端点本身不能被 auth middleware 拦（它就是发证入口）。
+// -- Login (G3 account system) ---------------------------------------------------------------
+// Separate router: the login endpoint itself cannot be intercepted by the auth middleware (it is the credential issuer).
 
-/// 登录限流（I3 review）: 2 请求/秒补桶 + 5 突发 — 暴力破解缓解。
+/// Login rate limiting (I3 review): 2 req/s refill bucket + 5 burst -- brute-force mitigation.
 const LOGIN_RATE_PER_SEC: u64 = 2;
 const LOGIN_RATE_BURST: u32 = 5;
 
@@ -155,13 +155,13 @@ pub struct LoginResponse {
     pub expires_in_secs: u64,
 }
 
-/// POST /api/auth/login — 校验 username/password（accounts.yaml）→ 签发角色 JWT。
+/// POST /api/auth/login -- validates username/password (accounts.yaml) -> issues a role JWT.
 ///
-/// I3 review: 登录是暴力破解面 — 挂 per-bucket 速率限制（GlobalKeyExtractor:
-/// 全服务单一桶, 简单且测试确定性; 多实例/代理场景按 X-Forwarded-For 分桶是后续细化）。
+/// I3 review: login is a brute-force surface -- attaches a per-bucket rate limit (GlobalKeyExtractor:
+/// a single bucket for the whole service, simple and deterministic in tests; bucketing by X-Forwarded-For for multi-instance/proxy setups is future refinement).
 pub fn login_router(state: AdminState) -> Router {
-    // ponytail: Box::leak — 进程生命周期的静态配置（tower_governor 0.3 Layer 持借用,
-    // axum Router 要求 'static; 泄漏一个配置对象对单进程服务无碍）。
+    // ponytail: Box::leak -- process-lifetime static config (tower_governor 0.3 Layer holds a borrow,
+    // axum Router requires 'static; leaking one config object is fine for a single-process service).
     let limiter: &'static _ = Box::leak(Box::new(
         tower_governor::governor::GovernorConfigBuilder::default()
             .key_extractor(tower_governor::key_extractor::GlobalKeyExtractor)
@@ -170,7 +170,7 @@ pub fn login_router(state: AdminState) -> Router {
             .finish()
             .expect("governor config"),
     ));
-    // exchange 同暴力破解面 — 独立桶（login 突发不挤兑换发配额，反之亦然）。
+    // exchange shares the brute-force surface -- its own bucket (login bursts do not eat the exchange quota, and vice versa).
     let ex_limiter: &'static _ = Box::leak(Box::new(
         tower_governor::governor::GovernorConfigBuilder::default()
             .key_extractor(tower_governor::key_extractor::GlobalKeyExtractor)
@@ -186,7 +186,8 @@ pub fn login_router(state: AdminState) -> Router {
         )
         .route(
             "/api/auth/exchange",
-            axum::routing::post(exchange).layer(tower_governor::GovernorLayer { config: ex_limiter }),
+            axum::routing::post(exchange)
+                .layer(tower_governor::GovernorLayer { config: ex_limiter }),
         )
         .with_state(state)
 }
@@ -209,7 +210,7 @@ async fn login(
             }),
         ));
     }
-    // 未知用户与错误密码逐字一致（防枚举，同 G2 devices）。
+    // Unknown-user and wrong-password are byte-identical (anti-enumeration, same as G2 devices).
     let identity = state.accounts.authenticate(&req.username, &req.password).map_err(|_| {
         tracing::warn!("login failed for user {}", req.username);
         crate::audit::log_event(crate::audit::AuditEvent::AuthFailure {
@@ -223,7 +224,7 @@ async fn login(
             }),
         )
     })?;
-    let ttl: u64 = 12 * 3600; // ponytail: 12h 会话; 需要更短/续签时改为配置项
+    let ttl: u64 = 12 * 3600; // ponytail: 12h session; switch to config when shorter/renewal is needed
     let token = accounts::issue_account_token(secret, &identity, ttl).map_err(|e| {
         tracing::error!("login token issuance failed: {e}");
         (
@@ -243,7 +244,7 @@ async fn login(
     }))
 }
 
-// ── API-key exchange（accountless-client-auth T1；LiveKit apikey/apiSecret 同型）────
+// -- API-key exchange (accountless-client-auth T1; same shape as LiveKit apikey/apiSecret) ------
 
 #[derive(Debug, Deserialize)]
 pub struct ExchangeRequest {
@@ -251,9 +252,9 @@ pub struct ExchangeRequest {
     pub secret: String,
 }
 
-/// POST /api/auth/exchange — API-key 换短 JWT。凭证对验后以 `admin_jwt_secret` 现签
-/// `{sub:"apikey:<id>", role, vehicles, exp}`，此后 `/ws` 与 REST 走既有账号门（T0 三面同步）。
-/// 防枚举：未知 key 与错 secret 逐字同消息（devices 同纪律）；限流独立桶（login_router）。
+/// POST /api/auth/exchange -- API-key to short JWT. After verifying the pair, signs with `admin_jwt_secret`
+/// `{sub:"apikey:<id>", role, vehicles, exp}`; from then on `/ws` and REST go through the existing account gate (T0 three-sided sync).
+/// Anti-enumeration: unknown key and wrong secret are byte-identical (same discipline as devices); a separate rate-limit bucket (login_router).
 async fn exchange(
     State(state): State<AdminState>,
     axum::Json(req): axum::Json<ExchangeRequest>,
@@ -270,19 +271,17 @@ async fn exchange(
             peer_id: format!("apikey:{}", req.key_id),
             reason: "api key exchange failed".into(),
         });
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse { error: e.message().into() }),
-        )
+        (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: e.message().into() }))
     })?;
     let ttl = state.api_token_ttl_secs;
-    let token = crate::apikeys::issue_api_token(signing, &req.key_id, &entry, ttl).map_err(|e| {
-        tracing::error!("exchange token issuance failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse { error: "token issuance failed".into() }),
-        )
-    })?;
+    let token =
+        crate::apikeys::issue_api_token(signing, &req.key_id, &entry, ttl).map_err(|e| {
+            tracing::error!("exchange token issuance failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "token issuance failed".into() }),
+            )
+        })?;
     crate::audit::log_event(crate::audit::AuditEvent::AuthSuccess {
         peer_id: format!("apikey:{}", req.key_id),
         device_id: None,
@@ -305,7 +304,7 @@ pub struct RegisterApiKeyRequest {
     pub label: Option<String>,
 }
 
-/// GET /api/admin/apikeys — 列表（secret_hash 绝不出内存，同 devices/C33 语义）。
+/// GET /api/admin/apikeys -- list (secret_hash never leaves memory, same semantics as devices/C33).
 async fn list_api_keys(State(state): State<AdminState>) -> Json<serde_json::Value> {
     let items: Vec<_> = state
         .api_registry
@@ -318,32 +317,29 @@ async fn list_api_keys(State(state): State<AdminState>) -> Json<serde_json::Valu
     Json(serde_json::json!({"api_keys": items}))
 }
 
-/// POST /api/admin/apikeys — 注册（服务器生成 secret，**仅响应内一次明文**，C33 纪律）。
-/// 写盘失败 → 内存回滚（register_device 同形）。
+/// POST /api/admin/apikeys -- register (server generates the secret, **plaintext shown once in the response**, C33 discipline).
+/// Disk write failure -> in-memory rollback (register_device same shape).
 async fn register_api_key(
     State(state): State<AdminState>,
     Extension(claims): Extension<JwtClaims>,
     axum::Json(req): axum::Json<RegisterApiKeyRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<ErrorResponse>)> {
-    let secret = state.api_registry.register(
-        &req.key_id,
-        &req.role,
-        &req.vehicles,
-        req.label.as_deref(),
-    ).map_err(|e| match e {
-        crate::apikeys::ApiKeyRegError::Duplicate => (
-            StatusCode::CONFLICT,
-            Json(ErrorResponse { error: "api key already registered".into() }),
-        ),
-        crate::apikeys::ApiKeyRegError::Invalid(msg) => (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: msg }),
-        ),
-        crate::apikeys::ApiKeyRegError::Unknown => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse { error: "api key registry internal error".into() }),
-        ),
-    })?;
+    let secret = state
+        .api_registry
+        .register(&req.key_id, &req.role, &req.vehicles, req.label.as_deref())
+        .map_err(|e| match e {
+            crate::apikeys::ApiKeyRegError::Duplicate => (
+                StatusCode::CONFLICT,
+                Json(ErrorResponse { error: "api key already registered".into() }),
+            ),
+            crate::apikeys::ApiKeyRegError::Invalid(msg) => {
+                (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: msg }))
+            }
+            crate::apikeys::ApiKeyRegError::Unknown => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "api key registry internal error".into() }),
+            ),
+        })?;
     if let Err(e) = state.api_registry.save(&state.api_keys_path) {
         let _ = state.api_registry.revoke(&req.key_id);
         return Err((
@@ -360,12 +356,12 @@ async fn register_api_key(
         Json(serde_json::json!({
             "key_id": req.key_id,
             "secret": secret,
-            "note": "secret 仅此一次展示；丢失=吊销后重注册（无找回路径）。吊销只挡后续 exchange，已发 JWT 至 TTL 自然失效。"
+            "note": "secret shown this once only; lost = revoke and re-register (no recovery path). Revocation only blocks future exchanges; issued JWTs expire naturally at TTL."
         })),
     ))
 }
 
-/// DELETE /api/admin/apikeys/:key_id — 吊销（内存即时 + 写回；已发 JWT 至 exp 自然死 = F10）。
+/// DELETE /api/admin/apikeys/:key_id -- revoke (in-memory immediate + write-back; issued JWTs die naturally at exp = F10).
 async fn revoke_api_key(
     State(state): State<AdminState>,
     Path(key_id): Path<String>,
@@ -388,7 +384,7 @@ async fn revoke_api_key(
     Ok(Json(serde_json::json!({"revoked": key_id})))
 }
 
-/// POST /api/admin/config/push — admin 专属整车配置下发（E4 push_config 的 HTTP 入口）。
+/// POST /api/admin/config/push -- admin-only vehicle config push (the HTTP entry for E4 push_config).
 #[derive(Debug, Deserialize)]
 pub struct ConfigPushRequest {
     pub room_id: String,
@@ -412,9 +408,9 @@ async fn push_config(
 }
 
 // ── Devices admin (unified-device-admin) ──────────────────────────────────
-// 设备注册表管理（G2 devices.yaml 热生效; dispatcher 只读 GET 由 auth_middleware 保证）。
+// Device registry management (G2 devices.yaml hot effect; dispatcher read-only GET enforced by auth_middleware).
 
-/// device_id 轻校验（1-64 字符，[A-Za-z0-9-_]；现有设备名 ms-<hex> 兼容）。
+/// device_id light validation (1-64 chars, [A-Za-z0-9-_]; compatible with existing ms-<hex> device names).
 fn validate_device_id(id: &str) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
     let ok = !id.is_empty()
         && id.len() <= 64
@@ -434,7 +430,7 @@ fn validate_device_id(id: &str) -> Result<(), (StatusCode, Json<ErrorResponse>)>
 #[derive(Debug, Deserialize)]
 pub struct RegisterDeviceRequest {
     pub device_id: String,
-    /// 可选：管理员自带 secret（方案 A — 先配 host 再注册，secret 不丢失）；缺省服务器生成。
+    /// Optional: admin-supplied secret (option A -- configure host first then register; the secret is never lost); default server-generated.
     #[serde(default)]
     pub secret: Option<String>,
 }
@@ -444,7 +440,7 @@ struct DeviceView {
     device_id: String,
 }
 
-/// GET /api/admin/devices — 注册表清单（已授权设备; 在线态由前端交叉 rooms 视图）。
+/// GET /api/admin/devices -- registry listing (authorized devices; online state is cross-checked by the frontend rooms view).
 async fn list_devices(State(state): State<AdminState>) -> Json<serde_json::Value> {
     let mut devices: Vec<DeviceView> = state
         .device_registry
@@ -456,7 +452,7 @@ async fn list_devices(State(state): State<AdminState>) -> Json<serde_json::Value
     Json(serde_json::json!({ "devices": devices, "count": devices.len() }))
 }
 
-/// POST /api/admin/devices — 注册设备，返回 secret（唯一一次明文展示）。
+/// POST /api/admin/devices -- register a device, returns the secret (plaintext shown exactly once).
 async fn register_device(
     State(state): State<AdminState>,
     Extension(claims): Extension<JwtClaims>,
@@ -485,7 +481,7 @@ async fn register_device(
             }
         })?;
     if let Err(e) = state.device_registry.save(&state.devices_path) {
-        // 落盘失败 → 回滚内存（单一事实源=磁盘，保持内存不变语义）
+        // Disk write failure -> roll back memory (single source of truth = disk; memory-unchanged semantics preserved)
         tracing::error!("device {} register: write failed, rolling back: {e}", req.device_id);
         let _ = state.device_registry.revoke(&req.device_id);
         return Err((
@@ -503,12 +499,12 @@ async fn register_device(
             "device_id": req.device_id,
             "secret": secret,
             "secret_hash": secret_hash,
-            "note": "secret 仅此一次明文展示",
+            "note": "secret plaintext shown this once only",
         })),
     ))
 }
 
-/// DELETE /api/admin/devices/{device_id} — 吊销设备（下次接入 4010）。
+/// DELETE /api/admin/devices/{device_id} -- revoke a device (next access gets 4010).
 async fn revoke_device(
     State(state): State<AdminState>,
     Extension(claims): Extension<JwtClaims>,
@@ -534,7 +530,7 @@ async fn revoke_device(
     Ok(Json(serde_json::json!({ "revoked": device_id })))
 }
 
-/// POST /api/admin/devices/{device_id}/reset-secret — 重置密钥（旧密钥立即失效）。
+/// POST /api/admin/devices/{device_id}/reset-secret -- reset the key (old key invalidated immediately).
 async fn reset_device_secret(
     State(state): State<AdminState>,
     Extension(claims): Extension<JwtClaims>,
@@ -547,8 +543,8 @@ async fn reset_device_secret(
         )
     })?;
     if let Err(e) = state.device_registry.save(&state.devices_path) {
-        // 无回滚（旧 hash 未快照）— 内存新值/磁盘旧值: 错误消息注明偏差，
-        // 后续任意 save（register/revoke）会修正; 重启则回旧值（C15 已留痕）。
+        // No rollback (old hash not snapshotted) -- memory new / disk old: the error message notes the divergence,
+        // any later save (register/revoke) fixes it; a restart reverts to the old value (C15 already logged).
         tracing::error!("device {device_id} reset-secret: write failed, memory/disk diverge: {e}");
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -566,14 +562,14 @@ async fn reset_device_secret(
         Json(serde_json::json!({
             "device_id": device_id,
             "secret": secret,
-            "note": "secret 仅此一次明文展示",
+            "note": "secret plaintext shown this once only",
         })),
     ))
 }
 
-// ── device-enroll §5.4: 待批准队列（手动档）───────────────────────────────
+// -- device-enroll S5.4: pending queue (manual mode) ------------------------------------------
 
-/// GET /api/admin/devices/pending — 待批准设备（验签过、未入册；内存表 D-E5 重启即清）。
+/// GET /api/admin/devices/pending -- pending devices (verified but not admitted; in-memory table D-E5, cleared on restart).
 async fn list_pending_devices(State(state): State<AdminState>) -> Json<serde_json::Value> {
     let pending: Vec<serde_json::Value> = state
         .signaling
@@ -595,14 +591,14 @@ async fn list_pending_devices(State(state): State<AdminState>) -> Json<serde_jso
 #[derive(Debug, Deserialize)]
 pub struct ApproveDeviceRequest {
     pub device_id: String,
-    /// 可选显示名（入 registry public_key 形条目；缺省 null）。
+    /// Optional display name (enters the registry public_key-form entry; default null).
     #[serde(default)]
     pub name: Option<String>,
 }
 
-/// POST /api/admin/devices/approve — 批准 pending 设备：
-/// 命中 → enroll_auto(public_key 形) + save + 踢出 pending；未命中 404；竞态已入册 409。
-/// approve = 政策门（D-E8）：设备下次连接仍走验签挑战，possession proof 不豁免。
+/// POST /api/admin/devices/approve -- approve a pending device:
+/// hit -> enroll_auto (public_key form) + save + kick from pending; miss -> 404; already registered by a race -> 409.
+/// approve = the policy gate (D-E8): the device's next connection still walks the verify challenge; possession proof is not waived.
 async fn approve_pending_device(
     State(state): State<AdminState>,
     Extension(claims): Extension<JwtClaims>,
@@ -613,13 +609,16 @@ async fn approve_pending_device(
         (
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
-                error: format!("no pending device {} (未报待或已处理)", req.device_id),
+                error: format!(
+                    "no pending device {} (never reported or already handled)",
+                    req.device_id
+                ),
             }),
         )
     })?;
     state.device_registry.enroll_auto(&req.device_id, &entry.vk, req.name.as_deref()).map_err(
         |e| {
-            // 入册失败 → 恢复 pending（不吞设备重报窗口）。
+            // Admission failure -> restore pending (do not swallow the device re-report window).
             state.signaling.pending_devices.insert(&req.device_id, &entry.vk, entry.verified);
             match e {
                 DeviceRegError::Duplicate => (
@@ -636,7 +635,7 @@ async fn approve_pending_device(
         },
     )?;
     if let Err(e) = state.device_registry.save(&state.devices_path) {
-        // 落盘失败 → 回滚内存 + 恢复 pending（单一事实源=磁盘，同 register 回滚链）。
+        // Disk write failure -> roll back memory + restore pending (single source of truth = disk, same rollback chain as register).
         tracing::error!("device {} approve: write failed, rolling back: {e}", req.device_id);
         let _ = state.device_registry.revoke(&req.device_id);
         state.signaling.pending_devices.insert(&req.device_id, &entry.vk, entry.verified);
@@ -656,13 +655,13 @@ async fn approve_pending_device(
             "device_id": req.device_id,
             "public_key": format!("ed25519:{}", entry.vk),
             "name": req.name,
-            "note": "已入册；设备重连（退避）即以公钥形走验签放行",
+            "note": "admitted; on reconnect (with backoff) the device passes via public-key verification",
         })),
     ))
 }
 
 // ── Accounts admin (unified-device-admin) ────────────────────────────────
-// 账号注册表管理（G3 accounts.yaml 热生效; dispatcher 只读 GET 由 auth_middleware 保证）。
+// Account registry management (G3 accounts.yaml hot effect; dispatcher read-only GET enforced by auth_middleware).
 
 #[derive(Debug, Deserialize)]
 pub struct CreateAccountRequest {
@@ -682,14 +681,14 @@ pub struct UpdateAccountRequest {
     pub new_password: Option<String>,
 }
 
-/// GET /api/admin/accounts — 账号清单（不含密码哈希）。
+/// GET /api/admin/accounts -- account listing (no password hashes).
 async fn list_accounts(State(state): State<AdminState>) -> Json<serde_json::Value> {
     let accounts = state.accounts.list_accounts();
     let count = accounts.len();
     Json(serde_json::json!({ "accounts": accounts, "count": count }))
 }
 
-/// POST /api/admin/accounts — 创建账号（admin 专属）。
+/// POST /api/admin/accounts -- create an account (admin only).
 async fn create_account(
     State(state): State<AdminState>,
     Extension(claims): Extension<JwtClaims>,
@@ -721,7 +720,7 @@ async fn create_account(
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "created": req.username }))))
 }
 
-/// PUT /api/admin/accounts/{username} — 更新角色/车辆白名单/密码（admin 专属）。
+/// PUT /api/admin/accounts/{username} -- update role/vehicle allowlist/password (admin only).
 async fn update_account(
     State(state): State<AdminState>,
     Extension(claims): Extension<JwtClaims>,
@@ -738,7 +737,7 @@ async fn update_account(
         )
         .map_err(map_account_reg_error)?;
     if let Err(e) = state.accounts.save(&state.accounts_path) {
-        // 无快照回滚 — 内存新值/磁盘旧值: 错误消息注明偏差（同 devices reset-secret）。
+        // No snapshot rollback -- memory new / disk old: the error message notes the divergence (same as devices reset-secret).
         tracing::error!("account {username} update: write failed, memory/disk diverge: {e}");
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -754,7 +753,7 @@ async fn update_account(
     Ok(Json(serde_json::json!({ "updated": username })))
 }
 
-/// DELETE /api/admin/accounts/{username} — 删除账号（admin 专属）。
+/// DELETE /api/admin/accounts/{username} -- delete an account (admin only).
 async fn delete_account(
     State(state): State<AdminState>,
     Extension(claims): Extension<JwtClaims>,
@@ -781,7 +780,7 @@ async fn delete_account(
     Ok(Json(serde_json::json!({ "deleted": username })))
 }
 
-/// AccountRegError → HTTP 状态映射（C15: 每分支可读错误）。
+/// AccountRegError -> HTTP status mapping (C15: a readable error per branch).
 fn map_account_reg_error(e: crate::accounts::AccountRegError) -> (StatusCode, Json<ErrorResponse>) {
     match e {
         crate::accounts::AccountRegError::Duplicate => {
@@ -802,9 +801,9 @@ fn map_account_reg_error(e: crate::accounts::AccountRegError) -> (StatusCode, Js
     }
 }
 
-// ── PSK 管理辅助（psk-admin-management）────────────────────────────────────
+// -- PSK management helpers (psk-admin-management) --------------------------------------------
 
-/// psk 掩码（hint 展示用）：前 2 字符 + `··`；空 → 空；≤2 字符 → 原样（不泄密）。
+/// psk mask (for hint display): first 2 chars + `..`; empty -> empty; <=2 chars -> as-is (no leak).
 pub fn mask_psk(psk: &str) -> String {
     if psk.is_empty() {
         return String::new();
@@ -816,21 +815,21 @@ pub fn mask_psk(psk: &str) -> String {
     format!("{}··", chars[..2].iter().collect::<String>())
 }
 
-/// 文本级写回 server.yaml 的顶层 `psk: "<value>"`（保留注释/缩进/其他字段）。
-/// 未找到 psk 行 → 追加顶层 psk 行（YAML 顶层语义—配置 psk 在顶层, 与 listen 同级）。
-/// 失败：错误清理（无 temp 残留）并返回 Err（C15 日志由调用方打）。
+/// Text-level write-back of the top-level `psk: "<value>"` in server.yaml (comments/indent/other fields preserved).
+/// psk line not found -> append a top-level psk line (YAML top-level semantics -- config psk sits at the top level, a sibling of listen).
+/// Failure: error cleanup (no temp residue) and return Err (C15 logging is the caller's job).
 fn write_back_psk(path: &std::path::Path, psk: &str) -> Result<(), String> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| format!("server config {}: read failed: {e}", path.display()))?;
     let (new_text, replaced_count) = {
-        // 仅替换零缩进顶层 psk 行（保留注释/缩进/其他字段）; 缩进行（注释里的 # psk:）不碰
+        // Only replace a zero-indent top-level psk line (comments/indent/other fields preserved); indented lines (# psk: inside comments) untouched
         let mut count = 0usize;
         let replaced = text
             .lines()
             .map(|line| {
                 if line.starts_with("psk:") && !line.starts_with(char::is_whitespace) {
                     count += 1;
-                    // 保留 inline 注释（`"..."   # comment` 形态 — 值尾引号后取 # 尾）
+                    // Preserve the inline comment (`"..."   # comment` shape -- take the trailing # after the value's closing quote)
                     let base = format!("psk: {psk:?}");
                     return match line.rfind('"') {
                         Some(q) => {
@@ -840,7 +839,7 @@ fn write_back_psk(path: &std::path::Path, psk: &str) -> Result<(), String> {
                                 _ => base,
                             }
                         }
-                        None => base, // 无引号值（非标准形态）— 整体替换
+                        None => base, // unquoted value (non-standard shape) -- replace the whole thing
                     };
                 }
                 line.to_string()
@@ -870,14 +869,14 @@ fn write_back_psk(path: &std::path::Path, psk: &str) -> Result<(), String> {
 
 #[derive(Debug, Deserialize)]
 pub struct RotatePskRequest {
-    /// 可选：指定新 psk（8-128 无空白）；缺省服务器随机生成 32B hex。
+    /// Optional: specify the new psk (8-128, no whitespace); default server random 32B hex.
     #[serde(default)]
     pub password: Option<String>,
 }
 
 #[derive(Serialize)]
 struct PskResponse {
-    /// psk 明文 — **仅此一次**（C33 纪律；前端展示即弃）。
+    /// psk plaintext -- **this once only** (C33 discipline; the frontend shows it and drops it).
     psk: String,
     hint: String,
 }
@@ -891,13 +890,13 @@ fn validate_psk_value(v: &str) -> Result<(), (StatusCode, Json<ErrorResponse>)> 
     {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: "invalid psk: 8-128 字符且不含空白".into() }),
+            Json(ErrorResponse { error: "invalid psk: 8-128 chars, no whitespace".into() }),
         ));
     }
     Ok(())
 }
 
-/// GET /api/admin/psk — 一次性查看（admin-only; dispatcher 被角色门拦截）。
+/// GET /api/admin/psk -- one-time view (admin-only; dispatcher blocked by the role gate).
 async fn get_psk(
     State(state): State<AdminState>,
     Extension(claims): Extension<JwtClaims>,
@@ -907,7 +906,7 @@ async fn get_psk(
         (
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
-                error: "psk 未配置（未设 server.yaml psk / MEDIASERVO_PSK）".into(),
+                error: "psk not configured (no server.yaml psk / MEDIASERVO_PSK)".into(),
             }),
         )
     })?;
@@ -916,7 +915,7 @@ async fn get_psk(
     Ok(Json(PskResponse { psk, hint }))
 }
 
-/// POST /api/admin/psk — 轮换（admin-only）：热生效 + 写回 server.yaml + audit。
+/// POST /api/admin/psk -- rotate (admin-only): hot effect + write back to server.yaml + audit.
 async fn rotate_psk(
     State(state): State<AdminState>,
     Extension(claims): Extension<JwtClaims>,
@@ -928,13 +927,16 @@ async fn rotate_psk(
             p
         }
         None => {
-            // 随机 32B hex（uuid v4 simple 36 字符 < 128 — 合法范围；与 devices new_secret 同路径）
+            // Random 32B hex (uuid v4 simple, 36 chars < 128 -- legal range; same path as devices new_secret)
             uuid::Uuid::new_v4().to_string().replace('-', "")
         }
     };
-    // 写回文件（先落盘后生效 — 写失败不切内存）
+    // Write back the file (disk first, effect second -- a failed write does not switch memory)
     if let Err(e) = write_back_psk(std::path::Path::new(&state.config_path), &new_psk) {
-        tracing::error!("psk rotate: 写回 {} 失败（内存未更新）: {e}", state.config_path);
+        tracing::error!(
+            "psk rotate: write-back to {} failed (memory not updated): {e}",
+            state.config_path
+        );
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: format!("server config write failed: {e}") }),
@@ -942,14 +944,14 @@ async fn rotate_psk(
     }
     *state.psk_state.write().unwrap_or_else(|e| e.into_inner()) = Some(new_psk.clone());
     crate::audit::log_event(crate::audit::AuditEvent::PskRotated { actor: claims.sub.clone() });
-    tracing::warn!("PSK 已轮换（actor={}）— 所有 host 需同步新 psk", claims.sub);
+    tracing::warn!("PSK rotated (actor={}) -- all hosts must sync the new psk", claims.sub);
     let hint = mask_psk(&new_psk);
     Ok(Json(PskResponse { psk: new_psk, hint }))
 }
 
 // ── Auth helper ─────────────────────────────────────────────────────────────
 
-/// 从 Authorization: Bearer <jwt> 头或 `?token=<jwt>` 查询参数取 token。
+/// Take the token from the Authorization: Bearer <jwt> header or the `?token=<jwt>` query parameter.
 fn extract_token(req: &axum::http::Request<Body>) -> Option<String> {
     req.headers()
         .get(axum::http::header::AUTHORIZATION)
@@ -985,9 +987,9 @@ pub(crate) fn check_auth(
     })
 }
 
-/// admin API 全路由鉴权中间件（axum 0.7 from_fn 标准形态）。
-/// H3 角色感知: admin = 全部端点; dispatcher = 只读 GET（/api/admin/config 除外 — 配置属 admin 专属;
-/// 写操作 POST/DELETE 一律拒绝）。viewer/operator/未知角色 → 401（现有语义不变）。
+/// Admin API all-route auth middleware (standard axum 0.7 from_fn shape).
+/// H3 role awareness: admin = every endpoint; dispatcher = read-only GET (except /api/admin/config -- config is admin-only;
+/// write ops POST/DELETE always denied). viewer/operator/unknown roles -> 401 (existing semantics unchanged).
 async fn auth_middleware(
     State(state): State<AdminState>,
     mut req: axum::extract::Request,
@@ -1003,7 +1005,7 @@ async fn auth_middleware(
         ));
     }
     if !is_admin {
-        // H3 dispatcher: 只读视图（音频房间/状态/视频监控），无 config/control。
+        // H3 dispatcher: read-only views (audio rooms/status/video monitoring), no config/control.
         let read_only = matches!(*req.method(), axum::http::Method::GET)
             && !req.uri().path().starts_with("/api/admin/config")
             && !req.uri().path().starts_with("/api/admin/psk");
@@ -1117,7 +1119,7 @@ async fn stats(State(state): State<AdminState>) -> Json<StatsResponse> {
     Json(StatsResponse { active_rooms, total_peers, active_connections })
 }
 
-/// H3: 多车监控视图数据源 — StatusRegistry 全量快照（每房间最新 StatusReport）。
+/// H3: multi-vehicle monitoring view data source -- full StatusRegistry snapshot (latest StatusReport per room).
 async fn list_status(State(state): State<AdminState>) -> Json<serde_json::Value> {
     let vehicles = state
         .signaling
@@ -1129,20 +1131,20 @@ async fn list_status(State(state): State<AdminState>) -> Json<serde_json::Value>
     Json(serde_json::json!({ "vehicles": vehicles }))
 }
 
-/// H3: 音频会议面板数据源 — SFU 房间列表摘要（participants/producers/consumers + ids）。
+/// H3: audio conference panel data source -- SFU room list summary (participants/producers/consumers + ids).
 #[cfg(feature = "sfu-mediasoup")]
 async fn sfu_rooms(State(state): State<AdminState>) -> Json<serde_json::Value> {
     let rooms = state.sfu_manager.list_rooms();
     Json(serde_json::json!({ "rooms": rooms }))
 }
 
-/// H3: SfuStats REST 查询（镜像 WS 信令 SfuStatsRequest — H2 协议的管理面路径）。
-/// 查询参数: ?producer_id=X 或 ?consumer_id=X（任一）。
+/// H3: SfuStats REST query (mirrors the WS signaling SfuStatsRequest -- the management-plane path of the H2 protocol).
+/// Query params: ?producer_id=X or ?consumer_id=X (either).
 #[cfg(feature = "sfu-mediasoup")]
-/// H2: SfuStats REST 查询（镜像 WS 信令 SfuStatsRequest — H2 协议的管理面路径）。
-/// 查询参数: `?producer_id=X` 或 `?consumer_id=X` = 单条（含 transport 观测增强字段）；
-/// **均缺省 = 列表模式**（可选 `?room=<id>` 过滤）——weaknet-harness T1 刀 A/B：
-/// 原「无 query → 400」语义已改判（钉住测试同步改判），400 保留给双 id 歧义。
+/// H2: SfuStats REST query (mirrors the WS signaling SfuStatsRequest -- the management-plane path of the H2 protocol).
+/// Query params: `?producer_id=X` or `?consumer_id=X` = single entry (with transport observation enrichment);
+/// **both absent = list mode** (optional `?room=<id>` filter) -- weaknet-harness T1 cut A/B:
+/// the old "no query -> 400" semantics was re-judged (pinned test re-judged with it); 400 is kept only for dual-id ambiguity.
 #[cfg(feature = "sfu-mediasoup")]
 async fn sfu_stats(
     State(state): State<AdminState>,
@@ -1185,7 +1187,7 @@ async fn sfu_stats(
             }),
         )
     } else {
-        // 列表模式（刀 A）：全流 transport 级观测行，room 可选过滤。
+        // List mode (cut A): transport-level observation rows for all streams, optional room filter.
         let room = params.get("room").cloned();
         let streams = state
             .sfu_manager
@@ -1195,7 +1197,7 @@ async fn sfu_stats(
         return Ok(Json(serde_json::json!({ "streams": streams })));
     };
     let (qid, mut result) = base;
-    // 刀 B：per-ID 模式经列表观测面并档 transport 字段（查无 → 保持基础字段，不降级）。
+    // Cut B: per-ID mode goes through the list observation surface and gains the transport fields (not found -> keep the base fields, no downgrade).
     const T_FIELDS: [&str; 8] = [
         "transport_id",
         "local_port",
@@ -1224,7 +1226,7 @@ async fn sfu_stats(
             tracing::debug!("admin sfu_stats: {qid} has no transport observation row (race/closed)")
         }
     }
-    // C15: 响应路径日志（查询成功侧也留痕，运维可见）。
+    // C15: response-path logging (successful queries also leave a trace, visible to ops).
     tracing::info!(
         "admin sfu_stats: {qid} → {} bytes / {} packets",
         result["byte_count"],
@@ -1240,7 +1242,7 @@ struct ServerConfigResponse {
     rate_limit: u32,
     room_capacity: usize,
     consumer_limit_per_stream: usize,
-    /// psk 掩码（前 2 字符 + ··）— 不可逆, dispatcher 只读可见。
+    /// psk mask (first 2 chars + ..) -- irreversible; visible to dispatcher read-only.
     psk_hint: String,
 }
 
@@ -1398,7 +1400,7 @@ async fn handle_admin_sfu(
             rtp_capabilities,
             transport_id,
         } => {
-            // PIT-65: 用消息 peer_id (每连接唯一), 非硬编码 admin — 多连接隔离
+            // PIT-65: use the message peer_id (unique per connection), not a hardcoded admin -- multi-connection isolation
             match sfu
                 .create_consumer(
                     room_id,
@@ -1521,7 +1523,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// rooms 等跨模块集成测试共用：任意 sub/role 的合法 JWT。
+    /// Shared by rooms and other cross-module integration tests: a valid JWT with any sub/role.
     #[cfg(test)]
     pub(crate) fn token_of_role(state: &AdminState, user: &str, role: Option<&str>) -> String {
         let now =
@@ -1752,7 +1754,7 @@ pub(crate) mod tests {
     }
 }
 
-// ── G3 tests: 账号登录 + 角色化 admin 鉴权 + 配置下发门 ───────────────────────
+// -- G3 tests: account login + role-based admin auth + config-push gate ------------------------
 
 #[cfg(test)]
 mod g3_tests {
@@ -1854,13 +1856,16 @@ mod g3_tests {
         assert_eq!(unknown.status(), StatusCode::UNAUTHORIZED);
         let wb = axum::body::to_bytes(wrong.into_body(), 1 << 20).await.unwrap();
         let ub = axum::body::to_bytes(unknown.into_body(), 1 << 20).await.unwrap();
-        assert_eq!(wb, ub, "未知用户与错误密码响应必须逐字一致（防枚举）");
+        assert_eq!(
+            wb, ub,
+            "unknown-user and wrong-password responses must be byte-identical (anti-enumeration)"
+        );
         assert!(String::from_utf8_lossy(&wb).contains("invalid credentials"));
     }
 
     #[tokio::test]
     async fn login_is_rate_limited() {
-        // I3 review: 突发超过 burst → 429（GlobalKeyExtractor 单桶, 测试确定性）
+        // I3 review: burst beyond the burst limit -> 429 (GlobalKeyExtractor single bucket, test determinism)
         let state = make_state_with_accounts().await;
         let app = login_router(state);
         let mut statuses = Vec::new();
@@ -1873,25 +1878,28 @@ mod g3_tests {
             statuses.push(resp.status());
         }
         let limited = statuses.iter().filter(|s| **s == StatusCode::TOO_MANY_REQUESTS).count();
-        assert!(limited >= 2, "burst={LOGIN_RATE_BURST} 之后必须被限流(429), got: {statuses:?}");
-        // 前若干请求必须不是 429（限流层存在但不过度拦截正常登录）
+        assert!(
+            limited >= 2,
+            "after burst={LOGIN_RATE_BURST} must be rate-limited (429), got: {statuses:?}"
+        );
+        // The first requests must not be 429 (the limit layer exists but does not over-block normal logins)
         assert!(
             statuses[..LOGIN_RATE_BURST as usize]
                 .iter()
                 .all(|s| *s != StatusCode::TOO_MANY_REQUESTS),
-            "burst 内的请求不应被限流: {statuses:?}"
+            "requests within the burst must not be rate-limited: {statuses:?}"
         );
     }
 
     #[tokio::test]
     async fn login_without_secret_503_and_without_accounts_401() {
-        let mut state = super::tests::make_state().await; // 空账号
+        let mut state = super::tests::make_state().await; // no accounts
         let app = login_router(state.clone());
         let resp = app
             .oneshot(login_request(r#"{"username":"carol","password":"s3cret"}"#))
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "空注册表一律 401");
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "empty registry always 401");
 
         state.accounts = Arc::new(AccountRegistry::from_yaml(&accounts_yaml()).unwrap());
         state.admin_jwt_secret = None;
@@ -1900,7 +1908,7 @@ mod g3_tests {
             .oneshot(login_request(r#"{"username":"carol","password":"s3cret"}"#))
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE, "无 JWT secret 503");
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE, "no JWT secret -> 503");
     }
 
     #[tokio::test]
@@ -1911,12 +1919,12 @@ mod g3_tests {
             .room_manager
             .join_room("vehicle-1", "veh-peer", &PeerRole::Host)
             .expect("join host");
-        // 房间频道订阅者（等价真实车端 WS 连接的接收端 — push 需有接收者）。
+        // Room channel subscriber (the receiving end of an equivalent real vehicle WS connection -- push needs a receiver).
         let _rx = state.signaling.get_or_create_channel("vehicle-1").subscribe();
         let app = admin_router(state);
         let secret = "test-admin-secret-32-byte-min";
 
-        // admin 角色（账号 adm）→ 200
+        // admin role (account adm) -> 200
         let admin_claims = mediaservo_common::auth::JwtClaims {
             sub: "adm".into(),
             iat: 1,
@@ -1945,9 +1953,9 @@ mod g3_tests {
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK, "admin config push 必须放行");
+        assert_eq!(resp.status(), StatusCode::OK, "admin config push must pass");
 
-        // operator 角色 → 401（中间件按 role 判定）
+        // operator role -> 401 (middleware decides by role)
         let op_tok = operator_token(secret);
         let resp = app
             .oneshot(
@@ -1961,7 +1969,7 @@ mod g3_tests {
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "operator config push 必须拒绝");
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "operator config push must be denied");
     }
 
     #[tokio::test]
@@ -1996,7 +2004,7 @@ mod g3_tests {
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
-    // ── H3: dispatcher 角色只读 + 新端点 ─────────────────────────────────────
+    // -- H3: dispatcher read-only + new endpoints ---------------------------------------------
 
     #[tokio::test]
     async fn dispatcher_can_read_status() {
@@ -2014,7 +2022,7 @@ mod g3_tests {
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK, "dispatcher 可读状态视图");
+        assert_eq!(resp.status(), StatusCode::OK, "dispatcher can read the status view");
     }
 
     #[tokio::test]
@@ -2033,7 +2041,11 @@ mod g3_tests {
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "dispatcher 禁止写操作");
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "dispatcher is denied write operations"
+        );
     }
 
     #[tokio::test]
@@ -2052,7 +2064,7 @@ mod g3_tests {
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "config 属 admin 专属");
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "config is admin-only");
     }
 
     #[tokio::test]
@@ -2077,7 +2089,7 @@ mod g3_tests {
         assert_eq!(
             resp.status(),
             StatusCode::NOT_FOUND,
-            "admin 不被只读拦截（房间不存在 → 404 而非 401）"
+            "admin is not blocked by read-only (room missing -> 404, not 401)"
         );
     }
 
@@ -2141,7 +2153,7 @@ mod g3_tests {
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK, "dispatcher 可读 SFU 房间列表");
+        assert_eq!(resp.status(), StatusCode::OK, "dispatcher can read the SFU room list");
         let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["rooms"], serde_json::json!([]));
@@ -2164,15 +2176,15 @@ mod g3_tests {
             )
             .await
             .unwrap();
-        // weaknet-harness T1 改判（Momus N1）：无 query = 列表模式 200；
-        // 原 400 语义迁移至「双 id 歧义」（见 sfu_stats_both_ids_ambiguous）。
-        assert_eq!(resp.status(), StatusCode::OK, "无 query → 列表模式 200");
+        // weaknet-harness T1 re-judgment (Momus N1): no query = list mode 200;
+        // the old 400 semantics moved to "dual-id ambiguity" (see sfu_stats_both_ids_ambiguous).
+        assert_eq!(resp.status(), StatusCode::OK, "no query -> list mode 200");
         let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(
             json["streams"],
             serde_json::json!([]),
-            "空 manager 的列表模式 = streams 空数组"
+            "list mode on an empty manager = empty streams array"
         );
     }
 
@@ -2196,11 +2208,11 @@ mod g3_tests {
         assert_eq!(
             resp.status(),
             StatusCode::BAD_REQUEST,
-            "双 id 同给 = 歧义 → 400（列表模式改判后 400 仅保留此语义）"
+            "both ids given = ambiguous -> 400 (after the list-mode re-judgment, 400 keeps only this meaning)"
         );
     }
 
-    // ── psk-admin-management T2: 辅助函数 ────────────────────────────────
+    // -- psk-admin-management T2: helper functions -------------------------------------------
 
     #[test]
     fn mask_psk_bounds() {
@@ -2209,22 +2221,28 @@ mod g3_tests {
         assert_eq!(mask_psk("ab"), "ab");
         assert_eq!(mask_psk("abc"), "ab··");
         assert_eq!(mask_psk("secret-12345678"), "se··");
-        assert!(!mask_psk("secret-12345678").contains("cret"), "掩码不得泄露中间部分");
+        assert!(
+            !mask_psk("secret-12345678").contains("cret"),
+            "mask must not leak the middle part"
+        );
     }
 
     #[test]
     fn write_back_psk_replaces_top_level_preserving_comments_and_indent() {
         let dir = std::env::temp_dir();
         let path = dir.join(format!("ms-server-psk-{}.yaml", uuid::Uuid::new_v4()));
-        // 含 inline 注释与缩进字段（模拟 server.docker.yaml 形态）
+        // With inline comment and indented fields (mimicking the server.docker.yaml shape)
         std::fs::write(&path,
             "listen:\n  host: \"0.0.0.0\"\n  port: 9800\npsk: \"old-secret\"   # PIT-49\njwt_secret: \"x\"\n").unwrap();
         write_back_psk(&path, "new-secret-123").unwrap();
         let out = std::fs::read_to_string(&path).unwrap();
-        assert!(out.contains("psk: \"new-secret-123\"  # PIT-49"), "替换保留 inline 注释: {out}");
-        assert!(out.contains("jwt_secret:"), "其他字段保留: {out}");
-        assert!(!out.contains("old-secret"), "旧值清除: {out}");
-        assert!(!path.with_extension("yaml.tmp").exists(), "temp 必须清理");
+        assert!(
+            out.contains("psk: \"new-secret-123\"  # PIT-49"),
+            "replacement preserves the inline comment: {out}"
+        );
+        assert!(out.contains("jwt_secret:"), "other fields preserved: {out}");
+        assert!(!out.contains("old-secret"), "old value cleared: {out}");
+        assert!(!path.with_extension("yaml.tmp").exists(), "temp must be cleaned up");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -2235,7 +2253,7 @@ mod g3_tests {
         std::fs::write(&path, "listen:\n  host: \"0.0.0.0\"\n").unwrap();
         write_back_psk(&path, "fresh-secret-9").unwrap();
         let out = std::fs::read_to_string(&path).unwrap();
-        assert!(out.contains("psk: \"fresh-secret-9\""), "无 psk 行时追加: {out}");
+        assert!(out.contains("psk: \"fresh-secret-9\""), "appended when no psk line: {out}");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -2243,13 +2261,16 @@ mod g3_tests {
     fn write_back_psk_does_not_touch_indented_comment_psk() {
         let dir = std::env::temp_dir();
         let path = dir.join(format!("ms-server-psk-comment-{}.yaml", uuid::Uuid::new_v4()));
-        std::fs::write(&path, "listen:\n  host: \"x\"\n# psk: \"commented\" — 注释里的非配置\n")
-            .unwrap();
+        std::fs::write(
+            &path,
+            "listen:\n  host: \"x\"\n# psk: \"commented\" -- a non-config line inside a comment\n",
+        )
+        .unwrap();
         write_back_psk(&path, "real-secret-77").unwrap();
         let out = std::fs::read_to_string(&path).unwrap();
-        // 注释行不动 + 顶层追加
-        assert!(out.contains("# psk: \"commented\""), "注释 psk 行不替换: {out}");
-        assert!(out.contains("psk: \"real-secret-77\""), "追加真实 psk: {out}");
+        // Comment line untouched + top-level append
+        assert!(out.contains("# psk: \"commented\""), "commented psk line not replaced: {out}");
+        assert!(out.contains("psk: \"real-secret-77\""), "real psk appended: {out}");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -2260,7 +2281,7 @@ mod g3_tests {
     }
 }
 
-// ── accountless-client-auth T1: API-key 管理面 + exchange 端到端钉 ─────────────
+// -- accountless-client-auth T1: API-key management plane + exchange end-to-end pin -------------
 
 #[cfg(test)]
 mod apikey_tests {
@@ -2280,7 +2301,7 @@ mod apikey_tests {
     async fn apikey_crud_exchange_and_revoke_flow() {
         let state = make_state().await;
 
-        // 1) 管理面注册 → 201 + secret 一次明文
+        // 1) Register on the management plane -> 201 + one-time plaintext secret
         let admin = admin_token(&state);
         let app = admin_router(state.clone());
         let resp = app
@@ -2302,9 +2323,9 @@ mod apikey_tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::CREATED);
         let body = json_body(resp).await;
-        let secret = body["secret"].as_str().expect("secret 一次明文").to_string();
+        let secret = body["secret"].as_str().expect("secret one-time plaintext").to_string();
 
-        // 2) 列表不含哈希/secret（C33 语义）
+        // 2) List contains no hash/secret (C33 semantics)
         let app = admin_router(state.clone());
         let resp = app
             .oneshot(
@@ -2319,9 +2340,12 @@ mod apikey_tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let list = json_body(resp).await;
         let text = list.to_string();
-        assert!(!text.contains("secret_hash") && !text.contains(&secret), "列表泄密: {text}");
+        assert!(
+            !text.contains("secret_hash") && !text.contains(&secret),
+            "list leaks secrets: {text}"
+        );
 
-        // 3) exchange 成功 → token claims 形（F5 sub 前缀 / role / vehicles / TTL）
+        // 3) exchange success -> token claims shape (F5 sub prefix / role / vehicles / TTL)
         let app = login_router(state.clone());
         let resp = app
             .oneshot(
@@ -2330,8 +2354,10 @@ mod apikey_tests {
                     .uri("/api/auth/exchange")
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        serde_json::to_vec(&serde_json::json!({"key_id": "ci-1", "secret": secret}))
-                            .unwrap(),
+                        serde_json::to_vec(
+                            &serde_json::json!({"key_id": "ci-1", "secret": secret}),
+                        )
+                        .unwrap(),
                     ))
                     .unwrap(),
             )
@@ -2351,7 +2377,7 @@ mod apikey_tests {
         assert_eq!(claims.sub, "apikey:ci-1");
         assert_eq!(claims.vehicles.as_deref().unwrap(), ["vehicle_a"]);
 
-        // 4) 防枚举：错 secret 与未知 key 逐字同消息
+        // 4) Anti-enumeration: wrong secret and unknown key are byte-identical
         let mut msgs: Vec<String> = Vec::new();
         for (kid, sec) in [("ci-1", "typo"), ("nope", &secret)] {
             let app = login_router(state.clone());
@@ -2373,9 +2399,9 @@ mod apikey_tests {
             let b = json_body(resp).await;
             msgs.push(b["error"].as_str().unwrap().to_string());
         }
-        assert_eq!(msgs[0], msgs[1], "exchange 防枚举破防");
+        assert_eq!(msgs[0], msgs[1], "exchange anti-enumeration broken");
 
-        // 5) 吊销 → 后续 exchange 即 401（F10：挡新发；已发 JWT 至 exp 自然死）
+        // 5) Revoke -> subsequent exchange immediately 401 (F10: blocks new issues; issued JWTs die naturally at exp)
         let app = admin_router(state.clone());
         let resp = app
             .oneshot(
@@ -2397,14 +2423,20 @@ mod apikey_tests {
                     .uri("/api/auth/exchange")
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        serde_json::to_vec(&serde_json::json!({"key_id": "ci-1", "secret": secret}))
-                            .unwrap(),
+                        serde_json::to_vec(
+                            &serde_json::json!({"key_id": "ci-1", "secret": secret}),
+                        )
+                        .unwrap(),
                     ))
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "吊销后 exchange 必须拒");
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "exchange after revocation must be denied"
+        );
     }
 
     #[tokio::test]
@@ -2420,23 +2452,30 @@ mod apikey_tests {
                     .header("Authorization", format!("Bearer {admin}"))
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        serde_json::to_vec(&serde_json::json!({"key_id": "k", "role": "superuser"}))
-                            .unwrap(),
+                        serde_json::to_vec(
+                            &serde_json::json!({"key_id": "k", "role": "superuser"}),
+                        )
+                        .unwrap(),
                     ))
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "矩阵外角色 deploy 期拦");
+        assert_eq!(
+            resp.status(),
+            StatusCode::BAD_REQUEST,
+            "out-of-matrix role caught at deploy time"
+        );
     }
 
     #[tokio::test]
     async fn exchange_issue_path_uses_apikeys_module_directly() {
-        // 纯函数链：register → verify → issue_api_token 的 sub 前缀钉（与 handler 解耦的第二层保险）
+        // Pure-function chain: register -> verify -> issue_api_token sub-prefix pin (a second layer of insurance decoupled from the handler)
         let reg = apikeys::ApiKeyRegistry::empty();
         let secret = reg.register("ci-2", "operator", &[], None).unwrap();
         let entry = reg.verify("ci-2", &secret).unwrap();
-        let tok = apikeys::issue_api_token("s3cret-min-32-bytes-for-test!!", "ci-2", &entry, 60).unwrap();
+        let tok =
+            apikeys::issue_api_token("s3cret-min-32-bytes-for-test!!", "ci-2", &entry, 60).unwrap();
         let claims: mediaservo_common::auth::JwtClaims = jsonwebtoken::decode(
             &tok,
             &jsonwebtoken::DecodingKey::from_secret(b"s3cret-min-32-bytes-for-test!!"),

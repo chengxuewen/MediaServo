@@ -3,7 +3,7 @@ name = "mediaservo-link-c"
 build = "build.rs"
 version.workspace = true
 edition.workspace = true
-description = "MediaServo link C ABI — ms_link_* opaque handle bindings (信令 + 帧总线)"
+description = "MediaServo link C ABI — ms_link_* opaque handle bindings (signaling + frame bus)"
 license.workspace = true
 
 [lib]

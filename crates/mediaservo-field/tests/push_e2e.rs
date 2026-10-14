@@ -1,17 +1,17 @@
 //! E2E integration tests for field::PushSession → mediasoup SFU pipeline.
 //!
 //! Runs on Linux only — connects to an external mediasoup server (C21).
-//! 纯外部模式：仅通过 WS 信令协议交互，不 import server 内部类型。
+//! Pure external mode: interacts only through the WS signaling protocol, imports no server internal types.
 //!
 //! Tests:
-//! - D1-field: PushSession connect → publish_video 全链路（transport→produce）
-//! - D2-field: 信令事件桥（SignalEvent → SessionEvent::Message）
+//! - D1-field: PushSession connect → publish_video full chain (transport→produce)
+//! - D2-field: signaling event bridge (SignalEvent → SessionEvent::Message)
 
 #![cfg(target_os = "linux")]
 
 use std::time::Duration;
 
-// 诊断: 测试内初始化 tracing（否则日志不可见）
+// Diagnostics: init tracing inside tests (otherwise logs are invisible)
 fn init_tracing() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -28,7 +28,7 @@ use mediaservo_webrtc::traits::PeerConnectionApi;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn ws_url() -> String {
-    // 缺省 dev server（docker compose 9800）——仍连外部 server（C21）; 生产/CI 用 env 覆盖
+    // Default dev server (docker compose 9800) — still connects to an external server (C21); production/CI override via env
     std::env::var("SFU_E2E_WS_URL").unwrap_or_else(|_| "ws://127.0.0.1:9800/ws".to_string())
 }
 
@@ -37,7 +37,7 @@ fn psk() -> String {
 }
 
 fn test_config() -> PushConfig {
-    // 每次调用独立 room（测试并行 + 每次运行唯一，防 server 端残留 producer 冲突）
+    // Independent room per call (test parallelism + unique per run; guards against leftover producers on the server)
     let room = format!(
         "field-push-test-{}-{:?}",
         std::process::id(),
@@ -48,12 +48,12 @@ fn test_config() -> PushConfig {
     cfg
 }
 
-/// D1-field: PushSession 全链路 — connect → publish_video 成功。
+/// D1-field: PushSession full chain — connect → publish_video succeeds.
 ///
-/// 流程（对齐 host e2e_sfu D1/D2）：
-/// 1. PushSession::connect(cfg) — 信令连接 + 加入房间
-/// 2. publish_video — transport 创建 → answer 协商 → Connect → Produce
-/// 3. 断言返回 track id + TrackPublished 事件
+/// Flow (mirrors host e2e_sfu D1/D2):
+/// 1. PushSession::connect(cfg) — signaling connection + join the room
+/// 2. publish_video — transport created → answer negotiation → Connect → Produce
+/// 3. Assert the returned track id + TrackPublished event
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn field_push_session_publish_video() {
     let cfg = test_config();
@@ -67,7 +67,7 @@ async fn field_push_session_publish_video() {
         .expect("publish_video failed");
     assert!(!track.is_empty(), "track id empty");
 
-    // 事件流应出现 TrackPublished
+    // TrackPublished should appear in the event stream
     tokio::time::timeout(CONNECT_TIMEOUT, async {
         while let Some(ev) = events.recv().await {
             match ev {
@@ -76,7 +76,7 @@ async fn field_push_session_publish_video() {
                     return;
                 }
                 SessionEvent::Error(e) => panic!("session error during publish: {e:?}"),
-                _ => continue, // Message/Connected/Disconnected 忽略
+                _ => continue, // Message/Connected/Disconnected ignored
             }
         }
         panic!("event stream closed before TrackPublished");
@@ -87,11 +87,11 @@ async fn field_push_session_publish_video() {
     session.close().await.expect("close failed");
 }
 
-/// D2-field: 连接失败路径 — 无 server 时 connect 应回 LinkError 而非挂起。
+/// D2-field: connection-failure path — connect should return LinkError rather than hang when no server.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn field_push_session_connect_failure() {
     let mut cfg = test_config();
-    cfg.url = "ws://127.0.0.1:1/ws".to_string(); // 必然不可达端口
+    cfg.url = "ws://127.0.0.1:1/ws".to_string(); // certainly unreachable port
     let err = PushSession::connect(cfg).await;
     match err {
         Err(FieldError::Link(_)) => {}
@@ -99,13 +99,13 @@ async fn field_push_session_connect_failure() {
     }
 }
 
-/// D3-field: peer_connection escape hatch — publish 后应暴露底层 PC。
+/// D3-field: peer_connection escape hatch — the underlying PC should be exposed after publish.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn field_push_session_peer_connection_available() {
     let cfg = test_config();
     let (mut session, _events) = PushSession::connect(cfg.clone()).await.expect("connect failed");
 
-    // publish 前无 PC
+    // No PC before publish
     assert!(session.peer_connection().is_none(), "PC should be None before publish");
 
     let opts = PublishOptions::default();
@@ -114,13 +114,13 @@ async fn field_push_session_peer_connection_available() {
         .expect("publish timeout")
         .expect("publish failed");
 
-    // publish 后 PC 可用（escape hatch 可访问底层状态）
+    // PC available after publish (escape hatch reaches the underlying state)
     let pc = session.peer_connection().expect("PC available after publish");
     assert_eq!(pc.track_count(), 1, "one video track");
 
     session.close().await.expect("close failed");
 }
-/// D4-field: 帧发布 — start_video_frames 后 sender 应产生编码帧（bytes_sent/frames_encoded 增长）。
+/// D4-field: frame publishing — after start_video_frames the sender should produce encoded frames (bytes_sent/frames_encoded growing).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn field_push_session_video_frames_flow() {
     let cfg = test_config();
@@ -132,16 +132,16 @@ async fn field_push_session_video_frames_flow() {
         .expect("publish timeout")
         .expect("publish failed");
 
-    // 帧发布前: 无生成器
+    // Before frame publishing: no generator
     assert!(session.peer_connection().is_some(), "PC after publish");
 
-    // 启动帧生成
+    // Start frame generation
     session.start_video_frames(&cfg).expect("start_video_frames failed");
-    // 重复启动应报 InvalidState
+    // Repeated start should return InvalidState
     let dup = session.start_video_frames(&cfg).unwrap_err();
     assert!(matches!(dup, FieldError::InvalidState(_)), "got {dup:?}");
 
-    // 轮询 sender stats: 帧编码应启动（等待 ≤10s 出帧）
+    // Poll sender stats: frame encoding should start (wait ≤10s for frames)
     let pc = session.peer_connection().expect("pc");
     let mut observed_frames = false;
     for _ in 0..20 {
@@ -164,20 +164,20 @@ async fn field_push_session_video_frames_flow() {
     }
     assert!(observed_frames, "no outbound frames observed within 10s");
 
-    // 停止帧生成（幂等）
+    // Stop frame generation (idempotent)
     session.stop_video_frames();
-    session.stop_video_frames(); // 二次调用无副作用
+    session.stop_video_frames(); // Second call has no effect
 
     session.close().await.expect("close failed");
 }
 
-/// D5-field: PullSession 消费 — Push 推帧 → Pull 订阅 → 解码帧流出。
-/// 已知限制 (2026-08-18 收口): 协商全通但 libwebrtc 收帧挂起（RTP 全对,
-/// on_frame 不触发）— 归属 client 端开发时攻关。测试保留为文档化限制。
-#[ignore = "PullSession 收帧挂起 (libwebrtc 接收管线缺陷, 2026-08-18 收口)"]
+/// D5-field: PullSession consume — Push frames → Pull subscribes → decoded frames flow out.
+/// Known limitation (closed 2026-08-18): negotiation fully succeeds but libwebrtc hangs receiving frames (RTP all correct,
+/// on_frame never fires) — belongs to client-side development. Test kept as a documented limitation.
+#[ignore = "PullSession frame reception hangs (libwebrtc receive-pipeline defect, closed 2026-08-18)"]
 ///
-/// 同一房间内: PushSession publish + start_video_frames → PullSession subscribe
-/// （producer_id 来自 NewProducer 广播）→ on_track → FrameSink → PullFrame 接收。
+/// Same room: PushSession publish + start_video_frames → PullSession subscribe
+/// (producer_id from the NewProducer broadcast) → on_track → FrameSink → PullFrame received.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn field_pull_session_consumes_video() {
     init_tracing();
@@ -197,11 +197,11 @@ async fn field_pull_session_consumes_video() {
         auto_subscribe: true,
     };
 
-    // 1. Pull 先入房（Consumer 角色）— 保证 push publish 的 NewProducer 广播必达
+    // 1. Pull joins the room first (Consumer role) — guarantees the NewProducer broadcast of the push publish always arrives
     let (mut pull, mut pull_events) =
         PullSession::connect(pull_cfg.clone()).await.expect("pull connect");
 
-    // 2. Push 侧: 连接 + publish + 帧生成（广播给房间内已有 peer = Pull）
+    // 2. Push side: connect + publish + frame generation (broadcast to peers already in the room = Pull)
     let (mut push, push_events) =
         PushSession::connect(push_cfg.clone()).await.expect("push connect");
     let opts = PublishOptions::default();
@@ -211,7 +211,7 @@ async fn field_pull_session_consumes_video() {
         .expect("push publish failed");
     push.start_video_frames(&push_cfg).expect("start frames");
 
-    // 3. 等待 NewProducer 广播（Push 的 producer）
+    // 3. Wait for the NewProducer broadcast (Push's producer)
     let producer_id = tokio::time::timeout(CONNECT_TIMEOUT, async {
         loop {
             match pull_events.recv().await {
@@ -228,13 +228,13 @@ async fn field_pull_session_consumes_video() {
     .await
     .expect("NewProducer timeout");
 
-    // 4. 订阅 + 收帧
+    // 4. Subscribe + receive frames
     let mut frames = tokio::time::timeout(CONNECT_TIMEOUT, pull.subscribe(&pull_cfg, &producer_id))
         .await
         .expect("subscribe timeout")
         .expect("subscribe failed");
 
-    // 5. 等待解码帧流出（≤15s; WebRtcTrackSink 推帧 → SFU relay → 解码 → FrameSink）
+    // 5. Wait for decoded frames to flow out (≤15s; WebRtcTrackSink pushes frames → SFU relay → decode → FrameSink)
     let mut got_frame = false;
     for _ in 0..30 {
         tokio::time::timeout(Duration::from_secs(1), frames.recv()).await.map(|opt| {
@@ -251,7 +251,7 @@ async fn field_pull_session_consumes_video() {
     }
     assert!(got_frame, "no decoded frame within 15s");
 
-    // 清理
+    // Cleanup
     push.stop_video_frames();
     push.close().await.expect("push close");
     pull.close().await.expect("pull close");
@@ -259,7 +259,7 @@ async fn field_pull_session_consumes_video() {
     let _ = push_events;
 }
 
-/// D6-field: 重复 publish 应报 InvalidState（MVP 单视频轨约束）。
+/// D6-field: repeated publish should return InvalidState (MVP single-video-track constraint).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn field_push_session_double_publish_fails() {
     let cfg = test_config();
@@ -277,7 +277,7 @@ async fn field_push_session_double_publish_fails() {
     session.close().await.expect("close failed");
 }
 
-/// D7-field: 低分辨率低帧率配置 — 帧发布参数边界（640x360@15fps）。
+/// D7-field: low-resolution low-fps config — frame publishing parameter boundary (640x360@15fps).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn field_push_session_low_res_frames() {
     let mut cfg = test_config();
@@ -295,7 +295,7 @@ async fn field_push_session_low_res_frames() {
 
     session.start_video_frames(&cfg).expect("start frames");
 
-    // 轮询 sender stats: 低码率配置下帧仍应编码
+    // Poll sender stats: frames should still encode under the low-bitrate config
     let pc = session.peer_connection().expect("pc");
     let mut observed = false;
     for _ in 0..20 {
@@ -306,8 +306,8 @@ async fn field_push_session_low_res_frames() {
             _ => None,
         }) && o.frames_encoded > 0
         {
-            // 分辨率可能被 libwebrtc BWE 自适应降级（低码率 → scaling down）—
-            // 不强制等于配置, 验证帧已编码即可（尺寸语义由 C17 帧循环保证）
+            // Resolution may be degraded adaptively by libwebrtc BWE (low bitrate → scaling down) —
+            // do not force equality with the config; verifying frames encode is enough (dimension semantics guaranteed by the C17 frame loop)
             assert!(o.frame_width > 0 && o.frame_height > 0, "frame dims");
             observed = true;
             break;

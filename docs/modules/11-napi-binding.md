@@ -1,40 +1,40 @@
 # 11. NAPI Binding — Node.js API
 
-> 版本: 0.1 | 日期: 2026-07-16 | Phase: 0
+> Version: 0.1 | Date: 2026-07-16 | Phase: 0
 
-## 11.1 设计原则
+## 11.1 Design Principles
 
-- **Session 抽象**：仅导出高级 Session API，不暴露 Rust trait 层次
-- **EventEmitter**：Node.js 原生模式，零额外依赖
-- **解码后传递**：Rust 侧 GStreamer decode → RGBA Buffer → napi-rs 拷贝
-- **零代码生成**：手动编写 napi-rs 绑定，不依赖宏
+- **Session abstraction**: only the high-level Session API is exported; the Rust trait hierarchy is not exposed
+- **EventEmitter**: native Node.js pattern, zero extra dependencies
+- **Delivered decoded**: GStreamer decode on the Rust side → RGBA Buffer → napi-rs copy
+- **Zero code generation**: napi-rs bindings hand-written, no macro dependency
 
-## 11.2 架构
+## 11.2 Architecture
 
 ```
-宿主平台 (Node.js)
+Host platform (Node.js)
 │
 ├─ @mediaservo/napi
-│   ├─ Session          ← napi-rs 导出类
+│   ├─ Session          ← napi-rs exported class
 │   │   ├─ EventEmitter
 │   │   ├─ control.send()
 │   │   └─ getStats()
 │   │
-│   └─ types.d.ts       ← TypeScript 类型声明
+│   └─ types.d.ts       ← TypeScript type declarations
 │
 │  napi-rs FFI
 │
 ▼
 mediaservo-common (Rust)
-├─ SessionManager        ← 新建 thin wrapper
-├─ MediaTransport        ← 现有
-├─ PluginManager         ← 现有
-└─ pipeline              ← 现有
+├─ SessionManager        ← new thin wrapper
+├─ MediaTransport        ← existing
+├─ PluginManager         ← existing
+└─ pipeline              ← existing
 ```
 
 ## 11.3 Session API
 
-### 创建
+### Creating
 
 ```typescript
 import { createSession, SessionType, SessionRole } from '@mediaservo/napi';
@@ -62,7 +62,7 @@ const session = createSession({
   },
 
   audio: {
-    codec: 'opus',             // Phase 1 only opus
+    codec: 'opus',             // Phase 1 supports opus only
     sampleRate: 48000,
     channels: 2,
     bitrateKbps: 64,
@@ -71,58 +71,58 @@ const session = createSession({
   dataChannel: {
     labels: ['control', 'telemetry'],
     ordered: {
-      'control': true,         // 控制指令确保顺序
-      'telemetry': false,      // 遥测允许丢包
+      'control': true,         // Control commands must be ordered
+      'telemetry': false,      // Telemetry tolerates drops
     },
   },
 });
 ```
 
-### 类型
+### Types
 
 ```typescript
 type SessionType =
-  | 'remote_desktop'    // 远程桌面
-  | 'teleop_cockpit'    // 遥控座舱
-  | 'teleop_vehicle';   // 遥控车辆
+  | 'remote_desktop'    // Remote desktop
+  | 'teleop_cockpit'    // Teleoperation cockpit
+  | 'teleop_vehicle';   // Teleoperation vehicle
 
-> Phase 1 SessionType range: remote_desktop, teleop_cockpit, teleop_vehicle。剩余 4 种能力（视频会议、推拉流、监控相机、video-conference）为 Phase 2+ 扩展。
+> Phase 1 SessionType range: remote_desktop, teleop_cockpit, teleop_vehicle. The remaining 4 capabilities (video conferencing, streaming push/pull, surveillance cameras, video-conference) are Phase 2+ extensions.
 type SessionRole =
-  | 'host'              // 被控端（桌面共享方）
-  | 'client'            // 控制端（远程桌面客户端）
-  | 'cockpit'           // 座舱（接收视频+发送控制）
-  | 'vehicle';          // 车辆端（发送视频+接收控制）
+  | 'host'              // Controlled end (screen-sharing side)
+  | 'client'            // Controller (remote desktop client)
+  | 'cockpit'           // Cockpit (receives video + sends control)
+  | 'vehicle';          // Vehicle (sends video + receives control)
 
 type SessionState =
-  | 'idle'              // 未连接
-  | 'connecting'        // 正在建立连接
-  | 'connected'         // 已连接
-  | 'reconnecting'      // 断线重连中
-  | 'disconnected'      // 已断开
-  | 'failed';           // 连接失败
+  | 'idle'              // Not connected
+  | 'connecting'        // Connection being established
+  | 'connected'         // Connected
+  | 'reconnecting'      // Reconnecting after disconnect
+  | 'disconnected'      // Disconnected
+  | 'failed';           // Connection failed
 ```
 
-### 生命周期
+### Lifecycle
 
 ```typescript
-// 启动连接（阻塞至 ICE completed 或失败）
+// Start the connection (blocks until ICE completed or failure)
 await session.connect();
 
-// 等待特定状态（用于测试）
+// Wait for a specific state (for testing)
 await session.waitFor('connected', { timeoutMs: 30000 });
 
-// 优雅关闭
+// Graceful shutdown
 session.disconnect();
 ```
 
-### 事件
+### Events
 
 ```typescript
 interface VideoFrame {
-  timestamp: bigint;            // 微秒
+  timestamp: bigint;            // Microseconds
   width: number;
   height: number;
-  format: 'rgba';              // Phase 1 only RGBA
+  format: 'rgba';              // Phase 1 supports RGBA only
   data: Buffer;                 // width × height × 4 bytes
 }
 
@@ -130,7 +130,7 @@ interface AudioFrame {
   timestamp: bigint;
   sampleRate: number;          // 48000
   channels: number;            // 1 | 2
-  format: 'pcm_s16le';        // PCM 16-bit signed little-endian
+  format: 'pcm_s16le';         // PCM 16-bit signed little-endian
   data: Buffer;
 }
 
@@ -144,8 +144,8 @@ interface SessionStats {
   packetLossPercent: number;
   bitrateKbps: number;
   framerate: number;
-  encodeMs: number;            // 编码延迟
-  decodeMs: number;            // 解码延迟
+  encodeMs: number;            // Encoding latency
+  decodeMs: number;            // Decoding latency
   jitterMs: number;
 }
 
@@ -155,32 +155,32 @@ interface SessionError {
   recoverable: boolean;
 }
 
-// 注册回调
+// Register callbacks
 session.on('state_change', (state: SessionState) => {});
 session.on('remote_video', (frame: VideoFrame) => {});
 session.on('remote_audio', (frame: AudioFrame) => {});
 session.on('data_channel', (msg: DataChannelMessage) => {});
-session.on('stats', (stats: SessionStats) => {});      // 每秒推送
+session.on('stats', (stats: SessionStats) => {});      // Pushed every second
 session.on('error', (err: SessionError) => {});
 ```
 
-### 控制
+### Control
 
 ```typescript
-// 发送控制指令（RTCDataChannel）
+// Send a control command (RTCDataChannel)
 session.control.send(Buffer.from(JSON.stringify({ steering: 15 })));
 
-// 主动拉取统计
+// Pull stats on demand
 const stats: SessionStats = session.getStats();
 
-// 请求关键帧（弱网重传后）
+// Request a keyframe (after weak-network retransmission)
 session.control.requestKeyframe();
 ```
 
-## 11.4 Rust 侧实现
+## 11.4 Rust-Side Implementation
 
 ```rust
-// mediaservo-common/src/session.rs (新建)
+// mediaservo-common/src/session.rs (new)
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -209,9 +209,9 @@ pub struct Session {
 impl Session {
   #[napi(constructor)]
   pub fn new(config: SessionConfig) -> Result<Self> {
-    // 1. 根据 transport 选择 MediaTransport 后端
-    // 2. 创建 SignalingTransport（WebSocket）
-    // 3. 创建 pipeline (decode → format convert → callback)
+    // 1. Pick the MediaTransport backend based on transport
+    // 2. Create the SignalingTransport (WebSocket)
+    // 3. Create the pipeline (decode → format convert → callback)
     Ok(Self { inner: Mutex::new(SessionInner::new(config)?) })
   }
 
@@ -220,7 +220,7 @@ impl Session {
     // 1. WS connect
     // 2. SDP offer/answer via SignalHandler
     // 3. ICE negotiation
-    // 4. 启动 pipeline
+    // 4. Start the pipeline
     // 5. emit('state_change', 'connected')
     Ok(())
   }
@@ -230,7 +230,7 @@ impl Session {
 }
 ```
 
-## 11.5 视频帧管线（napi-rs 路径）
+## 11.5 Video Frame Pipeline (napi-rs path)
 
 ```
 Rust: GStreamer pipeline
@@ -238,33 +238,33 @@ Rust: GStreamer pipeline
   │ appsrc   │ →  │ h264parse│ →  │ decodebin│ →  │ appsink  │
   │ (RTP)    │    │          │    │ (HW dec) │    │ (RGBA)   │
   └──────────┘    └──────────┘    └──────────┘    └────┬─────┘
-                                                        │
-  appsink callback: GstBuffer → RGBA bytes              │
-  napi-rs: Buffer::from(rgba_bytes)                     │
-                                                        ▼
+                                                       │
+  appsink callback: GstBuffer → RGBA bytes             │
+  napi-rs: Buffer::from(rgba_bytes)                    │
+                                                       ▼
   Node.js: emit('remote_video', { data: Buffer })
 ```
 
-Phase 2 优化：DMA-BUF 共享（Linux only）
-- Rust 输出 DMA-BUF fd → napi-rs 传递 fd → Node.js 侧通过 addon 导入 GPU 纹理
-- 避免 ~8MB/frame RGBA 拷贝
+Phase 2 optimization: DMA-BUF sharing (Linux only)
+- Rust outputs a DMA-BUF fd → napi-rs passes the fd → the Node.js side imports the GPU texture via an addon
+- Avoids the ~8MB/frame RGBA copy
 
-## 11.6 内存与性能
+## 11.6 Memory & Performance
 
-| 场景 | 分辨率 | FPS | RGBA 带宽 | 拷贝开销 |
-|------|--------|-----|----------|---------|
-| 远程桌面 | 1920×1080 | 30 | ~250 MB/s | 5-10ms (memcpy) |
-| 遥控座舱 | 1280×720 | 30 | ~110 MB/s | 2-4ms |
-| 遥控座舱 | 1280×720 | 15 | ~55 MB/s | 1-2ms |
-| 视频会议 | 640×480 | 15 | ~18 MB/s | <1ms |
+| Scenario | Resolution | FPS | RGBA bandwidth | Copy overhead |
+|----------|------------|-----|----------------|---------------|
+| Remote desktop | 1920×1080 | 30 | ~250 MB/s | 5-10ms (memcpy) |
+| Teleop cockpit | 1280×720 | 30 | ~110 MB/s | 2-4ms |
+| Teleop cockpit | 1280×720 | 15 | ~55 MB/s | 1-2ms |
+| Video conference | 640×480 | 15 | ~18 MB/s | <1ms |
 
-Phase 1 遥控座舱场景 15fps，55MB/s 拷贝开销可接受。
-`memcpy` 在现代 CPU 上 8MB RGBA 帧约 2-4ms（DDR4 带宽 ~20GB/s）。
+The Phase 1 teleop-cockpit scenario runs at 15fps; the 55MB/s copy overhead is acceptable.
+`memcpy` of an 8MB RGBA frame costs ~2-4ms on modern CPUs (DDR4 bandwidth ~20GB/s).
 
-## 11.7 与宿主平台集成
+## 11.7 Host-Platform Integration
 
 ```typescript
-// 宿主平台插件内部使用 MediaServo Session
+// MediaServo Sessions used inside a host-platform plugin
 
 // plugins/teleop-cockpit/src/index.ts
 import { createSession } from '@mediaservo/napi';
@@ -282,7 +282,7 @@ export class TeleopCockpitPlugin implements Plugin {
     });
 
     this.session.on('remote_video', (frame) => {
-      // 渲染到浏览器 Canvas / WebGL
+      // Render to browser Canvas / WebGL
       ctx.ui.renderVideo(this.videoElementId, frame);
     });
 
@@ -295,7 +295,7 @@ export class TeleopCockpitPlugin implements Plugin {
     await this.session.connect();
   }
 
-  // 宿主平台 UI 可通过 PluginHost 调用
+  // The host-platform UI can call this via PluginHost
   sendControl(steering: number, throttle: number) {
     this.session.control.send(Buffer.from(JSON.stringify({ steering, throttle })));
   }
@@ -307,7 +307,7 @@ export class TeleopCockpitPlugin implements Plugin {
 | | Phase 1 | Phase 2 |
 |---|---------|---------|
 | SessionType | remote_desktop, teleop_cockpit, teleop_vehicle | + video_conference, live_streaming, surveillance_viewer |
-| 视频格式 | RGBA Buffer | + DMA-BUF fd (Linux) |
-| 音频格式 | PCM s16le | + Opus pass-through |
-| 事件 | 6 种基础事件 | + track_added/removed (SFU) |
-| 控制 | control.send() | + subscribeTrack() (SFU) |
+| Video format | RGBA Buffer | + DMA-BUF fd (Linux) |
+| Audio format | PCM s16le | + Opus pass-through |
+| Events | 6 basic events | + track_added/removed (SFU) |
+| Control | control.send() | + subscribeTrack() (SFU) |

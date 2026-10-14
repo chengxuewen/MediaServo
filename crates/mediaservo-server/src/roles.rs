@@ -1,19 +1,19 @@
-//! G3 舱端角色授权矩阵（D-H11）— 纯函数授权层，无 I/O 无 tokio，全矩阵单测。
+//! G3 cockpit role authorization matrix (D-H11) -- pure-function authorization layer, no I/O, no tokio, full-matrix unit tests.
 //!
-//! 矩阵（D-H11 定稿）:
+//! Matrix (D-H11 final):
 //! ```text
-//! 能力 \ 角色        viewer   operator   admin   dispatcher
-//! 拉流(视频+视觉)     ✅        ✅        ✅      ✅（任意车）
-//! 音频会议           ✅        ✅        ✅      ✅（任意车）
-//! 控制(底盘/云台)     ❌        ✅        ✅      ❌
-//! 急停              ❌        ✅*       ✅      ❌      *强审计
-//! 配置下发           ❌        ❌        ✅      ❌
-//! 状态/告警          ❌        ✅        ✅      ✅
+//! capability \ role        viewer   operator   admin   dispatcher
+//! pull (video+vision)      YES      YES        YES     YES (any vehicle)
+//! audio conference         YES      YES        YES     YES (any vehicle)
+//! control (chassis/gimbal) NO       YES        YES     NO
+//! emergency stop           NO       YES*       YES     NO       * strong audit
+//! config push              NO       NO         YES     NO
+//! status/alarms            NO       YES        YES     YES
 //! ```
-//! 车×舱白名单: viewer/operator 仅授权车（accounts.yaml vehicles）；admin/dispatcher 任意车。
-//! 车端（device 会话）: produce 自己的流 / 收配置 / 收控制转发 —— 由会话身份门控制。
+//! Vehicle x cockpit allowlist: viewer/operator only for allowlisted vehicles (accounts.yaml vehicles); admin/dispatcher any vehicle.
+//! Vehicle side (device session): produce its own streams / receive config / receive control forwarding -- gated by session identity.
 
-/// 舱端账号角色（D-H11 四级）。
+/// Cockpit account roles (D-H11 four levels).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CockpitRole {
     Viewer,
@@ -23,7 +23,7 @@ pub enum CockpitRole {
 }
 
 impl CockpitRole {
-    /// 解析 role claim / accounts.yaml 角色串；未知角色 → None（拒绝）。
+    /// Parse a role claim / accounts.yaml role string; unknown role -> None (reject).
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "viewer" => Some(Self::Viewer),
@@ -43,7 +43,7 @@ impl CockpitRole {
         }
     }
 
-    /// 拉流（视频+视觉+音频）: admin/dispatcher 任意车；viewer/operator 仅白名单车。
+    /// Pull streams (video+vision+audio): admin/dispatcher any vehicle; viewer/operator only allowlisted vehicles.
     pub fn can_pull(&self, vehicle: &str, allowed: &[String]) -> bool {
         match self {
             Self::Admin | Self::Dispatcher => true,
@@ -51,38 +51,38 @@ impl CockpitRole {
         }
     }
 
-    /// 控制（底盘/云台; P2P DC 协商授权）。
+    /// Control (chassis/gimbal; P2P DC negotiation authorization).
     pub fn can_control(&self) -> bool {
         matches!(self, Self::Operator | Self::Admin)
     }
 
-    /// 急停（operator+ 强审计）。
+    /// Emergency stop (operator+ with strong audit).
     pub fn can_emergency(&self) -> bool {
         matches!(self, Self::Operator | Self::Admin)
     }
 
-    /// 配置下发（admin 专属）。
+    /// Config push (admin only).
     pub fn can_config(&self) -> bool {
         matches!(self, Self::Admin)
     }
 
-    /// 状态/告警查看。
+    /// Status/alarm viewing.
     pub fn can_status(&self) -> bool {
         matches!(self, Self::Operator | Self::Admin | Self::Dispatcher)
     }
 
-    /// 音频会议房间 = 拉流矩阵同语义（同白名单）。
+    /// Audio conference rooms = same semantics as the pull matrix (same allowlist).
     pub fn can_audio(&self, vehicle: &str, allowed: &[String]) -> bool {
         self.can_pull(vehicle, allowed)
     }
 }
 
-/// 舱端账号身份（登录签发 token 的 claims 解析结果）。
+/// Cockpit account identity (claims parsed from the token issued at login).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountIdentity {
     pub username: String,
     pub role: CockpitRole,
-    /// 车×舱白名单 device_id（viewer/operator 生效；admin/dispatcher 忽略）。
+    /// Vehicle x cockpit allowlist of device_ids (effective for viewer/operator; ignored for admin/dispatcher).
     pub vehicles: Vec<String>,
 }
 
@@ -92,17 +92,17 @@ impl AccountIdentity {
     }
 }
 
-/// 会话身份（G3 连接级）— 授权决策的唯一输入。
+/// Session identity (G3 connection-level) -- the sole input to authorization decisions.
 ///
-/// G3 additive 原则: 仅 Account（JWT 带合法 role）与 Device（设备认证）会话
-/// 启用矩阵强制；Legacy（PSK/无角色 JWT）保持既有行为（开发/内网路径）。
+/// G3 additive principle: only Account (JWT with a valid role) and Device (device-auth) sessions
+/// enable matrix enforcement; Legacy (PSK/role-less JWT) keeps existing behavior (dev/intranet path).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionIdentity {
-    /// 车端设备（device auth 成功绑定，D-H11 连接级身份）。
+    /// Vehicle device (bound after device auth, D-H11 connection-level identity).
     Device(String),
-    /// 舱端账号（JWT role claim 合法）。
+    /// Cockpit account (JWT role claim valid).
     Account(AccountIdentity),
-    /// PSK/无管理身份 — 不加矩阵限制。
+    /// PSK/no management identity -- not constrained by the matrix.
     Legacy,
 }
 
@@ -111,7 +111,7 @@ impl SessionIdentity {
         matches!(self, Self::Account(_))
     }
 
-    /// 供审计的 (username, role) 可读串（账号会话）。
+    /// Auditable (username, role) readable string (account session).
     pub fn who(&self) -> String {
         match self {
             Self::Account(a) => format!("{}[{}]", a.username, a.role.as_str()),
@@ -120,9 +120,9 @@ impl SessionIdentity {
         }
     }
 
-    /// RoomJoin 门（D-H11 租户隔离 + 授权矩阵; P2P 协商的授权点）。
-    /// `room_owner` = 该房间所属车端 device_id（device 会话加入时记录）。
-    /// 返回拒绝理由（None = 允许）。
+    /// RoomJoin gate (D-H11 tenant isolation + authorization matrix; the authorization point for P2P negotiation).
+    /// `room_owner` = the owning vehicle device_id of the room (recorded when a device session joins).
+    /// Returns the denial reason (None = allowed).
     pub fn join_vehicle_room(&self, room_owner: Option<&str>) -> Option<String> {
         match self {
             Self::Device(d) => match room_owner {
@@ -133,7 +133,7 @@ impl SessionIdentity {
                 }
             },
             Self::Account(a) => match room_owner {
-                // 房间无主（车未上线）: 允许加入（媒体访问仍受 consume 门控 + DeviceStream 帧过滤）。
+                // Room unowned (vehicle offline): joining allowed (media access still gated by consume + DeviceStream frame filtering).
                 None => None,
                 Some(owner) if a.can_access_vehicle(owner) => None,
                 Some(owner) => Some(format!(
@@ -146,7 +146,7 @@ impl SessionIdentity {
         }
     }
 
-    /// 账号会话禁止以 Host 角色入房（Host = 车端位，防账号抢占房间使车无法上线）。
+    /// Account sessions cannot join with the Host role (Host = the vehicle slot; prevents an account hijacking the room and blocking the vehicle from coming online).
     pub fn host_join_denied(&self) -> Option<&'static str> {
         match self {
             Self::Account(_) => Some("cockpit accounts cannot join as host role"),
@@ -154,9 +154,9 @@ impl SessionIdentity {
         }
     }
 
-    /// 控制能力（I1 review — P2P 路径控制列强制）: Remote 角色 join 与 P2P 房间
-    /// SDP/ICE 中继的裁决依据。operator/admin 有控制; viewer/dispatcher 无;
-    /// 设备（控制接收方）与 legacy（无管理身份）放行。
+    /// Control capability (I1 review -- control-column enforcement on the P2P path): the deciding basis for Remote-role joins and
+    /// P2P room SDP/ICE relaying. operator/admin have control; viewer/dispatcher do not;
+    /// devices (control receivers) and legacy (no management identity) are allowed.
     pub fn can_control(&self) -> bool {
         match self {
             Self::Account(a) => a.role.can_control(),
@@ -164,9 +164,9 @@ impl SessionIdentity {
         }
     }
 
-    /// Produce 门: 车端自动允许（自己的流）; 账号默认禁止（舱端只消费）——
-    /// **audio-* 会议房豁免**（D-H11 修订/P1: 会议麦上行，C29 全互连语义）;
-    /// Legacy 允许（dev 路径）。
+    /// Produce gate: vehicles auto-allowed (their own streams); accounts denied by default (cockpits only consume) --
+    /// **audio-* conference-room exemption** (D-H11 revision/P1: conference mic uplink, C29 full-interconnect semantics);
+    /// Legacy allowed (dev path).
     pub fn can_produce(&self, room_id: &str) -> Result<(), String> {
         match self {
             Self::Account(a) => {
@@ -184,12 +184,12 @@ impl SessionIdentity {
         }
     }
 
-    /// Consume 门（RoomJoin 已按房间主车过滤 — 此处为对具体 producer 的纵深防御）:
-    /// 账号只能 consume 自己有权车的 producer；设备/legacy 放行。
+    /// Consume gate (RoomJoin already filtered by room owner vehicle -- this is defense-in-depth per producer):
+    /// accounts may only consume producers of vehicles they are authorized for; devices/legacy allowed.
     pub fn can_consume(&self, producer_owner: Option<&str>) -> Result<(), String> {
         match self {
             Self::Account(a) => match producer_owner {
-                // 非设备 producer（legacy 会话/未知来源）— 无主可校验，放行（兼容既有部署）。
+                // Non-device producer (legacy session/unknown origin) -- no owner to check against, allowed (compat with existing deployments).
                 None => Ok(()),
                 Some(v) if a.can_access_vehicle(v) => Ok(()),
                 Some(v) => Err(format!(
@@ -202,7 +202,7 @@ impl SessionIdentity {
         }
     }
 
-    /// 急停门: operator/admin + 对该车的访问权（D-H11 急停强审计 — 见 audit.rs）。
+    /// Emergency-stop gate: operator/admin + access to that vehicle (D-H11 strong audit -- see audit.rs).
     pub fn can_emergency(&self, room_owner: Option<&str>) -> Result<(), String> {
         match self {
             Self::Account(a) if a.role.can_emergency() => match room_owner {
@@ -220,11 +220,11 @@ impl SessionIdentity {
                 a.role.as_str()
             )),
             Self::Device(d) => Err(format!("device {d} cannot send emergency (receiver side)")),
-            Self::Legacy => Ok(()), // dev PSK 路径
+            Self::Legacy => Ok(()), // dev PSK path
         }
     }
 
-    /// 配置下发门（REST / admin API 用; WS 入站 ConfigPush 一律拒绝 — server 单向）。
+    /// Config-push gate (REST / admin API; inbound WS ConfigPush always denied -- server is one-way).
     pub fn can_config(&self) -> bool {
         matches!(self, Self::Account(a) if a.role.can_config())
     }
@@ -239,27 +239,23 @@ mod tests {
     }
 
     fn account(role: CockpitRole, vehicles: Vec<String>) -> SessionIdentity {
-        SessionIdentity::Account(AccountIdentity {
-            username: "u".into(),
-            role,
-            vehicles,
-        })
+        SessionIdentity::Account(AccountIdentity { username: "u".into(), role, vehicles })
     }
 
-    /// D-H11 矩阵全组合（表驱动）: 能力 × 角色 × 车授权。
+    /// Full D-H11 matrix combination (table-driven): capability x role x vehicle authorization.
     #[test]
     fn matrix_pull_by_role_and_allowlist() {
-        // (角色, 白名单, 目标车, 期望)
+        // (role, allowlist, target vehicle, expected)
         let cases: &[(CockpitRole, &[&str], &str, bool)] = &[
             (CockpitRole::Viewer, &["ms-car1"], "ms-car1", true),
             (CockpitRole::Viewer, &["ms-car1"], "ms-car2", false),
-            (CockpitRole::Viewer, &[], "ms-car1", false), // 空白名单 = 无车可看
+            (CockpitRole::Viewer, &[], "ms-car1", false), // empty allowlist = nothing to watch
             (CockpitRole::Operator, &["ms-car1"], "ms-car1", true),
             (CockpitRole::Operator, &["ms-car1"], "ms-car2", false),
             (CockpitRole::Operator, &[], "ms-car1", false),
-            (CockpitRole::Admin, &[], "ms-car9", true), // 任意车
-            (CockpitRole::Dispatcher, &[], "ms-car9", true), // 任意车
-            (CockpitRole::Dispatcher, &["ms-car1"], "ms-car9", true), // 白名单不生效
+            (CockpitRole::Admin, &[], "ms-car9", true), // any vehicle
+            (CockpitRole::Dispatcher, &[], "ms-car9", true), // any vehicle
+            (CockpitRole::Dispatcher, &["ms-car1"], "ms-car9", true), // allowlist not applied
         ];
         for (role, list, target, want) in cases {
             assert_eq!(
@@ -267,7 +263,7 @@ mod tests {
                 *want,
                 "role={role:?} allowed={list:?} target={target}"
             );
-            // 音频 = 拉流同矩阵
+            // audio = same matrix as pull
             assert_eq!(role.can_audio(target, &allowed(list)), *want);
         }
     }
@@ -275,7 +271,7 @@ mod tests {
     #[test]
     fn matrix_boolean_capabilities_by_role() {
         let cases: &[(CockpitRole, bool, bool, bool, bool)] = &[
-            // (角色, control, emergency, config, status)
+            // (role, control, emergency, config, status)
             (CockpitRole::Viewer, false, false, false, false),
             (CockpitRole::Operator, true, true, false, true),
             (CockpitRole::Admin, true, true, true, true),
@@ -301,41 +297,41 @@ mod tests {
             assert_eq!(want.as_str(), s);
         }
         for bad in ["", "superuser", "ADMIN", "viewer ", "null"] {
-            assert_eq!(CockpitRole::parse(bad), None, "{bad:?} 必须拒绝");
+            assert_eq!(CockpitRole::parse(bad), None, "{bad:?} must be rejected");
         }
     }
 
-    // ── SessionIdentity 门 ──────────────────────────────────────────────────
+    // -- SessionIdentity gates --------------------------------------------------------------
 
     #[test]
     fn join_gate_account_allowlist() {
         let op_car1 = account(CockpitRole::Operator, allowed(&["ms-car1"]));
-        assert_eq!(op_car1.join_vehicle_room(Some("ms-car1")), None, "授权车放行");
+        assert_eq!(op_car1.join_vehicle_room(Some("ms-car1")), None, "allowlisted vehicle allowed");
         assert!(
             op_car1.join_vehicle_room(Some("ms-car2")).is_some(),
-            "非白名单车拒绝（租户隔离）"
+            "non-allowlisted vehicle denied (tenant isolation)"
         );
-        assert_eq!(op_car1.join_vehicle_room(None), None, "房间无主放行（车未上线）");
+        assert_eq!(op_car1.join_vehicle_room(None), None, "unowned room allowed (vehicle offline)");
 
         let viewer = account(CockpitRole::Viewer, allowed(&["ms-car1"]));
-        assert_eq!(viewer.join_vehicle_room(Some("ms-car1")), None, "viewer 可拉流");
+        assert_eq!(viewer.join_vehicle_room(Some("ms-car1")), None, "viewer can pull");
         assert!(viewer.join_vehicle_room(Some("ms-car2")).is_some());
 
         let admin = account(CockpitRole::Admin, vec![]);
-        assert_eq!(admin.join_vehicle_room(Some("ms-car9")), None, "admin 任意车");
+        assert_eq!(admin.join_vehicle_room(Some("ms-car9")), None, "admin any vehicle");
 
         let disp = account(CockpitRole::Dispatcher, vec![]);
-        assert_eq!(disp.join_vehicle_room(Some("ms-car9")), None, "dispatcher 任意车");
+        assert_eq!(disp.join_vehicle_room(Some("ms-car9")), None, "dispatcher any vehicle");
     }
 
     #[test]
     fn join_gate_device_tenant_isolation() {
         let veh_a = SessionIdentity::Device("ms-car-a".into());
-        assert_eq!(veh_a.join_vehicle_room(None), None, "车加入自己的空房间");
-        assert_eq!(veh_a.join_vehicle_room(Some("ms-car-a")), None, "车加入自己的房间");
+        assert_eq!(veh_a.join_vehicle_room(None), None, "vehicle joins its own empty room");
+        assert_eq!(veh_a.join_vehicle_room(Some("ms-car-a")), None, "vehicle joins its own room");
         assert!(
             veh_a.join_vehicle_room(Some("ms-car-b")).is_some(),
-            "车 A 不可加入车 B 房间（租户隔离）"
+            "vehicle A cannot join vehicle B's room (tenant isolation)"
         );
         assert_eq!(SessionIdentity::Legacy.join_vehicle_room(Some("ms-car-b")), None);
     }
@@ -350,42 +346,49 @@ mod tests {
 
     #[test]
     fn control_capability_matrix() {
-        // I1 review: P2P 路径控制门 — 矩阵 + 身份
+        // I1 review: P2P path control gate -- matrix + identity
         assert!(!account(CockpitRole::Viewer, vec![]).can_control());
         assert!(!account(CockpitRole::Dispatcher, vec![]).can_control());
         assert!(account(CockpitRole::Operator, vec![]).can_control());
         assert!(account(CockpitRole::Admin, vec![]).can_control());
-        assert!(SessionIdentity::Device("d".into()).can_control(), "设备是控制接收方");
-        assert!(SessionIdentity::Legacy.can_control(), "legacy 不受矩阵限制");
+        assert!(
+            SessionIdentity::Device("d".into()).can_control(),
+            "device is the control receiver"
+        );
+        assert!(SessionIdentity::Legacy.can_control(), "legacy is not constrained by the matrix");
     }
 
     #[test]
     fn produce_gate_device_and_legacy_allowed_account_denied() {
-        assert_eq!(SessionIdentity::Device("d".into()).can_produce("vehicle_x"), Ok(()), "车端 produce 自动允许");
-        assert_eq!(SessionIdentity::Legacy.can_produce("vehicle_x"), Ok(()), "dev 路径放行");
+        assert_eq!(
+            SessionIdentity::Device("d".into()).can_produce("vehicle_x"),
+            Ok(()),
+            "vehicle-side produce auto-allowed"
+        );
+        assert_eq!(SessionIdentity::Legacy.can_produce("vehicle_x"), Ok(()), "dev path allowed");
         assert!(
             account(CockpitRole::Viewer, vec![]).can_produce("vehicle_x").is_err(),
-            "账号禁止 produce（视频房）"
+            "accounts denied produce (video room)"
         );
         assert!(account(CockpitRole::Admin, vec![]).can_produce("vehicle_x").is_err());
     }
 
     #[test]
     fn produce_gate_audio_room_account_exempt() {
-        // P1/D-H11 修订: audio-* 会议房账号上行豁免（C29 麦语义）；视频房与近前缀房仍禁。
+        // P1/D-H11 revision: audio-* conference-room account uplink exemption (C29 mic semantics); video rooms and near-prefix rooms still denied.
         assert_eq!(
             account(CockpitRole::Operator, vec![]).can_produce("audio-car1"),
             Ok(()),
-            "audio 会议房账号上行豁免"
+            "audio conference room account uplink exempt"
         );
         assert_eq!(account(CockpitRole::Viewer, vec![]).can_produce("audio-car1"), Ok(()));
         assert!(
             account(CockpitRole::Operator, vec![]).can_produce("vehicle_car1").is_err(),
-            "视频房账号仍禁"
+            "video room account still denied"
         );
         assert!(
             account(CockpitRole::Operator, vec![]).can_produce("audiox").is_err(),
-            "audio 前缀必须是 audio-（近前缀不豁免）"
+            "audio prefix must be audio- (near prefix not exempt)"
         );
     }
 
@@ -393,8 +396,11 @@ mod tests {
     fn consume_gate_account_allowlist_device_legacy_allow() {
         let op_car1 = account(CockpitRole::Operator, allowed(&["ms-car1"]));
         assert_eq!(op_car1.can_consume(Some("ms-car1")), Ok(()));
-        assert!(op_car1.can_consume(Some("ms-car2")).is_err(), "非授权车 producer 拒绝");
-        assert_eq!(op_car1.can_consume(None), Ok(()), "无主 producer 放行（兼容）");
+        assert!(
+            op_car1.can_consume(Some("ms-car2")).is_err(),
+            "non-authorized vehicle producer denied"
+        );
+        assert_eq!(op_car1.can_consume(None), Ok(()), "ownerless producer allowed (compat)");
         assert_eq!(SessionIdentity::Device("d".into()).can_consume(Some("ms-car2")), Ok(()));
         assert_eq!(SessionIdentity::Legacy.can_consume(Some("ms-car2")), Ok(()));
     }
@@ -402,20 +408,27 @@ mod tests {
     #[test]
     fn emergency_gate_matrix() {
         let op_car1 = account(CockpitRole::Operator, allowed(&["ms-car1"]));
-        assert_eq!(op_car1.can_emergency(Some("ms-car1")), Ok(()), "operator 授权车急停");
-        assert!(op_car1.can_emergency(Some("ms-car2")).is_err(), "非授权车拒绝");
-        assert!(op_car1.can_emergency(None).is_err(), "车离线拒绝");
+        assert_eq!(
+            op_car1.can_emergency(Some("ms-car1")),
+            Ok(()),
+            "operator emergency on allowlisted vehicle"
+        );
+        assert!(op_car1.can_emergency(Some("ms-car2")).is_err(), "non-authorized vehicle denied");
+        assert!(op_car1.can_emergency(None).is_err(), "vehicle offline denied");
         let viewer = account(CockpitRole::Viewer, allowed(&["ms-car1"]));
-        assert!(viewer.can_emergency(Some("ms-car1")).is_err(), "viewer 无急停");
+        assert!(viewer.can_emergency(Some("ms-car1")).is_err(), "viewer has no emergency stop");
         let dispatcher = account(CockpitRole::Dispatcher, vec![]);
-        assert!(dispatcher.can_emergency(Some("ms-car9")).is_err(), "dispatcher 无急停");
+        assert!(
+            dispatcher.can_emergency(Some("ms-car9")).is_err(),
+            "dispatcher has no emergency stop"
+        );
         let admin = account(CockpitRole::Admin, vec![]);
-        assert_eq!(admin.can_emergency(Some("ms-car9")), Ok(()), "admin 任意车急停");
+        assert_eq!(admin.can_emergency(Some("ms-car9")), Ok(()), "admin emergency on any vehicle");
         assert!(
             SessionIdentity::Device("d".into()).can_emergency(Some("ms-car-d")).is_err(),
-            "车端是接收方"
+            "vehicle side is the receiver"
         );
-        assert_eq!(SessionIdentity::Legacy.can_emergency(Some("ms-car1")), Ok(()), "dev 路径");
+        assert_eq!(SessionIdentity::Legacy.can_emergency(Some("ms-car1")), Ok(()), "dev path");
     }
 
     #[test]
@@ -432,9 +445,6 @@ mod tests {
     fn who_labels_identity() {
         assert_eq!(SessionIdentity::Legacy.who(), "legacy-psk");
         assert_eq!(SessionIdentity::Device("ms-x".into()).who(), "device:ms-x");
-        assert_eq!(
-            account(CockpitRole::Operator, vec![]).who(),
-            "u[operator]"
-        );
+        assert_eq!(account(CockpitRole::Operator, vec![]).who(), "u[operator]");
     }
 }

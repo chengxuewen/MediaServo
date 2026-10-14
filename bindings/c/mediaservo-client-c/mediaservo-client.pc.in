@@ -4,7 +4,7 @@ libdir=${exec_prefix}/lib
 includedir=${prefix}/include
 
 Name: mediaservo-client
-Description: MediaServo client C ABI — 舱端/消费侧 SDK（登录 + SFU 消费 + 控制 DC）
+Description: MediaServo client C ABI — cockpit/consumer-side SDK (login + SFU consumption + control DC)
 Version: @VERSION@
 Libs: -L${libdir} -lmediaservo_client
 Cflags: -I${includedir}

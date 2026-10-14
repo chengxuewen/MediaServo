@@ -4,10 +4,10 @@
   <name>mediaservo_control_relay</name>
   <version>0.1.0</version>
   <description>
-    MSRTC 舱端遥控 → ROS2 桥接样例（G5 三层之 device-day 面）：经 mediaservo-client
-    C++ SDK（sdk-client 包 components/client）建立控制 DataChannel，把回执转发为
-    ROS topic /mediaservo/ack；指令由 ROS topic /mediaservo/cmd 注入（seq 进程内自增）。
-    构建前置：sdk-client 包安装（libmediaservo_client + headers，见包内 README）。
+    MSRTC cockpit teleop → ROS2 bridge sample (the device-day face of the G5 three layers): via the mediaservo-client
+    C++ SDK (the sdk-client package's components/client) it establishes a control DataChannel and forwards receipts as
+    the ROS topic /mediaservo/ack; commands are injected via the ROS topic /mediaservo/cmd (seq increments in-process).
+    Build prerequisite: the sdk-client package installed (libmediaservo_client + headers; see the in-package README).
   </description>
   <maintainer email="dev@maxsense.local">maxsense</maintainer>
   <license>Apache-2.0</license>

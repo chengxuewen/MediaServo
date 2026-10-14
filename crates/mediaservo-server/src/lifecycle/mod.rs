@@ -1,11 +1,11 @@
-//! `msrtc-server` 实例生命周期（frontend-process-split T15-T19，单二进制双角色之管理面）。
+//! `msrtc-server` instance lifecycle (frontend-process-split T15-T19, the admin plane of the single-binary dual role).
 //!
-//! 引擎 = oxmgr（与 host 同构，design.md「Server 进程管理：修正版」）。拓扑 2~3 进程
-//! （server + caddy web + weaknet-serve 条件并管），oxfile 静态模板免翻译层。所有 oxmgr 调用走**实例 daemon**
-//! （OXMGR_HOME/OXMGR_DAEMON_ADDR 派生自实例目录——C32 隔离，基数 18500 避开 host 系）。
+//! Engine = oxmgr (isomorphic with host, design.md "Server process management: revised"). Topology of 2~3 processes
+//! (server + caddy web + weaknet-serve conditionally), oxfile static template with no translation layer. All oxmgr calls go through the **instance daemon**
+//! (OXMGR_HOME/OXMGR_DAEMON_ADDR derived from the instance dir -- C32 isolation; base 18500 avoids the host family).
 //!
-//! 向后兼容硬门：main.rs 仅在首参命中 LIFECYCLE_CMDS 时进入本模块；
-//! `run`/无参/`--config`/未知参数 = 守护模式原样（systemd/compose/docker 直启零破坏）。
+//! Backward-compat hard gate: main.rs enters this module only when the first arg matches LIFECYCLE_CMDS;
+//! `run`/no-arg/`--config`/unknown args = daemon mode as-is (systemd/compose/docker direct starts untouched).
 
 mod conflict;
 mod inspect;
@@ -27,7 +27,7 @@ use templates::{
     weaknet_listen,
 };
 
-/// 管理面子命令表（main.rs 派发判据）。`run` 不在此列——它走守护模式（显式形态）。
+/// Admin-plane subcommand table (main.rs dispatch predicate). `run` is not listed -- it goes to daemon mode (explicit form).
 pub const LIFECYCLE_CMDS: &[&str] = &[
     "init", "start", "stop", "restart", "status", "doctor", "logs", "startup", "monit", "ps",
     "version",
@@ -54,13 +54,13 @@ pub fn dispatch(cmd: &str, args: &mut dyn Iterator<Item = String>) -> i32 {
             0
         }
         other => {
-            eprintln!("未知子命令: {other}");
+            eprintln!("unknown subcommand: {other}");
             2
         }
     }
 }
 
-/// 解析实例目录（位置参数，智能默认同 host：cwd 有实例→"."，二进制同级/上级→安装根，否则 .server）。
+/// Resolve the instance dir (positional arg, smart default like host: instance in cwd -> ".", sibling/parent of binary -> install root, else .server).
 pub(super) fn parse_dir(args: &mut dyn Iterator<Item = String>) -> Result<PathBuf, String> {
     let Some(arg) = args.next() else {
         if PathBuf::from("etc/server.yaml").exists() {
@@ -81,19 +81,21 @@ pub(super) fn parse_dir(args: &mut dyn Iterator<Item = String>) -> Result<PathBu
         return Ok(PathBuf::from(".server"));
     };
     if arg.starts_with("--") {
-        return Err(format!("实例目录参数不能以 -- 开头（目录是位置参数）: {arg}"));
+        return Err(format!(
+            "instance dir argument must not start with -- (dir is a positional arg): {arg}"
+        ));
     }
     if args.next().is_some() {
-        return Err("实例目录仅接受一个位置参数".to_string());
+        return Err("instance dir accepts only one positional argument".to_string());
     }
     Ok(PathBuf::from(arg))
 }
 
 // ── init ─────────────────────────────────────────────────────────────────────
 
-/// `init [<dir>]`：实例目录生成（PIT-160：已存在文件**永不覆盖**）。
-/// etc/{server,devices,accounts}.yaml + Caddyfile + run/oxfile.toml + secret 自举（0600 幂等，
-/// compose entrypoint 逻辑归位——双轨同语义）。env MEDIASERVO_ADMIN_PASSWORD 引导首账号（entrypoint ⑤）。
+/// `init [<dir>]`: instance dir generation (PIT-160: existing files are **never overwritten**).
+/// etc/{server,devices,accounts}.yaml + Caddyfile + run/oxfile.toml + secret bootstrap (0600, idempotent,
+/// compose entrypoint logic folded in -- both tracks share semantics). env MEDIASERVO_ADMIN_PASSWORD seeds the first account (entrypoint 5).
 fn cmd_init(args: &mut dyn Iterator<Item = String>) -> i32 {
     let dir = match parse_dir(args) {
         Ok(d) => d,
@@ -114,20 +116,22 @@ fn cmd_init(args: &mut dyn Iterator<Item = String>) -> i32 {
 fn init_instance(dir: &Path) -> Result<(), String> {
     let etc = dir.join("etc");
     let run = dir.join("run");
-    std::fs::create_dir_all(&etc).map_err(|e| format!("创建 {} 失败: {e}", etc.display()))?;
-    std::fs::create_dir_all(run.join("logs")).map_err(|e| format!("创建 run 目录失败: {e}"))?;
+    std::fs::create_dir_all(&etc)
+        .map_err(|e| format!("failed to create {}: {e}", etc.display()))?;
+    std::fs::create_dir_all(run.join("logs"))
+        .map_err(|e| format!("failed to create run dir: {e}"))?;
 
-    // ① server.yaml（含凭据 → 0600；存在即整体跳过——secret 不可再生覆盖，entrypoint ② 幂等语义）
+    // 1. server.yaml (contains credentials -> 0600; skipped entirely if present -- secrets must not be regenerated/overwritten, entrypoint 2 idempotency)
     let cfg_path = etc.join("server.yaml");
     if cfg_path.exists() {
-        eprintln!("init: {} 已存在，跳过（凭据保留）", cfg_path.display());
+        eprintln!("init: {} already exists, skipping (credentials preserved)", cfg_path.display());
     } else {
         let yaml = render_server_yaml(&gen_secret(), &gen_secret());
         write_private(&cfg_path, yaml.as_bytes())?;
-        println!("已生成 {}（PSK/JWT 自举，0600）", cfg_path.display());
+        println!("generated {} (PSK/JWT bootstrap, 0600)", cfg_path.display());
     }
 
-    // ② 注册表空模板（管理面 C33；逐文件缺失才写）
+    // 2. Empty registry templates (admin-plane C33; written only per missing file)
     let registry_templates = [
         ("devices.yaml", templates::DEVICES_TEMPLATE),
         ("accounts.yaml", templates::ACCOUNTS_TEMPLATE),
@@ -135,17 +139,18 @@ fn init_instance(dir: &Path) -> Result<(), String> {
     for (name, content) in registry_templates {
         let p = etc.join(name);
         if p.exists() {
-            eprintln!("init: {} 已存在，跳过", p.display());
+            eprintln!("init: {} already exists, skipping", p.display());
         } else {
-            std::fs::write(&p, content).map_err(|e| format!("写入 {} 失败: {e}", p.display()))?;
-            println!("已生成 {}", p.display());
+            std::fs::write(&p, content)
+                .map_err(|e| format!("failed to write {}: {e}", p.display()))?;
+            println!("generated {}", p.display());
         }
     }
 
-    // ③ admin 引导账号（env 提供且尚无任何 admin 时追加——entrypoint ⑤ 归位）
+    // 3. admin bootstrap account (appended when env provided and no admin exists yet -- entrypoint 5 folded in)
     bootstrap_admin_from_env(&etc.join("accounts.yaml"))?;
 
-    // ④ Caddyfile（config-unification P1 读序：yaml > env MEDIASERVO_WEB_PORT > 缺省 8080）
+    // 4. Caddyfile (config-unification P1 read order: yaml > env MEDIASERVO_WEB_PORT > default 8080)
     let caddy_path = etc.join("Caddyfile");
     let yaml_cfg = std::fs::read_to_string(&cfg_path)
         .ok()
@@ -154,34 +159,34 @@ fn init_instance(dir: &Path) -> Result<(), String> {
     let backend_port =
         std::fs::read_to_string(&cfg_path).ok().and_then(|c| parse_listen_port(&c)).unwrap_or(9800);
     if caddy_path.exists() {
-        eprintln!("init: {} 已存在，跳过", caddy_path.display());
+        eprintln!("init: {} already exists, skipping", caddy_path.display());
     } else {
         let root = web_root_override.unwrap_or_else(|| absolute(&dir.join("web")));
         std::fs::write(
             &caddy_path,
             render_caddyfile(web_port, backend_port, &root, &weaknet_listen(weaknet_port)),
         )
-        .map_err(|e| format!("写入 Caddyfile 失败: {e}"))?;
-        println!("已生成 {}（:{web_port} → 127.0.0.1:{backend_port}）", caddy_path.display());
+        .map_err(|e| format!("failed to write Caddyfile: {e}"))?;
+        println!("generated {} (:{web_port} -> 127.0.0.1:{backend_port})", caddy_path.display());
     }
 
-    // ⑤ oxfile（静态 2~3 条目，weaknet 条件渲染 [M-1]；存在不覆盖——手工 env 编辑保留，
-    //    陈旧迁移=Python _drop_stale_server_oxfile 单点 [bF3]）
+    // 5. oxfile (static 2~3 entries, weaknet conditional rendering [M-1]; never overwrites -- manual env edits preserved,
+    //    stale migration = Python _drop_stale_server_oxfile single point [bF3])
     let oxfile = run.join("oxfile.toml");
     if oxfile.exists() {
-        eprintln!("init: {} 已存在，跳过", oxfile.display());
+        eprintln!("init: {} already exists, skipping", oxfile.display());
     } else {
         write_oxfile(&run)?;
     }
     println!(
-        "init: 实例就绪 {}（start 后用 server 日志 setup-token 建号，或 MEDIASERVO_ADMIN_PASSWORD 重跑 init）",
+        "init: instance ready {} (after start use the server log setup-token to create an account, or rerun init with MEDIASERVO_ADMIN_PASSWORD)",
         dir.display()
     );
     Ok(())
 }
 
-/// 统一端口读序（config-unification P1）：yaml(Option 字段) > env > 常量缺省。
-/// init ④ 与 write_oxfile 共用——消灭双份读序漂移。yaml_cfg=None（缺文件/解析失败）= 全兜底。
+/// Unified port read order (config-unification P1): yaml (Option field) > env > constant default.
+/// Shared by init 4 and write_oxfile -- eliminates dual read-order drift. yaml_cfg=None (missing file/parse failure) = full fallback.
 fn resolved_ports(
     yaml_cfg: Option<&mediaservo_common::config::ServerConfig>,
 ) -> (u16, Option<std::path::PathBuf>, u16) {
@@ -195,14 +200,14 @@ fn resolved_ports(
     (web_port, root, weaknet_port)
 }
 
-/// 写 run/oxfile.toml（init 与 start-缺文件兜底共用——Rust 侧唯一 oxfile 写点）。
-/// PIT-160 根修（PLAN §2.4）：重渲染不从零——合并源 = live oxfile 在场用之，否则
-/// .bak（上次成功渲染快照，覆盖「用户删文件后 start 重渲」与「Python deploy stale
-/// 备份后 init 重渲」两路），双缺 = 首渲纯渲染；写毕以终态刷新 .bak（多轮重渲 N 不
-/// 翻倍——快照随合并结果推进）。.bak 对 oxmgr 惰性（只读显式 oxfile 路径）。
+/// Write run/oxfile.toml (shared by init and the start missing-file fallback -- the only Rust-side oxfile write point).
+/// PIT-160 root fix (PLAN S2.4): re-rendering never starts from scratch -- merge source = the live oxfile when present, else
+/// the .bak (last successful render snapshot, covering both "user deleted the file then start re-renders" and "Python deploy stale
+/// backup then init re-renders"); both missing = first render, pure. After writing, refresh .bak with the final state (N re-renders
+/// do not double the manual entries -- the snapshot advances with the merge result). .bak is inert to oxmgr (which reads the explicit oxfile path).
 fn write_oxfile(run_dir: &Path) -> Result<(), String> {
-    let dir = run_dir.parent().ok_or("oxfile 渲染需实例根目录")?;
-    let bin = std::env::current_exe().map_err(|e| format!("current_exe 失败: {e}"))?;
+    let dir = run_dir.parent().ok_or("oxfile rendering needs the instance root dir")?;
+    let bin = std::env::current_exe().map_err(|e| format!("current_exe failed: {e}"))?;
     let yaml_cfg = std::fs::read_to_string(dir.join("etc").join("server.yaml"))
         .ok()
         .and_then(|c| serde_yaml::from_str::<mediaservo_common::config::ServerConfig>(&c).ok());
@@ -232,39 +237,44 @@ fn write_oxfile(run_dir: &Path) -> Result<(), String> {
         }
         _ => (0, 0),
     };
-    std::fs::write(&path, &text).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
-    println!("已生成 {}", path.display());
+    std::fs::write(&path, &text).map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+    println!("generated {}", path.display());
     if let Err(e) = std::fs::write(&bak, &text) {
-        eprintln!("警告: {} 快照写入失败（{e}）——下次重渲染无手工 env 可回吸收", bak.display());
+        eprintln!(
+            "warning: failed to write {} snapshot ({e}) -- the next re-render has no manual env to absorb",
+            bak.display()
+        );
     }
     if corrupt {
         eprintln!(
-            "警告: 旧 {source} 非本程序渲染形——本次退化为纯渲染，手工 env 未回吸收（PIT-160 兜底，不阻塞 start）"
+            "warning: the old {source} was not rendered by this program -- this render degrades to pure rendering, manual env not absorbed (PIT-160 fallback, does not block start)"
         );
     }
     eprintln!("{}", pit160_note(merged, lost));
     Ok(())
 }
 
-/// PIT-160 提示行（纯函数可测）：无手工条目 → 旧指引文本逐字保留；有则「已合并 N 条
-/// 手工 env」变体 + 未并（新渲染无对应 app 条目）计数。渲染器受管键（MEDIASERVO_SFU_*
-/// 与 WEAKNET_STATEDIR）恒以本次渲染为准（baked-wins）、不计入 N。
+/// PIT-160 note line (pure function, testable): no manual entries -> the old guidance text preserved byte-for-byte; otherwise the "merged N
+/// manual env entries" variant + a count of not-merged entries (the new render has no matching app entry). Managed keys of the renderer
+/// (MEDIASERVO_SFU_* and WEAKNET_STATEDIR) always follow this render (baked-wins) and are not counted in N.
 fn pit160_note(merged: usize, lost: usize) -> String {
     if merged == 0 && lost == 0 {
-        return "提示: 若本树此前存在手工 [apps.env] 行（ALLOW_DEV_*/RUST_LOG/WEAKNET_ADMIN_PASS），本次渲染不含它们——按 msrtc.sh -h「环境变量 [B]」回补".to_string();
+        return "Note: if this tree previously had manual [apps.env] lines (ALLOW_DEV_*/RUST_LOG/WEAKNET_ADMIN_PASS), this render does not include them -- restore them per the msrtc.sh -h \"environment variables [B]\" section".to_string();
     }
     let tail = if lost > 0 {
-        format!("；另有 {lost} 条因新渲染无对应 app 条目未并入——按 msrtc.sh -h「环境变量 [B]」回补")
+        format!(
+            "; additionally {lost} entries were not merged because the new render has no matching app entry -- restore them per the msrtc.sh -h \"environment variables [B]\" section"
+        )
     } else {
         String::new()
     };
     format!(
-        "提示: 已合并 {merged} 条手工 env（来源=上次渲染快照；受管键 MEDIASERVO_SFU_*/WEAKNET_STATEDIR 以本次渲染为准）{tail}"
+        "Note: merged {merged} manual env entries (source = last render snapshot; managed keys MEDIASERVO_SFU_*/WEAKNET_STATEDIR follow this render){tail}"
     )
 }
 
-/// weaknet 探针口 = oxfile 反解（`serve --listen 127.0.0.1:NNNN`）——与渲染产物同源；
-/// 反解失败（旧 oxfile 无条目/手工损形）回退缺省常量。
+/// weaknet probe port = reverse-parsed from the oxfile (`serve --listen 127.0.0.1:NNNN`) -- same source as the rendered output;
+/// reverse-parse failure (old oxfile without the entry / manually mangled) falls back to the default constant.
 fn weaknet_probe_port(oxfile: &Path) -> u16 {
     std::fs::read_to_string(oxfile)
         .ok()
@@ -272,15 +282,15 @@ fn weaknet_probe_port(oxfile: &Path) -> u16 {
         .unwrap_or(WEAKNET_SERVE_PORT)
 }
 
-/// init 时把 SFU 相关 env 烘进 oxfile [apps.env]（drill/多实例端口隔离入口）。
-/// 透传键集 = SFU_ENV_KEYS 唯一真源；merge 排除集为 MANAGED_ENV_KEYS（本集 + weaknet
-/// 烘值键——尾刀 baked-wins 裁决：env 透传与模板烘值两族受管键分集命名，各自单源）。
+/// At init, bake SFU-related env into the oxfile [apps.env] (the drill/multi-instance port-isolation entry).
+/// The passthrough key set = the single source SFU_ENV_KEYS; the merge exclusion set is MANAGED_ENV_KEYS (this set + weaknet
+/// baked-value keys -- final-cut baked-wins ruling: the env-passthrough and template-baked families are separately named managed key sets, each single-sourced).
 fn sfu_env_passthrough() -> Vec<(String, String)> {
     SFU_ENV_KEYS.iter().filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v))).collect()
 }
 
-/// caddy 命令探测链（2026-09-29 自适应化）：① PATH ② 本二进制同目录（out/server/bin
-/// 自包含部署——caddy 随包）③ 仓内 pixi 树（源码机）。全落空 = 字面量（保持现降级语义）。
+/// caddy command probe chain (2026-09-29 adaptive): 1. PATH 2. same dir as this binary (out/server/bin
+/// self-contained deployment -- caddy ships with the package) 3. the in-repo pixi tree (source machines). All miss = the literal name (keeps the current degraded semantics).
 fn caddy_command() -> String {
     caddy_probe().unwrap_or_else(|| "caddy".to_string())
 }
@@ -289,7 +299,7 @@ fn caddy_probe() -> Option<String> {
     if let Some(p) = which("caddy") {
         return Some(p);
     }
-    // ② exe 同目录（部署树 bin/ 三件套形态）
+    // 2. exe's own dir (the deploy tree bin/ trio shape)
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
@@ -298,8 +308,8 @@ fn caddy_probe() -> Option<String> {
             return Some(p.to_string_lossy().into_owned());
         }
     }
-    // ③ 仓内 pixi 树（源码机直跑 target/debug 形态；构建期路径，跨机部署由 ② 接管）
-    // （单候选——原数组循环形，1.97 clippy single_element_loop 直线化，语义零差）
+    // 3. in-repo pixi tree (source machines running target/debug directly; a build-time path -- cross-machine deploys are handled by 2)
+    // (single candidate -- the former array loop form, straightened per 1.97 clippy single_element_loop, zero semantic change)
     let cand = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.pixi/envs/default/bin/caddy");
     let p = cand.canonicalize().unwrap_or(cand.clone());
     if p.is_file() {
@@ -326,7 +336,7 @@ fn is_executable(_p: &Path) -> bool {
     true
 }
 
-/// entrypoint ⑤：env MEDIASERVO_ADMIN_PASSWORD 存在时引导 admin（env 读取壳，逻辑在 bootstrap_admin）。
+/// Entrypoint 5: seed the admin when env MEDIASERVO_ADMIN_PASSWORD exists (env read shell; logic in bootstrap_admin).
 fn bootstrap_admin_from_env(path: &Path) -> Result<(), String> {
     let pass = std::env::var("MEDIASERVO_ADMIN_PASSWORD").unwrap_or_default();
     if pass.trim().is_empty() {
@@ -335,15 +345,15 @@ fn bootstrap_admin_from_env(path: &Path) -> Result<(), String> {
     bootstrap_admin(path, &pass)
 }
 
-/// 账号表无 admin 时追加引导 admin（幂等；密码显式入参——避免测试 env 竞争）。
+/// Append a bootstrap admin when the account table has no admin (idempotent; password is an explicit arg -- avoids test env races).
 pub fn bootstrap_admin(path: &Path, pass: &str) -> Result<(), String> {
     if pass.trim().is_empty() {
         return Ok(());
     }
     let text =
-        std::fs::read_to_string(path).map_err(|e| format!("读取 accounts.yaml 失败: {e}"))?;
+        std::fs::read_to_string(path).map_err(|e| format!("failed to read accounts.yaml: {e}"))?;
     if text.lines().any(|l| l.trim() == "admin:") {
-        eprintln!("init: admin 账号已存在，跳过引导");
+        eprintln!("init: admin account already exists, skipping bootstrap");
         return Ok(());
     }
     let mut body = text.replace("accounts: {}", "accounts:");
@@ -351,28 +361,28 @@ pub fn bootstrap_admin(path: &Path, pass: &str) -> Result<(), String> {
         body.push('\n');
     }
     body.push_str(&render_admin_account("admin", pass));
-    std::fs::write(path, body).map_err(|e| format!("写入 accounts.yaml 失败: {e}"))?;
-    println!("init: 已创建引导 admin 账号（bootstrap）");
+    std::fs::write(path, body).map_err(|e| format!("failed to write accounts.yaml: {e}"))?;
+    println!("init: bootstrap admin account created (bootstrap)");
     Ok(())
 }
 
-/// 凭据文件写入 + 0600（unix）。
+/// Credential file write + 0600 (unix).
 fn write_private(path: &Path, data: &[u8]) -> Result<(), String> {
-    let mut f =
-        std::fs::File::create(path).map_err(|e| format!("创建 {} 失败: {e}", path.display()))?;
+    let mut f = std::fs::File::create(path)
+        .map_err(|e| format!("failed to create {}: {e}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         f.set_permissions(std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| format!("{} 权限设置失败: {e}", path.display()))?;
+            .map_err(|e| format!("failed to set permissions on {}: {e}", path.display()))?;
     }
-    f.write_all(data).map_err(|e| format!("写入 {} 失败: {e}", path.display()))
+    f.write_all(data).map_err(|e| format!("failed to write {}: {e}", path.display()))
 }
 
 // ── start / stop / restart ───────────────────────────────────────────────────
 
-/// dev 闭环决策（design「dev 模式闭环」）：显式 --no-web 或 caddy 不在 PATH → 降级仅后端。
-/// 返回 (降级后 no_web, 是否因 caddy 缺失降级[warn 标记])。纯函数可单测。
+/// dev loop decision (design "dev mode loop"): explicit --no-web, or caddy missing from PATH -> degrade to backend-only.
+/// Returns (post-degrade no_web, whether degraded because caddy is missing [warn marker]). Pure function, unit-testable.
 pub fn decide_no_web(no_web_flag: bool, caddy_found: bool) -> (bool, bool) {
     if no_web_flag {
         (true, false)
@@ -383,7 +393,7 @@ pub fn decide_no_web(no_web_flag: bool, caddy_found: bool) -> (bool, bool) {
     }
 }
 
-/// 解析 `start/restart` 参数：`--no-web` flag + 单位置目录。Err(i32) = 已打印的退出码。
+/// Parse `start/restart` args: `--no-web` flag + a single positional dir. Err(i32) = exit code already printed.
 fn parse_start_args(args: &mut dyn Iterator<Item = String>) -> Result<(PathBuf, bool), i32> {
     let mut no_web = false;
     let mut positional: Vec<String> = Vec::new();
@@ -391,14 +401,14 @@ fn parse_start_args(args: &mut dyn Iterator<Item = String>) -> Result<(PathBuf, 
         match a.as_str() {
             "--no-web" => no_web = true,
             s if s.starts_with("--") => {
-                eprintln!("未知参数: {s}");
+                eprintln!("unknown argument: {s}");
                 return Err(2);
             }
             s => positional.push(s.to_string()),
         }
     }
     if positional.len() > 1 {
-        eprintln!("实例目录仅接受一个位置参数");
+        eprintln!("instance dir accepts only one positional argument");
         return Err(2);
     }
     let mut it = positional.into_iter();
@@ -415,10 +425,14 @@ fn cmd_start(args: &mut dyn Iterator<Item = String>, verb: &str) -> i32 {
 
 fn start_impl(dir: &Path, no_web_flag: bool, verb: &str) -> i32 {
     if !dir.join("etc").join("server.yaml").exists() {
-        eprintln!("{verb}: {} 无实例配置——先 `{} init <dir>`", dir.display(), server_product());
+        eprintln!(
+            "{verb}: {} has no instance config -- run `{} init <dir>` first",
+            dir.display(),
+            server_product()
+        );
         return 2;
     }
-    // oxfile：init 产物为准（手工编辑保留——drill 的 SFU 端口注入路径）；缺失才重渲染
+    // oxfile: the init output wins (manual edits preserved -- the drill's SFU port injection path); re-render only if missing
     let oxfile = dir.join("run").join("oxfile.toml");
     if !oxfile.exists()
         && let Err(e) = write_oxfile(&dir.join("run"))
@@ -429,38 +443,42 @@ fn start_impl(dir: &Path, no_web_flag: bool, verb: &str) -> i32 {
     let cfg = match std::fs::read_to_string(dir.join("etc").join("server.yaml")) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("{verb}: 读 server.yaml 失败: {e}");
+            eprintln!("{verb}: failed to read server.yaml: {e}");
             return 1;
         }
     };
     let port = match parse_listen_port(&cfg) {
         Some(p) => p,
         None => {
-            eprintln!("{verb}: server.yaml 解析失败（listen.port 不可读）——先跑 doctor");
+            eprintln!(
+                "{verb}: server.yaml parse failed (listen.port unreadable) -- run doctor first"
+            );
             return 1;
         }
     };
     let (no_web, caddy_missing) = decide_no_web(no_web_flag, caddy_probe().is_some());
     if caddy_missing {
-        eprintln!("{verb}: caddy 不在 PATH——warn 自动降级 --no-web（dev 形态；严格检查用 doctor）");
+        eprintln!(
+            "{verb}: caddy not in PATH -- warn + auto-degrade to --no-web (dev form; use doctor for strict checks)"
+        );
     }
     let web_port = std::fs::read_to_string(dir.join("etc").join("Caddyfile"))
         .ok()
         .and_then(|cf| parse_web_port(&cf))
         .unwrap_or(DEFAULT_WEB_PORT);
-    // weaknet 条目在场（oxfile 文本判据——与 render_oxfile 条件渲染同源 [BA-9]）：
-    // 决定 9810 探针 + --no-web 白名单是否保留 weaknet-serve。
+    // weaknet entry present (oxfile-text predicate -- same source as render_oxfile conditional rendering [BA-9]):
+    // decides whether to keep the 9810 probe + the --no-web allowlist weaknet-serve entry.
     let weaknet_cluster = std::fs::read_to_string(&oxfile).is_ok_and(|t| oxfile_has_weaknet(&t));
-    // 端口竞争防护（host start 同模式：交互 y 接管 / 非 tty 退出）
+    // Port-conflict protection (same pattern as host start: interactive y takeover / non-tty exit)
     let mut busy: Option<(&str, u16)> = None;
     if inspect::port_in_use(port) {
-        busy = Some(("后端监听口", port));
+        busy = Some(("backend listen port", port));
     } else if !no_web && inspect::port_in_use(web_port) {
-        busy = Some(("web 口", web_port));
+        busy = Some(("web port", web_port));
     } else if weaknet_cluster && inspect::port_in_use(weaknet_probe_port(&oxfile)) {
-        // BA-9：外部 dev serve 占 weaknet 口时簇带 crash-loop unit 假「running」——被占报因拒启
-        // 探针口 = oxfile 反解（与渲染同源；反解失败回退常量——config-unification P1）
-        busy = Some(("weaknet 面板口", weaknet_probe_port(&oxfile)));
+        // BA-9: an external dev serve on the weaknet port makes the cluster show a fake "running" with a crash-loop unit -- report the occupied port and refuse to start
+        // Probe port = oxfile reverse parse (same source as the render; fallback to the constant on parse failure -- config-unification P1)
+        busy = Some(("weaknet panel port", weaknet_probe_port(&oxfile)));
     }
     if let Some((what, p)) = busy {
         return contention_flow(verb, dir, what, p, no_web);
@@ -468,9 +486,9 @@ fn start_impl(dir: &Path, no_web_flag: bool, verb: &str) -> i32 {
     apply_oxfile(dir, &oxfile, no_web, verb)
 }
 
-/// `--no-web` 的 apply 白名单（纯函数单测锚点，lck-F8）：**只剔 web，绝不连坐剔 weaknet**
-/// （D5-6）——oxmgr 0.5.0 `--only` = 白名单形制实测：非白名单条目被 stop（不删除），
-/// 三条目下缺省白名单必须含 weaknet-serve（条目在场时）。逗号并列形实测同义（`--only a,b`）。
+/// The `--no-web` apply allowlist (pure-function unit-test anchor, lck-F8): **only web is removed, weaknet is never dragged along**
+/// (D5-6) -- oxmgr 0.5.0 `--only` = allowlist semantics verified live: non-allowlisted entries are stopped (not deleted);
+/// with three entries the default allowlist must include weaknet-serve (when the entry is present). The comma form is verified equivalent (`--only a,b`).
 pub fn no_web_only_list(weaknet_in_oxfile: bool) -> String {
     if weaknet_in_oxfile {
         format!("{},{}", server_product(), WEAKNET_APP)
@@ -488,58 +506,62 @@ fn apply_oxfile(dir: &Path, oxfile: &Path, no_web: bool, verb: &str) -> i32 {
     let refs: Vec<&str> = oxargs.iter().map(String::as_str).collect();
     let code = run_oxmgr(Some(dir), &refs);
     if code == 0 {
-        // BA-6 四点同步之 apply_oxfile 文案：三条目形如实枚举（weaknet 在场才报）
+        // BA-6 four-point sync of the apply_oxfile text: the three-entry form lists them as-is (reported only when weaknet is present)
         let wnet_part = if has_wnet { format!(" + {WEAKNET_APP}") } else { String::new() };
         let cluster = if no_web {
-            format!("仅后端（--no-web）: {svc}{wnet_part}", svc = server_product())
+            format!("backend only (--no-web): {svc}{wnet_part}", svc = server_product())
         } else {
             format!(
-                "整簇: {svc} + {web}{wnet_part}",
+                "whole cluster: {svc} + {web}{wnet_part}",
                 svc = server_product(),
                 web = server_web_app()
             )
         };
-        println!("{verb}: 已应用 {} — {cluster}", oxfile.display());
+        println!("{verb}: applied {} -- {cluster}", oxfile.display());
     }
     code
 }
 
-/// 端口占用 → 定位旧 server 实例 → 交互接管（stop 旧簇）/ 非 tty 退出（host PIT-155 模式）。
+/// Port occupied -> locate the old server instance -> interactive takeover (stop the old cluster) / non-tty exit (host PIT-155 pattern).
 fn contention_flow(verb: &str, dir: &Path, what: &str, port: u16, no_web: bool) -> i32 {
-    eprintln!("{verb}: {what} {port} 被占用——检测到另一进程在监听");
-    // start-conflict-doctor T2：占用者指认（pid/exe/deleted/父 daemon）——指认不杀戮（F1）。
+    eprintln!("{verb}: {what} {port} is occupied -- another process is listening");
+    // start-conflict-doctor T2: occupant attribution (pid/exe/deleted/parent daemon) -- attribute, do not kill (F1).
     let reports = conflict::diagnose_port(port);
     conflict::print_report(&reports, port);
     let old = inspect::find_other_server_dir(dir);
     match &old {
-        Some(od) => eprintln!("  旧实例目录: {}", od.display()),
+        Some(od) => eprintln!("  old instance dir: {}", od.display()),
         None => {
             match inspect::strays_under(&inspect::read_default_registry(), dir).into_iter().next() {
-                // T5: /proc 扫不到 → 占用者可能在共享/旧 daemon 名下（非本实例注册表管辖
-                // ——2026-10-12 事故形）。指认不杀戮：接管路径仍拒（old=None 语义不变）。
+                // T5: /proc scan finds nothing -> the occupant may live under a shared/old daemon (outside this instance registry's
+                // jurisdiction -- the 2026-10-12 incident shape). Attribute, do not kill: the takeover path still refuses (old=None semantics unchanged).
                 Some(e) => {
                     eprintln!(
-                        "  端口占用者在旧共享 daemon 名下: name={} id={} status={} pid={}（非本实例注册表管辖）—— {}",
+                        "  the port occupant lives under the old shared daemon: name={} id={} status={} pid={} (outside this instance registry) -- {}",
                         e.name,
                         e.id,
                         e.status,
                         e.pid.map_or_else(|| "?".into(), |p| p.to_string()),
                         inspect::SPLIT_GUIDANCE
                     );
-                    // global-reap T4：文案闭环——T5 指认后给一键出口
-                    eprintln!("  可用 msrtc-server stop -g 收口（全局按进程身份清场）");
+                    // global-reap T4: text loop closed -- after the T5 attribution, offer a one-command exit
+                    eprintln!("  use msrtc-server stop -g to reap (globally by process identity)");
                 }
-                None => eprintln!("  （未能定位旧实例目录——端口可能被其他程序占用）"),
+                None => eprintln!(
+                    "  (could not locate the old instance dir -- the port may be held by another program)"
+                ),
             }
         }
     }
     if !std::io::stdin().is_terminal() {
         eprintln!(
-            "  非交互环境——退出（多实例共存: 各实例配不同 listen.port + MEDIASERVO_WEB_PORT 后重新 init）"
+            "  non-interactive environment -- exiting (multi-instance coexistence: give each instance a distinct listen.port + MEDIASERVO_WEB_PORT and re-init)"
         );
         return 1;
     }
-    eprint!("  输入 y 接管（停止旧实例并启动当前）/ 其他键退出: ");
+    eprint!(
+        "  enter y to take over (stop the old instance and start this one) / any other key to exit: "
+    );
     let _ = std::io::stdout().flush();
     let mut ans = String::new();
     let _ = std::io::stdin().read_line(&mut ans);
@@ -547,16 +569,18 @@ fn contention_flow(verb: &str, dir: &Path, what: &str, port: u16, no_web: bool) 
         return 1;
     }
     let Some(od) = old else {
-        eprintln!("接管中止: 未定位旧实例目录——继续启动会与存活进程混战（PIT-155 教训）");
+        eprintln!(
+            "takeover aborted: old instance dir not located -- continuing would fight live processes (PIT-155 lesson)"
+        );
         return 1;
     };
-    eprintln!("接管: 停止旧实例 {}", od.display());
+    eprintln!("takeover: stopping old instance {}", od.display());
     stop_cluster_in(&od);
     apply_oxfile(dir, &dir.join("run").join("oxfile.toml"), no_web, verb)
 }
 
-/// stop 参数形（纯解析，单测锚）：`stop` 默认目录 / `stop <dir>` / `stop -g|--all`；
-/// `-g` 与目录并给 = 参数非法（exit 2）。
+/// stop arg form (pure parse, unit-test anchor): `stop` default dir / `stop <dir>` / `stop -g|--all`;
+/// `-g` together with a dir = invalid args (exit 2).
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum StopArgs {
     Dir(Option<String>),
@@ -570,25 +594,25 @@ pub(super) fn parse_stop_args(args: &mut dyn Iterator<Item = String>) -> Result<
         match a.as_str() {
             "-g" | "--all" => global = true,
             s if s.starts_with('-') => {
-                return Err(format!("未知参数: {s}"));
+                return Err(format!("unknown argument: {s}"));
             }
             s => positional.push(s.to_string()),
         }
     }
     if global {
         if !positional.is_empty() {
-            return Err("stop -g 为全局收口，不接受目录参数".to_string());
+            return Err("stop -g is a global reap and does not accept a dir argument".to_string());
         }
         return Ok(StopArgs::Global);
     }
     if positional.len() > 1 {
-        return Err("实例目录仅接受一个位置参数".to_string());
+        return Err("instance dir accepts only one positional argument".to_string());
     }
     Ok(StopArgs::Dir(positional.into_iter().next()))
 }
 
-/// `stop [<dir>]`：按注册名 stop+delete + 实例 daemon 收敛（stop 后本实例无常驻进程）。
-/// `stop -g|--all`：跨目录跨 daemon 按进程身份全局收口（PLAN §2.4）。
+/// `stop [<dir>]`: stop+delete by registered name + instance daemon convergence (after stop this instance has no resident processes).
+/// `stop -g|--all`: global reap by process identity across dirs and daemons (PLAN S2.4).
 fn cmd_stop(args: &mut dyn Iterator<Item = String>) -> i32 {
     let parsed = match parse_stop_args(args) {
         Ok(v) => v,
@@ -610,10 +634,12 @@ fn stop_cluster(dir: &Path) -> i32 {
     let names = match inspect::list_registered_apps(dir) {
         Ok(n) => n,
         Err(e) => {
-            // 二审残余#1：daemon 未起/oxmgr 缺失**不早退**——该变体下残留进程恰可能
-            // 注册在别的 daemon 名下，必须继续走扫尾（幂等成功语义在尾部统一判定）。
+            // Second-review residual #1: daemon down/oxmgr missing must **not exit early** -- in this variant the leftover processes may well
+            // be registered under another daemon; the sweep must still run (idempotent success semantics judged at the tail).
             eprintln!("stop: {e}");
-            println!("stop: 视为无运行中实例（无已管理进程）——继续扫尾兜底");
+            println!(
+                "stop: treated as no running instance (no managed processes) -- continuing the sweep fallback"
+            );
             Vec::new()
         }
     };
@@ -626,30 +652,32 @@ fn stop_cluster(dir: &Path) -> i32 {
             failed = 1;
         }
     }
-    // 扫尾兜底（global-reap T2，PLAN §2.2/§2.3）：实例表停货后 /proc 全扫本实例
-    // 残留（含注册在共享/默认 daemon 名下的分裂形），经所属 daemon 优雅收口防
-    // restart_policy=always 复活；双查 miss 才直杀。
+    // Sweep fallback (global-reap T2, PLAN S2.2/S2.3): after the instance table is emptied, a full /proc scan for this instance's
+    // leftovers (including those registered under shared/default daemons, the split shape), gracefully closed via their owning daemon to
+    // prevent restart_policy=always revival; direct kill only after both lookups miss.
     let reaped_pids = reap_under(dir);
-    // 实例 daemon 收敛（M1：挪扫尾后——先收敛会让实例名下残货被迫走裸杀）
+    // Instance daemon convergence (M1: moved after the sweep -- converging first would force instance-owned leftovers into raw kills)
     if !names.is_empty() && run_oxmgr(Some(dir), &["daemon", "stop"]) != 0 {
-        eprintln!("stop: 实例 daemon 停止命令未成功（可能已自行退出）");
+        eprintln!(
+            "stop: instance daemon stop command did not succeed (it may have exited on its own)"
+        );
     }
     if failed == 0 {
-        // B2 归属归因自证：轮询 ≤5s 三端口——我方残留=失败，陌生者占口=WARN+成功。
+        // B2 ownership-attribution self-verification: poll the three ports for <=5s -- our leftover = failure, stranger holding the port = WARN + success.
         let ports = stop_ports(dir);
         let verified = verify_ports_attribution(&ports, &reaped_pids, dir);
         println!(
-            "stop: 已停止 {n} 个进程并收敛实例 daemon（{prod} 簇）{}",
+            "stop: stopped {n} processes and converged the instance daemon ({prod} cluster) {}",
             if verified {
-                "——自证清场 ✓（端口级）"
+                "-- self-verified clean at port level"
             } else {
-                "——⚠ 端口仍被本实例残留占用"
+                "-- [!] ports still held by this instance's leftovers"
             },
             n = names.len(),
             prod = server_product()
         );
-        // T4-a 实环勘误：自证未过 = 本实例残留在场，语义即失败（RC=0 曾令假绿复活——
-        // 归因行如实报了 failed 但退出码没跟上）。failed 本身不为 0 的路径已按计数返 1。
+        // T4-a live correction: self-verification failed = this instance's leftovers present, which means failure (RC=0 once let a fake-green revival through --
+        // the attribution line reported failed honestly but the exit code did not follow). Paths where failed itself is non-zero already return 1 by count.
         if !verified {
             failed = 1;
         }
@@ -657,16 +685,16 @@ fn stop_cluster(dir: &Path) -> i32 {
     failed
 }
 
-/// 本实例三探针口（parse 失败 → skip 该端口不假红，§2.3）。
-/// S1 起 = startup::instance_ports 共享实现（stop 自证与 startup 冲突闸同源——行为逐字节一致：
-/// 唯一差异 = weaknet 无条目时旧形压缺省常量、新形 skip；冲突闸语义下 skip 更诚实，stop 自证
-/// 面 no-oxfile 条目场景 server.yaml/Caddyfile 仍双口在场，验证面不缩水）。
+/// This instance's three probe ports (parse failure -> skip that port, no fake red, S2.3).
+/// Since S1 = the shared startup::instance_ports implementation (stop self-verification and the startup conflict gate share a source -- behavior byte-identical:
+/// the only difference = the old form collapsed a missing weaknet entry to the default constant while the new form skips; under conflict-gate semantics skip is more honest; on the stop
+/// self-verification side, in no-oxfile-entry scenarios server.yaml/Caddyfile still have both ports present, so the verification surface does not shrink).
 fn stop_ports(dir: &Path) -> Vec<u16> {
     startup::instance_ports(dir)
 }
 
-/// 扫尾执行：签名命中且 dir 归属 ∈ 本实例的存活进程 → reap_plan → 逐个执行。
-/// 返回本轮收口的 pid 集（B2 归因用）。判定全在 reap 纯函数；此处只做 IO 薄壳。
+/// Sweep execution: live processes whose signature hits and whose dir belongs to this instance -> reap_plan -> execute each.
+/// Returns the set of pids reaped this round (for B2 attribution). All judgment lives in the reap pure functions; this is only a thin IO shell.
 fn reap_under(dir: &Path) -> Vec<u32> {
     let live = reap::scan_live_procs();
     let matched: Vec<(&LiveProc, ProcKind)> = live
@@ -676,7 +704,7 @@ fn reap_under(dir: &Path) -> Vec<u32> {
             if !reap::kind_dir_within(&kind, &p.argv, dir) {
                 return None;
             }
-            // caddy 磁盘标记（B1）——root 下须有本产品 bin
+            // caddy disk marker (B1) -- the product's bin must exist under root
             if let ProcKind::Caddy { config } = &kind
                 && !reap::caddy_marker_ok(config)
             {
@@ -686,10 +714,10 @@ fn reap_under(dir: &Path) -> Vec<u32> {
         })
         .collect();
     if matched.is_empty() {
-        println!("扫尾: 无残留进程");
+        println!("sweep: no leftover processes");
         return Vec::new();
     }
-    // 注册表快照：实例 daemon 表（若目录可读）+ 默认 daemon 表（B3 清洗后读取）。
+    // Registry snapshots: the instance daemon table (if the dir is readable) + the default daemon table (read after B3 sanitization).
     let mut registries: Vec<(PathBuf, Vec<inspect::ManagedEntry>)> = Vec::new();
     let inst_dir = dir.join("run").join("oxmgr");
     registries.push((inst_dir.clone(), inspect::read_registry(&inst_dir.join("state.json"))));
@@ -703,14 +731,14 @@ fn reap_under(dir: &Path) -> Vec<u32> {
     execute_steps(&plan).into_iter().map(|(pid, _)| pid).collect()
 }
 
-/// daemon 存活探测：DAEMON_ADDR 端口可连 = 活（§10 直杀闸判据①）。
+/// Daemon liveness probe: DAEMON_ADDR port connectable = alive (S10 direct-kill gate criterion 1).
 fn daemon_alive(daemon_data_dir: &Path) -> bool {
     let home = absolute(daemon_data_dir);
     std::net::TcpStream::connect(("127.0.0.1", instance_daemon_port(&home))).is_ok()
 }
 
-/// 注册表条目在否（§10 直杀闸判据②）：name 命中且 pid 相符（或 pid 陈旧但 name 在场
-/// ——daemon 活着重拉过 pid 的形态，M2 同源）。
+/// Registry entry presence (S10 direct-kill gate criterion 2): name matches and pid matches (or pid is stale but the name is present
+/// -- the shape where a live daemon re-pulled a new pid, M2 same source).
 fn registry_has_entry(daemon_data_dir: &Path, name: &str, pid: &u32) -> bool {
     let state = daemon_data_dir.join("state.json");
     inspect::read_registry(&state)
@@ -718,14 +746,14 @@ fn registry_has_entry(daemon_data_dir: &Path, name: &str, pid: &u32) -> bool {
         .any(|e| e.name == name && (e.pid == Some((*pid).into()) || e.pid.is_none()))
 }
 
-/// 收口步骤执行（T2/T3 共用薄壳；语义与 T2 内联形逐字节一致——daemon 不可达降级
-/// 直杀、直杀横幅、单次补杀上限）。返回 (pid, 结局) 序列供汇总计数。
+/// Reap step execution (shared thin shell by T2/T3; semantics byte-identical to the T2 inline form -- daemon unreachable degrades
+/// to direct kill, the direct-kill banner, a single follow-up kill cap). Returns a (pid, outcome) sequence for tallying.
 fn execute_steps(plan: &[ReapStep]) -> Vec<(u32, StepOutcome)> {
     plan.iter()
         .map(|step| match step {
             ReapStep::ViaDaemon { daemon_data_dir, name, pid } => {
                 println!(
-                    "扫尾: pid {pid}（{name}）→ 经所属 daemon 收口 {}",
+                    "sweep: pid {pid} ({name}) -> closed via its owning daemon {}",
                     daemon_data_dir.display()
                 );
                 if run_oxmgr_for_daemon(daemon_data_dir, &["stop", name]) == 0
@@ -733,26 +761,26 @@ fn execute_steps(plan: &[ReapStep]) -> Vec<(u32, StepOutcome)> {
                 {
                     return (*pid, StepOutcome::ViaDaemon);
                 }
-                // §10 直杀闸（10-13 二次事故）：收口失败 ≠ daemon 死——daemon 可能只是
-                // 短暂不可达/被 stop 收敛但条目仍在拉新 pid。直杀许可 = daemon 确认死亡
-                // 且注册表无该条目；否则只报告（-g/stop 均不越权，防 always 复活循环）。
+                // S10 direct-kill gate (10-13 second incident): close failure != daemon dead -- the daemon may only be
+                // briefly unreachable/converged by stop while its entry is still pulling new pids. Direct-kill permission = daemon confirmed dead
+                // AND no registry entry; otherwise report only (-g/stop never overstep, preventing always-revival loops).
                 if daemon_alive(daemon_data_dir)
                     || registry_has_entry(daemon_data_dir, name, pid)
                 {
                     eprintln!(
-                        "扫尾: pid {pid}（{name}）daemon 收口未成功且 daemon 仍活/条目在——跳过直杀（可经 stop <dir> 或修复 daemon 后重试）"
+                        "sweep: pid {pid} ({name}) daemon close failed and the daemon is alive/entry present -- skipping direct kill (use stop <dir> or fix the daemon and retry)"
                     );
-                    // K2 拆态：直杀闸跳过 ≠ 杀败——独立 Skipped（不入 failed、不抬 RC；
-                    // 终态残货仍由 T4-b 终态二扫兜底计入 failed）。
+                // K2 split states: a direct-kill-gate skip != a kill failure -- a separate Skipped (not counted in failed, does not raise RC;
+                // leftover final-state stock is still caught by the T4-b final second pass and counted as failed).
                     return (*pid, StepOutcome::Skipped);
                 }
-                eprintln!("扫尾: daemon 收口未成功且 daemon 确认死亡——绕过 daemon 直杀");
+                eprintln!("sweep: daemon close failed and the daemon is confirmed dead -- bypassing the daemon to kill directly");
                 kill_and_wait(*pid);
                 let ok = !pid_alive(*pid);
                 (*pid, if ok { StepOutcome::DirectKill } else { StepOutcome::Failed })
             }
             ReapStep::DirectKill { pid, reason: DirectReason::NoRegistry } => {
-                println!("扫尾: pid {pid} → 绕过 daemon 直杀（无所属注册表）");
+                println!("sweep: pid {pid} -> direct kill bypassing the daemon (no owning registry)");
                 kill_and_wait(*pid);
                 let ok = !pid_alive(*pid);
                 (*pid, if ok { StepOutcome::DirectKill } else { StepOutcome::Failed })
@@ -761,34 +789,39 @@ fn execute_steps(plan: &[ReapStep]) -> Vec<(u32, StepOutcome)> {
         .collect()
 }
 
-/// `stop -g`（PLAN §2.4）：/proc 全扫签名命中者（无 dir 过滤、无端口探查），逐个按
-/// 所属 daemon 优雅收口（environ 反查——实例 daemon 名下进程经其自家 home 收口，
-/// 注册表快照=默认 daemon 表 + 各 environ home 表），双查 miss 才直杀。汇总表 +
-/// 签名命中 pid 终态行 + 「实例 daemon 未动」注记（m4）。退出码 = 失败数语义与
-/// 既有 stop 一致（0/1）。
+/// `stop -g` (PLAN S2.4): full /proc scan for signature hits (no dir filter, no port probing), each closed gracefully via
+/// its owning daemon (environ reverse lookup -- processes under an instance daemon are closed via that daemon's own home,
+/// registry snapshot = the default daemon table + each environ home's table), direct kill only after both lookups miss. Summary table +
+/// final-state lines for signature-hit pids + an "instance daemon untouched" note (m4). Exit code = failure count, matching existing stop (0/1).
+/// consistent with existing stop (0/1).
 fn scan_all() -> i32 {
-    println!("stop -g: 全局收口（按进程身份，跨目录跨 daemon；实例 daemon 本身不动）");
+    println!(
+        "stop -g: global reap (by process identity, across dirs and daemons; the instance daemon itself is untouched)"
+    );
     let live = reap::scan_live_procs();
     let (matched, rejected) = reap::select_global(&live, reap::caddy_marker_ok);
     for p in &rejected {
-        println!("stop -g: pid {} caddy 签名命中但磁盘标记缺失（非本产品布局）——跳过", p.pid);
+        println!(
+            "stop -g: pid {} hit the caddy signature but the disk marker is missing (not this product's layout) -- skipping",
+            p.pid
+        );
     }
     if matched.is_empty() {
         println!(
-            "stop -g: 无本产品进程存活——收口汇总: 经 daemon 0 个 / 直杀 0 个 / 跳过 0 个 / 失败 0 个"
+            "stop -g: no live product processes -- reap summary: via daemon 0 / direct kill 0 / skipped 0 / failed 0"
         );
-        println!("终态: 全部清场 ✓");
-        println!("实例 daemon 未动（非目标）");
+        println!("final state: all clear");
+        println!("instance daemon untouched (not a target)");
         return 0;
     }
-    // 注册表快照：默认 daemon 表 + matched 进程各自 environ home 的实例表（reap_plan
-    // 按 per-proc environ 排序配对——-g 传空实例列表即默认表，无需 dir 语义）。
-    // B3 姊妹（T4-b 实环揪出）：default_data_dir() 按 CLI 自身 env 解析，而
-    // run_oxmgr_default 给子进程剥 XDG_DATA_HOME——CLI 视角与执行视角的"默认 daemon"
-    // 会分叉（XDG 沙箱壳里 -g 误扫真默认 daemon 并直杀生产进程=事故形）。统一为
-    // 剥后语义：CLI 侧忽略 XDG_DATA_HOME，与执行子进程同源。
-    // （不绕 env 突改——直接按"剥 XDG_DATA_HOME 后"的解析形计算：HOME/.local/share，
-    //  与 default_data_dir 的 XDG 回退实现一致，零 unsafe）
+    // Registry snapshots: the default daemon table + each matched process's environ home instance table (reap_plan
+    // pairs them sorted per-proc environ; -g passes an empty instance list = the default table, no dir semantics needed).
+    // B3 sibling (T4-b caught live): default_data_dir() resolves from the CLI's own env, while
+    // run_oxmgr_default strips XDG_DATA_HOME from child processes -- the CLI's view of the "default daemon" and the executor's view
+    // diverge (inside an XDG sandbox shell, -g scanned the real default daemon and direct-killed production processes = the incident shape). Unified to
+    // the post-strip semantics: the CLI side ignores XDG_DATA_HOME, same source as the executing child.
+    // (no env mutation shortcut -- computed directly in the "strip XDG_DATA_HOME" resolution form: HOME/.local/share,
+    //  consistent with default_data_dir's XDG fallback implementation, zero unsafe)
     let default_dir = std::env::var_os("XDG_DATA_HOME")
         .filter(|v| !v.is_empty())
         .is_some()
@@ -815,7 +848,7 @@ fn scan_all() -> i32 {
     let steps = execute_steps(&plan);
     let (via, direct, skipped, mut failed) =
         reap::tally(&steps.iter().map(|(_, o)| *o).collect::<Vec<_>>());
-    // 终态（归因型端口终态打印的 -g 形——ports 逐实例各异不探，按签名二扫裁决）：
+    // Final state (the -g form of attribution-style final port printing -- ports differ per instance so they are not probed; judged by a signature second pass):
     let still: Vec<u32> = reap::scan_live_procs()
         .into_iter()
         .filter(|p| match reap::proc_kind(&p.argv, p.exe.as_deref()) {
@@ -826,21 +859,21 @@ fn scan_all() -> i32 {
         .map(|p| p.pid)
         .collect();
     if still.is_empty() {
-        println!("终态: 全部清场 ✓");
+        println!("final state: all clear");
     } else {
-        println!("终态: 仍有签名命中存活 pid: {still:?}");
-        // T4-b 勘误: 终态残货=未清干净，计入失败（曾只看 tally 的 Failed 步——
-        // "杀令已发但进程仍在"之外的复活/漏网形态不被 tally 覆盖）
+        println!("final state: signature-hit pids still alive: {still:?}");
+        // T4-b correction: final-state leftovers = not fully cleared, counted as failures (previously only tally's Failed steps were checked --
+        // revival/escape shapes beyond "kill signal sent but the process still lives" were not covered by the tally)
         failed += still.len();
     }
     println!(
-        "收口汇总: 经 daemon {via} 个 / 直杀 {direct} 个 / 跳过 {skipped} 个 / 失败 {failed} 个"
+        "reap summary: via daemon {via} / direct kill {direct} / skipped {skipped} / failed {failed}"
     );
-    println!("实例 daemon 未动（非目标）");
+    println!("instance daemon untouched (not a target)");
     i32::from(failed > 0)
 }
 
-/// 对**指定 daemon 数据目录**发 oxmgr stop/delete（env 四键按 oxmgr_cmd 同法派生）。
+/// Send oxmgr stop/delete to a **specific daemon data dir** (the four env keys derived like oxmgr_cmd).
 fn run_oxmgr_for_daemon(daemon_data_dir: &Path, args: &[&str]) -> i32 {
     let home = absolute(daemon_data_dir);
     let port = instance_daemon_port(&home);
@@ -855,12 +888,12 @@ fn run_oxmgr_for_daemon(daemon_data_dir: &Path, args: &[&str]) -> i32 {
     }
 }
 
-/// SIGTERM → ≤3s 等退 → SIGKILL（§2.2 末路）。EPERM（跨用户）记失败不崩溃（m2）。
+/// SIGTERM -> wait <=3s -> SIGKILL (S2.2 last resort). EPERM (cross-user) recorded as failure without crashing (m2).
 fn kill_and_wait(pid: u32) {
     unsafe {
         if libc::kill(pid as i32, libc::SIGTERM) != 0 {
             eprintln!(
-                "扫尾: SIGTERM pid {pid} 失败（{}）——可能跨用户进程",
+                "sweep: SIGTERM on pid {pid} failed ({}) -- possibly a cross-user process",
                 std::io::Error::last_os_error()
             );
             return;
@@ -874,7 +907,7 @@ fn kill_and_wait(pid: u32) {
     }
     unsafe {
         if libc::kill(pid as i32, libc::SIGKILL) == 0 {
-            eprintln!("扫尾: pid {pid} 3s 未退——已 SIGKILL");
+            eprintln!("sweep: pid {pid} did not exit within 3s -- SIGKILLed");
         }
     }
 }
@@ -891,8 +924,8 @@ fn pid_alive(pid: u32) -> bool {
     }
 }
 
-/// B2 归属归因端口自证三态（纯判定，单测锚）：Ok(()) = 清场/陌生者 pass，
-/// Err(残留报告集) = 本实例进程仍占口。
+/// B2 ownership-attribution port self-verification three states (pure judgment, unit-test anchor): Ok(()) = clear/stranger pass,
+/// Err(leftover report set) = this instance's processes still hold ports.
 pub(super) fn port_verdict(
     listeners: &[conflict::ConflictReport],
     ours: &[u32],
@@ -902,9 +935,9 @@ pub(super) fn port_verdict(
     if residue.is_empty() { Ok(()) } else { Err(residue) }
 }
 
-/// 轮询 ≤5s（10×500ms）三端口归属归因。true = 全部清场或陌生者占口（WARN）。
+/// Poll the three ports for <=5s (10x500ms) with ownership attribution. true = all clear or a stranger holds the port (WARN).
 fn verify_ports_attribution(ports: &[u16], reaped: &[u32], dir: &Path) -> bool {
-    // 签名命中本实例 dir 的存活 pid 也算"我方"（sweep 匹配集，B2 归因并集）
+    // Live pids whose signature hits this instance's dir also count as "ours" (the sweep match set, B2 attribution union)
     let sweep_matched: Vec<u32> = reap::scan_live_procs()
         .into_iter()
         .filter(|p| {
@@ -923,11 +956,11 @@ fn verify_ports_attribution(ports: &[u16], reaped: &[u32], dir: &Path) -> bool {
             }
             let rep = conflict::diagnose_port(port);
             match port_verdict(&rep, &ours) {
-                // B2：陌生者占口 ≠ 残留——WARN + pass（TalkServo 实录形不假失败）
+                // B2: a stranger holding the port != a leftover -- WARN + pass (the TalkServo live shape must not fake a failure)
                 Ok(()) => {
                     for r in &rep {
                         eprintln!(
-                            "[warn] 端口 {port} 由非本实例进程持有(pid {} exe {}；可能是另一目录本产品实例)",
+                            "[warn] port {port} is held by a non-instance process (pid {} exe {}; possibly another dir's instance of this product)",
                             r.pid, r.exe
                         );
                     }
@@ -935,7 +968,7 @@ fn verify_ports_attribution(ports: &[u16], reaped: &[u32], dir: &Path) -> bool {
                 Err(residue) => {
                     verdict_ok = false;
                     if !residue.is_empty() {
-                        eprintln!("stop: 端口 {port} 仍被本实例残留占用:");
+                        eprintln!("stop: port {port} is still held by this instance's leftovers:");
                         for r in &residue {
                             eprintln!("  {}", r.line());
                         }
@@ -950,7 +983,9 @@ fn verify_ports_attribution(ports: &[u16], reaped: &[u32], dir: &Path) -> bool {
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
     if !verified {
-        eprintln!("stop: 端口级自证未过（本实例残留未清）——复核占用者后处置");
+        eprintln!(
+            "stop: port-level self-verification failed (this instance's leftovers not cleared) -- inspect the occupant before handling"
+        );
     }
     verified
 }
@@ -965,19 +1000,21 @@ fn stop_cluster_in(od: &Path) {
     }
 }
 
-/// `restart [<dir>] [--no-web]`：stop 后重新 apply（守卫复用 start 路径）。
+/// `restart [<dir>] [--no-web]`: stop then apply again (guards reused from the start path).
 fn cmd_restart(args: &mut dyn Iterator<Item = String>) -> i32 {
     let (dir, no_web_flag) = match parse_start_args(args) {
         Ok(v) => v,
         Err(code) => return code,
     };
     if stop_cluster(&dir) != 0 {
-        eprintln!("restart: 停止阶段有失败，仍继续重起（oxmgr 对存活 app 幂等）");
+        eprintln!(
+            "restart: the stop phase had failures; still restarting (oxmgr is idempotent for live apps)"
+        );
     }
     start_impl(&dir, no_web_flag, "restart")
 }
 
-/// monit/ps——oxmgr TUI/列表直通（实例 env；目录走智能默认）。
+/// monit/ps -- oxmgr TUI/list passthrough (instance env; dir uses the smart default).
 fn cmd_oxmgr_proxy(fixed: &[&str]) -> i32 {
     let dir = parse_dir(&mut std::iter::empty()).unwrap_or_else(|_| PathBuf::from("."));
     let mut cmd = oxmgr_cmd(&dir);
@@ -985,14 +1022,16 @@ fn cmd_oxmgr_proxy(fixed: &[&str]) -> i32 {
     match cmd.status() {
         Ok(st) => st.code().unwrap_or(1),
         Err(e) => {
-            eprintln!("无法执行 oxmgr: {e}");
-            eprintln!("提示: deploy 实例 oxmgr 在 <prefix>/bin——export PATH 后重试");
+            eprintln!("cannot execute oxmgr: {e}");
+            eprintln!(
+                "hint: the deployed instance's oxmgr is in <prefix>/bin -- export PATH and retry"
+            );
             1
         }
     }
 }
 
-// ── oxmgr 管线（实例 daemon env——C32 隔离，与 host translate::oxmgr_env 同源派生）──
+// -- oxmgr pipeline (instance daemon env -- C32 isolation, derived from the same source as host translate::oxmgr_env) --
 
 pub(super) fn oxmgr_bin() -> PathBuf {
     std::env::current_exe()
@@ -1004,11 +1043,11 @@ pub(super) fn oxmgr_bin() -> PathBuf {
 
 fn oxmgr_cmd(dir: &Path) -> Command {
     let mut cmd = Command::new(oxmgr_bin());
-    // 绝对化（相对路径依赖 daemon cwd——锚点/重启错位）
+    // Absolute paths (relative paths depend on the daemon's cwd -- anchor/restart misalignment)
     let home = absolute(&dir.join("run").join("oxmgr"));
     let port = instance_daemon_port(&home);
     cmd.env("OXMGR_HOME", &home)
-        .env("OXMGR_DATA_DIR", &home) // C32 记忆用名——双设兼容
+        .env("OXMGR_DATA_DIR", &home) // C32's memory-friendly name -- dual-set for compatibility
         .env("OXMGR_DAEMON_ADDR", format!("127.0.0.1:{port}"))
         .env("OXMGR_API_ADDR", format!("127.0.0.1:{}", port + 1000));
     cmd
@@ -1017,8 +1056,8 @@ fn oxmgr_cmd(dir: &Path) -> Command {
 pub(super) fn run_oxmgr(dir: Option<&Path>, args: &[&str]) -> i32 {
     let mut cmd = match dir {
         Some(d) => oxmgr_cmd(d),
-        // B3（PLAN §2.2）：默认 daemon 语义 = 显式无 OXMGR_*——std Command 继承父 env，
-        // 操作者 shell 残留会把"默认 daemon"操作静默打到实例 daemon（错向同族）。
+        // B3 (PLAN S2.2): default-daemon semantics = explicitly no OXMGR_* -- std Command inherits the parent env,
+        // and operator shell residue would silently point "default daemon" operations at an instance daemon (same family of misdirection).
         None => {
             let mut c = Command::new(oxmgr_bin());
             for k in [
@@ -1026,8 +1065,8 @@ pub(super) fn run_oxmgr(dir: Option<&Path>, args: &[&str]) -> i32 {
                 "OXMGR_DATA_DIR",
                 "OXMGR_DAEMON_ADDR",
                 "OXMGR_API_ADDR",
-                "XDG_DATA_HOME", // B3 姊妹（T4-a 实环揪出）：XDG 沙箱同样令 default_data_dir
-                                 // 解析到非默认 daemon——默认语义=完全无覆盖形态
+                "XDG_DATA_HOME", // B3 sibling (T4-a caught live): an XDG sandbox likewise makes default_data_dir
+                                 // resolve to a non-default daemon -- the default semantics = a fully uncovered form
             ] {
                 c.env_remove(k);
             }
@@ -1038,7 +1077,7 @@ pub(super) fn run_oxmgr(dir: Option<&Path>, args: &[&str]) -> i32 {
         Ok(st) => st.code().unwrap_or(1),
         Err(e) => {
             eprintln!(
-                "oxmgr 执行失败: {e} — 安装 OxMgr（GitHub Releases 预编译 / cargo install，见 https://github.com/Vladimir-Urik/OxMgr#install）"
+                "oxmgr execution failed: {e} -- install OxMgr (GitHub Releases prebuilt / cargo install, see https://github.com/Vladimir-Urik/OxMgr#install)"
             );
             1
         }
@@ -1046,14 +1085,14 @@ pub(super) fn run_oxmgr(dir: Option<&Path>, args: &[&str]) -> i32 {
 }
 
 pub(super) fn oxmgr_list(dir: &Path) -> Result<Vec<serde_json::Value>, String> {
-    let out = oxmgr_cmd(dir)
-        .args(["list", "--json"])
-        .output()
-        .map_err(|e| format!("oxmgr 执行失败: {e} — 请先安装 OxMgr 并加入 PATH"))?;
+    let out = oxmgr_cmd(dir).args(["list", "--json"]).output().map_err(|e| {
+        format!("oxmgr execution failed: {e} -- install OxMgr and add it to PATH first")
+    })?;
     if !out.status.success() {
-        return Err(format!("oxmgr list 失败: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        return Err(format!("oxmgr list failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
     }
-    serde_json::from_slice(&out.stdout).map_err(|e| format!("解析 oxmgr list --json 失败: {e}"))
+    serde_json::from_slice(&out.stdout)
+        .map_err(|e| format!("failed to parse oxmgr list --json: {e}"))
 }
 
 pub(super) fn absolute(p: &Path) -> PathBuf {
@@ -1064,11 +1103,11 @@ pub(super) fn absolute(p: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
-    // ── K2: Skipped 拆态钉测（§6 M1——唯一转换点+杀败不漂移负例+RC 净行为）──
+    // -- K2: Skipped split-state pin tests (S6 M1 -- the only conversion point + no kill-failure drift + RC behavior) --
 
     #[test]
     fn k2_tally_outcome_partition() {
-        // 四态互斥完备：Skipped 独立计数，绝不流入 failed
+        // The four states are mutually exclusive and complete: Skipped counted independently, never flowing into failed
         let out = vec![
             StepOutcome::Skipped,
             StepOutcome::Skipped,
@@ -1081,37 +1120,37 @@ mod tests {
 
     #[test]
     fn k2_kill_failure_is_not_skipped() {
-        // 杀败不漂移负例（M1 精确拒绝）：execute_steps 两个杀败出口
-        // （ViaDaemon 杀败后 daemon 确认死亡→直杀仍活；NoRegistry 直杀仍活）
-        // 必须落 Failed 而非 Skipped——enum 语义级守卫 + tally 消费面守卫。
+        // No kill-failure drift negative (M1 exact rejection): execute_steps' two kill-failure exits
+        // (ViaDaemon kill failed then daemon confirmed dead -> direct kill still alive; NoRegistry direct kill still alive)
+        // must land in Failed, not Skipped -- an enum-level semantic guard + a tally consumer guard.
         let kill_failed = vec![StepOutcome::Failed, StepOutcome::Failed, StepOutcome::Skipped];
         let (_, _, skipped, failed) = reap::tally(&kill_failed);
-        assert_eq!(failed, 2, "杀败=Failed 不漂移");
-        assert_eq!(skipped, 1, "仅直杀闸跳过=Skipped");
-        // RC 公式（MINOR#1）：Skipped 不入 failed → 纯跳过 RC 0
+        assert_eq!(failed, 2, "kill failure = Failed, no drift");
+        assert_eq!(skipped, 1, "only direct-kill-gate skips = Skipped");
+        // RC formula (MINOR#1): Skipped not in failed -> pure skip gives RC 0
         let pure_skip = [StepOutcome::Skipped, StepOutcome::Skipped];
         let (_, _, _, failed) = reap::tally(&pure_skip);
-        assert_eq!(i32::from(failed > 0), 0, "纯跳过+终态干净 → RC 0");
+        assert_eq!(i32::from(failed > 0), 0, "pure skips + clean final state -> RC 0");
     }
 
     #[test]
     fn no_web_only_list_keeps_weaknet_never_web() {
-        // lck-F8/D5-6：--no-web 只剔 web——weaknet 条目在场必入白名单（防连坐 stop）
+        // lck-F8/D5-6: --no-web only removes web -- when the weaknet entry is present it must be in the allowlist (prevent dragged-along stop)
         assert!(no_web_only_list(true).contains(&format!(",{WEAKNET_APP}")));
         assert!(no_web_only_list(true).starts_with(&format!("{},", server_product())));
-        // 条目缺位（bin 未装配的条件渲染形）→ 纯 server，不带幽灵名（apply --only 未知名风险）
+        // Entry absent (conditional-rendering form when bin is not assembled) -> server only, no ghost names (apply --only unknown-name risk)
         assert_eq!(no_web_only_list(false), server_product());
-        // 白名单永不含 web（剔除语义=只剔它）
+        // The allowlist never contains web (removal semantics = it alone is removed)
         assert!(!no_web_only_list(true).contains(&server_web_app()));
         assert!(!no_web_only_list(false).contains(&server_web_app()));
     }
 
     #[test]
     fn no_web_downgrade_decision() {
-        assert_eq!(decide_no_web(true, true), (true, false)); // 显式 --no-web
-        assert_eq!(decide_no_web(true, false), (true, false)); // 显式优先，无 warn 标记
-        assert_eq!(decide_no_web(false, false), (true, true)); // caddy 缺失自动降级 + warn
-        assert_eq!(decide_no_web(false, true), (false, false)); // 整簇
+        assert_eq!(decide_no_web(true, true), (true, false)); // explicit --no-web
+        assert_eq!(decide_no_web(true, false), (true, false)); // explicit wins, no warn marker
+        assert_eq!(decide_no_web(false, false), (true, true)); // caddy missing auto-degrade + warn
+        assert_eq!(decide_no_web(false, true), (false, false)); // whole cluster
     }
 
     #[test]
@@ -1122,7 +1161,7 @@ mod tests {
         let cfg = dir.join("etc").join("server.yaml");
         let ox_first =
             std::fs::read_to_string(dir.join("run").join("oxfile.toml")).expect("oxfile");
-        // 篡改后二次 init 必须不覆盖（PIT-160）
+        // A second init after tampering must not overwrite (PIT-160)
         std::fs::write(&cfg, "edited by user").expect("tamper");
         init_instance(dir).expect("second init");
         assert_eq!(std::fs::read_to_string(&cfg).expect("read"), "edited by user");
@@ -1137,7 +1176,7 @@ mod tests {
             "etc/Caddyfile",
             "run/oxfile.toml",
         ] {
-            assert!(dir.join(f).exists(), "{f} 缺失");
+            assert!(dir.join(f).exists(), "{f} missing");
         }
     }
 
@@ -1153,8 +1192,8 @@ mod tests {
         init_instance(b.path()).expect("init b");
         let sa = std::fs::read_to_string(a.path().join("etc/server.yaml")).expect("read a");
         let sb = std::fs::read_to_string(b.path().join("etc/server.yaml")).expect("read b");
-        assert_ne!(sa, sb, "两次 init 的随机凭据不得相同");
-        // jwt 与 admin_jwt 同值（pairing fail-fast 门 C35）
+        assert_ne!(sa, sb, "the random credentials of two inits must differ");
+        // jwt and admin_jwt share a value (pairing fail-fast gate C35)
         let jwt = sa.lines().find(|l| l.starts_with("jwt_secret:")).expect("jwt line");
         let adjwt = sa.lines().find(|l| l.starts_with("admin_jwt_secret:")).expect("admin line");
         assert_eq!(jwt.split(':').nth(1).expect("v1"), adjwt.split(':').nth(1).expect("v2"));
@@ -1165,41 +1204,48 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let acc = tmp.path().join("accounts.yaml");
         std::fs::write(&acc, templates::ACCOUNTS_TEMPLATE).expect("write");
-        // 空密码：不动
+        // Empty password: no-op
         bootstrap_admin(&acc, "").expect("empty-pass no-op");
         assert!(!std::fs::read_to_string(&acc).expect("read").contains("role: admin"));
-        // 引导一次，二次不重复（显式入参，无 env 竞争）
+        // Bootstrap once; a second run does not repeat (explicit args, no env race)
         bootstrap_admin(&acc, "pw-test").expect("bootstrap 1");
         bootstrap_admin(&acc, "pw-test").expect("bootstrap 2");
         let after = std::fs::read_to_string(&acc).expect("read");
-        assert_eq!(after.matches("role: admin").count(), 1, "admin 引导幂等");
+        assert_eq!(after.matches("role: admin").count(), 1, "admin bootstrap is idempotent");
         assert!(after.contains("  admin:"));
-        serde_yaml::from_str::<serde_yaml::Value>(&after).expect("bootstrap 后仍是合法 YAML");
+        serde_yaml::from_str::<serde_yaml::Value>(&after)
+            .expect("still valid YAML after bootstrap");
     }
 
     #[test]
     fn dir_flag_guard_rejects_dashdash() {
         let mut it = ["--dir".to_string(), "/tmp/x".to_string()].into_iter();
-        assert!(parse_dir(&mut it).is_err(), "--dir 类笔误必须拒绝（host init --dir 事故同训）");
+        assert!(
+            parse_dir(&mut it).is_err(),
+            "--dir style typos must be rejected (same lesson as the host init --dir incident)"
+        );
     }
 
-    // ---- config-unification P1: yaml 端口键贯通 init 渲染产物 ----
+    // ---- config-unification P1: yaml port keys flow through into init render products ----
 
     #[test]
     fn init_caddyfile_uses_yaml_web_port() {
-        // PIT-13 正对照：断言具体渲染值，非仅"无告警"
+        // PIT-13 positive control: assert the concrete rendered value, not merely "no warning"
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path();
         init_instance(dir).expect("first init");
-        // 覆盖 server.yaml 加 web.port，删 Caddyfile 后重 init（PIT-160 语义：缺失才写）
+        // Add web.port to server.yaml, delete the Caddyfile, re-init (PIT-160 semantics: written only when missing)
         let cfg = dir.join("etc").join("server.yaml");
         let text = std::fs::read_to_string(&cfg).expect("read");
         std::fs::write(&cfg, format!("{text}\nweb:\n  port: 9080\n")).expect("write");
         std::fs::remove_file(dir.join("etc").join("Caddyfile")).expect("rm caddyfile");
         init_instance(dir).expect("re-init");
         let cf = std::fs::read_to_string(dir.join("etc").join("Caddyfile")).expect("read cf");
-        assert!(cf.contains(":9080 {"), "yaml web.port 必须渲染进 Caddyfile 站点地址");
-        assert!(!cf.contains(":8080"), "缺省口不得残留在站点地址");
+        assert!(
+            cf.contains(":9080 {"),
+            "yaml web.port must render into the Caddyfile site address"
+        );
+        assert!(!cf.contains(":8080"), "the default port must not linger in the site address");
     }
 
     #[test]
@@ -1210,14 +1256,17 @@ mod tests {
         let cfg = dir.join("etc").join("server.yaml");
         let text = std::fs::read_to_string(&cfg).expect("read");
         std::fs::write(&cfg, format!("{text}\nsfu:\n  weaknet_port: 9811\n")).expect("write");
-        // 重渲 oxfile（write_oxfile 单点——删掉让 init 重建）
+        // Re-render the oxfile (write_oxfile is the single point -- delete it and let init rebuild)
         std::fs::remove_file(dir.join("run").join("oxfile.toml")).expect("rm oxfile");
-        // oxfile 条件渲染需要 bin/weaknet 在场；无 bin 时只验 Caddyfile 侧
+        // oxfile conditional rendering needs bin/weaknet present; without bin only the Caddyfile side is verified
         std::fs::remove_file(dir.join("etc").join("Caddyfile")).expect("rm cf");
         init_instance(dir).expect("re-init");
         let cf = std::fs::read_to_string(dir.join("etc").join("Caddyfile")).expect("read cf");
-        assert!(cf.contains("reverse_proxy 127.0.0.1:9811"), "weaknet_port 渲染进 Caddyfile 上游");
-        // oxfile：手工造 bin 后直接调 write_oxfile 验证两产物同源
+        assert!(
+            cf.contains("reverse_proxy 127.0.0.1:9811"),
+            "weaknet_port renders into the Caddyfile upstream"
+        );
+        // oxfile: fake the bin then call write_oxfile directly to verify both products share a source
         std::fs::create_dir_all(dir.join("bin")).expect("mkdir bin");
         std::fs::write(dir.join("bin").join("mediaservo-weaknet"), b"#!/bin/sh\n")
             .expect("write bin");
@@ -1234,11 +1283,11 @@ mod tests {
         let ox = std::fs::read_to_string(dir.join("run").join("oxfile.toml")).expect("read ox");
         assert!(
             ox.contains("serve --listen 127.0.0.1:9811"),
-            "weaknet_port 渲染进 oxfile --listen（两产物同源）"
+            "weaknet_port renders into the oxfile --listen (both products share a source)"
         );
     }
 
-    // ---- T4（PIT-160 根修）：write_oxfile 合并源 live→.bak + 提示行分叉 ----
+    // ---- T4 (PIT-160 root fix): write_oxfile merge source live->.bak + note-line divergence ----
 
     #[test]
     fn t4c_manual_env_survives_via_bak_when_live_deleted() {
@@ -1247,41 +1296,42 @@ mod tests {
         init_instance(dir).expect("first init");
         let ox = dir.join("run").join("oxfile.toml");
         let bak = dir.join("run").join("oxfile.toml.bak");
-        let base = std::fs::read_to_string(&bak)
-            .expect("write_oxfile 必须同产 .bak 快照（PIT-160 重渲源）");
-        // 手工键注入 .bak（= Python deploy stale 备份后的形）；server 条目 env 表有/无形两路
+        let base = std::fs::read_to_string(&bak).expect(
+            "write_oxfile must also produce the .bak snapshot (the PIT-160 re-render source)",
+        );
+        // Inject manual keys into .bak (= the shape after Python deploy stale backup); two paths for the server entry's env table (present/absent)
         let tampered = if base.contains("[apps.env]") {
             base.replacen("[apps.env]", "[apps.env]\nALLOW_X = \"1\"", 1)
         } else {
             base.replacen("[apps.logs]", "[apps.env]\nALLOW_X = \"1\"\n[apps.logs]", 1)
         };
-        assert_ne!(tampered, base, "fixture 注入失败");
+        assert_ne!(tampered, base, "fixture injection failed");
         std::fs::write(&bak, &tampered).expect("tamper bak");
         std::fs::remove_file(&ox).expect("rm live oxfile");
-        write_oxfile(&dir.join("run")).expect("re-render（live 缺 → bak 合并源）");
+        write_oxfile(&dir.join("run")).expect("re-render (live missing -> bak merge source)");
         let after = std::fs::read_to_string(&ox).expect("read ox");
-        assert!(after.contains("ALLOW_X = \"1\""), ".bak 手工 env 必须合并回:\n{after}");
+        assert!(after.contains("ALLOW_X = \"1\""), ".bak manual env must be merged back:\n{after}");
         assert_eq!(
             std::fs::read_to_string(&bak).expect("read bak"),
             after,
-            ".bak 应随写终态推进（多轮 N 不翻倍）"
+            ".bak should advance with the written final state (multiple rounds, N does not double)"
         );
-        // live 与 bak 双缺 → 纯渲染（无任何手工键）
+        // Both live and bak missing -> pure render (no manual keys at all)
         std::fs::remove_file(&ox).expect("rm oxfile 2");
         std::fs::remove_file(&bak).expect("rm bak");
-        write_oxfile(&dir.join("run")).expect("re-render（首渲形）");
+        write_oxfile(&dir.join("run")).expect("re-render (first-render shape)");
         let pure = std::fs::read_to_string(&ox).expect("read ox 2");
-        assert!(!pure.contains("ALLOW_X"), "live 与 bak 双缺 → 纯渲染");
+        assert!(!pure.contains("ALLOW_X"), "both live and bak missing -> pure render");
     }
 
-    // ---- global-reap T2: B3 env 清洗 + B2 归因三态 + 扫尾计划 fixture ----
+    // ---- global-reap T2: B3 env sanitization + B2 attribution three states + sweep plan fixture ----
 
     #[test]
     fn run_oxmgr_default_strips_oxmgr_env() {
-        // B3：默认 daemon 语义 = 显式无 OXMGR_*。std Command 继承父 env——env_remove
-        // 后 get_envs 必含 (key, None) 覆盖删除项（父 shell 残留也不得漏进子进程）。
-        // （不 set_var 造父 env：edition 2024 unsafe + 并行测试 env 竞争——删除语义
-        // 对"继承值"同样生效，覆盖项即证明。）
+        // B3: default-daemon semantics = explicitly no OXMGR_*. std Command inherits the parent env -- after env_remove,
+        // get_envs must contain (key, None) covering the deleted items (parent shell residue must not leak into the child either).
+        // (no set_var to fabricate a parent env: edition 2024 unsafe + parallel test env races -- the deletion semantics
+        // apply equally to "inherited values"; the covering entries prove it.)
         let keys = ["OXMGR_HOME", "OXMGR_DATA_DIR", "OXMGR_DAEMON_ADDR", "OXMGR_API_ADDR"];
         let mut cmd = Command::new(oxmgr_bin());
         for k in keys {
@@ -1290,7 +1340,7 @@ mod tests {
         for k in keys {
             assert!(
                 cmd.get_envs().any(|(key, v)| key == std::ffi::OsStr::new(k) && v.is_none()),
-                "{k} 必须呈显式删除态"
+                "{k} must appear as an explicit deletion"
             );
         }
     }
@@ -1305,14 +1355,14 @@ mod tests {
             deleted: false,
             parent: None,
         };
-        // ① 空闲（无监听者）→ pass
+        // 1. idle (no listener) -> pass
         assert!(port_verdict(&[], &[1, 2]).is_ok());
-        // ② 我方残留（pid ∈ 本轮 reap 名单）→ fail
+        // 2. our leftover (pid in this round's reap list) -> fail
         let ours = vec![rep(101), rep(102)];
         assert!(port_verdict(&ours, &[101]).is_err());
-        // ③ 陌生者占口 → pass（B2：TalkServo 实录形不假失败）
+        // 3. stranger holds the port -> pass (B2: the TalkServo live shape must not fake a failure)
         assert!(port_verdict(&ours, &[999]).is_ok());
-        // 边界：两侧全空 → pass
+        // Boundary: both sides empty -> pass
         assert!(port_verdict(&[], &[]).is_ok());
     }
 
@@ -1320,12 +1370,12 @@ mod tests {
     #[test]
     fn sweep_plan_fixture_direct_kill_when_no_registry() {
         use super::reap::{LiveProc, ProcKind, ReapStep};
-        // fixture：tempdir 实例 root + 伪造 bin/msrtc-server 标记（marker 判据面）
+        // fixture: tempdir instance root + a faked bin/msrtc-server marker (the marker judgment surface)
         let tmp = tempfile::tempdir().expect("tempdir");
         let root = absolute(tmp.path());
         std::fs::create_dir_all(root.join("bin")).expect("mkdir bin");
         std::fs::write(root.join("bin").join("msrtc-server"), b"").expect("marker");
-        // LiveProc 指向它：server 签名 + --config 归属本 root；注册表空 → DirectKill 计划
+        // LiveProc points at it: server signature + --config owned by this root; empty registry -> DirectKill plan
         let p = LiveProc {
             argv: vec![
                 format!("{}/bin/msrtc-server", root.display()),
@@ -1341,10 +1391,10 @@ mod tests {
         assert_eq!(
             super::reap::proc_kind(&p.argv, p.exe.as_deref()),
             Some(ProcKind::Server),
-            "fixture 必须过签名"
+            "fixture must pass the signature check"
         );
         assert!(super::reap::kind_dir_within(&ProcKind::Server, &p.argv, &root));
-        // 空注册表（双表快照）→ 直杀计划（断言计划，不执行——单元测试零真实信号）
+        // Empty registry (both-table snapshot) -> direct-kill plan (assert the plan, do not execute -- zero real signals in unit tests)
         let plan = super::reap::reap_plan(&[p], &[(root.join("run").join("oxmgr"), &[])]);
         assert_eq!(
             plan,
@@ -1355,7 +1405,7 @@ mod tests {
         );
     }
 
-    // ---- global-reap T3: stop 参数解析三形 ----
+    // ---- global-reap T3: stop arg parsing, three forms ----
 
     #[test]
     fn stop_args_global_alone_and_with_dir_conflict() {
@@ -1363,20 +1413,23 @@ mod tests {
         assert_eq!(parse_stop_args(&mut a), Ok(StopArgs::Global));
         let mut b = ["--all".to_string()].into_iter();
         assert_eq!(parse_stop_args(&mut b), Ok(StopArgs::Global));
-        // -g + dir = 非法（exit 2 由 cmd_stop 映射）
+        // -g + dir = invalid (exit 2 mapped by cmd_stop)
         let mut c = ["-g".to_string(), "/opt/x".to_string()].into_iter();
-        assert_eq!(parse_stop_args(&mut c), Err("stop -g 为全局收口，不接受目录参数".to_string()));
-        // dir 在前 -g 在后同拒（顺序无关）
+        assert_eq!(
+            parse_stop_args(&mut c),
+            Err("stop -g is a global reap and does not accept a dir argument".to_string())
+        );
+        // dir first, -g last: also rejected (order-independent)
         let mut d = ["/opt/x".to_string(), "--all".to_string()].into_iter();
         assert!(parse_stop_args(&mut d).is_err());
-        // 未知旗标拒
+        // Unknown flag rejected
         let mut e = ["--dir".to_string()].into_iter();
         assert!(parse_stop_args(&mut e).is_err());
     }
 
     #[test]
     fn stop_args_dir_forms_unchanged() {
-        // 裸 stop = 默认目录（既有行为）；显式 dir；dir 与未知 -- 开头参数同拒。
+        // Bare stop = default dir (existing behavior); explicit dir; a dir together with an unknown -- arg is also rejected.
         let mut a: Box<dyn Iterator<Item = String>> = Box::new(std::iter::empty());
         assert_eq!(parse_stop_args(&mut a), Ok(StopArgs::Dir(None)));
         let mut b = ["/opt/inst".to_string()].into_iter();
@@ -1389,12 +1442,12 @@ mod tests {
     fn t4_pit160_note_variants() {
         assert_eq!(
             pit160_note(0, 0),
-            "提示: 若本树此前存在手工 [apps.env] 行（ALLOW_DEV_*/RUST_LOG/WEAKNET_ADMIN_PASS），本次渲染不含它们——按 msrtc.sh -h「环境变量 [B]」回补",
-            "N=0 必须逐字节保留旧指引文本"
+            "Note: if this tree previously had manual [apps.env] lines (ALLOW_DEV_*/RUST_LOG/WEAKNET_ADMIN_PASS), this render does not include them -- restore them per the msrtc.sh -h \"environment variables [B]\" section",
+            "N=0 must preserve the old guidance text byte-for-byte"
         );
         let v = pit160_note(3, 0);
-        assert!(v.contains("已合并 3 条手工 env"), "N>0 变体: {v}");
+        assert!(v.contains("merged 3 manual env entries"), "N>0 variant: {v}");
         let l = pit160_note(2, 1);
-        assert!(l.contains("另有 1 条"), "未并条目必须报数: {l}");
+        assert!(l.contains("additionally 1 entries"), "unmerged entries must report a count: {l}");
     }
 }

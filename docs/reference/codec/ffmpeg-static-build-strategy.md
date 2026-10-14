@@ -1,27 +1,27 @@
-# FFmpeg 静态构建与链接策略
+# FFmpeg Static Build & Linking Strategy
 
-> **决策引用**: D71 — GStreamer (Field/Host) + FFmpeg (Remote), 统一 VideoDecoder/VideoEncoder trait
-> **目标**: Remote 端零运行时依赖的 FFmpeg 静态链接解码方案
-> **适用 crate**: `mediaservo-codec` (Phase 2+), `mediaservo-client` decode path
-> **参考**: BtbN/FFmpeg-Builds (预构建), ffmpeg-sys-next (build.rs 模式), rivet-transcoder (GPU 直连 FFI)
+> **Decision ref**: D71 — GStreamer (Field/Host) + FFmpeg (Remote), unified VideoDecoder/VideoEncoder traits
+> **Goal**: a zero-runtime-dependency statically linked FFmpeg decoding solution for the Remote side
+> **Applies to**: `mediaservo-codec` (Phase 2+), the `mediaservo-client` decode path
+> **References**: BtbN/FFmpeg-Builds (prebuilt), ffmpeg-sys-next (the build.rs pattern), rivet-transcoder (GPU-direct FFI)
 
 
 ---
 
-## 一、策略总览
+## 1. Strategy Overview
 
-**三个选项按复杂度递增**:
+**Three options in increasing complexity**:
 
-| 选项 | 复杂度 | 包体积 | 灵活性 | 适合阶段 |
+| Option | Complexity | Package size | Flexibility | Suited phase |
 |------|--------|--------|--------|---------|
-| A: 引用 BtbN/FFmpeg-Builds 预构建包 | 低 | ~4 MB | 低（固定 codec 集） | Phase 1 快速集成 |
-| B: mediaservo 自建预构建（本策略核心） | 中 | ~2 MB | 中（定制 codec 集） | Phase 2 正式方案 |
-| C: 跟随 playa-ffmpeg 的 vcpkg 路径 | 低 | ~5 MB | 低 | 备选方案 |
+| A: Reference BtbN/FFmpeg-Builds prebuilts | low | ~4 MB | low (fixed codec set) | Phase 1 quick integration |
+| B: mediaservo's own prebuilts (the core of this strategy) | medium | ~2 MB | medium (custom codec set) | Phase 2 official plan |
+| C: Follow playa-ffmpeg's vcpkg path | low | ~5 MB | low | fallback option |
 
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  预构建层 (CI/Docker)                            │
+│  Prebuilt layer (CI/Docker)                      │
 │  ffmpeg-build/                                   │
 │  ├── Dockerfile.macos-arm64  → ffmpeg-arm64.tar  │
 │  ├── Dockerfile.macos-x86_64 → ffmpeg-x86_64.tar │
@@ -29,60 +29,60 @@
 │  ├── Dockerfile.linux-aarch64 → ffmpeg-arm64.tar │
 │  └── Dockerfile.windows-msvc → ffmpeg-win64.tar  │
 └──────────────────────┬──────────────────────────┘
-                       │ 上传 CI artifacts / S3
+                       │ upload CI artifacts / S3
 ┌──────────────────────▼──────────────────────────┐
-│  cargo build 时                                  │
+│  During cargo build                              │
 │  build.rs                                        │
-│  ├── 检查 FFMPEG_DIR 环境变量                     │
-│  ├── 未设置 → 从 CI cache 自动下载预构建包         │
-│  ├── 验证 ABI: pkg-config 或 头文件探测            │
-│  └── 输出 cargo: 指令 (rustc-link-search, etc.)   │
+│  ├── checks the FFMPEG_DIR env var               │
+│  ├── unset → auto-downloads the prebuilt from CI cache │
+│  ├── verifies the ABI: pkg-config or header probing │
+│  └── emits cargo: directives (rustc-link-search, etc.) │
 └──────────────────────┬──────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────┐
-│  Rust 绑定层                                     │
+│  The Rust binding layer                          │
 │  mediaservo-codec::ffmpeg                          │
-│  ├── 直接用 ffmpeg-sys/ffmpeg-next 的 FFI        │
-│  └── 实现 VideoDecoder trait                     │
+│  ├── uses the ffmpeg-sys/ffmpeg-next FFI directly │
+│  └── implements the VideoDecoder trait           │
 └─────────────────────────────────────────────────┘
 ```
 
-**核心原则**:
-- **不编译 FFmpeg 源码** — cargo build 零等待
-- **CI 预构建为唯一真实源** — 一次构建, 所有开发者复用
-- **fallback: FFMPEG_DIR 指向本地构建** — 开发者可自行编译
-- **按需求裁剪** — Remote 端仅需 decode + colorspace convert
+**Core principles**:
+- **Never compile FFmpeg sources** — zero wait on cargo build
+- **CI prebuilds are the single source of truth** — build once, reused by every developer
+- **Fallback: FFMPEG_DIR points at a local build** — developers may compile it themselves
+- **Trim to need** — the Remote side needs only decode + colorspace convert
 
 ---
 
-## 二、预构建脚本 (`ffmpeg-build/`)
+## 2. The Prebuilt Scripts (`ffmpeg-build/`)
 
-### 2.1 目录结构
+### 2.1 Directory Structure
 
 ```
 ffmpeg-build/
-├── build.sh               # 入口脚本: 检测平台, 下载依赖, 调用 configure
-├── configure-opts.sh      # 各平台的 configure flags
-├── Dockerfile.linux       # Linux x86_64 构建容器
-├── Dockerfile.linux-arm   # Linux aarch64 交叉编译容器
-├── Dockerfile.macos       # macOS universal binary 构建
-├── Dockerfile.windows     # Windows MSVC 交叉编译 (via mingw-w64)
-├── patch/                 # 可选补丁
+├── build.sh               # entry script: detect platform, fetch deps, invoke configure
+├── configure-opts.sh      # per-platform configure flags
+├── Dockerfile.linux       # Linux x86_64 build container
+├── Dockerfile.linux-arm   # Linux aarch64 cross-compile container
+├── Dockerfile.macos       # macOS universal binary build
+├── Dockerfile.windows     # Windows MSVC cross-compile (via mingw-w64)
+├── patch/                 # optional patches
 │   └── 0001-static-math.patch
 └── README.md
 ```
 
-### 2.2 最小 configure flags (按 D71 — decode only)
+### 2.2 Minimal configure flags (per D71 — decode only)
 
 ```bash
 #!/bin/bash
-# configure-opts.sh — Remote 端最小解码器集
+# configure-opts.sh — the Remote side's minimal decoder set
 
 COMMON_FLAGS=(
-    # === 关闭一切 ===
+    # === disable everything ===
     --disable-everything
 
-    # === 仅启用解码器 ===
+    # === enable decoders only ===
     --enable-decoder=h264
     --enable-decoder=hevc
     --enable-decoder=vp8
@@ -92,7 +92,7 @@ COMMON_FLAGS=(
     --enable-decoder=mp3
     --enable-decoder=pcm_s16le
 
-    # === 仅启用解析器 ===
+    # === enable parsers only ===
     --enable-parser=h264
     --enable-parser=hevc
     --enable-parser=vp8
@@ -101,7 +101,7 @@ COMMON_FLAGS=(
     --enable-parser=aac
     --enable-parser=mpegaudio
 
-    # === 仅启用解封装 ===
+    # === enable demuxers only ===
     --enable-demuxer=h264
     --enable-demuxer=hevc
     --enable-demuxer=matroska
@@ -111,22 +111,22 @@ COMMON_FLAGS=(
     --enable-demuxer=mp3
     --enable-demuxer=wav
 
-    # === 仅启用封装 (用于测试) ===
+    # === enable muxers (for testing) ===
     --enable-muxer=null
 
-    # === 协议 ===
+    # === protocols ===
     --enable-protocol=file
     --enable-protocol=pipe
 
-    # === 滤镜 (色彩空间转换必须) ===
+    # === filters (required for colorspace conversion) ===
     --enable-filter=scale
     --enable-filter=format
     --enable-filter=null
 
-    # === 不启用任何 encoder/hwaccel/postproc ===
-    # (Remote 端只做解码, 无需这些)
+    # === no encoders/hwaccel/postproc ===
+    # (the Remote side only decodes; these are unneeded)
 
-    # === 二进制大小优化 ===
+    # === binary size optimization ===
     --enable-small
     --disable-doc
     --disable-htmlpages
@@ -138,18 +138,18 @@ COMMON_FLAGS=(
     --disable-ffprobe
     --disable-avdevice
     --disable-postproc
-    --disable-swresample        # 不需要音频重采样 (WebRTC 自带)
-    --disable-avfilter          # 不需要滤镜图 (颜色空间转换在 swscale)
-    --disable-network           # Remote 端不解码网络流
-    --disable-bsfs              # 不需要 bitstream filter
+    --disable-swresample        # no audio resampling needed (WebRTC has its own)
+    --disable-avfilter          # no filter graphs (colorspace conversion is in swscale)
+    --disable-network           # the Remote side never decodes network streams
+    --disable-bsfs              # no bitstream filters needed
 
-    # === 静态库 ===
+    # === static libraries ===
     --enable-static
     --disable-shared
-    --enable-pic                # 位置无关代码 (Rust 静态链接需要)
+    --enable-pic                # position-independent code (needed by Rust static linking)
 )
 
-# === 平台特定 flags ===
+# === platform-specific flags ===
 case "$TARGET" in
     *linux*)
         EXTRA_FLAGS=(
@@ -166,7 +166,7 @@ case "$TARGET" in
     *macos*)
         EXTRA_FLAGS=(
             --disable-securetransport
-            --disable-videotoolbox  # ponytail: Apple VT 用动态框架, 静态链接场景跳过
+            --disable-videotoolbox  # ponytail: Apple VT is a dynamic framework; skip in static-linking scenarios
             --disable-avfoundation
             --disable-coreimage
         )
@@ -182,11 +182,11 @@ esac
 ALL_FLAGS=("${COMMON_FLAGS[@]}" "${EXTRA_FLAGS[@]}")
 ```
 
-### 2.3 构建脚本
+### 2.3 The Build Script
 
 ```bash
 #!/bin/bash
-# build.sh — FFmpeg 静态构建入口
+# build.sh — the FFmpeg static-build entry point
 set -euo pipefail
 
 FFMPEG_VERSION="${FFMPEG_VERSION:-7.0.2}"
@@ -196,7 +196,7 @@ JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
 echo "=== Building FFmpeg ${FFMPEG_VERSION} for ${TARGET:-native} ==="
 
-# 1. 下载源码
+# 1. download the source
 if [ ! -d "ffmpeg-${FFMPEG_VERSION}" ]; then
     curl -sSL "$FFMPEG_SRC" | tar xJ
 fi
@@ -213,7 +213,7 @@ source ../configure-opts.sh
 make -j"$JOBS"
 make install
 
-# 4. 打包
+# 4. Package
 cd "$OUTPUT_DIR"
 tar czf "ffmpeg-${FFMPEG_VERSION}-${TARGET}.tar.gz" lib/ include/
 
@@ -222,47 +222,47 @@ echo "=== Done: $OUTPUT_DIR/ffmpeg-${FFMPEG_VERSION}-${TARGET}.tar.gz ==="
 
 ---
 
-## 三、GPL 合规
+## 3. GPL Compliance
 
-### 3.1 许可风险 — 关键事实
+### 3.1 Licensing Risk — Key Facts
 
-**libx264 是 GPL 许可，不是 LGPL！** 一旦 `./configure` 启用 `--enable-libx264`，FFmpeg 整套库（libavcodec, libavformat, libavutil, libswscale）全部从 LGPL 转为 **GPL 2+**，整个链接二进制被 GPL 传染。
+**libx264 is GPL-licensed, not LGPL!** The moment `./configure` enables `--enable-libx264`, the whole FFmpeg set (libavcodec, libavformat, libavutil, libswscale) flips from LGPL to **GPL 2+**, and the entire linked binary becomes GPL-contaminated.
 
-同理：libx265 也是 GPL。ffmpeg-sys-next 通过 `build-license-gpl` feature flag 显式控制，默认不启用。
+Likewise libx265 is GPL. ffmpeg-sys-next controls this explicitly via the `build-license-gpl` feature flag, off by default.
 
-| FFmpeg 组件 | 默认许可 | --enable-libx264 后 | 影响 |
+| FFmpeg component | Default license | after --enable-libx264 | Impact |
 |-------------|---------|---------------------|------|
-| libavcodec | LGPL 2.1+ | **GPL 2+** | 全部二进制 GPL |
-| libavformat | LGPL 2.1+ | **GPL 2+** | 全部二进制 GPL |
-| libavutil | LGPL 2.1+ | **GPL 2+** | 全部二进制 GPL |
-| libswscale | LGPL 2.1+ | **GPL 2+** | 全部二进制 GPL |
+| libavcodec | LGPL 2.1+ | **GPL 2+** | all binaries GPL |
+| libavformat | LGPL 2.1+ | **GPL 2+** | all binaries GPL |
+| libavutil | LGPL 2.1+ | **GPL 2+** | all binaries GPL |
+| libswscale | LGPL 2.1+ | **GPL 2+** | all binaries GPL |
 
-**替代方案**: 使用 FFmpeg 内置的 H.264 解码器（`--enable-decoder=h264`，不依赖 libx264），保持 LGPL。内置解码器受专利限制（需另外考虑），但在许可层面不触发 GPL。
+**Alternative**: use FFmpeg's built-in H.264 decoder (`--enable-decoder=h264`, no libx264 dependency) to stay LGPL. The built-in decoder is patent-encumbered (a separate consideration) but does not trigger GPL at the licensing level.
 
-**结论**: 上述 `configure-opts.sh` 不启用任何 GPL 编码器，纯解码路径保持 LGPL。
+**Conclusion**: the `configure-opts.sh` above enables no GPL encoders; the pure-decode path stays LGPL.
 
-### 3.2 LGPL 静态链接合规要求
+### 3.2 LGPL Static-Linking Compliance Requirements
 
-根据 FSF LGPL 2.1 §6, 静态链接 LGPL 库要求:
+Per FSF LGPL 2.1 §6, statically linking an LGPL library requires:
 
-1. **提供目标文件**: 提供 MediaServo `.o` 文件, 使最终用户可重新链接修改后的 FFmpeg
-   - 可行方案: CI 中保留 `.rlib` 中间产物
-2. **源码分发**: FFmpeg 源码直接引用 (版本号 + URL), 不修改的源码可以不重新分发
-3. **通知**: LICENSE 文件中声明使用的 LGPL 组件及获取方式
+1. **Provide object files**: ship MediaServo's `.o` files so end users can relink against a modified FFmpeg
+   - Workable approach: keep the `.rlib` intermediates in CI
+2. **Source distribution**: reference the FFmpeg source directly (version + URL); unmodified sources need not be redistributed
+3. **Notice**: declare the LGPL components used and how to obtain them in the LICENSE file
 
-### 3.3 推荐合规方案
+### 3.3 Recommended Compliance Setup
 
 ```
 MediaServo/
-├── LICENSE           # Apache 2.0 (应用代码)
-├── LICENSE.3rdparty  # 第三方许可声明
+├── LICENSE           # Apache 2.0 (application code)
+├── LICENSE.3rdparty  # third-party license declarations
 │   ├── FFmpeg 7.0.2 — LGPL 2.1+
 │   ├── libwebrtc — BSD
 │   └── ...
-└── NOTICE            # 如何获取 FFmpeg 源码 + 如何重新链接
+└── NOTICE            # how to obtain the FFmpeg source + how to relink
 ```
 
-**NOTICE 模板**:
+**NOTICE template**:
 ```
 This product includes FFmpeg (version 7.0.2) licensed under LGPL 2.1+.
 Source: https://ffmpeg.org/releases/ffmpeg-7.0.2.tar.xz
@@ -271,23 +271,23 @@ To relink against a modified FFmpeg, obtain MediaServo object files from:
 and run: cargo build --target <your-target> -- FFMPEG_DIR=<path>
 ```
 
-### 3.4 如果未来需要 GPL 编码器
+### 3.4 If GPL Encoders Are Ever Needed
 
-若 Phase 3+ 需要在 Remote 端添加 libx264/libx265 编码:
+If Phase 3+ needs libx264/libx265 encoding on the Remote side:
 
-- **选项 A**: 动态链接 GPL 库 (`.so`/`.dylib`) — GPL 要求动态链接不传染应用
-- **选项 B**: 独立进程 (ffmpeg CLI subprocess) — 进程隔离, GPL 不传染
-- **选项 C**: 全部 GPL 授权 — 不推荐
+- **Option A**: dynamically link the GPL libraries (`.so`/`.dylib`) — GPL treats dynamic linking as non-contaminating for the app
+- **Option B**: a separate process (an ffmpeg CLI subprocess) — process isolation; GPL doesn't spread
+- **Option C**: license everything GPL — not recommended
 
-当前策略: 不解码依赖 GPL, 保持 LGPL 路径。
+Current strategy: no decode path depends on GPL; keep the LGPL route.
 
 ---
 
-## 四、cargo build 集成
+## 4. cargo build Integration
 
-### 4.1 build.rs 设计
+### 4.1 The build.rs Design
 
-`mediaservo-codec/build.rs` (或 `mediaservo-client/build.rs`):
+`mediaservo-codec/build.rs` (or `mediaservo-client/build.rs`):
 
 ```rust
 // build.rs — FFmpeg static linking detection
@@ -302,7 +302,7 @@ fn main() {
     let ffmpeg_dir = match env::var("FFMPEG_DIR") {
         Ok(dir) => PathBuf::from(dir),
         Err(_) => {
-            // 尝试从 CI cache 自动下载
+            // Try auto-downloading from the CI cache
             let target = env::var("TARGET").unwrap();
             let cache_dir = dirs_next().or_else(|| {
                 eprintln!("cargo:warning=FFMPEG_DIR not set and no cache dir found");
@@ -320,7 +320,7 @@ fn main() {
     let lib_dir = ffmpeg_dir.join("lib");
     let include_dir = ffmpeg_dir.join("include");
 
-    // 验证关键文件存在
+    // Verify the key files exist
     let required = [
         ("libavcodec", lib_dir.join("libavcodec.a")),
         ("libavformat", lib_dir.join("libavformat.a")),
@@ -333,15 +333,15 @@ fn main() {
         }
     }
 
-    // cargo 指令
+    // cargo directives
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=avcodec");
     println!("cargo:rustc-link-lib=static=avformat");
     println!("cargo:rustc-link-lib=static=avutil");
     println!("cargo:rustc-link-lib=static=swscale");
 
-    // macOS 额外链接 (VideoToolbox 在头文件中引用但静态禁用时不需要)
-    // Linux 额外链接
+    // macOS extra links (VideoToolbox is referenced in headers but unneeded when statically disabled)
+    // Linux extra links
     #[cfg(target_os = "linux")]
     {
         println!("cargo:rustc-link-lib=static=z");
@@ -349,15 +349,15 @@ fn main() {
         println!("cargo:rustc-link-lib=static=pthread");
     }
 
-    // 头文件路径 (用于 bindgen 或 ffmpeg-sys)
+    // Header path (for bindgen or ffmpeg-sys)
     println!("cargo:include={}", include_dir.display());
 
-    // 编译期验证符号存在 (见 §七)
+    // Compile-time symbol verification (see section 7)
     verify_symbols(&lib_dir);
 }
 
 fn verify_symbols(lib_dir: &PathBuf) {
-    // 关键函数指针验证 — 确保 libavcodec 有 decode 能力
+    // Key function-pointer verification — ensures libavcodec has decode capability
     let test_symbols = [
         "avcodec_find_decoder",
         "avcodec_alloc_context3",
@@ -367,9 +367,9 @@ fn verify_symbols(lib_dir: &PathBuf) {
         "sws_getContext",
         "sws_scale",
     ];
-    // ponytail: 编译期符号验证通过 cc 编译一个小探针;
-    // 详见 §七 build.rs 探针方案
-    let _ = (lib_dir, test_symbols); // 占位
+    // ponytail: compile-time symbol verification compiles a small probe via cc;
+    // see section 7 for the build.rs probe plan
+    let _ = (lib_dir, test_symbols); // placeholder
 }
 ```
 
@@ -378,18 +378,18 @@ fn verify_symbols(lib_dir: &PathBuf) {
 ```toml
 [features]
 default = []
-# FFmpeg 解码后端 (Remote 端静态链接)
+# the FFmpeg decode backend (Remote side, statically linked)
 backend-ffmpeg = []
-# GStreamer 解码后端 (通用, 动态链接)
+# the GStreamer decode backend (general, dynamically linked)
 backend-gstreamer = []
 ```
 
-### 4.3 代码层 feature gate
+### 4.3 Code-Level Feature Gates
 
 ```rust
 // mediaservo-codec/src/lib.rs
 
-/// 统一解码器工厂 — 编译时选择后端
+/// Unified decoder factory — the backend is chosen at compile time
 pub fn create_decoder(config: &DecodeConfig) -> Box<dyn VideoDecoder> {
     #[cfg(feature = "backend-ffmpeg")]
     {
@@ -408,9 +408,9 @@ pub fn create_decoder(config: &DecodeConfig) -> Box<dyn VideoDecoder> {
 
 ---
 
-## 五、CI/CD 策略
+## 5. CI/CD Strategy
 
-### 5.1 GitHub Actions 预构建流水线
+### 5.1 The GitHub Actions Prebuilt Pipeline
 
 ```yaml
 # .github/workflows/build-ffmpeg.yml
@@ -458,21 +458,21 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: ffmpeg-build/out/*.tar.gz
-          retention-days: 90  # ponytail: 预构建 3 个月有效, 长期存 S3
+          retention-days: 90  # ponytail: pre-builds valid for 3 months; long-term goes to S3
 ```
 
-### 5.2 主构建流水线 (cache 复用)
+### 5.2 The Main Build Pipeline (cache reuse)
 
 ```yaml
-# .github/workflows/ci.yml (片段)
+# .github/workflows/ci.yml (snippet)
 jobs:
   build:
     steps:
       - uses: actions/checkout@v4
       - name: Download FFmpeg pre-built
         run: |
-          # 从上次 build-ffmpeg workflow 下载最新 artifact
-          # 或从 S3 bucket 下载 (长期缓存)
+          # Download the latest artifact from the previous build-ffmpeg workflow run
+          # Or download from an S3 bucket (long-term cache)
           mkdir -p /tmp/ffmpeg
           curl -sSL "$FFMPEG_CACHE_URL/$TARGET.tar.gz" | tar xz -C /tmp/ffmpeg
           echo "FFMPEG_DIR=/tmp/ffmpeg" >> $GITHUB_ENV
@@ -480,31 +480,31 @@ jobs:
         run: cargo build --features backend-ffmpeg
 ```
 
-### 5.3 开发者本地
+### 5.3 Developer Local
 
 ```bash
-# 方式 1: 从 CI 下载
+# Method 1: download from CI
 ./ffmpeg-build/ci-download.sh linux-x86_64
 
-# 方式 2: 本地构建 (慢, 但可自定义)
+# Method 2: build locally (slow, but customizable)
 FFMPEG_VERSION=7.0.2 ./ffmpeg-build/build.sh
 
-# 方式 3: 系统包管理器 (dev only)
+# Method 3: system package manager (dev only)
 brew install ffmpeg  # macOS
 apt install libavcodec-dev libavformat-dev libswscale-dev  # Linux
-export FFMPEG_DIR=/usr/local  # 指向系统安装
+export FFMPEG_DIR=/usr/local  # point at the system install
 
-# 然后
+# then
 FFMPEG_DIR=/opt/ffmpeg cargo build --features backend-ffmpeg
 ```
 
 ---
 
-## 六、交叉编译
+## 6. Cross-Compilation
 
-### 6.1 策略
+### 6.1 Strategy
 
-**FFmpeg 交叉编译: 在 x86_64 CI 上, 用 Docker 交叉编译到 arm64。**
+**FFmpeg cross-compilation: on x86_64 CI, use Docker to cross-compile to arm64.**
 
 ```dockerfile
 # Dockerfile.linux-arm
@@ -512,17 +512,17 @@ FROM --platform=linux/arm64 ubuntu:24.04
 RUN apt-get update && apt-get install -y \
     build-essential curl xz-utils \
     gcc-aarch64-linux-gnu
-# 然后用 cross-compiler 构建 FFmpeg
+# then build FFmpeg with the cross-compiler
 ```
 
 ```bash
-# configure-opts.sh — linux-arm64 追加
+# configure-opts.sh — linux-arm64 additions
 --cross-prefix=aarch64-linux-gnu-
 --target-os=linux
 --arch=aarch64
 ```
 
-### 6.2 Rust 交叉编译对齐
+### 6.2 Rust Cross-Compile Alignment
 
 ```
 TARGET_TRIPLE              FFmpeg --target-os  --arch
@@ -534,16 +534,16 @@ aarch64-apple-darwin       darwin              aarch64
 x86_64-pc-windows-msvc     win32 (mingw-w64)   x86_64
 ```
 
-**关键**: FFmpeg 交叉编译 `--target-os` + `--arch` 必须与 Rust `TARGET` 匹配, 否则 ABI 不兼容。
+**Key**: FFmpeg's cross-compile `--target-os` + `--arch` must match the Rust `TARGET`, otherwise the ABIs are incompatible.
 
 ---
 
-## 七、编译期验证
+## 7. Compile-Time Verification
 
-### 7.1 build.rs 符号探针
+### 7.1 The build.rs Symbol Probe
 
 ```rust
-// build.rs (续) — 编译一个小 C 程序验证 FFmpeg 符号存在
+// build.rs (cont.) — compiles a small C program verifying the FFmpeg symbols exist
 
 fn verify_symbols(include_dir: &Path, lib_dir: &Path) {
     use std::process::Command;
@@ -552,10 +552,10 @@ fn verify_symbols(include_dir: &Path, lib_dir: &Path) {
 #include <libavcodec/avcodec.h>
 #include <libavutil/frame.h>
 int main() {
-    // 关键: 确认 avcodec_find_decoder 可链接
+    // Key: confirm avcodec_find_decoder links
     const AVCodec *c = avcodec_find_decoder(AV_CODEC_ID_H264);
     if (c) {
-        // AVFrame fields exist (receive_frame 使用)
+        // AVFrame fields exist (used by receive_frame)
         AVFrame *f = av_frame_alloc();
         av_frame_free(&f);
         return 0;
@@ -587,18 +587,18 @@ int main() {
         );
     }
 
-    // 运行探针 (可选, 确认运行时链接)
+    // Run the probe (optional; confirms runtime linking)
     let run_status = Command::new(&probe_exe).status()
         .expect("failed to run FFmpeg probe");
     assert!(run_status.success(), "FFmpeg probe returned non-zero");
 }
 ```
 
-### 7.1b ffmpeg-sys-next 的 `check_features()` 模式（高级）
+### 7.1b ffmpeg-sys-next's `check_features()` pattern (advanced)
 
 ```rust
-/// 编译 C 探针，解析 FFmpeg #define 值，驱动 Rust #[cfg]。
-/// ffmpeg-sys-next 的 build.rs 核心模式（参考实现）。
+/// Compiles a C probe, parses FFmpeg #define values, drives Rust #[cfg].
+/// The core build.rs pattern of ffmpeg-sys-next (reference implementation).
 fn check_features(include_dir: &Path) {
     use std::process::Command;
 
@@ -619,7 +619,7 @@ int main() {
 "#;
 
     let out = compile_and_run(probe_code, include_dir);
-    // 解析 stdout 输出，设置 cargo:rustc-cfg
+    // Parse the stdout output and set cargo:rustc-cfg
     for line in out.lines() {
         if line.starts_with("H264_DECODER=1") {
             println!("cargo:rustc-cfg=feature=\"h264_decode\"");
@@ -631,152 +631,152 @@ int main() {
 }
 ```
 
-这样 Rust 端可以用 `#[cfg(feature = "h264_decode")]` 编译期开关解码路径。
+This lets the Rust side switch decode paths at compile time via `#[cfg(feature = "h264_decode")]`.
 
 ### 7.2 CI guard
 
 ```yaml
-# ci.yml — 编译期验证作为 CI 步骤
+# ci.yml — compile-time verification as a CI step
 - name: Verify FFmpeg symbols
   run: |
     FFMPEG_DIR=/tmp/ffmpeg cargo check --features backend-ffmpeg
-    # check 会运行 build.rs, 触发符号探针
+    # check runs build.rs, triggering the symbol probe
 ```
 
 ---
 
-## 八、二进制大小优化
+## 8. Binary Size Optimization
 
-### 8.1 对比估算
+### 8.1 Comparative Estimates
 
-| 场景 | 库大小 | 说明 |
+| Scenario | Library size | Notes |
 |------|--------|------|
-| 完整 FFmpeg (shared) | ~30 MB | 全部编解码器 |
-| 完整 FFmpeg (static) | ~40 MB | 静态链接增大 |
-| 最小解码器集 (static, --enable-small) | ~4 MB | --disable-everything + 最小解码器 |
+| Full FFmpeg (shared) | ~30 MB | all codecs |
+| Full FFmpeg (static) | ~40 MB | static linking grows it |
+| Minimal decoder set (static, --enable-small) | ~4 MB | --disable-everything + minimal decoders |
 | + LTO + strip | **~2 MB** | Rust target release profile |
 
 ### 8.2 recommended release profile
 
 ```toml
-# Cargo.toml (mediaservo-codec 或 workspace 级)
+# Cargo.toml (mediaservo-codec or workspace level)
 [profile.release]
-opt-level = "z"      # 优先体积 (替代 "s")
-lto = true            # Rust + FFmpeg 跨库 LTO
-codegen-units = 1     # 最大化 LTO 效果
-strip = true          # 剥离符号
-panic = "abort"       # 进一步减小体积
+opt-level = "z"      # size first (instead of "s")
+lto = true            # Rust + FFmpeg cross-library LTO
+codegen-units = 1     # maximize the LTO effect
+strip = true          # strip symbols
+panic = "abort"       # shrink further
 ```
 
-**注意**: FFmpeg 本身需要 `--enable-small --disable-debug` 编译选项才能受益。
+**Note**: FFmpeg itself needs `--enable-small --disable-debug` build options to benefit.
 
 ---
 
-## 九、参考项目分析
+## 9. Reference Project Analysis
 
 ### 9.1 ffmpeg-next (zmwangx/rust-ffmpeg)
 
-| 项目 | 结论 |
+| Project | Conclusion |
 |------|------|
-| 链接方式 | pkg-config 动态链接 (`.so`/`.dylib`), 非静态 |
-| 适用性 | 不适用 MediaServo Remote 的零依赖需求 |
-| 可借鉴 | feature flag 映射 codec 选择模式 (`ffmpeg_<ver>`) |
+| Linking | pkg-config dynamic linking (`.so`/`.dylib`), not static |
+| Applicability | doesn't fit MediaServo Remote's zero-dependency need |
+| Borrowable | the feature-flag → codec selection mapping pattern (`ffmpeg_<ver>`) |
 
-### 9.2 GStreamer (当前 Host 方案)
+### 9.2 GStreamer (the current Host plan)
 
-| 项目 | 结论 |
+| Project | Conclusion |
 |------|------|
-| 当前状态 | Host 端已集成 GStreamer, feature-gated |
-| 局限性 | 全动态链接, 插件体系无法静态化, 不适合 Remote |
-| 互补性 | Host GStreamer 编码 + Remote FFmpeg 解码 — D71 已决策 |
+| Current state | the Host has GStreamer integrated, feature-gated |
+| Limitations | fully dynamic; the plugin system can't be staticized; unsuitable for Remote |
+| Complementarity | Host GStreamer encode + Remote FFmpeg decode — decided in D71 |
 
-### 9.3 rivet-transcoder (参考)
+### 9.3 rivet-transcoder (reference)
 
-| 项目 | 结论 |
+| Project | Conclusion |
 |------|------|
-| 策略 | CI 中预构建 FFmpeg, 上传到 GitHub Releases, cargo 通过环境变量引用 |
-| 可借鉴 | **artifact-caching 模式**: GitHub Actions → Release → build.rs 下载 |
-| 构建优化 | `--disable-everything` + 最小 codec 集, 最终 .a 约 3-5 MB |
+| Strategy | prebuild FFmpeg in CI, upload to GitHub Releases, cargo references it via an env var |
+| Borrowable | **the artifact-caching pattern**: GitHub Actions → Release → build.rs downloads |
+| Build optimization | `--disable-everything` + a minimal codec set; the final .a is ~3-5 MB |
 
 ### 9.4 playa-ffmpeg (vcpkg-first)
 
-| 项目 | 结论 |
+| Project | Conclusion |
 |------|------|
-| 策略 | vcpkg 自动安装 FFmpeg（Linux/macOS/Windows），triplet 选静态链接 |
-| 可借鉴 | **零配置路径**: 开发者无需设置 FFMPEG_DIR，vcpkg 自动处理一切 |
-| 三平台 CI | GitHub Actions 已验证 Linux + macOS + Windows，带 vcpkg cache |
-| 构建时间 | 首次 ~15min (vcpkg 下载+编译 FFmpeg)，后续 ~30s (cache hit) |
-| 体积 | vcpkg 默认 full build → ~5 MB，可通过 vcpkg features 裁剪 |
-| 适用性 | 快速原型阶段 — 不想管理 Docker 和 FFmpeg 构建时的备选方案 |
+| Strategy | vcpkg auto-installs FFmpeg (Linux/macOS/Windows); choose static linking in the triplet |
+| Borrowable | **the zero-config path**: no FFMPEG_DIR needed; vcpkg handles everything |
+| Three-platform CI | GitHub Actions proven on Linux + macOS + Windows, with vcpkg cache |
+| Build time | first ~15min (vcpkg download+compile of FFmpeg), then ~30s (cache hit) |
+| Size | vcpkg's default full build → ~5 MB, trimmable via vcpkg features |
+| Applicability | quick prototyping — the fallback when you don't want to manage Docker and FFmpeg builds |
 
-### 9.5 BtbN/FFmpeg-Builds（预构建标准参考）
+### 9.5 BtbN/FFmpeg-Builds (the prebuilt standard reference)
 
-| 项目 | 结论 |
+| Project | Conclusion |
 |------|------|
-| 策略 | GitHub Actions + Docker + crosstool-ng 构建**全静态** FFmpeg 二进制 |
-| 覆盖 | Linux x86_64, Linux arm64, Windows x86_64 (预构建 `.tar.xz` 发布) |
-| 可借鉴 | **预构建 artifact 模式**: Docker 内构建 → 上传到 GitHub Releases → build.rs 从 URL 下载 |
-| 优势 | 社区维护，无需自建 Dockerfile；可直接引用作为选项 A |
-| 劣势 | 固定 codec 集（全功能），体积约 30 MB；不提供 macOS target |
+| Strategy | GitHub Actions + Docker + crosstool-ng building **fully static** FFmpeg binaries |
+| Coverage | Linux x86_64, Linux arm64, Windows x86_64 (published as prebuilt `.tar.xz`) |
+| Borrowable | **the prebuilt-artifact pattern**: build inside Docker → upload to GitHub Releases → build.rs downloads from the URL |
+| Strengths | community-maintained, no Dockerfiles to maintain; directly usable as option A |
+| Weaknesses | a fixed codec set (full-featured), ~30 MB; no macOS target |
 
-### 9.6 对比矩阵
+### 9.6 Comparison Matrix
 
-| 维度 | ffmpeg-next (source) | playa-ffmpeg (vcpkg) | BtbN Builds | 本策略 (自建) |
+| Dimension | ffmpeg-next (source) | playa-ffmpeg (vcpkg) | BtbN Builds | this strategy (own build) |
 |------|---------------------|---------------------|-------------|--------------|
-| 构建方式 | git clone + make | vcpkg install | 预构建下载 | Docker + make |
-| build.rs 复杂度 | 67KB（含完整构建器） | 5.6KB（vcpkg 调度） | N/A（需要自建） | ~2KB（探测+验证） |
-| 首次构建耗时 | ~10min（源码编译） | ~15min（vcpkg编译） | ~30s（下载） | ~30s（下载预构建） |
-| 预构建体积 | N/A（自编译） | ~5 MB | ~30 MB | ~2-4 MB |
-| 交叉编译 | 一等公民（iOS/Android） | vcpkg triplet | 仅 Linux/Windows | Docker cross-compile |
-| macOS 支持 | ✅ | ✅ | ❌（需自建） | ✅（GitHub Actions macos runner） |
-| Windows MSVC | ✅ | ✅（最佳） | ✅（mingw-w64） | ✅ |
-| Codec 定制 | ✅（完全自定义） | ✅（vcpkg features） | ❌（全功能） | ✅（最小集） |
-| GPL 控制 | ✅（feature flag） | ❌（vcpkg 端口默认可能包含） | ❌ | ✅（configure 控制） |
+| Build method | git clone + make | vcpkg install | prebuilt download | Docker + make |
+| build.rs complexity | 67KB (a full builder) | 5.6KB (vcpkg orchestration) | N/A (must build one) | ~2KB (probe + verify) |
+| First-build time | ~10min (source compile) | ~15min (vcpkg compile) | ~30s (download) | ~30s (download prebuilt) |
+| Prebuilt size | N/A (self-compiled) | ~5 MB | ~30 MB | ~2-4 MB |
+| Cross-compile | first-class (iOS/Android) | vcpkg triplet | Linux/Windows only | Docker cross-compile |
+| macOS support | ✅ | ✅ | ❌ (self-build needed) | ✅ (GitHub Actions macos runners) |
+| Windows MSVC | ✅ | ✅ (best) | ✅ (mingw-w64) | ✅ |
+| Codec customization | ✅ (fully custom) | ✅ (vcpkg features) | ❌ (full-featured) | ✅ (minimal set) |
+| GPL control | ✅ (feature flag) | ❌ (the vcpkg port default may include it) | ❌ | ✅ (controlled by configure) |
 
 ---
 
-## 十、实施路线图
+## 10. Implementation Roadmap
 
-| Phase | 任务 | 产出 | 工作量 |
+| Phase | Task | Output | Effort |
 |-------|------|------|--------|
-| **0** | FFmpeg 预构建脚本 + Dockerfiles | `ffmpeg-build/` 目录 | 2-3 天 |
-| **0** | CI 流水线: build-ffmpeg.yml | `.github/workflows/` | 1 天 |
-| **1** | `mediaservo-codec` crate 骨架 | `crates/mediaservo-codec/` | 2 天 |
-| **1** | build.rs (FFmpeg 检测+符号验证) | `build.rs` | 1 天 |
-| **1** | VideoDecoder trait 的 FFmpeg 实现 | `codec/ffmpeg_decoder.rs` | 3 天 |
-| **2** | Remote Client 集成解码 | `mediaservo-client` decode path | 2 天 |
-| **2** | 二进制大小优化 + 基准测试 | release profile tuning | 1 天 |
-| **3** | GPL 编码器支持 (如需) | 动态链接 或 子进程 | TBD |
+| **0** | FFmpeg prebuilt scripts + Dockerfiles | the `ffmpeg-build/` directory | 2-3 days |
+| **0** | CI pipeline: build-ffmpeg.yml | `.github/workflows/` | 1 day |
+| **1** | the `mediaservo-codec` crate skeleton | `crates/mediaservo-codec/` | 2 days |
+| **1** | build.rs (FFmpeg detection + symbol verification) | `build.rs` | 1 day |
+| **1** | the FFmpeg implementation of the VideoDecoder trait | `codec/ffmpeg_decoder.rs` | 3 days |
+| **2** | Remote Client decode integration | the `mediaservo-client` decode path | 2 days |
+| **2** | binary size optimization + benchmarks | release profile tuning | 1 day |
+| **3** | GPL encoder support (if needed) | dynamic linking or subprocess | TBD |
 
 ---
 
-## 十一、风险与缓解
+## 11. Risks & Mitigations
 
-| 风险 | 概率 | 缓解 |
+| Risk | Probability | Mitigation |
 |------|------|------|
-| FFmpeg ABI 不稳定 (major 版本) | 中 | 锁定版本号 (`FFMPEG_VERSION=7.0.2`), CI 控制 |
-| 预构建包过大 (>10 MB) 影响 clone | 低 | `--enable-small` + 最小 codec 集 → ~4 MB |
-| LGPL 静态链接合规问题 | 中 | NOTICE 文件 + 保留 .rlib 中间产物 |
-| macOS 签名问题 (静态库) | 低 | `.a` 文件不需要签名, 最终二进制由 Xcode 签名 |
-| 交叉编译 ABI 不匹配 | 中 | Docker 隔离构建, TARGET 严格对齐 (见 §6.2) |
-| 系统依赖 (libm, libz, libpthread) | 低 | 这些是系统库, 所有目标平台均有 |
+| FFmpeg ABI instability (major versions) | medium | pin the version (`FFMPEG_VERSION=7.0.2`), CI-controlled |
+| Prebuilt packages too large (>10 MB) slowing clones | low | `--enable-small` + a minimal codec set → ~4 MB |
+| LGPL static-linking compliance issues | medium | the NOTICE file + keeping the .rlib intermediates |
+| macOS signing issues (static libs) | low | `.a` files need no signing; the final binary is signed by Xcode |
+| Cross-compile ABI mismatch | medium | Docker-isolated builds, TARGET strictly aligned (see §6.2) |
+| System dependencies (libm, libz, libpthread) | low | system libraries present on every target platform |
 
 ---
 
-**ponytail 摘要**: 
-- 预构建 → build.rs 探测 → 静态链接 → 零运行时依赖
-- 跳过: 实时编译 FFmpeg, vcpkg (体积大), 全功能构建
-- Remote 端仅 decode, 不引入 encoder
-- GPL 边界: 保持 LGPL (**libx264 = GPL，绝对不启用**)
-- 快速开始: 选项 A (BtbN/FFmpeg-Builds 预构建) → 选项 B (自建) → 选项 C (vcpkg)
+**ponytail summary**:
+- Prebuild → build.rs probe → static link → zero runtime dependencies
+- Skipped: compiling FFmpeg live, vcpkg (large), full-featured builds
+- The Remote side decodes only; no encoder introduced
+- GPL boundary: stay LGPL (**libx264 = GPL; never enable it**)
+- Quick start: option A (BtbN/FFmpeg-Builds prebuilt) → option B (own build) → option C (vcpkg)
 
 ---
 
-## 附录: 参考资源
+## Appendix: Reference Resources
 
 - ffmpeg-sys-next build.rs: https://github.com/russelltg/rust-ffmpeg-sys
-- playa-ffmpeg vcpkg 集成: https://github.com/ssoj13/playa-ffmpeg
-- BtbN/FFmpeg-Builds 预构建: https://github.com/BtbN/FFmpeg-Builds
-- rivet-transcoder GPU 架构: https://github.com/rivet-transcoder/rivet
-- FFmpeg 官方 legal: https://www.ffmpeg.org/legal.html
-- LGPL 合规清单: FSF LGPL 2.1 §6a-b (静态链接条款)
+- playa-ffmpeg vcpkg integration: https://github.com/ssoj13/playa-ffmpeg
+- BtbN/FFmpeg-Builds prebuilts: https://github.com/BtbN/FFmpeg-Builds
+- rivet-transcoder GPU architecture: https://github.com/rivet-transcoder/rivet
+- FFmpeg official legal: https://www.ffmpeg.org/legal.html
+- LGPL compliance checklist: FSF LGPL 2.1 §6a-b (the static-linking clauses)

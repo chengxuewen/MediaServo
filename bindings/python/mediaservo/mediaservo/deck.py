@@ -1,12 +1,12 @@
-"""MediaServo deck Python 绑定 — 采集/录制/回放（镜像 C++ mediaservo::deck 类结构）。
+"""MediaServo deck Python bindings — capture/record/playback (mirrors the C++ mediaservo::deck class structure).
 
 API: DeviceKind(Enum) + enumerate_devices、CaptureOptions + CameraSource（open/
 start/on_frame/stop/close）、Recorder（open/record/stop/close）、Player（open/
-on_frame/close）。帧回调收 Frame dataclass（data 已拷贝为 bytes——C 指针仅
-回调内有效）。
+on_frame/close). Frame callbacks receive a Frame dataclass (data is copied to bytes — C pointers are
+valid only inside the callback).
 
-线程语义（C 契约）: 帧回调在泵线程触发，回调内禁止调用任何 deck API。
-关闭顺序（录制场景）: recorder stop/close 先于 camera stop/close。
+Threading semantics (C contract): frame callbacks fire on the pump thread; calling any deck API from within a callback is forbidden.
+Close order (recording scenario): recorder stop/close precedes camera stop/close.
 """
 
 import ctypes
@@ -24,7 +24,7 @@ __all__ = [
     "ERR_PLAYER", "ERR_STATE", "ERR_INTERNAL",
 ]
 
-# 错误码（deck.h）
+# Error codes (deck.h)
 ERR_OK = 0
 ERR_INVALID_ARG = -1
 ERR_DEVICE = -2
@@ -35,12 +35,12 @@ ERR_INTERNAL = -6
 
 
 class DeckError(MediaServoError):
-    """deck SDK 调用失败。"""
+    """deck SDK call failed."""
 
 
 _lib = _ffi.load("deck")
 
-# 帧回调签名（deck.h）: void (*)(const mediaservo_frame_t*, void*)
+# Frame callback signature (deck.h): void (*)(const mediaservo_frame_t*, void*)
 _FRAME_CB_TYPE = ctypes.CFUNCTYPE(None, ctypes.POINTER(_ffi.mediaservo_frame_t), ctypes.c_void_p)
 
 
@@ -55,9 +55,9 @@ def _check(rc: int) -> None:
         raise DeckError(rc, _last_error())
 
 
-# ── FFI 声明（H3: restype + argtypes 全覆盖，64 位指针截断防护）──────
+# -- FFI declarations (H3: restype + argtypes fully declared, 64-bit pointer truncation guard) ------
 
-_API = {}  # name -> (fn, restype, argtypes)，测试断言全覆盖
+_API = {}  # name -> (fn, restype, argtypes); tests assert full coverage
 
 
 def _api(name, restype, argtypes):
@@ -105,7 +105,7 @@ _version_fn = _api("mediaservo_deck_version", ctypes.c_int, [ctypes.c_char_p, ct
 
 
 def version() -> str:
-    """SDK 版本 (MAJOR.MINOR.PATCH)，去尾 NUL。"""
+    """SDK version (MAJOR.MINOR.PATCH), trailing NUL stripped."""
     buf = ctypes.create_string_buffer(64)
     rc = _version_fn(buf, 64)
     if rc != ERR_OK:
@@ -114,7 +114,7 @@ def version() -> str:
 
 
 class DeviceKind(enum.Enum):
-    """设备种类（对应 enumerate 的 kind 参数）。"""
+    """Device kind (matches the kind parameter of enumerate())."""
 
     Camera = 0
     Audio = 1
@@ -123,7 +123,7 @@ class DeviceKind(enum.Enum):
 
 @dataclass
 class CaptureOptions:
-    """采集选项（对应 mediaservo_deck_capture_options_t）。"""
+    """Capture options (mirrors mediaservo_deck_capture_options_t)."""
 
     width: int = 1280
     height: int = 720
@@ -132,10 +132,10 @@ class CaptureOptions:
 
 @dataclass
 class Frame:
-    """一帧（I420 三平面拼接: data = y + u + v，各平面行宽 = stride_*）。
+    """One frame (I420 three planes concatenated: data = y + u + v, each plane row width = stride_*).
 
-    data 已拷贝为 bytes —— C 的 data_* 指针仅回调内有效。
-    平面切片: y = data[:stride_y*height]; u = data[stride_y*height:...]。
+    data is copied to bytes — the C data_* pointers are valid only inside the callback.
+    Plane slicing: y = data[:stride_y*height]; u = data[stride_y*height:...].
     """
 
     width: int
@@ -148,12 +148,12 @@ class Frame:
 
 
 def enumerate_devices(kind: DeviceKind) -> list:
-    """枚举设备 id（双调用模式；多设备 '\n' 分隔；失败 = 空列表，C++ parity）。"""
+    """Enumerate device ids (two-call pattern; multiple devices separated by '\n'; failure = empty list, C++ parity)."""
     first = ctypes.c_size_t()
     rc = _devices_enumerate(int(kind.value), None, 0, ctypes.byref(first))
-    if rc < 0 or first.value == 0:  # rc 为正 = 所需长度（snprintf 约定）
+    if rc < 0 or first.value == 0:  # positive rc = required length (snprintf convention)
         return []
-    buf = ctypes.create_string_buffer(first.value + 1)  # C 写 cap-1 字符 + NUL
+    buf = ctypes.create_string_buffer(first.value + 1)  # C writes cap-1 chars + NUL
     out_len = ctypes.c_size_t()
     rc = _devices_enumerate(int(kind.value), buf, first.value + 1, ctypes.byref(out_len))
     if rc < 0:
@@ -163,9 +163,9 @@ def enumerate_devices(kind: DeviceKind) -> list:
 
 
 def _make_frame_trampoline(cb):
-    """Python 帧回调 → CFUNCTYPE（H3: 返回对象由调用方保存在持有句柄的对象上）。
+    """Python frame callback → CFUNCTYPE (H3: the returned object must be kept alive by the handle-owning Python object).
 
-    拷贝 I420 三平面为 bytes（指针仅回调内有效）；泵线程异常不得越过 C 边界（UB）。
+    Copy the I420 three planes to bytes (pointers are valid only inside the callback); pump-thread exceptions must never cross the C boundary (UB).
     """
 
     def _trampoline(frame_ptr, _user):
@@ -190,18 +190,18 @@ def _make_frame_trampoline(cb):
 
 
 class CameraSource:
-    """相机采集（对应 C++ mediaservo::deck::CameraSource）。默认构造 = 已关闭。"""
+    """Camera capture (mirrors C++ mediaservo::deck::CameraSource). Default construction = closed."""
 
     def __init__(self, h=None):
         self._h = h
-        self._cb_ref = None  # CFUNCTYPE 引用（H3: 防 GC，C close join 帧泵后才释放）
+        self._cb_ref = None  # CFUNCTYPE reference (H3: prevents GC; released after C close joins the frame pump)
 
     @classmethod
     def open(cls, dev_id: str, opts: CaptureOptions = None) -> "CameraSource":
-        """打开相机（仅本地初始化；dev_id 必须存在于枚举结果）。"""
+        """Open the camera (local initialization only; dev_id must exist in the enumeration result)."""
         opts = opts or CaptureOptions()
         c = _ffi.mediaservo_deck_capture_options_t()
-        c.struct_size = ctypes.sizeof(_ffi.mediaservo_deck_capture_options_t)  # R3: 自动填充
+        c.struct_size = ctypes.sizeof(_ffi.mediaservo_deck_capture_options_t)  # R3: auto-fill
         c.width = opts.width
         c.height = opts.height
         c.framerate = opts.framerate
@@ -216,33 +216,33 @@ class CameraSource:
             raise DeckError(ERR_STATE, "camera not open")
 
     def start(self) -> None:
-        """开始产帧（用 open 时的 opts；只允许一次，重复调用 → STATE）。"""
+        """Start producing frames (uses the opts from open; only allowed once, repeat calls → STATE)."""
         self._require_open()
         rc = _camera_start(self._h)
         if rc != ERR_OK:
             raise DeckError(rc, _last_error())
 
     def on_frame(self, callback) -> None:
-        """注册帧回调（泵线程逐帧触发；重复注册替换；回调收 Frame）。
+        """Register the frame callback (fires per frame on the pump thread; re-registration replaces; the callback receives a Frame).
 
-        回调内禁止调用任何 deck API；帧数据已拷贝，可安全保留。
+        Calling any deck API from within the callback is forbidden; frame data is copied and safe to keep.
         """
         self._require_open()
-        self._cb_ref = _make_frame_trampoline(callback)  # H3: 保存引用防 GC
+        self._cb_ref = _make_frame_trampoline(callback)  # H3: keep the reference to prevent GC
         rc = _camera_frames_cb(self._h, self._cb_ref, None)
         if rc != ERR_OK:
             self._cb_ref = None
             raise DeckError(rc, _last_error())
 
     def stop(self) -> None:
-        """停止产帧（幂等）。"""
+        """Stop producing frames (idempotent)."""
         self._require_open()
         rc = _camera_stop(self._h)
         if rc != ERR_OK:
             raise DeckError(rc, _last_error())
 
     def close(self) -> None:
-        """关闭相机并释放 handle（幂等；C close join 帧泵后释放回调引用）。"""
+        """Close the camera and release the handle (idempotent; the C close joins the frame pump before the callback reference is released)."""
         h, self._h = self._h, None
         if h is None:
             return
@@ -261,14 +261,14 @@ class CameraSource:
 
 
 class Recorder:
-    """录制器（对应 C++ mediaservo::deck::Recorder）。默认构造 = 已关闭。"""
+    """Recorder (mirrors C++ mediaservo::deck::Recorder). Default construction = closed."""
 
     def __init__(self, h=None):
         self._h = h
 
     @classmethod
     def open(cls, path: str) -> "Recorder":
-        """创建录制器（默认 h264/mp4；父目录必须已存在）。"""
+        """Create the recorder (default h264/mp4; the parent directory must already exist)."""
         out = ctypes.c_void_p()
         rc = _recorder_new(cstr(path), ctypes.byref(out))
         if rc != ERR_OK:
@@ -280,7 +280,7 @@ class Recorder:
             raise DeckError(ERR_STATE, "recorder not open")
 
     def record(self, camera: CameraSource) -> None:
-        """桥接录制: camera 帧泵 → recorder。camera 必须已 start 且活到录制结束。"""
+        """Bridge recording: camera frame pump → recorder. The camera must be started and outlive the recording."""
         self._require_open()
         if not camera._h:
             raise DeckError(ERR_INVALID_ARG, "camera closed")
@@ -289,14 +289,14 @@ class Recorder:
             raise DeckError(rc, _last_error())
 
     def stop(self) -> None:
-        """请求停止录制（幂等；flush + trailer 收尾在 close 时完成）。"""
+        """Request stop recording (idempotent; flush + trailer finalize on close)."""
         self._require_open()
         rc = _recorder_stop(self._h)
         if rc != ERR_OK:
             raise DeckError(rc, _last_error())
 
     def close(self) -> None:
-        """关闭录制器并释放 handle（幂等；join 录制任务完成 flush）。"""
+        """Close the recorder and release the handle (idempotent; joins the recording task to complete the flush)."""
         h, self._h = self._h, None
         if h is None:
             return
@@ -312,7 +312,7 @@ class Recorder:
 
 
 class Player:
-    """回放器（对应 C++ mediaservo::deck::Player）。默认构造 = 已关闭。"""
+    """Player (mirrors C++ mediaservo::deck::Player). Default construction = closed."""
 
     def __init__(self, h=None):
         self._h = h
@@ -320,7 +320,7 @@ class Player:
 
     @classmethod
     def open(cls, path: str) -> "Player":
-        """打开媒体文件（demux + 解码器就绪）。"""
+        """Open a media file (demux + decoder ready)."""
         out = ctypes.c_void_p()
         rc = _player_open(cstr(path), ctypes.byref(out))
         if rc != ERR_OK:
@@ -332,19 +332,19 @@ class Player:
             raise DeckError(ERR_STATE, "player not open")
 
     def on_frame(self, callback) -> None:
-        """逐帧解码回调泵（运行至 EOF 自然结束；只允许一次）。
+        """Per-frame decode callback pump (runs until EOF ends naturally; only allowed once).
 
-        close 为阻塞 join（等待解码完成）—— 长文件需等待，无法中途中止（YAGNI）。
+        close is a blocking join (waits for decoding to finish) — long files require waiting; no mid-flight abort (YAGNI).
         """
         self._require_open()
-        self._cb_ref = _make_frame_trampoline(callback)  # H3: 保存引用防 GC
+        self._cb_ref = _make_frame_trampoline(callback)  # H3: keep the reference to prevent GC
         rc = _player_frames_cb(self._h, self._cb_ref, None)
         if rc != ERR_OK:
             self._cb_ref = None
             raise DeckError(rc, _last_error())
 
     def close(self) -> None:
-        """关闭回放器并释放 handle（幂等；join 解码泵至完成后释放回调引用）。"""
+        """Close the player and release the handle (idempotent; joins the decode pump before the callback reference is released)."""
         h, self._h = self._h, None
         if h is None:
             return

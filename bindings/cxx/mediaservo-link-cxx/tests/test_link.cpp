@@ -1,5 +1,5 @@
-// mediaservo-link-cxx 编译运行测试：version + 错误路径 + move 语义 + Result 误用 + 回调生命周期。
-// 编译示例: g++ -std=c++17 -I bindings/cxx/mediaservo-link-cxx/include -I bindings/c/mediaservo-link-c/include
+// mediaservo-link-cxx compile-and-run tests: version + error paths + move semantics + Result misuse + callback lifetime.
+// Build example: g++ -std=c++17 -I bindings/cxx/mediaservo-link-cxx/include -I bindings/c/mediaservo-link-c/include
 //           -I bindings/c/include tests/test_link.cpp -L target/debug -lmediaservo_link
 //           -o /tmp/opencode/test_link_cxx
 
@@ -21,7 +21,7 @@ static void test_version() {
 }
 
 static void test_signal_connect_error_path() {
-    // 空配置 → C ABI 快速 INVALID_ARG（url/psk/room 必填），不触网
+    // Empty config → the C ABI fails fast with INVALID_ARG (url/psk/room required); no network touched
     auto r = SignalSession::connect(SignalConfig{});
     assert(!r.has_value());
     assert(r.error().code == MEDIASERVO_LINK_ERR_INVALID_ARG);
@@ -44,7 +44,7 @@ static void test_result_misuse_throws() {
 }
 
 static void test_closed_signal_error_path() {
-    SignalSession s; // 默认构造 = 已关闭
+    SignalSession s; // default construction = closed
     assert(!s);
 
     auto send = s.send("{\"type\":\"ping\"}");
@@ -52,13 +52,13 @@ static void test_closed_signal_error_path() {
     assert(send.error().code == MEDIASERVO_LINK_ERR_INVALID_ARG);
     assert(send.error().message == "closed");
 
-    s.on_event([](const std::string&) {}); // 已关闭 no-op，不崩
-    assert(s.close().has_value()); // 幂等
+    s.on_event([](const std::string&) {}); // closed no-op, no crash
+    assert(s.close().has_value()); // idempotent
     assert(s.close().has_value());
 }
 
 static void test_bus_attach_error_path() {
-    // 空 token/vk → JWT 验签快速失败（BUS 错误，不建 iceoryx 节点）
+    // Empty token/vk → JWT verification fails fast (BUS error; no iceoryx node created)
     auto r = Bus::attach("", "", "");
     assert(!r.has_value());
     assert(r.error().code == MEDIASERVO_LINK_ERR_BUS);
@@ -66,7 +66,7 @@ static void test_bus_attach_error_path() {
 }
 
 static void test_closed_bus_error_path() {
-    Bus b; // 默认构造 = 已关闭
+    Bus b; // default construction = closed
     assert(!b);
 
     mediaservo_frame_meta_t meta{};
@@ -84,8 +84,8 @@ static void test_closed_bus_error_path() {
 }
 
 static void test_closed_stream_error_path() {
-    mediaservo::link::Stream st; // 默认构造 = 已关闭
-    assert(!st); // Stream 句柄类（operator bool）
+    mediaservo::link::Stream st; // default construction = closed
+    assert(!st); // Stream is a handle class (operator bool)
 
     auto f = st.recv();
     assert(!f.has_value());

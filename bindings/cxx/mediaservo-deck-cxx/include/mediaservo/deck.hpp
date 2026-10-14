@@ -1,16 +1,16 @@
-/* MediaServo deck C++ header-only binding (采集/录制/回放面) — 本地监控/NVR C++ 消费。
+/* MediaServo deck C++ header-only binding (capture/record/playback plane) — C++ consumption for local monitoring/NVR.
  *
- * 薄包装 over bindings/c/mediaservo-deck-c/include/mediaservo/deck.h (D247)。
- * 生命周期契约（自 C ABI 头翻译成 RAII 保证）：
- *   - CameraSource/Recorder/Player 均 move-only；析构自动 close（幂等）。
- *   - 默认构造 = 已关闭（null handle）；对已关闭对象调用 API 返回
- *     Error{INVALID_ARG, "closed"}，不触碰 C ABI。
- *   - 帧回调（trampoline）在内部泵线程触发；mediaservo_frame_t 的 data_*
- *     指针仅在回调内有效（需保留请拷贝）；回调内禁止调用任何 deck API。
- *     std::function 堆对象在 close（join 泵线程）后统一释放，防 use-after-free。
- *   - Recorder::record 要求 camera 已 start 且活到录制结束；关闭顺序必须
- *     recorder stop/close 先于 camera stop/close（C 契约）。
- *   - 错误通道为 Result（非异常）；误用 value()/error() 抛 tl::bad_expected_access<Error>。
+ * Thin wrapper over bindings/c/mediaservo-deck-c/include/mediaservo/deck.h (D247).
+ * Lifecycle contract (translated from the C ABI header into RAII guarantees):
+ *   - CameraSource/Recorder/Player are all move-only; the destructor closes automatically (idempotent).
+ *   - Default construction = closed (null handle); calling an API on a closed object returns
+ *     Error{INVALID_ARG, "closed"} without touching the C ABI.
+ *   - Frame callbacks (trampolines) fire on the internal pump thread; the mediaservo_frame_t data_*
+ *     pointers are valid only inside the callback (copy to keep them); calling any deck API from within a callback is forbidden.
+ *     The heap std::function objects are released together after close (which joins the pump thread), preventing use-after-free.
+ *   - Recorder::record requires the camera to be started and to outlive the recording; the close order must be
+ *     recorder stop/close before camera stop/close (the C contract).
+ *   - The error channel is Result (not exceptions); misusing value()/error() throws tl::bad_expected_access<Error>.
  */
 #ifndef MEDIASERVO_DECK_HPP
 #define MEDIASERVO_DECK_HPP
@@ -37,14 +37,14 @@ using mediaservo::Result;
 
 namespace detail {
 
-/// 从 C ABI last_error 构造错误（C 调用返回 <0 后调用）。
+/// Build an error from the C ABI last_error (call after a C API returns <0).
 inline Error make_error(int code) {
     char buf[512];
     mediaservo_deck_last_error(buf, sizeof(buf));
     return Error{code, std::string(buf)};
 }
 
-/// 帧回调 trampoline 载体（堆分配，生命周期=注册期；close join 泵后释放）。
+/// Frame-callback trampoline carrier (heap-allocated, lifetime = the registration period; freed after close joins the pump).
 using FrameCb = std::function<void(const mediaservo_frame_t&)>;
 inline void frame_trampoline(const mediaservo_frame_t* frame, void* user) {
     (*static_cast<FrameCb*>(user))(*frame);
@@ -56,7 +56,7 @@ inline void frame_trampoline(const mediaservo_frame_t* frame, void* user) {
 
 
 
-/// SDK 版本 (MAJOR.MINOR.PATCH)。
+/// SDK version (MAJOR.MINOR.PATCH).
 inline Result<std::string> version() {
     char buf[64];
     int rc = mediaservo_deck_version(buf, sizeof(buf));
@@ -66,30 +66,30 @@ inline Result<std::string> version() {
     return Result<std::string>(std::string(buf));
 }
 
-/// 设备种类（对应 mediaservo_deck_devices_enumerate 的 kind 参数）。
+/// Device kind (matches the kind parameter of mediaservo_deck_devices_enumerate).
 enum class DeviceKind {
     Camera = 0,
     Audio = 1,
     Screen = 2,
 };
 
-/// 采集选项（对应 mediaservo_deck_capture_options_t；全 0 字段 = C 默认）。
+/// Capture options (mirrors mediaservo_deck_capture_options_t; all-zero fields = the C default).
 struct CaptureOptions {
     uint32_t width = 1280;
     uint32_t height = 720;
     uint32_t framerate = 30;
 };
 
-/// 枚举设备 id（双调用封装；多设备 '\n' 分隔）。失败返回空列表。
+/// Enumerate device ids (two-call wrapper; multiple devices separated by '\n'). Failure returns an empty list.
 inline std::vector<std::string> enumerate_devices(DeviceKind kind) {
     size_t len = 0;
     int rc = mediaservo_deck_devices_enumerate(static_cast<int>(kind), nullptr, 0, &len);
     if (rc < MEDIASERVO_OK || len == 0) {
-        return {}; // ponytail: 无 Result 通道（spec 固定签名）；失败=空列表
+        return {}; // ponytail: no Result channel (the spec fixes the signature); failure = empty list
     }
     std::string buf(len, '\0');
     rc = mediaservo_deck_devices_enumerate(static_cast<int>(kind), &buf[0], buf.size(), &len);
-    // C++11: string::data() 为 const，&buf[0] 惯用法
+    // C++11: string::data() is const, hence the &buf[0] idiom
     if (rc < MEDIASERVO_OK) {
         return {};
     }
@@ -106,10 +106,10 @@ inline std::vector<std::string> enumerate_devices(DeviceKind kind) {
 
 class Recorder;
 
-/// 相机采集（move-only RAII；析构自动 close；默认构造 = 已关闭）。
+/// Camera capture (move-only RAII; the destructor closes automatically; default construction = closed).
 class CameraSource {
 public:
-    /// 打开相机（仅本地初始化；dev_id 必须存在于枚举结果）。
+    /// Open the camera (local initialization only; dev_id must exist in the enumeration result).
     static Result<CameraSource> open(const std::string& dev_id, const CaptureOptions& opts = CaptureOptions{}) {
         mediaservo_deck_capture_options_t c = MEDIASERVO_DECK_CAPTURE_OPTIONS_DEFAULT;
         c.width = opts.width;
@@ -124,7 +124,7 @@ public:
         return Result<CameraSource>(CameraSource(h));
     }
 
-    /// 默认构造 = 已关闭相机。
+    /// Default construction = closed camera.
     CameraSource() noexcept = default;
     ~CameraSource() { (void)close(); }
 
@@ -140,10 +140,10 @@ public:
         return *this;
     }
 
-    /// 是否持有有效相机。
+    /// Whether a valid camera is held.
     explicit operator bool() const noexcept { return h_ != nullptr; }
 
-    /// 开始产帧（用 open 时的 opts；只允许一次）。
+    /// Start producing frames (uses the opts from open; only allowed once).
     Result<void> start() {
         if (!h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_DECK_ERR_INVALID_ARG, "closed"});
         int rc = mediaservo_deck_camera_start(h_);
@@ -153,12 +153,12 @@ public:
         return Result<void>();
     }
 
-    /// 注册帧回调（泵线程逐帧触发；重复注册替换；frame 指针仅回调内有效；
-    /// 回调内禁止调用任何 deck API）。
+    /// Register the frame callback (fires per frame on the pump thread; re-registration replaces; the frame pointer is valid only inside the callback;
+    /// calling any deck API from within the callback is forbidden).
     Result<void> on_frame(detail::FrameCb cb) {
         if (!h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_DECK_ERR_INVALID_ARG, "closed"});
         auto* f = new detail::FrameCb(std::move(cb));
-        cbs_.push_back(f); // ponytail: 旧回调留到 close 释放（泵线程可能正在执行，防 UAF）；注册次数通常 1
+        cbs_.push_back(f); // ponytail: old callbacks are kept until close frees them (the pump thread may be executing them, preventing UAF); usually 1 registration
         int rc = mediaservo_deck_camera_frames_cb(h_, &detail::frame_trampoline, f);
         if (rc != MEDIASERVO_OK) {
             cbs_.pop_back();
@@ -168,7 +168,7 @@ public:
         return Result<void>();
     }
 
-    /// 停止产帧（幂等）。
+    /// Stop producing frames (idempotent).
     Result<void> stop() noexcept {
         if (!h_) return Result<void>();
         int rc = mediaservo_deck_camera_stop(h_);
@@ -178,7 +178,7 @@ public:
         return Result<void>();
     }
 
-    /// 关闭相机并释放 handle（幂等；join 帧泵后才释放回调对象）。
+    /// Close the camera and release the handle (idempotent; callback objects are freed only after joining the frame pump).
     Result<void> close() noexcept {
         if (!h_ && cbs_.empty()) return Result<void>();
         int rc = MEDIASERVO_OK;
@@ -206,10 +206,10 @@ private:
     std::vector<detail::FrameCb*> cbs_;
 };
 
-/// 录制器（move-only RAII；析构自动 close；默认构造 = 已关闭）。
+/// Recorder (move-only RAII; the destructor closes automatically; default construction = closed).
 class Recorder {
 public:
-    /// 创建录制器（默认 h264/mp4；父目录必须已存在）。
+    /// Create the recorder (default h264/mp4; the parent directory must already exist).
     static Result<Recorder> open(const std::string& path) {
         mediaservo_deck_recorder_t* h = nullptr;
         int rc = mediaservo_deck_recorder_new(path.empty() ? nullptr : path.c_str(), &h);
@@ -219,7 +219,7 @@ public:
         return Result<Recorder>(Recorder(h));
     }
 
-    /// 默认构造 = 已关闭录制器。
+    /// Default construction = closed recorder.
     Recorder() noexcept = default;
     ~Recorder() { (void)close(); }
 
@@ -234,11 +234,11 @@ public:
         return *this;
     }
 
-    /// 是否持有有效录制器。
+    /// Whether a valid recorder is held.
     explicit operator bool() const noexcept { return h_ != nullptr; }
 
-    /// 桥接录制: camera 帧泵 → recorder。camera 必须已 start 且活到录制结束
-    /// （关闭顺序: recorder stop/close 先于 camera stop/close，C 契约）。
+    /// Bridge recording: camera frame pump → recorder. The camera must be started and outlive the recording
+    /// (close order: recorder stop/close before camera stop/close, the C contract).
     Result<void> record(CameraSource& camera) {
         if (!h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_DECK_ERR_INVALID_ARG, "closed"});
         if (!camera.h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_DECK_ERR_INVALID_ARG, "camera closed"});
@@ -249,7 +249,7 @@ public:
         return Result<void>();
     }
 
-    /// 请求停止录制（幂等；flush + trailer 收尾在 close 时完成）。
+    /// Request stop recording (idempotent; flush + trailer finalize on close).
     Result<void> stop() noexcept {
         if (!h_) return Result<void>();
         int rc = mediaservo_deck_recorder_stop(h_);
@@ -259,7 +259,7 @@ public:
         return Result<void>();
     }
 
-    /// 关闭录制器并释放 handle（幂等；join 录制任务完成 flush）。
+    /// Close the recorder and release the handle (idempotent; joins the recording task to complete the flush).
     Result<void> close() noexcept {
         if (!h_) return Result<void>();
         int rc = mediaservo_deck_recorder_close(h_);
@@ -280,10 +280,10 @@ private:
     mediaservo_deck_recorder_t* h_ = nullptr;
 };
 
-/// 回放器（move-only RAII；析构自动 close；默认构造 = 已关闭）。
+/// Player (move-only RAII; the destructor closes automatically; default construction = closed).
 class Player {
 public:
-    /// 打开媒体文件（demux + 解码器就绪）。
+    /// Open a media file (demux + decoder ready).
     static Result<Player> open(const std::string& path) {
         mediaservo_deck_player_t* h = nullptr;
         int rc = mediaservo_deck_player_open(path.empty() ? nullptr : path.c_str(), &h);
@@ -293,7 +293,7 @@ public:
         return Result<Player>(Player(h));
     }
 
-    /// 默认构造 = 已关闭回放器。
+    /// Default construction = closed player.
     Player() noexcept = default;
     ~Player() { (void)close(); }
 
@@ -309,10 +309,10 @@ public:
         return *this;
     }
 
-    /// 是否持有有效回放器。
+    /// Whether a valid player is held.
     explicit operator bool() const noexcept { return h_ != nullptr; }
 
-    /// 逐帧解码回调泵（运行至 EOF 自然结束；只允许一次；close 为阻塞 join）。
+    /// Per-frame decode callback pump (runs until EOF ends naturally; only allowed once; close is a blocking join).
     Result<void> on_frame(detail::FrameCb cb) {
         if (!h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_DECK_ERR_INVALID_ARG, "closed"});
         auto* f = new detail::FrameCb(std::move(cb));
@@ -326,7 +326,7 @@ public:
         return Result<void>();
     }
 
-    /// 关闭回放器并释放 handle（幂等；join 解码泵至完成后释放回调对象）。
+    /// Close the player and release the handle (idempotent; callback objects are freed after joining the decode pump until done).
     Result<void> close() noexcept {
         if (!h_ && cbs_.empty()) return Result<void>();
         int rc = MEDIASERVO_OK;

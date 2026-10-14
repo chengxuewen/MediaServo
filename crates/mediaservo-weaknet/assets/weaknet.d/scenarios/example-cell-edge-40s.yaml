@@ -1,5 +1,5 @@
-# example-cell-edge-40s —— 阶梯突变示例（T7 验收用迷你形；完整 40s 形按 QNS 100/150/200 思想）
-# at_s 严格递增（emit 校验）；参数保持到下一步；baseline_s 缺省=steps 总长+尾
+# example-cell-edge-40s -- stepped-burst example (the mini form for T7 acceptance; the full 40s form follows the QNS 100/150/200 idea)
+# at_s strictly increasing (emit validation); params persist to the next step; baseline_s default = total steps length + tail
 scenario:
   baseline_s: 10
   steps:
@@ -10,5 +10,5 @@ scenario:
     - at_s: 12
       set: {rtt_ms: 200, loss: "10%", rate_mbps: 2}
     - at_s: 18
-      set: {rtt_ms: 0, jitter_ms: 0, loss: "0%"}   # 恢复步（repeat 轮判据的定长替代）
+      set: {rtt_ms: 0, jitter_ms: 0, loss: "0%"}   # recovery step (the fixed-length stand-in for the repeat-round predicate)
   clear: false

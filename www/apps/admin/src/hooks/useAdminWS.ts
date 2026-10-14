@@ -21,7 +21,7 @@ export function useAdminWS(onEvent: (event: any) => void) {
       ws.onopen = () => { attempt = 0; };
       ws.onclose = () => {
         if (cancelled) return;
-        // W 韧性：固定 5s → 指数退避 2→30s + jitter（server 重启窗口防握手风暴）
+        // W resilience: fixed 5s → exponential backoff 2→30s + jitter (avoids a handshake storm during server restarts)
         attempt++;
         const base = Math.min(2000 * 2 ** (attempt - 1), 30000);
         timer = setTimeout(connect, base * (0.75 + Math.random() * 0.5));

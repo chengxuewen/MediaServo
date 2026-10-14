@@ -1,14 +1,14 @@
-# Error Model — 错误模型
+# Error Model
 
-> 状态：Phase 3 前设计 | 关联决策：D-ERR-01, D-ERR-02 | 创建依据：doc-audit M7
+> Status: pre-Phase 3 design | Related decisions: D-ERR-01, D-ERR-02 | Created per doc-audit M7
 
-## 错误传播
+## Error Propagation
 
 ```
 Host → [FlatBuffers ErrorPayload] → Server → [HTTP status + JSON body] → Client/Remote
 ```
 
-每个 crate 内部错误不得直接泄漏到边界。Component 层 `ComponentError` 是统一错误类型，跨进程时序列化为 FlatBuffers `ErrorPayload`（错误码 + 上下文 string）。
+Errors inside each crate must never leak directly across boundaries. The Component layer's `ComponentError` is the unified error type; when crossing process boundaries it is serialized into the FlatBuffers `ErrorPayload` (error code + context string).
 
 ## ComponentError (thiserror)
 
@@ -34,32 +34,32 @@ pub enum ComponentError {
 }
 ```
 
-## 错误码分层 (D-ERR-02)
+## Error Code Layering (D-ERR-02)
 
-| 范围 | 层 | 示例 |
-|------|-----|------|
-| 1xxx | 通用/Component | 1001 NotFound, 1002 InitFailed |
-| 2xxx | 传输层 | 2001 ConnectionRefused, 2002 Timeout |
-| 3xxx | 资源 | 3001 StreamNotFound, 3002 RoomFull |
-| 4xxx | 发现 | 4101 CameraNotFound, 4102 ONVIFAuthFailed, 4103 DiscoveryTimeout |
-| 5xxx | 认证授权 | 5001 TokenExpired, 5002 PermissionDenied |
-| 6xxx | 媒体 | 6001 CodecUnsupported, 6002 EncoderFailed |
+| Range | Layer | Examples |
+|-------|-------|----------|
+| 1xxx | Generic/Component | 1001 NotFound, 1002 InitFailed |
+| 2xxx | Transport | 2001 ConnectionRefused, 2002 Timeout |
+| 3xxx | Resources | 3001 StreamNotFound, 3002 RoomFull |
+| 4xxx | Discovery | 4101 CameraNotFound, 4102 ONVIFAuthFailed, 4103 DiscoveryTimeout |
+| 5xxx | Auth/authz | 5001 TokenExpired, 5002 PermissionDenied |
+| 6xxx | Media | 6001 CodecUnsupported, 6002 EncoderFailed |
 
-### SFU 媒体面错误 (40xx, 实时协议)
+### SFU Media-Plane Errors (40xx, real-time protocol)
 
-> 创建依据：doc-audit L6（错误码三处语义冲突合并）。SFU 码段为**线上信令协议实际使用**（signaling.rs），发现层已平移至 41xx。
+> Created per doc-audit L6 (merging three conflicting error-code semantics). The SFU code range is what the **wire signaling protocol actually uses** (signaling.rs); the discovery range has already shifted to 41xx.
 
-| 码 | 含义 | 代码位置 |
-|----|------|---------|
-| 4000 | transport 连接失败 / Produce 需要 send transport | signaling.rs:675 |
-| 4001 | Room join 失败 | signaling.rs:308 |
-| 4002 | Room 已满 | signaling.rs:295 |
-| 4003 | 认证失败（PSK）——语义属认证层，[规划] 迁移至 5003 | signaling.rs:215/232 |
-| 4099 | SFU 内部错误——[规划] 由 5000 迁入 | signaling.rs:629/636/661/703/726 |
+| Code | Meaning | Code location |
+|------|---------|---------------|
+| 4000 | Transport connection failed / Produce requires a send transport | signaling.rs:675 |
+| 4001 | Room join failed | signaling.rs:308 |
+| 4002 | Room full | signaling.rs:295 |
+| 4003 | Auth failure (PSK) — semantically auth-layer; [planned] migrate to 5003 | signaling.rs:215/232 |
+| 4099 | SFU internal error — [planned] migrated in from 5000 | signaling.rs:629/636/661/703/726 |
 
-> ⚠️ 5xxx 段注明：**5000 已被 SFU 内部错误占用**（signaling.rs 5 处），与 5xxx=认证授权语义冲突；迁移计划见上表（5000→4099、4003→5003），需信令协议版本兼容评估（浏览器按 type 字段路由，PIT-06，code 迁移风险低）。
+> ⚠️ The 5xxx range note: **5000 is already occupied by SFU internal errors** (5 sites in signaling.rs), conflicting with 5xxx=auth/authz semantics; the migration plan is in the table above (5000→4099, 4003→5003) and needs a signaling-protocol compatibility assessment (browsers route by the type field, PIT-06, so code migration risk is low).
 
-## HTTP 状态映射
+## HTTP Status Mapping
 
 ```
 ComponentError → gRPC status / HTTP status
@@ -74,47 +74,47 @@ Unauthorized(_)  → 401
 ConfigInvalid(_) → 400
 ```
 
-## 日志约定
+## Logging Conventions
 
-- **ERROR**: InitFailed, Internal — 需要人工介入
-- **WARN**: RpcTimeout, ChannelClosed — 可重试恢复
-- **INFO**: Shutdown, NotFound — 正常操作流程
-- **必须包含**: `component_id`, `request_id`, 上下文
+- **ERROR**: InitFailed, Internal — requires human intervention
+- **WARN**: RpcTimeout, ChannelClosed — retryable recovery
+- **INFO**: Shutdown, NotFound — normal operation flow
+- **Must include**: `component_id`, `request_id`, context
 
-## 运行时错误场景
+## Runtime Error Scenarios
 
-### Signal 断连
-- WebSocket 断开后保持现有 WebRTC 连接，ICE restart 尝试恢复信令。
-- 超时 30s → 关闭连接。
-- 错误码: 2004 SignalingDisconnected
+### Signal disconnect
+- After a WebSocket disconnect, existing WebRTC connections are kept; ICE restart attempts to recover signaling.
+- Timeout 30s → close the connection.
+- Error code: 2004 SignalingDisconnected
 
-### Transport 断开 (ICE)
-- 优雅关闭 (正常挂断): 错误码 2005 ConnectionClosed。
-- 异常断开 (网络中断): 错误码 2006 ConnectionLost。
-- ICE restart 自动尝试恢复。
+### Transport disconnect (ICE)
+- Graceful close (normal hang up): error code 2005 ConnectionClosed.
+- Abnormal disconnect (network interruption): error code 2006 ConnectionLost.
+- ICE restart attempts recovery automatically.
 
-### Discovery 超时
-- ONVIF/RTSP 设备发现超时 10s。
-- 错误码: 4103 DiscoveryTimeout
+### Discovery timeout
+- ONVIF/RTSP device discovery times out at 10s.
+- Error code: 4103 DiscoveryTimeout
 
-### Codec 不匹配
-- SDP 协商无共同 codec → 错误码 3005 CodecNegotiationFailed。
+### Codec mismatch
+- SDP negotiation finds no common codec → error code 3005 CodecNegotiationFailed.
 
-### Config 回滚屏障
-- 新配置导致组件崩溃 → 回滚到旧配置。
-- 二次失败 → 进入安全模式（最小化功能集）。
-- 错误码: 9004 ConfigRollbackFailed
+### Config rollback barrier
+- A new config crashes a component → roll back to the old config.
+- A second failure → enter safe mode (minimal feature set).
+- Error code: 9004 ConfigRollbackFailed
 
-## 背压与溢出策略
+## Backpressure & Overflow Policy
 
-### 编码队列满 (D-ERR-03)
-- Ring buffer，drop oldest frame，保留关键帧。
-- EncoderInputDropped 计数器。
+### Encode queue full (D-ERR-03)
+- Ring buffer, drop the oldest frame, keep keyframes.
+- EncoderInputDropped counter.
 
-### 推流发送缓冲满 (D-ERR-04)
-- bounded mpsc channel (cap 32)，超出→ drop oldest P frame。
-- signal lag 计数器。
+### Push send buffer full (D-ERR-04)
+- Bounded mpsc channel (cap 32); overflow → drop the oldest P frame.
+- Signal lag counter.
 
-### 背压传播
-- Sink → Processor → Source，通过 bounded channel capacity 实现。
-> 背压传播设计已实施完成（D127-D134 Component 架构，consolidated-mvp 计划）
+### Backpressure propagation
+- Sink → Processor → Source, via bounded channel capacities.
+> The backpressure propagation design is implemented (D127-D134 Component architecture, consolidated-mvp plan)

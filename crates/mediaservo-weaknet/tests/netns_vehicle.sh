@@ -1,43 +1,43 @@
 #!/usr/bin/env bash
-# tests/netns_vehicle.sh —— W8 车端面替身验收（tasks.md T12/T13）：unshare -rn netns 内
-# veth 拓扑跑通「weaknet.yaml → apply（影响面/反锁死钉）→ watch → down 零残留」全链。
+# tests/netns_vehicle.sh -- the W8 vehicle-surface stand-in acceptance (tasks.md T12/T13): inside an unshare -rn netns,
+# a veth topology exercises the full chain "weaknet.yaml -> apply (impact/anti-deadlock pins) -> watch -> down with zero residue".
 #
-# 安全面：一切内核触达在新 netns（user-ns root）——宿主 ens32/lo 零触碰；拓扑随进程退出消亡。
-# WEAKNET_STATEDIR 全程钉 $WORK（cleanup 的 clear 永不回落生产 out/.weaknet）。
-# 拓扑复用 tests/netns_ifb.sh 实证形（peer netns 出向真流量，非 local 短路）。
+# Safety: all kernel touching happens in a new netns (user-ns root) -- the host's ens32/lo is never touched; the topology dies with the process.
+# WEAKNET_STATEDIR pinned to $WORK throughout (cleanup's clear can never fall back to the production out/.weaknet).
+# Topology reuses the netns_ifb.sh proven shape (peer-netns outbound real traffic, not a local short-circuit).
 #
-# 反锁死断言替身法（注记：真实面=apply 期 ssh 连续往返 + getent hosts 解析，需上车日补）：
-#   ① 协议腿排除（活证）：施加期 `ping` ICMP（protocol 1≠17）0% 丢包零延迟——
-#      TCP/SSH 结构性不进 netem 的内核面等价证；TCP 临时端口碰撞的「filter 必带
-#      protocol 17 合取」面已由 spec.rs::legs_anti_lockout_pins 单元测试钉死（双保险）。
-#   ② 枚举排除（定量）：非枚举口 UDP(53) 流量 leaf 计数零计入（Δ≈0）——「端口集来自
-#      weaknet.yaml 枚举」的活证 + L1b 物理口无 ports 直接 exit2 报因（规则层枚举门）。
-# 换掉早期 TCP 源口探针方案的原因：socket 握手时序引入 flake，证明力与 ① ping 等价
-# （同为「非 UDP 不进叶」），协议维度另有单测钉——按等价强度取零构造方案。
+# Anti-deadlock assertion stand-in method (note: the real surface = continuous ssh round-trips during apply + getent hosts resolution, to be added on vehicle day):
+#   (1) protocol-leg exclusion (live evidence): during apply, `ping` over ICMP (protocol 1 != 17) with 0% loss and zero added delay --
+#      the kernel-surface equivalent proof that TCP/SSH structurally never enters netem; the "every filter must carry the
+#      protocol 17 conjunction" surface for TCP ephemeral-port collisions is already pinned by spec.rs::legs_anti_lockout_pins unit tests (double insurance).
+#   (2) enumeration exclusion (quantified): UDP(53) traffic on a non-enumerated port counts zero at the leaf (delta ~ 0) --
+#      live proof that "the port set comes from the weaknet.yaml enumeration" + L1b physical-port-without-ports direct exit2 cause (the rule-layer enumeration gate).
+# Why the early TCP source-port probe scheme was dropped: socket handshake timing introduced flakes; its evidentiary strength equals (1)'s ping
+# (both prove "non-UDP never reaches the leaf"), and the protocol dimension is separately pinned by unit tests -- the zero-construction scheme wins on equal strength.
 #
-# 用法：WEAKNET_BIN=/path/to/mediaservo-weaknet bash tests/netns_vehicle.sh
-# 退出：0=全案过 · 77=环境不可构（无 unshare/userns）· 其余=案失败
+# Usage: WEAKNET_BIN=/path/to/mediaservo-weaknet bash tests/netns_vehicle.sh
+# Exit: 0 = all cases pass, 77 = environment cannot be constructed (no unshare/userns), otherwise = case failure
 set -u -o pipefail
 
 BIN="${WEAKNET_BIN:-}"
-[[ -z "$BIN" || ! -x "$BIN" ]] && { echo "FAIL: WEAKNET_BIN 未设或不可执行: '$BIN'"; exit 2; }
+[[ -z "$BIN" || ! -x "$BIN" ]] && { echo "FAIL: WEAKNET_BIN unset or not executable: '$BIN'"; exit 2; }
 export BIN
-command -v tc >/dev/null || { echo "FAIL: 宿主无 tc（iproute2）"; exit 2; }
-command -v unshare >/dev/null || { echo "FAIL: 无 unshare"; exit 2; }
-command -v python3 >/dev/null || { echo "FAIL: 无 python3（UDP 流量源）"; exit 2; }
-command -v ping >/dev/null || { echo "FAIL: 无 ping（协议排除活证探针）"; exit 2; }
-unshare -rn true || { echo "SKIP: unshare -rn 不可用——W8 BLOCKED-env"; exit 77; }
+command -v tc >/dev/null || { echo "FAIL: no tc (iproute2) on the host"; exit 2; }
+command -v unshare >/dev/null || { echo "FAIL: no unshare"; exit 2; }
+command -v python3 >/dev/null || { echo "FAIL: no python3 (the UDP traffic source)"; exit 2; }
+command -v ping >/dev/null || { echo "FAIL: no ping (the protocol-exclusion live-evidence probe)"; exit 2; }
+unshare -rn true || { echo "SKIP: unshare -rn unavailable -- W8 BLOCKED-env"; exit 77; }
 
-echo "== 环境: tc=$(tc -V) $(python3 -V) bin=$BIN =="
+echo "== environment: tc=$(tc -V) $(python3 -V) bin=$BIN =="
 
-# L0：--version（scp 即用链的自证面，无内核触达）
+# L0: --version (the scp-and-go chain's self-proof surface, zero kernel touching)
 "$BIN" --version || { echo "FAIL L0: --version"; exit 1; }
 
 unshare -rn bash -eu -o pipefail <<'NETNS'
-echo "== 进入 unshare -rn（新 netns，user-ns root）=="
+echo "== entering unshare -rn (new netns, user-ns root) =="
 ip link set lo up
 
-# ---- 夹具：vethA 本侧（10.99.0.1）+ vethB 移入 peer netns（10.99.0.2，ARP/回程承载）----
+# ---- fixture: vethA local side (10.99.0.1) + vethB moved into the peer netns (10.99.0.2, carries ARP/return traffic) ----
 unshare -n sleep 400 & PEER=$!
 sleep 0.3
 ip link add vethA type veth peer name vethB
@@ -52,7 +52,7 @@ STATEDIR="$WORK/state"
 mkdir -p "$STATEDIR"
 export WEAKNET_STATEDIR="$STATEDIR"
 export WEAKNET_CHANNEL=local
-# 定向链去歧义：stats/凭证/env-iface/资产目录全部清空 → 解析只可能来自 --config/--rtp-port
+# targeting-chain disambiguation: stats/credentials/env-iface/asset dirs all cleared -> resolution can only come from --config/--rtp-port
 export WEAKNET_SERVER_URL="" WEAKNET_ADMIN_PASS="" WEAKNET_DEV="" WEAKNET_ASSETS_DIR=""
 PIDS=()
 cleanup() {
@@ -64,7 +64,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# 流量源（vethA egress，源口可控）——dir=out 腿按 sport∈P 匹配
+# traffic source (vethA egress, controllable source port) -- the dir=out legs match on sport in P
 udp_sport() { # udp_sport <bindport> <secs>
     timeout "$2" python3 -c '
 import socket, time, sys
@@ -76,7 +76,7 @@ while time.time() < end:
 ' "$1" "$2" &
     PIDS+=("$!")
 }
-leaf_stat() { # <field: pkt|dropped> —— vethA parent 1:10 netem 叶（解析形同 netns_ifb.sh）
+leaf_stat() { # <field: pkt|dropped> -- the vethA parent 1:10 netem leaf (same parse shape as netns_ifb.sh)
     tc -s qdisc show dev vethA | awk -v f="$1" '
         /netem/ { getline;
             if (f=="pkt") { for(i=1;i<=NF;i++) if($i=="pkt"){ v=$(i-1); gsub(/[^0-9]/,"",v); print v; exit } }
@@ -84,18 +84,18 @@ leaf_stat() { # <field: pkt|dropped> —— vethA parent 1:10 netem 叶（解析
         }'
 }
 
-# ---- L1 反锁死规则层负案（serde 严格 + 物理口枚举门）----
+# ---- L1 anti-deadlock rule-layer negatives (serde strictness + the physical-port enumeration gate) ----
 printf 'portz: [1]\n' > "$WORK/badkey.yaml"
 rc=$("$BIN" apply --config "$WORK/badkey.yaml" 2>&1; echo "RC:$?") || true
-grep -q "RC:4" <<<"$rc" || { echo "FAIL L1a: 未知键应 exit4，得: $rc"; exit 1; }
-grep -q "iface.*ports.*duration.*spec" <<<"$rc" || { echo "FAIL L1a: 报因需列合法键集，得: $rc"; exit 1; }
+grep -q "RC:4" <<<"$rc" || { echo "FAIL L1a: unknown key should exit4, got: $rc"; exit 1; }
+grep -q "iface.*ports.*duration.*spec" <<<"$rc" || { echo "FAIL L1a: the cause must list the legal key set, got: $rc"; exit 1; }
 printf 'iface: vethA\nduration: 60\nspec:\n  rtt_ms: 80\n' > "$WORK/noports.yaml"
 rc=$("$BIN" apply --config "$WORK/noports.yaml" 2>&1; echo "RC:$?") || true
-grep -q "RC:2" <<<"$rc" || { echo "FAIL L1b: 物理口无 ports 应 exit2，得: $rc"; exit 1; }
-grep -q "反锁死" <<<"$rc" || { echo "FAIL L1b: 报因缺枚举指引（反锁死）：$rc"; exit 1; }
-echo "### L1 反锁死负案双过（未知键 exit4 列合法集 · 物理口无 ports exit2 报因）###"
+grep -q "RC:2" <<<"$rc" || { echo "FAIL L1b: physical port without ports should exit2, got: $rc"; exit 1; }
+grep -q "anti-deadlock" <<<"$rc" || { echo "FAIL L1b: the cause lacks enumeration guidance (anti-deadlock): $rc"; exit 1; }
+echo "### L1 anti-deadlock negatives both pass (unknown key exit4 lists the legal set · physical port without ports exit2 cause) ###"
 
-# ---- L2 主链：yaml→apply（dir=out 端口腿）+ 命中/排除定量窗 ----
+# ---- L2 main chain: yaml -> apply (dir=out port legs) + hit/exclusion quantified windows ----
 cat > "$WORK/weaknet.yaml" <<'YAML'
 iface: vethA
 ports: [5000]
@@ -106,24 +106,24 @@ spec:
   loss: 10%
   dir: out
 YAML
-# 两路流量先行：5000-UDP（命中腿）/ 53-UDP（枚举外对照）
+# two traffic paths first: 5000-UDP (hits a leg) / 53-UDP (the non-enumerated control)
 udp_sport 5000 180
 udp_sport 53 180
 sleep 1
-OUT=$("$BIN" apply --config "$WORK/weaknet.yaml" 2>&1) || { echo "FAIL L2: apply 失败: $OUT"; exit 1; }
+OUT=$("$BIN" apply --config "$WORK/weaknet.yaml" 2>&1) || { echo "FAIL L2: apply failed: $OUT"; exit 1; }
 echo "$OUT"
-grep -q "影响面: vethA/UDP/5000/倒计时 60s" <<<"$OUT" || { echo "FAIL L2: 影响面横幅缺失"; exit 1; }
-grep -q "回读指纹过" <<<"$OUT" || { echo "FAIL L2: 指纹断言缺失"; exit 1; }
+grep -q "impact surface: vethA/UDP/5000/countdown 60s" <<<"$OUT" || { echo "FAIL L2: the impact-surface banner is missing"; exit 1; }
+grep -q "read-back fingerprint passed" <<<"$OUT" || { echo "FAIL L2: the fingerprint assert is missing"; exit 1; }
 sleep 2
 H1=$(leaf_stat pkt); H1=${H1:-0}
 sleep 3
 H2=$(leaf_stat pkt); H2=${H2:-0}
 D1=$(leaf_stat dropped); D1=${D1:-0}
-echo "命中窗 3s：vethA leaf Sent $H1 → $H2（Δ=$((H2 - H1))，dropped=$D1）"
-(( H2 - H1 > 1000 )) || { echo "FAIL L2 命中：5000-UDP 腿未进 netem（Δ=$((H2 - H1))）"; exit 1; }
-(( D1 > 0 )) || { echo "FAIL L2 命中：loss 10% 未产生 dropped"; exit 1; }
+echo "hit window 3s: vethA leaf Sent $H1 -> $H2 (delta=$((H2 - H1)), dropped=$D1)"
+(( H2 - H1 > 1000 )) || { echo "FAIL L2 hit: the 5000-UDP leg never entered netem (delta=$((H2 - H1)))"; exit 1; }
+(( D1 > 0 )) || { echo "FAIL L2 hit: loss 10% produced no dropped"; exit 1; }
 
-echo "== 排除窗：停 5000-UDP，仅 53-UDP 在跑 + 施加期 ping（ICMP 协议排除活证）=="
+echo "== exclusion window: stop 5000-UDP, only 53-UDP running + ping during apply (the ICMP protocol-exclusion live evidence) =="
 kill "${PIDS[0]}" 2>/dev/null || true
 wait "${PIDS[0]}" 2>/dev/null || true
 sleep 0.5
@@ -131,30 +131,30 @@ C1=$(leaf_stat pkt); C1=${C1:-0}
 PINGOUT=$(ping -c 3 -W 1 10.99.0.2 2>&1) || true
 sleep 2
 C2=$(leaf_stat pkt); C2=${C2:-0}
-echo "排除窗：leaf Sent $C1 → $C2（Δ=$((C2 - C1))，期望≈0）"
-echo "--- ping（施加期，损伤含 80ms/10% loss 却不沾 ICMP）---"
+echo "exclusion window: leaf Sent $C1 -> $C2 (delta=$((C2 - C1)), expected ~ 0)"
+echo "--- ping (during apply; the impairment has 80ms/10% loss yet ICMP untouched) ---"
 tail -2 <<<"$PINGOUT"
-grep -q " 0% packet loss" <<<"$PINGOUT" || { echo "FAIL L2①：施加期 ping 出现丢包/不通（协议腿排除失守？）"; exit 1; }
-grep -q "rtt" <<<"$PINGOUT" || { echo "FAIL L2①：ping 未达（RTT 行缺失）——检查拓扑"; cat <<<"$PINGOUT"; exit 1; }
-(( C2 - C1 < 100 )) || { echo "FAIL L2②：枚举外/非 UDP 流量进叶（Δ=$((C2 - C1))）——反锁死失守"; exit 1; }
-echo "### L2 三证过（命中 Δ>1000+dropped>0 · ICMP 排除活证 0% loss · 枚举外 UDP Δ<100）###"
+grep -q " 0% packet loss" <<<"$PINGOUT" || { echo "FAIL L2(1): ping during apply shows loss/unreachable (protocol-leg exclusion breached?)"; exit 1; }
+grep -q "rtt" <<<"$PINGOUT" || { echo "FAIL L2(1): ping did not get through (the RTT line missing) -- check the topology"; cat <<<"$PINGOUT"; exit 1; }
+(( C2 - C1 < 100 )) || { echo "FAIL L2(2): non-enumerated/non-UDP traffic reached the leaf (delta=$((C2 - C1))) -- anti-deadlock breached"; exit 1; }
+echo "### L2 three proofs pass (hit delta>1000+dropped>0 · ICMP exclusion live evidence 0% loss · non-enumerated UDP delta<100) ###"
 
-# ---- L3 watch → down（state 清除 → cleared → exit0）----
+# ---- L3 watch -> down (state cleared -> cleared -> exit0) ----
 COLUMNS=100 timeout -s INT 12 "$BIN" watch > "$WORK/watch.out" 2>&1 &
 WPID=$!
 sleep 2.5
 "$BIN" down
 if wait "$WPID"; then WRC=0; else WRC=$?; fi
-echo "--- watch 帧（前 8 行）---"
+echo "--- watch frame (first 8 lines) ---"
 head -8 "$WORK/watch.out"
-(( WRC == 0 )) || { echo "FAIL L3: watch 未随 down 自退（rc=$WRC）"; cat "$WORK/watch.out"; exit 1; }
-grep -q "weaknet watch" "$WORK/watch.out" || { echo "FAIL L3: watch 帧头缺失"; exit 1; }
-grep -qE "leaf sent=[1-9][0-9]*" "$WORK/watch.out" || { echo "FAIL L3: 计数行缺失或恒零（叶读取坏）"; head -8 "$WORK/watch.out"; exit 1; }
-grep -q "cleared" "$WORK/watch.out" || { echo "FAIL L3: cleared 判据行缺失"; exit 1; }
+(( WRC == 0 )) || { echo "FAIL L3: watch did not exit by itself after down (rc=$WRC)"; cat "$WORK/watch.out"; exit 1; }
+grep -q "weaknet watch" "$WORK/watch.out" || { echo "FAIL L3: the watch frame header is missing"; exit 1; }
+grep -qE "leaf sent=[1-9][0-9]*" "$WORK/watch.out" || { echo "FAIL L3: the counter line is missing or stuck at zero (leaf read broken)"; head -8 "$WORK/watch.out"; exit 1; }
+grep -q "cleared" "$WORK/watch.out" || { echo "FAIL L3: the cleared predicate line is missing"; exit 1; }
 tail -2 "$WORK/watch.out"
-echo "### L3 过（一屏重绘渲染 + state 清除→cleared→exit0）###"
+echo "### L3 pass (single-screen redraw rendering + state cleared -> cleared -> exit0) ###"
 
-# ---- L4 内嵌 profile 兜底（scp 单文件替身）：二进制离仓复制 + 仅二进制同级 weaknet.yaml ----
+# ---- L4 embedded profile fallback (the scp single-file stand-in): binary copied out of the repo + only a weaknet.yaml next to the binary ----
 EMBDIR="$WORK/embed"
 mkdir -p "$EMBDIR" "$EMBDIR/empty.d"
 cp "$BIN" "$EMBDIR/msrtc-weaknet"
@@ -172,18 +172,18 @@ sleep 0.5
 export WEAKNET_STATEDIR="$WORK/state-lo"
 EOUT=$( cd "$EMBDIR" && WEAKNET_ASSETS_DIR="$EMBDIR/empty.d" ./msrtc-weaknet up smoke --duration 30 2>&1 ) \
     && grep -q "applied: dev=lo" <<<"$EOUT" \
-    || { echo "FAIL L4: 内嵌 up smoke 未成: $EOUT"; exit 1; }
+    || { echo "FAIL L4: the embedded up smoke failed: $EOUT"; exit 1; }
 ( cd "$EMBDIR" && WEAKNET_ASSETS_DIR="$EMBDIR/empty.d" ./msrtc-weaknet down ) >/dev/null
 export WEAKNET_STATEDIR="$STATEDIR"
-echo "### L4 过（assets=空目录仍解析内嵌 smoke + 二进制同级 yaml 探测 + up/down 别名）###"
+echo "### L4 pass (assets=empty dir still resolves embedded smoke + next-to-binary yaml probing + the up/down aliases) ###"
 
-# ---- L5 撤净零残留 ----
+# ---- L5 teardown leaves zero residue ----
 if tc qdisc show dev vethA | grep -qE 'ffff:|netem'; then
-    echo "FAIL L5: vethA 残留"; tc qdisc show dev vethA; exit 1
+    echo "FAIL L5: vethA residue"; tc qdisc show dev vethA; exit 1
 fi
 if tc qdisc show dev lo | grep -qE 'ffff:|netem'; then
-    echo "FAIL L5: lo 残留"; tc qdisc show dev lo; exit 1
+    echo "FAIL L5: lo residue"; tc qdisc show dev lo; exit 1
 fi
-[[ -f "$STATEDIR/state.json" || -f "$WORK/state-lo/state.json" ]] && { echo "FAIL L5: state 残留"; exit 1; }
-echo "### W8 替身全链过（L0 version · L1 反锁死负案 · L2 定量 · L3 watch/down · L4 内嵌 · L5 零残留）###"
+[[ -f "$STATEDIR/state.json" || -f "$WORK/state-lo/state.json" ]] && { echo "FAIL L5: state residue"; exit 1; }
+echo "### W8 stand-in full chain pass (L0 version · L1 anti-deadlock negatives · L2 quantified · L3 watch/down · L4 embedded · L5 zero residue) ###"
 NETNS

@@ -1,28 +1,34 @@
-# MediaMTX 参考分析
-> 生成日期：2026-07-16 | 分类：流媒体
+# MediaMTX Reference Analysis
 
-## 1. 产品画像
-- **名称**：MediaMTX（原名 rtsp-simple-server，2023年更名）
-- **开发者**：Bluenviron（独立开发者/组织，主要作者为单个核心开发者）。各协议库由同一组织维护：gortsplib (RTSP), gortmplib (RTMP), gohlslib (HLS), mediacommon (通用媒体工具)
-- **首次发布**：2019年12月（rtsp-simple-server v0.0.0），2023年更名为 MediaMTX v1.0.0。持续开发超过 6 年，123+ releases
-- **产品定位**：即用型零依赖实时媒体服务器和媒体代理。定位为"媒体路由器"（media router），而非"流媒体平台"。核心理念是协议间的自动转换 — publisher 用任意协议推流，viewer 用任意协议观看，无需配置。不内置转码，纯路由
-- **目标用户群体**：IoT/IP 摄像头部署者、视频监控系统集成商、需要多协议转换的流媒体架构师、家庭安防 DIY 用户（Raspberry Pi 摄像头）、小型直播平台
-- **许可 / 商业模式**：MIT 许可，完全免费开源。无商业版。所有依赖库均为 MIT 或 Apache 2.0 许可
+> Generated: 2026-07-16 | Category: Streaming
 
-## 2. 技术特性
-### 整体架构
+## 1. Product Profile
+
+- **Name**: MediaMTX (formerly rtsp-simple-server, renamed in 2023)
+- **Developer**: Bluenviron (independent developer/organization; the primary author is a single core developer). The per-protocol libraries are maintained by the same organization: gortsplib (RTSP), gortmplib (RTMP), gohlslib (HLS), mediacommon (general-purpose media utilities)
+- **First release**: December 2019 (rtsp-simple-server v0.0.0), renamed to MediaMTX v1.0.0 in 2023. Under continuous development for more than 6 years, 123+ releases
+- **Product positioning**: Out-of-the-box, zero-dependency real-time media server and media proxy. Positioned as a "media router", not a "streaming platform". The core idea is automatic conversion between protocols — publishers push with any protocol, viewers watch with any protocol, no configuration required. No transcoding built in; pure routing
+- **Target user groups**: IoT/IP camera deployers, video surveillance system integrators, streaming architects needing multi-protocol conversion, home security DIY users (Raspberry Pi cameras), small live-streaming platforms
+- **License / business model**: MIT licensed, fully free and open source. No commercial edition. All dependencies are MIT or Apache 2.0 licensed
+
+## 2. Technical Characteristics
+
+### Overall architecture
+
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                      MediaMTX (Go 单二进制)                        │
+│                      MediaMTX (Go single binary)                  │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐     │
-│  │                    Path Manager                            │     │
-│  │  path → { source, publisher, readers[], auth, config }    │     │
+│  │                    Path Manager                           │     │
+│  │  path → { source, publisher, readers[], auth, config }   │     │
 │  │                                                           │     │
-│  │  每个 path 对应一个媒体流。生命周期由以下驱动：             │     │
-│  │  - publisher 连接/断开 → path 创建/销毁                    │     │
-│  │  - static source 配置 → path 持久存活                      │     │
-│  │  - sourceOnDemand → 有 reader 时拉取，无 reader 时释放      │     │
+│  │  Each path corresponds to one media stream. Its lifecycle │     │
+│  │  is driven by the following:                              │     │
+│  │  - publisher connect/disconnect → path create/destroy     │     │
+│  │  - static source config → path persists                   │     │
+│  │  - sourceOnDemand → pull when readers exist, release      │     │
+│  │    when no readers remain                                 │     │
 │  └────────────┬──────────────────────┬───────────────────────┘     │
 │               │                      │                             │
 │  ┌────────────▼──────────┐  ┌────────▼──────────────────────┐     │
@@ -30,93 +36,102 @@
 │  │                        │  │                                │     │
 │  │  ┌──────────────────┐  │  │  ┌──────────────────────────┐ │     │
 │  │  │ Static Source     │  │  │  │ Protocol Auto-Conversion │ │     │
-│  │  │ 持续拉取外部流     │  │  │  │ 零配置，自动转换          │ │     │
-│  │  │ RTSP/RTMP/SRT     │  │  │  │                          │ │     │
-│  │  │ 断线重连          │  │  │  │ 推 RTSP → 看 WebRTC     │ │     │
-│  │  └──────────────────┘  │  │  │ 推 RTMP → 看 LL-HLS      │ │     │
-│  │                        │  │  │ 推 SRT → 看 HLS          │ │     │
-│  │  ┌──────────────────┐  │  │  │ 推 WebRTC → 看 RTSP      │ │     │
-│  │  │ sourceOnDemand   │  │  │  │ 推 MoQ → 看 WebRTC       │ │     │
-│  │  │ 惰性拉流模式      │  │  │  └──────────────────────────┘ │     │
-│  │  │ 有 viewer 时拉取  │  │  │                                │     │
-│  │  │ 无 viewer 时释放  │  │  │  ┌──────────────────────────┐ │     │
-│  │  │ 省电/省带宽       │  │  │  │ Recording & Playback    │ │     │
-│  │  └──────────────────┘  │  │  │ fMP4 / MPEG-TS 分段录制  │ │     │
-│  │                        │  │  │ REST API 按时间段检索     │ │     │
-│  │  ┌──────────────────┐  │  │  │ 回放模拟实时流            │ │     │
-│  │  │ RPI Camera        │  │  │  └──────────────────────────┘ │     │
-│  │  │ 硬件H.264/MJPEG   │  │  │                                │     │
-│  │  │ 时间戳文字叠加    │  │  │                                │     │
+│  │  │ Continuously     │  │  │  │ Zero configuration,      │ │     │
+│  │  │ pulls external   │  │  │  │ automatic conversion     │ │     │
+│  │  │ RTSP/RTMP/SRT    │  │  │  │                          │ │     │
+│  │  │ Reconnect on     │  │  │  │ push RTSP → watch WebRTC │ │     │
+│  │  │ disconnect       │  │  │  │ push RTMP → watch LL-HLS │ │     │
+│  │  └──────────────────┘  │  │  │ push SRT → watch HLS     │ │     │
+│  │                        │  │  │ push WebRTC → watch RTSP │ │     │
+│  │  ┌──────────────────┐  │  │  │ push MoQ → watch WebRTC  │ │     │
+│  │  │ sourceOnDemand   │  │  │  └──────────────────────────┘ │     │
+│  │  │ Lazy pull mode   │  │  │                                │     │
+│  │  │ Pulls when       │  │  │  ┌──────────────────────────┐ │     │
+│  │  │ viewers exist    │  │  │  │ Recording & Playback     │ │     │
+│  │  │ Releases when    │  │  │  │ fMP4 / MPEG-TS segment   │ │     │
+│  │  │ no viewers       │  │  │  │ retrieval via REST API   │ │     │
+│  │  │ Save power/      │  │  │  │ playback mimics live     │ │     │
+│  │  │ save bandwidth   │  │  │  └──────────────────────────┘ │     │
+│  │  └──────────────────┘  │  │                                │     │
+│  │  ┌──────────────────┐  │  │                                │     │
+│  │  │ RPI Camera       │  │  │                                │     │
+│  │  │ HW H.264/MJPEG   │  │  │                                │     │
+│  │  │ Timestamp text   │  │  │                                │     │
+│  │  │ overlay          │  │  │                                │     │
 │  │  └──────────────────┘  │  │                                │     │
 │  └────────────────────────┘  └────────────────────────────────     │
 │                                                                   │
-│  内部数据流模型：                                                  │
-│  path 中的流由 reader track 管理。每个 track 有一个 ring buffer    │
-│  缓冲最近 N 个数据单元。新 reader 连接时从 ring buffer 最近     │
-│  关键帧开始发送，保证秒开                                          │
+│  Internal data flow model:                                        │
+│  Streams inside a path are managed by reader tracks. Each track   │
+│  has a ring buffer holding the most recent N data units. When a  │
+│  new reader connects, sending starts from the most recent key     │
+│  frame in the ring buffer, guaranteeing instant playback          │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐     │
-│  │ 协议层（每个协议有独立的服务端/客户端实现）                  │     │
+│  │ Protocol layer (each protocol has its own server/client)  │     │
 │  │                                                           │     │
 │  │  ┌──────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐ │     │
 │  │  │  RTSP    │ │   RTMP    │ │   SRT     │ │  WebRTC   │ │     │
 │  │  │gortsplib │ │ gortmplib │ │  libsrt   │ │ pion/     │ │     │
-│  │  │[推/播]   │ │ [推/播]   │ │ [推/播]   │ │ webrtc    │ │     │
+│  │  │[push/play]│ │[push/play]│ │[push/play]│ │ webrtc    │ │     │
 │  │  │TCP/UDP   │ │  TCP      │ │  UDP      │ │WHIP/WHEP  │ │     │
 │  │  └──────────┘ └───────────┘ └───────────┘ └───────────┘ │     │
 │  │  ┌──────────┐ ┌───────────┐ ┌───────────┐               │     │
 │  │  │ LL-HLS   │ │ MPEG-TS   │ │Media-over- │               │     │
 │  │  │gohlslib  │ │   UDP     │ │   QUIC    │               │     │
-│  │  │ [播]     │ │ [推/播]   │ │WebTransport│              │     │
-│  │  │HTTP      │ │           │ │[推/播]     │               │     │
+│  │  │ [play]   │ │[push/play]│ │WebTransport│              │     │
+│  │  │HTTP      │ │           │ │[push/play] │               │     │
 │  │  └──────────┘ └───────────┘ └───────────┘               │     │
 │  │  ┌──────────┐                                            │     │
-│  │  │   RTP    │  UDP 推流 (原始 RTP)                      │     │
+│  │  │   RTP    │  UDP streaming (raw RTP)                  │     │
 │  │  └──────────┘                                            │     │
 │  └──────────────────────────────────────────────────────────┘     │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐     │
-│  │ 扩展层                                                     │     │
+│  │ Extension layer                                          │     │
 │  │  ┌────────────────┐  ┌──────────────┐  ┌──────────────┐ │     │
-│  │  │ runOn*/exec钩子 │  │ 外部认证      │  │ Read Replica │ │     │
-│  │  │ FFmpeg子进程   │  │ HTTP回调     │  │ Origin→Edge  │ │     │
+│  │  │ runOn*/exec     │  │ External     │  │ Read Replica │ │     │
+│  │  │ hooks, FFmpeg   │  │ auth HTTP    │  │  Origin→Edge │ │     │
+│  │  │ subprocess      │  │ callback     │  │              │ │     │
 │  │  └────────────────┘  └──────────────┘  └──────────────┘ │     │
 │  └──────────────────────────────────────────────────────────┘     │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐     │
-│  │ Runtime API + Observability                                │     │
+│  │ Runtime API + Observability                              │     │
 │  │ REST API: /v3/config/paths/*, /v3/recordings/*, config   │     │
-│  │ Prometheus metrics, pprof, structured logging, healthz    │     │
+│  │ Prometheus metrics, pprof, structured logging, healthz   │     │
 │  └──────────────────────────────────────────────────────────┘     │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### Path 模型详解
+### Path model in detail
 
-MediaMTX 的核心抽象是 Path，每个 path 是一个媒体流的生命周期管理单元：
+The core abstraction of MediaMTX is the Path; each path is a lifecycle management unit for one media stream:
 
-- **Path 状态机**：Idle（无 publisher 无 source）→ Ready（有 publisher 或 source 提供数据）→ OnDemandWaiting（sourceOnDemand = true，有 viewer 等待拉流）→ OnDemandPulling（正在拉取上游流）→ Idle（publisher/source 断开，所有 viewer 未连接）
-- **Publisher 模式**：外部客户端推流到 path（RTSP ANNOUNCE/SETUP, RTMP publish, SRT caller, WHIP POST, MoQ ANNOUNCE）
-- **Static Source 模式**：服务器主动从外部拉流（RTSP DESCRIBE/SETUP/PLAY, RTMP play, SRT listener），持续重连
-- **sourceOnDemand 模式**：仅在 viewer 存在时才拉取上游流。viewer 断开后等待 onDemandCloseAfter 时间后释放连接
-- **认证与授权**：每个 path 可单独配置 publisher 和 reader 的认证。支持 external（HTTP 回调认证）、externalStart（仅在 path 启动时回调）、rtsp（RTSP Digest）、jwt、internal（配置文件中的明文凭据）
-- **IP 白名单**：按发布和读取分别配置 IP/CIDR 列表
+- **Path state machine**: Idle (no publisher, no source) → Ready (a publisher or source is providing data) → OnDemandWaiting (sourceOnDemand = true, viewers are waiting for the pull) → OnDemandPulling (currently pulling from the upstream stream) → Idle (publisher/source disconnected, all viewers unconnected)
+- **Publisher mode**: an external client pushes to the path (RTSP ANNOUNCE/SETUP, RTMP publish, SRT caller, WHIP POST, MoQ ANNOUNCE)
+- **Static Source mode**: the server actively pulls from an external stream (RTSP DESCRIBE/SETUP/PLAY, RTMP play, SRT listener), reconnecting continuously
+- **sourceOnDemand mode**: only pulls from the upstream when viewers exist. After viewers disconnect, the connection is released after the onDemandCloseAfter timeout
+- **Authentication and authorization**: each path can configure publisher and reader authentication separately. Supports external (HTTP callback auth), externalStart (callback only when the path starts), rtsp (RTSP Digest), jwt, internal (plaintext credentials in the config file)
+- **IP allowlists**: IP/CIDR lists configured separately for publishing and reading
 
-### 关键技术能力
-| 能力 | 详情 |
+### Key technical capabilities
+
+| Capability | Details |
 |------|------|
-| 协议支持 | 输入(推流)：RTSP (TCP/UDP, TLS), RTMP/RTMPS (TCP), SRT (UDP, AES-128/256 加密), WebRTC/WHIP (UDP/TCP, DTLS-SRTP), Media-over-QUIC (QUIC/HTTP3 WebTransport), MPEG-TS over UDP, RTP over UDP。输出(播放)：RTSP, RTMP, SRT, WebRTC/WHEP, LL-HLS, Media-over-QUIC, MPEG-TS |
-| 编码 | 视频：H.264, H.265(HEVC), AV1, VP9, VP8, MJPEG。音频：Opus, MPEG-4 Audio (AAC), G.711 (PCMA/PCMU), LPCM, FLAC (v1.19.0+), G.726。**纯 passthrough 模式，不解码不重新编码** |
-| 传输 | TCP/UDP（各协议原生），QUIC/HTTP3/WebTransport (Media-over-QUIC)。RTSP 支持 TCP/UDP 自动切换（interleaved TCP/UDP transport fallback）。RTP over UDP 支持单播和组播 |
-| 录制 | fMP4 (fragmented MP4) 或 MPEG-TS 分段录制到磁盘。按时间和文件大小分段。REST API 按起止时间检索段列表。录制路径和段大小可配置 |
-| sourceOnDemand | 仅在 viewer 存在时从上游拉流。viewer 断开后等待可配置的延时后释放。适用电池供电 IP 摄像头或带宽受限场景 |
-| 回放 | 将录制的片段重新作为实时流播放。REST API 按时间段选择回放范围。支持加速/减速播放和暂停 |
-| API & 热重载 | REST API 运行时管理 path 和配置。热重载配置文件不中断已有连接（except 端口变更、加密密钥变更等特殊情况） |
-| 安全 | Argon2 密码哈希。TLS 1.3（HTTPS/RTMPS/RTSPS）。Basic/Digest 认证。JWT。HTTP 外部认证 |
-| RPI Camera | mediamtx-rpicamera 模块：树莓派摄像头硬件 H.264 编码和 MJPEG 编码。统一软硬件编码参数 (v2.8.0)。时间戳自定义文字叠加 |
+| Protocol support | Inbound (push): RTSP (TCP/UDP, TLS), RTMP/RTMPS (TCP), SRT (UDP, AES-128/256 encryption), WebRTC/WHIP (UDP/TCP, DTLS-SRTP), Media-over-QUIC (QUIC/HTTP3 WebTransport), MPEG-TS over UDP, RTP over UDP. Outbound (playback): RTSP, RTMP, SRT, WebRTC/WHEP, LL-HLS, Media-over-QUIC, MPEG-TS |
+| Codecs | Video: H.264, H.265(HEVC), AV1, VP9, VP8, MJPEG. Audio: Opus, MPEG-4 Audio (AAC), G.711 (PCMA/PCMU), LPCM, FLAC (v1.19.0+), G.726. **Pure passthrough mode — no decoding, no re-encoding** |
+| Transport | TCP/UDP (native to each protocol), QUIC/HTTP3/WebTransport (Media-over-QUIC). RTSP supports automatic TCP/UDP switching (interleaved TCP/UDP transport fallback). RTP over UDP supports unicast and multicast |
+| Recording | fMP4 (fragmented MP4) or MPEG-TS segmented recording to disk. Segmentation by time and file size. REST API retrieves the segment list by start/end time. Recording path and segment size are configurable |
+| sourceOnDemand | Pulls from upstream only when viewers exist. Releases after a configurable delay following viewer disconnect. Suitable for battery-powered IP cameras or bandwidth-constrained scenarios |
+| Playback | Replays recorded segments as a live stream. REST API selects the playback range by time span. Supports fast/slow playback and pause |
+| API & hot reload | REST API for runtime management of paths and configuration. Config files can be hot-reloaded without interrupting existing connections (except for special cases such as port changes and encryption key changes) |
+| Security | Argon2 password hashing. TLS 1.3 (HTTPS/RTMPS/RTSPS). Basic/Digest authentication. JWT. HTTP external authentication |
+| RPI Camera | mediamtx-rpicamera module: Raspberry Pi camera hardware H.264 encoding and MJPEG encoding. Unified software/hardware encoding parameters (v2.8.0). Custom timestamp text overlay |
 
-### 协议转换矩阵
-MediaMTX 的协议自动转换支持任意协议组合，以下是已验证的组合：
+### Protocol conversion matrix
+
+MediaMTX's automatic protocol conversion supports any protocol combination; the following combinations are verified:
 
 | Publisher ↓ / Reader → | RTSP | RTMP | SRT | WebRTC | LL-HLS | MoQ | MPEG-TS |
 |------------------------|:----:|:----:|:---:|:------:|:------:|:---:|:-------:|
@@ -128,284 +143,295 @@ MediaMTX 的协议自动转换支持任意协议组合，以下是已验证的�
 | MPEG-TS (UDP) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | RTP (UDP) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
+### Protocol conversion latency comparison
 
-### 协议转换性能对比
+MediaMTX's protocol conversion requires no codec operations (pure passthrough), but end-to-end latency varies across protocol combinations depending on transport-layer characteristics:
 
-MediaMTX 的协议转换不需要编解码操作（pure passthrough），但在不同协议组合下的延迟表现因传输层特性而异：
-
-| 推流协议 | 播放协议 | 端到端延迟（局域网） | 瓶颈环节 | 适用 MediaServo 场景 |
+| Push protocol | Playback protocol | End-to-end latency (LAN) | Bottleneck stage | Applicable MediaServo scenario |
 |---------|---------|-------------------|---------|-------------------|
-| RTSP (TCP) | RTSP (TCP) | <100ms | RTP 解包/封包 | 监控相机→监控观看 |
-| RTSP (TCP) | LL-HLS | 500ms-2s | HLS segment 缓冲 | 监控相机→Web 观看 |
-| RTSP (TCP) | WebRTC | 100-200ms | ICE 协商 + RTP 转发 | 监控相机→实时互动 |
-| RTMP | LL-HLS | 500ms-2s | FLV→fMP4 转换 | 通用推流→HLS 分发 |
-| RTMP | WebRTC | 100-300ms | FLV→RTP 解包 | 推流→低延迟互动 |
-| SRT | WebRTC | 80-200ms | 无（最低延迟组合） | 远程推流→Web 播放 |
-| WebRTC | WebRTC | <80ms | 无（同级 RTP 转发） | 双向实时通话 |
-| Media-over-QUIC | WebRTC | 50-150ms | QUIC→RTP 桥接 | 未来低延迟链路 |
-| MPEG-TS (UDP) | RTSP | 100-200ms | UDP 组播→单播转发 | 广电级信号分发 |
+| RTSP (TCP) | RTSP (TCP) | <100ms | RTP unpack/pack | Surveillance camera → surveillance viewing |
+| RTSP (TCP) | LL-HLS | 500ms-2s | HLS segment buffering | Surveillance camera → Web viewing |
+| RTSP (TCP) | WebRTC | 100-200ms | ICE negotiation + RTP forwarding | Surveillance camera → real-time interaction |
+| RTMP | LL-HLS | 500ms-2s | FLV→fMP4 conversion | General push → HLS distribution |
+| RTMP | WebRTC | 100-300ms | FLV→RTP unpack | Push → low-latency interaction |
+| SRT | WebRTC | 80-200ms | None (lowest-latency combination) | Remote push → Web playback |
+| WebRTC | WebRTC | <80ms | None (peer-level RTP forwarding) | Bidirectional real-time calls |
+| Media-over-QUIC | WebRTC | 50-150ms | QUIC→RTP bridging | Future low-latency links |
+| MPEG-TS (UDP) | RTSP | 100-200ms | UDP multicast→unicast forwarding | Broadcast-grade signal distribution |
 
-**延迟等级划分**：
+**Latency tiers**:
 
-| 等级 | 延迟范围 | MediaMTX 组合 | MediaServo 协议路由策略 |
+| Tier | Latency range | MediaMTX combination | MediaServo protocol routing strategy |
 |------|---------|--------------|---------------------|
-| 实时 (Real-time) | <150ms | RTSP→RTSP, WebRTC→WebRTC, SRT→WebRTC | Fragment→WHEP 直通，零缓冲 |
-| 准实时 (Near-real-time) | 150-500ms | RTSP→WebRTC, RTMP→WebRTC, QUIC→WebRTC | Fragment→WHEP，最小 jitter buffer |
-| 低延迟 (Low-latency) | 500ms-2s | RTSP→HLS, RTMP→HLS, SRT→HLS | Fragment→CMAF→LL-HLS，0.5s segment |
-| 标准延迟 (Standard) | 2-10s | 任意→标准 HLS/DASH | Fragment→CMAF→HLS/DASH，3-6s segment |
+| Real-time | <150ms | RTSP→RTSP, WebRTC→WebRTC, SRT→WebRTC | Fragment→WHEP direct pass-through, zero buffering |
+| Near-real-time | 150-500ms | RTSP→WebRTC, RTMP→WebRTC, QUIC→WebRTC | Fragment→WHEP, minimal jitter buffer |
+| Low-latency | 500ms-2s | RTSP→HLS, RTMP→HLS, SRT→HLS | Fragment→CMAF→LL-HLS, 0.5s segment |
+| Standard | 2-10s | Any→standard HLS/DASH | Fragment→CMAF→HLS/DASH, 3-6s segment |
 
-### 传输层协议对比
+### Transport layer protocol comparison
 
-| 传输协议 | 多路复用 | 丢包恢复 | 连接迁移 | TLS 加密 | 防火墙穿越 | MediaServo 优先级 |
+| Transport protocol | Multiplexing | Loss recovery | Connection migration | TLS encryption | Firewall traversal | MediaServo priority |
 |---------|:-------:|:-------:|:-------:|:--------:|:---------:|:--------------:|
-| TCP | ❌ (顺序) | 重传 (头部阻塞) | ❌ | ✅ | ✅ | Phase 1 (基础) |
-| UDP | ❌ | 应用层处理 | ❌ | DTLS | ⚠️ | Phase 1 (SRT/WebRTC) |
-| QUIC (HTTP/3) | ✅ (并行流) | 独立流重传 | ✅ (连接迁移) | ✅ (内建) | ✅ (80/443) | Phase 4 (未来) |
-| WebTransport | ✅ (stream+datagram) | 独立流重传 + 丢包忽略 | ✅ | ✅ (内建) | ✅ | Phase 4+ (前沿) |
+| TCP | ❌ (ordered) | Retransmission (head-of-line blocking) | ❌ | ✅ | ✅ | Phase 1 (baseline) |
+| UDP | ❌ | Application layer handling | ❌ | DTLS | ⚠️ | Phase 1 (SRT/WebRTC) |
+| QUIC (HTTP/3) | ✅ (parallel streams) | Per-stream retransmission | ✅ (connection migration) | ✅ (built-in) | ✅ (80/443) | Phase 4 (future) |
+| WebTransport | ✅ (stream+datagram) | Per-stream retransmission + loss ignoring | ✅ | ✅ (built-in) | ✅ | Phase 4+ (cutting edge) |
 
-QUIC/WebTransport 的独立流重传特性对流媒体意义重大：一个视频帧的丢包不会阻塞后续帧的传输（TCP 的头部阻塞问题）。MediaMTX v1.19.0 验证了 QUIC 在流媒体中的可行性。
+The per-stream retransmission property of QUIC/WebTransport matters greatly for streaming: packet loss of one video frame does not block transmission of later frames (the TCP head-of-line blocking problem). MediaMTX v1.19.0 validated the feasibility of QUIC in streaming.
 
-### 技术栈
-- **语言**：Go (100%)。使用 Go 1.22+ 特性
-- **核心依赖库**（全部由 Bluenviron 自研维护）：
-  - `gortsplib/v5`：RTSP 1.0 客户端和服务端库。支持 TCP/UDP/TLS transport。H.264 SPS/PPS 解析，RTP 解包/封包。v5 是一次重大重构，性能显著提升
-  - `gortmplib`：RTMP 客户端和服务端库。支持 RTMP/RTMPS。FLV 解析和生成
-  - `gohlslib/v2`：HLS 解析和生成库。支持 LL-HLS、fMP4 segments、主播放列表生成
-  - `mediacommon/v2`：通用媒体工具库。Codec 解析 (H.264 NAL/H.265 NAL/AV1 OBU/VP9)，fMP4 写入，Bitrate 计算
-  - `mediamtx-rpicamera`：Raspberry Pi 摄像头硬件编码模块。独立仓库
-- **WebRTC 栈**：pion 项目（Go 版 WebRTC 标准实现，Google 贡献）。
-  - `pion/webrtc/v4` — WebRTC 实现 (WHIP/WHEP)
-  - `pion/srtp/v3` — SRTP (Secure RTP) 加密
-  - `pion/dtls/v3` — DTLS (Datagram TLS) 握手
-  - `pion/ice/v4` — ICE (Interactive Connectivity Establishment) NAT 穿透
+### Technology stack
+
+- **Language**: Go (100%). Uses Go 1.22+ features
+- **Core dependency libraries** (all authored and maintained by Bluenviron):
+  - `gortsplib/v5`: RTSP 1.0 client and server library. Supports TCP/UDP/TLS transports. H.264 SPS/PPS parsing, RTP unpack/pack. v5 was a major refactor with significantly improved performance
+  - `gortmplib`: RTMP client and server library. Supports RTMP/RTMPS. FLV parsing and generation
+  - `gohlslib/v2`: HLS parsing and generation library. Supports LL-HLS, fMP4 segments, master playlist generation
+  - `mediacommon/v2`: General-purpose media utilities. Codec parsing (H.264 NAL/H.265 NAL/AV1 OBU/VP9), fMP4 writing, bitrate calculation
+  - `mediamtx-rpicamera`: Raspberry Pi camera hardware encoding module. Separate repository
+- **WebRTC stack**: the pion project (Go implementation of the WebRTC standard, contributed by Google).
+  - `pion/webrtc/v4` — WebRTC implementation (WHIP/WHEP)
+  - `pion/srtp/v3` — SRTP (Secure RTP) encryption
+  - `pion/dtls/v3` — DTLS (Datagram TLS) handshake
+  - `pion/ice/v4` — ICE (Interactive Connectivity Establishment) NAT traversal
   - `pion/sctp` — SCTP (Stream Control Transmission Protocol) RTCDataChannel
-  - `pion/turn/v5` — TURN 服务 (仅在配置 webrtcAdditionalHosts 时)
-- **QUIC/WebTransport**：`quic-go/webtransport-go` v0.11.0。支持 QUIC/HTTP3 和 WebTransport API
-- **密码学**：`argon2` (密码哈希)，`golang.org/x/crypto` (TLS/加密)
-- **构建/部署**：Go 交叉编译为单一静态二进制 (除 libsrt C 绑定外，静态链接)。Docker 镜像：~27MB (amd64), ~26MB (arm64), ~28MB (armv6/v7)。支持 darwin/amd64, darwin/arm64, linux/amd64, linux/arm/v6, linux/arm/v7, linux/arm64, windows/amd64
-- **可观测性**：Prometheus metrics（`/metrics` 端点），Go pprof 性能分析（`/debug/pprof/*`），结构化日志（slog），health check (`/healthz`)
+  - `pion/turn/v5` — TURN service (only when webrtcAdditionalHosts is configured)
+- **QUIC/WebTransport**: `quic-go/webtransport-go` v0.11.0. Supports QUIC/HTTP3 and the WebTransport API
+- **Cryptography**: `argon2` (password hashing), `golang.org/x/crypto` (TLS/encryption)
+- **Build/deploy**: Go cross-compiles to a single static binary (statically linked except for the libsrt C bindings). Docker images: ~27MB (amd64), ~26MB (arm64), ~28MB (armv6/v7). Supports darwin/amd64, darwin/arm64, linux/amd64, linux/arm/v6, linux/arm/v7, linux/arm64, windows/amd64
+- **Observability**: Prometheus metrics (`/metrics` endpoint), Go pprof profiling (`/debug/pprof/*`), structured logging (slog), health check (`/healthz`)
 
-## 3. 功能概览
-### 核心功能模块
-| 模块 | 功能 | 实现 |
+## 3. Feature Overview
+
+### Core feature modules
+
+| Module | Function | Implementation |
 |------|------|------|
-| Path Manager | 管理所有媒体路径。维护 publisher/source/reader 映射。驱动 path 生命周期状态机。处理认证和配置 | `internal/core/path_manager.go` |
-| Static Source | 服务器持续连接外部流源。支持 RTSP/Rtmp/SRT 作为源。断线自动重连（指数退避）。支持源认证 | `internal/core/source_static.go` |
-| sourceOnDemand | 惰性拉流。第一个 viewer 触发拉流，最后一个 viewer 断开后释放。可配置释放延迟 | `internal/core/source_on_demand.go` |
-| Protocol Auto-Conversion | 自动协议转换。无需配置。publisher 推入的媒体数据自动映射到所有启用的输出协议。基于 track 的 ring buffer | `internal/core/path.go` (readPublisher 方法) |
-| Recording | fMP4/MPEG-TS 分段录制。按时间或大小分段。REST API 检索段列表。录制路径可配置 | `internal/record/` |
-| Playback | 将录制段作为实时流播放。REST API 按时间范围选择。支持暂停/加速/减速 | `internal/playback/` |
-| Read Replica | 从 origin 实例拉流分发。Replica node 通过配置指定 origin 的 source。L4/L7 负载均衡 | `internal/core/source_static.go` (remote 源) |
-| Auth & ACL | External/RTSP Digest/JWT/Internal 认证。Per-path 发布/读取凭据。IP/CIDR 白名单 | `internal/auth/` |
-| RPI Camera | 树莓派硬件 H.264/MJPEG 编码。统一配置接口 (v2.8.0)。时间戳文字叠加。性能优化 | `mediamtx-rpicamera` (独立模块) |
-| API | REST API: path CRUD, 录制段查询, 配置热重载, 运行时状态。Swagger/OpenAPI | `internal/api/` |
-| Metrics | Prometheus metrics exporter。Path 数、客户端数、发布者/读取者数、字节数、录制段数 | `internal/metrics/` |
+| Path Manager | Manages all media paths. Maintains publisher/source/reader mappings. Drives the path lifecycle state machine. Handles authentication and configuration | `internal/core/path_manager.go` |
+| Static Source | The server continuously connects to an external stream source. Supports RTSP/Rtmp/SRT as sources. Automatic reconnection on disconnect (exponential backoff). Supports source authentication | `internal/core/source_static.go` |
+| sourceOnDemand | Lazy pulling. The first viewer triggers the pull; released after the last viewer disconnects. Configurable release delay | `internal/core/source_on_demand.go` |
+| Protocol Auto-Conversion | Automatic protocol conversion. No configuration required. Media pushed by a publisher is automatically mapped to all enabled output protocols. Track-based ring buffer | `internal/core/path.go` (readPublisher method) |
+| Recording | fMP4/MPEG-TS segmented recording. Segmentation by time or size. REST API retrieves segment lists. Recording path configurable | `internal/record/` |
+| Playback | Plays recorded segments as live streams. REST API selects by time range. Supports pause/speed-up/slow-down | `internal/playback/` |
+| Read Replica | Pulls and distributes from an origin instance. A replica node specifies the origin as its source via configuration. L4/L7 load balancing | `internal/core/source_static.go` (remote source) |
+| Auth & ACL | External/RTSP Digest/JWT/Internal authentication. Per-path publish/read credentials. IP/CIDR allowlists | `internal/auth/` |
+| RPI Camera | Raspberry Pi hardware H.264/MJPEG encoding. Unified configuration interface (v2.8.0). Timestamp text overlay. Performance optimizations | `mediamtx-rpicamera` (separate module) |
+| API | REST API: path CRUD, recording segment queries, hot config reload, runtime status. Swagger/OpenAPI | `internal/api/` |
+| Metrics | Prometheus metrics exporter. Path count, client count, publisher/reader count, bytes, recording segment count | `internal/metrics/` |
 
-### 特色功能
-- **零配置协议自动转换**：MediaMTX 的杀手特性。publisher 推 RTSP → viewer 用 HLS 看。publisher 推 RTMP → viewer 用 WebRTC 看。不需要任何转换规则配置。内部 track ring buffer + codec passthrough 实现了零开销的协议转换
-- **Media-over-QUIC 先行者（v1.19.0, 2026-06-02）**：业界首批原生支持 Media-over-QUIC 的开源媒体服务器。基于 QUIC/HTTP3 传输和 WebTransport 浏览器 API。比 WebRTC 稍快（无 SCTP 开销），更好的丢包恢复（QUIC 原生），额外 codec 支持（FLAC），路由复杂度更低（单 UDP 端口，无 ICE/STUN 协商）
-- **sourceOnDemand 惰性拉流**：IoT/摄像头场景的节能模式。摄像头仅在有 viewer 时才传输视频流。无 viewer 时完全释放网络连接，摄像头进入低功耗模式。可配置释放延迟（防止频繁上下线）。对 4G/电池供电监控相机价值巨大
-- **RPI Camera 硬件编码**：直接在树莓派上使用硬件 H.264/MJPEG 编码器。v2.8.0 统一了软件和硬件编码的配置接口（`rpiCameraH264Profile` 和 `rpiCameraH264Level` 同时适用于软件和硬件路径）。性能计算优化（帧大小计算一次）
-- **RTSP 隧道穿越防火墙**：RTSP over HTTP 和 RTSP over WebSocket 隧道。解决企业网络中 RTSP 端口封锁问题。gortsplib 同时支持 TCP (interleaved) 和 UDP transport，自动切换
-- **Read Replica 水平扩展**：最简单的 origin-replica 架构。Origin 作为 static source，Replica 通过远程路径拉流。不需要集群管理系统（无 Raft/Paxos/etcd）。通过外部 L4 (TCP) 或 L7 (HTTP) 负载均衡器分散读流量
+### Signature features
 
-### 扩展性 / 插件机制
-MediaMTX 没有传统插件系统。扩展方式：
-- **配置驱动**：所有行为通过 YAML 配置文件控制。支持热重载（`SIGHUP` 信号或 API 触发）。配置覆盖：全局 → 协议默认 → per-path
-- **REST API**：完整的运行时管理 API。路径 CRUD（POST/GET/PATCH/DELETE `/v3/config/paths/{name}`），录制段查询（GET `/v3/recordings/list`），录制段详情（GET `/v3/recordings/get/{name}`），配置重载（POST `/v3/config/reload`）
-- **外部认证钩子**：`externalAuthenticationURL` — HTTP POST 回调认证。服务器将 client 的凭据和 IP 发送到外部服务，由外部服务决定是否允许连接。Callback 超时/失败默认拒绝
-- **runOn*/exec 钩子**：在特定事件时执行外部命令。`runOnInit` (服务启动后)，`runOnReady` (path 就绪)，`runOnRead` (有 viewer)，`runOnRecordSegmentCreate` (录制段创建)。常用作外部 FFmpeg 转码的触发器
-- **API 事件（WebSocket）**：通过 WebSocket 接收服务器事件（path 创建/删除、publisher 连接/断开、reader 连接/断开）。适合构建自定义管理界面
-- **Go build tags**：编译时通过 build tags 控制特性开关。RPI Camera 模块仅在 ARM Linux 上编译
-- **静态编译**：所有 Go 依赖编译进单二进制。只有一个外部 C 依赖 (libsrt)，但也在 linker 中静态链接
+- **Zero-config automatic protocol conversion**: MediaMTX's killer feature. Publisher pushes RTSP → viewer watches via HLS. Publisher pushes RTMP → viewer watches via WebRTC. No conversion rules need to be configured. The internal track ring buffer plus codec passthrough realizes zero-overhead protocol conversion
+- **Media-over-QUIC pioneer (v1.19.0, 2026-06-02)**: Among the first open-source media servers with native Media-over-QUIC support. Built on QUIC/HTTP3 transport and the WebTransport browser API. Slightly faster than WebRTC (no SCTP overhead), better loss recovery (native to QUIC), extra codec support (FLAC), lower routing complexity (single UDP port, no ICE/STUN negotiation)
+- **sourceOnDemand lazy pulling**: An energy-saving mode for IoT/camera scenarios. Cameras transmit video only while a viewer is watching. With no viewers the network connection is fully released and the camera enters low-power mode. The release delay is configurable (prevents frequent connect/disconnect cycles). Extremely valuable for 4G/battery-powered surveillance cameras
+- **RPI Camera hardware encoding**: Uses the hardware H.264/MJPEG encoder directly on the Raspberry Pi. v2.8.0 unified the configuration interface for software and hardware encoding (`rpiCameraH264Profile` and `rpiCameraH264Level` apply to both software and hardware paths). Performance optimization (frame size computed once)
+- **RTSP tunneling through firewalls**: RTSP over HTTP and RTSP over WebSocket tunnels. Solves RTSP port blocking in enterprise networks. gortsplib supports both TCP (interleaved) and UDP transport, switching automatically
+- **Read Replica horizontal scaling**: The simplest origin-replica architecture. The origin acts as a static source; replicas pull via remote paths. No cluster management system required (no Raft/Paxos/etcd). Read traffic is spread by an external L4 (TCP) or L7 (HTTP) load balancer
 
-## 4. 现状与生态
-- **当前版本**：v1.19.2 (2026-06-28，最新稳定版)，v1.19.0 (2026-06-02，新增 Media-over-QUIC 和 FLAC 支持)。活跃维护，约每月一个 release。6 年来共 123+ releases
-- **GitHub Stars / 活跃度**：约 20,000 stars，1,500+ forks。高频提交，Issue 响应快速（通常 1-3 天内回复）。代码质量高（测试覆盖好，CI/CD 自动化完善）。Release 工作流完全公开（GitHub Actions 编译，区块链校验和验证）
-- **社区规模**：中等规模社区。GitHub Issues/Discussions 活跃。主要用例集中在 IP 摄像头 / IoT / 监控 / 家庭安防。Discord 有用户社区
-- **文档 / SDK / API 生态**：
-  - 官方网站：mediamtx.org（完整文档，包括所有协议的配置指南、快速开始、部署指南、API 参考、FAQ）
-  - REST API 文档：完整的 OpenAPI/Swagger 描述。所有端点有 curl 和编程语言示例
-  - 配置文档：每个参数都有详细说明和默认值。YAML 配置注释完善
-  - Docker Hub 官方镜像：bluenviron/mediamtx，多架构 (amd64/arm64/armv6/armv7)。自动构建，标签对应版本号
-  - 客户端集成示例：提供 OBS Studio、FFmpeg、GStreamer、VLC、WebRTC (pion/browser)、RTSP (OpenCV/ffplay) 等客户端对接 MediaMTX 的配置示例
-  - 无官方 SDK，但所有协议都是标准的。使用各协议的标准客户端库即可
-  - 安全与校验：Release checksums.sha256 + GitHub Attestations 区块链校验
-- **已知缺陷或限制**：
-  - **Go GC 延迟风险**：在极高并发（万级以上连接）下 Go GC 可能产生毫秒级停顿。对于 <50ms 低延迟场景有风险
-  - **不内置转码**：纯媒体路由器定位。无内部编解码引擎。需要 ABR 自适应码率时必须外部 FFmpeg/GStreamer。runOnReady 钩子 fork 的子进程管理是运维负担
-  - **无内置集群管理**：Read Replica 依赖手动配置。无自动服务发现、故障转移或节点编排
-  - **纯 Go 生态限制**：无法调用 GPU 硬件编码 API（NVENC/VAAPI/VT）。不适合嵌入式 C FFI 场景
-  - **LL-HLS + CDN 缓存冲突**：低延迟 HLS 的部分 segment 需要绕过 CDN 缓存。对不同 CDN 的配置需要个案处理
-  - **录制不支持云存储**：仅支持本地文件系统录制。无 S3/OSS/MinIO 等对象存储的直接集成
-  - **MJPEG 仅 RPI Camera 支持**：通用 MJPEG 流的处理和分发未实现。仅在 RPI Camera 模块中通过硬件编码器支持
-  - **RTMP Enhanced (HEVC/AV1) 支持不完善**：gortmplib 是轻量级实现，功能不如 SRS/librtmp 完整
+### Extensibility / plugin mechanism
 
-## 5. 市场定位
-- **主要应用行业**：视频监控 — IP 摄像头流转发和多协议分发（最核心场景），IoT 视频设备管理 — 将边缘设备的视频流接入云端，家庭安防 DIY — 树莓派摄像头 + Home Assistant 集成，小型直播平台 — 依赖外部转码的直播分发，多协议转换网关 — 将遗留 RTSP 系统升级为 WebRTC/HLS
-- **竞品对比简表**：
-| 维度 | MediaMTX | SRS | nginx-rtmp | Ant Media | Wowza | LiveKit |
+MediaMTX has no traditional plugin system. Extension approaches:
+
+- **Configuration-driven**: All behavior is controlled through YAML config files. Hot reload is supported (via `SIGHUP` signal or triggered by the API). Configuration overrides: global → protocol defaults → per-path
+- **REST API**: A complete runtime management API. Path CRUD (POST/GET/PATCH/DELETE `/v3/config/paths/{name}`), recording segment list (GET `/v3/recordings/list`), recording segment detail (GET `/v3/recordings/get/{name}`), config reload (POST `/v3/config/reload`)
+- **External authentication hook**: `externalAuthenticationURL` — HTTP POST callback authentication. The server sends the client's credentials and IP to an external service, which decides whether to allow the connection. Callback timeout/failure denies by default
+- **runOn*/exec hooks**: Execute external commands on specific events. `runOnInit` (after the service starts), `runOnReady` (path ready), `runOnRead` (a viewer is present), `runOnRecordSegmentCreate` (recording segment created). Commonly used as a trigger for external FFmpeg transcoding
+- **API events (WebSocket)**: Receive server events over WebSocket (path create/delete, publisher connect/disconnect, reader connect/disconnect). Well suited to building a custom admin UI
+- **Go build tags**: Feature switches controlled by build tags at compile time. The RPI Camera module compiles only on ARM Linux
+- **Static compilation**: All Go dependencies compile into a single binary. There is only one external C dependency (libsrt), which is also statically linked in the linker
+
+## 4. Status & Ecosystem
+
+- **Current version**: v1.19.2 (2026-06-28, latest stable), v1.19.0 (2026-06-02, adds Media-over-QUIC and FLAC support). Actively maintained, roughly one release per month. 123+ releases over 6 years
+- **GitHub Stars / activity**: ~20,000 stars, 1,500+ forks. High commit frequency, fast issue response (usually replied to within 1-3 days). High code quality (good test coverage, well-developed CI/CD automation). The release workflow is fully public (GitHub Actions builds, blockchain-verified checksums)
+- **Community size**: Mid-sized community. GitHub Issues/Discussions are active. Main use cases concentrate on IP cameras / IoT / surveillance / home security. A user community exists on Discord
+- **Documentation / SDK / API ecosystem**:
+  - Official website: mediamtx.org (complete documentation, including configuration guides for all protocols, quickstart, deployment guides, API reference, FAQ)
+  - REST API documentation: complete OpenAPI/Swagger description. Every endpoint has curl and programming-language examples
+  - Configuration documentation: every parameter has detailed description and defaults. YAML config comments are thorough
+  - Docker Hub official images: bluenviron/mediamtx, multi-architecture (amd64/arm64/armv6/armv7). Built automatically, tags correspond to version numbers
+  - Client integration examples: configuration examples for connecting OBS Studio, FFmpeg, GStreamer, VLC, WebRTC (pion/browser), RTSP (OpenCV/ffplay) clients to MediaMTX
+  - No official SDK, but all protocols are standard. Standard client libraries for each protocol work as-is
+  - Security and verification: Release checksums.sha256 + GitHub Attestations blockchain verification
+- **Known defects or limitations**:
+  - **Go GC latency risk**: under extremely high concurrency (tens of thousands of connections) Go GC can produce millisecond-scale pauses. A risk for sub-50ms low-latency scenarios
+  - **No transcoding built in**: pure media router positioning. No internal codec engine. ABR adaptive bitrate always requires external FFmpeg/GStreamer. Managing subprocesses forked by the runOnReady hook is an operational burden
+  - **No built-in cluster management**: Read Replica relies on manual configuration. No automatic service discovery, failover, or node orchestration
+  - **Pure Go ecosystem limits**: cannot call GPU hardware encoding APIs (NVENC/VAAPI/VT). Unsuitable for embedded C FFI scenarios
+  - **LL-HLS + CDN cache conflicts**: partial segments of low-latency HLS must bypass the CDN cache. Configuration differs per CDN provider and needs case-by-case handling
+  - **Recording does not support cloud storage**: only local filesystem recording. No direct integration with S3/OSS/MinIO object storage
+  - **MJPEG supported only by RPI Camera**: generic MJPEG stream handling and distribution is unimplemented. Supported only in the RPI Camera module via hardware encoders
+  - **RTMP Enhanced (HEVC/AV1) support is incomplete**: gortmplib is a lightweight implementation, less complete in features than SRS/librtmp
+
+## 5. Market Positioning
+
+- **Primary application industries**: Video surveillance — IP camera stream forwarding and multi-protocol distribution (the most core scenario); IoT video device management — connecting edge device video streams to the cloud; home security DIY — Raspberry Pi cameras integrated with Home Assistant; small streaming platforms — live distribution relying on external transcoding; multi-protocol conversion gateways — upgrading legacy RTSP systems to WebRTC/HLS
+- **Competitor comparison summary**:
+
+| Dimension | MediaMTX | SRS | nginx-rtmp | Ant Media | Wowza | LiveKit |
 |------|----------|-----|------------|-----------|-------|---------|
-| 部署复杂度 | ⭐ (单二进制) | ⭐⭐ (需TURN) | ⭐⭐ (需nginx) | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐ |
-| Docker 体积 | ~27MB | ~100MB+ | ~50MB+ | ~200MB+ | ~500MB+ | ~150MB+ |
-| 内置转码 | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| 集群 | Read Replica | Origin-Edge | push/pull | 内置 | 内置 | 内置 |
+| Deployment complexity | ⭐ (single binary) | ⭐⭐ (needs TURN) | ⭐⭐ (needs nginx) | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐ |
+| Docker size | ~27MB | ~100MB+ | ~50MB+ | ~200MB+ | ~500MB+ | ~150MB+ |
+| Built-in transcoding | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Cluster | Read Replica | Origin-Edge | push/pull | Built-in | Built-in | Built-in |
 | Media-over-QUIC | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| RTSP 支持 | ⭐⭐⭐⭐⭐ | ⚠️ | ❌ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ❌ |
-| on-demand 拉流 | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| RPI Camera 优化 | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| IP Camera 场景 | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐ | ⭐⭐ | ⭐⭐⭐ | ❌ |
-| ABR 转码 | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| 语言 | Go | C/C++ | C | Java | Java | Go/TS |
+| RTSP support | ⭐⭐⭐⭐⭐ | ⚠️ | ❌ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ❌ |
+| on-demand pulling | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| RPI Camera optimization | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| IP camera scenario | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐ | ⭐⭐ | ⭐⭐⭐ | ❌ |
+| ABR transcoding | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Language | Go | C/C++ | C | Java | Java | Go/TS |
 | Stars | 20K | 29K | 14K | 3K | N/A | 30K+ |
-| 许可 | MIT | MIT | BSD-2 | 商业 | 商业 | Apache 2.0 |
-| 发布时间 | 2019 | 2013 | 2012 | 2018 | 2007 | 2021 |
-- **定价 / 许可**：MIT 免费开源。无商业版。Release 二进制免费下载
+| License | MIT | MIT | BSD-2 | Commercial | Commercial | Apache 2.0 |
+| Release year | 2019 | 2013 | 2012 | 2018 | 2007 | 2021 |
 
-## 6. 产品特色
-1. **零依赖单二进制**：Go 编译出一个静态二进制，无运行时依赖。Docker 镜像 27MB (amd64)。部署就是下载/启动。没有外部 Java/JRE (Ant Media/Wowza)，没有外部 nginx (nginx-rtmp)。这是"简单"的终极体现
-2. **协议自动转换**："推一种，所有协议自动可用"。不需要配置转换规则或输入输出对。Publisher 推 RTSP，viewer 用 HLS/WebRTC/SRT/RTMP 都能播放。内部 ring buffer + codec passthrough 实现的零开销转换
-3. **sourceOnDemand 惰性拉流**：IoT/电池供电场景的节能优化。摄像头仅在被人看的时候工作。无 viewer 时完全释放资源。这是监控领域特有的需求，其他通用流媒体服务器都没有实现
-4. **Media-over-QUIC 先行者**：2026年6月 v1.19.0 即支持。领先 SRS (13 年项目)、nginx-rtmp (14 年项目)、Ant Media (8 年项目) 等所有竞品。QUIC 传输层在丢包恢复、连接迁移、多路复用方面优于 TCP
-5. **IP 摄像头场景的一站式方案**：RPI Camera 硬件编码 + RTSP 主协议 + on-demand 拉流 + 多协议分发。从摄像头到 viewer 的完整链路，且几乎零配置
+- **Pricing / license**: MIT, free and open source. No commercial edition. Release binaries are free to download
 
-## 7. 对 MediaServo 的参考价值
-### [Adopt] 可直接借鉴
-1. **Path 抽象模型**：`path → { publisher/source, readers[], auth, config }` 的流生命周期管理模型直接映射到 MediaServo 的 Stream/Channel 概念。Path 作为 publisher 和 reader 的 meeting point，与 MediaServo 的 Stream 概念高度契合。状态机设计（Idle → Ready → OnDemand*）也值得直接复用
-2. **sourceOnDemand 按需拉流模式**：MediaServo 监控相机接入的核心能力之一。`MediaSource` trait 的 `start()`/`stop()` 生命周期方法天然支持此模式。当没有 `StreamSubscriber` 连接时释放对摄像头的 RTSP 连接
-3. **协议自动转换的零配置哲学**：MediaMTX 证明了不需要显式配置"RTSP → HLS"转换规则。MediaServo 的 Unified Fragment Model 天然支持这种模式：所有输入产生 Fragment → 所有输出消费 Fragment → 所有协议组合自动可用
-4. **Read Replica 水平扩展**：origin-replica 是最简单的水平扩展模式。不需要 Raft/etcd，通过外部 LB 实现。MediaServo Phase 1-2 可以先用此模式，后期再升级到更完善的集群方案
-5. **热重载配置**：不中断已有连接更新配置是生产服务器的基本要求。MediaServo 的 PluginManager 应该设计运行时配置重载能力（通过 `ConfigUpdate` trait 方法或信号处理）
-- **版本演进**：
-  - 2019-12：rtsp-simple-server v0.0.0 — 仅 RTSP 推流+拉流，Go 编写
-  - 2020-02：v0.2.0 — 加入 RTMP 播放支持
-  - 2021-05：v0.16.0 — 加入 HLS 播放
-  - 2022-03：v0.18.0 — 加入 WebRTC 播放 (pion/webrtc)
-  - 2023-06：v1.0.0 — 更名为 MediaMTX，架构全面重构
-  - 2024-09：v1.15.0 — 加入录制功能 (fMP4/MPEG-TS)
-  - 2025-11：v1.18.0 — 加入 WHIP 推流，Read Replica 模式
-  - 2026-06：v1.19.0 — Media-over-QUIC 支持，FLAC 支持 (里程碑版本)
-  - 2026-06：v1.19.2 — 最新稳定版，QUIC 稳定性改进
-- **Docker 下载量**：超过 2 亿次拉取（来自 Docker Hub 公开数据），是流媒体领域部署最广泛的容器之一
-- **赞助/依赖关系**：核心作者受雇于 Bluenviron 从事 MediaMTX 全职开发。所有协议库 (gortsplib/gortmplib/gohlslib/mediacommon) 由同一作者维护
+## 6. Product Highlights
 
+1. **Zero-dependency single binary**: Go compiles to one static binary with no runtime dependencies. Docker image is 27MB (amd64). Deployment is download/start. No external Java/JRE (Ant Media/Wowza), no external nginx (nginx-rtmp). This is the ultimate expression of "simplicity"
+2. **Automatic protocol conversion**: "Push one protocol, and it is automatically available on all protocols". No conversion rules or input/output pairs to configure. A publisher pushes RTSP, and viewers can play via HLS/WebRTC/SRT/RTMP. Zero-overhead conversion realized by the internal ring buffer plus codec passthrough
+3. **sourceOnDemand lazy pulling**: Energy-saving optimization for IoT/battery-powered scenarios. Cameras work only while someone is watching. Resources are fully released when no viewer is present. This is a demand specific to the surveillance domain that no other general streaming server implements
+4. **Media-over-QUIC pioneer**: Supported since v1.19.0 in June 2026. Ahead of all competitors — SRS (13-year project), nginx-rtmp (14-year project), Ant Media (8-year project). The QUIC transport layer is superior to TCP in loss recovery, connection migration, and multiplexing
+5. **One-stop solution for IP camera scenarios**: RPI Camera hardware encoding + RTSP as the primary protocol + on-demand pulling + multi-protocol distribution. The complete chain from camera to viewer, with nearly zero configuration
 
-### [Adapt] 需修改后采用
-1. **Path 模型 + Fragment 模型融合**：MediaMTX 的 path 模型缺乏统一的内部媒体表示（内部只是 codec-aware ring buffer）。MediaServo 应该在 path 模型上叠加 Fragment 模型 — path 管理流生命周期和权限，Fragment 管理媒体数据表示和跨协议映射
-2. **录制策略**：MediaMTX 的 fMP4/MPEG-TS 分段录制到本地磁盘。MediaServo 应该统一使用 CMAF/fMP4（与 Fragment payload 一致），录制目标支持多种后端（本地、S3/OSS、NFS），且直接从 FragmentObserver 写入
-3. **外部转码的集成方式**：MediaMTX 的 `runOnReady` 钩子 + FFmpeg 子进程模式的功能性正确但运维复杂。MediaServo 应该设计 `Transcoder` trait，支持内建转码（首选）和外部转码（备选）两种后端，统一生命周期管理
-4. **RPI Camera 配置统一的思路**：MediaMTX v2.8.0 统一软硬件编码参数的作法值得借鉴。MediaServo 的 `HardwareEncoder` trait 应该提供统一的配置接口，隐藏 NVENC/VAAPI/VT/QSV 的差异
-5. **RTSP 隧道**：RTSP over HTTP/WebSocket 的防火墙穿透对监控场景有价值。MediaServo 的 `RtspPlugin` 应该支持多种 transport（TCP interleaved, UDP, HTTP tunnel）
-6. **QUIC/WebTransport 传输层**：MediaMTX v1.19.0 验证了 QUIC 在流媒体中的可行性。MediaServo Phase 4+ 应该将 QUIC/WebTransport 作为统一传输层，减少协议数量
+## 7. Reference Value for MediaServo
 
-### [Avoid] 已知坑 / 不适用场景
-1. **Go GC 低延迟风险**：毫秒级 GC 停顿对 <50ms 场景不可接受。MediaServo 的 Rust 核心没有 GC，这是正确的选择
-2. **不内置转码的架构限制**：MediaMTX 完全依赖外部进程转码。MediaServo 需要内置 transmux 路径（Fragment 容器格式转换）和可选编码管线。不应依赖外部进程
-3. **无 GPU 硬件编码能力**：纯 Go 无法调用 GPU API。MediaServo 的屏幕捕获和编码路径必须通过 Rust FFI 或 `libloading` 直接调用 NVENC/VAAPI/VT
-4. **Read Replica 无故障转移**：无自动 failover。MediaServo 如果需要高可用，需要设计更完善的集群方案（参考 LVQR 的 gossip 集群）
-5. **单 publisher 限制**：一个 path 仅一个 publisher。MediaServo 的视频会议需要多 publisher → audiomixer/compositor 后输出。需要在 path 模型上增加 room/conference 抽象
-6. **gortsplib 等依赖库的 bus factor**：MediaMTX 的所有协议库都由一人维护。如果作者停止维护，整个生态崩溃
+### [Adopt] Directly Adoptable
 
-**总体评分**：★★★☆☆ (3/5)
+1. **Path abstraction model**: the `path → { publisher/source, readers[], auth, config }` stream lifecycle management model maps directly onto MediaServo's Stream/Channel concepts. A path as the meeting point between publisher and reader fits MediaServo's Stream concept closely. The state machine design (Idle → Ready → OnDemand*) is also worth reusing directly
+2. **sourceOnDemand on-demand pulling pattern**: one of the core capabilities for connecting surveillance cameras to MediaServo. The `start()`/`stop()` lifecycle methods of the `MediaSource` trait naturally support this pattern. Release the RTSP connection to the camera when no `StreamSubscriber` is connected
+3. **Zero-configuration philosophy of automatic protocol conversion**: MediaMTX proves that explicit "RTSP → HLS" conversion rules need not be configured. MediaServo's Unified Fragment Model naturally supports this pattern: all inputs produce Fragments → all outputs consume Fragments → all protocol combinations are automatically available
+4. **Read Replica horizontal scaling**: origin-replica is the simplest horizontal scaling pattern. No Raft/etcd required, achieved with an external LB. MediaServo Phase 1-2 can start with this pattern and upgrade to a fuller cluster design later
+5. **Hot config reload**: updating configuration without interrupting existing connections is a basic requirement for production servers. MediaServo's PluginManager should be designed with runtime configuration reload capability (via a `ConfigUpdate` trait method or signal handling)
+- **Version evolution**:
+  - 2019-12: rtsp-simple-server v0.0.0 — RTSP push and pull only, written in Go
+  - 2020-02: v0.2.0 — adds RTMP playback
+  - 2021-05: v0.16.0 — adds HLS playback
+  - 2022-03: v0.18.0 — adds WebRTC playback (pion/webrtc)
+  - 2023-06: v1.0.0 — renamed MediaMTX, architecture comprehensively rebuilt
+  - 2024-09: v1.15.0 — adds recording (fMP4/MPEG-TS)
+  - 2025-11: v1.18.0 — adds WHIP pushing, Read Replica mode
+  - 2026-06: v1.19.0 — Media-over-QUIC support, FLAC support (milestone release)
+  - 2026-06: v1.19.2 — latest stable, QUIC stability improvements
+- **Docker download volume**: over 200 million pulls (from public Docker Hub data), one of the most widely deployed containers in the streaming space
+- **Sponsorship / dependency relations**: the core author is employed by Bluenviron for full-time MediaMTX development. All protocol libraries (gortsplib/gortmplib/gohlslib/mediacommon) are maintained by the same author
 
-MediaMTX 是协议路由 reference — 在零配置协议转换、IoT/监控边缘场景、QUIC 传输方面表现卓越。Path 抽象和 sourceOnDemand 模式对 MediaServo 有直接参考价值。但 Go GC 限制、无转码能力、无 GPU 编码能力使其实现方式不适合 MediaServo 的直接需求。取其设计思想（Path 管理 + 自动转换 + on-demand 拉流），用 Rust + Fragment Model 重新实现。
+### [Adapt] Needs Modification Before Adoption
+
+1. **Fusing the Path model with the Fragment model**: MediaMTX's path model lacks a unified internal media representation (internally it is only a codec-aware ring buffer). MediaServo should layer the Fragment model on top of the path model — the path manages stream lifecycle and permissions, the Fragment manages the media data representation and cross-protocol mapping
+2. **Recording strategy**: MediaMTX records fMP4/MPEG-TS segments to local disk. MediaServo should use CMAF/fMP4 uniformly (consistent with the Fragment payload), support multiple recording backends (local, S3/OSS, NFS), and write directly from the FragmentObserver
+3. **Integration approach for external transcoding**: the MediaMTX `runOnReady` hook + FFmpeg subprocess pattern is functionally correct but operationally complex. MediaServo should design a `Transcoder` trait supporting both built-in transcoding (preferred) and external transcoding (fallback) backends, with unified lifecycle management
+4. **The idea behind unifying RPI Camera configuration**: MediaMTX v2.8.0's approach of unifying software/hardware encoding parameters is worth adopting. MediaServo's `HardwareEncoder` trait should provide a unified configuration interface that hides the differences between NVENC/VAAPI/VT/QSV
+5. **RTSP tunneling**: RTSP over HTTP/WebSocket firewall traversal has value for surveillance scenarios. MediaServo's `RtspPlugin` should support multiple transports (TCP interleaved, UDP, HTTP tunnel)
+6. **QUIC/WebTransport transport layer**: MediaMTX v1.19.0 validated the feasibility of QUIC in streaming. MediaServo Phase 4+ should make QUIC/WebTransport the unified transport layer to reduce the number of protocols
+
+### [Avoid] Known Pitfalls / Non-applicable scenarios
+
+1. **Go GC low-latency risk**: millisecond-scale GC pauses are unacceptable for sub-50ms scenarios. MediaServo's Rust core has no GC, which is the right choice
+2. **Architectural limitation of not building in transcoding**: MediaMTX relies entirely on external processes for transcoding. MediaServo needs a built-in transmux path (Fragment container format conversion) and an optional encoding pipeline. It should not depend on external processes
+3. **No GPU hardware encoding capability**: pure Go cannot call GPU APIs. MediaServo's screen capture and encoding path must call NVENC/VAAPI/VT directly via Rust FFI or `libloading`
+4. **Read Replica has no failover**: no automatic failover. If MediaServo needs high availability, it needs a more complete cluster design (see LVQR's gossip cluster)
+5. **Single publisher limit**: one publisher per path. MediaServo video conferencing needs multiple publishers → audiomixer/compositor → output. A room/conference abstraction must be added on top of the path model
+6. **Bus factor of dependencies such as gortsplib**: all of MediaMTX's protocol libraries are maintained by a single person. If the author stops maintaining them, the entire ecosystem collapses
+
+**Overall rating**: ★★★☆☆ (3/5)
+
+MediaMTX is a reference for protocol routing — excellent in zero-configuration protocol conversion, IoT/surveillance edge scenarios, and QUIC transport. The Path abstraction and the sourceOnDemand pattern have direct reference value for MediaServo. But the Go GC limitation, lack of transcoding, and lack of GPU encoding make its implementation unsuitable for MediaServo's direct needs. Take its design ideas (Path management + automatic conversion + on-demand pulling) and reimplement them in Rust + Fragment Model.
 
 ---
-**相关决策**: D5 (Unified Fragment), D21 (时间戳), D-STREAM-TOPOLOGY, D152 (nginx hooks)
+**Related decisions**: D5 (Unified Fragment), D21 (timestamps), D-STREAM-TOPOLOGY, D152 (nginx hooks)
 
-## 附录 A: sourceOnDemand 模式详解
+## Appendix A: sourceOnDemand pattern in detail
 
-### A.1 状态机
+### A.1 State machine
 
-sourceOnDemand 模式的核心是一个带超时的状态机：
+The core of the sourceOnDemand pattern is a state machine with a timeout:
 
 ```
   set sourceOnDemand = yes
                           
-    Idle  viewer连接  Connecting  拉流中  Active
-   (释放) ----------->  (连接上游) -------> (推流中)
+    Idle  viewer connects  Connecting  pulling  Active
+   (released) ----------->  (connecting to upstream) -------> (pushing)
        A                                      |
-       |    viewer 断开 + 超时后              |
+       |    all viewers disconnect + after timeout              |
        +--------------------------------------+
 ```
 
-**状态说明**：
-- Idle：无 viewer，无上游连接。摄像头可进入低功耗模式
-- Connecting：第一个 viewer 到达，正在连接上游源
-- Active：viewer 存在，上游连接活跃，正在推送媒体数据
-- 返回 Idle：viewer 全部断开，等待 onDemandCloseAfter 超时后释放
+**State descriptions**:
+- Idle: no viewers, no upstream connection. The camera may enter low-power mode
+- Connecting: the first viewer arrived, connecting to the upstream source
+- Active: viewers exist, the upstream connection is active, media data is being pushed
+- Back to Idle: all viewers disconnected, released after the onDemandCloseAfter timeout
 
-**防抖机制**：
-- onDemandCloseAfter 默认 10s。避免 viewer 短暂断开立即重连
-- viewer 在超时前重连则回到 Active 状态，不释放连接
-- 超时后释放，摄像头可进入休眠
+**Debounce mechanism**:
+- onDemandCloseAfter defaults to 10s. Avoids immediate reconnection after a brief viewer disconnect
+- If a viewer reconnects before the timeout, the state returns to Active and the connection is not released
+- After the timeout the connection is released and the camera may enter sleep
 
-### A.2 对摄像头的影响
+### A.2 Impact on the camera
 
-电池供电的 IP 摄像头场景：
-- Idle 状态：摄像头完全停止编码和传输，功耗降至待机模式
-- Active 状态：摄像头正常编码和传输，正常工作功耗
-- 如果监控场景是偶尔有人看，sourceOnDemand 可节省 95%+ 电力
+Battery-powered IP camera scenario:
+- Idle state: the camera stops encoding and transmitting entirely, power consumption drops to standby
+- Active state: the camera encodes and transmits normally, at normal working power
+- If the surveillance scenario is watched only occasionally, sourceOnDemand can save 95%+ of power
 
-### A.3 配置示例
+### A.3 Configuration example
 
 ```yaml
 paths:
   front_door:
     source: rtsp://192.168.1.100:554/stream
     sourceOnDemand: yes
-    sourceOnDemandCloseAfter: 30s  # 最后 viewer 离开后 30s 释放
-    sourceOnDemandRetryInterval: 5s  # 重连间隔
+    sourceOnDemandCloseAfter: 30s  # release 30s after the last viewer leaves
+    sourceOnDemandRetryInterval: 5s  # reconnect interval
 ```
 
+### [Adopt] Supplement — hot config reload design
 
-### [Adopt] 补充 — 热重载配置设计
-
-**6. 运行时配置热重载**：MediaMTX 支持通过 SIGHUP 信号或 POST API 热重载 YAML 配置文件，不中断已有连接。MediaServo 的 `PluginManager` 需要类似的机制：
+**6. Runtime hot configuration reload**: MediaMTX supports hot-reloading the YAML configuration file via a SIGHUP signal or a POST API without interrupting existing connections. MediaServo's `PluginManager` needs a similar mechanism:
 
 ```rust
 pub trait ConfigurablePlugin: Send + Sync {
-    /// 应用新的配置。返回变更的配置差异
+    /// Apply a new configuration. Returns the diff of the changed configuration
     async fn apply_config(&self, new: &serde_json::Value) -> Result<ConfigDiff>;
-    /// 当前配置快照
+    /// Snapshot of the current configuration
     async fn current_config(&self) -> Result<serde_json::Value>;
 }
 ```
 
-热重载的边界的处理：端口变更需要重启 listener、编解码器变更不会影响已有编码会话、path 配置变更立即生效但不会踢出已有 viewer。MediaServo 的 PipelineEngine 应在 reload_config() 时遍历所有插件的 apply_config() 方法。
+Handling the boundaries of hot reload: a port change requires restarting the listener, a codec change does not affect existing encoding sessions, a path configuration change takes effect immediately but does not kick out existing viewers. MediaServo's PipelineEngine should iterate over all plugins' apply_config() methods in reload_config().
 
-### [Adapt] 补充 — 认证与授权模型
+### [Adapt] Supplement — authentication and authorization model
 
-**7. 多级认证机制**：MediaMTX 支持 per-path 的 external/RTSP Digest/JWT/internal 认证，以及 IP 白名单。MediaServo 的认证模型应更简洁：
+**7. Multi-level authentication**: MediaMTX supports per-path external/RTSP Digest/JWT/internal authentication, plus IP allowlists. MediaServo's authentication model should be simpler:
 
-| 认证级别 | MediaMTX 方式 | MediaServo 方式 | 差异说明 |
+| Auth level | MediaMTX approach | MediaServo approach | Difference |
 |---------|-------------|---------------|---------|
-| Level 0 | 无认证 (noauth) | `AuthMode::None` | 内部测试、开发环境 |
-| Level 1 | 静态密码 (internal) | `AuthMode::Static` | 单 Token/密码，简单部署 |
-| Level 2 | HTTP 回调 (external) | `AuthMode::Webhook` | 外部认证服务，支持 RBAC |
-| Level 3 | JWT | `AuthMode::Jwt` | 无状态令牌，适合微服务 |
-| Level 4 | 多因子 + IP ACL | `AuthMode::Composite` | 安全敏感场景 |
+| Level 0 | No auth (noauth) | `AuthMode::None` | Internal testing, development environments |
+| Level 1 | Static password (internal) | `AuthMode::Static` | Single token/password, simple deployments |
+| Level 2 | HTTP callback (external) | `AuthMode::Webhook` | External auth service, supports RBAC |
+| Level 3 | JWT | `AuthMode::Jwt` | Stateless tokens, suited to microservices |
+| Level 4 | Multi-factor + IP ACL | `AuthMode::Composite` | Security-sensitive scenarios |
 
-MediaServo 应采用 `AuthMode` 枚举 + `AuthBackend` trait，允许插件实现自定义认证后端（LDAP/OAuth/OIDC）。
+MediaServo should use an `AuthMode` enum + `AuthBackend` trait, allowing plugins to implement custom authentication backends (LDAP/OAuth/OIDC).
 
-### [Avoid] 补充 — 更多已知坑
+### [Avoid] Supplement — more known pitfalls
 
-**7. QUIC 传输的可达性问题**：MediaMTX 的 Media-over-QUIC 需要客户端支持 HTTP/3 (WebTransport API)。在企业网络中，QUIC (UDP 443) 可能被防火墙封锁（允许 TLS/TCP 443 但不允许 UDP 443）。MediaServo 如果采用 QUIC 传输，必须保留 TCP/Long-Polling/WebSocket 作为回退传输层。
+**7. Reachability problems with QUIC transport**: MediaMTX's Media-over-QUIC requires clients that support HTTP/3 (WebTransport API). In enterprise networks, QUIC (UDP 443) may be blocked by firewalls (TLS/TCP 443 allowed but UDP 443 denied). If MediaServo adopts QUIC transport, it must keep TCP/Long-Polling/WebSocket as fallback transport layers.
 
-**8. 单 path 单 publisher 的局限性**：MediaMTX 一个 path 只允许一个 publisher。这适合监控摄像头和通用推流，但不适合视频会议（需要多方合成）。MediaServo 需要在 Path 模型上叠加 Room/Conference 模型 — Room 管理多 publisher 的音频混音和视频合成后成为单一的 Fragment 流输出。
+**8. Limitations of single path, single publisher**: MediaMTX allows only one publisher per path. That suits surveillance cameras and general pushing, but not video conferencing (which needs multiparty compositing). MediaServo needs a Room/Conference model layered on top of the Path model — a Room mixes audio from multiple publishers and composites video, producing a single Fragment stream output.
 
-
-对 MediaServo 的启示：
-- mediaservo-surveillance SDK 的 CameraSource trait 应支持 onDemand: bool
-- start() 方法是拉流动作，stop() 是释放动作
-- PipelineEngine 需要感知 viewer 连接数，触发 start/stop
-- 防抖超时需要可配置
+### Implications for MediaServo:
+- mediaservo-surveillance SDK's CameraSource trait should support onDemand: bool
+- start() is the pull action, stop() is the release action
+- PipelineEngine needs to be aware of viewer connection count to trigger start/stop
+- The debounce timeout must be configurable
 
 ---
 
-## 附录 B: Read Replica 架构详解
+## Appendix B: Read Replica architecture in detail
 
-### B.1 拓扑结构
+### B.1 Topology
 
 ```
                Load Balancer
@@ -414,50 +440,50 @@ MediaServo 应采用 `AuthMode` 枚举 + `AuthBackend` trait，允许插件实�
           +---------+---------+
           |                   |
       Replica 1           Replica 2
-       (只读)              (只读)
-      从Origin拉流        从Origin拉流
+       (read-only)         (read-only)
+      pulls from Origin   pulls from Origin
           |                   |
           +---------+---------+
                     |
                   Origin
-            (接收推流 + 录制 + API)
+            (accepts push + recording + API)
 ```
 
-### B.2 配置示例
+### B.2 Configuration examples
 
-**Origin (接收推流)**：
+**Origin (accepts push)**:
 ```yaml
 paths:
   live_stream:
-    # Publisher 推到这里
+    # Publishers push here
 ```
 
-**Replica (分发观看)**：
+**Replica (distributes playback)**:
 ```yaml
 paths:
   live_stream:
-    source: rtsp://origin-ip:8554/live_stream  # 从Origin拉流
-    sourceOnDemand: yes  # 可选
+    source: rtsp://origin-ip:8554/live_stream  # pull from Origin
+    sourceOnDemand: yes  # optional
 ```
 
-### B.3 限制与适用场景
+### B.3 Limitations and applicable scenarios
 
-**限制**：
-- 手动配置所有 path (无自动同步)
-- 无自动故障转移：Origin 宕机则所有 Replica 断流
-- 无自动服务发现：需手动更新 LB 配置
-- Replica 仅分发阅读流量 (无推流/录制功能)
+**Limitations**:
+- All paths configured manually (no automatic synchronization)
+- No automatic failover: if Origin goes down, all replicas lose the stream
+- No automatic service discovery: LB configuration must be updated manually
+- A Replica only distributes read traffic (no push/recording capability)
 
-对 MediaServo 的启示：
-- Phase 1-2 可采用 Read Replica 作为简单水平扩展方案
-- Phase 3+ 升级到 LVQR gossip 集群 (自动发现 + 故障转移)
-- mediaservo-cluster 应实现两个后端 trait 支持渐进式升级
+### Implications for MediaServo:
+- Phase 1-2 can adopt Read Replica as a simple horizontal scaling solution
+- Phase 3+ upgrade to an LVQR gossip cluster (automatic discovery + failover)
+- mediaservo-cluster should implement two backend traits to support incremental upgrades
 
 ---
 
-## 附录 C: MediaMTX 配置核心参数
+## Appendix C: MediaMTX core configuration parameters
 
-MediaMTX 的配置文件结构：
+MediaMTX configuration file structure:
 
 ```yaml
 logLevel: info
@@ -468,24 +494,24 @@ webrtcAddress: :8889
 srtAddress: :8890
 
 paths:
-  # Publisher 模式
+  # Publisher mode
   live:
     runOnReady: ffmpeg -i rtsp://localhost:$RTSP_PORT/$MTX_PATH ...
     runOnReadyRestart: yes
 
-  # Static Source 模式
+  # Static Source mode
   ip_camera:
     source: rtsp://admin:password@192.168.1.64:554/stream
     sourceProtocol: tcp
     sourceOnDemand: no
 
-  # SourceOnDemand 模式
+  # SourceOnDemand mode
   battery_camera:
     source: rtsp://192.168.1.65:554/stream
     sourceOnDemand: yes
     sourceOnDemandCloseAfter: 1m
 
-  # 录制配置
+  # Recording configuration
   recorded_stream:
     record: yes
     recordPath: /recordings/$MTX_PATH/%Y-%m-%d_%H-%M-%S
@@ -493,14 +519,14 @@ paths:
     recordSegmentDuration: 1h
 ```
 
-核心参数说明：
-- sourceProtocol: tcp 强制 TCP 传输，兼容某些摄像头的 UDP 问题
-- runOnReady 钩子在 path 就绪时执行 shell 命令，常用于触发转码
-- recordSegmentDuration 录制分段时间，避免单文件过大
-- sourceOnDemand + sourceOnDemandCloseAfter 组合实现节能模式
+Core parameter notes:
+- sourceProtocol: tcp forces TCP transport, avoiding UDP issues with certain cameras
+- The runOnReady hook executes a shell command when a path becomes ready, commonly used to trigger transcoding
+- recordSegmentDuration sets the recording segment length, avoiding overly large single files
+- The sourceOnDemand + sourceOnDemandCloseAfter combination implements energy-saving mode
 
-对 MediaServo 的启示：
-- 配置格式应考虑 YAML (人类友好) 而非 INI (SRS) 或 TOML (Xiu)
-- runOnReady 钩子模式是简单场景实用方案，生产应用 trait 抽象
-- 基础录制配置 (路径/格式/分段时间) 是 MVP 的一部分
-- 协议端口应可禁用 (仅启用需要的协议)，减少攻击面
+### Implications for MediaServo:
+- Configuration format should consider YAML (human-friendly) rather than INI (SRS) or TOML (Xiu)
+- The runOnReady hook pattern is a practical solution for simple scenarios; production applications should use trait abstraction
+- Basic recording configuration (path/format/segment duration) is part of the MVP
+- Protocol ports should be disableable (enable only the protocols needed) to reduce the attack surface

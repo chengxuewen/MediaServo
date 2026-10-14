@@ -18,7 +18,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { components: rustfmt }
       - run: cargo fmt --all --check
-      - name: Changelog scope markers (F11-X V4, 仅 Unreleased 节)
+      - name: Changelog scope markers (F11-X V4, Unreleased section only)
         run: |
           python3 - <<'EOF'
           import re, sys
@@ -29,32 +29,32 @@ jobs:
           if m:
               for n, line in enumerate(m.group(1).splitlines(), text[:m.start(1)].count("\n") + 1):
                   if line.startswith("- "):
-                      head = line[: line.find("：") if "：" in line else 80]
+                      head = line[: line.find(": ") if ": " in line else 80]
                       tags = re.findall(r"\[([a-z0-9-]+)\]", head)
                       if not tags:
-                          bad.append(f"L{n}: 无 [scope] 标记")
-                      bad += [f"L{n}: 词表外 [{t}]" for t in tags if t not in ALLOWED]
+                          bad.append(f"L{n}: missing [scope] tag")
+                      bad += [f"L{n}: [{t}] outside allowed vocabulary" for t in tags if t not in ALLOWED]
           if bad:
-              print("\n".join(bad)); sys.exit("CHANGELOG Unreleased 标记违规（F11-X）")
+              print("\n".join(bad)); sys.exit("CHANGELOG Unreleased marker violations (F11-X)")
           print("changelog markers ok")
           EOF
-      - name: Bindings version parity (C43③ 手抄三处防漂移)
+      - name: Bindings version parity (C43③ three hand copies, anti-drift)
         run: |
-          v=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="mediaservo-field"))')  # bindings 属 sdk-field 交付域(F12)，对齐 field 非 workspace
+          v=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="mediaservo-field"))')  # bindings belong to the sdk-field delivery domain (F12) — align with field, not workspace
           grep -q "version = \"$v\"" bindings/python/mediaservo/pyproject.toml
           grep -q "__version__ = \"$v\"" bindings/python/mediaservo/mediaservo/__init__.py
           grep -q "\"version\": \"$v\"" bindings/node/package.json
-      - name: Version uniformity gate (C43——crate 版本单一源=workspace，禁自带字面量)
+      - name: Version uniformity gate (C43 — crate version single source = workspace; no self-carried literals)
         run: |
           if grep -l '^version = "' crates/*/Cargo.toml | grep -vE "mediaservo-(host|server|field|client)/Cargo.toml"; then
-            echo "FAIL: 有 crate 自带 version 字面量——bump 必漏；改 version.workspace = true" && exit 1
+            echo "FAIL: a crate carries its own version literal — bump will miss it; use version.workspace = true" && exit 1
           fi
-          echo "OK: 全 crate 继承 [workspace.package] 版本"
-      - name: Changelog currency gate (C43⑥/D280——workspace 版本必出现在 CHANGELOG.md)
+          echo "OK: every crate inherits [workspace.package] version"
+      - name: Changelog currency gate (C43⑥/D280 — workspace version must appear in CHANGELOG.md)
         run: |
           ver=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          grep -q "v$ver" CHANGELOG.md || { echo "FAIL: workspace 版本 $ver 无 CHANGELOG 节——bump 提交必须同笔补更新日志（人读版，AI 起草）"; exit 1; }
-          echo "OK: CHANGELOG.md 含 v$ver 节"
+          grep -q "v$ver" CHANGELOG.md || { echo "FAIL: workspace version $ver has no CHANGELOG section — the bump commit must add the changelog entry in the same commit (human-facing log, AI-drafted)"; exit 1; }
+          echo "OK: CHANGELOG.md contains the v$ver section"
 
   check:
     strategy:
@@ -88,9 +88,9 @@ jobs:
       - run: cargo test --workspace
 
   test-server-stub:
-    # V5 双姿态门：stub（--no-default-features）lib+tests 编译面。09-17 双雷清偿
-    # （signaling E0599 / handle_sfu_message 测 E0425 = cfg 门的静默回归面）焊成守卫。
-    # --all-targets 必带：E0425 只在 tests 编译面暴露（lib-only 恒绿=半证据）。
+    # V5 dual-posture gate: stub (--no-default-features) lib+tests compile surface. The 09-17 twin-mine clearance
+    # (signaling E0599 / handle_sfu_message test E0425 = silent-regression faces of the cfg gate) is welded into a guard.
+    # --all-targets is mandatory: E0425 only surfaces on the tests compile face (lib-only is always green = half evidence).
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -102,15 +102,15 @@ jobs:
       - run: cargo test -p mediaservo-server --no-default-features --all-targets
 
   test-delivery:
-    # V5 交付面冒烟：out/bindings 组装 → 组件纯度(轻组件禁 FFmpeg) +
-    # find_package COMPONENTS 真符号 + pkg-config 版本对账 + ABI 巡检。
-    # 全系统工具链（无 pixi）= 交付物本应对干净环境可用（N7 事故面的反向守卫）。
+    # V5 delivery-surface smoke: out/bindings assembly -> component purity (lightweight components forbid FFmpeg) +
+    # find_package COMPONENTS real symbols + pkg-config version reconciliation + ABI inspection.
+    # All-system toolchain (no pixi) = the deliverable must work in a clean environment (reverse guard of the N7 incident surface).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install system deps (干净消费者形)
+      - name: Install system deps (clean-consumer shape)
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake python3-pip
@@ -118,8 +118,9 @@ jobs:
         run: bash scripts/e2e-delivery.sh
 
   test-cxx:
-    # cxx header-only 家族编译+运行门（四 SDK 测试程序）+ C ABI 符号巡检（老三面漂移 +
-    # client 新面）。前置 build-c 产四 cdylib。ASan/UBSan 活体环归 device-day（需活 server）。
+    # cxx header-only family compile+run gate (four SDK test programs) + C ABI symbol inspection
+    # (drift on the three legacy surfaces + the new client surface). Prereq: build-c produces the four cdylibs.
+    # ASan/UBSan live rounds belong to device-day (needs a live server).
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -127,7 +128,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build C ABI cdylibs (field/link/deck/client)
         run: cargo build -p mediaservo-field-c -p mediaservo-link-c -p mediaservo-deck-c -p mediaservo-client-c
-      - name: Dev soname symlinks (loader 解析 libmediaservo_*.so.0)
+      - name: Dev soname symlinks (loader resolves libmediaservo_*.so.0)
         run: |
           cd target/debug
           for l in field link deck client; do ln -sf libmediaservo_$l.so libmediaservo_$l.so.0; done
@@ -137,10 +138,10 @@ jobs:
         run: bash scripts/check-abi-drift.sh && bash scripts/check-abi-client.sh
 
   test-gui:
-    # p3 GUI examples 编译+单测门：SDL3/ImGui 走仓内档案（file:// FetchContent，
-    # 零联网），X11/音频后端在聚合根显式 OFF（clean ubuntu 依赖面）。
-    # 判据 = build example RC=0 + ctest -R core（viewer_core 纯函数钉）。
-    # 活体出画（dummy cb=tex 咬合，需活 server+producer）= device-day/self-hosted 位。
+    # p3 GUI examples compile+unit gate: SDL3/ImGui come from in-repo archives (file:// FetchContent,
+    # zero network), X11/audio backends explicitly OFF in the aggregate root (clean ubuntu dependency surface).
+    # Criteria = build example RC=0 + ctest -R core (viewer_core pure-function pins).
+    # Live window output (dummy cb=tex meshing, needs a live server+producer) = device-day/self-hosted slot.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -150,7 +151,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
       - name: Build client-c cdylib (SDK_DIR guard input)
         run: cargo build -p mediaservo-client-c
-      - name: Dev soname symlinks (同 test-cxx 纪律)
+      - name: Dev soname symlinks (same discipline as test-cxx)
         run: cd target/debug && ln -sf libmediaservo_client_c.so libmediaservo_client_c.so.0
       - name: Build GUI examples (aggregated FetchContent, headless combos)
         run: ./mediaservo.sh build example
@@ -183,8 +184,8 @@ jobs:
         run: cargo build -p mediaservo-server --features sfu-mediasoup
       - name: Start mediaservo-server for e2e_sfu (pure external mode)
         run: |
-          # C21: e2e_sfu 是纯外部模式 — 需真实 server 进程 + WS 信令交互
-          # 注意: server 认证用 MEDIASERVO_PSK env (main.rs:185), 与 e2e_sfu 的 SFU_E2E_PSK 匹配
+          # C21: e2e_sfu is pure external mode — needs a real server process + WS signaling interaction
+          # Note: server auth uses the MEDIASERVO_PSK env (main.rs:185), matching e2e_sfu's SFU_E2E_PSK
           MEDIASERVO_PSK="mediaservo-dev" nohup ./target/debug/mediaservo-server > /tmp/server.log 2>&1 &
           for i in $(seq 1 30); do
             if curl -s --noproxy "*" http://127.0.0.1:9800/health 2>/dev/null | grep -q healthy; then
@@ -195,7 +196,7 @@ jobs:
           curl -s --noproxy "*" http://127.0.0.1:9800/health || (cat /tmp/server.log; exit 1)
       - name: e2e_sfu (Host→mediasoup→consume, Linux only)
         run: |
-          # 首次 Linux 真跑 — CI 覆盖防 C14 假象重演 (PIT-71/72)
+          # First real Linux run — CI coverage prevents a C14 illusion from recurring (PIT-71/72)
           SFU_E2E_WS_URL="ws://127.0.0.1:9800/ws" \
           SFU_E2E_PSK="mediaservo-dev" \
           cargo test -p mediaservo-host --test e2e_sfu
@@ -211,15 +212,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y meson ninja-build libuv1-dev libssl-dev
-      - name: Preflight netem (PIT-184 反例防线：施加后必回读，静默 no-op 直接红)
+      - name: Preflight netem (PIT-184 counter-example defense — read back after applying, a silent no-op goes red)
         run: |
           sudo modprobe sch_netem || true
           tc -V
           sudo tc qdisc replace dev lo root netem limit 100000 delay 40ms 10ms distribution normal loss 2%
           sudo tc -s qdisc show dev lo | grep "netem" | grep -q "delay 40"
           RTT=$(ping -c 4 -i 0.2 127.0.0.1 2>/dev/null | awk -F/ "END {print \$5}")
-          awk -v a="$RTT" "BEGIN{exit !(a>=30)}" || { echo "netem 未生效：ping RTT=$RTTms"; exit 1; }
-          echo "netem 生效（ping RTT=${RTT}ms ≈ 2×40ms 口径）"
+          awk -v a="$RTT" "BEGIN{exit !(a>=30)}" || { echo "netem not in effect: ping RTT=$RTTms"; exit 1; }
+          echo "netem in effect (ping RTT=${RTT}ms ≈ 2×40ms convention)"
       - name: Build server + e2e test (external mode)
         run: |
           cargo build -p mediaservo-server --features sfu-mediasoup
@@ -232,10 +233,10 @@ jobs:
             sleep 1
           done
           curl -s --noproxy "*" http://127.0.0.1:9800/health || (cat /tmp/server-weaknet.log; exit 1)
-      - name: e2e_sfu under weak network (韧性判据)
+      - name: e2e_sfu under weak network (resilience criterion)
         run: |
-          # netem 全 lo 命中：信令/ICE/RTCP/RTP 同受 delay+loss——过 = 栈内恢复机制活着
-          # （对照口径见主仓 weaknet-harness：真机分侧损伤由 profile --stream/方向规则做）
+          # netem hits the whole lo interface: signaling/ICE/RTCP/RTP all take delay+loss — passing = the in-stack recovery mechanisms are alive
+          # (comparison conventions live in the parent repo's weaknet-harness: per-side impairment on real hardware is done via profile --stream / direction rules)
           SFU_E2E_WS_URL="ws://127.0.0.1:9800/ws" \
           SFU_E2E_PSK="mediaservo-dev" \
           timeout 300 cargo test -p mediaservo-host --test e2e_sfu
@@ -244,18 +245,18 @@ jobs:
         run: |
           DROP=$(sudo tc -s qdisc show dev lo | grep -oP "dropped \K[0-9]+" | head -1 || echo 0)
           echo "netem dropped=$DROP"
-          [ "${DROP:-0}" -gt 0 ] || { echo "注入侧零丢弃=疑似静默失效(PIT-184 同族)"; exit 1; }
+          [ "${DROP:-0}" -gt 0 ] || { echo "zero drops on the injection side = suspected silent no-op (same family as PIT-184)"; exit 1; }
 
-      # ==== T10 扩步：mediaservo-weaknet local-root 实环（runner=root 通道，agent 自证）====
+      # ==== T10 extended steps: mediaservo-weaknet local-root live loop (runner = root channel, agent self-proves) ====
       - name: Weaknet crate tests
         run: |
           cargo test -p mediaservo-weaknet
           cargo clippy -p mediaservo-weaknet --all-targets -- -D warnings
-      - name: Weaknet agent live loop (local-root, W1/W2/W6 子集全链)
+      - name: Weaknet agent live loop (local-root, full chain of the W1/W2/W6 subset)
         run: |
-          # 先收 preflight 的裸 netem 现场——否则 guard_foreign_root fail-closed 拦 agent apply
+          # First clear the bare netem state left by preflight — otherwise guard_foreign_root fails closed and blocks the agent apply
           sudo tc qdisc del dev lo root || true
-          # loss 参数显式（delay-only 永不 drop——dropped 真值判据的参数据）
+          # loss specified explicitly (delay-only never drops — dropped is the truth counter for the assertion)
           cargo build -p mediaservo-weaknet
           sudo ./target/debug/mediaservo-weaknet apply --rtt 50 --loss 5 --rtp-port 20000 --dir both --duration 120
           sudo ./target/debug/mediaservo-weaknet status | grep -q "iface=lo"
@@ -266,10 +267,10 @@ jobs:
           echo "agent-injected dropped=$DROP"
           [ "${DROP:-0}" -gt 0 ] || exit 1
           sudo ./target/debug/mediaservo-weaknet clear
-          sudo tc qdisc show dev lo | grep -qE "htb|netem" && { echo "撤除残留"; exit 1; }
-          echo "agent 实环链绿（apply→status→指纹→set→dropped→clear 零残留）"
+          sudo tc qdisc show dev lo | grep -qE "htb|netem" && { echo "teardown residue remains"; exit 1; }
+          echo "agent live chain green (apply -> status -> fingerprint -> set -> dropped -> clear leaves no residue)"
 
-      - name: Teardown (只删自记的 root，回读确认为空)
+      - name: Teardown (delete only the self-recorded root qdisc; read back to confirm empty)
         if: always()
         run: |
           sudo tc qdisc del dev lo root || true

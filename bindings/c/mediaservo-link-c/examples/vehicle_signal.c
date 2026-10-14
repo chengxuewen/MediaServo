@@ -1,9 +1,9 @@
-/* 车端信令示例（C ABI 消费）— mediaservo_link_signal_* 用法。
+/* Vehicle-side signaling example (C ABI consumption) — mediaservo_link_signal_* usage.
  *
- * 编译（链接 libmediaservo_link.so）:
+ * Build (linking libmediaservo_link.so):
  *   gcc vehicle_signal.c -I bindings/c/mediaservo-link-c/include -I bindings/c/include \
  *       -L target/debug -lmediaservo_link -o vehicle_signal
- * 运行: LD_LIBRARY_PATH=target/debug ./vehicle_signal
+ * Run: LD_LIBRARY_PATH=target/debug ./vehicle_signal
  */
 #include <stdio.h>
 #include <string.h>
@@ -18,7 +18,7 @@ static void on_event(mediaservo_link_signal_t* s, const char* event_json, void* 
 }
 
 int main(void) {
-    /* 1. 配置 */
+        /* 1. Configure */
     mediaservo_link_signal_config_t cfg = MEDIASERVO_LINK_SIGNAL_CONFIG_DEFAULT;
     cfg.url = "ws://127.0.0.1:9800/ws";
     cfg.psk = "mediaservo-dev";
@@ -27,7 +27,7 @@ int main(void) {
 
     char err[256];
 
-    /* 2. 连接 */
+        /* 2. Connect */
     mediaservo_link_signal_t* s = NULL;
     mediaservo_err_t rc = mediaservo_link_signal_connect(&cfg, &s);
     if (rc != MEDIASERVO_OK) {
@@ -37,10 +37,10 @@ int main(void) {
     }
     printf("connected\n");
 
-    /* 3. 注册事件回调（泵线程：合成 Connected + 转发事件） */
+        /* 3. Register the event callback (pump thread: synthesize Connected + forward events) */
     mediaservo_link_signal_on_event(s, on_event, NULL);
 
-    /* 4. 发送一条 EncoderStatus（server 广播 relay 到房间） */
+        /* 4. Send one EncoderStatus (the server broadcasts/relays it to the room) */
     const char* status =
         "{\"type\":\"encoder_status\",\"room_id\":\"vehicle-link-c\","
         "\"peer_id\":\"vehicle-link-c\",\"codec\":\"h264\","
@@ -54,12 +54,12 @@ int main(void) {
         printf("sent encoder_status\n");
     }
 
-    /* 5. 运行 10s（车端循环） */
+        /* 5. Run for 10s (vehicle-side loop) */
     for (int i = 0; i < 10; i++) {
         sleep(1);
     }
 
-    /* 6. 关闭 */
+        /* 6. Close */
     rc = mediaservo_link_signal_close(s);
     if (rc != MEDIASERVO_OK) {
         mediaservo_link_last_error(err, sizeof(err));

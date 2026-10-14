@@ -1,5 +1,5 @@
-//! controller 逻辑纯单测（S1）——无网络/无 PC：channel_init 语义、SCTP 参数派生、
-//! 合成 SDP 形状（PIT-48 顺序 + mDNS 过滤）、信封→Actuator→ControlAck 往返。
+//! Pure unit tests for controller logic (S1) - no network / no PC: channel_init semantics, SCTP parameter derivation,
+//! synthetic SDP shape (PIT-48 ordering + mDNS filtering), envelope -> Actuator -> ControlAck roundtrip.
 
 use mediaservo_common::protocol::{
     ControlAck, ControlEnvelope, DtlsParameters, Fingerprint, IceCandidate, IceParameters,
@@ -7,148 +7,154 @@ use mediaservo_common::protocol::{
 
 use mediaservo_host::control::{Actuator, StubActuator};
 use mediaservo_host::controller::{
-    ACK_LABEL, CommandPolicy, CollectAckSink, build_dc_remote_sdp, channel_init, estop_verdict,
+    ACK_LABEL, CollectAckSink, CommandPolicy, build_dc_remote_sdp, channel_init, estop_verdict,
     handle_command, sctp_stream_params,
 };
 
-    #[test]
-    fn channel_init_reliability_semantics() {
-        // D-H3: chassis/light 可靠有序；gimbal partial-reliable
-        let chassis = channel_init("chassis");
-        assert!(chassis.ordered);
-        assert_eq!(chassis.max_retransmits, None);
-        let light = channel_init("light");
-        assert!(light.ordered);
-        let gimbal = channel_init("gimbal");
-        assert!(!gimbal.ordered, "云台 partial-reliable: 无序");
-        assert_eq!(gimbal.max_retransmits, Some(5), "云台 5 次重传上限");
-        let ack = channel_init(ACK_LABEL);
-        assert!(ack.ordered, "ack 可靠有序");
-    }
+#[test]
+fn channel_init_reliability_semantics() {
+    // D-H3: chassis/light reliable-ordered; gimbal partial-reliable
+    let chassis = channel_init("chassis");
+    assert!(chassis.ordered);
+    assert_eq!(chassis.max_retransmits, None);
+    let light = channel_init("light");
+    assert!(light.ordered);
+    let gimbal = channel_init("gimbal");
+    assert!(!gimbal.ordered, "gimbal partial-reliable: unordered");
+    assert_eq!(gimbal.max_retransmits, Some(5), "gimbal retransmit cap of 5");
+    let ack = channel_init(ACK_LABEL);
+    assert!(ack.ordered, "ack reliable-ordered");
+}
 
-    #[test]
-    fn sctp_params_track_channel_init_and_reject_unassigned_id() {
-        assert!(
-            sctp_stream_params("chassis", -1).is_err(),
-            "未分配 id 的 DC 禁止 announce"
-        );
-        let p = sctp_stream_params("gimbal", 3).expect("id=3 合法");
-        assert_eq!(p.stream_id, 3);
-        assert!(!p.ordered, "gimbal 参数与 channel_init 同源");
-        assert_eq!(p.max_retransmits, Some(5));
-        let ack = sctp_stream_params(ACK_LABEL, 0).expect("id=0 合法");
-        assert!(ack.ordered);
-        assert_eq!(ack.stream_id, 0);
-    }
+#[test]
+fn sctp_params_track_channel_init_and_reject_unassigned_id() {
+    assert!(
+        sctp_stream_params("chassis", -1).is_err(),
+        "DCs without an assigned id must not announce"
+    );
+    let p = sctp_stream_params("gimbal", 3).expect("id=3 is legal");
+    assert_eq!(p.stream_id, 3);
+    assert!(!p.ordered, "gimbal params share the source with channel_init");
+    assert_eq!(p.max_retransmits, Some(5));
+    let ack = sctp_stream_params(ACK_LABEL, 0).expect("id=0 is legal");
+    assert!(ack.ordered);
+    assert_eq!(ack.stream_id, 0);
+}
 
-    fn fake_transport_parts() -> (IceParameters, DtlsParameters, Vec<IceCandidate>) {
-        (
-            IceParameters {
-                username_fragment: "ufrag1234".into(),
-                password: "pwd123456789012".into(),
+fn fake_transport_parts() -> (IceParameters, DtlsParameters, Vec<IceCandidate>) {
+    (
+        IceParameters { username_fragment: "ufrag1234".into(), password: "pwd123456789012".into() },
+        DtlsParameters {
+            fingerprints: vec![Fingerprint { algorithm: "sha-256".into(), value: "AA:BB".into() }],
+            role: "auto".into(),
+        },
+        vec![
+            IceCandidate {
+                ip: "fe80::1.local".into(), // mDNS should be skipped
+                port: 9,
+                protocol: "udp".into(),
+                foundation: "f0".into(),
+                priority: 1,
+                candidate_type: "host".into(),
             },
-            DtlsParameters {
-                fingerprints: vec![Fingerprint {
-                    algorithm: "sha-256".into(),
-                    value: "AA:BB".into(),
-                }],
-                role: "auto".into(),
+            IceCandidate {
+                ip: "10.0.0.5".into(),
+                port: 40000,
+                protocol: "udp".into(),
+                foundation: "f1".into(),
+                priority: 2,
+                candidate_type: "host".into(),
             },
-            vec![
-                IceCandidate {
-                    ip: "fe80::1.local".into(), // mDNS 应被跳过
-                    port: 9,
-                    protocol: "udp".into(),
-                    foundation: "f0".into(),
-                    priority: 1,
-                    candidate_type: "host".into(),
-                },
-                IceCandidate {
-                    ip: "10.0.0.5".into(),
-                    port: 40000,
-                    protocol: "udp".into(),
-                    foundation: "f1".into(),
-                    priority: 2,
-                    candidate_type: "host".into(),
-                },
-            ],
-        )
-    }
+        ],
+    )
+}
 
-    #[test]
-    fn build_dc_remote_sdp_application_shape() {
-        let (ice, dtls, cands) = fake_transport_parts();
-        let sdp = build_dc_remote_sdp(&ice, &dtls, Some(&cands));
-        assert!(sdp.contains("a=group:BUNDLE data"));
-        assert!(sdp.contains("a=ice-lite"));
-        assert!(sdp.contains("a=setup:actpass"));
-        assert!(sdp.contains("m=application 9 UDP/DTLS/SCTP webrtc-datachannel"));
-        assert!(sdp.contains("a=mid:data"));
-        assert!(sdp.contains("a=sctp-port:5000"));
-        // PIT-48: candidate 行必须位于 m= 之后；mDNS 跳过
-        let m_at = sdp.find("m=application").expect("m 行");
-        let cand_at = sdp.find("a=candidate:f1").expect("候选在 m 后");
-        assert!(cand_at > m_at);
-        assert!(!sdp.contains(".local"), "mDNS 候选应被过滤");
-        assert!(sdp.contains("a=end-of-candidates"));
-    }
+#[test]
+fn build_dc_remote_sdp_application_shape() {
+    let (ice, dtls, cands) = fake_transport_parts();
+    let sdp = build_dc_remote_sdp(&ice, &dtls, Some(&cands));
+    assert!(sdp.contains("a=group:BUNDLE data"));
+    assert!(sdp.contains("a=ice-lite"));
+    assert!(sdp.contains("a=setup:actpass"));
+    assert!(sdp.contains("m=application 9 UDP/DTLS/SCTP webrtc-datachannel"));
+    assert!(sdp.contains("a=mid:data"));
+    assert!(sdp.contains("a=sctp-port:5000"));
+    // PIT-48: candidate lines must come after the m= line; mDNS skipped
+    let m_at = sdp.find("m=application").expect("the m line");
+    let cand_at = sdp.find("a=candidate:f1").expect("candidate after m");
+    assert!(cand_at > m_at);
+    assert!(!sdp.contains(".local"), "mDNS candidates should be filtered");
+    assert!(sdp.contains("a=end-of-candidates"));
+}
 
-    #[tokio::test]
-    async fn handle_command_roundtrip_via_collect_sink() {
-        let actuator = StubActuator;
-        let sink = CollectAckSink::default();
-        let env = ControlEnvelope {
-            seq: 7,
-            cmd: "steer".into(),
-            payload: serde_json::json!({ "value": 0.35 }),
-            sig: None,
-        };
-        handle_command(
-            "chassis",
-            serde_json::to_string(&env).unwrap().as_bytes(),
-            &actuator,
-            None,
-            &sink,
-            &mediaservo_host::controller::CommandPolicy::default(),
-        )
-        .await;
-        let items = sink.items.lock().unwrap();
-        assert_eq!(items.len(), 1, "恰好一条回执");
-        let ack: ControlAck = serde_json::from_str(&items[0]).unwrap();
-        assert_eq!(ack.ack, 7, "ack 原样回传 seq 配对");
-        assert_eq!(ack.result["ok"], true);
-        assert_eq!(ack.result["channel"], "chassis", "label 路由证据");
-    }
+#[tokio::test]
+async fn handle_command_roundtrip_via_collect_sink() {
+    let actuator = StubActuator;
+    let sink = CollectAckSink::default();
+    let env = ControlEnvelope {
+        seq: 7,
+        cmd: "steer".into(),
+        payload: serde_json::json!({ "value": 0.35 }),
+        sig: None,
+    };
+    handle_command(
+        "chassis",
+        serde_json::to_string(&env).unwrap().as_bytes(),
+        &actuator,
+        None,
+        &sink,
+        &mediaservo_host::controller::CommandPolicy::default(),
+    )
+    .await;
+    let items = sink.items.lock().unwrap();
+    assert_eq!(items.len(), 1, "exactly one ack");
+    let ack: ControlAck = serde_json::from_str(&items[0]).unwrap();
+    assert_eq!(ack.ack, 7, "ack echoes seq for pairing");
+    assert_eq!(ack.result["ok"], true);
+    assert_eq!(ack.result["channel"], "chassis", "label routing evidence");
+}
 
-    #[tokio::test]
-    async fn handle_command_reports_actuator_error() {
-        struct Failing;
-        impl Actuator for Failing {
-            fn on_command(
-                &self,
-                _: &str,
-                _: &ControlEnvelope,
-            ) -> Result<serde_json::Value, String> {
-                Err("gpio down".into())
-            }
+#[tokio::test]
+async fn handle_command_reports_actuator_error() {
+    struct Failing;
+    impl Actuator for Failing {
+        fn on_command(&self, _: &str, _: &ControlEnvelope) -> Result<serde_json::Value, String> {
+            Err("gpio down".into())
         }
-        let sink = CollectAckSink::default();
-        let bytes = br#"{"seq":9,"cmd":"on","payload":{}}"#;
-        handle_command("light", bytes, &Failing, None, &sink, &mediaservo_host::controller::CommandPolicy::default()).await;
-        let items = sink.items.lock().unwrap();
-        let ack: ControlAck = serde_json::from_str(&items[0]).unwrap();
-        assert_eq!(ack.ack, 9);
-        assert_eq!(ack.result["error"], "gpio down", "失败回执携带原因（非静默）");
     }
+    let sink = CollectAckSink::default();
+    let bytes = br#"{"seq":9,"cmd":"on","payload":{}}"#;
+    handle_command(
+        "light",
+        bytes,
+        &Failing,
+        None,
+        &sink,
+        &mediaservo_host::controller::CommandPolicy::default(),
+    )
+    .await;
+    let items = sink.items.lock().unwrap();
+    let ack: ControlAck = serde_json::from_str(&items[0]).unwrap();
+    assert_eq!(ack.ack, 9);
+    assert_eq!(ack.result["error"], "gpio down", "failure ack carries the reason (not silent)");
+}
 
-    #[tokio::test]
-    async fn handle_command_ignores_garbage() {
-        let sink = CollectAckSink::default();
-        handle_command("chassis", b"not-json", &StubActuator, None, &sink, &mediaservo_host::controller::CommandPolicy::default()).await;
-        assert!(sink.items.lock().unwrap().is_empty(), "坏信封不得产生回执");
-    }
+#[tokio::test]
+async fn handle_command_ignores_garbage() {
+    let sink = CollectAckSink::default();
+    handle_command(
+        "chassis",
+        b"not-json",
+        &StubActuator,
+        None,
+        &sink,
+        &mediaservo_host::controller::CommandPolicy::default(),
+    )
+    .await;
+    assert!(sink.items.lock().unwrap().is_empty(), "a malformed envelope must not produce an ack");
+}
 
-// ── S4/a4·T3.5 estop 门 ──────────────────────────────────────
+// -- S4/a4 T3.5 estop gate -─────────────────────────────────────
 
 #[test]
 fn estop_verdict_matrix() {
@@ -163,14 +169,32 @@ fn estop_verdict_matrix() {
         allow_unsigned_estop: allow,
         actuation_log: None,
     };
-    assert!(estop_verdict(&pol(None, false), &env_with(None)).1, "未配 key 迁移放行");
+    assert!(
+        estop_verdict(&pol(None, false), &env_with(None)).1,
+        "no key configured: migration passthrough"
+    );
     let signed = mediaservo_common::protocol::control_hmac_sign("k", &env_with(None));
-    assert!(estop_verdict(&pol(Some("k"), false), &env_with(Some(&signed))).1, "正确签名放行");
-    assert!(!estop_verdict(&pol(Some("k"), false), &env_with(Some("bad"))).1, "错签必拒");
-    assert!(!estop_verdict(&pol(Some("k"), false), &env_with(None)).1, "有 key 无 sig 必拒");
-    assert!(estop_verdict(&pol(Some("k"), true), &env_with(None)).1, "逃生位显式开放行");
+    assert!(
+        estop_verdict(&pol(Some("k"), false), &env_with(Some(&signed))).1,
+        "valid signature passes"
+    );
+    assert!(
+        !estop_verdict(&pol(Some("k"), false), &env_with(Some("bad"))).1,
+        "bad signature must be rejected"
+    );
+    assert!(
+        !estop_verdict(&pol(Some("k"), false), &env_with(None)).1,
+        "key present but no sig must be rejected"
+    );
+    assert!(
+        estop_verdict(&pol(Some("k"), true), &env_with(None)).1,
+        "escape hatch explicitly open passes"
+    );
     let steer = ControlEnvelope { cmd: "steer".into(), ..env_with(None) };
-    assert!(estop_verdict(&pol(Some("k"), false), &steer).1, "非 estop 族不涉签名");
+    assert!(
+        estop_verdict(&pol(Some("k"), false), &steer).1,
+        "non-estop family is not signature-gated"
+    );
 }
 
 #[tokio::test]
@@ -179,11 +203,7 @@ async fn estop_rejected_does_not_reach_actuator() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct Counting(Arc<AtomicUsize>);
     impl Actuator for Counting {
-        fn on_command(
-            &self,
-            _l: &str,
-            _e: &ControlEnvelope,
-        ) -> Result<serde_json::Value, String> {
+        fn on_command(&self, _l: &str, _e: &ControlEnvelope) -> Result<serde_json::Value, String> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Ok(serde_json::json!({ "ok": true }))
         }
@@ -210,10 +230,14 @@ async fn estop_rejected_does_not_reach_actuator() {
         &pol,
     )
     .await;
-    assert_eq!(n.load(Ordering::SeqCst), 0, "验签失败 estop 不得触达执行器");
+    assert_eq!(
+        n.load(Ordering::SeqCst),
+        0,
+        "an estop failing verification must not reach the actuator"
+    );
     let acks = sink.items.lock().unwrap_or_else(|e| e.into_inner());
     assert!(
         acks[0].contains("estop_signature_rejected"),
-        "拒执必须错误回执: {acks:?}"
+        "refusal must produce an error ack: {acks:?}"
     );
 }

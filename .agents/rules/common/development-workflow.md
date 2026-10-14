@@ -21,8 +21,8 @@ The Feature Implementation Workflow describes the development pipeline: research
 
 1.5 **Execution Confirmation Gate** _(mandatory — NEVER skip)_
    - **MUST get explicit user confirmation** before executing ANY plan or todo list:
-     - Use the `question` tool with a "Proceed with execution?" prompt (交互式 confirm)
-     - Wait for user's affirmative response ("确认", "执行", "yes", "proceed")
+     - Use the `question` tool with a "Proceed with execution?" prompt (interactive confirm)
+     - Wait for user's affirmative response ("\u786e\u8ba4", "\u6267\u884c", "yes", "proceed")
    - **What requires confirmation**:
      - Creating or deleting crates/workspace members
      - Moving modules between crates
@@ -32,7 +32,7 @@ The Feature Implementation Workflow describes the development pipeline: research
      - Any multi-step todo list execution
    - **What does NOT count as confirmation**:
      - System directives (TODO CONTINUATION, SYSTEM REMINDER)
-     - The word "继续" (continue) — means "continue discussing" or "continue with trivial/safe work"
+     - The word "\u7ee7\u7eed" (continue) \u2014 means "continue discussing" or "continue with trivial/safe work"
      - Silence or timeout
    - **Process**: Present plan → display confirmation prompt → wait for user → execute only after explicit affirmative
 

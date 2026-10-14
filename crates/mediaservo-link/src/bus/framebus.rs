@@ -1,4 +1,4 @@
-//! FrameBus（iceoryx2 SHM 零拷贝帧总线，latest-frame 覆盖语义）。
+//! FrameBus (iceoryx2 SHM zero-copy frame bus, latest-frame overwrite semantics).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -6,11 +6,11 @@ use std::sync::{Arc, Mutex};
 use iceoryx2::port::publisher::Publisher;
 use iceoryx2::prelude::*;
 
-/// 单 topic 订阅者上限（服务创建时定死的静态配置，iceoryx2 0.9.3 默认仅 8）：
-/// D282 defaults 形态后「N 路流共用同一 source」= 合法常态（09-21 实录：8 路 streamer
-/// 共享 camera/generator → 8 槽顶格 + 僵尸节点占位 → 确定性 ExceedsMaxSupportedSubscribers，
-/// 且旧服务的静态配置跨 restart 存活 = 重启无效）。
-/// ponytail: 常量固定；上限 = 边缘盒无 >32 路共享单源的已知场景，升级路径 = host.yaml 配置键。
+/// Per-topic subscriber cap (static config frozen at service creation; iceoryx2 0.9.3 defaults to only 8):
+/// after D282 defaults, "N streams sharing one source" is a legal steady state (09-21 incident: 8 streamers
+/// sharing camera/generator hit the 8-slot cap + zombie nodes occupied slots -> deterministic ExceedsMaxSupportedSubscribers,
+/// and old services' static config survives restarts = restarting does not help).
+/// ponytail: fixed constant; 32 suffices - no known edge-box scenario shares one source across >32 streams. Upgrade path: host.yaml config key.
 const MAX_SUBSCRIBERS_PER_TOPIC: usize = 32;
 
 use crate::acl::NodeAcl;
@@ -20,40 +20,40 @@ use crate::id::{FrameTopic, NodeId};
 use crate::registry::{NodeInfo, Registry};
 use crate::token::{CapabilityToken, Ed25519VerifyingKey};
 
-/// 单帧字节上限（1080p I420 ≈ 3.1MB，留余量）。
+/// Per-frame byte cap (1080p I420 ~ 3.1MB, with headroom).
 const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
 
 type TopicPublisher = Publisher<ipc_threadsafe::Service, [u8], ()>;
 
-/// 跨进程 topic 发现结果（E1 拓扑监控数据源，Momus MEDIUM-2 选项 ①）。
+/// Cross-process topic discovery result (E1 topology-monitoring data source, Momus MEDIUM-2 option 1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredTopic {
     pub topic: FrameTopic,
-    /// 服务上活跃节点数（0 = 无活进程连接该 topic）。
+    /// Active node instances on the service (0 = no live process connected to this topic).
     pub alive_nodes: usize,
 }
 
-/// 帧总线（每节点一个实例；attach 即注册，D235）。
+/// Frame bus (one instance per node; register-on-attach, D235).
 pub struct FrameBus {
     node: Node<ipc_threadsafe::Service>,
     acl: NodeAcl,
     node_id: NodeId,
-    /// 已创建流的内部状态（close 时 shutdown）。
+    /// Inner state of created streams (shutdown on close).
     streams: Mutex<Vec<Arc<StreamInner>>>,
-    /// 缓存 publisher（持有以维持 max_publishers(1) 单发布者锁 + 交付可靠）。
+    /// Cached publishers (held to keep the max_publishers(1) single-publisher lock + delivery reliability).
     publishers: Mutex<HashMap<String, TopicPublisher>>,
 }
 
 impl FrameBus {
-    /// 跨进程发布者枚举（静态，无需 attach — host-agent 拓扑监控用）。
+    /// Cross-process publisher enumeration (static, no attach needed - for host-agent topology monitoring).
     ///
-    /// 数据源: iceoryx2 0.9.3 服务注册表枚举 `Service::list(Config::global_config(), ...)`
-    /// （官方示例见 iceoryx2 源码 `src/service/mod.rs` `Service::list` doc example），
-    /// 过滤 PublishSubscribe 模式（FrameBus topic 语义）。
+    /// Data source: iceoryx2 0.9.3 service-registry enumeration `Service::list(Config::global_config(), ...)`
+    /// (official example: iceoryx2 source `src/service/mod.rs` `Service::list` doc example),
+    /// filtered to PublishSubscribe mode (FrameBus topic semantics).
     ///
-    /// 限制: 0.9.3 公共 API 不区分发布者/订阅者节点（`ServiceDynamicDetails::nodes`
-    /// 是服务上全部连接节点）→ `alive_nodes > 0` = 有活跃进程连接该 topic；
-    /// 发布端进程级 liveness 由调用方（host monitor）结合 oxmgr 判定。
+    /// Limit: the 0.9.3 public API does not distinguish publisher/subscriber nodes (`ServiceDynamicDetails::nodes`
+    /// lists all connected nodes on the service) -> `alive_nodes > 0` = some live process is connected;
+    /// publisher-process liveness is decided by the caller (host monitor) combined with oxmgr.
     pub fn list_topics() -> Result<Vec<DiscoveredTopic>, LinkError> {
         let mut out = Vec::new();
         ipc_threadsafe::Service::list(Config::global_config(), |service| {
@@ -83,13 +83,13 @@ impl FrameBus {
         Ok(out)
     }
 
-    /// attach 即注册（D235）：验签（fail-closed）→ 载 ACL → iceoryx2 节点 → `Registry::register`。
+    /// Register-on-attach (D235): verify token (fail-closed) -> load ACL -> iceoryx2 node -> `Registry::register`.
     pub fn attach(
         endpoint: &str,
         token: &CapabilityToken,
         verifying_key: &Ed25519VerifyingKey,
     ) -> Result<Self, LinkError> {
-        let _ = endpoint; // Phase 1 预留（iceoryx2 用全局 config，无显式 endpoint）
+        let _ = endpoint; // Phase 1 reservation (iceoryx2 uses the global config, no explicit endpoint)
         let claims = token.verify(verifying_key).map_err(|e| LinkError::Attach(e.to_string()))?;
         let acl = claims.acl.clone();
         let node_id = NodeId::new(claims.node_id.clone());
@@ -107,10 +107,10 @@ impl FrameBus {
         })
     }
 
-    /// 统一 topic service 构造（pub/sub 必须同配置，审核 C1）：
-    /// buffer_size=1 + enable_safe_overflow(true) → latest-frame 覆盖；
-    /// max_publishers(1) → 单发布者兜底（D239，跨进程由 iceoryx2 强制）；
-    /// max_subscribers → 见 [`MAX_SUBSCRIBERS_PER_TOPIC`]（09-21 顶格事故根治）。
+    /// Unified topic-service builder (pub/sub must share config, review C1):
+    /// buffer_size=1 + enable_safe_overflow(true) -> latest-frame overwrite;
+    /// max_publishers(1) -> single-publisher backstop (D239, enforced cross-process by iceoryx2);
+    /// max_subscribers -> see [`MAX_SUBSCRIBERS_PER_TOPIC`] (root fix for the 09-21 cap incident).
     fn topic_service(
         &self,
         topic: &FrameTopic,
@@ -126,7 +126,7 @@ impl FrameBus {
             .as_str()
             .try_into()
             .map_err(|_| LinkError::Bus(format!("invalid topic name: {}", topic.as_str())))?;
-        // open_or_create 可能遇 SystemInFlux 瞬态（服务正被并发创建/销毁），重试
+        // open_or_create may hit transient SystemInFlux (service being created/destroyed concurrently); retry
         let mut last_err = None;
         for _ in 0..5 {
             match self
@@ -153,7 +153,7 @@ impl FrameBus {
         Err(LinkError::Bus(format!("open topic service failed after retries: {:?}", last_err)))
     }
 
-    /// 发布一帧：ACL 检查 → 单发布者检查 → 缓存 publisher → loan 写入 SHM → send → 记录活跃发布者。
+    /// Publish one frame: ACL check -> single-publisher check -> cached publisher -> loan into SHM -> send -> record active publisher.
     pub fn publish(
         &self,
         topic: &FrameTopic,
@@ -163,7 +163,7 @@ impl FrameBus {
         if !self.acl.can_publish(topic) {
             return Err(LinkError::AclDenied { topic: topic.as_str().into() });
         }
-        // D239 单发布者：该 topic 已有其他节点的活跃发布者 → 冲突（进程本地快速检查）
+        // D239 single publisher: another node already publishes this topic -> conflict (process-local fast check)
         if let Some(existing) =
             Registry::topic_publisher(topic).map_err(|e| LinkError::Bus(e.to_string()))?
             && existing != self.node_id
@@ -174,7 +174,7 @@ impl FrameBus {
         if buf_len > MAX_FRAME_BYTES {
             return Err(LinkError::Bus(format!("frame too large: {buf_len} > {MAX_FRAME_BYTES}")));
         }
-        // 取或建缓存 publisher（持有它维持 max_publishers(1) 锁；跨进程冲突在此失败）
+        // Get or create the cached publisher (holding it keeps the max_publishers(1) lock; cross-process conflicts fail here)
         let mut publishers = self
             .publishers
             .lock()
@@ -188,7 +188,7 @@ impl FrameBus {
                 .create()
                 .map_err(|e| {
                     tracing::warn!(topic = %topic.as_str(), "publisher create failed: {e:?}");
-                    // iceoryx2 max_publishers(1) 兜底：已有发布者（跨进程）
+                    // iceoryx2 max_publishers(1) backstop: a publisher already exists (cross-process)
                     LinkError::TopicConflict { topic: topic.as_str().into() }
                 })?;
             publishers.insert(topic.as_str().to_string(), publisher);
@@ -207,7 +207,7 @@ impl FrameBus {
         Ok(())
     }
 
-    /// 订阅一个 topic：ACL 检查 → subscriber（buffer_size=1）→ 后台线程投递 latest-slot。
+    /// Subscribe a topic: ACL check -> subscriber (buffer_size=1) -> background thread delivers into the latest-slot.
     pub fn subscribe(&self, topic: &FrameTopic) -> Result<FrameStream, LinkError> {
         if !self.acl.can_subscribe(topic) {
             return Err(LinkError::AclDenied { topic: topic.as_str().into() });
@@ -221,20 +221,20 @@ impl FrameBus {
         let stream = FrameStream::new();
         let weak = stream.weak_inner();
         let topic_for_thread = topic.clone();
-        // 后台线程：receive() → 解析 meta+payload → deliver latest-slot（流丢弃即退出）
-        // PortFactory(service) 移入线程，使 subscriber 的借用在线程内有效
+        // Background thread: receive() -> parse meta+payload -> deliver into latest-slot (exits when the stream is dropped)
+        // PortFactory(service) moves into the thread so the subscriber borrow stays valid there
         std::thread::spawn(move || {
-            // C5 崩溃恢复: iceoryx2 0.9.3 在发布端重启时能自动重建连接（实证：重启点
-            // seq 归零且后续帧连续）；但发布端列表只变一次/重启，若那次连接创建被
-            // degradation handler 吞掉（瞬态失败）则永不重试 → 订阅端永久 stale。
-            // 此处兜底：长于 REBUILD_IDLE 无帧 → 重建 subscriber（FrameStream 句柄不变，
-            // D241）；重建失败保留旧句柄，冷却后重试。
+            // C5 crash recovery: iceoryx2 0.9.3 auto-reconnects when the publisher restarts (proven: at restart
+            // seq resets to zero and later frames run on); but the publisher list changes once per restart, and if
+            // that connection setup is swallowed by the degradation handler (transient failure) it never retries -> subscriber goes permanently stale.
+            // Backstop here: silence longer than REBUILD_IDLE -> rebuild the subscriber (FrameStream handle unchanged,
+            // D241); on rebuild failure keep the old handle and retry after cooldown.
             const REBUILD_IDLE: std::time::Duration = std::time::Duration::from_secs(5);
             const REBUILD_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
             let mut subscriber = subscriber;
             let mut last_frame = std::time::Instant::now();
             let mut last_rebuild = std::time::Instant::now() - REBUILD_COOLDOWN;
-            // 重建成功返回 true。失败保留旧 subscriber（可能只是瞬态），冷却后重试。
+            // Rebuild returns true on success. On failure keep the old subscriber (may be transient) and retry after cooldown.
             let try_rebuild = |sub: &mut iceoryx2::port::subscriber::Subscriber<
                 ipc_threadsafe::Service,
                 [u8],
@@ -248,11 +248,11 @@ impl FrameBus {
                         *sub = new_sub;
                         *last_rebuild = std::time::Instant::now();
                         *last_frame = std::time::Instant::now();
-                        tracing::warn!(topic = %topic_for_thread.as_str(), "subscriber 重建完成（发布端重启/瞬态连接失败自愈）");
+                        tracing::warn!(topic = %topic_for_thread.as_str(), "subscriber rebuilt (publisher restart / transient connect failure self-healed)");
                         true
                     }
                     Err(e) => {
-                        tracing::warn!(topic = %topic_for_thread.as_str(), "subscriber 重建失败，保留旧句柄冷却后重试: {e:?}");
+                        tracing::warn!(topic = %topic_for_thread.as_str(), "subscriber rebuild failed, keeping old handle, retry after cooldown: {e:?}");
                         false
                     }
                 }
@@ -265,25 +265,25 @@ impl FrameBus {
                         if data.len() >= FrameMeta::WIRE_LEN {
                             match FrameMeta::decode(&data[..FrameMeta::WIRE_LEN]) {
                                 Ok(meta) => {
-                                    // Phase 1：一拷贝进 owned Vec（Phase 2 可持 Sample 实现真零拷贝）
+                                    // Phase 1: one copy into an owned Vec (Phase 2 can hold the Sample for true zero-copy)
                                     let payload = data[FrameMeta::WIRE_LEN..].to_vec();
                                     inner.deliver(FrameRef::new(meta, payload));
                                 }
-                                // N4：拒帧必出声（C15）；每订阅线程一次防热路径洪泛
+                                // N4: rejected frames must speak up (C15); once per subscriber thread to avoid hot-path flooding
                                 Err(e) => {
                                     static VERSION_WARNED: std::sync::atomic::AtomicBool =
                                         std::sync::atomic::AtomicBool::new(false);
                                     if !VERSION_WARNED
                                         .swap(true, std::sync::atomic::Ordering::Relaxed)
                                     {
-                                        tracing::warn!("FrameBus meta 拒帧: {e}");
+                                        tracing::warn!("FrameBus meta rejected frame: {e}");
                                     }
                                 }
                             }
                         }
                     }
                     Ok(None) => {
-                        // 发布端长时间无帧：连接可能已死但重建未触发（见上）→ 重建
+                        // Publisher silent for a long time: the connection may be dead without a rebuild trigger (see above) -> rebuild
                         if last_frame.elapsed() > REBUILD_IDLE
                             && last_rebuild.elapsed() > REBUILD_COOLDOWN
                         {
@@ -292,9 +292,9 @@ impl FrameBus {
                         std::thread::sleep(std::time::Duration::from_millis(1));
                     }
                     Err(e) => {
-                        // 连接层错误：冷却期内不重建（避免热循环）且不刷日志；重建失败则
-                        // 终止（旧行为，流停投递）。重建成功后 receive 可能继续 Err（瞬态/
-                        // 持续）→ 每次错误至少 1ms 让步，防止 100% CPU 自旋。
+                        // Connection-layer errors: no rebuild during cooldown (avoids a hot loop) and no log spam; a failed rebuild
+                        // terminates (old behavior, stream stops delivering). After a successful rebuild receive may keep returning Err (transient/
+                        // persistent) -> yield at least 1ms per error to prevent a 100% CPU spin.
                         if last_rebuild.elapsed() > REBUILD_COOLDOWN {
                             tracing::warn!(topic = %topic_for_thread.as_str(), "subscribe receive error: {e:?}");
                             if !try_rebuild(&mut subscriber, &mut last_frame, &mut last_rebuild) {
@@ -313,12 +313,12 @@ impl FrameBus {
         Ok(stream)
     }
 
-    /// 本节点 ID。
+    /// This node's ID.
     pub fn node_id(&self) -> &NodeId {
         &self.node_id
     }
 
-    /// 关闭：shutdown 全部流（recv 返回 None）+ 注销节点（释放 publishers 与单发布者锁）。
+    /// Close: shutdown all streams (recv returns None) + unregister the node (releases publishers and the single-publisher lock).
     pub fn close(self) -> Result<(), LinkError> {
         let streams =
             self.streams.lock().map_err(|_| LinkError::Bus("streams lock poisoned".into()))?;

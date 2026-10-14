@@ -1,6 +1,6 @@
-//! T2: golden fixture 渲染门——12 案全消费（9 netem_spec/rate_arg bash 继承 + 3 legs dir 新契约）。
-//! expect 字符串/结构为法（fixtures/golden.json 头注）；计数从 fixture 派生，禁硬写。
-//! 分类完整性：每案必落三 kind 之一且被断言，孤儿案 = 测试失败。
+//! T2: golden fixture rendering gate -- all 12 cases consumed (9 netem_spec/rate_arg bash-inherited + 3 legs dir new-contract).
+//! The expect string/structure is law (fixtures/golden.json header note); counts derived from the fixture, never hardcoded.
+//! Classification completeness: every case lands in exactly one of the three kinds and is asserted; an orphan case = test failure.
 
 use mediaservo_weaknet::spec::{
     Dir, IfaceKind, ImpairSpec, ScopeSel, build_filter_legs, render_netem_spec, render_rate_arg,
@@ -9,20 +9,16 @@ use serde_json::Value;
 
 fn load_cases() -> Vec<Case> {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/golden.json");
-    let raw = std::fs::read_to_string(path).expect("golden.json 必须随 crate 存在");
-    let doc: Value = serde_json::from_str(&raw).expect("golden.json 必须是合法 JSON");
-    assert_eq!(
-        doc["schema"].as_str(),
-        Some("weaknet-golden/1"),
-        "fixture schema 门"
-    );
+    let raw = std::fs::read_to_string(path).expect("golden.json must exist alongside the crate");
+    let doc: Value = serde_json::from_str(&raw).expect("golden.json must be valid JSON");
+    assert_eq!(doc["schema"].as_str(), Some("weaknet-golden/1"), "fixture schema gate");
     doc["cases"]
         .as_array()
-        .expect("cases 为数组")
+        .expect("cases must be an array")
         .iter()
         .map(|c| Case {
-            id: c["id"].as_str().expect("id 字符串").to_string(),
-            kind: c["kind"].as_str().expect("kind 字符串").to_string(),
+            id: c["id"].as_str().expect("id string").to_string(),
+            kind: c["kind"].as_str().expect("kind string").to_string(),
             input: c["input"].clone(),
             expect: c["expect"].clone(),
         })
@@ -44,37 +40,29 @@ fn golden_all_cases_render() {
         let got: Value = match case.kind.as_str() {
             "netem_spec" => {
                 let spec = ImpairSpec::from_flat_json(&case.input)
-                    .unwrap_or_else(|e| panic!("{}: input 解析失败: {e}", case.id));
+                    .unwrap_or_else(|e| panic!("{}: input parse failed: {e}", case.id));
                 Value::String(render_netem_spec(&spec))
             }
-            "rate_arg" => Value::String(render_rate_arg(
-                case.input["rate_mbps"].as_f64(),
-            )),
+            "rate_arg" => Value::String(render_rate_arg(case.input["rate_mbps"].as_f64())),
             "legs" => {
                 let legs = legs_from_input(&case.input)
-                    .unwrap_or_else(|e| panic!("{}: 腿装配失败: {e}", case.id));
-                serde_json::to_value(&legs).expect("LegFilter 必可序列化")
+                    .unwrap_or_else(|e| panic!("{}: leg assembly failed: {e}", case.id));
+                serde_json::to_value(&legs).expect("LegFilter must be serializable")
             }
-            other => panic!("{}: 未知 kind {other}（fixture 与测试脱节）", case.id),
+            other => panic!("{}: unknown kind {other} (fixture and tests out of sync)", case.id),
         };
-        assert_eq!(got, case.expect, "案 {} 渲染不符 expect", case.id);
+        assert_eq!(got, case.expect, "case {} render does not match expect", case.id);
         *seen.entry(case.kind.as_str()).or_insert(0usize) += 1;
     }
-    // 派生计数 + 分类全覆盖（每 kind 至少一案在场，防 fixture 静默改形）
-    assert_eq!(seen.len(), 3, "三 kind 必须全覆盖，实得 {seen:?}");
-    assert!(
-        seen["netem_spec"] >= 1 && seen["rate_arg"] >= 1 && seen["legs"] >= 1,
-        "{seen:?}"
-    );
+    // derived counts + full classification coverage (at least one case per kind present, guarding the fixture against silent reshaping)
+    assert_eq!(seen.len(), 3, "all three kinds must be covered, got {seen:?}");
+    assert!(seen["netem_spec"] >= 1 && seen["rate_arg"] >= 1 && seen["legs"] >= 1, "{seen:?}");
     assert_eq!(
         seen.values().sum::<usize>(),
         cases.len(),
-        "每案必被消费（无孤儿 kind 泄漏）"
+        "every case must be consumed (no orphan kind leaks)"
     );
-    println!(
-        "golden_render: {} 案全断言 {seen:?}",
-        cases.len()
-    );
+    println!("golden_render: {} cases all asserted {seen:?}", cases.len());
 }
 
 fn legs_from_input(input: &Value) -> Result<Value, String> {
@@ -82,13 +70,13 @@ fn legs_from_input(input: &Value) -> Result<Value, String> {
         "media" => ScopeSel::Media,
         "stream" => ScopeSel::Stream,
         "device" => ScopeSel::Device,
-        other => return Err(format!("scope 非法: {other}")),
+        other => return Err(format!("scope invalid: {other}")),
     };
     let dir = match req_str(input, "dir")? {
         "out" => Dir::Out,
         "in" => Dir::In,
         "both" => Dir::Both,
-        other => return Err(format!("dir 非法: {other}")),
+        other => return Err(format!("dir invalid: {other}")),
     };
     let iface = match req_str(input, "iface")? {
         "lo" => IfaceKind::Loopback,
@@ -116,16 +104,12 @@ fn legs_from_input(input: &Value) -> Result<Value, String> {
 fn req_str<'a>(v: &'a Value, key: &str) -> Result<&'a str, String> {
     v.get(key)
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("缺字段或非字符串: {key}"))
+        .ok_or_else(|| format!("missing field or not a string: {key}"))
 }
 
 fn opt_u16_array(v: &Value, key: &str) -> Vec<u16> {
     v.get(key)
         .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .map(|n| n.as_u64().expect("端口为数字") as u16)
-                .collect()
-        })
+        .map(|a| a.iter().map(|n| n.as_u64().expect("port is a number") as u16).collect())
         .unwrap_or_default()
 }

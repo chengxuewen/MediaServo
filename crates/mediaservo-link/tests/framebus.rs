@@ -1,4 +1,4 @@
-//! Task 5: FrameBus 单进程测试（roundtrip / ACL 负例 / 单发布者）。
+//! Task 5: FrameBus single-process tests (roundtrip / ACL negatives / single publisher).
 
 use mediaservo_link::{
     CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, FrameBus, FrameMeta, FrameTopic,
@@ -17,12 +17,12 @@ fn token(role: Role, node_id: &str) -> (CapabilityToken, Ed25519VerifyingKey) {
 
 #[tokio::test]
 async fn pubsub_roundtrip() {
-    // 发布方：Capture（pub camera/*）；订阅方：Processor（sub camera/*）——角色不对称（D237）
+    // publisher: Capture (pub camera/*); subscriber: Processor (sub camera/*) - asymmetric roles (D237)
     let (tok_pub, vk_pub) = token(Role::Capture, "capture-fb0");
     let bus_pub = FrameBus::attach("", &tok_pub, &vk_pub).unwrap();
     let (tok_sub, vk_sub) = token(Role::Processor, "proc-fb0");
     let bus_sub = FrameBus::attach("", &tok_sub, &vk_sub).unwrap();
-    let topic = FrameTopic::new(format!("camera/fb0/{}/raw", std::process::id())); // 唯一名, 避免跨 run 残留
+    let topic = FrameTopic::new(format!("camera/fb0/{}/raw", std::process::id())); // unique name, avoids cross-run residue
     let stream = bus_sub.subscribe(&topic).unwrap();
     let meta = FrameMeta {
         seq: 1,
@@ -35,7 +35,7 @@ async fn pubsub_roundtrip() {
         ts_epoch_ns: 200,
     };
     bus_pub.publish(&topic, &[1u8, 2, 3], &meta).unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await; // 调试: 看是否时序问题
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await; // debug: check for a timing issue
     let frame = tokio::time::timeout(std::time::Duration::from_secs(3), stream.recv())
         .await
         .expect("recv timeout")
@@ -54,7 +54,7 @@ async fn acl_deny_publish() {
     let err = bus.publish(&topic, &[1], &FrameMeta::default()).unwrap_err();
     assert!(
         matches!(err, LinkError::AclDenied { .. }),
-        "capture 不应能 publish control/cmd，got: {err:?}"
+        "capture must not publish control/cmd, got: {err:?}"
     );
 }
 
@@ -64,21 +64,24 @@ async fn acl_deny_subscribe() {
     let bus = FrameBus::attach("", &tok, &vk).unwrap();
     let topic = FrameTopic::new("camera/fb2/raw");
     let err = bus.subscribe(&topic).unwrap_err();
-    assert!(matches!(err, LinkError::AclDenied { .. }), "capture 不应能 subscribe，got: {err:?}");
+    assert!(matches!(err, LinkError::AclDenied { .. }), "capture must not subscribe, got: {err:?}");
 }
 
 #[tokio::test]
 async fn single_publisher_conflict() {
-    // 节点 A 发布 camera/fb3/raw
+    // node A publishes camera/fb3/raw
     let (tok_a, vk_a) = token(Role::Capture, "capture-a");
     let bus_a = FrameBus::attach("", &tok_a, &vk_a).unwrap();
     let topic = FrameTopic::new("camera/fb3/raw");
     bus_a.publish(&topic, &[1], &FrameMeta::default()).unwrap();
-    // 节点 B 发布同 topic → TopicConflict（D239）
+    // node B publishes the same topic -> TopicConflict (D239)
     let (tok_b, vk_b) = token(Role::Capture, "capture-b");
     let bus_b = FrameBus::attach("", &tok_b, &vk_b).unwrap();
     let err = bus_b.publish(&topic, &[2], &FrameMeta::default()).unwrap_err();
-    assert!(matches!(err, LinkError::TopicConflict { .. }), "第二发布者应冲突，got: {err:?}");
+    assert!(
+        matches!(err, LinkError::TopicConflict { .. }),
+        "the second publisher must conflict, got: {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -87,14 +90,14 @@ async fn same_node_republish_allowed() {
     let bus = FrameBus::attach("", &tok, &vk).unwrap();
     let topic = FrameTopic::new("camera/fb4/raw");
     bus.publish(&topic, &[1], &FrameMeta::default()).unwrap();
-    bus.publish(&topic, &[2], &FrameMeta::default()).unwrap(); // 同节点再次发布应允许
+    bus.publish(&topic, &[2], &FrameMeta::default()).unwrap(); // republishing from the same node must be allowed
 }
 
 #[tokio::test]
 async fn many_subscribers_share_single_source_topic() {
-    // 回归钉（09-21 顶格事故）：8+ 路流共用单 source = D282 defaults 合法形态；
-    // iceoryx2 默认 max_subscribers=8 顶格时第 9 订必炸 ExceedsMaxSupportedSubscribers。
-    // 显式扩至 32 后 10 订阅者共存 + 发布联通钉。
+    // regression pin (09-21 cap incident): 8+ streams sharing one source = legal under D282 defaults;
+    // with iceoryx2's default max_subscribers=8, the 9th subscription always explodes with ExceedsMaxSupportedSubscribers.
+    // after raising to 32: 10 subscribers coexist + publish connectivity pinned.
     let (tok_pub, vk_pub) = token(Role::Capture, "capture-fbcap");
     let bus_pub = FrameBus::attach("", &tok_pub, &vk_pub).unwrap();
     let topic = FrameTopic::new(format!("camera/fbcap/{}", std::process::id()));
@@ -116,12 +119,14 @@ async fn many_subscribers_share_single_source_topic() {
         ts_epoch_ns: 2,
     };
     bus_pub.publish(&topic, &[9u8; 4], &meta).unwrap();
-    // latest-slot 覆盖语义：全员都应拿到该帧
+    // latest-slot overwrite semantics: everyone must receive the frame
     for (i, (_, stream)) in subs.iter().enumerate() {
         let frame = tokio::time::timeout(std::time::Duration::from_secs(3), stream.recv())
             .await
-            .unwrap_or_else(|_| panic!("subscriber #{i} 未收到帧（容量/联通异常）"))
-            .unwrap_or_else(|| panic!("subscriber #{i} 流已关闭"));
+            .unwrap_or_else(|_| {
+                panic!("subscriber #{i} got no frame (capacity/connectivity anomaly)")
+            })
+            .unwrap_or_else(|| panic!("subscriber #{i} stream closed"));
         assert_eq!(frame.meta().seq, 7);
     }
 }

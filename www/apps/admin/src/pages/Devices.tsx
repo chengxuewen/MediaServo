@@ -5,12 +5,12 @@ import Modal from '../components/Modal';
 import './Devices.css';
 import { MonitorCog, AlertTriangle, Check, Inbox } from 'lucide-react';
 
-// 首见时间 → 相对时间（刻度仿 Vehicles fmtUptime）
+// first-seen time → relative time (scale mirrors Vehicles fmtUptime)
 function fmtAgo(firstSeenMs: number): string {
   const secs = Math.max(0, Math.floor((Date.now() - firstSeenMs) / 1000));
-  if (secs < 60) return `${secs}s 前`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m 前`;
-  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m 前`;
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m ago`;
 }
 
 export default function Devices() {
@@ -19,22 +19,22 @@ export default function Devices() {
   const [error, setError] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // 注册表单弹窗
+  // register-form modal
   const [registerOpen, setRegisterOpen] = useState(false);
   const [newDeviceId, setNewDeviceId] = useState('');
   const [providedSecret, setProvidedSecret] = useState('');
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [registering, setRegistering] = useState(false);
 
-  // 一次性 secret 展示（注册/重置后弹出，关闭即弃 — 不落 state 之外）
+  // one-time secret display (shown after register/reset, discarded on close — never leaves this state)
   const [secretModal, setSecretModal] = useState<{ title: string; secret: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
 
-  // 吊销/重置进行中的行（防重复点击）
+  // row currently being revoked/reset (guards double clicks)
   const [busy, setBusy] = useState<string | null>(null);
 
-  // device-enroll: 待批准队列（手动档；内存表 D-E5，重启即清）
+  // device-enroll: pending approval queue (manual mode; in-memory table D-E5, cleared on restart)
   const [pending, setPending] = useState<PendingDevice[]>([]);
   const [pendingError, setPendingError] = useState<string | null>(null);
   const [pendingNames, setPendingNames] = useState<Record<string, string>>({});
@@ -65,7 +65,7 @@ export default function Devices() {
   }, []);
 
   useEffect(() => { fetchPending(); }, [fetchPending]);
-  // ponytail: 5s 轮询（与 useDevices/Vehicles 同节奏）
+  // ponytail: 5s polling (same cadence as useDevices/Vehicles)
   useEffect(() => {
     const interval = setInterval(fetchPending, 5000);
     return () => clearInterval(interval);
@@ -133,7 +133,7 @@ export default function Devices() {
     try {
       const resp = await approvePendingDevice(deviceId, pendingNames[deviceId]);
       setPendingNames((prev) => { const next = { ...prev }; delete next[deviceId]; return next; });
-      setActionMsg({ type: 'success', text: `${resp.device_id} 已批准 — ${resp.note}` });
+      setActionMsg({ type: 'success', text: `${resp.device_id} approved — ${resp.note}` });
       fetchPending();
     } catch (e) {
       setActionMsg({ type: 'error', text: e instanceof Error ? e.message : 'Approve failed' });
@@ -148,7 +148,7 @@ export default function Devices() {
       await navigator.clipboard.writeText(secretModal.secret);
       setCopied(true);
     } catch {
-      // fallback: secret 以只读框展示可全选手动复制 — 不假设 clipboard 可用
+      // fallback: show the secret in a read-only box that can be fully selected and copied manually — do not assume clipboard is available
       setCopyError('Clipboard unavailable — select the secret manually');
     }
   };
@@ -159,19 +159,19 @@ export default function Devices() {
   return (
     <div className="devices">
       <div className="pending-card">
-        <h2 className="section-title"><Inbox size={14} /> 待批准设备</h2>
+        <h2 className="section-title"><Inbox size={14} /> Pending Devices</h2>
         {pendingError && <p className="token-status error">{pendingError}</p>}
         {pending.length === 0 ? (
-          <p className="empty">暂无待批准设备</p>
+          <p className="empty">No pending devices</p>
         ) : (
           <div className="pending-list">
             {pending.map((p) => (
               <div key={p.device_id} className="pending-row">
                 <span className="pending-id">{p.device_id}</span>
-                <span className="pending-seen">首见 {fmtAgo(p.first_seen_ms)}</span>
+                <span className="pending-seen">Seen {fmtAgo(p.first_seen_ms)}</span>
                 <input
                   className="pending-name-input"
-                  placeholder="名称（可选）"
+                  placeholder="Name (optional)"
                   value={pendingNames[p.device_id] ?? ''}
                   onChange={(e) => setPendingNames((prev) => ({ ...prev, [p.device_id]: e.target.value }))}
                 />
@@ -179,7 +179,7 @@ export default function Devices() {
                   className="btn-secret"
                   disabled={pendingBusy === p.device_id}
                   onClick={() => handleApprove(p.device_id)}
-                >批准</button>
+                >Approve</button>
               </div>
             ))}
           </div>

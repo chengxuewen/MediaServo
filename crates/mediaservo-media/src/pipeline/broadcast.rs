@@ -40,7 +40,7 @@ impl<P: Clone + Send + 'static> FragmentBroadcaster<P> {
     }
 
     /// Create a new subscriber stream.
-    #[allow(clippy::type_complexity)] // 广播回调签名（Arc<dyn Fn>）
+    #[allow(clippy::type_complexity)] // Broadcast callback signature (Arc<dyn Fn>)
     pub fn subscribe(&self) -> BroadcastStream<P> {
         BroadcastStream { rx: self.tx.subscribe(), _meta: self.meta.clone() }
     }
@@ -102,7 +102,7 @@ impl<P: Clone + Send + 'static> MediaSource for BroadcastStream<P> {
 // ── 3. PipelineRegistry ──
 
 /// Central registry for dynamic source broadcasters.
-#[allow(clippy::type_complexity)] // 广播器注册表键值形（(topic,kind)->broadcaster）
+#[allow(clippy::type_complexity)] // Broadcaster registry key/value shape ((topic,kind)->broadcaster)
 pub struct PipelineRegistry {
     broadcasters: RwLock<HashMap<(String, String), Arc<FragmentBroadcaster<Vec<u8>>>>>,
 }

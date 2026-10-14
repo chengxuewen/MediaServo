@@ -1,17 +1,17 @@
-//! API-key 注册表 — 免账号客户端凭证（accountless-client-auth T1）。
+//! API-key registry -- credential path for clients without accounts (accountless-client-auth T1).
 //!
-//! 形态 = LiveKit apikey/apiSecret 同型：`POST /api/auth/exchange {key_id, secret}`
-//! → 验 key → 以 `admin_jwt_secret` 现签短 JWT `{sub:"apikey:<id>", role, vehicles, exp}`
-//! → 走 `/ws` 既有握手门（验签/角色/矩阵零改动，见 signaling.rs）。
+//! Shape mirrors the LiveKit apikey/apiSecret model: `POST /api/auth/exchange {key_id, secret}`
+//! -> verify key -> sign a short-lived JWT `{sub:"apikey:<id>", role, vehicles, exp}` with `admin_jwt_secret`
+//! -> go through the existing `/ws` handshake gate (verification/roles/matrix unchanged, see signaling.rs).
 //!
-//! 与 [devices] 的纪律同构（有意复用其模式而非新发明）：
-//! - YAML 单一事实源 + `RwLock` 热生效 + atomic save（temp+fsync+rename，失败内存不变）；
-//! - 仅存 `sha256(key_id + ":" + secret)`（复用 [`crate::devices::hash_secret`]，key_id 为盐）；
-//! - Unknown 与 BadSecret **逐字同消息**（防枚举，review #1 同族）；dummy 哈希垫时间等长；
-//! - secret 明文仅 register 响应一次（C33 语义），丢失=吊销重发，无找回路径。
+//! Discipline mirrors [devices] (deliberately reusing its pattern rather than inventing a new one):
+//! - YAML single source of truth + `RwLock` hot effect + atomic save (temp+fsync+rename; memory unchanged on failure);
+//! - stores only `sha256(key_id + ":" + secret)` (reuses [`crate::devices::hash_secret`], key_id as salt);
+//! - Unknown and BadSecret use **byte-identical messages** (anti-enumeration, same family as review #1); dummy hash pads to equal time;
+//! - secret plaintext is returned only once in the register response (C33 semantics); lost = revoke and re-register, no recovery path.
 //!
-//! 吊销粒度（F10）：删 key 只挡后续 exchange；已发 JWT 至 exp 自然死（窗口=TTL）。
-//! `sub` 命名空间前缀 `apikey:` 与账号用户名隔离（F5，审计可归因）。
+//! Revocation granularity (F10): deleting a key only blocks future exchanges; issued JWTs die naturally at exp (window = TTL).
+//! The `sub` namespace prefix `apikey:` keeps API keys isolated from account usernames (F5, auditable attribution).
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
@@ -26,15 +26,15 @@ use crate::roles::CockpitRole;
 use mediaservo_common::auth::JwtClaims;
 use mediaservo_common::error::CoreError;
 
-/// key_id 词法（防 YAML 注入/路径歧义，同 validate_device_id 纪律）。
+/// key_id lexing (anti YAML-injection / path ambiguity, same discipline as validate_device_id).
 fn valid_key_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
         && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// key_id 为**键**（非用户名语义），secret 仅哈希落盘。vehicles 缺省空
-/// （viewer/operator 生效；admin/dispatcher 忽略=任意车 — 同 G3 矩阵）。
+/// key_id is the **key** (not a username); only the secret hash is persisted. vehicles defaults to empty
+/// (effective for viewer/operator; ignored for admin/dispatcher = any vehicle -- same as the G3 matrix).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FileEntry {
     secret_hash: String,
@@ -62,7 +62,7 @@ struct RegistryFile {
 #[derive(Debug)]
 struct Inner {
     keys: HashMap<String, ApiKeyEntry>,
-    /// 未知 key 时间补偿目标（随机 id 盐，长度与真实哈希恒等 — devices.rs review #1 同形）。
+    /// Timing-compensation target for unknown keys (random id salt, length always equals a real hash -- same shape as devices.rs review #1).
     dummy_hash: [u8; 32],
 }
 
@@ -70,7 +70,7 @@ pub struct ApiKeyRegistry {
     inner: RwLock<Inner>,
 }
 
-/// register/revoke 错误（管理面 400/409/404 映射）。
+/// register/revoke errors (admin-plane 400/409/404 mapping).
 #[derive(Debug, PartialEq, Eq)]
 pub enum ApiKeyRegError {
     Duplicate,
@@ -78,7 +78,7 @@ pub enum ApiKeyRegError {
     Invalid(String),
 }
 
-/// exchange 认证失败（对外逐字同消息，防枚举）。
+/// exchange authentication failure (externally byte-identical message, anti-enumeration).
 #[derive(Debug, PartialEq, Eq)]
 pub enum ApiKeyAuthError {
     Unknown,
@@ -88,16 +88,14 @@ pub enum ApiKeyAuthError {
 impl ApiKeyAuthError {
     #[must_use]
     pub fn message(&self) -> &'static str {
-        // Unknown 与 BadSecret 必须逐字一致（集成测试钉）——exchange 响应不含区分信息。
+        // Unknown and BadSecret must be byte-identical (integration test pins this) -- the exchange response carries no distinguishing info.
         "api key authentication failed: invalid credentials"
     }
 }
 
 impl ApiKeyRegistry {
     pub fn empty() -> Self {
-        Self {
-            inner: RwLock::new(Inner { keys: HashMap::new(), dummy_hash: new_dummy_hash() }),
-        }
+        Self { inner: RwLock::new(Inner { keys: HashMap::new(), dummy_hash: new_dummy_hash() }) }
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, CoreError> {
@@ -114,19 +112,24 @@ impl ApiKeyRegistry {
             if !valid_key_id(&id) {
                 return Err(CoreError::ConfigParse(format!("api_keys: invalid key_id {id:?}")));
             }
-            let role = CockpitRole::parse(&fe.role)
-                .ok_or_else(|| CoreError::ConfigParse(format!(
-                    "api_keys[{id}]: role {:?} not in viewer|operator|admin|dispatcher", fe.role
-                )))?;
+            let role = CockpitRole::parse(&fe.role).ok_or_else(|| {
+                CoreError::ConfigParse(format!(
+                    "api_keys[{id}]: role {:?} not in viewer|operator|admin|dispatcher",
+                    fe.role
+                ))
+            })?;
             let hash = decode_hash(&fe.secret_hash).ok_or_else(|| {
                 CoreError::ConfigParse(format!("api_keys[{id}]: bad secret_hash"))
             })?;
-            keys.insert(id, ApiKeyEntry {
-                secret_hash: hash,
-                role,
-                vehicles: fe.vehicles.unwrap_or_default(),
-                label: fe.label,
-            });
+            keys.insert(
+                id,
+                ApiKeyEntry {
+                    secret_hash: hash,
+                    role,
+                    vehicles: fe.vehicles.unwrap_or_default(),
+                    label: fe.label,
+                },
+            );
         }
         Ok(Self { inner: RwLock::new(Inner { keys, dummy_hash: new_dummy_hash() }) })
     }
@@ -143,10 +146,17 @@ impl ApiKeyRegistry {
                         FileEntry {
                             secret_hash: format!(
                                 "sha256:{}",
-                                e.secret_hash.iter().map(|b| format!("{b:02x}")).collect::<String>()
+                                e.secret_hash
+                                    .iter()
+                                    .map(|b| format!("{b:02x}"))
+                                    .collect::<String>()
                             ),
                             role: e.role.as_str().to_string(),
-                            vehicles: if e.vehicles.is_empty() { None } else { Some(e.vehicles.clone()) },
+                            vehicles: if e.vehicles.is_empty() {
+                                None
+                            } else {
+                                Some(e.vehicles.clone())
+                            },
                             label: e.label.clone(),
                         },
                     )
@@ -157,7 +167,7 @@ impl ApiKeyRegistry {
             .map_err(|e| CoreError::ConfigParse(format!("api_keys serialize: {e}")))
     }
 
-    /// Atomic 写回 api_keys.yaml（temp + fsync + rename；失败内存不变 — devices.rs 同纪律）。
+    /// Atomic write-back of api_keys.yaml (temp + fsync + rename; memory unchanged on failure -- same discipline as devices.rs).
     pub fn save(&self, path: impl AsRef<Path>) -> Result<(), CoreError> {
         let path = path.as_ref();
         let yaml = self.to_yaml()?;
@@ -182,8 +192,8 @@ impl ApiKeyRegistry {
         }
     }
 
-    /// 注册：服务器生成 secret（uuid v4 36 字符，同 devices 熵源），明文**仅此一次**返回。
-    /// role 闭集校验（非法 → Invalid，deploy 期拦，不静默存矩阵外角色）。
+    /// Register: server generates the secret (uuid v4, 36 chars, same entropy source as devices); plaintext returned **only this once**.
+    /// Role closed-set validation (invalid -> Invalid, caught at deploy time; never silently store an out-of-matrix role).
     pub fn register(
         &self,
         key_id: &str,
@@ -192,17 +202,14 @@ impl ApiKeyRegistry {
         label: Option<&str>,
     ) -> Result<String, ApiKeyRegError> {
         if !valid_key_id(key_id) {
-            return Err(ApiKeyRegError::Invalid(
-                "key_id: 1-64 字符 [A-Za-z0-9-_]".into(),
-            ));
+            return Err(ApiKeyRegError::Invalid("key_id: 1-64 chars [A-Za-z0-9-_]".into()));
         }
-        let role = CockpitRole::parse(role)
-            .ok_or_else(|| ApiKeyRegError::Invalid(
-                "role: viewer|operator|admin|dispatcher".into(),
-            ))?;
+        let role = CockpitRole::parse(role).ok_or_else(|| {
+            ApiKeyRegError::Invalid("role: viewer|operator|admin|dispatcher".into())
+        })?;
         let secret = uuid::Uuid::new_v4().to_string();
         let hash = decode_hash(&hash_secret(key_id, &secret))
-            .expect("hash_secret 输出恒可解码");
+            .expect("hash_secret output is always decodable");
         let mut inner = self.lock_write();
         if inner.keys.contains_key(key_id) {
             return Err(ApiKeyRegError::Duplicate);
@@ -223,23 +230,25 @@ impl ApiKeyRegistry {
         self.lock_write().keys.remove(key_id).map(|_| ()).ok_or(ApiKeyRegError::Unknown)
     }
 
-    /// 列表（管理面；secret_hash 绝不出内存——map 成明文安全形）。
+    /// List (admin plane; secret_hash never leaves memory -- mapped to a plaintext-safe shape).
     #[must_use]
     pub fn list(&self) -> Vec<(String, String, Vec<String>, Option<String>)> {
         let inner = self.lock_read();
         let mut out: Vec<_> = inner
             .keys
             .iter()
-            .map(|(id, e)| (id.clone(), e.role.as_str().to_string(), e.vehicles.clone(), e.label.clone()))
+            .map(|(id, e)| {
+                (id.clone(), e.role.as_str().to_string(), e.vehicles.clone(), e.label.clone())
+            })
             .collect();
         out.sort();
         out
     }
 
-    /// exchange 认证决策点：secret 恒定时间比对；未知 key 走 dummy 等长比对（时间不泄露存在性）。
+    /// exchange authentication decision point: constant-time secret comparison; unknown keys go through a dummy equal-length comparison (no existence timing leak).
     pub fn verify(&self, key_id: &str, secret: &str) -> Result<ApiKeyEntry, ApiKeyAuthError> {
         let inner = self.lock_read();
-        // hash_secret 输出即 "sha256:<hex>"；decode 失败（理论不可达）= 全 0 垫底永不匹配。
+        // hash_secret output is "sha256:<hex>"; decode failure (theoretically unreachable) = all-zero pad that never matches.
         let provided = decode_hash(&hash_secret(key_id, secret)).unwrap_or([0u8; 32]);
         match inner.keys.get(key_id) {
             Some(e) => {
@@ -250,7 +259,7 @@ impl ApiKeyRegistry {
                 }
             }
             None => {
-                let _ = inner.dummy_hash.ct_eq(&provided); // 时间补偿
+                let _ = inner.dummy_hash.ct_eq(&provided); // timing compensation
                 Err(ApiKeyAuthError::Unknown)
             }
         }
@@ -275,8 +284,8 @@ impl ApiKeyRegistry {
     }
 }
 
-/// exchange 用签发：与 accounts::issue_account_token 同签名基建（admin_jwt_secret），
-/// 差异 = `sub` 加 `apikey:` 命名空间前缀（F5 审计归因 + 与用户名隔离）。
+/// exchange issuance: same signing infrastructure as accounts::issue_account_token (admin_jwt_secret),
+/// difference = the `sub` gets the `apikey:` namespace prefix (F5 audit attribution + username isolation).
 pub fn issue_api_token(
     secret: &str,
     key_id: &str,
@@ -302,7 +311,7 @@ pub fn issue_api_token(
     .map_err(|e| format!("JWT encode error: {e}"))
 }
 
-/// `sha256:<64 hex>` → 32B；形状不符 = None（load 期拒，运行期不猜）。
+/// `sha256:<64 hex>` -> 32B; wrong shape = None (rejected at load time, never guessed at runtime).
 fn decode_hash(s: &str) -> Option<[u8; 32]> {
     let hex = s.strip_prefix("sha256:")?;
     if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -318,10 +327,10 @@ fn decode_hash(s: &str) -> Option<[u8; 32]> {
     Some(out)
 }
 
-/// 启动时生成一次的 dummy 比较目标（随机 key_id 盐保证与任何在册 key 不冲突）。
+/// Dummy comparison target generated once at startup (random key_id salt guarantees no collision with any registered key).
 fn new_dummy_hash() -> [u8; 32] {
     let h = hash_secret(&format!("apikey-dummy-{}", uuid::Uuid::new_v4()), "dummy");
-    decode_hash(&h).expect("hash_secret 输出恒可解码")
+    decode_hash(&h).expect("hash_secret output is always decodable")
 }
 
 #[cfg(test)]
@@ -335,12 +344,12 @@ mod tests {
 
     #[test]
     fn load_roundtrip_preserves_shape_and_salts() {
-        let reg = ApiKeyRegistry::from_yaml(&entry_yaml("cockpit-1", "s3cret", "viewer"))
-            .expect("load");
+        let reg =
+            ApiKeyRegistry::from_yaml(&entry_yaml("cockpit-1", "s3cret", "viewer")).expect("load");
         let yaml = reg.to_yaml().unwrap();
         let back = ApiKeyRegistry::from_yaml(&yaml).unwrap();
         assert_eq!(back.verify("cockpit-1", "s3cret").unwrap().role.as_str(), "viewer");
-        // 盐= key_id：同 secret 不同 key → 不同 hash（devices 同钉）。
+        // Salt = key_id: same secret, different key -> different hash (same pin as devices).
         assert_ne!(hash_secret("a", "x"), hash_secret("b", "x"));
     }
 
@@ -362,14 +371,21 @@ mod tests {
             reg.register("k", "superuser", &[], None),
             Err(ApiKeyRegError::Invalid(_))
         ));
-        assert!(matches!(reg.register("bad id!!", "viewer", &[], None), Err(ApiKeyRegError::Invalid(_))));
+        assert!(matches!(
+            reg.register("bad id!!", "viewer", &[], None),
+            Err(ApiKeyRegError::Invalid(_))
+        ));
     }
 
     #[test]
     fn register_returns_secret_once_and_verify_passes() {
         let reg = ApiKeyRegistry::empty();
-        let secret = reg.register("ci-1", "viewer", &["vehicle_a".into()], Some("ci 集成")).unwrap();
-        assert!(matches!(reg.register("ci-1", "viewer", &[], None), Err(ApiKeyRegError::Duplicate)));
+        let secret =
+            reg.register("ci-1", "viewer", &["vehicle_a".into()], Some("ci integration")).unwrap();
+        assert!(matches!(
+            reg.register("ci-1", "viewer", &[], None),
+            Err(ApiKeyRegError::Duplicate)
+        ));
         let e = reg.verify("ci-1", &secret).unwrap();
         assert_eq!(e.vehicles, vec!["vehicle_a".to_string()]);
         assert!(reg.verify("ci-1", "typo").is_err());
@@ -387,7 +403,7 @@ mod tests {
         )
         .unwrap()
         .claims;
-        assert_eq!(claims.sub, "apikey:k", "F5: sub 必须 apikey: 命名空间");
+        assert_eq!(claims.sub, "apikey:k", "F5: sub must use the apikey: namespace");
         assert_eq!(claims.role.as_deref(), Some("dispatcher"));
         assert!(claims.exp > claims.iat + 3590 && claims.exp <= claims.iat + 3600);
     }

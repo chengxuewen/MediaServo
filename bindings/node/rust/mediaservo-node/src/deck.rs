@@ -1,5 +1,5 @@
-//! deck 数据面 napi 绑定 — CameraSource（帧回调经 ThreadsafeFunction → JS 主线程，
-//! 帧数据 I420 拼接 Buffer + meta JSON）。
+//! deck data-plane napi bindings — CameraSource (frame callbacks via ThreadsafeFunction → JS main thread,
+//! frame data concatenated as an I420 Buffer + meta JSON).
 
 use std::sync::Arc;
 
@@ -8,7 +8,7 @@ use napi::bindgen_prelude::*;
 use napi::threadsafe_function::ThreadsafeFunctionCallMode;
 use napi_derive::napi;
 
-/// 采集选项（省略字段用默认 1280x720@30）。
+/// Capture options (omitted fields use the default 1280x720@30).
 #[napi(object)]
 pub struct JsCaptureOptions {
     pub width: Option<u32>,
@@ -20,7 +20,7 @@ fn closed_err() -> napi::Error {
     napi::Error::from_reason("camera not started or closed")
 }
 
-/// 相机采集源（async；帧回调经 TSFN 线程安全转发）。
+/// Camera capture source (async; frame callbacks forwarded thread-safely via TSFN).
 #[napi]
 pub struct JsCameraSource {
     inner: Arc<tokio::sync::Mutex<Option<CameraSource>>>,
@@ -28,13 +28,13 @@ pub struct JsCameraSource {
     opts: CaptureOptions,
 }
 
-// SAFETY: 所有方法经 tokio Mutex 序列化（field-c 同款先例）。
+// SAFETY: all methods are serialized through a tokio Mutex (same precedent as field-c).
 unsafe impl Send for JsCameraSource {}
 unsafe impl Sync for JsCameraSource {}
 
 #[napi]
 impl JsCameraSource {
-    /// 打开相机（当前 stub 设备 "stub:test-camera"）。
+    /// Open the camera (currently the stub device "stub:test-camera").
     #[napi(factory)]
     pub async fn open(dev_id: String, opts: JsCaptureOptions) -> Result<Self> {
         let mut cap = CaptureOptions::default();
@@ -53,7 +53,7 @@ impl JsCameraSource {
         })
     }
 
-    /// 开始产帧（只允许一次；内部生成 FrameStream）。
+    /// Start producing frames (only allowed once; creates the FrameStream internally).
     #[napi]
     pub async fn start(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;
@@ -65,20 +65,20 @@ impl JsCameraSource {
         Ok(())
     }
 
-    /// 订阅帧回调（(meta_json, i420_buffer) → JS；stream 关闭后泵退出）。
+    /// Subscribe to frame callbacks ((meta_json, i420_buffer) → JS; the pump exits when the stream closes).
     #[napi]
-    #[allow(clippy::while_let_loop)] // 泵循环 match 形保留 None 分支日志钩位，不改 while-let
+    #[allow(clippy::while_let_loop)] // keep the match-shaped pump loop with the None branch log hook; do not rewrite as while-let
     pub fn on_frame(&self, cb: Function<(String, Vec<u8>), ()>) -> Result<()> {
         let tsfn = cb.build_threadsafe_function::<(String, Vec<u8>)>().build()?;
         let stream = self.stream.clone();
         super::event_runtime().spawn(async move {
-            // FrameStream 非 Clone（mpsc Receiver）——take 独占；sender 全 drop 后 recv 返回 None 停泵
+            // FrameStream is not Clone (mpsc Receiver) — take() for exclusive access; recv returns None once all senders drop, stopping the pump.
             let rx = { stream.lock().await.take() };
             let Some(mut rx) = rx else { return };
             loop {
                 match rx.recv().await {
                     Some(frame) => {
-                        // I420 三平面拼接（Y + U + V）
+                        // Concatenate the I420 three planes (Y + U + V)
                         let mut data =
                             Vec::with_capacity(frame.planes.iter().map(|p| p.data.len()).sum());
                         for p in &frame.planes {
@@ -93,14 +93,14 @@ impl JsCameraSource {
                         .to_string();
                         let _ = tsfn.call((meta, data), ThreadsafeFunctionCallMode::Blocking);
                     }
-                    None => break, // stream 关闭
+                    None => break, // stream closed
                 }
             }
         });
         Ok(())
     }
 
-    /// 停止产帧（幂等）。
+    /// Stop producing frames (idempotent).
     #[napi]
     pub async fn stop(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;
@@ -110,7 +110,7 @@ impl JsCameraSource {
         Ok(())
     }
 
-    /// 关闭（幂等；停泵经 stream drop）。
+    /// Close (idempotent; the pump stops when the stream is dropped).
     #[napi]
     pub async fn close(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;
@@ -120,8 +120,8 @@ impl JsCameraSource {
     }
 }
 
-/// 录制器（FFmpeg mux；record(camera) 后台任务 + stop_signal——deck-c C ABI 同款模式，
-/// record 阻塞至 stop → 必须 spawn，否则 JS await 死锁）。
+/// Recorder (FFmpeg mux; record(camera) as a background task + stop_signal — same pattern as the deck-c C ABI:
+/// record blocks until stop, so it must be spawned or the JS await deadlocks).
 #[napi]
 pub struct JsRecorder {
     recorder: Arc<tokio::sync::Mutex<Option<mediaservo_deck::Recorder>>>,
@@ -132,7 +132,7 @@ pub struct JsRecorder {
 
 #[napi]
 impl JsRecorder {
-    /// 打开录制目标（RecordOptions 默认 h264/mp4）。
+    /// Open the recording target (RecordOptions defaults to h264/mp4).
     #[napi(factory)]
     pub async fn open(path: String) -> Result<Self> {
         let rec = mediaservo_deck::Recorder::new(path, mediaservo_deck::RecordOptions::default())
@@ -144,7 +144,7 @@ impl JsRecorder {
         })
     }
 
-    /// 开始录制（后台任务；立即返回。camera 须已 start 且活到 record 结束——C 契约同款）。
+    /// Start recording (background task; returns immediately. The camera must be started and outlive the recording — same as the C contract).
     #[napi]
     pub async fn record(&self, camera: &JsCameraSource) -> Result<()> {
         let stream = { camera.stream.lock().await.take() }
@@ -162,7 +162,7 @@ impl JsRecorder {
         Ok(())
     }
 
-    /// 停止录制（幂等；触发 stop_signal → worker flush + trailer）。
+    /// Stop recording (idempotent; signals stop → worker flush + trailer).
     #[napi]
     pub fn stop(&self) -> Result<()> {
         if let Some(signal) = self
@@ -176,7 +176,7 @@ impl JsRecorder {
         Ok(())
     }
 
-    /// 关闭（幂等；stop 残留 signal）。
+    /// Close (idempotent; drains a leftover stop signal).
     #[napi]
     pub async fn close(&self) -> Result<()> {
         if let Some(signal) = self.stop_signal.lock().await.take() {
@@ -187,19 +187,19 @@ impl JsRecorder {
     }
 }
 
-/// 回放器（demux+decode；onFrame 泵线程逐帧回调——next_frame 同步 API）。
+/// Player (demux+decode; onFrame called per frame on the pump thread — next_frame is a sync API).
 #[napi]
 pub struct JsPlayer {
     inner: Arc<tokio::sync::Mutex<Option<mediaservo_deck::Player>>>,
 }
 
-// SAFETY: 泵线程独占访问（next_frame &mut）经 Mutex 序列化。
+// SAFETY: exclusive pump-thread access (next_frame &mut) is serialized through a Mutex.
 unsafe impl Send for JsPlayer {}
 unsafe impl Sync for JsPlayer {}
 
 #[napi]
 impl JsPlayer {
-    /// 打开媒体文件（FFmpeg demux+decode）。
+    /// Open a media file (FFmpeg demux+decode).
     #[napi(factory)]
     pub async fn open(path: String) -> Result<Self> {
         let p = mediaservo_deck::Player::open(path)
@@ -207,7 +207,7 @@ impl JsPlayer {
         Ok(Self { inner: Arc::new(tokio::sync::Mutex::new(Some(p))) })
     }
 
-    /// 逐帧回调（泵线程 next_frame → tsfn；EOF 或 None 停泵）。
+    /// Per-frame callback (pump-thread next_frame → tsfn; EOF or None stops the pump).
     #[napi]
     pub fn on_frame(&self, cb: Function<(String, Vec<u8>), ()>) -> Result<()> {
         let tsfn = cb.build_threadsafe_function::<(String, Vec<u8>)>().build()?;
@@ -253,7 +253,7 @@ impl JsPlayer {
         Ok(())
     }
 
-    /// 媒体时长（秒）。
+    /// Media duration (seconds).
     #[napi]
     pub fn duration_secs(&self) -> Result<f64> {
         let guard = self.inner.try_lock().map_err(|_| napi::Error::from_reason("player busy"))?;
@@ -264,7 +264,7 @@ impl JsPlayer {
             .map_err(|e| napi::Error::from_reason(format!("duration: {e}")))
     }
 
-    /// 关闭（幂等）。
+    /// Close (idempotent).
     #[napi]
     pub async fn close(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;

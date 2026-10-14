@@ -1,4 +1,4 @@
-// node:test — 错误路径 + 本地帧验证（无需 server；真 server 场景见 examples/）。
+// node:test — error paths + local frame verification (no server needed; for a real server see examples/).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PushSession, SignalSession, CameraSource, Recorder, Player } from '../lib/index.mjs';
@@ -30,7 +30,7 @@ test('Recorder + Player closed loop (record camera → playback frames)', async 
   const cam = await CameraSource.open('stub:test-camera', { width: 320, height: 180, framerate: 10 });
   await cam.start();
   const rec = await Recorder.open(path);
-  await rec.record(cam);           // 后台任务，立即返回
+  await rec.record(cam);           // background task, returns immediately
   await new Promise((r) => setTimeout(r, 1200));
   rec.stop();                       // stop_signal → flush + trailer
   await rec.close();

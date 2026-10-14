@@ -1,338 +1,344 @@
-# SRS 参考分析
-> 生成日期：2026-07-16 | 分类：流媒体
+# SRS Reference Analysis
+> Generated: 2026-07-16 | Category: Streaming
 
-## 1. 产品画像
-- **名称**：SRS (Simple Realtime Server)，品牌名为 SRS/8.0（2026年5月起）
-- **开发者**：OSSRS 开源社区。核心维护者 winlinvip（杨成立，全职投入 SRS 开发超过 10 年）及 120+ 贡献者。社区包括大量的中文互联网开发者
-- **首次发布**：2013年（v1.0），持续开发超过 13 年。SRS/8.0 为当前主版本（2026-05-17 发布），是自 2013 年来第 8 个大版本
-- **产品定位**：简单高效的实时视频服务器。从一个二进制同时提供 RTMP/WebRTC/HLS/HTTP-FLV/HTTP-TS/SRT/MPEG-DASH/GB28181 的多协议支持。"简单"是核心哲学 — 无论是部署（一条命令）、配置（INI 文件）、还是使用（HTTP API + 内建播放器）。同时支持高性能（协程并发、transmux-only、零转码）和低延迟（WebRTC 80ms、SRT 0.5s）
-- **目标用户群体**：直播平台开发者（中文互联网直播公司大量使用 — 斗鱼/虎牙/快手/抖音等），需要 RTMP 兼容性的传统流媒体架构师，自建小型直播方案（教育/企业/安防），视频监控系统集成商（GB28181 设备接入）
-- **许可 / 商业模式**：MIT 许可（SRS/8.0 "code Free" 版本）。核心代码完全免费开源。通过 Oryx (SRS Stack) 管理平台提供服务盈利（Docker 一体化部署 + Web UI），提供商业技术支持。赞助商包括声网 (Agora) 等
+## 1. Product Profile
+- **Name**: SRS (Simple Realtime Server), branded SRS/8.0 (from May 2026)
+- **Developer**: OSSRS open-source community. Core maintainer winlinvip (Yang Chengli, full-time on SRS development for over 10 years) and 120+ contributors. The community includes many Chinese internet developers
+- **First release**: 2013 (v1.0), continuously developed for over 13 years. SRS/8.0 is the current main version (released 2026-05-17), the 8th major version since 2013
+- **Product positioning**: a simple, efficient real-time video server. A single binary simultaneously providing multi-protocol support for RTMP/WebRTC/HLS/HTTP-FLV/HTTP-TS/SRT/MPEG-DASH/GB28181. "Simple" is the core philosophy — for deployment (one command), configuration (an INI file), and usage (HTTP API + built-in player) alike. Simultaneously supports high performance (coroutine concurrency, transmux-only, zero transcoding) and low latency (WebRTC 80ms, SRT 0.5s)
+- **Target audience**: live platform developers (heavily used by Chinese internet live companies — Douyu/Huya/Kuaishou/Douyin etc.), traditional streaming architects needing RTMP compatibility, self-built small live solutions (education/enterprise/surveillance), video surveillance system integrators (GB28181 device ingestion)
+- **License / business model**: MIT license (the SRS/8.0 "code Free" edition). The core code is completely free and open source. Revenue comes from the Oryx (SRS Stack) management platform (integrated Docker deployment + Web UI) and commercial technical support. Sponsors include Agora and others
 
-## 2. 技术特性
-### 整体架构
+## 2. Technical Characteristics
+### Overall architecture
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                         SRS (C/C++ 协程架构)                       │
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐     │
-│  │               ST (State Threads) 协程调度器                │     │
-│  │                                                           │     │
-│  │  单进程，多协程。每个网络连接绑定一个 ST 协程              │     │
-│  │  同步编程模型（无回调嵌套）。用户态线程，百万级并发        │     │
-│  │  Linux/macOS/ARM/RISCV/LOONGARCH/MIPS 全架构支持          │     │
-│  └──────────────────────────────────────────────────────────┘     │
-│                                                                   │
-│  ┌───────────────────────────────────────────────────────┐        │
-│  │              内部统一数据路径：RTMP 流 ← 核心设计       │        │
-│  │                                                       │        │
-│  │  所有输入协议 ──→ 内部 RTMP 流 ──→ 所有输出协议        │        │
-│  │                                                       │        │
-│  │  RTMP (推流) ──┐                                      │        │
-│  │  WebRTC (推流) ─┤        ┌───────────┐               │        │
-│  │  SRT (推流)    ─┼───────▶│ 内部 RTMP  ├───────────┐  │        │
-│  │  GB28181 (推)  ─┘        └───────────┘           │  │        │
-│  │                                                  ▼  │        │
-│  │                             ┌──────────────────────┐ │        │
-│  │                             │  transmux (零转码)    │ │        │
-│  │                             │                      │ │        │
-│  │                             │ RTMP → HLS           │ │        │
-│  │                             │ (解 FLV → 封 TS)     │ │        │
-│  │                             │ RTMP → HTTP-FLV      │ │        │
-│  │                             │ (零开销，直接转发)    │ │        │
-│  │                             │ RTMP → DASH          │ │        │
-│  │                             │ (解 FLV → 封 fMP4)   │ │        │
-│  │                             │ RTMP → SRT           │ │        │
-│  │                             │ (解 FLV → 封 MPEG-TS)│ │        │
-│  │                             │ WebRTC → RTMP         │ │        │
-│  │                             │ (解 RTP → 封 FLV)    │ │        │
-│  │                             └──────────────────────┘ │        │
-│  └───────────────────────────────────────────────────────┘        │
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐     │
-│  │  协议输入层                                               │     │
-│  │  ┌────────┐ ┌──────────┐ ┌───────┐ ┌─────────┐          │     │
-│  │  │  RTMP  │ │  WebRTC  │ │  SRT  │ │ GB28181 │          │     │
-│  │  │ TCP    │ │WHIP/WHEP │ │  UDP  │ │SIP+RTP  │          │     │
-│  │  │ 1935   │ │DTLS-SRTP │ │       │ │         │          │     │
-│  │  │        │ │ICE-Lite  │ │Go独立  │ │         │          │     │
-│  │  │        │ │需外部TURN│ │进程    │ │         │          │     │
-│  │  └────────┘ └──────────┘ └───────┘ └─────────┘          │     │
-│  └──────────────────────────────────────────────────────────┘     │
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐     │
-│  │  协议输出层（全部从内部 RTMP 流 transmux 生成）            │     │
-│  │  ┌──────┐ ┌──────┐ ┌────-┐ ┌──────┐ ┌────-┐ ┌────┐     │     │
-│  │  │ RTMP │ │ HLS  │ │HTTP-│ │WebRTC│ │DASH │ │SRT │     │     │
-│  │  │ 播放 │ │.m3u8│ │ FLV │ │WHEP  │ │.mpd │ │播放│     │     │
-│  │  │      │ │ +.ts │ │HTTP │ │RTP   │ │     │ │    │     │     │
-│  │  │ TCP  │ │      │ │长连接│ │UDP   │ │HTTP │ │UDP │     │     │
-│  │  └──────┘ └──────┘ └────┘ └──────┘ └────┘ └────┘     │     │
-│  └──────────────────────────────────────────────────────────┘     │
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐     │
-│  │  Origin-Edge 集群                                          │     │
-│  │                                                           │     │
-│  │  推流 → Origin ──┬──► Edge 1 ──► 观众 (RTMP/FLV/WebRTC)  │     │
-│  │                 ├──► Edge 2 ──► 观众                       │     │
-│  │                 └──► Edge N ──► 观众                       │     │
-│  │                                                           │     │
-│  │  多级边缘节点（Edge-of-Edge）。RTMP/HTTP-FLV/WebRTC 分发 │     │
-│  └──────────────────────────────────────────────────────────┘     │
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐     │
-│  │  HTTP Callback 事件系统                                    │     │
-│  │  on_publish · on_unpublish · on_play · on_stop           │     │
-│  │  on_dvr · on_hls · on_rtc_play                            │     │
-│  │  → HTTP POST 到外部服务 → 认证/计费/通知/自动转码触发      │     │
-│  └──────────────────────────────────────────────────────────┘     │
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐     │
-│  │  可观测性                                                   │     │
-│  │  Prometheus metrics exporter · Grafana Dashboard          │     │
-│  │  HTTP API (运行时控制) · 内建 WebRTC/HLS 播放器控制台     │     │
-│  │  Docker Hub · Helm Chart (Kubernetes)                     │     │
-│  └──────────────────────────────────────────────────────────┘     │
-│                                                                   │
-│  SRS/8.0 特殊说明：MIT 许可，code Free，无额外收费特性             │
+│                    SRS (C/C++ coroutine architecture)            │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │          ST (State Threads) coroutine scheduler           │  │
+│  │                                                          │  │
+│  │  Single process, multiple coroutines. Each network        │  │
+│  │  connection is bound to one ST coroutine                  │  │
+│  │  Synchronous programming model (no callback nesting).     │  │
+│  │  User-space threads, million-scale concurrency            │  │
+│  │  Full architecture support: Linux/macOS/ARM/RISCV/        │  │
+│  │  LOONGARCH/MIPS                                           │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                │
+│  ┌───────────────────────────────────────────────────────┐     │
+│  │  Internal unified data path: RTMP stream ← core design  │     │
+│  │                                                       │     │
+│  │  All input protocols ──▶ internal RTMP stream ──▶ all   │     │
+│  │  output protocols                                    │     │
+│  │                                                       │     │
+│  │  RTMP (push) ──┐                                     │     │
+│  │  WebRTC (push) ─┤        ┌───────────┐               │     │
+│  │  SRT (push)    ─┼───────▶│internal RTMP├───────────┐  │     │
+│  │  GB28181(push) ─┘        └───────────┘           │  │     │
+│  │                                                  ▼  │     │
+│  │                             ┌──────────────────────┐ │     │
+│  │                             │ transmux (zero transcode)│ │  │
+│  │                             │                      │ │     │
+│  │                             │ RTMP → HLS           │ │     │
+│  │                             │ (demux FLV → mux TS)  │ │     │
+│  │                             │ RTMP → HTTP-FLV      │ │     │
+│  │                             │ (zero overhead, direct forward)││
+│  │                             │ RTMP → DASH          │ │     │
+│  │                             │ (demux FLV → mux fMP4)│ │     │
+│  │                             │ RTMP → SRT           │ │     │
+│  │                             │ (demux FLV → mux MPEG-TS)│ │  │
+│  │                             │ WebRTC → RTMP         │ │     │
+│  │                             │ (depkt RTP → mux FLV) │ │     │
+│  │                             └──────────────────────┘ │     │
+│  └───────────────────────────────────────────────────────┘     │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Protocol input layer                                    │  │
+│  │  ┌────────┐ ┌──────────┐ ┌───────┐ ┌─────────┐          │  │
+│  │  │  RTMP  │ │  WebRTC  │ │  SRT  │ │ GB28181 │          │  │
+│  │  │ TCP    │ │WHIP/WHEP │ │  UDP  │ │SIP+RTP  │          │  │
+│  │  │ 1935   │ │DTLS-SRTP │ │       │ │         │          │  │
+│  │  │        │ │ICE-Lite  │ │Go sep.│ │         │          │  │
+│  │  │        │ │ext.TURN  │ │process │ │         │          │  │
+│  │  └────────┘ └──────────┘ └───────┘ └─────────┘          │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Protocol output layer (all transmuxed from the internal  │  │
+│  │  RTMP stream)                                             │  │
+│  │  ┌──────┐ ┌──────┐ ┌─────┐ ┌──────┐ ┌─────┐ ┌────┐     │  │
+│  │  │ RTMP │ │ HLS  │ │HTTP-│ │WebRTC│ │ DASH│ │ SRT │     │  │
+│  │  │ play │ │.m3u8 │ │ FLV │ │ WHEP │ │.mpd │ │ play│     │  │
+│  │  │      │ │ +.ts │ │ HTTP│ │ RTP  │ │     │ │    │     │  │
+│  │  │ TCP  │ │      │ │ long │ │ UDP  │ │ HTTP│ │ UDP │     │  │
+│  │  └──────┘ └──────┘ └─────┘ └──────┘ └─────┘ └────┘     │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Origin-Edge cluster                                      │  │
+│  │                                                           │  │
+│  │  push → Origin ──┬──▶ Edge 1 ──▶ viewers (RTMP/FLV/WebRTC)│  │
+│  │                 ├──▶ Edge 2 ──▶ viewers                   │  │
+│  │                 └──▶ Edge N ──▶ viewers                   │  │
+│  │                                                           │  │
+│  │  Multi-level edge nodes (Edge-of-Edge). RTMP/HTTP-FLV/    │  │
+│  │  WebRTC distribution                                      │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  HTTP Callback event system                               │  │
+│  │  on_publish · on_unpublish · on_play · on_stop           │  │
+│  │  on_dvr · on_hls · on_rtc_play                           │  │
+│  │  → HTTP POST to an external service → auth/billing/       │  │
+│  │  notification/auto-transcoding trigger                     │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Observability                                            │  │
+│  │  Prometheus metrics exporter · Grafana Dashboard         │  │
+│  │  HTTP API (runtime control) · built-in WebRTC/HLS player  │  │
+│  │  console                                                 │  │
+│  │  Docker Hub · Helm Chart (Kubernetes)                    │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                │
+│  SRS/8.0 note: MIT license, code Free, no paid features        │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### 内部 RTMP 归一化模型
+### Internal RTMP normalization model
 
-SRS 最核心的设计决策是将所有输入协议归一化到内部的 RTMP 流：
+SRS's most core design decision is normalizing all input protocols into an internal RTMP stream:
 
-**归一化流程**：
-1. **RTMP 推流** → 直接解析 FLV tag → 内部 RTMP 流（零转换）
-2. **WebRTC WHIP 推流** → 解 RTP → 解码 H.264/Opus → 重新编码 FLV → 内部 RTMP 流（有编解码开销！）
-3. **SRT 推流** → (SRT 独立进程) → FLV → TCP 管道 → 内部 RTMP 流（跨进程桥接）
-4. **GB28181 推流** → 解 PS/RTP → 提取 H.264/AAC → 封 FLV → 内部 RTMP 流
+**Normalization flow**:
+1. **RTMP push** → parse FLV tags directly → internal RTMP stream (zero conversion)
+2. **WebRTC WHIP push** → depacketize RTP → decode H.264/Opus → re-encode to FLV → internal RTMP stream (with codec overhead!)
+3. **SRT push** → (separate SRT process) → FLV → TCP pipe → internal RTMP stream (cross-process bridge)
+4. **GB28181 push** → depacketize PS/RTP → extract H.264/AAC → mux FLV → internal RTMP stream
 
-**归一化后的 transmux**：
-- RTMP → HTTP-FLV：零开销（FLV tag 原样转发），最低延迟 (1-3s)
-- RTMP → HLS：解 FLV → 编码为 TS segment + 生成 m3u8 playlist，延迟 3-10s (标准) / 2-3s (LL-HLS)
-- RTMP → DASH：解 FLV → 编码为 fMP4 segment + 生成 MPD manifest，延迟 3-10s
-- RTMP → SRT：解 FLV → 封 MPEG-TS → SRT 推流，延迟 0.5-2s
-- RTMP → WebRTC (WHEP)：解 FLV → 解编码 → 重新 RTP 打包 → WebRTC 播放（有编解码开销）
+**Transmux after normalization**:
+- RTMP → HTTP-FLV: zero overhead (FLV tags forwarded as-is), lowest latency (1-3s)
+- RTMP → HLS: demux FLV → mux TS segments + generate the m3u8 playlist, latency 3-10s (standard) / 2-3s (LL-HLS)
+- RTMP → DASH: demux FLV → mux fMP4 segments + generate the MPD manifest, latency 3-10s
+- RTMP → SRT: demux FLV → mux MPEG-TS → SRT push, latency 0.5-2s
+- RTMP → WebRTC (WHEP): demux FLV → decode → repackage as RTP → WebRTC playback (with codec overhead)
 
-### 关键技术能力
-| 能力 | 详情 |
+### Key technical capabilities
+| Capability | Details |
 |------|------|
-| 协议支持 | 输入：RTMP/RTMPS (TCP 1935), WebRTC/WHIP (UDP/TCP), SRT (UDP, 独立进程), GB28181 (SIP+RTP)。输出：RTMP, WebRTC/WHEP, HLS (m3u8+ts), HTTP-FLV, HTTP-TS, MPEG-DASH (MPD+fMP4), SRT |
-| 编码 | H.264, H.265(HEVC) — Enhanced RTMP, AV1 — Enhanced RTMP, VP9/VP8 — WebRTC。音频：AAC, Opus, G.711 (PCMA/PCMU), MP3 |
-| 传输 | RTMP: TCP (1935) + TLS (RTMPS)；SRT: UDP + AES-128/256；WebRTC: UDP/DTLS-SRTP + ICE-Lite + 外部 TURN；HLS: HTTP/HTTPS；HTTP-FLV: HTTP 长连接；DASH: HTTP |
-| 转换 | **transmux only（核心设计哲学）**：RTMP → HLS / HTTP-FLV / DASH / SRT。仅协议容器格式转换，不解码/编码。CPU 开销极低 |
-| 录制 | FLV 格式录制到磁盘。按流和按时间分段。HTTP 回调 on_dvr 通知录制段创建。DVR 支持滑动窗口 |
-| 安全 | RTMP token 认证（`?token=<md5_hash>` URL 参数），HTTP 回调认证，WebRTC DTLS-SRTP 加密，SRT AES-128/256 加密 |
-| 转码 | **不内置转码**。依赖外部 FFmpeg 进程（通过 HTTP 回调 on_publish 触发）。接收转码流作为不同的流名 |
-| LL-HLS | 低延迟 HLS，segment 时间 1-2s，延迟 2-3s（vs 标准 HLS 3-10s） |
+| Protocol support | Input: RTMP/RTMPS (TCP 1935), WebRTC/WHIP (UDP/TCP), SRT (UDP, separate process), GB28181 (SIP+RTP). Output: RTMP, WebRTC/WHEP, HLS (m3u8+ts), HTTP-FLV, HTTP-TS, MPEG-DASH (MPD+fMP4), SRT |
+| Coding | H.264, H.265(HEVC) — Enhanced RTMP, AV1 — Enhanced RTMP, VP9/VP8 — WebRTC. Audio: AAC, Opus, G.711 (PCMA/PCMU), MP3 |
+| Transport | RTMP: TCP (1935) + TLS (RTMPS); SRT: UDP + AES-128/256; WebRTC: UDP/DTLS-SRTP + ICE-Lite + external TURN; HLS: HTTP/HTTPS; HTTP-FLV: HTTP long connection; DASH: HTTP |
+| Conversion | **transmux only (core design philosophy)**: RTMP → HLS / HTTP-FLV / DASH / SRT. Container format conversion only, no decode/encode. Extremely low CPU overhead |
+| Recording | FLV format recording to disk. Segmented by stream and by time. The on_dvr HTTP callback notifies segment creation. DVR supports a sliding window |
+| Security | RTMP token authentication (`?token=<md5_hash>` URL parameter), HTTP callback authentication, WebRTC DTLS-SRTP encryption, SRT AES-128/256 encryption |
+| Transcoding | **Not built in**. Depends on an external FFmpeg process (triggered by the on_publish HTTP callback). Receives the transcoded stream as a different stream name |
+| LL-HLS | Low-latency HLS, segment duration 1-2s, latency 2-3s (vs standard HLS 3-10s) |
 
-### 性能指标
-| 测试项 | 数据 | 条件 |
+### Performance metrics
+| Test item | Data | Conditions |
 |--------|------|------|
-| RTMP 延迟 | 0.4-3s | H.264 only: 0.4s; H.264+AAC: 0.6s; 标准: 0.8-3s |
-| WebRTC 延迟 | 80-400ms | 优化后 80ms (SRS 4.0.87)；SRS 2.0.72 基准测试 80ms |
-| HLS 延迟 | 3-10s (标准) / 2-3s (LL-HLS) | Segment 时长 1-6s |
-| HTTP-FLV 延迟 | 1-3s | HTTP 长连接，FLV tag 直通 |
-| RTMP 播放并发 | 数千路 | 单机 4 核，无转码 |
-| WebRTC 播放并发 | 500-1000+ | 2 vCPU，需外部 TURN |
-| HLS 最优 fragment | 3s | 延迟与稳定性的平衡点 |
-| CPU 占用 | 极低 (transmux only) | 单核可承载数百 RTMP 连接 |
-| 代码行数 | 约 170,000 行 | SRS v6.0-r0 |
+| RTMP latency | 0.4-3s | H.264 only: 0.4s; H.264+AAC: 0.6s; standard: 0.8-3s |
+| WebRTC latency | 80-400ms | 80ms after optimization (SRS 4.0.87); SRS 2.0.72 benchmark 80ms |
+| HLS latency | 3-10s (standard) / 2-3s (LL-HLS) | Segment duration 1-6s |
+| HTTP-FLV latency | 1-3s | HTTP long connection, FLV tag passthrough |
+| RTMP playback concurrency | thousands of sessions | Single machine 4 cores, no transcoding |
+| WebRTC playback concurrency | 500-1000+ | 2 vCPU, external TURN required |
+| Optimal HLS fragment | 3s | The balance point of latency and stability |
+| CPU usage | Extremely low (transmux only) | One core can handle hundreds of RTMP connections |
+| Lines of code | about 170,000 | SRS v6.0-r0 |
 
-### 协议对比深度分析 — SRS vs Fragment Model
+### Deep protocol comparison — SRS vs Fragment Model
 
-SRS 的协议转换矩阵以 RTMP 流为中间表示，与非 RTMP 协议的交互存在以下性能特征：
+SRS's protocol conversion matrix uses the RTMP stream as its intermediate representation; interaction with non-RTMP protocols has the following performance characteristics:
 
-| 协议路径 | SRS 处理方式 | 编解码开销 | 延迟范围 | MediaServo Fragment 处理方式 | 延迟改善 |
+| Protocol path | SRS handling | Codec overhead | Latency range | MediaServo Fragment handling | Latency improvement |
 |---------|-------------|:---------:|:-------:|---------------------------|:--------:|
-| RTMP→HLS | FLV→TS transmux | 无 | 3-10s | Fragment→CMAF→LL-HLS | 改善50% (1-3s) |
-| RTMP→HTTP-FLV | FLV 直通 | 无 | 1-3s | Fragment→FLV tag 生成 | 持平 |
-| RTMP→WHEP | FLV→解码→RTP | **有** (丢失质量) | 200-500ms | Fragment→RTP 打包 (passthrough) | **改善**(无质量损失) |
-| WHIP→RTMP | RTP→解码→FLV | **有** (重复编码) | 200-500ms | Fragment 直通 (回到 WHIP) | **改善**(无编码) |
-| WHIP→WHEP | RTP→FLV→解码→RTP | **有** (2次编解码) | 300-800ms | Fragment→RTP 直通 | **改善90%** |
-| SRT→HLS | MPEG-TS→FLV→TS | 无 (双容器转换) | 3-10s | Fragment→CMAF→HLS | 改善 (单步) |
-| GB28181→HLS | PS→FLV→TS | 无 | 3-10s | PS→Fragment→CMAF→HLS | 改善 (单步) |
+| RTMP→HLS | FLV→TS transmux | none | 3-10s | Fragment→CMAF→LL-HLS | 50% improvement (1-3s) |
+| RTMP→HTTP-FLV | FLV passthrough | none | 1-3s | Fragment→FLV tag generation | on par |
+| RTMP→WHEP | FLV→decode→RTP | **yes** (quality lost) | 200-500ms | Fragment→RTP packaging (passthrough) | **improved** (no quality loss) |
+| WHIP→RTMP | RTP→decode→FLV | **yes** (double encoding) | 200-500ms | Fragment passthrough (back to WHIP) | **improved** (no encoding) |
+| WHIP→WHEP | RTP→FLV→decode→RTP | **yes** (2 codec passes) | 300-800ms | Fragment→RTP passthrough | **90% improvement** |
+| SRT→HLS | MPEG-TS→FLV→TS | none (double container conversion) | 3-10s | Fragment→CMAF→HLS | improved (single step) |
+| GB28181→HLS | PS→FLV→TS | none | 3-10s | PS→Fragment→CMAF→HLS | improved (single step) |
 
-**关键发现**：
-1. WHIP→WHEP 在 SRS 中存在 2 次编解码（原始最优质量已丢失），是 SRS 架构最大的性能痛点
-2. Fragment Model 中 WHIP→WHEP 是纯 RTP 直通路径，没有任何编解码操作
-3. SRT→HLS 在 SRS 中经过 MPEG-TS→FLV→TS 两步容器转换，Fragment Model 只需 Fragment→CMAF 一步
+**Key findings**:
+1. WHIP→WHEP in SRS involves 2 codec passes (the original best quality is already lost); it is the biggest performance pain point of the SRS architecture
+2. In the Fragment Model, WHIP→WHEP is a pure RTP passthrough path with no codec operations at all
+3. SRT→HLS in SRS passes through two container conversions, MPEG-TS→FLV→TS; the Fragment Model needs only one step, Fragment→CMAF
 
-### 并发性能与资源消耗对比
+### Concurrency performance and resource consumption comparison
 
-| 场景 | SRS (RTMP 归一化) | LVQR (Fragment Model) | 差异 |
+| Scenario | SRS (RTMP normalization) | LVQR (Fragment Model) | Difference |
 |------|-----------------|----------------------|------|
-| 1000 路 RTMP→HLS | 1000 条 transmux 通道 (零 CPU) | 1000 条 CMAF 生成通道 (零 CPU) | 相近 |
-| 100 路 WHIP→WHEP | 100 路编解码 (100% CPU+GPU) | 100 路 Fragment 直通 (<1% CPU) | SRS 高出 100x |
-| 500 路 RTMP→HTTP-FLV | 500 条 FLV 直通 (零 CPU) | 500 条 FLV tag 生成 (零 CPU) | 相近 |
-| 添加 RTMP→MoQ 支持 | 需要 FLV→MoQ Object 适配 (复杂) | 已支持 (Fragment→MoQ) | Fragment 优势 |
-| GPU 需求 | WHIP 转 RTMP 必需 GPU | 不需要 (零编解码) | Fragment 优势 |
+| 1000 sessions RTMP→HLS | 1000 transmux channels (zero CPU) | 1000 CMAF generation channels (zero CPU) | comparable |
+| 100 sessions WHIP→WHEP | 100 codec passes (100% CPU+GPU) | 100 Fragment passthroughs (<1% CPU) | SRS 100x higher |
+| 500 sessions RTMP→HTTP-FLV | 500 FLV passthroughs (zero CPU) | 500 FLV tag generations (zero CPU) | comparable |
+| Adding RTMP→MoQ support | requires an FLV→MoQ Object adapter (complex) | already supported (Fragment→MoQ) | Fragment advantage |
+| GPU requirement | GPU mandatory for WHIP to RTMP | not needed (zero codec) | Fragment advantage |
 
+### Technology stack
+- **Language breakdown**: C/C++ (87.5% — core server), Go (5.5% — the SRSX proxy module, some tools), JavaScript (3.0% — the WebRTC player srsRTCPlayer.js, the HLS/FLV player srsPlayer.js, the admin console), Shell/Python/Lua (ops scripts)
+- **Coroutine framework**: ST (State Threads) — a lightweight user-space coroutine library. Developed by Netscape in 2001, single-process multi-coroutine model. One coroutine per network connection. Context switching ≈ the cost of a function call. No async programming framework needed. Downsides: not a standard library, no native debugger support, small community
+- **Internal dependencies**: self-developed first, external dependencies minimized.
+  - RTMP protocol stack: a complete self-developed implementation (13 years of refinement). Enhanced RTMP support (HEVC/AV1/multi-track). FLV parsing and generation
+  - WebRTC module: a self-developed RTC module. DTLS-SRTP encryption (based on OpenSSL/mbedTLS). ICE-Lite (simplified server-side ICE, no STUN negotiation needed). No built-in TURN/STUN services
+  - SRT: a separate Go process module (hybrid model), communicating with the main process through an internal TCP pipe, passing FLV streams. Uses the libsrt C library
+  - GB28181: a self-developed SIP signaling + RTP/PS depacketizing module
+- **Configuration system**: INI-format configuration files (`conf/srs.conf`). Per-vhost and per-app configuration isolation. Supports the include directive to reference multiple configuration files
+- **Monitoring and operations**: Prometheus metrics exporter (HTTP `/metrics`), Grafana JSON dashboard templates, HTTP API runtime status queries and control, built-in WebRTC/HLS/HTTP-FLV players (testing and demos), containerized deployment (Docker Hub + Helm Chart)
+- **Multi-architecture support**: x86_64, ARMv7 (32-bit ARM), AARCH64 (ARM64/Apple M1/M2), RISCV (RISC-V 64-bit), LOONGARCH (Loongson), MIPS (MIPS64). Domestic CPU support is an important competitive strength in its Chinese market
+- **Client ecosystem**: srsRTCPlayer.js (WebRTC player, provided via GitHub releases), srsPlayer.js (HTTP-FLV/HLS player), community SDKs (Java/C#/Python/Go), Oryx/SRS Stack (an integrated Docker management platform + Web UI)
 
-### 技术栈
-- **语言分布**：C/C++ (87.5% — 核心服务器)，Go (5.5% — SRSX 代理模块、部分工具)，JavaScript (3.0% — WebRTC 播放器 srsRTCPlayer.js、HLS/FLV 播放器 srsPlayer.js、管理控制台)，Shell/Python/Lua (运维脚本)
-- **协程框架**：ST (State Threads) — 轻量级用户态协程库。2001年 Netscape 开发，单进程多协程模型。每个网络连接一个协程。上下文切换 ≈ 函数调用成本。无需异步编程框架。缺点：非标准库，无原生调试支持，社区较小
-- **内部依赖**：自研为主，最小化外部依赖。
-  - RTMP 协议栈：完整的自研实现（13 年打磨）。Enhanced RTMP 支持（HEVC/AV1/多轨）。FLV 解析和生成
-  - WebRTC 模块：自研 RTC 模块。DTLS-SRTP 加密 (基于 OpenSSL/mbedTLS)。ICE-Lite（服务器端简化 ICE，无需 STUN 协商）。无内置 TURN/STUN 服务
-  - SRT：独立 Go 进程模块（hybrid model），通过内部 TCP 管道与主进程通信，传递 FLV 流。使用 libsrt C 库
-  - GB28181：自研 SIP 信令 + RTP/PS 解包模块
-- **配置系统**：INI 格式配置文件 (`conf/srs.conf`)。Per-vhost 和 per-app 配置隔离。支持 include 指令引用多个配置文件
-- **监控与运维**：Prometheus metrics exporter (HTTP `/metrics`)，Grafana JSON 仪表板模板，HTTP API 运行时状态查询和控制，内建 WebRTC/HLS/HTTP-FLV 播放器（测试和演示），容器化部署（Docker Hub + Helm Chart）
-- **多架构支持**：x86_64, ARMv7 (32-bit ARM), AARCH64 (ARM64/Apple M1/M2), RISCV (RISC-V 64-bit), LOONGARCH (龙芯), MIPS (MIPS64)。国产 CPU 适配是其中国市场的重要竞争力
-- **客户端生态**：srsRTCPlayer.js (WebRTC 播放器，GitHub releases 提供)，srsPlayer.js (HTTP-FLV/HLS 播放器)，社区 SDK (Java/C#/Python/Go)，Oryx/SRS Stack (Docker 一体化管理平台 + Web UI)
-
-## 3. 功能概览
-### 核心功能模块
-| 模块 | 功能 | 实现语言 |
+## 3. Feature Overview
+### Core feature modules
+| Module | Function | Implementation language |
 |------|------|----------|
-| RTMP Core | 完整 RTMP/RTMPS 实现。推流 + 播放。Enhanced RTMP：H.265/AV1/多轨。GOP cache：缓存最近 GOP，新观众秒开画面。FLV tag 直通（HTTP-FLV 输出） | C/C++ |
-| WebRTC | WHIP 推流 + WHEP 播放。DTLS-SRTP。ICE-Lite（简化 ICE）。需外部 TURN 做 NAT 穿透。延迟 80-400ms | C/C++ |
-| HLS | 实时 HLS 生成：FLV → TS segment + m3u8 playlist。标准 HLS (3-10s) + LL-HLS (2-3s)。HLS over HTTPS | C/C++ |
-| HTTP-FLV | HTTP 长连接 FLV 流分发。延迟 1-3s。零开销（FLV tag 直通）。不支持 iOS Safari | C/C++ |
-| DASH | FLV → fMP4 segment + MPD manifest 生成。ABR 多码率（手动配置多流 MPD）。延迟接近 HLS | C/C++ |
-| SRT | 独立 Go 进程。内部 TCP 管道连接主进程。支持推流和播放。AES 加密。延迟 0.5-2s | Go (独立进程) |
-| GB28181 | 国标 GB/T 28181 协议。SIP 信令（注册/心跳/Invite）+ RTP/PS 推流。安防摄像头接入。唯一开源实现 | C/C++ |
-| Origin-Edge Cluster | Origin 推流 → Edge 分发。多级 Edge。RTMP/HTTP-FLV/WebRTC 均支持。配置简单 | C/C++ |
-| HTTP Callback | 流生命周期事件通知。on_publish/unpublish/play/stop/dvr/hls。HTTP POST 调用外部服务。认证/计费/转码触发 | C/C++ |
-| Transmux | 纯容器格式转换。不解码/编码。RTMP → HLS/DASH/HTTP-FLV/SRT。极低 CPU 开销 | C/C++ |
-| Security | RTMP token 认证。HTTP 回调认证。DTLS-SRTP (WebRTC)。AES 加密 (SRT)。Per-vhost/app 认证规则 | C/C++ |
-| Monitoring | Prometheus metrics。HTTP API。内建 WebRTC/HLS 播放器调试工具。Grafana Dashboard | C/C++ + JS |
+| RTMP Core | A complete RTMP/RTMPS implementation. Push + playback. Enhanced RTMP: H.265/AV1/multi-track. GOP cache: caches the most recent GOP so new viewers get a picture immediately. FLV tag passthrough (HTTP-FLV output) | C/C++ |
+| WebRTC | WHIP push + WHEP playback. DTLS-SRTP. ICE-Lite (simplified ICE). Requires an external TURN for NAT traversal. Latency 80-400ms | C/C++ |
+| HLS | Real-time HLS generation: FLV → TS segments + m3u8 playlist. Standard HLS (3-10s) + LL-HLS (2-3s). HLS over HTTPS | C/C++ |
+| HTTP-FLV | HTTP long-connection FLV stream distribution. Latency 1-3s. Zero overhead (FLV tag passthrough). Not supported on iOS Safari | C/C++ |
+| DASH | FLV → fMP4 segments + MPD manifest generation. ABR multi-bitrate (manually configured multi-stream MPD). Latency comparable to HLS | C/C++ |
+| SRT | A separate Go process. Internal TCP pipe connecting to the main process. Supports push and playback. AES encryption. Latency 0.5-2s | Go (separate process) |
+| GB28181 | The national GB/T 28181 standard. SIP signaling (register/keepalive/Invite) + RTP/PS streaming. Surveillance camera ingestion. The only open-source implementation | C/C++ |
+| Origin-Edge Cluster | Origin push → Edge distribution. Multi-level Edge. Supports RTMP/HTTP-FLV/WebRTC. Simple configuration | C/C++ |
+| HTTP Callback | Stream lifecycle event notifications. on_publish/unpublish/play/stop/dvr/hls. HTTP POST calls to external services. Auth/billing/transcode triggering | C/C++ |
+| Transmux | Pure container format conversion. No decode/encode. RTMP → HLS/DASH/HTTP-FLV/SRT. Extremely low CPU overhead | C/C++ |
+| Security | RTMP token authentication. HTTP callback authentication. DTLS-SRTP (WebRTC). AES encryption (SRT). Per-vhost/app authentication rules | C/C++ |
+| Monitoring | Prometheus metrics. HTTP API. Built-in WebRTC/HLS player debug tools. Grafana Dashboard | C/C++ + JS |
 
-### 特色功能
-- **RTMP 协议的深度实现**：13 年持续打磨的 RTMP 协议栈。Enhanced RTMP 支持 HEVC/AV1 编码和多音视频轨道。OBS Studio 将 SRS 作为 RTMP 兼容性测试基准。这个深厚积累是长期投入的结果
-- **ST 协程架构的简洁性**：单进程多协程。同步编程模型（无 async/await 关键字，无 Future/Promise）。每个连接一个协程，代码像写同步一样简单，但底层是高效的协程调度。在 C/C++ 生态中独树一帜
-- **Transmux 零转码哲学**：不解码/编码，仅做容器格式转换。CPU 开销极低（单机 4 核可承载数千 RTMP 并发）。这一决策在不需要 ABR 自适应码率的场景下是最优架构
-- **GB28181 国标唯一开源支持**：中国安防监控行业标准协议的原生开源实现。SIP 信令 + RTP/PS 媒体传输。对 GB28181 设备（中国安防摄像头）的开箱即用支持。这是 SRS 在中国安防监控市场的独特竞争力
-- **中文社区生态全面**：完整的中文文档、教程、Wiki、GitHub Issues（中文友好）、微信群。对于中文用户，SRS 是上手门槛最低的开源流媒体服务器。Oryx (SRS Stack) 提供了一键部署的 Web 管理界面
-- **多架构 CPU 支持**：x86_64, ARMv7, AARCH64 (Apple M1/M2), RISCV, LOONGARCH (龙芯), MIPS。国产 CPU 适配使其在中国信创市场有独特优势
+### Signature features
+- **A deep implementation of the RTMP protocol**: an RTMP protocol stack refined continuously for 13 years. Enhanced RTMP supports HEVC/AV1 coding and multiple audio/video tracks. OBS Studio uses SRS as its RTMP compatibility benchmark. This deep accumulation is the result of long-term investment
+- **The simplicity of the ST coroutine architecture**: single process, multiple coroutines. The synchronous programming model (no async/await keywords, no Future/Promise). One coroutine per connection, so the code is as simple to write as synchronous code, while the bottom layer is efficient coroutine scheduling. Unique in the C/C++ ecosystem
+- **The Transmux zero-transcode philosophy**: no decode/encode, only container format conversion. Extremely low CPU overhead (a single 4-core machine can handle thousands of RTMP sessions). This decision is the optimal architecture in scenarios that do not need ABR adaptive bitrate
+- **The only open-source support for the GB28181 national standard**: a native open-source implementation of the Chinese surveillance industry standard protocol. SIP signaling + RTP/PS media transport. Out-of-the-box support for GB28181 devices (Chinese surveillance cameras). This is SRS's unique competitive strength in the Chinese surveillance market
+- **A comprehensive Chinese community ecosystem**: complete Chinese documentation, tutorials, Wiki, GitHub Issues (Chinese-friendly), WeChat groups. For Chinese users, SRS is the open-source streaming server with the lowest barrier to entry. Oryx (SRS Stack) provides a one-click deployment web management interface
+- **Multi-architecture CPU support**: x86_64, ARMv7, AARCH64 (Apple M1/M2), RISCV, LOONGARCH (Loongson), MIPS. Domestic CPU support gives it a unique advantage in the Chinese xinchuang market
 
-### 扩展性 / 插件机制
-SRS 没有官方插件系统。扩展方式：
-- **HTTP Callback 事件系统**：定义了一组流生命周期事件（on_publish, on_unpublish, on_play, on_stop, on_dvr, on_hls, on_rtc_play）。事件发生时 HTTP POST 调用配置 URL。用于：
-  - 认证：on_publish/on_play 回调中验证 token 和权限，返回 HTTP 状态码控制允许/拒绝
-  - 计费：on_stop 回调中记录观看时长
-  - 通知：on_dvr 回调中通知录制完成
-  - 自动转码：on_publish 回调触发 FFmpeg 子进程做 ABR 转码
-- **外部 FFmpeg 转码**：通过 HTTP 回调 on_publish 自动启动 FFmpeg 进程。FFmpeg 输出新的 RTMP 流（如 `stream_720p`, `stream_480p`）。SRS 接收这些流作为独立的 path。然后手动配置 HLS master playlist 或 DASH MPD 包含多码率
-- **Origin-Edge 集群**：通过配置文件指定 Edge 节点的上游 Origin。Edge 节点启动时连接 Origin 并拉流。动态流分配（观众请求时 Edge 才从 Origin 拉取该流）
-- **HTTP API**：运行时查询（流列表、客户端列表、服务器状态、统计信息），运行时控制（踢出发布者/播放者），配置查询
-- **SRT 混合模块（hybrid model）**：SRT 作为独立 Go 进程运行。通过内部 TCP 连接与 C/C++ 主进程通信。这是历史遗留设计，不是推荐的扩展模式
+### Extensibility / plugin mechanism
+SRS has no official plugin system. Extension mechanisms:
+- **HTTP Callback event system**: defines a set of stream lifecycle events (on_publish, on_unpublish, on_play, on_stop, on_dvr, on_hls, on_rtc_play). When an event occurs, an HTTP POST is made to the configured URL. Used for:
+  - Authentication: verify tokens and permissions in the on_publish/on_play callback, controlling allow/deny via the HTTP status code
+  - Billing: record viewing duration in the on_stop callback
+  - Notification: notify that recording is complete in the on_dvr callback
+  - Automatic transcoding: trigger an FFmpeg subprocess for ABR transcoding in the on_publish callback
+- **External FFmpeg transcoding**: automatically starts an FFmpeg process via the on_publish HTTP callback. FFmpeg outputs new RTMP streams (such as `stream_720p`, `stream_480p`). SRS receives these streams as independent paths. Then the HLS master playlist or DASH MPD is manually configured to include multiple bitrates
+- **Origin-Edge cluster**: the upstream Origin of Edge nodes is specified in the configuration file. Edge nodes connect to the Origin on startup and pull the stream. Dynamic stream allocation (Edge pulls the stream from Origin only when a viewer requests it)
+- **HTTP API**: runtime queries (stream list, client list, server status, statistics), runtime control (kick publishers/viewers), configuration queries
+- **SRT hybrid module (hybrid model)**: SRT runs as a separate Go process. It communicates with the C/C++ main process over an internal TCP connection. This is a historical legacy design and not the recommended extension model
 
-## 4. 现状与生态
-- **当前版本**：SRS/8.0（2026-05-17，code Free）。此前的最新 tagged release 是 v6.0-r0（2025-12-03，170,962 行代码）。自 v6.0 后不再使用语义化版本号，改为品牌版本
-- **GitHub Stars / 活跃度**：约 29,000 stars，5,600+ forks。持续高活跃度，120+ 贡献者。Open Issues 约 45 个。核心维护者 winlinvip 全职投入 SRS 开发超过 10 年。Release 周期：v5.x 约每季度一个 release，v6.x 约每月一个 alpha/beta
-- **社区规模**：可能是中文互联网最活跃的开源流媒体社区。中文文档完善（Wiki + 官方文档站 ossrs.io/ossrs.net）。英文文档也持续完善。Reddit、GitHub Issues/Discussions 活跃。微信社群。Oryx 开发者社区
-- **文档 / SDK / API 生态**：
-  - 官方网站：ossrs.io (国际站), ossrs.net (中国站)。完整的中英文文档
-  - Wiki: GitHub Wiki 包含详细的架构文档、配置指南、性能测试报告、FAQ
-  - HTTP API 文档：完整的 REST API 参考
-  - 配置文档：每个参数有详细说明。示例配置文件丰富
-  - 客户端 SDK：srsRTCPlayer.js (WebRTC 播放器)，srsPlayer.js (HTTP-FLV/HLS 播放器)。社区贡献 Java/C#/Python/Go SDK
-  - 播放器兼容：FFmpeg (推流/拉流)，OBS Studio (推流)，VLC (RTMP/HLS 播放)，browser WebRTC (WHEP 播放)
-  - 运维工具：Prometheus + Grafana 监控模板，Docker Compose (docker-compose.yml)，Helm Chart (Kubernetes)
-  - Oryx (SRS Stack)：一体化管理平台。Docker 一键部署。Web UI 管理界面。支持 docker run 一行命令启动完整直播平台
-- **已知缺陷或限制**：
-  - **内部模型固定为 RTMP 流（最大架构限制）**：所有输入归一化到 RTMP，所有输出从 RTMP 派生。添加新协议（如 MoQ/QUIC 的 subgroup 和 object 概念）需要扭曲适配 RTMP 语义。这是 SRS 的阿喀琉斯之踵
-  - **不支持 QUIC/Media-over-QUIC**：MediaMTX v1.19.0 已支持，SRS 无计划。RTMP 中心架构难以适配 QUIC 的多路复用和对象模型
-  - **无内置 TURN/STUN**：WebRTC 的 NAT 穿透完全依赖外部 coturn 服务器。增加了部署复杂度和故障点
-  - **SRT 混合进程模型**：独立 Go 进程 + TCP 管道桥接增加了延迟、维护复杂度和故障点
-  - **集群管理无 GUI**：Origin-Edge 配置全部在配置文件中手动指定。无图形化管理或动态编排
-  - **C 代码基础老化**：核心代码始于 2013 年，17 万行 C/C++。技术债务积累。新人入手难度高
-  - **HLS 延迟较高**：LL-HLS 的 2-3s 延迟在 WebRTC 时代（<100ms）显得较慢
-  - **WebRTC 推流转 RTMP 有编解码开销**：WHIP 推流（H.264/Opus）→ 解码 → 重新编码为 FLV（H.264/AAC）→ RTMP。破坏了纯 transmux 的性能优势
-  - **ABR 配置复杂**：多码率分发需要手动配置 FFmpeg 转码 + 手动编辑 HLS master playlist。无自动化 ABR ladder
+## 4. Status & Ecosystem
+- **Current version**: SRS/8.0 (2026-05-17, code Free). The previous latest tagged release was v6.0-r0 (2025-12-03, 170,962 lines of code). Semantic versioning has not been used since v6.0; it switched to brand versioning
+- **GitHub Stars / activity**: about 29,000 stars, 5,600+ forks. Sustained high activity, 120+ contributors. About 45 open issues. Core maintainer winlinvip has worked full-time on SRS development for over 10 years. Release cycle: v5.x about one release per quarter, v6.x about one alpha/beta per month
+- **Community size**: possibly the most active open-source streaming community on the Chinese internet. The Chinese documentation is thorough (Wiki + the official documentation sites ossrs.io/ossrs.net). English documentation is also continuously improving. Reddit, GitHub Issues/Discussions are active. WeChat groups. An Oryx developer community
+- **Documentation / SDK / API ecosystem**:
+  - Official websites: ossrs.io (international), ossrs.net (China). Complete Chinese and English documentation
+  - Wiki: the GitHub Wiki contains detailed architecture documents, configuration guides, performance test reports, FAQ
+  - HTTP API documentation: a complete REST API reference
+  - Configuration documentation: detailed descriptions for every parameter. Rich example configuration files
+  - Client SDKs: srsRTCPlayer.js (WebRTC player), srsPlayer.js (HTTP-FLV/HLS player). Community-contributed Java/C#/Python/Go SDKs
+  - Player compatibility: FFmpeg (push/pull), OBS Studio (push), VLC (RTMP/HLS playback), browser WebRTC (WHEP playback)
+  - Operations tooling: Prometheus + Grafana monitoring templates, Docker Compose (docker-compose.yml), Helm Chart (Kubernetes)
+  - Oryx (SRS Stack): an integrated management platform. One-click Docker deployment. A web UI management interface. Supports starting a complete live platform with one docker run command
+- **Known defects or limitations**:
+  - **The internal model is fixed as the RTMP stream (the biggest architectural limitation)**: all inputs are normalized to RTMP and all outputs are derived from RTMP. Adding a new protocol (such as MoQ/QUIC's subgroup and object concepts) requires twisting the adaptation to RTMP semantics. This is SRS's Achilles' heel
+  - **No QUIC/Media-over-QUIC support**: MediaMTX v1.19.0 already supports it, SRS has no plans. An RTMP-centric architecture is hard to adapt to QUIC's multiplexing and object model
+  - **No built-in TURN/STUN**: WebRTC NAT traversal depends entirely on an external coturn server. This adds deployment complexity and failure points
+  - **The SRT hybrid process model**: a separate Go process + TCP pipe bridging adds latency, maintenance complexity, and failure points
+  - **No GUI for cluster management**: Origin-Edge configuration is all specified manually in configuration files. No graphical management or dynamic orchestration
+  - **An aging C code base**: the core code dates from 2013, 170k lines of C/C++. Accumulated technical debt. High difficulty for newcomers to start
+  - **Relatively high HLS latency**: LL-HLS's 2-3s latency seems slow in the WebRTC era (<100ms)
+  - **WebRTC push to RTMP has codec overhead**: WHIP push (H.264/Opus) → decode → re-encode to FLV (H.264/AAC) → RTMP. This breaks the pure transmux performance advantage
+  - **Complex ABR configuration**: multi-bitrate distribution requires manually configured FFmpeg transcoding + manually editing the HLS master playlist. No automated ABR ladder
 
-## 5. 市场定位
-- **主要应用行业**：中文互联网直播 — 斗鱼/虎牙/快手/抖音/B站等平台大量使用 SRS 作为边缘/中转服务器（最大用户群体），在线教育直播 — 网课平台实时互动，企业直播/培训 — 内部培训直播，安防监控 — GB28181 摄像头接入和流分发，海外中小型直播平台 — RTMP/HLS/LHLS 分发
-- **竞品对比简表**：
-| 维度 | SRS | MediaMTX | nginx-rtmp | Ant Media | Wowza | LiveKit |
+## 5. Market Positioning
+- **Main application industries**: Chinese internet live streaming — platforms such as Douyu/Huya/Kuaishou/Douyin/Bilibili heavily use SRS as edge/relay servers (the largest user base); online education live streaming — real-time interaction on course platforms; corporate live/training — internal training streams; surveillance — GB28181 camera ingestion and stream distribution; small and medium live platforms overseas — RTMP/HLS/LHLS distribution
+- **Competitive comparison summary**:
+| Dimension | SRS | MediaMTX | nginx-rtmp | Ant Media | Wowza | LiveKit |
 |------|-----|----------|------------|-----------|-------|---------|
-| 核心语言 | C/C++ | Go | C | Java | Java | Go/TS |
-| 协议数 | 8 | 7 | 3 | 6+ | 10+ | 1 (WebRTC) |
-| 内部模型 | **RTMP 归一化** | Path + 无统一模型 | 无统一模型 | RTMP 归一化 | 多格式 | Room/Track |
-| 内置转码 | ❌ | ❌ | ❌ | ✅ (H.264) | ✅ (多格式) | ✅ |
+| Core language | C/C++ | Go | C | Java | Java | Go/TS |
+| Number of protocols | 8 | 7 | 3 | 6+ | 10+ | 1 (WebRTC) |
+| Internal model | **RTMP normalization** | Path + no unified model | no unified model | RTMP normalization | multi-format | Room/Track |
+| Built-in transcoding | ❌ | ❌ | ❌ | ✅ (H.264) | ✅ (multi-format) | ✅ |
 | MoQ/QUIC | ❌ | ✅ v1.19 | ❌ | ❌ | ❌ | ❌ |
-| 集群 | Origin-Edge | Read Replica | push/pull | 内置集群 | 内置集群 | 内置 SFU |
-| TURN 内置 | ❌ (需 coturn) | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Cluster | Origin-Edge | Read Replica | push/pull | built-in cluster | built-in cluster | built-in SFU |
+| TURN built in | ❌ (requires coturn) | ❌ | ❌ | ✅ | ✅ | ✅ |
 | GB28181 | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| RTMP 深度 | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ❌ |
-| HLS 优化 | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ❌ |
-| Stars | 29K | 20K | 14K | 3K | N/A (闭源) | 30K+ |
-| 中文支持 | ⭐⭐⭐⭐⭐ | ⭐ | ⭐ | ⭐ | ⭐ | ⭐ |
-| 许可 | MIT | MIT | BSD-2 | 商业 | 商业 | Apache 2.0 |
-| 发布年份 | 2013 | 2019 | 2012 | 2018 | 2007 | 2021 |
-| 代码规模 | 17万行 | ~5万行 | ~3万行 | ~20万行 | ~50万行 | ~10万行 |
-- **定价 / 许可**：MIT 免费开源（SRS/8.0 code Free）。Oryx (SRS Stack) 平台有免费版和付费版（高级特性如多用户管理、录制管理、统计面板）。企业可购买商业技术支持
+| RTMP depth | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ❌ |
+| HLS optimization | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ❌ |
+| Stars | 29K | 20K | 14K | 3K | N/A (closed source) | 30K+ |
+| Chinese support | ⭐⭐⭐⭐⭐ | ⭐ | ⭐ | ⭐ | ⭐ | ⭐ |
+| License | MIT | MIT | BSD-2 | commercial | commercial | Apache 2.0 |
+| Release year | 2013 | 2019 | 2012 | 2018 | 2007 | 2021 |
+| Code size | 170k lines | ~50k lines | ~30k lines | ~200k lines | ~500k lines | ~100k lines |
+- **Pricing / license**: MIT free open source (SRS/8.0 code Free). The Oryx (SRS Stack) platform has a free tier and a paid tier (advanced features such as multi-user management, recording management, statistics panel). Enterprises can purchase commercial technical support
 
-## 6. 产品特色
-1. **开源 RTMP 协议实现的巅峰**：13 年持续打磨。Enhanced RTMP (HEVC/AV1/多轨) 领先业界。OBS Studio 作为兼容性基准。17 万行 C/C++ 代码承载了 RTMP 时代的所有经验教训
-2. **ST 协程架构的工程实践**：单进程多协程、同步编程模型避免了 C/C++ 异步编程的复杂性。2013 年就实现了如今 async/await 的用户体验，但用的是 2001 年的协程库
-3. **Transmux 零转码架构**：不解码/编码，仅容器格式转换。单机 4 核可承载数千 RTMP 并发。CPU 占用极低。不需要 GPU。这是简单场景下的最优架构
-4. **GB28181 国标唯一开源支持**：中国安防监控行业的国家标准协议。SIP 信令 + RTP/PS 媒体传输。中国安防摄像头接入的标准开源方案
-5. **中文社区生态全面**：可能是全球中文文档最完善的开源流媒体服务器。完整的中文 Wiki、博客、微信群。Oryx 一键部署的 Web UI。零门槛上手
-- **版本演进**：
-  - 2013 年：SRS v1.0 — 仅 RTMP，C 语言，ST 协程架构确立
-  - 2015 年：SRS v2.0 — HLS 支持，HTTP Callback，DVR 录制
-  - 2017 年：SRS v3.0 — HTTP-FLV，多进程架构，DASH 支持
-  - 2020 年：SRS v4.0 — WebRTC (WHIP/WHEP) 支持 (重大里程碑)，SRT 支持 (Go 独立进程)
-  - 2021 年：SRS v5.0 — H.265/AV1 Enhanced RTMP，LL-HLS，GB28181 (安防)
-  - 2023 年：SRS v6.0 — Centrifuge 级联集群，SRT 推流，WebTransport 初步
-  - 2025 年：SRS v6.0-r0 — 170,962 行代码，最后语义化版本
-  - 2026-05：SRS/8.0 — 品牌更名，MIT 许可 "code Free" 版本
-- **贡献者结构**：120+ 贡献者，核心维护者 winlinvip 全职开发超 10 年。公司赞助包括声网 (Agora) 等 Chinese 实时音视频公司
-- **中国市场占有率**：中文互联网直播场景中 RTMP 服务器市场的约 30-40% (预估)，Oryx (SRS Stack) Docker 镜像下载量数百万次
+## 6. Product Highlights
+1. **The pinnacle of open-source RTMP protocol implementations**: 13 years of continuous refinement. Enhanced RTMP (HEVC/AV1/multi-track) ahead of the industry. OBS Studio as the compatibility benchmark. 170k lines of C/C++ carry all the lessons of the RTMP era
+2. **Engineering practice of the ST coroutine architecture**: single process, multiple coroutines; the synchronous programming model avoids the complexity of C/C++ async programming. In 2013 it already delivered today's async/await user experience, but with a 2001 coroutine library
+3. **The Transmux zero-transcode architecture**: no decode/encode, only container format conversion. A single 4-core machine can handle thousands of RTMP sessions. Extremely low CPU usage. No GPU needed. This is the optimal architecture for simple scenarios
+4. **The only open-source support for the GB28181 national standard**: the national standard protocol of the Chinese surveillance industry. SIP signaling + RTP/PS media transport. The standard open-source solution for Chinese surveillance camera ingestion
+5. **A comprehensive Chinese community ecosystem**: possibly the open-source streaming server with the best Chinese documentation in the world. A complete Chinese Wiki, blogs, WeChat groups. Oryx one-click deployment web UI. Zero-barrier onboarding
+- **Version evolution**:
+  - 2013: SRS v1.0 — RTMP only, C language, the ST coroutine architecture established
+  - 2015: SRS v2.0 — HLS support, HTTP Callback, DVR recording
+  - 2017: SRS v3.0 — HTTP-FLV, multi-process architecture, DASH support
+  - 2020: SRS v4.0 — WebRTC (WHIP/WHEP) support (a major milestone), SRT support (Go separate process)
+  - 2021: SRS v5.0 — H.265/AV1 Enhanced RTMP, LL-HLS, GB28181 (surveillance)
+  - 2023: SRS v6.0 — Centrifuge cascading cluster, SRT push, initial WebTransport
+  - 2025: SRS v6.0-r0 — 170,962 lines of code, the last semantic version
+  - 2026-05: SRS/8.0 — brand rename, MIT licensed "code Free" edition
+- **Contributor structure**: 120+ contributors, core maintainer winlinvip developing full-time for over 10 years. Corporate sponsors include Agora and other Chinese real-time audio/video companies
+- **Chinese market share**: about 30-40% of the RTMP server market in Chinese internet live streaming scenarios (estimated); Oryx (SRS Stack) Docker image downloads in the millions
 
+## 7. Reference Value for MediaServo
+### [Adopt] Directly Adoptable
+1. **The Transmux zero-transcode fast path**: MediaServo should support a "fast transmux path": when the Fragment payload is fMP4/CMAF, outputting HLS/DASH/HTTP-FLV reuses the payload directly or does container format conversion only, with no decode/encode. This is the performance-optimal path. Start the encoding pipeline only when ABR is needed
+2. **The HTTP Callback event system**: the stream lifecycle callback pattern of `on_publish`/`on_play`/`on_unpublish`/`on_stop`/`on_dvr` is concise and practical. MediaServo's `StreamingSDK` needs the same hook system for authentication, billing, notification, and automated transcoding triggers
+3. **The Origin-Edge cluster topology**: a multi-level edge node cluster model validated at large scale. Suited to CDN edge distribution scenarios. MediaServo's `ClusterPlugin` can adopt a similar topology early on — simple and effective
+4. **The GOP Cache mechanism**: caching the most recent GOP lets new viewers get a picture immediately. This is a basic requirement of online live streaming. MediaServo's HLS/HTTP-FLV output layer must implement it. See SRS's ring buffer + keyframe boundary strategy
+5. **A Prometheus + Grafana observability reference**: SRS's metrics design (stream count/client count/bitrate/latency distribution) is a basic reference. MediaServo should add Fragment-level metrics on top of it (Fragment throughput, Observer latency, SLO violation count)
+6. **The Docker + Helm deployment model**: Docker images + Helm Charts are standard in the K8s era. MediaServo should reference SRS's deployment configuration (multi-architecture Dockerfile + K8s values.yaml)
 
-## 7. 对 MediaServo 的参考价值
-### [Adopt] 可直接借鉴
-1. **Transmux 零转码快速路径**：MediaServo 应该支持"快速 transmux 路径"：当 Fragment payload 是 fMP4/CMAF 时，输出 HLS/DASH/HTTP-FLV 直接复用 payload 或仅做容器格式转换，不解码/编码。这是性能最优的路径。当需要 ABR 时才启动编码管线
-2. **HTTP Callback 事件系统**：`on_publish`/`on_play`/`on_unpublish`/`on_stop`/`on_dvr` 的流生命周期回调模式简洁实用。MediaServo 的 `StreamingSDK` 需要相同的钩子系统用于认证、计费、通知、自动化转码触发
-3. **Origin-Edge 集群拓扑**：多级边缘节点经大规模验证的集群模型。适合 CDN 边缘分发场景。MediaServo 的 `ClusterPlugin` 在初期可以采用相似拓扑，简单有效
-4. **GOP Cache 机制**：缓存最近 GOP 使新观众秒开。这是在线直播的基本要求。MediaServo 的 HLS/HTTP-FLV 输出层必须实现。参考 SRS 的 ring buffer + keyframe boundary 策略
-5. **Prometheus + Grafana 可观测性参考**：SRS 的 metrics 设计（流数/客户端数/码率/延迟分布）是基础参考。MediaServo 应该在此基础上增加 Fragment 级指标（Fragment 吞吐量、Observer 延迟、SLO 违反次数）
-6. **Docker + Helm 部署模式**：Docker 镜像 + Helm Chart 的部署方式是 K8s 时代的标配。MediaServo 应该参考 SRS 的部署配置（多架构 Dockerfile + K8s values.yaml）
+### [Adapt] Needs Modification Before Adoption
+1. **RTMP normalization → Unified Fragment Model**: SRS normalizes all inputs to RTMP. MediaServo should borrow the normalization idea but replace RTMP with Fragment. Fragment has none of RTMP's semantic limitations (no fixed audio/video interleaving, has unordered object IDs, has a subgroup concept) and can map naturally onto new protocols such as MoQ/QUIC
+2. **The coroutine model → Tokio async/await**: ST coroutines are a non-standard technology. MediaServo uses Rust's Tokio (the industry standard), with identical functionality but a more complete ecosystem. The synchronous-style async/await code is equally readable
+3. **The RTMP protocol implementation as a reference**: SRS's RTMP implementation can serve as the functional specification and compatibility benchmark for `mediaservo-ingest-rtmp`. But the code cannot be ported directly (incompatible language and license). It must be reimplemented in Rust, with a focus on Enhanced RTMP compatibility
+4. **A reference implementation of the GB28181 protocol**: MediaServo's `SurveillanceSDK` should consider GB28181 in Phase 3+. SRS's SIP signaling + RTP/PS depacketizing is the only referenceable open-source implementation. Attention is needed to SIP registration, keepalive, catalog query, and invite signaling flows
+5. **HTTP-FLV output**: the HTTP-FLV protocol unique to the Chinese live ecosystem. MediaServo's `HlsPlugin` can add HTTP-FLV output capability (generating FLV tag sequences from the Fragment payload). This is a lightweight format conversion
+6. **The Oryx management platform philosophy**: the one-click Docker deployment + Web UI model is a reference for MediaServo's deployment shape. But MediaServo's Client is a desktop application and Host's embedded configuration page is axum + static HTML, not SRS's web SPA
 
-### [Adapt] 需修改后采用
-1. **RTMP 归一化 → Unified Fragment Model**：SRS 所有输入归一化到 RTMP。MediaServo 应该借鉴归一化思想，但用 Fragment 替代 RTMP。Fragment 没有 RTMP 的语义限制（无固定音视频交错、有无序 object ID、有 subgroup 概念），可以自然地映射到 MoQ/QUIC 等新协议
-2. **协程模型 → Tokio async/await**：ST 协程是非标准技术。MediaServo 用 Rust 的 Tokio（业界标准），功能相同但生态更完整。同步风格的 async/await 代码可读性同样好
-3. **RTMP 协议实现的参考**：SRS 的 RTMP 实现可以作为 `mediaservo-ingest-rtmp` 的功能规范和兼容性基准。但不能直接移植代码（语言和许可不兼容）。需用 Rust 重新实现，重点关注 Enhanced RTMP 兼容性
-4. **GB28181 协议的参考实现**：MediaServo 的 `SurveillanceSDK` 在 Phase 3+ 应考虑 GB28181。SRS 的 SIP 信令 + RTP/PS 解包是唯一可参考的开源实现。需要关注 SIP 注册、心跳、catalog 查询、invite 信令流程
-5. **HTTP-FLV 输出**：中文直播生态特有的 HTTP-FLV 协议。MediaServo 的 `HlsPlugin` 可以附加 HTTP-FLV 输出能力（从 Fragment payload 生成 FLV tag 序列）。这是轻量级的格式转换
-6. **Oryx 管理平台的理念**：Docker 一键部署 + Web UI 的模式对 MediaServo 的部署形态有参考价值。但 MediaServo 的 Client 是桌面应用，Host 的嵌入式配置页是 axum + 静态 HTML，不是 SRS 的 Web SPA
+### [Avoid] Known Pitfalls / Not Applicable
+1. **Do not use RTMP as the internal unified representation (the core lesson)**: RTMP's semantic limitations (fixed audio/video interleaving, no subgroup, no object ID) make adding new protocols difficult. MediaServo must replace RTMP normalization with the Fragment Model. This is the most important lesson learned from SRS
+2. **Do not use ST coroutines or other non-standard concurrency technologies**: ST coroutine debugging tools are immature, the community is small, and hiring is hard. MediaServo should use Tokio async/await (Rust's standard async runtime)
+3. **Do not depend entirely on external transcoding**: SRS has no built-in transcoding and depends on an external FFmpeg process. MediaServo needs built-in transmux (mandatory) and an optional encoding pipeline (for ABR, format transcoding, and similar scenarios). The `Transcoder` trait should support multiple backends
+4. **Do not use a multi-language mixed-process architecture**: SRS's separate SRT Go process + TCP pipe bridging is a historical burden. Cross-process communication adds latency and failure points. MediaServo should keep all critical paths inside a single Rust process
+5. **The technical debt lesson of 170k lines of C code**: the maintenance challenge of a large single-repository code base. MediaServo should keep clear crate boundaries from the start (see LVQR's 29 crates) and avoid a monolithic code base
+6. **The operational burden of separately deploying TURN servers**: SRS's dependence on an external coturn is a persistent pain point. MediaServo should make TURN/STUN an optional built-in module (`StunTurnPlugin`) to simplify deployment
+7. **The codec overhead of WebRTC push to RTMP**: SRS's WHIP push to RTMP requires decode→re-encode, destroying transmux performance. With the Fragment Model, MediaServo's WHIP input produces Fragments directly, with no re-encoding needed
 
-### [Avoid] 已知坑 / 不适用场景
-1. **不要以 RTMP 作为内部统一表示（核心教训）**：RTMP 的语义限制（固定音视频交错、无 subgroup、无 object ID）使得添加新协议困难。MediaServo 必须用 Fragment Model 替代 RTMP 归一化。这是从 SRS 吸取的最重要教训
-2. **不要用 ST 协程或非标准并发技术**：ST 协程调试工具不完善、社区小、招聘难。MediaServo 应该使用 Tokio async/await（Rust 标准异步运行时）
-3. **不要完全依赖外部转码**：SRS 不内置转码，依赖外部 FFmpeg 进程。MediaServo 需要内置 transmux（必须）和可选编码管线（ABR、格式转码等场景）。`Transcoder` trait 支持多种后端
-4. **不要使用多语言混合进程架构**：SRS 的 SRT 独立 Go 进程 + TCP 管道桥接是历史包袱。跨进程通信增加了延迟和故障点。MediaServo 应将所有关键路径保持在 Rust 单进程中
-5. **17 万行 C 代码的技术债务教训**：单仓库大代码库的维护挑战。MediaServo 应该从初期就保持清晰的 crate 边界（参考 LVQR 的 29 crate），避免单体代码库
-6. **TURN 服务器独立部署的运维负担**：SRS 依赖外部 coturn 是持续的痛点。MediaServo 应将 TURN/STUN 作为一个可选的内置模块（`StunTurnPlugin`），简化部署
-7. **WebRTC 推流转 RTMP 的编解码开销**：SRS WHIP 推流转 RTMP 需要解码→重新编码，破坏 transmux 性能。MediaServo 如果用 Fragment Model，WHIP 输入直接产生 Fragment，无需重新编码
+**Overall rating**: ★★★☆☆ (3/5)
 
-**总体评分**：★★★☆☆ (3/5)
-
-SRS 是 RTMP 时代的标杆 — 协议兼容性、生产稳定性、传输性能、中文社区支持均无可匹敌。但以 RTMP 为中心的归一化模型是它的根本性架构缺陷，限制了向 MoQ/QUIC 等现代协议的演进。MediaServo 应从 SRS 学习 transmux 哲学、HTTP Callback 事件系统、Origin-Edge 集群拓扑和可观测性设计，但必须用 Fragment Model 替代 RTMP 归一化，从根本上解决 13 年前的架构遗留问题。
+SRS is the benchmark of the RTMP era — unmatched in protocol compatibility, production stability, transport performance, and Chinese community support. But an RTMP-centric normalization model is its fundamental architectural flaw, limiting evolution toward modern protocols such as MoQ/QUIC. MediaServo should learn from SRS's transmux philosophy, HTTP Callback event system, Origin-Edge cluster topology, and observability design, but must replace RTMP normalization with the Fragment Model to fundamentally solve the architectural legacy problem from 13 years ago.
 
 ---
-**相关决策**: D5 (Unified Fragment), D6, D19, D-STREAM-TOPOLOGY, D-GOP-CACHE
+**Related decisions**: D5 (Unified Fragment), D6, D19, D-STREAM-TOPOLOGY, D-GOP-CACHE
 
-## 附录 A: ST 协程架构详解
+## Appendix A: Detailed Explanation of the ST Coroutine Architecture
 
-### A.1 ST (State Threads) 协程原理
+### A.1 The ST (State Threads) coroutine principle
 
-ST 是 2001 年 Netscape 开发的用户态线程库。SRS 自 2013 年起使用 ST
-作为唯一并发模型。
+ST is a user-space threading library developed by Netscape in 2001. SRS has used ST
+as its only concurrency model since 2013.
 
-**核心特性**：
-- 用户态协程：调度在内核之外完成，无需系统调用切换上下文
-- M:1 模型：多个 ST 协程映射到 1 个内核线程，单进程运行
-- 协作式调度：协程主动 yield (通常在 I/O 操作时)
-- 上下文切换成本近似于函数调用 (保存/恢复寄存器)
-- 每个连接一个协程：新 TCP 连接到达则创建 ST 协程处理此连接所有 I/O
+**Core characteristics**:
+- User-space coroutines: scheduling happens outside the kernel, with no system calls for context switches
+- M:1 model: many ST coroutines map to 1 kernel thread, running in a single process
+- Cooperative scheduling: coroutines yield voluntarily (usually on I/O operations)
+- Context switch cost approximately that of a function call (saving/restoring registers)
+- One coroutine per connection: on a new TCP connection, an ST coroutine is created to handle all of that connection's I/O
 
-**调度流程**：
+**Scheduling flow**:
 ```
                    ST Scheduler
                    
@@ -342,80 +348,81 @@ ST 是 2001 年 Netscape 开发的用户态线程库。SRS 自 2013 年起使用
                [coro_5 (waiting for fd=9)]
 
   Loop:
-  1. 从 Ready Queue 取出协程，恢复执行
-  2. 协程执行到 I/O 操作 -> yield -> 加入 Wait Queue
-  3. select() 等待 I/O 事件 -> 就绪协程移入 Ready
-  4. 回到步骤 1
+  1. Take a coroutine from the Ready Queue, resume execution
+  2. The coroutine runs to an I/O operation -> yield -> added to the Wait Queue
+  3. select() waits for I/O events -> ready coroutines move to Ready
+  4. Back to step 1
 ```
 
-### A.2 与 Tokio async/await 的比较
+### A.2 Comparison with Tokio async/await
 
-| 维度 | ST 协程 | Tokio async/await |
+| Dimension | ST coroutines | Tokio async/await |
 |------|---------|-------------------|
-| 语言 | C (非标准) | Rust (语言级支持) |
-| 调度模型 | 协作式 (手动 yield) | 协作式 (await point 自动 yield) |
-| 上下文切换 | 近乎函数调用 | 近乎函数调用 |
+| Language | C (non-standard) | Rust (language-level support) |
+| Scheduling model | Cooperative (manual yield) | Cooperative (automatic yield at await points) |
+| Context switch | Nearly a function call | Nearly a function call |
 
 
-### [Adopt] 补充 — HTTP Callback 事件系统详细设计
+### [Adopt] Supplementary — detailed design of the HTTP Callback event system
 
-**10. HTTP Callback 的事件类型与 MediaServo 映射**：
+**10. HTTP Callback event types and their MediaServo mapping**:
 
-| SRS Callback | 触发时机 | 返回控制 | MediaServo 等效 |
+| SRS Callback | Trigger timing | Return control | MediaServo equivalent |
 |-------------|---------|---------|---------------|
-| on_publish | publisher 推流请求 | HTTP 200=允许, 其他=拒绝 | MediaSource::on_publish |
-| on_unpublish | publisher 断开连接 | 无（通知） | MediaSource::on_unpublish |
-| on_play | viewer 开始播放 | HTTP 200=允许, 其他=拒绝 | MediaSink::on_subscribe |
-| on_stop | viewer 停止播放 | 无（通知） | MediaSink::on_unsubscribe |
-| on_dvr | 录制段完成 | 无（通知） | RecordSink::on_segment_closed |
-| on_hls | HLS segment 生成 | 无（通知） | HlsSink::on_partial_ready |
-| on_rtc_play | WebRTC 播放开始 | HTTP 200=允许, 其他=拒绝 | WhepSink::on_subscribe |
+| on_publish | publisher push request | HTTP 200=allow, otherwise=deny | MediaSource::on_publish |
+| on_unpublish | publisher disconnects | none (notification) | MediaSource::on_unpublish |
+| on_play | viewer starts playback | HTTP 200=allow, otherwise=deny | MediaSink::on_subscribe |
+| on_stop | viewer stops playback | none (notification) | MediaSink::on_unsubscribe |
+| on_dvr | recording segment complete | none (notification) | RecordSink::on_segment_closed |
+| on_hls | HLS segment generated | none (notification) | HlsSink::on_partial_ready |
+| on_rtc_play | WebRTC playback starts | HTTP 200=allow, otherwise=deny | WhepSink::on_subscribe |
 
-MediaServo 的 callback 系统应设计为 `EventHook` trait，支持 HTTP 回调（远程服务）和本地回调（内建认证/计费插件）两种模式。
+MediaServo's callback system should be designed as an `EventHook` trait supporting two modes: HTTP callbacks (remote services) and local callbacks (built-in auth/billing plugins).
 
-### [Adapt] 补充 — Origin-Edge 集群的 MediaServo 实现
+### [Adapt] Supplementary — MediaServo implementation of the Origin-Edge cluster
 
-**8. Origin-Edge 拓扑在 ClusterPlugin 中的实现策略**：
+**8. Implementation strategy of the Origin-Edge topology in the ClusterPlugin**:
 
-MediaServo Phase 1-2 的集群模型可以直接采用 Origin-Edge 拓扑（与 SRS 一致）：
+MediaServo's Phase 1-2 cluster model can adopt the Origin-Edge topology directly (identical to SRS):
 
 ```
-Origin 节点                          Edge 节点
+Origin node                          Edge node
 (PipelineEngine)                     (PipelineEngine)
-├── MediaSource (RTMP)               ├── MediaSource (从 Origin 拉流)
-├── MediaSink (HLS)                  ├── MediaSink (HLS, 本地观众)
-├── MediaSink (WHEP)                 ├── MediaSink (WHEP, 本地观众)
-└── ClusterPlugin (Origin 角色)      └── ClusterPlugin (Edge 角色)
-     ├── 接收推流                           ├── 从 Origin 的 FragmentBroadcaster
-     └── FragmentBroadcaster                拉取 Fragment 流 (gRPC/QUIC)
-          └── 非本地 edge 通过远程拉流       └── 广播到本地 Sink
+├── MediaSource (RTMP)               ├── MediaSource (pulls from Origin)
+├── MediaSink (HLS)                  ├── MediaSink (HLS, local viewers)
+├── MediaSink (WHEP)                 ├── MediaSink (WHEP, local viewers)
+└── ClusterPlugin (Origin role)      └── ClusterPlugin (Edge role)
+     ├── receives pushes                    ├── pulls Fragment streams from the
+     └── FragmentBroadcaster                  Origin's FragmentBroadcaster
+                                               (gRPC/QUIC)
+          └── non-local edges via remote pull └── broadcasts to local Sinks
 ```
 
-关键差异：SRS 的 Edge 从 Origin 拉取 RTMP 流（需要编解码器感知），MediaServo 的 Edge 从 Origin 拉取 Fragment 流（协议无关）。这意味着 Edge 可以缓存和分发的数据格式不受协议限制 — 同一个 Fragment 流可以被 Edge 的 HLS、DASH、WHEP 三个 Sink 独立消费。
+Key difference: SRS's Edge pulls an RTMP stream from the Origin (requiring codec awareness), while MediaServo's Edge pulls a Fragment stream from the Origin (protocol-agnostic). This means the data format an Edge can cache and distribute is not restricted by protocol — the same Fragment stream can be consumed independently by an Edge's HLS, DASH, and WHEP Sinks.
 
-### [Avoid] 补充 — 更多不适用场景
+### [Avoid] Supplementary — more not-applicable scenarios
 
-**8. RTMP 作为推流协议的生命周期**：RTMP 于 2009 年由 Adobe 公开规范，至今超过 15 年。虽然 RTMP 兼容性在直播生态中不可替代（OBS→RTMP→SRS 是目前最成熟的推流链路），但 Adobe Flash Player 已于 2020 年退役。RTMP 在传输层面逐渐被 SRT/WebRTC/MoQ 替代。MediaServo 必须支持 RTMP（Phase 1，因为 OBS 和推流工具链依赖它），但不应将其作为架构核心。Fragment Model 使 RTMP 成为平等的协议之一，而非架构中心。
+**8. The lifecycle of RTMP as a streaming protocol**: RTMP was publicly specified by Adobe in 2009, over 15 years ago. Although RTMP compatibility is irreplaceable in the live streaming ecosystem (OBS→RTMP→SRS is currently the most mature push chain), Adobe Flash Player was retired in 2020. RTMP is gradually being replaced at the transport layer by SRT/WebRTC/MoQ. MediaServo must support RTMP (Phase 1, because OBS and the push toolchain depend on it), but should not make it the architectural core. The Fragment Model makes RTMP one equal protocol among others rather than the center of the architecture.
 
-**9. 17 万行 C 代码的维护代价**：SRS 的单体代码库 (170K 行 C/C++) 使得新人贡献门槛极高。MediaServo 从 Phase 0 就要避免这个问题 — 每个 crate 保持在 2000-5000 行 Rust 代码，加上清晰的 crate 边界和 trait 隔离，让新人可以在单个 crate 范围内完成工作而不需要理解整个代码库。
+**9. The maintenance cost of 170k lines of C code**: SRS's monolithic code base (170k lines of C/C++) makes the barrier to new contributors extremely high. MediaServo must avoid this problem from Phase 0 — keep every crate at 2000-5000 lines of Rust code, plus clear crate boundaries and trait isolation, so newcomers can complete work within a single crate without understanding the whole code base.
 
-| 多核利用 | 单线程 (M:1) | 多线程 work-stealing (M:N) |
-| 调试支持 | 无原生调试器 | Rust IDE/tracing |
-| 生态成熟度 | 极小 | 极大 (整个 Rust 异步生态) |
-| I/O 唤醒 | select() | epoll/kqueue/iocp (mio) |
-| 代码风格 | 同步写 (无关键字) | async/await 显式标记 |
-| 招聘难度 | 几乎不可能 | 容易 (Rust 开发者都会) |
+| Multi-core utilization | Single threaded (M:1) | Multi-threaded work-stealing (M:N) |
+| Debugger support | No native debugger | Rust IDE/tracing |
+| Ecosystem maturity | Extremely small | Very large (the whole Rust async ecosystem) |
+| I/O wakeup | select() | epoll/kqueue/iocp (mio) |
+| Code style | Written synchronously (no keywords) | Explicit async/await markers |
+| Hiring difficulty | Nearly impossible | Easy (all Rust developers know it) |
 
-SRS 使用 ST 的历史原因：2013 年 C/C++ 没有标准异步模型。
-现在 Rust 的 async/await 是更好的选择。MediaServo 使用 Tokio 正确。
+The historical reason SRS uses ST: in 2013, C/C++ had no standard async model.
+Today Rust's async/await is the better choice. MediaServo's use of Tokio is correct.
 
 ---
 
-## 附录 B: RTMP 归一化 vs Fragment Model 比较
+## Appendix B: RTMP Normalization vs Fragment Model Comparison
 
-### B.1 SRS RTMP 归一化的编解码开销
+### B.1 Codec overhead of SRS's RTMP normalization
 
-SRS 将 WebRTC WHIP 推流归一化到 RTMP 时存在重复编码：
+SRS incurs double encoding when normalizing a WebRTC WHIP push to RTMP:
 
 ```
 WebRTC WHIP (H.264+Opus)
@@ -428,18 +435,18 @@ H.264 decoder -> YUV -> H.264 encoder -> H.264 NAL (re-encode!)
 Opus decoder -> PCM -> AAC encoder -> AAC frames (re-encode!)
   |
   v
-FLV muxer -> RTMP stream (内部表示)
+FLV muxer -> RTMP stream (internal representation)
   |
   v
-从 RTMP transmux 到各输出协议 (HLS/DASH/HTTP-FLV/SRT/WHEP)
+Transmux from RTMP to each output protocol (HLS/DASH/HTTP-FLV/SRT/WHEP)
 ```
 
-问题：
-1. WHIP 输入的 H.264 已编码完成，但 SRS 需解码再编码，浪费 CPU 且损失质量
-2. WHIP 输入的 Opus 音频质量高于 AAC，归一化到 RTMP 后变成 AAC，信息丢失
-3. 每个 WHIP 推流都有编解码开销，transmux 零转码优势丧失
+Problems:
+1. The WHIP input's H.264 is already encoded, but SRS must decode and re-encode it, wasting CPU and losing quality
+2. The WHIP input's Opus audio has higher quality than AAC; after normalization to RTMP it becomes AAC, losing information
+3. Every WHIP push incurs codec overhead, and the transmux zero-transcode advantage is lost
 
-### B.2 Fragment Model 解决此问题
+### B.2 How the Fragment Model solves this
 
 ```
 WebRTC WHIP (H.264+Opus)
@@ -448,41 +455,41 @@ WebRTC WHIP (H.264+Opus)
 RTP depacketizer -> H.264 NAL + Opus frames
   |
   v
-直接打包为 Fragment { payload: H.264 NAL + Opus frames }
+Pack directly into Fragment { payload: H.264 NAL + Opus frames }
   |
   v
 FragmentBroadcasterRegistry -> Observer taps
   |
-  +---> HLS: 从 Fragment 生成 CMAF chunk (不解码!)
-  +---> DASH: 从 Fragment 生成 fMP4 segment (不解码!)
-  +---> WHEP: 从 Fragment 生成 RTP packets (不解码!)
-  +---> MoQ: 直接推送 Fragment (不解码!)
-  +---> Recording: 直接写入 fMP4 (不解码!)
+  +---> HLS: generate a CMAF chunk from the Fragment (no decode!)
+  +---> DASH: generate an fMP4 segment from the Fragment (no decode!)
+  +---> WHEP: generate RTP packets from the Fragment (no decode!)
+  +---> MoQ: push the Fragment directly (no decode!)
+  +---> Recording: write to fMP4 directly (no decode!)
 ```
 
-优势：
-1. 零编解码：Fragment 承载原始编码数据，所有输出直接复用
-2. 无质量损失：H.264 passthrough
-3. 保留原编解码器信息，输出协议可实现最优分包策略
+Advantages:
+1. Zero codec: the Fragment carries raw encoded data, and all outputs reuse it directly
+2. No quality loss: H.264 passthrough
+3. The original encoder information is preserved, letting output protocols implement optimal packetization strategies
 
-### B.3 迁移路径对比
+### B.3 Migration path comparison
 
-| 组件 | RTMP 归一化 (SRS) | Fragment Model (MediaServo) |
+| Component | RTMP normalization (SRS) | Fragment Model (MediaServo) |
 |------|-------------------|---------------------------|
-| 内部表示 | FLV tag stream | Fragment stream |
-| RTMP 输入 | 零转换 (FLV-FLV) | 小转换 (FLV-Fragment) |
-| WHIP 输入 | 解码-编码-FLV | RTP depacket-Fragment |
-| SRT 输入 | (独立进程) FLV 桥接 | MPEG-TS-Fragment |
-| HLS 输出 | FLV-TS segment | Fragment-CMAF chunk |
-| DASH 输出 | FLV-fMP4 segment | Fragment-fMP4 segment |
-| WHEP 输出 | FLV-解码-RTP | Fragment-RTP (不解码!) |
-| HTTP-FLV 输出 | FLV 直通 | Fragment-FLV tag |
+| Internal representation | FLV tag stream | Fragment stream |
+| RTMP input | Zero conversion (FLV-FLV) | Small conversion (FLV-Fragment) |
+| WHIP input | Decode-encode-FLV | RTP depacket-Fragment |
+| SRT input | (separate process) FLV bridge | MPEG-TS-Fragment |
+| HLS output | FLV-TS segment | Fragment-CMAF chunk |
+| DASH output | FLV-fMP4 segment | Fragment-fMP4 segment |
+| WHEP output | FLV-decode-RTP | Fragment-RTP (no decode!) |
+| HTTP-FLV output | FLV passthrough | Fragment-FLV tag |
 
 ---
 
-## 附录 C: SRS 配置核心参数
+## Appendix C: SRS Core Configuration Parameters
 
-SRS 的 INI 配置文件结构：
+SRS's INI configuration file structure:
 
 ```ini
 listen              1935;
@@ -499,20 +506,20 @@ vhost __defaultVhost__ {
         on_dvr          http://127.0.0.1:8085/api/v1/callback/on_dvr;
     }
 
-    # HLS 配置
+    # HLS configuration
     hls {
         enabled         on;
-        hls_fragment    3;      # 分片时长 (秒)
-        hls_window      12;     # 保留分片数
+        hls_fragment    3;      # fragment duration (seconds)
+        hls_window      12;     # number of retained fragments
         hls_path        ./objs/nginx/html;
     }
 
-    # DVR 录制
+    # DVR recording
     dvr {
         enabled         on;
         dvr_path        ./objs/nginx/html/dvr/[app]/[stream]/[timestamp].flv;
         dvr_plan        segment;
-        dvr_duration    600;    # 每段10分钟
+        dvr_duration    600;    # 10 minutes per segment
     }
 
     # HTTP-FLV
@@ -523,8 +530,8 @@ vhost __defaultVhost__ {
 }
 ```
 
-对 MediaServo 的启示：
-- INI 格式虽然传统，但配置参数设计简洁 (hls_fragment 仅需一个数字)
-- HTTP Callback 的 URL 模式用参数化路径如 [app]/[stream]
-- dvr_plan: segment 按时间分段是标准录制策略
-- max_connections 等全局限制是生产级的必要保护措施
+Implications for MediaServo:
+- The INI format is traditional, but the configuration parameter design is concise (hls_fragment needs only one number)
+- HTTP Callback URL patterns use parameterized paths such as [app]/[stream]
+- dvr_plan: segment, time-based segmentation, is the standard recording strategy
+- Global limits such as max_connections are necessary production-grade protection measures

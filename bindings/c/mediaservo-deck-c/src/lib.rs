@@ -1,27 +1,27 @@
-//! MediaServo deck C ABI — 采集/录制/回放面（本地监控/NVR 场景 C 消费）。
+//! MediaServo deck C ABI — capture/record/playback plane (C consumption for local monitoring/NVR scenarios).
 //!
-//! 契约 §7（D109/D240/D241）：opaque handle + int 错误码 + 帧回调。
-//! 同步阻塞式（内部 per-handle 共享 multi_thread runtime + 泵线程）。
+//! Contract §7 (D109/D240/D241): opaque handles + int error codes + frame callbacks.
+//! Synchronous blocking style (internally a per-handle shared multi_thread runtime + pump threads).
 //!
-//! # 生命周期契约（审核 R2 延续）
-//! - handle 单线程属主；close 后任何 API 调用为 UB（close 幂等）。
-//! - close = 置 closed 标志 → join 泵线程 → 释放 handle。
-//! - `mediaservo_frame_t` 的 data_* 指针仅在回调内有效 —— 需要保留必须拷贝。
-//! - 帧回调仅在泵线程触发；回调内禁止调用任何 mediaservo_deck_* API（含 close）。
-//! - `mediaservo_deck_recorder_record(rec, cam)`：camera 必须已 `start` 且**活到录制
-//!   结束**（关闭顺序：recorder_stop/close 先于 camera_stop/close）。
+//! # Lifecycle contract (continuing audit R2)
+//! - Each handle is single-thread-owner; any API call after close is UB (close is idempotent).
+//! - close = set the closed flag → join the pump thread → release the handle.
+//! - The mediaservo_frame_t data_* pointers are valid only inside the callback — copy if you need to keep them.
+//! - Frame callbacks fire only on the pump thread; calling any mediaservo_deck_* API (including close) from within a callback is forbidden.
+//! - `mediaservo_deck_recorder_record(rec, cam)`: the camera must already be `start`ed and **outlive the
+//!   recording** (close order: recorder_stop/close before camera_stop/close).
 //!
-//! # C ABI 面
+//! # C ABI surface
 //! ```c
 //! typedef struct mediaservo_deck_camera_t mediaservo_deck_camera_t;     /* opaque */
 //! typedef struct mediaservo_deck_recorder_t mediaservo_deck_recorder_t; /* opaque */
 //! typedef struct mediaservo_deck_player_t mediaservo_deck_player_t;     /* opaque */
 //! typedef void (*mediaservo_deck_frame_cb)(const mediaservo_frame_t* frame, void* user);
 //! ```
-//! 错误码：MEDIASERVO_DECK_ERR_INVALID_ARG(-1)/DEVICE(-2)/RECORDER(-3)/PLAYER(-4)/STATE(-5)/INTERNAL(-6)。
+//! Error codes: MEDIASERVO_DECK_ERR_INVALID_ARG(-1)/DEVICE(-2)/RECORDER(-3)/PLAYER(-4)/STATE(-5)/INTERNAL(-6).
 
-#![allow(clippy::not_unsafe_ptr_arg_deref)] // C ABI 门面：非空/对齐 = 文档契约（link-c 同形 crate-top 先例）
-#![allow(non_camel_case_types)] // C 可见类型名 = snake_case 镜像（*_*_t 词形是 ABI 一部分）
+#![allow(clippy::not_unsafe_ptr_arg_deref)] // C ABI facade: non-null/alignment = documented contract (same crate-top precedent as link-c)
+#![allow(non_camel_case_types)] // C-visible type names = snake_case mirrors (the *_*_t word shape is part of the ABI)
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -39,7 +39,7 @@ use mediaservo_deck::{
 };
 use tokio::sync::mpsc;
 
-/// 错误码（0 = ok, <0 = error）。
+/// Error codes (0 = ok, <0 = error).
 pub const MEDIASERVO_OK: c_int = 0;
 pub const MEDIASERVO_DECK_ERR_INVALID_ARG: c_int = -1;
 pub const MEDIASERVO_DECK_ERR_DEVICE: c_int = -2;
@@ -48,7 +48,7 @@ pub const MEDIASERVO_DECK_ERR_PLAYER: c_int = -4;
 pub const MEDIASERVO_DECK_ERR_STATE: c_int = -5;
 pub const MEDIASERVO_DECK_ERR_INTERNAL: c_int = -6;
 
-/// 全局最近错误信息（mediaservo_deck_last_error 读取）。
+/// Global last-error message (read via mediaservo_deck_last_error).
 static LAST_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 fn set_last_error(msg: impl Into<String>) {
@@ -57,14 +57,14 @@ fn set_last_error(msg: impl Into<String>) {
     }
 }
 
-// ── C 结构 ──
+// -- C structs --
 
-/// 采集选项（C 结构 — 与 CaptureOptions 映射）。
+/// Capture options (C struct — maps to CaptureOptions).
 ///
-/// 首字段 `struct_size`（审核 R3）：调用方填 `sizeof(mediaservo_deck_capture_options_t)`，
-/// 库校验 `>= sizeof(已知结构)`、超长忽略。width/height/framerate 全 0 = 默认
+/// First field `struct_size` (audit R3): the caller fills `sizeof(mediaservo_deck_capture_options_t)`;
+/// the library validates `>= sizeof(known struct)` and ignores extra length. width/height/framerate all 0 = default
 /// 1280x720@30。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外：mediaservo_* 前缀）
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception: mediaservo_* prefix)
 #[repr(C)]
 pub struct mediaservo_deck_capture_options_t {
     pub struct_size: usize,
@@ -73,12 +73,12 @@ pub struct mediaservo_deck_capture_options_t {
     pub framerate: u32,
 }
 
-/// C 结构已知前缀尺寸（版本演进时的最小合法值）。
+/// Known prefix size of the C struct (the minimum legal value across version evolution).
 pub const MEDIASERVO_DECK_CAPTURE_OPTIONS_MIN_SIZE: usize =
     size_of::<mediaservo_deck_capture_options_t>();
 
-/// 内存帧（I420 三平面；布局与 mediaservo_common.h 的 mediaservo_frame_t 一致）。
-/// data_* 指针仅在回调内有效。
+/// In-memory frame (I420 three planes; layout matches mediaservo_frame_t in mediaservo_common.h).
+/// data_* pointers are valid only inside the callback.
 #[allow(non_camel_case_types)]
 #[repr(C)]
 pub struct mediaservo_frame_t {
@@ -93,12 +93,12 @@ pub struct mediaservo_frame_t {
     pub data_v: *const u8,
 }
 
-/// 帧回调（泵线程触发；`frame` 指针仅回调内有效）。
+/// Frame callback (fires on the pump thread; the `frame` pointer is valid only inside the callback).
 pub type mediaservo_deck_frame_cb = unsafe extern "C" fn(*const mediaservo_frame_t, *mut c_void);
 
-// ── 内部辅助 ──
+// -- Internal helpers --
 
-/// 提取 C 字符串（null → None）。非法 UTF-8 → 错误。
+/// Extract a C string (null → None). Invalid UTF-8 → error.
 fn cstr<'a>(ptr: *const c_char) -> Result<Option<&'a str>, ()> {
     if ptr.is_null() {
         return Ok(None);
@@ -106,7 +106,7 @@ fn cstr<'a>(ptr: *const c_char) -> Result<Option<&'a str>, ()> {
     unsafe { CStr::from_ptr(ptr) }.to_str().map(Some).map_err(|_| ())
 }
 
-/// 新建共享 multi_thread runtime（每个 handle 一个）。
+/// Create a shared multi_thread runtime (one per handle).
 fn new_runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -115,7 +115,7 @@ fn new_runtime() -> tokio::runtime::Runtime {
         .expect("deck-c runtime")
 }
 
-/// DeckError → C 错误码（按调用域区分 RECORDER/PLAYER 归属）。
+/// DeckError → C error code (mapped to RECORDER/PLAYER by call domain).
 #[derive(Clone, Copy)]
 enum Ctx {
     Camera,
@@ -137,12 +137,12 @@ fn map_deck_err(e: &DeckError, ctx: Ctx) -> c_int {
             Ctx::Recorder => MEDIASERVO_DECK_ERR_RECORDER,
             Ctx::Player => MEDIASERVO_DECK_ERR_PLAYER,
         },
-        // #[non_exhaustive]：未来变体统一映射 INTERNAL
+        // #[non_exhaustive]: future variants map uniformly to INTERNAL
         _ => MEDIASERVO_DECK_ERR_INTERNAL,
     }
 }
 
-/// 捕获锁（poison → INTERNAL）。
+/// Capture the lock (poison → INTERNAL).
 fn lock<'a, T>(
     guard: Result<
         std::sync::MutexGuard<'a, T>,
@@ -155,7 +155,7 @@ fn lock<'a, T>(
     })
 }
 
-/// VideoFrame → mediaservo_frame_t（data 指针指向帧内 planes，仅回调内有效）。
+/// VideoFrame → mediaservo_frame_t (data pointers point into the frame planes, valid only inside the callback).
 fn to_mediaservo_frame(f: &VideoFrame) -> mediaservo_frame_t {
     mediaservo_frame_t {
         width: f.format.width,
@@ -170,37 +170,37 @@ fn to_mediaservo_frame(f: &VideoFrame) -> mediaservo_frame_t {
     }
 }
 
-// ── camera（采集）──
+// -- camera (capture) --
 
-/// camera 共享状态（泵线程 + C 调用经 Arc 访问）。
+/// camera shared state (pump thread + C calls access it via Arc).
 struct CameraInner {
     src: Mutex<Option<CameraSource>>,
     opts: CaptureOptions,
-    /// 帧回调（frames_cb 注册；泵线程每次取用）。
+    /// Frame callback (registered via frames_cb; fetched by the pump thread each cycle).
     cb: Mutex<Option<(mediaservo_deck_frame_cb, *mut c_void)>>,
-    /// 录制桥接发送端（recorder_record 注册；泵线程逐帧 send）。
+    /// Recording-bridge sender (registered via recorder_record; the pump thread sends per frame).
     rec_tx: Mutex<Option<mpsc::UnboundedSender<VideoFrame>>>,
-    /// 泵线程停止标志（camera_stop 置位）。
+    /// Pump-thread stop flag (set by camera_stop).
     stop: AtomicBool,
     started: AtomicBool,
     closed: AtomicBool,
     rt: tokio::runtime::Runtime,
 }
 
-// SAFETY: cb 的 user 指针仅在泵线程使用（契约：回调内禁止调用 API、
-// close 先 join 泵线程后释放 handle）；其余字段均为线程安全类型。
+// SAFETY: cb's user pointer is used only on the pump thread (contract: no API calls inside callbacks,
+// close joins the pump thread before releasing the handle); the remaining fields are thread-safe types.
 unsafe impl Send for CameraInner {}
-// SAFETY: 同上，所有可变访问经 Mutex/Atomic 序列化。
+// SAFETY: same as above; all mutable access is serialized through Mutex/Atomic.
 unsafe impl Sync for CameraInner {}
 
-/// 相机 opaque handle。
+/// Camera opaque handle.
 pub struct mediaservo_deck_camera_t {
     inner: Arc<CameraInner>,
     pump: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
-/// 泵线程主体：50ms 轮询 stop/closed（generator.stop 不释放 sink →
-/// recv 永不返回 None，必须超时轮询），帧扇出到 cb + 录制桥。
+/// Pump-thread body: polls stop/closed every 50ms (generator.stop does not release the sink →
+/// recv never returns None, so a timeout poll is required); frames fan out to cb + the recording bridge.
 fn camera_pump_loop(shared: Arc<CameraInner>, mut stream: FrameStream) {
     loop {
         if shared.stop.load(Ordering::SeqCst) || shared.closed.load(Ordering::SeqCst) {
@@ -210,13 +210,13 @@ fn camera_pump_loop(shared: Arc<CameraInner>, mut stream: FrameStream) {
             tokio::time::timeout(Duration::from_millis(50), stream.recv()).await
         }) {
             Ok(Some(frame)) => deliver_frame(&shared, frame),
-            Ok(None) => break, // 帧流结束
-            Err(_) => {}       // 超时：回到循环检查 stop/closed
+            Ok(None) => break, // frame stream ended
+            Err(_) => {}       // timeout: back to the loop to check stop/closed
         }
     }
 }
 
-/// 单帧扇出：先 cb（借用），再录制桥（move 所有权）。
+/// Single-frame fan-out: cb first (borrow), then the recording bridge (move ownership).
 fn deliver_frame(shared: &CameraInner, frame: VideoFrame) {
     if let Ok(guard) = shared.cb.lock()
         && let Some((cb, user)) = *guard
@@ -228,16 +228,16 @@ fn deliver_frame(shared: &CameraInner, frame: VideoFrame) {
         && let Some(tx) = guard.clone()
         && tx.send(frame).is_err()
     {
-        // 录制任务已结束（rx 已 drop）→ 自愈清除
+        // The recording task has ended (rx dropped) → self-heal clear
         if let Ok(mut g) = shared.rec_tx.lock() {
             *g = None;
         }
     }
 }
 
-/// 枚举设备（双调用模式）：第一次 `out_ids=NULL` 返回所需长度（不含 NUL，
-/// snprintf 约定；错误为负值），第二次填缓冲（截断时同样返回所需长度）。
-/// kind: 0=Camera 1=Audio 2=Screen；多设备 '\n' 分隔。
+/// Enumerate devices (two-call pattern): the first call with `out_ids=NULL` returns the required length (excluding NUL,
+/// snprintf convention; negative on error), the second fills the buffer (also returns the required length on truncation).
+/// kind: 0=Camera 1=Audio 2=Screen; multiple devices separated by '\n'.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_devices_enumerate(
     kind: c_int,
@@ -281,8 +281,8 @@ pub extern "C" fn mediaservo_deck_devices_enumerate(
     })
 }
 
-/// 打开相机（阻塞仅本地初始化）。`opts` 不可为 null；`dev_id` 必须存在于枚举结果。
-/// 成功后 `*out` 指向新 handle（调用方负责 `mediaservo_deck_camera_close`）。
+/// Open the camera (blocking, local initialization only). `opts` must not be null; `dev_id` must exist in the enumeration result.
+/// On success `*out` points to the new handle (the caller owns `mediaservo_deck_camera_close`).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_camera_open(
     dev_id: *const c_char,
@@ -314,7 +314,7 @@ pub extern "C" fn mediaservo_deck_camera_open(
                 return MEDIASERVO_DECK_ERR_INVALID_ARG;
             }
         };
-        // width/height/framerate 全 0 = 默认 1280x720@30
+        // width/height/framerate all 0 = default 1280x720@30
         let (w, h) = if opts_ref.width > 0 && opts_ref.height > 0 {
             (opts_ref.width, opts_ref.height)
         } else {
@@ -324,7 +324,7 @@ pub extern "C" fn mediaservo_deck_camera_open(
         let copts = CaptureOptions {
             resolution: Some((w, h)),
             framerate: Some(fps),
-            format: None, // CameraSource::start 不使用 format
+            format: None, // CameraSource::start does not use format
         };
         match CameraSource::open(DeviceId(dev), copts.clone()) {
             Ok(src) => {
@@ -356,7 +356,7 @@ pub extern "C" fn mediaservo_deck_camera_open(
     })
 }
 
-/// 开始产帧（用 open 时的 opts；只允许一次，重复调用 → STATE）并启动泵线程。
+/// Start producing frames (uses the opts from open; only allowed once, repeat calls → STATE) and start the pump thread.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_camera_start(c: *mut mediaservo_deck_camera_t) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -414,7 +414,7 @@ pub extern "C" fn mediaservo_deck_camera_start(c: *mut mediaservo_deck_camera_t)
     })
 }
 
-/// 注册帧回调（泵线程逐帧触发；重复调用替换旧回调）。
+/// Register the frame callback (fires per frame on the pump thread; a repeat call replaces the old callback).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_camera_frames_cb(
     c: *mut mediaservo_deck_camera_t,
@@ -448,7 +448,7 @@ pub extern "C" fn mediaservo_deck_camera_frames_cb(
     })
 }
 
-/// 停止产帧（幂等）：置停止标志 → 泵线程 ≤50ms 退出 → 停止帧源。
+/// Stop producing frames (idempotent): set the stop flag → the pump thread exits within 50ms → stop the frame source.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_camera_stop(c: *mut mediaservo_deck_camera_t) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -471,8 +471,8 @@ pub extern "C" fn mediaservo_deck_camera_stop(c: *mut mediaservo_deck_camera_t) 
     })
 }
 
-/// 关闭相机并释放 handle（幂等）：置 closed → join 泵线程 → 释放
-/// （Drop 链停止帧源）。帧回调期间调用为 UB（契约文档）。
+/// Close the camera and release the handle (idempotent): set closed → join the pump thread → release
+/// (the Drop chain stops the frame source). Calling during a frame callback is UB (documented contract).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_camera_close(c: *mut mediaservo_deck_camera_t) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -480,7 +480,7 @@ pub extern "C" fn mediaservo_deck_camera_close(c: *mut mediaservo_deck_camera_t)
             return MEDIASERVO_OK;
         }
         if unsafe { &*c }.inner.closed.load(Ordering::SeqCst) {
-            return MEDIASERVO_OK; // 幂等：已关闭
+            return MEDIASERVO_OK; // idempotent: already closed
         }
         let handle = unsafe { Box::from_raw(c) };
         handle.inner.closed.store(true, Ordering::SeqCst);
@@ -496,37 +496,37 @@ pub extern "C" fn mediaservo_deck_camera_close(c: *mut mediaservo_deck_camera_t)
     })
 }
 
-// ── recorder（录制）──
+// -- recorder (recording) --
 
-/// 帧桥：录制任务侧的 async 帧源（camera 泵 → unbounded channel）。
+/// Frame bridge: async frame source on the recording-task side (camera pump → unbounded channel).
 struct FrameRx {
     rx: mpsc::UnboundedReceiver<VideoFrame>,
 }
 
 impl Frames for FrameRx {
-    #[allow(clippy::manual_async_fn)] // 泵线程入口返回显式 Future：async 化牵动线程边界，收益 < 风险
+    #[allow(clippy::manual_async_fn)] // the pump-thread entry returns an explicit Future: making it async moves thread boundaries, benefit < risk
     fn next(&mut self) -> impl std::future::Future<Output = Option<VideoFrame>> + Send {
         async move { self.rx.recv().await }
     }
 }
 
-/// recorder 共享状态。
+/// recorder shared state.
 struct RecorderInner {
     recorder: Mutex<Option<Recorder>>,
-    /// 录制任务（record 启动；close 时 block_on join 完成 flush+trailer）。
+    /// Recording task (started by record; close does block_on join to complete flush+trailer).
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    /// 外部停止信号（stop 时置位 → 录制循环 50ms 内退出并 flush）。
+    /// External stop signal (set by stop → the recording loop exits within 50ms and flushes).
     stop_signal: Mutex<Option<StopSignal>>,
     closed: AtomicBool,
     rt: tokio::runtime::Runtime,
 }
 
-/// 录制器 opaque handle。
+/// Recorder opaque handle.
 pub struct mediaservo_deck_recorder_t {
     inner: Arc<RecorderInner>,
 }
 
-/// 创建录制器（RecordOptions 默认 h264/mp4；不启动）。
+/// Create the recorder (RecordOptions defaults to h264/mp4; not started).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_recorder_new(
     path: *const c_char,
@@ -574,8 +574,8 @@ pub extern "C" fn mediaservo_deck_recorder_new(
     })
 }
 
-/// 桥接录制：camera 已 start 的帧泵 → recorder 录制任务（内部 flush 收尾）。
-/// 契约：camera 必须活到录制结束（关闭顺序 recorder 先于 camera）。
+/// Bridge recording: the camera's started frame pump → the recorder's recording task (internally finalizes with a flush).
+/// Contract: the camera must outlive the recording (close order: recorder before camera).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_recorder_record(
     r: *mut mediaservo_deck_recorder_t,
@@ -638,7 +638,7 @@ pub extern "C" fn mediaservo_deck_recorder_record(
         let (tx, rx) = mpsc::unbounded_channel();
         *tx_guard = Some(tx);
         let stop_signal = recorder.stop_signal();
-        // record() 阻塞到 stop/流结束 → 必须 spawn 到共享 runtime（R1 延续）
+        // record() blocks until stop/stream end → must be spawned onto the shared runtime (continuing R1)
         let task = rec_handle.inner.rt.spawn(async move {
             if let Err(e) = recorder.record(FrameRx { rx }).await {
                 tracing::error!("deck-c recorder task: {e}");
@@ -654,7 +654,7 @@ pub extern "C" fn mediaservo_deck_recorder_record(
     })
 }
 
-/// 请求停止录制（幂等）：置 running=false → 录制循环 50ms 内退出并 flush。
+/// Request stop recording (idempotent): set running=false → the recording loop exits within 50ms and flushes.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_recorder_stop(r: *mut mediaservo_deck_recorder_t) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -678,7 +678,7 @@ pub extern "C" fn mediaservo_deck_recorder_stop(r: *mut mediaservo_deck_recorder
     })
 }
 
-/// 关闭录制器并释放 handle（幂等）：join 录制任务（flush + trailer 完成）。
+/// Close the recorder and release the handle (idempotent): join the recording task (flush + trailer complete).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_recorder_close(r: *mut mediaservo_deck_recorder_t) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -686,7 +686,7 @@ pub extern "C" fn mediaservo_deck_recorder_close(r: *mut mediaservo_deck_recorde
             return MEDIASERVO_OK;
         }
         if unsafe { &*r }.inner.closed.load(Ordering::SeqCst) {
-            return MEDIASERVO_OK; // 幂等：已关闭
+            return MEDIASERVO_OK; // idempotent: already closed
         }
         let handle = unsafe { Box::from_raw(r) };
         handle.inner.closed.store(true, Ordering::SeqCst);
@@ -708,22 +708,22 @@ pub extern "C" fn mediaservo_deck_recorder_close(r: *mut mediaservo_deck_recorde
     })
 }
 
-// ── player（回放）──
+// -- player (playback) --
 
-/// player 共享状态。
+/// player shared state.
 struct PlayerInner {
     player: Mutex<Option<Player>>,
-    /// 解码泵线程（frames_cb 启动；close 置 closed → 线程 ≤1 帧退出 → join）。
+    /// Decode pump thread (started by frames_cb; close sets closed → the thread exits within one frame → join).
     pump: Mutex<Option<std::thread::JoinHandle<()>>>,
     closed: AtomicBool,
 }
 
-/// 回放器 opaque handle。
+/// Player opaque handle.
 pub struct mediaservo_deck_player_t {
     inner: Arc<PlayerInner>,
 }
 
-/// 打开媒体文件（demux + 解码器就绪；不支持的文件 → PLAYER 错误）。
+/// Open a media file (demux + decoder ready; unsupported files → PLAYER error).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_player_open(
     path: *const c_char,
@@ -769,8 +769,8 @@ pub extern "C" fn mediaservo_deck_player_open(
     })
 }
 
-/// 逐帧解码回调泵（同步 next_frame 循环；EOF 或 close 后退出）。
-/// 只允许一次（重复调用 → STATE）。
+/// Per-frame decode callback pump (synchronous next_frame loop; exits on EOF or close).
+/// Only allowed once (repeat calls → STATE).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_player_frames_cb(
     p: *mut mediaservo_deck_player_t,
@@ -802,19 +802,19 @@ pub extern "C" fn mediaservo_deck_player_frames_cb(
         let mut pump_guard = match lock(handle.inner.pump.lock()) {
             Ok(g) => g,
             Err(rc) => {
-                *guard = Some(player); // 放回
+                *guard = Some(player); // put back
                 return rc;
             }
         };
         let _shared = Arc::clone(&handle.inner);
-        // *mut c_void 非 Send → 线程闭包内经 usize 往返（FFI 惯例）
+        // *mut c_void is not Send → round-trip as usize inside the thread closure (FFI convention)
         let user_tag = user as usize;
         let pump =
             match std::thread::Builder::new().name("deck-player-pump".into()).spawn(move || {
                 let user = user_tag as *mut c_void;
-                // 泵运行至 EOF（或解码错误）自然结束 — 不被 close 中止：
-                // close 语义 = join（阻塞至解码完成），否则 frames_cb 返回后
-                // 立即 close 会竞态杀死尚未解码任何帧的泵（0 帧输出）。
+                // The pump runs until EOF (or a decode error) ends it naturally — close does not abort it:
+                // close semantics = join (blocks until decoding finishes); otherwise calling close right after frames_cb returns
+                // would race-kill a pump that has not decoded any frames yet (zero-frame output).
                 loop {
                     match player.next_frame() {
                         Ok(Some(frame)) => {
@@ -831,7 +831,7 @@ pub extern "C" fn mediaservo_deck_player_frames_cb(
             }) {
                 Ok(p) => p,
                 Err(e) => {
-                    // player 已移入闭包（spawn 失败时随闭包 drop — 资源耗尽级错误，不可恢复）
+                    // player has been moved into the closure (dropped with it if spawn fails — an unrecoverable resource-exhaustion-class error)
                     set_last_error(format!("mediaservo_deck_player_frames_cb: spawn pump: {e}"));
                     return MEDIASERVO_DECK_ERR_INTERNAL;
                 }
@@ -845,7 +845,7 @@ pub extern "C" fn mediaservo_deck_player_frames_cb(
     })
 }
 
-/// 关闭回放器并释放 handle（幂等）：置 closed → join 解码泵（阻塞至 EOF/错误）→ 释放。
+/// Close the player and release the handle (idempotent): set closed → join the decode pump (blocks until EOF/error) → release.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_player_close(p: *mut mediaservo_deck_player_t) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -853,7 +853,7 @@ pub extern "C" fn mediaservo_deck_player_close(p: *mut mediaservo_deck_player_t)
             return MEDIASERVO_OK;
         }
         if unsafe { &*p }.inner.closed.load(Ordering::SeqCst) {
-            return MEDIASERVO_OK; // 幂等：已关闭
+            return MEDIASERVO_OK; // idempotent: already closed
         }
         let handle = unsafe { Box::from_raw(p) };
         handle.inner.closed.store(true, Ordering::SeqCst);
@@ -868,9 +868,9 @@ pub extern "C" fn mediaservo_deck_player_close(p: *mut mediaservo_deck_player_t)
     })
 }
 
-// ── 通用 ──
+// -- Common --
 
-/// 最近一次错误的详情（线程安全；无错误时返回空串）。
+/// Details of the last error (thread-safe; returns an empty string when no error).
 fn last_error_impl(buf: *mut c_char, len: usize) -> c_int {
     if buf.is_null() || len == 0 {
         return MEDIASERVO_DECK_ERR_INVALID_ARG;
@@ -885,14 +885,14 @@ fn last_error_impl(buf: *mut c_char, len: usize) -> c_int {
     MEDIASERVO_OK
 }
 
-/// 最近错误详情。
+/// Last error details.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_last_error(buf: *mut c_char, len: usize) -> c_int {
     catch_unwind(AssertUnwindSafe(|| last_error_impl(buf, len)))
         .unwrap_or(MEDIASERVO_DECK_ERR_INTERNAL)
 }
 
-/// 版本信息（MAJOR.MINOR.PATCH — D241 soname 语义）。
+/// Version info (MAJOR.MINOR.PATCH — D241 soname semantics).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_deck_version(buf: *mut c_char, len: usize) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -913,14 +913,14 @@ pub extern "C" fn mediaservo_deck_version(buf: *mut c_char, len: usize) -> c_int
 
 #[cfg(test)]
 mod tests {
-    /// 本文件测试共享进程级 static LAST_ERROR（C ABI 语义在册）——null-handle 负例
-    /// 隐式写它，显式读断言并互踩 = flaky（field-c 09-20 同型手术；link-c 09-20 gate
-    /// 实抓 last_error_roundtrip 竞跑覆写；deck-c 预防同批）。测试域全文件经此锁串行。
+    /// Tests in this file share the process-level static LAST_ERROR (C ABI semantics) — null-handle negative
+    /// cases write it implicitly, so explicit-read assertions stomp on each other = flaky (same surgery as field-c 09-20; link-c 09-20 gate
+    /// caught last_error_roundtrip racing; deck-c prevented in the same batch). All tests in this file serialize through this lock.
     static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     use super::*;
 
-    /// 辅助：open 一台默认相机（成功后调用方负责 close）。
+    /// Helper: open a default camera (the caller owns close on success).
     fn open_camera() -> *mut mediaservo_deck_camera_t {
         let dev = c"stub:test-camera";
         let opts = mediaservo_deck_capture_options_t {
@@ -938,7 +938,7 @@ mod tests {
     #[test]
     fn last_error_roundtrip() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // 全局状态跨测试竞争: 先清空再设（不依赖其他测试未写）
+        // Global state races across tests: clear before setting (do not assume other tests haven't written)
         set_last_error("");
         set_last_error("deck test error");
         let mut buf = [0u8; 64];
@@ -961,7 +961,7 @@ mod tests {
     #[test]
     fn enumerate_two_call_roundtrip() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // 第一次: 长度（含分隔符，不含 NUL）；第二次: 内容一致
+        // First call: length (including separators, excluding NUL); second call: identical content
         let mut len1: usize = 0;
         let rc = mediaservo_deck_devices_enumerate(0, ptr::null_mut(), 0, &mut len1);
         assert!(rc > 0, "rc={rc}");
@@ -984,7 +984,7 @@ mod tests {
     #[test]
     fn enumerate_empty_kind() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // Audio/Screen 无设备 → 长度 0
+        // Audio/Screen have no devices → length 0
         let mut len: usize = 0;
         let rc = mediaservo_deck_devices_enumerate(1, ptr::null_mut(), 0, &mut len);
         assert_eq!(rc, 0);
@@ -1039,7 +1039,7 @@ mod tests {
         let cam = open_camera();
         assert!(!cam.is_null());
         assert_eq!(mediaservo_deck_camera_close(cam), MEDIASERVO_OK);
-        // C 消费者惯例: close 后置 NULL（重复 close 同一指针为 UB — 头文件契约）
+        // C-consumer convention: set to NULL after close (closing the same pointer twice is UB — header contract)
         assert_eq!(mediaservo_deck_camera_close(ptr::null_mut()), MEDIASERVO_OK);
     }
 
@@ -1051,7 +1051,7 @@ mod tests {
         let rc = mediaservo_deck_camera_start(cam);
         assert_eq!(rc, MEDIASERVO_DECK_ERR_STATE);
         assert_eq!(mediaservo_deck_camera_stop(cam), MEDIASERVO_OK);
-        assert_eq!(mediaservo_deck_camera_stop(cam), MEDIASERVO_OK); // 幂等
+        assert_eq!(mediaservo_deck_camera_stop(cam), MEDIASERVO_OK); // idempotent
         assert_eq!(mediaservo_deck_camera_close(cam), MEDIASERVO_OK);
     }
 
@@ -1078,7 +1078,7 @@ mod tests {
     #[test]
     fn recorder_new_missing_parent_fails() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // 父目录不存在 → NotFound → RECORDER
+        // Parent directory missing → NotFound → RECORDER
         let mut out: *mut mediaservo_deck_recorder_t = ptr::null_mut();
         let p = c"/tmp/opencode/no-such-dir-xyz/deck_test.mp4";
         let rc = mediaservo_deck_recorder_new(p.as_ptr(), &mut out);
@@ -1101,7 +1101,7 @@ mod tests {
         let p = c"/tmp/opencode/deck_test_never_written.mp4";
         let rc = mediaservo_deck_recorder_new(p.as_ptr(), &mut rec);
         assert_eq!(rc, MEDIASERVO_OK);
-        let rc = mediaservo_deck_recorder_record(rec, cam); // camera 未 start
+        let rc = mediaservo_deck_recorder_record(rec, cam); // camera not started
         assert_eq!(rc, MEDIASERVO_DECK_ERR_STATE);
         assert_eq!(mediaservo_deck_recorder_close(rec), MEDIASERVO_OK);
         assert_eq!(mediaservo_deck_camera_close(cam), MEDIASERVO_OK);

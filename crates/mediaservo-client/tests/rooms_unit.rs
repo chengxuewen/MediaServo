@@ -1,10 +1,10 @@
-//! list_rooms 的 TCP mock 测试——GET 形断言 + 200/401/垃圾三态。
-//! C21 纪律：零 server 依赖，canned 字节与 server rooms.rs 集成测同 wire 形。
+//! list_rooms's TCP mock tests -- GET-shape asserts + the 200/401/garbage tri-state.
+//! The C21 discipline: zero server dependency; the canned bytes share the wire shape of the server rooms.rs integration test.
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use mediaservo_client::auth::{list_rooms, RoomInfo};
+use mediaservo_client::auth::{RoomInfo, list_rooms};
 use mediaservo_client::error::ClientError;
 
 fn response(status: &str, body: &str) -> Vec<u8> {
@@ -15,8 +15,8 @@ fn response(status: &str, body: &str) -> Vec<u8> {
     .into_bytes()
 }
 
-/// GET mock：无 body——读满头（\r\n\r\n）即回应；断言 GET 行 + Bearer 头
-/// （auth_unit.rs canned_server 同法，方向参数化）。
+/// GET mock: no body -- read the full header (\r\n\r\n) then respond; asserts the GET line + the Bearer header
+/// (the auth_unit.rs canned_server method, parameterized by direction).
 async fn canned_get_server(resp: Vec<u8>) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -54,8 +54,18 @@ async fn list_rooms_ok_returns_entries() {
     assert_eq!(
         rooms,
         vec![
-            RoomInfo { room_id: "vehicle_t1".into(), kind: "video".into(), parent: None, streams: None },
-            RoomInfo { room_id: "audio-c1".into(), kind: "audio".into(), parent: None, streams: None },
+            RoomInfo {
+                room_id: "vehicle_t1".into(),
+                kind: "video".into(),
+                parent: None,
+                streams: None
+            },
+            RoomInfo {
+                room_id: "audio-c1".into(),
+                kind: "audio".into(),
+                parent: None,
+                streams: None
+            },
         ]
     );
 }
@@ -68,9 +78,10 @@ async fn list_rooms_empty_list_is_ok() {
 
 #[tokio::test]
 async fn list_rooms_401_maps_invalid_credentials() {
-    let port = canned_get_server(response("401 Unauthorized", r#"{"error":"invalid token"}"#)).await;
-    // psk-discover 刀起的语义统一：list 面非 2xx 的 401 = InvalidCredentials 终态
-    // （与 exchange/login 同族——D273 红牌，不重试）。
+    let port =
+        canned_get_server(response("401 Unauthorized", r#"{"error":"invalid token"}"#)).await;
+    // the psk-discover knife's semantic unification: a non-2xx 401 on the list surface = the InvalidCredentials terminal
+    // (the same family as exchange/login -- the D273 red card, no retry).
     let e = list_rooms(&format!("http://127.0.0.1:{port}"), "jwt-abc").await.unwrap_err();
     assert!(matches!(e, ClientError::InvalidCredentials), "got {e:?}");
     assert!(!e.is_retryable());

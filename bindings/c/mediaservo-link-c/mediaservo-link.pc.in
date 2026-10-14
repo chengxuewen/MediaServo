@@ -4,7 +4,7 @@ libdir=${exec_prefix}/lib
 includedir=${prefix}/include
 
 Name: mediaservo-link
-Description: MediaServo link C ABI — 设备侧 IPC（信令 + 帧总线）
+Description: MediaServo link C ABI — device-side IPC (signaling + frame bus)
 Version: @VERSION@
 Libs: -L${libdir} -lmediaservo_link
 Cflags: -I${includedir}

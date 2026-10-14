@@ -1,47 +1,37 @@
-//! 整车状态上报注册表（Task E3）— 存储每房间最新 StatusReport。
+//! Vehicle status report registry (Task E3) -- stores the latest StatusReport per room.
 //!
-//! 消费方: H 阶段 admin API（当前仅存储，无存储之外消费路径）。
-//! 语义: 覆盖式（每房间仅保留最近一次上报）；房间移除（空房）时清理，
-//! 避免陈旧数据悬挂。
+//! Consumers: phase-H admin API (currently storage only; no other consumption path).
+//! Semantics: overwrite-style (only the most recent report per room is kept); cleaned up when a room is removed (empty room),
+//! so stale data never lingers.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 use mediaservo_common::protocol::SignalingMessage;
 
-/// 每房间最新状态上报（room_id → 最近一次 StatusReport 消息）。
+/// Latest status report per room (room_id -> most recent StatusReport message).
 #[derive(Default)]
 pub struct StatusRegistry {
     latest: Mutex<HashMap<String, SignalingMessage>>,
 }
 
 impl StatusRegistry {
-    /// 存储最新上报（覆盖同房间旧值）。
+    /// Store the latest report (overwrites the old value for the same room).
     pub fn store(&self, room_id: &str, msg: SignalingMessage) {
-        self.latest
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(room_id.to_string(), msg);
+        self.latest.lock().unwrap_or_else(|e| e.into_inner()).insert(room_id.to_string(), msg);
     }
 
-    /// 最近一次上报（H 阶段 admin API 读取）。
+    /// Most recent report (read by the phase-H admin API).
     pub fn get(&self, room_id: &str) -> Option<SignalingMessage> {
-        self.latest
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(room_id)
-            .cloned()
+        self.latest.lock().unwrap_or_else(|e| e.into_inner()).get(room_id).cloned()
     }
 
-    /// 房间移除时清理（房间空 = 无状态可报）。
+    /// Clean up when a room is removed (empty room = no state left to report).
     pub fn remove(&self, room_id: &str) {
-        self.latest
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(room_id);
+        self.latest.lock().unwrap_or_else(|e| e.into_inner()).remove(room_id);
     }
 
-    /// 全量快照（room_id → 最新上报）— H3 多车监控视图数据源。
+    /// Full snapshot (room_id -> latest report) -- data source for the H3 multi-vehicle monitoring view.
     pub fn list(&self) -> Vec<(String, SignalingMessage)> {
         self.latest
             .lock()
@@ -94,13 +84,13 @@ mod tests {
         reg.store("room-b", report("room-b", 300));
         match reg.get("room-a") {
             Some(SignalingMessage::StatusReport { ts, .. }) => {
-                assert_eq!(ts, 200, "同房间应覆盖旧值")
+                assert_eq!(ts, 200, "same room should overwrite the old value")
             }
             other => panic!("expected StatusReport, got {other:?}"),
         }
         match reg.get("room-b") {
             Some(SignalingMessage::StatusReport { ts, .. }) => {
-                assert_eq!(ts, 300, "房间间应隔离")
+                assert_eq!(ts, 300, "rooms should be isolated")
             }
             other => panic!("expected StatusReport, got {other:?}"),
         }
@@ -120,7 +110,7 @@ mod tests {
         reg.store("room-a", report("room-a", 100));
         reg.store("room-b", report("room-b", 200));
         let all = reg.list();
-        assert_eq!(all.len(), 2, "应返回全部房间");
+        assert_eq!(all.len(), 2, "should return all rooms");
         assert!(all.iter().any(|(k, _)| k == "room-a"));
         assert!(all.iter().any(|(k, _)| k == "room-b"));
     }

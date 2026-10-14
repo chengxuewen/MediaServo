@@ -1,44 +1,45 @@
-//! Phase 1b: SignalClient 测试（本地 mock WS server）。
+//! Phase 1b: SignalClient tests (local mock WS server).
 
+use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
-use base64::Engine as _;
 use mediaservo_link::{DeviceIdentity, LinkError, SignalClient, SignalEvent};
 use tokio_tungstenite::tungstenite::Message;
 
 #[tokio::test]
 async fn connect_auth_join_and_roundtrip() {
-    // 本地 mock WS server：PSK 认证 → RoomJoin → RoomJoined → echo
+    // local mock WS server: PSK auth -> RoomJoin -> RoomJoined -> echo
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
 
-        // 1) 收 PSK（首条文本）
+        // 1) receive PSK (first text frame)
         let psk_msg = ws.next().await.unwrap().unwrap();
-        assert!(matches!(psk_msg, Message::Text(_)), "首条应为 PSK 文本");
+        assert!(matches!(psk_msg, Message::Text(_)), "the first frame must be the PSK text");
 
-        // 2) 发认证确认 Error{code:0}
+        // 2) send the auth ack Error{code:0}
         let ack = SignalingMessage::Error { code: 0, message: String::new() };
-        ws.send(Message::Text(serde_json::to_string(&ack).unwrap()))
-            .await
-            .unwrap();
+        ws.send(Message::Text(serde_json::to_string(&ack).unwrap())).await.unwrap();
 
-        // 3) 收 RoomJoin → 发 RoomJoined
+        // 3) receive RoomJoin -> send RoomJoined
         let join_msg = ws.next().await.unwrap().unwrap();
-        let join: SignalingMessage =
-            serde_json::from_str(join_msg.to_text().unwrap()).unwrap();
+        let join: SignalingMessage = serde_json::from_str(join_msg.to_text().unwrap()).unwrap();
         let room_id = match join {
             SignalingMessage::RoomJoin { room_id, .. } => room_id,
             _ => panic!("expected RoomJoin"),
         };
-        let joined = SignalingMessage::RoomJoined { room_id, peer_id: "peer-1".to_string() , protocol: None, server_version: None, session_nonce: None};
-        ws.send(Message::Text(serde_json::to_string(&joined).unwrap()))
-            .await
-            .unwrap();
+        let joined = SignalingMessage::RoomJoined {
+            room_id,
+            peer_id: "peer-1".to_string(),
+            protocol: None,
+            server_version: None,
+            session_nonce: None,
+        };
+        ws.send(Message::Text(serde_json::to_string(&joined).unwrap())).await.unwrap();
 
-        // 4) echo loop：收一条回一条
+        // 4) echo loop: reply one for each received
         while let Some(Ok(msg)) = ws.next().await {
             if ws.send(msg).await.is_err() {
                 break;
@@ -46,20 +47,16 @@ async fn connect_auth_join_and_roundtrip() {
         }
     });
 
-    // 客户端
-    let client = SignalClient::new(
-        &format!("ws://{addr}/ws"),
-        "test-psk",
-        "test-room",
-        PeerRole::Host,
-    );
+    // client
+    let client =
+        SignalClient::new(&format!("ws://{addr}/ws"), "test-psk", "test-room", PeerRole::Host);
     let session = client.connect().await.expect("connect");
     assert_eq!(session.room_id(), "test-room");
-    assert_eq!(session.peer_id(), "peer-1", "RoomJoined 的 peer_id 应可访问");
+    assert_eq!(session.peer_id(), "peer-1", "RoomJoined peer_id must be accessible");
     assert_eq!(session.room_id(), "test-room");
     let mut events = session.events();
 
-    // 发一条 Sdp，期待 server echo 回来
+    // send an Sdp, expect the server to echo it back
     session
         .send(SignalingMessage::Sdp {
             room_id: "test-room".to_string(),
@@ -69,12 +66,12 @@ async fn connect_auth_join_and_roundtrip() {
         .await
         .expect("send");
 
-    // 收事件（先 Connected，后 echo 的 Message）
+    // receive events (Connected first, then the echoed Message)
     let echoed = tokio::time::timeout(std::time::Duration::from_secs(3), async {
         loop {
             match events.recv().await.unwrap() {
                 SignalEvent::Message(SignalingMessage::Sdp { sdp, .. }) => return sdp,
-                _ => continue, // Connected 等事件跳过
+                _ => continue, // skip Connected and similar events
             }
         }
     })
@@ -86,38 +83,42 @@ async fn connect_auth_join_and_roundtrip() {
     server.await.unwrap();
 }
 
-// ── D2: 本地网关模式（LocalEnvelope 信封 wire，无 PSK 挑战）──────────────
+// -- D2: local gateway mode (LocalEnvelope wire, no PSK challenge) --
 
 #[tokio::test]
 async fn gateway_mode_connects_with_envelope_wire() {
-    // mock 网关：首条消息必须是 LocalEnvelope 包 RoomJoin（无 PSK 挑战！），
-    // 回复 LocalEnvelope{RoomJoined}，随后信封回显。
+    // mock gateway: the first message must be a LocalEnvelope wrapping RoomJoin (no PSK challenge!);
+    // it replies LocalEnvelope{RoomJoined}, then echoes envelopes.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
 
-        // 1) 首条必须是信封（网关本地 wire 无 PSK 挑战）
+        // 1) the first frame must be an envelope (gateway local wire has no PSK challenge)
         let first = ws.next().await.unwrap().unwrap();
-        let env: mediaservo_link::LocalEnvelope =
-            serde_json::from_str(first.to_text().unwrap()).expect("首条应为 LocalEnvelope");
+        let env: mediaservo_link::LocalEnvelope = serde_json::from_str(first.to_text().unwrap())
+            .expect("the first frame must be a LocalEnvelope");
         assert_eq!(env.src, "child-1");
         let room_id = match env.msg {
             SignalingMessage::RoomJoin { room_id, .. } => room_id,
             other => panic!("expected RoomJoin in envelope, got {other:?}"),
         };
 
-        // 2) 信封回 RoomJoined
+        // 2) the envelope replies RoomJoined
         let joined = mediaservo_link::LocalEnvelope {
             src: "server".into(),
-            msg: SignalingMessage::RoomJoined { room_id, peer_id: "veh-peer".into() , protocol: None, server_version: None, session_nonce: None},
+            msg: SignalingMessage::RoomJoined {
+                room_id,
+                peer_id: "veh-peer".into(),
+                protocol: None,
+                server_version: None,
+                session_nonce: None,
+            },
         };
-        ws.send(Message::Text(serde_json::to_string(&joined).unwrap()))
-            .await
-            .unwrap();
+        ws.send(Message::Text(serde_json::to_string(&joined).unwrap())).await.unwrap();
 
-        // 3) echo loop（信封）
+        // 3) echo loop (envelopes)
         while let Some(Ok(msg)) = ws.next().await {
             if ws.send(msg).await.is_err() {
                 break;
@@ -133,7 +134,11 @@ async fn gateway_mode_connects_with_envelope_wire() {
     );
     let session = client.connect().await.expect("gateway connect");
     assert_eq!(session.room_id(), "stream-s0");
-    assert_eq!(session.peer_id(), "veh-peer", "合成 RoomJoined 的整车 peer_id");
+    assert_eq!(
+        session.peer_id(),
+        "veh-peer",
+        "synthesized RoomJoined carries the vehicle-level peer_id"
+    );
     let mut events = session.events();
 
     session
@@ -162,7 +167,7 @@ async fn gateway_mode_connects_with_envelope_wire() {
 
 #[tokio::test]
 async fn gateway_mode_room_join_denied_returns_error() {
-    // 网关未连上远端 server → RoomJoin 拦截回 Error 5001（信封内）
+    // gateway not connected to the remote server -> intercepted RoomJoin replies Error 5001 (inside an envelope)
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -171,51 +176,49 @@ async fn gateway_mode_room_join_denied_returns_error() {
         let _env = ws.next().await.unwrap().unwrap();
         let deny = mediaservo_link::LocalEnvelope {
             src: "server".into(),
-            msg: SignalingMessage::Error { code: 5001, message: "gateway not connected to server".into() },
+            msg: SignalingMessage::Error {
+                code: 5001,
+                message: "gateway not connected to server".into(),
+            },
         };
-        ws.send(Message::Text(serde_json::to_string(&deny).unwrap()))
-            .await
-            .unwrap();
+        ws.send(Message::Text(serde_json::to_string(&deny).unwrap())).await.unwrap();
     });
 
-    let client = SignalClient::new_gateway(
-        &format!("ws://{addr}/ws"),
-        "child-1",
-        "r",
-        PeerRole::Host,
-    );
+    let client =
+        SignalClient::new_gateway(&format!("ws://{addr}/ws"), "child-1", "r", PeerRole::Host);
     let err = client.connect().await.unwrap_err();
-    assert!(err.to_string().contains("5001"), "应报 5001，got: {err}");
+    assert!(err.to_string().contains("5001"), "must report 5001, got: {err}");
     server.await.unwrap();
 }
 
 #[tokio::test]
 async fn auth_denied_returns_error() {
-    // mock server：认证拒绝
+    // mock server: auth denied
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
         let _psk = ws.next().await.unwrap().unwrap();
-        let deny = SignalingMessage::Error { code: 4003, message: "PSK authentication failed".to_string() };
-        ws.send(Message::Text(serde_json::to_string(&deny).unwrap()))
-            .await
-            .unwrap();
+        let deny = SignalingMessage::Error {
+            code: 4003,
+            message: "PSK authentication failed".to_string(),
+        };
+        ws.send(Message::Text(serde_json::to_string(&deny).unwrap())).await.unwrap();
     });
 
     let client = SignalClient::new(&format!("ws://{addr}/ws"), "wrong-psk", "r", PeerRole::Host);
     let err = client.connect().await.unwrap_err();
-    assert!(err.to_string().contains("auth denied [4003]"), "应报认证拒绝，got: {err}");
+    assert!(err.to_string().contains("auth denied [4003]"), "must report auth denial, got: {err}");
 
     server.await.unwrap();
 }
 
-// ---- G4: 设备凭证（D-H11）——RoomJoin 携带（additive；缺省 = PSK 路径）----
+// ---- G4: device credential (D-H11) - carried by RoomJoin (additive; default = PSK path) ----
 
 #[tokio::test]
 async fn room_join_carries_device_credentials() {
-    // mock server：PSK 确认后，断言 RoomJoin 携带 device_id/device_secret
+    // mock server: after the PSK ack, assert RoomJoin carries device_id/device_secret
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -228,12 +231,26 @@ async fn room_join_carries_device_credentials() {
         let join: SignalingMessage = serde_json::from_str(join_msg.to_text().unwrap()).unwrap();
         match join {
             SignalingMessage::RoomJoin { device_id, device_secret, .. } => {
-                assert_eq!(device_id.as_deref(), Some("ms-001122334455"), "RoomJoin 应携带 device_id");
-                assert_eq!(device_secret.as_deref(), Some("s3cr3t"), "RoomJoin 应携带 device_secret");
+                assert_eq!(
+                    device_id.as_deref(),
+                    Some("ms-001122334455"),
+                    "RoomJoin must carry device_id"
+                );
+                assert_eq!(
+                    device_secret.as_deref(),
+                    Some("s3cr3t"),
+                    "RoomJoin must carry device_secret"
+                );
             }
             other => panic!("expected RoomJoin, got {other:?}"),
         }
-        let joined = SignalingMessage::RoomJoined { room_id: "r".into(), peer_id: "peer-1".into() , protocol: None, server_version: None, session_nonce: None};
+        let joined = SignalingMessage::RoomJoined {
+            room_id: "r".into(),
+            peer_id: "peer-1".into(),
+            protocol: None,
+            server_version: None,
+            session_nonce: None,
+        };
         ws.send(Message::Text(serde_json::to_string(&joined).unwrap())).await.unwrap();
     });
     let client = SignalClient::new(&format!("ws://{addr}/ws"), "test-psk", "r", PeerRole::Host)
@@ -249,7 +266,7 @@ async fn room_join_carries_device_credentials() {
 
 #[tokio::test]
 async fn room_join_denied_surfaces_device_auth_error() {
-    // 凭证被 server 拒绝（G2 起：Error 4010 设备认证失败）→ 客户端必须明确报错（C15/C16）
+    // credential rejected by the server (since G2: Error 4010 device auth failed) -> the client must error explicitly (C15/C16)
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -259,7 +276,10 @@ async fn room_join_denied_surfaces_device_auth_error() {
         let ack = SignalingMessage::Error { code: 0, message: String::new() };
         ws.send(Message::Text(serde_json::to_string(&ack).unwrap())).await.unwrap();
         let _join = ws.next().await.unwrap().unwrap();
-        let deny = SignalingMessage::Error { code: 4010, message: "device authentication failed".to_string() };
+        let deny = SignalingMessage::Error {
+            code: 4010,
+            message: "device authentication failed".to_string(),
+        };
         ws.send(Message::Text(serde_json::to_string(&deny).unwrap())).await.unwrap();
     });
     let client = SignalClient::new(&format!("ws://{addr}/ws"), "test-psk", "r", PeerRole::Host)
@@ -268,16 +288,26 @@ async fn room_join_denied_surfaces_device_auth_error() {
             device_secret: "wrong".into(),
         });
     let err = client.connect().await.unwrap_err();
-    assert!(err.to_string().contains("4010") && err.to_string().contains("device authentication failed"),
-        "应明确报设备认证失败，got: {err}");
+    assert!(
+        err.to_string().contains("4010")
+            && err.to_string().contains("device authentication failed"),
+        "must explicitly report device auth failure, got: {err}"
+    );
     server.await.unwrap();
 }
 
-// ---- Phase B (B1): 重连（指数退避 + jitter）与断线通知 ----
+// ---- Phase B (B1): reconnect (exponential backoff + jitter) and disconnect notice ----
 
-/// mock server：前 `refuse` 次连接 TCP 立断（WS 握手失败），之后完整认证+入房；
-/// 累计接受 `total` 次连接后退出（防客户端放弃后 accept 永久阻塞）。
-async fn refuse_then_serve(refuse: usize, total: usize) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+/// mock server: the first `refuse` connections get an instant TCP drop (WS handshake fails), then full auth + join;
+/// exits after serving `total` connections in total (so accept never blocks forever once the client gives up).
+async fn refuse_then_serve(
+    refuse: usize,
+    total: usize,
+) -> (
+    std::net::SocketAddr,
+    tokio::task::JoinHandle<()>,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -290,7 +320,7 @@ async fn refuse_then_serve(refuse: usize, total: usize) -> (std::net::SocketAddr
                 conn += 1;
                 attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if conn <= refuse {
-                    drop(stream); // 拒绝：TCP 立即关闭 → connect_async 报错
+                    drop(stream); // refuse: instant TCP close -> connect_async errors
                     continue;
                 }
                 let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
@@ -299,14 +329,21 @@ async fn refuse_then_serve(refuse: usize, total: usize) -> (std::net::SocketAddr
                 let ack = SignalingMessage::Error { code: 0, message: String::new() };
                 ws.send(Message::Text(serde_json::to_string(&ack).unwrap())).await.unwrap();
                 let join_msg = ws.next().await.unwrap().unwrap();
-                let join: SignalingMessage = serde_json::from_str(join_msg.to_text().unwrap()).unwrap();
+                let join: SignalingMessage =
+                    serde_json::from_str(join_msg.to_text().unwrap()).unwrap();
                 let room_id = match join {
                     SignalingMessage::RoomJoin { room_id, .. } => room_id,
                     _ => panic!("expected RoomJoin"),
                 };
-                let joined = SignalingMessage::RoomJoined { room_id, peer_id: "peer-1".to_string() , protocol: None, server_version: None, session_nonce: None};
+                let joined = SignalingMessage::RoomJoined {
+                    room_id,
+                    peer_id: "peer-1".to_string(),
+                    protocol: None,
+                    server_version: None,
+                    session_nonce: None,
+                };
                 ws.send(Message::Text(serde_json::to_string(&joined).unwrap())).await.unwrap();
-                return; // 本轮服务完成，剩余连接不再处理
+                return; // this round is done, remaining connections are not served
             }
         }
     });
@@ -315,9 +352,10 @@ async fn refuse_then_serve(refuse: usize, total: usize) -> (std::net::SocketAddr
 
 #[tokio::test]
 async fn connect_with_retry_refuses_then_succeeds() {
-    // 先拒 2 次（重试 2 轮），第 3 次连接成功 → 会话可用
+    // refuse twice first (2 retry rounds), the 3rd connect succeeds -> session usable
     let (addr, server, attempts) = refuse_then_serve(2, 3).await;
-    let client = SignalClient::new(&format!("ws://{addr}/ws"), "test-psk", "test-room", PeerRole::Host);
+    let client =
+        SignalClient::new(&format!("ws://{addr}/ws"), "test-psk", "test-room", PeerRole::Host);
     let session = client
         .connect_with_retry(mediaservo_link::RetryConfig {
             max_retries: 3,
@@ -327,16 +365,21 @@ async fn connect_with_retry_refuses_then_succeeds() {
         .await
         .expect("retry should succeed");
     assert_eq!(session.room_id(), "test-room");
-    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 3, "应尝试 3 次（2 拒 + 1 收）");
+    assert_eq!(
+        attempts.load(std::sync::atomic::Ordering::SeqCst),
+        3,
+        "must attempt 3 times (2 refused + 1 accepted)"
+    );
     session.close().await.expect("close");
     server.await.unwrap();
 }
 
 #[tokio::test]
 async fn connect_with_retry_exhausts_max_retries() {
-    // 永远拒绝 → max_retries 次重试后返回错误，且每次等待指数退避
+    // always refuse -> errors after max_retries, each wait using exponential backoff
     let (addr, server, attempts) = refuse_then_serve(3, 3).await;
-    let client = SignalClient::new(&format!("ws://{addr}/ws"), "test-psk", "test-room", PeerRole::Host);
+    let client =
+        SignalClient::new(&format!("ws://{addr}/ws"), "test-psk", "test-room", PeerRole::Host);
     let started = std::time::Instant::now();
     let err = client
         .connect_with_retry(mediaservo_link::RetryConfig {
@@ -346,16 +389,24 @@ async fn connect_with_retry_exhausts_max_retries() {
         })
         .await
         .unwrap_err();
-    assert!(err.to_string().contains("after 2 retries"), "应报告重试次数，got: {err}");
-    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 3, "应尝试 3 次（1 初 + 2 重试）");
-    // ±25% jitter：两次退避 50ms/100ms 的 75% 下限合计 ≥ 100ms
-    assert!(started.elapsed() >= std::time::Duration::from_millis(100), "应等待退避，elapsed={:?}", started.elapsed());
+    assert!(err.to_string().contains("after 2 retries"), "must report the retry count, got: {err}");
+    assert_eq!(
+        attempts.load(std::sync::atomic::Ordering::SeqCst),
+        3,
+        "must attempt 3 times (1 initial + 2 retries)"
+    );
+    // ±25% jitter: backoffs 50ms/100ms at their 75% floors sum to >= 100ms
+    assert!(
+        started.elapsed() >= std::time::Duration::from_millis(100),
+        "must have waited for backoff, elapsed={:?}",
+        started.elapsed()
+    );
     server.await.unwrap();
 }
 
 #[tokio::test]
 async fn on_disconnect_fires_when_server_closes() {
-    // mock server：完整握手后，等客户端 ready 消息再主动 Close
+    // mock server: after the full handshake, waits for the client's ready message then sends Close
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -365,9 +416,15 @@ async fn on_disconnect_fires_when_server_closes() {
         let ack = SignalingMessage::Error { code: 0, message: String::new() };
         ws.send(Message::Text(serde_json::to_string(&ack).unwrap())).await.unwrap();
         let _join = ws.next().await.unwrap().unwrap();
-        let joined = SignalingMessage::RoomJoined { room_id: "r".to_string(), peer_id: "peer-1".to_string() , protocol: None, server_version: None, session_nonce: None};
+        let joined = SignalingMessage::RoomJoined {
+            room_id: "r".to_string(),
+            peer_id: "peer-1".to_string(),
+            protocol: None,
+            server_version: None,
+            session_nonce: None,
+        };
         ws.send(Message::Text(serde_json::to_string(&joined).unwrap())).await.unwrap();
-        let _ready = ws.next().await.unwrap().unwrap(); // 等客户端就绪
+        let _ready = ws.next().await.unwrap().unwrap(); // wait for the client to be ready
         ws.close(None).await.unwrap();
     });
 
@@ -377,7 +434,7 @@ async fn on_disconnect_fires_when_server_closes() {
     session.on_disconnect(Box::new(move || {
         let _ = tx.send(());
     }));
-    // 通知 server 关闭
+    // tell the server to close
     session
         .send(SignalingMessage::Sdp {
             room_id: "r".to_string(),
@@ -388,13 +445,13 @@ async fn on_disconnect_fires_when_server_closes() {
         .expect("send ready");
     tokio::time::timeout(std::time::Duration::from_secs(3), rx.changed())
         .await
-        .expect("on_disconnect 应在 server 关闭时触发（3s 超时）")
-        .expect("watch channel 不应关闭");
+        .expect("on_disconnect must fire when the server closes (3s timeout)")
+        .expect("watch channel must not close");
     server.await.unwrap();
 }
 
-// ── device-enroll T7: 公钥指纹验签链（challenge→应答→终态）+ 单锚交叉复验 ─────
-// 常量与期望值 = server devices.rs::sig_vector（批2 钉死）同一锚点，逐字抄录不重算。
+// -- device-enroll T7: public-key fingerprint signature chain (challenge -> reply -> terminal) + single-anchor cross-reverify --
+// constants and expectations share the server devices.rs::sig_vector anchor (pinned in batch 2), copied verbatim - never recomputed.
 
 const SIG_VECTOR_VK_B64: &str = "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=";
 const SIG_VECTOR_SIG_CAM0_B64: &str =
@@ -404,7 +461,7 @@ fn sig_nonce() -> Vec<u8> {
     (0x40u8..0x60).collect()
 }
 
-/// sig_vector 身份：seed = bytes(0..=31)，device_id = ms-0a1b2c3d4e5f。
+/// sig_vector identity: seed = bytes(0..=31), device_id = ms-0a1b2c3d4e5f.
 fn ident_seed0() -> DeviceIdentity {
     let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
     DeviceIdentity::new("ms-0a1b2c3d4e5f", ed25519_dalek::SigningKey::from_bytes(&seed))
@@ -412,18 +469,21 @@ fn ident_seed0() -> DeviceIdentity {
 
 #[test]
 fn device_auth_sig_cross_anchor_matches_server_vector() {
-    // 单锚交叉复验：本 crate 签名函数 × server 钉期望值 —— 同输入必出同字节。
+    // single-anchor cross-reverify: this crate's signing function x the server's pinned expectation - same inputs must yield identical bytes.
     let ident = ident_seed0();
-    assert_eq!(ident.pubkey_b64, SIG_VECTOR_VK_B64, "公钥指纹必须 = server 钉值");
+    assert_eq!(
+        ident.pubkey_b64, SIG_VECTOR_VK_B64,
+        "the public-key fingerprint must equal the server's pinned value"
+    );
     assert_eq!(
         ident.sign_device_auth(&sig_nonce(), "vehicle_cam0"),
         SIG_VECTOR_SIG_CAM0_B64,
-        "同 seed/nonce/device_id/room 必出同 sig（字节合同 §3 两侧一致）"
+        "same seed/nonce/device_id/room must produce the same sig (byte contract §3 holds on both sides)"
     );
 }
 
-/// mock server：PSK ack → 断言 Join 为 pubkey 形 → challenge(sig_vector nonce) →
-/// 断言应答 verify_strict 过 → 回 `final_msg` 终态。
+/// mock server: PSK ack -> assert Join is the pubkey form -> challenge(sig_vector nonce) ->
+/// assert the reply passes verify_strict -> reply with the `final_msg` terminal state.
 async fn spawn_pubkey_server(final_msg: SignalingMessage) -> std::net::SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -432,37 +492,39 @@ async fn spawn_pubkey_server(final_msg: SignalingMessage) -> std::net::SocketAdd
         let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
         let _psk = ws.next().await.unwrap().unwrap();
         let ack = SignalingMessage::Error { code: 0, message: String::new() };
-        ws.send(Message::Text(serde_json::to_string(&ack).unwrap()))
-            .await
-            .unwrap();
+        ws.send(Message::Text(serde_json::to_string(&ack).unwrap())).await.unwrap();
         let join_msg = ws.next().await.unwrap().unwrap();
-        let room_id =
-            match serde_json::from_str::<SignalingMessage>(join_msg.to_text().unwrap()).unwrap() {
-                SignalingMessage::RoomJoin { room_id, device_id, device_secret, device_pubkey, .. } => {
-                    assert_eq!(device_id.as_deref(), Some("ms-0a1b2c3d4e5f"));
-                    assert_eq!(device_secret, None, "pubkey 形 Join 不得携带 secret");
-                    assert_eq!(
-                        device_pubkey.as_deref(),
-                        Some(SIG_VECTOR_VK_B64),
-                        "Join 应带 device_pubkey（= sig_vector vk）"
-                    );
-                    room_id
-                }
-                other => panic!("expected RoomJoin, got {other:?}"),
-            };
+        let room_id = match serde_json::from_str::<SignalingMessage>(join_msg.to_text().unwrap())
+            .unwrap()
+        {
+            SignalingMessage::RoomJoin {
+                room_id, device_id, device_secret, device_pubkey, ..
+            } => {
+                assert_eq!(device_id.as_deref(), Some("ms-0a1b2c3d4e5f"));
+                assert_eq!(device_secret, None, "a pubkey-form Join must not carry a secret");
+                assert_eq!(
+                    device_pubkey.as_deref(),
+                    Some(SIG_VECTOR_VK_B64),
+                    "Join must carry device_pubkey (= sig_vector vk)"
+                );
+                room_id
+            }
+            other => panic!("expected RoomJoin, got {other:?}"),
+        };
         let nonce_raw = sig_nonce();
         let ch = SignalingMessage::DeviceAuthChallenge {
             nonce: base64::engine::general_purpose::STANDARD.encode(&nonce_raw),
         };
-        ws.send(Message::Text(serde_json::to_string(&ch).unwrap()))
-            .await
-            .unwrap();
-        // server 同款纪律验签（verify_strict，§3）+ 同锚 sig 比对
+        ws.send(Message::Text(serde_json::to_string(&ch).unwrap())).await.unwrap();
+        // verify with the server's own discipline (verify_strict, §3) + same-anchor sig comparison
         let resp_msg = ws.next().await.unwrap().unwrap();
         match serde_json::from_str::<SignalingMessage>(resp_msg.to_text().unwrap()).unwrap() {
             SignalingMessage::DeviceAuthResponse { room_id: r, sig } => {
-                assert_eq!(r, room_id, "应答 room 必须回显 Join 房间");
-                assert_eq!(sig, SIG_VECTOR_SIG_CAM0_B64, "nonce/ids/room 同锚必出同 sig");
+                assert_eq!(r, room_id, "the reply's room must echo the Join room");
+                assert_eq!(
+                    sig, SIG_VECTOR_SIG_CAM0_B64,
+                    "same nonce/ids/room anchor must produce the same sig"
+                );
                 let vk_arr: [u8; 32] = base64::engine::general_purpose::STANDARD
                     .decode(SIG_VECTOR_VK_B64)
                     .unwrap()
@@ -481,13 +543,11 @@ async fn spawn_pubkey_server(final_msg: SignalingMessage) -> std::net::SocketAdd
                 ed25519_dalek::VerifyingKey::from_bytes(&vk_arr)
                     .unwrap()
                     .verify_strict(&msg, &ed25519_dalek::Signature::from_bytes(&sig_arr))
-                    .expect("host 应答必须通过验签");
+                    .expect("the host reply must pass verification");
             }
             other => panic!("expected DeviceAuthResponse, got {other:?}"),
         }
-        ws.send(Message::Text(serde_json::to_string(&final_msg).unwrap()))
-            .await
-            .unwrap();
+        ws.send(Message::Text(serde_json::to_string(&final_msg).unwrap())).await.unwrap();
     });
     addr
 }
@@ -499,7 +559,7 @@ fn pubkey_client(addr: std::net::SocketAddr) -> SignalClient {
 
 #[tokio::test]
 async fn pubkey_join_challenge_answered_receives_joined() {
-    // 全链过：Join(pubkey) → challenge → 应答 → RoomJoined → 会话可用
+    // full chain passes: Join(pubkey) -> challenge -> reply -> RoomJoined -> session usable
     let addr = spawn_pubkey_server(SignalingMessage::RoomJoined {
         room_id: "vehicle_cam0".into(),
         peer_id: "peer-vk".into(),
@@ -508,44 +568,49 @@ async fn pubkey_join_challenge_answered_receives_joined() {
         session_nonce: None,
     })
     .await;
-    let session = pubkey_client(addr).connect().await.expect("pubkey 全链应过");
+    let session =
+        pubkey_client(addr).connect().await.expect("the pubkey-form full chain must pass");
     assert_eq!(session.peer_id(), "peer-vk");
     session.close().await.expect("close");
 }
 
 #[tokio::test]
 async fn pubkey_join_pending_maps_to_enroll_pending_error() {
-    // 手动档未批准：DeviceAuthPending → typed EnrollPending（host 日志面可判别）
+    // manual mode, not approved: DeviceAuthPending -> typed EnrollPending (distinguishable in host logs)
     let addr = spawn_pubkey_server(SignalingMessage::DeviceAuthPending {
         device_id: "ms-0a1b2c3d4e5f".into(),
     })
     .await;
-    let err = pubkey_client(addr).connect().await.expect_err("pending 必须报 typed 错误");
+    let err = pubkey_client(addr).connect().await.expect_err("pending must report a typed error");
     assert!(
         matches!(&err, LinkError::EnrollPending { device_id } if device_id == "ms-0a1b2c3d4e5f"),
-        "应为 EnrollPending{{device_id}}，got: {err:?}"
+        "must be EnrollPending{{device_id}}, got: {err:?}"
     );
-    assert!(err.to_string().contains("device enroll pending"), "Display 含家族串: {err}");
+    assert!(
+        err.to_string().contains("device enroll pending"),
+        "Display contains the family string: {err}"
+    );
 }
 
 #[tokio::test]
 async fn pubkey_join_rejected_after_answer_surfaces_error() {
-    // 验签被拒（4010 统一防枚举消息）→ 错误上抛，会话不建
+    // signature rejected (4010 uniform anti-enumeration message) -> error surfaces, no session
     let addr = spawn_pubkey_server(SignalingMessage::Error {
         code: 4010,
         message: "device authentication failed: invalid device credentials".into(),
     })
     .await;
-    let err = pubkey_client(addr).connect().await.expect_err("拒签必须报错");
+    let err = pubkey_client(addr).connect().await.expect_err("rejection must error");
     assert!(
-        err.to_string().contains("4010") && err.to_string().contains("device authentication failed"),
+        err.to_string().contains("4010")
+            && err.to_string().contains("device authentication failed"),
         "got: {err}"
     );
 }
 
 #[tokio::test]
 async fn pubkey_join_silence_hits_five_second_disconnect() {
-    // §1 合同：pubkey 形 Join 后服务端静默 → 5s 超时断连错误（start_paused 瞬时推进）
+    // §1 contract: server silence after a pubkey Join -> 5s-timeout disconnect error (start_paused advances instantly)
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -553,13 +618,11 @@ async fn pubkey_join_silence_hits_five_second_disconnect() {
         let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
         let _psk = ws.next().await.unwrap().unwrap();
         let ack = SignalingMessage::Error { code: 0, message: String::new() };
-        ws.send(Message::Text(serde_json::to_string(&ack).unwrap()))
-            .await
-            .unwrap();
-        let _join = ws.next().await; // 此后静默
+        ws.send(Message::Text(serde_json::to_string(&ack).unwrap())).await.unwrap();
+        let _join = ws.next().await; // silence from here on
         tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
     });
-    let err = pubkey_client(addr).connect().await.expect_err("静默必须超时");
+    let err = pubkey_client(addr).connect().await.expect_err("silence must time out");
     assert!(err.to_string().contains("no server response within 5s"), "got: {err}");
     server.abort();
 }

@@ -1,7 +1,7 @@
 // RTCDataChannel control + HMAC validation + buffer tracking
 // MVP quality — validates frames, tracks buffer, drops oldest when >3 deep
 
-#![allow(dead_code)] // 双身份文件：host-legacy bin 的 `mod` 形态在用（T1.3 翻案），独立 bin 编译形态全 dead = 结构噪音
+#![allow(dead_code)] // Dual-identity file: the `mod` form of the host-legacy bin is in use (T1.3 reversal); the standalone bin compile form is entirely dead = structural noise
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;

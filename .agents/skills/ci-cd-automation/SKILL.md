@@ -78,10 +78,10 @@ docker compose down
 
 ## pixi Task Reference
 
-### Cargo Tasks (mediasoup 分离)
+### Cargo Tasks (mediasoup separated)
 
-mediaservo-server 走 Docker（C13）— `scripts/docker-cargo.sh` / `docker compose exec server`；
-其余 crate 原生编译。
+mediaservo-server goes through Docker (C13) — `scripts/docker-cargo.sh` / `docker compose exec server`;
+the remaining crates compile natively.
 
 | Task | Command | When |
 |------|---------|------|
@@ -89,7 +89,7 @@ mediaservo-server 走 Docker（C13）— `scripts/docker-cargo.sh` / `docker com
 | `pixi run build` | `cargo build --workspace --exclude mediaservo-server` | Before running bins |
 | `pixi run lint` | `cargo clippy --workspace --all-targets -- -D warnings` | Before commit |
 | `pixi run test` | `cargo test --workspace --exclude mediaservo-server` | Before PR |
-| `pixi run check-server` | `scripts/docker-cargo.sh check -p mediaservo-server --features sfu-mediasoup` | Server 变更 |
+| `pixi run check-server` | `scripts/docker-cargo.sh check -p mediaservo-server --features sfu-mediasoup` | Server changes |
 | `pixi run test-server` | `scripts/docker-cargo.sh test -p mediaservo-server --features sfu-mediasoup` | SFU changes only |
 
 ### Vanilla Tasks (no wrapper, faster)
@@ -246,7 +246,7 @@ Rules:
 
 | Pitfall | Reference | Fix |
 |---------|-----------|-----|
-| mediasoup-sys buildtype conflict | PIT-11 | 已解决（registry 官方原版）— 本机编译走 Docker（C13） |
+| mediasoup-sys buildtype conflict | PIT-11 | Resolved (official registry original) — local builds go through Docker (C13) |
 | MESON must be absolute path | PIT-12 | `pixi run -- which meson` |
 | cargo clean -p doesn't clear build cache | PIT-13 | `rm -rf target/debug/build/<pkg>-*` |
 | macOS Docker volume mount slow | constraints.md | Use cargo-cache named volume |

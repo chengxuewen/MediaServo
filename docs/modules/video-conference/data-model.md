@@ -1,19 +1,19 @@
-# 数据模型
+# Data Model
 
 ## 1. Room
 
 ```typescript
 interface Room {
   id: string;                    // UUID
-  name: string;                  // 房间名称
+  name: string;                  // Room name
   createdAt: string;             // ISO 8601
   status: RoomStatus;
-  maxParticipants: number;       // 最大参与人数
-  recording: boolean;            // 是否录制
+  maxParticipants: number;       // Max participants
+  recording: boolean;            // Whether recording
   mode: "conference" | "webinar" | "p2p";
-  region: string;                // 部署区域
+  region: string;                // Deployment region
 
-  // 媒体配置
+  // Media config
   mediaConfig: {
     videoCodec: "vp8" | "vp9" | "h264" | "av1";
     audioCodec: "opus";
@@ -22,7 +22,7 @@ interface Room {
     maxBitrate: number;          // kbps
   };
 
-  // 安全
+  // Security
   security: {
     e2ee: boolean;
     requireAuth: boolean;
@@ -43,12 +43,12 @@ enum RoomStatus {
 interface Participant {
   id: string;                    // UUID
   roomId: string;
-  userId: string;                // 关联用户系统
+  userId: string;                // Linked to the user system
   displayName: string;
   role: "host" | "speaker" | "listener";
   joinedAt: string;              // ISO 8601
 
-  // 连接信息
+  // Connection info
   connection: {
     transportId: string;         // mediasoup Transport ID
     iceState: "connected" | "disconnected" | "failed";
@@ -57,14 +57,14 @@ interface Participant {
     rtt: number;                 // ms
   };
 
-  // 媒体状态
+  // Media state
   media: {
     video: MediaState;
     audio: MediaState;
     screenShare: MediaState;
   };
 
-  // 客户端信息
+  // Client info
   client: {
     platform: "web" | "desktop" | "mobile";
     browser?: string;
@@ -93,11 +93,11 @@ interface Track {
   participantId: string;
   roomId: string;
 
-  // mediasoup 映射
+  // mediasoup mapping
   producerId: string;            // mediasoup Producer ID
   routerId: string;              // mediasoup Router ID
 
-  // 编码信息
+  // Encoding info
   encoding: {
     codec: string;
     mimeType: string;            // e.g. "video/VP8"
@@ -105,14 +105,14 @@ interface Track {
     channels?: number;           // audio only
   };
 
-  // Simulcast / SVC 层
+  // Simulcast / SVC layers
   layers?: SimulcastLayer[];
   svc?: {
     spatialLayers: number;
     temporalLayers: number;
   };
 
-  // 统计
+  // Stats
   stats: {
     bitrate: number;             // kbps
     packetLoss: number;          // %
@@ -123,27 +123,27 @@ interface Track {
 
 interface SimulcastLayer {
   id: string;
-  rid: "r0" | "r1" | "r2";     // 编码层 ID
+  rid: "r0" | "r1" | "r2";      // Encoding layer ID
   resolution: { width: number; height: number };
   bitrate: number;               // kbps
-  active: boolean;               // 是否有订阅者
+  active: boolean;               // Whether it has subscribers
 }
 ```
 
-## 4. 编码层参考
+## 4. Encoding Layer Reference
 
-### 4.1 Simulcast 层
+### 4.1 Simulcast Layers
 
-| 层 | RID | 分辨率 | 码率 (VP8) | 码率 (H.264) |
-|----|-----|--------|-----------|-------------|
-| 低 | r0 | 320×180 | 150 kbps | 120 kbps |
-| 中 | r1 | 640×360 | 400 kbps | 350 kbps |
-| 高 | r2 | 1280×720 | 1200 kbps | 1000 kbps |
+| Layer | RID | Resolution | Bitrate (VP8) | Bitrate (H.264) |
+|-------|-----|------------|---------------|-----------------|
+| Low | r0 | 320×180 | 150 kbps | 120 kbps |
+| Mid | r1 | 640×360 | 400 kbps | 350 kbps |
+| High | r2 | 1280×720 | 1200 kbps | 1000 kbps |
 
-### 4.2 VP9 SVC 层
+### 4.2 VP9 SVC Layers
 
-| 空域 | 时域 | 分辨率 | 帧率 |
-|------|------|--------|------|
+| Spatial | Temporal | Resolution | Frame rate |
+|---------|----------|------------|------------|
 | S0 | T0 | 320×180 | 7.5 fps |
 | S0 | T1 | 320×180 | 15 fps |
 | S0 | T2 | 320×180 | 30 fps |
@@ -154,23 +154,23 @@ interface SimulcastLayer {
 | S2 | T1 | 1280×720 | 15 fps |
 | S2 | T2 | 1280×720 | 30 fps |
 
-### 4.3 音频
+### 4.3 Audio
 
-| 参数 | 值 |
-|------|-----|
-| 编码 | Opus |
-| 采样率 | 48 kHz |
-| 声道 | 2 (stereo) |
-| 码率 | 30 kbps |
-| 帧长 | 20 ms |
-| FEC | 启用 |
-| DTX | 启用 |
+| Parameter | Value |
+|-----------|-------|
+| Codec | Opus |
+| Sample rate | 48 kHz |
+| Channels | 2 (stereo) |
+| Bitrate | 30 kbps |
+| Frame length | 20 ms |
+| FEC | Enabled |
+| DTX | Enabled |
 
-## 5. 权限模型
+## 5. Permission Model
 
 ```typescript
 interface ConferencePermission {
-  // 功能
+  // Features
   canPublishVideo: boolean;
   canPublishAudio: boolean;
   canShareScreen: boolean;
@@ -179,17 +179,17 @@ interface ConferencePermission {
   canKick: boolean;
   canLock: boolean;
 
-  // 配额
+  // Quotas
   maxPublishBitrate: number;     // kbps
   maxResolution: string;         // "720p" | "1080p" | "4k"
   maxParticipants: number;
 
-  // 录制
+  // Recording
   recording: "none" | "own" | "all";
 }
 ```
 
-## 6. 事件模型
+## 6. Event Model
 
 ```typescript
 type ConferenceEvent =
@@ -209,34 +209,34 @@ type ConferenceEvent =
   | { type: "error"; code: string; message: string };
 ```
 
-## 7. 状态机
+## 7. State Machines
 
-### Room 生命周期
+### Room Lifecycle
 
 ```
 Created ──→ Active ──→ Ended
                 │
-                ├──→ Recording (子状态)
+                ├──→ Recording (sub-state)
                 │
-                └──→ Locked (子状态, 禁止新加入)
+                └──→ Locked (sub-state, no new joins)
 ```
 
-### Participant 连接状态
+### Participant Connection State
 
 ```
 Invited ──→ Joining ──→ Connected ──→ Disconnected
                 │            │
                 └──→ Failed  └──→ Reconnecting ──→ Connected
                                        │
-                                       └──→ Disconnected (超时)
+                                       └──→ Disconnected (timeout)
 ```
 
-### Track 生命周期
+### Track Lifecycle
 
 ```
 Added ──→ Active ──→ Removed
             │
-            ├──→ Muted (暂停转发)
+            ├──→ Muted (forwarding paused)
             │
-            └──→ LayerChanged (编码层切换)
+            └──→ LayerChanged (encoding layer switch)
 ```

@@ -1,5 +1,5 @@
-// mediaservo-field-cxx 编译运行测试：version + 错误路径 + move 语义 + Result 误用。
-// 编译示例: g++ -std=c++17 -I bindings/cxx/mediaservo-field-cxx/include -I bindings/c/mediaservo-field-c/include
+// mediaservo-field-cxx compile-and-run tests: version + error paths + move semantics + Result misuse.
+// Build example: g++ -std=c++17 -I bindings/cxx/mediaservo-field-cxx/include -I bindings/c/mediaservo-field-c/include
 //           -I bindings/c/include tests/test_field.cpp -L target/debug -lmediaservo_field
 //           -o /tmp/opencode/test_field_cxx
 
@@ -19,7 +19,7 @@ static void test_version() {
 }
 
 static void test_connect_error_path() {
-    // 空配置 → C ABI 快速 INVALID_ARG（url/psk/room 必填），不触网
+    // Empty config → the C ABI fails fast with INVALID_ARG (url/psk/room required); no network touched
     auto r = PushSession::connect(PushConfig{});
     assert(!r.has_value());
     assert(!r.has_value());
@@ -40,7 +40,7 @@ static void test_result_misuse_throws() {
 }
 
 static void test_closed_session_error_path() {
-    PushSession s; // 默认构造 = 已关闭
+    PushSession s; // default construction = closed
     assert(!s);
 
     auto p = s.publish_video();
@@ -52,21 +52,21 @@ static void test_closed_session_error_path() {
     assert(!st.has_value());
     assert(st.error().code == MEDIASERVO_FIELD_ERR_INVALID_ARG);
 
-    s.stop_video_frames(); // 已关闭 no-op，不崩
-    assert(s.close().has_value()); // 幂等
+    s.stop_video_frames(); // closed no-op, no crash
+    assert(s.close().has_value()); // idempotent
     assert(s.close().has_value());
 }
 
 static void test_move_semantics() {
     PushSession a;                       // null
-    PushSession b(std::move(a));         // move 构造
+    PushSession b(std::move(a));         // move construction
     assert(!a && !b);
 
     PushSession c;
-    c = std::move(b);                    // move 赋值
+    c = std::move(b);                    // move assignment
     assert(!b && !c);
 
-    (void)c.close();                     // double-close 安全（析构再触发一次）
+    (void)c.close();                     // double-close safe (the destructor triggers once more)
 }
 
 int main() {

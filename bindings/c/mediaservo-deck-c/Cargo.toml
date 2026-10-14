@@ -3,7 +3,7 @@ name = "mediaservo-deck-c"
 build = "build.rs"
 version.workspace = true
 edition.workspace = true
-description = "MediaServo deck C ABI — ms_deck_* opaque handle bindings (采集/录制/回放)"
+description = "MediaServo deck C ABI — ms_deck_* opaque handle bindings (capture/record/playback)"
 license.workspace = true
 
 [lib]

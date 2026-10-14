@@ -1,80 +1,79 @@
-//! ifb.rs —— T9 capability 探测（design §引擎 capability 表 + §ifb 合同的「先读后探」链）。
+//! ifb.rs -- T9 capability probing (design §engine capability table + the §ifb contract's "read-before-probe" chain).
 //!
-//! 判定合同（零内核触达的纯函数 [`ifb_decision`]，探测事实注入）：
-//! - **先读后探**：`ip link show ifb0` 已存在 → 直接 true，**绝不删非本次探测所建的 ifb0**
-//!   （否则 refresh 会拆掉活跃 dir=in 会话的镜像=黑洞复发——design §capability 红线）。
-//! - local 通道：缺席才 modprobe → add → link up → 【立即 del，仅限本次探测所建】→ true。
-//!   模块缺失 → false+「内核无 ifb 模块」；已加载但建不起来 → false+「无权创建 netdev」。
-//! - sidecar 通道：**只读 lsmod 判定**（容器与宿主共享内核 → /proc/modules 即宿主模块表；
-//!   镜像内无 /lib/modules 不能自行 modprobe，也不做建删探测——避免拆宿主活跃会话）。
-//!   未加载 → false+「需宿主 root modprobe ifb（sidecar 通道无 /lib/modules）」；已加载 → true
-//!   （NET_ADMIN + host netns，施加期 `ip link add` 可行）。
+//! Verdict contract (the zero-kernel-touch pure function [`ifb_decision`], probe facts injected):
+//! - **read-before-probe**: `ip link show ifb0` already exists -> directly true, **never delete an ifb0 not created by this probe**
+//!   (otherwise refresh would tear down a live dir=in session's mirror = the black hole relapsing -- design §capability red line).
+//! - local channel: only when absent, modprobe -> add -> link up -> [immediately del, only if created by this probe] -> true.
+//!   module missing -> false + "kernel has no ifb module"; loaded but cannot create -> false + "no permission to create a netdev".
+//! - sidecar channel: **read-only lsmod verdict** (container and host share the kernel -> /proc/modules IS the host module table;
+//!   the image has no /lib/modules so it cannot modprobe itself, and no create/delete probing either -- avoids tearing down live host sessions).
+//!   not loaded -> false + "needs modprobe ifb as host root (the sidecar channel has no /lib/modules)"; loaded -> true
+//!   (NET_ADMIN + host netns, `ip link add` feasible at apply time).
 //!
-//! ifb 是内核模块支持的 netdev：`ip link add ... type ifb` 需要**宿主内核已装载 ifb.ko**
-//! （模块表全局，netns 帮不上忙）；非 root 用户命名空间内 request_module 被禁用。
+//! ifb is a kernel-module-backed netdev: `ip link add ... type ifb` requires **the host kernel to have ifb.ko loaded**
+//! (the module table is global, netns doesn't help); request_module is disabled inside unprivileged user namespaces.
 
 use crate::engine::{self, Channel};
 
-/// §ifb 合同固定镜像设备名（宿主全局单例——多物理口并发共享 ifb0 是已注记的简化，
-/// ponytail: 多 NIC 同时上行需 per-iface ifb 设备，出现真实需求再扩）。
+/// §ifb contract fixed mirror device name (host-global singleton -- concurrent multi-NIC sharing of ifb0 is a documented simplification,
+/// ponytail: per-iface ifb devices needed for simultaneous multi-NIC ingress; extend when a real need appears).
 pub const IFB_DEV: &str = "ifb0";
-/// 内核模块名（≠ 设备名——/proc/modules 首列与 modprobe 实参用此）。
+/// Kernel module name (!= device name -- /proc/modules first column and the modprobe argument use this).
 pub const IFB_MODULE: &str = "ifb";
 
 pub const REASON_OK: &str = "";
-pub const REASON_NO_MODULE: &str = "内核无 ifb 模块";
-/// sidecar 通道未加载专用文案（区分「未加载（宿主补救=modprobe）」vs「不可用（权限）」）。
-pub const REASON_NEED_HOST_ROOT: &str = "需宿主 root modprobe ifb（sidecar 通道无 /lib/modules）";
-pub const REASON_NO_PERM: &str = "无权创建 netdev";
+pub const REASON_NO_MODULE: &str = "kernel has no ifb module";
+/// sidecar-channel not-loaded dedicated wording (distinguishes "not loaded (host fix = modprobe)" vs "unavailable (permission)").
+pub const REASON_NEED_HOST_ROOT: &str =
+    "needs modprobe ifb as host root (the sidecar channel has no /lib/modules)";
+pub const REASON_NO_PERM: &str = "no permission to create a netdev";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IfbKind {
-    /// local-root 通道：允许完整 modprobe→建→up→删探测链。
+    /// local-root channel: the full modprobe -> create -> up -> del probe chain allowed.
     Local,
-    /// docker NET_ADMIN sidecar：只读判定，零建删副作用。
+    /// docker NET_ADMIN sidecar: read-only verdict, zero create/delete side effects.
     Sidecar,
 }
 
-/// 探测事实（纯函数入参——单测矩阵零环境触碰；实探由 [`probe`] 收集）。
+/// Probe facts (pure-function inputs -- the unit-test matrix touches zero environment; [`probe`] collects the real facts).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IfbFacts {
     pub kind: IfbKind,
-    /// 先读结果：`ip link show ifb0` 成功（存在他人/系统建的 ifb0 = 镜像通道现成）。
+    /// read result: `ip link show ifb0` succeeded (someone else's/the system's ifb0 present = the mirror channel ready-made).
     pub ifb0_exists: bool,
-    /// 宿主内核模块表含 ifb（local 读本进程 /proc/modules；sidecar 读容器内同表=宿主）。
+    /// the host kernel module table contains ifb (local reads this process's /proc/modules; sidecar reads the same table in the container = host).
     pub module_loaded: bool,
-    /// local 探测链 add+up+del 全成；sidecar 恒 false（不做建删探测）。
+    /// the local probe chain add+up+del all succeeded; sidecar always false (no create/delete probing).
     pub create_ok: bool,
 }
 
-/// 纯判定（design §capability 表行为面）。返回 (ifb_ingress, reason)。
-/// 优先级：先读命中 > 建探测成功 > 通道×模块事实。
+/// Pure verdict (the design §capability table behavior surface). Returns (ifb_ingress, reason).
+/// Priority: read hit > create-probe success > channel x module facts.
 #[must_use]
 pub fn ifb_decision(f: IfbFacts) -> (bool, &'static str) {
     if f.ifb0_exists {
         return (true, REASON_OK);
     }
     match f.kind {
-        // 建探测成功即终证（modprobe 竞态后模块表读数滞后也不翻案——事实以 kernel 回执为准）。
+        // create-probe success is the final proof (even if the module-table read lags after a modprobe race, the kernel receipt wins).
         IfbKind::Local if f.create_ok => (true, REASON_OK),
         IfbKind::Local if !f.module_loaded => (false, REASON_NO_MODULE),
         IfbKind::Local => (false, REASON_NO_PERM),
-        // sidecar：模块在 → NET_ADMIN 可建；不在 → 只能宿主 root modprobe（镜像无 /lib/modules）。
+        // sidecar: module present -> NET_ADMIN can create; absent -> only host root modprobe (no /lib/modules in the image).
         IfbKind::Sidecar if f.module_loaded => (true, REASON_OK),
         IfbKind::Sidecar => (false, REASON_NEED_HOST_ROOT),
     }
 }
 
-/// 宿主内核模块表读 ifb（`/proc/modules` 首列精确词）。netns/容器可见性=全局内核状态。
+/// Read ifb from the host kernel module table (`/proc/modules` first column, exact word). netns/container visibility = global kernel state.
 #[must_use]
 pub fn module_loaded_from(proc_modules: &str) -> bool {
-    proc_modules
-        .lines()
-        .any(|l| l.split_whitespace().next() == Some(IFB_MODULE))
+    proc_modules.lines().any(|l| l.split_whitespace().next() == Some(IFB_MODULE))
 }
 
-/// 实探入口（design「先读后探」链）。写锁瞬持由调用方保证；本函数自身仅有界建删副作用，
-/// 且 del 严格限于本次 add 成功的 ifb0。
+/// The real-probe entry (the design "read-before-probe" chain). The caller guarantees the transient write lock; this function has only
+/// bounded create/delete side effects, and del is strictly limited to the ifb0 this add created.
 pub fn probe(channel: &Channel) -> (bool, String) {
     let kind = match channel {
         Channel::LocalRoot => IfbKind::Local,
@@ -91,15 +90,10 @@ pub fn probe(channel: &Channel) -> (bool, String) {
             create_ok: false,
         },
         IfbKind::Local => {
-            // modprobe 尽力而为（非 root 必败——失败留给 add 回执定因，bash「载与不载都查」同构）。
+            // best-effort modprobe (must fail as non-root -- the add receipt decides the cause, structurally same as bash "check loaded or not").
             let _ = engine::exec_prog(channel, &["modprobe", IFB_MODULE]);
             let create_ok = local_try_create(channel);
-            IfbFacts {
-                kind,
-                ifb0_exists: false,
-                module_loaded: local_module_loaded(),
-                create_ok,
-            }
+            IfbFacts { kind, ifb0_exists: false, module_loaded: local_module_loaded(), create_ok }
         }
     };
     let (ok, reason) = ifb_decision(facts);
@@ -114,24 +108,27 @@ fn local_module_loaded() -> bool {
     match std::fs::read_to_string("/proc/modules") {
         Ok(s) => module_loaded_from(&s),
         Err(e) => {
-            eprintln!("weaknet(ifb): WARN /proc/modules 不可读（按未加载处理）: {e}");
+            eprintln!("weaknet(ifb): WARN /proc/modules unreadable (treating as not loaded): {e}");
             false
         }
     }
 }
 
 fn sidecar_module_loaded(channel: &Channel) -> bool {
-    // 容器 /proc/modules = 宿主内核模块表（模块全局，非 netns 隔离面）——documented 于模块头注。
+    // the container's /proc/modules = the host kernel module table (modules are global, not a netns-isolated surface) -- documented in the module header.
     match engine::exec_prog(channel, &["cat", "/proc/modules"]) {
         Ok(s) => module_loaded_from(&s),
         Err(e) => {
-            eprintln!("weaknet(ifb): WARN sidecar 读 /proc/modules 失败（按未加载处理）: {}", e.msg);
+            eprintln!(
+                "weaknet(ifb): WARN sidecar failed to read /proc/modules (treating as not loaded): {}",
+                e.msg
+            );
             false
         }
     }
 }
 
-/// local 建删探测：add → up → del（仅限本次所建）。任一步败 → 清掉本次半成品后 false。
+/// local create/delete probe: add -> up -> del (only what we created). Any step failing -> clean up this round's half-product and return false.
 fn local_try_create(channel: &Channel) -> bool {
     if engine::exec_prog(channel, &["ip", "link", "add", IFB_DEV, "type", "ifb"]).is_err() {
         return false;
@@ -139,13 +136,16 @@ fn local_try_create(channel: &Channel) -> bool {
     let up = engine::exec_prog(channel, &["ip", "link", "set", IFB_DEV, "up"]);
     let del = engine::exec_prog(channel, &["ip", "link", "del", IFB_DEV]);
     if let Err(e) = del {
-        // 探测残留必须报因（不可静默——下一步 apply 会复用/覆盖，但所有权判断依赖现场）。
-        eprintln!("weaknet(ifb): WARN 探测建删链收尾 del {IFB_DEV} 失败（残留待人工/apply 复用）: {}", e.msg);
+        // probe residue must report cause (never silent -- the next apply reuses/overwrites, but ownership judgment depends on the site).
+        eprintln!(
+            "weaknet(ifb): WARN probe chain's closing del of {IFB_DEV} failed (residue awaits manual/apply reuse): {}",
+            e.msg
+        );
     }
     up.is_ok()
 }
 
-/// 供 apply 路径复用：探测链之外的「本次是否需我方建 ifb0」判据。
+/// For the apply path's reuse: the "does this round need us to create ifb0" predicate beyond the probe chain.
 pub fn link_present(channel: &Channel) -> bool {
     ifb0_exists(channel)
 }
@@ -155,59 +155,63 @@ mod tests {
     use super::*;
 
     fn facts(kind: IfbKind, exists: bool, loaded: bool, create: bool) -> IfbFacts {
-        IfbFacts {
-            kind,
-            ifb0_exists: exists,
-            module_loaded: loaded,
-            create_ok: create,
-        }
+        IfbFacts { kind, ifb0_exists: exists, module_loaded: loaded, create_ok: create }
     }
 
     #[test]
     fn read_first_hit_true_both_channels_empty_reason() {
-        // 先读命中：两通道一律 true+空因，绝不建删（活跃会话镜像不拆）。
+        // read hit: both channels true + empty cause, never create/delete (a live session's mirror is not torn down).
         assert_eq!(ifb_decision(facts(IfbKind::Local, true, false, false)), (true, REASON_OK));
         assert_eq!(ifb_decision(facts(IfbKind::Sidecar, true, false, false)), (true, REASON_OK));
     }
 
     #[test]
     fn local_matrix() {
-        // local × 建探测成功 = 终证（模块表滞后读数不翻案）。
+        // local x create-probe success = final proof (a lagging module-table read doesn't overturn it).
         assert_eq!(ifb_decision(facts(IfbKind::Local, false, false, true)), (true, REASON_OK));
-        // local × 模块缺失 = 「内核无 ifb 模块」。
-        assert_eq!(ifb_decision(facts(IfbKind::Local, false, false, false)), (false, REASON_NO_MODULE));
-        // local × 已加载但建不起（非 root netns 场景 = request_module 禁用+EPERM）= 「无权创建 netdev」。
-        assert_eq!(ifb_decision(facts(IfbKind::Local, false, true, false)), (false, REASON_NO_PERM));
+        // local x module missing = "kernel has no ifb module".
+        assert_eq!(
+            ifb_decision(facts(IfbKind::Local, false, false, false)),
+            (false, REASON_NO_MODULE)
+        );
+        // local x loaded but cannot create (the non-root netns case = request_module disabled + EPERM) = "no permission to create a netdev".
+        assert_eq!(
+            ifb_decision(facts(IfbKind::Local, false, true, false)),
+            (false, REASON_NO_PERM)
+        );
     }
 
     #[test]
     fn sidecar_matrix_distinguishes_not_loaded_vs_unavailable() {
-        // sidecar 只读判定：已加载 → true（NET_ADMIN 施加期可建）；未加载 → 专属补救文案。
+        // sidecar read-only verdict: loaded -> true (NET_ADMIN can create at apply); not loaded -> the dedicated fix wording.
         assert_eq!(ifb_decision(facts(IfbKind::Sidecar, false, true, false)), (true, REASON_OK));
-        assert_eq!(ifb_decision(facts(IfbKind::Sidecar, false, false, false)), (false, REASON_NEED_HOST_ROOT));
+        assert_eq!(
+            ifb_decision(facts(IfbKind::Sidecar, false, false, false)),
+            (false, REASON_NEED_HOST_ROOT)
+        );
     }
 
     #[test]
     fn module_table_parsing_exact_word_and_edges() {
         let table = "ifb 20480 0 - 0xffffffffffffffff\nsch_netem 20480 0 - 0xffffffffffffffff\n";
         assert!(module_loaded_from(table));
-        // 前缀词不误判（ifb 精确列匹配，非子串）。
+        // prefix words must not misjudge (ifb exact-column match, not substring).
         assert!(!module_loaded_from("dummy_ifb2 16384 0 -\nsch_foo 1 1 -\n"));
         assert!(!module_loaded_from(""));
-        // 在用模块（refcount>0）同样命中。
+        // an in-use module (refcount>0) matches too.
         assert!(module_loaded_from("ifb 20480 3 - 0xffffffffffffffff\n"));
-        // 设备名 ifb0 出现于他列 ≠ 模块已载（module≠dev 名钉死，防本族混淆回归）。
+        // the device name ifb0 appearing in another column != module loaded (module != dev name pinned, guarding against this family's confusion regressing).
         assert!(!module_loaded_from("dummy 20480 0 -\nfoo 1 1 ifb0 -\n"));
     }
 
     #[test]
     fn reason_strings_are_design_contract_text() {
-        // 面板灰显 tooltip 消费这两串（design §UI「结构性不支持」vs「宿主未加载」区分）。
-        assert_eq!(REASON_NO_MODULE, "内核无 ifb 模块");
+        // the panel grey-tooltip consumes these two strings (design §UI "structurally unsupported" vs "not loaded on host" distinction).
+        assert_eq!(REASON_NO_MODULE, "kernel has no ifb module");
         assert_eq!(
             REASON_NEED_HOST_ROOT,
-            "需宿主 root modprobe ifb（sidecar 通道无 /lib/modules）"
+            "needs modprobe ifb as host root (the sidecar channel has no /lib/modules)"
         );
-        assert_eq!(REASON_NO_PERM, "无权创建 netdev");
+        assert_eq!(REASON_NO_PERM, "no permission to create a netdev");
     }
 }

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# V5 交付面冒烟（e2e-package 的"纯库消费"轻量孪生）：out/bindings 组装后
-# ① 组件纯度（link/field 轻组件禁 FFmpeg DT_NEEDED = V1 sdk-field 组件化的依赖断言）
-# ② find_package COMPONENTS link+client 真符号编译链接运行（V2 演练全形 CI 化）
-# ③ pkg-config 版本 == workspace 实值（C43 parity 交付面延伸）
-# 前置：python3 scripts/mediaservo_cli.py build bindings（本脚本自跑，CI 零额外步骤）。
+# V5 delivery-surface smoke (the pure-library-consumption lightweight twin of e2e-package): after out/bindings assembly,
+# ① component purity (link/field lightweight components must not have FFmpeg DT_NEEDED = V1 sdk-field componentization dependency assertion)
+# ② find_package COMPONENTS link+client: compile, link and run against real symbols (V2 drill, full form in CI)
+# ③ pkg-config version == workspace actual value (C43 parity, extended to the delivery surface)
+# Prereq: python3 scripts/mediaservo_cli.py build bindings (this script runs it itself; zero extra CI steps).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TMP=$(mktemp -d /tmp/ms-delivery.XXXXXX)
@@ -14,15 +14,15 @@ python3 scripts/mediaservo_cli.py build bindings >/dev/null
 OUT="$PWD/out/bindings"
 VER=$(python3 -c 'import tomllib;print(tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"])')
 
-# ① 轻组件 FFmpeg 免疫
+# ① Lightweight components: FFmpeg immunity
 for lib in link field; do
     if readelf -d "$OUT/lib/libmediaservo_$lib.so" | grep -qE "NEEDED.*(avformat|avcodec|swresample)"; then
-        echo "FAIL: 轻组件 libmediaservo_$lib.so DT_NEEDED 含 FFmpeg（轻组件面被污染）"; FAIL=1
+        echo "FAIL: lightweight component libmediaservo_$lib.so has FFmpeg in DT_NEEDED (lightweight surface polluted)"; FAIL=1
     fi
 done
-[ "$FAIL" = 0 ] && echo "OK: link/field 无 FFmpeg DT_NEEDED（deck/sdk 面不受此限）"
+[ "$FAIL" = 0 ] && echo "OK: no FFmpeg DT_NEEDED in link/field (deck/sdk surface is exempt)"
 
-# ② find_package 三面
+# ② find_package three surfaces
 mkdir -p "$TMP/pkg"
 cat > "$TMP/pkg/CMakeLists.txt" <<'CM'
 cmake_minimum_required(VERSION 3.16)
@@ -34,27 +34,27 @@ CM
 cat > "$TMP/pkg/main.c" <<'C'
 #include <mediaservo/link.h>
 #include <mediaservo/client.h>
-/* 符号存在性判据（链接期即证；不调用——免网络/设备依赖）。 */
+/* Symbol-existence criterion (proved at link time; not called — avoids network/device dependencies). */
 int main(void) {
     void *a = (void *)mediaservo_link_version;
     void *b = (void *)mediaservo_client_login;
     return (a != 0 && b != 0) ? 0 : 1;
 }
 C
-# 生成器自适应（pixi 有 ninja 无 make / ubuntu runner 反之）
+# Generator auto-adapt (pixi has ninja but no make / ubuntu runner the other way)
 GEN=""
 command -v make >/dev/null 2>&1 || GEN="Ninja"
 cmake -S "$TMP/pkg" -B "$TMP/pkg/build" ${GEN:+-G "$GEN"} -DCMAKE_PREFIX_PATH="$OUT/lib/cmake/mediaservo" >/dev/null
 cmake --build "$TMP/pkg/build" >/dev/null
-LD_LIBRARY_PATH="$OUT/lib" "$TMP/pkg/build/smoke" && echo "OK: find_package(link,client)+真符号链接运行"
+LD_LIBRARY_PATH="$OUT/lib" "$TMP/pkg/build/smoke" && echo "OK: find_package(link,client) + real-symbol link & run"
 
-# ③ pkg-config 版本对账
+# ③ pkg-config version reconciliation
 for pc in mediaservo-link mediaservo-client mediaservo-deck mediaservo-field; do
     got=$(PKG_CONFIG_PATH="$OUT/lib/pkgconfig" pkg-config --modversion "$pc")
-    [ "$got" = "$VER" ] || { echo "FAIL: $pc 版本 $got != workspace $VER"; FAIL=1; }
+    [ "$got" = "$VER" ] || { echo "FAIL: $pc version $got != workspace $VER"; FAIL=1; }
 done
-[ "$FAIL" = 0 ] && echo "OK: pkg-config 四件 == $VER"
+[ "$FAIL" = 0 ] && echo "OK: all four pkg-config files == $VER"
 
-# ④ 复用既有巡检（漂移零成本加固）
+# ④ Reuse existing drift checks (zero-cost hardening)
 bash scripts/check-abi-drift.sh
 exit $FAIL

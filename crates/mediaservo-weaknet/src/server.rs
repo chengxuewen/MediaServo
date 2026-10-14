@@ -1,18 +1,18 @@
-//! server.rs —— serve 控制面（design §API 契约 + §serve 安全栈，rev-2.2 全家桶）。
+//! server.rs -- serve control plane (design §API contract + §serve security stack, full rev-2.2 set).
 //!
-//! 门槛栈：Host 白名单恒开 →（--lan 时 Origin 白名单）→ Bearer token（唯一豁免 = SSE
-//! `?token=`，EventSource 无 header 能力）；bind 门槛 = 非 loopback 未 --lan 启动拒绝；
-//! CORS 全关（无跨源需求，面板同源伺服）。门序 Host 先于 token：Host 是源隔离形门槛，
-//! 先把 rebinding 流量拒在无信息泄露处（不暴露「token 对/错」信号）。
+//! Gate stack: Host allowlist always on -> (Origin allowlist with --lan) -> Bearer token (sole exemption = SSE
+//! `?token=`; EventSource cannot send headers). Bind gate = non-loopback without --lan refuses startup;
+//! CORS fully off (no cross-origin need, panel served same-origin). Gate order Host before token: Host is the origin-isolation gate,
+//! rejecting rebinding traffic with zero information leakage (never reveals a token right/wrong signal).
 //!
-//! 写路径与 CLI 同构：flock 瞬持（engine::take_write_lock）→ engine::replay；
-//! verify Deferred——200 仅要求回读指纹过，实测双采样移入后台任务，结果落 timeline
-//! `verify` 事件（SSE 状态帧 ev 透传播报，design §server「verify 移出响应路径」）。
-//! 读路径零副作用：state.json 直读 / tc 回读仅经 state.teardown 重建通道（不重探、
-//! 不 ensure——GET 永不建容器/起进程）/ stats 复用 scope::StatsClient（token 缓存进程级）。
+//! Write path mirrors the CLI: transient flock (engine::take_write_lock) -> engine::replay;
+//! verify Deferred -- 200 only requires the fingerprint re-read to pass; live double sampling moved into a background task, results land as a timeline
+//! `verify` event (SSE state frame ev broadcast, design §server: verify moved off the response path).
+//! Read path is side-effect free: state.json read directly / tc re-read only via the state.teardown rebuilt channel (no re-probe,
+//! no ensure -- GET never creates containers or processes) / stats reuses scope::StatsClient (token cached at process level).
 //!
-//! 错误体统一 {"error":...}；Fail.code 映射：4→400 · 3→409 · 2→500（main.rs 头注语义沿用）。
-//! scenario run/stop = 真实 T8（run 同步 start 相 409/500，stop 旗标 200）；basename/inline 校验先行——400 是真的。
+//! Error body uniformly {"error":...}; Fail.code mapping: 4->400, 3->409, 2->500 (main.rs header-comment semantics).
+//! scenario run/stop = real T8 (run synchronous start phase 409/500, stop flag 200); basename/inline validation up front -- the 400 is real.
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -40,40 +40,40 @@ use crate::scope::{self, Capabilities, StatsClient, Targeting};
 use crate::spec::{self, Dir, ImpairSpec, LossSpec};
 use crate::state::{self, Dirs, State};
 
-/// bash/CLI 同规缺省保险丝（apply 未带 duration 时）。
+/// Default fuse shared with bash/CLI (apply without duration).
 const DEFAULT_DURATION: u64 = 300;
-/// C20 豁免形：文档化缺省常量 + `--listen` 显式覆写（design §serve 安全 1）。
+/// C20 exemption shape: documented default constant + explicit `--listen` override (design §serve security 1).
 const DEFAULT_LISTEN: &str = "127.0.0.1:9810";
-/// SSE 状态帧节拍（design §API：2s）。
+/// SSE state frame cadence (design §API: 2s).
 const FRAME_SECS: u64 = 2;
-/// scenario inline 上限（design §serve 安全 6）。
+/// scenario inline size cap (design §serve security 6).
 const MAX_INLINE_BYTES: usize = 32 * 1024;
-/// ev 字段单帧事件上限。ponytail: 防 CLI 刷屏单帧爆量，50 条足够面板滚动，超限丢弃老行
-/// （cursor 照推进）。
+/// Per-frame event cap for the ev field. ponytail: stops a single frame from flooding the CLI; 50 rows suffice for panel scrolling, overflow drops the oldest rows
+/// (the cursor still advances).
 const MAX_EV_LINES: usize = 50;
-/// SIGTERM/SIGINT 优雅退出②步「drive 静默」总预算（design §D2 lck-F1）：超时弃 clear 直退、
-/// 撤网交幸存 watchdog——handler 本体绝不无界阻塞（否则撞 oxmgr grace 后 SIGKILL，优雅路成死路）。
+/// Total budget for SIGTERM/SIGINT graceful-exit step 2, drive quiet (design §D2 lck-F1): on timeout abandon clear and exit,
+/// leaving teardown to the surviving watchdog -- the handler itself must never block unboundedly (otherwise it hits the oxmgr grace window then SIGKILL, turning the graceful path into a dead end).
 const DRIVE_QUIET_BUDGET: Duration = Duration::from_secs(2);
 
-// ---------- 优雅退出五步序（design §D2〔sF2 lck-F1〕；纯决策见 [`shutdown_plan`]） ----------
+// ---------- Graceful exit five-step sequence (design §D2 [sF2 lck-F1]; pure decision in [`shutdown_plan`]) ----------
 
-/// SIGTERM/SIGINT 优雅退出步骤（映射 design §D2 五步；④「state 落 inactive」由 [`engine::clear`]
-/// 内 `remove_file` 承担——clear 已做则跳过，故不单列变体）。
+/// SIGTERM/SIGINT graceful exit steps (map design §D2 five steps; step 4, state lands inactive, is handled inside [`engine::clear`]
+/// via `remove_file` -- skipped when clear already did it, hence no dedicated variant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ShutdownStep {
-    /// ① 置 scenario::stop 旗标（复用 post/request_stop 机制——属主存活写 cancel 文件，runner ≤1s 自收口）。
+    /// 1. Set the scenario::stop flag (reuses the post/request_stop mechanism -- owner alive writes the cancel file, runner settles itself within 1s).
     WriteStopFlag,
-    /// ② 等在飞 drive 静默（≤ DRIVE_QUIET_BUDGET；无在飞视作已静默）。
+    /// 2. Await in-flight drive quiet (within DRIVE_QUIET_BUDGET; nothing in flight counts as quiet).
     AwaitDriveQuiet,
-    /// ③④ clear 本 statedir 的活跃施压（engine::clear 幂等：no-queue→Ok；④ state 落 inactive 内含）。
+    /// 3-4. Clear active pressure in this statedir (engine::clear is idempotent: no-queue -> Ok; step 4, state lands inactive, included).
     ClearPressure,
-    /// ⑤ 退出（serve_main 返回 → main 退 0）。
+    /// 5. Exit (serve_main returns -> main exits 0).
     Exit,
 }
 
-/// 五步序纯决策。`drive_settled=false`（②超时）⇒ 弃 ③④ 直 ⑤（lck-F1：在飞 step 仍可能落地 tc，
-/// 此刻 clear 与它竞态反致残留；撤网正确性不依赖优雅退出，交 deadline watchdog〔design D5-3〕）。
-/// `state_present=false`（无施压 / 已被 drive 的 finish_abort 撤净）⇒ ③④ 天然幂等跳过。
+/// Pure decision for the five-step sequence. `drive_settled=false` (step-2 timeout) => skip steps 3-4 and go straight to 5 (lck-F1: an in-flight step may still land tc,
+/// and clearing concurrently with it would itself cause residue; teardown correctness never depends on graceful exit -- left to the deadline watchdog [design D5-3]).
+/// `state_present=false` (no pressure / already torn down cleanly by drive finish_abort) => steps 3-4 naturally skip as no-ops.
 pub(crate) fn shutdown_plan(drive_settled: bool, state_present: bool) -> Vec<ShutdownStep> {
     let mut steps = vec![ShutdownStep::WriteStopFlag, ShutdownStep::AwaitDriveQuiet];
     if drive_settled && state_present {
@@ -83,9 +83,9 @@ pub(crate) fn shutdown_plan(drive_settled: bool, state_present: bool) -> Vec<Shu
     steps
 }
 
-// ---------- 装配与共享态 ----------
+// ---------- Assembly and shared state ----------
 
-/// serve 装配参数（tests 直构零 env 依赖；生产由 [`serve_main`] 从 env+flag 组装）。
+/// serve assembly params (tests construct directly with zero env dependency; production assembles env+flags in [`serve_main`]).
 #[derive(Debug, Clone)]
 pub struct ServeConfig {
     pub token: String,
@@ -94,21 +94,21 @@ pub struct ServeConfig {
     pub lan: bool,
     pub listen_host: String,
     pub listen_port: u16,
-    /// server_url 三级链解析结果（None = /v1/streams 与 stats 定向报因降级）。
+    /// server_url three-level chain resolution result (None = /v1/streams and targeted stats degrade).
     pub server_url: Option<String>,
-    /// capabilities 注入（api_matrix 免真探；T7 的 WEAKNET_FAKE_CAPS 走同一字段）。
+    /// capabilities injection (api_matrix skips real probing; the T7 WEAKNET_FAKE_CAPS knob feeds the same field).
     pub caps_override: Option<Capabilities>,
-    /// SSE 帧数上限（api_matrix 发满即收口断 body；None = 无限）。
+    /// SSE frame-count cap (api_matrix closes and asserts the body once full; None = unlimited).
     pub sse_frames_limit: Option<u32>,
 }
 
 struct Ctx {
     cfg: ServeConfig,
-    /// 进程级 stats 客户端（server_url 可解析 ∧ WEAKNET_ADMIN_PASS 在位时才建；登录 token 缓存复用）。
+    /// Process-level stats client (built only when server_url resolves AND WEAKNET_ADMIN_PASS is present; login token cache reused).
     stats: Option<Mutex<StatsClient>>,
-    /// capabilities 缓存（refresh 重探后覆写）。
+    /// capabilities cache (overwritten after a refresh re-probe).
     caps: Mutex<Option<Capabilities>>,
-    /// 在飞 scenario drive 句柄（①写 stop 旗标后 ②await 它自收口；至多一个——job 独占门）。
+    /// In-flight scenario drive handle (write the stop flag, then await self-settle; at most one -- job exclusivity gate).
     drive: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
@@ -117,7 +117,10 @@ impl Ctx {
         let stats = cfg.server_url.as_deref().and_then(|url| {
             StatsClient::from_env(url)
                 .map_err(|e| {
-                    println!("weaknet(serve): /v1/streams 降级（stats 客户端不可建）：{}", e.msg);
+                    println!(
+                        "weaknet(serve): /v1/streams degraded (stats client unavailable): {}",
+                        e.msg
+                    );
                 })
                 .ok()
                 .map(Mutex::new)
@@ -126,9 +129,9 @@ impl Ctx {
     }
 }
 
-// ---------- 路由 ----------
+// ---------- Routing ----------
 
-/// 路由工厂（注入固定 Config，测试 oneshot 不触网；全 query 化 C34，零路径参数）。
+/// Router factory (injects a fixed Config, test oneshots never touch the network; all-query C34, zero path params).
 pub fn build_router(cfg: ServeConfig) -> Router {
     build_router_with_ctx(Arc::new(Ctx::new(cfg)))
 }
@@ -152,14 +155,14 @@ fn build_router_with_ctx(ctx: Arc<Ctx>) -> Router {
         .with_state(ctx)
 }
 
-// ---------- 内嵌面板（T7：rust-embed ui/；静态资产免 token——401 引导页须先于凭证可载，Host 白名单仍生效） ----------
+// ---------- Embedded panel (T7: rust-embed ui/; static assets are token-free -- the 401 onboarding page must load before credentials exist; Host allowlist still applies) ----------
 
-/// 面板资产编译期内嵌（design §Files：src/ui，零构建链）。debug-embed 已开：调试构建同样内嵌，二进制自足。
+/// Panel assets embedded at compile time (design §Files: src/ui, zero build chain). debug-embed is on: debug builds embed too, the binary is self-contained.
 #[derive(Embed)]
 #[folder = "src/ui/"]
 struct UiAssets;
 
-/// 扩展名 → MIME（embed 键查表，不涉文件系统；未知一律 octet-stream 防嗅探执行）。
+/// Extension -> MIME (lookup over embed keys, never the filesystem; unknown always octet-stream to prevent sniff-and-execute).
 fn mime_for(key: &str) -> &'static str {
     match key.rsplit('.').next().unwrap_or("") {
         "html" => "text/html; charset=utf-8",
@@ -189,7 +192,7 @@ fn asset_response(key: &str, csp: bool) -> Response {
             }
             (StatusCode::OK, headers, f.data.to_vec()).into_response()
         }
-        None => err_json(StatusCode::NOT_FOUND, "资源不存在"),
+        None => err_json(StatusCode::NOT_FOUND, "resource not found"),
     }
 }
 
@@ -198,42 +201,48 @@ async fn get_index() -> Response {
     asset_response("index.html", true)
 }
 
-/// GET /assets/* —— app.js/css/vendor。穿越防御双保险：显式拒 `..` 与前导 '/'，
-/// 且 embed 键为精确哈希查找——路径永不触盘，未命中仅 404 零泄露。
+/// GET /assets/* -- app.js/css/vendor. Double traversal defense: explicitly reject `..` and a leading '/',
+/// and embed keys are exact hash lookups -- the path never touches disk; a miss is a plain 404 with zero leakage.
 async fn get_asset(Path(p): Path<String>) -> Response {
     if p.contains("..") || p.starts_with('/') {
-        return err_json(StatusCode::BAD_REQUEST, "非法资源路径");
+        return err_json(StatusCode::BAD_REQUEST, "illegal asset path");
     }
     asset_response(&p, false)
 }
 
-/// Host → Origin(--lan) → Bearer 三道门槛（/v1* 才查 token；Host 恒查）。
+/// Three gates Host -> Origin(--lan) -> Bearer (token checked only on /v1*; Host always checked).
 async fn guard(AxumState(ctx): AxumState<Arc<Ctx>>, req: Request, next: Next) -> Response {
     if !host_allowed(&ctx, req.headers()) {
         return err_json(
             StatusCode::FORBIDDEN,
-            "Host 头不在白名单（loopback/localhost/::1；跨机需 --lan）",
+            "Host header not in allowlist (loopback/localhost/::1; cross-machine needs --lan)",
         );
     }
     if ctx.cfg.lan && !origin_allowed(&ctx, req.headers()) {
-        return err_json(StatusCode::FORBIDDEN, "Origin 与监听地址不符（--lan Origin 白名单）");
+        return err_json(
+            StatusCode::FORBIDDEN,
+            "Origin does not match the listen address (--lan Origin allowlist)",
+        );
     }
     if req.uri().path().starts_with("/v1") && !auth_ok(&ctx, &req) {
-        // 侧栏探活 401 消噪（2026-09-11 小刀）：capabilities 无鉴权**只读缓存**豁免——
-        // 探活方（Layout.tsx HEAD）无 token，浏览器必打 401 resource log，语义上 401 本就是
-        // 「活着但需凭证」。消噪同时不得放开探测面：refresh/冷缓存真探 = 写锁 + tc exec，
-        // 经 caddy 可被 LAN 无凭证触发 = DoS → CapsNoProbe 打标，handler 内降级为 no-probe。
+        // Sidebar liveness 401 de-noise (2026-09-11 small knife): unauthenticated capabilities get a **read-only cache** exemption --
+        // the prober (Layout.tsx HEAD) has no token so the browser always logs a 401 resource error; semantically 401 just means
+        // alive but credentials required. De-noising must not open the probe surface: refresh/cold-cache real probes = write lock + tc exec,
+        // reachable via caddy by credential-less LAN clients = DoS -> flagged CapsNoProbe, handler downgrades to no-probe.
         if req.uri().path() == "/v1/capabilities" {
             let mut req = req;
             req.extensions_mut().insert(CapsNoProbe);
             return next.run(req).await;
         }
-        return err_json(StatusCode::UNAUTHORIZED, "缺失或错误的 token（横幅行整行复制）");
+        return err_json(
+            StatusCode::UNAUTHORIZED,
+            "missing or wrong token (copy the whole banner line)",
+        );
     }
     next.run(req).await
 }
 
-/// guard 注入：本请求为无鉴权 capabilities 读（禁真探，缓存只读）。
+/// Guard injection: this request is an unauthenticated capabilities read (no real probes; cache read-only).
 #[derive(Clone, Copy)]
 struct CapsNoProbe;
 
@@ -246,7 +255,7 @@ fn auth_ok(ctx: &Ctx, req: &Request) -> bool {
     {
         return constant_time_eq(t.as_bytes(), ctx.cfg.token.as_bytes());
     }
-    // 唯一豁免：SSE EventSource 无 header 能力 → ?token=（design §API 鉴权条）。
+    // Sole exemption: SSE EventSource cannot send headers -> ?token= (design §API auth item).
     if req.uri().path() == "/v1/events"
         && let Some(t) = req.uri().query().and_then(query_token)
     {
@@ -259,8 +268,8 @@ fn query_token(q: &str) -> Option<&str> {
     q.split('&').find_map(|kv| kv.strip_prefix("token=")).filter(|s| !s.is_empty())
 }
 
-/// 等时比较（无早退；长度差亦并入 diff 累加）。ponytail: 代替 timing_guard 依赖——
-/// 本地 dev 面板，微秒级偏差可接受，注释即文档。
+/// Constant-time compare (no early exit; length difference folded into the diff accumulator). ponytail: replaces a timing_guard dependency --
+/// local dev panel, microsecond-level bias is acceptable, the comment is the doc.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     let (long, short) = if a.len() >= b.len() { (a, b) } else { (b, a) };
     let mut diff = a.len() ^ b.len();
@@ -285,7 +294,7 @@ fn host_allowed(ctx: &Ctx, headers: &HeaderMap) -> bool {
     ctx.cfg.lan && host == ctx.cfg.listen_host
 }
 
-/// 剥端口 → 主机串。仅「单冒号且尾段全数字」剥端口（裸 IPv6 `::1` 不剥）；`[::1]:9810` 取括号段。
+/// Strip port -> host string. Only strips on a single colon with an all-numeric tail (bare IPv6 `::1` untouched); `[::1]:9810` takes the bracketed segment.
 fn host_only(v: &str) -> String {
     if let Some(idx) = v.rfind(']') {
         return v[..=idx].to_string();
@@ -303,8 +312,8 @@ fn host_only(v: &str) -> String {
     }
 }
 
-/// --lan Origin 白名单：浏览器必带且须等于监听 host[:port]；非浏览器（curl 无 Origin）放行
-/// （design 裁决：Origin 仅约束浏览器跨源，服务端面已由 token 把守）。
+/// --lan Origin allowlist: browsers always send it and it must equal the listen host[:port]; non-browsers (curl without Origin) pass
+/// (design ruling: Origin only constrains browser cross-origin; the server side is already guarded by the token).
 fn origin_allowed(ctx: &Ctx, headers: &HeaderMap) -> bool {
     let Some(o) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
         return true;
@@ -321,7 +330,7 @@ fn err_json(status: StatusCode, msg: &str) -> Response {
     (status, Json(json!({"error": msg}))).into_response()
 }
 
-// ---------- 错误映射 ----------
+// ---------- Error mapping ----------
 
 struct AppErr {
     status: StatusCode,
@@ -351,23 +360,23 @@ impl From<Fail> for AppErr {
     }
 }
 
-/// 引擎/FS 全同步（std::process / TcpStream）→ 统一进 spawn_blocking；JoinError = 500 报因。
+/// Engine/FS calls are all synchronous (std::process / TcpStream) -> uniformly wrapped in spawn_blocking; JoinError = 500 with cause.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Wn<T> + Send + 'static) -> Wn<T> {
     tokio::task::spawn_blocking(f)
         .await
-        .map_err(|e| Fail::env(format!("阻塞任务崩溃/中止: {e}")))?
+        .map_err(|e| Fail::env(format!("blocking task crashed/aborted: {e}")))?
 }
 
-// ---------- GET 面 ----------
+// ---------- GET surface ----------
 
-/// state.json 全量 JSON；无 state = `{"active": false}`（design §API）。
+/// Full state.json JSON; no state = `{"active": false}` (design §API).
 async fn get_state(AxumState(ctx): AxumState<Arc<Ctx>>) -> Result<Json<Value>, AppErr> {
     let dirs = ctx.cfg.dirs.clone();
     let st = blocking(move || State::read_from(&dirs.state_json()).map_err(Fail::env)).await?;
     match st {
         Some(s) => serde_json::to_value(&s)
             .map(Json)
-            .map_err(|e| AppErr::from(Fail::env(format!("state 序列化失败: {e}")))),
+            .map_err(|e| AppErr::from(Fail::env(format!("state serialization failed: {e}")))),
         None => Ok(Json(json!({"active": false}))),
     }
 }
@@ -377,24 +386,24 @@ async fn get_profiles() -> Result<Json<Value>, AppErr> {
     Ok(Json(v))
 }
 
-/// 剧本只读列举（T7 S 页签数据源；与 /v1/profiles 同形同目录寻径，零业务逻辑）。
+/// Read-only scenario listing (T7 scenarios tab data source; same shape and directory resolution as /v1/profiles, zero business logic).
 async fn get_scenarios() -> Result<Json<Value>, AppErr> {
     let v = blocking(|| Ok::<Value, Fail>(list_yaml_dir("scenarios"))).await?;
     Ok(Json(v))
 }
 
 fn list_yaml_dir(sub: &str) -> Value {
-    // T13 §车端面：fs 探测链 ∪ 编译期内嵌（单一源 = scope::list_assets，与 CLI 同规则）。
+    // T13 vehicle side: fs probe chain union compile-time embedded (single source = scope::list_assets, same rules as the CLI).
     let names = scope::list_assets(sub);
     if names.is_empty() {
-        return json!({sub: [], "note": "无资产（WEAKNET_ASSETS_DIR / 二进制同级 weaknet.d / scripts/weaknet.d / 内嵌均空）"});
+        return json!({sub: [], "note": "no assets (WEAKNET_ASSETS_DIR / weaknet.d next to the binary / scripts/weaknet.d / embedded all empty)"});
     }
     json!({sub: names})
 }
 
-/// capabilities：缓存优先；`?refresh=1` 重探（seed 版本门；ifb 位 = false +「T9 到场」——
-/// 先读后探链随 T9 进 scope::capabilities 单点替换，此处不复制探测结构）。
-/// 重探在写锁瞬持内执行（design §引擎 capability：防拆活跃会话，T9 生效面先行钉住）。
+/// capabilities: cache first; `?refresh=1` re-probes (seed version gate; ifb bit = false + T9 pending --
+/// the read-before-probe chain moves into scope::capabilities with T9 as a single-point replacement; the probe structure is not duplicated here).
+/// Re-probe runs under a transient write lock (design §engine capability: protects live sessions; the T9 effective surface pinned in advance).
 async fn get_capabilities(
     AxumState(ctx): AxumState<Arc<Ctx>>,
     Query(q): Query<HashMap<String, String>>,
@@ -404,26 +413,23 @@ async fn get_capabilities(
         return Ok(Json(caps_json(c)));
     }
     let no_probe = no_probe.is_some();
-    let refresh =
-        !no_probe && q.get("refresh").is_some_and(|v| v == "1" || v == "true");
+    let refresh = !no_probe && q.get("refresh").is_some_and(|v| v == "1" || v == "true");
     let cached = ctx.caps.lock().unwrap_or_else(|e| e.into_inner()).clone();
     if let Some(c) = cached.filter(|_| !refresh) {
         return Ok(Json(caps_json(&c)));
     }
     if no_probe {
-        // 无鉴权 + 无缓存：显式「待测」形 200（探活方只需状态码；不虚构能力、不触探测）。
+        // Unauthenticated + no cache: explicit unknown shape with 200 (liveness probers only need the status code; no fabricated capabilities, no probing).
         return Ok(Json(serde_json::json!({ "cached": false })));
     }
     let c = ctx.clone();
     let caps = blocking(move || {
         let _lk = engine::take_write_lock(&c.cfg.dirs)?;
         let st = State::read_from(&c.cfg.dirs.state_json()).ok().flatten();
-        let iface = st
-            .as_ref()
-            .map(|s| s.iface.clone())
-            .unwrap_or_else(|| engine::resolve_iface(None));
-        // §capability：state 有活跃 ifb 会话时 refresh = no-op 返回缓存——真探已按先读后探
-        // 保护（ifb0 在=零建删），此守卫防「无缓存首探」在竞态窗口碰空转。
+        let iface =
+            st.as_ref().map(|s| s.iface.clone()).unwrap_or_else(|| engine::resolve_iface(None));
+        // §capability: with an active ifb session in state, refresh is a no-op returning the cache -- the real probe already follows read-before-probe
+        // protection (ifb0 present = zero create/delete); this guard keeps a no-cache first probe from spinning up inside the race window.
         if st.as_ref().is_some_and(|s| s.ifb_used)
             && let Some(cached) = c.caps.lock().unwrap_or_else(|e| e.into_inner()).clone()
         {
@@ -446,15 +452,15 @@ fn caps_json(c: &Capabilities) -> Value {
     })
 }
 
-/// stats 代理（design §API：{room, owner, live, remote_ports[], local_port}）；
-/// 不可达/未配置 = 200 `{"streams": [], "note": 报因}`（禁 500——面板降级渲染）。
+/// stats proxy (design §API: {room, owner, live, remote_ports[], local_port});
+/// unreachable/unconfigured = 200 `{"streams": [], "note": cause}` (never 500 -- the panel degrades gracefully).
 async fn get_streams(AxumState(ctx): AxumState<Arc<Ctx>>) -> Result<Json<Value>, AppErr> {
     let c = ctx.clone();
     let out = blocking(move || {
         let m = c
             .stats
             .as_ref()
-            .ok_or_else(|| Fail::env("stats 未配置：需 server_url（--server-url/env WEAKNET_SERVER_URL/out 探测）+ WEAKNET_ADMIN_PASS"))?;
+            .ok_or_else(|| Fail::env("stats not configured: needs server_url (--server-url/env WEAKNET_SERVER_URL/out detection) + WEAKNET_ADMIN_PASS"))?;
         let rows = m.lock().unwrap_or_else(|e| e.into_inner()).fetch_streams()?;
         Ok::<Vec<Value>, Fail>(
             rows.iter()
@@ -477,7 +483,7 @@ async fn get_streams(AxumState(ctx): AxumState<Arc<Ctx>>) -> Result<Json<Value>,
     }))
 }
 
-// ---------- POST 面 ----------
+// ---------- POST surface ----------
 
 #[derive(Debug)]
 struct TargetingCmd {
@@ -509,55 +515,59 @@ fn take_key(obj: &mut Map<String, Value>, k: &str) -> Option<Value> {
 }
 
 fn req_u64(v: Value, k: &str) -> Wn<u64> {
-    v.as_u64().ok_or_else(|| Fail::bad_param(format!("{k} 需非负整数，得 {v}")))
+    v.as_u64()
+        .ok_or_else(|| Fail::bad_param(format!("{k} must be a non-negative integer, got {v}")))
 }
 
 fn req_u16(v: Value, k: &str) -> Wn<u16> {
     v.as_u64()
         .and_then(|n| u16::try_from(n).ok())
-        .ok_or_else(|| Fail::bad_param(format!("{k} 需 0-65535 整数，得 {v}")))
+        .ok_or_else(|| Fail::bad_param(format!("{k} must be an integer in 0-65535, got {v}")))
 }
 
 fn req_str(v: Value, k: &str) -> Wn<String> {
-    v.as_str().map(str::to_owned).ok_or_else(|| Fail::bad_param(format!("{k} 需字符串，得 {v}")))
+    v.as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| Fail::bad_param(format!("{k} must be a string, got {v}")))
 }
 
 fn req_ports(v: Value) -> Wn<Vec<u16>> {
-    let arr = v.as_array().ok_or_else(|| Fail::bad_param(format!("ports 需数组，得 {v}")))?;
+    let arr =
+        v.as_array().ok_or_else(|| Fail::bad_param(format!("ports must be an array, got {v}")))?;
     arr.iter().map(|n| req_u16(n.clone(), "ports[]")).collect()
 }
 
 fn req_csv(v: Value, k: &str, field: &str) -> Wn<String> {
     let o = v
         .as_object()
-        .ok_or_else(|| Fail::bad_param(format!("{k} 需对象 {{\"{field}\": [...]}}")))?;
+        .ok_or_else(|| Fail::bad_param(format!("{k} must be an object {{\"{field}\": [...]}}")))?;
     let arr = o
         .get(field)
         .and_then(Value::as_array)
-        .ok_or_else(|| Fail::bad_param(format!("{k}.{field} 需字符串数组")))?;
+        .ok_or_else(|| Fail::bad_param(format!("{k}.{field} must be a string array")))?;
     let mut items: Vec<&str> = Vec::new();
     for x in arr {
-        items.push(
-            x.as_str().ok_or_else(|| Fail::bad_param(format!("{k}.{field} 项需字符串，得 {x}")))?,
-        );
+        items.push(x.as_str().ok_or_else(|| {
+            Fail::bad_param(format!("{k}.{field} items must be strings, got {x}"))
+        })?);
     }
     if items.is_empty() {
-        return Err(Fail::bad_param(format!("{k}.{field} 空集")));
+        return Err(Fail::bad_param(format!("{k}.{field} must not be empty")));
     }
     Ok(items.join(","))
 }
 
-/// (spec 余键, 定向, iface, sig_port)。兼容形：`sig_port`（design §API 词）与
-/// `signaling_port`（CLI flag 词）同义，前者优先。
+/// (remaining spec keys, direction, iface, sig_port). Compatibility forms: `sig_port` (design §API word) and
+/// `signaling_port` (CLI flag word) are synonyms; the former wins.
 type BodySplit = (Map<String, Value>, TargetingCmd, Option<String>, Option<u16>);
 
-/// body 拆壳：额外键先取，余下 = ImpairSpec flat 形（未知键由 from_flat_json 拒绝——typos 显性化）。
+/// Body unwrapping: extra keys taken first, the rest = ImpairSpec flat form (unknown keys rejected by from_flat_json -- typos surface loudly).
 fn split_body(raw: &[u8]) -> Wn<BodySplit> {
-    let v: Value =
-        serde_json::from_slice(raw).map_err(|e| Fail::bad_param(format!("body JSON 非法: {e}")))?;
+    let v: Value = serde_json::from_slice(raw)
+        .map_err(|e| Fail::bad_param(format!("invalid body JSON: {e}")))?;
     let mut obj = match v {
         Value::Object(m) => m,
-        other => return Err(Fail::bad_param(format!("body 需 JSON 对象，得 {other}"))),
+        other => return Err(Fail::bad_param(format!("body must be a JSON object, got {other}"))),
     };
     let ports = take_key(&mut obj, "ports").map(req_ports).transpose()?.unwrap_or_default();
     let stream = take_key(&mut obj, "stream_scope")
@@ -586,8 +596,8 @@ fn resolve_cmd(c: &Ctx, t: &TargetingCmd) -> Wn<Targeting> {
     )
 }
 
-/// POST /v1/apply —— 200 = 已下发 + 回读指纹过（verify 后台化）；watchdog 由 replay Apply 分支
-/// spawn（REST 与 CLI 同规，design §fuse）。
+/// POST /v1/apply -- 200 = dispatched + fingerprint re-read passed (verify async); the watchdog spawns from the replay Apply branch
+/// (REST mirrors the CLI, design §fuse).
 async fn post_apply(
     AxumState(ctx): AxumState<Arc<Ctx>>,
     body: axum::body::Bytes,
@@ -614,7 +624,7 @@ async fn post_apply(
     ))
 }
 
-/// duration 在 split 后余 map 里（属 spec 邻键）——先摘出再交 from_flat_json。
+/// duration sits in the leftover map after splitting (a spec-adjacent key) -- extract it before handing off to from_flat_json.
 fn target_duration(obj: &mut Map<String, Value>) -> Wn<Option<u64>> {
     match take_key(obj, "duration") {
         None => Ok(None),
@@ -671,14 +681,14 @@ fn do_apply_http(c: &Arc<Ctx>, cmd: ApplyCmd) -> Wn<HttpReplay> {
     })
 }
 
-/// scenario job 独占门（design §server rev-2.2 Momus-B2）：属主存活 = 409/exit3；
-/// 死主旗标自清放行（Momus-minor#1，T8 前也保 /v1/state 帧 job 不撒谎）。
+/// scenario job exclusivity gate (design §server rev-2.2 Momus-B2): owner alive = 409/exit3;
+/// a dead owner has its flag self-cleared and passes (Momus-minor#1; keeps the /v1/state job field honest even before T8).
 fn job_gate(prior: &Option<State>) -> Wn<()> {
     if let Some(st) = prior
         && let Some(j) = &st.job
         && fuse::read_proc_starttime(j.pid) == Some(j.starttime)
     {
-        return Err(Fail::conflict("scenario 进行中（先 stop）"));
+        return Err(Fail::conflict("scenario in progress (stop first)"));
     }
     Ok(())
 }
@@ -687,13 +697,16 @@ fn sanitize_job(st: &mut State) {
     if let Some(j) = &st.job
         && fuse::read_proc_starttime(j.pid) != Some(j.starttime)
     {
-        eprintln!("weaknet(serve): WARN 陈旧 job「{}」（pid {} 已亡）——清旗标放行", j.name, j.pid);
+        eprintln!(
+            "weaknet(serve): WARN stale job '{}' (pid {} dead) -- clearing flag and passing",
+            j.name, j.pid
+        );
         st.job = None;
     }
 }
 
-/// POST /v1/set —— 无活跃 spec = 409 引导总闸（design §UI 写路径协议）；字段覆盖合并
-/// 基底后全量重放（同 CLI：不续命；scope 缺省复用 state.pairs 免重拉 stats）。
+/// POST /v1/set -- no active spec = 409 onboarding gate (design §UI write-path protocol); field-override merge
+/// over the base then full replay (same as the CLI: no lifetime extension; scope defaults reuse state.pairs to skip re-pulling stats).
 async fn post_set(
     AxumState(ctx): AxumState<Arc<Ctx>>,
     body: axum::body::Bytes,
@@ -702,7 +715,7 @@ async fn post_set(
     let duration = target_duration(&mut obj)?;
     if duration.is_some() {
         return Err(AppErr::from(Fail::bad_param(
-            "set 不续命（duration 归 apply）——改存活请重新 apply",
+            "set does not extend lifetime (duration belongs to apply) -- re-apply to change it",
         )));
     }
     let cmd = SetCmd { overrides: obj, iface, sig_port, target };
@@ -720,11 +733,11 @@ async fn post_set(
 
 fn do_set_http(c: &Arc<Ctx>, cmd: SetCmd) -> Wn<(Value, u64, String, u64)> {
     let _lk = engine::take_write_lock(&c.cfg.dirs)?;
-    engine::autoheal_if_expired(&c.cfg.dirs, &c.cfg.env)?; // CLI Set 同规（apply/clear 免检、set/status 开场先验）
+    engine::autoheal_if_expired(&c.cfg.dirs, &c.cfg.env)?; // same as CLI Set (apply/clear skip the check; set/status verify up front)
     let mut prior = State::read_from(&c.cfg.dirs.state_json())
         .map_err(Fail::env)?
-        .ok_or_else(|| Fail::conflict("no active spec — 先 apply/开总闸"))?;
-    job_gate(&Some(prior.clone()))?; // rev-2.2：job 活跃期 set 同样 409（与 apply 对称）
+        .ok_or_else(|| Fail::conflict("no active spec -- apply first"))?;
+    job_gate(&Some(prior.clone()))?; // rev-2.2: set 409s while a job is active too (symmetric with apply)
     sanitize_job(&mut prior);
     let has_override = !cmd.overrides.is_empty()
         || cmd.iface.is_some()
@@ -733,7 +746,9 @@ fn do_set_http(c: &Arc<Ctx>, cmd: SetCmd) -> Wn<(Value, u64, String, u64)> {
         || cmd.target.stream.is_some()
         || cmd.target.device.is_some();
     if !has_override {
-        return Err(Fail::bad_param("set 需至少一个覆盖字段（spec 键/iface/sig_port/定向）"));
+        return Err(Fail::bad_param(
+            "set needs at least one override field (spec key/iface/sig_port/direction)",
+        ));
     }
     let mut flat = spec_to_flat_map(&prior.spec);
     for (k, v) in cmd.overrides {
@@ -759,7 +774,7 @@ fn do_set_http(c: &Arc<Ctx>, cmd: SetCmd) -> Wn<(Value, u64, String, u64)> {
     };
     if targeting.ports.is_empty() && targeting.pairs.is_empty() {
         return Err(Fail::env(
-            "无可用媒体口/配对（基底 state 为空且未给 ports/stream_scope/device_scope）——重新 apply",
+            "no usable media ports/pairs (base state empty and no ports/stream_scope/device_scope given) -- re-apply",
         ));
     }
     let before = state::param_summary(&prior.spec);
@@ -780,12 +795,12 @@ fn do_set_http(c: &Arc<Ctx>, cmd: SetCmd) -> Wn<(Value, u64, String, u64)> {
         &c.cfg.env,
         Verify::Deferred,
     )?;
-    let spec_v =
-        serde_json::to_value(&spec).map_err(|e| Fail::env(format!("spec 序列化失败: {e}")))?;
+    let spec_v = serde_json::to_value(&spec)
+        .map_err(|e| Fail::env(format!("spec serialization failed: {e}")))?;
     Ok((spec_v, out.expires_at_ms, iface, out.leaf.0))
 }
 
-/// ImpairSpec → from_flat_json 键形（set 合并基底用；两向无损，单测钉住）。
+/// ImpairSpec -> from_flat_json key form (used by set to merge the base; lossless both ways, pinned by unit tests).
 fn spec_to_flat_map(s: &ImpairSpec) -> Map<String, Value> {
     let mut m = Map::new();
     m.insert("rtt_ms".into(), json!(s.rtt_ms));
@@ -821,24 +836,24 @@ fn spec_to_flat_map(s: &ImpairSpec) -> Map<String, Value> {
     m
 }
 
-/// POST /v1/clear —— 免锁救火通道（与 CLI 同规），幂等。
+/// POST /v1/clear -- lock-free firefighting channel (same as the CLI), idempotent.
 async fn post_clear(AxumState(ctx): AxumState<Arc<Ctx>>) -> Result<Json<Value>, AppErr> {
     let c = ctx.clone();
     let msg = blocking(move || engine::clear(&c.cfg.dirs, &c.cfg.env, false)).await?;
     Ok(Json(json!({"ok": true, "detail": msg})))
 }
 
-/// 后台实测双采样（verify 异步化）：1s 窗 leaf 增量 → timeline `verify` 事件（SSE ev 播报；
-/// 失败横幅素材）。通道仅经 state.teardown 重建（零探测副作用）。
+/// Background live double sampling (verify async): leaf delta over a 1s window -> timeline `verify` event (SSE ev broadcast;
+/// banner material on failure). The channel is rebuilt only via state.teardown (zero probe side effects).
 fn spawn_verify(ctx: Arc<Ctx>, iface: String, pre: u64, phase: &'static str, with_reset: bool) {
     tokio::spawn(async move {
         let c = ctx.clone();
         let r = blocking(move || {
             let st = State::read_from(&c.cfg.dirs.state_json())
                 .map_err(Fail::env)?
-                .ok_or_else(|| Fail::env("verify：state 已失（并发 clear？）"))?;
+                .ok_or_else(|| Fail::env("verify: state gone (concurrent clear?)"))?;
             let chan = engine::channel_of(&st.teardown)
-                .ok_or_else(|| Fail::env("verify：teardown 通道不可重建"))?;
+                .ok_or_else(|| Fail::env("verify: teardown channel cannot be rebuilt"))?;
             let ev = match engine::verify_measure(&chan, &iface, Some(pre)) {
                 Ok((p, q)) => {
                     let mut v = json!({"ev": "verify", "phase": phase, "ok": true, "leaf": [p, q]});
@@ -853,20 +868,20 @@ fn spawn_verify(ctx: Arc<Ctx>, iface: String, pre: u64, phase: &'static str, wit
         })
         .await;
         if let Err(e) = r {
-            eprintln!("weaknet(serve): WARN 后台 verify 落事件失败: {}", e.msg);
+            eprintln!("weaknet(serve): WARN background verify failed to land its event: {}", e.msg);
         }
     });
 }
 
-// ---------- scenario（T8：run=同步 start（真实 409/500 面）+ 后台 drive；stop=旗标通路） ----------
+// ---------- scenario (T8: run = synchronous start (real 409/500 surface) + background drive; stop = flag channel) ----------
 
 fn is_basename(f: &str) -> bool {
     !f.is_empty() && f != "." && f != ".." && !f.contains(['/', '\\'])
 }
 
-/// scenario 阻塞相产物（run 句柄元组）——type 别名消解 clippy::type_complexity。
+/// scenario blocking-phase artifacts (run handle tuple) -- type alias to silence clippy::type_complexity.
 type PreparedRun = (Arc<scenario::RunSpec>, Arc<dyn StepExec>, Arc<Dirs>, ImpairSpec);
-/// 阻塞相：互斥门/预演/首步 apply/job 落盘（start_blocking 内串全部 409/500 真错）。
+/// Blocking phase: exclusivity gate / dry-run / first-step apply / job persistence (start_blocking chains all real 409/500 errors).
 fn scenario_prepare(
     c: &Arc<Ctx>,
     plan: scenario::ScenarioPlan,
@@ -886,11 +901,12 @@ fn scenario_prepare(
         sig_port: None,
         recovery_dwell_secs: None,
     });
-    let exec: Arc<dyn StepExec> = Arc::new(scenario::EngineExec::new(dirs.clone(), c.cfg.env.clone()));
+    let exec: Arc<dyn StepExec> =
+        Arc::new(scenario::EngineExec::new(dirs.clone(), c.cfg.env.clone()));
     scenario::start_blocking(&rs, &exec, &dirs)?;
     let cur = State::read_from(&dirs.state_json())
         .map_err(Fail::env)?
-        .ok_or_else(|| Fail::env("scenario: start 后 state 缺失"))?
+        .ok_or_else(|| Fail::env("scenario: state missing after start"))?
         .spec;
     Ok((rs, exec, Arc::new(dirs), cur))
 }
@@ -900,22 +916,25 @@ async fn post_scenario_run(
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, AppErr> {
     let v: Value = serde_json::from_slice(&body)
-        .map_err(|e| AppErr::from(Fail::bad_param(format!("body JSON 非法: {e}"))))?;
+        .map_err(|e| AppErr::from(Fail::bad_param(format!("invalid body JSON: {e}"))))?;
     let (plan, name, file_disp) = if let Some(f) = v.get("file") {
-        let f = f.as_str().ok_or_else(|| AppErr::bad("file 需字符串（basename-only）"))?;
+        let f = f.as_str().ok_or_else(|| AppErr::bad("file must be a string (basename-only)"))?;
         if !is_basename(f) {
             return Err(AppErr::bad(
-                "file 必须为 basename（禁路径穿越/绝对路径，design §serve 安全 6）",
+                "file must be a basename (no path traversal/absolute paths, design §serve security 6)",
             ));
         }
         let (src, stem, disp) = match scenario::resolve_serve_file(f) {
             Ok((path, stem)) => {
                 let src = std::fs::read_to_string(&path).map_err(|e| {
-                    AppErr::from(Fail::env(format!("读 scenario {} 失败: {e}", path.display())))
+                    AppErr::from(Fail::env(format!(
+                        "failed to read scenario {}: {e}",
+                        path.display()
+                    )))
                 })?;
                 (src, stem, path.display().to_string())
             }
-            // T13 内嵌兜底（车端 scp 单文件）：fs 缺位且 basename 干净才走内嵌。
+            // T13 embedded fallback (vehicle scp single file): embedded only when fs is absent and the basename is clean.
             Err(fs_err) => {
                 if !scenario::is_safe_asset_name(f) {
                     return Err(AppErr::from(fs_err));
@@ -925,7 +944,7 @@ async fn post_scenario_run(
                     Some(raw) => (
                         raw,
                         f.trim_end_matches(".yaml").trim_end_matches(".yml").to_string(),
-                        format!("内嵌 {rel}"),
+                        format!("embedded {rel}"),
                     ),
                     None => return Err(AppErr::from(fs_err)),
                 }
@@ -934,15 +953,15 @@ async fn post_scenario_run(
         let plan = scenario::parse_plan_yaml(&src).map_err(|e| AppErr::from(Fail::bad_param(e)))?;
         (plan, stem, disp)
     } else if let Some(inl) = v.get("inline") {
-        let s = inl.as_str().ok_or_else(|| AppErr::bad("inline 需字符串"))?;
+        let s = inl.as_str().ok_or_else(|| AppErr::bad("inline must be a string"))?;
         if s.len() > MAX_INLINE_BYTES {
-            return Err(AppErr::bad(format!("inline 超 32KB 上限（{} 字节）", s.len())));
+            return Err(AppErr::bad(format!("inline exceeds the 32KB cap ({} bytes)", s.len())));
         }
         let plan = scenario::parse_plan_yaml(s).map_err(|e| AppErr::from(Fail::bad_param(e)))?;
         (plan, "inline".to_string(), "inline".to_string())
     } else {
         return Err(AppErr::bad(
-            "body 需 file{{\"file\":\"<basename>\"}} 或 {{\"inline\":\"<yaml>\"}}",
+            "body needs file{{\"file\":\"<basename>\"}} or {{\"inline\":\"<yaml>\"}}",
         ));
     };
     let total = plan.lines.len();
@@ -953,11 +972,13 @@ async fn post_scenario_run(
     let handle = tokio::spawn(async move {
         let out = scenario::drive(rs, exec, dirs, cur).await;
         match &out.aborted {
-            Some(r) => eprintln!("weaknet(serve): scenario abort: {r}（elapsed_s={}）", out.elapsed_s),
+            Some(r) => {
+                eprintln!("weaknet(serve): scenario abort: {r}（elapsed_s={}）", out.elapsed_s)
+            }
             None => println!("weaknet(serve): {}", out.summary),
         }
     });
-    // 优雅退出② await 此句柄（drive 见 cancel 旗标→finish_abort 自收口+clear；至多一个=job 独占门）。
+    // Graceful-exit step 2 awaits this handle (drive sees the cancel flag -> finish_abort self-settle + clear; at most one = job exclusivity gate).
     *ctx.drive.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
     Ok(Json(json!({
         "ok": true,
@@ -965,9 +986,7 @@ async fn post_scenario_run(
     })))
 }
 
-async fn post_scenario_stop(
-    AxumState(ctx): AxumState<Arc<Ctx>>,
-) -> Result<Json<Value>, AppErr> {
+async fn post_scenario_stop(AxumState(ctx): AxumState<Arc<Ctx>>) -> Result<Json<Value>, AppErr> {
     let dirs = ctx.cfg.dirs.clone();
     let detail = blocking(move || scenario::stop(&dirs)).await?;
     Ok(Json(json!({"ok": true, "detail": detail})))
@@ -975,7 +994,7 @@ async fn post_scenario_stop(
 
 // ---------- SSE ----------
 
-/// 状态帧节拍（design §API）。tokio::time::interval 首拍即发——文档化：面板秒开。
+/// State-frame cadence (design §API). tokio::time::interval fires on the first tick -- documented: panel opens instantly.
 async fn get_events(AxumState(ctx): AxumState<Arc<Ctx>>) -> Response {
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(16);
     tokio::spawn(run_events(ctx, tx));
@@ -991,7 +1010,7 @@ impl futures_core::stream::Stream for EventStream {
     }
 }
 
-/// 每连接 FrameState（ev 尾标/差分样本独立——无跨连接共享可变态，消竞态）。
+/// Per-connection FrameState (independent ev tail cursor / differential samples -- no cross-connection shared mutable state, kills races).
 #[derive(Default)]
 struct FrameState {
     cursor: u64,
@@ -1013,7 +1032,7 @@ async fn run_events(ctx: Arc<Ctx>, tx: tokio::sync::mpsc::Sender<Result<Event, I
     let mut fs = match blocking(move || Ok::<FrameState, Fail>(FrameState::open(&c))).await {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("weaknet(serve): WARN SSE 游标初始化失败: {}", e.msg);
+            eprintln!("weaknet(serve): WARN SSE cursor init failed: {}", e.msg);
             return;
         }
     };
@@ -1036,11 +1055,11 @@ async fn run_events(ctx: Arc<Ctx>, tx: tokio::sync::mpsc::Sender<Result<Event, I
         fs = fs2;
         let body = serde_json::to_string(&frame).unwrap_or_else(|_| "{}".into());
         if tx.send(Ok(Event::default().data(body))).await.is_err() {
-            return; // 浏览器断开
+            return; // browser disconnected
         }
         sent += 1;
         if limit.is_some_and(|n| sent >= n) {
-            return; // 测试收口（api_matrix 单帧断言）；生产 limit=None 恒无限
+            return; // test cutoff (api_matrix single-frame assert); production limit=None stays unlimited
         }
     }
 }
@@ -1054,13 +1073,12 @@ impl FrameState {
     }
 }
 
-/// 状态帧（design §API 全字段）：expires_at = state.expires_at_ms 顶层镜像；job 形 =
-/// state.job（{name,pid,starttime,done,total}）；无 state = spec/scope/dir/expires_at/job/
-/// names 全 null——「键恒在、值可 null」与 kbps null 语义一致。
+/// State frame (full design §API fields): expires_at mirrors state.expires_at_ms at top level; job shape =
+/// state.job ({name,pid,starttime,done,total}); no state = spec/scope/dir/expires_at/job/
+/// names all null -- keys always present, values nullable, same semantics as the null kbps.
 fn build_frame(ctx: &Ctx, mut fs: FrameState) -> (Value, FrameState) {
     let st = State::read_from(&ctx.cfg.dirs.state_json()).ok().flatten();
-    let mut frame =
-        json!({"spec": null, "scope": null, "dir": null, "expires_at": null, "job": null, "names": null});
+    let mut frame = json!({"spec": null, "scope": null, "dir": null, "expires_at": null, "job": null, "names": null});
     let mut tc = json!({"sent": null, "dropped": null});
     if let Some(s) = &st {
         frame["spec"] = serde_json::to_value(&s.spec).unwrap_or(Value::Null);
@@ -1068,10 +1086,10 @@ fn build_frame(ctx: &Ctx, mut fs: FrameState) -> (Value, FrameState) {
         frame["dir"] = serde_json::to_value(s.dir).unwrap_or(Value::Null);
         frame["expires_at"] = json!(s.expires_at_ms);
         frame["job"] = serde_json::to_value(&s.job).unwrap_or(Value::Null);
-        // E2：定向名字（面板勾选回显唯一通路——与 spec 同构，非乐观更新）。
+        // E2: targeted names (the only path for panel checkbox echo -- mirrors spec, not optimistic updates).
         frame["names"] = json!({ "rooms": s.rooms, "devices": s.devices });
-        // 活性计数仅经 state.teardown 重建通道（不 probe_channel——读面零 ensure 副作用）。
-        // T9 观测点路由：ifb 纯上行会话的现场在 ifb0 root（上行铁证=其 Sent 增长）。
+        // Liveness counts go only through the state.teardown rebuilt channel (no probe_channel -- the read surface has zero ensure side effects).
+        // T9 observation-point routing: an ifb ingress-only session lives at the ifb0 root (ingress proof = its Sent growth).
         let (rd_dev, rd_form) = readback_target(Some(s), &s.iface);
         if let Some(chan) = engine::channel_of(&s.teardown)
             && let Ok(show) = engine::tc_exec(&chan, &["-s", "qdisc", "show", "dev", rd_dev])
@@ -1090,7 +1108,7 @@ fn build_frame(ctx: &Ctx, mut fs: FrameState) -> (Value, FrameState) {
 
 fn build_streams(ctx: &Ctx, fs: &mut FrameState) -> Value {
     let Some(m) = &ctx.stats else {
-        return json!([]); // 未配置（无 url/无凭证）= 空表；降级提示面归 UI（T7）
+        return json!([]); // unconfigured (no url/no credentials) = empty list; degraded-notice surface belongs to the UI (T7)
     };
     let fetched = m.lock().unwrap_or_else(|e| e.into_inner()).fetch_streams();
     match fetched {
@@ -1105,7 +1123,7 @@ fn build_streams(ctx: &Ctx, fs: &mut FrameState) -> Value {
                 .map(|a| {
                     let kbps = match (a.bytes, fs.prev.as_ref().and_then(|(_, m)| m.get(&a.room).copied())) {
                         (Some(c), Some(p)) if c >= p => Some(((c - p) as f64 * 8.0 / dt / 1000.0).round() as u64),
-                        _ => None, // 首点/新出现/计数回退 = null（两语义禁混 0，design §API）
+                        _ => None, // first sample/newly seen/counter reset = null (never conflated with 0, design §API)
                     };
                     json!({"room": a.room, "owner": a.owner, "kbps": kbps, "stale": false, "live": a.live})
                 })
@@ -1115,8 +1133,8 @@ fn build_streams(ctx: &Ctx, fs: &mut FrameState) -> Value {
             Value::Array(out)
         }
         Err(e) => {
-            // stats 失败 → 上帧行保留 + stale:true（不跳帧、不假 0——kbps 语义条款）。
-            eprintln!("weaknet(serve): WARN stats 拉取失败（本帧 stale）: {}", e.msg);
+            // stats failure -> keep the previous row + stale:true (no skipped frames, no fake 0 -- the kbps semantics clause).
+            eprintln!("weaknet(serve): WARN stats fetch failed (frame marked stale): {}", e.msg);
             let out: Vec<Value> = fs
                 .cache
                 .iter()
@@ -1141,7 +1159,7 @@ fn aggregate_streams(rows: &[scope::StreamInfo]) -> Vec<AggRow> {
         e.1 |= r.live;
         e.2 = match (e.2, r.byte_count) {
             (Some(acc), Some(b)) => Some(acc + b),
-            _ => None, // 任一成员行缺 byte_count（旧 server）→ 整房不可差分 = None
+            _ => None, // any member row missing byte_count (older server) -> room not differentiable = None
         };
     }
     order.sort();
@@ -1154,7 +1172,7 @@ fn aggregate_streams(rows: &[scope::StreamInfo]) -> Vec<AggRow> {
         .collect()
 }
 
-/// timeline 尾标增量 → ev 数组（CLI 写操作/自愈/verify 结果的通路，design §API）。
+/// timeline tail-cursor delta -> ev array (the path for CLI write ops / self-heal / verify results, design §API).
 fn tail_ev(ctx: &Ctx, fs: &mut FrameState) -> Option<Value> {
     let raw = std::fs::read_to_string(ctx.cfg.dirs.timeline()).ok()?;
     let lines: Vec<&str> = raw.lines().collect();
@@ -1172,10 +1190,10 @@ fn tail_ev(ctx: &Ctx, fs: &mut FrameState) -> Option<Value> {
     if new.is_empty() { None } else { Some(json!(new)) }
 }
 
-// ---------- serve 主体 ----------
+// ---------- serve main body ----------
 
-/// `serve` 子命令入口（main.rs 建 runtime 后 block_on）：门槛校验 → token（含 --token-file）
-/// → 启动交叉判定 → 横幅 → bind + 惰性过期 tick + axum::serve ⊕ SIGTERM/SIGINT 五步优雅退出。
+/// `serve` subcommand entry (main.rs builds the runtime then block_on): gate validation -> token (incl. --token-file)
+/// -> startup cross-check -> banner -> bind + lazy-expiry tick + axum::serve plus SIGTERM/SIGINT five-step graceful exit.
 pub async fn serve_main(
     listen: Option<&str>,
     lan: bool,
@@ -1186,16 +1204,16 @@ pub async fn serve_main(
     let (host, port) = parse_listen(listen.unwrap_or(DEFAULT_LISTEN))?;
     if !is_loopback_host(&host) && !lan {
         return Err(Fail::env(format!(
-            "bind 门槛：--listen {host}:{port} 非 loopback 且未 --lan——启动拒绝（design §serve 安全 1）"
+            "bind gate: --listen {host}:{port} is non-loopback without --lan -- refusing startup (design §serve security 1)"
         )));
     }
     let dirs = Dirs::from_env();
     let env = Env::from_env();
     if env.channel_pref == "local" {
-        // 启动即验（免运行到写路径才炸）；local 判据零副作用，auto/sidecar 的 ensure 留按需。
+        // Validate at startup (don't wait to blow up on the write path); the local predicate is side-effect free, auto/sidecar ensure stays on demand.
         engine::probe_channel(&env, &engine::resolve_iface(None)).map(|_| ())?;
     }
-    // token 优先级（design §D2 sF5）：--token flag > WEAKNET_TOKEN env > --token-file（读/生成）> CSPRNG。
+    // token priority (design §D2 sF5): --token flag > WEAKNET_TOKEN env > --token-file (read/generate) > CSPRNG.
     let token = if let Some(t) = token_opt.filter(|s| !s.is_empty()) {
         t.to_owned()
     } else if let Some(t) = std::env::var("WEAKNET_TOKEN").ok().filter(|s| !s.is_empty()) {
@@ -1207,13 +1225,13 @@ pub async fn serve_main(
     };
     if lan && token.len() < 16 {
         println!(
-            "weaknet(serve): WARN --lan 且 token 短于 16 字符——跨机面建议 WEAKNET_TOKEN 给足熵"
+            "weaknet(serve): WARN --lan with a token shorter than 16 chars -- give WEAKNET_TOKEN enough entropy for cross-machine use"
         );
     }
     let server_url = match scope::server_url_or_default(server_url_flag) {
         Ok(u) => Some(u),
         Err(e) => {
-            println!("weaknet(serve): /v1/streams 与 stats 定向下线：{}", e.msg);
+            println!("weaknet(serve): /v1/streams and targeted stats offline: {}", e.msg);
             None
         }
     };
@@ -1234,52 +1252,54 @@ pub async fn serve_main(
     let port = cfg.listen_port;
     let ctx = Arc::new(Ctx::new(cfg));
     spawn_expiry_ticker(ctx.clone());
-    let listener = tokio::net::TcpListener::bind((host.as_str(), port))
-        .await
-        .map_err(|e| Fail::env(format!("bind {host}:{port} 失败: {e}（占用？--listen 换端口）")))?;
-    // SIGTERM/SIGINT 优雅退出（design §D2 五步序）。listener 已 bind（可连），信号监听一旦建立即进入
-    // 等待；任一终止信号到达 → 丢弃 serve future（关 listener 停接单）→ 走完五步 → 返回退 0。
+    let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await.map_err(|e| {
+        Fail::env(format!("bind {host}:{port} failed: {e} (port in use? change --listen)"))
+    })?;
+    // SIGTERM/SIGINT graceful exit (design §D2 five-step). listener already bound (connectable); once the signal listener is up it enters
+    // waiting; any termination signal -> drop the serve future (close the listener, stop accepting) -> run the five steps -> return and exit 0.
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .map_err(|e| Fail::env(format!("SIGTERM 监听建立失败: {e}")))?;
+        .map_err(|e| Fail::env(format!("failed to set up the SIGTERM listener: {e}")))?;
     tokio::select! {
         r = axum::serve(listener, build_router_with_ctx(ctx.clone())) => {
-            return r.map_err(|e| Fail::env(format!("serve 异常退出: {e}")));
+            return r.map_err(|e| Fail::env(format!("serve exited abnormally: {e}")));
         }
-        _ = tokio::signal::ctrl_c() => println!("weaknet(serve): SIGINT——优雅退出五步序"),
-        _ = sigterm.recv() => println!("weaknet(serve): SIGTERM——优雅退出五步序"),
+        _ = tokio::signal::ctrl_c() => println!("weaknet(serve): SIGINT -- five-step graceful exit"),
+        _ = sigterm.recv() => println!("weaknet(serve): SIGTERM -- five-step graceful exit"),
     }
     graceful_shutdown(ctx).await;
     Ok(())
 }
 
-/// SIGTERM/SIGINT 优雅退出执行体（design §D2 五步；顺序/预算分支的纯判据见 [`shutdown_plan`]）。
-/// 语义锚：lck-F1 无界阻塞=撞 oxmgr grace SIGKILL 死路 → ②await 2s 预算，超时弃 clear；runner 已常听
-/// SIGTERM+finish_abort 自收口（scenario.rs 实证）故②多为秒内即回；兜底=幸存 watchdog（apply 即 spawn
-/// 的独立 re-exec 进程，pgid 脱离，serve 死它不死）——撤网正确性不依赖本函数〔design D5-3〕。
+/// SIGTERM/SIGINT graceful-exit executor (design §D2 five steps; pure predicates for order/budget branches in [`shutdown_plan`]).
+/// Semantic anchor: lck-F1 unbounded blocking = the oxmgr-grace-then-SIGKILL dead end -> await step 2 under a 2s budget, abandon clear on timeout; the runner already listens
+/// for SIGTERM + finish_abort self-settle (proven in scenario.rs), so step 2 usually returns within seconds; the fallback is the surviving watchdog (spawned at apply as an
+/// independent re-exec'd process, detached pgid, outlives serve) -- teardown correctness never depends on this function [design D5-3].
 async fn graceful_shutdown(ctx: Arc<Ctx>) {
     let dirs = ctx.cfg.dirs.clone();
     let env = ctx.cfg.env.clone();
-    // ① 置 scenario::stop 旗标（复用 post 机制；无在飞 job 时幂等 no-op）。
+    // 1. Set the scenario::stop flag (reuses the post mechanism; idempotent no-op with no in-flight job).
     let _ = blocking(move || scenario::stop(&dirs)).await;
-    println!("weaknet(serve): 优雅退出① stop 旗标已置");
-    // ② 等在飞 drive 静默（≤ DRIVE_QUIET_BUDGET）。无在飞句柄 ⇒ 视作已静默（静态施压走 ③ 主动撤）。
+    println!("weaknet(serve): graceful exit (1) stop flag set");
+    // 2. Await in-flight drive quiet (within DRIVE_QUIET_BUDGET). No in-flight handle => treat as quiet (static pressure goes through step 3).
     let drive = ctx.drive.lock().unwrap_or_else(|e| e.into_inner()).take();
     let drive_settled = match drive {
         Some(h) => tokio::time::timeout(DRIVE_QUIET_BUDGET, h).await.is_ok(),
         None => true,
     };
     println!(
-        "weaknet(serve): 优雅退出② drive 静默（{}）",
-        if drive_settled { "预算内自收口" } else { "超时→弃 clear 交 watchdog" }
+        "weaknet(serve): graceful exit (2) drive quiet ({})",
+        if drive_settled {
+            "settled within budget"
+        } else {
+            "timeout -> abandoning clear, leaving it to the watchdog"
+        }
     );
-    // ③④ 裁决：drive 已静默 ∧ 本 statedir 有活跃施压 ⇒ engine::clear（quiet：不再 ensure 通道打扰，
-    // teardown 照单撤 + rm state〔=④落 inactive〕）。超时或无施压 ⇒ shutdown_plan 略过本步。
+    // 3-4 verdict: drive quiet AND active pressure in this statedir => engine::clear (quiet: no channel ensure noise,
+    // teardown per the list + rm state [= step 4 lands inactive]). Timeout or no pressure => shutdown_plan skips this step.
     let dirs_for_read = ctx.cfg.dirs.clone();
     let state_present = blocking(move || {
         Ok::<bool, Fail>(
-            State::read_from(&dirs_for_read.state_json())
-                .map(|s| s.is_some())
-                .unwrap_or(false),
+            State::read_from(&dirs_for_read.state_json()).map(|s| s.is_some()).unwrap_or(false),
         )
     })
     .await
@@ -1288,32 +1308,34 @@ async fn graceful_shutdown(ctx: Arc<Ctx>) {
         if step == ShutdownStep::ClearPressure {
             let (d, e) = (ctx.cfg.dirs.clone(), env.clone());
             match blocking(move || engine::clear(&d, &e, true)).await {
-                Ok(msg) => println!("weaknet(serve): 优雅退出③④ clear 活跃施压+落 inactive：{msg}"),
+                Ok(msg) => println!(
+                    "weaknet(serve): graceful exit (3-4) cleared active pressure + landed inactive: {msg}"
+                ),
                 Err(f) => println!(
-                    "weaknet(serve): 优雅退出③④ WARN clear 失败（残留归 watchdog/人工）：{}",
+                    "weaknet(serve): graceful exit (3-4) WARN clear failed (residue goes to the watchdog/manual): {}",
                     f.msg
                 ),
             }
         }
     }
-    // ⑤ 退出：serve_main 返回 Ok → main 结束 → 进程 exit 0（runtime drop 顺带回收 ticker/残余任务）。
-    println!("weaknet(serve): 优雅退出⑤ exit 0");
+    // 5. Exit: serve_main returns Ok -> main ends -> process exit 0 (runtime drop reclaims the ticker/leftover tasks).
+    println!("weaknet(serve): graceful exit (5) exit 0");
 }
 
-/// 解析 `--listen`（host:port；支持 [::1]:9810 括号形）。
+/// Parse `--listen` (host:port; supports the [::1]:9810 bracketed form).
 fn parse_listen(s: &str) -> Wn<(String, u16)> {
     let (h, p) = s
         .rsplit_once(':')
-        .ok_or_else(|| Fail::bad_param(format!("--listen 需 host:port，得 {s:?}")))?;
-    // 括号形 [::1]:9810 剥两侧；裸 IPv6 无括号形按末冒号分端口。
+        .ok_or_else(|| Fail::bad_param(format!("--listen must be host:port, got {s:?}")))?;
+    // Bracketed [::1]:9810 strips both sides; bare IPv6 without brackets splits the port at the last colon.
     let h = h.trim_start_matches('[').trim_end_matches(']').to_string();
     if h.is_empty() {
-        return Err(Fail::bad_param(format!("--listen 主机为空: {s:?}")));
+        return Err(Fail::bad_param(format!("--listen host is empty: {s:?}")));
     }
     let p = p
         .trim_end_matches(']')
         .parse::<u16>()
-        .map_err(|e| Fail::bad_param(format!("--listen 端口非法 {s:?}: {e}")))?;
+        .map_err(|e| Fail::bad_param(format!("--listen port invalid {s:?}: {e}")))?;
     Ok((h, p))
 }
 
@@ -1321,33 +1343,34 @@ fn is_loopback_host(h: &str) -> bool {
     matches!(h, "127.0.0.1" | "localhost" | "::1" | "[::1]") || h.starts_with("127.")
 }
 
-/// CSPRNG ≥128bit：/dev/urandom 32B → hex（零新依赖，std 即可）。
+/// CSPRNG >=128bit: /dev/urandom 32B -> hex (zero new dependencies, std suffices).
 fn gen_token() -> Wn<String> {
     let mut buf = [0u8; 32];
     let mut f = std::fs::File::open("/dev/urandom")
-        .map_err(|e| Fail::env(format!("/dev/urandom 不可读: {e}")))?;
-    f.read_exact(&mut buf).map_err(|e| Fail::env(format!("/dev/urandom 读取失败: {e}")))?;
+        .map_err(|e| Fail::env(format!("cannot read /dev/urandom: {e}")))?;
+    f.read_exact(&mut buf).map_err(|e| Fail::env(format!("failed reading /dev/urandom: {e}")))?;
     Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// token 文件权限闸（lck-F10/F11）：既存文件 mode 可能被 daemon umask 放宽（022→644 全员可读）；
-/// 读前校验须=0600 否则拒用报因；新建 create 后 set_permissions(0600) 再读回复核。非 unix 无 POSIX
-/// mode 概念 → no-op（token 仍读写，仅不强制位）。
+/// Token file permission gate (lck-F10/F11): an existing file's mode may have been loosened by a daemon umask (022 -> 644 world-readable);
+/// validate before read, must be 0600 else reject with cause; for new files set_permissions(0600) after create then re-read to confirm. Non-unix has no POSIX
+/// mode concept -> no-op (token still read/written, bits just not enforced).
 #[cfg(unix)]
 fn enforce_token_mode(path: &StdPath, apply: bool) -> Wn<()> {
     use std::os::unix::fs::PermissionsExt;
     if apply {
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| Fail::env(format!("token 文件 {} chmod 0600 失败: {e}", path.display())))?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
+            Fail::env(format!("failed to chmod 0600 token file {}: {e}", path.display()))
+        })?;
     }
     let got = std::fs::metadata(path)
-        .map_err(|e| Fail::env(format!("token 文件 {} stat 失败: {e}", path.display())))?
+        .map_err(|e| Fail::env(format!("failed to stat token file {}: {e}", path.display())))?
         .permissions()
         .mode()
         & 0o777;
     if got != 0o600 {
         return Err(Fail::env(format!(
-            "token 文件 {} 权限 {got:#o}≠0600（既存文件可能被 daemon umask 放宽=可读泄漏；chmod 600 或 rm 后重生成）",
+            "token file {} permissions {got:#o} != 0600 (existing file may have been loosened by a daemon umask = readable leak; chmod 600 or rm and regenerate)",
             path.display()
         )));
     }
@@ -1359,16 +1382,16 @@ fn enforce_token_mode(_path: &StdPath, _apply: bool) -> Wn<()> {
     Ok(())
 }
 
-/// `--token-file`（design §D2 sF5）：存在则读（trim，强制 0600 校验）、缺则 CSPRNG 生成并原子落盘
-/// （create_new + set 0600 + 读回复核）。父目录自动建；token 真源写 run/ 由 unit 侧传路径（T4 的事）。
+/// `--token-file` (design §D2 sF5): read if present (trim, enforced 0600 check), else generate via CSPRNG and write atomically
+/// (create_new + set 0600 + re-read confirm). Parent dirs auto-created; the token source of truth in run/ gets its path passed by the unit side (T4's job).
 fn resolve_token_file(path: &StdPath) -> Wn<String> {
     if path.exists() {
-        enforce_token_mode(path, false)?; // 既存：先校验（lck-F10：create mode 对既存文件不生效）
+        enforce_token_mode(path, false)?; // existing: validate first (lck-F10: create mode does not apply to existing files)
         let raw = std::fs::read_to_string(path)
-            .map_err(|e| Fail::env(format!("读 token 文件 {} 失败: {e}", path.display())))?;
+            .map_err(|e| Fail::env(format!("failed to read token file {}: {e}", path.display())))?;
         let tok = raw.trim();
         if tok.is_empty() {
-            return Err(Fail::env(format!("token 文件 {} 内容为空", path.display())));
+            return Err(Fail::env(format!("token file {} is empty", path.display())));
         }
         return Ok(tok.to_owned());
     }
@@ -1376,58 +1399,63 @@ fn resolve_token_file(path: &StdPath) -> Wn<String> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| Fail::env(format!("建 token 目录 {} 失败: {e}", parent.display())))?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            Fail::env(format!("failed to create token dir {}: {e}", parent.display()))
+        })?;
     }
-    // create_new：与并发首建竞态→AlreadyExists 视作对手已落，转读校验（幂等）。
+    // create_new: races with a concurrent first create -> AlreadyExists treated as the other side having landed; fall through to read-and-validate (idempotent).
     match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
         Ok(mut f) => {
-            f.write_all(tok.as_bytes())
-                .map_err(|e| Fail::env(format!("写 token 文件 {} 失败: {e}", path.display())))?;
+            f.write_all(tok.as_bytes()).map_err(|e| {
+                Fail::env(format!("failed to write token file {}: {e}", path.display()))
+            })?;
             f.flush().ok();
             drop(f);
-            enforce_token_mode(path, true)?; // 新建：chmod 0600 + 读回复核（lck-F10）
+            enforce_token_mode(path, true)?; // new file: chmod 0600 + re-read confirm (lck-F10)
             println!(
-                "weaknet(serve): token 已生成写入 {}（0600；轮转=rm 文件 + 重启 unit）",
+                "weaknet(serve): token generated and written to {} (0600; rotate = rm the file + restart the unit)",
                 path.display()
             );
             Ok(tok)
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => resolve_token_file(path),
-        Err(e) => Err(Fail::env(format!("创建 token 文件 {} 失败: {e}", path.display()))),
+        Err(e) => Err(Fail::env(format!("failed to create token file {}: {e}", path.display()))),
     }
 }
 
-/// 呈现规则（design §API Token 条）：loopback 横幅 = 整行可复制 URL；--lan = 仅 token
-/// （URL 带 token 会进 shell 历史/日志）。
+/// Presentation rules (design §API Token item): loopback banner = a full copy-paste URL; --lan = token only
+/// (a URL carrying the token would land in shell history/logs).
 fn print_banner(cfg: &ServeConfig) {
     if cfg.lan {
         println!(
-            "weaknet serve (--lan) 监听 {}:{} — token（仅此一现，浏览器打开后粘贴）:",
+            "weaknet serve (--lan) listening on {}:{} -- token (shown once, paste after opening in the browser):",
             cfg.listen_host, cfg.listen_port
         );
         println!("  {}", cfg.token);
     } else {
         println!(
-            "weaknet serve 面板（复制即用）: http://{}:{}/?token={}",
+            "weaknet serve panel (copy-paste ready): http://{}:{}/?token={}",
             cfg.listen_host, cfg.listen_port, cfg.token
         );
     }
     println!(
-        "weaknet serve 安全栈: Host 白名单恒开 + Bearer（SSE 唯一 ?token= 豁免）+ CORS 全关 + 写路径 flock 瞬持"
+        "weaknet serve security stack: Host allowlist always on + Bearer (SSE is the sole ?token= exemption) + CORS fully off + transient flock on the write path"
     );
-    // 反代形（wW8）：经 server 后台入口（Caddy）时浏览器到不了上面的 :9810，须走 /weaknet/ 前缀。
+    // Reverse-proxy form (wW8): through the server admin entry (Caddy) the browser cannot reach :9810 above; must use the /weaknet/ prefix.
     println!(
-        "weaknet serve 反代入口: 经 server 后台访问时开 http://<当前 host>/weaknet/ —— token 见部署树 run/weaknet.token（与上方直连 token 同值）"
+        "weaknet serve reverse proxy: when going through the server admin entry, open http://<current host>/weaknet/ -- token at run/weaknet.token in the deploy tree (same value as the direct token above)"
     );
 }
 
-/// serve 启动交叉判定（design §Error handling，与 CLI status 共用 assert_fingerprint 原语）：
-/// state × tc 回读，分歧 → 清 state 文件 + WARN——绝不清内核盲重放（qdisc 现况归 watchdog/人工 clear）。
-/// T9 回读观测点单一判定（status/状态帧/启动交叉共用）：ifb 纯上行会话（dir=In 且
-/// 无 egress 骨架痕迹——sig 腿存在时 root 已建，观测归 iface）→ ifb0 root 形。
+/// serve startup cross-check (design §Error handling; shares the assert_fingerprint primitive with CLI status):
+/// state x tc re-read; on divergence clear the state file + WARN -- never blindly re-apply to the kernel (current qdisc state belongs to the watchdog/manual clear).
+/// Single T9 re-read observation-point predicate (shared by status/state frame/startup cross-check): an ifb ingress-only session (dir=In and
+/// no egress skeleton traces -- when a sig leg exists the root was already built, observation belongs to the iface) -> ifb0 root form.
 #[must_use]
-pub(crate) fn readback_target<'a>(st: Option<&State>, iface: &'a str) -> (&'a str, engine::LeafForm) {
+pub(crate) fn readback_target<'a>(
+    st: Option<&State>,
+    iface: &'a str,
+) -> (&'a str, engine::LeafForm) {
     match st {
         Some(s) if s.ifb_used && s.dir == spec::Dir::In && s.sig_port.is_none() => {
             (crate::ifb::IFB_DEV, engine::LeafForm::Root)
@@ -1437,7 +1465,7 @@ pub(crate) fn readback_target<'a>(st: Option<&State>, iface: &'a str) -> (&'a st
 }
 
 fn startup_cross_check(dirs: &Dirs) -> Wn<()> {
-    // 无 state：启动不探 tc（通道探测有 ensure 副作用且无判定对象）；残留面由 apply 守卫/status 收口。
+    // No state: do not probe tc at startup (channel probing has ensure side effects and nothing to judge); residue is handled by the apply guard/status.
     if let Some(mut st) = State::read_from(&dirs.state_json()).map_err(Fail::env)? {
         if st.job.is_some() {
             sanitize_job(&mut st);
@@ -1447,7 +1475,7 @@ fn startup_cross_check(dirs: &Dirs) -> Wn<()> {
         }
         let Some(chan) = engine::channel_of(&st.teardown) else {
             println!(
-                "weaknet(serve): WARN state.teardown 通道不可重建（state 损坏？）——交叉判定跳过"
+                "weaknet(serve): WARN state.teardown channel cannot be rebuilt (corrupt state?) -- skipping the cross-check"
             );
             return Ok(());
         };
@@ -1460,21 +1488,21 @@ fn startup_cross_check(dirs: &Dirs) -> Wn<()> {
                     rd_form,
                 ) {
                     eprintln!(
-                        "weaknet(serve): WARN 启动交叉判定分歧（qdisc 被外部改写/已消失）：{}——清 state 文件复位（未动内核；现况残留归 watchdog/clear）",
+                        "weaknet(serve): WARN startup cross-check divergence (qdisc rewritten externally/gone): {} -- clearing the state file to reset (kernel untouched; current residue belongs to the watchdog/clear)",
                         e.msg
                     );
                     if let Err(re) = std::fs::remove_file(dirs.state_json())
                         && re.kind() != std::io::ErrorKind::NotFound
                     {
-                        return Err(Fail::env(format!("清 state 失败: {re}")));
+                        return Err(Fail::env(format!("failed to clear state: {re}")));
                     }
                 } else {
-                    println!("weaknet(serve): 启动交叉判定 state × tc 一致 ✓");
+                    println!("weaknet(serve): startup cross-check state x tc consistent");
                 }
             }
             Err(e) => {
                 eprintln!(
-                    "weaknet(serve): WARN 启动 tc 不可读（{e}）——state 保留，惰性过期自愈/后台 verify 兜底"
+                    "weaknet(serve): WARN tc unreadable at startup ({e}) -- keeping state; lazy-expiry self-heal/background verify back it up"
                 );
             }
         }
@@ -1482,8 +1510,8 @@ fn startup_cross_check(dirs: &Dirs) -> Wn<()> {
     Ok(())
 }
 
-/// 惰性过期 fuse 层在 serve 内的定时身（design §fuse「serve tokio 定时器」——独立于 SSE 连接
-/// 数，无面板也自愈）。取锁瞬持再检；锁忙 = 写进行中，共法排队跳过本拍（C15：非冲突错误才 WARN）。
+/// The lazy-expiry fuse layer's timer inside serve (design §fuse serve tokio timer -- independent of the SSE connection
+/// count, self-heals even without the panel). Take the lock transiently then check; a busy lock = a write in progress, skip this tick (C15: WARN only on non-conflict errors).
 fn spawn_expiry_ticker(ctx: Arc<Ctx>) {
     tokio::spawn(async move {
         loop {
@@ -1496,16 +1524,16 @@ fn spawn_expiry_ticker(ctx: Arc<Ctx>) {
             })
             .await;
             if let Err(e) = r {
-                eprintln!("weaknet(serve): WARN 惰性过期检查异常: {}", e.msg);
+                eprintln!("weaknet(serve): WARN lazy-expiry check failed: {}", e.msg);
             }
         }
     });
 }
 
-/// dev-only 注入（tasks T7 Verify：灰态断言依赖）：`WEAKNET_FAKE_CAPS="ifb_ingress=false,seed=false"`。
-/// 键 ∈ {seed, dir_lo, ifb_ingress}，值 true|false；未给键取保守缺省（seed=false/dir_lo=true/
-/// ifb_ingress=false——假灰不假亮，禁虚构能力）。结果进 ServeConfig.caps_override →
-/// /v1/capabilities 直返缓存跳过真探测。生产勿设——它把能力面钉成谎。
+/// dev-only injection (tasks T7 Verify: grey-state assertions depend on it): `WEAKNET_FAKE_CAPS="ifb_ingress=false,seed=false"`.
+/// Keys in {seed, dir_lo, ifb_ingress}, values true|false; missing keys take conservative defaults (seed=false/dir_lo=true/
+/// ifb_ingress=false -- grey not falsely green, fabricated capabilities forbidden). Results go into ServeConfig.caps_override ->
+/// /v1/capabilities returns the cache directly, skipping the real probe. Never set in production -- it pins the capability surface to a lie.
 fn fake_caps_from_env() -> Option<Capabilities> {
     let raw = std::env::var("WEAKNET_FAKE_CAPS").ok();
     parse_fake_caps(raw.as_deref())
@@ -1520,7 +1548,7 @@ fn parse_fake_caps(raw: Option<&str>) -> Option<Capabilities> {
         seed: false,
         dir_lo: true,
         ifb_ingress: false,
-        ifb_reason: "dev 注入（WEAKNET_FAKE_CAPS）：宿主未加载 ifb——补救=宿主 root modprobe ifb；真判定=ifb::probe 先读后探链".into(),
+        ifb_reason: "dev injection (WEAKNET_FAKE_CAPS): host has not loaded ifb -- fix = modprobe ifb as host root; real verdict = ifb::probe read-before-probe chain".into(),
     };
     for pair in raw.split(',') {
         let pair = pair.trim();
@@ -1528,7 +1556,9 @@ fn parse_fake_caps(raw: Option<&str>) -> Option<Capabilities> {
             continue;
         }
         let Some((k, v)) = pair.split_once('=') else {
-            eprintln!("weaknet(serve): WARN WEAKNET_FAKE_CAPS 忽略项 {pair:?}（形如 key=true|false）");
+            eprintln!(
+                "weaknet(serve): WARN WEAKNET_FAKE_CAPS ignored entry {pair:?} (expected key=true|false)"
+            );
             continue;
         };
         match (k.trim(), v.trim()) {
@@ -1542,15 +1572,19 @@ fn parse_fake_caps(raw: Option<&str>) -> Option<Capabilities> {
             }
             ("ifb_ingress", "false") => c.ifb_ingress = false,
             (_, v @ ("true" | "false")) => {
-                eprintln!("weaknet(serve): WARN WEAKNET_FAKE_CAPS 未知键 {v:?}（合法: seed|dir_lo|ifb_ingress）");
+                eprintln!(
+                    "weaknet(serve): WARN WEAKNET_FAKE_CAPS unknown key {v:?} (valid: seed|dir_lo|ifb_ingress)"
+                );
             }
-            _ => eprintln!("weaknet(serve): WARN WEAKNET_FAKE_CAPS 非法值 {pair:?}（值需 true|false）"),
+            _ => eprintln!(
+                "weaknet(serve): WARN WEAKNET_FAKE_CAPS invalid value {pair:?} (value must be true|false)"
+            ),
         }
     }
     Some(c)
 }
 
-// ---------- 单元面纯函数测 ----------
+// ---------- Unit pure-function tests ----------
 
 #[cfg(test)]
 mod tests {
@@ -1646,24 +1680,24 @@ mod tests {
         assert_eq!(agg[0].owner.as_deref(), Some("dev-a"));
         assert_eq!(agg[0].bytes, Some(150));
         assert!(agg[0].live);
-        assert_eq!(agg[1].bytes, None, "成员行缺 byte_count → 整房不可差分");
+        assert_eq!(agg[1].bytes, None, "member row missing byte_count -> room not differentiable");
     }
 
     #[test]
     fn fake_caps_parses_and_defaults_conservative() {
         let c = parse_fake_caps(Some("ifb_ingress=false")).unwrap();
         assert!(!c.ifb_ingress);
-        assert!(!c.seed, "未给键=保守缺省");
+        assert!(!c.seed, "missing key = conservative default");
         assert!(c.dir_lo);
         assert!(
-            c.ifb_reason.contains("宿主未加载") && c.ifb_reason.contains("modprobe"),
-            "灰显 tooltip 两词面（补救文案=design §UI 区分结构性 vs 宿主未加载）",
+            c.ifb_reason.contains("not loaded") && c.ifb_reason.contains("modprobe"),
+            "grey tooltip covers both wordings (fix text = design §UI distinguishes structural vs not-loaded)",
         );
         let g = parse_fake_caps(Some(" seed=true , dir_lo=false ,ifb_ingress=true ")).unwrap();
         assert!(g.seed && !g.dir_lo && g.ifb_ingress && g.ifb_reason.is_empty());
         assert_eq!(parse_fake_caps(None), None);
         assert_eq!(parse_fake_caps(Some("  ")), None);
-        // 垃圾项 WARN 后忽略，不毁其余
+        // junk entries WARNed then ignored, the rest intact
         let b = parse_fake_caps(Some("nope=true,seed=true,oops")).unwrap();
         assert!(b.seed && !b.ifb_ingress);
     }
@@ -1693,7 +1727,9 @@ mod tests {
         let res = app.clone().oneshot(req("/")).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(res.headers()[header::CONTENT_TYPE], "text/html; charset=utf-8");
-        assert!(res.headers()[header::CONTENT_SECURITY_POLICY].as_bytes().starts_with(b"default-src"));
+        assert!(
+            res.headers()[header::CONTENT_SECURITY_POLICY].as_bytes().starts_with(b"default-src")
+        );
         let body = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
         assert!(String::from_utf8_lossy(&body).to_ascii_lowercase().contains("<!doctype html"));
         let res = app.clone().oneshot(req("/assets/app.js")).await.unwrap();
@@ -1701,24 +1737,45 @@ mod tests {
         assert_eq!(res.headers()[header::CONTENT_TYPE], "text/javascript; charset=utf-8");
         let res = app.clone().oneshot(req("/assets/vendor/uPlot.iife.min.js")).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
-        // 穿越：显式 `..`（含解码形）= 400；未命中键 = 404 零泄露
-        assert_eq!(app.clone().oneshot(req("/assets/../server.rs")).await.unwrap().status(), StatusCode::BAD_REQUEST);
-        assert_eq!(app.clone().oneshot(req("/assets/%2e%2e/Cargo.toml")).await.unwrap().status(), StatusCode::BAD_REQUEST);
-        assert_eq!(app.clone().oneshot(req("/assets/nope.js")).await.unwrap().status(), StatusCode::NOT_FOUND);
-        // /v1* 鉴权不变：无 token 401、带 token 200（capabilities 只读豁免除外，见下）
-        assert_eq!(app.clone().oneshot(req("/v1/state")).await.unwrap().status(), StatusCode::UNAUTHORIZED);
-        // capabilities 无鉴权只读豁免：冷缓存不触探测（探测在本测试 env 下会 Err→非 200）、
-        // refresh=1 同样不得越门——否则 401 消噪变成无凭证 DoS 面。
+        // traversal: explicit `..` (incl. decoded forms) = 400; unknown key = 404 with zero leakage
+        assert_eq!(
+            app.clone().oneshot(req("/assets/../server.rs")).await.unwrap().status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            app.clone().oneshot(req("/assets/%2e%2e/Cargo.toml")).await.unwrap().status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            app.clone().oneshot(req("/assets/nope.js")).await.unwrap().status(),
+            StatusCode::NOT_FOUND
+        );
+        // /v1* auth unchanged: no token 401, valid token 200 (except the capabilities read-only exemption, below)
+        assert_eq!(
+            app.clone().oneshot(req("/v1/state")).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+        // capabilities unauthenticated read-only exemption: cold cache must not probe (probing would Err in this test env -> non-200),
+        // and refresh=1 must not slip past the gate either -- otherwise 401 de-noising becomes a credential-less DoS surface.
         for uri in ["/v1/capabilities", "/v1/capabilities?refresh=1"] {
             let res = app.clone().oneshot(req(uri)).await.unwrap();
-            assert_eq!(res.status(), StatusCode::OK, "{uri} 应 200（缓存只读豁免）");
-            let body: Value =
-                serde_json::from_slice(&axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap())
-                    .unwrap();
-            assert_eq!(body["cached"], serde_json::Value::Bool(false), "{uri} 无缓存须返待测形");
+            assert_eq!(
+                res.status(),
+                StatusCode::OK,
+                "{uri} should be 200 (read-only cache exemption)"
+            );
+            let body: Value = serde_json::from_slice(
+                &axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                body["cached"],
+                serde_json::Value::Bool(false),
+                "{uri} with no cache must return the unknown shape"
+            );
         }
-        // 带 token 的 refresh 仍走原路（无 CapsNoProbe 短路）——确定性断言：探测成功=真能力形
-        // （含 seed 键），探测失败=5xx；两态都不得是 {"cached":false} 短路形。
+        // token-bearing refresh still takes the original path (no CapsNoProbe shortcut) -- deterministic asserts: probe success = real capability shape
+        // (incl. seed key), probe failure = 5xx; neither state may be the {"cached":false} shortcut shape.
         let res = app
             .clone()
             .oneshot(
@@ -1736,7 +1793,7 @@ mod tests {
         let v: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
         assert!(
             !st.is_success() || v.get("cached") != Some(&Value::Bool(false)),
-            "带凭证 refresh 不得走 no-probe 短路，got {st} {v}"
+            "authenticated refresh must not take the no-probe shortcut, got {st} {v}"
         );
         let res = app
             .oneshot(
@@ -1754,26 +1811,29 @@ mod tests {
 
     #[test]
     fn drive_quiet_budget_is_two_seconds() {
-        // design §D2 lck-F1 预算钉：②步总预算恰为 2s（改值=撞 oxmgr grace 的回归前哨）。
+        // design §D2 lck-F1 budget pin: step-2 total budget is exactly 2s (changing it = regression tripwire against the oxmgr grace window).
         assert_eq!(DRIVE_QUIET_BUDGET, Duration::from_secs(2));
     }
 
     #[test]
     fn shutdown_plan_writes_flag_then_awaits_drive_first() {
         let p = shutdown_plan(true, false);
-        assert_eq!(p[0], ShutdownStep::WriteStopFlag, "① stop 旗标恒先");
-        assert_eq!(p[1], ShutdownStep::AwaitDriveQuiet, "② drive 静默恒居次");
-        assert_eq!(*p.last().unwrap(), ShutdownStep::Exit, "⑤ 恒为末");
+        assert_eq!(p[0], ShutdownStep::WriteStopFlag, "(1) stop flag always first");
+        assert_eq!(p[1], ShutdownStep::AwaitDriveQuiet, "(2) drive quiet always second");
+        assert_eq!(*p.last().unwrap(), ShutdownStep::Exit, "(5) always last");
     }
 
     #[test]
     fn shutdown_plan_clears_only_when_settled_and_state_present() {
-        // drive 已静默 ∧ 有施压 ⇒ ③④（ClearPressure）到场。
+        // drive quiet AND pressure present => steps 3-4 (ClearPressure) show up.
         let p = shutdown_plan(true, true);
-        assert!(p.contains(&ShutdownStep::ClearPressure), "settled+present 应主动撤");
-        // 无施压 ⇒ ③④ 幂等跳过（只剩 ①②⑤）。
+        assert!(
+            p.contains(&ShutdownStep::ClearPressure),
+            "settled+present should tear down actively"
+        );
+        // no pressure => steps 3-4 skip as no-ops (only 1, 2, 5 remain).
         let q = shutdown_plan(false, false);
-        assert!(!q.contains(&ShutdownStep::ClearPressure), "无施压不应撤");
+        assert!(!q.contains(&ShutdownStep::ClearPressure), "no pressure should not tear down");
         assert_eq!(
             q,
             vec![ShutdownStep::WriteStopFlag, ShutdownStep::AwaitDriveQuiet, ShutdownStep::Exit]
@@ -1782,10 +1842,13 @@ mod tests {
 
     #[test]
     fn shutdown_plan_timeout_abandons_clear() {
-        // lck-F1：②超时（drive_settled=false）⇒ 即使 state 在场也弃 clear 直退（交 watchdog），
-        // 绝不在在飞 step 可能落地 tc 时与其竞态。
+        // lck-F1: step-2 timeout (drive_settled=false) => skip clear and exit even with state present (leave it to the watchdog),
+        // never race an in-flight step that may still land tc.
         let p = shutdown_plan(false, true);
-        assert!(!p.contains(&ShutdownStep::ClearPressure), "超时必弃 clear（lck-F1）");
+        assert!(
+            !p.contains(&ShutdownStep::ClearPressure),
+            "on timeout clear must be abandoned (lck-F1)"
+        );
         assert_eq!(
             p,
             vec![ShutdownStep::WriteStopFlag, ShutdownStep::AwaitDriveQuiet, ShutdownStep::Exit]
@@ -1796,20 +1859,24 @@ mod tests {
     fn token_file_generates_0600_when_absent() {
         let dir = std::env::temp_dir().join(format!("wnet-t3-gen-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("sub").join("weaknet.token"); // 父目录 sub 不存在 → 自动建
+        let path = dir.join("sub").join("weaknet.token"); // parent dir sub absent -> auto-created
         let tok = resolve_token_file(&path).unwrap();
-        assert_eq!(tok.len(), 64, "CSPRNG 32B hex=64 字符");
-        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), tok, "落盘内容=返回值");
+        assert_eq!(tok.len(), 64, "CSPRNG 32B hex = 64 chars");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap().trim(),
+            tok,
+            "file content = return value"
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(
                 std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
                 0o600,
-                "新建必 0600"
+                "new file must be 0600"
             );
         }
-        // 二次调用走读分支（同值，不重生成）。
+        // second call takes the read branch (same value, not regenerated).
         assert_eq!(resolve_token_file(&path).unwrap(), tok);
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1824,8 +1891,8 @@ mod tests {
         std::fs::write(&path, "leaky-token\n").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         let err = resolve_token_file(&path).unwrap_err();
-        assert!(err.msg.contains("0600"), "报因须含 0600：{}", err.msg);
-        // 修成 0600 后放行，且 trim 掉尾换行。
+        assert!(err.msg.contains("0600"), "cause must mention 0600: {}", err.msg);
+        // after fixing to 0600 it passes, and the trailing newline is trimmed.
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert_eq!(resolve_token_file(&path).unwrap(), "leaky-token");
         std::fs::remove_dir_all(&dir).ok();

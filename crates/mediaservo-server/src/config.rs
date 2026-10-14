@@ -4,8 +4,9 @@ use std::path::Path;
 
 /// Load server configuration from a YAML file into the shared ServerConfig type.
 pub fn load(path: impl AsRef<Path>) -> Result<ServerConfig, CoreError> {
-    let file = std::fs::File::open(path.as_ref())
-        .map_err(|e| CoreError::ConfigParse(format!("Cannot open {}: {}", path.as_ref().display(), e)))?;
+    let file = std::fs::File::open(path.as_ref()).map_err(|e| {
+        CoreError::ConfigParse(format!("Cannot open {}: {}", path.as_ref().display(), e))
+    })?;
     serde_yaml::from_reader(file)
         .map_err(|e| CoreError::ConfigParse(format!("YAML parse error: {}", e)))
 }
@@ -46,10 +47,9 @@ sfu:
             config.sfu.announced_ips,
             vec!["192.168.2.127".to_string(), "10.144.0.3".to_string()]
         );
-        // 缺省空（env/探测兜底）
+        // Empty by default (env/probe fallback)
         let minimal: mediaservo_common::config::ServerConfig =
-            serde_yaml::from_str("version: 1\nlisten:\n  host: 0.0.0.0\n  port: 9800\n")
-                .unwrap();
+            serde_yaml::from_str("version: 1\nlisten:\n  host: 0.0.0.0\n  port: 9800\n").unwrap();
         assert!(minimal.sfu.announced_ips.is_empty());
     }
 

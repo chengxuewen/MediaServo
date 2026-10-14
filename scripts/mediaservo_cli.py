@@ -1,10 +1,10 @@
-"""mediaservo — MediaServo 统一构建 CLI（vapkg 式单入口）。
+"""mediaservo — unified MediaServo build CLI (vapkg-style single entry point).
 
-薄壳（mediaservo.sh/.bat）保证 pixi 环境激活后调用本脚本：
-环境内 PATH/LIBCLANG_PATH 已注入，subprocess 直接调 cargo/docker 等。
-平台差异仅 e2e（bash 脚本）与 clean（删除命令）两处。
+The thin shell (mediaservo.sh/.bat) guarantees this script runs after the pixi environment is activated:
+PATH/LIBCLANG_PATH are already injected in the environment; subprocess calls cargo/docker directly.
+Platform differences exist in only two places: e2e (bash scripts) and clean (delete commands).
 
-用法: mediaservo [-h] {build,build-host,build-server,up,down,logs,e2e,test,ci,deploy,install,package,clean,config,status,version} ...
+Usage: mediaservo [-h] {build,build-host,build-server,up,down,logs,e2e,test,ci,deploy,install,package,clean,config,status,version} ...
 """
 
 from __future__ import annotations
@@ -28,14 +28,14 @@ HOST_CONF = ROOT / "crates/mediaservo-host/config/host.conf"
 SERVER_YAML = ROOT / "config/server.docker.yaml"
 
 
-# 交付目标 → 版本源 crate（F12 四独立版本源的打包侧接线；V1b 四包名化续用此表）。
+# Delivery target -> version-source crate (F12: four independent version sources, packaging-side wiring; V1b four-package naming reuses this table).
 _TARGET_CRATE = {"host": "mediaservo-host", "server": "mediaservo-server",
                  "bindings": "mediaservo-field", "sdk-field": "mediaservo-field",
                  "sdk-client": "mediaservo-client"}
 
 
 def _crate_version(crate: str) -> str:
-    """crate 本地版本；`version.workspace = true` 回落根 [workspace.package]。"""
+    """Crate-local version; falls back to root [workspace.package] when version.workspace = true."""
     text = (ROOT / "crates" / crate / "Cargo.toml").read_text()
     seg = text.split("[package]", 1)[1].split("[", 1)[0] if "[package]" in text else ""
     for line in seg.splitlines():
@@ -48,32 +48,32 @@ def _crate_version(crate: str) -> str:
 
 
 def _frame_meta_wire_version() -> int:
-    """FrameMeta 线版本从 Rust 源生成（D243/N4——version.txt 漂浮号终结）。"""
+    """FrameMeta wire version derived from the Rust source (D243/N4 — ends version.txt floating numbers)."""
     text = (ROOT / "crates" / "mediaservo-link" / "src" / "frame.rs").read_text()
     m = re.search(r"pub const WIRE_VERSION: u8 = (\d+)", text)
     if not m:
-        raise SystemExit("错误: frame.rs WIRE_VERSION 常数未找到（形态漂移）")
+        raise SystemExit("Error: WIRE_VERSION constant not found in frame.rs (shape drift)")
     return int(m.group(1))
 
 
 def _token_file_version() -> int:
-    """MSTK 令牌文件格式版本从 Rust 源生成（TokenFile::VERSION，D-H10）。"""
+    """MSTK token file format version derived from the Rust source (TokenFile::VERSION, D-H10)."""
     text = (ROOT / "crates" / "mediaservo-link" / "src" / "token.rs").read_text()
     m = re.search(r"pub const VERSION: u8 = (\d+)", text)
     if not m:
-        raise SystemExit("错误: token.rs TokenFile::VERSION 未找到（形态漂移）")
+        raise SystemExit("Error: TokenFile::VERSION not found in token.rs (shape drift)")
     return int(m.group(1))
 
 
 def _check(tool: str, hint: str) -> None:
-    """依赖检查 — 缺失时明确报错退出（不静默）。"""
+    """Dependency check — exits with a clear error when missing (never silent)."""
     if shutil.which(tool) is None:
-        print(f"错误: 缺少依赖 '{tool}' — {hint}", file=sys.stderr)
+        print(f"Error: missing dependency '{tool}' — {hint}", file=sys.stderr)
         sys.exit(1)
 
 
 def _run(cmd: list[str], env: dict[str, str] | None = None, cwd: str | None = None) -> int:
-    """执行命令（默认继承环境），失败透传退出码。"""
+    """Run a command (inherits env by default); propagate the failure exit code."""
     print(f"$ {' '.join(cmd)}{'  (cwd: ' + cwd + ')' if cwd else ''}")
     return subprocess.run(cmd, env=env, cwd=cwd).returncode
 
@@ -85,15 +85,15 @@ def _run_or_exit(cmd: list[str], env: dict[str, str] | None = None, cwd: str | N
 
 
 def _cmd_build_host() -> None:
-    """build host — 纯编译到 target/（组装/品牌化迁 deploy——D266）。"""
-    _check("cargo", "pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat")
+    """build host — pure compile into target/ (assembly/branding moved to deploy — D266)."""
+    _check("cargo", "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat")
     _run_or_exit(["cargo", "build", "-p", "mediaservo-host", "-p", "mediaservo-client"])
-    print("✓ host 构建完成（纯编译 target/——组装与品牌化在 deploy: mediaservo deploy host --prefix <X>）")
+    print("✓ host build complete (pure compile to target/ — assembly and branding happen at deploy: mediaservo deploy host --prefix <X>)")
 
 def _ensure_admin_dist() -> None:
-    """admin 前端增量构建（C13 双轨一致性——Docker 路径 Dockerfile 内现场构建，原生路径对齐）。
-    判定: dist 缺失 或 src 有文件比 dist/index.html 新 → pnpm build:admin（turbo filter）。
-    无前端变更时零额外成本（mtime 跳过）。修复 C24 事故（改前端 rebuild 不生效）。"""
+    """Incremental admin frontend build (C13 dual-track parity — the Docker path builds inside the Dockerfile; the native path aligns with it).
+    Decision: dist missing, or any src file newer than dist/index.html → pnpm build:admin (turbo filter).
+    Zero extra cost when there are no frontend changes (mtime skip). Fixes the C24 incident (frontend edits not taking effect after rebuild)."""
     dist_index = ROOT / "www" / "apps" / "admin" / "dist" / "index.html"
     src_dir = ROOT / "www" / "apps" / "admin" / "src"
     need = True
@@ -105,30 +105,30 @@ def _ensure_admin_dist() -> None:
             newers = []
         need = bool(newers)
     if not need:
-        print(f"admin dist 最新（{dist_index.parent.relative_to(ROOT)}——src 无变更）— 跳过前端构建，复用既有 dist")
+        print(f"admin dist up to date ({dist_index.parent.relative_to(ROOT)} — no src changes) — skipping frontend build, reusing existing dist")
         return
-    _check("pnpm", "pnpm 未安装——前端构建需要（或先手动 cd www && pnpm build:admin）")
-    print("admin dist 过期/缺失 — 构建前端（tsc -b && vite build）...")
+    _check("pnpm", "pnpm not installed — required for the frontend build (or run manually: cd www && pnpm build:admin)")
+    print("admin dist stale/missing — building frontend (tsc -b && vite build)...")
     _run_or_exit(["pnpm", "build:admin"], cwd=str(ROOT / "www"))
 
 
 def _stage_web_to_out() -> None:
-    """dist → out/server/web 合并树（frontend-process-split T2——web 唯一消费方=server 部署单元，
-    单树=单 tar=单 deploy；Caddy 静态 root 指此）。"""
+    """Merge dist into the out/server/web tree (frontend-process-split T2 — the only web consumer is the server deployment unit,
+    single tree = single tar = single deploy; the Caddy static root points here)."""
     src = ROOT / "www" / "apps" / "admin" / "dist"
     dst = _out_root() / "server" / "web"
     if not (src / "index.html").exists():
-        print(f"错误: {src} 无产物——pnpm build:admin 未执行或失败", file=sys.stderr)
+        print(f"Error: no artifacts in {src} — pnpm build:admin not run or failed", file=sys.stderr)
         sys.exit(2)
     if dst.exists():
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
     n = sum(1 for x in dst.rglob("*") if x.is_file())
-    print(f"web 交付物组装: out/server/web/（{n} 文件——Caddy 静态 root）")
+    print(f"web deliverables staged: out/server/web/ ({n} files — Caddy static root)")
 
 
 def _cmd_build_web() -> None:
-    """build web — 纯前端快速通道：mtime 增量 pnpm → out/server/web（不碰 cargo）。"""
+    """build web — frontend-only fast lane: incremental pnpm by mtime → out/server/web (does not touch cargo)."""
     _ensure_admin_dist()
     _stage_web_to_out()
 
@@ -138,8 +138,8 @@ def _web_pid_file() -> Path:
 
 
 def _run_web_native() -> None:
-    """run web — 过渡形态：独立 caddy 静态+反代理（deploy/caddy/Caddyfile.native）。
-    Phase 6 后 web 归 msrtc-server 的 oxmgr 进程簇统管（T17），本命令退役。"""
+    """run web — transitional form: standalone caddy serving static files + reverse proxy (deploy/caddy/Caddyfile.native).
+    After Phase 6, web is managed by the msrtc-server oxmgr process cluster (T17); this command retires."""
     pid_file = _web_pid_file()
     if pid_file.exists():
         try:
@@ -147,16 +147,16 @@ def _run_web_native() -> None:
         except ValueError:
             alive = -1
         if alive > 0 and Path(f"/proc/{alive}").exists():
-            print(f"✓ web(caddy) 已在运行 pid={alive} — 跳过启动")
+            print(f"✓ web(caddy) already running pid={alive} — skipping start")
             sys.exit(0)
     if shutil.which("caddy") is None:
-        print("错误: caddy 不在 PATH——安装 GitHub Releases 预编译二进制"
-              "（https://github.com/caddyserver/caddy/releases，sha512 见 checksums.txt），"
-              "禁止自研静态服务器", file=sys.stderr)
+        print("Error: caddy not in PATH — install the GitHub Releases prebuilt binary"
+              " (https://github.com/caddyserver/caddy/releases, sha512 in checksums.txt);"
+              "do not roll your own static server", file=sys.stderr)
         sys.exit(2)
     out_server = _out_root() / "server"
     if not (out_server / "web" / "index.html").exists():
-        print(f"错误: {out_server / 'web'} 无产物——先 mediaservo build web", file=sys.stderr)
+        print(f"Error: no artifacts in {out_server / 'web'} — run mediaservo build web first", file=sys.stderr)
         sys.exit(2)
     cfg = ROOT / "deploy" / "caddy" / "Caddyfile.native"
     log_path = _native_runtime_dirs()[1] / "web-native.log"
@@ -166,8 +166,8 @@ def _run_web_native() -> None:
             cwd=str(out_server), stdout=lf, stderr=lf,
             stdin=subprocess.DEVNULL, start_new_session=True)
     pid_file.write_text(str(proc.pid))
-    print(f"✓ web 运行中 pid={proc.pid} — http://localhost:8080（静态 root={out_server / 'web'}，"
-          f"反代 127.0.0.1:9800；日志 {log_path}）")
+    print(f"✓ web running pid={proc.pid} — http://localhost:8080 (static root={out_server / 'web'}, "
+          f"reverse proxy 127.0.0.1:9800; log {log_path})")
 
 
 def _stop_web_native(allow_inactive: bool = False) -> None:
@@ -186,27 +186,27 @@ def _stop_web_native(allow_inactive: bool = False) -> None:
             time.sleep(0.5)
         if Path(f"/proc/{pid}").exists():
             subprocess.run(["kill", "-9", str(pid)], check=False)
-        print(f"web(caddy) 已停止 pid={pid}")
+        print(f"web(caddy) stopped pid={pid}")
     elif not allow_inactive:
-        print("web 未在运行（pid 文件缺失或进程已亡）", file=sys.stderr)
+        print("web not running (pid file missing or process dead)", file=sys.stderr)
         pid_file.unlink(missing_ok=True)
         sys.exit(1)
     pid_file.unlink(missing_ok=True)
 
 
 def _status_web_native() -> int:
-    """退出码 0=运行中且入口 200 / 1=未运行或不可达 / 2=探测异常。"""
+    """Exit codes: 0 = running and entrypoint returns 200 / 1 = not running or unreachable / 2 = probe error."""
     pid_file = _web_pid_file()
     if not pid_file.exists():
-        print("web: 未运行（无 pid 文件）")
+        print("web: not running (no pid file)")
         return 1
     try:
         pid = int(pid_file.read_text().strip())
     except ValueError:
-        print("web: pid 文件损坏")
+        print("web: pid file corrupted")
         return 2
     if not Path(f"/proc/{pid}").exists():
-        print(f"web: 未运行（pid={pid} 已亡）")
+        print(f"web: not running (pid={pid} dead)")
         return 1
     try:
         code = subprocess.run(
@@ -214,32 +214,32 @@ def _status_web_native() -> int:
              "--max-time", "2", "http://127.0.0.1:8080/"],
             capture_output=True, text=True, timeout=5, check=False).stdout.strip()
     except Exception as e:
-        print(f"web: 探测失败 {e}", file=sys.stderr)
+        print(f"web: probe failed {e}", file=sys.stderr)
         return 2
-    print(f"web: 运行中 pid={pid} 入口 http={code or '—'}")
+    print(f"web: running pid={pid} entrypoint http={code or '—'}")
     return 0 if code == "200" else 1
 
 
 def _build_stage_weaknet(release: bool) -> None:
-    """build server 装配步：weaknet 编译 + stage out/server/bin/{brand}-weaknet（品牌单点化——
-    PIT-191 根治后 build 即落终态名，deploy 改名语义对同值 no-op）。profile 跟随 --release 传导。
-    失败仅 WARN 不阻断 server 主流程（weaknet-server-integration design §D1 [bF4 bF5]——
-    排尾会吃 mediasoup 挂机树的 exit 连坐，本机在册 [BA-15 树挂背书=CI]）。"""
+    """build server assembly step: compile weaknet + stage out/server/bin/{brand}-weaknet (single-point branding —
+    after the PIT-191 root fix, build writes the final name directly, making deploy's rename a no-op on equal values). Profile follows --release propagation.
+    Failure only WARNs and does not block the server main flow (weaknet-server-integration design §D1 [bF4 bF5] —
+    running it last would take the mediasoup hung-build tree's exit guilt-by-association; on this machine recorded as [BA-15 tree-hang endorsed by CI])."""
     cmd = ["cargo", "build"] + (["--release"] if release else []) + ["-p", "mediaservo-weaknet"]
     try:
         code = _run(cmd)
-    except OSError as e:  # cargo 缺失/无法启动（降级路径——server 主路径自有 _check 报错退出）
-        print(f"WARN: weaknet 装配跳过（cargo 不可用: {e}）——不阻断 server 构建", file=sys.stderr)
+    except OSError as e:  # cargo missing/cannot start (degraded path — the server main path has its own _check error exit)
+        print(f"WARN: weaknet staging skipped (cargo unavailable: {e}) — not blocking the server build", file=sys.stderr)
         return
     if code != 0:
-        print(f"WARN: weaknet 编译失败（rc={code}）——不阻断 server 构建；排障后重跑 build server 补装配", file=sys.stderr)
+        print(f"WARN: weaknet compile failed (rc={code}) — not blocking the server build; after troubleshooting, re-run build server to complete staging", file=sys.stderr)
         return
     src = ROOT / "target" / ("release" if release else "debug") / _exe_name("mediaservo-weaknet")
     if not src.exists():
-        print(f"WARN: weaknet 编译成功但产物缺位 {src}——不 stage", file=sys.stderr)
+        print(f"WARN: weaknet compiled but the artifact is missing at {src} — not staging", file=sys.stderr)
         return
-    # PIT-191 根治同构延伸：out/server/bin 是现役集群目录、unit 指品牌名——build 落上游名
-    # = 新编译件永不生效（双名漂移，09-10 weaknet 单名化只修了 deploy 侧）。解析序同 server 装配。
+    # PIT-191 root-fix isomorphic extension: out/server/bin is the live cluster directory and the unit points at the brand name — build writing the upstream name
+    # = freshly compiled binaries never take effect (dual-name drift; the 09-10 weaknet single-name fix only covered the deploy side). Resolution order same as server staging.
     bin_dir = _out_root() / "server" / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     brand = os.environ.get("MEDIASERVO_BRAND", "").strip() or _derive_brand_server(bin_dir)
@@ -251,37 +251,37 @@ def _build_stage_weaknet(release: bool) -> None:
         legacy_w = bin_dir / _exe_name("mediaservo-weaknet")
         if legacy_w.exists():
             legacy_w.unlink()
-            print("  已回收 legacy 兄弟名 mediaservo-weaknet（unit 只认品牌名）", file=sys.stderr)
-    print(f"weaknet 装配 stage: out/server/bin/{wname}")
+            print("  reclaimed legacy sibling name mediaservo-weaknet (the unit only recognizes the brand name)", file=sys.stderr)
+    print(f"weaknet staged: out/server/bin/{wname}")
 
 
 def _cmd_build_server(image: str | None = None, native: bool = False, release: bool = False) -> None:
-    """build server: 默认 native（用户裁决 B——不写模式=原生）| --image runtime|dev=Docker 镜像（--native 兼容别名）。"""
-    # weaknet 装配最前（design §D1 [bF4 bF5 BA-15]）：必须先于 server 的 cargo build——mediasoup
-    # 姿态挂机不连坐它；其自身失败仅 WARN 也不阻断 server（独立 try）。
+    """build server: default native (user ruling B — no mode written = native) | --image runtime|dev = Docker image (--native kept as compat alias)."""
+    # weaknet staging comes first (design §D1 [bF4 bF5 BA-15]): it must precede the server cargo build — mediasoup
+    # hangs in that posture don't guilt-by-association it; and its own failure only WARNs, never blocking server (separate try).
     _build_stage_weaknet(release)
-    if native or image is None:   # 默认 native；--image 显式才走 Docker
-        _ensure_admin_dist()      # mtime 增量前端构建（Docker 路径 Dockerfile 内自理）
-        _stage_web_to_out()       # T3 后 default=不嵌入，dist 以文件树进交付物（out/server/web）
-        _check("cargo", "pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat")
+    if native or image is None:   # default native; Docker only when --image is explicit
+        _ensure_admin_dist()      # incremental frontend build by mtime (the Docker path handles it in the Dockerfile)
+        _stage_web_to_out()       # after T3, default = no embedding; dist enters deliverables as a file tree (out/server/web)
+        _check("cargo", "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat")
         if not os.environ.get("MESON"):
-            print("错误: MESON 环境变量未设置——请经 ./mediaservo.sh 调用（source pixi-shell.sh 注入 activation env）", file=sys.stderr)
+            print("Error: MESON environment variable not set — invoke via ./mediaservo.sh (source pixi-shell.sh injects the activation env)", file=sys.stderr)
             sys.exit(2)
         cmd = ["cargo", "build"] + (["--release"] if release else []) + ["-p", "mediaservo-server"]
-        # tasks.py env 坑（T1 Ruling 延伸，brief 未预见）: pixi activation 注入的 MESON 指向
-        # 不存在的 NINJA → build.rs/tasks.py 跳过 pip 但 NINJA 缺失会挂；pop 掉与 T1 unset 语义一致。
-        # MESON 断言仅作为「经 mediaservo.sh 激活」代理（pixi activation 注入）；pop 后 cargo
-        # 子进程无 MESON/MESON_ARGS，与 T1 unset 语义一致（tasks.py 回落官方 pip 自装 meson/ninja）。
+        # tasks.py env pitfall (T1 Ruling extension, not foreseen in the brief): the MESON injected by pixi activation points to
+        # a nonexistent NINJA → build.rs/tasks.py skip pip but hang when NINJA is missing; popping it matches T1 unset semantics.
+        # The MESON assertion only proxies "activated via mediaservo.sh" (injected by pixi activation); after pop, cargo
+        # subprocesses see no MESON/MESON_ARGS, consistent with T1 unset semantics (tasks.py falls back to official pip self-installing meson/ninja).
         env = {**os.environ}
         env.pop("MESON_ARGS", None)
         env.pop("MESON", None)
         _run_or_exit(cmd, env=env)
-        # 组装到 out/server/bin/（与 build host/bindings 对称——out = 统一发布根）
+        # stage into out/server/bin/ (symmetric with build host/bindings — out = unified release root)
         server_bin = ROOT / "target" / ("release" if release else "debug") / "mediaservo-server"
         if server_bin.exists():
-            # PIT-191 根治：装配品牌名单点化（解析序与 deploy 同源：env MEDIASERVO_BRAND →
-            # 树内 *-server 派生 → 上游名）。out/server/bin 是**现役集群目录**——build 写 legacy
-            # 名而 unit 指品牌名 = 集群静默跑旧二进制（PIT-191 事故面；与 09-10 weaknet 单名化同源）。
+            # PIT-191 root fix: single-point brand in staging (resolution order shared with deploy: env MEDIASERVO_BRAND →
+            # in-tree *-server derivation → upstream name). out/server/bin is the **live cluster directory** — build writing the legacy
+            # name while the unit points at the brand name = the cluster silently runs the old binary (PIT-191 incident surface; same root as the 09-10 weaknet single-name change).
             bin_dir = _out_root() / "server" / "bin"
             bin_dir.mkdir(parents=True, exist_ok=True)
             brand = os.environ.get("MEDIASERVO_BRAND", "").strip() or _derive_brand_server(bin_dir)
@@ -292,11 +292,11 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
             legacy = bin_dir / _exe_name("mediaservo-server")
             if brand and legacy.exists():
                 legacy.unlink()
-                print("  已回收 legacy 兄弟名 mediaservo-server（bin 单名化——unit 只认品牌名）", file=sys.stderr)
-            print(f"server 交付布局组装: out/server/bin/{base}（{server_bin.stat().st_size // 1024} KB）")
-        # caddy 随包（2026-09-29：探测只认 PATH → 裸 shell start 静默 --no-web 的根治）——
-        # 找得到（PATH/仓内 pixi 树）就拷进 bin/（部署自包含：探测链第三条=bin 同目录）；
-        # 找不到 WARN 不阻断（老形态：PATH 提供）。
+                print("  reclaimed legacy sibling name mediaservo-server (single-name bin — the unit only recognizes the brand name)", file=sys.stderr)
+            print(f"server delivery layout staged: out/server/bin/{base} ({server_bin.stat().st_size // 1024} KB)")
+        # ship caddy along (2026-09-29: detection only honored PATH → root fix for bare-shell start silently going --no-web) —
+        # if found (PATH / in-repo pixi tree), copy it into bin/ (self-contained deployment: third probe-chain entry = bin's own directory);
+        # if not found, WARN without blocking (old form: provided by PATH).
         caddy_src = shutil.which("caddy") or next(
             (c for c in (ROOT / ".pixi" / "envs" / "default" / "bin" / "caddy",
                          ROOT.parent / ".pixi" / "envs" / "default" / "bin" / "caddy")
@@ -305,35 +305,35 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
             caddy_dst = _out_root() / "server" / "bin" / "caddy"
             if not caddy_dst.exists() or Path(caddy_src).resolve() != caddy_dst.resolve():
                 shutil.copy2(caddy_src, caddy_dst)
-                print(f"caddy 随包: out/server/bin/caddy（自 {caddy_src}）")
+                print(f"caddy shipped: out/server/bin/caddy (from {caddy_src})")
         else:
-            print("WARN: caddy 未找到（PATH/仓内 pixi 树）——out/server 不含 caddy，"
-                  "start 时须 PATH 提供否则 web 静默降级", file=sys.stderr)
-        # 组装默认配置（server.yaml——从 config/server.docker.yaml 派生，accounts/devices 相对路径）
-        # PIT-158/160: 已存在则跳过（运行时注册表 devices/accounts 可能被 admin API 热写、
-        # server.yaml 可能被运维改过）——build 不得把模板覆盖回运行时数据；需要新模板先删旧文件。
+            print("WARN: caddy not found (PATH / in-repo pixi tree) — out/server contains no caddy; "
+                  "at start it must come from PATH, otherwise web silently degrades", file=sys.stderr)
+        # stage the default config (server.yaml — derived from config/server.docker.yaml, accounts/devices relative paths)
+        # PIT-158/160: skip if already present (runtime registries devices/accounts may be hot-written by the admin API,
+        # and server.yaml may have been changed by ops) — build must not overwrite runtime data back with the template; to get a fresh template, delete the old file first.
         etc_dir = _out_root() / "server" / "etc"
         etc_dir.mkdir(parents=True, exist_ok=True)
         src_cfg = ROOT / "config" / "server.docker.yaml"
         if src_cfg.exists() and not (etc_dir / "server.yaml").exists():
             cfg = src_cfg.read_text()
-            # accounts/devices 改为相对于 etc 目录（打包后 bin/../etc/accounts.yaml 等）
+            # point accounts/devices relative to the etc dir (after packaging: bin/../etc/accounts.yaml etc.)
             cfg = cfg.replace('/opt/mediaservo/etc/accounts.yaml', 'accounts.yaml')
             cfg = cfg.replace('/opt/mediaservo/etc/devices.yaml', 'devices.yaml')
             (etc_dir / "server.yaml").write_text(cfg)
         if src_cfg.exists():
-            # 拷贝设备/账号文件（dev 模板——仅首次缺失时补）
+            # copy device/account files (dev templates — filled only when missing on first run)
             for f in ("accounts.yaml", "devices.yaml"):
                 src = ROOT / "config" / f
                 dst = etc_dir / f
                 if src.exists() and not dst.exists():
                     shutil.copy2(src, dst)
-            print(f"server 默认配置组装: {etc_dir}/server.yaml")
+            print(f"server default config staged: {etc_dir}/server.yaml")
         return
-    _check("docker", "安装 docker 并启动 daemon")
+    _check("docker", "install docker and start the daemon")
     if image:
         if image == "runtime":
-            # 生产交付镜像（--target runtime——瘦身/自举 entrypoint）
+            # production delivery image (--target runtime — slimmed / self-bootstrapping entrypoint)
             _run_or_exit(["docker", "build", "--target", "runtime", "-t", "mediaservo-server:latest", "."])
         else:
             _run_or_exit(COMPOSE_BASE + ["build", "server"])
@@ -342,37 +342,37 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
 
 
 def _cmd_build_client() -> None:
-    _check("cargo", "pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat")
+    _check("cargo", "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat")
     _run_or_exit(["cargo", "build", "-p", "mediaservo-client"])
 
 
 def _cmd_build(target: str) -> None:
-    """build <target> — all|host|server|client|bindings（默认 all）。"""
+    """build <target> — all|host|server|client|bindings (default all)."""
     if target in ("all", "host"):
         _cmd_build_host()
     if target in ("all", "server"):
         _cmd_build_server()
     if target in ("all", "client"):
         _cmd_build_client()
-    if target == "web":   # 纯前端快速通道（all 不含——build server 已带 web 装配）
+    if target == "web":   # frontend-only fast lane (not in all — build server already stages web)
         _cmd_build_web()
     if target == "bindings":
         _cmd_build_bindings()
 
 
 def _workspace_version() -> str:
-    """workspace 版本（[workspace.package] version，如 0.1.0）。py3.10 无 tomllib，轻量解析。"""
+    """Workspace version ([workspace.package] version, e.g. 0.1.0). py3.10 has no tomllib — lightweight parsing."""
     text = (ROOT / "Cargo.toml").read_text()
     seg = text.split("[workspace.package]", 1)[1].split("[", 1)[0]
     for line in seg.splitlines():
         line = line.strip()
         if line.startswith("version") and "=" in line:
             return line.split("=", 1)[1].strip().strip('"')
-    raise SystemExit("错误: workspace version 未找到")
+    raise SystemExit("Error: workspace version not found")
 
 
 def _symlink_force(target: str, link: Path) -> None:
-    """幂等符号链接（存在则先删）。"""
+    """Idempotent symlink (delete first if present)."""
     try:
         link.unlink()
     except FileNotFoundError:
@@ -381,13 +381,13 @@ def _symlink_force(target: str, link: Path) -> None:
 
 
 def _cmd_build_bindings(release: bool = False) -> None:
-    """构建三 SDK cdylib + dev .so.<MAJOR> symlink（D241: DT_NEEDED 解析）。
+    """Build the three SDK cdylibs + dev .so.<MAJOR> symlinks (D241: DT_NEEDED resolution).
 
-    staging 纪律（2026-09-29）：bindings/node、bindings/python 的**构建产物**
-    （.node/.whl 中间物/_libs）一律落 target/bindings-staging/（gitignore 区），
-    源码树回归纯源码——此前就地写源码目录（观感差+git 噪音+误提交风险）。
+    Staging discipline (2026-09-29): the **build artifacts** of bindings/node and bindings/python
+    (.node/.whl intermediates/_libs) all land in target/bindings-staging/ (gitignored area);
+    the source tree returns to pure source — previously artifacts were written in-place into source dirs (bad hygiene + git noise + accidental-commit risk).
     """
-    _check("cargo", "pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat")
+    _check("cargo", "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat")
     staging = ROOT / "target" / "bindings-staging"
     staging.mkdir(parents=True, exist_ok=True)
     cmd = ["cargo", "build"]
@@ -403,15 +403,15 @@ def _cmd_build_bindings(release: bool = False) -> None:
             f"libmediaservo_{sdk}.so",
             out_dir / f"libmediaservo_{sdk}.so.{major}",
         )
-    # node 绑定（napi-rs .node；FFmpeg 动态库链接经 build.rs 补齐）
+    # node bindings (napi-rs .node; FFmpeg dynamic-lib linking completed via build.rs)
     _run_or_exit(["cargo", "build"] + (["--release"] if release else []) + ["-p", "mediaservo-node"])
     node_so = out_dir / "libmediaservo_node.so"
     node_node = staging / "mediaservo.node"
     if node_so.exists():
         shutil.copy2(node_so, node_node)
-    # 组装交付布局 out/bindings（完整 SDK 包镜像——Momus HIGH3/Task 2.5 补齐）:
-    # D241 三件套 version-full（.so.<M.m.p> 实体 + .so.<major> + .so 链接）+ D248 头（C/cxx）
-    # + pkgconfig .pc + cmake config + python fat wheel/site-packages + node 包
+    # stage the delivery layout out/bindings (full SDK package mirror — completed per Momus HIGH3/Task 2.5):
+    # D241 version-full triple (.so.<M.m.p> real file + .so.<major> + .so link) + D248 headers (C/cxx)
+    # + pkgconfig .pc + cmake config + python fat wheel/site-packages + node package
     ver = _crate_version("mediaservo-field")
     major, minor, patch = ver.split(".")
     bind_dst = _out_root() / "bindings"
@@ -420,19 +420,19 @@ def _cmd_build_bindings(release: bool = False) -> None:
     cmake_dst = lib_dst / "cmake" / "mediaservo"; cmake_dst.mkdir(parents=True, exist_ok=True)
     inc_dst = bind_dst / "include" / "mediaservo"; inc_dst.mkdir(parents=True, exist_ok=True)
 
-    # lib 三件套（D241）: .so.<M.m.p> 实体（SONAME 文件名——DT_NEEDED 自解析）+ 两级符号链接
+    # lib triple (D241): .so.<M.m.p> real file (SONAME filename — DT_NEEDED self-resolution) + two-level symlinks
     for sdk in ALL_SDKS:
         so_src = out_dir / f"libmediaservo_{sdk}.so"
         if not so_src.exists():
-            print(f"错误: {so_src} 不存在 — cargo 未产出 {sdk} SDK", file=sys.stderr)
+            print(f"Error: {so_src} does not exist — cargo produced no {sdk} SDK", file=sys.stderr)
             sys.exit(1)
         full = lib_dst / f"libmediaservo_{sdk}.so.{major}.{minor}.{patch}"
         shutil.copy2(so_src, full)
-        _strip_so(full)  # N7: debug 符号不进交付树（wheel/tar 体积主因实测翻案）
+        _strip_so(full)  # N7: debug symbols don't enter the delivery tree (wheel/tar size root cause, revised by measurement)
         _symlink_force(full.name, lib_dst / f"libmediaservo_{sdk}.so.{major}")
         _symlink_force(f"libmediaservo_{sdk}.so.{major}", lib_dst / f"libmediaservo_{sdk}.so")
 
-    # include/mediaservo（D248）: C common.h + per-sdk .h；cxx per-sdk .hpp + 共享 detail/3rdparty
+    # include/mediaservo (D248): C common.h + per-sdk .h; cxx per-sdk .hpp + shared detail/3rdparty
     for h in (ROOT / "bindings" / "c" / "include" / "mediaservo").glob("*.h"):
         shutil.copy2(h, inc_dst)
     for sdk in ALL_SDKS:
@@ -447,12 +447,12 @@ def _cmd_build_bindings(release: bool = False) -> None:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(f, dst)
 
-    # pkg-config .pc（${pcfiledir} 保持可重定位——不绑定绝对 prefix）
+    # pkg-config .pc (${pcfiledir} keeps it relocatable — not bound to an absolute prefix)
     for sdk in ALL_SDKS:
         tpl = ROOT / f"bindings/c/mediaservo-{sdk}-c/mediaservo-{sdk}.pc.in"
         (pc_dst / f"mediaservo-{sdk}.pc").write_text(tpl.read_text().replace("@VERSION@", ver))
 
-    # cmake package config（find_package(mediaservo COMPONENTS ...)——D248 输出纪律）
+    # cmake package config (find_package(mediaservo COMPONENTS ...) — D248 output discipline)
     sdk_list = " ".join(ALL_SDKS)
     for name, tpl_name in (("mediaservoConfig.cmake", "mediaservoConfig.cmake.in"),
                            ("mediaservoConfigVersion.cmake", "mediaservoConfigVersion.cmake.in")):
@@ -460,11 +460,11 @@ def _cmd_build_bindings(release: bool = False) -> None:
             .replace("@VERSION@", ver).replace("@MAJOR@", major).replace("@SDK_LIST@", sdk_list)
         (cmake_dst / name).write_text(content)
 
-    # python: fat wheel（_libs 内 .so.<major> 实体——DT_NEEDED 自解析）+ pip --prefix 组装 site-packages
-    # python wheel 构建树 = staging 镜像（拷源码文件 + _libs 全在 staging；
-    # 源码树 bindings/python 零写入——build/ 缓存与 _libs 均不再进源码目录）
-    # 源映射：bindings/python/mediaservo/ = pip 构建根（pyproject 同层）——
-    # staging 镜像整层（剥产物/缓存），py_src 即构建根。
+    # python: fat wheel (.so.<major> real files inside _libs — DT_NEEDED self-resolution) + pip --prefix assembly of site-packages
+    # python wheel build tree = staging mirror (source files copied + _libs all live in staging;
+    # zero writes into the source tree bindings/python — neither the build/ cache nor _libs enter source dirs anymore)
+    # source mapping: bindings/python/mediaservo/ = pip build root (same level as pyproject) —
+    # the whole layer is a staging mirror (artifacts/cache stripped); py_src is the build root.
     py_src = staging / "python-pkg"
     shutil.rmtree(py_src, ignore_errors=True)
     shutil.copytree(ROOT / "bindings" / "python" / "mediaservo", py_src,
@@ -474,29 +474,29 @@ def _cmd_build_bindings(release: bool = False) -> None:
     libs_src = py_pkg / "_libs"
     libs_src.mkdir(exist_ok=True)
     try:
-        for sdk in ("field", "link", "deck"):  # py 域=设备半区三件（client 属 sdk-client 包，V1b 防冗余入 wheel）
+        for sdk in ("field", "link", "deck"):  # py domain = the three device-half items (client belongs to the sdk-client package; V1b prevents redundancy in the wheel)
             so_major = libs_src / f"libmediaservo_{sdk}.so.{major}"
             shutil.copy2(out_dir / f"libmediaservo_{sdk}.so", so_major)
-            _strip_so(so_major)  # 同族：wheel 内嵌 _libs 烘完不可改，strip 必须前置
+            _strip_so(so_major)  # same family: wheel-embedded _libs are immutable once baked in, so strip must be front-loaded
             _symlink_force(f"libmediaservo_{sdk}.so.{major}", libs_src / f"libmediaservo_{sdk}.so")
         wheel_dir = bind_dst / "wheel"; wheel_dir.mkdir(exist_ok=True)
-        # 陈旧 whl 清扫（09-17 e2e-delivery 首跑抓出：glob 无序 + 跨 run 残留 →
-        # next() 可咬旧文件 = rename 链自蚀源 pip ENOENT）。
+        # stale whl sweep (caught on the first 09-17 e2e-delivery run: unordered glob + cross-run residue →
+        # next() may grab an old file = the rename chain eats its own source, pip ENOENT).
         for _stale in wheel_dir.glob("*.whl"):
             _stale.unlink()
-        # setuptools build/ 缓存同族清扫（09-17 V1b；build/ 现在也在 staging——源码树零污染）
+        # setuptools build/ cache same-family sweep (09-17 V1b; build/ now also lives in staging — zero source-tree pollution)
         shutil.rmtree(py_src / "build", ignore_errors=True)
         r = subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-deps",
                             "--no-build-isolation", "-w", str(wheel_dir), "."],
                            cwd=str(py_src), capture_output=True, text=True)
         if r.returncode != 0:
-            print(f"错误: wheel 构建失败 — {r.stderr[-500:]}", file=sys.stderr)
+            print(f"Error: wheel build failed — {r.stderr[-500:]}", file=sys.stderr)
             sys.exit(1)
-        # 强制平台 tag（wheel 含 Linux .so，拒绝 any-tag 误装跨平台）: 改 WHEEL 内 Tag + 重命名。
-        # 版本保持与 pyproject（=内 dist-info）一致——不强制 workspace ver（原 install 的 {ver} 重命名
-        # 在 workspace ver ≠ pyproject 0.1.0 时 dist-info 版本不一致 → pip 拒绝安装——本实现更小修复面）
+        # force the platform tag (the wheel contains Linux .so; refuse any-tag misinstall across platforms): rewrite the Tag inside WHEEL + rename.
+        # keep the version consistent with pyproject (= the embedded dist-info) — do not force workspace ver (the old install's {ver} rename
+        # produced a dist-info version mismatch when workspace ver ≠ pyproject 0.1.0 → pip refused install — this implementation has a smaller fix surface)
         import zipfile
-        wheel = next(wheel_dir.glob("mediaservo-*-py3-none-any.whl"))  # 仅 any 源形
+        wheel = next(wheel_dir.glob("mediaservo-*-py3-none-any.whl"))  # any-source form only
         tag_new = f"py3-none-{_platform_tag()}"
         with zipfile.ZipFile(wheel, "r") as z:
             items = z.infolist()
@@ -509,48 +509,48 @@ def _cmd_build_bindings(release: bool = False) -> None:
                     content = content.replace(b"Tag: py3-none-any", f"Tag: {tag_new}".encode())
                 z.writestr(i, content)
         wheel.unlink()
-        # pip --prefix 不删旧 data_files（V1b 抓出：域收缩后 site-packages/_libs 残留
-        # 上一轮 client.so 尸体——wheel 新形正确但装树被旧件混入）。装前摘旧包树。
+        # pip --prefix does not delete old data_files (caught in V1b: after the domain shrink, site-packages/_libs retains
+        # the previous round's client.so corpse — the new wheel is correct but old files contaminate the install tree). Remove the old package tree before installing.
         for _old_sp in bind_dst.glob("lib/python3.*/site-packages/mediaservo"):
             shutil.rmtree(_old_sp, ignore_errors=True)
         r2 = subprocess.run([sys.executable, "-m", "pip", "install", "--prefix",
                              str(bind_dst), "--no-deps", str(fixed)],
                             capture_output=True, text=True)
         if r2.returncode != 0:
-            print(f"错误: pip install 失败 — {r2.stderr[-500:]}", file=sys.stderr)
+            print(f"Error: pip install failed — {r2.stderr[-500:]}", file=sys.stderr)
             sys.exit(1)
     finally:
-        shutil.rmtree(libs_src, ignore_errors=True)  # 清理临时 _libs（gitignore 兜底）
+        shutil.rmtree(libs_src, ignore_errors=True)  # clean up temp _libs (gitignore as backstop)
 
-    # node 包: node/mediaservo/（package.json + .node + lib/index.mjs）——D248 布局
+    # node package: node/mediaservo/ (package.json + .node + lib/index.mjs) — D248 layout
     node_src = ROOT / "bindings" / "node"
     if node_node.exists():
         node_dst = bind_dst / "node" / "mediaservo"
         node_dst.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(node_node, node_dst / "mediaservo.node")           # 产物=staging
-        shutil.copy2(node_src / "package.json", node_dst)               # 源码=源码树
+        shutil.copy2(node_node, node_dst / "mediaservo.node")           # artifact = staging
+        shutil.copy2(node_src / "package.json", node_dst)               # source = source tree
         (node_dst / "lib").mkdir(parents=True, exist_ok=True)
         shutil.copy2(node_src / "lib" / "index.mjs", node_dst / "lib")
-    # docs: SDK 消费侧帮助（sdk-cxx 手册——out/bindings 树/发布包消费者直接可读，
-    # 同目录互链有效；每轮先摘后拷=防已删册残留，09-17 wheel 清扫同族纪律）
+    # docs: SDK consumer-side help (sdk-cxx manuals — directly readable from the out/bindings tree / release packages,
+    # inter-links within the same dir work; remove-then-copy each round = guards against deleted-volume residue, same discipline family as the 09-17 wheel sweep)
     docs_dst = bind_dst / "docs" / "sdk-cxx"
     shutil.rmtree(docs_dst, ignore_errors=True)
     docs_dst.mkdir(parents=True)
     for m in (ROOT / "docs" / "reference" / "sdk-cxx").glob("*.md"):
         shutil.copy2(m, docs_dst)
     n_docs = len(list(docs_dst.glob("*.md")))
-    print("bindings 构建完成: libmediaservo_{%s}.so 三件套 version-full + node + python + .pc + cmake (%s)"
+    print("bindings build complete: libmediaservo_{%s}.so version-full triple + node + python + .pc + cmake (%s)"
           % (",".join(ALL_SDKS), "release" if release else "debug"))
     n_lib = len([p for p in lib_dst.glob("libmediaservo_*") if p.is_file() or p.is_symlink()])
-    print(f"bindings 交付布局组装: out/bindings/（lib {n_lib} 件 + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx {n_docs} 册）")
+    print(f"bindings delivery layout staged: out/bindings/ (lib {n_lib} files + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx {n_docs} volumes)")
 
 
-# client 入列（V2 补全刀 09-17）：C 面 15 符号+cxx RAII 头在仓、pc.in 在位——此前 ALL_SDKS
-# 缺 client 导致交付面=零（find_package/pkg-config/include 三面皆无）。全下游环节皆本常量驱动+模板泛化。
+# client added to the roster (V2 completion knife 09-17): C surface 15 symbols + cxx RAII headers in repo, pc.in in place — previously ALL_SDKS
+# lacking client made the delivery surface = zero (find_package/pkg-config/include all absent). All downstream steps are driven by this constant + template generalization.
 ALL_SDKS = ("field", "link", "deck", "client")
 
 
-# D-H13: host 包 8 进程二进制（host CLI + 7 守护进程；host-legacy 旧单进程不入包）
+# D-H13: host package = 8 process binaries (host CLI + 7 daemons; the host-legacy old single process is not packaged)
 HOST_BINS = (
     "mediaservo-host", "host-agent", "host-capturer", "host-streamer",
     "host-recorder", "host-controller", "host-emergency", "host-audio",
@@ -558,34 +558,34 @@ HOST_BINS = (
 
 
 def _resolve_oxmgr_or_die(role: str) -> Path:
-    """oxmgr 硬依赖探源（config-unification 前置修复，D-H13 补强）：PATH → ~/.cache/oxmgr
-    回收 → 都缺则 deploy 失败。旧语义"非致命提示"是部署陷阱——bin/ 缺 oxmgr 后
-    start/stop 全废（'No such file or directory'），错误离根因隔一个 deploy 周期。"""
+    """oxmgr hard-dependency source hunt (config-unification pre-fix, D-H13 reinforcement): PATH → ~/.cache/oxmgr
+    cache reclaim → deploy fails when both are missing. The old "non-fatal hint" semantics was a deployment trap — with oxmgr missing from bin/,
+    start/stop are all dead ('No such file or directory'), one deploy cycle away from the root cause."""
     found = shutil.which("oxmgr")
     if found:
         return Path(found)
-    # 本机缓存回收（同版本优先；OxMgr 官方下载器布局 oxmgr-v<ver>-<target>/oxmgr）
+    # reclaim the local cache (same version preferred; OxMgr official downloader layout oxmgr-v<ver>-<target>/oxmgr)
     cache = sorted(Path.home().glob(".cache/oxmgr/oxmgr-v*/oxmgr"), reverse=True)
     if cache:
-        print(f"  oxmgr: PATH 未找到，回收本机缓存 {cache[0]}")
+        print(f"  oxmgr: not found in PATH, reclaiming local cache {cache[0]}")
         return cache[0]
-    print(f"错误: PATH 与 ~/.cache/oxmgr 均未找到 oxmgr — deploy {role} 必须打包进程管理器"
-          "（运行时 start/stop 硬依赖）。安装: 下载 GitHub Releases 预编译 Rust 二进制"
-          "（含 sha256/asc 校验，https://github.com/Vladimir-Urik/OxMgr/releases），"
-          "或构建 oxmgr-src 后放 ~/.local/bin，再重跑 deploy", file=sys.stderr)
+    print(f"Error: oxmgr found in neither PATH nor ~/.cache/oxmgr — deploy {role} must package the process manager"
+          " (a hard runtime dependency of start/stop). Install: download the prebuilt Rust binary from GitHub Releases"
+          " (with sha256/asc verification, https://github.com/Vladimir-Urik/OxMgr/releases),"
+          "or build oxmgr-src and place it in ~/.local/bin, then re-run deploy", file=sys.stderr)
     sys.exit(2)
 
 
 def _exe_name(name: str) -> str:
-    """Windows best-effort: 二进制名带 .exe（其余平台原名）。"""
+    """Windows best-effort: binary names get .exe (other platforms keep the bare name)."""
     return name + (".exe" if sys.platform == "win32" else "")
 
 
 
 def _pids_using(path: Path) -> list[int]:
-    """占用 path 的进程 pid：① fd 打开 ② /proc/pid/exe==realpath（exec 内存映射占用）。
-    精确匹配——禁 basename/cmdline 模糊匹配（同签名兄弟进程会被连坐，多实例机器上即生产事故
-    ——PIT-166；2026-08-31 deploy drill 实证旧 basename 匹配可波及他实例 daemon）。"""
+    """Pids of processes occupying path: (1) fd open, (2) /proc/pid/exe==realpath (exec memory-mapped occupancy).
+    Exact match — no basename/cmdline fuzzy matching (same-signature sibling processes get guilt-by-associated; on multi-instance machines that is a production incident
+    — PIT-166; the 2026-08-31 deploy drill proved the old basename matching could hit other instances' daemons)."""
     target = os.path.realpath(path)
     pids: list[int] = []
     try:
@@ -594,7 +594,7 @@ def _pids_using(path: Path) -> list[int]:
                 continue
             pid = int(p)
             try:
-                # ① fd 扫描（打开文件占用）
+                # (1) fd scan (open file descriptors)
                 for fd in os.listdir(f"/proc/{p}/fd"):
                     try:
                         if os.path.realpath(f"/proc/{p}/fd/{fd}") == target:
@@ -604,7 +604,7 @@ def _pids_using(path: Path) -> list[int]:
                         continue
                 if pid in pids:
                     continue
-                # ② exe 符号链接（exec 占用——内核记录的就是这个 inode，无假阳性）
+                # (2) exe symlink (exec occupancy — the kernel records exactly this inode, no false positives)
                 if os.path.realpath(f"/proc/{p}/exe") == target:
                     pids.append(pid)
             except OSError:
@@ -614,18 +614,18 @@ def _pids_using(path: Path) -> list[int]:
     return pids
 
 def _kill_using(path: Path) -> None:
-    """kill 占用 path 的进程（_pids_using 精确判据——只按 pid 杀，SIGTERM 优雅退）。"""
+    """Kill processes occupying path (_pids_using exact predicate — kill by pid only, graceful SIGTERM exit)."""
     for pid in _pids_using(path):
         try:
-            os.kill(pid, 15)  # SIGTERM（daemon 优雅退出）
-            print(f"  已终止占用进程 {pid}")
+            os.kill(pid, 15)  # SIGTERM (graceful daemon exit)
+            print(f"  killed occupying process {pid}")
         except OSError:
             pass
     time.sleep(1)
 
 
 def _copy_with_kill(src, dst: Path) -> None:
-    """复制带 busy 重试: Text file busy（运行中进程占用）→ 杀占用者 → 重试（最多 3 次）。"""
+    """Copy with busy retry: Text file busy (occupied by a running process) → kill the occupier → retry (max 3 attempts)."""
     for attempt in range(3):
         try:
             shutil.copy2(src, dst)
@@ -633,37 +633,37 @@ def _copy_with_kill(src, dst: Path) -> None:
         except OSError as e:
             if e.errno != 26 or attempt == 2:  # 26 = Text file busy
                 raise
-            print(f"  {dst.name} 被占用（Text file busy）— 终止占用进程后重试 ({attempt + 1}/3)")
+            print(f"  {dst.name} occupied (Text file busy) — killing the occupier then retrying ({attempt + 1}/3)")
             _kill_using(dst)
-    raise OSError(f"复制 {dst} 失败（多次重试仍 busy）")
+    raise OSError(f"failed to copy {dst} (still busy after multiple retries)")
 
 def strip_package_binaries(staging: Path) -> None:
-    """打包前 strip 二进制符号（debug 构建 135-155MB/个——gzip 1.2GB 压缩超时根因，PIT-119）。
-    保留可执行（发布物 = strip 后体积 -90%+）；strip 失败仅警告不阻断（不可缺失路径场景）。"""
+    """Strip binary symbols before packaging (debug builds are 135-155MB each — the root cause of gzip 1.2GB compression timeouts, PIT-119).
+    Keeps executability (release artifacts = size -90%+ after strip); strip failure only warns, never blocks (paths that cannot be missing)."""
     if not shutil.which("strip"):
         return
     for f in sorted((staging / "bin").iterdir()) if (staging / "bin").is_dir() else []:
         if f.is_file() and os.access(f, os.X_OK):
             code = subprocess.run(["strip", "--strip-unneeded", str(f)], capture_output=True, check=False).returncode
             if code != 0:
-                print(f"  warning: strip {f.name} 失败（跳过——包体积未优化）")
+                print(f"  warning: strip {f.name} failed (skipped — package size not optimized)")
 
 
 def _strip_so(path: Path) -> None:
-    """交付树 .so 实体 strip --strip-unneeded（N7 09-18 实测：debug cdylib 是 fat wheel
-    528MB 的全部主因，非 FFmpeg——未压 27M→~1M 级）。动态符号(.dynsym/导出 ABI)不动，
-    check-abi-drift 与消费者 ldd 无感知；仅删调试段。target/ 开发树不碰（gdb 要栈）。"""
+    """strip --strip-unneeded on delivery-tree .so real files (N7 09-18 measurement: the debug cdylib was the entire
+    cause of the fat wheel's 528MB — not FFmpeg — uncompressed 27M→~1M scale). Dynamic symbols (.dynsym / exported ABI) untouched,
+    check-abi-drift and consumer ldd are unaware; only debug sections are removed. The target/ dev tree is untouched (gdb needs stacks)."""
     if not shutil.which("strip"):
         return
     if subprocess.run(["strip", "--strip-unneeded", str(path)],
                       capture_output=True, check=False).returncode != 0:
-        print(f"  warning: strip {path.name} 失败（跳过——交付体积未优化）")
+        print(f"  warning: strip {path.name} failed (skipped — delivery size not optimized)")
 
 
 def _derive_brand(bin_dir: Path) -> str:
-    """从已装/组装 bin 目录推导品牌（三连停/init 名/快捷名全用它——禁止参数与硬编码）。
-    规则: 存在 <brand>-agent（任意品牌化角色）→ 该前缀；否则空（官方名 host-*）。
-    已知限制: 多品牌共存时 glob 顺序文件系统相关（取首个）——当前部署单品牌；若多品牌需改排序/最长前缀策略。"""
+    """Derive the brand from an installed/staged bin directory (used by triple-stop/init name/shortcut names — no parameters, no hardcoding).
+    Rule: if a <brand>-agent (any branded role) exists → that prefix; otherwise empty (official name host-*).
+    Known limit: with multiple brands coexisting, glob order is filesystem-dependent (first match) — current deployments are single-brand; multi-brand needs a sorted/longest-prefix strategy."""
     for p in bin_dir.glob("*-agent"):
         name = p.name
         if name.startswith("host-"):
@@ -672,8 +672,8 @@ def _derive_brand(bin_dir: Path) -> str:
     return ""
 
 def _derive_brand_server(bin_dir: Path) -> str:
-    """server 树品牌派生（branding-completion BLOCKER-2）：glob bin/*-server 排除上游名。
-    禁复用 _derive_brand（只认 *-agent，server 树恒返 ""）。多品牌共存取首个（同 host 已知限制）。"""
+    """server tree brand derivation (branding-completion BLOCKER-2): glob bin/*-server excluding the upstream name.
+    Do not reuse _derive_brand (it only recognizes *-agent; the server tree would always return ""). Multiple brands coexisting: take the first (same known limit as host)."""
     for f in sorted(bin_dir.glob("*-server")):
         if f.name == _exe_name("mediaservo-server"):
             continue
@@ -681,32 +681,32 @@ def _derive_brand_server(bin_dir: Path) -> str:
     return ""
 
 def _server_bin_names(brand: str) -> tuple[str, str]:
-    """(deployed bin name, root shortcut name)——brand 空 → 上游名（永不渲染 "-server" 残名）。"""
+    """(deployed bin name, root shortcut name) — empty brand → upstream name (never render a "-server" leftover name)."""
     base = f"{brand}-server" if brand else "mediaservo-server"
     return _exe_name(base), base
 
 def _weaknet_bin_name(brand: str) -> str:
-    """weaknet 物理 bin 名——brand 空 → 上游 mediaservo-weaknet，永不出 "-weaknet" 残名
-    （weaknet-server-integration design §D1 [BA-2①]，_server_bin_names 同构契约）。
-    build 只 stage 上游名，品牌化单点在 deploy（D266/D269 同构）。"""
+    """weaknet physical bin name — empty brand → upstream mediaservo-weaknet; never emit a "-weaknet" leftover name
+    (weaknet-server-integration design §D1 [BA-2(i)], isomorphic contract with _server_bin_names).
+    build only stages the upstream name; branding is single-pointed at deploy (D266/D269 isomorphic)."""
     return _exe_name(f"{brand}-weaknet" if brand else "mediaservo-weaknet")
 
-WEAKNET_OXFILE_APP = "weaknet-serve"  # 品牌无关字面量——与 Rust templates::WEAKNET_APP 同值 [mn10]
+WEAKNET_OXFILE_APP = "weaknet-serve"  # brand-independent literal — same value as Rust templates::WEAKNET_APP [mn10]
 
 
 def _drop_stale_server_oxfile(prefix_p: Path, bin_name: str, wnet_bin: str) -> tuple[bool, dict[str, dict[str, str]]]:
-    """BLOCKER-3 + weaknet-server-integration D1 stale 判据（**Python 侧单点**——Rust init
-    遇 oxfile 存在恒跳过，Rust 侧写检测永不被调用 [bF3]）：
-      oxfile 迁移 = server 条目基名漂移（D269 原语义，不连坐 weaknet 在场）
-        ∨ **bin 在场 ∧（缺 weaknet-serve 条目 ∨ 其 command 基名漂移）**（mn2 后形；bin 缺位
-        = 条件渲染无条目是正确形态，零 churn）。→ .bak 令随后 init 重渲染。
-      Caddyfile 对称迁移 [wF2] = bin 在场 ∧ etc/Caddyfile 已存在 ∧ 反代段缺位（锚点判据见
-        下方 render 段注释——D3.1 定稿形无 '@weaknet' 字面量）→ .bak
-        重渲染。返回值合并进同一 migrated 旗标接既有 --reapply 路径 [lck-F4]——防
-        「oxfile 已迁 ∧ Caddyfile 未迁」半迁移假成功（unit 起了、/weaknet 404）。
-    各 [[apps]] 的 [apps.env] 键值照旧捕获回吸收（PIT-171 教训）。回吸收只补缺不覆盖 →
-    token-file 路径/statedir 模板烘值天然优先于旧手工值 [lck-F14/mn6]，无需豁免代码。
-    返回 (任一文件迁移, {app 名: {env 键: 值}})；各自 .bak 提示在本函数内打印。"""
+    """BLOCKER-3 + weaknet-server-integration D1 stale predicate (**Python-side single point** — Rust init
+    always skips when oxfile exists, so a Rust-side write of the detection would never be called [bF3]):
+      oxfile migration = server entry basename drift (D269 original semantics, weaknet presence not guilt-by-associated)
+        OR **bin present AND (weaknet-serve entry missing OR its command basename drifts)** (post-mn2 form; bin absent
+        = conditional rendering with no entry is the correct form, zero churn). → rename to .bak so the following init re-renders.
+      Caddyfile symmetric migration [wF2] = bin present AND etc/Caddyfile exists AND the reverse-proxy block is missing (anchor predicate: see
+        the render-section comment below — the D3.1 finalized form has no '@weaknet' literal) → .bak
+        re-render. The return value merges into the same migrated flag wired to the existing --reapply path [lck-F4] — prevents
+        the half-migration false success of "oxfile migrated AND Caddyfile not migrated" (unit up, /weaknet 404).
+    Each [[apps]]'s [apps.env] key-values are captured and re-absorbed as before (PIT-171 lesson). Re-absorption only fills missing, never overwrites →
+    token-file path/statedir template-baked values naturally take precedence over old manual values [lck-F14/mn6]; no exemption code needed.
+    Returns (any file migrated, {app name: {env key: value}}); each .bak notice is printed inside this function."""
     oxfile = prefix_p / "run" / "oxfile.toml"
     wnet_present = (prefix_p / "bin" / wnet_bin).is_file()
     stale = False
@@ -743,28 +743,28 @@ def _drop_stale_server_oxfile(prefix_p: Path, bin_name: str, wnet_bin: str) -> t
                     if (stem == "mediaservo-server" or stem.endswith("-server")) and stem != bin_name:
                         stale = True
                     if cur_app == WEAKNET_OXFILE_APP and stem != Path(wnet_bin).name.removesuffix(".exe"):
-                        stale = True  # weaknet 条目基名漂移（换品牌重部署）——仅条目在场才可达
+                        stale = True  # weaknet entry basename drift (brand-switch redeploy) — reachable only when the entry is present
         if wnet_present and WEAKNET_OXFILE_APP not in seen_apps:
-            stale = True  # 缺 weaknet 条目 ∧ bin 在场 → 重渲补 [bF3/mn2]
+            stale = True  # weaknet entry missing AND bin present → re-render to add it [bF3/mn2]
         if stale:
             oxfile.replace(oxfile.with_name("oxfile.toml.bak"))
-            print("  run/oxfile.toml 陈旧（bin 改名迁移/缺 weaknet 条目）——已备份为 run/oxfile.toml.bak 并重渲染；"
-                  "运维手工 env 回吸收只补缺不覆盖（init 本次烘值优先）；整树重建场景无旧文件可吸收——手工行清单见 msrtc.sh -h 环境变量节 [B]", file=sys.stderr)
-    # 段在判据锚 = `handle_path /weaknet`（D3.1 定稿实测形的功能核心；票面「'@weaknet'」系
-    # design §D3.1「@weaknet 段」速记——模板字面量只有 @wnroot/handle_path，用 '@weaknet'
-    # 永假 → 每 deploy 重迁不收敛。redir 单独存在不构成反代，不算段在。）
+            print("  run/oxfile.toml stale (bin rename migration / weaknet entry missing) — backed up to run/oxfile.toml.bak and will re-render; "
+                  "ops manual env re-absorption only fills missing (this init's baked values win); a whole-tree rebuild has no old file to absorb — manual line list in msrtc.sh -h env section [B]", file=sys.stderr)
+    # The block-present anchor = `handle_path /weaknet` (the functional core of the D3.1 finalized real-world form; the ticket's "'@weaknet'" was
+    # shorthand for design §D3.1's "@weaknet block" — template literals only contain @wnroot/handle_path; using '@weaknet'
+    # would be forever false → every deploy re-migrates without convergence. A lone redir does not constitute a reverse proxy and does not count as block-present.)
     caddy = prefix_p / "etc" / "Caddyfile"
     if wnet_present and caddy.exists() and "handle_path /weaknet" not in caddy.read_text(encoding="utf-8", errors="replace"):
         caddy.replace(caddy.with_name("Caddyfile.bak"))
-        print("  etc/Caddyfile 无 @weaknet 反代段 ∧ weaknet bin 在场——已备份为 etc/Caddyfile.bak 并令 init 重渲染"
-              "（与 oxfile 同一迁移旗标——reapply 触发耦合 [lck-F4]）", file=sys.stderr)
+        print("  etc/Caddyfile lacks the @weaknet reverse-proxy block AND weaknet bin is present — backed up to etc/Caddyfile.bak and init will re-render"
+              " (same migration flag as oxfile — reapply trigger coupling [lck-F4])", file=sys.stderr)
         stale = True
     return stale, app_envs
 
 
 def _reapply_carried_env(prefix_p: Path, app_envs: dict[str, dict[str, str]]) -> list[str]:
-    """迁移回吸收：新 oxfile（init 重渲染产物）缺失的旧 env 键按 app 补回。
-    只补缺不覆盖（init 本次 baked 的键以新值为准）；返回被补的 "app:k" 列表。"""
+    """Migration re-absorption: old env keys missing from the new oxfile (init re-render output) are restored per app.
+    Only fills missing, never overwrites (keys baked by this init take the new values); returns the list of restored "app:k" entries."""
     if not app_envs:
         return []
     oxfile = prefix_p / "run" / "oxfile.toml"
@@ -775,7 +775,7 @@ def _reapply_carried_env(prefix_p: Path, app_envs: dict[str, dict[str, str]]) ->
     for app, kv in app_envs.items():
         if not kv:
             continue
-        # 定位该 app 块
+        # locate this app's block
         try:
             i = next(n for n, l in enumerate(lines) if l.strip() == "[[apps]]")
         except StopIteration:
@@ -803,7 +803,7 @@ def _reapply_carried_env(prefix_p: Path, app_envs: dict[str, dict[str, str]]) ->
         miss = {k: v for k, v in kv.items() if k.strip().strip('"') not in existing}
         if not miss:
             continue
-        # 找块内 [apps.env] 头，无则在块尾（下一 [[apps]] 前）新建
+        # find the [apps.env] header inside the block; if absent, create one at the block end (before the next [[apps]])
         try:
             ei = next(j for j, l in enumerate(blk) if l.strip() == "[apps.env]")
         except StopIteration:
@@ -824,13 +824,13 @@ def _reapply_carried_env(prefix_p: Path, app_envs: dict[str, dict[str, str]]) ->
 
 
 def _assemble_host_binaries(bin_dir: Path, release: bool, brand: str) -> set[str]:
-    """组装品牌化二进制到 bin_dir（D266——组装从 build 迁到 deploy，源=target/{debug,release}）。
-    host-<app> → <brand>-<app>、mediaservo-host → <brand>-host；client 出树、host-streamer 兼容链已退役（D269）。
-    返回组装文件名集合（供部署残留白名单）。"""
+    """Assemble branded binaries into bin_dir (D266 — assembly moved from build to deploy; source = target/{debug,release}).
+    host-<app> → <brand>-<app>, mediaservo-host → <brand>-host; client exits the tree, the host-streamer compat chain is retired (D269).
+    Returns the set of assembled file names (for the deployment-residue whitelist)."""
     src_dir = ROOT / "target" / ("release" if release else "debug")
     if not src_dir.is_dir():
-        hint = "（--release 需配合 build --release）" if release else ""
-        print(f"错误: {src_dir} 无构建产物{hint} — 先 build host", file=sys.stderr)
+        hint = " (--release requires build --release)" if release else ""
+        print(f"Error: no build artifacts in {src_dir}{hint} — run build host first", file=sys.stderr)
         sys.exit(1)
     src_names: set[str] = set()
     for b in HOST_BINS:
@@ -845,47 +845,47 @@ def _assemble_host_binaries(bin_dir: Path, release: bool, brand: str) -> set[str
                 name = f"{brand}-host"
         _copy_with_kill(src, bin_dir / name)
         src_names.add(name)
-    # client 出树（D269/T3）：舱端拉流工具不再随车端 host 树装配——bin 白名单同轮清存量实例
-    # host-streamer 兼容链已退役（D269/T2）：spawn 路径 exe_cmd(app_name()) 本已品牌感知，
-    # src 显示串无消费方（磁盘 oxfile 全指 bin/msrtc-* 实证）——白名单同轮清存量实例残链
+    # client exits the tree (D269/T3): cockpit-side pull tools are no longer assembled into the vehicle-side host tree — the bin whitelist clears existing instances in the same round
+    # host-streamer compat chain retired (D269/T2): the spawn path exe_cmd(app_name()) is already brand-aware,
+    # and the src display string has no consumers (on-disk oxfiles all point to bin/msrtc-* — proven) — the whitelist clears residual chains of existing instances in the same round
     return src_names
 
 def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
-    """deploy host（有状态部署——组装 + 落地，D266）：identity 幂等/oxmgr/systemd/env.sh。
-    package host 复用（Momus b——Task 2.5）: staging 目录内跑本函数组装身份/etc/env.sh；
-    三连停不触发（staging 无 run/oxfile.toml——cli F5 只读安全）。
+    """deploy host (stateful deployment — assemble + land, D266): identity idempotence/oxmgr/systemd/env.sh.
+    Reused by package host (Momus b — Task 2.5): run this function inside the staging dir to assemble identity/etc/env.sh;
+    the triple-stop is not triggered (staging has no run/oxfile.toml — cli F5 read-only safety).
 
-    D4: --prefix 必填（无默认——防污染 out/ 无状态交付；车端用 /opt/mediaservo-host）。
-    品牌: 环境 MEDIASERVO_BRAND 优先（msrtc.sh 注入），回退已装实例 _derive_brand（deploy-ops 高危②）。"""
+    D4: --prefix mandatory (no default — protects out/ stateless delivery; vehicles use /opt/mediaservo-host).
+    Brand: env MEDIASERVO_BRAND first (injected by msrtc.sh), falling back to _derive_brand of the installed instance (deploy-ops hazard 2)."""
     if not prefix:
-        print("错误: deploy 必须 --prefix（无默认——防止污染 out/ 无状态交付；车端用 /opt/mediaservo-host）", file=sys.stderr)
+        print("Error: deploy requires --prefix (no default — prevents polluting out/ stateless delivery; vehicles use /opt/mediaservo-host)", file=sys.stderr)
         sys.exit(2)
     prefix_p = Path(prefix)
     bin_dir = prefix_p / "bin"
-    # 品牌：环境（msrtc.sh 注入 MEDIASERVO_BRAND）优先，回退已有实例推导（重复部署零参数）
-    # Python 布局与 Rust media_brand 对齐："mediaservo" 是显式默认，映射 legacy host-* 串。
+    # Brand: env (msrtc.sh injects MEDIASERVO_BRAND) first, falling back to derivation from the existing instance (zero parameters on re-deploy)
+    # Python layout aligned with Rust media_brand: "mediaservo" is the explicit default, mapping to legacy host-* strings.
     brand_input = os.environ.get("MEDIASERVO_BRAND", "") or _derive_brand(bin_dir)
     brand = "" if brand_input == "mediaservo" else brand_input
     rust_brand = brand or "mediaservo"
     try:
         bin_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        print(f"错误: 无法创建 {bin_dir}: {e} — 部署用 sudo msrtc.sh deploy host --prefix /opt/mediaservo-host", file=sys.stderr)
+        print(f"Error: cannot create {bin_dir}: {e} — for deployment use sudo msrtc.sh deploy host --prefix /opt/mediaservo-host", file=sys.stderr)
         sys.exit(1)
     if str(prefix_p).startswith("/opt") and hasattr(os, "geteuid") and os.geteuid() != 0:
-        print("错误: /opt 部署需 root（sudo msrtc.sh deploy host --prefix /opt/mediaservo-host）", file=sys.stderr)
+        print("Error: /opt deployment needs root (sudo msrtc.sh deploy host --prefix /opt/mediaservo-host)", file=sys.stderr)
         sys.exit(1)
     host_cli = _exe_name(f"{brand}-host") if brand else _exe_name("mediaservo-host")
 
-    # 运行中的实例二进制被占用（Text file busy）→ 复制前自动停进程族。
-    # 注意: 不调 oxmgr CLI（其 IPC 命令在 daemon 未跑时自动拉起 daemon——反而制造 busy）；
-    # 直接 kill host 进程族 + 占用 bin/oxmgr 的 daemon。
+    # Running instance binaries are occupied (Text file busy) → stop the process family automatically before copying.
+    # Note: do not call the oxmgr CLI (its IPC commands auto-spawn the daemon when it isn't running — creating busy instead);
+    # kill the host process family + the daemon occupying bin/oxmgr directly.
     oxfile = prefix_p / "run" / "oxfile.toml"
     if oxfile.exists() and (bin_dir / host_cli).exists():
-        print("检测到运行中的 host 实例 — 先停进程族（重装不覆盖 etc/ 凭据）")
-        # 复活源三连停: ① systemd 自启 unit（Restart=always 会在 daemon 被杀后立即拉起）
-        # ② daemon 自身 ③ host 进程族（restart_policy=always 由 daemon 重启——必须先杀 daemon）
-        # systemctl 不接受 glob——按推导 brand 只枚举 oxmgr-{brand}-*.service（deploy-ops 高危②）
+        print("Running host instance detected — stopping the process family first (reinstall does not overwrite etc/ credentials)")
+        # Triple stop of revival sources: (1) systemd auto-start unit (Restart=always respawns right after the daemon is killed)
+        # (2) the daemon itself (3) the host process family (restart_policy=always restarted by the daemon — the daemon must die first)
+        # systemctl does not accept globs — enumerate only oxmgr-{brand}-*.service by the derived brand (deploy-ops hazard 2)
         units_dir = Path.home() / ".config" / "systemd" / "user"
         if shutil.which("systemctl") and units_dir.is_dir():
             for u in sorted(units_dir.glob(f"oxmgr-{brand}-*.service")):
@@ -897,12 +897,12 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
             subprocess.run(["pkill", "-x", _exe_name(f"{brand}-{base}" if brand else f"host-{base}")], check=False)
         time.sleep(1)
 
-    # 组装品牌化二进制（D266：源=target/{debug,release}——build 已纯编译）
+    # assemble branded binaries (D266: source = target/{debug,release} — build is pure compile now)
     src_names = _assemble_host_binaries(bin_dir, release, brand)
 
-    # bin 白名单（deploy-ops ④ 品牌切换残留清理）：非当前布局的 app 二进制删除
-    # （build 已物理改名——残留 = 旧品牌/旧 install 遗留）
-    # client/streamer 收尾 = D269 出树/拔链后存量实例残留的自动回收（白名单语义）
+    # bin whitelist (deploy-ops 4: brand-switch residue cleanup): delete app binaries not in the current layout
+    # (build already physically renamed — residue = leftovers from old brands/old install)
+    # client/streamer cleanup = automatic reclaim of existing-instance residue after the D269 tree-exit/chain-pull (whitelist semantics)
     roles = ("agent", "streamer", "capturer", "recorder", "controller", "emergency", "audio", "legacy", "host", "client")
     for p in sorted(bin_dir.iterdir()):
         if p.is_symlink() or not p.is_file():
@@ -910,25 +910,25 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
         if p.name in src_names or p.name == _exe_name("oxmgr"):
             continue
         if any(p.name.endswith(f"-{r}") for r in roles):
-            print(f"  清理部署残留: {p.name}")
+            print(f"  cleaning deployment residue: {p.name}")
             p.unlink()
 
-    # oxmgr 随部署锁定版本（D-H13）: PATH → 缓存回收 → 硬依赖缺失即失败
+    # lock the oxmgr version with the deployment (D-H13): PATH → cache reclaim → fail on missing hard dependency
     oxmgr_src = _resolve_oxmgr_or_die("host")
     _copy_with_kill(oxmgr_src, bin_dir / _exe_name("oxmgr"))
     ver = subprocess.run([str(oxmgr_src), "--version"], capture_output=True, text=True, check=False)
-    print(f"  oxmgr 已打包: {ver.stdout.strip() or ver.stderr.strip() or '?'}")
+    print(f"  oxmgr packaged: {ver.stdout.strip() or ver.stderr.strip() or '?'}")
 
-    # host init: 生成 etc/ + identity.json + 令牌——幂等只写不删（已存在跳过, 重装保留凭据）
-    # brand: env 注入（init 是独立进程——device 前缀需与布局品牌一致）
+    # host init: generate etc/ + identity.json + tokens — idempotent write-only, never delete (skip if present; reinstall keeps credentials)
+    # brand: env injection (init is a separate process — the device prefix must match the layout brand)
     identity_file = prefix_p / "identity.json"
     if identity_file.exists():
-        print(f"  identity.json 已存在——只写不删（设备身份保留）: {identity_file}")
+        print(f"  identity.json exists — write-only, never delete (device identity preserved): {identity_file}")
     init_env = dict(os.environ)
     init_env["MEDIASERVO_BRAND"] = rust_brand
     _run_or_exit([str(bin_dir / host_cli), "init", str(prefix_p)], env=init_env)
 
-    # 快捷名（arch MED4：build 已物理改名为 <brand>-host——快捷指向品牌真实名；官方名回退 host/mediaservo-host）
+    # shortcut names (arch MED4: build already physically renamed to <brand>-host — shortcuts point at the real branded name; official-name fallback host/mediaservo-host)
     if brand:
         shortcut_names = (f"{brand}-host",)
         link_target = _exe_name(f"{brand}-host")
@@ -940,64 +940,64 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
         if link.exists():
             link.unlink()
         try:
-            link.symlink_to(f"bin/{link_target}")  # 相对路径，前缀可搬迁
-            print(f"  已创建符号链接 {link} → bin/{link_target}")
+            link.symlink_to(f"bin/{link_target}")  # relative path; the prefix stays relocatable
+            print(f"  created symlink {link} → bin/{link_target}")
         except OSError:
             shutil.copy2(bin_dir / link_target, link)
-            print(f"  已复制 {link_target} 到 {link}（符号链接失败，回退到拷贝）")
+            print(f"  copied {link_target} to {link} (symlink failed, fell back to copy)")
 
-    # env.sh 一键激活（arch MED5 承接——deploy 生成；可搬迁：相对自身推导，非硬编码路径）
+    # env.sh one-shot activation (carrying arch MED5 — generated at deploy; relocatable: derived relative to itself, not hardcoded)
     env_host = f"{brand}-host" if brand else "mediaservo-host"
     env_sh = prefix_p / "env.sh"
     env_lines = [
         "#!/usr/bin/env bash",
-        f"# {env_host} 环境激活（deploy 生成）——source 后全部命令可用",
-        "# 用法: source env.sh（任意前缀/搬迁后依然有效，相对本文件推导）",
+        f"# {env_host} environment activation (generated at deploy) — all commands available after sourcing",
+        "# Usage: source env.sh (still valid under any prefix / after relocation, derived relative to this file)",
         '__MSRTC_ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"',
         'export PATH="${__MSRTC_ENV_DIR}/bin:$PATH"',
     ]
-    env_lines.append(f'export MEDIASERVO_BRAND="{rust_brand}"   # 品牌 env（D252），部署包内显式钉死布局'),
+    env_lines.append(f'export MEDIASERVO_BRAND="{rust_brand}"   # brand env (D252); the deployment package pins the layout explicitly'),
     env_lines += [
-        'BIN_DIR_MSRTC="${__MSRTC_ENV_DIR}/bin"   # 供脚本/别名引用',
+        'BIN_DIR_MSRTC="${__MSRTC_ENV_DIR}/bin"   # for scripts/aliases to reference',
         "unset __MSRTC_ENV_DIR",
-        f'echo "[{brand or "mediaservo"}] {env_host} 环境已激活 — bin/: $BIN_DIR_MSRTC"',
+        f'echo "[{brand or "mediaservo"}] {env_host} environment activated — bin/: $BIN_DIR_MSRTC"',
     ]
     env_sh.write_text("\n".join(env_lines) + "\n")
     env_sh.chmod(0o755)
-    print(f"  env.sh 已生成: {env_sh}（source 后 PATH=bin/ 全部命令可用）")
+    print(f"  env.sh generated: {env_sh} (after sourcing, PATH=bin/ makes all commands available)")
 
     for d in ("run/logs", "recordings"):
         (prefix_p / d).mkdir(parents=True, exist_ok=True)
 
-    print(f"host 已部署到 {prefix}（{'release' if release else 'debug'}）")
+    print(f"host deployed to {prefix} ({'release' if release else 'debug'})")
     print(f"  bin/    {', '.join(sorted(src_names))} + oxmgr")
-    print("  etc/    host.yaml + link/{signing.pem,*.token}（host init 生成, 重装保留）")
+    print("  etc/    host.yaml + link/{signing.pem,*.token} (generated by host init, kept on reinstall)")
     print("  run/    logs/")
     print("  recordings/")
-    print("  identity.json（0600, 设备身份 — 只写不删, 勿删）")
-    print(f"使用: export PATH={bin_dir}:$PATH && {host_cli} doctor {prefix} && {host_cli} start {prefix}")
+    print("  identity.json (0600, device identity — write-only, do not delete)")
+    print(f"Usage: export PATH={bin_dir}:$PATH && {host_cli} doctor {prefix} && {host_cli} start {prefix}")
     if sys.platform == "win32":
-        print("注意: Windows best-effort（未全面验证）— 生产部署建议 Linux 车端", file=sys.stderr)
+        print("Note: Windows best-effort (not fully validated) — production deployment recommends Linux vehicles", file=sys.stderr)
 
 def _cmd_deploy_server(prefix: str) -> None:
-    """deploy server（有状态落地——T20, D266 与 host 同构；deploy 不触发构建——源=out/server 单棵交付树）。
-    品牌: env MEDIASERVO_BRAND 优先，回退目标树 bin/*-server 派生（_derive_brand_server）——
-    物理二进制名 = {brand}-server（D269 品牌名=物理名，host 同构；cargo/bin 单元名不变）。
-    BLOCKER-1 双探源：上游名（fresh build）→ {brand}-server（已迁移，免重 build 二次 deploy）。
-    BLOCKER-2 空 brand 防护：brand 解析为空且目标树已有品牌化 bin → 拒绝（空 brand 永不删/改名品牌件）。
-    BLOCKER-3 oxfile 刷新：bin 改名迁移 → 删 {prefix}/run/oxfile.toml 令 init 重渲染（手工 [apps.env] 需重加）。
-    etc 已存在不覆盖（PIT-160——运维改动/注册数据不被重部署冲掉）；web 整树平移（rmtree+copytree）；
-    init 幂等渲染（run/oxfile.toml + Caddyfile + PSK/JWT secret 自举——生命周期模块已并入二进制）。
-    D4: --prefix 必填（无默认）；/opt 需 root（同 host 规则）。"""
+    """deploy server (stateful landing — T20, D266 isomorphic with host; deploy does not trigger builds — source = the single out/server delivery tree).
+    Brand: env MEDIASERVO_BRAND first, falling back to target-tree bin/*-server derivation (_derive_brand_server) —
+    the physical binary name = {brand}-server (D269 brand = physical name, isomorphic with host; cargo/bin unit names unchanged).
+    BLOCKER-1 dual source hunt: upstream name (fresh build) → {brand}-server (already migrated, so a second deploy needs no rebuild).
+    BLOCKER-2 empty-brand guard: brand resolves empty while the target tree already has branded bin → reject (empty brand never deletes/renames branded files).
+    BLOCKER-3 oxfile refresh: bin rename migration → delete {prefix}/run/oxfile.toml so init re-renders (manual [apps.env] lines must be re-added).
+    etc is never overwritten when present (PIT-160 — ops changes/registry data survive redeploys); the web tree moves wholesale (rmtree+copytree);
+    init renders idempotently (run/oxfile.toml + Caddyfile + PSK/JWT secret bootstrap — lifecycle modules are built into the binary).
+    D4: --prefix mandatory (no default); /opt needs root (same rule as host)."""
     if not prefix:
-        print("错误: deploy 必须 --prefix（无默认——防止污染 out/ 无状态交付；惯例 /opt/mediaservo-server）", file=sys.stderr)
+        print("Error: deploy requires --prefix (no default — prevents polluting out/ stateless delivery; convention: /opt/mediaservo-server)", file=sys.stderr)
         sys.exit(2)
     src_root = _out_root() / "server"
     src_bin_dir = src_root / "bin"
     prefix_p = Path(prefix)
     bin_dir = prefix_p / "bin"
-    # 品牌：env 优先 → 目标树派生 → 源树派生（host L554 同款零参数幂等重部署；
-    # 源树回退覆盖"out/server 已原地品牌化 → deploy /opt 未带 env"场景）。
+    # Brand: env first → target-tree derivation → source-tree derivation (same as host L554: zero-parameter idempotent re-deploy;
+    # the source-tree fallback covers the "out/server already branded in place → deploy /opt without env" scenario).
     brand = (os.environ.get("MEDIASERVO_BRAND", "")
              or _derive_brand_server(bin_dir)
              or _derive_brand_server(src_bin_dir))
@@ -1005,70 +1005,70 @@ def _cmd_deploy_server(prefix: str) -> None:
         unexpected = sorted({f.name for d in (bin_dir, src_bin_dir) for f in d.glob("*-server")
                              if f.name != _exe_name("mediaservo-server")})
         if unexpected:
-            # 派生恒能命中品牌件，理论不可达——防御断言：空 brand 永不走到删/改名
-            print(f"错误: 在场 {', '.join(unexpected)} 但品牌解析为空——export MEDIASERVO_BRAND 后重试", file=sys.stderr)
+            # derivation always hits branded files, theoretically unreachable — defensive assertion: empty brand never reaches delete/rename
+            print(f"Error: {', '.join(unexpected)} present but brand resolved empty — export MEDIASERVO_BRAND and retry", file=sys.stderr)
             sys.exit(2)
     bin_name, shortcut = _server_bin_names(brand)
     server_bin_name = bin_name
-    # BLOCKER-1 双探源（按序）：上游名（fresh build 产物）→ {brand}-server（已迁移树，免重 build）
+    # BLOCKER-1 dual source hunt (ordered): upstream name (fresh build output) → {brand}-server (migrated tree, no rebuild needed)
     candidates = [src_bin_dir / _exe_name("mediaservo-server")]
     if brand:
         candidates.append(src_bin_dir / _exe_name(f"{brand}-server"))
     src_bin = next((cand for cand in candidates if cand.exists()), None)
     if src_bin is None:
-        print(f"错误: {' 与 '.join(str(c) for c in candidates)} 均不存在 — 先 build server（deploy 不触发构建——D266）", file=sys.stderr)
+        print(f"Error: none of {' / '.join(str(c) for c in candidates)} exists — run build server first (deploy does not trigger builds — D266)", file=sys.stderr)
         sys.exit(2)
     src_web = src_root / "web"
     if not (src_web / "index.html").exists():
-        print(f"错误: {src_web} 无前端产物 — 先 build web（deploy 不触发构建——D266）", file=sys.stderr)
+        print(f"Error: no frontend artifacts in {src_web} — run build web first (deploy does not trigger builds — D266)", file=sys.stderr)
         sys.exit(2)
     try:
         bin_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        print(f"错误: 无法创建 {bin_dir}: {e} — 部署用 sudo mediaservo deploy server --prefix /opt/mediaservo-server", file=sys.stderr)
+        print(f"Error: cannot create {bin_dir}: {e} — for deployment use sudo mediaservo deploy server --prefix /opt/mediaservo-server", file=sys.stderr)
         sys.exit(1)
     if str(prefix_p).startswith("/opt") and hasattr(os, "geteuid") and os.geteuid() != 0:
-        print("错误: /opt 部署需 root（sudo mediaservo deploy server --prefix /opt/mediaservo-server）", file=sys.stderr)
+        print("Error: /opt deployment needs root (sudo mediaservo deploy server --prefix /opt/mediaservo-server)", file=sys.stderr)
         sys.exit(1)
 
-    # build:deploy 糖注入 --prefix out/<target>（host 惯例）——server 源即目标：原地装配模式，
-    # 跨树拷贝与 web rmtree 必须跳过（SameFileError 防护 + 删源自毁防护），init 渲染照常；
-    # 原地改名（upstream→brand）属同目录 os.rename，允许（branding-completion T1.3）。
+    # build:deploy sugar injects --prefix out/<target> (host convention) — for server the source is the target: in-place assembly mode,
+    # cross-tree copies and the web rmtree must be skipped (SameFileError guard + delete-source self-destruction guard); init rendering proceeds;
+    # in-place rename (upstream→brand) is a same-directory os.rename, allowed (branding-completion T1.3).
     inplace = prefix_p.resolve() == src_root.resolve()
     dst_bin = bin_dir / bin_name
     server_cli = dst_bin
-    # 先停后动（PIT-170 同构：优雅 stop 先行，绝不靠 _copy/replace 强穿在跑二进制——否则
-    # _copy_with_kill 的 inode 击杀会绕过簇优雅停、inplace 改名会开 daemon 用陈旧 oxfile 重拉死路径的窗口）。
-    # 老名/新名两路径都查（改名前=老名在跑、上轮部署=新名在跑）；stop 用在场生命期二进制。
+    # stop before move (PIT-170 isomorphic: graceful stop first; never force through a running binary via _copy/replace — otherwise
+    # _copy_with_kill's inode kill would bypass the cluster's graceful stop, and inplace rename opens a window where the daemon relaunches dead paths from a stale oxfile).
+    # check both old and new paths (before rename = old name running; last deploy = new name running); stop uses the live lifecycle binary.
     stop_bin = dst_bin if dst_bin.exists() else src_bin
     running = _pids_using(dst_bin)
     for cand in candidates:
         if cand.name != dst_bin.name:
             running = running or _pids_using(bin_dir / cand.name)
     if running or _pids_using(bin_dir / _exe_name("oxmgr")):
-        print("检测到运行中的 server 实例 — 先停本簇（重装不覆盖 etc/ 凭据）")
+        print("Running server instance detected — stopping this cluster first (reinstall does not overwrite etc/ credentials)")
         try:
             subprocess.run([str(stop_bin), "stop", str(prefix_p)], capture_output=True, timeout=30, check=False)
         except subprocess.TimeoutExpired:
-            print("  ⚠ 旧实例 stop 超时（可能是无生命周期的旧二进制）— 继续重装", file=sys.stderr)
-    # renamed 仅在发生/需要 upstream→brand 迁移时置真；同文件/同目录 no-op 不触发 oxfile 强刷
+            print("  ⚠ old instance stop timed out (possibly a pre-lifecycle old binary) — continuing reinstall", file=sys.stderr)
+    # renamed is only set true when an upstream→brand migration happens/is needed; same-file/same-dir no-ops do not trigger an oxfile force-refresh
     renamed = src_bin.name != bin_name and not (dst_bin.exists() and os.path.samefile(src_bin, dst_bin))
     if inplace:
         if renamed:
-            os.replace(src_bin, dst_bin)  # 同目录原子改名（src==dst 上游无 brand 场景不置 renamed，不到这里）
-            print(f"  bin 原地改名: {src_bin.name} → {bin_name}")
+            os.replace(src_bin, dst_bin)  # atomic same-directory rename (with src==dst and no brand, renamed stays false and we never land here)
+            print(f"  bin renamed in place: {src_bin.name} → {bin_name}")
         else:
-            print(f"  bin/{bin_name} 原地（源=目标）— 跳过拷贝")
+            print(f"  bin/{bin_name} in place (source = target) — skipping copy")
     elif renamed:
-        _copy_with_kill(src_bin, dst_bin)  # 上游名 → 品牌名（换名拷贝）
+        _copy_with_kill(src_bin, dst_bin)  # upstream name → brand name (rename-on-copy)
     else:
         if dst_bin.exists() and os.path.samefile(src_bin, dst_bin):
-            print(f"  bin/{bin_name} 已就位（源=目标同文件）— 跳过拷贝")
+            print(f"  bin/{bin_name} already in place (source = target same file) — skipping copy")
         else:
             _copy_with_kill(src_bin, dst_bin)
     os.chmod(dst_bin, 0o755)
     server_cli = dst_bin
-    # 生命周期冒烟：out/ 可能是无 init/start 子命令的旧构建（旧二进制会把未知参数当守护参数直启）
+    # lifecycle smoke test: out/ may be an old build without init/start subcommands (old binaries treat unknown args as daemon args and boot straight through)
     ver_line: str | None = None
     try:
         probe = subprocess.run([str(server_cli), "version"], capture_output=True, text=True, timeout=10, check=False)
@@ -1078,20 +1078,20 @@ def _cmd_deploy_server(prefix: str) -> None:
     except subprocess.TimeoutExpired:
         pass
     if ver_line is None:
-        print(f"错误: {server_cli} 生命周期冒烟失败（version 非零/超时——out/ 疑为无生命周期旧构建）— 先 build server 刷新后重跑 deploy", file=sys.stderr)
+        print(f"Error: {server_cli} lifecycle smoke failed (version nonzero/timeout — out/ is likely a pre-lifecycle old build) — rebuild server then re-run deploy", file=sys.stderr)
         sys.exit(2)
-    print(f"  二进制就绪: {ver_line}")
+    print(f"  binary ready: {ver_line}")
 
-    # oxmgr 随部署锁定版本（D-H13，同 host 待遇）: PATH → 缓存回收 → 硬依赖缺失即失败
+    # lock the oxmgr version with the deployment (D-H13, same treatment as host): PATH → cache reclaim → fail on missing hard dependency
     oxmgr_src = _resolve_oxmgr_or_die("server")
     _copy_with_kill(oxmgr_src, bin_dir / _exe_name("oxmgr"))
     os.chmod(bin_dir / _exe_name("oxmgr"), 0o755)
     ov = subprocess.run([str(oxmgr_src), "--version"], capture_output=True, text=True, check=False)
-    print(f"  oxmgr 已打包: {ov.stdout.strip() or ov.stderr.strip() or '?'}")
+    print(f"  oxmgr packaged: {ov.stdout.strip() or ov.stderr.strip() or '?'}")
 
-    # weaknet 双探源拷贝（design §D1 [bF1 bF6]；bin 在场判定只落数据面——oxfile 条件渲染判据
-    # 归 Rust init（T4），M-1 钉死：Python 无渲染杠杆）。prefix 源 out/server/bin 优先（上游名→
-    # 品牌名，与 server 双探源 BLOCKER-1 同构），回退 target/{release,debug}；两处皆缺 → WARN 不阻断。
+    # weaknet dual-source copy (design §D1 [bF1 bF6]; the bin-presence check only settles the data plane — the oxfile conditional-render predicate
+    # belongs to Rust init (T4), nailed by M-1: Python has no rendering lever). prefix source out/server/bin first (upstream name →
+    # brand name, isomorphic with the server dual-source BLOCKER-1), falling back to target/{release,debug}; missing in both → WARN, no block.
     wnet_bin = _weaknet_bin_name(brand)
     wnet_dst = bin_dir / wnet_bin
     wnet_candidates = [src_bin_dir / _exe_name("mediaservo-weaknet")]
@@ -1100,28 +1100,28 @@ def _cmd_deploy_server(prefix: str) -> None:
     wnet_candidates += [ROOT / "target" / p / _exe_name("mediaservo-weaknet") for p in ("release", "debug")]
     wnet_src = next((c for c in wnet_candidates if c.exists()), None)
     if wnet_src is None:
-        print(f"WARN: weaknet 二进制两处缺位（out/server/bin 与 target/ 均无）——本次不装配 bin/{wnet_bin}"
-              "（不阻断 deploy；先 build server 产出）", file=sys.stderr)
+        print(f"WARN: weaknet binary absent from both locations (neither out/server/bin nor target/) — not staging bin/{wnet_bin} this time"
+              " (does not block deploy; run build server to produce it)", file=sys.stderr)
     elif wnet_dst.exists() and os.path.samefile(wnet_src, wnet_dst):
-        print(f"  bin/{wnet_bin} 原地（源=目标同文件）— 跳过拷贝")
+        print(f"  bin/{wnet_bin} in place (source = target same file) — skipping copy")
     elif wnet_src.name != wnet_bin and src_bin_dir.resolve() == bin_dir.resolve():
-        # 原地部署 + 需换名 → 同目录原子改名，上游名不残留（2026-09-10 用户裁决对齐
-        # server bin 改名语义，旧 BA-2① keeper 双名作废；target/ 源跨目录仍走拷贝——
-        # 绝不移走 cargo 缓存件）。
+        # in-place deploy + rename needed → atomic same-directory rename; the upstream name leaves no residue (2026-09-10 user ruling aligning
+        # server bin rename semantics; the old BA-2(i) keeper dual-name is void; cross-directory target/ sources still go through copy —
+        # never move cargo cache files away).
         os.replace(wnet_src, wnet_dst)
-        print(f"  weaknet 原地改名装配: {wnet_src.name} → bin/{wnet_bin}")
+        print(f"  weaknet renamed and staged in place: {wnet_src.name} → bin/{wnet_bin}")
     else:
         _copy_with_kill(wnet_src, wnet_dst)
         os.chmod(wnet_dst, 0o755)
-        print(f"  weaknet 装配: {wnet_src} → bin/{wnet_bin}")
+        print(f"  weaknet staged: {wnet_src} → bin/{wnet_bin}")
 
-    # BLOCKER-3：bin 改名/换品牌迁移后 oxfile command 成死路径（init 遇已存在 oxfile 跳过——mod.rs 实证）
-    # → 删除令下方 init 以 current_exe 重渲染。判据=server 条目 command 基名 != 当前 bin 名
-    # （重复部署基名已一致 → 零 churn；fresh 树无 oxfile → init 正常渲染）。
-    # 迁移判据单点（含 Caddyfile 对称迁移）——wnet_bin 取本次装配目标名（在场=已拷贝成功）
+    # BLOCKER-3: after a bin rename/brand migration the oxfile command becomes a dead path (init skips an existing oxfile — proven in mod.rs)
+    # → delete it so the init below re-renders with current_exe. Predicate = server entry command basename != current bin name
+    # (a re-deploy where basenames already match → zero churn; a fresh tree has no oxfile → init renders normally).
+    # single-point migration predicate (includes the Caddyfile symmetric migration) — wnet_bin is this staging's target name (present = copy succeeded)
     migrated, carried_envs = _drop_stale_server_oxfile(prefix_p, bin_name, wnet_bin)
 
-    # etc 模板——已存在不覆盖（PIT-160；init 同样幂等，双保险）
+    # etc templates — never overwrite when present (PIT-160; init is equally idempotent, double safety)
     etc_dir = prefix_p / "etc"
     etc_dir.mkdir(parents=True, exist_ok=True)
     src_etc = src_root / "etc"
@@ -1129,47 +1129,47 @@ def _cmd_deploy_server(prefix: str) -> None:
         if not f.is_file():
             continue
         if (etc_dir / f.name).exists():
-            print(f"  etc/{f.name} 已存在—保留（PIT-160）")
+            print(f"  etc/{f.name} exists — kept (PIT-160)")
         else:
             shutil.copy2(f, etc_dir / f.name)
-            print(f"  etc/{f.name}: 模板落地")
+            print(f"  etc/{f.name}: template landed")
 
-    # web 整树平移（caddy 静态 root——绝对路径由 init 写进 oxfile/Caddyfile）
+    # the web tree moves wholesale (caddy static root — absolute paths written into oxfile/Caddyfile by init)
     dst_web = prefix_p / "web"
     if inplace:
-        print("  web/ 原地（源=目标）— 跳过平移（rmtree 防护）")
+        print("  web/ in place (source = target) — skipping move (rmtree guard)")
     else:
         if dst_web.exists():
             shutil.rmtree(dst_web)
         shutil.copytree(src_web, dst_web)
     (prefix_p / "run").mkdir(parents=True, exist_ok=True)
 
-    # init 幂等渲染：etc/Caddyfile + run/oxfile.toml（server+caddy 恒定 + weaknet-serve 条件
-    # 渲染 [M-1]——bin 在场才写，判定单点在 Rust render_oxfile）+ secret 自举（0600）
-    # SFU 端口/公告隔离：部署前 export MEDIASERVO_SFU_PORT / MEDIASERVO_SFU_ANNOUNCED_IP，init 烘进 oxfile env
+    # init renders idempotently: etc/Caddyfile + run/oxfile.toml (server+caddy always + weaknet-serve conditionally
+    # rendered [M-1] — written only when bin is present; the check lives in Rust render_oxfile) + secret bootstrap (0600)
+    # SFU port/announce isolation: export MEDIASERVO_SFU_PORT / MEDIASERVO_SFU_ANNOUNCED_IP before deploy; init bakes them into the oxfile env
     _run_or_exit([str(server_cli), "init", str(prefix_p)])
-    # lck-F4：migrated = oxfile ∨ Caddyfile 任一迁移 → 统一走本回吸收路径（carried 只补缺
-    # 键，未迁移侧幂等 no-op——单一触发面防半迁移假成功）
+    # lck-F4: migrated = oxfile OR Caddyfile migrated → the single re-absorption path runs (carried only fills missing
+    # keys; the non-migrated side is an idempotent no-op — one trigger surface prevents half-migration false success)
     if migrated:
         got = _reapply_carried_env(prefix_p, carried_envs)
         if got:
-            print(f"  运维 env 已回吸收: {', '.join(got)}")
+            print(f"  ops env re-absorbed: {', '.join(got)}")
 
-    # bin 白名单（host 同构——deploy-ops ④）：非当前布局的 server/weaknet 二进制删除
-    # （upstream 旧名/旧品牌残留；mediaservo-server 仅无 brand 布局保留）。
-    # weaknet 与 server 同构（2026-09-10 改判，旧 BA-2① 双名恒留作废）：原地装配已把
-    # 上游名改名消耗；brand 空时白名单项 _weaknet_bin_name("")=上游名恒等命中。树内
-    # 残留的上游名/旧品牌（历史拷贝布局/中断）走下方 endswith 清理分支删除。
+    # bin whitelist (host isomorphic — deploy-ops 4): delete server/weaknet binaries not in the current layout
+    # (upstream old names / old-brand residue; mediaservo-server kept only in brand-less layouts).
+    # weaknet isomorphic with server (2026-09-10 revision; the old BA-2(i) keep-both-names rule is void): in-place assembly already
+    # consumed the upstream name via rename; with an empty brand the whitelist entry _weaknet_bin_name("") equals the upstream name and always hits. In-tree
+    # residual upstream names / old brands (historical copy layouts / interruptions) fall to the endswith cleanup branch below.
     for p in sorted(bin_dir.iterdir()):
         if p.is_symlink() or not p.is_file():
             continue
         if p.name in {_exe_name("oxmgr"), bin_name, _weaknet_bin_name(brand)}:
             continue
         if p.name.endswith(("-server", "-weaknet")) or p.name == _exe_name("mediaservo-server"):
-            print(f"  清理部署残留: {p.name}")
+            print(f"  cleaning deployment residue: {p.name}")
             p.unlink()
 
-    # 根级快捷名（host 同构——brand 非空只建 {brand}-server 链；brand 空 = 上游双快捷，永不建 "-server" 残名）
+    # root-level shortcuts (host isomorphic — a non-empty brand creates only the {brand}-server link; empty brand = dual upstream shortcuts, never a "-server" leftover)
     if brand:
         shortcut_names = (shortcut,)
     else:
@@ -1179,13 +1179,13 @@ def _cmd_deploy_server(prefix: str) -> None:
         if link.is_symlink() or link.exists():
             link.unlink(missing_ok=True)
         try:
-            link.symlink_to(f"bin/{bin_name}")  # 相对路径，前缀可搬迁
-            print(f"  已创建符号链接 {link} → bin/{bin_name}")
+            link.symlink_to(f"bin/{bin_name}")  # relative path; the prefix stays relocatable
+            print(f"  created symlink {link} → bin/{bin_name}")
         except OSError:
             shutil.copy2(bin_dir / bin_name, link)
             os.chmod(link, 0o755)
-            print(f"  已复制 {bin_name} 到 {link}（符号链接失败，回退到拷贝）")
-    # 旧品牌根级链清理（只碰指向本布局 bin/ 的 *-server 文件链，目录永不触碰）
+            print(f"  copied {bin_name} to {link} (symlink failed, fell back to copy)")
+    # old-brand root-level link cleanup (touch only *-server file links pointing into this layout's bin/; directories are never touched)
     for link in prefix_p.glob("*-server"):
         if not link.is_symlink() or link.name == shortcut:
             continue
@@ -1194,68 +1194,68 @@ def _cmd_deploy_server(prefix: str) -> None:
         except OSError:
             continue
         if resolved.parent == bin_dir.resolve() and link.name.endswith("-server"):
-            print(f"  清理旧品牌入口链: {link.name}")
+            print(f"  cleaning old-brand entry link: {link.name}")
             link.unlink()
 
-    print(f"server 已部署到 {prefix}" + ("（原地装配——渲染完成，可直接 start）" if inplace else "")
-          + (f"（品牌 {brand}）" if brand else ""))
-    print(f"  bin/    {server_bin_name}（物理名品牌化——D269）+ oxmgr（D-H13 锁定）")
-    print("  etc/    server/devices/accounts.yaml + Caddyfile + secret（重部署保留既有——PIT-160）")
-    print("  web/    前端交付物整树平移（caddy 静态 root）")
-    print("  run/    oxfile.toml + oxmgr/（OXMGR_DATA_DIR——C32 隔离）+ logs/")
-    print("  入口:   " + ", ".join(str(prefix_p / s) for s in shortcut_names) + f" → bin/{bin_name}")
-    print("⚠ accounts.yaml 为 dev 占位模板（admin123 等）——裸机启动将 fail-fast（C35 守卫）:")
-    print('    生产: export MEDIASERVO_ADMIN_PASSWORD=*** 后删 etc/accounts.yaml 重跑本 deploy')
-    print('    联调: run/oxfile.toml server 条目 [apps.env] 加 MEDIASERVO_ALLOW_DEV_CREDENTIALS = "1"')
-    print("下一步（实例目录命令, 本 CLI 运行分支已退役——C39）:")
-    print(f"  启动:   {prefix_p / shortcut} start {prefix}（仅后端: 加 --no-web；前端面过渡可用 mediaservo run web）")
-    print(f"  探测:   {prefix_p / shortcut} status {prefix}（退出码 0/1/2）| doctor {prefix}")
-    print(f"  开机锚点（操作方步骤, 一次性）: {prefix_p / shortcut} startup on {prefix}")
+    print(f"server deployed to {prefix}" + (" (assembled in place — rendering complete, start directly)" if inplace else "")
+          + (f" (brand {brand})" if brand else ""))
+    print(f"  bin/    {server_bin_name} (physical name branded — D269) + oxmgr (pinned by D-H13)")
+    print("  etc/    server/devices/accounts.yaml + Caddyfile + secret (redeploys keep existing — PIT-160)")
+    print("  web/    frontend deliverables moved as a whole tree (caddy static root)")
+    print("  run/    oxfile.toml + oxmgr/ (OXMGR_DATA_DIR — C32 isolation) + logs/")
+    print("  entrypoints: " + ", ".join(str(prefix_p / s) for s in shortcut_names) + f" → bin/{bin_name}")
+    print("⚠ accounts.yaml is a dev placeholder template (admin123 etc.) — bare-metal startup will fail-fast (C35 guard):")
+    print('    production: export MEDIASERVO_ADMIN_PASSWORD=*** then delete etc/accounts.yaml and re-run this deploy')
+    print('    integration: add MEDIASERVO_ALLOW_DEV_CREDENTIALS = "1" under the server entry [apps.env] in run/oxfile.toml')
+    print("Next steps (instance-directory commands; this CLI's run branch is retired — C39):")
+    print(f"  start:   {prefix_p / shortcut} start {prefix} (backend only: add --no-web; frontend transition: mediaservo run web)")
+    print(f"  probe:   {prefix_p / shortcut} status {prefix} (exit codes 0/1/2) | doctor {prefix}")
+    print(f"  boot anchor (operator step, one-time): {prefix_p / shortcut} startup on {prefix}")
 
 
 def _platform_tag() -> str:
-    """wheel 平台 tag（Linux x86_64 → linux_x86_64；其余平台 best-effort）。"""
+    """wheel platform tag (Linux x86_64 → linux_x86_64; other platforms best-effort)."""
     import platform
     mach = platform.machine().lower().replace("-", "_")
     return f"{platform.system().lower()}_{mach}"
 
 
 def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
-    """从 out/bindings 部署完整 SDK 布局（D241 三件套 version-full + include C/cxx + .pc + cmake
-    + python/wheel + node——build 已组装，deploy 纯拷贝）。SDK 品牌无关（libmediaservo_* 原样，D3）。
-    prefix 缺省 = `<out>/bindings`（room-grouping 同源：out 根随调用壳解析——msrtc.sh 注入
-    MSRTC_OUT_ROOT=主仓 out；mediaservo.sh/裸 CLI fallback 子模块 out。同树 deploy=幂等守卫）。
-    D4 收窄（2026-09-29）：bindings 纯静态无状态 → 可默认；host/server 仍必填（运行数据防误写）。"""
+    """Deploy the full SDK layout from out/bindings (D241 version-full triple + include C/cxx + .pc + cmake
+    + python/wheel + node — build already assembled it; deploy is a pure copy). SDK is brand-independent (libmediaservo_* kept verbatim, D3).
+    prefix default = `<out>/bindings` (same root as room-grouping: the out root resolves per calling shell — msrtc.sh injects
+    MSRTC_OUT_ROOT = the main repo's out; mediaservo.sh / bare CLI fall back to the submodule's out. Same-tree deploy = idempotent guard).
+    D4 narrowed (2026-09-29): bindings are pure-static/stateless → defaultable; host/server still mandatory (protects runtime data from mis-writes)."""
     if not prefix:
         prefix = str(_out_root() / "bindings")
-        print(f"[deploy bindings] prefix 缺省 → {prefix}（out 根随调用壳；--prefix 可覆盖）")
+        print(f"[deploy bindings] prefix default → {prefix} (out root follows the calling shell; --prefix overrides)")
     src = _out_root() / "bindings"
     if not (src / "lib").is_dir():
-        print(f"错误: {src} 无组装产物 — 先 build bindings", file=sys.stderr)
+        print(f"Error: no assembled artifacts in {src} — run build bindings first", file=sys.stderr)
         sys.exit(1)
     prefix_p = Path(prefix)
     try:
         prefix_p.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        print(f"错误: 无法创建 {prefix_p}: {e} — 部署用 sudo msrtc.sh deploy bindings --prefix /opt/mediaservo-sdk", file=sys.stderr)
+        print(f"Error: cannot create {prefix_p}: {e} — for deployment use sudo msrtc.sh deploy bindings --prefix /opt/mediaservo-sdk", file=sys.stderr)
         sys.exit(1)
     lib_dir = prefix_p / "lib"
     lib_dir.mkdir(parents=True, exist_ok=True)
-    # 同树幂等守卫（build:deploy bindings 默认前缀=out/bindings=组装源本身）：
-    # build 阶段已把 lib/include/cmake/wheel 装配到位，再复制=SameFileError（09-21 实炸；
-    # server/host 部署 L982 同款，bindings 路径漏了——V1b 交付面扩 client.so 后首咬）。
+    # same-tree idempotent guard (build:deploy bindings default prefix = out/bindings = the assembly source itself):
+    # the build phase already placed lib/include/cmake/wheel; re-copying = SameFileError (exploded on 09-21;
+    # the same guard exists in server/host deploy L982; the bindings path missed it — first bite after V1b widened the delivery surface with client.so).
     if prefix_p.resolve() == src.resolve():
         sos = sorted(x.name for x in (src / "lib").glob("libmediaservo_*.so*"))
     else:
         sos = []
         for so in sorted((src / "lib").glob("libmediaservo_*.so*")):
-            _copy_with_kill(so, lib_dir / so.name)  # busy（运行中加载）→ 杀占用重试
+            _copy_with_kill(so, lib_dir / so.name)  # busy (loaded by a running process) → kill the occupier and retry
             sos.append(so.name)
-        # lib/ 内子目录（pkgconfig/cmake）——.so 已单独 busy 重试，子目录直接整树复制
+        # subdirectories inside lib/ (pkgconfig/cmake) — .so files already retried individually on busy; subdirs are copied tree-wide directly
         for sub in sorted((src / "lib").iterdir()):
             if sub.is_dir():
                 shutil.copytree(sub, lib_dir / sub.name, dirs_exist_ok=True)
-        # 其余（include/.pc/cmake/python/wheel/node）整树复制——.so 已单独 busy 重试
+        # everything else (include/.pc/cmake/python/wheel/node) copied tree-wide — .so files already retried individually on busy
         for e in sorted(src.iterdir()):
             if e.name == "lib":
                 continue
@@ -1264,31 +1264,31 @@ def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
                 shutil.copytree(e, dst, dirs_exist_ok=True)
             elif e.is_file() or e.is_symlink():
                 shutil.copy2(e, dst, follow_symlinks=False)
-    print(f"bindings 已部署到 {prefix}（lib/ {', '.join(sos)} + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx）")
-    print("  使用: export LD_LIBRARY_PATH=<prefix>/lib && 链接库见 bindings 头文件；python: pip install <prefix>/wheel/*.whl")
+    print(f"bindings deployed to {prefix} (lib/ {', '.join(sos)} + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx)")
+    print("  usage: export LD_LIBRARY_PATH=<prefix>/lib; link per the bindings headers; python: pip install <prefix>/wheel/*.whl")
 
 
-# ── package: dist/ 双包发布（D-H13）──────────────────────────
+# ── package: dist/ dual-package release (D-H13) ──────────────────────────
 def _stage_sdk_package(staging: Path, domain: str) -> None:
-    """V1b 双包切分（F12：设备半区 sdk-field / 舱端半区 sdk-client）——
-    源 = out/bindings 单树（deploy bindings 全形），按域文件清单切分；
-    cmake config 按域重渲染 SDK_LIST（consumers 只见本包组件，未知组件报错=正确）。"""
+    """V1b dual-package split (F12: device half = sdk-field / cockpit half = sdk-client) —
+    source = the single out/bindings tree (the full deploy bindings form), split by per-domain file lists;
+    the cmake config re-renders SDK_LIST per domain (consumers see only this package's components; unknown components erroring = correct)."""
     src = _out_root() / "bindings"
     if not src.exists():
-        print("错误: out/bindings 不存在——先 build bindings", file=sys.stderr)
+        print("Error: out/bindings does not exist — run build bindings first", file=sys.stderr)
         sys.exit(1)
     shutil.copytree(src, staging, dirs_exist_ok=True, symlinks=True)
     sdk_cmake = staging / "lib" / "cmake" / "mediaservo"
     ver = _crate_version(_TARGET_CRATE[domain])
     major = ver.split(".")[0]
     if domain == "sdk-client":
-        # 摘设备面：libs 除 client 三件套、include 除 field/link/deck 头、pc、py/node/wheel
+        # strip the device surface: libs except the client triple, include except field/link/deck headers, pc, py/node/wheel
         for pat in ("libmediaservo_field", "libmediaservo_link", "libmediaservo_deck"):
             for p in (staging / "lib").glob(f"{pat}*"):
                 p.unlink()
         shutil.rmtree(staging / "wheel", ignore_errors=True)
         shutil.rmtree(staging / "node", ignore_errors=True)
-        for pydir in (staging / "lib").glob("python3.*"):  # pip --prefix 实体在此（非顶层 python/）
+        for pydir in (staging / "lib").glob("python3.*/site-packages/mediaservo/"):  # pip --prefix lands here (not a top-level python/)
             shutil.rmtree(pydir, ignore_errors=True)
         for name in ("field.h", "field.hpp", "link.h", "link.hpp", "deck.h", "deck.hpp"):
             (staging / "include" / "mediaservo" / name).unlink(missing_ok=True)
@@ -1297,7 +1297,7 @@ def _stage_sdk_package(staging: Path, domain: str) -> None:
         for name in ("field.md", "link.md", "deck.md"):
             (staging / "docs" / "sdk-cxx" / name).unlink(missing_ok=True)
         sdk_list = "client"
-    else:  # sdk-field（含 bindings alias）
+    else:  # sdk-field (includes the bindings alias)
         for p in (staging / "lib").glob("libmediaservo_client*"):
             p.unlink()
         for name in ("client.h", "client.hpp"):
@@ -1312,12 +1312,12 @@ def _stage_sdk_package(staging: Path, domain: str) -> None:
             .replace("@VERSION@", ver).replace("@MAJOR@", major).replace("@SDK_LIST@", sdk_list))
 
 
-_SDK_EXTRA = {"python", "node"}  # sdk-field 非 C 组件（发现面对 py/npm 消费方）
+_SDK_EXTRA = {"python", "node"}  # sdk-field's non-C components (discovery surface for py/npm consumers)
 
 
 def _write_manifest_file(dst: Path, domain: str, pkg_root: Path) -> None:
-    """N2 交付发现 manifest（机械派生零新事实源）：components 来自包实际 staging
-    内容 + readelf ffmpeg 实据——消费方（ROS/打包器/CI）不 parse CMake 即可枚举能力面。"""
+    """N2 delivery discovery manifest (mechanically derived, zero new sources of truth): components come from the package's actual staging
+    contents + readelf ffmpeg evidence — consumers (ROS/packagers/CI) can enumerate the capability surface without parsing CMake."""
     ver = _crate_version(_TARGET_CRATE[domain])
     comps = []
     for so in sorted((pkg_root / "lib").glob("libmediaservo_*.so")):
@@ -1325,9 +1325,9 @@ def _write_manifest_file(dst: Path, domain: str, pkg_root: Path) -> None:
         try:
             nee = subprocess.run(["readelf", "-d", str(so.resolve() if so.is_symlink() else so)],
                                  capture_output=True, text=True, timeout=10).stdout
-            ffmpeg = bool(re.search(r"NEEDED.*\[libav(format|codec)", nee))  # DT_NEEDED 名=libav*
+            ffmpeg = bool(re.search(r"NEEDED.*\[libav(format|codec)", nee))  # DT_NEEDED names are libav*
         except (OSError, subprocess.TimeoutExpired):
-            ffmpeg = None  # readelf 缺席（非 Linux）= 未知而非 false（诚实形）
+            ffmpeg = None  # readelf absent (non-Linux) = unknown, not false (honest form)
         comps.append({
             "name": name, "lib": f"lib/{so.name}",
             "header": f"include/mediaservo/{name}.h",
@@ -1352,26 +1352,26 @@ def _write_manifest_file(dst: Path, domain: str, pkg_root: Path) -> None:
 
 
 def _write_version_file(dst: Path, target: str) -> None:
-    """版本契约文件（D-H13: 版本兼容靠协议契约显式配对, 非同包隐含）。
-    host-version.txt / sdk-version.txt: workspace 版本 + FrameMeta wire 版本 + 令牌 schema 版本。
-    消费方（ROS/算法）校验 sdk-version.txt 与 host 包配对; 信令 wire 契约随 workspace 演进,
-    独立协议版本号 = 后续工作（D-H14 全量版本化方案）。"""
+    """Version contract file (D-H13: version compatibility relies on explicit protocol-contract pairing, not same-package implication).
+    host-version.txt / sdk-version.txt: workspace version + FrameMeta wire version + token schema version.
+    consumers (ROS/algorithms) verify sdk-version.txt pairs with the host package; the signaling wire contract evolves with the workspace,
+    an independent protocol version number = follow-up work (D-H14 full versioning scheme)."""
     ver = _crate_version(_TARGET_CRATE.get(target, "mediaservo-link"))
     lines = [
-        f"# mediaservo-{target}-{ver} — 协议契约版本声明（D-H13/D-H14 最小版）",
+        f"# mediaservo-{target}-{ver} — protocol contract version declaration (D-H13/D-H14 minimal)",
         f"workspace_version: {ver}",
-        f"frame_meta_version: {_frame_meta_wire_version()}",  # 源生成（WIRE_VERSION）
-        f"token_schema_version: {_token_file_version()}",  # MSTK 令牌文件版本源生成（D-H10; link token.rs）
-        "# host 包部署: 裸解包生成版本目录；落地到前缀目录用 `tar xzf <pkg>.tar.gz -C <prefix> --strip-components=1`",
-        "# 多设备共用同一包时, 每台删除 identity.json 后重跑",
-        "# `host init <prefix>`（幂等, 已存在凭据保留）生成独立设备身份（G4）"
+        f"frame_meta_version: {_frame_meta_wire_version()}",  # source-generated (WIRE_VERSION)
+        f"token_schema_version: {_token_file_version()}",  # MSTK token file version source-generated (D-H10; link token.rs)
+        "# host package deploy: bare unpack creates the versioned dir; to land into a prefix dir use `tar xzf <pkg>.tar.gz -C <prefix> --strip-components=1`",
+        "# when multiple devices share one package, delete identity.json on each device and re-run",
+        "# `host init <prefix>` (idempotent, existing credentials kept) to generate an independent device identity (G4)"
     ]
     (dst / f"{target}-version.txt").write_text("\n".join(lines) + "\n")
 
 
 def _git_out(args: list[str], timeout: int = 10) -> str | None:
-    """git 只读查询（capture stdout，cwd=仓库根）；任何失败（无 git/浅克隆/超时）→ None 不抛
-    ——package CHANGES 生成的降级面（package-changes design §边界）。"""
+    """Read-only git query (captures stdout, cwd = repo root); any failure (no git / shallow clone / timeout) → None, never raises
+    — the degraded surface of package CHANGES generation (package-changes design §boundaries)."""
     try:
         r = subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
@@ -1379,12 +1379,12 @@ def _git_out(args: list[str], timeout: int = 10) -> str | None:
     return r.stdout if r.returncode == 0 else None
 
 
-# V4/F11-X：scope 标记 → 包路由表（词表=CI lint 守护；protocol=全链路词三包全带，
-# deploy=集群侧仅 host/server；V1 四包化时 sdk-field/sdk-client 拆独立行）。
+# V4/F11-X: scope marker → package routing table (vocabulary guarded by CI lint; protocol = full-chain term carried by all three packages,
+# deploy = cluster side, host/server only; when V1 becomes four packages, split sdk-field/sdk-client into dedicated rows).
 CHANGES_SCOPES = {
     "host": {"host", "protocol", "deploy"},
     "server": {"server", "protocol", "deploy"},
-    "bindings": {"sdk-field", "protocol"},      # alias = sdk-field 形
+    "bindings": {"sdk-field", "protocol"},      # alias = sdk-field form
     "sdk-field": {"sdk-field", "protocol"},
     "sdk-client": {"sdk-client", "protocol"},
 }
@@ -1393,13 +1393,13 @@ _MARKERS = re.compile(r"\[([a-z0-9-]+)\]")
 
 
 def _cl_keep(first_line: str, keep: set[str]) -> bool:
-    tags = _MARKERS.findall(first_line[: first_line.find("：") if "：" in first_line else len(first_line)])
-    # 无标记 = 全带（F11-X 前历史节条目/升级注意散文——宁全勿缺；新条目由 CI 门强制有标记）
+    tags = _MARKERS.findall(first_line[: first_line.find(":") if ":" in first_line else len(first_line)])
+    # no markers = carry everything (pre-F11-X historical entries / upgrade-note prose — better too many than missing; new entries are marker-enforced by the CI gate)
     return (not tags) or any(t in keep for t in tags)
 
 
 def _cl_items(lines: list[str]):
-    """条目块生成器：("- "行+缩进续行) 与 其他行 逐块产出 (is_item, block)。"""
+    """Entry-block generator: yields ("- " line + indented continuations) and other lines block by block as (is_item, block)."""
     i, n = 0, len(lines)
     while i < n:
         if lines[i].startswith("- "):
@@ -1417,7 +1417,7 @@ def _cl_items(lines: list[str]):
 
 
 def _cl_render_block(head: str | None, body: list[str], keep: set[str]) -> list[str]:
-    """小节渲染：条目过滤；无保留条目 = 空节（返回 [] 表示丢弃）。"""
+    """Subsection rendering: filter entries; no kept entries = empty section (return [] to drop it)."""
     out: list[str] = []
     for is_item, blk in _cl_items(body):
         if is_item and not _cl_keep(blk[0], keep):
@@ -1429,8 +1429,8 @@ def _cl_render_block(head: str | None, body: list[str], keep: set[str]) -> list[
 
 
 def _changelog_slice(text: str, keep: set[str]) -> str:
-    """F11-X 机械切片（D280 单源不动，仅进包时路由）：
-    条目="- "行+缩进续行，[scope] ∈ keep 保留；空小节/空版本节丢弃；文件头恒留。"""
+    """F11-X mechanical slicing (D280 single source stays untouched; routing happens only when packaging):
+    entries = "- " line + indented continuations; [scope] in keep survives; empty subsections / empty version sections are dropped; the file header always stays."""
     lines = text.splitlines()
     head_end = next((i for i, l in enumerate(lines) if l.startswith("## ")), len(lines))
     out = lines[:head_end]
@@ -1443,7 +1443,7 @@ def _changelog_slice(text: str, keep: set[str]) -> str:
         while j < n and not lines[j].startswith("## "):
             j += 1
         ver_head, ver_body = lines[i], lines[i + 1:j]
-        # ## 体按 ### 切块逐节渲染
+        # the ## body is split by ### into blocks and rendered section by section
         blocks: list[tuple[str | None, list[str]]] = []
         cur: tuple[str | None, list[str]] = (None, [])
         for ln in ver_body:
@@ -1464,13 +1464,13 @@ def _changelog_slice(text: str, keep: set[str]) -> str:
 
 
 def _write_changes_file(staging: Path, target: str) -> None:
-    """发布包内嵌更新日志（D280 单源 + F11-X 机械切片 V4）：
-    仓根 CHANGELOG.md 按 [scope] 标记路由进包（CHANGES_SCOPES 表）。
-    未知 target / 全空切片 → 降级直拷全文（宁全勿缺）。源缺失 → WARN 不阻断。"""
+    """Embed the changelog into release packages (D280 single source + F11-X mechanical slicing V4):
+    the repo-root CHANGELOG.md is routed into packages by [scope] markers (CHANGES_SCOPES table).
+    unknown target / all-empty slice → degrade to copying the full text (better too many than missing). Missing source → WARN without blocking."""
     try:
         text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     except OSError:
-        print("WARN: CHANGELOG.md 缺失——包内不带 CHANGES.md（不阻断打包）", file=sys.stderr)
+        print("WARN: CHANGELOG.md missing — package ships without CHANGES.md (packaging not blocked)", file=sys.stderr)
         return
     keep = CHANGES_SCOPES.get(target)
     if keep:
@@ -1480,88 +1480,88 @@ def _write_changes_file(staging: Path, target: str) -> None:
     try:
         (staging / "CHANGES.md").write_text(text, encoding="utf-8")
     except OSError as e:
-        print(f"WARN: CHANGES.md 写盘失败（{e}）——不阻断打包", file=sys.stderr)
+        print(f"WARN: CHANGES.md write failed ({e}) — packaging not blocked", file=sys.stderr)
 
 
 def _cmd_package(args: argparse.Namespace) -> None:
-    """package <target> — <dist>/<brand>-{host|server|sdk}-<ver>.tar.gz 多包发布（D-H13）。
-    dist: --dist 指定输出目录；未指定时默认子模块 dist/（MSRTC 发布壳会注入 out/packages/）。
-    server: staging 内跑 _cmd_deploy_server（bin+oxmgr/etc/web/init 幂等——与 host 同构, T20/T21）。
-    host: staging 内跑 _cmd_deploy_host(staging)（Momus 裁决 b——identity 初始/oxmgr 锁定/
-    etc 模板/env.sh 文件组装；build 仍无状态）+ tar 含 bin 8/oxmgr/etc/identity/run/logs/recordings。
-    bindings: staging 拷贝 out/bindings（完整 SDK 布局——D241 三件套 version-full/.pc/cmake/
-    wheel/node/cxx 头，Task 2.5 补齐）→ sdk 包。
-    staging 临时目录 → tar.gz; tar 内顶层为版本目录 {brand}-{target}-{ver}/，裸解包不会撒出凭据/二进制；
-    需要直接落地到前缀目录时用 `tar xzf package.tar.gz -C <prefix> --strip-components=1`。"""
+    """package <target> — <dist>/<brand>-{host|server|sdk}-<ver>.tar.gz multi-package release (D-H13).
+    dist: --dist selects the output dir; defaults to the submodule dist/ when unspecified (the MSRTC release shell injects out/packages/).
+    server: run _cmd_deploy_server inside staging (bin+oxmgr/etc/web/init idempotent — isomorphic with host, T20/T21).
+    host: run _cmd_deploy_host(staging) inside staging (Momus ruling b — identity init / oxmgr pinning /
+    etc template / env.sh file assembly; build stays stateless) + tar contains bin 8/oxmgr/etc/identity/run/logs/recordings.
+    bindings: staging copies out/bindings (full SDK layout — D241 version-full triple /.pc / cmake /
+    wheel / node / cxx headers, completed by Task 2.5) → sdk package.
+    staging temp dir → tar.gz; the tar's top level is the versioned dir {brand}-{target}-{ver}/, so a bare unpack never scatters credentials/binaries;
+    to land directly into a prefix dir use `tar xzf package.tar.gz -C <prefix> --strip-components=1`."""
     if sys.platform == "win32":
-        print("package: Windows best-effort — 验证清单见 scripts/e2e-win-validate.ps1", file=sys.stderr)
+        print("package: Windows best-effort — validation checklist in scripts/e2e-win-validate.ps1", file=sys.stderr)
     if args.target == "bindings":
-        print("WARN: target `bindings` 已更名 `sdk-field`（F12 双半区切分；本 alias 保留一个版本周期）",
+        print("WARN: target `bindings` renamed to `sdk-field` (F12 dual-half split; this alias stays for one version cycle)",
               file=sys.stderr)
     pkg_name = {"bindings": "sdk", "server": "server"}.get(args.target, args.target)
     ver = _crate_version(_TARGET_CRATE[args.target])
-    # C43⑧ 发版完整性守卫：工作区 Cargo.toml 相对 HEAD 有差且 git 可用 → 打包版本无
-    # git 锚（tag 无从落，v0.1.8.2 漂浮号事故同族）——WARN 不阻断（调试包允许脏树）。
+    # C43(8) release integrity guard: the workspace Cargo.toml differs from HEAD and git is available → the packaged version has no
+    # git anchor (no tag to attach, same family as the v0.1.8.2 floating-number incident) — WARN without blocking (debug packages may be dirty).
     if _git_out(["log", "-1", "--format=%s"]) is not None and \
             _git_out(["diff", "--quiet", "HEAD", "--", "Cargo.toml",
                                   "crates/mediaservo-host/Cargo.toml",
                                   "crates/mediaservo-server/Cargo.toml",
                                   "crates/mediaservo-field/Cargo.toml",
                                   "crates/mediaservo-client/Cargo.toml"]) is None:
-        print(f"WARN: Cargo.toml 未提交改动承载版本 {ver}——发版前 commit bump + tag v{ver}"
-              "（当前包 CHANGES 头部版本无 git 锚）", file=sys.stderr)
+        print(f"WARN: Cargo.toml has uncommitted changes carrying version {ver} — before release: commit the bump + tag v{ver}"
+              " (this package's CHANGES header version has no git anchor)", file=sys.stderr)
     dist = Path(args.dist) if getattr(args, "dist", "") else ROOT / "dist"
     dist.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f"ms-{args.target}-pkg-", dir=str(dist)))
     try:
         if args.target == "host":
-            _cmd_deploy_host(str(staging), args.release)  # brand 经 MEDIASERVO_BRAND 环境/已装实例推导（D266）
+            _cmd_deploy_host(str(staging), args.release)  # brand via MEDIASERVO_BRAND env / installed-instance derivation (D266)
         elif args.target == "server":
-            _cmd_deploy_server(str(staging))  # 同 deploy 语义整树入 staging（init 幂等落 staging）
+            _cmd_deploy_server(str(staging))  # same deploy semantics, whole tree into staging (init lands idempotently in staging)
         elif args.target in ("bindings", "sdk-field"):
-            _stage_sdk_package(staging, "sdk-field")  # bindings = 一周期 alias（F12 更名 WARN 见上）
+            _stage_sdk_package(staging, "sdk-field")  # bindings = one-cycle alias (F12 rename WARN above)
         elif args.target == "sdk-client":
             _stage_sdk_package(staging, "sdk-client")
         else:
-            print(f"错误: 未知 package 目标 {args.target!r}（可选 host|server|sdk-field|sdk-client，bindings=alias）",
+            print(f"Error: unknown package target {args.target!r} (valid: host|server|sdk-field|sdk-client, bindings=alias)",
                   file=sys.stderr)
             sys.exit(2)
         _write_version_file(staging, pkg_name)
         if args.target in ("bindings", "sdk-field", "sdk-client"):
             _write_manifest_file(staging, "sdk-client" if args.target == "sdk-client" else "sdk-field", staging)
         prefix_name = args.brand if args.brand else "mediaservo"
-        _write_changes_file(staging, args.target)  # D280 单源 + F11-X 切片（WARN 降级不阻断）
+        _write_changes_file(staging, args.target)  # D280 single source + F11-X slicing (WARN-degraded, non-blocking)
         package_root = f"{prefix_name}-{pkg_name}-{ver}"
         out = dist / f"{package_root}.tar.gz"
-        strip_package_binaries(staging)  # PIT-119: debug 二进制未 strip（单 135-155MB）→ gzip 1.2GB 超时
-        with tarfile.open(out, "w:gz", compresslevel=6) as tar:  # 默认 9 最慢; 6 工程折中
-            tar.add(staging, arcname=package_root)  # 解包生成版本目录；--strip-components=1 可落前缀目录
-        print(f"✓ 打包完成: {out}（{out.stat().st_size // 1024} KiB）")
-        print(f"  顶层目录: {package_root}/")
-        print(f"  内容: {', '.join(sorted(e.name for e in staging.iterdir()))}")
+        strip_package_binaries(staging)  # PIT-119: unstripped debug binaries (135-155MB each) → gzip 1.2GB timeout
+        with tarfile.open(out, "w:gz", compresslevel=6) as tar:  # default 9 is slowest; 6 is the engineering trade-off
+            tar.add(staging, arcname=package_root)  # unpacking creates the versioned dir; --strip-components=1 lands the prefix dir
+        print(f"✓ packaged: {out} ({out.stat().st_size // 1024} KiB)")
+        print(f"  top-level dir: {package_root}/")
+        print(f"  contents: {', '.join(sorted(e.name for e in staging.iterdir()))}")
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
-# 排除的接口类型/名称：docker 网桥、虚拟接口（这些 IP 客户端不可达）。
-# 注意: tun/vpn **不排除**——VPN 组网场景下隧道 IP 正是客户端可达路径（10.144.0.3 实证）；
-# 公告多余候选无害（ICE 多候选，对端连不通自动跳过）。
+# Excluded interface types/names: docker bridges, virtual interfaces (these IPs are unreachable by clients).
+# Note: tun/vpn are **not excluded** — in VPN-mesh scenarios the tunnel IP is exactly the client-reachable path (proven at 10.144.0.3);
+# extra announced candidates are harmless (ICE multi-candidate; peers skip unreachable ones automatically).
 _ANNOUNCED_IP_BLOCKED_IFACE = ("lo", "docker", "br-", "veth", "virbr")
 
 
 def _detect_announced_ips() -> list[str]:
-    """探测宿主机全部真实网卡 IP（供容器内 mediasoup announced_address 使用）。
+    """Detect all real NIC IPs of the host machine (for mediasoup announced_address inside containers).
 
-    宿主 IP 会变且可能有多个（多网卡/DHCP）——返回全部真实 IP（逗号分隔），
-    由 server 侧为每个 IP 创建 ListenInfo（WebRtcServer 多 announced）。
-    按接口名过滤 docker 网桥(br-*)/虚拟接口(veth/virbr)；tun/vpn **保留**
-    （VPN 组网隧道 IP 正是客户端可达路径——PIT-143 多 IP 公告语义，非过滤对象）。"""
+    Host IPs change and may be multiple (multi-NIC/DHCP) — returns all real IPs (comma-separated),
+    and the server side creates a ListenInfo per IP (WebRtcServer multi-announced).
+    Filters docker bridges (br-*) / virtual interfaces (veth/virbr) by name; tun/vpn are **kept**
+    (VPN-mesh tunnel IPs are exactly the client-reachable path — PIT-143 multi-IP announcement semantics, not filter targets)."""
     ips: list[str] = []
     try:
         out = subprocess.run(
             ["ip", "-o", "-4", "addr", "show"], capture_output=True, text=True, timeout=5, check=False
         )
         for line in out.stdout.splitlines():
-            # 格式: "2: ens32    inet 192.168.2.127/24 brd ... scope global ..."
+            # format: "2: ens32    inet 192.168.2.127/24 brd ... scope global ..."
             parts = line.split()
             if len(parts) < 4 or parts[2] != "inet":
                 continue
@@ -1574,7 +1574,7 @@ def _detect_announced_ips() -> list[str]:
             if ip not in ips:
                 ips.append(ip)
     except OSError:
-        # ip 命令不可用 → 回退 hostname -I（粗过滤）
+        # ip command unavailable → fall back to hostname -I (coarse filter)
         try:
             out = subprocess.run(
                 ["hostname", "-I"], capture_output=True, text=True, timeout=5, check=False
@@ -1589,10 +1589,10 @@ def _detect_announced_ips() -> list[str]:
 
 
 def _compose_env(announced_ip: str | None = None) -> dict[str, str]:
-    """docker compose 调用环境 — 确保 MEDIASERVO_SFU_ANNOUNCED_IP 有值。
-    PIT-79: CLI 启动 server 时若未注入，mediasoup 公告 0.0.0.0 → 浏览器拉流失败。
-    显式 --announced-ip（参数/env）优先，否则自动探测宿主机全部真实 IP（逗号分隔，多网卡支持）。
-    显式给值时跳过"自动探测"打印（T3 minor）。"""
+    """docker compose invocation env — ensures MEDIASERVO_SFU_ANNOUNCED_IP has a value.
+    PIT-79: if the CLI starts the server without injection, mediasoup announces 0.0.0.0 → browser pull fails.
+    Explicit --announced-ip (arg/env) wins; otherwise auto-detect all real host IPs (comma-separated, multi-NIC support).
+    When given explicitly, skip the "auto-detect" print (T3 minor)."""
     env = {**os.environ}
     if announced_ip:
         env["MEDIASERVO_SFU_ANNOUNCED_IP"] = announced_ip
@@ -1600,35 +1600,35 @@ def _compose_env(announced_ip: str | None = None) -> dict[str, str]:
         ips = _detect_announced_ips()
         if ips:
             env["MEDIASERVO_SFU_ANNOUNCED_IP"] = ",".join(ips)
-            print(f"MEDIASERVO_SFU_ANNOUNCED_IP 自动探测: {env['MEDIASERVO_SFU_ANNOUNCED_IP']}")
+            print(f"MEDIASERVO_SFU_ANNOUNCED_IP auto-detected: {env['MEDIASERVO_SFU_ANNOUNCED_IP']}")
     return env
 
 
 def _host_runtime_hint(action: str) -> None:
-    """host 运行已移除 CLI 封装（D266）——build=编译 / deploy=安装 / 运行=手动。"""
-    print(f"{action} host 已移除 CLI 封装——请手动运行:", file=sys.stderr)
-    print("  部署实例: systemctl --user start|stop oxmgr-<brand>-host.service", file=sys.stderr)
-    print("            或 <prefix>/bin/msrtc-host start|stop <prefix>", file=sys.stderr)
-    print("  开发:     target/debug/mediaservo-host init . && token issue --all . && start|stop .", file=sys.stderr)
-    print("            跑前清 iceoryx2 残留: rm -rf /tmp/iceoryx2 /dev/shm/iox2_*（C25）", file=sys.stderr)
+    """host runtime: the CLI wrapper was removed (D266) — build = compile / deploy = install / run = manual."""
+    print(f"{action} host: CLI wrapper removed — run manually:", file=sys.stderr)
+    print("  deployed instance: systemctl --user start|stop oxmgr-<brand>-host.service", file=sys.stderr)
+    print("            or <prefix>/bin/msrtc-host start|stop <prefix>", file=sys.stderr)
+    print("  development: target/debug/mediaservo-host init . && token issue --all . && start|stop .", file=sys.stderr)
+    print("            clear iceoryx2 residue before running: rm -rf /tmp/iceoryx2 /dev/shm/iox2_* (C25)", file=sys.stderr)
 
 def _server_runtime_hint(action: str) -> None:
-    """server 运行已移除 CLI 封装（T21——C39 与 host 同待遇）：build=编译 / deploy=安装 / 运行=实例目录命令。
-    bin 名品牌感知（D269——env MEDIASERVO_BRAND，缺省上游名）。"""
+    """server runtime: the CLI wrapper was removed (T21 — C39, same treatment as host): build = compile / deploy = install / run = instance-directory commands.
+    The bin name is brand-aware (D269 — env MEDIASERVO_BRAND; defaults to the upstream name)."""
     sb = f"{os.environ.get('MEDIASERVO_BRAND', '')}-server" if os.environ.get("MEDIASERVO_BRAND", "") else "mediaservo-server"
-    print(f"{action} server 已移除 CLI 封装——请经实例目录运行:", file=sys.stderr)
-    print(f"  部署实例: <prefix>/bin/{sb} start|stop|restart|status <prefix>（未部署: mediaservo deploy server --prefix <X>；裸机入口 <prefix>/{sb}）", file=sys.stderr)
-    print("  开发:     target/debug/mediaservo-server init . && start . --no-web（前端面: dev web=vite:5173 / run web=过渡 caddy）", file=sys.stderr)
-    print("  容器（模式②③）: mediaservo up / down --env dev|prod 不变", file=sys.stderr)
-    print("  只读探测保留: mediaservo status server | logs server", file=sys.stderr)
+    print(f"{action} server: CLI wrapper removed — run via the instance directory:", file=sys.stderr)
+    print(f"  deployed instance: <prefix>/bin/{sb} start|stop|restart|status <prefix> (not deployed yet: mediaservo deploy server --prefix <X>; bare-metal entry <prefix>/{sb})", file=sys.stderr)
+    print("  development: target/debug/mediaservo-server init . && start . --no-web (frontend transition: dev web = vite:5173 / run web = transitional caddy)", file=sys.stderr)
+    print("  containers (modes 2/3): mediaservo up / down --env dev|prod unchanged", file=sys.stderr)
+    print("  read-only probes kept: mediaservo status server | logs server", file=sys.stderr)
 
 def _cmd_dev(args: argparse.Namespace) -> None:
-    """dev web — vite dev 薄透传（pnpm dev, cwd www/:5173, proxy /api /ws→9800；前台工具无 pidfile）。"""
-    _check("pnpm", "pnpm 未安装——dev web 需要（www 为 pnpm workspace，或手动 cd www && pnpm dev）")
+    """dev web — thin vite-dev passthrough (pnpm dev, cwd www/:5173, proxy /api /ws→9800; foreground tool, no pidfile)."""
+    _check("pnpm", "pnpm not installed — dev web needs it (www is a pnpm workspace, or run manually: cd www && pnpm dev)")
     _run_or_exit(["pnpm", "dev"] + list(args.rest), cwd=str(ROOT / "www"))
 
 def _cmd_start(args: argparse.Namespace) -> None:
-    """start <target> — server/host 退役→指引 exit 2（T21/C39: 实例目录命令；容器用 up）；web=过渡 caddy。"""
+    """start <target> — server/host retired → guidance + exit 2 (T21/C39: instance-directory commands; containers use up); web = transitional caddy."""
     target = args.target
     if target == "server":
         _server_runtime_hint("start")
@@ -1639,13 +1639,13 @@ def _cmd_start(args: argparse.Namespace) -> None:
     elif target == "web":
         _run_web_native()
     else:  # client
-        print("start client: 待实现（client 骨架阶段）", file=sys.stderr)
+        print("start client: not implemented (client skeleton phase)", file=sys.stderr)
         sys.exit(1)
 
 
 def _cmd_restart(args: argparse.Namespace) -> None:
     target = args.target
-    """restart <target> — web=过渡 caddy；server/host 退役→指引 exit 2（实例目录命令；容器 up/down）。"""
+    """restart <target> — web = transitional caddy; server/host retired → guidance + exit 2 (instance-directory commands; containers up/down)."""
     if target == "web":
         _stop_web_native(allow_inactive=True)
         _run_web_native()
@@ -1657,21 +1657,21 @@ def _cmd_restart(args: argparse.Namespace) -> None:
         _host_runtime_hint("restart")
         sys.exit(2)
     else:  # client
-        print("restart client: 待实现（client 骨架阶段）", file=sys.stderr)
+        print("restart client: not implemented (client skeleton phase)", file=sys.stderr)
         sys.exit(1)
 
 
-# ───────── example 命令面（p3-gui-viewer W0，G7）─────────
+# ───────── example command surface (p3-gui-viewer W0, G7) ─────────
 #
-# 目录契约 = bindings/cxx/examples/<name>/CMakeLists.txt（目录名==target==产物名，G4）。
-# CLI 与聚合根 CMake 字面同规则 glob（F-A-6）。产物 target/examples/{build,bin}/，
-# 不进 out/、不 package（例子产品化闸门，PLAN §6）。
+# Directory contract = bindings/cxx/examples/<name>/CMakeLists.txt (dir name == target == artifact name, G4).
+# the CLI and the aggregate-root CMake glob by the same literal rule (F-A-6). Artifacts in target/examples/{build,bin}/,
+# never in out/, never packaged (example productization gate, PLAN §6).
 
 _EXAMPLES_DIR = ROOT / "bindings" / "cxx" / "examples"
 _EXAMPLES_BUILD = ROOT / "target" / "examples" / "build"
 _EXAMPLES_BIN = ROOT / "target" / "examples" / "bin"
 
-# pixi/conda 激活注入的编译相关 env——configure 子进程剥离（见 _cmd_build_example 注）
+# compile-related env injected by pixi/conda activation — stripped from configure subprocesses (see the _cmd_build_example note)
 _CONDA_BUILD_ENV_VARS = frozenset({
     "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "CPATH",
     "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "CONDA_PREFIX",
@@ -1681,13 +1681,13 @@ _CONDA_BUILD_ENV_VARS = frozenset({
 
 
 def _example_env() -> dict[str, str]:
-    """examples configure+build 共用：剥 conda 构建 env + PATH 前置 /usr/bin
-    （collect2 按 PATH 找 ld，否则拾 conda ld → Ubuntu multiarch 库目录缺失，
-    libxcb 等间接依赖 undefined reference，focal 事故 2026-09-28）。"""
+    """Shared by examples configure+build: strip the conda build env + prepend /usr/bin to PATH
+    (collect2 resolves ld via PATH; otherwise it picks conda ld → Ubuntu multiarch lib dirs missing,
+    indirect deps like libxcb get undefined references — the focal incident of 2026-09-28)."""
     env = {k: v for k, v in os.environ.items() if k not in _CONDA_BUILD_ENV_VARS}
     env["PATH"] = "/usr/bin:" + env.get("PATH", "")
-    # conda 的 pkg-config 把自身目录编进默认搜索路径（env 剥离也拦不住，
-    # liburing/dbus 经它重新泄漏 → configure 探测必须锁系统 pkgconfig 集）
+    # conda's pkg-config bakes its own dirs into the default search path (env stripping cannot block it;
+    # liburing/dbus leak back through it → configure probes must lock the system pkgconfig set)
     multi = {"x86_64": "x86_64-linux-gnu", "aarch64": "aarch64-linux-gnu"}.get(
         os.uname().machine)
     dirs = ([f"/usr/lib/{multi}/pkgconfig"] if multi else []) + [
@@ -1697,7 +1697,7 @@ def _example_env() -> dict[str, str]:
 
 
 def _example_names() -> list[tuple[str, bool]]:
-    """[(目录名, 是否纯库)]——聚合根 file(GLOB */CMakeLists.txt) 的字面同规则。"""
+    """[(dir name, is-pure-library)] — same literal rule as the aggregate root's file(GLOB */CMakeLists.txt)."""
     out = []
     for cml in sorted(_EXAMPLES_DIR.glob("*/CMakeLists.txt")):
         name = cml.parent.name
@@ -1709,39 +1709,39 @@ def _example_names() -> list[tuple[str, bool]]:
 def _cmd_list_example() -> None:
     names = _example_names()
     if not names:
-        print(f"（{_EXAMPLES_DIR.relative_to(ROOT)} 暂无例子）", file=sys.stderr)
+        print(f"(no examples in {_EXAMPLES_DIR.relative_to(ROOT)} yet)", file=sys.stderr)
         return
-    print("可用例子（目录=target=产物名；[库]=非可执行）:")
+    print("Available examples (dir = target = artifact name; [lib] = non-executable):")
     for name, is_lib in names:
         art = _EXAMPLES_BIN / name
         if is_lib:
-            tag = "[库]"
+            tag = "[lib]"
         else:
-            tag = "[已构建]" if art.exists() else "[未构建]"
+            tag = "[built]" if art.exists() else "[not built]"
         print(f"  {name:24s} {tag}")
 
 
 def _cmd_build_example(names: list[str], release: bool = False) -> None:
-    # build-c 前置（PLAN G7；无则自动补——新鲜度由 cargo 增量自管）。
+    # build-c prelude (PLAN G7; auto-added when missing — freshness is cargo's incremental job).
     if not (ROOT / "target" / "debug" / "libmediaservo_client.so").exists():
-        print("[example] libmediaservo_client.so 缺失 → 先执行 build-c", file=sys.stderr)
+        print("[example] libmediaservo_client.so missing → running build-c first", file=sys.stderr)
         _run_or_exit([os.environ.get("PIXI_BIN", "pixi"), "run", "build-c"])
     gen_build = "Release" if release else "Debug"
     cache = _EXAMPLES_BUILD / "CMakeCache.txt"
     if not cache.exists():
         cfg = [
             "cmake", "-S", str(_EXAMPLES_DIR), "-B", str(_EXAMPLES_BUILD),
-            "-G", "Ninja",  # pixi 环境有 ninja 无 make（3.4.16 实录）
+            "-G", "Ninja",  # the pixi env has ninja but no make (observed on 3.4.16)
             "-DCMAKE_BUILD_TYPE=" + gen_build,
             "-DMEDIASERVO_SDK_DIR=" + str(ROOT / "target" / ("release" if release else "debug")),
-            # 例子面不需要游戏外设栈；显式关死，杜绝 pkg-config 探测经 conda env
-            # （libusb-1.0.pc 等）反向漏进 SDL 构建（focal 事故 2026-09-28）
+            # examples don't need the gaming peripheral stack; explicitly off to stop pkg-config probes via conda env
+            # (libusb-1.0.pc etc.) from leaking back into the SDL build (focal incident 2026-09-28)
             "-DSDL_LIBURING=OFF", "-DSDL_DBUS=OFF", "-DSDL_LIBUSB=OFF",
         ]
-        # conda/系统工具链互斥（focal 事故 2026-09-28）：conda cc+sysroot 与 glibc 2.31
-        # 头混编（bits/endian.h guard 冲突 → SDL pthreads FATAL）；系统编译器又被激活
-        # env（CFLAGS/CONDA_PREFIX）烘进 cache 劫持探测。examples 面单走系统工具链
-        # + 剥离 conda 构建 env（C23 Jetson 同配方；cargo build-c 前置不经此处，零扰动）。
+        # conda/system toolchains are mutually exclusive (focal incident 2026-09-28): conda cc+sysroot mixed with glibc 2.31
+        # headers collide (bits/endian.h guard conflict → SDL pthreads FATAL); the system compiler is also hijacked by activation
+        # env (CFLAGS/CONDA_PREFIX) baked into the cache. The examples surface uses the system toolchain only
+        # + strips the conda build env (same recipe as C23 Jetson; the cargo build-c prelude does not pass here, zero disturbance).
         if Path("/usr/bin/cc").exists():
             cfg += ["-DCMAKE_C_COMPILER=/usr/bin/cc", "-DCMAKE_CXX_COMPILER=/usr/bin/c++"]
         ex_env = _example_env()
@@ -1751,52 +1751,52 @@ def _cmd_build_example(names: list[str], release: bool = False) -> None:
         known = {n for n, _ in _example_names()}
         for n in names:
             if n not in known:
-                print(f"[example] 未知例子 '{n}'（./mediaservo.sh list example 看清单）",
+                print(f"[example] unknown example '{n}' (see ./mediaservo.sh list example)",
                       file=sys.stderr)
                 sys.exit(2)
         cmd += ["--target"] + names
     _run_or_exit(cmd, env=_example_env())
-    print(f"[example] 产物 → {_EXAMPLES_BIN.relative_to(ROOT)}/")
+    print(f"[example] artifacts → {_EXAMPLES_BIN.relative_to(ROOT)}/")
 
 
 def _cmd_run_example(rest: list[str]) -> None:
-    """run example <name> [透传…] — 需要则先 build，再前台 exec（开发工具面，
-    与 host run 退役语义（C39=部署实例）不同物）。"""
+    """run example <name> [passthrough…] — build first if needed, then exec in foreground (dev-tool surface,
+    distinct from the retired host-run semantics (C39 = deployed instances))."""
     if not rest:
-        print("用法: run example <name> [args…]（./mediaservo.sh list example）",
+        print("Usage: run example <name> [args…] (./mediaservo.sh list example)",
               file=sys.stderr)
         sys.exit(2)
     name, extra = rest[0], rest[1:]
     known = dict(_example_names())
     if name not in known:
-        print(f"[example] 未知例子 '{name}'", file=sys.stderr)
+        print(f"[example] unknown example '{name}'", file=sys.stderr)
         sys.exit(2)
-    if known[name]:  # 纯库无产物可 run
+    if known[name]:  # pure library, nothing to run
         _cmd_build_example([name])
-        print(f"[example] '{name}' 是库（无产物可运行）", file=sys.stderr)
+        print(f"[example] '{name}' is a library (no runnable artifact)", file=sys.stderr)
         sys.exit(1)
     _cmd_build_example([name])
     exe = _EXAMPLES_BIN / name
     if not exe.exists():
-        print(f"[example] 构建后仍无产物 {exe}", file=sys.stderr)
+        print(f"[example] still no artifact after build: {exe}", file=sys.stderr)
         sys.exit(1)
-    # 出窗提示（探测+明示，不代设——display 是会话语义，脚本从会话外猜 = 猜错目标比 fail-soft 难查；
-    # 正解 = ssh -X / 桌面 session 自带 DISPLAY。本段只把缺失与出口讲清。）
+    # Windowing hint (probe + state, never set for the user — display is session semantics; a script guessing from outside the session = a wrong guess is harder to diagnose than fail-soft;
+    # the correct path = ssh -X / a desktop session's own DISPLAY. This block only states what is missing and the exits.)
     if not os.environ.get("DISPLAY") and not os.environ.get("SDL_VIDEODRIVER"):
-        print("[example] 无显示环境变量（DISPLAY/SDL_VIDEODRIVER 均未设）:", file=sys.stderr)
+        print("[example] no display env vars (neither DISPLAY nor SDL_VIDEODRIVER set):", file=sys.stderr)
         xsock = "/tmp/.X11-unix"
         xs = sorted(f":{f[1:]}" for f in os.listdir(xsock) if f.startswith("X")) if os.path.isdir(xsock) else []
         if xs:
-            print(f"  • 出窗: 本机可用 {' '.join(xs)} → export DISPLAY=:N 后重跑"
-                  "（若报 x11 not available = 当前构建 SDL_X11=OFF，需 cmake -DSDL_X11=ON 重配）", file=sys.stderr)
-        print("  • 无头验收: SDL_VIDEODRIVER=dummy MSRTC_RUN_SECS=20 重跑（cb/tex 双计数判据）", file=sys.stderr)
+            print(f"  • windowed: local displays available: {' '.join(xs)} → export DISPLAY=:N and re-run"
+                  " (if it reports x11 not available = this build has SDL_X11=OFF; reconfigure with cmake -DSDL_X11=ON)", file=sys.stderr)
+        print("  • headless acceptance: SDL_VIDEODRIVER=dummy MSRTC_RUN_SECS=20 re-run (cb/tex dual-count predicate)", file=sys.stderr)
     env = dict(os.environ, LD_LIBRARY_PATH=str(ROOT / "target" / "debug") +
                (":" + os.environ["LD_LIBRARY_PATH"] if os.environ.get("LD_LIBRARY_PATH") else ""))
     sys.exit(subprocess.run([str(exe), *extra], env=env).returncode)
 
 
 def _cmd_test_example(name: str | None) -> None:
-    """test example [<name>] — ctest（-R 过滤）；构建目录不存在=先 build。"""
+    """test example [<name>] — ctest (-R filter); a missing build dir = build first."""
     if not (_EXAMPLES_BUILD / "CTestTestfile.cmake").exists():
         _cmd_build_example([])
     cmd = ["ctest", "--test-dir", str(_EXAMPLES_BUILD), "--output-on-failure"]
@@ -1806,7 +1806,7 @@ def _cmd_test_example(name: str | None) -> None:
 
 
 def _cmd_run(args: argparse.Namespace) -> None:
-    """run <target> — web=过渡 caddy（:8080）；server/host 退役→指引 exit 2（T21/C39）。"""
+    """run <target> — web = transitional caddy (:8080); server/host retired → guidance + exit 2 (T21/C39)."""
     if args.target == "example":
         _cmd_run_example(args.rest)
     if args.target == "server":
@@ -1818,18 +1818,18 @@ def _cmd_run(args: argparse.Namespace) -> None:
     elif args.target == "web":
         _run_web_native()
     else:
-        print('run client: 待实现（client 骨架阶段）', file=sys.stderr)
+        print('run client: not implemented (client skeleton phase)', file=sys.stderr)
         sys.exit(1)
 
 
 def _out_root() -> Path:
-    """发布根（MSRTC_OUT_ROOT env or 子模块 out/）——build 交付布局与 server 运行时共用。"""
+    """Release root (MSRTC_OUT_ROOT env or the submodule's out/) — shared by the build delivery layout and the server runtime."""
     env_out = os.environ.get("MSRTC_OUT_ROOT", "")
     return Path(env_out) if env_out else ROOT / "out"
 
 
 def _stage_to_out(target: str, files: list[Path], sub: str = "bin", brand: str = "") -> list[Path]:
-    """拷贝 target/debug|release 产物到 out/<target>/<sub>（交付布局镜像）；brand 非空时物理重命名：host-<app> → <brand>-<app>、mediaservo-host → <brand>-host（server 物理名品牌化在 deploy 段——D269）。"""
+    """Copy target/debug|release artifacts to out/<target>/<sub> (delivery layout mirror); with a non-empty brand, physically rename: host-<app> → <brand>-<app>, mediaservo-host → <brand>-host (server physical-name branding happens at deploy — D269)."""
     dst = _out_root() / target / sub
     dst.mkdir(parents=True, exist_ok=True)
     staged = []
@@ -1838,7 +1838,7 @@ def _stage_to_out(target: str, files: list[Path], sub: str = "bin", brand: str =
             continue
         name = src.name
         if brand:
-            if name.startswith("host-"):      # host-agent → msrtc-agent（D3：仅 host- 子进程品牌化）
+            if name.startswith("host-"):      # host-agent → msrtc-agent (D3: only host- subprocesses are branded)
                 name = f"{brand}-{name[5:]}"
             elif name == "mediaservo-host":
                 name = f"{brand}-host"
@@ -1856,8 +1856,8 @@ def _stage_to_out(target: str, files: list[Path], sub: str = "bin", brand: str =
 
 
 def _native_runtime_dirs() -> tuple[Path, Path, Path]:
-    """native server 运行目录（MSRTC 发布壳注入 MSRTC_OUT_ROOT → ${out}/server；裸 CLI fallback 子模块 data/）。
-    返回 (etc_dir, logs_dir, data_dir)——config/pid/log 全收敛于发布根 out/（主仓场景）或 data/（裸用）。"""
+    """Native server runtime dirs (the MSRTC release shell injects MSRTC_OUT_ROOT → ${out}/server; bare CLI falls back to the submodule data/).
+    Returns (etc_dir, logs_dir, data_dir) — config/pid/log all converge under the release root out/ (main-repo scenario) or data/ (standalone use)."""
     env_out = os.environ.get("MSRTC_OUT_ROOT", "")
     if env_out:
         base = Path(env_out) / "server"
@@ -1872,8 +1872,8 @@ def _native_runtime_dirs() -> tuple[Path, Path, Path]:
 
 
 def _run_server_native(args: argparse.Namespace) -> None:
-    """裸机跑 server：幂等（已在跑→提示跳过）；bin/../etc/server.yaml 默认配置 + 公告注入 + 端口守卫。"""
-    # 幂等: start/restart/run 共用——pid 文件存活即已运行（防自家进程撞端口卫士）
+    """Run server on bare metal: idempotent (already running → hint + skip); bin/../etc/server.yaml default config + announce injection + port guards."""
+    # Idempotence: shared by start/restart/run — a live pid file means running (prevents our own process from tripping the port guard)
     pid_file = _native_runtime_dirs()[1] / "server-native.pid"
     if pid_file.exists():
         try:
@@ -1881,37 +1881,37 @@ def _run_server_native(args: argparse.Namespace) -> None:
         except ValueError:
             alive_pid = -1
         if alive_pid > 0 and Path(f"/proc/{alive_pid}").exists():
-            print(f"✓ server 裸机已在运行 pid={alive_pid}（server-native.pid）— 跳过启动")
+            print(f"✓ server already running on bare metal pid={alive_pid} (server-native.pid) — skipping start")
             sys.exit(0)
-    _check('cargo', 'pixi 环境未激活? 先运行: source bootstrap.sh / pixi.bat')
-    # 优先 out/server/bin（build server 组装）→回退 target/（兼容未组装场景）
+    _check('cargo', 'pixi environment not activated? Run first: source bootstrap.sh / pixi.bat')
+    # prefer out/server/bin (assembled by build server) → fall back to target/ (covers un-assembled scenarios)
     bin_path = _out_root() / "server" / "bin" / "mediaservo-server"
     if not bin_path.exists():
         bin_path_fallback = ROOT / 'target' / ('release' if getattr(args, 'release', False) else 'debug') / 'mediaservo-server'
         if bin_path_fallback.exists():
-            print("⚠ 使用 target/ 二进制（建议先: mediaservo build server — 组装到 out/server/bin）", file=sys.stderr)
+            print("⚠ using the target/ binary (recommended first: mediaservo build server — assembles into out/server/bin)", file=sys.stderr)
             bin_path = bin_path_fallback
     if not bin_path.exists():
         rel = bin_path.relative_to(ROOT) if bin_path.is_relative_to(ROOT) else bin_path
-        print(f'错误: 未找到 {rel} — 先运行: mediaservo build server --native', file=sys.stderr)
+        print(f'Error: {rel} not found — run first: mediaservo build server --native', file=sys.stderr)
         sys.exit(1)
-    # 端口冲突守卫: 裸机 9800/20000/40000-40100 与 dev/prod 容器并行会冲突
+    # Port conflict guards: bare-metal 9800/20000/40000-40100 conflict with dev/prod containers running in parallel
     _check_port_free(9800, '9800(HTTP)')
     _check_port_free(20000, '20000(SFU UDP)')
     _check_port_range_free(40000, 40100, '40000-40100(RTP)')
-    # announced 注入: --announced-ip > env > CLI 探测(含 tun) > 不注入(server 侧 detect_all_ips 兜底)
-    env = _compose_env(getattr(args, 'announced_ip', None))  # 复用探测（显式给值时跳过自动探测打印）
-    print('⚠ 警告: 裸机跑 dev 轨道 config（psk=mediaservo-dev + 占位账号 admin123 等）——', file=sys.stderr)
-    print('     仅限开发联调；生产部署用 up --env prod（entrypoint 自举随机密钥）', file=sys.stderr)
-    # 裸机 config: 优先使用 bin/../etc/server.yaml（build server 组装时生成）
-    # target/ 回退场景需 --config 显式指定
+    # Announce injection: --announced-ip > env > CLI detection (incl. tun) > no injection (server-side detect_all_ips backstop)
+    env = _compose_env(getattr(args, 'announced_ip', None))  # reuse the probe (skips the auto-detect print when given explicitly)
+    print('⚠ Warning: bare metal runs the dev-track config (psk=mediaservo-dev + placeholder accounts admin123 etc.) —', file=sys.stderr)
+    print('     development/integration only; production deploys with up --env prod (entrypoint bootstraps random keys)', file=sys.stderr)
+    # Bare-metal config: prefer bin/../etc/server.yaml (generated during build server assembly)
+    # the target/ fallback scenario needs an explicit --config
     bin_dir = bin_path.parent  # out/server/bin
     default_cfg = bin_dir.parent / "etc" / "server.yaml"  # out/server/etc/server.yaml
     if default_cfg.exists() and bin_dir == (_out_root() / "server" / "bin"):
-        # 二进制在 out/server/bin/ → 等同 build server 组装 → 不需 --config
+        # binary in out/server/bin/ → equivalent to build server assembly → no --config needed
         cmd = [str(bin_path)]
     else:
-        # target/ 回退: 生成临时 config 并 --config 传入
+        # target/ fallback: generate a temp config and pass it via --config
         etc_dir, _logs_dir, _data_dir = _native_runtime_dirs()
         native_cfg = etc_dir / 'server.native.yaml'
         native_cfg.parent.mkdir(parents=True, exist_ok=True)
@@ -1922,28 +1922,28 @@ def _run_server_native(args: argparse.Namespace) -> None:
             cfg_text = cfg_text.replace('/opt/mediaservo/etc/devices.yaml', str(ROOT / 'config' / 'devices.yaml'))
             native_cfg.write_text(cfg_text)
         cmd = [str(bin_path), '--config', str(native_cfg)]
-    # dev 占位账号豁免（fail-fast 守卫——裸机=dev 联调，与 dev compose 的 ALLOW_DEV_CREDENTIALS=1 一致）
+    # dev placeholder-account exemption (fail-fast guard — bare metal = dev integration, consistent with dev compose's ALLOW_DEV_CREDENTIALS=1)
     env.setdefault('MEDIASERVO_ALLOW_DEV_CREDENTIALS', '1')
     log_path = _native_runtime_dirs()[1] / "server-native.log"
-    # export 指引（AccessBase cmd_start_native L180 借鉴——PIT-79/138 公告闭环:
-    # 后续终端操作需同一公告值，零新增探测——直接读生效 env）
+    # export guidance (borrowed from AccessBase cmd_start_native L180 — the PIT-79/138 announce loop:
+    # later terminal operations need the same announce value, zero new probing — read the effective env directly)
     announced_val = env.get("MEDIASERVO_SFU_ANNOUNCED_IP", "")
     if announced_val:
         print(f"  export MEDIASERVO_SFU_ANNOUNCED_IP='{announced_val}'")
     if getattr(args, 'foreground', False):
         _run_or_exit(cmd, env=env)
     else:
-        # I-1: 清 stale pid（上次崩溃残留）——防 stop 杀错回收 pid；写后覆盖语意保留
+        # I-1: clear stale pids (leftovers from the last crash) — prevents stop from killing a recycled pid; overwrite-on-write semantics kept
         pid_file = _native_runtime_dirs()[1] / "server-native.pid"
         pid_file.unlink(missing_ok=True)
-        # T3 minor: 启动时 truncate（崩溃残留不污染，重启从头记）+ start_new_session（脱离终端，stop 按 pid 文件可杀）
+        # T3 minor: truncate at start (crash residue does not contaminate; restart records from scratch) + start_new_session (detached from the terminal; stop can kill by pid file)
         proc = subprocess.Popen(cmd, env=env, stdout=open(log_path, 'wb'), stderr=subprocess.STDOUT, start_new_session=True)
         pid_file.write_text(str(proc.pid))
-        print(f'✓ server 裸机运行中 pid={proc.pid} — 日志: {log_path}（logs server --native）')
+        print(f'✓ server running on bare metal pid={proc.pid} — log: {log_path} (logs server --native)')
 
 
 def _port_owner(port: int) -> str:
-    """从 ss -tulnp 解析 :port 行的占用方（name,pid）。非 root 下容器端口无 users 段——如实提示（评审 ops#2）。"""
+    """Parse the occupier (name,pid) of the :port line from ss -tulnp. Under non-root, container ports have no users section — reported honestly (review ops#2)."""
     try:
         out = subprocess.run(["ss", "-tulnp"], capture_output=True, text=True, timeout=5, check=False).stdout
         for line in out.splitlines():
@@ -1954,10 +1954,10 @@ def _port_owner(port: int) -> str:
                 name, pid = m.group(1), m.group(2)
                 cmd = Path(f"/proc/{pid}/cmdline").read_text().replace("\0", " ").split()[:1]
                 return f"{name} (pid {pid})" + (f" — {Path(cmd[0]).name}" if cmd else "")
-            return "占用方不可见（宿主 root/容器端口——sudo ss 查看）"
+            return "occupier invisible (host root / container port — check with sudo ss)"
     except OSError:
         pass
-    try:  # darwin: lsof 回退
+    try:  # darwin: lsof fallback
         out = subprocess.run(["lsof", "-i", f":{port}"], capture_output=True, text=True, timeout=5, check=False).stdout
         for line in out.splitlines()[1:]:
             parts = line.split()
@@ -1965,41 +1965,41 @@ def _port_owner(port: int) -> str:
                 return f"{parts[0]} (pid {parts[1]})"
     except OSError:
         pass
-    return "未知（ss/lsof 均不可用）"
+    return "unknown (neither ss nor lsof available)"
 
 
 def _check_port_free(port: int, name: str) -> None:
-    """端口占用检查（TCP/UDP；占用则提示先停冲突方）。平台守卫 + 探测命令同平台分支（Momus MEDIUM：原版守卫选 lsof 但探测仍 ss——darwin traceback）。"""
+    """Port occupancy check (TCP/UDP; if occupied, advise stopping the conflicting party). The platform guard and the probe command share the same platform branching (Momus MEDIUM: the original picked lsof for the guard but still ss for probing — darwin traceback)."""
     if sys.platform == "darwin":
-        _check("lsof", "lsof 不可用")
+        _check("lsof", "lsof unavailable")
         out = subprocess.run(["lsof", "-i", f":{port}"], capture_output=True, text=True, timeout=5, check=False).stdout
         busy = f":{port}" in out
     else:
-        _check("ss", "ss 不可用——安装 iproute2")
+        _check("ss", "ss unavailable — install iproute2")
         out = subprocess.run(["ss", "-tulnp"], capture_output=True, text=True, timeout=5, check=False).stdout
         busy = f":{port} " in out
     if busy:
-        print(f"错误: {name} 端口被占: {_port_owner(port)} — 先运行: mediaservo stop server（裸机/容器皆可）", file=sys.stderr)
+        print(f"Error: port {name} occupied: {_port_owner(port)} — run first: mediaservo stop server (works for both bare metal and containers)", file=sys.stderr)
         sys.exit(1)
 
 
 def _check_port_range_free(start: int, end: int, name: str) -> None:
-    """RTP 范围扫描（mediasoup 惰性 bind——health 200 但传输间歇失败，必须显式查）。同平台分支——darwin lsof 回退。"""
+    """RTP range scan (mediasoup binds lazily — health 200 but transports fail intermittently; an explicit check is mandatory). Same platform branching — darwin uses the lsof fallback."""
     if sys.platform == "darwin":
-        _check("lsof", "lsof 不可用")
+        _check("lsof", "lsof unavailable")
         out = subprocess.run(["lsof", "-i", f":{start}-{end}"], capture_output=True, text=True, timeout=5, check=False).stdout
         busy = [p for p in range(start, end + 1) if f":{p}" in out]
     else:
-        _check("ss", "ss 不可用——安装 iproute2")
+        _check("ss", "ss unavailable — install iproute2")
         out = subprocess.run(["ss", "-tulnp"], capture_output=True, text=True, timeout=5, check=False).stdout
         busy = [p for p in range(start, end + 1) if f':{p} ' in out]
     if busy:
-        print(f'错误: {name} 端口被占 {busy[:5]}... 首占者: {_port_owner(busy[0])} — 先停止占用进程', file=sys.stderr)
+        print(f'Error: ports {name} occupied at {busy[:5]}... first occupier: {_port_owner(busy[0])} — stop the occupying process first', file=sys.stderr)
         sys.exit(1)
 
 
 def _cmd_stop(args: argparse.Namespace) -> None:
-    """stop <target> — web=过渡 caddy；server/host 退役→指引 exit 2（容器: mediaservo down）。"""
+    """stop <target> — web = transitional caddy; server/host retired → guidance + exit 2 (containers: mediaservo down)."""
     target = args.target
     if target == "web":
         _stop_web_native()
@@ -2012,43 +2012,43 @@ def _cmd_stop(args: argparse.Namespace) -> None:
         sys.exit(2)
     else:  # client
         subprocess.run(["pkill", "-x", "mediaservo-client"], check=False)
-        print("✓ client 已停止")
+        print("✓ client stopped")
 
 
 def _cmd_logs(args: argparse.Namespace) -> None:
-    """logs [<target>] [--follow] [--mode native|compose] — server: 裸机日志（默认——用户裁决 B）| compose 容器日志；host: 日志目录。"""
+    """logs [<target>] [--follow] [--mode native|compose] — server: bare-metal log (default — user ruling B) | compose container log; host: log directory."""
     target = args.target
     if target == "server":
         mode = _resolve_mode(args, default="native")
         if mode == "native":
             log_path = _native_runtime_dirs()[1] / "server-native.log"
             if not log_path.exists():
-                print(f"错误: {log_path} 不存在 — 裸机 server 未运行？", file=sys.stderr)
+                print(f"Error: {log_path} does not exist — is the bare-metal server not running?", file=sys.stderr)
                 sys.exit(1)
             cmd = (["tail", "-f"] if args.follow else ["tail", "-n", "100"]) + [str(log_path)]
             _run_or_exit(cmd)
             return
-        _check("docker", "安装 docker 并启动 daemon")
+        _check("docker", "install docker and start the daemon")
         _run_or_exit(COMPOSE_BASE + ["logs"] + (["-f"] if args.follow else []) + ["server"])
     elif target == "host":
         log_path = Path("/tmp/mediaservo-host.log")
         if log_path.exists():
             _run_or_exit(["tail", "-n", "100"] + (["-f"] if args.follow else []) + [str(log_path)])
         ox_logs = Path.home() / ".local/share/oxmgr/logs"
-        print(f"host 日志目录: {ox_logs}（实例日志: OXMGR_DATA_DIR/run/logs/msrtc-streamer-*.err.log）", file=sys.stderr)
+        print(f"host log directory: {ox_logs} (instance logs: OXMGR_DATA_DIR/run/logs/msrtc-streamer-*.err.log)", file=sys.stderr)
     else:  # client
-        print("client 日志: 待实现（client 骨架阶段）", file=sys.stderr)
+        print("client logs: not implemented (client skeleton phase)", file=sys.stderr)
         sys.exit(1)
 
 
 def _cmd_e2e(args: argparse.Namespace) -> None:
     if sys.platform == "win32" and args.suite not in ("host", "package", "brand", "bindings", "smoke"):
-        print("e2e: Windows 仅支持 bash 脚本套件", file=sys.stderr)
+        print("e2e: Windows supports only bash-script suites", file=sys.stderr)
         sys.exit(1)
     for tool, hint in (
-        ("cargo", "pixi 环境未激活?"),
-        ("docker", "server 容器需要 docker"),
-        ("bash", "e2e 脚本需要 bash"),
+        ("cargo", "pixi environment not activated?"),
+        ("docker", "the server container requires docker"),
+        ("bash", "e2e scripts require bash"),
     ):
         _check(tool, hint)
     cmd = _E2E_SUITES[args.suite]
@@ -2057,13 +2057,13 @@ def _cmd_e2e(args: argparse.Namespace) -> None:
 
 
 def _cmd_test() -> None:
-    _check("cargo", "pixi 环境未激活?")
+    _check("cargo", "pixi environment not activated?")
     _run_or_exit(["cargo", "test", "--workspace", "--exclude", "mediaservo-server"])
 
 
 def _cmd_ci() -> None:
-    _check("cargo", "pixi 环境未激活?")
-    _check("docker", "安装 docker 并启动 daemon")
+    _check("cargo", "pixi environment not activated?")
+    _check("docker", "install docker and start the daemon")
     steps = [
         ["cargo", "fmt", "--all", "--", "--check"],
         ["cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
@@ -2077,7 +2077,7 @@ def _cmd_ci() -> None:
 
 
 def _rm_path(path: Path) -> None:
-    """删文件或目录（clean 通用——二进制文件用 unlink，目录用 rmtree）。"""
+    """Delete a file or directory (general clean helper — binary files via unlink, directories via rmtree)."""
     try:
         if path.is_dir():
             shutil.rmtree(path)
@@ -2088,8 +2088,8 @@ def _rm_path(path: Path) -> None:
 
 
 def _rm_tree(path: Path) -> None:
-    """跨平台目录删除（Windows 用 rmdir /s /q 语义，Unix 用 rmtree）。
-    容器生成的 root 文件会导致 PermissionError — 捕获并提示手动删除，不中断后续清理。"""
+    """Cross-platform directory deletion (Windows uses rmdir /s /q semantics, Unix uses rmtree).
+    Root files created by containers trigger PermissionError — caught with a manual-delete hint; later cleanup continues."""
     if not path.exists():
         return
     try:
@@ -2097,16 +2097,16 @@ def _rm_tree(path: Path) -> None:
             _run_or_exit(["rmdir", "/s", "/q", str(path)])
         else:
             shutil.rmtree(path)
-        print(f"已删除: {path}")
+        print(f"deleted: {path}")
     except PermissionError:
         print(
-            f"警告: 无法删除 {path}（含容器生成的 root 文件）— 手动执行: sudo rm -rf {path}",
+            f"Warning: cannot delete {path} (contains container-created root files) — run manually: sudo rm -rf {path}",
             file=sys.stderr,
         )
 
 
 def _cmd_deploy(args: argparse.Namespace) -> None:
-    """deploy <target> — bindings | host | server（源=out/ 交付树；--prefix 必填 D4；deploy 不触发构建）。"""
+    """deploy <target> — bindings | host | server (source = the out/ delivery tree; --prefix mandatory per D4; deploy does not trigger builds)."""
     if args.target == "bindings":
         _cmd_deploy_bindings(args.prefix, args.release)
     elif args.target == "host":
@@ -2116,24 +2116,24 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
 
 
 def _cmd_install_deprecated(args: argparse.Namespace) -> None:
-    """D1: install 已改名 deploy——提示迁移后退出（不 alias——语义不同: 源=out/ 交付布局 + --prefix 必填）。"""
+    """D1: install was renamed deploy — prints the migration hint then exits (not aliased — different semantics: source = out/ delivery layout + --prefix mandatory)."""
     print(
-        "install 已改名 deploy：源改为 out/ 交付布局（有状态部署——identity 幂等/oxmgr/systemd/env.sh），"
-        "--prefix 必填。请用: mediaservo deploy host|bindings --prefix <前缀>（车端 host: --prefix /opt/mediaservo-host）",
+        "install was renamed deploy: the source is now the out/ delivery layout (stateful deployment — identity idempotence/oxmgr/systemd/env.sh),"
+        "--prefix is mandatory. Use: mediaservo deploy host|bindings --prefix <path> (vehicle host: --prefix /opt/mediaservo-host)",
         file=sys.stderr,
     )
     if getattr(args, "args", []):
-        print(f"  （忽略旧参数: {' '.join(args.args)}）", file=sys.stderr)
+        print(f"  (ignoring legacy args: {' '.join(args.args)})", file=sys.stderr)
     sys.exit(2)
 
 
 def _cmd_clean(args: argparse.Namespace) -> None:
-    """clean <target> — all|server|host|client（默认 all）。
-    server: 默认 native（B 裁决——清裸机产物+先停进程）；--mode both 双清 / compose 只清容器；host/client: 清宿主 cargo target。"""
+    """clean <target> — all|server|host|client (default all).
+    server: default native (ruling B — clears bare-metal artifacts + stops processes first); --mode both clears both tracks / compose clears containers only; host/client: clears the host cargo target."""
     target = args.target
     if target in ("all", "server"):
         mode = _resolve_mode(args, default="native")
-        # native：先停裸机进程（读 pid 文件）再删产物（防孤儿——clean 曾留进程在跑 pid 已删）
+        # native: stop bare-metal processes first (read pid files), then delete artifacts (prevents orphans — clean once left a process running with its pid already deleted)
         if mode in ("both", "native"):
             pid_file = _native_runtime_dirs()[1] / "server-native.pid"
             if pid_file.exists():
@@ -2142,7 +2142,7 @@ def _cmd_clean(args: argparse.Namespace) -> None:
                 except ValueError:
                     pid = -1
                 if pid > 0 and Path(f"/proc/{pid}").exists():
-                    print(f"clean server: 停止裸机进程 pid={pid}")
+                    print(f"clean server: stopping bare-metal process pid={pid}")
                     subprocess.run(["kill", str(pid)], check=False)
                     for _ in range(4):
                         if not Path(f"/proc/{pid}").exists():
@@ -2153,41 +2153,41 @@ def _cmd_clean(args: argparse.Namespace) -> None:
             etc_d, logs_d, _ = _native_runtime_dirs()
             out_server = _out_root() / "server"
             targets = [logs_d / "server-native.pid", logs_d / "server-native.log",
-                       logs_d / "web-native.pid", logs_d / "web-native.log",  # 过渡 caddy 运行态（T6 漏网补清）
+                       logs_d / "web-native.pid", logs_d / "web-native.log",  # transitional caddy runtime state (missed by T6, cleaned here)
                        out_server / "bin" / _exe_name("mediaservo-server"),
-                       # weaknet 装配回收（weaknet-server-integration [bF10]）：out 上游名 + target 双 profile
+                       # weaknet staging reclaim (weaknet-server-integration [bF10]): out upstream name + both target profiles
                        out_server / "bin" / _exe_name("mediaservo-weaknet"),
                        ROOT / "target/debug/mediaservo-weaknet", ROOT / "target/release/mediaservo-weaknet",
-                       out_server / "web",  # 前端交付树（T21: build web 产物随 clean 回收）
+                       out_server / "web",  # frontend delivery tree (T21: build web artifacts reclaimed with clean)
                        ROOT / "target/debug/mediaservo-server", ROOT / "target/release/mediaservo-server"]
-            # MAJOR-C 品牌态两名全清 + 根级快捷链（glob 只收文件/链，目录永不触碰）
+            # MAJOR-C: clear both branded names + root-level shortcut links (glob collects only files/links; directories are never touched)
             targets += [f for f in sorted((out_server / "bin").glob("*-server")) if f.is_file()]
             targets += [f for f in sorted((out_server / "bin").glob("*-weaknet")) if f.is_file()]
             targets += [f for f in sorted(out_server.glob("*-server")) if f.is_symlink()]
-            _sv = out_server / "server"  # 无品牌快捷链（brand="" 布局）
+            _sv = out_server / "server"  # unbranded shortcut link (brand="" layout)
             if _sv.is_symlink():
                 targets.append(_sv)
             for f in targets:
                 _rm_path(f)
             for d in sorted((_out_root() / "server" / "run").glob("oxmgr*")):
-                _rm_path(d)  # out 轨演练残留 daemon 数据（C32——prefix 下的 run/ 归实例生命周期, 不在此列）
-        # compose 容器（both/compose 时）
+                _rm_path(d)  # daemon data left by out-track drills (C32 — run/ under a prefix belongs to the instance lifecycle, not listed here)
+        # compose containers (under both/compose)
         if mode in ("both", "compose"):
-            _check("docker", "安装 docker 并启动 daemon")
+            _check("docker", "install docker and start the daemon")
             down = COMPOSE_BASE + ["down"]
             if args.all:
-                down.append("-v")  # --all 显式删卷（cargo-cache）→ 下次 build-server 15-30 分钟重建
-                print("警告: clean --all 将删除 cargo-cache 命名卷（下次 server 构建全量重编 15-30 分钟）")
+                down.append("-v")  # --all explicitly deletes volumes (cargo-cache) → the next build-server rebuild takes 15-30 minutes
+                print("Warning: clean --all deletes the cargo-cache named volume (the next server build recompiles fully, 15-30 minutes)")
             _run_or_exit(down)
     if target in ("all", "host", "client"):
-        # 项目根 target（workspace 默认，host/client 共享）
+        # project-root target (workspace default, shared by host/client)
         _rm_tree(ROOT / "target")
-        # CARGO_TARGET_DIR 分支（审核: 用户设置时项目根清理会漏）
+        # CARGO_TARGET_DIR branch (review: project-root cleanup misses it when the user sets it)
         cargo_target = os.environ.get("CARGO_TARGET_DIR")
         if cargo_target:
-            print(f"注意: CARGO_TARGET_DIR={cargo_target}（可能被多项目共享）")
+            print(f"Note: CARGO_TARGET_DIR={cargo_target} (possibly shared by multiple projects)")
             _rm_tree(Path(cargo_target))
-    # --all 额外清 docker builder 缓存；不碰 .pixi-cache（包缓存）
+    # --all additionally clears the docker builder cache; never touches .pixi-cache (package cache)
     if args.all and target in ("all", "server"):
         _run_or_exit(["docker", "builder", "prune", "-f"])
 
@@ -2199,44 +2199,44 @@ def _cmd_config(args: argparse.Namespace) -> None:
             if path.exists():
                 print(path.read_text(encoding="utf-8"))
             else:
-                print(f"(缺失: {path})", file=sys.stderr)
+                print(f"(missing: {path})", file=sys.stderr)
         return
     if args.config_cmd == "set":
         if not args.key or args.value is None:
-            print("用法: mediaservo config set <key> <value>", file=sys.stderr)
+            print("Usage: mediaservo config set <key> <value>", file=sys.stderr)
             sys.exit(2)
-        # dev 轨道: 写宿主 config/ 目录（prod 卷内用 exec 路径——见 docs/modules/26）
-        # 仅支持 signaling.psk 键（其他键待演进）
+        # dev track: writes the host config/ dir (inside prod volumes use the exec path — see docs/modules/26)
+        # only the signaling.psk key is supported (other keys pending evolution)
         if args.key != "signaling.psk":
-            print(f"config set: 暂仅支持 signaling.psk（当前键 {args.key}）", file=sys.stderr)
+            print(f"config set: currently supports only signaling.psk (got {args.key})", file=sys.stderr)
             sys.exit(2)
         p = ROOT / "config" / "host.conf"
         p.write_text(f"signaling.psk = {args.value}\n", encoding="utf-8")
-        print(f"已写入 {p.relative_to(ROOT)}（dev 轨道——prod 用 exec 编辑卷内 server.yaml）")
+        print(f"wrote {p.relative_to(ROOT)} (dev track — in prod, use exec to edit the in-volume server.yaml)")
         return
-    # validate — pyyaml 真解析（审核 BLOCKER-2: pixi.toml 已加依赖）
+    # validate — real pyyaml parsing (review BLOCKER-2: the dependency was already added to pixi.toml)
     try:
         import yaml  # noqa: PLC0415
     except ImportError:
-        print("错误: 缺少 pyyaml — 运行: pixi install", file=sys.stderr)
+        print("Error: pyyaml missing — run: pixi install", file=sys.stderr)
         sys.exit(1)
     ok = True
     for path in (HOST_CONF, SERVER_YAML):
         if not path.exists():
-            print(f"缺失: {path.relative_to(ROOT)}", file=sys.stderr)
+            print(f"missing: {path.relative_to(ROOT)}", file=sys.stderr)
             ok = False
             continue
         try:
             yaml.safe_load(path.read_text(encoding="utf-8"))
             print(f"OK: {path.relative_to(ROOT)}")
         except yaml.YAMLError as e:
-            print(f"YAML 错误: {path.relative_to(ROOT)}: {e}", file=sys.stderr)
+            print(f"YAML error: {path.relative_to(ROOT)}: {e}", file=sys.stderr)
             ok = False
     sys.exit(0 if ok else 1)
 
 
 def _cmd_env_diagnose() -> None:
-    """环境诊断 — 逐工具检查版本，缺失标 MISSING。"""
+    """Environment diagnosis — check each tool's version, mark missing ones MISSING."""
     pixi_bin = shutil.which("pixi") or str(Path.home() / ".pixi/bin/pixi")
     tools = [
         ("pixi", [pixi_bin, "--version"]),
@@ -2250,30 +2250,30 @@ def _cmd_env_diagnose() -> None:
                 cmd, capture_output=True, text=True, timeout=10, check=False
             )
         except (OSError, subprocess.TimeoutExpired):
-            print(f"{name:8s} MISSING（或超时）")
+            print(f"{name:8s} MISSING (or timeout)")
             continue
         output = (result.stdout or result.stderr).strip().splitlines()
         print(f"{name:8s} {output[0] if output else '?'}")
 
 
 def _cmd_status_runtime(args: argparse.Namespace) -> None:
-    """status <target> — 健康探测（AccessBase cmd_status_native 借鉴，评审吸收）。
-    退出码: 0=运行中 1=未运行 2=探测失败/参数错。ps=清单 vs status=健康结论（help 互引）。"""
+    """status <target> — health probe (borrowed from AccessBase cmd_status_native, absorbed per review).
+    Exit codes: 0 = running, 1 = not running, 2 = probe failed / bad arg. ps = listing vs status = health verdict (helps cross-reference)."""
     code = 2
     if args.target == "server":
-        mode = _resolve_mode(args, default="native")   # 默认 native（用户裁决 B 翻转）
+        mode = _resolve_mode(args, default="native")   # default native (flipped per user ruling B)
         code = _status_server_native() if mode == "native" else _status_server_container(args.env)
     elif args.target == "host":
         code = _status_host()
     elif args.target == "web":
         code = _status_web_native()
     else:
-        print("status client: 待实现（client 骨架阶段）", file=sys.stderr)
+        print("status client: not implemented (client skeleton phase)", file=sys.stderr)
     sys.exit(code)
 
 
 def _curl_health_code() -> str:
-    """curl -o /dev/null -w %{http_code} 9800（2s 超时）。"""
+    """curl -o /dev/null -w %{http_code} against 9800 (2s timeout)."""
     try:
         out = subprocess.run(
             ["curl", "--noproxy", "*", "-s", "-o", "/dev/null", "-w", "%{http_code}",
@@ -2286,7 +2286,7 @@ def _curl_health_code() -> str:
 
 
 def _ss_listening(port: int) -> bool | None:
-    """ss -tulnp 是否含 :port。None=无法判定（C15——评审 arch F4 假阴性修正）。"""
+    """Whether ss -tulnp contains :port. None = undecidable (C15 — review arch F4 false-negative fix)."""
     try:
         out = subprocess.run(["ss", "-tulnp"], capture_output=True, text=True, timeout=5, check=False).stdout
         return f":{port} " in out
@@ -2295,7 +2295,7 @@ def _ss_listening(port: int) -> bool | None:
 
 
 def _status_server_native() -> int:
-    """裸机运行态。返回 0/1。"""
+    """Bare-metal runtime state. Returns 0/1."""
     print("server (native):")
     pid_file = _native_runtime_dirs()[1] / "server-native.pid"
     running = False
@@ -2305,28 +2305,28 @@ def _status_server_native() -> int:
         except ValueError:
             pid = 0
         alive = pid > 0 and Path(f"/proc/{pid}").exists()
-        print(f"  pid 文件: {pid_file.name} {'存活 pid=' + str(pid) if alive else '(进程不在 — stale)'}")
+        print(f"  pid file: {pid_file.name} {'alive pid=' + str(pid) if alive else '(process gone — stale)'}")
         running = alive
     else:
-        print("  pid 文件: 不存在（未运行）")
-    code = _curl_health_code()  # 观察量——dev/prod 容器也占 9800，不作"裸机在跑"判据（pid 文件是 run/stop 契约）
-    print(f"  health 9800: {'200 OK' if code == '200' else code or '无响应'}")
+        print("  pid file: absent (not running)")
+    code = _curl_health_code()  # observation only — dev/prod containers also hold 9800; not a predicate for "bare metal running" (the pid file is the run/stop contract)
+    print(f"  health 9800: {'200 OK' if code == '200' else code or 'no response'}")
     av = _compose_env().get("MEDIASERVO_SFU_ANNOUNCED_IP", "")
     if av:
-        print(f"  announced: {av}")   # C38 ①层观察量（评审 arch F3）
+        print(f"  announced: {av}")   # C38 layer-1 observation (review arch F3)
     probe_failed = False
-    for port, name in ((20000, "SFU UDP"), (40000, "RTP 起"), (40100, "RTP 止")):
+    for port, name in ((20000, "SFU UDP"), (40000, "RTP start"), (40100, "RTP end")):
         st = _ss_listening(port)
         if st is None:
             probe_failed = True
-        print(f"  {port} {name}: {'监听' if st else ('无法判定' if st is None else '空闲')}")
-    # Momus LOW：探测失败契约——无法判定 → 退出码 2（优先于 0/1）
+        print(f"  {port} {name}: {'listening' if st else ('undecidable' if st is None else 'free')}")
+    # Momus LOW: probe-failure contract — undecidable → exit code 2 (takes priority over 0/1)
     return 2 if probe_failed else (0 if running else 1)
 
 
 def _compose_running(env: str) -> bool:
-    """env 是否有容器在跑（dev/prod 同容器名、compose ps 按目录聚合不分 env——
-    按 config_files label 区分，_detect_running_env 同源）。"""
+    """Whether env has containers running (dev/prod share container names, and compose ps aggregates by directory regardless of env —
+    distinguished by the config_files label, same source as _detect_running_env)."""
     try:
         out = subprocess.run(["docker", "ps", "--format", "{{.Names}}"],
                              capture_output=True, text=True, timeout=5, check=False).stdout
@@ -2338,26 +2338,26 @@ def _compose_running(env: str) -> bool:
 
 
 def _status_server_container(env_arg: str | None = None) -> int:
-    """容器运行态。env_arg 复接 --env（评审 cli F1：不许 help-实现漂移）。"""
+    """Container runtime state. env_arg reuses --env (review cli F1: no help-vs-implementation drift allowed)."""
     code = _curl_health_code()
     env_now = env_arg or _detect_running_env()
-    print(f"server (compose env={env_now}):", flush=True)  # flush: _run 子进程输出先于 print（pipe 缓冲）
-    _check("docker", "安装 docker 并启动 daemon")
-    _run(["docker", "compose", "-f", _compose_file(env_now), "ps"])  # 进程/容器清单（ps 子集——评审 arch F1）
-    print(f"  health 9800: {'200 OK' if code == '200' else code or '无响应'}")
+    print(f"server (compose env={env_now}):", flush=True)  # flush: _run subprocess output lands before print (pipe buffering)
+    _check("docker", "install docker and start the daemon")
+    _run(["docker", "compose", "-f", _compose_file(env_now), "ps"])  # process/container listing (a subset of ps — review arch F1)
+    print(f"  health 9800: {'200 OK' if code == '200' else code or 'no response'}")
     av = _compose_env().get("MEDIASERVO_SFU_ANNOUNCED_IP", "")
     if av:
-        print(f"  announced: {av}")   # C38 ①层观察量
+        print(f"  announced: {av}")   # C38 layer-1 observation
     return 0 if _compose_running(env_now) else 1
 
 
 def _status_host() -> int:
-    """host 运行态。进程名双前缀（评审 ops#1 CRITICAL：品牌化 msrtc-* vs 官方 host-*）。"""
+    """Host runtime state. Process names have dual prefixes (review ops#1 CRITICAL: branded msrtc-* vs official host-*)."""
     print("host:")
-    procs = ["agent", "streamer", "capturer"]  # 品牌化角色（双前缀——ops#1 CRITICAL）
+    procs = ["agent", "streamer", "capturer"]  # branded roles (dual prefixes — ops#1 CRITICAL)
     brands = ["msrtc", "host"]
-    bare_procs = ["oxmgr"]  # Momus HIGH：oxmgr daemon 进程名是裸 `oxmgr`（npm 二进制 bin/oxmgr；
-    # 品牌前缀仅作用于 translate 生成的 <brand>-<app>——agent/streamer/capturer 才带前缀）
+    bare_procs = ["oxmgr"]  # Momus HIGH: the oxmgr daemon's process name is bare `oxmgr` (npm binary bin/oxmgr;
+    # the brand prefix applies only to translate-generated <brand>-<app> — only agent/streamer/capturer carry prefixes)
     any_alive = False
     probe_failed = False
     for role in procs + bare_procs:
@@ -2370,39 +2370,39 @@ def _status_host() -> int:
                 break
         if pids:
             any_alive = True
-            print(f"  {role}: 运行中 pid={' '.join(pids)}")
+            print(f"  {role}: running pid={' '.join(pids)}")
         else:
-            print(f"  {role}: 未运行")
+            print(f"  {role}: not running")
     st = _ss_listening(17980)
     if st is None:
         probe_failed = True
-    print(f"  网关 17980: {'监听' if st else ('无法判定' if st is None else '空闲')}")
-    # 实例日志路径（评审 ops#5/docs#3：C32 实例隔离——不硬编码占位符）
+    print(f"  gateway 17980: {'listening' if st else ('undecidable' if st is None else 'free')}")
+    # instance log path (review ops#5/docs#3: C32 instance isolation — no hardcoded placeholders)
     inst = os.environ.get("OXMGR_DATA_DIR", "")
     log_hint = (Path(inst).parent / "run" / "logs") if inst else (ROOT.parent / "out" / "host" / "run" / "logs")
-    print(f"  日志: {log_hint}/msrtc-streamer-<stream>.err.log（C38 ②层：grep 订阅/acl denied/OpenH264）")
+    print(f"  logs: {log_hint}/msrtc-streamer-<stream>.err.log (C38 layer-2: grep subscription/acl denied/OpenH264)")
     if not any_alive:
-        print("  → host 未运行——手动: target/debug/mediaservo-host init . && token issue --all . && start .（开发）或 systemctl --user start oxmgr-<brand>-host.service（部署）", file=sys.stderr)
+        print("  → host not running — manual: target/debug/mediaservo-host init . && token issue --all . && start . (development) or systemctl --user start oxmgr-<brand>-host.service (deployed)", file=sys.stderr)
     return 2 if probe_failed else (0 if any_alive else 1)
 
 
 def _add_mode_args(p, *, env_choices=("dev", "prod"), allow_both=False):
-    """统一模式参数（--mode native|compose[/both] + 短别名 --native/--env；互斥）。
-    语义: 命令默认 native（用户裁决 B）——compose 需显式 --mode compose / --env；
-    both 仅 stop/clean 启用（双停/双清两轨）。"""
+    """Unified mode parameters (--mode native|compose[/both] + short aliases --native/--env; mutually exclusive).
+    Semantics: commands default to native (user ruling B) — compose requires an explicit --mode compose / --env;
+    both is enabled only for stop/clean (stops/clears both tracks)."""
     choices = ["native", "compose"] + (["both"] if allow_both else [])
     grp = p.add_mutually_exclusive_group()
     grp.add_argument("--mode", choices=choices, default=None,
-                     help="运行模式: native=裸机（默认）| compose=容器（--env 同效）"
-                     + (" | both=两轨全处理" if allow_both else ""))
-    grp.add_argument("--native", action="store_true", help="（--mode native 短别名——默认模式，可省略）")
+                     help="run mode: native = bare metal (default) | compose = containers (--env equivalent)"
+                     + (" | both = handle both tracks" if allow_both else ""))
+    grp.add_argument("--native", action="store_true", help="(short alias for --mode native — default mode, omittable)")
     grp.add_argument("--env", choices=list(env_choices), default=None,
-                     help="（--mode compose 短别名 = 进程族容器模式；compose 族 up/down/ps 的 --env 是环境选择——两套语义）")
+                     help="(short alias for --mode compose = process-family container mode; --env in the compose family up/down/ps selects the environment — two distinct semantics)")
     p.set_defaults(_resolve_mode_into=None)
 
 
 def _resolve_mode(args, default: str = "native") -> str:
-    """统一解析 args → mode（--mode > --native/--env > default）。"""
+    """Resolve args → mode uniformly (--mode > --native/--env > default)."""
     if getattr(args, "mode", None):
         return args.mode
     if getattr(args, "native", False):
@@ -2413,26 +2413,26 @@ def _resolve_mode(args, default: str = "native") -> str:
 
 
 def _compose_file(env: str) -> str:
-    """环境 → compose 文件映射（up/down/ps/exec 共用）。"""
+    """Environment → compose file mapping (shared by up/down/ps/exec)."""
     return "docker-compose.yml" if env == "prod" else "docker-compose.dev.yml"
 
 
 def _cmd_up(args: argparse.Namespace) -> None:
-    """部署生命周期: up [--env dev|prod] [svc]——prod=单容器+命名卷+entrypoint 自举。"""
+    """Deployment lifecycle: up [--env dev|prod] [svc] — prod = single container + named volumes + entrypoint bootstrap."""
     cf = _compose_file(args.env)
     cmd = ["docker", "compose", "-f", cf, "up", "-d", args.svc]
     if args.build:
         cmd.insert(5, "--build")
     env = _compose_env(args.announced_ip)
     if args.announced_ip:
-        print(f"MEDIASERVO_SFU_ANNOUNCED_IP 显式指定: {args.announced_ip}")
-    # PIT-79 接线: 未显式设置时自动探测宿主机全部真实 IP（多网卡/VPN 场景）注入 env
+        print(f"MEDIASERVO_SFU_ANNOUNCED_IP explicitly set: {args.announced_ip}")
+    # PIT-79 wiring: when not set explicitly, auto-detect all real host IPs (multi-NIC/VPN scenarios) and inject into env
     _run_or_exit(cmd, env=env)
 
 
 def _detect_running_env() -> str:
-    """检测当前运行中的 server 容器属于哪个 compose 项目（dev/prod——容器名相同，
-    按 compose config_files label 区分；无容器 = 默认 dev）。"""
+    """Detect which compose project the running server container belongs to (dev/prod — same container name,
+    distinguished by the compose config_files label; no container = default dev)."""
     try:
         out = subprocess.run(
             ["docker", "ps", "--format", "{{.Names}}"],
@@ -2452,29 +2452,29 @@ def _detect_running_env() -> str:
 
 
 def _cmd_down(args: argparse.Namespace) -> None:
-    """停止部署（卷保留——prod 数据持久）。无 --env 时自动检测当前运行环境。"""
+    """Stop the deployment (volumes kept — prod data persists). Without --env, auto-detect the current running environment."""
     env = args.env if args.env is not None else _detect_running_env()
-    print(f"down: 检测到环境 {env}")
+    print(f"down: detected environment {env}")
     cf = _compose_file(env)
     _run_or_exit(["docker", "compose", "-f", cf, "down"])
 
 
 def _cmd_exec(args: argparse.Namespace) -> None:
-    """容器内命令（调试）: exec <svc> -- <cmd>（argparse REMAINDER 自动剥离 --）。"""
+    """Run a command inside a container (debugging): exec <svc> -- <cmd> (argparse REMAINDER strips the -- automatically)."""
     if not args.cmd:
-        print("用法: mediaservo exec <svc> -- <cmd>", file=sys.stderr)
+        print("Usage: mediaservo exec <svc> -- <cmd>", file=sys.stderr)
         sys.exit(2)
     _run_or_exit(["docker", "compose", "-f", "docker-compose.dev.yml", "exec", "-T", args.svc] + args.cmd)
 
 
 def _cmd_ps(args: argparse.Namespace) -> None:
-    """运行态: compose ps（server 部署）+ host ps（进程实例——cwd 推断）。"""
+    """Runtime state: compose ps (server deployment) + host ps (process instances — inferred from cwd)."""
     cf = _compose_file(getattr(args, "env", "dev"))
     _run(["docker", "compose", "-f", cf, "ps"])
 
 
 def _cmd_data(args: argparse.Namespace) -> None:
-    """数据卷管理: backup|reset|inspect（mediaservo-data/recordings）。"""
+    """Data volume management: backup|reset|inspect (mediaservo-data/recordings)."""
     vol_data = "mediaservo_mediaservo-data"
     vol_rec = "mediaservo_mediaservo-recordings"
     if args.data_cmd == "inspect":
@@ -2489,21 +2489,21 @@ def _cmd_data(args: argparse.Namespace) -> None:
                 "-v", f"{target.absolute()}:/backup",
                 "alpine", "sh", "-c", f"tar czf /backup/{vol}.tar.gz -C /data .",
             ])
-            print(f"已备份 {vol} → {out}")
+            print(f"backed up {vol} → {out}")
     elif args.data_cmd == "reset":
         if not args.force:
-            ans = input(f"重置 {vol_data} + {vol_rec}（删除全部数据）？[y/N] ")
+            ans = input(f"reset {vol_data} + {vol_rec} (delete all data)? [y/N] ")
             if ans.strip().lower() != "y":
-                print("已取消")
+                print("cancelled")
                 return
-        # 语义: 先 down（容器停）再删卷（entrypoint 下次 up 重新生成）
+        # semantics: down first (containers stop), then delete volumes (entrypoint regenerates on the next up)
         _cmd_down(argparse.Namespace(env="prod"))
         _run_or_exit(["docker", "volume", "rm", vol_data, vol_rec])
-        print("卷已删除——`mediaservo up --env prod` 重新初始化（密钥重新生成）")
+        print("volumes deleted — `mediaservo up --env prod` re-initializes (keys regenerated)")
 
 
 def _cmd_doctor(_args: argparse.Namespace | None = None) -> None:
-    """环境诊断（工具链版本——原 status 更名，与运行态探测 status 区分）。"""
+    """Environment diagnosis (toolchain versions — renamed from the original status to distinguish it from the runtime health probe status)."""
     _cmd_env_diagnose()
 
 
@@ -2514,151 +2514,151 @@ def _cmd_version() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mediaservo",
-        description="MediaServo 统一构建 CLI（术语: native=裸机, compose=容器）",
+        description="MediaServo unified build CLI (terms: native = bare metal, compose = containers)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""三模式速查（native=裸机 compose=容器）:
-  模式① 裸机交付: build server（bin/etc/web 装配）→ deploy server --prefix <X> →
-             <X>/<brand>-server init/start/stop/status/restart/doctor <X>（startup on=开机锚点；bin 物理名品牌化 D269）
-    快速通道: build web（仅前端→out/server/web）| dev web（vite:5173 热更, 配 start --no-web）
-             | run web（过渡独立 caddy :8080——Phase 6 后归实例进程簇）
-  模式② 单容器生产: build server --image runtime → up --env prod → logs server --env prod
-  模式③ compose开发: up --env dev（热更）→ logs -f → down --env dev
-  退役→指引 exit 2: run/start/stop/restart server|host（C39——用实例目录命令；容器面 up/down 不变）
-  只读探测保留: status server|web / logs server / clean server
-  C++ 例子面（p3）: list example → build example [名…] → run example <名> / test example
-             （前台开发工具，产物 target/examples/bin/——不进 out/；build-c 前置自动补）
-  退出码: status/logs/stop —— 0=成功 1=未运行/目标缺失 2=参数错/退役指引
+        epilog="""Three-mode quick reference (native = bare metal, compose = containers):
+  Mode 1 bare-metal delivery: build server (assembles bin/etc/web) → deploy server --prefix <X> →
+             <X>/<brand>-server init/start/stop/status/restart/doctor <X> (startup on = boot anchor; bin physical name branded per D269)
+    fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
+             | run web (transitional standalone caddy :8080 — joins the instance process cluster after Phase 6)
+  Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
+  Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
+  retired → guidance + exit 2: run/start/stop/restart server|host (C39 — use instance-directory commands; the container face up/down is unchanged)
+  read-only probes kept: status server|web / logs server / clean server
+  C++ example surface (p3): list example → build example [names…] → run example <name> / test example
+             (foreground dev tool; artifacts in target/examples/bin/ — never in out/; the build-c prelude is auto-added)
+  exit codes: status/logs/stop — 0 = success, 1 = not running/target missing, 2 = bad args / retirement guidance
 """)
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    build_p = sub.add_parser("build", help="构建 <target> [--image runtime|dev]: all|web|host|server|client|bindings（默认 all；server=不嵌入变体+web 装配一步出；web=纯前端快速通道；--image 才走 Docker）")
+    build_p = sub.add_parser("build", help="build <target> [--image runtime|dev]: all|web|host|server|client|bindings (default all; server = non-embedded variant + one-step web assembly; web = frontend-only fast lane; only --image takes the Docker path)")
     build_p.add_argument("target", nargs="?", choices=["all", "web", "host", "server", "client", "bindings", "example"], default="all")
-    build_p.add_argument("--release", action="store_true", help="release 构建（bindings: target/release，strip+LTO）")
+    build_p.add_argument("--release", action="store_true", help="release build (bindings: target/release, strip+LTO)")
     grp = build_p.add_mutually_exclusive_group()
     grp.add_argument("--image", choices=["runtime", "dev"], default=None,
-                     help="仅 build server: Docker 镜像 target（runtime=生产交付瘦身镜像；dev=工具链镜像）")
+                     help="build server only: Docker image target (runtime = production slim delivery image; dev = toolchain image)")
     grp.add_argument("--native", action="store_true",
-                     help="仅 build server: 原生编译（pixi 工具链——首次需联网拉 meson wrap；多 IP 公告在 run 阶段生效）")
+                     help="build server only: native compile (pixi toolchain — first run needs network for meson wraps; multi-IP announcement takes effect at the run stage)")
     build_p.add_argument("names", nargs="*", metavar="NAME",
-                        help="仅 build example: 例子名（省略=全部；list example 看清单）")
+                        help="build example only: example names (omit = all; list example shows the roster)")
     build_p.set_defaults(func=_cmd_build)
 
-    up_p = sub.add_parser("up", help="启动部署 <svc> [--env dev|prod] [--announced-ip IP]: dev=热更 compose；prod=单容器+命名卷+entrypoint 自举（公告地址显式覆盖）")
-    up_p.add_argument("svc", nargs="?", default="server", help="服务（默认 server）")
-    up_p.add_argument("--env", choices=["dev", "prod"], default="dev", help="环境（默认 dev——可省略）")
-    up_p.add_argument("--build", action="store_true", help="先构建镜像再 up")
+    up_p = sub.add_parser("up", help="start deployment <svc> [--env dev|prod] [--announced-ip IP]: dev = hot-reload compose; prod = single container + named volumes + entrypoint bootstrap (announce address explicit override)")
+    up_p.add_argument("svc", nargs="?", default="server", help="service (default server)")
+    up_p.add_argument("--env", choices=["dev", "prod"], default="dev", help="environment (default dev — omittable)")
+    up_p.add_argument("--build", action="store_true", help="build the image first, then up")
     up_p.add_argument(
         "--announced-ip",
         metavar="IP[,IP...]",
         default=None,
-        help="容器 mediasoup 公告地址（覆盖自动探测——如 10.144.0.3 或 192.168.2.127,10.144.0.3；"
-        "容器仅单公告生效——首个 IP；多地址需裸机运行）",
+        help="container mediasoup announce address (overrides auto-detection — e.g. 10.144.0.3 or 192.168.2.127,10.144.0.3; "
+        "containers honor only a single announcement — the first IP wins; multiple addresses require bare-metal run)",
     )
     up_p.set_defaults(func=_cmd_up)
 
-    down_p = sub.add_parser("down", help="停止部署 [--env dev|prod]（卷保留；无 --env 自动检测当前环境）")
+    down_p = sub.add_parser("down", help="stop deployment [--env dev|prod] (volumes kept; without --env, auto-detect the current environment)")
     down_p.add_argument("--env", choices=["dev", "prod"], default=None)
     down_p.set_defaults(func=_cmd_down)
 
-    restart_p = sub.add_parser("restart", help="重启 <target>: web=过渡 caddy；server/host 退役→指引 exit 2（<prefix>/bin/mediaservo-server restart <dir>；容器 up/down）")
+    restart_p = sub.add_parser("restart", help="restart <target>: web = transitional caddy; server/host retired → guidance + exit 2 (<prefix>/bin/mediaservo-server restart <dir>; containers up/down)")
     restart_p.add_argument("target", choices=["host", "server", "web"])
     _add_mode_args(restart_p)
     restart_p.set_defaults(func=_cmd_restart)
-    run_p = sub.add_parser("run", help="运行 <target>: web=过渡 caddy（:8080）；server/host 退役→指引 exit 2（实例命令见 <prefix>/bin/mediaservo-server -h）")
+    run_p = sub.add_parser("run", help="run <target>: web = transitional caddy (:8080); server/host retired → guidance + exit 2 (instance commands: <prefix>/bin/mediaservo-server -h)")
     run_p.add_argument("target", choices=["server", "host", "web", "example"])
     run_p.add_argument("rest", nargs=argparse.REMAINDER,
-                       help="仅 run example: <name> [应用透传参数…]")
-    run_p.add_argument("--foreground", "-f", action="store_true", help="（退役遗留——server 运行分支已移除, 无效果）")
-    run_p.add_argument("--release", action="store_true", help="（退役遗留——无效果）")
+                       help="run example only: <name> [app passthrough args…]")
+    run_p.add_argument("--foreground", "-f", action="store_true", help="(retirement leftover — the server run branch is removed; no effect)")
+    run_p.add_argument("--release", action="store_true", help="(retirement leftover — no effect)")
     run_p.add_argument("--announced-ip", metavar="IP[,IP...]", default=None,
-                       help="（退役遗留——实例侧公告用 MEDIASERVO_SFU_ANNOUNCED_IP env）")
+                       help="(retirement leftover — for instance-side announcements use the MEDIASERVO_SFU_ANNOUNCED_IP env)")
     run_p.set_defaults(func=_cmd_run)
 
-    start_p = sub.add_parser("start", help="启动 <target>（默认 server）: server 退役→指引 exit 2（容器用 up）；host 已移除 CLI 封装；web=过渡 caddy")
+    start_p = sub.add_parser("start", help="start <target> (default server): server retired → guidance + exit 2 (containers use up); host CLI wrapper removed; web = transitional caddy")
     start_p.add_argument("target", nargs="?", choices=["host", "server", "web"], default="server")
     _add_mode_args(start_p)
-    start_p.add_argument("--foreground", "-f", action="store_true", help="（退役遗留——server 运行分支已移除, 无效果）")
+    start_p.add_argument("--foreground", "-f", action="store_true", help="(retirement leftover — the server run branch is removed; no effect)")
     start_p.set_defaults(func=_cmd_start)
 
-    stop_p = sub.add_parser("stop", help="停止 <target>: server/host 退役→指引 exit 2（实例命令 stop <dir>；容器 mediaservo down）；web=过渡 caddy")
+    stop_p = sub.add_parser("stop", help="stop <target>: server/host retired → guidance + exit 2 (instance command stop <dir>; containers: mediaservo down); web = transitional caddy")
     stop_p.add_argument("target", choices=["host", "server", "web"])
     _add_mode_args(stop_p, allow_both=True)
     stop_p.set_defaults(func=_cmd_stop)
 
-    dev_p = sub.add_parser("dev", help="开发服务透传: web=vite dev（:5173, proxy /api /ws→9800——配 mediaservo-server start --no-web 组开发栈；前台工具无 pidfile）")
+    dev_p = sub.add_parser("dev", help="dev service passthrough: web = vite dev (:5173, proxy /api /ws→9800 — pairs with mediaservo-server start --no-web for the dev stack; foreground tool, no pidfile)")
     dev_p.add_argument("target", choices=["web"])
-    dev_p.add_argument("rest", nargs=argparse.REMAINDER, help="透传参数（-- 之后, 如 -- --port 5174）")
+    dev_p.add_argument("rest", nargs=argparse.REMAINDER, help="passthrough args (after --, e.g. -- --port 5174)")
     dev_p.set_defaults(func=_cmd_dev)
 
-    logs_p = sub.add_parser("logs", help="日志 [<svc>] [--follow] [--mode native|compose]: server=裸机日志（默认）| compose 容器日志 | host 日志")
+    logs_p = sub.add_parser("logs", help="logs [<svc>] [--follow] [--mode native|compose]: server = bare-metal log (default) | compose container log | host log")
     logs_p.add_argument("target", nargs="?", choices=["server", "host"], default="server")
     _add_mode_args(logs_p)
-    logs_p.add_argument("--follow", "-f", action="store_true", help="跟踪输出")
+    logs_p.add_argument("--follow", "-f", action="store_true", help="follow output")
     logs_p.set_defaults(func=_cmd_logs)
 
-    ps_p = sub.add_parser("ps", help="运行态: compose ps（server 部署——按 --env）")
+    ps_p = sub.add_parser("ps", help="runtime state: compose ps (server deployment — by --env)")
     ps_p.add_argument("--env", choices=["dev", "prod"], default="dev")
     ps_p.set_defaults(func=_cmd_ps)
 
-    exec_p = sub.add_parser("exec", help="容器内执行: exec <svc> -- <cmd>（compose exec——调试用）")
-    exec_p.add_argument("svc", help="服务名（server/proxy）")
-    exec_p.add_argument("cmd", nargs=argparse.REMAINDER, help="容器内命令（-- 后）")
+    exec_p = sub.add_parser("exec", help="execute in container: exec <svc> -- <cmd> (compose exec — for debugging)")
+    exec_p.add_argument("svc", help="service name (server/proxy)")
+    exec_p.add_argument("cmd", nargs=argparse.REMAINDER, help="command inside the container (after --)")
     exec_p.set_defaults(func=_cmd_exec)
 
-    e2e_p = sub.add_parser("e2e", help="测试套件: sfu|push|ui|host|package|brand|bindings|client|smoke")
+    e2e_p = sub.add_parser("e2e", help="test suites: sfu|push|ui|host|package|brand|bindings|client|smoke")
     e2e_p.add_argument("suite", choices=["sfu", "push", "ui", "host", "package", "brand", "bindings", "client", "smoke"])
     e2e_p.set_defaults(func=_cmd_e2e)
 
-    list_p = sub.add_parser("list", help="清单 <target>: example=C++ 例子（目录契约=G4 三形合一）")
+    list_p = sub.add_parser("list", help="listing <target>: example = C++ examples (directory contract = G4 three-forms-in-one)")
     list_p.add_argument("target", choices=["example"])
     list_p.set_defaults(func=lambda a: _cmd_list_example())
-    test_p = sub.add_parser("test", help="workspace 测试（排除 mediaservo-server）| example=<name> ctest")
+    test_p = sub.add_parser("test", help="workspace tests (excluding mediaservo-server) | example=<name> ctest")
     test_p.add_argument("what", nargs="?", choices=["example"], default=None,
-                        help="example=GUI/SDK 例子 ctest 面（裸 test=workspace 语义不变，F-A-9①）")
-    test_p.add_argument("name", nargs="?", help="example: 例子名过滤（ctest -R）")
-    sub.add_parser("ci", help="CI 全链: fmt → clippy → test → e2e sfu")
+                        help="example = GUI/SDK example ctest surface (bare test = unchanged workspace semantics, F-A-9(1))")
+    test_p.add_argument("name", nargs="?", help="example: filter by example name (ctest -R)")
+    sub.add_parser("ci", help="full CI chain: fmt → clippy → test → e2e sfu")
 
-    deploy_p = sub.add_parser("deploy", help="部署 <target>（有状态落地——deploy 不触发构建, 源=out/ 交付树）：host|server|bindings；host/server --prefix 必填（/opt 需 root）；bindings 缺省=<out>/bindings")
+    deploy_p = sub.add_parser("deploy", help="deploy <target> (stateful landing — deploy does not trigger builds, source = out/ delivery tree): host|server|bindings; host/server --prefix mandatory (/opt needs root); bindings defaults to <out>/bindings")
     deploy_p.add_argument("target", choices=["bindings", "host", "server"])
-    deploy_p.add_argument("--prefix", default=None, help="部署前缀（host/server 必填：/opt/mediaservo-{host,server}；bindings 缺省=<out>/bindings，out 根随调用壳）")
-    deploy_p.add_argument("--release", action="store_true", help="部署 release 组装产物")
+    deploy_p.add_argument("--prefix", default=None, help="deployment prefix (mandatory for host/server: /opt/mediaservo-{host,server}; bindings defaults to <out>/bindings, out root follows the calling shell)")
+    deploy_p.add_argument("--release", action="store_true", help="deploy release-profile assembled artifacts")
     deploy_p.set_defaults(func=_cmd_deploy)
-    # D1: install 隐藏 prompt（不 alias——语义不同: 源=out/ 交付布局 + --prefix 必填）
-    install_p = sub.add_parser("install", help="已改名 deploy（提示迁移后退出 exit 2）")
-    install_p.add_argument("args", nargs=argparse.REMAINDER, help="吞掉旧调用点透传参数（T3 迁移前 msrtc.sh 仍注入 --prefix 等）——仅提示改名")
+    # D1: install kept as a hidden prompt (not aliased — different semantics: source = out/ delivery layout + --prefix mandatory)
+    install_p = sub.add_parser("install", help="renamed to deploy (prints the migration hint then exits with 2)")
+    install_p.add_argument("args", nargs=argparse.REMAINDER, help="swallow passthrough args from old call sites (msrtc.sh still injects --prefix etc. before the T3 migration) — only prints the rename hint")
     install_p.set_defaults(func=_cmd_install_deprecated)
-    package_p = sub.add_parser("package", help="打包 <target>: host|server|sdk-field（设备半区，原 bindings 更名 alias 一周期）|sdk-client（舱端半区）→ <dist>/<brand>-<target>-<ver>.tar.gz（D-H13/F12，含版本契约与版本顶层目录）")
+    package_p = sub.add_parser("package", help="package <target>: host|server|sdk-field (device half; the old bindings name stays as a one-cycle alias)|sdk-client (cockpit half) → <dist>/<brand>-<target>-<ver>.tar.gz (D-H13/F12, includes the version contract and a versioned top-level dir)")
     package_p.add_argument("target", choices=["host", "server", "bindings", "sdk-field", "sdk-client"])
-    package_p.add_argument("--dist", default="", help="package tar 与 staging 输出目录（默认 dist；MSRTC 发布壳默认 out/packages）")
-    package_p.add_argument("--brand", default="", help="品牌包名（<dist>/<brand>-<target>-<ver>.tar.gz；缺省 mediaservo）")
-    package_p.add_argument("--release", action="store_true", help="打包 release 产物（target/release, 配合 build --release）")
+    package_p.add_argument("--dist", default="", help="output dir for the package tar and staging (default dist; the MSRTC release shell defaults to out/packages)")
+    package_p.add_argument("--brand", default="", help="brand package name (<dist>/<brand>-<target>-<ver>.tar.gz; default mediaservo)")
+    package_p.add_argument("--release", action="store_true", help="package release artifacts (target/release, pairs with build --release)")
     package_p.set_defaults(func=_cmd_package)
-    clean_p = sub.add_parser("clean", help="清理 <target>: all|server|host|client（默认 all；server=原生清（默认）| --mode both 双清）")
+    clean_p = sub.add_parser("clean", help="clean <target>: all|server|host|client (default all; server = native clean (default) | --mode both clears both)")
     clean_p.add_argument("target", nargs="?", choices=["all", "server", "host", "client"], default="all")
     _add_mode_args(clean_p, allow_both=True)
-    clean_p.add_argument("--all", action="store_true", help="显式删卷 + docker builder prune（15-30 分钟重建代价）")
+    clean_p.add_argument("--all", action="store_true", help="explicitly delete volumes + docker builder prune (15-30 minute rebuild cost)")
     clean_p.set_defaults(func=_cmd_clean)
-    config_p = sub.add_parser("config", help="配置 show|validate|set <key> <value>（dev 轨道 config/ 目录）")
+    config_p = sub.add_parser("config", help="config show|validate|set <key> <value> (dev-track config/ directory)")
     config_p.add_argument("config_cmd", choices=["show", "validate", "set"])
-    config_p.add_argument("key", nargs="?", help="set: 配置键（如 signaling.psk）")
-    config_p.add_argument("value", nargs="?", help="set: 配置值")
+    config_p.add_argument("key", nargs="?", help="set: config key (e.g. signaling.psk)")
+    config_p.add_argument("value", nargs="?", help="set: config value")
     config_p.set_defaults(func=_cmd_config)
-    data_p = sub.add_parser("data", help="数据卷: backup [<dir>]| reset | inspect")
+    data_p = sub.add_parser("data", help="data volumes: backup [<dir>]| reset | inspect")
     data_p.add_argument("data_cmd", choices=["backup", "reset", "inspect"])
-    data_p.add_argument("dir", nargs="?", help="backup: 目标目录（默认 ./backup）")
-    data_p.add_argument("--force", action="store_true", help="reset: 跳过交互确认")
+    data_p.add_argument("dir", nargs="?", help="backup: target directory (default ./backup)")
+    data_p.add_argument("--force", action="store_true", help="reset: skip the interactive confirmation")
     data_p.set_defaults(func=_cmd_data)
-    doctor_p = sub.add_parser("doctor", help="环境诊断（pixi/cargo/docker/node——原 status）")
+    doctor_p = sub.add_parser("doctor", help="environment diagnosis (pixi/cargo/docker/node — the original status)")
     doctor_p.set_defaults(func=_cmd_doctor)
-    status_p = sub.add_parser("status", help="健康探测 <target>（退出码 0/1/2）: server=裸机（默认）| compose 容器（--mode compose）| host 推流进程")
+    status_p = sub.add_parser("status", help="health probe <target> (exit codes 0/1/2): server = bare metal (default) | compose containers (--mode compose) | host push processes")
     status_p.add_argument("target", choices=["server", "host", "web"])
     _add_mode_args(status_p)
     status_p.set_defaults(func=_cmd_status_runtime)
 
-    sub.add_parser("version", help="CLI 版本")
+    sub.add_parser("version", help="CLI version")
 
-    # 兼容别名（保留 build-*——e2e 脚本/习惯用法）: run-host/up/down 别名已移除（up/down 现一级命令）
+    # compat aliases (build-* kept — e2e scripts/habitual usage): run-host/up/down aliases removed (up/down are now first-level commands)
     ALIASES = {
         "build-host": ["build", "host"],
         "build-server": ["build", "server"],
@@ -2669,10 +2669,10 @@ def main() -> None:
     args = parser.parse_args(argv)
     if args.command == "build":
         if getattr(args, "image", None) and args.target != "server":
-            print(f"build --image 仅支持 build server（当前 target={args.target}）", file=sys.stderr)
+            print(f"build --image only supports build server (current target={args.target})", file=sys.stderr)
             sys.exit(2)
         if getattr(args, "native", False) and args.target != "server":
-            print(f"build --native 仅支持 build server（当前 target={args.target}）", file=sys.stderr)
+            print(f"build --native only supports build server (current target={args.target})", file=sys.stderr)
             sys.exit(2)
         if args.target == "bindings":
             _cmd_build_bindings(args.release)

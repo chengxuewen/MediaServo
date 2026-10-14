@@ -2,7 +2,7 @@
 .apikeys-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
 .apikeys-head .section-title { margin-bottom: 0; }
 
-/* 列表行布局仿 .account-list（Accounts.css）— 同 token 同刻度 */
+/* List row layout mirrors .account-list (Accounts.css) — same tokens, same scale */
 .apikey-list { display: flex; flex-direction: column; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow: hidden; }
 .apikey-row { display: flex; align-items: center; gap: 1rem; padding: 0.75rem 1rem; border-bottom: 1px solid #f0f0f0; font-size: 0.9rem; }
 .apikey-row:last-child { border-bottom: none; }

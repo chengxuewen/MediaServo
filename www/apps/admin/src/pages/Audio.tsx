@@ -9,7 +9,7 @@ interface RoomStats {
   error?: string;
 }
 
-/** 拉取单房间全部 producer/consumer 的 SfuStats（H2 协议管理面 REST 路径）。 */
+/** Fetch SfuStats for all producers/consumers of one room (H2 protocol admin REST path). */
 async function fetchRoomStats(room: SfuRoom): Promise<RoomStats> {
   const [producerStats, consumerStats] = await Promise.all([
     Promise.all(room.producer_ids.map((id) => getSfuStats(id, undefined))),
@@ -43,7 +43,7 @@ export default function Audio() {
   }, []);
 
   useEffect(() => { fetchRooms(); }, [fetchRooms]);
-  // ponytail: 5s 轮询（与 useDevices 同节奏）; WS 事件合并留后续
+  // ponytail: 5s polling (same cadence as useDevices); WS event merge deferred
   useEffect(() => {
     const interval = setInterval(fetchRooms, 5000);
     return () => clearInterval(interval);
@@ -63,7 +63,7 @@ export default function Audio() {
     }
   }, [rooms]);
 
-  // 首次加载后自动拉一轮 stats（房间存在 producer/consumer 时）
+  // after first load, pull stats once automatically (when the room has producers/consumers)
   useEffect(() => {
     if (!loading) rooms.forEach((r) => refreshStats(r.room_id));
   }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps

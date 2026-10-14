@@ -1,11 +1,11 @@
-//! Task E1: 拓扑监控 e2e — 真实数据源闭环。
+//! Task E1: topology monitor e2e - closed loop with real data sources.
 //!
-//! ① oxmgr 进程起/杀 → snapshot 实际态变化 + diff 出现 mismatch（进程级）；
-//! ② FrameBus 发布 → collect() 的 actual_topics 可见（发现式实际，发布者级）。
+//! (1) start/kill an oxmgr process -> the snapshot's actual state changes + the diff shows a mismatch (process level);
+//! (2) publish on FrameBus -> collect()'s actual_topics see it (discovered actual, publisher level).
 //!
-//! 依赖: oxmgr CLI（PATH 或 ~/.local/bin，daemon 自动拉起）+ iceoryx2 运行时。
-//! 前置（C25）: `rm -rf /tmp/iceoryx2 /dev/shm/iox2_*`。
-//! oxmgr 不可用时跳过（CI 环境无 daemon 也能跑其余测试）。
+//! Requires: the oxmgr CLI (PATH or ~/.local/bin, daemon auto-spawned) + the iceoryx2 runtime.
+//! Prerequisite (C25): `rm -rf /tmp/iceoryx2 /dev/shm/iox2_*`.
+//! Skipped when oxmgr is unavailable (the remaining tests run in CI without a daemon).
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -20,7 +20,7 @@ use mediaservo_link::{
 const PRIV_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIObCg8b+Le6kKOI/+pE+4+YhXUlr6X6h7q8p/MjvHmXT\n-----END PRIVATE KEY-----\n";
 const PUB_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgXprEbnahCZoZtLpiUqR0ruqtzEfRXk/Gl/6F6PEm4o=\n-----END PUBLIC KEY-----\n";
 
-/// PATH 查找 oxmgr，回退 ~/.local/bin（与 topology.rs find_oxmgr 同逻辑）。
+/// Look up oxmgr on PATH, falling back to ~/.local/bin (same logic as find_oxmgr in topology.rs).
 fn oxmgr_bin() -> Option<PathBuf> {
     if let Some(paths) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&paths) {
@@ -35,7 +35,7 @@ fn oxmgr_bin() -> Option<PathBuf> {
     fallback.is_file().then_some(fallback)
 }
 
-/// oxmgr 托管进程清理守卫（断言失败也删除）。
+/// Cleanup guard for oxmgr-managed processes (removed even when an assertion fails).
 struct OxCleanup(PathBuf, String);
 impl Drop for OxCleanup {
     fn drop(&mut self) {
@@ -46,7 +46,7 @@ impl Drop for OxCleanup {
 #[test]
 fn oxmgr_process_lifecycle_reflected_in_snapshot() {
     let Some(bin) = oxmgr_bin() else {
-        eprintln!("oxmgr 不可用, 跳过");
+        eprintln!("oxmgr unavailable, skipping");
         return;
     };
     let name = format!("e1-topo-{}", std::process::id());
@@ -54,11 +54,11 @@ fn oxmgr_process_lifecycle_reflected_in_snapshot() {
     let out = Command::new(&bin)
         .args(["start", "--name", &name, "sleep 300"])
         .output()
-        .expect("oxmgr start 执行");
-    assert!(out.status.success(), "oxmgr start 失败: {}", String::from_utf8_lossy(&out.stderr));
+        .expect("oxmgr start executes");
+    assert!(out.status.success(), "oxmgr start failed: {}", String::from_utf8_lossy(&out.stderr));
     let _guard = OxCleanup(bin.clone(), name.clone());
 
-    // 等待注册为 running（oxmgr 注册与进程拉起间有小窗口）
+    // Wait until registered as running (small window between oxmgr registration and process spawn)
     let ox = OxmgrClient::with_bin(bin.clone());
     let mut procs = vec![];
     for _ in 0..50 {
@@ -70,18 +70,18 @@ fn oxmgr_process_lifecycle_reflected_in_snapshot() {
     }
     assert!(
         procs.iter().any(|p| p.name == name && p.status == "running"),
-        "启动后应 running: {procs:#?}"
+        "should be running after start: {procs:#?}"
     );
 
-    // 快照: 实际态含该进程 → 无 mismatch
+    // Snapshot: actual state contains the process -> no mismatch
     let monitor = TopologyMonitor::new_with_grace(String::new(), Duration::ZERO);
     let snap = monitor.collect();
     assert!(snap.actual_processes.iter().any(|p| p.name == name && p.status == "running"));
     assert!(diff(std::slice::from_ref(&name), &[], &snap.actual_processes, &[]).is_empty());
 
-    // 杀 → 实际态缺失 → mismatch 出现（grace=0 即时生效）
-    let out = Command::new(&bin).args(["stop", &name]).output().expect("oxmgr stop 执行");
-    assert!(out.status.success(), "oxmgr stop 失败: {}", String::from_utf8_lossy(&out.stderr));
+    // Kill -> actual state misses it -> mismatch appears (grace=0 takes effect immediately)
+    let out = Command::new(&bin).args(["stop", &name]).output().expect("oxmgr stop executes");
+    assert!(out.status.success(), "oxmgr stop failed: {}", String::from_utf8_lossy(&out.stderr));
     for _ in 0..50 {
         procs = ox.list().unwrap_or_default();
         if !procs.iter().any(|p| p.name == name && p.status == "running") {
@@ -93,13 +93,13 @@ fn oxmgr_process_lifecycle_reflected_in_snapshot() {
     assert!(
         diff(std::slice::from_ref(&name), &[], &snap.actual_processes, &[])
             .contains(&Mismatch::ProcessMissing { name: name.clone() }),
-        "停止后应报进程缺失: {snap:#?}"
+        "after stop the process should be reported missing: {snap:#?}"
     );
 }
 
 #[tokio::test]
 async fn publisher_discovery_visible_in_snapshot() {
-    // 真实发布者 → collect() 的 actual_topics 应可见（发现式实际闭环）
+    // Real publisher -> collect()'s actual_topics should show it (discovered-actual closed loop)
     let sk = Ed25519SigningKey::from_pem(PRIV_PEM.as_bytes());
     let vk = Ed25519VerifyingKey::from_pem(PUB_PEM.as_bytes());
     let acl = NodeAcl::for_role(NodeId::new("capture-e1e2"), Role::Capture);
@@ -112,6 +112,6 @@ async fn publisher_discovery_visible_in_snapshot() {
     let snap = monitor.collect();
     assert!(
         snap.actual_topics.iter().any(|t| t == &topic),
-        "发布者 topic 应出现在快照 actual_topics: {snap:#?}"
+        "the publisher topic should appear in the snapshot's actual_topics: {snap:#?}"
     );
 }

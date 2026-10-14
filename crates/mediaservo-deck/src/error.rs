@@ -1,6 +1,6 @@
-//! deck 错误类型。
+//! Deck error types.
 
-/// deck 媒体数据面错误。
+/// Errors for the deck media data plane.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum DeckError {

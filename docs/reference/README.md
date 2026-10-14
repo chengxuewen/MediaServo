@@ -1,82 +1,82 @@
-# MediaServo 参考文档索引
+# MediaServo Reference Docs Index
 
-> 更新: 2026-09-23 | 组织原则: **Diátaxis 框架**（活参考 / 调研存档分离）
-> 活参考按**产品模块**镜像组织（reference mirror product structure）；调研存档独立于 `research/`（历史调研，不碍事）
+> Updated: 2026-09-23 | Organizing principle: the **Diátaxis framework** (living reference / research archive separation)
+> Living references are organized to **mirror the product modules** (reference mirrors product structure); research archives sit separately under `research/` (historical research, inert)
 
-## 活参考（Reference — 查用，按产品模块）
+## Living Reference (Reference — for lookup, by product module)
 
-### 🌐 WebRTC 模块 — `webrtc/`
-| 文档 | 内容 |
-|------|------|
-| `webrtc/mediasoup-refs.md` | **入口** — 官方 mediasoup 源码导航 + 同步脚本用法 |
-| `webrtc/mediasoup-client.md` | 官方客户端架构参考（画像/用法/架构/案例） |
-| `webrtc/webrtc-w3c-alignment.md` | Host SFU 对齐 W3C API 重构分析（含团队审核修正） |
-| `webrtc/keyframe-black-screen-analysis.md` | PIT-65 关键帧黑屏根因分析 |
-| `webrtc/gop-control-internal-encoder.md` | **GOP 控制根因与修复路径** — libwebrtc 内部编码器关键帧机制 + 方案对比 + vendor 决策 |
-| `webrtc/sdp-negotiation-bitrate-audit.md` | **SDP 协商审计 + 码率链路** — Host 构建方式分析 + BWE 反馈断裂根因 + A/C 方案决策 (2026-08-12) |
+### 🌐 WebRTC module — `webrtc/`
+| Document | Content |
+|----------|---------|
+| `webrtc/mediasoup-refs.md` | **Entry point** — official mediasoup source navigation + sync-script usage |
+| `webrtc/mediasoup-client.md` | Official client architecture reference (profile/usage/architecture/cases) |
+| `webrtc/webrtc-w3c-alignment.md` | Host SFU W3C API alignment rework analysis (incl. team-review corrections) |
+| `webrtc/keyframe-black-screen-analysis.md` | PIT-65 keyframe black-screen root-cause analysis |
+| `webrtc/gop-control-internal-encoder.md` | **GOP control root cause & fix path** — libwebrtc internal-encoder keyframe mechanics + option comparison + vendor decision |
+| `webrtc/sdp-negotiation-bitrate-audit.md` | **SDP negotiation audit + bitrate chain** — Host build-form analysis + BWE feedback-break root cause + option A/C decision (2026-08-12) |
 
-### 🧰 Codec / 构建策略 — `codec/`
-| 文档 | 内容 |
-|------|------|
-| `codec/ffmpeg-static-build-strategy.md` | FFmpeg 静态构建策略（codec 三后端） |
-| `codec/build-optimization-strategy.md` | Docker 构建优化（分层缓存、国内镜像、lto） |
+### 🧰 Codec / build strategy — `codec/`
+| Document | Content |
+|----------|---------|
+| `codec/ffmpeg-static-build-strategy.md` | FFmpeg static build strategy (codec's three backends) |
+| `codec/build-optimization-strategy.md` | Docker build optimization (layer caching, regional mirrors, lto) |
 
-### 🧩 SDK C++ 绑定 — `sdk-cxx/`
-| 文档 | 内容 |
-|------|------|
-| `sdk-cxx/link.md` | 设备侧 IPC：信令 + 帧总线（12 函数 C 面的 cxx RAII；重连/resume/ACK 泵语义） |
-| `auth-guide.md` | 客户端鉴权总指南（四凭证选型/时序/四语言片段/运维要点；单点真源——sdk-cxx 四册只留指针） | viewer-auth-matrix T6 |
-| `sdk-cxx/deck.md` | 采集 / 录制 / 回放（FFmpeg 静态内嵌口径；FrameBus 不在 C/C++ 面、采集 MVP=stub 双警示） |
-| `auth-guide.md` | 客户端鉴权总指南（四凭证选型/时序/四语言片段/运维要点；单点真源——sdk-cxx 四册只留指针） | viewer-auth-matrix T6 |
-| `sdk-cxx/field.md` | 设备侧推流闭环（PushSession/内置帧源；**无外部喂帧入口**、拉流不在此面 两警示） |
-| `auth-guide.md` | 客户端鉴权总指南（四凭证选型/时序/四语言片段/运维要点；单点真源——sdk-cxx 四册只留指针） | viewer-auth-matrix T6 |
-| `sdk-cxx/client.md` | 舱端/消费侧（S6 批1b 28 符号形；Consumer RAII、协商/控制 DC/急停签名面） |
-| `auth-guide.md` | 客户端鉴权总指南（四凭证选型/时序/四语言片段/运维要点；单点真源——sdk-cxx 四册只留指针） | viewer-auth-matrix T6 |
+### 🧩 SDK C++ bindings — `sdk-cxx/`
+| Document | Content |
+|----------|---------|
+| `sdk-cxx/link.md` | Device-side IPC: signaling + frame bus (cxx RAII over the 12-function C face; reconnect/resume/ACK pump semantics) |
+| `auth-guide.md` | Client auth master guide (four-credential selection/timing/four-language snippets/ops notes; single source of truth — the four sdk-cxx volumes keep only pointers) | viewer-auth-matrix T6 |
+| `sdk-cxx/deck.md` | Capture / record / playback (FFmpeg statically embedded; two warnings: FrameBus is not on the C/C++ face, capture MVP=stub) |
+| `auth-guide.md` | Client auth master guide (four-credential selection/timing/four-language snippets/ops notes; single source of truth — the four sdk-cxx volumes keep only pointers) | viewer-auth-matrix T6 |
+| `sdk-cxx/field.md` | Device-side push closed loop (PushSession/built-in frame source; two warnings: **no external frame-feed entry**, pull is not on this face) |
+| `auth-guide.md` | Client auth master guide (four-credential selection/timing/four-language snippets/ops notes; single source of truth — the four sdk-cxx volumes keep only pointers) | viewer-auth-matrix T6 |
+| `sdk-cxx/client.md` | Cockpit/consumer side (S6 batch-1b 28-symbol form; Consumer RAII, negotiation/control DC/e-stop signing surface) |
+| `auth-guide.md` | Client auth master guide (four-credential selection/timing/four-language snippets/ops notes; single source of truth — the four sdk-cxx volumes keep only pointers) | viewer-auth-matrix T6 |
 
-### 其他活参考（根目录）
-| 文档 | 内容 |
-|------|------|
-| `janus-gateway.md` | Janus Gateway（WebRTC 会议网关）参考 |
+### Other living references (root)
+| Document | Content |
+|----------|---------|
+| `janus-gateway.md` | Janus Gateway (WebRTC conferencing gateway) reference |
 
-## 调研存档（Explanation — 历史调研，不参与活跃工作）
+## Research Archive (Explanation — historical research, not part of active work)
 
-> 一次性竞品/技术选型调研笔记，写完后不被引用。按原领域子目录归档，仅作历史参考。
+> One-off competitor/tech-selection research notes, never referenced after writing. Archived in their original domain subdirectories, historical reference only.
 
 ### `research/`
-| 子目录 | 内容 |
-|--------|------|
+| Subdirectory | Content |
+|--------------|---------|
 | `research/remote-desktop/` | anydesk / parsec / rustdesk / moonlight-sunshine / teamviewer |
 | `research/streaming/` | mediamtx / srs / zlmediakit / nginx-rtmp-module / pion / obs-studio / lvqr / xiu |
 | `research/video-conference/` | mediasoup* / openvidu-* / livekit / jitsi / kurento / zoom |
 | `research/teleoperation/` | comma-ai-openpilot / tether-rally / tum-teleoperated-driving / vay |
-| `research/network-emulation/` | 弱网模拟工具全景（tc/netem 族 / clumsy / ATC·toxiproxy 核证修正 / webrtc test-network·Pion vnet / 选型速查·深坑清单） |
+| `research/network-emulation/` | Weak-network emulation tool landscape (tc/netem family / clumsy / ATC·toxiproxy verified corrections / webrtc test-network·Pion vnet / quick-selection table · pitfall list) |
 
-## WebRTC 活参考关联图
+## WebRTC Living-Reference Relationship Map
 
 ```
-webrtc/mediasoup-refs.md (源码导航)
-   ├── webrtc/mediasoup-client.md (官方架构参考)
-   ├── webrtc/webrtc-w3c-alignment.md (对齐重构分析)
-   └── webrtc/keyframe-black-screen-analysis.md (PIT-65 根因)
-        ├── webrtc/gop-control-internal-encoder.md (GOP 机制 + 修复路径, 2026-08-10)
-        └── .agents/memorys/ (C18 官方用法优先, PIT-46/54/56/65)
+webrtc/mediasoup-refs.md (source navigation)
+   ├── webrtc/mediasoup-client.md (official architecture reference)
+   ├── webrtc/webrtc-w3c-alignment.md (alignment rework analysis)
+   └── webrtc/keyframe-black-screen-analysis.md (PIT-65 root cause)
+        ├── webrtc/gop-control-internal-encoder.md (GOP mechanics + fix path, 2026-08-10)
+        └── .agents/memorys/ (C18 official-usage-first, PIT-46/54/56/65)
 ```
 
-## 官方参考源码（脚本管理）
+## Official Reference Sources (script-managed)
 
-官方 mediasoup 客户端源码克隆在 `.refinfo/`（git-ignored），由 `scripts/sync-official-refs.sh` 管理。详见 `webrtc/mediasoup-refs.md`。
+The official mediasoup client source is cloned into `.refinfo/` (git-ignored), managed by `scripts/sync-official-refs.sh`. See `webrtc/mediasoup-refs.md`.
 
-## 组织规范（Diátaxis）
+## Organization Convention (Diátaxis)
 
-| 需求 | 归属 | 规范 |
-|------|------|------|
-| **Reference**（事实/查用） | `webrtc/` `codec/` 或根目录 | 按产品模块镜像；克制、权威、无歧义 |
-| **Explanation**（调研/理解） | `research/` | 历史调研存档；不参与活跃工作 |
-| **新增活参考** | 对应模块目录 | 在 README 登记 |
-| **新增调研** | `research/<领域>/` | 在 README 登记 |
+| Need | Home | Convention |
+|------|------|------------|
+| **Reference** (facts/lookup) | `webrtc/` `codec/` or root | Mirrors product modules; restrained, authoritative, unambiguous |
+| **Explanation** (research/understanding) | `research/` | Historical research archive; not part of active work |
+| **New living reference** | The corresponding module directory | Register in this README |
+| **New research** | `research/<domain>/` | Register in this README |
 
-## 说明
+## Notes
 
-- 本目录为**参考/调研**资料，非项目设计文档
-- 项目设计文档在 `docs/modules/`，架构总览在 `docs/architecture.md`
-- 调研存档（`research/`）不被代码引用，仅作历史参考；必要时可归档/删除
+- This directory holds **reference/research** material, not project design docs
+- Project design docs live in `docs/modules/`; the architecture overview is `docs/architecture.md`
+- Research archives (`research/`) are not referenced by code, historical reference only; may be archived/deleted if needed

@@ -1,4 +1,4 @@
-//! Task 5: FrameBus 多进程零拷贝测试（父进程订阅，子进程发布 1080p）。
+//! Task 5: FrameBus multiprocess zero-copy test (parent subscribes, child publishes 1080p).
 
 use mediaservo_link::{
     CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, FrameBus, FrameTopic, NodeAcl, NodeId,
@@ -15,10 +15,10 @@ async fn multiproc_zero_copy_1080p() {
     let acl = NodeAcl::for_role(NodeId::new("proc-mp"), Role::Processor);
     let tok = CapabilityToken::sign(&acl, 3600, &sk).unwrap();
     let bus = FrameBus::attach("", &tok, &vk).unwrap();
-    // 唯一 topic（避免跨 run 的 iceoryx2 全局服务污染）
+    // unique topic (avoids cross-run iceoryx2 global-service pollution)
     let topic = FrameTopic::new(format!("camera/mp/{}/raw", std::process::id()));
     let stream = bus.subscribe(&topic).unwrap();
-    // spawn 子进程发布 3_110_400 字节
+    // spawn the child publishing 3_110_400 bytes
     let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_framebus_pub"))
         .arg(topic.as_str())
         .spawn()
@@ -27,10 +27,10 @@ async fn multiproc_zero_copy_1080p() {
         .await
         .expect("recv timeout")
         .expect("frame");
-    assert_eq!(frame.payload().len(), 3_110_400, "payload 应为 1080p I420 大小");
+    assert_eq!(frame.payload().len(), 3_110_400, "payload should be the 1080p I420 size");
     assert_eq!(frame.meta().seq, 7);
     assert_eq!(frame.meta().width, 1920);
     assert_eq!(frame.meta().height, 1080);
     let status = child.wait().expect("wait child");
-    assert!(status.success(), "child 应成功");
+    assert!(status.success(), "child must succeed");
 }

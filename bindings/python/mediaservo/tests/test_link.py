@@ -1,11 +1,11 @@
-"""link SDK 绑定测试（unittest，零依赖）。
+"""link SDK binding tests (unittest, zero dependencies).
 
-运行（工作区根）:
+Run (from the workspace root):
   export PATH="$HOME/.pixi/bin:$PATH"
   export MEDIASERVO_LIB_DIR=$(pwd)/target/debug
   python3 -m unittest discover -s bindings/python/mediaservo/tests
 
-注: 不触碰 iceoryx2 SHM（无 attach 正例）；FrameMeta 36B 往返为纯 Python 级验证。
+Note: does not touch iceoryx2 SHM (no positive attach case); the FrameMeta 36B round-trip is pure-Python-level verification.
 """
 
 import ctypes
@@ -44,7 +44,7 @@ class LinkErrorPathTest(unittest.TestCase):
         self.assertEqual(cm.exception.code, link.ERR_STATE)
 
     def test_struct_size_invalid_arg(self):
-        # R3: struct_size 首字段必须 >= sizeof(已知结构)；手动设 1 → INVALID_ARG
+                # R3: struct_size first field must be >= sizeof(known struct); setting 1 manually → INVALID_ARG
         cfg = _ffi.mediaservo_link_signal_config_t()
         cfg.struct_size = 1
         out = ctypes.c_void_p()
@@ -63,11 +63,11 @@ class LinkErrorPathTest(unittest.TestCase):
 
 class LinkFrameMetaTest(unittest.TestCase):
     def test_frame_meta_36_bytes(self):
-        # R4: _pack_=1 → 36B 线格式；自然对齐是 40B 会错帧
+                # R4: _pack_=1 → 36B wire format; natural alignment is 40B and corrupts frames
         self.assertEqual(ctypes.sizeof(_ffi.mediaservo_frame_meta_t), 36)
 
     def test_frame_meta_roundtrip(self):
-        # 构造 → to_c → from_c，9 字段逐字段一致
+                # construct → to_c → from_c, all 9 fields identical
         meta = link.FrameMeta(
             seq=0x0102030405060708, width=1280, height=720, format=1,
             version=0, is_keyframe=1, reserved=0,
@@ -79,7 +79,7 @@ class LinkFrameMetaTest(unittest.TestCase):
 
 class LinkFfiSafetyTest(unittest.TestCase):
     def test_all_functions_declared_restype_argtypes(self):
-        # H3: 每个导出函数都必须声明 restype + argtypes（64 位指针截断防护）
+                # H3: every exported function must declare restype + argtypes (64-bit pointer truncation guard)
         self.assertGreaterEqual(len(link._API), 11)
         for name, (fn, restype, argtypes) in link._API.items():
             self.assertEqual(fn.restype, restype, name)

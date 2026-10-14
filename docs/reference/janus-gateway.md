@@ -1,26 +1,26 @@
-# Janus Gateway — 参考分析
+# Janus Gateway — Reference Analysis
 
-> 研究日期: 2026-07-19 | 版本: v1.4.0 | 仓库: [meetecho/janus-gateway](https://github.com/meetecho/janus-gateway)
+> Research date: 2026-07-19 | Version: v1.4.0 | Repo: [meetecho/janus-gateway](https://github.com/meetecho/janus-gateway)
 
-## 1. 产品画像
+## 1. Product Profile
 
-| 属性 | 值 |
-|------|-----|
-| **名称** | Janus WebRTC Server (Janus Gateway) |
-| **开发者** | [Meetecho](https://www.meetecho.com/) s.r.l. |
-| **首次发布** | 2014 |
-| **当前版本** | v1.4.0 (2026-02-06) |
-| **许可证** | GPL v3.0 (server), MIT (janus.js) |
+| Attribute | Value |
+|-----------|-------|
+| **Name** | Janus WebRTC Server (Janus Gateway) |
+| **Developer** | [Meetecho](https://www.meetecho.com/) s.r.l. |
+| **First release** | 2014 |
+| **Current version** | v1.4.0 (2026-02-06) |
+| **License** | GPL v3.0 (server), MIT (janus.js) |
 | **GitHub Stars** | ~9,100 |
-| **语言** | C (82.8%), JavaScript (11.7%) |
-| **定位** | 通用 WebRTC 服务器 — 轻量、模块化、不限信令协议 |
-| **目标用户** | 需要自托管、可扩展 WebRTC 媒体服务器的开发者 |
+| **Language** | C (82.8%), JavaScript (11.7%) |
+| **Positioning** | General-purpose WebRTC server — lightweight, modular, signaling-agnostic |
+| **Target users** | Developers who need a self-hosted, extensible WebRTC media server |
 
-## 2. 架构特征
+## 2. Architectural Characteristics
 
-### 2.1 核心+插件架构
+### 2.1 Core + Plugin Architecture
 
-Janus 的设计哲学：**核心极薄，所有业务逻辑在插件中**。
+Janus's design philosophy: **an extremely thin core; all business logic lives in plugins**.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -43,11 +43,11 @@ Janus 的设计哲学：**核心极薄，所有业务逻辑在插件中**。
     └─────────┘         └─────────┘         └─────────┘
 ```
 
-**核心职责**：仅处理 WebRTC 协议栈（ICE/DTLS/SRTP）+ 插件加载 + 消息路由。
+**Core responsibilities**: only the WebRTC protocol stack (ICE/DTLS/SRTP) + plugin loading + message routing.
 
-**插件不接触**：ICE 协商、DTLS 握手、SRTP 加解密 —— 核心对插件透明。
+**Plugins never touch**: ICE negotiation, DTLS handshake, SRTP encrypt/decrypt — the core is transparent to plugins.
 
-### 2.2 Session/Handle 模型
+### 2.2 Session/Handle Model
 
 ```
 Browser → 1. Create Session (session_id)
@@ -55,132 +55,132 @@ Browser → 1. Create Session (session_id)
               ↳ handle ↔ janus_plugin_session (opaque)
         → 3. Messages (handle_message)
               ↳ JSEP offer/answer (optional, for WebRTC)
-        → 4. Media Flow (RTP/RTCP via handle's ICE)
+        → 4. Media Flow (RTP/RTCP via the handle's ICE)
         → 5. Detach/Destroy
 ```
 
-一个 session 可 attach 多个 handle 到不同插件，实现一个用户同时使用多个功能。
+One session may attach multiple handles to different plugins, letting one user use several features simultaneously.
 
-### 2.3 线程模型
+### 2.3 Thread Model
 
-- **每个 handle 一个 GMainLoop 线程**（PR #1399, 2018）：替代了旧的 2-threads-per-RTCPeerConnection
-- **插件辅助线程**（可选）：VideoRoom 和 Streaming 插件支持解耦收包和分发
-- **`event_loops` 池**：可配置的线程池，复用而非每 handle 新建
+- **One GMainLoop thread per handle** (PR #1399, 2018): replacing the old 2-threads-per-RTCPeerConnection
+- **Plugin helper threads** (optional): the VideoRoom and Streaming plugins support decoupled packet receipt and dispatch
+- **`event_loops` pool**: a configurable thread pool, reused rather than created per handle
 
-### 2.4 传输层
+### 2.4 Transport Layer
 
-支持 6 种传输协议，全部由可加载的 transport 插件实现：HTTP/HTTPS (libmicrohttpd)、WebSocket (libwebsockets)、RabbitMQ、MQTT、Nanomsg、Unix Sockets。
+Supports 6 transport protocols, all implemented by loadable transport plugins: HTTP/HTTPS (libmicrohttpd), WebSocket (libwebsockets), RabbitMQ, MQTT, Nanomsg, Unix Sockets.
 
-### 2.5 插件 API
+### 2.5 Plugin API
 
 ```c
-// 插件必须实现的回调
+// Callbacks every plugin must implement
 struct janus_plugin {
-    int (*init)(const char *config_path);           // 启动时
-    void (*destroy)(void);                           // 关闭时
+    int (*init)(const char *config_path);           // at startup
+    void (*destroy)(void);                           // at shutdown
     void (*create_session)(janus_plugin_session *, int *error);
     void (*destroy_session)(janus_plugin_session *, int *error);
-    struct janus_plugin_result *(*handle_message)(   // 消息处理
+    struct janus_plugin_result *(*handle_message)(   // message handling
         janus_plugin_session *, char *, json_t *, json_t *);
-    // 可选：媒体回调
-    void (*incoming_rtp)(...);   // 接收 RTP
+    // Optional: media callbacks
+    void (*incoming_rtp)(...);   // receive RTP
     void (*incoming_rtcp)(...);
-    void (*setup_media)(...);    // PC 就绪
+    void (*setup_media)(...);    // PC ready
     void (*hangup_media)(...);
 };
 
-// 核心暴露给插件的接口
+// Interfaces the core exposes to plugins
 struct janus_callbacks {
-    int (*push_event)(...);     // 推送事件给客户端
-    void (*relay_rtp)(...);     // 转发 RTP
+    int (*push_event)(...);     // push events to the client
+    void (*relay_rtp)(...);     // relay RTP
     void (*relay_rtcp)(...);
     void (*close_pc)(...);
     void (*end_session)(...);
 };
 ```
 
-加载方式：`dlopen()` + `dlsym("create_p")` 获取插件实例。
+Loading: `dlopen()` + `dlsym("create_p")` obtains the plugin instance.
 
-## 3. 关键能力
+## 3. Key Capabilities
 
-| 能力 | 说明 |
-|------|------|
-| **SFU** | VideoRoom 插件：1 个发布者 → N 个订阅者 |
-| **MCU** | AudioBridge 插件：Opus 音频混音 |
-| **编解码** | VP8/VP9/H.264/H.265/AV1, Opus/G.711/G.722 |
-| **Simulcast** | VP8/VP9/H.264 多空间/时间层 |
-| **Multistream** | v1.0.0+ 完整 Unified Plan 支持 |
-| **录制** | 内置 .mjr 格式 + janus-pp-rec 后处理工具 |
-| **级联** | v1.4.0 Remote Publishers：跨实例 RTP 转发 |
-| **扩展点** | 12 个官方插件 + 自定义 .so 开发 |
+| Capability | Description |
+|------------|-------------|
+| **SFU** | VideoRoom plugin: 1 publisher → N subscribers |
+| **MCU** | AudioBridge plugin: Opus audio mixing |
+| **Codecs** | VP8/VP9/H.264/H.265/AV1, Opus/G.711/G.722 |
+| **Simulcast** | VP8/VP9/H.264 multi spatial/temporal layers |
+| **Multistream** | v1.0.0+ full Unified Plan support |
+| **Recording** | Built-in .mjr format + the janus-pp-rec post-processing tool |
+| **Cascading** | v1.4.0 Remote Publishers: cross-instance RTP forwarding |
+| **Extension points** | 12 official plugins + custom .so development |
 
-## 4. 插件列表（v1.4.0）
+## 4. Plugin List (v1.4.0)
 
-| 插件 | 用途 |
-|------|------|
-| Echo Test | 回环测试 |
-| Video Room | SFU 多人视频（publish/subscribe） |
-| Video Call | 1-1 视频通话 |
-| Streaming | 广播 RTSP/RTMP 流到 WebRTC |
-| Record & Play | 录制 WebRTC 流 + 回放 |
-| Text Room | RTCDataChannel 聊天 |
-| Audio Bridge | MCU 音频混音 |
-| SIP Gateway | WebRTC↔SIP 互通 |
-| Lua/Duktape | Lua/JS 脚本编写插件 |
+| Plugin | Purpose |
+|--------|---------|
+| Echo Test | Loopback testing |
+| Video Room | SFU multi-party video (publish/subscribe) |
+| Video Call | 1-1 video calls |
+| Streaming | Broadcasting RTSP/RTMP streams to WebRTC |
+| Record & Play | Recording WebRTC streams + playback |
+| Text Room | RTCDataChannel chat |
+| Audio Bridge | MCU audio mixing |
+| SIP Gateway | WebRTC↔SIP interop |
+| Lua/Duktape | Plugin authoring in Lua/JS |
 
-## 5. 生态与市场
+## 5. Ecosystem & Market
 
-- **生产案例**：IETF 会议直播、企业级视频会议、流媒体分发
-- **社区**：Discourse 论坛活跃，300+ 贡献者
-- **商业支持**：Meetecho 提供咨询服务
-- **竞争**：LiveKit（更现代但更重）、mediasoup（SFU 专精）、Jitsi（完整方案）
+- **Production cases**: IETF conference streaming, enterprise video conferencing, media distribution
+- **Community**: active Discourse forum, 300+ contributors
+- **Commercial support**: Meetecho offers consulting
+- **Competition**: LiveKit (more modern but heavier), mediasoup (SFU specialist), Jitsi (complete solution)
 
-## 6. 亮点与局限
+## 6. Highlights & Limitations
 
-### 亮点
+### Highlights
 
-- **极端灵活**：插件架构对应用逻辑零约束
-- **不限信令**：不带信令服务器，你用自己的
-- **多传输**：6 种传输协议，全异步 JSON
-- **轻量**：纯 C，依赖少，Raspberry Pi 可运行
-- **成熟**：自 2014 年投入生产使用
+- **Extremely flexible**: the plugin architecture places zero constraints on application logic
+- **Signaling-agnostic**: ships no signaling server; you bring your own
+- **Multi-transport**: 6 transport protocols, all async JSON
+- **Lightweight**: pure C, few dependencies, runs on a Raspberry Pi
+- **Mature**: in production since 2014
 
-### 局限
+### Limitations
 
-- **C 代码**：116K 行 C，内存安全风险（use-after-free、缓冲区溢出）
-- **无内置集群**：一个房间只能在一个实例上，集群需外部构建
-- **插件 ABI 脆弱**：版本号升一次，所有 .so 需重编译
-- **无内置鉴权**：需外部系统叠加
-- **Windows 不支持**：仅 Linux/macOS
-- **RTP 扩展被核心剥离**：导致部分扩展失效
+- **C code**: 116K lines of C, memory-safety risk (use-after-free, buffer overflows)
+- **No built-in clustering**: a room lives on one instance only; clustering is built externally
+- **Fragile plugin ABI**: one version bump and every .so must be recompiled
+- **No built-in auth**: an external system must be layered on
+- **No Windows support**: Linux/macOS only
+- **RTP extensions stripped by the core**: leaving some extensions broken
 
-## 7. 对 MediaServo 的参考价值
+## 7. Reference Value for MediaServo
 
-### 可采纳
+### Adoptable
 
-| 概念 | Janus 做法 | MediaServo 应用 |
-|------|-----------|--------------|
-| **薄核心+插件** | 核心只处理 WebRTC 协议，全部业务在插件 | mediaservo-core 微内核 + 插件体系 |
-| **Session/Handle 隔离** | opaque `janus_plugin_session` + 引用计数 | `Arc<SessionHandle>` + trait object |
-| **异步消息模式** | `handle_message` → 返回结果 → `push_event` | `handle_message()` → `tokio::mpsc::Sender` |
-| **传输层抽象** | transport 也是可加载插件 | `TransportProvider` trait |
-| **不限信令** | 不强加信令协议 | 自研 WebSocket 信令 + 可替换 |
+| Concept | Janus's approach | MediaServo application |
+|---------|------------------|------------------------|
+| **Thin core + plugins** | The core handles only the WebRTC protocol; all business lives in plugins | mediaservo-core microkernel + plugin system |
+| **Session/Handle isolation** | opaque `janus_plugin_session` + reference counting | `Arc<SessionHandle>` + trait objects |
+| **Async message pattern** | `handle_message` → returns results → `push_event` | `handle_message()` → `tokio::mpsc::Sender` |
+| **Transport abstraction** | Transports are loadable plugins too | `TransportProvider` trait |
+| **Signaling-agnostic** | Imposes no signaling protocol | In-house WebSocket signaling, swappable |
 
-### 需改造
+### Needs Adaptation
 
-| Janus 做法 | MediaServo 适配 |
-|-----------|--------------|
-| `dlopen .so` 运行时加载 | **编译期 trait** — `Vec<Box<dyn PluginTrait>>`，类型安全 |
-| C 函数指针表 | **Rust trait** — 编译时检查，默认实现可选方法 |
-| 单线程 GMainLoop per handle | **tokio async** — 每个 handle 一个 task，工作窃取调度 |
-| `json_t` 消息 | **serde + 强类型 Message enum** |
-| 手动 refcounting | **Arc + 所有权系统** — 消除 use-after-free |
+| Janus's approach | MediaServo adaptation |
+|------------------|------------------------|
+| `dlopen .so` runtime loading | **Compile-time traits** — `Vec<Box<dyn PluginTrait>>`, type-safe |
+| C function pointer tables | **Rust traits** — checked at compile time, default impls for optional methods |
+| Single-threaded GMainLoop per handle | **tokio async** — one task per handle, work-stealing scheduler |
+| `json_t` messages | **serde + strongly-typed Message enums** |
+| Manual refcounting | **Arc + the ownership system** — eliminates use-after-free |
 
-### 需避免
+### Must Avoid
 
-- **单线程阻塞** → 用 tokio async 避免
-- **C ABI 脆弱** → 用 Rust trait + semver
-- **无内置集群** → 从 Phase 2 开始设计集群意识
-- **仅内存会话** → 可选持久化层（Redis/SQLite）
-- **janus.js 是演示库** → 提供一等 client SDK
-**相关决策**: D97 (插件架构), D144-D145 (多后端trait)
+- **Single-threaded blocking** → use tokio async
+- **Fragile C ABI** → Rust traits + semver
+- **No built-in clustering** → design cluster-awareness from Phase 2
+- **Memory-only sessions** → an optional persistence layer (Redis/SQLite)
+- **janus.js is a demo library** → ship a first-class client SDK
+**Related decisions**: D97 (plugin architecture), D144-D145 (multi-backend traits)

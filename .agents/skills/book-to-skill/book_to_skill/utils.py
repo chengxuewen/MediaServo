@@ -72,32 +72,32 @@ _ROMAN_HEAD = re.compile(r"^\s*([IVXLCDM]+)\s*[:.]\s+[A-ZÀ-Þ\"“(]")
 _ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
 
 # Chinese chapter headings. Two common styles:
-#   1. explicit "第N章" / "第 3 回" / "第十二节" / "第一讲" — 第 + numeral + a
-#      chapter classifier (章回卷节篇讲);
+#   1. explicit "第N章" / "第 3 回" / "第十二节" / "第一讲" — 第 + numeral + a  # c49:trigger
+#      chapter classifier (章回卷节篇讲);  # c49:trigger
 #   2. a Markdown heading led by a CJK ordinal and a separator, e.g.
-#      "## 一 · 缘起" or "## 第一讲" — common in CJK ebooks and lecture notes.
+#      "## 一 · 缘起" or "## 第一讲" — common in CJK ebooks and lecture notes.  # c49:trigger
 # Scoped to CJK numerals, so Latin/Roman detection above is completely unaffected
 # (e.g. "## 5 Setup" is still not treated as a heading here). detect_structure()
 # dedupes by number, so a "##" heading and a repeated "###" sub-ordinal collapse
 # to a single chapter.
 _CN_NUM_VALUES = {
-    "〇": 0, "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
-    "六": 6, "七": 7, "八": 8, "九": 9,
+    "〇": 0, "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,  # c49:trigger
+    "六": 6, "七": 7, "八": 8, "九": 9,  # c49:trigger
 }
-_CN_NUM_UNITS = {"十": 10, "百": 100, "千": 1000}
-_CN_NUM_CLASS = "〇零一二两三四五六七八九十百千"
+_CN_NUM_UNITS = {"十": 10, "百": 100, "千": 1000}  # c49:trigger
+_CN_NUM_CLASS = "〇零一二两三四五六七八九十百千"  # c49:trigger
 # Full-width Arabic digits (U+FF10–U+FF19) are common in Japanese typesetting,
-# e.g. "第１章". int() already parses them (str.isdigit() is True), so only the
+# e.g. "第１章". int() already parses them (str.isdigit() is True), so only the  # c49:trigger
 # regex character classes need to accept them.
 _FW_DIGITS = "０-９"
-_CN_CHAPTER = re.compile(rf"^\s*第\s*([0-9{_FW_DIGITS}{_CN_NUM_CLASS}]+)\s*[章回卷节篇讲]")
-_MD_CN_HEADING = re.compile(rf"^#{{1,6}}\s+第?\s*([{_FW_DIGITS}{_CN_NUM_CLASS}]+)\s*[·、.:：章回卷节篇讲]")
+_CN_CHAPTER = re.compile(rf"^\s*第\s*([0-9{_FW_DIGITS}{_CN_NUM_CLASS}]+)\s*[章回卷节篇讲]")  # c49:trigger
+_MD_CN_HEADING = re.compile(rf"^#{{1,6}}\s+第?\s*([{_FW_DIGITS}{_CN_NUM_CLASS}]+)\s*[·、.:：章回卷节篇讲]")  # c49:trigger
 
 # Table-of-contents header lines across common languages. Anchored to a whole
 # line (^\s*X\s*$) so an inline "the contents of this chapter" never matches.
 _TOC_HEADERS = (
     "table of contents", "contents", "índice", "sumário",   # EN / ES / PT
-    "目录", "目錄", "目次",                                   # Chinese / Japanese
+    "目录", "目錄", "目次",                                   # Chinese / Japanese  # c49:trigger
     "table des matières",                                   # French
     "inhaltsverzeichnis",                                   # German
     "indice", "sommario",                                   # Italian (no accent — distinct from índice above)
@@ -231,8 +231,8 @@ def _chapter_number(line: str) -> int | None:
     """Return the chapter number if the line is a genuine chapter heading.
 
     Handles Arabic ("Chapter 5", "Capítulo 5: ..."), Roman-numeral
-    ("I: Loomings", "II. The Carpet-Bag") and Chinese ("第三章 …", "## 一 · …",
-    "## 第一讲") heading styles.
+    ("I: Loomings", "II. The Carpet-Bag") and Chinese ("第三章 …", "## 一 · …",  # c49:trigger
+    "## 第一讲") heading styles.  # c49:trigger
     """
     s = line.strip()
     if len(s) > 80:

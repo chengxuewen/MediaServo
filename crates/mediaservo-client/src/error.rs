@@ -1,71 +1,71 @@
-//! client SDK 错误面（thiserror——库姿态；C15：所有 Err 分支带类型与上下文）。
+//! client SDK error surface (thiserror -- library posture; C15: every Err branch carries type and context).
 
 use mediaservo_link::LinkError;
 
-/// client v2 统一错误。
+/// The client v2 unified error.
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    /// 登录请求/解析失败（网络、状态码非 401、响应畸形）。
+    /// Login request/parse failure (network, non-401 status, malformed response).
     #[error("login failed: {0}")]
     Login(String),
-    /// 401 —— 用户名或口令错（server 防枚举措辞，细节仅本侧 WARN）。
+    /// 401 -- wrong username or password (the server's anti-enumeration wording; details only WARN locally).
     #[error("invalid credentials")]
     InvalidCredentials,
-    /// REST 发现面（GET /api/rooms）非 2xx——token 失效/过期/授权不符（p3 W2-B）。
+    /// REST discovery surface (GET /api/rooms) non-2xx -- token invalid/expired/authorization mismatch (p3 W2-B).
     #[error("REST rejected [{code}]: {message}")]
     RestRejected { code: u16, message: String },
-    /// 连接级认证被拒（4003 PSK / 4010 设备 / 4011 role 非法 / 4013 JWT 验签失败）。
+    /// Connection-level auth rejected (4003 PSK / 4010 device / 4011 illegal role / 4013 JWT signature failure).
     #[error("auth rejected [{code}]: {message}")]
     AuthRejected { code: u16, message: String },
-    /// server 拒绝方言版本（4101，S0）——不静默降级，终态。
+    /// The server rejects the dialect version (4101, S0) -- no silent downgrade, terminal.
     #[error("protocol version unsupported (4101): {0}")]
     ProtocolUnsupported(String),
-    /// v1 登录面仅支持明文 http（TLS 依赖引入归 S4+ 裁决）。
+    /// The v1 login surface only supports plaintext http (TLS dependency is an S4+ decision).
     #[error("unsupported scheme \"{0}\" (login v1 = plain http only)")]
     UnsupportedScheme(String),
-    /// 响应无法解析（HTTP 状态行/JSON）。
+    /// Response unparseable (HTTP status line/JSON).
     #[error("malformed response: {0}")]
     MalformedResponse(String),
-    /// 信令层错误（link 透传：WS 连接/认证/收发/入房）。
+    /// Signaling-layer error (link passthrough: WS connect/auth/send-receive/join).
     #[error("signal error: {0}")]
     Signal(#[from] LinkError),
-    /// SFU 域 server 错误（非终态码通用承载）。
+    /// SFU-domain server error (the generic carrier for non-terminal codes).
     #[error("server error [{code}]: {message}")]
     Server { code: u16, message: String },
-    /// 控制 DC 建立被拒（4012——role 无 can_control 或方言不足，终态）。
+    /// Control DC establishment rejected (4012 -- role without can_control or dialect too low, terminal).
     #[error("control denied (4012): {0}")]
     ControlDenied(String),
-    /// I5 能力门前置判定：本地谈成方言低于控制域要求（未发出任何请求即拒）。
+    /// I5 capability-gate pre-check: the locally negotiated dialect is below the control domain's requirement (rejected before any request is sent).
     #[error("negotiated protocol {got} < required {need} for control domain")]
     ProtocolTooLow { need: u32, got: u32 },
-    /// WebRTC 本地错误（PC 协商/DC 写）。
+    /// WebRTC local error (PC negotiation/DC write).
     #[error("webrtc error: {0}")]
     WebRtc(String),
-    /// IO（TcpStream 读写等）。
+    /// IO (TcpStream read/write etc.).
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    /// 有界等待超时（操作名标注，便于归因）。
+    /// Bounded-wait timeout (tagged with the operation name for attribution).
     #[error("timed out waiting for {what}")]
     Timeout { what: &'static str },
-    /// 流不存在（msrtc-stream-not-found：房间已知 label 全集内无此 label，
-    /// 兜底窗内也未等到——URL 写错流名的确定性判定，区别于网络盲等超时）。
+    /// Stream not found (msrtc-stream-not-found: the label is absent from the room's full known label set
+    /// and also never arrived within the fallback window -- a deterministic verdict for a wrong stream name in the URL, distinct from a blind network timeout).
     #[error("stream not found: {label}")]
     StreamNotFound { label: String },
-    /// 状态机违例（未知通道、会话已关闭等）。
+    /// State-machine violation (unknown channel, session already closed, etc.).
     #[error("invalid state: {0}")]
     InvalidState(String),
 }
 
 impl ClientError {
-    /// S6/K2: wire 码反向可查——`from_wire_error` 分类源的机读回读面。
+    /// S6/K2: wire code reverse-lookup -- the machine-readable read-back of the `from_wire_error` classification source.
     ///
-    /// 单源纪律：4012/4101/4003|4010|4011 的归属与 [`from_wire_error`] 一致，
-    /// 不重抄映射表；`Signal` 变体经 [`extract_wire_code`] 从 link 嵌入串恢复。
-    /// 返回 `None` = 该错误无 wire 码（本地/REST/IO 域）。
+    /// Single-source discipline: the attribution of 4012/4101/4003|4010|4011 matches [`from_wire_error`];
+    /// the mapping table is never duplicated; the `Signal` variant recovers via [`extract_wire_code`] from the link-embedded string.
+    /// Returns `None` = the error carries no wire code (local/REST/IO domains).
     #[must_use]
     pub fn wire_code(&self) -> Option<u32> {
         match self {
-            // 无 wire 码的本地/REST/传输域。
+// local/REST/transport domains without a wire code.
             Self::Login(_)
             | Self::InvalidCredentials
             | Self::RestRejected { .. }
@@ -76,7 +76,7 @@ impl ClientError {
             | Self::Timeout { .. }
             | Self::StreamNotFound { .. }
             | Self::InvalidState(_)
-            // I5 本地预拒（未发出任何请求，无 server 应答码）。
+// I5 local pre-rejection (no request sent, no server reply code).
             | Self::ProtocolTooLow { .. } => None,
             Self::AuthRejected { code, .. } => Some(u32::from(*code)),
             Self::ProtocolUnsupported(_) => Some(4101),
@@ -86,16 +86,16 @@ impl ClientError {
         }
     }
 
-    /// S6/K2: 重试语义一等位（K1 重连环的判据源）。
+    /// S6/K2: retry semantics as a first-class predicate (the classification source for the K1 reconnect chain).
     ///
-    /// 出处 = D273 红牌家族语义（web 半区已实盘）：auth 族（4003/4010/4011/4012）
-    /// 与方言拒（4101）= 终态（重连必然同败，重试只掩盖凭证问题）；连接类
-    /// （IO/Signal 无码/WebRtc 建连/Timeout）与 server 域 ≥5000（5001=SFU 暂不可用
-    /// 等瞬态）= 可重试。REST 拒/协议错位/状态违例按保守不重试（4xx 语义）。
+    /// Provenance = the D273 red-card family semantics (field-proven on the web half): the auth family (4003/4010/4011/4012)
+    /// and the dialect rejection (4101) = terminal (a reconnect necessarily fails the same way; retries only mask credential problems); connection-class
+    /// (IO/Signal codeless/WebRtc connect/Timeout) and server-domain >=5000 (5001 = SFU temporarily unavailable
+    /// and similar transients) = retryable. REST rejections/protocol mismatches/state violations conservatively non-retryable (4xx semantics).
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         match self {
-            // 终态族（D273 红牌 = auth 族 + 4101；ProtocolTooLow = 本地门同族）。
+            // the terminal family (D273 red cards = the auth family + 4101; ProtocolTooLow = the same family as the local gate).
             Self::InvalidCredentials
             | Self::AuthRejected { .. }
             | Self::ProtocolUnsupported(_)
@@ -106,10 +106,10 @@ impl ClientError {
             | Self::MalformedResponse(_)
             | Self::InvalidState(_)
             | Self::StreamNotFound { .. } => false,
-            // 连接/瞬态族。
+            // the connection/transient family.
             Self::Io(_) | Self::WebRtc(_) | Self::Timeout { .. } | Self::Login(_) => true,
             Self::Server { code, .. } => *code >= 5000,
-            // link 透传：嵌入 auth 族码 = 终态；纯连接错 = 可重试。
+            // link passthrough: an embedded auth-family code = terminal; a pure connection error = retryable.
             Self::Signal(e) => !matches!(
                 extract_wire_code(&e.to_string()),
                 Some(4003 | 4010 | 4011 | 4012 | 4013 | 4101)
@@ -118,9 +118,9 @@ impl ClientError {
     }
 }
 
-/// wire `Error{code,message}` → 终态分类（D273 terminal 族在 SDK 侧的落点）。
+/// wire `Error{code,message}` -> terminal classification (the D273 terminal family's SDK-side landing).
 ///
-/// 4012=控制拒、4101=方言拒单独成 typed；其余承载为 [`ClientError::Server`]。
+/// 4012 = control rejected, 4101 = dialect rejected as dedicated typed variants; everything else carried by [`ClientError::Server`].
 #[must_use]
 pub fn from_wire_error(code: u16, message: &str) -> ClientError {
     match code {
@@ -133,11 +133,11 @@ pub fn from_wire_error(code: u16, message: &str) -> ClientError {
     }
 }
 
-/// 从 link 错误串提取 wire 码（`LinkError::Signal("... [4101] ...")` 形，
-/// link::connect 在入房阶段把 server Error 码嵌进消息串——这里恢复 typed 分类）。
-/// 从 link 错误串提取 wire 码（`LinkError::Signal("... [4101] ...")` 形），
-/// link::connect 在入房阶段把 server Error 码嵌进消息串——这里恢复 typed 分类）。
-/// LinkError 无 Clone——取值转换，fallback 转为 Signal 变体。
+/// Extract the wire code from a link error string (the `LinkError::Signal("... [4101] ...")` shape:
+/// link::connect embeds the server Error code into the message string at the join phase -- typed classification recovered here).
+/// Extract the wire code from a link error string (the `LinkError::Signal("... [4101] ...")` shape);
+/// link::connect embeds the server Error code into the message string at the join phase -- typed classification recovered here).
+/// LinkError is not Clone -- consumed by value conversion; the fallback converts into a Signal variant.
 #[must_use]
 pub fn classify_link_error(err: LinkError) -> ClientError {
     let text = err.to_string();
@@ -149,7 +149,7 @@ pub fn classify_link_error(err: LinkError) -> ClientError {
     }
 }
 
-/// 提取首个 `[<u16>]` 数字（无 = None）。纯函数，测试钉。
+/// Extract the first `[<u16>]` number (none = None). Pure function, pinned by tests.
 #[must_use]
 pub fn extract_wire_code(text: &str) -> Option<u16> {
     let start = text.find('[')? + 1;
@@ -190,7 +190,7 @@ mod tests {
             Some(4101)
         );
         assert_eq!(extract_wire_code("no code here"), None);
-        assert_eq!(extract_wire_code("[999999]"), None); // u16 溢出 → None
+        assert_eq!(extract_wire_code("[999999]"), None); // u16 overflow -> None
     }
 
     #[test]
@@ -201,26 +201,26 @@ mod tests {
         assert!(matches!(classify_link_error(other), ClientError::Signal(_)));
     }
 
-    /// K2 钉：wire_code 与 from_wire_error 分类源一致（穷尽 match 的表外回归网）。
+    /// K2 pin: wire_code agrees with the from_wire_error classification source (a regression net over the exhaustive match's table).
     #[test]
     fn wire_code_round_trips_classification_source() {
         assert_eq!(from_wire_error(4012, "x").wire_code(), Some(4012));
         assert_eq!(from_wire_error(4101, "x").wire_code(), Some(4101));
         assert_eq!(from_wire_error(4010, "x").wire_code(), Some(4010));
         assert_eq!(from_wire_error(5001, "x").wire_code(), Some(5001));
-        // 本地域无码。
+        // local-domain errors carry no code.
         assert_eq!(ClientError::InvalidCredentials.wire_code(), None);
         assert_eq!(
             ClientError::ProtocolTooLow { need: 2, got: 1 }.wire_code(),
             None,
-            "本地预拒不发请求 = 无 wire 码"
+            "a local pre-rejection sends no request = no wire code"
         );
-        // Signal 嵌入码恢复（classify 未命中的未知码从串里捞回）。
+        // Signal embedded-code recovery (unknown codes that classify misses are fished back out of the string).
         let e = ClientError::Signal(LinkError::Signal("room join failed [4031]: denied".into()));
         assert_eq!(e.wire_code(), Some(4031));
     }
 
-    /// K2 钉：重试分类对齐 D273 红牌家族（auth 族/4101/4012 终态；连接类/5001 可重试）。
+    /// K2 pin: retry classification aligned with the D273 red-card family (auth family/4101/4012 terminal; connection class/5001 retryable).
     #[test]
     fn retryable_matches_d273_red_card_family() {
         for terminal in [
@@ -232,7 +232,10 @@ mod tests {
             ClientError::InvalidCredentials,
             ClientError::RestRejected { code: 401, message: String::new() },
         ] {
-            assert!(!terminal.is_retryable(), "auth/方言族必须终态: {terminal:?}");
+            assert!(
+                !terminal.is_retryable(),
+                "the auth/dialect family must be terminal: {terminal:?}"
+            );
         }
         for retry in [
             ClientError::Io(std::io::Error::other("refused")),
@@ -242,11 +245,14 @@ mod tests {
             from_wire_error(5001, "sfu unavailable"),
             ClientError::Signal(LinkError::Signal("connect ws://x: refused".into())),
         ] {
-            assert!(retry.is_retryable(), "连接/≥5000 族必须可重试: {retry:?}");
+            assert!(
+                retry.is_retryable(),
+                "the connection/>=5000 family must be retryable: {retry:?}"
+            );
         }
-        // Signal 嵌入 auth 码 = 终态（link 透传形与 typed 形同判）。
+        // Signal with an embedded auth code = terminal (the link-passthrough form judges the same as the typed form).
         assert!(!ClientError::Signal(LinkError::Signal("join [4010] nope".into())).is_retryable());
-        // 4xxx 非 auth 的 Server 码（如 4031 produce 拒）保守不重试。
+        // non-auth 4xxx Server codes (e.g. 4031 produce rejection) conservatively non-retryable.
         assert!(!from_wire_error(4031, "video in audio room").is_retryable());
     }
 }

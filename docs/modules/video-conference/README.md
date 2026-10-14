@@ -1,38 +1,38 @@
-# MediaServo 视频会议模块 — 参考文档
+# MediaServo Video-Conference Module — Reference Docs
 
-> Phase 0 架构定义 | 2026-07-16
+> Phase 0 architecture definition | 2026-07-16
 
-> **文档版本**: 写于 2026-07-16 (D126-D155 决策前)。后续 D126 (三层模型), D137-D139 (WebRTC 后端), D142 (整合计划) 可能影响本文档内容，请对照最新决策阅读。
+> **Doc version**: written 2026-07-16 (before the D126-D155 decisions). Later D126 (three-layer model), D137-D139 (WebRTC backends), and D142 (integration plan) may affect this document's content; read against the latest decisions.
 
-本文档是 MediaServo 视频会议 (VC) 模块的参考手册，涵盖架构、API、信令协议、数据模型、部署和 SFU 配置。
+This document is the reference manual for MediaServo's video-conference (VC) module, covering architecture, API, signaling protocol, data model, deployment, and SFU configuration.
 
-## 文档索引
+## Document Index
 
-| 文档 | 内容 |
-|------|------|
-| [architecture.md](architecture.md) | 组件架构、SFU 引擎设计、Worker 模型、级联策略 |
-| [api.md](api.md) | Conference SDK API 参考 (Rust/TS)，管线与事件模型 |
-| [signaling.md](signaling.md) | WebSocket 信令协议、房间管理、SDP/ICE 协商 |
-| [data-model.md](data-model.md) | Room/Participant/Track 模型、编码层、权限 |
-| [deployment.md](deployment.md) | 四种部署形态与配置参考 |
-| [sfu-config.md](sfu-config.md) | SFU 调优、Worker 分配、带宽管理、容量规划 |
+| Document | Content |
+|----------|---------|
+| [architecture.md](architecture.md) | Component architecture, SFU engine design, Worker model, cascading strategy |
+| [api.md](api.md) | Conference SDK API reference (Rust/TS), pipeline and event models |
+| [signaling.md](signaling.md) | WebSocket signaling protocol, room management, SDP/ICE negotiation |
+| [data-model.md](data-model.md) | Room/Participant/Track models, encoding layers, permissions |
+| [deployment.md](deployment.md) | Four deployment forms and configuration reference |
+| [sfu-config.md](sfu-config.md) | SFU tuning, Worker allocation, bandwidth management, capacity planning |
 
-## 设计原则
+## Design Principles
 
-1. **媒体层与控制层分离** — SFU 只做 RTP 转发，不解码不转码。信令和业务逻辑独立。
-2. **SFU 优先** — 音频视频均走 SFU 转发。MCU 混音仅在 PSTN 桥接和录制桥接时使用。
-3. **Worker 隔离** — 每个 mediasoup Worker 是独立进程，崩溃不影响其他会议。
-4. **级联而非全连接** — 跨区域通过 pipeToRouter 级联，避免 N×N 连接爆炸。
-5. **客户端混音** — 客户端解码多路音频流并本地混音，服务端不混音。
+1. **Media layer separate from control layer** — the SFU only forwards RTP, no decode, no transcode. Signaling and business logic are independent.
+2. **SFU first** — both audio and video go through SFU forwarding. MCU mixing is used only for PSTN bridging and recording bridging.
+3. **Worker isolation** — each mediasoup Worker is an independent process; a crash does not affect other conferences.
+4. **Cascade, not full mesh** — cross-region via pipeToRouter cascading, avoiding N×N connection explosion.
+5. **Client-side mixing** — the client decodes multiple audio streams and mixes locally; the server does not mix.
 
-## 技术选型
+## Technology Choices
 
-| 组件 | 选型 | 理由 |
-|------|------|------|
-| SFU 引擎 | mediasoup (C++) | 性能最优、Worker 隔离、信令不可知 |
-| 信令 | 自研 WebSocket + gRPC | 灵活可控，借鉴 Colibri2 + PSRPC |
-| 音频 | SFU 转发 + 客户端混音 | 避免 MCU 扩展性瓶颈 |
-| 录制 | RTP Forwarding | SFU 流复制推送到录制服务 |
-| 绑定层 | napi-rs | Rust -> Node.js 原生模块 |
+| Component | Choice | Rationale |
+|-----------|--------|-----------|
+| SFU engine | mediasoup (C++) | Best performance, Worker isolation, signaling-agnostic |
+| Signaling | In-house WebSocket + gRPC | Flexible and controllable; modeled on Colibri2 + PSRPC |
+| Audio | SFU forwarding + client mixing | Avoids MCU scalability bottlenecks |
+| Recording | RTP Forwarding | SFU stream duplication pushed to a recording service |
+| Binding layer | napi-rs | Rust -> Node.js native module |
 
-详见 [research doc](../../research/video-conference.md) 了解调研过程和对比分析。
+See the [research doc](../../research/video-conference.md) for the research process and comparative analysis.

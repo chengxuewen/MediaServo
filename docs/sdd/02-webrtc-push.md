@@ -1,12 +1,12 @@
 # SDD 02: WebRTC Push
 
-## 1. 概述
+## 1. Overview
 
-WebRTC 推流模块。将 I420 帧编码为 H.264/H.265，经 libwebrtc 推送到 Server relay。
+WebRTC push module. Encodes I420 frames to H.264/H.265 and pushes them via libwebrtc to the Server relay.
 
-**决策引用**: D11 (三后端架构), D32 (编译期分发), D-ERR-01 (熔断器)
+**Decision refs**: D11 (triple-backend architecture), D32 (compile-time dispatch), D-ERR-01 (circuit breaker)
 
-## 2. 接口定义
+## 2. Interface Definition
 
 ```rust
 #[async_trait]
@@ -35,7 +35,7 @@ pub struct SignalingConfig {
 }
 ```
 
-### 编码配置
+### Encoding Configuration
 
 ```rust
 pub struct EncodeConfig {
@@ -49,17 +49,17 @@ pub struct EncodeConfig {
 }
 ```
 
-## 3. 后端策略 (D11)
+## 3. Backend Strategy (D11)
 
-| 后端 | 场景 | feature flag |
-|------|------|-------------|
-| str0m | Embed/LAN, sans-I/O 轻量 | backend-str0m (默认) |
-| libwebrtc | 公网弱网, GCC+FEC | backend-libwebrtc |
-| webrtc-rs | 未来升级目标 | backend-webrtc-rs |
+| Backend | Scenario | feature flag |
+|---------|----------|--------------|
+| str0m | Embed/LAN, sans-I/O lightweight | backend-str0m (default) |
+| libwebrtc | Public internet / weak network, GCC+FEC | backend-libwebrtc |
+| webrtc-rs | Future upgrade target | backend-webrtc-rs |
 
-编译期 `#[cfg(feature)]` 互斥，一次编译一个后端。
+Mutually exclusive via compile-time `#[cfg(feature)]`; one backend per build.
 
-## 4. 信令流程 (WHIP/WHEP)
+## 4. Signaling Flow (WHIP/WHEP)
 
 ```
 Remote              Server              Host
@@ -73,26 +73,26 @@ Remote              Server              Host
   │═══════════ RTP/SRTP ═════════════════▶
 ```
 
-## 5. 错误处理 (D-ERR-01 熔断器)
+## 5. Error Handling (D-ERR-01 Circuit Breaker)
 
-| 条件 | 分类 | 错误码 | 恢复 |
-|------|------|--------|------|
-| ICE 连接超时 | Recoverable | 1003 | ICE restart + 指数退避 |
-| WebSocket 断连 | Recoverable | 1001 | 指数退避重连 (1s, 2s, 4s...) |
-| 编码器初始化失败 | Fatal | 2001 | fallback 软件 VP8 |
-| 5 次失败 / 60s | 熔断 | 1001 | 停止推流, 等待 30s 恢复 |
+| Condition | Category | Error Code | Recovery |
+|-----------|----------|------------|----------|
+| ICE connect timeout | Recoverable | 1003 | ICE restart + exponential backoff |
+| WebSocket disconnect | Recoverable | 1001 | Exponential backoff reconnect (1s, 2s, 4s...) |
+| Encoder init failure | Fatal | 2001 | Fall back to software VP8 |
+| 5 failures / 60s | Circuit break | 1001 | Stop pushing, wait 30s to recover |
 
-熔断器状态机: `Closed → Open (5 failures / 60s) → HalfOpen (wait 30s) → Closed`
+Circuit breaker state machine: `Closed → Open (5 failures / 60s) → HalfOpen (wait 30s) → Closed`
 
-## 6. 测试计划
+## 6. Test Plan
 
-| 测试 | 类型 | 描述 |
-|------|------|------|
-| stream_startup | 集成 | connect → push_frame → disconnect 生命周期完整 |
-| simulcast_enabled | 集成 | 多分辨率推流, 确认各层独立编码 |
-| ice_restart | 集成 | 模拟 ICE 断连 → ICE restart → 恢复 |
-| bitrate_adaptation | 集成 | GCC 根据模拟带宽变化调整码率 |
-| circuit_breaker_open | 单元 | 5 次失败后熔断触发, Open 状态阻塞推流 |
-| circuit_breaker_recover | 单元 | Open 状态 30s 后转为 HalfOpen |
-| codec_negotiation | 单元 | SDP Offer/Answer 中 codec 协商正确 |
-| stats_reporting | 单元 | stats() 返回实时 fps/bitrate/rtt |
+| Test | Type | Description |
+|------|------|-------------|
+| stream_startup | Integration | Full connect → push_frame → disconnect lifecycle |
+| simulcast_enabled | Integration | Multi-resolution push, each layer encoded independently |
+| ice_restart | Integration | Simulate ICE disconnect → ICE restart → recovery |
+| bitrate_adaptation | Integration | GCC adjusts bitrate per simulated bandwidth changes |
+| circuit_breaker_open | Unit | Circuit opens after 5 failures; Open state blocks pushing |
+| circuit_breaker_recover | Unit | Open state transitions to HalfOpen after 30s |
+| codec_negotiation | Unit | Codec negotiation correct in SDP Offer/Answer |
+| stats_reporting | Unit | stats() returns live fps/bitrate/rtt |

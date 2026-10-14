@@ -1,4 +1,4 @@
-//! auth::login 的 TCP mock 单测——canned 响应各态（ok / 401 / 垃圾 / 空 token）。
+//! auth::login's TCP mock unit tests -- canned responses per state (ok / 401 / garbage / empty token).
 
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
@@ -6,21 +6,21 @@ use tokio::net::TcpListener;
 use mediaservo_client::auth::{exchange, login};
 use mediaservo_client::error::ClientError;
 
-/// 起一个单次应答的 mock HTTP 服务：读完请求（Connection: close → 客户端半关
-/// 后 read_to_end 自然收敛）→ 回 canned 字节 → 断开。
+/// Start a single-reply mock HTTP server: read the request fully (Connection: close -> the client's half-close
+/// lets read_to_end converge naturally) -> reply with canned bytes -> disconnect.
 async fn canned_server(resp: Vec<u8>) -> u16 {
     canned_server_on(b"POST /api/auth/login HTTP/1.1\r\n".to_vec(), resp).await
 }
 
-/// 同 mock，但断言指定请求行前缀（exchange 面复用同一 body 处理链）。
+/// Same mock, but asserts a given request-line prefix (the exchange surface reuses the same body-processing chain).
 async fn canned_server_on(prefix: Vec<u8>, resp: Vec<u8>) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
-        // 客户端不再写半关（S2b：真实 hyper 对 half-close 前置请求静默断连）——
-        // mock 同真 server 语义：读到完整请求头+body 即回应。loopback 下
-        // write_all 一发全达，单 read 足够。
+        // the client no longer write-half-closes (S2b: real hyper silently disconnects on a request with a leading half-close) --
+        // the mock shares the real server's semantics: reply once the full header+body is read. On loopback
+        // write_all lands in one go, a single read suffices.
         use tokio::io::AsyncReadExt;
         let mut req = Vec::new();
         let mut tmp = [0u8; 4096];
@@ -53,7 +53,7 @@ async fn canned_server_on(prefix: Vec<u8>, resp: Vec<u8>) -> u16 {
         }
         assert!(
             req.starts_with(prefix.as_slice()),
-            "请求报文头部形不符: {req:?}"
+            "the request message's header shape mismatches: {req:?}"
         );
         sock.write_all(&resp).await.ok();
         drop(sock);
@@ -110,7 +110,7 @@ async fn login_https_scheme_rejected_v1() {
     assert!(matches!(e, ClientError::UnsupportedScheme(_)), "got {e:?}");
 }
 
-// ── T2: exchange 面（同 body 链、不同 path/请求体）────────────────────────────
+// -- T2: the exchange surface (the same body chain, a different path/request body) --
 
 #[tokio::test]
 async fn exchange_ok_returns_outcome_with_key_id_as_username() {
@@ -124,7 +124,10 @@ async fn exchange_ok_returns_outcome_with_key_id_as_username() {
     .await;
     let out = exchange(&format!("http://127.0.0.1:{port}"), "ci-1", "s3cret").await.unwrap();
     assert_eq!(out.jwt, "jwt.k.x");
-    assert_eq!(out.username, "ci-1", "exchange 的 username 位 = key_id（server LoginResponse 同形）");
+    assert_eq!(
+        out.username, "ci-1",
+        "exchange's username slot = key_id (the same shape as the server's LoginResponse)"
+    );
     assert_eq!(out.role, "viewer");
     assert_eq!(out.expires_in_secs, 43200);
 }
@@ -133,11 +136,14 @@ async fn exchange_ok_returns_outcome_with_key_id_as_username() {
 async fn exchange_401_is_terminal_invalid_credentials() {
     let port = canned_server_on(
         b"POST /api/auth/exchange HTTP/1.1\r\n".to_vec(),
-        response("401 Unauthorized", r#"{"error":"api key authentication failed: invalid credentials"}"#),
+        response(
+            "401 Unauthorized",
+            r#"{"error":"api key authentication failed: invalid credentials"}"#,
+        ),
     )
     .await;
     let err = exchange(&format!("http://127.0.0.1:{port}"), "ci-1", "typo").await.unwrap_err();
     assert!(matches!(err, ClientError::InvalidCredentials), "{err:?}");
-    // D273 红牌族：坏凭证不得重试（T0 语义在客户端的镜像面）。
+    // the D273 red-card family: bad credentials must never retry (the client-side mirror of the T0 semantics).
     assert!(!err.is_retryable());
 }

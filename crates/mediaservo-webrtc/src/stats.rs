@@ -58,9 +58,9 @@ pub struct RTCInboundRtpStreamStats {
     pub frame_width: u32,
     pub frame_height: u32,
     pub frames_per_second: f64,
-    // W3C 口径补全（09-24 对表 web play：libwebrtc stats JSON 一直全带，此前只搬 10 字段）
-    pub jitter: f64, // 秒（W3C）——面板显示乘 1000
-    /// 累计解码耗时（秒，W3C totalDecodeTime）——avg = Δdecode/Δframes 差分比值
+    // the W3C convention completion (09-24 reconciled against web play: libwebrtc's stats JSON always carried them all; previously only 10 fields were ported)
+    pub jitter: f64, // seconds (W3C) -- the panel multiplies by 1000 for display
+    /// The cumulative decode time (seconds, W3C totalDecodeTime) -- avg = the delta-decode/delta-frames differential ratio
     pub total_decode_time: f64,
     pub frame_dropped: u64,
     pub nack_count: u64,
@@ -68,10 +68,10 @@ pub struct RTCInboundRtpStreamStats {
     pub fir_count: u64,
 }
 
-/// 连接级统计（candidate-pair）——rtt 唯一 W3C 口径源（receiver 级 getStats 无此行）。
+/// Connection-level stats (candidate-pair) -- the sole W3C-convention source of rtt (receiver-level getStats has no such row).
 #[derive(Debug, Clone, Copy, Default, serde::Serialize)]
 pub struct ConnectionStats {
-    /// 当前选中 pair 的往返时延（毫秒；currentRoundTripTime 秒×1000）
+    /// The selected pair's round-trip time (ms; currentRoundTripTime seconds x 1000)
     pub rtt_ms: f64,
 }
 
@@ -80,8 +80,8 @@ pub struct ConnectionStats {
 pub struct RTCOutboundRtpStreamStats {
     pub id: String,
     pub timestamp: f64,
-    /// v2 (web-stream-stats T1.5): libwebrtc outbound-rtp 实际编码器实现名
-    /// （如 "libvpx"/"OpenH264"/"VideoToolbox"）— 软编/硬编识别。
+    /// v2 (web-stream-stats T1.5): libwebrtc outbound-rtp's actual encoder implementation name
+    /// (e.g. "libvpx"/"OpenH264"/"VideoToolbox") -- software/hardware encoder identification.
     pub encoder_implementation: Option<String>,
     pub ssrc: u32,
     pub kind: String,
@@ -91,7 +91,7 @@ pub struct RTCOutboundRtpStreamStats {
     pub frame_width: u32,
     pub frame_height: u32,
     pub frames_per_second: f64,
-    /// v3 (encode-time-stats T2): 累计编码耗时（秒, W3C outbound-rtp 标准字段）—
-    /// 平均每帧编码耗时 = ΔtotalEncodeTime / ΔframesEncoded（host 侧增量计算）。
+    /// v3 (encode-time-stats T2): the cumulative encode time (seconds, the W3C outbound-rtp standard field) --
+    /// average encode ms/frame = delta totalEncodeTime / delta framesEncoded (computed incrementally on the host side).
     pub total_encode_time: Option<f64>,
 }

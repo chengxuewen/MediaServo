@@ -1,6 +1,6 @@
-//! Task 4: Registry 注册/发现/活性测试（D235）。
+//! Task 4: Registry registration/discovery/liveness tests (D235).
 
-use mediaservo_link::{registry::NodeInfo, FrameTopic, NodeId, Registry, Role};
+use mediaservo_link::{FrameTopic, NodeId, Registry, Role, registry::NodeInfo};
 
 #[test]
 fn register_then_discover_topics_and_nodes() {
@@ -46,5 +46,8 @@ fn unregister_removes_node_and_publishers() {
     Registry::mark_publisher(&topic, &id).unwrap();
     assert_eq!(Registry::topic_publisher(&topic).unwrap().as_ref(), Some(&id));
     Registry::unregister(&id).unwrap();
-    assert!(Registry::topic_publisher(&topic).unwrap().is_none(), "注销后应无活跃发布者");
+    assert!(
+        Registry::topic_publisher(&topic).unwrap().is_none(),
+        "no active publisher after unregister"
+    );
 }

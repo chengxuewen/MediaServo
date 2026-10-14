@@ -28,13 +28,13 @@ After EVERY code change (edit, write, or ast_grep_replace):
 ```
 Rust:   cargo check -p <crate>       (5-15s)
 TS/TSX: npx tsc --noEmit             (3-5s)
-YAML:   docker compose config --quiet (compose 文件)
-Shell:  bash -n <script>             (脚本)
+YAML:   docker compose config --quiet (compose files)
+Shell:  bash -n <script>             (scripts)
 ```
 
-### 批量 edits 数组必须逐操作验证 (PIT-41)
+### Batch edits arrays must be verified operation-by-operation (PIT-41)
 
-多个 replace 操作引用相邻区域时，边界行号/内容易错位（一个操作可能覆盖另一个操作的保留区域）。每次 edit 调用后立即跑对应格式验证；发现破坏 → 重读文件恢复，不叠加修复。
+When multiple replace operations reference adjacent regions, boundary line numbers/content easily slip out of place (one operation may overwrite another operation's keep-region). Run the corresponding format verification immediately after each edit call; if breakage is found → re-read the file and restore, do not stack fixes on top.
 
 If verification fails, STOP. Do NOT apply another edit on top. Instead:
 1. `git diff` to see what changed
@@ -67,7 +67,7 @@ Before implementing ANY architectural change (protocol, data flow, transport mod
 - **NEVER silently switch** from the agreed architecture (e.g., SFU → P2P) even if it seems "easier"
 - **NEVER implement a workaround** that changes the system's design without explicit user consent
 
-If the agreed approach fails, report the failure and ask: "方案 X 失败，原因是 Y。建议改用 Z，是否同意？"
+If the agreed approach fails, report the failure and ask: "Approach X failed, cause is Y. I suggest switching to Z — do you agree?"
 
 ## Test Execution Constraint (NON-NEGOTIABLE)
 
@@ -104,7 +104,7 @@ After claiming tests are written or features are working:
 - **NEVER start editing files without explicit user approval.** Describing a plan ≠ approval to execute.
 - **When user asks 'what can be done' or 'is it possible to...', they are asking a question, not giving an instruction to edit.** Answer the question. Do NOT edit files.
 - **Before editing, present the plan AND use the `question` tool to confirm.** Wait for affirmative response before touching files.
-- **Silence / '继续' / timeout ≠ approval.** Only explicit 'yes' / 'do it' / '执行' counts.
+- **Silence / 'continue' / timeout ≠ approval.** Only explicit 'yes' / 'do it' / 'proceed' counts.
 
 ## Process Management (shell)
 
@@ -113,117 +113,118 @@ After claiming tests are written or features are working:
 - **Port-in-use on relaunch** (e.g. `Failed to bind 0.0.0.0:9801`) almost always means the old process survived the kill — verify with `ss -tlnp | grep <port>` and kill by PID.
 - **Container-recreated services lose apt-installed tools** (gdb etc.) — install debug tools in the Dockerfile dev target, not per-container.
 
-**来源**：PIT-54 调试轮 (2026-08-04: pgrep -f 自杀、容器重建丢 gdb)
+**Source**: PIT-54 debugging round (2026-08-04: pgrep -f self-kill, container recreation lost gdb)
 
 ## Network Tooling (bash)
 
-- **curl 本机服务必须 --noproxy**：bash 环境有 `http_proxy` 时，`curl http://127.0.0.1:5173` 会走代理 → 超时假死（表现为"Vite 无响应"）。用 `curl --noproxy "*" http://127.0.0.1:PORT/`。
-- **容器 tcpdump 过滤注意 NAT**：宿主发往容器网段（172.18.0.2）的包源 IP 被改写为网关（172.18.0.1）——`not host 172.18.0.1` 会把本机浏览器/应用的流量一并过滤掉。按**源端口**区分（Host 的固定端口 vs 浏览器随机端口），不要按源 IP。
+- **curl against local services must use --noproxy**: when the bash environment has `http_proxy`, `curl http://127.0.0.1:5173` goes through the proxy → timeout hang (presents as "Vite not responding"). Use `curl --noproxy "*" http://127.0.0.1:PORT/`.
+- **Container tcpdump filters must account for NAT**: packets from the host to the container subnet (172.18.0.2) have their source IP rewritten to the gateway (172.18.0.1) — `not host 172.18.0.1` filters out this machine's browser/app traffic as well. Distinguish by **source port** (Host's fixed port vs browser's random ports), not by source IP.
 
-**来源**：PIT-56/58 调试轮 (2026-08-04)
+**Source**: PIT-56/58 debugging round (2026-08-04)
 
-## Git 恢复操作
+## Git Recovery Operations
 
-- **批量 `git restore <paths>` 恢复已 staged 删除时，可能部分目录工作区未实际写回**——`git ls-files`（index）有文件但磁盘（worktree）为空，grep 该目录无结果。根因：`restore` 对 staged 删除的路径恢复不完整。**优先用 `git checkout HEAD -- <paths>`**（强制从 HEAD 写回工作区）。
-- **验证必须是全量对比，不能抽样**：恢复/删除 N 个目录后，逐个 `for d in ...; do echo "[$d] index=$(git ls-files $d/ | wc -l) worktree=$(ls $d/ 2>/dev/null | wc -l)"; done` 核对，index 与 worktree 计数必须全部相等。只 `ls` 部分目录 = 遗漏（PIT-68：恢复 10 个目录仅 7 个实际写回，3 个磁盘为空未被发现）。
+- **Bulk `git restore <paths>` recovering staged deletions may leave some directories not actually written back to the worktree** — `git ls-files` (index) shows files but the disk (worktree) is empty, grep in that directory returns nothing. Root cause: `restore` recovers staged-deleted paths incompletely. **Prefer `git checkout HEAD -- <paths>`** (force write-back from HEAD to the worktree).
+- **Verification must be a full comparison, never a sample**: after restoring/deleting N directories, check each one with `for d in ...; do echo "[$d] index=$(git ls-files $d/ | wc -l) worktree=$(ls $d/ 2>/dev/null | wc -l)"; done` — index and worktree counts must all be equal. Only `ls`-ing some directories = missed gaps (PIT-68: 10 directories "restored", only 7 actually written back, 3 empty on disk went unnoticed).
 
-**来源**：PIT-68 (2026-08-06 .agents 精简恢复轮)
+**Source**: PIT-68 (2026-08-06 .agents trim recovery round)
 
-### 8. edit 工具多行替换后必须验证行唯一性 (PIT-78a)
+### 8. After multi-line replacements with the edit tool, verify line uniqueness (PIT-78a)
 
-**规则**: 对 .py/.rs 文件用 edit 做多行替换后，若替换内容含重复模式（相同行），必须 grep 验证唯一性：
+**Rule**: After using edit for multi-line replacements in .py/.rs files, if the replacement content contains repeated patterns (identical lines), you must grep to verify uniqueness:
 
 ```bash
-grep -c "重复模式" <file>    # 期望 1；>1 = edit 重复插入
+grep -c "<repeated-pattern>" <file>    # expect 1; >1 = edit inserted duplicates
 ```
 
-**先例**: 2026-08-10 会话内 edit 工具三次异常——① 替换丢失前几行（main.rs 配置路径缩进损坏但语法合法，编译通过但逻辑旧）；② 重复插入分派行（mediaservo_cli.py 287/288 相同行 → restart/run-host 执行两轮容器重建）。**修复**: ① 改用 python 精确字符串替换（读文件→replace→写回）；② 删除重复行后 grep -c 验证。
+**Precedent**: 2026-08-10 — three edit-tool anomalies in one session: ① replacement dropped preceding lines (main.rs config-path indentation corrupted but syntactically valid, compiled yet carried stale logic); ② duplicate insertion of dispatch lines (mediaservo_cli.py lines 287/288 identical → restart/run-host executed two rounds of container rebuild). **Fix**: ① switch to exact python string replacement (read file → replace → write back); ② delete duplicate lines then verify with grep -c.
 
-**阻塞条件**: 多行 edit 后未验证唯一性/行数即提交。
+**Blocking condition**: committing after a multi-line edit without verifying uniqueness/line counts.
 
-### 9. 同区域连续 edit 前必须 grep 现状 (PIT-81 轮)
+### 9. Before consecutive edits in the same region, grep the current state first (PIT-81 round)
 
-**规则**: 对同一文件同一函数/区域做连续 edit 时，每次 edit 前先 `grep -c "<锚点行内容>" <file>` 确认唯一性；对"已有内容 + 插入"模式（在旧代码前加日志/改签名），优先用 python 精确字符串替换（读→replace→写回），不用 edit 的 lines 数组重复命中。
+**Rule**: When doing consecutive edits on the same function/region of the same file, before each edit first run `grep -c "<anchor-line content>" <file>` to confirm uniqueness; for the "existing content + insertion" pattern (adding logs / changing signatures before old code), prefer exact python string replacement (read → replace → write back), not the edit tool's lines array hitting repeatedly.
 
-**先例**: 2026-08-11 PIT-81 调试轮 — edit 工具三次重复插入（stop() 函数签名 ×2、main 声明 ×2、日志行残留），每次 build 才暴露，浪费 3 轮。修复统一走 python replace（assert count==1）。
+**Precedent**: 2026-08-11 PIT-81 debugging round — edit tool inserted duplicates three times (stop() function signature ×2, main declaration ×2, leftover log lines), each only exposed at build time, wasting 3 rounds. Fix: route everything through python replace (assert count==1).
 
-**阻塞条件**: 同一函数连续第 2 次 edit 前未 grep 验证；已出现重复插入但未删除重复行即提交。
+**Blocking condition**: a 2nd+ consecutive edit on the same function without grep verification; committing with duplicate insertions present but duplicate lines not deleted.
 
-### 10. python 批量替换脚本必须逐块写盘或前置验证 (PIT-84)
+### 10. Python bulk-replacement scripts must write to disk block-by-block or pre-validate everything (PIT-84)
 
-**规则**: 多块替换的 python 脚本（assert → replace → write 模式），**每块 replace 后立即写盘**，或**所有 assert 前置验证后再统一替换**；禁止"全部替换后末尾一次写盘"（任一 assert 失败 → 全盘丢失，PIT-84 踩 2 次）。
+**Rule**: For python scripts doing multi-block replacement (assert → replace → write pattern), **write to disk immediately after each block's replace**, or **run all asserts as a pre-validation pass before any replacement**; forbidden: "replace everything, single write at the end" (any assert failure → total loss, PIT-84 hit twice).
 
-**验证**: 脚本执行后 `grep -c "<关键替换内容>" <file>` 确认每块生效；失败重跑前检查哪些块已写。
+**Verify**: after the script runs, `grep -c "<key replacement content>" <file>` to confirm each block landed; before a rerun after failure, check which blocks were already written.
 
-**阻塞条件**: 多块脚本末尾一次性写盘；assert 失败后未确认中间状态直接重跑。
-**阻塞条件**: 多块脚本末尾一次性写盘；assert 失败后未确认中间状态直接重跑。
+**Blocking condition**: multi-block script with a single end-of-run write; rerunning directly after an assert failure without confirming intermediate state.
+**Blocking condition**: multi-block script with a single end-of-run write; rerunning directly after an assert failure without confirming intermediate state.
 
-### 11. 大块 markdown 追加用 heredoc，不用 edit 工具 JSON (PIT-85 轮)
+### 11. For large markdown appends use heredoc, not the edit tool's JSON (PIT-85 round)
 
-**规则**: 对 `.agents/memorys/*.md` 等大块 markdown（含引号/反引号/长中文）**追加**新条目时，优先用 `cat >> file <<'EOF'` heredoc；
-**禁止用 edit 工具做长内容 append**——edit 的 JSON 载荷会因复杂引号/反引号/超长内容反复解析失败
-（本次踩 3 次："unsupported op undefined"×2 + JSON parse error×1，each 浪费一轮）。
+**Rule**: When **appending** new entries to large markdown files like `.agents/memorys/*.md` (containing quotes/backticks/long text), prefer `cat >> file <<'EOF'` heredoc;
+**forbidden to use the edit tool for long-content appends** — the edit tool's JSON payload repeatedly fails to parse due to complex quotes/backticks/overlong content
+(hit 3 times in that round: "unsupported op undefined"×2 + JSON parse error×1, each wasting a round).
 
-**验证**: 追加后 `grep -c "<关键标题>" <file>` 确认生效 + `wc -l` 行数增长。
+**Verify**: after appending, `grep -c "<key heading>" <file>` to confirm it landed + `wc -l` shows line growth.
 
-**阻塞条件**: 长 markdown/memory 内容用 edit 工具 append 且失败后未改用 heredoc。
+**Blocking condition**: using the edit tool to append long markdown/memory content and not switching to heredoc after failure.
 
-### 12. 禁止 cargo fmt 无差别运行 — workspace 格式漂移 (PIT-88)
+### 12. Never run cargo fmt indiscriminately — workspace format drift (PIT-88)
 
-**规则**: 禁止 `cargo fmt` / `pixi run cargo fmt` 无参数或带 `-- <path>` 运行nyi——cargo fmt 的 `--` 后参数**不是路径过滤**，会格式化整个 workspace；且本工作区存在 rustfmt 版本漂移（历史文件格式与当前 rustfmt 期望不一致，全量 fmt 产生 112 文件/3000+ 行 diff）。需要单文件格式化时用 `rustfmt --edition 2024 <file>`（rustfmt CLI 支持单文件），或手动保持风格。
+**Rule**: Forbidden: `cargo fmt` / `pixi run cargo fmt` with no arguments or with `-- <path>` (nyi) — arguments after cargo fmt's `--` are **not a path filter**, they format the entire workspace; and this workspace has rustfmt version drift (historical file format vs what the current rustfmt expects, a full fmt produces a 112-file/3000+-line diff). To format a single file use `rustfmt --edition 2024 <file>` (the rustfmt CLI supports single files), or hand-maintain the style.
 
-**先例**: 2026-08-12 `pixi run cargo fmt -- crates/mediaservo-host/src/sfu_media.rs` 误格式化 workspace 112 文件（3103 insertions），`git checkout -- .` 恢复后才重新应用功能改动，浪费 3+ 轮。
+**Precedent**: 2026-08-12 `pixi run cargo fmt -- crates/mediaservo-host/src/sfu_media.rs` accidentally formatted 112 workspace files (3103 insertions); only after `git checkout -- .` recovery were the functional changes re-applied, wasting 3+ rounds.
 
-**验证**: 任何 fmt 操作后 `git diff --stat | wc -l` 必须 == 预期文件数（通常 1）；`git status --short` 无意外文件。
+**Verify**: after ANY fmt operation, `git diff --stat | wc -l` must == the expected file count (usually 1); `git status --short` shows no unexpected files.
 
-**阻塞条件**: 试图用 cargo fmt 做单文件格式化；fmt 后未验证 diff 范围。
+**Blocking condition**: attempting single-file formatting via cargo fmt; not verifying the diff scope after fmt.
 
-### 13. 批量 edit 遇 hash mismatch → 完整 re-read 再重试，禁止用错误输出的部分 tags 拼接 (2026-08-17)
+### 13. Bulk edit hitting hash mismatch → full re-read before retry, never stitch partial tags from the error output (2026-08-17)
 
-**规则**: 批量 edit 报 "hash mismatch" 后，**先完整 re-read 目标文件再重试**；禁止直接用错误输出中更新的部分 LINE#ID 拼接第二次调用（未变化行仍用旧 tag → 再次失败，浪费 2 轮）。对全局配置（`~/.config/opencode/*.jsonc`）等 opencode 运行中可能被改写的文件，**编辑前必须现场 re-read**（会话早段读取的 tags 会失效）。
+**Rule**: After a bulk edit reports "hash mismatch", **fully re-read the target file first, then retry**; forbidden to directly stitch the partially-updated LINE#IDs from the error output into the second call (unchanged lines still carry stale tags → fails again, wasting 2 rounds). For global config files like `~/.config/opencode/*.jsonc` that opencode may rewrite while running, **always re-read in-place before editing** (tags read early in the session go stale).
 
-**先例**: 2026-08-17 omo.jsonc 批量 edit 第 1 次 8 行 mismatch → 用错误提示更新 tags 重试仍失败 → 完整 re-read 167-347 行后才成功（3 轮 vs 2 轮）。
+**Precedent**: 2026-08-17 omo.jsonc bulk edit, 1st attempt: 8 lines mismatch → retried using tags updated per the error hint, still failed → succeeded only after a full re-read of lines 167-347 (3 rounds vs 2 rounds).
 
-**验证**: edit 后 `python3 -m json.tool <file>`（json）或 `grep -c '"reasoningEffort": "low"' .omo/omo.jsonc`（jsonc 目标字段）确认生效。
+**Verify**: after edit, `python3 -m json.tool <file>` (json) or `grep -c '"reasoningEffort": "low"' .omo/omo.jsonc` (jsonc target field) to confirm it landed.
 
-**阻塞条件**: 未 re-read 直接拼接错误输出的部分 tags 重试；JSON 替换后未做语法校验。
+**Blocking condition**: stitching partial tags from the error output and retrying without a re-read; JSON replacement done without a syntax check.
 
-### 14. 仓级重命名/批量编辑是代理并发禁区 (PIT-98)
+### 14. Repo-wide renames/bulk edits are a subagent-concurrency forbidden zone (PIT-98)
 
-**规则**: 有子代理在运行（background task 未收到完成通知）时，**禁止**执行仓级重命名、跨文件批量替换、`git checkout/restore` 目录级操作。子代理可能：① 后续提交覆盖/还原工作区（git checkout 恢复"污染"会连带冲掉编排者的未提交改动——PIT-98 实证 10 文件重命名被整体冲掉）；② 基于旧内容继续编码产生冲突合并。
+**Rule**: While subagents are running (background tasks with no completion notification), **forbidden**: repo-wide renames, cross-file bulk replacements, `git checkout/restore` at directory scope. Subagents may: ① have a later commit overwrite/revert the worktree (git checkout "undoing pollution" also washes away the orchestrator's uncommitted changes — PIT-98 precedent: a 10-file rename was wholesale wiped); ② keep coding against stale content producing conflict merges.
 
-**验证**: 重命名/批量替换后 `grep -rc "<旧模式>" <范围>` 必须为 0 + 二进制级验证（`readelf --dyn-syms` 符号名）；重做前确认 `git log` 静止 + 无 background 任务。
+**Verify**: after rename/bulk replacement, `grep -rc "<old-pattern>" <scope>` must be 0 + binary-level verification (`readelf --dyn-syms` symbol names); before redoing work, confirm `git log` is static + no background tasks.
 
-**阻塞条件**: 有未完成子代理时执行仓级替换；批量替换后未做符号/内容双重验证即提交。
+**Blocking condition**: executing repo-wide replacement while unfinished subagents exist; committing after a bulk replacement without dual symbol/content verification.
 
-### 15. bash 脚本清理 pkill/pgrep + set -e — 必须 || true；timeout 加 -k (PIT-120/121 轮)
+### 15. Bash cleanup pkill/pgrep under set -e — must append || true; timeout needs -k (PIT-120/121 round)
 
-**规则**: ① `set -euo pipefail` 脚本中**清理型 `pkill`/`pgrep` 必须后缀 `|| true`**——pkill **无匹配进程时 exit 1** → set -e **秒退脚本**（trap 清理吞掉现场——外界观察像"卡死 200s+"，实为快速失败，PIT-120 实证 e2e-brand 段 4 在 start 前死）；② 包长命令的 `timeout` 用 **`timeout -k 5 <sec>`**（TERM 只发直接子进程且可能被忽略——如 oxmgr 忽略 TERM——不带 -k 打不死子进程链）；③ "卡住 vs 秒退"第一诊断 = **`bash -x scripts/x.sh` 看尾行**（`+ pkill` 后直接 trap 清理 = 秒退；尾行是目标命令 = 真卡）；④ 清理型 pkill 用 `-x` 精确名（禁止 `-f` 匹配自己命令行——见上 Process Management 规则，本会话再次踩中浪费 200s 超时轮）。
+**Rule**: ① In `set -euo pipefail` scripts, **cleanup-style `pkill`/`pgrep` calls must be suffixed with `|| true`** — pkill **exits 1 when no process matches** → set -e **instantly kills the script** (trap cleanup swallows the scene — externally it looks like "hung for 200s+", it is actually a fast failure; PIT-120 precedent: e2e-brand section 4 died before start); ② wrap long commands with **`timeout -k 5 <sec>`** (TERM goes only to the direct child and may be ignored — e.g. oxmgr ignores TERM — without -k the child-process chain never dies); ③ first diagnostic for "hung vs instant-exit" = **`bash -x scripts/x.sh`, read the last lines** (`+ pkill` followed directly by trap cleanup = instant exit; last line is the target command = genuinely hung); ④ cleanup pkills use `-x` with exact names (forbidden: `-f` matching your own command line — see Process Management rule above, hit again this session wasting a 200s timeout round).
 
-**验证**: `grep -nE "pkill|pgrep" scripts/*.sh`——清理型调用逐行确认 `|| true`；`grep -rn "timeout [0-9]" scripts/` 确认带 -k 的长命令。
+**Verify**: `grep -nE "pkill|pgrep" scripts/*.sh` — confirm line by line that cleanup calls have `|| true`; `grep -rn "timeout [0-9]" scripts/` — confirm long-command wrappers carry -k.
 
-**阻塞条件**: 脚本内 pkill/pgrep 无 `|| true`；timeout 包裹长命令不带 -k；"卡住"未用 bash -x 定位直接猜死锁。
+**Blocking condition**: pkill/pgrep in scripts without `|| true`; timeout wrapping long commands without -k; declaring "hung" without locating via bash -x and guessing a deadlock instead.
 
-**来源**: PIT-120/121 (2026-08-21 app-branding e2e-brand 调试轮)
+**Source**: PIT-120/121 (2026-08-21 app-branding e2e-brand debugging round)
 
-### 16. pkill/pgrep -f 模式含自身 cmdline 字面量 = 自杀挂死 shell（第二次犯，2026-09-01）
+### 16. pkill/pgrep -f pattern containing your own cmdline literal = self-kill hanging the shell (second occurrence, 2026-09-01)
 
-**规则**: 清理浏览器/子进程时**禁止** `pkill -f <字符串>`，当该字符串出现在当前 bash 命令行里（路径如 chrome-linux64/chrome 极易入 own cmdline）。用 `ps -eo pid,comm`（comm 精确列）+ 按 pid kill，或 grep 方括号法 `[c]hrome`。
-**先例**: PIT-54（首次）；2026-09-01 play 轮 T11 调试中 `pkill -f "ms-playwright/chromium-1234/chrome-linux64/chrome"`（模式串在自身命令行）→ shell 无声挂死两个 60s/260s 工具窗口。
-**阻塞条件**: 任何 `pkill -f`/`pgrep -f` 模式串与当前命令行有子串重叠。
+**Rule**: When cleaning up browsers/child processes, **forbidden**: `pkill -f <string>` when that string appears in the current bash command line (paths like chrome-linux64/chrome very easily land in your own cmdline). Use `ps -eo pid,comm` (exact comm column) + kill by pid, or the grep bracket trick `[c]hrome`.
 
-### 17. 批量编辑失败/补丁 no-op——先 grep 现状再补刀，门禁防假绿 (2026-09-03)
+**Precedent**: PIT-54 (first); 2026-09-01 play round T11 debugging: `pkill -f "ms-playwright/chromium-1234/chrome-linux64/chrome"` (pattern string in own command line) → shell silently hung for two 60s/260s tool windows.
+**Blocking condition**: any `pkill -f`/`pgrep -f` pattern string that overlaps as a substring with the current command line.
 
-**规则**:
-① `edit` 工具批量调用报 hash mismatch 后**可能已部分应用**——重试前必须 grep/重读失败区确认每个 op 现状，只补未落地项；整批重发会双重应用（本会话实证：`await this.connect()` 重复行 + tsc 语法错）。
-② python 批量补丁每块 replace 前必须 `assert s.count(old)==1`——无 assert 的锚点不匹配是静默 no-op（本会话实证：矩阵脚本定义块未插入，运行至 ReferenceError 才暴露）。
-③ 门禁命令取真实退出码：`npx tsc --noEmit && echo OK`（或 `set -o pipefail`）；`cmd | head; echo $?` 读到的是管道尾命令退出码 = 假绿（本会话两次把语法错误读成 tsc=0，白跑一整个压测矩阵）。
-**验证**: 补丁落盘后 `grep -c "<新内容关键串>" <文件>` 逐 op 计数；批量 edit 失败后任何重试前必须先读现场。
-**阻塞条件**: 整批重发失败批次；无 assert replace；管道尾退出码当门禁。
+### 17. Bulk-edit failures / patch no-ops — grep the current state before re-striking; gates must prevent false green (2026-09-03)
 
-### 11. 长会话开工前 git log -1 对表——防幻觉轮接力（2026-09-17 事故实录）
+**Rule**:
+① After the `edit` tool's bulk call reports hash mismatch, it **may have partially applied** — before retrying, grep/re-read the failed region to confirm each op's state, re-apply only the unlanded items; resending the whole batch double-applies (this session's proof: duplicated `await this.connect()` line + tsc syntax error).
+② Python bulk patches must have `assert s.count(old)==1` before every block's replace — an anchor miss without an assert is a silent no-op (this session's proof: matrix-script definition block never inserted, only exposed at runtime as ReferenceError).
+③ Gate commands must capture the real exit code: `npx tsc --noEmit && echo OK` (or `set -o pipefail`); `cmd | head; echo $?` reads the pipeline tail's exit code = false green (this session twice read syntax errors as tsc=0, burning an entire stress-matrix run).
+**Verify**: after patches land, `grep -c "<new-content key string>" <file>` counted per op; after a bulk edit failure, always read the scene first before any retry.
+**Blocking condition**: resending a whole failed batch; replace without assert; treating a pipeline-tail exit code as the gate.
 
-**规则**: 上下文耗尽态（第 N 次收束警告后）的每一轮，开工第一个动作 = `git log --oneline -1` + `git status --short` 与上一轮声称的 HEAD 对表；上轮报告里的函数名/文件/commit 哈希未经本轮亲验一律视为未发生。计划引用的函数/feature 动手前 grep 双查（含查自己计划里的存在性断言）。
-**先例**: 09-17 幻觉轮——完整一轮的工具输出（构建日志/发现/提交回显 0a7f29e/b6697b9）为虚构，真实 HEAD 停在 819b58c；被下一轮 edit hash 防线+grep 实况抓获，零损害（无任何真实文件被幻觉轮触碰）。
-**验证**: 每轮开场对表输出与上轮 message 一致才继续；不一致 = 以 git 实况为准重写账面。
-**阻塞条件**: 耗尽态会话中未对表即开始编辑/构建/提交。
+### 11. Before starting work in a long session, reconcile with git log -1 — prevent hallucination-round handoffs (2026-09-17 incident log)
+
+**Rule**: In context-exhausted state (after the Nth convergence warning), every round's first action = `git log --oneline -1` + `git status --short` reconciled against the HEAD the previous round claimed; function names/files/commit hashes in the last round's report count as not-happened until verified this round. Functions/features referenced by plans get a double grep before touching them (including verifying existence assertions in your own plan).
+**Precedent**: 09-17 hallucination round — an entire round's tool output (build log/findings/commit echoes 0a7f29e/b6697b9) was fabricated; real HEAD stayed at 819b58c; caught by the next round's edit hash defense + grep of the actual state, zero damage (no real file was touched by the hallucination round).
+**Verify**: each round's opening reconciliation output must match the previous round's message before continuing; mismatch = rewrite the books from git ground truth.
+**Blocking condition**: in an exhausted session, starting any edit/build/commit without reconciling first.

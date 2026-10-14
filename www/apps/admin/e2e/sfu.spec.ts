@@ -5,10 +5,10 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// SFU 视频渲染 e2e — 需要: Docker server (9800) + 自备干净 SFU 生产者（host-legacy）。
-// PIT-106 修复后浏览器 consume 全链路可用（candidates alias + vite ws proxy）;
-// 生产者必须是纯 SFU 路径（host-legacy sfu_produce）— 多进程网关主机会同时 P2P 中继
-// SDP/ICE, 与浏览器 SFU 协商共用一个 RTCPeerConnection 冲突（已知限制）。
+// SFU video rendering e2e — requires: Docker server (9800) + your own clean SFU producer (host-legacy).
+// After the PIT-106 fix the browser consume path works end to end (candidates alias + vite ws proxy);
+// the producer must be pure-SFU (host-legacy sfu_produce) — a multi-process gateway host would also relay P2P
+// SDP/ICE, clashing with the browser SFU negotiation on one RTCPeerConnection (known limitation).
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
 const HOST_BIN = path.join(REPO_ROOT, 'target', 'debug', 'host-legacy');
@@ -34,12 +34,12 @@ async function waitForProducer(page: Page, room: string, timeoutMs = 30000): Pro
 }
 
 test.describe('SFU Video Rendering', () => {
-  // 自备生产者启动 ~12s → 单测试预算放宽（默认 30s 不够）
+  // own producer takes ~12s to start → widened per-test budget (default 30s is not enough)
   test.setTimeout(120_000);
   let producer: ChildProcess | null = null;
 
   test.beforeAll(async () => {
-    // 自备干净 SFU 生产者（test-room）— 浏览器 Play 的目标房间
+    // own clean SFU producer (test-room) — the room browser Play targets
     producer = await startCleanProducer();
   });
 
@@ -49,14 +49,14 @@ test.describe('SFU Video Rendering', () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    // storageState（global-setup 登录）提供 admin token — PIT-103 鉴权后仍需登录态。
+    // storageState (global-setup login) provides the admin token — PIT-103: a signed-in state is still required after auth.
     await page.goto('/');
   });
 
   test('navigates to dashboard and clicks Play to render video', async ({ page }) => {
     // Navigate to dashboard
     await expect(page.locator('.dashboard')).toBeVisible();
-    // 等 test-room 的 SFU 生产者就绪
+    // wait for the test-room SFU producer to be ready
     await waitForProducer(page, 'test-room');
 
     // Find and click the Play button for test-room
@@ -68,7 +68,7 @@ test.describe('SFU Video Rendering', () => {
     const video = page.locator('video');
     await expect(video).toBeVisible({ timeout: 10000 });
 
-    // Verify video readyState >= 2 (HAVE_CURRENT_DATA) — 等真实帧数据到达
+    // Verify video readyState >= 2 (HAVE_CURRENT_DATA) — wait for real frame data to arrive
     await page.waitForFunction(() => {
       const v = document.querySelector('video');
       return v && v.readyState >= 2;
@@ -91,7 +91,7 @@ test.describe('SFU Video Rendering', () => {
     await expect(playButton).toBeVisible();
     await playButton.click();
 
-    // Wait for VideoPlayer error state (Signal Lost) — WS 被 abort → connect 失败
+    // Wait for VideoPlayer error state (Signal Lost) — WS was aborted → connect fails
     const signalLost = page.locator('.vp-status-msg.error');
     await expect(signalLost).toBeVisible({ timeout: 15000 });
     await expect(signalLost).toContainText(/signal lost|error|failed|disconnected/i);

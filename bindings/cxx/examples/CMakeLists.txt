@@ -1,20 +1,20 @@
-# bindings/cxx/examples — GUI/SDK 例子聚合根（p3-gui-viewer W0）
+# bindings/cxx/examples — GUI/SDK examples aggregation root (p3-gui-viewer W0)
 #
-# 命令面唯一入口 = `./mediaservo.sh build example [name…]`（G7）；本文件可独立
-# `cmake -S . -B build` 配置（兼容白赚=各子目录亦可单独摘走——依赖由本根 prepare）。
+# The single CLI entry point is `./mediaservo.sh build example [name...]` (G7); this file can also be configured standalone with
+# `cmake -S . -B build` (a compatibility bonus = each subdirectory can also be lifted out on its own — dependencies are prepared by this root).
 #
-# 契约（PLAN §3/§6）：
-# - 目录名 == target 名 == 产物名（三形合一 G4）：子目录扫描与本文件字面同规则
-#   file(GLOB */CMakeLists.txt)（F-A-6），CLI `list example` 复用同一 glob。
-# - MEDIASERVO_SDK_DIR = build-c 产物目录（含 libmediaservo_*.so）。缺失/无 .so →
-#   FATAL_ERROR 明错指 build-c（PIT-189 部署新鲜度教训的编译面等价物）。
-# - GUI 依赖 = 3rdparty/ 本地档案 zip + URL_HASH（D281 oxmgr 同法；台账
-#   3rdparty/PROVENANCE-gui-deps.md）。哈希不符 = FetchContent 拒绝展开。
+# Contracts (PLAN §3/§6):
+# - Directory name == target name == artifact name (the three-in-one G4): the subdirectory scan follows exactly the same literal rule as this file's
+# file(GLOB */CMakeLists.txt) (F-A-6); the CLI `list example` reuses the same glob.
+# - MEDIASERVO_SDK_DIR = the build-c output directory (containing libmediaservo_*.so). Missing / no .so →
+# FATAL_ERROR with a message pointing at build-c (the compile-surface equivalent of the PIT-189 deployment-freshness lesson).
+# - GUI dependencies = local archive zips under 3rdparty/ + URL_HASH (the same method as D281's oxmgr; the ledger is
+# 3rdparty/PROVENANCE-gui-deps.md). A hash mismatch = FetchContent refuses to extract.
 
 cmake_minimum_required(VERSION 3.24)
 project(mediaservo_examples LANGUAGES C CXX)
 
-enable_testing() # 子目录 add_test 生效前提（core 判据面）
+enable_testing() # prerequisite for subdirectory add_test to take effect (the core test surface)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,13 +22,13 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 
-# ── SDK 交付目录（build-c 前置）──
+# -- SDK delivery directory (build-c prerequisite) --
 set(MEDIASERVO_SDK_DIR "${REPO_ROOT}/target/debug" CACHE PATH
-    "build-c 产物目录（libmediaservo_*.so 所在）")
+    "build-c output directory (where libmediaservo_*.so lives)")
 if(NOT EXISTS "${MEDIASERVO_SDK_DIR}/libmediaservo_client.so")
     message(FATAL_ERROR
-        "MEDIASERVO_SDK_DIR='${MEDIASERVO_SDK_DIR}' 内无 libmediaservo_client.so —"
-        " 先执行 ./mediaservo.sh build-c（或 pixi run build-c）再配置（PIT-189）")
+        "no libmediaservo_client.so inside MEDIASERVO_SDK_DIR='${MEDIASERVO_SDK_DIR}' —"
+        " run ./mediaservo.sh build-c (or pixi run build-c) before configuring (PIT-189)")
 endif()
 
 add_library(mediaservo_client_sdk INTERFACE)
@@ -39,50 +39,50 @@ target_include_directories(mediaservo_client_sdk INTERFACE
     "${REPO_ROOT}/bindings/c/include")                           # common.h
 target_link_libraries(mediaservo_client_sdk INTERFACE
     "${MEDIASERVO_SDK_DIR}/libmediaservo_client.so")
-# SDK 由 conda 工具链编译（GLIBCXX_3.4.29/3.4.30 新符号）：examples 走系统
-# 编译器链（focal 头混编修复，2026-09-28）时，链接期需 rpath-link 看见 conda
-# libstdc++ 解析版本符号；运行时由 .so 自带 RPATH 兜底，conda 编译器亦兼容此旗。
+# The SDK is built with the conda toolchain (GLIBCXX_3.4.29/3.4.30 new symbols): when the examples use the system
+# compiler chain (the focal header mix fix, 2026-09-28), linking needs rpath-link to see the conda
+# libstdc++ to resolve versioned symbols; at runtime the .so's own RPATH backstops it, and the conda compiler also tolerates this flag.
 set(_ms_conda_lib "${REPO_ROOT}/.pixi/envs/default/lib")
 if(EXISTS "${_ms_conda_lib}/libstdc++.so.6")
-    # -L 使驱动追加的 -lstdc++ 解析到 conda 版（版本符号齐全，先 -L 先赢）；
-    # rpath-link 供 ld 解 .so 的 NEEDED 链；rpath 保运行时加载 conda libstdc++
-    # （系统 gcc-10 的 3.4.28 无 3.4.29/30 → 运行期 version not found）。
+    # -L makes the driver-appended -lstdc++ resolve to the conda version (full versioned symbols; first -L wins);
+    # rpath-link lets ld resolve the .so's NEEDED chain; rpath keeps the runtime loading the conda libstdc++
+    # (system gcc-10 has 3.4.28 without 3.4.29/30 → a runtime version-not-found).
     target_link_options(mediaservo_client_sdk INTERFACE
         "-L${_ms_conda_lib}"
         "-Wl,-rpath-link,${_ms_conda_lib}"
         "-Wl,-rpath,${_ms_conda_lib}")
 endif()
 
-# ── GUI 依赖档案（FetchContent 本地 zip + 哈希）──
+# -- GUI dependency archives (FetchContent local zips + hashes) --
 include(FetchContent)
 FetchContent_Declare(sdl3
     URL "file://${REPO_ROOT}/3rdparty/sdl3-release-3.4.16.zip"
     URL_HASH SHA256=547af2e721e8fc1a60f17acbb01cf6b65a6fa2022d885746b776e2d867adc2b1
-    # 上游 bug 补丁：X11_PickTarget 对 Xwayland XdndTypeList 的 None 原子调 XGetAtomName
-    # → Xlib 默认 handler exit(1)（3.4.16 未修/无报告/无 hint，09-20 对 main 逐字比对确认；
-    # 崩点四处 PickTarget/SDL_FORMATS×2/PropertyNotify，守护形=同文件 1436 既有 if(name) 同款）。
-    # 档案 zip 保持上游逐字节；guard 解包后应用（python 脚本，逐点幂等），headless 亦无害。
+    # Upstream bug patch: X11_PickTarget calls XGetAtomName on a None atom from Xwayland's XdndTypeList,
+    # → the default Xlib handler exit(1) (unfixed in 3.4.16 / no report / no hint; confirmed 09-20 by comparing main verbatim;
+    # four crash sites: PickTarget / SDL_FORMATS×2 / PropertyNotify; the guard mirrors the existing if(name) form at line 1436 in the same file).
+    # The archive zip stays byte-for-byte upstream; the guard is applied after extraction (a python script, idempotent per site), harmless headless too.
     PATCH_COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/patches/sdl3-x11-none-guard.py)
 FetchContent_Declare(imgui
-    # v1.92.9b-docking = 第一方 docking 分支随版 tag（commit b48d1af，IMGUI_HAS_DOCK 在位；
-    # imgui.h 的 IMGUI_VERSION 与 master 同串不带后缀——分支指纹只认 IMGUI_HAS_DOCK 宏）
+    # v1.92.9b-docking = the first-party docking branch's version-pinned tag (commit b48d1af, IMGUI_HAS_DOCK present;
+    # imgui.h's IMGUI_VERSION is the same string as master without a suffix — the branch fingerprint is only the IMGUI_HAS_DOCK macro)
     URL "file://${REPO_ROOT}/3rdparty/imgui-v1.92.9b-docking.zip"
     URL_HASH SHA256=0434445157a575f452ff0f2d1681fdd90ea8939e0c6983e6f8e47c51fba1bccd)
 
-set(SDL_SHARED OFF CACHE BOOL "" FORCE)      # 例子静态吃 SDL3，产物免运行时库路径钉子
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)      # the examples link SDL3 statically, sparing the artifacts runtime library-path pins
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_TESTS OFF CACHE BOOL "" FORCE)
 set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
-# 桌面视频后端：构建机缺 xorg/Wayland dev 头时 SDL 自动探测直接 FATAL（3.4.16 实录
-# sdlchecks CheckX11）。W0 档案面 = 官方 headless 组合（docs/README-cmake.md）：
-# X11/Wayland 显式 OFF + SDL_UNIX_CONSOLE_BUILD=ON（否则 PrintSummary 无后端 FATAL）。
-# 桌面真跑出窗（W3 冒烟 / W5 ubuntu-x11 job）：装 README-linux 包后传
+# Desktop video backend: when the build machine lacks xorg/Wayland dev headers, SDL's auto-detection FATALs directly (3.4.16 reality
+# in sdlchecks CheckX11). The W0 archive surface = the official headless combination (docs/README-cmake.md):
+# X11/Wayland explicitly OFF + SDL_UNIX_CONSOLE_BUILD=ON (otherwise PrintSummary FATALs with no backend).
+# Desktop real-window runs (the W3 smoke / W5 ubuntu-x11 job): after installing the README-linux packages pass
 #   -DSDL_X11=ON -DSDL_UNIX_CONSOLE_BUILD=OFF
-# 桌面真跑出窗自动化（09-20 小刀，官方配方 README L59-60）：构建机 xorg 头包组齐
-# → 自动开 X11（-DSDL_X11=OFF 可强制 headless）；缺 → W0 headless 形（CI 零扰动）。
-# 09-20 三坑一并绕：① conda 编译器默认不搜 /usr/include（补 -isystem）；② pixi 自带
-# x11.pc 指向残缺 conda 头目录盖过系统（PKG_CONFIG_PATH 系统段前置）；③ SDL 无全局
-# Xlib error handler（Xwayland None 原子 = PATCH_COMMAND 上游 bug 补丁）。
+# Desktop real-window automation (the 09-20 touch, the official recipe README L59-60): with the build machine's xorg header package group complete,
+# X11 turns on automatically (-DSDL_X11=OFF forces headless); without them → the W0 headless form (zero CI disturbance).
+# Three 09-20 pitfalls sidestepped together: ① the conda compiler does not search /usr/include by default (add -isystem); ② pixi's bundled
+# x11.pc points at an incomplete conda header directory, shadowing the system one (prepend the system segment to PKG_CONFIG_PATH); ③ SDL has no global
+# Xlib error handler (the Xwayland None atom = the upstream bug patch via PATCH_COMMAND).
 if(NOT DEFINED SDL_X11)
     set(_msrtc_x11_probe ON)
     foreach(_h "X11/XKBlib.h" "X11/extensions/Xfixes.h" "X11/extensions/XInput2.h"
@@ -95,15 +95,15 @@ if(NOT DEFINED SDL_X11)
     endforeach()
     if(_msrtc_x11_probe AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
         set(SDL_X11 ON CACHE BOOL "" FORCE)
-        # 09-20 两hack仅 conda 编译器适用：系统 gcc 默认链已含 /usr/include，
-        # 再 -isystem 会触发 include_next 去重断链（c++/10/cstdlib 找不到 stdlib.h，
-        # focal 事故 2026-09-28）。conda 侧行为不变（CI/老 Jetson 零扰动）。
+        # The two 09-20 hacks apply only to the conda compiler: the system gcc's default chain already includes /usr/include,
+        # and another -isystem triggers include_next dedup breakage (c++/10/cstdlib cannot find stdlib.h,
+        # the focal incident of 2026-09-28). The conda side is unchanged (zero disturbance for CI / old Jetson).
         if(CMAKE_C_COMPILER MATCHES "conda|envs/default")
             string(PREPEND CMAKE_C_FLAGS "-isystem /usr/include ")
             string(PREPEND CMAKE_CXX_FLAGS "-isystem /usr/include ")
             set(ENV{PKG_CONFIG_PATH} "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:$ENV{PKG_CONFIG_PATH}")
         endif()
-        message(STATUS "GUI 例子: 检出系统 xorg 头包组 → SDL_X11=ON（出窗形态；-DSDL_X11=OFF 可强制 headless）")
+        message(STATUS "GUI examples: detected the system xorg header package group → SDL_X11=ON (windowed form; -DSDL_X11=OFF forces headless)")
     else()
         set(SDL_X11 OFF CACHE BOOL "" FORCE)
     endif()
@@ -111,8 +111,8 @@ endif()
 if(NOT DEFINED SDL_WAYLAND)
     set(SDL_WAYLAND OFF CACHE BOOL "" FORCE)
 endif()
-# 音频后端（GUI 例子零音频需求）：clean CI（ubuntu-22.04 无 libasound2-dev 等）
-# 下 SDL 默认 ON 会 FATAL/find 失败——同 X11 纪律显式 OFF，`if(NOT DEFINED)` 留_OVERRIDE 位。
+# Audio backend (the GUI examples need no audio): on a clean CI (ubuntu-22.04 without libasound2-dev etc.),
+# SDL's default ON FATALs/find fails — explicitly OFF with the same X11 discipline; `if(NOT DEFINED)` keeps an _OVERRIDE slot.
 foreach(_snd ALSA PULSEAUDIO PIPEWIRE SNDIO OSS)
     if(NOT DEFINED SDL_${_snd})
         set(SDL_${_snd} OFF CACHE BOOL "" FORCE)
@@ -121,16 +121,16 @@ endforeach()
 
 if(NOT DEFINED SDL_UNIX_CONSOLE_BUILD)
     if(SDL_X11)
-        set(SDL_UNIX_CONSOLE_BUILD OFF CACHE BOOL "" FORCE)  # 官方真窗配方（无后端才需 console）
+        set(SDL_UNIX_CONSOLE_BUILD OFF CACHE BOOL "" FORCE)  # the official real-window recipe (console only needed with no backend)
     else()
         set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
     endif()
 endif()
 FetchContent_MakeAvailable(sdl3)
 
-# imgui 无官方 CMake 构建（上游即源文件集，官方用法=手动编入工程）：
-# core + 渲染后端按 docs/BACKENDS.md 清单显式列出。renderer=SDL3 的
-# SDL_Renderer 后端（W0 空窗；GPU 纹理面归 W3 再判 sdlgpu3）。
+# imgui has no official CMake build (upstream is just a set of source files; the official usage = compile them into your project manually):
+# core + the rendering backend are listed explicitly per the docs/BACKENDS.md inventory. For renderer=SDL3 the
+# SDL_Renderer backend (the W0 empty window; the GPU texture surface goes to W3, which will judge sdlgpu3).
 FetchContent_Populate(imgui)
 add_library(imgui STATIC
     "${imgui_SOURCE_DIR}/imgui.cpp"
@@ -142,7 +142,7 @@ add_library(imgui STATIC
 target_include_directories(imgui PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
 target_link_libraries(imgui PUBLIC SDL3::SDL3)
 
-# ── 例子聚合：子目录字面同规则扫描（与 CLI list 同源，F-A-6）──
+# -- Example aggregation: subdirectory scan with the same literal rule (same source as the CLI list, F-A-6) --
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${REPO_ROOT}/target/examples/bin")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${REPO_ROOT}/target/examples/bin")
 
@@ -153,9 +153,9 @@ foreach(entry ${EXAMPLE_DIRS})
     get_filename_component(dir "${entry}" DIRECTORY)
     add_subdirectory("${dir}")
     list(APPEND _known_targets "${dir}")
-    # 三形合一门（G4 升格为 configure 期断言，早于任何编译）：目录名必须有同名 target。
+    # The three-in-one gate (G4 promoted to a configure-time assertion, before any compilation): a directory must have a same-named target.
     if(NOT TARGET "${dir}")
-        message(FATAL_ERROR "例子目录 '${dir}/' 内缺同名 target '${dir}'（三形合一 G4 违约）")
+        message(FATAL_ERROR "example directory '${dir}/' lacks a same-named target '${dir}' (a G4 three-in-one violation)")
     endif()
 endforeach()
 message(STATUS "mediaservo examples: ${_known_targets}")

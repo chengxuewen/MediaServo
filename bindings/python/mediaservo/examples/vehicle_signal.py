@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""link 信令 + 事件 — 设备侧信令会话骨架（连接 → 事件 → 发送 → 关闭）。
+"""link signaling + events — device-side signaling session skeleton (connect → events → send → close).
 
-运行（需信令 server + MEDIASERVO_LIB_DIR）:
+Run (requires a signaling server + MEDIASERVO_LIB_DIR):
   export MEDIASERVO_LIB_DIR=$PWD/target/debug
   python3 examples/vehicle_signal.py ws://127.0.0.1:9800/ws mediaservo-dev room-1
 """
@@ -9,14 +9,14 @@
 import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # 开发模式
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # dev mode
 
 import mediaservo
 from mediaservo.link import SignalConfig, SignalSession
 
 
 def on_event(event_json: str) -> None:
-    # 泵线程触发；事件 JSON 已拷贝为 str，可安全保留
+    # fires on the pump thread; the event JSON is copied to str and safe to keep
     print("event: %s" % event_json)
 
 
@@ -28,17 +28,17 @@ def main() -> int:
     seconds = float(sys.argv[4]) if len(sys.argv) > 4 else 5.0
 
     print("mediaservo-link %s" % mediaservo.link.version())
-    cfg = SignalConfig(url=url, psk=psk, room=room, role="Pusher")  # 空 role = Host
+    cfg = SignalConfig(url=url, psk=psk, room=room, role="Pusher")  # empty role = Host
 
-    # 连接信令 + 创建会话（阻塞；失败抛 LinkError）
+    # Connect signaling and create the session (blocking; raises LinkError on failure)
     session = SignalSession.connect(cfg)
     try:
-        session.on_event(on_event)  # 注册事件回调（首次注册泵补发 {"type":"connected"}）
+        session.on_event(on_event)  # register the event callback (first registration makes the pump re-synthesize {"type":"connected"})
         time.sleep(0.5)
         session.send('{"type":"ping"}')
         time.sleep(seconds)
     finally:
-        session.close()  # C close join 事件泵
+        session.close()  # C close joins the event pump
     return 0
 
 

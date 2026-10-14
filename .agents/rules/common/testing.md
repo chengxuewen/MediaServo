@@ -56,11 +56,11 @@ test('throws error when API key is missing', () => {})
 test('falls back to substring search when Redis is unavailable', () => {})
 ```
 
-## 可执行检查
+## Executable Checks
 
 ```bash
-# 验证：测试通过
+# Verify: tests pass
 cargo test --workspace
-# 验证：覆盖率
+# Verify: coverage
 cargo tarpaulin --workspace 2>/dev/null || echo "tarpaulin not installed"
 ```

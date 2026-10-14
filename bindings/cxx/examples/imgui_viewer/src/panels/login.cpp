@@ -1,4 +1,4 @@
-// panels/login — 实现（T3 自 main.cpp「登录面」分支逐字迁居）。
+// panels/login — implementation (the "login face" branch relocated verbatim from main.cpp in T3).
 #include "login.hpp"
 
 #include <cstring>
@@ -10,15 +10,15 @@
 namespace viewer {
 
 void render_login(AppModel& m, const Env& env) {
-    // 登录前浮动单窗（未 dock）；位置语义与拆分前一致
+    // A single floating window before login (not docked); position semantics identical to before the split
     ImGui::SetNextWindowPos(ImVec2(8, 40), ImGuiCond_FirstUseEver);
     ImGui::Begin("MSRTC Viewer");
-    // server 地址登录前可改（env/缺省值预置进字段；登录后会话沿用建联时的值）
+    // The server address is editable before login (preset from env/defaults into the field; after login the session keeps the connect-time value)
     ImGui::SetNextItemWidth(280);
     ImGui::InputText("server ws##url", m.url_ws, sizeof(m.url_ws));
     ImGui::InputText("server http##url", m.url_http, sizeof(m.url_http));
-    // 鉴权五模式（viewer-auth-matrix T3/F1）：Radio 横排 + 按需输入域。
-    // 不相关域灰显不隐藏（测试截图可见"该模式不需要什么"）；密语共用 show 眼睛。
+    // The five auth modes (viewer-auth-matrix T3/F1): a horizontal Radio row + on-demand input fields.
+    // Irrelevant fields are greyed, not hidden (test screenshots show "what this mode does not need"); the secrets share one show-eyes toggle.
     auto radio = [&](AuthMode mode, const char* label, const char* tip) {
         if (ImGui::RadioButton(label, m.auth == mode)) m.auth = mode;
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tip);
@@ -54,7 +54,7 @@ void render_login(AppModel& m, const Env& env) {
         ImGui::Checkbox("show", &m.pass_shown);
         ImGui::TextDisabled("bad/expired token -> 4013 red banner (fail-closed probe)");
     }
-    // 无关域灰显（F1：可见"该模式不需要什么"）。
+    // Irrelevant fields greyed out (F1: "what this mode does not need" stays visible).
     if (m.auth != AuthMode::Account) { ImGui::BeginDisabled(); ImGui::InputText("user", m.user, sizeof(m.user)); ImGui::EndDisabled(); }
     if (!m.status.empty()) ImGui::TextColored({1, .4f, .4f, 1}, "%s", m.status.c_str());
     if (!m.identity_label.empty()) ImGui::TextDisabled("identity: %s", m.identity_label.c_str());
@@ -62,14 +62,14 @@ void render_login(AppModel& m, const Env& env) {
     const char* btn;
     switch (m.auth) {
     case AuthMode::ApiKey: cred_ready = m.key_id[0] && m.key_secret[0]; btn = "Login"; break;
-    case AuthMode::Psk:    cred_ready = m.psk[0] != '\0';               btn = "Connect"; break; // room 可选：空=发现树
+    case AuthMode::Psk:    cred_ready = m.psk[0] != '\0';               btn = "Connect"; break; // room optional: empty = the discovery tree
     case AuthMode::Device: cred_ready = m.identity_dir[0];              btn = "Connect"; break;
     case AuthMode::JwtPaste: cred_ready = m.jwt_paste[0];               btn = "Connect"; break;
     default:               cred_ready = m.pass[0] != '\0';              btn = "Login"; break;
     }
     bool do_login = ImGui::Button(btn) && cred_ready;
     if (m.auto_join) do_login = true;
-    if (do_login) perform_login(m, env);   // 登录+列举+auto-join 全在 sessions 层
+    if (do_login) perform_login(m, env);   // login + listing + auto-join all live in the sessions layer
     ImGui::End();
 }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""field 推流骨架 — 车端视频推流到云端（连接 → 发布视频轨 → 帧生成 → 关闭）。
+"""field push skeleton — push vehicle video to the cloud (connect → publish track → generate frames → close).
 
-运行（需信令 server + MEDIASERVO_LIB_DIR）:
+Run (requires a signaling server + MEDIASERVO_LIB_DIR):
   export MEDIASERVO_LIB_DIR=$PWD/target/debug
   python3 examples/vehicle_push.py ws://127.0.0.1:9800/ws mediaservo-dev room-1 10
 """
@@ -9,7 +9,7 @@
 import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # 开发模式
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # dev mode
 
 import mediaservo
 from mediaservo.field import PushConfig, PushSession
@@ -27,21 +27,21 @@ def main() -> int:
                      width=1280, height=720, framerate=30,
                      bitrate_kbps=2000, keyframe_interval=2)
 
-    # 连接信令 + 创建会话（阻塞；失败抛 FieldError）
+    # Connect signaling and create the session (blocking; raises FieldError on failure)
     session = PushSession.connect(cfg)
     try:
-        # 发布视频轨（阻塞协商）→ track id
+        # Publish the video track (blocking negotiation) → track id
         track = session.publish_video()
         print("track: %s" % track)
 
-        # 启动视频帧生成（Squares + 时间戳水印）
+        # Start video frame generation (squares + timestamp watermark)
         session.start_video_frames()
         print("pushing for %.1fs ..." % seconds)
         time.sleep(seconds)
 
-        session.stop_video_frames()  # 幂等
+        session.stop_video_frames()  # idempotent
     finally:
-        session.close()  # 显式关闭（__del__ 兜底，但显式 close 优先）
+        session.close()  # explicit close (__del__ is the safety net, but prefer explicit close)
     return 0
 
 

@@ -1,19 +1,20 @@
-//! host-controller: 控制进程（Task F1 → S1 SFU-DC 迁移）— 控制通道走 SFU SCTP。
+//! host-controller: control process (Task F1 → S1 SFU-DC migration) — control channels over SFU SCTP.
 //!
-//! 用法: `host-controller [--gateway <本地网关 ws url>] [--token <FrameBus 令牌>]`
-//! （缺省 `ws://127.0.0.1:17980/ws`，D2 本地网关）。
+//! Usage: `host-controller [--gateway <local gateway ws url>] [--token <FrameBus token>]`
+//! (default `ws://127.0.0.1:17980/ws`, D2 local gateway).
 //!
-//! 流程（S1 起，替代旧 P2P offer/answer 死路——all-SFU 决策后注册房间的 Sdp/ICE
-//! 一律被 server 帧过滤丢弃，永等不到舱端 answer）: SignalClient 经本地网关
-//! （信封 wire 无 PSK；整车 PSK 在 host-agent 远端）加入本地房间 `control`（网关
-//! 拦截并重写为整车房间）→ [`mediaservo_host::controller::control_loop`]：
-//! Send transport + create_data_channel × labels（chassis/gimbal/light/ack，
-//! D-H3 可靠性语义）+ CreateDataProducer announce → Recv transport +
-//! NewDataProducer→ConsumeData → 收令 parse_envelope → Actuator → ControlAck
-//! （ack DC 主路 + 同通道回声）→ 旁路镜像 FrameBus control/cmd、control/ack。
+//! Flow (since S1, replacing the old P2P offer/answer dead end — after the all-SFU decision,
+//! Sdp/ICE of registered rooms is dropped by the server frame filter, so the cockpit answer never
+//! arrives): SignalClient joins local room `control` via the local gateway (envelope wire, no PSK;
+//! the vehicle PSK lives at the remote host-agent; the gateway intercepts and rewrites to the
+//! vehicle room) → [`mediaservo_host::controller::control_loop`]: Send transport +
+//! create_data_channel × labels (chassis/gimbal/light/ack, D-H3 reliability semantics) +
+//! CreateDataProducer announce → Recv transport + NewDataProducer→ConsumeData → parse_envelope on
+//! receipt → Actuator → ControlAck (ack DC main path + same-channel echo) → sidecar mirror to
+//! FrameBus control/cmd, control/ack.
 //!
-//! 失败语义（C15 + PIT-87 自愈惯例）：信令断开 / ICE Failed / 建立失败 →
-//! 打日志退出 1，部署侧 restart_policy=always 拉起。
+//! Failure semantics (C15 + PIT-87 self-heal convention): signaling disconnect / ICE Failed /
+//! setup failure → log and exit 1; deployment-side restart_policy=always relaunches.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -21,24 +22,26 @@ use std::sync::Arc;
 
 use mediaservo_common::protocol::PeerRole;
 use mediaservo_host::control::{Actuator, StubActuator};
-use mediaservo_host::controller::{CommandPolicy as ControllerPolicy, ControllerConfig, control_loop};
+use mediaservo_host::controller::{
+    CommandPolicy as ControllerPolicy, ControllerConfig, control_loop,
+};
 use mediaservo_link::{FrameBus, SignalClient, TokenFile};
 
-/// 本地房间名（网关拦截并重写为整车房间；子进程本地房间仅作下行改写目标）。
+/// Local room name (gateway intercepts and rewrites to the vehicle room; the child's local room is only the downlink rewrite target).
 const ROOM: &str = "control";
-/// 本地信封 src（网关子进程标识）。
+/// Local envelope src (identifies the gateway child process).
 const SRC: &str = "host-controller";
 
-const USAGE: &str = "用法: host-controller [--gateway <本地网关 ws url>] [--token <FrameBus 令牌路径>] \
-    [--hmac-key-file <急停验签密钥文件>]";
+const USAGE: &str = "Usage: host-controller [--gateway <local gateway ws url>] [--token <FrameBus token path>] \
+    [--hmac-key-file <e-stop signing key file>]";
 
 #[derive(Debug, Default)]
 struct Args {
     gateway: Option<String>,
-    /// FrameBus 令牌（可选镜像面：缺省/失败仅关总线旁路，不影响执行）。
+    /// FrameBus token (optional mirror surface: absent/failing only closes the bus sidecar, never affects execution).
     token: Option<PathBuf>,
-    /// 急停 HMAC 验签密钥文件（V5：[control].hmac_key_file 渲染透传；
-    /// 显式 > env MEDIASERVO_CONTROL_HMAC_KEY_FILE；读败 = 早退非静默降级）。
+    /// Emergency-stop HMAC verification key file (V5: rendered from [control].hmac_key_file;
+    /// explicit > env MEDIASERVO_CONTROL_HMAC_KEY_FILE; read failure = early exit, no silent downgrade).
     hmac_key_file: Option<PathBuf>,
 }
 
@@ -46,42 +49,46 @@ fn parse_args() -> Result<Args, String> {
     args_from(std::env::args().skip(1))
 }
 
-/// 纯参数解析（可单测）：`--gateway <url>` / `--token <path>`；缺省本地网关（D2）。
+/// Pure arg parsing (unit-testable): `--gateway <url>` / `--token <path>`; defaults to the local gateway (D2).
 fn args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut args = args.peekable();
     let mut out = Args::default();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--gateway" => out.gateway = Some(args.next().ok_or("--gateway 缺值")?),
-            "--token" => out.token = Some(PathBuf::from(args.next().ok_or("--token 缺值")?)),
+            "--gateway" => out.gateway = Some(args.next().ok_or("--gateway missing value")?),
+            "--token" => {
+                out.token = Some(PathBuf::from(args.next().ok_or("--token missing value")?))
+            }
             "--hmac-key-file" => {
                 out.hmac_key_file =
-                    Some(PathBuf::from(args.next().ok_or("--hmac-key-file 缺值")?))
+                    Some(PathBuf::from(args.next().ok_or("--hmac-key-file missing value")?))
             }
-            _ => return Err(format!("未知参数: {arg}\n{USAGE}")),
+            _ => return Err(format!("unknown arg: {arg}\n{USAGE}")),
         }
     }
     Ok(out)
 }
 
-/// 令牌 → FrameBus attach（命令/回执镜像面）。任何失败仅 warn——总线是旁路，
-/// 永不阻塞控制执行（deploy 面令牌签发为增强项，缺令牌 = 纯 DC 链路照常）。
+/// Token → FrameBus attach (command/ack mirror surface). Any failure only warns — the bus is a
+/// sidecar and never blocks control execution (token issuance on the deploy side is additive;
+/// no token = the pure DC path works as usual).
 fn attach_bus(token: Option<&PathBuf>) -> Option<Arc<FrameBus>> {
     let Some(path) = token else {
-        tracing::info!("未提供 --token — FrameBus 镜像面关闭（控制链路不受影响）");
+        tracing::info!("no --token — FrameBus mirror surface off (control path unaffected)");
         return None;
     };
     let bus = (|| -> Result<FrameBus, String> {
-        let bytes = std::fs::read(path).map_err(|e| format!("读取令牌 {} 失败: {e}", path.display()))?;
-        let (verifying_key, cap) =
-            TokenFile::decode(&bytes).map_err(|e| format!("令牌 {} 无效: {e}", path.display()))?;
+        let bytes = std::fs::read(path)
+            .map_err(|e| format!("read token {} failed: {e}", path.display()))?;
+        let (verifying_key, cap) = TokenFile::decode(&bytes)
+            .map_err(|e| format!("token {} invalid: {e}", path.display()))?;
         FrameBus::attach("", &cap, &verifying_key)
-            .map_err(|e| format!("FrameBus attach 失败: {e}"))
+            .map_err(|e| format!("FrameBus attach failed: {e}"))
     })();
     match bus {
         Ok(b) => Some(Arc::new(b)),
         Err(e) => {
-            tracing::warn!("{e} — FrameBus 镜像面关闭（控制链路不受影响）");
+            tracing::warn!("{e} — FrameBus mirror surface off (control path unaffected)");
             None
         }
     }
@@ -97,14 +104,13 @@ async fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let gateway = args
-        .gateway
-        .unwrap_or_else(|| "ws://127.0.0.1:17980/ws".to_string());
+    let gateway = args.gateway.unwrap_or_else(|| "ws://127.0.0.1:17980/ws".to_string());
 
-    // 信令：经本地网关（D2 信封 wire；网关拦截 RoomJoin 合成 RoomJoined）
-    // S4′(刀2): 冷启动竞态——agent 上游 WS 未连上 server 时 join 回 5001
-    //（gateway 本地秒起不背锅）。指数退避重试覆盖 server 簇拉起窗（S1 挂账小刀，
-    // 此前形态 = 5001×N 即触 oxmgr 熔断）。耗尽仍败 → exit 1 交 restart_policy 兜底。
+    // Signaling: via local gateway (D2 envelope wire; gateway intercepts RoomJoin and synthesizes RoomJoined)
+    // S4′(knife 2): cold-start race — while the agent uplink WS has not reached the server, join
+    // returns 5001 (the local gateway starts in seconds and is not at fault). Exponential-backoff
+    // retry covers the server-cluster startup window (S1 booked knife; the old form = 5001×N
+    // tripping the oxmgr breaker). Retries exhausted → exit 1, leave it to restart_policy.
     let retry = mediaservo_link::RetryConfig {
         max_retries: 12,
         base_delay: std::time::Duration::from_secs(1),
@@ -116,23 +122,27 @@ async fn main() -> ExitCode {
     {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("controller: 信令连接失败（重试耗尽）: {e}");
+            eprintln!("controller: signaling connect failed (retries exhausted): {e}");
             return ExitCode::from(1);
         }
     };
-    tracing::info!(room = %signal.room_id(), "controller 已加入本地房间");
+    tracing::info!(room = %signal.room_id(), "controller joined local room");
 
     let bus = attach_bus(args.token.as_ref());
     let actuator: Arc<dyn Actuator> = Arc::new(StubActuator);
-    // S4/a4·T3.5：e-stop 验签策略（env 驱动，车舱同值 key = 部署配置面）。
-    // V5：--hmac-key-file 显式形（host.yaml [control] 渲染透传）优先于 env；
-    // 密钥读败 = 安全功能拒绝静默降级——error+exit 1 交 restart_policy（同 env 纪律）。
+    // S4/a4·T3.5: e-stop verification policy (env-driven; vehicle and cockpit share the same key = deployment config surface).
+    // V5: the explicit --hmac-key-file form (rendered from host.yaml [control]) wins over env;
+    // key read failure = the security feature refuses silent downgrade — error + exit 1 to
+    // restart_policy (same env discipline).
     let mut policy = ControllerPolicy::from_env();
     if let Some(f) = &args.hmac_key_file {
         match mediaservo_common::protocol::control_hmac_key_from_file(&f.to_string_lossy()) {
             Ok(k) => policy.hmac_key = Some(k),
             Err(e) => {
-                tracing::error!("--hmac-key-file {} 加载失败: {e}——急停验签不可静默降级", f.display());
+                tracing::error!(
+                    "--hmac-key-file {} load failed: {e} — e-stop verification must not silently degrade",
+                    f.display()
+                );
                 return ExitCode::from(1);
             }
         }
@@ -147,18 +157,16 @@ mod tests {
 
     #[test]
     fn gateway_from_override_wins() {
-        let gw = args_from(
-            vec!["--gateway".into(), "ws://127.0.0.1:18888/ws".into()].into_iter(),
-        )
-        .unwrap()
-        .gateway
-        .unwrap();
+        let gw = args_from(vec!["--gateway".into(), "ws://127.0.0.1:18888/ws".into()].into_iter())
+            .unwrap()
+            .gateway
+            .unwrap();
         assert_eq!(gw, "ws://127.0.0.1:18888/ws");
     }
 
     #[test]
     fn gateway_from_defaults_to_local_gateway() {
-        // 无参数 → 缺省本地网关（D2）；token 缺省 None
+        // no args → default local gateway (D2); token defaults to None
         let args = args_from(vec![].into_iter()).unwrap();
         assert_eq!(
             args.gateway.unwrap_or_else(|| "ws://127.0.0.1:17980/ws".to_string()),

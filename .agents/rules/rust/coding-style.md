@@ -150,11 +150,11 @@ src/
 
 See skill: `rust-patterns` for comprehensive Rust idioms and patterns.
 
-## 可执行检查
+## Executable Checks
 
 ```bash
-# 验证：无 unwrap 滥用
+# Verify: no unwrap abuse
 grep -rn "unwrap()" --include="*.rs" crates/ | grep -v "test" | grep -v "// OK" | head -5
-# 验证：clippy 通过
+# Verify: clippy passes
 cargo clippy --workspace -- -D warnings
 ```

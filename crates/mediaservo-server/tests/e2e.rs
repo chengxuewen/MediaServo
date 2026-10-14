@@ -229,10 +229,7 @@ fn protocol_roundtrip_room_joined() {
 
 #[test]
 fn protocol_roundtrip_room_leave() {
-    let msg = SignalingMessage::RoomLeave {
-        room_id: "room-x".into(),
-        peer_id: "peer-abc".into(),
-    };
+    let msg = SignalingMessage::RoomLeave { room_id: "room-x".into(), peer_id: "peer-abc".into() };
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"room_leave""#));
     let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
@@ -255,11 +252,7 @@ fn protocol_roundtrip_sdp() {
     let json = serde_json::to_string(&msg).unwrap();
     let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
     match parsed {
-        SignalingMessage::Sdp {
-            room_id,
-            target,
-            sdp,
-        } => {
+        SignalingMessage::Sdp { room_id, target, sdp } => {
             assert_eq!(room_id, "room-2");
             assert_eq!(target.as_deref(), Some("peer-1"));
             assert!(sdp.starts_with("v=0"));
@@ -280,11 +273,7 @@ fn protocol_roundtrip_ice_candidate() {
     let json = serde_json::to_string(&msg).unwrap();
     let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
     match parsed {
-        SignalingMessage::RTCIceCandidate {
-            sdp_mid,
-            sdp_mline_index,
-            ..
-        } => {
+        SignalingMessage::RTCIceCandidate { sdp_mid, sdp_mline_index, .. } => {
             assert_eq!(sdp_mid.as_deref(), Some("0"));
             assert_eq!(sdp_mline_index, Some(0));
         }
@@ -294,10 +283,7 @@ fn protocol_roundtrip_ice_candidate() {
 
 #[test]
 fn protocol_roundtrip_error() {
-    let msg = SignalingMessage::Error {
-        code: 4003,
-        message: "PSK authentication failed".into(),
-    };
+    let msg = SignalingMessage::Error { code: 4003, message: "PSK authentication failed".into() };
     let json = serde_json::to_string(&msg).unwrap();
     let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
     match parsed {
@@ -337,10 +323,7 @@ async fn auth_verify_denied_wrong_key() {
     let challenge = b"server-challenge";
     let forged_sig = attacker.sign(challenge);
 
-    let result = correct
-        .verify_challenge(challenge, &forged_sig)
-        .await
-        .unwrap();
+    let result = correct.verify_challenge(challenge, &forged_sig).await.unwrap();
     assert_eq!(result, AuthResult::Denied);
 }
 
@@ -367,8 +350,7 @@ fn room_manager_join_and_leave() {
     assert_eq!(rm.get_peer_count(), 1);
 
     // Remote joins same room
-    rm.join_room("room-1", "remote-1", &PeerRole::Remote)
-        .unwrap();
+    rm.join_room("room-1", "remote-1", &PeerRole::Remote).unwrap();
     assert_eq!(rm.active_rooms(), 1);
     assert_eq!(rm.get_peer_count(), 2);
 
@@ -377,7 +359,7 @@ fn room_manager_join_and_leave() {
     assert!(result.is_err());
     assert_eq!(rm.get_peer_count(), 2); // unchanged
 
-    // 全 SFU（2026-08-25）: 多 Remote（舱端 consumer）可共存——无 P2P single-slot
+    // All-SFU (2026-08-25): multiple Remotes (cockpit consumers) can coexist -- no P2P single slot
     rm.join_room("room-1", "remote-2", &PeerRole::Remote).unwrap();
     assert_eq!(rm.get_peer_count(), 3);
 
@@ -420,10 +402,7 @@ async fn e2e_server_health_endpoint() {
     use mediaservo_server::tokio::net::TcpListener;
     use mediaservo_server::tokio::net::TcpStream;
 
-    let app = Router::new().route(
-        "/health",
-        get(|| async { "OK" }),
-    );
+    let app = Router::new().route("/health", get(|| async { "OK" }));
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -437,9 +416,7 @@ async fn e2e_server_health_endpoint() {
 
     let mut stream = TcpStream::connect(addr).await.unwrap();
     stream
-        .write_all(
-            b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
-        )
+        .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         .await
         .unwrap();
 
@@ -447,16 +424,8 @@ async fn e2e_server_health_endpoint() {
     stream.read_to_end(&mut buf).await.unwrap();
     let response = String::from_utf8_lossy(&buf);
 
-    assert!(
-        response.contains("200 OK"),
-        "expected 200 OK, got:\n{}",
-        response
-    );
-    assert!(
-        response.contains("OK"),
-        "expected body 'OK', got:\n{}",
-        response
-    );
+    assert!(response.contains("200 OK"), "expected 200 OK, got:\n{}", response);
+    assert!(response.contains("OK"), "expected body 'OK', got:\n{}", response);
 }
 
 #[tokio::test]
@@ -474,7 +443,8 @@ async fn e2e_monitor_router_health_endpoint() {
                 mediaservo_server::sfu::random_udp_port(),
             )
             .await
-            .unwrap());
+            .unwrap(),
+        );
         SignalingServer::new(sfu, 65536, None)
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
@@ -492,9 +462,7 @@ async fn e2e_monitor_router_health_endpoint() {
 
     let mut stream = TcpStream::connect(addr).await.unwrap();
     stream
-        .write_all(
-            b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
-        )
+        .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         .await
         .unwrap();
 
@@ -521,7 +489,8 @@ async fn e2e_monitor_router_stats_endpoint() {
                 mediaservo_server::sfu::random_udp_port(),
             )
             .await
-            .unwrap());
+            .unwrap(),
+        );
         SignalingServer::new(sfu, 65536, None)
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
@@ -539,9 +508,7 @@ async fn e2e_monitor_router_stats_endpoint() {
 
     let mut stream = TcpStream::connect(addr).await.unwrap();
     stream
-        .write_all(
-            b"GET /stats HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
-        )
+        .write_all(b"GET /stats HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         .await
         .unwrap();
 
@@ -555,16 +522,8 @@ async fn e2e_monitor_router_stats_endpoint() {
         "stats should contain 'active_rooms', got:\n{}",
         response
     );
-    assert!(
-        response.contains("connected_peers"),
-        "got:\n{}",
-        response
-    );
-    assert!(
-        response.contains("uptime_seconds"),
-        "got:\n{}",
-        response
-    );
+    assert!(response.contains("connected_peers"), "got:\n{}", response);
+    assert!(response.contains("uptime_seconds"), "got:\n{}", response);
 }
 
 #[tokio::test]
@@ -582,7 +541,8 @@ async fn e2e_monitor_router_metrics_endpoint() {
                 mediaservo_server::sfu::random_udp_port(),
             )
             .await
-            .unwrap());
+            .unwrap(),
+        );
         SignalingServer::new(sfu, 65536, None)
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
@@ -600,9 +560,7 @@ async fn e2e_monitor_router_metrics_endpoint() {
 
     let mut stream = TcpStream::connect(addr).await.unwrap();
     stream
-        .write_all(
-            b"GET /metrics HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
-        )
+        .write_all(b"GET /metrics HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         .await
         .unwrap();
 

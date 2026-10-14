@@ -1,7 +1,7 @@
-//! T8 场景引擎集成测试：NoopExec（零 tc/docker 触达）串起 run_full 全链——
-//! 事件序列逐字面钉（bash do_scenario timeline_note 口径）、drift 列、job 进度、
-//! abort/stop/陈旧恢复三面，并把 clean/aborted 两份 timeline 工件落 CARGO_TARGET_TMPDIR
-//! 供 tests/scenario_judge_contract.py（judge.py 消费合同）二次消费。
+//! T8 scenario engine integration tests: NoopExec (zero tc/docker touching) chains the run_full full path --
+//! event sequence pinned verbatim (bash do_scenario timeline_note conventions), drift columns, job progress,
+//! the abort/stop/stale-recovery three surfaces, and lands clean/aborted timeline artifacts in CARGO_TARGET_TMPDIR
+//! for tests/scenario_judge_contract.py (the judge.py consumption contract) to re-consume.
 
 use std::sync::{Arc, Mutex};
 
@@ -10,9 +10,9 @@ use mediaservo_weaknet::fuse;
 use mediaservo_weaknet::scenario::{self, PlanLine, RunSpec, StepExec};
 use mediaservo_weaknet::scope::Targeting;
 use mediaservo_weaknet::spec::{ImpairSpec, ScopeSel};
-use mediaservo_weaknet::state::{self, ChannelSer, Dirs, JobRef, State, STATE_SCHEMA, Teardown};
+use mediaservo_weaknet::state::{self, ChannelSer, Dirs, JobRef, STATE_SCHEMA, State, Teardown};
 
-// ---------- Noop StepExec（镜像 EngineExec 的落盘/事件形，零特权触达） ----------
+// ---------- Noop StepExec (mirrors EngineExec's persistence/event shapes, zero privileged touching) ----------
 
 #[derive(Default)]
 struct Recorder {
@@ -50,23 +50,14 @@ fn write_state(dirs: &Dirs, req: &ApplyRequest, job: Option<JobRef>, expires_at_
         ifb_used: false,
         created_ifb: false,
         job,
-        teardown: Teardown {
-            channel: ChannelSer::LocalRoot,
-            sidecar: None,
-            steps: vec![],
-        },
+        teardown: Teardown { channel: ChannelSer::LocalRoot, sidecar: None, steps: vec![] },
     };
     st.write_to(&dirs.state_json()).unwrap();
 }
 
 impl StepExec for NoopExec {
     fn apply(&self, req: &ApplyRequest, duration_secs: u64) -> Wn<()> {
-        write_state(
-            &self.dirs,
-            req,
-            None,
-            fuse::now_epoch_ms() + duration_secs * 1000,
-        );
+        write_state(&self.dirs, req, None, fuse::now_epoch_ms() + duration_secs * 1000);
         state::timeline_append(
             &self.dirs,
             state::apply_event(&req.spec, &req.ports, &stream_sel(req)),
@@ -79,8 +70,7 @@ impl StepExec for NoopExec {
         let after = state::param_summary(&req.spec);
         {
             let mut r = self.rec.lock().unwrap();
-            r.set_jobs_done
-                .push(prior.job.as_ref().map_or(u32::MAX, |j| j.done));
+            r.set_jobs_done.push(prior.job.as_ref().map_or(u32::MAX, |j| j.done));
         }
         write_state(&self.dirs, req, prior.job.clone(), prior.expires_at_ms);
         state::timeline_append(
@@ -91,19 +81,20 @@ impl StepExec for NoopExec {
                 "after": after,
                 "counters": "ok",
             }),
-        ).map_err(Fail::env)
+        )
+        .map_err(Fail::env)
     }
     fn clear(&self) -> Wn<()> {
         if let Err(e) = std::fs::remove_file(self.dirs.state_json())
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            return Err(Fail::env(format!("rm state 失败: {e}")));
+            return Err(Fail::env(format!("failed to rm state: {e}")));
         }
         state::timeline_append(&self.dirs, serde_json::json!({"ev": "clear"})).map_err(Fail::env)
     }
 }
 
-// ---------- 脚手架 ----------
+// ---------- scaffold ----------
 
 fn dirs_for(tag: &str) -> Dirs {
     let d = std::env::temp_dir().join(format!("wnet-sceneng-{}-{tag}", std::process::id()));
@@ -111,16 +102,10 @@ fn dirs_for(tag: &str) -> Dirs {
     Dirs { statedir: d }
 }
 
-/// (exec 门面, 记录器)——exec 以 Arc<dyn> 形直交，免调用方散落 cast。
+/// (exec facade, recorder) -- exec handed over as Arc<dyn>, sparing callers scattered casts.
 fn noop(dirs: &Dirs) -> (Arc<dyn StepExec>, Arc<Mutex<Recorder>>) {
     let rec = Arc::new(Mutex::new(Recorder::default()));
-    (
-        Arc::new(NoopExec {
-            dirs: dirs.clone(),
-            rec: rec.clone(),
-        }),
-        rec,
-    )
+    (Arc::new(NoopExec { dirs: dirs.clone(), rec: rec.clone() }), rec)
 }
 
 fn rs(name: &str, yaml: &str, keep: bool) -> RunSpec {
@@ -138,23 +123,17 @@ fn rs(name: &str, yaml: &str, keep: bool) -> RunSpec {
         },
         iface: "lo".into(),
         sig_port: None,
-        recovery_dwell_secs: Some(0), // 测试缩形（生产=None→25s bash 真值）
+        recovery_dwell_secs: Some(0), // test-shrunk form (production None -> the 25s bash truth)
     }
 }
 
 fn timeline_events(dirs: &Dirs) -> Vec<serde_json::Value> {
     let raw = std::fs::read_to_string(dirs.timeline()).unwrap();
-    raw.lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect()
+    raw.lines().filter(|l| !l.trim().is_empty()).map(|l| serde_json::from_str(l).unwrap()).collect()
 }
 
 fn ev_seq(dirs: &Dirs) -> Vec<String> {
-    timeline_events(dirs)
-        .iter()
-        .map(|e| e["ev"].as_str().unwrap().to_string())
-        .collect()
+    timeline_events(dirs).iter().map(|e| e["ev"].as_str().unwrap().to_string()).collect()
 }
 
 fn own_job(name: &str, alive: bool) -> JobRef {
@@ -185,17 +164,17 @@ fn artifact_path(name: &str) -> std::path::PathBuf {
 
 const CLEAN_YAML: &str = "scenario:\n  baseline_s: 1\n  steps:\n    - at_s: 1\n      set: {rtt_ms: 80, loss: \"5%\"}\n    - at_s: 2\n      set: {rtt_ms: 0, jitter_ms: 0, loss: \"0%\"}\n";
 
-// ---------- A：完整干净跑——事件序列逐字面 + drift + 恢复步 after + job 进度 ----------
+// ---------- A: full clean run -- event sequence verbatim + drift + the recovery step's after + job progress ----------
 
 #[tokio::test]
 async fn clean_run_exact_event_sequence_and_job_progression() {
     let dirs = dirs_for("clean");
     let (exec, rec) = noop(&dirs);
     let out = scenario::run_full(rs("clean", CLEAN_YAML, false), exec, dirs.clone()).await;
-    assert_eq!(out.aborted, None, "干净跑不该 abort: {:?}", out.aborted);
+    assert_eq!(out.aborted, None, "a clean run must not abort: {:?}", out.aborted);
     assert_eq!(out.exit_code, 0);
 
-    // 事件精确序（bash do_scenario 口径：apply→scenario-start→baseline-done→(set,step)×2→clear）
+    // exact event order (bash do_scenario convention: apply -> scenario-start -> baseline-done -> (set,step)x2 -> clear)
     assert_eq!(
         ev_seq(&dirs),
         vec![
@@ -213,47 +192,47 @@ async fn clean_run_exact_event_sequence_and_job_progression() {
     let tl = timeline_events(&dirs);
     let by = |ev: &str| tl.iter().find(|e| e["ev"] == ev).unwrap().clone();
 
-    // scenario-start note = bash L571 形：`<file> baseline=Ns steps_dur=Ns`（total=max(at+15)=17）
+    // the scenario-start note = the bash L571 form: `<file> baseline=Ns steps_dur=Ns` (total=max(at+15)=17)
     assert_eq!(
         by("scenario-start")["note"].as_str().unwrap(),
         "clean.yaml baseline=1s steps_dur=17s"
     );
     assert_eq!(by("baseline-done")["note"], "window_s=1");
-    // drift 列必在且=1（轮询粒度下容差内）
+    // the drift column must be present and =1 (within tolerance at this polling granularity)
     let steps: Vec<_> = tl.iter().filter(|e| e["ev"] == "scenario-step").collect();
     assert_eq!(steps.len(), 2);
     assert!(steps[0]["note"].as_str().unwrap().starts_with("at_s=1 actual_s="));
     assert!(steps[0]["note"].as_str().unwrap().ends_with("drift_le_1s=1"));
     assert!(steps[1]["note"].as_str().unwrap().starts_with("at_s=2 actual_s="));
     assert!(steps[1]["note"].as_str().unwrap().ends_with("drift_le_1s=1"));
-    // 恢复（清零）步：set.after 前缀 rtt=0ms ∧ 含 loss=0%（judge.py:71 判据的消费面）
+    // the recovery (zeroing) step: set.after prefix rtt=0ms AND contains loss=0% (the consumption surface of the judge.py:71 predicate)
     let sets: Vec<_> = tl.iter().filter(|e| e["ev"] == "set").collect();
     let after0 = sets[0]["after"].as_str().unwrap();
     let after1 = sets[1]["after"].as_str().unwrap();
     assert!(after0.starts_with("rtt=80ms") && after0.contains("loss=5%"), "{after0}");
     assert!(
         after1.starts_with("rtt=0ms") && after1.contains("loss=0%"),
-        "恢复步 after 需满足 judge 白名单判据: {after1}"
+        "the recovery step's after must satisfy the judge whitelist predicate: {after1}"
     );
-    // scenario-end elapsed_s 列在位
+    // the scenario-end elapsed_s column in place
     let end = by("scenario-end");
     assert!(end["note"].as_str().unwrap().starts_with("elapsed_s="));
-    assert!(end.get("aborted").is_none(), "干净跑 scenario-end 不得带 aborted");
+    assert!(end.get("aborted").is_none(), "a clean run's scenario-end must not carry aborted");
 
-    // job 进度经 prior 流入落盘：done 依次 1,2（step_sync 先置 done 再 exec.set）
+    // job progress flows in through prior and lands on disk: done 1,2 in order (step_sync sets done before exec.set)
     assert_eq!(rec.lock().unwrap().set_jobs_done, vec![1, 2]);
     assert_eq!(rec.lock().unwrap().applies, 1);
-    // 收尾：state 随现场清除；timeline 保留；aborted 集空
+    // wrap-up: state cleared with the site; timeline kept; the aborted set empty
     assert!(!dirs.state_json().exists());
     assert_eq!(scenario::aborted_in_timeline(&dirs).unwrap(), Vec::<String>::new());
 
-    // judge 合同工件（供 tests/scenario_judge_contract.py 消费）
+    // judge contract artifacts (consumed by tests/scenario_judge_contract.py)
     std::fs::copy(dirs.timeline(), artifact_path("scenario_clean_timeline.jsonl")).unwrap();
     std::fs::write(artifact_path("abort_clean.txt"), "none\n").unwrap();
     std::fs::remove_dir_all(&dirs.statedir).ok();
 }
 
-// ---------- B：keep 形——不清场 + 收尾摘 job（serve 长驻进程防自锁）+ names 回声 ----------
+// ---------- B: the keep form -- no cleanup + finish-time job removal (long-lived serve anti-self-lock) + names echo ----------
 
 #[tokio::test]
 async fn keep_run_clears_job_but_preserves_site() {
@@ -268,22 +247,26 @@ async fn keep_run_clears_job_but_preserves_site() {
     };
     let out = scenario::run_full(spec_rs, exec, dirs.clone()).await;
     assert_eq!(out.aborted, None);
-    // keep → 无 clear 事件、现场保留
+    // keep -> no clear event, site kept
     let seq = ev_seq(&dirs);
-    assert!(!seq.contains(&"clear".to_string()), "keep 形不得清场: {seq:?}");
+    assert!(!seq.contains(&"clear".to_string()), "the keep form must not clean the site: {seq:?}");
     let st = State::read_from(&dirs.state_json()).unwrap().unwrap();
-    // 收尾兜底摘 job（否则 serve 属主=存活进程 → 自锁死后续 apply/set）
-    assert!(st.job.is_none(), "scenario 完成后 job 旗必摘: {:?}", st.job);
-    // E2 ledger：names 入 state（面板回显真值源）
+    // finish-time fallback removes the job (otherwise the serve owner = a live process -> self-locks all later apply/set)
+    assert!(
+        st.job.is_none(),
+        "the job flag must be removed after the scenario completes: {:?}",
+        st.job
+    );
+    // E2 ledger: names into state (the panel echo truth source)
     assert_eq!(st.rooms, vec!["room-x".to_string()]);
-    // E1 ledger：apply 事件 stream 键 = 名字并集（bash STREAM_SEL 同键名同口径）
+    // E1 ledger: the apply event stream key = the name union (same key and convention as bash STREAM_SEL)
     let tl = timeline_events(&dirs);
     assert_eq!(tl[0]["ev"], "apply");
     assert_eq!(tl[0]["stream"], "room-x");
     std::fs::remove_dir_all(&dirs.statedir).ok();
 }
 
-// ---------- C：lock-busy abort 形——scenario-end.aborted + 判据作废面 ----------
+// ---------- C: the lock-busy abort form -- scenario-end.aborted + the verdict-invalidation surface ----------
 
 #[tokio::test]
 async fn lock_busy_step_aborts_with_flagged_scenario_end() {
@@ -295,86 +278,67 @@ async fn lock_busy_step_aborts_with_flagged_scenario_end() {
         false,
     ));
     scenario::start_blocking(&spec_rs, &exec, &dirs).unwrap();
-    // job 初形落盘：done=0 total=行数
+    // the job's initial shape on disk: done=0 total=line count
     let j = State::read_from(&dirs.state_json()).unwrap().unwrap().job.unwrap();
     assert_eq!((j.name.as_str(), j.done, j.total), ("busy", 0, 1));
     let cur = State::read_from(&dirs.state_json()).unwrap().unwrap().spec;
-    // 外部抢锁 → 首步瞬持锁失败 → aborted:"lock-busy"
+    // external lock grab -> the first step's transient lock fails -> aborted:"lock-busy"
     let _held = engine::take_write_lock(&dirs).unwrap();
     let out = scenario::drive(spec_rs, exec, Arc::new(dirs.clone()), cur).await;
     drop(_held);
     assert_eq!(out.aborted.as_deref(), Some("lock-busy"));
-    assert_eq!(out.exit_code, 3, "lock-busy → exit3（guard 冲突族）");
+    assert_eq!(out.exit_code, 3, "lock-busy -> exit3 (the guard conflict family)");
     let tl = timeline_events(&dirs);
     let end = tl.iter().rev().find(|e| e["ev"] == "scenario-end").unwrap();
     assert_eq!(end["ev"], "scenario-end");
-    assert_eq!(end["aborted"], "lock-busy", "rev-2.2 判据作废信号字段");
+    assert_eq!(end["aborted"], "lock-busy", "the rev-2.2 verdict-invalidation signal field");
     assert!(end["note"].as_str().unwrap().starts_with("elapsed_s="));
-    assert_eq!(
-        scenario::aborted_in_timeline(&dirs).unwrap(),
-        vec!["lock-busy".to_string()]
-    );
-    // abort 收尾（非 keep）：现场清除
+    assert_eq!(scenario::aborted_in_timeline(&dirs).unwrap(), vec!["lock-busy".to_string()]);
+    // abort wrap-up (not keep): the site is cleared
     assert!(!dirs.state_json().exists());
-    // 合同工件（aborted 形）
+    // contract artifacts (the aborted form)
     std::fs::copy(dirs.timeline(), artifact_path("scenario_aborted_timeline.jsonl")).unwrap();
     std::fs::write(artifact_path("abort_aborted.txt"), "lock-busy\n").unwrap();
     std::fs::remove_dir_all(&dirs.statedir).ok();
 }
 
-// ---------- D：job 独占门——属主存活拦二次 run，零副作用 ----------
+// ---------- D: the job exclusivity gate -- a live owner blocks a second run, zero side effects ----------
 
 #[tokio::test]
 async fn alive_job_gates_scenario_start() {
     let dirs = dirs_for("gate");
     let req = media_req(ImpairSpec::default());
-    write_state(
-        &dirs,
-        &req,
-        Some(own_job("ghost-run", true)),
-        fuse::now_epoch_ms() + 300_000,
-    );
+    write_state(&dirs, &req, Some(own_job("ghost-run", true)), fuse::now_epoch_ms() + 300_000);
     let e = scenario::job_gate(&dirs).unwrap_err();
-    assert_eq!(e.code, 3, "冲突族 exit3（bash guard 同码）");
-    assert!(e.msg.contains("scenario 进行中"), "{}", e.msg);
-    // 二次 run 同样被拦（互斥 = job 旗层，不依赖锁）
+    assert_eq!(e.code, 3, "the conflict family exits 3 (bash guard same code)");
+    assert!(e.msg.contains("scenario in progress"), "{}", e.msg);
+    // a second run is blocked the same way (exclusivity = the job flag layer, independent of the lock)
     let (exec, _rec) = noop(&dirs);
     let err = scenario::start_blocking(&Arc::new(rs("second", CLEAN_YAML, false)), &exec, &dirs)
         .unwrap_err();
     assert_eq!(err.code, 3);
-    // 拦在门外 = 零事件写入（write_state 只动 state.json）
-    assert!(
-        !dirs.timeline().exists(),
-        "job_gate 拦截先于任何 timeline 写"
-    );
+    // blocked at the door = zero event writes (write_state only touches state.json)
+    assert!(!dirs.timeline().exists(), "job_gate intercepts before any timeline write");
     std::fs::remove_dir_all(&dirs.statedir).ok();
 }
 
-// ---------- E：陈旧属主恢复——判亡放行 + stop 自清旗标 ----------
+// ---------- E: stale owner recovery -- declared dead passes + stop self-clears the flag ----------
 
 #[tokio::test]
 async fn stale_job_recovery_gate_passes_and_stop_clears() {
     let dirs = dirs_for("stale");
-    let req = media_req(ImpairSpec {
-        rtt_ms: 40,
-        ..Default::default()
-    });
-    write_state(
-        &dirs,
-        &req,
-        Some(own_job("dead-run", false)),
-        fuse::now_epoch_ms() + 300_000,
-    );
-    scenario::job_gate(&dirs).expect("死主旗标不得拦");
+    let req = media_req(ImpairSpec { rtt_ms: 40, ..Default::default() });
+    write_state(&dirs, &req, Some(own_job("dead-run", false)), fuse::now_epoch_ms() + 300_000);
+    scenario::job_gate(&dirs).expect("a dead owner's flag must not block");
     let msg = scenario::stop(&dirs).unwrap();
-    assert!(msg.contains("陈旧") && msg.contains("dead-run"), "{msg}");
+    assert!(msg.contains("stale") && msg.contains("dead-run"), "{msg}");
     let st = State::read_from(&dirs.state_json()).unwrap().unwrap();
-    assert!(st.job.is_none(), "stop 落盘自清死主旗");
-    assert_eq!(st.spec.rtt_ms, 40, "清旗不动现场（spec 保留）");
+    assert!(st.job.is_none(), "stop persists and self-clears the dead owner's flag");
+    assert_eq!(st.spec.rtt_ms, 40, "clearing the flag doesn't touch the site (spec kept)");
     std::fs::remove_dir_all(&dirs.statedir).ok();
 }
 
-// ---------- F：跨进程 stop——cancel 旗标 → aborted:"user" 正常收尾 exit0 ----------
+// ---------- F: cross-process stop -- the cancel flag -> aborted:"user" normal wrap-up exit0 ----------
 
 #[tokio::test]
 async fn stop_mid_run_emits_aborted_user_and_exits_zero() {
@@ -391,70 +355,62 @@ async fn stop_mid_run_emits_aborted_user_and_exits_zero() {
     let h = tokio::spawn(scenario::drive(spec_rs, exec, dirs_arc, cur));
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     let msg = scenario::stop(&dirs).unwrap();
-    assert!(msg.contains("已请求停止"), "{msg}");
+    assert!(msg.contains("stop requested"), "{msg}");
     let out = h.await.unwrap();
     assert_eq!(out.aborted.as_deref(), Some("user"));
-    assert_eq!(out.exit_code, 0, "主动 stop = 正常收尾形（非错误族）");
+    assert_eq!(out.exit_code, 0, "an active stop = a normal wrap-up shape (not the error family)");
     let tl = timeline_events(&dirs);
     let end = tl.iter().rev().find(|e| e["ev"] == "scenario-end").unwrap();
-    assert_eq!(
-        (end["ev"].as_str(), end["aborted"].as_str()),
-        (Some("scenario-end"), Some("user"))
-    );
-    // cancel 旗标消费 + 收尾清除后现场归零
+    assert_eq!((end["ev"].as_str(), end["aborted"].as_str()), (Some("scenario-end"), Some("user")));
+    // the cancel flag consumed + post-wrap-up cleanup returns the site to zero
     assert!(!scenario::cancel_path(&dirs).exists());
     assert!(!dirs.state_json().exists());
     std::fs::remove_dir_all(&dirs.statedir).ok();
 }
 
-// ---------- G：文法 fail-closed 与 emit.py 平价面 ----------
+// ---------- G: grammar fail-closed and emit.py parity surface ----------
 
 #[test]
 fn parse_grammar_parity_with_emit() {
-    // 未知键即拒且报错含合法集全清单（fail-closed 合同）
-    let err =
-        scenario::parse_plan_yaml("scenario:\n  steps:\n    - at_s: 1\n      set: {bogus_key: 1}\n")
-            .unwrap_err();
+    // unknown keys rejected and the error lists the full legal set (the fail-closed contract)
+    let err = scenario::parse_plan_yaml(
+        "scenario:\n  steps:\n    - at_s: 1\n      set: {bogus_key: 1}\n",
+    )
+    .unwrap_err();
     assert!(
-        err.contains("未知键") && err.contains("rate_mbps") && err.contains("gemodel"),
+        err.contains("unknown keys") && err.contains("rate_mbps") && err.contains("gemodel"),
         "{err}"
     );
-    // at_s 严格递增
+    // at_s strictly increasing
     let err = scenario::parse_plan_yaml(
         "scenario:\n  steps:\n    - at_s: 2\n      set: {rtt_ms: 1}\n    - at_s: 2\n      set: {rtt_ms: 2}\n",
     )
     .unwrap_err();
-    assert!(err.contains("严格递增"), "{err}");
-    // 空计划即拒
+    assert!(err.contains("strictly increasing"), "{err}");
+    // an empty plan rejected
     assert!(scenario::parse_plan_yaml("scenario: {baseline_s: 5}").is_err());
-    // baseline 缺省 = total（末步 +15 观察尾）；at_s 浮点截断形（bash ${f2%.*}）
-    let p = scenario::parse_plan_yaml("scenario:\n  steps:\n    - at_s: 4.7\n      set: {rtt_ms: 30}\n")
-        .unwrap();
+    // baseline default = total (the last step +15 observation tail); the at_s float truncation form (bash ${f2%.*})
+    let p = scenario::parse_plan_yaml(
+        "scenario:\n  steps:\n    - at_s: 4.7\n      set: {rtt_ms: 30}\n",
+    )
+    .unwrap();
     assert_eq!((p.baseline_s, p.total_s), (19, 19));
     let PlanLine::Step { at_disp, at_secs, .. } = &p.lines[0] else {
-        panic!("单步应为 Step");
+        panic!("a single step should be Step");
     };
     assert_eq!((at_disp.as_str(), *at_secs), ("4.7", 4));
-    // repeat：off 固定零参形（emit.py:107 → judge 恢复判据生成源）
+    // repeat: the off fixed zero-param form (emit.py:107 -> the recovery-predicate generation source)
     let p = scenario::parse_plan_yaml(
         "scenario:\n  repeat: {rounds: 2, on_s: 6, off_s: 5, set: {rtt_ms: 80}}\n",
     )
     .unwrap();
-    let PlanLine::Repeat {
-        rounds,
-        on_s,
-        off_s,
-        on_flags,
-        off_flags,
-        ..
-    } = &p.lines[0]
-    else {
-        panic!("应为 Repeat");
+    let PlanLine::Repeat { rounds, on_s, off_s, on_flags, off_flags, .. } = &p.lines[0] else {
+        panic!("should be Repeat");
     };
     assert_eq!((*rounds, *on_s, *off_s), (2, 6, 5));
     assert_eq!(on_flags, "--rtt 80");
     assert_eq!(off_flags, "--rtt 0 --jitter 0 --loss 0%");
-    // clear 假值语义（python truthiness）
+    // clear falsy semantics (python truthiness)
     assert!(
         !scenario::parse_plan_yaml(
             "scenario:\n  clear: false\n  steps:\n    - at_s: 1\n      set: {rtt_ms: 10}\n"
@@ -467,39 +423,34 @@ fn parse_grammar_parity_with_emit() {
             .unwrap()
             .clear
     );
-    // 值域校验（emit.py:50-56 同规）
+    // range validation (same rules as emit.py:50-56)
     assert!(
-        scenario::parse_plan_yaml("scenario:\n  steps:\n    - at_s: 1\n      set: {loss: \"abc\"}\n")
-            .is_err()
+        scenario::parse_plan_yaml(
+            "scenario:\n  steps:\n    - at_s: 1\n      set: {loss: \"abc\"}\n"
+        )
+        .is_err()
     );
-    assert!(scenario::parse_plan_yaml(
-        "scenario:\n  steps:\n    - at_s: 1\n      set: {rate_mbps: 0}\n"
-    )
-    .is_err());
+    assert!(
+        scenario::parse_plan_yaml(
+            "scenario:\n  steps:\n    - at_s: 1\n      set: {rate_mbps: 0}\n"
+        )
+        .is_err()
+    );
 }
 
-// ---------- H：merge_step 继承语义（bash do_set：显式覆盖、缺省继承） ----------
+// ---------- H: merge_step inheritance semantics (bash do_set: explicit overrides, defaults inherited) ----------
 
 #[test]
 fn merge_step_inherits_base_like_bash_do_set() {
-    let base = ImpairSpec {
-        rtt_ms: 80,
-        jitter_ms: 15,
-        rate_mbps: Some(4.0),
-        ..Default::default()
-    };
-    // 只动 rtt：jitter/rate 继承；loss 显式覆盖
+    let base = ImpairSpec { rtt_ms: 80, jitter_ms: 15, rate_mbps: Some(4.0), ..Default::default() };
+    // only rtt touched: jitter/rate inherited; loss explicitly overridden
     let m = scenario::merge_step(
         &base,
-        &scenario::StepOverride {
-            rtt_ms: Some(0),
-            loss: Some("0%".into()),
-            ..Default::default()
-        },
+        &scenario::StepOverride { rtt_ms: Some(0), loss: Some("0%".into()), ..Default::default() },
     )
     .unwrap();
     assert_eq!((m.rtt_ms, m.jitter_ms, m.rate_mbps), (0, 15, Some(4.0)));
-    // gemodel 步缺省 loss 且基底无 loss → 报因（bash --gemodel 必伴 --loss 组合语义，C15 禁静默）
+    // a gemodel step with no loss and a loss-less base -> reports cause (bash --gemodel must pair with --loss, C15 never silent)
     let g = scenario::merge_step(
         &base,
         &scenario::StepOverride {
@@ -507,16 +458,16 @@ fn merge_step_inherits_base_like_bash_do_set() {
             ..Default::default()
         },
     );
-    assert!(g.is_err(), "基底无 loss 时 gemodel 需报因");
+    assert!(g.is_err(), "gemodel must report cause when the base has no loss");
 }
 
-// ---------- I：--auto-clear 信号层包装——旗标写入方=信号 handler 的等价形 ----------
-// run_full_auto_clear 内部 = unix_signals(SIGINT/SIGTERM) → request_stop 写与 scenario::stop
-// 属主存活分支同一 cancel 旗标文件；handler 本体是细包装（unix_signals/request_stop 两面
-// 已由 src/scenario.rs 单测钉住：真 SIGTERM 送达 + 旗标幂等写），本例验包装层整体合同：
-// 外部写旗标（模拟信号效果）→ 继续等 run_full 至检查点自终 → aborted:"user" 形
-// scenario-end + teardown（exec.clear 事件、现场归零、旗标消费）+ exit0。
-// 与 F 测的差异面：走 auto-clear 入口且 keep=false，把 abort 收尾的 clear 链跑通。
+// ---------- I: the --auto-clear signal-layer wrapper -- the flag writer = the signal handler's equivalent form ----------
+// run_full_auto_clear internally = unix_signals(SIGINT/SIGTERM) -> request_stop writing the same cancel flag file as scenario::stop's
+// owner-alive branch; the handler itself is a thin wrapper (unix_signals/request_stop both surfaces
+// already pinned by src/scenario.rs unit tests: a real SIGTERM delivered + idempotent flag writes); this case validates the wrapper's overall contract:
+// an external flag write (simulating the signal effect) -> keep waiting for run_full to self-terminate at a checkpoint -> the aborted:"user" shape
+// scenario-end + teardown (the exec.clear event, site zeroed, flag consumed) + exit0.
+// the difference vs test F: goes through the auto-clear entry with keep=false, exercising the abort wrap-up's clear chain end to end.
 
 #[tokio::test]
 async fn auto_clear_wrapper_aborts_with_teardown_like_stop() {
@@ -528,7 +479,7 @@ async fn auto_clear_wrapper_aborts_with_teardown_like_stop() {
         false,
     );
     let dirs_cl = dirs.clone();
-    // 信号效果的等价形：并发任务写 stop 旗标（handler = unix_signals→request_stop 同文件同内容）
+    // the signal effect's equivalent form: a concurrent task writes the stop flag (handler = unix_signals -> request_stop, same file and content)
     let flagger = tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         scenario::stop(&dirs_cl).unwrap();
@@ -538,16 +489,18 @@ async fn auto_clear_wrapper_aborts_with_teardown_like_stop() {
         scenario::run_full_auto_clear(spec_rs, exec, dirs.clone()),
     )
     .await
-    .expect("包装层应在检查点自终，不得挂到 60s 步窗");
+    .expect(
+        "the wrapper should self-terminate at a checkpoint, not hang until the 60s step window",
+    );
     let _ = flagger.await;
-    assert_eq!(out.aborted.as_deref(), Some("user"), "信号层形 = stop 旗标形");
-    assert_eq!(out.exit_code, 0, "主动中止=正常收尾族");
+    assert_eq!(out.aborted.as_deref(), Some("user"), "the signal-layer form = the stop-flag form");
+    assert_eq!(out.exit_code, 0, "an active abort = the normal wrap-up family");
     let tl = timeline_events(&dirs);
     let end = tl.iter().rev().find(|e| e["ev"] == "scenario-end").unwrap();
     assert_eq!(end["aborted"], "user");
     assert!(end["note"].as_str().unwrap().starts_with("elapsed_s="));
-    // teardown 走既有 abort 收口：exec.clear 事件落 timeline、现场 state 归零、旗标消费
-    assert_eq!(tl.last().unwrap()["ev"], "clear", "abort 收尾链需跑通 clear");
+    // teardown goes through the existing abort wrap-up: the exec.clear event lands in the timeline, site state zeroed, flag consumed
+    assert_eq!(tl.last().unwrap()["ev"], "clear", "the abort wrap-up chain must run clear");
     assert!(!scenario::cancel_path(&dirs).exists());
     assert!(!dirs.state_json().exists());
     std::fs::remove_dir_all(&dirs.statedir).ok();

@@ -1,14 +1,14 @@
-//! Task C3: host-recorder 进程测试 — FrameBus 订阅 → deck Recorder 落盘 MP4。
+//! Task C3: host-recorder process tests - FrameBus subscribe -> deck Recorder writes MP4.
 //!
-//! - `bad_args_exit_2_with_usage`: 缺参/坏参 → exit 2 + stderr 用法提示
-//! - `record_disabled_exits_0`: [record] enabled=false → exit 0 + stdout 消息
-//!   （进程级门控；oxfile 仍含 recorder app，运行时 gate）
-//! - `recorder_writes_mp4_from_capturer_frames`: capturer（真进程）+ recorder
-//!   （真进程）→ MP4 落盘 → ffprobe 验证 duration>0 + codec=h264 →
-//!   SIGTERM 双双优雅退出 0
+//! - `bad_args_exit_2_with_usage`: missing/bad args -> exit 2 + usage hint on stderr
+//! - `record_disabled_exits_0`: [record] enabled=false -> exit 0 + stdout message
+//!   (process-level gating; the oxfile still contains the recorder app, runtime gate)
+//! - `recorder_writes_mp4_from_capturer_frames`: capturer (real process) + recorder
+//!   (real process) -> MP4 written to disk -> ffprobe verifies duration>0 + codec=h264 ->
+//!   SIGTERM: both exit gracefully with 0
 //!
-//! 前置: 测试须在 pixi run 环境运行（ffprobe/FFmpeg 动态库来自 pixi env）;
-//! C25: 跑前清 `/tmp/iceoryx2` + `/dev/shm/iox2_*`。
+//! Prerequisite: tests must run in the pixi run environment (ffprobe/FFmpeg shared libs come from the pixi env);
+//! C25: clean `/tmp/iceoryx2` + `/dev/shm/iox2_*` before running.
 
 #![cfg(target_os = "linux")]
 
@@ -21,7 +21,7 @@ use mediaservo_link::{
     CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, NodeAcl, NodeId, Role, TokenFile,
 };
 
-// 测试用 Ed25519 密钥对（openssl 生成，仅测试用；与 link/deck/capturer/streamer 测试同源）。
+// Test Ed25519 keypair (generated with openssl, test-only; same source as link/deck/capturer/streamer tests).
 const PRIV_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIObCg8b+Le6kKOI/+pE+4+YhXUlr6X6h7q8p/MjvHmXT\n-----END PRIVATE KEY-----\n";
 const PUB_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgXprEbnahCZoZtLpiUqR0ruqtzEfRXk/Gl/6F6PEm4o=\n-----END PUBLIC KEY-----\n";
 
@@ -32,7 +32,7 @@ fn token(role: Role, node_id: &str) -> (CapabilityToken, Ed25519VerifyingKey) {
     (CapabilityToken::sign(&acl, 3600, &sk).unwrap(), vk)
 }
 
-/// C25: 清 iceoryx2 0.9.3 运行时残留（/tmp/iceoryx2 + /dev/shm/iox2_*）。
+/// C25: clean iceoryx2 0.9.3 runtime residue (/tmp/iceoryx2 + /dev/shm/iox2_*).
 fn cleanup_iceoryx() {
     let _ = std::fs::remove_dir_all("/tmp/iceoryx2");
     if let Ok(entries) = std::fs::read_dir("/dev/shm") {
@@ -47,19 +47,19 @@ fn cleanup_iceoryx() {
 #[test]
 fn bad_args_exit_2_with_usage() {
     for args in [
-        vec![],                 // 全缺
-        vec!["--config"],       // 缺值
-        vec!["--config", "x"],  // 缺 token
-        vec!["--bogus", "y"],   // 未知参数
+        vec![],                // all missing
+        vec!["--config"],      // missing value
+        vec!["--config", "x"], // missing token
+        vec!["--bogus", "y"],  // unknown arg
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_host-recorder"))
             .args(&args)
             .output()
             .expect("spawn host-recorder");
-        assert_eq!(out.status.code(), Some(2), "args {args:?} 应 exit 2");
+        assert_eq!(out.status.code(), Some(2), "args {args:?} should exit 2");
         assert!(
             !out.stderr.is_empty(),
-            "args {args:?} stderr 应有用法提示, got: {:?}",
+            "args {args:?} stderr should show usage, got: {:?}",
             String::from_utf8_lossy(&out.stderr)
         );
     }
@@ -74,7 +74,7 @@ fn record_disabled_exits_0() {
         "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\nrecord:\n  enabled: false\n",
     )
     .expect("write host.yaml");
-    // 门控先于令牌读取 — 禁用时凭据无效也应 exit 0（garbage token 验证顺序）
+    // gating precedes token reading - even with an invalid credential, disabled must exit 0 (garbage-token order check)
     let tok_path = dir.path().join("garbage.token");
     std::fs::write(&tok_path, b"garbage").expect("write token");
     let out = Command::new(env!("CARGO_BIN_EXE_host-recorder"))
@@ -86,22 +86,19 @@ fn record_disabled_exits_0() {
         ])
         .output()
         .expect("spawn host-recorder");
-    assert_eq!(out.status.code(), Some(0), "disabled 应 exit 0");
+    assert_eq!(out.status.code(), Some(0), "disabled should exit 0");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("未启用"), "应指明未启用, got: {stdout}");
+    assert!(stdout.contains("not enabled"), "should state it is not enabled, got: {stdout}");
 }
 
-/// 读取子进程日志（stdout+stderr 合并到同一文件）。
+/// Read the child process log (stdout+stderr merged into one file).
 fn read_log(file: &tempfile::NamedTempFile) -> String {
     let mut out = String::new();
-    file.reopen()
-        .expect("reopen log")
-        .read_to_string(&mut out)
-        .expect("read log");
+    file.reopen().expect("reopen log").read_to_string(&mut out).expect("read log");
     out
 }
 
-/// 轮询日志直到出现 needle（≤ timeout_secs）。
+/// Poll the log until the needle appears (<= timeout_secs).
 fn wait_for_secs(log: &tempfile::NamedTempFile, needle: &str, timeout_secs: u64) {
     for _ in 0..(timeout_secs * 2) {
         if read_log(log).contains(needle) {
@@ -109,30 +106,26 @@ fn wait_for_secs(log: &tempfile::NamedTempFile, needle: &str, timeout_secs: u64)
         }
         std::thread::sleep(Duration::from_millis(500));
     }
-    panic!("{timeout_secs}s 内未见 {needle:?}, log:\n{}", read_log(log));
+    panic!("needle {needle:?} not seen within {timeout_secs}s, log:\n{}", read_log(log));
 }
 
-/// 轮询日志直到出现 needle（≤10s）。
+/// Poll the log until the needle appears (<=10s).
 fn wait_for(log: &tempfile::NamedTempFile, needle: &str) {
     wait_for_secs(log, needle, 10);
 }
 
-/// ffprobe 单值查询（pixi run 环境 PATH 提供 ffprobe）。
+/// ffprobe single-value query (ffprobe on PATH from the pixi run environment).
 fn ffprobe(args: &[&str]) -> String {
     let out = Command::new("ffprobe")
         .args(args)
         .output()
-        .expect("spawn ffprobe（需 pixi run 环境）");
-    assert!(
-        out.status.success(),
-        "ffprobe 失败: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+        .expect("spawn ffprobe (requires the pixi run environment)");
+    assert!(out.status.success(), "ffprobe failed: {}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-/// E2E: capturer（真进程发布 camera/cam0）→ recorder（真进程订阅 + 落盘）
-/// → ffprobe 验证 MP4（duration>0 + h264）→ SIGTERM 双双优雅退出 0。
+/// E2E: capturer (real process publishing camera/cam0) -> recorder (real process subscribing + writing)
+/// -> ffprobe verifies the MP4 (duration>0 + h264) -> SIGTERM: both exit gracefully with 0.
 #[tokio::test]
 async fn recorder_writes_mp4_from_capturer_frames() {
     cleanup_iceoryx();
@@ -140,7 +133,7 @@ async fn recorder_writes_mp4_from_capturer_frames() {
     let pid = std::process::id();
     let out_dir = dir.path().join("recordings");
 
-    // host.yaml: cam0 generator 30fps + [record] enabled + 测试专用 out_dir
+    // host.yaml: cam0 generator 30fps + [record] enabled + a test-only out_dir
     let cfg_path = dir.path().join("host.yaml");
     std::fs::write(
         &cfg_path,
@@ -152,7 +145,7 @@ async fn recorder_writes_mp4_from_capturer_frames() {
     )
     .expect("write host.yaml");
 
-    // 令牌: capturer=Capture（发布 camera/*），recorder=Recorder（订阅 camera/*）
+    // tokens: capturer=Capture (publishes camera/*), recorder=Recorder (subscribes camera/*)
     let (cap_tok, cap_vk) = token(Role::Capture, &format!("capture-{pid}"));
     let cap_path = dir.path().join("cam0.token");
     std::fs::write(&cap_path, TokenFile::encode(&cap_tok, &cap_vk)).expect("write cap token");
@@ -160,7 +153,7 @@ async fn recorder_writes_mp4_from_capturer_frames() {
     let rec_path = dir.path().join("recorder.token");
     std::fs::write(&rec_path, TokenFile::encode(&rec_tok, &rec_vk)).expect("write rec token");
 
-    // capturer 进程（先起：录制首帧 gate 依赖发布端）
+    // capturer process (started first: the first-frame gate depends on the publisher)
     let cap_log = tempfile::NamedTempFile::new().expect("cap log");
     let mut capturer = Command::new(env!("CARGO_BIN_EXE_host-capturer"))
         .args([
@@ -177,7 +170,7 @@ async fn recorder_writes_mp4_from_capturer_frames() {
         .expect("spawn host-capturer");
     wait_for(&cap_log, "capturer ready");
 
-    // recorder 进程
+    // recorder process
     let rec_log = tempfile::NamedTempFile::new().expect("rec log");
     let mut recorder = Command::new(env!("CARGO_BIN_EXE_host-recorder"))
         .args([
@@ -192,36 +185,48 @@ async fn recorder_writes_mp4_from_capturer_frames() {
         .expect("spawn host-recorder");
     wait_for(&rec_log, "recorder ready");
 
-    // 录制约 2.5s → SIGTERM → flush + trailer 收尾
+    // record ~2.5s -> SIGTERM -> flush + trailer finalize
     tokio::time::sleep(Duration::from_millis(2500)).await;
     unsafe { libc::kill(recorder.id() as i32, libc::SIGTERM) };
     let st = recorder.wait().expect("wait recorder");
-    assert_eq!(st.code(), Some(0), "recorder 应优雅退出 0, got {st:?}");
+    assert_eq!(st.code(), Some(0), "recorder should exit gracefully with 0, got {st:?}");
 
-    // ffprobe 验证: duration > 0.5s + codec h264（moov 完整 = trailer 已写）
+    // ffprobe verification: duration > 0.5s + codec h264 (complete moov = trailer written)
     let mp4 = out_dir.join("cam0.mp4");
     let duration = ffprobe(&[
-        "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "csv=p=0",
         mp4.to_str().expect("mp4 utf8"),
     ]);
     let codec = ffprobe(&[
-        "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of",
-        "csv=p=0", mp4.to_str().expect("mp4 utf8"),
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=codec_name",
+        "-of",
+        "csv=p=0",
+        mp4.to_str().expect("mp4 utf8"),
     ]);
     eprintln!("[recorder_e2e] duration={duration}s codec={codec}");
     assert!(
         duration.parse::<f64>().unwrap_or(0.0) > 0.5,
-        "duration 应 > 0.5s, got: {duration}"
+        "duration should be > 0.5s, got: {duration}"
     );
-    assert_eq!(codec.trim(), "h264", "codec 应为 h264, got: {codec}");
+    assert_eq!(codec.trim(), "h264", "codec should be h264, got: {codec}");
 
-    // capturer 同样优雅退出
+    // the capturer exits gracefully as well
     unsafe { libc::kill(capturer.id() as i32, libc::SIGTERM) };
     let ct = capturer.wait().expect("wait capturer");
-    assert_eq!(ct.code(), Some(0), "capturer 应优雅退出 0, got {ct:?}");
+    assert_eq!(ct.code(), Some(0), "capturer should exit gracefully with 0, got {ct:?}");
 }
 
-/// 断言失败时 SIGKILL 子进程（防孤儿；正常路径已 wait → ESRCH 忽略）。
+/// SIGKILLs the child on assertion failure (orphan prevention; the happy path already waited -> ESRCH ignored).
 struct KillOnDrop(u32);
 impl Drop for KillOnDrop {
     fn drop(&mut self) {
@@ -229,9 +234,9 @@ impl Drop for KillOnDrop {
     }
 }
 
-/// C5 崩溃恢复契约（审查 #1 回归）: recorder 在 capturer 缺席时存活并告警
-/// （stall warning 必须 ≤20s 出现 — 修复前内层 10s timeout 被 deck pump 的
-/// 50ms 外层轮询取消 → 永不触发），capturer 后启动后录制恢复（帧流动 → MP4 有效）。
+/// C5 crash-recovery contract (review #1 regression): the recorder survives without the capturer and warns
+/// (the stall warning must appear within <=20s - before the fix the inner 10s timeout was cancelled
+/// by the deck pump's 50ms outer polling -> never fired); recording resumes once the capturer starts late (frames flow -> valid MP4).
 #[tokio::test]
 async fn recorder_survives_missing_capturer_and_resumes() {
     cleanup_iceoryx();
@@ -250,7 +255,7 @@ async fn recorder_survives_missing_capturer_and_resumes() {
     )
     .expect("write host.yaml");
 
-    // recorder 先起（capturer 缺席）
+    // recorder starts first (capturer absent)
     let (rec_tok, rec_vk) = token(Role::Recorder, &format!("recorder-{pid}"));
     let rec_path = dir.path().join("recorder.token");
     std::fs::write(&rec_path, TokenFile::encode(&rec_tok, &rec_vk)).expect("write rec token");
@@ -266,13 +271,13 @@ async fn recorder_survives_missing_capturer_and_resumes() {
         .stderr(Stdio::from(rec_log.reopen().expect("reopen rec log")))
         .spawn()
         .expect("spawn host-recorder");
-    let _kill_on_drop = KillOnDrop(recorder.id()); // panic 时不留孤儿进程
+    let _kill_on_drop = KillOnDrop(recorder.id()); // no orphan process on panic
     wait_for(&rec_log, "recorder ready");
 
-    // 无帧 stall 警告必须出现（10s 无帧 + 节流 → 约 10-11s; 给 20s 窗口）
-    wait_for_secs(&rec_log, "无帧", 20);
+    // the no-frame stall warning must appear (10s without frames + throttling -> ~10-11s; allow a 20s window)
+    wait_for_secs(&rec_log, "no frames", 20);
 
-    // capturer 后启动 → 录制恢复（帧流动 → MP4 duration>0）
+    // capturer starts late -> recording resumes (frames flow -> MP4 duration>0)
     let (cap_tok, cap_vk) = token(Role::Capture, &format!("capture-{pid}"));
     let cap_path = dir.path().join("cam0.token");
     std::fs::write(&cap_path, TokenFile::encode(&cap_tok, &cap_vk)).expect("write cap token");
@@ -295,25 +300,37 @@ async fn recorder_survives_missing_capturer_and_resumes() {
     tokio::time::sleep(Duration::from_millis(2500)).await;
     unsafe { libc::kill(recorder.id() as i32, libc::SIGTERM) };
     let st = recorder.wait().expect("wait recorder");
-    assert_eq!(st.code(), Some(0), "recorder 应优雅退出 0, got {st:?}");
+    assert_eq!(st.code(), Some(0), "recorder should exit gracefully with 0, got {st:?}");
 
     let mp4 = out_dir.join("cam0.mp4");
     let duration = ffprobe(&[
-        "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "csv=p=0",
         mp4.to_str().expect("mp4 utf8"),
     ]);
     let codec = ffprobe(&[
-        "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of",
-        "csv=p=0", mp4.to_str().expect("mp4 utf8"),
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=codec_name",
+        "-of",
+        "csv=p=0",
+        mp4.to_str().expect("mp4 utf8"),
     ]);
     eprintln!("[recorder_e2e] stall-recovery duration={duration}s codec={codec}");
     assert!(
         duration.parse::<f64>().unwrap_or(0.0) > 0.5,
-        "capturer 后启动后应恢复录制, duration got {duration}"
+        "recording should resume after the late capturer start, duration got {duration}"
     );
-    assert_eq!(codec.trim(), "h264", "codec 应为 h264, got: {codec}");
+    assert_eq!(codec.trim(), "h264", "codec should be h264, got: {codec}");
 
     unsafe { libc::kill(capturer.id() as i32, libc::SIGTERM) };
     let ct = capturer.wait().expect("wait capturer");
-    assert_eq!(ct.code(), Some(0), "capturer 应优雅退出 0, got {ct:?}");
+    assert_eq!(ct.code(), Some(0), "capturer should exit gracefully with 0, got {ct:?}");
 }

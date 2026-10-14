@@ -1,8 +1,8 @@
 #!/bin/bash
-# install.sh — MediaServo Host 裸机部署脚本 (D104 Phase 1 部署机制)
-# 用途: 边缘设备/车端（无 Docker 环境）安装 host-legacy 守护进程
-# 依赖: 先构建二进制 (cargo build -p mediaservo-host --release) 且与 host.conf/服务文件同目录
-# 注意: Phase 2 起 Docker Compose 为主要部署方式 (D110)；本脚本保留边缘部署能力
+# install.sh — MediaServo Host bare-metal deployment script (D104 Phase 1 deployment mechanism)
+# Purpose: install the host-legacy daemon on edge devices/vehicles (no Docker environment)
+# Prereq: build the binary first (cargo build -p mediaservo-host --release); keep it in the same directory as host.conf/service files
+# Note: from Phase 2 on, Docker Compose is the primary deployment path (D110); this script keeps edge-deploy capability
 set -e
 
 PREFIX="${PREFIX:-/opt/mediaservo}"
@@ -10,7 +10,7 @@ echo "Installing MediaServo Host to $PREFIX..."
 
 BIN_NAME="host-legacy"
 
-# 二进制存在性检查（防静默失败 — PIT-39 教训）
+# Binary existence check (guards against silent failure — PIT-39 lesson)
 if [ ! -f "${BIN_NAME}" ]; then
     echo "ERROR: ${BIN_NAME} not found in current directory." >&2
     echo "Build first: cargo build -p mediaservo-host --release" >&2

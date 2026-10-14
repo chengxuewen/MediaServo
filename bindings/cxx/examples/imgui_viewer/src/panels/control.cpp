@@ -1,4 +1,4 @@
-// panels/control — 实现（UI 行逐字迁居；建立块换成 sessions 调用，语义不变）。
+// panels/control — implementation (UI lines relocated verbatim; the setup block became sessions calls, semantics unchanged).
 #include "control.hpp"
 
 #include <memory>
@@ -16,7 +16,7 @@ void render_control(AppModel& m) {
     ImGui::Begin(dock::kControl);
     if (m.tiles.empty()) {
         ImGui::TextDisabled("join a room first");
-        ImGui::End();  // 早退也必须关窗（T4 补丁漏网：Begin/End 配平要数所有 return 路径——09-24 用户实跑第二次揪出）
+        ImGui::End();  // an early return must still close the window (missed by the T4 patch: Begin/End balancing requires counting every return path — caught by a user's second live run on 09-24)
         return;
     }
     std::vector<const char*> names;
@@ -24,11 +24,11 @@ void render_control(AppModel& m) {
     if (m.sel_control >= static_cast<int>(names.size())) m.sel_control = -1;
     ImGui::Combo("tile", &m.sel_control, names.data(), static_cast<int>(names.size()));
     if (m.sel_control < 0) {
-        ImGui::End();  // 同族早退二漏（grep 全面板扫出）——Begin/End 配平=每文件 return 路径逐条数
+        ImGui::End();  // a second early-return leak of the same family (found by grepping all panels) — Begin/End balancing = counting every return path per file
         return;
     }
     Tile* t = m.tiles[m.sel_control].get();
-    ensure_control(*t); // 一次性建立；失败原因进红行，重连=Rooms 页 Reconnect（旧内联块的调用化）
+    ensure_control(*t); // one-shot setup; the failure reason lands in the red line; reconnect = the Rooms page's Reconnect (the old inline block, call-ified)
     ImGui::SeparatorText(t->room.c_str());
     if (!t->err.empty()) ImGui::TextColored({1, .4f, .4f, 1}, "%s", t->err.c_str());
     ImGui::SliderFloat("steer deg", &m.steer_deg, -90.0f, 90.0f);
@@ -37,8 +37,8 @@ void render_control(AppModel& m) {
                     (std::string("{\"deg\":") + std::to_string(m.steer_deg) + "}").c_str());
     }
     ImGui::SameLine();
-    // W4b：签名急停组合面（Config.hmac_key_file 决定签名态；
-    // 未配 key = 迁移放行形；车端有 key 则拒签=正确裁决）。
+    // W4b: the signed-estop compound surface (Config.hmac_key_file decides the signing state;
+    // no key configured = the migration-allow form; a vehicle with a key refusing to sign = the correct ruling).
     if (ImGui::Button("ESTOP")) {
         auto es = t->sess.emergency_stop(*t->ctl, "chassis", 900,
                                          R"({"reason":"viewer-ui"})");

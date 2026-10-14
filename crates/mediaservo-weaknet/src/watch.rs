@@ -1,12 +1,12 @@
-//! watch.rs —— `status --watch` ANSI 一屏重绘（`top` 式；design §watch.rs 行，T12）。
+//! watch.rs -- `status --watch` ANSI single-screen redraw (`top`-style; design §watch.rs row, T12).
 //!
-//! 契约：1s tick 读 state.json + leaf 计数（engine::leaf_stats_form，经 state.teardown
-//! 重建通道——零 ensure 副作用，与 serve 状态帧同法）+ timeline 尾 5；帧内容由纯函数
-//! [`render_frame`] 产出（快照测面对象，tests/watch_frame.rs）。非纯源（通道描述、
-//! watchdog 存活、时刻）由循环侧取好后以 `sig_lines`/`now_ms` 注入。
+//! Contract: a 1s tick reads state.json + leaf counters (engine::leaf_stats_form, via the state.teardown
+//! rebuilt channel -- zero ensure side effects, same method as the serve state frame) + timeline tail 5; frame content is produced by the pure
+//! [`render_frame`] (the snapshot-test surface, tests/watch_frame.rs). Non-pure sources (channel description,
+//! watchdog liveness, time) are fetched loop-side and injected via `sig_lines`/`now_ms`.
 //!
-//! 退出语义：state 被清除（down/过期自愈）→ 末帧 + `cleared` 行 exit0；SIGINT = 默认
-//! 动作直接退出（**不**触发 clear——watch 是观测面，撤损通道只有 down/auto-clear 旗标）。
+//! Exit semantics: state cleared (down/expiry self-heal) -> final frame + a `cleared` line, exit0; SIGINT = the default
+//! action exits directly (**not** triggering clear -- watch is an observation surface; the only damage-control channels are down/the auto-clear flag).
 
 use std::io::Write;
 use std::path::Path;
@@ -17,19 +17,19 @@ use crate::fuse;
 use crate::server;
 use crate::state::{Dirs, State};
 
-/// 每 tick 秒数（bash watch 同节奏；帧内计数差分留给观测者肉眼）。
+/// Seconds per tick (same cadence as the bash watch; in-frame counter differentials are left to the observer's eye).
 const TICK: Duration = Duration::from_secs(1);
 const TIMELINE_TAIL: usize = 5;
 
 pub fn run(dirs: &Dirs, env: &Env) -> Wn<()> {
     let mut prev_lines = 0usize;
     loop {
-        // 惰性过期自愈每 tick 复检（与 do_status 同入口纪律：watch 是常驻 status 入口）。
+        // lazy-expiry self-heal re-checked every tick (same entry discipline as do_status: watch is a resident status entry).
         engine::autoheal_if_expired(dirs, env)?;
         let st = State::read_from(&dirs.state_json()).map_err(Fail::env)?;
         let (leaf, mut sig) = match &st {
             Some(s) => {
-                let mut chan = String::from("teardown 通道不可重建（state 损坏？）");
+                let mut chan = String::from("teardown channel cannot be rebuilt (corrupt state?)");
                 let mut leaf = None;
                 if let Some(c) = engine::channel_of(&s.teardown) {
                     chan = c.describe();
@@ -39,22 +39,20 @@ pub fn run(dirs: &Dirs, env: &Env) -> Wn<()> {
                             leaf = engine::leaf_stats_form(&show, rd_form);
                             if leaf.is_none() {
                                 eprintln!(
-                                    "weaknet(watch): WARN 叶计数不可读（{rd_dev} 回读无匹配叶形——qdisc 被外部改写？）"
+                                    "weaknet(watch): WARN leaf counts unreadable ({rd_dev} read-back matched no leaf form -- qdisc rewritten externally?)"
                                 );
                             }
                         }
-                        Err(e) => eprintln!("weaknet(watch): WARN tc 回读失败: {}", e.msg),
+                        Err(e) => eprintln!("weaknet(watch): WARN tc read-back failed: {}", e.msg),
                     }
                 }
-                (leaf, vec![
-                    format!("channel={chan} watchdog={}", watchdog_value(dirs)),
-                    format!(
-                        "scope={:?} dir={:?} {}",
-                        s.scope,
-                        s.dir,
-                        scope_detail(s)
-                    ),
-                ])
+                (
+                    leaf,
+                    vec![
+                        format!("channel={chan} watchdog={}", watchdog_value(dirs)),
+                        format!("scope={:?} dir={:?} {}", s.scope, s.dir, scope_detail(s)),
+                    ],
+                )
             }
             None => (None, vec![format!("watchdog={}", watchdog_value(dirs))]),
         };
@@ -70,9 +68,9 @@ pub fn run(dirs: &Dirs, env: &Env) -> Wn<()> {
     }
 }
 
-/// 纯帧渲染（快照测面对象）。`sig_lines` = 循环侧取好的非纯源（通道/watchdog/scope/
-/// timeline 尾行），`now_ms` 注入使倒计时可纯测——deviation 注记：票面签名
-/// `render_frame(state,leaf,timeline,w,sig_lines)` 无时刻参，纯函数无法算剩余秒，补第 6 参。
+/// Pure frame rendering (the snapshot-test surface). `sig_lines` = the non-pure sources fetched loop-side (channel/watchdog/scope/
+/// timeline tail); `now_ms` injected so the countdown is purely testable -- deviation note: the plan's signature
+/// `render_frame(state,leaf,timeline,w,sig_lines)` had no time param, a pure function cannot compute remaining seconds, so a 6th param was added.
 #[must_use]
 pub fn render_frame(
     st: Option<&State>,
@@ -85,7 +83,7 @@ pub fn render_frame(
     let mut out = String::new();
     match st {
         None => {
-            out.push_str("weaknet watch — 无活跃现场（inactive）\n");
+            out.push_str("weaknet watch -- no active site (inactive)\n");
         }
         Some(s) => {
             out.push_str(&format!(
@@ -103,7 +101,7 @@ pub fn render_frame(
             let bar_w = (w.saturating_sub(34)).clamp(10, 50);
             let filled = (bar_w as u128 * pct as u128 / 100) as usize;
             out.push_str(&format!(
-                "leaf sent={sent} dropped={dropped} 阶梯[{}|{}] {pct}%\n",
+                "leaf sent={sent} dropped={dropped} tiers[{}|{}] {pct}%\n",
                 "█".repeat(filled),
                 "░".repeat(bar_w - filled),
             ));
@@ -118,36 +116,29 @@ pub fn render_frame(
 
 fn countdown_text(expires_at_ms: u64, now_ms: u64) -> String {
     if expires_at_ms == 0 {
-        return "剩余 forever".into();
+        return "remaining forever".into();
     }
     if now_ms >= expires_at_ms {
-        return "已过期（惰性自愈将清）".into();
+        return "expired (lazy self-heal will clear)".into();
     }
-    format!("剩余 {}s", (expires_at_ms - now_ms) / 1000)
+    format!("remaining {}s", (expires_at_ms - now_ms) / 1000)
 }
 
-/// state 的 ports/pairs 摘要（do_status 同形措辞，单一语义源在调用方搬运）。
+/// state ports/pairs summary (same wording as do_status; the single semantic source is hauled by the caller).
 fn scope_detail(s: &State) -> String {
     if s.pairs.is_empty() {
-        format!(
-            "ports=[{}]",
-            s.ports.iter().map(u16::to_string).collect::<Vec<_>>().join(" ")
-        )
+        format!("ports=[{}]", s.ports.iter().map(u16::to_string).collect::<Vec<_>>().join(" "))
     } else {
         format!(
             "pairs=[{}]",
-            s.pairs
-                .iter()
-                .map(|(l, r)| format!("{l}:{r}"))
-                .collect::<Vec<_>>()
-                .join(" ")
+            s.pairs.iter().map(|(l, r)| format!("{l}:{r}")).collect::<Vec<_>>().join(" ")
         )
     }
 }
 
 fn timeline_tail(dirs: &Dirs, n: usize) -> Vec<String> {
     let Ok(raw) = std::fs::read_to_string(dirs.timeline()) else {
-        return vec!["timeline 不可读".to_string()];
+        return vec!["timeline unreadable".to_string()];
     };
     let lines: Vec<String> = raw.lines().map(str::to_string).collect();
     lines
@@ -156,11 +147,11 @@ fn timeline_tail(dirs: &Dirs, n: usize) -> Vec<String> {
         .take(n)
         .rev()
         .cloned()
-        .chain(std::iter::once(format!("(timeline 共 {} 行)", lines.len())))
+        .chain(std::iter::once(format!("(timeline: {} lines total)", lines.len())))
         .collect()
 }
 
-/// watchdog 存活值（自 main.rs 上提——do_status 与 --watch 共用同一判据，禁复制）。
+/// watchdog liveness value (lifted from main.rs -- do_status and --watch share one predicate, no copies).
 #[must_use]
 pub fn watchdog_value(dirs: &Dirs) -> &'static str {
     match fuse::read_pidfile(&dirs.watchdog_pid()) {
@@ -168,31 +159,24 @@ pub fn watchdog_value(dirs: &Dirs) -> &'static str {
         Ok(Some(e)) => {
             let alive = Path::new(&format!("/proc/{}", e.pid)).exists()
                 && fuse::read_proc_starttime(e.pid) == Some(e.starttime);
-            if alive {
-                "ok"
-            } else {
-                "dead（仅剩惰性自愈层）"
-            }
+            if alive { "ok" } else { "dead (only the lazy self-heal layer remains)" }
         }
         Err(e) => {
             eprintln!("weaknet: WARN {e}");
-            "协议违例"
+            "protocol violation"
         }
     }
 }
 
 fn term_width() -> usize {
-    std::env::var("COLUMNS")
-        .ok()
-        .and_then(|c| c.trim().parse::<usize>().ok())
-        .unwrap_or(100)
+    std::env::var("COLUMNS").ok().and_then(|c| c.trim().parse::<usize>().ok()).unwrap_or(100)
 }
 
 fn truncate_chars(s: &str, w: usize) -> String {
     s.chars().take(w).collect()
 }
 
-/// 单块重绘：非首帧先游标上移回块首，逐行覆写 + 行尾擦除（无 alt-screen、无全屏控制）。
+/// Single-block redraw: non-first frames move the cursor back to the block head, overwrite line by line + erase to EOL (no alt-screen, no fullscreen control).
 fn emit(frame: &str, prev_lines: usize) {
     let mut so = std::io::stdout();
     if prev_lines > 0 {

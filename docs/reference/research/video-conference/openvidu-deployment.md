@@ -1,88 +1,91 @@
-# OpenVidu 部署参考
+# OpenVidu Deployment Reference
 
-> 生成日期：2026-07-31 | 分类：视频会议部署
+> Generated: 2026-07-31 | Category: Video Conference Deployment
 
-## 1. 概述
+## 1. Overview
 
-OpenVidu 是一个开源的 WebRTC 视频会议平台，提供从信令到媒体层的完整解决方案。本文档聚焦其 Docker Compose 部署架构：12 个容器协同工作，覆盖反向代理、信令、媒体引擎（LiveKit 内嵌）、录制/推流、TURN（LiveKit 内置）、对象存储等全链路。
+OpenVidu is an open-source WebRTC video-conferencing platform offering a complete solution from signaling to the media layer. This document focuses on its Docker Compose deployment architecture: 12 cooperating containers covering the reverse proxy, signaling, media engine (embedded LiveKit), recording/streaming, TURN (built into LiveKit), and object storage across the full chain.
 
-所有镜像均来自 Docker Hub（`docker.io/openvidu/...`）。
+All images come from Docker Hub (`docker.io/openvidu/...`).
 
-### 1.1 版本与许可
+### 1.1 Versions & Licensing
 
-| 维度 | 说明 |
-|------|------|
-| 社区版 | 基于 LiveKit（Pion Go SFU）的免费部署。Apache 2.0 许可 |
-| 专业版 | 增加 mediasoup C++ 引擎切换、v2 兼容层、优先支持。商业许可 |
-| 推荐部署 | Docker Compose（单机）或 Kubernetes（集群） |
-| 版本 | 参考 v2.29+，2026 年 7 月稳定版 |
+| Dimension | Notes |
+|-----------|-------|
+| Community edition | free deployment on LiveKit (the Pion Go SFU), Apache 2.0 license |
+| Professional edition | adds mediasoup C++ engine switching, the v2 compatibility layer, priority support; commercial license |
+| Recommended deployment | Docker Compose (single machine) or Kubernetes (cluster) |
+| Version | reference v2.29+, stable as of July 2026 |
 
-### 1.2 容器总览
+### 1.2 Container Overview
 
 ```
 ┌───────────────────────────────────────────────────────────────────┐
 │                      OpenVidu Docker Compose                        │
 │                                                                     │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐      │
-│  │  Caddy   │  │ OpenVidu │  │  MongoDB  │  │    Redis     │      │
-│  │ 反向代理  │  │ 信令+引擎 │  │  持久化   │  │  缓存/队列   │      │
+│  │  Caddy   │  │ OpenVidu │  │  MongoDB │  │    Redis     │      │
+│  │ reverse  │  │ signaling│  │persistence│  │cache/queue   │      │
+│  │ proxy    │  │ + engine │  │          │  │              │      │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬───────┘      │
 │       │             │             │                │               │
 │  ┌────┴─────┐  ┌────┴─────┐  ┌────┴─────┐  ┌──────┴────────┐     │
 │  │  MinIO   │  │Dashboard │  │ Ingress  │  │    Egress     │     │
-│  │ 录制存储  │  │ 管理面板  │  │ 媒体接入  │  │ 录制/推流输出  │     │
+│  │ recording│  │ admin    │  │ media    │  │ recording /   │     │
+│  │ storage  │  │ panel    │  │ ingest   │  │ streaming out │     │
 │  └──────────┘  └──────────┘  └──────────┘  └───────────────┘     │
 │                                                                     │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐      │
 │  │ Operator │  │   Meet   │  │RdyCheck  │  │    Setup     │      │
-│  │ 部署管理  │  │ Web 应用  │  │ 健康检查  │  │  busybox 初始化│     │
+│  │ deployment│ │ web app  │  │ health   │  │ busybox init  │     │
+│  │ manager  │  │          │  │ check    │  │              │      │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────────┘      │
 │                                                                     │
 │  ┌─────────────────────────────────────────────────────────┐       │
-│  │    LiveKit Server (Go 二进制, 运行在 openvidu 容器内)      │       │
-│  │    · SFU 媒体转发（Pion WebRTC v3）                        │       │
-│  │    · 内置 TURN/STUN (端口 3478) — 无需独立 Coturn         │       │
+│  │  LiveKit Server (Go binary, running inside openvidu)     │       │
+│  │    · SFU media forwarding (Pion WebRTC v3)                │       │
+│  │    · built-in TURN/STUN (port 3478) — no Coturn needed   │       │
 │  └─────────────────────────────────────────────────────────┘       │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-**关键架构事实：**
-- LiveKit 不是独立容器——它是 Go 二进制（`livekit-server`），运行在 `openvidu` 容器内部
-- TURN/STUN 由 LiveKit 内置提供（端口 3478），不依赖独立的 Coturn 容器
-- 数据库使用 MongoDB（副本集），不使用 PostgreSQL
-- 没有 Kurento 容器——录制/推流通过 Egress 服务处理
+**Key architectural facts:**
+- LiveKit is not a standalone container — it is a Go binary (`livekit-server`) running inside the `openvidu` container
+- TURN/STUN is provided by LiveKit built-in (port 3478); no separate Coturn container
+- the database is MongoDB (replica set), not PostgreSQL
+- there is no Kurento container — recording/streaming is handled by the Egress service
 
-### 1.3 端口映射
+### 1.3 Port Mapping
 
-| 端口 | 协议 | 用途 | 来源 |
-|------|------|------|------|
-| 443 | TCP | HTTPS 入口（Caddy TLS 终止） | caddy |
-| 5443 | TCP | OpenVidu 信令 WebSocket API | openvidu |
-| 7880 | TCP | LiveKit HTTP 健康检查（openvidu 容器内） | openvidu |
-| 7881 | TCP | LiveKit RTC over TCP 回退 | openvidu |
-| 7900-7999 | UDP | LiveKit 媒体端口（ICE/DTLS/SRTP） | openvidu |
-| 3478 | TCP/UDP | LiveKit 内置 STUN/TURN | openvidu |
-| 5349 | TCP/UDP | STUN/TURN over TLS（LiveKit 内置） | openvidu |
-| 6379 | TCP | Redis 内部通信 | redis |
-| 27017 | TCP | MongoDB 内部通信 | mongo |
+| Port | Protocol | Purpose | Source |
+|------|----------|---------|--------|
+| 443 | TCP | HTTPS entry (Caddy TLS termination) | caddy |
+| 5443 | TCP | OpenVidu signaling WebSocket API | openvidu |
+| 7880 | TCP | LiveKit HTTP health check (inside the openvidu container) | openvidu |
+| 7881 | TCP | LiveKit RTC-over-TCP fallback | openvidu |
+| 7900-7999 | UDP | LiveKit media ports (ICE/DTLS/SRTP) | openvidu |
+| 3478 | TCP/UDP | LiveKit built-in STUN/TURN | openvidu |
+| 5349 | TCP/UDP | STUN/TURN over TLS (LiveKit built-in) | openvidu |
+| 6379 | TCP | Redis internal | redis |
+| 27017 | TCP | MongoDB internal | mongo |
 | 9000 | TCP | MinIO S3 API | minio |
-| 9001 | TCP | MinIO Web Console | minio |
+| 9001 | TCP | MinIO web console | minio |
 
-## 2. Docker Compose 服务详解
+## 2. Docker Compose Services in Detail
 
-### 2.1 Caddy（反向代理）
+### 2.1 Caddy (Reverse Proxy)
 
-OpenVidu 使用 Caddy 作为 TLS 终止代理。Caddy 自动从 Let's Encrypt 申请证书，无需手动管理证书文件。
+OpenVidu uses Caddy as its TLS-termination proxy. Caddy requests certificates from Let's Encrypt automatically, with no manual certificate-file management.
 
-**配置重点：**
+**Configuration highlights:**
 
-- 对 `openvidu` 服务反向代理 `/openvidu` 路径，WebSocket 升级
-- 对 LiveKit 信令反向代理（通过 openvidu 容器路由）
-- 全局配置 HTTP/2 处于启用状态，但针对媒体流路径不做协议升级
-- TLS 证书路径通过 Docker 卷挂载持久化
-- 默认使用 `openvidu.example.com` 域名，部署时需替换为实际域名
+- reverse-proxy the `/openvidu` path to the `openvidu` service, with WebSocket upgrade
+- reverse-proxy LiveKit signaling (routed through the openvidu container)
+- HTTP/2 enabled globally, but no protocol upgrade on media-stream paths
+- TLS certificate paths persisted via Docker volumes
+- the default domain is `openvidu.example.com`; replace with the real domain at deployment
 
-**Caddyfile 核心段（简化）：**
+**Core Caddyfile section (simplified):**
 
 ```
 openvidu.example.com {
@@ -92,13 +95,13 @@ openvidu.example.com {
 }
 ```
 
-### 2.2 OpenVidu 信令服务（含 LiveKit 引擎）
+### 2.2 OpenVidu Signaling Service (incl. the LiveKit Engine)
 
-OpenVidu 主容器提供 REST API 和 WebSocket 信令，负责房间管理、参与者生命周期、录制任务调度。**其核心不同之处在于：LiveKit Server 作为一个 Go 二进制（`livekit-server`）运行在该容器内部**，而非独立部署。
+The OpenVidu main container provides the REST API and WebSocket signaling, owning room management, participant lifecycles, and recording-job scheduling. **Its key difference: the LiveKit Server runs as a Go binary (`livekit-server`) inside this container**, rather than deployed separately.
 
-这意味着 LiveKit 的 SFU 媒体引擎、信令、TURN/STUN 全部集成在 `openvidu` 这一个容器中。容器内部通过 localhost 通信，无需额外网络跳。
+That means LiveKit's SFU media engine, signaling, and TURN/STUN all live inside the single `openvidu` container. Internal communication rides localhost with no extra network hop.
 
-**环境变量：**
+**Environment variables:**
 
 ```yaml
 DOMAIN_OR_PUBLIC_IP=openvidu.example.com
@@ -115,64 +118,66 @@ LIVEKIT_TURN_PORT: "3478"
 LIVEKIT_TURN_TLS_PORT: "5349"
 ```
 
-**限制请求体大小：** OpenVidu 默认限制请求体大小为 10MB，用于防止大文件上传攻击。生产环境建议根据实际需求调整 `OPENVIDU_WEBHOOK_MAXBODYSIZE`。
+**Request body size limit:** OpenVidu caps request bodies at 10MB by default against large-upload attacks. In production, tune `OPENVIDU_WEBHOOK_MAXBODYSIZE` to real needs.
 
-### 2.3 LiveKit（社区版 SFU 核心 — 内嵌于 openvidu 容器）
+### 2.3 LiveKit (Community-Edition SFU Core — Embedded in the openvidu Container)
 
-LiveKit 是 OpenVidu 社区版的默认媒体引擎，**不是独立容器**，而是作为 Go 二进制（`livekit-server`）在 `openvidu` 容器内运行。使用 Pion 库实现 WebRTC 协议栈。特点是单二进制部署、性能稳定、协议兼容性好。
+LiveKit is the default media engine of OpenVidu Community — **not a standalone container** but the `livekit-server` Go binary running inside `openvidu`. It builds its WebRTC stack on the Pion libraries. Single-binary deployment, stable performance, good protocol compatibility.
 
-**LiveKit 内部架构：**
+**LiveKit internal architecture:**
 
 ```
 ┌─────────────────────────────────────────────┐
 │              LiveKit Server (Go)              │
 │                                               │
 │  ┌─────────────────────────────────────────┐ │
-│  │         RTC 层 (Pion/webrtc v3)         │ │
+│  │         RTC layer (Pion/webrtc v3)       │ │
 │  │  ┌──────────┐  ┌──────────┐             │ │
-│  │  │ ICE 传输  │  │ DTLS 传输 │             │ │
+│  │  │ ICE      │  │ DTLS     │             │ │
+│  │  │ transport│  │ transport│             │ │
 │  │  └──────────┘  └──────────┘             │ │
 │  │  ┌──────────┐  ┌──────────┐             │ │
-│  │  │ SRTP/SRTCP│  │ DataChannel│           │ │
+│  │  │ SRTP/SRTCP│ │ DataChannel│            │ │
 │  │  └──────────┘  └──────────┘             │ │
 │  └─────────────────────────────────────────┘ │
 │                                               │
 │  ┌─────────────────────────────────────────┐ │
-│  │     Room 路由层                           │ │
-│  │  · 房间创建/销毁                          │ │
-│  │  · 参与者 Track 发布/订阅                  │ │
-│  │  · 音频/视频/屏幕共享 3 种 Track 类型      │ │
-│  │  · 单播 → 广播转发（Selective Forwarding）│ │
+│  │     Room routing layer                    │ │
+│  │  · room creation/teardown                   │ │
+│  │  · participant Track publish/subscribe     │ │
+│  │  · 3 Track kinds: audio/video/screenshare  │ │
+│  │  · unicast → broadcast forwarding          │ │
+│  │    (Selective Forwarding)                   │ │
 │  └─────────────────────────────────────────┘ │
 │                                               │
 │  ┌─────────────────────────────────────────┐ │
-│  │  信令层（WebSocket 二进制协议）             │ │
-│  │  · Protobuf 编码                          │ │
-│  │  · SDP 协商                              │ │
-│  │  · ICE Candidate 交换                     │ │
-│  │  · Track 订阅管理                         │ │
+│  │  Signaling layer (binary WS protocol)    │ │
+│  │  · Protobuf encoding                     │ │
+│  │  · SDP negotiation                       │ │
+│  │  · ICE candidate exchange                 │ │
+│  │  · Track subscription management          │ │
 │  ├─────────────────────────────────────────┤ │
-│  │  TURN/STUN 层（内置）                      │ │
-│  │  · STUN 绑定请求 (端口 3478)               │ │
-│  │  · TURN 中继 (端口 3478/5349 TLS)          │ │
+│  │  TURN/STUN layer (built-in)              │ │
+│  │  · STUN binding requests (port 3478)     │ │
+│  │  · TURN relay (ports 3478 / 5349 TLS)    │ │
 │  └─────────────────────────────────────────┘ │
 └─────────────────────────────────────────────┘
 ```
 
-**LiveKit 媒体端口范围：**
+**LiveKit media port ranges:**
 
-| 范围 | 用途 | 协议 |
-|------|------|------|
-| 7900-7999 | ICE/DTLS/SRTP 媒体流 | UDP |
-| 7881 | RTC over TCP 回退 | TCP |
-| 3478 | LiveKit 内置 STUN/TURN | TCP/UDP |
+| Range | Purpose | Protocol |
+|-------|---------|----------|
+| 7900-7999 | ICE/DTLS/SRTP media streams | UDP |
+| 7881 | RTC-over-TCP fallback | TCP |
+| 3478 | LiveKit built-in STUN/TURN | TCP/UDP |
 | 5349 | STUN/TURN over TLS | TCP/UDP |
 
-100 个 UDP 端口在典型负载下支持约 300-500 并发参与者（取决于码率、分辨率、帧率）。
+100 UDP ports support roughly 300-500 concurrent participants at typical loads (depending on bitrate, resolution, frame rate).
 
-**内置 TURN 的工作方式：**
+**How the built-in TURN works:**
 
-LiveKit 内置 TURN 服务器，无需部署独立的 Coturn 容器。当一个客户端无法建立 P2P ICE 连接时，LiveKit 的 TURN 服务器自动介入中继。配置在 `openvidu` 容器的环境变量中完成：
+LiveKit ships an integrated TURN server — no Coturn container needed. When a client cannot establish P2P ICE, the LiveKit TURN server automatically relays. Configuration happens via `openvidu` container env vars:
 
 ```yaml
 LIVEKIT_TURN_ENABLED: "true"
@@ -180,62 +185,62 @@ LIVEKIT_TURN_PORT: "3478"
 LIVEKIT_TURN_TLS_PORT: "5349"
 ```
 
-### 2.4 mediasoup 引擎（专业版）
+### 2.4 The mediasoup Engine (Professional Edition)
 
-专业版在 LiveKit 基础上增加 mediasoup 引擎，通过 `openvidu.rtc.engine` 配置项切换。mediasoup 使用 C++ Worker 进程处理媒体，性能更高且支持更细粒度的编码控制。
+The Professional edition adds a mediasoup engine alongside LiveKit, switched via the `openvidu.rtc.engine` setting. mediasoup uses C++ Worker processes for media, delivering higher performance and finer-grained encode control.
 
-**切换方式：**
+**How to switch:**
 
 ```yaml
-# 在 openvidu 容器环境变量中
-OPENVIDU_RTC_ENGINE=mediasoup  # 或 pion（默认）
+# in the openvidu container env
+OPENVIDU_RTC_ENGINE=mediasoup  # or pion (default)
 
-# mediasoup 额外配置
+# mediasoup extras
 OPENVIDU_MEDIASOUP_WORKER_BIN=/opt/mediasoup/worker/mediasoup-worker
 OPENVIDU_MEDIASOUP_RTC_MIN_PORT=7900
 OPENVIDU_MEDIASOUP_RTC_MAX_PORT=7999
 OPENVIDU_MEDIASOUP_NUM_WORKERS=2
 ```
 
-**mediasoup 与 LiveKit 的差异：**
+**mediasoup vs LiveKit differences:**
 
-| 维度 | LiveKit 引擎 | mediasoup 引擎 |
-|------|-------------|----------------|
-| 语言 | Go（Pion 库） | C++ Worker + Rust/Node.js 绑定 |
-| 进程模型 | 单进程多协程 | 多 Worker 子进程 |
-| 编码控制 | 粗粒度（码率/分辨率控制） | 细粒度（每个 Consumer 可独立设置编码参数） |
-| 可扩展性 | 水平扩展（Redis 集群路由） | 垂直扩展（多 Worker 绑定 CPU 核心） |
-| 延迟 | 3-5ms 转发（Pion 优化） | 1-2ms 转发（原生的 C++） |
-| 资源占用 | 每参与者 ~5MB 内存 | 每个 Worker 进程 ~50MB 基线 |
+| Dimension | LiveKit engine | mediasoup engine |
+|-----------|----------------|------------------|
+| Language | Go (Pion) | C++ Worker + Rust/Node.js bindings |
+| Process model | single process, many coroutines | multiple Worker child processes |
+| Encode control | coarse (bitrate/resolution) | fine (per-Consumer encode parameters) |
+| Scaling | horizontal (Redis cluster routing) | vertical (Workers pinned to CPU cores) |
+| Latency | 3-5ms forwarding (Pion-tuned) | 1-2ms forwarding (native C++) |
+| Resource use | ~5MB memory per participant | ~50MB baseline per Worker process |
 
-### 2.5 v2 兼容层（专业版）
+### 2.5 The v2 Compatibility Layer (Professional Edition)
 
-专业版包含 `v2compatibility` 服务，实现 OpenVidu v2 API 的兼容层。这在从 OpenVidu v2 迁移到 v3 时至关重要。
+The Professional edition ships the `v2compatibility` service implementing OpenVidu v2 API compatibility — critical when migrating from v2 to v3.
 
-**兼容层覆盖的 API：**
+**APIs covered by the compatibility layer:**
 
-- Session 创建/关闭（映射到 LiveKit Room）
-- Connection 创建（映射到 LiveKit Participant）
-- Publisher/Subscriber 模型（映射到 LiveKit Track 发布/订阅）
-- Token 生成（v2 的 role 映射到 LiveKit 的 canPublish/canSubscribe）
+- Session create/close (mapped to LiveKit Rooms)
+- Connection create (mapped to LiveKit Participants)
+- Publisher/Subscriber model (mapped to LiveKit Track publish/subscribe)
+- Token generation (v2 roles mapped to LiveKit canPublish/canSubscribe)
 
-**兼容限制：**
+**Compatibility limits:**
 
-- `Filter` API（v2 的媒体处理滤镜）仅在 mediasoup 引擎下生效
-- v2 的录制回调格式与 v3 不同，需要适配
-- 部分 v2 事件（如 `participantPublished`）的字段映射可能存在差异
+- the `Filter` API (v2 media-processing filters) only works on the mediasoup engine
+- v2 recording-callback formats differ from v3 and need adaptation
+- some v2 events (e.g. `participantPublished`) may map fields differently
 
-### 2.6 Redis（缓存/队列/发布订阅）
+### 2.6 Redis (Cache / Queue / Pub-Sub)
 
-Redis 在 OpenVidu 中承担三个角色：
+Redis plays three roles in OpenVidu:
 
-| 角色 | 用途 | 数据结构 |
-|------|------|----------|
-| 缓存 | 会话 Token、房间元数据、短时配置 | String（TTL 设置） |
-| 队列 | 异步录制任务、Webhook 事件 | List（RPUSH/LPOP） |
-| 发布订阅 | 跨服务事件通知（房间状态变更） | Pub/Sub |
+| Role | Purpose | Data structure |
+|------|---------|----------------|
+| cache | session Tokens, room metadata, short-lived config | String (with TTL) |
+| queue | async recording jobs, webhook events | List (RPUSH/LPOP) |
+| pub/sub | cross-service event notification (room-state changes) | Pub/Sub |
 
-**持久化配置：**
+**Persistence configuration:**
 
 ```yaml
 redis:
@@ -245,18 +250,18 @@ redis:
     - redis-data:/data
 ```
 
-AOF（Append Only File）持久化模式每秒 fsync，确保 Redis 重启后缓存数据不丢失。RDB 快照作为辅助备份，每 60 秒或在 1000 次写入后触发。
+AOF (Append Only File) persistence fsyncs per second so cached data survives restarts; RDB snapshots act as a secondary backup every 60s or 1000 writes.
 
-### 2.7 MongoDB（持久化数据库）
+### 2.7 MongoDB (Persistent Database)
 
-MongoDB 副本集存储 OpenVidu 的持久化数据：
+The MongoDB replica set stores OpenVidu's persistent data:
 
-- 用户账户和角色
-- 录制元数据（录制 ID、时间戳、文件路径、状态）
-- CDR（Call Detail Records）——通话详单
-- 应用配置（Webhook URL、录制存储策略）
+- user accounts and roles
+- recording metadata (recording ID, timestamps, file paths, status)
+- CDR (Call Detail Records)
+- application config (webhook URLs, recording-storage policies)
 
-**副本集配置：**
+**Replica-set configuration:**
 
 ```yaml
 mongo:
@@ -266,13 +271,13 @@ mongo:
     - mongo-data:/data/db
 ```
 
-生产环境下 MongoDB 以副本集模式运行，提供高可用和自动故障转移。OpenVidu 通过 MongoDB 驱动连接副本集，读写分离以提升性能。
+In production MongoDB runs as a replica set for high availability and automatic failover. OpenVidu connects through the MongoDB driver; read/write splitting boosts performance.
 
-### 2.8 MinIO（录制存储）
+### 2.8 MinIO (Recording Storage)
 
-MinIO 提供兼容 S3 的录制文件存储。OpenVidu 录制生成的 `.webm` 文件通过 MinIO 客户端 SDK 上传。
+MinIO provides S3-compatible recording storage. OpenVidu uploads generated `.webm` files via the MinIO client SDK.
 
-**存储路径结构：**
+**Storage path layout:**
 
 ```
 recordings/
@@ -283,58 +288,58 @@ recordings/
       └── metadata.json
 ```
 
-**数据生命周期：**
+**Data lifecycle:**
 
-MinIO 默认保留所有文件。生产环境应配置生命周期策略：
+MinIO keeps every file by default. Production should configure lifecycle policies:
 
 ```yaml
-# 通过 MinIO 客户端配置
+# via the MinIO client
 mc ilm rule add --expire-days 90 myminio/recordings
 ```
 
-### 2.9 Dashboard（管理面板）
+### 2.9 Dashboard (Admin Panel)
 
-Dashboard 容器提供基于 Web 的管理面板，用于：
+The Dashboard container serves the web admin panel:
 
-- 实时查看活跃会话和参与者
-- 录制文件管理和回放
-- 系统配置和引擎切换
-- 监控指标可视化
+- live view of active sessions and participants
+- recording-file management and playback
+- system configuration and engine switching
+- monitoring-metric visualization
 
-镜像来源：`docker.io/openvidu/dashboard`
+Image: `docker.io/openvidu/dashboard`
 
-### 2.10 Ingress（媒体接入）
+### 2.10 Ingress (Media Ingest)
 
-Ingress 服务负责外部媒体流的接入，支持：
+The Ingress service handles external media ingest:
 
-- RTMP 推流接入
-- WHIP（WebRTC-HTTP Ingestion Protocol）接入
-- 外部 RTSP 源拉取
+- RTMP push ingest
+- WHIP (WebRTC-HTTP Ingestion Protocol)
+- pulling external RTSP sources
 
-Ingress 将外部流转换为 LiveKit Track，使其可以被会议中的参与者消费。
+Ingress converts external streams into LiveKit Tracks consumable by conference participants.
 
-### 2.11 Egress（录制/推流输出）
+### 2.11 Egress (Recording / Streaming Out)
 
-Egress 服务负责录制合成和流输出，取代了旧版 OpenVidu v2 中的 Kurento：
+The Egress service handles recording composition and stream output, replacing Kurento from OpenVidu v2:
 
-- **录制合成**：多路视频合成为一路（Composite 模式）或分别录制（Individual 模式）
-- **RTMP 推流输出**：将会议画面推流到直播平台（YouTube、Twitch 等）
-- **文件输出**：MP4 / WebM 格式的录制文件直写 MinIO
+- **Composited recording**: multiple feeds mixed into one (Composite mode) or recorded separately (Individual mode)
+- **RTMP stream out**: push conference video to streaming platforms (YouTube, Twitch, etc.)
+- **File output**: MP4 / WebM recordings written straight to MinIO
 
-Egress 直接与 LiveKit 交互，通过 gRPC 获取媒体流，不经过 OpenVidu 信令层。
+Egress talks to LiveKit directly over gRPC to pull media — bypassing the OpenVidu signaling layer.
 
-### 2.12 Operator（部署管理）
+### 2.12 Operator (Deployment Management)
 
-Operator 容器管理 OpenVidu 部署的生命周期：
+The Operator container manages the OpenVidu deployment lifecycle:
 
-- 自动证书更新
-- 服务健康监控和自动重启
-- 配置热更新
-- 版本升级编排
+- automatic certificate renewal
+- service health monitoring and auto-restart
+- hot config updates
+- version-upgrade orchestration
 
-### 2.13 Setup 容器（初始化）
+### 2.13 The Setup Container (Initialization)
 
-Setup 容器使用 `busybox` 镜像，在 OpenVidu 主服务启动前完成初始化工作：
+The Setup container runs the `busybox` image, initializing state before the OpenVidu main service starts:
 
 ```yaml
 setup:
@@ -351,34 +356,34 @@ setup:
     - openvidu-data:/opt/openvidu
 ```
 
-**Setup 容器执行的工作：**
+**Work performed by the Setup container:**
 
-1. 创建录制目录 `/opt/openvidu/recordings`（OpenVidu 用户 UID 1000）
-2. 设置目录权限，确保 OpenVidu 容器写入权限
-3. 创建自定义布局目录 `/opt/openvidu/custom-layout`
-4. 初始化日志目录 `/opt/openvidu/logs`
-5. 完成后退出（`restart: "no"`）
+1. create the recording directory `/opt/openvidu/recordings` (OpenVidu user UID 1000)
+2. set directory permissions ensuring the OpenVidu container can write
+3. create the custom-layout directory `/opt/openvidu/custom-layout`
+4. initialize the log directory `/opt/openvidu/logs`
+5. exit when done (`restart: "no"`)
 
-### 2.14 Ready Check（健康检查）
+### 2.14 Ready Check (Health Gate)
 
-Ready Check 容器在启动时验证所有依赖服务是否就绪（MongoDB、Redis、MinIO、LiveKit），通过后向 Caddy 返回就绪信号，Caddy 才开始转发流量。
+The Ready Check container verifies every dependency (MongoDB, Redis, MinIO, LiveKit) is up at boot; once green it signals readiness to Caddy, which only then starts forwarding traffic.
 
-### 2.15 Meet（Web 会议应用）
+### 2.15 Meet (Web Conference App)
 
-OpenVidu Meet 容器提供开箱即用的 Web 会议前端应用，基于 React 构建。用户可直接通过浏览器加入会议，无需自行开发客户端。
+The OpenVidu Meet container ships a ready-to-use React-based web conference front end. Users join meetings from a browser with no client development needed.
 
-镜像来源：`docker.io/openvidu/openvidu-meet`
+Image: `docker.io/openvidu/openvidu-meet`
 
-## 3. 网络拓扑
+## 3. Network Topology
 
-### 3.1 内部网络
+### 3.1 Internal Network
 
-OpenVidu 使用 Docker 自定义网络 `openvidu-net`，默认子网 `172.28.0.0/16`。所有容器通过服务名互相寻址，无需手动配置 IP。
+OpenVidu uses the Docker custom network `openvidu-net`, default subnet `172.28.0.0/16`. All containers address each other by service name — no manual IPs.
 
 ```
 openvidu-net (172.28.0.0/16)
  ├── caddy (172.28.0.2)
- ├── openvidu (172.28.0.3)  ← LiveKit Server 二进制在内部运行
+ ├── openvidu (172.28.0.3)  ← the LiveKit Server binary runs inside
  ├── mongo (172.28.0.4)
  ├── redis (172.28.0.5)
  ├── minio (172.28.0.6)
@@ -391,83 +396,83 @@ openvidu-net (172.28.0.0/16)
  └── setup (172.28.0.13)
 ```
 
-### 3.2 外部流量路径
+### 3.2 External Traffic Paths
 
 ```
-外部客户端
+External clients
     │
-    ├── HTTPS (443) → Caddy → TLS 终止
+    ├── HTTPS (443) → Caddy → TLS termination
     │   ├── /openvidu/* → WebSocket/REST → openvidu:5443
-    │   └── /livekit/* → WebSocket → openvidu (LiveKit 内嵌)
+    │   └── /livekit/*  → WebSocket → openvidu (LiveKit embedded)
     │
-    ├── STUN (3478) → openvidu (LiveKit 内置 STUN)
+    ├── STUN (3478) → openvidu (LiveKit built-in STUN)
     │
-    ├── TURN (5349/TLS) → openvidu (LiveKit 内置 TURN/TLS)
+    ├── TURN (5349/TLS) → openvidu (LiveKit built-in TURN/TLS)
     │
-    └── UDP 媒体 (7900-7999) → openvidu (LiveKit ICE/DTLS/SRTP)
+    └── UDP media (7900-7999) → openvidu (LiveKit ICE/DTLS/SRTP)
 ```
 
-### 3.3 防火墙规则
+### 3.3 Firewall Rules
 
-生产环境至少需要以下防火墙入站规则：
+Production needs at least these inbound rules:
 
-| 规则 | 端口 | 协议 | 来源 | 说明 |
-|------|------|------|------|------|
-| HTTPS | 443 | TCP | 0.0.0.0/0 | Web 访问和信令 |
-| STUN | 3478 | TCP/UDP | 0.0.0.0/0 | 候选地址发现（LiveKit 内置） |
-| TURN/TLS | 5349 | TCP/UDP | 0.0.0.0/0 | 加密中继连接（LiveKit 内置） |
-| 媒体端口 | 7900-7999 | UDP | 0.0.0.0/0 | RTP/RTCP 媒体流 |
-| SSH | 22 | TCP | 限定管理 IP | 服务器管理 |
+| Rule | Port | Protocol | Source | Notes |
+|------|------|----------|--------|-------|
+| HTTPS | 443 | TCP | 0.0.0.0/0 | web access and signaling |
+| STUN | 3478 | TCP/UDP | 0.0.0.0/0 | candidate discovery (LiveKit built-in) |
+| TURN/TLS | 5349 | TCP/UDP | 0.0.0.0/0 | encrypted relay (LiveKit built-in) |
+| media ports | 7900-7999 | UDP | 0.0.0.0/0 | RTP/RTCP media streams |
+| SSH | 22 | TCP | admin IPs only | server administration |
 
-## 4. 启动流程
+## 4. Startup Flow
 
-### 4.1 首次启动顺序
+### 4.1 First-Boot Order
 
 ```
-时序 容器           动作
- │    ├── setup       创建目录结构，设置权限，退出
- │    ├── mongo       启动数据库副本集，等待就绪
- │    ├── redis       启动缓存，等待就绪
- │    ├── minio       启动 S3 存储，等待就绪
- │    ├── openvidu    启动主服务 + LiveKit Server 二进制
- │    │   ├── 连接 MongoDB、Redis、MinIO
- │    │   ├── 启动 LiveKit Server（端口 7880/7881/7900-7999/3478/5349）
- │    │   └── 启动信令 WebSocket 服务（端口 5443）
- │    ├── ingress     启动媒体接入服务
- │    ├── egress      启动录制/推流服务
- │    ├── dashboard   启动管理面板
- │    ├── meet        启动 Web 会议前端
- │    ├── operator    启动部署管理
- │    ├── ready-check 验证所有依赖就绪
- │    └── caddy       最后启动，配置 TLS 证书，开始接收流量
+time  container       action
+ │    ├── setup       create directory structure, set permissions, exit
+ │    ├── mongo       start the database replica set, wait for readiness
+ │    ├── redis       start the cache, wait for readiness
+ │    ├── minio       start S3 storage, wait for readiness
+ │    ├── openvidu    start the main service + the LiveKit Server binary
+ │    │   ├── connect to MongoDB, Redis, MinIO
+ │    │   ├── start LiveKit Server (ports 7880/7881/7900-7999/3478/5349)
+ │    │   └── start the signaling WebSocket service (port 5443)
+ │    ├── ingress     start the media-ingest service
+ │    ├── egress      start the recording/streaming service
+ │    ├── dashboard   start the admin panel
+ │    ├── meet        start the web conference front end
+ │    ├── operator    start deployment management
+ │    ├── ready-check verify every dependency is ready
+ │    └── caddy       start last, configure TLS certs, begin accepting traffic
  ▼
-就绪                  ready-check 返回 200，Caddy 开始转发
+ready                 ready-check returns 200; Caddy starts forwarding
 ```
 
-### 4.2 健康检查
+### 4.2 Health Checks
 
-OpenVidu 提供多个健康检查端点：
+OpenVidu exposes several health endpoints:
 
-| 端点 | 用途 | 返回 |
-|------|------|------|
-| `/openvidu/health` | OpenVidu 主服务 | `200 OK` |
-| `/livekit/health` | LiveKit 引擎（openvidu 容器内） | `serving` |
-| `/openvidu/api/rooms` | API 可用性 | 房间列表 |
+| Endpoint | Purpose | Returns |
+|----------|---------|---------|
+| `/openvidu/health` | the OpenVidu main service | `200 OK` |
+| `/livekit/health` | the LiveKit engine (inside openvidu) | `serving` |
+| `/openvidu/api/rooms` | API availability | the room list |
 
-### 4.3 日志诊断
+### 4.3 Log Diagnostics
 
-**常见启动问题：**
+**Common startup problems:**
 
-| 症状 | 根因 | 解法 |
-|------|------|------|
-| Caddy TLS 证书申请失败 | 域名未绑定到公网 IP | 检查 DNS A 记录 |
-| LiveKit 启动失败 | 端口 7900-7999 被占用 | `netstat -tulpn \| grep 7900` 检查 |
-| MongoDB 副本集未初始化 | 首次部署需手动 `rs.initiate()` | 运行 mongo shell 执行初始化 |
-| 录制文件无法写入 | MinIO 未就绪或权限不足 | 检查 MinIO 日志和 bucket 策略 |
+| Symptom | Root cause | Fix |
+|---------|------------|-----|
+| Caddy TLS cert request fails | the domain isn't pointed at the public IP | check the DNS A record |
+| LiveKit fails to start | ports 7900-7999 occupied | check `netstat -tulpn \| grep 7900` |
+| MongoDB replica set uninitialized | first deployment needs a manual `rs.initiate()` | run it in the mongo shell |
+| recordings not writable | MinIO not ready or permission denied | check MinIO logs and bucket policy |
 
-## 5. 持久化存储
+## 5. Persistent Storage
 
-### 5.1 卷映射
+### 5.1 Volume Mapping
 
 ```yaml
 volumes:
@@ -483,110 +488,110 @@ volumes:
     external: false
 ```
 
-建议生产环境使用 NFS 或云存储提供商的持久化卷，确保容器重启后数据不丢失。
+Production should use NFS or a cloud provider's persistent volumes so data survives container restarts.
 
-### 5.2 数据备份策略
+### 5.2 Backup Strategy
 
-| 数据 | 备份频率 | 方法 | 保留策略 |
-|------|---------|------|---------|
-| MongoDB | 每日 | mongodump + MinIO 上传 | 30 天 |
-| Redis AOF | 每小时 | 复制 AOF 文件 | 7 天 |
-| MinIO 录制 | 按需 | 跨区域复制 | 90 天 |
-| Caddy 证书 | 每次更新 | 自动备份到 MinIO | 365 天 |
+| Data | Frequency | Method | Retention |
+|------|-----------|--------|-----------|
+| MongoDB | daily | mongodump + upload to MinIO | 30 days |
+| Redis AOF | hourly | copy the AOF file | 7 days |
+| MinIO recordings | on demand | cross-region replication | 90 days |
+| Caddy certs | on each renewal | auto-backup to MinIO | 365 days |
 
-## 6. 引擎切换详解
+## 6. Engine Switching in Detail
 
-### 6.1 运行时切换
+### 6.1 Runtime Switching
 
-OpenVidu 专业版支持在运行时通过环境变量切换 RTC 引擎。切换后重启 `openvidu` 容器即可生效，无需重新部署整个栈。
+OpenVidu Professional supports switching the RTC engine at runtime via environment variable. Restart the `openvidu` container afterwards — no full-stack redeploy.
 
 ```
 openvidu.rtc.engine = pion
-    └── OpenVidu 通过 LiveKit 客户端 SDK 控制内嵌的 LiveKit Server
-    └── 所有媒体路由经过 LiveKit 的 Pion 引擎
+    └── OpenVidu drives the embedded LiveKit Server through the LiveKit client SDK
+    └── all media routing goes through LiveKit's Pion engine
 
 openvidu.rtc.engine = mediasoup
-    └── OpenVidu 通过 mediasoup 客户端 SDK 控制 mediasoup Worker
-    └── 所有媒体路由经过 mediasoup 的 C++ Worker
-    └── mediasoup Worker 内嵌于 OpenVidu 容器，不增额外容器
+    └── OpenVidu drives mediasoup Workers through the mediasoup client SDK
+    └── all media routing goes through mediasoup's C++ Workers
+    └── mediasoup Workers are embedded in the OpenVidu container — no extra container
 ```
 
-### 6.2 引擎切换的影响范围
+### 6.2 Switch Impact Surface
 
-| 维度 | Pion 引擎 | mediasoup 引擎 |
-|------|----------|----------------|
-| 容器数 | 12（标准部署） | 12（无增减） |
-| 内存占用 | ~200MB baseline | ~400MB baseline |
-| CPU 占用 | 转发 100 路流 ~10% | 转发 100 路流 ~5% |
-| 信令协议 | LiveKit Protobuf | mediasoup JSON |
-| 录制路径 | Egress 服务 | Egress 服务（不变） |
-| v2 兼容 | 基本兼容 | 完整兼容（含 Filter） |
+| Dimension | Pion engine | mediasoup engine |
+|-----------|-------------|------------------|
+| container count | 12 (standard) | 12 (unchanged) |
+| memory | ~200MB baseline | ~400MB baseline |
+| CPU | ~10% forwarding 100 streams | ~5% forwarding 100 streams |
+| signaling protocol | LiveKit Protobuf | mediasoup JSON |
+| recording path | Egress service | Egress service (unchanged) |
+| v2 compatibility | mostly compatible | fully compatible (incl. Filter) |
 
-### 6.3 切换建议
+### 6.3 Switching Advice
 
-- **选择 Pion 引擎**：轻量部署、快速启动、社区版默认。适合中小规模会议（<50 参与者）、IoT 设备、快速原型验证
-- **选择 mediasoup 引擎**：高性能场景、大规模会议（100+ 参与者）、需要细粒度编码控制的场景。适合专业视频会议、直播推流、教育平台
+- **choose Pion**: lightweight deployment, fast startup, the community-edition default. Good for small/medium conferences (<50 participants), IoT devices, rapid prototyping
+- **choose mediasoup**: high performance, large conferences (100+ participants), fine-grained encode control. Good for professional conferencing, live streaming, education platforms
 
-## 7. MediaServo 借鉴
+## 7. Borrowings for MediaServo
 
-### 7.1 架构借鉴
+### 7.1 Architectural Borrowings
 
-| OpenVidu 实践 | MediaServo 对应 | 借鉴价值 |
-|---------------|---------------|----------|
-| 12 容器微服务架构 | 7 crate 工作区 | 容器化边界明确，服务间职责清晰 |
-| Caddy 反向代理做 TLS 终止 | mediaservo-server 当前直接暴露 | 引入反向代理层分离证书管理 |
-| Setup 容器做目录初始化 | mediaservo-host 启动时初始化 | 分离初始化逻辑，确保容器启动顺序正确 |
-| 引擎可切换（pion/mediasoup） | mediaservo-webrtc 三后端抽象 | 后端切换模式一致，可复用 LiveKit 的配置驱动思路 |
-| LiveKit 内嵌模式（无独立 SFU 容器） | mediaservo-server SFU 集成 | SFU 与服务同容器减少网络跳数和部署复杂度 |
-| TURN 由 SFU 内置提供 | mediaservo-server ICE 候选地址 | 减少独立 TURN 容器的运维开销 |
+| OpenVidu practice | MediaServo counterpart | Value |
+|-------------------|------------------------|-------|
+| 12-container microservices | the 7-crate workspace | clear containerization boundaries, crisp service responsibilities |
+| Caddy reverse proxy for TLS termination | mediaservo-server currently exposed directly | add a proxy layer to separate certificate management |
+| the Setup container does directory init | mediaservo-host initializes at startup | separate initialization logic so container startup order stays correct |
+| swappable engines (pion/mediasoup) | mediaservo-webrtc's three-backend abstraction | same switching pattern; reuse LiveKit's config-driven approach |
+| the LiveKit embedded mode (no standalone SFU container) | mediaservo-server's SFU integration | SFU + service in one container cuts network hops and deployment complexity |
+| TURN provided built into the SFU | mediaservo-server ICE candidates | cuts the ops overhead of a standalone TURN container |
 
-### 7.2 端口规划借鉴
+### 7.2 Port-Planning Borrowings
 
-| 端口范围 | 复用方式 |
-|----------|----------|
-| 7900-7999 | 100 端口范围适用于中等规模部署，MediaServo 当前 40000-40100 范围过窄 |
-| 3478/5349 | LiveKit 内置 TURN 端口，MediaServo 可参考将 STUN/TURN 集成到 SFU 而非独立部署 |
+| Range | Takeaway |
+|-------|----------|
+| 7900-7999 | a 100-port range suits medium deployments; MediaServo's current 40000-40100 is too narrow |
+| 3478/5349 | LiveKit's built-in TURN ports; MediaServo can consider folding STUN/TURN into the SFU rather than standalone deployment |
 
-### 7.3 引入反向代理层
+### 7.3 Introducing a Reverse-Proxy Layer
 
-MediaServo 当前 `mediaservo-server` 直接暴露 9800 端口。借鉴 OpenVidu 的 Caddy 模式：
+MediaServo currently exposes port 9800 directly on `mediaservo-server`. Borrowing OpenVidu's Caddy pattern:
 
 ```
-当前：
-  Client → mediaservo-server:9800 (直连，无 TLS)
+Today:
+  Client → mediaservo-server:9800 (direct, no TLS)
 
-借鉴后：
-  Client → Caddy (443 TLS) → mediaservo-server:9800 (内网)
+Borrowing:
+  Client → Caddy (443 TLS) → mediaservo-server:9800 (private network)
 ```
 
-优势：
-- TLS 证书自动管理（Let's Encrypt）
-- 路径路由（/signaling, /admin, /livekit 等）
-- WebSocket 升级统一处理
-- 负载均衡和健康检查集中管理
+Advantages:
+- automatic TLS certificate management (Let's Encrypt)
+- path routing (/signaling, /admin, /livekit, etc.)
+- unified WebSocket upgrade handling
+- centralized load balancing and health checks
 
-### 7.4 引擎切换策略
+### 7.4 Engine-Switch Strategy
 
-OpenVidu 的 `openvidu.rtc.engine` 配置驱动切换模式与 MediaServo 的 `mediaservo-webrtc` 三后端抽象不谋而合。MediaServo 可借鉴其配置方式：
+OpenVidu's config-driven `openvidu.rtc.engine` switching matches MediaServo's `mediaservo-webrtc` three-backend abstraction. MediaServo can borrow its configuration shape:
 
 ```toml
-# MediaServo 未来配置
+# MediaServo future config
 [webrtc]
 backend = "webrtc-sys"  # webrtc-rs | webrtc-sys | str0m
 ```
 
-社区版默认使用 `webrtc-sys`（libwebrtc 稳定性能），专业版允许切换。切换逻辑在 `mediaservo-webrtc/src/backend/` 中由 feature flag 和运行时配置共同决定。
+The community edition defaults to `webrtc-sys` (stable libwebrtc performance); the professional edition allows switching. The switch logic lives in `mediaservo-webrtc/src/backend/`, decided jointly by feature flags and runtime config.
 
-### 7.5 录制架构
+### 7.5 Recording Architecture
 
-OpenVidu 的录制依赖 MinIO + Egress 服务（不再使用 Kurento）。MediaServo 的录制路径可简化为：
+OpenVidu's recording depends on MinIO + Egress (no more Kurento). MediaServo's recording path can be simplified likewise:
 
 ```
-MediaServo 录制（当前）：
-  Host → RTP → mediaservo-server → 文件写入
+MediaServo recording (today):
+  Host → RTP → mediaservo-server → file write
 
-OpenVidu 录制（借鉴）：
-  LiveKit → Egress 合成/编码 → MinIO S3 存储 → 生命周期管理
+OpenVidu recording (borrowed):
+  LiveKit → Egress compose/encode → MinIO S3 storage → lifecycle management
 ```
 
-MediaServo 未来录制可引入 MinIO 兼容层，复用 OpenVidu 的 S3 录制路径和生命周期策略。
+MediaServo's future recording can introduce a MinIO-compatible layer, reusing OpenVidu's S3 recording paths and lifecycle policies.

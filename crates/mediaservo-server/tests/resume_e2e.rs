@@ -1,5 +1,5 @@
-//! a2 会话续期（S0.5）集成验证：设备形（auto-enroll）+ 保留窗 + 票轮换/一次性。
-//! 脚手架复刻 device_enroll_test（seed 常量与 sig 合同同源）。
+//! a2 session resume (S0.5) integration verification: the device form (auto-enroll) + the retention window + ticket rotation/one-shot.
+//! Scaffolding replicates device_enroll_test (seed constants and the sig contract share a source).
 use base64::Engine as _;
 use ed25519_dalek::{Signer, SigningKey};
 use futures_util::{SinkExt, StreamExt};
@@ -44,7 +44,7 @@ async fn spawn_server(allow_enroll: bool, hold_secs: u64) -> (String, SignalingS
     #[cfg(not(feature = "sfu-mediasoup"))]
     let server = SignalingServer::new(65536, None);
     let mut server = server;
-    server.ws_ping_secs = 0; // 本套件裸 JSON 读环不吃控制帧（心跳归 heartbeat_e2e）
+    server.ws_ping_secs = 0; // this suite's raw JSON read loop must not eat control frames (the heartbeat lives in heartbeat_e2e)
     server.ws_resume_hold_secs = hold_secs;
     server.allow_dev_enroll = Arc::new(AtomicBool::new(allow_enroll));
     server.device_registry = Arc::new(DeviceRegistry::empty());
@@ -80,7 +80,7 @@ async fn send(ws: &mut Ws, msg: &SignalingMessage) {
     ws.send(WsMsg::Text(serde_json::to_string(msg).unwrap())).await.unwrap();
 }
 
-/// pubkey 形 join + 验签挑战链走完 → RoomJoined。resume 票可选携带（仅 v3 受理）。
+/// pubkey-form join completing the verify-challenge chain -> RoomJoined. The resume ticket is optionally carried (accepted only on v3).
 async fn device_join(ws: &mut Ws, protocol: u32, resume: Option<String>) -> SignalingMessage {
     send(
         ws,
@@ -116,7 +116,7 @@ async fn device_join(ws: &mut Ws, protocol: u32, resume: Option<String>) -> Sign
     recv(ws).await
 }
 
-/// ① 核心：断链 → 保留窗内 resume → peer 接管 + 票轮换；旧延迟清理作废（seq 守卫）。
+/// 1. core: disconnect -> resume within the retention window -> peer takeover + ticket rotation; the old delayed cleanup is voided (the seq guard).
 #[tokio::test]
 async fn resume_rebinds_peer_and_rotates_nonce() {
     let hold = 2u64;
@@ -130,37 +130,46 @@ async fn resume_rebinds_peer_and_rotates_nonce() {
         ..
     } = &j1
     else {
-        panic!("v3 车端设备会话必须谈成 3 并下发重挂票, got {j1:?}")
+        panic!(
+            "a v3 vehicle device session must negotiate 3 and issue a re-attach ticket, got {j1:?}"
+        )
     };
     let (peer1, nonce1) = (peer1.clone(), nonce1.clone());
-    assert!(srv.device_bindings.contains_key(&peer1), "join 后应有连接级绑定");
+    assert!(
+        srv.device_bindings.contains_key(&peer1),
+        "there should be a connection-level binding after join"
+    );
 
-    // 断链（drop = 服务端读端 EOF）→ 进入保留窗
+    // disconnect (drop = the server's read end sees EOF) -> enters the retention window
     drop(ws);
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(srv.device_bindings.contains_key(&peer1), "保留窗内绑定不得被清（延迟清理在等票）");
+    assert!(
+        srv.device_bindings.contains_key(&peer1),
+        "within the retention window the binding must not be cleared (the delayed cleanup is waiting on the ticket)"
+    );
 
-    // 重挂：认证链全量重跑（新挑战新签）+ resume 票
+    // re-attach: the auth chain fully re-run (a new challenge, new signature) + the resume ticket
     let mut ws2 = connect(&url).await;
     let j2 = device_join(&mut ws2, 3, Some(nonce1.clone())).await;
     let (peer2, nonce2) = match &j2 {
-        SignalingMessage::RoomJoined { peer_id, session_nonce, .. } => {
-            (peer_id.clone(), session_nonce.clone().expect("重挂会话票须轮换"))
-        }
+        SignalingMessage::RoomJoined { peer_id, session_nonce, .. } => (
+            peer_id.clone(),
+            session_nonce.clone().expect("the re-attach session ticket must be rotated"),
+        ),
         other => panic!("expected RoomJoined, got {other:?}"),
     };
-    assert_eq!(peer2, peer1, "resume = 旧 peer 身份接管");
-    assert_ne!(nonce2, nonce1, "票一次性：重挂后必须轮换");
+    assert_eq!(peer2, peer1, "resume = the old peer identity taking over");
+    assert_ne!(nonce2, nonce1, "tickets are one-shot: they must rotate after a re-attach");
 
-    // 越过保留窗：延迟任务须因 seq 不匹配作废（轮换后新票在场 = 非 stale）
+    // past the retention window: the delayed task must be voided by the seq mismatch (after rotation the new ticket is present = not stale)
     tokio::time::sleep(Duration::from_secs(hold + 1)).await;
     assert!(
         srv.device_bindings.contains_key(&peer1),
-        "a2: 重挂后的活会话不得被上一连接的延迟清理误杀"
+        "a2: a live session after a re-attach must not be killed by the previous connection's delayed cleanup"
     );
 }
 
-/// ② 重放拒绝：已焚票再次携带 → miss → 全量 join + 旧挂起 peer 即刻接管清理（peer 必换）。
+/// 2. replay refusal: a burned ticket presented again -> miss -> full join + the old pending peer taken over and cleared immediately (the peer must change).
 #[tokio::test]
 async fn burned_nonce_replay_falls_back_to_full_join() {
     let (url, _srv) = spawn_server(true, 30).await;
@@ -175,7 +184,7 @@ async fn burned_nonce_replay_falls_back_to_full_join() {
         _ => unreachable!(),
     };
     drop(ws);
-    // 第一次：有效票 → 接管
+    // first: a valid ticket -> takeover
     let mut ws2 = connect(&url).await;
     let j2 = device_join(&mut ws2, 3, Some(nonce1.clone())).await;
     let SignalingMessage::RoomJoined { peer_id: p2, session_nonce: Some(n2), .. } = j2 else {
@@ -183,17 +192,17 @@ async fn burned_nonce_replay_falls_back_to_full_join() {
     };
     assert_eq!(p2, peer1);
     drop(ws2);
-    // 第二次：同一旧票重放 → 必须 miss（即焚验证），接管路径清旧、新 peer 诞生
+    // second: replaying the same old ticket -> must miss (burn-on-verify), the takeover path clears the old and a new peer is born
     let mut ws3 = connect(&url).await;
     let j3 = device_join(&mut ws3, 3, Some(nonce1.clone())).await;
     let SignalingMessage::RoomJoined { peer_id: p3, .. } = j3 else {
-        panic!("重放应回落全量 join（takeover 腾位），got {j3:?}")
+        panic!("a replay should fall back to a full join (takeover frees the slot), got {j3:?}")
     };
-    assert_ne!(p3, peer1, "重放票不得接管（burn-and-burn 失守）");
+    assert_ne!(p3, peer1, "a replayed ticket must not take over (burn-and-burn failed)");
     assert!(n2 != nonce1);
 }
 
-/// ③ 协议门：n=2 携带 resume → 忽略；n=2 车端不挂载票（v3 才开域）。
+/// 3. the protocol gate: n=2 carrying resume -> ignored; n=2 vehicles do not attach tickets (v3 opens the domain).
 #[tokio::test]
 async fn resume_ignored_below_v3() {
     let (url, _srv) = spawn_server(true, 30).await;
@@ -201,11 +210,11 @@ async fn resume_ignored_below_v3() {
     let j = device_join(&mut ws, 2, Some("bogus".into())).await;
     match j {
         SignalingMessage::RoomJoined { protocol: Some(2), session_nonce: None, .. } => {}
-        other => panic!("v2 会话不得见票/不得谈 v3: {other:?}"),
+        other => panic!("a v2 session must not see tickets / must not negotiate v3: {other:?}"),
     }
 }
 
-/// ④ 身份门：Legacy PSK 车端（无设备凭证）即便 v3 也不挂载（v1 范围=设备会话）。
+/// 4. the identity gate: a Legacy PSK vehicle (no device credentials) does not attach even on v3 (the v1 scope = device sessions).
 #[tokio::test]
 async fn legacy_host_not_armed() {
     let (url, _srv) = spawn_server(false, 30).await;
@@ -227,6 +236,6 @@ async fn legacy_host_not_armed() {
     .await;
     match recv(&mut ws).await {
         SignalingMessage::RoomJoined { protocol: Some(3), session_nonce: None, .. } => {}
-        other => panic!("Legacy 车端不应下发重挂票: {other:?}"),
+        other => panic!("a Legacy vehicle should not be issued a re-attach ticket: {other:?}"),
     }
 }

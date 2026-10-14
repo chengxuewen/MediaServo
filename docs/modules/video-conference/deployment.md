@@ -1,44 +1,44 @@
-# 视频会议部署参考
+# Video Conference Deployment Reference
 
-## 1. 部署形态
+## 1. Deployment Forms
 
-视频会议模块支持四种部署形态，与 MediaServo 总体架构一致：
+The video-conference module supports four deployment forms, consistent with MediaServo's overall architecture:
 
 ### 1.1 Embed (Rust crate)
 
-**场景**: 第三方平台嵌入式场景
-**特点**: 静态链接，约 5 个插件，轻量级
+**Scenario**: third-party platform embedded use
+**Characteristics**: statically linked, ~5 plugins, lightweight
 
 ```
-第三方平台 binary
+Third-party platform binary
   └── mediaservo-core
       └── mediaservo-conference (crate)
-          └── mediasoup (静态链接)
+          └── mediasoup (statically linked)
 
-部署: single binary, no external deps
-容量: <50 会话/SFU Worker
+Deployment: single binary, no external deps
+Capacity: <50 sessions/SFU Worker
 ```
 
-### 1.2 Sidecar (napi-rs 绑定)
+### 1.2 Sidecar (napi-rs bindings)
 
-**场景**: 宿主平台企业应用
-**特点**: 容器 + napi-rs 绑定，约 12 个插件
+**Scenario**: host-platform enterprise apps
+**Characteristics**: container + napi-rs bindings, ~12 plugins
 
 ```
-宿主平台 Docker
+Host-platform Docker
   └── mediaservo-service
       ├── napi-rs binding
       └── mediaservo-conference
           └── mediasoup Worker pool
 
-部署: Docker container, sidecar 模式
-容量: <200 会话/节点
+Deployment: Docker container, sidecar mode
+Capacity: <200 sessions/node
 ```
 
 ### 1.3 Standalone
 
-**场景**: 独立部署
-**特点**: 完整后端 + Web UI，独立进程
+**Scenario**: standalone deployment
+**Characteristics**: complete backend + Web UI, standalone processes
 
 ```
 mediaservo-server
@@ -48,39 +48,39 @@ mediaservo-server
   ├── Recording pipeline
   └── Admin Web UI
 
-部署: bare metal / VM / container
-容量: <1000 会话/节点 (视 Worker 数)
+Deployment: bare metal / VM / container
+Capacity: <1000 sessions/node (depending on Worker count)
 ```
 
-### 1.4 平台模块
+### 1.4 Platform Module
 
-**场景**: 宿主平台集成
-**特点**: Docker 容器模块，委托平台认证
+**Scenario**: host-platform integration
+**Characteristics**: Docker container module, auth delegated to the platform
 
 ```
-宿主平台
+Host platform
   └── Container: mediaservo-conference
-      ├── 委托平台 RBAC/LDAP
-      └── 独立 SFU Worker 池
+      ├── RBAC/LDAP delegated to the platform
+      └── Independent SFU Worker pool
 
-部署: 宿主平台容器编排
-容量: 取决于宿主平台资源分配
+Deployment: host-platform container orchestration
+Capacity: depends on the host platform's resource allocation
 ```
 
-## 2. 配置参考
+## 2. Configuration Reference
 
 ```yaml
-# config.yaml — 视频会议模块配置
+# config.yaml — video-conference module configuration
 
 conference:
-  # 信令
+  # Signaling
   signaling:
     port: 8000
     tls: true
     cert_path: "/etc/mediaservo/certs/server.pem"
     key_path: "/etc/mediaservo/certs/server.key"
     max_connections: 10000
-    rate_limit: 1000  # 每秒最大请求数
+    rate_limit: 1000  # Max requests per second
 
   # SFU
   sfu:
@@ -94,14 +94,14 @@ conference:
       rtc_min_port: 40000
       rtc_max_port: 49999
 
-  # 房间
+  # Rooms
   room:
     default_max_participants: 16
     max_duration_sec: 86400   # 24h
-    inactivity_timeout_sec: 300  # 5min 无参与者自动结束
+    inactivity_timeout_sec: 300  # Auto-end after 5min with no participants
     max_rooms_per_user: 5
 
-  # 媒体
+  # Media
   media:
     default_video_codec: "vp9"
     default_audio_codec: "opus"
@@ -114,7 +114,7 @@ conference:
       dtx: true
       bitrate: 30000        # bps
 
-  # 录制
+  # Recording
   recording:
     enabled: true
     storage_path: "/var/mediaservo/recordings"
@@ -133,7 +133,7 @@ conference:
     #     username: "user"
     #     credential: "pass"
 
-  # 分布式
+  # Distributed
   distributed:
     enabled: false
     redis_url: "redis://localhost:6379"
@@ -142,24 +142,24 @@ conference:
       nodes: []
 ```
 
-## 3. 环境变量
+## 3. Environment Variables
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `CONFERENCE_SIGNALING_PORT` | 8000 | 信令端口 |
-| `CONFERENCE_SFU_MIN_PORT` | 40000 | RTC 最小端口 |
-| `CONFERENCE_SFU_MAX_PORT` | 49999 | RTC 最大端口 |
-| `CONFERENCE_REDIS_URL` | - | Redis 连接 |
-| `CONFERENCE_REGION` | default | 部署区域 |
-| `CONFERENCE_RECORDING_PATH` | /var/mediaservo/recordings | 录制存储路径 |
-| `CONFERENCE_RECORDING_ENABLED` | true | 启用录制 |
-| `CONFERENCE_DEFAULT_CODEC` | vp9 | 默认视频编码 |
-| `CONFERENCE_MAX_BITRATE` | 5000 | 最大码率 (kbps) |
-| `CONFERENCE_MAX_ROOMS` | 1000 | 最大房间数 |
-| `CONFERENCE_WORKER_MIN` | 2 | 最小 Worker 数 |
-| `CONFERENCE_WORKER_MAX` | 16 | 最大 Worker 数 |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONFERENCE_SIGNALING_PORT` | 8000 | Signaling port |
+| `CONFERENCE_SFU_MIN_PORT` | 40000 | RTC min port |
+| `CONFERENCE_SFU_MAX_PORT` | 49999 | RTC max port |
+| `CONFERENCE_REDIS_URL` | - | Redis connection |
+| `CONFERENCE_REGION` | default | Deployment region |
+| `CONFERENCE_RECORDING_PATH` | /var/mediaservo/recordings | Recording storage path |
+| `CONFERENCE_RECORDING_ENABLED` | true | Enable recording |
+| `CONFERENCE_DEFAULT_CODEC` | vp9 | Default video codec |
+| `CONFERENCE_MAX_BITRATE` | 5000 | Max bitrate (kbps) |
+| `CONFERENCE_MAX_ROOMS` | 1000 | Max room count |
+| `CONFERENCE_WORKER_MIN` | 2 | Min Worker count |
+| `CONFERENCE_WORKER_MAX` | 16 | Max Worker count |
 
-## 4. Docker 部署
+## 4. Docker Deployment
 
 ```dockerfile
 # Dockerfile — conference module
@@ -210,48 +210,48 @@ services:
       - "6379:6379"
 ```
 
-## 5. 防火墙端口
+## 5. Firewall Ports
 
-| 端口 | 协议 | 用途 |
-|------|------|------|
-| 8000 | TCP | 信令 WebSocket |
-| 8001 | TCP | gRPC 服务间通信 |
-| 40000-49999 | UDP | WebRTC 媒体 |
-| 443 | TCP | 可选 TLS 信令 |
-| 3478 | UDP | TURN 服务 |
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| 8000 | TCP | Signaling WebSocket |
+| 8001 | TCP | Inter-service gRPC |
+| 40000-49999 | UDP | WebRTC media |
+| 443 | TCP | Optional TLS signaling |
+| 3478 | UDP | TURN service |
 
-## 6. 监控
+## 6. Monitoring
 
 ```yaml
-# Prometheus 指标端点
+# Prometheus metrics endpoint
 metrics:
   port: 9090
   path: "/metrics"
 
-# 关键指标
-- conference_rooms_active      # 活跃房间数
-- conference_participants_total # 总参与人数
-- conference_workers_count      # Worker 数
-- conference_sfu_cpu_usage     # SFU CPU 使用率
-- conference_bitrate_total     # 总码率 (bps)
-- conference_packet_loss       # 丢包率
-- conference_connection_errors # 连接错误数
-- conference_recording_active  # 录制中数
+# Key metrics
+- conference_rooms_active      # Active room count
+- conference_participants_total # Total participants
+- conference_workers_count      # Worker count
+- conference_sfu_cpu_usage     # SFU CPU usage
+- conference_bitrate_total     # Total bitrate (bps)
+- conference_packet_loss       # Packet loss rate
+- conference_connection_errors # Connection error count
+- conference_recording_active  # Active recordings
 ```
 
-## 7. 容量规划
+## 7. Capacity Planning
 
-| 规格 | 小 | 中 | 大 |
-|------|-----|-----|-----|
-| CPU | 4 核 | 8 核 | 32 核 |
-| 内存 | 8 GB | 16 GB | 64 GB |
-| Worker 数 | 2 | 6 | 24 |
-| 并发房间 | 50 | 200 | 1000 |
-| 并发参与者 | 200 | 2000 | 10000 |
-| 带宽 | 100 Mbps | 1 Gbps | 10 Gbps |
-| 部署形态 | Embed | Sidecar/Standalone | Standalone 集群 |
+| Spec | Small | Medium | Large |
+|------|-------|--------|-------|
+| CPU | 4 cores | 8 cores | 32 cores |
+| Memory | 8 GB | 16 GB | 64 GB |
+| Worker count | 2 | 6 | 24 |
+| Concurrent rooms | 50 | 200 | 1000 |
+| Concurrent participants | 200 | 2000 | 10000 |
+| Bandwidth | 100 Mbps | 1 Gbps | 10 Gbps |
+| Deployment form | Embed | Sidecar/Standalone | Standalone cluster |
 
-## 8. 高可用
+## 8. High Availability
 
 ```
                  ┌──────────┐
@@ -275,7 +275,7 @@ metrics:
                   └──────────┘
 ```
 
-- 多节点水平扩展，Redis 共享状态
-- 区域就近接入，跨区域级联
-- 节点故障自动迁移会议
-- 无单点故障
+- Multi-node horizontal scaling, Redis-shared state
+- Region-nearest access, cross-region cascading
+- Conferences auto-migrate on node failure
+- No single point of failure

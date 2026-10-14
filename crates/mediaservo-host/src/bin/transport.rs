@@ -3,7 +3,7 @@
 //! Real WebRTC connections need a running signaling server (Phase I integration).
 //! The Transport struct holds a placeholder for the eventual RTCPeerConnection.
 
-#![allow(dead_code)] // legacy AUDEMSP Phase-I 占位件（host-legacy mod 引用保编译，Transport 无消费方 = 在册死面）
+#![allow(dead_code)] // legacy AUDEMSP Phase-I stub (kept compilable via host-legacy mod include; Transport has no consumer = known dead surface)
 mod imp {
     use base64::{Engine as _, engine::general_purpose};
     use mediaservo_common::error::CoreError;
@@ -44,7 +44,7 @@ mod imp {
 }
 
 #[cfg(test)]
-use imp::Transport; // test 形态可见性（root 非 test 不导出 = 无 unused_imports 反噬）
+use imp::Transport; // test-build visibility (not exported from root outside tests = no unused_imports blowback)
 
 #[cfg(test)]
 mod tests {

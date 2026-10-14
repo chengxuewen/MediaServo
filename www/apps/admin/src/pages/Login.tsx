@@ -3,7 +3,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { login, setToken, hasToken } from '../api/client';
 import './Login.css';
 
-/** 登录页 — 复用 Settings 登录表单样式（.login-input/.btn/.token-status）。 */
+/** Login page — reuses the Settings login form styles (.login-input/.btn/.token-status). */
 export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -21,7 +21,7 @@ export default function Login() {
     try {
       const resp = await login(username.trim(), password);
       setToken(resp.token);
-      // 角色感知默认视图: operator 无 admin REST 准入（I1）→ 落 Settings 而非触发 Dashboard 401
+      // role-aware default view: operator has no admin REST access (I1) → land on Settings instead of triggering a Dashboard 401
       navigate(resp.role === 'admin' || resp.role === 'dispatcher' ? '/' : '/settings');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');

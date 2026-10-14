@@ -16,7 +16,7 @@ export default function Settings() {
   const currentRole = getRole();
   const isAdmin = currentRole === 'admin';
 
-  // ── PSK 管理（psk-admin-management）──────────────────────────────────
+  // ── PSK management (psk-admin-management) ─────────────────────────────
   const [pskSecret, setPskSecret] = useState<{ psk: string; hint: string } | null>(null);
   const [pskCopied, setPskCopied] = useState(false);
   const [pskError, setPskError] = useState<string | null>(null);

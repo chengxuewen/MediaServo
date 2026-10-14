@@ -1,25 +1,25 @@
-# mediasoup 客户端架构参考（画像 · 用法 · 架构 · 案例）
+# mediasoup Client Architecture Reference (Profile · Usage · Architecture · Cases)
 
-> 创建: 2026-08-05 | 来源: `.refinfo/` 官方源码 + 团队审核实证
-> 参考入口: `docs/reference/webrtc/mediasoup-refs.md`（导航）
-> 适用: MediaServo Host SFU produce / consume 对齐官方用法（C18）
+> Created: 2026-08-05 | Source: `.refinfo/` official sources + team-review evidence
+> Reference entry: `docs/reference/webrtc/mediasoup-refs.md` (navigation)
+> Applies to: MediaServo Host SFU produce/consume aligned with official usage (C18)
 
-## 1. 画像（Overview）
+## 1. Profile (Overview)
 
-mediasoup 是一套 **SFU 多媒体服务器 + 客户端 SDK**：
+mediasoup is an **SFU multimedia server + client SDK** family:
 
-| 组件 | 语言 | 角色 |
+| Component | Language | Role |
 |------|------|------|
-| **mediasoup** (server) | Node.js + C++ Worker | SFU 核心：Router/Transport/Producer/Consumer/DataProducer/DataConsumer |
-| **mediasoup-client** | JavaScript (浏览器) | 官方 JS 客户端 SDK |
-| **libmediasoupclient** | C++ | 官方 C++ 客户端 SDK（基于 libwebrtc） |
-| **mediasoup-demo** | JS | 官方端到端 demo（信令 + 媒体协商完整流程） |
+| **mediasoup** (server) | Node.js + C++ Worker | SFU core: Router/Transport/Producer/Consumer/DataProducer/DataConsumer |
+| **mediasoup-client** | JavaScript (browser) | The official JS client SDK |
+| **libmediasoupclient** | C++ | The official C++ client SDK (based on libwebrtc) |
+| **mediasoup-demo** | JS | The official end-to-end demo (complete signaling + media negotiation flow) |
 
-**核心设计**: 媒体面**纯 ORTC**（RTP 参数匹配），**不交换 SDP**。信令面只传 JSON 对象（rtpParameters、dtlsParameters、iceParameters），SDP 由客户端内部构造（本地 offer + 客户端自构 answer）。
+**Core design**: the media plane is **pure ORTC** (RTP parameter matching); **no SDP is exchanged**. The signaling plane only carries JSON objects (rtpParameters, dtlsParameters, iceParameters); the SDP is constructed client-internally (local offer + a client-built answer).
 
-**🔑 最重要的事实（团队审核实证）**: 服务端**从不返回 SDP answer**。客户端是 offerer —— `addTransceiver(sendonly) → createOffer → setLocalDescription(offer) → 发 rtpParameters → 服务端 produce → 客户端自构 answer → setRemoteDescription(answer)`。
+**🔑 The most important fact (team-review evidence)**: the server **never returns an SDP answer**. The client is the offerer — `addTransceiver(sendonly) → createOffer → setLocalDescription(offer) → send rtpParameters → server produce → the client builds its own answer → setRemoteDescription(answer)`.
 
-## 2. 官方 produce 协商流程（标准）
+## 2. The Official produce Negotiation Flow (standard)
 
 ### 2.1 JS — `Chrome74.ts send()`（`.refinfo/mediasoup-client`）
 
@@ -27,15 +27,15 @@ mediasoup 是一套 **SFU 多媒体服务器 + 客户端 SDK**：
 ① pc.addTransceiver(track, { direction: 'sendonly', streams, sendEncodings })
 ② let offer = await pc.createOffer()
 ③ ortc.getSendingRtpParameters(kind, extendedCapabilities)
-   → sendingRtpParameters (ssrc/PT/fmtp 从 offer 推导)
+   → sendingRtpParameters (ssrc/PT/fmtp derived from the offer)
 ④ await pc.setLocalDescription(offer)
-⑤ 发 sendingRtpParameters → 服务端 transport.produce() → 回 rtpParameters (无 SDP)
-⑥ 客户端自构 answer: this._remoteSdp.send({offerMediaObject, offerRtpParameters,
+⑤ Send sendingRtpParameters → server transport.produce() → returns rtpParameters (no SDP)
+⑥ The client builds its own answer: this._remoteSdp.send({offerMediaObject, offerRtpParameters,
    answerRtpParameters}) → answer = { sdp: this._remoteSdp.getSdp() }
    await pc.setRemoteDescription(answer)
 ```
 
-**关键代码**（verbatim，file:line）:
+**Key code** (verbatim, file:line):
 ```ts
 // Chrome74.ts:360-364
 const transceiver = this._pc.addTransceiver(track, {
@@ -46,7 +46,7 @@ const transceiver = this._pc.addTransceiver(track, {
 // Chrome74.ts:394-397
 const sendingRtpParameters = ortc.getSendingRtpParameters(
     track.kind, sendExtendedRtpCapabilities);
-// Chrome74.ts:542-560  ← 客户端自构 answer, 非服务端返回!
+// Chrome74.ts:542-560  ← the client builds its own answer; not returned by the server!
 this._remoteSdp.send({ offerMediaObject, offerRtpParameters: sendingRtpParameters,
     answerRtpParameters: sendingRemoteRtpParameters, codecOptions });
 const answer = { type: 'answer', sdp: this._remoteSdp.getSdp() };
@@ -60,12 +60,12 @@ await this._pc.setRemoteDescription(answer);
 ② offer = pc->CreateOffer(options)
 ③ ortc::getSendingRtpParameters(kind, ...) → sendingRtpParameters
 ④ pc->SetLocalDescription(kOffer, offer)
-⑤ 发 sendingRtpParameters → transport.produce()
-⑥ answer = remoteSdp->GetSdp()  ← 客户端自构
+⑤ Send sendingRtpParameters → transport.produce()
+⑥ answer = remoteSdp->GetSdp()  ← built by the client itself
    pc->SetRemoteDescription(kAnswer, answer)
 ```
 
-**关键**（verbatim，file:line）:
+**Key** (verbatim, file:line):
 ```cpp
 // Handler.cpp:191-200
 webrtc::RtpTransceiverInit transceiverInit;
@@ -73,50 +73,50 @@ transceiverInit.direction = webrtc::RtpTransceiverDirection::kSendOnly;
 if (encodings && !encodings->empty())
     transceiverInit.send_encodings = *encodings;
 auto transceiver = this->pc->AddTransceiver(scopedTrack, transceiverInit);
-// Handler.cpp:365-369  ← ssrc 来自 offer SDP, 客户端自构 answer
+// Handler.cpp:365-369  ← the ssrc comes from the offer SDP; the client builds its own answer
 auto answer = this->remoteSdp->GetSdp();
 this->pc->SetRemoteDescription(webrtc::SdpType::kAnswer, answer);
 ```
 
-## 3. 关键机制（架构细节）
+## 3. Key Mechanisms (architecture details)
 
-### 3.1 ssrc / PT / fmtp 来源
+### 3.1 Where ssrc / PT / fmtp Come From
 
-| 参数 | 来源 | 说明 |
+| Parameter | Source | Notes |
 |------|------|------|
-| **ssrc** | libwebrtc 生成的 offer SDP（`getRtpEncodings`，Handler.cpp:306-308） | 非手工硬编码 |
-| **payloadType** | `getSendingRtpParameters`（ortc.cpp:1473） | 从协商能力 `localPayloadType` 推导 |
-| **codec parameters (fmtp)** | `getSendingRtpParameters` `localParameters` + `codecOptions` | 官方只注入 `x-google-{start,max,min}-bitrate`（MediaSection.cpp:255-277） |
+| **ssrc** | The offer SDP generated by libwebrtc (`getRtpEncodings`, Handler.cpp:306-308) | Not hand-hardcoded |
+| **payloadType** | `getSendingRtpParameters` (ortc.cpp:1473) | Derived from the negotiated capability `localPayloadType` |
+| **codec parameters (fmtp)** | `getSendingRtpParameters`'s `localParameters` + `codecOptions` | The official side only injects `x-google-{start,max,min}-bitrate` (MediaSection.cpp:255-277) |
 
-### 3.2 客户端自构 answer 机制
+### 3.2 The Client-Built Answer Mechanism
 
-`RemoteSdp::Send()`（RemoteSdp.cpp:157-185）用 `offerMediaObject`（本地）+ `offerRtpParameters`（发送参数）+ `answerRtpParameters`（remote 参数）+ `codecOptions` 构造 `AnswerMediaSection`，生成 answer 的 m= 段。**codec 参数经 answer 的 fmtp 行写回，随后 `setRemoteDescription(answer)` 让 libwebrtc 读取**。
+`RemoteSdp::Send()` (RemoteSdp.cpp:157-185) uses `offerMediaObject` (local) + `offerRtpParameters` (send parameters) + `answerRtpParameters` (remote parameters) + `codecOptions` to build an `AnswerMediaSection`, generating the answer's m= section. **Codec parameters are written back through the answer's fmtp lines, then `setRemoteDescription(answer)` applies them** — libwebrtc reads the negotiated codec parameters from the local answer.
 
-### 3.3 关键帧 / 码率控制
+### 3.3 Keyframe / Bitrate Control
 
-- **官方不用 `x-google-max-keyframe-interval`**（webrtc-sys `RtpEncodingParameters` 无此字段；官方 MediaSection.cpp 只注入 bitrate 三件套）
-- 关键帧靠**标准 PLI → RequestKeyFrame → IDR 反馈链路**（roffer + sendonly 方向协商完整时生效）
-- 码率控制: `send_encodings.max_bitrate` / `codecOptions.videoGoogleMaxBitrate`
+- **The official side does not use `x-google-max-keyframe-interval`** (webrtc-sys `RtpEncodingParameters` has no such field; the official MediaSection.cpp injects only the bitrate trio)
+- Keyframes rely on the **standard PLI → RequestKeyFrame → IDR feedback chain** (works when offer + sendonly direction negotiation is complete)
+- Bitrate control: `send_encodings.max_bitrate` / `codecOptions.videoGoogleMaxBitrate`
 
-### 3.4 方向
+### 3.4 Direction
 
-- Producer 侧: mediasoup 是**接收方**，remote SDP 方向 **recvonly**（官方客户端 remote 也 recvonly）。真正的差异是**"谁生成本地 m= 行"**（offer vs answer），不是方向本身（审计修正，纠正初版"方向反转"误判）。
+- Producer side: mediasoup is the **receiver**; the remote SDP direction is **recvonly** (the official client's remote is also recvonly). The real difference is **who generates the local m= line** (offer vs answer), not the direction itself (audit correction of the initial "direction reversal" misjudgment).
 
-## 4. 案例对照：MediaServo Host 当前实现 vs 官方
+## 4. Case Comparison: MediaServo Host's Implementation vs Official
 
-| # | 官方 | MediaServo Host 现状 | 问题 |
+| # | Official | MediaServo Host state | Problem |
 |---|------|------------------|------|
-| 1 | `addTransceiver(sendonly)` 生成 offer | `setRemoteDescription(手工 recvonly SDP)` | 绕过协商，codec 参数放错位置 |
-| 2 | `addTrack(track, stream)` / `addTransceiver` | `add_track("video")` 非 W3C 签名 | 无 sendEncodings |
-| 3 | `createOffer` + `setLocalDescription(offer)` | `create_answer()` 在 remote offer 上做 | 角色逆转，协商语义错位 |
-| 4 | `getSendingRtpParameters` 从 offer 推导 | 手工 `build_produce_rtp_parameters` (PT=101) | 双硬编码（PIT-54） |
-| 5 | ssrc 从 offer SDP 解析 | 手工 `negotiated_ssrc_from_sdp`(answer) | 绕过标准推导 |
+| 1 | `addTransceiver(sendonly)` generates the offer | `setRemoteDescription(hand-built recvonly SDP)` | Bypasses negotiation; codec parameters placed in the wrong location |
+| 2 | `addTrack(track, stream)` / `addTransceiver` | `add_track("video")`, a non-W3C signature | No sendEncodings |
+| 3 | `createOffer` + `setLocalDescription(offer)` | `create_answer()` performed on the remote offer | Role reversal; negotiation semantics misplaced |
+| 4 | `getSendingRtpParameters` derived from the offer | Hand-made `build_produce_rtp_parameters` (PT=101) | Double hardcoding (PIT-54) |
+| 5 | The ssrc parsed from the offer SDP | Hand-made `negotiated_ssrc_from_sdp`(answer) | Bypasses standard derivation |
 
-**重构方案**: 已实施完成（D214 W3C API 补全 + D216 Host 标准协商）。
+**Rework plan**: implemented (D214 W3C API completion + D216 Host standard negotiation).
 
-## 5. 相关文档
+## 5. Related Docs
 
-- `mediasoup-refs.md` — 源码导航 + 脚本用法
-- `webrtc-w3c-alignment.md` — 对齐分析（含 §0 团队审核 3 处修正）
-- `.agents/memorys/conventions.md` C18 — 官方用法优先约束
-- host-sfu-w3c-alignment — 重构计划（已实施完成，D214/D216）
+- `mediasoup-refs.md` — source navigation + script usage
+- `webrtc-w3c-alignment.md` — alignment analysis (incl. §0's three team-review corrections)
+- `.agents/memorys/conventions.md` C18 — the official-usage-first constraint
+- host-sfu-w3c-alignment — the rework plan (implemented, D214/D216)

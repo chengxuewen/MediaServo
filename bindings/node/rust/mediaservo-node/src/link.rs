@@ -1,5 +1,5 @@
-//! link 信令面 napi 绑定 — SignalSession（事件经 ThreadsafeFunction → JS 主线程，
-//! livekit async_queue 同构：Rust broadcast 线程 → tsfn → JS 回调）。
+//! link signaling-plane napi bindings — SignalSession (events via ThreadsafeFunction → JS main thread,
+//! livekit async_queue shape: Rust broadcast thread → tsfn → JS callback).
 
 use std::sync::Arc;
 
@@ -9,7 +9,7 @@ use napi::bindgen_prelude::*;
 use napi::threadsafe_function::ThreadsafeFunctionCallMode;
 use napi_derive::napi;
 
-/// 信令配置（role: "Host"/"Pusher"→Host, "Client"/"Puller"→Remote; 默认 Host）。
+/// Signaling configuration (role: "Host"/"Pusher"→Host, "Client"/"Puller"→Remote; default Host).
 #[napi(object)]
 pub struct JsSignalConfig {
     pub url: String,
@@ -34,19 +34,19 @@ fn event_to_json(ev: &SignalEvent) -> String {
     .to_string()
 }
 
-/// 信令会话（async；事件订阅经 onEvent 回调——C 泵线程安全转发 JS 主线程）。
+/// Signaling session (async; event subscription via the onEvent callback — forwarded safely from the C pump thread to the JS main thread).
 #[napi]
 pub struct JsSignalSession {
     inner: Arc<tokio::sync::Mutex<Option<SignalSession>>>,
 }
 
-// SAFETY: 所有方法经 tokio Mutex 序列化（field-c 同款先例）。
+// SAFETY: all methods are serialized through a tokio Mutex (same precedent as field-c).
 unsafe impl Send for JsSignalSession {}
 unsafe impl Sync for JsSignalSession {}
 
 #[napi]
 impl JsSignalSession {
-    /// 连接信令 + 加入房间（async，PSK 认证内建）。
+    /// Connect signaling and join the room (async, PSK authentication built in).
     #[napi(factory)]
     pub async fn connect(cfg: JsSignalConfig) -> Result<Self> {
         let role = match cfg.role.as_deref().unwrap_or("Host") {
@@ -62,7 +62,7 @@ impl JsSignalSession {
         Ok(Self { inner: Arc::new(tokio::sync::Mutex::new(Some(session))) })
     }
 
-    /// 发送信令消息（JSON 字符串，SignalingMessage serde 格式）。
+    /// Send a signaling message (JSON string in SignalingMessage serde format).
     #[napi]
     pub async fn send(&self, json: String) -> Result<()> {
         let msg: SignalingMessage = serde_json::from_str(&json)
@@ -76,16 +76,16 @@ impl JsSignalSession {
             .map_err(|e| napi::Error::from_reason(format!("send: {e}")))
     }
 
-    /// 订阅事件（JSON 字符串回调；connect 后可随时注册，替换旧回调）。
+    /// Subscribe to events (JSON string callback; can be registered any time after connect, replacing the old callback).
     #[napi]
-    #[allow(clippy::while_let_loop)] // 泵循环 match 形保留 None 分支日志钩位，不改 while-let
+    #[allow(clippy::while_let_loop)] // keep the match-shaped pump loop with the None branch log hook; do not rewrite as while-let
     pub fn on_event(&self, cb: Function<String, ()>) -> Result<()> {
-        // TSFN 的 T 自动转 JS 参数（JsValuesTupleIntoVec）；无闭包 build 即可
+        // The TSFN's T is auto-converted to JS args (JsValuesTupleIntoVec); build() without a closure is enough.
         let tsfn = cb.build_threadsafe_function::<String>().build()?;
 
         let session = self.inner.clone();
-        // 泵: broadcast receiver → tsfn.call（JS 主线程）；broadcast 关闭（session 关闭）后退出。
-        // 同步方法无 tokio 上下文 → 用全局共享 runtime（field-c 同款模式）。
+        // Pump: broadcast receiver → tsfn.call (JS main thread); exits once the broadcast closes (session closed).
+        // Sync methods have no tokio context → use the global shared runtime (same pattern as field-c).
         super::event_runtime().spawn(async move {
             let (room_id, rx) = {
                 let guard = session.lock().await;
@@ -95,7 +95,7 @@ impl JsSignalSession {
                 }
             };
             let Some(mut rx) = rx else { return };
-            // Connected 事件在 connect() 内已发出（订阅前丢失）——合成补发（link-c 同款方案）
+            // The Connected event is emitted inside connect() (lost before subscribing) — re-synthesize it (same approach as link-c).
             let _ = tsfn.call(
                 serde_json::json!({"type": "connected", "room_id": room_id}).to_string(),
                 ThreadsafeFunctionCallMode::Blocking,
@@ -106,14 +106,14 @@ impl JsSignalSession {
                         let json = event_to_json(&ev);
                         let _ = tsfn.call(json, ThreadsafeFunctionCallMode::Blocking);
                     }
-                    Err(_) => break, // broadcast closed（session 关闭）
+                    Err(_) => break, // broadcast closed (session closed)
                 }
             }
         });
         Ok(())
     }
 
-    /// 关闭会话（幂等）。
+    /// Close the session (idempotent).
     #[napi]
     pub async fn close(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;

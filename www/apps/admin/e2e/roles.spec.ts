@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
-// H3: admin 角色视图（storageState 已登录 admin — global-setup）。
-// 前置: Docker server (9800) + vite dev (5173)。
+// H3: admin role view (storageState signed in as admin — global-setup).
+// Prereq: Docker server (9800) + vite dev (5173).
 
 test.describe('H3 admin role-aware views', () => {
   test('admin sees audio + vehicles nav, header shows role', async ({ page }) => {
@@ -18,7 +18,7 @@ test.describe('H3 admin role-aware views', () => {
       const res = await fetch('/api/admin/rooms/nope', { method: 'DELETE', headers: { Authorization: `Bearer ${tok}` } });
       return res.status;
     }, token);
-    expect(deleteStatus).toBe(404); // 只读拦截不存在 → 走到房间查找（auth 通过）
+    expect(deleteStatus).toBe(404); // read-only block: room not found → falls through to room lookup (auth passed)
   });
 
   test('audio panel renders (rooms or empty state)', async ({ page }) => {

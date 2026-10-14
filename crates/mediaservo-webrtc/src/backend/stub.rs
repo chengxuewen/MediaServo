@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Debug, Default)]
 pub(crate) struct StubPc {
     closed: AtomicBool,
-    /// v2: 状态化 transceivers（T2 测试需 add 后 get 非空）
+    /// v2: stateful transceivers (the T2 tests need get non-empty after add)
     transceivers: std::sync::Mutex<Vec<crate::rtp::RTCRtpTransceiver>>,
 }
 
@@ -79,7 +79,7 @@ impl PcBackend for StubPc {
         self.closed.store(true, Ordering::Relaxed);
     }
 
-    // ── v2: W3C API stub overrides（状态化）──
+    // -- v2: W3C API stub overrides (stateful) --
     fn get_transceivers(&self) -> Result<Vec<crate::rtp::RTCRtpTransceiver>, crate::RTCError> {
         Ok(self.transceivers.lock().unwrap().clone())
     }
@@ -282,12 +282,12 @@ impl DcBackend for StubDc {
 
 // ── StubTrack ──
 
-/// Stub 轨道后端 — 写帧 no-op，但记录 I420 写入供测试观测（T2 透传断言）。
+/// Stub track backend -- write-frame is a no-op but records the I420 writes for test observation (the T2 passthrough asserts).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct StubTrack {
-    /// 已写 I420 帧数（write_raw_i420_with_ts 计数）。
+    /// The number of I420 frames written (counted by write_raw_i420_with_ts).
     frames_written: Arc<AtomicU64>,
-    /// 已写帧时间戳序列（C17 透传断言）。
+    /// The sequence of written frame timestamps (the C17 passthrough asserts).
     ts_history: Arc<Mutex<Vec<i64>>>,
 }
 
@@ -313,7 +313,7 @@ impl TrackWriteBackend for StubTrack {
         Ok(())
     }
 
-    /// 记录 I420 写入（帧数 + 时间戳），测试断言透传/单调性。
+    /// Record an I420 write (frame count + timestamps); test asserts cover passthrough/monotonicity.
     async fn write_raw_i420_with_ts(
         &self,
         data: &[u8],
@@ -353,7 +353,7 @@ impl StubFactory {
     }
 }
 
-// ── T2: W3C PcBackend stub 状态化测试（v2）──
+// -- T2: W3C PcBackend stub stateful tests (v2) --
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,21 +391,21 @@ mod tests {
     fn sender_get_parameters_roundtrip() {
         let pc = new_pc();
         let params = pc.sender_get_parameters("t1").unwrap();
-        assert!(params.codecs.is_empty()); // stub 默认
+        assert!(params.codecs.is_empty()); // the stub default
     }
 
     #[test]
     fn receiver_get_parameters_roundtrip() {
         let pc = new_pc();
         let params = pc.receiver_get_parameters("t1").unwrap();
-        assert!(params.codecs.is_empty()); // stub 默认
+        assert!(params.codecs.is_empty()); // the stub default
     }
 
     #[test]
     fn get_sender_capabilities_video() {
         let pc = new_pc();
         let caps = pc.get_sender_capabilities(TrackKind::Video).unwrap();
-        assert!(caps.is_none()); // stub 允许 None
+        assert!(caps.is_none()); // the stub allows None
     }
 
     #[test]

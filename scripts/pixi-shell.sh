@@ -8,7 +8,7 @@ set -eo pipefail
 SCRIPT_DIR_PSHELL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "${SCRIPT_DIR_PSHELL}/_common.sh"
 
-# TTY 守卫（评审 H1）：非交互/管道（-h 抓取、脚本消费）不打印横幅——帮助输出干净
+# TTY guard (review H1): non-interactive/piped contexts (-h capture, script consumption) print no banner — clean help output
 if [ -t 1 ]; then
   echo "Activating MediaServo pixi environment..."
 fi

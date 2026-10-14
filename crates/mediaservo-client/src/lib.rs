@@ -1,21 +1,21 @@
-//! # mediaservo-client — 舱端/消费侧 SDK v2
+//! # mediaservo-client -- the cockpit/consumer-side SDK v2
 //!
-//! 最小闭环：账号登录（REST JWT）→ 信令入房（link SignalClient，JWT 经
-//! `Sec-WebSocket-Protocol` 头）→ SFU 视频消费（on_track I420 帧流）→
-//! 控制 DataChannel（ControlEnvelope/ControlAck，SFU-DC 形，与 host S1 镜像）。
+//! The minimal loop: account login (REST JWT) -> signaling join (link SignalClient, JWT via the
+//! `Sec-WebSocket-Protocol` header) -> SFU video consume (on_track I420 frame stream) ->
+//! control DataChannel (ControlEnvelope/ControlAck, the SFU-DC form, mirroring host S1).
 //!
-//! 边界纪律：C12（WebRTC 仅经 mediaservo-webrtc）、C21（禁依 mediasoup/server）、
-//! 禁依 field/deck/codec（consume 序列本地镜像 field::PullSession 形状）、
-//! 无硬编码端点/凭证（全部调用方传入）。
+//! Boundary discipline: C12 (WebRTC only via mediaservo-webrtc), C21 (never depend on mediasoup/server),
+//! never depend on field/deck/codec (the consume sequence locally mirrors field::PullSession's shape),
+//! no hardcoded endpoints/credentials (everything passed in by the caller).
 //!
-//! ## 5 分钟上手
+//! ## 5-minute quickstart
 //!
 //! ```ignore
 //! use mediaservo_client::{auth::login, ClientConfig, RoomSession};
 //! use mediaservo_common::protocol::PeerRole;
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-//! let base = "http://10.0.0.2:9800";            // 调用方提供，无默认值
+//! let base = "http://10.0.0.2:9800";            // caller-provided, no default
 //! let token = login(base, "operator", "<pw>").await?;
 //! let cfg = ClientConfig {
 //!     signaling_url: "ws://10.0.0.2:9800/ws".into(),
@@ -27,11 +27,11 @@
 //!     identity_dir: None,
 //! };
 //! let mut session = RoomSession::connect(&cfg).await?;
-//! // 视频：发现 producer → 消费，帧从 mpsc receiver 取（latest 语义，容量 3）
+//! // video: discover a producer -> consume, frames come from an mpsc receiver (latest-wins, capacity 3)
 //! let producer = session.wait_video_producer(std::time::Duration::from_secs(10)).await?;
 //! let mut frames = session.consume_video(&producer).await?;
 //! let frame = frames.recv().await.unwrap();
-//! // 控制：开 chassis 通道（要求谈成方言 ≥2），发命令等回执
+//! // control: open the chassis channel (requires negotiated dialect >= 2), send a command and await the receipt
 //! let mut ctl = session.open_control(&["chassis"]).await?;
 //! ctl.send("chassis", 1, "steer", serde_json::json!({"deg": 10})).await?;
 //! let ack = ctl.recv_ack(std::time::Duration::from_secs(5)).await?;

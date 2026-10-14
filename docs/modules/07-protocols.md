@@ -1,103 +1,103 @@
-# 协议与通信参考
+# Protocols & Communication Reference
 
-> MediaServo 采用多协议分层设计，覆盖内部通信、外部接入和媒体传输。
-
----
-
-## 一、协议分层
-
-| 层次 | 协议 | 说明 |
-|------|------|------|
-| **内部 IPC** | FlatBuffers | 插件间零拷贝通信 |
-| **第三方平台** | C FFI | Rust → C 静态链接 |
-| **宿主平台** | napi-rs | Rust → Node.js 原生模块 |
-| **后台服务** | gRPC (protobuf) | 控制面 API |
-| **信令** | WebSocket | SDP 协商、ICE 交换 |
-| **媒体传输** | RTP/RTCP, SRT, WebRTC | 数据面 |
-| **客户端 ⇄ 后台** | gRPC + REST | 认证、权限拉取、配置同步 |
+> MediaServo uses a multi-protocol layered design covering internal communication, external access, and media transport.
 
 ---
 
-## 二、协议选择建议
+## 1. Protocol Layers
 
-| 协议 | 推流接入 | 播放分发 | 低延迟 | 穿透 NAT | 移动端 | 推荐度 |
-|------|:---:|:---:|:---:|:---:|:---:|:---:|
-| **RTMP** | ✅ | ⚠️ | 1-5s | ❌ | ❌ | 必须支持（生态兼容） |
-| **SRT** | ✅ | - | 0.5-2s | ⚠️ | ❌ | 高（可靠推流） |
-| **WebRTC/WHIP** | ✅ | ✅ | <500ms | 需 TURN | ✅ | 高（低延迟互动） |
-| **HLS/LL-HLS** | - | ✅ | 2-10s | ✅ | ✅ | 必须（大规模分发） |
-| **MPEG-DASH** | - | ✅ | 2-10s | ✅ | ✅ | 建议支持 |
-| **HTTP-FLV** | - | ✅ | 1-3s | ✅ | ⚠️ | 可选（中文生态） |
-| **RTSP** | ✅ | ✅ | 0.5-2s | ❌ | ❌ | 建议（IPC 接入） |
-| **Media-over-QUIC** | ✅ | ✅ | <100ms | ✅ | - | 未来方向 |
-| **MoQ (QUIC)** | ✅ | ✅ | <100ms | ✅ | - | 未来方向 |
+| Layer | Protocol | Description |
+|-------|----------|-------------|
+| **Internal IPC** | FlatBuffers | Zero-copy communication between plugins |
+| **Third-party platforms** | C FFI | Rust → C static linking |
+| **Host platform** | napi-rs | Rust → Node.js native module |
+| **Backend services** | gRPC (protobuf) | Control-plane API |
+| **Signaling** | WebSocket | SDP negotiation, ICE exchange |
+| **Media transport** | RTP/RTCP, SRT, WebRTC | Data plane |
+| **Client ⇄ backend** | gRPC + REST | Auth, permission pull, config sync |
 
 ---
 
-## 三、WebRTC RTCDataChannel 协议（遥操作）
+## 2. Protocol Selection Guide
 
-### 3.1 通道分离策略
+| Protocol | Push ingest | Playback distribution | Low latency | NAT traversal | Mobile | Recommendation |
+|----------|:-----------:|:---------------------:|:-----------:|:-------------:|:------:|:--------------:|
+| **RTMP** | ✅ | ⚠️ | 1-5s | ❌ | ❌ | Must support (ecosystem compatibility) |
+| **SRT** | ✅ | - | 0.5-2s | ⚠️ | ❌ | High (reliable push) |
+| **WebRTC/WHIP** | ✅ | ✅ | <500ms | Needs TURN | ✅ | High (low-latency interaction) |
+| **HLS/LL-HLS** | - | ✅ | 2-10s | ✅ | ✅ | Must (large-scale distribution) |
+| **MPEG-DASH** | - | ✅ | 2-10s | ✅ | ✅ | Recommended |
+| **HTTP-FLV** | - | ✅ | 1-3s | ✅ | ⚠️ | Optional (Chinese ecosystem) |
+| **RTSP** | ✅ | ✅ | 0.5-2s | ❌ | ❌ | Recommended (IPC access) |
+| **Media-over-QUIC** | ✅ | ✅ | <100ms | ✅ | - | Future direction |
+| **MoQ (QUIC)** | ✅ | ✅ | <100ms | ✅ | - | Future direction |
 
-| 通道类型 | ordered | 可靠性模式 | 典型负载 | 频率 |
-|----------|---------|-----------|----------|------|
-| **控制指令通道** | false | maxRetransmits: 0 | 方向盘/油门/刹车（uint16 × N） | 50-200Hz |
-| **遥测通道** | false | maxRetransmits: 0 | 车速/GPS/IMU/状态位 | 20-50Hz |
-| **可靠指令通道** | true | reliable | 系统重启/模式切换/配置下发 | 按需 |
-| **文件/日志通道** | true | reliable | 日志上传/固件更新 | 按需 |
-| **心跳通道** | false | maxRetransmits: 0 | 时间戳 + 序列号 | 1-10Hz |
+---
 
-### 3.2 二进制协议格式
+## 3. WebRTC RTCDataChannel Protocol (teleoperation)
 
-**扩展控制包**（遥操作推荐）：
+### 3.1 Channel Separation Strategy
+
+| Channel Type | ordered | Reliability mode | Typical payload | Frequency |
+|--------------|---------|------------------|-----------------|-----------|
+| **Control command channel** | false | maxRetransmits: 0 | Steering/throttle/brake (uint16 × N) | 50-200Hz |
+| **Telemetry channel** | false | maxRetransmits: 0 | Speed/GPS/IMU/status bits | 20-50Hz |
+| **Reliable command channel** | true | reliable | System restart/mode switch/config push | On demand |
+| **File/log channel** | true | reliable | Log upload/firmware update | On demand |
+| **Heartbeat channel** | false | maxRetransmits: 0 | Timestamp + sequence number | 1-10Hz |
+
+### 3.2 Binary Protocol Format
+
+**Extended control packet** (recommended for teleoperation):
 ```
 [timestamp: uint32 LE] [seq: uint16 LE] [cmd: uint8] [flags: uint8] [payload: N bytes]
-总开销：8 字节头
+Total overhead: 8-byte header
 
 flags:
-  bit 0: emergency (急停)
-  bit 1: heartbeat (心跳)
-  bit 2: ack_requested (需要确认)
+  bit 0: emergency (e-stop)
+  bit 1: heartbeat
+  bit 2: ack_requested
   bit 3-7: reserved
 ```
 
-**遥测包**：
+**Telemetry packet**:
 ```
 [timestamp: uint32 LE] [seq: uint16 LE]
 [steering_angle: int16] [throttle: int16] [brake: uint16]
 [speed: uint16] [yaw_rate: int16] [lat_accel: int16]
 [gps_lat: int32] [gps_lon: int32] [heading: uint16]
 [status_flags: uint16] [battery: uint8] [signal_rssi: int8]
-总开销：37 字节
+Total overhead: 37 bytes
 ```
 
-### 3.3 核心原则
-- 有序可靠通道共享一个 SCTP 流——一条通道阻塞不影响其他通道
-- 实时控制必须 `ordered: false`——旧指令到达反而危险
-- 心跳独立通道——不与其他数据混合，测量真实网络 RTT
-- 单条消息 ≤ 16KB（浏览器兼容上限）
+### 3.3 Core Principles
+- Ordered reliable channels share one SCTP stream — one channel blocking doesn't affect others
+- Real-time control must be `ordered: false` — old commands arriving late are actively dangerous
+- Heartbeat on its own channel — not mixed with other data, measuring true network RTT
+- Single message ≤ 16KB (browser compatibility ceiling)
 
 ---
 
 ### MQTT 5.0 (Phase 2+)
 
-MQTT 5.0 is planned for Phase 2+ vehicle-to-cloud signaling scenarios. Phase 1 uses WebSocket exclusively. Key features: session persistence, shared subscriptions, request-response pattern. 参见决策 D74。
+MQTT 5.0 is planned for Phase 2+ vehicle-to-cloud signaling scenarios. Phase 1 uses WebSocket exclusively. Key features: session persistence, shared subscriptions, request-response pattern. See decision D74.
 
 ---
 
-## 四、WebRTC 后端
+## 4. WebRTC Backends
 
-MediaServo 支持三个 WebRTC 后端，通过 Cargo feature gate 切换：
+MediaServo supports three WebRTC backends, switched via Cargo feature gates:
 
-| 后端 | Feature Gate | 用途 | 阶段 |
-|------|-------------|------|------|
-| **webrtc-sys** (libwebrtc FFI) | `webrtc-libwebrtc` | 默认后端，完整 WebRTC 支持 | Phase 1+ |
-| **str0m** | `webrtc-str0m` | sans-I/O，轻量纯 Rust | Phase 1 (LAN) |
-| **mediasoup-sys** | `webrtc-mediasoup` | SFU 多方会议 | Phase 2 |
+| Backend | Feature Gate | Use | Phase |
+|---------|--------------|-----|-------|
+| **webrtc-sys** (libwebrtc FFI) | `webrtc-libwebrtc` | Default backend, full WebRTC support | Phase 1+ |
+| **str0m** | `webrtc-str0m` | sans-I/O, lightweight pure Rust | Phase 1 (LAN) |
+| **mediasoup-sys** | `webrtc-mediasoup` | SFU multi-party conferencing | Phase 2 |
 
-决策依据：D137 (libwebrtc FFI 选型), D139 (webrtc-sys crate 定义), D118 (mediasoup SFU 规划)。
+Decision basis: D137 (libwebrtc FFI selection), D139 (webrtc-sys crate definition), D118 (mediasoup SFU plan).
 
-### 4.1 webrtc-sys（默认后端）
+### 4.1 webrtc-sys (default backend)
 
-webrtc-sys 通过 FFI 绑定 Google libwebrtc，提供完整 RTCPeerConnection + RTP Track API。
-作为默认 Cargo feature (`default = ["webrtc-libwebrtc"]`) 编译。
-参见 `crates/webrtc-sys/`。
+webrtc-sys binds Google libwebrtc via FFI, providing the full RTCPeerConnection + RTP track API.
+Compiled as the default Cargo feature (`default = ["webrtc-libwebrtc"]`).
+See `crates/webrtc-sys/`.

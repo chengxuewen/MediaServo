@@ -1,11 +1,11 @@
-//! MediaServo Field — 组合 SDK。
+//! MediaServo Field — composition SDK.
 //!
-//! 一行依赖完整闭环：信令 + 帧总线 + 采集/录制/回放 + WebRTC 抽象。
-//! - 通信: `SignalClient`/`FrameBus`（re-export link）
-//! - 媒体: `MediaDevices`/`CameraSource`（re-export deck）
-//! - 会话: `PushSession`/`PullSession`（推流/拉流门面，Phase 2 接 webrtc 真传输）
+//! A one-line dependency for the full loop: signaling + frame bus + capture/record/playback + WebRTC abstraction.
+//! - Comms: `SignalClient`/`FrameBus` (re-export of link)
+//! - Media: `MediaDevices`/`CameraSource` (re-export of deck)
+//! - Sessions: `PushSession`/`PullSession` (push/pull facades; Phase 2 wires the real webrtc transport)
 //!
-//! 依赖方向（C21 单向无环）：`field → webrtc + link + deck`。
+//! Dependency direction (C21 one-way acyclic): `field → webrtc + link + deck`.
 
 pub mod config;
 pub mod error;
@@ -17,12 +17,12 @@ pub use error::FieldError;
 
 pub use session::{PullSession, PushSession, SessionEvent, SessionEvents};
 
-// ── 组合 re-export（契约 §4: 一行依赖闭环）────────────────
-pub use mediaservo_link::{
-    CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, FrameBus, FrameTopic, LinkError,
-    NodeAcl, NodeId, Role, SignalClient,
-};
+// ── Composition re-exports (contract §4: one-line dependency loop) ────────
 pub use mediaservo_deck::{
     CameraSource, CaptureOptions, Container, DeviceId, MediaDeviceKind, MediaDevices, Player,
     RecordOptions, Recorder, VideoCodec,
+};
+pub use mediaservo_link::{
+    CapabilityToken, Ed25519SigningKey, Ed25519VerifyingKey, FrameBus, FrameTopic, LinkError,
+    NodeAcl, NodeId, Role, SignalClient,
 };

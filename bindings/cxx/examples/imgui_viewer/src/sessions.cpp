@@ -1,4 +1,4 @@
-// sessions — 实现（T3 自 main.cpp join_room lambda 与登录分支迁居；语义逐字保持）。
+// sessions — implementation (the join_room lambda and login branches relocated from main.cpp in T3; semantics preserved verbatim).
 #include "sessions.hpp"
 
 #include <algorithm>
@@ -19,17 +19,17 @@ void join_room(AppModel& m, const Env& env, const std::string& room_id, bool vid
     ms::Config cfg;
     cfg.signaling_url = m.url_ws;
     cfg.room = room_id;
-    // T4：凭证按模式带（每会话都带——server 侧每次 join 独立鉴权）。
+    // T4: attach credentials per mode (every session carries them — the server authenticates each join independently).
     if (m.auth == AuthMode::Psk) cfg.psk = m.psk;
     if (m.auth == AuthMode::Device) cfg.identity_dir = m.identity_dir;
-    if (!m.jwt.empty()) cfg.jwt = m.jwt; // M1/M2/M5 换发/直贴产物
+    if (!m.jwt.empty()) cfg.jwt = m.jwt; // the M1/M2/M5 exchange/paste output
     cfg.role = "Client";
     if (!env.key_file.empty()) {
         cfg.hmac_key_file = env.key_file;
         m.key_signed = true;
     }
     auto tile = std::make_unique<Tile>(room_id);
-    tile->video = video; // 控制房 tile 不发 consume（整车房无媒体=wait-producer 黑洞）
+    tile->video = video; // a control-room tile does not consume (the whole-vehicle room has no media = a wait-producer black hole)
     Tile* tp = tile.get();
     auto sj = ms::Session::connect(cfg);
     if (!sj) {
@@ -48,15 +48,15 @@ void join_room(AppModel& m, const Env& env, const std::string& room_id, bool vid
     log().add_fmt(tile->err.empty() ? "info" : "warn", "%s %s%s", video ? "join" : "pair-join",
                   room_id.c_str(), tile->err.empty() ? " ok" : (": " + tile->err).c_str());
     m.tiles.push_back(std::move(tile));
-    // W4d 双房约定：流房（`<base>_<stream>`）自动并入整车房做控制面 tile
-    // （G11 多会话形态；控制通道只在整车房建——PIT-140 v2 + W4c 定性）。
+    // The W4d dual-room convention: a stream room (`<base>_<stream>`) is auto-paired with the whole-vehicle room as a control-plane tile
+    // (the G11 multi-session form; the control channel is created only in the whole-vehicle room — PIT-140 v2 + the W4c ruling).
     const auto sep = room_id.rfind('_');
     if (video && sep != std::string::npos) {
         const std::string base = room_id.substr(0, sep);
         bool has = base.empty();
         for (auto& t : m.tiles)
             if (t->room == base) has = true;
-        if (!has) join_room(m, env, base, false); // 递归仅此一处（旧形 std::function 自引用，搬迁改直递归=等价）
+        if (!has) join_room(m, env, base, false); // the only recursion site (the old form used a self-referencing std::function; direct recursion after relocation = equivalent)
     }
 }
 
@@ -72,8 +72,8 @@ void ensure_control(Tile& t) {
     t.ctl = std::make_unique<ms::Control>(std::move(*oc));
     Tile* tp = &t;
     t.ctl->on_ack([tp](const std::string& ack) {
-        // ack 信封 `{"ack":<seq>,...}`；seq 匹配最近一发才计 RTT
-        // （重发幂等窗内旧 ack 到达 = 只刷文本不刷 RTT）。
+        // the ack envelope {"ack":<seq>,...}; RTT counts only when the seq matches the most recent send
+        // (an old ack arriving within the idempotent re-send window refreshes the text but not the RTT).
         uint64_t aseq = 0;
         ::viewer_core::json_u64(ack, "ack", &aseq);
         const int64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -96,7 +96,7 @@ void close_room(AppModel& m, const std::string& room) {
 }
 
 void perform_login(AppModel& m, const Env& env) {
-    // T4：五模式两段化——acquire（M1/M2 换发；M3/M4 无）→ discover（M3 跳；M5 失败容忍）。
+    // T4: the five modes in two phases — acquire (M1/M2 exchange; M3/M4 have none) → discover (M3 skips; M5 tolerates failure).
     switch (m.auth) {
     case AuthMode::Account: {
         auto token = ms::login(m.url_http, m.user, m.pass);
@@ -121,20 +121,20 @@ void perform_login(AppModel& m, const Env& env) {
         break;
     }
     case AuthMode::Psk:
-        m.jwt.clear(); // M3：无 JWT；join 带 psk（上）
+        m.jwt.clear(); // M3: no JWT; join carries the psk (above)
         break;
     case AuthMode::Device:
-        // M4：Device 身份无 REST 发证（D283 wire 只在 WS join 面）——发现走不了，
-        // 与 M3 同形直 join（房名 direct_room/MSRTC_ROOM）。
+        // M4: Device identity has no REST issuance (the D283 wire exists only on the WS join face) — discovery is impossible,
+        // so join directly like M3 (the room name from direct_room/MSRTC_ROOM).
         m.jwt.clear();
         break;
     case AuthMode::JwtPaste:
-        m.jwt = m.jwt_paste; // M5：直贴（坏 token 由 join 期 4013 红牌裁决）
+        m.jwt = m.jwt_paste; // M5: paste directly (a bad token is adjudicated by the 4013 red card at join time)
         break;
     }
-    // 发现段（psk-discover 后）：M3 有 PSK 即走发现（Legacy 全量视角——跨房间拉流主路）；
-    // 填了 direct_room 则直连（可选覆盖）；M4 Device 仍无 REST 发证面 → 直 join；
-    // M5 失败容忍（坏 token 测试点在 join 期红牌，非发现）。
+    // The discover phase (after psk-discover): M3 goes through discovery when it has a PSK (the Legacy full view — the main path for cross-room pulls);
+    // with direct_room filled it connects directly (an optional override); M4's Device still has no REST issuance face → join directly;
+    // M5 tolerates failure (the bad-token test point is the join-time red card, not discovery).
     if (m.auth == AuthMode::Psk && m.direct_room[0]) {
         m.rooms.clear();
         if (!m.direct_room[0]) {
@@ -144,7 +144,7 @@ void perform_login(AppModel& m, const Env& env) {
         }
         RoomRow r;
         r.room_id = m.direct_room;
-        // F2 kind 猜测：`_` 分隔名按流房（video）处理，否则整车房（control——不占格）。
+        // The F2 kind guess: a `_`-separated name is treated as a stream room (video); otherwise a whole-vehicle room (control — takes no grid slot).
         r.kind = r.room_id.find('_') != std::string::npos ? "video" : "control";
         r.video = r.kind == "video";
         m.rooms.push_back(std::move(r));
@@ -152,7 +152,7 @@ void perform_login(AppModel& m, const Env& env) {
         m.status.clear();
         log().add_fmt("info", "psk direct-join target: %s", m.rooms[0].room_id.c_str());
     } else if (m.auth == AuthMode::Psk) {
-        // psk-discover：Legacy 全量列表——与账号模式同形（树勾选多房=跨房间拉流）。
+        // psk-discover: the Legacy full list — the same form as the account modes (checking multiple rooms in the tree = cross-room pulls).
         auto lr = ms::list_rooms_psk(m.url_http, m.psk);
         if (!lr) {
             m.status = "psk discover: " + lr.error().message;
@@ -170,13 +170,13 @@ void perform_login(AppModel& m, const Env& env) {
         }
         m.logged_in = true;
         m.status.clear();
-        std::printf("[discover] psk rooms=%zu\n", m.rooms.size()); // 无头判据行
+        std::printf("[discover] psk rooms=%zu\n", m.rooms.size()); // the headless judgment line
         log().add_fmt("info", "psk discover ok: %zu rooms", m.rooms.size());
     } else if (m.auth == AuthMode::Device) {
         m.rooms.clear();
         if (!m.direct_room[0] && m.identity_dir[0]) {
-            // Device 无 REST 发证面（D283 挑战只在 WS）→ 直 join 语义；房名从
-            // identity 目录旁的约定取不可能——由 MSRTC_ROOM/UI 提供。
+            // Device has no REST issuance face (the D283 challenge exists only on WS) → direct-join semantics; the room name cannot
+            // come from a convention beside the identity directory — it is provided by MSRTC_ROOM/the UI.
         }
         if (!m.direct_room[0]) {
             m.status = "device: room required (no REST discovery)";
@@ -197,9 +197,9 @@ void perform_login(AppModel& m, const Env& env) {
             if (m.auth == AuthMode::JwtPaste) {
                 log().add_fmt("warn", "list_rooms failed (jwt paste): %s — join will judge", lr.error().message.c_str());
                 m.rooms.clear();
-                m.logged_in = true; // 放行到 join 期 4013 红牌（M5b 判据）
+                m.logged_in = true; // let it through to the join-time 4013 red card (the M5b judgment)
                 m.status.clear();
-                goto auto_join; // 不能 return——4013 判决点在下发 join
+                goto auto_join; // cannot return — the 4013 adjudication point is in the join below
             }
             m.status = "list_rooms: " + lr.error().message;
             m.auto_join = false;
@@ -211,7 +211,7 @@ void perform_login(AppModel& m, const Env& env) {
             r.room_id = rid;
             r.kind = kind;
             r.parent = parent;
-            r.video = kind == "video"; // W4d：kind 三面直判，名字猜测退役
+            r.video = kind == "video"; // W4d: judged directly from the three-kind face; the name guessing is retired
             m.rooms.push_back(std::move(r));
         }
         m.logged_in = true;
@@ -224,7 +224,7 @@ auto_join:
         if (target.empty())
             for (auto& r : m.rooms)
                 if (r.video) { target = r.room_id; break; }
-        // M5b：发现被 401 打掉=rooms 空——仍按 hint 直 join，4013 判决点在 join 期。
+        // M5b: discovery knocked out by a 401 = empty rooms — still join directly by the hint; the 4013 adjudication point is at join time.
         if (target.empty() && m.auth == AuthMode::JwtPaste) target = "vehicle_probe";
         if (!target.empty()) join_room(m, env, target, true);
         else m.status = "auto-join: no video room";
@@ -233,7 +233,7 @@ auto_join:
 }
 
 void refresh_identity_label(AppModel& m) {
-    // T4/F6：任一活动会话取身份标签（静态快照，同值；无会话=空显示）。
+    // T4/F6: take the identity label from any active session (a static snapshot, identical values; no session = empty display).
     for (auto& t : m.tiles)
         if (t->sess) {
             auto lb = ms::identity_label(t->sess);

@@ -3,8 +3,8 @@ import { login } from './helpers';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// H3: 套件级登录一次（G3 登录限流 2req/s burst5 — 逐测试登录会 429）→ storageState 复用。
-// 前置: Docker server (9800) + config/accounts.docker.yaml dev 账号。
+// H3: sign in once per suite (G3 login rate-limit 2req/s burst5 — per-test logins get 429) → reuse storageState.
+// Prereq: Docker server (9800) + config/accounts.docker.yaml dev account.
 
 export default async function globalSetup() {
   const authDir = path.join(process.cwd(), '.auth');

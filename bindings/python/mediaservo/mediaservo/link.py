@@ -1,11 +1,11 @@
-"""MediaServo link Python 绑定 — 信令 + 帧总线（镜像 C++ mediaservo::link 类结构）。
+"""MediaServo link Python bindings — signaling + frame bus (mirrors the C++ mediaservo::link class structure).
 
 API: SignalConfig + SignalSession（connect/send/on_event/close）、Bus（attach/
-publish/subscribe/close）、Stream（recv/close）、FrameMeta（9 字段 dataclass
-↔ ctypes 结构逐字段互转，mediaservo_frame_meta_t _pack_=1 36B）。
+publish/subscribe/close), Stream (recv/close), FrameMeta (9-field dataclass
+↔ ctypes struct field-by-field, mediaservo_frame_meta_t _pack_=1 36B).
 
-线程语义（C 契约）: on_event 回调在内部泵线程触发，事件 JSON 字符串仅回调内
-有效——Python str 已拷贝，可安全保留。回调内禁止调用本对象任何方法。
+Threading semantics (C contract): the on_event callback fires on the internal pump thread; the event JSON string is valid only
+inside the callback — the Python str is copied and safe to keep. Calling any method on this object from within the callback is forbidden.
 """
 
 import ctypes
@@ -21,7 +21,7 @@ __all__ = [
     "ERR_STATE", "ERR_INTERNAL", "ERR_CLOSED",
 ]
 
-# 错误码（link.h）
+# Error codes (link.h)
 ERR_OK = 0
 ERR_INVALID_ARG = -1
 ERR_CONNECT = -2
@@ -33,12 +33,12 @@ ERR_CLOSED = -7
 
 
 class LinkError(MediaServoError):
-    """link SDK 调用失败。"""
+    """link SDK call failed."""
 
 
 _lib = _ffi.load("link")
 
-# 事件回调签名（link.h）: void (*)(mediaservo_link_signal_t*, const char*, void*)
+# Event callback signature (link.h): void (*)(mediaservo_link_signal_t*, const char*, void*)
 _EVENT_CB_TYPE = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p)
 
 
@@ -53,9 +53,9 @@ def _check(rc: int) -> None:
         raise LinkError(rc, _last_error())
 
 
-# ── FFI 声明（H3: restype + argtypes 全覆盖，64 位指针截断防护）──────
+# -- FFI declarations (H3: restype + argtypes fully declared, 64-bit pointer truncation guard) ------
 
-_API = {}  # name -> (fn, restype, argtypes)，测试断言全覆盖
+_API = {}  # name -> (fn, restype, argtypes); tests assert full coverage
 
 
 def _api(name, restype, argtypes):
@@ -104,7 +104,7 @@ _version_fn = _api("mediaservo_link_version", ctypes.c_int, [ctypes.c_char_p, ct
 
 
 def version() -> str:
-    """SDK 版本 (MAJOR.MINOR.PATCH)，去尾 NUL。"""
+    """SDK version (MAJOR.MINOR.PATCH), trailing NUL stripped."""
     buf = ctypes.create_string_buffer(64)
     rc = _version_fn(buf, 64)
     if rc != ERR_OK:
@@ -114,17 +114,17 @@ def version() -> str:
 
 @dataclass
 class SignalConfig:
-    """信令配置（对应 mediaservo_link_signal_config_t）。"""
+    """Signaling configuration (mirrors mediaservo_link_signal_config_t)."""
 
     url: str
     psk: str
     room: str
-    role: str = ""  # "Host"/"Pusher" → Host, "Client"/"Puller" → Remote；空 = Host
+    role: str = ""  # "Host"/"Pusher" → Host, "Client"/"Puller" → Remote; empty = Host
 
 
 @dataclass
 class FrameMeta:
-    """帧元数据（9 字段，36B 线格式 D243；format: 0=未知 1=I420 2=NV12 3=RGBA）。"""
+    """Frame metadata (9 fields, 36B wire format D243; format: 0=unknown 1=I420 2=NV12 3=RGBA)."""
 
     seq: int = 0
     width: int = 0
@@ -137,7 +137,7 @@ class FrameMeta:
     ts_epoch_ns: int = 0
 
     def to_c(self) -> _ffi.mediaservo_frame_meta_t:
-        """→ ctypes 结构（逐字段赋值；禁 struct.pack 猜测——线格式由 _pack_=1 结构保证）。"""
+        """→ ctypes struct (field-by-field assignment; no struct.pack guessing — the wire format is guaranteed by the _pack_=1 struct)."""
         c = _ffi.mediaservo_frame_meta_t()
         c.seq = self.seq
         c.width = self.width
@@ -160,21 +160,21 @@ class FrameMeta:
 
 
 class SignalSession:
-    """信令会话（对应 C++ mediaservo::link::SignalSession）。默认构造 = 已关闭。"""
+    """Signaling session (mirrors C++ mediaservo::link::SignalSession). Default construction = closed."""
 
     def __init__(self, h=None):
         self._h = h
-        self._cb_ref = None  # CFUNCTYPE 引用（H3: 防 GC，C close join 泵线程后才释放）
+        self._cb_ref = None  # CFUNCTYPE reference (H3: prevents GC; released after C close joins the pump thread)
 
     @classmethod
     def connect(cls, cfg: SignalConfig) -> "SignalSession":
-        """连接信令 + 创建会话（阻塞）。失败抛 LinkError，不返回半开会话。"""
+        """Connect signaling and create the session (blocking). Raises LinkError on failure; never returns a half-open session."""
         c = _ffi.mediaservo_link_signal_config_t()
-        c.struct_size = ctypes.sizeof(_ffi.mediaservo_link_signal_config_t)  # R3: 自动填充
+        c.struct_size = ctypes.sizeof(_ffi.mediaservo_link_signal_config_t)  # R3: auto-fill
         c.url = cstr(cfg.url)
         c.psk = cstr(cfg.psk)
         c.room = cstr(cfg.room)
-        c.role = cstr(cfg.role)  # 空 → NULL = Host
+        c.role = cstr(cfg.role)  # empty → NULL = Host
         out = ctypes.c_void_p()
         rc = _signal_connect(ctypes.byref(c), ctypes.byref(out))
         if rc != ERR_OK:
@@ -186,7 +186,7 @@ class SignalSession:
             raise LinkError(ERR_STATE, "session not connected")
 
     def send(self, json_str: str) -> None:
-        """发送一条信令消息（JSON；SignalingMessage type 标签 snake_case）。"""
+        """Send one signaling message (JSON; SignalingMessage type tag is snake_case)."""
         self._require_open()
         payload = json_str.encode("utf-8")
         rc = _signal_send(self._h, payload, len(payload))
@@ -194,10 +194,10 @@ class SignalSession:
             raise LinkError(rc, _last_error())
 
     def on_event(self, callback) -> None:
-        """注册事件回调（connect 后任意时刻；重复注册替换；泵线程触发）。
+        """Register the event callback (any time after connect; re-registration replaces; fires on the pump thread).
 
-        callback(event_json: str) -> None；回调内禁止调用本对象任何方法。
-        已关闭会话: no-op（C++ parity）。
+        callback(event_json: str) -> None; calling any method on this object from within the callback is forbidden.
+        Closed session: no-op (C++ parity).
         """
         if not self._h:
             return
@@ -206,13 +206,13 @@ class SignalSession:
             try:
                 callback(event_json.decode("utf-8", errors="replace") if event_json else "")
             except Exception:
-                traceback.print_exc()  # 泵线程异常不得越过 C 边界（UB）
+                traceback.print_exc()  # pump-thread exceptions must never cross the C boundary (UB)
 
-        self._cb_ref = _EVENT_CB_TYPE(_trampoline)  # H3: 保存引用防 GC
+        self._cb_ref = _EVENT_CB_TYPE(_trampoline)  # H3: keep the reference to prevent GC
         _signal_on_event(self._h, self._cb_ref, None)
 
     def close(self) -> None:
-        """关闭会话并释放 handle（幂等；C close join 事件泵后释放回调引用）。"""
+        """Close the session and release the handle (idempotent; the C close joins the event pump before the callback reference is released)."""
         h, self._h = self._h, None
         if h is None:
             return
@@ -231,14 +231,14 @@ class SignalSession:
 
 
 class Bus:
-    """帧总线（对应 C++ mediaservo::link::Bus）。默认构造 = 已关闭。"""
+    """Frame bus (mirrors C++ mediaservo::link::Bus). Default construction = closed."""
 
     def __init__(self, h=None):
         self._h = h
 
     @classmethod
     def attach(cls, endpoint: str, token_pem: str, vk_pem: str) -> "Bus":
-        """附加帧总线（验签 + ACL + iceoryx2 节点，阻塞）。endpoint 为 Phase 1 预留（空串即可）。"""
+        """Attach the frame bus (signature verification + ACL + iceoryx2 node, blocking). endpoint is reserved for Phase 1 (empty string is fine)."""
         out = ctypes.c_void_p()
         rc = _bus_attach(cstr(endpoint), cstr(token_pem), cstr(vk_pem), ctypes.byref(out))
         if rc != ERR_OK:
@@ -250,9 +250,9 @@ class Bus:
             raise LinkError(ERR_STATE, "bus not attached")
 
     def publish(self, topic: str, payload: bytes, meta: FrameMeta) -> None:
-        """发布一帧（ACL 检查 + SHM loan + send，阻塞）。payload 空 = 纯元数据帧。"""
+        """Publish one frame (ACL check + SHM loan + send, blocking). Empty payload = metadata-only frame."""
         self._require_open()
-        # C 契约: payload NULL 当且仅当 len == 0
+        # C contract: payload NULL iff len == 0
         buf = ctypes.create_string_buffer(payload) if payload else None
         cmeta = meta.to_c()
         rc = _bus_publish(self._h, cstr(topic), buf, len(payload), ctypes.byref(cmeta))
@@ -260,7 +260,7 @@ class Bus:
             raise LinkError(rc, _last_error())
 
     def subscribe(self, topic: str) -> "Stream":
-        """订阅 topic，创建帧流（阻塞）。"""
+        """Subscribe to a topic and create a frame stream (blocking)."""
         self._require_open()
         out = ctypes.c_void_p()
         rc = _bus_subscribe(self._h, cstr(topic), ctypes.byref(out))
@@ -269,7 +269,7 @@ class Bus:
         return Stream(out.value)
 
     def close(self) -> None:
-        """关闭帧总线并释放 handle（幂等；shutdown 全部流，stream recv 返回 CLOSED）。"""
+        """Close the frame bus and release the handle (idempotent; shuts down all streams, stream recv returns CLOSED)."""
         h, self._h = self._h, None
         if h is None:
             return
@@ -285,10 +285,10 @@ class Bus:
 
 
 class Stream:
-    """帧流（对应 C++ mediaservo::link::Stream）。默认构造 = 已关闭。"""
+    """Frame stream (mirrors C++ mediaservo::link::Stream). Default construction = closed."""
 
-    # ponytail: 单缓冲 16MiB 覆盖 4K I420（12.4MiB）；C ABI 无法探测截断，
-    # 更大帧需扩缓冲 —— 升级路径: 按 meta 缓存上次帧尺寸自适应增长（同 C++）。
+    # ponytail: single 16MiB buffer covers 4K I420 (12.4MiB); the C ABI cannot detect truncation,
+    # larger frames need a bigger buffer — upgrade path: grow adaptively using the previous frame size from meta (same as C++).
     _CAP = 16 * 1024 * 1024
 
     def __init__(self, h=None):
@@ -300,7 +300,7 @@ class Stream:
             raise LinkError(ERR_STATE, "stream not subscribed")
 
     def recv(self):
-        """阻塞取帧 → (FrameMeta, bytes)。关停（stream/bus close）抛 LinkError CLOSED。"""
+        """Blocking frame fetch → (FrameMeta, bytes). Shutdown (stream/bus close) raises LinkError CLOSED."""
         self._require_open()
         meta = _ffi.mediaservo_frame_meta_t()
         out_len = ctypes.c_size_t()
@@ -312,7 +312,7 @@ class Stream:
         return FrameMeta.from_c(meta), bytes(self._buf[: out_len.value])
 
     def close(self) -> None:
-        """关闭帧流并释放 handle（幂等；唤醒阻塞中的 recv 使其返回 CLOSED）。"""
+        """Close the frame stream and release the handle (idempotent; wakes a blocked recv so it returns CLOSED)."""
         h, self._h = self._h, None
         if h is None:
             return

@@ -1,4 +1,4 @@
-/* 登录页 — token 对齐 Settings.css / App.css（#4361ee 主色, 4px 圆角, 0.85rem 表单字号）。 */
+/* Login page — tokens aligned with Settings.css / App.css (#4361ee primary, 4px radius, 0.85rem form font size). */
 .login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f0f2f5; }
 .login-card { width: 320px; background: #fff; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,.06); display: flex; flex-direction: column; gap: 0.75rem; }
 .login-title { font-size: 1.2rem; text-align: center; }

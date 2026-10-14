@@ -1,9 +1,9 @@
-//! device-enroll T4/T5: 验签挑战状态机（WS 端到端）+ admin pending/approve。
+//! device-enroll T4/T5: the verify-challenge state machine (WS end-to-end) + admin pending/approve.
 //!
-//! 双姿态（仿 admin_psk_test）：ALLOW_DEV_ENROLL 门经 `srv.allow_dev_enroll` 注入
-//! （= main.rs 启动读 env 后同源字段）。字节常量复用批1 sig_vector
-//! （seed=bytes(0..=31) / nonce=bytes(0x40..=0x5f) / DEV+ROOM），批3 host 交叉复验同锚。
-//! 既有 secret 路径回归隔离钉：本文件仅新增，不触碰旧分支测试。
+//! Dual posture (mirroring admin_psk_test): the ALLOW_DEV_ENROLL gate is injected via `srv.allow_dev_enroll`
+//! (= the same-source field after main.rs reads the env at startup). The byte constants reuse the batch-1 sig_vector
+//! (seed=bytes(0..=31) / nonce=bytes(0x40..=0x5f) / DEV+ROOM), the same anchor the batch-3 host cross-verifies.
+//! Regression-isolation pin for the existing secret path: this file only adds; it never touches old-branch tests.
 
 use base64::Engine as _;
 use ed25519_dalek::{Signer, SigningKey};
@@ -19,12 +19,11 @@ use tokio_tungstenite::tungstenite::Message as WsMsg;
 
 const DEV: &str = "ms-0a1b2c3d4e5f";
 const ROOM: &str = "vehicle_cam0";
-/// sig_vector 常量 vk（seed=bytes(0..=31) 派生）。
+/// The sig_vector constant vk (derived from seed=bytes(0..=31)).
 const VK: &str = "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=";
 
-type Ws = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type Ws =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 fn b64enc(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
@@ -34,17 +33,15 @@ fn signing_key() -> SigningKey {
     SigningKey::from_bytes(&std::array::from_fn::<u8, 32, _>(|i| i as u8))
 }
 
-/// §3 字节合同: sig = sign(nonce_raw(32B) ‖ device_id ‖ room_id)。
+/// S3 byte contract: sig = sign(nonce_raw(32B) || device_id || room_id).
 fn sign(nonce_b64: &str, device_id: &str, room_id: &str) -> String {
-    let mut msg = base64::engine::general_purpose::STANDARD
-        .decode(nonce_b64)
-        .unwrap();
+    let mut msg = base64::engine::general_purpose::STANDARD.decode(nonce_b64).unwrap();
     msg.extend_from_slice(device_id.as_bytes());
     msg.extend_from_slice(room_id.as_bytes());
     b64enc(&signing_key().sign(&msg).to_bytes())
 }
 
-// ── server harness（双 cfg 仿 admin_psk_test::make_state）──────────────────
+// -- server harness (dual cfg, mirroring admin_psk_test::make_state) --
 
 async fn new_signaling() -> SignalingServer {
     #[cfg(feature = "sfu-mediasoup")]
@@ -81,7 +78,7 @@ async fn spawn_server(reg: Arc<DeviceRegistry>, allow_enroll: bool) -> (String, 
 
 async fn connect(url: &str) -> Ws {
     let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
-    // psk 未配置 → 建连即 auth ack（Error code=0 "authenticated"），与旧路径一致。
+    // psk unconfigured -> the connection gets an auth ack right away (Error code=0 "authenticated"), same as the old path.
     let ack = recv(&mut ws).await;
     assert!(
         matches!(&ack, SignalingMessage::Error { code: 0, .. }),
@@ -101,9 +98,7 @@ async fn recv(ws: &mut Ws) -> SignalingMessage {
 }
 
 async fn send(ws: &mut Ws, msg: &SignalingMessage) {
-    ws.send(WsMsg::Text(serde_json::to_string(msg).unwrap()))
-        .await
-        .unwrap();
+    ws.send(WsMsg::Text(serde_json::to_string(msg).unwrap())).await.unwrap();
 }
 
 async fn send_raw(ws: &mut Ws, raw: &str) {
@@ -134,19 +129,19 @@ async fn expect_closed(ws: &mut Ws) {
             Err(_) => panic!("expected connection close, socket still open"),
             Ok(None) | Ok(Some(Err(_))) => return,
             Ok(Some(Ok(WsMsg::Close(_)))) => return,
-            Ok(Some(Ok(_))) => continue, // 关闭前允许有 Error 帧
+            Ok(Some(Ok(_))) => continue, // Error frames are allowed before the close
         }
     }
 }
 
-/// 断言收到 DeviceAuthChallenge 并取回 nonce。
+/// Asserts a DeviceAuthChallenge is received and returns the nonce.
 async fn get_challenge(ws: &mut Ws) -> String {
     match recv(ws).await {
         SignalingMessage::DeviceAuthChallenge { nonce } => {
             assert_eq!(
                 base64::engine::general_purpose::STANDARD.decode(&nonce).unwrap().len(),
                 32,
-                "nonce 必须 32B（§3 OsRng）"
+                "the nonce must be 32B (S3 OsRng)"
             );
             nonce
         }
@@ -154,9 +149,9 @@ async fn get_challenge(ws: &mut Ws) -> String {
     }
 }
 
-// ── T4: 状态机（auto 门 / pending / 重放 / 超时 / 形态拒 / 延后队列）────────
+// -- T4: the state machine (auto gate / pending / replay / timeout / shape refusal / deferred queue) --
 
-/// §5.2 auto 开: 陌生 pubkey 验签过 → 收录（内存+落盘）+ Joined 即过。
+/// S5.2 auto on: an unknown pubkey passing verification -> admitted (memory + disk) + Joined passes right after.
 #[tokio::test]
 async fn auto_enroll_unknown_pubkey_join_passes_and_persists() {
     let reg = Arc::new(DeviceRegistry::empty());
@@ -166,21 +161,24 @@ async fn auto_enroll_unknown_pubkey_join_passes_and_persists() {
     let nonce = get_challenge(&mut ws).await;
     send(
         &mut ws,
-        &SignalingMessage::DeviceAuthResponse { room_id: ROOM.into(), sig: sign(&nonce, DEV, ROOM) },
+        &SignalingMessage::DeviceAuthResponse {
+            room_id: ROOM.into(),
+            sig: sign(&nonce, DEV, ROOM),
+        },
     )
     .await;
     let ack = recv(&mut ws).await;
     assert!(matches!(ack, SignalingMessage::RoomJoined { .. }), "{ack:?}");
     assert!(
         matches!(reg.entry_of(DEV), Some(Entry::PublicKey { vk, .. }) if vk == VK),
-        "auto 收录应为 public_key 形: {:?}",
+        "auto admission should be the public_key form: {:?}",
         reg.entry_of(DEV)
     );
     let saved = std::fs::read_to_string(srv.devices_path.as_ref()).unwrap();
     assert!(saved.contains("ed25519:"), "{saved}");
 }
 
-/// §5.2 默认(手动)档: 陌生 pubkey 验签过 → pending{verified} + DeviceAuthPending + 断连；不入册。
+/// S5.2 default (manual) mode: an unknown pubkey passing verification -> pending{verified} + DeviceAuthPending + disconnect; not admitted.
 #[tokio::test]
 async fn manual_mode_unknown_pubkey_goes_pending() {
     let reg = Arc::new(DeviceRegistry::empty());
@@ -190,7 +188,10 @@ async fn manual_mode_unknown_pubkey_goes_pending() {
     let nonce = get_challenge(&mut ws).await;
     send(
         &mut ws,
-        &SignalingMessage::DeviceAuthResponse { room_id: ROOM.into(), sig: sign(&nonce, DEV, ROOM) },
+        &SignalingMessage::DeviceAuthResponse {
+            room_id: ROOM.into(),
+            sig: sign(&nonce, DEV, ROOM),
+        },
     )
     .await;
     match recv(&mut ws).await {
@@ -202,17 +203,17 @@ async fn manual_mode_unknown_pubkey_goes_pending() {
     assert_eq!(list.len(), 1, "{list:?}");
     assert_eq!(list[0].0, DEV);
     assert_eq!(list[0].1.vk, VK);
-    assert!(list[0].1.verified, "pending 条目应标 verified=true");
-    assert!(reg.entry_of(DEV).is_none(), "手动档验签过 ≠ 入册");
+    assert!(list[0].1.verified, "the pending entry should be marked verified=true");
+    assert!(reg.entry_of(DEV).is_none(), "manual mode passing verification != admitted");
 }
 
-/// nonce 一连接一次性 + nonce 绑定（D-E7）: 跨连接重放旧 sig → 4010 且不污染 pending。
+/// nonce one-shot per connection + nonce binding (D-E7): replaying an old sig across connections -> 4010 without polluting pending.
 #[tokio::test]
 async fn replayed_sig_from_other_connection_rejected() {
     let reg = Arc::new(DeviceRegistry::empty());
     let (url, srv) = spawn_server(Arc::clone(&reg), false).await;
 
-    // 连接 A: 正常应答 → pending（nonce A 已焚）。
+    // connection A: a normal answer -> pending (nonce A burned).
     let mut a = connect(&url).await;
     join_pubkey(&mut a, Some(DEV), None).await;
     let nonce_a = get_challenge(&mut a).await;
@@ -226,25 +227,21 @@ async fn replayed_sig_from_other_connection_rejected() {
     expect_closed(&mut a).await;
     let first_seen = srv.pending_devices.get(DEV).unwrap().first_seen_ms;
 
-    // 连接 B: 新 nonce，重放 sig_a → 验签败 → 4010 + 断连（不入 pending / 不覆盖首见）。
+    // connection B: a new nonce, replaying sig_a -> verification fails -> 4010 + disconnect (not entered into pending / first_seen not overwritten).
     let mut b = connect(&url).await;
     join_pubkey(&mut b, Some(DEV), None).await;
     let _nonce_b = get_challenge(&mut b).await;
-    send(
-        &mut b,
-        &SignalingMessage::DeviceAuthResponse { room_id: ROOM.into(), sig: sig_a },
-    )
-    .await;
+    send(&mut b, &SignalingMessage::DeviceAuthResponse { room_id: ROOM.into(), sig: sig_a }).await;
     match recv(&mut b).await {
-        SignalingMessage::Error { code, .. } => assert_eq!(code, 4010, "重放必 4010"),
+        SignalingMessage::Error { code, .. } => assert_eq!(code, 4010, "a replay must get 4010"),
         other => panic!("expected Error 4010, got {other:?}"),
     }
     expect_closed(&mut b).await;
-    let e = srv.pending_devices.get(DEV).expect("验签败不得清除 pending");
-    assert_eq!(e.first_seen_ms, first_seen, "重放失败不得覆盖 pending");
+    let e = srv.pending_devices.get(DEV).expect("a failed verification must not clear pending");
+    assert_eq!(e.first_seen_ms, first_seen, "a replay failure must not overwrite pending");
 }
 
-/// §5.2 「5s 超时未答 = 断连 WARN」：不应答 → 4010 + 关闭，pending 零残留。
+/// S5.2 "5s timeout without an answer = disconnect WARN": not answering -> 4010 + close, zero pending residue.
 #[tokio::test]
 async fn challenge_timeout_disconnects() {
     let reg = Arc::new(DeviceRegistry::empty());
@@ -252,16 +249,19 @@ async fn challenge_timeout_disconnects() {
     let mut ws = connect(&url).await;
     join_pubkey(&mut ws, Some(DEV), None).await;
     let _nonce = get_challenge(&mut ws).await;
-    // 保持沉默：server 5s watchdog 发统一 4010 后断连。
+    // stay silent: the server's 5s watchdog sends the uniform 4010 and disconnects.
     match recv(&mut ws).await {
         SignalingMessage::Error { code, .. } => assert_eq!(code, 4010),
         other => panic!("expected Error 4010 on timeout, got {other:?}"),
     }
     expect_closed(&mut ws).await;
-    assert!(srv.pending_devices.is_empty(), "超时未验签不得入 pending");
+    assert!(
+        srv.pending_devices.is_empty(),
+        "a timeout without verification must not enter pending"
+    );
 }
 
-/// §5.2 「已登记 secret 形设备以 pubkey 形来连 → 拒 + 不发挑战」（§8 迁移处置进日志）。
+/// S5.2 "a registered secret-form device connecting in pubkey form -> refused, no challenge issued" (the S8 migration handling goes to the log).
 #[tokio::test]
 async fn secret_form_device_rejects_pubkey_join_without_challenge() {
     let reg = Arc::new(DeviceRegistry::empty());
@@ -269,35 +269,39 @@ async fn secret_form_device_rejects_pubkey_join_without_challenge() {
     let (url, srv) = spawn_server(Arc::clone(&reg), true).await;
     let mut ws = connect(&url).await;
     join_pubkey(&mut ws, Some(DEV), None).await;
-    // 首帧即 4010 —— 不是 DeviceAuthChallenge（省 RTT，分支②）。
+    // the first frame is 4010 -- not a DeviceAuthChallenge (saves an RTT, branch 2).
     match recv(&mut ws).await {
         SignalingMessage::Error { code, .. } => assert_eq!(code, 4010),
         other => panic!("expected immediate Error 4010 (no challenge), got {other:?}"),
     }
     expect_closed(&mut ws).await;
-    assert!(srv.pending_devices.is_empty(), "secret 形拒绝不得入 pending");
+    assert!(srv.pending_devices.is_empty(), "a secret-form refusal must not enter pending");
     assert!(matches!(srv.device_registry.entry_of(DEV), Some(Entry::Secret(_))));
 }
 
-/// 已登记公钥形: 每次连接照常验签（D-E8）；异钥签名 → 4010（换钥拒，§5.2 分支①）。
+/// Registered public-key form: every connection verifies as usual (D-E8); a different-key signature -> 4010 (a key change is refused, S5.2 branch 1).
 #[tokio::test]
 async fn registered_pubkey_passes_and_other_key_rejected() {
-    let yaml = format!("devices:\n  {DEV}:\n    public_key: \"ed25519:{VK}\"\n    name: jetson-7\n");
+    let yaml =
+        format!("devices:\n  {DEV}:\n    public_key: \"ed25519:{VK}\"\n    name: jetson-7\n");
     let reg = Arc::new(DeviceRegistry::from_yaml(&yaml).unwrap());
     let (url, _srv) = spawn_server(Arc::clone(&reg), false).await;
 
-    // 正钥: 挑战→应答→RoomJoined（手动档对已登记设备无感——验签过即放行）。
+    // correct key: challenge -> answer -> RoomJoined (manual mode is transparent for registered devices -- passing verification is enough).
     let mut ws = connect(&url).await;
     join_pubkey(&mut ws, Some(DEV), None).await;
     let nonce = get_challenge(&mut ws).await;
     send(
         &mut ws,
-        &SignalingMessage::DeviceAuthResponse { room_id: ROOM.into(), sig: sign(&nonce, DEV, ROOM) },
+        &SignalingMessage::DeviceAuthResponse {
+            room_id: ROOM.into(),
+            sig: sign(&nonce, DEV, ROOM),
+        },
     )
     .await;
     assert!(matches!(recv(&mut ws).await, SignalingMessage::RoomJoined { .. }));
 
-    // 异钥: 新私钥签名 → verify_strict(登记 vk) 败 → 4010 + 断连。
+    // different key: a new private key's signature -> verify_strict(registered vk) fails -> 4010 + disconnect.
     let mut ws2 = connect(&url).await;
     join_pubkey(&mut ws2, Some(DEV), None).await;
     let nonce2 = get_challenge(&mut ws2).await;
@@ -306,34 +310,33 @@ async fn registered_pubkey_passes_and_other_key_rejected() {
     msg.extend_from_slice(DEV.as_bytes());
     msg.extend_from_slice(ROOM.as_bytes());
     let bad_sig = b64enc(&rogue.sign(&msg).to_bytes());
-    send(
-        &mut ws2,
-        &SignalingMessage::DeviceAuthResponse { room_id: ROOM.into(), sig: bad_sig },
-    )
-    .await;
+    send(&mut ws2, &SignalingMessage::DeviceAuthResponse { room_id: ROOM.into(), sig: bad_sig })
+        .await;
     match recv(&mut ws2).await {
         SignalingMessage::Error { code, .. } => assert_eq!(code, 4010),
-        other => panic!("expected Error 4010 (换钥), got {other:?}"),
+        other => panic!("expected Error 4010 (key change), got {other:?}"),
     }
     expect_closed(&mut ws2).await;
 }
 
-/// 形态纪律: 两形同现 / pubkey 缺 device_id → 4000 参数类拒 + 断连（不发挑战）。
+/// Shape discipline: both forms present / pubkey without device_id -> a 4000 parameter-class refusal + disconnect (no challenge).
 #[tokio::test]
 async fn credential_shape_violations_rejected_4000() {
     let reg = Arc::new(DeviceRegistry::empty());
     let (url, _srv) = spawn_server(Arc::clone(&reg), true).await;
 
-    // 两形同现
+    // both forms present
     let mut ws = connect(&url).await;
     join_pubkey(&mut ws, Some(DEV), Some("legacy-secret")).await;
     match recv(&mut ws).await {
-        SignalingMessage::Error { code, .. } => assert_eq!(code, 4000, "两形同现必 4000"),
+        SignalingMessage::Error { code, .. } => {
+            assert_eq!(code, 4000, "both forms present must get 4000")
+        }
         other => panic!("expected Error 4000, got {other:?}"),
     }
     expect_closed(&mut ws).await;
 
-    // pubkey 无 device_id
+    // pubkey without device_id
     let mut ws2 = connect(&url).await;
     send(
         &mut ws2,
@@ -357,14 +360,14 @@ async fn credential_shape_violations_rejected_4000() {
     expect_closed(&mut ws2).await;
 }
 
-/// 回归隔离钉（D-E3）: secret 形路径逐字节不变——正确/错误 secret 均无挑战帧介入。
+/// Regression-isolation pin (D-E3): the secret-form path is byte-identical -- correct/wrong secrets get no challenge frame in between.
 #[tokio::test]
 async fn secret_legacy_path_regression() {
     let reg = Arc::new(DeviceRegistry::empty());
     reg.register_with_secret(DEV, Some("abcdefgh")).unwrap();
     let (url, _srv) = spawn_server(Arc::clone(&reg), true).await;
 
-    // 正确 secret → 直接 RoomJoined（无 DeviceAuthChallenge）。
+    // correct secret -> RoomJoined directly (no DeviceAuthChallenge).
     let mut ws = connect(&url).await;
     send(
         &mut ws,
@@ -383,7 +386,7 @@ async fn secret_legacy_path_regression() {
     .await;
     assert!(matches!(recv(&mut ws).await, SignalingMessage::RoomJoined { .. }));
 
-    // 错误 secret → 统一 4010（旧语义原样：单一家族消息防枚举）。
+    // wrong secret -> the uniform 4010 (the old semantics as-is: a single family message against enumeration).
     let mut ws2 = connect(&url).await;
     send(
         &mut ws2,
@@ -410,7 +413,7 @@ async fn secret_legacy_path_regression() {
     expect_closed(&mut ws2).await;
 }
 
-/// §5.3 延后队列冲刷: 挑战窗口内的 StatusReport 鉴权前不得入管线，通过后按序冲刷。
+/// S5.3 deferred-queue flush: a StatusReport inside the challenge window must not enter the pipeline before auth; after passing it is flushed in order.
 #[tokio::test]
 async fn deferred_messages_flushed_after_auth() {
     let reg = Arc::new(DeviceRegistry::empty());
@@ -418,26 +421,35 @@ async fn deferred_messages_flushed_after_auth() {
     let mut ws = connect(&url).await;
     join_pubkey(&mut ws, Some(DEV), None).await;
     let nonce = get_challenge(&mut ws).await;
-    // 挑战在途时抢发 StatusReport（未鉴权不得被 store）。
+    // fire a StatusReport while the challenge is in flight (unauthenticated messages must not be stored).
     let status_raw = r#"{"type":"status_report","room_id":"vehicle_cam0","topics":[],"streams":[],"processes":[],"signal":{"remote_connected":true,"remote_peer_id":"child","children":[],"agent_uptime_secs":1},"ts":1,"config_version":0}"#;
     send_raw(&mut ws, status_raw).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
-    assert!(srv.status_registry.get(ROOM).is_none(), "未鉴权消息不得入 store");
+    assert!(
+        srv.status_registry.get(ROOM).is_none(),
+        "unauthenticated messages must not enter the store"
+    );
     send(
         &mut ws,
-        &SignalingMessage::DeviceAuthResponse { room_id: ROOM.into(), sig: sign(&nonce, DEV, ROOM) },
+        &SignalingMessage::DeviceAuthResponse {
+            room_id: ROOM.into(),
+            sig: sign(&nonce, DEV, ROOM),
+        },
     )
     .await;
     assert!(matches!(recv(&mut ws).await, SignalingMessage::RoomJoined { .. }));
-    // 冲刷后同一管线消费延后消息（轮询吸收 relay loop 启动抖）。
+    // after the flush the same pipeline consumes the deferred messages (polling absorbs the relay-loop start jitter).
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     while srv.status_registry.get(ROOM).is_none() && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    assert!(srv.status_registry.get(ROOM).is_some(), "延后消息必须在鉴权后冲刷入管线");
+    assert!(
+        srv.status_registry.get(ROOM).is_some(),
+        "deferred messages must be flushed into the pipeline after auth"
+    );
 }
 
-/// 延后队列封顶: 挑战窗口洪泛 >16 条可解析非应答消息 → 断连（防未鉴权占内存）。
+/// Deferred-queue cap: flooding >16 parseable non-answer messages during the challenge window -> disconnect (prevents unauthenticated memory squatting).
 #[tokio::test]
 async fn deferred_overflow_disconnects() {
     let reg = Arc::new(DeviceRegistry::empty());
@@ -452,7 +464,7 @@ async fn deferred_overflow_disconnects() {
     expect_closed(&mut ws).await;
 }
 
-// ── T5: admin pending/approve（tower::oneshot，仿 admin_device_test）────────
+// -- T5: admin pending/approve (tower::oneshot, mirroring admin_device_test) --
 
 use axum::body::Body;
 use http::{Method, Request, StatusCode};
@@ -507,10 +519,8 @@ fn admin_token(state: &AdminState) -> String {
 }
 
 fn role_token(state: &AdminState, role: &str) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as usize;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+        as usize;
     let claims = JwtClaims {
         sub: role.into(),
         iat: now,
@@ -545,8 +555,8 @@ async fn json_of(response: axum::response::Response) -> serde_json::Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
-/// 角色门（C33 现有法=auth_middleware）: 无凭证 401；dispatcher POST approve 非只读 → 拒
-/// （既有 middleware 对 dispatcher 写操作回 401，admin_device_test devices_dispatcher_read_only 同源语义）。
+/// Role gate (the existing C33 method = auth_middleware): no credential 401; dispatcher POST approve is not read-only -> denied
+/// (the existing middleware answers 401 for dispatcher writes; the same-source semantics as admin_device_test devices_dispatcher_read_only).
 #[tokio::test]
 async fn pending_endpoints_auth_gates() {
     let state =
@@ -555,7 +565,8 @@ async fn pending_endpoints_auth_gates() {
     let resp = app
         .clone()
         .oneshot(auth_request(Method::GET, "/api/admin/devices/pending", None, Body::empty()))
-        .await.unwrap();
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     let resp = app
         .oneshot(auth_request(
@@ -564,15 +575,15 @@ async fn pending_endpoints_auth_gates() {
             Some(&role_token(&state, "dispatcher")),
             Body::from(r#"{"device_id":"ms-x"}"#),
         ))
-        .await.unwrap();
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
-/// approve 未命中 pending → 404。
+/// approve missing pending -> 404.
 #[tokio::test]
 async fn approve_unknown_returns_404() {
-    let state =
-        make_admin_state(format!("/tmp/ms-enroll-404-{}.yaml", uuid::Uuid::new_v4())).await;
+    let state = make_admin_state(format!("/tmp/ms-enroll-404-{}.yaml", uuid::Uuid::new_v4())).await;
     let app = admin_router(state.clone());
     let tk = admin_token(&state);
     let resp = app
@@ -582,38 +593,35 @@ async fn approve_unknown_returns_404() {
             Some(&tk),
             Body::from(r#"{"device_id":"ms-ghost"}"#),
         ))
-        .await.unwrap();
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
-/// approve 全链 + 热生效: pending 命中 → 入册(public_key 形+name)+save+踢出；
-/// 新 vk 立即可完成一次 pubkey 验签（verify_pubkey = 接入面同一入口）。
+/// approve full chain + hot effect: a pending hit -> admit (public_key form + name) + save + kick from pending;
+/// the new vk can immediately complete one pubkey verification (verify_pubkey = the same entry as the access plane).
 #[tokio::test]
 async fn approve_full_chain_hot_effective() {
     let devices_path = format!("/tmp/ms-enroll-approve-{}.yaml", uuid::Uuid::new_v4());
     let state = make_admin_state(devices_path.clone()).await;
-    // 预置 pending（模拟手动档陌生设备验签过后入表）。
+    // pre-seed pending (simulating a manual-mode unknown device after passing verification, entering the table).
     state.signaling.pending_devices.insert(DEV, VK, true);
     let app = admin_router(state.clone());
     let tk = admin_token(&state);
 
-    // 1) GET pending 列出（public_key 回显 ed25519: 前缀形）。
+    // 1) GET pending lists it (the public_key echoed in the ed25519: prefix form).
     let resp = app
         .clone()
-        .oneshot(auth_request(
-            Method::GET,
-            "/api/admin/devices/pending",
-            Some(&tk),
-            Body::empty(),
-        ))
-        .await.unwrap();
+        .oneshot(auth_request(Method::GET, "/api/admin/devices/pending", Some(&tk), Body::empty()))
+        .await
+        .unwrap();
     let body = json_of(resp).await;
     assert_eq!(body["count"], 1, "{body}");
     assert_eq!(body["pending"][0]["device_id"], DEV);
     assert_eq!(body["pending"][0]["public_key"], format!("ed25519:{VK}"));
     assert_eq!(body["pending"][0]["verified"], true);
 
-    // 2) POST approve（带 name）。
+    // 2) POST approve (with name).
     let resp = app
         .clone()
         .oneshot(auth_request(
@@ -622,18 +630,15 @@ async fn approve_full_chain_hot_effective() {
             Some(&tk),
             Body::from(format!(r#"{{"device_id":"{DEV}","name":"jetson-7"}}"#)),
         ))
-        .await.unwrap();
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
 
-    // 3) pending 清空 + 入册 + 落盘保形。
+    // 3) pending emptied + admitted + the disk write-back preserves the form.
     let resp = app
-        .oneshot(auth_request(
-            Method::GET,
-            "/api/admin/devices/pending",
-            Some(&tk),
-            Body::empty(),
-        ))
-        .await.unwrap();
+        .oneshot(auth_request(Method::GET, "/api/admin/devices/pending", Some(&tk), Body::empty()))
+        .await
+        .unwrap();
     assert_eq!(json_of(resp).await["count"], 0);
     assert!(
         matches!(state.device_registry.entry_of(DEV),
@@ -645,7 +650,7 @@ async fn approve_full_chain_hot_effective() {
     let saved = std::fs::read_to_string(&devices_path).unwrap();
     assert!(saved.contains("ed25519:") && saved.contains("jetson-7"), "{saved}");
 
-    // 4) 热生效: 新登记 vk 立即通过一次 sig_vector 挑战验签（下次连接即放行）。
+    // 4) hot effect: the newly registered vk immediately passes one sig_vector challenge verification (the next connection passes).
     let nonce_b64 = b64enc(&(0x40u8..0x60).collect::<Vec<u8>>());
     let mut msg = (0x40u8..0x60).collect::<Vec<u8>>();
     msg.extend_from_slice(DEV.as_bytes());
@@ -654,7 +659,7 @@ async fn approve_full_chain_hot_effective() {
     assert_eq!(state.device_registry.verify_pubkey(DEV, &nonce_b64, ROOM, &sig), Ok(()));
 }
 
-/// 竞态面: approve 时 device_id 已在册 → 409 且 pending 恢复（不吞设备重报窗口）。
+/// Race surface: on approve the device_id is already registered -> 409 and pending is restored (the device re-report window is not swallowed).
 #[tokio::test]
 async fn approve_conflict_409_restores_pending() {
     let devices_path = format!("/tmp/ms-enroll-conf-{}.yaml", uuid::Uuid::new_v4());
@@ -670,12 +675,13 @@ async fn approve_conflict_409_restores_pending() {
             Some(&tk),
             Body::from(format!(r#"{{"device_id":"{DEV}"}}"#)),
         ))
-        .await.unwrap();
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::CONFLICT);
     assert!(
         state.signaling.pending_devices.get(DEV).is_some(),
-        "409 后 pending 必须恢复"
+        "after 409 pending must be restored"
     );
-    // 已注册条目未被触碰（仍是 secret 形）。
+    // the registered entry untouched (still the secret form).
     assert!(matches!(state.device_registry.entry_of(DEV), Some(Entry::Secret(_))));
 }

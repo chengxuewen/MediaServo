@@ -1,16 +1,16 @@
-// mediaservo_control_relay — 舱端遥控 ↔ ROS2 桥接样例（G5 device-day 面）。
+// mediaservo_control_relay — cockpit teleop ↔ ROS2 bridge sample (the G5 device-day face).
 //
-// 数据流：
+// Data flow:
 //   ROS /mediaservo/cmd (std_msgs/String = JSON {label, cmd, payload})
-//     → ms::Control::send(seq 自增) → 车端执行 → ack
+//     → ms::Control::send(seq increments) → vehicle executes → ack
 //   ms::Control::on_ack → ROS /mediaservo/ack (std_msgs/String = ack JSON)
 //
-// 参数（ROS 声明，无硬编码）：http_base / ws_url / room / user / pass_param（口令走
-// rosparam 或环境变量 MSRTC_PASS，不落命令行——PIT-171 纪律）。
+// Parameters (declared via ROS, nothing hardcoded): http_base / ws_url / room / user / pass_param (the password goes
+// via rosparam or the MSRTC_PASS env var, never the command line — the PIT-171 discipline).
 //
-// 构建（device-day，需 sdk-client 安装 + ROS2 humble）:
+// Build (device-day; needs the sdk-client install + ROS2 humble):
 //   colcon build --packages-select mediaservo_control_relay
-//   或独立: colcon build 于本目录（CMAKE_PREFIX_PATH 含 SDK 安装前缀）。
+//   or standalone: colcon build in this directory (CMAKE_PREFIX_PATH includes the SDK install prefix).
 
 #include <atomic>
 #include <chrono>
@@ -43,16 +43,16 @@ public:
 
 private:
     void spin_up() {
-        // 口令仅接受 env（ROS param 明文落盘 = 凭证泄露面，拒绝）。
+        // The password is accepted only via env (a plaintext ROS param on disk = a credential-leak surface; refused).
         const char* pass = std::getenv("MSRTC_PASS");
         if (pass == nullptr || *pass == '\0') {
-            RCLCPP_ERROR(get_logger(), "MSRTC_PASS 未设置（口令只接受环境变量）");
+            RCLCPP_ERROR(get_logger(), "MSRTC_PASS not set (the password is accepted only via the environment variable)");
             rclcpp::shutdown();
             return;
         }
         auto token = ms::login(http_base_, user_, pass);
         if (!token) {
-            RCLCPP_ERROR(get_logger(), "login 失败: [%d] %s",
+            RCLCPP_ERROR(get_logger(), "login failed: [%d] %s",
                          token.error().code, token.error().message.c_str());
             rclcpp::shutdown();
             return;
@@ -64,14 +64,14 @@ private:
         cfg.role = "Client";
         auto session = ms::Session::connect(cfg);
         if (!session) {
-            RCLCPP_ERROR(get_logger(), "入房失败: [%d] %s",
+            RCLCPP_ERROR(get_logger(), "join failed: [%d] %s",
                          session.error().code, session.error().message.c_str());
             rclcpp::shutdown();
             return;
         }
         auto ctl = session->open_control({"chassis", "gimbal", "light"});
         if (!ctl) {
-            RCLCPP_ERROR(get_logger(), "open_control 失败: [%d] %s",
+            RCLCPP_ERROR(get_logger(), "open_control failed: [%d] %s",
                          ctl.error().code, ctl.error().message.c_str());
             rclcpp::shutdown();
             return;
@@ -81,14 +81,14 @@ private:
             m.data = ack_json;
             ack_pub_->publish(m);
         });
-        RCLCPP_INFO(get_logger(), "mediaservo 控制面就绪 room=%s negotiated=%u",
+        RCLCPP_INFO(get_logger(), "mediaservo control plane ready room=%s negotiated=%u",
                     room_.c_str(), session->negotiated().value_or(0));
         session_.emplace(std::move(session.value()));
         ctl_.emplace(std::move(ctl.value()));
     }
 
-    // cmd JSON 最小方言: {"label":"chassis","cmd":"steer","payload":{"deg":10}}
-    // （payload 原样转发字符串拼接禁止——此处按 SDK 契约以 raw JSON 传递）。
+    // Minimal cmd JSON dialect: {"label":"chassis","cmd":"steer","payload":{"deg":10}}
+    // (verbatim-forwarding via string concatenation is forbidden — per the SDK contract this passes raw JSON).
     void on_cmd(const std_msgs::msg::String::SharedPtr& msg) {
         if (!ctl_) return;
         const std::string& raw = msg->data;
@@ -118,13 +118,13 @@ private:
             }
         }
         if (label.empty() || cmd.empty()) {
-            RCLCPP_WARN(get_logger(), "cmd JSON 缺 label/cmd: %s", raw.c_str());
+            RCLCPP_WARN(get_logger(), "cmd JSON missing label/cmd: %s", raw.c_str());
             return;
         }
         const uint64_t seq = next_seq_.fetch_add(1);
         auto sent = ctl_->send(label, seq, cmd, payload.empty() ? "{}" : payload);
         if (!sent) {
-            RCLCPP_ERROR(get_logger(), "send 失败: [%d] %s",
+            RCLCPP_ERROR(get_logger(), "send failed: [%d] %s",
                          sent.error().code, sent.error().message.c_str());
         }
     }

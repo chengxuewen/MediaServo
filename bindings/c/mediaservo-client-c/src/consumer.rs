@@ -1,9 +1,9 @@
-//! 单路视频消费者 C handle（S6 批1b/K4 的 C 面）：每路一个独立帧泵，多路互不
-//! 连坐。句柄由 `mediaservo_client_session_consume` 产出，独立 close。
+//! Single video-consumer C handle (the C face of S6 batch 1b/K4): one independent frame pump per consumer, no
+//! cross-consumer coupling. Handles are produced by `mediaservo_client_session_consume` and closed independently.
 //!
-//! 泵纪律：std Mutex 持锁跨 `timeout(CONSUMER_POLL, recv)` 等待——stats/close 与泵
-//! 争锁的最坏延迟 = CONSUMER_POLL（250ms，有界）；close 置 closed → 取走 Consumer
-//! （receiver 随 drop 消亡，K1 重放判死该路）→ join 泵 → user_free 恰好一次。
+//! Pump discipline: the std Mutex is held across the `timeout(CONSUMER_POLL, recv)` wait — the worst-case lock
+//! contention delay for stats/close is CONSUMER_POLL (250ms, bounded); close sets closed → takes the Consumer away
+//! (the receiver dies with the drop, K1 replay declares that consumer dead) → join the pump → user_free exactly once.
 
 use std::os::raw::{c_char, c_int, c_void};
 use std::sync::Mutex;
@@ -22,13 +22,13 @@ use crate::{
     mediaservo_client_user_free, runtime,
 };
 
-/// 帧泵空转复查窗（closed / 通道消亡的轮询粒度；兼作 close/stats 最坏锁延迟）。
+/// Frame-pump idle re-check window (polling granularity for closed / channel death; also the worst-case close/stats lock delay).
 const CONSUMER_POLL: Duration = Duration::from_millis(250);
 
-/// QOE 快照 C 布局（client.h `mediaservo_client_qoe_snapshot_t` 镜像；
-/// 字段序冻结——ABI 只增纪律，新字段尾部追加）。
+/// QOE snapshot C layout (mirror of client.h `mediaservo_client_qoe_snapshot_t`;
+/// field order is frozen — ABI additive-only discipline; new fields append at the end).
 #[repr(C)]
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception)
 pub struct mediaservo_client_qoe_snapshot_t {
     pub struct_size: u32,
     pub fps: u32,
@@ -43,24 +43,24 @@ pub struct mediaservo_client_qoe_snapshot_t {
     pub epoch: u32,
 }
 
-/// QOE 回调 C 函数指针。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外——同 qoe_snapshot_t/consumer_t）
+/// QOE callback C function pointer.
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception — same as qoe_snapshot_t/consumer_t)
 pub type mediaservo_client_qoe_cb =
     extern "C" fn(*const mediaservo_client_qoe_snapshot_t, *mut c_void);
 
-/// `*mut c_void` 的 Send/Sync 包装——C 回调契约：**调用方保证 user 上下文的
-/// 线程安全**（client.h QOE 节注释；SDK 节拍线程触发 cb）。
+/// Send/Sync wrapper over `*mut c_void` — the C callback contract: **the caller guarantees the thread safety
+/// of the user context** (client.h QOE section note; the SDK tick thread invokes cb).
 #[derive(Clone, Copy)]
 struct CbUser(*mut c_void);
-// SAFETY: C ABI 契约——user 上下文线程安全由调用方保证（client.h 明示）。
+// SAFETY: C ABI contract — caller-side thread safety of the user context (explicit in client.h).
 unsafe impl Send for CbUser {}
 unsafe impl Sync for CbUser {}
 
-/// 单路视频消费者 opaque handle。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外）
+/// Single video-consumer opaque handle.
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception)
 pub struct mediaservo_client_consumer_t {
-    /// 帧回调第一参数透传（**永不解引用**——属主契约由调用方保证会话不早于
-    /// consumer 释放；见 client.h 生命周期节）。
+    /// First frame-callback parameter passed through (**never dereferenced** — the ownership contract makes the caller guarantee the session does not outlive
+    /// the consumer; see the client.h lifecycle section).
     session: *mut mediaservo_client_session_t,
     producer_id: String,
     consumer: Mutex<Option<Consumer>>,
@@ -69,16 +69,16 @@ pub struct mediaservo_client_consumer_t {
     user: *mut c_void,
     free: Option<mediaservo_client_user_free>,
     pump: Mutex<Option<std::thread::JoinHandle<()>>>,
-    /// QOE 节拍 task 句柄——close 时 abort 释放 trampoline 闭包
-    /// （lsan.1096280 实证：进程退出 tokio runtime 不 shutdown → Box 残留 64B/次注册）。
+    /// QOE tick task handle — close aborts it, releasing the trampoline closure
+    /// (proven by lsan.1096280: on process exit the tokio runtime does not shut down → a 64B Box leaks per registration).
     qoe_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     err: ErrSlot,
 }
 
-// SAFETY: consumer/cb/user 的跨线程访问全部经 Mutex/AtomicBool；session 指针只搬运
-// 不解引用。
+// SAFETY: all cross-thread access to consumer/cb/user goes through Mutex/AtomicBool; the session pointer is only moved,
+// never dereferenced.
 unsafe impl Send for mediaservo_client_consumer_t {}
-// SAFETY: 同上。
+// SAFETY: same as above.
 unsafe impl Sync for mediaservo_client_consumer_t {}
 
 impl HandleErr for mediaservo_client_consumer_t {
@@ -87,7 +87,7 @@ impl HandleErr for mediaservo_client_consumer_t {
     }
 }
 
-/// 由 session_consume 装配：建句柄 + 启动帧泵，返回 raw handle。
+/// Assembled by session_consume: build the handle + start the frame pump, returning the raw handle.
 pub(crate) fn spawn(
     session: *mut mediaservo_client_session_t,
     consumer: Consumer,
@@ -111,14 +111,14 @@ pub(crate) fn spawn(
     let raw = Box::into_raw(handle);
     let raw_usize = raw as usize;
     let join = std::thread::spawn(move || pump_loop(raw_usize));
-    // 泵可能已跑完（closed 竞态/通道瞬死）——store 仍成立，join 即收敛。
+    // The pump may already have finished (closed race / transient channel death) — the store still holds and the join converges.
     if let Ok(mut g) = unsafe { &*raw }.pump.lock() {
         *g = Some(join);
     }
     raw
 }
 
-/// 帧泵线程：本路帧通道 → C 回调（帧数据 Vec 存活跨越回调调用点，data 仅回调内有效）。
+/// Frame-pump thread: this consumer's frame channel → C callback (the frame data Vec outlives the callback call site; data is valid only inside the callback).
 fn pump_loop(raw: usize) {
     let c = raw as *mut mediaservo_client_consumer_t;
     let h = unsafe { &*c };
@@ -127,16 +127,16 @@ fn pump_loop(raw: usize) {
         if h.closed.load(Ordering::SeqCst) {
             break;
         }
-        // 注意: `timeout(..)` 必须在 async 块内构造（无 context 线程的外侧实参
-        //        会 panic——lib.rs video_pump 同训）。
+        // Note: `timeout(..)` must be constructed inside the async block (an outside argument on a context-less thread
+        //        panics — same lesson as the lib.rs video_pump).
         let frame = match h.consumer.lock() {
             Ok(mut g) => match g.as_mut() {
                 Some(cons) => {
                     rt.block_on(async { timeout(CONSUMER_POLL, cons.frames().recv()).await })
                 }
-                None => break, // close 已取走
+                None => break, // already taken by close
             },
-            Err(_) => break, // poisoned = 有线程 panic 在临界区，收敛退出
+            Err(_) => break, // poisoned = a thread panicked inside the critical section; converge and exit
         };
         match frame {
             Ok(Some(f)) => {
@@ -149,13 +149,13 @@ fn pump_loop(raw: usize) {
                 };
                 (h.cb)(h.session, &cframe, h.user);
             }
-            Ok(None) => break,  // 帧通道消亡（会话关闭/该路撤走）——正常收敛
-            Err(_) => continue, // CONSUMER_POLL 空转，复查 closed
+            Ok(None) => break, // frame channel gone (session closed / this consumer withdrawn) — normal convergence
+            Err(_) => continue, // CONSUMER_POLL idle tick; re-check closed
         }
     }
 }
 
-/// 本路 producer id（needed 溢出合同；id 短，cap 256 足够）。
+/// This consumer's producer id (needed overflow contract; ids are short, cap 256 is enough).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_consumer_id(
     c: *const mediaservo_client_consumer_t,
@@ -185,8 +185,8 @@ pub extern "C" fn mediaservo_client_consumer_id(
     })
 }
 
-/// 本路视频统计 JSON（K4 单路读数，不经会话汇总；键表 = session_video_stats 同形）。
-/// needed 溢出合同同 list_rooms。
+/// This consumer's video stats JSON (K4 per-consumer reading, not the session aggregate; the key table matches session_video_stats).
+/// Same needed overflow contract as list_rooms.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_consumer_stats(
     c: *mut mediaservo_client_consumer_t,
@@ -230,9 +230,9 @@ pub extern "C" fn mediaservo_client_consumer_stats(
     })
 }
 
-/// QOE 周期回调（consumer-qoe-callback）：Rust on_qoe → C trampoline。
-/// cb 在 SDK 节拍 task 触发（tokio worker），C 侧须自行保证线程安全。
-/// 重复注册：旧 task abort+join 后才返回——调用方换 ctx 时序安全（PIT-221）。
+/// QOE periodic callback (consumer-qoe-callback): Rust on_qoe → C trampoline.
+/// cb fires on the SDK tick task (a tokio worker); the C side must guarantee its own thread safety.
+/// Re-registration: the old task is abort+join before returning — timing-safe for the caller swapping ctx (PIT-221).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_consumer_on_qoe(
     c: *mut mediaservo_client_consumer_t,
@@ -258,8 +258,8 @@ pub extern "C" fn mediaservo_client_consumer_on_qoe(
         let Some(consumer) = guard.as_ref() else {
             return h.fail_state("mediaservo_client_consumer_on_qoe: consumer closed");
         };
-        // C trampoline：QoeSnapshot → C struct（字段序冻结，client.h ABI 注释）。
-        // CbUser 携带裸指针过 Send 边界（C 契约：调用方保证 user 线程安全）。
+        // C trampoline: QoeSnapshot → C struct (field order frozen; see the client.h ABI note).
+        // CbUser carries a raw pointer across the Send boundary (C contract: the caller guarantees the user's thread safety).
         let ctx = std::sync::Arc::new(CbUser(user));
         let cb_cb = cb;
         let trampoline = move |snap: mediaservo_client::consumer::QoeSnapshot| {
@@ -278,14 +278,12 @@ pub extern "C" fn mediaservo_client_consumer_on_qoe(
             };
             cb_cb(&c_snap, ctx.0);
         };
-        let qoe_task = consumer.on_qoe(
-            std::time::Duration::from_millis(u64::from(period_ms)),
-            Box::new(trampoline),
-        );
-        // 幂等替换（PIT-221 同款纪律）：旧 task abort+join（join 在锁外——
-        // 同 close 路径死锁面收窄）——返回后旧回调物理不可能再触发，C++ 层
-        // delete 旧 qoe_ctx_ 时序安全。新 task 先建后插：join 窗内新 task 可能
-        // 已触发一次（用新 ctx——注册前已分配，安全）。
+        let qoe_task = consumer
+            .on_qoe(std::time::Duration::from_millis(u64::from(period_ms)), Box::new(trampoline));
+        // Idempotent replacement (same discipline as PIT-221): old task abort+join (the join happens outside the lock —
+        // narrowing the deadlock surface like the close path) — after return the old callback physically cannot fire again, so the C++ layer
+        // can safely delete the old qoe_ctx_. The new task is created before insertion: within the join window the new task may
+        // already have fired once (with the new ctx — allocated before registration, safe).
         let old_task = h.qoe_task.lock().ok().and_then(|mut g| g.take());
         if let Some(t) = old_task {
             t.abort();
@@ -298,10 +296,9 @@ pub extern "C" fn mediaservo_client_consumer_on_qoe(
     })
 }
 
-
-/// abort 后等待 task 真退出。C API 同步入口均为非 runtime 线程——
-/// block_on 安全；若误从 runtime 线程调用（未来误用），try_current 守卫
-/// 降级为只 abort（不 join），契约降级为「尽力而为」并打日志。
+/// After abort, wait for the task to really exit. The C API sync entry points are never runtime threads —
+/// block_on is safe; if misused from a runtime thread (future misuse), the try_current guard
+/// degrades to abort-only (no join), the contract degrades to best-effort, and it logs.
 fn join_qoe_task(task: tokio::task::JoinHandle<()>) {
     if tokio::runtime::Handle::try_current().is_ok() {
         tracing::warn!("join_qoe_task called on runtime thread — skip join (abort only)");
@@ -310,11 +307,11 @@ fn join_qoe_task(task: tokio::task::JoinHandle<()>) {
     let _ = crate::runtime().block_on(task);
 }
 
-/// 关闭本路并释放 handle（幂等）。置 closed → 取走 Consumer（receiver drop → K1 重放
-/// 判死本路）→ join 泵（≤CONSUMER_POLL）→ user_free 恰好一次 → free。
-/// QOE task join 纪律（PIT-221）：返回后旧回调必不再触发（abort+join 硬保证）；
-/// 回调内禁止重入 close / on_qoe（join 虽已移出锁临界区，重入仍属契约违反，
-/// 死锁风险自担——契约沿用「回调内禁止阻塞」）。
+/// Close this consumer and release the handle (idempotent). Set closed → take the Consumer away (receiver drop → K1 replay
+/// declares it dead) → join the pump (≤CONSUMER_POLL) → user_free exactly once → free.
+/// QOE task join discipline (PIT-221): after return the old callback cannot fire again (hard abort+join guarantee);
+/// re-entering close / on_qoe from within a callback is forbidden (the join has been moved out of the lock critical section, but re-entry is still a contract violation,
+/// deadlock risk is the caller's — the contract remains "no blocking inside callbacks").
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_client_consumer_close(c: *mut mediaservo_client_consumer_t) -> c_int {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -323,18 +320,18 @@ pub extern "C" fn mediaservo_client_consumer_close(c: *mut mediaservo_client_con
         }
         let handle = unsafe { Box::from_raw(c) };
         if handle.closed.swap(true, Ordering::SeqCst) {
-            return MEDIASERVO_OK; // 幂等（同 link-c 双 close 纪律）
+            return MEDIASERVO_OK; // idempotent (same double-close discipline as link-c)
         }
-        // 取走即 drop：帧通道接收端消亡，泵下轮 recv → None → break。
+        // Take-and-drop: the frame channel's receiver dies, the pump's next recv → None → break.
         if let Ok(mut g) = handle.consumer.lock() {
             drop(g.take());
         }
-        // QOE 节拍 task abort + join——返回后旧回调物理不可能再触发。
-        // （PIT-221: abort 不打断同步执行中的回调——crash_d036 实证 client.hpp:436
-        // (*fn)(q) 调已 delete ctx。block_on 用进程级 runtime()——C API 同步入口
-        // 均为非 runtime 线程；try_current 守卫见 join_qoe_task。lsan.1096280:
-        // 64B/次注册残留——释放语义不变。join 在锁外（take 后 guard 即 drop）——
-        // 回调违规重入 close/on_qoe 时只拿 closed 状态错误，不与 join 互锁。）
+        // QOE tick task abort + join — after return the old callback physically cannot fire again.
+        // (PIT-221: abort does not interrupt a callback executing synchronously — crash_d036 proved the client.hpp:436
+        // (*fn)(q) call hit an already-deleted ctx. block_on uses the process-level runtime() — the C API sync entry points
+        // are never runtime threads; see join_qoe_task for the try_current guard. lsan.1096280:
+        // a 64B-per-registration leak — release semantics unchanged. The join runs outside the lock (the guard drops right after the take) —
+        // a contract-violating callback re-entering close/on_qoe just gets the closed-state error and never deadlocks against the join.)
         let task = handle.qoe_task.lock().ok().and_then(|mut g| g.take());
         if let Some(t) = task {
             t.abort();
@@ -387,9 +384,9 @@ mod tests {
 
     #[test]
     fn consumer_close_joins_pump_and_frees_once() {
-        // user_free 恰好一次钉（合同）：泵空转窗（CONSUMER_POLL）内有界 join。
-        // 双 close 不测——close 后句柄内存按契约即 UB（swap 幂等分支是纵深防御，
-        // 不是 use-after-free 豁免；link-c 同纪律）。
+        // user_free exactly-once pin (contract): bounded join within the pump idle window (CONSUMER_POLL).
+        // Double close is not tested — after close, touching handle memory is UB per contract (the swap idempotent branch is defense in depth,
+        // not a use-after-free exemption; same discipline as link-c).
         static FREES: AtomicBool = AtomicBool::new(false);
         extern "C" fn mark_free(_u: *mut c_void) {
             FREES.store(true, Ordering::SeqCst);
@@ -400,8 +397,8 @@ mod tests {
             _u: *mut c_void,
         ) {
         }
-        // Consumer 无公开构造（真 pc 依赖）——用 spawn 注入不可行，改为手工装配
-        // （同 crate 私有字段可见）：consumer=None 形 = "通道已撤"泵立即收敛。
+        // Consumer has no public constructor (needs a real pc) — spawn injection is not feasible, so assemble manually
+        // (same-crate private field access): the consumer=None form = "channel withdrawn", the pump converges immediately.
         let handle = Box::new(mediaservo_client_consumer_t {
             session: ptr::null_mut(),
             producer_id: "p-test".to_string(),
@@ -420,7 +417,7 @@ mod tests {
         unsafe { &*raw }.pump.lock().unwrap_or_else(|e| e.into_inner()).replace(join);
 
         assert_eq!(mediaservo_client_consumer_close(raw), MEDIASERVO_OK);
-        assert!(FREES.load(Ordering::SeqCst), "user_free 未调用");
+        assert!(FREES.load(Ordering::SeqCst), "user_free was not called");
     }
 
     #[test]
@@ -433,8 +430,8 @@ mod tests {
             _u: *mut c_void,
         ) {
         }
-        // 节拍 task：tick → 30ms 同步段（模拟「同步执行中的回调」——abort 打不断
-        // 的那一段，把竞态窗从微秒拉宽到 ~75% 周期）→ 真实递增 FIRES。
+        // Tick task: tick → 30ms sync segment (simulating "a callback executing synchronously" — the segment abort cannot interrupt),
+        // widening the race window from microseconds to ~75% of the period → really increments FIRES.
         let task = crate::runtime().spawn(async {
             let mut tick = tokio::time::interval(std::time::Duration::from_millis(10));
             loop {
@@ -459,25 +456,25 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(50));
         assert_eq!(mediaservo_client_consumer_close(raw), MEDIASERVO_OK);
         let after = FIRES.load(Ordering::SeqCst);
-        // join 纪律（PIT-221）：close 返回 = task 已终结——在途回调的递增已计入
-        // after，此后物理不可能再涨。严格相等（无宽容度——宽容即遮蔽回归）。
+        // join discipline (PIT-221): close returning = the task has ended — the in-flight callback's increment is already counted
+        // in `after`, and it can physically never grow again. Strict equality (no tolerance — tolerance would mask regressions).
         std::thread::sleep(std::time::Duration::from_millis(100));
         let settled = FIRES.load(Ordering::SeqCst);
         assert_eq!(
             settled, after,
-            "close 返回后回调仍触发: after={after} settled={settled}"
+            "callback still fired after close returned: after={after} settled={settled}"
         );
     }
 
     #[test]
     fn on_qoe_replace_joins_old_task() {
-        // 替换路径复用 join_qoe_task（close 测试已钉行为）——此处钉 helper 对
-        // 长 sleep task 的 abort+join 即时收敛，防未来改异步 join 致替换回归。
+        // The replacement path reuses join_qoe_task (behavior pinned by the close test) — here we pin the helper's
+        // abort+join immediate convergence for a long-sleep task, guarding against a future async-join change regressing replacement.
         let old = crate::runtime().spawn(async {
             tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
         });
         old.abort();
         join_qoe_task(old);
-        // join 返回即证 task 终结（abort 生效——1h sleep 不可能自然结束）
+        // join returning proves the task ended (abort worked — a 1h sleep cannot end naturally)
     }
 }

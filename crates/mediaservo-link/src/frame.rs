@@ -1,19 +1,19 @@
-//! 帧元数据 + 帧引用 + 帧流（latest-slot）。
+//! Frame metadata + frame reference + frame stream (latest-slot).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
-/// 帧元数据（定长 LE 编码，D243）。
+/// Frame metadata (fixed-length LE encoding, D243).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FrameMeta {
     pub seq: u64,
     pub width: u32,
     pub height: u32,
-    /// 像素格式（0=未知, 1=I420, 2=NV12, 3=RGBA, 4=JSON 载荷——非像素数据，
-    /// 如 E2 streamer 推流状态 stats/* topic）。
+    /// Pixel format (0=unknown, 1=I420, 2=NV12, 3=RGBA, 4=JSON payload - not pixels,
+    /// e.g. E2 streamer push-status on stats/* topics).
     pub format: u8,
-    /// 元数据版本（演进用，D243）。encode 恒写 [`Self::WIRE_VERSION`]；
-    /// decode 对非当前版本**拒帧**（N4：静默错解 36 字节 = 比丢帧更糟）。
+    /// Metadata version (for evolution, D243). encode always writes [`Self::WIRE_VERSION`];
+    /// decode **rejects frames** of other versions (N4: silently mis-parsing 36 bytes is worse than dropping).
     pub version: u8,
     pub is_keyframe: bool,
     pub ts_mono_ns: u64,
@@ -21,16 +21,16 @@ pub struct FrameMeta {
 }
 
 impl FrameMeta {
-    /// JSON 载荷格式标记（E2 stats topic 线格式；非像素数据）。
+    /// JSON payload format marker (E2 stats topic wire format; not pixel data).
     pub const FORMAT_JSON: u8 = 4;
 
-    /// 当前线格式版本。0 = 历史恒零值（全量部署字节形即 v0）——**上线零断裂**；
-    /// 未来演进 bump 此常数并在 decode 加兼容窗。
+    /// Current wire-format version. 0 = the historical value (all deployed bytes are v0) - **zero breakage on rollout**;
+    /// future evolution bumps this constant and adds a compat window in decode.
     pub const WIRE_VERSION: u8 = 0;
 
-    /// 定长编码字节数：
+    /// Fixed encoded byte count:
     /// seq(8) + width(4) + height(4) + format(1) + version(1) + keyframe(1) + reserved(1)
-    /// + ts_mono_ns(8) + ts_epoch_ns(8) = 36。
+    /// + ts_mono_ns(8) + ts_epoch_ns(8) = 36.
     pub const WIRE_LEN: usize = 36;
 
     pub fn encode(&self) -> [u8; Self::WIRE_LEN] {
@@ -55,7 +55,7 @@ impl FrameMeta {
                 Self::WIRE_LEN
             )));
         }
-        // N4 版本门：未知版本拒帧（解析后字段全错位 = 静默花屏比丢帧更坏）。
+        // N4 version gate: reject unknown versions (all fields misaligned after parse = silent corruption, worse than a drop).
         if b[17] != Self::WIRE_VERSION {
             return Err(crate::LinkError::Bus(format!(
                 "frame meta wire version {} unsupported (expected {})",
@@ -76,7 +76,7 @@ impl FrameMeta {
     }
 }
 
-/// 帧引用（元数据 + payload）。Phase 2 可演进为 iceoryx2 SHM 零拷贝视图。
+/// Frame reference (metadata + payload). Phase 2 may evolve into an iceoryx2 SHM zero-copy view.
 pub struct FrameRef {
     meta: FrameMeta,
     payload: Vec<u8>,
@@ -94,7 +94,7 @@ impl FrameRef {
     }
 }
 
-/// 帧流内部状态（后台线程经 [`Weak`] 投递，流被丢弃时自动停线程）。
+/// Frame-stream inner state (background thread delivers via [`Weak`]; auto-stops when the stream is dropped).
 pub(crate) struct StreamInner {
     slot: Mutex<Option<FrameRef>>,
     notify: tokio::sync::Notify,
@@ -102,23 +102,23 @@ pub(crate) struct StreamInner {
 }
 
 impl StreamInner {
-    /// 投递最新帧（替换旧帧）。
+    /// Deliver the latest frame (replaces the old one).
     pub(crate) fn deliver(&self, frame: FrameRef) {
         *self.slot.lock().expect("frame slot lock") = Some(frame);
         self.notify.notify_waiters();
     }
 
-    /// 关停（唤醒等待中的 recv 返回 None）。
+    /// Shutdown (wakes blocked recv calls to return None).
     pub(crate) fn shutdown(&self) {
         self.shutdown.store(true, Ordering::SeqCst);
         self.notify.notify_waiters();
     }
 }
 
-/// 帧流（latest-slot：慢消费者跳到最新帧，审核 H5）。
+/// Frame stream (latest-slot: slow consumers skip to the newest frame, review H5).
 ///
-/// FrameBus 后台线程每收到一帧经 [`StreamInner::deliver`] 替换槽内帧并通知；
-/// 消费者 [`Self::recv`] 等待通知后取最新帧。**禁用无界队列**（会重新引入积压）。
+/// The FrameBus background thread replaces the slot and notifies via [`StreamInner::deliver`] on every frame;
+/// consumers take the newest frame after [`Self::recv`] wakes. **Unbounded queues are forbidden** (they reintroduce backlog).
 #[derive(Clone)]
 pub struct FrameStream {
     inner: Arc<StreamInner>,
@@ -141,17 +141,17 @@ impl FrameStream {
         }
     }
 
-    /// 供后台线程获取弱引用（流被丢弃时线程自动退出）。
+    /// Weak handle for the background thread (thread auto-exits when the stream is dropped).
     pub(crate) fn weak_inner(&self) -> Weak<StreamInner> {
         Arc::downgrade(&self.inner)
     }
 
-    /// 内部共享状态（FrameBus 用于 close 时 shutdown）。
+    /// Inner shared state (FrameBus uses it to shutdown on close).
     pub(crate) fn inner(&self) -> Arc<StreamInner> {
         Arc::clone(&self.inner)
     }
 
-    /// 取最新帧；无帧时等待。慢消费者自动跳到最新（不积压）；关停后返回 None。
+    /// Take the latest frame, waiting when none. Slow consumers auto-skip to the newest (no backlog); returns None after shutdown.
     pub async fn recv(&self) -> Option<FrameRef> {
         loop {
             let notified = self.inner.notify.notified();
@@ -161,7 +161,7 @@ impl FrameStream {
                 return Some(f);
             }
             if self.inner.shutdown.load(Ordering::SeqCst) {
-                return None; // 已关停且无帧
+                return None; // shut down with no frame
             }
             notified.await;
         }
@@ -173,10 +173,7 @@ mod tests {
     use super::*;
 
     fn frame(seq: u64) -> FrameRef {
-        FrameRef::new(
-            FrameMeta { seq, ..Default::default() },
-            vec![seq as u8],
-        )
+        FrameRef::new(FrameMeta { seq, ..Default::default() }, vec![seq as u8])
     }
 
     #[tokio::test]
@@ -186,7 +183,7 @@ mod tests {
         s.inner.deliver(frame(2));
         s.inner.deliver(frame(3));
         let f = s.recv().await.expect("frame");
-        assert_eq!(f.meta().seq, 3, "慢消费者应跳到最新帧");
+        assert_eq!(f.meta().seq, 3, "slow consumer should skip to the newest frame");
     }
 
     #[tokio::test]
@@ -206,12 +203,12 @@ mod tests {
     async fn recv_returns_none_after_shutdown() {
         let s = FrameStream::new();
         s.inner().shutdown();
-        assert!(s.recv().await.is_none(), "关停后 recv 应返回 None");
+        assert!(s.recv().await.is_none(), "recv should return None after shutdown");
     }
 
     #[test]
     fn decode_rejects_unknown_wire_version() {
-        // N4：版本位非 0 = 拒帧且报版本（36 字节全错位比丢帧更坏）
+        // N4: nonzero version bit = reject and report the version (36 misaligned bytes are worse than a drop)
         let mut b = FrameMeta { seq: 7, width: 4, ..Default::default() }.encode();
         assert_eq!(FrameMeta::decode(&b).unwrap().version, FrameMeta::WIRE_VERSION);
         b[17] = 9;

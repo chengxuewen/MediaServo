@@ -8,7 +8,7 @@ interface Props {
   onClose: () => void;
 }
 
-/** 居中弹窗（Devices/Accounts 表单共用; 复用 stream-detail 的 overlay 交互语义）。 */
+/** Centered modal (shared by the Devices/Accounts forms; reuses the stream-detail overlay interaction semantics). */
 export default function Modal({ title, children, onClose }: Props) {
   return (
     <div className="modal-overlay" onClick={onClose}>

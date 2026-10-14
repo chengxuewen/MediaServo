@@ -1,8 +1,8 @@
 # mediaservoConfig.cmake — find_package(mediaservo [COMPONENTS field|link|deck])
-# 单包多组件模式（OpenCV/Boost 惯例）: 三个 INTERFACE target 全定义（链接粒度由
-# target_link_libraries 决定），COMPONENTS 声明性校验（缺失/未知组件报错）。
-# 手工模板（等价 iceoryx2 Config.cmake.in 输出纪律，D248）: 安装时渲染 @VERSION@/@MAJOR@
-# 可重定位: 前缀从本文件位置推导（lib/cmake/mediaservo → ../../..）
+# Single-package multi-component mode (OpenCV/Boost convention): all three INTERFACE targets are defined (link granularity is
+# decided by target_link_libraries), COMPONENTS is a declarative check (missing/unknown components error out).
+# Hand-maintained template (equivalent to the iceoryx2 Config.cmake.in output discipline, D248): renders @VERSION@/@MAJOR@ at install time
+# Relocatable: the prefix is derived from this file's location (lib/cmake/mediaservo → ../../..)
 
 get_filename_component(_mediaservo_prefix "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 
@@ -34,9 +34,9 @@ set(mediaservo_VERSION "@VERSION@")
 set(mediaservo_SDK_ABI_MAJOR "@MAJOR@")
 set(mediaservo_INCLUDE_DIRS "${_mediaservo_prefix}/include")
 
-# ── COMPONENTS 声明性校验（OpenCV/Boost 模式）────────────────
-# 手写校验（FPHSA CONFIG_MODE+HANDLE_COMPONENTS 组合行为不稳）；
-# 版本检查由 CMake 自动 include 本目录 mediaservoConfigVersion.cmake。
+# -- COMPONENTS declarative check (OpenCV/Boost pattern) ------------------------
+# Hand-written check (the FPHSA CONFIG_MODE+HANDLE_COMPONENTS combination is behaviorally unstable);
+# the version check is handled by CMake auto-including mediaservoConfigVersion.cmake from this directory.
 foreach(_comp IN LISTS mediaservo_FIND_COMPONENTS)
     if(NOT _comp IN_LIST mediaservo_KNOWN_COMPONENTS)
         message(FATAL_ERROR

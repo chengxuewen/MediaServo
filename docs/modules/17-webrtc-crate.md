@@ -1,94 +1,94 @@
 # 17. WebRTC Crate — mediaservo-webrtc
 
-> 状态：Phase 3 完成 | 关联决策：D11, D31, D139–D151 | 参考：webrtc-kit trait 抽象模式
+> Status: Phase 3 complete | Related decisions: D11, D31, D139–D151 | Reference: webrtc-kit trait abstraction pattern
 
-## 定位
+## Positioning
 
-`mediaservo-webrtc` 是 MediaServo 的 WebRTC 传输层 crate，对外暴露标准 W3C WebRTC API trait，内部通过编译期 feature gate 支持多后端分发。当前默认后端 `webrtc-sys`（libwebrtc C++ FFI）。
+`mediaservo-webrtc` is MediaServo's WebRTC transport crate. It exposes standard W3C WebRTC API traits externally and dispatches across multiple backends via compile-time feature gates. The current default backend is `webrtc-sys` (libwebrtc C++ FFI).
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                 mediaservo-webrtc                     │
+│                 mediaservo-webrtc                   │
 │                                                     │
 │  RTCEngine::create_factory()                        │
 │    └→ RTCPeerConnectionFactory                      │
 │         └→ RTCPeerConnection (pub trait)            │
 │                                                     │
 │  ┌─────────────────────────────────────────────┐    │
-│  │              内部 trait 层                   │    │
-│  │  PcBackend  │  DcBackend  │  TrackWriteBackend │ │
+│  │            internal trait layer             │    │
+│  │  PcBackend  │  DcBackend  │ TrackWriteBackend│   │
 │  └──────────────┼─────────────┼──────────────────┘ │
 │                 ▼             ▼                     │
 │  ┌─────────────────────────────────────────────┐    │
-│  │             编译期 type alias                 │    │
-│  │  ActivePc / ActiveDc / ActiveTrack           │    │
+│  │          compile-time type alias            │    │
+│  │  ActivePc / ActiveDc / ActiveTrack          │    │
 │  └──────────────┬──────────────────────────────┘ │
 │                 ▼                                  │
 │  ┌─────────────────────────────────────────────┐    │
-│  │    webrtc-sys    │   webrtc-rs   │   stub    │   │
-│  │  (libwebrtc C++) │  (纯 Rust)   │  (测试用)  │   │
+│  │    webrtc-sys    │   webrtc-rs   │   stub   │    │
+│  │  (libwebrtc C++) │  (pure Rust)  │ (testing)│    │
 │  └──────────────────┴───────────────┴───────────┘   │
 └─────────────────────────────────────────────────────┘
 ```
 
-## 命名规范
+## Naming Convention
 
-所有对外 API 类型统一 `RTC` 前缀，对齐 W3C WebRTC 标准：
+All externally visible API types use the uniform `RTC` prefix, aligned with the W3C WebRTC standard:
 
-| 类型 | 命名 | W3C 标准 |
-|------|------|----------|
-| 引擎入口 | `RTCEngine` | — |
-| 工厂 | `RTCPeerConnectionFactory` | — |
-| 连接 | `RTCPeerConnection` | `RTCPeerConnection` |
-| 数据通道 | `RTCDataChannel` | `RTCDataChannel` |
-| 会话描述 | `RTCSessionDescription` | `RTCSessionDescription` |
-| ICE 候选 | `RTCIceCandidate` | `RTCIceCandidate` |
-| 配置 | `RTCConfiguration` | `RTCConfiguration` |
-| RTP 发送 | `RTCRtpSender` | `RTCRtpSender` |
-| RTP 接收 | `RTCRtpReceiver` | `RTCRtpReceiver` |
-| 错误 | `RTCError` | — |
-| ICE 连接状态 | `RTCIceConnectionState` | `RTCIceConnectionState` |
-| ICE 收集状态 | `RTCIceGatheringState` | `RTCIceGatheringState` |
-| 信令状态 | `RTCSignalingState` | `RTCSignalingState` |
-| Offer 选项 | `RTCOfferOptions` | `RTCOfferOptions` |
-| Answer 选项 | `RTCAnswerOptions` | `RTCAnswerOptions` |
-| ICE 传输策略 | `RTCIceTransportPolicy` | `RTCIceTransportPolicy` |
-| 统计 | `RTCStats` | — |
+| Type | Name | W3C Standard |
+|------|------|--------------|
+| Engine entry | `RTCEngine` | — |
+| Factory | `RTCPeerConnectionFactory` | — |
+| Connection | `RTCPeerConnection` | `RTCPeerConnection` |
+| Data channel | `RTCDataChannel` | `RTCDataChannel` |
+| Session description | `RTCSessionDescription` | `RTCSessionDescription` |
+| ICE candidate | `RTCIceCandidate` | `RTCIceCandidate` |
+| Configuration | `RTCConfiguration` | `RTCConfiguration` |
+| RTP sender | `RTCRtpSender` | `RTCRtpSender` |
+| RTP receiver | `RTCRtpReceiver` | `RTCRtpReceiver` |
+| Error | `RTCError` | — |
+| ICE connection state | `RTCIceConnectionState` | `RTCIceConnectionState` |
+| ICE gathering state | `RTCIceGatheringState` | `RTCIceGatheringState` |
+| Signaling state | `RTCSignalingState` | `RTCSignalingState` |
+| Offer options | `RTCOfferOptions` | `RTCOfferOptions` |
+| Answer options | `RTCAnswerOptions` | `RTCAnswerOptions` |
+| ICE transport policy | `RTCIceTransportPolicy` | `RTCIceTransportPolicy` |
+| Stats | `RTCStats` | — |
 
-**内部类型不加前缀**：`TrackSender`、`TrackReceiver`、`PcBackend`、`DcBackend`、`TrackWriteBackend`。`AudioTrackConfig`、`DataChannelRx` 保留原名（无 W3C 对应类型）。
+**Internal types carry no prefix**: `TrackSender`, `TrackReceiver`, `PcBackend`, `DcBackend`, `TrackWriteBackend`. `AudioTrackConfig` and `DataChannelRx` keep their names (no W3C counterpart).
 
-## Trait 层次
+## Trait Hierarchy
 
-两层架构：
+Two-layer architecture:
 
 ```
 ┌──────────────────────────────────────────┐
-│  pub trait RTCPeerConnection             │  ← 对外 W3C API
+│  pub trait RTCPeerConnection             │  ← external W3C API
 │    create_offer / create_answer / close  │
-│    add_track / on_track / get_senders...│
+│    add_track / on_track / get_senders... │
 ├──────────────────────────────────────────┤
-│  RTCPeerConnectionImpl (struct)          │  ← 共享逻辑
-│    tracks: HashMap<TrackRef>             │     track 注册表
-│    on_track_callback: Arc<Mutex<...>>    │     回调管理
-│    backend: ActivePc                     │     委托后端
+│  RTCPeerConnectionImpl (struct)          │  ← shared logic
+│    tracks: HashMap<TrackRef>             │    track registry
+│    on_track_callback: Arc<Mutex<...>>    │    callback management
+│    backend: ActivePc                     │    delegates to backend
 ├──────────────────────────────────────────┤
-│  pub(crate) trait PcBackend              │  ← 内部后端 trait
+│  pub(crate) trait PcBackend              │  ← internal backend trait
 │    create_offer / set_local_desc / ...   │
 │    set_on_track / register_track / ...   │
 ├──────────────────────────────────────────┤
-│  WebrtcSysPc │ WebrtcRsPc │ StubPc      │
+│  WebrtcSysPc │ WebrtcRsPc │ StubPc       │
 └──────────────────────────────────────────┘
 ```
 
-- **RTCPeerConnection trait**：对外 W3C API，方法使用 Rust 惯用 snake_case（`create_offer` / `on_track`），对齐 webrtc-rs/str0m 生态
-- **RTCPeerConnectionImpl**：track 注册表、`MAX_TRACKS` 校验、回调管理——三个后端共享
-- **PcBackend**：`pub(crate)` 可见，SDP/ICE 生成与解析、observer 注册——每个后端独立实现
+- **RTCPeerConnection trait**: the external W3C API; methods use idiomatic Rust snake_case (`create_offer` / `on_track`), aligned with the webrtc-rs/str0m ecosystem
+- **RTCPeerConnectionImpl**: track registry, `MAX_TRACKS` validation, callback management — shared by all three backends
+- **PcBackend**: `pub(crate)` visibility; SDP/ICE generation and parsing, observer registration — implemented independently per backend
 
-D145 最初规定 Phase 0 RTCPeerConnection struct 而非 trait。该决策的范围是 PcBackend 内部后端层——后端实现用 concrete struct 直接对接 webrtc-sys，不引入后端的 trait 抽象。对外 API 层 `RTCPeerConnection` 定义为 pub trait 是为了提供稳定 W3C 契约，与后端抽象是不同层次的设计考量（2026-07-22 修订）。
+D145 originally specified a Phase 0 RTCPeerConnection struct rather than trait. That decision's scope is the PcBackend internal backend layer — backend implementations use concrete structs to bind directly to webrtc-sys without introducing a backend trait abstraction. Defining the external API layer's `RTCPeerConnection` as a pub trait provides a stable W3C contract — a different layer of design consideration than backend abstraction (revised 2026-07-22).
 
-### 方法命名原则
+### Method Naming Principle
 
-所有对外方法使用 Rust snake_case（D167），napi-rs 自动转换为 JS camelCase：
+All external methods use Rust snake_case (D167); napi-rs converts them automatically to JS camelCase:
 
 ```rust
 pub trait RTCPeerConnection: Send + Sync {
@@ -115,10 +115,10 @@ pub trait RTCPeerConnection: Send + Sync {
 }
 ```
 
-## 后端编译期分发
+## Backend Compile-Time Dispatch
 
 ```rust
-// backend/mod.rs — 一次只编译一个后端，零运行时开销
+// backend/mod.rs — one backend compiled at a time, zero runtime overhead
 #[cfg(feature = "backend-webrtc-sys")]
 pub type ActivePc = webrtc_sys::WebrtcSysPc;
 
@@ -128,26 +128,26 @@ pub type ActivePc = webrtc_rs::WebrtcRsPc;
 #[cfg(not(any(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys")))]
 pub type ActivePc = stub::StubPc;
 
-// 互斥守卫 — 同时启用多个后端报编译错误
+// Mutual-exclusion guard — enabling multiple backends at once is a compile error
 #[cfg(all(feature = "backend-webrtc-rs", feature = "backend-webrtc-sys"))]
 compile_error!("Only one backend can be enabled at a time.");
 ```
 
-| 后端 | Feature | 依赖 | 场景 |
-|------|---------|------|------|
-| `webrtc-sys` | `backend-webrtc-sys`（默认） | libwebrtc C++ (cmake) | 公网遥控、弱网穿透 |
-| `webrtc-rs` | `backend-webrtc-rs` | 纯 Rust webrtc crate | 未来 Embed 升级 |
-| `stub` | 无 feature 时 | 无 | 开发/测试/编译检查 |
+| Backend | Feature | Dependencies | Scenario |
+|---------|---------|--------------|----------|
+| `webrtc-sys` | `backend-webrtc-sys` (default) | libwebrtc C++ (cmake) | Public-internet remote control, weak-network penetration |
+| `webrtc-rs` | `backend-webrtc-rs` | Pure Rust webrtc crate | Future Embed upgrade |
+| `stub` | When no feature set | None | Dev/test/compile checks |
 
-`ActivePc` / `ActiveDc` / `ActiveTrack` / `ActiveFactory` 同理——四个 type alias 覆盖所有后端分发点。
+`ActivePc` / `ActiveDc` / `ActiveTrack` / `ActiveFactory` work the same way — four type aliases cover every backend dispatch point.
 
 ## PcBackend trait
 
-`pub(crate)` 可见的内部 trait，定义每个后端必须实现的 SDP/ICE 操作：
+An internal `pub(crate)` trait defining the SDP/ICE operations each backend must implement:
 
 ```
 pub(crate) trait PcBackend: Send + Sync + 'static {
-    // ── 必需 (10 methods) ──
+    // ── Required (10 methods) ──
     async fn create_offer(&self, &RTCOfferOptions) -> Result<RTCSessionDescription>;
     async fn create_answer(&self, &RTCAnswerOptions) -> Result<RTCSessionDescription>;
     async fn set_local_description(&self, &RTCSessionDescription) -> Result<()>;
@@ -159,10 +159,10 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
     fn ice_gathering_state(&self) -> RTCIceGatheringState;
     fn signaling_state(&self) -> RTCSignalingState;
 
-    // ── 默认 / 可选 (8 methods) ──
-    fn set_on_data_channel(&self, cb) {}     // 默认 no-op
-    fn set_on_track(&self, cb) {}            // 默认 no-op — RealObserver 覆盖
-    fn set_on_ice_candidate(&self, cb) {}    // 默认 no-op
+    // ── Default / optional (8 methods) ──
+    fn set_on_data_channel(&self, cb) {}     // Default no-op
+    fn set_on_track(&self, cb) {}            // Default no-op — overridden by RealObserver
+    fn set_on_ice_candidate(&self, cb) {}    // Default no-op
     fn gather_complete(&self) -> Result { Ok(()) }
     fn get_stats(&self) -> Vec<RTCRtcStats> { vec![] }
     fn add_transceiver(&self, ...) -> Result { Err("not supported") }
@@ -170,22 +170,22 @@ pub(crate) trait PcBackend: Send + Sync + 'static {
 }
 ```
 
-### 当前覆盖状态
+### Current Coverage Status
 
-| 方法 | WebrtcSysPc | WebrtcRsPc | StubPc |
-|------|:-----------:|:----------:|:------:|
-| `create_offer` / `create_answer` | ✅ FFI | ✅ webrtc-rs | ✅ 空 SDP |
+| Method | WebrtcSysPc | WebrtcRsPc | StubPc |
+|--------|:-----------:|:----------:|:------:|
+| `create_offer` / `create_answer` | ✅ FFI | ✅ webrtc-rs | ✅ empty SDP |
 | `set_local_description` / `set_remote_description` | ✅ FFI | ✅ webrtc-rs | ✅ no-op |
 | `add_ice_candidate` | ✅ FFI | ✅ webrtc-rs | ✅ no-op |
-| `connection_state` 等状态方法 | ✅ | ✅ | ✅ |
+| `connection_state` and other state methods | ✅ | ✅ | ✅ |
 | `close` | ✅ FFI | ✅ | ✅ |
-| `set_on_track` | ✅ RealObserver (D173) | ❌ 默认 no-op | ❌ 默认 no-op |
-| `set_on_data_channel` | ✅ RealObserver | ❌ 默认 no-op | ❌ 默认 no-op |
-| `set_on_ice_candidate` | ✅ RealObserver | ❌ 默认 no-op | ❌ 默认 no-op |
+| `set_on_track` | ✅ RealObserver (D173) | ❌ default no-op | ❌ default no-op |
+| `set_on_data_channel` | ✅ RealObserver | ❌ default no-op | ❌ default no-op |
+| `set_on_ice_candidate` | ✅ RealObserver | ❌ default no-op | ❌ default no-op |
 
-更新: 2026-07-31 — webrtc-sys 后端通过 RealObserver 已实现三个回调 (D173)，覆盖率表修正。
+Updated: 2026-07-31 — the webrtc-sys backend implemented the three callbacks via RealObserver (D173); coverage table corrected.
 
-## 帧发送链路
+## Frame Send Path
 
 ```
 TrackSender::write_raw_i420(data, w, h)
@@ -194,25 +194,25 @@ TrackSender::write_raw_i420(data, w, h)
       → I420Buffer::data_y/data_u/data_v (raw pointer fill)
       → VideoFrameBuilder → set_video_frame_buffer → build()
       → VideoTrackSource::on_captured_frame(&frame, &metadata)
-    → libwebrtc 内部编码 (VP8/H.264)
+    → libwebrtc internal encoding (VP8/H.264)
 ```
 
-## 帧接收链路（Phase 0-1 实施中）
+## Frame Receive Path (Phase 0-1 in progress)
 
 ```
-libwebrtc on_track 事件
+libwebrtc on_track event
   → RealObserver::on_track(transceiver)
     → transceiver.receiver().track()  → MediaStreamTrack
     → media_to_video(media_track)     → VideoTrack
     → new_native_video_sink(FrameSinkAdapter)
     → video_track.add_sink(&native_sink)
     → VideoSink::on_frame(VideoFrame) → FrameSinkAdapter
-    → 用户 FrameSink::on_frame(&VideoFrame)
+    → user FrameSink::on_frame(&VideoFrame)
 ```
 
 ### FrameSink trait
 
-对标 `mediaservo-media::VideoSink<F>` 的回调模式：
+Mirrors the `mediaservo-media::VideoSink<F>` callback pattern:
 
 ```rust
 pub trait FrameSink: Send + Sync {
@@ -221,7 +221,7 @@ pub trait FrameSink: Send + Sync {
 }
 ```
 
-用户可自行封装为 channel / stream：
+Users may wrap it as a channel / stream themselves:
 
 ```rust
 struct ChannelSink { tx: mpsc::UnboundedSender<VideoFrame> }
@@ -233,9 +233,9 @@ impl FrameSink for ChannelSink {
 }
 ```
 
-### RealObserver 替代 NoOpObserver
+### RealObserver replaces NoOpObserver
 
-当前 `NoOpObserver`（webrtc_sys.rs:517-602）实现 `PeerConnectionObserver` 但 **全部 20+ 回调为空**。Phase 0-1 替换为 `RealObserver`：
+The current `NoOpObserver` (webrtc_sys.rs:517-602) implements `PeerConnectionObserver` but **all 20+ callbacks are empty**. Phase 0-1 replaces it with `RealObserver`:
 
 ```rust
 struct RealObserver {
@@ -245,7 +245,7 @@ struct RealObserver {
 }
 ```
 
-## 工厂入口
+## Factory Entry
 
 ```rust
 pub struct RTCEngine;
@@ -261,7 +261,7 @@ pub trait RTCPeerConnectionFactory: Send + Sync {
 }
 ```
 
-使用示例：
+Usage example:
 
 ```rust
 use mediaservo_webrtc::{RTCEngine, RTCConfiguration};
@@ -274,7 +274,7 @@ pc.onTrack(|receiver| {
 });
 ```
 
-## 文件结构
+## File Structure
 
 ```
 crates/mediaservo-webrtc/
@@ -287,40 +287,40 @@ crates/mediaservo-webrtc/
 │   ├── rtp.rs              RTCRtpSender / RTCRtpReceiver
 │   ├── sdp.rs              RTCSessionDescription
 │   ├── stats.rs            RTCRtcStats
-│   ├── rtp_params.rs       RTP 参数类型
+│   ├── rtp_params.rs       RTP parameter types
 │   └── backend/
-│       ├── mod.rs          PcBackend / DcBackend trait + type alias
+│       ├── mod.rs          PcBackend / DcBackend trait + type aliases
 │       ├── webrtc_sys.rs   WebrtcSysPc + RealObserver
 │       ├── webrtc_rs.rs    WebrtcRsPc
 │       └── stub.rs         StubPc
 ├── examples/
 │   └── webrtc_loopback_egui.rs  P2P loopback demo
 └── tests/
-    └── w3c_api_tests.rs    W3C API 测试
+    └── w3c_api_tests.rs    W3C API tests
 ```
 
-## 关联文档
+## Related Documents
 
-- [09. 传输架构与 trait 设计](09-transport-architecture.md) — `MediaTransport` trait（上层抽象）
-- [10. 信令架构](10-signaling-architecture.md) — 信令层，调用本 crate 创建连接
-- [14. Remote 架构](14-remote-architecture.md) — Remote Client/Host 使用本 crate
-- [15. Component 架构](15-component-architecture.md) — Component 通过本 crate 通信
-- [决策记录 D144–D151](../.agents/memorys/decisions.md) — 架构决策链
+- [09. Transport architecture & trait design](09-transport-architecture.md) — the `MediaTransport` trait (upper abstraction)
+- [10. Signaling architecture](10-signaling-architecture.md) — the signaling layer, calls this crate to create connections
+- [14. Remote architecture](14-remote-architecture.md) — Remote Client/Host use this crate
+- [15. Component architecture](15-component-architecture.md) — Components communicate through this crate
+- [Decision records D144–D151](../.agents/memorys/decisions.md) — the architecture decision chain
 
-## 当前状态
+## Current Status
 
-| 能力 | 状态 |
-|------|------|
-| 发送端 I420 帧 → libwebrtc | ✅ 已实现 |
-| SDP 协商 (createOffer/createAnswer) | ✅ 已实现 |
-| ICE candidate 管理 | ✅ 已实现 |
-| RTCDataChannel 创建与发送 | ✅ 已实现 |
-| RTCDataChannel 事件接收 (spool) | ⚠️ webrtc-sys 为 stub |
-| 接收端 onTrack 回调 | ✅ 已实现 (RealObserver, D173) |
-| 接收端 FrameSink 帧接收 | ✅ 已实现 (VideoSink bridge, D173) |
-| webrtc-rs 后端 | ⚠️ struct 已有，待适配 trait |
-| str0m 后端 | 🔲 Phase 2+ |
-| RTC 前缀重命名 | ✅ 已完成 (D170) |
-| backends/ → backend/ 目录统一 | ✅ 已完成 (D171) |
-| core → media 模块迁移 | ✅ 已完成 (D169) |
-| RawPixelFormat → PixelFormat 合并 | ✅ 已完成 |
+| Capability | Status |
+|------------|--------|
+| Sender I420 frames → libwebrtc | ✅ Implemented |
+| SDP negotiation (createOffer/createAnswer) | ✅ Implemented |
+| ICE candidate management | ✅ Implemented |
+| RTCDataChannel creation and sending | ✅ Implemented |
+| RTCDataChannel event receiving (spool) | ⚠️ stub in webrtc-sys |
+| Receiver onTrack callback | ✅ Implemented (RealObserver, D173) |
+| Receiver FrameSink frame receipt | ✅ Implemented (VideoSink bridge, D173) |
+| webrtc-rs backend | ⚠️ structs exist, trait adaptation pending |
+| str0m backend | 🔲 Phase 2+ |
+| RTC prefix rename | ✅ Done (D170) |
+| backends/ → backend/ directory unification | ✅ Done (D171) |
+| core → media module migration | ✅ Done (D169) |
+| RawPixelFormat → PixelFormat merge | ✅ Done |

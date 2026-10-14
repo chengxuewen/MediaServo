@@ -107,36 +107,36 @@ pub trait PeerConnectionApi: Send + Sync + 'static {
     where
         F: Fn(RTCRtpReceiver) + Send + Sync + 'static;
 
-    // ── v2: W3C API 补全 ──
+    // -- v2: W3C API completion --
 
     /// W3C getTransceivers
     fn get_transceivers(&self) -> Result<Vec<crate::rtp::RTCRtpTransceiver>, RTCError>;
-    /// W3C addTransceiver(kind, init) — 同步
+    /// W3C addTransceiver(kind, init) -- sync
     fn add_transceiver(
         &self,
         kind: TrackKind,
         init: crate::rtp::RTCRtpTransceiverInit,
     ) -> Result<crate::rtp::RTCRtpTransceiver, RTCError>;
-    /// W3C addTransceiver(track, init) — track 版（P3 核心）
+    /// W3C addTransceiver(track, init) -- the track variant (the P3 core)
     fn add_transceiver_with_track(
         &self,
         track: &TrackSender,
         init: crate::rtp::RTCRtpTransceiverInit,
     ) -> Result<crate::rtp::RTCRtpTransceiver, RTCError>;
-    /// W3C RTCRtpSender.getParameters 对应（经 track_id）
-    /// W3C RTCRtpSender.getParameters 对应（经 track_id）
+    /// the W3C RTCRtpSender.getParameters counterpart (via track_id)
+    /// the W3C RTCRtpSender.getParameters counterpart (via track_id)
     fn get_sending_rtp_parameters(
         &self,
         track_id: &str,
     ) -> Result<crate::rtp::RTCRtpParameters, RTCError>;
-    /// PIT-76: 请求关键帧（经 track_id，同步）— libwebrtc 每次调用触发一次
+    /// PIT-76: request a keyframe (via track_id, sync) -- libwebrtc fires once per call
     fn request_key_frame(&self, track_id: &str) -> Result<(), RTCError>;
-    /// W3C RTCRtpReceiver.getParameters 对应（经 track_id）
+    /// the W3C RTCRtpReceiver.getParameters counterpart (via track_id)
     fn get_receiving_rtp_parameters(
         &self,
         track_id: &str,
     ) -> Result<crate::rtp::RTCRtpParameters, RTCError>;
-    /// W3C 静态 getCapabilities
+    /// W3C static getCapabilities
     fn get_sender_capabilities(
         &self,
         kind: TrackKind,
@@ -145,26 +145,26 @@ pub trait PeerConnectionApi: Send + Sync + 'static {
         &self,
         kind: TrackKind,
     ) -> Result<Option<crate::rtp::RTCRtpCapabilities>, RTCError>;
-    /// W3C restartIce — 同步
+    /// W3C restartIce -- sync
     fn restart_ice(&self) -> Result<(), RTCError>;
-    /// W3C RTCRtpSender.getStats — 出站统计（outbound-rtp, v2 web-stream-stats T2）。
+    /// W3C RTCRtpSender.getStats -- outbound stats (outbound-rtp, v2 web-stream-stats T2).
     fn sender_get_stats(&self, track_id: &str) -> Vec<crate::stats::RTCStats>;
 
-    /// S2c：收侧 inbound-rtp stats（packetsReceived/framesDecoded 二分判据）。
-    /// 默认空面 = 未接线的后端零成本。
+    /// S2c: the receive-side inbound-rtp stats (the packetsReceived/framesDecoded bisection predicate).
+    /// an empty default surface = zero cost for unwired backends.
     fn receiver_get_stats(&self, _track_id: &str) -> Vec<crate::stats::RTCStats> {
         Vec::new()
     }
 
-    /// 连接级统计（candidate-pair currentRoundTripTime）——rtt 唯一口径源。
-    /// None = 后端未实现/无 succeeded pair（调用方置 0）。
+    /// Connection-level stats (candidate-pair currentRoundTripTime) -- the sole source of the rtt convention.
+    /// None = the backend hasn't implemented it / no succeeded pair (callers set 0).
     fn connection_stats(&self) -> Option<crate::stats::ConnectionStats> {
         None
     }
 
-    /// W3C RTCRtpTransceiver.setCodecPreferences — 协商 codec 偏好（降序）。
-    /// v2 实证修正: 按 track_id 定位 transceiver（mid 在协商前不存在 — offerer 场景核心）,
-    /// 同 sender_get_parameters/request_key_frame 的 sender.track().id() 匹配模式。
+    /// W3C RTCRtpTransceiver.setCodecPreferences -- negotiate codec preferences (descending).
+    /// the v2 field-proven revision: locate the transceiver by track_id (mid doesn't exist pre-negotiation -- the offerer scenario's core),
+    /// the same sender.track().id() matching pattern as sender_get_parameters/request_key_frame.
     fn transceiver_set_codec_preferences(
         &self,
         track_id: &str,

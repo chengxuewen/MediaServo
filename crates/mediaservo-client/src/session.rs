@@ -1,10 +1,10 @@
-//! 房间会话——link 信令之上的 SFU 消费 + 控制出程（S2 核心）。
+//! Room session -- SFU consume + control egress on top of link signaling (the S2 core).
 //!
-//! consume 序列本地镜像 `mediaservo-field::PullSession::subscribe` 形状
-//! （C21 依赖边界：client 禁依 field）；控制序列镜像 `mediaservo-host::controller`
-//! S1 出程形（Send transport → DC 先于 answer → Connect → CreateDataProducer）。
-//! ICE-Lite：候选随 WebRtcTransportCreated 内联，无 candidate 交换回合；
-//! `Error{code:0,"transport_connected"}` 是 server 惯例 ack，非真错误。
+//! The consume sequence locally mirrors `mediaservo-field::PullSession::subscribe`'s shape
+//! (C21 dependency boundary: client must not depend on field); the control sequence mirrors `mediaservo-host::controller`'s
+//! S1 egress shape (Send transport -> DC before answer -> Connect -> CreateDataProducer).
+//! ICE-Lite: candidates arrive inline with WebRtcTransportCreated, no candidate exchange round;
+//! `Error{code:0,"transport_connected"}` is the server's conventional ack, not a real error.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -28,28 +28,28 @@ use crate::sfu;
 use crate::signal::{LinkSignal, Signal};
 use crate::supervisor::{self, ConnectionState, SupervisorCtx};
 
-/// 控制域能力门（I5 首用户，S0 契约）：CreateDataProducer 的 can_control 门
-/// 自方言 2 起生效——低于 2 本地预拒，不发请求（省一次 4012 往返）。
+/// The control-domain capability gate (I5's first user, S0 contract): the CreateDataProducer can_control gate
+/// takes effect from dialect 2 -- below 2, pre-reject locally without sending a request (saves a 4012 round trip).
 const CONTROL_MIN_PROTOCOL: u32 = 2;
-/// CreateDataProducer 子协议（host controller DATA_PROTOCOL 同值）。
+/// CreateDataProducer sub-protocol (same value as host controller DATA_PROTOCOL).
 const DATA_PROTOCOL: &str = "sctp";
-/// server 响应等待窗（transport/consumed/producer）。
+/// Server response wait windows (transport/consumed/producer).
 const RESPONSE_WAIT: Duration = Duration::from_secs(10);
 
-/// 解码视频帧（I420，libwebrtc 侧渲染前格式；C5 边界语义）。
-/// inbound-rtp 折叠规则单一落点（自由函数形单测可钉，免触真 pc）。
+/// Decode a video frame (I420, libwebrtc's pre-render format; C5 boundary semantics).
+/// The single landing point of the inbound-rtp fold rule (a free function so tests can pin it without touching a real pc).
 ///
-/// 多行语义（PIT-2026-10-09 码率异常）：libwebrtc 同 pc 可并存 2 行 inbound-rtp
-/// （新旧 SSRC 报告共存，旧行冻结在最后 timestamp）。累计型字段（bytes/packets/frames）
-/// 若 `+=` 会把冻结旧行重复计入 → 差分基线错位 → 码率恒 0/跳变。**按 ssrc 去重、
-/// 每组取 timestamp 最新的行**，再跨组求和（真多 SSRC 场景仍正确累加）。
+/// Multi-row semantics (PIT-2026-10-09 bitrate anomaly): libwebrtc can keep 2 inbound-rtp rows on one pc
+/// (new and old SSRC reports coexisting, the old row frozen at its last timestamp). If cumulative fields (bytes/packets/frames)
+/// `+=`, the frozen old row gets counted twice -> a misaligned differential baseline -> bitrate stuck at 0 / jumpy. **Dedup by ssrc,
+/// keep each group's row with the newest timestamp**, then sum across groups (true multi-SSRC scenarios still accumulate correctly).
 pub(crate) fn fold_inbound_stats(
     items: Vec<mediaservo_webrtc::stats::RTCStats>,
 ) -> VideoStreamStats {
     use mediaservo_webrtc::stats::RTCStats;
-    // ssrc → 最新行（timestamp 大者胜；ssrc=0 的旧行不丢——用 id 兜底分组）
-    // 诊断（debug 级）：区分「stats 表里根本没有该 inbound-rtp（demux 注册失败）」与
-    // 「有行但全零（RTP 未达 transport）」——零帧排障的两级判据（09-24 实录入册）。
+    // ssrc -> newest row (the bigger timestamp wins; an old ssrc=0 row is not lost -- id used as the grouping fallback)
+    // diagnostics (debug level): distinguish "the stats table has no such inbound-rtp at all (demux registration failed)" from
+    // "a row exists but all zeros (RTP never reached the transport)" -- the two-level predicate for zero-frame debugging (logged 09-24).
     tracing::debug!(
         rows = items.len(),
         kinds = ?items.iter().map(|x| match x {
@@ -58,8 +58,10 @@ pub(crate) fn fold_inbound_stats(
         }).collect::<Vec<_>>(),
         "fold_inbound_stats raw rows"
     );
-    let mut latest: std::collections::HashMap<(u32, String), mediaservo_webrtc::stats::RTCInboundRtpStreamStats> =
-        std::collections::HashMap::new();
+    let mut latest: std::collections::HashMap<
+        (u32, String),
+        mediaservo_webrtc::stats::RTCInboundRtpStreamStats,
+    > = std::collections::HashMap::new();
     for st in &items {
         if let RTCStats::InboundRtp(r) = st {
             let key = (r.ssrc, r.id.clone());
@@ -90,7 +92,7 @@ pub(crate) fn fold_inbound_stats(
     out
 }
 
-/// [`RoomSession::video_stats_summary`] 的扁平结果（serde 键名 = C 面 JSON 契约）。
+/// The flat result of [`RoomSession::video_stats_summary`] (serde key names = the C-surface JSON contract).
 #[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
 pub struct VideoStreamStats {
     pub bytes_received: u64,
@@ -100,9 +102,9 @@ pub struct VideoStreamStats {
     pub frame_width: u32,
     pub frame_height: u32,
     pub frames_per_second: f64,
-    pub jitter: f64,        // 秒（多路 union 取 max）
-    pub total_decode_time: f64, // 秒累计（多路 union 取 max——解码耗时非可加量）
-    pub frame_dropped: u64, // 多路求和
+    pub jitter: f64,            // seconds (multi-path union takes max)
+    pub total_decode_time: f64, // seconds cumulative (multi-path union takes max -- decode time is not additive)
+    pub frame_dropped: u64,     // summed across paths
     pub nack_count: u64,
     pub pli_count: u64,
     pub fir_count: u64,
@@ -113,40 +115,40 @@ pub struct VideoFrame {
     pub width: u32,
     pub height: u32,
     pub data: Vec<u8>,
-    /// 帧到达无时钟源（webrtc-sys 未暴露 rtp ts）——恒 0，上层按到达序消费。
+    /// Frame arrival has no clock source (webrtc-sys exposes no rtp ts) -- always 0; upper layers consume in arrival order.
     pub ts_us: i64,
 }
 
-/// 已入房会话：视频消费 + 控制出程共用一条 link WS 信令面。
+/// A joined session: video consume + control egress share one link WS signaling surface.
 ///
-/// S6/K1：信令面韧性——`ctx` 持有 supervisor 上下文（重连环/帧槽/状态机），
-/// 跨重连存续；`events`/`pump_events` 是 per-session 订阅（重连后 refresh）。
+/// S6/K1: signaling resilience -- `ctx` holds the supervisor context (reconnect chain/frame slots/state machine),
+/// removal needs the id-based lookup; a re-push with the same id re-inserts over it).
 pub struct RoomSession {
-    /// S6/K1: 信令面韧性上下文（Arc 单实例；forwarder/supervisor/重放共用）。
+    /// S6/K1: the signaling resilience context (a single Arc instance; shared by forwarder/supervisor/replay).
     ctx: Arc<SupervisorCtx>,
-    /// S4/T3.5: 急停 HMAC 密钥（emergency_stop 签名用；None = 不签）。
+    /// S4/T3.5: the emergency-stop HMAC key (used by emergency_stop signing; None = unsigned).
     hmac_key: Option<String>,
-    /// connect 时刻订阅（broadcast 无历史重放——接住 join 时 server 回放的
-    /// late-join NewProducer）。重连后由 supervisor 刷新。
+    /// Subscribed at connect time (broadcast has no history replay -- catches the server's join-time
+    /// late-join NewProducer replay). Refreshed by the supervisor after reconnect.
     events: Mutex<broadcast::Receiver<SignalEvent>>,
-    /// S2d: open_control 专用第二流（connect 同刻订阅 = join 回放零缺口；
-    /// take 后移交 ack 泵，每会话一次性）。
+    /// S2d: the dedicated second stream for open_control (subscribed at the same instant as connect = zero gap in the join replay;
+    /// handed to the ack pump after take, once per session).
     pump_events: Mutex<Option<broadcast::Receiver<SignalEvent>>>,
-    /// msrtc-stream-not-found: 房间视频 label 全集（wait 循环内增量维护——
-    /// events 队列被 wait 独占消费，循环是唯一可靠汇聚点；重连重放经同一入口）。
-    /// label=None 的旧 host 流不入集。集合空 = 未知态（走保守盲等，不判不存在）。
-    /// producer_labels: producer_id→label 反查（ProducerClosed 无 label 字段，
-    /// 摘除需按 id 回查；重推同 id 复插覆盖）。
+    /// msrtc-stream-not-found: the room's full video label set (incrementally maintained in the wait loop --
+    /// the events queue is monopolized by the wait, the loop is the only reliable aggregation point; reconnect replays enter through the same door).
+    /// Old-host streams with label=None don't join the set. An empty set = unknown state (conservative blind wait, no not-found verdict).
+    /// producer_labels: producer_id -> label reverse lookup (ProducerClosed carries no label field;
+    /// removal needs the id-based lookup; a re-push with the same id re-inserts over it).
     known_video_labels: Mutex<std::collections::HashSet<String>>,
     producer_labels: Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl RoomSession {
-    /// S2c 诊断面：video receiver 的 inbound-rtp stats（"包没进来" vs
-    /// "进而不解" 二分的定案读点；track_id = offer msid 注入的 "video"）。
+    /// S2c diagnostics surface: the video receiver's inbound-rtp stats (the decisive readout for the
+    /// "packets never arrived" vs "arrived but not decoded" bisection; track_id = the "video" injected by the offer msid).
     #[must_use]
     pub fn video_receiver_stats(&self) -> Vec<mediaservo_webrtc::stats::RTCStats> {
-        // 全路并集（与旧 _pcs flat_map 语义逐位一致；单路读数走 Consumer::stats）。
+        // the union across all paths (bit-identical to the old _pcs flat_map semantics; a single-path read goes through Consumer::stats).
         self.ctx
             .slots
             .lock()
@@ -156,16 +158,16 @@ impl RoomSession {
             .collect()
     }
 
-    /// 消费面视频统计汇总（W3 mini-stats 数据源）：本会话全部 inbound-rtp 折叠。
-    /// 形状刻意**扁平 + 稳定键名**（C ABI JSON 透传给 C++ mini-parse 消费，
-    /// 不导出 webrtc 内部枚举 wire）。计数类求和；fps 取最大（多轨无求和语义）。
+    /// Consumption-surface video stats summary (the W3 mini-stats data source): folds every inbound-rtp of this session.
+    /// The shape is deliberately **flat + stable key names** (passed through C ABI JSON to the C++ mini-parse consumer,
+    /// never exporting webrtc internal enum wires). Counters sum; fps takes the max (no sum semantics across tracks).
     pub fn video_stats_summary(&self) -> VideoStreamStats {
         fold_inbound_stats(self.video_receiver_stats())
     }
 
-    /// S4/a4·T3.5：急停双路 —— DC 快路径（带 HMAC sig，车端 act-then-audit 主留痕）
-    /// 伴随 WS `ControlAudit` 审计副本（best-effort：副本失败不影响已投递 DC 命令
-    /// ——急停恰多发于 WS 降级窗，审计主落点=车端执行器，PLAN §11.6 席3 裁决）。
+    /// S4/a4-T3.5: the emergency-stop dual path -- the DC fast path (with the HMAC sig, the vehicle act-then-audit primary record)
+    /// accompanied by the WS `ControlAudit` audit copy (best-effort: a copy failure never affects the already-delivered DC command
+    /// -- e-stops happen exactly during WS degraded windows; the audit's primary landing = the vehicle executor, PLAN §11.6 seat-3 ruling).
     pub async fn emergency_stop(
         &mut self,
         ctl: &mut ControlChannel,
@@ -177,7 +179,7 @@ impl RoomSession {
         if let Some(k) = &self.hmac_key {
             env.sig = Some(mediaservo_common::protocol::control_hmac_sign(k, &env));
         }
-        ctl.send_envelope(label, &env).await?; // DC 快路径先行（急停语义 = 不等审计副本）
+        ctl.send_envelope(label, &env).await?; // the DC fast path first (e-stop semantics = never wait for the audit copy)
         let _ = self
             .ctx
             .signal
@@ -187,26 +189,26 @@ impl RoomSession {
                 cmd: env.cmd.clone(),
                 sig_present: env.sig.is_some(),
             })
-            .await; // WS 副本 best-effort（C15：失败静默 = 主留痕在车端 actuation）
+            .await; // the WS copy best-effort (C15: silent failure = the primary record is on the vehicle)
         Ok(())
     }
 
-    /// S4：急停密钥是否已配置（观测面；密钥值永不外泄）。
+    /// S4: whether the emergency-stop key is configured (observation surface; the key value never leaves).
     #[must_use]
     pub fn hmac_key_debug_present(&self) -> bool {
         self.hmac_key.is_some()
     }
 
-    /// 信令连接 + 入房（PSK 或 JWT，见 [`ClientConfig`]；link 承载全部握手）。
-    /// 引擎 = 真 webrtc-sys 直通（[`Self::connect_with_engine`] 的便捷包装）。
+    /// Signaling connect + room join (PSK or JWT, see [`ClientConfig`]; link carries the whole handshake).
+    /// engine = the real webrtc-sys passthrough (the convenience wrapper of [`Self::connect_with_engine`]).
     pub async fn connect(cfg: &ClientConfig) -> Result<Self, ClientError> {
         Self::connect_with_engine(cfg, Arc::new(SysEngine::new())).await
     }
 
-    /// 信令连接 + 入房 + 引擎注入（S6 批0/K11：测试以 FakeEngine 走全链确定性演练）。
+    /// Signaling connect + join + engine injection (S6 batch 0/K11: tests run deterministic drills over the full chain with FakeEngine).
     ///
-    /// S6/K1：创建 SupervisorCtx（持有 Arc<SignalClient> 供 supervisor 重连），
-    /// 订阅事件流后 spawn epoch-1 forwarder + supervisor。
+    /// S6/K1: create the SupervisorCtx (holding Arc<SignalClient> for supervisor reconnects),
+    /// subscribe the event stream then spawn the epoch-1 forwarder + supervisor.
     pub async fn connect_with_engine(
         cfg: &ClientConfig,
         engine: Arc<dyn Engine>,
@@ -218,8 +220,8 @@ impl RoomSession {
             cfg.role.clone(),
         );
         let client = if let Some(jwt) = &cfg.jwt { client.with_jwt(jwt.clone()) } else { client };
-        // T3：设备公钥身份（与 jwt 可叠——server 端 device 认证优先建 room 归属）。
-        // 加载语义见 ClientConfig::identity_dir 文档；Err 文案直呈（本地配置问题，重试无益）。
+        // T3: the device public-key identity (stackable with jwt -- server-side device authentication builds room membership first).
+        // Load semantics documented at ClientConfig::identity_dir; the Err text is presented directly (a local config problem, retrying won't help).
         let client = match &cfg.identity_dir {
             Some(dir) => {
                 match mediaservo_link::DeviceIdentity::load_from_instance_dir(dir)
@@ -232,8 +234,8 @@ impl RoomSession {
             None => client,
         };
         let session = client.connect().await.map_err(classify_link_error)?;
-        // 第二流与主流同刻订阅（LinkSignal::events 在 async 态 blocking_lock
-        // 会 panic——订阅必须在此同步点完成）。
+        // the second stream subscribed at the same instant as the main one (blocking_lock on LinkSignal::events in async context
+        // would panic -- the subscription must complete at this sync point).
         let raw_events = session.events();
         let pump_events = session.events();
         let signal = Arc::new(LinkSignal::new(session, sfu_peer_key(&cfg.role).to_string()));
@@ -251,7 +253,7 @@ impl RoomSession {
         })
     }
 
-    /// 谈成的方言版本（S0；旧 server = 1）。
+    /// The negotiated dialect version (S0; an old server = 1).
     #[must_use]
     pub fn negotiated(&self) -> u32 {
         self.ctx.signal.negotiated()
@@ -262,29 +264,32 @@ impl RoomSession {
         self.ctx.signal.room_id()
     }
 
-    /// 等待房间内的视频 producer（join 时 server 对存量 producer 回放 NewProducer）。
+    /// Wait for a video producer in the room (the server replays NewProducer for existing producers at join).
     pub async fn wait_video_producer(&mut self, wait: Duration) -> Result<String, ClientError> {
         self.wait_video_producer_labeled(wait, None).await
     }
 
-    /// producer-label T2.1: 按标签定向等待。label=None = 不过滤（第一路回退语义）；
-    /// Some(label) 只匹配带同标签的 producer——无标签流（旧 host）不匹配，继续等。
+    /// producer-label T2.1: label-targeted waiting. label=None = no filter (the first-path fallback semantics);
+    /// Some(label) matches only producers carrying the same label -- unlabeled streams (old hosts) never match, keep waiting.
     pub async fn wait_video_producer_labeled(
         &mut self,
         wait: Duration,
         label: Option<&str>,
     ) -> Result<String, ClientError> {
-        // msrtc-stream-not-found 快路径前置量：label 定向等待才判存在性。
+        // the msrtc-stream-not-found fast-path precondition quantity: existence is only judged for label-targeted waits.
         let mut ev = self.events.lock().await;
-        // 回放汇聚窗：join ack 与 NewProducer 回放存在时序竞态——立刻判空集会
-        // 误入保守盲等。先非阻塞抽干当前队列（回放事件已投递则在缓冲内），
-        // 把已知 label 收进集合后再做存在性判定。
+        // replay aggregation window: a timing race exists between the join ack and the NewProducer replay -- judging the set empty immediately
+        // would wrongly enter the conservative blind wait. First non-blocking drain of the current queue (replay events, if any, are in the buffer),
+        // collect the known labels into the set, then make the existence judgment.
         {
             let mut known = self.known_video_labels.lock().await;
             let mut plabels = self.producer_labels.lock().await;
             while let Ok(sig) = ev.try_recv() {
                 if let SignalEvent::Message(SignalingMessage::NewProducer {
-                    producer_id, kind: MediaKind::Video, label: Some(l), ..
+                    producer_id,
+                    kind: MediaKind::Video,
+                    label: Some(l),
+                    ..
                 }) = sig
                 {
                     known.insert(l.clone());
@@ -293,9 +298,9 @@ impl RoomSession {
             }
         }
         let set_snapshot = self.known_video_labels.lock().await.clone();
-        // 存在性判定：集合仍空 = 房间确认无任何带标签视频流（回放窗已抽干）。
-        // 目标 label 不在全集 → 兜底窗 3s（覆盖"consumer 先到、推流后到"竞态），
-        // 窗内仍未等到才判 StreamNotFound（区别于网络盲等的 Timeout）。
+        // existence verdict: the set still empty = the room confirmed to have no labeled video stream at all (the replay window drained).
+        // the target label absent from the full set -> fallback window 3s (covering the "consumer first, push later" race),
+        // only after the window expires without a hit is StreamNotFound judged (distinct from the blind network Timeout).
         const ABSENT_GRACE: Duration = Duration::from_secs(3);
         const REPLAY_SETTLE: Duration = Duration::from_millis(500);
         let grace = match label {
@@ -303,7 +308,7 @@ impl RoomSession {
             _ => None,
         };
         let effective_wait = grace.unwrap_or(wait);
-        let _ = REPLAY_SETTLE; // 汇聚已由 try_recv 抽干完成（保留常量注释语义）
+        let _ = REPLAY_SETTLE; // aggregation already done by the try_recv drain (keeping the constant's documented semantics)
         tokio::time::timeout(effective_wait, async {
             loop {
                 match ev.recv().await {
@@ -313,7 +318,7 @@ impl RoomSession {
                         label: pl,
                         ..
                     })) => {
-                        // 全集增量维护（None 标签不入集）+ id→label 反查记录
+                        // full-set incremental maintenance (None labels never join) + the id -> label reverse-lookup record
                         if let Some(l) = &pl {
                             self.known_video_labels.lock().await.insert(l.clone());
                             self.producer_labels
@@ -325,53 +330,56 @@ impl RoomSession {
                             None => true,
                             Some(want) => pl.as_deref() == Some(want),
                         };
-                        if matched
-                        {
+                        if matched {
                             return Ok(producer_id);
                         }
-                        // 标签不匹配——继续等下一路
+                        // label mismatch -- keep waiting for the next path
                     }
                     Ok(SignalEvent::Message(SignalingMessage::ProducerClosed {
-                        producer_id: ref pid, kind: MediaKind::Video, ..
+                        producer_id: ref pid,
+                        kind: MediaKind::Video,
+                        ..
                     })) => {
-                        // 流下线 → 按 id 反查 label 摘出全集（重推回房间会再收 NewProducer；
-                        // ProducerClosed 协议面无 label 字段——producer_labels 反查）
+                        // stream offline -> reverse-lookup the label by id and remove it from the full set (a re-push back into the room re-delivers NewProducer;
+                        // the ProducerClosed protocol surface carries no label field -- producer_labels reverse lookup)
                         if let Some(l) = self.producer_labels.lock().await.remove(pid) {
                             self.known_video_labels.lock().await.remove(&l);
                         }
                     }
                     Ok(SignalEvent::Disconnected { reason }) => {
                         return Err(ClientError::InvalidState(format!(
-                            "等待 producer 期信令断开: {reason}"
+                            "signaling disconnected while waiting for a producer: {reason}"
                         )));
                     }
                     Ok(_) => {}
                     Err(_) => {
-                        return Err(ClientError::InvalidState("信令事件流关闭".into()));
+                        return Err(ClientError::InvalidState(
+                            "the signaling event stream closed".into(),
+                        ));
                     }
                 }
             }
         })
         .await
         .map_err(|_| match grace {
-            // 兜底窗超时 = label 确认不在全集（3s 内也无新 producer）
+            // fallback-window timeout = the label confirmed absent from the full set (also no new producer within 3s)
             Some(_) => ClientError::StreamNotFound { label: label.unwrap_or("").to_string() },
             None => ClientError::Timeout { what: "video NewProducer" },
         })?
     }
 
-    /// 房间已知视频 label 全集快照（诊断/测试面；wait 循环增量维护）。
+    /// Snapshot of the room's full known video label set (diagnostics/testing surface; incrementally maintained in the wait loop).
     #[must_use]
     pub async fn known_video_labels(&self) -> Vec<String> {
         let known = self.known_video_labels.lock().await;
         known.iter().cloned().collect()
     }
 
-    /// S6/K4: 订阅一路视频 producer，返回 [`Consumer`] 句柄（多路注册）。
+    /// S6/K4: subscribe one video producer, returning a [`Consumer`] handle (multi-path registration).
     ///
-    /// 序列 = 旧 consume_video 原体（挪入 [`consume_sequence`]，零复制）；差异 =
-    /// pc 挂注册槽：帧通道 frame_tx 随槽存续，K1 重连重放换 pc 不换槽，app
-    /// 手里的 receiver 跨重连续流（无感）。与重放经 consume_lock 串行（K1）。
+    /// Sequence = the old consume_video body verbatim (moved into [`consume_sequence`], zero copies); the difference =
+    // the pc is hung on a registration slot: the frame channel frame_tx lives with the slot, the K1 reconnect replay swaps the pc not the slot, so the
+    // app's receiver keeps streaming across reconnects (imperceptibly). Serialized with replay via consume_lock (K1).
     pub async fn consume(&self, producer_id: &str) -> Result<Consumer, ClientError> {
         let _seq = self.ctx.consume_lock.lock().await;
         let mut ev = self.events.lock().await;
@@ -390,8 +398,8 @@ impl RoomSession {
         Ok(Consumer::new(producer_id.to_string(), slot, frame_rx))
     }
 
-    /// 旧形桥（R3 行为重映射）：等价 `consume(p).await?.into_receiver()`，
-    /// 返回裸帧流接收端，行为与旧 consume_video 逐字节一致。
+    /// Legacy bridge (R3 behavior remap): equivalent to `consume(p).await?.into_receiver()`,
+    /// returning the bare frame-stream receiver, byte-identical in behavior to the old consume_video.
     pub async fn consume_video(
         &mut self,
         producer_id: &str,
@@ -399,7 +407,7 @@ impl RoomSession {
         self.consume(producer_id).await.map(Consumer::into_receiver)
     }
 
-    /// 开出程控制通道集（host S1 镜像）。前置 I5 门：方言 ≥2，否则本地预拒。
+    /// Open the egress control channel set (host S1 mirror). Precondition I5 gate: dialect >= 2, else a local pre-rejection.
     pub async fn open_control(&mut self, labels: &[&str]) -> Result<ControlChannel, ClientError> {
         let got = self.ctx.signal.negotiated();
         if got < CONTROL_MIN_PROTOCOL {
@@ -408,11 +416,12 @@ impl RoomSession {
         let mut ev = self.events.lock().await;
         let room = self.ctx.signal.room_id().to_string();
         let peer = self.ctx.signal.sfu_peer_id().to_string();
-        // S2d: 取 connect 同刻预订阅的第二流（建立期车端 ack announce 零缺口）。
-        let pump_ev =
-            self.pump_events.lock().await.take().ok_or_else(|| {
-                ClientError::InvalidState("控制面已开启（ack 泵每会话一次）".into())
-            })?;
+        // S2d: take the second stream pre-subscribed at connect time (zero gap for the vehicle ack announce during establishment).
+        let pump_ev = self.pump_events.lock().await.take().ok_or_else(|| {
+            ClientError::InvalidState(
+                "the control plane is already open (the ack pump runs once per session)".into(),
+            )
+        })?;
 
         // 1. Send transport
         self.ctx
@@ -428,13 +437,13 @@ impl RoomSession {
                 .await
                 .map_err(|_| ClientError::Timeout { what: "WebRtcTransportCreated(send)" })??;
 
-        // 2. PC + 合成 offer set_remote；DC 必须先于 answer 创建（S1 时序合同）
+        // 2. PC + synthetic offer set_remote; the DC must be created before the answer (the S1 ordering contract)
         let pc = self.ctx.engine.create_pc().await?;
         let remote_sdp = sfu::build_dc_remote_sdp(&ice, &dtls, candidates.as_ref());
         pc.set_remote_offer(remote_sdp).await?;
 
-        // 3. 每 label 出程 DC（mediasoup 单向对模型：producer DC 无入程，回执
-        //    回程 = step 6 ack 消费链路——2026-09-15 活体证 consumer 反向不透传）。
+        // 3. one egress DC per label (the mediasoup unidirectional-pair model: a producer DC has no ingress; the return
+        //    path = step 6's ack consumption chain -- live-proven 2026-09-15 that consumer reverse is not relayed).
         let (ack_tx, ack_rx) = mpsc::channel::<ControlAck>(32);
         let mut dcs: HashMap<String, Arc<dyn DcHandle>> = HashMap::new();
         let mut order = Vec::with_capacity(labels.len());
@@ -444,12 +453,12 @@ impl RoomSession {
             order.push(label.to_string());
         }
 
-        // 4. answer/connect 收口
+        // 4. answer/connect wrap-up
         let answer = pc.create_answer().await?;
         pc.set_local_answer(&answer).await?;
         connect_transport(&*self.ctx.signal, &room, &peer, &transport_id, &pc).await?;
 
-        // 5. 逐 DC CreateDataProducer announce（4012 → ControlDenied 终态）
+        // 5. CreateDataProducer announce per DC (4012 -> ControlDenied terminal)
         let mut producer_ids = Vec::with_capacity(order.len());
         for label in &order {
             let dc = &dcs[label];
@@ -471,12 +480,12 @@ impl RoomSession {
             let dp = tokio::time::timeout(RESPONSE_WAIT, await_data_producer_created(&mut ev))
                 .await
                 .map_err(|_| ClientError::Timeout { what: "DataProducerCreated" })??;
-            tracing::info!(label = %label, data_producer_id = %dp, "client DataProducer 已建立");
+            tracing::info!(label = %label, data_producer_id = %dp, "client DataProducer established");
             producer_ids.push(dp);
         }
 
-        // 6. S2d 官方单向对模型：后台消费车端 label=ack DataProducer，negotiated
-        //    consumer DC 的 ControlAck 路由进 ack_rx（recv_ack 的正式供数来源）。
+        // 6. the S2d official unidirectional-pair model: a background task consumes the vehicle's label=ack DataProducer, routing the negotiated
+        //    consumer DC's ControlAck into ack_rx (the official supply source of recv_ack).
         tokio::spawn(ack_consumer_pump(
             pump_ev,
             self.ctx.signal.clone(),
@@ -489,29 +498,29 @@ impl RoomSession {
         Ok(ControlChannel::new(dcs, order, ack_rx, producer_ids, pc))
     }
 
-    /// 关闭会话（shutdown supervisor + 释放 WS；帧/ack 流随 drop 收敛）。
+    /// Close the session (shutdown supervisor + release WS; frame/ack streams converge on drop).
     pub async fn close(self) -> Result<(), ClientError> {
         self.ctx.shutdown();
         self.ctx.signal.close().await
     }
 
-    /// S6/K1: 信令连接态观测（单一 watch 真源；重连/终态实时可读）。
+    /// S6/K1: signaling connection-state observation (the single watch truth source; reconnect/terminal states readable live).
     #[must_use]
     pub fn connection_state(&self) -> ConnectionState {
         self.ctx.state()
     }
 
-    /// S6/K1: 信令连接态变更流（subscriber 语义；重连/终态自动推送）。
+    /// S6/K1: the signaling connection-state change stream (subscriber semantics; reconnect/terminal pushed automatically).
     #[must_use]
     pub fn subscribe_connection_state(&self) -> tokio::sync::watch::Receiver<ConnectionState> {
         self.ctx.subscribe_state()
     }
 
-    /// S6/K1: 动态切换自动重连（D273 红牌语义：Failed = auth 族终态，不受此开关控制）。
+    /// S6/K1: dynamically toggle auto-reconnect (D273 red-card semantics: Failed = the auth family terminal, not governed by this switch).
     ///
-    /// **DEVIATION**：设计最初考虑为 ClientConfig 字段，但 client-c lib.rs:238
-    /// 的 ClientConfig 是 exhaustive 字面量，新增字段 = C ABI break（本批禁触），
-    /// 故改为运行时方法（K5 亦用运行时 setter 形）。
+    /// **DEVIATION**: the design first considered a ClientConfig field, but client-c lib.rs:238's
+    /// ClientConfig is an exhaustive literal; a new field = a C ABI break (forbidden this batch),
+    /// so it became a runtime method (K5 also uses the runtime-setter shape).
     pub fn set_auto_reconnect(&mut self, on: bool) {
         self.ctx.set_auto_reconnect(on);
     }
@@ -523,9 +532,9 @@ impl Drop for RoomSession {
     }
 }
 
-/// K4/K1: 单路视频收流建立全序列（Recv transport → router caps → Consume →
-/// answerer 协商 → Connect）。自旧 consume_video 原体抽出 = K1 重放共用，零复制。
-/// 帧出口由 `frame_tx` 注入（槽持有的长寿命 sender；on_track 每 sink 克隆一份）。
+/// K4/K1: the full establishment sequence of one video receive path (Recv transport -> router caps -> Consume ->
+/// answerer negotiation -> Connect). Extracted verbatim from the old consume_video = shared with the K1 replay, zero copies.
+/// The frame outlet is injected via `frame_tx` (the slot-held long-lived sender; on_track clones one per sink).
 pub(crate) async fn consume_sequence(
     producer_id: &str,
     engine: &Arc<dyn Engine>,
@@ -549,23 +558,23 @@ pub(crate) async fn consume_sequence(
             .await
             .map_err(|_| ClientError::Timeout { what: "WebRtcTransportCreated(recv)" })??;
 
-    // 2. PC（mediasoup ICE-Lite，无 STUN）+ on_track 先于 set_remote（晚注册丢首 track）
+    // 2. PC (mediasoup ICE-Lite, no STUN) + on_track before set_remote (late registration loses the first track)
     let pc = engine.create_pc().await?;
     pc.on_track(Box::new(move |track| {
-        // S2c 诊断（常久日志）：on_track 到达 = RTP 已 demux 成 track；
-        // 「ICE/DTLS 通过但零帧」的分水岭判据。
-        tracing::info!(kind = ?track.kind, track_id = ?track.track_id, "consume on_track 到达");
+        // S2c diagnostics (permanent log): on_track arriving = RTP already demuxed into a track;
+        // the watershed predicate for "ICE/DTLS pass but zero frames".
+        tracing::info!(kind = ?track.kind, track_id = ?track.track_id, "consume on_track arrived");
         track.set_frame_sink(Box::new(FrameChanSink { tx: frame_tx.clone() }));
     }));
 
-    // 3a. Router 能力查询直传（mediasoup-client Device.load 同款官方流程，C18；
-    //     手拼 caps 在 H264 producer 下必拒——S2b 活体教训，PullSession 同罪另案）。
+    // 3a. Router capability query passthrough (the same official flow as mediasoup-client Device.load, C18;
+    //     hand-built caps are always rejected under an H264 producer -- the S2b live lesson; PullSession shares the sin, another case).
     signal.send(SignalingMessage::GetRouterRtpCapabilities { room_id: room.clone() }).await?;
     let router_caps = tokio::time::timeout(RESPONSE_WAIT, await_router_caps(ev))
         .await
         .map_err(|_| ClientError::Timeout { what: "RouterRtpCapabilities" })??;
 
-    // 3b. Consume（C1 显式绑 transport_id；caps = router 原样回包）
+    // 3b. Consume (C1 explicitly binds transport_id; caps = the router's verbatim reply)
     signal
         .send(SignalingMessage::Consume {
             room_id: room.clone(),
@@ -579,9 +588,9 @@ pub(crate) async fn consume_sequence(
         .await
         .map_err(|_| ClientError::Timeout { what: "Consumed" })??;
 
-    // 4. remote SDP：codec 取自 consumer rtp_parameters，注入 ssrc 供 demux
+    // 4. remote SDP: codec taken from the consumer rtp_parameters, ssrc injected for demux
     let (pt, name, clock, fmtp) = sfu::codec_from_consumer(&consumer_rtp).ok_or_else(|| {
-        ClientError::MalformedResponse("Consumed rtp_parameters 无 video codec".into())
+        ClientError::MalformedResponse("Consumed rtp_parameters has no video codec".into())
     })?;
     let remote_sdp = sfu::build_recv_video_sdp(
         &ice,
@@ -594,7 +603,7 @@ pub(crate) async fn consume_sequence(
     );
     let remote_sdp = sfu::inject_remote_ssrc(&remote_sdp, &consumer_rtp);
 
-    // 5. answerer 收口：add_transceiver(recvonly) → set_remote(offer) → answer
+    // 5. answerer wrap-up: add_transceiver(recvonly) -> set_remote(offer) -> answer
     pc.add_transceiver(
         TrackKind::Video,
         RTCRtpTransceiverInit {
@@ -602,15 +611,15 @@ pub(crate) async fn consume_sequence(
             ..Default::default()
         },
     )?;
-    tracing::debug!(remote_sdp = %remote_sdp, "consume remote offer（SSRC 注入后）");
+    tracing::debug!(remote_sdp = %remote_sdp, "consume remote offer (after SSRC injection)");
     pc.set_remote_offer(remote_sdp).await?;
     let answer = pc.create_answer().await?;
     pc.set_local_answer(&answer).await?;
 
-    // 6. Connect（本地 DTLS 指纹，role=client）
+    // 6. Connect (the local DTLS fingerprint, role=client)
     connect_transport(signal, &room, &peer, &transport_id, &pc).await?;
 
-    tracing::info!(producer_id, transport_id = %transport_id, "client consume_video 建立");
+    tracing::info!(producer_id, transport_id = %transport_id, "client consume_video established");
     Ok(pc)
 }
 
@@ -623,7 +632,7 @@ async fn connect_transport(
 ) -> Result<(), ClientError> {
     let fp_hex = pc
         .local_dtls_fingerprint()
-        .ok_or_else(|| ClientError::WebRtc("无本地 DTLS 指纹".into()))?;
+        .ok_or_else(|| ClientError::WebRtc("no local DTLS fingerprint".into()))?;
     signal
         .send(SignalingMessage::ConnectWebRtcTransport {
             room_id: room.to_string(),
@@ -637,7 +646,7 @@ async fn connect_transport(
         .await
 }
 
-// ── 事件等待（broadcast 单流顺序消费；transport_connected ack 豁免）──
+// -- event waiting (broadcast single-stream sequential consumption; the transport_connected ack exemption) --
 
 async fn await_transport_created(
     ev: &mut broadcast::Receiver<SignalEvent>,
@@ -652,13 +661,13 @@ async fn await_transport_created(
                 ..
             } => return Ok((transport_id, ice_parameters, dtls_parameters, ice_candidates)),
             SignalingMessage::Error { message, .. } if message == "transport_connected" => {}
-            // 并发事件容忍（车房常态：他人 producer 广播与 transport 应答同窗）；
-            // 仅 Error 终态（C15 带上下文）。
+            // concurrent-event tolerance (the vehicle-room norm: another party's producer broadcast and the transport reply share a window);
+            // only Error is terminal (C15 with context).
             err @ SignalingMessage::Error { .. } => {
                 return Err(on_unexpected(err, "WebRtcTransportCreated"));
             }
             other => {
-                tracing::debug!(msg = ?other, "await(transport) 忽略无关事件，继续等");
+                tracing::debug!(msg = ?other, "await(transport) ignoring an unrelated event, keep waiting");
                 continue;
             }
         }
@@ -674,7 +683,7 @@ async fn await_consumed(
             SignalingMessage::Error { message, .. } if message == "transport_connected" => {}
             err @ SignalingMessage::Error { .. } => return Err(on_unexpected(err, "Consumed")),
             other => {
-                tracing::debug!(msg = ?other, "await(consumed) 忽略无关事件，继续等");
+                tracing::debug!(msg = ?other, "await(consumed) ignoring an unrelated event, keep waiting");
                 continue;
             }
         }
@@ -694,15 +703,15 @@ async fn await_data_producer_created(
                 return Err(on_unexpected(err, "DataProducerCreated"));
             }
             other => {
-                tracing::debug!(msg = ?other, "await(producer) 忽略无关事件，继续等");
+                tracing::debug!(msg = ?other, "await(producer) ignoring an unrelated event, keep waiting");
                 continue;
             }
         }
     }
 }
 
-/// S2b：consume 前查 router 真实 caps——手拼"仅 VP8"声明被 H264 producer 的
-/// can_consume 直拒（5000 No compatible media codecs，09-15 活体实锤）。
+/// S2b: query the router's real caps before consume -- a hand-built "VP8 only" declaration is directly rejected by an H264 producer's
+/// can_consume (5000 No compatible media codecs, live-proven 09-15).
 async fn await_router_caps(
     ev: &mut broadcast::Receiver<SignalEvent>,
 ) -> Result<serde_json::Value, ClientError> {
@@ -712,11 +721,11 @@ async fn await_router_caps(
     }
 }
 
-// ── S2d ack 消费链路（舱端 = 车端 ack producer 的 consumer）──────────
+// -- the S2d ack consumption chain (cockpit = the consumer of the vehicle's ack producer) --
 
-/// 等车端 ack producer 公告（非 ack label / 自身回显跳过；`None` = 事件流终结）。
-/// S4′: 途经 `ProducerClosed(Data)` 定向拆除对应本地 consumer DC（释放 libwebrtc
-/// stream id 占用 = `StreamId reserved` 消费天花板的舱端解法）。
+/// Wait for the vehicle ack producer's announce (non-ack labels / own echo skipped; `None` = the event stream ended).
+/// S4': en route, `ProducerClosed(Data)` tears down the corresponding local consumer DC (freeing the libwebrtc
+/// stream id it held = the cockpit-side answer to the `StreamId reserved` consumption ceiling).
 async fn await_ack_producer(
     ev: &mut broadcast::Receiver<SignalEvent>,
     self_peer: &str,
@@ -741,32 +750,38 @@ async fn await_ack_producer(
             })) => {
                 if let Some(tx) = consumers.remove(&producer_id) {
                     let _ = tx.send(());
-                    tracing::info!(producer_id, "ack 泵: 车端 DataProducer 死亡—本地 DC 定向拆除");
+                    tracing::info!(
+                        producer_id,
+                        "ack pump: the vehicle DataProducer died -- targeted teardown of the local DC"
+                    );
                 }
             }
             Ok(SignalEvent::Message(_)) | Ok(SignalEvent::Connected { .. }) => {}
-            Ok(SignalEvent::Error(e)) => tracing::warn!("ack 泵: 信令事件错误（忽略续等）: {e}"),
+            Ok(SignalEvent::Error(e)) => {
+                tracing::warn!("ack pump: signaling event error (ignored, keep waiting): {e}")
+            }
             Ok(_) => {}
             Err(broadcast::error::RecvError::Lagged(n)) => {
-                tracing::warn!("ack 泵: 队列溢出丢 {n} 事件，续");
+                tracing::warn!("ack pump: queue overflow dropped {n} events, continuing");
             }
-            Err(_) => return None, // Closed = 会话终结
+            Err(_) => return None, // Closed = session ended
         }
     }
 }
 
-/// 等 DataConsumed 的 S2d 参数三元组（Error 终态，其余无关事件忽略续等）。
+/// Wait for DataConsumed's S2d parameter triple (Error is terminal; other unrelated events are ignored, keep waiting).
 async fn await_data_consumed(
     ev: &mut broadcast::Receiver<SignalEvent>,
 ) -> Result<(SctpStreamParameters, String, String), ClientError> {
     loop {
         match next_msg(ev).await? {
-            // connect ack（code=0 豁免形，同 await_transport_created——泵恰跨 connect 窗）。
+            // the connect ack (the code=0 exemption shape, same as await_transport_created -- the pump happens to span the connect window).
             SignalingMessage::Error { ref message, .. } if message == "transport_connected" => {}
             SignalingMessage::DataConsumed { sctp_stream_parameters, label, protocol, .. } => {
                 let sp = sctp_stream_parameters.ok_or_else(|| {
                     ClientError::MalformedResponse(
-                        "DataConsumed 缺 sctp 参数（server 过旧，无 negotiated 依据）".into(),
+                        "DataConsumed missing sctp params (server too old, no negotiated basis)"
+                            .into(),
                     )
                 })?;
                 return Ok((sp, label, protocol));
@@ -775,15 +790,15 @@ async fn await_data_consumed(
                 return Err(on_unexpected(err, "DataConsumed"));
             }
             other => {
-                tracing::debug!(msg = ?other, "ack 泵 await 期忽略无关事件");
+                tracing::debug!(msg = ?other, "ignoring an unrelated event while the ack pump awaits");
                 continue;
             }
         }
     }
 }
 
-/// 建 DC-only recv transport 并 connect（S1 车端 setup_recv_side 同形；negotiated
-/// DC 带外协商不受「DC 先于 answer」时序合同约束）。
+/// Build a DC-only recv transport and connect (the same shape as host S1 setup_recv_side; a negotiated
+/// DC's out-of-band negotiation is exempt from the "DC before answer" ordering contract).
 async fn open_dc_recv_transport(
     ev: &mut broadcast::Receiver<SignalEvent>,
     signal: &LinkSignal,
@@ -804,7 +819,7 @@ async fn open_dc_recv_transport(
             .map_err(|_| ClientError::Timeout { what: "WebRtcTransportCreated(recv-ack)" })??;
     let pc = engine.create_pc().await?;
     let remote_sdp = sfu::build_dc_remote_sdp(&ice, &dtls, candidates.as_ref());
-    // 错误串归一（原 "(recv-ack)" 局部前缀并入引擎统一映射——仅文本差，类型/路径不变）。
+    // error-string normalization (the old "(recv-ack)" local prefix folded into the engine's unified mapping -- a text-only diff, type/path unchanged).
     pc.set_remote_offer(remote_sdp).await?;
     let answer = pc.create_answer().await?;
     pc.set_local_answer(&answer).await?;
@@ -812,9 +827,9 @@ async fn open_dc_recv_transport(
     Ok((pc, transport_id))
 }
 
-/// 后台泵：消费车端 ack producer → negotiated DC → ControlAck 路由进 `ack_tx`。
-/// 循环等后续 announce（车端重启/多车实例自适应）；transport 首建复用。
-/// `ack_tx` 全 drop（ControlChannel 释放）或事件流 Closed 时退出。
+/// Background pump: consumes the vehicle ack producer -> negotiated DC -> routes ControlAck into `ack_tx`.
+/// Loops waiting for later announces (adapts to vehicle restarts/multi-instance); the transport's first build is reused.
+/// Exits when all `ack_tx` receivers drop (ControlChannel released) or the event stream closes.
 async fn ack_consumer_pump(
     mut ev: broadcast::Receiver<SignalEvent>,
     signal: Arc<LinkSignal>,
@@ -824,12 +839,12 @@ async fn ack_consumer_pump(
     ack_tx: mpsc::Sender<ControlAck>,
 ) {
     let mut transport: Option<(Arc<dyn PcHandle>, String)> = None;
-    // S4′: dp_id → 本地 ack consumer DC 拆除通道。
+    // S4': dp_id -> the teardown channel of the local ack consumer DC.
     let mut consumers: HashMap<String, mpsc::UnboundedSender<()>> = HashMap::new();
-    // 预订阅流与主流各见全量广播 = 开局积压混有 step1 send transport 的
-    // Created/connect ack（泵直接 await 会抓错旧应答 → 对 send 槽二次 connect
-    // = worker "connect() already called"，2026-09-15 活体实证）。排空积压：
-    // ack announce 入 seed，其余丢弃；此后队列只剩本泵轮次的应答。
+    // the pre-subscribed stream and the main stream each see the full broadcast = the opening backlog mixes the step1 send transport's
+    // Created/connect acks (the pump awaiting directly would grab a stale reply -> a second connect on the send slot
+    // = worker "connect() already called", live-proven 2026-09-15). Drain the backlog:
+    // ack announces go into the seed, the rest discarded; afterwards the queue only holds this pump round's replies.
     let mut seed: Vec<String> = Vec::new();
     'drain: loop {
         match ev.try_recv() {
@@ -859,7 +874,7 @@ async fn ack_consumer_pump(
                 dp
             }
         };
-        tracing::info!(data_producer_id = %dp_id, "ack 泵: 发现车端 DataProducer，消费");
+        tracing::info!(data_producer_id = %dp_id, "ack pump: vehicle DataProducer found, consuming");
         let (pc, tid) = match transport.clone() {
             Some(t) => t,
             None => match open_dc_recv_transport(&mut ev, &signal, &engine, &room, &peer).await {
@@ -868,7 +883,7 @@ async fn ack_consumer_pump(
                     t
                 }
                 Err(e) => {
-                    tracing::error!("ack 泵: recv transport 建立失败: {e}");
+                    tracing::error!("ack pump: recv transport establishment failed: {e}");
                     continue;
                 }
             },
@@ -883,17 +898,17 @@ async fn ack_consumer_pump(
             })
             .await
         {
-            tracing::error!("ack 泵: ConsumeData 发送失败: {e}");
+            tracing::error!("ack pump: ConsumeData send failed: {e}");
             continue;
         }
         let sp = match tokio::time::timeout(RESPONSE_WAIT, await_data_consumed(&mut ev)).await {
             Ok(Ok(v)) => v,
             Ok(Err(e)) => {
-                tracing::error!("ack 泵: DataConsumed 异常: {e}");
+                tracing::error!("ack pump: DataConsumed error: {e}");
                 continue;
             }
             Err(_) => {
-                tracing::error!("ack 泵: DataConsumed 等待超时");
+                tracing::error!("ack pump: DataConsumed wait timed out");
                 continue;
             }
         };
@@ -903,77 +918,77 @@ async fn ack_consumer_pump(
                 tracing::info!(
                     label,
                     stream_id = sp.stream_id,
-                    "ack 泵: negotiated consumer DC 已建，回执接入 recv_ack"
+                    "ack pump: the negotiated consumer DC is up, receipts wired into recv_ack"
                 );
                 let tx = ack_tx.clone();
                 let mut rx = dc.events().await;
                 let (purge_tx, mut purge_rx) = mpsc::unbounded_channel();
                 consumers.insert(dp_id.clone(), purge_tx);
                 tokio::spawn(async move {
-                    let _dc = dc; // 通道生命周期锚（Arc drop 即关）
+                    let _dc = dc; // the channel lifetime anchor (Arc drop closes it)
                     loop {
                         tokio::select! {
-                            item = rx.recv() => match item {
-                                Some(EngineDcEvent::Message(data)) => {
-                                    match serde_json::from_slice::<ControlAck>(&data) {
-                                        Ok(ack) => {
-                                            if tx.send(ack).await.is_err() {
-                                                break;
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!("ack DC 非 ControlAck 载荷丢弃: {e}")
-                                        }
-                                    }
-                                }
-                                Some(EngineDcEvent::Closed) => break,
-                                Some(_) => {}
-                                None => break,
-                            },
-                            // S4′: 车端 ack dp 死亡（泵定向）→ 本地关闭释放 sid 占用。
-                            _ = purge_rx.recv() => {
-                                tracing::info!("ack 泵: 本地 consumer DC 自拆（车端 DataProducer 死亡）");
-                                _dc.close().await;
-                                break;
-                            }
-                        }
+                                                    item = rx.recv() => match item {
+                                                        Some(EngineDcEvent::Message(data)) => {
+                                                            match serde_json::from_slice::<ControlAck>(&data) {
+                                                                Ok(ack) => {
+                                                                    if tx.send(ack).await.is_err() {
+                                                                        break;
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    tracing::warn!("dropping a non-ControlAck payload on the ack DC: {e}")
+                                                                }
+                                                            }
+                                                        }
+                                                        Some(EngineDcEvent::Closed) => break,
+                                                        Some(_) => {}
+                                                        None => break,
+                                                    },
+                        // S4': the vehicle ack dp died (pump-targeted) -> close locally to free the sid.
+                                                    _ = purge_rx.recv() => {
+                                                        tracing::info!("ack pump: the local consumer DC self-tears (the vehicle DataProducer died)");
+                                                        _dc.close().await;
+                                                        break;
+                                                    }
+                                                }
                     }
                 });
             }
-            Err(e) => tracing::error!("ack 泵: negotiated DC 创建失败: {e}"),
+            Err(e) => tracing::error!("ack pump: negotiated DC creation failed: {e}"),
         }
     }
 }
 
-/// 取下一条信令消息（断流/断链/非消息事件报错；Error 帧由调用方分类）。
+/// Fetch the next signaling message (stream break/disconnect/non-message events error; Error frames are classified by the caller).
 async fn next_msg(
     ev: &mut broadcast::Receiver<SignalEvent>,
 ) -> Result<SignalingMessage, ClientError> {
     match ev.recv().await {
         Ok(SignalEvent::Message(msg)) => Ok(msg),
-        Ok(SignalEvent::Disconnected { reason }) => {
-            Err(ClientError::InvalidState(format!("等待期信令断开: {reason}")))
-        }
+        Ok(SignalEvent::Disconnected { reason }) => Err(ClientError::InvalidState(format!(
+            "signaling disconnected while waiting: {reason}"
+        ))),
         Ok(SignalEvent::Error(e)) => {
             Err(ClientError::Signal(mediaservo_link::LinkError::Signal(e)))
         }
-        Ok(SignalEvent::Connected { .. }) => {
-            Err(ClientError::InvalidState("等待期连接事件（resume 重挂未支持）".into()))
-        }
-        Ok(_) => Err(ClientError::InvalidState("未知信令事件".into())),
-        Err(_) => Err(ClientError::InvalidState("信令事件流关闭".into())),
+        Ok(SignalEvent::Connected { .. }) => Err(ClientError::InvalidState(
+            "a connection event while waiting (resume re-mount unsupported)".into(),
+        )),
+        Ok(_) => Err(ClientError::InvalidState("unknown signaling event".into())),
+        Err(_) => Err(ClientError::InvalidState("the signaling event stream closed".into())),
     }
 }
 
-/// 等待目标消息外的事件：Error{code} → typed 终态，其余 = 协议错位。
+/// Wait for events other than the target message: Error{code} -> typed terminal, the rest = a protocol misalignment.
 fn on_unexpected(msg: SignalingMessage, want: &str) -> ClientError {
     match msg {
         SignalingMessage::Error { code, message } => from_wire_error(code, &message),
-        other => ClientError::MalformedResponse(format!("期望 {want}, got {other:?}")),
+        other => ClientError::MalformedResponse(format!("expected {want}, got {other:?}")),
     }
 }
 
-/// FrameSink → bounded mpsc（满则丢 = latest 语义，同 field PullFrameSink）。
+/// FrameSink -> bounded mpsc (full = drop, the latest-wins semantics, same as field PullFrameSink).
 struct FrameChanSink {
     tx: mpsc::Sender<VideoFrame>,
 }
@@ -1017,8 +1032,8 @@ mod tests {
 
     #[test]
     fn fold_inbound_unions_new_w3c_fields() {
-        // 09-24 扩面语义钉：jitter 多路取 max，dropped/nack/pli/fir 跨 SSRC 求和
-        // （PIT-212 修订：fold 按 (ssrc,id) 去重——夹具必须异 ssrc 才是"多路"）
+        // the 09-24 widened-semantics pin: jitter takes the max across paths, dropped/nack/pli/fir sum across SSRCs
+        // (the PIT-212 revision: fold dedups by (ssrc,id) -- fixtures must differ in ssrc to count as "multi-path")
         let mut mk2 = mk_keyed("a", 1, 1.0, 100, 1280, 30.0);
         if let RTCStats::InboundRtp(r) = &mut mk2 {
             r.jitter = 0.004;
@@ -1039,31 +1054,31 @@ mod tests {
         assert_eq!(out.nack_count, 9);
         assert_eq!(out.pli_count, 2);
         assert_eq!(out.fir_count, 1);
-        assert_eq!(out.bytes_received, 200, "异 ssrc 跨组求和");
+        assert_eq!(out.bytes_received, 200, "distinct ssrcs sum across groups");
     }
 
     #[test]
     fn fold_inbound_dedup_frozen_row_takes_latest() {
-        // PIT-212 钉（码率异常根因）：同 pc 双行 = 冻结旧行 + 活行（同 ssrc 同 id）。
-        // 冻结行 bytes 停在旧值——`+=` 会把它重复计入 → 差分基线错位。
-        // 新语义：同 key 取 timestamp 最新的行（活行），旧行丢弃。
-        let frozen = mk_keyed("x", 1, 10.0, 100, 1280, 24.0);   // 旧行：ts 旧、bytes 小
-        let mut live = mk_keyed("x", 1, 20.0, 900, 1920, 30.0); // 活行：ts 新
+        // the PIT-212 pin (the bitrate-anomaly root cause): two rows on one pc = a frozen old row + a live row (same ssrc, same id).
+        // the frozen row's bytes stop at the old value -- `+=` would count it twice -> a misaligned differential baseline.
+        // the new semantics: for the same key keep the row with the newest timestamp (the live row), drop the old.
+        let frozen = mk_keyed("x", 1, 10.0, 100, 1280, 24.0); // the old row: older ts, smaller bytes
+        let mut live = mk_keyed("x", 1, 20.0, 900, 1920, 30.0); // the live row: newer ts
         if let RTCStats::InboundRtp(r) = &mut live {
             r.frame_dropped = 5;
             r.nack_count = 3;
         }
         let out = fold_inbound_stats(vec![frozen, live]);
-        assert_eq!(out.bytes_received, 900, "同 key 取 timestamp 最新行（非求和）");
+        assert_eq!(out.bytes_received, 900, "same key keeps the newest-timestamp row (no summing)");
         assert_eq!(out.frame_width, 1920);
         assert_eq!(out.frames_per_second, 30.0);
-        assert_eq!(out.frame_dropped, 5, "冻结行的 dropped 不得叠加");
+        assert_eq!(out.frame_dropped, 5, "the frozen row's dropped must not add in");
         assert_eq!(out.nack_count, 3);
     }
 
     #[test]
     fn fold_inbound_sums_counts_maxes_size_and_fps() {
-        // 异 ssrc（真多路）跨组求和
+        // distinct ssrcs (true multi-path) sum across groups
         let out = fold_inbound_stats(vec![
             mk_keyed("x", 1, 1.0, 100, 1280, 24.0),
             mk_keyed("y", 2, 1.0, 50, 1920, 30.0),

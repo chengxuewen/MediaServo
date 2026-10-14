@@ -602,3 +602,5 @@ ff_.*_muxer` 应为 0（demuxer-only 实证）。
 - **理由**: 交付物面向国际消费者/上游同步（upstream-friendly）；对话语言是用户偏好，与制品语言正交。混合语言制品在 grep/检索/上游 PR 时成本最高。
 - **检查**: 新增 md/注释抽查 `grep -rP '[\x{4e00}-\x{9fff}]' <新文件>` 应为 0（历史文件豁免，不回改）；提交信息 `git log --format=%s -20 | grep -P '[\x{4e00}-\x{9fff}]'` 对新提交应为 0。
 - **边界**: `.agents/memorys/*.md`（status/decisions/pitfalls 会话台账）= 中文既成体系，豁免（历史叙述不改写，C45 同款）；新增条目仍鼓励英文但保持台账连续性优先。
+- **Functional-CJK exemption**: skill trigger keywords that must match Chinese user input verbatim (and analogous functional data, e.g. CJK parsing tables in book-to-skill utils.py) stay ONLY on lines carrying the pragma `c49:trigger` (markdown: ` <!-- c49:trigger -->`; yaml/python/comment lines: ` # c49:trigger`). Enforced by `scripts/check-english-only.sh` — CJK without pragma = gate failure. The pragma is the audit surface: every retained CJK line is explicit and reviewable.
+- **Migration**: historical files are being backfilled in scope by the english-only-migration round (2026-10-14, user ruled docs/plans/CHANGELOG included; `.agents/memorys/*` stays exempt). Until a file is converted it may retain legacy CJK; new writes into it must be English.

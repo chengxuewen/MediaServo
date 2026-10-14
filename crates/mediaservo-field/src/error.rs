@@ -1,9 +1,9 @@
-//! field 错误类型。
+//! Field error types.
 
 use mediaservo_deck::DeckError;
 use mediaservo_link::LinkError;
 
-/// field 组合 SDK 错误（契约 §4）。
+/// Errors for the field composition SDK (contract §4).
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum FieldError {

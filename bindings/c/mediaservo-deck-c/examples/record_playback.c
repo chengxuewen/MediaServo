@@ -1,9 +1,9 @@
-/* 采集→录制→回放 闭环示例（C ABI 消费）— mediaservo_deck_* 用法。
+/* Capture→record→playback closed-loop example (C ABI consumption) — mediaservo_deck_* usage.
  *
- * 编译（链接 libmediaservo_deck.so）:
+ * Build (linking libmediaservo_deck.so):
  *   gcc record_playback.c -I bindings/c/mediaservo-deck-c/include -I bindings/c/include \
  *       -L target/debug -lmediaservo_deck -o record_playback
- * 运行: LD_LIBRARY_PATH=target/debug ./record_playback
+ * Run: LD_LIBRARY_PATH=target/debug ./record_playback
  */
 #include <stdio.h>
 #include <string.h>
@@ -36,7 +36,7 @@ int main(void) {
     mediaservo_deck_recorder_t* rec = NULL;
     mediaservo_deck_player_t* player = NULL;
 
-    /* 1. 枚举相机（双调用模式: 第一次长度 → 第二次内容） */
+        /* 1. Enumerate cameras (two-call pattern: first the length, then the content) */
     size_t need = 0;
     mediaservo_err_t rc = mediaservo_deck_devices_enumerate(0, NULL, 0, &need);
     if (rc < 0) {
@@ -53,7 +53,7 @@ int main(void) {
     }
     printf("devices (%zu bytes): %s\n", need, dev);
 
-    /* 2. 打开相机 + 开始产帧（默认 1280x720@30）+ 帧回调 */
+        /* 2. Open the camera + start producing frames (default 1280x720@30) + frame callback */
     mediaservo_deck_capture_options_t copts = MEDIASERVO_DECK_CAPTURE_OPTIONS_DEFAULT;
     rc = mediaservo_deck_camera_open(dev, &copts, &cam);
     if (rc != MEDIASERVO_OK) {
@@ -74,7 +74,7 @@ int main(void) {
         return 1;
     }
 
-    /* 3. 录制 3 秒（camera → recorder 桥接） */
+        /* 3. Record for 3 seconds (camera → recorder bridge) */
     const char* out_path = "/tmp/opencode/deck_test.mp4";
     rc = mediaservo_deck_recorder_new(out_path, &rec);
     if (rc != MEDIASERVO_OK) {
@@ -91,7 +91,7 @@ int main(void) {
     printf("recording 3s -> %s ...\n", out_path);
     sleep(3);
 
-    /* 4. 停止录制 + 关闭（顺序: recorder 先于 camera — 生命周期契约） */
+        /* 4. Stop recording + close (order: recorder before camera — lifecycle contract) */
     rc = mediaservo_deck_recorder_stop(rec);
     if (rc != MEDIASERVO_OK) {
         mediaservo_deck_last_error(err, sizeof(err));
@@ -118,7 +118,7 @@ int main(void) {
     }
     printf("recorded %ld camera frames -> %s\n", g_camera_frames, out_path);
 
-    /* 5. 回放: 解码逐帧计数 */
+        /* 5. Playback: count decoded frames */
     rc = mediaservo_deck_player_open(out_path, &player);
     if (rc != MEDIASERVO_OK) {
         mediaservo_deck_last_error(err, sizeof(err));

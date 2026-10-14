@@ -1,7 +1,7 @@
 {
   "name": "mediaservo",
   "version": "0.1.1",
-  "description": "MediaServo Node.js 绑定 — napi-rs 直绑 Rust SDK（field/link/deck）",
+  "description": "MediaServo Node.js bindings — napi-rs direct bindings to the Rust SDK (field/link/deck)",
   "type": "module",
   "main": "lib/index.mjs",
   "exports": { ".": "./lib/index.mjs" },

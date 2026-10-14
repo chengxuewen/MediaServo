@@ -1,13 +1,13 @@
-//! FakeEngine——有状态 libwebrtc 语义模拟器（feature `engine-fake` 门控，默认 off）。
+//! FakeEngine -- a stateful libwebrtc semantics simulator (feature-gated `engine-fake`, off by default).
 //!
-//! 存在理由（K11 / mediasoup-client FakeHandler 同型）：把「引擎行为」层假面化，
-//! 让 consume/control/ack 逻辑与故障分支进 CI 秒级确定性执行——真 webrtc-sys
-//! 只保留在直通姿态回归里。与真实现的语义差异见各注入方法文档；**不模拟**：
-//! DTLS/ICE 握手时序、SRTP 解帧、SCTP 拥塞/重传、真 SDP 语义校验。
+//! Reason to exist (K11 / same type as mediasoup-client FakeHandler): mask the "engine behavior" layer so
+//! consume/control/ack logic and failure branches run deterministically in CI at second scale -- the real webrtc-sys
+//! stays only in the passthrough-posture regression. Semantic differences from the real impl are documented on each injection method; **not simulated**:
+//! DTLS/ICE handshake timing, SRTP framing, SCTP congestion/retransmit, real SDP semantic validation.
 //!
-//! 锁模型：单全局 `std::sync::Mutex`（收集→释放→再动作，绝不跨 pc 锁嵌套、
-//! 绝不持锁 await）。测试基座专用，无吞吐诉求。
-//! ponytail: 全局锁，若演练并行化出现竞争再分 pc 锁。
+//! Lock model: one global `std::sync::Mutex` (collect -> release -> act again, never nested across pc locks,
+//! never hold the lock across await). Dedicated to the test foundation, no throughput demands.
+//! ponytail: a global lock; split into per-pc locks if drill parallelism ever contends.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -24,32 +24,32 @@ use mediaservo_webrtc::track::{FrameSink, TrackKind};
 use super::{DcHandle, Engine, EngineDcEvent, EngineTrack, PcHandle, TrackHandle};
 use crate::error::ClientError;
 
-/// 假 answer SDP（形状合法即可——fake 域无人解析）。
+/// A fake answer SDP (shape-valid is enough -- nobody parses it in the fake domain).
 const FAKE_ANSWER_SDP: &str = "v=0\r\no=mediaservo-fake 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n";
-/// 假本地 DTLS 指纹：32 字节冒号十六进制（与 libwebrtc 出形一致，供 Connect 上行断言）。
+/// A fake local DTLS fingerprint: 32 bytes of colon-separated hex (matching libwebrtc's output shape, for Connect uplink asserts).
 const FAKE_LOCAL_FINGERPRINT: &str = "FA:01:02:03:04:05:06:07:08:09:0A:0B:0C:0D:0E:0F:10:11:12:13:14:15:16:17:18:19:1A:1B:1C:1D:1E:1F:20";
-/// DC 事件广播容量（演练级流量下不构成瓶颈）。
+/// DC event broadcast capacity (drill-level traffic never bottlenecks on it).
 const DC_EVENT_CAP: usize = 64;
 
-/// 全局可变状态（故障旗标 + pc 注册表 + 出程记账）。
+/// Global mutable state (failure flags + the pc registry + egress bookkeeping).
 struct St {
-    /// 剩余 create_pc 注入失败次数。
+    /// Remaining injected create_pc failures.
     fail_connect: usize,
-    /// 剩余「已有远端描述再 set_remote」注入失败次数（批1 resume 预置）。
+    /// Remaining injected "set_remote with a remote description already set" failures (the batch-1 resume preset).
     fail_resume: usize,
-    /// 下一次 DC send 丢弃旗标。
+    /// Whether the next DC send is dropped.
     drop_next_send: bool,
-    /// 新建 DC 是否即刻 open（libwebrtc 常态 = 连上即开；演练 c 关掉它）。
+    /// Whether a newly created DC opens immediately (the libwebrtc norm = open once connected; drill c turns it off).
     dc_auto_open: bool,
-    /// DC id 分配器（从 1 起，模拟 libwebrtc 递增实配）。
+    /// DC id allocator (starting at 1, mimicking libwebrtc's increasing real ids).
     next_dc_id: i32,
-    /// 活 pc 注册表（注入面寻址用）。
+    /// The live pc registry (the injection surface's addressing).
     pcs: Vec<Weak<FakePc>>,
-    /// 出程记账：label → 已送达文本序列。
+    /// Egress bookkeeping: label -> the sequence of texts actually delivered.
     sent: HashMap<String, Vec<String>>,
 }
 
-/// 有状态假引擎。`Clone` 得同一世界句柄（测试侧注入面与 session 侧引擎同源）。
+/// The stateful fake engine. `Clone` shares the same world handle (the test-side injection surface and the session-side engine share one source).
 #[derive(Clone)]
 pub struct FakeEngine {
     st: Arc<Mutex<St>>,
@@ -77,48 +77,48 @@ impl FakeEngine {
         }
     }
 
-    /// 测试基座内统一取锁：中毒即取内值继续（演练环境无「脏状态不可信」语义，
-    /// panic 传播只会掩盖首个真实失败）。
+    /// Unified lock acquisition inside the test foundation: on poison, take the inner value and continue (a drill environment has no
+    /// "dirty state untrustworthy" semantics; panic propagation would only mask the first real failure).
     fn lock(&self) -> std::sync::MutexGuard<'_, St> {
         self.st.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// 收集活 pc 强引用（释放全局锁后再动作——无锁嵌套纪律）。
+    /// Collect live pc strong references (acting only after releasing the global lock -- the no-nested-lock discipline).
     fn live_pcs(&self) -> Vec<Arc<FakePc>> {
         let mut st = self.lock();
         st.pcs.retain(|w| w.strong_count() > 0);
         st.pcs.iter().filter_map(Weak::upgrade).collect()
     }
 
-    // ── 故障注入面（最小三件，ticket K11）─────────────────────
+    // -- failure-injection surface (the minimal three, ticket K11) --
 
-    /// 接下来 n 次 `create_pc` 失败（= libwebrtc factory/ICE 建连期故障）。
-    /// 用途：验证引擎错误正确映射 `ClientError::WebRtc` 且不 panic、会话可续用。
+    /// The next n `create_pc` calls fail (= libwebrtc factory/ICE establishment-phase failures).
+    /// Use: verify engine errors map correctly to `ClientError::WebRtc` without panicking and the session stays usable.
     pub fn fail_next_connect(&self, n: usize) {
         self.lock().fail_connect = n;
     }
 
-    /// 接下来 n 次「对已协商 pc 再次 set_remote_offer」失败。批1 resume 路径
-    /// = 存量 transport 重协商形，此旗标为该演练预置注入点（现码无 resume 调用方，
-    /// 首消费者出现前它是纯 fake 侧语义）。
+    /// The next n "set_remote_offer again on an already-negotiated pc" calls fail. The batch-1 resume path
+    /// = renegotiation of an existing transport shape; this flag is the preset injection point for that drill (no resume caller in current code;
+    /// until the first consumer appears it is purely fake-side semantics).
     pub fn fail_next_resume(&self, n: usize) {
         self.lock().fail_resume = n;
     }
 
-    /// 下一次 DC send「发成功但丢包」（= SCTP 中途断链吞包：send_text 返回 Ok、
-    /// 对端永不出帧）。用途：验证舱端重发/超时窗不被假 ack 误导。
+    /// The next DC send "succeeds but the packet vanishes" (= an SCTP mid-stream break swallowing: send_text returns Ok,
+    /// the peer never emits a frame). Use: verify the cockpit's resend/timeout window is not misled by a fake ack.
     pub fn drop_dc_mid_send(&self) {
         self.lock().drop_next_send = true;
     }
 
-    // ── 世界控制面 ─────────────────────────────────────────
+    // -- world control surface --
 
-    /// 新建 DC 是否自动进入 open 态（默认 true；演练 c 置 false 验发送态拒绝）。
+    /// Whether a new DC automatically enters the open state (default true; drill c sets false to verify send-state rejection).
     pub fn set_dc_auto_open(&self, on: bool) {
         self.lock().dc_auto_open = on;
     }
 
-    /// 手动把所有在册 DC 推到 open（配 `set_dc_auto_open(false)` 用）。
+    /// Manually push all registered DCs to open (paired with `set_dc_auto_open(false)`).
     pub fn open_data_channels(&self) {
         for pc in self.live_pcs() {
             for dc in pc.dcs_snapshot() {
@@ -127,16 +127,16 @@ impl FakeEngine {
         }
     }
 
-    /// 向所有已注册 on_track 的 pc 投递一条 video 入程 track（= libwebrtc
-    /// 「demux 出 track」时刻；track_id 恒 "video"，与 stats 查询键同源）。
+    /// Deliver one video ingress track to every pc registered with on_track (= libwebrtc's
+    /// "demux produced a track" moment; track_id always "video", the same source as the stats query key).
     pub fn inject_video_track(&self) {
         for pc in self.live_pcs() {
             pc.fire_on_track();
         }
     }
 
-    /// 向全部已挂 sink 推一帧零值 I420 并累计 receiver stats
-    /// （= RTP 解密→解码→出帧的合并抽象；宽×高×3/2 字节）。
+    /// Push one zero-value I420 frame to every attached sink and accumulate receiver stats
+    /// (= the merged abstraction of RTP decrypt -> decode -> frame-out; width x height x 3/2 bytes).
     pub fn inject_frame(&self, width: u32, height: u32) {
         let data = vec![0u8; (width as usize) * (height as usize) * 3 / 2];
         for pc in self.live_pcs() {
@@ -144,8 +144,8 @@ impl FakeEngine {
         }
     }
 
-    /// 以 label 匹配投递 DC 入程消息（ack 泵等消费侧可见）。
-    /// 返回 false = 该 label 的 consumer DC 尚未建立（调用方重试，竞态归测试侧消化）。
+    /// Deliver a DC ingress message matching by label (visible to the ack pump and other consumers).
+    /// Returns false = that label's consumer DC is not yet established (the caller retries; races are the test side's problem).
     pub fn deliver_dc_message(&self, label: &str, bytes: Vec<u8>) -> bool {
         let mut hit = false;
         for pc in self.live_pcs() {
@@ -159,7 +159,7 @@ impl FakeEngine {
         hit
     }
 
-    /// K5 演练位：按 label 定向关闭 DC（state → Closed；ready_state 最差态聚合断言用）。
+    /// K5 drill slot: close the DC targeted by label (state -> Closed; for the worst-state ready_state aggregation assert).
     pub fn close_dc(&self, label: &str) {
         for pc in self.live_pcs() {
             for dc in pc.dcs_snapshot() {
@@ -170,7 +170,7 @@ impl FakeEngine {
         }
     }
 
-    /// K5 演练位：把匹配 label 的 DC 待发队列覆写为指定字节数（模拟拥塞水位）。
+    /// K5 drill slot: overwrite the buffered outbound queue of DCs matching label to a given byte count (simulating a congestion waterline).
     pub fn set_dc_buffered(&self, label: &str, bytes: u64) {
         for pc in self.live_pcs() {
             for dc in pc.dcs_snapshot() {
@@ -181,7 +181,7 @@ impl FakeEngine {
         }
     }
 
-    /// 出程记账读取：该 label 已真实送达的文本序列（drop_dc_mid_send 的不计入）。
+    /// Egress bookkeeping read: the texts actually delivered for that label (drop_dc_mid_send's don't count).
     #[must_use]
     pub fn sent_texts(&self, label: &str) -> Vec<String> {
         self.lock().sent.get(label).cloned().unwrap_or_default()
@@ -194,7 +194,9 @@ impl Engine for FakeEngine {
         let mut st = self.lock();
         if st.fail_connect > 0 {
             st.fail_connect -= 1;
-            return Err(ClientError::WebRtc("fake: create_peer_connection 故障注入".into()));
+            return Err(ClientError::WebRtc(
+                "fake: create_peer_connection failure injected".into(),
+            ));
         }
         let pc = Arc::new(FakePc { st: self.st.clone(), inner: FakePcInner::default() });
         st.pcs.push(Arc::downgrade(&pc));
@@ -202,10 +204,10 @@ impl Engine for FakeEngine {
     }
 }
 
-/// on_track 回调槽类型（clippy type_complexity 豁免面收敛成别名）。
+/// The on_track callback slot type (a clippy type_complexity exemption surface collapsed into an alias).
 type OnTrackCb = Arc<dyn Fn(EngineTrack) + Send + Sync + 'static>;
 
-/// pc 可变内核（回调槽 / track / DC / stats）。
+/// The pc mutable core (callback slot / track / DCs / stats).
 #[derive(Default)]
 struct FakePcInner {
     on_track: Mutex<Option<OnTrackCb>>,
@@ -265,7 +267,7 @@ impl PcHandle for FakePc {
         *self.inner.on_track.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::from(cb));
     }
 
-    /// 记录式接受（fake 不校验方向/类型——现码唯一调用形 = Video+Recvonly）。
+    /// Recording acceptance (the fake doesn't validate direction/type -- the only call shape in current code = Video+Recvonly).
     fn add_transceiver(
         &self,
         _kind: TrackKind,
@@ -279,7 +281,9 @@ impl PcHandle for FakePc {
             let mut st = self.lock_st();
             if st.fail_resume > 0 {
                 st.fail_resume -= 1;
-                return Err(ClientError::WebRtc("fake: 重协商（resume 形）故障注入".into()));
+                return Err(ClientError::WebRtc(
+                    "fake: renegotiation (the resume shape) failure injected".into(),
+                ));
             }
         }
         self.inner.had_remote.store(true, Ordering::Release);
@@ -298,7 +302,7 @@ impl PcHandle for FakePc {
         Some(FAKE_LOCAL_FINGERPRINT.to_string())
     }
 
-    /// 注入帧的累计账（零帧 = 空表，同真 receiver 未收流形态）。
+    /// The injected-frame ledger (zero frames = an empty table, the same shape as a real receiver that never received a stream).
     fn receiver_stats(&self, track_id: &str) -> Vec<RTCStats> {
         let stats = self.inner.stats.lock().unwrap_or_else(|e| e.into_inner());
         if stats.frames == 0 {
@@ -332,8 +336,8 @@ impl PcHandle for FakePc {
     ) -> Result<Arc<dyn DcHandle>, ClientError> {
         let (id, auto_open) = {
             let mut st = self.lock_st();
-            // negotiated 形沿用入参 id（server 分配 stream_id 语义）；
-            // 非 negotiated = libwebrtc 实配递增 id。
+            // the negotiated form keeps the input id (the server-assigned stream_id semantics);
+            // non-negotiated = a libwebrtc real-config incrementing id.
             let id = if init.negotiated { init.id } else { st.next_dc_id };
             if !init.negotiated {
                 st.next_dc_id += 1;
@@ -358,7 +362,7 @@ impl PcHandle for FakePc {
     }
 }
 
-/// 注入 track 的 sink 槽（inject_frame 的投递目标）。
+/// The sink slot of an injected track (deliver_target of inject_frame).
 #[derive(Default)]
 struct FakeTrack {
     sink: Mutex<Option<Box<dyn FrameSink>>>,
@@ -383,9 +387,9 @@ struct FakeDc {
     label: String,
     id: i32,
     open: AtomicBool,
-    /// K5 演练位：close 后 state 报 Closed（open=false 单旗标区分不了未开/已关）。
+    /// K5 drill slot: after close, state reports Closed (the single open=false flag can't distinguish not-yet-open from closed).
     closed: AtomicBool,
-    /// K5 演练位：待发队列记账（send 实送达累加；set_dc_buffered 覆写）。
+    /// K5 drill slot: the outbound queue ledger (send accumulates what was actually delivered; set_dc_buffered overwrites).
     buffered: AtomicUsize,
     tx: broadcast::Sender<EngineDcEvent>,
     st: Arc<Mutex<St>>,
@@ -403,7 +407,7 @@ impl FakeDc {
     }
 
     fn push_open(&self) {
-        // 无订阅者 = 尚未 events()——Open 语义由后续 send 态检查承载，丢之无害。
+        // no subscribers = events() never called -- Open semantics carried by the later send-state check, safe to drop.
         let _ = self.tx.send(EngineDcEvent::Open);
     }
 
@@ -411,7 +415,7 @@ impl FakeDc {
         let _ = self.tx.send(EngineDcEvent::Message(bytes));
     }
 
-    /// 同步关闭内核（async close 与 FakeEngine::close_dc 共用——旗标+事件，无 await）。
+    /// Synchronously close the core (shared by async close and FakeEngine::close_dc -- flag + event, no await).
     fn close_inner(&self) {
         self.open.store(false, Ordering::Release);
         self.closed.store(true, Ordering::Release);
@@ -429,7 +433,7 @@ impl DcHandle for FakeDc {
         self.id
     }
 
-    /// 三态映射：open → Open；close 过 → Closed；其余（auto_open=false 未推）→ Connecting。
+    /// The three-state mapping: open -> Open; closed before -> Closed; otherwise (auto_open=false, never pushed) -> Connecting.
     fn state(&self) -> RTCDataChannelState {
         if self.open.load(Ordering::Acquire) {
             RTCDataChannelState::Open
@@ -451,7 +455,7 @@ impl DcHandle for FakeDc {
         let mut st = self.st.lock().unwrap_or_else(|e| e.into_inner());
         if st.drop_next_send {
             st.drop_next_send = false;
-            tracing::warn!(label = %self.label, "fake: drop_dc_mid_send 命中——send 返 Ok 但未达对端");
+            tracing::warn!(label = %self.label, "fake: drop_dc_mid_send hit -- send returned Ok but never reached the peer");
             return Ok(());
         }
         st.sent.entry(self.label.clone()).or_default().push(text.to_string());
@@ -467,7 +471,7 @@ impl DcHandle for FakeDc {
                 match brx.recv().await {
                     Ok(ev) => {
                         if tx.send(ev).is_err() {
-                            break; // 订阅端 drop
+                            break; // the subscriber dropped
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -487,13 +491,13 @@ impl DcHandle for FakeDc {
 mod tests {
     use super::*;
 
-    /// 引擎自语义钉（不经 session 层）：故障旗标一次性消耗 + DC 态门 + 记账。
+    /// The engine's own semantics pin (bypassing the session layer): one-shot flag consumption + the DC state gate + bookkeeping.
     #[tokio::test]
     async fn fault_knobs_are_one_shot() {
         let eng = FakeEngine::new();
         eng.fail_next_connect(1);
         assert!(matches!(eng.create_pc().await, Err(ClientError::WebRtc(_))));
-        assert!(eng.create_pc().await.is_ok(), "注入应一次性消耗");
+        assert!(eng.create_pc().await.is_ok(), "an injection should be consumed in one shot");
     }
 
     #[tokio::test]
@@ -504,11 +508,14 @@ mod tests {
         let dc = pc.create_data_channel("chassis", RTCDataChannelInit::default()).await.unwrap();
         assert!(
             matches!(dc.send_text("x").await, Err(ClientError::WebRtc(m)) if m.contains("not open")),
-            "未 open 应拒发"
+            "a non-open DC must reject sends"
         );
         eng.open_data_channels();
         eng.drop_dc_mid_send();
-        assert!(dc.send_text("dropped").await.is_ok(), "丢弃注入应仍返 Ok（假送达）");
+        assert!(
+            dc.send_text("dropped").await.is_ok(),
+            "the drop injection still returns Ok (a fake delivery)"
+        );
         assert!(eng.sent_texts("chassis").is_empty());
         assert!(dc.send_text("real").await.is_ok());
         assert_eq!(eng.sent_texts("chassis"), ["real"]);
@@ -519,12 +526,15 @@ mod tests {
         let eng = FakeEngine::new();
         eng.fail_next_resume(1);
         let pc = eng.create_pc().await.unwrap();
-        // 首次协商不受 resume 旗标影响（resume = 存量 pc 重协商语义）。
+        // the first negotiation is unaffected by the resume flag (resume = renegotiation semantics on an existing pc).
         assert!(pc.set_remote_offer("offer1".into()).await.is_ok());
         assert!(
             matches!(pc.set_remote_offer("offer2".into()).await, Err(ClientError::WebRtc(_))),
-            "二次 set_remote 应被 resume 注入命中"
+            "the second set_remote should be hit by the resume injection"
         );
-        assert!(pc.set_remote_offer("offer3".into()).await.is_ok(), "注入一次性消耗");
+        assert!(
+            pc.set_remote_offer("offer3".into()).await.is_ok(),
+            "the injection is consumed in one shot"
+        );
     }
 }

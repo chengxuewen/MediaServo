@@ -54,7 +54,7 @@
 .vp-metrics-bar:hover { color: #fff; }
 .vp-metrics-bar.disconnected { color: #e74c3c; justify-content: center; cursor: default; }
 
-/* 详情浮层（portal→document.body，fixed 浮于卡旁——产品方案① 2026-09-02） */
+/* Detail popover (portal→document.body, fixed floating beside the card — product option 1, 2026-09-02) */
 .vp-stats-pop {
   position: fixed; z-index: 300; width: 260px;
   background: rgba(0,0,0,.78); border-radius: 6px; padding: .45rem .65rem .5rem;
@@ -73,7 +73,7 @@
   color: #888; cursor: pointer; font-size: 1rem;
 }
 
-/* multi-stream P3: tile 模式（网格单元——非 fixed、撑满 cell） */
+/* multi-stream P3: tile mode (grid cell — not fixed, fills the cell) */
 .video-player-overlay.tile {
   position: relative; inset: auto; background: none; z-index: auto;
   display: block; width: 100%; height: 100%;
@@ -84,10 +84,10 @@
 .video-player.tile .vp-body video {
   width: 100%; height: 100%; object-fit: contain;
 }
-/* tile ✕ 可见可关（play-layout-stats T5：原 display:none 规则删除，✕ 恢复） */
+/* tile close ✕ visible again (play-layout-stats T5: the old display:none rule was removed, ✕ restored) */
 
 
-/* mini stats 常驻卡（tile-only）：核心六指标 2列×3行——详情二次点击走大面板（产品精化 2026-09-01） */
+/* Mini stats resident card (tile-only): core six metrics in a 2x3 grid — details behind a second click in the large panel (product refinement 2026-09-01) */
 .vp-mini-stats {
   position: absolute; left: 6px; top: 6px; z-index: 10;
   padding: 4px 8px 5px; border-radius: 4px;
@@ -106,7 +106,7 @@
 .ms-k { opacity: .55; }
 .ms-v, .ms-vals { color: #cfe3ff; }
 
-/* 断联遮罩（T7 双态）：盖画面区不盖 top-bar——✕/重开路径保持可点 */
+/* Disconnect overlay (T7 dual-state): covers the video area but not the top bar — ✕/reopen paths stay clickable */
 .vp-discon-overlay {
   position: absolute; inset: 0; z-index: 20;
   display: flex; align-items: center; justify-content: center;

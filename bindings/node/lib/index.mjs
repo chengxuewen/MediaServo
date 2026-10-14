@@ -1,6 +1,6 @@
-// MediaServo Node.js 绑定 — 薄 TS 层（livekit-rtc 式包装 over napi .node）。
-// 使用: import { PushSession, SignalSession, CameraSource } from 'mediaservo';
-// 加载: 同目录 mediaservo.node（构建: cargo build -p mediaservo-node + cp .so → .node）
+// MediaServo Node.js bindings — thin TS layer (livekit-rtc style wrapper over the napi .node binary).
+// Usage: import { PushSession, SignalSession, CameraSource } from 'mediaservo';
+// Loading: mediaservo.node from the same directory (build: cargo build -p mediaservo-node + cp .so → .node)
 
 import { createRequire } from 'node:module';
 
@@ -8,25 +8,25 @@ const require = createRequire(import.meta.url);
 const binding = require('../mediaservo.node');
 
 /**
- * 推流配置。
+ * Push stream configuration.
  * @typedef {Object} PushConfig
- * @property {string} url - WS 信令地址（如 ws://host:9800/ws）
- * @property {string} psk - PSK 认证密钥
- * @property {string} room - 房间 ID
- * @property {number} [width] - 视频宽（默认 1280）
- * @property {number} [height] - 视频高（默认 720）
- * @property {number} [framerate] - 帧率（默认 30）
- * @property {number} [bitrateKbps] - 码率 kbps（默认 2000）
+ * @property {string} url - Signaling WS URL (e.g. ws://host:9800/ws)
+ * @property {string} psk - PSK authentication key
+ * @property {string} room - Room ID
+ * @property {number} [width] - Video width (default 1280)
+ * @property {number} [height] - Video height (default 720)
+ * @property {number} [framerate] - Framerate (default 30)
+ * @property {number} [bitrateKbps] - Bitrate in kbps (default 2000)
  */
 export class PushSession {
   /** @private */
   constructor(h) { this._h = h; }
 
-  /** 连接信令 + 创建会话（async）。 */
+  /** Connect signaling and create the session (async). */
   static async connect(cfg) {
     return new PushSession(await binding.JsPushSession.connect(cfg));
   }
-  /** 发布视频轨（SFU 协商）。@returns {Promise<string>} track id */
+  /** Publish the video track (SFU negotiation). @returns {Promise<string>} track id */
   publishVideo() { return this._h.publishVideo(); }
   startVideoFrames() { return this._h.startVideoFrames(); }
   stopVideoFrames() { return this._h.stopVideoFrames(); }
@@ -34,7 +34,7 @@ export class PushSession {
 }
 
 /**
- * 信令配置。role: "Host"|"Pusher"|"Client"|"Puller"（默认 Host）。
+ * Signaling configuration. role: "Host"|"Pusher"|"Client"|"Puller" (default Host).
  * @typedef {Object} SignalConfig
  * @property {string} url
  * @property {string} psk
@@ -48,15 +48,15 @@ export class SignalSession {
   static async connect(cfg) {
     return new SignalSession(await binding.JsSignalSession.connect(cfg));
   }
-  /** 发送信令消息（SignalingMessage JSON）。 */
+  /** Send a signaling message (SignalingMessage JSON). */
   send(json) { return this._h.send(json); }
-  /** 订阅事件（JSON 字符串回调；事件对象 {type, ...}）。 */
+  /** Subscribe to events (JSON string callback; event object {type, ...}). */
   onEvent(cb) { return this._h.onEvent((ev) => cb(JSON.parse(ev))); }
   close() { return this._h.close(); }
 }
 
 /**
- * 采集选项。
+ * Capture options.
  * @typedef {Object} CaptureOptions
  * @property {number} [width]
  * @property {number} [height]
@@ -66,13 +66,13 @@ export class CameraSource {
   /** @private */
   constructor(h) { this._h = h; }
 
-  /** 打开相机（当前 stub 设备 "stub:test-camera"）。 */
+  /** Open the camera (currently the stub device "stub:test-camera"). */
   static async open(devId, opts = {}) {
     return new CameraSource(await binding.JsCameraSource.open(devId, opts));
   }
   start() { return this._h.start(); }
   /**
-   * 订阅帧回调。napi 元组 → JS 数组 [meta, data] → 解构为帧对象。
+   * Subscribe to frame callbacks. napi tuple → JS array [meta, data] → destructured into a frame object.
    * @param {(frame: {width:number,height:number,ptsUs:number,keyframe:boolean,data:Uint8Array}) => void} cb
    */
   onFrame(cb) {
@@ -83,20 +83,20 @@ export class CameraSource {
 }
 
 /**
- * 录制器（FFmpeg mux；record(camera) 后台任务，stop() 触发 flush+trailer）。
+ * Recorder (FFmpeg mux; record(camera) runs as a background task, stop() triggers flush+trailer).
  */
 export class Recorder {
   /** @private */
   constructor(h) { this._h = h; }
   static async open(path) { return new Recorder(await binding.JsRecorder.open(path)); }
-  /** 开始录制（立即返回；camera 须已 start）。 */
+  /** Start recording (returns immediately; the camera must already be started). */
   record(camera) { return this._h.record(camera._h); }
   stop() { return this._h.stop(); }
   close() { return this._h.close(); }
 }
 
 /**
- * 回放器（demux+decode；onFrame 泵线程逐帧回调）。
+ * Player (demux+decode; onFrame is called per frame on the pump thread).
  */
 export class Player {
   /** @private */

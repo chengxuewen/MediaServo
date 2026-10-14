@@ -1,16 +1,17 @@
-//! host-recorder: 录制进程（Task C3）— FrameBus 订阅 camera/<id> → deck Recorder 落盘。
+//! host-recorder: recording process (Task C3) — FrameBus subscribes camera/<id> → deck Recorder writes files.
 //!
-//! 用法: `host-recorder --config <host.yaml 路径> --token <令牌文件路径>`
+//! Usage: `host-recorder --config <host.yaml path> --token <token file path>`
 //!
-//! 流程: 读 host.yaml（`[record]` enabled 门控 + out_dir，缺省 disabled +
-//! /tmp/mediaservo-recordings）→ 每视频源一个录制任务：link `FrameBus` 订阅
-//! `camera/<id>`（FrameMeta + 紧凑 I420，C1 capturer 线格式）→ deck `Recorder`
-//! （H264 + MP4 mux，复用 deck closed_loop 已验证闭环）→ `{out_dir}/{id}.mp4`。
-//! SIGTERM → 全部 Recorder stop（flush + trailer，worker 完成 mux）。
+//! Flow: read host.yaml (`[record]` enabled gate + out_dir; defaults disabled +
+//! /tmp/mediaservo-recordings) → one recording task per video source: link `FrameBus` subscribes
+//! `camera/<id>` (FrameMeta + packed I420, C1 capturer wire format) → deck `Recorder`
+//! (H264 + MP4 mux, reusing the deck closed_loop verified pipeline) → `{out_dir}/{id}.mp4`.
+//! SIGTERM → stop all Recorders (flush + trailer, worker finishes mux).
 //!
-//! 看门狗决策（C5 crash-recovery 对齐）: recorder **不设**无帧退出——录制必须
-//! 存活过 capturer 重启（停帧期间帧稀疏，pts 时间间隙由 MP4 时间戳保留）；
-//! 超过 10s 无帧仅打 stall 警告（`LinkFrames` 适配器内），SIGTERM 时 0 帧也正常收尾。
+//! Watchdog decision (C5 crash-recovery alignment): the recorder does **not** exit on frame
+//! starvation — recording must survive capturer restarts (frames are sparse while stopped; pts
+//! gaps are preserved by MP4 timestamps). Beyond 10s without frames only a stall warning is
+//! logged (inside the `LinkFrames` adapter); at SIGTERM, even 0 frames finalizes cleanly.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -21,16 +22,16 @@ use mediaservo_codec::frame::{Plane, VideoFrame};
 use mediaservo_deck::record::{Container, Frames, RecordOptions, Recorder, VideoCodec};
 use mediaservo_link::{FrameBus, FrameMeta, FrameTopic, TokenFile};
 
-/// FrameMeta 像素格式: 1 = I420（D243 枚举，与 C1 capturer 一致）。
+/// FrameMeta pixel format: 1 = I420 (D243 enum, matches C1 capturer).
 const FORMAT_I420: u8 = 1;
-/// 无帧 stall 警告间隔（recorder 不退出 — C5: 存活过 capturer 重启）。
+/// No-frame stall warning interval (recorder does not exit — C5: survive capturer restarts).
 const STALL_WARN_INTERVAL: Duration = Duration::from_secs(10);
-/// 关键帧间隔 = 帧数（1s，对齐 capturer is_keyframe 节奏）。
+/// Keyframe interval = frame count (1s, aligned with the capturer is_keyframe cadence).
 const KEYFRAME_INTERVAL_SECS: u32 = 1;
-/// SIGTERM 后录制任务收尾（flush + trailer）超时。
+/// Timeout for recording-task finish (flush + trailer) after SIGTERM.
 const FINISH_TIMEOUT: Duration = Duration::from_secs(30);
 
-const USAGE: &str = "用法: host-recorder --config <host.yaml> --token <令牌文件>";
+const USAGE: &str = "Usage: host-recorder --config <host.yaml> --token <token file>";
 
 struct Args {
     config: PathBuf,
@@ -43,18 +44,17 @@ fn parse_args() -> Result<Args, String> {
     let mut token: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--config" => config = Some(PathBuf::from(args.next().ok_or("--config 缺值")?)),
-            "--token" => token = Some(PathBuf::from(args.next().ok_or("--token 缺值")?)),
-            _ => return Err(format!("未知参数: {arg}")),
+            "--config" => {
+                config = Some(PathBuf::from(args.next().ok_or("--config missing value")?))
+            }
+            "--token" => token = Some(PathBuf::from(args.next().ok_or("--token missing value")?)),
+            _ => return Err(format!("unknown arg: {arg}")),
         }
     }
-    Ok(Args {
-        config: config.ok_or("缺少 --config")?,
-        token: token.ok_or("缺少 --token")?,
-    })
+    Ok(Args { config: config.ok_or("missing --config")?, token: token.ok_or("missing --token")? })
 }
 
-/// 紧凑 I420 payload 校验（线格式假设: tight strides Y + U + V）。
+/// Packed I420 payload validation (wire-format assumption: tight strides Y + U + V).
 fn valid_i420(meta: &FrameMeta, payload_len: usize) -> bool {
     meta.format == FORMAT_I420
         && meta.width.is_multiple_of(2)
@@ -62,8 +62,8 @@ fn valid_i420(meta: &FrameMeta, payload_len: usize) -> bool {
         && payload_len == (meta.width * meta.height * 3 / 2) as usize
 }
 
-/// payload → VideoFrame（flat I420；deck closed_loop 同款线格式）。
-/// 非法帧返回 None（调用方跳过并打日志，C15 — 绝不静默丢弃）。
+/// payload → VideoFrame (flat I420; same wire format as deck closed_loop).
+/// Invalid frames return None (caller skips and logs, C15 — never drop silently).
 fn payload_to_frame(meta: &FrameMeta, payload: &[u8]) -> Option<VideoFrame> {
     if !valid_i420(meta, payload.len()) {
         return None;
@@ -88,16 +88,17 @@ fn payload_to_frame(meta: &FrameMeta, payload: &[u8]) -> Option<VideoFrame> {
     })
 }
 
-/// link FrameStream → deck `Frames` 适配器（closed_loop 参考模式 + stall 警告）。
+/// link FrameStream → deck `Frames` adapter (closed_loop reference pattern + stall warning).
 ///
-/// 看门狗决策（C5 crash-recovery 对齐）: 无帧**不退出**——recorder 必须存活过
-/// capturer 重启（停帧期间帧稀疏，pts 时间间隙由 MP4 时间戳保留）；capturer
-/// 恢复发布后帧自动续录（FrameBus 订阅常驻）。仅流关停（recv None）才结束录制。
+/// Watchdog decision (C5 crash-recovery alignment): no frames does **not** exit — the recorder
+/// must survive capturer restarts (frames are sparse while stopped; pts gaps are preserved by MP4
+/// timestamps); once the capturer resumes publishing, frames continue recording automatically (the
+/// FrameBus subscription stays alive). Only stream closure (recv None) ends the recording.
 ///
-/// stall 检测位置（审查 #1 修复）: deck `Recorder::record` 的帧泵以 50ms 轮询
-/// `next()`（外层 timeout）——**不能在 next 内再用内层 timeout 包 recv**（外层
-/// 50ms 取消内层 10s 等待 → 永不触发）。改为在每次泵 tick 处评估
-/// `last_frame.elapsed()`：>10s 打 warn（节流 1 次/10s 防刷屏）后继续等待。
+/// Stall detection site (review #1 fix): deck `Recorder::record`'s frame pump polls `next()` every
+/// 50ms (outer timeout) — **do not wrap recv in an inner timeout inside next** (the outer 50ms
+/// would cancel the inner 10s wait → never fires). Instead evaluate `last_frame.elapsed()` at each
+/// pump tick: >10s logs a warn (throttled to 1/10s against spam) and keeps waiting.
 struct LinkFrames {
     stream: mediaservo_link::FrameStream,
     topic: String,
@@ -108,17 +109,17 @@ struct LinkFrames {
 impl Frames for LinkFrames {
     async fn next(&mut self) -> Option<VideoFrame> {
         loop {
-            // 泵 tick（约 50ms/次）: 评估无帧时长，>10s 节流告警（stall 只打日志）
+            // pump tick (~50ms each): evaluate idle duration, >10s warns (throttled; stall only logs)
             let idle = self.last_frame.elapsed();
             if idle >= STALL_WARN_INTERVAL && self.last_warn.elapsed() >= STALL_WARN_INTERVAL {
                 self.last_warn = Instant::now();
                 tracing::warn!(
                     topic = %self.topic,
                     idle_secs = idle.as_secs(),
-                    "无帧 — capturer 未运行? 录制继续（C3 看门狗: 不退出）"
+                    "no frames — capturer not running? recording continues (C3 watchdog: no exit)"
                 );
             }
-            // 直接 recv（无内层 timeout — 外层 50ms 泵轮询负责唤醒/取消）
+            // direct recv (no inner timeout — the outer 50ms pump polling handles wakeup/cancel)
             let f = self.stream.recv().await?;
             let meta = f.meta();
             if let Some(frame) = payload_to_frame(meta, f.payload()) {
@@ -135,8 +136,8 @@ impl Frames for LinkFrames {
     }
 }
 
-/// 出错路径（审查 #2）: 停止已创建的全部录制任务并等其收尾（flush + trailer），
-/// 避免残留无 trailer 的残缺 mp4。
+/// Error path (review #2): stop all already-created recording tasks and wait for them to finish
+/// (flush + trailer), avoiding leftover truncated mp4s without a trailer.
 async fn stop_and_finish(
     stops: &[mediaservo_deck::record::StopSignal],
     tasks: Vec<tokio::task::JoinHandle<Result<(), mediaservo_deck::DeckError>>>,
@@ -149,11 +150,12 @@ async fn stop_and_finish(
     }
 }
 
-/// 等待 SIGINT/SIGTERM（unix 主路径；其他平台仅 ctrl_c）。
+/// Wait for SIGINT/SIGTERM (unix main path; other platforms only ctrl_c).
 async fn shutdown_signal() -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}
             _ = sigterm.recv() => {}
@@ -175,11 +177,11 @@ async fn main() -> ExitCode {
         }
     };
 
-    // [record] enabled 门控（先于令牌读取 — 禁用时无需任何凭据即退出 0）
+    // [record] enabled gate (before token read — when disabled, exit 0 with no credentials at all)
     let cfg_text = match std::fs::read_to_string(&args.config) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("recorder: 读取配置 {} 失败: {e}", args.config.display());
+            eprintln!("recorder: read config {} failed: {e}", args.config.display());
             return ExitCode::from(1);
         }
     };
@@ -191,7 +193,7 @@ async fn main() -> ExitCode {
         }
     };
     if !rec.enabled {
-        println!("recorder: [record] enabled=false — 录制未启用，退出");
+        println!("recorder: [record] enabled=false — recording not enabled, exiting");
         return ExitCode::from(0);
     }
     let cams = match mediaservo_host::translate::camera_configs(&cfg_text) {
@@ -202,51 +204,52 @@ async fn main() -> ExitCode {
         }
     };
     if cams.is_empty() {
-        eprintln!("recorder: [record] enabled 但 host.yaml 无 sources — 无 topic 可订阅");
+        eprintln!("recorder: [record] enabled but host.yaml has no sources — nothing to subscribe");
         return ExitCode::from(1);
     }
 
-    // 令牌 → FrameBus attach（验签失败/过期/缺失均明确报错退出）
+    // token → FrameBus attach (verification failure / expiry / missing all exit with an explicit error)
     let token_bytes = match std::fs::read(&args.token) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("recorder: 读取令牌 {} 失败: {e}", args.token.display());
+            eprintln!("recorder: read token {} failed: {e}", args.token.display());
             return ExitCode::from(1);
         }
     };
     let (verifying_key, token) = match TokenFile::decode(&token_bytes) {
         Ok(kv) => kv,
         Err(e) => {
-            eprintln!("recorder: 令牌 {} 无效: {e}", args.token.display());
+            eprintln!("recorder: token {} invalid: {e}", args.token.display());
             return ExitCode::from(1);
         }
     };
     let bus = match FrameBus::attach("", &token, &verifying_key) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("recorder: FrameBus attach 失败: {e}");
+            eprintln!("recorder: FrameBus attach failed: {e}");
             return ExitCode::from(1);
         }
     };
 
-    // 输出目录（deck Recorder::new 要求父目录存在 — 显式创建，失败可见）
+    // output dir (deck Recorder::new requires the parent dir — create explicitly, failures visible)
     if let Err(e) = std::fs::create_dir_all(&rec.out_dir) {
-        eprintln!("recorder: 创建输出目录 {} 失败: {e}", rec.out_dir.display());
+        eprintln!("recorder: create output dir {} failed: {e}", rec.out_dir.display());
         return ExitCode::from(1);
     }
 
-    // 每视频源: 订阅 camera/<id> + deck Recorder 落盘任务（持续录制至 SIGTERM）
+    // per video source: subscribe camera/<id> + deck Recorder file task (records until SIGTERM)
     let mut stops: Vec<mediaservo_deck::record::StopSignal> = Vec::new();
-    let mut tasks: Vec<tokio::task::JoinHandle<Result<(), mediaservo_deck::DeckError>>> = Vec::new();
+    let mut tasks: Vec<tokio::task::JoinHandle<Result<(), mediaservo_deck::DeckError>>> =
+        Vec::new();
     let mut ids: Vec<String> = Vec::new();
     for cam in &cams {
         let topic = FrameTopic::new(format!("camera/{}", cam.id));
         let frames = match bus.subscribe(&topic) {
             Ok(f) => f,
             Err(e) => {
-                // 审查 #2: 已创建的录制任务必须收尾（flush + trailer），否则残留无 trailer 的残缺 mp4
+                // Review #2: already-created recording tasks must finish (flush + trailer), else truncated mp4s without trailer remain
                 stop_and_finish(&stops, tasks).await;
-                eprintln!("recorder: 订阅 {} 失败: {e}", topic.as_str());
+                eprintln!("recorder: subscribe {} failed: {e}", topic.as_str());
                 return ExitCode::from(1);
             }
         };
@@ -262,9 +265,9 @@ async fn main() -> ExitCode {
         ) {
             Ok(r) => r,
             Err(e) => {
-                // 审查 #2: 同上 — 停掉先前相机再退出
+                // Review #2: same — stop previously created camera recorders before exiting
                 stop_and_finish(&stops, tasks).await;
-                eprintln!("recorder: 创建录制器 {} 失败: {e}", path.display());
+                eprintln!("recorder: create recorder {} failed: {e}", path.display());
                 return ExitCode::from(1);
             }
         };
@@ -275,24 +278,19 @@ async fn main() -> ExitCode {
             last_frame: Instant::now(),
             last_warn: Instant::now(),
         };
-        tasks.push(tokio::spawn(async move {
-            recorder.record(link_frames).await
-        }));
+        tasks.push(tokio::spawn(async move { recorder.record(link_frames).await }));
         stops.push(stop);
         ids.push(cam.id.clone());
         tracing::info!(topic = %topic.as_str(), out = %path.display(), "recording source");
     }
 
-    println!(
-        "recorder ready: sources={ids:?} out={}",
-        rec.out_dir.display()
-    );
+    println!("recorder ready: sources={ids:?} out={}", rec.out_dir.display());
 
-    // 等待 SIGINT/SIGTERM → 全部 stop（flush + trailer）→ 优雅退出 0
+    // wait for SIGINT/SIGTERM → stop all (flush + trailer) → graceful exit 0
     match shutdown_signal().await {
         Ok(()) => {}
         Err(e) => {
-            eprintln!("recorder: 信号处理失败: {e}");
+            eprintln!("recorder: signal handling failed: {e}");
             return ExitCode::from(1);
         }
     }
@@ -301,7 +299,7 @@ async fn main() -> ExitCode {
     }
     for t in tasks {
         if tokio::time::timeout(FINISH_TIMEOUT, t).await.is_err() {
-            tracing::error!("录制任务 {FINISH_TIMEOUT:?} 内未收尾（mux 卡死?）");
+            tracing::error!("recording task did not finish within {FINISH_TIMEOUT:?} (mux stuck?)");
             return ExitCode::from(1);
         }
     }

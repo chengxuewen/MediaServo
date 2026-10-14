@@ -10,7 +10,7 @@
 //! 7. Start emergency UDP listener
 //! 8. Serve until shutdown signal
 
-#![allow(unused_assignments, unused_variables, dead_code)] // frame_generator = Drop-guard（PIT-81：存活本身 = 语义，无读取方）
+#![allow(unused_assignments, unused_variables, dead_code)] // frame_generator = Drop-guard (PIT-81: being alive IS the semantics, no reader)
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tower_http::timeout::TimeoutLayer;
@@ -57,10 +57,10 @@ async fn main() -> anyhow::Result<()> {
         if args.len() > 2 && args[1] == "--config" {
             args[2].clone()
         } else if std::path::Path::new("crates/mediaservo-host/config/host.conf").exists() {
-            // dev 默认（仓库根 cwd）— 不带 --config 时优先项目内配置
+            // dev default (repo-root cwd) — without --config prefer the in-project config
             "crates/mediaservo-host/config/host.conf".to_string()
         } else {
-            // 部署默认
+            // deploy default
             "/opt/mediaservo/etc/host.conf".to_string()
         }
     };
@@ -75,9 +75,9 @@ async fn main() -> anyhow::Result<()> {
         }
     }; // ponytail: fallback to defaults when config file missing, add config wizard when needed
 
-    // v2 (encoder-bitrate): 码率区间校验 — min>=max 会 libwebrtc 双失效（视频静默降级）
+    // v2 (encoder-bitrate): bitrate range validation — min>=max disables libwebrtc both ends (video silently degrades)
     if let Err(e) = config.encoder.validate_bitrate() {
-        tracing::error!("配置校验失败: {e}");
+        tracing::error!("config validation failed: {e}");
         std::process::exit(1);
     }
 
@@ -94,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
     // Collect background task handles for clean shutdown
     let mut background_tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
-    // PIT-81: SFU 帧生成器必须存活到 main 结束（if 分支作用域内绑定 → 分支结束即 Drop → 线程被 stop）。
+    // PIT-81: the SFU frame generator must outlive main (binding inside an if-branch scope → Drop at branch end → thread stopped).
     let mut frame_generator: Option<mediaservo_media::pipeline::generator::VideoFrameGenerator> =
         None;
 
@@ -226,7 +226,7 @@ async fn main() -> anyhow::Result<()> {
                             ice_parameters,
                             dtls_parameters,
                             ice_candidates,
-                            sctp_parameters: _, // P1 additive 字段——legacy 夹具不消费
+                            sctp_parameters: _, // P1 additive field — the legacy fixture does not consume it
                         } => break (transport_id, ice_parameters, dtls_parameters, ice_candidates),
                         SignalingMessage::Sdp { .. } | SignalingMessage::RTCIceCandidate { .. } => {
                             tracing::debug!("SFU: skipping P2P message");
@@ -234,13 +234,13 @@ async fn main() -> anyhow::Result<()> {
                         SignalingMessage::Error { code, message } => {
                             return Err(anyhow::anyhow!("SFU error [{}]: {}", code, message));
                         }
-                        // PIT-59: server 重启清理旧 peer 时广播 RoomLeave — 非自己的直接忽略
-                        // (旧 Host 的 RoomLeave 会污染新 Host 的 forward loop, 误判退出)
+                        // PIT-59: server restarts broadcast RoomLeave while cleaning old peers — ignore anything not our own
+                        // (an old Host's RoomLeave would pollute the new Host's forward loop and be misread as an exit)
                         SignalingMessage::RoomLeave { peer_id, .. } => {
                             tracing::info!("SFU: RoomLeave for peer {} ignored", peer_id);
                         }
-                        // PIT-65: 旧 Host 的 producer 残留 server → 新 Host 连接时广播 stale NewProducer → 忽略
-                        // (本 Host 关注视频帧, 不消费 NewProducer; 只等 transport + produce 响应)
+                        // PIT-65: the old Host's producers linger on the server → a stale NewProducer is broadcast when the new Host connects — ignore
+                        // (this Host cares about video frames, not NewProducer; it only awaits transport + produce responses)
                         SignalingMessage::NewProducer { .. } => {
                             tracing::debug!("SFU: NewProducer ignored");
                         }
@@ -289,11 +289,13 @@ async fn main() -> anyhow::Result<()> {
             pc.on_ice_connection_state_change(move |state| {
                 let _ = &_pc;
                 tracing::info!("SFU ICE state: {:?}", state);
-                // PIT-87: ICE Failed = 连接终结（mediasoup/server 重启等）— 无自愈可能,
-                // 退出由守护拉起（systemd Restart=always / mediaservo.sh start host）。
-                // 之前的行为: 永久挂起 → web 拉流无 producer。
+                // PIT-87: ICE Failed = terminal connection (mediasoup/server restart etc.) — no self-heal possible,
+                // exit and let the supervisor bring it up (systemd Restart=always / mediaservo.sh start host).
+                // Previous behavior: hang forever → web pull sees no producer.
                 if state == mediaservo_webrtc::peer_connection::RTCIceConnectionState::Failed {
-                    tracing::error!("SFU ICE Failed — 退出进程由守护拉起 (PIT-87)");
+                    tracing::error!(
+                        "SFU ICE Failed — exiting; supervisor will restart the process (PIT-87)"
+                    );
                     std::process::exit(1);
                 }
             });
@@ -310,28 +312,28 @@ async fn main() -> anyhow::Result<()> {
             });
         }
 
-        // P3 (v2)+P2: 标准 answerer 协商（对齐 libmediasoupclient Handler.cpp 顺序）:
-        //  ① 用 server transport 参数构造 remote SDP → set_remote_description
-        //  ② add_track (sendrecv transceiver + 默认 encoding; libwebrtc 自动生成)
+        // P3 (v2)+P2: standard answerer negotiation (aligned with the libmediasoupclient Handler.cpp order):
+        //  (1) build the remote SDP from server transport params → set_remote_description
+        //  (2) add_track (sendrecv transceiver + default encodings; auto-generated by libwebrtc)
         //  ③ create_answer → set_local_description
-        // 顺序关键: set_remote_description 必须先于 add_track — 反之 transceiver
-        // 不匹配 remote m-line → answer a=inactive → codecs=0 → produce 被拒
-        // 不用 add_transceiver_with_track: 空 send_encodings → libwebrtc 生成无 encoding
-        // sender → answer inactive (P2 实测); add_track 与 e2e_sfu 验证路径一致
-        // PIT-48: a=candidate 行必须位于 m= 行之后（media section 内）——
-        // 会话级 candidate 被 libwebrtc 忽略 → remote candidate 丢失 → ICE 不发起 STUN
+        // Order is critical: set_remote_description must precede add_track — otherwise the transceiver
+        // does not match the remote m-line → answer a=inactive → codecs=0 → produce rejected
+        // Not using add_transceiver_with_track: empty send_encodings → libwebrtc generates an encoding-less
+        // sender → answer inactive (P2 measured); add_track matches the e2e_sfu verified path
+        // PIT-48: a=candidate lines must sit after the m= line (inside the media section) —
+        // session-level candidates are ignored by libwebrtc → remote candidates lost → ICE never starts STUN
 
-        // ① remote SDP from real server ICE candidates — codec 由 config.encoder.codec 控制 (v2, T3/T4)
-        // 固定 offer codec = 固定协商交集 = 固定实际编码（Oracle 审核: produce 参数裁剪不可行）
-        // PT 对齐 router 默认（sfu.rs default_router_options: VP8 96 / H264 101）; VP9/AV1 router 无 → 协商失败负向
+        // (1) remote SDP from real server ICE candidates — codec controlled by config.encoder.codec (v2, T3/T4)
+        // fixed offer codec = fixed negotiation intersection = fixed actual encoder (Oracle review: pruning produce params is infeasible)
+        // PT aligned with router defaults (sfu.rs default_router_options: VP8 96 / H264 101); VP9/AV1 absent in router → negative negotiation failure
         let (sdp_pt, sdp_codec, sdp_clock, sdp_fmtp) = match config.encoder.codec.as_str() {
             "h264" => {
                 (101u16, "H264", 90000u32, Some("profile-level-id=42e01f;packetization-mode=1"))
-            } // v2 T7: 与 router 42e01f 对齐
+            } // v2 T7: aligned with router 42e01f
             "vp8" => (96u16, "VP8", 90000u32, None),
-            "vp9" => (99u16, "VP9", 90000u32, None), // PT 与 router 对齐 (sfu.rs default_router_options)
+            "vp9" => (99u16, "VP9", 90000u32, None), // PT aligned with the router (sfu.rs default_router_options)
             "av1" => (97u16, "AV1", 90000u32, None),
-            _ => (96u16, "VP8", 90000u32, None), // auto 默认: 现状行为（router 序 VP8 优先）
+            _ => (96u16, "VP8", 90000u32, None), // auto default: current behavior (router order prefers VP8)
         };
         let remote_sdp = sfu_media::build_remote_sdp(
             &ice_parameters,
@@ -352,7 +354,7 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("set remote: {}", e))?;
         tracing::info!("SFU: remote description set (server ICE-Lite offer)");
 
-        // ② add track (sendrecv; answer 协商后 host 侧 sendonly)
+        // (2) add track (sendrecv; after answer negotiation the host side is sendonly)
         let track_id = pc
             .add_track("video", TrackKind::Video)
             .map_err(|e| anyhow::anyhow!("add_track: {}", e))?;
@@ -364,8 +366,8 @@ async fn main() -> anyhow::Result<()> {
             _ => return Err(anyhow::anyhow!("expected sender track")),
         };
 
-        // v2 (T5): 编码器软/硬后端选择 — 协商前设置（首个编码器创建于首帧, SetEncoderSelector 生效）
-        // 语义: 偏好非强制（不可用时 libwebrtc 自动 fallback + warning）
+        // v2 (T5): encoder software/hardware backend selection — set before negotiation (the first encoder
+        // is created at the first frame, so SetEncoderSelector takes effect). Semantics: preference, not enforcement (libwebrtc auto-falls back with a warning when unavailable)
         if let Some(backend) =
             mediaservo_webrtc::rtp::RTCVideoEncoderBackend::from_config(&config.encoder.backend)
             && backend != mediaservo_webrtc::rtp::RTCVideoEncoderBackend::Auto
@@ -381,7 +383,7 @@ async fn main() -> anyhow::Result<()> {
         }
         tracing::info!("SFU: video track added (id={})", track_id);
 
-        // ③ answer + set local — PIT-76 v2: x-google 注入已移除（见 build_remote_sdp）
+        // (3) answer + set local — PIT-76 v2: x-google injection removed (see build_remote_sdp)
         let answer = pc
             .create_answer(&RTCAnswerOptions)
             .await
@@ -389,9 +391,9 @@ async fn main() -> anyhow::Result<()> {
         tracing::debug!("SFU local answer SDP:\n{}", answer.sdp);
         pc.set_local_description(&answer).await.map_err(|e| anyhow::anyhow!("set local: {}", e))?;
 
-        // v2 (encoder-bitrate): 设置发送编码器 min/max 码率（协商后、get_sending_rtp_parameters 前）—
-        // produce 路径自动反射 max_bitrate（build_produce 读 e.max_bitrate）。
-        // 错误降级: log 继续不 abort（rate-control-reviewer）; 只调一次（ReconfigureEncoder 重配开销）。
+        // v2 (encoder-bitrate): set sender encoder min/max bitrate (after negotiation, before get_sending_rtp_parameters) —
+        // the produce path auto-reflects max_bitrate (build_produce reads e.max_bitrate).
+        // Error degradation: log and continue, no abort (rate-control-reviewer); call only once (ReconfigureEncoder reconfig cost).
         if config.encoder.min_bitrate_kbps.is_some() || config.encoder.max_bitrate_kbps.is_some() {
             let min_bps = config.encoder.min_bitrate_kbps.map(|v| u64::from(v) * 1000);
             let max_bps = config.encoder.max_bitrate_kbps.map(|v| u64::from(v) * 1000);
@@ -399,7 +401,7 @@ async fn main() -> anyhow::Result<()> {
                 Some(sender) => {
                     if let Err(e) = sender.set_encoding_bitrate(min_bps, max_bps) {
                         tracing::warn!(
-                            "SFU: set_encoding_bitrate({min_bps:?}, {max_bps:?}): {e} — 继续 produce"
+                            "SFU: set_encoding_bitrate({min_bps:?}, {max_bps:?}): {e} — continuing to produce"
                         );
                     } else {
                         tracing::info!(
@@ -435,8 +437,8 @@ async fn main() -> anyhow::Result<()> {
             Err(_) => return Err(anyhow::anyhow!("SFU: ICE/DTLS connection timeout after 30s")),
         }
 
-        // Step 4: Produce video (P3 v2: 从 get_sending_rtp_parameters 推导，非手工)
-        // PIT-56 替代: 不再手工解析 answer ssrc — 走 transceiver.sender.get_parameters() 官方路径
+        // Step 4: Produce video (P3 v2: derived from get_sending_rtp_parameters, not handcrafted)
+        // PIT-56 replacement: no longer hand-parses answer ssrc — official path: transceiver.sender.get_parameters()
         let rtp_params: RTCRtpParameters = pc
             .get_sending_rtp_parameters("video")
             .map_err(|e| anyhow::anyhow!("get_sending_rtp_parameters: {}", e))?;
@@ -447,11 +449,11 @@ async fn main() -> anyhow::Result<()> {
             rtp_params.encodings.len(),
             rtp_params.header_extensions.len()
         );
-        // v3 (sfu-negotiation-completion T4): transport-cc 协商实证 — header_extensions 非空
-        // 即 BWE 反馈链路恢复（mediasoup 将转发 consumer feedback 给 host）。
+        // v3 (sfu-negotiation-completion T4): transport-cc negotiation proof — non-empty header_extensions
+        // restores the BWE feedback loop (mediasoup forwards consumer feedback to the host).
         if rtp_params.header_extensions.is_empty() {
             tracing::warn!(
-                "SFU: no negotiated header extensions — transport-cc 未协商, BWE 反馈链路断裂"
+                "SFU: no negotiated header extensions — transport-cc not negotiated, BWE feedback loop broken"
             );
         } else {
             let uris: Vec<&str> =
@@ -460,14 +462,14 @@ async fn main() -> anyhow::Result<()> {
         }
 
         let produce = SignalingMessage::Produce {
-            room_id: sfu_room.clone(), // v2: 保留原值给 stats 任务 (web-stream-stats T2)
-            peer_id: peer_id.to_string(), // PIT-65: 与 create/connect 一致 (host)
+            room_id: sfu_room.clone(), // v2: keep the original value for the stats task (web-stream-stats T2)
+            peer_id: peer_id.to_string(), // PIT-65: consistent with create/connect (host)
             transport_direction: TransportDirection::Send,
             kind: MediaKind::Video,
             rtp_parameters: sfu_media::build_produce_rtp_parameters_from_rtp(&rtp_params),
-            // C1: 指名绑定本会话的 send transport（防多会话共享 peer_id 串线）
+            // C1: bind by name to this session's send transport (prevents cross-talk when multiple sessions share peer_id)
             transport_id: Some(transport_id.clone()),
-            label: None, // producer-label T3: legacy 链路保持旧形
+            label: None, // producer-label T3: the legacy chain keeps the old shape
         };
         let json = serde_json::to_string(&produce)?;
         match tokio::time::timeout(Duration::from_secs(10), ws_sender.send(Message::Text(json)))
@@ -478,12 +480,12 @@ async fn main() -> anyhow::Result<()> {
             Err(_) => return Err(anyhow::anyhow!("SFU Produce send timeout after 10s")),
         }
 
-        // B5 (v2): VideoFrameGenerator + WebRtcTrackSink — 统一帧源接口
-        // 计划: docs/plans/video-source-unification T3 (WebRtcTrackSink: c56bd87)。
-        // 旧手写循环已删除（原 main.rs:373-406; 历史参考 d24f6e5 SquaresPattern 引入 /
-        // 9cf94b8 b=AS 码率预算 / 90ea937 关键帧触发）。C17 语义由 generator 内部保证:
-        // 绝对时间轴 + 锚定单调时间戳 + 时间戳水印 (TopLeft, DateTime+FrameCount)。
-        // PIT-81: generator 绑定 main 级 frame_generator（if 分支内绑定 → 分支结束 Drop 停线程）。
+        // B5 (v2): VideoFrameGenerator + WebRtcTrackSink — unified frame-source interface
+        // Plan: docs/plans/video-source-unification T3 (WebRtcTrackSink: c56bd87).
+        // The old hand-written loop is deleted (former main.rs:373-406; historical refs d24f6e5 SquaresPattern intro /
+        // 9cf94b8 b=AS bitrate budget / 90ea937 keyframe trigger). C17 semantics are guaranteed inside the generator:
+        // absolute timeline + anchored monotonic timestamps + timestamp watermark (TopLeft, DateTime+FrameCount).
+        // PIT-81: bind the generator at main-level frame_generator (binding inside the if branch → Drop stops the thread at branch end).
         {
             use mediaservo_media::pipeline::generator::{
                 Anchor, BitmapFont, ColorStrategy, PatternMode, SquaresConfig, TextBurner,
@@ -493,7 +495,7 @@ async fn main() -> anyhow::Result<()> {
             use mediaservo_media::pipeline::source::VideoSource;
             use mediaservo_webrtc::WebRtcTrackSink;
 
-            // v2: fps/resolution 接 config.capture（修复旧循环硬编码 33ms/640×480）。
+            // v2: fps/resolution come from config.capture (fixes the old loop's hardcoded 33ms/640×480).
             let fps = config.capture.framerate.max(1);
             let (width, height) = parse_resolution(&config.capture.resolution);
 
@@ -503,7 +505,7 @@ async fn main() -> anyhow::Result<()> {
                 count: 40,
                 min_size: 20,
                 max_size: 300,
-                motion_speed: 10, // 沿用 B5 常量（v2 审核确认）
+                motion_speed: 10, // carries over the B5 constant (v2 review confirmed)
                 color_strategy: ColorStrategy::default(),
             };
 
@@ -512,14 +514,14 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!("WebRtcTrackSink: {}", e))?;
             generator.add_or_update_sink(Box::new(sink), VideoSinkWants::default());
             generator.start(fps, PatternMode::Squares(squares), Some(overlay), width, height);
-            // Drop guard: main 退出/错误路径 → generator.stop() 停线程 (BLOCKER-4)。
+            // Drop guard: main exit / error path → generator.stop() halts the thread (BLOCKER-4).
             frame_generator = Some(generator);
         }
 
-        // PIT-76: 周期关键帧触发 — GOP ≤ keyframe_interval 秒（默认 2s）。
-        // interval 首 tick 立即 = 协商完成即触发一次（快速首帧）; libwebrtc 每次
-        // 消费后清标志, 每次调用恰好一次 GenerateKeyFrame, 无需复位。
-        // 独立 task 与帧循环解耦; 同步 cxx 调用（worker Invoke, 毫秒级）不影响帧节奏。
+        // PIT-76: periodic keyframe trigger — GOP ≤ keyframe_interval seconds (default 2s).
+        // The interval's first tick fires immediately = one trigger right after negotiation completes (fast first frame);
+        // libwebrtc clears the flag on each consumption, exactly one GenerateKeyFrame per call — no manual reset needed.
+        // A standalone task decoupled from the frame loop; a synchronous cxx call (worker Invoke, millisecond-scale) does not affect frame pacing.
         let pc_kf = pc.clone();
         let track_kf = track_id.clone();
         let kf_interval_secs = config.encoder.keyframe_interval.max(1) as u64;
@@ -533,18 +535,18 @@ async fn main() -> anyhow::Result<()> {
             }
         });
 
-        // v2 (web-stream-stats T2): 编码状态周期上报（2s）— EncoderStatus → room 广播 → 浏览器面板。
-        // codec 来自协商结果; encoder_implementation 来自 get_stats（实际编码器, 软编/硬编识别）;
-        // 回退 backend 请求值。停流（WS 断）时任务随 SFU 分支结束。
+        // v2 (web-stream-stats T2): periodic encoder-status reporting (2s) — EncoderStatus → room broadcast → browser panel.
+        // codec comes from the negotiated result; encoder_implementation from get_stats (actual encoder, identifies
+        // soft/hard encode); falls back to the requested backend value. On stream stop (WS drop) the task ends with the SFU branch.
         let pc_stats = pc.clone();
         let track_stats = track_id.clone();
         let codec_stats =
             rtp_params.codecs.first().map(|c| c.mime_type.clone()).unwrap_or_default();
         let backend_req = config.encoder.backend.clone();
-        let mut ws_stats = ws_sender; // move 进 stats 任务（if/else 分支互斥, else 分支独立 move）
+        let mut ws_stats = ws_sender; // moved into the stats task (if/else branches are exclusive; the else branch moves independently)
         let last_bytes_sent = std::sync::atomic::AtomicU64::new(0);
         let counter = std::sync::atomic::AtomicU32::new(0);
-        // v3 (encode-time-stats T3): 编码耗时增量 — ΔtotalEncodeTime / ΔframesEncoded
+        // v3 (encode-time-stats T3): encode-time delta — ΔtotalEncodeTime / ΔframesEncoded
         let last_encode_ms = std::sync::atomic::AtomicU64::new(0);
         let last_frames_encoded = std::sync::atomic::AtomicU64::new(0);
         tokio::spawn(async move {
@@ -559,13 +561,13 @@ async fn main() -> anyhow::Result<()> {
                 let _enc_impl = outbound
                     .and_then(|o| o.encoder_implementation.clone())
                     .unwrap_or_else(|| backend_req.clone());
-                // v3 (sfu-negotiation-completion T4 诊断): 实际发送码率增量（BWE 实证）—
-                // 每 10s 打一次（5 × 2s tick）, 对比 min/max 配置判断 BWE 是否自适应。
+                // v3 (sfu-negotiation-completion T4 diagnostics): actual sending bitrate delta (BWE proof) —
+                // logged every 10s (5 × 2s tick); compare against the min/max config to judge whether BWE adapts.
                 if let Some(o) = &outbound {
                     let now = o.bytes_sent;
                     let prev = last_bytes_sent.load(std::sync::atomic::Ordering::Relaxed);
                     if prev > 0 && now > prev {
-                        // interval 固定 2s; 累计窗口 = 自上次打印以来经过的 tick 数 × 2
+                        // interval fixed at 2s; accumulation window = ticks elapsed since the last print × 2
                         let ticks = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                         if ticks.is_multiple_of(5) {
                             let window_s = 10.0;
@@ -580,8 +582,8 @@ async fn main() -> anyhow::Result<()> {
                     }
                     last_bytes_sent.store(now, std::sync::atomic::Ordering::Relaxed);
                 }
-                // v3 (encode-time-stats T3): 平均每帧编码耗时（ms/帧, 2s 窗口增量）—
-                // ΔtotalEncodeTime(ms) / ΔframesEncoded; 首周期/卡帧 → None。
+                // v3 (encode-time-stats T3): average per-frame encode time (ms/frame, 2s-window delta) —
+                // ΔtotalEncodeTime(ms) / ΔframesEncoded; first cycle / stalled frames → None.
                 let avg_encode_ms = outbound.and_then(|o| {
                     let now_ms = (o.total_encode_time? * 1000.0) as u64;
                     let prev_ms = last_encode_ms.load(std::sync::atomic::Ordering::Relaxed);

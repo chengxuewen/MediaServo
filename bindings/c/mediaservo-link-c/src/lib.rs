@@ -1,29 +1,29 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
-// C ABI 门面形态：extern fn 收裸指针是合同本身，判空守卫在体内（unsafe fn 形反而把义务推给 C 侧）
-//! MediaServo link C ABI — 信令 + 帧总线（设备侧 SDK 消费）。
+// C ABI facade shape: extern fn receiving raw pointers IS the contract; null guards live in the body (an unsafe fn form would push the obligation onto the C side)
+//! MediaServo link C ABI — signaling + frame bus (device-side SDK consumption).
 //!
-//! 契约 §7（D109/D240/D241）：opaque handle + int 错误码 + 回调。
-//! 模式基准 = bindings/c/mediaservo-field-c（slice 1 已交付并 live e2e 实证）。
+//! Contract §7 (D109/D240/D241): opaque handles + int error codes + callbacks.
+//! Pattern baseline = bindings/c/mediaservo-field-c (slice 1 was delivered and proven in live e2e).
 //!
-//! # 生命周期契约（审核 R2）
-//! - handle 单线程属主；close 后任何 API 调用为 UB（除幂等 close）。
-//! - close = 置 closed 标志 → 释放会话（唤醒事件泵）→ join 泵线程 → 才 free handle。
-//! - 事件回调仅在一个内部泵线程触发；回调调用期间不持任何锁；
-//!   回调内禁止调用任何 mediaservo_link_signal_* API（含 close）— 未定义行为。
-//! - `mediaservo_link_signal_on_event` 可在 connect 后任意时刻注册（重复注册替换回调）；
-//!   首次注册时启动事件泵并合成补发 Connected 事件（broadcast 订阅前的事件不可见）。
-//! - 事件 JSON 字符串仅在回调内有效（需保留请拷贝）。
+//! # Lifecycle contract (audit R2)
+//! - Each handle is single-thread-owner; any API call after close is UB (except idempotent close).
+//! - close = set the closed flag → release the session (wakes the event pump) → join the pump thread → only then free the handle.
+//! - Event callbacks fire on a single internal pump thread; no lock is held during the callback;
+//!   calling any mediaservo_link_signal_* API (including close) from within a callback is forbidden — undefined behavior.
+//! - `mediaservo_link_signal_on_event` can be registered at any time after connect (re-registration replaces the callback);
+//!   the first registration starts the event pump and re-synthesizes the Connected event (events sent before subscribing to the broadcast are invisible).
+//! - The event JSON string is valid only inside the callback (copy it if you need to keep it).
 //!
-//! # runtime（审核 R1）
-//! `SignalClient::connect` 内部 `tokio::spawn(session_task)`（WS 读循环）——per-call
-//! runtime 会在返回时取消 spawn 任务导致会话死亡。因此每个 signal handle 持有
-//! 共享 multi_thread runtime，全部 C 调用 block_on 同一实例；事件泵复用该 runtime。
+//! # runtime (audit R1)
+//! `SignalClient::connect` internally does `tokio::spawn(session_task)` (WS read loop) — a per-call
+//! runtime would cancel the spawned task on return, killing the session. Therefore each signal handle owns
+//! a shared multi_thread runtime; all C calls block_on the same instance; the event pump reuses that runtime.
 //!
 //! # FrameMeta（R4）
-//! mediaservo_frame_meta_t（C 侧 #pragma pack(1)）为字段袋：Rust 侧经 36B 拷贝 +
-//! [`FrameMeta::decode`] 逐字段读取，禁止整块 reinterpret（填充/字节序风险）。
+//! mediaservo_frame_meta_t (C-side #pragma pack(1)) is a field bag: the Rust side does a 36B copy +
+//! [`FrameMeta::decode`] field-by-field read; never reinterpret the whole block (padding/endianness risk).
 //!
-//! # C ABI 面（手工维护头文件, MAJOR 内稳定）
+//! # C ABI surface (hand-maintained header, stable within MAJOR)
 //! ```c
 //! typedef struct mediaservo_link_signal_t mediaservo_link_signal_t;   /* opaque */
 //! typedef int mediaservo_err_t;                               /* 0=ok, <0=error */
@@ -59,7 +59,7 @@ use mediaservo_link::{
 };
 use tokio::sync::{Notify, broadcast};
 
-// ── 错误码（0 = ok, <0 = error；MEDIASERVO_LINK_ERR_*，D241 前缀化）──
+// -- Error codes (0 = ok, <0 = error; MEDIASERVO_LINK_ERR_*, prefixed per D241) --
 pub const MEDIASERVO_OK: c_int = 0;
 pub const MEDIASERVO_LINK_ERR_INVALID_ARG: c_int = -1;
 pub const MEDIASERVO_LINK_ERR_CONNECT: c_int = -2;
@@ -69,7 +69,7 @@ pub const MEDIASERVO_LINK_ERR_STATE: c_int = -5;
 pub const MEDIASERVO_LINK_ERR_INTERNAL: c_int = -6;
 pub const MEDIASERVO_LINK_ERR_CLOSED: c_int = -7;
 
-/// 全局最近错误信息（mediaservo_link_last_error 读取）。
+/// Global last-error message (read via mediaservo_link_last_error).
 static LAST_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 fn set_last_error(msg: impl Into<String>) {
@@ -78,9 +78,9 @@ fn set_last_error(msg: impl Into<String>) {
     }
 }
 
-// ── 内部辅助 ──
+// -- Internal helpers --
 
-/// 提取 C 字符串（null → None）。非法 UTF-8 → Err。
+/// Extract a C string (null → None). Invalid UTF-8 → Err.
 fn cstr<'a>(ptr: *const c_char) -> Result<Option<&'a str>, ()> {
     if ptr.is_null() {
         return Ok(None);
@@ -88,7 +88,7 @@ fn cstr<'a>(ptr: *const c_char) -> Result<Option<&'a str>, ()> {
     unsafe { CStr::from_ptr(ptr) }.to_str().map(Some).map_err(|_| ())
 }
 
-/// 新建共享 multi_thread runtime（每个 handle 一个，R1）。
+/// Create a shared multi_thread runtime (one per handle, R1).
 fn new_runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -97,7 +97,7 @@ fn new_runtime() -> tokio::runtime::Runtime {
         .expect("link-c runtime")
 }
 
-/// C 侧 mediaservo_frame_meta_t → 36B 拷贝 → FrameMeta::decode（逐字段，R4）。
+/// C-side mediaservo_frame_meta_t → 36B copy → FrameMeta::decode (field-by-field, R4).
 fn meta_from_c(meta: *const mediaservo_frame_meta_t) -> Result<FrameMeta, ()> {
     let mut buf = [0u8; FrameMeta::WIRE_LEN];
     unsafe {
@@ -106,7 +106,7 @@ fn meta_from_c(meta: *const mediaservo_frame_meta_t) -> Result<FrameMeta, ()> {
     FrameMeta::decode(&buf).map_err(|_| ())
 }
 
-/// FrameMeta::encode → 36B 拷贝到 C 侧 mediaservo_frame_meta_t。
+/// FrameMeta::encode → 36B copy into the C-side mediaservo_frame_meta_t.
 fn meta_to_c(meta: &FrameMeta, out: *mut mediaservo_frame_meta_t) {
     let bytes = meta.encode();
     unsafe {
@@ -114,27 +114,27 @@ fn meta_to_c(meta: &FrameMeta, out: *mut mediaservo_frame_meta_t) {
     }
 }
 
-// ── 信令 ──
+// -- Signaling --
 
-/// 信令配置（C 结构 — 与 SignalClient 参数映射）。
+/// Signaling configuration (C struct — maps to the SignalClient parameters).
 ///
-/// 首字段 `struct_size`（审核 R3）：调用方填 `sizeof(mediaservo_link_signal_config_t)`，
-/// 库校验 `>= sizeof(已知结构)`、超长忽略 —— 结构演进不破坏二进制兼容。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外：mediaservo_* 前缀）
+/// First field `struct_size` (audit R3): the caller fills `sizeof(mediaservo_link_signal_config_t)`;
+/// the library validates `>= sizeof(known struct)` and ignores extra length — struct evolution does not break binary compatibility.
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception: mediaservo_* prefix)
 #[repr(C)]
 pub struct mediaservo_link_signal_config_t {
     pub struct_size: usize,
-    /// 信令 WS 地址（如 "ws://host:9800/ws"）。
+    /// Signaling WS address (e.g. "ws://host:9800/ws").
     pub url: *const c_char,
-    /// PSK 认证密钥。
+    /// PSK authentication key.
     pub psk: *const c_char,
-    /// 房间 ID。
+    /// Room ID.
     pub room: *const c_char,
-    /// 角色：`"Host"`/`"Pusher"` → Host，`"Client"`/`"Puller"` → Remote；NULL/空 = Host。
+    /// Role: `"Host"`/`"Pusher"` → Host, `"Client"`/`"Puller"` → Remote; NULL/empty = Host.
     pub role: *const c_char,
 }
 
-/// C 结构已知前缀尺寸（版本演进时的最小合法值）。
+/// Known prefix size of the C struct (the minimum legal value across version evolution).
 pub const MEDIASERVO_LINK_SIGNAL_CONFIG_MIN_SIZE: usize =
     size_of::<mediaservo_link_signal_config_t>();
 
@@ -150,7 +150,7 @@ impl Default for mediaservo_link_signal_config_t {
     }
 }
 
-/// C 侧角色字符串 → PeerRole。
+/// C-side role string → PeerRole.
 fn parse_role(s: &str) -> Result<PeerRole, ()> {
     match s {
         "Host" | "Pusher" => Ok(PeerRole::Host),
@@ -159,37 +159,37 @@ fn parse_role(s: &str) -> Result<PeerRole, ()> {
     }
 }
 
-/// 信令会话 opaque handle。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外：mediaservo_* 前缀）
+/// Signaling session opaque handle.
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception: mediaservo_* prefix)
 pub struct mediaservo_link_signal_t {
     session: std::sync::Mutex<Option<SignalSession>>,
-    /// 共享 multi_thread runtime（R1）：session 后台任务（WS 读循环）
-    /// 存活于本 runtime，全部 C 调用 block_on 同一实例。
+    /// Shared multi_thread runtime (R1): the session background task (WS read loop)
+    /// lives on this runtime; all C calls block_on the same instance.
     rt: tokio::runtime::Runtime,
-    /// 已关闭标志（close 幂等 + 入口校验）。
+    /// Closed flag (close idempotence + entry validation).
     closed: AtomicBool,
-    /// connect 时的房间 ID（泵合成 Connected 事件用）。
+    /// Room ID captured at connect (used for the pump-synthesized Connected event).
     room_id: String,
-    /// connect 时立即订阅的事件接收器（缓冲 connect→on_event 之间的事件，
-    /// broadcast 只保留订阅后发送的消息）；泵启动时接管。
+    /// Event receiver subscribed at connect time (buffers events between connect→on_event;
+    /// the broadcast only keeps messages sent after subscribing); the pump takes it over at startup.
     events_rx: std::sync::Mutex<Option<broadcast::Receiver<SignalEvent>>>,
-    /// 事件回调（泵线程每轮读取；重复注册替换）。
+    /// Event callback (read by the pump thread each cycle; re-registration replaces).
     cb: std::sync::Mutex<Option<(mediaservo_link_event_cb, *mut c_void)>>,
-    /// 事件泵线程（首次 on_event 注册时启动，R2）。
+    /// Event pump thread (started on first on_event registration, R2).
     pump: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
-// SAFETY: handle 内部为 Mutex<Option<SignalSession>>（线程安全）+ Send runtime。
+// SAFETY: the handle holds Mutex<Option<SignalSession>> (thread-safe) + a Send runtime.
 unsafe impl Send for mediaservo_link_signal_t {}
-// SAFETY: 所有方法经 Mutex 序列化访问内部会话。
+// SAFETY: all methods access the inner session serialized through the Mutex.
 unsafe impl Sync for mediaservo_link_signal_t {}
 
-/// 信令事件回调（C ABI）。event_json 仅在回调内有效。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外：mediaservo_* 前缀）
+/// Signaling event callback (C ABI). event_json is valid only inside the callback.
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception: mediaservo_* prefix)
 pub type mediaservo_link_event_cb =
     extern "C" fn(*mut mediaservo_link_signal_t, *const c_char, *mut c_void);
 
-/// SignalEvent → opaque JSON 字符串（v1）。
+/// SignalEvent → opaque JSON string (v1).
 fn event_to_json(ev: &SignalEvent) -> String {
     let v = match ev {
         SignalEvent::Connected { room_id } => {
@@ -200,26 +200,26 @@ fn event_to_json(ev: &SignalEvent) -> String {
             serde_json::json!({"type": "disconnected", "reason": reason})
         }
         SignalEvent::Error(e) => serde_json::json!({"type": "error", "error": e}),
-        // #[non_exhaustive]：新变体加在事件 JSON 契约演进（opaque v1 未知类型）
+        // #[non_exhaustive]: new variants land via the event-JSON contract evolution (opaque v1 unknown type)
         _ => serde_json::json!({"type": "unknown"}),
     };
     v.to_string()
 }
 
-/// 调 C 回调（不持任何锁 — cb 克隆后释放 guard，R2）。
+/// Invoke the C callback (holding no lock — the guard is released after cloning cb, R2).
 fn deliver_event(handle: *mut mediaservo_link_signal_t, json: String) {
     let h = unsafe { &*handle };
     let cb = h.cb.lock().ok().and_then(|g| *g);
     if let Some((cb, user)) = cb {
-        // CString 存活至回调返回（serde_json 输出无内嵌 NUL）。
+        // CString lives until the callback returns (serde_json output has no embedded NUL).
         if let Ok(cstr) = CString::new(json) {
             cb(handle, cstr.as_ptr(), user);
         }
     }
 }
 
-/// 事件泵线程（R2）：先合成补发 Connected（broadcast 订阅前的事件不可见），
-/// 然后循环转发事件。会话关闭（广播 sender 全 drop）或 closed 标志 → 退出。
+/// Event pump thread (R2): first re-synthesize Connected (events sent before subscribing to the broadcast are invisible),
+/// then forward events in a loop. Session closed (all broadcast senders dropped) or the closed flag → exit.
 fn signal_pump(handle: *mut mediaservo_link_signal_t) {
     let h = unsafe { &*handle };
     deliver_event(
@@ -236,17 +236,17 @@ fn signal_pump(handle: *mut mediaservo_link_signal_t) {
         }
         match h.rt.block_on(rx.recv()) {
             Ok(ev) => deliver_event(handle, event_to_json(&ev)),
-            Err(broadcast::error::RecvError::Closed) => break, // 会话已关闭
-            Err(broadcast::error::RecvError::Lagged(_)) => continue, // 溢出丢弃（文档）
+            Err(broadcast::error::RecvError::Closed) => break, // session closed
+            Err(broadcast::error::RecvError::Lagged(_)) => continue, // dropped on overflow (documented)
         }
     }
 }
 
-/// 连接信令并创建会话（阻塞）。
+/// Connect signaling and create the session (blocking).
 ///
-/// `cfg` 不可为 null；`url/psk/room` 必填；`role` 可空（默认 Host）；
-/// `cfg.struct_size` 必须 `>= sizeof(mediaservo_link_signal_config_t)`（R3）。
-/// 成功后 `*out` 指向新 handle（调用方负责 `mediaservo_link_signal_close`）。
+/// `cfg` must not be null; `url/psk/room` are required; `role` may be NULL (default Host);
+/// `cfg.struct_size` must be `>= sizeof(mediaservo_link_signal_config_t)` (R3).
+/// On success `*out` points to the new handle (the caller owns `mediaservo_link_signal_close`).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_link_signal_connect(
     cfg: *const mediaservo_link_signal_config_t,
@@ -299,7 +299,7 @@ pub extern "C" fn mediaservo_link_signal_connect(
                     return MEDIASERVO_LINK_ERR_INVALID_ARG;
                 }
             },
-            Ok(None) => PeerRole::Host, // 车端默认
+            Ok(None) => PeerRole::Host, // vehicle-side default
             Err(()) => {
                 set_last_error("mediaservo_link_signal_connect: invalid UTF-8 in role");
                 return MEDIASERVO_LINK_ERR_INVALID_ARG;
@@ -310,7 +310,7 @@ pub extern "C" fn mediaservo_link_signal_connect(
         let client = SignalClient::new(url, psk, room, role);
         match rt.block_on(client.connect()) {
             Ok(session) => {
-                // 立即订阅：缓冲 connect→on_event 之间的事件（广播只保留订阅后消息）。
+                // Subscribe immediately: buffer events between connect→on_event (the broadcast keeps only post-subscription messages).
                 let events_rx = session.events();
                 let room_id = session.room_id().to_string();
                 let handle = Box::new(mediaservo_link_signal_t {
@@ -337,9 +337,9 @@ pub extern "C" fn mediaservo_link_signal_connect(
     })
 }
 
-/// 发送一条信令消息（JSON 字符串 + 字节长度；阻塞入队）。
+/// Send one signaling message (JSON string + byte length; blocking enqueue).
 ///
-/// 消息类型为 [`SignalingMessage`]（type 标签 snake_case）。解析失败 → SEND 错误。
+/// The message type is [`SignalingMessage`] (type tag is snake_case). Parse failure → SEND error.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_link_signal_send(
     s: *mut mediaservo_link_signal_t,
@@ -393,14 +393,14 @@ pub extern "C" fn mediaservo_link_signal_send(
     })
 }
 
-/// 注册事件回调（connect 后任意时刻；重复注册替换）。
+/// Register the event callback (any time after connect; re-registration replaces).
 ///
-/// 首次注册时启动事件泵线程：先合成补发 Connected 事件，再循环转发。
-/// 回调仅在一个泵线程触发；回调内禁止调用任何 mediaservo_link_signal_* API（含 close）。
+/// The first registration starts the event pump thread: re-synthesize Connected first, then forward events in a loop.
+/// Callbacks fire on a single pump thread; calling any mediaservo_link_signal_* API (including close) from within a callback is forbidden.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_link_signal_on_event(
     s: *mut mediaservo_link_signal_t,
-    cb: Option<mediaservo_link_event_cb>, // NULL = 取消注册（FFI-safe NPO）
+    cb: Option<mediaservo_link_event_cb>, // NULL = unregister (FFI-safe NPO)
     user: *mut c_void,
 ) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
@@ -421,9 +421,9 @@ pub extern "C" fn mediaservo_link_signal_on_event(
                     return;
                 }
             };
-            *guard = cb.map(|cb| (cb, user)); // NULL 回调 = 取消注册
+            *guard = cb.map(|cb| (cb, user)); // NULL callback = unregister
         }
-        // 首次注册时启动事件泵（R2）。
+        // Start the event pump on first registration (R2).
         let mut pump_guard = match handle.pump.lock() {
             Ok(g) => g,
             Err(_) => {
@@ -432,8 +432,8 @@ pub extern "C" fn mediaservo_link_signal_on_event(
             }
         };
         if pump_guard.is_none() {
-            // NonNull<T>: T: Send 时 Send（mediaservo_link_signal_t 已 unsafe impl Send）。
-            // 裸指针非 Send：经 usize 传递（值语义，仅地址搬运）。
+            // NonNull<T> is Send when T: Send (mediaservo_link_signal_t already has unsafe impl Send).
+            // Raw pointers are not Send: pass as usize (value semantics, address move only).
             let raw = s as usize;
             let join =
                 std::thread::spawn(move || signal_pump(raw as *mut mediaservo_link_signal_t));
@@ -442,11 +442,11 @@ pub extern "C" fn mediaservo_link_signal_on_event(
     }));
 }
 
-/// 关闭信令会话并释放 handle（幂等）。
+/// Close the signaling session and release the handle (idempotent).
 ///
-/// 顺序（R2）：置 closed 标志 → 释放会话（广播 sender 全 drop，泵 recv 返回 Closed
-/// 退出）→ join 事件泵线程 → drop runtime → 释放 handle 内存。
-/// 泵正在回调中时 join 阻塞——回调必须快速返回，回调内禁止调 close。
+/// Order (R2): set the closed flag → release the session (all broadcast senders drop, pump recv returns Closed
+/// and exits) → join the event pump thread → drop the runtime → free the handle memory.
+/// join blocks while the pump is inside a callback — callbacks must return quickly; calling close from a callback is forbidden.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_link_signal_close(s: *mut mediaservo_link_signal_t) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -455,7 +455,7 @@ pub extern "C" fn mediaservo_link_signal_close(s: *mut mediaservo_link_signal_t)
         }
         let handle = unsafe { Box::from_raw(s) };
         if handle.closed.swap(true, Ordering::SeqCst) {
-            return MEDIASERVO_OK; // 幂等：已关闭
+            return MEDIASERVO_OK; // idempotent: already closed
         }
         let session = handle.session.lock().ok().and_then(|mut g| g.take());
         if let Some(session) = session
@@ -474,35 +474,35 @@ pub extern "C" fn mediaservo_link_signal_close(s: *mut mediaservo_link_signal_t)
     })
 }
 
-// ── 帧总线 ──
+// -- Frame bus --
 
-/// 帧总线 opaque handle。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外：mediaservo_* 前缀）
+/// Frame bus opaque handle.
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception: mediaservo_* prefix)
 pub struct mediaservo_link_bus_t {
     bus: std::sync::Mutex<Option<FrameBus>>,
     closed: AtomicBool,
 }
 
-// SAFETY: 内部为 Mutex<Option<FrameBus>>（iceoryx2 ipc_threadsafe 线程安全）。
+// SAFETY: the inner is Mutex<Option<FrameBus>> (iceoryx2 ipc_threadsafe is thread-safe).
 unsafe impl Send for mediaservo_link_bus_t {}
 unsafe impl Sync for mediaservo_link_bus_t {}
 
-/// 帧流 opaque handle。
-#[allow(non_camel_case_types)] // C ABI 命名（C6 例外：mediaservo_* 前缀）
+/// Frame stream opaque handle.
+#[allow(non_camel_case_types)] // C ABI naming (C6 exception: mediaservo_* prefix)
 pub struct mediaservo_link_stream_t {
     stream: FrameStream,
-    /// 每流一个 runtime（recv 阻塞取帧用；帧状态在共享 inner，不依赖本 runtime）。
+    /// One runtime per stream (recv uses it to block for frames; the frame state lives in the shared inner, not on this runtime).
     rt: tokio::runtime::Runtime,
-    /// 关停信号：stream_close 唤醒阻塞中的 recv → None → CLOSED。
+    /// Shutdown signal: stream_close wakes a blocked recv → None → CLOSED.
     shutdown: Arc<Notify>,
     closed: AtomicBool,
 }
 
-// SAFETY: stream 内部为 Arc<StreamInner>（Mutex + Notify）+ Send runtime。
+// SAFETY: the stream holds Arc<StreamInner> (Mutex + Notify) + a Send runtime.
 unsafe impl Send for mediaservo_link_stream_t {}
 unsafe impl Sync for mediaservo_link_stream_t {}
 
-/// recv 实现：取帧或关停（select 两路，bus close / stream close 均唤醒）。
+/// recv implementation: take a frame or shut down (two-way select; bus close / stream close both wake).
 async fn stream_recv_impl(stream: &FrameStream, shutdown: &Notify) -> Option<FrameRef> {
     tokio::select! {
         f = stream.recv() => f,
@@ -510,10 +510,10 @@ async fn stream_recv_impl(stream: &FrameStream, shutdown: &Notify) -> Option<Fra
     }
 }
 
-/// 附加帧总线（验签 + ACL + iceoryx2 节点，阻塞）。
+/// Attach the frame bus (signature verification + ACL + iceoryx2 node, blocking).
 ///
-/// `endpoint` 为 Phase 1 预留（可传空串）；`token_pem`/`vk_pem` 为 Ed25519
-/// 能力令牌/验证密钥的 PEM 字符串（必须非空）。
+/// `endpoint` is reserved for Phase 1 (an empty string is fine); `token_pem`/`vk_pem` are the Ed25519
+/// capability token / verification key PEM strings (must be non-empty).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_link_bus_attach(
     endpoint: *const c_char,
@@ -547,7 +547,7 @@ pub extern "C" fn mediaservo_link_bus_attach(
                 return MEDIASERVO_LINK_ERR_INVALID_ARG;
             }
         };
-        let token = CapabilityToken::from_raw(token_pem); // JWT 字符串（from_pem 仅密钥）
+        let token = CapabilityToken::from_raw(token_pem); // JWT string (from_pem is for keys only)
         let vk = Ed25519VerifyingKey::from_pem(vk_pem.as_bytes());
         match FrameBus::attach(&endpoint, &token, &vk) {
             Ok(bus) => {
@@ -570,10 +570,10 @@ pub extern "C" fn mediaservo_link_bus_attach(
     })
 }
 
-/// 发布一帧（ACL 检查 + SHM loan + send；阻塞）。
+/// Publish one frame (ACL check + SHM loan + send; blocking).
 ///
-/// `meta` 为共享头文件 mediaservo_frame_meta_t（36B 字段袋，R4 逐字段读取）。
-/// `payload` 可为 NULL 当且仅当 `len == 0`（纯元数据帧）。
+/// `meta` is the shared-header mediaservo_frame_meta_t (36B field bag, read field-by-field per R4).
+/// `payload` may be NULL if and only if `len == 0` (metadata-only frame).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_link_bus_publish(
     b: *mut mediaservo_link_bus_t,
@@ -637,9 +637,9 @@ pub extern "C" fn mediaservo_link_bus_publish(
     })
 }
 
-/// 订阅一个 topic，创建帧流 handle（阻塞）。
+/// Subscribe to a topic and create a frame-stream handle (blocking).
 ///
-/// 成功后 `*out` 指向新 handle（调用方负责 `mediaservo_link_stream_close`）。
+/// On success `*out` points to the new handle (the caller owns `mediaservo_link_stream_close`).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_link_bus_subscribe(
     b: *mut mediaservo_link_bus_t,
@@ -697,10 +697,10 @@ pub extern "C" fn mediaservo_link_bus_subscribe(
     })
 }
 
-/// 阻塞取帧：元数据拷入 `out_meta`，载荷拷入 `out_data`（最多 `cap` 字节），
-/// `*out_len` = 实际拷贝字节数（帧大于 cap 时截断）。
+/// Blocking frame fetch: metadata is copied into `out_meta`, the payload into `out_data` (up to `cap` bytes),
+/// `*out_len` = bytes actually copied (truncated when the frame exceeds cap).
 ///
-/// 帧到达或关停时返回：关停（stream_close / bus_close）→ MEDIASERVO_LINK_ERR_CLOSED。
+/// Returns when a frame arrives or on shutdown: shutdown (stream_close / bus_close) → MEDIASERVO_LINK_ERR_CLOSED.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_link_bus_recv(
     st: *mut mediaservo_link_stream_t,
@@ -746,7 +746,7 @@ pub extern "C" fn mediaservo_link_bus_recv(
     })
 }
 
-/// 关闭帧流 handle（幂等；唤醒阻塞中的 recv 使其返回 CLOSED）。
+/// Close the frame-stream handle (idempotent; wakes a blocked recv so it returns CLOSED).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_link_stream_close(st: *mut mediaservo_link_stream_t) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -755,7 +755,7 @@ pub extern "C" fn mediaservo_link_stream_close(st: *mut mediaservo_link_stream_t
         }
         let handle = unsafe { Box::from_raw(st) };
         if handle.closed.swap(true, Ordering::SeqCst) {
-            return MEDIASERVO_OK; // 幂等：已关闭
+            return MEDIASERVO_OK; // idempotent: already closed
         }
         handle.shutdown.notify_waiters();
         MEDIASERVO_OK
@@ -766,7 +766,7 @@ pub extern "C" fn mediaservo_link_stream_close(st: *mut mediaservo_link_stream_t
     })
 }
 
-/// 关闭帧总线 handle（幂等；shutdown 全部流，recv 返回 None → CLOSED）。
+/// Close the frame-bus handle (idempotent; shuts down all streams, recv returns None → CLOSED).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_link_bus_close(b: *mut mediaservo_link_bus_t) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -775,7 +775,7 @@ pub extern "C" fn mediaservo_link_bus_close(b: *mut mediaservo_link_bus_t) -> c_
         }
         let handle = unsafe { Box::from_raw(b) };
         if handle.closed.swap(true, Ordering::SeqCst) {
-            return MEDIASERVO_OK; // 幂等：已关闭
+            return MEDIASERVO_OK; // idempotent: already closed
         }
         let bus = handle.bus.lock().ok().and_then(|mut g| g.take());
         match bus {
@@ -795,9 +795,9 @@ pub extern "C" fn mediaservo_link_bus_close(b: *mut mediaservo_link_bus_t) -> c_
     })
 }
 
-// ── 通用 ──
+// -- Common --
 
-/// 最近一次错误的详情（线程安全；无错误时返回空串）。
+/// Details of the last error (thread-safe; returns an empty string when no error).
 fn last_error_impl(buf: *mut c_char, len: usize) -> c_int {
     if buf.is_null() || len == 0 {
         return MEDIASERVO_LINK_ERR_INVALID_ARG;
@@ -812,14 +812,14 @@ fn last_error_impl(buf: *mut c_char, len: usize) -> c_int {
     MEDIASERVO_OK
 }
 
-/// 最近错误详情。
+/// Last error details.
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_link_last_error(buf: *mut c_char, len: usize) -> c_int {
     catch_unwind(AssertUnwindSafe(|| last_error_impl(buf, len)))
         .unwrap_or(MEDIASERVO_LINK_ERR_INTERNAL)
 }
 
-/// 版本信息（MAJOR.MINOR.PATCH — D241 soname 语义）。
+/// Version info (MAJOR.MINOR.PATCH — D241 soname semantics).
 #[unsafe(no_mangle)]
 pub extern "C" fn mediaservo_link_version(buf: *mut c_char, len: usize) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -838,12 +838,12 @@ pub extern "C" fn mediaservo_link_version(buf: *mut c_char, len: usize) -> c_int
     .unwrap_or(MEDIASERVO_LINK_ERR_INTERNAL)
 }
 
-// ── 共享 C 类型镜像（mediaservo_common.h，R4 字段袋）──
+// -- Shared C type mirror (mediaservo_common.h, R4 field bag) --
 
-/// C 侧帧元数据（#pragma pack(1) 36B，与 FrameMeta::encode 线格式一致）。
+/// C-side frame metadata (#pragma pack(1) 36B, same wire format as FrameMeta::encode).
 ///
-/// 生产路径一律经 36B 拷贝 + FrameMeta::decode/encode 逐字段读写；
-/// 禁止整块 reinterpret（packed 未对齐 + 字节序风险）。
+/// Production paths always go through a 36B copy + FrameMeta::decode/encode field-by-field read/write;
+/// never reinterpret the whole block (packed misalignment + endianness risk).
 #[allow(non_camel_case_types)]
 #[repr(C, packed)]
 pub struct mediaservo_frame_meta_t {
@@ -860,16 +860,16 @@ pub struct mediaservo_frame_meta_t {
 
 #[cfg(test)]
 mod tests {
-    /// 本文件测试共享进程级 static LAST_ERROR（C ABI 语义在册）——null-handle 负例
-    /// 隐式写它，显式读断言并互踩 = flaky（field-c 09-20 同型手术；link-c 09-20 gate
-    /// 实抓 last_error_roundtrip 竞跑覆写；deck-c 预防同批）。测试域全文件经此锁串行。
+    /// Tests in this file share the process-level static LAST_ERROR (C ABI semantics) — null-handle negative
+    /// cases write it implicitly, so explicit-read assertions stomp on each other = flaky (same surgery as field-c 09-20; link-c 09-20 gate
+    /// caught last_error_roundtrip racing; deck-c prevented in the same batch). All tests in this file serialize through this lock.
     static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     use super::*;
 
-    /// 合成一个未连接的信令 handle（会话 None，仅用于 closed/STATE 路径测试）。
-    /// 合成一个未连接的信令 handle（会话 None；closed 标志可预设）。
-    /// 注意：close 后调用为 UB（契约），测试对同一指针只 close 一次。
+    /// Synthesize an unconnected signal handle (session None; for closed/STATE path tests only).
+    /// Synthesize an unconnected signal handle (session None; closed flag can be preset).
+    /// Note: calling after close is UB (contract); each test closes a given pointer only once.
     fn signal_handle(closed: bool) -> *mut mediaservo_link_signal_t {
         Box::into_raw(Box::new(mediaservo_link_signal_t {
             session: std::sync::Mutex::new(None),
@@ -882,7 +882,7 @@ mod tests {
         }))
     }
 
-    /// 合成一个未 attach 的总线 handle（bus None；closed 标志可预设）。
+    /// Synthesize an unattached bus handle (bus None; closed flag can be preset).
     fn bus_handle(closed: bool) -> *mut mediaservo_link_bus_t {
         Box::into_raw(Box::new(mediaservo_link_bus_t {
             bus: std::sync::Mutex::new(None),
@@ -890,7 +890,7 @@ mod tests {
         }))
     }
 
-    /// 合成一个未 attach 的总线 handle（bus None）。
+    /// Synthesize an unattached bus handle (bus None).
     fn bus_handle_closed() -> *mut mediaservo_link_bus_t {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         Box::into_raw(Box::new(mediaservo_link_bus_t {
@@ -902,7 +902,7 @@ mod tests {
     #[test]
     fn last_error_roundtrip() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // 全局状态跨测试竞争: 先清空再设（不依赖其他测试未写）
+        // Global state races across tests: clear before setting (do not assume other tests haven't written)
         set_last_error("");
         set_last_error("test error");
         let mut buf = [0u8; 64];
@@ -932,7 +932,7 @@ mod tests {
     #[test]
     fn connect_small_struct_size_fails() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // 旧头文件编译的调用方：struct_size 过小 → 明确错误（R3）
+        // Caller compiled against an older header: struct_size too small → explicit error (R3)
         let cfg = mediaservo_link_signal_config_t { struct_size: 1, ..Default::default() };
         let mut out: *mut mediaservo_link_signal_t = ptr::null_mut();
         let rc = mediaservo_link_signal_connect(&cfg, &mut out);
@@ -943,7 +943,7 @@ mod tests {
     #[test]
     fn connect_missing_required_fails() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // struct_size 合法但 url/psk/room 为空 → 必填错误
+        // struct_size valid but url/psk/room empty → required-field error
         let cfg = mediaservo_link_signal_config_t::default();
         let mut out: *mut mediaservo_link_signal_t = ptr::null_mut();
         let rc = mediaservo_link_signal_connect(&cfg, &mut out);
@@ -954,7 +954,7 @@ mod tests {
     #[test]
     fn connect_bad_role_fails_before_network() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // 角色字符串非法 → 连接前即拒绝（不触网）
+        // Invalid role string → rejected before connecting (no network touch)
         let url = c"ws://127.0.0.1:1/ws";
         let psk = c"psk";
         let room = c"room";
@@ -992,7 +992,7 @@ mod tests {
     fn send_without_session_returns_state() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let s = signal_handle(false);
-        // 合法 SignalingMessage（frame）但会话缺失 → STATE
+        // Valid SignalingMessage (frame) but no session → STATE
         let msg = c"{\"type\":\"frame\",\"room_id\":\"r\",\"codec\":\"h264\",\"sequence\":1,\"is_keyframe\":true,\"data_base64\":\"\"}";
         let rc = mediaservo_link_signal_send(s, msg.as_ptr(), msg.to_bytes().len());
         assert_eq!(rc, MEDIASERVO_LINK_ERR_STATE);
@@ -1003,7 +1003,7 @@ mod tests {
     fn send_after_closed_flag_returns_state() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let s = signal_handle(true);
-        // closed 标志已置 → STATE（不触会话）
+        // closed flag already set → STATE (does not touch the session)
         let rc = mediaservo_link_signal_send(s, c"{}".as_ptr(), 2);
         assert_eq!(rc, MEDIASERVO_LINK_ERR_STATE);
         assert_eq!(mediaservo_link_signal_close(s), MEDIASERVO_OK);
@@ -1110,8 +1110,8 @@ mod tests {
     #[test]
     fn frame_meta_c_layout_matches_wire() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // R4: repr(C, packed) 镜像结构逐字段填 → 36B 拷贝 + decode →
-        // 与 Rust FrameMeta::encode 逐字节比对
+        // R4: fill a repr(C, packed) mirror struct field-by-field → 36B copy + decode →
+        // compare byte-for-byte against Rust FrameMeta::encode
         assert_eq!(size_of::<mediaservo_frame_meta_t>(), FrameMeta::WIRE_LEN);
         let c = mediaservo_frame_meta_t {
             seq: 0x0102030405060708,
@@ -1134,7 +1134,7 @@ mod tests {
             ts_mono_ns: c.ts_mono_ns,
             ts_epoch_ns: c.ts_epoch_ns,
         };
-        // 走真实生产路径：36B 拷贝 + decode（与 meta_from_c 同机制）
+        // Go through the real production path: 36B copy + decode (same mechanism as meta_from_c)
         let mut buf = [0u8; FrameMeta::WIRE_LEN];
         unsafe {
             ptr::copy_nonoverlapping(
@@ -1146,7 +1146,7 @@ mod tests {
         let decoded = FrameMeta::decode(&buf).expect("decode");
         assert_eq!(decoded, rust);
         assert_eq!(decoded.encode(), rust.encode());
-        // 回写路径（meta_to_c 同机制）也逐字节一致
+        // The write-back path (same mechanism as meta_to_c) is also byte-for-byte identical
         let mut back = mediaservo_frame_meta_t {
             seq: 0,
             width: 0,
@@ -1182,10 +1182,10 @@ mod tests {
         assert_eq!(mediaservo_link_bus_close(ptr::null_mut()), MEDIASERVO_OK);
     }
 
-    /// bus 正向链路: attach(验签) → subscribe → publish → recv 断言 meta/payload。
-    /// 双节点（ACL 矩阵: Capture 仅发布 camera/*, Processor 仅订阅 camera/*）；
-    /// 订阅先于发布（iceoryx2 新订阅者不重放历史帧）。
-    /// 复用 mediaservo-link e2e 测试密钥对（D235 测试 fixture）。
+    /// bus positive path: attach (signature verify) → subscribe → publish → recv asserting meta/payload.
+    /// Two nodes (ACL matrix: Capture publishes camera/* only, Processor subscribes camera/* only);
+    /// Subscribe before publishing (iceoryx2 does not replay history frames to new subscribers).
+    /// Reuse the mediaservo-link e2e test key pair (D235 test fixture).
     #[test]
     fn bus_attach_publish_subscribe_recv_roundtrip() {
         let _ser = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -1206,7 +1206,7 @@ mod tests {
             CString::new(CapabilityToken::sign(&acl, 3600, &sk).expect("sign").as_str()).unwrap()
         };
 
-        // 1. Capture 发布端
+        // 1. Capture publisher
         let mut bus: *mut mediaservo_link_bus_t = ptr::null_mut();
         let rc = mediaservo_link_bus_attach(
             endpoint.as_ptr(),
@@ -1217,7 +1217,7 @@ mod tests {
         assert_eq!(rc, MEDIASERVO_OK, "attach capture");
         assert!(!bus.is_null());
 
-        // 2. Processor 订阅端
+        // 2. Processor subscriber
         let mut proc_bus: *mut mediaservo_link_bus_t = ptr::null_mut();
         let rc = mediaservo_link_bus_attach(
             endpoint.as_ptr(),
@@ -1228,13 +1228,13 @@ mod tests {
         assert_eq!(rc, MEDIASERVO_OK, "attach processor");
         assert!(!proc_bus.is_null());
 
-        // 3. 订阅先于发布（历史帧不重放）
+        // 3. Subscribe before publishing (no history-frame replay)
         let mut stream: *mut mediaservo_link_stream_t = ptr::null_mut();
         let rc = mediaservo_link_bus_subscribe(proc_bus, topic.as_ptr(), &mut stream);
         assert_eq!(rc, MEDIASERVO_OK, "subscribe");
         assert!(!stream.is_null());
 
-        // 4. 发布
+        // 4. Publish
         let meta = mediaservo_frame_meta_t {
             seq: 7,
             width: 640,
@@ -1256,7 +1256,7 @@ mod tests {
         );
         assert_eq!(rc, MEDIASERVO_OK, "publish");
 
-        // 5. 接收并断言 meta/payload
+        // 5. Receive and assert meta/payload
         let mut out_meta = mediaservo_frame_meta_t {
             seq: 0,
             width: 0,
@@ -1278,7 +1278,7 @@ mod tests {
             &mut out_len,
         );
         assert_eq!(rc, MEDIASERVO_OK, "recv");
-        // packed 结构字段读取必须 read_unaligned（E0793）
+        // Reading packed-struct fields requires read_unaligned (E0793)
         unsafe {
             assert_eq!(ptr::addr_of!(out_meta.seq).read_unaligned(), 7);
             assert_eq!(ptr::addr_of!(out_meta.width).read_unaligned(), 640);
@@ -1289,7 +1289,7 @@ mod tests {
         assert_eq!(out_len, 64);
         assert_eq!(&buf[..64], &payload);
 
-        // 6. 关闭
+        // 6. Close
         assert_eq!(mediaservo_link_stream_close(stream), MEDIASERVO_OK);
         assert_eq!(mediaservo_link_bus_close(proc_bus), MEDIASERVO_OK);
         assert_eq!(mediaservo_link_bus_close(bus), MEDIASERVO_OK);

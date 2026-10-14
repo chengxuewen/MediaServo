@@ -1,15 +1,15 @@
-//! D1 host-agent 信令网关测试（本地 mock WS server，无 Docker 依赖）。
+//! D1 host-agent signaling gateway tests (local mock WS server, no Docker dependency).
 //!
-//! 覆盖契约（Momus HIGH-1 协议语义）:
-//! ① 多本地客户端 → 单远端 WS，双向转发 + 房间重写（整车房间 ↔ 子进程房间）
-//! ② RoomJoin 拦截：子进程 RoomJoin 不上行（agent 单次 join）；子进程本地
-//!    合成 RoomJoined（携带整车 peer_id）
-//! ③ 并发协商：两路 CreateWebRtcTransport 在途 → 响应按 FIFO 路由不串
-//!    （NewProducer 广播夹在响应之间不消耗 FIFO）
-//! ④ 断线重连：远端 WS 断开 → B1 重连 → 转发恢复；断线在途请求清空
-//! ⑤ P2P Sdp/ICE 单协商路由：回显去重 + 协商归属切换
+//! Covered contracts (Momus HIGH-1 protocol semantics):
+//! (1) many local clients -> one remote WS, bidirectional forwarding + room rewriting (vehicle room <-> child-process room)
+//! (2) RoomJoin interception: child-process RoomJoins never go upstream (the agent joins once); children get a
+//!    locally synthesized RoomJoined (carrying the vehicle peer_id)
+//! (3) concurrent negotiations: two in-flight CreateWebRtcTransports -> responses route by FIFO without crossing
+//!    (a NewProducer broadcast wedged between responses does not consume the FIFO)
+//! (4) disconnect/reconnect: remote WS drops -> B1 reconnect -> forwarding resumes; in-flight requests clear on disconnect
+//! (5) P2P Sdp/ICE single-negotiation routing: echo dedupe + negotiation ownership handover
 
-#![allow(dead_code)] // Ws 别名 = 套件通用件位（当前分支未消费）
+#![allow(dead_code)] // the Ws alias = a suite-common slot (unconsumed on the current branch)
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -25,12 +25,12 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-/// mock server 侧（accept_async 原始 TCP 流）。
+/// The mock server side (accept_async over a raw TCP stream).
 type WsServer = WebSocketStream<TcpStream>;
-/// 本地子进程侧（connect_async 可能 TLS 流）。
+/// The local child-process side (connect_async, possibly a TLS stream).
 type WsClient = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-/// 任一 WS 流（client/server 共用 helper 的泛型约束）。
+/// Either WS stream (the generic bound of the client/server shared helper).
 trait WsIo: AsyncRead + AsyncWrite + Unpin + Send {}
 impl WsIo for TcpStream {}
 impl WsIo for MaybeTlsStream<TcpStream> {}
@@ -42,7 +42,7 @@ const VEHICLE_PEER: &str = "veh-peer";
 
 fn cfg(remote: SocketAddr) -> GatewayConfig {
     GatewayConfig {
-        local_port: 0, // 临时端口
+        local_port: 0, // ephemeral port
         remote_url: format!("ws://{remote}/ws"),
         psk: "test-psk".into(),
         device: None,
@@ -59,13 +59,13 @@ fn env(src: &str, msg: SignalingMessage) -> String {
     serde_json::to_string(&LocalEnvelope { src: src.into(), msg }).unwrap()
 }
 
-/// mock server 完整握手：PSK → Error{0} 确认 → RoomJoin → RoomJoined。
-/// 返回 (ws, 请求的房间, 角色)。
+/// Full mock-server handshake: PSK -> Error{0} ack -> RoomJoin -> RoomJoined.
+/// Returns (ws, requested room, role).
 async fn mock_handshake(listener: &TcpListener) -> (WsServer, String, PeerRole) {
     let (stream, _) = listener.accept().await.expect("mock accept");
     let mut ws = tokio_tungstenite::accept_async(stream).await.expect("mock ws handshake");
     let psk = ws.next().await.unwrap().unwrap();
-    assert!(matches!(psk, Message::Text(_)), "首条应为 PSK 文本");
+    assert!(matches!(psk, Message::Text(_)), "first message should be PSK text");
     ws.send(Message::Text(
         serde_json::to_string(&SignalingMessage::Error { code: 0, message: String::new() })
             .unwrap(),
@@ -74,7 +74,7 @@ async fn mock_handshake(listener: &TcpListener) -> (WsServer, String, PeerRole) 
     .unwrap();
     let join = ws.next().await.unwrap().unwrap();
     let (room, role) = match serde_json::from_str::<SignalingMessage>(join.to_text().unwrap())
-        .expect("mock 解析 RoomJoin")
+        .expect("mock parses RoomJoin")
     {
         SignalingMessage::RoomJoin { room_id, peer_role, .. } => (room_id, peer_role),
         other => panic!("expected RoomJoin, got {other:?}"),
@@ -104,16 +104,16 @@ async fn local(port: u16) -> WsClient {
 async fn read_env<S: WsIo>(ws: &mut WebSocketStream<S>) -> (String, SignalingMessage) {
     let msg = tokio::time::timeout(Duration::from_secs(5), ws.next())
         .await
-        .expect("读超时")
-        .expect("ws 关闭")
-        .expect("ws 错误");
-    let text = msg.to_text().expect("应为文本").to_string();
-    let env: LocalEnvelope = serde_json::from_str(&text).expect("信封解析");
+        .expect("read timeout")
+        .expect("ws closed")
+        .expect("ws error");
+    let text = msg.to_text().expect("should be text").to_string();
+    let env: LocalEnvelope = serde_json::from_str(&text).expect("envelope parses");
     (env.src, env.msg)
 }
 
-/// 子进程 RoomJoin（拦截语义）：网关未就绪时 Error 5001 → 重试。
-/// 返回合成 RoomJoined 的 peer_id。
+/// Child-process RoomJoin (interception semantics): Error 5001 when the gateway is not ready -> retry.
+/// Returns the synthesized RoomJoined's peer_id.
 async fn join<S: WsIo>(ws: &mut WebSocketStream<S>, room: &str) -> String {
     for _ in 0..100 {
         ws.send(Message::Text(env(
@@ -135,21 +135,24 @@ async fn join<S: WsIo>(ws: &mut WebSocketStream<S>, room: &str) -> String {
         let (_src, msg) = read_env(ws).await;
         match msg {
             SignalingMessage::RoomJoined { room_id, peer_id, .. } => {
-                assert_eq!(room_id, room, "合成 RoomJoined 应回显子进程房间");
+                assert_eq!(
+                    room_id, room,
+                    "the synthesized RoomJoined should echo the child process's room"
+                );
                 return peer_id;
             }
             SignalingMessage::Error { code: 5001, .. } => {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
-            other => panic!("join 意外应答: {other:?}"),
+            other => panic!("unexpected join response: {other:?}"),
         }
     }
-    panic!("join 重试耗尽");
+    panic!("join retries exhausted");
 }
 
-/// 读 2 条消息：transport 响应 + NewProducer 广播（任意顺序）。
-/// 返回 (transport_id, 响应 peer_id)——mock 回显请求标识（peer_id 作标记），
-/// 串线即可检测（A 收到 req-b 的响应 = 错配）。
+/// Read 2 messages: the transport response + the NewProducer broadcast (any order).
+/// Returns (transport_id, response peer_id) - the mock echoes the request marker (peer_id as a tag),
+/// so any crossing is detectable (A receiving req-b's response = mismatch).
 async fn collect_transport(ws: &mut WsClient, room: &str) -> (String, String) {
     let mut transport: Option<String> = None;
     let mut peer: Option<String> = None;
@@ -157,17 +160,26 @@ async fn collect_transport(ws: &mut WsClient, room: &str) -> (String, String) {
         let (_, m) = read_env(ws).await;
         match m {
             SignalingMessage::WebRtcTransportCreated { transport_id, room_id, peer_id, .. } => {
-                assert_eq!(room_id, room, "transport 响应房间应改写为 {room}");
+                assert_eq!(
+                    room_id, room,
+                    "the transport response room should be rewritten to {room}"
+                );
                 transport = Some(transport_id);
                 peer = Some(peer_id);
             }
             SignalingMessage::NewProducer { room_id, .. } => {
-                assert_eq!(room_id, room, "NewProducer 广播房间应改写为 {room}");
+                assert_eq!(
+                    room_id, room,
+                    "the NewProducer broadcast room should be rewritten to {room}"
+                );
             }
-            other => panic!("{room} 意外消息: {other:?}"),
+            other => panic!("unexpected message in {room}: {other:?}"),
         }
     }
-    (transport.expect("应收到 transport 响应"), peer.expect("响应应携带身份回显"))
+    (
+        transport.expect("a transport response should arrive"),
+        peer.expect("the response should carry the identity echo"),
+    )
 }
 
 fn transport_created_for(transport_id: &str, peer_id: &str) -> SignalingMessage {
@@ -175,7 +187,7 @@ fn transport_created_for(transport_id: &str, peer_id: &str) -> SignalingMessage 
         room_id: VEHICLE_ROOM.into(),
         peer_id: peer_id.into(),
         transport_id: transport_id.into(),
-        sctp_parameters: None, // P1 additive 字段——夹具不消费
+        sctp_parameters: None, // P1 additive field - the fixture does not consume it
         ice_parameters: IceParameters { username_fragment: "ufrag".into(), password: "pwd".into() },
         dtls_parameters: DtlsParameters {
             fingerprints: vec![Fingerprint {
@@ -188,12 +200,12 @@ fn transport_created_for(transport_id: &str, peer_id: &str) -> SignalingMessage 
     }
 }
 
-/// mock 响应：transport 创建确认（peer_id 身份回显）。
+/// mock response: the transport creation ack (peer_id identity echo).
 fn transport_created(transport_id: &str) -> SignalingMessage {
     transport_created_for(transport_id, VEHICLE_PEER)
 }
 
-/// CreateWebRtcTransport 请求（peer_id 作请求标识；room 由网关重写）。
+/// CreateWebRtcTransport request (peer_id as the request marker; the room is rewritten by the gateway).
 fn create(room: &str, peer_id: &str) -> SignalingMessage {
     SignalingMessage::CreateWebRtcTransport {
         room_id: room.into(),
@@ -202,7 +214,7 @@ fn create(room: &str, peer_id: &str) -> SignalingMessage {
     }
 }
 
-// ── ① 多本地客户端转发正确（双向房间重写 + src=server 下发）────────────────
+// -- (1) multi-local-client forwarding correctness (bidirectional room rewriting + src=server delivery) --────────────
 
 #[tokio::test]
 async fn multiple_clients_forward_with_room_rewrite() {
@@ -210,24 +222,27 @@ async fn multiple_clients_forward_with_room_rewrite() {
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         let (mut ws, room, role) = mock_handshake(&listener).await;
-        assert_eq!(room, VEHICLE_ROOM, "agent 应以整车身份单次 join");
+        assert_eq!(
+            room, VEHICLE_ROOM,
+            "the agent should join exactly once with the vehicle identity"
+        );
         assert_eq!(role, PeerRole::Host);
 
-        // 两条上行（来自不同子进程）：房间均重写为整车房间
+        // two upstream messages (from different child processes): both rooms rewritten to the vehicle room
         let m1: SignalingMessage =
             serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
         assert!(
             matches!(&m1, SignalingMessage::Frame { room_id, .. } if room_id == VEHICLE_ROOM),
-            "Frame 房间应重写为整车房间, got {m1:?}"
+            "the Frame room should be rewritten to the vehicle room, got {m1:?}"
         );
         let m2: SignalingMessage =
             serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
         assert!(
             matches!(&m2, SignalingMessage::EncoderStatus { room_id, .. } if room_id == VEHICLE_ROOM),
-            "EncoderStatus 房间应重写为整车房间, got {m2:?}"
+            "the EncoderStatus room should be rewritten to the vehicle room, got {m2:?}"
         );
 
-        // 下行房间级广播：每个子进程收到自己房间的改写
+        // downstream room-level broadcast: each child process receives the rewrite for its own room
         ws.send(Message::Text(
             serde_json::to_string(&SignalingMessage::NewProducer {
                 room_id: VEHICLE_ROOM.into(),
@@ -240,7 +255,7 @@ async fn multiple_clients_forward_with_room_rewrite() {
         ))
         .await
         .unwrap();
-        tokio::time::sleep(Duration::from_secs(1)).await; // 保持连接至断言完成
+        tokio::time::sleep(Duration::from_secs(1)).await; // keep the connection until the assertions complete
     });
 
     let (port, _handle) = run_gateway(cfg(addr)).await.unwrap();
@@ -278,23 +293,23 @@ async fn multiple_clients_forward_with_room_rewrite() {
     .await
     .unwrap();
 
-    // 下行广播：各子进程收到自己的房间改写 + src=server
+    // downstream broadcast: each child receives its own room rewrite + src=server
     let (src, m) = read_env(&mut a).await;
     assert_eq!(src, "server");
     assert!(
         matches!(&m, SignalingMessage::NewProducer { room_id, .. } if room_id == "room-a"),
-        "子进程 a 应收到房间 room-a 的改写, got {m:?}"
+        "child process a should receive the room-a rewrite, got {m:?}"
     );
     let (src, m) = read_env(&mut b).await;
     assert_eq!(src, "server");
     assert!(
         matches!(&m, SignalingMessage::NewProducer { room_id, .. } if room_id == "room-b"),
-        "子进程 b 应收到房间 room-b 的改写, got {m:?}"
+        "child process b should receive the room-b rewrite, got {m:?}"
     );
     server.await.unwrap();
 }
 
-// ── ② RoomJoin 拦截：不上行 + 本地合成 RoomJoined ──────────────────────────
+// -- (2) RoomJoin interception: nothing upstream + local synthesized RoomJoined --─────────────────────
 
 #[tokio::test]
 async fn room_join_intercepted_not_forwarded() {
@@ -304,11 +319,11 @@ async fn room_join_intercepted_not_forwarded() {
         let (mut ws, room, role) = mock_handshake(&listener).await;
         assert_eq!(room, VEHICLE_ROOM);
         assert_eq!(role, PeerRole::Host);
-        // 子进程 RoomJoin 绝不上行：2s 内不应收到任何消息（更不是 RoomJoin）
+        // the child's RoomJoin never goes upstream: no message should arrive within 2s (and certainly not a RoomJoin)
         let leaked = tokio::time::timeout(Duration::from_secs(2), ws.next()).await;
         assert!(
             leaked.is_err(),
-            "子进程 RoomJoin 泄漏到远端: {:?}",
+            "a child's RoomJoin leaked to the remote: {:?}",
             leaked.ok().flatten().map(|m| format!("{m:?}"))
         );
     });
@@ -316,11 +331,14 @@ async fn room_join_intercepted_not_forwarded() {
     let (port, _handle) = run_gateway(cfg(addr)).await.unwrap();
     let mut a = local(port).await;
     let peer_id = join(&mut a, "child-room").await;
-    assert_eq!(peer_id, VEHICLE_PEER, "合成 RoomJoined 应携带整车 peer_id");
+    assert_eq!(
+        peer_id, VEHICLE_PEER,
+        "the synthesized RoomJoined should carry the vehicle peer_id"
+    );
     server.await.unwrap();
 }
 
-// ── ③ 并发协商：两路 Create 在途 → FIFO 响应路由不串 ───────────────────────
+// -- (3) concurrent negotiations: two in-flight Creates -> FIFO response routing without crossing --──────────────────
 
 #[tokio::test]
 async fn concurrent_sfu_negotiation_routes_responses() {
@@ -329,21 +347,24 @@ async fn concurrent_sfu_negotiation_routes_responses() {
     let server = tokio::spawn(async move {
         let (mut ws, _room, _role) = mock_handshake(&listener).await;
 
-        // 两路 Create（顺序 = 响应顺序）：提取请求标识（peer_id 作标记）
+        // two Creates (order = response order): extract the request markers (peer_id as the tag)
         let mut markers = Vec::new();
         for _ in 0..2 {
             let c: SignalingMessage =
                 serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
             match &c {
                 SignalingMessage::CreateWebRtcTransport { peer_id, room_id, direction, .. } => {
-                    assert_eq!(room_id, VEHICLE_ROOM, "Create 房间应重写为整车房间");
+                    assert_eq!(
+                        room_id, VEHICLE_ROOM,
+                        "the Create room should be rewritten to the vehicle room"
+                    );
                     assert_eq!(direction, &TransportDirection::Send);
                     markers.push(peer_id.clone());
                 }
-                other => panic!("期望 CreateWebRtcTransport, got {other:?}"),
+                other => panic!("expected CreateWebRtcTransport, got {other:?}"),
             }
         }
-        // 响应序列：t1(markers[0]) → NewProducer 广播（夹在响应之间）→ t2(markers[1])
+        // response sequence: t1(markers[0]) -> NewProducer broadcast (wedged between responses) -> t2(markers[1])
         ws.send(Message::Text(
             serde_json::to_string(&transport_created_for("t1", &markers[0])).unwrap(),
         ))
@@ -375,43 +396,46 @@ async fn concurrent_sfu_negotiation_routes_responses() {
     join(&mut a, "room-a").await;
     join(&mut b, "room-b").await;
 
-    // 两路同时发送 Create（在途；peer_id 携带各自请求标识）
+    // both send Create at the same time (in flight; peer_id carries each request marker)
     a.send(Message::Text(env("a", create("room-a", "req-a")))).await.unwrap();
     b.send(Message::Text(env("b", create("room-b", "req-b")))).await.unwrap();
 
-    // 各读 2 条：自己的 transport 响应 + NewProducer 广播（顺序不定——server 的
-    // 广播通道与直连响应并发，广播可能先于第二个响应到达）
+    // each reads 2: its own transport response + the NewProducer broadcast (order varies - the server's
+    // broadcast channel races the direct response, so the broadcast may arrive before the second response)
     let (ta, pa) = collect_transport(&mut a, "room-a").await;
     let (tb, pb) = collect_transport(&mut b, "room-b").await;
-    assert_eq!(pa, "req-a", "A 必须收到自己请求的响应（身份回显）");
-    assert_eq!(pb, "req-b", "B 必须收到自己请求的响应（身份回显）");
-    assert_ne!(ta, tb, "两路 transport_id 不得串线");
+    assert_eq!(pa, "req-a", "A must receive the response to its own request (identity echo)");
+    assert_eq!(pb, "req-b", "B must receive the response to its own request (identity echo)");
+    assert_ne!(ta, tb, "the two transport_ids must not cross");
     assert!(ta == "t1" || ta == "t2");
     assert!(tb == "t1" || tb == "t2");
     server.await.unwrap();
 }
 
-// ── ④ 断线重连：转发恢复 + 在途请求清空 ────────────────────────────────────
+// -- (4) disconnect/reconnect: forwarding recovery + in-flight request clearing --───────────────────────────────
 
 #[tokio::test]
 async fn reconnect_resumes_forwarding() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
-        // 连接 1：完整握手 → 收一条消息 → 关闭（模拟远端断线）
+        // connection 1: full handshake -> receive one message -> close (simulates a remote drop)
         let (mut ws1, _r, _role) = mock_handshake(&listener).await;
         let m1 = ws1.next().await.unwrap().unwrap();
-        assert!(m1.to_text().unwrap().contains("\"type\":\"sdp\""), "连接 1 应收到子进程 Sdp");
+        assert!(
+            m1.to_text().unwrap().contains("\"type\":\"sdp\""),
+            "connection 1 should receive the child process Sdp"
+        );
         drop(ws1);
 
-        // 连接 2：握手 → 收 Create → 响应
+        // connection 2: handshake -> receive Create -> respond
         let (mut ws2, _r2, _role2) = mock_handshake(&listener).await;
         let c = ws2.next().await.unwrap().unwrap();
         let c: SignalingMessage = serde_json::from_str(c.to_text().unwrap()).unwrap();
         assert!(
             matches!(&c, SignalingMessage::CreateWebRtcTransport { room_id, .. }
                 if room_id == VEHICLE_ROOM),
-            "重连后 Create 房间应为整车房间, got {c:?}"
+            "the Create room after reconnect should be the vehicle room, got {c:?}"
         );
         ws2.send(Message::Text(serde_json::to_string(&transport_created("t-after")).unwrap()))
             .await
@@ -423,7 +447,7 @@ async fn reconnect_resumes_forwarding() {
     let mut a = local(port).await;
     join(&mut a, "room-a").await;
 
-    // 断线前：Sdp 转发（mock 连接 1 收后关闭）
+    // before the drop: Sdp forwarded (mock connection 1 receives it then closes)
     a.send(Message::Text(env(
         "a",
         SignalingMessage::Sdp { room_id: "room-a".into(), target: None, sdp: "v=0 offer".into() },
@@ -431,7 +455,7 @@ async fn reconnect_resumes_forwarding() {
     .await
     .unwrap();
 
-    // 重连后：Create 在途（5001 或断线窗口无应答 → 重试）→ 响应路由回本连接
+    // after reconnect: Create in flight (5001 or no answer during the disconnect window -> retry) -> the response routes back to this connection
     let response = loop {
         a.send(Message::Text(env(
             "a",
@@ -448,18 +472,18 @@ async fn reconnect_resumes_forwarding() {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
             Ok((_, m)) => break m,
-            Err(_) => {} // 断线窗口：请求无应答，重发
+            Err(_) => {} // disconnect window: no answer for the request, resend
         }
     };
     assert!(
         matches!(&response, SignalingMessage::WebRtcTransportCreated { transport_id, room_id, .. }
             if transport_id == "t-after" && room_id == "room-a"),
-        "重连后响应应路由到本连接且房间改写, got {response:?}"
+        "after reconnect the response should route to this connection with the room rewritten, got {response:?}"
     );
     server.await.unwrap();
 }
 
-// ── ⑤ P2P Sdp/ICE 单协商路由：回显去重 + 归属切换 ──────────────────────────
+// -- (5) P2P Sdp/ICE single-negotiation routing: echo dedupe + ownership handover --─────────────────────
 
 #[tokio::test]
 async fn p2p_sdp_ice_single_negotiation_routing() {
@@ -468,7 +492,7 @@ async fn p2p_sdp_ice_single_negotiation_routing() {
     let server = tokio::spawn(async move {
         let (mut ws, _r, _role) = mock_handshake(&listener).await;
 
-        // 收 A 的 offer → 原样回显（模拟 server 房间广播）+ 远端应答
+        // receive A's offer -> echo it verbatim (simulates the server room broadcast) + answer from the remote
         let offer = ws.next().await.unwrap().unwrap();
         assert!(offer.to_text().unwrap().contains("\"type\":\"sdp\""));
         ws.send(offer).await.unwrap();
@@ -483,7 +507,7 @@ async fn p2p_sdp_ice_single_negotiation_routing() {
         .await
         .unwrap();
 
-        // 收 B 的 ICE → 原样回显 + 远端候选
+        // receive B's ICE -> echo verbatim + remote candidate
         let ice = ws.next().await.unwrap().unwrap();
         assert!(ice.to_text().unwrap().contains("\"type\":\"r_t_c_ice_candidate\""));
         ws.send(ice).await.unwrap();
@@ -508,22 +532,22 @@ async fn p2p_sdp_ice_single_negotiation_routing() {
     join(&mut a, "room-a").await;
     join(&mut b, "room-b").await;
 
-    // A 发 offer（协商归属 = A）
+    // A sends the offer (negotiation ownership = A)
     a.send(Message::Text(env(
         "a",
         SignalingMessage::Sdp { room_id: "room-a".into(), target: None, sdp: "a-offer".into() },
     )))
     .await
     .unwrap();
-    // A 收到的第一条必须是远端应答（自己的回显已被去重）
+    // the first message A receives must be the remote answer (its own echo was deduped)
     let (_, m) = read_env(&mut a).await;
     assert!(
         matches!(&m, SignalingMessage::Sdp { sdp, room_id, .. }
             if sdp == "b-answer" && room_id == "room-a"),
-        "A 应收到远端应答（非自身回显），房间改写, got {m:?}"
+        "A should receive the remote answer (not its own echo), room rewritten, got {m:?}"
     );
 
-    // B 发 ICE（归属切到 B）→ 收到远端候选（非自身回显）
+    // B sends ICE (ownership switches to B) -> receives the remote candidate (not its own echo)
     b.send(Message::Text(env(
         "b",
         SignalingMessage::RTCIceCandidate {
@@ -540,42 +564,42 @@ async fn p2p_sdp_ice_single_negotiation_routing() {
     assert!(
         matches!(&m, SignalingMessage::RTCIceCandidate { candidate, room_id, .. }
             if candidate == "peer-cand" && room_id == "room-b"),
-        "B 应收到远端候选（非自身回显），房间改写, got {m:?}"
+        "B should receive the remote candidate (not its own echo), room rewritten, got {m:?}"
     );
     server.await.unwrap();
 }
 
-// ── CRITICAL-1 回归：断线窗口的 5001 不得留下陈旧 pending 槽 ────────────────
+// -- CRITICAL-1 regression: a disconnect-window 5001 must not leave a stale pending slot --───────────
 
 #[tokio::test]
 async fn disconnect_window_stale_pending_not_cross_routed() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    // 闸门：mock2 在测试放行前不 accept → agent 阻塞在 WS 握手，joined 保持
-    // false（确定性断线窗口——connect 在途且无超时）
+    // gate: mock2 does not accept until the test releases it -> the agent blocks in the WS handshake, joined stays
+    // false (a deterministic disconnect window - connect in flight with no timeout)
     let (gate_tx, gate_rx) = tokio::sync::watch::channel(false);
     let server = tokio::spawn(async move {
-        // 连接 1：收 A 的在途请求 → 无响应关闭
+        // connection 1: receive A's in-flight request -> close without responding
         let (mut ws1, _r, _role) = mock_handshake(&listener).await;
         let m1 = ws1.next().await.unwrap().unwrap();
         let m1: SignalingMessage = serde_json::from_str(m1.to_text().unwrap()).unwrap();
         assert!(
             matches!(&m1, SignalingMessage::CreateWebRtcTransport { peer_id, .. } if peer_id == "req-a1"),
-            "mock1 应收到 A 的在途请求, got {m1:?}"
+            "mock1 should receive A's in-flight request, got {m1:?}"
         );
         drop(ws1);
-        // 等测试放行 mock2
+        // wait for the test to release mock2
         let mut g = gate_rx.clone();
         while !*g.borrow() {
             g.changed().await.unwrap();
         }
-        // 连接 2：收 B 的请求 → 响应（身份回显）
+        // connection 2: receive B's request -> respond (identity echo)
         let (mut ws2, _r2, _role2) = mock_handshake(&listener).await;
         let c2 = ws2.next().await.unwrap().unwrap();
         let c2: SignalingMessage = serde_json::from_str(c2.to_text().unwrap()).unwrap();
         assert!(
             matches!(&c2, SignalingMessage::CreateWebRtcTransport { peer_id, .. } if peer_id == "req-b"),
-            "mock2 应收到 B 的请求, got {c2:?}"
+            "mock2 should receive B's request, got {c2:?}"
         );
         ws2.send(Message::Text(
             serde_json::to_string(&transport_created_for("t-b", "req-b")).unwrap(),
@@ -591,10 +615,10 @@ async fn disconnect_window_stale_pending_not_cross_routed() {
     join(&mut a, "room-a").await;
     join(&mut b, "room-b").await;
 
-    // A 在断线前发出在途请求（mock1 收后无响应关闭 → 断线窗口开始）
+    // A sends its in-flight request before the disconnect (mock1 receives it then closes without responding -> the disconnect window begins)
     a.send(Message::Text(env("a", create("room-a", "req-a1")))).await.unwrap();
 
-    // 窗口期：A 反复发 Create 直到 5001（修复后：未 join 不入 pending）
+    // window: A repeatedly sends Create until 5001 (after the fix: not joined -> not queued in pending)
     let mut saw_5001 = false;
     for _ in 0..50 {
         a.send(Message::Text(env("a", create("room-a", "req-a2")))).await.unwrap();
@@ -603,16 +627,16 @@ async fn disconnect_window_stale_pending_not_cross_routed() {
                 saw_5001 = true;
                 break;
             }
-            Ok((_, m)) => panic!("断线窗口不应有响应: {m:?}"),
-            Err(_) => {} // 转发已死连接：无应答，重试
+            Ok((_, m)) => panic!("the disconnect window must not yield a response: {m:?}"),
+            Err(_) => {} // forwarding to a dead connection: no answer, retry
         }
     }
-    assert!(saw_5001, "A 应命中断线窗口（5001）");
+    assert!(saw_5001, "A should hit the disconnect window (5001)");
 
-    // 放行 mock2 → agent 重连完成
+    // release mock2 -> the agent completes its reconnect
     gate_tx.send(true).unwrap();
 
-    // B 发请求（5001/无应答重试，有界防挂起）→ 必须收到自己的响应
+    // B sends a request (5001/no-answer retries, bounded to prevent hangs) -> must receive its own response
     let resp = 'b_loop: {
         for _ in 0..50 {
             b.send(Message::Text(env("b", create("room-b", "req-b")))).await.unwrap();
@@ -624,25 +648,25 @@ async fn disconnect_window_stale_pending_not_cross_routed() {
                 Err(_) => {}
             }
         }
-        panic!("B 重试耗尽未收到响应（陈旧 pending 串线）");
+        panic!("B's retries exhausted without a response (stale pending crossing)");
     };
     assert!(
         matches!(&resp, SignalingMessage::WebRtcTransportCreated { peer_id, transport_id, .. }
             if peer_id == "req-b" && transport_id == "t-b"),
-        "B 应收到自己请求的响应, got {resp:?}"
+        "B should receive the response to its own request, got {resp:?}"
     );
 
-    // A 不得收到任何响应（修复前：陈旧槽弹出 → A 收到 B 的响应 = 串线）
+    // A must not receive any response (before the fix: the stale slot pops -> A gets B's response = crossing)
     let extra = tokio::time::timeout(Duration::from_millis(300), read_env(&mut a)).await;
     assert!(
         extra.is_err(),
-        "A 不应收到响应（陈旧 pending 串线）, got {:?}",
+        "A should not receive a response (stale pending crossing), got {:?}",
         extra.ok().map(|(_, m)| m)
     );
     server.await.unwrap();
 }
 
-// ── IMPORTANT-3 回归：relay 的 Frame 不得抢占 P2P 协商归属 ──────────────────
+// -- IMPORTANT-3 regression: relayed Frames must not steal P2P negotiation ownership --─────────────
 
 #[tokio::test]
 async fn frame_relay_does_not_steal_p2p_ownership() {
@@ -650,7 +674,7 @@ async fn frame_relay_does_not_steal_p2p_ownership() {
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         let (mut ws, _r, _role) = mock_handshake(&listener).await;
-        // 收 offer（A）+ Frame（B），任意顺序；随后回显两者 + 发远端应答
+        // receive the offer (A) + the Frame (B), any order; then echo both + answer from the remote
         let mut offer: Option<Message> = None;
         let mut frame: Option<Message> = None;
         for _ in 0..2 {
@@ -661,7 +685,7 @@ async fn frame_relay_does_not_steal_p2p_ownership() {
             } else if t.contains("\"type\":\"frame\"") {
                 frame = Some(m);
             } else {
-                panic!("mock 意外消息: {t}");
+                panic!("mock got an unexpected message: {t}");
             }
         }
         ws.send(offer.unwrap()).await.unwrap();
@@ -685,14 +709,14 @@ async fn frame_relay_does_not_steal_p2p_ownership() {
     join(&mut a, "room-a").await;
     join(&mut b, "room-b").await;
 
-    // A 发 offer（协商归属 = A）
+    // A sends the offer (negotiation ownership = A)
     a.send(Message::Text(env(
         "a",
         SignalingMessage::Sdp { room_id: "room-a".into(), target: None, sdp: "a-offer".into() },
     )))
     .await
     .unwrap();
-    // B 发 Frame（relay 消息；修复前 is_relay_msg 会抢走归属）
+    // B sends a Frame (a relay message; before the fix is_relay_msg would steal ownership)
     b.send(Message::Text(env(
         "b",
         SignalingMessage::Frame {
@@ -706,38 +730,38 @@ async fn frame_relay_does_not_steal_p2p_ownership() {
     .await
     .unwrap();
 
-    // A 收到远端应答（自身 offer 回显去重；归属未被 Frame 抢占）
+    // A receives the remote answer (its own offer echo deduped; ownership not stolen by the Frame)
     let (_, m) = read_env(&mut a).await;
     assert!(
         matches!(&m, SignalingMessage::Sdp { sdp, room_id, .. }
             if sdp == "b-answer" && room_id == "room-a"),
-        "A 应收到远端应答（归属未被 Frame 抢占）, got {m:?}"
+        "A should receive the remote answer (ownership not stolen by the Frame), got {m:?}"
     );
-    // B 不得收到任何消息（Frame 回显去重；应答不属于 B）
+    // B must not receive anything (the Frame echo is deduped; the answer is not B's)
     let extra = tokio::time::timeout(Duration::from_millis(300), read_env(&mut b)).await;
-    assert!(extra.is_err(), "B 不应收到消息, got {:?}", extra.ok().map(|(_, m)| m));
+    assert!(extra.is_err(), "B should not receive a message, got {:?}", extra.ok().map(|(_, m)| m));
     server.await.unwrap();
 }
 
-// ── device-enroll: 远端 Join 公钥指纹全链（challenge→应答→joined）────────────
+// -- device-enroll: remote Join public-key fingerprint full chain (challenge -> answer -> joined) --────────
 
 #[tokio::test]
 async fn remote_join_carries_device_credentials() {
     use base64::Engine as _;
     use ed25519_dalek::VerifyingKey;
-    // 网关侧身份 = sig_vector 同锚 seed（批3 交叉复验同一常量系）
+    // the gateway-side identity = the same sig_vector anchor seed (batch-3 cross-verification of the same constant system)
     let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
     let ident = DeviceIdentity::new("ms-gw-device", ed25519_dalek::SigningKey::from_bytes(&seed));
     let expect_pk = ident.pubkey_b64.clone();
-    // mock 远端 server：PSK 确认后断言 RoomJoin 带 device_pubkey（pubkey 形，无 secret），
-    // 发 challenge → 断言应答验签过（server 同款 verify_strict）→ RoomJoined。
+    // the mock remote server: after the PSK ack, assert RoomJoin carries device_pubkey (pubkey form, no secret),
+    // send a challenge -> assert the answer passes verification (the server's own verify_strict) -> RoomJoined.
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.expect("mock accept");
         let mut ws = tokio_tungstenite::accept_async(stream).await.expect("mock ws handshake");
         let psk = ws.next().await.unwrap().unwrap();
-        assert!(matches!(psk, Message::Text(_)), "首条应为 PSK 文本");
+        assert!(matches!(psk, Message::Text(_)), "first message should be PSK text");
         ws.send(Message::Text(
             serde_json::to_string(&SignalingMessage::Error { code: 0, message: String::new() })
                 .unwrap(),
@@ -751,13 +775,16 @@ async fn remote_join_carries_device_credentials() {
                 assert_eq!(
                     device_id.as_deref(),
                     Some("ms-gw-device"),
-                    "远端 RoomJoin 应携带 device_id"
+                    "the remote RoomJoin should carry device_id"
                 );
-                assert_eq!(device_secret, None, "pubkey 形不携带 secret（D-E3 两形互斥）");
+                assert_eq!(
+                    device_secret, None,
+                    "the pubkey form carries no secret (D-E3 mutual exclusion of the two forms)"
+                );
                 assert_eq!(
                     device_pubkey.as_deref(),
                     Some(expect_pk.as_str()),
-                    "应携带装配出的公钥指纹"
+                    "it should carry the assembled public-key fingerprint"
                 );
             }
             other => panic!("expected RoomJoin, got {other:?}"),
@@ -773,7 +800,7 @@ async fn remote_join_carries_device_credentials() {
         let resp = ws.next().await.unwrap().unwrap();
         match serde_json::from_str::<SignalingMessage>(resp.to_text().unwrap()).unwrap() {
             SignalingMessage::DeviceAuthResponse { room_id, sig } => {
-                assert_eq!(room_id, VEHICLE_ROOM, "应答 room 回显整车房间");
+                assert_eq!(room_id, VEHICLE_ROOM, "the answer's room echoes the vehicle room");
                 let vk_arr: [u8; 32] = base64::engine::general_purpose::STANDARD
                     .decode(&expect_pk)
                     .unwrap()
@@ -792,7 +819,7 @@ async fn remote_join_carries_device_credentials() {
                 VerifyingKey::from_bytes(&vk_arr)
                     .unwrap()
                     .verify_strict(&msg, &ed25519_dalek::Signature::from_bytes(&sig_arr))
-                    .expect("网关应答必须通过验签");
+                    .expect("the gateway answer must pass verification");
             }
             other => panic!("expected DeviceAuthResponse, got {other:?}"),
         }
@@ -808,14 +835,14 @@ async fn remote_join_carries_device_credentials() {
         ))
         .await
         .unwrap();
-        tokio::time::sleep(Duration::from_millis(500)).await; // 保持连接至断言完成
+        tokio::time::sleep(Duration::from_millis(500)).await; // keep the connection until the assertions complete
     });
 
-    // 网关携带设备身份（host-agent 从 identity.json + signing.pem 装配——device-enroll T6/T7）
+    // the gateway carries the device identity (host-agent assembles identity.json + signing.pem - device-enroll T6/T7)
     let mut gateway_cfg = cfg(addr);
     gateway_cfg.device = Some(ident);
     let (port, _handle) = run_gateway(gateway_cfg).await.expect("run_gateway");
-    // 本地子进程 join：合成 RoomJoined 证明远端会话已就绪（连接全链路）
+    // local child-process join: the synthesized RoomJoined proves the remote session is ready (full connection chain)
     let mut child = local(port).await;
     let peer = join(&mut child, "child-room").await;
     assert_eq!(peer, VEHICLE_PEER);

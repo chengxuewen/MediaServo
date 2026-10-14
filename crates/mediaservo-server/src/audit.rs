@@ -14,13 +14,8 @@
 /// Audit event variants covering all security-relevant server operations.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuditEvent {
-    /// S4/a4：座舱急停 WS 审计副本（DC 快路径不经 server，本副本 best-effort 留痕）。
-    EstopAudit {
-        room_id: String,
-        seq: u64,
-        cmd: String,
-        sig_present: bool,
-    },
+    /// S4/a4: cockpit emergency-stop WS audit copy (the DC fast path bypasses the server; this copy is best-effort).
+    EstopAudit { room_id: String, seq: u64, cmd: String, sig_present: bool },
     /// A new room was created.
     RoomCreate { room_id: String },
     /// A room was destroyed (last peer left).
@@ -29,7 +24,7 @@ pub enum AuditEvent {
     PeerJoin { peer_id: String, room_id: String, role: String },
     /// A peer left a room.
     PeerLeave { peer_id: String, room_id: String },
-    /// Authentication succeeded (PSK/JWT/device). device_id 仅设备认证路径有值（G2）。
+    /// Authentication succeeded (PSK/JWT/device). device_id is set only on the device-auth path (G2).
     AuthSuccess { peer_id: String, device_id: Option<String> },
     /// PSK authentication failed.
     AuthFailure { peer_id: String, reason: String },
@@ -45,31 +40,31 @@ pub enum AuditEvent {
     ConsumerJoin { stream_id: String, peer_id: String },
     /// A peer stopped consuming a stream.
     ConsumerLeave { stream_id: String, peer_id: String },
-    /// G3 急停强审计（D-H11）— 谁/何时/哪个车/什么命令。
-    /// when = 日志时间戳（tracing 注入）；vehicle = 目标车 device_id（房间主车）。
+    /// G3 emergency-stop strong audit (D-H11) -- who/when/which vehicle/what command.
+    /// when = log timestamp (injected by tracing); vehicle = target vehicle device_id (room owner vehicle).
     EmergencyCommand { username: String, role: String, vehicle: String, command: String },
-    /// 管理面设备注册（unified-device-admin）— actor = 管理员账号。
+    /// Admin-plane device registration (unified-device-admin) -- actor = admin account.
     DeviceRegistered { device_id: String, actor: String },
-    /// 管理面设备吊销（unified-device-admin）。
+    /// Admin-plane device revocation (unified-device-admin).
     DeviceRevoked { device_id: String, actor: String },
-    /// 管理面设备密钥重置（unified-device-admin）。
+    /// Admin-plane device secret reset (unified-device-admin).
     DeviceSecretReset { device_id: String, actor: String },
-    /// 管理面 API-key 注册（accountless-client-auth T1）— 只落 key_id，secret 永不入事件。
+    /// Admin-plane API-key registration (accountless-client-auth T1) -- stores key_id only; the secret never enters the event.
     ApiKeyRegistered { key_id: String, actor: String },
-    /// 管理面 API-key 吊销（后续 exchange 即 401；已发 JWT 至 exp 自然死）。
+    /// Admin-plane API-key revocation (subsequent exchange gets 401; issued JWTs die naturally at exp).
     ApiKeyRevoked { key_id: String, actor: String },
-    /// 管理面账号创建（unified-device-admin）— actor = 管理员账号。
+    /// Admin-plane account creation (unified-device-admin) -- actor = admin account.
     AccountCreated { username: String, actor: String, role: String },
-    /// 管理面账号更新（unified-device-admin）。
+    /// Admin-plane account update (unified-device-admin).
     AccountUpdated { username: String, actor: String },
-    /// 管理面账号删除（unified-device-admin）。
+    /// Admin-plane account deletion (unified-device-admin).
     AccountDeleted { username: String, actor: String },
-    /// 管理面 PSK 一次性查看（psk-admin-management）。
+    /// Admin-plane PSK one-time view (psk-admin-management).
     PskViewed { actor: String },
-    /// 管理面 PSK 轮换（psk-admin-management）。
+    /// Admin-plane PSK rotation (psk-admin-management).
     PskRotated { actor: String },
-    /// G3 授权拒绝（C15: 所有 denial 必须打日志 + 审计）。
-    /// action: room_join|consume|produce|config_push|emergency。
+    /// G3 authorization denial (C15: every denial must be logged + audited).
+    /// action: room_join|consume|produce|config_push|emergency.
     AuthorizationDenied { action: String, peer_id: String, detail: String },
 }
 
@@ -78,7 +73,7 @@ pub enum AuditEvent {
 /// The `audit.event` field is used as the JSON key for downstream filtering
 /// (e.g., log aggregation, SIEM ingestion).
 pub fn log_event(event: AuditEvent) {
-    // 有界环形缓冲（运维/测试读最近事件; tracing 日志仍是主通道）
+    // Bounded ring buffer (ops/tests read recent events; tracing logs remain the main channel)
     {
         let mut ring = recent_sink().lock().unwrap_or_else(|e| e.into_inner());
         ring.push_back(event.clone());
@@ -87,12 +82,7 @@ pub fn log_event(event: AuditEvent) {
         }
     }
     match event {
-        AuditEvent::EstopAudit {
-            room_id,
-            seq,
-            cmd,
-            sig_present,
-        } => {
+        AuditEvent::EstopAudit { room_id, seq, cmd, sig_present } => {
             tracing::warn!(
                 audit.event = "estop_audit",
                 room_id = %room_id,
@@ -201,7 +191,7 @@ pub fn log_event(event: AuditEvent) {
                 role = %role,
                 vehicle = %vehicle,
                 command = %command,
-                "Emergency command (强审计)"
+                "Emergency command (strong audit)"
             );
         }
         AuditEvent::AuthorizationDenied { action, peer_id, detail } => {
@@ -295,8 +285,8 @@ pub fn log_event(event: AuditEvent) {
     }
 }
 
-// ── 有界审计环形缓冲（运维/测试读最近事件）──────────────────────────────────
-// ponytail: 内存环形 256 条覆盖最近事件; 长期留存靠 tracing 日志管道（SIEM）。
+// -- Bounded audit ring buffer (ops/tests read recent events) --------------------------------
+// ponytail: in-memory ring of 256 entries covers recent events; long-term retention goes through the tracing log pipeline (SIEM).
 
 const AUDIT_RING_CAP: usize = 256;
 
@@ -306,12 +296,12 @@ fn recent_sink() -> &'static std::sync::Mutex<std::collections::VecDeque<AuditEv
     RECENT.get_or_init(|| std::sync::Mutex::new(std::collections::VecDeque::new()))
 }
 
-/// 最近审计事件（有界环形，新事件在尾部；测试与运维查询用）。
+/// Recent audit events (bounded ring, newest at the tail; used by tests and ops queries).
 pub fn recent() -> Vec<AuditEvent> {
     recent_sink().lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect()
 }
 
-/// 清空环形缓冲（测试隔离用 — 各测试按新事件断言）。
+/// Clear the ring buffer (test isolation -- each test asserts on new events).
 pub fn clear_recent() {
     recent_sink().lock().unwrap_or_else(|e| e.into_inner()).clear();
 }
@@ -320,13 +310,13 @@ pub fn clear_recent() {
 mod tests {
     use super::*;
 
-    // 注意: 环形缓冲是进程全局共享 — 并行测试会写入（login 审计等）。
-    // 机械性断言用白盒（直接持锁操作 deque，全程无竞争）; log_event 断言用
-    // presence 过滤（窗口 256 内不会被挤掉），禁止精确位置断言（并行竞态）。
+    // Note: the ring buffer is process-global and shared -- parallel tests write to it (login audits etc.).
+    // Mechanical assertions use white-box access (lock the deque directly, race-free throughout); log_event assertions use
+    // presence filtering (events within the 256 window never get evicted); exact-position assertions are forbidden (parallel races).
 
     #[test]
     fn recent_ring_records_and_bounds() {
-        // 白盒: 持锁期间独占 deque — 确定性验证 封顶 + 淘汰最旧 + 保留最新。
+        // White-box: exclusive deque access while holding the lock -- deterministic verification of cap + evict-oldest + keep-newest.
         let mut ring = recent_sink().lock().unwrap_or_else(|e| e.into_inner());
         ring.clear();
         for i in 0..300 {
@@ -339,7 +329,7 @@ mod tests {
                 ring.pop_front();
             }
         }
-        assert_eq!(ring.len(), AUDIT_RING_CAP, "环形必须封顶");
+        assert_eq!(ring.len(), AUDIT_RING_CAP, "ring must be capped");
         assert_eq!(
             ring[0],
             AuditEvent::AuthorizationDenied {
@@ -347,7 +337,7 @@ mod tests {
                 peer_id: "p44".into(),
                 detail: "d".into(),
             },
-            "最旧事件被淘汰（300 - 256 = 44）"
+            "oldest event evicted (300 - 256 = 44)"
         );
         assert_eq!(
             ring.back(),
@@ -356,14 +346,14 @@ mod tests {
                 peer_id: "p299".into(),
                 detail: "d".into(),
             }),
-            "最新事件保留"
+            "newest event kept"
         );
         ring.clear();
     }
 
     #[test]
     fn log_event_appends_to_ring() {
-        // log_event 的 push 路径（presence 断言 — 并行写入不挤掉窗口内事件）。
+        // log_event's push path (presence assertions -- parallel writes never evict in-window events).
         clear_recent();
         log_event(AuditEvent::AuthorizationDenied {
             action: "log-event-path".into(),
@@ -376,7 +366,7 @@ mod tests {
                 AuditEvent::AuthorizationDenied { action, peer_id, .. }
                     if action == "log-event-path" && peer_id == "p"
             )),
-            "log_event 必须写入环形缓冲"
+            "log_event must write into the ring buffer"
         );
     }
 
@@ -402,7 +392,7 @@ mod tests {
                     && vehicle == "ms-car1"
                     && command == "e-stop"
             )),
-            "急停审计事件必须含 谁/角色/车/命令"
+            "emergency-stop audit event must contain who/role/vehicle/command"
         );
     }
 }

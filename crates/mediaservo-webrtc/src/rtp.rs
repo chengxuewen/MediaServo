@@ -1,11 +1,11 @@
 use crate::RTCError;
 use crate::track::{TrackKind, TrackRef};
 
-/// 编码器后端选择（对齐 webrtc-sys VideoEncoderBackend）。
-/// 语义: 偏好非强制 — 不可用时 libwebrtc 自动 fallback（video_encoder_factory.cpp:511-566 实证）。
+/// encoder backend selection (aligned with webrtc-sys VideoEncoderBackend).
+/// semantics: a preference, not a mandate -- libwebrtc falls back automatically when unavailable (proven at video_encoder_factory.cpp:511-566).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RTCVideoEncoderBackend {
-    /// libwebrtc 默认策略（清空选择器）
+    /// the libwebrtc default policy (selector cleared)
     Auto,
     Software,
     Hardware,
@@ -31,18 +31,18 @@ impl RTCVideoEncoderBackend {
     }
 }
 
-/// 发送端降级偏好（对齐 vendor webrtc-sys DegradationPreference 4 变体，C18 不裁剪）。
-/// Fixed = vendor MaintainFramerateAndResolution（帧率/分辨率双保，只丢帧）。
-/// 字符串形态（fixed/framerate/resolution/balanced）供 translate/streamer 解析复用。
+/// sender-side degradation preference (aligned with vendor webrtc-sys DegradationPreference's 4 variants, C18 no trimming).
+/// Fixed = vendor MaintainFramerateAndResolution (both framerate/resolution kept, frames dropped only).
+/// The string forms (fixed/framerate/resolution/balanced) are reused by the translate/streamer parsers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum RTCDegradationPreference {
-    /// 不降级（仅丢帧）——vendor MaintainFramerateAndResolution
+    /// no degradation (frames dropped only) -- vendor MaintainFramerateAndResolution
     Fixed,
-    /// 保帧率，降分辨率（弱网实时优先，遥控场景）
+    /// keep framerate, drop resolution (weak-network realtime first, the teleop scenario)
     MaintainFramerate,
-    /// 保分辨率，降帧率（画质/取证优先）
+    /// keep resolution, drop framerate (image quality/forensics first)
     MaintainResolution,
-    /// 两者均衡（libwebrtc 缺省语义，本库缺省）
+    /// balance both (the libwebrtc default semantics, this lib's default)
     #[default]
     Balanced,
 }
@@ -56,19 +56,19 @@ impl std::str::FromStr for RTCDegradationPreference {
             "resolution" => Ok(Self::MaintainResolution),
             "balanced" => Ok(Self::Balanced),
             _ => Err(format!(
-                "非法 degradation 值 {s:?}（合法: fixed|framerate|resolution|balanced）"
+                "illegal degradation value {s:?} (legal: fixed|framerate|resolution|balanced)"
             )),
         }
     }
 }
 
-/// 发送端内容提示（对齐 W3C contentHint；本库仅落 {None, Fluid}，AD-5——
-/// Detailed/Text 无监控相机场景，YAGNI，扩枚举纯加法）。
+/// sender-side content hint (aligned with the W3C contentHint; this lib only lands {None, Fluid}, AD-5 --
+/// Detailed/Text have no monitoring-camera scenario, YAGNI, extending the enum is purely additive).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum RTCRtpContentHint {
     #[default]
     None,
-    /// 高运动内容（libwebrtc 倾向保帧率）
+    /// high-motion content (libwebrtc leans toward keeping framerate)
     Fluid,
 }
 
@@ -77,7 +77,7 @@ impl std::str::FromStr for RTCRtpContentHint {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_lowercase().as_str() {
             "fluid" => Ok(Self::Fluid),
-            _ => Err(format!("非法 content-hint 值 {s:?}（合法: fluid）")),
+            _ => Err(format!("illegal content-hint value {s:?} (legal: fluid)")),
         }
     }
 }
@@ -88,7 +88,7 @@ pub struct RTCRtpSender {
     pub track: TrackRef,
     pub track_id: String,
     pub kind: TrackKind,
-    /// v2: backend 句柄（对象方法分派）— ActivePc 具体类型（async trait 非 object-safe）
+    /// v2: the backend handle (object-method dispatch) -- the ActivePc concrete type (async traits are not object-safe)
     pub(crate) backend: Option<crate::backend::ActivePc>,
 }
 
@@ -99,13 +99,13 @@ impl RTCRtpSender {
         Self { track, track_id, kind, backend: None }
     }
 
-    /// v2: 绑定 backend 句柄（get_senders 构造时填充）
+    /// v2: bind the backend handle (filled when get_senders constructs)
     pub fn with_backend(mut self, backend: crate::backend::ActivePc) -> Self {
         self.backend = Some(backend);
         self
     }
 
-    /// W3C RTCRtpSender.getParameters — 经 backend 分派（PcBackend 同步方法）
+    /// W3C RTCRtpSender.getParameters -- dispatched via the backend (a PcBackend sync method)
     pub fn get_parameters(&self) -> Result<crate::rtp::RTCRtpParameters, RTCError> {
         use crate::backend::PcBackend as _;
         match &self.backend {
@@ -114,15 +114,15 @@ impl RTCRtpSender {
         }
     }
 
-    /// W3C RTCRtpSender.setParameters — v2 补
+    /// W3C RTCRtpSender.setParameters -- added in v2
     pub fn set_parameters(&self, _params: crate::rtp::RTCRtpParameters) -> Result<(), RTCError> {
-        Err(RTCError::NotSupported("set_parameters: backend 未实现".into()))
+        Err(RTCError::NotSupported("set_parameters: the backend has not implemented it".into()))
     }
 
-    /// v2 (encoder-bitrate): 设置发送编码器 min/max 码率（bps）。
-    /// 聚焦式 API（非 W3C setParameters 全量）— 后端 cxx 保真往返只改 bitrate 字段（PIT-76）。
-    /// min 为受限链路 best-effort 下限（libwebrtc 分配层生效, 编码器无硬下限）;
-    /// max 为可靠硬上限。None = 不限制。
+    /// v2 (encoder-bitrate): set the sending encoder's min/max bitrate (bps).
+    /// A focused API (not the full W3C setParameters) -- the backend's cxx-faithful round trip touches only the bitrate fields (PIT-76).
+    /// min = the best-effort floor on constrained links (effective at the libwebrtc allocation layer, no hard encoder floor);
+    /// max = the reliable hard ceiling. None = unlimited.
     pub fn set_encoding_bitrate(
         &self,
         min_bps: Option<u64>,
@@ -135,9 +135,9 @@ impl RTCRtpSender {
         }
     }
 
-    /// v2 (multi-stream P1): 设置发送编码器帧率上限（fps）。聚焦式 API（非 W3C
-    /// setParameters 全量）— 后端 cxx 保真往返只改 enc[].max_framerate 字段（bitrate 同模式）。
-    /// None = 不限制（has_max_framerate=false）。
+    /// v2 (multi-stream P1): set the sending encoder's framerate cap (fps). A focused API (not the full W3C
+    /// setParameters) -- the backend's cxx-faithful round trip touches only the enc[].max_framerate field (the same pattern as bitrate).
+    /// None = unlimited (has_max_framerate=false).
     pub fn set_encoding_framerate(&self, max_fps: Option<f64>) -> Result<(), RTCError> {
         use crate::backend::PcBackend as _;
         match &self.backend {
@@ -146,8 +146,8 @@ impl RTCRtpSender {
         }
     }
 
-    /// v2 (encoder-backend-codec-config T1): 设置编码器后端（软/硬, PcBackend track_id 分派）。
-    /// SetEncoderSelector 语义: 偏好非强制（不可用自动 fallback）。
+    /// v2 (encoder-backend-codec-config T1): set the encoder backend (soft/hard, dispatched via PcBackend track_id).
+    /// SetEncoderSelector semantics: a preference, not a mandate (automatic fallback when unavailable).
     pub fn set_video_encoder_backend(
         &self,
         backend: RTCVideoEncoderBackend,
@@ -159,8 +159,8 @@ impl RTCRtpSender {
         }
     }
 
-    /// v2 (qos-framerate-priority): 设置降级偏好——聚焦式 API（bitrate 同模式），
-    /// 后端 cxx 保真往返只改 RtpParameters.degradation_preference 字段。
+    /// v2 (qos-framerate-priority): set the degradation preference -- a focused API (the same pattern as bitrate),
+    /// the backend's cxx-faithful round trip touches only the RtpParameters.degradation_preference field.
     pub fn set_degradation_preference(
         &self,
         pref: RTCDegradationPreference,
@@ -172,8 +172,8 @@ impl RTCRtpSender {
         }
     }
 
-    /// v2 (qos-framerate-priority): 设置内容 hint（track 级，非 SetParameters）——
-    /// 后端经 media_to_video 转 VideoTrack 后 set_content_hint。
+    /// v2 (qos-framerate-priority): set the content hint (track-level, not SetParameters) --
+    /// the backend goes through media_to_video to the VideoTrack then set_content_hint.
     pub fn set_content_hint(&self, hint: RTCRtpContentHint) -> Result<(), RTCError> {
         use crate::backend::PcBackend as _;
         match &self.backend {
@@ -182,14 +182,14 @@ impl RTCRtpSender {
         }
     }
 
-    /// W3C RTCRtpSender.replaceTrack — v2 补
+    /// W3C RTCRtpSender.replaceTrack -- added in v2
     pub fn replace_track(&self, _new_track_id: &str) -> Result<(), RTCError> {
-        Err(RTCError::NotSupported("replace_track: backend 未实现".into()))
+        Err(RTCError::NotSupported("replace_track: the backend has not implemented it".into()))
     }
 
-    /// W3C RTCRtpSender.setStreams — v2 补
+    /// W3C RTCRtpSender.setStreams -- added in v2
     pub fn set_streams(&self, _stream_ids: Vec<String>) -> Result<(), RTCError> {
-        Err(RTCError::NotSupported("set_streams: backend 未实现".into()))
+        Err(RTCError::NotSupported("set_streams: the backend has not implemented it".into()))
     }
 }
 
@@ -225,17 +225,17 @@ pub struct RTCRtpEncodingParameters {
     pub ssrc: Option<u64>,
     pub active: bool,
     pub max_bitrate: Option<u64>,
-    /// v2 (encoder-bitrate): 最低码率 (bps) — 受限链路 best-effort 下限, None=不限制
+    /// v2 (encoder-bitrate): the min bitrate (bps) -- the best-effort floor on constrained links, None = unlimited
     pub min_bitrate: Option<u64>,
     pub max_framerate: Option<f64>,
     pub scale_resolution_down_by: Option<f64>,
     pub rid: Option<String>,
-    /// W3C: 编码选择（引用 codecs 中的 mime_type）— v2 补
+    /// W3C: codec selection (references mime_type within codecs) -- added in v2
     pub codec: Option<String>,
-    /// W3C: 音频断续传输 (discontinuous transmission) — v2 补
+    /// W3C: discontinuous transmission (DTX) -- added in v2
     pub dtx: Option<bool>,
-    /// W3C requestKeyFrame — 周期关键帧触发（PIT-76）。
-    /// libwebrtc 消费后内部清标志；每次 set_parameters 传 true 恰好触发一次。
+    /// W3C requestKeyFrame -- periodic keyframe triggering (PIT-76).
+    /// libwebrtc clears the flag internally after consuming; each set_parameters passing true triggers exactly one.
     pub request_key_frame: bool,
 }
 
@@ -277,7 +277,7 @@ pub struct RTCRtcpParameters {
 #[derive(Debug, Clone, Default)]
 pub struct RTCRtpParameters {
     pub transaction_id: String,
-    /// W3C: m-line 关联 ID — v2 补
+    /// W3C: the m-line association ID -- added in v2
     pub mid: String,
     pub codecs: Vec<RTCRtpCodecParameters>,
     pub encodings: Vec<RTCRtpEncodingParameters>,
@@ -323,17 +323,17 @@ impl Default for RTCRtpTransceiverInit {
     }
 }
 
-/// W3C RTCRtpTransceiver — 纯数据视图（协商后快照语义）。
-/// 内部持有不透明 backend 句柄（SharedPtr/Arc，不 pub）防 GC。
-/// 对象方法（set_direction/stop/set_codec_preferences）经 backend 分派。
+/// W3C RTCRtpTransceiver -- a pure-data view (post-negotiation snapshot semantics).
+/// Internally holds an opaque backend handle (SharedPtr/Arc, not pub) to defeat GC.
+/// Object methods (set_direction/stop/set_codec_preferences) dispatch via the backend.
 #[derive(Debug, Clone)]
 pub struct RTCRtpTransceiver {
     pub mid: Option<String>,
-    /// 期望方向（可写，经 set_direction）
+    /// The desired direction (writable, via set_direction)
     pub direction: RTCRtpTransceiverDirection,
-    /// 协商后方向（只读）
+    /// The negotiated direction (read-only)
     pub current_direction: Option<RTCRtpTransceiverDirection>,
-    /// W3C: 是否已停止 — v2 补
+    /// W3C: whether stopped -- added in v2
     pub stopped: bool,
     pub sender: RTCRtpSender,
     pub receiver: RTCRtpReceiver,
@@ -354,7 +354,7 @@ impl RTCRtpTransceiver {
     }
 }
 
-/// W3C RTCRtpCapabilities (spec: getCapabilities 返回值)
+/// W3C RTCRtpCapabilities (spec: the getCapabilities return value)
 #[derive(Debug, Clone, Default)]
 pub struct RTCRtpCapabilities {
     pub codecs: Vec<RTCRtpCodecCapability>,
@@ -405,7 +405,7 @@ mod tests {
             RTCVideoEncoderBackend::from_config("videotoolbox"),
             Some(RTCVideoEncoderBackend::VideoToolbox)
         );
-        // 大小写不敏感 + 未知值 None
+        // case-insensitive + unknown values None
         assert_eq!(
             RTCVideoEncoderBackend::from_config("HARDWARE"),
             Some(RTCVideoEncoderBackend::Hardware)
@@ -414,7 +414,7 @@ mod tests {
         assert_eq!(RTCVideoEncoderBackend::from_config(""), None);
     }
 
-    // qos-framerate-priority T1: DegradationPreference / ContentHint 解析与缺省
+    // qos-framerate-priority T1: DegradationPreference / ContentHint parsing and defaults
     #[test]
     fn degradation_preference_from_str_legal() {
         assert_eq!(
@@ -433,7 +433,7 @@ mod tests {
             "balanced".parse::<RTCDegradationPreference>().unwrap(),
             RTCDegradationPreference::Balanced
         );
-        // 大小写/空白不敏感（from_config 同风格）
+        // case/whitespace-insensitive (the from_config style)
         assert_eq!(
             " FRAMERATE ".parse::<RTCDegradationPreference>().unwrap(),
             RTCDegradationPreference::MaintainFramerate

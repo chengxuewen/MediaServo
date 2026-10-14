@@ -1,35 +1,35 @@
-//! ClientConfig — 所有端点/凭证由调用方传入（S2 纪律：无默认 localhost/9800/psk）。
+//! ClientConfig -- every endpoint/credential is passed in by the caller (the S2 discipline: no default localhost/9800/psk).
 //!
-//! URL 派生纯函数 + SFU peer key 镜像 field 语义。
+//! URL derivation pure functions + the SFU peer key mirroring field semantics.
 
 use crate::error::ClientError;
 use mediaservo_common::protocol::PeerRole;
 
-/// client v2 配置——构造即用，无隐式默认值。
+/// The client v2 config -- ready at construction, no implicit defaults.
 #[derive(Clone)]
 pub struct ClientConfig {
-    /// 信令 WS 地址（如 `ws://10.0.0.2:9800/ws`）——直传 link SignalClient。
+    /// The signaling WS address (e.g. `ws://10.0.0.2:9800/ws`) -- passed straight to the link SignalClient.
     pub signaling_url: String,
-    /// server 房间 ID。
+    /// The server room ID.
     pub room_id: String,
-    /// 可选 PSK 直传（server 未配时省略；空 ≠ 猜测默认值）。
+    /// Optional PSK passed straight through (omit when the server has none; empty != guessing a default).
     pub psk: Option<String>,
-    /// 可选账号 JWT（登录输出；v1 WS 透传仅 link 手工注入）。
+    /// Optional account JWT (the login output; the v1 WS passthrough only injects by hand via link).
     pub jwt: Option<String>,
-    /// 入房角色（cockpit 侧 = Remote 或 Consumer）。
+    /// The join role (the cockpit side = Remote or Consumer).
     pub role: PeerRole,
-    /// S4/T3.5：e-stop HMAC 预共享密钥（与车端 `MEDIASERVO_CONTROL_HMAC_KEY` 同值）。
-    /// None = 急停不带 sig（车端未配置 key 时照常执行；车端配置后 estop 会被拒）。
+    /// S4/T3.5: the e-stop HMAC pre-shared key (the same value as the vehicle's `MEDIASERVO_CONTROL_HMAC_KEY`).
+    /// None = e-stops carry no sig (the vehicle executes as usual without a key; once configured, unsigned estops get rejected).
     pub hmac_key: Option<String>,
-    /// 设备身份实例目录（accountless-client-auth T3 / D283 公钥链接线）：内含
-    /// `identity.json` + `etc/link/signing.pem`（`msrtc-host init` 同布局）。
-    /// Some 且文件齐 → RoomJoin 带 device_pubkey + Ed25519 挑战应答（免账号进门，
-    /// 身份 = Device）；identity.json 缺失 → 静默无身份（PSK/JWT 路原样）；
-    /// PEM 缺失/损坏 → connect 显式报错（不静默降级，C15）。
+    /// The device identity instance dir (the accountless-client-auth T3 / D283 public-key wiring): contains
+    /// `identity.json` + `etc/link/signing.pem` (the same layout as `msrtc-host init`).
+    /// Some with both files present -> RoomJoin carries device_pubkey + an Ed25519 challenge response (account-less entry,
+    /// identity = Device); identity.json missing -> silently identity-less (the PSK/JWT paths unchanged);
+    /// PEM missing/corrupt -> connect errors explicitly (never a silent downgrade, C15).
     pub identity_dir: Option<std::path::PathBuf>,
 }
 
-// jwt 在 Debug 中脱敏——凭证永不入日志。
+// jwt redacted in Debug -- credentials never enter logs.
 impl std::fmt::Debug for ClientConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClientConfig")
@@ -42,10 +42,10 @@ impl std::fmt::Debug for ClientConfig {
     }
 }
 
-/// SFU peer key 派生（镜像 `field::peer_id(role)` 语义，I2 同形状）。
+/// SFU peer key derivation (mirrors `field::peer_id(role)` semantics, the I2 same shape).
 ///
-/// SFU 房间 peer ID 是"谁在说话"语义标签，非身份标识。
-/// identity.json/device_id 才是身份。peer ID 重叠无实际影响（SFU per-conn）。
+/// An SFU room's peer ID is a "who is speaking" semantic label, not an identity.
+/// identity.json/device_id is the identity. Peer ID overlap has no practical effect (SFU per-conn).
 #[must_use]
 pub fn sfu_peer_key(role: &PeerRole) -> &'static str {
     match role {
@@ -55,10 +55,10 @@ pub fn sfu_peer_key(role: &PeerRole) -> &'static str {
     }
 }
 
-/// 从信令 URL 派生 HTTP 基地址（v1 login 面）。
+/// Derive the HTTP base address from the signaling URL (the v1 login surface).
 ///
 /// `"ws://10.0.0.2:9800/ws"` → `"http://10.0.0.2:9800"`
-/// `"wss://host/ws"` → `"https://host"`（login 层面后续 Reject scheme）。
+/// `"wss://host/ws"` -> `"https://host"` (the login layer rejects the scheme afterwards).
 pub fn http_base_from_signaling(url: &str) -> Result<String, ClientError> {
     let (scheme, rest) = url.split_once("://").ok_or_else(|| {
         ClientError::MalformedResponse(format!("no scheme in signaling URL: {url}"))

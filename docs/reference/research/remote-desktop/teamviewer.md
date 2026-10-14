@@ -1,501 +1,509 @@
-# TeamViewer 参考分析
-> 生成日期：2026-07-16 | 分类：远程桌面
+# TeamViewer Reference Analysis
 
-## 1. 产品画像
-- **名称**：TeamViewer
-- **开发者**：TeamViewer AG（德国 Göppingen，2005 年成立，2019 年法兰克福上市 MDAX 企业）
-- **首次发布**：2005 年（前身为 VNC 衍生项目）
-- **产品定位**：全球远程桌面市场的定义者和最大规模商业化平台，从个人远程协助到企业数字化转型的综合方案
-- **目标用户群体**：
-  - 个人用户（免费版，非商业用途）
-  - 中小企业 IT 部门（远程支持和办公）
-  - MSP/托管服务提供商（TeamViewer Tensor 多租户管理）
-  - 大型企业（IoT 远程管理、AR 辅助维修）
-  - 教育和医疗（远程教学、远程医疗）
-- **许可 / 商业模式**：订阅制（SaaS），免费版仅限个人非商业使用；企业版按席位/设备数年费制；月活设备 3 亿+；年营收 6 亿+ 欧元（2024 年）；2,500+ 员工
+> Generated: 2026-07-16 | Category: Remote desktop
 
-## 2. 技术特性
-### 整体架构
-```
-┌────────────────────────────────────────────────────────────────────┐
-│                     TeamViewer Global Infrastructure               │
-│                                                                    │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
-│  │   Master Server   │  │  KeepAlive Server │  │  Router Server   │  │
-│  │                   │  │                   │  │                  │  │
-│  │  · 用户身份认证   │  │  · 在线状态维护   │  │  · 数据中继转发  │  │
-│  │  · 账户/设备管理  │  │  · 心跳监测       │  │  · TCP/UDP隧道   │  │
-│  │  · 会话鉴权       │  │  · 路由器发现     │  │  · HTTP 443隧道  │  │
-│  │  · License 校验   │  │  · 连接参数协商   │  │  · 全球1000+节点 │  │
-│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘  │
-│           │                     │                     │            │
-│           └─────────────────────┼─────────────────────┘            │
-│                                 │                                  │
-│  ┌──────────────────────────────┴──────────────────────────────┐  │
-│  │                  TeamViewer Client (C++/Qt)                  │  │
-│  │                                                              │  │
-│  │  ┌───────────────────────────────────────────────────────┐  │  │
-│  │  │              连接策略金字塔 (4层fallback)              │  │  │
-│  │  │                                                       │  │  │
-│  │  │  Layer 1: UDP 打洞 (5938) ──── ~70% 连接走此路径      │  │  │
-│  │  │  Layer 2: TCP P2P (5938) ──── UDP被挡时尝试           │  │  │
-│  │  │  Layer 3: TCP 中继 (5938) ── 通过Router Server转发    │  │  │
-│  │  │  Layer 4: HTTP 隧道 (443) ── 穿透最严格防火墙环境     │  │  │
-│  │  └───────────────────────────────────────────────────────┘  │  │
-│  │                                                              │  │
-│  │  安全层：                                                    │  │
-│  │  ┌───────────────────────────────────────────────────────┐  │  │
-│  │  │  SRP 密码认证 ──── 密码从不离开客户端内存              │  │  │
-│  │  │  RSA-4096 公钥交换                                      │  │  │
-│  │  │  AES-256 会话加密                                       │  │  │
-│  │  │  TLS 1.3 传输加密 (v15.73+)                            │  │  │
-│  │  │  Perfect Forward Secrecy                                │  │  │
-│  │  └───────────────────────────────────────────────────────┘  │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  基础设施: ISO 27001 认证数据中心 (德国/奥地利/荷兰)              │
-│            全球 1000+ 路由节点，年连接完成率 >99%                  │
-└────────────────────────────────────────────────────────────────────┘
-```
+## 1. Product Profile
 
-### 连接建立流程详细步骤
+- **Name**: TeamViewer
+- **Developer**: TeamViewer AG (Goeppingen, Germany, founded 2005, listed on the MDAX in Frankfurt in 2019)
+- **First release**: 2005 (its predecessor was a VNC derivative project)
+- **Product positioning**: The definer of the global remote desktop market and the largest commercially scaled platform, covering everything from personal remote assistance to comprehensive enterprise digital transformation solutions
+- **Target user groups**:
+  - Individual users (free tier, non-commercial use)
+  - IT departments of small and medium businesses (remote support and office work)
+  - MSP / managed service providers (TeamViewer Tensor multi-tenant management)
+  - Large enterprises (IoT remote management, AR-assisted maintenance)
+  - Education and healthcare (remote teaching, telemedicine)
+- **License / business model**: Subscription (SaaS); the free tier is limited to personal non-commercial use; enterprise editions are billed annually per seat/device; 300M+ monthly active devices; more than 600M EUR annual revenue (2024); 2,500+ employees
+
+## 2. Technical Characteristics
+### Overall Architecture
 ```
-客户端                           Master Server                   远端主机
-  │                                   │                              │
-  │── 1. TCP连接 + 设备注册 ──────────►│                              │
-  │── 2. SRP认证(密码不传输) ──────────►│                              │
-  │     · 客户端证明知道密码而不发送它  │                              │
-  │     · 使用零知识证明机制            │                              │
-  │◄── 3. 认证成功 + JWT Token ───────│                              │
-  │                                    │                              │
-  │── 4. 查询目标设备在线/离线 ────────►│◄── 心跳保活(持续) ──────────│
-  │◄── 5. 返回在线 + KeepAlive路由 ───│                              │
-  │                                    │                              │
-  │── 6. KeepAlive Server协商 ────────►│◄── 6. KeepAlive协商 ───────│
-  │     · 交换双方NAT类型信息           │     · 交换NAT类型信息        │
-  │     · 选择最优连接路径              │     · 确认端口可用性         │
-  │                                    │                              │
-  │── 7. UDP打洞探测(端口5938) ────────────────────────────────────►│
-  │     [成功：约70%的case]                                          │
-  │◄═══════════ AES-256 加密 P2P 会话 ═════════════════════════════►│
-  │                                    │                              │
-  │     [失败：NAT类型不兼容]           │                              │
-  │── 8. TCP直连尝试(端口5938) ───────────────────────────────────►│
-  │     [成功：约15%的case]                                          │
-  │◄═══════════ AES-256 加密 P2P 会话 ═════════════════════════════►│
-  │                                    │                              │
-  │     [失败：防火墙严格]              │                              │
-  │── 9. Router中继请求 ───────────────►│◄── 9. Router中继请求 ──────│
-  │◄════ Router 中继转发(5938) ═══════►│◄════ Router 中继转发 ══════│
-  │                                    │                              │
-  │     [失败：5938端口也被封]          │                              │
-  │── 10. HTTP隧道(端口443) ───────────►│◄── 10. HTTP隧道 ──────────│
-  │◄════ WebSocket封装 + HTTPS ═══════►│◄════ WebSocket封装 ════════│
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                             TeamViewer Global Infrastructure                         │
+│                                                                                      │
+│  ┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐  │
+│  │       Master Server     │  │     KeepAlive Server    │  │      Router Server      │  │
+│  │                         │  │                         │  │                         │  │
+│  │  · user identity auth   │  │  · online status         │  │  · data relay forwarding │  │
+│  │  · account/device mgmt  │  │  · heartbeat monitoring  │  │  · TCP/UDP tunnel       │  │
+│  │  · session auth         │  │  · router discovery      │  │  · HTTP 443 tunnel      │  │
+│  │  · License validation   │  │  · conn. param negot.    │  │  · 1000+ nodes worldwide │  │
+│  └────────┬────────────────┘  └────────┬────────────────┘  └────────┬────────────────┘  │
+│           │                            │                            │                    │
+│           └────────────────────────────┼────────────────────────────┘                    │
+│                                        │                                                │
+│  ┌─────────────────────────────────────┴──────────────────────────────────────────────┐  │
+│  │                          TeamViewer Client (C++/Qt)                                │  │
+│  │                                                                                     │  │
+│  │  ┌───────────────────────────────────────────────────────────────────────────────┐  │  │
+│  │  │                 Connection Strategy Pyramid (4-layer fallback)                  │  │  │
+│  │  │                                                                                 │  │  │
+│  │  │  Layer 1: UDP hole punching (5938) ──── ~70% of connections take this path     │  │  │
+│  │  │  Layer 2: TCP P2P (5938) ──── attempted when UDP is blocked                    │  │  │
+│  │  │  Layer 3: TCP relay (5938) ── forwarded through the Router Server              │  │  │
+│  │  │  Layer 4: HTTP tunnel (443) ── penetrates the strictest firewall environments  │  │  │
+│  │  └───────────────────────────────────────────────────────────────────────────────┘  │  │
+│  │                                                                                     │  │
+│  │  Security layer:                                                                    │  │
+│  │  ┌───────────────────────────────────────────────────────────────────────────────┐  │  │
+│  │  │  SRP password authentication ──── the password never leaves client memory      │  │  │
+│  │  │  RSA-4096 public key exchange                                                  │  │  │
+│  │  │  AES-256 session encryption                                                    │  │  │
+│  │  │  TLS 1.3 transport encryption (v15.73+)                                        │  │  │
+│  │  │  Perfect Forward Secrecy                                                       │  │  │
+│  │  └───────────────────────────────────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                      │
+│  Infrastructure: ISO 27001 certified data centers (Germany/Austria/Netherlands)       │
+│                1000+ routing nodes worldwide, annual connection completion rate >99%  │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 关键技术能力
-| 能力 | 详情 |
+### Detailed Steps of Connection Establishment
+```
+Client                             Master Server                     Remote Host
+  │                                    │                              │
+  │── 1. TCP connect + device reg. ───►│                              │
+  │── 2. SRP auth (password never sent)►│                             │
+  │     · proves it knows the password without sending it             │
+  │     · uses a zero-knowledge proof mechanism                       │
+  │◄── 3. Auth OK + JWT token ─────────│                              │
+  │                                    │                              │
+  │── 4. Query target device online/offline►│◄── heartbeat keep-alive (continuous) │
+  │◄── 5. Online + KeepAlive route ─────│                              │
+  │                                    │                              │
+  │── 6. KeepAlive Server negotiation ──►│◄── 6. KeepAlive negotiation──│
+  │     · exchange both NAT types        │     · exchange NAT types      │
+  │     · select optimal connection path │     · confirm port availability│
+  │                                    │                              │
+  │── 7. UDP hole punching probe (5938) ─────────────────────────────►│
+  │     [success: about 70% of cases]                                        │
+  │◄═══════════ AES-256 encrypted P2P session ═══════════════════════►│
+  │                                    │                              │
+  │     [failure: incompatible NAT types]                               │
+  │── 8. TCP direct connection attempt (5938) ───────────────────────►│
+  │     [success: about 15% of cases]                                        │
+  │◄═══════════ AES-256 encrypted P2P session ═══════════════════════►│
+  │                                    │                              │
+  │     [failure: strict firewall]                                     │
+  │── 9. Router relay request ──────────────►│◄── 9. Router relay request ────│
+  │◄════ Router relay forwarding (5938) ═══►│◄════ Router relay forwarding ═══│
+  │                                    │                              │
+  │     [failure: port 5938 also blocked]                             │
+  │── 10. HTTP tunnel (port 443) ───────────►│◄── 10. HTTP tunnel ─────────│
+  │◄════ WebSocket wrapping + HTTPS ═══════►│◄════ WebSocket wrapping ═════│
+```
+
+### Key Technical Capabilities
+| Capability | Details |
 |------|------|
-| 视频编码 | 多编码器自适应选择；支持软件编码和硬件加速（NVENC/Intel QSV）；动态分辨率/帧率按网络条件调整；支持 4K 分辨率 |
-| 传输协议 | 自研专有协议（非公开文档化）；主端口 TCP/UDP 5938；fallback 到 443 (HTTP隧道) 和 80 |
-| 安全机制 | SRP-6a 密码认证（密码不离开客户端）→ RSA-4096 密钥交换 → AES-256 会话加密 → TLS 1.3 传输加密 (v15.73+) → PFS 前向安全性 |
-| 连接策略 | 4 层金字塔：UDP打洞(~70%) → TCP P2P(~15%) → 中继(~10%) → HTTP隧道(~5%)；年连接成功率 >99% |
-| 平台支持 | Windows / macOS / Linux / iOS / Android / ChromeOS / 树莓派；覆盖 127 个操作系统变体 |
-| 全球基础设施 | 1000+ 路由节点部署于 ISO 27001 数据中心（德国/奥地利/荷兰） |
-| 会话特性 | 录制、聊天、语音/视频通话、白板标注、远程打印、Wake-on-LAN、黑屏模式、双光标 |
-| 企业功能 | Management Console、Conditional Access、AD/Azure AD 集成、SIEM 日志、MSP 多租户 |
+| Video encoding | Adaptive multi-encoder selection; software encoding and hardware acceleration (NVENC/Intel QSV); dynamic resolution/framerate adjustment according to network conditions; supports 4K resolution |
+| Transport protocol | Proprietary in-house protocol (not publicly documented); main port TCP/UDP 5938; falls back to 443 (HTTP tunnel) and 80 |
+| Security mechanisms | SRP-6a password authentication (password never leaves the client) -> RSA-4096 key exchange -> AES-256 session encryption -> TLS 1.3 transport encryption (v15.73+) -> PFS forward secrecy |
+| Connection strategy | 4-layer pyramid: UDP hole punching (~70%) -> TCP P2P (~15%) -> relay (~10%) -> HTTP tunnel (~5%); annual connection success rate >99% |
+| Platform support | Windows / macOS / Linux / iOS / Android / ChromeOS / Raspberry Pi; covers 127 operating system variants |
+| Global infrastructure | 1000+ routing nodes deployed in ISO 27001 data centers (Germany/Austria/Netherlands) |
+| Session features | Recording, chat, voice/video calls, whiteboard annotation, remote printing, Wake-on-LAN, black screen mode, dual cursors |
+| Enterprise features | Management Console, Conditional Access, AD/Azure AD integration, SIEM logging, MSP multi-tenancy |
 
-### SRP (Secure Remote Password) 协议详解
+### Detailed Explanation of the SRP (Secure Remote Password) Protocol
 ```
-┌──────────────────────────────────────────────────────────────┐
-│            SRP-6a — 密码认证零知识证明流程                    │
-│                                                              │
-│  1. 注册阶段:                                                 │
-│     客户端: s = random_salt()                                 │
-│             x = SHA256(s | SHA256(username | ":" | pwd))     │
-│             v = g^x mod N    ← 密码验证器(非密码本身)         │
-│     服务器: 存储 {username, s, v} ← 不存储密码或密码哈希      │
-│                                                              │
-│  2. 认证阶段:                                                 │
-│     客户端: a = random(); A = g^a mod N                      │
-│     服务器: b = random(); B = k*v + g^b mod N                │
-│     双方独立计算: u = SHA256(A | B)                          │
-│     客户端: S_c = (B - k*g^x)^(a+u*x) mod N                  │
-│     服务器: S_s = (A*v^u)^b mod N                            │
-│     验证: S_c == S_s (双方共享同一会话密钥但不传输)           │
-│                                                              │
-│  安全属性:                                                    │
-│  · 密码从不在网络上传输（零知识证明）                         │
-│  · 服务器被攻破：攻击者只有 {s, v}，无法计算实际密码          │
-│  · 中间人攻击：M1 无法伪造证明（不知道密码则无法完成交换）    │
-│  · 历史会话安全：每次认证生成新的随机 a,b → 即使未来破获      │
-│    密码，历史会话也无法解密 (Perfect Forward Secrecy)         │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│               SRP-6a — zero-knowledge proof password authentication  │
+│                                                                      │
+│  1. Registration phase:                                              │
+│     Client: s = random_salt()                                        │
+│             x = SHA256(s | SHA256(username | ":" | pwd))             │
+│             v = g^x mod N    <- password verifier (not the password) │
+│     Server: stores {username, s, v} <- never stores the password or  │
+│             a hash of the password                                   │
+│                                                                      │
+│  2. Authentication phase:                                            │
+│     Client: a = random(); A = g^a mod N                              │
+│     Server: b = random(); B = k*v + g^b mod N                        │
+│     Both compute independently: u = SHA256(A | B)                    │
+│     Client: S_c = (B - k*g^x)^(a+u*x) mod N                         │
+│     Server: S_s = (A*v^u)^b mod N                                   │
+│     Verification: S_c == S_s (both sides derive the same session     │
+│     key without ever transmitting it)                                │
+│                                                                      │
+│  Security properties:                                               │
+│  · The password is never transmitted over the network (zero-knowledge proof) │
+│  · If the server is compromised: the attacker only has {s, v} and    │
+│    cannot derive the actual password                                 │
+│  · Man-in-the-middle: M1 cannot forge the proof (without knowing the │
+│    password the exchange cannot be completed)                        │
+│  · Historical sessions stay safe: each authentication generates new  │
+│    random a,b -> even if the password is later broken, past sessions │
+│    cannot be decrypted (Perfect Forward Secrecy)                    │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-### 技术栈
-- **客户端**：C++ / Qt（跨平台 GUI 框架）
-- **后端**：专有 C++ 服务端 + 全云基础设施
-- **协议**：自研专有协议（非公开文档化，2017/2024 年两次发布安全白皮书）
-- **加密栈**：SRP-6a 认证 + RSA-4096 密钥交换 + AES-256 会话加密 + TLS 1.3
-- **基础设施**：全球 1000+ 节点，ISO 27001 认证数据中心，24/7 运维
-- **移动端 SDK**：原生（iOS Swift/ObjC、Android Kotlin/Java）
-- **Web 客户端**：基于 WebAssembly 和 WebSocket
+### Tech Stack
+- **Client**: C++ / Qt (cross-platform GUI framework)
+- **Backend**: proprietary C++ servers + fully cloud-hosted infrastructure
+- **Protocol**: proprietary in-house protocol (not publicly documented; two security whitepapers published in 2017 and 2024)
+- **Encryption stack**: SRP-6a authentication + RSA-4096 key exchange + AES-256 session encryption + TLS 1.3
+- **Infrastructure**: 1000+ nodes worldwide, ISO 27001 certified data centers, 24/7 operations
+- **Mobile SDK**: native (iOS Swift/ObjC, Android Kotlin/Java)
+- **Web client**: based on WebAssembly and WebSocket
 
-## 3. 功能概览
-### 核心功能模块
-- **远程桌面控制**：完整的远程桌面体验，支持多显示器、4K@60fps、自适应画质和帧率、双光标模式、真彩色、GPU 加速渲染
-- **文件传输**：双向文件传输，支持文件夹、拖拽操作、断点续传、带宽限制设置
-- **远程打印**：从远程主机直接在本地打印机打印文档，无需先传输文件。支持彩色/黑白、纸张尺寸选择
-- **VPN 隧道**：建立安全的设备间 VPN 通道，所有 TCP/UDP 应用流量通过加密隧道传输，支持远程访问内网资源
-- **会话录制**：完整录制远程会话为视频文件（支持压缩格式），基于角色的访问控制（谁可以查看/下载录制）
-- **会议与协作**：视频会议（最多 300 人参加）、屏幕共享、白板标注、远程演示
-- **聊天**：文字聊天、表情、文件分享、会话内即时消息
+## 3. Feature Overview
+### Core Feature Modules
+- **Remote desktop control**: a complete remote desktop experience, with multi-monitor support, 4K@60fps, adaptive quality and framerate, dual-cursor mode, true color, GPU-accelerated rendering
+- **File transfer**: bidirectional file transfer, with folder support, drag and drop, resume-after-interruption, and configurable bandwidth limits
+- **Remote printing**: print documents from the remote host directly to a local printer without transferring the file first. Supports color/grayscale and paper size selection
+- **VPN tunnel**: establishes a secure device-to-device VPN channel; all TCP/UDP application traffic is carried through the encrypted tunnel, enabling remote access to intranet resources
+- **Session recording**: records a complete remote session as a video file (compressed formats supported), with role-based access control over who can view or download recordings
+- **Meetings and collaboration**: video meetings (up to 300 participants), screen sharing, whiteboard annotation, remote presentations
+- **Chat**: text chat, emoji, file sharing, in-session instant messages
 
-### 特色功能
-- **IoT 远程访问**：TeamViewer IoT 提供嵌入式设备（树莓派、工控机、POS 机、数字标牌、智能传感器）的远程管理和监控。支持 MQTT 协议采集传感器数据、远程固件更新、批量设备管理
-- **AR 远程协助**：TeamViewer Frontline 使用 AR 眼镜（如 HoloLens、RealWear）进行远程专家指导。专家可在现场工人视野中叠加 AR 标记（箭头、圆圈、文字）、冻结画面标注、共享 PDF 手册和示意图
-- **Conditional Access（条件访问策略）**：企业版支持基于设备健康状态（是否有杀毒软件、是否越狱）、地理位置（国家/城市级别）、网络 IP（内网/外网/VPN）的条件访问规则。不合规设备自动拒绝连接或限定为只读模式
-- **企业集成生态**：Microsoft Intune 集成（移动设备管理）、Active Directory / Azure AD 同步（用户和组自动同步）、SAML 2.0（单点登录）、SIEM 安全日志导出（Splunk/Sentinel/ArcSight 格式）、API 自动化
-- **Management Console 管理控制台**：Web 界面实现设备分组（按部门/地区/功能）、策略模板批量下发、连接审批工作流（需要管理员批准才能发起远程会话）、使用统计和报表、License 分配和回收
-- **MSP 专属能力**：TeamViewer Tensor 提供大规模设备管理（万级并发连接）、批量 MSI/Intune 部署、远程静默升级、客户独立分组和计费、品牌白标、API 全自动化流程
-- **Servicecamp 工单系统**：内置的工单和服务请求管理系统，支持 SLA 管理、工单分配、客户门户，与远程控制功能无缝集成
+### Signature Features
+- **IoT remote access**: TeamViewer IoT provides remote management and monitoring for embedded devices (Raspberry Pi, industrial PCs, POS terminals, digital signage, smart sensors). Supports MQTT-based sensor data collection, remote firmware updates, and batch device management
+- **AR remote assistance**: TeamViewer Frontline uses AR glasses (such as HoloLens and RealWear) for remote expert guidance. Experts can overlay AR markers (arrows, circles, text) into the on-site worker's view, freeze-and-annotate frames, and share PDF manuals and diagrams
+- **Conditional Access (conditional access policies)**: the enterprise edition supports conditional access rules based on device health (antivirus present, jailbroken or not), geographic location (country/city level), and network IP (intranet/extranet/VPN). Non-compliant devices are automatically denied or restricted to read-only mode
+- **Enterprise integration ecosystem**: Microsoft Intune integration (mobile device management), Active Directory / Azure AD sync (users and groups sync automatically), SAML 2.0 (single sign-on), SIEM security log export (Splunk/Sentinel/ArcSight formats), API automation
+- **Management Console**: a web UI for device grouping (by department/region/function), batch policy template rollout, connection approval workflows (an administrator must approve before a remote session can start), usage statistics and reporting, License assignment and reclaim
+- **MSP-specific capabilities**: TeamViewer Tensor provides large-scale device management (tens of thousands of concurrent connections), batch MSI/Intune deployment, remote silent upgrades, independent customer grouping and billing, brand white-labeling, and fully automated API workflows
+- **Servicecamp ticket system**: a built-in ticket and service request management system with SLA management, ticket assignment, and a customer portal, seamlessly integrated with remote control
 
-### 扩展性 / 插件机制
-- **TeamViewer API**：RESTful API 用于自动化设备管理、连接创建、会话报告、用户管理
-- **Integration SDK**：将远程控制能力嵌入第三方 Web 应用或桌面应用（支持 JavaScript/TypeScript）
-- **IoT Agent**：轻量级嵌入式 Agent 可安装在资源受限设备上（内存 <64MB 可运行）
-- **SSO 集成**：支持 SAML 2.0 / OIDC / OAuth2 对接企业统一认证系统
-- **Conditional Access 规则引擎**：支持自定义规则（基于 JSON 的策略定义）
-- **Web 客户端**：无需安装任何软件，通过浏览器即可远程控制（WebAssembly）
+### Extensibility / Plugin Mechanism
+- **TeamViewer API**: RESTful API for automating device management, connection creation, session reporting, and user management
+- **Integration SDK**: embeds remote control capabilities into third-party web or desktop applications (JavaScript/TypeScript supported)
+- **IoT Agent**: a lightweight embedded agent installable on resource-constrained devices (runs with less than 64MB of memory)
+- **SSO integration**: supports SAML 2.0 / OIDC / OAuth2 for connecting to enterprise identity systems
+- **Conditional Access rule engine**: supports custom rules (policy definitions based on JSON)
+- **Web client**: no software installation required, remote control through the browser (WebAssembly)
 
-### 核心功能技术细节深入
+### Deep Dive into Core Feature Technical Details
 
-#### 视频传输质量自适应机制
-TeamViewer 使用多编码器自适应选择策略，根据两端硬件能力和网络状况动态切换编码方案：
+#### Adaptive Video Transport Quality Mechanism
+TeamViewer uses an adaptive multi-encoder selection strategy, switching encoding schemes dynamically based on the hardware capability of both endpoints and the network conditions:
 
-| 网络条件 | 带宽 | 分辨率策略 | 帧率策略 | 画质策略 |
+| Network condition | Bandwidth | Resolution strategy | Framerate strategy | Quality strategy |
 |---------|------|-----------|---------|---------|
-| 优秀（LAN） | >10Mbps | 原始分辨率，4K 支持 | 60fps | 真彩色，无压缩 |
-| 良好（宽带） | 2-10Mbps | 1920x1080 自适应 | 30-60fps | 高质量，轻微压缩 |
-| 一般（移动4G） | 0.5-2Mbps | 1280x720 动态缩放 | 15-30fps | 中等质量 |
-| 受限（3G/弱网） | <500kbps | 1024x768 或更低 | 5-15fps | 降色深 + 增压缩 |
-| 极弱（卫星） | <200kbps | 800x600 | 1-5fps | 256色 + 高压缩 |
+| Excellent (LAN) | >10Mbps | Native resolution, 4K supported | 60fps | True color, no compression |
+| Good (broadband) | 2-10Mbps | 1920x1080 adaptive | 30-60fps | High quality, light compression |
+| Average (mobile 4G) | 0.5-2Mbps | 1280x720 dynamic scaling | 15-30fps | Medium quality |
+| Constrained (3G/weak network) | <500kbps | 1024x768 or lower | 5-15fps | Reduced color depth + increased compression |
+| Extremely weak (satellite) | <200kbps | 800x600 | 1-5fps | 256 colors + heavy compression |
 
-#### 连接策略金字塔详细概率分布
-基于 TeamViewer 公开数据和用户社区统计：
+#### Detailed Probability Distribution of the Connection Strategy Pyramid
+Based on TeamViewer's public data and user community statistics:
 ```
-UDP 打洞成功 (~70%):
-  └── 锥形 NAT + 锥形 NAT : 最高成功率
-  └── 锥形 NAT + 端口限制型 : 较高成功率
-  └── 端口限制型 + 端口限制型 : 中等
+UDP hole punching success (~70%):
+  └── Full Cone NAT + Full Cone NAT : highest success rate
+  └── Full Cone NAT + Port Restricted : relatively high success rate
+  └── Port Restricted + Port Restricted : medium
 
 TCP P2P (~15%):
-  └── UDP 被防火墙封锁但 TCP 5938 放行
-  └── 一端或两端对称 NAT（UDP 打洞失败但 TCP 洞可打）
+  └── UDP blocked by the firewall but TCP 5938 is allowed
+  └── One or both ends are Symmetric NAT (UDP hole punching fails but a TCP hole can be punched)
 
-中继转发 (~10%):
-  └── 双方 NAT 均对称且无端口预测规律
-  └── 非标准端口全部被封锁，仅中继可用
+Relay forwarding (~10%):
+  └── Both ends are Symmetric NAT with no predictable port pattern
+  └── All non-standard ports are blocked, only relay is usable
 
-HTTP 隧道 (~5%):
-  └── 极严格企业防火墙（仅放行 443 出站 HTTP/HTTPS）
-  └── WebSocket 封装过 HTTP 代理（需 CONNECT 方法支持）
+HTTP tunnel (~5%):
+  └── Extremely strict enterprise firewall (only outbound 443 HTTP/HTTPS allowed)
+  └── WebSocket wrapping over an HTTP proxy (requires CONNECT method support)
 ```
 
-### TeamViewer 版本演进关键节点
-| 版本 | 年份 | 关键更新 |
+### Key Milestones in TeamViewer's Version Evolution
+| Version | Year | Key updates |
 |------|------|---------|
-| v4.x | 2008 | 首个商业正式版，引入文件传输和 VPN 功能 |
-| v6.x | 2011 | 多语言支持，Web 客户端概念验证 |
-| v7.x | 2012 | 引入 Session Recording（会话录制） |
-| v8.x | 2013 | iOS/Android 移动客户端诞生，移动远程控制 |
-| v9.x | 2014 | 引入 Management Console（Web 管理控制台） |
-| v10.x | 2015 | IoT 功能引入，首个非桌面远程控制场景 |
-| v11.x | 2016 | 安全事件后的安全加固版本（Trusted Devices + 强制 2FA 选项） |
-| v12.x | 2017 | AR 辅助维修（TeamViewer Frontline），桌面→工业场景扩展 |
-| v13.x | 2018 | Pilot 远程协助引入，视频通话 + 屏幕共享深度融合 |
-| v14.x | 2019 | Tensor 多租户 MSP 平台，百万级设备管理 |
-| v15.x | 2022 | TLS 1.3 引入，Web 客户端基于 WebAssembly，Conditional Access |
-| v15.73+ | 2024 | TLS 1.3 完整覆盖所有通信路径，证书管理增强 |
+| v4.x | 2008 | First commercial stable release; introduced file transfer and VPN features |
+| v6.x | 2011 | Multi-language support; web client proof of concept |
+| v7.x | 2012 | Introduced Session Recording |
+| v8.x | 2013 | iOS/Android mobile clients born; remote control from mobile devices |
+| v9.x | 2014 | Introduced the Management Console (web administration) |
+| v10.x | 2015 | IoT features introduced; the first non-desktop remote control scenario |
+| v11.x | 2016 | Security hardening release after the security incident (Trusted Devices + optional mandatory 2FA) |
+| v12.x | 2017 | AR-assisted maintenance (TeamViewer Frontline); expansion from desktop to industrial scenarios |
+| v13.x | 2018 | Introduced Pilot remote assistance; deep integration of video calls and screen sharing |
+| v14.x | 2019 | Tensor multi-tenant MSP platform; million-device management |
+| v15.x | 2022 | TLS 1.3 introduced; WebAssembly-based web client; Conditional Access |
+| v15.73+ | 2024 | TLS 1.3 fully covers all communication paths; enhanced certificate management |
 
-### API 能力矩阵
-| API 类别 | 端点示例 | 用途 |
+### API Capability Matrix
+| API category | Endpoint example | Purpose |
 |---------|---------|------|
-| 设备管理 | GET /api/v1/devices | 列出所有受控设备 |
-| 用户管理 | POST /api/v1/users | 创建/管理用户账户 |
-| 会话控制 | POST /api/v1/sessions | 创建远程会话 |
-| 报告 | GET /api/v1/reports/connections | 连接历史报告 |
-| 分组管理 | PUT /api/v1/groups/{id} | 设备分组操作 |
-| 策略 | POST /api/v1/policies | 下发 Conditional Access 策略 |
-| License | GET /api/v1/licenses | 查询 License 使用状态 |
-## 4. 现状与生态
-- **当前版本**：v15.x 系列（不同平台独立版本号，桌面端 v15.73+ 支持 TLS 1.3） ；持续月度/季度更新
-- **用户规模**：
-  - 月活设备 3 亿+
-  - 632,000+ 付费客户
-  - 年营收 6 亿+ 欧元（2024 财年）
-  - 2,500+ 员工，25+ 全球办公室
-  - 40 亿+ 次年度远程连接会话
-- **社区规模**：
-  - TeamViewer Community（官方论坛）：活跃用户和技术支持
-  - Stack Overflow：teamviewer 标签有数千问题
-  - 官方博客和知识库：定期更新最佳实践和用例
-- **文档 / SDK / API 生态**：
-  - 官方知识库和文档中心 (community.teamviewer.com)：覆盖所有产品线
-  - Integration API 文档完善，提供多语言 SDK（Python/Java/C#/PHP/Node.js/TypeScript）
-  - MSI/Intune/GPO 批量部署指南
-  - 安全白皮书（2017 年初版 + 2024 年更新版）
-  - SOC 2 Type II / ISO 27001 / HIPAA 合规认证文档
-  - 视频教程和在线培训课程
-- **已知缺陷或限制**：
-  1. **中心化架构的单点故障风险**：所有连接建立依赖 Master Server 和 KeepAlive Server，历史上曾出现大规模宕机导致全球用户无法建立新连接
-  2. **2016 年安全事件**：俄罗斯 APT 组织利用泄露账号凭据访问大量用户设备。TeamViewer 声称是用户密码重用导致而非自身基础设施被攻破，但事件暴露了中心化身份系统的脆弱性
-  3. **协议不透明**：专有协议无法被第三方安全审计。2017 年安全白皮书描述加密模型，但 2024 年才更新到 TLS 1.3，说明协议现代化进展不可控
-  4. **免费版商业用途检测过激**：算法频繁将个人用户误标记为"商业使用"，导致合法的个人远程连接被中断。用户投诉持续多年
-  5. **订阅费用高**：企业订阅按年付费，Business License $50.90/月（单一用户），Corporate License $206.90/月。大型部署（100+ 席位）年费可达数十万美元
-  6. **客户端体积大**：Windows 安装包 30MB+，远大于 AnyDesk (3.7MB) 和 RustDesk (10MB+)
+| Device management | GET /api/v1/devices | List all managed devices |
+| User management | POST /api/v1/users | Create and manage user accounts |
+| Session control | POST /api/v1/sessions | Create a remote session |
+| Reporting | GET /api/v1/reports/connections | Connection history reports |
+| Group management | PUT /api/v1/groups/{id} | Device grouping operations |
+| Policy | POST /api/v1/policies | Push Conditional Access policies |
+| License | GET /api/v1/licenses | Query License usage status |
+## 4. Status & Ecosystem
+- **Current version**: the v15.x series (independent version numbers per platform; desktop v15.73+ supports TLS 1.3); continuous monthly/quarterly updates
+- **User scale**:
+  - 300M+ monthly active devices
+  - 632,000+ paying customers
+  - More than 600M EUR annual revenue (fiscal 2024)
+  - 2,500+ employees and 25+ offices worldwide
+  - Over 4 billion remote connection sessions per year
+- **Community scale**:
+  - TeamViewer Community (official forum): active users and technical support
+  - Stack Overflow: the teamviewer tag has thousands of questions
+  - Official blog and knowledge base: regularly updated best practices and use cases
+- **Documentation / SDK / API ecosystem**:
+  - Official knowledge base and documentation center (community.teamviewer.com): covers all product lines
+  - Well-maintained Integration API docs with multi-language SDKs (Python/Java/C#/PHP/Node.js/TypeScript)
+  - Batch deployment guides for MSI/Intune/GPO
+  - Security whitepapers (2017 first edition + 2024 updated edition)
+  - SOC 2 Type II / ISO 27001 / HIPAA compliance documentation
+  - Video tutorials and online training courses
+- **Known defects or limitations**:
+  1. **Single point of failure risk of the centralized architecture**: every connection establishment depends on the Master Server and KeepAlive Server; historically there have been large-scale outages during which users worldwide could not establish new connections
+  2. **2016 security incident**: a Russian APT organization used leaked account credentials to access many user devices. TeamViewer claimed the cause was user password reuse rather than a breach of its own infrastructure, but the incident exposed the fragility of a centralized identity system
+  3. **Opaque protocol**: the proprietary protocol cannot be independently security-audited by third parties. The 2017 security whitepaper described the encryption model, but it was not updated to TLS 1.3 until 2024, showing that protocol modernization is not controllable
+  4. **Over-aggressive commercial-use detection in the free tier**: the algorithm frequently mislabels individual users as "commercial use", causing legitimate personal remote connections to be interrupted. User complaints have continued for years
+  5. **High subscription costs**: enterprise subscriptions are billed annually; Business License is $50.90/month (single user) and Corporate License is $206.90/month. Large deployments (100+ seats) can reach hundreds of thousands of dollars per year
+  6. **Large client footprint**: the Windows installer is 30MB+, far larger than AnyDesk (3.7MB) and RustDesk (10MB+)
 
-  7. **移动端电池消耗**：iOS/Android 后台连接维护消耗大量电量，长期运行（>2小时）需要外接电源。TeamViewer 未使用 iOS 的 BGTaskScheduler 或 Android WorkManager 优化后台电池策略
-  8. **Mac 客户端权限复杂度**：macOS Catalina+(10.15+) 引入 Screen Recording 权限（System Preferences → Security & Privacy），用户首次使用时需多步手动授权。大量用户反馈卡在权限配置上，远程技术支持无法远程指导此步骤
-  9. **Web 客户端的功能阉割**：基于 WebAssembly 的 Web 客户端无法支持多显示器切换、文件传输断点续传、远程打印等本地客户端完全支持的功能。Web 客户端主要作为应急方案而非正式工具
-## 5. 市场定位
-- **主要应用行业**：
-  - IT 支持与运维（MSP 场景最核心）
-  - 制造业（远程维护设备、AR 辅助维修）
-  - 医疗（远程医疗会诊、医疗设备远程监控、HIPAA 合规）
-  - 零售（POS 系统远程管理、数字标牌内容更新）
-  - 教育（远程教学、虚拟实验室）
-  - 金融（远程访问交易终端、合规审计）
-- **竞品对比简表**：
+  7. **Mobile battery consumption**: maintaining background connections on iOS/Android drains the battery heavily, and long-running sessions (>2 hours) require external power. TeamViewer does not use iOS BGTaskScheduler or Android WorkManager to optimize background battery behavior
+  8. **Complex permission model on macOS**: macOS Catalina+ (10.15+) introduces the Screen Recording permission (System Preferences -> Security & Privacy), requiring several manual authorization steps on first use. Many users report getting stuck on permission configuration, and remote technical support cannot walk them through it remotely
+  9. **Feature castration of the web client**: the WebAssembly-based web client cannot support multi-monitor switching, resumable file transfer, or remote printing, all of which the local client fully supports. The web client mainly serves as an emergency fallback rather than a first-class tool
+## 5. Market Positioning
+- **Main application industries**:
+  - IT support and operations (the MSP scenario is the most core)
+  - Manufacturing (remote equipment maintenance, AR-assisted repair)
+  - Healthcare (telemedicine consultation, remote monitoring of medical devices, HIPAA compliance)
+  - Retail (POS system remote management, digital signage content updates)
+  - Education (remote teaching, virtual laboratories)
+  - Finance (remote access to trading terminals, compliance auditing)
+- **Competitor comparison summary**:
 
-| 竞品 | 优势 | 劣势 |
+| Competitor | Strengths | Weaknesses |
 |------|------|------|
-| AnyDesk | DeskRT 延迟更低、客户端小 10 倍、Erlang 后端更可靠 | 品牌不如、企业功能完整度不如、500+ 员工 vs 2500+ |
-| RustDesk | 完全开源、可自托管、零费用 | 功能成熟度和生态差距大、打洞成功率不如、无 IoT/AR 能力 |
-| Splashtop | 定价更低（约 TeamViewer 的 1/3）、On-Premises 部署、AI 编码器 | 品牌影响力较小、全球节点覆盖不如、企业集成生态不如 |
-| Parsec | 7ms 延迟标杆（游戏场景）、GPU 零拷贝 | 无 IoT/AR/MSP 功能、桌面场景全面性不如、仅硬件编码 |
+| AnyDesk | Lower DeskRT latency, client 10x smaller, more reliable Erlang backend | Weaker brand, less complete enterprise feature set, 500+ employees vs 2500+ |
+| RustDesk | Fully open source, self-hostable, zero cost | Large gap in feature maturity and ecosystem, worse hole punching success, no IoT/AR capabilities |
+| Splashtop | Much lower pricing (about 1/3 of TeamViewer), on-premises deployment, AI encoder | Smaller brand influence, weaker global node coverage, weaker enterprise integration ecosystem |
+| Parsec | 7ms latency benchmark (gaming scenarios), GPU zero-copy | No IoT/AR/MSP features, less complete for desktop scenarios, hardware encoding only |
 
-- **定价 / 许可**：
-  - **Remote Access（个人）**：免费（非商业用途，功能基本完整）
-  - **Business License**：$50.90/月/许可（1 用户，最多管理 200 设备）
-  - **Premium License**：$102.90/月/许可（1 用户，最多管理 300 设备，支持多用户会话）
-  - **Corporate License**：$206.90/月/许可（1 用户，最多管理 500 设备，MSI 部署、Conditional Access、设备分组）
-  - **Tensor（MSP/企业）**：定制报价（多租户、万级并发、品牌白标、自建中继节点可选）
-  - 以上为 2025 年参考价格，按年订阅约享 15-20% 折扣
+- **Pricing / licensing**:
+  - **Remote Access (individual)**: free (non-commercial use, essentially full feature set)
+  - **Business License**: $50.90/month/license (1 user, manages up to 200 devices)
+  - **Premium License**: $102.90/month/license (1 user, manages up to 300 devices, supports multi-user sessions)
+  - **Corporate License**: $206.90/month/license (1 user, manages up to 500 devices, MSI deployment, Conditional Access, device grouping)
+  - **Tensor (MSP/enterprise)**: custom quote (multi-tenant, tens of thousands of concurrent connections, white-label branding, self-hosted relay nodes optional)
+  - The above are reference prices for 2025; annual subscriptions get an approximate 15-20% discount
 
-## 6. 产品特色
-1. **全球最大规模的商业化远程桌面平台**：月活设备 3 亿+、1000+ 全球中继节点、127 个操作系统变体覆盖、632,000+ 付费客户。团队规模（2,500+ 员工）和基础设施投入是任何其他远程桌面产品难以企及的。这种规模带来的网络效应（更多中继节点 → 更低延迟 → 更多用户）形成了极强的商业护城河。
-2. **4 层连接策略金字塔的可达性工程**：UDP 打洞（~70%）→ TCP P2P（~15%）→ 中继（~10%）→ HTTP 隧道（~5%）。这种层层 fallback 设计确保了年连接完成率 >99%。对企业防火墙环境（通常封锁非标准端口和 UDP）的 HTTP 443 隧道 fallback 尤为关键。
-3. **SRP 密码认证协议**：Secure Remote Password 协议确保密码从不离开客户端内存，不通过网络传输。即使 TeamViewer 服务器被攻破，攻击者也无法获取用户密码或解密历史会话。这是远程桌面认证安全的黄金标准。2016 年安全事件中，即使攻击者获取了用户凭证，SRP 机制确保了他们无法通过协议层面窃取更多密码。
-4. **从远程桌面到工业数字化的演进路径**：IoT 远程管理和 AR 辅助维修展示了远程桌面技术的天花板远不止"远程控制电脑"。TeamViewer 的战略是将远程连接能力从桌面扩展到任何带芯片的设备。MediaServo 的 WebRTC 遥操作和车端推流场景可借鉴这一演进思路。
-5. **企业级管理体系的完整性**：Management Console + Conditional Access + AD/Azure AD 同步 + SIEM 导出 + MSP 多租户 + Servicecamp 工单 —— 构成最完整的企业远程桌面管理闭环。这种"控制面"的完整性是 MediaServo 功能规划的重要参考。
+## 6. Product Highlights
+1. **The largest commercially scaled remote desktop platform in the world**: 300M+ monthly active devices, 1000+ global relay nodes, coverage of 127 operating system variants, 632,000+ paying customers. Its team size (2,500+ employees) and infrastructure investment are out of reach for any other remote desktop product. The network effects this scale creates (more relay nodes -> lower latency -> more users) form an extremely strong commercial moat.
+2. **Reachability engineering via the 4-layer connection strategy pyramid**: UDP hole punching (~70%) -> TCP P2P (~15%) -> relay (~10%) -> HTTP tunnel (~5%). This layer-by-layer fallback design guarantees an annual connection completion rate above 99%. The HTTP 443 tunnel fallback is especially critical for enterprise firewall environments (which typically block non-standard ports and UDP).
+3. **SRP password authentication protocol**: the Secure Remote Password protocol ensures the password never leaves client memory and is never transmitted over the network. Even if TeamViewer's servers are compromised, an attacker cannot obtain user passwords or decrypt historical sessions. This is the gold standard of remote desktop authentication security. In the 2016 security incident, even though the attackers obtained user credentials, the SRP mechanism ensured they could not steal more passwords at the protocol layer.
+4. **An evolution path from remote desktop to industrial digitalization**: IoT remote management and AR-assisted repair show that the ceiling of remote desktop technology is far more than "remotely controlling a computer". TeamViewer's strategy is to extend remote connectivity from the desktop to any device with a chip. MediaServo's WebRTC teleoperation and vehicle streaming scenarios can borrow this evolution thinking.
+5. **Completeness of the enterprise management system**: Management Console + Conditional Access + AD/Azure AD sync + SIEM export + MSP multi-tenancy + Servicecamp tickets -- together they form the most complete closed loop of enterprise remote desktop management. This completeness of the "control plane" is an important reference for MediaServo's feature planning.
 
-## 7. 对 MediaServo 的参考价值
-### [Adopt] 可直接借鉴
-- **SRP 或 PAKE 类密码认证协议**：避免密码传输，确保即使信令服务器沦陷也无法获取用户密码。对 MediaServo AuthProvider trait 的密码认证实现有直接参考价值
-- **4 层连接策略金字塔的分层 fallback 模式**：P2P 优先 + 中继 fallback + HTTP 隧道最终兜底。MediaServo 应该设计类似的网络策略分层
-- **TLS 1.3 + PFS 的会话加密模型**：确保每次会话使用独立的会话密钥，历史会话安全
-- **Conditional Access 条件访问策略**：基于设备健康/位置/网络的条件连接审批，可作为 MediaServo LicenseManager 的前置校验参考
-- **API/SDK 商业化模式**：将远程控制能力以 SDK 形式提供给第三方嵌入，打开 B2B2B 的商业化路径
+## 7. Reference Value for MediaServo
+### [Adopt] Directly Adoptable
+- **SRP or PAKE-style password authentication protocols**: avoids transmitting the password and ensures that even a compromised signaling server cannot obtain user passwords. Directly relevant to the password authentication implementation of MediaServo's AuthProvider trait
+- **The layered fallback pattern of the 4-layer connection strategy pyramid**: P2P first + relay fallback + HTTP tunnel as the final safety net. MediaServo should design a similar layered network strategy
+- **The TLS 1.3 + PFS session encryption model**: each session uses an independent session key, keeping historical sessions safe
+- **Conditional Access policies**: conditional connection approval based on device health/location/network, usable as a reference for the pre-validation stage of MediaServo's LicenseManager
+- **The API/SDK commercialization model**: delivering remote control capability as an SDK for third-party embedding opens a B2B2B commercial path
 
-### [Adapt] 需修改后采用
-- **中心化 Master Server 模型** → 分布式/联邦化信令服务：MediaServo 的信令支持自托管 + 多实例部署，避免单点故障
-- **专有封闭协议** → 基于 WebRTC 标准协议族（ICE/STUN/TURN + DTLS-SRTP + RTP/RTCP），协议公开文档化
-- **全球中继节点部署** → 渐进式部署：Phase 1 支持单节点/少量节点中继，Phase 2+ 逐步扩展到多区域
-- **Management Console** → MediaServo 权限驱动 UI：通过后台返回的 Permission 对象动态加载功能模块，而非独立的管理控制台
-- **IoT 和 AR** → 不属于 Phase 0 远程桌面范围，可在 Phase 2+ 的 WebRTC 遥操作和监控相机场景中扩展
+### [Adapt] Needs Modification Before Adoption
+- **Centralized Master Server model** -> distributed/federated signaling service: MediaServo signaling supports self-hosting + multi-instance deployment, avoiding a single point of failure
+- **Proprietary closed protocol** -> the standard WebRTC protocol family (ICE/STUN/TURN + DTLS-SRTP + RTP/RTCP), with the protocol publicly documented
+- **Global relay node deployment** -> incremental deployment: Phase 1 supports single-node or few-node relay, Phase 2+ gradually expands to multiple regions
+- **Management Console** -> MediaServo permission-driven UI: dynamically load feature modules based on the Permission object returned by the backend, instead of a standalone administration console
+- **IoT and AR** -> outside the Phase 0 remote desktop scope; can be extended in Phase 2+ WebRTC teleoperation and surveillance camera scenarios
 
-### [Avoid] 已知坑 / 不适用场景
-- **中心化单点故障**：信令服务必须是分布式的。MediaServo 在设计上支持自托管信令和联邦化部署，任何时候不依赖单一节点或单一厂商
-- **协议不透明**：MediaServo 核心协议必须基于 RFC 标准并公开文档化。确保第三方可独立审计安全性和实现兼容客户端
-- **过度激进的商业用途检测**：MediaServo License 检测逻辑应透明、可预测、有明确的申诉机制。不应出现类似 TeamViewer 的"误标记个人用户为商业使用"的用户体验问题
-- **高昂的企业定价**：MediaServo 作为基础设施组件而非独立 SaaS 产品，成本结构应参照技术栈实际成本而非市场对标定价
+### [Avoid] Known Pitfalls / Non-Applicable Scenarios
+- **Centralized single point of failure**: the signaling service must be distributed. MediaServo is designed to support self-hosted signaling and federated deployment, never relying on a single node or single vendor at any time
+- **Opaque protocol**: MediaServo core protocols must be based on RFC standards and publicly documented. This ensures third parties can independently audit security and implement compatible clients
+- **Over-aggressive commercial-use detection**: MediaServo License detection logic should be transparent, predictable, and have a clear appeal mechanism. It should not suffer the kind of user experience problem TeamViewer has, where individual users are mislabeled as commercial users
+- **Exorbitant enterprise pricing**: as an infrastructure component rather than a standalone SaaS product, MediaServo's cost structure should follow the actual cost of the tech stack rather than market-benchmark pricing
 
-- **定价模型的启示**：TeamViewer 的高定价是其最大弱点——企业用户年费可达数十万美元。MediaServo 作为基础设施组件，定价模型应参照技术栈实际成本而非市场对标。开源 + 技术支持服务的商业模式可能是更可持续的路径。但 TeamViewer 的高定价也验证了远程桌面技术的商业价值——如果提供足够的差异化价值（IoT/AR/全球覆盖），用户愿意支付高溢价
-- **IoT 和 AR 的演进路径**：TeamViewer 从远程桌面到 IoT 远程管理再到 AR 辅助维修的产品演进，展示了远程连接技术的全方位可能性。MediaServo 当前聚焦 Phase 0 远程桌面，但 WebRTC 遥操作和车端推流场景天然适合发展为 MediaServo 的 IoT/AR 扩展方向
-- **企业功能完整性的参考模板**：虽然不照搬 TeamViewer 的中心化管理模式，但其企业功能的完整性（Conditional Access/AD 集成/SIEM/SSO/MSP 多租户）是 MediaServo Phase 2+ 企业功能规划的功能清单参考
+- **Insights from the pricing model**: TeamViewer's high pricing is its biggest weakness -- enterprise customers can pay hundreds of thousands of dollars per year. As an infrastructure component, MediaServo's pricing model should follow the actual cost of the tech stack rather than market benchmarking. An open source + technical support services business model may be a more sustainable path. But TeamViewer's high pricing also validates the commercial value of remote desktop technology -- if enough differentiated value is provided (IoT/AR/global coverage), users are willing to pay a large premium
+- **The IoT and AR evolution path**: TeamViewer's product evolution from remote desktop to IoT remote management and then to AR-assisted repair demonstrates the full range of possibilities for remote connectivity technology. MediaServo is currently focused on Phase 0 remote desktop, but the WebRTC teleoperation and vehicle streaming scenarios are naturally suited to develop into MediaServo's IoT/AR extension direction
+- **A reference template for enterprise feature completeness**: although TeamViewer's centralized management pattern is not copied, the completeness of its enterprise features (Conditional Access/AD integration/SIEM/SSO/MSP multi-tenancy) serves as a feature checklist reference for MediaServo's Phase 2+ enterprise planning
 
-### 对 MediaServo 编码策略的额外启示
-TeamViewer 的编码自适应机制揭示了一个关键点：**编码策略不应硬编码，而应是网络条件的函数**。MediaServo 的 Encoder Plugin 应实现：
-1. 实时网络探测（RTT/丢包率/带宽/抖动）→ 定期反馈到编码参数
-2. 编码参数可调：分辨率（多档缩放）、帧率（1-60fps 连续可调）、画质（QP 参数/色深）、编码器选择（硬/软切换）
-3. 内容自适应：文本页→高画质低帧率；视频页→低画质高帧率；静态页→停止发送
-4. 这些不是 Phase 0 的必须项，但应在 Encoder Plugin trait 设计中预留扩展点
-**总体评分**：★★★★☆ (4/5)
-**评语**：全球远程桌面商业化的灯塔和行业天花板。其 SRP 安全认证、连接策略金字塔、企业功能完整性和从桌面到 IoT/AR 的产品演进思路是最值得借鉴的地方。但中心化架构和闭源协议与 MediaServo 的分布式/自托管/开放协议理念有根本冲突，需要取其精华、走不同路径。
+### Additional Insights for MediaServo's Encoding Strategy
+TeamViewer's adaptive encoding mechanism reveals a key point: **the encoding strategy should not be hardcoded, but should be a function of the network conditions**. MediaServo's Encoder Plugin should implement:
+1. Real-time network probing (RTT/packet loss/bandwidth/jitter) -> periodic feedback into encoding parameters
+2. Tunable encoding parameters: resolution (multiple scaling tiers), framerate (continuously adjustable from 1-60fps), quality (QP parameter/color depth), encoder selection (hard/soft switching)
+3. Content adaptivity: text pages -> high quality at low framerate; video pages -> lower quality at high framerate; static pages -> stop sending
+4. These are not mandatory for Phase 0, but extension points should be reserved in the Encoder Plugin trait design
+**Overall rating**: ★★★★☆ (4/5)
+**Comment**: The lighthouse of commercial remote desktop and the ceiling of the industry. Its SRP secure authentication, connection strategy pyramid, enterprise feature completeness, and the product evolution thinking from desktop to IoT/AR are the most worthwhile things to borrow. But its centralized architecture and closed-source protocol fundamentally conflict with MediaServo's distributed/self-hosted/open-protocol philosophy, so it must take the essence and travel a different path.
 <!-- -->
-**相关决策**: D2 (Client+Host), D8 (四形态)
-## 附录：TeamViewer 安全架构详细分析
+**Related decisions**: D2 (Client+Host), D8 (four forms)
+## Appendix: Detailed Analysis of TeamViewer's Security Architecture
 
-### 加密栈完整路径
+### Complete Path of the Encryption Stack
 ```
-连接建立前:
-  SRP-6a 密码认证 → 客户端证明知道密码但不传输密码
-  (零知识证明，MITM抵抗)
-         ↓
-密钥交换:
-  RSA-4096 公钥加密 → 传输对称密钥材料
-  (仅服务端可解密)
-         ↓
-会话加密:
-  AES-256-GCM → 所有数据加密
-  (GCM模式 = 加密 + 完整性校验)
-         ↓
-传输加密:
-  TLS 1.3 → 保护与信令服务器的通信
-  (v15.73+ 引入，替代旧版 TLS 1.2)
-         ↓
-前向安全性:
-  PFS → 每次会话使用独立密钥
-  (即使长期密钥泄露，历史会话无法解密)
-```
-
-### 2016 年安全事件回放
-时间线:
-- 2016年5月: 大量TeamViewer用户报告账户被远程控制
-- 2016年6月: 德国BSI发布安全警告
-- 2016年6月: TeamViewer声明: 用户密码重用导致，非基础设施被攻破
-- 2016年12月: 美国CERT协调中心发布TA16-336A
-- 2017年: TeamViewer发布新版安全白皮书，引入更多安全措施
-- 2024年: 更新到TLS 1.3
-
-影响分析与教训:
-- 攻击者利用泄露凭据(从其他网站数据泄露中获取)进行凭据填充
-- 攻击者成功控制了大量用户设备，对TeamViewer品牌信任造成长期损害
-- 中心化身份系统的风险: 一旦凭据泄露影响面极大
-- SRP协议保护的边界: 它可以保护密码不泄露，但无法防御已知密码的登录
-- MFA(多因素认证)的必要性: 这是2016年后远程桌面产品的标配
-
-### MSP 管理架构
-TeamViewer Tensor (MSP) 管理层次:
-- Management Console (Web UI): 客户分组管理、角色权限分配
-- 策略模板: 连接审批工作流、Conditional Access、会话录制、带宽限制
-- 集成导出: SIEM(Splunk/Sentinel)、API自动化、Python SDK
-
-## 附录：对 MediaServo 企业功能规划的参考
-
-TeamViewer 的企业功能体系是远程桌面商业化最完整的模板，MediaServo 可选择性借鉴：
-1. Conditional Access（条件访问）→ 可在 LicenseManager 中实现
-2. Multi-Tenant MSP 架构 → 与 AUDEBase 的多租户能力对齐
-3. SIEM 日志导出 → 企业客户合规要求，Phase 2+ 规划
-4. SSO (SAML/OIDC) → AuthProvider trait 的第二实现
-5. Management Console → MediaServo 的权限驱动 Web UI
-
-## 附录：TeamViewer 连接策略详细概率模型
-
-基于实际网络环境统计分析的连接成功路径分布：
-```
-┌─────────────────────────────────────────────────────────┐
-│              连接策略金字塔 — 成功率模型                   │
-│                                                         │
-│  第一层: UDP打洞 (5938) ───────── ~70% ── 直接P2P       │
-│  │  前提条件: 至少一端为锥形NAT或端口限制型NAT           │
-│  │  端到端延迟: <5ms (P2P直连，无中间节点)                │
-│  │                                                       │
-│  第二层: TCP P2P (5938) ───────── ~15% ── TCP直连       │
-│  │  前提条件: UDP被封锁但TCP 5938放行                    │
-│  │  端到端延迟: 5-15ms (TCP三次握手+确认开销)             │
-│  │                                                       │
-│  第三层: 中继转发 (5938) ───────── ~10% ── Router中继    │
-│  │  前提条件: P2P不可行但5938端口可连接Router            │
-│  │  端到端延迟: 15-40ms (取决于中继节点距离)              │
-│  │                                                       │
-│  第四层: HTTP隧道 (443) ────────── ~5% ── WebSocket转发  │
-│  │  前提条件: 仅443端口可用(最严格防火墙)                 │
-│  │  端到端延迟: 30-80ms (HTTP封装+中继转发双重开销)       │
-│  ───────────────────────────────────────────────────── │
-│  总计: 年连接完成率 >99%                                 │
-│  未完成连接(<1%): 极严格防火墙(全端口封锁)或NAT类型     │
-│                  极罕见组合(两端对称NAT+无中继可用)       │
-└─────────────────────────────────────────────────────────┘
+Before connection establishment:
+  SRP-6a password authentication -> the client proves knowledge of the password without transmitting it
+  (zero-knowledge proof, MITM resistant)
+         |
+Key exchange:
+  RSA-4096 public key encryption -> transmits the symmetric key material
+  (only the server can decrypt)
+         |
+Session encryption:
+  AES-256-GCM -> all data is encrypted
+  (GCM mode = encryption + integrity verification)
+         |
+Transport encryption:
+  TLS 1.3 -> protects communication with the signaling server
+  (introduced in v15.73+, replacing the older TLS 1.2)
+         |
+Forward secrecy:
+  PFS -> each session uses an independent key
+  (even if a long-term key is leaked, historical sessions cannot be decrypted)
 ```
 
-### NAT类型与打洞成功率映射
-| 控制端NAT | 被控端NAT | UDP打洞 | TCP打洞 | 推荐策略 |
+### Playback of the 2016 Security Incident
+Timeline:
+- May 2016: many TeamViewer users reported their accounts were remotely controlled
+- June 2016: the German BSI issued a security advisory
+- June 2016: TeamViewer statement: caused by user password reuse, not an infrastructure breach
+- December 2016: the US CERT Coordination Center published TA16-336A
+- 2017: TeamViewer published a new security whitepaper and introduced more security measures
+- 2024: updated to TLS 1.3
+
+Impact analysis and lessons:
+- The attackers used leaked credentials (obtained from data breaches on other websites) for credential stuffing
+- The attackers successfully took control of a large number of user devices, causing long-term damage to trust in the TeamViewer brand
+- The risk of a centralized identity system: once credentials leak, the blast radius is enormous
+- The boundary of SRP protocol protection: it can protect the password from leaking, but it cannot defend against logins with an already-known password
+- The necessity of MFA (multi-factor authentication): it has been standard equipment on remote desktop products since 2016
+
+### MSP Management Architecture
+TeamViewer Tensor (MSP) management layers:
+- Management Console (web UI): customer grouping, role and permission assignment
+- Policy templates: connection approval workflows, Conditional Access, session recording, bandwidth limits
+- Integration and export: SIEM (Splunk/Sentinel), API automation, Python SDK
+
+## Appendix: Reference for MediaServo's Enterprise Feature Planning
+
+TeamViewer's enterprise feature system is the most complete template of commercial remote desktop, and MediaServo can borrow selectively:
+1. Conditional Access (conditional access) -> can be implemented in the LicenseManager
+2. Multi-tenant MSP architecture -> aligns with AUDEBase's multi-tenant capability
+3. SIEM log export -> an enterprise compliance requirement, planned for Phase 2+
+4. SSO (SAML/OIDC) -> a second implementation of the AuthProvider trait
+5. Management Console -> MediaServo's permission-driven web UI
+
+## Appendix: Detailed Probability Model of TeamViewer's Connection Strategy
+
+The distribution of connection success paths based on statistical analysis of real network environments:
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                 Connection Strategy Pyramid — success rate model     │
+│                                                                      │
+│  Layer 1: UDP hole punching (5938) ────── ~70% ── direct P2P       │
+│  │  Precondition: at least one end is Full Cone NAT or Port Restricted │
+│  │  End-to-end latency: <5ms (direct P2P, no intermediate node)       │
+│  │                                                                      │
+│  Layer 2: TCP P2P (5938) ──────────────── ~15% ── direct TCP        │
+│  │  Precondition: UDP blocked but TCP 5938 allowed                     │
+│  │  End-to-end latency: 5-15ms (TCP three-way handshake + ACK overhead)│
+│  │                                                                      │
+│  Layer 3: relay forwarding (5938) ─────── ~10% ── Router relay      │
+│  │  Precondition: P2P not feasible but port 5938 can reach the Router │
+│  │  End-to-end latency: 15-40ms (depends on the distance to the relay) │
+│  │                                                                      │
+│  Layer 4: HTTP tunnel (443) ───────────── ~5% ── WebSocket forwarding │
+│  │  Precondition: only port 443 available (strictest firewalls)         │
+│  │  End-to-end latency: 30-80ms (HTTP wrapping + relay forwarding overhead) │
+│  ──────────────────────────────────────────────────────────── │
+│  Total: annual connection completion rate >99%                      │
+│  Incomplete connections (<1%): extremely strict firewalls (all ports  │
+│  blocked) or an extremely rare NAT type combination (both ends         │
+│  Symmetric NAT + no relay available)                                  │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Mapping of NAT Types and Hole Punching Success Rates
+| NAT of controller | NAT of controlled | UDP hole punching | TCP hole punching | Recommended strategy |
 |----------|----------|---------|---------|---------|
-| 锥形(Full Cone) | 锥形 | ✅ >95% | ✅ >90% | UDP优先 |
-| 锥形 | 端口限制型(Port Restricted) | ✅ ~85% | ✅ ~80% | UDP优先 |
-| 锥形 | 对称型(Symmetric) | ❌ <5% | ⚠️ ~40% | TCP打洞或中继 |
-| 端口限制型 | 端口限制型 | ⚠️ ~60% | ⚠️ ~55% | 尝试UDP+fallback中继 |
-| 端口限制型 | 对称型 | ❌ <1% | ❌ <10% | 直接走中继 |
-| 对称型 | 对称型 | ❌ 0% | ❌ <5% | 必须中继 |
+| Full Cone | Full Cone | ✅ >95% | ✅ >90% | Prefer UDP |
+| Full Cone | Port Restricted | ✅ ~85% | ✅ ~80% | Prefer UDP |
+| Full Cone | Symmetric | ❌ <5% | ⚠️ ~40% | TCP hole punching or relay |
+| Port Restricted | Port Restricted | ⚠️ ~60% | ⚠️ ~55% | Try UDP + fall back to relay |
+| Port Restricted | Symmetric | ❌ <1% | ❌ <10% | Go directly to relay |
+| Symmetric | Symmetric | ❌ 0% | ❌ <5% | Relay is mandatory |
 
-### TeamViewer全球中继节点部署策略
-TeamViewer的1000+路由节点并非在地理上均匀分布。部署策略遵循需求密度分布：
-- Tier 1区域（高密度商业+住宅）：北美东海岸、西欧（德/英/法/荷）、东亚（日/韩/台） → 每城市3-5个节点
-- Tier 2区域（中等密度）：南美（巴/阿）、东南亚（新/马/泰）、澳洲、东欧 → 每国家1-3个节点
-- Tier 3区域（低密度）：非洲、中亚、太平洋岛国 → 每区域1个节点或依赖邻国节点
-- 选数据中心标准：ISO 27001认证、Ping值<30ms到主要ISP骨干、冗余电力+网络（至少2条独立光纤上行）
+### TeamViewer's Global Relay Node Deployment Strategy
+TeamViewer's 1000+ routing nodes are not geographically evenly distributed. Deployment follows demand density:
+- Tier 1 regions (high density, commercial + residential): US East Coast, Western Europe (DE/UK/FR/NL), East Asia (JP/KR/TW) -> 3-5 nodes per city
+- Tier 2 regions (medium density): South America (BR/AR), Southeast Asia (SG/MY/TH), Australia, Eastern Europe -> 1-3 nodes per country
+- Tier 3 regions (low density): Africa, Central Asia, Pacific island nations -> 1 node per region or reliance on neighboring countries' nodes
+- Data center selection criteria: ISO 27001 certification, ping value <30ms to major ISP backbones, redundant power + network (at least 2 independent fiber uplinks)
 
-### 对MediaServo信令服务的启示
-TeamViewer的Master/KeepAlive/Router三类服务器的职责分离是MediaServo信令设计的参考模式：
-- Master Server（认证+授权+账户）→ MediaServo的AuthProvider trait实现（支持多种实现：本地DB/LDAP/OIDC）
-- KeepAlive Server（在线状态+路由发现）→ MediaServo的PresenceService（设备在线/离线/网络坐标跟踪）
-- Router Server（中继转发）→ MediaServo的RelayService（TURN服务器或自研中继节点）
-- MediaServo的一个改进：三类服务都可水平扩展（多实例部署），而TeamViewer的Master Server在架构上是单点。信令服务从设计上必须是分布式的
+### Implications for MediaServo's Signaling Service
+The separation of responsibilities among TeamViewer's three server classes -- Master/KeepAlive/Router -- is a reference pattern for MediaServo signaling design:
+- Master Server (authentication + authorization + accounts) -> implemented by MediaServo's AuthProvider trait (supports multiple implementations: local DB/LDAP/OIDC)
+- KeepAlive Server (online status + routing discovery) -> MediaServo's PresenceService (device online/offline/network coordinate tracking)
+- Router Server (relay forwarding) -> MediaServo's RelayService (TURN server or in-house relay nodes)
+- One improvement for MediaServo: all three service classes can be horizontally scaled (multi-instance deployment), whereas TeamViewer's Master Server is a single point by architecture. The signaling service must be distributed by design
 
-## 附录：TeamViewer 与 MediaServo 架构哲学的根本差异
-| 维度 | TeamViewer | MediaServo |
+## Appendix: Fundamental Differences in Architecture Philosophy between TeamViewer and MediaServo
+| Dimension | TeamViewer | MediaServo |
 |------|-----------|-----------|
-| 架构模式 | 中心化云服务（3亿设备依赖单一基础设施） | 分布式自托管（可独立部署，可委托平台） |
-| 协议开放性 | 专有闭源（2017/2024年两次安全白皮书） | RFC标准+公开文档（WebRTC/Protobuf/RTP） |
-| 数据主权 | 数据经过TeamViewer服务器（虽有P2P但中继可见） | 端到端加密+自托管信令/中继 |
-| 商业模式 | SaaS订阅制（$50-$207/月/席位） | 开源+企业技术支持 |
-| 企业管理 | 中心化Management Console | 权限驱动动态UI |
-| 信令可靠性 | 单点Master Server（历史上曾大范围宕机） | 分布式信令（多实例水平扩展） |
-| 技术栈 | C++/Qt+专有协议 | Rust核心+WebRTC+插件化 |
-| IoT/AR | 原生支持（Frontline+IoT Agent） | Phase 2+扩展（遥操作+监控相机） |
+| Architecture pattern | Centralized cloud service (300M devices rely on a single infrastructure) | Distributed self-hosting (independently deployable, delegatable to a platform) |
+| Protocol openness | Proprietary closed source (two security whitepapers in 2017/2024) | RFC standards + public documentation (WebRTC/Protobuf/RTP) |
+| Data sovereignty | Data passes through TeamViewer servers (P2P exists but the relay can see it) | End-to-end encryption + self-hosted signaling/relay |
+| Business model | SaaS subscription ($50-$207/month/seat) | Open source + enterprise technical support |
+| Enterprise management | Centralized Management Console | Permission-driven dynamic UI |
+| Signaling reliability | Single-point Master Server (historically suffered large-scale outages) | Distributed signaling (horizontally scaled multi-instance) |
+| Tech stack | C++/Qt + proprietary protocol | Rust core + WebRTC + pluginization |
+| IoT/AR | Native support (Frontline + IoT Agent) | Phase 2+ extension (teleoperation + surveillance cameras) |
 
-核心启示：MediaServo不走TeamViewer的大而全路线（中心化云服务垄断），而是走小而美路线（开放协议+自托管+插件化）。两者服务不同的市场需求。
+Core insight: MediaServo does not follow TeamViewer's big-and-everything path (a monopolistic centralized cloud service), but takes the small-and-beautiful path (open protocols + self-hosting + pluginization). The two serve different market demands.
 
-### TeamViewer技术债务清单（MediaServo应避免）
-1. 中心化架构：Master Server单点故障风险。MediaServo已设计分布式信令
-2. 闭源协议：不可审计。MediaServo采用RFC标准+公开文档
-3. 高定价模型：$50-$207/月。MediaServo开源+技术支持成本模型
-4. 更新机制：历史上无独立签名验证路径（已修复但教训不变）
-5. 密码重用导致的2016安全事件：中心化身份系统的脆弱性
-6. 移动端电池消耗：后台连接维护的高电量开销
-7. macOS权限复杂度：Screen Recording权限导致的高支持成本
-8. Web客户端功能阉割：Web版与桌面版功能差距大
+### TeamViewer's Technical Debt List (What MediaServo Should Avoid)
+1. Centralized architecture: Master Server single point of failure risk. MediaServo has already designed distributed signaling
+2. Closed-source protocol: unauditable. MediaServo adopts RFC standards + public documentation
+3. High pricing model: $50-$207/month. MediaServo uses an open source + technical support cost model
+4. Update mechanism: historically no independent signature verification path (fixed, but the lesson stands)
+5. The 2016 security incident caused by password reuse: the fragility of a centralized identity system
+6. Mobile battery consumption: high power overhead of background connection maintenance
+7. macOS permission complexity: high support cost caused by the Screen Recording permission
+8. Feature castration of the web client: a large gap between the web and desktop editions
 
-### 总结：TeamViewer对MediaServo的核心价值
-TeamViewer不是MediaServo要复刻的模式，而是MediaServo要反省的对象。它的成功不可否认（3亿月活、$6B+营收、2500+员工），但其中心化架构、闭源协议、高昂定价和安全事件也是不可忽视的教训。MediaServo应从TeamViewer学习：
-- 连接策略金字塔的分层设计（4层fallback）
-- SRP密码认证协议的安全哲学（密码不传输）
-- 企业功能完整性的功能清单（Conditional Access/AD/SIEM/SSO）
-- IoT和AR的产品演进路径（远程连接的全场景扩展）
+### Summary: The Core Value of TeamViewer for MediaServo
+TeamViewer is not the pattern MediaServo should replicate, but the object it should reflect on. Its success is undeniable (300M monthly actives, $6B+ revenue, 2500+ employees), but its centralized architecture, closed-source protocol, exorbitant pricing, and security incidents are lessons that must not be ignored. What MediaServo should learn from TeamViewer:
+- The layered design of the connection strategy pyramid (4-layer fallback)
+- The security philosophy of SRP password authentication (the password is never transmitted)
+- The feature checklist of enterprise completeness (Conditional Access/AD/SIEM/SSO)
+- The product evolution path of IoT and AR (full-scenario expansion of remote connectivity)
 
-而MediaServo应避免：
-- 中心化架构的单点故障
-- 闭源协议的审计黑箱
-- SaaS定价的封闭商业模式
-- 凭据管理不善导致的安全事件
+And MediaServo should avoid:
+- The single point of failure of a centralized architecture
+- The audit black box of a closed-source protocol
+- The closed business model of SaaS pricing
+- Security incidents caused by poor credential management
 
-## 附录：TeamViewer对MediaServo功能优先级的影响
-基于TeamViewer的企业功能体系，MediaServo功能优先级排序建议：
+## Appendix: The Impact of TeamViewer on MediaServo's Feature Priorities
+Based on TeamViewer's enterprise feature system, the recommended MediaServo feature priority ordering:
 
-Phase 0（架构定义）：SRP/PAKE密码认证、连接策略分层设计、P2P+中继fallback模型
-Phase 1（MVP）：基本远程桌面、文件传输、剪贴板同步、无人值守访问
-Phase 2（企业）：Conditional Access条件访问、LDAP/AD集成、会话录制
-Phase 3（扩展）：SIEM日志导出、SSO单点登录、MSP多租户管理
-Phase 4（未来）：IoT远程管理、AR辅助、WebRTC遥操作扩展
+Phase 0 (architecture definition): SRP/PAKE password authentication, layered connection strategy design, P2P+relay fallback model
+Phase 1 (MVP): basic remote desktop, file transfer, clipboard sync, unattended access
+Phase 2 (enterprise): Conditional Access, LDAP/AD integration, session recording
+Phase 3 (extension): SIEM log export, SSO single sign-on, MSP multi-tenant management
+Phase 4 (future): IoT remote management, AR assistance, WebRTC teleoperation extension
 
-此优先级排序将TeamViewer用20年构建的功能按MediaServo需求重新组织，确保每个Phase交付完整可用产品。
+This priority ordering reorganizes the features TeamViewer built over 20 years according to MediaServo's requirements, ensuring that each Phase delivers a complete, usable product.
 
-## 附录：参考数据来源说明
-本文档分析基于以下数据来源：
-- TeamViewer官方安全白皮书（2017初版、2024更新版）
-- TeamViewer 2016年安全事件：美国CERT协调中心TA16-336A、德国BSI安全警告
-- TeamViewer API文档和开发者中心
-- 社区知识库和Stack Overflow数据分析
-- 竞品对比数据来源于各产品官方定价页面（截至2026年7月）
+## Appendix: Notes on the Reference Data Sources
+This analysis is based on the following data sources:
+- TeamViewer official security whitepapers (2017 first edition, 2024 updated edition)
+- The 2016 TeamViewer security incident: US CERT Coordination Center TA16-336A, German BSI security advisory
+- TeamViewer API documentation and developer center
+- Community knowledge base and Stack Overflow data analysis
+- Competitor comparison data comes from each product's official pricing page (as of July 2026)
 
-数据时效性：所有技术细节和定价截至2026年7月。TeamViewer每月发布更新，具体版本功能以官方发布日志为准。
+Data currency: all technical details and pricing are as of July 2026. TeamViewer ships updates monthly; specific version features are subject to the official release notes.
 
 ---
 
-> 本文档为MediaServo Phase 0架构定义阶段的参考资料。
-> 随着项目推进，部分分析和建议可能根据实际需求和约束调整。
-> 所有外部产品数据、版本、定价信息截至2026年7月。
-> TeamViewer是TeamViewer AG的注册商标。本文档仅供技术参考。
+> This document is reference material for the MediaServo Phase 0 architecture definition stage.
+> As the project advances, some analysis and recommendations may be adjusted according to actual requirements and constraints.
+> All external product data, versions, and pricing are as of July 2026.
+> TeamViewer is a registered trademark of TeamViewer AG. This document is for technical reference only.

@@ -1,26 +1,26 @@
-# MediaServo G2 设备注册表 — server 侧设备凭证（D-H11 连接级身份）
+# MediaServo G2 device registry — server-side device credentials (D-H11 connection-level identity)
 #
-# 配发流程:
-#   1. 车端 `mediaservo host init` 生成实例身份 identity.json（device_id: ms-<12hex>, device_secret: <64hex>）
-#   2. 运维把 device_id/device_secret 拷入本文件:
-#      - Linux:   echo -n "<device_id>:<device_secret>" | sha256sum  → 得 64 hex
-#      - 便捷:    mediaservo server hash-device <device_id> <secret>  （H 阶段 CLI）
-#   3. 填入 secret_hash: "sha256:<上面得到的 64 hex>"
-#   4. 重启 server（`./mediaservo.sh restart server`）— 注册表启动时加载
+# Provisioning flow:
+#   1. On the vehicle: `mediaservo host init` generates the instance identity identity.json (device_id: ms-<12hex>, device_secret: <64hex>)
+#   2. The operator copies device_id/device_secret into this file:
+#      - Linux:   echo -n "<device_id>:<device_secret>" | sha256sum  → yields 64 hex
+#      - Handy:    mediaservo server hash-device <device_id> <secret>  (H-phase CLI)
+#   3. Fill in secret_hash: "sha256:<the 64 hex obtained above>"
+#   4. Restart the server (`./mediaservo.sh restart server`) — the registry loads at startup
 #
-# 存储决策 (G2): 客户端经 TLS 在 wire 上明文携带 secret（与 PSK 同级），
-# 注册表仅存 sha256(device_id + ":" + device_secret) 单向哈希 — device_id 充当每设备盐。
-# 比较用常量时间（subtle），防时序侧信道。升级路径: H 阶段换 argon2id（前缀 argon2:）。
-# 删除设备: 删掉对应条目即可（新连接立即拒绝，已连接会话保持到断开）。
-# 错误码: 认证失败统一 Error 4010 + 统一消息 "device authentication failed: invalid
-# device credentials"（未知设备与错误 secret 逐字一致 — 防枚举防时序; 内部区分仅进审计日志）。
-# 半带凭证（只带 id 或只带 secret）单独消息提示形状错误。
+# Storage decision (G2): the client carries the secret in plaintext over TLS on the wire (same tier as PSK),
+# so the registry stores only the one-way hash sha256(device_id + ":" + device_secret) — device_id acts as a per-device salt.
+# Comparison is constant-time (subtle), guarding against timing side channels. Upgrade path: argon2id in phase H (prefix argon2:).
+# Removing a device: delete its entry (new connections are refused immediately, established sessions live until disconnect).
+# Error codes: auth failures return a uniform Error 4010 with a uniform message "device authentication failed: invalid
+# device credentials" (unknown device vs wrong secret are byte-identical — anti-enumeration, anti-timing; the distinction only reaches audit logs).
+# Half-carried credentials (id only or secret only) get a separate message hinting at the shape error.
 #
-# 示例（占位 — 请删除或替换）:
+# Example (placeholder — delete or replace):
 # devices:
 #   ms-0a1b2c3d4e5f:
 #     secret_hash: "sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
-# 设备注册表（真实条目）
+# Device registry (real entries)
 devices:
   ms-78f38e76f13a:
     secret_hash: "sha256:1f775557c5eb8e384678c015d260a6ada38c23e5e47c60554c687b2b152612d5"

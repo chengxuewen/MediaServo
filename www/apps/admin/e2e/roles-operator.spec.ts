@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
-// I1 review 回归: operator（G3 can_status 但无 admin REST 准入）不应看到监控导航 —
-// 前端 canMonitor 必须与 server auth_middleware 准入一致（admin|dispatcher）。
+// I1 review regression: operator (G3 can_status but no admin REST access) must not see the monitoring nav —
+// frontend canMonitor must match server auth_middleware admission (admin|dispatcher).
 
 test.describe('I1 operator admission alignment', () => {
   test('operator does NOT see audio/vehicles nav, header shows role', async ({ page }) => {
@@ -9,7 +9,7 @@ test.describe('I1 operator admission alignment', () => {
     await expect(page.locator('.header .version')).toContainText('operator [operator]');
     await expect(page.locator('nav a', { hasText: 'Audio Conference' })).toHaveCount(0);
     await expect(page.locator('nav a', { hasText: 'Vehicles' })).toHaveCount(0);
-    // Dashboard 数据走 admin REST → operator 被服务端拒绝 → 401 错误态（准入一致性）
+    // Dashboard data goes through admin REST → operator is server-rejected → 401 error state (admission parity)
     await expect(page.locator('.error')).toContainText('Authentication required');
   });
 

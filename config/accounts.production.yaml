@@ -1,13 +1,13 @@
-# MediaServo 生产账号注册表（D-H11）— 无 dev 占位账号，server 启动守卫不豁免。
+# MediaServo production account registry (D-H11) — no dev placeholder accounts; the server startup guard grants no exemption.
 #
-# 格式同 accounts.yaml: username → {password_hash: "sha256:<hex>", role, vehicles}
-#   - password_hash = sha256(username + ":" + password)（username 为盐，单向）
+# Format same as accounts.yaml: username → {password_hash: "sha256:<hex>", role, vehicles}
+#   - password_hash = sha256(username + ":" + password) (username is the salt, one-way)
 #   - role: viewer | operator | admin | dispatcher
-#   - vehicles: 该账号可访问的车（device_id 列表）— dispatcher/admin 可省略（任意车）
+#   - vehicles: vehicles this account may access (list of device_ids) — dispatcher/admin may omit (any vehicle)
 #
-# 生成: echo -n "<username>:<password>" | sha256sum
+# Generate: echo -n "<username>:<password>" | sha256sum
 #
-# 示例:
+# Example:
 # accounts:
 #   ops-car1:
 #     password_hash: "sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"

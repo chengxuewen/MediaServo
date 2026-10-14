@@ -1,14 +1,14 @@
-# handover-blackscreen-30s —— SLA 切换近似（S4/PLAN §11.6 补丁 d 前提案）
-# ⚠ 近似声明：tc netem 不表达真 IP 变更——本场景用"100% 全丢黑障 30s + 恢复驻留"
-#   逼近舱/车换网时刻的协议面（WS resume / transport 重建 / streamer 重挂）。
-#   真换 IP = netns 扩展项或真车日。基线配对与四指标采集见主仓 evidence/s4-sla.md。
+# handover-blackscreen-30s -- SLA handover approximation (pre-proposal for the S4/PLAN §11.6 patch d)
+# approximation notice: tc netem cannot express a real IP change -- this scenario uses a 100% full-loss blackscreen for 30s + a recovery dwell
+#   to approximate the protocol surface at the cockpit/vehicle network-switch moment (WS resume / transport rebuild / streamer re-mount).
+#   A real IP change = a netns extension item or a real-vehicle day. Baseline pairing and the four metrics: parent-repo evidence/s4-sla.md.
 scenario:
   baseline_s: 8
   steps:
     - at_s: 0
-      set: {rtt_ms: 0, jitter_ms: 0, loss: "0%"}        # 基线（可配 loopback 对照）
+      set: {rtt_ms: 0, jitter_ms: 0, loss: "0%"}        # baseline (pairable with a loopback control)
     - at_s: 8
-      set: {loss: "100%", rtt_ms: 160}                 # 黑障入（全丢，协议栈盲飞 30s）
+      set: {loss: "100%", rtt_ms: 160}                 # blackscreen in (full loss, protocol stack flying blind 30s)
     - at_s: 38
-      set: {rtt_ms: 0, jitter_ms: 0, loss: "0%"}       # 恢复（四指标计时窗开启）
+      set: {rtt_ms: 0, jitter_ms: 0, loss: "0%"}       # recovery (the four-metric timing window opens)
   clear: false

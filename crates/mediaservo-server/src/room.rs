@@ -15,7 +15,7 @@ pub enum RoomType {
 #[derive(Debug, Clone, Serialize)]
 pub struct Consumer {
     pub peer_id: String,
-    /// ISO 时间字符串 (API 展示) — 原 Instant 被 serde(skip) 排除导致前端 undefined (PIT-66)
+    /// ISO time string (for API display) -- the original Instant was excluded by serde(skip), leaving the frontend undefined (PIT-66)
     pub connected_since: String,
 }
 
@@ -44,7 +44,7 @@ pub struct DeviceSnapshot {
 pub struct StreamSnapshot {
     pub stream_id: String,
     pub consumers: Vec<Consumer>,
-    /// 推流在线（multi-stream P2: host-agent StatusReport.StreamFlowJson.connected）。
+    /// Publishing online (multi-stream P2: host-agent StatusReport.StreamFlowJson.connected).
     pub online: bool,
 }
 
@@ -113,8 +113,8 @@ impl RoomManager {
             }
             tracing::info!("Peer {} joined room {} as {:?}", peer_id, room_id, role);
         } else {
-            // 全 SFU（D 决策 2026-08-25）: 房间统一 DeviceStream——无 P2P 直连语义，
-            // 所有 join 均为设备流房间（Host 推流 / Remote|Consumer 消费）。
+            // All-SFU (D decision 2026-08-25): rooms are uniformly DeviceStream -- no P2P direct-connect semantics;
+            // every join is a device-stream room (Host publishes / Remote|Consumer consumes).
             let room_type = RoomType::DeviceStream;
             let (h, r, consumers) = match role {
                 PeerRole::Host => (Some(pid), None, vec![]),
@@ -243,16 +243,16 @@ impl RoomManager {
     }
 
     /// Aggregate rooms by device_id into DeviceSnapshot list.
-    /// 流列表从 host-agent StatusReport 构造（multi-stream P2）——Room.device_id/
-    /// stream_id 恒 None（join_room 不设），真正的流标识与在线状态在
-    /// StatusRegistry（agent 每 5s 整车聚合上报）。无报告 → streams 空。
+    /// The stream list is built from the host-agent StatusReport (multi-stream P2) -- Room.device_id/
+    /// stream_id stay None (join_room does not set them); the real stream identity and online state live in
+    /// the StatusRegistry (agent reports the vehicle aggregate every 5s). No report -> empty streams.
     pub fn list_devices(&self, status: &crate::status::StatusRegistry) -> Vec<DeviceSnapshot> {
         let mut device_map: HashMap<String, DeviceSnapshot> = HashMap::new();
         for r in self.rooms.iter() {
-            // per-stream 房间（PIT-140 v2: <vehicle>_<stream>）→ device 归一：DeviceStream
-            // 房间按最后一段 _<stream> 拆分出整车 device（前端 roomId = device_stream 复原；
-            // P2P 房间保持原样）。StatusReport 键 = 整车房间（agent 上报），不依赖房间拆分。
-            // per-stream 房间（<vehicle>_<stream>）→ device 归一（前端 roomId=device_stream 复原）
+            // per-stream rooms (PIT-140 v2: <vehicle>_<stream>) -> device normalization: DeviceStream
+            // rooms split the vehicle device out of the trailing _<stream> segment (frontend roomId = device_stream restored;
+            // P2P rooms stay as-is). StatusReport keys = vehicle rooms (agent-reported), independent of room splitting.
+            // per-stream rooms (<vehicle>_<stream>) -> device normalization (frontend roomId=device_stream restored)
             let device_id = r.device_id.clone().unwrap_or_else(|| {
                 r.id.rsplit_once('_').map(|(v, _s)| v.to_string()).unwrap_or_else(|| r.id.clone())
             });
@@ -264,7 +264,7 @@ impl RoomManager {
             if r.created_at < entry.online_since {
                 entry.online_since = r.created_at;
             }
-            // 该房间的 StatusReport → 每流状态（id/connected）；无报告/无流 → 空
+            // This room's StatusReport -> per-stream state (id/connected); no report/no streams -> empty
             let report_streams: Vec<StreamSnapshot> = status
                 .get(&r.id)
                 .and_then(|m| match m {
@@ -344,13 +344,13 @@ mod tests {
 
     #[test]
     fn join_room_host_creates_device_stream_for_perstream_room() {
-        // multi-stream P3: Host 首进 <vehicle>_<stream> 房间 → DeviceStream
-        // （否则 list_devices 归一见 vehicle_test-30fps 伪设备）
+        // multi-stream P3: Host joining a <vehicle>_<stream> room for the first time -> DeviceStream
+        // (otherwise list_devices normalization would show a vehicle_test-30fps pseudo device)
         let mgr = RoomManager::new();
         mgr.join_room("vehicle_test-30fps", "host-1", &PeerRole::Host).unwrap();
         let room = mgr.rooms.get("vehicle_test-30fps").unwrap();
         assert_eq!(room.room_type, RoomType::DeviceStream);
-        // 纯整车房间同为 DeviceStream（全 SFU）
+        // pure vehicle rooms are DeviceStream too (all-SFU)
         mgr.join_room("vehicle", "host-2", &PeerRole::Host).unwrap();
         let room2 = mgr.rooms.get("vehicle").unwrap();
         assert_eq!(room2.room_type, RoomType::DeviceStream);
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn join_multiple_remotes_coexist() {
-        // 全 SFU（2026-08-25）: Remote = consumer，多舱端可共存（无 P2P single-slot）
+        // All-SFU (2026-08-25): Remote = consumer; multiple cockpits can coexist (no P2P single-slot)
         let mgr = RoomManager::new();
         mgr.join_room("room-1", "host-1", &PeerRole::Host).unwrap();
         mgr.join_room("room-1", "remote-1", &PeerRole::Remote).unwrap();
@@ -504,15 +504,15 @@ mod tests {
         let mgr = RoomManager::new();
         let status = crate::status::StatusRegistry::default();
 
-        // P2P room（device 分组用 r.device_id 或伪 device=room.id）
+        // P2P room (device grouping uses r.device_id or a pseudo device=room.id)
         mgr.join_room("room-1", "host-1", &PeerRole::Host).unwrap();
         mgr.join_room("room-2", "consumer-1", &PeerRole::Consumer).unwrap();
         mgr.join_room("room-3", "host-2", &PeerRole::Host).unwrap();
 
         let devices = mgr.list_devices(&status);
-        assert_eq!(devices.len(), 3); // 无报告 → 每房间一个 pseudo device，streams 空
+        assert_eq!(devices.len(), 3); // no report -> one pseudo device per room, empty streams
 
-        // 有报告 → streams 来自 StatusReport（id/connected），consumers 保留
+        // with a report -> streams come from the StatusReport (id/connected), consumers kept
         status.store("room-1", test_report("room-1", vec![("test-30fps".into(), true)]));
         status.store("room-3", test_report("room-3", vec![("test-15fps".into(), false)]));
         let devices = mgr.list_devices(&status);
@@ -537,7 +537,7 @@ mod tests {
         let devices = mgr.list_devices(&status);
         let d = devices.iter().find(|d| d.device_id == "room-1").unwrap();
         assert_eq!(d.streams.len(), 1);
-        assert_eq!(d.streams[0].consumers.len(), 1, "consumers 保留（向后兼容）");
+        assert_eq!(d.streams[0].consumers.len(), 1, "consumers kept (backward compatible)");
         assert_eq!(d.streams[0].consumers[0].peer_id, "consumer-1");
     }
 

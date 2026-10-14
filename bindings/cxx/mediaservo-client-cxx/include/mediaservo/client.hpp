@@ -1,28 +1,29 @@
-/* MediaServo client C++ header-only binding (舱端/消费侧) — 登录 + 视频消费 + 控制 DC。
+/* MediaServo client C++ header-only binding (cockpit/consumer side) — login + video consumption + control DC.
  *
- * 薄包装 over bindings/c/mediaservo-client-c/include/mediaservo/client.h (D247)。
- * S6 批1b 镜像：Session.state()/on_state()、wait_video()、consume()→Consumer（多路）；
- * Control.on_ack 返回 token + off_ack()/ready_state()/buffered_amount()；Error 携
- * wire_code/retryable（会话句柄 error_t 读回）。旧 consume_video/video_stats 桥保留
- * （内部 = C ⊘ 形，行为一周期不变）。
+ * Thin wrapper over bindings/c/mediaservo-client-c/include/mediaservo/client.h (D247).
+ * S6 batch 1b mirror: Session.state()/on_state(), wait_video(), consume()→Consumer (multi-consumer);
+ * Control.on_ack returns a token + off_ack()/ready_state()/buffered_amount(); Error carries
+ * wire_code/retryable (read back via the session handle's error_t). The old consume_video/video_stats bridges are kept
+ * (internally the C ⊘ forms, behavior unchanged for one period).
  *
- * 生命周期契约（自 C ABI 头翻译成 RAII 保证，link.hpp 同形纪律）：
- *   - Session/Control/Consumer 均 move-only；析构自动 close（幂等）。
- *   - 默认构造 = 已关闭（null handle）；对已关闭对象调用 API 返回
- *     Error{INVALID_ARG, "closed"}，不触碰 C ABI。
- *   - 帧/ack/状态回调（trampoline）在各自内部泵线程触发。注册堆对象的释放走
- *     C 侧 user_free 契约（on_state→session_close；consume→consumer_close；
- *     on_ack→off_ack 泵回收轮或 control_close）——C++ 面零裸 delete 泄漏；
- *     注册失败（C 未接管）时本头 delete 兜底。仅 consume_video（⊘ C 形无
- *     user_free）的回调堆对象留在 cbs_ 随 close 释放（泵已 join，无 UAF）。
- *   - 回调内禁止调用 close/其他方法（C 契约）。
- *   - 错误通道为 Result（非异常）；误用 value()/error() 抛 tl::bad_expected_access<Error>。
+ * Lifecycle contract (translated from the C ABI header into RAII guarantees, the same discipline as link.hpp):
+ *   - Session/Control/Consumer are all move-only; the destructor closes automatically (idempotent).
+ *   - Default construction = closed (null handle); calling an API on a closed object returns
+ *     Error{INVALID_ARG, "closed"} without touching the C ABI.
+ *   - Frame/ack/state callbacks (trampolines) fire on their own internal pump threads. The registration heap objects are freed through
+ *     the C-side user_free contract (on_state→session_close; consume→consumer_close;
+ *     on_ack→the off_ack pump reclamation round or control_close) — zero raw deletes leak on the C++ side;
+ *     when registration fails (the C side never took over), this header's delete is the backstop. Only consume_video (⊘ the C form has
+ *     no user_free) keeps its callback heap object in cbs_ and frees it at close (the pump has been joined, no UAF).
+ *   - Calling close/other methods from within a callback is forbidden (the C contract).
+ *   - The error channel is Result (not exceptions); misusing value()/error() throws tl::bad_expected_access<Error>.
  */
 #ifndef MEDIASERVO_CLIENT_HPP
 #define MEDIASERVO_CLIENT_HPP
 
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -38,7 +39,7 @@ namespace client {
 using mediaservo::Error;
 using mediaservo::Result;
 
-/// 会话连接态（线值 0..3 = MEDIASERVO_CLIENT_STATE_*）。
+/// Session connection state (wire values 0..3 = MEDIASERVO_CLIENT_STATE_*).
 enum class State : uint8_t {
     Disconnected = 0,
     Connected = 1,
@@ -46,7 +47,7 @@ enum class State : uint8_t {
     Failed = 3,
 };
 
-/// DC 就绪态（线值 0..3 = MEDIASERVO_CLIENT_DC_*）。
+/// DC ready state (wire values 0..3 = MEDIASERVO_CLIENT_DC_*).
 enum class DcState : uint8_t {
     Connecting = 0,
     Open = 1,
@@ -56,14 +57,14 @@ enum class DcState : uint8_t {
 
 namespace detail {
 
-/// 从 C ABI 全局 last_error 构造错误（无会话句柄形：自由函数/守卫路径）。
+/// Build an error from the C ABI global last_error (the handle-less form: free functions / guard paths).
 inline Error make_error(int code) {
     char buf[512];
     mediaservo_client_last_error(buf, sizeof(buf));
     return Error{code, std::string(buf), 0, false};
 }
 
-/// 会话句柄形：机读位读 session_error，文本读 session_last_error（K3 归属精确）。
+/// The session-handle form: machine-readable bits from session_error, text from session_last_error (K3-precise attribution).
 inline Error make_error(int code, mediaservo_client_session_t* h) {
     char buf[512];
     uint16_t wire = 0;
@@ -85,9 +86,9 @@ inline Error make_error(int code, mediaservo_client_session_t* h) {
     return Error{code, std::string(buf), wire, retry};
 }
 
-/// needed 溢出合同 + 自动扩一次重试（list_rooms/video_stats/producer_ids/wait_video/
-/// consumer id+stats 共用内核；>64KiB 拒——超限报 INVALID_ARG 带必需长度语义）。
-/// h 非空 = 会话错误通道（wire/retryable 精确）；空 = 全局 last_error。
+/// needed overflow contract + one automatic grow-retry (shared core by list_rooms/video_stats/producer_ids/wait_video/
+/// consumer id+stats; >64KiB is rejected — over-limit reports INVALID_ARG with the required-length semantics).
+/// Non-empty h = the session error channel (precise wire/retryable); empty = the global last_error.
 inline Result<std::string> needed_read(
     mediaservo_client_session_t* h,
     const std::function<int(char*, size_t, size_t*)>& call) {
@@ -110,7 +111,7 @@ inline Result<std::string> needed_read(
 
 } // namespace detail
 
-/// SDK 版本 (MAJOR.MINOR.PATCH)。
+/// SDK version (MAJOR.MINOR.PATCH).
 inline Result<std::string> version() {
     char buf[64];
     int rc = mediaservo_client_version(buf, sizeof(buf));
@@ -120,7 +121,7 @@ inline Result<std::string> version() {
     return Result<std::string>(std::string(buf));
 }
 
-/// 账号登录换 JWT（阻塞；批1b 扁平 C 形镜像）。溢出经 needed 反馈自动扩一次。
+/// Account login for a JWT (blocking; mirrors the batch-1b flat C form). Overflow auto-grows once via the needed feedback.
 inline Result<std::string> login(const std::string& http_base_url,
                                  const std::string& username,
                                  const std::string& password) {
@@ -130,8 +131,8 @@ inline Result<std::string> login(const std::string& http_base_url,
     });
 }
 
-/// API-key 换短 JWT（阻塞；accountless-client-auth T2 镜像 C 面）。输出原样填
-/// Config::jwt 走既有 /ws 门。401（未知 key/错 secret 防枚举）→ error.code=UNAUTHORIZED。
+/// Exchange an API key for a short JWT (blocking; mirrors the accountless-client-auth T2 C surface). Fill the output verbatim into
+/// Config::jwt to use the existing /ws gate. 401 (unknown key/wrong secret, enumeration-safe) → error.code=UNAUTHORIZED.
 inline Result<std::string> exchange(const std::string& http_base_url,
                                     const std::string& key_id,
                                     const std::string& secret) {
@@ -141,36 +142,36 @@ inline Result<std::string> exchange(const std::string& http_base_url,
     });
 }
 
-/// 房间发现（阻塞，会话前自由函数）。返回 JSON 数组
-/// `[{"room_id":..,"kind":..}]`（与 producer_ids 同形：header-only 无 JSON 依赖，
-/// 调用方解析）。溢出经 needed 反馈自动扩一次重试。
+/// Room discovery (blocking, a pre-session free function). Returns the JSON array
+/// `[{"room_id":..,"kind":..}]` (same shape as producer_ids: header-only with no JSON dependency,
+/// the caller parses it). Overflow auto-grows once via the needed feedback.
 inline Result<std::string> list_rooms(const std::string& http_base, const std::string& jwt) {
     return detail::needed_read(nullptr, [&](char* b, size_t c, size_t* n) {
         return mediaservo_client_list_rooms(http_base.c_str(), jwt.c_str(), b, c, n);
     });
 }
 
-/// 会话配置（对应 mediaservo_client_config_t）。jwt/psk 恰一非空（connect 校验）。
+/// Session configuration (mirrors mediaservo_client_config_t). Exactly one of jwt/psk non-empty (validated at connect).
 struct Config {
     std::string signaling_url; // "ws://host:9800/ws"
-    std::string room;          // 房间 ID
-    std::string jwt;           // login() 输出（与 psk 二选一）
-    std::string hmac_key_file; // 急停密钥文件（0600；空 = 不签名，语义见 client.h）
-    std::string psk;           // PSK 直传（与 jwt 二选一）
-    /// 设备身份实例目录（viewer-auth-matrix T1；identity.json+signing.pem 同
-    /// msrtc-host init 布局）。空=不启用；与 jwt/psk 可叠（server 设备认证优先）。
+    std::string room;          // Room ID
+    std::string jwt;           // the login() output (pick one of jwt/psk)
+    std::string hmac_key_file; // emergency-stop key file (0600; empty = do not sign; semantics in client.h)
+    std::string psk;           // PSK passed directly (pick one of jwt/psk)
+    /// Device identity instance directory (viewer-auth-matrix T1; identity.json+signing.pem in the
+    /// same layout as msrtc-host init). Empty = disabled; composes with jwt/psk (server device auth takes priority).
     std::string identity_dir;
-    /// "Client"(默认)/"Viewer"/"Remote"；空串 = "Client"。
+    /// "Client" (default)/"Viewer"/"Remote"; empty string = "Client".
     std::string role;
 };
 
 class Consumer;
 
-/// 房间会话（move-only RAII；析构自动 close；默认构造 = 已关闭）。
+/// Room session (move-only RAII; the destructor closes automatically; default construction = closed).
 class Session {
 public:
-    /// 信令连接 + 入房（阻塞；失败返回错误，不抛异常）。
-    /// T4/F6 自由函数 identity_label 需读私有 C 句柄。
+    /// Connect signaling and join the room (blocking; returns an error on failure, throws nothing).
+    /// The T4/F6 free function identity_label needs to read the private C handle.
     friend Result<std::string> identity_label(const Session& s);
 
     static Result<Session> connect(const Config& cfg) {
@@ -191,7 +192,7 @@ public:
         return Result<Session>(Session(h));
     }
 
-    /// 默认构造 = 已关闭会话。
+    /// Default construction = closed session.
     Session() noexcept = default;
     ~Session() { (void)close(); }
 
@@ -207,10 +208,10 @@ public:
         return *this;
     }
 
-    /// 是否持有有效会话。
+    /// Whether a valid session is held.
     explicit operator bool() const noexcept { return h_ != nullptr; }
 
-    /// 谈成的方言版本（S0；旧 server = 1）。
+    /// The negotiated dialect version (S0; an old server = 1).
     Result<uint32_t> negotiated() const {
         if (!h_) return Result<uint32_t>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
         uint32_t p = 0;
@@ -221,7 +222,7 @@ public:
         return Result<uint32_t>(p);
     }
 
-    /// 会话连接态快照（重连环观测面，K1）。
+    /// Session connection-state snapshot (the reconnect-loop observation surface, K1).
     Result<State> state() const {
         if (!h_) return Result<State>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
         uint8_t st = 0;
@@ -232,21 +233,21 @@ public:
         return Result<State>(static_cast<State>(st));
     }
 
-    /// 注册连接态变化回调（累积形：多次注册 = 每次变化逐个回调；不可注销，
-    /// 随 close 由 C 侧统一释放。只报变化——初始态用 state() 自取）。
+    /// Register a connection-state change callback (cumulative form: multiple registrations = every change invokes each entry; no unregister,
+    /// released together at close by the C side. Reports only changes — fetch the initial state with state()).
     Result<void> on_state(std::function<void(State)> cb) {
         if (!h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
         auto* f = new std::function<void(State)>(std::move(cb));
         int rc = mediaservo_client_session_on_state(h_, &Session::state_trampoline, f,
                                                     &Session::state_user_free);
         if (rc != MEDIASERVO_OK) {
-            delete f; // C 未接管，本侧兜底（禁泄漏）
+            delete f; // the C side never took over; this-side backstop (no leaks)
             return Result<void>(tl::unexpect, detail::make_error(rc, h_));
         }
         return Result<void>();
     }
 
-    /// 纯等待房间内视频 producer（无副作用；多路编排定向入口）。超时/断链 = 错误。
+    /// Purely wait for a video producer in the room (no side effects; the directed entry point for multi-consumer orchestration). Timeout/disconnect = error.
     Result<std::string> wait_video(uint64_t timeout_ms) {
         if (!h_) return Result<std::string>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
         return detail::needed_read(h_, [&](char* b, size_t c, size_t* n) {
@@ -254,8 +255,8 @@ public:
         });
     }
 
-    /// producer-label T2.2: 按标签定向等待（裁决 §12-1 设备房+label 形）。
-    /// label 空 = 不过滤（第一路回退）；其余合同同 wait_video。
+    /// producer-label T2.2: wait directed by label (adjudication §12-1's device-room+label form).
+    /// Empty label = no filter (falls back to the first consumer); all other contracts match wait_video.
     Result<std::string> wait_video_labeled(const std::string& label, uint64_t timeout_ms) {
         if (!h_) return Result<std::string>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
         return detail::needed_read(h_, [&](char* b, size_t c, size_t* n) {
@@ -264,17 +265,17 @@ public:
         });
     }
 
-    /// 订阅一路视频 producer（多路新形，K4：每路独立泵，互不连坐）。返回的
-    /// Consumer 为 move-only RAII（析构自动 close；Session.close 不隐式关）。
+    /// Subscribe to one video producer (the new multi-consumer form, K4: one independent pump per producer, no cross coupling). The returned
+    /// Consumer is move-only RAII (the destructor closes automatically; Session.close does not implicitly close it).
     Result<Consumer> consume(const std::string& producer_id,
                              std::function<void(const mediaservo_client_frame_t&)> cb);
 
-    /// ⊘ 消费房间第一路视频（首路桥，保留一周期；新代码用 wait_video+consume）。
-    /// 重复调用 = ERR_STATE。帧回调堆对象留 cbs_ 随 close 释放（⊘ C 形无 user_free）。
+    /// ⊘ Consume the room's first video (the first-consumer bridge, kept for one period; new code should use wait_video+consume).
+    /// A repeat call = ERR_STATE. The frame-callback heap object stays in cbs_ and is freed at close (the ⊘ C form has no user_free).
     Result<void> consume_video(std::function<void(const mediaservo_client_frame_t&)> cb) {
         if (!h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
         auto* f = new std::function<void(const mediaservo_client_frame_t&)>(std::move(cb));
-        cbs_.push_back(f); // ponytail: ⊘ 形无 C 侧回收，旧回调对象留到 close 释放（泵线程可能正在执行，防 UAF）
+        cbs_.push_back(f); // ponytail: the ⊘ form has no C-side reclamation, so old callback objects are kept until close frees them (the pump thread may be executing them, preventing UAF)
         int rc = mediaservo_client_session_consume_video(h_, &Session::frame_trampoline, f);
         if (rc != MEDIASERVO_OK) {
             return Result<void>(tl::unexpect, detail::make_error(rc, h_));
@@ -282,8 +283,8 @@ public:
         return Result<void>();
     }
 
-    /// ⊘ 视频统计汇总 JSON（会话级 union，保留一周期；多路精确读数用
-    /// Consumer::stats()；键见 client.h；imgui_shell core::RateEstimator 为参考消费形）。
+    /// ⊘ video stats aggregate JSON (session-level union, kept for one period; for precise per-consumer readings use
+    /// Consumer::stats(); keys in client.h; imgui_shell's core::RateEstimator is the reference consumer).
     Result<std::string> video_stats() {
         if (!h_) return Result<std::string>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
         return detail::needed_read(h_, [&](char* b, size_t c, size_t* n) {
@@ -291,16 +292,16 @@ public:
         });
     }
 
-    /// 开出程控制通道集（每会话一次性；labels 如 {"chassis"}）。
+    /// Open the outbound control channel set (once per session; labels like {"chassis"}).
     Result<class Control> open_control(const std::vector<std::string>& labels);
 
-    /// 急停双路投递（W4b；签名态 = Config.hmac_key_file）。OK = 投递成功，
-    /// 车端执行裁决看 ctl 的 seq 回执 ack。payload_json "" = null。
+    /// Emergency-stop dual-path delivery (W4b; the signing state = Config.hmac_key_file). OK = delivery succeeded;
+    /// the vehicle's execution adjudication is ctl's seq receipt ack. payload_json "" = null.
     Result<void> emergency_stop(const class Control& ctl, const std::string& label,
                                 uint64_t seq, const std::string& payload_json);
 
-    /// 关闭会话并释放 handle（幂等；join 泵 + C 侧逐条 user_free 状态回调后，
-    /// 本侧再释放 ⊘ consume_video 的 cbs_ 堆对象）。
+    /// Close the session and release the handle (idempotent; after joining the pumps + the C side's per-entry user_free of state callbacks,
+    /// this side then frees the ⊘ consume_video cbs_ heap objects).
     Result<void> close() noexcept {
         if (!h_ && cbs_.empty()) return Result<void>();
         int rc = MEDIASERVO_OK;
@@ -344,18 +345,18 @@ private:
     std::vector<std::function<void(const mediaservo_client_frame_t&)>*> cbs_;
 };
 
-/// 单路视频消费者（move-only RAII；析构自动 close；默认构造 = 已关闭）。
-/// PSK 房间发现（psk-discover：Legacy 全量视角，跨房间拉流的发现面）。
+/// Single video consumer (move-only RAII; the destructor closes automatically; default construction = closed).
+/// PSK room discovery (psk-discover: the Legacy full view, the discovery surface for cross-room pulls).
 inline Result<std::string> list_rooms_psk(const std::string& http_base, const std::string& psk) {
     return detail::needed_read(nullptr, [&](char* b, size_t c, size_t* n) {
         return mediaservo_client_list_rooms_psk(http_base.c_str(), psk.c_str(), b, c, n);
     });
 }
 
-/// 生效身份标签（T4/F6 镜像；零网络，create 期本地推导静态值）。closed 会话仍可读。
+/// The effective identity label (the T4/F6 mirror; zero network, a static value derived locally at create). Readable even on a closed session.
 inline Result<std::string> identity_label(const Session& s) {
     return detail::needed_read(nullptr, [&](char* b, size_t c, size_t* n) {
-        return mediaservo_client_session_identity(s.h_, b, c, n); // 友元形：自由函数读私有句柄
+        return mediaservo_client_session_identity(s.h_, b, c, n); // the friend form: the free function reads the private handle
     });
 }
 
@@ -372,7 +373,7 @@ public:
     }
     Consumer& operator=(Consumer&& other) noexcept {
         if (this != &other) {
-            (void)close();  // 释放自身 qoe_ctx + 旧 handle
+            (void)close();  // release our own qoe_ctx + the old handle
             h_ = other.release_();
             qoe_ctx_ = other.qoe_ctx_;
             other.qoe_ctx_ = nullptr;
@@ -380,10 +381,10 @@ public:
         return *this;
     }
 
-    /// 是否持有有效消费者。
+    /// Whether a valid consumer is held.
     explicit operator bool() const noexcept { return h_ != nullptr; }
 
-    /// 本路 producer id（建立期常量；已关闭/读取失败 = 空串）。
+    /// This consumer's producer id (a setup-time constant; closed/read failure = empty string).
     std::string id() const {
         if (!h_) return std::string();
         auto r = detail::needed_read(nullptr, [&](char* b, size_t c, size_t* n) {
@@ -392,7 +393,7 @@ public:
         return r ? r.value() : std::string();
     }
 
-    /// 本路视频统计 JSON（单路读数，K4；键表 = Session::video_stats 同形）。
+    /// This consumer's video stats JSON (per-consumer reading, K4; the key table matches Session::video_stats).
     Result<std::string> stats() {
         if (!h_) return Result<std::string>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
         return detail::needed_read(nullptr, [&](char* b, size_t c, size_t* n) {
@@ -400,31 +401,31 @@ public:
         });
     }
 
-    /// QOE 周期回调（consumer-qoe-callback，2026-10-09；对齐 TRRO OnMediaState）：
-    /// SDK 内置节拍/差分/换算——cb 收现成换算值。幂等（替换前次）；close 即停。
-    /// cb 在 SDK 节拍线程触发——**回调内禁止阻塞**。
+    /// QOE periodic callback (consumer-qoe-callback, 2026-10-09; aligned with TRRO OnMediaState):
+    /// the SDK handles tick/diff/conversion internally — cb receives ready-converted values. Idempotent (replaces the previous); close stops it.
+    /// cb fires on the SDK tick thread — **blocking inside the callback is forbidden**.
     struct QoeSnapshot {
         uint32_t fps;
         uint32_t kbps;
         float lost_percent;
         uint64_t decoded_total;
-        uint32_t avg_decode_ms;  // 平均解码耗时 ms/帧
-        uint32_t jitter_ms;      // 抖动 ms
-        uint32_t rtt_ms;         // 往返时延 ms（后端无源=0）
+        uint32_t avg_decode_ms;  // average decode time ms/frame
+        uint32_t jitter_ms;      // jitter in ms
+        uint32_t rtt_ms;         // round-trip time ms (0 when the backend has no source)
         uint32_t width;
         uint32_t height;
-        uint32_t epoch;  // 重协商断点代（仅识别用）
+        uint32_t epoch;  // renegotiation-breakpoint generation (for identification only)
     };
 
     Result<void> on_qoe(std::chrono::milliseconds period,
                         std::function<void(const QoeSnapshot&)> cb) {
         if (!h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
-        // 堆上悬挂保护：cb 存活期 = C 侧注册期。C 层 PIT-221 join 纪律：
-        // consumer_close/重复注册返回前已 abort+join 旧 task——delete qoe_ctx_
-        // 时序由 C 层硬保证（回调物理停发后才释放）。
+        // Heap-dangling protection: the cb lifetime = the C-side registration period. The C layer's PIT-221 join discipline:
+        // consumer_close/re-registration has already abort+join'ed the old task before returning — the delete qoe_ctx_
+        // ordering is hard-guaranteed by the C layer (freed only after callbacks physically stop firing).
         auto* ctx = new std::function<void(const QoeSnapshot&)>(std::move(cb));
         static_assert(sizeof(QoeSnapshot) >= sizeof(mediaservo_client_qoe_snapshot_t) - sizeof(uint32_t),
-                      "QoeSnapshot 字段序漂移——C ABI 兼容破坏");
+                      "QoeSnapshot field order drift — a C ABI compatibility break");
         int rc = mediaservo_client_consumer_on_qoe(
             h_, static_cast<uint32_t>(period.count()),
             [](const mediaservo_client_qoe_snapshot_t* snap, void* user) {
@@ -439,19 +440,19 @@ public:
             delete ctx;
             return Result<void>(tl::unexpect, detail::make_error(rc));
         }
-        // 幂等替换：旧 ctx 释放（新注册已让 C 层 abort 旧 task——旧 ctx 不再被触发）
+        // Idempotent replacement: the old ctx is freed (the new registration already had the C layer abort the old task — the old ctx is never triggered again)
         delete static_cast<std::function<void(const QoeSnapshot&)>*>(qoe_ctx_);
         qoe_ctx_ = ctx;
         return Result<void>();
     }
 
-    /// 关闭本路并释放 handle（幂等；C 侧 join 泵 + abort qoe task + user_free 帧回调堆对象）。
+    /// Close this consumer and release the handle (idempotent; the C side joins the pump + aborts the qoe task + user_free's the frame-callback heap objects).
     Result<void> close() noexcept {
         if (!h_) return Result<void>();
         int rc = mediaservo_client_consumer_close(h_);
         h_ = nullptr;
-        // qoe 回调堆上下文释放（lsan.1096280 实证 64B/次注册）：
-        // C close 已 abort qoe task——回调不再触发，此处 delete 安全。
+        // qoe callback heap-context release (lsan.1096280 proved a 64B leak per registration):
+        // the C close has already aborted the qoe task — callbacks no longer fire, so delete is safe here.
         delete static_cast<std::function<void(const QoeSnapshot&)>*>(qoe_ctx_);
         qoe_ctx_ = nullptr;
         if (rc != MEDIASERVO_OK) {
@@ -469,14 +470,14 @@ private:
         return p;
     }
     mediaservo_client_consumer_t* h_ = nullptr;
-    /// qoe 回调堆上下文（on_qoe 存；close 释放——move 转移见下）
+    /// qoe callback heap context (stored by on_qoe; freed at close — moved in the move ops below)
     void* qoe_ctx_ = nullptr;
 };
 
-/// 出程控制通道集（move-only RAII；析构自动 close）。
+/// Outbound control channel set (move-only RAII; the destructor closes automatically).
 class Control {
 public:
-    /// 默认构造 = 已关闭通道。
+    /// Default construction = closed channel.
     Control() noexcept = default;
     ~Control() { (void)close(); }
 
@@ -491,12 +492,12 @@ public:
         return *this;
     }
 
-    /// 是否持有有效通道。
+    /// Whether a valid channel is held.
     explicit operator bool() const noexcept { return h_ != nullptr; }
 
-    /// 注册 ack 回调（累积形，批1b：多次注册 = 每条 ack 逐个回调；首次启动泵）。
-    /// 返回注销凭据 token（Control::off_ack）；回调堆对象由 C 侧在 off_ack 泵
-    /// 回收轮或 close 时释放（注册失败本侧 delete 兜底）。
+    /// Register an ack callback (cumulative form, batch 1b: multiple registrations = each ack invokes them one by one; the first starts the pump).
+    /// Returns the unregistration credential token (Control::off_ack); the callback heap objects are freed by the C side at the off_ack pump
+    /// reclamation round or at close (this-side delete is the backstop when registration fails).
     Result<uint64_t> on_ack(std::function<void(const std::string&)> cb) {
         if (!h_) return Result<uint64_t>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
         auto* f = new std::function<void(const std::string&)>(std::move(cb));
@@ -504,13 +505,13 @@ public:
         int rc = mediaservo_client_control_on_ack(h_, &Control::ack_trampoline, f,
                                                   &Control::ack_user_free, &token);
         if (rc != MEDIASERVO_OK) {
-            delete f; // C 未接管，本侧兜底（禁泄漏）
+            delete f; // the C side never took over; this-side backstop (no leaks)
             return Result<uint64_t>(tl::unexpect, detail::make_error(rc));
         }
         return Result<uint64_t>(token);
     }
 
-    /// 按 token 注销 ack 回调（泵下轮回收并释放堆对象；在途轮次可能仍触发一次）。
+    /// Unregister an ack callback by token (the pump reclaims and frees the heap object next round; an in-flight round may still fire once).
     Result<void> off_ack(uint64_t token) {
         if (!h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
         int rc = mediaservo_client_control_off_ack(h_, token);
@@ -520,7 +521,7 @@ public:
         return Result<void>();
     }
 
-    /// 发送命令信封（payload_json "" = null payload；seq 调用方自增维护）。
+    /// Send a command envelope (payload_json "" = a null payload; the caller maintains seq as a monotonic counter).
     Result<void> send(const std::string& label, uint64_t seq, const std::string& cmd,
                       const std::string& payload_json) {
         if (!h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
@@ -532,7 +533,7 @@ public:
         return Result<void>();
     }
 
-    /// DC 就绪态（发送/急停前门禁用，K5）。
+    /// DC ready state (the gate before sending/estop, K5).
     Result<DcState> ready_state() const {
         if (!h_) return Result<DcState>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
         uint8_t st = 0;
@@ -543,7 +544,7 @@ public:
         return Result<DcState>(static_cast<DcState>(st));
     }
 
-    /// SCTP 背压水位（字节数；0 = 可安全追加，K5）。
+    /// SCTP backpressure water level (bytes; 0 = safe to append, K5).
     Result<uint64_t> buffered_amount() {
         if (!h_) return Result<uint64_t>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
         uint64_t bytes = 0;
@@ -554,8 +555,8 @@ public:
         return Result<uint64_t>(bytes);
     }
 
-    /// server 分配的 data producer id 的 JSON 数组（观测面）。溢出经 needed
-    /// 反馈自动扩一次重试（批1b 升形）。
+    /// JSON array of the server-assigned data producer ids (observation surface). Overflow auto-grows once via the needed
+    /// feedback (the batch-1b upgrade).
     Result<std::string> producer_ids() {
         if (!h_) return Result<std::string>(tl::unexpect, Error{MEDIASERVO_CLIENT_ERR_INVALID_ARG, "closed", 0, false});
         return detail::needed_read(nullptr, [&](char* b, size_t c, size_t* n) {
@@ -563,8 +564,8 @@ public:
         });
     }
 
-    /// 关闭控制通道并释放 handle（幂等；join ack 泵后 C 侧全量回收注册表——
-    /// 堆 std::function 经 user_free 释放，C++ 面无残留）。
+    /// Close the control channel and release the handle (idempotent; after joining the ack pump, the C side reclaims the whole registry —
+    /// heap std::function objects are freed via user_free; nothing lingers on the C++ side).
     Result<void> close() noexcept {
         if (!h_) return Result<void>();
         int rc = mediaservo_client_control_close(h_);
@@ -602,7 +603,7 @@ inline Result<Consumer> Session::consume(const std::string& producer_id,
     int rc = mediaservo_client_session_consume(h_, producer_id.c_str(), &Session::frame_trampoline,
                                                f, &Session::frame_user_free, &ch);
     if (rc != MEDIASERVO_OK) {
-        delete f; // C 未接管，本侧兜底（禁泄漏）
+        delete f; // the C side never took over; this-side backstop (no leaks)
         return Result<Consumer>(tl::unexpect, detail::make_error(rc, h_));
     }
     return Result<Consumer>(Consumer(ch));

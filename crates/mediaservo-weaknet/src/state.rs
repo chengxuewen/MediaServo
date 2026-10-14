@@ -1,14 +1,14 @@
-//! state.rs —— state.json（JSON 单写者，含 teardown 计划）+ timeline（JSONL=judge.py 契约）+
-//! 路径解析 + 写锁 + param_summary（bash 措辞逐字平移，judge.py:71 与 W7 肌肉记忆依赖）。
+//! state.rs -- state.json (single JSON writer, carries the teardown plan) + timeline (JSONL = the judge.py contract) +
+//! path resolution + write lock + param_summary (verbatim bash port; judge.py:71 and the W7 muscle memory depend on it).
 //!
-//! 设计契约源 = design.md §state.rs：`{spec, scope, dir, iface, expires_at, teardown:{channel,
-//! sidecar?:{name,image}, steps[]}, job?, schema}`——teardown 计划 **apply 时落盘且自带通道信息**
-//! （watchdog 跨进程苏醒后知道走本地 tc 还是 docker exec，照单执行而非硬编码）。
+//! Design contract source = design.md §state.rs: `{spec, scope, dir, iface, expires_at, teardown:{channel,
+//! sidecar?:{name,image}, steps[]}, job?, schema}` -- the teardown plan **is persisted at apply and carries its channel info**
+//! (a watchdog waking cross-process knows whether to use local tc or docker exec, executing per the plan instead of hardcoding).
 //!
-//! 路径（C20）：`WEAKNET_STATEDIR` env 覆写 > exe 目录祖先探测 `<repo>/out/.weaknet`（与 bash
-//! `ROOT/out/.weaknet` 同路径 = T10 窗口期双工具共享 timeline 的兼容判据）> cwd 兜底。
-//! 文件名：state.json（本工具唯一事实源；bash 时代的 `state` KEY=VAL 文件与其并存互不读取）、
-//! timeline.jsonl（共享追加）、watchdog.pid（fuse 协议 `<pid> <starttime>`）、lock（写锁见 [`acquire_write_lock`]）。
+//! Path (C20): `WEAKNET_STATEDIR` env override > exe-dir ancestor probing of `<repo>/out/.weaknet` (same path as bash
+//! `ROOT/out/.weaknet` = the compat predicate letting both tools share the timeline during the T10 window) > cwd fallback.
+//! Filenames: state.json (this tool's sole fact source; the bash-era `state` KEY=VAL file coexists but neither reads the other),
+//! timeline.jsonl (shared append), watchdog.pid (fuse protocol `<pid> <starttime>`), lock (write lock, see [`acquire_write_lock`]).
 
 use serde::{Deserialize, Serialize};
 
@@ -19,12 +19,12 @@ pub const STATE_FILE: &str = "state.json";
 pub const TIMELINE_FILE: &str = "timeline.jsonl";
 pub const WATCHDOG_PID_FILE: &str = "watchdog.pid";
 pub const LOCK_FILE: &str = "lock";
-/// bash 侧默认目录名（ROOT/out/.weaknet）——探测链末端与此对齐。
+/// bash-side default dir name (ROOT/out/.weaknet) -- the probe chain's end aligns with it.
 const DEFAULT_OUT_SUBDIR: &str = "out/.weaknet";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChannelSer {
-    /// serde 形 = design §state.rs：channel "local"|"sidecar" + sidecar{name,image}
+    /// serde shape = design §state.rs: channel "local"|"sidecar" + sidecar{name,image}
     #[serde(rename = "local")]
     LocalRoot,
     #[serde(rename = "sidecar")]
@@ -37,8 +37,8 @@ pub struct SidecarRef {
     pub image: String,
 }
 
-/// teardown 计划（steps = tc argv 序列，不含 `tc` 前缀；执行语义见 engine::run_teardown——
-/// ENOENT 类幂等、其余逐条 WARN 不中断）。
+/// teardown plan (steps = a tc argv sequence, without the `tc` prefix; execution semantics in engine::run_teardown --
+/// ENOENT-class idempotent, everything else WARNed per step without aborting).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Teardown {
     pub channel: ChannelSer,
@@ -47,15 +47,15 @@ pub struct Teardown {
     pub steps: Vec<Vec<String>>,
 }
 
-/// scenario job 属主（T8 写入；本结构先行入 schema——陈旧判活走 /proc starttime，
-/// 复用 fuse 同一校验法，design §server「陈旧 job 恢复」）。
+/// scenario job owner (written at T8; this struct led the schema -- stale liveness via /proc starttime,
+/// reusing the fuse's same validation method, design §server "stale job recovery").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobRef {
     pub name: String,
     pub pid: u32,
     pub starttime: u64,
-    /// T8：进度回显源（写处理器每 step 更新 done；total = plan 行数）。
-    /// `#[serde(default)]` 兼容 rev-2.2 首形（无 done/total 的落盘）。
+    /// T8: progress echo source (the writer updates done each step; total = the plan line count).
+    /// `#[serde(default)]` for compat with the first rev-2.2 shape (persisted without done/total).
     #[serde(default)]
     pub done: u32,
     #[serde(default)]
@@ -66,19 +66,19 @@ pub struct JobRef {
 pub struct State {
     pub schema: String,
     pub spec: ImpairSpec,
-    /// spec.dir 的顶层镜像（design 字段清单形；单写者恒同步，status/serve 直读）。
+    /// Top-level mirror of spec.dir (design field-list shape; kept in sync by the single writer, read directly by status/serve).
     pub dir: Dir,
     pub scope: ScopeSel,
     pub iface: String,
-    /// 施加时的端口/配对快照（status 展示与排障用；Media=本地口集，Stream/Device=拍平对端）。
+    /// Port/pair snapshot at apply time (for status display and debugging; Media = local ports, Stream/Device = flattened peers).
     #[serde(default)]
     pub ports: Vec<u16>,
-    /// T5：Stream/Device 施加时解析的有序对 (local, remote)——解析结果入盘，
-    /// replay/status 免重复拉 stats；`#[serde(default)]` 向后兼容旧 state（无此键）。
+    /// T5: ordered pairs (local, remote) resolved at Stream/Device apply time -- the resolution lands on disk,
+    /// replay/status skip re-pulling stats; `#[serde(default)]` for backward compat with old state (no such key).
     #[serde(default)]
     pub pairs: Vec<(u16, u16)>,
-    /// E2（T8 小账）：定向名字（rooms=--stream 房间集；devices=--device 设备集）。
-    /// 面板勾选回显与 apply 事件 stream 字段（E1）的单一真值源。
+    /// E2 (T8 minor): targeted names (rooms = the --stream room set; devices = the --device device set).
+    /// Single truth source for panel checkbox echo and the apply event stream field (E1).
     #[serde(default)]
     pub rooms: Vec<String>,
     #[serde(default)]
@@ -86,13 +86,13 @@ pub struct State {
     #[serde(default)]
     pub sig_port: Option<u16>,
     pub expires_at_ms: u64,
-    /// 本次现场是否由我方建立 root（teardown 只删我方建立的——guard 纪律的持久化）。
+    /// Whether this site's root was created by us (teardown only deletes what we created -- the guard discipline persisted).
     pub created_root: bool,
-    /// T9：本会话是否装了 ifb0 镜像链（dir=in/both × 物理口）。回读/verify 观测点路由
-    /// （ifb0 root 形 vs iface 1:10）与 teardown 计划共用的单一真值源。
+    /// T9: whether this session installed the ifb0 mirror chain (dir=in/both x physical port). The single truth source shared by
+    /// read-back/verify observation-point routing (ifb0 root form vs iface 1:10) and the teardown plan.
     #[serde(default)]
     pub ifb_used: bool,
-    /// T9：ifb0 链路本次是否由我方所建（§ifb owner 合同：别人/系统建的撤除不碰）。
+    /// T9: whether the ifb0 link was created by us this session (§ifb owner contract: never touch links built by others/the system).
     #[serde(default)]
     pub created_ifb: bool,
     #[serde(default)]
@@ -101,43 +101,41 @@ pub struct State {
 }
 
 impl State {
-    /// `expires_at_ms == 0` = forever 档（--forever 语义位，M0 CLI 未暴露；fuse.is_expired 已兼容）。
+    /// `expires_at_ms == 0` = the forever tier (--forever semantics, not exposed by the M0 CLI; fuse.is_expired already handles it).
     #[must_use]
     pub fn is_forever(&self) -> bool {
         self.expires_at_ms == 0
     }
 
-    /// 原子写（tmp+rename——JSON 单写者 + watchdog 跨进程读半文件防御）。
+    /// Atomic write (tmp+rename -- single JSON writer + defending the watchdog's cross-process read of a half file).
     pub fn write_to(&self, path: &std::path::Path) -> Result<(), String> {
         let parent = path
             .parent()
-            .ok_or_else(|| format!("state 路径无父目录: {}", path.display()))?;
+            .ok_or_else(|| format!("state path has no parent dir: {}", path.display()))?;
         std::fs::create_dir_all(parent)
-            .map_err(|e| format!("建 state 目录 {} 失败: {e}", parent.display()))?;
-        let tmp = path.with_file_name(format!(
-            "{}.tmp-{}",
-            STATE_FILE,
-            std::process::id()
-        ));
+            .map_err(|e| format!("failed to create the state dir {}: {e}", parent.display()))?;
+        let tmp = path.with_file_name(format!("{}.tmp-{}", STATE_FILE, std::process::id()));
         let body = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("state 序列化失败: {e}"))?;
-        std::fs::write(&tmp, body).map_err(|e| format!("写 state 临时文件失败: {e}"))?;
-        std::fs::rename(&tmp, path)
-            .map_err(|e| format!("state rename {} → {} 失败: {e}", tmp.display(), path.display()))
+            .map_err(|e| format!("state serialization failed: {e}"))?;
+        std::fs::write(&tmp, body)
+            .map_err(|e| format!("failed to write the state tmp file: {e}"))?;
+        std::fs::rename(&tmp, path).map_err(|e| {
+            format!("state rename {} -> {} failed: {e}", tmp.display(), path.display())
+        })
     }
 
-    /// 读 state。不存在 → Ok(None)；schema 失配 / JSON 非法 → Err（禁静默背离，C15）。
+    /// Read state. Missing -> Ok(None); schema mismatch / invalid JSON -> Err (never silent divergence, C15).
     pub fn read_from(path: &std::path::Path) -> Result<Option<State>, String> {
         let raw = match std::fs::read_to_string(path) {
             Ok(s) => s,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(format!("读 state {} 失败: {e}", path.display())),
+            Err(e) => return Err(format!("failed to read state {}: {e}", path.display())),
         };
         let st: State = serde_json::from_str(&raw)
-            .map_err(|e| format!("state {} 非法: {e}", path.display()))?;
+            .map_err(|e| format!("invalid state {}: {e}", path.display()))?;
         if st.schema != STATE_SCHEMA {
             return Err(format!(
-                "state schema 失配: {} != {STATE_SCHEMA}（版本漂移？先 clear 复位）",
+                "state schema mismatch: {} != {STATE_SCHEMA} (version drift? reset with clear first)",
                 st.schema
             ));
         }
@@ -145,7 +143,7 @@ impl State {
     }
 }
 
-// ---------- 路径解析 ----------
+// ---------- Path resolution ----------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dirs {
@@ -170,10 +168,10 @@ impl Dirs {
         self.statedir.join(LOCK_FILE)
     }
 
-    /// 纯解析（env / exe_dir / cwd 全部注入——测试零环境触碰）：
-    /// `WEAKNET_STATEDIR` > exe_dir 祖先中最近的仓库根（含 Cargo.toml+crates/）下
-    /// `out/.weaknet`（= bash `ROOT/out/.weaknet` 同路径）> 已存在的 `out/.weaknet` 祖先 >
-    /// cwd/`out/.weaknet` 兜底。
+    /// Pure resolution (env / exe_dir / cwd all injected -- tests touch zero environment):
+    /// `WEAKNET_STATEDIR` > the nearest repo root (with Cargo.toml+crates/) among exe_dir ancestors, under which
+    /// `out/.weaknet` (= bash `ROOT/out/.weaknet` same path) > an existing `out/.weaknet` ancestor >
+    /// cwd/`out/.weaknet` fallback.
     #[must_use]
     pub fn resolve(
         env_val: Option<&str>,
@@ -181,9 +179,7 @@ impl Dirs {
         cwd: &std::path::Path,
     ) -> Self {
         if let Some(v) = env_val.filter(|s| !s.is_empty()) {
-            return Self {
-                statedir: std::path::PathBuf::from(v),
-            };
+            return Self { statedir: std::path::PathBuf::from(v) };
         }
         let mut probe = Some(exe_dir);
         let mut repo_hit: Option<std::path::PathBuf> = None;
@@ -194,17 +190,13 @@ impl Dirs {
             if exists_hit.is_none() && cand.is_dir() {
                 exists_hit = Some(cand.clone());
             }
-            if repo_hit.is_none()
-                && dir.join("Cargo.toml").is_file()
-                && dir.join("crates").is_dir()
+            if repo_hit.is_none() && dir.join("Cargo.toml").is_file() && dir.join("crates").is_dir()
             {
                 repo_hit = Some(cand);
             }
             probe = dir.parent();
         }
-        Self {
-            statedir: repo_hit.or(exists_hit).unwrap_or_else(|| cwd.join(DEFAULT_OUT_SUBDIR)),
-        }
+        Self { statedir: repo_hit.or(exists_hit).unwrap_or_else(|| cwd.join(DEFAULT_OUT_SUBDIR)) }
     }
 
     #[must_use]
@@ -219,60 +211,58 @@ impl Dirs {
     }
 }
 
-// ---------- 写锁（跨工具窗口注记） ----------
+// ---------- Write lock (cross-tool window note) ----------
 
-/// 瞬持写锁（apply/set/scenario 全程；clear/status 免锁可达——bash 同规）。
-/// 机制 = `<statedir>/lock` 内容 pid+starttime 锁文件（create_new 原子性 + fuse::read_proc_starttime
-/// 判活回收）。**与 bash flock(1) 同路径不同机制**：Rust→bash 方向的互斥由「窗口纪律 = bash 写入
-/// 次数 0」保证（tasks.md 头注）；bash 持锁期间我方对空 lock 文件保守报忙。
+/// Transient write lock (apply/set/scenario full run; clear/status lock-free reachable -- bash parity).
+/// Mechanism = the `<statedir>/lock` pid+starttime lock file (create_new atomicity + fuse::read_proc_starttime
+/// liveness reaping). **Same path as bash flock(1), different mechanism**: Rust->bash mutual exclusion is guaranteed by
+/// "window discipline = bash writes 0 times" (tasks.md header); while bash holds the lock we conservatively report busy on the empty lock file.
 pub fn acquire_write_lock(dirs: &Dirs) -> Result<WriteLock, String> {
     std::fs::create_dir_all(&dirs.statedir)
-        .map_err(|e| format!("建 state 目录失败: {e}"))?;
+        .map_err(|e| format!("failed to create the state dir: {e}"))?;
     let path = dirs.lock();
     for attempt in 0..2 {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(f) => {
                 use std::io::Write;
                 let pid = std::process::id();
                 let st = crate::fuse::read_proc_starttime(pid).unwrap_or(0);
                 let mut f = f;
                 if let Err(e) = writeln!(f, "{pid} {st}") {
-                    eprintln!("weaknet(state): 写锁内容失败: {e}");
+                    eprintln!("weaknet(state): failed to write lock content: {e}");
                 }
                 return Ok(WriteLock { path });
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 if holder_alive(&path)? {
                     return Err(format!(
-                        "另一 weaknet 实例运行中（锁持有；确需接管先等其结束或 clear）: {}",
+                        "another weaknet instance is running (holds the lock; to take over wait for it to finish or clear first): {}",
                         path.display()
                     ));
                 }
-                // 属主已亡 → 回收陈旧锁重试一次
+                // dead owner -> reap the stale lock and retry once
                 std::fs::remove_file(&path)
-                    .map_err(|e| format!("回收陈旧锁失败: {e}"))?;
+                    .map_err(|e| format!("failed to reap the stale lock: {e}"))?;
                 if attempt == 1 {
-                    return Err("锁回收后二次创建仍失败（竞态？）——重试".to_string());
+                    return Err(
+                        "second create after reaping still failed (race?) -- retry".to_string()
+                    );
                 }
             }
-            Err(e) => return Err(format!("打开锁文件失败: {e}")),
+            Err(e) => return Err(format!("failed to open the lock file: {e}")),
         }
     }
     Err("unreachable".to_string())
 }
 
 fn holder_alive(path: &std::path::Path) -> Result<bool, String> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| format!("读锁文件失败: {e}"))?;
+    let raw =
+        std::fs::read_to_string(path).map_err(|e| format!("failed to read the lock file: {e}"))?;
     let mut it = raw.split_whitespace();
     let (Some(pid), Some(starttime)) = (it.next(), it.next()) else {
-        // 空/畸形 = bash flock 时代遗留（flock 不落内容）——保守视为持有，交人工 clear 裁决
+        // empty/malformed = a bash flock-era leftover (flock writes no content) -- conservatively treat as held, leave the verdict to a manual clear
         eprintln!(
-            "weaknet(state): 锁文件 {} 无属主信息（bash flock 遗留？畸形）——保守报忙，确认无并发后删除 {}",
+            "weaknet(state): lock file {} has no owner info (bash flock leftover? malformed) -- conservatively reporting busy; delete {} once sure nothing is concurrent",
             path.display(),
             path.display()
         );
@@ -290,7 +280,7 @@ fn holder_alive(path: &std::path::Path) -> Result<bool, String> {
     })
 }
 
-/// RAII：Drop 即释放（写操作瞬持语义；进程崩溃时锁文件残留由 starttime 判活回收）。
+/// RAII: Drop releases (the write op transient semantics; a crash-leaked lock file is reaped via starttime liveness).
 #[derive(Debug)]
 pub struct WriteLock {
     path: std::path::PathBuf,
@@ -301,46 +291,37 @@ impl Drop for WriteLock {
         if let Err(e) = std::fs::remove_file(&self.path)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            eprintln!(
-                "weaknet(state): 释放写锁 {} 失败: {e}",
-                self.path.display()
-            );
+            eprintln!("weaknet(state): failed to release write lock {}: {e}", self.path.display());
         }
     }
 }
 
-// ---------- timeline（JSONL，UTC——PIT-181：本机时区取证错位教训） ----------
+// ---------- timeline (JSONL, UTC -- PIT-181: the lesson of local-timezone forensics misalignment) ----------
 
-/// 追加一行事件（自动注入 t_utc；调用方给 `json!({...})` 不带 t_utc 即可）。
-/// 事件名白名单（judge 契约 T8 钉）：apply/set/clear/self-heal-clear/watchdog-clear/
+/// Append one event (auto-injects t_utc; callers pass `json!({...})` without t_utc).
+/// Event-name whitelist (the judge contract pinned at T8): apply/set/clear/self-heal-clear/watchdog-clear/
 /// watchdog-clear-failed/scenario-start/baseline-done/scenario-step/repeat-round/scenario-end。
-pub fn timeline_append(
-    dirs: &Dirs,
-    ev: serde_json::Value,
-) -> Result<(), String> {
+pub fn timeline_append(dirs: &Dirs, ev: serde_json::Value) -> Result<(), String> {
     use std::io::Write;
     std::fs::create_dir_all(&dirs.statedir)
-        .map_err(|e| format!("建 timeline 目录失败: {e}"))?;
+        .map_err(|e| format!("failed to create the timeline dir: {e}"))?;
     let mut obj = match ev {
         serde_json::Value::Object(m) => m,
-        _ => return Err("timeline 事件必须是对象".to_string()),
+        _ => return Err("a timeline event must be an object".to_string()),
     };
     if !obj.contains_key("t_utc") {
-        obj.insert(
-            "t_utc".to_string(),
-            serde_json::Value::String(utc_now_string()),
-        );
+        obj.insert("t_utc".to_string(), serde_json::Value::String(utc_now_string()));
     }
     let line = serde_json::Value::Object(obj).to_string();
     let mut f = std::fs::OpenOptions::new()
         .append(true)
         .create(true)
         .open(dirs.timeline())
-        .map_err(|e| format!("开 timeline 失败: {e}"))?;
-    writeln!(f, "{line}").map_err(|e| format!("写 timeline 失败: {e}"))
+        .map_err(|e| format!("failed to open the timeline: {e}"))?;
+    writeln!(f, "{line}").map_err(|e| format!("failed to write the timeline: {e}"))
 }
 
-/// bash `utc()` 同形：`%Y-%m-%dT%H:%M:%SZ`（epoch → 日历日 = Hinnant civil_from_days，零依赖）。
+/// bash `utc()` same shape: `%Y-%m-%dT%H:%M:%SZ` (epoch -> calendar day = Hinnant civil_from_days, zero deps).
 #[must_use]
 pub fn utc_now_string() -> String {
     let secs = crate::fuse::now_epoch_ms() / 1000;
@@ -351,21 +332,15 @@ pub fn utc_now_string() -> String {
 fn format_utc_secs(epoch: u64) -> String {
     let (y, m, d) = civil_from_days((epoch / 86400) as i64);
     let tod = epoch % 86400;
-    format!(
-        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
-        tod / 3600,
-        (tod % 3600) / 60,
-        tod % 60
-    )
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", tod / 3600, (tod % 3600) / 60, tod % 60)
 }
 
-/// Howard Hinnant civil_from_days（z = 自 1970-01-01 的天数）。
+/// Howard Hinnant civil_from_days (z = days since 1970-01-01).
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = (z - era * 146_097) as u64; // [0, 146096]
-    let yoe =
-        (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
     let y = yoe as i64 + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
     let mp = (5 * doy + 2) / 153; // [0, 11]
@@ -374,12 +349,12 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
-// ---------- param_summary（bash 逐字平移） ----------
+// ---------- param_summary (verbatim bash port) ----------
 
-/// bash `param_summary()` 精确形：
+/// bash `param_summary()` exact shape:
 /// `rtt=80ms jitter=15ms loss=2%/uniform rate=sentinel reorder=0 seed=off`
-/// （LOSS_MODE 恒非空 → `/<mode>` 恒在；rate 未设=sentinel；reorder 未设=0；seed 未设=off。
-/// judge.py 以 `rtt=0ms` 前缀 + `loss=0%` 子串识别恢复步——措辞即契约，禁改。）
+/// (LOSS_MODE never empty -> `/<mode>` always present; rate unset = sentinel; reorder unset = 0; seed unset = off.
+/// judge.py recognizes the recovery step by the `rtt=0ms` prefix + `loss=0%` substring -- the wording is the contract, do not change.)
 #[must_use]
 pub fn param_summary(s: &ImpairSpec) -> String {
     let (loss, mode) = match &s.loss {
@@ -403,7 +378,7 @@ pub fn param_summary(s: &ImpairSpec) -> String {
     )
 }
 
-/// apply 事件体（bash state_write printf 形：rtt_ms/jitter_ms 数字，loss/rate_mbps/seed/stream 字符串）。
+/// apply event body (bash state_write printf shape: rtt_ms/jitter_ms numbers, loss/rate_mbps/seed/stream strings).
 #[must_use]
 pub fn apply_event(s: &ImpairSpec, ports: &[u16], stream_sel: &str) -> serde_json::Value {
     let loss = match &s.loss {
@@ -412,16 +387,16 @@ pub fn apply_event(s: &ImpairSpec, ports: &[u16], stream_sel: &str) -> serde_jso
         None => "0%".to_string(),
     };
     serde_json::json!({
-        "ev": "apply",
-        "rtt_ms": s.rtt_ms,
-        "jitter_ms": s.jitter_ms,
-        "loss": loss,
-        "rate_mbps": s.rate_mbps.map(|n| if n.fract() == 0.0 { format!("{}", n as u64) } else { format!("{n}") }).unwrap_or_default(),
-        "ports": ports.iter().map(u16::to_string).collect::<Vec<_>>().join(" "),
-        "seed": s.seed.map(|n| n.to_string()).unwrap_or_default(),
-        // E1：bash STREAM_SEL 同键名——Stream/Device 定向时落名字串（段级=空串同旧形）。
-        "stream": stream_sel,
-    })
+            "ev": "apply",
+            "rtt_ms": s.rtt_ms,
+            "jitter_ms": s.jitter_ms,
+            "loss": loss,
+            "rate_mbps": s.rate_mbps.map(|n| if n.fract() == 0.0 { format!("{}", n as u64) } else { format!("{n}") }).unwrap_or_default(),
+            "ports": ports.iter().map(u16::to_string).collect::<Vec<_>>().join(" "),
+            "seed": s.seed.map(|n| n.to_string()).unwrap_or_default(),
+    // E1: same key as bash STREAM_SEL -- Stream/Device targeting lands the name string (room-level = empty string, same as the old form).
+            "stream": stream_sel,
+        })
 }
 
 #[cfg(test)]
@@ -466,7 +441,13 @@ mod tests {
                     name: "weaknet-ctrl".into(),
                     image: "gaiadocker/iproute2".into(),
                 }),
-                steps: vec![vec!["qdisc".into(), "del".into(), "dev".into(), "lo".into(), "root".into()]],
+                steps: vec![vec![
+                    "qdisc".into(),
+                    "del".into(),
+                    "dev".into(),
+                    "lo".into(),
+                    "root".into(),
+                ]],
             },
         }
     }
@@ -476,24 +457,24 @@ mod tests {
         let st = sample_state();
         let json = serde_json::to_string(&st).unwrap();
         let back: State = serde_json::from_str(&json).unwrap();
-        assert_eq!(st, back, "roundtrip 逐字段等");
+        assert_eq!(st, back, "roundtrip equal field by field");
         let dir = std::env::temp_dir().join(format!("weaknet-state-{}", std::process::id()));
         let p = dir.join(STATE_FILE);
         st.write_to(&p).unwrap();
         assert_eq!(State::read_from(&p).unwrap().as_ref(), Some(&st));
-        // schema 失配 → Err（禁静默）
+        // schema mismatch -> Err (never silent)
         let mut bad = st.clone();
         bad.schema = "weaknet-state/999".into();
         bad.write_to(&p).unwrap();
         assert!(State::read_from(&p).unwrap_err().contains("schema"));
         std::fs::remove_file(&p).ok();
         std::fs::remove_dir_all(&dir).ok();
-        // 不存在 = Ok(None)
+        // missing = Ok(None)
         assert_eq!(State::read_from(&p).unwrap(), None);
     }
 
-    /// 小刀 C 配套（T5）：旧 state JSON 无 pairs 键 → serde(default) 读为空集，
-    /// Media 形现场跨升级可读（禁 schema 断崖）。
+    // knife-C companion (T5): old state JSON without the pairs key -> serde(default) reads as empty,
+    // a Media-form site stays readable across the upgrade (no schema cliff).
     #[test]
     fn state_json_without_pairs_key_still_reads() {
         let st = sample_state();
@@ -501,17 +482,17 @@ mod tests {
         json.as_object_mut().unwrap().remove("pairs");
         let back: State = serde_json::from_value(json).unwrap();
         assert_eq!(back.pairs, vec![]);
-        assert_eq!(back.ports, st.ports, "其余字段不受影响");
+        assert_eq!(back.ports, st.ports, "other fields unaffected");
     }
 
     #[test]
     fn teardown_roundtrip_channel_ser_sidecar_shape() {
-        // design §state.rs 合同：teardown.channel 落盘为 "sidecar" 串 + sidecar{name,image} 对象。
+        // design §state.rs contract: teardown.channel persisted as the "sidecar" string + sidecar{name,image} object.
         let st = sample_state();
         let json = serde_json::to_string(&st).unwrap();
         assert!(
             json.contains(r#""channel":"sidecar""#),
-            "channel 词形必须 sidecar，得 {json}"
+            "channel word must be sidecar, got {json}"
         );
         assert!(json.contains(r#""name":"weaknet-ctrl""#));
         assert!(json.contains(r#""image":"gaiadocker/iproute2""#));
@@ -521,10 +502,10 @@ mod tests {
             steps: vec![vec!["qdisc".into(), "del".into()]],
         };
         let s = serde_json::to_string(&local).unwrap();
-        assert!(s.contains(r#""channel":"local""#), "local 形 {s}");
+        assert!(s.contains(r#""channel":"local""#), "local form {s}");
         let back: Teardown = serde_json::from_str(&s).unwrap();
         assert_eq!(back, local);
-        // sidecar 形缺省 None 字段可反序（#[serde(default)] 兼容旧落盘）。
+        // a sidecar form with default-None fields round-trips (#[serde(default)] compat with old persisted state).
         let no_sc = r#"{"channel":"local","steps":[]}"#;
         let t: Teardown = serde_json::from_str(no_sc).unwrap();
         assert_eq!(t.channel, ChannelSer::LocalRoot);
@@ -533,14 +514,14 @@ mod tests {
 
     #[test]
     fn utc_form_matches_bash_date_u_shape() {
-        // bash `date -u +%Y-%m-%dT%H:%M:%SZ`——timeline 取证口径（PIT-181）。
+        // bash `date -u +%Y-%m-%dT%H:%M:%SZ` -- the timeline forensics convention (PIT-181).
         assert_eq!(utc_now_string().len(), 20, "2026-09-08T01:26:49Z");
         assert!(utc_now_string().ends_with('Z'));
     }
 
     #[test]
     fn param_summary_bash_parity_strings() {
-        // 期望串 = bash param_summary 实测输出（逐字符，judge.py:71 消费面）
+        // expected string = actual bash param_summary output (character by character; consumed at judge.py:71)
         let s = ImpairSpec {
             rtt_ms: 80,
             jitter_ms: 15,
@@ -569,7 +550,7 @@ mod tests {
             param_summary(&g),
             "rtt=120ms jitter=0ms loss=8%/gemodel rate=4.5 reorder=5 seed=42"
         );
-        // 恢复步判据兼容（judge.py: after.startswith('rtt=0ms') && 'loss=0%' in after）
+        // recovery-step predicate compat (judge.py: after.startswith('rtt=0ms') && 'loss=0%' in after)
         let z = param_summary(&ImpairSpec::default());
         assert!(z.starts_with("rtt=0ms") && z.contains("loss=0%"), "{z}");
     }
@@ -590,7 +571,10 @@ mod tests {
         assert_eq!(v["rate_mbps"], "4");
         assert_eq!(v["ports"], "20000");
         assert_eq!(v["seed"], "");
-        assert_eq!(v["stream"], "cam0,cam1", "E1: 定向名串入 stream 键（bash STREAM_SEL 同位）");
+        assert_eq!(
+            v["stream"], "cam0,cam1",
+            "E1: targeted name string in the stream key (same slot as bash STREAM_SEL)"
+        );
     }
 
     #[test]
@@ -598,7 +582,7 @@ mod tests {
         assert_eq!(format_utc_secs(0), "1970-01-01T00:00:00Z");
         assert_eq!(format_utc_secs(1_000_000_000), "2001-09-09T01:46:40Z");
         assert_eq!(format_utc_secs(1_757_292_409), "2025-09-08T00:46:49Z");
-        // 闰年边界 2024-02-29
+        // leap-year boundary 2024-02-29
         assert_eq!(format_utc_secs(1_709_208_000), "2024-02-29T12:00:00Z");
     }
 
@@ -611,13 +595,13 @@ mod tests {
         std::fs::write(repo.join("Cargo.toml"), "[workspace]").unwrap();
         let exe = repo.join("target/debug");
         std::fs::create_dir_all(&exe).unwrap();
-        // env 覆写优先
+        // env override wins
         let d = Dirs::resolve(Some("/tmp/injected-wnet"), &exe, &repo);
         assert_eq!(d.statedir, std::path::PathBuf::from("/tmp/injected-wnet"));
-        // 仓库根探测（exe → 祖先 repo）
+        // repo-root probing (exe -> ancestor repo)
         let d = Dirs::resolve(None, &exe, std::path::Path::new("/nowhere"));
-        assert_eq!(d.statedir, repo.join("out/.weaknet"), "= bash ROOT/out/.weaknet 同形");
-        // 兜底 cwd
+        assert_eq!(d.statedir, repo.join("out/.weaknet"), "= same shape as bash ROOT/out/.weaknet");
+        // cwd fallback
         let d = Dirs::resolve(None, std::path::Path::new("/nonexistent/deep/path"), &repo);
         assert_eq!(d.statedir, repo.join("out/.weaknet"));
         std::fs::remove_dir_all(&root).ok();
@@ -628,18 +612,18 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("weaknet-lock-{}", std::process::id()));
         let dirs = Dirs { statedir: dir.clone() };
         {
-            let _lk = acquire_write_lock(&dirs).expect("首次获取必成");
+            let _lk = acquire_write_lock(&dirs).expect("first acquire must succeed");
             assert!(dirs.lock().exists());
-            // 持锁中二次获取 = 报忙（同进程二次 create_new → 内容 pid=自己 starttime=自己 → alive）
+            // second acquire while held = busy (same-process second create_new -> content pid=self starttime=self -> alive)
             let e = acquire_write_lock(&dirs).unwrap_err();
-            assert!(e.contains("另一 weaknet 实例"), "{e}");
+            assert!(e.contains("another weaknet instance"), "{e}");
         }
-        assert!(!dirs.lock().exists(), "Drop 即释放");
-        // 陈旧属主（pid 不存在）→ 回收重试成功
+        assert!(!dirs.lock().exists(), "Drop releases");
+        // stale owner (pid missing) -> reap and retry succeeds
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dirs.lock(), "4294967 12345\n").unwrap();
-        let _lk = acquire_write_lock(&dirs).expect("陈旧锁应被回收");
-        // 空文件（bash flock 遗留形）→ 保守报忙
+        let _lk = acquire_write_lock(&dirs).expect("stale lock should be reaped");
+        // empty file (bash flock leftover form) -> conservatively report busy
         drop(_lk);
         std::fs::write(dirs.lock(), "").unwrap();
         assert!(acquire_write_lock(&dirs).is_err());
@@ -651,18 +635,18 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("weaknet-tl-{}", std::process::id()));
         let dirs = Dirs { statedir: dir.clone() };
         timeline_append(&dirs, serde_json::json!({"ev":"apply","rtt_ms":80})).unwrap();
-        timeline_append(&dirs, serde_json::json!({"ev":"clear","t_utc":"2026-01-01T00:00:00Z"})).unwrap();
-        let lines: Vec<String> = std::fs::read_to_string(dirs.timeline())
-            .unwrap()
-            .lines()
-            .map(str::to_string)
-            .collect();
+        timeline_append(&dirs, serde_json::json!({"ev":"clear","t_utc":"2026-01-01T00:00:00Z"}))
+            .unwrap();
+        let lines: Vec<String> =
+            std::fs::read_to_string(dirs.timeline()).unwrap().lines().map(str::to_string).collect();
         assert_eq!(lines.len(), 2);
         let first: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
-        assert!(first["t_utc"].as_str().unwrap().ends_with("Z"), "首行自动 UTC 注入");
-        assert_eq!(lines[1], r#"{"ev":"clear","t_utc":"2026-01-01T00:00:00Z"}"#, "已有 t_utc 不覆写，键序保持");
+        assert!(first["t_utc"].as_str().unwrap().ends_with("Z"), "first line auto-injects UTC");
+        assert_eq!(
+            lines[1], r#"{"ev":"clear","t_utc":"2026-01-01T00:00:00Z"}"#,
+            "existing t_utc not overwritten, key order kept"
+        );
         assert!(timeline_append(&dirs, serde_json::json!("nope")).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
-
 }

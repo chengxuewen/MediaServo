@@ -117,50 +117,50 @@ Before submitting work touching multiple crates:
 
 | Skill | Relationship |
 |-------|-------------|
-| `think-before-act` | Context selection IS part of "先查再动手" |
+| `think-before-act` | Context selection IS part of "check first, then act" |
 | `api-interface-design` | Context-engineering informs protocol contracts |
 | `test-harness` | Cross-crate testing needs correct per-crate context |
 | `lesson-memory` (C9) | New multi-language pitfalls → write to `pitfalls.md` |
 
-## 任务 → 技能路由
+## Task → skill routing
 
-识别用户意图后，主动建议加载对应技能：
+After identifying user intent, proactively suggest loading the matching skill:
 
-| 关键词/场景 | 建议技能 | 触发条件 |
+| Keyword/scenario | Suggested skill | Trigger condition |
 |------------|---------|---------|
-| "实现/添加/创建 + 功能" | `incremental-implementation` | 跨文件变更 |
-| "修复/bug/报错/不工作" | `systematic-debugging` | 运行时错误 |
-| "怎么用/文档/API + 库名" | `source-driven-development` | 外部依赖 |
-| "写测试/测试失败" | `test-driven-development` | 测试相关 |
-| "页面/UI/前端/Admin" | `browser-testing` | 浏览器变更 |
-| "安全/密钥/认证/漏洞" | `security-hardening` | 安全相关 |
-| "审查/review/检查代码" | code-review 规则 | 代码修改后 |
-| "性能/慢/卡顿/延迟" | `performance-optimization` | 性能问题 |
-| "架构/设计/trait/协议" | `api-interface-design` | API 设计 |
-| "切换/上下文/语言" | `context-engineering` | 多语言任务 |
-| "CI/CD/Docker/pipeline" | `ci-cd-automation` | CI 变更 |
-| "简化/重构/清理" | `code-simplification` | 降复杂度 |
-| "优化 agent/审计/技能" | `ecosystem-scan` | Agent 体系 |
-| "总结/记录/教训/经验" | `lesson-review` | 会话结束 |
-| 任何非平凡操作前 | `think-before-act` | 自动 |
-| "审计/一致性/文档矛盾" | `doc-audit` | 文档审计 |
-| "方案/提案/标准化变更" | `openspec-propose` | 架构变更 |
-| "实施/按方案/逐步" | `openspec-apply-change` | 方案执行 |
-| "归档/完成变更" | `openspec-archive-change` | 变更归档 |
-| "探索/调研/思路" | `openspec-explore` | 方案调研 |
-| "生成测试/测试骨架" | `test-harness` | 测试框架 |
-| "硬编码/密钥/端口扫描" | `review-hardcode` | 安全扫描 |
-| "文档转技能/书籍" | `book-to-skill` | 文档转换 |
-| "同步规格/delta" | `openspec-sync-specs` | 规格同步 |
+| "实现/添加/创建 + 功能" (implement/add/create + feature) | `incremental-implementation` | cross-file changes | <!-- c49:trigger -->
+| "修复/bug/报错/不工作" (fix/bug/error/not working) | `systematic-debugging` | runtime errors | <!-- c49:trigger -->
+| "怎么用/文档/API + 库名" (how to use/docs/API + lib name) | `source-driven-development` | external dependencies | <!-- c49:trigger -->
+| "写测试/测试失败" (write tests/test failure) | `test-driven-development` | test-related work | <!-- c49:trigger -->
+| "页面/UI/前端/Admin" (page/UI/frontend/Admin) | `browser-testing` | browser changes | <!-- c49:trigger -->
+| "安全/密钥/认证/漏洞" (security/secret/auth/vulnerability) | `security-hardening` | security work | <!-- c49:trigger -->
+| "审查/review/检查代码" (review/inspect code) | code-review rules | after code changes | <!-- c49:trigger -->
+| "性能/慢/卡顿/延迟" (performance/slow/lag/latency) | `performance-optimization` | performance issues | <!-- c49:trigger -->
+| "架构/设计/trait/协议" (architecture/design/trait/protocol) | `api-interface-design` | API design | <!-- c49:trigger -->
+| "切换/上下文/语言" (switch/context/language) | `context-engineering` | multi-language tasks | <!-- c49:trigger -->
+| "CI/CD/Docker/pipeline" | `ci-cd-automation` | CI changes |
+| "简化/重构/清理" (simplify/refactor/cleanup) | `code-simplification` | reduce complexity | <!-- c49:trigger -->
+| "优化 agent/审计/技能" (optimize agents/audit/skills) | `ecosystem-scan` | agent ecosystem | <!-- c49:trigger -->
+| "总结/记录/教训/经验" (summarize/log lessons) | `lesson-review` | session end | <!-- c49:trigger -->
+| before any non-trivial action | `think-before-act` | automatic |
+| "审计/一致性/文档矛盾" (audit/consistency/doc conflicts) | `doc-audit` | docs audit | <!-- c49:trigger -->
+| "方案/提案/标准化变更" (proposal/spec-driven change) | `openspec-propose` | architecture changes | <!-- c49:trigger -->
+| "实施/按方案/逐步" (implement per plan/step by step) | `openspec-apply-change` | plan execution | <!-- c49:trigger -->
+| "归档/完成变更" (archive/complete change) | `openspec-archive-change` | change archiving | <!-- c49:trigger -->
+| "探索/调研/思路" (explore/research/ideas) | `openspec-explore` | option research | <!-- c49:trigger -->
+| "生成测试/测试骨架" (generate tests/test skeleton) | `test-harness` | test tooling | <!-- c49:trigger -->
+| "硬编码/密钥/端口扫描" (hardcode/secret/port scan) | `review-hardcode` | security scan | <!-- c49:trigger -->
+| "文档转技能/书籍" (docs/book → skill) | `book-to-skill` | document conversion | <!-- c49:trigger -->
+| "同步规格/delta" (sync specs/delta) | `openspec-sync-specs` | spec sync | <!-- c49:trigger -->
 
-## 主动建议机制
+## Proactive suggestion mechanism
 
-当 agent 识别到上述关键词但**未**加载对应技能时：
-1. 简要提示："这个任务可能需要 `X` 技能，要我加载吗？"
-2. **不强制** — 用户可跳过
-3. **不重复** — 同一会话中对同一技能只建议一次
-4. 建议格式：
+When the agent detects one of the keywords above but the matching skill is **not** loaded:
+1. Brief prompt: "This task may need the `X` skill — want me to load it?"
+2. **Not forced** — the user may skip
+3. **No repeats** — suggest each skill at most once per session
+4. Suggestion format:
 
 ```
-💡 建议: 这个任务涉及 [场景]，`skill(name="X")` 可以提供 [价值]。需要吗？
+💡 Suggestion: this task involves [scenario]; `skill(name="X")` can provide [value]. Need it?
 ```

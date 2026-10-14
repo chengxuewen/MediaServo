@@ -55,7 +55,7 @@ impl RTCDataChannel {
         self.backend.state()
     }
 
-    /// S6/K5: 待发队列字节数（拥塞水位判据；急停投递前预检用）。
+    /// S6/K5: the outbound queue byte count (the congestion-waterline predicate; for preflight before dispatching an e-stop).
     pub async fn buffered_amount(&self) -> u64 {
         self.backend.buffered_amount().await
     }
@@ -125,9 +125,9 @@ pub struct RTCDataMessage {
 /// Receiver for RTCDataChannel events.
 /// Created by spool() — polls the backend's event stream.
 ///
-/// 事件源 = broadcast 通道（Sender 可多克隆）：`RTCDataChannelRx` 本身不 Clone，
-/// 但同一 DC 多次 spool() 各得一个独立 receiver（F1 审查 #1: register-once 语义
-/// 要求 spool() 可重复调用，每次返回共享事件流的订阅端）。
+/// The event source = a broadcast channel (the Sender clones freely): `RTCDataChannelRx` itself is not Clone,
+/// but multiple spool() calls on the same DC each yield an independent receiver (F1 review #1: the register-once semantics
+/// requires spool() be callable repeatedly, each call returning a subscriber end of the shared event stream).
 pub struct RTCDataChannelRx {
     rx: Option<tokio::sync::broadcast::Receiver<RTCDataChannelEvent>>,
 }
@@ -137,7 +137,7 @@ impl RTCDataChannelRx {
         Self { rx }
     }
 
-    #[allow(dead_code)] // stub/webrtc-rs 姿态构造器（sfu 姿态-unused = PIT-203 族）
+    #[allow(dead_code)] // the stub/webrtc-rs posture constructor (unused in the sfu posture = the PIT-203 family)
     pub(crate) fn stub() -> Self {
         Self { rx: None }
     }
@@ -146,7 +146,7 @@ impl RTCDataChannelRx {
         match &mut self.rx {
             Some(rx) => match rx.recv().await {
                 Ok(ev) => Some(ev),
-                // Lagged: 订阅端落后被丢弃 — 返回 Error 事件（消费端可见，非静默）
+                // Lagged: the subscriber fell behind and events were dropped -- returns an Error event (visible to the consumer, not silent)
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     Some(RTCDataChannelEvent::Error(format!("lagged {n} events")))
                 }

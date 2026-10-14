@@ -1,5 +1,5 @@
-// mediaservo-field-cxx 推流流程示例（骨架；需运行中 server 才能全流程跑通）。
-// 编译示例: g++ -std=c++17 -I bindings/cxx/mediaservo-field-cxx/include -I bindings/c/mediaservo-field-c/include
+// mediaservo-field-cxx push-flow example (skeleton; needs a running server for the full flow).
+// Build example: g++ -std=c++17 -I bindings/cxx/mediaservo-field-cxx/include -I bindings/c/mediaservo-field-c/include
 //           -I bindings/c/include examples/vehicle_field.cpp -L target/debug -lmediaservo_field
 
 #include <iostream>
@@ -11,7 +11,7 @@ int main() {
     using mediaservo::field::PushConfig;
     using mediaservo::field::PushSession;
 
-    // 配置从环境变量读取（禁止硬编码密钥/地址）
+    // Configuration comes from environment variables (hardcoded keys/addresses are forbidden)
     const char* url = std::getenv("MEDIASERVO_SIGNAL_URL");
     const char* psk = std::getenv("MEDIASERVO_PSK");
     const char* room = std::getenv("MEDIASERVO_ROOM");
@@ -48,7 +48,7 @@ int main() {
     }
 
     std::cout << "pushing frames (Ctrl-C to stop)...\n";
-    std::cin.get(); // 阻塞直到用户停止
+    std::cin.get(); // block until the user stops
 
     s.stop_video_frames();
     auto closed = s.close();

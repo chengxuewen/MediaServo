@@ -1,25 +1,25 @@
-# 视频会议信令协议
+# Video Conference Signaling Protocol
 
-## 1. 概述
+## 1. Overview
 
-信令协议使用 WebSocket 作为实时传输层，gRPC 作为服务间通信。
+The signaling protocol uses WebSocket as the real-time transport layer and gRPC for inter-service communication.
 
-### 设计原则
+### Design Principles
 
-- **独立于媒体层**: 信令不依赖 SFU 具体实现，可切换 SFU 引擎
-- **JSON 负载**: Web 端优先 JSON，native 端可选 Protobuf
-- **请求-响应 + 事件推送**: 统一消息格式
+- **Independent of the media layer**: signaling doesn't depend on a specific SFU implementation; the SFU engine is swappable
+- **JSON payloads**: JSON first on the web side; Protobuf optional on the native side
+- **Request-response + event push**: unified message format
 
-## 2. 传输层
+## 2. Transport Layer
 
-### 2.1 WebSocket 端点
+### 2.1 WebSocket Endpoints
 
 ```
 ws://<host>/ws/conference/v1
 wss://<host>/ws/conference/v1  (TLS)
 ```
 
-连接时携带 Token 认证：
+Connections carry token auth:
 
 ```
 GET /ws/conference/v1 HTTP/1.1
@@ -28,82 +28,82 @@ Sec-WebSocket-Protocol: conference-v1
 Authorization: Bearer <token>
 ```
 
-### 2.2 消息格式
+### 2.2 Message Format
 
 ```typescript
-// 请求
+// Request
 interface WsRequest {
-  id: string;                    // 请求 ID，用于关联响应
-  method: string;                // 方法名，如 "room.create"
-  params: Record<string, any>;   // 参数
+  id: string;                    // Request ID, for correlating responses
+  method: string;                // Method name, e.g. "room.create"
+  params: Record<string, any>;   // Parameters
 }
 
-// 响应
+// Response
 interface WsResponse {
-  id: string;                    // 对应请求 ID
-  result?: Record<string, any>;  // 成功响应
-  error?: {                      // 错误响应
+  id: string;                    // Matching request ID
+  result?: Record<string, any>;  // Success response
+  error?: {                      // Error response
     code: string;
     message: string;
   };
 }
 
-// 事件推送
+// Event push
 interface WsEvent {
-  type: string;                  // 事件类型
-  data: Record<string, any>;     // 事件数据
+  type: string;                  // Event type
+  data: Record<string, any>;     // Event data
   timestamp: string;             // ISO 8601
 }
 ```
 
-## 3. 信令方法
+## 3. Signaling Methods
 
-### 3.1 房间管理
+### 3.1 Room Management
 
-| 方法 | 方向 | 说明 |
-|------|------|------|
-| `room.create` | Client → Server | 创建房间 |
-| `room.join` | Client → Server | 加入房间 |
-| `room.leave` | Client → Server | 离开房间 |
-| `room.get` | Client → Server | 获取房间信息 |
-| `room.list` | Client → Server | 列出房间 |
-| `room.end` | Host → Server | 结束房间 |
-| `room.lock` | Host → Server | 锁定房间 |
-| `room.unlock` | Host → Server | 解锁房间 |
+| Method | Direction | Description |
+|--------|-----------|-------------|
+| `room.create` | Client → Server | Create a room |
+| `room.join` | Client → Server | Join a room |
+| `room.leave` | Client → Server | Leave a room |
+| `room.get` | Client → Server | Get room info |
+| `room.list` | Client → Server | List rooms |
+| `room.end` | Host → Server | End a room |
+| `room.lock` | Host → Server | Lock a room |
+| `room.unlock` | Host → Server | Unlock a room |
 
-### 3.2 媒体协商
+### 3.2 Media Negotiation
 
-| 方法 | 方向 | 说明 |
-|------|------|------|
-| `transport.create` | Client → Server | 创建 WebRTC Transport |
-| `transport.connect` | Client → Server | 连接 Transport (ICE) |
-| `produce` | Client → Server | 发布媒体 |
-| `consume` | Client → Server | 订阅媒体 |
-| `producer.pause` | Client → Server | 暂停发布 |
-| `producer.resume` | Client → Server | 恢复发布 |
-| `consumer.setLayer` | Client → Server | 切换编码层 |
-| `consumer.setPreferredLayers` | Client → Server | 设置优选的 SVC 层 |
+| Method | Direction | Description |
+|--------|-----------|-------------|
+| `transport.create` | Client → Server | Create a WebRTC transport |
+| `transport.connect` | Client → Server | Connect a transport (ICE) |
+| `produce` | Client → Server | Publish media |
+| `consume` | Client → Server | Subscribe to media |
+| `producer.pause` | Client → Server | Pause publishing |
+| `producer.resume` | Client → Server | Resume publishing |
+| `consumer.setLayer` | Client → Server | Switch the encoding layer |
+| `consumer.setPreferredLayers` | Client → Server | Set preferred SVC layers |
 
-### 3.3 参与者管理
+### 3.3 Participant Management
 
-| 方法 | 方向 | 说明 |
-|------|------|------|
-| `participant.mute` | Host → Server | 静音参与者 |
-| `participant.unmute` | Host → Server | 取消静音 |
-| `participant.kick` | Host → Server | 移除参与者 |
-| `participant.setRole` | Host → Server | 设置角色 |
+| Method | Direction | Description |
+|--------|-----------|-------------|
+| `participant.mute` | Host → Server | Mute a participant |
+| `participant.unmute` | Host → Server | Unmute a participant |
+| `participant.kick` | Host → Server | Remove a participant |
+| `participant.setRole` | Host → Server | Set a role |
 
-### 3.4 录制管理
+### 3.4 Recording Management
 
-| 方法 | 方向 | 说明 |
-|------|------|------|
-| `recording.start` | Host → Server | 开始录制 |
-| `recording.stop` | Host → Server | 停止录制 |
-| `recording.status` | Client → Server | 查询录制状态 |
+| Method | Direction | Description |
+|--------|-----------|-------------|
+| `recording.start` | Host → Server | Start recording |
+| `recording.stop` | Host → Server | Stop recording |
+| `recording.status` | Client → Server | Query recording status |
 
-## 4. 媒体协商流程
+## 4. Media Negotiation Flow
 
-### 4.1 加入房间
+### 4.1 Joining a Room
 
 ```
 Client                      Server                      mediasoup
@@ -117,12 +117,12 @@ Client                      Server                      mediasoup
   │                           │                           │
   │  transport.create(type)   │                           │
   │──────────────────────────►│                           │
-  │                           │─── router.createTransport  │
+  │                           │─── router.createTransport │
   │                           │──────────────────────────►│
   │                           │◄──────────────────────────│
   │  ◄────────────────────────│ transportCreated          │
   │      { transportId, iceParameters, iceCandidates,     │
-  │        dtlsParameters }                                │
+  │        dtlsParameters }                               │
   │                           │                           │
   │  transport.connect()      │                           │
   │──────────────────────────►│                           │
@@ -138,8 +138,8 @@ Client                      Server                      mediasoup
   │                           │◄──────────────────────────│
   │  ◄────────────────────────│ produced { producerId }   │
   │                           │                           │
-  │  consume(producerId)      │  (为其他参与者创建 Consumer)│
-  │──────────────────────────►│                           │
+  │  consume(producerId)      │  (creates Consumers for    │
+  │──────────────────────────►│   other participants)      │
   │                           │─── consumer.create()      │
   │                           │──────────────────────────►│
   │                           │◄──────────────────────────│
@@ -150,9 +150,9 @@ Client                      Server                      mediasoup
   │                           │                           │
 ```
 
-### 4.2 订阅新参与者
+### 4.2 Subscribing to New Participants
 
-当参与者 B 加入房间时，已有参与者 A 自动收到事件：
+When participant B joins, existing participant A automatically receives events:
 
 ```
 Server                      Client A
@@ -169,69 +169,69 @@ Server                      Client A
   │──────────────────────────►│
   │  { track: B's audio }     │
   │                           │
-  │  (Client A 可以主动 consume)│
+  │  (Client A may consume proactively) │
   │                           │
 ```
 
-## 5. 服务间信令 (gRPC)
+## 5. Inter-Service Signaling (gRPC)
 
 ### 5.1 Conference Service
 
 ```protobuf
 service ConferenceService {
-  // 房间管理
+  // Room management
   rpc CreateRoom(CreateRoomRequest) returns (Room);
   rpc GetRoom(GetRoomRequest) returns (Room);
   rpc EndRoom(EndRoomRequest) returns (Empty);
   rpc ListRooms(ListRoomsRequest) returns (ListRoomsResponse);
 
-  // 参与者管理
+  // Participant management
   rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);
   rpc LeaveRoom(LeaveRoomRequest) returns (Empty);
   rpc KickParticipant(KickRequest) returns (Empty);
   rpc MuteParticipant(MuteRequest) returns (Empty);
 
-  // 录制
+  // Recording
   rpc StartRecording(RecordingRequest) returns (RecordingStatus);
   rpc StopRecording(RecordingRequest) returns (RecordingStatus);
   rpc GetRecordingStatus(RecordingRequest) returns (RecordingStatus);
 }
 ```
 
-### 5.2 SFU 管理 Service
+### 5.2 SFU Management Service
 
 ```protobuf
 service SfuService {
-  // Worker 管理
+  // Worker management
   rpc GetWorkerStatus(Empty) returns (WorkerStatus);
   rpc ListWorkers(Empty) returns (ListWorkersResponse);
   rpc AllocateWorker(AllocateRequest) returns (Worker);
 
-  // 区域路由
+  // Region routing
   rpc GetRegionStatus(Empty) returns (RegionStatus);
   rpc RouteToRegion(RouteRequest) returns (RouteResponse);
 }
 ```
 
-## 6. 错误码
+## 6. Error Codes
 
-| 错误码 | HTTP 类比 | 说明 |
-|--------|----------|------|
-| `ROOM_NOT_FOUND` | 404 | 房间不存在 |
-| `ROOM_FULL` | 403 | 房间已满 |
-| `ROOM_LOCKED` | 403 | 房间已锁定 |
-| `ROOM_ENDED` | 410 | 房间已结束 |
-| `UNAUTHORIZED` | 401 | 未认证 |
-| `FORBIDDEN` | 403 | 无权限 |
-| `INVALID_PARAMS` | 400 | 参数错误 |
-| `TRANSPORT_ERROR` | 500 | 传输层错误 |
-| `PRODUCE_FAILED` | 500 | 发布失败 |
-| `CONSUME_FAILED` | 500 | 订阅失败 |
-| `RATE_LIMITED` | 429 | 频率限制 |
-| `INTERNAL_ERROR` | 500 | 内部错误 |
+| Error code | HTTP analogue | Description |
+|------------|---------------|-------------|
+| `ROOM_NOT_FOUND` | 404 | Room does not exist |
+| `ROOM_FULL` | 403 | Room is full |
+| `ROOM_LOCKED` | 403 | Room is locked |
+| `ROOM_ENDED` | 410 | Room has ended |
+| `UNAUTHORIZED` | 401 | Not authenticated |
+| `FORBIDDEN` | 403 | No permission |
+| `INVALID_PARAMS` | 400 | Invalid parameters |
+| `TRANSPORT_ERROR` | 500 | Transport layer error |
+| `PRODUCE_FAILED` | 500 | Publish failed |
+| `CONSUME_FAILED` | 500 | Subscribe failed |
+| `RATE_LIMITED` | 429 | Rate limited |
+| `INTERNAL_ERROR` | 500 | Internal error |
 
-## 7. 参考
+## 7. References
 
-- 消息格式借鉴 Colibri2 RESTful API 设计 (Jitsi)
-- 服务间 RPC 借鉴 LiveKit PSRPC 模式
-- 媒体协商流程遵循 mediasoup 标准 API
+- Message format modeled on Colibri2's RESTful API design (Jitsi)
+- Inter-service RPC modeled on LiveKit's PSRPC pattern
+- Media negotiation flow follows the standard mediasoup API

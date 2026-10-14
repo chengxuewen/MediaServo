@@ -134,18 +134,18 @@ impl V4l2Backend {
             message: e.to_string(),
         })?;
 
-        // S_PARM — frame interval; tegra-video 驱动不支持（实证: VIDIOC_S_PARM
-        // Inappropriate ioctl）→ 降级 warn 不阻断（帧率由传感器/ISP 固定）；
-        // UVC 支持则正常设置。fps 失配 warn（C17；实机对照 v4l2-ctl --get-parm）。
+        // S_PARM — frame interval; the tegra-video driver does not support it (verified: VIDIOC_S_PARM
+        // Inappropriate ioctl) → degrade to warn without blocking (fps is fixed by the sensor/ISP);
+        // UVC drivers that support it set it normally. Warn on fps mismatch (C17; verified live with v4l2-ctl --get-parm).
         let params = match dev.set_params(&CaptureParameters::with_fps(self.fps)) {
             Ok(p) => p,
             Err(e) => {
                 tracing::warn!(
                     path = %self.path,
                     error = %e,
-                    "S_PARM 不支持（tegra 驱动固定帧率）——降级，fps 按驱动默认"
+                    "S_PARM unsupported (tegra driver fixes fps) — degrading; fps follows the driver default"
                 );
-                // 降级: interval 0/0 = 驱动默认帧率
+                // Degrade: interval 0/0 = driver default fps
                 CaptureParameters::new(Fraction::new(0, 0))
             }
         };
@@ -155,7 +155,7 @@ impl V4l2Backend {
                 path = %self.path,
                 configured = self.fps,
                 actual = fps,
-                "fps mismatch after set_params — 实机对照见 T8 (v4l2-ctl --get-parm)"
+                "fps mismatch after set_params — see T8 live check (v4l2-ctl --get-parm)"
             );
         }
 
@@ -245,7 +245,7 @@ fn convert_to_compact_i420(
         nv12_to_compact_i420(raw, w, h, stride)
     } else {
         Err(CaptureError::Unsupported(format!(
-            "FourCC {} 解码未实现（Phase 3 支持范围；当前仅 YUYV/NV12）",
+            "FourCC {} decode not implemented (Phase 3 support scope; currently only YUYV/NV12)",
             fourcc.str().unwrap_or("????")
         )))
     }

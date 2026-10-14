@@ -1,13 +1,13 @@
-//! host-capturer: 采集进程（Task C1）— 相机视频 → FrameBus 发布（I420）。
+//! host-capturer: capture process (Task C1) — camera video → FrameBus publish (I420).
 //!
-//! 用法: `host-capturer --camera <id> --config <host.yaml 路径> --token <令牌文件路径> [--reconnect-ms <ms>]`
+//! Usage: `host-capturer --camera <id> --config <host.yaml path> --token <token file path> [--reconnect-ms <ms>]`
 //!
-//! 流程: 读 host.yaml 视频源配置（mode/width/height/fps/input/reconnect_ms）→ mode 分派:
-//! generator → mediaservo-media `VideoFrameGenerator` 产帧（C17 单调时钟由 generator 保证）；
-//! camera → `V4l2Backend` 采集（DQBUF 阻塞即节拍——不叠加 sleep_until；open/read 失败按
-//! reconnect_ms 退避重试）。两路统一 publish topic `camera/<id>`（payload = FrameMeta 36B +
-//! 紧凑 I420，与 deck closed_loop 线格式一致）。desktop / subscriber 未实现——明确报错退出
-//! （不静默降级，C36）。
+//! Flow: read host.yaml video source config (mode/width/height/fps/input/reconnect_ms) → dispatch by mode:
+//! generator → mediaservo-media `VideoFrameGenerator` produces frames (C17 monotonic clock guaranteed by
+//! the generator); camera → `V4l2Backend` capture (blocking DQBUF is the pacing — no added sleep_until;
+//! open/read failures retry with reconnect_ms backoff). Both paths publish topic `camera/<id>` uniformly
+//! (payload = FrameMeta 36B + packed I420, matching the deck closed_loop wire format). desktop / subscriber
+//! unimplemented — explicit error exit (no silent downgrade, C36).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -33,19 +33,19 @@ use mediaservo_media::pipeline::capture::v4l2::V4l2Backend;
 #[cfg(all(feature = "capture-v4l2", target_os = "linux"))]
 use mediaservo_media::pipeline::capture::{CaptureBackend, CaptureError};
 
-/// FrameMeta 像素格式: 1 = I420（D243 枚举）。
+/// FrameMeta pixel format: 1 = I420 (D243 enum).
 const FORMAT_I420: u8 = 1;
 
-/// 采集失败重连间隔缺省（ms；host.yaml `reconnect_ms` 未配置时生效）。
+/// Default reconnect interval after capture failure (ms; applies when host.yaml `reconnect_ms` is unset).
 const DEFAULT_RECONNECT_MS: u64 = 5000;
 
-const USAGE: &str = "用法: host-capturer --camera <id> --config <host.yaml> --token <令牌文件> [--reconnect-ms <ms>]";
+const USAGE: &str = "Usage: host-capturer --camera <id> --config <host.yaml> --token <token file> [--reconnect-ms <ms>]";
 
 struct Args {
     camera: String,
     config: PathBuf,
     token: PathBuf,
-    /// 采集失败重连间隔 ms（open 失败/流错误退避；缺省 5000）。
+    /// Reconnect interval ms after capture failure (backoff on open failure / stream error; default 5000).
     reconnect_ms: u64,
 }
 
@@ -60,27 +60,30 @@ fn parse_args_from<I: Iterator<Item = String>>(mut args: I) -> Result<Args, Stri
     let mut reconnect_ms: Option<u64> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--camera" => camera = Some(args.next().ok_or("--camera 缺值")?),
-            "--config" => config = Some(PathBuf::from(args.next().ok_or("--config 缺值")?)),
-            "--token" => token = Some(PathBuf::from(args.next().ok_or("--token 缺值")?)),
-            "--reconnect-ms" => {
-                let v = args.next().ok_or("--reconnect-ms 缺值")?;
-                reconnect_ms =
-                    Some(v.parse().map_err(|e| format!("--reconnect-ms 解析失败: {e}"))?);
+            "--camera" => camera = Some(args.next().ok_or("--camera missing value")?),
+            "--config" => {
+                config = Some(PathBuf::from(args.next().ok_or("--config missing value")?))
             }
-            _ => return Err(format!("未知参数: {arg}")),
+            "--token" => token = Some(PathBuf::from(args.next().ok_or("--token missing value")?)),
+            "--reconnect-ms" => {
+                let v = args.next().ok_or("--reconnect-ms missing value")?;
+                reconnect_ms =
+                    Some(v.parse().map_err(|e| format!("--reconnect-ms parse failed: {e}"))?);
+            }
+            _ => return Err(format!("unknown arg: {arg}")),
         }
     }
     Ok(Args {
-        camera: camera.ok_or("缺少 --camera")?,
-        config: config.ok_or("缺少 --config")?,
-        token: token.ok_or("缺少 --token")?,
+        camera: camera.ok_or("missing --camera")?,
+        config: config.ok_or("missing --config")?,
+        token: token.ok_or("missing --token")?,
         reconnect_ms: reconnect_ms.unwrap_or(DEFAULT_RECONNECT_MS),
     })
 }
 
-/// 采集后端选择（纯函数，可单测）。camera → V4l2（input 为设备路径）；generator → 现状
-/// （不进 trait——push 模型与 pull 语义不兼容）；desktop/subscriber → 未支持（C15 报错退出）。
+/// Capture backend selection (pure function, unit-testable). camera → V4l2 (input is the device path);
+/// generator → as-is (not behind the trait — push model incompatible with pull semantics);
+/// desktop/subscriber → unsupported (C15 error exit).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum BackendKind {
     V4l2 { path: String, width: u32, height: u32, fps: u32 },
@@ -102,18 +105,20 @@ fn select_backend(
                 BackendKind::V4l2 { path: path.to_string(), width, height, fps }
             }
             _ => BackendKind::Unsupported(
-                "camera 需 input 设备路径（如 /dev/video0 或 /dev/v4l/by-id/ 稳定路径）",
+                "camera requires an input device path (e.g. /dev/video0 or a stable /dev/v4l/by-id/ path)",
             ),
         },
-        SourceMode::Desktop => BackendKind::Unsupported("desktop 采集未实现（屏幕捕获后接）"),
-        SourceMode::Subscriber => {
-            BackendKind::Unsupported("subscriber 消费未实现（外部源订阅后接）")
+        SourceMode::Desktop => {
+            BackendKind::Unsupported("desktop capture not implemented (screen capture to follow)")
         }
+        SourceMode::Subscriber => BackendKind::Unsupported(
+            "subscriber consumption not implemented (external source subscription to follow)",
+        ),
     }
 }
 
-/// FrameBus 发布 sink：generator 线程 → publish（payload = FrameMeta + 紧凑 I420）。
-/// generator 忽略 sink 返回的 Err，发布失败在此打日志（C15，不静默丢帧）。
+/// FrameBus publish sink: generator thread → publish (payload = FrameMeta + packed I420).
+/// The generator ignores Err returned by the sink; publish failures are logged here (C15, no silent frame drop).
 struct FrameBusSink {
     bus: Arc<FrameBus>,
     topic: FrameTopic,
@@ -121,8 +126,8 @@ struct FrameBusSink {
     fps: u32,
 }
 
-/// 发布一帧紧凑 I420（payload = FrameMeta + I420）——generator 与 v4l2 共用线格式（DRY）。
-#[allow(clippy::too_many_arguments)] // 采集泵参数组（D274 追加后 8 元），打包 = 独立重构
+/// Publish one packed I420 frame (payload = FrameMeta + I420) — shared wire format for generator and v4l2 (DRY).
+#[allow(clippy::too_many_arguments)] // capture pump parameter group (8 args after D274); bundling = separate refactor
 fn publish_i420(
     bus: &FrameBus,
     topic: &FrameTopic,
@@ -158,7 +163,7 @@ impl VideoSink<BoxVideoFrame> for FrameBusSink {
         debug_assert_eq!(
             buf.stride_y,
             buf.width(),
-            "generator buffer 应为紧凑布局（payload 线格式假设）"
+            "generator buffer must use packed layout (payload wire-format assumption)"
         );
         let mut payload =
             Vec::with_capacity(buf.data_y.len() + buf.data_u.len() + buf.data_v.len());
@@ -179,7 +184,7 @@ impl VideoSink<BoxVideoFrame> for FrameBusSink {
     }
 }
 
-/// open() 幂等重连循环：失败 → C15 日志（含 /dev/v4l/by-id/ 与一相机一实例提示）→ 退避重试。
+/// Idempotent reconnect loop for open(): failure → C15 log (with /dev/v4l/by-id/ and one-camera-per-instance hints) → backoff retry.
 #[cfg(all(feature = "capture-v4l2", target_os = "linux"))]
 fn reconnect_with_backoff(backend: &mut V4l2Backend, reconnect_ms: u64) {
     loop {
@@ -189,7 +194,7 @@ fn reconnect_with_backoff(backend: &mut V4l2Backend, reconnect_ms: u64) {
                 tracing::warn!(
                     path = %backend.path(),
                     error = %e,
-                    "capture open 失败——{reconnect_ms}ms 后重试；请核对 /dev/v4l/by-id/ 稳定路径；一相机一实例（多实例抢占会 EBUSY，C32）"
+                    "capture open failed — retrying in {reconnect_ms}ms; check the stable /dev/v4l/by-id/ path; one camera per instance (multi-instance contention gives EBUSY, C32)"
                 );
                 std::thread::sleep(Duration::from_millis(reconnect_ms));
             }
@@ -197,9 +202,10 @@ fn reconnect_with_backoff(backend: &mut V4l2Backend, reconnect_ms: u64) {
     }
 }
 
-/// V4L2 帧循环（DQBUF 阻塞即节拍——不叠加 sleep_until；generator 维持 C17 绝对时间轴）。
-/// read 失败: 转换错误丢帧不退出（瞬时错误不杀进程）；其余（Stream/Open/Format/Unsupported）
-/// → 重连退避（open() 幂等重调，时间戳锚定不重采——跨重连 ts 连续，Momus H1）。
+/// V4L2 frame loop (blocking DQBUF is the pacing — no added sleep_until; generator keeps the C17 absolute timeline).
+/// read failures: Convert errors drop the frame without exiting (transient errors must not kill the process);
+/// others (Stream/Open/Format/Unsupported) → reconnect backoff (open() is idempotent, timestamp anchoring is
+/// not re-sampled — ts stays continuous across reconnects, Momus H1).
 #[cfg(all(feature = "capture-v4l2", target_os = "linux"))]
 fn run_v4l2_capture(
     mut backend: V4l2Backend,
@@ -226,11 +232,11 @@ fn run_v4l2_capture(
                     tracing::warn!(
                         path = %backend.path(),
                         error = %e,
-                        "帧转换失败——本帧丢弃（瞬时错误不杀进程）"
+                        "frame convert failed — frame dropped (transient error must not kill the process)"
                     );
                 }
                 _ => {
-                    tracing::warn!(path = %backend.path(), error = %e, "采集错误——重连中");
+                    tracing::warn!(path = %backend.path(), error = %e, "capture error — reconnecting");
                     reconnect_with_backoff(&mut backend, reconnect_ms);
                 }
             },
@@ -238,7 +244,7 @@ fn run_v4l2_capture(
     }
 }
 
-/// 等待 SIGINT/SIGTERM → 优雅停止（generator/v4l2 共用）。
+/// Wait for SIGINT/SIGTERM → graceful stop (shared by generator/v4l2).
 async fn wait_for_shutdown() -> ExitCode {
     #[cfg(unix)]
     {
@@ -246,7 +252,7 @@ async fn wait_for_shutdown() -> ExitCode {
         let mut sigterm = match signal(SignalKind::terminate()) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("capturer: 注册 SIGTERM 处理器失败: {e}");
+                eprintln!("capturer: register SIGTERM handler failed: {e}");
                 return ExitCode::from(1);
             }
         };
@@ -273,18 +279,18 @@ async fn main() -> ExitCode {
         }
     };
 
-    // 视频源配置（mode/width/height/fps/input/reconnect_ms；缺省 generator/1280x720/30）
+    // video source config (mode/width/height/fps/input/reconnect_ms; defaults generator/1280x720/30)
     let cfg_text = match std::fs::read_to_string(&args.config) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("capturer: 读取配置 {} 失败: {e}", args.config.display());
+            eprintln!("capturer: read config {} failed: {e}", args.config.display());
             return ExitCode::from(1);
         }
     };
     let cam = match mediaservo_host::translate::camera_config(&cfg_text, &args.camera) {
         Ok(Some(c)) => c,
         Ok(None) => {
-            eprintln!("capturer: 配置中无视频源 {}", args.camera);
+            eprintln!("capturer: no video source {} in config", args.camera);
             return ExitCode::from(1);
         }
         Err(e) => {
@@ -292,42 +298,46 @@ async fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    // mode 分派（纯函数）: camera → V4l2Backend；generator → 现状；desktop/subscriber → 报错退出
+    // dispatch by mode (pure function): camera → V4l2Backend; generator → as-is; desktop/subscriber → error exit
     let backend_kind =
         select_backend(cam.mode, cam.input.as_deref(), cam.width, cam.height, cam.fps);
     if let BackendKind::Unsupported(reason) = &backend_kind {
-        eprintln!("capturer: 视频源 {} mode={} 未支持: {reason}", cam.id, cam.mode.as_str());
+        eprintln!(
+            "capturer: video source {} mode={} unsupported: {reason}",
+            cam.id,
+            cam.mode.as_str()
+        );
         return ExitCode::from(1);
     }
 
-    // 令牌 → FrameBus attach（验签失败/过期/缺失均明确报错退出）
+    // token → FrameBus attach (verification failure / expiry / missing all exit with an explicit error)
     let token_bytes = match std::fs::read(&args.token) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("capturer: 读取令牌 {} 失败: {e}", args.token.display());
+            eprintln!("capturer: read token {} failed: {e}", args.token.display());
             return ExitCode::from(1);
         }
     };
     let (verifying_key, token) = match TokenFile::decode(&token_bytes) {
         Ok(kv) => kv,
         Err(e) => {
-            eprintln!("capturer: 令牌 {} 无效: {e}", args.token.display());
+            eprintln!("capturer: token {} invalid: {e}", args.token.display());
             return ExitCode::from(1);
         }
     };
     let bus = match FrameBus::attach("", &token, &verifying_key) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("capturer: FrameBus attach 失败: {e}");
+            eprintln!("capturer: FrameBus attach failed: {e}");
             return ExitCode::from(1);
         }
     };
     let topic = FrameTopic::new(format!("camera/{}", cam.id));
-    // ponytail: 固定 topic 跨进程重开依赖残留清理（C25 只覆盖测试；生产机制归 C2 计划）。
+    // ponytail: reopening a fixed topic across processes relies on residue cleanup (C25 covers tests only; production mechanism belongs to the C2 plan).
 
     match backend_kind {
         BackendKind::Generator => {
-            // 产帧 + 发布（generator owned 于 main 作用域，PIT-81）
+            // produce frames + publish (generator owned in main scope, PIT-81)
             let generator = VideoFrameGenerator::new();
             generator.add_or_update_sink(
                 Box::new(FrameBusSink {
@@ -379,8 +389,8 @@ async fn main() -> ExitCode {
             {
                 let reconnect_ms = args.reconnect_ms;
                 let backend = V4l2Backend::new(&path, width, height, fps);
-                // 帧循环跑普通线程（DQBUF 阻塞）；信号到达 → main 返回 → 进程退出回收。
-                // 不用 spawn_blocking：tokio runtime drop 会等待 blocking 任务 → 永不退出。
+                // The frame loop runs on a plain thread (blocking DQBUF); signal arrives → main returns → process exit reaps it.
+                // Not spawn_blocking: dropping the tokio runtime waits for blocking tasks → never exits.
                 std::thread::spawn(move || {
                     run_v4l2_capture(backend, Arc::new(bus), topic.clone(), reconnect_ms)
                 });
@@ -388,16 +398,16 @@ async fn main() -> ExitCode {
             }
             #[cfg(not(all(feature = "capture-v4l2", target_os = "linux")))]
             {
-                // 非 Linux / feature 关闭：camera 模式不可用（避免未用变量警告）。
+                // Non-Linux / feature off: camera mode unavailable (avoids unused-variable warnings).
                 let _ = (path.as_str(), width, height, fps);
                 eprintln!(
-                    "capturer: 视频源 {} mode=camera 需 Linux + capture-v4l2 feature（当前平台不支持）",
+                    "capturer: video source {} mode=camera requires Linux + capture-v4l2 feature (current platform unsupported)",
                     cam.id
                 );
                 ExitCode::from(1)
             }
         }
-        BackendKind::Unsupported(_) => unreachable!("已在分派前处理"),
+        BackendKind::Unsupported(_) => unreachable!("handled before dispatch"),
     }
 }
 
@@ -455,7 +465,7 @@ mod tests {
         ));
     }
 
-    // ── CLI 参数（T7） ───────────────────────────────────────
+    // ── CLI args (T7) ──────────────────────────────────────
 
     #[test]
     fn parse_args_defaults_reconnect_ms_to_5000() {

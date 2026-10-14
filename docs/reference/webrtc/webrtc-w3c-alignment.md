@@ -1,214 +1,214 @@
-# WebRTC W3C API 对齐重构分析
+# WebRTC W3C API Alignment Rework Analysis
 
-> 状态: 分析文档（未实施） | 日期: 2026-08-05 | 触发: PIT-65 关键帧问题 + C18 用户显式要求
+> Status: analysis doc (not implemented) | Date: 2026-08-05 | Trigger: the PIT-65 keyframe problem + C18's explicit user requirement
 >
-> **结论先行**: 当前 Host SFU produce 流程绕过标准协商，用 5 处"手工构造/最小接口"替代官方 mediasoup 客户端架构。这是 PIT-65 黑屏的架构性根因（`x-google-max-keyframe-interval` 加在错误位置正是绕过协商的恶果）。重构 = 对齐官方 mediasoup-client / libmediasoupclient 的标准 offer/answer 协商流程。
-> **结论先行**: 当前 Host SFU produce 流程绕过标准协商。**关键修正（团队审核）: mediasoup 媒体面是纯 ORTC，服务端从不返回 SDP answer —— 官方客户端自构 answer**（Chrome74.ts + libmediasoupclient /tmp 源码实证）。重构 = 对齐官方 mediasoup-client / libmediasoupclient 的标准 offer/answer 协商流程。
+> **Conclusion first**: the current Host SFU produce flow bypasses standard negotiation, substituting 5 "hand-built/minimal-interface" spots for the official mediasoup client architecture. This is the architectural root cause of the PIT-65 black screen (`x-google-max-keyframe-interval` landing in the wrong place is exactly the fruit of bypassing negotiation). The rework = aligning with the standard offer/answer negotiation flow of official mediasoup-client / libmediasoupclient.
+> **Conclusion first**: the current Host SFU produce flow bypasses standard negotiation. **Key correction (team review): the mediasoup media plane is pure ORTC and the server never returns an SDP answer — the official client builds its own answer** (verified against Chrome74.ts + libmediasoupclient /tmp sources). The rework = aligning with the standard offer/answer negotiation flow of official mediasoup-client / libmediasoupclient.
 
-## 0. 团队审核修正（2026-08-05, gap-auditor + 官方源码实证）
+## 0. Team-Review Corrections (2026-08-05, gap-auditor + official-source evidence)
 
-初版文档 3 处错误，均经官方仓库源码逐行核验：
+The initial document had 3 errors, each verified line-by-line against official repo sources:
 
-| # | 初版断言 | 官方源码实证 | 修正 |
+| # | Initial claim | Official-source evidence | Correction |
 |---|---------|-------------|------|
-| 1 | §1.1/§3.2 “服务端返回 SDP answer” | mediasoup 媒体面纯 ORTC，**从不返回 SDP**。Chrome74.ts:542-560 answer 客户端自构（`this._remoteSdp.getSdp()`）；libmediasoupclient Handler.cpp:365-369 同（`remoteSdp->GetSdp()`）；本项目 server Produce handler 只回 `Produced{producer_id}`（signaling.rs:715） | 重构 P2 改为“客户端自构 answer”，**server 不改** |
-| 2 | §3.3 “x-google-max-keyframe-interval 放 send_encodings” | webrtc-sys `RtpEncodingParameters` 无该字段（rtp_transceiver.rs:21-24）；官方注入路径 = `codecOptions` → answer 的 fmtp（MediaSection.cpp:255-277 只注入 x-google-{start,max,min}-bitrate） | 官方**根本不用 keyframe-interval**；对齐靠标准 PLI→RequestKeyFrame 链路 |
-| 3 | §3.1 “需新增 create_offer/set_local/set_remote” | 三者已存在（traits.rs:40,46,49）；真正缺的只有 `add_transceiver` + `get_sending_rtp_parameters`；webrtc-sys 0.3.41 已暴露 `add_transceiver`（peer_connection.rs:171-179） | 缩小 P1 范围 |
+| 1 | §1.1/§3.2 "the server returns an SDP answer" | the mediasoup media plane is pure ORTC and **never returns SDP**. The Chrome74.ts:542-560 answer is client-built (`this._remoteSdp.getSdp()`); libmediasoupclient Handler.cpp:365-369 the same (`remoteSdp->GetSdp()`); this project's server Produce handler replies only `Produced |
+| 2 | §3.3 "put x-google-max-keyframe-interval in send_encodings" | webrtc-sys `RtpEncodingParameters` has no such field (rtp_transceiver.rs:21-24); the official injection path = `codecOptions` → the answer's fmtp (MediaSection.cpp:255-277 injects only x-google-{start,max,min}-bitrate | change to the codecOptions path |
+| 3 | §3.1 "need to add create_offer/set_local/set_remote" | all three already exist (traits.rs:40,46,49); the real gaps are only `add_transceiver` + `get_sending_rtp_parameters`; webrtc-sys 0.3.41 already exposes `add_transceiver` (peer_connection.rs:171-179) | narrow P1's scope |
 
-**官方流程实证（/tmp 克隆源码）**: 客户端是 offerer —— `addTransceiver(sendonly) → createOffer → getSendingRtpParameters(从 offer 推导) → setLocalDescription(offer) → 发 rtpParameters 等 produce 响应 → 客户端自构 answer(RemoteSdp::Send 用本地 offerMediaObject + 服务端 rtpParameters) → setRemoteDescription(answer)`。ssrc 来自 libwebrtc 生成的 offer SDP（`getRtpEncodings`，Handler.cpp:306-308），非手工硬编码。
+**Official-flow evidence (/tmp cloned sources)**: the client is the offerer — `addTransceiver(sendonly) → createOffer → getSendingRtpParameters (derived from the offer) → setLocalDescription(offer) → send rtpParameters and await the produce response → the client builds its own answer (RemoteSdp::Send using the local offerMediaObject + the server's rtpParameters) → setRemoteDescription(answer)`.
 
 
-## 1. 官方标准流程（对照基准）
+## 1. The Official Standard Flow (the comparison baseline)
 
-### 1.1 mediasoup-client JS — `Chrome74.ts` send() 流程
+### 1.1 mediasoup-client JS — the `Chrome74.ts` send() flow
 
-官方 `mediasoup-client/src/handlers/Chrome74.ts`（`/tmp/mediasoup-client`）标准 produce 协商：
+The official `mediasoup-client/src/handlers/Chrome74.ts` (`/tmp/mediasoup-client`) standard produce negotiation:
 
 ```ts
 // Chrome74.ts send()
 const pc = this._pc;
 
-// ① 标准 W3C API：addTransceiver（指定方向 + 编码参数）
+// ① Standard W3C API: addTransceiver (direction + encoding parameters)
 pc.addTransceiver(track, {
   direction: 'sendonly',
-  sendEncodings: [{ ... }],          // 可选的 simulcast/layers
+  sendEncodings: [{ ... }],          // optional simulcast/layers
 });
 
-// ② createOffer() 让浏览器协商本地能力
+// ② createOffer() lets the browser negotiate local capabilities
 const offer = await pc.createOffer();
 
-// ③ 从 offer 的 m= 段提取发送 RTP 参数（ortc.getSendingRtpParameters）
-//    —— RTP 参数由浏览器协商结果推导，不是手工构造
+// ③ Extract the send RTP parameters from the offer's m= section (ortc.getSendingRtpParameters)
+//    — RTP parameters are derived from the browser's negotiation result, not hand-built
 const rtpParameters = this._extractRtpParameters(offer);
 
-// ④ setLocalDescription(offer) —— 标准时序
+// ④ setLocalDescription(offer) — the standard sequence
 await pc.setLocalDescription(offer);
 
-// ⑤ 发送 offer → 服务端产生 answer
-// ⑥ await pc.setRemoteDescription(answer) —— 关键：必须交给标准协商
+// ⑤ Send the offer → the server produces the answer
+// ⑥ await pc.setRemoteDescription(answer) — critical: must go through standard negotiation
 ```
 
-关键点：**所有 RTP 参数（ssrc/PT/fmtp）都从协商结果推导**。**注意（审核修正 §0）：mediasoup 媒体面纯 ORTC，服务端从不返回 SDP answer —— 客户端自构 answer**（`RemoteSdp::Send` 用本地 offerMediaObject + 服务端 rtpParameters 构造）。官方 `setRemoteDescription(answer)` 的 answer 是客户端自构的，非服务端返回。
+Key point: **all RTP parameters (ssrc/PT/fmtp) are derived from the negotiation result**. **Note (review correction §0): the mediasoup media plane is pure ORTC and the server never returns an SDP answer — the client builds its own answer** (`RemoteSdp::Send` constructs it from the local offerMediaObject + the server's rtpParameters). The answer in the official `setRemoteDescription(answer)` is client-built, not server-returned.
 
 ### 1.2 libmediasoupclient C++ — `SendHandler::Send()`
 
-`/tmp/libmediasoupclient/src/Handler.cpp` 同样的 W3C 模式：
+`/tmp/libmediasoupclient/src/Handler.cpp` — the same W3C pattern:
 
 ```cpp
 // SendHandler::Send()
-// ① 标准 W3C：AddTransceiver with direction
+// ① Standard W3C: AddTransceiver with direction
 pc->AddTransceiver(track, { direction = sendonly });
 
 // ② CreateOffer
 auto offer = pc->CreateOffer();
 
-// ③ 从 offer 推导 rtpParameters
+// ③ Derive rtpParameters from the offer
 auto rtpParameters = ... // from offer
 
 // ④ SetLocalDescription(offer)
-// ⑤ 发 offer，等 answer
+// ⑤ Send the offer and await the answer
 // ⑥ SetRemoteDescription(answer)
 ```
 
 ### 1.3 mediasoup-demo — `RoomClient.js` produce
 
-`/tmp/mediasoup-demo/app/src/RoomClient.js` 中 produce 流程同样标准：`pc.addTransceiver` → `createOffer` → `setLocalDescription` → 发 offer → `setRemoteDescription(answer)` → 从协商后的发送参数构造 rtpParameters。
+In `/tmp/mediasoup-demo/app/src/RoomClient.js` the produce flow is equally standard: `pc.addTransceiver` → `createOffer` → `setLocalDescription` → send the offer → `setRemoteDescription(answer)` → build rtpParameters from the negotiated send parameters.
 
-## 2. 当前 Host 实现 vs 官方 —— 5 处偏差
+## 2. Current Host Implementation vs Official — 5 Deviations
 
-当前流程（`crates/mediaservo-host/src/main.rs:277-361` + `sfu_media.rs`）：
+The current flow (`crates/mediaservo-host/src/main.rs:277-361` + `sfu_media.rs`):
 
 ```
-① pc.setRemoteDescription(手工构造 recvonly SDP)   ← 方向反转
-② pc.add_track("video")                            ← 非 W3C 最小接口
-③ pc.create_answer() + set_local_description       ← 在 remote offer 上做 answer（角色反了）
-④ 手工 build_produce_rtp_parameters(ssrc)          ← 硬编码 PT=101
-⑤ 从 answer 手工提取 ssrc                          ← 绕过标准 rtpParameters 推导
+① pc.setRemoteDescription(hand-built recvonly SDP)   ← direction reversal
+② pc.add_track("video")                            ← a non-W3C minimal interface
+③ pc.create_answer() + set_local_description       ← answering on the remote offer (roles reversed)
+④ Hand-made build_produce_rtp_parameters(ssrc)     ← hardcoded PT=101
+⑤ Hand-parsing the ssrc from the answer            ← bypasses standard rtpParameters derivation
 ```
 
-| # | 当前实现 | 官方标准 | 后果 |
+| # | Current implementation | Official standard | Consequence |
 |---|---------|---------|------|
-| 1 | 手工构造 remote SDP（`a=recvonly`，fprintf 拼接 candidate/fmtp） | `addTransceiver(sendonly)` 让浏览器生成 offer | 方向反转；编码器参数放错位置（fmtp 在 remote 不被本地读）；SDP 手工拼接易错 |
-| 2 | `add_track("video", TrackKind::Video)` 非 W3C 签名 | `addTrack(track, stream)` / `addTransceiver(track, {...})` | 无 sendEncodings 能力；方向由 setRemoteDescription 隐式决定而非显式 |
-| 3 | `setRemoteDescription(offer)` 后 `create_answer()` | `createOffer()` + `setLocalDescription(offer)` + `setRemoteDescription(answer)` | 角色逆转：Host 当被叫方，mediasoup 才是 offerer；协商语义错位 |
-| 4 | 手工 `build_produce_rtp_parameters(ssrc)` 硬编码 H264 PT=101 + 固定参数 | `ortc.getSendingRtpParameters()` 从 offer 推导 | PT/参数与协商结果可能不一致（PIT-54 双硬编码教训）；addTransceiver 的 sendEncodings 未用 |
-| 5 | `negotiated_ssrc_from_sdp(&answer.sdp)` 手工解析 ssrc | 从 addTransceiver tracked 的发送参数直接取 | 绕过标准协商；ssrc 硬编码 vs 协商值漂移 |
+| 1 | Hand-built remote SDP (`a=recvonly`, fprintf-assembled candidate/fmtp) | `addTransceiver(sendonly)` lets the browser generate the offer | Direction reversal; encoder parameters in the wrong place (fmtp on the remote is never read locally); hand-assembled SDP is error-prone |
+| 2 | `add_track("video", TrackKind::Video)` with a non-W3C signature | `addTrack(track, stream)` / `addTransceiver(track, {...})` | No sendEncodings capability; direction decided implicitly by setRemoteDescription rather than explicitly |
+| 3 | `setRemoteDescription(offer)` then `create_answer()` | `createOffer()` + `setLocalDescription(offer)` + `setRemoteDescription(answer)` | Role inversion: the Host acts as the callee when mediasoup is the offerer; negotiation semantics misplaced |
+| 4 | Hand-made `build_produce_rtp_parameters(ssrc)` hardcoding H264 PT=101 + fixed parameters | `ortc.getSendingRtpParameters()` derived from the offer | PT/parameters may diverge from the negotiation result (the PIT-54 double-hardcode lesson); addTransceiver's sendEncodings unused |
+| 5 | `negotiated_ssrc_from_sdp(&answer.sdp)` hand-parses the ssrc | Take it directly from the send parameters tracked by addTransceiver | Bypasses standard negotiation; ssrc hardcoded vs the negotiated value drifting |
 
-### 偏差的连锁恶果（PIT-65 实证）
+### The Deviations' Chain of Damage (PIT-65 evidence)
 
-- **`x-google-max-keyframe-interval=2000` 失效**：该参数加在 `build_remote_sdp` 的 fmtp 行（remote SDP），但 libwebrtc 关键帧间隔从**本地 answer 的协商 codec 参数**读取。由于 Host 走 `setRemoteDescription(手工 recvonly offer)` → 本地 answer 不含该参数 → 参数被丢弃 → GOP 仍 ~99s。**审核修正：官方根本不用 keyframe-interval**（webrtc-sys RtpEncodingParameters 无该字段，官方 MediaSection.cpp 只注入 x-google-{start,max,min}-bitrate）—— 对齐靠标准 PLI→RequestKeyFrame 链路，非该参数。
-- **PLI 关键帧请求链路异常**：方向反转（recvonly offer）绕过了 libwebrtc 的发送方向协商，PLI → RequestKeyFrame → IDR 反馈链路在 Host 侧不完整（PIT-65 §根因确认：Host 28s 无关键帧响应）。
+- **`x-google-max-keyframe-interval=2000` has no effect**: the parameter sits on a `build_remote_sdp` fmtp line (the remote SDP), but libwebrtc reads the keyframe interval from the **local answer's negotiated codec parameters**. Since the Host does `setRemoteDescription(hand-built recvonly offer)` → the local answer lacks the parameter → it is dropped → the GOP stays ~99s
+- **The PLI keyframe-request chain is broken**: the direction reversal (a recvonly offer) bypasses libwebrtc's send-direction negotiation; the PLI → RequestKeyFrame → IDR feedback chain is incomplete on the Host side (PIT-65 §root cause confirmed: the Host had no keyframe response for 28s)
 
-## 3. 重构方案（对齐官方）
+## 3. Rework Plan (aligned with official)
 
-### 3.0 原则
+### 3.0 Principles
 
-- **mediaservo-webrtc 仅暴露完整 W3C WebRTC API**（C18）：`addTransceiver`/`addTrack`/`createOffer`/`setLocalDescription`/`setRemoteDescription`/`onicecandidate`/`ontrack`/`getSendingRtpParameters` 齐全，禁止裁剪成最小接口。
-- **Host SFU 走标准 offer/answer 协商**（对齐 libmediasoupclient / mediasoup-client / mediasoup-demo）。
-- **ssrc/PT/fmtp 全部从协商结果推导**，禁止手工 JSON rtp_parameters + 手工 SDP 拼接。
+- **mediaservo-webrtc exposes the complete W3C WebRTC API only** (C18): `addTransceiver`/`addTrack`/`createOffer`/`setLocalDescription`/`setRemoteDescription`/`onicecandidate`/`ontrack`/`getSendingRtpParameters` all present; trimming to a minimal interface is forbidden.
+- **The Host SFU uses standard offer/answer negotiation** (aligned with libmediasoupclient / mediasoup-client / mediasoup-demo).
+- **ssrc/PT/fmtp all derived from the negotiation result**; hand-made JSON rtp_parameters + hand-assembled SDP forbidden.
 
-### 3.1 mediaservo-webrtc：补齐 W3C API 面
+### 3.1 mediaservo-webrtc: complete the W3C API surface
 
-`crates/mediaservo-webrtc/src/backend/traits.rs` `PeerConnectionApi` 需新增/对齐：
+`crates/mediaservo-webrtc/src/backend/traits.rs`'s `PeerConnectionApi` needs additions/alignment:
 
 ```rust
-// W3C 标准接口（webrtc-rs 原生支持，webrtc-sys backend 需在 FFI 层补齐）
+// W3C standard interfaces (natively supported by webrtc-rs; the webrtc-sys backend fills them at the FFI layer)
 async fn add_transceiver(&self, kind: TrackKind, init: RTCRtpTransceiverInit) -> Result<RTCRtpTransceiver>;
 // RTCRtpTransceiverInit { direction: Sendonly/Recvonly/Sendrecv, send_encodings: Vec<RTCRtpEncodingParameters> }
 async fn create_offer(&self, options: RTCOfferOptions) -> Result<RTCSessionDescription>;
 async fn set_remote_description(&self, desc: &RTCSessionDescription) -> Result<()>;
 async fn set_local_description(&self, desc: &RTCSessionDescription) -> Result<()>;
-fn on_ice_candidate(&mut self, cb: ...);   // 补全 trickle 转发（PIT-43 空桩）
-fn get_sending_rtp_parameters(&self, track_id: &str) -> Result<RtpParameters>;  // 从协商结果推导
+fn on_ice_candidate(&mut self, cb: ...);   // complete trickle forwarding (the PIT-43 empty stub)
+fn get_sending_rtp_parameters(&self, track_id: &str) -> Result<RtpParameters>;  // derived from the negotiation result
 ```
 
-### 3.2 Host 标准 produce 流程（对齐 Chrome74.ts）
+### 3.2 The Host's Standard produce Flow (aligned with Chrome74.ts)
 
-替换 `main.rs:277-361` 的 `setRemoteDescription(手工) → add_track → create_answer → build_produce_rtp_parameters`：
+Replaces `main.rs:277-361`'s `setRemoteDescription(hand-made) → add_track → create_answer → build_produce_rtp_parameters`:
 
 ```
 ① pc.add_transceiver(Video, { direction: Sendonly, send_encodings: [H264 encode] })
-   // 审核修正: 官方不注入 keyframe-interval (RtpEncodingParameters 无该字段); 码率用 x-google-max-bitrate 或 send_encodings.max_bitrate
+   // Review correction: the official side doesn't inject keyframe-interval (RtpEncodingParameters has no such field); bitrate uses x-google-max-bitrate or send_encodings.max_bitrate
 ② let offer = pc.create_offer()
 ③ pc.set_local_description(&offer)
-④ let rtp_parameters = pc.get_sending_rtp_parameters(track_id)   // 从 offer 推导, 非手工
-⑤ 发 rtp_parameters → 服务端 produce → 回 Produced{producer_id} (无 SDP answer)
-⑥ 客户端自构 answer (mirror 本地 offer codec 参数 + 服务端 rtpParameters) → set_remote_description(answer)
-   // standard时序完成后, PLI → RequestKeyFrame → IDR 反馈链路完整
-⑦ write_raw_i420 帧循环（SquaresPattern，不变）
+④ let rtp_parameters = pc.get_sending_rtp_parameters(track_id)   // derived from the offer, not hand-made
+⑤ Send rtp_parameters → server produce → returns Produced{producer_id} (no SDP answer)
+⑥ The client builds its own answer (mirroring the local offer's codec parameters + the server's rtpParameters) → set_remote_description(answer)
+   // once the standard sequence completes, the PLI → RequestKeyFrame → IDR feedback chain is complete
+⑦ the write_raw_i420 frame loop (SquaresPattern, unchanged)
 ```
 
-### 3.3 关键帧参数的正确位置
+### 3.3 The Correct Home for Keyframe Parameters
 
-- **官方不用 `x-google-max-keyframe-interval`**（审核修正 §0）：webrtc-sys `RtpEncodingParameters` 无该字段，官方 MediaSection.cpp:255-277 只注入 x-google-{start,max,min}-bitrate。关键帧靠**标准 PLI→RequestKeyFrame 链路**（对齐后 Host 是 offerer+sendonly，libwebrtc 发送方向协商完整 → PLI 能触发 IDR）。
-- 码率控制：send_encodings.max_bitrate 或 codecOptions x-google-max-bitrate（官方路径），替代当前 b=AS 手工注入。
-- 不再依赖手工 remote fmtp（当前失效路径，参数放 remote 被本地 answer 丢弃）。
+- **The official side doesn't use `x-google-max-keyframe-interval`** (review correction §0): webrtc-sys `RtpEncodingParameters` has no such field, and the official MediaSection.cpp:255-277 injects only x-google-{start,max,min}-bitrate. Keyframes rely on the **standard PLI→RequestKeyFrame chain** (once aligned the Host is offerer+sendonly, and libwebrtc responds natively)
+- Bitrate control: send_encodings.max_bitrate or codecOptions x-google-max-bitrate (the official path), replacing today's hand-injected b=AS.
+- No more reliance on hand-made remote fmtp (the current dead path; parameters on the remote are dropped by the local answer).
 
-### 3.4 分阶段实施
+### 3.4 Phased Implementation
 
-| 阶段 | 内容 | 验证 |
+| Phase | Content | Verification |
 |------|------|------|
-| P1 | mediaservo-webrtc 补 `add_transceiver`/`create_offer`/`get_sending_rtp_parameters`（traits + webrtc-sys backend） | `cargo test -p mediaservo-webrtc --features backend-webrtc-sys` |
-| P2 | Host SFU produce 改标准协商流程 | E2E 截图渲染 + 关键帧间隔 < 5s |
-| P3 | 验证多页面黑屏（PIT-65）修复 | `/tmp/multi-page.cjs` 3 页 + 首帧延迟 |
-| P4 | sfu-client.ts（浏览器）同步对齐官方 mediasoup-client 消费流程 | 浏览器 consume 正常 |
+| P1 | mediaservo-webrtc adds `add_transceiver`/`create_offer`/`get_sending_rtp_parameters` (traits + the webrtc-sys backend) | `cargo test -p mediaservo-webrtc --features backend-webrtc-sys` |
+| P2 | The Host SFU produce moves to the standard negotiation flow | E2E screenshot rendering + keyframe interval < 5s |
+| P3 | Verify the multi-page black screen (PIT-65) is fixed | `/tmp/multi-page.cjs` 3 pages + first-frame latency |
+| P4 | sfu-client.ts (browser) aligns with the official mediasoup-client consume flow | Browser consume works |
 
-## 4. 风险与取舍
+## 4. Risks & Trade-offs
 
-- **webrtc-sys backend 接口缺口**：`add_transceiver`/`create_offer`/`get_sending_rtp_parameters` 在 webrtc-sys FFI 层可能未暴露，需在 `webrtc_sys.rs` 补齐（livekit sdk 应支持，参照官方用法落地）。
-- **P2P 路径回归**：P2P relay 也走 `PeerConnectionApi`，改 trait 后需回归 P2P E2E。
-- **这是架构改动**：按 edit-safety.md 架构决策门，**需用户确认后才实施**。本文档仅分析。
+- **webrtc-sys backend interface gaps**: `add_transceiver`/`create_offer`/`get_sending_rtp_parameters` may not be exposed at the webrtc-sys FFI layer; fill them in `webrtc_sys.rs` (the livekit sdk should support it; follow official usage).
+- **P2P path regression**: the P2P relay also goes through `PeerConnectionApi`; after changing the trait, P2P E2E regression is required.
+- **This is an architecture change**: per edit-safety.md's architecture decision gate, **implement only after user confirmation**. This document is analysis only.
 
-## 7. 相关文件
+## 7. Related Files
 
-- `crates/mediaservo-host/src/main.rs:277-361` — 当前 SFU produce 流程
+- `crates/mediaservo-host/src/main.rs:277-361` — the current SFU produce flow
 - `crates/mediaservo-host/src/sfu_media.rs` — `build_remote_sdp` / `build_produce_rtp_parameters` / `negotiated_ssrc_from_sdp`
-- `crates/mediaservo-webrtc/src/backend/traits.rs` — `PeerConnectionApi` 需补齐的 W3C 接口
-- `crates/mediaservo-webrtc/src/backend/webrtc_sys.rs` — webrtc-sys backend 实现
-- `/tmp/mediasoup-client/src/handlers/Chrome74.ts` — 官方 send() 流程基准
-- `/tmp/libmediasoupclient/src/Handler.cpp` — 官方 C++ 客户端基准
-- `/tmp/mediasoup-demo/app/src/RoomClient.js` — 官方 demo 基准
+- `crates/mediaservo-webrtc/src/backend/traits.rs` — the W3C interfaces `PeerConnectionApi` needs
+- `crates/mediaservo-webrtc/src/backend/webrtc_sys.rs` — the webrtc-sys backend implementation
+- `/tmp/mediasoup-client/src/handlers/Chrome74.ts` — the official send() flow baseline
+- `/tmp/libmediasoupclient/src/Handler.cpp` — the official C++ client baseline
+- `/tmp/mediasoup-demo/app/src/RoomClient.js` — the official demo baseline
 
 ---
 
-## 5. 无法实现的 W3C API（标注未来实现）
+## 5. W3C APIs That Cannot Be Implemented (flagged for future)
 
-> 计划: 2026-08-06 v2（团队审核 + W3C 对标审计后） | 依据: webrtc-sys 0.3.x FFI inventory 实测（§6）
-> 以下 API 因缺 FFI 或浏览器专属，**不实施**，仅标注供未来触发：
+> Plan: 2026-08-06 v2 (after the team review + the W3C benchmarking audit) | Basis: measured webrtc-sys 0.3.x FFI inventory (§6)
+> The following APIs are **not implemented** for lack of FFI or browser exclusivity; flagged only, for future triggers:
 
-| API | 原因 | 未来触发 |
+| API | Reason | Future trigger |
 |-----|------|---------|
-| `RTCDTMFSender` | webrtc-sys 无 DTMF FFI（需新 C++） | 遥控/电话网关场景 |
-| `setIdentityProvider` / `RTCIdentityAssertion` | webrtc-sys 无 identity FFI | DTLS 证书级身份认证 |
-| `generateCertificate`（静态） | libwebrtc 内部自动管理证书，非必需 | 自定义证书指纹 |
-| `getDefaultIceServers`（静态） | 浏览器专属 | 无 |
-| `sctp` 属性 / `RTCSctpTransport` | 浏览器专属 | 无 |
-| `RTCRtpScriptTransform` / `RTCEncodedFrame` | 浏览器专属（插入式 transform） | 服务端 E2E 加密（FrameCryptor 已覆盖） |
-| `addStream` / `createDTMFSender` / `removeStream` | 已废弃（obsolete） | 永不 |
-| `RTCRtpReceiver.getContributingSources/getSynchronizationSources` | webrtc-sys 无 CSRC/SSRC 列表 FFI | 统计/监控场景 |
-| `RTCRtpSender/Receiver.transport` 属性 | webrtc-sys 无 DTLS transport 句柄暴露 | 传输诊断 |
+| `RTCDTMFSender` | webrtc-sys has no DTMF FFI (new C++ needed) | Remote control / telephony gateway scenarios |
+| `setIdentityProvider` / `RTCIdentityAssertion` | webrtc-sys has no identity FFI | DTLS certificate-level identity auth |
+| `generateCertificate` (static) | libwebrtc manages certificates internally and automatically; unnecessary | Custom certificate fingerprints |
+| `getDefaultIceServers` (static) | Browser-exclusive | none |
+| the `sctp` attribute / `RTCSctpTransport` | Browser-exclusive | none |
+| `RTCRtpScriptTransform` / `RTCEncodedFrame` | Browser-exclusive (insertable transforms) | Server-side E2E encryption (already covered by FrameCryptor) |
+| `addStream` / `createDTMFSender` / `removeStream` | Deprecated (obsolete) | never |
+| `RTCRtpReceiver.getContributingSources/getSynchronizationSources` | webrtc-sys has no CSRC/SSRC list FFI | Stats/monitoring scenarios |
+| the `RTCRtpSender/Receiver.transport` attributes | webrtc-sys exposes no DTLS transport handle | Transport diagnostics |
 
-**注意（v2 修正）**: Sender 的 `set_parameters`/`replace_track`/`set_streams`/`get_stats` 与 Receiver 的 `get_parameters` **均可实现**（webrtc-sys FFI 有），属于 host-sfu-w3c-alignment P1/P2 实施范围（已实施完成，D214），**不列入**未来实现。
+**Note (v2 correction)**: the Sender's `set_parameters`/`replace_track`/`set_streams`/`get_stats` and the Receiver's `get_parameters` **are all implementable** (the webrtc-sys FFI has them), falling within host-sfu-w3c-alignment P1/P2 (implemented, D214) and are **not** flagged as future.
 
-**mediaservo-webrtc 已覆盖/将覆盖**: 上述以外的 W3C RTCPeerConnection / RTCRtpTransceiver / RTCRtpSender / RTCRtpReceiver / RTCDataChannel / RTCRtpCapabilities 接口全部实现（host-sfu-w3c-alignment P0-P2，已实施完成，D214）。
+**mediaservo-webrtc covered/will cover**: all other W3C RTCPeerConnection / RTCRtpTransceiver / RTCRtpSender / RTCRtpReceiver / RTCDataChannel / RTCRtpCapabilities interfaces (host-sfu-w3c-alignment P0-P2, implemented, D214).
 
 ---
 
-## 6. webrtc-sys 0.3.x FFI 能力清单（完整 inventory）
+## 6. The webrtc-sys 0.3.x FFI Capability Inventory (complete)
 
-> 实测 2026-08-06 | 源码: `/tmp/webrtc-investigation/rust-sdks/webrtc-sys/src/`
+> Measured 2026-08-06 | Sources: `/tmp/webrtc-investigation/rust-sdks/webrtc-sys/src/`
 
-### 6.1 PeerConnection（peer_connection.rs, 18 方法）
+### 6.1 PeerConnection (peer_connection.rs, 18 methods)
 
 ```
 set_configuration(config) -> Result
-create_offer(options, ctx, on_success, on_error)   // async 回调
-create_answer(options, ctx, on_success, on_error)  // async 回调
+create_offer(options, ctx, on_success, on_error)   // async callbacks
+create_answer(options, ctx, on_success, on_error)  // async callbacks
 set_local_description(desc, ctx, on_complete)
 set_remote_description(desc, ctx, on_complete)
 add_track(track, stream_ids) -> Result<SharedPtr<RtpSender>>
 remove_track(sender) -> Result
-get_stats(ctx, on_stats)  // async 回调, JSON
+get_stats(ctx, on_stats)  // async callback, JSON
 add_transceiver(track, init) -> Result<SharedPtr<RtpTransceiver>>
 add_transceiver_for_media(media_type, init) -> Result<SharedPtr<RtpTransceiver>>
 get_senders() -> Vec<RtpSenderPtr>
@@ -221,11 +221,11 @@ current_local_description() -> UniquePtr<SessionDescription>
 current_remote_description() -> UniquePtr<SessionDescription>
 connection_state / signaling_state / ice_gathering_state / ice_connection_state
 close()
-// 枚举: PeerConnectionState, SignalingState, IceConnectionState, IceGatheringState, ContinualGatheringPolicy, IceTransportsType
-// 结构体: RtcOfferAnswerOptions, IceServer, RtcConfiguration
+// Enums: PeerConnectionState, SignalingState, IceConnectionState, IceGatheringState, ContinualGatheringPolicy, IceTransportsType
+// Structs: RtcOfferAnswerOptions, IceServer, RtcConfiguration
 ```
 
-### 6.2 RtpTransceiver（rtp_transceiver.rs, 16 方法）
+### 6.2 RtpTransceiver (rtp_transceiver.rs, 16 methods)
 
 ```
 media_type() -> MediaType
@@ -241,10 +241,10 @@ stop_standard() -> Result
 set_codec_preferences(codecs) / codec_preferences()
 header_extensions_to_negotiate() / negotiated_header_extensions()
 set_header_extensions_to_negotiate(headers)
-// 结构体: RtpTransceiverInit { direction, stream_ids, send_encodings }
+// Structs: RtpTransceiverInit { direction, stream_ids, send_encodings }
 ```
 
-### 6.3 RtpSender（rtp_sender.rs, 12 方法）
+### 6.3 RtpSender (rtp_sender.rs, 12 methods)
 
 ```
 set_track(track) -> bool
@@ -261,7 +261,7 @@ set_parameters(parameters) -> Result
 set_video_encoder_backend(backend)
 ```
 
-### 6.4 RtpReceiver（rtp_receiver.rs, 8 方法）
+### 6.4 RtpReceiver (rtp_receiver.rs, 8 methods)
 
 ```
 track() -> SharedPtr<MediaStreamTrack>
@@ -273,7 +273,7 @@ get_parameters() -> RtpParameters
 set_jitter_buffer_minimum_delay(is_some, delay_seconds)
 ```
 
-### 6.5 参数类型（rtp_parameters.rs）
+### 6.5 Parameter types (rtp_parameters.rs)
 
 ```
 RtpParameters { transaction_id, mid, codecs, header_extensions, encodings, rtcp, degradation_preference }
@@ -284,7 +284,7 @@ RtpCodecCapability { mime_type, name, kind, clock_rate, preferred_payload_type, 
 RtpHeaderExtensionCapability { uri, preferred_id, preferred_encrypt, direction }
 RtcpParameters { ssrc, cname, reduced_size, mux }
 RtpExtension { uri, id, encrypt }
-// 枚举: FecMechanism, RtcpFeedbackType, RtcpFeedbackMessageType, DegradationPreference, RtpExtensionFilter
+// Enums: FecMechanism, RtcpFeedbackType, RtcpFeedbackMessageType, DegradationPreference, RtpExtensionFilter
 ```
 
 ### 6.6 Factory（peer_connection_factory.rs）
@@ -295,21 +295,21 @@ create_peer_connection(config, observer)
 create_video_track(label, source) / create_audio_track(label, source)
 rtp_sender_capabilities(kind) -> RtpCapabilities
 rtp_receiver_capabilities(kind) -> RtpCapabilities
-// Observer 回调: on_signaling_change / on_renegotiation_needed / on_negotiation_needed_event / on_ice_connection_change / on_connection_change / on_ice_gathering_change / on_ice_candidate / on_ice_candidate_error / on_ice_candidates_removed / on_ice_connection_receiving_change / on_ice_selected_candidate_pair_changed / on_add_track / on_track / on_remove_track
+// Observer callbacks: on_signaling_change / on_renegotiation_needed / on_negotiation_needed_event / on_ice_connection_change / on_connection_change / on_ice_gathering_change / on_ice_candidate / on_ice_candidate_error / on_ice_candidate_...
 ```
 
 ### 6.7 DataChannel（data_channel.rs）
 
 ```
 send(data) / close() / id() / label() / state() / buffered_amount()
-// 枚举: Priority, DataState | 结构体: DataChannelInit, DataBuffer
+// Enums: Priority, DataState | Structs: DataChannelInit, DataBuffer
 // Observer: on_state_change / on_message / on_buffered_amount_change
 ```
 
-### 6.8 不透明指针包装（helper.rs）
+### 6.8 Opaque pointer wrappers (helper.rs)
 
 ```
 MediaStreamPtr / CandidatePtr / AudioTrackPtr / VideoTrackPtr / RtpSenderPtr / RtpReceiverPtr / RtpTransceiverPtr
-// 目的: 绕 cxx 限制 (SharedPtr<T> 不能直接放 rust::Vec)
+// Purpose: work around cxx limits (SharedPtr<T> can't go directly into a rust::Vec)
 ```
-- `docs/reference/webrtc/keyframe-black-screen-analysis.md` — PIT-65 关键帧分析
+- `docs/reference/webrtc/keyframe-black-screen-analysis.md` — the PIT-65 keyframe analysis

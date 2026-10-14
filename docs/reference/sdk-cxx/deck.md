@@ -1,141 +1,147 @@
-# mediaservo-deck C++ SDK 手册（采集 / 录制 / 回放）
+# mediaservo-deck C++ SDK Manual (Capture / Record / Playback)
 
-> 状态: active · 2026-09-23 · 活参考（查用）。对象：`bindings/cxx/mediaservo-deck-cxx/include/mediaservo/deck.hpp`（header-only RAII）
-> 与其下的 C ABI `bindings/c/mediaservo-deck-c/include/mediaservo/deck.h`。
-> 所有签名逐字抄自上述头文件；行为语义抄自 `bindings/c/mediaservo-deck-c/src/lib.rs`。
+> Status: active · 2026-09-23 · Living reference (for lookup). Subjects: `bindings/cxx/mediaservo-deck-cxx/include/mediaservo/deck.hpp` (header-only RAII)
+> and the C ABI beneath it, `bindings/c/mediaservo-deck-c/include/mediaservo/deck.h`.
+> All signatures are copied verbatim from the headers above; behavioral semantics from `bindings/c/mediaservo-deck-c/src/lib.rs`.
 
-## 1. 定位与适用场景
+## 1. Positioning & Applicable Scenarios
 
-deck C++ 绑定是**媒体数据面 SDK**：本机相机采集 → H.264/MP4 录制 → 文件回放解码，一条不经过
-WebRTC / server 的本地闭环。适用场景：
+The deck C++ binding is the **media data-plane SDK**: local camera capture → H.264/MP4 recording → file
+playback decoding, one local closed loop that never touches WebRTC / a server. Applicable scenarios:
 
-- **本地监控 / NVR**：设备端直采直录，无网络依赖；
-- **边缘侧帧源**：为上层（field 组合 SDK、推流链路）提供统一采集入口与帧回调；
-- **录制回放工具链**：C++ 宿主程序内嵌录像、逐帧解码取图。
+- **Local surveillance / NVR**: devices capture and record directly, no network dependency;
+- **An edge-side frame source**: a unified capture entry + frame callbacks for upper layers (the field
+  composed SDK, push chains);
+- **A record/playback toolchain**: embedding recording and frame-by-frame decode into C++ host programs.
 
-不适用：任何需要网络传输的场景（那是 link/field/client 的地盘）；音频/屏幕采集当前枚举表为空（见 §8）。
+Not applicable: anything requiring network transport (that's link/field/client territory); audio/screen
+capture currently have empty enumeration tables (see §8).
 
-## 2. 原理与架构
+## 2. Principles & Architecture
 
-C++ 层是 **header-only 薄包装**（`mediaservo-deck-cxx/src/lib.rs` 为空载体 crate，仅承载测试与
-分发元数据），全部实现下沉到 C ABI cdylib `libmediaservo_deck.so`：
+The C++ layer is a **header-only thin wrapper** (`mediaservo-deck-cxx/src/lib.rs` is an empty carrier
+crate holding only tests and distribution metadata); all implementation sinks into the C ABI cdylib
+`libmediaservo_deck.so`:
 
 ```mermaid
 flowchart TD
-    subgraph 宿主进程
-        A["C++ 层 deck.hpp<br/>(header-only RAII, move-only handle)"]
-        B["C ABI 层 libmediaservo_deck.so<br/>deck-c/src/lib.rs (opaque handle + int 错误码)"]
+    subgraph Host process
+        A["C++ layer deck.hpp<br/>(header-only RAII, move-only handles)"]
+        B["C ABI layer libmediaservo_deck.so<br/>deck-c/src/lib.rs (opaque handles + int error codes)"]
         C["Rust deck crate<br/>crates/mediaservo-deck<br/>source / record / playback"]
-        D["mediaservo-codec<br/>(FFmpeg 后端 backend-ffmpeg)"]
-        E["mediaservo-media<br/>VideoFrameGenerator (stub 帧源)"]
-        F["FFmpeg (ffmpeg-the-third 6)<br/>静态链接进 .so + --exclude-libs,ALL"]
+        D["mediaservo-codec<br/>(the FFmpeg backend, backend-ffmpeg)"]
+        E["mediaservo-media<br/>VideoFrameGenerator (the stub frame source)"]
+        F["FFmpeg (ffmpeg-the-third 6)<br/>statically linked into the .so + --exclude-libs,ALL"]
     end
-    A -->|"extern \"C\" 调用"| B
+    A -->|"extern C calls"| B
     B --> C
-    C -->|"H264 编码 / mp4 mux / demux+decode"| D
-    C -->|"采集 MVP = 生成器帧源"| E
+    C -->|"H264 encode / mp4 mux / demux+decode"| D
+    C -->|"capture MVP = a generator frame source"| E
     D --> F
 ```
 
-要点（均有代码依据）：
+Key points (all code-backed):
 
-- **每 handle 一个 tokio multi-thread runtime（2 worker）+ 独立泵线程**：camera 泵线程
-  `deck-camera-pump` 以 50ms 超时轮询帧流并检查 stop/closed 标志（`lib.rs` `camera_pump_loop`）；
-  recorder 录制任务 spawn 到共享 runtime；player 泵线程 `deck-player-pump` 同步 `next_frame` 循环。
-- **录制桥**：`Recorder::record(camera)` 在 C 层实现为 camera 泵 → unbounded channel → 录制任务
-  （`lib.rs` `deliver_frame` 的 `rec_tx` 扇出），即帧回调与录制共用同一个泵。
-- **FrameBus 互操作**：Rust 侧存在闭环演练（`crates/mediaservo-deck/tests/closed_loop.rs`：
-  CameraSource → FrameBus 发布 → 订阅 → Recorder），**但 C/C++ ABI 面没有任何 FrameBus 入口**——
-  C++ 消费者拿不到该能力，勿在文档之外假设其存在。
-- **采集后端现状**：`crates/mediaservo-deck/src/source.rs` 模块头声明 MVP 为 stub 帧源
-  （`VideoFrameGenerator` 彩条/方块图案），真实设备采集（GStreamer v4l2src）为 deck 后续版本。
-  因此当前 C++ 面 `enumerate_devices(Camera)` 只会得到 `["stub:test-camera"]`。
+- **One tokio multi-thread runtime per handle (2 workers) + dedicated pump threads**: the camera pump
+  thread `deck-camera-pump` polls the frame stream with a 50ms timeout while checking stop/closed flags
+  (`camera_pump_loop` in lib.rs); recorder tasks spawn onto the shared runtime; the player pump thread
+  `deck-player-pump` runs a synchronous `next_frame` loop.
+- **The recording bridge**: `Recorder::record(camera)` is implemented in the C layer as camera pump →
+  unbounded channel → the recording task (the `rec_tx` fan-out of lib.rs's `deliver_frame`); i.e. the frame
+  callback and recording share one pump.
+- **FrameBus interop**: a closed-loop drill exists on the Rust side (`crates/mediaservo-deck/tests/closed_loop.rs`:
+  CameraSource → FrameBus publish → subscribe → Recorder), **but the C/C++ ABI face has no FrameBus entry
+  point whatsoever** — C++ consumers cannot reach that capability; do not assume it exists beyond this doc.
+- **Capture-backend status**: `crates/mediaservo-deck/src/source.rs`'s module header declares the MVP as a
+  stub frame source (a `VideoFrameGenerator` color-bar/checker pattern); real device capture (GStreamer
+  v4l2src) is a later deck version. So the current C++ face's `enumerate_devices(Camera)` only ever
+  returns `["stub:test-camera"]`.
 
-## 3. 生命周期时序
+## 3. Lifecycle Sequence
 
-调用顺序取自真实示例 `bindings/cxx/mediaservo-deck-cxx/examples/vehicle_deck.cpp`
-（L26–L92）与 C 示例 `bindings/c/mediaservo-deck-c/examples/record_playback.c`（L33–L144）：
+The call order comes from the real example `bindings/cxx/mediaservo-deck-cxx/examples/vehicle_deck.cpp`
+(L26-L92) and the C example `bindings/c/mediaservo-deck-c/examples/record_playback.c` (L33-L144):
 
 ```mermaid
 sequenceDiagram
-    participant App as 应用（调用线程）
+    participant App as Application (calling thread)
     participant Cam as CameraSource
-    participant Pump as deck-camera-pump 线程
+    participant Pump as deck-camera-pump thread
     participant Rec as Recorder
-    participant RTask as 录制任务(runtime)
+    participant RTask as Recording task (runtime)
     participant Ply as Player
 
     App->>App: enumerate_devices(Camera)
-    App->>Cam: open(dev_id, opts)（仅本地初始化）
-    App->>Cam: on_frame(cb)（注册，可先于 start）
-    App->>Cam: start()（只允许一次）
-    Cam->>Pump: 启动泵线程
-    loop 每帧
-        Pump-->>App: cb(frame)（data_* 仅回调内有效）
+    App->>Cam: open(dev_id, opts) (local initialization only)
+    App->>Cam: on_frame(cb) (register; may precede start)
+    App->>Cam: start() (allowed once only)
+    Cam->>Pump: starts the pump thread
+    loop per frame
+        Pump-->>App: cb(frame) (data_* valid only inside the callback)
     end
-    App->>Rec: open(path)（父目录必须已存在）
-    App->>Rec: record(cam)（桥接，立即返回）
-    Rec->>RTask: spawn 录制任务（H264 编码 + mp4 mux）
-    App->>App: ... 运行期（示例等待输入 / sleep）...
-    App->>Rec: stop()（置停止信号，≤50ms 退出循环）
-    App->>Rec: close()（join 任务：flush + trailer 落盘完成）
-    Note over App,Rec: 契约：recorder 必须先于 camera 关闭
-    App->>Cam: stop()（幂等）
-    App->>Cam: close()（join 泵线程后释放回调对象）
-    App->>Ply: open(path)（demux + 解码器就绪）
-    App->>Ply: on_frame(cb)（启动解码泵，只允许一次）
-    Ply->>Ply: 泵线程逐帧 cb 直至 EOF
-    App->>Ply: close()（阻塞 join 至 EOF，无法中途中止）
+    App->>Rec: open(path) (the parent directory must exist)
+    App->>Rec: record(cam) (bridging; returns immediately)
+    Rec->>RTask: spawns the recording task (H264 encode + mp4 mux)
+    App->>App: ... running (the example waits for input / sleeps) ...
+    App->>Rec: stop() (sets the stop signal; the loop exits within 50ms)
+    App->>Rec: close() (joins the task: flush + trailer written)
+    Note over App,Rec: Contract: the recorder must close before the camera
+    App->>Cam: stop() (idempotent)
+    App->>Cam: close() (frees the callback objects after joining the pump thread)
+    App->>Ply: open(path) (demux + decoder ready)
+    App->>Ply: on_frame(cb) (starts the decode pump; allowed once only)
+    Ply->>Ply: the pump thread calls cb frame by frame until EOF
+    App->>Ply: close() (blocks joining until EOF; cannot be aborted midway)
 ```
 
-## 4. API 一览
+## 4. API Inventory
 
-### 4.1 C++ 共享错误层（`bindings/cxx/include/mediaservo/detail/result.hpp`）
+### 4.1 The C++ Shared Error Layer (`bindings/cxx/include/mediaservo/detail/result.hpp`)
 
-| 项 | 签名（逐字） | 语义 |
-|---|---|---|
-| Error | `struct Error { int code; std::string message; uint16_t wire_code; bool retryable; };` | `code` = `MEDIASERVO_DECK_ERR_*`；`message` 读自 C 层 last_error；deck 家族 `wire_code` 恒 0、`retryable` 恒 false（仅 client 填充） |
-| Result | `template <typename T> using Result = tl::expected<T, Error>;` | 原生 tl::expected API：`has_value()/value()/error()/value_or()`；对 error 调 `value()`（或对 ok 调 `error()`）抛 `tl::bad_expected_access<Error>` |
+| Item | Signature (verbatim) | Semantics |
+|------|----------------------|-----------|
+| Error | `struct Error { int code; std::string message; uint16_t wire_code; bool retryable; };` | `code` = `MEDIASERVO_DECK_ERR_*`; `message` read from the C layer's last_error; the deck family's `wire_code` is always 0 and `retryable` always false (filled only by client) |
+| Result | `template <typename T> using Result = tl::expected<T, Error>;` | The native tl::expected API: `has_value()/value()/error()/value_or()`; calling `value()` on an error (or `error()` on ok) throws `tl::bad_expected_access<Error>` |
 
-### 4.2 自由函数与类型（`namespace mediaservo::deck`，deck.hpp）
+### 4.2 Free Functions & Types (`namespace mediaservo::deck`, deck.hpp)
 
-| 签名（逐字） | 语义 |
-|---|---|
-| `inline Result<std::string> version()` | SDK 版本 `MAJOR.MINOR.PATCH`（读自 C 层 `mediaservo_deck_version`） |
-| `enum class DeviceKind { Camera = 0, Audio = 1, Screen = 2 };` | 设备种类，值与 C ABI `kind` 参数一致 |
-| `struct CaptureOptions { uint32_t width = 1280; uint32_t height = 720; uint32_t framerate = 30; };` | 采集选项；映射到 C 结构（全 0 字段 = C 默认 1280x720@30） |
-| `inline std::vector<std::string> enumerate_devices(DeviceKind kind)` | 枚举设备 id 列表（双调用封装；'\n' 分隔拆分）。**失败返回空列表，无错误通道**（头文件内 `ponytail:` 注记：spec 固定签名） |
+| Signature (verbatim) | Semantics |
+|----------------------|-----------|
+| `inline Result<std::string> version()` | The SDK version `MAJOR.MINOR.PATCH` (read from the C layer's `mediaservo_deck_version`) |
+| `enum class DeviceKind { Camera = 0, Audio = 1, Screen = 2 };` | Device kinds; values match the C ABI `kind` parameter |
+| `struct CaptureOptions { uint32_t width = 1280; uint32_t height = 720; uint32_t framerate = 30; };` | Capture options; mapped to the C struct (all-zero fields = the C default 1280x720@30) |
+| `inline std::vector<std::string> enumerate_devices(DeviceKind kind)` | Enumerates device ids (the two-call wrapper; splits on newline). **Returns an empty list on failure, with no error channel** (a `ponytail:` note in the header: the spec fixed the signature) |
 
-### 4.3 `class CameraSource`（move-only RAII；析构自动 close；默认构造 = 已关闭）
+### 4.3 `class CameraSource` (move-only RAII; the destructor closes; default construction = closed)
 
-| 签名（逐字） | 语义 / 错误 |
-|---|---|
-| `static Result<CameraSource> open(const std::string& dev_id, const CaptureOptions& opts = CaptureOptions{})` | 打开相机（仅本地初始化）。空 `dev_id` → `INVALID_ARG`；设备不在枚举表 → `DEVICE`；`opts.struct_size` 门在 C++ 层恒满足 |
-| `CameraSource() noexcept` / 移动构造、移动赋值 / `~CameraSource()` | 拷贝被删除；移动转移句柄与回调登记；析构 `(void)close()` |
-| `explicit operator bool() const noexcept` | 是否持有有效 handle |
-| `Result<void> start()` | 开始产帧并启动泵线程；**只允许一次**，重复 → C 层 `STATE`；已关闭对象 → `INVALID_ARG, "closed"` |
-| `Result<void> on_frame(detail::FrameCb cb)`（`FrameCb = std::function<void(const mediaservo_frame_t&)>`） | 注册帧回调（泵线程逐帧触发）。C 层重复注册替换旧回调；C++ 层旧回调堆对象**留到 close 才释放**（防泵线程 UAF）。已关闭 → `INVALID_ARG, "closed"` |
-| `Result<void> stop() noexcept` | 停止产帧（幂等；已关闭直接返回 ok） |
-| `Result<void> close() noexcept` | 关闭并释放 handle（幂等；join 泵线程后才释放回调对象） |
+| Signature (verbatim) | Semantics / errors |
+|----------------------|--------------------|
+| `static Result<CameraSource> open(const std::string& dev_id, const CaptureOptions& opts = CaptureOptions{})` | Opens a camera (local initialization only). An empty `dev_id` → `INVALID_ARG`; the device not in the enumeration table → `DEVICE`; the `opts.struct_size` gate is always satisfied at the C++ layer |
+| `CameraSource() noexcept` / move ctor, move assign / `~CameraSource()` | Copy deleted; moving transfers the handle and the callback registration; the destructor does `(void)close()` |
+| `explicit operator bool() const noexcept` | Whether a live handle is held |
+| `Result<void> start()` | Starts producing frames and the pump thread; **allowed once only**, a repeat → the C layer's `STATE`; a closed object → `INVALID_ARG, "closed"` |
+| `Result<void> on_frame(detail::FrameCb cb)` (`FrameCb = std::function<void(const mediaservo_frame_t&)>`) | Registers the frame callback (fired per frame on the pump thread). Re-registering in the C layer replaces the old callback; at the C++ layer the old callback's heap object **stays alive until close** (preventing pump-thread UAF). Closed → `INVALID_ARG, "closed"` |
+| `Result<void> stop() noexcept` | Stops producing frames (idempotent; a closed object returns ok directly) |
+| `Result<void> close() noexcept` | Closes and frees the handle (idempotent; the callback objects are freed only after the pump thread joins) |
 
-### 4.4 `class Recorder`（move-only RAII；析构自动 close）
+### 4.4 `class Recorder` (move-only RAII; the destructor closes)
 
-| 签名（逐字） | 语义 / 错误 |
-|---|---|
-| `static Result<Recorder> open(const std::string& path)` | 创建录制器（默认 h264/mp4；不启动）。空 path → `INVALID_ARG`；父目录不存在 → `RECORDER`（C 层 NotFound 映射） |
-| `Result<void> record(CameraSource& camera)` | 桥接录制：camera 帧泵 → recorder，立即返回。C++ 已关闭对象 → `INVALID_ARG, "closed"`（录制器检查优先）；C 层：recorder/camera 已关闭、camera 未 start、camera 已 stop、重复 record → 均 `STATE` |
-| `Result<void> stop() noexcept` | 请求停止（幂等；停止信号 ≤50ms 生效，flush 在 close 完成） |
-| `Result<void> close() noexcept` | join 录制任务（**flush + trailer 在此完成**）后释放 |
+| Signature (verbatim) | Semantics / errors |
+|----------------------|--------------------|
+| `static Result<Recorder> open(const std::string& path)` | Creates a recorder (default h264/mp4; not started). An empty path → `INVALID_ARG`; the parent directory missing → `RECORDER` (mapped from the C layer's NotFound) |
+| `Result<void> record(CameraSource& camera)` | Bridge recording: the camera's frame pump → the recorder; returns immediately. A C++ closed object → `INVALID_ARG, "closed"` (the recorder check wins); at the C layer: a closed recorder/camera, a camera not started, a camera already stopped, or a duplicate record → all `STATE` |
+| `Result<void> stop() noexcept` | Requests a stop (idempotent; the stop signal takes effect within 50ms; the flush happens in close) |
+| `Result<void> close() noexcept` | Joins the recording task (**flush + trailer complete here**) then frees |
 
-### 4.5 `class Player`（move-only RAII；析构自动 close）
+### 4.5 `class Player` (move-only RAII; the destructor closes)
 
-| 签名（逐字） | 语义 / 错误 |
-|---|---|
-| `static Result<Player> open(const std::string& path)` | 打开媒体文件（demux + 解码器就绪）。空 path → `INVALID_ARG`；文件不存在/不支持 → `PLAYER` |
-| `Result<void> on_frame(detail::FrameCb cb)` | 启动逐帧解码泵（**只允许一次**，重复 → `STATE`；运行至 EOF 自然结束） |
-| `Result<void> close() noexcept` | **阻塞 join 解码泵至完成**（长文件需等待，无法中途中止——头文件 YAGNI 注记） |
+| Signature (verbatim) | Semantics / errors |
+|----------------------|--------------------|
+| `static Result<Player> open(const std::string& path)` | Opens a media file (demux + decoder ready). An empty path → `INVALID_ARG`; the file missing/unsupported → `PLAYER` |
+| `Result<void> on_frame(detail::FrameCb cb)` | Starts the frame-by-frame decode pump (**allowed once only**, a repeat → `STATE`; runs naturally to EOF) |
+| `Result<void> close() noexcept` | **Blocks joining the decode pump until completion** (long files must wait; cannot be aborted midway — a YAGNI note in the header) |
 
-### 4.6 C ABI 面（`bindings/c/mediaservo-deck-c/include/mediaservo/deck.h`，签名逐字）
+### 4.6 The C ABI Face (`bindings/c/mediaservo-deck-c/include/mediaservo/deck.h`, signatures verbatim)
 
 ```c
 mediaservo_err_t mediaservo_deck_devices_enumerate(int kind, char* out_ids, size_t cap, size_t* out_len);
@@ -157,14 +163,14 @@ mediaservo_err_t mediaservo_deck_last_error(char* buf, size_t len);
 mediaservo_err_t mediaservo_deck_version(char* buf, size_t len);
 ```
 
-辅助类型（逐字，deck.h + common.h）：
+Helper types (verbatim, deck.h + common.h):
 
 ```c
 typedef struct mediaservo_deck_capture_options_t {
     size_t struct_size;           /* sizeof(mediaservo_deck_capture_options_t) */
-    uint32_t width;               /* 视频宽 (0 = 默认 1280) */
-    uint32_t height;              /* 视频高 (0 = 默认 720) */
-    uint32_t framerate;           /* 帧率 (0 = 默认 30) */
+    uint32_t width;               /* video width (0 = default 1280) */
+    uint32_t height;              /* video height (0 = default 720) */
+    uint32_t framerate;           /* frame rate (0 = default 30) */
 } mediaservo_deck_capture_options_t;
 #define MEDIASERVO_DECK_CAPTURE_OPTIONS_DEFAULT { sizeof(mediaservo_deck_capture_options_t), 0, 0, 0 }
 
@@ -173,7 +179,7 @@ typedef void (*mediaservo_deck_frame_cb)(const mediaservo_frame_t* frame, void* 
 typedef struct mediaservo_frame_t {
     uint32_t width;
     uint32_t height;
-    uint64_t pts_us;        /* 演示时间戳 µs */
+    uint64_t pts_us;        /* presentation timestamp in microseconds */
     uint32_t stride_y;
     uint32_t stride_u;
     uint32_t stride_v;
@@ -183,22 +189,23 @@ typedef struct mediaservo_frame_t {
 } mediaservo_frame_t;
 ```
 
-`devices_enumerate` 双调用约定（snprintf 风格）：第一次 `out_ids=NULL` 取所需长度（返回值 =
-长度，不含 NUL；负值为错误）；第二次填缓冲，**截断时同样返回所需长度**；`out_len` 非空时两次均写回。
-多设备以 `'\n'` 分隔；`kind`: 0=Camera 1=Audio 2=Screen。
+The `devices_enumerate` two-call convention (snprintf style): the first call with `out_ids=NULL` returns
+the needed length (the return value = the length, excluding NUL; negative = an error); the second fills the
+buffer and **on truncation likewise returns the needed length**; `out_len` is written back both times when
+non-null. Multiple devices are newline-separated; `kind`: 0=Camera 1=Audio 2=Screen.
 
-## 5. 使用示例（均为仓内真实代码）
+## 5. Usage Examples (all real in-repo code)
 
-### 5.1 C++ 采集→录制→回放闭环（真实代码）
+### 5.1 C++ Capture→Record→Playback Closed Loop (real code)
 
-来源：`bindings/cxx/mediaservo-deck-cxx/examples/vehicle_deck.cpp` L26–L75（节选，回放段同理见 L78–L91；
-需设环境变量 `MEDIASERVO_RECORD_PATH`）。
+Source: `bindings/cxx/mediaservo-deck-cxx/examples/vehicle_deck.cpp` L26-L75 (excerpt; the playback section
+is analogous at L78-L91; requires the env var `MEDIASERVO_RECORD_PATH`).
 
 ```cpp
 auto cams = mediaservo::deck::enumerate_devices(DeviceKind::Camera);
 if (cams.empty()) { std::cerr << "no camera devices\n"; return 1; }
 
-CaptureOptions opts; // 默认 1280x720@30
+CaptureOptions opts; // defaults to 1280x720@30
 auto cam_result = CameraSource::open(cams[0], opts);
 if (!cam_result) {
     std::cerr << "camera open failed: code=" << cam_result.error().code
@@ -207,119 +214,125 @@ if (!cam_result) {
 }
 auto cam = std::move(cam_result).value();
 
-// 帧回调（泵线程；frame 指针仅回调内有效——此处只打印，不保留）
+// The frame callback (pump thread; the frame pointers are valid only inside the callback — just print here, don't keep them)
 auto cb = cam.on_frame([](const mediaservo_frame_t& frame) {
     std::cout << "frame " << frame.width << "x" << frame.height << "\n";
 });
 auto started = cam.start();
 
-// 录制（camera 必须已 start 且活到录制结束 → recorder 先 close）
+// Record (the camera must have started and live until recording ends → the recorder closes first)
 auto rec = std::move(Recorder::open(out_path).value());
 auto recorded = rec.record(cam);
 
 std::cin.get();
 
-(void)rec.stop();   // 请求停止
-(void)rec.close();  // 先关 recorder（flush + trailer）
-(void)cam.stop();   // 后关 camera
+(void)rec.stop();   // request the stop
+(void)rec.close();  // close the recorder first (flush + trailer)
+(void)cam.stop();   // close the camera after
 (void)cam.close();
 ```
 
-### 5.2 C++ 错误路径与已关闭语义（真实代码）
+### 5.2 C++ Error Paths & Closed Semantics (real code)
 
-来源：`bindings/cxx/mediaservo-deck-cxx/tests/test_deck.cpp` L35–L55。
+Source: `bindings/cxx/mediaservo-deck-cxx/tests/test_deck.cpp` L35-L55.
 
 ```cpp
-// 空 dev_id → C ABI 快速 INVALID_ARG，不触硬件
+// Empty dev_id → the C ABI fails fast with INVALID_ARG, hardware untouched
 auto r = CameraSource::open("");
 assert(!r.has_value());
 assert(r.error().code == MEDIASERVO_DECK_ERR_INVALID_ARG);
 assert(!r.error().message.empty());
 
-// 已关闭相机：start/on_frame → INVALID_ARG/"closed"
+// A closed camera: start/on_frame → INVALID_ARG/"closed"
 CameraSource c;
 assert(!c);
 auto st = c.start();
 assert(st.error().code == MEDIASERVO_DECK_ERR_INVALID_ARG);
 assert(st.error().message == "closed");
-assert(c.stop().has_value());  // 幂等
-assert(c.close().has_value()); // 幂等（C++ 层；C 层重复 close 同指针为 UB）
+assert(c.stop().has_value());  // idempotent
+assert(c.close().has_value()); // idempotent (C++ layer; a repeated C-layer close on the same pointer is UB)
 ```
 
-### 5.3 C ABI 消费（真实代码，节选）
+### 5.3 C ABI Consumption (real code, excerpt)
 
-来源：`bindings/c/mediaservo-deck-c/examples/record_playback.c` L39–L58、L94–L118。
+Source: `bindings/c/mediaservo-deck-c/examples/record_playback.c` L39-L58, L94-L118.
 
 ```c
-/* 1. 枚举相机（双调用模式: 第一次长度 → 第二次内容） */
+/* 1. Enumerate cameras (two-call pattern: first the length, then the content) */
 size_t need = 0;
 mediaservo_err_t rc = mediaservo_deck_devices_enumerate(0, NULL, 0, &need);
 char dev[64];
 rc = mediaservo_deck_devices_enumerate(0, dev, sizeof(dev), &need);
 
-/* 2. 打开相机 + 开始产帧（默认 1280x720@30）+ 帧回调 */
+/* 2. Open the camera + start producing frames (default 1280x720@30) + the frame callback */
 mediaservo_deck_capture_options_t copts = MEDIASERVO_DECK_CAPTURE_OPTIONS_DEFAULT;
 mediaservo_deck_camera_t* cam = NULL;
 rc = mediaservo_deck_camera_open(dev, &copts, &cam);
 rc = mediaservo_deck_camera_start(cam);
 rc = mediaservo_deck_camera_frames_cb(cam, on_camera_frame, NULL);
 
-/* 4. 停止录制 + 关闭（顺序: recorder 先于 camera — 生命周期契约） */
+/* 4. Stop recording + close (order: recorder before camera — the lifecycle contract) */
 rc = mediaservo_deck_recorder_stop(rec);
 rc = mediaservo_deck_recorder_close(rec);
 rc = mediaservo_deck_camera_stop(cam);
 rc = mediaservo_deck_camera_close(cam);
 ```
 
-C 侧每个错误分支统一模式：`rc != MEDIASERVO_OK` → `mediaservo_deck_last_error(err, sizeof(err))` 取详情。
+Every C-side error branch follows one pattern: `rc != MEDIASERVO_OK` →
+`mediaservo_deck_last_error(err, sizeof(err))` fetches the details.
 
-## 6. 错误与边界语义
+## 6. Error & Boundary Semantics
 
-### 6.1 错误码（deck.h 逐字）
+### 6.1 Error Codes (verbatim from deck.h)
 
 ```c
-#define MEDIASERVO_DECK_ERR_INVALID_ARG  (-1)   /* 参数非法 / null 指针 / struct_size 过小 */
-#define MEDIASERVO_DECK_ERR_DEVICE       (-2)   /* 设备枚举/打开失败 */
-#define MEDIASERVO_DECK_ERR_RECORDER     (-3)   /* 录制域（路径不存在、mux 失败等） */
-#define MEDIASERVO_DECK_ERR_PLAYER       (-4)   /* 回放域（文件不存在、demux/decode 失败等） */
-#define MEDIASERVO_DECK_ERR_STATE        (-5)   /* 状态违例（重复 start、未 start 即 record 等） */
-#define MEDIASERVO_DECK_ERR_INTERNAL     (-6)   /* 内部错误（含 panic 捕获、mutex poisoned） */
+#define MEDIASERVO_DECK_ERR_INVALID_ARG  (-1)   /* invalid args / null pointer / struct_size too small */
+#define MEDIASERVO_DECK_ERR_DEVICE       (-2)   /* device enumeration/open failure */
+#define MEDIASERVO_DECK_ERR_RECORDER     (-3)   /* the record domain (missing path, mux failure, etc.) */
+#define MEDIASERVO_DECK_ERR_PLAYER       (-4)   /* the playback domain (missing file, demux/decode failure, etc.) */
+#define MEDIASERVO_DECK_ERR_STATE        (-5)   /* a state violation (duplicate start, record before start, etc.) */
+#define MEDIASERVO_DECK_ERR_INTERNAL     (-6)   /* an internal error (incl. panic capture, poisoned mutex) */
 ```
 
-Rust `DeckError` → C 码按调用域映射（`lib.rs` `map_deck_err`）：`Device`→-2、`InvalidState`→-5、
-`NotFound`/`Codec`/`Io` 按 Camera/Recorder/Player 上下文映射为 -2/-3/-4（Camera 的 Codec/Io → -6）；
-未知变体统一 -6。所有导出函数经 `catch_unwind` 包裹，panic 不会穿越 FFI。
+Rust `DeckError` → C codes are mapped by the call domain (`map_deck_err` in lib.rs): `Device`→-2,
+`InvalidState`→-5, `NotFound`/`Codec`/`Io` map to -2/-3/-4 per the Camera/Recorder/Player context
+(Camera's Codec/Io → -6); unknown variants are uniformly -6. All exported functions are wrapped in
+`catch_unwind`; panics never cross the FFI.
 
-### 6.2 last_error 通道
+### 6.2 The last_error Channel
 
-- `mediaservo_deck_last_error(buf, len)` 线程安全；无错误时返回空串；超长截断 + NUL。
-- **进程级全局单槽**（`static LAST_ERROR`）：任何线程的任何一次失败调用都会覆写它。并发消费
-  （或多测试用例并跑）时「先调用、后读错误」不是原子对——deck-c 测试自身即因此引入文件内
-  `TEST_LOCK` 串行（`lib.rs` 测试模块注记，与 link-c/field-c 同族）。消费者写测试若并发断言
-  last_error，需自行串行化。
+- `mediaservo_deck_last_error(buf, len)` is thread-safe; returns an empty string when there is no error;
+  overlong values are truncated + NUL.
+- **A process-global single slot** (`static LAST_ERROR`): any thread's any failing call overwrites it. Under
+  concurrent consumption (or concurrent test cases) "call first, read the error later" is not an atomic pair —
+  the deck-c tests themselves serialize with a file-local `TEST_LOCK` for exactly this reason (a note in
+  lib.rs's test module; the same family as link-c/field-c). Consumers writing tests that concurrently assert
+  last_error must serialize themselves.
 
-### 6.3 struct_size 兼容门
+### 6.3 The struct_size Compatibility Gate
 
-`mediaservo_deck_camera_open` 校验 `opts->struct_size >= sizeof(mediaservo_deck_capture_options_t)`
-（当前 24B/64 位），过小 → `INVALID_ARG` 并给出「rebuild with current header」提示；超长忽略——
-结构演进不破二进制兼容（审核 R3）。C++ 层用 `MEDIASERVO_DECK_CAPTURE_OPTIONS_DEFAULT` 初始化，恒满足。
+`mediaservo_deck_camera_open` validates `opts->struct_size >= sizeof(mediaservo_deck_capture_options_t)`
+(currently 24B on 64-bit); too small → `INVALID_ARG` with a "rebuild with current header" hint; an oversized
+value is ignored — struct evolution doesn't break binary compatibility (review R3). The C++ layer
+initializes with `MEDIASERVO_DECK_CAPTURE_OPTIONS_DEFAULT`, always satisfied.
 
-### 6.4 生命周期红线（C 头契约，C++ 层翻译为 RAII 保证）
+### 6.4 Lifecycle Red Lines (the C header contract, translated by the C++ layer into RAII guarantees)
 
-| 红线 | 违反后果 |
-|---|---|
-| close 后再用 handle（含重复 close 同一指针） | C 层 UB（C++ 层已封为幂等 + 默认构造=已关闭） |
-| 帧回调内调用任何 `mediaservo_deck_*` API（含 close） | UB（泵线程自等待/自释放） |
-| 回调返回后继续持有 `data_y/u/v` 指针 | 悬垂——需要保留必须拷贝 |
-| recorder 未先于 camera 关闭 | 录制任务持有 camera 帧桥，违序关闭为契约外行为 |
-| camera 未 start（或已 stop）即 record | `STATE`（C 层显式检查 started/stop 标志） |
-| player `on_frame` 调两次 | `STATE`（只允许一次） |
+| Red line | Consequence of violation |
+|----------|--------------------------|
+| Using a handle after close (incl. a repeated close on the same pointer) | UB at the C layer (the C++ layer wraps it as idempotent + default-construction=closed) |
+| Calling any `mediaservo_deck_*` API inside a frame callback (incl. close) | UB (the pump thread waits on/frees itself) |
+| Holding the `data_y/u/v` pointers after the callback returns | dangling — copy if you need to keep |
+| Closing the recorder after the camera | the recording task holds the camera's frame bridge; closing out of order is out-of-contract behavior |
+| record before the camera starts (or after it stopped) | `STATE` (the C layer explicitly checks the started/stopped flags) |
+| Calling player `on_frame` twice | `STATE` (allowed once only) |
 
-## 7. 构建与链接
+## 7. Build & Linking
 
-### 7.1 直接编译（仓内测试脚本实形）
+### 7.1 Direct Compilation (the actual form in the in-repo test script)
 
-来源：`scripts/test-cxx.sh`（deck 轮）。前置：`pixi run build-c` 产出 `target/debug/libmediaservo_deck.so`。
+Source: `scripts/test-cxx.sh` (the deck pass). Prerequisite: `pixi run build-c` producing
+`target/debug/libmediaservo_deck.so`.
 
 ```bash
 g++ -std=c++11 -Wall -Wextra \
@@ -330,69 +343,81 @@ g++ -std=c++11 -Wall -Wextra \
 LD_LIBRARY_PATH=$PWD/target/debug /tmp/opencode/test_deck_cxx
 ```
 
-（头文件注释里的编译行同为 `-std=c++17` 形，见 deck.hpp 测试头 L2–L3 注记；绑定本体 C++11 起步。）
+(The compile line in the header comments is likewise a `-std=c++17` form, see the deck.hpp test-header L2-L3
+notes; the binding body itself is C++11-baseline.)
 
-### 7.2 安装树消费（deploy bindings 后）
+### 7.2 Consuming the Installed Tree (after deploy bindings)
 
-`mediaservo.sh deploy bindings --prefix <dir>` 装配 `lib/ + include/mediaservo + pkgconfig + cmake`
-（C 公共头与 per-sdk 头、cxx .hpp 统一平铺到 `include/mediaservo/`）。
+`mediaservo.sh deploy bindings --prefix <dir>` assembles `lib/ + include/mediaservo + pkgconfig + cmake`
+(the common C header and per-sdk headers, and the cxx .hpp files, all flattened into `include/mediaservo/`).
 
-**CMake**（`bindings/c/cmake/mediaservoConfig.cmake.in`，单包多组件，OpenCV/Boost 惯例；下两段消费写法由模板推导，假代码——未编译验证）：
+**CMake** (`bindings/c/cmake/mediaservoConfig.cmake.in`; one package, multiple components, the OpenCV/Boost
+convention; the two consumption snippets below are derived from the template — hypothetical, not
+compile-verified):
 
 ```cmake
 find_package(mediaservo REQUIRED COMPONENTS deck)
 target_link_libraries(app PRIVATE mediaservo::deck)   # INTERFACE: include/ + libmediaservo_deck.so
 ```
 
-组件缺失/未知 → `FATAL_ERROR`；版本兼容由 `mediaservoConfigVersion.cmake`（`@VERSION@/@MAJOR@`）把关。
+A missing/unknown component → `FATAL_ERROR`; version compatibility is gated by
+`mediaservoConfigVersion.cmake` (`@VERSION@/@MAJOR@`).
 
-**pkg-config**（`bindings/c/mediaservo-deck-c/mediaservo-deck.pc.in`）：
+**pkg-config** (`bindings/c/mediaservo-deck-c/mediaservo-deck.pc.in`):
 
 ```bash
 pkg-config --cflags --libs mediaservo-deck
 # Libs: -L${libdir} -lmediaservo_deck    Cflags: -I${includedir}
 ```
 
-### 7.3 运行时依赖（FFmpeg）
+### 7.3 Runtime Dependencies (FFmpeg)
 
-- **FFmpeg 静态链接进 `libmediaservo_deck.so`**（`bindings/c/mediaservo-deck-c/build.rs` R10 注记：
-  ffmpeg-the-third 源码构建 + `-Wl,--exclude-libs,ALL`）：宿主无需系统 FFmpeg，且与宿主自带的
-  其它 FFmpeg 版本不冲突（静态符号不进动态符号表）。
-- soname（仅 Linux）：实体 `libmediaservo_deck.so.MAJOR.MINOR.PATCH`，soname `libmediaservo_deck.so.<MAJOR>`；
-  非目标机部署时注意携带实体文件而非仅 symlink，并设 `LD_LIBRARY_PATH` 或 rpath 指向 `lib/`。
-- `.pc` 文件无 FFmpeg `Requires`——与静态内嵌一致，属预期而非遗漏。
+- **FFmpeg is statically linked into `libmediaservo_deck.so`** (an R10 note in
+  `bindings/c/mediaservo-deck-c/build.rs`: ffmpeg-the-third built from source +
+  `-Wl,--exclude-libs,ALL`): the host needs no system FFmpeg, and it doesn't conflict with the host's own
+  other FFmpeg versions (static symbols never enter the dynamic symbol table).
+- soname (Linux only): the real file `libmediaservo_deck.so.MAJOR.MINOR.PATCH`, the soname
+  `libmediaservo_deck.so.<MAJOR>`; when deploying to a different machine, carry the real file rather than
+  just symlinks, and point `LD_LIBRARY_PATH` or rpath at `lib/`.
+- The `.pc` file has no FFmpeg `Requires` — consistent with the static embedding; expected, not an omission.
 
-## 8. 已知坑 / FAQ
+## 8. Known Pitfalls / FAQ
 
-- **Q: 枚举不到真实相机？** 现状即如此：采集 MVP 为 stub 帧源（`crates/mediaservo-deck/src/source.rs`
-  模块头），Camera 枚举表固定 `stub:test-camera`，Audio/Screen 恒空。真实 v4l2 采集是 deck 后续版本。
-- **Q: recorder 打开报 -3？** C 层 `Recorder::new` 要求**父目录已存在**（不隐式 mkdir，
-  `record.rs` 明确失败设计）；先 `mkdir -p`。
-- **Q: 录出来的 mp4 打不开 / 0 帧？** 数据只在 `recorder_close()`（join 任务完成 flush+trailer）后
-  才完整落盘；`stop()` 只是发信号。另注意关闭顺序 recorder → camera（§6.4）。
-- **Q: player close 卡住？** 语义即阻塞 join 至 EOF——长文件要等完，无中止接口（头文件 YAGNI 注记）。
-  想要边解边停的，目前只能在回调里自行计数后不再消费（泵仍会跑完）。
-- **Q: `enumerate_devices` 返回空列表是错误还是没设备？** 二者不可分辨（无 Result 通道，头文件
-  `ponytail:` 注记）。需要区分错误请下沉 C ABI 双调用检查返回值。
-- **Q: 帧回调收不到帧？** 检查是否 `open` 后忘了 `start()`（回调注册不依赖 start，但产帧依赖）；
-  以及 pump 线程 50ms 轮询节奏——stop/close 后 ≤50ms 内退出，最后一帧可能丢弃。
-- **Q: 多个并发任务同时读 last_error 串台？** 是，全局单槽（§6.2）。
-- **待核实**：`deck.hpp` L37–38 有一段悬空文档注释 + 孤立 `;`（错误详情说明文字残留在 namespace
-  顶层，无对应声明）——不影响编译（测试以 `-Wall -Wextra` 通过），疑为重构残留；引用该注释时
-  以 §4.1 的 `Error` 结构（result.hpp）为准。
+- **Q: No real camera enumerated?** That is the current state: capture MVP is a stub frame source (the
+  `crates/mediaservo-deck/src/source.rs` module header); the Camera enumeration table is fixed to
+  `stub:test-camera`, and Audio/Screen are always empty. Real v4l2 capture is a later deck version.
+- **Q: The recorder open returns -3?** The C layer's `Recorder::new` requires **the parent directory to
+  already exist** (no implicit mkdir; an explicit-failure design in record.rs); `mkdir -p` first.
+- **Q: The recorded mp4 won't open / has 0 frames?** The data is only complete after `recorder_close()`
+  (joining the task completes flush+trailer); `stop()` merely signals. Also mind the close order
+  recorder → camera (§6.4).
+- **Q: The player close hangs?** That is the semantics: a blocking join to EOF — long files must finish;
+  there is no abort interface (a YAGNI note in the header). To stop while decoding, count frames in the
+  callback yourself and stop consuming (the pump still runs to the end).
+- **Q: Is an empty `enumerate_devices` an error or no devices?** Indistinguishable (no Result channel; a
+  `ponytail:` note in the header). To distinguish errors, drop to the C ABI's two-call pattern and check the
+  return value.
+- **Q: The frame callback receives no frames?** Check whether you `open`ed but forgot `start()` (callback
+  registration doesn't depend on start, but frame production does); also the pump thread's 50ms polling
+  cadence — after stop/close it exits within 50ms, and the last frame may be dropped.
+- **Q: Concurrent tasks reading last_error cross-contaminate?** Yes, a global single slot (§6.2).
+- **Unverified**: `deck.hpp` L37-L38 has a dangling doc comment + a stray `;` (error-detail explanatory text
+  stranded at namespace top level with no corresponding declaration) — it doesn't affect compilation (the
+  tests pass under `-Wall -Wextra`); likely a refactor leftover; when citing that comment, defer to §4.1's
+  `Error` struct (result.hpp).
 
-## 9. 相关文件索引
+## 9. Related File Index
 
-| 内容 | 路径 |
-|---|---|
-| C++ 头（本手册对象） | `bindings/cxx/mediaservo-deck-cxx/include/mediaservo/deck.hpp` |
-| C ABI 头 | `bindings/c/mediaservo-deck-c/include/mediaservo/deck.h` |
-| 共享 C 类型 | `bindings/c/include/mediaservo/common.h` |
-| 共享 C++ Result | `bindings/cxx/include/mediaservo/detail/result.hpp` |
-| C ABI 实现 + 单测 | `bindings/c/mediaservo-deck-c/src/lib.rs` |
-| C++ 编译运行测试 | `bindings/cxx/mediaservo-deck-cxx/tests/test_deck.cpp` |
-| C++ 闭环示例 | `bindings/cxx/mediaservo-deck-cxx/examples/vehicle_deck.cpp` |
-| C 闭环示例 | `bindings/c/mediaservo-deck-c/examples/record_playback.c` |
-| Rust deck crate | `crates/mediaservo-deck/`（source/record/playback/error） |
-| CMake/pkg-config 模板 | `bindings/c/cmake/mediaservoConfig.cmake.in` · `bindings/c/mediaservo-deck-c/mediaservo-deck.pc.in` |
-| C++ 测试驱动脚本 | `scripts/test-cxx.sh` |
+| Content | Path |
+|---------|------|
+| The C++ header (this manual's subject) | `bindings/cxx/mediaservo-deck-cxx/include/mediaservo/deck.hpp` |
+| The C ABI header | `bindings/c/mediaservo-deck-c/include/mediaservo/deck.h` |
+| Shared C types | `bindings/c/include/mediaservo/common.h` |
+| Shared C++ Result | `bindings/cxx/include/mediaservo/detail/result.hpp` |
+| C ABI impl + unit tests | `bindings/c/mediaservo-deck-c/src/lib.rs` |
+| The C++ compile-and-run test | `bindings/cxx/mediaservo-deck-cxx/tests/test_deck.cpp` |
+| The C++ closed-loop example | `bindings/cxx/mediaservo-deck-cxx/examples/vehicle_deck.cpp` |
+| The C closed-loop example | `bindings/c/mediaservo-deck-c/examples/record_playback.c` |
+| The Rust deck crate | `crates/mediaservo-deck/` (source/record/playback/error) |
+| CMake/pkg-config templates | `bindings/c/cmake/mediaservoConfig.cmake.in` · `bindings/c/mediaservo-deck-c/mediaservo-deck.pc.in` |
+| The C++ test driver script | `scripts/test-cxx.sh` |

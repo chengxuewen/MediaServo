@@ -1,12 +1,12 @@
-//! deck 录制域（record）端到端测试：CameraSource → Recorder → MP4 文件。
+//! Deck record domain end-to-end test: CameraSource → Recorder → MP4 file.
 //!
-//! 需要 `backend-ffmpeg` feature（`cargo test -p mediaservo-deck --features backend-ffmpeg`）。
+//! Requires the `backend-ffmpeg` feature (`cargo test -p mediaservo-deck --features backend-ffmpeg`).
 
 #![cfg(feature = "backend-ffmpeg")]
 
 use std::time::Duration;
 
-use mediaservo_deck::record::{Container, Recorder, RecordOptions, VideoCodec};
+use mediaservo_deck::record::{Container, RecordOptions, Recorder, VideoCodec};
 use mediaservo_deck::source::{CameraSource, CaptureOptions, DeviceId};
 
 #[tokio::test]
@@ -16,16 +16,10 @@ async fn records_mp4_from_camera_source() {
     let path = dir.join("out.mp4");
     let _ = std::fs::remove_file(&path);
 
-    let mut cam = CameraSource::open(
-        DeviceId("stub:test-camera".into()),
-        CaptureOptions::default(),
-    )
-    .expect("open camera");
-    let opts = CaptureOptions {
-        resolution: Some((320, 240)),
-        framerate: Some(30),
-        format: None,
-    };
+    let mut cam =
+        CameraSource::open(DeviceId("stub:test-camera".into()), CaptureOptions::default())
+            .expect("open camera");
+    let opts = CaptureOptions { resolution: Some((320, 240)), framerate: Some(30), format: None };
     let mut frames = cam.start(&opts).expect("start camera");
 
     let mut recorder = Recorder::new(
@@ -40,27 +34,27 @@ async fn records_mp4_from_camera_source() {
     .unwrap_or_else(|e| panic!("create recorder: {e}"));
     let stop = recorder.stop_signal();
 
-    // 异步录制任务：消费帧直到 stop() → flush + trailer
+    // Async recording task: consume frames until stop() → flush + trailer
     let record_task = tokio::spawn(async move {
         recorder.record(&mut frames).await.expect("record ok");
     });
 
-    // 喂 ~2s 帧后停止
+    // Feed ~2s of frames, then stop
     tokio::time::sleep(Duration::from_millis(1500)).await;
     cam.stop();
     stop.stop();
 
-    // 等待录制任务完成（worker flush + trailer 后退出）
+    // Wait for the recording task to finish (worker exits after flush + trailer)
     tokio::time::timeout(Duration::from_secs(10), record_task)
         .await
         .expect("record task finishes (no timeout)")
         .expect("record task panicked");
 
-    // 文件应存在且非空（MP4 header + 若干帧）
+    // File should exist and be non-empty (MP4 header + several frames)
     let size = std::fs::metadata(&path).expect("file exists").len();
     assert!(size > 1_000, "mp4 size should be > 1KB, got {size} bytes");
 
-    // DECK_KEEP=1 时保留文件供外部验证（如 ffprobe）
+    // With DECK_KEEP=1 keep the file for external verification (e.g. ffprobe)
     if std::env::var("DECK_KEEP").is_err() {
         let _ = std::fs::remove_file(&path);
     } else {

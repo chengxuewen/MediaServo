@@ -1,12 +1,12 @@
-//! e2e_audio_conf: H2 音频会议房间 — 3 方全互连 opus（车端 + 舱端 + dispatcher，
-//! 全部为合成音频参与者：tone PCM → AudioTrackSource → libwebrtc opus → RTP）。
+//! e2e_audio_conf: H2 audio conference rooms - 3-party full-mesh opus (vehicle + cockpit + dispatcher,
+//! all synthetic audio participants: tone PCM -> AudioTrackSource -> libwebrtc opus -> RTP).
 //!
-//! 纯外部模式（C21）— 连外部 mediasoup server，仅通过 WS 信令协议交互。
-//! 媒体面证据 = server 侧 RTP 统计（SfuStatsRequest → get_stats）:
-//!   - 每个 producer 的 byte_count > 0（参与者音频 RTP 到达 server）
-//!   - 每个 consumer 的 byte_count > 0（router 转发到所有消费方 — "all hear all"）
+//! Pure external mode (C21) - connect to an external mediasoup server, interact only via the WS signaling protocol.
+//! Media-plane evidence = server-side RTP stats (SfuStatsRequest -> get_stats):
+//!   - every producer's byte_count > 0 (participant audio RTP reaches the server)
+//!   - every consumer's byte_count > 0 (the router forwards to all consumers - "all hear all")
 //!
-//! Runs on Linux only (C22: host 原生 + Docker server)。
+//! Runs on Linux only (C22: host native + Docker server).
 
 #![cfg(target_os = "linux")]
 
@@ -24,7 +24,7 @@ use mediaservo_webrtc::{
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 
-/// 测试级 logging 初始化（全局 subscriber 只能 set 一次 — 多测试并行防 panic）。
+/// Test-level logging init (the global subscriber can only be set once - avoids panics with parallel tests).
 fn init_logging_once() {
     use std::sync::Once;
     static INIT: Once = Once::new();
@@ -38,9 +38,9 @@ fn psk() -> String {
 }
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-/// opus 标准 PT（router default_router_options: opus 111/48000/2ch）。
+/// opus standard PT (router default_router_options: opus 111/48000/2ch).
 const OPUS_PT: u16 = 111;
-/// 48kHz mono，10ms 帧 = 480 样本。
+/// 48kHz mono, 10ms frame = 480 samples.
 const SAMPLE_RATE: u32 = 48_000;
 const FRAME_SAMPLES: usize = 480;
 
@@ -50,9 +50,10 @@ struct Harness {
 
 impl Harness {
     async fn new() -> Self {
-        let url = std::env::var("SFU_E2E_WS_URL")
-            .unwrap_or_else(|_| panic!("SFU_E2E_WS_URL 未设置 — 需连外部 mediasoup server (C21)"));
-        tracing::info!("SfuTestHarness: 外部 mediasoup server 模式 ({url})");
+        let url = std::env::var("SFU_E2E_WS_URL").unwrap_or_else(|_| {
+            panic!("SFU_E2E_WS_URL not set - needs an external mediasoup server (C21)")
+        });
+        tracing::info!("SfuTestHarness: external mediasoup server mode ({url})");
         Self { ws_url: url }
     }
 }
@@ -87,7 +88,7 @@ where
     assert!(joined.to_text().unwrap().contains("room_joined"));
 }
 
-/// 读下一条消息并解析；跳过 transport_connected ack 与 NewProducer 广播。
+/// Read and parse the next message; skip transport_connected acks and NewProducer broadcasts.
 async fn next_sig_skip_noise<S>(ws: &mut S) -> SignalingMessage
 where
     S: SinkExt<WsMsg>
@@ -110,9 +111,9 @@ where
     }
 }
 
-/// 构造音频 remote SDP（opus）。
-/// `sendonly` = server 发送、本地接收（消费侧）; `recvonly` = server 接收、本地发送（生产侧）。
-/// `ssrc` 仅在 sendonly 时注入（consumer 的 encodings[0].ssrc — libwebrtc demux 必需）。
+/// Build the audio remote SDP (opus).
+/// `sendonly` = the server sends and the local side receives (consumer side); `recvonly` = the server receives and the local side sends (producer side).
+/// `ssrc` is injected only for sendonly (the consumer's encodings[0].ssrc - required by libwebrtc demux).
 fn build_remote_audio_sdp(
     ice_parameters: &IceParameters,
     dtls_parameters: &DtlsParameters,
@@ -181,7 +182,7 @@ fn build_remote_audio_sdp(
     lines.join("\r\n")
 }
 
-/// 440Hz 正弦 tone 生成器 — 10ms/帧 i16 mono PCM（opus 有实际载荷，防 DTX 静音零包）。
+/// 440Hz sine tone generator - 10ms/frame i16 mono PCM (gives opus a real payload, preventing DTX silent no-packet).
 fn tone_frame(phase: &mut f64) -> Vec<u8> {
     let freq = 440.0;
     let step = 2.0 * std::f64::consts::PI * freq / SAMPLE_RATE as f64;
@@ -197,8 +198,8 @@ fn tone_frame(phase: &mut f64) -> Vec<u8> {
     out
 }
 
-/// 参与者 = 生产者：join → send transport → audio SDP → add_track(audio) → answer →
-/// Connect → Produce → 返回 (producer_id, TrackSender, tone 推送 task)。
+/// Participant = producer: join -> send transport -> audio SDP -> add_track(audio) -> answer ->
+/// Connect -> Produce -> returns (producer_id, TrackSender, tone push task).
 async fn audio_producer<S>(
     ws: &mut S,
     room: &str,
@@ -242,7 +243,7 @@ where
         }
     };
 
-    // 2. PC + 标准 answerer 协商（C18: remote SDP → add_track → create_answer）
+    // 2. PC + standard answerer negotiation (C18: remote SDP -> add_track -> create_answer)
     let factory = RTCPeerConnectionFactory::new();
     let pc = factory.create_peer_connection(RTCConfiguration::default()).await.unwrap();
     let connected = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -263,8 +264,8 @@ where
     );
     let remote_desc = RTCSessionDescription::new(RTCSdpType::Offer, remote_sdp);
     pc.set_remote_description(&remote_desc).await.unwrap();
-    // track id 必须与 libwebrtc 内部 track label 一致（create_audio_track 建 "audio"）—
-    // sender_get_parameters 按 track.id() 匹配。
+    // the track id must match libwebrtc's internal track label (create_audio_track builds "audio") -
+    // sender_get_parameters matches by track.id().
     let track_id = pc.add_track("audio", TrackKind::Audio).unwrap();
     let answer = pc.create_answer(&RTCAnswerOptions).await.unwrap();
     tracing::info!("producer {peer} answer SDP:\n{}", answer.sdp);
@@ -291,7 +292,7 @@ where
         .expect("producer PC connect timeout");
     assert_eq!(pc.connection_state(), RTCPeerConnectionState::Connected);
 
-    // 4. Produce（协商结果推导 rtp_parameters — C18 官方路径）
+    // 4. Produce (derive rtp_parameters from the negotiation result - C18 official path)
     let rtp_params = pc.get_sending_rtp_parameters(&track_id).unwrap();
     let codecs: Vec<serde_json::Value> = rtp_params
         .codecs
@@ -326,7 +327,7 @@ where
                     {"type": "transport-cc", "parameter": ""},
                 ],
             });
-            // opus 必须带 channels（mediasoup codec 匹配含 channels — 2ch）
+            // opus must carry channels (mediasoup codec matching includes channels - 2ch)
             if let Some(ch) = c.channels {
                 codec["channels"] = serde_json::json!(ch);
             }
@@ -360,7 +361,7 @@ where
             "encodings": encodings,
             "rtcp": {"reducedSize": rtp_params.rtcp.reduced_size},
         }),
-        transport_id: None, // legacy 路径回归
+        transport_id: None, // legacy path regression
 
         label: None,
     };
@@ -376,15 +377,15 @@ where
         }
     };
 
-    // 5. tone 推送 task（10ms 节奏 — libwebrtc opus 编码）
+    // 5. tone push task (10ms cadence - libwebrtc opus encoding)
     let track = match pc.get_track(&track_id) {
         Some(TrackRef::Sender(s)) => s,
         _ => panic!("producer {peer}: expected TrackSender"),
     };
     let peer = peer.to_string();
     let tone_track = track.clone();
-    // PCM 推流成功计数（I4 re-review）: 共享计数在 tone 任务 abort 后仍可读 —
-    // write_frame 静默失败（如 PIT-105 之外的接线回归）会被下方 total_pushed 断言捕获。
+    // PCM push success counter (I4 re-review): the shared counter stays readable after the tone task aborts -
+    // silent write_frame failures (a wiring regression beyond PIT-105) are caught by the total_pushed assertion below.
     let pushed: std::sync::Arc<std::sync::atomic::AtomicU64> = Default::default();
     let pushed_for_task = pushed.clone();
     let tone_task = tokio::spawn(async move {
@@ -413,8 +414,8 @@ where
     (producer_id, track, tone_task, pushed)
 }
 
-/// 消费方：Recv transport → Consume → 构造含 ssrc 的 sendonly SDP → answer →
-/// Connect → 返回 consumer_id。DTLS 完成后 mediasoup 才会转发 RTP（consumer 统计生效）。
+/// Consumer: Recv transport -> Consume -> build a sendonly SDP with ssrc -> answer ->
+/// Connect -> returns consumer_id. mediasoup only forwards RTP after DTLS completes (consumer stats become effective).
 async fn audio_consumer<S>(ws: &mut S, room: &str, peer: &str, producer_id: &str) -> String
 where
     S: SinkExt<WsMsg>
@@ -447,7 +448,7 @@ where
         }
     };
 
-    // 2. Consume 先于 SDP（拿 consumer ssrc 注入 remote SDP — PullSession 顺序）
+    // 2. Consume before SDP (take the consumer ssrc into the remote SDP - PullSession order)
     ws.send(WsMsg::Text(
         serde_json::to_string(&SignalingMessage::Consume {
             room_id: room.into(),
@@ -460,7 +461,7 @@ where
                     {"uri": "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01", "preferredId": 3, "kind": "audio", "preferredEncrypt": false, "direction": "sendrecv"},
                 ],
             }),
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
         })
         .unwrap(),
     ))
@@ -486,7 +487,7 @@ where
         .and_then(|s| s.as_u64());
     let mid = consumer_rtp.get("mid").and_then(|m| m.as_str()).unwrap_or("0").to_string();
 
-    // 3. PC + recvonly audio transceiver → sendonly SDP（含 ssrc）→ answer
+    // 3. PC + recvonly audio transceiver -> sendonly SDP (with ssrc) -> answer
     let factory = RTCPeerConnectionFactory::new();
     let pc = factory.create_peer_connection(RTCConfiguration::default()).await.unwrap();
     let connected = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -517,7 +518,7 @@ where
     let answer = pc.create_answer(&RTCAnswerOptions).await.unwrap();
     pc.set_local_description(&answer).await.unwrap();
 
-    // 4. ConnectWebRtcTransport（DTLS — mediasoup 转发的前提）
+    // 4. ConnectWebRtcTransport (DTLS - the prerequisite for mediasoup forwarding)
     let fp_hex = pc.local_dtls_fingerprint().unwrap();
     ws.send(WsMsg::Text(
         serde_json::to_string(&SignalingMessage::ConnectWebRtcTransport {
@@ -544,7 +545,7 @@ where
     consumer_id
 }
 
-/// 查询 SFU RTP 统计（producer 或 consumer）。
+/// Query SFU RTP stats (producer or consumer).
 async fn sfu_stats<S>(
     ws: &mut S,
     producer_id: Option<&str>,
@@ -577,8 +578,8 @@ where
     }
 }
 
-/// H2 主场景：3 方（车端/舱端/dispatcher）各 publish 1 路 opus + subscribe 其他所有。
-/// 媒体面证据：9 个统计点（3 producer + 6 consumer）byte_count 全部 > 0。
+/// H2 main scenario: 3 parties (vehicle/cockpit/dispatcher) each publish 1 opus track + subscribe to all others.
+/// Media-plane evidence: 9 stats points (3 producers + 6 consumers) all with byte_count > 0.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn e2e_audio_conf_three_party_all_hear_all() {
     init_logging_once();
@@ -586,7 +587,7 @@ async fn e2e_audio_conf_three_party_all_hear_all() {
     let room = format!("audio-e2e-{}", std::process::id());
     let peers = ["audio-veh", "audio-cockpit", "audio-dispatch"];
 
-    // 3 生产者（顺序执行 — server 单 WS 处理，串行最稳）
+    // 3 producers (sequential - the server handles a single WS, serial is most stable)
     let mut ws_list = Vec::new();
     let mut producers = Vec::new();
     let mut tone_tasks = Vec::new();
@@ -601,7 +602,7 @@ async fn e2e_audio_conf_three_party_all_hear_all() {
         ws_list.push(ws);
     }
 
-    // 每人消费其他两人 → 6 consumers
+    // each person consumes the other two -> 6 consumers
     let mut consumer_ids = Vec::new();
     for (i, ws) in ws_list.iter_mut().enumerate() {
         for (j, pid) in producers.iter().enumerate() {
@@ -613,51 +614,51 @@ async fn e2e_audio_conf_three_party_all_hear_all() {
         }
     }
 
-    // 给 libwebrtc 音频编码更长的暖机窗口（诊断: 首包延迟假设 — PIT-105 验证轮）
+    // give libwebrtc audio encoding a longer warmup window (diagnosis: first-packet-delay hypothesis - PIT-105 verification round)
     tracing::info!("waiting 5s for audio RTP warmup...");
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    // 媒体面证据：producer 入站 RTP 统计。
-    // PIT-105: 本 vendor libwebrtc 构建 AudioTrackSource→RTP 编码链路不产包
-    // （capture_frame 成功、sink 交付实证，但 outbound RTP 为零）— byte_count>0
-    // 断言在 PIT-105 修复后启用；当前断言 wiring 证据（kind=Audio + 统计可达）。
+    // Media-plane evidence: producer inbound RTP stats.
+    // PIT-105: this vendor's libwebrtc build produces no packets on the AudioTrackSource->RTP encoding chain
+    // (capture_frame succeeds, sink delivery is proven, but outbound RTP is zero) - the byte_count>0
+    // assertion is enabled after the PIT-105 fix; currently assert wiring evidence (kind=Audio + stats reachable).
     for pid in &producers {
         match sfu_stats(&mut ws_list[0], Some(pid), None).await {
             SignalingMessage::SfuStats { byte_count, packet_count, kind, .. } => {
-                assert_eq!(kind, Some(MediaKind::Audio), "producer {pid} 必须是音频");
+                assert_eq!(kind, Some(MediaKind::Audio), "producer {pid} must be audio");
                 tracing::info!(
-                    "PRODUCER {pid}: bytes={byte_count} packets={packet_count} kind={kind:?} (PIT-105: >0 待音频编码修复)"
+                    "PRODUCER {pid}: bytes={byte_count} packets={packet_count} kind={kind:?} (PIT-105: >0 pending the audio-encoding fix)"
                 );
             }
             other => panic!("expected SfuStats for producer {pid}, got {other:?}"),
         }
     }
 
-    // 媒体面证据：consumer 出站 RTP 统计（router 转发 — all hear all）。
-    // PIT-105 同前: byte_count>0/score 断言待音频编码修复后启用。
+    // Media-plane evidence: consumer outbound RTP stats (router forwarding - all hear all).
+    // PIT-105 same as before: the byte_count>0/score assertions wait for the audio-encoding fix.
     for (cid, pid) in &consumer_ids {
         match sfu_stats(&mut ws_list[0], None, Some(cid)).await {
             SignalingMessage::SfuStats { byte_count, packet_count, kind, .. } => {
-                assert_eq!(kind, Some(MediaKind::Audio), "consumer {cid} 必须是音频");
+                assert_eq!(kind, Some(MediaKind::Audio), "consumer {cid} must be audio");
                 tracing::info!(
-                    "CONSUMER {cid} ← {pid}: bytes={byte_count} packets={packet_count} (PIT-105: >0 待音频编码修复)"
+                    "CONSUMER {cid} ← {pid}: bytes={byte_count} packets={packet_count} (PIT-105: >0 pending the audio-encoding fix)"
                 );
             }
             other => panic!("expected SfuStats for consumer {cid}, got {other:?}"),
         }
     }
 
-    // PCM 推流成功断言（I4 re-review）: tone 任务静默失败（write_frame 全 Err /
-    // 任务早退）→ total_pushed == 0 → 测试失败。abort 后计数仍可读（Arc）。
+    // PCM push success assertion (I4 re-review): a silent tone-task failure (all write_frame Err /
+    // the task exiting early) -> total_pushed == 0 -> the test fails. The counter stays readable after abort (Arc).
     let total_pushed: u64 =
         pcm_pushed.iter().map(|c| c.load(std::sync::atomic::Ordering::Relaxed)).sum();
     assert!(
         total_pushed > 0,
-        "PCM 帧必须成功推入 libwebrtc（capture_frame 接受）— 推流静默失败 = 接线回归"
+        "PCM frames must push into libwebrtc successfully (capture_frame accepts) - a silent push failure = wiring regression"
     );
     tracing::info!("PCM frames pushed total: {total_pushed}");
 
-    // 清理
+    // cleanup
     for t in tone_tasks {
         t.abort();
     }
@@ -665,7 +666,7 @@ async fn e2e_audio_conf_three_party_all_hear_all() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 }
 
-/// 负例：音频房间禁止视频 producer（H2 房间语义 — 4031 + 审计）。
+/// Negative: video producers are forbidden in audio rooms (H2 room semantics - 4031 + audit).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn e2e_audio_room_rejects_video_produce() {
     init_logging_once();
@@ -693,7 +694,7 @@ async fn e2e_audio_room_rejects_video_produce() {
         }
     };
 
-    // 视频 produce → 必须 4031（门在 transport 连接前即触发）
+    // video produce -> must be 4031 (the gate fires before the transport is connected)
     ws.send(WsMsg::Text(
         serde_json::to_string(&SignalingMessage::Produce {
             room_id: room,
@@ -707,7 +708,7 @@ async fn e2e_audio_room_rejects_video_produce() {
                 "encodings": [{"ssrc": 12345}],
                 "rtcp": {"reducedSize": true}
             }),
-            transport_id: None, // legacy 路径回归
+            transport_id: None, // legacy path regression
 
             label: None,
         })
@@ -719,11 +720,11 @@ async fn e2e_audio_room_rejects_video_produce() {
         let sig = next_sig_skip_noise(&mut ws).await;
         match sig {
             SignalingMessage::Error { code, message } => {
-                assert_eq!(code, 4031, "音频房间视频 produce 必须 4031: {message}");
+                assert_eq!(code, 4031, "video produce in an audio room must be 4031: {message}");
                 assert!(message.contains("audio rooms allow audio producers only"));
             }
             SignalingMessage::Produced { .. } => {
-                panic!("音频房间视频 produce 必须被拒，却返回 Produced")
+                panic!("video produce in an audio room must be rejected, but Produced was returned")
             }
             other => panic!("expected Error, got {other:?}"),
         }

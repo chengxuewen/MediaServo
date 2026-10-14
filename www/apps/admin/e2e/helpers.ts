@@ -3,8 +3,8 @@ import { expect, type Page } from '@playwright/test';
 export interface Creds { username: string; password: string; role: string; }
 
 /**
- * 登录 + 断言已签名。登录端点有 tower_governor 限流（2 req/s burst 5, G3）—
- * 429 时等待补桶重试。轮询 localStorage 判定成功（比指示器时序稳健）。
+ * Sign in + assert signed in. The login endpoint is rate-limited by tower_governor (2 req/s burst 5, G3) —
+ * on 429 wait for the bucket refill and retry. Polls localStorage for success (more robust than indicator timing).
  */
 export async function login(page: Page, creds: Creds, attempts = 4): Promise<void> {
   for (let i = 0; i < attempts; i++) {
@@ -13,7 +13,7 @@ export async function login(page: Page, creds: Creds, attempts = 4): Promise<voi
     await page.locator('input.login-input[placeholder="password"]').fill(creds.password);
     await page.locator('button', { hasText: 'Login' }).click();
 
-    // 轮询: token 落 localStorage = 成功; error 指示器 = 失败（限流/凭证）→ 重试
+    // Poll: token in localStorage = success; error indicator = failure (rate-limit/credentials) → retry
     for (let t = 0; t < 40; t++) {
       const token = await page.evaluate(() => localStorage.getItem('mediaservo_admin_token'));
       if (token) {
@@ -24,7 +24,7 @@ export async function login(page: Page, creds: Creds, attempts = 4): Promise<voi
       if (errorCount > 0) break;
       await page.waitForTimeout(150);
     }
-    await page.waitForTimeout(1200); // 等限流桶恢复
+    await page.waitForTimeout(1200); // wait for the rate-limit bucket to refill
   }
   throw new Error(`login failed for ${creds.username} after ${attempts} attempts`);
 }

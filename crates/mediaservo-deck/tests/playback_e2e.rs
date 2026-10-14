@@ -1,16 +1,16 @@
-//! deck 回放域（playback）测试：录制产物 → Player demux/decode。
+//! Deck playback domain test: recorded artifact → Player demux/decode.
 //!
-//! 需要 `backend-ffmpeg` feature。
+//! Requires the `backend-ffmpeg` feature.
 
 #![cfg(feature = "backend-ffmpeg")]
 
 use std::time::Duration;
 
 use mediaservo_deck::playback::Player;
-use mediaservo_deck::record::{Container, Recorder, RecordOptions, VideoCodec};
+use mediaservo_deck::record::{Container, RecordOptions, Recorder, VideoCodec};
 use mediaservo_deck::source::{CameraSource, CaptureOptions, DeviceId};
 
-/// 录制一个 MP4 后回放，验证解码帧数/尺寸。
+/// Record an MP4, then play it back and verify decoded frame count/dimensions.
 #[tokio::test]
 async fn records_then_plays_back() {
     let dir = std::env::temp_dir().join("deck-playback-test");
@@ -18,17 +18,11 @@ async fn records_then_plays_back() {
     let path = dir.join("rec.mp4");
     let _ = std::fs::remove_file(&path);
 
-    // ── 录制 ~1s ────────────────────────────────────
-    let mut cam = CameraSource::open(
-        DeviceId("stub:test-camera".into()),
-        CaptureOptions::default(),
-    )
-    .expect("open cam");
-    let opts = CaptureOptions {
-        resolution: Some((320, 240)),
-        framerate: Some(30),
-        format: None,
-    };
+    // ── Record ~1s ──────────────────────────────────
+    let mut cam =
+        CameraSource::open(DeviceId("stub:test-camera".into()), CaptureOptions::default())
+            .expect("open cam");
+    let opts = CaptureOptions { resolution: Some((320, 240)), framerate: Some(30), format: None };
     let mut cam_frames = cam.start(&opts).expect("start cam");
 
     let mut recorder = Recorder::new(
@@ -55,13 +49,10 @@ async fn records_then_plays_back() {
         .expect("record ok");
     drop(cam);
 
-    // ── 回放 ────────────────────────────────────────
+    // ── Playback ────────────────────────────────────
     let mut player = Player::open(&path).unwrap_or_else(|e| panic!("open: {e}"));
     let dur = player.duration_secs().expect("duration");
-    assert!(
-        (0.5..=5.0).contains(&dur),
-        "duration {dur}s should be ~1s"
-    );
+    assert!((0.5..=5.0).contains(&dur), "duration {dur}s should be ~1s");
 
     let mut count = 0u32;
     let mut last_w = 0;
@@ -77,7 +68,7 @@ async fn records_then_plays_back() {
         assert_eq!(frame.format.height, last_h);
         count += 1;
         if count > 120 {
-            break; // 防呆：120 帧上限
+            break; // Safety guard: 120-frame cap
         }
     }
     assert!(count >= 15, "expected >=15 decoded frames, got {count}");

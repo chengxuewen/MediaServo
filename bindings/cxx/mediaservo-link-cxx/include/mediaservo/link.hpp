@@ -1,15 +1,15 @@
-/* MediaServo link C++ header-only binding (信令 + 帧总线) — 设备侧 C++ 消费。
+/* MediaServo link C++ header-only binding (signaling + frame bus) — device-side C++ consumption.
  *
- * 薄包装 over bindings/c/mediaservo-link-c/include/mediaservo/link.h (D247)。
- * 生命周期契约（自 C ABI 头翻译成 RAII 保证）：
- *   - SignalSession/Bus/Stream 均 move-only；析构自动 close（幂等）。
- *   - 默认构造 = 已关闭（null handle）；对已关闭对象调用 API 返回
- *     Error{INVALID_ARG, "closed"}，不触碰 C ABI。
- *   - 事件/帧回调（trampoline）在内部泵线程触发；std::function 堆对象在
- *     close（join 泵线程）后统一释放，防 use-after-free。回调内禁止调用
- *     close/on_event（C 契约）；重复注册不释放旧回调对象（泵线程可能正在
- *     执行它），随 close 一起释放 —— 注册次数通常为 1，上界有界。
- *   - 错误通道为 Result（非异常）；误用 value()/error() 抛 tl::bad_expected_access<Error>。
+ * Thin wrapper over bindings/c/mediaservo-link-c/include/mediaservo/link.h (D247).
+ * Lifecycle contract (translated from the C ABI header into RAII guarantees):
+ *   - SignalSession/Bus/Stream are all move-only; the destructor closes automatically (idempotent).
+ *   - Default construction = closed (null handle); calling an API on a closed object returns
+ *     Error{INVALID_ARG, "closed"} without touching the C ABI.
+ *   - Event/frame callbacks (trampolines) fire on the internal pump thread; the heap std::function objects are
+ *     released together after close (which joins the pump thread), preventing use-after-free. Calling close/on_event from within a callback is forbidden (the C contract); re-registration does not free the old callback object (the pump thread may be executing it); it is freed together with close — registrations are usually 1, with a bounded upper limit.
+ *     calling close/on_event from within a callback is forbidden (the C contract); re-registration does not free the old
+ *     callback object (the pump thread may be executing it); it is freed together with close — usually 1 registration, bounded upper limit.
+ *   - The error channel is Result (not exceptions); misusing value()/error() throws tl::bad_expected_access<Error>.
  */
 #ifndef MEDIASERVO_LINK_HPP
 #define MEDIASERVO_LINK_HPP
@@ -33,12 +33,12 @@ namespace link {
 using mediaservo::Error;
 using mediaservo::Result;
 
-/// 错误详情（code 为 mediaservo/link.h 中 MEDIASERVO_LINK_ERR_* 值；message 读自 last_error）。
+/// Error details (code is a MEDIASERVO_LINK_ERR_* value from mediaservo/link.h; message read from last_error).
 ;
 
 namespace detail {
 
-/// 从 C ABI last_error 构造错误（C 调用返回 <0 后调用）。
+/// Build an error from the C ABI last_error (call after a C API returns <0).
 inline Error make_error(int code) {
     char buf[512];
     mediaservo_link_last_error(buf, sizeof(buf));
@@ -51,7 +51,7 @@ inline Error make_error(int code) {
 
 
 
-/// SDK 版本 (MAJOR.MINOR.PATCH)。
+/// SDK version (MAJOR.MINOR.PATCH).
 inline Result<std::string> version() {
     char buf[64];
     int rc = mediaservo_link_version(buf, sizeof(buf));
@@ -61,19 +61,19 @@ inline Result<std::string> version() {
     return Result<std::string>(std::string(buf));
 }
 
-/// 信令配置（对应 mediaservo_link_signal_config_t）。
+/// Signaling configuration (mirrors mediaservo_link_signal_config_t).
 struct SignalConfig {
     std::string url;
     std::string psk;
     std::string room;
-    /// "Host"/"Pusher" → Host, "Client"/"Puller" → Remote；空串 = Host。
+    /// "Host"/"Pusher" → Host, "Client"/"Puller" → Remote; empty string = Host.
     std::string role;
 };
 
-/// 信令会话（move-only RAII；析构自动 close；默认构造 = 已关闭）。
+/// Signaling session (move-only RAII; the destructor closes automatically; default construction = closed).
 class SignalSession {
 public:
-    /// 连接信令 + 创建会话（阻塞；失败返回错误，不抛异常）。
+    /// Connect signaling and create the session (blocking; returns an error on failure, throws nothing).
     static Result<SignalSession> connect(const SignalConfig& cfg) {
         mediaservo_link_signal_config_t c = MEDIASERVO_LINK_SIGNAL_CONFIG_DEFAULT;
         c.url = cfg.url.empty() ? nullptr : cfg.url.c_str();
@@ -89,7 +89,7 @@ public:
         return Result<SignalSession>(SignalSession(h));
     }
 
-    /// 默认构造 = 已关闭会话。
+    /// Default construction = closed session.
     SignalSession() noexcept = default;
     ~SignalSession() { (void)close(); }
 
@@ -105,10 +105,10 @@ public:
         return *this;
     }
 
-    /// 是否持有有效会话。
+    /// Whether a valid session is held.
     explicit operator bool() const noexcept { return h_ != nullptr; }
 
-    /// 发送一条信令消息（JSON；SignalingMessage type 标签 snake_case）。
+    /// Send one signaling message (JSON; the SignalingMessage type tag is snake_case).
     Result<void> send(const std::string& json) {
         if (!h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_LINK_ERR_INVALID_ARG, "closed"});
         int rc = mediaservo_link_signal_send(h_, json.c_str(), json.size());
@@ -118,17 +118,17 @@ public:
         return Result<void>();
     }
 
-    /// 注册事件回调（connect 后任意时刻；重复注册替换；回调在内部泵线程触发，
-    /// 事件串仅在回调内有效，需保留请拷贝；回调内禁止调用本对象任何方法）。
+    /// Register the event callback (any time after connect; re-registration replaces; the callback fires on the internal pump thread,
+    /// the event string is valid only inside the callback — copy it to keep it; calling any method on this object from within the callback is forbidden).
     void on_event(std::function<void(const std::string&)> cb) {
-        if (!h_) return; // 已关闭：no-op
+        if (!h_) return; // closed: no-op
         auto* f = new std::function<void(const std::string&)>(std::move(cb));
-        cbs_.push_back(f); // ponytail: 旧回调对象留到 close 释放（泵线程可能正在执行，防 UAF）；
-                           // 注册次数通常 1，上界 = 注册次数，有界。
+        cbs_.push_back(f); // ponytail: old callback objects are kept until close frees them (the pump thread may be executing them, preventing UAF);
+                           // registrations are usually 1; the upper bound = the registration count, bounded.
         mediaservo_link_signal_on_event(h_, &SignalSession::trampoline, f);
     }
 
-    /// 关闭会话并释放 handle（幂等；join 事件泵后才释放回调对象）。
+    /// Close the session and release the handle (idempotent; callback objects are freed only after joining the event pump).
     Result<void> close() noexcept {
         if (!h_ && cbs_.empty()) return Result<void>();
         int rc = MEDIASERVO_OK;
@@ -158,10 +158,10 @@ private:
     std::vector<std::function<void(const std::string&)>*> cbs_;
 };
 
-/// 帧总线（move-only RAII；析构自动 close）。
+/// Frame bus (move-only RAII; the destructor closes automatically).
 class Bus {
 public:
-    /// 附加帧总线（验签 + ACL + iceoryx2 节点，阻塞）。endpoint 为 Phase 1 预留（空串即可）。
+    /// Attach the frame bus (signature verification + ACL + iceoryx2 node, blocking). endpoint is reserved for Phase 1 (an empty string is fine).
     static Result<Bus> attach(const std::string& endpoint, const std::string& token_pem, const std::string& vk_pem) {
         mediaservo_link_bus_t* b = nullptr;
         int rc = mediaservo_link_bus_attach(endpoint.c_str(), token_pem.c_str(), vk_pem.c_str(), &b);
@@ -171,7 +171,7 @@ public:
         return Result<Bus>(Bus(b));
     }
 
-    /// 默认构造 = 已关闭总线。
+    /// Default construction = closed bus.
     Bus() noexcept = default;
     ~Bus() { (void)close(); }
 
@@ -186,13 +186,13 @@ public:
         return *this;
     }
 
-    /// 是否持有有效总线。
+    /// Whether a valid bus is held.
     explicit operator bool() const noexcept { return h_ != nullptr; }
 
-    /// 发布一帧（ACL 检查 + SHM loan + send，阻塞）。
+    /// Publish one frame (ACL check + SHM loan + send, blocking).
     Result<void> publish(const std::string& topic, const std::vector<uint8_t>& payload, const mediaservo_frame_meta_t& meta) {
         if (!h_) return Result<void>(tl::unexpect, Error{MEDIASERVO_LINK_ERR_INVALID_ARG, "closed"});
-        const uint8_t* data = payload.empty() ? nullptr : payload.data(); // C 契约：payload NULL 当且仅当 len==0
+        const uint8_t* data = payload.empty() ? nullptr : payload.data(); // C contract: payload is NULL iff len==0
         int rc = mediaservo_link_bus_publish(h_, topic.c_str(), data, payload.size(), &meta);
         if (rc != MEDIASERVO_OK) {
             return Result<void>(tl::unexpect, detail::make_error(rc));
@@ -200,10 +200,10 @@ public:
         return Result<void>();
     }
 
-    /// 订阅 topic，创建帧流（阻塞）。
+    /// Subscribe to a topic and create a frame stream (blocking).
     Result<class Stream> subscribe(const std::string& topic);
 
-    /// 关闭帧总线并释放 handle（幂等；shutdown 全部流，stream recv 返回 CLOSED）。
+    /// Close the frame bus and release the handle (idempotent; shuts down all streams, stream recv returns CLOSED).
     Result<void> close() noexcept {
         if (!h_) return Result<void>();
         int rc = mediaservo_link_bus_close(h_);
@@ -224,16 +224,16 @@ private:
     mediaservo_link_bus_t* h_ = nullptr;
 };
 
-/// 一帧（元数据 + 载荷拷贝）。
+/// One frame (metadata + payload copy).
 struct Frame {
     mediaservo_frame_meta_t meta{};
     std::vector<uint8_t> data;
 };
 
-/// 帧流（move-only RAII；析构自动 close）。
+/// Frame stream (move-only RAII; the destructor closes automatically).
 class Stream {
 public:
-    /// 默认构造 = 已关闭流。
+    /// Default construction = closed stream.
     Stream() noexcept = default;
     ~Stream() { (void)close(); }
 
@@ -248,16 +248,16 @@ public:
         return *this;
     }
 
-    /// 是否持有有效流。
+    /// Whether a valid stream is held.
     explicit operator bool() const noexcept { return h_ != nullptr; }
 
-    /// 阻塞取帧（元数据 + 载荷拷贝）。
+    /// Blocking frame fetch (metadata + payload copy).
     Result<Frame> recv() {
         if (!h_) return Result<Frame>(tl::unexpect, Error{MEDIASERVO_LINK_ERR_INVALID_ARG, "closed"});
         Frame frame;
-        // ponytail: 单缓冲 16MiB 覆盖 4K I420（12.4MiB）；C ABI 无法探测截断
-        //（meta 仅取帧后可知），更大帧需扩缓冲 —— 升级路径: 按 meta 缓存上次
-        // 帧尺寸自适应增长。
+        // ponytail: a single 16MiB buffer covers 4K I420 (12.4MiB); the C ABI cannot detect truncation
+        // (meta is known only after fetching the frame); larger frames need a bigger buffer — upgrade path: cache the previous
+        // frame size from meta and grow adaptively.
         frame.data.resize(16 * 1024 * 1024);
         size_t len = 0;
         int rc = mediaservo_link_bus_recv(h_, &frame.meta, frame.data.data(), frame.data.size(), &len);
@@ -268,7 +268,7 @@ public:
         return Result<Frame>(std::move(frame));
     }
 
-    /// 关闭帧流并释放 handle（幂等；唤醒阻塞中的 recv 使其返回 CLOSED）。
+    /// Close the frame stream and release the handle (idempotent; wakes a blocked recv so it returns CLOSED).
     Result<void> close() noexcept {
         if (!h_) return Result<void>();
         int rc = mediaservo_link_stream_close(h_);

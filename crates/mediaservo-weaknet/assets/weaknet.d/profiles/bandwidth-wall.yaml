@@ -1,5 +1,5 @@
-# bandwidth-wall —— 纯带宽墙：零时延零丢包，仅 htb rate 天花板
-# 0.2Mbit = foxglove「几乎必挂」锚点（D274 A/B 档在该激励下判别力已实盘）
+# bandwidth-wall -- pure bandwidth wall: zero delay zero loss, only the htb rate ceiling
+# 0.2Mbit = the foxglove 'almost always fails' anchor (the D274 A/B tiers' discriminative power under this stimulus is field-proven)
 rate_mbps: 0.2
 loss: "0%"
 scope:

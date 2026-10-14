@@ -9,33 +9,33 @@ use tower_http::timeout::TimeoutLayer;
 
 mod lifecycle;
 
-/// 用法表——品牌 replace 复用 host.rs USAGE 模式（T15；默认品牌 mediaservo-server）。
-const USAGE: &str = "用法: mediaservo-server <init|start|stop|restart|status|doctor|logs|startup|monit|ps|run|version> [<dir>]（目录为位置参数，默认 .server/）
-子命令:
-  init [<dir>]       生成实例：etc/{server,devices,accounts}.yaml + Caddyfile + run/oxfile.toml
-                     + PSK/JWT secret 自举（0600 幂等；compose entrypoint 逻辑归位——双轨同语义）
+/// Usage table -- brand replace reuses the host.rs USAGE pattern (T15; default brand mediaservo-server).
+const USAGE: &str = "Usage: mediaservo-server <init|start|stop|restart|status|doctor|logs|startup|monit|ps|run|version> [<dir>] (dir is a positional arg, default .server/)
+Subcommands:
+  init [<dir>]       Create an instance: etc/{server,devices,accounts}.yaml + Caddyfile + run/oxfile.toml
+                     + PSK/JWT secret bootstrap (0600, idempotent; compose entrypoint logic folded in -- both tracks share semantics)
   start [<dir>] [--no-web]
-                     oxmgr apply 拉起进程簇（mediaservo-server + caddy web）；端口竞争=交互接管/
-                     非交互退出；--no-web=仅后端（dev 形态）；caddy 不在 PATH → warn 自动降级
-  stop [<dir>] [--all|-g]  全簇停止（oxmgr stop+delete + 实例 daemon 收敛）；-g=全局按进程身份收口，跨目录跨 daemon
-  restart [<dir>] [--no-web]  stop 后重新 apply
-  status [<dir>]     进程表 + /ready 探针列（退出码 0 健康 / 1 降级 / 2 未运行或目录非法）
-  doctor [<dir>]     环境诊断（oxmgr/caddy PATH、yaml、web dist、announced IP；退出码=失败数）
-  logs [server|web|all] [<dir>]  oxmgr logs 转发（支持 -f/--lines 透传）
-  startup on|off|status [<dir>]  开机锚点（systemd user unit 拉实例 daemon，全局唯一）
-  monit              oxmgr TUI（进程/CPU/RAM/日志流）
-  ps                 oxmgr 进程列表
-  run                【守护模式】现 mediaservo-server 启动行为原样（--config 等）；
-                     无参/未知参数 → 回落本模式——既有 systemd/compose/脚本直启零破坏
-  version            版本信息
+                     oxmgr apply brings up the process cluster (mediaservo-server + caddy web); port conflict = interactive takeover /
+                     non-interactive exit; --no-web = backend only (dev form); caddy missing from PATH -> warn + automatic degradation
+  stop [<dir>] [--all|-g]  Stop the whole cluster (oxmgr stop+delete + instance daemon convergence); -g = global reap by process identity, across dirs and daemons
+  restart [<dir>] [--no-web]  stop then apply again
+  status [<dir>]     Process table + /ready probe column (exit 0 healthy / 1 degraded / 2 not running or invalid dir)
+  doctor [<dir>]     Environment diagnostics (oxmgr/caddy PATH, yaml, web dist, announced IP; exit code = failure count)
+  logs [server|web|all] [<dir>]  oxmgr logs passthrough (supports -f/--lines)
+  startup on|off|status [<dir>]  Boot anchor (systemd user unit brings up the instance daemon, globally unique)
+  monit              oxmgr TUI (processes/CPU/RAM/log stream)
+  ps                 oxmgr process list
+  run                [DAEMON MODE] current mediaservo-server daemon startup behavior as-is (--config etc.);
+                     no args/unknown args -> falls back to this mode -- existing systemd/compose/script direct starts untouched
+  version            Version info
 
-示例:
+Examples:
   mediaservo-server init /opt/mediaservo && mediaservo-server start /opt/mediaservo
-  mediaservo-server --config /etc/mediaservo/server.yaml    守护直启（兼容旧链）
-  mediaservo-server -h|-H|--help                  本帮助";
+  mediaservo-server --config /etc/mediaservo/server.yaml    daemon direct start (legacy path)
+  mediaservo-server -h|-H|--help                  this help";
 
 fn print_usage() {
-    // env 总表来自 common 资产（单一真源，与 msrtc.sh/host 面同源）；品牌词随 product 替换。
+    // The env table comes from the common asset (single source, same source as msrtc.sh/host); brand word substituted per product.
     println!(
         "{}",
         format!("{}\n\n{}", USAGE, mediaservo_common::env_usage_text())
@@ -43,9 +43,9 @@ fn print_usage() {
     );
 }
 
-/// Entry point — 单二进制双角色派发（T15）。管理面子命令 → lifecycle；
-/// `run` → 守护（显式形态）；无参/`--config`/未知 → 守护回落（向后兼容硬门：
-/// systemd/compose/docker 直启链行为逐字节不变）。
+/// Entry point -- single binary dual-role dispatch (T15). Admin-plane subcommands -> lifecycle;
+/// `run` -> daemon (explicit form); no args/`--config`/unknown -> daemon fallback (hard backward-compat gate:
+/// systemd/compose/docker direct-start chain behavior is byte-identical).
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
     let first = argv.get(1).map(String::as_str);
@@ -57,18 +57,18 @@ fn main() {
         let code = lifecycle::dispatch(cmd, &mut argv.iter().skip(2).cloned());
         std::process::exit(code);
     }
-    // 选项形参收紧（PIT-171 轮 UX 缺陷）：守护分支实际只认 --config（run_server
-    // 仅读 args[1]=="--config"），其余 "-x" 首参回落守护 = 配置全默认 + 撞 C35 守卫
-    // 的误导性 panic。未知选项 → USAGE + exit 2（无参/`--config` 前缀/run 兼容链不动）。
+    // Option-argument tightening (PIT-171 UX defect): the daemon branch actually only accepts --config (run_server
+    // only reads args[1]=="--config"); any other leading "-x" falls back to the daemon = all-default config + a misleading
+    // panic against the C35 guard. Unknown option -> USAGE + exit 2 (no-arg/`--config` prefix/run legacy chain untouched).
     if let Some(f) = first
         && f.starts_with('-')
         && f != "--config"
     {
-        eprintln!("未知选项: {f}");
+        eprintln!("unknown option: {f}");
         print_usage();
         std::process::exit(2);
     }
-    // `run` = 显式守护形态：剔除该 token，其余 argv 与直启同构（--config 落回 args[1]）
+    // `run` = explicit daemon form: drop that token; the remaining argv is isomorphic to direct start (--config lands back at args[1])
     let daemon_argv = if first == Some("run") {
         let mut v: Vec<String> = Vec::with_capacity(argv.len().saturating_sub(1));
         v.extend(argv.first().cloned());
@@ -80,8 +80,8 @@ fn main() {
     run_daemon(daemon_argv);
 }
 
-/// 守护模式 = 原 main 本体（panic hook + runtime + run_server）。argv 透传
-/// （`--config` 判定从 env::args() 改为显式入参，其余逻辑零改动）。
+/// Daemon mode = the original main body (panic hook + runtime + run_server). argv passthrough
+/// (the `--config` check moved from env::args() to an explicit argument; everything else unchanged).
 fn run_daemon(argv: Vec<String>) {
     // ── Panic boundary ───────────────────────────────────────────────────────
     std::panic::set_hook(Box::new(|info| {
@@ -134,8 +134,8 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     tracing::info!("MediaServo Server v{} starting", env!("CARGO_PKG_VERSION"));
 
     // Parse config — collect args once for bounds-safe access
-    // 默认：相对二进制路径 bin/../etc/server.yaml（build server 组装时生成）
-    // 容器 fallback：/opt/mediaservo/etc/server.yaml（旧路径兜底）
+    // Default: relative to the binary path bin/../etc/server.yaml (generated by the build server assembly)
+    // Container fallback: /opt/mediaservo/etc/server.yaml (legacy path fallback)
     let config_path = {
         let args: Vec<String> = argv;
         if args.len() > 2 && args[1] == "--config" {
@@ -160,7 +160,7 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         }
     };
 
-    // 相对路径解析: devices/accounts 路径相对于 config 文件所在目录（非 CWD）
+    // Relative path resolution: devices/accounts paths are relative to the config file's directory (not CWD)
     let config_dir =
         std::path::Path::new(&config_path).parent().unwrap_or_else(|| std::path::Path::new("."));
     let resolve_path = |p: &str| -> String {
@@ -175,8 +175,8 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     // Build JWT authenticator from config (optional)
     let jwt_auth = config.jwt_secret.as_ref().map(|s| JwtAuth::new(s.as_str()));
 
-    // ── G2 设备注册表加载（devices.yaml; 缺省路径与 server.yaml 同目录）────────
-    // 文件缺失/解析失败 → 空注册表 + 警告（PSK 路径不受影响，不阻断启动）。
+    // -- G2 device registry load (devices.yaml; default path = same dir as server.yaml) ----------------
+    // Missing file/parse failure -> empty registry + warning (PSK path unaffected, does not block startup).
     let devices_path = config
         .devices_file
         .as_deref()
@@ -194,11 +194,11 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
             mediaservo_server::devices::DeviceRegistry::empty()
         }
     };
-    // unified-device-admin: 单一 Arc 实例，signaling（接入鉴权）与 admin（管理写回）共享。
+    // unified-device-admin: a single Arc instance shared by signaling (access auth) and admin (management write-back).
     let device_registry = std::sync::Arc::new(device_registry);
 
-    // ── accountless-client-auth T1: API-key 注册表（api_keys.yaml；缺省与 server.yaml 同目录）
-    // 文件缺失/解析失败 → 空注册表 + 警告（exchange 恒 401；账号/PSK/设备通路零影响）。
+    // -- accountless-client-auth T1: API-key registry (api_keys.yaml; default = same dir as server.yaml)
+    // Missing file/parse failure -> empty registry + warning (exchange always 401; account/PSK/device paths unaffected).
     let api_keys_path = config
         .api_keys_file
         .as_deref()
@@ -216,15 +216,17 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     };
     let api_registry = std::sync::Arc::new(api_registry);
 
-    // device-enroll §7: ALLOW_DEV_ENROLL（env，缺省 false = 生产手动 pending 队列；
-    // =1 专网/开发验签过即自动入册零人工）。解析语义同族（ALLOW_DEV_CREDENTIALS）：仅字面 "1"。
+    // device-enroll S7: ALLOW_DEV_ENROLL (env, default false = production manual pending queue;
+    // =1 controlled network/dev auto-registers on verify success, zero manual steps). Parsing semantics same family (ALLOW_DEV_CREDENTIALS): literal "1" only.
     let allow_dev_enroll = std::env::var("ALLOW_DEV_ENROLL").as_deref() == Ok("1");
     if allow_dev_enroll {
-        tracing::warn!("ALLOW_DEV_ENROLL=1: 陌生设备验签通过即自动入册（仅限受控专网/开发环境）");
+        tracing::warn!(
+            "ALLOW_DEV_ENROLL=1: unknown devices auto-register after pubkey verify passes (controlled private network/dev environments only)"
+        );
     }
 
-    // ── G3 舱端账号注册表加载（accounts.yaml; 缺省路径与 server.yaml 同目录）────
-    // 文件缺失/解析失败 → 空注册表 + 警告（PSK/设备路径不受影响，不阻断启动）。
+    // -- G3 cockpit account registry load (accounts.yaml; default path = same dir as server.yaml) --
+    // Missing file/parse failure -> empty registry + warning (PSK/device paths unaffected, does not block startup).
     let accounts_path = config
         .accounts_file
         .as_deref()
@@ -235,13 +237,15 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
             tracing::info!("Account registry loaded from {accounts_path}: {} accounts", reg.len());
             reg
         }
-        // I4 review: 文件存在但损坏 → fail-fast（静默空注册表 = 授权强制被静默禁用）。
+        // I4 review: file exists but is corrupt -> fail-fast (silently empty registry = authorization enforcement silently disabled).
         Err(e) => {
-            panic!("账号注册表 {accounts_path} 损坏，拒绝以授权禁用状态启动: {e}");
+            panic!(
+                "account registry {accounts_path} is corrupt; refusing to start with authorization disabled: {e}"
+            );
         }
     };
-    // I2 review: 已知开发占位账号 fail-fast（config/accounts.yaml 仅限本地 dev）—
-    // 显式覆盖 env MEDIASERVO_ALLOW_DEV_CREDENTIALS=1（dev compose 已设）豁免。
+    // I2 review: known dev placeholder accounts fail-fast (config/accounts.yaml is local dev only) --
+    // explicit override env MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 (set in dev compose) exempts.
     if let Err(e) = accounts.check_dev_credentials(
         std::env::var("MEDIASERVO_ALLOW_DEV_CREDENTIALS").as_deref() == Ok("1"),
     ) {
@@ -249,8 +253,8 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     }
     let accounts = std::sync::Arc::new(accounts);
 
-    // I2 review: 账号 token 经 admin_jwt_secret 签发、/ws 经 jwt_secret 验签 —
-    // 分歧 = 账号认证静默回退 PSK（矩阵绕过），启动期 fail-fast。
+    // I2 review: account tokens are signed with admin_jwt_secret, /ws verifies with jwt_secret --
+    // a mismatch = account auth silently falls back to PSK (matrix bypass); fail-fast at startup.
     if let Err(e) = mediaservo_server::accounts::validate_secret_pairing(
         !accounts.is_empty(),
         config.jwt_secret.as_deref(),
@@ -282,7 +286,7 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
                 srv.allow_dev_enroll =
                     std::sync::Arc::new(std::sync::atomic::AtomicBool::new(allow_dev_enroll));
                 srv.devices_path = std::sync::Arc::from(devices_path.as_str());
-                // psk-admin-management: config 优先 + env 兜底（死配置修复 — server.yaml psk 正式接入鉴权）
+                // psk-admin-management: config first + env fallback (dead-config fix -- server.yaml psk formally wired into auth)
                 let merged_psk =
                     config.psk.clone().or_else(|| std::env::var("MEDIASERVO_PSK").ok());
                 srv.psk_state = std::sync::Arc::new(std::sync::RwLock::new(merged_psk));
@@ -301,7 +305,7 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         srv.allow_dev_enroll =
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(allow_dev_enroll));
         srv.devices_path = std::sync::Arc::from(devices_path.as_str());
-        // psk-admin-management: config 优先 + env 兜底（死配置修复 — server.yaml psk 正式接入鉴权）
+        // psk-admin-management: config first + env fallback (dead-config fix -- server.yaml psk formally wired into auth)
         let merged_psk = config.psk.clone().or_else(|| std::env::var("MEDIASERVO_PSK").ok());
         srv.psk_state = std::sync::Arc::new(std::sync::RwLock::new(merged_psk));
         srv
@@ -312,7 +316,7 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     let monitor_router = monitor::monitor_router(signaling_server.clone());
 
     // ── Admin API state ────────────────────────────────────────────────────
-    // 与 SignalingServer 内建频道同源（流上/下线事件由信令路径推送）。
+    // Same source as the built-in SignalingServer channel (stream up/down events pushed via the signaling path).
     let admin_tx = signaling_server.admin_events();
     let admin_state = admin::AdminState {
         event_tx: admin_tx,
@@ -337,14 +341,14 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     };
 
     let admin_router = admin::admin_router(admin_state.clone());
-    // G3: 登录端点独立 router（不被 admin auth middleware 拦截 — 它就是发证入口）。
+    // G3: login endpoint on its own router (not intercepted by the admin auth middleware -- it is the credential issuer).
     let login_router = admin::login_router(admin_state.clone());
 
     let app = axum::Router::new()
         .merge(signaling_router)
         .merge(monitor_router)
         .merge(login_router)
-        // p3 W2-A: 消费者面房间发现（独立 router，与 admin 特权面隔离）。
+        // p3 W2-A: consumer-facing room discovery (separate router, isolated from the admin privileged plane).
         .merge(mediaservo_server::rooms::rooms_router(admin_state.clone()))
         .merge(admin_router);
     let app = mediaservo_server::static_files::add_admin_routes(app);
