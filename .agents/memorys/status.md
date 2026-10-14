@@ -1097,3 +1097,7 @@ install                        → 改名提示 + exit 2（退役）
   published CHANGES.md frozen (announcements can only ride the NEXT release); lane keyed on
   release EVENT not package count (1 tag/5 weeks cadence); unpushed-segment audit premise
   died — segment is empty, gate proof = fixture matrix only.
+- Delivered same day: B0 15656cd (conventions + CHANGELOG [protocol]) / B1 3b43797 (G1) /
+  B2 64e294f (G3). all-gates quick 10/10 PASS with the new gate present; fixture matrix
+  verified the pairing predicate live (wire+entry-outside=RED, legit pairing=GREEN,
+  i18n comment-only=GREEN). Plan = main repo docs/plans/_archive/wire-compat-governance/.
