@@ -867,3 +867,28 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **理由**: 测绘实证 server 授权只看 SessionIdentity 枚举——JWT 验签不依赖账号存在，换签发源即可（改动面最小）；LiveKit apikey/apiSecret 业界同型。吊销粒度=删 key 挡新发 + 已发 JWT 至 TTL（不建 revocation 表，YAGNI）。
 - **配套（完成判据）**: T0 fail-closed——坏/过期 JWT 直接 4013 断连（旧形回落 PSK 且 PSK 对=Legacy 矩阵全旁路，免账号会在此变免鉴权）；三面终态族同步（Rust error 族/TS 分类/D273 文档）。/api/rooms 授权同源读 claims（本批活体抓出的副作用修复）。
 - **参考**: LiveKit AccessToken · Agora RTCToken · mediasoup-demo（auth 归应用层）；计划=主仓 docs/plans/accountless-client-auth/。
+
+## D292: wire-compat-governance — four-plane compatibility governance (2026-10-14, user-ratified; codified as C50)
+- **Decision**: cross-end (host/server/web/SDK) compatibility is arbitrated per plane —
+  P1 signaling WS = integer dialect negotiation (min-clamp, reject-low explicit 4101);
+  P2 media negotiation = capabilities content negotiation (no version numbers, no
+  hand-built SDP, C18); P3 IPC/SHM = FrameMeta WIRE_VERSION hard gate + same-machine
+  whole-tree pairing (no rolling compat); P4 SDK ABI = soname major + manifest tuple.
+  Gates read negotiated>=N only, never pkg_version (I5). Three hard additive rules
+  define the safe class; MIN_SUPPORTED=1 permanent (legacy-shape removal = user special
+  ruling + semver major + ⚠ section; removals already adjudicated, e.g. C44/D-E3,
+  survive the default); announcement lanes keyed on release EVENTS with the
+  behavior-identical same-release bridge form legal (S6/D240 precedent); security
+  direct lane = user ruling + same-commit exploit rationale + exempt from announcement
+  timing and semver major; golden-vector JSON diff = review surface, dual-language
+  replay tests = the enforcer (no separate machine arm); design forbidden zones =
+  parallel version endpoints / per-feature flag matrix / media-plane versioning, each
+  with a stated reopen condition.
+- **Alternatives rejected**: pure changelog notification (zero runtime defense);
+  pure version negotiation without declaration/announcement surface (ops blindness —
+  the same-day i18n wording switch silently broke operational greps as live evidence);
+  Kafka KIP-588 feature-level matrix (scale mismatch, three-endpoint product);
+  Docker/Matrix dual endpoints (rejected twice, F13-D 09-14 + mainstream scan 10-14).
+- **References**: C50 (conventions, full text); main repo
+  docs/plans/_archive/wire-compat-governance/PLAN.md (R1-R12 ledger, 4-seat team
+  review record); gates = scripts/gate-wire-changelog.sh + scripts/e2e-compat*.

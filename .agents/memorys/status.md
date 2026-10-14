@@ -1101,3 +1101,4 @@ install                        → 改名提示 + exit 2（退役）
   B2 64e294f (G3). all-gates quick 10/10 PASS with the new gate present; fixture matrix
   verified the pairing predicate live (wire+entry-outside=RED, legit pairing=GREEN,
   i18n comment-only=GREEN). Plan = main repo docs/plans/_archive/wire-compat-governance/.
+- D292 entered decisions (governance codification ledger, this commit).
