@@ -597,3 +597,8 @@ ff_.*_muxer` 应为 0（demuxer-only 实证）。
 - 约束：san 模式切必须全量重编（插桩在目标码里）——launcher 已自动删陈旧 QML 插件产物；QML 插件 POST_BUILD qmlplugindump 在 san 模式必须跳过（QEXT_SKIP_QMLPLUGINDUMP=ON 自动）；libasan preload 必须与链接版本同源（TPSanitizer 从链接目录派生）。
 - 报告：`<构建目录>/san_reports/<name>.<PID>`（正常退出落盘，kill -9 丢失）；lsan.supp 已沉淀第三方良性——报告只剩 TPHMI 自有代码泄漏。
 - 检查：`grep '^TP_SANITIZER:' <构建目录>/CMakeCache.txt` 核对生效模式；Qt 窗口查找用 xwininfo root 树（勿用 xdotool --pid，Qt 不设 _NET_WM_PID）。
+## C49: English-only artifacts — 中文仅限 AI 对话 (2026-10-14, 用户裁决)
+- **约束**: 所有产出物一律英文——markdown 文档、代码注释、技能(skill)、规则(rules)、提交信息、计划(PLAN)、CHANGELOG、日志文案、用户可见字符串。**唯一例外**: AI 交互对话——默认英文；当用户以中文输入时，对话中使用中文回复。产出物语言不跟随对话语言。
+- **理由**: 交付物面向国际消费者/上游同步（upstream-friendly）；对话语言是用户偏好，与制品语言正交。混合语言制品在 grep/检索/上游 PR 时成本最高。
+- **检查**: 新增 md/注释抽查 `grep -rP '[\x{4e00}-\x{9fff}]' <新文件>` 应为 0（历史文件豁免，不回改）；提交信息 `git log --format=%s -20 | grep -P '[\x{4e00}-\x{9fff}]'` 对新提交应为 0。
+- **边界**: `.agents/memorys/*.md`（status/decisions/pitfalls 会话台账）= 中文既成体系，豁免（历史叙述不改写，C45 同款）；新增条目仍鼓励英文但保持台账连续性优先。
