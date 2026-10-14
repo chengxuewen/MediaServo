@@ -1812,3 +1812,22 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: 三层——① webrtc_sys create_peer_connection 包 spawn_blocking（重型 ffi 出 worker，心跳永不饿死——治本）；② client-c runtime() 初始化后后台预热空跑一次 create_pc（首调成本摊到加载期）；③ TPHMI tst break 条件 >0→>=3（连带修掉 502ms 型测试误报）。
 - **验证**: cargo test 18 result 全 ok + bindings 重部署 + TPHMI 12 轮连锤 0 失败（修复前同条件 10-50% 失败率）。
 - **禁止**: tokio worker 上直接调用可能秒级以上的 C/C++ 同步初始化（spawn_blocking 强制）；把「重试就成功」当网络抖动放过——自愈型失败先查本进程阻塞链。
+
+## PIT-223: Raw-line text judges false-red on comment-stripping diffs (2026-10-14, G3 gate design)
+- **Symptom**: G3 gate draft scanned `git diff -- protocol.rs` line-wise for wire-shape
+  patterns; the english-only migration commit (2bea311) touched `#[serde(...)]` attribute
+  lines (only delta = removed trailing Chinese comments) and reflowed format!/assert! —
+  a raw-line judge false-reds a wire-neutral commit, training everyone to distrust/skip
+  the gate. Caught by ops-live seat F3 before implementation.
+- **Root cause**: comment removal shifts the line itself, so line-granular diff cannot
+  distinguish cosmetic from wire changes; additionally string literals INSIDE wire lines
+  (serde tags) are wire and must NOT be stripped.
+- **Solution**: judge = comment-stripped CODE-PROJECTION diff — strip // and /* */
+  respecting string/char escapes, cut the #[cfg(test)] tail, collapse whitespace, then set-
+  compare wire-shaped lines. The i18n diff is kept as the standing hard-negative FIXTURE
+  (case c of the gate self-test), not as a live scan case. Related same-gate pitfalls
+  (cross main-repo PIT-227): baseline must be `@{u}`-derived (this repo tracks
+  origin/main; literal origin/master = bad revision = silent degrade), and the unpushed
+  range can be EMPTY — gate proof = fixture matrix, never a vacuous green live run.
+- **Verify**: `bash scripts/gate-wire-changelog.sh` fixture trio (synthetic wire line +
+  entry outside Unreleased = RC 1; same + entry inside = RC 0; comment-only delta = RC 0).
