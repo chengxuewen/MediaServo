@@ -1114,28 +1114,76 @@ fn run_oxmgr_in(dir: Option<&std::path::Path>, args: &[&str]) -> i32 {
     }
 }
 
-/// Proxy oxmgr commands (TUI / list / logs — thin wrapper, stdio inherited).
-/// Usage: mediaservo-host <monit|ps|logs [proc]> — clear error when oxmgr is not on PATH.
-fn cmd_oxmgr(args: &mut impl Iterator<Item = String>, fixed: &[&str]) -> i32 {
-    // monit/ps take no extra args; logs passes the remaining args through (process name + oxmgr options like --lines/-f).
-    // note: after logs consumes its [<proc>], a <dir> may still follow — two-stage parse_dir;
-    // monit/ps take the dir straight from the head of args.
-    let extra: Vec<String> = if fixed[0] == "logs" { args.collect() } else { Vec::new() };
-    // K3 (startup-stop-followups): an explicit dir is required — the old default "." let any cwd trigger
-    // a `<cwd>/run/oxmgr` daemon address → oxmgr CLI IPC silently spawns a default-location daemon (D1 checklist risk).
-    // server took the same cut the same day (lifecycle::cmd_oxmgr_proxy, same shape) — both sides tightened consistently.
-    let mut parts: Vec<String> = extra.clone();
-    let Some(dir_arg) = parts.iter().position(|a| !a.starts_with('-')) else {
-        eprintln!(
-            "{}: an explicit instance-dir positional argument is required (e.g. mediaservo-host {} out/host) — no more cwd default",
-            fixed[0], fixed[0]
-        );
-        return 2;
+/// Pull the instance dir out of the proxy tail args: the last pathlike positional
+/// (`.`, `..`, anything containing `/`, or an existing directory) is the dir; the rest
+/// pass through to oxmgr untouched (proc name, `--lines`, `-f`...). A trailing bare
+/// positional like `logs cam0` is a proc, not a dir — no dir was given, smart default decides.
+/// ponytail: a proc name that also names a real directory under cwd would read as dir —
+/// dir-last with `/` covers real usage; add a `--dir` flag form only if it ever bites.
+fn split_dir_arg(tail: &[String]) -> (Option<PathBuf>, Vec<String>) {
+    let is_dir_arg = |a: &str| {
+        !a.starts_with('-')
+            && (a == "." || a == ".." || a.contains('/') || std::path::Path::new(a).is_dir())
     };
-    let dir = std::path::PathBuf::from(parts.remove(dir_arg));
+    match tail.iter().rposition(|a| is_dir_arg(a)) {
+        Some(i) => {
+            let mut rest = tail.to_vec();
+            let dir = rest.remove(i);
+            (Some(PathBuf::from(dir)), rest)
+        }
+        None => (None, tail.to_vec()),
+    }
+}
+
+/// Strict smart default for the proxy commands (parse_dir minus the legacy `.host` guess):
+/// (1) cwd carries an etc/host.yaml instance → cwd; (2) an instance beside the binary
+/// (exe dir or its parent, the install layout) → that root; otherwise None — the caller
+/// must then demand an explicit dir. Rationale (PIT-224): these commands talk to a daemon
+/// addressed by dir, and a dir we cannot prove is an instance may spawn one that belongs
+/// to nowhere, so the unprovable fallback is sealed.
+fn proxy_smart_dir(cwd: &Path, exe_dir: Option<&Path>) -> Option<PathBuf> {
+    let has_instance = |d: &Path| d.join("etc").join("host.yaml").exists();
+    if has_instance(cwd) {
+        return Some(cwd.to_path_buf());
+    }
+    let exe = exe_dir?;
+    if has_instance(exe) {
+        return Some(exe.to_path_buf());
+    }
+    exe.parent().filter(|p| has_instance(p)).map(PathBuf::from)
+}
+
+/// Resolve (dir, oxmgr passthrough args) for cmd_oxmgr from the collected tail args.
+fn resolve_proxy_dir(tail: &[String]) -> Result<(PathBuf, Vec<String>), &'static str> {
+    let (dir, rest) = split_dir_arg(tail);
+    if let Some(d) = dir {
+        return Ok((d, rest));
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    proxy_smart_dir(&cwd, exe.as_deref())
+        .map(|d| (d, rest))
+        .ok_or("no instance found in the current dir or beside this binary — pass the instance dir explicitly (e.g. out/host)")
+}
+
+/// Proxy oxmgr commands (TUI / list / logs — thin wrapper, stdio inherited).
+/// Usage: mediaservo-host <monit|ps|logs [proc] [dir]> — dir optional (strict smart
+/// default: cwd instance / instance beside the binary); clear error when oxmgr is not on PATH.
+fn cmd_oxmgr(args: &mut impl Iterator<Item = String>, fixed: &[&str]) -> i32 {
+    // K3 v2 (this fix): the first K3 shape collected tail args only for logs — monit/ps kept an
+    // always-empty parts, so the explicit-dir gate was a dead bolt (the commands were unusable
+    // even when passing a dir as the message itself instructed) — and it passed `fixed` to oxmgr
+    // twice (`ui ui`). All three forms now collect the tail and resolve dir in resolve_proxy_dir.
+    let tail: Vec<String> = args.collect();
+    let (dir, passthrough) = match resolve_proxy_dir(&tail) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("{}: {e}", fixed[0]);
+            return 2;
+        }
+    };
     let mut cmd = oxmgr_env(&dir);
-    cmd.args(fixed).args(&parts);
-    cmd.args(fixed).args(&extra);
+    cmd.args(fixed).args(&passthrough);
     match cmd.status() {
         Ok(st) => st.code().unwrap_or(1),
         Err(e) => {
@@ -2032,6 +2080,96 @@ mod k3_oxmgr_surface_tests {
             "second key = the dual-set form (server same order)"
         );
         assert_eq!(env[0].1, env[1].1, "dual set carries the same value");
+    }
+}
+
+// ── K3 v2 (monit/ps/logs dir resolution): split + strict smart default pin tests ────────────────
+#[cfg(test)]
+mod k3_proxy_dir_tests {
+    use super::*;
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn split_picks_trailing_pathlike_dir() {
+        assert_eq!(
+            split_dir_arg(&s(&["cam0", "out/host"])),
+            (Some(PathBuf::from("out/host")), s(&["cam0"])),
+            "dir is the last positional; proc stays in passthrough"
+        );
+        assert_eq!(split_dir_arg(&s(&["out/host"])), (Some(PathBuf::from("out/host")), s(&[])));
+        assert_eq!(split_dir_arg(&s(&["."])), (Some(PathBuf::from(".")), s(&[])));
+    }
+
+    #[test]
+    fn split_keeps_flags_and_bare_proc() {
+        // no pathlike trailing positional → no dir given (smart default decides later);
+        // proc name and flag/value pass through untouched
+        let (dir, rest) = split_dir_arg(&s(&["cam0", "--lines", "50"]));
+        assert_eq!(dir, None);
+        assert_eq!(rest, s(&["cam0", "--lines", "50"]));
+        let (dir, rest) = split_dir_arg(&s(&["-f"]));
+        assert_eq!(dir, None);
+        assert_eq!(rest, s(&["-f"]));
+        let (dir, _) = split_dir_arg(&s(&[]));
+        assert_eq!(dir, None);
+    }
+
+    #[test]
+    fn smart_default_prefers_cwd_instance() {
+        let root = temp_root("k3-cwd", true, false);
+        assert_eq!(
+            proxy_smart_dir(&root, Some(Path::new("/nonexistent-msrtc-k3/bin"))),
+            Some(root.clone()),
+            "cwd instance wins over any binary-side layout"
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn smart_default_resolves_instance_beside_binary() {
+        // install layout: <inst>/bin/<exe> with <inst>/etc/host.yaml (the out/host case)
+        let root = temp_root("k3-exe", false, true);
+        let bin = root.join("inst").join("bin");
+        assert_eq!(
+            proxy_smart_dir(&root, Some(bin.as_path())),
+            Some(root.join("inst")),
+            "exe sibling root resolves even when cwd has no instance"
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn smart_default_rejects_unprovable_dirs() {
+        // neither cwd nor beside-binary is an instance → None (explicit dir required; no .host guessing)
+        let root = temp_root("k3-none", false, false);
+        assert_eq!(proxy_smart_dir(&root, Some(root.join("bin").as_path())), None);
+        cleanup(&root);
+    }
+
+    fn temp_root(tag: &str, cwd_marker: bool, exe_sibling_marker: bool) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("msrtc-{tag}-{}", std::process::id()));
+        cleanup(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        if cwd_marker {
+            touch_host_yaml(&root);
+        }
+        if exe_sibling_marker {
+            std::fs::create_dir_all(root.join("inst").join("bin")).unwrap();
+            touch_host_yaml(&root.join("inst"));
+        }
+        root
+    }
+
+    fn touch_host_yaml(dir: &Path) {
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::write(dir.join("etc").join("host.yaml"), b"").unwrap();
+    }
+
+    fn cleanup(root: &Path) {
+        let _ = std::fs::remove_dir_all(root);
     }
 }
 

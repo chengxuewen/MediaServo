@@ -37,16 +37,24 @@ teams); for development process details, consult git log directly. Newest versio
   block with the stray `*/` junk. Repaired; full-site CSS comment-balance sweep shows no
   other occurrences. Build/vitest/playwright-computed-string checks all passed over it —
   visual layout smoke is now a required step for asset-wording rounds (see status ledger).
+- [host] K3 v1 regression (same-day follow-up): the explicit-dir gate collected tail args
+  only for `logs`, so `monit`/`ps` never saw the directory argument — they failed with
+  "explicit instance-dir required" even when one was passed (commands unusable), and the
+  wrapper handed `fixed` to oxmgr twice (`ui ui`). Unified tail collection + single pass;
+  `logs` keeps the process-name passthrough (last pathlike positional = dir).
+- [server] `monit`/`ps` accept the same optional dir form (strict resolution, `.server`
+  guessing sealed) — completes the K3 promise that both sides tightened consistently.
 
 ### Changed
 - [host] root fix for oxmgr CLI IPC daemon spawning (startup-stop-followups K3): (1) full
   instance env coverage — every oxmgr subprocess from the host CLI and the translate layer now
   sets both `OXMGR_HOME`+`OXMGR_DATA_DIR` (all four keys, same shape as server);
-  (2) `monit`/`ps`/`logs` now require an explicit instance-directory positional argument
-  (e.g. `msrtc-host ps out/host`) — no more cwd default (the old default let any directory
-  resolve a `<cwd>/run/oxmgr` daemon address, silently spawning a default-location daemon via
-  oxmgr CLI IPC). **Behavior change**: exit code 2 with a usage hint when the directory
-  argument is missing.
+  (2) `monit`/`ps`/`logs` instance-dir resolution (K3 v2): the old cwd-default `.` is gone (it
+  let any directory resolve a `<cwd>/run/oxmgr` daemon address and silently spawn a
+  default-location daemon via oxmgr CLI IPC); the dir is now an optional trailing pathlike
+  positional (e.g. `msrtc-host ps out/host`, `msrtc-host logs cam0 out/host`) or a strict
+  smart default (cwd instance / instance beside the binary). No provable instance → exit 2
+  with a hint — the legacy `.host`/`.server` guessing is sealed for these proxy commands.
 - [server] `stop -g` summary line reports skipped/failed separately (direct-kill gate skips =
   a distinct Skipped state, no longer lumped in with kill failures):
   "Reap summary: via daemon N / direct-killed M / skipped K / failed J". **Exit code behavior

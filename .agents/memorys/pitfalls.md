@@ -1849,3 +1849,21 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
   '*dist*'); do [ "$(grep -o '/*' $f | wc -l)" != "$(grep -o '*/' $f | wc -l)" ] && echo
   IMBALANCE $f; done` empty + playwright: `.video-grid` first-row child widths shrink when
   Columns=4 is clicked.
+
+## PIT-225: K3 v1 explicit-dir gate deadbolt — monit/ps permanently unusable (2026-10-14)
+- **Symptom**: `msrtc-host monit` / `ps <dir>` print "an explicit instance-dir positional
+  argument is required" for EVERY invocation — passing the dir the message itself suggests
+  changes nothing; the commands are dead regardless of usage.
+- **Root cause**: the K3 v1 rewrite of `cmd_oxmgr` collected tail args only when
+  `fixed[0] == "logs"`; for monit/ps the collection stayed empty, so the new "explicit dir
+  required" gate could never be satisfied — plus `cmd.args(fixed)` was applied twice
+  (`oxmgr ui ui`). No test covered the arg path and the live verification round exercised
+  apply/start/status, never monit/ps — the deadbolt shipped unnoticed to today's deployed
+  binary.
+- **Fix (K3 v2)**: unified tail collection; dir = last pathlike positional else strict smart
+  default (cwd instance / beside-binary; no `.host` legacy guess); single args pass; pure
+  functions `split_dir_arg`/`proxy_smart_dir` table-pinned; server twin aligned.
+- **Verify**: `msrtc-host ps out/host` prints the list; bare `ps` inside the instance dir works;
+  bare `ps` in a random dir exits 2 with "no instance found ... pass the instance dir".
+- **Prevent rule**: arg-path changes to CLI proxies need one LIVE invocation per subcommand
+  (not just the primary verb) + a pure-function pin test for the parsing itself.

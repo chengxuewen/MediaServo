@@ -47,8 +47,8 @@ pub fn dispatch(cmd: &str, args: &mut dyn Iterator<Item = String>) -> i32 {
         "doctor" => inspect::cmd_doctor(args),
         "logs" => inspect::cmd_logs(args),
         "startup" => startup::cmd_startup(args),
-        "monit" => cmd_oxmgr_proxy(&["ui"]),
-        "ps" => cmd_oxmgr_proxy(&["list"]),
+        "monit" => cmd_oxmgr_proxy(&["ui"], args),
+        "ps" => cmd_oxmgr_proxy(&["list"], args),
         "version" => {
             println!("{} {}", server_product(), env!("CARGO_PKG_VERSION"));
             0
@@ -1014,11 +1014,65 @@ fn cmd_restart(args: &mut dyn Iterator<Item = String>) -> i32 {
     start_impl(&dir, no_web_flag, "restart")
 }
 
-/// monit/ps -- oxmgr TUI/list passthrough (instance env; dir uses the smart default).
-fn cmd_oxmgr_proxy(fixed: &[&str]) -> i32 {
-    let dir = parse_dir(&mut std::iter::empty()).unwrap_or_else(|_| PathBuf::from("."));
+/// Pull the instance dir out of the proxy tail args: the last pathlike positional
+/// (`.`, `..`, anything containing `/`, or an existing directory) is the dir; the rest
+/// pass through to oxmgr untouched. Server proxy takes no proc names today, but the split
+/// is shared-shape with host cmd_oxmgr (K3 v2) so both sides resolve dir identically.
+fn split_dir_arg(tail: &[String]) -> (Option<PathBuf>, Vec<String>) {
+    let is_dir_arg = |a: &str| {
+        !a.starts_with('-') && (a == "." || a == ".." || a.contains('/') || Path::new(a).is_dir())
+    };
+    match tail.iter().rposition(|a| is_dir_arg(a)) {
+        Some(i) => {
+            let mut rest = tail.to_vec();
+            let dir = rest.remove(i);
+            (Some(PathBuf::from(dir)), rest)
+        }
+        None => (None, tail.to_vec()),
+    }
+}
+
+/// Strict smart default for the proxy commands (parse_dir minus the legacy `.server` guess):
+/// (1) cwd carries an etc/server.yaml instance → cwd; (2) an instance beside the binary
+/// (exe dir or its parent, the install layout) → that root; otherwise None — an explicit dir
+/// is then required. Rationale (PIT-224): the proxy talks to the daemon addressed by dir;
+/// an unprovable dir may spawn one that belongs to nowhere, so the fallback is sealed.
+fn proxy_smart_dir(cwd: &Path, exe_dir: Option<&Path>) -> Option<PathBuf> {
+    let has_instance = |d: &Path| d.join("etc").join("server.yaml").exists();
+    if has_instance(cwd) {
+        return Some(cwd.to_path_buf());
+    }
+    let exe = exe_dir?;
+    if has_instance(exe) {
+        return Some(exe.to_path_buf());
+    }
+    exe.parent().filter(|p| has_instance(p)).map(PathBuf::from)
+}
+
+/// monit/ps -- oxmgr TUI/list passthrough (instance env; dir = explicit trailing pathlike
+/// positional, else the strict smart default — K3 v2, aligned with host cmd_oxmgr).
+fn cmd_oxmgr_proxy(fixed: &[&str], args: &mut dyn Iterator<Item = String>) -> i32 {
+    let tail: Vec<String> = args.collect();
+    let (dir, passthrough) = match split_dir_arg(&tail) {
+        (Some(d), rest) => (d, rest),
+        (None, rest) => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let exe =
+                std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()));
+            match proxy_smart_dir(&cwd, exe.as_deref()) {
+                Some(d) => (d, rest),
+                None => {
+                    eprintln!(
+                        "{}: no instance found in the current dir or beside this binary — pass the instance dir explicitly (e.g. out/server)",
+                        fixed[0]
+                    );
+                    return 2;
+                }
+            }
+        }
+    };
     let mut cmd = oxmgr_cmd(&dir);
-    cmd.args(fixed);
+    cmd.args(fixed).args(&passthrough);
     match cmd.status() {
         Ok(st) => st.code().unwrap_or(1),
         Err(e) => {
@@ -1028,6 +1082,57 @@ fn cmd_oxmgr_proxy(fixed: &[&str]) -> i32 {
             );
             1
         }
+    }
+}
+
+// ── K3 v2 (monit/ps dir resolution): split + strict smart default pin tests ────────────────
+#[cfg(test)]
+mod proxy_dir_tests {
+    use super::*;
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn split_picks_trailing_pathlike_dir() {
+        assert_eq!(split_dir_arg(&s(&["out/server"])), (Some(PathBuf::from("out/server")), s(&[])));
+        assert_eq!(
+            split_dir_arg(&s(&["--lines", "50", "."])),
+            (Some(PathBuf::from(".")), s(&["--lines", "50"]))
+        );
+    }
+
+    #[test]
+    fn split_keeps_flags() {
+        let (dir, rest) = split_dir_arg(&s(&["--follow"]));
+        assert_eq!(dir, None);
+        assert_eq!(rest, s(&["--follow"]));
+        let (dir, _) = split_dir_arg(&s(&[]));
+        assert_eq!(dir, None);
+    }
+
+    #[test]
+    fn smart_default_cwd_then_binary_sibling_then_none() {
+        let root = std::env::temp_dir().join(format!("msrtc-srv-k3-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        // nothing marks an instance → None (explicit dir required; no .server guessing)
+        assert_eq!(proxy_smart_dir(&root, Some(root.join("bin").as_path())), None);
+        // binary sibling: <root>/inst/{bin,etc/server.yaml} with a plain cwd
+        let inst = root.join("inst");
+        std::fs::create_dir_all(inst.join("bin")).unwrap();
+        std::fs::create_dir_all(inst.join("etc")).unwrap();
+        std::fs::write(inst.join("etc").join("server.yaml"), b"").unwrap();
+        assert_eq!(proxy_smart_dir(&root, Some(inst.join("bin").as_path())), Some(inst.clone()));
+        // cwd instance wins over the binary side
+        std::fs::create_dir_all(root.join("etc")).unwrap();
+        std::fs::write(root.join("etc").join("server.yaml"), b"").unwrap();
+        assert_eq!(
+            proxy_smart_dir(&root, Some(Path::new("/nonexistent-msrtc-k3/bin"))),
+            Some(root.clone())
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
 

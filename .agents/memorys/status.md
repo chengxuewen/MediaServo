@@ -1116,3 +1116,28 @@ install                        → 改名提示 + exit 2（退役）
   healthy because the assertion read the gridTemplateColumns computed STRING — reported even
   on a block container = false green. Layout assertions must read resolved pixel geometry.
   Asset-wording rounds now require a visual smoke pass (this section is the retro ticket).
+
+### 2026-10-14: k3-v2-monit-ps-fix — proxy dir gate deadbolt cleared, both sides aligned (PIT-225)
+- User hit `./msrtc-host monit` on the deployed instance: the K3 v1 gate fired on EVERY form
+  (dir passed or not) — tail args were collected only for `logs`, monit/ps parts stayed empty
+  = unsatisfiable gate; plus double `cmd.args(fixed)` (`oxmgr ui ui`) and `logs` treating the
+  proc name as dir. Server twin claim in the comment ("both sides tightened") was never true
+  (proxy ignored args, kept `.server` guessing).
+- K3 v2 (this fix, user-ruled scope: both sides aligned + no-arg defaults to the instance
+  beside the binary): unified tail collection; dir = last pathlike positional (`.`, `..`,
+  contains `/`, or real dir) else STRICT smart default (cwd instance / beside-binary — the
+  legacy `.host`/`.server` fallback is sealed for proxies, PIT-224 spawn surface stays shut);
+  unprovable → exit 2 with hint. Pure functions `split_dir_arg`/`proxy_smart_dir` table-pinned
+  (5 host + 3 server tests). `host.rs` + `lifecycle/mod.rs` twins, fmt clean.
+- Evidence: server proxy tests 3/3 (stub bin posture); host `check --all-targets` + clippy
+  green (host TEST-bin LINKING is environment-flaky on this Jetson — see env ledger below,
+  baseline-proven with changes stashed); live matrix on target/debug/mediaservo-host:
+  `ps out/host` lists ✓ bare `ps` inside instance ✓ bare `ps` in random dir rc=2 clean ✓
+  `logs msrtc-agent --lines 2 out/host` proc passthrough ✓.
+- ENV LEDGER (unresolved, NOT this knife): host bin link via conda chain intermittently dies
+  with `libgobject-2.0.so.0: DSO missing from command line` (test harnesses + some fingerprints;
+  regular dev-tree and deploy-era links succeeded — same tree, different invocations; hermetic
+  env -i also failed for host-streamer). Attribution: stash@HEAD baseline reproduced the same
+  failure on untouched bins. Register under PIT-199 family (conda/system toolchain mixing);
+  main-project/CI boxes run these test binaries normally. When it bites a host test run, use
+  the deployed `out/host/bin/msrtc-host` for live checks and report the gap honestly.
