@@ -1102,3 +1102,17 @@ install                        → 改名提示 + exit 2（退役）
   verified the pairing predicate live (wire+entry-outside=RED, legit pairing=GREEN,
   i18n comment-only=GREEN). Plan = main repo docs/plans/_archive/wire-compat-governance/.
 - D292 entered decisions (governance codification ledger, this commit).
+
+### 2026-10-14: grid-fix — play grid stuck at one column (english-only migration leaked a CSS comment wound)
+- Symptom & root cause: Columns buttons changed state with zero visual effect, grid pinned to
+  one column. `.video-grid` computed display=block, the rule absent from the CSSOM while the
+  deployed CSS text still contained it — Dashboard.css lost the opening `/*` of a two-line
+  comment during the i18n conversion (stray `*/` left), and the browser parser ate the
+  following rule block as junk (PIT-224).
+- Fix: comment pairing repaired + whole-site CSS balance sweep clean + `build web` redeploy.
+  Live new bundle index-CTar32JR.css: display=grid, tile pixel widths follow the buttons
+  (1672/832/552/412), zero console errors.
+- Audit lesson (the pit inside the pit): two earlier Playwright passes declared the feature
+  healthy because the assertion read the gridTemplateColumns computed STRING — reported even
+  on a block container = false green. Layout assertions must read resolved pixel geometry.
+  Asset-wording rounds now require a visual smoke pass (this section is the retro ticket).

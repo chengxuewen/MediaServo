@@ -39,7 +39,7 @@
 .error { color: #e74c3c; }
 .btn-play { padding: .25rem .5rem; font-size: .75rem; background: #e74c3c; color: #fff; border: none; border-radius: 4px; cursor: pointer; margin-left: auto; } .btn-play:hover { background: #c0392b; }
 
-/* multi-stream P3 + play-layout-stats: multi-stream playback grid (column count set inline; this is the fallback of 3 columns) */
+/* multi-stream P3 + play-layout-stats: multi-stream playback grid (column count set inline; this is the fallback of 3 columns)
    Cropping fix: 16:9 belongs to .vp-body (VideoPlayer.css); the whole card no longer locks aspect-ratio causing bottom overflow */
 .video-grid {
   display: grid;

@@ -30,6 +30,14 @@ teams); for development process details, consult git log directly. Newest versio
   {target}-version.txt carry the signaling tuple {signaling_protocol_version,
   signaling_min_supported} next to frame_meta + token_schema, all derived from Rust source.
 
+### Fixed
+- [server] admin dashboard play grid was stuck at one column regardless of the Columns
+  buttons: the english-only migration dropped the opening `/*` of a two-line comment in
+  `Dashboard.css`, and the browser CSS parser swallowed the whole `.video-grid { display: grid }`
+  block with the stray `*/` junk. Repaired; full-site CSS comment-balance sweep shows no
+  other occurrences. Build/vitest/playwright-computed-string checks all passed over it —
+  visual layout smoke is now a required step for asset-wording rounds (see status ledger).
+
 ### Changed
 - [host] root fix for oxmgr CLI IPC daemon spawning (startup-stop-followups K3): (1) full
   instance env coverage — every oxmgr subprocess from the host CLI and the translate layer now

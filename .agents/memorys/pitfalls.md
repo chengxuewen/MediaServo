@@ -1831,3 +1831,21 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
   range can be EMPTY — gate proof = fixture matrix, never a vacuous green live run.
 - **Verify**: `bash scripts/gate-wire-changelog.sh` fixture trio (synthetic wire line +
   entry outside Unreleased = RC 1; same + entry inside = RC 0; comment-only delta = RC 0).
+
+## PIT-224: i18n round dropped a CSS comment opener — parser ate the whole grid rule (2026-10-14)
+- **Symptom**: admin play grid stuck at one column; Columns buttons changed React state and
+  inline grid-template-columns but nothing visually moved. `getComputedStyle(grid).display`
+  = block; CSSOM contained no `.video-grid` rule at all, while the deployed CSS text did.
+- **Root cause**: english-only migration rewrote a two-line `/* ... */` comment and lost the
+  second line's opener (stray `*/` left). An orphan `*/` at stylesheet top-level makes the
+  CSS parser drop the following rule block as junk — the rule exists in text, vanishes from
+  the parse tree. No gate catches it: vite build only minifies CSS, vitest never renders it,
+  and the earlier Playwright checks asserted the `gridTemplateColumns` computed STRING, which
+  is reported even on a block container (false-green trap).
+- **Solution**: repair comment pairing; sweep balance per file (`open-count != close-count`
+  grep loop + a parser-mode scan). For any layout assertion in browser checks, read the
+  element's resolved PIXEL WIDTH (or computed display), never the property string alone.
+- **Verify**: `for f in $(find www -name '*.css' -not -path '*node_modules*' -not -path
+  '*dist*'); do [ "$(grep -o '/*' $f | wc -l)" != "$(grep -o '*/' $f | wc -l)" ] && echo
+  IMBALANCE $f; done` empty + playwright: `.video-grid` first-row child widths shrink when
+  Columns=4 is clicked.
