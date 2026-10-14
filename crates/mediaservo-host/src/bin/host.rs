@@ -1912,26 +1912,54 @@ use S1UnitIdentity::{
     Foreign as S1Foreign, Host as S1Host, Server as S1Server, Unknown as S1Unknown,
 };
 
+/// 已知品牌集合（跨品牌互查 ∪——startup-stop-followups 裁决 1；与 server 侧
+/// lifecycle/startup.rs KNOWN_BRANDS 同值镜像，两 crate 常量不提升——计划 §3）。
+const S1_KNOWN_BRANDS: &[&str] = &["mediaservo", "msrtc"];
+
 /// unit 文件名 → 身份（精确前缀匹配——禁 contains；B1）。
 fn startup_classify_unit(name: &str) -> S1UnitIdentity {
+    startup_classify_unit_with(name, &mediaservo_common::brand::media_brand())
+}
+
+/// 同上（品牌参数缝——K1 钉测双视角；生产走薄壳）。
+fn startup_classify_unit_with(
+    name: &str,
+    brand: &mediaservo_common::brand::Brand,
+) -> S1UnitIdentity {
     let stem = name.strip_suffix(".service").unwrap_or(name);
     let Some(rest) = stem.strip_prefix("oxmgr-").or((stem == "oxmgr").then_some("")) else {
         return S1Foreign;
     };
-    let brand = mediaservo_common::brand::media_brand();
-    // server 域（跨域对方）先判 = `oxmgr-{bin_prefix}server-` ∪ 默认品牌形
-    // （§6 minor#2 ∪ 规则；先于 host——`mediaservo-server-` ⊃ `mediaservo-` 前缀，
-    //   host 先判会把 server unit 吞进 Host 域）。
-    let mut server_forms = vec![format!("{}server-", brand.bin_prefix)];
-    if brand.bin_prefix != "mediaservo-" {
-        server_forms.push("mediaservo-server-".to_string());
-    }
+    // server 域（跨域对方）先判 = 已知品牌 `{bin_prefix}server-` 全枚举 ∪ 当前品牌形
+    // （先于 host——`mediaservo-server-` ⊃ `mediaservo-` 前缀，host 先判会吞 server unit）。
+    let mut server_forms: Vec<String> = S1_KNOWN_BRANDS
+        .iter()
+        .map(|b| {
+            format!("{}server-", mediaservo_common::brand::media_brand_from(Some(b)).bin_prefix)
+        })
+        .collect();
+    server_forms.push(format!("{}server-", brand.bin_prefix));
+    server_forms.sort();
+    server_forms.dedup();
     if server_forms.iter().any(|f| rest.starts_with(f.as_str())) {
         return S1Server;
     }
-    // host 域 = unit_prefix（默认 `oxmgr-host-` 盖 legacy）∪ 品牌化 `oxmgr-{brand}-`
-    let host_forms =
-        [brand.unit_prefix.trim_start_matches("oxmgr-").to_string(), format!("{}-", brand.id)];
+    // host 域 = 已知品牌两形（legacy `host-` + 各品牌 `<brand>-`）∪ 当前品牌两形。
+    let mut host_forms: Vec<String> = S1_KNOWN_BRANDS
+        .iter()
+        .map(|b| {
+            mediaservo_common::brand::media_brand_from(Some(b))
+                .unit_prefix
+                .trim_start_matches("oxmgr-")
+                .to_string()
+        })
+        .chain([
+            brand.unit_prefix.trim_start_matches("oxmgr-").to_string(),
+            format!("{}-", brand.id),
+        ])
+        .collect();
+    host_forms.sort();
+    host_forms.dedup();
     if host_forms.iter().any(|f| rest.starts_with(f.as_str())) {
         return S1Host;
     }
@@ -2148,6 +2176,39 @@ mod s1_startup_gate_tests {
         assert_eq!(startup_classify_unit("oxmgr-talkservo-host-x.service"), S1Unknown);
         assert_eq!(startup_classify_unit("oxmgr.service"), S1Unknown);
         assert_eq!(startup_classify_unit("nginx.service"), S1Foreign);
+    }
+
+    // ── K1 跨品牌互查 ∪（裁决 1；缝钉测——双品牌视角逐方验证）────────────────
+
+    #[test]
+    fn k1_msrtc_brand_perspective_recognizes_default_and_msrtc() {
+        let msrtc = mediaservo_common::brand::media_brand_from(Some("msrtc"));
+        // host 域：默认/legacy 形（此前 msrtc bin 只认 msrtc- 形=互查缺口主对象）
+        assert_eq!(startup_classify_unit_with("oxmgr-host-home-x.service", &msrtc), S1Host);
+        // server 域：默认品牌 server unit → 跨域 Server
+        assert_eq!(
+            startup_classify_unit_with("oxmgr-mediaservo-server-x.service", &msrtc),
+            S1Server
+        );
+        // 自身两形不丢
+        assert_eq!(startup_classify_unit_with("oxmgr-msrtc-home-x.service", &msrtc), S1Host);
+        assert_eq!(startup_classify_unit_with("oxmgr-msrtc-server-x.service", &msrtc), S1Server);
+        // TalkServo 负例
+        assert_eq!(startup_classify_unit_with("oxmgr-talkservo-host-x.service", &msrtc), S1Unknown);
+    }
+
+    #[test]
+    fn k1_default_brand_perspective_recognizes_msrtc() {
+        let msrtc = mediaservo_common::brand::media_brand_from(Some("msrtc"));
+        let def = mediaservo_common::brand::media_brand_from(None);
+        // 默认 bin 认 msrtc 两域
+        assert_eq!(
+            startup_classify_unit_with("oxmgr-msrtc-server-home-x-out-server.service", &def),
+            S1Server
+        );
+        assert_eq!(startup_classify_unit_with("oxmgr-msrtc-home-x-out-host.service", &def), S1Host);
+        // msrtc 视角下 legacy host 形（同串双视角互证）
+        assert_eq!(startup_classify_unit_with("oxmgr-host-home-x.service", &msrtc), S1Host);
     }
 
     #[test]
