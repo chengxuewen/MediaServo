@@ -1019,16 +1019,26 @@ fn cmd_doctor(args: &mut impl Iterator<Item = String>) -> i32 {
     failed
 }
 
+/// K3 oxmgr 子进程调用点审计（startup-stop-followups——IPC 繁殖根修的完整面）:
+/// ┌ 调用点 ─────────────────────┬ dir 来源 ────────────────┬ 缺省形风险 ┐
+/// │ run_oxmgr_in ×9（stop/delete/apply）│ 全部 Some(&dir) 显式传入 │ 无        │
+/// │ oxmgr_env ← run_oxmgr_in/cmd_status/cmd_oxmgr │ 调用方 dir        │ 见下两行   │
+/// │ cmd_status（oxmgr list --json）     │ parse_dir 智能默认    │ 低: cwd/exe 锚定，仍可能 .host │
+/// │ cmd_oxmgr（monit/ps/logs 直通）     │ ★K3 后显式必选        │ 旧: 缺省 "." ← 繁殖面已封 │
+/// │ cmd_doctor --version               │ 无 daemon（纯可执行查询）│ 安全      │
+/// │ oxmgr_bin() service install/uninstall/status │ 系统服务操作（无实例 daemon 语义）│ 面外 │
+/// └────────────────────────────────────┴──────────────────────────┴───────────┘
+/// translate.rs 同构链: oxmgr_apply/live_host_apps/delete 全走 oxmgr_env(&dir) 显式（无缺省形）。
 /// 代理 oxmgr CLI；oxmgr 不在 PATH 时报清晰错误并提示安装。
-/// 注入实例化的 oxmgr 数据目录（<dir>/run/oxmgr——oxmgr 用 OXMGR_HOME env）——多实例 daemon 状态隔离
 /// 注入实例化的 oxmgr 环境——多实例 daemon 完全隔离:
 /// ① OXMGR_HOME = <dir>/run/oxmgr（数据/日志/state）② OXMGR_DAEMON_ADDR 端口从 dir 稳定派生
-/// （daemon 互斥 = TCP 端口——不隔离则全局 daemon 阻断实例 daemon 启动）
+/// （daemon 互斥 = TCP 端口——不隔离则全局 daemon 阻断实例 daemon 启动）③ OXMGR_DATA_DIR 双设
+/// （C32 记忆用名——server oxmgr_cmd 同形，reap/startup 反查两键任一在场即命中）。
 fn oxmgr_env(dir: &std::path::Path) -> std::process::Command {
     let mut cmd = std::process::Command::new(oxmgr_path());
     // 绝对化（OXMGR_HOME 相对路径依赖 daemon cwd——重启/系统服务会错位）
     let home = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).join("run").join("oxmgr");
-    cmd.env("OXMGR_HOME", &home);
+    cmd.env("OXMGR_HOME", &home).env("OXMGR_DATA_DIR", &home); // C32 记忆用名——双设兼容（server oxmgr_cmd 同形）
     let port = instance_daemon_port(&home);
     cmd.env("OXMGR_DAEMON_ADDR", format!("127.0.0.1:{port}"));
     // 第三个互斥点: webhook API 端口（默认从全局 daemon 端口派生——不隔离则撞全局 53081）
@@ -1046,7 +1056,13 @@ fn instance_daemon_port(dir: &std::path::Path) -> u16 {
 fn run_oxmgr_in(dir: Option<&std::path::Path>, args: &[&str]) -> i32 {
     let mut cmd = match dir {
         Some(d) => oxmgr_env(d),
-        None => std::process::Command::new(oxmgr_path()),
+        // K3 繁殖闸（现全仓 9 调用点全 Some——零行为变化，纯防御）:
+        // 裸 Command 不带实例 env → oxmgr CLI IPC 按 cwd 静默拉起默认位 daemon。
+        // 保持 Option 签名——未来调用者撞闸得到明确报错而非一次繁殖。
+        None => {
+            eprintln!("run_oxmgr_in: None dir 已禁用（防 IPC 繁殖默认 daemon）");
+            return 2;
+        }
     };
     match cmd.args(args).status() {
         Ok(status) => status.code().unwrap_or(1),
@@ -1062,10 +1078,24 @@ fn run_oxmgr_in(dir: Option<&std::path::Path>, args: &[&str]) -> i32 {
 /// 代理 oxmgr 命令（TUI/列表/日志——薄封装，stdio 继承）。
 /// 用法: mediaservo-host <monit|ps|logs [proc]> —— oxmgr 不在 PATH 时报清晰错误。
 fn cmd_oxmgr(args: &mut impl Iterator<Item = String>, fixed: &[&str]) -> i32 {
-    // monit/ps 无额外参数；logs 透传全部参数（进程名 + oxmgr 选项如 --lines/-f）
+    // monit/ps 无额外参数；logs 透传剩余参数（进程名 + oxmgr 选项如 --lines/-f）。
+    // 注意: logs 的 [<proc>] 消费完毕后仍可追加 <dir>——两段式 parse_dir；
+    // monit/ps 的目录直接从 args 头部取。
     let extra: Vec<String> = if fixed[0] == "logs" { args.collect() } else { Vec::new() };
-    let dir = parse_dir(&mut std::iter::empty()).unwrap_or_else(|_| std::path::PathBuf::from("."));
+    // K3（startup-stop-followups）: 显式目录必选——旧缺省 "." 让任何 cwd 触发
+    // `<cwd>/run/oxmgr` daemon 地址 → oxmgr CLI IPC 静默繁殖默认位 daemon（D1 清单风险位）。
+    // server 同日同刀（lifecycle::cmd_oxmgr_proxy 同形态）——两侧一致收紧。
+    let mut parts: Vec<String> = extra.clone();
+    let Some(dir_arg) = parts.iter().position(|a| !a.starts_with('-')) else {
+        eprintln!(
+            "{}: 需要显式实例目录位置参数（如 mediaservo-host {} out/host）——不再缺省 cwd",
+            fixed[0], fixed[0]
+        );
+        return 2;
+    };
+    let dir = std::path::PathBuf::from(parts.remove(dir_arg));
     let mut cmd = oxmgr_env(&dir);
+    cmd.args(fixed).args(&parts);
     cmd.args(fixed).args(&extra);
     match cmd.status() {
         Ok(st) => st.code().unwrap_or(1),
@@ -1892,6 +1922,47 @@ mod instance_probe_tests {
             probe_agent_dir(cmdline).as_deref(),
             Some(std::path::Path::new("/opt/mediaservo-host"))
         );
+    }
+}
+
+// ── K3（startup-stop-followups）: oxmgr 调用面繁殖闸/双设 env ────────────────
+#[cfg(test)]
+mod k3_oxmgr_surface_tests {
+    use super::*;
+
+    /// D2: None 臂 = 防繁殖闸——返回 2 且不 spawn 子进程（闸在 Command 构造前返回）。
+    #[test]
+    fn run_oxmgr_in_none_dir_blocked() {
+        let rc = run_oxmgr_in(None, &["list"]);
+        assert_eq!(rc, 2, "None dir 必须被闸拦截（exit 2），不得裸 spawn 默认 daemon 面 oxmgr");
+    }
+
+    /// D4: host oxmgr_env 四键齐——OXMGR_HOME+OXMGR_DATA_DIR 双设（server 同形）+ 两地址键。
+    #[test]
+    fn oxmgr_env_carries_dual_data_dir_keys() {
+        let cmd = oxmgr_env(std::path::Path::new("/tmp/k3-fake-instance"));
+        let keys: Vec<_> = cmd.get_envs().map(|(k, _)| k.to_string_lossy().into_owned()).collect();
+        for k in ["OXMGR_HOME", "OXMGR_DATA_DIR", "OXMGR_DAEMON_ADDR", "OXMGR_API_ADDR"] {
+            assert!(keys.contains(&k.to_string()), "缺键 {k}: envs={keys:?}");
+        }
+        let home = cmd.get_envs().find(|(k, _)| *k == "OXMGR_HOME").unwrap().1.unwrap();
+        assert!(
+            home.to_string_lossy().ends_with("run/oxmgr"),
+            "home 锚定 <dir>/run/oxmgr: {home:?}"
+        );
+        let data = cmd.get_envs().find(|(k, _)| *k == "OXMGR_DATA_DIR").unwrap().1.unwrap();
+        assert_eq!(home, data, "双设同值");
+    }
+
+    /// D4: translate::oxmgr_env（env 向量形）同样四键双设。
+    #[test]
+    fn translate_oxmgr_env_vector_dual_set() {
+        let env =
+            mediaservo_host::translate::oxmgr_env(std::path::Path::new("/tmp/k3-fake-instance"));
+        assert_eq!(env.len(), 4, "四键: {env:?}");
+        assert_eq!(env[0].0, "OXMGR_HOME");
+        assert_eq!(env[1].0, "OXMGR_DATA_DIR", "第二键=双设形（server 同序）");
+        assert_eq!(env[0].1, env[1].1, "双设同值");
     }
 }
 

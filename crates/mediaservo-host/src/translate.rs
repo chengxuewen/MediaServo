@@ -399,6 +399,8 @@ pub fn oxmgr_env(dir: &Path) -> Vec<(String, String)> {
     let port = 18000 + (sum % 400);
     vec![
         ("OXMGR_HOME".to_string(), home.to_string_lossy().into_owned()),
+        // C32 记忆用名——双设兼容（server oxmgr_cmd :1011 同形）
+        ("OXMGR_DATA_DIR".to_string(), home.to_string_lossy().into_owned()),
         ("OXMGR_DAEMON_ADDR".to_string(), format!("127.0.0.1:{port}")),
         ("OXMGR_API_ADDR".to_string(), format!("127.0.0.1:{}", port + 1000)),
     ]

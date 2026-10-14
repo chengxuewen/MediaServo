@@ -6,6 +6,11 @@
 ## Unreleased
 
 ### 变更
+- [host] oxmgr 调用面 IPC 繁殖根修（startup-stop-followups K3）：① 实例 env 全键覆盖——
+  host CLI 与翻译层所有 oxmgr 子进程现双设 `OXMGR_HOME`+`OXMGR_DATA_DIR`（四键齐，server 同形）；
+  ② `monit`/`ps`/`logs` 需要显式实例目录位置参数（如 `msrtc-host ps out/host`）——不再缺省
+  cwd（旧缺省让任意目录触发 `<cwd>/run/oxmgr` daemon 地址，oxmgr CLI IPC 静默繁殖默认位
+  daemon）。**行为变化**：无目录参数时退出码 2 并提示用法。
 - [server] `stop -g` 汇总行跳过/失败分列（直杀闸跳过=独立 Skipped 态，不再与杀败混计）：
   「收口汇总: 经 daemon N / 直杀 M / 跳过 K / 失败 J」。**退出码行为变化**——纯跳过
   （daemon 仍活/条目在而不越权直杀）且终态签名扫描干净时退出码 1→0；跳过但终态仍有
