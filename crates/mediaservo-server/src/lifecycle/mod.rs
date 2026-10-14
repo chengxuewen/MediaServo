@@ -742,7 +742,9 @@ fn execute_steps(plan: &[ReapStep]) -> Vec<(u32, StepOutcome)> {
                     eprintln!(
                         "扫尾: pid {pid}（{name}）daemon 收口未成功且 daemon 仍活/条目在——跳过直杀（可经 stop <dir> 或修复 daemon 后重试）"
                     );
-                    return (*pid, StepOutcome::Failed);
+                    // K2 拆态：直杀闸跳过 ≠ 杀败——独立 Skipped（不入 failed、不抬 RC；
+                    // 终态残货仍由 T4-b 终态二扫兜底计入 failed）。
+                    return (*pid, StepOutcome::Skipped);
                 }
                 eprintln!("扫尾: daemon 收口未成功且 daemon 确认死亡——绕过 daemon 直杀");
                 kill_and_wait(*pid);
@@ -772,7 +774,9 @@ fn scan_all() -> i32 {
         println!("stop -g: pid {} caddy 签名命中但磁盘标记缺失（非本产品布局）——跳过", p.pid);
     }
     if matched.is_empty() {
-        println!("stop -g: 无本产品进程存活——收口汇总: 经 daemon 0 个 / 直杀 0 个 / 失败 0 个");
+        println!(
+            "stop -g: 无本产品进程存活——收口汇总: 经 daemon 0 个 / 直杀 0 个 / 跳过 0 个 / 失败 0 个"
+        );
         println!("终态: 全部清场 ✓");
         println!("实例 daemon 未动（非目标）");
         return 0;
@@ -809,7 +813,8 @@ fn scan_all() -> i32 {
         registries.iter().map(|(d, e)| (d.clone(), e.as_slice())).collect();
     let plan = reap::reap_plan(&matched, &refs);
     let steps = execute_steps(&plan);
-    let (via, direct, mut failed) = reap::tally(&steps.iter().map(|(_, o)| *o).collect::<Vec<_>>());
+    let (via, direct, skipped, mut failed) =
+        reap::tally(&steps.iter().map(|(_, o)| *o).collect::<Vec<_>>());
     // 终态（归因型端口终态打印的 -g 形——ports 逐实例各异不探，按签名二扫裁决）：
     let still: Vec<u32> = reap::scan_live_procs()
         .into_iter()
@@ -828,7 +833,9 @@ fn scan_all() -> i32 {
         // "杀令已发但进程仍在"之外的复活/漏网形态不被 tally 覆盖）
         failed += still.len();
     }
-    println!("收口汇总: 经 daemon {via} 个 / 直杀 {direct} 个 / 失败 {failed} 个");
+    println!(
+        "收口汇总: 经 daemon {via} 个 / 直杀 {direct} 个 / 跳过 {skipped} 个 / 失败 {failed} 个"
+    );
     println!("实例 daemon 未动（非目标）");
     i32::from(failed > 0)
 }
@@ -1056,6 +1063,36 @@ pub(super) fn absolute(p: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── K2: Skipped 拆态钉测（§6 M1——唯一转换点+杀败不漂移负例+RC 净行为）──
+
+    #[test]
+    fn k2_tally_outcome_partition() {
+        // 四态互斥完备：Skipped 独立计数，绝不流入 failed
+        let out = vec![
+            StepOutcome::Skipped,
+            StepOutcome::Skipped,
+            StepOutcome::Failed,
+            StepOutcome::ViaDaemon,
+        ];
+        let (via, direct, skipped, failed) = reap::tally(&out);
+        assert_eq!((via, direct, skipped, failed), (1, 0, 2, 1));
+    }
+
+    #[test]
+    fn k2_kill_failure_is_not_skipped() {
+        // 杀败不漂移负例（M1 精确拒绝）：execute_steps 两个杀败出口
+        // （ViaDaemon 杀败后 daemon 确认死亡→直杀仍活；NoRegistry 直杀仍活）
+        // 必须落 Failed 而非 Skipped——enum 语义级守卫 + tally 消费面守卫。
+        let kill_failed = vec![StepOutcome::Failed, StepOutcome::Failed, StepOutcome::Skipped];
+        let (_, _, skipped, failed) = reap::tally(&kill_failed);
+        assert_eq!(failed, 2, "杀败=Failed 不漂移");
+        assert_eq!(skipped, 1, "仅直杀闸跳过=Skipped");
+        // RC 公式（MINOR#1）：Skipped 不入 failed → 纯跳过 RC 0
+        let pure_skip = [StepOutcome::Skipped, StepOutcome::Skipped];
+        let (_, _, _, failed) = reap::tally(&pure_skip);
+        assert_eq!(i32::from(failed > 0), 0, "纯跳过+终态干净 → RC 0");
+    }
 
     #[test]
     fn no_web_only_list_keeps_weaknet_never_web() {

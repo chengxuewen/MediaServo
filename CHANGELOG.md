@@ -5,6 +5,13 @@
 
 ## Unreleased
 
+### 变更
+- [server] `stop -g` 汇总行跳过/失败分列（直杀闸跳过=独立 Skipped 态，不再与杀败混计）：
+  「收口汇总: 经 daemon N / 直杀 M / 跳过 K / 失败 J」。**退出码行为变化**——纯跳过
+  （daemon 仍活/条目在而不越权直杀）且终态签名扫描干净时退出码 1→0；跳过但终态仍有
+  签名命中存活时仍退出 1（终态残货计入失败，既有语义不变）；杀令已发但进程仍在
+  （EPERM/D-state）仍计失败。
+
 ### 新增
 - [server][host] startup 冲突闸 v2（startup-hardening S1）：`startup on` 现扫描本产品全部
   自启锚点 unit（server+host 双域，brand 感知精确前缀——含 legacy `oxmgr-host-`+OXMGR_DATA_DIR

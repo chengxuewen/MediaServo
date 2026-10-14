@@ -180,6 +180,9 @@ pub(super) enum StepOutcome {
     ViaDaemon,
     /// 直杀并观察到退场（含 daemon 不可达降级直杀）。
     DirectKill,
+    /// 直杀闸跳过（daemon 仍活/条目在——杀之必复活，只报告不越权）。
+    /// 非失败：不入 failed，不影响 RC（终态干净=RC 0）。
+    Skipped,
     /// 杀令已发但进程仍在（EPERM/D-state 等）。
     Failed,
 }
@@ -204,11 +207,12 @@ pub(super) fn select_global(
     (selected, rejected)
 }
 
-/// `-g` 汇总计数（纯函数）：返回 (经 daemon N, 直杀 M, 失败 K)。
-pub(super) fn tally(outcomes: &[StepOutcome]) -> (usize, usize, usize) {
+/// `-g` 汇总计数（纯函数）：返回 (经 daemon N, 直杀 M, 跳过 S, 失败 K)。
+pub(super) fn tally(outcomes: &[StepOutcome]) -> (usize, usize, usize, usize) {
     (
         outcomes.iter().filter(|o| **o == StepOutcome::ViaDaemon).count(),
         outcomes.iter().filter(|o| **o == StepOutcome::DirectKill).count(),
+        outcomes.iter().filter(|o| **o == StepOutcome::Skipped).count(),
         outcomes.iter().filter(|o| **o == StepOutcome::Failed).count(),
     )
 }
@@ -627,16 +631,18 @@ mod tests {
     }
 
     #[test]
-    fn tally_counts_three_outcomes() {
+    fn tally_counts_four_outcomes() {
         let out = vec![
             StepOutcome::ViaDaemon,
             StepOutcome::DirectKill,
             StepOutcome::Failed,
             StepOutcome::ViaDaemon,
             StepOutcome::DirectKill,
+            StepOutcome::Skipped,
+            StepOutcome::Skipped,
         ];
-        assert_eq!(tally(&out), (2, 2, 1));
-        assert_eq!(tally(&[]), (0, 0, 0));
+        assert_eq!(tally(&out), (2, 2, 2, 1));
+        assert_eq!(tally(&[]), (0, 0, 0, 0));
     }
 
     #[test]
