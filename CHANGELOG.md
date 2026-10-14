@@ -15,6 +15,21 @@ teams); for development process details, consult git log directly. Newest versio
   `Consumer::on_qoe` failed to compile since the 2026-10-09 QOE merge (latent debt, caught by the
   migration gate rerun of test-cxx).
 
+### Added
+- [protocol] wire-compat-governance (C50, user-ratified 2026-10-14): four-plane compatibility
+  governance convention — P1 signaling = dialect integer negotiation (min-clamp, 4101), P2
+  media = capabilities content negotiation (no version numbers), P3 IPC/SHM = FrameMeta
+  WIRE_VERSION hard gate + same-machine pairing, P4 SDK ABI = soname + manifest tuple.
+  Codifies: three hard additive rules, permanent back-compat window (MIN=1; legacy-shape
+  removal = user ruling + semver major + warning section), upgrade order (server-first),
+  announcement lanes keyed on release events with the behavior-identical same-release
+  bridge form legal, security lane (immediate, user-gated, minor+warning exempt from major),
+  interop-down plane-attribution SOP, and design forbidden zones. Gate `
+  scripts/gate-wire-changelog.sh` now pairs protocol.rs wire-shape diffs with a
+  CHANGELOG [protocol] entry (fixture-verified); packaging (G1/D-H14): manifest.json +
+  {target}-version.txt carry the signaling tuple {signaling_protocol_version,
+  signaling_min_supported} next to frame_meta + token_schema, all derived from Rust source.
+
 ### Changed
 - [host] root fix for oxmgr CLI IPC daemon spawning (startup-stop-followups K3): (1) full
   instance env coverage — every oxmgr subprocess from the host CLI and the translate layer now

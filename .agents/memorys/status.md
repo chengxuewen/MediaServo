@@ -1083,3 +1083,17 @@ install                        → 改名提示 + exit 2（退役）
 - Translation-introduced regressions (all found by gates, all fixed): ① doctor.rs string-continuation split (`"..."` + stray `\n`); ② deck lib.rs `[\`x\`]:` = rustdoc link-definition collision (→ `] —`); ③ startup.rs linger hint lost leading space (fullwidth-dash absorbed) breaking status-shape test; ④ link.h lost `/*` opener + dropped clause; ⑤ 223 files re-rustfmt (line-width shrink).
 - Pre-existing debt caught: [sdk-client] client.hpp missing `#include <chrono>` — test-cxx broken since 2026-10-09 QOE merge, never gated locally (fixed; CHANGELOG entry).
 - Gates: all-gates --full 15/15 PASS + mediasoup skip-by-design (PIT-192); www build + vitest 28/28; guard PASS 0 CJK.
+
+### 2026-10-14: wire-compat-governance — C50 four-plane compatibility governance (G1+G3)
+- C50 entered conventions (user-ratified; walkthrough R5-R8 A/A/C/A + team review 4 seats +
+  post-team R9-R12 A/A/B/A). Plan = main-repo docs/plans/wire-compat-governance/PLAN.md.
+- G1: manifest.json + {target}-version.txt carry signaling tuple {signaling_protocol_version,
+  signaling_min_supported} derived from protocol.rs constants (D-H14 closure); soname shelved
+  (zero source in packaging chain, verified). G3: scripts/gate-wire-changelog.sh pairs
+  protocol.rs code-projection diffs with a CHANGELOG [protocol] entry; baseline @{u}-derived
+  (repo tracks origin/main); wired into all-gates quick section.
+- Team-review fixes worth remembering: origin/master literal = bad revision (sub is main);
+  i18n serde-attr line touched = raw-line judge false-red (projection diff required);
+  published CHANGES.md frozen (announcements can only ride the NEXT release); lane keyed on
+  release EVENT not package count (1 tag/5 weeks cadence); unpushed-segment audit premise
+  died — segment is empty, gate proof = fixture matrix only.

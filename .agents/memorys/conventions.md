@@ -604,3 +604,103 @@ ff_.*_muxer` 应为 0（demuxer-only 实证）。
 - **边界**: `.agents/memorys/*.md`（status/decisions/pitfalls 会话台账）= 中文既成体系，豁免（历史叙述不改写，C45 同款）；新增条目仍鼓励英文但保持台账连续性优先。
 - **Functional-CJK exemption**: skill trigger keywords that must match Chinese user input verbatim (and analogous functional data, e.g. CJK parsing tables in book-to-skill utils.py) stay ONLY on lines carrying the pragma `c49:trigger` (markdown: ` <!-- c49:trigger -->`; yaml/python/comment lines: ` # c49:trigger`). Enforced by `scripts/check-english-only.sh` — CJK without pragma = gate failure. The pragma is the audit surface: every retained CJK line is explicit and reviewable.
 - **Migration**: historical files are being backfilled in scope by the english-only-migration round (2026-10-14, user ruled docs/plans/CHANGELOG included; `.agents/memorys/*` stays exempt). Until a file is converted it may retain legacy CJK; new writes into it must be English.
+
+## C50: Cross-end signaling & media-negotiation compatibility governance — four-plane model (2026-10-14, user-ratified)
+
+Constraint:
+0. Four planes, one mechanism each; no cross-application: P1 signaling WS = integer dialect
+   negotiation (S0 shape: negotiate=min(claim,max); claim<MIN -> explicit 4101). P2 media
+   negotiation = capabilities content negotiation (C18: no version numbers, no hand-built
+   SDP). P3 IPC/SHM = FrameMeta WIRE_VERSION hard gate + same-machine whole-tree pairing
+   (no rolling compat; D-H13). P4 SDK ABI = soname major + manifest tuple. Every gate reads
+   only negotiated>=N; pkg_version>=x comparisons are forbidden (I5).
+1. P1 change classes. Three hard rules define the safe (additive) class: deleted field
+   names never resurrect; renaming = semantic class; new fields must be optional and their
+   absence must reproduce byte-identical behavior in old readers. additive (satisfies all
+   three) = no bump, MIN_SUPPORTED untouched, order-free. semantic / removal / new-required
+   = bump SIGNALING_PROTOCOL_VERSION + new behavior gated at negotiated>=N + reject-low
+   carries an explicit code; silent degradation forbidden. Bump quadruple = Rust constant +
+   L1 golden vectors + e2e-compat P1 probe expectations + TS claim sync (TS claim is 4
+   hardcoded sites until G4; manual cross-check; note the relay endpoint gateway.rs:154
+   re-synthesizes RoomJoined.protocol with its own clamp - manual sync burden is 5 sites).
+2. Compat window: server is permanently backward compatible by default (MIN_SUPPORTED=1 =
+   wire-shape acceptance floor; it does NOT force authless deployments — PSK/JWT
+   requirements are config-gated and orthogonal to dialect). Retiring a legacy wire shape =
+   removal-class bump: user special ruling + delivery crate semver major + CHANGELOG
+   warning section + upgrade-order statement — except removals riding the rule-4 security
+   lane (minor + warning per rule 4). Removals adjudicated before this constraint
+   (C44/D-E3 legacy secret form one-cycle removal) proceed under their existing rulings;
+   permanent-compat default does not rescind them.
+3. Upgrade order: tightening-class changes ship server-first (clamp keeps old clients
+   alive); breaking-class = server first, devices after, rejection always carries an
+   explicit code (half-open/silent = incident); additive = order-free. Server-side upgrade
+   on oxmgr clusters = stop -> build:deploy -> start with post-deploy exe verification
+   (C49; restart_policy=always resurrects killed procs; cp-while-running = ETXTBSY;
+   stale-bin = PIT-191; re-check manual [apps.env] lines after re-render = PIT-160).
+   "Server-first" means ALL server instances before ANY field device. Expect ~25-30s
+   auto-reconnect transient; recovery criterion = server log "SFU: Produce received".
+4. Announcement lanes. Lane = one release event (workspace version bump + git tag; all
+   delivery packages sliced from one event share the lane). Normal breaking
+   (tightening/removal) announces one release event ahead: warning entry in the repo
+   CHANGELOG ships with release N ("release N+1 rejects shape X"); enforcing code ships in
+   N+1 or later - a published package's CHANGES.md is frozen at slice time (F11-X),
+   announcements cannot be retrofitted. Equivalent alternative (S6/D240 house form): ship
+   new form in release N with old form kept behavior-identical (legacy bridge), retired in
+   N+1. Collapsing announcement and enforcement into one release without the bridge form
+   requires user ruling. Security lane (change closes an exploitable auth/authz/integrity
+   hole - e.g. auth fail-closed, estop verification): immediate effect allowed with user
+   ruling + exploit rationale recorded in the same commit (D-number or trailer);
+   tightening only - never loosening, never bundling unrelated breaking changes; exempted =
+   announcement timing + delivery-crate semver major (ships minor + Breaking warning
+   entry); the rule-1 bump quadruple, rule-3 explicit codes and rule-5 CHANGELOG entry
+   still apply same-commit. Accumulating warning entries in Unreleased = release-cut
+   trigger (C43 bump checklist hook).
+5. Notification + audit surfaces: wire changes carry a CHANGELOG [protocol] entry (order +
+   compat-matrix line; G3 gate enforces pairing against the scanned commit range, entry
+   landing inside the Unreleased section). The review surface of a wire change is the
+   L1 golden-vector JSON diff - enforcement is the existing dual-language replay tests
+   (wire shape changed while vectors static = tests red); new message kinds/variants must
+   enter the vector set same commit (review discipline). manifest.json / version.txt carry
+   the signaling tuple {signaling_protocol_version, signaling_min_supported,
+   frame_meta_wire_version, token_schema_version} (G1; soname shelved with P4 declaration
+   surface; D-H14 closure). Error message TEXT is non-contractual - wire codes are the
+   contract (clients classify by code only).
+6. Live interop-down SOP: read both tuples -> attribute by plane:
+   - 4101 explicit reject = P1. "Missing field" = P1 ONLY AFTER excluding: absence-by-design
+     (Option + skip_serializing_if), relay/routing interception (gateway rewrite_room -
+     H1/encoder_status precedents), stale TS client (pre-G4).
+   - codec rejected / rtpParameters mismatch / produce-5000 unsupported codec = P2.
+   - SystemInFlux / frame rejection = P3 (zombie SHM nodes give the identical symptom -
+     same remedy; version pairing only if it persists after clean runtime clear +
+     whole-tree redeploy).
+   - link/symbol / soname = P4.
+   - 4003/4010/4012/4013 = auth plane, NOT compat (only 4101 is P1).
+   - Signaling green + ICE connected + no media / black frames = NOT a compat plane - run
+     the C38 five-layer chain (announced IP -> subscription -> room -> producer -> ICE
+     state) before touching any tuple.
+   -> treat (P1: negotiated cross-check + escape switch + order correction; P2: caps
+   cross-check; P3: stop -> clear runtime -> whole-tree redeploy; P4: manifest pairing) ->
+   close out (compat matrix + vectors + CHANGELOG + PIT entry).
+7. Escape: breaking P1 semantics should be switch-reversible - the switch lives in
+   server.yaml (artifact-as-truth-source, survives oxfile re-render, doctor-visible), NOT
+   bare env (env loss on re-render silently re-arms breaking changes = PIT-160 class).
+   Any change classified security-lane under rule 4 automatically gets NO escape switch
+   (shared family definition, single source). ALLOW_DEV_* deployment-posture gates are
+   dev/private-network stances, not compat escapes. Safety paths (auth fail-closed, estop
+   verification) never get escape switches.
+
+Design forbidden zones (adjudicated NOT to adopt; reopen only at the stated condition):
+- Parallel version endpoints (/v1+/v2 dual stack, Docker/Matrix form). Rejected twice
+  (F13-D 2026-09-14; mainstream scan 2026-10-14). Reopen if the REST /v1 surface ruling
+  lands and a real API-version split is demanded.
+- Per-feature flag matrix (Kafka KIP-588 form). Three-endpoint product; dialect integer +
+  negotiated>=N gates cover the current surface. Reopen when feature surface exceeds ~10
+  AND field operations actually demand per-feature toggles.
+- Versioning the media-negotiation plane. SDP/capabilities content negotiation IS the
+  compat mechanism; a version number there = double arbitration, conflicts C18. Reopen
+  only on media engine replacement.
+
+Checks:
+- pixi run bash -c 'bash scripts/gate-wire-changelog.sh'   (code-projection diff <-> [protocol] pairing)
+- node scripts/e2e-compat-probe.mjs against a live server  (four dialect probes)
+- manifest.json protocol section four-field complete       (live package cross-check)
