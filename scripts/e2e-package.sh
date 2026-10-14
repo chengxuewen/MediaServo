@@ -153,15 +153,22 @@ grep -qE "^$CLI_ROOT/docs/sdk-cxx/(field|link|deck).md$" "$TMP/cli-list.txt" && 
 echo "OK: sdk-client half-package shaped (client-only + zero device-side contamination)"
 # N2 manifest content spot-check: the client package lists exactly one cmake component and ffmpeg=false (readelf-backed)
 tar xzf "$CLI_TGZ" -C "$TMP/cli" "$CLI_ROOT/manifest.json" 2>/dev/null
+SPV=$(grep -oE "pub const SIGNALING_PROTOCOL_VERSION: u32 = [0-9]+" crates/mediaservo-common/src/protocol.rs | grep -oE "[0-9]+$")
+SMIN=$(grep -oE "pub const SIGNALING_PROTOCOL_MIN_SUPPORTED: u32 = [0-9]+" crates/mediaservo-common/src/protocol.rs | grep -oE "[0-9]+$")
+export SPV SMIN
 python3 - "$TMP/cli/$CLI_ROOT/manifest.json" <<'PYV'
-import json, sys
+import json, os, sys
 d = json.load(open(sys.argv[1]))
 assert d["package"] == "sdk-client" and d["schema"] == 1
 c = [x for x in d["components"] if "cmake_component" in x]
 assert [x["cmake_component"] for x in c] == ["client"], c
 assert c[0]["requires_ffmpeg"] in (False, None), c
 assert d["protocol"]["frame_meta_wire_version"] == 0, "wire version must equal the generated source value"
-print("OK: manifest.json content reconciled (client-only / ffmpeg evidence / wire=0)")
+assert d["protocol"]["signaling_protocol_version"] == int(os.environ["SPV"]), "manifest signaling_protocol_version != protocol.rs const"
+assert d["protocol"]["signaling_min_supported"] == int(os.environ["SMIN"]), "manifest signaling_min_supported != protocol.rs const"
+assert set(d["protocol"]) == {"frame_meta_wire_version", "token_schema_version",
+                              "signaling_protocol_version", "signaling_min_supported"}, d["protocol"]
+print("OK: manifest.json content reconciled (client-only / ffmpeg evidence / four-field protocol tuple)")
 PYV
 
 # ── 6. Version contract file content (D-H14 minimal: workspace + FrameMeta wire version) ──
@@ -173,6 +180,8 @@ FW=$(grep -oE "pub const WIRE_VERSION: u8 = [0-9]+" crates/mediaservo-link/src/f
 grep -q "^frame_meta_version: $FW$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt frame_meta_version != source value $FW (floating-number pin)"; FAIL=1; }
 TV=$(grep -oE "pub const VERSION: u8 = [0-9]+" crates/mediaservo-link/src/token.rs | grep -oE "[0-9]+$")
 grep -q "^token_schema_version: $TV$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: token_schema_version != source value $TV (floating-number pin)"; FAIL=1; }
+grep -q "^signaling_protocol_version: $SPV$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt signaling_protocol_version != source value $SPV (C50/G1 pin)"; FAIL=1; }
+grep -q "^signaling_min_supported: $SMIN$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt signaling_min_supported != source value $SMIN (C50/G1 pin)"; FAIL=1; }
 grep -q "^token_schema_version: 1$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt lacks token_schema_version"; FAIL=1; }
 grep -q "workspace_version: $VER" <(tar xzf "$HOST_TGZ" -O "$HOST_ROOT/host-version.txt") || { echo "FAIL: host-version.txt lacks workspace_version=$VER"; FAIL=1; }
 echo "OK: version contract files (host-version.txt + sdk-version.txt) content correct"

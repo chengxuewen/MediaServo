@@ -65,6 +65,17 @@ def _token_file_version() -> int:
     return int(m.group(1))
 
 
+def _signaling_protocol_versions() -> tuple:
+    """(max, min) signaling dialect constants derived from the Rust source (C50 rule 5 / G1,
+    D-H14 closure — ends the version.txt signaling gap; same anti-drift shape as WIRE_VERSION)."""
+    text = (ROOT / "crates" / "mediaservo-common" / "src" / "protocol.rs").read_text()
+    m = re.search(r"pub const SIGNALING_PROTOCOL_VERSION: u32 = (\d+)", text)
+    n = re.search(r"pub const SIGNALING_PROTOCOL_MIN_SUPPORTED: u32 = (\d+)", text)
+    if not m or not n:
+        raise SystemExit("Error: SIGNALING_PROTOCOL_VERSION/MIN_SUPPORTED not found in protocol.rs (shape drift)")
+    return int(m.group(1)), int(n.group(1))
+
+
 def _check(tool: str, hint: str) -> None:
     """Dependency check — exits with a clear error when missing (never silent)."""
     if shutil.which(tool) is None:
@@ -1345,7 +1356,9 @@ def _write_manifest_file(dst: Path, domain: str, pkg_root: Path) -> None:
         "version": ver,
         "components": comps,
         "protocol": {"frame_meta_wire_version": _frame_meta_wire_version(),
-                     "token_schema_version": _token_file_version()},
+                     "token_schema_version": _token_file_version(),
+                     "signaling_protocol_version": _signaling_protocol_versions()[0],
+                     "signaling_min_supported": _signaling_protocol_versions()[1]},
         "generated_by": "mediaservo_cli package (D281/N2)",
     }
     (dst / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
@@ -1353,15 +1366,19 @@ def _write_manifest_file(dst: Path, domain: str, pkg_root: Path) -> None:
 
 def _write_version_file(dst: Path, target: str) -> None:
     """Version contract file (D-H13: version compatibility relies on explicit protocol-contract pairing, not same-package implication).
-    host-version.txt / sdk-version.txt: workspace version + FrameMeta wire version + token schema version.
-    consumers (ROS/algorithms) verify sdk-version.txt pairs with the host package; the signaling wire contract evolves with the workspace,
-    an independent protocol version number = follow-up work (D-H14 full versioning scheme)."""
+    host-version.txt / sdk-version.txt: workspace version + FrameMeta wire version + token schema
+    version + signaling dialect tuple (max/min, C50 rule 5 / G1). Consumers (ROS/algorithms) verify
+    sdk-version.txt pairs with the host package. D-H14 closure: the signaling dialect constants ship
+    in this contract since 2026-10-14 (gate-wire-changelog.sh pairs wire changes with CHANGELOG
+    [protocol] entries; semver plane per C43)."""
     ver = _crate_version(_TARGET_CRATE.get(target, "mediaservo-link"))
     lines = [
         f"# mediaservo-{target}-{ver} — protocol contract version declaration (D-H13/D-H14 minimal)",
         f"workspace_version: {ver}",
         f"frame_meta_version: {_frame_meta_wire_version()}",  # source-generated (WIRE_VERSION)
         f"token_schema_version: {_token_file_version()}",  # MSTK token file version source-generated (D-H10; link token.rs)
+        f"signaling_protocol_version: {_signaling_protocol_versions()[0]}",  # dialect max (C50/G1; protocol.rs const)
+        f"signaling_min_supported: {_signaling_protocol_versions()[1]}",  # dialect acceptance floor (C50 rule 2)
         "# host package deploy: bare unpack creates the versioned dir; to land into a prefix dir use `tar xzf <pkg>.tar.gz -C <prefix> --strip-components=1`",
         "# when multiple devices share one package, delete identity.json on each device and re-run",
         "# `host init <prefix>` (idempotent, existing credentials kept) to generate an independent device identity (G4)"
