@@ -1798,32 +1798,60 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
                             frame.height()
                         );
                         if let Some(ref sink) = *self.sink.lock().unwrap() {
-                            let w = frame.width();
-                            let h = frame.height();
+                            // FIX(msrtc-corruption P1): frame.width()/height() are the RENDER
+                            // dimensions; the underlying buffer is the CODED one (H.264 pads to
+                            // macroblocks, e.g. 540→544) with per-plane row strides. The old code
+                            // sliced plane offsets by render size and copied linearly by render
+                            // size — padding rows leaked into U and stride>width misaligned every
+                            // chroma row => full-frame corruption at non-16-multiple heights.
+                            let w = frame.width() as usize;
+                            let h = frame.height() as usize;
                             let buf = unsafe { frame.video_frame_buffer() };
                             let i420 = unsafe { (*buf).to_i420() };
                             let yuv = unsafe { vfb::i420_to_yuv8(&*i420) };
-                            let y_size = (w * h) as usize;
-                            let uv_size = ((w / 2) * (h / 2)) as usize;
+                            let sy = unsafe { (*yuv).stride_y() } as usize;
+                            let su = unsafe { (*yuv).stride_u() } as usize;
+                            let sv = unsafe { (*yuv).stride_v() } as usize;
+                            let cw = (w + 1) / 2;
+                            let ch = (h + 1) / 2;
+                            let y_size = w * h;
+                            let uv_size = cw * ch;
                             let mut data = vec![0u8; y_size + 2 * uv_size];
                             unsafe {
-                                std::ptr::copy_nonoverlapping(
-                                    (*yuv).data_y(),
-                                    data.as_mut_ptr(),
-                                    y_size,
-                                );
-                                std::ptr::copy_nonoverlapping(
-                                    (*yuv).data_u(),
-                                    data.as_mut_ptr().add(y_size),
-                                    uv_size,
-                                );
-                                std::ptr::copy_nonoverlapping(
-                                    (*yuv).data_v(),
-                                    data.as_mut_ptr().add(y_size + uv_size),
-                                    uv_size,
-                                );
+                                let yp = (*yuv).data_y();
+                                let up = (*yuv).data_u();
+                                let vp = (*yuv).data_v();
+                                // Fast path: buffer is exactly render-sized and compact — bulk copy.
+                                if sy == w && su == cw && sv == cw
+                                    && (*yuv).width() as usize == w && (*yuv).height() as usize == h
+                                {
+                                    std::ptr::copy_nonoverlapping(yp, data.as_mut_ptr(), y_size);
+                                    std::ptr::copy_nonoverlapping(up, data.as_mut_ptr().add(y_size), uv_size);
+                                    std::ptr::copy_nonoverlapping(vp, data.as_mut_ptr().add(y_size + uv_size), uv_size);
+                                } else {
+                                    // Stride-aware row copy; top-left crop (H.264 conformance window pads bottom/right).
+                                    for r in 0..h {
+                                        std::ptr::copy_nonoverlapping(
+                                            yp.add(r * sy),
+                                            data.as_mut_ptr().add(r * w),
+                                            w,
+                                        );
+                                    }
+                                    for r in 0..ch {
+                                        std::ptr::copy_nonoverlapping(
+                                            up.add(r * su),
+                                            data.as_mut_ptr().add(y_size + r * cw),
+                                            cw,
+                                        );
+                                        std::ptr::copy_nonoverlapping(
+                                            vp.add(r * sv),
+                                            data.as_mut_ptr().add(y_size + uv_size + r * cw),
+                                            cw,
+                                        );
+                                    }
+                                }
                             }
-                            sink.on_frame(&data, w, h);
+                            sink.on_frame(&data, w as u32, h as u32);
                         }
                     }
                     fn on_discarded_frame(&self) {

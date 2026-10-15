@@ -72,6 +72,16 @@ pub mod ffi {
         fn data_u(self: &PlanarYuv8Buffer) -> *const u8;
         fn data_v(self: &PlanarYuv8Buffer) -> *const u8;
 
+        // FIX(msrtc-corruption P1): expose coded-geometry accessors on the Yuv8 view
+        // (inherited public methods on the C++ side) so sinks can copy stride-aware.
+        fn width(self: &PlanarYuv8Buffer) -> u32;
+        fn height(self: &PlanarYuv8Buffer) -> u32;
+        fn chroma_width(self: &PlanarYuv8Buffer) -> u32;
+        fn chroma_height(self: &PlanarYuv8Buffer) -> u32;
+        fn stride_y(self: &PlanarYuv8Buffer) -> u32;
+        fn stride_u(self: &PlanarYuv8Buffer) -> u32;
+        fn stride_v(self: &PlanarYuv8Buffer) -> u32;
+
         fn data_y(self: &PlanarYuv16BBuffer) -> *const u16;
         fn data_u(self: &PlanarYuv16BBuffer) -> *const u16;
         fn data_v(self: &PlanarYuv16BBuffer) -> *const u16;
