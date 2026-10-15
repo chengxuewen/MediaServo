@@ -155,10 +155,53 @@ T6（编译器大版本闸门 + pixi update 纪律）未列为独立议题，作
 - 消费端环境事实：focal 20.04；系统运行时被人手动升至 libstdc++ 3.4.35（2026-03-17）；`libstdc++-11-dev` 的 .so 为实物旧 ELF（3.4.29 上限）非链接器脚本 —— 这就是"本机运行没问题、链接就炸"的原因。
 - 车端 libstdc++ 版本：**待 T8 填入**。
 - 实施进度：**两批裁决共 8 项定案（§8）；本文档已按 #7 提交交付。待 SDK 侧执行 T1/T2/T5/T6/T9 + 声明面缩窄（#6）；TPHMI 侧 T7 到货后验收；T8 挂账（#8）**。
+- 2026-10-15 second-round analysis (abi-doc25-v2, 4 seats + lead): 2 CRITICAL / 5 HIGH / 10 MED clustered into §11; rulings #9-#11 (A/A/A: doc25→English / FFmpeg carry-in-package+$ORIGIN / guard LC_ALL fix + all-gates hard wiring); tasks extended T10-T15. §6 gate as drafted is blind to the incident class it was written for (C1) — do NOT implement T5 before T12 scope/bullet fixes land.
 - 支持矩阵定稿（裁决 #1 派生）：x86 裸机族 = Ubuntu 20.04+（glibc≤2.31；T1 后 C++ 运行时引用=0）；Jetson 族 = JetPack5/L4T35（系统工具链，现状即达标）；server 族 = 容器自含（2.35 封箱内）。重开条件 = 18.04/JetPack4 客户清单出现。
 - 团队审核记录（docs25-abi-review，2026-10-15，3 成员只读）：doc-auditor 1C/2H/6M/3L/4INFO；evidence-verifier 21 断言仓库可证项全 CONFIRMED（1 措辞已修，2 条决策史/叙述项不可机验）；platform-abi-researcher 产出跨平台矩阵（→§10）+发现 T9。本修订轮已应用：§6 脚本 exit 出循环（CRITICAL）/古老计数 76→75/T0 残句清除/mermaid 两处/T4 陈旧选项/T5 补 manifest abi_floor/新增 T9。
 - 2026-10-15 跨会话对账（另会话结论审阅）：一致项——反对降工具链、"底限由引用而非编译器年龄决定"、msrtc-server 无 libstdc++ 需求、门禁+声明面治理、"20.04 解法=静态嵌 libstdc++"；修正项——墙归因（实测 `libwebrtcsys-cxx.a` 31/29 命中 vs `libwebrtc.a` 0 命中，本仓可改）；不采项——"≥22.04 底限声明"及其"YAGNI 等老 OS 客户"（车端就是现存的 focal 客户）。
 - 2026-10-15 跨会话对账·二（Jetson 会话"构建机 OS 定地板"结论）：采纳——支持矩阵是根决策、package 时 objdump 扫地板写 manifest 字段、"conda C++ 运行时永不入裸机交付 NEEDED"三条纪律；修正——"gcc 版本与地板几乎无关"仅对系统工具链路线（C23）成立，conda 路线上 libstdc++ 代别恰由 conda 编译器决定（本事故即反例）；该会话实测矩阵缺 x86 bindings 行（其视域 Jetson），x86 族处方=本文 T1（嵌）或 focal 分箱（系统侧），手段二选一、由同一条门禁执法。三会话共识收敛点：地板=产物属性、按交付族登记、CI 扫描生成、禁止裸机 NEEDED 出现 conda 运行时。
+
+---
+
+## 11. 第二轮团队分析与追加裁决（2026-10-15，abi-doc25-v2 四席 + lead 亲验；裁决 #9-#11 逐项过）
+
+> 本节约按 C51 用英文书写（新增内容规则）。四席 = build-reality / abi-strategy / consumer-ops / governance，全部磁盘实证（宿主无 binutils → pixi 内复测，防全零假干净）。
+
+### 11.1 Findings clusters (dedup across seats + lead)
+
+| ID | Sev | Cluster | Seats | Disposition |
+|---|---|---|---|---|
+| C1 | CRITICAL | deck.so/field.so ship a dynamic conda-FFmpeg closure (`DT_NEEDED libavcodec.so.63…`) + absolute conda `DT_RPATH`; focal target lacks them → load dies; all three §6 bullets pass it green today (gate blind to the exact failure class this doc exists for) | abi-strategy ABI-1/2/3, build-reality | ruling #10 (carry-in-package + 4th bullet) |
+| C2 | CRITICAL | check-english-only.sh locale-dependent silent zero-match (LANG unset → grep -P CJK finds nothing): doc25 itself = live C51 violation (123 CJK lines, post-ratification Chinese artifact + Chinese commit msg), guard passed it; guard also not wired into any CI gate | governance GOV-1/2/11, lead live-repro (bare FAIL 123 vs pixi PASS) | ruling #9 (convert) + #11 (fix+wire) |
+| H1 | HIGH | family delivery contracts contradict across 3 sources (link.h §6.6 "never bundle, host provides ≥1.8" vs deck/field bundling 57/64 MB vs C50 no-rolling): consumer cannot read "what must the target have" | governance GOV-3/4 | T13 unified matrix table into this doc |
+| H2 | HIGH | §9 matrix "Ubuntu 20.04+" overclaims for fleet ops — subject is SDK .so only; the g++-11 app itself needs GLIBCXX_3.4.29 > pristine focal 3.4.28 | consumer-ops CO-1 | wording caveat in §9 (T13 same batch) |
+| H3 | HIGH | T7 acceptance on the hand-upgraded dev box (runtime 3.4.35 + stale 11-dev ELF) can false-green a partial fix; authoritative acceptance = pristine ubuntu:20.04 container checklist | consumer-ops CO-2 | T10 acceptance spec |
+| H4 | HIGH | gate scope holes: link.so omitted entirely (and trips bullet3 via `__internal_default_logger` today); no RPATH/NEEDED-closure bullet | build-reality BR-2, abi-strategy ABI-2/3 | T11/T12 |
+| H5 | HIGH | bump-time breakage: gate hardcodes `.so.0.1.1` + `libavcodec.so.63` while C43③ bump checklist lacks pixi.lock/FFmpeg-soname lines → version bump fails the gate silently from the bumper's POV | build-reality BR-6/7/8, governance GOV-5 | derive all versions in gate + C43③ row (T10) |
+| M | MED | ① shared version-script swallows field's bare `mediaservo_last_error` (per-so maps or explicit export); ② client∩field share 329 `cxxbridge1$*` exports → T2 is T1's HARD prerequisite (ODR), §5 dep note wrong; ③ bullet2 regex needs GLIBC_ anchor; ④ keep version node anonymous (@@VER suffix false-red); ⑤ webrtc-sys 52 extern-C seams, 0 catch_unwind (worker panic = host abort); ⑥ glibc ceiling actually comes from conda sysroot (2.28) — pin `sysroot_linux-64` (T6 incomplete), T4 container partly redundant, manifest sysroot field; ⑦ $ORIGIN runtime bundling = ops action not ruling-3 violation but useless for the LINK-time wall + masks gate evidence — trigger = T8; ⑧ T8 probe one-liner + 3-branch decision tree; ⑨ §1 root-cause wording imprecise (versioned UND lives on the .so; fetch-time happens at link) + T7 depends on TPHMI-local history (changes-1.4.1/san recipes) not in this repo → T14 self-contained acceptance; ⑩ C47's promised "symbol table patrol" materializes exactly as check-abi-drift + this gate — name it gate-abi-baseline.sh, wire beside G3 in all-gates quick (governance GOV-8, C50 rule 5 lineage) | abi-strategy, consumer-ops, governance | folded into T10-T14 + §5/§6/§7 fixes at revision batch |
+
+### 11.2 Additional rulings (adjudication-walkthrough one-by-one, 2026-10-15, replies A/A/A)
+
+| # | Topic | Ruling | Derived actions |
+|---|---|---|---|
+| 9 | doc25 language under C51 (created post-ratification, 123 CJK lines, corpus otherwise English since 2bea311) | **A: convert to English** in the revision batch; git-history commit stays (C51 history exemption) | T15 translation ticket (batch leader); guard wiring sequenced AFTER conversion so first run is green |
+| 10 | FFmpeg closure delivery for deck/field .so | **A: carry in package + $ORIGIN runpath** (wheel precedent adopted for the .so surface; §7 "部署包必须携带" finally implemented); B strip-heavy re-ruling rejected (reopens C44/N7), C host-provides rejected (violates §2 no-host-modification goal) | T11 staging rewrite + T12 gate bullet 4 (NEEDED closure whitelist: libav*/libsw* allowed only when present under package-relative path; absolute build-machine RPATH = red); link.so added to scope (T12) |
+| 11 | guard fix + duty | **A: LC_ALL force + wire into all-gates quick, hard block** (after #9 conversion); B manual-run (proven blind today) and C soft-report rejected | T10: guard script env line + all-gates entry; C51 first live enforcement |
+
+### 11.3 Extended task ledger (T10-T15, all in the execution batch this doc awaits)
+
+- **T10** guard/acceptance hardening: check-english-only LC_ALL=C.UTF-8 + all-gates wiring; T7 authoritative acceptance = pristine ubuntu:20.04 container checklist (pristine proof → bullets → cc/g++ link → dlopen → RC010+san → evidence back to §9).
+- **T11** staging runpath rewrite: patchelf/`--set-rpath $ORIGIN:$ORIGIN/../lib` on all four .so + FFmpeg libs laid into package lib/ (ruling #10).
+- **T12** gate expansion: scope = link/client/deck/field; bullet 4 = recursive NEEDED closure + RPATH whitelist; bullet2 GLIBC_ anchor; bullet3 keep anonymous version node; version strings derived (_crate_version / readelf), never literal.
+- **T13** unified delivery matrix table (family × FFmpeg posture × min glibc × libstdc++ posture × version promise) into §9; fixes H1/H2; single source for all consumers.
+- **T14** §5/§7 text corrections: T2-as-T1-prerequisite (cxxbridge ODR note), per-so maps (`mediaservo_last_error`), sysroot pin into T6, C43③ bump rows (pixi.lock + FFmpeg soname), §1 mechanism wording, webrtc-sys catch_unwind debt noted (fix另案).
+- **T15** doc25 full English conversion (ruling #9), before gate wiring per sequencing.
+
+### 11.4 Lead cross-check record
+
+- Guard live contradiction reproduced same session: bare shell FAIL (doc25:123) vs pixi PASS — locale root cause; every historical "guard PASS" quoted from pixi contexts re-judged as unproven (this session's morning ledger line included, corrected here).
+- Cross-doc keyword sweep (GLIBCXX/glibc/2.31/focal/22.04): contradictions captured as GOV-3 (link.h §6.6) and GOV-4 (wheel doc silence) — both routed to T13/T15 batch.
+
 
 ---
 
