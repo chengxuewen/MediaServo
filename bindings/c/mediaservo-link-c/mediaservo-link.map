@@ -1,0 +1,9 @@
+/* ABI baseline export whitelist (docs/modules/25-abi-baseline.md §5-T2, rulings #12/#2).
+   Only the public C API leaves the library; internal symbols become LOCAL — this also
+   demotes __internal_default_logger (the known bullet-3 offender) out of the dynamic table. */
+{
+  global:
+    mediaservo_*;
+  local:
+    *;
+};

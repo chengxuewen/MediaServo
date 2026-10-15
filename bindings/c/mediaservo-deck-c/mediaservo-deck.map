@@ -1,0 +1,9 @@
+/* ABI baseline export whitelist (docs/modules/25-abi-baseline.md §5-T2, ruling #2).
+   deck-c already used --exclude-libs,ALL (R10); this map adds the explicit export
+   surface so future non-archive internals stay hidden too. */
+{
+  global:
+    mediaservo_*;
+  local:
+    *;
+};

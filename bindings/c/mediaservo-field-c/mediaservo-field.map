@@ -1,0 +1,9 @@
+/* ABI baseline export whitelist (docs/modules/25-abi-baseline.md §5-T2, rulings #12/#2).
+   Only the public C API leaves the library; cxxbridge1$/rust internals become LOCAL,
+   killing same-name shared exports across .so files (ODR/interposition class). */
+{
+  global:
+    mediaservo_*;
+  local:
+    *;
+};
