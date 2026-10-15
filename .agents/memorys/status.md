@@ -1162,3 +1162,30 @@ install                        → 改名提示 + exit 2（退役）
   gains pixi.lock/FFmpeg-soname rows; delivery matrix single-sourced (T13).
 - D293 entered decisions; writeback = doc25 §11 (commit ef52960, English per C51 — the file's
   body conversion itself is T15, tracked). Execution gate NOT opened (T1-T15 pool).
+
+### 2026-10-15: abi-doc25-v3 — round-3 audit + eight user rulings (#12-#19) applied to doc25
+- Round 3 (2 seats on this Jetson box: claims-verifier + carryover-auditor, both disk-first) audited
+  round-2 §11 itself. Outcome: §11 severity claims stood but three of its evidence statements were
+  corrected on disk — "absolute conda DT_RPATH" REFUTED (extant aarch64 artifacts carry zero
+  RPATH/RUNPATH; load-death comes from missing NEEDED regardless), "all three bullets pass green
+  today" FALSE (bullet1 measured RED on field.so = 106 UND; bullet3 RED via link's
+  __internal_default_logger), "宿主无 binutils" is round-2 analysis-box-only (Jetson msrtv302 runs
+  objdump/readelf/nm bare). Two fabricated quotations removed (§7 "部署包必须携带"; link.h §6.6
+  "never bundle") — git history never rewritten, errata recorded in §11.4; ef52960 commit-message
+  overclaim ("§5 corrected") — this batch applies the real §5 correction.
+- Eight adjudications walked one-by-one (user-ruled): #12=B (T2→T1 order kept mechanism-first,
+  329-count annotated PENDING-RECHECK; §5 dep line + mermaid edge fixed), #13=A (C1 severity kept,
+  false halves corrected; T12 bullet-4 rewritten as resolvability predicate — fail-closed, no
+  vacuous pass on RPATH-less artifacts), #14=A (guard un-swallow clause: checker faults must exit
+  distinguishably, never PASS), #15=A (fabricated quotes → real anchors or honest new-reasoning),
+  #16=A (pre-package ABI scan extended to delivered executables out/*/bin — same closure/ceiling
+  checks, one shared script; closes the §9 "conda never in bare-metal NEEDED" discipline with an
+  enforcer), #17=A (T4 PAUSED not deleted, reopen conditions written), #18=A (measurements must
+  register machine+env — §11 head rewritten), #19=A (T8 primary prescription = consumer app-side
+  -static-libstdc++ one flag, precedents node/deck-c/NDK; $ORIGIN bundle demoted to fallback with
+  provenance red line: target-OS builds only, never conda; probe stays).
+- Doc25 now carries 19 rulings + rev3 markers; ledger §9 synced (T4 paused, T5 blocked until
+  T12/T10, T8 prescribed). Remaining: T15 (full English conversion — doc still 127 CJK lines,
+  guard NOT yet wired, wiring sequenced after conversion), T10-T14 execution untouched (code face).
+- Environment fact recorded: conda FFmpeg on this box = 9.0.0 (avcodec soname .63 — matches doc;
+  my earlier .61 guess was wrong, retraction logged in session).

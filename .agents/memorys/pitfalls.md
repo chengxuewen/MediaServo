@@ -1887,3 +1887,9 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **Verify**: `env -i bash -c 'bash scripts/check-english-only.sh'` before fix = false PASS
   (or exit 2); after fix on a Chinese fixture = FAIL. Cross-ref main-repo ledger: this is
   the #17 false-green family hitting our own measurement layer.
+- **[rev3 erratum 2026-10-15, doc25 ruling #14=A]** mechanism refinement from re-measurement:
+  in the failing env grep -P actually *errors* (exit 2: PCRE compile unavailable/mode-conflict
+  under C locale on some builds) and the script's `2>/dev/null || true` **swallows** it — so the
+  observable is not only "never-matching exit 1" but also "checker fault masked as success".
+  Consequence for the fix: LC_ALL pin alone is insufficient — the un-swallow clause is mandatory
+  (exit vocabulary 0=clean / 1=violation / >=2=checker-broken; broken must never read as PASS).

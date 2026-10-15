@@ -1,6 +1,6 @@
 # 25 - SDK 产物 ABI 兼容基线（方案与实施计划）
 
-> 状态：**已裁决定稿**（2026-10-15 五项裁决见 §8；同日团队审核 docs25-abi-review 修订已应用，见 §9 审核记录；新增 §10 平台族限定）
+> 状态：**已裁决定稿 + 三轮审核修订**（2026-10-15 裁决 #1-#8 见 §8，#9-#11 见 §11.2；第三轮 abi-doc25-v3 两席复核 + 八项用户裁决 **#12-#19** 与勘误批已应用——行尾标 rev3；正文转英仍挂 T15）
 > 触发事故：TPHMI `tp_tst_msrtcBackend` 链接失败（2026-10-15），根因见 §1。
 > 本文 = 策略（长期有效）+ 实施任务表（一次性）。任务完成后 §5-T* 打勾留档，策略部分常驻。
 
@@ -53,7 +53,7 @@ ld: libmediaservo_client.so: undefined reference to
 │  ┌ libmediaservo_client.so ────────────────────────────┐                                   │
 │  │ [层2] 静态嵌入 libstdc++.a/libgcc（自家实现 LOCAL）  │ ← 对系统 libstdc++ 引用 = 0        │
 │  │ [层3] version script：global: mediaservo_* local: *  │ ← 内部符号不可见=不可抢占          │
-│  │ 动态依赖仅剩: libc/libm/libpthread/libdl…            │                                   │
+│  │ [层2/4/6 后] 动态依赖闭合可达：libc/libm/… + 随包 libav* @ORIGIN │
 │  └───────────────┬──────────────────────────────────────┘                                   │
 │                  ▼                                                                           │
 │  [层4] glibc ≤2.31：在 focal 构建镜像/构建机产出（唯一静态打包救不了的一条，靠环境）           │
@@ -71,7 +71,7 @@ ld: libmediaservo_client.so: undefined reference to
 flowchart LR
   T1[T1 静态三件套<br/>build.rs/cmake] --> T3[T3 纯C边界测试]
   T1 --> T5
-  T2[T2 版本脚本白名单]
+  T2[T2 版本脚本白名单] --> T1[T1 静态三件套]
   T2 --> T5[T5 CI 门禁脚本]
   T4[T4 focal 构建镜像] --> T5
   T6[T6 编译器版本闸门] --> T5
@@ -85,14 +85,14 @@ flowchart LR
 | **T1** | MediaServo | **补齐自家既有配方**：client-c/field 套用 node 先例（`bindings/node/.../build.rs:18`）与 deck-c 先例（`build.rs:14`）：`-static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL`（cdylib 经 `cargo:rustc-cdylib-link-arg`） | `readelf --dyn-syms -W <so> \| awk '/UND/ && /GLIBCXX\|CXXABI/' \| wc -l` == **0**（与 §6 脚本同形） | 小 |
 | **T2** | MediaServo | `mediaservo.map` 版本脚本：`{ global: mediaservo_*; local: *; };` 链入 | `nm -D --defined-only` 只剩公开 API；示例程序照跑 | 小 |
 | **T3** | MediaServo | 边界守卫：`tests/abi_boundary.c` 用**纯 C 编译器** include 三个公开头 + 链 .so | `cc -std=c11` 编译过 = C ABI 承诺不破 | 小 |
-| **T4** | MediaServo | glibc 基线：发布构建固定 ubuntu:20.04 专用 release job（优先容器化，不绑个人机；开发容器与其余 CI 不动——裁决 #4） | `objdump -T <so> \| grep -o 'GLIBC_2\.[0-9]*' \| sort -V \| tail -1` ≤ **2.31**，且 CI 机器无关复现 | 中 |
+| **T4** | MediaServo | **[rev3 #17=A：PAUSED 挂而不删]** glibc 基线：发布构建固定 ubuntu:20.04 专用 release job（优先容器化，不绑个人机——裁决 #4）。暂停依据：实测无漂移（本机产物 GLIBC 上限 2.30 ≤ 2.31）、地板已由 T12-bullet2 当场拦红、“专用 job”无执行者（C46）。**重开条件** = 地板安检咬到构建侧不可定位漂移，或 18.04/JetPack4 客户清单出现 | 重开后：`objdump -T <so> \| grep -o 'GLIBC_2\.[0-9]*' \| sort -V \| tail -1` ≤ **2.31**，且构建机无关复现 | 中 |
 | **T5** | MediaServo | `abibaseline_check.sh` 门禁 = 三发扫描（§6，发布硬拦/日常 SOFT=1 软报）+ `g++-9/10/11` 直链烟 + dlopen 冒烟 + **扫描结果写入 manifest `abi_floor` 字段**（裁决 #5）；挂进 bindings 发布 job 尾步 | 人为引入一个 3.4.30 引用应能拦红；manifest 字段自动生成 | 小 |
 | **T6** | MediaServo | pixi.toml 显式闸门：`gcc/gxx = ">=14.4,<15"`（把浮动限制在 patch 级）；纪律入文档：`pixi update` 先 `--dry-run`，lock 中编译器行 diff 视同 ABI 变更需过 T5 | `pixi update --dry-run` 输出不含 gcc 跨 major | 小 |
 | **T7** | TPHMI | 收货：三发验收命令 + 全套构建直链通过 + 实机冒烟（推流/拉流，含 san 档一轮）+ `changes-1.4.1` 记账 | `build_san.sh build` 绿、RC010 冒烟照过 | 小 |
-| **T8** | 实车 | 摸底车端 `libstdc++.so.6` 现版本（app 自身 g++-11 → 需 3.4.29 的悬案）；若为原生 3.4.28 → 触发层6（$ORIGIN 随包）裁决 | 拿到版本号并回写本文档 §9 | 一次性 |
+| **T8** | 实车 | 摸底车端 `libstdc++.so.6` 现版本。**[rev3 #19=A 处方定案，不等探针]**：主治 = 消费 app 自身加一条 `-static-libstdc++`（自家三先例：node build.rs:18 / deck-c exclude-libs / NDK c++_static）；后备 = 层6 $ORIGIN 随包，**来源红线：只准随包目标系统版 libstdc++，严禁 conda 运行时**（CXXABI_1.3.17 致命族）；探针照旧 | 拿到版本号回写 §9 + 交付矩阵（T13）落地行 | 一次性 |
 | **T9** | MediaServo | 审核发现硬 bug：node 绑定 `build.rs:18-19` 的 Linux 链接参数**未加 cfg 门控**，osx/win 真编 napi 即炸；照 C 绑定补 `#[cfg(target_os="linux")]` | 声明平台矩阵内各平台 napi 构建通过（或平台显式移出声明） | 小 |
 
-**依赖**：T1/T2 可并行先行（不依赖别的）；T5 必须在 T1/T2/T4 后；T7 依赖 SDK 新产物到货；T8/T9 独立可先行。
+**依赖**（rev3 订正；旧文本“T1/T2 可并行先行”为未同步残留，提交 ef52960 自称已改属 overclaim，勘误记 §11.4）：**T2 → T1**（同名 cxxbridge 导出即可险——撞名存在性与共享符号计数无关，计数复核见 §11.1 M②/[rev3 #12]）；T5 必须在 **T12/T10 修复落地**后；T7 依赖 SDK 新产物到货；T10/T11/T13/T15 独立可先行。
 
 ## 6. 门禁脚本示意（T5 核心）
 
@@ -154,7 +154,7 @@ T6（编译器大版本闸门 + pixi update 纪律）未列为独立议题，作
 - 2026-10-15 事故实测：client.so 引用分布 78 个（**75 古老** / 1×3.4.29 / 1×3.4.30 / 1×CXXABI_1.3.15）；glibc ≤2.28；conda gcc-14.4.0 + libstdcxx-16.1.0（pixi.lock 9-29 定稿后编译器/运行时锁定行零漂移）。
 - 消费端环境事实：focal 20.04；系统运行时被人手动升至 libstdc++ 3.4.35（2026-03-17）；`libstdc++-11-dev` 的 .so 为实物旧 ELF（3.4.29 上限）非链接器脚本 —— 这就是"本机运行没问题、链接就炸"的原因。
 - 车端 libstdc++ 版本：**待 T8 填入**。
-- 实施进度：**两批裁决共 8 项定案（§8）；本文档已按 #7 提交交付。待 SDK 侧执行 T1/T2/T5/T6/T9 + 声明面缩窄（#6）；TPHMI 侧 T7 到货后验收；T8 挂账（#8）**。
+- 实施进度：**[rev3 台账订正]** 三批裁决共 19 项定案（§8 + §11.2 #9-#19）。待执行：T2→T1（#12 顺序已钉）、T3/T6/T9/T10-T15、T12 含 bin/ 扩面（#16）、声明面缩窄（#6）；**T4 = PAUSED 挂起，重开条件已记（#17）**；T5 禁于 T12/T10 落地前；T7 等 TPHMI 到货；T8 探针照做、处方已裁（#19=A 主治随 T13 入交付文档）。
 - 2026-10-15 second-round analysis (abi-doc25-v2, 4 seats + lead): 2 CRITICAL / 5 HIGH / 10 MED clustered into §11; rulings #9-#11 (A/A/A: doc25→English / FFmpeg carry-in-package+$ORIGIN / guard LC_ALL fix + all-gates hard wiring); tasks extended T10-T15. §6 gate as drafted is blind to the incident class it was written for (C1) — do NOT implement T5 before T12 scope/bullet fixes land.
 - 支持矩阵定稿（裁决 #1 派生）：x86 裸机族 = Ubuntu 20.04+（glibc≤2.31；T1 后 C++ 运行时引用=0）；Jetson 族 = JetPack5/L4T35（系统工具链，现状即达标）；server 族 = 容器自含（2.35 封箱内）。重开条件 = 18.04/JetPack4 客户清单出现。
 - 团队审核记录（docs25-abi-review，2026-10-15，3 成员只读）：doc-auditor 1C/2H/6M/3L/4INFO；evidence-verifier 21 断言仓库可证项全 CONFIRMED（1 措辞已修，2 条决策史/叙述项不可机验）；platform-abi-researcher 产出跨平台矩阵（→§10）+发现 T9。本修订轮已应用：§6 脚本 exit 出循环（CRITICAL）/古老计数 76→75/T0 残句清除/mermaid 两处/T4 陈旧选项/T5 补 manifest abi_floor/新增 T9。
@@ -165,49 +165,61 @@ T6（编译器大版本闸门 + pixi update 纪律）未列为独立议题，作
 
 ## 11. 第二轮团队分析与追加裁决（2026-10-15，abi-doc25-v2 四席 + lead 亲验；裁决 #9-#11 逐项过）
 
-> 本节约按 C51 用英文书写（新增内容规则）。四席 = build-reality / abi-strategy / consumer-ops / governance，全部磁盘实证（宿主无 binutils → pixi 内复测，防全零假干净）。
+> 本节约按 C51 用英文书写（新增内容规则；本节自身残留 4 行 CJK 见 §11.4 rev3 勘误）。四席 = build-reality / abi-strategy / consumer-ops / governance，全部磁盘实证；**[rev3 #13=A] 测量须登记机器与环境：本 doc 证据跨两台——主项目分析机（无系统 binutils，全走 pixi 沙箱）与 Jetson 交付机 msrtv302（objdump/readelf/nm 裸跑可用），“哪台机器哪种跑法”已逐条标注。**
 
 ### 11.1 Findings clusters (dedup across seats + lead)
 
 | ID | Sev | Cluster | Seats | Disposition |
 |---|---|---|---|---|
-| C1 | CRITICAL | deck.so/field.so ship a dynamic conda-FFmpeg closure (`DT_NEEDED libavcodec.so.63…`) + absolute conda `DT_RPATH`; focal target lacks them → load dies; all three §6 bullets pass it green today (gate blind to the exact failure class this doc exists for) | abi-strategy ABI-1/2/3, build-reality | ruling #10 (carry-in-package + 4th bullet) |
-| C2 | CRITICAL | check-english-only.sh locale-dependent silent zero-match (LANG unset → grep -P CJK finds nothing): doc25 itself = live C51 violation (123 CJK lines, post-ratification Chinese artifact + Chinese commit msg), guard passed it; guard also not wired into any CI gate | governance GOV-1/2/11, lead live-repro (bare FAIL 123 vs pixi PASS) | ruling #9 (convert) + #11 (fix+wire) |
-| H1 | HIGH | family delivery contracts contradict across 3 sources (link.h §6.6 "never bundle, host provides ≥1.8" vs deck/field bundling 57/64 MB vs C50 no-rolling): consumer cannot read "what must the target have" | governance GOV-3/4 | T13 unified matrix table into this doc |
+| C1 | CRITICAL **[sev upheld, text corrected rev3]** | deck.so/field.so carry a dynamic FFmpeg-9 closure (`DT_NEEDED libavcodec.so.63…`) absent on focal → load dies. **[rev3 corrections]**: the “absolute conda DT_RPATH” half is REFUTED on the extant aarch64 artifacts (zero RPATH/RUNPATH — load death comes from missing NEEDED regardless); the “all three bullets pass green today” half is FALSE (bullet1 measured RED on field.so = 106 GLIBCXX/CXXABI UND; bullet3 RED via link's `__internal_default_logger`) — the founding link-time class IS caught by bullet1. The genuinely blind axis = NEEDED-closure resolvability (no 4th bullet). | abi-strategy ABI-1/2/3, build-reality | ruling #10 (carry-in-package + 4th bullet, predicate corrected in T12 per #13-A) |
+| C2 | CRITICAL | check-english-only.sh locale-dependent false PASS: under unset LANG `grep -P` **errors (exit 2)** and the script's `2>/dev/null || true` swallows it (mechanism corrected by rev3 — originally stated as “never-matching exit 1”); doc25 itself = live C51 violation (**123 → 127 CJK lines** at rev3 count, post-ratification Chinese artifact + Chinese commit message); guard not wired into any gate. | governance GOV-1/2/11, lead live-repro + rev3 re-repro | ruling #9 (convert) + #11 (fix+wire); **[rev3 #14=A]** the fix MUST also un-swallow checker faults: exit vocabulary 0=clean / 1=violation / 2+=broken-checker, broken never maps to PASS |
+| H1 | HIGH | family delivery contracts contradict across 3 sources (link.h bundling-policy text vs deck/field bundling 57/64 MB vs C50 no-rolling): consumer cannot read “what must the target have”. **[rev3 #15=A]** the originally quoted “link.h §6.6 never bundle, host provides ≥1.8” string was not found in link.h (130L), 21-link-ipc.md, or sdk-cxx/link.md — quote removed; claim stands positionally; real anchors to be re-located in T13 or the item is dropped | governance GOV-3/4 | T13 unified matrix table into this doc |
 | H2 | HIGH | §9 matrix "Ubuntu 20.04+" overclaims for fleet ops — subject is SDK .so only; the g++-11 app itself needs GLIBCXX_3.4.29 > pristine focal 3.4.28 | consumer-ops CO-1 | wording caveat in §9 (T13 same batch) |
 | H3 | HIGH | T7 acceptance on the hand-upgraded dev box (runtime 3.4.35 + stale 11-dev ELF) can false-green a partial fix; authoritative acceptance = pristine ubuntu:20.04 container checklist | consumer-ops CO-2 | T10 acceptance spec |
 | H4 | HIGH | gate scope holes: link.so omitted entirely (and trips bullet3 via `__internal_default_logger` today); no RPATH/NEEDED-closure bullet | build-reality BR-2, abi-strategy ABI-2/3 | T11/T12 |
 | H5 | HIGH | bump-time breakage: gate hardcodes `.so.0.1.1` + `libavcodec.so.63` while C43③ bump checklist lacks pixi.lock/FFmpeg-soname lines → version bump fails the gate silently from the bumper's POV | build-reality BR-6/7/8, governance GOV-5 | derive all versions in gate + C43③ row (T10) |
-| M | MED | ① shared version-script swallows field's bare `mediaservo_last_error` (per-so maps or explicit export); ② client∩field share 329 `cxxbridge1$*` exports → T2 is T1's HARD prerequisite (ODR), §5 dep note wrong; ③ bullet2 regex needs GLIBC_ anchor; ④ keep version node anonymous (@@VER suffix false-red); ⑤ webrtc-sys 52 extern-C seams, 0 catch_unwind (worker panic = host abort); ⑥ glibc ceiling actually comes from conda sysroot (2.28) — pin `sysroot_linux-64` (T6 incomplete), T4 container partly redundant, manifest sysroot field; ⑦ $ORIGIN runtime bundling = ops action not ruling-3 violation but useless for the LINK-time wall + masks gate evidence — trigger = T8; ⑧ T8 probe one-liner + 3-branch decision tree; ⑨ §1 root-cause wording imprecise (versioned UND lives on the .so; fetch-time happens at link) + T7 depends on TPHMI-local history (changes-1.4.1/san recipes) not in this repo → T14 self-contained acceptance; ⑩ C47's promised "symbol table patrol" materializes exactly as check-abi-drift + this gate — name it gate-abi-baseline.sh, wire beside G3 in all-gates quick (governance GOV-8, C50 rule 5 lineage) | abi-strategy, consumer-ops, governance | folded into T10-T14 + §5/§6/§7 fixes at revision batch |
+| M | MED | ① shared version-script swallows field's bare `mediaservo_last_error` (per-so maps or explicit export); ② client∩field share 329 `cxxbridge1$*` exports → T2 is T1's HARD prerequisite (ODR) **[rev3 #12=B: the 329 count is PENDING-RECHECK — no client.so on this box; field.so defines 399 cxxbridge symbols itself; the ORDER does not depend on the count: any shared 同名 export is the hazard — §5 corrected in this batch]**; ③ bullet2 regex needs GLIBC_ anchor; ④ keep version node anonymous (@@VER suffix false-red); ⑤ webrtc-sys 52 extern-C seams, 0 catch_unwind (worker panic = host abort); ⑥ glibc ceiling actually comes from conda sysroot (2.28) — pin `sysroot_linux-64` (T6 incomplete), T4 container partly redundant **[rev3 #17=A: T4 PAUSED 挂而不删，重开条件记 §5 行]**, manifest sysroot field; ⑦ $ORIGIN runtime bundling = ops action not ruling-3 violation but useless for the LINK-time wall + masks gate evidence **[rev3 #19=A: primary = app-side static flag; bundle = fallback + provenance red line]**; ⑧ T8 probe one-liner + 3-branch decision tree; ⑨ §1 root-cause wording imprecise (versioned UND lives on the .so; fetch-time happens at link) + T7 depends on TPHMI-local history (changes-1.4.1/san recipes) not in this repo → T14 self-contained acceptance; ⑩ C47's promised “symbol table patrol” materializes exactly as check-abi-drift + this gate — name it gate-abi-baseline.sh, wire beside G3 in all-gates quick (governance GOV-8, C50 rule 5 lineage) | abi-strategy, consumer-ops, governance | folded into T10-T14 + §5/§6/§7 fixes at revision batch |
 
-### 11.2 Additional rulings (adjudication-walkthrough one-by-one, 2026-10-15, replies A/A/A)
+### 11.2 Additional rulings (adjudication-walkthrough one-by-one; round 2 = #9-#11 replies A/A/A; round 3 = #12-#19, replies B/A×7, 2026-10-15)
 
 | # | Topic | Ruling | Derived actions |
 |---|---|---|---|
 | 9 | doc25 language under C51 (created post-ratification, 123 CJK lines, corpus otherwise English since 2bea311) | **A: convert to English** in the revision batch; git-history commit stays (C51 history exemption) | T15 translation ticket (batch leader); guard wiring sequenced AFTER conversion so first run is green |
-| 10 | FFmpeg closure delivery for deck/field .so | **A: carry in package + $ORIGIN runpath** (wheel precedent adopted for the .so surface; §7 "部署包必须携带" finally implemented); B strip-heavy re-ruling rejected (reopens C44/N7), C host-provides rejected (violates §2 no-host-modification goal) | T11 staging rewrite + T12 gate bullet 4 (NEEDED closure whitelist: libav*/libsw* allowed only when present under package-relative path; absolute build-machine RPATH = red); link.so added to scope (T12) |
+| 10 | FFmpeg closure delivery for deck/field .so | **A: carry in package + $ORIGIN runpath** (wheel precedent adopted for the .so surface; **[rev3 #15=A]** the former “§7 部署包必须携带” quotation was not found anywhere in §7/doc — removed; grounding = §4 层6 + §3 Valve/OpenSSL vendoring precedent + measured load-death C1); B strip-heavy re-ruling rejected (reopens C44/N7), C host-provides rejected (violates §2 no-host-modification goal) | T11 staging rewrite + T12 gate bullet 4 (NEEDED closure whitelist per revised resolvability predicate below); link.so added to scope (T12) |
 | 11 | guard fix + duty | **A: LC_ALL force + wire into all-gates quick, hard block** (after #9 conversion); B manual-run (proven blind today) and C soft-report rejected | T10: guard script env line + all-gates entry; C51 first live enforcement |
+
+| 12 | D293 T2≺T1 sequencing evidence (329 unverifiable) | **B**: order upheld mechanism-first; count annotated PENDING-RECHECK; §5 dep line corrected in-batch; ef52960 commit-message overclaim → erratum in 11.4 | §5 dependency rewritten; M② annotated |
+| 13 | C1 overstatements (RPATH / three-green) | **A**: severity kept (load-death is real), false halves corrected, blind axis narrowed to closure-resolvability; T12 bullet-4 rewritten as a real predicate (no vacuous pass) | §11.1 C1 + T12 |
+| 14 | guard mechanism wording (swallowed exit 2) | **A**: ledger wording fixed AND prescription gains the un-swallow clause (checker fault must never read as PASS) | T10 updated; PIT-226 memory erratum rides the memory batch |
+| 15 | unlocatable quotations (#10's §7 phrase; H1's link.h §6.6) | **A**: replace with real anchors or state honestly as new reasoning; errata appended, git history never rewritten | §11.2 #10 + H1 rewritten + 11.4 errata |
+| 16 | gate covers .so only, executables ungated (conda-leak axis) | **A**: pre-package scan extended to delivered executables (`out/*/bin`): C++-runtime ceiling + NEEDED closure per binary, one script shared with libs | T12 scope; §9 discipline gains its enforcer |
+| 17 | T4 focal release container fate | **A**: PAUSED 挂而不删 with written reopen conditions (floor scan measures no drift; bullet2 already interdicts) | §5 T4 row; M⑥ |
+| 18 | machine attribution of “宿主无 binutils” | **A**: keep + annotate which box/env per measurement (analysis box vs Jetson msrtv302) | §11 head + 11.4 |
+| 19 | T8 consumer-runtime prescription | **A**: primary = app-side `-static-libstdc++` one-flag self-containment; $ORIGIN bundle = fallback + provenance red line (target-OS builds only, never conda); probe unchanged | §5 T8 row; T13 matrix |
 
 ### 11.3 Extended task ledger (T10-T15, all in the execution batch this doc awaits)
 
-- **T10** guard/acceptance hardening: check-english-only LC_ALL=C.UTF-8 + all-gates wiring; T7 authoritative acceptance = pristine ubuntu:20.04 container checklist (pristine proof → bullets → cc/g++ link → dlopen → RC010+san → evidence back to §9).
+- **T10** guard/acceptance hardening: check-english-only LC_ALL=C.UTF-8 + all-gates wiring **[rev3 #14=A adds: UN-SWALLOW — remove `2>/dev/null || true`-style fault masking; exit vocabulary 0=clean / 1=violation / 2+=checker-broken, broken never maps to PASS; per #9/#11 sequencing the all-gates WIRE lands only AFTER T15 conversion — fix-the-script may precede]**; T7 authoritative acceptance = pristine ubuntu:20.04 container checklist (pristine proof → bullets → cc/g++ link → dlopen → RC010+san → evidence back to §9).
 - **T11** staging runpath rewrite: patchelf/`--set-rpath $ORIGIN:$ORIGIN/../lib` on all four .so + FFmpeg libs laid into package lib/ (ruling #10).
-- **T12** gate expansion: scope = link/client/deck/field; bullet 4 = recursive NEEDED closure + RPATH whitelist; bullet2 GLIBC_ anchor; bullet3 keep anonymous version node; version strings derived (_crate_version / readelf), never literal.
-- **T13** unified delivery matrix table (family × FFmpeg posture × min glibc × libstdc++ posture × version promise) into §9; fixes H1/H2; single source for all consumers.
+- **T12** gate expansion: scope = link/client/deck/field **[rev3 #16=A: + delivered executables under `out/*/bin` — same closure/ceiling checks, one shared script]**; bullet 4 = recursive NEEDED-closure **resolvability**: every NEEDED outside the system whitelist must resolve under package-relative `$ORIGIN` paths — a missing RUNPATH is fail-closed RED, never silently passing **[rev3 #13=A: replaces the vacuous “absolute RPATH = red” predicate — extant artifacts have zero RPATH and would pass it]**; bullet2 GLIBC_ anchor; bullet3 keep anonymous version node; version strings derived (_crate_version / readelf), never literal.
+- **T13** unified delivery matrix table (family × FFmpeg posture × min glibc × libstdc++ posture × version promise) into §9; fixes H1/H2; single source for all consumers **[rev3 #19=A: matrix carries the consumer-side `-static-libstdc++` recommendation as the primary posture row; $ORIGIN bundle = fallback with provenance]**
 - **T14** §5/§7 text corrections: T2-as-T1-prerequisite (cxxbridge ODR note), per-so maps (`mediaservo_last_error`), sysroot pin into T6, C43③ bump rows (pixi.lock + FFmpeg soname), §1 mechanism wording, webrtc-sys catch_unwind debt noted (fix另案).
 - **T15** doc25 full English conversion (ruling #9), before gate wiring per sequencing.
 
 ### 11.4 Lead cross-check record
 
-- Guard live contradiction reproduced same session: bare shell FAIL (doc25:123) vs pixi PASS — locale root cause; every historical "guard PASS" quoted from pixi contexts re-judged as unproven (this session's morning ledger line included, corrected here).
+- Guard live contradiction reproduced in the SAME Jetson box (rev3 re-repro): bare shell FAIL **127** CJK (the “123” was as-of ef52960; §11 itself added 4 CJK lines, violating its own English-zone promise — cured by T15), `LC_ALL=C.UTF-8` FAIL 127, pixi-internal PASS (pixi sets LANG). Mechanism = grep ERROR exit 2 swallowed by `2>/dev/null || true` (#14). Every historical “guard PASS” quoted from pixi contexts re-judged unproven (this ledger's morning line included, corrected above).
 - Cross-doc keyword sweep (GLIBCXX/glibc/2.31/focal/22.04): contradictions captured as GOV-3 (link.h §6.6) and GOV-4 (wheel doc silence) — both routed to T13/T15 batch.
+- **[rev3 #13/#18=A erratum]** “宿主无 binutils” describes the round-2 analysis box (main-project machine) only; on Jetson msrtv302 objdump/readelf/nm run bare — all rev3 measurements here are bare-host unless noted. Rule: measurements register machine+env (C49/C37 artifact-identity discipline).
+- **[rev3 #15=A erratum]** two quotations removed as unlocatable: “§7 部署包必须携带” (grep-verified absent from §7/doc) and “link.h §6.6 never bundle, host provides ≥1.8” (absent from link.h 130L, 21-link-ipc.md, sdk-cxx/link.md). Ruling #10 and finding H1 stand on corrected grounding; git history (ef52960) is never rewritten — this line is the erratum.
+- **[rev3 #12=B erratum]** commit ef52960 message claims “§5 dependency note corrected”; its diff = 43 insertions with zero §5 edits. This batch applies the real §5 correction (T2→T1).
 
 
 ---
 
 ## 10. 平台族 ABI 限定（macOS / iOS / Android / Windows / Node）
 
-> 触发条件：任一非 Linux 平台进入交付清单（§8 裁决只裁了 Linux 数值）。本章 = 设计时约束预登记 + 启用时门禁配方；继承 §9 共识：**地板=产物属性、按族登记、CI 扫描、裸机禁 conda 运行时**。全文底稿：platform-abi-researcher 交付（/tmp/opencode/abi/platform-abi-matrix.md）。
+> 触发条件：任一非 Linux 平台进入交付清单（§8 裁决只裁了 Linux 数值）。本章 = 设计时约束预登记 + 启用时门禁配方；继承 §9 共识：**地板=产物属性、按族登记、CI 扫描、裸机禁 conda 运行时**。原 `/tmp` 底稿已失效且不在仓（rev3 复核）——内容以 §10.1–§10.3 本体为准，自足，不再引外部路径（C45 证据同包）。
 
 ### 10.0 现实核查（REAL vs PAPER）
 
