@@ -1893,3 +1893,9 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
   observable is not only "never-matching exit 1" but also "checker fault masked as success".
   Consequence for the fix: LC_ALL pin alone is insufficient — the un-swallow clause is mandatory
   (exit vocabulary 0=clean / 1=violation / >=2=checker-broken; broken must never read as PASS).
+
+## PIT-227: conda-forge gcc's `-static-libstdc++` is a SILENT NO-OP for cdylib links (2026-10-15)
+- **Symptom**: `.so` keeps versioned GLIBCXX/CXXABI UND + dynamic NEEDED libstdc++.so.6 despite `-static-libstdc++ -static-libgcc` in build.rs (node build.rs:18 precedent since 09-17 never bound the archive; `.node` measured UND=80 today).
+- **Root cause**: conda driver does not convert the plain `-lstdc++` already emitted by cc/cxx-crate metadata; ld binds the DSO at first match and a trailing `-Bstatic` sandwich loses the race. Minimal repro: `cc -static-libstdc++ x.cpp` => undefined `operator new` / `__gxx_personality_v0`.
+- **Fix**: ask the active compiler for the archive's absolute path (`CXX||CC -print-file-name=libstdc++.a`) => `cargo:rustc-link-search=native=<dir>` + `cargo:rustc-link-lib=static=stdc++`. Root-crate user libs are emitted BEFORE dependency native libs, so the archive wins — measured UND 78->0 and the NEEDED entry vanishes entirely. Keep the sandwich only as fallback.
+- **Anti-patterns**: trusting `-static-libstdc++` on conda toolchains; `.cargo/config.toml` rustflags with repo-relative `-L` (resolves against rustc CWD and breaks rlib compilation — reverted).

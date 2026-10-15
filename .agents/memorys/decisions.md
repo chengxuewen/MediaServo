@@ -915,3 +915,8 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
   gate evidence; trigger = T8). Design ledger + tasks T1-T15 = docs/modules/25-abi-baseline.md
   (§8/§11); supersession of earlier attribution (local libwebrtcsys-cxx.a carries the refs,
   upstream libwebrtc.a = 0) already corrected there.
+
+## D294: ABI recipe + decode-sink contract shipped in-tree (2026-10-15, consumer-side session; commits 721f47c..9c6745a)
+- Implemented per doc25 §5/§8: **T2** (per-.so `mediaservo_*.map` export whitelists — field's bare `mediaservo_last_error` stays visible), **T1** (statically vendored libstdc++ via compiler-probed `<CC> -print-file-name=libstdc++.a` absolute path — see PIT-227; the node/deck-c "static" precedents never actually worked), **T9** (node build.rs cfg-gate + probe recipe; README win-64 retracted per ruling #6), **P1 decode-sink contract** (vendored binding exposes stride/geometry on PlanarYuv8Buffer; sink copies stride-aware rows at RENDER dims, bulk path only when the buffer is compact — fixes the 960x540 full-frame chroma corruption; proven by SMPTE-bars loopback: garbled pre-fix, clean bars post-fix).
+- Gate state at ship: all four `.so` UND GLIBCXX/CXXABI == 0, dynamic NEEDED libstdc++ gone, glibc ceiling 2.28 unchanged. Execution digest + open tickets live in `docs/handoff-2026-1015-abi-exec.md`.
+- NOT done (stays in the T1-T15 ledger): T3, T5 wiring, T10 (guard fix + wire after T15), T12, T13, T14, T15. Known adjacent defect: `p2p_codec_e2e` is fake-green (received==0 still passes) — separate ticket, do not trust it as a codec regression gate until fixed.
