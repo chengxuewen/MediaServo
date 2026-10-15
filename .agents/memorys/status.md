@@ -1141,3 +1141,24 @@ install                        → 改名提示 + exit 2（退役）
   failure on untouched bins. Register under PIT-199 family (conda/system toolchain mixing);
   main-project/CI boxes run these test binaries normally. When it bites a host test run, use
   the deployed `out/host/bin/msrtc-host` for live checks and report the gap honestly.
+
+### 2026-10-15: doc25 second-round team analysis (abi-doc25-v2) — 2 CRITICAL / 5 HIGH / 10 MED, rulings #9-#11, tasks T10-T15
+- Four seats (build-reality/abi-strategy/consumer-ops/governance, all disk-verified via pixi
+  binutils — host has none; caught-and-corrected an all-zeros false-clean first pass) + lead.
+  Verdict: direction & layering sound (manylinux/NDK aligned, 9/9 anchors disk-CONFIRMED); the
+  designed gate is BLIND to the incident class it exists for.
+- C1: deck.so/field.so ship a dynamic conda-FFmpeg closure + absolute build-machine DT_RPATH
+  (focal has no libavcodec.so.63 → load dies; three gate bullets all green). Ruling #10:
+  carry-in-package + $ORIGIN rewrite at staging (T11) + bullet-4 closure scan, link.so joins
+  scope (T12). C2: english-guard locale false-green (PIT-226) blessed doc25 itself (live C51
+  violation) → ruling #9 convert-to-English (T15), #11 LC_ALL + all-gates duty (T10, sequenced
+  after T15 so first duty run is green).
+- Fleet-scope corrections: §9 "20.04+" overclaims (g++-11 APP itself needs 3.4.29 > pristine
+  focal 3.4.28 — SDK fix doesn't absolve app/layer6, T8 probe decides); T7 on the hand-upgraded
+  dev box can false-green → authoritative acceptance = pristine focal container checklist.
+- Text ledgers fixed: T2=HARD prereq of T1 (329 shared cxxbridge exports ODR); sysroot is the
+  real glibc-ceiling source (pin it, T4 partly redundant); version-script per-so (bare
+  mediaservo_last_error); webrtc-sys 0 catch_unwind on 52 seams (debt noted); C43③ bump list
+  gains pixi.lock/FFmpeg-soname rows; delivery matrix single-sourced (T13).
+- D293 entered decisions; writeback = doc25 §11 (commit ef52960, English per C51 — the file's
+  body conversion itself is T15, tracked). Execution gate NOT opened (T1-T15 pool).

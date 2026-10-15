@@ -1867,3 +1867,23 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
   bare `ps` in a random dir exits 2 with "no instance found ... pass the instance dir".
 - **Prevent rule**: arg-path changes to CLI proxies need one LIVE invocation per subcommand
   (not just the primary verb) + a pure-function pin test for the parsing itself.
+
+## PIT-226: grep -P Unicode class silently matches NOTHING under non-UTF-8 locale (2026-10-15)
+- **Symptom**: `scripts/check-english-only.sh` reports PASS (0 CJK / 680 artifacts) inside pixi
+  while the identical bare-shell run FAILs with 123 CJK lines in the same file — the C51
+  enforcement layer was blind exactly when automated (LANG= empty in pixi env), and it blessed
+  doc 25 (created after C51, fully Chinese, tracked + committed) plus every "guard PASS" quote
+  from pixi-wrapped sessions (this session's morning ledger line included — re-judged false).
+- **Root cause**: `grep -P '[\x{4e00}-\x{9fff}]'` compiles the \x{...} class against the
+  current locale's charset; with LANG/LC_ALL unset (C/POSIX = bytes) the multibyte range
+  degenerates to never-matching, exit status 1 with zero output — looks like "clean", is
+  "not looking".
+- **Solution**: any Unicode-class grep/PCRE tool must pin its locale explicitly
+  (`export LC_ALL=C.UTF-8` at script top; Ubuntu/Debian base images always provide it);
+  and every enforcement gate needs (a) environment-pinned self-test (positive control:
+  feed a known-CJK fixture under the SAME env the gate runs in) and (b) a duty roster —
+  a script nobody schedules is a rumor, not a gate. Pending execution = doc25 T10
+  (LC_ALL line + all-gates wiring after the T15 English conversion so the first duty run is green).
+- **Verify**: `env -i bash -c 'bash scripts/check-english-only.sh'` before fix = false PASS
+  (or exit 2); after fix on a Chinese fixture = FAIL. Cross-ref main-repo ledger: this is
+  the #17 false-green family hitting our own measurement layer.

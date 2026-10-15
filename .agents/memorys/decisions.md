@@ -892,3 +892,26 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **References**: C50 (conventions, full text); main repo
   docs/plans/_archive/wire-compat-governance/PLAN.md (R1-R12 ledger, 4-seat team
   review record); gates = scripts/gate-wire-changelog.sh + scripts/e2e-compat*.
+
+## D293: SDK artifact ABI compatibility baseline (doc 25; 2026-10-15, rulings #1-#11 user-ratified)
+- **Decision**: C++ runtime never crosses the C ABI boundary as a dynamic conda dependency —
+  bindings .so statically embed libstdc++/libgcc (`-static-libstdc++ -static-libgcc
+  -Wl,--exclude-libs,ALL`, house precedent node build.rs/deck-c build.rs) + per-object-file
+  version-script whitelist (global: mediaservo_*; T2 is T1's HARD prerequisite — 329 shared
+  cxxbridge1$ exports between client/field = ODR risk, not hygiene); export closure keeps
+  libc-level DT_NEEDED only; glibc ceiling governed by build environment (conda sysroot 2.28
+  today — pin it; focal release container = declared ceiling), not by toolchain age
+  ("floor = artifact property, measured by scan, never by downgrading compilers"); per-family
+  support matrix: x86 bare-metal focal+ / Jetson JetPack5 system-toolchain (C23, status quo)
+  / server container-self-contained / Python wheel = FFmpeg+bundled precedent (C44).
+- **Second-round deltas (rulings #9-#11, 2026-10-15 walkthrough A/A/A)**: doc25 converts to
+  English (C51 first enforcement case); FFmpeg closure for deck/field rides INSIDE the package
+  with `$ORIGIN` runpath rewrite at staging (wheel precedent moved to the .so surface —
+  implements §7's "deployment package carries it" finally); gate extends: scope += link.so,
+  bullet-4 = recursive NEEDED closure + RPATH whitelist (absolute build-machine paths = red),
+  version strings derived never hardcoded; english-guard gets LC_ALL pin + all-gates hard duty.
+- **Forbidden**: static-linking glibc (NSS iron rule); host-provides-FFmpeg posture (violates
+  no-host-modification goal §2); interim $ORIGIN runtime bundle before T8 fleet probe (masks
+  gate evidence; trigger = T8). Design ledger + tasks T1-T15 = docs/modules/25-abi-baseline.md
+  (§8/§11); supersession of earlier attribution (local libwebrtcsys-cxx.a carries the refs,
+  upstream libwebrtc.a = 0) already corrected there.
