@@ -82,7 +82,7 @@ Unified CLI entry point (available after bootstrap):
 > client target is registered (build works); up/down/restart/logs client pending skeleton completion.
 
 First use: `source bootstrap.sh` (Linux/macOS) or `bootstrap.bat` (Windows).
-Windows is best-effort (pixi.toml platforms must include win-64).
+Windows: planned, not yet supported (win-64 is not declared in pixi.toml platforms; bootstrapping per `docs/modules/25-abi-baseline.md` §10.4 ticket O4 once a customer list materializes).
 
 ## License
 
