@@ -12,5 +12,10 @@ fn main() {
     {
         println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,libmediaservo_deck.so.{major}");
         println!("cargo:rustc-cdylib-link-arg=-Wl,--exclude-libs,ALL");
+        // doc25 §5 T2+T1 — explicit export whitelist + vendored runtime alongside existing --exclude-libs,ALL (R10).
+        let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
+        println!("cargo:rustc-cdylib-link-arg=-Wl,--version-script,{dir}/mediaservo-deck.map");
+        // E1 empirical: conda gcc's -static-libstdc++ alone is a NO-OP. -Bstatic sandwich binds libstdc++.a.
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-Bstatic,-lstdc++,-Bdynamic");
     }
 }

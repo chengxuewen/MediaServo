@@ -6,5 +6,12 @@ fn main() {
     #[cfg(target_os = "linux")]
     {
         println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,libmediaservo_link.so.{major}");
+        // doc25 §5 T2+T1 — per-so export whitelist + vendored C++/GCC runtime.
+        let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
+        println!("cargo:rustc-cdylib-link-arg=-Wl,--version-script,{dir}/mediaservo-link.map");
+        // E1 empirical: conda gcc's -static-libstdc++ alone is a NO-OP (undefined operator new).
+        // Explicit -Bstatic sandwich binds libstdc++.a (libgcc_s stays dynamic, stock-focal-safe GCC_4.2.0 nodes).
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-Bstatic,-lstdc++,-Bdynamic");
+        println!("cargo:rustc-cdylib-link-arg=-Wl,--exclude-libs,ALL");
     }
 }
