@@ -66,6 +66,31 @@ pub enum Outcome {
     Residue { survivors: Vec<SurvivorInfo> },
 }
 
+/// File-watch bell verdict (T1b3 k2): debounce over a 2s sampling loop so half-written
+/// edits never reach the core. See [`watch_tick`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WatchAction {
+    /// Sample equals the baseline (or is an io-error None): keep watching.
+    Follow,
+    /// First sighting of a change: a second equal sample must confirm it.
+    Wait,
+    /// Confirmed change (two consecutive equal samples != baseline); carries the new
+    /// fingerprint, which the bell adopts as baseline before running the core.
+    Trigger(String),
+}
+
+/// Pure state machine of the file-watch bell: Trigger only when
+/// `Some(cur) != baseline && Some(cur) == prev`. The in-lock fingerprint re-read inside
+/// `execute` is the correctness net -- this machine is debounce, never authority.
+pub fn watch_tick(cur: Option<String>, prev: Option<String>, baseline: &str) -> WatchAction {
+    match cur {
+        None => WatchAction::Follow,
+        Some(h) if h == baseline => WatchAction::Follow,
+        Some(h) if prev.as_deref() == Some(h.as_str()) => WatchAction::Trigger(h),
+        Some(_) => WatchAction::Wait,
+    }
+}
+
 /// Run the seven-step core once against `dir` (an initialized instance tree).
 /// `force` bypasses only the step1 fingerprint short-circuit — every gate still applies.
 /// Err is reserved for operational failures (lock timeout, io, oxmgr unrunnable, ledger
@@ -214,6 +239,76 @@ pub fn execute(
     led.push_history(&hash, opts.origin, opts.actor, "applied");
     led.save(dir)?;
     Ok(Outcome::Applied { hash })
+}
+
+/// EX-3 boot fast path: when a previous run left `pending_apply` set (crash between step6
+/// activation and step7 reconcile) AND the live registry already reconciles with the
+/// activated roster, commit the ledger WITHOUT teardown/re-render/apply (zero churn).
+///
+/// `Ok(true)` = committed, the caller is done. `Ok(false)` = fast path not trustworthy
+/// (no matching pending_apply, roster/expected unreadable, reconcile mismatch, daemon
+/// unreachable) -- the caller runs the full [`execute`], which owns the repair and its
+/// refusal audits. `Err` is operational only (lock timeout, host.yaml io, ledger save).
+pub fn try_commit_pending(dir: &Path) -> Result<bool, String> {
+    let _guard = CoreLock::acquire(dir)?;
+    let cfg_path = dir.join("etc").join("host.yaml");
+    let cfg = std::fs::read_to_string(&cfg_path)
+        .map_err(|e| format!("read {} failed: {e}", cfg_path.display()))?;
+    let hash = file_hash(cfg.as_bytes());
+    if !Ledger::load(dir).pending_apply.as_ref().is_some_and(|p| p.hash == hash) {
+        return Ok(false);
+    }
+    // An unreachable daemon cannot prove the live state: the empty registry then mismatches
+    // the non-empty roster below => Ok(false) => the full execute owns the repair.
+    let env = translate::oxmgr_env(dir);
+    let registry = translate::live_host_apps(&env).unwrap_or_default();
+    commit_pending_fast(dir, &hash, &cfg, &registry)
+}
+
+/// Fast-path verdict + commit with the registry list injected (the unit-test seam;
+/// [`try_commit_pending`] is its thin live side). Same leniency as step7: reuses
+/// `reconcile_mismatch` against pre-existing state only -- never re-renders or applies.
+fn commit_pending_fast(
+    dir: &Path,
+    hash: &str,
+    cfg: &str,
+    registry: &[String],
+) -> Result<bool, String> {
+    let mut led = Ledger::load(dir);
+    if !led.pending_apply.as_ref().is_some_and(|p| p.hash == hash) {
+        return Ok(false);
+    }
+    let oxfile = dir.join("run").join("oxfile.toml");
+    let Ok(roster) = translate::oxfile_app_names(&oxfile) else {
+        return Ok(false); // missing/corrupt activated roster => the full execute re-renders
+    };
+    let Ok(expected) = translate::expected_process_names(cfg) else {
+        return Ok(false); // malformed cfg => the full execute refuses with its audit
+    };
+    if let Some(detail) =
+        reconcile_mismatch(&roster, registry, &expected, &translate::app_name("recorder"))
+    {
+        tracing::info!(
+            "boot fast path declined: pending apply does not reconcile ({detail}) -- the full execute owns the repair"
+        );
+        return Ok(false);
+    }
+    led.running = Some(Running {
+        hash: hash.to_string(),
+        at: now_rfc3339(),
+        origin: "boot-commit".to_string(),
+        actor: None,
+    });
+    led.pending_apply = None;
+    led.flags.pending = false;
+    led.flags.error = false;
+    led.push_history(hash, "boot-commit", None, "pending-committed");
+    led.save(dir)?;
+    tracing::info!(
+        "config-core: pending apply committed at boot (fast path, zero churn) -- hash {}",
+        short12(hash)
+    );
+    Ok(true)
 }
 
 /// C25: iceoryx2 SHM residue (SystemInFlux) makes capturer/streamer subscription open
@@ -558,5 +653,97 @@ mod tests {
         std::fs::write(&staging, "stale leftover").unwrap();
         write_staging(&staging, "fresh2").unwrap();
         assert_eq!(std::fs::read_to_string(&staging).unwrap(), "fresh2");
+    }
+
+    #[test]
+    fn watch_tick_follows_while_quiet() {
+        assert_eq!(watch_tick(Some("h".into()), None, "h"), WatchAction::Follow);
+        assert_eq!(watch_tick(Some("h".into()), Some("h".into()), "h"), WatchAction::Follow);
+        assert_eq!(watch_tick(None, Some("x".into()), "h"), WatchAction::Follow);
+        assert_eq!(watch_tick(None, None, "h"), WatchAction::Follow);
+    }
+
+    #[test]
+    fn watch_tick_waits_on_first_sighting_of_a_change() {
+        assert_eq!(watch_tick(Some("x".into()), None, "h"), WatchAction::Wait);
+        assert_eq!(watch_tick(Some("x".into()), Some("y".into()), "h"), WatchAction::Wait);
+    }
+
+    #[test]
+    fn watch_tick_triggers_on_two_equal_non_baseline_samples() {
+        assert_eq!(
+            watch_tick(Some("x".into()), Some("x".into()), "h"),
+            WatchAction::Trigger("x".into())
+        );
+    }
+
+    #[test]
+    fn watch_tick_baseline_equal_never_triggers_even_with_equal_prev() {
+        assert_eq!(watch_tick(Some("h".into()), Some("h".into()), "h"), WatchAction::Follow);
+    }
+
+    #[test]
+    fn watch_tick_first_sample_never_triggers() {
+        assert_eq!(watch_tick(Some("x".into()), None, "h"), WatchAction::Wait);
+    }
+
+    fn seed_fast_tree(dir: &Path, cfg: &str, pending: bool) -> String {
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::create_dir_all(dir.join("run")).unwrap();
+        std::fs::write(dir.join("etc").join("host.yaml"), cfg).unwrap();
+        let hash = file_hash(cfg.as_bytes());
+        let mut led = Ledger::default();
+        if pending {
+            led.pending_apply = Some(PendingApply { hash: hash.clone(), at: now_rfc3339() });
+            led.flags.pending = true;
+        }
+        led.save(dir).unwrap();
+        hash
+    }
+
+    #[test]
+    fn try_commit_pending_fast_path_commits_with_matching_registry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let cfg = "{}\n";
+        let hash = seed_fast_tree(dir, cfg, true);
+        let expected = translate::expected_process_names(cfg).unwrap();
+        let roster_toml: String =
+            expected.iter().map(|n| format!("[[apps]]\nname = \"{n}\"\n")).collect();
+        std::fs::write(dir.join("run").join("oxfile.toml"), roster_toml).unwrap();
+        assert!(commit_pending_fast(dir, &hash, cfg, &expected).unwrap());
+        let led = Ledger::load(dir);
+        assert_eq!(led.running.as_ref().unwrap().hash, hash);
+        assert_eq!(led.running.as_ref().unwrap().origin, "boot-commit");
+        assert!(led.pending_apply.is_none());
+        assert!(!led.flags.pending && !led.flags.error);
+        assert_eq!(led.history.last().unwrap().result, "pending-committed");
+    }
+
+    #[test]
+    fn try_commit_pending_declines_without_matching_pending_apply() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let cfg = "{}\n";
+        let hash = seed_fast_tree(dir, cfg, false); // no pending_apply at all
+        assert!(!commit_pending_fast(dir, &hash, cfg, &[]).unwrap());
+        seed_fast_tree(dir, cfg, true);
+        // pending_apply present but the fingerprint differs (site edited after the crash)
+        assert!(!commit_pending_fast(dir, "stale-hash", cfg, &[]).unwrap());
+    }
+
+    #[test]
+    fn try_commit_pending_declines_on_reconcile_mismatch_and_keeps_ledger() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let cfg = "{}\n";
+        let hash = seed_fast_tree(dir, cfg, true);
+        std::fs::write(dir.join("run").join("oxfile.toml"), "[[apps]]\nname = \"x\"\n").unwrap();
+        // empty injected registry vs roster ["x"] => mismatch => decline, leave the ledger
+        // exactly as the crashed core wrote it (the full execute owns the repair)
+        assert!(!commit_pending_fast(dir, &hash, cfg, &[]).unwrap());
+        let led = Ledger::load(dir);
+        assert!(led.pending_apply.is_some());
+        assert!(led.running.is_none());
     }
 }

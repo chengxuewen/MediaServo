@@ -18,9 +18,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::config_core::{Ledger, short12};
 use crate::gateway::{ChildStatus, GatewayHandle, GatewayStatus};
 use crate::monitor::flow::{FlowMonitor, FlowSnapshot, StreamFlow, TopicFlow};
 use crate::monitor::topology::{DEFAULT_GRACE, Mismatch, TopologyMonitor, TopologySnapshot};
+use std::path::{Path, PathBuf};
 
 /// Reporting interval (5s, the same tick as the monitoring collection; the report is <2KB JSON, so the WS traffic is negligible.
 /// The 10s option that halves the traffic was rejected -- decoupling from the collection buys nothing and only adds state-window drift).
@@ -67,11 +69,13 @@ pub fn spawn_status_reporter(
     interval: Duration,
     // E4: the config version (updated by the agent after a ConfigPush apply; data source of StatusReport.config_version).
     config_version: Arc<AtomicU64>,
+    // T1b3 (k11): instance dir for ledger-epoch polling + telemetry re-attach (None = pinned monitors).
+    dir: Option<PathBuf>,
 ) {
     tokio::spawn(async move {
-        let topology = TopologyMonitor::new_at(host_toml.clone(), DEFAULT_GRACE, started);
-        let flow = match token {
-            Some((tok, vk)) => match FlowMonitor::attach(host_toml, &tok, &vk) {
+        let mut topology = TopologyMonitor::new_at(host_toml.clone(), DEFAULT_GRACE, started);
+        let mut flow = match &token {
+            Some((tok, vk)) => match FlowMonitor::attach(host_toml, tok, vk) {
                 Ok(m) => Some(m),
                 Err(e) => {
                     tracing::error!(
@@ -89,9 +93,22 @@ pub fn spawn_status_reporter(
         let _last_enc: std::collections::HashMap<String, (f64, u64)> =
             std::collections::HashMap::new();
         let mut tick = tokio::time::interval(interval);
+        // T1b3 (k11): last observed committed config epoch (running.hash) from the ledger.
+        let mut last_epoch: Option<String> = None;
         // consume the first immediate tick (aligned with the E1/E2 behavior)
         loop {
             tick.tick().await;
+            // T1b3 (k11): ledger-driven telemetry re-attach. The first observation only
+            // records the epoch (startup monitors are fresh by definition); a later flip
+            // means the core rebuilt the cluster -> drop the stale monitors, re-read
+            // host.yaml, re-attach against the new expected state.
+            if let Some(d) = &dir {
+                let epoch = Ledger::load(d).running.map(|r| r.hash);
+                if let Some(h) = epoch_bump(&last_epoch, &epoch) {
+                    reattach_monitors(d, &token, &mut topology, &mut flow, h);
+                }
+                last_epoch = epoch; // absent/corrupt ledger reads as None, never panics
+            }
             let topo = topology.collect();
             // E1 logging (behavior identical to E1: counting + suppressing mismatch warnings inside grace)
             tracing::info!(
@@ -180,6 +197,48 @@ pub fn spawn_status_reporter(
             }
         }
     });
+}
+
+/// T1b3 (k11): pure epoch verdict — re-attach only when both observations are present and
+/// differ; returns the new epoch label for the re-attach log. `None` (first observation,
+/// absent/corrupt ledger, or quiet) = record-only.
+fn epoch_bump<'a>(prev: &Option<String>, next: &'a Option<String>) -> Option<&'a str> {
+    if prev.is_some() && next.as_deref().is_some_and(|h| prev.as_deref() != Some(h)) {
+        return next.as_deref();
+    }
+    None
+}
+
+/// T1b3 (k11): rebuild the two config-sensitive monitors against the current on-disk
+/// host.yaml (grace window restarts with the fresh topology; the old FlowMonitor's Drop
+/// detaches its bus subscriptions + drain tasks). Unreadable host.yaml keeps the current
+/// monitors (warn, C15) — repair rides the next epoch flip or a restart (deliberately simple).
+fn reattach_monitors(
+    dir: &Path,
+    token: &Option<(CapabilityToken, Ed25519VerifyingKey)>,
+    topology: &mut TopologyMonitor,
+    flow: &mut Option<FlowMonitor>,
+    epoch: &str,
+) {
+    let cfg_path = dir.join("etc").join("host.yaml");
+    let Ok(host_toml) = std::fs::read_to_string(&cfg_path) else {
+        tracing::warn!(path = %cfg_path.display(), "monitor re-attach: host.yaml unreadable -- keeping current monitors");
+        return;
+    };
+    *topology = TopologyMonitor::new(host_toml.clone());
+    *flow = match token {
+        Some((tok, vk)) => match FlowMonitor::attach(host_toml, tok, vk) {
+            Ok(m) => Some(m),
+            Err(e) => {
+                tracing::error!(
+                    "monitor re-attach: data-flow attach failed: {e} -- flow paused until the next epoch"
+                );
+                None
+            }
+        },
+        None => None,
+    };
+    tracing::info!("telemetry monitors re-attached (config epoch {})", short12(epoch));
 }
 
 /// Aggregate the three snapshots -> the StatusReport signaling message (pure function, covered by the E3 unit tests).
@@ -395,5 +454,16 @@ mod tests {
             }
             other => panic!("expected StatusReport, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn epoch_bump_requires_two_present_differing_epochs() {
+        let none: Option<String> = None;
+        let a = || Some("a".to_string());
+        let b = || Some("b".to_string());
+        assert_eq!(epoch_bump(&none, &a()), None, "first observation records only");
+        assert_eq!(epoch_bump(&a(), &none), None, "absent ledger records only");
+        assert_eq!(epoch_bump(&a(), &a()), None, "same epoch is quiet");
+        assert_eq!(epoch_bump(&a(), &b()), Some("b"), "epoch flip re-attaches");
     }
 }

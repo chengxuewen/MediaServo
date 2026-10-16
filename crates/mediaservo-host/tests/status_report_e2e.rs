@@ -142,6 +142,7 @@ async fn status_report_reaches_mock_server_with_expected_content() {
         handle,
         Duration::from_millis(300),
         std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        None, // T1b3: no ledger dir -> telemetry monitors stay pinned (report-only test)
     );
     server.await.unwrap();
 }

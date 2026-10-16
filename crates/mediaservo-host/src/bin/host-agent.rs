@@ -8,7 +8,13 @@
 //!
 //! E1-E3 monitoring (topology/data-flow/signaling + status reporting) is driven by [`spawn_status_reporter`]
 //! as a single loop (since E3 it replaces the standalone E1/E2 loops; behavior and logs unchanged).
+//!
+//! T1b3 (k2/k11/EX-3): all three config bells (push-immediate, file-watch, boot) execute through
+//! [`mediaservo_host::config_core`] -- the file write is the bell, the core is the executor.
 
+use mediaservo_host::config_core::{
+    self, ExecuteOpts, Ledger, Outcome, Topology, WatchAction, file_hash, short12, watch_tick,
+};
 use mediaservo_host::gateway::{GatewayConfig, GatewayHandle, run_gateway};
 use mediaservo_host::init_logging;
 use mediaservo_host::monitor::signal::{STATUS_INTERVAL, spawn_status_reporter};
@@ -135,9 +141,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_version = Arc::new(AtomicU64::new(
         config_dir.as_deref().map(mediaservo_host::translate::recover_config_version).unwrap_or(0),
     ));
+    // T1b3 (EX-3): boot config pass BEFORE the bells go live -- pending-commit fast path first,
+    // full core only when the ledger disagrees with the on-disk fingerprint. Blocking (subprocess +
+    // flock waits) => spawn_blocking even though startup is serial by construction.
+    if let Some(dir) = &config_dir {
+        let d = dir.clone();
+        if let Err(e) = tokio::task::spawn_blocking(move || boot_config_pass(&d)).await {
+            tracing::error!("boot config pass join failed: {e}");
+        }
+    }
     // E4: the cloud config apply loop (polls the gateway every 500ms for a pending ConfigPush; the latest wins over older)
+    // T1b3 (k2): plus the agent-owned file-watch bell for local edits (2s sampling, debounce).
     match &config_dir {
-        Some(dir) => spawn_config_applier(gateway.clone(), dir.clone(), config_version.clone()),
+        Some(dir) => {
+            spawn_config_applier(gateway.clone(), dir.clone(), config_version.clone());
+            spawn_config_watcher(dir.clone());
+        }
         None => tracing::warn!(
             "--config not provided (<dir>/etc/host.yaml cannot be derived) -- cloud config push disabled"
         ),
@@ -149,14 +168,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         gateway,
         STATUS_INTERVAL,
         config_version,
+        config_dir,
     );
     wait_shutdown().await;
     Ok(())
 }
 
+/// Shared outcome audit for the three config bells (push / local / boot).
+/// NoOp carries the "already current" meaning: the in-lock fingerprint re-check inside the core
+/// is the correctness boundary, so a bell-level short-circuit is always honest to log.
+fn log_core_outcome(bell: &str, o: &Outcome) {
+    match o {
+        Outcome::Applied { hash } => {
+            tracing::info!(hash = short12(hash), "config-core ({bell}): applied")
+        }
+        Outcome::NoOp { hash } => {
+            tracing::info!(hash = short12(hash), "config-core ({bell}): config already current")
+        }
+        Outcome::Refused { reason } => tracing::error!("config-core ({bell}): refused -- {reason}"),
+        Outcome::Residue { survivors } => tracing::error!(
+            "config-core ({bell}): refused-residue -- {} survivor(s) still alive: {survivors:?}",
+            survivors.len()
+        ),
+    }
+}
+
 /// E4: the cloud config apply loop -- polls the gateway for a pending ConfigPush (500ms; the latest wins over older).
-/// A successful apply -> the version goes into StatusReport.config_version; a rejection -> handle_config_push already
-/// logged the warn audit (C15); an oxmgr apply failure -> the error audit (the apply already hit disk, and the next process restart self-heals).
+/// T1b3 (k2): the push-immediate bell runs the config-core instead of the raw `oxmgr_apply` bypass:
+/// `handle_config_push` (validate -> backup -> atomic write) stays the BELL (the write is the fact),
+/// the core is the EXECUTOR (teardown gate, staging, ledger). ConfigVersion advances ONLY on
+/// Applied/NoOp -- a Refused/Residue keeps the old version in StatusReport so the cloud sees the
+/// push did not land (honest reporting; ConfigPush stays one-way: the ack is the heartbeat echo).
 fn spawn_config_applier(handle: GatewayHandle, dir: PathBuf, config_version: Arc<AtomicU64>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(500));
@@ -168,13 +210,124 @@ fn spawn_config_applier(handle: GatewayHandle, dir: PathBuf, config_version: Arc
                 config_version.load(Ordering::Relaxed),
                 &push,
             ) {
-                config_version.store(v, Ordering::Relaxed);
-                if let Err(e) = mediaservo_host::translate::oxmgr_apply(&dir) {
-                    tracing::error!(version = v, "ConfigPush oxmgr apply failed: {e}");
+                let dir2 = dir.clone();
+                let res = tokio::task::spawn_blocking(move || {
+                    config_core::execute(
+                        &dir2,
+                        Topology::AgentRun,
+                        false,
+                        &ExecuteOpts { origin: "push", actor: None },
+                    )
+                })
+                .await;
+                match res {
+                    Ok(Ok(o)) => {
+                        if matches!(o, Outcome::Applied { .. } | Outcome::NoOp { .. }) {
+                            config_version.store(v, Ordering::Relaxed);
+                        }
+                        log_core_outcome("push", &o);
+                    }
+                    Ok(Err(e)) => tracing::error!(version = v, "config-core (push) failed: {e}"),
+                    Err(e) => {
+                        tracing::error!(version = v, "config-core (push) join failed: {e}")
+                    }
                 }
             } // the rejection reason is already logged as a warn audit by handle_config_push
         }
     });
+}
+
+/// T1b3 (k2): the file-watch bell -- local edits to etc/host.yaml are picked up without the
+/// cloud (2s sampling, [`watch_tick`] debounce: two equal samples differing from the baseline).
+/// On trigger the same AgentRun core executes (origin="local"); the core's flock serializes it
+/// against the push bell. This is the agent side of "edit the file on the vehicle, then apply":
+/// oxmgr `watch` still hot-restarts pure content edits, the core owns roster-level changes.
+fn spawn_config_watcher(dir: PathBuf) {
+    tokio::spawn(async move {
+        let cfg_path = dir.join("etc").join("host.yaml");
+        let mut baseline = std::fs::read(&cfg_path).map(|b| file_hash(&b)).unwrap_or_default();
+        let mut prev: Option<String> = None;
+        let mut io_warned = false;
+        let mut tick = tokio::time::interval(Duration::from_secs(2));
+        loop {
+            tick.tick().await;
+            let cur = match std::fs::read(&cfg_path) {
+                Ok(b) => Some(file_hash(&b)),
+                Err(e) => {
+                    if !io_warned {
+                        tracing::warn!(path = %cfg_path.display(), "file-watch bell: host.yaml unreadable: {e} (warned once, keeps polling)");
+                        io_warned = true;
+                    }
+                    None
+                }
+            };
+            let next = cur.clone();
+            let action = watch_tick(cur, std::mem::take(&mut prev), &baseline);
+            prev = next;
+            if let WatchAction::Trigger(hash) = action {
+                baseline = hash;
+                tracing::info!(
+                    hash = short12(&baseline),
+                    "file-watch bell: local host.yaml change confirmed"
+                );
+                let d = dir.clone();
+                let res = tokio::task::spawn_blocking(move || {
+                    config_core::execute(
+                        &d,
+                        Topology::AgentRun,
+                        false,
+                        &ExecuteOpts { origin: "local", actor: None },
+                    )
+                })
+                .await;
+                match res {
+                    Ok(Ok(o)) => log_core_outcome("local", &o),
+                    Ok(Err(e)) => tracing::error!("config-core (local) failed: {e}"),
+                    Err(e) => tracing::error!("config-core (local) join failed: {e}"),
+                }
+            }
+        }
+    });
+}
+
+/// T1b3 (EX-3): the boot config pass. Fast path first: a previous run that crashed between
+/// activation and reconcile left `pending_apply` set -- when the live registry already
+/// reconciles with the activated roster, [`config_core::try_commit_pending`] commits the ledger
+/// with zero churn. Otherwise the full core runs ONLY when the ledger disagrees with the on-disk
+/// fingerprint or a pending flag is raised (fresh boot with an equal fingerprint stays quiet).
+fn boot_config_pass(dir: &Path) {
+    let committed = config_core::try_commit_pending(dir).unwrap_or_else(|e| {
+        tracing::warn!("boot fast path unavailable: {e}");
+        false
+    });
+    if committed {
+        return;
+    }
+    let Ok(bytes) = std::fs::read(dir.join("etc").join("host.yaml")) else {
+        tracing::warn!(
+            "boot bell: etc/host.yaml unreadable -- nothing to reconcile (push path self-heals)"
+        );
+        return;
+    };
+    let hash = file_hash(&bytes);
+    let led = Ledger::load(dir);
+    let stale = led.running.as_ref().is_none_or(|r| r.hash != hash) || led.flags.pending;
+    if !stale {
+        return;
+    }
+    tracing::info!(
+        hash = short12(&hash),
+        "boot bell: config differs from the ledger (or pending set) -- running config-core"
+    );
+    match config_core::execute(
+        dir,
+        Topology::AgentRun,
+        false,
+        &ExecuteOpts { origin: "boot", actor: None },
+    ) {
+        Ok(o) => log_core_outcome("boot", &o),
+        Err(e) => tracing::error!("config-core (boot) failed: {e}"),
+    }
 }
 
 /// Wait for SIGINT/SIGTERM (the unix main path; other platforms only get ctrl_c).
