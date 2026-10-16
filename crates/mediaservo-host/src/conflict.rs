@@ -162,6 +162,70 @@ pub fn stop_sweep_names(app_prefix: &str) -> Vec<String> {
     BASES.iter().flat_map(|b| [format!("{app_prefix}{b}"), format!("host-{b}")]).collect()
 }
 
+/// T1-k10 (host-ops-hardening R16): a family process that outlived cmd_stop's sweep.
+#[derive(Debug, Clone)]
+pub struct SurvivorInfo {
+    pub pid: u32,
+    /// Cmdline first segment (full path; comm-truncation-safe per PIT-15).
+    pub first_arg: String,
+    /// OXMGR_HOME from the process environ (same-uid readable), else "owner unknown".
+    pub owner: String,
+}
+
+/// Pure name predicate: basename of the cmdline first segment starts with ANY family
+/// name (covers instance names like msrtc-capturer-cam0); dev/test binaries under a
+/// `/target/` path component never match. Self-pid exclusion is caller-side.
+fn survivor_match(first_arg: &str, family: &[String]) -> bool {
+    if first_arg.contains("/target/") {
+        return false;
+    }
+    let base = first_arg.rsplit('/').next().unwrap_or(first_arg);
+    family.iter().any(|n| base.starts_with(n.as_str()))
+}
+
+/// Extract OXMGR_HOME from a NUL-separated /proc/<pid>/environ blob (KEY=VALUE entries).
+fn parse_oxmgr_home(environ: &[u8]) -> Option<String> {
+    environ.split(|b| *b == 0).find_map(|kv| {
+        let v = kv.strip_prefix(b"OXMGR_HOME=")?;
+        (!v.is_empty()).then(|| String::from_utf8_lossy(v).into_owned())
+    })
+}
+
+/// Post-stop ground truth (report-only, NEVER kills — F1 name-don-t-kill): anything in
+/// the process table whose cmdline first segment hits the brand-aware family set after
+/// the sweep was "verified". Closes the branded-sweep false-green (W1 evidence round).
+/// `_dir` is kept for the instance-scoping follow-up (batch spec signature); the current
+/// check is namespace-wide via the family set + target/ exclusion.
+pub fn stop_survivors(_dir: &std::path::Path) -> Vec<SurvivorInfo> {
+    let family = stop_sweep_names(mediaservo_common::brand::media_brand().app_prefix);
+    let mut out = Vec::new();
+    for pid in proc_pids() {
+        if pid == std::process::id() {
+            continue;
+        }
+        let Ok(cmd) = std::fs::read_to_string(format!("/proc/{pid}/cmdline")) else {
+            continue;
+        };
+        let first = cmd.split('\0').next().unwrap_or("");
+        if !survivor_match(first, &family) {
+            continue;
+        }
+        // exe under cargo target/ = a dev/test binary, not an instance survivor
+        let exe = std::fs::read_link(format!("/proc/{pid}/exe"))
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if exe.contains("/target/") {
+            continue;
+        }
+        let owner = std::fs::read(format!("/proc/{pid}/environ"))
+            .ok()
+            .and_then(|env| parse_oxmgr_home(&env))
+            .unwrap_or_else(|| "owner unknown".to_string());
+        out.push(SurvivorInfo { pid, first_arg: first.to_string(), owner });
+    }
+    out
+}
+
 /// Human-readable report output (eprintln; gives a disposition suggestion when an occupier is an upgrade leftover, F1 name-don-t-kill).
 pub fn print_report(reports: &[ConflictReport], port: u16) {
     if reports.is_empty() {
@@ -260,5 +324,52 @@ mod tests {
         let _ = child.wait();
         let _ = std::fs::remove_dir_all(&dir);
         assert!(!gone, "branded survivor must count as leftover (found => gone=false)");
+    }
+
+    /// k10 pin: brand basename hits (branded, legacy, instance name) and misses;
+    /// /target/ component never matches (dev binaries are not survivors).
+    #[test]
+    fn survivor_match_covers_brand_family() {
+        let family = stop_sweep_names("msrtc-");
+        assert!(survivor_match("/opt/x/bin/msrtc-agent", &family));
+        assert!(survivor_match("msrtc-capturer-cam0", &family), "instance names count");
+        assert!(survivor_match("/opt/x/bin/host-agent", &family), "legacy form counts");
+        assert!(survivor_match("/opt/x/bin/host-recorder", &family));
+        assert!(!survivor_match("/usr/bin/nginx", &family));
+        assert!(!survivor_match("/repo/target/debug/msrtc-agent", &family), "target/ excluded");
+        assert!(!survivor_match("/repo/target/debug/oxmgr", &family));
+    }
+
+    /// k10 pin: OXMGR_HOME parsed from NUL-separated environ; absent/empty key -> None.
+    #[test]
+    fn parse_oxmgr_home_reads_environ() {
+        let env = b"PATH=/usr/bin\0OXMGR_HOME=/srv/host/run/oxmgr\0RUST_LOG=info\0";
+        assert_eq!(parse_oxmgr_home(env).as_deref(), Some("/srv/host/run/oxmgr"));
+        assert_eq!(parse_oxmgr_home(b"PATH=/usr/bin\0HOME=/root\0"), None);
+        assert_eq!(parse_oxmgr_home(b"OXMGR_HOME=\0"), None, "empty value is not an owner");
+    }
+
+    /// k10 Linux fixture: a live process named after the CURRENT brand's agent must be
+    /// reported with owner unknown (spawned without oxmgr env) and vanish after kill.
+    /// (Name derives from the process's own brand: media_brand() is OnceLock-cached, so
+    /// a hardcoded "msrtc-" name would be red on the default-brand test box.)
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stop_survivors_finds_and_loses_live_fixture() {
+        let branded = format!("{}agent", mediaservo_common::brand::media_brand().app_prefix);
+        let dir = std::env::temp_dir().join(format!("k10-survivor-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join(&branded);
+        std::fs::copy("/bin/sleep", &fake).unwrap();
+        let mut child =
+            std::process::Command::new(&fake).arg("30").spawn().expect("spawn k10 fixture");
+        let found = stop_survivors(&dir);
+        let hit = found.iter().find(|s| s.first_arg == fake.to_string_lossy()).cloned();
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&dir);
+        let hit = hit.unwrap_or_else(|| panic!("fixture {branded} must be reported: {found:?}"));
+        assert_eq!(hit.owner, "owner unknown", "no OXMGR_HOME in the fixture environ");
+        assert!(stop_survivors(&dir).iter().all(|s| s.pid != hit.pid), "killed pid must be gone");
     }
 }

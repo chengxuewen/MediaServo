@@ -16,6 +16,20 @@ teams); for development process details, consult git log directly. Newest versio
   migration gate rerun of test-cxx).
 
 ### Added
+- [host] recorder roster tri-state (host-ops-hardening T1-e): `record.enabled: false` in
+  host.yaml now ALSO removes the recorder app from the rendered oxfile roster (no process, no
+  oxmgr slot). Key absent or `true` keep the legacy shape byte-identical (the process starts
+  and parks immediately when disabled). The program-side gate (`record_config` default + the
+  expected process set) is unchanged; render↔expected alignment is pinned by tests.
+- [host] iceoryx2 residue drift sentinel (T1-c): `status` and `doctor` count node dirs under
+  `/tmp/iceoryx2/nodes` plus `/dev/shm/iox2_*` entries against the live app count (slack 8)
+  and WARN on persistent drift — the corpse signature left by refused-start or crash churn
+  (start/restart self-clears, C25).
+- [host][server] startup log retention + decision audit (T1-d, N5 ruling A): the systemd
+  anchor unit now carries `OXMGR_LOG_MAX_SIZE_MB=10` / `OXMGR_LOG_MAX_FILES=3` /
+  `OXMGR_LOG_MAX_DAYS=7`, and a successful `startup on` prints the audit pointer
+  `daemon decision audit: journalctl --user -u <unit> -n 50` (journald captures the daemon
+  stdout — daemon reload decisions become auditable after the fact).
 - [protocol] wire-compat-governance (C50, user-ratified 2026-10-14): four-plane compatibility
   governance convention — P1 signaling = dialect integer negotiation (min-clamp, 4101), P2
   media = capabilities content negotiation (no version numbers), P3 IPC/SHM = FrameMeta
@@ -52,6 +66,12 @@ teams); for development process details, consult git log directly. Newest versio
   guessing sealed) — completes the K3 promise that both sides tightened consistently.
 
 ### Changed
+- [host] `stop` now exits non-zero when survivors remain (T1-k10 post-stop ground truth):
+  after the sweep self-proof completes, the process table is re-checked for family processes
+  (brand-aware name set, dev binaries under a `/target/` path component excluded, own pid
+  excluded). Each survivor prints `stop: SURVIVOR pid=<pid> exe=<cmdline-first> owner=<OXMGR_HOME
+  or "owner unknown">` and flips the exit code to 1. Report-only — the check never kills
+  (name-don't-kill); an empty survivor set keeps today's exit behavior exactly.
 - [host] root fix for oxmgr CLI IPC daemon spawning (startup-stop-followups K3): (1) full
   instance env coverage — every oxmgr subprocess from the host CLI and the translate layer now
   sets both `OXMGR_HOME`+`OXMGR_DATA_DIR` (all four keys, same shape as server);

@@ -104,6 +104,8 @@ streams:
     source: "cam0"          # references sources[].id (minimal shape: encode/policy keys from defaults)
 
 record:
+  # false ALSO removes the recorder from the managed roster (no process, no oxmgr slot);
+  # omitting the key keeps legacy behavior (process starts and parks immediately).
   enabled: false
 
 control:

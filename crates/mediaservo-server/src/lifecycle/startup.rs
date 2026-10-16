@@ -223,6 +223,9 @@ Type=simple
 Environment=OXMGR_HOME={home}
 Environment=OXMGR_DAEMON_ADDR=127.0.0.1:{port}
 Environment=OXMGR_API_ADDR=127.0.0.1:{api}
+Environment=OXMGR_LOG_MAX_SIZE_MB=10
+Environment=OXMGR_LOG_MAX_FILES=3
+Environment=OXMGR_LOG_MAX_DAYS=7
 ExecStart={oxmgr} daemon run
 Restart=always
 RestartSec=2
@@ -715,6 +718,9 @@ fn startup_install(dir: &Path) -> i32 {
         );
     }
     println!("startup on: recommend loginctl enable-linger for cross-session survival");
+    println!(
+        "daemon decision audit: journalctl --user -u {unit_name} -n 50 (journald captures daemon stdout)"
+    );
     0
 }
 

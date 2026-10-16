@@ -575,6 +575,10 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
     // capturer instances need the full source config (reconnect_ms passthrough); streams need only their id.
     let sources = camera_configs(cfg)?;
     let (_, streams) = camera_and_stream_ids(cfg)?;
+    // T1-e roster tri-state: the render gate reads the RAW [record] enabled flag
+    // (record_enabled_raw), NOT the flattened record_config() default — absent/true/false
+    // must stay distinguishable here. Only explicit `enabled: false` drops the recorder app.
+    let record_enabled = record_enabled_raw(cfg)?;
 
     let mut out = format!(
         "version = 1\n\n[defaults]\nnamespace = \"{}\"\nrestart_policy = \"always\"\n",
@@ -600,6 +604,13 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
     let log_dir = inst_root.as_deref().map(|d| format!("{d}/run/logs"));
 
     for base in FIXED_APP_BASES {
+        // T1-e: explicit record.enabled=false → no recorder slot at all (no process, no
+        // oxmgr entry). Absent/Some(true) render exactly as before (byte-identical roster);
+        // the program gate (record_config unwrap_or(false) + expected_process_names) keeps
+        // its shape: absent = slot exists + process parks exit-0 = today's behavior.
+        if base == "recorder" && record_enabled == Some(false) {
+            continue;
+        }
         let name = app_name(base);
         let mut cmd = exe_cmd(&name);
         // C3: the fixed recorder app gets --config/--token appended like capturer/streamer
@@ -861,6 +872,15 @@ pub fn record_config(cfg: &str) -> Result<RecordConfig, String> {
         enabled: rec.enabled.unwrap_or(false),
         out_dir: PathBuf::from(rec.out_dir.unwrap_or_else(|| DEFAULT_RECORD_DIR.to_string())),
     })
+}
+
+/// Raw `[record] enabled` value without the program-side default: None = key omitted,
+/// Some(true)/Some(false) = explicit. The T1-e render gate trips ONLY on Some(false);
+/// record_config() keeps its `unwrap_or(false)` flattening for the process semantics.
+pub fn record_enabled_raw(cfg: &str) -> Result<Option<bool>, String> {
+    let cfg: HostConfig =
+        serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml parse failed: {e}"))?;
+    Ok(cfg.record.and_then(|r| r.enabled))
 }
 
 /// Look up a single video source config by id (not found → Ok(None)).
@@ -1939,5 +1959,57 @@ control:
         let e = write_oxfile(CFG_CONTROL, Path::new("/nonexistent-v5-guard-dir"))
             .expect_err("a missing key file must reject rendering");
         assert!(e.contains("hmac_key_file points to a missing file"), "{e}");
+    }
+
+    /// T1-e render-gate tri-state: absent / true keep the recorder in the roster (today's
+    /// byte shape); explicit false removes the app entirely.
+    #[test]
+    fn recorder_roster_tristate_render() {
+        let recorder = app_name("recorder");
+        assert!(
+            to_oxfile(CFG_V0).unwrap().contains(&recorder),
+            "record key omitted must render the recorder (legacy shape)"
+        );
+        let on = format!("{CFG_V0}\nrecord:\n  enabled: true\n");
+        assert!(
+            to_oxfile(&on).unwrap().contains(&recorder),
+            "enabled: true must render the recorder"
+        );
+        let off = format!("{CFG_V0}\nrecord:\n  enabled: false\n");
+        assert!(
+            !to_oxfile(&off).unwrap().contains(&recorder),
+            "enabled: false must drop the recorder from the managed roster entirely"
+        );
+    }
+
+    /// T1-e roster↔expected-set alignment pin: the two gate sites must agree —
+    /// false = out of both; absent = in roster + out of expected (today's shape, the
+    /// split that keeps the parked recorder from false-alarming ProcessMissing).
+    #[test]
+    fn recorder_roster_expected_set_alignment() {
+        let recorder = app_name("recorder");
+        let off = format!("{CFG_V0}\nrecord:\n  enabled: false\n");
+        assert!(!to_oxfile(&off).unwrap().contains(&recorder));
+        assert!(!expected_process_names(&off).unwrap().contains(&recorder));
+        let on = format!("{CFG_V0}\nrecord:\n  enabled: true\n");
+        assert!(to_oxfile(&on).unwrap().contains(&recorder));
+        assert!(expected_process_names(&on).unwrap().contains(&recorder));
+        // absent: render gate does not trip (in roster), program gate flattens to false (out of expected)
+        assert!(to_oxfile(CFG_V0).unwrap().contains(&recorder));
+        assert!(!expected_process_names(CFG_V0).unwrap().contains(&recorder));
+    }
+
+    /// record_enabled_raw keeps the tri-state that record_config() flattens away.
+    #[test]
+    fn record_enabled_raw_keeps_tristate() {
+        assert_eq!(record_enabled_raw(CFG_V0).unwrap(), None);
+        assert_eq!(
+            record_enabled_raw(&format!("{CFG_V0}\nrecord:\n  enabled: true\n")).unwrap(),
+            Some(true)
+        );
+        assert_eq!(
+            record_enabled_raw(&format!("{CFG_V0}\nrecord:\n  enabled: false\n")).unwrap(),
+            Some(false)
+        );
     }
 }
