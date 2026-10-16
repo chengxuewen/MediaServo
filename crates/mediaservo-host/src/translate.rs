@@ -1411,6 +1411,7 @@ sources:
             target: "p".into(),
             config: CFG_V0.into(),
             version,
+            actor: None,
         };
         assert_eq!(handle_config_push(dir.path(), 0, &push(7)).unwrap(), 7);
         let dup = handle_config_push(dir.path(), 7, &push(7)).unwrap_err();

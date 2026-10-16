@@ -1040,6 +1040,7 @@ mod tests {
             target: "veh-peer".into(),
             config: "sources:\n".into(),
             version: 3,
+            actor: None,
         };
         let targets = lock_state(&state).downstream(push.clone());
         assert!(targets.is_empty(), "ConfigPush must not enter child-process routing: {targets:?}");
@@ -1060,6 +1061,7 @@ mod tests {
             target: "other-peer".into(),
             config: "cfg".into(),
             version: 1,
+            actor: None,
         };
         assert!(lock_state(&state).downstream(wrong_peer).is_empty());
         let wrong_room = SignalingMessage::ConfigPush {
@@ -1067,6 +1069,7 @@ mod tests {
             target: "veh-peer".into(),
             config: "cfg".into(),
             version: 1,
+            actor: None,
         };
         assert!(lock_state(&state).downstream(wrong_room).is_empty());
         let handle = handle_for(state).0;

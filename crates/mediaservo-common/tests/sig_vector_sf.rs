@@ -1,6 +1,6 @@
-///! P1/T1.3 L1 contract fixture replay (sig_vector/sfu/*.json) - cross-language single source:
-///! the same JSON set is replayed by this test (Rust) and by www/packages/client vitest (TS),
-///! asserting wire shape + semantic fields. Anchor pattern = the device-enroll devices.rs pinned constants, upgraded to a file form.
+//! P1/T1.3 L1 contract fixture replay (sig_vector/sfu/*.json) - cross-language single source:
+//! the same JSON set is replayed by this test (Rust) and by www/packages/client vitest (TS),
+//! asserting wire shape + semantic fields. Anchor pattern = the device-enroll devices.rs pinned constants, upgraded to a file form.
 use mediaservo_common::protocol::{ControlAck, ControlEnvelope, SignalingMessage};
 use serde_json::Value;
 

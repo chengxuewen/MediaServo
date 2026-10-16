@@ -618,6 +618,10 @@ mod tests {
             },
             ts: 1000,
             config_version: 0,
+            config_running: None,
+            config_file: None,
+            config_last_push: None,
+            config_flags: None,
         };
         let flow = |id: &str, connected: bool| StreamFlowJson {
             id: id.into(),

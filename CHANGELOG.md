@@ -6,6 +6,10 @@ teams); for development process details, consult git log directly. Newest versio
 ## Unreleased
 
 ### ⚠ Upgrade Notes
+- [protocol] The StatusReport config echo is PRESENCE-gated, not version-gated: a vehicle that
+  never ran the config core (or an old agent) simply omits the fields — consumers must render
+  "unknown/gray" for absent fields, never infer a healthy default. Same rule for ConfigPush
+  `actor` (absent = old server or unknown origin).
 - [host][server][sdk-client][sdk-field] english-only-migration (C49): all artifacts and
   user-visible text are now English — log/error/audit message WORDING switched from Chinese to
   English. Operational greps must switch keywords (e.g. streamer subscription line now
@@ -21,6 +25,12 @@ teams); for development process details, consult git log directly. Newest versio
   ghost slots); `stop` now exits non-zero when survivors remain.
 
 ### Added
+- [protocol] StatusReport gains the optional config-ledger echo quartet `config_running` /
+  `config_file` / `config_last_push` (short12 fingerprints) + `config_flags` (pending/error/
+  conflict lamps); ConfigPush gains optional `actor` (the authenticated admin account behind
+  the REST push). Purely additive: serde defaults + skip keep the old wire byte-identical, no
+  dialect bump. Absent echo = legacy vehicle (no ledger on disk) — the cloud shows GRAY, never
+  green (T1b6 k9).
 - [host] config-ledger block in `status` (running/file/last-push fingerprints + pending/
   boot-pending/conflict lamps + newest history) and a WARN-tier config-lamp check in `doctor`
   (T1b5 k5/k8; conflict recomputed at each commit point and each landed cloud push).

@@ -10,15 +10,15 @@
 //! or a send failure both self-heal in the next cycle.
 
 use mediaservo_common::protocol::{
-    ChildSignalJson, ProcessStateJson, SignalStatusJson, SignalingMessage, StreamFlowJson,
-    TopicFlowJson,
+    ChildSignalJson, ConfigFlagsEcho, ProcessStateJson, SignalStatusJson, SignalingMessage,
+    StreamFlowJson, TopicFlowJson,
 };
 use mediaservo_link::{CapabilityToken, Ed25519VerifyingKey};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::config_core::{Ledger, short12};
+use crate::config_core::{Ledger, file_hash, short12};
 use crate::gateway::{ChildStatus, GatewayHandle, GatewayStatus};
 use crate::monitor::flow::{FlowMonitor, FlowSnapshot, StreamFlow, TopicFlow};
 use crate::monitor::topology::{DEFAULT_GRACE, Mismatch, TopologyMonitor, TopologySnapshot};
@@ -163,12 +163,19 @@ pub fn spawn_status_reporter(
                 remote_connected = sig.gateway.remote.connected,
                 "signaling snapshot"
             );
+            // T1b6 (k9): fresh disk read each tick (<1ms on a 5s cadence) — the echo must
+            // reflect the on-disk truth of THIS window, never a cached memo.
+            let echo = match &dir {
+                Some(d) => ConfigEcho::collect(d),
+                None => ConfigEcho::default(),
+            };
             let report = build_status_report(
                 &room,
                 &topo,
                 &flow_snap,
                 &sig,
                 config_version.load(Ordering::Relaxed),
+                &echo,
             );
             if let Err(e) = gateway.send_remote(report) {
                 tracing::warn!("failed to send the StatusReport: {e}"); // C15
@@ -241,6 +248,42 @@ fn reattach_monitors(
     tracing::info!("telemetry monitors re-attached (config epoch {})", short12(epoch));
 }
 
+/// T1b6 (k9): the four config facts read from disk for the StatusReport echo.
+/// Ledger absent => all None (pre-T1″ vehicle / never applied): the cloud shows GRAY,
+/// never green (PC-2 presence gate; nothing here is version-gated).
+#[derive(Debug, Default)]
+struct ConfigEcho {
+    running: Option<String>,
+    file: Option<String>,
+    last_push: Option<String>,
+    flags: Option<ConfigFlagsEcho>,
+}
+
+impl ConfigEcho {
+    /// Collect from the instance dir. `file` is hashed from the CURRENT host.yaml bytes
+    /// on demand (§9.1: a memoized file hash is erasable); flags ride only a present ledger
+    /// (a default ledger with no file would fabricate a "lamps all green" lie).
+    fn collect(dir: &Path) -> Self {
+        if !Ledger::path(dir).exists() {
+            return Self::default();
+        }
+        let ledger = Ledger::load(dir);
+        let file = std::fs::read(dir.join("etc").join("host.yaml"))
+            .ok()
+            .map(|bytes| short12(&file_hash(&bytes)).to_owned());
+        Self {
+            running: ledger.running.as_ref().map(|r| short12(&r.hash).to_owned()),
+            file,
+            last_push: ledger.last_push.as_ref().map(|p| short12(&p.hash).to_owned()),
+            flags: Some(ConfigFlagsEcho {
+                pending: ledger.flags.pending,
+                error: ledger.flags.error,
+                conflict: ledger.flags.conflict,
+            }),
+        }
+    }
+}
+
 /// Aggregate the three snapshots -> the StatusReport signaling message (pure function, covered by the E3 unit tests).
 fn build_status_report(
     room_id: &str,
@@ -248,6 +291,7 @@ fn build_status_report(
     flow: &FlowSnapshot,
     signal: &SignalSnapshot,
     config_version: u64,
+    echo: &ConfigEcho,
 ) -> SignalingMessage {
     let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     SignalingMessage::StatusReport {
@@ -258,6 +302,10 @@ fn build_status_report(
         signal: signal_to_json(signal),
         ts,
         config_version,
+        config_running: echo.running.clone(),
+        config_file: echo.file.clone(),
+        config_last_push: echo.last_push.clone(),
+        config_flags: echo.flags.clone(),
     }
 }
 
@@ -400,7 +448,14 @@ mod tests {
 
     #[test]
     fn build_status_report_aggregates_three_snapshots() {
-        let msg = build_status_report("vehicle-1", &topo_snap(), &flow_snap(), &signal_snap(), 0);
+        let msg = build_status_report(
+            "vehicle-1",
+            &topo_snap(),
+            &flow_snap(),
+            &signal_snap(),
+            0,
+            &ConfigEcho::default(),
+        );
         match msg {
             SignalingMessage::StatusReport {
                 room_id,
@@ -410,6 +465,10 @@ mod tests {
                 signal,
                 ts,
                 config_version,
+                config_running,
+                config_file,
+                config_last_push,
+                config_flags,
             } => {
                 assert_eq!(room_id, "vehicle-1");
                 assert_eq!(topics[0].topic, "camera/cam0");
@@ -422,6 +481,10 @@ mod tests {
                 assert_eq!(signal.agent_uptime_secs, 123);
                 assert!(ts > 0, "ts should be unix seconds");
                 assert_eq!(config_version, 0);
+                assert_eq!(config_running, None, "default echo = legacy shape");
+                assert_eq!(config_file, None);
+                assert_eq!(config_last_push, None);
+                assert_eq!(config_flags, None);
             }
             other => panic!("expected StatusReport, got {other:?}"),
         }
@@ -430,7 +493,7 @@ mod tests {
     #[test]
     fn empty_flow_snapshot_serializes_empty_sections() {
         let flow = FlowSnapshot::default();
-        let msg = build_status_report("r", &topo_snap(), &flow, &signal_snap(), 0);
+        let msg = build_status_report("r", &topo_snap(), &flow, &signal_snap(), 0, &ConfigEcho::default());
         match msg {
             SignalingMessage::StatusReport { topics, streams, .. } => {
                 assert!(topics.is_empty());
@@ -443,7 +506,7 @@ mod tests {
     #[test]
     fn flow_stats_conversions_preserve_fields() {
         let snap = flow_snap();
-        let msg = build_status_report("r", &topo_snap(), &snap, &signal_snap(), 3);
+        let msg = build_status_report("r", &topo_snap(), &snap, &signal_snap(), 3, &ConfigEcho::default());
         match msg {
             SignalingMessage::StatusReport { topics, streams, config_version, .. } => {
                 assert_eq!(topics[0].fps, 29.0);
@@ -465,5 +528,63 @@ mod tests {
         assert_eq!(epoch_bump(&a(), &none), None, "absent ledger records only");
         assert_eq!(epoch_bump(&a(), &a()), None, "same epoch is quiet");
         assert_eq!(epoch_bump(&a(), &b()), Some("b"), "epoch flip re-attaches");
+    }
+
+    #[test]
+    fn config_echo_absent_ledger_is_all_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let echo = ConfigEcho::collect(dir.path());
+        assert_eq!(echo.running, None);
+        assert_eq!(echo.file, None);
+        assert_eq!(echo.last_push, None);
+        assert_eq!(echo.flags, None, "no ledger file = no lamps (honest legacy shape)");
+    }
+
+    #[test]
+    fn config_echo_collects_ledger_facts_and_file_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("run")).unwrap();
+        std::fs::create_dir_all(dir.path().join("etc")).unwrap();
+        let yaml = b"sources: [];\n";
+        std::fs::write(dir.path().join("etc").join("host.yaml"), yaml).unwrap();
+        let full = file_hash(yaml); // 64 hex; the echo carries the short12 display form
+        std::fs::write(
+            Ledger::path(dir.path()),
+            format!(
+                "{{\"running\":{{\"hash\":\"{full}\",\"at\":\"t\",\"origin\":\"push\"}},\
+\"last_push\":{{\"hash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"at\":\"t\"}},\
+\"flags\":{{\"pending\":true,\"error\":false,\"conflict\":true}}}}",
+            ),
+        )
+        .unwrap();
+        let echo = ConfigEcho::collect(dir.path());
+        assert_eq!(echo.running.as_deref(), Some(short12(&full)));
+        assert_eq!(echo.file.as_deref(), Some(short12(&full)));
+        assert_eq!(echo.last_push.as_deref(), Some("0123456789ab"));
+        assert_eq!(echo.flags, Some(ConfigFlagsEcho { pending: true, error: false, conflict: true }));
+
+        let msg = build_status_report(
+            "r",
+            &topo_snap(),
+            &FlowSnapshot::default(),
+            &signal_snap(),
+            0,
+            &echo,
+        );
+        match msg {
+            SignalingMessage::StatusReport {
+                config_running,
+                config_file,
+                config_last_push,
+                config_flags,
+                ..
+            } => {
+                assert_eq!(config_running.as_deref(), Some(short12(&full)));
+                assert_eq!(config_file.as_deref(), Some(short12(&full)));
+                assert_eq!(config_last_push.as_deref(), Some("0123456789ab"));
+                assert_eq!(config_flags, Some(ConfigFlagsEcho { pending: true, error: false, conflict: true }));
+            }
+            other => panic!("expected StatusReport, got {other:?}"),
+        }
     }
 }

@@ -1,0 +1,23 @@
+{
+  "name": "config-echo-absent",
+  "kind": "signal",
+  "wire": {
+    "type": "status_report",
+    "room_id": "vehicle-1",
+    "topics": [],
+    "streams": [],
+    "processes": [],
+    "signal": {
+      "remote_connected": true,
+      "remote_peer_id": "veh-peer",
+      "children": [],
+      "agent_uptime_secs": 60
+    },
+    "ts": 1700000000,
+    "config_version": 7
+  },
+  "checks": {
+    "type": "status_report",
+    "config_version": 7
+  }
+}

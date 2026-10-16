@@ -395,11 +395,12 @@ pub struct ConfigPushRequest {
 
 async fn push_config(
     State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
     axum::Json(req): axum::Json<ConfigPushRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     state
         .signaling
-        .push_config(&req.room_id, &req.config, req.version)
+        .push_config(&req.room_id, &req.config, req.version, Some(claims.sub))
         .map(|_| Json(serde_json::json!({"pushed": req.room_id, "version": req.version})))
         .map_err(|e| {
             tracing::error!("config push failed: {e}");
@@ -2111,6 +2112,10 @@ mod g3_tests {
             },
             ts: 1000,
             config_version: 0,
+            config_running: None,
+            config_file: None,
+            config_last_push: None,
+            config_flags: None,
         };
         state.signaling.status_registry.store("ms-car1", report);
         let secret = state.admin_jwt_secret.clone().unwrap();

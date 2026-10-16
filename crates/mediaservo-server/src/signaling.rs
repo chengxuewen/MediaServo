@@ -225,8 +225,15 @@ impl SignalingServer {
     }
     /// E4 cloud config push: pushes the host.toml full text to the room's Host (the vehicle host-agent session).
     /// Delivered via the room broadcast channel (target = the host peer_id; the receiver filters by target).
+    /// `actor` = the authenticated admin account behind the REST call (T1b6 k9; None = unknown origin).
     /// Returns Err on failure -- the caller must log it (C15).
-    pub fn push_config(&self, room_id: &str, config: &str, version: u64) -> Result<(), String> {
+    pub fn push_config(
+        &self,
+        room_id: &str,
+        config: &str,
+        version: u64,
+        actor: Option<String>,
+    ) -> Result<(), String> {
         let host_peer = self
             .room_manager
             .list_rooms()
@@ -239,6 +246,7 @@ impl SignalingServer {
             target: host_peer.clone(),
             config: config.to_string(),
             version,
+            actor: actor.clone(),
         };
         let text = serde_json::to_string(&msg)
             .map_err(|e| format!("push_config: serialization failed: {e}"))?;
@@ -248,6 +256,7 @@ impl SignalingServer {
             room_id,
             peer = %host_peer,
             version,
+            actor = actor.as_deref().unwrap_or("-"),
             "ConfigPush delivered (the agent correlates it via StatusReport.config_version after applying)"
         );
         Ok(())
@@ -2693,14 +2702,17 @@ mod tests {
         let tx = server.get_or_create_channel("vehicle-1");
         let mut rx = tx.subscribe();
 
-        server.push_config("vehicle-1", "[[cameras]]\nid = \"cam0\"\n", 7).expect("push");
+        server
+            .push_config("vehicle-1", "[[cameras]]\nid = \"cam0\"\n", 7, Some("ops-admin".into()))
+            .expect("push");
         let text = rx.try_recv().expect("the channel should hold a ConfigPush");
         match serde_json::from_str::<SignalingMessage>(&text).expect("parse") {
-            SignalingMessage::ConfigPush { room_id, target, config, version } => {
+            SignalingMessage::ConfigPush { room_id, target, config, version, actor } => {
                 assert_eq!(room_id, "vehicle-1");
                 assert_eq!(target, "veh-peer", "target should be the room's host peer");
                 assert!(config.contains("cam0"));
                 assert_eq!(version, 7);
+                assert_eq!(actor.as_deref(), Some("ops-admin"), "the admin actor rides the push (T1b6)");
             }
             other => panic!("expected ConfigPush, got {other:?}"),
         }
@@ -2766,7 +2778,7 @@ mod tests {
     #[cfg(feature = "sfu-mediasoup")] // handle_sfu_message exists only in the SFU posture (paying down the on-record stub --tests E0425 case)
     async fn push_config_errors_when_room_has_no_host() {
         let server = new_test_server().await;
-        let err = server.push_config("empty-room", "cfg", 1).unwrap_err();
+        let err = server.push_config("empty-room", "cfg", 1, None).unwrap_err();
         assert!(err.contains("has no host"), "a host-less room must error: {err}");
     }
 

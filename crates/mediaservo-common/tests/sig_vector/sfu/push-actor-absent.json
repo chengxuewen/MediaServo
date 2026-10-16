@@ -1,0 +1,15 @@
+{
+  "name": "push-actor-absent",
+  "kind": "signal",
+  "wire": {
+    "type": "config_push",
+    "room_id": "vehicle-1",
+    "target": "veh-peer",
+    "config": "sources: []\n",
+    "version": 7
+  },
+  "checks": {
+    "type": "config_push",
+    "version": 7
+  }
+}

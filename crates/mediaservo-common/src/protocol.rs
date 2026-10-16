@@ -226,6 +226,21 @@ pub enum SignalingMessage {
         ts: u64,
         /// host.toml config version (tied to E4 ConfigPush; currently always 0).
         config_version: u64,
+        /// T1b6 (k9): four-fact config-ledger echo (annex §9.1 three-fact model + lamps).
+        /// PRESENCE-gated, not version-gated: all absent = legacy vehicle (pre-T1″ / no ledger)
+        /// on disk — the cloud must show GRAY for these, never green (PC-2).
+        /// Values are short12 display fingerprints (first 12 hex of sha256), never identities.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config_running: Option<String>,
+        /// short12 of the CURRENT etc/host.yaml bytes, computed on demand (never memoized).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config_file: Option<String>,
+        /// short12 of the ledger last_push.hash (what the cloud believes it set).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config_last_push: Option<String>,
+        /// The ledger three lamps as committed on disk (pending/error/conflict).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config_flags: Option<ConfigFlagsEcho>,
     },
 
     /// Peer asks to consume a producer on its recv transport.
@@ -253,7 +268,16 @@ pub enum SignalingMessage {
     /// v5 (E4 cloud config loop): Server -> host-agent whole-vehicle config delivery.
     /// config is the full host.toml text; target = whole-vehicle peer_id (other peers in the room ignore it);
     /// version ties to StatusReport.config_version (the agent reports it back after applying).
-    ConfigPush { room_id: String, target: String, config: String, version: u64 },
+    ConfigPush {
+        room_id: String,
+        target: String,
+        config: String,
+        version: u64,
+        /// T1b6 (k9): authenticated admin account that triggered the push (audit actor).
+        /// None = legacy server or unknown origin; additive, old agents parse without it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<String>,
+    },
     /// G3 emergency-stop command (cockpit -> server -> vehicle room): server-side strongly audited path (D-H11 estop strong audit).
     /// Chassis/gimbal regular control stays on the P2P DC (authorized by role during negotiation, invisible to the server); estop must
     /// leave a trace (who / when / which vehicle / which command) -> forwarded over signaling, then the host-agent hands it to the local controller.
@@ -417,6 +441,17 @@ pub struct ProcessStateJson {
     pub running: bool,
     /// Process expected by host.toml (a discovered non-expected process = false).
     pub expected: bool,
+}
+
+/// T1b6 (k9): the config ledger's three lamps (§9.1) echoed inside StatusReport.config_flags.
+/// Deliberately a wire mirror of host config_core::ledger::Flags, not a re-export: the
+/// protocol crate must not depend on host internals. serde(default) keeps partial wire readable.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ConfigFlagsEcho {
+    pub pending: bool,
+    pub error: bool,
+    pub conflict: bool,
 }
 
 /// E3 status report: signaling plane (gateway perspective).
@@ -1198,17 +1233,19 @@ mod tests {
             target: "veh-peer".into(),
             config: "[[cameras]]\nid = \"cam0\"\n".into(),
             version: 7,
+            actor: Some("ops-admin".into()),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"config_push""#));
         assert!(json.contains(r#""version":7"#));
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         match parsed {
-            SignalingMessage::ConfigPush { room_id, target, config, version } => {
+            SignalingMessage::ConfigPush { room_id, target, config, version, actor } => {
                 assert_eq!(room_id, "vehicle-1");
                 assert_eq!(target, "veh-peer");
                 assert!(config.contains("cam0"));
                 assert_eq!(version, 7);
+                assert_eq!(actor.as_deref(), Some("ops-admin"));
             }
             other => panic!("expected ConfigPush, got {other:?}"),
         }
@@ -1274,6 +1311,10 @@ mod tests {
             },
             ts: 1_700_000_000,
             config_version: 0,
+            config_running: None,
+            config_file: None,
+            config_last_push: None,
+            config_flags: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"status_report""#));
@@ -1287,6 +1328,7 @@ mod tests {
                 signal,
                 ts,
                 config_version,
+                ..
             } => {
                 assert_eq!(room_id, "vehicle-1");
                 assert_eq!(topics[0].topic, "camera/cam0");
@@ -1302,6 +1344,108 @@ mod tests {
             _ => panic!("expected StatusReport"),
         }
     }
+
+    /// T1b6 (k9) PC-2 pin: an echo-free StatusReport must serialize to EXACTLY the old
+    /// wire shape (7 keys, no config_*) and a legacy wire must parse with all-None echo.
+    #[test]
+    fn status_report_echo_absent_keeps_old_wire() {
+        let msg = SignalingMessage::StatusReport {
+            room_id: "vehicle-1".into(),
+            topics: vec![],
+            streams: vec![],
+            processes: vec![],
+            signal: SignalStatusJson {
+                remote_connected: true,
+                remote_since_secs: None,
+                remote_peer_id: "veh-peer".into(),
+                children: vec![],
+                agent_uptime_secs: 1,
+            },
+            ts: 1_700_000_000,
+            config_version: 0,
+            config_running: None,
+            config_file: None,
+            config_last_push: None,
+            config_flags: None,
+        };
+        let value = serde_json::to_value(&msg).unwrap();
+        let keys: Vec<&str> = value.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        // 7 payload fields + the internally-tagged "type" key = the pre-T1b6 wire shape.
+        assert_eq!(keys.len(), 8, "legacy field-count baseline: {keys:?}");
+        for gone in ["config_running", "config_file", "config_last_push", "config_flags"] {
+            assert!(!value.get(gone).is_some(), "None echo must not hit the wire: {gone}");
+        }
+        // Legacy wire (pre-T1b6 server/agent) parses with all echo fields None.
+        let legacy = r#"{"type":"status_report","room_id":"v","topics":[],"streams":[],"processes":[],"signal":{"remote_connected":true,"remote_peer_id":"","children":[],"agent_uptime_secs":0},"ts":1,"config_version":0}"#;
+        let parsed: SignalingMessage = serde_json::from_str(legacy).unwrap();
+        match parsed {
+            SignalingMessage::StatusReport { config_running, config_file, config_last_push, config_flags, .. } => {
+                assert_eq!(config_running, None);
+                assert_eq!(config_file, None);
+                assert_eq!(config_last_push, None);
+                assert_eq!(config_flags, None);
+            }
+            other => panic!("expected StatusReport, got {other:?}"),
+        }
+    }
+
+    /// T1b6 (k9): full four-fact echo round-trips (presence-gated cloud display source).
+    #[test]
+    fn status_report_config_echo_roundtrip() {
+        let msg = SignalingMessage::StatusReport {
+            room_id: "vehicle-1".into(),
+            topics: vec![],
+            streams: vec![],
+            processes: vec![],
+            signal: SignalStatusJson {
+                remote_connected: true,
+                remote_since_secs: None,
+                remote_peer_id: "veh-peer".into(),
+                children: vec![],
+                agent_uptime_secs: 1,
+            },
+            ts: 1_700_000_000,
+            config_version: 7,
+            config_running: Some("abcdef012345".into()),
+            config_file: Some("abcdef012345".into()),
+            config_last_push: Some("1234567890ab".into()),
+            config_flags: Some(ConfigFlagsEcho { pending: false, error: false, conflict: true }),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""config_running":"abcdef012345""#));
+        assert!(json.contains(r#""config_flags":{"pending":false,"error":false,"conflict":true}"#));
+        let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            SignalingMessage::StatusReport { config_running, config_file, config_last_push, config_flags, .. } => {
+                assert_eq!(config_running.as_deref(), Some("abcdef012345"));
+                assert_eq!(config_file.as_deref(), Some("abcdef012345"));
+                assert_eq!(config_last_push.as_deref(), Some("1234567890ab"));
+                assert_eq!(config_flags, Some(ConfigFlagsEcho { pending: false, error: false, conflict: true }));
+            }
+            other => panic!("expected StatusReport, got {other:?}"),
+        }
+    }
+
+    /// T1b6 (k9): actor=None keeps the pre-T1b6 ConfigPush wire byte-compatible.
+    #[test]
+    fn config_push_actor_absent_keeps_old_wire() {
+        let msg = SignalingMessage::ConfigPush {
+            room_id: "vehicle-1".into(),
+            target: "veh-peer".into(),
+            config: "cfg".into(),
+            version: 7,
+            actor: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(!json.contains("actor"), "None actor must not hit the wire: {json}");
+        let legacy = r#"{"type":"config_push","room_id":"v","target":"t","config":"c","version":7}"#;
+        let parsed: SignalingMessage = serde_json::from_str(legacy).unwrap();
+        match parsed {
+            SignalingMessage::ConfigPush { actor, .. } => assert_eq!(actor, None),
+            other => panic!("expected ConfigPush, got {other:?}"),
+        }
+    }
+
 
     // ── H1 SFU data domain ────────────────────────────────────────────────
 

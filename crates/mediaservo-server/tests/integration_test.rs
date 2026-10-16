@@ -1002,6 +1002,7 @@ async fn g3_config_push_inbound_rejected() {
         target: "self".into(),
         config: "[[cameras]]\nid = \"cam0\"\n".into(),
         version: 1,
+        actor: None,
     };
     veh_ws.send(WsMsg::Text(serde_json::to_string(&cfg).unwrap())).await.unwrap();
     let resp = tokio::time::timeout(std::time::Duration::from_secs(3), veh_ws.next())

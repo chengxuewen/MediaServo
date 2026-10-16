@@ -496,6 +496,10 @@ mod tests {
             },
             ts: 1,
             config_version: 0,
+            config_running: None,
+            config_file: None,
+            config_last_push: None,
+            config_flags: None,
         }
     }
 

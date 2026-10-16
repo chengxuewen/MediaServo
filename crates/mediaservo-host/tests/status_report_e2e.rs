@@ -86,6 +86,9 @@ async fn status_report_reaches_mock_server_with_expected_content() {
                 signal,
                 ts,
                 config_version,
+                config_running,
+                config_flags,
+                ..
             } => {
                 assert_eq!(
                     room_id, VEHICLE_ROOM,
@@ -117,6 +120,8 @@ async fn status_report_reaches_mock_server_with_expected_content() {
                 );
                 assert!(ts > 0, "ts should be unix seconds: {ts}");
                 assert_eq!(config_version, 0, "config_version is always 0 before E4");
+                assert_eq!(config_running, None, "no ledger on disk = legacy echo shape (PC-2)");
+                assert_eq!(config_flags, None, "no ledger on disk = no lamps (PC-2)");
             }
             other => panic!("expected StatusReport, got {other:?}"),
         }

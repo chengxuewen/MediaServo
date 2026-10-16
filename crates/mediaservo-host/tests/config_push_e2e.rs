@@ -141,6 +141,7 @@ async fn config_push_via_mock_server_updates_host_toml_backs_up_and_regenerates_
                 target: VEHICLE_PEER.into(),
                 config: CFG_V1.into(),
                 version: 7,
+                actor: None,
             })
             .unwrap(),
         ))
@@ -221,6 +222,7 @@ async fn invalid_config_push_rejected_with_audit_log_and_unchanged_files() {
                 target: VEHICLE_PEER.into(),
                 config: "not toml [[[".into(),
                 version: 9,
+                actor: None,
             })
             .unwrap(),
         ))
