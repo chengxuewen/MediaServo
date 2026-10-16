@@ -1,13 +1,15 @@
 //! Task E4: cloud-config closed loop e2e - ConfigPush receive -> validate -> host.yaml update (backup) ->
-//! oxfile regeneration -> OxMgr hot activation (incremental apply + file-watch restart).
+//! oxfile regeneration -> OxMgr hot activation (gated config-core apply: push -> apply; local file edits
+//! reach the cluster via the agent file-watch bell — the vendor oxmgr watch is retired in T1b7).
 //!
 //! (1) the mock server sends ConfigPush -> gateway -> apply: host.yaml updated + backup + oxfile regenerated
 //!    + version recorded (the correlated data source of StatusReport.config_version)
 //! (2) illegal config rejected: host.yaml unchanged + no backup + audit log (tracing-captured assertion)
 //! (3) OxMgr hot-activation proof (Linux + oxmgr prerequisite): host start -> push new config (add a camera) ->
-//!    the new capturer process appears (incremental apply Start) + the existing capturer's pid changes
-//!    (host.yaml content fingerprint -> file-watch restart; when the command is unchanged apply is a Noop,
-//!     so the pid change can only come from watch); then push a config removing the camera -> that app is cleaned up (removal)
+//!    the new capturer process appears (gated core apply Start) + the existing capturer's pid changes
+//!    (the change comes from the agent file-watch bell invoking config_core teardown+fresh — vendor
+//!     watch retired T1b7; the explicit CLI apply races the bell under the core flock, either order
+//!     converges); then push a config removing the camera -> that app is cleaned up (core removed_apps)
 //!
 //! Prerequisite (C25): the test cleans iceoryx2 itself (/tmp/iceoryx2 + /dev/shm/iox2_*).
 
@@ -439,16 +441,17 @@ mod oxmgr_hot_reload {
         assert!(old_pid != 0, "the capturer pid should be non-zero");
 
         // (3) push the new config (add cam1) + the cam1 token - the same write-to-disk -> apply sequence as host-agent
-        //    (the agent writes host.yaml + regenerates the oxfile -> oxmgr apply; the test runs apply via the host CLI
-        //     because the test process's current_exe lives under deps/ and cannot resolve artifact paths; the watch restart
-        //     is triggered asynchronously through the daemon)
+        //    (the agent writes host.yaml + regenerates the oxfile -> config_core apply; the test runs apply via
+        //     the host CLI because the test process's current_exe lives under deps/ and cannot resolve
+        //     artifact paths; the agent's file-watch bell fires asynchronously and may reconcile first — the
+        //     core flock + fingerprint gate makes either order converge on the same outcome)
         issue_token(&dir_path, "capture", "capture-cam1", "cam1.token");
         write_host_toml(&dir_path, CFG_V1);
         assert_eq!(host_cli(&["apply", dir_path.to_str().expect("dir utf8")]), 0);
 
-        // (4) proof 1 (incremental apply Start): host-capturer-cam1 appears and is running
-        //    proof 2 (file-watch restart): host-capturer-cam0 (command unchanged -> apply is Noop)
-        //      pid changed - can only come from the host.yaml content fingerprint -> watch restart
+        // (4) proof 1 (new app appears): host-capturer-cam1 running after the gated apply
+        //    proof 2 (restart on change): host-capturer-cam0 pid changed — with the vendor watch retired
+        //      (T1b7) this comes from config_core teardown+fresh (agent bell or the CLI apply, whichever wins the flock)
         let mut new_pid = 0u64;
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
@@ -463,7 +466,7 @@ mod oxmgr_hot_reload {
             {
                 new_pid = *p0;
                 eprintln!(
-                    "[config_push_e2e] OK: cam1 running + cam0 watch-restarted {old_pid}->{new_pid}"
+                    "[config_push_e2e] OK: cam1 running + cam0 core-restarted {old_pid}->{new_pid}"
                 );
                 break;
             }
@@ -479,8 +482,8 @@ mod oxmgr_hot_reload {
         assert!(new_pid != 0, "the pid should be non-zero after the watch restart");
 
         // (4b) removal-path proof: push v2 (cam0 only, fps 15) -> the cam1 app is cleaned up
-        //    (oxmgr_apply removal is synchronous; removal = oxmgr delete); cam0's command is unchanged ->
-        //    another watch restart (pid changes again)
+        //    (core removal is synchronous against the live registry); cam0's command is unchanged ->
+        //    another core teardown+fresh restart (pid changes again, via bell or CLI apply)
         write_host_toml(&dir_path, CFG_V2);
         assert_eq!(host_cli(&["apply", dir_path.to_str().expect("dir utf8")]), 0);
         let mut pid_after_remove = 0u64;
@@ -496,7 +499,7 @@ mod oxmgr_hot_reload {
             {
                 pid_after_remove = *p0;
                 eprintln!(
-                    "[config_push_e2e] OK: cam1 deleted + cam0 watch-restarted {new_pid}->{pid_after_remove}"
+                    "[config_push_e2e] OK: cam1 deleted + cam0 core-restarted {new_pid}->{pid_after_remove}"
                 );
                 break;
             }
@@ -511,11 +514,11 @@ mod oxmgr_hot_reload {
         }
         assert!(
             pid_after_remove != 0,
-            "the pid should be non-zero after the removal-triggered watch restart"
+            "the pid should be non-zero after the removal-triggered core restart"
         );
 
-        // (5) cleanup: host stop -> the host namespace empties (a race exists between watch restarts and stop -",
-        //    re-check after stopping, stop again on residue, up to 15s)
+        // (5) cleanup: host stop -> the host namespace empties (a race exists between bell-driven core
+        //    restarts and stop: re-check after stopping, stop again on residue, up to 15s)
         let deadline = std::time::Instant::now() + Duration::from_secs(15);
         loop {
             if oxmgr_host_procs(&dir_path).is_empty() {

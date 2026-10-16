@@ -245,8 +245,9 @@ fn spawn_config_applier(handle: GatewayHandle, dir: PathBuf, config_version: Arc
 /// T1b3 (k2): the file-watch bell -- local edits to etc/host.yaml are picked up without the
 /// cloud (2s sampling, [`watch_tick`] debounce: two equal samples differing from the baseline).
 /// On trigger the same AgentRun core executes (origin="local"); the core's flock serializes it
-/// against the push bell. This is the agent side of "edit the file on the vehicle, then apply":
-/// oxmgr `watch` still hot-restarts pure content edits, the core owns roster-level changes.
+/// against the push bell. This is the agent side of "edit the file on the vehicle, then apply": with the
+/// vendor oxmgr watch retired (T1b7), this bell is the sole local-edit path — the core owns every change
+/// class (content and roster) via fingerprint-gated teardown+fresh.
 fn spawn_config_watcher(dir: PathBuf) {
     tokio::spawn(async move {
         let cfg_path = dir.join("etc").join("host.yaml");

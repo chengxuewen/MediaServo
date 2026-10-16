@@ -320,7 +320,8 @@ fn check_id(kind: &str, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Atomic write (tmp + rename) — oxmgr file-watch only ever sees complete files; readers never see half-written state.
+/// Atomic write (tmp + rename) — the agent file-watch bell's fingerprint reads and the daemon reads during an
+/// apply invocation only ever see complete files; readers never see half-written state.
 fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     let tmp = path.with_extension("toml.tmp");
     std::fs::write(&tmp, content).map_err(|e| format!("write {} failed: {e}", tmp.display()))?;
@@ -351,8 +352,8 @@ pub fn write_oxfile(cfg: &str, dir: &Path) -> Result<PathBuf, String> {
 }
 
 /// F1: recover the most recently applied version from etc/host.yaml.bak-<version> backups (take the max version).
-/// After the agent is restarted via the oxfile [defaults].watch, config_version does not reset to zero — the association
-/// contract between the version applied on disk and StatusReport.config_version. No backup → 0.
+/// After the agent file-watch bell / config-core re-applies a new version, config_version does not reset to zero —
+/// the association contract between the version applied on disk and StatusReport.config_version. No backup → 0.
 pub fn recover_config_version(dir: &Path) -> u64 {
     let Ok(entries) = std::fs::read_dir(dir.join("etc")) else { return 0 };
     entries
@@ -590,18 +591,18 @@ fn to_oxfile_with_paths(cfg: &str, config_path: &Path, token_dir: &Path) -> Resu
         mediaservo_common::brand::media_brand().namespace
     );
 
-    // E4 hot-apply: [defaults] watch = host.yaml (content fingerprint) — after agent/CLI write new config,
-    // oxmgr file-watch restarts affected processes (the process re-reads host.yaml at startup to apply it);
-    // app add/remove (cameras/streams) is handled incrementally by `oxmgr apply` (Start/Recreate), and watch covers
-    // pure content changes (e.g. fps, command unchanged → apply Noop). cwd is a watch precondition (proven in the OxMgr
-    // source watch_fingerprint_for_process); the pathless variant (doctor) carries no watch.
+    // T1b7 (A‴): the vendor oxmgr watch is RETIRED — [defaults] renders no watch/watch_delay_secs. Both reload
+    // paths converge on config_core (validate + flock + teardown-verification gate + ledger): the E4 cloud loop
+    // (one-way ConfigPush → handle_config_push → apply, heartbeat echo unchanged) and local edits via the agent
+    // file-watch bell. With no vendor watch, a content-only edit reaches the cluster only through the bell;
+    // restart_policy "always" keeps the agent alive — if it is briefly down the daemon relifts it and its boot
+    // bell re-reconciles, so there is no orphan gap. cwd is kept on purpose: apps resolve relative paths against
+    // it and it underpins the daemon-cwd-independence lesson (absolute log paths below) — it is not
+    // watch-specific. The pathless variant (doctor) carries no cwd.
     let inst_root =
         config_path.parent().and_then(|p| p.parent()).map(|d| d.to_string_lossy().into_owned());
-    if let (Some(cwd), Some(watch)) = (
-        inst_root.as_deref(),
-        (!config_path.as_os_str().is_empty()).then(|| config_path.to_string_lossy().into_owned()),
-    ) {
-        out.push_str(&format!("cwd = \"{cwd}\"\nwatch = [\"{watch}\"]\nwatch_delay_secs = 1\n"));
+    if let Some(cwd) = inst_root.as_deref() {
+        out.push_str(&format!("cwd = \"{cwd}\"\n"));
     }
     out.push('\n');
     // PIT: absolute log paths (instance run/logs) — OxMgr resolves relative paths against the daemon cwd, and a leftover
@@ -1226,22 +1227,21 @@ sources:
     }
 
     #[test]
-    fn oxfile_watches_host_yaml_with_cwd() {
+    fn oxfile_sets_cwd_without_vendor_watch() {
+        // T1b7 contract: the production render pins the instance cwd (apps resolve relative paths;
+        // daemon-cwd independence) and carries NO vendor oxmgr watch — the agent file-watch bell invoking
+        // config_core is the sole local-edit path.
         let dir = tempfile::tempdir().unwrap();
         let ox = to_oxfile_in_dir(CFG_V0, dir.path()).expect("to_oxfile_in_dir");
-        let expected_watch =
-            format!("watch = [\"{}\"]", dir.path().join("etc").join("host.yaml").display());
-        assert!(
-            ox.contains(&expected_watch),
-            "the oxfile should watch host.yaml for hot-apply: {ox}"
-        );
-        assert!(ox.contains("watch_delay_secs"), "watch should carry debounce: {ox}");
-        assert!(ox.contains("cwd = \""), "watch precondition cwd: {ox}");
-        // the pathless variant (for doctor) carries no watch
-        assert!(
-            !to_oxfile(CFG_V0).unwrap().contains("watch"),
-            "the to_oxfile pathless variant should not watch"
-        );
+        let expected_cwd = format!("cwd = \"{}\"", dir.path().display());
+        assert!(ox.contains(&expected_cwd), "the oxfile should pin the instance cwd: {ox}");
+        assert!(ox.contains("\n[apps") || ox.contains("[apps"), "roster still renders: {ox}");
+        assert!(!ox.contains("watch"), "vendor watch retired — no watch lines may render: {ox}");
+        assert!(!ox.contains("watch_delay_secs"), "vendor watch debounce gone with it: {ox}");
+        // the pathless variant (for doctor) carries neither cwd nor watch
+        let pathless = to_oxfile(CFG_V0).unwrap();
+        assert!(!pathless.contains("watch"), "the to_oxfile pathless variant should not watch");
+        assert!(!pathless.contains("cwd = \""), "the to_oxfile pathless variant carries no cwd");
     }
 
     /// G1: host-agent carries --token like the recorder (agent.token, Monitor ACL) —
@@ -1382,8 +1382,8 @@ sources:
 
     #[test]
     fn recover_config_version_returns_max_backup_version_after_restart() {
-        // F1 association contract: after the agent is restarted via [defaults].watch, config_version must recover from disk
-        // (the max version among the backups), never reset to zero
+        // F1 association contract: after the agent file-watch bell / config-core re-applies, config_version must
+        // recover from disk (the max version among the backups), never reset to zero
         let dir = tempfile::tempdir().unwrap();
         write_host_yaml(dir.path(), CFG_V0);
         let v7 = "sources:\n  - id: \"cam0\"\n    mode: \"generator\"\n    fps: 30\n  - id: \"cam1\"\n    mode: \"generator\"\n    fps: 15\nstreams:\n  - id: \"s0\"\n    source: \"cam0\"\n";

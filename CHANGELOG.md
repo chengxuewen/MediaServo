@@ -95,6 +95,11 @@ teams); for development process details, consult git log directly. Newest versio
   guessing sealed) — completes the K3 promise that both sides tightened consistently.
 
 ### Changed
+- [host] vendor oxmgr file-watch retired — config edits are applied ONLY by the config-core
+  (push/watch-bell/boot/CLI), closing the ungated global-restart + ledger-desync hazard (T1b7;
+  the ⚠ maintenance-window note in T1b4 now holds in full). The rendered oxfile keeps `cwd`
+  (path resolution + daemon-cwd independence) but no longer emits `watch`/`watch_delay_secs`.
+  Deployed trees pick this up when the T1b7 binary re-renders the oxfile (build:deploy / start).
 - [host] `stop` now exits non-zero when survivors remain (T1-k10 post-stop ground truth):
   after the sweep self-proof completes, the process table is re-checked for family processes
   (brand-aware name set, dev binaries under a `/target/` path component excluded, own pid
