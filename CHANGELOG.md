@@ -14,6 +14,11 @@ teams); for development process details, consult git log directly. Newest versio
 - [sdk-client] client-cxx `client.hpp` was missing `#include <chrono>` — every consumer of
   `Consumer::on_qoe` failed to compile since the 2026-10-09 QOE merge (latent debt, caught by the
   migration gate rerun of test-cxx).
+- [host] host.yaml edits (file save / ConfigPush / CLI `start`/`apply`/`restart`) now mean a
+  full ordered teardown + fresh start of the host cluster — maintenance-window semantics, a
+  stream interruption of roughly 10-60s per accepted change. Invalid configs are REFUSED
+  without touching the running cluster; removed streams are deregistered automatically (no
+  ghost slots); `stop` now exits non-zero when survivors remain.
 
 ### Added
 - [host] recorder roster tri-state (host-ops-hardening T1-e): `record.enabled: false` in
@@ -43,6 +48,17 @@ teams); for development process details, consult git log directly. Newest versio
   CHANGELOG [protocol] entry (fixture-verified); packaging (G1/D-H14): manifest.json +
   {target}-version.txt carry the signaling tuple {signaling_protocol_version,
   signaling_min_supported} next to frame_meta + token_schema, all derived from Rust source.
+- [host] config activation runs through a single executor core (host-ops-hardening T1″ A‴,
+  batches k1/k2/k4): every config change — cloud ConfigPush, local file-watch, boot, CLI —
+  converges into one flock-serialized path: validate gate (parse + D274 enum gates +
+  hmac-key existence + C40 token pre-check whose refusal carries the `token issue --all`
+  hint), staging render (the live oxfile is only swapped by an atomic rename once the gates
+  pass), reverse-order teardown sourced from the LIVE registry, C25 SHM clear, a
+  residue-verifying gate that refuses to start over corpses (brand-aware instance-scoped
+  survivor scan), and a prepare/commit ledger at `run/config-state.json` (three-fact model:
+  `running` = what IS running, `pending_apply` = crash-recovery marker, `history` rows with
+  origin/actor). Four bells ring it: push-immediate, file-watch (two-sample debounce),
+  boot-reconcile (pending-commit fast path, zero churn), CLI.
 
 ### Fixed
 - [host] k0 (host-ops-hardening F15): the stop self-proof scanned a hardcoded list of
@@ -89,6 +105,21 @@ teams); for development process details, consult git log directly. Newest versio
   still has a signature-hit survivor still exit 1 (final-state leftovers count as failures,
   existing semantics unchanged); kill issued but process still alive (EPERM/D-state) still
   counts as failed.
+- [host] `start`/`apply`/`restart` now run the config-core (T1b4 k3): `restart` = the core
+  with force=true (EX-4 — the fingerprint short-circuit is the ONLY thing skipped, every gate
+  stays), `start`/`apply` = force=false with an honest fingerprint NoOp. The raw `oxmgr stop
+  <oxfile>` + pre-clear + `oxmgr apply` trio is gone: teardown sources from the live registry
+  (covers leftover ghosts the oxfile no longer lists) and C25 clears exactly once per
+  reconciled run. A fully clean `stop` clears the ledger `running` row, so the next
+  start/wake reconciles instead of no-oping onto a dead cluster.
+- [host] `startup on` wake reconciles through the core (`origin=wake`) instead of a raw
+  apply: ledger current = zero-churn NoOp; registry emptied by `stop` or edited while down =
+  ordered full teardown + fresh apply (closes the corpse-start bypass R3/OL-3 host-side).
+- [server] `startup on` wake gained the minimal counterpart guard (kept self-contained —
+  the server crate does not depend on the host crate, C21): a non-empty instance registry
+  (own `oxmgr list --json`) skips the wake apply, the daemon already owns the run; a query
+  or parse failure proceeds with the apply exactly as before (fail-open — the wake step
+  gains no new hard gate).
 
 ### Added
 - [server][host] startup conflict gate v2 (startup-hardening S1): `startup on` now scans every

@@ -273,9 +273,10 @@ fn write_private_pem(path: &Path, data: &[u8]) -> std::io::Result<()> {
     f.write_all(data)
 }
 
-/// `host start [<dir>]` / `host apply [<dir>]` (shared implementation): read host.yaml → validate →
-/// translate → atomically write run/oxfile.toml → `oxmgr apply` (incremental: new Start / changed
-/// Recreate / unchanged Noop). verb = "start"|"apply" (log prefix).
+/// `host start [<dir>]` / `host apply [<dir>]` (shared implementation): route through the
+/// config-core (T1b4 k3) — validate gate, staging, registry-sourced teardown, residue gate,
+/// ledger. verb = "start"|"apply" (log prefix). The port-conflict takeover pre-flight below
+/// stays CLI-side (it talks about FOREIGN instances, not this tree's config).
 fn cmd_apply_impl(args: &mut impl Iterator<Item = String>, verb: &str) -> i32 {
     let dir = match parse_dir(args) {
         Ok(d) => d,
@@ -341,17 +342,26 @@ fn cmd_apply_impl(args: &mut impl Iterator<Item = String>, verb: &str) -> i32 {
             return 1;
         }
     }
-    // C25: clear SHM residue before a full start; apply (hot update) does not (processes running, SHM in use)
-    if verb == "start" {
-        mediaservo_host::config_core::clear_iceoryx_residue("start");
-    }
-    match mediaservo_host::translate::apply_config(&dir) {
-        Ok(()) => {
-            println!("{verb}: applied {}", dir.join("run").join("oxfile.toml").display());
-            // log sync: OxMgr 0.5.0 [apps.logs] override not wired (upstream) —
-            // logs land in the oxmgr log_dir; symlink host process logs into the instance run/logs/ (D-H13 layout)
-            sync_host_logs(&dir);
-            0
+    // k3 (T1b4): start/apply runs the config-core — validate gate (incl. the C40 token
+    // pre-check whose refusal carries the `token issue --all` hint), staging render,
+    // reverse teardown from the live registry, C25 SHM clear (core step4: exactly one
+    // clear per RECONCILED run — the old pre-start clear wiped SHM under a live cluster
+    // on unchanged re-starts), residue-verifying gate, ledger.
+    let actor = mediaservo_host::config_core::env_actor();
+    match mediaservo_host::config_core::execute(
+        &dir,
+        mediaservo_host::config_core::Topology::CliRun,
+        false,
+        &mediaservo_host::config_core::ExecuteOpts { origin: "cli", actor: actor.as_deref() },
+    ) {
+        Ok(o) => {
+            let code = report_core_outcome(verb, &o);
+            if code == 0 {
+                // log sync: OxMgr 0.5.0 [apps.logs] override not wired (upstream) —
+                // logs land in the oxmgr log_dir; symlink host process logs into the instance run/logs/ (D-H13 layout)
+                sync_host_logs(&dir);
+            }
+            code
         }
         Err(e) => {
             eprintln!("{verb}: {e}");
@@ -360,9 +370,50 @@ fn cmd_apply_impl(args: &mut impl Iterator<Item = String>, verb: &str) -> i32 {
     }
 }
 
+/// k3 (T1b4): map a config-core Outcome onto the CLI exit-code contract shared by
+/// start/apply/restart and the startup-on wake: Applied/NoOp => 0 (fingerprint summary),
+/// Refused/Residue => 1 (reason / survivor lines — the old cluster stays running untouched).
+fn report_core_outcome(verb: &str, o: &mediaservo_host::config_core::Outcome) -> i32 {
+    use mediaservo_host::config_core::{Outcome, short12};
+    match o {
+        Outcome::Applied { hash } => {
+            println!("{verb}: applied — fingerprint {} live and reconciled", short12(hash));
+            0
+        }
+        Outcome::NoOp { hash } => {
+            println!(
+                "{verb}: no-op — fingerprint {} equals the ledger running row (config already current, cluster untouched)",
+                short12(hash)
+            );
+            0
+        }
+        Outcome::Refused { reason } => {
+            eprintln!("{verb}: refused — {reason}");
+            1
+        }
+        Outcome::Residue { survivors } => {
+            for sv in survivors {
+                eprintln!(
+                    "{verb}: SURVIVOR pid={} exe={} owner={}",
+                    sv.pid, sv.first_arg, sv.owner
+                );
+            }
+            eprintln!(
+                "{verb}: refused-residue — {} process(es) survived teardown; new config NOT activated",
+                survivors.len()
+            );
+            1
+        }
+    }
+}
+
 // C25 clear moved to mediaservo_host::config_core::clear_iceoryx_residue (T1b2 single source).
 
-/// `host restart [<dir>]`: `oxmgr stop <oxfile>` (stop all apps) then re-apply (full restart).
+/// `host restart [<dir>]`: config-core with force=true (EX-4) — the fingerprint
+/// short-circuit is the only thing skipped; validate gate, staging, residue gate all stay.
+/// The old raw `oxmgr stop <oxfile>` + duplicate C25 clear are replaced by the core's
+/// step3/step4: the teardown set comes from the LIVE registry (superset of the oxfile —
+/// leftover ghosts included) and SHM clears exactly once per run.
 fn cmd_restart(args: &mut impl Iterator<Item = String>) -> i32 {
     let dir = match parse_dir(args) {
         Ok(d) => d,
@@ -376,17 +427,19 @@ fn cmd_restart(args: &mut impl Iterator<Item = String>) -> i32 {
         eprintln!("restart: no {} — run host start/apply first", oxfile.display());
         return 1;
     }
-    let code = run_oxmgr_in(Some(&dir), &["stop", oxfile.to_str().expect("oxfile path utf8")]);
-    if code != 0 {
-        return code;
-    }
-
-    // full restart = stop then start: clear SHM residue like start does (a restart skipping cleanup → SystemInFlux black screen)
-    mediaservo_host::config_core::clear_iceoryx_residue("restart");
-    match mediaservo_host::translate::apply_config(&dir) {
-        Ok(()) => {
-            println!("restart: fully restarted ({}", dir.join("run").join("oxfile.toml").display());
-            0
+    let actor = mediaservo_host::config_core::env_actor();
+    match mediaservo_host::config_core::execute(
+        &dir,
+        mediaservo_host::config_core::Topology::CliRun,
+        true,
+        &mediaservo_host::config_core::ExecuteOpts { origin: "cli", actor: actor.as_deref() },
+    ) {
+        Ok(o) => {
+            let code = report_core_outcome("restart", &o);
+            if code == 0 {
+                sync_host_logs(&dir);
+            }
+            code
         }
         Err(e) => {
             eprintln!("restart: {e}");
@@ -466,6 +519,19 @@ fn cmd_stop(args: &mut impl Iterator<Item = String>) -> i32 {
     for sv in mediaservo_host::conflict::stop_survivors(&dir) {
         eprintln!("stop: SURVIVOR pid={} exe={} owner={}", sv.pid, sv.first_arg, sv.owner);
         failed = 1;
+    }
+    // k3 ledger truth (T1b4): a fully clean stop leaves NOTHING running — clear the running
+    // row so the next start/wake reconciles instead of fingerprint-NoOp-ing onto a dead
+    // cluster. Not core routing (stop stays teardown-only); this keeps the three-fact
+    // ledger's own definition honest (running.hash = what IS running). A partial sweep
+    // (failed != 0) keeps the row: ground truth is unknown there.
+    if failed == 0 {
+        let mut led = mediaservo_host::config_core::Ledger::load(&dir);
+        if led.running.take().is_some() && led.save(&dir).is_err() {
+            eprintln!(
+                "stop: config-state ledger writeback failed — the next start may no-op against a dead cluster until it is retried"
+            );
+        }
     }
     failed
 }
@@ -1840,16 +1906,32 @@ fn startup_install(dir: &std::path::Path) -> i32 {
         return 1;
     }
     println!("startup on: boot autostart enabled + daemon brought up ✓ ({unit_name})");
-    // S5 field corrigendum (same cut as the server side): a daemon anchor does not raise the cluster — apply the oxfile to wake it idempotently.
+    // S5 field corrigendum + k3 (T1b4): a daemon anchor does not raise the cluster, but the
+    // wake now reconciles through the config-core (flock-serialized, fingerprint-verified) —
+    // a raw apply beside a live registry was exactly the corpse-start bypass (R3/OL-3).
+    // Ledger current => zero-churn NoOp; emptied by stop or edited while down => ordered
+    // full teardown + fresh apply.
     let oxfile = dir.join("run").join("oxfile.toml");
     if oxfile.exists() {
-        println!("startup on: waking instance processes (apply {})", oxfile.display());
-        if run_oxmgr_in(Some(dir), &["apply", &oxfile.to_string_lossy()]) != 0 {
-            eprintln!(
-                "startup on: apply failed — unit/daemon in place but the instance was not brought up (start manually: {})",
-                dir.display()
-            );
-            return 1;
+        println!("startup on: reconciling instance processes (config-core, origin=wake)");
+        match mediaservo_host::config_core::startup_reconcile(dir, "wake") {
+            Ok(o) => {
+                if report_core_outcome("startup on", &o) != 0 {
+                    eprintln!(
+                        "startup on: unit/daemon in place but the reconcile refused (see lines above; start manually: {})",
+                        dir.display()
+                    );
+                    return 1;
+                }
+                sync_host_logs(dir);
+            }
+            Err(e) => {
+                eprintln!(
+                    "startup on: config-core failed — unit/daemon in place but the instance was not brought up (start manually: {}): {e}",
+                    dir.display()
+                );
+                return 1;
+            }
         }
     } else {
         eprintln!(

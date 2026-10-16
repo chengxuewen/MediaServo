@@ -13,7 +13,7 @@
 //! [`mediaservo_host::config_core`] -- the file write is the bell, the core is the executor.
 
 use mediaservo_host::config_core::{
-    self, ExecuteOpts, Ledger, Outcome, Topology, WatchAction, file_hash, short12, watch_tick,
+    self, ExecuteOpts, Outcome, Topology, WatchAction, file_hash, short12, watch_tick,
 };
 use mediaservo_host::gateway::{GatewayConfig, GatewayHandle, run_gateway};
 use mediaservo_host::init_logging;
@@ -290,43 +290,15 @@ fn spawn_config_watcher(dir: PathBuf) {
     });
 }
 
-/// T1b3 (EX-3): the boot config pass. Fast path first: a previous run that crashed between
-/// activation and reconcile left `pending_apply` set -- when the live registry already
-/// reconciles with the activated roster, [`config_core::try_commit_pending`] commits the ledger
-/// with zero churn. Otherwise the full core runs ONLY when the ledger disagrees with the on-disk
-/// fingerprint or a pending flag is raised (fresh boot with an equal fingerprint stays quiet).
+/// T1b3 (EX-3) / T1b4: the boot config pass -- now a thin logging shell over
+/// [`config_core::startup_reconcile_with`] with `Topology::AgentRun` (the agent is alive:
+/// the gate tolerates the agent-only registry, and the declarative apply swaps it last).
+/// Fast path, fingerprint gate and the full core all live on the shared side -- the same
+/// decision table the CLI startup wake uses, zero duplication.
 fn boot_config_pass(dir: &Path) {
-    let committed = config_core::try_commit_pending(dir).unwrap_or_else(|e| {
-        tracing::warn!("boot fast path unavailable: {e}");
-        false
-    });
-    if committed {
-        return;
-    }
-    let Ok(bytes) = std::fs::read(dir.join("etc").join("host.yaml")) else {
-        tracing::warn!(
-            "boot bell: etc/host.yaml unreadable -- nothing to reconcile (push path self-heals)"
-        );
-        return;
-    };
-    let hash = file_hash(&bytes);
-    let led = Ledger::load(dir);
-    let stale = led.running.as_ref().is_none_or(|r| r.hash != hash) || led.flags.pending;
-    if !stale {
-        return;
-    }
-    tracing::info!(
-        hash = short12(&hash),
-        "boot bell: config differs from the ledger (or pending set) -- running config-core"
-    );
-    match config_core::execute(
-        dir,
-        Topology::AgentRun,
-        false,
-        &ExecuteOpts { origin: "boot", actor: None },
-    ) {
+    match config_core::startup_reconcile_with(dir, Topology::AgentRun, "boot") {
         Ok(o) => log_core_outcome("boot", &o),
-        Err(e) => tracing::error!("config-core (boot) failed: {e}"),
+        Err(e) => tracing::warn!("config-core (boot) unavailable: {e}"),
     }
 }
 

@@ -14,7 +14,7 @@ use super::templates::{
     instance_daemon_port, parse_listen_port, parse_weaknet_port, parse_web_port, server_namespace,
     server_product,
 };
-use super::{absolute, oxmgr_bin, parse_dir, run_oxmgr};
+use super::{absolute, oxmgr_bin, oxmgr_list, parse_dir, run_oxmgr};
 
 // -- S1: identity check (unit identity classification -- brand-aware prefix, exact match, contains forbidden) --
 
@@ -702,8 +702,28 @@ fn startup_install(dir: &Path) -> i32 {
     // finishing step = apply the oxfile as an idempotent wakeup (a registered account reconciles with zero churn, an empty account fills in).
     let oxfile = dir.join("run").join("oxfile.toml");
     if oxfile.exists() {
-        println!("startup on: waking the cluster (apply {})", oxfile.display());
-        if run_oxmgr(Some(dir), &["apply", &oxfile.to_string_lossy()]) != 0 {
+        // k3 minimal mirror of the host core-routing (T1b4): a raw apply onto a NON-empty
+        // registry can double-start against entries the daemon already owns (the
+        // corpse-start bypass, R3/OL-3). The server crate must not depend on the host
+        // crate (C21), so this is a registry guard, not the config-core: skip the wake
+        // apply while the instance registry carries entries. Any query/parse failure
+        // falls through to today's raw apply (fail-open -- the wake step must not become
+        // a new hard gate).
+        let owned = match oxmgr_list(dir) {
+            Ok(rows) if !rows.is_empty() => Some(rows.len()),
+            Ok(_) => None,
+            Err(e) => {
+                eprintln!(
+                    "startup on: registry query failed ({e}) -- proceeding with the wake apply"
+                );
+                None
+            }
+        };
+        if let Some(n) = owned {
+            println!(
+                "startup on: cluster registry non-empty ({n} app entries) -- skip wake apply (the daemon already owns the run)"
+            );
+        } else if run_oxmgr(Some(dir), &["apply", &oxfile.to_string_lossy()]) != 0 {
             eprintln!(
                 "startup on: apply failed -- unit/daemon in place but the cluster not started (manually {} start {} or fix the oxfile)",
                 server_product(),

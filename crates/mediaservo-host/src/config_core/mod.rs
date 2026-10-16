@@ -112,7 +112,8 @@ pub fn execute(
     let hash = file_hash(&bytes);
     let mut led = Ledger::load(dir);
     let pending_mismatch = led.pending_apply.as_ref().is_some_and(|p| p.hash != hash);
-    if !force && led.running.as_ref().is_some_and(|r| r.hash == hash) && !pending_mismatch {
+    let running_match = led.running.as_ref().is_some_and(|r| r.hash == hash);
+    if !should_reconcile(force, running_match, pending_mismatch, false) {
         return Ok(Outcome::NoOp { hash });
     }
 
@@ -309,6 +310,71 @@ fn commit_pending_fast(
         short12(hash)
     );
     Ok(true)
+}
+
+/// Actor label (env USER) for the ledger rows written by CLI/wake origins — unset or
+/// empty is None: the actor is provenance, never a gate.
+pub fn env_actor() -> Option<String> {
+    std::env::var("USER").ok().filter(|u| !u.is_empty())
+}
+
+/// Reconcile decision (pure, table-tested): `false` = the fingerprint short-circuit --
+/// the cluster already runs this exact config. Shared by [`execute`]'s step1 (which
+/// passes flags_pending as false, keeping batch2's exact boundary) and the wake/boot
+/// gate ([`gate_needs_reconcile`]).
+/// EX-4: `force` skips ONLY this short-circuit -- every gate downstream still runs.
+fn should_reconcile(
+    force: bool,
+    running_match: bool,
+    pending_mismatch: bool,
+    flags_pending: bool,
+) -> bool {
+    force || !running_match || pending_mismatch || flags_pending
+}
+
+/// Wake/boot gate over a loaded ledger (pure, table-tested): NoOp only when the running
+/// row equals the file and nothing flags-pending or mismatches. A pending_apply that
+/// MATCHES the file is the fast path's business (try_commit_pending has already committed
+/// or declined it) -- the gate stays quiet; batch3's boot-gate semantics kept verbatim.
+fn gate_needs_reconcile(led: &Ledger, hash: &str) -> bool {
+    let running_match = led.running.as_ref().is_some_and(|r| r.hash == hash);
+    let pending_mismatch = led.pending_apply.as_ref().is_some_and(|p| p.hash != hash);
+    should_reconcile(false, running_match, pending_mismatch, led.flags.pending)
+}
+
+/// T1b4 (k3): the shared wake/boot reconcile entry -- EX-3 fast path first (a pending
+/// commit is zero-churn), then the fingerprint gate, then the full [`execute`] with
+/// `force=false` when it disagrees. Callers get the honest [`Outcome`]: the NoOp branch
+/// never wakes the core (bell short-circuit R10 -- the in-lock re-read stays the
+/// correctness boundary inside execute itself).
+///
+/// Topology choice: `AgentRun` is for the agent's own boot pass (the agent is alive --
+/// the gate tolerates the agent-only registry and apply swaps it last), `CliRun` for CLI
+/// processes (the gate demands a fully empty registry -- anything alive there is teardown
+/// work). host-agent delegates with AgentRun, the CLI startup wake uses the
+/// [`startup_reconcile`] wrapper; one call site each, no duplicated boot logic.
+pub fn startup_reconcile_with(dir: &Path, topo: Topology, origin: &str) -> Result<Outcome, String> {
+    let committed = try_commit_pending(dir)?;
+    let cfg_path = dir.join("etc").join("host.yaml");
+    let bytes =
+        std::fs::read(&cfg_path).map_err(|e| format!("read {} failed: {e}", cfg_path.display()))?;
+    let hash = file_hash(&bytes);
+    if committed {
+        // the fast path committed the pending row: this config IS live (the boot-commit
+        // provenance lives in the ledger history).
+        return Ok(Outcome::Applied { hash });
+    }
+    if !gate_needs_reconcile(&Ledger::load(dir), &hash) {
+        return Ok(Outcome::NoOp { hash });
+    }
+    let actor = env_actor();
+    execute(dir, topo, false, &ExecuteOpts { origin, actor: actor.as_deref() })
+}
+
+/// Thin [`startup_reconcile_with`] wrapper for CLI-side wakes: [`Topology::CliRun`] plus
+/// the env-USER actor.
+pub fn startup_reconcile(dir: &Path, origin: &str) -> Result<Outcome, String> {
+    startup_reconcile_with(dir, Topology::CliRun, origin)
 }
 
 /// C25: iceoryx2 SHM residue (SystemInFlux) makes capturer/streamer subscription open
@@ -745,5 +811,40 @@ mod tests {
         let led = Ledger::load(dir);
         assert!(led.pending_apply.is_some());
         assert!(led.running.is_none());
+    }
+
+    #[test]
+    fn should_reconcile_table() {
+        // the single quiet cell: fingerprint equals the ledger row, nothing pending
+        assert!(!should_reconcile(false, true, false, false));
+        // EX-4: force skips ONLY the short-circuit -- fingerprint-equal still executes
+        assert!(should_reconcile(true, true, false, false));
+        assert!(should_reconcile(false, false, false, false)); // never applied (no running row)
+        assert!(should_reconcile(false, true, true, false)); // pending_apply edited after a crash
+        assert!(should_reconcile(false, true, false, true)); // refused-residue bell flag retries
+    }
+
+    #[test]
+    fn gate_needs_reconcile_keeps_batch3_boot_semantics() {
+        let mut led = Ledger::default();
+        let hash = "a".repeat(64);
+        assert!(gate_needs_reconcile(&led, &hash)); // fresh tree: no ledger row at all
+        let row = |h: String| Running {
+            hash: h,
+            at: now_rfc3339(),
+            origin: "cli".to_string(),
+            actor: None,
+        };
+        led.running = Some(row("b".to_string()));
+        assert!(gate_needs_reconcile(&led, &hash)); // fingerprint drift
+        led.running = Some(row(hash.clone()));
+        assert!(!gate_needs_reconcile(&led, &hash)); // the quiet cell
+        led.flags.pending = true;
+        assert!(gate_needs_reconcile(&led, &hash)); // residue flag (batch3's boot condition)
+        led.flags.pending = false;
+        led.pending_apply = Some(PendingApply { hash: hash.clone(), at: now_rfc3339() });
+        assert!(!gate_needs_reconcile(&led, &hash)); // matching pending = fast path's business
+        led.pending_apply = Some(PendingApply { hash: "stale".to_string(), at: now_rfc3339() });
+        assert!(gate_needs_reconcile(&led, &hash)); // mismatch => execute's in-lock check fires
     }
 }
