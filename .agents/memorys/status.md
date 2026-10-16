@@ -1189,3 +1189,9 @@ install                        → 改名提示 + exit 2（退役）
   guard NOT yet wired, wiring sequenced after conversion), T10-T14 execution untouched (code face).
 - Environment fact recorded: conda FFmpeg on this box = 9.0.0 (avcodec soname .63 — matches doc;
   my earlier .61 guess was wrong, retraction logged in session).
+
+### 2026-10-16 (vehicle box): host-ops-hardening round opened — k0 landed (e53d0a9)
+- Vehicle-field analysis (main repo `docs/plans/host-ops-hardening/`, PLAN + annex) produced 16 user adjudications (N1-N6, R7-R16): vendor file-watch RETIRED, unified config core A‴ (validate gate → pre-render → reverse-order teardown → C25 clear → teardown-verification gate that REFUSES start on residue → fresh ordered load → reconcile ledger; flock; four bells = push-immediate / agent-owned file-watch 5s / boot-reconcile / manual CLI; restart=force form; agent rebuilds Flow/Topology monitors on ledger change = k11, double-seat BLOCKER; version = external content-hash ledger, absent echo = legacy = gray lamps; recorder folded into tri-state `record.enabled`).
+- 4-seat team audit (3 BLOCKER / 12 MAJOR, all adopted into v2) + Momus final gate **[OKAY]** → v3 pins (W1 stop-bleed timing, gate predicate dual-topology, prepare/commit double-bounce kill, ack = heartbeat echo reality, brand-needle hotfix).
+- **k0 shipped here** (e53d0a9, unpushed): stop self-proof brand-aware names + fixtures; PIT-228 filed. CHANGELOG [host] same commit.
+- Pending: W1 (stop experiment / legacy /etc unit sweep needs root / daemon re-home + log env), T1″ execution order, push order. Vehicle box env ledger still governs (libtest link flake — tests run elsewhere).
