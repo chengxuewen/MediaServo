@@ -21,6 +21,9 @@ teams); for development process details, consult git log directly. Newest versio
   ghost slots); `stop` now exits non-zero when survivors remain.
 
 ### Added
+- [host] config-ledger block in `status` (running/file/last-push fingerprints + pending/
+  boot-pending/conflict lamps + newest history) and a WARN-tier config-lamp check in `doctor`
+  (T1b5 k5/k8; conflict recomputed at each commit point and each landed cloud push).
 - [host] recorder roster tri-state (host-ops-hardening T1-e): `record.enabled: false` in
   host.yaml now ALSO removes the recorder app from the rendered oxfile roster (no process, no
   oxmgr slot). Key absent or `true` keep the legacy shape byte-identical (the process starts

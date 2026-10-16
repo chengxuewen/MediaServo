@@ -20,7 +20,7 @@ use crate::translate;
 
 pub mod ledger;
 
-use self::ledger::{PendingApply, Running, now_rfc3339};
+use self::ledger::{Flags, LastPush, PendingApply, Running, now_rfc3339};
 
 /// Blocking flock budget for step0 — a queued bell waits for the running core, it does
 /// not skip it (annex §3: every trigger queues here).
@@ -228,15 +228,15 @@ pub fn execute(
         led.save(dir)?;
         return Ok(Outcome::Refused { reason: detail });
     }
-    led.running = Some(Running {
+    let running = Running {
         hash: hash.clone(),
         at: now_rfc3339(),
         origin: opts.origin.to_string(),
         actor: opts.actor.map(str::to_string),
-    });
+    };
+    led.running = Some(running.clone());
     led.pending_apply = None;
-    led.flags.pending = false;
-    led.flags.error = false;
+    led.flags = flags_after_commit(&running, led.last_push.as_ref());
     led.push_history(&hash, opts.origin, opts.actor, "applied");
     led.save(dir)?;
     Ok(Outcome::Applied { hash })
@@ -294,15 +294,15 @@ fn commit_pending_fast(
         );
         return Ok(false);
     }
-    led.running = Some(Running {
+    let running = Running {
         hash: hash.to_string(),
         at: now_rfc3339(),
         origin: "boot-commit".to_string(),
         actor: None,
-    });
+    };
+    led.running = Some(running.clone());
     led.pending_apply = None;
-    led.flags.pending = false;
-    led.flags.error = false;
+    led.flags = flags_after_commit(&running, led.last_push.as_ref());
     led.push_history(hash, "boot-commit", None, "pending-committed");
     led.save(dir)?;
     tracing::info!(
@@ -310,6 +310,35 @@ fn commit_pending_fast(
         short12(hash)
     );
     Ok(true)
+}
+
+/// T1b5 (k8) lamp truth at a commit point: a successful activation clears pending/error and
+/// recomputes `conflict` from the ledger's own facts — the cloud's belief (`last_push`) vs
+/// what actually runs. A vehicle that was never pushed stays conflict=false (no belief to
+/// diverge from). Pure: every commit path (execute step7, boot fast commit) routes through it.
+pub fn flags_after_commit(running: &Running, last_push: Option<&LastPush>) -> Flags {
+    Flags {
+        pending: false,
+        error: false,
+        conflict: last_push.is_some_and(|p| p.hash != running.hash),
+    }
+}
+
+/// T1b5 (k8): record "what the cloud believes it set" — the push bell calls this ONLY after
+/// its push-origin run reported Applied/NoOp (a refused push must not move the belief). The
+/// hash is re-derived from the just-written etc/host.yaml inside the core lock, and the
+/// conflict lamp is re-judged against the running row. Err is operational only (io/lock/save).
+pub fn record_push(dir: &Path, actor: Option<&str>) -> Result<(), String> {
+    let _guard = CoreLock::acquire(dir)?;
+    let cfg_path = dir.join("etc").join("host.yaml");
+    let bytes =
+        std::fs::read(&cfg_path).map_err(|e| format!("read {} failed: {e}", cfg_path.display()))?;
+    let hash = file_hash(&bytes);
+    let mut led = Ledger::load(dir);
+    led.last_push =
+        Some(LastPush { hash: hash.clone(), actor: actor.map(str::to_string), at: now_rfc3339() });
+    led.flags.conflict = led.running.as_ref().is_some_and(|r| r.hash != hash);
+    led.save(dir)
 }
 
 /// Actor label (env USER) for the ledger rows written by CLI/wake origins — unset or
@@ -822,6 +851,59 @@ mod tests {
         assert!(should_reconcile(false, false, false, false)); // never applied (no running row)
         assert!(should_reconcile(false, true, true, false)); // pending_apply edited after a crash
         assert!(should_reconcile(false, true, false, true)); // refused-residue bell flag retries
+    }
+
+    #[test]
+    fn flags_after_commit_table() {
+        let running = Running {
+            hash: "same".to_string(),
+            at: now_rfc3339(),
+            origin: "push".to_string(),
+            actor: None,
+        };
+        // never pushed: no cloud belief to diverge from; lamps off after a commit
+        let f = flags_after_commit(&running, None);
+        assert!(!f.pending && !f.error && !f.conflict);
+        // belief equals what runs -> consistent
+        let pushed = LastPush { hash: "same".to_string(), actor: None, at: now_rfc3339() };
+        assert!(!flags_after_commit(&running, Some(&pushed)).conflict);
+        // site moved after the landed push (local edit applied) -> conflict lamp
+        let stale = LastPush { hash: "other".to_string(), actor: None, at: now_rfc3339() };
+        assert!(flags_after_commit(&running, Some(&stale)).conflict);
+    }
+
+    #[test]
+    fn record_push_sets_belief_and_recomputes_conflict() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::write(dir.join("etc").join("host.yaml"), "a: 1\n").unwrap();
+        let push_hash = file_hash(b"a: 1\n");
+        let row = |h: String| Running {
+            hash: h,
+            at: now_rfc3339(),
+            origin: "cli".to_string(),
+            actor: None,
+        };
+        // pushed content differs from what runs -> conflict lit, actor recorded
+        let led = Ledger { running: Some(row("other".to_string())), ..Ledger::default() };
+        led.save(dir).unwrap();
+        record_push(dir, Some("ops")).unwrap();
+        let got = Ledger::load(dir);
+        assert_eq!(got.last_push.as_ref().unwrap().hash, push_hash);
+        assert_eq!(got.last_push.as_ref().unwrap().actor.as_deref(), Some("ops"));
+        assert!(got.flags.conflict);
+        // pushed content equals the running row -> lamp clear, belief updated in place
+        let mut led = Ledger::load(dir);
+        led.running = Some(row(push_hash.clone()));
+        led.save(dir).unwrap();
+        record_push(dir, None).unwrap();
+        let got = Ledger::load(dir);
+        assert!(!got.flags.conflict);
+        assert!(got.last_push.as_ref().unwrap().actor.is_none());
+        // absent host.yaml: operational Err, never a half-written belief
+        let empty = tempfile::tempdir().unwrap();
+        assert!(record_push(empty.path(), None).is_err());
     }
 
     #[test]

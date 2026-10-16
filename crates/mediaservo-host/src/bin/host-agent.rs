@@ -224,6 +224,11 @@ fn spawn_config_applier(handle: GatewayHandle, dir: PathBuf, config_version: Arc
                     Ok(Ok(o)) => {
                         if matches!(o, Outcome::Applied { .. } | Outcome::NoOp { .. }) {
                             config_version.store(v, Ordering::Relaxed);
+                            // T1b5 (k8): the cloud belief lands only when the push went live;
+                            // refused pushes keep the previous last_push (honest conflict lamp).
+                            if let Err(e) = config_core::record_push(&dir, None) {
+                                tracing::error!("config-core (push): last_push record failed: {e}");
+                            }
                         }
                         log_core_outcome("push", &o);
                     }

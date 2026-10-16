@@ -578,6 +578,7 @@ fn cmd_status(args: &mut impl Iterator<Item = String>) -> i32 {
         println!("no managed processes in the host namespace (run host start [<dir>] first)");
         // T1-c sentinel: zero live apps with heavy residue is exactly the post-stop corpse shape.
         print_shm_drift(0);
+        print_config_block(&dir);
         return 0;
     }
     println!("{:<28} {:<10} PID", "NAME", "STATUS");
@@ -593,7 +594,32 @@ fn cmd_status(args: &mut impl Iterator<Item = String>) -> i32 {
     }
     // T1-c SHM drift sentinel (after the app table)
     print_shm_drift(live);
+    // T1b5 (k5): config ledger block (three-fact fingerprints + lamps + recent history)
+    print_config_block(&dir);
     0
+}
+
+/// T1b5 (k5): render the config-state ledger block after the status table. Read-only
+/// provenance: an absent ledger or an unreadable host.yaml degrades to one line and never
+/// changes the caller's exit code (process-table truth stays the table above).
+fn print_config_block(dir: &std::path::Path) {
+    use mediaservo_host::config_core::ledger::{Ledger, config_status_lines, file_hash};
+    if !Ledger::path(dir).exists() {
+        for line in config_status_lines(&Ledger::default(), "") {
+            println!("{line}");
+        }
+        return;
+    }
+    let bytes = match std::fs::read(dir.join("etc").join("host.yaml")) {
+        Ok(b) => b,
+        Err(e) => {
+            println!("config: host.yaml unreadable: {e} — ledger block skipped");
+            return;
+        }
+    };
+    for line in config_status_lines(&Ledger::load(dir), &file_hash(&bytes)) {
+        println!("{line}");
+    }
 }
 
 /// T1-c residue counters: node dirs under /tmp/iceoryx2/nodes + /dev/shm/iox2_* entries.
@@ -1159,6 +1185,22 @@ fn cmd_doctor(args: &mut impl Iterator<Item = String>) -> i32 {
         None => println!(
             "[ok] iceoryx2 residue within bounds ({nodes} node dirs / {shm} shm entries / {live} live apps)"
         ),
+    }
+    // (5) T1b5 (k5) config ledger lamps — WARN tier, never enters the failed count
+    // (a lit lamp is triage provenance, not an executability failure).
+    if !mediaservo_host::config_core::ledger::Ledger::path(&dir).exists() {
+        println!("[ok] config: no config-state.json yet (pre-T1\u{2033} state or never applied)");
+    } else {
+        let flags = mediaservo_host::config_core::ledger::Ledger::load(&dir).flags;
+        if flags.pending {
+            println!("[warn] config pending (refused/uncommitted change)");
+        } else if flags.error {
+            println!("[warn] last config apply flagged an error");
+        } else if flags.conflict {
+            println!("[warn] config diverged from last cloud push");
+        } else {
+            println!("[ok] config ledger consistent");
+        }
     }
     if failed == 0 {
         println!("doctor: all checks passed ({})", cfg_path.display());

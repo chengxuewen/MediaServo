@@ -139,6 +139,90 @@ impl Ledger {
     }
 }
 
+/// T1b5 (k5): render shape for `host status` — one fact per line, fixed columns, plain text
+/// (no box drawing). An all-empty ledger (file absent / corrupt / never applied —
+/// [`Ledger::load`] collapses all three to default) renders the single pre-T1\u{2033} line.
+pub fn config_status_lines(led: &Ledger, file_hash_now: &str) -> Vec<String> {
+    if led.running.is_none()
+        && led.last_push.is_none()
+        && led.pending_apply.is_none()
+        && led.history.is_empty()
+    {
+        return vec![
+            "config: no config-state.json yet (pre-T1\u{2033} state or never applied)".to_string(),
+        ];
+    }
+    let mut out = Vec::new();
+    match &led.running {
+        Some(r) => out.push(format!(
+            "config:  running  = {}  (origin {}, actor {}, {})",
+            short12(&r.hash),
+            r.origin,
+            r.actor.as_deref().unwrap_or("-"),
+            date16(&r.at)
+        )),
+        None => out.push("config:  running  = -  (nothing applied yet)".to_string()),
+    }
+    let file_note = if led.pending_apply.as_ref().is_some_and(|p| p.hash == file_hash_now) {
+        "BOOT-PENDING: apply in progress"
+    } else if led.running.as_ref().is_some_and(|r| r.hash == file_hash_now) {
+        "= matches"
+    } else {
+        "PENDING: edited, not applied"
+    };
+    out.push(format!("         file     = {}  [{file_note}]", short12(file_hash_now)));
+    match &led.last_push {
+        Some(p) => {
+            let note = match &led.running {
+                Some(r) if r.hash == p.hash => "  [consistent]",
+                Some(_) => "  [CONFLICT: site changed since push]",
+                None => "",
+            };
+            out.push(format!("         last push= {}{note}", short12(&p.hash)));
+        }
+        None => out.push("         last push= -  (no cloud push recorded)".to_string()),
+    }
+    if !led.history.is_empty() {
+        let items: Vec<String> = led
+            .history
+            .iter()
+            .rev()
+            .take(3)
+            .map(|h| {
+                format!(
+                    "{} {}:{} {}",
+                    hm(&h.at),
+                    h.origin,
+                    h.actor.as_deref().unwrap_or("-"),
+                    trunc(&h.result, 48)
+                )
+            })
+            .collect();
+        out.push(format!("         history: {}", items.join("  |  ")));
+    }
+    out
+}
+
+/// Display shortening of an RFC3339 stamp: "2026-10-16T12:34:56+00:00" -> "2026-10-16 12:34".
+/// Never parses — a malformed stamp falls back to the raw string.
+fn date16(ts: &str) -> String {
+    ts.get(..16).unwrap_or(ts).replace('T', " ")
+}
+
+/// "2026-10-16T12:34:56+00:00" -> "12:34": history rows carry same-day context only, the
+/// date lives on the running row.
+fn hm(ts: &str) -> &str {
+    ts.get(11..16).unwrap_or(ts)
+}
+
+/// Char-boundary-safe display truncation (refusal reasons can run long).
+fn trunc(s: &str, max: usize) -> &str {
+    match s.char_indices().nth(max) {
+        Some((i, _)) => &s[..i],
+        None => s,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,5 +277,86 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("run")).unwrap();
         std::fs::write(Ledger::path(dir.path()), "{ not json").unwrap();
         assert_eq!(Ledger::load(dir.path()), Ledger::default()); // corrupt
+    }
+
+    fn r_row(hash: &str, origin: &str, actor: Option<&str>) -> Running {
+        Running {
+            hash: hash.to_string(),
+            at: "2026-10-16T12:34:56+00:00".to_string(),
+            origin: origin.to_string(),
+            actor: actor.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn config_status_lines_absent_ledger_is_one_line() {
+        let lines = config_status_lines(&Ledger::default(), "f");
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("no config-state.json yet"));
+    }
+
+    #[test]
+    fn config_status_lines_matches_shape() {
+        let h = "a".repeat(64);
+        let led = Ledger { running: Some(r_row(&h, "cli", Some("max"))), ..Ledger::default() };
+        let text = config_status_lines(&led, &h).join("\n");
+        assert!(text.contains("aaaaaaaaaaaa")); // short12 display form
+        assert!(text.contains("= matches"));
+        assert!(text.contains("actor max"));
+        assert!(text.contains("2026-10-16 12:34"));
+        assert!(!text.contains("CONFLICT"));
+        assert!(!text.contains("PENDING"));
+    }
+
+    #[test]
+    fn config_status_lines_edited_file_is_pending() {
+        let led =
+            Ledger { running: Some(r_row(&"a".repeat(64), "cli", None)), ..Ledger::default() };
+        let text = config_status_lines(&led, &"b".repeat(64)).join("\n");
+        assert!(text.contains("PENDING: edited, not applied"));
+        assert!(text.contains("no cloud push recorded"));
+    }
+
+    #[test]
+    fn config_status_lines_boot_pending_when_pending_apply_matches_file() {
+        let h = "c".repeat(64);
+        let led = Ledger {
+            running: Some(r_row(&"d".repeat(64), "cli", None)),
+            pending_apply: Some(PendingApply {
+                hash: h.clone(),
+                at: "2026-10-16T13:00:00+00:00".to_string(),
+            }),
+            ..Ledger::default()
+        };
+        let text = config_status_lines(&led, &h).join("\n");
+        assert!(text.contains("BOOT-PENDING: apply in progress"));
+    }
+
+    #[test]
+    fn config_status_lines_conflict_and_history_shape() {
+        let mut led = Ledger {
+            running: Some(r_row(&"e".repeat(64), "push", None)),
+            last_push: Some(LastPush {
+                hash: "f".repeat(64),
+                actor: None,
+                at: "2026-10-16T12:00:00+00:00".to_string(),
+            }),
+            ..Ledger::default()
+        };
+        led.push_history(&"e".repeat(64), "local", Some("max"), "applied");
+        led.push_history(
+            &"e".repeat(64),
+            "push",
+            None,
+            "refused-residue: very long reason that should be truncated well past the display budget",
+        );
+        let text = config_status_lines(&led, &"e".repeat(64)).join("\n");
+        assert!(text.contains("CONFLICT: site changed since push"));
+        assert!(text.contains("last push= ffffffffffff"));
+        let hist = text.lines().find(|l| l.contains("history:")).unwrap();
+        assert!(hist.contains("push:- refused-residue"));
+        assert!(hist.contains("local:max applied"));
+        // newest first
+        assert!(hist.find("push:- refused").unwrap() < hist.find("local:max applied").unwrap());
     }
 }
