@@ -150,6 +150,18 @@ pub fn diagnose_app_gone(app: &str) -> bool {
     true
 }
 
+/// k0 (host-ops-hardening F15): brand-aware family name list for the cmd_stop
+/// self-proof. The old hardcoded `host-*` list was vacuously true on branded
+/// trees (processes run as `msrtc-agent` — no needle matched). Pass brand-derived
+/// names PLUS the legacy `host-` forms so current-brand, renamed-legacy, and
+/// default-brand (CI) deployments are all covered; `diagnose_app_gone` layers its
+/// own prefix variants per supplied name.
+pub fn stop_sweep_names(app_prefix: &str) -> Vec<String> {
+    const BASES: [&str; 7] =
+        ["agent", "streamer", "capturer", "recorder", "controller", "emergency", "audio"];
+    BASES.iter().flat_map(|b| [format!("{app_prefix}{b}"), format!("host-{b}")]).collect()
+}
+
 /// Human-readable report output (eprintln; gives a disposition suggestion when an occupier is an upgrade leftover, F1 name-don-t-kill).
 pub fn print_report(reports: &[ConflictReport], port: u16) {
     if reports.is_empty() {
@@ -219,5 +231,34 @@ mod tests {
                 && line.contains("upgrade leftover")
         );
         assert!(line.contains("oxmgr daemon run(7)"));
+    }
+
+    /// k0 pin: branded prefix yields brand AND legacy forms (no single-shape list).
+    #[test]
+    fn stop_sweep_names_cover_both_families() {
+        let names = stop_sweep_names("msrtc-");
+        assert!(names.contains(&"msrtc-agent".to_string()));
+        assert!(names.contains(&"host-agent".to_string()));
+        assert!(names.contains(&"msrtc-capturer".to_string()));
+        let legacy = stop_sweep_names("host-");
+        assert!(legacy.iter().any(|n| n == "host-agent"));
+    }
+
+    /// F15 negative fixture: a live branded-named process MUST be detected — the
+    /// old hardcoded list reported "sweep verified" regardless on branded boxes.
+    /// (Linux-only: /proc scan.)
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn branded_survivor_is_not_vacuously_gone() {
+        let dir = std::env::temp_dir().join(format!("k0-sweep-fixture-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("msrtc-agent");
+        std::fs::copy("/bin/sleep", &fake).unwrap();
+        let mut child = std::process::Command::new(&fake).arg("30").spawn().expect("spawn fixture");
+        let gone = diagnose_app_gone("msrtc-agent");
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!gone, "branded survivor must count as leftover (found => gone=false)");
     }
 }

@@ -31,6 +31,12 @@ teams); for development process details, consult git log directly. Newest versio
   signaling_min_supported} next to frame_meta + token_schema, all derived from Rust source.
 
 ### Fixed
+- [host] k0 (host-ops-hardening F15): the stop self-proof scanned a hardcoded list of
+  legacy process names, so "sweep verified ✓" printed vacuously on branded trees
+  (real processes are `msrtc-*` — none of the needles could match). Sweep names now
+  derive from the active brand prefix plus the legacy `host-` forms, pinned by a
+  `/proc`-backed negative fixture (a live `msrtc-agent`-named process must be flagged
+  as leftover). Pre-existing false-green in production tooling; ships ahead of the T1″ batch.
 - [server] admin dashboard play grid was stuck at one column regardless of the Columns
   buttons: the english-only migration dropped the opening `/*` of a two-line comment in
   `Dashboard.css`, and the browser CSS parser swallowed the whole `.video-grid { display: grid }`

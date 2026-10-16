@@ -448,17 +448,10 @@ fn cmd_stop(args: &mut impl Iterator<Item = String>) -> i32 {
         // start-conflict-doctor T4: stop self-proof (poll ≤5s until the family count reaches zero)
         let mut verified = false;
         for _ in 0..10 {
-            let gone = [
-                "host-agent",
-                "host-streamer",
-                "host-capturer",
-                "host-recorder",
-                "host-controller",
-                "host-emergency",
-                "host-audio",
-            ]
-            .iter()
-            .all(|app| mediaservo_host::conflict::diagnose_app_gone(app));
+            let sweep = mediaservo_host::conflict::stop_sweep_names(
+                mediaservo_common::brand::media_brand().app_prefix,
+            );
+            let gone = sweep.iter().all(|app| mediaservo_host::conflict::diagnose_app_gone(app));
             if gone {
                 verified = true;
                 break;
