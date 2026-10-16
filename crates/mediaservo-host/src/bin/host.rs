@@ -343,7 +343,7 @@ fn cmd_apply_impl(args: &mut impl Iterator<Item = String>, verb: &str) -> i32 {
     }
     // C25: clear SHM residue before a full start; apply (hot update) does not (processes running, SHM in use)
     if verb == "start" {
-        clear_iceoryx_residue("start");
+        mediaservo_host::config_core::clear_iceoryx_residue("start");
     }
     match mediaservo_host::translate::apply_config(&dir) {
         Ok(()) => {
@@ -360,14 +360,7 @@ fn cmd_apply_impl(args: &mut impl Iterator<Item = String>, verb: &str) -> i32 {
     }
 }
 
-/// C25: iceoryx2 SHM residue (SystemInFlux) makes capturer/streamer subscription open fail —
-/// must clean after a full stop (start/restart); apply (hot update) does not (processes running, SHM in use).
-fn clear_iceoryx_residue(verb: &str) {
-    for p in ["/tmp/iceoryx2", "/dev/shm/iox2_*"] {
-        let _ = std::process::Command::new("rm").args(["-rf", p]).status();
-    }
-    println!("{verb}: cleared iceoryx2 SHM residue (C25)");
-}
+// C25 clear moved to mediaservo_host::config_core::clear_iceoryx_residue (T1b2 single source).
 
 /// `host restart [<dir>]`: `oxmgr stop <oxfile>` (stop all apps) then re-apply (full restart).
 fn cmd_restart(args: &mut impl Iterator<Item = String>) -> i32 {
@@ -389,7 +382,7 @@ fn cmd_restart(args: &mut impl Iterator<Item = String>) -> i32 {
     }
 
     // full restart = stop then start: clear SHM residue like start does (a restart skipping cleanup → SystemInFlux black screen)
-    clear_iceoryx_residue("restart");
+    mediaservo_host::config_core::clear_iceoryx_residue("restart");
     match mediaservo_host::translate::apply_config(&dir) {
         Ok(()) => {
             println!("restart: fully restarted ({}", dir.join("run").join("oxfile.toml").display());

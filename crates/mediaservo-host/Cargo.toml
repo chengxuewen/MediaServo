@@ -105,6 +105,9 @@ bytes = "1"
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
 
+# Advisory file locking (config-core executor spine, T1b2); also used by e2e tests for SIGTERM/SIGKILL
+libc = "0.2"
+
 
 [features]
 default = ["capture-v4l2"]
@@ -116,5 +119,4 @@ production = ["gstreamer"]
 webrtc-p2p = ["dep:webrtc"]
 [dev-dependencies]
 tempfile = "3"
-libc = "0.2"
 tokio-tungstenite = { version = "0.24", features = ["connect"] }

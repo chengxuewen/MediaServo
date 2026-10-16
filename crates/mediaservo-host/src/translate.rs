@@ -256,7 +256,7 @@ pub fn signaling_gateway_url(cfg: &str) -> Result<String, String> {
 const FIXED_APP_BASES: [&str; 5] = ["agent", "recorder", "controller", "emergency", "audio"];
 
 /// app name = brand prefix + base (default "host-" → "host-agent"; branded "cp-agent").
-fn app_name(base: &str) -> String {
+pub(crate) fn app_name(base: &str) -> String {
     format!("{}{}", mediaservo_common::brand::media_brand().app_prefix, base)
 }
 
@@ -396,10 +396,15 @@ fn oxmgr_cmd() -> std::process::Command {
     std::process::Command::new(bin)
 }
 
+/// Instance daemon home (single source behind oxmgr_env and the config-core survivor scoping).
+pub(crate) fn oxmgr_home(dir: &Path) -> PathBuf {
+    dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).join("run").join("oxmgr")
+}
+
 /// Instance daemon env (OXMGR_HOME-derived port-isolated daemon — multi-instance / parallel tests do not collide).
 /// oxmgr_apply, live_host_apps and delete must share this source, otherwise list hits the default daemon and comes back empty.
 pub fn oxmgr_env(dir: &Path) -> Vec<(String, String)> {
-    let home = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).join("run").join("oxmgr");
+    let home = oxmgr_home(dir);
     let sum: u32 = home.to_string_lossy().bytes().map(u32::from).sum();
     let port = 18000 + (sum % 400);
     vec![
@@ -411,7 +416,7 @@ pub fn oxmgr_env(dir: &Path) -> Vec<(String, String)> {
     ]
 }
 
-fn oxmgr_cmd_with_env(env: &[(String, String)]) -> std::process::Command {
+pub(crate) fn oxmgr_cmd_with_env(env: &[(String, String)]) -> std::process::Command {
     let mut cmd = oxmgr_cmd();
     for (k, v) in env {
         cmd.env(k, v);
@@ -492,7 +497,7 @@ pub fn live_host_apps(env: &[(String, String)]) -> Result<Vec<String>, String> {
 }
 
 /// Parse the oxfile [[apps]].name list (the desired side of the removal diff).
-fn oxfile_app_names(path: &Path) -> Result<Vec<String>, String> {
+pub(crate) fn oxfile_app_names(path: &Path) -> Result<Vec<String>, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| format!("read {} failed: {e}", path.display()))?;
     let val: toml::Value =

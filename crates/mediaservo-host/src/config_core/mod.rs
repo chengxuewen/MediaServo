@@ -1,0 +1,562 @@
+//! T1″ batch2 — config-core spine (annex §2: one executor, seven steps, flock-serialized).
+//!
+//! Single serialized executor for host-config activation: in-lock fingerprint re-read,
+//! validate + C40 token pre-check, staging render, registry-sourced reverse-order
+//! teardown, C25 SHM clear, hard dual-topology verification gate, prepare/commit
+//! (pending_apply before activation) and reconcile + ledger. Batch4 routes the CLI/agent
+//! verbs through `execute`; this batch ships the callable core only — no bells, no
+//! protocol fields.
+//!
+//! Topology contract: `AgentRun` = the executor IS the agent process (it never stops
+//! itself; the declarative apply swaps it last), `CliRun` = a CLI process executes and
+//! may stop the agent too.
+
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+pub use self::ledger::{Ledger, file_hash, short12};
+use crate::conflict::{self, SurvivorInfo};
+use crate::translate;
+
+pub mod ledger;
+
+use self::ledger::{PendingApply, Running, now_rfc3339};
+
+/// Blocking flock budget for step0 — a queued bell waits for the running core, it does
+/// not skip it (annex §3: every trigger queues here).
+const LOCK_TIMEOUT: Duration = Duration::from_secs(120);
+/// step5 teardown-verification retry budget (annex §2: "Retry-with-timeout ~15s").
+const GATE_TIMEOUT: Duration = Duration::from_secs(15);
+/// Shared poll step for the lock wait and the verification gate.
+const RETRY_STEP: Duration = Duration::from_millis(500);
+/// Staging file name (activated only by the step6 rename).
+const STAGING_NAME: &str = "oxfile.toml.staging";
+/// conflict.rs writes this literal into `SurvivorInfo.owner` when the environ carries no
+/// OXMGR_HOME — the unknown-owner branch of the instance scoping keys on it.
+const OWNER_UNKNOWN: &str = "owner unknown";
+
+/// Which process runs the core (annex §2 step3/step5 dual topology).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Topology {
+    /// host-agent executes: the agent entry stays in the registry and is swapped by apply.
+    AgentRun,
+    /// CLI executes: the agent is torn down too; the gate expects a fully empty registry.
+    CliRun,
+}
+
+/// Who/why this run happened — self-report labels written into the ledger (§9.2:
+/// "push" | "local" | "cli" origin, actor when known).
+#[derive(Debug, Clone, Copy)]
+pub struct ExecuteOpts<'a> {
+    pub origin: &'a str,
+    pub actor: Option<&'a str>,
+}
+
+/// End state of one core run.
+#[derive(Debug)]
+pub enum Outcome {
+    /// Fingerprint already running (verified in-lock), nothing touched.
+    NoOp { hash: String },
+    /// Fresh cluster live and reconciled; ledger committed.
+    Applied { hash: String },
+    /// Config refused at a gate — old cluster keeps running untouched.
+    Refused { reason: String },
+    /// Teardown verification failed (step5): refused to start over corpses, new oxfile
+    /// NOT activated; `survivors` are instance-scoped family processes still alive.
+    Residue { survivors: Vec<SurvivorInfo> },
+}
+
+/// Run the seven-step core once against `dir` (an initialized instance tree).
+/// `force` bypasses only the step1 fingerprint short-circuit — every gate still applies.
+/// Err is reserved for operational failures (lock timeout, io, oxmgr unrunnable, ledger
+/// unwritable); every config-level rejection is a typed `Outcome`.
+pub fn execute(
+    dir: &Path,
+    topo: Topology,
+    force: bool,
+    opts: &ExecuteOpts<'_>,
+) -> Result<Outcome, String> {
+    // ── step0 — per-instance serialization (flock auto-releases on process death) ──
+    let _guard = CoreLock::acquire(dir)?;
+
+    // ── step1 — IN-LOCK re-read: the fingerprint check is the correctness boundary,
+    // any bell-level pre-check outside is only an optimization and must not be trusted. ──
+    let cfg_path = dir.join("etc").join("host.yaml");
+    let bytes =
+        std::fs::read(&cfg_path).map_err(|e| format!("read {} failed: {e}", cfg_path.display()))?;
+    let hash = file_hash(&bytes);
+    let mut led = Ledger::load(dir);
+    let pending_mismatch = led.pending_apply.as_ref().is_some_and(|p| p.hash != hash);
+    if !force && led.running.as_ref().is_some_and(|r| r.hash == hash) && !pending_mismatch {
+        return Ok(Outcome::NoOp { hash });
+    }
+
+    // ── step1 validate gate — parse + D274 enum gates (inside stream_configs) +
+    // V5 hmac-key guard (same source of truth as write_oxfile) + C40 token pre-check. ──
+    let cfg = String::from_utf8(bytes).map_err(|e| format!("host.yaml is not valid utf-8: {e}"))?;
+    if let Err(e) = translate::validate(&cfg) {
+        return Ok(Outcome::Refused { reason: e });
+    }
+    if let Some(rel) = translate::control_hmac_key_file(&cfg)? {
+        let p = dir.join(rel); // absolute rel passes through join directly
+        if !p.exists() {
+            return Ok(Outcome::Refused {
+                reason: format!(
+                    "[control].hmac_key_file points to a missing file: {}",
+                    p.display()
+                ),
+            });
+        }
+    }
+    // Render the roster IN MEMORY first: the token set is exactly what the roster
+    // references (the T1-e tri-state drops the recorder slot from the render when
+    // explicitly disabled, so its token is only demanded when the slot lives).
+    let rendered = translate::to_oxfile_in_dir(&cfg, dir)?;
+    let missing: Vec<String> =
+        token_paths(&rendered).into_iter().filter(|p| !Path::new(p).exists()).collect();
+    if !missing.is_empty() {
+        return Ok(Outcome::Refused {
+            reason: format!(
+                "token pre-check (C40): missing {} — run `token issue --all {}`",
+                missing.join(", "),
+                dir.display()
+            ),
+        });
+    }
+
+    // ── step2 — staging render (the live oxfile is untouched until the step6 rename) ──
+    let staging = dir.join("run").join(STAGING_NAME);
+    write_staging(&staging, &rendered)?;
+
+    // ── step3 — reverse-order teardown; source = LIVE registry (only the registry
+    // contains F11 ghosts — never the old/new roster) minus the executor's own agent. ──
+    let env = translate::oxmgr_env(dir);
+    let agent = translate::app_name("agent");
+    let live = match translate::live_host_apps(&env) {
+        Ok(v) => v,
+        Err(e) => {
+            remove_quiet(&staging);
+            return Ok(Outcome::Refused { reason: format!("teardown source unavailable: {e}") });
+        }
+    };
+    let targets: Vec<String> =
+        live.iter().filter(|n| !(topo == Topology::AgentRun && **n == agent)).cloned().collect();
+    for name in order_teardown(&targets) {
+        stop_and_delete(&env, &name);
+    }
+
+    // ── step4 — C25 SHM residue clear (safe: the instance just tore down) ──
+    clear_iceoryx_residue("config-core");
+
+    // ── step5 — teardown-verification gate (hard, dual-topology). Never start over
+    // corpses: a dirty gate refuses before the new config is activated. ──
+    let home = translate::oxmgr_home(dir).to_string_lossy().into_owned();
+    let dir_prefix =
+        format!("{}/", dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).display());
+    let family = conflict::stop_sweep_names(mediaservo_common::brand::media_brand().app_prefix);
+    if let Err((survivors, registry_note)) =
+        wait_for_clean(dir, &env, topo, &dir_prefix, &home, &family)
+    {
+        remove_quiet(&staging); // content stays observable via the ledger history row
+        let detail = format!(
+            "refused-residue: survivors=[{}] registry={}",
+            survivors
+                .iter()
+                .map(|s| format!("{}@{}", s.pid, s.owner))
+                .collect::<Vec<_>>()
+                .join(", "),
+            registry_note
+        );
+        tracing::error!("{detail} — config-core refused to start over corpses");
+        led.flags.pending = true;
+        led.push_history(&hash, opts.origin, opts.actor, &detail);
+        led.save(dir)?;
+        return Ok(Outcome::Residue { survivors });
+    }
+
+    // ── step6 — prepare/commit: pending_apply BEFORE activation (crash in between =>
+    // the boot bell re-reconciles file.hash vs pending instead of re-tearing-down). ──
+    led.pending_apply = Some(PendingApply { hash: hash.clone(), at: now_rfc3339() });
+    led.save(dir)?;
+    let oxfile = dir.join("run").join("oxfile.toml");
+    std::fs::rename(&staging, &oxfile).map_err(|e| {
+        format!("activate {} -> {} failed: {e}", staging.display(), oxfile.display())
+    })?;
+    if let Err(e) = translate::oxmgr_apply(dir) {
+        // pending_apply stays set — the boot bell owns the repair from here.
+        led.flags.error = true;
+        led.push_history(&hash, opts.origin, opts.actor, &format!("refused-apply: {e}"));
+        led.save(dir)?;
+        return Ok(Outcome::Refused { reason: e });
+    }
+
+    // ── step7 — reconcile + ledger commit (ghost-free assert, lenient on the batch1
+    // falsy-recorder asymmetry). The lock releases on return, AFTER the ledger write. ──
+    let roster = translate::oxfile_app_names(&oxfile)?;
+    let registry = translate::live_host_apps(&env)?;
+    let expected = translate::expected_process_names(&cfg)?;
+    let recorder = translate::app_name("recorder");
+    if let Some(detail) = reconcile_mismatch(&roster, &registry, &expected, &recorder) {
+        led.flags.error = true; // pending_apply kept for boot-bell repair
+        led.push_history(&hash, opts.origin, opts.actor, &format!("reconcile-mismatch: {detail}"));
+        led.save(dir)?;
+        return Ok(Outcome::Refused { reason: detail });
+    }
+    led.running = Some(Running {
+        hash: hash.clone(),
+        at: now_rfc3339(),
+        origin: opts.origin.to_string(),
+        actor: opts.actor.map(str::to_string),
+    });
+    led.pending_apply = None;
+    led.flags.pending = false;
+    led.flags.error = false;
+    led.push_history(&hash, opts.origin, opts.actor, "applied");
+    led.save(dir)?;
+    Ok(Outcome::Applied { hash })
+}
+
+/// C25: iceoryx2 SHM residue (SystemInFlux) makes capturer/streamer subscription open
+/// fail — must clean after a full stop (start/restart/core step4); hot apply does not
+/// (processes running, SHM in use). Moved out of bin/host.rs (T1b2): the CLI verbs and
+/// the core share one implementation (single source).
+pub fn clear_iceoryx_residue(verb: &str) {
+    for p in ["/tmp/iceoryx2", "/dev/shm/iox2_*"] {
+        let _ = std::process::Command::new("rm").args(["-rf", p]).status();
+    }
+    println!("{verb}: cleared iceoryx2 SHM residue (C25)");
+}
+
+/// step0 — per-instance advisory lock. flock auto-releases on process death, so a
+/// crashed core never leaves a dead lock (the O_EXCL-with-pid alternative would need
+/// stale-liveness heuristics for exactly this case).
+struct CoreLock {
+    _file: std::fs::File,
+}
+
+impl CoreLock {
+    fn acquire(dir: &Path) -> Result<CoreLock, String> {
+        let run = dir.join("run");
+        std::fs::create_dir_all(&run)
+            .map_err(|e| format!("create {} failed: {e}", run.display()))?;
+        let path = run.join("config-core.lock");
+        let file = std::fs::File::create(&path)
+            .map_err(|e| format!("create {} failed: {e}", path.display()))?;
+        Self::lock_exclusive(file, &path)
+    }
+
+    #[cfg(unix)]
+    fn lock_exclusive(file: std::fs::File, path: &Path) -> Result<CoreLock, String> {
+        use std::os::unix::io::AsRawFd;
+        let fd = file.as_raw_fd();
+        let deadline = Instant::now() + LOCK_TIMEOUT;
+        loop {
+            // SAFETY: `fd` is a valid descriptor owned by `file` for the whole loop;
+            // flock(2) touches only the kernel lock table (no memory access).
+            let rc = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+            if rc == 0 {
+                return Ok(CoreLock { _file: file });
+            }
+            let err = std::io::Error::last_os_error();
+            if rc != -1 || err.raw_os_error() != Some(libc::EWOULDBLOCK) {
+                return Err(format!("flock({}) failed (rc {rc}): {err}", path.display()));
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "config-core lock {} busy for {}s — another executor holds it",
+                    path.display(),
+                    LOCK_TIMEOUT.as_secs()
+                ));
+            }
+            std::thread::sleep(RETRY_STEP);
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn lock_exclusive(_file: std::fs::File, _path: &Path) -> Result<CoreLock, String> {
+        Err("config-core: advisory locking is only implemented for unix".to_string())
+    }
+}
+
+/// step2 — write the rendered oxfile to staging. Leftovers from crashed runs are swept
+/// before every write (activation renames the CURRENT staging only, never a leftover).
+fn write_staging(staging: &Path, content: &str) -> Result<(), String> {
+    if let Some(parent) = staging.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create {} failed: {e}", parent.display()))?;
+    }
+    let _ = std::fs::remove_file(staging);
+    std::fs::write(staging, content).map_err(|e| format!("write {} failed: {e}", staging.display()))
+}
+
+fn remove_quiet(p: &Path) {
+    let _ = std::fs::remove_file(p);
+}
+
+/// Extract every `--token <path>` argument from the rendered roster text (C40 pre-check
+/// input). Paths in rendered commands are unquoted; a quote/newline ends the value.
+fn token_paths(rendered: &str) -> Vec<String> {
+    const NEEDLE: &str = "--token ";
+    let mut out = Vec::new();
+    let mut rest = rendered;
+    while let Some(rel) = rest.find(NEEDLE) {
+        rest = &rest[rel + NEEDLE.len()..];
+        let end = rest.find([' ', '"', '\n', '\r', '\t']).unwrap_or(rest.len());
+        if end > 0 {
+            out.push(rest[..end].to_string());
+        }
+        rest = &rest[end..];
+    }
+    out
+}
+
+/// step3 order (pure): consumers (streamer/audio/controller/emergency/recorder) first,
+/// then producers (capturer), agent last (only CliRun ever carries it — apply swaps the
+/// agent declaratively instead, never via the teardown loop).
+fn order_teardown(names: &[String]) -> Vec<String> {
+    const CONSUMER_BASES: [&str; 5] = ["streamer", "audio", "controller", "emergency", "recorder"];
+    let rank = |n: &String| -> u8 {
+        if n.ends_with("agent") {
+            3
+        } else if CONSUMER_BASES.iter().any(|b| n.contains(b)) {
+            0
+        } else if n.contains("capturer") {
+            1
+        } else {
+            2
+        }
+    };
+    let mut out = names.to_vec();
+    out.sort_by_key(rank); // stable sort keeps caller order within a class
+    out
+}
+
+/// step3 — per-name `oxmgr stop` + `oxmgr delete`. Failures only WARN here: the hard
+/// verdict is step5's gate (refuse only when the state never reaches clean, not per verb).
+fn stop_and_delete(env: &[(String, String)], name: &str) {
+    for verb in ["stop", "delete"] {
+        match translate::oxmgr_cmd_with_env(env).arg(verb).arg(name).output() {
+            Ok(out) if out.status.success() => {
+                tracing::info!(app = %name, verb, "config-core: teardown {verb} ok");
+            }
+            Ok(out) => tracing::warn!(
+                app = %name, verb,
+                "config-core: oxmgr {verb} failed (step5 gate decides): {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+            Err(e) => {
+                tracing::warn!(app = %name, verb, "config-core: oxmgr {verb} exec failed: {e}")
+            }
+        }
+    }
+}
+
+/// step5 registry predicate (pure, table-tested).
+/// ponytail: suffix match on "agent" — if a future app base name could end in "agent",
+/// thread the exact `translate::app_name("agent")` through as a parameter.
+fn gate_clean(registry: &[String], topo: &Topology) -> bool {
+    match topo {
+        Topology::CliRun => registry.is_empty(),
+        Topology::AgentRun => registry.iter().all(|n| n.ends_with("agent")),
+    }
+}
+
+/// step5 survivor scoping (pure): an instance process is one whose cmdline first segment
+/// lives under the instance dir, OR whose daemon home (OXMGR_HOME environ) is this
+/// instance, OR whose owner is unreadable while the basename belongs to the family set.
+/// Self-pid and `/target/` dev binaries are already excluded upstream (conflict.rs).
+/// AgentRun corollary: the executor agent is self-pid-excluded there by construction.
+fn instance_scoped(s: &SurvivorInfo, dir_prefix: &str, home: &str, family: &[String]) -> bool {
+    if s.first_arg.starts_with(dir_prefix) || s.owner == home {
+        return true;
+    }
+    s.owner == OWNER_UNKNOWN
+        && family
+            .iter()
+            .any(|n| s.first_arg.rsplit('/').next().unwrap_or_default().starts_with(n.as_str()))
+}
+
+/// step5 retry loop (annex: never start over corpses): registry gate + instance-scoped
+/// survivor scan, ~15s budget in 500ms steps. An oxmgr list error counts as NOT clean
+/// (fail-closed — an unreadable registry is exactly what the gate exists to catch).
+fn wait_for_clean(
+    dir: &Path,
+    env: &[(String, String)],
+    topo: Topology,
+    dir_prefix: &str,
+    home: &str,
+    family: &[String],
+) -> Result<(), (Vec<SurvivorInfo>, String)> {
+    let deadline = Instant::now() + GATE_TIMEOUT;
+    loop {
+        let registry = translate::live_host_apps(env);
+        let survivors: Vec<SurvivorInfo> = conflict::stop_survivors(dir)
+            .into_iter()
+            .filter(|s| instance_scoped(s, dir_prefix, home, family))
+            .collect();
+        if registry.as_ref().is_ok_and(|r| gate_clean(r, &topo)) && survivors.is_empty() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            let note = match registry {
+                Ok(r) => format!("{r:?}"),
+                Err(e) => format!("list failed: {e}"),
+            };
+            return Err((survivors, note));
+        }
+        std::thread::sleep(RETRY_STEP);
+    }
+}
+
+/// step7 reconcile (pure): registry == roster (set-wise), expected ⊆ roster, and
+/// roster\expected may only carry the falsy-recorder slot (batch1 asymmetry kept lenient).
+fn reconcile_mismatch(
+    roster: &[String],
+    registry: &[String],
+    expected: &[String],
+    recorder: &str,
+) -> Option<String> {
+    let missing: Vec<&String> = roster.iter().filter(|n| !registry.contains(n)).collect();
+    let extra: Vec<&String> = registry.iter().filter(|n| !roster.contains(n)).collect();
+    if !missing.is_empty() || !extra.is_empty() {
+        return Some(format!("registry != roster: missing={missing:?} extra={extra:?}"));
+    }
+    let unregistered: Vec<&String> = expected.iter().filter(|n| !roster.contains(n)).collect();
+    if !unregistered.is_empty() {
+        return Some(format!("expected apps not in roster: {unregistered:?}"));
+    }
+    if let Some(bad) = roster.iter().find(|n| !expected.contains(n) && n.as_str() != recorder) {
+        return Some(format!(
+            "roster carries unexpected app {bad} (only the falsy recorder slot may exceed expected)"
+        ));
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn gate_clean_cli_requires_a_fully_empty_registry() {
+        assert!(gate_clean(&[], &Topology::CliRun));
+        assert!(!gate_clean(&s(&["host-agent"]), &Topology::CliRun));
+    }
+
+    #[test]
+    fn gate_clean_agent_run_tolerates_only_the_agent_entry() {
+        assert!(gate_clean(&s(&["host-agent"]), &Topology::AgentRun));
+        assert!(gate_clean(&[], &Topology::AgentRun)); // agent dead => still passes (never stricter than needed)
+        assert!(!gate_clean(&s(&["host-agent", "host-streamer-t1"]), &Topology::AgentRun));
+        assert!(!gate_clean(&s(&["host-recorder"]), &Topology::AgentRun));
+    }
+
+    #[test]
+    fn order_teardown_consumers_then_producers_agent_last() {
+        let names = s(&[
+            "host-capturer-cam0",
+            "msrtc-agent",
+            "msrtc-streamer-t1",
+            "msrtc-audio",
+            "msrtc-controller",
+        ]);
+        let out = order_teardown(&names);
+        assert_eq!(out.last().unwrap(), "msrtc-agent");
+        let idx = |n: &str| out.iter().position(|x| x == n).unwrap();
+        assert!(idx("msrtc-streamer-t1") < idx("host-capturer-cam0"));
+        assert!(idx("msrtc-audio") < idx("host-capturer-cam0"));
+        assert!(idx("msrtc-controller") < idx("msrtc-agent"));
+    }
+
+    #[test]
+    fn token_paths_extracts_every_occurrence() {
+        let rendered = "[[apps]]\ncommand = \"bin/x --token /opt/h/etc/link/cam0.token\"\ncommand = \"bin/y --token /opt/h/etc/link/recorder.token\"\n";
+        assert_eq!(
+            token_paths(rendered),
+            s(&["/opt/h/etc/link/cam0.token", "/opt/h/etc/link/recorder.token"])
+        );
+    }
+
+    #[test]
+    fn token_paths_is_empty_without_token_args() {
+        assert!(token_paths("command = \"bin/x --camera cam0\"").is_empty());
+    }
+
+    #[test]
+    fn instance_scoped_covers_dir_prefix_home_and_unknown_owner_family() {
+        let mk = |first_arg: &str, owner: &str| SurvivorInfo {
+            pid: 1,
+            first_arg: first_arg.to_string(),
+            owner: owner.to_string(),
+        };
+        let family = s(&["msrtc-streamer", "host-streamer"]);
+        // path under the instance dir wins even with a foreign daemon
+        assert!(instance_scoped(
+            &mk("/opt/host/bin/msrtc-streamer-t1", "/opt/other/run/oxmgr"),
+            "/opt/host/",
+            "/opt/host/run/oxmgr",
+            &family
+        ));
+        // same daemon home wins even with an odd path
+        assert!(instance_scoped(
+            &mk("/var/tmp/relocated-msrtc-streamer", "/opt/host/run/oxmgr"),
+            "/opt/host/",
+            "/opt/host/run/oxmgr",
+            &family
+        ));
+        // unreadable owner + family basename qualifies (per-instance fallback)
+        assert!(instance_scoped(
+            &mk("/srv/x/bin/host-streamer-old", OWNER_UNKNOWN),
+            "/opt/host/",
+            "/opt/host/run/oxmgr",
+            &family
+        ));
+        // foreign instance with a readable foreign owner and a non-family name: out
+        assert!(!instance_scoped(
+            &mk("/opt/other/bin/monitor", "/opt/other/run/oxmgr"),
+            "/opt/host/",
+            "/opt/host/run/oxmgr",
+            &family
+        ));
+    }
+
+    #[test]
+    fn reconcile_mismatch_survives_the_recorder_falsy_asymmetry() {
+        let roster = s(&["host-agent", "host-recorder", "host-streamer-t1"]);
+        let expected = s(&["host-agent", "host-streamer-t1"]);
+        // recorder slot present but not expected ([record] falsy): lenient pass
+        assert!(reconcile_mismatch(&roster, &roster, &expected, "host-recorder").is_none());
+        // any other roster surplus => mismatch
+        let roster2 = s(&["host-agent", "host-mystery"]);
+        assert!(reconcile_mismatch(&roster2, &roster2, &expected, "host-recorder").is_some());
+        // registry drift vs roster => mismatch
+        assert!(
+            reconcile_mismatch(&roster, &s(&["host-agent"]), &expected, "host-recorder").is_some()
+        );
+        // expected not covered by the roster => mismatch
+        assert!(
+            reconcile_mismatch(
+                &s(&["host-agent"]),
+                &s(&["host-agent"]),
+                &expected,
+                "host-recorder"
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn write_staging_sweeps_crash_leftovers_before_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let staging = dir.path().join("run").join(STAGING_NAME);
+        write_staging(&staging, "fresh").unwrap();
+        assert_eq!(std::fs::read_to_string(&staging).unwrap(), "fresh");
+        std::fs::write(&staging, "stale leftover").unwrap();
+        write_staging(&staging, "fresh2").unwrap();
+        assert_eq!(std::fs::read_to_string(&staging).unwrap(), "fresh2");
+    }
+}

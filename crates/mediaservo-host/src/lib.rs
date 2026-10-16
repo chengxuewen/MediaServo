@@ -3,6 +3,10 @@
 //! Currently provides only log initialization and a placeholder process runner; media/signaling
 //! features (B/C) migrate here incrementally from host-legacy. The old single-process implementation
 //! stays at `src/bin/host-legacy.rs` and is removed once the Phase C migration is done.
+/// Unified config executor core (T1″ batch2, annex §2): ledger + flock + validate/token
+/// gate + staging + dual-topology teardown gate + prepare/commit.
+/// Batch4 routes the CLI/agent verbs through it; this batch ships the callable spine only.
+pub mod config_core;
 /// Control plane (Task F1): control envelope + actuator interface.
 pub mod control;
 /// Control plane over SFU-DC (S1): controller transport setup + command loop + bus mirroring.
