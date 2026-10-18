@@ -74,6 +74,7 @@ teams); for development process details, consult git log directly. Newest versio
   boot-reconcile (pending-commit fast path, zero churn), CLI.
 
 ### Fixed
+- [host] (Jetson aarch64) `mediaservo-host` now links glib/gobject/gio explicitly (gated build.rs: aarch64 + system glib-dev present; x86_64/CI untouched) — lib-test artifacts no longer die with conda-glib "DSO missing from command line" (PIT-199 family). Running dev-profile host binaries additionally needs `LD_LIBRARY_PATH=$CONDA_PREFIX/lib` (conda FFmpeg .63 sonames; recorder crash-loop shared the same root symptom).
 - [host] k0 (host-ops-hardening F15): the stop self-proof scanned a hardcoded list of
   legacy process names, so "sweep verified ✓" printed vacuously on branded trees
   (real processes are `msrtc-*` — none of the needles could match). Sweep names now
