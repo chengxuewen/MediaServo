@@ -113,7 +113,9 @@ pub fn execute(
     let mut led = Ledger::load(dir);
     let pending_mismatch = led.pending_apply.as_ref().is_some_and(|p| p.hash != hash);
     let running_match = led.running.as_ref().is_some_and(|r| r.hash == hash);
-    if !should_reconcile(force, running_match, pending_mismatch, false) {
+    if !should_reconcile(force, running_match, pending_mismatch, false)
+        && noop_may_skip(dir, &bytes, running_match)
+    {
         return Ok(Outcome::NoOp { hash });
     }
 
@@ -371,6 +373,79 @@ fn gate_needs_reconcile(led: &Ledger, hash: &str) -> bool {
     should_reconcile(false, running_match, pending_mismatch, led.flags.pending)
 }
 
+/// k13 (F20): the fingerprint short-circuit may only skip when the cluster is PROVEN
+/// live -- the pure decision core (table-tested). A matching hash over a half-dead
+/// roster must take the full execute path (liveness recovery); a fingerprint mismatch
+/// keeps the legacy full-execute semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoOpVerdict {
+    NoOp,
+    Execute,
+}
+
+pub fn noop_verdict(fingerprint_matches: bool, roster_live_ok: bool) -> NoOpVerdict {
+    if fingerprint_matches && roster_live_ok { NoOpVerdict::NoOp } else { NoOpVerdict::Execute }
+}
+
+/// Expected apps NOT `running` in the registry (missing / errored / stopped all count
+/// as dead). The collection step of the k13 liveness check (fixture-tested, no /proc).
+fn dead_apps(expected: &[String], registry: &[crate::monitor::topology::OxProcess]) -> Vec<String> {
+    expected
+        .iter()
+        .filter(|n| !registry.iter().any(|p| &p.name == *n && p.status == "running"))
+        .cloned()
+        .collect()
+}
+
+/// k13 liveness IO shell: (dead expected apps, expected total). `bytes` is the in-lock
+/// host.yaml whose fingerprint already matched the ledger running row.
+fn noop_liveness(dir: &Path, bytes: &[u8]) -> Result<(Vec<String>, usize), String> {
+    let cfg =
+        std::str::from_utf8(bytes).map_err(|e| format!("host.yaml is not valid utf-8: {e}"))?;
+    let expected = translate::expected_process_names(cfg)?;
+    let env = translate::oxmgr_env(dir);
+    let out = translate::oxmgr_cmd_with_env(&env)
+        .args(["list", "--json"])
+        .output()
+        .map_err(|e| format!("oxmgr exec failed: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "oxmgr list failed (exit {}): {}",
+            out.status.code().unwrap_or(1),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let registry =
+        crate::monitor::topology::parse_oxmgr_json(&String::from_utf8_lossy(&out.stdout))?;
+    Ok((dead_apps(&expected, &registry), expected.len()))
+}
+
+/// Shared k13 gate: Ok(live)? => true only when every expected app is `running`; the
+/// recovery reason is logged here (C15) and false returned so the caller executes.
+/// `fingerprint_matches` is passed through to the pure verdict (both call sites hold
+/// the ledger-current precondition; kept explicit for the table tests' sake).
+fn noop_may_skip(dir: &Path, bytes: &[u8], fingerprint_matches: bool) -> bool {
+    match noop_liveness(dir, bytes) {
+        Ok((dead, total)) => {
+            let live = dead.is_empty();
+            if !live {
+                tracing::warn!(
+                    "config-core: ledger current but {} of {total} expected apps not running ({}) -- executing liveness recovery",
+                    dead.len(),
+                    dead.join(", ")
+                );
+            }
+            noop_verdict(fingerprint_matches, live) == NoOpVerdict::NoOp
+        }
+        Err(e) => {
+            tracing::warn!(
+                "config-core: ledger current but the registry could not be read ({e}) -- executing liveness recovery"
+            );
+            false
+        }
+    }
+}
+
 /// T1b4 (k3): the shared wake/boot reconcile entry -- EX-3 fast path first (a pending
 /// commit is zero-churn), then the fingerprint gate, then the full [`execute`] with
 /// `force=false` when it disagrees. Callers get the honest [`Outcome`]: the NoOp branch
@@ -393,7 +468,9 @@ pub fn startup_reconcile_with(dir: &Path, topo: Topology, origin: &str) -> Resul
         // provenance lives in the ledger history).
         return Ok(Outcome::Applied { hash });
     }
-    if !gate_needs_reconcile(&Ledger::load(dir), &hash) {
+    let led = Ledger::load(dir);
+    let wake_match = led.running.as_ref().is_some_and(|r| r.hash == hash);
+    if !gate_needs_reconcile(&led, &hash) && noop_may_skip(dir, &bytes, wake_match) {
         return Ok(Outcome::NoOp { hash });
     }
     let actor = env_actor();
@@ -904,6 +981,36 @@ mod tests {
         // absent host.yaml: operational Err, never a half-written belief
         let empty = tempfile::tempdir().unwrap();
         assert!(record_push(empty.path(), None).is_err());
+    }
+
+    #[test]
+    fn noop_verdict_table_k13() {
+        use NoOpVerdict::*;
+        // fingerprint match + live roster = the only NoOp
+        assert_eq!(noop_verdict(true, true), NoOp);
+        // fingerprint match but a missing app
+        assert_eq!(noop_verdict(true, false), Execute);
+        // fingerprint match but an errored row (same bool, same verdict)
+        assert_eq!(noop_verdict(true, false), Execute);
+        // fingerprint mismatch executes regardless of the roster
+        assert_eq!(noop_verdict(false, true), Execute);
+        assert_eq!(noop_verdict(false, false), Execute);
+    }
+
+    #[test]
+    fn dead_apps_fixture_k13() {
+        use crate::monitor::topology::OxProcess;
+        let expected = vec!["a".into(), "b".into(), "c".into()];
+        let registry = vec![
+            OxProcess { name: "a".into(), status: "running".into() },
+            OxProcess { name: "b".into(), status: "errored".into() },
+            // "c" missing entirely
+            OxProcess { name: "other".into(), status: "running".into() },
+        ];
+        let dead = dead_apps(&expected, &registry);
+        assert_eq!(dead, vec!["b".to_string(), "c".to_string()]);
+        assert!(dead_apps(&expected, &[]).len() == 3);
+        assert!(dead_apps(&[], &registry).is_empty());
     }
 
     #[test]
