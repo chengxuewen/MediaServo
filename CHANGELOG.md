@@ -99,6 +99,7 @@ teams); for development process details, consult git log directly. Newest versio
   guessing sealed) — completes the K3 promise that both sides tightened consistently.
 
 ### Changed
+- [host] host.yaml.template comments revamped (thin config / fat docs): 112 -> 70 lines, no archaeology in the file (see CHANGELOG history), per-line enum quick-reference; keys, values and semantics byte-equivalent (rendered key-set asserted).
 - [host] vendor oxmgr file-watch retired — config edits are applied ONLY by the config-core
   (push/watch-bell/boot/CLI), closing the ungated global-restart + ledger-desync hazard (T1b7;
   the ⚠ maintenance-window note in T1b4 now holds in full). The rendered oxfile keeps `cwd`
