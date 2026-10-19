@@ -33,7 +33,7 @@ const USAGE: &str = "Usage: mediaservo-host <init|start|apply|restart|stop|statu
 Subcommands:
   init [<dir>]       create instance: host.yaml template + signing.pem(0600) + identity.json + standard token set
   start [<dir>]      read host.yaml → validate → translate oxfile → oxmgr apply to bring up all processes
-  apply [<dir>]      apply config changes (incremental: new Start / changed Recreate / unchanged Noop)
+  apply [<dir>]      apply config changes via the config core (full teardown-restart on change, liveness recovery on half-dead cluster; no-op only when fingerprint matches AND all apps running)
   restart [<dir>]    full restart (re-apply after oxmgr stop)
   stop [<dir>]       stop all (oxmgr stop + delete)
   status [<dir>]     show process status table (oxmgr list filtered to the host namespace)
@@ -145,7 +145,60 @@ fn parse_dir(args: &mut impl Iterator<Item = String>) -> Result<PathBuf, String>
     if args.next().is_some() {
         return Err("the instance dir accepts exactly one positional argument".to_string());
     }
-    Ok(PathBuf::from(arg))
+    if PathBuf::from(&arg).is_absolute() {
+        return Ok(PathBuf::from(arg)); // absolute args pass untouched (guard is relative-only)
+    }
+    match resolve_dir_guard(&cwd_components(), &arg_components(&arg)) {
+        GuardDecision::UseArg => Ok(PathBuf::from(arg)),
+        GuardDecision::UseCwdNested(nested) => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            eprintln!(
+                "warning: you are already inside the instance {} — '{}' would resolve to the nested path {} (a vacuous no-op); using the current directory instead. Pass an absolute path or run bare for the smart default.",
+                cwd.display(),
+                arg,
+                nested.display()
+            );
+            Ok(PathBuf::from("."))
+        }
+    }
+}
+
+/// k15a: cwd split into components (best effort; unreadable cwd = no guard input).
+fn cwd_components() -> Vec<String> {
+    std::env::current_dir()
+        .ok()
+        .map(|p| {
+            p.components().filter_map(|c| c.as_os_str().to_str()).map(str::to_string).collect()
+        })
+        .unwrap_or_default()
+}
+
+/// k15a: explicit dir argument split into components ('.' and './' prefixes normalize away).
+fn arg_components(arg: &str) -> Vec<String> {
+    arg.split('/').filter(|c: &&str| !c.is_empty() && *c != ".").map(str::to_string).collect()
+}
+
+/// k15a: pure guard decision — should an explicit relative dir arg that merely re-states the
+/// cwd tail (cwd=/x/out/host + arg="out/host" or "./out/host") be replaced by the cwd itself?
+/// Live incident: `stop out/host` typed inside out/host silently resolved out/host/out/host.
+/// Absolute args are handled before this seam (pass untouched).
+#[derive(Debug, PartialEq, Eq)]
+enum GuardDecision {
+    /// use the arg as typed (absolute arg, a "." arg, or a relative arg not nesting inside cwd)
+    UseArg,
+    /// arg re-states the cwd tail; payload = the would-be nested path (named in the warning)
+    UseCwdNested(PathBuf),
+}
+
+fn resolve_dir_guard(cwd: &[String], arg: &[String]) -> GuardDecision {
+    if arg.is_empty() || cwd.len() <= arg.len() {
+        return GuardDecision::UseArg; // "." arg, or arg deeper/equal than cwd — nothing to guard
+    }
+    if cwd[cwd.len() - arg.len()..] == *arg {
+        let nested: PathBuf = cwd.iter().cloned().collect();
+        return GuardDecision::UseCwdNested(nested.join(arg.iter().collect::<PathBuf>()));
+    }
+    GuardDecision::UseArg
 }
 
 /// `host init <dir>`: generate the etc/host.yaml template + etc/link/signing.pem (Ed25519, 0600)
@@ -2173,11 +2226,71 @@ fn startup_install(dir: &std::path::Path) -> i32 {
             oxfile.display()
         );
     }
-    println!("startup on: recommend loginctl enable-linger to survive across sessions");
+    enable_linger_best_effort("startup on");
     println!(
         "daemon decision audit: journalctl --user -u {unit_name} -n 50 (journald captures daemon stdout)"
     );
     0
+}
+
+/// k14 (T1-k14): linger outcome of one `loginctl enable-linger` attempt.
+#[derive(Debug, PartialEq, Eq)]
+enum LingerOutcome {
+    Enabled,
+    AlreadyEnabled,
+    Failed(String),
+}
+
+/// Pure seam for the linger enable decision: exit status + stderr => outcome.
+/// "already enabled" (either exit-ok or noted on stderr) is success; anything else with a
+/// non-zero exit is a failure carrying the reason (polkit refusal, no systemd session, ...).
+fn linger_action(exit_ok: bool, stderr: &str) -> LingerOutcome {
+    if exit_ok {
+        return LingerOutcome::Enabled;
+    }
+    if stderr.to_lowercase().contains("already enabled") {
+        return LingerOutcome::AlreadyEnabled;
+    }
+    LingerOutcome::Failed(stderr.trim().to_string())
+}
+
+/// k14: `startup on` enables linger for the current user itself (polkit set-user-linger
+/// allows the active-session owner; no sudo). Best-effort by contract: any failure falls
+/// back to the legacy guidance line and NEVER fails the startup-on verb.
+#[cfg(target_os = "linux")]
+fn enable_linger_best_effort(verb: &str) {
+    let Some(user) = std::env::var("USER")
+        .ok()
+        .or_else(|| std::env::var("LOGNAME").ok())
+        .filter(|u| !u.is_empty())
+    else {
+        println!(
+            "{verb}: recommend loginctl enable-linger to survive across sessions (no USER/LOGNAME in env)"
+        );
+        return;
+    };
+    let out = Command::new("loginctl").arg("enable-linger").arg(&user).output();
+    let (ok, stderr) = match &out {
+        Ok(o) => (o.status.success(), String::from_utf8_lossy(&o.stderr).to_string()),
+        Err(e) => (false, e.to_string()),
+    };
+    match linger_action(ok, &stderr) {
+        LingerOutcome::Enabled => println!(
+            "{verb}: linger enabled for {user} (survives logout & reboot — no login needed)"
+        ),
+        LingerOutcome::AlreadyEnabled => println!(
+            "{verb}: linger already enabled for {user} (survives logout & reboot — no login needed)"
+        ),
+        LingerOutcome::Failed(reason) => println!(
+            "{verb}: recommend loginctl enable-linger to survive across sessions (enable failed: {reason})"
+        ),
+    }
+}
+
+/// non-Linux: no loginctl — keep the guidance line (k14 contract).
+#[cfg(not(target_os = "linux"))]
+fn enable_linger_best_effort(verb: &str) {
+    println!("{verb}: recommend loginctl enable-linger to survive across sessions");
 }
 
 #[cfg(target_os = "linux")]
@@ -2520,6 +2633,60 @@ mod k12_surface_tests {
         ];
         for (reachable, foreign, want) in cases {
             assert_eq!(daemon_spawn_action(reachable, foreign), want);
+        }
+    }
+}
+
+// ── k14/k15 pure-seam table tests ───────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod k14_k15_tests {
+    use super::*;
+
+    #[test]
+    fn linger_action_table() {
+        use LingerOutcome::{AlreadyEnabled, Enabled, Failed};
+        let cases = vec![
+            (true, "", Enabled),
+            (true, "some noise on stderr", Enabled), // exit-ok wins regardless of stderr
+            (false, "Could not enable linger: Already enabled", AlreadyEnabled),
+            (
+                false,
+                "polkit refused: not authorized",
+                Failed("polkit refused: not authorized".into()),
+            ),
+            (false, "", Failed(String::new())),
+        ];
+        for (ok, stderr, want) in cases {
+            assert_eq!(linger_action(ok, stderr), want);
+        }
+    }
+
+    #[test]
+    fn resolve_dir_guard_table() {
+        let cwd: Vec<String> = ["/", "x", "out", "host"].iter().map(|s| s.to_string()).collect();
+        // arg re-states the cwd tail => warn + use cwd; "./out/host" normalizes to the same components
+        let arg = arg_components("out/host");
+        assert_eq!(
+            resolve_dir_guard(&cwd, &arg),
+            GuardDecision::UseCwdNested(PathBuf::from("/x/out/host/out/host"))
+        );
+        assert_eq!(arg_components("./out/host"), arg);
+        assert_eq!(arg_components("out/host/"), arg);
+        // arg deeper than cwd, or not a cwd tail => use arg
+        assert_eq!(
+            resolve_dir_guard(&cwd, &["out", "host", "etc"].map(String::from)),
+            GuardDecision::UseArg
+        );
+        assert_eq!(
+            resolve_dir_guard(&["/".into(), "x".into()], &["out".into(), "host".into()]),
+            GuardDecision::UseArg
+        );
+        // "." (empty components) and absolute-arg shapes never guard
+        assert_eq!(resolve_dir_guard(&cwd, &[]), GuardDecision::UseArg);
+        // nested path names the would-be resolution
+        match resolve_dir_guard(&cwd, &["out".into(), "host".into()]) {
+            GuardDecision::UseCwdNested(p) => assert_eq!(p, PathBuf::from("/x/out/host/out/host")),
+            other => panic!("want nested, got {other:?}"),
         }
     }
 }

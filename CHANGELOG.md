@@ -75,6 +75,7 @@ teams); for development process details, consult git log directly. Newest versio
 
 ### Fixed
 - [host] k12: unit renderer and CLI now share ONE daemon-identity derivation (home-path ports + OXMGR_DATA_DIR everywhere) and refuse to spawn a parasite daemon onto an occupied instance home — the dir-vs-home port split-brain that made autostart daemons invisible to CLI verbs is closed at the root.
+- [host] k14/k15: `startup on` now enables linger itself (no sudo via polkit; guidance fallback on refusal — never blocks the verb), and an explicit relative dir that nests inside the current directory is caught with a named warning instead of silently resolving out/host/out/host; help text states T1″ apply semantics.
 - [host] k13: start/apply NoOp now requires a LIVE roster, not just a matching fingerprint — a half-dead cluster (missing/errored apps) is recovered by a full execute instead of being told "cluster untouched" (F20). All four bells (file/boot/push/CLI) benefit.
 - [host] (Jetson aarch64) `mediaservo-host` now links glib/gobject/gio explicitly (gated build.rs: aarch64 + system glib-dev present; x86_64/CI untouched) — lib-test artifacts no longer die with conda-glib "DSO missing from command line" (PIT-199 family). Running dev-profile host binaries additionally needs `LD_LIBRARY_PATH=$CONDA_PREFIX/lib` (conda FFmpeg .63 sonames; recorder crash-loop shared the same root symptom).
 - [host] k0 (host-ops-hardening F15): the stop self-proof scanned a hardcoded list of
