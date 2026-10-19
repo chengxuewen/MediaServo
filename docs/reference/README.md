@@ -37,6 +37,7 @@
 | Document | Content |
 |----------|---------|
 | `janus-gateway.md` | Janus Gateway (WebRTC conferencing gateway) reference |
+| `oxmgr-upstream-feedback.md` | **oxmgr vendor feedback letter** — service/startup gaps, daemon liveness truth + auto-spawn parasitism, SIGTERM orphaning (filed from the 2026-10-19 vehicle round; workarounds cross-ref k12/k14) |
 
 ## Research Archive (Explanation — historical research, not part of active work)
 
