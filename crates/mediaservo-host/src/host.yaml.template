@@ -7,8 +7,8 @@ host:
 # signaling:
 #   server_url: "ws://192.168.2.127:9800/ws"   # MediaServo server address
 #   psk: "mediaservo-dev"                      # must match the server's psk
-#   room: "my-car1"   # vehicle room; UNSET = builtin "vehicle".
-#                     # FLEETS: set a UNIQUE room per vehicle!
+#   room: "my-car1"   # vehicle room. Default: hostname baked at init (fleet-safe);
+#                     # unset falls back to the system hostname, then "vehicle".
 #   local_port: 17980                          # local gateway port
 
 # -- defaults: shared values for sources/streams -------------------------------

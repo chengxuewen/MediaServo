@@ -216,12 +216,23 @@ pub fn signaling_local_port(cfg: &str) -> Result<Option<u16>, String> {
     Ok(cfg.signaling.and_then(|s| s.local_port))
 }
 
-/// Vehicle-wide room ([signaling] room; default None → host-agent builtin default "vehicle").
+/// System hostname, sanitized for use as a room name (lowercase, [a-z0-9-]); None when
+/// unreadable or empty. Reads /proc/sys/kernel/hostname — zero new dependencies.
+pub fn system_hostname_room() -> Option<String> {
+    let raw = std::fs::read_to_string("/proc/sys/kernel/hostname").ok()?;
+    let h = raw.trim().to_lowercase();
+    let ok = !h.is_empty()
+        && h.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_');
+    if ok { Some(h) } else { None }
+}
+
+/// Vehicle-wide room: [signaling] room (manual) > system hostname (C-ruling 2026-10-19,
+/// fleet-safe default) > agent builtin "vehicle" (last-resort fallback).
 /// Closes the D3 TODO (gateway.rs Default) — translate is responsible for rendering the config into the oxfile.
 pub fn signaling_room(cfg: &str) -> Result<Option<String>, String> {
     let cfg: HostConfig =
         serde_yaml::from_str(cfg).map_err(|e| format!("host.yaml parse failed: {e}"))?;
-    Ok(cfg.signaling.and_then(|s| s.room))
+    Ok(cfg.signaling.and_then(|s| s.room).or_else(system_hostname_room))
 }
 
 /// [control].hmac_key_file (V5; default None → controller zero perturbation).
@@ -1260,6 +1271,28 @@ sources:
         );
     }
 
+    #[test]
+    fn system_hostname_room_sanitized_k() {
+        // live-box sanity: whatever this machine's hostname is, the sanitizer holds.
+        if let Some(h) = system_hostname_room() {
+            assert!(!h.is_empty());
+            assert!(h.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'));
+        }
+    }
+
+    #[test]
+    fn signaling_room_precedence_manual_over_hostname_k() {
+        // manual wins
+        let with = "signaling:\n  room: \"ms-car7\"\n";
+        assert_eq!(signaling_room(with).unwrap().as_deref(), Some("ms-car7"));
+        // unset falls to hostname when readable (never asserts a specific name)
+        let unset = "sources: []\n";
+        let got = signaling_room(unset).unwrap();
+        if system_hostname_room().is_some() {
+            assert!(got.is_some(), "hostname fallback must fire when readable");
+        }
+    }
+
     /// I1 review (D3 TODO closed): [signaling] room → agent --room; unset → no emit (agent builtin "vehicle").
     #[test]
     fn oxfile_wires_signaling_room_to_agent() {
@@ -1279,11 +1312,20 @@ sources:
             .lines()
             .find(|l| l.contains("command") && l.contains("host-agent"))
             .expect("agent command line: {ox2}");
+        // C-ruling 2026-10-19: unset room now falls back to the system hostname
+        // (fleet-safe default); "vehicle" only remains when the hostname is unreadable.
+        let fallback = signaling_room(CFG_V0)
+            .unwrap()
+            .expect("unset room falls back to hostname/vehicle");
+        let agent_line2 = ox2
+            .lines()
+            .find(|l| l.contains("command") && l.contains("host-agent"))
+            .expect("agent command line: {ox2}");
         assert!(
-            !agent_line2.contains("--room"),
-            "must not emit --room when room is unset: {agent_line2}"
+            agent_line2.contains(&format!("--room {fallback}")),
+            "agent must carry the derived room ({fallback}): {agent_line2}"
         );
-        assert_eq!(signaling_room(CFG_V0).unwrap(), None);
+        assert_eq!(signaling_room(CFG_V0).unwrap().as_deref(), Some(fallback.as_str()));
     }
 
     /// H2: host-audio must carry --room audio-<vehicle> (the audio room convention).
@@ -1304,9 +1346,17 @@ sources:
             .lines()
             .find(|l| l.contains("command") && l.contains("host-audio"))
             .expect("host-audio command line: {ox2}");
+        // C-ruling: unset room -> audio-<hostname-fallback> (was audio-vehicle).
+        let fallback = signaling_room(CFG_V0)
+            .unwrap()
+            .expect("unset room falls back to hostname/vehicle");
+        let audio_line2 = ox2
+            .lines()
+            .find(|l| l.contains("command") && l.contains("host-audio"))
+            .expect("host-audio command line: {ox2}");
         assert!(
-            audio_line2.contains("--room audio-vehicle"),
-            "host-audio defaults to audio-vehicle when room is unset: {audio_line2}"
+            audio_line2.contains(&format!("--room audio-{fallback}")),
+            "host-audio must carry the derived audio room: {audio_line2}"
         );
     }
 

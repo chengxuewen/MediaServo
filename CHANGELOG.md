@@ -97,6 +97,7 @@ teams); for development process details, consult git log directly. Newest versio
   `logs` keeps the process-name passthrough (last pathlike positional = dir).
 - [server] `monit`/`ps` accept the same optional dir form (strict resolution, `.server`
   guessing sealed) — completes the K3 promise that both sides tightened consistently.
+- [host] signaling room default is now fleet-safe: `host init` bakes the system hostname as `signaling.room` (visible, editable; renaming the host later does not drift an installed instance); at runtime an unset room falls back to the system hostname, then the legacy "vehicle" literal (manual config always wins).
 
 ### Changed
 - [host] host.yaml.template comments revamped (thin config / fat docs): 112 -> 70 lines, no archaeology in the file (see CHANGELOG history), per-line enum quick-reference; keys, values and semantics byte-equivalent (rendered key-set asserted).
