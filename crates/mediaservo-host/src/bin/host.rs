@@ -1310,7 +1310,11 @@ fn startup_daemon_env(dir: &std::path::Path) -> Vec<(String, String)> {
 /// OXMGR_* keys incl. OXMGR_DATA_DIR; the old literal block hashed the instance DIR and
 /// lacked DATA_DIR = the F19 split-brain). LOG_*/ExecStart/Restart shapes stay as before.
 /// Extracted pure so the unit-env pin can compare it against the CLI env key-for-key.
-fn render_unit_text(dir: &std::path::Path, oxmgr: &std::path::Path) -> String {
+fn render_unit_text(
+    dir: &std::path::Path,
+    oxmgr: &std::path::Path,
+    cli: &std::path::Path,
+) -> String {
     let env_block = startup_daemon_env(dir)
         .iter()
         .map(|(k, v)| format!("         Environment={k}={v}"))
@@ -1318,8 +1322,9 @@ fn render_unit_text(dir: &std::path::Path, oxmgr: &std::path::Path) -> String {
         .join("\n");
     format!(
         "[Unit]
-         Description=MediaServo host oxmgr daemon ({})
+         Description=MediaServo host oxmgr daemon ({dir})
          After=network.target
+         ConditionPathExists={ox}
          
          [Service]
          Type=simple
@@ -1327,15 +1332,31 @@ fn render_unit_text(dir: &std::path::Path, oxmgr: &std::path::Path) -> String {
          Environment=OXMGR_LOG_MAX_SIZE_MB=10
          Environment=OXMGR_LOG_MAX_FILES=3
          Environment=OXMGR_LOG_MAX_DAYS=7
-         ExecStart={} daemon run
+         ExecStart={ox} daemon run
          Restart=always
          RestartSec=2
+         TimeoutStartSec=240
+         {post}
          
          [Install]
          WantedBy=default.target
 ",
-        dir.display(),
-        oxmgr.display()
+        ox = oxmgr.display(),
+        post = if cli.as_os_str().is_empty() {
+            String::new()
+        } else {
+            // k19 boot hook: a cold-booted daemon may come up BEFORE NTP sync (fake-clock
+            // Jetsons) and discard the registry (PIT-236) — so after the daemon is up we
+            // run our own idempotent `apply` (k13 liveness guard does the rest). Wait up
+            // to ~120s for a synced clock, then proceed best-effort; ALWAYS exit 0 (a
+            // failing ExecStartPost x Restart=always = restart storm, the L209 lesson).
+            format!(
+                "ExecStartPost=/bin/sh -c 'for i in $(seq 1 90); do if [ \"$i\" -ge 60 ] || timedatectl show-properties --value -p NTPSynchronized 2>/dev/null | grep -q yes; then \"{}\" apply \"{}\" && break; fi; sleep 2; done; exit 0'",
+                cli.display(),
+                dir.display()
+            )
+        },
+        dir = dir.display()
     )
 }
 
@@ -2155,7 +2176,8 @@ fn startup_install(dir: &std::path::Path) -> i32 {
         p
     };
     // idempotent: overwrite own unit (rerunning on for the same instance = refresh)
-    let unit = render_unit_text(dir, &oxmgr);
+    let cli = std::env::current_exe().unwrap_or_default();
+    let unit = render_unit_text(dir, &oxmgr, &cli);
     let home = mediaservo_host::translate::oxmgr_home(dir);
     if let Some(parent) = unit_path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -2585,7 +2607,16 @@ mod k12_surface_tests {
     fn unit_env_equals_cli_env() {
         let root = std::env::temp_dir().join(format!("msrtc-k12-pin-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        let unit = render_unit_text(&root, std::path::Path::new("/usr/bin/oxmgr"));
+        let unit = render_unit_text(
+            &root,
+            std::path::Path::new("/usr/bin/oxmgr"),
+            std::path::Path::new("/x/bin/mediaservo-host"),
+        );
+        // k19/k20: deleted-tree guard + boot apply hook must be in every rendered unit
+        assert!(unit.contains("ConditionPathExists=/usr/bin/oxmgr"), "{unit}");
+        assert!(unit.contains("TimeoutStartSec=240"), "{unit}");
+        assert!(unit.contains("ExecStartPost=/bin/sh -c"), "{unit}");
+        assert!(unit.contains("\"/x/bin/mediaservo-host\" apply"), "{unit}");
         let parsed: Vec<(String, String)> = unit
             .lines()
             .filter_map(|l| l.trim().strip_prefix("Environment="))

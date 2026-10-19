@@ -77,3 +77,14 @@ never be signaled directly.
 - k14: our `startup on` enables linger itself (polkit no-sudo) — vendor `service
   install` could adopt the same pattern.
 - k16: this letter; revisit at oxmgr version bump (D281 archive pin).
+
+## Addendum (2026-10-19, second field reboot): cold-boot daemon on an unsynced clock discards the registry
+
+Repro (real Jetson, no RTC battery): boot at fake clock `2023-11-22`; the unit (ExecStart=oxmgr
+daemon run) starts ~2s later, still pre-sync; NTP lands 73s later. Outcome: `state.json` rewritten
+empty (30 B) at daemon start — the 8 "running" entries from the previous session are discarded, no
+respawn, no log. The same daemon restarted warm (clock sane, same state.json shape) restores all
+entries fine. Suspect the restore path's timestamp/consistency check treating future-dated entries
+as corrupt. Request: tolerate clock jumps (defer registry GC until clock sanity, or retry restore
+on first successful time sync). Our mitigation meanwhile: ExecStartPost idempotent apply hook
+(k19) — boot semantics no longer depend on the restore path.

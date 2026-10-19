@@ -1927,3 +1927,16 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法（k17 四件）**: ①`allow_stop` 参数，package 传 False（只读打包永不动运行实例）；②unit 停令按 `Environment=OXMGR_HOME=<resolved prefix>/run/oxmgr` 精确匹配（C50 进程身份三键落到 unit 文件层）；③package 收尾扫 /proc 收割 OXMGR_HOME∈dist 的 oxmgr 孤儿；④want_home 用 resolve()（防相对 prefix 错杀生产 deploy）。
 - **验证**: 活簇在线跑 package → apps/daemons/unit/remote_connected 四指标原封 + 零残树（本机实测）；`bash -n`/py_compile 过。
 - **禁止**: 任何"打包/校验/只读语义"命令走带 stop 副作用的共享函数；unit/进程杀令必须按实例归属精确匹配，品牌 contains/glob 一律禁。
+
+## PIT-236: 冷启假时钟窗口内 daemon 清盘名册——开机自启"活了但不出流"（2026-10-19 device-day 首撞）
+- **症状**: 物理重启后 unit active、daemon 在跑，但车队 0 进程、state.json 30B 空名册（mtime=开机秒）；之后任何 CLI 动词（status/monit）反而把车孵起来（PIT-224 寄生形）——"只有调命令才启动推流"。
+- **根因**: Jetson 无 RTC 电池，开机 fake clock=2023-11-22；unit 16:12:19 起 daemon，NTP 16:13:32 才同步。vendor 恢复逻辑在无同步时钟下把"未来时间戳（2026）"的名册条目判损坏整盘清空（黑盒推定；温重启对照实验同文件恢复 8/8 = 冷热差异定谳，见 upstream-feedback 附节）。
+- **解法（我方兜底 k19）**: unit 模板加 `ExecStartPost` 幂等 apply 钩（等 NTP ≤~120s 后尽力而为、恒 exit 0 防 Restart 风暴；`TimeoutStartSec=240` 防默认 90s 判超时）。车队复活从此不赌 vendor 恢复路径。
+- **验证**: 钩子三行渲染 + 探针 `systemd-run -p ConditionPathExists=/nonexistent` clean skip；同轮实弹：stop→start 钩跑通、8/8、remote true、bytes 增。物理断电终验=device-day 待办。
+- **禁止**: 把"开机自启已验证"的口径从"unit 会起"升级为"会起 ≠ 车队会活"——凡 fleet 型守护必须验到应用层三件套（apps 计数/remote/bytes）。
+
+## PIT-237: 裸 cargo build+手工 cp 交付 = 无品牌件——unit 名分裂 legacy `oxmgr-host-*`（2026-10-19，PIT-189 家族第 6 例）
+- **症状**: 急修想跳过 build:deploy，直接 `cargo build` 后 cp 到 out/host/bin/msrtc-host；`startup on` 渲染出 `oxmgr-host-home-…` 名（legacy mediaservo 品牌）≠ 现役 `oxmgr-msrtc-…`，enable --now 打在不存在/错名 unit 上报 rc=1。
+- **根因**: 品牌=**编译期注入**（build:deploy 设 MEDIASERVO_BRAND），不在 argv0 也不在运行 env；裸构建产物自报默认品牌 → unit 名/oxfile 名/进程签名全套漂移。
+- **解法**: host/server 二进制更新一律 `bash msrtc.sh build:deploy <t>`（先 stop 防 ETXTBSY）；已写错的 legacy 名 unit 文件手动 rm + daemon-reload 清场。
+- **验证**: 部署后 `python3 -c "marker in bin bytes"`（C49）+ `systemctl --user cat <现役unit>` 名实对账。

@@ -210,13 +210,14 @@ pub fn startup_unit_name(dir: &Path) -> String {
 /// the daemon persists app state and revives the whole cluster at boot; Restart=always watches the daemon.
 /// Note: the task brief once proposed ExecStart=`bin start <dir>` -- start exits quickly x Restart=always = a restart storm,
 /// and the host production precedent (oxmgr-*-host unit) is exactly daemon run; follow the design.md revised model).
-pub fn render_startup_unit(dir: &Path, oxmgr: &str) -> String {
+pub fn render_startup_unit(dir: &Path, oxmgr: &str, cli: &str) -> String {
     let home = absolute(&dir.join("run").join("oxmgr")).to_string_lossy().into_owned();
     let port = instance_daemon_port(Path::new(&home));
     format!(
         "[Unit]
 Description={product} oxmgr daemon ({dir})
 After=network.target
+ConditionPathExists={oxmgr}
 
 [Service]
 Type=simple
@@ -229,6 +230,8 @@ Environment=OXMGR_LOG_MAX_DAYS=7
 ExecStart={oxmgr} daemon run
 Restart=always
 RestartSec=2
+TimeoutStartSec=240
+{post}
 
 [Install]
 WantedBy=default.target
@@ -236,6 +239,18 @@ WantedBy=default.target
         product = server_product(),
         dir = dir.to_string_lossy(),
         api = port + 1000,
+        post = if cli.is_empty() {
+            String::new()
+        } else {
+            // k19 boot hook (host same cut, PIT-236): cold daemon may start before NTP
+            // sync and drop the registry — our idempotent apply revives the fleet;
+            // always exit 0 (failing ExecStartPost x Restart=always = restart storm).
+            format!(
+                "ExecStartPost=/bin/sh -c 'for i in $(seq 1 90); do if [ \"$i\" -ge 60 ] || timedatectl show-properties --value -p NTPSynchronized 2>/dev/null | grep -q yes; then \"{}\" apply \"{}\" && break; fi; sleep 2; done; exit 0'",
+                cli,
+                dir.to_string_lossy()
+            )
+        },
     )
 }
 
@@ -669,7 +684,8 @@ fn startup_install(dir: &Path) -> i32 {
         return 1;
     }
     let oxmgr = oxmgr_path.to_string_lossy().into_owned();
-    if let Err(e) = std::fs::write(&unit_path, render_startup_unit(dir, &oxmgr)) {
+    let cli = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+    if let Err(e) = std::fs::write(&unit_path, render_startup_unit(dir, &oxmgr, &cli)) {
         eprintln!("startup on: failed to write the unit: {e}");
         return 1;
     }
@@ -939,11 +955,21 @@ mod tests {
 
     #[test]
     fn startup_unit_render_and_naming() {
-        let u = render_startup_unit(Path::new("/opt/msr"), "/opt/msr/bin/oxmgr");
+        let u = render_startup_unit(
+            Path::new("/opt/msr"),
+            "/opt/msr/bin/oxmgr",
+            "/opt/msr/bin/msrtc-server",
+        );
         assert!(u.contains("ExecStart=/opt/msr/bin/oxmgr daemon run"));
         assert!(u.contains("After=network.target"));
         assert!(u.contains("Restart=always"));
         assert!(u.contains("Environment=OXMGR_HOME=/opt/msr/run/oxmgr"));
+        // k19/k20: deleted-tree guard + boot apply hook (mirror of the host cut)
+        assert!(u.contains("ConditionPathExists=/opt/msr/bin/oxmgr"));
+        assert!(u.contains("ExecStartPost=/bin/sh -c"));
+        assert!(u.contains("\"/opt/msr/bin/msrtc-server\" apply \"/opt/msr\""));
+        assert!(u.contains("exit 0'"));
+        assert!(u.contains("TimeoutStartSec=240"));
         let name = startup_unit_name(Path::new("/opt/msr"));
         assert!(name.starts_with("oxmgr-mediaservo-server-"), "{name}");
         assert!(name.ends_with("opt-msr.service"));

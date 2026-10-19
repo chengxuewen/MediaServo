@@ -1224,3 +1224,8 @@ install                        → 改名提示 + exit 2（退役）
 ### 2026-10-19: k17 package 无副作用化（实车事故根治，PIT-235）
 - 起因如实账：本会话模板轮 package host 连坐停了生产簇（品牌 glob 杀 unit + 解包树孵 daemon 18187 + live signaling 迁移缺 server_url/psk 三重叠加）；k13 活体首战（2 of 8 dead → EXECUTE 复苏）+ signaling 三要素恢复（room 钉 x1=D295 升级注活例）→ 8/8、remote true。
 - 根治四件（mediaservo_cli.py）：allow_stop 参数 / unit 前缀精确匹配（resolve 形）/ dist 树 daemon 收割 / package 传 False。活体验证：在线簇跑 package 全指标原封。
+
+### 2026-10-19: k19/k20 开机自启加固（device-day 首弹；PIT-236/237 全文见 pitfalls）
+- 用户真重启实测：生产实例 unit/daemon 开机全起但车队 0 = 冷启假时钟窗口（unit 16:12:19 起，NTP 16:13:32 到）vendor 清盘名册（state.json 30B；同文件温重启对照 8/8 复活=冷热定谳）。k19=ExecStartPost 幂等 apply 钩（NTP 门 ≤~120s、恒 exit 0、TimeoutStartSec=240）host+server 双模板；k20=ConditionPathExists 移树/删树 clean skip（systemd-run 探针实证）。server 侧钩属已渲未活验（Jetson bin 域=CI/stub 背书）；物理断电终验=device-day 待办。
+- 更正行（k17 段）："零残树"系误读——out/packages 下解包树为 tar 被解出的残留（含验收窗口自身），非 package 代码产物（tar.add 只读装配+finally rmtree；后续 package 跑 mtime 不变实锤）；k17 四件本体有效。
+- 插曲 PIT-237：裸 cargo build+cp=无品牌件→unit 名分裂 legacy oxmgr-host-*（build:deploy 正法收口）。
