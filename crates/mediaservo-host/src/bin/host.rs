@@ -285,6 +285,10 @@ fn cmd_apply_impl(args: &mut impl Iterator<Item = String>, verb: &str) -> i32 {
             return 2;
         }
     };
+    // k12 (F19): daemon-alive truth before the core's vendor apply (start/apply exec oxmgr).
+    if let Err(rc) = daemon_spawn_guard(&dir) {
+        return rc;
+    }
     // multi-instance contention detection: the host-agent local gateway port is taken = another host instance is running.
     // interactive either/or (non-interactive defaults to exit): quit / take over (stop the old instance, start this one).
     if verb == "start"
@@ -422,6 +426,10 @@ fn cmd_restart(args: &mut impl Iterator<Item = String>) -> i32 {
             return 2;
         }
     };
+    // k12 (F19): same guard as start/apply (restart routes through the core too).
+    if let Err(rc) = daemon_spawn_guard(&dir) {
+        return rc;
+    }
     let oxfile = dir.join("run").join("oxfile.toml");
     if !oxfile.exists() {
         eprintln!("restart: no {} — run host start/apply first", oxfile.display());
@@ -545,6 +553,11 @@ fn cmd_status(args: &mut impl Iterator<Item = String>) -> i32 {
             return 2;
         }
     };
+    // k12 (F19): status queries the derived addr — refuse instead of spawning a parasite
+    // onto a home a foreign listener already owns.
+    if let Err(rc) = daemon_spawn_guard(&dir) {
+        return rc;
+    }
     let out = match oxmgr_env(&dir).args(["list", "--json"]).output() {
         Ok(out) => out,
         Err(e) => {
@@ -1219,32 +1232,71 @@ fn cmd_doctor(args: &mut impl Iterator<Item = String>) -> i32 {
 /// └────────────────────────────────────┴──────────────────────────┴───────────┘
 /// translate.rs mirrors the chain: oxmgr_apply/live_host_apps/delete all pass oxmgr_env(&dir) explicitly (no default form).
 /// Proxy the oxmgr CLI; when oxmgr is not on PATH, print a clear error with install guidance.
-/// Inject the instantiated oxmgr environment — multi-instance daemon full isolation:
-/// (1) OXMGR_HOME = <dir>/run/oxmgr (data/logs/state) (2) OXMGR_DAEMON_ADDR port derived stably from dir
-/// (daemon mutex = TCP port — without isolation the global daemon blocks the instance daemon from starting) (3) OXMGR_DATA_DIR set as well
-/// (the name C32 memory uses — same shape as the server oxmgr_cmd; the reap/startup reverse lookup hits on either key).
+/// Inject the instantiated oxmgr environment — projection of the SINGLE daemon-identity
+/// source translate::oxmgr_env (k12 / F19 root fix: HOME + DATA_DIR + both ADDR keys from one
+/// canonicalized-home derivation; the old local copy re-hash-pathed and drifted from the
+/// unit renderer — the split-brain). Do not re-derive here.
 fn oxmgr_env(dir: &std::path::Path) -> std::process::Command {
     let mut cmd = std::process::Command::new(oxmgr_path());
-    // absolutize (a relative OXMGR_HOME depends on the daemon cwd — restarts/system services would misalign)
-    let home = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).join("run").join("oxmgr");
-    cmd.env("OXMGR_HOME", &home).env("OXMGR_DATA_DIR", &home); // the name C32 memory uses — set both for compat (server oxmgr_cmd same shape)
-    let port = instance_daemon_port(&home);
-    cmd.env("OXMGR_DAEMON_ADDR", format!("127.0.0.1:{port}"));
-    // third mutex point: the webhook API port (by default derived from the global daemon port — without isolation it collides with global 53081)
-    cmd.env("OXMGR_API_ADDR", format!("127.0.0.1:{}", port + 1000));
-    let _ = &home; // keep the home alive (used by later env entries)
+    for (k, v) in mediaservo_host::translate::oxmgr_env(dir) {
+        cmd.env(k, v);
+    }
     cmd
 }
 
-/// instance daemon port: 18000 + sum of the dir path bytes % 400 (stable — consistent across processes)
-fn instance_daemon_port(dir: &std::path::Path) -> u16 {
-    let sum: u32 = dir.to_string_lossy().bytes().map(u32::from).sum();
-    18000u16 + (sum % 400) as u16
+/// k12 (F19): the four OXMGR_* identity pairs (canonical order) — the single source both the
+/// CLI projection above and the systemd unit renderer consume; byte-identical by construction.
+/// Ports hash the canonicalized `<abs dir>/run/oxmgr` home (translate::oxmgr_home), so a
+/// relative-vs-absolute or trailing-slash invocation cannot drift the hash input.
+fn startup_daemon_env(dir: &std::path::Path) -> Vec<(String, String)> {
+    mediaservo_host::translate::oxmgr_env(dir)
+}
+
+/// k12 (F19): render the systemd unit text from the SINGLE daemon-identity source — the
+/// [Service] Environment= block is generated verbatim from startup_daemon_env (all four
+/// OXMGR_* keys incl. OXMGR_DATA_DIR; the old literal block hashed the instance DIR and
+/// lacked DATA_DIR = the F19 split-brain). LOG_*/ExecStart/Restart shapes stay as before.
+/// Extracted pure so the unit-env pin can compare it against the CLI env key-for-key.
+fn render_unit_text(dir: &std::path::Path, oxmgr: &std::path::Path) -> String {
+    let env_block = startup_daemon_env(dir)
+        .iter()
+        .map(|(k, v)| format!("         Environment={k}={v}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "[Unit]
+         Description=MediaServo host oxmgr daemon ({})
+         After=network.target
+         
+         [Service]
+         Type=simple
+         {env_block}
+         Environment=OXMGR_LOG_MAX_SIZE_MB=10
+         Environment=OXMGR_LOG_MAX_FILES=3
+         Environment=OXMGR_LOG_MAX_DAYS=7
+         ExecStart={} daemon run
+         Restart=always
+         RestartSec=2
+         
+         [Install]
+         WantedBy=default.target
+",
+        dir.display(),
+        oxmgr.display()
+    )
 }
 
 fn run_oxmgr_in(dir: Option<&std::path::Path>, args: &[&str]) -> i32 {
     let mut cmd = match dir {
-        Some(d) => oxmgr_env(d),
+        Some(d) => {
+            // k12 (F19): daemon-alive truth before any vendor exec — a foreign same-home
+            // listener on a dead derived addr means split-brain; never let the CLI auto-spawn
+            // a parasite onto the occupied home.
+            if let Err(rc) = daemon_spawn_guard(d) {
+                return rc;
+            }
+            oxmgr_env(d)
+        }
         // K3 spawn gate (all 9 call sites repo-wide now pass Some — zero behavior change, pure defense):
         // a bare Command without instance env → oxmgr CLI IPC silently spawns the default-location daemon based on cwd.
         // The Option signature is kept — a future caller hitting the gate gets a clear error instead of one spawning event.
@@ -1264,6 +1316,171 @@ fn run_oxmgr_in(dir: Option<&std::path::Path>, args: &[&str]) -> i32 {
             1
         }
     }
+}
+// ── k12 (F19): parasite-spawn prohibition — daemon-alive truth before any vendor exec ──────
+
+/// Outcome of the pre-exec daemon-truth guard for one instance dir (pure decision, table-pinned).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DaemonSpawnAction {
+    /// the daemon on our derived addr answers — proceed and use it
+    ProceedUse,
+    /// nothing alive on this home — proceed (vendor auto-start on a free home is legitimate
+    /// and keeps the first-start behavior byte-identical to today)
+    ProceedFree,
+    /// a foreign oxmgr listener owns this home while our derived addr is dead — refuse
+    RefuseOccupied,
+}
+
+/// One live oxmgr process found on /proc that claims this instance home.
+#[derive(PartialEq, Eq)]
+struct FoundDaemon {
+    pid: u32,
+    /// basename of the executable (best-effort; "oxmgr" when /proc/<pid>/exe is unreadable)
+    exe: String,
+    /// TCP LISTEN ports held by that process (empty when undiscernable)
+    listen_ports: Vec<u16>,
+}
+
+/// Pure decision (k12 table pin): derived-addr reachability × same-home foreign listener.
+fn daemon_spawn_action(probe_reachable: bool, foreign: Option<&FoundDaemon>) -> DaemonSpawnAction {
+    if probe_reachable {
+        DaemonSpawnAction::ProceedUse
+    } else if foreign.is_some() {
+        DaemonSpawnAction::RefuseOccupied
+    } else {
+        DaemonSpawnAction::ProceedFree
+    }
+}
+
+/// Guard before any oxmgr exec against `dir`'s daemon. Err(code) = refuse (the CLI's existing
+/// error-exit shape); Ok(()) = proceed. A dead derived addr with NO claimant is a free home.
+fn daemon_spawn_guard(dir: &std::path::Path) -> Result<(), i32> {
+    let env = startup_daemon_env(dir);
+    let daemon_addr = env
+        .iter()
+        .find(|(k, _)| k == "OXMGR_DAEMON_ADDR")
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default();
+    let reachable = probe_oxmgr_addr(&daemon_addr);
+    let foreign = if reachable {
+        None
+    } else {
+        foreign_daemon_on_home(&mediaservo_host::translate::oxmgr_home(dir))
+    };
+    match daemon_spawn_action(reachable, foreign.as_ref()) {
+        DaemonSpawnAction::ProceedUse | DaemonSpawnAction::ProceedFree => Ok(()),
+        DaemonSpawnAction::RefuseOccupied => {
+            let d = foreign.expect("RefuseOccupied implies a claimant");
+            let ports = if d.listen_ports.is_empty() {
+                "?".to_string()
+            } else {
+                d.listen_ports.iter().map(u16::to_string).collect::<Vec<_>>().join("/")
+            };
+            eprintln!(
+                "daemon-guard: home {} is claimed by oxmgr pid={} (exe={}) listening on port {} while our derived addr {daemon_addr} does not answer — split-brain (F19)",
+                mediaservo_host::translate::oxmgr_home(dir).display(),
+                d.pid,
+                d.exe,
+                ports
+            );
+            eprintln!(
+                "  refusing to spawn a parasite daemon onto the occupied home (events.sock unlink-rebind hijack precondition)"
+            );
+            eprintln!(
+                "  fix: re-render the unit so its env matches the CLI (`startup on <dir>`, k12), or stop the claiming daemon first"
+            );
+            Err(1)
+        }
+    }
+}
+
+/// Bounded TCP connect probe (~300 ms, same form as agent_port_in_use). Unparsable addr or any
+/// connect failure = false (conservative: the caller then runs the /proc claim scan).
+fn probe_oxmgr_addr(addr: &str) -> bool {
+    addr.parse::<std::net::SocketAddr>()
+        .map(|sa| {
+            std::net::TcpStream::connect_timeout(&sa, std::time::Duration::from_millis(300)).is_ok()
+        })
+        .unwrap_or(false)
+}
+
+/// /proc claim scan (wires the live data into daemon_spawn_action; same-uid only by construction —
+/// foreign-uid environ reads hit EPERM and are skipped). Predicate per F19: a process named oxmgr
+/// whose environ carries OXMGR_HOME (or the dual-set OXMGR_DATA_DIR) equal to this exact home.
+fn foreign_daemon_on_home(home: &std::path::Path) -> Option<FoundDaemon> {
+    let rd = std::fs::read_dir("/proc").ok()?; // non-Linux / unavailable: nothing provable = free
+    let want = home.to_string_lossy();
+    let self_pid = std::process::id();
+    for e in rd.flatten() {
+        let Ok(pid): Result<u32, _> = e.file_name().to_string_lossy().parse() else { continue };
+        if pid == self_pid {
+            continue;
+        }
+        let Ok(comm) = std::fs::read_to_string(format!("/proc/{pid}/comm")) else { continue };
+        if comm.trim() != "oxmgr" {
+            continue;
+        }
+        // dead/foreign-uid races: unreadable environ = no claim
+        let Ok(environ) = std::fs::read(format!("/proc/{pid}/environ")) else { continue };
+        let claims = environ.split(|b| *b == 0).any(|kv| {
+            kv.strip_prefix(b"OXMGR_DATA_DIR=")
+                .or_else(|| kv.strip_prefix(b"OXMGR_HOME="))
+                .is_some_and(|v| v == want.as_bytes())
+        });
+        if !claims {
+            continue;
+        }
+        let exe = std::fs::read_link(format!("/proc/{pid}/exe"))
+            .ok()
+            .and_then(|p| {
+                // Linux appends " (deleted)" to the target when the binary was replaced
+                let s = p.to_string_lossy().trim_end_matches(" (deleted)").to_string();
+
+                s.rsplit('/').next().map(str::to_string)
+            })
+            .unwrap_or_else(|| "oxmgr".to_string());
+        return Some(FoundDaemon { pid, exe, listen_ports: proc_listen_ports(pid) });
+    }
+    None
+}
+
+/// Best-effort LISTEN TCP ports of a pid: socket inodes from its fd links × state 0A rows of
+/// /proc/net/tcp. Any read failure yields an empty set (diagnostic only — the claim predicate
+/// above never depends on ports).
+fn proc_listen_ports(pid: u32) -> Vec<u16> {
+    let inodes: Vec<u64> = match std::fs::read_dir(format!("/proc/{pid}/fd")) {
+        Ok(rd) => rd
+            .flatten()
+            .filter_map(|e| std::fs::read_link(e.path()).ok())
+            .filter_map(|l| {
+                let s = l.to_string_lossy();
+                let inner = s.strip_prefix("socket:[")?.strip_suffix("]")?;
+                inner.parse().ok()
+            })
+            .collect(),
+        Err(_) => return Vec::new(),
+    };
+    let Ok(tcp) = std::fs::read_to_string("/proc/net/tcp") else {
+        return Vec::new();
+    };
+    let mut ports: Vec<u16> = tcp
+        .lines()
+        .skip(1)
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            if f.len() < 10 || f[3] != "0A" {
+                return None;
+            }
+            let ino: u64 = f[9].parse().ok()?;
+            if !inodes.contains(&ino) {
+                return None;
+            }
+            u16::from_str_radix(f[1].split(':').next()?.get(4..)?, 16).ok()
+        })
+        .collect();
+    ports.sort_unstable();
+    ports.dedup();
+    ports
 }
 
 /// Pull the instance dir out of the proxy tail args: the last pathlike positional
@@ -1334,6 +1551,10 @@ fn cmd_oxmgr(args: &mut impl Iterator<Item = String>, fixed: &[&str]) -> i32 {
             return 2;
         }
     };
+    // k12 (F19): proxy verbs (monit/ps/logs) exec the vendor CLI directly — same guard.
+    if let Err(rc) = daemon_spawn_guard(&dir) {
+        return rc;
+    }
     let mut cmd = oxmgr_env(&dir);
     cmd.args(fixed).args(&passthrough);
     match cmd.status() {
@@ -1880,34 +2101,9 @@ fn startup_install(dir: &std::path::Path) -> i32 {
         }
         p
     };
-    let data_dir = dir.join("run").join("oxmgr");
     // idempotent: overwrite own unit (rerunning on for the same instance = refresh)
-    let unit = format!(
-        "[Unit]
-         Description=MediaServo host oxmgr daemon ({})
-         After=network.target
-         
-         [Service]
-         Type=simple
-         Environment=OXMGR_HOME={}
-         Environment=OXMGR_DAEMON_ADDR=127.0.0.1:{}
-         Environment=OXMGR_API_ADDR=127.0.0.1:{}
-         Environment=OXMGR_LOG_MAX_SIZE_MB=10
-         Environment=OXMGR_LOG_MAX_FILES=3
-         Environment=OXMGR_LOG_MAX_DAYS=7
-         ExecStart={} daemon run
-         Restart=always
-         RestartSec=2
-         
-         [Install]
-         WantedBy=default.target
-",
-        dir.display(),
-        data_dir.display(),
-        instance_daemon_port(dir),
-        instance_daemon_port(dir) + 1000,
-        oxmgr.display()
-    );
+    let unit = render_unit_text(dir, &oxmgr);
+    let home = mediaservo_host::translate::oxmgr_home(dir);
     if let Some(parent) = unit_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -1915,11 +2111,7 @@ fn startup_install(dir: &std::path::Path) -> i32 {
         eprintln!("startup on: failed to write unit: {e}");
         return 1;
     }
-    println!(
-        "startup on: installed {} (OXMGR_DATA_DIR={})",
-        unit_path.display(),
-        data_dir.display()
-    );
+    println!("startup on: installed {} (OXMGR_DATA_DIR={})", unit_path.display(), home.display());
     for args in [
         vec!["systemctl", "--user", "daemon-reload"],
         vec!["systemctl", "--user", "enable", "--now", unit_name.as_str()],
@@ -2265,6 +2457,70 @@ mod k3_oxmgr_surface_tests {
             "second key = the dual-set form (server same order)"
         );
         assert_eq!(env[0].1, env[1].1, "dual set carries the same value");
+    }
+}
+
+// ── k12 (F19): single-source daemon identity + parasite-spawn prohibition pins ────────────────
+#[cfg(test)]
+mod k12_surface_tests {
+    use super::*;
+
+    /// unit-env equals CLI-env pin: the rendered unit's [Service] Environment= block must
+    /// carry exactly the four OXMGR_* pairs the CLI injects (incl. OXMGR_DATA_DIR) — key for
+    /// key, value for value. F19 was this block diverging (dir-hash ports, no DATA_DIR).
+    #[test]
+    fn unit_env_equals_cli_env() {
+        let root = std::env::temp_dir().join(format!("msrtc-k12-pin-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let unit = render_unit_text(&root, std::path::Path::new("/usr/bin/oxmgr"));
+        let parsed: Vec<(String, String)> = unit
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("Environment="))
+            .filter(|kv| {
+                ["OXMGR_HOME", "OXMGR_DATA_DIR", "OXMGR_DAEMON_ADDR", "OXMGR_API_ADDR"]
+                    .iter()
+                    .any(|k| kv.starts_with(*k))
+            })
+            .map(|kv| {
+                let (k, v) = kv.split_once('=').unwrap();
+                (k.to_string(), v.to_string())
+            })
+            .collect();
+        let cli = startup_daemon_env(&root);
+        assert_eq!(parsed, cli, "unit Environment= block must equal the CLI env (four keys)");
+        assert!(parsed.iter().any(|(k, _)| k == "OXMGR_DATA_DIR"), "DATA_DIR present: {parsed:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// port single-source pin: a trailing-slash invocation and the canonical form of the same
+    /// dir must yield identical identity pairs (canonicalization happens once, at the source).
+    #[test]
+    fn daemon_identity_stable_across_path_forms() {
+        let root = std::env::temp_dir().join(format!("msrtc-k12-slash-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let with_slash = PathBuf::from(format!("{}/", root.display()));
+        assert_eq!(
+            startup_daemon_env(&with_slash),
+            startup_daemon_env(&root),
+            "path form must not drift the hash input"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// foreign-listener decision table (pure): reachable derived addr = use it (with or
+    /// without a claimant); dead + claimant = refuse; dead + nothing = free home proceeds.
+    #[test]
+    fn daemon_spawn_action_table() {
+        let fd = FoundDaemon { pid: 4242, exe: "oxmgr".into(), listen_ports: vec![19311] };
+        let cases: Vec<(bool, Option<&FoundDaemon>, DaemonSpawnAction)> = vec![
+            (true, None, DaemonSpawnAction::ProceedUse),
+            (true, Some(&fd), DaemonSpawnAction::ProceedUse),
+            (false, Some(&fd), DaemonSpawnAction::RefuseOccupied),
+            (false, None, DaemonSpawnAction::ProceedFree),
+        ];
+        for (reachable, foreign, want) in cases {
+            assert_eq!(daemon_spawn_action(reachable, foreign), want);
+        }
     }
 }
 

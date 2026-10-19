@@ -316,10 +316,23 @@ mod tests {
     fn branded_survivor_is_not_vacuously_gone() {
         let dir = std::env::temp_dir().join(format!("k0-sweep-fixture-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let fake = dir.join("msrtc-agent");
+        // unique exec-mapped filename: a same-path copy right after a previous run's exiting
+        // process ETXTBSYs (seen live 1/15 — stale sleep still mapped); suffixes are prefix-safe
+        // for the family match.
+        let fake = dir.join(format!("msrtc-agent-k0-{}", std::process::id()));
         std::fs::copy("/bin/sleep", &fake).unwrap();
         let mut child = std::process::Command::new(&fake).arg("30").spawn().expect("spawn fixture");
-        let gone = diagnose_app_gone("msrtc-agent");
+        // spawn→/proc visibility is not synchronous — poll the very predicate we assert on
+        // (the k10 sibling fixture shares the needle basename; the asserted scan must be
+        // the thing we waited on, not a re-scan after an exact-path poll).
+        let mut gone = true;
+        for _ in 0..100 {
+            gone = diagnose_app_gone("msrtc-agent");
+            if !gone {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         let _ = child.kill();
         let _ = child.wait();
         let _ = std::fs::remove_dir_all(&dir);
@@ -359,16 +372,29 @@ mod tests {
         let branded = format!("{}agent", mediaservo_common::brand::media_brand().app_prefix);
         let dir = std::env::temp_dir().join(format!("k10-survivor-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let fake = dir.join(&branded);
+        // unique exec-mapped filename (ETXTBSY defense, same as the k0 fixture above)
+        let fake = dir.join(format!("{branded}-k10-{}", std::process::id()));
         std::fs::copy("/bin/sleep", &fake).unwrap();
         let mut child =
             std::process::Command::new(&fake).arg("30").spawn().expect("spawn k10 fixture");
-        let found = stop_survivors(&dir);
-        let hit = found.iter().find(|s| s.first_arg == fake.to_string_lossy()).cloned();
+        // spawn→/proc visibility is not synchronous; poll until our own fixture shows up
+        // before asserting (pre-existing flake, 4/15 red on clean HEAD when run parallel).
+        let mut found = Vec::new();
+        let mut hit: Option<SurvivorInfo> = None;
+        for _ in 0..100 {
+            found = stop_survivors(&dir);
+            if let Some(h) = found.iter().find(|s| s.first_arg == fake.to_string_lossy()) {
+                hit = Some(h.clone());
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         let _ = child.kill();
         let _ = child.wait();
         let _ = std::fs::remove_dir_all(&dir);
-        let hit = hit.unwrap_or_else(|| panic!("fixture {branded} must be reported: {found:?}"));
+        let hit = hit.unwrap_or_else(|| {
+            panic!("fixture {branded} must be reported within the poll window: {found:?}")
+        });
         assert_eq!(hit.owner, "owner unknown", "no OXMGR_HOME in the fixture environ");
         assert!(stop_survivors(&dir).iter().all(|s| s.pid != hit.pid), "killed pid must be gone");
     }

@@ -74,6 +74,7 @@ teams); for development process details, consult git log directly. Newest versio
   boot-reconcile (pending-commit fast path, zero churn), CLI.
 
 ### Fixed
+- [host] k12: unit renderer and CLI now share ONE daemon-identity derivation (home-path ports + OXMGR_DATA_DIR everywhere) and refuse to spawn a parasite daemon onto an occupied instance home — the dir-vs-home port split-brain that made autostart daemons invisible to CLI verbs is closed at the root.
 - [host] (Jetson aarch64) `mediaservo-host` now links glib/gobject/gio explicitly (gated build.rs: aarch64 + system glib-dev present; x86_64/CI untouched) — lib-test artifacts no longer die with conda-glib "DSO missing from command line" (PIT-199 family). Running dev-profile host binaries additionally needs `LD_LIBRARY_PATH=$CONDA_PREFIX/lib` (conda FFmpeg .63 sonames; recorder crash-loop shared the same root symptom).
 - [host] k0 (host-ops-hardening F15): the stop self-proof scanned a hardcoded list of
   legacy process names, so "sweep verified ✓" printed vacuously on branded trees

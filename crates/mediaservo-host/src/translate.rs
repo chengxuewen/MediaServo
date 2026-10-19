@@ -398,7 +398,7 @@ fn oxmgr_cmd() -> std::process::Command {
 }
 
 /// Instance daemon home (single source behind oxmgr_env and the config-core survivor scoping).
-pub(crate) fn oxmgr_home(dir: &Path) -> PathBuf {
+pub fn oxmgr_home(dir: &Path) -> PathBuf {
     dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).join("run").join("oxmgr")
 }
 
