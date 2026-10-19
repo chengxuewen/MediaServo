@@ -144,6 +144,7 @@ teams); for development process details, consult git log directly. Newest versio
   (own `oxmgr list --json`) skips the wake apply, the daemon already owns the run; a query
   or parse failure proceeds with the apply exactly as before (fail-open — the wake step
   gains no new hard gate).
+- [deploy] release packages now carry platform/arch: `<brand>-<target>-<ver>-<os>-<arch>.tar.gz` (Go/Docker short form: linux-amd64 / linux-arm64), top-level dir matches; prevents same-name collisions across machines and self-explaining downloads.
 
 ### Added
 - [server][host] startup conflict gate v2 (startup-hardening S1): `startup on` now scans every

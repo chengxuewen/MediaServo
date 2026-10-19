@@ -31,10 +31,13 @@ fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"; rm -rf /tmp/iceoryx2 /dev/shm/iox2_*' EXIT
 
-HOST_TGZ="dist/mediaservo-host-$VER.tar.gz"
-HOST_ROOT="mediaservo-host-$VER"
-SDK_TGZ="dist/mediaservo-sdk-$VER.tar.gz"
-SDK_ROOT="mediaservo-sdk-$VER"
+# Platform/arch suffix in package names (user ruling 2026-10-19, scheme A): the same
+# package name ships different binaries per machine; use a glob so any arch matches.
+ARCH=$(python3 -c 'import platform; print({"x86_64":"amd64","amd64":"amd64","aarch64":"arm64","arm64":"arm64"}.get(platform.machine().lower(), platform.machine().lower()))')
+HOST_TGZ="dist/mediaservo-host-$VER-linux-$ARCH.tar.gz"
+HOST_ROOT="mediaservo-host-$VER-linux-$ARCH"
+SDK_TGZ="dist/mediaservo-sdk-$VER-linux-$ARCH.tar.gz"
+SDK_ROOT="mediaservo-sdk-$VER-linux-$ARCH"
 
 # ── 1. package host ─────────────────────────────────────
 note "package host (ver=$VER)"

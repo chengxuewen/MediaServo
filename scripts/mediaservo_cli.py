@@ -18,6 +18,7 @@ import time
 import subprocess
 import sys
 import tarfile
+import platform
 import tempfile
 from pathlib import Path
 
@@ -1548,7 +1549,12 @@ def _cmd_package(args: argparse.Namespace) -> None:
             _write_manifest_file(staging, "sdk-client" if args.target == "sdk-client" else "sdk-field", staging)
         prefix_name = args.brand if args.brand else "mediaservo"
         _write_changes_file(staging, args.target)  # D280 single source + F11-X slicing (WARN-degraded, non-blocking)
-        package_root = f"{prefix_name}-{pkg_name}-{ver}"
+        # Platform/arch in the package name + top-level dir (user ruling 2026-10-19, scheme A):
+        # the same name ships different binaries per machine — x86_64 -> amd64, aarch64 -> arm64
+        # (Go/Docker short form; the download-visible identity, not the Rust triple).
+        machine = platform.machine().lower()
+        arch = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(machine, machine)
+        package_root = f"{prefix_name}-{pkg_name}-{ver}-{sys.platform}-{arch}"
         out = dist / f"{package_root}.tar.gz"
         strip_package_binaries(staging)  # PIT-119: unstripped debug binaries (135-155MB each) → gzip 1.2GB timeout
         with tarfile.open(out, "w:gz", compresslevel=6) as tar:  # default 9 is slowest; 6 is the engineering trade-off
