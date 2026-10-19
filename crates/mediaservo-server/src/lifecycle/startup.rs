@@ -355,10 +355,11 @@ fn systemctl_enabled(unit: &str) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
-/// S3 post-install probe sample (is-active normalized: active/failed/other incl. None).
+/// S3 post-install probe sample (is-active normalized: active/activating/failed/other incl. None).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProbeSample {
     Active,
+    Activating,
     Failed,
     Other,
 }
@@ -371,6 +372,9 @@ pub enum ProbeVerdict {
     FailFast,
     FailLate,
     Timeout,
+    /// k21: still activating at window end -- start job legitimately running the post-start
+    /// apply hook; install succeeded, the fleet reconcile continues in background.
+    OkWake,
 }
 
 /// S3 post-install probe verdict (pure function, S2.3+m1): sequential scan of the sample stream --
@@ -379,16 +383,24 @@ pub enum ProbeVerdict {
 /// The recheck samples still read is-active, so [Active,Failed] maps to FailLate (a late failure, not a pre-install failure).
 fn probe_verdict(samples: &[ProbeSample]) -> ProbeVerdict {
     let mut seen_active = false;
+    let mut seen_activating = false;
     for &smp in samples {
         match smp {
             ProbeSample::Failed if !seen_active => return ProbeVerdict::FailFast,
             ProbeSample::Failed => return ProbeVerdict::FailLate,
             ProbeSample::Active if !seen_active => seen_active = true,
             ProbeSample::Active => return ProbeVerdict::Ok,
+            ProbeSample::Activating => seen_activating = true,
             ProbeSample::Other => {}
         }
     }
-    if seen_active { ProbeVerdict::FailLate } else { ProbeVerdict::Timeout }
+    if seen_active {
+        ProbeVerdict::FailLate
+    } else if seen_activating {
+        ProbeVerdict::OkWake
+    } else {
+        ProbeVerdict::Timeout
+    }
 }
 
 /// journalctl diagnosis hint line (command-surface pin test point).
@@ -398,12 +410,13 @@ fn probe_failure_hint(unit: &str) -> String {
 
 /// Polling <=5s (10x500ms) + a 2s sustain recheck. I/O runner: systemctl is-active sampling + sleep;
 /// the verdict lives entirely in the probe_verdict pure function (pin tests drive it; no real systemctl/sleep in tests).
-fn probe_startup(unit: &str) -> bool {
+fn probe_startup(unit: &str) -> ProbeVerdict {
     let mut samples: Vec<ProbeSample> = Vec::new();
     let mut seen_active = false;
     for _ in 0..10 {
         let smp = match systemctl_active(unit).as_deref() {
             Some("active") => ProbeSample::Active,
+            Some("activating") => ProbeSample::Activating,
             Some("failed") => ProbeSample::Failed,
             _ => ProbeSample::Other,
         };
@@ -420,7 +433,13 @@ fn probe_startup(unit: &str) -> bool {
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
     match probe_verdict(&samples) {
-        ProbeVerdict::Ok => true,
+        ProbeVerdict::Ok => ProbeVerdict::Ok,
+        ProbeVerdict::OkWake => {
+            println!(
+                "note: the start job is still running -- the post-start apply hook reconciles the fleet (cold bring-up can take minutes); watch with: startup status"
+            );
+            ProbeVerdict::OkWake
+        }
         v => {
             let hint = probe_failure_hint(unit);
             match v {
@@ -444,7 +463,7 @@ fn probe_startup(unit: &str) -> bool {
                     );
                 }
             }
-            false
+            v
         }
     }
 }
@@ -700,7 +719,10 @@ fn startup_install(dir: &Path) -> i32 {
     println!("startup on: installed {} (daemon anchor, Restart=always)", unit_path.display());
     for args in [
         vec!["systemctl", "--user", "daemon-reload"],
-        vec!["systemctl", "--user", "enable", "--now", unit_name.as_str()],
+        vec!["systemctl", "--user", "enable", unit_name.as_str()],
+        // k21: no-block start -- the ExecStartPost apply hook may spend minutes on a cold
+        // fleet; a blocking enable --now reads as a hang (field report 18:0x).
+        vec!["systemctl", "--user", "start", "--no-block", unit_name.as_str()],
     ] {
         match Command::new(args[0]).args(&args[1..]).status() {
             Ok(s) if s.success() => {}
@@ -717,15 +739,21 @@ fn startup_install(dir: &Path) -> i32 {
             }
         }
     }
-    if !probe_startup(&unit_name) {
+    let s3 = probe_startup(&unit_name);
+    if !matches!(s3, ProbeVerdict::Ok | ProbeVerdict::OkWake) {
         return 1;
     }
-    println!("startup on: daemon brought up OK ({unit_name})");
+    if matches!(s3, ProbeVerdict::Ok) {
+        println!("startup on: daemon brought up OK ({unit_name})");
+    }
     // S5 live correction (startup-hardening): the daemon anchor only keeps the daemon alive; once the registry is emptied by stop's
     // delete, enable --now only brings up an empty daemon -- the cluster is not started (same at boot). startup on
     // finishing step = apply the oxfile as an idempotent wakeup (a registered account reconciles with zero churn, an empty account fills in).
     let oxfile = dir.join("run").join("oxfile.toml");
-    if oxfile.exists() {
+    if matches!(s3, ProbeVerdict::OkWake) {
+        // k21: the unit's own ExecStartPost hook is reconciling right now; the CLI wake
+        // would just queue on the same daemon -- background owns this round.
+    } else if oxfile.exists() {
         // k3 minimal mirror of the host core-routing (T1b4): a raw apply onto a NON-empty
         // registry can double-start against entries the daemon already owns (the
         // corpse-start bypass, R3/OL-3). The server crate must not depend on the host
@@ -1442,6 +1470,12 @@ ExecStart=/home/x/out/server/bin/oxmgr daemon run
         // the active-then-other-then-active edge: Other between two actives = still Ok
         // (an Other sample in the recheck window does not judge death -- is-active jitter tolerance; semantics pinned against implementation drift)
         assert_eq!(probe_verdict(&[Active, Other, Active]), POk);
+        // k21: activating at window end = legitimate background reconcile
+        assert_eq!(
+            probe_verdict(&[Other, ProbeSample::Activating, ProbeSample::Activating]),
+            ProbeVerdict::OkWake
+        );
+        assert_eq!(probe_verdict(&[ProbeSample::Failed, ProbeSample::Activating]), FailFast);
         // Active then a later failed = FailLate (a late failure, not a pre-install fast fail)
         assert_eq!(probe_verdict(&[Active, Other, Failed]), FailLate);
     }

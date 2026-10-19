@@ -5,6 +5,9 @@ teams); for development process details, consult git log directly. Newest versio
 
 ## [Unreleased]
 
+### Changed
+- [deploy] `startup on` returns in seconds again: the daemon start is issued with `systemctl --user start --no-block`, and the post-install probe now accepts `activating` as a success shape (`OkWake`) -- the fleet reconcile legitimately continues in background via the unit's post-start apply hook (blocking `enable --now` made a cold fleet bring-up of ~2 minutes look like a hang; field report 2026-10-19). Also fixed the doubled `(no port intersection)` suffix in the coexistence notice.
+
 ### Added
 - [deploy] `startup status` (no-arg inventory) now tags every unit with attribution -- `[own]` (this instance tree, resolved from the running CLI's location or cwd), `[other]` (same brand, another instance), `[stale]` (binary gone; boot already skips it via ConditionPathExists) with a `(this instance)` note when it is yours, `[?]` (unresolvable) -- prints the instance directory as a `path:` line (ExecStart-derived paths are marked `(from ExecStart)`), and sorts own-first / stale-last. The zombie hint and the `startup off <dir>` argument now appear together on screen. Server inventory mirrors the face; `startup status <dir>` gains the path line (no tags -- already scoped). Motivation: live operator feedback -- units of other instances looked like "foreign services" with no path to act on.
 

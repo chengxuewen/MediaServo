@@ -1758,18 +1758,22 @@ fn startup_systemctl_enabled(unit: &str) -> Option<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum S3ProbeSample {
     Active,
+    Activating,
     Failed,
     Other,
 }
 
 /// S3 probe verdict: FailFast = failed seen during polling; Ok = sustain recheck passed;
-/// FailLate = fell off after first active (late bind failure); Timeout = no active within 5s.
+/// FailLate = fell off after first active (late bind failure); Timeout = no active within 5s;
+/// OkWake (k21) = still activating at window end -- the start job is legitimately running
+/// the post-start apply hook, install succeeded, fleet reconcile continues in background.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum S3ProbeVerdict {
     Ok,
     FailFast,
     FailLate,
     Timeout,
+    OkWake,
 }
 
 /// S3 post-install probe verdict (pure function, §2.3+m1): Failed fails fast immediately; after the
@@ -1777,16 +1781,24 @@ enum S3ProbeVerdict {
 /// exhausted without ever seeing active = Timeout. Samples during the recheck are still is-active, so [Active,Failed] maps to FailLate. Mirrors server lifecycle.
 fn s3_probe_verdict(samples: &[S3ProbeSample]) -> S3ProbeVerdict {
     let mut seen_active = false;
+    let mut seen_activating = false;
     for &smp in samples {
         match smp {
             S3ProbeSample::Failed if !seen_active => return S3ProbeVerdict::FailFast,
             S3ProbeSample::Failed => return S3ProbeVerdict::FailLate,
             S3ProbeSample::Active if !seen_active => seen_active = true,
             S3ProbeSample::Active => return S3ProbeVerdict::Ok,
+            S3ProbeSample::Activating => seen_activating = true,
             S3ProbeSample::Other => {}
         }
     }
-    if seen_active { S3ProbeVerdict::FailLate } else { S3ProbeVerdict::Timeout }
+    if seen_active {
+        S3ProbeVerdict::FailLate
+    } else if seen_activating {
+        S3ProbeVerdict::OkWake
+    } else {
+        S3ProbeVerdict::Timeout
+    }
 }
 
 /// journalctl diagnostic hint line (command-surface pinned test point).
@@ -1795,12 +1807,13 @@ fn s3_probe_failure_hint(unit: &str) -> String {
 }
 
 /// Poll ≤5s (10×500ms) + 2s sustain recheck. I/O runner: sample + sleep; all verdict logic lives in the pure function.
-fn s3_probe_startup(unit: &str) -> bool {
+fn s3_probe_startup(unit: &str) -> S3ProbeVerdict {
     let mut samples: Vec<S3ProbeSample> = Vec::new();
     let mut seen_active = false;
     for _ in 0..10 {
         let smp = match startup_systemctl_active(unit).as_deref() {
             Some("active") => S3ProbeSample::Active,
+            Some("activating") => S3ProbeSample::Activating,
             Some("failed") => S3ProbeSample::Failed,
             _ => S3ProbeSample::Other,
         };
@@ -1817,7 +1830,13 @@ fn s3_probe_startup(unit: &str) -> bool {
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
     match s3_probe_verdict(&samples) {
-        S3ProbeVerdict::Ok => true,
+        S3ProbeVerdict::Ok => S3ProbeVerdict::Ok,
+        S3ProbeVerdict::OkWake => {
+            println!(
+                "note: the start job is still running -- the post-start apply hook reconciles the fleet (a cold fleet bring-up can take a couple of minutes); watch with: startup status"
+            );
+            S3ProbeVerdict::OkWake
+        }
         v => {
             let hint = s3_probe_failure_hint(unit);
             match v {
@@ -1835,7 +1854,7 @@ fn s3_probe_startup(unit: &str) -> bool {
                     eprintln!("  likely cause: port conflict? run doctor / check port usage");
                 }
             }
-            false
+            v
         }
     }
 }
@@ -2308,7 +2327,10 @@ fn startup_install(dir: &std::path::Path) -> i32 {
     println!("startup on: installed {} (OXMGR_DATA_DIR={})", unit_path.display(), home.display());
     for args in [
         vec!["systemctl", "--user", "daemon-reload"],
-        vec!["systemctl", "--user", "enable", "--now", unit_name.as_str()],
+        vec!["systemctl", "--user", "enable", unit_name.as_str()],
+        // k21: no-block start -- the unit's ExecStartPost hook may spend minutes
+        // reconciling a cold fleet (k19); a blocking enable --now reads as a hang.
+        vec!["systemctl", "--user", "start", "--no-block", unit_name.as_str()],
     ] {
         let st = std::process::Command::new(args[0]).args(&args[1..]).status();
         match st {
@@ -2330,17 +2352,23 @@ fn startup_install(dir: &std::path::Path) -> i32 {
             }
         }
     }
-    if !s3_probe_startup(&unit_name) {
+    let s3 = s3_probe_startup(&unit_name);
+    if !matches!(s3, S3ProbeVerdict::Ok | S3ProbeVerdict::OkWake) {
         return 1;
     }
-    println!("startup on: boot autostart enabled + daemon brought up ✓ ({unit_name})");
+    if matches!(s3, S3ProbeVerdict::Ok) {
+        println!("startup on: boot autostart enabled + daemon brought up ✓ ({unit_name})");
+    }
     // S5 field corrigendum + k3 (T1b4): a daemon anchor does not raise the cluster, but the
     // wake now reconciles through the config-core (flock-serialized, fingerprint-verified) —
     // a raw apply beside a live registry was exactly the corpse-start bypass (R3/OL-3).
     // Ledger current => zero-churn NoOp; emptied by stop or edited while down => ordered
     // full teardown + fresh apply.
     let oxfile = dir.join("run").join("oxfile.toml");
-    if oxfile.exists() {
+    if matches!(s3, S3ProbeVerdict::OkWake) {
+        // k21: the unit's own ExecStartPost hook is reconciling right now; a CLI-side
+        // reconcile would just queue on the same ledger lock. Background owns this round.
+    } else if oxfile.exists() {
         println!("startup on: reconciling instance processes (config-core, origin=wake)");
         match mediaservo_host::config_core::startup_reconcile(dir, "wake") {
             Ok(o) => {
@@ -3226,10 +3254,8 @@ fn s1_decide_v2(conflicts: &[S1Conflict], tty: bool) -> S1Decision {
     if cross_hit {
         return if tty { S1PromptCrossDomainWarn } else { S1Abort };
     }
-    let mut peers: Vec<String> = conflicts
-        .iter()
-        .map(|c| format!("{} (no port intersection)", c.peer_dir.display()))
-        .collect();
+    let mut peers: Vec<String> =
+        conflicts.iter().map(|c| c.peer_dir.display().to_string()).collect();
     peers.sort();
     peers.dedup();
     match peers.len() {
@@ -3441,6 +3467,13 @@ mod s1_startup_gate_tests {
         assert_eq!(s3_probe_verdict(&[]), Timeout);
         // active-then-other-then-active shape: Other flicker inside the recheck window is not judged dead (semantics nailed against drift)
         assert_eq!(s3_probe_verdict(&[Active, Other, Active]), POk);
+        // k21: still activating at window end = legitimate background reconcile
+        assert_eq!(
+            s3_probe_verdict(&[Other, S3ProbeSample::Activating, S3ProbeSample::Activating]),
+            S3ProbeVerdict::OkWake
+        );
+        assert_eq!(s3_probe_verdict(&[Failed, S3ProbeSample::Activating]), FailFast);
+        assert_eq!(s3_probe_verdict(&[]), Timeout);
     }
 
     #[test]
