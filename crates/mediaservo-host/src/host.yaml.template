@@ -7,8 +7,8 @@ host:
 # signaling:
 #   server_url: "ws://192.168.2.127:9800/ws"   # MediaServo server address
 #   psk: "mediaservo-dev"                      # must match the server's psk
-#   room: "my-car1"   # vehicle room. Default: hostname baked at init (fleet-safe);
-#                     # unset falls back to the system hostname, then "vehicle".
+#   room: "my-car1"   # vehicle room; UNSET = system hostname derived at
+#                               # runtime (fleet-safe), then "vehicle" last-resort
 #   local_port: 17980                          # local gateway port
 
 # -- defaults: shared values for sources/streams -------------------------------
@@ -20,25 +20,26 @@ defaults:
     stream_mode: smooth    # smooth | balanced | quality - see streams below
     keyframe_interval: 2   # GOP seconds
   sources:
-  # Platform/tuning keys only (backend/width/height/fps/reconnect_ms).
-  # mode/input are per-source identity - sharing them here is rejected.
-    fps: 30
-
-# -- sources: video capture declarations ---------------------------------------
-# mode: generator (test color bars) | camera (v4l2) | desktop* | subscriber*
-#       (* planned - capturer exits with an explicit "unsupported" error)
-# Keys: input (device path / topic) | width/height (default 1280x720) |
-#       fps (default 30, <=60) | reconnect_ms (camera only) | backend (declarative)
-sources:
-  - id: "cam0"
-    mode: "camera"
-    backend: "v4l2"
-    input: "/dev/video0"
+    # Platform/tuning keys only (backend/width/height/fps/reconnect_ms);
+    # mode/input are per-source identity - sharing them here is rejected.
+    # Same-spec fleet: tune here once, entries stay minimal (see sources).
+    backend: v4l2
     width: 1920
     height: 1080
     fps: 30
     reconnect_ms: 5000
-  - id: "test"             # minimal shape - remaining keys inherit defaults
+
+# -- sources: video capture declarations ---------------------------------------
+# mode: generator (test color bars) | camera (v4l2) | desktop* | subscriber*
+#       (* planned - capturer exits with an explicit "unsupported" error)
+# Keys: input (device path / topic) | width/height | fps | reconnect_ms
+#       (camera only) | backend (declarative; auto-selected today)
+sources:
+  - id: "cam0"             # minimal shape: spec inherited from defaults
+    mode: "camera"
+    input: "/dev/video0"
+  - id: "generator"        # color-bar fallback: works even without a camera attached
+    mode: "generator"
 
 # -- streams: publish declarations (streams[].source references sources[].id) --
 # codec (default h264):
@@ -61,8 +62,10 @@ sources:
 #   (keep min_bitrate_kbps <= bitrate_kbps/4).
 # keyframe_interval  default 2s; smaller = faster loss recovery
 streams:
-  - id: "cam0-stream"
-    source: "cam0"         # encode/policy keys inherit defaults
+  - id: "cam0"
+    source: "cam0"         # encode/policy keys inherit defaults.streams
+  - id: "generator"
+    source: "generator"
 
 record:
   enabled: false           # false = no recorder process; omit = legacy park mode

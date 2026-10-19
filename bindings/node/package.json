@@ -1,6 +1,6 @@
 {
   "name": "mediaservo",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "MediaServo Node.js bindings — napi-rs direct bindings to the Rust SDK (field/link/deck)",
   "type": "module",
   "main": "lib/index.mjs",

@@ -1,6 +1,6 @@
 [package]
 name = "mediaservo-client"
-version = "0.1.1"  # the delivery-surface independent version source (F12/N1 -- internal crates still inherit the workspace)
+version = "0.1.2"  # the delivery-surface independent version source (F12/N1 -- internal crates still inherit the workspace)
 edition = "2024"
 description = "MediaServo Client SDK v2 -- the cockpit/monitoring-side minimal consumption and control library (SFU consume + ControlEnvelope control DC, login JWT)"
 license = "Apache-2.0"

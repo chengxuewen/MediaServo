@@ -221,27 +221,10 @@ fn cmd_init(args: &mut impl Iterator<Item = String>) -> i32 {
     let cfg_path = etc.join("host.yaml");
     if cfg_path.exists() {
         eprintln!("init: {} already exists, skipping", cfg_path.display());
+    } else if let Err(e) = std::fs::write(&cfg_path, HOST_TOML_TEMPLATE) {
+        eprintln!("init: failed to write {}: {e}", cfg_path.display());
+        return 1;
     } else {
-        // C-ruling 2026-10-19: bake the system hostname into the signaling room so the
-        // fleet-safe default is VISIBLE in the file (no runtime magic; renaming the host
-        // later does not drift an installed instance). The signaling block is a commented
-        // example in the template — bake an ACTIVE signaling.room that the user can edit.
-        let body = match mediaservo_host::translate::system_hostname_room() {
-            Some(h) => {
-                // anchor the FULL device_id line (trailing comment included) so the
-                // replace cannot strand a partial comment on the baked line.
-                let marker = "  device_id: \"\"              # empty = auto-filled by init from identity.json";
-                let baked = format!(
-                    "  device_id: \"\"              # empty = auto-filled by init from identity.json\n\nsignaling:\n  room: \"{h}\"   # baked from hostname at init -- edit or comment out to fall back"
-                );
-                HOST_TOML_TEMPLATE.replace(marker, &baked)
-            }
-            None => HOST_TOML_TEMPLATE.to_string(),
-        };
-        if let Err(e) = std::fs::write(&cfg_path, body) {
-            eprintln!("init: failed to write {}: {e}", cfg_path.display());
-            return 1;
-        }
         println!("generated {}", cfg_path.display());
     }
 

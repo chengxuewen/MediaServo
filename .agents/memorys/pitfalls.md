@@ -1920,3 +1920,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: 字符串模板插值/replace 的锚**必须锚到整行**（含行尾注释），或锚后紧跟 `\n`（行边界）；插值前先 `grep -n` 模板确认锚行的完整字面量。
 - **验证**: 渲染冒烟逐行 `awk 'NF>1 && /^  [a-z_]+:.*#.*#/` 查双注释行；本例由 init 冒烟直接现形。
 - **禁止**: 对带行尾注释的模板行用"值前缀"做 replace 锚。
+
+## PIT-235: package 连坐停生产簇——品牌 glob 杀 unit + staging 生 daemon（2026-10-19 实车事故，k17 根治）
+- **症状**: 改模板轮跑 `msrtc.sh package host`（14:50:16），实车 out/host 簇归零、unit inactive；out/packages 下长出 149M 解包树，其 run/oxmgr 被孵出 daemon（端口 18187=该目录路径哈希，PIT-224 同族）。
+- **根因**: `_cmd_deploy_host` 的"已运行实例先停族"分支里 unit 枚举是 **品牌 glob `oxmgr-{brand}-*.service`，不筛归属前缀**（与 stop-global-reap B1 BLOCKER 同款雷，deploy 语境合法、package staging 复用该函数即误伤）；且 staging 内 init 链路可孵 daemon 落在 dist 树。
+- **解法（k17 四件）**: ①`allow_stop` 参数，package 传 False（只读打包永不动运行实例）；②unit 停令按 `Environment=OXMGR_HOME=<resolved prefix>/run/oxmgr` 精确匹配（C50 进程身份三键落到 unit 文件层）；③package 收尾扫 /proc 收割 OXMGR_HOME∈dist 的 oxmgr 孤儿；④want_home 用 resolve()（防相对 prefix 错杀生产 deploy）。
+- **验证**: 活簇在线跑 package → apps/daemons/unit/remote_connected 四指标原封 + 零残树（本机实测）；`bash -n`/py_compile 过。
+- **禁止**: 任何"打包/校验/只读语义"命令走带 stop 副作用的共享函数；unit/进程杀令必须按实例归属精确匹配，品牌 contains/glob 一律禁。

@@ -862,7 +862,7 @@ def _assemble_host_binaries(bin_dir: Path, release: bool, brand: str) -> set[str
     # and the src display string has no consumers (on-disk oxfiles all point to bin/msrtc-* — proven) — the whitelist clears residual chains of existing instances in the same round
     return src_names
 
-def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
+def _cmd_deploy_host(prefix: str, release: bool = False, allow_stop: bool = True) -> None:
     """deploy host (stateful deployment — assemble + land, D266): identity idempotence/oxmgr/systemd/env.sh.
     Reused by package host (Momus b — Task 2.5): run this function inside the staging dir to assemble identity/etc/env.sh;
     the triple-stop is not triggered (staging has no run/oxfile.toml — cli F5 read-only safety).
@@ -893,14 +893,27 @@ def _cmd_deploy_host(prefix: str, release: bool = False) -> None:
     # Note: do not call the oxmgr CLI (its IPC commands auto-spawn the daemon when it isn't running — creating busy instead);
     # kill the host process family + the daemon occupying bin/oxmgr directly.
     oxfile = prefix_p / "run" / "oxfile.toml"
-    if oxfile.exists() and (bin_dir / host_cli).exists():
+    if oxfile.exists() and (bin_dir / host_cli).exists() and not allow_stop:
+        print("packaging staging: skipping process-family stop (a read-only package run never touches running instances)")
+    elif oxfile.exists() and (bin_dir / host_cli).exists():
         print("Running host instance detected — stopping the process family first (reinstall does not overwrite etc/ credentials)")
         # Triple stop of revival sources: (1) systemd auto-start unit (Restart=always respawns right after the daemon is killed)
         # (2) the daemon itself (3) the host process family (restart_policy=always restarted by the daemon — the daemon must die first)
         # systemctl does not accept globs — enumerate only oxmgr-{brand}-*.service by the derived brand (deploy-ops hazard 2)
         units_dir = Path.home() / ".config" / "systemd" / "user"
         if shutil.which("systemctl") and units_dir.is_dir():
+            want_home = f"Environment=OXMGR_HOME={(prefix_p / 'run' / 'oxmgr').resolve()}"
             for u in sorted(units_dir.glob(f"oxmgr-{brand}-*.service")):
+                try:
+                    # C50 prefix-scope: only units whose OXMGR_HOME is THIS instance's
+                    # daemon dir. (2026-10-19 incident: a brand-glob stop from a package
+                    # staging run tore down the LIVE vehicle unit — never again.)
+                    txt = u.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if want_home not in txt:
+                    print(f"  note: leaving unit {u.name} untouched (belongs to another instance home)")
+                    continue
                 subprocess.run(["systemctl", "--user", "stop", u.name], check=False)
                 subprocess.run(["systemctl", "--user", "reset-failed", u.name], check=False)
         _kill_using(bin_dir / _exe_name("oxmgr"))
@@ -1533,7 +1546,7 @@ def _cmd_package(args: argparse.Namespace) -> None:
     staging = Path(tempfile.mkdtemp(prefix=f"ms-{args.target}-pkg-", dir=str(dist)))
     try:
         if args.target == "host":
-            _cmd_deploy_host(str(staging), args.release)  # brand via MEDIASERVO_BRAND env / installed-instance derivation (D266)
+            _cmd_deploy_host(str(staging), args.release, allow_stop=False)  # brand via MEDIASERVO_BRAND env / installed-instance derivation (D266)
         elif args.target == "server":
             _cmd_deploy_server(str(staging))  # same deploy semantics, whole tree into staging (init lands idempotently in staging)
         elif args.target in ("bindings", "sdk-field"):
@@ -1563,6 +1576,21 @@ def _cmd_package(args: argparse.Namespace) -> None:
         print(f"  top-level dir: {package_root}/")
         print(f"  contents: {', '.join(sorted(e.name for e in staging.iterdir()))}")
     finally:
+        # staging hygiene: a run against a fresh tree must never leave a daemon whose
+        # OXMGR_HOME points into dist/ (PIT-224 family — auto-spawn during staging init).
+        for q in Path("/proc").iterdir():
+            if not q.name.isdigit():
+                continue
+            try:
+                env = (q / "environ").read_bytes().split(b"\0")
+                home = next((e.split(b"=", 1)[1].decode(errors="replace") for e in env
+                             if e.startswith(b"OXMGR_HOME=") and e.split(b"=", 1)[1].decode(errors="replace").startswith(str(dist))), None)
+                comm = (q / "comm").read_text().strip()
+                if home and comm == "oxmgr":
+                    print(f"  note: reaping staging-scoped daemon pid={q.name} home={home}")
+                    os.kill(int(q.name), 15)
+            except OSError:
+                continue
         shutil.rmtree(staging, ignore_errors=True)
 
 # Excluded interface types/names: docker bridges, virtual interfaces (these IPs are unreachable by clients).

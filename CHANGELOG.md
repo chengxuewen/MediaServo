@@ -3,13 +3,17 @@
 This file records behavior changes aimed at consumers (deployment, ops, cockpit/vehicle-side
 teams); for development process details, consult git log directly. Newest version first.
 
-## Unreleased
+## v0.1.2 (2026-10-19)
 
 ### ⚠ Upgrade Notes
 - [protocol] The StatusReport config echo is PRESENCE-gated, not version-gated: a vehicle that
   never ran the config core (or an old agent) simply omits the fields — consumers must render
   "unknown/gray" for absent fields, never infer a healthy default. Same rule for ConfigPush
   `actor` (absent = old server or unknown origin).
+- [host] The signaling room default chain changed: an instance WITHOUT an explicit `signaling.room`
+  now derives the room from the system hostname (derived from the system hostname at runtime) instead of
+  the shared "vehicle" literal. Fleets upgrading with unset rooms will re-register under per-host rooms —
+  set `room:` explicitly to keep the old room name.
 - [host][server][sdk-client][sdk-field] english-only-migration (C49): all artifacts and
   user-visible text are now English — log/error/audit message WORDING switched from Chinese to
   English. Operational greps must switch keywords (e.g. streamer subscription line now
@@ -74,6 +78,7 @@ teams); for development process details, consult git log directly. Newest versio
   boot-reconcile (pending-commit fast path, zero churn), CLI.
 
 ### Fixed
+- [deploy] `package host` is now side-effect-free on live machines: staging runs skip the process-family stop entirely, the stop branch only touches systemd units whose OXMGR_HOME equals the target prefix (C50 — a brand-wide glob once tore down a running vehicle cluster during packaging), and any daemon spawned inside the staging tree is reaped when packaging finishes. Packages built on one machine no longer affect that machine's running instance.
 - [host] k12: unit renderer and CLI now share ONE daemon-identity derivation (home-path ports + OXMGR_DATA_DIR everywhere) and refuse to spawn a parasite daemon onto an occupied instance home — the dir-vs-home port split-brain that made autostart daemons invisible to CLI verbs is closed at the root.
 - [host] k14/k15: `startup on` now enables linger itself (no sudo via polkit; guidance fallback on refusal — never blocks the verb), and an explicit relative dir that nests inside the current directory is caught with a named warning instead of silently resolving out/host/out/host; help text states T1″ apply semantics.
 - [host] k13: start/apply NoOp now requires a LIVE roster, not just a matching fingerprint — a half-dead cluster (missing/errored apps) is recovered by a full execute instead of being told "cluster untouched" (F20). All four bells (file/boot/push/CLI) benefit.
@@ -97,7 +102,7 @@ teams); for development process details, consult git log directly. Newest versio
   `logs` keeps the process-name passthrough (last pathlike positional = dir).
 - [server] `monit`/`ps` accept the same optional dir form (strict resolution, `.server`
   guessing sealed) — completes the K3 promise that both sides tightened consistently.
-- [host] signaling room default is now fleet-safe: `host init` bakes the system hostname as `signaling.room` (visible, editable; renaming the host later does not drift an installed instance); at runtime an unset room falls back to the system hostname, then the legacy "vehicle" literal (manual config always wins).
+- [host] signaling room default is now fleet-safe: an unset `signaling.room` now derives the vehicle room from the SYSTEM HOSTNAME at runtime (fleet-safe; the old shared "vehicle" literal survives only as the last-resort fallback when the hostname is unreadable). Manual `room:` always wins. NOTE: an earlier init-time bake of the hostname was REVERTED before release - it leaked the packaging machine's hostname into distributed packages (cross-machine room contamination).
 
 ### Changed
 - [host] host.yaml.template comments revamped (thin config / fat docs): 112 -> 70 lines, no archaeology in the file (see CHANGELOG history), per-line enum quick-reference; keys, values and semantics byte-equivalent (rendered key-set asserted).
@@ -145,6 +150,7 @@ teams); for development process details, consult git log directly. Newest versio
   or parse failure proceeds with the apply exactly as before (fail-open — the wake step
   gains no new hard gate).
 - [deploy] release packages now carry platform/arch: `<brand>-<target>-<ver>-<os>-<arch>.tar.gz` (Go/Docker short form: linux-amd64 / linux-arm64), top-level dir matches; prevents same-name collisions across machines and self-explaining downloads.
+- [deploy] `host init` template now ships the real-vehicle shape: defaults.sources carries the typical full tuning block (v4l2 1920x1080@30, reconnect 5000), source entries are minimal (id/mode/input - inheritance demonstrated), and a generator color-bar fallback stream is included so a fresh instance publishes video even with no camera attached. (New instances derive stream room cam0/generator instead of cam0-stream - fresh installs only, existing configs untouched.)
 
 ### Added
 - [server][host] startup conflict gate v2 (startup-hardening S1): `startup on` now scans every
