@@ -1229,3 +1229,8 @@ install                        → 改名提示 + exit 2（退役）
 - 用户真重启实测：生产实例 unit/daemon 开机全起但车队 0 = 冷启假时钟窗口（unit 16:12:19 起，NTP 16:13:32 到）vendor 清盘名册（state.json 30B；同文件温重启对照 8/8 复活=冷热定谳）。k19=ExecStartPost 幂等 apply 钩（NTP 门 ≤~120s、恒 exit 0、TimeoutStartSec=240）host+server 双模板；k20=ConditionPathExists 移树/删树 clean skip（systemd-run 探针实证）。server 侧钩属已渲未活验（Jetson bin 域=CI/stub 背书）；物理断电终验=device-day 待办。
 - 更正行（k17 段）："零残树"系误读——out/packages 下解包树为 tar 被解出的残留（含验收窗口自身），非 package 代码产物（tar.add 只读装配+finally rmtree；后续 package 跑 mtime 不变实锤）；k17 四件本体有效。
 - 插曲 PIT-237：裸 cargo build+cp=无品牌件→unit 名分裂 legacy oxmgr-host-*（build:deploy 正法收口）。
+
+### 2026-10-19: startup-status-attribution delivered (host+server inventory face)
+- Tags [own]/[other]/[stale]/[?] + `path:` line (ExecStart fallback marked) + own-first sort + legend; own anchors = exe-tree/cwd ancestor walk via etc/host.yaml (server: etc/server.yaml). `startup status <dir>` gains path line only (F5). Four-shape S2 tests extended both sides + attribution matrix tests (fixture-split correction: dev-exe scenario needs its own tempdir -- etc/host.yaml under a shared root makes the walk find it by design).
+- Live on the vehicle box: V1 own shape (run inside tree) / V3 synthetic stale unit (tag+derived-path+cleanup hint rendered; probe self-cleaned) / V4 path-no-tag. V2 live n/a (brand isolation hides msrtc units from an unbranded dev binary) -- pinned by table test instead. V5 live server unit = deploy-window item (aarch64 server bin domain ledger); server stub bins 93/0 EXECUTED here (prior E0425 debt no longer biting).
+- Gates: host bin 33/0, server stub bins 93/0, fmt clean, clippy surface zero (remaining warnings pre-existing), change-scoped per 10-14 precedent.

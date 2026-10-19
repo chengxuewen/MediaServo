@@ -3,6 +3,11 @@
 This file records behavior changes aimed at consumers (deployment, ops, cockpit/vehicle-side
 teams); for development process details, consult git log directly. Newest version first.
 
+## [Unreleased]
+
+### Added
+- [deploy] `startup status` (no-arg inventory) now tags every unit with attribution -- `[own]` (this instance tree, resolved from the running CLI's location or cwd), `[other]` (same brand, another instance), `[stale]` (binary gone; boot already skips it via ConditionPathExists) with a `(this instance)` note when it is yours, `[?]` (unresolvable) -- prints the instance directory as a `path:` line (ExecStart-derived paths are marked `(from ExecStart)`), and sorts own-first / stale-last. The zombie hint and the `startup off <dir>` argument now appear together on screen. Server inventory mirrors the face; `startup status <dir>` gains the path line (no tags -- already scoped). Motivation: live operator feedback -- units of other instances looked like "foreign services" with no path to act on.
+
 ## v0.1.2 (2026-10-19)
 
 ### ⚠ Upgrade Notes

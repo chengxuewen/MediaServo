@@ -1705,12 +1705,20 @@ fn startup_first_token(unit_text: &str) -> Option<String> {
 /// Four-line health view of a single unit (pure render) — mirrors server `status_line` semantics (S2 four-shape pinned tests).
 fn startup_status_line(
     unit: &str,
+    tag: &str,
+    path: Option<(&std::path::Path, bool)>,
     enabled: Option<&str>,
     active: Option<&str>,
     linger: bool,
     bin_alive: bool,
 ) -> Vec<String> {
-    let mut out = vec![unit.to_string()];
+    let head = if tag.is_empty() { unit.to_string() } else { format!("{tag} {unit}") };
+    let mut out = vec![head];
+    out.push(match path {
+        Some((p, false)) => format!("  path:      {}", p.display()),
+        Some((p, true)) => format!("  path:      {} (from ExecStart)", p.display()),
+        None => "  path:      <unknown: no OXMGR_HOME in this unit>".to_string(),
+    });
     out.push(format!("  enabled: {}", enabled.unwrap_or("no")));
     let mut daemon_line = format!("  daemon:  {}", active.unwrap_or("inactive"));
     if active == Some("failed") {
@@ -1872,6 +1880,76 @@ struct S2UnitHealth {
     enabled: Option<String>,
     active: Option<String>,
     bin_alive: bool,
+    instance: Option<std::path::PathBuf>,
+    instance_derived: bool,
+}
+
+/// Attribution scope for the inventory view (PLAN startup-status-attribution F1-F4).
+#[derive(Debug, PartialEq, Eq)]
+enum S2Scope {
+    Own,
+    Other,
+    Stale,
+    Unknown,
+}
+
+/// Instance roots = nearest ancestors of the exe or of cwd carrying etc/host.yaml.
+/// A dev binary under target/ finds no exe anchor (no etc/host.yaml above it) -> cwd only.
+fn own_anchor_set(exe: Option<&std::path::Path>, cwd: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut v: Vec<std::path::PathBuf> = Vec::new();
+    for start in [exe, Some(cwd)].into_iter().flatten() {
+        let mut cur = Some(start);
+        while let Some(path) = cur {
+            if path.join("etc").join("host.yaml").is_file() {
+                if !v.contains(&path.to_path_buf()) {
+                    v.push(path.to_path_buf());
+                }
+                break;
+            }
+            cur = path.parent();
+        }
+    }
+    v
+}
+
+fn scope_matches_anchor(inst: Option<&std::path::Path>, anchors: &[std::path::PathBuf]) -> bool {
+    let Some(i) = inst else { return false };
+    let i_canon = i.canonicalize().unwrap_or_else(|_| i.to_path_buf());
+    anchors.iter().any(|a| a == i || a.canonicalize().unwrap_or_else(|_| a.clone()) == i_canon)
+}
+
+fn scope_of(
+    instance: Option<&std::path::Path>,
+    bin_alive: bool,
+    anchors: &[std::path::PathBuf],
+) -> (S2Scope, bool) {
+    // stale wins the label (F2); the bool = "stale but mine" note.
+    if !bin_alive {
+        return (S2Scope::Stale, scope_matches_anchor(instance, anchors));
+    }
+    match instance {
+        Some(i) if scope_matches_anchor(Some(i), anchors) => (S2Scope::Own, false),
+        Some(_) => (S2Scope::Other, false),
+        None => (S2Scope::Unknown, false),
+    }
+}
+
+fn scope_tag(s: &S2Scope) -> &'static str {
+    match s {
+        S2Scope::Own => "[own]",
+        S2Scope::Other => "[other]",
+        S2Scope::Stale => "[stale]",
+        S2Scope::Unknown => "[?]",
+    }
+}
+
+fn scope_rank(s: &S2Scope) -> u8 {
+    match s {
+        S2Scope::Own => 0,
+        S2Scope::Other => 1,
+        S2Scope::Stale => 2,
+        S2Scope::Unknown => 3,
+    }
 }
 
 /// Scan all host-domain units (S1 classifier — the Host domain collects both legacy and brand forms).
@@ -1892,15 +1970,36 @@ fn startup_scan_health() -> (Vec<S2UnitHealth>, Vec<String>) {
         match startup_classify_unit(name) {
             S1Foreign => continue,
             S1Unknown => unknown.push(name.to_string()),
-            _ => out.push(S2UnitHealth {
-                name: name.to_string(),
-                enabled: startup_systemctl_enabled(name),
-                active: startup_systemctl_active(name),
-                bin_alive: std::fs::read_to_string(e.path())
-                    .ok()
-                    .and_then(|c| startup_first_token(&c))
-                    .is_none_or(|p| std::path::Path::new(&p).exists()),
-            }),
+            _ => {
+                // attribution (startup-status-attribution): the unit file is already read
+                // here for bin liveness -- parse the instance dir in the same pass.
+                let text = std::fs::read_to_string(e.path()).ok();
+                let (bin_alive, instance, instance_derived) = match &text {
+                    Some(t) => {
+                        let alive = startup_first_token(t)
+                            .is_none_or(|x| std::path::Path::new(&x).exists());
+                        let env_dir = startup_unit_instance_dir(t);
+                        let inst = env_dir.clone().or_else(|| {
+                            startup_first_token(t).and_then(|x| {
+                                std::path::PathBuf::from(x)
+                                    .parent()
+                                    .and_then(std::path::Path::parent)
+                                    .map(std::path::Path::to_path_buf)
+                            })
+                        });
+                        (alive, inst, env_dir.is_none())
+                    }
+                    None => (true, None, false),
+                };
+                out.push(S2UnitHealth {
+                    name: name.to_string(),
+                    enabled: startup_systemctl_enabled(name),
+                    active: startup_systemctl_active(name),
+                    bin_alive,
+                    instance,
+                    instance_derived,
+                })
+            }
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -1969,11 +2068,31 @@ fn startup_status_all() -> i32 {
         }
         return 1;
     }
+    println!(
+        "scope: [own]=this instance tree | [other]=same brand, another instance | [stale]=binary gone (boot skips it via its ConditionPathExists guard) | [?]=instance path unresolvable"
+    );
+    let exe = std::env::current_exe().ok();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let anchors = own_anchor_set(exe.as_deref(), &cwd);
+    let mut rows: Vec<(u8, &S2UnitHealth, String)> = units
+        .iter()
+        .map(|u| {
+            let (sc, note) = scope_of(u.instance.as_deref(), u.bin_alive, &anchors);
+            let tag = if sc == S2Scope::Stale && note {
+                format!("{} (this instance)", scope_tag(&sc))
+            } else {
+                scope_tag(&sc).to_string()
+            };
+            (scope_rank(&sc), u, tag)
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.name.cmp(&b.1.name)));
     let mut unhealthy = 0;
-    for u in &units {
+    for (_, u, tag) in &rows {
         let e = u.enabled.as_deref();
         let a = u.active.as_deref();
-        for line in startup_status_line(&u.name, e, a, linger, u.bin_alive) {
+        let path = u.instance.as_deref().map(|p| (p, u.instance_derived));
+        for line in startup_status_line(&u.name, tag, path, e, a, linger, u.bin_alive) {
             println!("{line}");
         }
         if !startup_unit_healthy(e, a, u.bin_alive) {
@@ -2357,6 +2476,8 @@ fn startup_status(dir: &std::path::Path) -> i32 {
         .is_none_or(|p| std::path::Path::new(&p).exists());
     for line in startup_status_line(
         &unit_name,
+        "",
+        Some((dir, false)),
         enabled.as_deref(),
         active.as_deref(),
         startup_linger_enabled(),
@@ -2592,6 +2713,64 @@ mod k3_oxmgr_surface_tests {
             "second key = the dual-set form (server same order)"
         );
         assert_eq!(env[0].1, env[1].1, "dual set carries the same value");
+    }
+}
+
+// ── startup-status-attribution: scope/anchor pins ────────────────
+#[cfg(test)]
+mod s2_attribution_tests {
+    use super::*;
+
+    fn tree_with_config(root: &std::path::Path) -> std::path::PathBuf {
+        std::fs::create_dir_all(root.join("etc")).unwrap();
+        std::fs::write(
+            root.join("etc").join("host.yaml"),
+            "host: {}
+",
+        )
+        .unwrap();
+        root.to_path_buf()
+    }
+
+    #[test]
+    fn own_anchor_finds_installed_tree_from_exe_and_none_for_dev_binary() {
+        let t = tempfile::tempdir().unwrap();
+        let root = tree_with_config(t.path());
+        let exe = root.join("bin").join("msrtc-host");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        std::fs::write(&exe, b"x").unwrap();
+        let anchors = own_anchor_set(Some(&exe), std::path::Path::new("/"));
+        assert!(anchors.contains(&root), "{anchors:?}");
+        // dev binary in a SEPARATE tree with nothing resembling etc/host.yaml above it
+        let t2 = tempfile::tempdir().unwrap();
+        let dev = t2.path().join("target/debug/mediaservo-host");
+        std::fs::create_dir_all(dev.parent().unwrap()).unwrap();
+        std::fs::write(&dev, b"x").unwrap();
+        let anchors = own_anchor_set(Some(&dev), std::path::Path::new("/nonexistent-cwd"));
+        assert!(anchors.is_empty(), "{anchors:?}");
+    }
+
+    #[test]
+    fn scope_matrix_stale_wins_and_notes_mine() {
+        let t = tempfile::tempdir().unwrap();
+        let root = tree_with_config(t.path());
+        let other = std::path::PathBuf::from("/srv/other-host");
+        let anchors = vec![root.clone()];
+        assert_eq!(scope_of(Some(&root), true, &anchors), (S2Scope::Own, false));
+        assert_eq!(scope_of(Some(&other), true, &anchors), (S2Scope::Other, false));
+        assert_eq!(scope_of(Some(&root), false, &anchors), (S2Scope::Stale, true));
+        assert_eq!(scope_of(Some(&other), false, &anchors), (S2Scope::Stale, false));
+        assert_eq!(scope_of(None, true, &anchors), (S2Scope::Unknown, false));
+        assert_eq!(scope_of(None, false, &anchors), (S2Scope::Stale, false));
+        assert_eq!(scope_of(Some(&root), true, &[]), (S2Scope::Other, false));
+    }
+
+    #[test]
+    fn rank_orders_own_first_stale_last() {
+        assert!(scope_rank(&S2Scope::Own) < scope_rank(&S2Scope::Other));
+        assert!(scope_rank(&S2Scope::Other) < scope_rank(&S2Scope::Stale));
+        assert!(scope_rank(&S2Scope::Stale) <= scope_rank(&S2Scope::Unknown));
+        assert_eq!(scope_tag(&S2Scope::Own), "[own]");
     }
 }
 
@@ -3177,23 +3356,51 @@ mod s1_startup_gate_tests {
     #[test]
     fn s2_status_line_four_shapes() {
         // (1) healthy
-        let healthy = startup_status_line("u.service", Some("enabled"), Some("active"), true, true);
-        assert_eq!(healthy[1], "  enabled: enabled");
-        assert_eq!(healthy[2], "  daemon:  active");
-        assert_eq!(healthy[3], "  linger:  enabled");
-        assert_eq!(healthy[4], "  instance: bin ✓");
+        let healthy = startup_status_line(
+            "u.service",
+            "[own]",
+            Some((std::path::Path::new("/srv/host"), false)),
+            Some("enabled"),
+            Some("active"),
+            true,
+            true,
+        );
+        assert_eq!(healthy[0], "[own] u.service");
+        assert_eq!(healthy[1], "  path:      /srv/host");
+        assert_eq!(healthy[2], "  enabled: enabled");
+        assert_eq!(healthy[3], "  daemon:  active");
+        assert_eq!(healthy[4], "  linger:  enabled");
+        assert_eq!(healthy[5], "  instance: bin ✓");
         // (2) zombie bin (the legacy install-host form — boot would certainly fail)
-        let zombie = startup_status_line("u.service", Some("enabled"), Some("active"), true, false);
-        assert!(zombie[4].contains("bin deleted"));
-        assert!(zombie[4].contains("startup off <dir>"));
+        let zombie = startup_status_line(
+            "u.service",
+            "[stale]",
+            Some((std::path::Path::new("/gone/host"), true)),
+            Some("enabled"),
+            Some("active"),
+            true,
+            false,
+        );
+        assert!(zombie[5].contains("bin deleted"));
+        assert!(zombie[5].contains("startup off <dir>"));
+        assert!(zombie[1].contains("(from ExecStart)"));
         // ③ daemon failed
-        let failed = startup_status_line("u.service", Some("enabled"), Some("failed"), true, true);
-        assert!(failed[2].contains("journalctl"));
+        let failed =
+            startup_status_line("u.service", "", None, Some("enabled"), Some("failed"), true, true);
+        assert!(failed[3].contains("journalctl"));
+        assert!(failed[1].contains("<unknown"));
         // ④ linger off
-        let no_linger =
-            startup_status_line("u.service", Some("enabled"), Some("active"), false, true);
+        let no_linger = startup_status_line(
+            "u.service",
+            "",
+            None,
+            Some("enabled"),
+            Some("active"),
+            false,
+            true,
+        );
         assert_eq!(
-            no_linger[3],
+            no_linger[4],
             "  linger:  disabled — will not auto-start after reboot: run loginctl enable-linger"
         );
     }
