@@ -920,3 +920,9 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - Implemented per doc25 §5/§8: **T2** (per-.so `mediaservo_*.map` export whitelists — field's bare `mediaservo_last_error` stays visible), **T1** (statically vendored libstdc++ via compiler-probed `<CC> -print-file-name=libstdc++.a` absolute path — see PIT-227; the node/deck-c "static" precedents never actually worked), **T9** (node build.rs cfg-gate + probe recipe; README win-64 retracted per ruling #6), **P1 decode-sink contract** (vendored binding exposes stride/geometry on PlanarYuv8Buffer; sink copies stride-aware rows at RENDER dims, bulk path only when the buffer is compact — fixes the 960x540 full-frame chroma corruption; proven by SMPTE-bars loopback: garbled pre-fix, clean bars post-fix).
 - Gate state at ship: all four `.so` UND GLIBCXX/CXXABI == 0, dynamic NEEDED libstdc++ gone, glibc ceiling 2.28 unchanged. Execution digest + open tickets live in `docs/handoff-2026-1015-abi-exec.md`.
 - NOT done (stays in the T1-T15 ledger): T3, T5 wiring, T10 (guard fix + wire after T15), T12, T13, T14, T15. Known adjacent defect: `p2p_codec_e2e` is fake-green (received==0 still passes) — separate ticket, do not trust it as a codec regression gate until fixed.
+
+## D295: signaling room 缺省链改判——init 固化主机名（2026-10-19，用户裁 C 方案）
+- **决策**: `[signaling].room` 缺省语义从固定字面量 `"vehicle"` 改为三级链：**手动配置 > init 固化的系统主机名 > 运行时 hostname 兜底 > "vehicle"（最终兜底）**。`host init` 将清洗后的主机名（`/proc/sys/kernel/hostname`，`[a-z0-9-_]`，零新依赖）写为**active** `room` 值（可见、可改、改主机名不漂移已装实例）；`signaling_room()` 运行时兜底链同序；`host-audio` 的 `audio-<room>` 派生不变。
+- **理由**: fleet 场景固定缺省 = 所有车同房间（隔离失效，生产事故面）；运行时读主机名（B 案被否）引入不可见输入，违背同轮确立的"缺省值必须可见"原则；C 案（固化）文件自解释 + 零配置隔离 + 存量实例零影响。
+- **钉测**: sanitizer（hostname 字符合法性）+ manual>hostname 优先级两枚新钉；两枚旧钉（unset 不发射/vehicle）按新合同改判（unset 发射派生值）。
+- **兼容**: 已显式配置 room 的实例（含本车）零影响；未配置的旧实例运行时行为从 vehicle 变 hostname——CHANGELOG ⚠ 已带（fleet 升级注意）。

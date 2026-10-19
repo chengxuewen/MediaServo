@@ -1906,3 +1906,17 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **Fix**: e53d0a9 `stop_sweep_names(app_prefix)` = current-brand forms ∪ legacy `host-` forms; unit pin + live negative fixture (a /bin/sleep COPY named `msrtc-agent` must be detected). Tests authored+compiled here but FIRST EXECUTION on a link-healthy box (vehicle box: host lib-test link = baseline-proven conda-gobject env flake, honest non-run).
 - **Verify**: after W1 deploys the build, stop on the branded vehicle must now report real survivors.
 - **Prohibited**: hardcoding family literals in any process-name scan — derive from app_name()/brand with legacy union; ANY "zero matches = clean" check must ship with a must-hit negative fixture (otherwise you never learn the needles are dead). Same class as comm-15-truncation (PIT-15/155) — name-based tooling rots silently under rebrand.
+
+## PIT-233: include_str! 模板变更不被增量编译拾取（PIT-189 家族新形态，2026-10-19 room 缺省轮）
+- **症状**: 改 host.yaml.template 后跑 `host init` 冒烟，渲染产物仍是旧文案（两版前的注释形）；touch bin 源文件重链（22s）后新 template 才现形。
+- **根因**: include_str! 的 rerun-if-changed 依赖在增量编译的指纹判断中被缓存吞掉——模板内容变了但 bin 未重链（与 PIT-189 "部署树旧件"同族，但这里旧件在 target/ 编译缓存里）。
+- **解法**: 改 include_str! 引用的资产后，断言渲染产物前必 `touch <包含 include_str! 的源文件> && cargo build`；或直接 `cargo clean -p <crate>`（重链成本换确定性）。
+- **验证**: `grep "<新文案特征串>" /tmp/smoke/etc/host.yaml` 在重链后再断言；首轮冒烟渲染旧文案不算失败、算编译缓存未清。
+- **禁止**: 模板/资产改动后直接跑行为断言。
+
+## PIT-234: 字符串 replace 锚不含行尾注释 → 残尾甩到新行（2026-10-19 init bake 排版 bug）
+- **症状**: init 把 `signaling.room: "msrtv302"` 插入 device_id 行后，原 device_id 行的行尾注释（`# empty = auto-filled...`）被甩到新插入行的行尾，渲染出一行双注释的畸形。
+- **根因**: replace 锚 `"host:\n  device_id: \"\""` 只匹配到 device_id 值为止，模板里该行的行尾注释不在锚内 → replace 保留锚后剩余文本（注释）贴在新插入文本之后。
+- **解法**: 字符串模板插值/replace 的锚**必须锚到整行**（含行尾注释），或锚后紧跟 `\n`（行边界）；插值前先 `grep -n` 模板确认锚行的完整字面量。
+- **验证**: 渲染冒烟逐行 `awk 'NF>1 && /^  [a-z_]+:.*#.*#/` 查双注释行；本例由 init 冒烟直接现形。
+- **禁止**: 对带行尾注释的模板行用"值前缀"做 replace 锚。
