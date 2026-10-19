@@ -40,7 +40,7 @@ Subcommands:
   doctor [<dir>]     environment diagnostics (oxmgr/config/translate checks; exit code = failure count)
   token issue --role R --node N [--topic T] --out O [<dir>]   issue a link capability token
   token --all [<dir>]  issue the standard token set (camera/stream/recorder/agent)
-  startup on/off/status [<dir>]             boot autostart (Linux = systemd user unit; macOS/Windows = via oxmgr service, not built-in verified)
+  startup on/off/status [<dir>]             boot autostart REGISTRATION only -- on/off never touch running processes (runtime: start/stop; Linux = systemd user unit)
   monit               open the oxmgr TUI (process monitoring/logs/restart — requires oxmgr on PATH)
   ps                  process list (oxmgr list — includes CPU/RAM/uptime columns)
   logs [<proc>]       view oxmgr logs (logs all = every process)
@@ -1692,7 +1692,8 @@ fn dirs_log_dir() -> std::path::PathBuf {
 }
 
 /// Boot autostart (Linux = systemd user unit; macOS/Windows = via the oxmgr service, not built-in verified).
-/// `startup on` = oxmgr startup (register with the system) + service install; `off` = service uninstall.
+/// `startup on` registers boot autostart ONLY (write unit + enable + linger; NEVER starts processes -- use `start <dir>`);
+/// `off` un-registers (disable without --now + remove unit file; running processes stay). (startup-pure-registration R1/R2)
 /// Injecting OXMGR_DATA_DIR keeps daemon state inside the instance (same env as host start; consistency after the service self-starts).
 /// First token of ExecStart= in the unit text (the status bin liveness criterion) — mirrored by the same name in server startup.rs.
 fn startup_first_token(unit_text: &str) -> Option<String> {
@@ -1752,111 +1753,6 @@ fn startup_systemctl_enabled(unit: &str) -> Option<String> {
         .ok()?;
     let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
     (!s.is_empty()).then_some(s)
-}
-
-/// S3 post-install probe sample (normalized is-active).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum S3ProbeSample {
-    Active,
-    Activating,
-    Failed,
-    Other,
-}
-
-/// S3 probe verdict: FailFast = failed seen during polling; Ok = sustain recheck passed;
-/// FailLate = fell off after first active (late bind failure); Timeout = no active within 5s;
-/// OkWake (k21) = still activating at window end -- the start job is legitimately running
-/// the post-start apply hook, install succeeded, fleet reconcile continues in background.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum S3ProbeVerdict {
-    Ok,
-    FailFast,
-    FailLate,
-    Timeout,
-    OkWake,
-}
-
-/// S3 post-install probe verdict (pure function, §2.3+m1): Failed fails fast immediately; after the
-/// first Active wait for the sustain recheck sample: still Active = Ok, otherwise FailLate; samples
-/// exhausted without ever seeing active = Timeout. Samples during the recheck are still is-active, so [Active,Failed] maps to FailLate. Mirrors server lifecycle.
-fn s3_probe_verdict(samples: &[S3ProbeSample]) -> S3ProbeVerdict {
-    let mut seen_active = false;
-    let mut seen_activating = false;
-    for &smp in samples {
-        match smp {
-            S3ProbeSample::Failed if !seen_active => return S3ProbeVerdict::FailFast,
-            S3ProbeSample::Failed => return S3ProbeVerdict::FailLate,
-            S3ProbeSample::Active if !seen_active => seen_active = true,
-            S3ProbeSample::Active => return S3ProbeVerdict::Ok,
-            S3ProbeSample::Activating => seen_activating = true,
-            S3ProbeSample::Other => {}
-        }
-    }
-    if seen_active {
-        S3ProbeVerdict::FailLate
-    } else if seen_activating {
-        S3ProbeVerdict::OkWake
-    } else {
-        S3ProbeVerdict::Timeout
-    }
-}
-
-/// journalctl diagnostic hint line (command-surface pinned test point).
-fn s3_probe_failure_hint(unit: &str) -> String {
-    format!("journalctl --user -u {unit} -n 20")
-}
-
-/// Poll ≤5s (10×500ms) + 2s sustain recheck. I/O runner: sample + sleep; all verdict logic lives in the pure function.
-fn s3_probe_startup(unit: &str) -> S3ProbeVerdict {
-    let mut samples: Vec<S3ProbeSample> = Vec::new();
-    let mut seen_active = false;
-    for _ in 0..10 {
-        let smp = match startup_systemctl_active(unit).as_deref() {
-            Some("active") => S3ProbeSample::Active,
-            Some("activating") => S3ProbeSample::Activating,
-            Some("failed") => S3ProbeSample::Failed,
-            _ => S3ProbeSample::Other,
-        };
-        let hit = smp == S3ProbeSample::Active;
-        samples.push(smp);
-        if seen_active {
-            break; // the sustain recheck sample is enqueued — one more sample decides (§2.3 "one more is-active")
-        }
-        if hit {
-            seen_active = true;
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            continue;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
-    match s3_probe_verdict(&samples) {
-        S3ProbeVerdict::Ok => S3ProbeVerdict::Ok,
-        S3ProbeVerdict::OkWake => {
-            println!(
-                "note: the start job is still running -- the post-start apply hook reconciles the fleet (a cold fleet bring-up can take a couple of minutes); watch with: startup status"
-            );
-            S3ProbeVerdict::OkWake
-        }
-        v => {
-            let hint = s3_probe_failure_hint(unit);
-            match v {
-                S3ProbeVerdict::FailFast => {
-                    eprintln!("startup on: daemon failed right after start — check: {hint}");
-                    eprintln!("  likely cause: port conflict? run doctor / check port usage");
-                }
-                S3ProbeVerdict::FailLate => {
-                    eprintln!(
-                        "warning: daemon exited after starting (possible late bind failure) — check: {hint}"
-                    );
-                }
-                _ => {
-                    eprintln!("startup on: daemon did not reach active within 5s — check: {hint}");
-                    eprintln!("  likely cause: port conflict? run doctor / check port usage");
-                }
-            }
-            v
-        }
-    }
 }
 
 /// systemctl --user is-active (thin exec).
@@ -2169,15 +2065,18 @@ fn startup_off_all() -> i32 {
 
 /// Uninstall a single unit (disable --now + rm + daemon-reload).
 fn startup_uninstall_unit(unit: &str) -> i32 {
-    let _ =
-        std::process::Command::new("systemctl").args(["--user", "disable", "--now", unit]).status();
+    // R2 (startup-pure-registration): disable WITHOUT --now -- off un-registers, it never stops
+    // running processes (that is `stop`'s job).
+    let _ = std::process::Command::new("systemctl").args(["--user", "disable", unit]).status();
     let _ = std::fs::remove_file(
         std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
             .join(".config/systemd/user")
             .join(unit),
     );
     let _ = std::process::Command::new("systemctl").args(["--user", "daemon-reload"]).status();
-    println!("startup off: stopped and removed {unit}");
+    println!(
+        "startup off: un-registered {unit} -- any running processes stay up (use `stop <dir>` for runtime)"
+    );
     0
 }
 
@@ -2226,21 +2125,20 @@ fn startup_install(dir: &std::path::Path) -> i32 {
     }
     let tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
     match s1_decide_v2(&conflicts, tty) {
-        S1Abort => {
+        S1RegisterWithWarning => {
             eprintln!(
-                "  non-interactive environment — exiting (port conflicts need handling; run `startup off <old dir>` first or take over interactively)"
+                "warning: port overlap with another registered instance above — registration proceeds; clear the clash (stop / startup off one side) before the next boot"
             );
-            return 1;
         }
-        S1PromptTakeover => {
+        S1PromptUnenrollPeer => {
             eprintln!(
-                "same-class instance port conflict — pick one: [1] skip install [2] uninstall the peer and take over [3] handle manually"
+                "same-class instance port conflict — pick one: [1] skip install [2] un-enroll the peer's autostart REGISTRATION (its running processes stay untouched) [3] handle manually"
             );
             match s1_prompt().as_str() {
                 "2" => {
                     for c in conflicts.iter().filter(|c| c.peer_kind == S1SameDomain) {
                         eprintln!(
-                            "  takeover: uninstalling {} (instance {}, port details above)",
+                            "  un-enroll: removing registration of {} (instance {}, its processes stay up)",
                             c.peer_unit,
                             c.peer_dir.display()
                         );
@@ -2265,7 +2163,7 @@ fn startup_install(dir: &std::path::Path) -> i32 {
                 "warning: cross-service-domain port overlap — different service domains, usually a misconfiguration"
             );
             eprintln!(
-                "pick: [1] overwrite (uninstall peer) [2] cancel this one [3] allow parallel (risks acknowledged)"
+                "pick: [1] overwrite (un-enroll peer registration; processes stay up) [2] cancel this one [3] allow parallel (risks acknowledged)"
             );
             match s1_prompt().as_str() {
                 "1" => {
@@ -2274,7 +2172,7 @@ fn startup_install(dir: &std::path::Path) -> i32 {
                         .filter(|c| c.peer_kind == S1CrossDomain && !c.overlapping.is_empty())
                     {
                         eprintln!(
-                            "  overwrite: uninstalling {} (instance {}, port details above)",
+                            "  overwrite: un-enrolling {} (instance {}, its processes stay up)",
                             c.peer_unit,
                             c.peer_dir.display()
                         );
@@ -2328,9 +2226,6 @@ fn startup_install(dir: &std::path::Path) -> i32 {
     for args in [
         vec!["systemctl", "--user", "daemon-reload"],
         vec!["systemctl", "--user", "enable", unit_name.as_str()],
-        // k21: no-block start -- the unit's ExecStartPost hook may spend minutes
-        // reconciling a cold fleet (k19); a blocking enable --now reads as a hang.
-        vec!["systemctl", "--user", "start", "--no-block", unit_name.as_str()],
     ] {
         let st = std::process::Command::new(args[0]).args(&args[1..]).status();
         match st {
@@ -2352,52 +2247,14 @@ fn startup_install(dir: &std::path::Path) -> i32 {
             }
         }
     }
-    let s3 = s3_probe_startup(&unit_name);
-    if !matches!(s3, S3ProbeVerdict::Ok | S3ProbeVerdict::OkWake) {
-        return 1;
-    }
-    if matches!(s3, S3ProbeVerdict::Ok) {
-        println!("startup on: boot autostart enabled + daemon brought up ✓ ({unit_name})");
-    }
-    // S5 field corrigendum + k3 (T1b4): a daemon anchor does not raise the cluster, but the
-    // wake now reconciles through the config-core (flock-serialized, fingerprint-verified) —
-    // a raw apply beside a live registry was exactly the corpse-start bypass (R3/OL-3).
-    // Ledger current => zero-churn NoOp; emptied by stop or edited while down => ordered
-    // full teardown + fresh apply.
-    let oxfile = dir.join("run").join("oxfile.toml");
-    if matches!(s3, S3ProbeVerdict::OkWake) {
-        // k21: the unit's own ExecStartPost hook is reconciling right now; a CLI-side
-        // reconcile would just queue on the same ledger lock. Background owns this round.
-    } else if oxfile.exists() {
-        println!("startup on: reconciling instance processes (config-core, origin=wake)");
-        match mediaservo_host::config_core::startup_reconcile(dir, "wake") {
-            Ok(o) => {
-                if report_core_outcome("startup on", &o) != 0 {
-                    eprintln!(
-                        "startup on: unit/daemon in place but the reconcile refused (see lines above; start manually: {})",
-                        dir.display()
-                    );
-                    return 1;
-                }
-                sync_host_logs(dir);
-            }
-            Err(e) => {
-                eprintln!(
-                    "startup on: config-core failed — unit/daemon in place but the instance was not brought up (start manually: {}): {e}",
-                    dir.display()
-                );
-                return 1;
-            }
-        }
-    } else {
-        eprintln!(
-            "startup on: no {} (instance never init/started) — only the daemon anchor is in place",
-            oxfile.display()
-        );
-    }
     enable_linger_best_effort("startup on");
+    let me = std::env::current_exe()
+        .map(|x| x.display().to_string())
+        .unwrap_or_else(|_| mediaservo_common::brand::media_brand().product.to_string());
     println!(
-        "daemon decision audit: journalctl --user -u {unit_name} -n 50 (journald captures daemon stdout)"
+        "startup on: registered for boot autostart ({unit_name}) -- no processes were started; to run now: {} start {}",
+        me,
+        dir.display()
     );
     0
 }
@@ -2472,12 +2329,15 @@ fn startup_uninstall(dir: &std::path::Path) -> i32 {
         println!("startup off: autostart not installed ({} does not exist)", unit_path.display());
         return 0;
     }
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "disable", "--now", &unit_name])
-        .status();
+    let _ =
+        std::process::Command::new("systemctl").args(["--user", "disable", &unit_name]).status();
     let _ = std::fs::remove_file(&unit_path);
     let _ = std::process::Command::new("systemctl").args(["--user", "daemon-reload"]).status();
-    println!("startup off: stopped and removed {}", unit_path.display());
+    println!(
+        "startup off: un-registered {} -- any running processes stay up (use `stop {}` for runtime)",
+        unit_path.display(),
+        dir.display()
+    );
     0
 }
 
@@ -3146,15 +3006,11 @@ fn s1_prompt() -> String {
     ans.trim().to_string()
 }
 
-/// Takeover execution: daemon stops the old instance (oxfile present) → unit disable + file removal (details printed by the caller beforehand).
-fn s1_takeover_peer(unit: &str, peer_dir: &std::path::Path) {
-    if !peer_dir.as_os_str().is_empty() && peer_dir.join("run/oxfile.toml").exists() {
-        let ox = peer_dir.join("run/oxfile.toml").to_string_lossy().into_owned();
-        let _ = run_oxmgr_in(Some(peer_dir), &["stop", &ox]);
-        let _ = run_oxmgr_in(Some(peer_dir), &["delete", &ox]);
-    }
-    let _ =
-        std::process::Command::new("systemctl").args(["--user", "disable", "--now", unit]).status();
+/// R3-B (startup-pure-registration): un-enroll the peer's autostart REGISTRATION only --
+/// `disable` (no --now) + remove the unit file. The peer's running daemon/fleet stay up:
+/// runtime belongs to start/stop, never to registration verbs (18:03 takeover incident).
+fn s1_takeover_peer(unit: &str, _peer_dir: &std::path::Path) {
+    let _ = std::process::Command::new("systemctl").args(["--user", "disable", unit]).status();
     let _ = std::fs::remove_file(
         std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
             .join(".config/systemd/user")
@@ -3235,24 +3091,28 @@ use S1PeerKind::{CrossDomain as S1CrossDomain, SameDomain as S1SameDomain};
 enum S1Decision {
     Install,
     Coexist(String),
-    PromptTakeover,
+    PromptUnenrollPeer,
     PromptCrossDomainWarn,
-    Abort,
+    RegisterWithWarning,
 }
-use S1Decision::{Abort as S1Abort, Coexist as S1Coexist, Install as S1Install};
+use S1Decision::{
+    Coexist as S1Coexist, Install as S1Install, RegisterWithWarning as S1RegisterWithWarning,
+};
 
-/// Aggregate decision (§2.1, mirrors server decide_v2): a same-class collision prompts takeover first, else a cross-domain collision prompts a warning,
-/// an all-empty set coexists and installs; non-tty + any prompt raised → Abort.
+/// Aggregate decision (§2.1, mirrors server decide_v2): a same-class collision prompts a peer REGISTRATION un-enroll,
+/// else a cross-domain collision prompts a warning; an all-empty set coexists and installs.
+/// R3-B (startup-pure-registration): non-tty collisions warn and register anyway -- a registration verb never
+/// blocks on a missing human and never touches another instance's processes.
 fn s1_decide_v2(conflicts: &[S1Conflict], tty: bool) -> S1Decision {
     let same_hit =
         conflicts.iter().any(|c| c.peer_kind == S1SameDomain && !c.overlapping.is_empty());
     let cross_hit =
         conflicts.iter().any(|c| c.peer_kind == S1CrossDomain && !c.overlapping.is_empty());
     if same_hit {
-        return if tty { S1PromptTakeover } else { S1Abort };
+        return if tty { S1PromptUnenrollPeer } else { S1RegisterWithWarning };
     }
     if cross_hit {
-        return if tty { S1PromptCrossDomainWarn } else { S1Abort };
+        return if tty { S1PromptCrossDomainWarn } else { S1RegisterWithWarning };
     }
     let mut peers: Vec<String> =
         conflicts.iter().map(|c| c.peer_dir.display().to_string()).collect();
@@ -3268,7 +3128,7 @@ fn s1_decide_v2(conflicts: &[S1Conflict], tty: bool) -> S1Decision {
     }
 }
 use S1Decision::PromptCrossDomainWarn as S1PromptCrossDomainWarn;
-use S1Decision::PromptTakeover as S1PromptTakeover;
+use S1Decision::PromptUnenrollPeer as S1PromptUnenrollPeer;
 
 #[cfg(test)]
 mod s1_startup_gate_tests {
@@ -3354,9 +3214,9 @@ mod s1_startup_gate_tests {
             peer_kind: S1CrossDomain,
             overlapping: vec![],
         };
-        // four states + non-tty refusal + aggregation
-        assert_eq!(s1_decide_v2(&[same_hit.clone()], true), S1PromptTakeover);
-        assert_eq!(s1_decide_v2(&[same_hit.clone()], false), S1Abort);
+        // four states + non-tty warn+register + aggregation
+        assert_eq!(s1_decide_v2(&[same_hit.clone()], true), S1PromptUnenrollPeer);
+        assert_eq!(s1_decide_v2(&[same_hit.clone()], false), S1RegisterWithWarning);
         assert!(matches!(s1_decide_v2(&[cross_empty.clone()], true), S1Coexist(_)));
         match s1_decide_v2(
             &[S1Conflict { overlapping: vec![], ..same_hit.clone() }, cross_empty],
@@ -3445,43 +3305,6 @@ mod s1_startup_gate_tests {
         assert_eq!(startup_select_off(1, false), S2OffSelect::Single, "exactly one = direct stop");
         assert_eq!(startup_select_off(2, true), S2OffSelect::Prompt);
         assert_eq!(startup_select_off(3, false), S2OffSelect::RejectList);
-    }
-
-    // ── S3: post-install probe verdict (table-driven pure function; no real systemctl / real sleep in tests) ──
-
-    use S3ProbeSample::{Active, Failed, Other};
-    use S3ProbeVerdict::{FailFast, FailLate, Ok as POk, Timeout};
-
-    #[test]
-    fn s3_probe_verdict_table() {
-        // base shape: first-active + sustain passes
-        assert_eq!(s3_probe_verdict(&[Other, Active, Active]), POk);
-        assert_eq!(s3_probe_verdict(&[Active, Active]), POk);
-        // failed before install = fast fail
-        assert_eq!(s3_probe_verdict(&[Failed, Active]), FailFast);
-        // fell off on the sustain recheck after first-active = late failure (the [Active, Failed] shape)
-        assert_eq!(s3_probe_verdict(&[Active, Failed]), FailLate);
-        assert_eq!(s3_probe_verdict(&[Active, Other]), FailLate);
-        // no active within the polling window = timeout
-        assert_eq!(s3_probe_verdict(&[Other; 10]), Timeout);
-        assert_eq!(s3_probe_verdict(&[]), Timeout);
-        // active-then-other-then-active shape: Other flicker inside the recheck window is not judged dead (semantics nailed against drift)
-        assert_eq!(s3_probe_verdict(&[Active, Other, Active]), POk);
-        // k21: still activating at window end = legitimate background reconcile
-        assert_eq!(
-            s3_probe_verdict(&[Other, S3ProbeSample::Activating, S3ProbeSample::Activating]),
-            S3ProbeVerdict::OkWake
-        );
-        assert_eq!(s3_probe_verdict(&[Failed, S3ProbeSample::Activating]), FailFast);
-        assert_eq!(s3_probe_verdict(&[]), Timeout);
-    }
-
-    #[test]
-    fn s3_probe_failure_hint_command() {
-        assert_eq!(
-            s3_probe_failure_hint("oxmgr-host-x.service"),
-            "journalctl --user -u oxmgr-host-x.service -n 20"
-        );
     }
 
     #[test]

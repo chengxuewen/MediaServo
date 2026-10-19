@@ -926,3 +926,10 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **理由**: fleet 场景固定缺省 = 所有车同房间（隔离失效，生产事故面）；运行时读主机名（B 案被否）引入不可见输入，违背同轮确立的"缺省值必须可见"原则；C 案（固化）文件自解释 + 零配置隔离 + 存量实例零影响。
 - **钉测**: sanitizer（hostname 字符合法性）+ manual>hostname 优先级两枚新钉；两枚旧钉（unset 不发射/vehicle）按新合同改判（unset 发射派生值）。
 - **兼容**: 已显式配置 room 的实例（含本车）零影响；未配置的旧实例运行时行为从 vehicle 变 hostname——CHANGELOG ⚠ 已带（fleet 升级注意）。
+
+## D296: startup 动词族纯登记语义（2026-10-19，用户逐项亲裁 R1-R3；Momus [OKAY]）
+- **决策**: `startup` 家族（on/off/status）只读写开机自启登记簿，一律不碰运行时进程。on=渲染 unit+enable+linger+指引（点火归 `start`）；off=disable（无 `--now`）+删 unit 文件（停车归 `stop`），linger 任何单实例动词不得反向关闭（用户级共享资产）；冲突臂 tty→`PromptUnenrollPeer`（只摘对方**登记**，其进程原封）、non-tty→`RegisterWithWarning`（大声警告后照装，Abort 臂退役）。开机语义不变：k19 钩子在 unit 内照常整队。
+- **理由**: 现场"startup on 一直阻塞"定谳=k19 同步 enable --now 等冷启整队（~2min 零反馈=体感挂死）；混装动词失败面叠加（登记故障与点火故障无法定界），用户裁"不要混杂"。systemd 官方 `enable` 本就不启动——纯登记是回归默认语义。
+- **superseded**: S3 装后探针状态机（含当日 k21 OkWake 过渡形）双侧删除；startup-hardening 的"on 装后 apply 唤醒"设计（开机唤醒职责唯一化到 k19 钩子）。
+- **实环**: 抛弃树四连（on 748ms 零点火 / 真交叠 warn+register / off 后进程原封 / stop 收自家）+生产 out-host 纯登记恢复；验证 fixture 教训=systemd 裸环境跑的必须是部署件（target/debug 裸拷缺 conda 库解析，钩子假阴）。
+- **开放项**: 登记闸端口盲区（host.yaml 注释掉的默认 17980 对 `instance_ports` 不可见 → 两台同缺省口机器可"合法并存"，开机才打架）——先存 S1 缺陷，本环境抓现行，修刀另轮。
