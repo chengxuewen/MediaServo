@@ -16,6 +16,14 @@ accounts_file: "/opt/mediaservo/etc/accounts.yaml"
 # the exchange endpoint POST /api/auth/exchange {key_id, secret} → short-lived JWT (TTL seconds, default 12h).
 # One-click registration from the admin surface: ./msrtc.sh admin page /apikeys or POST /api/admin/apikeys.
 #api_keys_file: "/opt/mediaservo/etc/api_keys.yaml"
+
+# Dev-environment exemptions (PIT-160 root fix): config-first, env vars still override (compose form).
+# allow_dev_credentials: startup guard accepts the known dev placeholder accounts (admin123 etc.)
+#   instead of env MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 — set true in dev trees ONLY, never production.
+# allow_dev_enroll: unknown devices auto-register after pubkey verify (controlled private networks)
+#   instead of env ALLOW_DEV_ENROLL=1.
+#allow_dev_credentials: true
+#allow_dev_enroll: true
 #api_token_ttl_secs: 43200
 
 # SFU announced address (reachable IP across NICs/networks; precedence: env MEDIASERVO_SFU_ANNOUNCED_IP > here > auto-detect)

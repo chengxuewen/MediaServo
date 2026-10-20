@@ -216,12 +216,14 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     };
     let api_registry = std::sync::Arc::new(api_registry);
 
-    // device-enroll S7: ALLOW_DEV_ENROLL (env, default false = production manual pending queue;
-    // =1 controlled network/dev auto-registers on verify success, zero manual steps). Parsing semantics same family (ALLOW_DEV_CREDENTIALS): literal "1" only.
-    let allow_dev_enroll = std::env::var("ALLOW_DEV_ENROLL").as_deref() == Ok("1");
+    // device-enroll S7: allow_dev_enroll (config-first, env ALLOW_DEV_ENROLL=1 override wins;
+    // default false = production manual pending queue; true = controlled network/dev
+    // auto-registers on verify success, zero manual steps). Env parsing: literal "1" only.
+    let allow_dev_enroll = config.allow_dev_enroll
+        || std::env::var("ALLOW_DEV_ENROLL").as_deref() == Ok("1");
     if allow_dev_enroll {
         tracing::warn!(
-            "ALLOW_DEV_ENROLL=1: unknown devices auto-register after pubkey verify passes (controlled private network/dev environments only)"
+            "allow_dev_enroll: unknown devices auto-register after pubkey verify passes (controlled private network/dev environments only)"
         );
     }
 
@@ -245,10 +247,12 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         }
     };
     // I2 review: known dev placeholder accounts fail-fast (config/accounts.yaml is local dev only) --
-    // explicit override env MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 (set in dev compose) exempts.
-    if let Err(e) = accounts.check_dev_credentials(
-        std::env::var("MEDIASERVO_ALLOW_DEV_CREDENTIALS").as_deref() == Ok("1"),
-    ) {
+    // exemption = config allow_dev_credentials OR env MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 (env wins;
+    // config field survives tree rebuilds — PIT-160 root fix: the dev exemption is a property of the
+    // deployment tree, not of one shell's environment).
+    let allow_dev_credentials = config.allow_dev_credentials
+        || std::env::var("MEDIASERVO_ALLOW_DEV_CREDENTIALS").as_deref() == Ok("1");
+    if let Err(e) = accounts.check_dev_credentials(allow_dev_credentials) {
         panic!("{e}");
     }
     let accounts = std::sync::Arc::new(accounts);

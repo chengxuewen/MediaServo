@@ -92,6 +92,20 @@ pub struct ServerConfig {
     #[serde(default)]
     pub api_keys_file: Option<String>,
 
+    /// Dev-credentials exemption (PIT-160 root fix, 2026-10-20): config-first equivalent of env
+    /// MEDIASERVO_ALLOW_DEV_CREDENTIALS=1. When true, the startup guard accepts the known dev
+    /// placeholder accounts (admin123/dispatch123/operator123) in accounts.yaml. Lives in server.yaml
+    /// (etc/ is never overwritten by deploy — PIT-160 guard) so it survives tree rebuilds; the env var
+    /// remains as an override for container/compose forms (env wins over config).
+    #[serde(default)]
+    pub allow_dev_credentials: bool,
+
+    /// Device auto-enroll (device-enroll S7 config-first equivalent of env ALLOW_DEV_ENROLL=1):
+    /// unknown devices auto-register after pubkey verify passes (controlled private networks only).
+    /// Config-first, env override wins (same precedence as allow_dev_credentials).
+    #[serde(default)]
+    pub allow_dev_enroll: bool,
+
     /// TTL in seconds of JWTs minted by exchange (default 43200=12h, aligned with account login TTL; revocation granularity see F10).
     #[serde(default = "default_api_token_ttl")]
     pub api_token_ttl_secs: u64,
@@ -430,11 +444,35 @@ jwt_secret: "jwt-secret-256bit-min"
         assert_eq!(parsed.rate_limit, 200);
         assert_eq!(parsed.psk.as_deref(), Some("server-psk"));
         assert_eq!(parsed.jwt_secret.as_deref(), Some("jwt-secret-256bit-min"));
+        // PIT-160 root fix: dev-exemption fields default false (production-safe);
+        // absent keys parse clean on old configs (additive, serde default).
+        assert!(!parsed.allow_dev_credentials);
+        assert!(!parsed.allow_dev_enroll);
 
         let re_serialized = serde_yaml::to_string(&parsed).unwrap();
         let re_parsed: ServerConfig = serde_yaml::from_str(&re_serialized).unwrap();
         assert_eq!(re_parsed.listen.port, parsed.listen.port);
         assert_eq!(re_parsed.room_capacity, parsed.room_capacity);
+    }
+
+    #[test]
+    fn server_config_dev_exemption_fields() {
+        // config-first form of MEDIASERVO_ALLOW_DEV_CREDENTIALS / ALLOW_DEV_ENROLL envs —
+        // survives tree rebuilds (etc/ never overwritten by deploy), env still overrides.
+        let yaml = r#"
+listen:
+  host: "127.0.0.1"
+  port: 9800
+allow_dev_credentials: true
+allow_dev_enroll: true
+"#;
+        let parsed: ServerConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(parsed.allow_dev_credentials);
+        assert!(parsed.allow_dev_enroll);
+
+        let re_serialized = serde_yaml::to_string(&parsed).unwrap();
+        let re_parsed: ServerConfig = serde_yaml::from_str(&re_serialized).unwrap();
+        assert!(re_parsed.allow_dev_credentials && re_parsed.allow_dev_enroll);
     }
 
     #[test]
