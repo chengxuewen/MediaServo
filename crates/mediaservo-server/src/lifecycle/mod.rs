@@ -88,7 +88,60 @@ pub(super) fn parse_dir(args: &mut dyn Iterator<Item = String>) -> Result<PathBu
     if args.next().is_some() {
         return Err("instance dir accepts only one positional argument".to_string());
     }
-    Ok(PathBuf::from(arg))
+    if PathBuf::from(&arg).is_absolute() {
+        return Ok(PathBuf::from(arg)); // absolute args pass untouched (guard is relative-only)
+    }
+    match resolve_dir_guard(&cwd_components(), &arg_components(&arg)) {
+        GuardDecision::UseArg => Ok(PathBuf::from(arg)),
+        GuardDecision::UseCwdNested(nested) => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            eprintln!(
+                "warning: you are already inside the instance {} — '{}' would resolve to the nested path {} (a vacuous no-op); using the current directory instead. Pass an absolute path or run bare for the smart default.",
+                cwd.display(),
+                arg,
+                nested.display()
+            );
+            Ok(PathBuf::from("."))
+        }
+    }
+}
+
+/// k15a mirror (host 491d5fa9): cwd split into components (best effort; unreadable cwd = no guard input).
+fn cwd_components() -> Vec<String> {
+    std::env::current_dir()
+        .ok()
+        .map(|p| {
+            p.components().filter_map(|c| c.as_os_str().to_str()).map(str::to_string).collect()
+        })
+        .unwrap_or_default()
+}
+
+/// k15a mirror: explicit dir argument split into components ('.' and './' prefixes normalize away).
+fn arg_components(arg: &str) -> Vec<String> {
+    arg.split('/').filter(|c: &&str| !c.is_empty() && *c != ".").map(str::to_string).collect()
+}
+
+/// k15a mirror: pure guard decision — should an explicit relative dir arg that merely re-states the
+/// cwd tail (cwd=/x/out/server + arg="out/server" or "./out/server") be replaced by the cwd itself?
+/// Live incident (host 10-18): `stop out/host` typed inside out/host silently resolved out/host/out/host.
+/// Absolute args are handled before this seam (pass untouched).
+#[derive(Debug, PartialEq, Eq)]
+enum GuardDecision {
+    /// use the arg as typed (absolute arg, a "." arg, or a relative arg not nesting inside cwd)
+    UseArg,
+    /// arg re-states the cwd tail; payload = the would-be nested path (named in the warning)
+    UseCwdNested(PathBuf),
+}
+
+fn resolve_dir_guard(cwd: &[String], arg: &[String]) -> GuardDecision {
+    if arg.is_empty() || cwd.len() <= arg.len() {
+        return GuardDecision::UseArg; // "." arg, or arg deeper/equal than cwd — nothing to guard
+    }
+    if cwd[cwd.len() - arg.len()..] == *arg {
+        let nested: PathBuf = cwd.iter().cloned().collect();
+        return GuardDecision::UseCwdNested(nested.join(arg.iter().collect::<PathBuf>()));
+    }
+    GuardDecision::UseArg
 }
 
 // ── init ─────────────────────────────────────────────────────────────────────
@@ -1219,6 +1272,37 @@ pub(super) fn absolute(p: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    // -- k15: resolve_dir_guard table test (host 2763 shape, server-domain paths) --
+
+    #[test]
+    fn resolve_dir_guard_table() {
+        let cwd: Vec<String> = ["/", "x", "out", "server"].iter().map(|s| s.to_string()).collect();
+        // arg re-states the cwd tail => warn + use cwd; "./out/server" normalizes to the same components
+        let arg = arg_components("out/server");
+        assert_eq!(
+            resolve_dir_guard(&cwd, &arg),
+            GuardDecision::UseCwdNested(PathBuf::from("/x/out/server/out/server"))
+        );
+        assert_eq!(arg_components("./out/server"), arg);
+        assert_eq!(arg_components("out/server/"), arg);
+        // arg deeper than cwd, or not a cwd tail => use arg
+        assert_eq!(
+            resolve_dir_guard(&cwd, &["out", "server", "etc"].map(String::from)),
+            GuardDecision::UseArg
+        );
+        assert_eq!(
+            resolve_dir_guard(&["/".into(), "x".into()], &["out".into(), "server".into()]),
+            GuardDecision::UseArg
+        );
+        // "." (empty components) never guards
+        assert_eq!(resolve_dir_guard(&cwd, &[]), GuardDecision::UseArg);
+        // nested path names the would-be resolution
+        match resolve_dir_guard(&cwd, &["out".into(), "server".into()]) {
+            GuardDecision::UseCwdNested(p) => assert_eq!(p, PathBuf::from("/x/out/server/out/server")),
+            other => panic!("want nested, got {other:?}"),
+        }
+    }
+
     use super::*;
 
     // -- K2: Skipped split-state pin tests (S6 M1 -- the only conversion point + no kill-failure drift + RC behavior) --
