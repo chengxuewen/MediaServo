@@ -11,11 +11,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::templates::{
-    instance_daemon_port, parse_listen_port, parse_weaknet_port, parse_web_port,
-    server_namespace,
+    parse_listen_port, parse_weaknet_port, parse_web_port, server_namespace,
     server_product,
 };
-use super::{absolute, oxmgr_bin, oxmgr_env, oxmgr_list, parse_dir, run_oxmgr};
+use super::{absolute, oxmgr_bin, parse_dir};
 
 // -- S1: identity check (unit identity classification -- brand-aware prefix, exact match, contains forbidden) --
 
@@ -1013,6 +1012,8 @@ fn startup_status(_dir: &Path) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::oxmgr_env;
+    use crate::lifecycle::templates::instance_daemon_port;
 
     // -- k12 pins (Momus MAJOR-1 fix pair) ------------------------------------------------------
 
