@@ -1298,7 +1298,9 @@ mod tests {
         assert_eq!(resolve_dir_guard(&cwd, &[]), GuardDecision::UseArg);
         // nested path names the would-be resolution
         match resolve_dir_guard(&cwd, &["out".into(), "server".into()]) {
-            GuardDecision::UseCwdNested(p) => assert_eq!(p, PathBuf::from("/x/out/server/out/server")),
+            GuardDecision::UseCwdNested(p) => {
+                assert_eq!(p, PathBuf::from("/x/out/server/out/server"))
+            }
             other => panic!("want nested, got {other:?}"),
         }
     }

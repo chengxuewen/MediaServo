@@ -11,8 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::templates::{
-    parse_listen_port, parse_weaknet_port, parse_web_port, server_namespace,
-    server_product,
+    parse_listen_port, parse_weaknet_port, parse_web_port, server_namespace, server_product,
 };
 use super::{absolute, oxmgr_bin, parse_dir};
 
@@ -1011,8 +1010,8 @@ fn startup_status(_dir: &Path) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::oxmgr_env;
+    use super::*;
     use crate::lifecycle::templates::instance_daemon_port;
 
     // -- k12 pins (Momus MAJOR-1 fix pair) ------------------------------------------------------
@@ -1034,11 +1033,7 @@ mod tests {
     #[test]
     fn unit_env_equals_cli_env() {
         let dir = std::env::temp_dir().join(format!("msrtc-k12-pin-{}", std::process::id()));
-        let unit = render_startup_unit(
-            &dir,
-            "/usr/bin/oxmgr",
-            "/x/bin/msrtc-server",
-        );
+        let unit = render_startup_unit(&dir, "/usr/bin/oxmgr", "/x/bin/msrtc-server");
         // k19/k20 shapes ride along in every rendered unit
         assert!(unit.contains("ConditionPathExists=/usr/bin/oxmgr"), "{unit}");
         assert!(unit.contains("TimeoutStartSec=240"), "{unit}");
@@ -1057,11 +1052,7 @@ mod tests {
             })
             .collect();
         let cli = oxmgr_env(&dir);
-        assert_eq!(
-            parsed.len(),
-            cli.len(),
-            "unit env lines {parsed:?} != cli env {cli:?}"
-        );
+        assert_eq!(parsed.len(), cli.len(), "unit env lines {parsed:?} != cli env {cli:?}");
         for (pk, pv) in &parsed {
             let cv = cli
                 .iter()
