@@ -11,10 +11,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::templates::{
-    parse_listen_port, parse_weaknet_port, parse_web_port, server_namespace,
+    instance_daemon_port, parse_listen_port, parse_weaknet_port, parse_web_port,
+    server_namespace,
     server_product,
 };
-use super::{absolute, oxmgr_bin, oxmgr_list, parse_dir, run_oxmgr};
+use super::{absolute, oxmgr_bin, oxmgr_env, oxmgr_list, parse_dir, run_oxmgr};
 
 // -- S1: identity check (unit identity classification -- brand-aware prefix, exact match, contains forbidden) --
 
@@ -255,6 +256,69 @@ WantedBy=default.target
             )
         },
     )
+}
+
+// -- k14: linger self-enable (mirror of host 491d5fa9; write face only — read face linger_enabled :370 feeds status) --
+
+/// Linger outcome of one `loginctl enable-linger` attempt (host k14 same shape).
+#[derive(Debug, PartialEq, Eq)]
+enum LingerOutcome {
+    Enabled,
+    AlreadyEnabled,
+    Failed(String),
+}
+
+/// Pure seam for the linger enable decision: exit status + stderr => outcome.
+/// "already enabled" (either exit-ok or noted on stderr) is success; anything else with a
+/// non-zero exit is a failure carrying the reason (polkit refusal, no systemd session, ...).
+fn linger_action(exit_ok: bool, stderr: &str) -> LingerOutcome {
+    if exit_ok {
+        return LingerOutcome::Enabled;
+    }
+    if stderr.to_lowercase().contains("already enabled") {
+        return LingerOutcome::AlreadyEnabled;
+    }
+    LingerOutcome::Failed(stderr.trim().to_string())
+}
+
+/// k14: `startup on` enables linger for the current user itself (polkit set-user-linger
+/// allows the active-session owner; no sudo). Best-effort by contract: any failure falls
+/// back to the legacy guidance line and NEVER fails the startup-on verb (pure-registration
+/// preservation — linger enables session-less survival, it never ignites anything).
+#[cfg(target_os = "linux")]
+fn enable_linger_best_effort(verb: &str) {
+    let Some(user) = std::env::var("USER")
+        .ok()
+        .or_else(|| std::env::var("LOGNAME").ok())
+        .filter(|u| !u.is_empty())
+    else {
+        println!(
+            "{verb}: recommend loginctl enable-linger to survive across sessions (no USER/LOGNAME in env)"
+        );
+        return;
+    };
+    let out = Command::new("loginctl").arg("enable-linger").arg(&user).output();
+    let (ok, stderr) = match &out {
+        Ok(o) => (o.status.success(), String::from_utf8_lossy(&o.stderr).to_string()),
+        Err(e) => (false, e.to_string()),
+    };
+    match linger_action(ok, &stderr) {
+        LingerOutcome::Enabled => println!(
+            "{verb}: linger enabled for {user} (survives logout & reboot — no login needed)"
+        ),
+        LingerOutcome::AlreadyEnabled => println!(
+            "{verb}: linger already enabled for {user} (survives logout & reboot — no login needed)"
+        ),
+        LingerOutcome::Failed(reason) => println!(
+            "{verb}: recommend loginctl enable-linger to survive across sessions (enable failed: {reason})"
+        ),
+    }
+}
+
+/// non-Linux: no loginctl — keep the guidance line (k14 contract).
+#[cfg(not(target_os = "linux"))]
+fn enable_linger_best_effort(verb: &str) {
+    println!("{verb}: recommend loginctl enable-linger to survive across sessions");
 }
 
 fn units_dir() -> PathBuf {
@@ -625,7 +689,10 @@ fn startup_install(dir: &Path) -> i32 {
             }
         }
     }
-    println!("startup on: recommend loginctl enable-linger for cross-session survival");
+    // k14 mirror (host 491d5fa9): linger self-enable, best-effort — write face only;
+    // the read face (linger_enabled, :370) already feeds status. A failure prints the
+    // guidance line and NEVER fails the verb (pure-registration contract intact).
+    enable_linger_best_effort("startup on");
     let me = std::env::current_exe()
         .map(|x| x.display().to_string())
         .unwrap_or_else(|_| format!("{}-server", server_product()));
@@ -949,6 +1016,18 @@ mod tests {
 
     // -- k12 pins (Momus MAJOR-1 fix pair) ------------------------------------------------------
 
+    // -- k14: linger_action pure-seam table test (host 2744 shape) --
+
+    #[test]
+    fn linger_action_table() {
+        assert_eq!(linger_action(true, ""), LingerOutcome::Enabled);
+        assert_eq!(linger_action(false, "User already enabled."), LingerOutcome::AlreadyEnabled);
+        assert_eq!(
+            linger_action(false, "polkit refusal\n"),
+            LingerOutcome::Failed("polkit refusal".to_string())
+        );
+    }
+
     /// Pin 1 (host unit_env_equals_cli_env shape, host.rs:2674): the rendered unit's OXMGR_*
     /// Environment lines must equal the CLI-side oxmgr_env(dir) — key-for-key, value-for-value.
     #[test]
@@ -976,7 +1055,7 @@ mod tests {
                 (k.to_string(), v.to_string())
             })
             .collect();
-        let cli = super::oxmgr_env(&dir);
+        let cli = oxmgr_env(&dir);
         assert_eq!(
             parsed.len(),
             cli.len(),
@@ -987,7 +1066,7 @@ mod tests {
                 .iter()
                 .find(|(ck, _)| ck == pk)
                 .unwrap_or_else(|| panic!("unit key {pk} missing from CLI env"));
-            assert_eq!(pv, cv.1, "value drift on {pk}");
+            assert_eq!(pv.as_str(), cv.1.as_str(), "value drift on {pk}");
         }
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1007,9 +1086,9 @@ mod tests {
             ("OXMGR_DAEMON_ADDR".to_string(), format!("127.0.0.1:{port}")),
             ("OXMGR_API_ADDR".to_string(), format!("127.0.0.1:{}", port + 1000)),
         ];
-        assert_eq!(super::oxmgr_env(&dir), expected);
+        assert_eq!(oxmgr_env(&dir), expected);
         // HOME == DATA_DIR (same string — the dual-set invariant)
-        let env = super::oxmgr_env(&dir);
+        let env = oxmgr_env(&dir);
         assert_eq!(env[0].1, env[1].1, "HOME and DATA_DIR must carry the same value");
         std::fs::remove_dir_all(&dir).ok();
     }
