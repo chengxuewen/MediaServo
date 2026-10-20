@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::templates::{
-    instance_daemon_port, parse_listen_port, parse_weaknet_port, parse_web_port, server_namespace,
+    parse_listen_port, parse_weaknet_port, parse_web_port, server_namespace,
     server_product,
 };
 use super::{absolute, oxmgr_bin, oxmgr_list, parse_dir, run_oxmgr};
@@ -213,8 +213,12 @@ pub fn startup_unit_name(dir: &Path) -> String {
 /// Note: the task brief once proposed ExecStart=`bin start <dir>` -- start exits quickly x Restart=always = a restart storm,
 /// and the host production precedent (oxmgr-*-host unit) is exactly daemon run; follow the design.md revised model).
 pub fn render_startup_unit(dir: &Path, oxmgr: &str, cli: &str) -> String {
-    let home = absolute(&dir.join("run").join("oxmgr")).to_string_lossy().into_owned();
-    let port = instance_daemon_port(Path::new(&home));
+    // k12 mirror: env block generated from the SINGLE source (unit face ≡ CLI face, key-for-key).
+    let env_block = super::oxmgr_env(dir)
+        .iter()
+        .map(|(k, v)| format!("Environment={k}={v}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
         "[Unit]
 Description={product} oxmgr daemon ({dir})
@@ -223,9 +227,7 @@ ConditionPathExists={oxmgr}
 
 [Service]
 Type=simple
-Environment=OXMGR_HOME={home}
-Environment=OXMGR_DAEMON_ADDR=127.0.0.1:{port}
-Environment=OXMGR_API_ADDR=127.0.0.1:{api}
+{env_block}
 Environment=OXMGR_LOG_MAX_SIZE_MB=10
 Environment=OXMGR_LOG_MAX_FILES=3
 Environment=OXMGR_LOG_MAX_DAYS=7
@@ -240,7 +242,6 @@ WantedBy=default.target
 ",
         product = server_product(),
         dir = dir.to_string_lossy(),
-        api = port + 1000,
         post = if cli.is_empty() {
             String::new()
         } else {
@@ -946,6 +947,72 @@ fn startup_status(_dir: &Path) -> i32 {
 mod tests {
     use super::*;
 
+    // -- k12 pins (Momus MAJOR-1 fix pair) ------------------------------------------------------
+
+    /// Pin 1 (host unit_env_equals_cli_env shape, host.rs:2674): the rendered unit's OXMGR_*
+    /// Environment lines must equal the CLI-side oxmgr_env(dir) — key-for-key, value-for-value.
+    #[test]
+    fn unit_env_equals_cli_env() {
+        let dir = std::env::temp_dir().join(format!("msrtc-k12-pin-{}", std::process::id()));
+        let unit = render_startup_unit(
+            &dir,
+            "/usr/bin/oxmgr",
+            "/x/bin/msrtc-server",
+        );
+        // k19/k20 shapes ride along in every rendered unit
+        assert!(unit.contains("ConditionPathExists=/usr/bin/oxmgr"), "{unit}");
+        assert!(unit.contains("TimeoutStartSec=240"), "{unit}");
+        assert!(unit.contains("ExecStartPost=/bin/sh -c"), "{unit}");
+        let parsed: Vec<(String, String)> = unit
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("Environment="))
+            .filter(|kv| {
+                ["OXMGR_HOME", "OXMGR_DATA_DIR", "OXMGR_DAEMON_ADDR", "OXMGR_API_ADDR"]
+                    .iter()
+                    .any(|k| kv.starts_with(*k))
+            })
+            .map(|kv| {
+                let (k, v) = kv.split_once('=').unwrap();
+                (k.to_string(), v.to_string())
+            })
+            .collect();
+        let cli = super::oxmgr_env(&dir);
+        assert_eq!(
+            parsed.len(),
+            cli.len(),
+            "unit env lines {parsed:?} != cli env {cli:?}"
+        );
+        for (pk, pv) in &parsed {
+            let cv = cli
+                .iter()
+                .find(|(ck, _)| ck == pk)
+                .unwrap_or_else(|| panic!("unit key {pk} missing from CLI env"));
+            assert_eq!(pv, cv.1, "value drift on {pk}");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Pin 2 (Momus MAJOR-1): the single-source helper must reproduce TODAY's hand-written
+    /// four values byte-for-byte (guards "oxmgr_cmd behavior unchanged" — the unit≡CLI pin
+    /// alone cannot see helper-vs-today drift, e.g. a canonicalize creeping in).
+    #[test]
+    fn oxmgr_env_matches_legacy_handwritten_values() {
+        let dir = std::env::temp_dir().join(format!("msrtc-k12-eq-{}", std::process::id()));
+        // today's form: home = absolute(dir/run/oxmgr), port = instance_daemon_port(home)
+        let home = super::absolute(&dir.join("run").join("oxmgr"));
+        let port = instance_daemon_port(&home);
+        let expected = vec![
+            ("OXMGR_HOME".to_string(), home.to_string_lossy().into_owned()),
+            ("OXMGR_DATA_DIR".to_string(), home.to_string_lossy().into_owned()),
+            ("OXMGR_DAEMON_ADDR".to_string(), format!("127.0.0.1:{port}")),
+            ("OXMGR_API_ADDR".to_string(), format!("127.0.0.1:{}", port + 1000)),
+        ];
+        assert_eq!(super::oxmgr_env(&dir), expected);
+        // HOME == DATA_DIR (same string — the dual-set invariant)
+        let env = super::oxmgr_env(&dir);
+        assert_eq!(env[0].1, env[1].1, "HOME and DATA_DIR must carry the same value");
+        std::fs::remove_dir_all(&dir).ok();
+    }
     #[test]
     fn startup_unit_render_and_naming() {
         let u = render_startup_unit(

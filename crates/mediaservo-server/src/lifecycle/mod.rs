@@ -1146,15 +1146,28 @@ pub(super) fn oxmgr_bin() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("oxmgr"))
 }
 
-fn oxmgr_cmd(dir: &Path) -> Command {
-    let mut cmd = Command::new(oxmgr_bin());
-    // Absolute paths (relative paths depend on the daemon's cwd -- anchor/restart misalignment)
+/// k12 mirror (F19, host translate::oxmgr_env shape) — SINGLE SOURCE for the daemon identity env:
+/// consumed by oxmgr_cmd (CLI face) and render_startup_unit (unit face) so the two cannot drift.
+/// Home form pinned to the server's own `absolute()` (std::path::absolute, lexical) — the
+/// host's `oxmgr_home` canonicalize form is deliberately NOT ported (Momus MAJOR-1: canonicalize
+/// on a symlinked install path would re-key the port hash = F19 reborn on a subset of installs).
+pub(super) fn oxmgr_env(dir: &Path) -> Vec<(String, String)> {
     let home = absolute(&dir.join("run").join("oxmgr"));
     let port = instance_daemon_port(&home);
-    cmd.env("OXMGR_HOME", &home)
-        .env("OXMGR_DATA_DIR", &home) // C32's memory-friendly name -- dual-set for compatibility
-        .env("OXMGR_DAEMON_ADDR", format!("127.0.0.1:{port}"))
-        .env("OXMGR_API_ADDR", format!("127.0.0.1:{}", port + 1000));
+    vec![
+        ("OXMGR_HOME".to_string(), home.to_string_lossy().into_owned()),
+        // C32 legacy name oxmgr remembers — dual-set for compatibility (host k12 same shape)
+        ("OXMGR_DATA_DIR".to_string(), home.to_string_lossy().into_owned()),
+        ("OXMGR_DAEMON_ADDR".to_string(), format!("127.0.0.1:{port}")),
+        ("OXMGR_API_ADDR".to_string(), format!("127.0.0.1:{}", port + 1000)),
+    ]
+}
+
+fn oxmgr_cmd(dir: &Path) -> Command {
+    let mut cmd = Command::new(oxmgr_bin());
+    for (k, v) in oxmgr_env(dir) {
+        cmd.env(k, v);
+    }
     cmd
 }
 
