@@ -705,3 +705,13 @@ Checks:
 - pixi run bash -c 'bash scripts/gate-wire-changelog.sh'   (code-projection diff <-> [protocol] pairing)
 - node scripts/e2e-compat-probe.mjs against a live server  (four dialect probes)
 - manifest.json protocol section four-field complete       (live package cross-check)
+
+## C51: commit message shape — subject <=50 chars, one fact per body line (2026-10-19 user ruling; mirror of main-repo C55, with this repo's 200-char-subject history as the negative exhibit)
+- **Constraint**: `<type>(<scope>): <subject>` with subject **<=50 chars**, imperative mood, no trailing period, and NEVER chaining details into the subject with em-dashes/semicolons (the subject answers "what changed", one line, one thing). Blank line, then a `-` bulleted body: **one fact per line, wrapped <=72**, covering motivation + contrast with previous behavior + verification (git's own SubmittingPatches requirement). Footers carry ⚠ BREAKING / Release-Note. No local git hooks (same ruling as the main repo: hooksPath conflicts with Gerrit commit-msg) -- this is a D-level norm enforced by the self-check below; trivial typo/format-only commits may ship subject-only.
+- **Sources**: Pro Git 5.2 "Commit Guidelines" (~50-char summary, blank line, detailed body, imperative); Conventional Commits v1.0.0 (type/scope/description + body + footer); Tim Pope template (72-col wrap, bullet gaps).
+- **Self-check (before every commit)**:
+  ```bash
+  git log -1 --format='%s' | awk 'length>50 {print "LONG SUBJECT:", length; exit 1}'
+  git log -1 --format='%b' | grep -q '^- ' || echo "NOTE: no bulleted body (trivial exempt)"
+  ```
+- **Sweep (unpushed segment)**: `git log --format='%s' @{u}..HEAD | awk 'length>50 {print "LONG:", $0}'`
