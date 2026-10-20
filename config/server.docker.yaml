@@ -1,44 +1,98 @@
-version: 1
-# frontend-process-split D-2=B: keep 0.0.0.0 (host-agent connects /ws directly).
-# Precondition for moving to full-convergence A: once the admin API provisions signaling.url and the protocol_version handshake is ready, switch to 127.0.0.1 (Caddy reverse proxy becomes the only entry).
-listen:
-  host: "0.0.0.0"
-  port: 9800
-room_capacity: 50
-rate_limit: 100
-consumer_limit_per_stream: 50
-psk: "mediaservo-dev"
-jwt_secret: "docker-admin-secret-with-32-plus-bytes!!"  # PIT-49: signaling JWT auth (same secret as admin)
-admin_jwt_secret: "docker-admin-secret-with-32-plus-bytes!!"
-devices_file: "/opt/mediaservo/etc/devices.yaml"
-accounts_file: "/opt/mediaservo/etc/accounts.yaml"
-# Accountless API-key credentials (accountless-client-auth T1): api_keys.yaml defaults to this file's directory;
-# the exchange endpoint POST /api/auth/exchange {key_id, secret} → short-lived JWT (TTL seconds, default 12h).
-# One-click registration from the admin surface: ./msrtc.sh admin page /apikeys or POST /api/admin/apikeys.
-#api_keys_file: "/opt/mediaservo/etc/api_keys.yaml"
+# server.yaml — MediaServo server configuration template.
+#
+# Staged by `build server` on first run (etc/ is never overwritten afterwards —
+# edit in place; delete the file to get a fresh template back).
+# Every key below is optional unless marked REQUIRED; defaults come from
+# crates/mediaservo-common/src/config.rs (ServerConfig / SfuConfig / WebConfig).
+#
+# Precedence rules used throughout this file:
+#   env var > yaml value > built-in default (where both exist).
 
-# Dev-environment exemptions (PIT-160 root fix): config-first, env vars still override (compose form).
-# allow_dev_credentials: startup guard accepts the known dev placeholder accounts (admin123 etc.)
-#   instead of env MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 — set true in dev trees ONLY, never production.
-# allow_dev_enroll: unknown devices auto-register after pubkey verify (controlled private networks)
-#   instead of env ALLOW_DEV_ENROLL=1.
-#allow_dev_credentials: true
-#allow_dev_enroll: true
+version: 1
+
+# ---------------------------------------------------------------- listen ----
+# HTTP/WS listen address (admin API + signaling + REST).
+listen:
+  # 0.0.0.0 = serve LAN (frontend-process-split D-2=B: host-agent connects /ws
+  # directly). Use 127.0.0.1 once the web tier fully fronts the API.
+  host: "0.0.0.0"
+  # Admin/WS listen port. Default 9800.
+  port: 9800
+
+# ------------------------------------------------------------- security ----
+# REQUIRED in practice. PSK for signaling auth (header form:
+# `Authorization: Psk <value>`). Share only with devices that may join.
+psk: "mediaservo-dev"
+
+# 32+ byte secrets for JWT signing. Two DIFFERENT purposes:
+#   jwt_secret        — signaling /ws tokens (PSK fallback) + account logins
+#   admin_jwt_secret  — admin API /api/admin/* session tokens
+# Rotating one does not invalidate the other. Generate: `openssl rand -hex 32`.
+# (Placeholder values below are dev defaults — replace before any real deploy.)
+jwt_secret: "docker-admin-secret-with-32-plus-bytes!!"
+admin_jwt_secret: "docker-admin-secret-with-32-plus-bytes!!"
+
+# Registry files, resolved relative to this file's directory when not absolute.
+# Missing accounts.yaml = no account logins (PSK/device paths unaffected).
+# Missing devices.yaml = no known devices (enroll flow populates it).
+devices_file: "devices.yaml"
+accounts_file: "accounts.yaml"
+
+# ------------------------------------------------------------- limits ------
+# Max rooms the server admits. Default 10.
+room_capacity: 50
+# Per-connection WS message rate limit (req/s). Default 100.
+rate_limit: 100
+# Max simultaneous consumers per stream. Default 50.
+consumer_limit_per_stream: 50
+# WS frame cap in bytes. Default 65536.
+#ws_max_message_size: 65536
+
+# ------------------------------------------------- accountless API keys ----
+# api_keys.yaml (accountless-client-auth T1) lives next to this file by default.
+# Exchange: POST /api/auth/exchange {key_id, secret} -> short-lived JWT.
+# One-click registration: admin page /apikeys or POST /api/admin/apikeys.
+#api_keys_file: "api_keys.yaml"
+# TTL (seconds) of exchange-minted JWTs. Default 43200 (12h).
 #api_token_ttl_secs: 43200
 
-# SFU announced address (reachable IP across NICs/networks; precedence: env MEDIASERVO_SFU_ANNOUNCED_IP > here > auto-detect)
-# mediasoup requires announced config when listening on 0.0.0.0 (in-container detection is unreachable — PIT-44/58/138)
+# ------------------------------------------------- dev-only exemptions -----
+# Config-first form of the dev env vars (PIT-160 root fix): written here they
+# survive oxfile re-renders and tree rebuilds. Env vars still override
+# (MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 / ALLOW_DEV_ENROLL=1) for compose forms.
+# DEV TREES ONLY — production keeps both absent (fail-closed defaults).
+#
+# allow_dev_credentials: startup guard accepts the known dev placeholder
+#   accounts (admin123 / dispatch123 / operator123) instead of panicking.
+# allow_dev_enroll: unknown devices auto-register after pubkey verify passes
+#   (controlled private networks; off = manual approval queue in the web UI).
+#allow_dev_credentials: true
+#allow_dev_enroll: true
+
+# ------------------------------------------------------------- SFU ---------
+# mediasoup SFU. When listen.host is 0.0.0.0 an announced address is REQUIRED
+# (auto-detection inside a container/NAT is unreachable — PIT-44/58/138).
 sfu:
+  # Reachable IPs across NICs/networks, most-specific first.
+  # Precedence: env MEDIASERVO_SFU_ANNOUNCED_IP > announced_ips > auto-detect.
   announced_ips:
     - "192.168.2.127"
     - "10.144.0.3"
+  # ICE-lite UDP port (single port, all sessions). Default 20000.
+  # Env fallback: MEDIASERVO_SFU_PORT.
+  #port: 20000
+  # weaknet-serve panel port (loopback only). Default 9810.
+  #weaknet_port: 9810
 
-# Web static layer (caddy) — default 8080 / instance web/; env MEDIASERVO_WEB_PORT as fallback (yaml config wins, same shape as C35).
-# web:
-#   port: 8080
-#   static_root: "/abs/web"
-#
-# SFU/weaknet ports — defaults 20000 / 9810 (env MEDIASERVO_SFU_PORT falls back for sfu.port).
-# sfu:
-#   port: 20000
-#   weaknet_port: 9811
+# ------------------------------------------------------------- web ---------
+# Static web tier (caddy). Defaults: port 8080, static_root = instance web/.
+# Env fallback for port: MEDIASERVO_WEB_PORT (yaml wins over env, C35 shape).
+#web:
+#  port: 8080
+#  static_root: "/abs/path/to/web"
+
+# ------------------------------------------------------------- TLS ---------
+# HTTPS termination for the API/WS listener (cert = PEM chain, key = PEM key).
+#tls:
+#  cert_path: "/etc/mediaservo/tls.crt"
+#  key_path: "/etc/mediaservo/tls.key"

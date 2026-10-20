@@ -1246,3 +1246,7 @@ install                        → 改名提示 + exit 2（退役）
 - Live: throwaway tree quadruple pass (748ms register / true-intersection warn+register rc=0 / off purity (processes stay) / stop owns cleanup) + production out-host re-registered pure + rig restored to 8/8 via its own apply after test-window audio casualty (honest ledger). Fixture lesson: systemd-environment hooks require the DEPLOYED binary (target/debug raw copy lacks lib resolution) — first sp3 run was an invalid fixture, re-verified via deployed path.
 - Gates: host bin 31/0, server stub bins 91/0, fmt clean, clippy surface zero; CHANGELOG Unreleased rewritten to final shape (⚠ for `on`-starts scripts).
 - OPEN (filed, pre-existing): registration gate cannot see DEFAULTED ports (commented local_port) — two instances sharing implicit 17980 register "cleanly" and clash only at boot. Separate knife candidate.
+
+### 2026-10-20 续10: server.yaml 模板全面补全（注释帮助面 + 格式规整，用户指认"注释不全面/格式不规整/单行太长"）
+- config/server.docker.yaml 重写（44→99 行）：全字段分区注释（listen/security/limits/api-keys/dev-exemptions/SFU/web/TLS 八节，banner 头+优先级规则 env>yaml>default）；每键带缺省值/语义/安全注意（jwt vs admin_jwt 双 secret 语义、PSK 用法、0.0.0.0+announced REQUIRED 关系）；≤90 列零超长（旧 10 行>100 最长 135）。
+- 验收：pyyaml 合法 · staging 转换（L329 replace）对新模板空转无害（相对路径已是终态）· staging 产物相对路径解析正确 · common 114/114（模板不改 config 解析面）。
