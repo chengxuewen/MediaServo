@@ -1,6 +1,8 @@
 # Assembly layer: MediaServo root / project / PolyOrch embed / options / add_subdirectory.
 # Pure assembly — zero compilation rules here (PLAN §7.1; hosts ride supplier verbs only).
 # Design + rulings: parent-repo docs/plans/polyorch-adoption/PLAN.md (F14-F22).
+# Renderers here: .pc (per-domain versions) + mediaservo Config — consumed by the
+# python staging step; lanes are IDE/CI build buttons over the shared target/ cache.
 cmake_minimum_required(VERSION 3.25)
 
 # Version single source: the workspace Cargo.toml (C43 — do NOT copy the five-literal
@@ -29,4 +31,12 @@ mediaservo_ensure_polyorch()   # D39 sentinel: reuse superbuild copy first-wins,
 option(MEDIASERVO_BUILD_EXAMPLES "Mount the C++/SDL examples aggregate (requires target/ SDK outputs)" OFF)
 if(MEDIASERVO_BUILD_EXAMPLES)
   add_subdirectory(bindings/cxx/examples)
+endif()
+
+# S3 bindings surface: lanes (shared target/ cache, deliberate F17-D exception) +
+# delivery-manifest renderers (.pc per-domain / Config suite-version) — cmake/MediaServoBindings.cmake.
+include(cmake/MediaServoBindings.cmake)
+option(MEDIASERVO_BUILD_BINDINGS "Register bindings lanes + render delivery manifests (.pc / cmake config)" OFF)
+if(MEDIASERVO_BUILD_BINDINGS)
+  mediaservo_setup_bindings()
 endif()

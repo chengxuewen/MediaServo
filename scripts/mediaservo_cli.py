@@ -408,7 +408,7 @@ def _cmd_build_bindings(release: bool = False) -> None:
     for _sdk in ALL_SDKS:
         cmd += ["-p", f"mediaservo-{_sdk}-c"]
     _run_or_exit(cmd)
-    major = _crate_version("mediaservo-field").split(".")[0]
+    major = _workspace_version().split(".")[0]  # shim crates are workspace-inherited (S3)
     out_dir = ROOT / ("target/release" if release else "target/debug")
     for sdk in ALL_SDKS:
         _symlink_force(
@@ -424,10 +424,17 @@ def _cmd_build_bindings(release: bool = False) -> None:
     # stage the delivery layout out/bindings (full SDK package mirror — completed per Momus HIGH3/Task 2.5):
     # D241 version-full triple (.so.<M.m.p> real file + .so.<major> + .so link) + D248 headers (C/cxx)
     # + pkgconfig .pc + cmake config + python fat wheel/site-packages + node package
-    ver = _crate_version("mediaservo-field")
+    ver = _workspace_version()   # S3: deliverable .so triple = the shims' own (workspace) version
     major, minor, patch = ver.split(".")
     bind_dst = _out_root() / "bindings"
     lib_dst = bind_dst / "lib"; lib_dst.mkdir(parents=True, exist_ok=True)
+    # Stale full-version sweep (09-17 wheel-sweep family — S3 staging caught it: the first
+    # 0.1.2 run left the 0.1.1 real files on disk; links get overwritten, corpses never did.
+    # keep = this run's full names; anything else version-suffixed and non-symlink is deleted.)
+    _keep = {f"libmediaservo_{_s}.so.{major}.{minor}.{patch}" for _s in ALL_SDKS}
+    for _stale in lib_dst.glob("libmediaservo_*.so.[0-9]*"):
+        if _stale.name not in _keep and not _stale.is_symlink():
+            _stale.unlink()
     pc_dst = lib_dst / "pkgconfig"; pc_dst.mkdir(parents=True, exist_ok=True)
     cmake_dst = lib_dst / "cmake" / "mediaservo"; cmake_dst.mkdir(parents=True, exist_ok=True)
     inc_dst = bind_dst / "include" / "mediaservo"; inc_dst.mkdir(parents=True, exist_ok=True)
@@ -459,18 +466,17 @@ def _cmd_build_bindings(release: bool = False) -> None:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(f, dst)
 
-    # pkg-config .pc (${pcfiledir} keeps it relocatable — not bound to an absolute prefix)
+    # S3: the .pc + cmake-config renderers moved to the cmake bindings surface
+    # (cmake/MediaServoBindings.cmake — .pc stamped per DOMAIN crate via cargo metadata,
+    # Config stamped with the suite/workspace version; the field-for-all stamp was the M4
+    # collision waiting to happen). Configure renders; we copy. Templates untouched.
+    _run_or_exit(["cmake", "--preset", "bindings"], cwd=str(ROOT))
+    gen = ROOT / "build" / "presets" / "bindings" / "bindings-gen"
     for sdk in ALL_SDKS:
-        tpl = ROOT / f"bindings/c/mediaservo-{sdk}-c/mediaservo-{sdk}.pc.in"
-        (pc_dst / f"mediaservo-{sdk}.pc").write_text(tpl.read_text().replace("@VERSION@", ver))
-
-    # cmake package config (find_package(mediaservo COMPONENTS ...) — D248 output discipline)
-    sdk_list = " ".join(ALL_SDKS)
-    for name, tpl_name in (("mediaservoConfig.cmake", "mediaservoConfig.cmake.in"),
-                           ("mediaservoConfigVersion.cmake", "mediaservoConfigVersion.cmake.in")):
-        content = (ROOT / "bindings" / "c" / "cmake" / tpl_name).read_text() \
-            .replace("@VERSION@", ver).replace("@MAJOR@", major).replace("@SDK_LIST@", sdk_list)
-        (cmake_dst / name).write_text(content)
+        shutil.copy2(gen / "pkgconfig" / f"mediaservo-{sdk}.pc",
+                     pc_dst / f"mediaservo-{sdk}.pc")
+    for name in ("mediaservoConfig.cmake", "mediaservoConfigVersion.cmake"):
+        shutil.copy2(gen / "cmake" / name, cmake_dst / name)
 
     # python: fat wheel (.so.<major> real files inside _libs — DT_NEEDED self-resolution) + pip --prefix assembly of site-packages
     # python wheel build tree = staging mirror (source files copied + _libs all live in staging;

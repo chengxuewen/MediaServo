@@ -48,12 +48,27 @@ cmake -S "$TMP/pkg" -B "$TMP/pkg/build" ${GEN:+-G "$GEN"} -DCMAKE_PREFIX_PATH="$
 cmake --build "$TMP/pkg/build" >/dev/null
 LD_LIBRARY_PATH="$OUT/lib" "$TMP/pkg/build/smoke" && echo "OK: find_package(link,client) + real-symbol link & run"
 
-# ③ pkg-config version reconciliation
-for pc in mediaservo-link mediaservo-client mediaservo-deck mediaservo-field; do
-    got=$(PKG_CONFIG_PATH="$OUT/lib/pkgconfig" pkg-config --modversion "$pc")
-    [ "$got" = "$VER" ] || { echo "FAIL: $pc version $got != workspace $VER"; FAIL=1; }
+# ③ pkg-config version reconciliation (S3: per-DOMAIN stamp, workspace inheritance
+# resolved — the renderer is cmake/MediaServoBindings.cmake; a workspace-only assert
+# would silently pass while domains drift). Config = suite version.
+ver_of() {  # domain crate version; version.workspace=true resolves against the root manifest
+    python3 - "$1" <<'PY'
+import sys, tomllib
+t = tomllib.load(open(sys.argv[1], 'rb'))
+v = t['package'].get('version')
+if isinstance(v, dict):  # `version.workspace = true` parses to {'workspace': True}
+    v = tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version']
+print(v)
+PY
+}
+for sdk in link client deck field; do
+    want=$(ver_of "crates/mediaservo-$sdk/Cargo.toml")
+    got=$(PKG_CONFIG_PATH="$OUT/lib/pkgconfig" pkg-config --modversion "mediaservo-$sdk")
+    [ "$got" = "$want" ] || { echo "FAIL: mediaservo-$sdk.pc version $got != domain $want"; FAIL=1; }
 done
-[ "$FAIL" = 0 ] && echo "OK: all four pkg-config files == $VER"
+[ "$FAIL" = 0 ] && echo "OK: four pkg-config files == their domain crate versions"
+grep -q "set(PACKAGE_VERSION \"$VER\")" "$OUT/lib/cmake/mediaservo/mediaservoConfigVersion.cmake" \
+  || { echo "FAIL: ConfigVersion != suite/workspace $VER"; FAIL=1; }
 
 # ④ Reuse existing drift checks (zero-cost hardening)
 bash scripts/check-abi-drift.sh
