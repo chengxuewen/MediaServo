@@ -50,3 +50,11 @@ option(MEDIASERVO_BUILD_CRATES_LANES "Register crates lanes (IDE build/test butt
 if(MEDIASERVO_BUILD_CRATES_LANES)
   mediaservo_setup_crate_lanes()
 endif()
+
+# S5 web lanes: node surface over the supplier D43 pnpm support; the workspace:*
+# edge (admin -> client) becomes a real dependency (PIT-194 class fix).
+include(cmake/MediaServoWeb.cmake)
+option(MEDIASERVO_BUILD_WEB "Mount the www node lanes (web-build aggregate + per-member buttons)" OFF)
+if(MEDIASERVO_BUILD_WEB)
+  mediaservo_setup_web()
+endif()

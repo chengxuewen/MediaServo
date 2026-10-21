@@ -51,6 +51,13 @@
       "cacheVariables": { "MEDIASERVO_BUILD_BINDINGS": "ON" }
     },
     {
+      "name": "web",
+      "displayName": "www node lanes (web-build aggregate; admin chain rides the workspace:* client edge)",
+      "inherits": "default",
+      "binaryDir": "${sourceDir}/build/presets/${presetName}",
+      "cacheVariables": { "MEDIASERVO_BUILD_WEB": "ON" }
+    },
+    {
       "name": "crates",
       "displayName": "Crates lanes: IDE build/test buttons + ctest bridge (separate build-tree face, honest clean buttons)",
       "inherits": "default",
@@ -77,6 +84,7 @@
     { "name": "examples", "configurePreset": "examples" },
     { "name": "examples-release", "configurePreset": "examples-release" },
     { "name": "bindings", "configurePreset": "bindings" },
+    { "name": "web", "configurePreset": "web" },
     { "name": "crates", "configurePreset": "crates" },
     { "name": "crates-shared", "configurePreset": "crates-shared" },
     { "name": "shared-target", "configurePreset": "shared-target" }
