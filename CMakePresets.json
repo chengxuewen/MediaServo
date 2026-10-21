@@ -1,0 +1,42 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Assembly root — separate lane cargo cache, examples off (fresh-clone green)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/presets/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MEDIASERVO_BUILD_EXAMPLES": "OFF"
+      }
+    },
+    {
+      "name": "examples",
+      "displayName": "Examples island mounted (run build bindings / cargo build first — island guard)",
+      "inherits": "default",
+      "binaryDir": "${sourceDir}/build/presets/${presetName}",
+      "cacheVariables": { "MEDIASERVO_BUILD_EXAMPLES": "ON" }
+    },
+    {
+      "name": "shared-target",
+      "displayName": "F17-D opt-in: lane cargo builds share the workspace target/ cache (clean buttons unregistered in this mode; option lands with S4 lanes)",
+      "inherits": "default",
+      "binaryDir": "${sourceDir}/build/presets/${presetName}",
+      "cacheVariables": { "MEDIASERVO_SHARE_CARGO_TARGET": "ON" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "default", "configurePreset": "default" },
+    { "name": "examples", "configurePreset": "examples" },
+    { "name": "shared-target", "configurePreset": "shared-target" }
+  ],
+  "testPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

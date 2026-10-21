@@ -1,0 +1,67 @@
+# MediaServoPolyOrch.cmake — PolyOrch embed shim (D39 sentinel contract)
+#
+# Semantics (mirrors the VisiaEngine shim, the measured sibling precedent):
+#   * Sentinel present in this configure (a superbuild embedding MediaServo already
+#     ran add_subdirectory(PolyOrch)): REUSE it. First-wins (PolyOrch D39): the
+#     winning copy's code is live everywhere; this shim only reports which copy won.
+#   * No sentinel: self-embed our pinned submodule copy at the repo root.
+#     Version-conflict policy (ModuKit D67 grammar): the pinned gitlink SHA is a
+#     "lowest tested version" declaration, NOT an enforcement — the effective copy
+#     is whatever won first-wins. No version-range negotiation until PolyOrch
+#     ships 1.0 + semver.
+#   * API floor (two forms, per the D39-era measured discipline): keyword-level
+#     capability is invisible to COMMAND probes, so it rides the sentinel's
+#     INTERFACE_POLYORCH_VERSION; a bare (pre-D39) sentinel fails the property
+#     read — same loud discipline upstream. Floor = 0.3.0 (D42 LIB kind; our
+#     examples/crates lanes from S2 onward need it).
+# Escape hatch: a superbuild may point at its own checkout via
+#   -DMEDIASERVO_POLYORCH_DIR=<path>.
+
+function(mediaservo_ensure_polyorch)
+    if(TARGET PolyOrch::PolyOrch)
+        get_target_property(_po_dir PolyOrch::PolyOrch INTERFACE_POLYORCH_CMAKE_DIR)
+        get_target_property(_po_ver PolyOrch::PolyOrch INTERFACE_POLYORCH_VERSION)
+        if(NOT _po_dir OR NOT _po_ver)
+            message(FATAL_ERROR
+                "MediaServo: PolyOrch sentinel lacks INTERFACE_POLYORCH_CMAKE_DIR/VERSION "
+                "(pre-D39 bare sentinel). Fix: upgrade the winning outer PolyOrch checkout "
+                "to a D39-complete version (>= 0.3.0).")
+        endif()
+        if(_po_ver VERSION_LESS "0.3.0")
+            message(FATAL_ERROR
+                "MediaServo needs PolyOrch >= 0.3.0 (rust LIB kind, D42) but the winning "
+                "sentinel reports '${_po_ver}' — in reuse mode the outer copy is too old; "
+                "upgrade the superbuild's PolyOrch checkout or unshadow this repo's pinned copy.")
+        endif()
+        message(STATUS
+            "MediaServo: reusing PolyOrch ${_po_ver} at ${_po_dir} "
+            "(first-wins: registered by an outer scope)")
+        return()
+    endif()
+
+    if(MEDIASERVO_POLYORCH_DIR)
+        set(_po "${MEDIASERVO_POLYORCH_DIR}")
+    else()
+        # CMAKE_CURRENT_LIST_DIR inside a FUNCTION is the defining file's dir (cmake/);
+        # pin from the top-level source dir instead (measured sibling gotcha).
+        set(_po "${CMAKE_SOURCE_DIR}/PolyOrch")
+    endif()
+    if(NOT EXISTS "${_po}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "MediaServo: no PolyOrch::PolyOrch sentinel in this configure, and no checkout "
+            "at '${_po}'. Fix: run 'git submodule update --init --recursive' (pins the "
+            "tested SHA), or set -DMEDIASERVO_POLYORCH_DIR=<path> to supply a different "
+            "PolyOrch checkout.")
+    endif()
+    message(STATUS "MediaServo: embedding pinned PolyOrch at ${_po}")
+    add_subdirectory("${_po}" "${CMAKE_BINARY_DIR}/_polyorch" EXCLUDE_FROM_ALL)
+
+    # post-embed floor check (self-embed path): D39 properties must be delivered
+    get_target_property(_po_ver PolyOrch::PolyOrch INTERFACE_POLYORCH_VERSION)
+    if(NOT _po_ver OR _po_ver VERSION_LESS "0.3.0")
+        message(FATAL_ERROR
+            "MediaServo: the pinned PolyOrch checkout reports '${_po_ver}', below the "
+            "required floor 0.3.0 (rust LIB kind, D42). Bump the gitlink to a "
+            "D39/D42-complete SHA.")
+    endif()
+endfunction()
