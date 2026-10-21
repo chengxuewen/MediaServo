@@ -1715,36 +1715,18 @@ def _cmd_restart(args: argparse.Namespace) -> None:
 # ───────── example command surface (p3-gui-viewer W0, G7) ─────────
 #
 # Directory contract = bindings/cxx/examples/<name>/CMakeLists.txt (dir name == target == artifact name, G4).
-# the CLI and the aggregate-root CMake glob by the same literal rule (F-A-6). Artifacts in target/examples/{build,bin}/,
-# never in out/, never packaged (example productization gate, PLAN §6).
+# the CLI and the aggregate-root CMake glob by the same literal rule (F-A-6). Artifacts in
+# target/examples/bin/ (island-pinned), never in out/, never packaged (example productization gate, PLAN §6).
+# S2: the configure build dir moved to the root CMakePresets binaryDir (build/presets/examples);
+# the whole env/toolchain recipe lives in the preset (single declarative source, §7.11 three-finger).
 
 _EXAMPLES_DIR = ROOT / "bindings" / "cxx" / "examples"
-_EXAMPLES_BUILD = ROOT / "target" / "examples" / "build"
+_EXAMPLES_BUILD = ROOT / "build" / "presets" / "examples"
 _EXAMPLES_BIN = ROOT / "target" / "examples" / "bin"
 
 # compile-related env injected by pixi/conda activation — stripped from configure subprocesses (see the _cmd_build_example note)
-_CONDA_BUILD_ENV_VARS = frozenset({
-    "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "CPATH",
-    "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "CONDA_PREFIX",
-    "CMAKE_PREFIX_PATH", "PKG_CONFIG_PATH", "PKG_CONFIG_SYSROOT_DIR",
-    "COMPILER_PATH", "LIBRARY_PATH",
-})
 
 
-def _example_env() -> dict[str, str]:
-    """Shared by examples configure+build: strip the conda build env + prepend /usr/bin to PATH
-    (collect2 resolves ld via PATH; otherwise it picks conda ld → Ubuntu multiarch lib dirs missing,
-    indirect deps like libxcb get undefined references — the focal incident of 2026-09-28)."""
-    env = {k: v for k, v in os.environ.items() if k not in _CONDA_BUILD_ENV_VARS}
-    env["PATH"] = "/usr/bin:" + env.get("PATH", "")
-    # conda's pkg-config bakes its own dirs into the default search path (env stripping cannot block it;
-    # liburing/dbus leak back through it → configure probes must lock the system pkgconfig set)
-    multi = {"x86_64": "x86_64-linux-gnu", "aarch64": "aarch64-linux-gnu"}.get(
-        os.uname().machine)
-    dirs = ([f"/usr/lib/{multi}/pkgconfig"] if multi else []) + [
-        "/usr/lib/pkgconfig", "/usr/share/pkgconfig"]
-    env["PKG_CONFIG_LIBDIR"] = ":".join(dirs)
-    return env
 
 
 def _example_names() -> list[tuple[str, bool]]:
@@ -1774,30 +1756,15 @@ def _cmd_list_example() -> None:
 
 def _cmd_build_example(names: list[str], release: bool = False) -> None:
     # build-c prelude (PLAN G7; auto-added when missing — freshness is cargo's incremental job).
-    if not (ROOT / "target" / "debug" / "libmediaservo_client.so").exists():
+    profile = "release" if release else "debug"
+    if not (ROOT / "target" / profile / "libmediaservo_client.so").exists():
         print("[example] libmediaservo_client.so missing → running build-c first", file=sys.stderr)
         _run_or_exit([os.environ.get("PIXI_BIN", "pixi"), "run", "build-c"])
-    gen_build = "Release" if release else "Debug"
-    cache = _EXAMPLES_BUILD / "CMakeCache.txt"
-    if not cache.exists():
-        cfg = [
-            "cmake", "-S", str(_EXAMPLES_DIR), "-B", str(_EXAMPLES_BUILD),
-            "-G", "Ninja",  # the pixi env has ninja but no make (observed on 3.4.16)
-            "-DCMAKE_BUILD_TYPE=" + gen_build,
-            "-DMEDIASERVO_SDK_DIR=" + str(ROOT / "target" / ("release" if release else "debug")),
-            # examples don't need the gaming peripheral stack; explicitly off to stop pkg-config probes via conda env
-            # (libusb-1.0.pc etc.) from leaking back into the SDL build (focal incident 2026-09-28)
-            "-DSDL_LIBURING=OFF", "-DSDL_DBUS=OFF", "-DSDL_LIBUSB=OFF",
-        ]
-        # conda/system toolchains are mutually exclusive (focal incident 2026-09-28): conda cc+sysroot mixed with glibc 2.31
-        # headers collide (bits/endian.h guard conflict → SDL pthreads FATAL); the system compiler is also hijacked by activation
-        # env (CFLAGS/CONDA_PREFIX) baked into the cache. The examples surface uses the system toolchain only
-        # + strips the conda build env (same recipe as C23 Jetson; the cargo build-c prelude does not pass here, zero disturbance).
-        if Path("/usr/bin/cc").exists():
-            cfg += ["-DCMAKE_C_COMPILER=/usr/bin/cc", "-DCMAKE_CXX_COMPILER=/usr/bin/c++"]
-        ex_env = _example_env()
-        _run_or_exit(cfg, env=ex_env)
-    cmd = ["cmake", "--build", str(_EXAMPLES_BUILD), "-j"]
+    # S2: the entire configure recipe (Ninja generator, system toolchain pins, conda build-env
+    # strip via preset environment, SDK_DIR, SDL peripheral/audio OFF set) lives in the root
+    # CMakePresets.json — one declarative source shared with the IDE surface (parent-repo
+    # docs/plans/polyorch-adoption/evidence/s2/disposition.md retires the python four-gate).
+    preset = "examples-release" if release else "examples"
     if names:
         known = {n for n, _ in _example_names()}
         for n in names:
@@ -1805,8 +1772,13 @@ def _cmd_build_example(names: list[str], release: bool = False) -> None:
                 print(f"[example] unknown example '{n}' (see ./mediaservo.sh list example)",
                       file=sys.stderr)
                 sys.exit(2)
-        cmd += ["--target"] + names
-    _run_or_exit(cmd, env=_example_env())
+    _run_or_exit(["cmake", "--preset", preset], cwd=str(ROOT))
+    cmd = ["cmake", "--build", "--preset", preset]
+    if names:
+        cmd += ["--target"] + list(names)
+    else:
+        cmd += ["--parallel"]
+    _run_or_exit(cmd, cwd=str(ROOT))
     print(f"[example] artifacts → {_EXAMPLES_BIN.relative_to(ROOT)}/")
 
 

@@ -14,10 +14,34 @@
     },
     {
       "name": "examples",
-      "displayName": "Examples island mounted (run build bindings / cargo build first — island guard)",
+      "displayName": "Examples island on the system toolchain (S2: env recipe lives here; build-c prelude stays CLI-side; island guard = SDK_DIR)",
       "inherits": "default",
       "binaryDir": "${sourceDir}/build/presets/${presetName}",
-      "cacheVariables": { "MEDIASERVO_BUILD_EXAMPLES": "ON" }
+      "cacheVariables": {
+        "MEDIASERVO_BUILD_EXAMPLES": "ON",
+        "MEDIASERVO_SDK_DIR": "${sourceDir}/target/debug",
+        "CMAKE_C_COMPILER": "/usr/bin/cc",
+        "CMAKE_CXX_COMPILER": "/usr/bin/c++",
+        "CMAKE_PREFIX_PATH": "",
+        "CMAKE_IGNORE_PREFIX_PATH": "${sourceDir}/.pixi/envs/default"
+      },
+      "environment": {
+        "CFLAGS": "", "CXXFLAGS": "", "CPPFLAGS": "", "LDFLAGS": "", "CPATH": "",
+        "C_INCLUDE_PATH": "", "CPLUS_INCLUDE_PATH": "", "CONDA_PREFIX": "",
+        "CMAKE_PREFIX_PATH": "", "PKG_CONFIG_PATH": "", "PKG_CONFIG_SYSROOT_DIR": "",
+        "COMPILER_PATH": "", "LIBRARY_PATH": "",
+        "PATH": "/usr/bin:$penv{PATH}"
+      }
+    },
+    {
+      "name": "examples-release",
+      "displayName": "Examples island, Release profile + target/release SDK",
+      "inherits": "examples",
+      "binaryDir": "${sourceDir}/build/presets/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MEDIASERVO_SDK_DIR": "${sourceDir}/target/release"
+      }
     },
     {
       "name": "shared-target",
@@ -30,12 +54,18 @@
   "buildPresets": [
     { "name": "default", "configurePreset": "default" },
     { "name": "examples", "configurePreset": "examples" },
+    { "name": "examples-release", "configurePreset": "examples-release" },
     { "name": "shared-target", "configurePreset": "shared-target" }
   ],
   "testPresets": [
     {
       "name": "default",
       "configurePreset": "default",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "examples",
+      "configurePreset": "examples",
       "output": { "outputOnFailure": true }
     }
   ]

@@ -156,7 +156,7 @@ jobs:
       - name: Build GUI examples (aggregated FetchContent, headless combos)
         run: ./mediaservo.sh build example
       - name: ctest viewer_core
-        run: ctest --test-dir target/examples/build -R core --output-on-failure
+        run: ctest --test-dir build/presets/examples -R core --output-on-failure
 
   test-gstreamer:
     runs-on: ubuntu-latest

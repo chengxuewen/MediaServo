@@ -10,6 +10,9 @@
 # FATAL_ERROR with a message pointing at build-c (the compile-surface equivalent of the PIT-189 deployment-freshness lesson).
 # - GUI dependencies = local archive zips under 3rdparty/ + URL_HASH (the same method as D281's oxmgr; the ledger is
 # 3rdparty/PROVENANCE-gui-deps.md). A hash mismatch = FetchContent refuses to extract.
+# - Env recipe (conda var strip + PATH prefix) = the root preset's `environment` field
+#   (S2 disposition #1/#2); pkg-config lockdown lives here (#3) so standalone and mounted
+#   configures behave identically.
 
 cmake_minimum_required(VERSION 3.24)
 project(mediaservo_examples LANGUAGES C CXX)
@@ -53,6 +56,26 @@ if(EXISTS "${_ms_conda_lib}/libstdc++.so.6")
         "-Wl,-rpath,${_ms_conda_lib}")
 endif()
 
+# -- pkg-config lockdown (PIT-199 four-gate behavior #3, moved from python to here = effective
+# for standalone and mounted configuration alike; a caller-set PKG_CONFIG_LIBDIR is honored).
+# conda's pkg-config bakes its own dirs into the default search set and env stripping alone cannot
+# block it — liburing/dbus leaked back into SDL's probes (focal incident 2026-09-28). --
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND "$ENV{PKG_CONFIG_LIBDIR}" STREQUAL "")
+    set(_ms_multiarch "")
+    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
+        set(_ms_multiarch "/usr/lib/x86_64-linux-gnu/pkgconfig")
+    elseif(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+        set(_ms_multiarch "/usr/lib/aarch64-linux-gnu/pkgconfig")
+    endif()
+    set(_ms_pc "")
+    foreach(_d ${_ms_multiarch} /usr/lib/pkgconfig /usr/share/pkgconfig)
+        string(APPEND _ms_pc "${_d}:")
+    endforeach()
+    string(REGEX REPLACE ":$" "" _ms_pc "${_ms_pc}")
+    set(ENV{PKG_CONFIG_LIBDIR} "${_ms_pc}")
+    message(STATUS "GUI examples: pkg-config pinned to the system set (${_ms_pc})")
+endif()
+
 # -- GUI dependency archives (FetchContent local zips + hashes) --
 include(FetchContent)
 FetchContent_Declare(sdl3
@@ -85,8 +108,10 @@ set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 # Xlib error handler (the Xwayland None atom = the upstream bug patch via PATCH_COMMAND).
 if(NOT DEFINED SDL_X11)
     set(_msrtc_x11_probe ON)
-    foreach(_h "X11/XKBlib.h" "X11/extensions/Xfixes.h" "X11/extensions/XInput2.h"
-               "X11/extensions/Xrandr.h" "X11/Xcursor/Xcursor.h")
+    # full SDL_x11dyn.h include set (XTest/Xext were missing from the probe → SDL_X11=ON then
+    # compile death on machines without libxtst-dev; SDL's own README-linux lists them).
+    foreach(_h "X11/Xlib.h" "X11/XKBlib.h" "X11/extensions/Xfixes.h" "X11/extensions/XInput2.h"
+               "X11/extensions/Xrandr.h" "X11/Xcursor/Xcursor.h" "X11/extensions/XTest.h" "X11/extensions/Xext.h")
         find_file(_msrtc_h NAMES ${_h} PATHS /usr/include NO_DEFAULT_PATH)
         if(NOT _msrtc_h)
             set(_msrtc_x11_probe OFF)
@@ -116,6 +141,13 @@ endif()
 foreach(_snd ALSA PULSEAUDIO PIPEWIRE SNDIO OSS)
     if(NOT DEFINED SDL_${_snd})
         set(SDL_${_snd} OFF CACHE BOOL "" FORCE)
+    endif()
+endforeach()
+# Gaming/peripheral stack (python configure args, disposition #8): probes want libusb/liburing/dbus
+# dev packages that build machines commonly lack and the examples never use — OFF unless overridden.
+foreach(_per LIBURING DBUS LIBUSB)
+    if(NOT DEFINED SDL_${_per})
+        set(SDL_${_per} OFF CACHE BOOL "" FORCE)
     endif()
 endforeach()
 
@@ -156,6 +188,17 @@ foreach(entry ${EXAMPLE_DIRS})
     # The three-in-one gate (G4 promoted to a configure-time assertion, before any compilation): a directory must have a same-named target.
     if(NOT TARGET "${dir}")
         message(FATAL_ERROR "example directory '${dir}/' lacks a same-named target '${dir}' (a G4 three-in-one violation)")
+    endif()
+    # IDE run button (S2, supplier surface). Standalone island configure has no PolyOrch loaded →
+    # COMMAND guard keeps the compatibility bonus valid. GUI flavor = the supplier's exec-time
+    # display-probe chain (no display vars + a local X socket → DISPLAY=:0); CI/ctest never
+    # passes through it. The supplier deliberately ships no build edge — we wire our own.
+    if(COMMAND polyorch_example_run)
+        get_target_property(_et "${dir}" TYPE)
+        if(_et STREQUAL "EXECUTABLE")
+            polyorch_example_run(TARGET "${dir}" GUI FOLDER "examples/${dir}")
+            add_dependencies("${dir}-run" "${dir}")
+        endif()
     endif()
 endforeach()
 message(STATUS "mediaservo examples: ${_known_targets}")

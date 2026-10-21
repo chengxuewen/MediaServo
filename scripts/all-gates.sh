@@ -51,7 +51,7 @@ if [ "$FULL" = 1 ]; then
     gate "test-cxx"               bash -c 'LD_LIBRARY_PATH=$PWD/target/debug bash scripts/test-cxx.sh'
     gate "abi drift+client"       bash -c 'bash scripts/check-abi-drift.sh && bash scripts/check-abi-client.sh'
     gate "delivery smoke"         bash scripts/e2e-delivery.sh
-    gate "gui example"            bash -c 'MSRTC_RUN_SECS=0 bash mediaservo.sh build example && ctest --test-dir build-examples -R core --output-on-failure 2>/dev/null || bash mediaservo.sh test example'
+    gate "gui example"            bash -c 'MSRTC_RUN_SECS=0 bash mediaservo.sh build example && ctest --test-dir build/presets/examples -R core --output-on-failure'
     gate "gstreamer"              pixi run test-gstreamer
     if port_busy; then SKIP "mediasoup e2e" "live instance on 9800, PIT-192"
     else gate "mediasoup"         cargo test -p mediaservo-server --features sfu-mediasoup; fi
