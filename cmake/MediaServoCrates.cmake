@@ -28,6 +28,13 @@
 #     instance lifecycle belongs to C39 (deployed binaries / systemctl), not to
 #     IDE run buttons.
 
+# App-binary lanes (S6): the three CLI-consumed executables. BINARY handles over
+# the workspace target/ — deliberate F17-D exception like bindings: build:deploy,
+# systemd units, and doctor all read target/<profile>/<bin>; a separate face would
+# mint a second copy nobody deploys. No ctest twin (package -test compiles bins too);
+# no clean button in either mode (rm -rf of the shared cache is exactly what F17 bans).
+set(MEDIASERVO_APP_BINS mediaservo-host mediaservo-server mediaservo-client)
+
 set(MEDIASERVO_CRATE_LANES
     "mediaservo-common@mediaservo_common@crates/mediaservo-common"
     "mediaservo-webrtc@mediaservo_webrtc@crates/mediaservo-webrtc"
@@ -118,6 +125,33 @@ function(mediaservo_setup_crate_lanes)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             SKIP_RETURN_CODE 77
             LABELS "rust;lanes")
+    endforeach()
+
+    # App-binary lanes (see the table note above).
+    foreach(_app IN LISTS MEDIASERVO_APP_BINS)
+        set(_found OFF)
+        foreach(_row IN LISTS MEDIASERVO_CRATE_LANES)
+            string(REPLACE "@" ";" _p "${_row}")
+            list(GET _p 0 _c)
+            if(_c STREQUAL _app)
+                set(_found ON)
+                break()
+            endif()
+        endforeach()
+        if(NOT _found)
+            message(FATAL_ERROR
+                "MEDIASERVO_APP_BINS entry '${_app}' is not in MEDIASERVO_CRATE_LANES — "
+                "the two tables must move together (add the rlib lane first).")
+        endif()
+        polyorch_rust_build(
+            TARGET ${_app}-bin BINARY
+            PACKAGE ${_app} CRATE ${_app}
+            MANIFEST "${CMAKE_SOURCE_DIR}/crates/${_app}/Cargo.toml"
+            BASE_DIR "${CMAKE_SOURCE_DIR}/target"
+            FOLDER "crates/${_app}")
+        if(_c23_inject)
+            polyorch_rust_set_env_vars(TARGET ${_app}-bin ${_c23_inject})
+        endif()
     endforeach()
 
     if(MEDIASERVO_SHARE_CARGO_TARGET)

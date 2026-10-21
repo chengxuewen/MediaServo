@@ -2,6 +2,10 @@
 # pixi-shell.sh — Activate pixi environment in current shell
 # Source this file: source scripts/pixi-shell.sh
 # Do NOT run as a subshell (./pixi-shell.sh) — env vars would be lost.
+# Local variant of the supplier activation trio (PolyOrch/scripts/pixi.sh) — kept
+# because it carries MediaServo host-policy stages the supplier does not (bashrc
+# proxy import, macOS DYLD for GStreamer). Re-diff against the supplier copy on each
+# supplier bump (F20 as-built split: bootstrap delegates, activation stays local).
 
 set -eo pipefail
 
@@ -38,9 +42,6 @@ if [ -z "${http_proxy:-}" ] && [ -f "${HOME}/.bashrc" ]; then
 fi
 
 # Set DYLD_LIBRARY_PATH for GStreamer runtime linking on macOS
-if [ -n "${CONDA_PREFIX:-}" ]; then
-  export DYLD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${DYLD_LIBRARY_PATH:-}"
-fi
 if [ -n "${CONDA_PREFIX:-}" ]; then
   export DYLD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${DYLD_LIBRARY_PATH:-}"
 fi
