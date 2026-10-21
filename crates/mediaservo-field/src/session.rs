@@ -35,6 +35,9 @@ use crate::sfu;
 /// Session event stream (contract §4).
 #[derive(Debug)]
 #[non_exhaustive]
+// N8-style allow: the payload variant dominates enum size; boxing = per-event allocation on the
+// session pump hot path, not worth it (1.97 toolchain surfaced the lint, semantics unchanged).
+#[allow(clippy::large_enum_variant)]
 pub enum SessionEvent {
     /// Connected and joined the room.
     Connected,

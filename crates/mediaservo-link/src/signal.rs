@@ -44,6 +44,9 @@ type DisconnectSlot = std::sync::Arc<std::sync::Mutex<Option<Box<dyn Fn() + Send
 /// Signaling events.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
+// ponytail-era allow (N8 discipline): Message() dominates the enum size; boxing it would add a
+// heap allocation per signaling event on the hot path — stack size here is cheaper than churn.
+#[allow(clippy::large_enum_variant)]
 pub enum SignalEvent {
     /// Connected and joined the room.
     Connected { room_id: String },

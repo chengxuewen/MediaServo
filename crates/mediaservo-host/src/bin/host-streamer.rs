@@ -189,6 +189,9 @@ struct VisionNegotiation {
 }
 
 /// vision async events (aggregation of all transport B async sources).
+// N8-style allow: Signal() carries the link event enum by value; boxing adds per-event alloc on
+// the streamer pump hot path — stack hop is cheaper (1.97 toolchain surfaced the lint).
+#[allow(clippy::large_enum_variant)]
 enum VisionEvent {
     Signal(Result<SignalEvent, broadcast::error::RecvError>),
     Ice(Option<RTCIceCandidate>),

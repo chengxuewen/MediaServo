@@ -1812,8 +1812,8 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
                             let sy = unsafe { (*yuv).stride_y() } as usize;
                             let su = unsafe { (*yuv).stride_u() } as usize;
                             let sv = unsafe { (*yuv).stride_v() } as usize;
-                            let cw = (w + 1) / 2;
-                            let ch = (h + 1) / 2;
+                            let cw = w.div_ceil(2);
+                            let ch = h.div_ceil(2);
                             let y_size = w * h;
                             let uv_size = cw * ch;
                             let mut data = vec![0u8; y_size + 2 * uv_size];
@@ -1822,12 +1822,23 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
                                 let up = (*yuv).data_u();
                                 let vp = (*yuv).data_v();
                                 // Fast path: buffer is exactly render-sized and compact — bulk copy.
-                                if sy == w && su == cw && sv == cw
-                                    && (*yuv).width() as usize == w && (*yuv).height() as usize == h
+                                if sy == w
+                                    && su == cw
+                                    && sv == cw
+                                    && (*yuv).width() as usize == w
+                                    && (*yuv).height() as usize == h
                                 {
                                     std::ptr::copy_nonoverlapping(yp, data.as_mut_ptr(), y_size);
-                                    std::ptr::copy_nonoverlapping(up, data.as_mut_ptr().add(y_size), uv_size);
-                                    std::ptr::copy_nonoverlapping(vp, data.as_mut_ptr().add(y_size + uv_size), uv_size);
+                                    std::ptr::copy_nonoverlapping(
+                                        up,
+                                        data.as_mut_ptr().add(y_size),
+                                        uv_size,
+                                    );
+                                    std::ptr::copy_nonoverlapping(
+                                        vp,
+                                        data.as_mut_ptr().add(y_size + uv_size),
+                                        uv_size,
+                                    );
                                 } else {
                                     // Stride-aware row copy; top-left crop (H.264 conformance window pads bottom/right).
                                     for r in 0..h {
