@@ -73,7 +73,7 @@
     },
     {
       "name": "shared-target",
-      "displayName": "F17-D opt-in: lane cargo builds share the workspace target/ cache (clean buttons unregistered in this mode; option lands with S4 lanes)",
+      "displayName": "F17-D opt-in: lanes share the workspace target/ cache (clean buttons withheld by design)",
       "inherits": "default",
       "binaryDir": "${sourceDir}/build/presets/${presetName}",
       "cacheVariables": { "MEDIASERVO_SHARE_CARGO_TARGET": "ON" }

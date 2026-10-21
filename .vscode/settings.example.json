@@ -1,0 +1,4 @@
+{
+  "cmake.cmakePath": "${workspaceFolder}/.pixi/envs/default/bin/cmake",
+  "cmake.configureOnOpen": false
+}

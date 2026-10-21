@@ -53,8 +53,10 @@ Thumbs.db
 .vs
 .idea
 .cache
-.vscode
-!.vscode/settings.json
+.vscode/*
+# whitelist: only the IDE settings template is tracked (polyorch-adoption CA-1;
+# a negation under a plain `.vscode` dir-rule is inert — git never descends)
+!.vscode/settings.example.json
 
 # Build dirs
 # --------
