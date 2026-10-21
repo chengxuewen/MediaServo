@@ -51,6 +51,20 @@
       "cacheVariables": { "MEDIASERVO_BUILD_BINDINGS": "ON" }
     },
     {
+      "name": "crates",
+      "displayName": "Crates lanes: IDE build/test buttons + ctest bridge (separate build-tree face, honest clean buttons)",
+      "inherits": "default",
+      "binaryDir": "${sourceDir}/build/presets/${presetName}",
+      "cacheVariables": { "MEDIASERVO_BUILD_CRATES_LANES": "ON" }
+    },
+    {
+      "name": "crates-shared",
+      "displayName": "Crates lanes over the shared workspace target/ (F17-D opt-in; clean buttons withheld by design)",
+      "inherits": "crates",
+      "binaryDir": "${sourceDir}/build/presets/${presetName}",
+      "cacheVariables": { "MEDIASERVO_SHARE_CARGO_TARGET": "ON" }
+    },
+    {
       "name": "shared-target",
       "displayName": "F17-D opt-in: lane cargo builds share the workspace target/ cache (clean buttons unregistered in this mode; option lands with S4 lanes)",
       "inherits": "default",
@@ -63,6 +77,8 @@
     { "name": "examples", "configurePreset": "examples" },
     { "name": "examples-release", "configurePreset": "examples-release" },
     { "name": "bindings", "configurePreset": "bindings" },
+    { "name": "crates", "configurePreset": "crates" },
+    { "name": "crates-shared", "configurePreset": "crates-shared" },
     { "name": "shared-target", "configurePreset": "shared-target" }
   ],
   "testPresets": [
@@ -74,6 +90,12 @@
     {
       "name": "examples",
       "configurePreset": "examples",
+      "output": { "outputOnFailure": true }
+    }
+,
+    {
+      "name": "crates",
+      "configurePreset": "crates",
       "output": { "outputOnFailure": true }
     }
   ]
