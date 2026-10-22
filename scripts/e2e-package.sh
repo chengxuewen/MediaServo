@@ -211,8 +211,12 @@ grep -q "^token_schema_version: $TV$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { 
 grep -q "^signaling_protocol_version: $SPV$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt signaling_protocol_version != source value $SPV (C50/G1 pin)"; FAIL=1; }
 grep -q "^signaling_min_supported: $SMIN$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt signaling_min_supported != source value $SMIN (C50/G1 pin)"; FAIL=1; }
 grep -q "^token_schema_version: 1$" "$TMP/sdk/$SDK_ROOT/sdk-version.txt" || { echo "FAIL: sdk-version.txt lacks token_schema_version"; FAIL=1; }
-grep -q "workspace_version: $VER" <(tar xzf "$HOST_TGZ" -O "$HOST_ROOT/host-version.txt") || { echo "FAIL: host-version.txt lacks workspace_version=$VER"; FAIL=1; }
-echo "OK: version contract files (host-version.txt + sdk-version.txt) content correct"
+if [ "$SDK_ONLY" = 0 ]; then
+    grep -q "workspace_version: $VER" <(tar xzf "$HOST_TGZ" -O "$HOST_ROOT/host-version.txt") || { echo "FAIL: host-version.txt lacks workspace_version=$VER"; FAIL=1; }
+    echo "OK: version contract files (host-version.txt + sdk-version.txt) content correct"
+else
+    echo "OK: version contract file (sdk-version.txt) content correct (host leg skipped: --sdk-only)"
+fi
 
 # ── 7. dist/ gitignore ──────────────────────────────
 note "dist/ gitignore"
@@ -221,7 +225,7 @@ echo "OK: dist/ is gitignored"
 
 echo
 if [ "$FAIL" = 0 ]; then
-    echo "PASS: package e2e all green ($HOST_TGZ + $SDK_TGZ)"
+    if [ "$SDK_ONLY" = 1 ]; then echo "PASS: package e2e all green (SDK slice: $SDK_TGZ)"; else echo "PASS: package e2e all green ($HOST_TGZ + $SDK_TGZ)"; fi
 else
     echo "FAIL: $FAIL checks failed"; exit 1
 fi
