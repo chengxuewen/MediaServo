@@ -10,9 +10,9 @@
 # FATAL_ERROR with a message pointing at build-c (the compile-surface equivalent of the PIT-189 deployment-freshness lesson).
 # - GUI dependencies = local archive zips under 3rdparty/ + URL_HASH (the same method as D281's oxmgr; the ledger is
 # 3rdparty/PROVENANCE-gui-deps.md). A hash mismatch = FetchContent refuses to extract.
-# - Env recipe (conda var strip + PATH prefix) = the root preset's `environment` field
-#   (S2 disposition #1/#2); pkg-config lockdown lives here (#3) so standalone and mounted
-#   configures behave identically.
+# - Env constitution: the F25 gate (below) SELF-CHECKS the shell — an activated conda/pixi
+#   configure with the mount ON warns + force-OFFs; plain-shell -D or the CLI sanitized
+#   bridge are the two legit routes. pkg-config lockdown lives here regardless.
 
 cmake_minimum_required(VERSION 3.24)
 project(mediaservo_examples LANGUAGES C CXX)
@@ -33,6 +33,39 @@ if(NOT EXISTS "${MEDIASERVO_SDK_DIR}/libmediaservo_client.so")
         "no libmediaservo_client.so inside MEDIASERVO_SDK_DIR='${MEDIASERVO_SDK_DIR}' —"
         " run ./mediaservo.sh build-c (or pixi run build-c) before configuring (PIT-189)")
 endif()
+
+# -- F25 environment-eligibility gate (system constitution self-check) --
+# The C++/SDL island must compile against the SYSTEM toolchain (desktop runtime alignment,
+# PIT-199/204 lesson). Compiler-direct-read vars (CPATH/LIBRARY_PATH/COMPILER_PATH/...) cannot
+# be countered by cache variables — an activated conda/pixi shell must never configure this
+# tree. On a dirty shell with the mount ON: WARN + force the option OFF (loud degrade; never
+# silently misbuild). Legit routes: the CLI `mediaservo.sh build example` (sanitized env
+# bridge) or a plain shell with -DMEDIASERVO_BUILD_EXAMPLES=ON.
+set(_ms_env_dirty FALSE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    foreach(_v CONDA_PREFIX CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH COMPILER_PATH)
+        if(DEFINED ENV{${_v}} AND NOT "$ENV{${_v}}" STREQUAL "")
+            set(_ms_env_dirty TRUE)
+        endif()
+    endforeach()
+    if(NOT _ms_env_dirty AND "$ENV{PATH}" MATCHES "\\.pixi/envs/")
+        set(_ms_env_dirty TRUE)   # activated PATH drifts compiler/pkg-config discovery
+    endif()
+    foreach(_c "$ENV{CC}" "$ENV{CXX}")
+        if(_c MATCHES "conda|\\.pixi/envs")
+            set(_ms_env_dirty TRUE)   # conda compiler pin would hijack the system rule
+        endif()
+    endforeach()
+endif()
+if(MEDIASERVO_BUILD_EXAMPLES AND _ms_env_dirty)
+    message(WARNING
+        "examples island: activated conda/pixi shell detected — forcing "
+        "MEDIASERVO_BUILD_EXAMPLES=OFF for this configure (system-toolchain constitution, F25). "
+        "Build via `./mediaservo.sh build example` (sanitized bridge) or re-run from a plain shell.")
+    set(MEDIASERVO_BUILD_EXAMPLES OFF CACHE BOOL "forced OFF by F25 env gate" FORCE)
+    return()
+endif()
+
 
 add_library(mediaservo_client_sdk INTERFACE)
 target_include_directories(mediaservo_client_sdk INTERFACE

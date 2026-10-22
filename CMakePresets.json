@@ -1,11 +1,14 @@
 {
   "version": 3,
-  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "default",
-      "displayName": "Assembly root — separate lane cargo cache, examples off (fresh-clone green)",
-      "generator": "Ninja",
+      "displayName": "default - acceptance, all off",
       "binaryDir": "${sourceDir}/build/presets/${presetName}",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -13,98 +16,85 @@
       }
     },
     {
-      "name": "examples",
-      "displayName": "Examples island on the system toolchain (S2: env recipe lives here; build-c prelude stays CLI-side; island guard = SDK_DIR)",
-      "inherits": "default",
-      "binaryDir": "${sourceDir}/build/presets/${presetName}",
-      "cacheVariables": {
-        "MEDIASERVO_BUILD_EXAMPLES": "ON",
-        "MEDIASERVO_SDK_DIR": "${sourceDir}/target/debug",
-        "CMAKE_C_COMPILER": "/usr/bin/cc",
-        "CMAKE_CXX_COMPILER": "/usr/bin/c++",
-        "CMAKE_PREFIX_PATH": "",
-        "CMAKE_IGNORE_PREFIX_PATH": "${sourceDir}/.pixi/envs/default"
-      },
-      "environment": {
-        "CFLAGS": "", "CXXFLAGS": "", "CPPFLAGS": "", "LDFLAGS": "", "CPATH": "",
-        "C_INCLUDE_PATH": "", "CPLUS_INCLUDE_PATH": "", "CONDA_PREFIX": "",
-        "CMAKE_PREFIX_PATH": "", "PKG_CONFIG_PATH": "", "PKG_CONFIG_SYSROOT_DIR": "",
-        "COMPILER_PATH": "", "LIBRARY_PATH": "",
-        "PATH": "/usr/bin:$penv{PATH}"
-      }
-    },
-    {
-      "name": "examples-release",
-      "displayName": "Examples island, Release profile + target/release SDK",
-      "inherits": "examples",
-      "binaryDir": "${sourceDir}/build/presets/${presetName}",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "MEDIASERVO_SDK_DIR": "${sourceDir}/target/release"
-      }
-    },
-    {
       "name": "bindings",
-      "displayName": "Bindings lanes + delivery-manifest renderers (python 'build bindings' consumes bindings-gen/)",
+      "displayName": "bindings - SDK lanes + renderers",
       "inherits": "default",
       "binaryDir": "${sourceDir}/build/presets/${presetName}",
-      "cacheVariables": { "MEDIASERVO_BUILD_BINDINGS": "ON" }
+      "cacheVariables": {
+        "MEDIASERVO_BUILD_BINDINGS": "ON"
+      }
     },
     {
-      "name": "web",
-      "displayName": "www node lanes (web-build aggregate; admin chain rides the workspace:* client edge)",
+      "name": "host",
+      "displayName": "host - vehicle lanes (shared cache)",
       "inherits": "default",
       "binaryDir": "${sourceDir}/build/presets/${presetName}",
-      "cacheVariables": { "MEDIASERVO_BUILD_WEB": "ON" }
+      "cacheVariables": {
+        "MEDIASERVO_BUILD_BINDINGS": "ON",
+        "MEDIASERVO_BUILD_CRATES_LANES": "ON",
+        "MEDIASERVO_SHARE_CARGO_TARGET": "ON"
+      }
     },
     {
-      "name": "crates",
-      "displayName": "Crates lanes: IDE build/test buttons + ctest bridge (separate build-tree face, honest clean buttons)",
+      "name": "server",
+      "displayName": "server - cloud + www lanes (shared cache)",
       "inherits": "default",
       "binaryDir": "${sourceDir}/build/presets/${presetName}",
-      "cacheVariables": { "MEDIASERVO_BUILD_CRATES_LANES": "ON" }
+      "cacheVariables": {
+        "MEDIASERVO_BUILD_WEB": "ON",
+        "MEDIASERVO_BUILD_CRATES_LANES": "ON",
+        "MEDIASERVO_SHARE_CARGO_TARGET": "ON"
+      }
     },
     {
-      "name": "crates-shared",
-      "displayName": "Crates lanes over the shared workspace target/ (F17-D opt-in; clean buttons withheld by design)",
-      "inherits": "crates",
-      "binaryDir": "${sourceDir}/build/presets/${presetName}",
-      "cacheVariables": { "MEDIASERVO_SHARE_CARGO_TARGET": "ON" }
-    },
-    {
-      "name": "shared-target",
-      "displayName": "F17-D opt-in: lanes share the workspace target/ cache (clean buttons withheld by design)",
+      "name": "all",
+      "displayName": "all - full lanes surface",
       "inherits": "default",
       "binaryDir": "${sourceDir}/build/presets/${presetName}",
-      "cacheVariables": { "MEDIASERVO_SHARE_CARGO_TARGET": "ON" }
+      "cacheVariables": {
+        "MEDIASERVO_BUILD_BINDINGS": "ON",
+        "MEDIASERVO_BUILD_WEB": "ON",
+        "MEDIASERVO_BUILD_CRATES_LANES": "ON",
+        "MEDIASERVO_SHARE_CARGO_TARGET": "ON"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "default", "configurePreset": "default" },
-    { "name": "examples", "configurePreset": "examples" },
-    { "name": "examples-release", "configurePreset": "examples-release" },
-    { "name": "bindings", "configurePreset": "bindings" },
-    { "name": "web", "configurePreset": "web" },
-    { "name": "crates", "configurePreset": "crates" },
-    { "name": "crates-shared", "configurePreset": "crates-shared" },
-    { "name": "shared-target", "configurePreset": "shared-target" }
+    {
+      "name": "default",
+      "configurePreset": "default"
+    },
+    {
+      "name": "bindings",
+      "configurePreset": "bindings"
+    },
+    {
+      "name": "host",
+      "configurePreset": "host"
+    },
+    {
+      "name": "server",
+      "configurePreset": "server"
+    },
+    {
+      "name": "all",
+      "configurePreset": "all"
+    }
   ],
   "testPresets": [
     {
       "name": "default",
       "configurePreset": "default",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
-      "name": "examples",
-      "configurePreset": "examples",
-      "output": { "outputOnFailure": true }
-    }
-,
-    {
-      "name": "crates",
-      "configurePreset": "crates",
-      "output": { "outputOnFailure": true }
+      "name": "all",
+      "configurePreset": "all",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }

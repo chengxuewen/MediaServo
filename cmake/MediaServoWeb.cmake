@@ -37,6 +37,12 @@ function(mediaservo_setup_web)
                        "path is unaffected)")
         return()
     endif()
+    # namespace the npm handles: @mediaservo/client sanitizes to `mediaservo-client`,
+    # which would collide with the crates lane of the same name when server/all mount
+    # both surfaces (supplier-sanctioned knob PolyOrch_NODE_TARGET_PREFIX).
+    if(NOT PolyOrch_NODE_TARGET_PREFIX)
+        set(PolyOrch_NODE_TARGET_PREFIX "node")
+    endif()
     polyorch_node_import(ROOT "${MEDIASERVO_REPO_ROOT}/www/package.json")
     set(_builds "")
     foreach(_h IN LISTS POLYORCH_NODE_IMPORT_HANDLES)

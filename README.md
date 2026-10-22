@@ -83,7 +83,7 @@ Unified CLI entry point (available after bootstrap):
 
 First use: `source bootstrap.sh` (Linux/macOS) or `bootstrap.bat` (Windows).
 
-IDE (VS Code + CMake Tools): copy `.vscode/settings.example.json` to `.vscode/settings.json` — the committed presets (`cmake --preset …`) drive the assembly tree.
+IDE (VS Code + CMake Tools): copy `.vscode/settings.example.json` to `.vscode/settings.json` — the committed presets (`cmake --preset default|bindings|host|server|all`) drive the assembly tree; examples are the F25 `-DMEDIASERVO_BUILD_EXAMPLES=ON` route (plain shell or `mediaservo.sh build example`).
 Windows: planned, not yet supported (win-64 is not declared in pixi.toml platforms; bootstrapping per `docs/modules/25-abi-baseline.md` §10.4 ticket O4 once a customer list materializes).
 
 ## License
