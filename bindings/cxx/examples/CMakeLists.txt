@@ -108,10 +108,11 @@ set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 # Xlib error handler (the Xwayland None atom = the upstream bug patch via PATCH_COMMAND).
 if(NOT DEFINED SDL_X11)
     set(_msrtc_x11_probe ON)
-    # full SDL_x11dyn.h include set (XTest/Xext were missing from the probe → SDL_X11=ON then
-    # compile death on machines without libxtst-dev; SDL's own README-linux lists them).
+    # probe = what stays ENABLED (XTest dropped: opted out below, so its header is not a
+    # build requirement; Xext/Xdbe-era core headers are exercised by SDL's own
+    # check_c_source probes the moment SDL_X11 is ON).
     foreach(_h "X11/Xlib.h" "X11/XKBlib.h" "X11/extensions/Xfixes.h" "X11/extensions/XInput2.h"
-               "X11/extensions/Xrandr.h" "X11/Xcursor/Xcursor.h" "X11/extensions/XTest.h" "X11/extensions/Xext.h")
+               "X11/extensions/Xrandr.h" "X11/Xcursor/Xcursor.h" "X11/extensions/Xext.h")
         find_file(_msrtc_h NAMES ${_h} PATHS /usr/include NO_DEFAULT_PATH)
         if(NOT _msrtc_h)
             set(_msrtc_x11_probe OFF)
@@ -143,6 +144,14 @@ foreach(_snd ALSA PULSEAUDIO PIPEWIRE SNDIO OSS)
         set(SDL_${_snd} OFF CACHE BOOL "" FORCE)
     endif()
 endforeach()
+# XTest (global cursor-warp via XTestFakeMotionEvent): the viewer never warps the
+# system cursor (ImGui draws its own), so the feature is opted OUT — this removes the
+# libxtst-dev BUILD requirement from sudo-less dev boxes (SDL's own README-linux keeps
+# it listed for full-featured builds; -DSDL_X11_XTEST=ON restores it where headers exist).
+if(NOT DEFINED SDL_X11_XTEST)
+    set(SDL_X11_XTEST OFF CACHE BOOL "" FORCE)
+endif()
+
 # Gaming/peripheral stack (python configure args, disposition #8): probes want libusb/liburing/dbus
 # dev packages that build machines commonly lack and the examples never use — OFF unless overridden.
 foreach(_per LIBURING DBUS LIBUSB)
