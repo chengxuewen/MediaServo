@@ -67,7 +67,11 @@ function(mediaservo_setup_bindings)
     # measurement) -- the kw adds the flag-gated strip legs; the CLI invokes
     # `cmake --install ... --strip`. The dev-tree .so.<MAJOR> symlinks in
     # target/{debug,release} are NOT an install concern (T0 row #2, python
-    # stays). No EXPORT yet: the package suite moves at leg 3 (byte-judge).
+    # stays). No EXPORT on these calls: the delivered Config suite is the
+    # hand template (mediaservo::<sdk> INTERFACE targets + declarative
+    # COMPONENTS + per-domain SDK_LIST), which the supplier stub+wrapper
+    # shape cannot byte-replicate -- SR4 L3 ruling (2b), so only the
+    # rendered-file TRANSPORT moved cmake-side.
     # SR4 L2 (T0 #6): each SDK's own C header rides its own delivery call --
     # HEADERS_DIRECTORY copies the CONTENTS of <root> (tree preserved), so
     # bindings/c/mediaservo-<sdk>-c/include/mediaservo/<sdk>.h lands
@@ -133,4 +137,41 @@ function(mediaservo_setup_bindings)
     # files exist configure-time, the target documents/anchors them.
     add_custom_target(bindings-gen
         COMMENT "delivery manifests: ${_gen}/pkgconfig + ${_gen}/cmake (rendered at configure)")
+
+    # SR4 L3 (#9 transport, the pre-ruled row): the rendered manifests reach
+    # the delivery tree through install(FILES) rules -- python's copy2 loop is
+    # deleted in the same stroke (one leg, one owner). Direction is
+    # build-tree -> delivery-tree at INSTALL time (exactly the flow the python
+    # copy ran); nothing is copied INTO the build tree, so the F28 rejection
+    # stands untouched. Two rules, not one: the .pc and Config pairs have
+    # different DESTINATION prefixes.
+    install(FILES
+        "${_gen}/pkgconfig/mediaservo-field.pc"
+        "${_gen}/pkgconfig/mediaservo-link.pc"
+        "${_gen}/pkgconfig/mediaservo-deck.pc"
+        "${_gen}/pkgconfig/mediaservo-client.pc"
+        DESTINATION lib/pkgconfig)
+    install(FILES
+        "${_gen}/cmake/mediaservoConfig.cmake"
+        "${_gen}/cmake/mediaservoConfigVersion.cmake"
+        DESTINATION lib/cmake/mediaservo)
+
+    # -- SR4 L3 (T0 #9): transport of the rendered suite becomes install rules --
+    # Stock install(FILES) rows (no P-primitive needed; the ORPHAN GUARD re-home
+    # lands HERE, not in python). The python copy loop in build bindings died in
+    # the same stroke (one leg, one owner). #16's SHAPE itself was already cmake-
+    # side since S3 (per-domain renderers above): the D46 P2/P3 EXPORT surface
+    # stays unused by this consumer -- swapping the shipped renderers for the
+    # supplier's stub/Config generation would be a rewrite for zero delivered
+    # gain (ponytail: reuse the code that lives here); e2e-delivery's
+    # find_package(COMPONENTS) + version-tuple asserts pin the delivered suite.
+    set(_pc_rows "")
+    foreach(_sdk IN LISTS MEDIASERVO_BINDINGS_SDKS)
+        list(APPEND _pc_rows "${_gen}/pkgconfig/mediaservo-${_sdk}.pc")
+    endforeach()
+    install(FILES ${_pc_rows} DESTINATION lib/pkgconfig)
+    install(FILES
+        "${_gen}/cmake/mediaservoConfig.cmake"
+        "${_gen}/cmake/mediaservoConfigVersion.cmake"
+        DESTINATION lib/cmake/mediaservo)
 endfunction()

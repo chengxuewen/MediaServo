@@ -436,8 +436,6 @@ def _cmd_build_bindings(release: bool = False) -> None:
     for _stale in lib_dst.glob("libmediaservo_*.so.[0-9]*"):
         if _stale.name not in _keep and not _stale.is_symlink():
             _stale.unlink()
-    pc_dst = lib_dst / "pkgconfig"; pc_dst.mkdir(parents=True, exist_ok=True)
-    cmake_dst = lib_dst / "cmake" / "mediaservo"; cmake_dst.mkdir(parents=True, exist_ok=True)
 
     # lib triple (D241) + N7 strip — SR4 L1: the copy/rename/link/strip legs are
     # cmake install RULES now (cmake/MediaServoBindings.cmake -> polyorch_rust_install
@@ -455,17 +453,15 @@ def _cmd_build_bindings(release: bool = False) -> None:
     # fan-in in cmake/MediaServoBindings.cmake). The tree form also lands the
     # recursive cxx subtree (detail/, 3rdparty/ + NOTICE) that python rglob'd.
 
-    # S3: the .pc + cmake-config renderers live on the cmake bindings surface
-    # (cmake/MediaServoBindings.cmake — .pc stamped per DOMAIN crate via cargo metadata,
-    # Config stamped with the suite/workspace version; the field-for-all stamp was the M4
-    # collision waiting to happen). The configure above (SR4 L1 stroke) renders; we copy.
-    # Transport of these rendered files moves to an install(FILES) row at SR4 leg 3.
-    gen = ROOT / "build" / "presets" / "bindings" / "bindings-gen"
-    for sdk in ALL_SDKS:
-        shutil.copy2(gen / "pkgconfig" / f"mediaservo-{sdk}.pc",
-                     pc_dst / f"mediaservo-{sdk}.pc")
-    for name in ("mediaservoConfig.cmake", "mediaservoConfigVersion.cmake"):
-        shutil.copy2(gen / "cmake" / name, cmake_dst / name)
+    # SR4 L3 (#9 retired): the .pc + cmake-config renderers live on the cmake
+    # bindings surface (per-domain version stamps via cargo metadata, suite
+    # version for Config -- S3) and their TRANSPORT into the delivery tree is
+    # install(FILES) rows in cmake/MediaServoBindings.cmake, staged by the
+    # cmake --install above. The hand-suite SHAPE stays the template: the
+    # supplier EXPORT stub/wrapper cannot byte-replicate mediaservo::<sdk>
+    # INTERFACE targets + declarative COMPONENTS + per-domain SDK_LIST (L3
+    # ruling 2b). The package-half SDK_LIST re-render stays python (tar /
+    # CHANGES / manifest owner, D279 / SR6).
 
     # python: fat wheel (.so.<major> real files inside _libs — DT_NEEDED self-resolution) + pip --prefix assembly of site-packages
     # python wheel build tree = staging mirror (source files copied + _libs all live in staging;
