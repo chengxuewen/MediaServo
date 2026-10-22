@@ -21,10 +21,10 @@
 #     inject the system toolchain explicitly when a Jetson-class host carries it;
 #     without /usr/bin/gcc the lane face skips itself LOUDLY (documented posture,
 #     never silently broken).
-#   * ctest bridge: reuses `_polyorch_rust_command` (pixi PATH prefix + env
-#     strip) — the same internal the button uses — so button and ctest entry can
-#     never drift in env handling (ModuKit W4 precedent: the ONLY sanctioned
-#     internal-surface read here; duplicating the strip recipe is forbidden).
+#   * ctest bridge: the verb's own CTEST keyword (supplier D45) registers the
+#     entry from the SAME command vector as the button — the former
+#     sanctioned-internal exception (_polyorch_rust_command reads; ModuKit W4
+#     precedent) is RETIRED here: this file touches no supplier internals.
 #   * `polyorch_rust_run` is deliberately NOT wired for host/server packages:
 #     instance lifecycle belongs to C39 (deployed binaries / systemctl), not to
 #     IDE run buttons.
@@ -108,7 +108,15 @@ function(mediaservo_setup_crate_lanes)
         polyorch_rust_test(
             PACKAGE ${_pkg} NAME ${_pkg}-test TARGET ${_pkg}
             MANIFEST "${_manifest}" ${_base_args}
-            FOLDER "${_fold}")
+            FOLDER "${_fold}"
+            # D45 ctest entry: one vector with the button (default name is
+            # exactly ${_pkg}-test -- the 11-name census must stay identical).
+            # WORKING_DIRECTORY pins the workspace root (entry semantics held
+            # since S4, NOT the D45 default manifest-parent); LABELS keep -L/-R
+            # routing quiet for the gate suites; SKIP 77 = OUR PIT-192 posture.
+            CTEST CTEST_LABELS "rust;lanes"
+            CTEST_WORKING_DIRECTORY "${MEDIASERVO_REPO_ROOT}"
+            CTEST_SKIP_RETURN_CODE 77)
 
         if(MEDIASERVO_SHARE_CARGO_TARGET)
             # Shared mode (F17-D/SR2): per-package `cargo clean -p` through the
@@ -122,17 +130,6 @@ function(mediaservo_setup_crate_lanes)
             polyorch_rust_clean(NAME ${_pkg}-clean ${_base_args} FOLDER "${_fold}")
         endif()
 
-        # ctest twin: SAME argv + SAME command wrapper as the button (ModuKit W4
-        # shape). Labels keep -L/-R routing quiet for the gate suites.
-        _polyorch_rust_forward_env(TRIPLE "${POLYORCH_RUST_HOST_TARGET}" OUT_ENV _fenv)
-        _polyorch_rust_command(_cmd SUBCOMMAND
-            test --package "${_pkg}" --manifest-path "${_manifest}"
-            --target-dir "${_base}" ENV "${_fenv}")
-        add_test(NAME ${_pkg}-test COMMAND ${_cmd})
-        set_tests_properties(${_pkg}-test PROPERTIES
-            WORKING_DIRECTORY "${MEDIASERVO_REPO_ROOT}"
-            SKIP_RETURN_CODE 77
-            LABELS "rust;lanes")
     endforeach()
 
     # App-binary lanes (see the table note above).
