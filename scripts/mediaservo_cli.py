@@ -422,7 +422,7 @@ def _cmd_build_bindings(release: bool = False) -> None:
     if node_so.exists():
         shutil.copy2(node_so, node_node)
     # stage the delivery layout out/bindings (full SDK package mirror — completed per Momus HIGH3/Task 2.5):
-    # D241 version-full triple (.so.<M.m.p> real file + .so.<major> + .so link) + D248 headers (C/cxx)
+    # D241 version triple + N7 strip = cmake install rules (SR4 L1); D248 headers (C/cxx)
     # + pkgconfig .pc + cmake config + python fat wheel/site-packages + node package
     ver = _workspace_version()   # S3: deliverable .so triple = the shims' own (workspace) version
     major, minor, patch = ver.split(".")
@@ -439,17 +439,16 @@ def _cmd_build_bindings(release: bool = False) -> None:
     cmake_dst = lib_dst / "cmake" / "mediaservo"; cmake_dst.mkdir(parents=True, exist_ok=True)
     inc_dst = bind_dst / "include" / "mediaservo"; inc_dst.mkdir(parents=True, exist_ok=True)
 
-    # lib triple (D241): .so.<M.m.p> real file (SONAME filename — DT_NEEDED self-resolution) + two-level symlinks
-    for sdk in ALL_SDKS:
-        so_src = out_dir / f"libmediaservo_{sdk}.so"
-        if not so_src.exists():
-            print(f"Error: {so_src} does not exist — cargo produced no {sdk} SDK", file=sys.stderr)
-            sys.exit(1)
-        full = lib_dst / f"libmediaservo_{sdk}.so.{major}.{minor}.{patch}"
-        shutil.copy2(so_src, full)
-        _strip_so(full)  # N7: debug symbols don't enter the delivery tree (wheel/tar size root cause, revised by measurement)
-        _symlink_force(full.name, lib_dst / f"libmediaservo_{sdk}.so.{major}")
-        _symlink_force(f"libmediaservo_{sdk}.so.{major}", lib_dst / f"libmediaservo_{sdk}.so")
+    # lib triple (D241) + N7 strip — SR4 L1: the copy/rename/link/strip legs are
+    # cmake install RULES now (cmake/MediaServoBindings.cmake -> polyorch_rust_install
+    # SOVERSION/VERSION/STRIP, supplier D46 P1/P7). The CLI only invokes; python no
+    # longer lays any of the 12 lib names (one leg, one owner). --strip is mandatory
+    # here: the STRIP CODE legs gate on CMAKE_INSTALL_DO_STRIP (install(FILES) rows
+    # are NOT covered by --strip itself — that is precisely why the legs exist).
+    _btype = "Release" if release else "Debug"
+    _bind_build = Path("build") / "presets" / "bindings"
+    _run_or_exit(["cmake", "--preset", "bindings", f"-DCMAKE_BUILD_TYPE={_btype}"], cwd=str(ROOT))
+    _run_or_exit(["cmake", "--install", str(_bind_build), "--prefix", str(bind_dst), "--strip"], cwd=str(ROOT))
 
     # include/mediaservo (D248): C common.h + per-sdk .h; cxx per-sdk .hpp + shared detail/3rdparty
     for h in (ROOT / "bindings" / "c" / "include" / "mediaservo").glob("*.h"):
@@ -466,11 +465,11 @@ def _cmd_build_bindings(release: bool = False) -> None:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(f, dst)
 
-    # S3: the .pc + cmake-config renderers moved to the cmake bindings surface
+    # S3: the .pc + cmake-config renderers live on the cmake bindings surface
     # (cmake/MediaServoBindings.cmake — .pc stamped per DOMAIN crate via cargo metadata,
     # Config stamped with the suite/workspace version; the field-for-all stamp was the M4
-    # collision waiting to happen). Configure renders; we copy. Templates untouched.
-    _run_or_exit(["cmake", "--preset", "bindings"], cwd=str(ROOT))
+    # collision waiting to happen). The configure above (SR4 L1 stroke) renders; we copy.
+    # Transport of these rendered files moves to an install(FILES) row at SR4 leg 3.
     gen = ROOT / "build" / "presets" / "bindings" / "bindings-gen"
     for sdk in ALL_SDKS:
         shutil.copy2(gen / "pkgconfig" / f"mediaservo-{sdk}.pc",

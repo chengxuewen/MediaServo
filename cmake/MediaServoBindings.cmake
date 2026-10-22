@@ -53,6 +53,29 @@ function(mediaservo_setup_bindings)
         BASE_DIR "${_target_dir}"
         FOLDER bindings)
 
+    # -- SR4 L1: delivery staging rules for the four SDK cdylibs -------------
+    # D241 version triple + N7 strip, absorbed from python (one leg, one
+    # owner: the triple loop/copy2/_strip_so/symlink pair in
+    # scripts/mediaservo_cli.py are deleted in the same stroke). Versions are
+    # passed IN (root project() reads [workspace.package] per C43 -- the
+    # supplier never reads Cargo.toml). Chain = cmake's documented
+    # install(TARGETS) semantics: real <artifact>.<V> + <artifact>.<M> +
+    # dev <artifact>; the cargo-embedded SONAME (libmediaservo_<sdk>.so.0)
+    # self-resolves through the .so.0 leg (D241) and the dev name matches the
+    # unversioned link the headers/pkg-config advertise.
+    # STRIP: --strip alone does NOT reach install(FILES)-shape rows (SR5 P7
+    # measurement) -- the kw adds the flag-gated strip legs; the CLI invokes
+    # `cmake --install ... --strip`. The dev-tree .so.<MAJOR> symlinks in
+    # target/{debug,release} are NOT an install concern (T0 row #2, python
+    # stays). No EXPORT yet: the package suite moves at leg 3 (byte-judge).
+    foreach(_sdk IN LISTS MEDIASERVO_BINDINGS_SDKS)
+        polyorch_rust_install(
+            TARGETS mediaservo-${_sdk}-c
+            SOVERSION ${PROJECT_VERSION_MAJOR}
+            VERSION ${PROJECT_VERSION}
+            STRIP)
+    endforeach()
+
     # -- renderers: delivery manifests into the build tree (python stages these) --
     set(_gen "${CMAKE_CURRENT_BINARY_DIR}/bindings-gen")
     file(MAKE_DIRECTORY "${_gen}/pkgconfig" "${_gen}/cmake")
