@@ -393,7 +393,12 @@ def _symlink_force(target: str, link: Path) -> None:
 
 
 def _cmd_build_bindings(release: bool = False) -> None:
-    """Build the three SDK cdylibs + dev .so.<MAJOR> symlinks (D241: DT_NEEDED resolution).
+    """Build the three SDK cdylibs + dev .so.<MAJOR> symlinks (D241: DT_NEEDED resolution.
+
+    ruled-away (SR4 P3 audit, T0 row #2): the DEV-tree .so.<MAJOR> symlinks under
+    target/ stay python -- they are not a delivery layout concern (cmake install
+    rules own the DELIVERY tree only); terminal owner ruled at SR6 batch-4 kickoff
+    (drop vs tools-crate) per the ORPHAN GUARD table.
 
     Staging discipline (2026-09-29): the **build artifacts** of bindings/node and bindings/python
     (.node/.whl intermediates/_libs) all land in target/bindings-staging/ (gitignored area);
@@ -429,13 +434,11 @@ def _cmd_build_bindings(release: bool = False) -> None:
     major, minor, patch = ver.split(".")
     bind_dst = _out_root() / "bindings"
     lib_dst = bind_dst / "lib"; lib_dst.mkdir(parents=True, exist_ok=True)
-    # Stale full-version sweep (09-17 wheel-sweep family — S3 staging caught it: the first
-    # 0.1.2 run left the 0.1.1 real files on disk; links get overwritten, corpses never did.
-    # keep = this run's full names; anything else version-suffixed and non-symlink is deleted.)
-    _keep = {f"libmediaservo_{_s}.so.{major}.{minor}.{patch}" for _s in ALL_SDKS}
-    for _stale in lib_dst.glob("libmediaservo_*.so.[0-9]*"):
-        if _stale.name not in _keep and not _stale.is_symlink():
-            _stale.unlink()
+    # Stale full-version sweep (09-17 wheel-sweep family) — SR4 L4: the leg
+    # is a STALE_GLOB row on the merged polyorch_rust_install call
+    # (cmake/MediaServoBindings.cmake; keep = the twelve landed names of this
+    # install, sweep runs inside the `cmake --install` below, before the copy
+    # rows). Python no longer sweeps -- one leg, one owner.
 
     # lib triple (D241) + N7 strip — SR4 L1: the copy/rename/link/strip legs are
     # cmake install RULES now (cmake/MediaServoBindings.cmake -> polyorch_rust_install
@@ -464,6 +467,8 @@ def _cmd_build_bindings(release: bool = False) -> None:
     # CHANGES / manifest owner, D279 / SR6).
 
     # python: fat wheel (.so.<major> real files inside _libs — DT_NEEDED self-resolution) + pip --prefix assembly of site-packages
+    # ruled-away (SR4 P3 audit): wheel CONTENTS are language-native packaging territory (SR4 §1.3) --
+    # the _libs copies/symlinks below feed the WHEEL, never the cmake-laid delivery layout.
     # python wheel build tree = staging mirror (source files copied + _libs all live in staging;
     # zero writes into the source tree bindings/python — neither the build/ cache nor _libs enter source dirs anymore)
     # source mapping: bindings/python/mediaservo/ = pip build root (same level as pyproject) —
@@ -1262,23 +1267,41 @@ def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
     lib_dir = prefix_p / "lib"
     lib_dir.mkdir(parents=True, exist_ok=True)
     # same-tree idempotent guard (build:deploy bindings default prefix = out/bindings = the assembly source itself):
-    # the build phase already placed lib/include/cmake/wheel; re-copying = SameFileError (exploded on 09-21;
-    # the same guard exists in server/host deploy L982; the bindings path missed it — first bite after V1b widened the delivery surface with client.so).
+    # the build phase already ran the install rules into it; a second full pass is pure churn (09-21 SameFileError lesson).
     if prefix_p.resolve() == src.resolve():
         sos = sorted(x.name for x in (src / "lib").glob("libmediaservo_*.so*"))
     else:
-        sos = []
-        for so in sorted((src / "lib").glob("libmediaservo_*.so*")):
-            _copy_with_kill(so, lib_dir / so.name)  # busy (loaded by a running process) → kill the occupier and retry
-            sos.append(so.name)
-        # subdirectories inside lib/ (pkgconfig/cmake) — .so files already retried individually on busy; subdirs are copied tree-wide directly
-        for sub in sorted((src / "lib").iterdir()):
-            if sub.is_dir():
-                shutil.copytree(sub, lib_dir / sub.name, dirs_exist_ok=True)
-        # everything else (include/.pc/cmake/python/wheel/node) copied tree-wide — .so files already retried individually on busy
+        # SR4 L5 (T0 #17): the cmake-owned half (lib triple + symlinks + strip,
+        # include tree, pkgconfig + cmake suite) reaches ANY prefix through the SAME
+        # install rules the build used -- one route, one owner, zero hand-laid copies.
+        # ETXTBSY policy stays invocation-side: retry the install after killing the
+        # occupiers (install is idempotent -- rerun-safe by cmake semantics).
+        _bind_build = ROOT / "build" / "presets" / "bindings"
+        if not (_bind_build / "CMakeCache.txt").exists():
+            _run_or_exit(["cmake", "--preset", "bindings",
+                          f"-DCMAKE_BUILD_TYPE={'Release' if release else 'Debug'}"], cwd=str(ROOT))
+        ctypes = ["cmake", "--install", str(_bind_build), "--prefix", str(prefix_p), "--strip"]
+        for attempt in range(3):
+            r = subprocess.run(ctypes, cwd=str(ROOT), capture_output=True, text=True)
+            if r.returncode == 0:
+                break
+            blob = (r.stdout or "") + (r.stderr or "")
+            if "busy" not in blob.lower() and "Text file" not in blob or attempt == 2:
+                print(f"Error: cmake --install into {prefix_p} failed (rc={r.returncode}):\n{blob[-600:]}", file=sys.stderr)
+                sys.exit(1)
+            print(f"  install hit busy artifacts — killing occupiers, retrying ({attempt + 1}/3)")
+            for so in sorted(lib_dir.glob("libmediaservo_*.so*")):
+                _kill_using(so)
+        sos = sorted(x.name for x in lib_dir.glob("libmediaservo_*.so*"))
+        # language-native half (wheel/, node/, docs/, pip site-packages under lib/)
+        # stays python-side per SR4 §1.3 -- the cmake rules never touch them.
+        # pkgconfig/ + cmake/ under lib/ are RULE-OWNED (L3) -- re-copying them from
+        # the out tree would resurrect the two-writer disease; only python3.* moves.
+        for sub in sorted((src / "lib").glob("python3.*/")):
+            shutil.copytree(sub, lib_dir / sub.name, dirs_exist_ok=True)
         for e in sorted(src.iterdir()):
-            if e.name == "lib":
-                continue
+            if e.name in ("lib", "include"):
+                continue  # cmake-owned (L1-L3 rules) -- do not double-lay
             dst = prefix_p / e.name
             if e.is_dir():
                 shutil.copytree(e, dst, dirs_exist_ok=True)
