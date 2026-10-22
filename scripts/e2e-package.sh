@@ -5,6 +5,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# SR4/P-0 (full-review B-3): the host section runs doctor/start/status/stop smoke AND
+# its EXIT trap wipes /tmp/iceoryx2 = the live-cluster mutual-exclusion face (PIT-192/
+# PIT-235 family). SDK-layout leg judges may NOT run it whole. `--sdk-only` skips the
+# host packaging/lifecycle entirely and asserts NO managed process was touched.
+SDK_ONLY=0
+[ "${1:-}" = "--sdk-only" ] && SDK_ONLY=1
+
 export PATH="$HOME/.pixi/bin:$PATH"
 
 FAIL=0
@@ -29,7 +36,12 @@ if [ ! -f target/debug/libmediaservo_field.so ] || [ ! -f target/debug/libmedias
 fi
 
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"; rm -rf /tmp/iceoryx2 /dev/shm/iox2_*' EXIT
+if [ "$SDK_ONLY" = 1 ]; then
+    trap 'rm -rf "$TMP"' EXIT   # no SHM wipes: sdk legs must not touch shared runtime (PIT-192)
+else
+    trap 'rm -rf "$TMP"; rm -rf /tmp/iceoryx2 /dev/shm/iox2_*' EXIT
+fi
+PROC_BASE=$(ps -eo comm 2>/dev/null | grep -cE '^(mediaservo-|msrtc-|oxmgr)' || true)
 
 # Platform/arch suffix in package names (user ruling 2026-10-19, scheme A): the same
 # package name ships different binaries per machine; use a glob so any arch matches.
@@ -39,6 +51,7 @@ HOST_ROOT="mediaservo-host-$VER-linux-$ARCH"
 SDK_TGZ="dist/mediaservo-sdk-$VER-linux-$ARCH.tar.gz"
 SDK_ROOT="mediaservo-sdk-$VER-linux-$ARCH"
 
+if [ "$SDK_ONLY" = 0 ]; then
 # ── 1. package host ─────────────────────────────────────
 note "package host (ver=$VER)"
 env MEDIASERVO_BRAND=mediaservo pixi run python3 scripts/mediaservo_cli.py package host
@@ -105,6 +118,8 @@ if command -v oxmgr >/dev/null 2>&1 && [ -x "$BIN/mediaservo-host" ]; then
 else
     echo "NOTE: no oxmgr on PATH — skipping the host doctor/start/status/stop runtime smoke"
 fi
+
+fi   # SDK_ONLY==0 host sections 1-3 end
 
 # ── 4. package bindings ──────────────────────────────
 note "package bindings (ver=$VER)"
@@ -199,4 +214,14 @@ if [ "$FAIL" = 0 ]; then
     echo "PASS: package e2e all green ($HOST_TGZ + $SDK_TGZ)"
 else
     echo "FAIL: $FAIL checks failed"; exit 1
+fi
+
+# P-0 guard: the sdk-only slice must leave the managed-process census untouched.
+if [ "$SDK_ONLY" = 1 ]; then
+    PROC_NOW=$(ps -eo comm 2>/dev/null | grep -cE '^(mediaservo-|msrtc-|oxmgr)' || true)
+    if [ "$PROC_NOW" != "$PROC_BASE" ]; then
+        echo "FAIL: sdk-only run changed the managed-process census ($PROC_BASE -> $PROC_NOW)"
+        exit 1
+    fi
+    echo "OK: sdk-only guard held (managed-process census $PROC_BASE unchanged, no SHM wipe)"
 fi
