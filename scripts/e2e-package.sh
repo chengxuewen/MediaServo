@@ -153,11 +153,20 @@ echo "$LIST" | grep -q "^$SDK_ROOT/docs/sdk-cxx/client.md$" && { echo "FAIL: sdk
 echo "OK: SDK package key files complete (versioned top dir $SDK_ROOT/ + lib triplet real files+symlinks + include + python + wheel + node + .pc + cmake + sdk-version.txt)"
 
 # ── V1b cockpit-half package (sdk-client standalone form) ──
-"$MSRTC_CLI" package sdk-client --dist "$TMP/dist" >/dev/null 2>&1 || { echo "FAIL: package sdk-client failed"; exit 1; }
+# pre-existing bug caught at first-ever execution of this section (10-22): MSRTC_CLI was
+# referenced but never defined -- full runs died earlier (host smoke), nothing reached :156.
+if [ -z "${MSRTC_CLI:-}" ]; then
+    _cli=(pixi run python3 scripts/mediaservo_cli.py)
+else
+    read -r -a _cli <<< "$MSRTC_CLI"
+fi
+"${_cli[@]}" package sdk-client --dist "$TMP/dist" >/dev/null 2>&1 || { echo "FAIL: package sdk-client failed"; exit 1; }
 CLI_TGZ=$(ls "$TMP/dist"/mediaservo-sdk-client-*.tar.gz | head -1)
 [ -n "$CLI_TGZ" ] || { echo "FAIL: sdk-client tar not generated"; exit 1; }
-CLI_ROOT=$(tar tzf "$CLI_TGZ" | head -1 | cut -d/ -f1)
+# list to a file FIRST (two latent bugs retired at first real execution 10-22:
+# `tar | head` = SIGPIPE under set -o pipefail; MSRTC_CLI was unbound)
 tar tzf "$CLI_TGZ" > "$TMP/cli-list.txt"
+CLI_ROOT=$(head -1 "$TMP/cli-list.txt" | cut -d/ -f1)
 for f in lib/libmediaservo_client.so "lib/libmediaservo_client.so.$MAJOR" \
          include/mediaservo/client.h include/mediaservo/client.hpp \
          lib/pkgconfig/mediaservo-client.pc lib/cmake/mediaservo/mediaservoConfig.cmake \
@@ -170,6 +179,7 @@ grep -q "site-packages" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client package 
 grep -qE "^$CLI_ROOT/docs/sdk-cxx/(field|link|deck).md$" "$TMP/cli-list.txt" && { echo "FAIL: sdk-client package polluted by device-side docs"; FAIL=1; }
 echo "OK: sdk-client half-package shaped (client-only + zero device-side contamination)"
 # N2 manifest content spot-check: the client package lists exactly one cmake component and ffmpeg=false (readelf-backed)
+mkdir -p "$TMP/cli"
 tar xzf "$CLI_TGZ" -C "$TMP/cli" "$CLI_ROOT/manifest.json" 2>/dev/null
 SPV=$(grep -oE "pub const SIGNALING_PROTOCOL_VERSION: u32 = [0-9]+" crates/mediaservo-common/src/protocol.rs | grep -oE "[0-9]+$")
 SMIN=$(grep -oE "pub const SIGNALING_PROTOCOL_MIN_SUPPORTED: u32 = [0-9]+" crates/mediaservo-common/src/protocol.rs | grep -oE "[0-9]+$")

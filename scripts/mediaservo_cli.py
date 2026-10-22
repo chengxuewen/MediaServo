@@ -531,6 +531,10 @@ def _cmd_build_bindings(release: bool = False) -> None:
         # the previous round's client.so corpse — the new wheel is correct but old files contaminate the install tree). Remove the old package tree before installing.
         for _old_sp in bind_dst.glob("lib/python3.*/site-packages/mediaservo"):
             shutil.rmtree(_old_sp, ignore_errors=True)
+        # 10-22 e2e first-run catch: dist-info siblings were never swept -- an 0.1.1-era
+        # corpse survived every rebuild and rode into BOTH half-packages.
+        for _old_di in bind_dst.glob("lib/python3.*/site-packages/mediaservo-*.dist-info"):
+            shutil.rmtree(_old_di, ignore_errors=True)
         r2 = subprocess.run([sys.executable, "-m", "pip", "install", "--prefix",
                              str(bind_dst), "--no-deps", str(fixed)],
                             capture_output=True, text=True)
@@ -1319,7 +1323,10 @@ def _stage_sdk_package(staging: Path, domain: str) -> None:
                 p.unlink()
         shutil.rmtree(staging / "wheel", ignore_errors=True)
         shutil.rmtree(staging / "node", ignore_errors=True)
-        for pydir in (staging / "lib").glob("python3.*/site-packages/mediaservo/"):  # pip --prefix lands here (not a top-level python/)
+        # the client half ships ZERO python: sweep the whole pip-prefix tree (package
+        # dir AND its dist-info siblings -- the mediaservo/-only glob was a real leak,
+        # caught by e2e-package's never-before-executed contamination assert).
+        for pydir in (staging / "lib").glob("python3.*"):
             shutil.rmtree(pydir, ignore_errors=True)
         for name in ("field.h", "field.hpp", "link.h", "link.hpp", "deck.h", "deck.hpp"):
             (staging / "include" / "mediaservo" / name).unlink(missing_ok=True)
