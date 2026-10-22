@@ -73,7 +73,7 @@ function(mediaservo_setup_crate_lanes)
     # F17-D cache posture (see header): both forms spell the dir explicitly so that
     # build/test/clean/ctest agree on ONE path.
     if(MEDIASERVO_SHARE_CARGO_TARGET)
-        set(_base "${CMAKE_SOURCE_DIR}/target")
+        set(_base "${MEDIASERVO_REPO_ROOT}/target")
         set(_clean OFF)   # clean button would rm -rf the gate cache (see header)
     else()
         set(_base "${CMAKE_BINARY_DIR}/.cargo-target")  # supplier default face, spelled
@@ -85,7 +85,7 @@ function(mediaservo_setup_crate_lanes)
         list(GET _parts 0 _pkg)
         list(GET _parts 1 _lib)
         list(GET _parts 2 _fold)
-        set(_manifest "${CMAKE_SOURCE_DIR}/${_fold}/Cargo.toml")
+        set(_manifest "${MEDIASERVO_REPO_ROOT}/${_fold}/Cargo.toml")
 
         set(_base_args "")
         if(_base)
@@ -122,7 +122,7 @@ function(mediaservo_setup_crate_lanes)
             --target-dir "${_base}" ENV "${_fenv}")
         add_test(NAME ${_pkg}-test COMMAND ${_cmd})
         set_tests_properties(${_pkg}-test PROPERTIES
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            WORKING_DIRECTORY "${MEDIASERVO_REPO_ROOT}"
             SKIP_RETURN_CODE 77
             LABELS "rust;lanes")
     endforeach()
@@ -146,8 +146,8 @@ function(mediaservo_setup_crate_lanes)
         polyorch_rust_build(
             TARGET ${_app}-bin BINARY
             PACKAGE ${_app} CRATE ${_app}
-            MANIFEST "${CMAKE_SOURCE_DIR}/crates/${_app}/Cargo.toml"
-            BASE_DIR "${CMAKE_SOURCE_DIR}/target"
+            MANIFEST "${MEDIASERVO_REPO_ROOT}/crates/${_app}/Cargo.toml"
+            BASE_DIR "${MEDIASERVO_REPO_ROOT}/target"
             FOLDER "crates/${_app}")
         if(_c23_inject)
             polyorch_rust_set_env_vars(TARGET ${_app}-bin ${_c23_inject})

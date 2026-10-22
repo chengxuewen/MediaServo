@@ -14,6 +14,13 @@
 #     INTERFACE_POLYORCH_VERSION; a bare (pre-D39) sentinel fails the property
 #     read — same loud discipline upstream. Floor = 0.3.0 (D42 LIB kind; our
 #     examples/crates lanes from S2 onward need it).
+
+# Repo anchor: this file lives in <repo>/cmake/, so defining-file dir + ".." is the
+# repo root in BOTH standalone and superbuild (ms_rtc shell / third-party embed) mode —
+# CMAKE_SOURCE_DIR is the WRONG anchor under a superbuild (it points at the outer root).
+# All MediaServo modules consume MEDIASERVO_REPO_ROOT (F24).
+get_filename_component(MEDIASERVO_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+set(MEDIASERVO_REPO_ROOT "${MEDIASERVO_REPO_ROOT}" CACHE INTERNAL "MediaServo repo root (superbuild-safe anchor)")
 # Escape hatch: a superbuild may point at its own checkout via
 #   -DMEDIASERVO_POLYORCH_DIR=<path>.
 
@@ -42,9 +49,10 @@ function(mediaservo_ensure_polyorch)
     if(MEDIASERVO_POLYORCH_DIR)
         set(_po "${MEDIASERVO_POLYORCH_DIR}")
     else()
-        # CMAKE_CURRENT_LIST_DIR inside a FUNCTION is the defining file's dir (cmake/);
-        # pin from the top-level source dir instead (measured sibling gotcha).
-        set(_po "${CMAKE_SOURCE_DIR}/PolyOrch")
+        # Repo-relative (superbuild-safe, F24): the pinned submodule checkout
+        # always lives next to this module's repo root, wherever the outer
+        # project happens to be.
+        set(_po "${MEDIASERVO_REPO_ROOT}/PolyOrch")
     endif()
     if(NOT EXISTS "${_po}/CMakeLists.txt")
         message(FATAL_ERROR

@@ -32,7 +32,7 @@ function(mediaservo_setup_bindings)
         polyorch_rust_setup()   # system route: cargo resolved from the caller env
     endif()
 
-    set(_root "${CMAKE_SOURCE_DIR}")
+    set(_root "${MEDIASERVO_REPO_ROOT}")
     set(_target_dir "${_root}/target")   # shared cache — see header for the why
 
     # -- lanes: 4 C shims + node napi (SHARED kind; build buttons + artifact handles) --
