@@ -1,4 +1,7 @@
 {
   "cmake.cmakePath": "${workspaceFolder}/.pixi/envs/default/bin/cmake",
-  "cmake.configureOnOpen": false
+  "cmake.configureOnOpen": true,
+  "cmake.configurePreset": "all",
+  "cmake.buildPreset": "all",
+  "cmake.testPreset": "all"
 }
