@@ -72,35 +72,44 @@ function(mediaservo_setup_bindings)
     # COMPONENTS + per-domain SDK_LIST), which the supplier stub+wrapper
     # shape cannot byte-replicate -- SR4 L3 ruling (2b), so only the
     # rendered-file TRANSPORT moved cmake-side.
-    # SR4 L2 (T0 #6): each SDK's own C header rides its own delivery call --
-    # HEADERS_DIRECTORY copies the CONTENTS of <root> (tree preserved), so
-    # bindings/c/mediaservo-<sdk>-c/include/mediaservo/<sdk>.h lands
-    # include/mediaservo/<sdk>.h, byte-shape identical to the old python glob
-    # copy. DESTINATION "include" is the delivered root (P4 default; spelled
-    # for the reader). P5 GLOB_HEADERS stays unused: its rows land under the
-    # planner-internal DEST_INCLUDE (include/), unreachable for the
-    # include/mediaservo delivery shape -- recorded as a supplier surface note,
-    # tree form (P4) is the right tool here anyway.
-    foreach(_sdk IN LISTS MEDIASERVO_BINDINGS_SDKS)
-        polyorch_rust_install(
-            TARGETS mediaservo-${_sdk}-c
-            SOVERSION ${PROJECT_VERSION_MAJOR}
-            VERSION ${PROJECT_VERSION}
-            HEADERS_DIRECTORY "${_root}/bindings/c/mediaservo-${_sdk}-c/include"
-            DESTINATION include
-            STRIP)
-    endforeach()
+    # SR4 L2+L4 single-call shape: one polyorch_rust_install carries all
+    # four delivery handles, and every header root funnels through one
+    # fan-in rule. Two supplier semantics force this exact form:
+    #   * P6 STALE_GLOB (L4, the 09-17 wheel-sweep family): the keep-manifest
+    #     is per-CALL, so the swept destination `lib/` needs a single owner --
+    #     four calls each sweeping lib/ would delete the siblings' landed real
+    #     files (documented interaction: co-located installs sharing a swept
+    #     destination must not rely on each other). TARGETS is multi-valued
+    #     (D46): one call lands all twelve names and the sweep runs once,
+    #     before the copy rows, deleting version-suffixed corpses that are
+    #     not this install's keep set.
+    #   * P4 HEADERS_DIRECTORY is single-valued per call; folding the C-shim
+    #     roots into the fan-in keeps the one-owner-per-subtree shape and the
+    #     byte-identical include/mediaservo layout (contents form: the root's
+    #     mediaservo/<sdk>.h lands as include/mediaservo/<sdk>.h).
+    # P5 GLOB_HEADERS unused: its rows land under the planner-internal
+    # DEST_INCLUDE (include/), not the delivered include/mediaservo shape --
+    # recorded as a supplier-surface note.
+    polyorch_rust_install(
+        TARGETS mediaservo-field-c mediaservo-link-c mediaservo-deck-c mediaservo-client-c
+        SOVERSION ${PROJECT_VERSION_MAJOR}
+        VERSION ${PROJECT_VERSION}
+        STALE_GLOB "libmediaservo_*.so.[0-9]*"
+        STRIP)
 
-    # SR4 L2 fan-in (T0 #6 common.h + #7 cxx hpp/recursive tree): six roots
-    # stage into the SAME include/mediaservo subtree. P4 is one directory per
-    # call and a second polyorch_rust_install per handle would restage the lib
-    # rows (two writers -- SR4 1.1 disease), so the fan-in is ONE stock
-    # install(DIRECTORY) rule (stock cmake, single owner, zero python):
+    # SR4 L2/L4 header fan-in (T0 #6/#7): ten roots stage into the SAME
+    # include/mediaservo subtree through ONE stock install(DIRECTORY) rule
+    # (stock cmake, single owner, zero python):
     #   bindings/c/include                      -> mediaservo/common.h
+    #   bindings/c/mediaservo-<sdk>-c/include   -> mediaservo/<sdk>.h
     #   bindings/cxx/include                    -> mediaservo/{detail,3rdparty}/** (recursive, NOTICE rides)
     #   bindings/cxx/mediaservo-<sdk>-cxx/include -> mediaservo/<sdk>.hpp
     install(DIRECTORY
         "${_root}/bindings/c/include/"
+        "${_root}/bindings/c/mediaservo-field-c/include/"
+        "${_root}/bindings/c/mediaservo-link-c/include/"
+        "${_root}/bindings/c/mediaservo-deck-c/include/"
+        "${_root}/bindings/c/mediaservo-client-c/include/"
         "${_root}/bindings/cxx/include/"
         "${_root}/bindings/cxx/mediaservo-field-cxx/include/"
         "${_root}/bindings/cxx/mediaservo-link-cxx/include/"
@@ -138,25 +147,9 @@ function(mediaservo_setup_bindings)
     add_custom_target(bindings-gen
         COMMENT "delivery manifests: ${_gen}/pkgconfig + ${_gen}/cmake (rendered at configure)")
 
-    # SR4 L3 (#9 transport, the pre-ruled row): the rendered manifests reach
-    # the delivery tree through install(FILES) rules -- python's copy2 loop is
-    # deleted in the same stroke (one leg, one owner). Direction is
-    # build-tree -> delivery-tree at INSTALL time (exactly the flow the python
-    # copy ran); nothing is copied INTO the build tree, so the F28 rejection
-    # stands untouched. Two rules, not one: the .pc and Config pairs have
-    # different DESTINATION prefixes.
-    install(FILES
-        "${_gen}/pkgconfig/mediaservo-field.pc"
-        "${_gen}/pkgconfig/mediaservo-link.pc"
-        "${_gen}/pkgconfig/mediaservo-deck.pc"
-        "${_gen}/pkgconfig/mediaservo-client.pc"
-        DESTINATION lib/pkgconfig)
-    install(FILES
-        "${_gen}/cmake/mediaservoConfig.cmake"
-        "${_gen}/cmake/mediaservoConfigVersion.cmake"
-        DESTINATION lib/cmake/mediaservo)
-
-    # -- SR4 L3 (T0 #9): transport of the rendered suite becomes install rules --
+    # -- SR4 L3 (T0 #9, the pre-ruled row): transport of the rendered suite becomes
+    # install rules. Direction is build-tree -> delivery-tree at INSTALL time (the
+    # exact flow python's copy2 ran); nothing lands INTO the build tree, F28 stands.
     # Stock install(FILES) rows (no P-primitive needed; the ORPHAN GUARD re-home
     # lands HERE, not in python). The python copy loop in build bindings died in
     # the same stroke (one leg, one owner). #16's SHAPE itself was already cmake-
