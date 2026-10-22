@@ -17,7 +17,7 @@
     },
     {
       "name": "bindings",
-      "displayName": "bindings - SDK lanes + renderers",
+      "displayName": "bindings - sdk lanes + renderers",
       "inherits": "default",
       "binaryDir": "${sourceDir}/build/presets/${presetName}",
       "cacheVariables": {
