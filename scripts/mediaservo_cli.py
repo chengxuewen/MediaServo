@@ -423,7 +423,8 @@ def _cmd_build_bindings(release: bool = False) -> None:
         shutil.copy2(node_so, node_node)
     # stage the delivery layout out/bindings (full SDK package mirror — completed per Momus HIGH3/Task 2.5):
     # D241 version triple + N7 strip = cmake install rules (SR4 L1); D248 headers (C/cxx)
-    # + pkgconfig .pc + cmake config + python fat wheel/site-packages + node package
+    # = cmake install rules (SR4 L2); pkgconfig .pc + cmake config transport moves at
+    # SR4 L3; python fat wheel/site-packages + node package stay language-native
     ver = _workspace_version()   # S3: deliverable .so triple = the shims' own (workspace) version
     major, minor, patch = ver.split(".")
     bind_dst = _out_root() / "bindings"
@@ -437,7 +438,6 @@ def _cmd_build_bindings(release: bool = False) -> None:
             _stale.unlink()
     pc_dst = lib_dst / "pkgconfig"; pc_dst.mkdir(parents=True, exist_ok=True)
     cmake_dst = lib_dst / "cmake" / "mediaservo"; cmake_dst.mkdir(parents=True, exist_ok=True)
-    inc_dst = bind_dst / "include" / "mediaservo"; inc_dst.mkdir(parents=True, exist_ok=True)
 
     # lib triple (D241) + N7 strip — SR4 L1: the copy/rename/link/strip legs are
     # cmake install RULES now (cmake/MediaServoBindings.cmake -> polyorch_rust_install
@@ -450,20 +450,10 @@ def _cmd_build_bindings(release: bool = False) -> None:
     _run_or_exit(["cmake", "--preset", "bindings", f"-DCMAKE_BUILD_TYPE={_btype}"], cwd=str(ROOT))
     _run_or_exit(["cmake", "--install", str(_bind_build), "--prefix", str(bind_dst), "--strip"], cwd=str(ROOT))
 
-    # include/mediaservo (D248): C common.h + per-sdk .h; cxx per-sdk .hpp + shared detail/3rdparty
-    for h in (ROOT / "bindings" / "c" / "include" / "mediaservo").glob("*.h"):
-        shutil.copy2(h, inc_dst)
-    for sdk in ALL_SDKS:
-        for h in (ROOT / f"bindings/c/mediaservo-{sdk}-c/include/mediaservo").glob("*.h"):
-            shutil.copy2(h, inc_dst)
-        for h in (ROOT / f"bindings/cxx/mediaservo-{sdk}-cxx/include/mediaservo").glob("*.hpp"):
-            shutil.copy2(h, inc_dst)
-    for f in (ROOT / "bindings" / "cxx" / "include" / "mediaservo").rglob("*"):
-        if not f.is_file():
-            continue
-        dst = inc_dst / f.relative_to(ROOT / "bindings" / "cxx" / "include" / "mediaservo")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(f, dst)
+    # include/mediaservo (D248) -- SR4 L2: header staging is cmake install
+    # rules now (HEADERS_DIRECTORY per SDK call + one stock install(DIRECTORY)
+    # fan-in in cmake/MediaServoBindings.cmake). The tree form also lands the
+    # recursive cxx subtree (detail/, 3rdparty/ + NOTICE) that python rglob'd.
 
     # S3: the .pc + cmake-config renderers live on the cmake bindings surface
     # (cmake/MediaServoBindings.cmake — .pc stamped per DOMAIN crate via cargo metadata,

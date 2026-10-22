@@ -68,13 +68,41 @@ function(mediaservo_setup_bindings)
     # `cmake --install ... --strip`. The dev-tree .so.<MAJOR> symlinks in
     # target/{debug,release} are NOT an install concern (T0 row #2, python
     # stays). No EXPORT yet: the package suite moves at leg 3 (byte-judge).
+    # SR4 L2 (T0 #6): each SDK's own C header rides its own delivery call --
+    # HEADERS_DIRECTORY copies the CONTENTS of <root> (tree preserved), so
+    # bindings/c/mediaservo-<sdk>-c/include/mediaservo/<sdk>.h lands
+    # include/mediaservo/<sdk>.h, byte-shape identical to the old python glob
+    # copy. DESTINATION "include" is the delivered root (P4 default; spelled
+    # for the reader). P5 GLOB_HEADERS stays unused: its rows land under the
+    # planner-internal DEST_INCLUDE (include/), unreachable for the
+    # include/mediaservo delivery shape -- recorded as a supplier surface note,
+    # tree form (P4) is the right tool here anyway.
     foreach(_sdk IN LISTS MEDIASERVO_BINDINGS_SDKS)
         polyorch_rust_install(
             TARGETS mediaservo-${_sdk}-c
             SOVERSION ${PROJECT_VERSION_MAJOR}
             VERSION ${PROJECT_VERSION}
+            HEADERS_DIRECTORY "${_root}/bindings/c/mediaservo-${_sdk}-c/include"
+            DESTINATION include
             STRIP)
     endforeach()
+
+    # SR4 L2 fan-in (T0 #6 common.h + #7 cxx hpp/recursive tree): six roots
+    # stage into the SAME include/mediaservo subtree. P4 is one directory per
+    # call and a second polyorch_rust_install per handle would restage the lib
+    # rows (two writers -- SR4 1.1 disease), so the fan-in is ONE stock
+    # install(DIRECTORY) rule (stock cmake, single owner, zero python):
+    #   bindings/c/include                      -> mediaservo/common.h
+    #   bindings/cxx/include                    -> mediaservo/{detail,3rdparty}/** (recursive, NOTICE rides)
+    #   bindings/cxx/mediaservo-<sdk>-cxx/include -> mediaservo/<sdk>.hpp
+    install(DIRECTORY
+        "${_root}/bindings/c/include/"
+        "${_root}/bindings/cxx/include/"
+        "${_root}/bindings/cxx/mediaservo-field-cxx/include/"
+        "${_root}/bindings/cxx/mediaservo-link-cxx/include/"
+        "${_root}/bindings/cxx/mediaservo-deck-cxx/include/"
+        "${_root}/bindings/cxx/mediaservo-client-cxx/include/"
+        DESTINATION include)
 
     # -- renderers: delivery manifests into the build tree (python stages these) --
     set(_gen "${CMAKE_CURRENT_BINARY_DIR}/bindings-gen")
