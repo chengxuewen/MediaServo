@@ -8,12 +8,13 @@
 #   * cargo keeps build authority: this file registers driver surface only
 #     (LIB-kind rlib lanes + test buttons + ctest twins) — zero compilation rules,
 #     the lanes shell `cargo` through the supplier command wrapper.
-#   * cache posture (F17-D): default = supplier build-tree-local `.cargo-target`
-#     + honest whole-face clean buttons. Under `-DMEDIASERVO_SHARE_CARGO_TARGET=ON`
-#     lanes point at the workspace target/ (shared with bare cargo, S0(c) steady
-#     alternation) and clean buttons are NOT registered — rm -rf there would
-#     annihilate the authoritative gate cache (RustHelpers:2042+ wipes the whole
-#     dir, no supplier guard).
+#   * cache posture (F17-D, narrowed by SR2/D44): default = supplier build-tree-local
+#     `.cargo-target` + honest whole-face clean buttons. Under
+#     `-DMEDIASERVO_SHARE_CARGO_TARGET=ON` lanes point at the workspace target/
+#     (shared with bare cargo, S0(c) steady alternation); a WHOLE-FACE clean button
+#     is never registered there (rm -rf would annihilate the authoritative gate
+#     cache) — per-package `cargo clean -p` buttons through the supplier wrapper
+#     (D44) are the sanctioned shared-mode form.
 #   * posture rule (F18): default features only — no stub variant lanes; the
 #     gate entry (bare-cargo all-gates) is untouched (§3/§7.4 invariant).
 #   * aarch64 (C23/S0b): the command wrapper strips host CC/CXX, so lanes here
@@ -32,7 +33,10 @@
 # the workspace target/ — deliberate F17-D exception like bindings: build:deploy,
 # systemd units, and doctor all read target/<profile>/<bin>; a separate face would
 # mint a second copy nobody deploys. No ctest twin (package -test compiles bins too);
-# no clean button in either mode (rm -rf of the shared cache is exactly what F17 bans).
+# `${_app}-bin-clean` exists in shared mode only — an alias of the crate-row -p
+# command (N6 button symmetry with -bin-build; corr runs lib+bin buttons off ONE
+# package-scoped command: cargo has no bins-only selector, -p covers rlib+exe
+# together). The separate face keeps its own whole-dir wipe instead.
 set(MEDIASERVO_APP_BINS mediaservo-host mediaservo-server mediaservo-client)
 
 set(MEDIASERVO_CRATE_LANES
@@ -74,10 +78,8 @@ function(mediaservo_setup_crate_lanes)
     # build/test/clean/ctest agree on ONE path.
     if(MEDIASERVO_SHARE_CARGO_TARGET)
         set(_base "${MEDIASERVO_REPO_ROOT}/target")
-        set(_clean OFF)   # clean button would rm -rf the gate cache (see header)
-    else()
+            else()
         set(_base "${CMAKE_BINARY_DIR}/.cargo-target")  # supplier default face, spelled
-        set(_clean ON)
     endif()
 
     foreach(_row IN LISTS MEDIASERVO_CRATE_LANES)
@@ -108,9 +110,15 @@ function(mediaservo_setup_crate_lanes)
             MANIFEST "${_manifest}" ${_base_args}
             FOLDER "${_fold}")
 
-        if(_clean)
-            # Whole-face honest clean (all lanes share one face dir) — same
-            # semantics the siblings document: never a sibling-only wipe.
+        if(MEDIASERVO_SHARE_CARGO_TARGET)
+            # Shared mode (F17-D/SR2): per-package `cargo clean -p` through the
+            # sanctioned wrapper (supplier D44) — manifest-parent cwd, sibling
+            # artifacts provably untouched (t-rust-clean-e2e judge).
+            polyorch_rust_clean(NAME ${_pkg}-clean PACKAGE ${_pkg}
+                MANIFEST "${_manifest}" ${_base_args} FOLDER "${_fold}")
+        else()
+            # Separate face: whole-face honest clean (all lanes share one
+            # build-tree-local dir) — wiping it IS the clean, zero-toolchain form.
             polyorch_rust_clean(NAME ${_pkg}-clean ${_base_args} FOLDER "${_fold}")
         endif()
 
@@ -152,12 +160,26 @@ function(mediaservo_setup_crate_lanes)
         if(_c23_inject)
             polyorch_rust_set_env_vars(TARGET ${_app}-bin ${_c23_inject})
         endif()
+        if(MEDIASERVO_SHARE_CARGO_TARGET)
+            # N6 alias pair with -bin-build (user ruling 2026-10-22): deliberately
+            # the SAME package-scoped command as ${_app}-clean above — registering
+            # the -p clean twice is idempotent by construction. Shared-branch gate
+            # REQUIRED: BASE_DIR hard-codes the workspace target/ here while the
+            # loop runs on BOTH faces.
+            polyorch_rust_clean(NAME ${_app}-bin-clean PACKAGE ${_app}
+                MANIFEST "${MEDIASERVO_REPO_ROOT}/crates/${_app}/Cargo.toml"
+                BASE_DIR "${MEDIASERVO_REPO_ROOT}/target"
+                FOLDER "crates/${_app}")
+        endif()
     endforeach()
 
     if(MEDIASERVO_SHARE_CARGO_TARGET)
-        set(_mode "shared workspace target/")
+        message(STATUS
+            "MediaServo crates lanes: shared workspace target/ "
+            "(clean = per-package cargo clean -p, D44)")
     else()
-        set(_mode "separate build-tree face")
+        message(STATUS
+            "MediaServo crates lanes: separate build-tree face "
+            "(clean = whole-face rm -rf)")
     endif()
-    message(STATUS "MediaServo crates lanes: ${_mode} (clean buttons ${_clean})")
 endfunction()
