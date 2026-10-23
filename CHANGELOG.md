@@ -5,6 +5,9 @@ teams); for development process details, consult git log directly. Newest versio
 
 ## [Unreleased]
 
+### Removed
+- [deploy] Three retired verbs (SR6 walkthrough rulings V1-V3): the transitional web runtime family (`run web`/`start web`/`stop web`/`restart web`/`status web`) — web is cluster-managed, use `msrtc-server start <dir>` (⚠ scripts driving the standalone CLI caddy must switch to the cluster); `ci` — the one true gate surface is `all-gates` (C46); `install` — the word now names only CMake's internal placement (`cmake --install` inside `deploy`), never a CLI verb (F31).
+
 ### Added
 - [deploy] Per-crate clean buttons on the shared-target presets (`host`/`server`/`all`): `mediaservo-*-clean` and the app-bin `mediaservo-*-bin-clean` alias run `cargo clean -p` through the sanctioned command wrapper (per-package scope only — the whole-face wipe stays banned there so the bare-cargo gate cache survives; separate-face presets keep their existing whole-face clean button). Needs the vendored PolyOrch v0.5.0 (supplier D44).
 

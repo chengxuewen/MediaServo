@@ -144,91 +144,8 @@ def _cmd_build_web() -> None:
     _stage_web_to_out()
 
 
-def _web_pid_file() -> Path:
-    return _native_runtime_dirs()[1] / "web-native.pid"
 
 
-def _run_web_native() -> None:
-    """run web — transitional form: standalone caddy serving static files + reverse proxy (deploy/caddy/Caddyfile.native).
-    After Phase 6, web is managed by the msrtc-server oxmgr process cluster (T17); this command retires."""
-    pid_file = _web_pid_file()
-    if pid_file.exists():
-        try:
-            alive = int(pid_file.read_text().strip())
-        except ValueError:
-            alive = -1
-        if alive > 0 and Path(f"/proc/{alive}").exists():
-            print(f"✓ web(caddy) already running pid={alive} — skipping start")
-            sys.exit(0)
-    if shutil.which("caddy") is None:
-        print("Error: caddy not in PATH — install the GitHub Releases prebuilt binary"
-              " (https://github.com/caddyserver/caddy/releases, sha512 in checksums.txt);"
-              "do not roll your own static server", file=sys.stderr)
-        sys.exit(2)
-    out_server = _out_root() / "server"
-    if not (out_server / "web" / "index.html").exists():
-        print(f"Error: no artifacts in {out_server / 'web'} — run mediaservo build web first", file=sys.stderr)
-        sys.exit(2)
-    cfg = ROOT / "deploy" / "caddy" / "Caddyfile.native"
-    log_path = _native_runtime_dirs()[1] / "web-native.log"
-    with open(log_path, "ab") as lf:
-        proc = subprocess.Popen(
-            ["caddy", "run", "--config", str(cfg), "--adapter", "caddyfile"],
-            cwd=str(out_server), stdout=lf, stderr=lf,
-            stdin=subprocess.DEVNULL, start_new_session=True)
-    pid_file.write_text(str(proc.pid))
-    print(f"✓ web running pid={proc.pid} — http://localhost:8080 (static root={out_server / 'web'}, "
-          f"reverse proxy 127.0.0.1:9800; log {log_path})")
-
-
-def _stop_web_native(allow_inactive: bool = False) -> None:
-    pid_file = _web_pid_file()
-    pid = -1
-    if pid_file.exists():
-        try:
-            pid = int(pid_file.read_text().strip())
-        except ValueError:
-            pid = -1
-    if pid > 0 and Path(f"/proc/{pid}").exists():
-        subprocess.run(["kill", str(pid)], check=False)
-        for _ in range(4):
-            if not Path(f"/proc/{pid}").exists():
-                break
-            time.sleep(0.5)
-        if Path(f"/proc/{pid}").exists():
-            subprocess.run(["kill", "-9", str(pid)], check=False)
-        print(f"web(caddy) stopped pid={pid}")
-    elif not allow_inactive:
-        print("web not running (pid file missing or process dead)", file=sys.stderr)
-        pid_file.unlink(missing_ok=True)
-        sys.exit(1)
-    pid_file.unlink(missing_ok=True)
-
-
-def _status_web_native() -> int:
-    """Exit codes: 0 = running and entrypoint returns 200 / 1 = not running or unreachable / 2 = probe error."""
-    pid_file = _web_pid_file()
-    if not pid_file.exists():
-        print("web: not running (no pid file)")
-        return 1
-    try:
-        pid = int(pid_file.read_text().strip())
-    except ValueError:
-        print("web: pid file corrupted")
-        return 2
-    if not Path(f"/proc/{pid}").exists():
-        print(f"web: not running (pid={pid} dead)")
-        return 1
-    try:
-        code = subprocess.run(
-            ["curl", "-s", "--noproxy", "*", "-o", "/dev/null", "-w", "%{http_code}",
-             "--max-time", "2", "http://127.0.0.1:8080/"],
-            capture_output=True, text=True, timeout=5, check=False).stdout.strip()
-    except Exception as e:
-        print(f"web: probe failed {e}", file=sys.stderr)
-        return 2
-    print(f"web: running pid={pid} entrypoint http={code or '—'}")
-    return 0 if code == "200" else 1
 
 
 def _build_stage_weaknet(release: bool) -> None:
@@ -1689,13 +1606,13 @@ def _server_runtime_hint(action: str) -> None:
     sb = f"{os.environ.get('MEDIASERVO_BRAND', '')}-server" if os.environ.get("MEDIASERVO_BRAND", "") else "mediaservo-server"
     print(f"{action} server: CLI wrapper removed — run via the instance directory:", file=sys.stderr)
     print(f"  deployed instance: <prefix>/bin/{sb} start|stop|restart|status <prefix> (not deployed yet: mediaservo deploy server --prefix <X>; bare-metal entry <prefix>/{sb})", file=sys.stderr)
-    print("  development: target/debug/mediaservo-server init . && start . --no-web (frontend transition: dev web = vite:5173 / run web = transitional caddy)", file=sys.stderr)
+    print("  development: target/debug/mediaservo-server init . && start . --no-web (frontend dev: dev web = vite:5173 pairs with --no-web; the browser entry itself is cluster-managed)", file=sys.stderr)
     print("  containers (modes 2/3): mediaservo up / down --env dev|prod unchanged", file=sys.stderr)
     print("  read-only probes kept: mediaservo status server | logs server", file=sys.stderr)
 
 
 def _cmd_start(args: argparse.Namespace) -> None:
-    """start <target> — server/host retired → guidance + exit 2 (T21/C39: instance-directory commands; containers use up); web = transitional caddy."""
+    """start <target> — server/host retired → guidance + exit 2 (T21/C39: instance-directory commands; containers use up)."""
     target = args.target
     if target == "server":
         _server_runtime_hint("start")
@@ -1703,8 +1620,6 @@ def _cmd_start(args: argparse.Namespace) -> None:
     elif target == "host":
         _host_runtime_hint("start")
         sys.exit(2)
-    elif target == "web":
-        _run_web_native()
     else:  # client
         print("start client: not implemented (client skeleton phase)", file=sys.stderr)
         sys.exit(1)
@@ -1712,11 +1627,7 @@ def _cmd_start(args: argparse.Namespace) -> None:
 
 def _cmd_restart(args: argparse.Namespace) -> None:
     target = args.target
-    """restart <target> — web = transitional caddy; server/host retired → guidance + exit 2 (instance-directory commands; containers up/down)."""
-    if target == "web":
-        _stop_web_native(allow_inactive=True)
-        _run_web_native()
-        return
+    """restart <target> — server/host retired → guidance + exit 2 (instance-directory commands; containers up/down)."""
     if target == "server":
         _server_runtime_hint("restart")
         sys.exit(2)
@@ -1870,7 +1781,7 @@ def _cmd_test_example(name: str | None) -> None:
 
 
 def _cmd_run(args: argparse.Namespace) -> None:
-    """run <target> — web = transitional caddy (:8080); server/host retired → guidance + exit 2 (T21/C39)."""
+    """run <target> — example = C++ examples runner; server/host retired → guidance + exit 2 (T21/C39)."""
     if args.target == "example":
         _cmd_run_example(args.rest)
     if args.target == "server":
@@ -1879,8 +1790,6 @@ def _cmd_run(args: argparse.Namespace) -> None:
     elif args.target == "host":
         _host_runtime_hint("run")
         sys.exit(2)
-    elif args.target == "web":
-        _run_web_native()
     else:
         print('run client: not implemented (client skeleton phase)', file=sys.stderr)
         sys.exit(1)
@@ -2063,11 +1972,8 @@ def _check_port_range_free(start: int, end: int, name: str) -> None:
 
 
 def _cmd_stop(args: argparse.Namespace) -> None:
-    """stop <target> — web = transitional caddy; server/host retired → guidance + exit 2 (containers: mediaservo down)."""
+    """stop <target> — server/host retired → guidance + exit 2 (containers: mediaservo down)."""
     target = args.target
-    if target == "web":
-        _stop_web_native()
-        return
     if target == "server":
         _server_runtime_hint("stop")
         sys.exit(2)
@@ -2125,20 +2031,6 @@ def _cmd_test() -> None:
     _run_or_exit(["cargo", "test", "--workspace", "--exclude", "mediaservo-server"])
 
 
-def _cmd_ci() -> None:
-    _check("cargo", "pixi environment not activated?")
-    _check("docker", "install docker and start the daemon")
-    steps = [
-        ["cargo", "fmt", "--all", "--", "--check"],
-        ["cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
-        ["cargo", "test", "--workspace", "--exclude", "mediaservo-server"],
-    ]
-    for step in steps:
-        code = _run(step)
-        if code != 0:
-            sys.exit(code)
-    _cmd_e2e(argparse.Namespace(suite="sfu"))
-
 
 def _rm_path(path: Path) -> None:
     """Delete a file or directory (general clean helper — binary files via unlink, directories via rmtree)."""
@@ -2179,17 +2071,6 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         _cmd_deploy_server(args.prefix)
 
 
-def _cmd_install_deprecated(args: argparse.Namespace) -> None:
-    """D1: install was renamed deploy — prints the migration hint then exits (not aliased — different semantics: source = out/ delivery layout + --prefix mandatory)."""
-    print(
-        "install was renamed deploy: the source is now the out/ delivery layout (stateful deployment — identity idempotence/oxmgr/systemd/env.sh),"
-        "--prefix is mandatory. Use: mediaservo deploy host|bindings --prefix <path> (vehicle host: --prefix /opt/mediaservo-host)",
-        file=sys.stderr,
-    )
-    if getattr(args, "args", []):
-        print(f"  (ignoring legacy args: {' '.join(args.args)})", file=sys.stderr)
-    sys.exit(2)
-
 
 def _cmd_clean(args: argparse.Namespace) -> None:
     """clean <target> — all|server|host|client (default all).
@@ -2217,7 +2098,6 @@ def _cmd_clean(args: argparse.Namespace) -> None:
             etc_d, logs_d, _ = _native_runtime_dirs()
             out_server = _out_root() / "server"
             targets = [logs_d / "server-native.pid", logs_d / "server-native.log",
-                       logs_d / "web-native.pid", logs_d / "web-native.log",  # transitional caddy runtime state (missed by T6, cleaned here)
                        out_server / "bin" / _exe_name("mediaservo-server"),
                        # weaknet staging reclaim (weaknet-server-integration [bF10]): out upstream name + both target profiles
                        out_server / "bin" / _exe_name("mediaservo-weaknet"),
@@ -2329,8 +2209,6 @@ def _cmd_status_runtime(args: argparse.Namespace) -> None:
         code = _status_server_native() if mode == "native" else _status_server_container(args.env)
     elif args.target == "host":
         code = _status_host()
-    elif args.target == "web":
-        code = _status_web_native()
     else:
         print("status client: not implemented (client skeleton phase)", file=sys.stderr)
     sys.exit(code)
@@ -2522,12 +2400,11 @@ def main() -> None:
   Mode 1 bare-metal delivery: build server (assembles bin/etc/web) → deploy server --prefix <X> →
              <X>/<brand>-server init/start/stop/status/restart/doctor <X> (startup on = boot anchor; bin physical name branded per D269)
     fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
-             | run web (transitional standalone caddy :8080 — joins the instance process cluster after Phase 6)
   Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
   Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
   bash-owned (SR6 batch-1, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version
   retired → guidance + exit 2: run/start/stop/restart server|host (C39 — use instance-directory commands; the container face up/down is unchanged)
-  read-only probes kept: status server|web / logs server / clean server
+  read-only probes kept: status server|host / logs server / clean server
   C++ example surface (p3): list example → build example [names…] → run example <name> / test example
              (foreground dev tool; artifacts in target/examples/bin/ — never in out/; the build-c prelude is auto-added)
   exit codes: status/logs/stop — 0 = success, 1 = not running/target missing, 2 = bad args / retirement guidance
@@ -2549,12 +2426,12 @@ def main() -> None:
 
 
 
-    restart_p = sub.add_parser("restart", help="restart <target>: web = transitional caddy; server/host retired → guidance + exit 2 (<prefix>/bin/mediaservo-server restart <dir>; containers up/down)")
-    restart_p.add_argument("target", choices=["host", "server", "web"])
+    restart_p = sub.add_parser("restart", help="restart <target>: server/host retired → guidance + exit 2 (<prefix>/bin/mediaservo-server restart <dir>; containers up/down)")
+    restart_p.add_argument("target", choices=["host", "server"])
     _add_mode_args(restart_p)
     restart_p.set_defaults(func=_cmd_restart)
-    run_p = sub.add_parser("run", help="run <target>: web = transitional caddy (:8080); server/host retired → guidance + exit 2 (instance commands: <prefix>/bin/mediaservo-server -h)")
-    run_p.add_argument("target", choices=["server", "host", "web", "example"])
+    run_p = sub.add_parser("run", help="run <target>: server/host retired → guidance + exit 2 (instance commands: <prefix>/bin/mediaservo-server -h); example = C++ examples")
+    run_p.add_argument("target", choices=["server", "host", "example"])
     run_p.add_argument("rest", nargs=argparse.REMAINDER,
                        help="run example only: <name> [app passthrough args…]")
     run_p.add_argument("--foreground", "-f", action="store_true", help="(retirement leftover — the server run branch is removed; no effect)")
@@ -2563,14 +2440,14 @@ def main() -> None:
                        help="(retirement leftover — for instance-side announcements use the MEDIASERVO_SFU_ANNOUNCED_IP env)")
     run_p.set_defaults(func=_cmd_run)
 
-    start_p = sub.add_parser("start", help="start <target> (default server): server retired → guidance + exit 2 (containers use up); host CLI wrapper removed; web = transitional caddy")
-    start_p.add_argument("target", nargs="?", choices=["host", "server", "web"], default="server")
+    start_p = sub.add_parser("start", help="start <target> (default server): server/host retired → guidance + exit 2 (containers use up; instance commands for the rest)")
+    start_p.add_argument("target", nargs="?", choices=["host", "server"], default="server")
     _add_mode_args(start_p)
     start_p.add_argument("--foreground", "-f", action="store_true", help="(retirement leftover — the server run branch is removed; no effect)")
     start_p.set_defaults(func=_cmd_start)
 
-    stop_p = sub.add_parser("stop", help="stop <target>: server/host retired → guidance + exit 2 (instance command stop <dir>; containers: mediaservo down); web = transitional caddy")
-    stop_p.add_argument("target", choices=["host", "server", "web"])
+    stop_p = sub.add_parser("stop", help="stop <target>: server/host retired → guidance + exit 2 (instance command stop <dir>; containers: mediaservo down)")
+    stop_p.add_argument("target", choices=["host", "server"])
     _add_mode_args(stop_p, allow_both=True)
     stop_p.set_defaults(func=_cmd_stop)
 
@@ -2594,17 +2471,12 @@ def main() -> None:
     test_p.add_argument("what", nargs="?", choices=["example"], default=None,
                         help="example = GUI/SDK example ctest surface (bare test = unchanged workspace semantics, F-A-9(1))")
     test_p.add_argument("name", nargs="?", help="example: filter by example name (ctest -R)")
-    sub.add_parser("ci", help="full CI chain: fmt → clippy → test → e2e sfu")
 
     deploy_p = sub.add_parser("deploy", help="deploy <target> (stateful landing — deploy does not trigger builds, source = out/ delivery tree): host|server|bindings; host/server --prefix mandatory (/opt needs root); bindings defaults to <out>/bindings")
     deploy_p.add_argument("target", choices=["bindings", "host", "server"])
     deploy_p.add_argument("--prefix", default=None, help="deployment prefix (mandatory for host/server: /opt/mediaservo-{host,server}; bindings defaults to <out>/bindings, out root follows the calling shell)")
     deploy_p.add_argument("--release", action="store_true", help="deploy release-profile assembled artifacts")
     deploy_p.set_defaults(func=_cmd_deploy)
-    # D1: install kept as a hidden prompt (not aliased — different semantics: source = out/ delivery layout + --prefix mandatory)
-    install_p = sub.add_parser("install", help="renamed to deploy (prints the migration hint then exits with 2)")
-    install_p.add_argument("args", nargs=argparse.REMAINDER, help="swallow passthrough args from old call sites (msrtc.sh still injects --prefix etc. before the T3 migration) — only prints the rename hint")
-    install_p.set_defaults(func=_cmd_install_deprecated)
     package_p = sub.add_parser("package", help="package <target>: host|server|sdk-field (device half; the old bindings name stays as a one-cycle alias)|sdk-client (cockpit half) → <dist>/<brand>-<target>-<ver>.tar.gz (D-H13/F12, includes the version contract and a versioned top-level dir)")
     package_p.add_argument("target", choices=["host", "server", "bindings", "sdk-field", "sdk-client"])
     package_p.add_argument("--dist", default="", help="output dir for the package tar and staging (default dist; the MSRTC release shell defaults to out/packages)")
@@ -2624,7 +2496,7 @@ def main() -> None:
     doctor_p = sub.add_parser("doctor", help="environment diagnosis (pixi/cargo/docker/node — the original status)")
     doctor_p.set_defaults(func=_cmd_doctor)
     status_p = sub.add_parser("status", help="health probe <target> (exit codes 0/1/2): server = bare metal (default) | compose containers (--mode compose) | host push processes")
-    status_p.add_argument("target", choices=["server", "host", "web"])
+    status_p.add_argument("target", choices=["server", "host"])
     _add_mode_args(status_p)
     status_p.set_defaults(func=_cmd_status_runtime)
 
@@ -2670,8 +2542,6 @@ def main() -> None:
     elif args.command == "status":
         _cmd_status_runtime(args)
 
-    elif args.command == "ci":
-        _cmd_ci()
     elif args.command == "test":
         if args.what == "example":
             _cmd_test_example(args.name)

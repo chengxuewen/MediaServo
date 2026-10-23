@@ -49,7 +49,7 @@ etc.) — init rendering is a one-time snapshot (improvement item: `init --port`
 <brand>-server monit|ps [dir]           # oxmgr TUI / resource columns
 ```
 
-The Python CLI's `run/start/stop/restart server` are retired → guidance (C39); `run web` remains transitional.
+The Python CLI's `run/start/stop/restart server` are retired → guidance (C39); the transitional `run web` caddy has been retired too (SR6 V1, 10-23): web runs cluster-managed (`msrtc-server start <dir>` owns the caddy app); CLI no longer exposes any web runtime target.
 
 ## 5. Troubleshooting
 
