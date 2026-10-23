@@ -120,6 +120,38 @@ function(_mediaservo_app_tree_server)
             "bin/${_wname} is NOT staged this time (does not block deploy; run build server)")
     endif()
 
+    # etc mirror (SR7 T2): the delivery tree's staged configs (server.yaml + the
+    # accounts/devices templates — whatever build staged) land into <prefix>/etc
+    # FIRST-WRITER-WINS: the PIT-160 contract (ops runtime data — hot-written
+    # devices.yaml, PSK-edited server.yaml — survives redeploys; proven as-found,
+    # the live out/etc bytes differ from config/ templates, so the source is the
+    # delivery tree, never the templates). install(FILES) rows cannot express a
+    # destination-exists condition, so this is one script-mode CODE leg over a
+    # configure-time glob (freshness rides the always-reconfigure at the call
+    # site); file(COPY) preserves modes exactly like python copy2 (664 family).
+    file(GLOB _etcFiles LIST_DIRECTORIES FALSE "${MEDIASERVO_SERVER_OUT_DIR}/etc/*")
+    set(_etcKeep "")
+    foreach(_f IN LISTS _etcFiles)
+        if(EXISTS "${_f}" AND NOT IS_DIRECTORY "${_f}")
+            list(APPEND _etcKeep "${_f}")
+        endif()
+    endforeach()
+    list(SORT _etcKeep)
+    if(_etcKeep)
+        install(CODE "
+            file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/etc\")
+            set(_etcSrc [==[${_etcKeep}]==])
+            foreach(_f IN LISTS _etcSrc)
+                get_filename_component(_n \"\${_f}\" NAME)
+                if(EXISTS \"\${CMAKE_INSTALL_PREFIX}/etc/\${_n}\")
+                    continue()
+                endif()
+                file(COPY \"\${_f}\" DESTINATION \"\${CMAKE_INSTALL_PREFIX}/etc\")
+                message(STATUS \"  etc/\${_n}: template landed\")
+            endforeach()
+        ")
+    endif()
+
     # bin whitelist reclaim (deploy-ops 4): delete *-server / *-weaknet / the
     # upstream server name that are not in THIS layout's keep manifest. oxmgr and
     # caddy never match the patterns (python predicate mirrored; the keep list is

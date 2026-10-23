@@ -13,6 +13,17 @@ teams); for development process details, consult git log directly. Newest versio
 - [deploy] Per-crate clean buttons on the shared-target presets (`host`/`server`/`all`): `mediaservo-*-clean` and the app-bin `mediaservo-*-bin-clean` alias run `cargo clean -p` through the sanctioned command wrapper (per-package scope only — the whole-face wipe stays banned there so the bare-cargo gate cache survives; separate-face presets keep their existing whole-face clean button). Needs the vendored PolyOrch v0.5.0 (supplier D44).
 
 ### Changed
+- [deploy] `deploy server`'s etc template landing moved to the cmake rules (SR7
+  T2): the first-writer-wins mirror (PIT-160 — an ops-edited etc/server.yaml or a
+  hot-written devices.yaml survives every redeploy, byte-preserved) is one
+  install(CODE) leg over a configure-time glob of the delivery tree in
+  cmake/MediaServoAppTree.cmake. Shape deviation from the plan's "install(FILES
+  RENAME)": the destination-exists condition + the dynamic source set (out/etc
+  carries runtime registry data, proven as-found) make static FILES rows wrong.
+  The app-tree configure now uses its own build/app-tree directory (preset
+  default's recipe with a -B override) so the IDE default tree never inherits
+  app cache variables. No flag changes; deploy output lines for per-file keeps
+  moved into the captured install log.
 - [deploy] `deploy server` lays its bin tree through CMake install rules now
   (cmake/MediaServoAppTree.cmake, SR7 T1 / F32-C): `bin/{brand}-server` and
   `bin/{brand}-weaknet` are PROGRAMS+RENAME rows over the same dual-source hunt

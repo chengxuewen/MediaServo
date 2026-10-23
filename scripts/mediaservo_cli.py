@@ -927,15 +927,19 @@ def _cmake_app_install(prefix_p: Path, tree: str, brand: str, release: bool) -> 
     and must never be frozen by a stale cache (PIT-189 family: never trust yesterday's
     tree). Brand and the delivery root ride cache variables (§1 rule 3: the CLI keeps
     invoke+brand, cmake describes layout)."""
-    cfg = ["cmake", "--preset", "default",
+    # Dedicated binaryDir (preset default's recipe, -B override): the app cache
+    # vars must NEVER land in build/presets/default — a later plain IDE/gates
+    # configure of that tree would inherit a stale MEDIASERVO_APP_TREE from the
+    # cache and FATAL on a missing delivery tree (fresh-clone IDE regression).
+    app_tree = ROOT / "build" / "app-tree"
+    cfg = ["cmake", "--preset", "default", "-B", str(app_tree),
            f"-DMEDIASERVO_APP_TREE={tree}",
            f"-DMEDIASERVO_BRAND={brand}",
            f"-DCMAKE_BUILD_TYPE={'Release' if release else 'Debug'}"]
     if tree == "server":
         cfg.append(f"-DMEDIASERVO_SERVER_OUT_DIR={_out_root() / 'server'}")
     _run_or_exit(cfg, cwd=str(ROOT))
-    inst = ["cmake", "--install", str(ROOT / "build" / "presets" / "default"),
-            "--prefix", str(prefix_p)]
+    inst = ["cmake", "--install", str(app_tree), "--prefix", str(prefix_p)]
     # ETXTBSY policy stays invocation-side (SR4 L5 precedent): graceful stop ran
     # above; a survivor (daemon respawn race) kills the occupier BY EXACT PATH and
     # re-runs the idempotent install (rerun-safe by cmake semantics).
@@ -1070,18 +1074,9 @@ def _cmd_deploy_server(prefix: str) -> None:
     # single-point migration predicate (includes the Caddyfile symmetric migration) — wnet_bin is this staging's target name (present = copy succeeded)
     migrated, carried_envs = _drop_stale_server_oxfile(prefix_p, bin_name, wnet_bin)
 
-    # etc templates — never overwrite when present (PIT-160; init is equally idempotent, double safety)
-    etc_dir = prefix_p / "etc"
-    etc_dir.mkdir(parents=True, exist_ok=True)
-    src_etc = src_root / "etc"
-    for f in sorted(src_etc.iterdir()) if src_etc.is_dir() else []:
-        if not f.is_file():
-            continue
-        if (etc_dir / f.name).exists():
-            print(f"  etc/{f.name} exists — kept (PIT-160)")
-        else:
-            shutil.copy2(f, etc_dir / f.name)
-            print(f"  etc/{f.name}: template landed")
+    # SR7 T2: the etc template mirror (first-writer-wins, PIT-160) is a cmake
+    # install(CODE) leg now (MediaServoAppTree.cmake) — run by the --install
+    # above; the per-file "exists — kept" quietness moved into the leg.
 
     # the web tree moves wholesale (caddy static root — absolute paths written into oxfile/Caddyfile by init)
     dst_web = prefix_p / "web"
