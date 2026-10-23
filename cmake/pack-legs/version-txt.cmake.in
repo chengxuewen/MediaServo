@@ -1,0 +1,13 @@
+# version-txt.cmake.in — D-H13/D-H14 protocol contract file (python _write_version_file port).
+# configure_file @ONLY embeds the constants; runs at install time against the staging root.
+file(WRITE "${CMAKE_INSTALL_PREFIX}/@PKG_NAME@-version.txt"
+"# mediaservo-@PKG_NAME@-@VER@ — protocol contract version declaration (D-H13/D-H14 minimal)
+workspace_version: @VER@
+frame_meta_version: @FW@
+token_schema_version: @TV@
+signaling_protocol_version: @SPV@
+signaling_min_supported: @SMIN@
+# host package deploy: bare unpack creates the versioned dir; to land into a prefix dir use `tar xzf <pkg>.tar.gz -C <prefix> --strip-components=1`
+# when multiple devices share one package, delete identity.json on each device and re-run
+# `host init <prefix>` (idempotent, existing credentials kept) to generate an independent device identity (G4)
+")

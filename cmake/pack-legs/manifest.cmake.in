@@ -1,0 +1,80 @@
+# manifest.cmake.in — N2 delivery discovery manifest over the STAGED tree (SR6 P1).
+# Byte-port of python _write_manifest_file (json.dumps indent=2 shape pinned by
+# e2e-package PYV + the md5 judge). Components come from the landed files; ffmpeg
+# evidence = readelf DT_NEEDED (absent tool / cannot-start = null, ran-but-empty =
+# false — python's exact polarities). f8f85db: policy-neutral (no IN_LIST).
+set(_root "${CMAKE_INSTALL_PREFIX}")
+
+set(_comps "")
+find_program(_readelf readelf)
+file(GLOB _sos "${_root}/lib/libmediaservo_*.so")
+list(SORT _sos)
+foreach(_so IN LISTS _sos)
+    get_filename_component(_n "${_so}" NAME)
+    string(REGEX REPLACE "^libmediaservo_" "" _c "${_n}")
+    string(REGEX REPLACE "\\.so$" "" _c "${_c}")
+    set(_ff "null")
+    if(_readelf)
+        file(REAL_PATH "${_so}" _real)
+        execute_process(COMMAND "${_readelf}" -d "${_real}"
+                        OUTPUT_VARIABLE _nee OUTPUT_QUIET ERROR_QUIET
+                        RESULT_VARIABLE _rc TIMEOUT 10)
+        if(NOT _rc EQUAL -1)
+            if(_nee MATCHES "NEEDED[^\n]*\\[libav(format|codec)")
+                set(_ff "true")
+            else()
+                set(_ff "false")
+            endif()
+        endif()
+    endif()
+    set(_e "")
+    string(APPEND _e "    {\n")
+    string(APPEND _e "      \"name\": \"${_c}\",\n")
+    string(APPEND _e "      \"lib\": \"lib/${_n}\",\n")
+    string(APPEND _e "      \"header\": \"include/mediaservo/${_c}.h\",\n")
+    string(APPEND _e "      \"pkgconfig\": \"lib/pkgconfig/mediaservo-${_c}.pc\",\n")
+    string(APPEND _e "      \"cmake_component\": \"${_c}\",\n")
+    string(APPEND _e "      \"requires_ffmpeg\": ${_ff}\n")
+    string(APPEND _e "    }")
+    list(APPEND _comps "${_e}")
+endforeach()
+
+# language-native discovery components (sdk-field half only)
+if("@DOMAIN@" STREQUAL "sdk-field")
+    if(EXISTS "${_root}/node")
+        list(APPEND _comps "    {\n      \"name\": \"node\"\n    }")
+    endif()
+    file(GLOB _pyd "${_root}/lib/python3.*/site-packages/mediaservo")
+    if(_pyd)
+        list(APPEND _comps "    {\n      \"name\": \"python\"\n    }")
+    endif()
+endif()
+
+set(_cb "")
+foreach(_e IN LISTS _comps)
+    if(_cb)
+        string(APPEND _cb ",\n${_e}")
+    else()
+        string(APPEND _cb "${_e}")
+    endif()
+endforeach()
+if(_cb)
+    set(_cb "[\n${_cb}\n  ]")
+else()
+    set(_cb "[]")
+endif()
+
+file(WRITE "${_root}/manifest.json" "{
+  \"schema\": 1,
+  \"package\": \"@DOMAIN@\",
+  \"version\": \"@VER@\",
+  \"components\": ${_cb},
+  \"protocol\": {
+    \"frame_meta_wire_version\": @FW@,
+    \"token_schema_version\": @TV@,
+    \"signaling_protocol_version\": @SPV@,
+    \"signaling_min_supported\": @SMIN@
+  },
+  \"generated_by\": \"mediaservo_cli package (D281/N2)\"
+}
+")

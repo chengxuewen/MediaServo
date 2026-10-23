@@ -24,6 +24,15 @@ teams); for development process details, consult git log directly. Newest versio
   5255a13: migrate_stale_files runs as init step 0, BEFORE the exists-skips;
   verified end-to-end on a temp prefix: drifted server-entry command -> .bak
   rotation -> re-render -> "merged 1 manual env entries", ops line survived).
+- [deploy] SR6 P1 L1: `package sdk-client` lays its release tree with cmake install
+  rules (new `cmake/MediaServoPack.cmake` + install-time legs for the domain sweep,
+  lib link pairs, manifest.json, the version contract file and the F11-X CHANGES
+  slice) and packs the staged tree with native CPack TGZ (`cpack --config`,
+  CPACK_INSTALLED_DIRECTORIES). Naming owner moved to cmake (package-root.txt
+  readback — python computes no second copy of the tar name). The other targets
+  (bindings alias / sdk-field / host / server) keep the python staging branch until
+  their own legs land. Judge: extracted tree byte-identical to the pre-change
+  baseline (file+symlink+dir name sets, per-file md5, 0 drift).
   ⚠ Deploy-path stderr no longer carries the old "run/oxfile.toml stale —
   backed up..." python wording (the init message is the single surface now), and
   a pre-5255a13 instance binary performs no drift rotation: re-init with the

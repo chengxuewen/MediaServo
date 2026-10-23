@@ -1234,6 +1234,56 @@ def _write_changes_file(staging: Path, target: str) -> None:
         print(f"WARN: CHANGES.md write failed ({e}) — packaging not blocked", file=sys.stderr)
 
 
+# SR6 P1: legs migrated to cmake install rules + CPack TGZ (one-leg-one-owner —
+# targets NOT in this set still run the python staging/tar branch in _cmd_package).
+_CPACK_PKG = {"sdk-client"}
+
+
+def _cpack_stage_sdk(staging: Path, args: argparse.Namespace) -> str:
+    """L1: stage the sdk halves via install rules (cmake/MediaServoPack.cmake gates
+    on -DMEDIASERVO_PKG). Returns the package-root name the tree computed — naming
+    owner = cmake (C42 + 10-19 platform-suffix formula ported; package-root.txt is
+    its readback channel, so python never re-derives the tar name)."""
+    src = _out_root() / "bindings"
+    if not src.exists():
+        print("Error: out/bindings does not exist — run build bindings first", file=sys.stderr)
+        sys.exit(1)
+    bdir = ROOT / "build" / "packages" / args.target
+    _run_or_exit(["cmake", "--preset", "default", "-B", str(bdir),
+                  f"-DMEDIASERVO_PKG={args.target}",
+                  f"-DMEDIASERVO_PKG_BRAND={args.brand}",
+                  f"-DMEDIASERVO_BIND_OUT={src}"], cwd=str(ROOT))
+    # reconfigure-always at the call site (SR7 discipline): the source-existence
+    # globs are configure-time truth (PIT-189 family)
+    _run_or_exit(["cmake", "--install", str(bdir), "--prefix", str(staging)], cwd=str(ROOT))
+    return (bdir / "package-root.txt").read_text().strip()
+
+
+def _cpack_pack(staging: Path, package_root: str, ver: str, dist: Path) -> Path:
+    """CPack TGZ over the staged tree (design (a)/(c)): the wrapper dir and the tar
+    name both come from CPACK_PACKAGE_FILE_NAME; symlinks and empty dirs survive
+    (measured on this cpack). Scratch goes to a dedicated temp work dir INSIDE dist
+    (same filesystem for the move; the work dir self-cleans — dist keeps only the
+    tar, matching the python path's footprint)."""
+    _check("cpack", "cmake's packaging tool missing — install cmake (>= 3.25)")
+    work = Path(tempfile.mkdtemp(prefix=".cpack-work-", dir=str(dist)))
+    try:
+        cfgp = work / "cpack-config.cmake"
+        cfgp.write_text(
+            'set(CPACK_GENERATOR "TGZ")\n'
+            'set(CPACK_PACKAGE_NAME "mediaservo")\n'
+            f'set(CPACK_PACKAGE_VERSION "{ver}")\n'
+            'set(CPACK_PACKAGE_DESCRIPTION "MediaServo release package")\n'
+            f'set(CPACK_PACKAGE_FILE_NAME "{package_root}")\n'
+            f'set(CPACK_INSTALLED_DIRECTORIES "{staging};/")\n')
+        _run_or_exit(["cpack", "--config", str(cfgp), "-B", str(work)], cwd=str(ROOT))
+        out = dist / f"{package_root}.tar.gz"
+        shutil.move(str(work / f"{package_root}.tar.gz"), str(out))
+        return out
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def _cmd_package(args: argparse.Namespace) -> None:
     """package <target> — <dist>/<brand>-{host|server|sdk}-<ver>.tar.gz multi-package release (D-H13).
     dist: --dist selects the output dir; defaults to the submodule dist/ when unspecified (the MSRTC release shell injects out/packages/).
@@ -1242,6 +1292,8 @@ def _cmd_package(args: argparse.Namespace) -> None:
     etc template / env.sh file assembly; build stays stateless) + tar contains bin 8/oxmgr/etc/identity/run/logs/recordings.
     bindings: staging copies out/bindings (full SDK layout — D241 version-full triple /.pc / cmake /
     wheel / node / cxx headers, completed by Task 2.5) → sdk package.
+    sdk-client: SR6 P1 L1 — staged by cmake install rules + packed by native CPack TGZ
+    (the python staging branch runs only for the non-migrated targets).
     staging temp dir → tar.gz; the tar's top level is the versioned dir {brand}-{target}-{ver}/, so a bare unpack never scatters credentials/binaries;
     to land directly into a prefix dir use `tar xzf package.tar.gz -C <prefix> --strip-components=1`."""
     if sys.platform == "win32":
@@ -1264,6 +1316,7 @@ def _cmd_package(args: argparse.Namespace) -> None:
     dist = Path(args.dist) if getattr(args, "dist", "") else ROOT / "dist"
     dist.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f"ms-{args.target}-pkg-", dir=str(dist)))
+    cpack_root = ""
     try:
         if args.target == "host":
             _cmd_deploy_host(str(staging), args.release, allow_stop=False)  # brand via MEDIASERVO_BRAND env / installed-instance derivation (D266)
@@ -1272,26 +1325,30 @@ def _cmd_package(args: argparse.Namespace) -> None:
         elif args.target in ("bindings", "sdk-field"):
             _stage_sdk_package(staging, "sdk-field")  # bindings = one-cycle alias (F12 rename WARN above)
         elif args.target == "sdk-client":
-            _stage_sdk_package(staging, "sdk-client")
+            cpack_root = _cpack_stage_sdk(staging, args)
         else:
             print(f"Error: unknown package target {args.target!r} (valid: host|server|sdk-field|sdk-client, bindings=alias)",
                   file=sys.stderr)
             sys.exit(2)
-        _write_version_file(staging, pkg_name)
-        if args.target in ("bindings", "sdk-field", "sdk-client"):
-            _write_manifest_file(staging, "sdk-client" if args.target == "sdk-client" else "sdk-field", staging)
-        prefix_name = args.brand if args.brand else "mediaservo"
-        _write_changes_file(staging, args.target)  # D280 single source + F11-X slicing (WARN-degraded, non-blocking)
+        if args.target in _CPACK_PKG:
+            package_root = cpack_root
+            out = _cpack_pack(staging, package_root, ver, dist)
+        else:
+            _write_version_file(staging, pkg_name)
+            if args.target in ("bindings", "sdk-field", "sdk-client"):
+                _write_manifest_file(staging, "sdk-client" if args.target == "sdk-client" else "sdk-field", staging)
+            prefix_name = args.brand if args.brand else "mediaservo"
+            _write_changes_file(staging, args.target)  # D280 single source + F11-X slicing (WARN-degraded, non-blocking)
         # Platform/arch in the package name + top-level dir (user ruling 2026-10-19, scheme A):
         # the same name ships different binaries per machine — x86_64 -> amd64, aarch64 -> arm64
         # (Go/Docker short form; the download-visible identity, not the Rust triple).
-        machine = platform.machine().lower()
-        arch = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(machine, machine)
-        package_root = f"{prefix_name}-{pkg_name}-{ver}-{sys.platform}-{arch}"
-        out = dist / f"{package_root}.tar.gz"
-        strip_package_binaries(staging)  # PIT-119: unstripped debug binaries (135-155MB each) → gzip 1.2GB timeout
-        with tarfile.open(out, "w:gz", compresslevel=6) as tar:  # default 9 is slowest; 6 is the engineering trade-off
-            tar.add(staging, arcname=package_root)  # unpacking creates the versioned dir; --strip-components=1 lands the prefix dir
+            machine = platform.machine().lower()
+            arch = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(machine, machine)
+            package_root = f"{prefix_name}-{pkg_name}-{ver}-{sys.platform}-{arch}"
+            out = dist / f"{package_root}.tar.gz"
+            strip_package_binaries(staging)  # PIT-119: unstripped debug binaries (135-155MB each) → gzip 1.2GB timeout
+            with tarfile.open(out, "w:gz", compresslevel=6) as tar:  # default 9 is slowest; 6 is the engineering trade-off
+                tar.add(staging, arcname=package_root)  # unpacking creates the versioned dir; --strip-components=1 lands the prefix dir
         print(f"✓ packaged: {out} ({out.stat().st_size // 1024} KiB)")
         print(f"  top-level dir: {package_root}/")
         print(f"  contents: {', '.join(sorted(e.name for e in staging.iterdir()))}")

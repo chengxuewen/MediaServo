@@ -59,6 +59,14 @@ include(cmake/MediaServoAppTree.cmake)
 if(MEDIASERVO_APP_TREE)
     mediaservo_setup_app_tree()
 endif()
+# SR6-P1 packaging: the release tars described natively (CPack TGZ only;
+# cmake/MediaServoPack.cmake). Registered only when the CLI package verb injects
+# -DMEDIASERVO_PKG — every other configure (presets/IDE/gates/deploy) stays
+# behavior-neutral, mirroring the SR7 app-tree gate.
+include(cmake/MediaServoPack.cmake)
+if(MEDIASERVO_PKG)
+    mediaservo_setup_pack()
+endif()
 
 # S5 web lanes: node surface over the supplier D43 pnpm support; the workspace:*
 # edge (admin -> client) becomes a real dependency (PIT-194 class fix).

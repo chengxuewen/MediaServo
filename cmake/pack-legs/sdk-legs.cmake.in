@@ -1,0 +1,38 @@
+# sdk-legs.cmake.in — staged lib link pairs + domain sweep (SR6 P1 sdk legs)
+# Runs at install time; CMAKE_INSTALL_PREFIX = the live staging root.
+set(_root "${CMAKE_INSTALL_PREFIX}")
+
+# dev/major symlink pairs (targets read verbatim from the source delivery tree at
+# configure time — no SOVERSION semantics invented here; file(REMOVE) first: python's
+# copytree landed over an empty dir, CREATE_LINK on an existing name would error)
+set(_specs @LINK_SPECS@)
+foreach(_s IN LISTS _specs)
+    string(FIND "${_s}" "=" _eq)
+    string(LENGTH "${_s}" _len)
+    string(SUBSTRING "${_s}" 0 "${_eq}" _ln)
+    math(EXPR _st "${_eq} + 1")
+    math(EXPR _w "${_len} - ${_st}")
+    string(SUBSTRING "${_s}" "${_st}" "${_w}" _tgt)
+    set(_lk "${_root}/lib/${_ln}")
+    if(EXISTS "${_lk}" OR IS_SYMLINK "${_lk}")
+        file(REMOVE "${_lk}")
+    endif()
+    file(CREATE_LINK "${_tgt}" "${_lk}" SYMBOLIC)
+endforeach()
+
+# Domain sweep of the shared subtrees (include/ pkgconfig/ docs/ — the only rows that
+# copy whole; wheel/node/python3.* land only on the half that owns them, so the
+# python sweep lists for those names are net no-ops here). file(REMOVE) on absent
+# names is a no-op = python's unlink(missing_ok=True) parity.
+if("@DOMAIN@" STREQUAL "sdk-client")
+    set(_others field link deck)
+else()
+    set(_others client)
+endif()
+foreach(_o IN LISTS _others)
+    file(REMOVE
+        "${_root}/include/mediaservo/${_o}.h"
+        "${_root}/include/mediaservo/${_o}.hpp"
+        "${_root}/lib/pkgconfig/mediaservo-${_o}.pc"
+        "${_root}/docs/sdk-cxx/${_o}.md")
+endforeach()
