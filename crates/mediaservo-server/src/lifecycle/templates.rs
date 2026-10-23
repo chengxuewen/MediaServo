@@ -477,6 +477,116 @@ fn discover_weaknet_bin(dir_bin: &Path) -> Option<std::path::PathBuf> {
         .find(|p| p.is_file() && super::is_executable(p))
 }
 
+/// weaknet guard inputs for the init pre-skip migration hook (the port of Python
+/// `_drop_stale_server_oxfile`'s presence+expectation pair [bF3]): `(bin present, expected
+/// entry command basename)`. Presence = the **renderer's own discovery** (render_oxfile writes
+/// the weaknet-serve entry iff discover_weaknet_bin finds an executable bin -- sharing the source
+/// makes guard<->render disagreement, i.e. rotate->re-render->rotate churn, impossible; the
+/// Python `.is_file()` check on the brand-derived name agrees with it on every layout deploy
+/// produces -- the residue whitelist retires other names). When bin is absent the expected stem
+/// falls back to the brand-derived `{bin_prefix}weaknet` (isomorphic with Python
+/// `_weaknet_bin_name`, whose default-brand branch is `mediaservo-weaknet`) -- a surviving entry
+/// pointing at a different name is still convicted while the bin is gone (Python verbatim).
+pub fn weaknet_guard_shape(dir_bin: &Path) -> (bool, String) {
+    match discover_weaknet_bin(dir_bin) {
+        Some(p) => {
+            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            (true, strip_exe(&name))
+        }
+        None => (false, format!("{}weaknet", brand::media_brand().bin_prefix)),
+    }
+}
+
+/// Literal `.exe` removal -- same normalization as the ported Python guard
+/// (`Path(...).name.removesuffix(".exe")`, applied on every platform).
+fn strip_exe(name: &str) -> String {
+    name.strip_suffix(".exe").unwrap_or(name).to_string()
+}
+
+/// The command basename of an oxfile entry: first token of `command = "<bin> <args...>"`,
+/// dir stripped, literal `.exe` removed (Python guard parity: `cmd.split()` ->
+/// `Path(parts[0]).name.removesuffix(".exe")`).
+fn oxfile_cmd_stem(value: &str) -> Option<String> {
+    let first = value.split_whitespace().next()?;
+    let name = Path::new(first).file_name()?.to_string_lossy().into_owned();
+    Some(strip_exe(&name))
+}
+
+/// oxfile migration predicate -- the faithful port of the Python guard
+/// `_drop_stale_server_oxfile`'s oxfile half [bF3]; the live call site is
+/// `lifecycle::migrate_stale_files` (init PRE-skip hook). True = the existing run/oxfile.toml
+/// must rotate to .bak so this init re-renders. Stale when
+///   (a) a server-entry command basename drifts: any entry whose command stem has the server
+///       shape (`mediaservo-server`/`*-server` -- the Python `== "mediaservo-server"` disjunct is
+///       subsumed by the suffix test, same set) but differs from expected_server; the shape gate
+///       keeps hand-edited web/caddy entries unconvicted;
+///   (b) the weaknet-serve entry's command basename drifts from expected_wnet (reachable only
+///       when the entry is present -- Python verbatim, conviction independent of bin presence);
+///   (c) weaknet bin present AND no weaknet-serve entry at all (post-mn2 form).
+/// Bin absent = conditional render with no entry is the correct form -> zero churn (no rename).
+/// The old file's [apps.env] re-absorption needs no port here: the rotation makes the following
+/// write_oxfile take the .bak as merge source (merge_manual_env, baked-wins) -- that is the Rust
+/// equivalent of Python `_reapply_carried_env` (pinned by m3_hand_edited_bak_survives_rotation).
+pub fn oxfile_migration_needed(
+    text: &str,
+    expected_server: &str,
+    expected_wnet: &str,
+    wnet_present: bool,
+) -> bool {
+    let mut stale = false;
+    let mut cur_app: Option<String> = None;
+    let mut in_env = false;
+    let mut saw_wnet_entry = false;
+    for line in text.lines() {
+        let t = line.trim();
+        if t == "[[apps]]" {
+            cur_app = None;
+            in_env = false;
+            continue;
+        }
+        // first `name = ...` line after an [[apps]] header owns the entry (Python verbatim:
+        // startswith("name") -- the [defaults] namespace line lands here too in the original,
+        // same quirk kept: it only ever names an app, and a brand namespace never equals
+        // "weaknet-serve", so the seen-set stays correct)
+        if t.starts_with("name") && t.contains('=') && cur_app.is_none() {
+            cur_app = t.split('=').nth(1).map(|s| s.trim().trim_matches('"').to_string());
+            saw_wnet_entry |= cur_app.as_deref() == Some(WEAKNET_APP);
+            continue;
+        }
+        if t.starts_with('[') {
+            in_env = t == "[apps.env]";
+            continue;
+        }
+        // Python swallows `=` lines inside [apps.env] into the env capture -- a command line
+        // there is env text, never convicted (and never read by oxmgr either).
+        if in_env || cur_app.is_none() || !t.starts_with("command") || !t.contains('=') {
+            continue;
+        }
+        let value = t.split('=').nth(1).unwrap_or_default().trim().trim_matches('"');
+        let Some(stem) = oxfile_cmd_stem(value) else {
+            continue;
+        };
+        if stem.ends_with("-server") && stem != expected_server {
+            stale = true;
+        }
+        if cur_app.as_deref() == Some(WEAKNET_APP) && stem != expected_wnet {
+            stale = true;
+        }
+    }
+    stale || (wnet_present && !saw_wnet_entry)
+}
+
+/// Caddyfile symmetric migration predicate [wF2] (the Python guard's etc/Caddyfile half):
+/// true = rotate the existing Caddyfile to .bak so this init re-renders with the weaknet
+/// reverse-proxy block. Trigger = bin present AND the block is missing.
+/// Block-present anchor = the literal `handle_path /weaknet` -- the functional core of the
+/// D3.1 finalized render form (the ticket shorthand `@weaknet` is NOT a template literal --
+/// anchoring on it would be forever false -> every init re-migrates without convergence; a
+/// lone `@wnroot` redirect is not a reverse proxy and does not count as block-present).
+pub fn caddyfile_migration_needed(text: &str, wnet_present: bool) -> bool {
+    wnet_present && !text.contains("handle_path /weaknet")
+}
+
 /// Absolute log paths (instance run/logs -- the OxMgr pitfall of resolving relative paths against the daemon's cwd; same lesson as host translate).
 fn push_logs(out: &mut String, name: &str, log_dir: &str) {
     out.push_str(&format!(
@@ -896,6 +1006,174 @@ mod tests {
         assert!(merged.contains("ALLOW_X = \"1\""), "genuine manual keys still merge");
         let keys = manual_env_keys(&old);
         assert_eq!(keys.len(), 1, "the N tally does not accept baked keys: {keys:?}");
+    }
+
+    // ---- bF3 port: init pre-skip stale-migration predicates ----
+
+    fn b_f3_app(name: &str, cmd: &str) -> String {
+        format!("[[apps]]\nname = \"{name}\"\ncommand = \"{cmd}\"\n")
+    }
+
+    #[test]
+    fn b_f3_oxfile_migration_predicate_table() {
+        // (healthy baseline) entry command basename == expectation -> no churn
+        let healthy =
+            b_f3_app("msrtc-server", "/x/bin/msrtc-server run --config /x/etc/server.yaml");
+        assert!(!oxfile_migration_needed(&healthy, "msrtc-server", "msrtc-weaknet", false));
+        // (a) server-entry basename drift -> rotate (D269 original semantics)
+        let drift =
+            b_f3_app("msrtc-server", "/x/bin/mediaservo-server run --config /x/etc/server.yaml");
+        assert!(
+            oxfile_migration_needed(&drift, "msrtc-server", "msrtc-weaknet", false),
+            "server basename drift"
+        );
+        // (b) weaknet entry basename drift -- convicted whether or not the bin is present
+        //     (Python runs the entry-present check ungated by wnet_present)
+        let wnet_drift =
+            b_f3_app(WEAKNET_APP, "/x/bin/old-brand-weaknet serve --listen 127.0.0.1:9810");
+        assert!(
+            oxfile_migration_needed(&wnet_drift, "msrtc-server", "msrtc-weaknet", true),
+            "wnet drift, bin present"
+        );
+        assert!(
+            oxfile_migration_needed(&wnet_drift, "msrtc-server", "msrtc-weaknet", false),
+            "wnet drift, bin gone"
+        );
+        // (c) entry missing AND bin present -> rotate; bin absent -> no entry expected = zero churn
+        assert!(
+            oxfile_migration_needed(&healthy, "msrtc-server", "msrtc-weaknet", true),
+            "entry missing while bin present"
+        );
+        // web-style first token (caddy) carries no server shape -> unconvicted (hand edits tolerated)
+        let web = b_f3_app(
+            "msrtc-web",
+            "/usr/bin/caddy run --config /x/etc/Caddyfile --adapter caddyfile",
+        );
+        assert!(
+            !oxfile_migration_needed(&web, "msrtc-server", "msrtc-weaknet", false),
+            "web entry shape gate"
+        );
+        // literal .exe normalized on the command stem (parity with the Python removesuffix)
+        let win =
+            b_f3_app("msrtc-server", "/x/bin/msrtc-server.exe run --config /x/etc/server.yaml");
+        assert!(
+            !oxfile_migration_needed(&win, "msrtc-server", "msrtc-weaknet", false),
+            ".exe normalized"
+        );
+        // [apps.env] swallows `=` lines (Python env-capture position) -- a command key there is env text
+        let in_env = format!("{healthy}[apps.env]\ncommand = \"/bin/evil-server x\"\n");
+        assert!(
+            !oxfile_migration_needed(&in_env, "msrtc-server", "msrtc-weaknet", false),
+            "env-table swallow"
+        );
+        // multi-entry file: second entry drifts -> convicted (seen-set + per-entry walk)
+        let multi = format!(
+            "{healthy}{}",
+            b_f3_app(WEAKNET_APP, "/x/bin/mediaservo-weaknet serve --listen 127.0.0.1:9810")
+        );
+        assert!(
+            oxfile_migration_needed(&multi, "msrtc-server", "msrtc-weaknet", true),
+            "weaknet entry basename drifts even inside a multi-entry file"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn b_f3_full_render_is_healthy_and_guard_inputs_agree() {
+        // The convergence property: guard inputs = the renderer's own brand/discovery sources,
+        // so a freshly rendered tree never re-migrates (rotate->render->rotate is structurally off).
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        touch_exec_bin(dir, "mediaservo-weaknet");
+        let (present, expected_wnet) = weaknet_guard_shape(&dir.join("bin"));
+        assert!(present);
+        assert_eq!(expected_wnet, "mediaservo-weaknet", "default brand derivation");
+        let text = render_oxfile(
+            dir,
+            &dir.join("bin").join(server_product()),
+            "caddy",
+            &[],
+            WEAKNET_SERVE_PORT,
+        );
+        assert!(
+            !oxfile_migration_needed(&text, &server_product(), &expected_wnet, present),
+            "guard must agree with its own render",
+        );
+        // bin removed again (fresh dir) -> guard shape falls back to the brand-derived expectation
+        let tmp2 = tempfile::tempdir().expect("tempdir2");
+        let (present2, expected2) = weaknet_guard_shape(&tmp2.path().join("bin"));
+        assert!(!present2);
+        assert_eq!(expected2, "mediaservo-weaknet");
+    }
+
+    #[test]
+    fn b_f3_caddyfile_migration_predicate_table() {
+        let with_block = render_caddyfile(8080, 9800, Path::new("/x/web"), "127.0.0.1:9810");
+        assert!(!caddyfile_migration_needed(&with_block, true), "block present -> no churn");
+        let without = "8080 {\n\treverse_proxy 127.0.0.1:9800\n}\n";
+        assert!(
+            caddyfile_migration_needed(without, true),
+            "block missing + bin present -> rotate [wF2]"
+        );
+        assert!(!caddyfile_migration_needed(without, false), "bin absent -> zero churn");
+        // the D3.1 form has no `@weaknet` literal -- anchor must be the handle_path line,
+        // a lone redirect must NOT count as block-present (Python comment parity)
+        let only_redir =
+            "8080 {\n\t@wnroot path /weaknet\n\tredir @wnroot \"/weaknet/?{query}\" 308\n}\n";
+        assert!(
+            caddyfile_migration_needed(only_redir, true),
+            "lone redir is not the reverse-proxy block"
+        );
+        assert!(!caddyfile_migration_needed(only_redir, false));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn m3_hand_edited_bak_survives_rotation_re_render() {
+        // M-3 demanded the .bak-not-rendered-from-manual-edits case: the hook rotates a stale
+        // oxfile to oxfile.toml.bak; the following init re-render (write_oxfile) takes the .bak as
+        // merge source. Composition pinned here at the pure level: predicate says stale, and
+        // merge_manual_env(.bak, new) keeps hand-edited non-managed keys while managed baked
+        // keys never resurrect (t4a/t4b own the polarity itself -- this test owns the rotation
+        // composition, i.e. Python `_reapply_carried_env` needs no second implementation).
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        touch_exec_bin(dir, "mediaservo-weaknet");
+        let (present, expected_wnet) = weaknet_guard_shape(&dir.join("bin"));
+        // old file: previous-brand server path (shape drift) + a hand-edited key + last
+        // render's managed SFU passthrough value
+        let old_base = render_oxfile(
+            dir,
+            &dir.join("bin").join("old-brand-server"),
+            "caddy",
+            &[("MEDIASERVO_SFU_PORT".to_string(), "20012".to_string())],
+            WEAKNET_SERVE_PORT,
+        );
+        let anchor = t4_logs_anchor(dir);
+        let old = old_base.replacen(&anchor, &format!("[apps.env]\nALLOW_X = \"1\"\n{anchor}"), 1);
+        assert!(
+            oxfile_migration_needed(&old, &server_product(), &expected_wnet, present),
+            "fixture must be stale: old-brand server path vs current expectation",
+        );
+        // rotation (rename to .bak) makes write_oxfile read exactly this text as merge source
+        let new = render_oxfile(
+            dir,
+            &dir.join("bin").join(server_product()),
+            "caddy",
+            &[],
+            WEAKNET_SERVE_PORT,
+        );
+        let merged = merge_manual_env(&old, &new);
+        assert!(merged.contains("ALLOW_X = \"1\""), "hand edit survives the rotation merge");
+        assert!(
+            !merged.contains("MEDIASERVO_SFU_PORT"),
+            "managed key never resurrects from the .bak"
+        );
+        assert!(!merged.contains("old-brand-server"), "drifted path leaves the rendered line");
+        assert!(
+            merged.contains(&format!("bin/{}", server_product())),
+            "current bin path is the render"
+        );
     }
 
     #[test]

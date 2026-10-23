@@ -20,11 +20,11 @@ use std::process::Command;
 use reap::{DirectReason, LiveProc, ProcKind, ReapStep, StepOutcome};
 
 use templates::{
-    DEFAULT_WEB_PORT, SFU_ENV_KEYS, WEAKNET_APP, WEAKNET_SERVE_PORT, gen_secret,
-    instance_daemon_port, looks_like_oxfile, manual_env_keys, merge_manual_env, oxfile_has_weaknet,
-    parse_listen_port, parse_weaknet_port, parse_web_port, render_admin_account, render_caddyfile,
-    render_oxfile, render_server_yaml, resolve_port, server_product, server_web_app,
-    weaknet_listen,
+    DEFAULT_WEB_PORT, SFU_ENV_KEYS, WEAKNET_APP, WEAKNET_SERVE_PORT, caddyfile_migration_needed,
+    gen_secret, instance_daemon_port, looks_like_oxfile, manual_env_keys, merge_manual_env,
+    oxfile_has_weaknet, oxfile_migration_needed, parse_listen_port, parse_weaknet_port,
+    parse_web_port, render_admin_account, render_caddyfile, render_oxfile, render_server_yaml,
+    resolve_port, server_product, server_web_app, weaknet_guard_shape, weaknet_listen,
 };
 
 /// Admin-plane subcommand table (main.rs dispatch predicate). `run` is not listed -- it goes to daemon mode (explicit form).
@@ -174,6 +174,9 @@ fn init_instance(dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(run.join("logs"))
         .map_err(|e| format!("failed to create run dir: {e}"))?;
 
+    // 0. bF3 port: stale migration BEFORE the exists-skips of steps 4/5 (see migrate_stale_files).
+    migrate_stale_files(dir)?;
+
     // 1. server.yaml (contains credentials -> 0600; skipped entirely if present -- secrets must not be regenerated/overwritten, entrypoint 2 idempotency)
     let cfg_path = etc.join("server.yaml");
     if cfg_path.exists() {
@@ -235,6 +238,52 @@ fn init_instance(dir: &Path) -> Result<(), String> {
         "init: instance ready {} (after start use the server log setup-token to create an account, or rerun init with MEDIASERVO_ADMIN_PASSWORD)",
         dir.display()
     );
+    Ok(())
+}
+
+/// Deploy-time oxfile/Caddyfile staleness guard, ported from Python
+/// `_drop_stale_server_oxfile` into the managed binary (S6 batch-4 precondition).
+///
+/// **Ordering fact (bF3 -- survives the Python guard's eventual deletion):** the detection must
+/// run BEFORE the exists-skips of init steps 4 (Caddyfile) and 5 (oxfile). The Python docstring
+/// recorded that "Rust init always skips when oxfile exists, so a Rust-side write of the
+/// detection would never be called [bF3]" -- this pre-skip hook is the call site that broke that
+/// constraint; a detection placed after a skip is born dead.
+///
+/// Rotation = rename to `.bak` (same suffix names as the Python guard: oxfile.toml.bak /
+/// Caddyfile.bak -- `fs::rename` overwrites an existing .bak exactly like Python
+/// `Path.replace`), then the EXISTING init flow re-renders in the same call: write_oxfile takes
+/// the rotated .bak as its merge source, so ops-edited [apps.env] lines survive and managed
+/// baked keys win (merge_manual_env -- Python `_reapply_carried_env` gets no second
+/// implementation; polarity pinned by t4a/t4b + m3_hand_edited_bak_survives_rotation). The
+/// Caddyfile has no env surface; its .bak is inert (oxmgr/caddy read the explicit path).
+fn migrate_stale_files(dir: &Path) -> Result<(), String> {
+    let (wnet_present, expected_wnet) = weaknet_guard_shape(&dir.join("bin"));
+    let expected_server = server_product();
+    let oxfile = dir.join("run").join("oxfile.toml");
+    if let Ok(text) = std::fs::read_to_string(&oxfile)
+        && oxfile_migration_needed(&text, &expected_server, &expected_wnet, wnet_present)
+    {
+        let bak = dir.join("run").join("oxfile.toml.bak");
+        std::fs::rename(&oxfile, &bak).map_err(|e| {
+            format!("stale-oxfile rotation {} -> {}: {e}", oxfile.display(), bak.display())
+        })?;
+        eprintln!(
+            "init: run/oxfile.toml is stale (bin rename migration / weaknet entry missing or basename drift) -- rotated to run/oxfile.toml.bak; this init re-renders (manual env re-absorbed from the .bak, baked values win; the manual-line list stays in the msrtc.sh -h environment section [B])"
+        );
+    }
+    let caddy = dir.join("etc").join("Caddyfile");
+    if let Ok(text) = std::fs::read_to_string(&caddy)
+        && caddyfile_migration_needed(&text, wnet_present)
+    {
+        let bak = dir.join("etc").join("Caddyfile.bak");
+        std::fs::rename(&caddy, &bak).map_err(|e| {
+            format!("stale-Caddyfile rotation {} -> {}: {e}", caddy.display(), bak.display())
+        })?;
+        eprintln!(
+            "init: etc/Caddyfile lacks the weaknet reverse-proxy block while the weaknet bin is present -- rotated to etc/Caddyfile.bak; this init re-renders (same migration trigger as the oxfile -- [lck-F4] half-migration guard: unit up + /weaknet 404 must not coexist)"
+        );
+    }
     Ok(())
 }
 
@@ -1401,6 +1450,58 @@ mod tests {
         let jwt = sa.lines().find(|l| l.starts_with("jwt_secret:")).expect("jwt line");
         let adjwt = sa.lines().find(|l| l.starts_with("admin_jwt_secret:")).expect("admin line");
         assert_eq!(jwt.split(':').nth(1).expect("v1"), adjwt.split(':').nth(1).expect("v2"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn migrate_stale_files_hook_rotates_then_converges() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        let run = dir.join("run");
+        let etc = dir.join("etc");
+        std::fs::create_dir_all(&run).expect("run");
+        std::fs::create_dir_all(&etc).expect("etc");
+        // oxfile WITHOUT the weaknet entry (rendered before the bin exists) + Caddyfile without
+        // the weaknet block = the pre-weaknet-deploy shape; then the deploy stages the bin.
+        let old_ox = templates::render_oxfile(
+            dir,
+            &dir.join("bin").join(server_product()),
+            "caddy",
+            &[],
+            templates::WEAKNET_SERVE_PORT,
+        );
+        std::fs::write(run.join("oxfile.toml"), &old_ox).expect("oxfile");
+        std::fs::write(etc.join("Caddyfile"), "8080 {\n\treverse_proxy 127.0.0.1:9800\n}\n")
+            .expect("caddy");
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).expect("bin");
+        let wnet = bin.join("mediaservo-weaknet");
+        std::fs::write(&wnet, b"#!/bin/sh\n").expect("wnet");
+        std::fs::set_permissions(&wnet, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        migrate_stale_files(dir).expect("migrate");
+        assert!(
+            !run.join("oxfile.toml").exists() && run.join("oxfile.toml.bak").exists(),
+            "stale oxfile rotated to the Python suffix",
+        );
+        assert!(
+            !etc.join("Caddyfile").exists() && etc.join("Caddyfile.bak").exists(),
+            "stale Caddyfile rotated",
+        );
+        // the following normal init flow re-renders both files with the weaknet shape
+        init_instance(dir).expect("re-render init");
+        let ox = std::fs::read_to_string(run.join("oxfile.toml")).expect("ox re");
+        assert!(ox.contains(WEAKNET_APP), "re-render carries the weaknet entry");
+        let cf = std::fs::read_to_string(etc.join("Caddyfile")).expect("cf re");
+        assert!(cf.contains("handle_path /weaknet"), "re-render carries the proxy block");
+        // convergence: a second hook pass on the fresh render is zero-churn (no re-rotation)
+        migrate_stale_files(dir).expect("migrate 2");
+        assert_eq!(
+            std::fs::read_to_string(run.join("oxfile.toml")).expect("ox 2"),
+            ox,
+            "healthy render must not re-migrate (bF3 convergence)",
+        );
+        assert!(run.join("oxfile.toml.bak").exists() && etc.join("Caddyfile").exists());
     }
 
     #[test]
