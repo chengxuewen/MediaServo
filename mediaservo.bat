@@ -15,5 +15,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-python "%ROOT%scripts\mediaservo_cli.py" %*
-exit /b %errorlevel%
+echo mediaservo.bat: the python CLI entry retired (SR6 batch-beta-2) — the verb surface 1>&2
+echo lives in mediaservo.sh (bash): build/package/deploy/ops. Windows-native is an 1>&2
+echo open item (pixi.toml has no win-64 platform; see docs/modules/25-abi-baseline.md). 1>&2
+exit /b 2

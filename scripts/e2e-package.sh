@@ -17,7 +17,7 @@ export PATH="$HOME/.pixi/bin:$PATH"
 FAIL=0
 note() { echo "== $1"; }
 
-# Workspace version (same source as mediaservo_cli.py _workspace_version: Cargo.toml [workspace.package])
+# Workspace version (same source as the bash _ms_workspace_version: Cargo.toml [workspace.package])
 # After V1a the four sources are independent: reading workspace is still correct while all four values match; when V1b
 # splits the four package names this must switch to per-target domain reads (same source as the cli _TARGET_CRATE table) — host package checks the host crate, sdk package checks the field crate.
 VER=$(sed -n '/\[workspace.package\]/,/^\[/p' Cargo.toml | sed -n 's/^version *= *"\(.*\)"/\1/p' | head -1)
@@ -54,7 +54,7 @@ SDK_ROOT="mediaservo-sdk-$VER-linux-$ARCH"
 if [ "$SDK_ONLY" = 0 ]; then
 # ── 1. package host ─────────────────────────────────────
 note "package host (ver=$VER)"
-env MEDIASERVO_BRAND=mediaservo pixi run python3 scripts/mediaservo_cli.py package host
+env MEDIASERVO_BRAND=mediaservo bash ./mediaservo.sh package host
 [ -f "$HOST_TGZ" ] || { echo "FAIL: missing $HOST_TGZ"; FAIL=1; }
 
 # ── 2. host package content asserts (versioned top dir + D-H13 layout + host-version.txt) ────
@@ -123,7 +123,7 @@ fi   # SDK_ONLY==0 host sections 1-3 end
 
 # ── 4. package bindings ──────────────────────────────
 note "package bindings (ver=$VER)"
-env MEDIASERVO_BRAND=mediaservo pixi run python3 scripts/mediaservo_cli.py package bindings
+env MEDIASERVO_BRAND=mediaservo bash ./mediaservo.sh package bindings
 [ -f "$SDK_TGZ" ] || { echo "FAIL: missing $SDK_TGZ"; FAIL=1; }
 
 # ── 5. SDK package key-file asserts ────────────────────────
@@ -156,7 +156,7 @@ echo "OK: SDK package key files complete (versioned top dir $SDK_ROOT/ + lib tri
 # pre-existing bug caught at first-ever execution of this section (10-22): MSRTC_CLI was
 # referenced but never defined -- full runs died earlier (host smoke), nothing reached :156.
 if [ -z "${MSRTC_CLI:-}" ]; then
-    _cli=(pixi run python3 scripts/mediaservo_cli.py)
+    _cli=(bash ./mediaservo.sh)
 else
     read -r -a _cli <<< "$MSRTC_CLI"
 fi

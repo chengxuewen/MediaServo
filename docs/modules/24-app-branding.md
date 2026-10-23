@@ -79,7 +79,7 @@ MEDIASERVO_BRAND=cp ./target/debug/mediaservo-host startup on <dir>  # unit oxmg
 - `crates/mediaservo-host/src/bin/host.rs`: USAGE/version/namespace filter/unit names
 - `crates/mediaservo-host/src/translate.rs`: `app_name()` (app prefix) + oxfile namespace
 - `crates/mediaservo-host/src/identity.rs`: `generate_identity()` device prefix
-- `scripts/mediaservo_cli.py`: `deploy host --brand` / `package host --brand`
+- `mediaservo.sh` (bash driver): the `deploy host` / `package host --brand` brand chain; delivery layout truth lives in `cmake/MediaServo{AppTree,Pack}.cmake`
 - `www/apps/admin/vite.config.ts`: `__APP_TITLE__` define
 
 Plan: `docs/superpowers/plans/2026-08-21-app-branding-customization.md`

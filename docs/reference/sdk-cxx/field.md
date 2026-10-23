@@ -359,7 +359,7 @@ the common-cxx contract).
 
 `./msrtc.sh build bindings` (or the submodule's `mediaservo.sh build bindings` / `deploy bindings`)
 assembles `out/bindings/`: `include/mediaservo/{field.h,field.hpp,common.h,detail/,3rdparty/}`
-(mediaservo_cli.py L412-426 copies each sdk's `.h`/`.hpp`), `lib/libmediaservo_field.so.<major>`,
+(install rules in `cmake/MediaServoBindings.cmake` fan the h/hpp headers per SDK — HEADERS_DIRECTORY, SR4 L2), `lib/libmediaservo_field.so.<major>`,
 `lib/pkgconfig/mediaservo-field.pc`, `lib/cmake/mediaservo/mediaservoConfig.cmake`.
 
 ```cmake
@@ -373,8 +373,8 @@ pkg-config --cflags --libs mediaservo-field   # -I${prefix}/include -L${prefix}/
 
 The .pc template: `bindings/c/mediaservo-field-c/mediaservo-field.pc.in` (relocatable via `${pcfiledir}`).
 Release-package ownership: **field goes in the sdk-field package** (the device half, `sdk_list = "field link deck"`);
-when the sdk-client package assembles, field's h/hpp/pc/.so are explicitly stripped (mediaservo_cli.py
-L1233-1245) — cockpit consumers don't need this SDK.
+when the sdk-client package assembles, field's h/hpp/pc/.so are explicitly stripped (per-domain sweep legs in
+`cmake/MediaServoPack.cmake`) — cockpit consumers don't need this SDK.
 
 ## 8. Known Pitfalls / FAQ / Open Items
 
@@ -427,4 +427,4 @@ L1233-1245) — cockpit consumers don't need this SDK.
 | Result | bindings/cxx/include/mediaservo/detail/result.hpp | Error L33-43 / Result L48 |
 | Rust behavior | crates/mediaservo-field/src/session.rs · config.rs · sfu.rs | PushSession L60-370 / PublishOptions L170-184 / codec_spec sfu.rs:22 |
 | Examples/tests | test_field.cpp (cxx) · vehicle_field.cpp (cxx) · vehicle_push.c (c) | the references in section 5 |
-| Build | scripts/test-cxx.sh · mediaservo-field.pc.in · scripts/mediaservo_cli.py L412-426/L1233-1254 | section 7 |
+| Build | scripts/test-cxx.sh · mediaservo-field.pc.in · cmake/MediaServoBindings.cmake + cmake/MediaServoPack.cmake | section 7 |

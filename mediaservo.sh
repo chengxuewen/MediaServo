@@ -18,7 +18,49 @@ fi
 # -h/--help/version: skip pixi activation (review H1: the activation banner pollutes -h output — 8-line banner before usage)
 case "${1:-}" in
     -h|--help)
-        exec python3 "$ROOT/scripts/mediaservo_cli.py" "$@"   # bare python3 (stdlib-only at the top — no activation noise)
+        # SR6 batch-beta-2: -h moved off the retired python argparse (static text
+        # before activation — the banner-free -h duty from review H1 survives).
+        cat <<'HEOF'
+usage: mediaservo [-h] <verb> [...]
+
+MediaServo unified build CLI (terms: native = bare metal, compose = containers)
+Entry: ./mediaservo.sh (bash driver; the python CLI retired at SR6 batch-beta-2 —
+the build/package/example/compose/ops faces all live in this shell, cmake and the
+managed binaries own layout and runtime truth).
+
+build/assembly face:
+  build <target> [--release] [--image runtime|dev] [--native] [NAME...]
+        target: all|web|host|server|client|bindings|example (default all;
+        server = non-embedded variant + one-step web assembly; web =
+        frontend-only fast lane; only --image takes the Docker path;
+        build-host/build-server compat aliases kept)
+  build:deploy <target> [--prefix DIR] [--release]   (one-step build + deploy)
+  package <target> [--dist DIR] [--brand NAME] [--release]
+        target: host|server|sdk-field|sdk-client (bindings = one-cycle alias)
+        → <dist>/<brand>-<target>-<ver>-<platform>-<arch>.tar.gz (D-H13/F12,
+        versioned top-level dir; --dist defaults to dist/, the MSRTC release
+        shell injects out/packages; unpack straight into a prefix with
+        tar xzf pkg.tar.gz -C <prefix> --strip-components=1)
+  run example <name> [args…]   test example [<name>]   list example
+        (foreground dev tool; artifacts in target/examples/bin/ — never in
+        out/; the build-c prelude is auto-added)
+  deploy bindings|host|server [--prefix DIR] [--release]   (cmake install rows
+        lay the tree; the managed binaries render state [bF3] — driver only
+        orchestrates)
+
+Three-mode quick reference (native = bare metal, compose = containers):
+  Mode 1 bare-metal delivery: build server (assembles bin/etc/web in out/) → deploy server --prefix <X> (bin/etc layout = cmake install rules) →
+             <X>/<brand>-server init/start/stop/status/restart/doctor <X> (startup on = boot anchor; bin physical name branded per D269)
+    fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
+  Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
+  Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
+
+ops face (this shell): up down exec ps data dev version doctor list
+  start stop restart run logs status clean config e2e test deploy
+  guidance arms exit 2 (C39 — instance-directory commands; the container face up/down is unchanged)
+  exit codes (shell-owned status/logs): 0 = success, 1 = not running/target missing, 2 = bad args / probe undecidable
+HEOF
+        exit 0
         ;;
     version)
         # SR6 batch-1 (bash-owned): was a python float literal (0.1.0 — C43 drift
@@ -616,6 +658,148 @@ PYRESTAMP
         exit 1
     fi
 }
+
+# =============================================================================
+# SR6 batch-beta-2 -- package driver (was _cmd_package + _cpack_* + C43(8)
+# guard + _git_out + _crate_version/_TARGET_CRATE + _resolve_oxmgr/_derive_
+# brand_server python twins). The release tree is described by cmake install
+# rules (cmake/MediaServoPack.cmake + pack-legs/*.cmake.in) and packed by
+# native CPack TGZ; the driver owns invoke + brand + lifecycle only (F29/F30).
+# =============================================================================
+_ms_target_crate() {  # F12: delivery target -> version-source crate
+    case "$1" in
+        host) echo mediaservo-host ;;
+        server) echo mediaservo-server ;;
+        bindings|sdk-field) echo mediaservo-field ;;
+        sdk-client) echo mediaservo-client ;;
+    esac
+}
+_ms_crate_version() {  # $1=crate dir name; [package] version, workspace-inherited falls back
+    local f="$ROOT/crates/$1/Cargo.toml" v
+    v=$(sed -n '/^\[package\]/,/^\[/{s/^version *= *"\([^"]*\)".*/\1/p;}' "$f" 2>/dev/null | head -1)
+    if [ -n "$v" ]; then echo "$v"; else _ms_workspace_version; fi
+}
+_ms_git_out() {  # read-only git query: any failure (no git/shallow/timeout) -> rc1,
+    # never raises — the degraded surface of the release-integrity guard.
+    (cd "$ROOT" && timeout 10 git "$@" 2>/dev/null)
+}
+_ms_cpack_stage_sdk() {  # $1=staging $2=target $3=brand — L1/L2 halves
+    local src="${MSRTC_OUT_ROOT:-$ROOT/out}/bindings" pkg bdir
+    if [ ! -e "$src" ]; then echo "Error: out/bindings does not exist — run build bindings first" >&2; exit 1; fi
+    case "$2" in bindings|sdk-field) pkg=sdk-field ;; *) pkg="$2" ;; esac
+    bdir="$ROOT/build/packages/$2"   # alias keeps its own cache dir
+    local cfg=(cmake --preset default -B "$bdir" "-DMEDIASERVO_PKG=$pkg" "-DMEDIASERVO_PKG_BRAND=$3" "-DMEDIASERVO_BIND_OUT=$src")
+    [ "$2" = bindings ] && cfg+=("-DMEDIASERVO_PKG_ALIAS=sdk")   # one-cycle naming slot (F12)
+    echo "\$ ${cfg[*]}  (cwd: $ROOT)"
+    (cd "$ROOT" && "${cfg[@]}") || exit $?
+    # reconfigure-always at the call site (SR7 discipline): the source-existence
+    # globs are configure-time truth (PIT-189 family)
+    echo "\$ cmake --install $bdir --prefix $1  (cwd: $ROOT)"
+    (cd "$ROOT" && cmake --install "$bdir" --prefix "$1") || exit $?
+}
+_ms_cpack_stage_app() {  # $1=staging $2=target $3=brand-arg $4=release(0/1) — L3/L4
+    local target=$2 src_root="${MSRTC_OUT_ROOT:-$ROOT/out}/server" bdir="$ROOT/build/packages/$2"
+    local oxmgr brand bi cfg
+    _msvc_oxmgr_resolve "$target"   # hard gate, same fail-loud message as deploy legs
+    oxmgr=$MS_OXMGR_SRC
+    cfg=(cmake --preset default -B "$bdir" "-DMEDIASERVO_PKG=$target" "-DMEDIASERVO_APP_TREE=$target" "-DMEDIASERVO_OXMGR_BIN=$oxmgr" "-DMEDIASERVO_PKG_BRAND=$3")
+    if [ "$target" = server ]; then
+        if [ ! -f "$src_root/web/index.html" ]; then
+            echo "Error: no frontend artifacts in $src_root/web — run build web first (deploy does not trigger builds — D266)" >&2
+            exit 2
+        fi
+        # deploy server's brand chain minus the always-empty staging arm (a fresh
+        # staging dir derives nothing): env -> source-tree hunt
+        brand="${MEDIASERVO_BRAND:-}"
+        [ -n "$brand" ] || brand=$(_ms_derive_brand_server "$src_root/bin")
+        cfg+=("-DMEDIASERVO_BRAND=$brand" "-DMEDIASERVO_SERVER_OUT_DIR=$src_root" "-DCMAKE_BUILD_TYPE=Debug")
+    else
+        bi="${MEDIASERVO_BRAND:-}"; bi="${bi// /}"  # python .strip() parity (spaces only — single-source env value)
+        brand=""
+        [ "$bi" = mediaservo ] || brand=$bi
+        local sbt=Debug; [ "$4" = 1 ] && sbt=Release
+        cfg+=("-DMEDIASERVO_BRAND=$brand" "-DCMAKE_BUILD_TYPE=$sbt")
+    fi
+    echo "\$ ${cfg[*]}  (cwd: $ROOT)"
+    (cd "$ROOT" && "${cfg[@]}") || exit $?
+    echo "\$ cmake --install $bdir --prefix $1  (cwd: $ROOT)"
+    (cd "$ROOT" && cmake --install "$bdir" --prefix "$1") || exit $?
+}
+_ms_cpack_pack() {  # $1=staging $2=package_root $3=ver $4=dist — CPack TGZ over
+    # the staged tree (design (a)/(c)): wrapper dir + tar name both come from
+    # CPACK_PACKAGE_FILE_NAME; symlinks and empty dirs survive (measured). Scratch
+    # goes to a temp work dir INSIDE dist (same fs for the move; self-cleans).
+    _ms_check cpack "cmake's packaging tool missing — install cmake (>= 3.25)"
+    local work rc=0
+    work=$(mktemp -d "$4/.cpack-work-XXXXXX")
+    cat > "$work/cpack-config.cmake" <<EOF
+set(CPACK_GENERATOR "TGZ")
+set(CPACK_PACKAGE_NAME "mediaservo")
+set(CPACK_PACKAGE_VERSION "$3")
+set(CPACK_PACKAGE_DESCRIPTION "MediaServo release package")
+set(CPACK_PACKAGE_FILE_NAME "$2")
+set(CPACK_INSTALLED_DIRECTORIES "$1;/")
+EOF
+    echo "\$ cpack --config $work/cpack-config.cmake -B $work  (cwd: $ROOT)"
+    (cd "$ROOT" && cpack --config "$work/cpack-config.cmake" -B "$work") || rc=$?
+    if [ $rc = 0 ]; then
+        mv "$work/$2.tar.gz" "$4/$2.tar.gz" || rc=$?
+    fi
+    rm -rf "$work"
+    [ $rc = 0 ] || exit $rc
+}
+_ms_reap_dist_daemons() {  # $1=dist $2=staging — staging hygiene: a run against a
+    # fresh tree must never leave a daemon whose OXMGR_HOME points into dist
+    # (PIT-224 family — auto-spawn during staging init). python finally-parity.
+    local pid home comm
+    for pid in $(ls -1 /proc 2>/dev/null | grep -E '^[0-9]+$'); do
+        [ -r "/proc/$pid/environ" ] || continue
+        home=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^OXMGR_HOME=//p' | head -1)
+        case "$home" in "$1"*) ;; *) continue ;; esac
+        comm=$(cat "/proc/$pid/comm" 2>/dev/null) || continue
+        if [ "$comm" = oxmgr ]; then
+            echo "  note: reaping staging-scoped daemon pid=$pid home=$home"
+            kill "$pid" 2>/dev/null || true
+        fi
+    done
+    rm -rf "$2"
+}
+_ms_package() {  # $1=target $2=dist $3=brand $4=release(0/1)
+    case "$1" in host|server|bindings|sdk-field|sdk-client) ;; *) echo "package: argument target: invalid choice: '$1' (choose from 'host', 'server', 'bindings', 'sdk-field', 'sdk-client')" >&2; exit 2 ;; esac
+    if [ "$1" = bindings ]; then echo 'WARN: target `bindings` renamed to `sdk-field` (F12 dual-half split; this alias stays for one version cycle)' >&2; fi
+    local ver; ver=$(_ms_crate_version "$(_ms_target_crate "$1")")
+    # C43(8) release-integrity guard: Cargo.toml differs from HEAD while git is
+    # available -> the packaged version has no git anchor (no tag to attach, same
+    # family as the v0.1.8.2 floating-number incident) — WARN without blocking
+    # (debug packages may be dirty).
+    if _ms_git_out log -1 --format=%s >/dev/null 2>&1; then
+        if ! _ms_git_out diff --quiet HEAD -- Cargo.toml crates/mediaservo-host/Cargo.toml crates/mediaservo-server/Cargo.toml crates/mediaservo-field/Cargo.toml crates/mediaservo-client/Cargo.toml >/dev/null 2>&1; then
+            echo "WARN: Cargo.toml has uncommitted changes carrying version $ver — before release: commit the bump + tag v$ver (this package's CHANGES header version has no git anchor)" >&2
+        fi
+    fi
+    local dist="${2:-$ROOT/dist}" package_root="" rc=0
+    mkdir -p "$dist"
+    local staging; staging=$(mktemp -d "$dist/ms-$1-pkg-XXXXXX")
+    if [ "$1" = host ] || [ "$1" = server ]; then
+        _ms_cpack_stage_app "$staging" "$1" "$3" "$4" || rc=$?
+    else
+        _ms_cpack_stage_sdk "$staging" "$1" "$3" || rc=$?
+    fi
+    if [ $rc = 0 ]; then
+        # naming + layout owner = cmake (package-root.txt readback; the
+        # platform/arch formula lives in MediaServoPack.cmake)
+        package_root=$(cat "$ROOT/build/packages/$1/package-root.txt")
+        _ms_cpack_pack "$staging" "$package_root" "$ver" "$dist" || rc=$?
+    fi
+    if [ $rc = 0 ]; then
+        local out="$dist/$package_root.tar.gz"
+        echo "✓ packaged: $out ($(( $(stat -c%s "$out") / 1024 )) KiB)"
+        echo "  top-level dir: $package_root/"
+        echo "  contents: $(cd "$staging" && ls -1 | sort | paste -sd, - | sed 's/,/, /g')"
+    fi
+    _ms_reap_dist_daemons "$dist" "$staging"
+    [ $rc = 0 ] || exit $rc
+}
 _ms_build_example() {  # $1=release(0/1); rest = example names (empty = all)
     local release=$1; shift
     local profile=debug; [ "$release" = 1 ] && profile=release
@@ -1070,6 +1254,24 @@ case "${1:-}" in
         echo "\$ cargo test --workspace --exclude mediaservo-server"
         exec cargo test --workspace --exclude mediaservo-server
         ;;
+    package)
+        # SR6 batch-beta-2: release-tar driver on bash (CPack legs + pack-legs
+        # templates stay cmake-owned; wheel/pip mechanics are build bindings'
+        # territory). Flags mirror the retired argparse (--dist/--brand/--release).
+        shift; tgt="${1:-}"; [ $# -gt 0 ] && shift
+        dist=""; brand=""; release=0
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --dist) dist="${2:?package --dist needs a value}"; shift 2 ;;
+                --brand) brand="${2:?package --brand needs a value}"; shift 2 ;;
+                --release) release=1; shift ;;
+                *) echo "package: unexpected argument $1" >&2; exit 2 ;;
+            esac
+        done
+        [ -n "$tgt" ] || { echo "mediaservo package: error: the following arguments are required: target" >&2; exit 2; }
+        _ms_package "$tgt" "$dist" "$brand" "$release"
+        exit 0
+        ;;
     deploy)
         # SR6 P2: bindings leg shell-driven (cmake --install route). SR6 batch-beta-1:
         # the host leg joined; server stays python until its own beta commit. The
@@ -1362,4 +1564,5 @@ if [ "${1:-}" = "build:deploy" ] && [ $# -ge 2 ]; then
     exit $?
 fi
 
-exec python "$ROOT/scripts/mediaservo_cli.py" "$@"
+echo "mediaservo: unknown verb '${1:-}' — ./mediaservo.sh -h lists the surface (the python CLI entry retired at SR6 batch-beta-2)" >&2
+exit 2
