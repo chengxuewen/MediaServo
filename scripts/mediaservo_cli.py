@@ -751,33 +751,6 @@ def _reapply_carried_env(prefix_p: Path, app_envs: dict[str, dict[str, str]]) ->
     return carried
 
 
-def _assemble_host_binaries(bin_dir: Path, release: bool, brand: str) -> set[str]:
-    """Assemble branded binaries into bin_dir (D266 — assembly moved from build to deploy; source = target/{debug,release}).
-    host-<app> → <brand>-<app>, mediaservo-host → <brand>-host; client exits the tree, the host-streamer compat chain is retired (D269).
-    Returns the set of assembled file names (for the deployment-residue whitelist)."""
-    src_dir = ROOT / "target" / ("release" if release else "debug")
-    if not src_dir.is_dir():
-        hint = " (--release requires build --release)" if release else ""
-        print(f"Error: no build artifacts in {src_dir}{hint} — run build host first", file=sys.stderr)
-        sys.exit(1)
-    src_names: set[str] = set()
-    for b in HOST_BINS:
-        src = src_dir / _exe_name(b)
-        if not src.exists():
-            continue
-        name = src.name
-        if brand:
-            if name.startswith("host-"):
-                name = f"{brand}-{name[5:]}"
-            elif name == "mediaservo-host":
-                name = f"{brand}-host"
-        _copy_with_kill(src, bin_dir / name)
-        src_names.add(name)
-    # client exits the tree (D269/T3): cockpit-side pull tools are no longer assembled into the vehicle-side host tree — the bin whitelist clears existing instances in the same round
-    # host-streamer compat chain retired (D269/T2): the spawn path exe_cmd(app_name()) is already brand-aware,
-    # and the src display string has no consumers (on-disk oxfiles all point to bin/msrtc-* — proven) — the whitelist clears residual chains of existing instances in the same round
-    return src_names
-
 def _cmd_deploy_host(prefix: str, release: bool = False, allow_stop: bool = True) -> None:
     """deploy host (stateful deployment — assemble + land, D266): identity idempotence/oxmgr/systemd/env.sh.
     Reused by package host (Momus b — Task 2.5): run this function inside the staging dir to assemble identity/etc/env.sh;
@@ -838,21 +811,14 @@ def _cmd_deploy_host(prefix: str, release: bool = False, allow_stop: bool = True
             subprocess.run(["pkill", "-x", _exe_name(f"{brand}-{base}" if brand else f"host-{base}")], check=False)
         time.sleep(1)
 
-    # assemble branded binaries (D266: source = target/{debug,release} — build is pure compile now)
-    src_names = _assemble_host_binaries(bin_dir, release, brand)
-
-    # bin whitelist (deploy-ops 4: brand-switch residue cleanup): delete app binaries not in the current layout
-    # (build already physically renamed — residue = leftovers from old brands/old install)
-    # client/streamer cleanup = automatic reclaim of existing-instance residue after the D269 tree-exit/chain-pull (whitelist semantics)
-    roles = ("agent", "streamer", "capturer", "recorder", "controller", "emergency", "audio", "legacy", "host", "client")
-    for p in sorted(bin_dir.iterdir()):
-        if p.is_symlink() or not p.is_file():
-            continue
-        if p.name in src_names or p.name == _exe_name("oxmgr"):
-            continue
-        if any(p.name.endswith(f"-{r}") for r in roles):
-            print(f"  cleaning deployment residue: {p.name}")
-            p.unlink()
+    # SR7 T3: branded bin assembly (D266 source = target/{debug,release}), the
+    # bin whitelist residue reclaim and the root entry shortcut are cmake
+    # install rules now (cmake/MediaServoAppTree.cmake — one leg, one owner).
+    # The per-name N3 census: all 8 names are cmake-visible target-dir
+    # artifacts -> zero ruled-away bins. ruled-away (vendor layer, plan §5):
+    # the oxmgr copy below stays python — the archive unpack/cache is not a
+    # delivery layout concern.
+    _cmake_app_install(prefix_p, "host", brand, release)
 
     # lock the oxmgr version with the deployment (D-H13): PATH → cache reclaim → fail on missing hard dependency
     oxmgr_src = _resolve_oxmgr_or_die("host")
@@ -869,23 +835,9 @@ def _cmd_deploy_host(prefix: str, release: bool = False, allow_stop: bool = True
     init_env["MEDIASERVO_BRAND"] = rust_brand
     _run_or_exit([str(bin_dir / host_cli), "init", str(prefix_p)], env=init_env)
 
-    # shortcut names (arch MED4: build already physically renamed to <brand>-host — shortcuts point at the real branded name; official-name fallback host/mediaservo-host)
-    if brand:
-        shortcut_names = (f"{brand}-host",)
-        link_target = _exe_name(f"{brand}-host")
-    else:
-        shortcut_names = ("host", "mediaservo-host")
-        link_target = _exe_name("mediaservo-host")
-    for link_name in shortcut_names:
-        link = prefix_p / link_name
-        if link.exists():
-            link.unlink()
-        try:
-            link.symlink_to(f"bin/{link_target}")  # relative path; the prefix stays relocatable
-            print(f"  created symlink {link} → bin/{link_target}")
-        except OSError:
-            shutil.copy2(bin_dir / link_target, link)
-            print(f"  copied {link_target} to {link} (symlink failed, fell back to copy)")
+    # SR7 T3: the root entry shortcut (MED4 shape, relocatable relative link +
+    # copy fallback) is a cmake link leg of the --install above.
+    shortcut_names = (f"{brand}-host",) if brand else ("host", "mediaservo-host")
 
     # env.sh one-shot activation (carrying arch MED5 — generated at deploy; relocatable: derived relative to itself, not hardcoded)
     env_host = f"{brand}-host" if brand else "mediaservo-host"
@@ -911,7 +863,7 @@ def _cmd_deploy_host(prefix: str, release: bool = False, allow_stop: bool = True
         (prefix_p / d).mkdir(parents=True, exist_ok=True)
 
     print(f"host deployed to {prefix} ({'release' if release else 'debug'})")
-    print(f"  bin/    {', '.join(sorted(src_names))} + oxmgr")
+    print(f"  bin/    {', '.join(sorted(x.name for x in bin_dir.iterdir()))}")
     print("  etc/    host.yaml + link/{signing.pem,*.token} (generated by host init, kept on reinstall)")
     print("  run/    logs/")
     print("  recordings/")

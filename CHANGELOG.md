@@ -13,6 +13,18 @@ teams); for development process details, consult git log directly. Newest versio
 - [deploy] Per-crate clean buttons on the shared-target presets (`host`/`server`/`all`): `mediaservo-*-clean` and the app-bin `mediaservo-*-bin-clean` alias run `cargo clean -p` through the sanctioned command wrapper (per-package scope only — the whole-face wipe stays banned there so the bare-cargo gate cache survives; separate-face presets keep their existing whole-face clean button). Needs the vendored PolyOrch v0.5.0 (supplier D44).
 
 ### Changed
+### Changed
+- [deploy] `deploy host` lays its branded bin tree through CMake install rules
+  (SR7 T3): the 8 app binaries (mediaservo-host + the seven host-<role> lanes,
+  D269 names host-<app> -> <brand>-<app>) are PROGRAMS+RENAME rows over the
+  cargo target/<profile> dir, the bin whitelist residue reclaim and the root
+  entry shortcut are install(CODE) legs (cmake/MediaServoAppTree.cmake). The
+  per-name N3 census: every name is cmake-visible -> zero ruled-away bins.
+  Flags unchanged; deploy still never starts anything. Delta: the host bin exec
+  bits normalize 775 -> 755 (cargo dir's group-write umask was inherited by
+  python copy2 before; install(PROGRAMS) permissions are deterministic).
+  oxmgr (vendor archive layer) and env.sh (generated text) stay python —
+  ruled-away markers at their call sites.
 - [deploy] `deploy server`'s etc template landing moved to the cmake rules (SR7
   T2): the first-writer-wins mirror (PIT-160 — an ops-edited etc/server.yaml or a
   hot-written devices.yaml survives every redeploy, byte-preserved) is one

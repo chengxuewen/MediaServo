@@ -225,7 +225,104 @@ function(_mediaservo_app_tree_server)
     ")
 endfunction()
 
-# -- host tree: lands with the SR7 T3 stroke (the 8 branded names + reclaim + link) --
+# -- host tree: the 8 branded app bins + reclaim + entry link (SR7 T3) --
+# Sources are the cargo workspace target/<profile> (build host is pure compile —
+# D266; this is where _assemble_host_binaries read from). Per-name N3 rule: every
+# name is cmake-visible (target-dir artifact) -> row, zero ruled-away bins.
+# oxmgr (vendor archive layer, plan §5) and env.sh (generated text) STAY python —
+# ruled-away markers live at their call sites in mediaservo_cli.py.
 function(_mediaservo_app_tree_host)
-    message(FATAL_ERROR "MEDIASERVO_APP_TREE=host lands with the SR7 T3 stroke")
+    set(_exe "${CMAKE_EXECUTABLE_SUFFIX}")
+    string(TOLOWER "${CMAKE_BUILD_TYPE}" _profile)
+    if(NOT _profile)
+        set(_profile debug)
+    endif()
+    set(_srcdir "${MEDIASERVO_REPO_ROOT}/target/${_profile}")
+    set(_landed "")
+    set(_hostdn "")
+    foreach(_b IN LISTS MEDIASERVO_HOST_BINS)
+        set(_art "${_srcdir}/${_b}${_exe}")
+        # missing-src skip = python's "continue" for unbuilt bins (a partial
+        # build deploys the names that exist; keep manifest tracks landings).
+        if(NOT EXISTS "${_art}")
+            continue()
+        endif()
+        if(MEDIASERVO_BRAND)
+            if(_b STREQUAL "mediaservo-host")
+                set(_dn "${MEDIASERVO_BRAND}-host${_exe}")
+            else()
+                string(SUBSTRING "${_b}" 5 -1 _app)   # strip "host-"
+                set(_dn "${MEDIASERVO_BRAND}-${_app}${_exe}")
+            endif()
+        else()
+            set(_dn "${_b}${_exe}")
+        endif()
+        install(PROGRAMS "${_art}" DESTINATION bin RENAME "${_dn}")
+        list(APPEND _landed "${_dn}")
+        if(_b STREQUAL "mediaservo-host")
+            set(_hostdn "${_dn}")
+        endif()
+    endforeach()
+    if(NOT _landed)
+        message(FATAL_ERROR
+            "no host binaries found under ${_srcdir} — run build host first "
+            "(deploy does not trigger builds — D266)")
+    endif()
+
+    # bin whitelist reclaim (deploy-ops 4 + the client/streamer-compat-chain
+    # residue of D269): delete role-suffixed files not landed by THIS layout.
+    # Symlinks and directories are never touched (python predicate mirrored).
+    # f8f85db rule: list(FIND), not IN_LIST.
+    set(_roles agent streamer capturer recorder controller emergency audio legacy host client)
+    set(_role_rx "")
+    foreach(_r IN LISTS _roles)
+        string(APPEND _role_rx "|-${_r}${_exe}")
+    endforeach()
+    string(SUBSTRING "${_role_rx}" 1 -1 _role_rx)
+    install(CODE "
+        set(_keep [==[${_landed}]==])
+        file(GLOB _binFiles LIST_DIRECTORIES FALSE \"\${CMAKE_INSTALL_PREFIX}/bin/*\")
+        foreach(_f IN LISTS _binFiles)
+            if(IS_SYMLINK \"\${_f}\" OR IS_DIRECTORY \"\${_f}\")
+                continue()
+            endif()
+            get_filename_component(_n \"\${_f}\" NAME)
+            list(FIND _keep \"\${_n}\" _ix)
+            if(NOT _ix EQUAL -1)
+                continue()
+            endif()
+            # suffix match (python endswith on dash-role) -- no leading anchor;
+            # each alternative already starts with the dash.
+            if(_n MATCHES \"(${_role_rx})\$\")
+                message(STATUS \"  cleaning deployment residue: \${_n}\")
+                file(REMOVE \"\${_f}\")
+            endif()
+        endforeach()
+    ")
+
+    # root entry shortcut (MED4 shape): relative symlink to the real branded CLI
+    # (empty brand = the dual upstream shortcuts, never a "-host" leftover).
+    # The dangling-link case mirrors python (symlink_to succeeds anyway); the
+    # copy fallback only runs where symlinks are unsupported.
+    if(MEDIASERVO_BRAND)
+        set(_link_names "${MEDIASERVO_BRAND}-host")
+    else()
+        set(_link_names "host;mediaservo-host")
+    endif()
+    install(CODE "
+        set(_ln [==[${_link_names}]==])
+        foreach(_n IN LISTS _ln)
+            set(_l \"\${CMAKE_INSTALL_PREFIX}/\${_n}\")
+            if(EXISTS \"\${_l}\" OR IS_SYMLINK \"\${_l}\")
+                file(REMOVE \"\${_l}\")
+            endif()
+            file(CREATE_LINK \"bin/${_hostdn}\" \"\${_l}\" SYMBOLIC RESULT _r)
+            if(NOT _r EQUAL 0)
+                file(INSTALL \"\${CMAKE_INSTALL_PREFIX}/bin/${_hostdn}\"
+                     DESTINATION \"\${CMAKE_INSTALL_PREFIX}\" RENAME \"\${_n}\"
+                     PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+                                 OWNER_EXECUTE GROUP_EXECUTE WORLD_EXECUTE)
+            endif()
+        endforeach()
+    ")
 endfunction()
