@@ -24,6 +24,9 @@ gate() {  # gate <name> <command...> (per-gate mktemp log — first run caught a
 }
 port_busy() { ss -tln 2>/dev/null | grep -q ":9800 "; }
 
+# ── gate checker face (SR6 P3): checker logics live in tools/mediaservo-gates (N4 ruling A′) ──
+gate "build mediaservo-gates"      cargo build -q -p mediaservo-gates
+
 # ── fmt job, three fragments ──
 gate "fmt --check (incremental)"  bash -c '
   base=$(git rev-parse --abbrev-ref "@{u}" 2>/dev/null || echo HEAD)
@@ -31,7 +34,7 @@ gate "fmt --check (incremental)"  bash -c '
   [ -z "$files" ] && { echo "no changed .rs files (base $base)"; exit 0; }
   echo "checking $(echo "$files" | grep -c .) changed files (base $base)"
   rustfmt --edition 2024 --check $files'
-gate "changelog markers (F11-X)"  python3 scripts/gate-changelog.py
+gate "changelog markers (F11-X)"  target/debug/mediaservo-gates changelog
 gate "wire changelog pairing (G3)"  bash scripts/gate-wire-changelog.sh
 gate "bindings version parity"    python3 scripts/gate-parity.py
 gate "crate literal versions"     bash -c '! git grep -l "^version = \"" -- "crates/*/Cargo.toml" | grep -vE "mediaservo-(host|server|field|client)/Cargo.toml" | grep -q .'

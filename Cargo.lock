@@ -4418,6 +4418,15 @@ name = "mediaservo-field-cxx"
 version = "0.1.2"
 
 [[package]]
+name = "mediaservo-gates"
+version = "0.1.2"
+dependencies = [
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+]
+
+[[package]]
 name = "mediaservo-host"
 version = "0.1.2"
 dependencies = [

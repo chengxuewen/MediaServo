@@ -19,25 +19,9 @@ jobs:
         with: { components: rustfmt }
       - run: cargo fmt --all --check
       - name: Changelog scope markers (F11-X V4, Unreleased section only)
-        run: |
-          python3 - <<'EOF'
-          import re, sys
-          ALLOWED = {"host", "server", "sdk-client", "sdk-field", "protocol", "deploy"}
-          text = open("CHANGELOG.md", encoding="utf-8").read()
-          m = re.search(r"## Unreleased\n(.*?)(?=\n## |\Z)", text, re.S)
-          bad = []
-          if m:
-              for n, line in enumerate(m.group(1).splitlines(), text[:m.start(1)].count("\n") + 1):
-                  if line.startswith("- "):
-                      head = line[: line.find(": ") if ": " in line else 80]
-                      tags = re.findall(r"\[([a-z0-9-]+)\]", head)
-                      if not tags:
-                          bad.append(f"L{n}: missing [scope] tag")
-                      bad += [f"L{n}: [{t}] outside allowed vocabulary" for t in tags if t not in ALLOWED]
-          if bad:
-              print("\n".join(bad)); sys.exit("CHANGELOG Unreleased marker violations (F11-X)")
-          print("changelog markers ok")
-          EOF
+        # SR6 P3: one executable truth — the Rust face (scripts/gate-changelog.py retired);
+        # the former inline copy had drifted in L-numbering (absolute vs section-relative).
+        run: cargo run --quiet -p mediaservo-gates -- changelog
       - name: Bindings version parity (C43③ three hand copies, anti-drift)
         run: |
           v=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="mediaservo-field"))')  # bindings belong to the sdk-field delivery domain (F12) — align with field, not workspace

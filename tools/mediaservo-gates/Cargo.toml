@@ -1,0 +1,18 @@
+[package]
+name = "mediaservo-gates"
+version.workspace = true
+edition = "2024"
+description = "build-gate checker CLIs (SR6 P3: retired scripts/gate-{changelog,lanes,openapi,parity}.py) — dev tool, never a delivery crate"
+license = "Apache-2.0"
+
+[dependencies]
+# every dep is lock-present and already used by delivery crates (zero new edges)
+serde_yaml = "0.9"
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "mediaservo-gates"
+path = "src/main.rs"

@@ -18,7 +18,8 @@ members = ["crates/mediaservo-host",
     "bindings/cxx/mediaservo-deck-cxx",
     "bindings/cxx/mediaservo-field-cxx",
     "bindings/cxx/mediaservo-client-cxx",
-    "bindings/node/rust/mediaservo-node"]
+    "bindings/node/rust/mediaservo-node",
+    "tools/mediaservo-gates"]
 resolver = "3"
 
 [workspace.package]
