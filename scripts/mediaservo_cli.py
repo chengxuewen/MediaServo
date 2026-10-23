@@ -553,12 +553,6 @@ def _server_bin_names(brand: str) -> tuple[str, str]:
     base = f"{brand}-server" if brand else "mediaservo-server"
     return _exe_name(base), base
 
-def _weaknet_bin_name(brand: str) -> str:
-    """weaknet physical bin name — empty brand → upstream mediaservo-weaknet; never emit a "-weaknet" leftover name
-    (weaknet-server-integration design §D1 [BA-2(i)], isomorphic contract with _server_bin_names).
-    build only stages the upstream name; branding is single-pointed at deploy (D266/D269 isomorphic)."""
-    return _exe_name(f"{brand}-weaknet" if brand else "mediaservo-weaknet")
-
 # SR7 T4: the Python-side stale-oxfile/Caddyfile migration guard (_drop_stale_server_oxfile)
 # + its env re-absorption twin (_reapply_carried_env) are retired -- the bF3 port (5255a13)
 # runs migrate_stale_files as init step 0 (BEFORE both exists-skips) with the same
@@ -1383,62 +1377,6 @@ def _native_runtime_dirs() -> tuple[Path, Path, Path]:
 
 
 
-def _port_owner(port: int) -> str:
-    """Parse the occupier (name,pid) of the :port line from ss -tulnp. Under non-root, container ports have no users section — reported honestly (review ops#2)."""
-    try:
-        out = subprocess.run(["ss", "-tulnp"], capture_output=True, text=True, timeout=5, check=False).stdout
-        for line in out.splitlines():
-            if f":{port} " not in line:
-                continue
-            m = re.search(r'users:\s*\(\("([^"]+)",pid=(\d+)', line)
-            if m:
-                name, pid = m.group(1), m.group(2)
-                cmd = Path(f"/proc/{pid}/cmdline").read_text().replace("\0", " ").split()[:1]
-                return f"{name} (pid {pid})" + (f" — {Path(cmd[0]).name}" if cmd else "")
-            return "occupier invisible (host root / container port — check with sudo ss)"
-    except OSError:
-        pass
-    try:  # darwin: lsof fallback
-        out = subprocess.run(["lsof", "-i", f":{port}"], capture_output=True, text=True, timeout=5, check=False).stdout
-        for line in out.splitlines()[1:]:
-            parts = line.split()
-            if len(parts) >= 2:
-                return f"{parts[0]} (pid {parts[1]})"
-    except OSError:
-        pass
-    return "unknown (neither ss nor lsof available)"
-
-
-def _check_port_free(port: int, name: str) -> None:
-    """Port occupancy check (TCP/UDP; if occupied, advise stopping the conflicting party). The platform guard and the probe command share the same platform branching (Momus MEDIUM: the original picked lsof for the guard but still ss for probing — darwin traceback)."""
-    if sys.platform == "darwin":
-        _check("lsof", "lsof unavailable")
-        out = subprocess.run(["lsof", "-i", f":{port}"], capture_output=True, text=True, timeout=5, check=False).stdout
-        busy = f":{port}" in out
-    else:
-        _check("ss", "ss unavailable — install iproute2")
-        out = subprocess.run(["ss", "-tulnp"], capture_output=True, text=True, timeout=5, check=False).stdout
-        busy = f":{port} " in out
-    if busy:
-        print(f"Error: port {name} occupied: {_port_owner(port)} — run first: mediaservo stop server (works for both bare metal and containers)", file=sys.stderr)
-        sys.exit(1)
-
-
-def _check_port_range_free(start: int, end: int, name: str) -> None:
-    """RTP range scan (mediasoup binds lazily — health 200 but transports fail intermittently; an explicit check is mandatory). Same platform branching — darwin uses the lsof fallback."""
-    if sys.platform == "darwin":
-        _check("lsof", "lsof unavailable")
-        out = subprocess.run(["lsof", "-i", f":{start}-{end}"], capture_output=True, text=True, timeout=5, check=False).stdout
-        busy = [p for p in range(start, end + 1) if f":{p}" in out]
-    else:
-        _check("ss", "ss unavailable — install iproute2")
-        out = subprocess.run(["ss", "-tulnp"], capture_output=True, text=True, timeout=5, check=False).stdout
-        busy = [p for p in range(start, end + 1) if f':{p} ' in out]
-    if busy:
-        print(f'Error: ports {name} occupied at {busy[:5]}... first occupier: {_port_owner(busy[0])} — stop the occupying process first', file=sys.stderr)
-        sys.exit(1)
-
-
 def _cmd_stop(args: argparse.Namespace) -> None:
     """stop <target> — server/host retired → guidance + exit 2 (containers: mediaservo down)."""
     target = args.target
@@ -1652,27 +1590,6 @@ def _cmd_config(args: argparse.Namespace) -> None:
     sys.exit(0 if ok else 1)
 
 
-def _cmd_env_diagnose() -> None:
-    """Environment diagnosis — check each tool's version, mark missing ones MISSING."""
-    pixi_bin = shutil.which("pixi") or str(Path.home() / ".pixi/bin/pixi")
-    tools = [
-        ("pixi", [pixi_bin, "--version"]),
-        ("cargo", ["cargo", "--version"]),
-        ("docker", ["docker", "--version"]),
-        ("node", ["node", "--version"]),
-    ]
-    for name, cmd in tools:
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=10, check=False
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            print(f"{name:8s} MISSING (or timeout)")
-            continue
-        output = (result.stdout or result.stderr).strip().splitlines()
-        print(f"{name:8s} {output[0] if output else '?'}")
-
-
 def _cmd_status_runtime(args: argparse.Namespace) -> None:
     """status <target> — health probe (borrowed from AccessBase cmd_status_native, absorbed per review).
     Exit codes: 0 = running, 1 = not running, 2 = probe failed / bad arg. ps = listing vs status = health verdict (helps cross-reference)."""
@@ -1850,12 +1767,6 @@ def _detect_running_env() -> str:
 
 
 
-def _cmd_doctor(_args: argparse.Namespace | None = None) -> None:
-    """Environment diagnosis (toolchain versions — renamed from the original status to distinguish it from the runtime health probe status)."""
-    _cmd_env_diagnose()
-
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mediaservo",
@@ -1867,7 +1778,7 @@ def main() -> None:
     fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
   Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
   Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
-  bash-owned (SR6 batch-1, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version
+  bash-owned (SR6 batch-1/alpha, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor
   retired → guidance + exit 2: run/start/stop/restart server|host (C39 — use instance-directory commands; the container face up/down is unchanged)
   read-only probes kept: status server|host / logs server / clean server
   C++ example surface (p3): list example → build example [names…] → run example <name> / test example
@@ -1950,8 +1861,6 @@ def main() -> None:
     config_p.add_argument("key", nargs="?", help="set: config key (e.g. signaling.psk)")
     config_p.add_argument("value", nargs="?", help="set: config value")
     config_p.set_defaults(func=_cmd_config)
-    doctor_p = sub.add_parser("doctor", help="environment diagnosis (pixi/cargo/docker/node — the original status)")
-    doctor_p.set_defaults(func=_cmd_doctor)
     status_p = sub.add_parser("status", help="health probe <target> (exit codes 0/1/2): server = bare metal (default) | compose containers (--mode compose) | host push processes")
     status_p.add_argument("target", choices=["server", "host"])
     _add_mode_args(status_p)

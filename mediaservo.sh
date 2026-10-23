@@ -192,6 +192,26 @@ else
     echo "[mediaservo] WARN: uname -m=$(uname -m) has no pinned oxmgr (upstream ships no binaries for this platform) — install it into PATH yourself" >&2
 fi
 
+# =============================================================================
+# SR6 batch-alpha (P2) -- ops read-probe/guidance family, bash-owned (same
+# one-leg-one-owner route as batch-1; flags and output shapes mirror the
+# retired python exactly; MEDIASERVO_DRY_RUN honored on command legs).
+# =============================================================================
+case "${1:-}" in
+    doctor)
+        # toolchain version probe (was _cmd_env_diagnose: which + --version, first line)
+        for t in pixi cargo docker node; do
+            if [ "$t" = pixi ]; then p="${PIXI_BIN:-pixi}"; else p="$t"; fi
+            if out=$("$p" --version 2>&1); then
+                printf '%-8s %s\n' "$t" "${out%%$'\n'*}"
+            else
+                printf '%-8s %s\n' "$t" "MISSING (or timeout)"
+            fi
+        done
+        exit 0
+        ;;
+esac
+
 # build:deploy composite (2026-09-29: verb surface aligned with the parent-repo msrtc.sh — the submodule shell
 # works standalone without returning to the parent repo. Default prefix=<out>/<target> (the _out_root resolution
 # lives in the CLI layer — bindings default there; host/server composite forms still pass --prefix out/<target> explicitly for symmetry).
