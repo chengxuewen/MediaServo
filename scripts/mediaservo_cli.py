@@ -303,16 +303,15 @@ def _cmd_build_bindings(release: bool = False) -> None:
             f"libmediaservo_{sdk}.so",
             out_dir / f"libmediaservo_{sdk}.so.{major}",
         )
-    # node bindings (napi-rs .node; FFmpeg dynamic-lib linking completed via build.rs)
+    # node bindings (napi-rs .node; FFmpeg dynamic-lib linking completed via build.rs).
+    # SR6 batch-5: the staging .node copy died with the python placement loop — the
+    # node/mediaservo rows read target/{profile} directly (cmake/MediaServoBindings.cmake).
     _run_or_exit(["cargo", "build"] + (["--release"] if release else []) + ["-p", "mediaservo-node"])
-    node_so = out_dir / "libmediaservo_node.so"
-    node_node = staging / "mediaservo.node"
-    if node_so.exists():
-        shutil.copy2(node_so, node_node)
     # stage the delivery layout out/bindings (full SDK package mirror — completed per Momus HIGH3/Task 2.5):
     # D241 version triple + N7 strip = cmake install rules (SR4 L1); D248 headers (C/cxx)
     # = cmake install rules (SR4 L2); pkgconfig .pc + cmake config transport moves at
-    # SR4 L3; python fat wheel/site-packages + node package stay language-native
+    # SR4 L3; python WHEEL CONTENTS stay pip-side (ruled-away territory), while the
+    # node package + docs volumes ride the same cmake rows (SR6 batch-5).
     ver = _workspace_version()   # S3: deliverable .so triple = the shims' own (workspace) version
     major, minor, patch = ver.split(".")
     bind_dst = _out_root() / "bindings"
@@ -331,7 +330,10 @@ def _cmd_build_bindings(release: bool = False) -> None:
     # are NOT covered by --strip itself — that is precisely why the legs exist).
     _btype = "Release" if release else "Debug"
     _bind_build = Path("build") / "presets" / "bindings"
-    _run_or_exit(["cmake", "--preset", "bindings", f"-DCMAKE_BUILD_TYPE={_btype}"], cwd=str(ROOT))
+    # SRC reset is EXPLICIT: deploy may have left MEDIASERVO_BINDINGS_SRC in the cache;
+    # the build assembly must configure the ROWS mode, never inherit the mirror mode.
+    _run_or_exit(["cmake", "--preset", "bindings", f"-DCMAKE_BUILD_TYPE={_btype}",
+                  "-DMEDIASERVO_BINDINGS_SRC="], cwd=str(ROOT))
     _run_or_exit(["cmake", "--install", str(_bind_build), "--prefix", str(bind_dst), "--strip"], cwd=str(ROOT))
 
     # include/mediaservo (D248) -- SR4 L2: header staging is cmake install
@@ -370,11 +372,8 @@ def _cmd_build_bindings(release: bool = False) -> None:
             shutil.copy2(out_dir / f"libmediaservo_{sdk}.so", so_major)
             _strip_so(so_major)  # same family: wheel-embedded _libs are immutable once baked in, so strip must be front-loaded
             _symlink_force(f"libmediaservo_{sdk}.so.{major}", libs_src / f"libmediaservo_{sdk}.so")
-        wheel_dir = bind_dst / "wheel"; wheel_dir.mkdir(exist_ok=True)
-        # stale whl sweep (caught on the first 09-17 e2e-delivery run: unordered glob + cross-run residue →
-        # next() may grab an old file = the rename chain eats its own source, pip ENOENT).
-        for _stale in wheel_dir.glob("*.whl"):
-            _stale.unlink()
+        wheel_dir = bind_dst / "wheel"  # pip -w creates the dir (batch-5: the stale-whl sweep
+        # — the 09-17 unordered-glob ENOENT guard — rode to the cmake bindings-face legs).
         # setuptools build/ cache same-family sweep (09-17 V1b; build/ now also lives in staging — zero source-tree pollution)
         shutil.rmtree(py_src / "build", ignore_errors=True)
         r = subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-deps",
@@ -400,14 +399,10 @@ def _cmd_build_bindings(release: bool = False) -> None:
                     content = content.replace(b"Tag: py3-none-any", f"Tag: {tag_new}".encode())
                 z.writestr(i, content)
         wheel.unlink()
-        # pip --prefix does not delete old data_files (caught in V1b: after the domain shrink, site-packages/_libs retains
-        # the previous round's client.so corpse — the new wheel is correct but old files contaminate the install tree). Remove the old package tree before installing.
-        for _old_sp in bind_dst.glob("lib/python3.*/site-packages/mediaservo"):
-            shutil.rmtree(_old_sp, ignore_errors=True)
-        # 10-22 e2e first-run catch: dist-info siblings were never swept -- an 0.1.1-era
-        # corpse survived every rebuild and rode into BOTH half-packages.
-        for _old_di in bind_dst.glob("lib/python3.*/site-packages/mediaservo-*.dist-info"):
-            shutil.rmtree(_old_di, ignore_errors=True)
+        # pip --prefix does not delete old data_files (V1b client.so corpse + 10-22
+        # dist-info corpse catches): the pre-install sweep of the site-packages
+        # mediaservo/ + mediaservo-*.dist-info trees now runs as a cmake bindings-face
+        # leg in the --install pass that precedes this invocation (SR6 batch-5).
         r2 = subprocess.run([sys.executable, "-m", "pip", "install", "--prefix",
                              str(bind_dst), "--no-deps", str(fixed)],
                             capture_output=True, text=True)
@@ -417,23 +412,13 @@ def _cmd_build_bindings(release: bool = False) -> None:
     finally:
         shutil.rmtree(libs_src, ignore_errors=True)  # clean up temp _libs (gitignore as backstop)
 
-    # node package: node/mediaservo/ (package.json + .node + lib/index.mjs) — D248 layout
-    node_src = ROOT / "bindings" / "node"
-    if node_node.exists():
-        node_dst = bind_dst / "node" / "mediaservo"
-        node_dst.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(node_node, node_dst / "mediaservo.node")           # artifact = staging
-        shutil.copy2(node_src / "package.json", node_dst)               # source = source tree
-        (node_dst / "lib").mkdir(parents=True, exist_ok=True)
-        shutil.copy2(node_src / "lib" / "index.mjs", node_dst / "lib")
-    # docs: SDK consumer-side help (sdk-cxx manuals — directly readable from the out/bindings tree / release packages,
-    # inter-links within the same dir work; remove-then-copy each round = guards against deleted-volume residue, same discipline family as the 09-17 wheel sweep)
-    docs_dst = bind_dst / "docs" / "sdk-cxx"
-    shutil.rmtree(docs_dst, ignore_errors=True)
-    docs_dst.mkdir(parents=True)
-    for m in (ROOT / "docs" / "reference" / "sdk-cxx").glob("*.md"):
-        shutil.copy2(m, docs_dst)
-    n_docs = len(list(docs_dst.glob("*.md")))
+    # SR6 batch-5: the node package (D248 layout) and the docs/sdk-cxx volumes (the
+    # remove-then-copy residue discipline) are cmake install rows on the bindings face
+    # — the python placement loops die here (one leg, one owner). The summary count
+    # below reads the LANDED tree. batch-5 ruled-away (remaining python): the py_src
+    # staging mirror + _libs feeds + tag rewrite above = wheel CONTENTS, pip territory
+    # (SR4 §1.3 verdict stands; only their stale DELIVERY sweeps moved).
+    n_docs = len(list((bind_dst / "docs" / "sdk-cxx").glob("*.md")))
     print("bindings build complete: libmediaservo_{%s}.so version-full triple + node + python + .pc + cmake (%s)"
           % (",".join(ALL_SDKS), "release" if release else "debug"))
     n_lib = len([p for p in lib_dst.glob("libmediaservo_*") if p.is_file() or p.is_symlink()])

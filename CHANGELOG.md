@@ -15,6 +15,22 @@ teams); for development process details, consult git log directly. Newest versio
 ### Changed
 ### Changed
 ### Changed
+- [deploy] `build bindings` node-package + docs-volume placement are cmake install
+  rules now (SR6 batch-5 face 2). New cache knob `MEDIASERVO_BINDINGS_SRC` on the
+  bindings face: EMPTY (the build assembly — the CLI resets it explicitly so a
+  deploy-run cache can never flip the mode) registers the node/mediaservo/
+  {mediaservo.node, package.json, lib/index.mjs} rows sourced from
+  target/{profile} + repo (the same files python's copy2 read; the .node rides
+  install(FILES) so --strip — measured NOT to touch FILES rows, SR5 P7 — keeps
+  copy2 bytes), the remove-then-copy docs/sdk-cxx pair (deleted-volume-residue
+  discipline ported 1:1), and the stale wheel/site-packages sweeps (09-17
+  unordered-glob ENOENT + V1b/10-22 corpse guards — same position in the chain:
+  this --install completes before pip re-lays what pip owns). python keeps only
+  the pip IMPERATIVES: wheel BUILD inputs (staging mirror, _libs feeds, tag
+  rewrite) + the pip wheel/install invocations — the SR4 §1.3 wheel-contents
+  verdict, marked batch-5 ruled-away at the site. Judge: fresh temp-root rebuild
+  byte-identical to the pre-change baseline (63/63 names+md5, 8/8 links; only
+  the documented per-run pip 8 drift).
 - [deploy] `build server` / `build web` assembly now rides the SR7 app-tree cmake
   rules (SR6 batch-5 face 1). `_cmd_build_server` hand-laid no more: the bin
   copy/swap/legacy-reclaim block and `_build_stage_weaknet`'s branded placement

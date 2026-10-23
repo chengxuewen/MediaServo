@@ -18,11 +18,15 @@
 #     cbindgen baseline (headers are hand-frozen; README's intent line was
 #     never pipelined). The drift gate is check-abi-drift.sh (header decls vs
 #     cdylib dynsyms), which stays THE comparison.
-#   * Staging (version triples, strip, wheel, node pack, docs copy) stays
-#     python — incident-forged; it consumes ${CMAKE_CURRENT_BINARY_DIR}/
-#     bindings-gen/ instead of rendering templates inline (F16 lane split).
+#   * Staging since SR4 L1-L4 + SR6 batch-5: the version triples, strip, headers,
+#     .pc/Config transport, the node package, the docs volumes and the stale
+#     pip-artifact sweeps are install RULES here. What stays python is pip IMPERATIVE:
+#     the wheel BUILD inputs (staging mirror, _libs feeds) and the pip --prefix
+#     invocations (ruled-away wheel-content territory, batch-5 census). Renderers
+#     consume ${CMAKE_CURRENT_BINARY_DIR}/bindings-gen/ (F16 lane split).
 
 set(MEDIASERVO_BINDINGS_SDKS field link deck client)
+set(MEDIASERVO_BINDINGS_SRC "" CACHE PATH "SR6 batch-5 deploy mirror root (<out>/bindings) — cross-tree deploy passes it; the build assembly leaves it EMPTY (mode reset is explicit at the call site so a stale cache can never flip the mode)")
 
 function(mediaservo_setup_bindings)
     if(NOT MEDIASERVO_BUILD_BINDINGS)
@@ -167,4 +171,73 @@ function(mediaservo_setup_bindings)
         "${_gen}/cmake/mediaservoConfig.cmake"
         "${_gen}/cmake/mediaservoConfigVersion.cmake"
         DESTINATION lib/cmake/mediaservo)
+
+    # -- SR6 batch-5: language-native payload placement, one owner per mode ----------
+    # Build assembly (SRC empty): the node package + docs volumes land from the
+    # REPO/target artifacts (fresh by construction — the cargo invocations run
+    # BEFORE this reconfigure at the call site), plus the stale pip-artifact sweeps
+    # the python corpse loops retired into (same order: this --install completes,
+    # then pip wheel/pip install re-lays what pip owns). Cross-tree deploy (SRC =
+    # <out>/bindings): the mirror legs copy exactly the language-native subtrees of
+    # the delivery tree (wheel/, node/, docs/, lib/python3.*/) — the retired deploy
+    # sweep loop. A subtree never has rows AND mirror legs registered together
+    # (two-writer disease, L3 warning's own words).
+    # f8f85db rule: script-mode legs use if(IS_DIRECTORY), never IN_LIST; recursive
+    # delete = ${CMAKE_COMMAND} -E rm -rf (file(REMOVE_RECURSIVE) is NOT a file()
+    # sub-command — measured on cmake 4.4.4 when the first smoke install died on it).
+    if(MEDIASERVO_BINDINGS_SRC)
+        foreach(_sub wheel node docs)
+            if(IS_DIRECTORY "${MEDIASERVO_BINDINGS_SRC}/${_sub}")
+                install(DIRECTORY "${MEDIASERVO_BINDINGS_SRC}/${_sub}" DESTINATION .)
+            endif()
+        endforeach()
+        file(GLOB _pydirs LIST_DIRECTORIES true "${MEDIASERVO_BINDINGS_SRC}/lib/python3.*")
+        foreach(_d IN LISTS _pydirs)
+            if(IS_DIRECTORY "${_d}")
+                install(DIRECTORY "${_d}" DESTINATION lib)
+            endif()
+        endforeach()
+    else()
+        # node package (D248 layout node/mediaservo/{mediaservo.node,package.json,
+        # lib/index.mjs}). mediaservo.node rides install(FILES), NOT PROGRAMS:
+        # --strip is measured NOT to touch FILES-shape rows (SR5 P7) so the retired
+        # copy2's exact bytes survive; dlopen needs no exec bit. Missing artifact =
+        # skip (python's node_so.exists() polarity; cargo runs _run_or_exit above).
+        string(TOLOWER "${CMAKE_BUILD_TYPE}" _prof)
+        if(NOT _prof)
+            set(_prof debug)
+        endif()
+        set(_node_art "${_target_dir}/${_prof}/libmediaservo_node.so")
+        if(EXISTS "${_node_art}")
+            install(FILES "${_node_art}" DESTINATION node/mediaservo RENAME mediaservo.node)
+            install(FILES "${_root}/bindings/node/package.json" DESTINATION node/mediaservo)
+            install(FILES "${_root}/bindings/node/lib/index.mjs" DESTINATION node/mediaservo/lib)
+        else()
+            message(STATUS "bindings: target/${_prof}/libmediaservo_node.so absent — node/ package NOT staged this pass")
+        endif()
+        # docs/sdk-cxx volumes: remove-then-copy per round = deleted-volume residue
+        # guard (python's rmtree-then-glob discipline; registration order IS run
+        # order — the P1-pack measured fact).
+        install(CODE "execute_process(COMMAND \"\${CMAKE_COMMAND}\" -E rm -rf \"\${CMAKE_INSTALL_PREFIX}/docs/sdk-cxx\")")
+        install(DIRECTORY "${_root}/docs/reference/sdk-cxx" DESTINATION docs)
+        # stale pip-artifact sweeps (09-17 e2e-delivery catch: unordered glob +
+        # cross-run residue = the rename chain eats its own source; V1b + 10-22
+        # corpse catches: pip --prefix never deletes old data_files). pip re-lays
+        # the fresh wheel/site-packages immediately after this pass (python side).
+        install(CODE "
+            file(GLOB _whls \"\${CMAKE_INSTALL_PREFIX}/wheel/*.whl\")
+            foreach(_w IN LISTS _whls)
+                file(REMOVE \"\${_w}\")
+                message(STATUS \"  stale wheel swept\")
+            endforeach()
+            file(GLOB _spdirs LIST_DIRECTORIES true \"\${CMAKE_INSTALL_PREFIX}/lib/python3.*/site-packages/mediaservo\")
+            file(GLOB _dists LIST_DIRECTORIES true \"\${CMAKE_INSTALL_PREFIX}/lib/python3.*/site-packages/mediaservo-*.dist-info\")
+            foreach(_d IN LISTS _spdirs _dists)
+                if(IS_DIRECTORY \"\${_d}\")
+                    execute_process(COMMAND \"\${CMAKE_COMMAND}\" -E rm -rf \"\${_d}\")
+                    message(STATUS \"  stale site-packages tree swept\")
+                endif()
+            endforeach()
+        ")
+    endif()
 endfunction()
