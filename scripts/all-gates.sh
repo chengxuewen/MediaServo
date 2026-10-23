@@ -36,7 +36,7 @@ gate "fmt --check (incremental)"  bash -c '
   rustfmt --edition 2024 --check $files'
 gate "changelog markers (F11-X)"  target/debug/mediaservo-gates changelog
 gate "wire changelog pairing (G3)"  bash scripts/gate-wire-changelog.sh
-gate "bindings version parity"    python3 scripts/gate-parity.py
+gate "bindings version parity"    target/debug/mediaservo-gates parity
 gate "crate literal versions"     bash -c '! git grep -l "^version = \"" -- "crates/*/Cargo.toml" | grep -vE "mediaservo-(host|server|field|client)/Cargo.toml" | grep -q .'
 gate "crate lanes reconciliation" target/debug/mediaservo-gates lanes
 

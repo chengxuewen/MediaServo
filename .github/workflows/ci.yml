@@ -23,11 +23,9 @@ jobs:
         # the former inline copy had drifted in L-numbering (absolute vs section-relative).
         run: cargo run --quiet -p mediaservo-gates -- changelog
       - name: Bindings version parity (C43③ three hand copies, anti-drift)
-        run: |
-          v=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="mediaservo-field"))')  # bindings belong to the sdk-field delivery domain (F12) — align with field, not workspace
-          grep -q "version = \"$v\"" bindings/python/mediaservo/pyproject.toml
-          grep -q "__version__ = \"$v\"" bindings/python/mediaservo/mediaservo/__init__.py
-          grep -q "\"version\": \"$v\"" bindings/node/package.json
+        # SR6 P3: Rust face = the executed gate (gate-parity.py retired). Truth stays
+        # the sdk-field delivery-domain version via cargo metadata (F12), one source.
+        run: cargo run --quiet -p mediaservo-gates -- parity
       - name: Version uniformity gate (C43 — crate version single source = workspace; no self-carried literals)
         run: |
           if grep -l '^version = "' crates/*/Cargo.toml | grep -vE "mediaservo-(host|server|field|client)/Cargo.toml"; then
