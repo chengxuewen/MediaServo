@@ -197,6 +197,24 @@ fi
 # one-leg-one-owner route as batch-1; flags and output shapes mirror the
 # retired python exactly; MEDIASERVO_DRY_RUN honored on command legs).
 # =============================================================================
+# runtime guidance (was _host_runtime_hint/_server_runtime_hint — the wrappers
+# retired at D266/T21; the arms only print the instance-command shape)
+_msvc_hint_host() {
+    echo "$1 host: CLI wrapper removed — run manually:" >&2
+    echo "  deployed instance: systemctl --user start|stop oxmgr-<brand>-host.service" >&2
+    echo "            or <prefix>/bin/msrtc-host start|stop <prefix>" >&2
+    echo "  development: target/debug/mediaservo-host init . && token issue --all . && start|stop ." >&2
+    echo "            clear iceoryx2 residue before running: rm -rf /tmp/iceoryx2 /dev/shm/iox2_* (C25)" >&2
+}
+_msvc_hint_server() {
+    local sb="${MEDIASERVO_BRAND:+${MEDIASERVO_BRAND}-server}"; sb="${sb:-mediaservo-server}"
+    echo "$1 server: CLI wrapper removed — run via the instance directory:" >&2
+    echo "  deployed instance: <prefix>/bin/$sb start|stop|restart|status <prefix> (not deployed yet: mediaservo deploy server --prefix <X>; bare-metal entry <prefix>/$sb)" >&2
+    echo "  development: target/debug/mediaservo-server init . && start . --no-web (frontend dev: dev web = vite:5173 pairs with --no-web; the browser entry itself is cluster-managed)" >&2
+    echo "  containers (modes 2/3): mediaservo up / down --env dev|prod unchanged" >&2
+    echo "  read-only probes kept: mediaservo status server | logs server" >&2
+}
+
 case "${1:-}" in
     doctor)
         # toolchain version probe (was _cmd_env_diagnose: which + --version, first line)
@@ -232,6 +250,31 @@ case "${1:-}" in
             printf '  %-24s %s\n' "$name" "$tag"
         done
         exit 0
+        ;;
+    start|stop|restart)
+        act="${1}"
+        [ $# -le 2 ] || { echo "$act: unrecognized arguments: ${*:3}" >&2; exit 2; }
+        if [ "$act" = start ] && [ $# -eq 1 ]; then tgt=server; else tgt="${2:-}"; fi
+        case "$tgt" in
+            server) _msvc_hint_server "$act" ;;
+            host) _msvc_hint_host "$act" ;;
+            *) if [ -z "$tgt" ] && [ "$act" != start ]; then echo "usage: $act {host,server}" >&2; else echo "$act: invalid target '${tgt:-}' (choose from host, server)" >&2; fi
+               exit 2 ;;
+        esac
+        exit 2
+        ;;
+    run)
+        # run example stays python (build/run/test example surface = batch-beta);
+        # the server/host guidance arms are bash-owned now.
+        if [ "${2:-}" = example ]; then
+            exec python "$ROOT/scripts/mediaservo_cli.py" "$@"
+        fi
+        case "${2:-}" in
+            server) _msvc_hint_server run ;;
+            host) _msvc_hint_host run ;;
+            *) echo "run: invalid target '${2:-}' (choose from server, host, example)" >&2; exit 2 ;;
+        esac
+        exit 2
         ;;
 esac
 

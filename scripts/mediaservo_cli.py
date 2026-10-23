@@ -1160,47 +1160,6 @@ def _compose_env(announced_ip: str | None = None) -> dict[str, str]:
     return env
 
 
-def _host_runtime_hint(action: str) -> None:
-    """host runtime: the CLI wrapper was removed (D266) — build = compile / deploy = install / run = manual."""
-    print(f"{action} host: CLI wrapper removed — run manually:", file=sys.stderr)
-    print("  deployed instance: systemctl --user start|stop oxmgr-<brand>-host.service", file=sys.stderr)
-    print("            or <prefix>/bin/msrtc-host start|stop <prefix>", file=sys.stderr)
-    print("  development: target/debug/mediaservo-host init . && token issue --all . && start|stop .", file=sys.stderr)
-    print("            clear iceoryx2 residue before running: rm -rf /tmp/iceoryx2 /dev/shm/iox2_* (C25)", file=sys.stderr)
-
-def _server_runtime_hint(action: str) -> None:
-    """server runtime: the CLI wrapper was removed (T21 — C39, same treatment as host): build = compile / deploy = install / run = instance-directory commands.
-    The bin name is brand-aware (D269 — env MEDIASERVO_BRAND; defaults to the upstream name)."""
-    sb = f"{os.environ.get('MEDIASERVO_BRAND', '')}-server" if os.environ.get("MEDIASERVO_BRAND", "") else "mediaservo-server"
-    print(f"{action} server: CLI wrapper removed — run via the instance directory:", file=sys.stderr)
-    print(f"  deployed instance: <prefix>/bin/{sb} start|stop|restart|status <prefix> (not deployed yet: mediaservo deploy server --prefix <X>; bare-metal entry <prefix>/{sb})", file=sys.stderr)
-    print("  development: target/debug/mediaservo-server init . && start . --no-web (frontend dev: dev web = vite:5173 pairs with --no-web; the browser entry itself is cluster-managed)", file=sys.stderr)
-    print("  containers (modes 2/3): mediaservo up / down --env dev|prod unchanged", file=sys.stderr)
-    print("  read-only probes kept: mediaservo status server | logs server", file=sys.stderr)
-
-
-def _cmd_start(args: argparse.Namespace) -> None:
-    """start <target> — server/host retired → guidance + exit 2 (T21/C39: instance-directory commands; containers use up)."""
-    target = args.target
-    if target == "server":
-        _server_runtime_hint("start")
-        sys.exit(2)
-    elif target == "host":
-        _host_runtime_hint("start")
-        sys.exit(2)
-
-
-def _cmd_restart(args: argparse.Namespace) -> None:
-    target = args.target
-    """restart <target> — server/host retired → guidance + exit 2 (instance-directory commands; containers up/down)."""
-    if target == "server":
-        _server_runtime_hint("restart")
-        sys.exit(2)
-    elif target == "host":
-        _host_runtime_hint("restart")
-        sys.exit(2)
-
-
 # ───────── example command surface (p3-gui-viewer W0, G7) ─────────
 #
 # Directory contract = bindings/cxx/examples/<name>/CMakeLists.txt (dir name == target == artifact name, G4).
@@ -1328,15 +1287,8 @@ def _cmd_test_example(name: str | None) -> None:
 
 
 def _cmd_run(args: argparse.Namespace) -> None:
-    """run <target> — example = C++ examples runner; server/host retired → guidance + exit 2 (T21/C39)."""
-    if args.target == "example":
-        _cmd_run_example(args.rest)
-    if args.target == "server":
-        _server_runtime_hint("run")
-        sys.exit(2)
-    elif args.target == "host":
-        _host_runtime_hint("run")
-        sys.exit(2)
+    """run example <name> [passthrough…] — C++ examples runner (server/host guidance arms are shell-owned since SR6 P2)."""
+    _cmd_run_example(args.rest)
 
 
 def _out_root() -> Path:
@@ -1360,17 +1312,6 @@ def _native_runtime_dirs() -> tuple[Path, Path, Path]:
     (base / "logs").mkdir(parents=True, exist_ok=True)
     return base / "etc", base / "logs", base
 
-
-
-def _cmd_stop(args: argparse.Namespace) -> None:
-    """stop <target> — server/host retired → guidance + exit 2 (containers: mediaservo down)."""
-    target = args.target
-    if target == "server":
-        _server_runtime_hint("stop")
-        sys.exit(2)
-    elif target == "host":
-        _host_runtime_hint("stop")
-        sys.exit(2)
 
 
 def _cmd_logs(args: argparse.Namespace) -> None:
@@ -1763,12 +1704,12 @@ def main() -> None:
     fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
   Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
   Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
-  bash-owned (SR6 batch-1/alpha, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list
-  retired → guidance + exit 2: run/start/stop/restart server|host (C39 — use instance-directory commands; the container face up/down is unchanged)
+  bash-owned (SR6 batch-1/alpha, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance)
+  guidance arms exit 2 (C39 — instance-directory commands; the container face up/down is unchanged)
   read-only probes kept: status server|host / logs server / clean server
   C++ example surface (p3): list example → build example [names…] → run example <name> / test example
              (foreground dev tool; artifacts in target/examples/bin/ — never in out/; the build-c prelude is auto-added)
-  exit codes: status/logs — 0 = success, 1 = not running/target missing, 2 = bad args / probe undecidable; run/start/stop/restart — retired arms land at 2 with the instance-command guidance
+  exit codes: status/logs — 0 = success, 1 = not running/target missing, 2 = bad args / probe undecidable
 """)
 
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1787,23 +1728,11 @@ def main() -> None:
 
 
 
-    restart_p = sub.add_parser("restart", help="restart <target>: server/host retired → guidance + exit 2 (<prefix>/bin/mediaservo-server restart <dir>; containers up/down)")
-    restart_p.add_argument("target", choices=["host", "server"])
-    restart_p.set_defaults(func=_cmd_restart)
-    run_p = sub.add_parser("run", help="run <target>: server/host retired → guidance + exit 2 (instance commands: <prefix>/bin/mediaservo-server -h); example = C++ examples")
-    run_p.add_argument("target", choices=["server", "host", "example"])
+    run_p = sub.add_parser("run", help="run example <name> [args…] — C++ examples runner (server|host guidance is shell-owned)")
+    run_p.add_argument("target", choices=["example"])
     run_p.add_argument("rest", nargs=argparse.REMAINDER,
                        help="run example only: <name> [app passthrough args…]")
     run_p.set_defaults(func=_cmd_run)
-
-    start_p = sub.add_parser("start", help="start <target> (default server): server/host retired → guidance + exit 2 (containers use up; instance commands for the rest)")
-    start_p.add_argument("target", nargs="?", choices=["host", "server"], default="server")
-    start_p.set_defaults(func=_cmd_start)
-
-    stop_p = sub.add_parser("stop", help="stop <target>: server/host retired → guidance + exit 2 (instance command stop <dir>; containers: mediaservo down)")
-    stop_p.add_argument("target", choices=["host", "server"])
-    stop_p.set_defaults(func=_cmd_stop)
-
 
     logs_p = sub.add_parser("logs", help="logs [<svc>] [--follow] [--mode native|compose]: server = bare-metal log (default) | compose container log | host log")
     logs_p.add_argument("target", nargs="?", choices=["server", "host"], default="server")
@@ -1883,10 +1812,8 @@ def main() -> None:
             _cmd_build_example(args.names, args.release)
     elif args.command == "run":
         _cmd_run(args)
-    elif args.command == "start":
-        _cmd_start(args)
-    elif args.command in ("stop", "restart", "logs"):
-        globals()[f"_cmd_{args.command}"](args)
+    elif args.command == "logs":
+        _cmd_logs(args)
     elif args.command == "status":
         _cmd_status_runtime(args)
 

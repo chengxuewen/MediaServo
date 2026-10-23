@@ -62,10 +62,10 @@ Unified CLI entry point (available after bootstrap):
 ./mediaservo.sh up --announced-ip 10.144.0.3  # Explicit container announced address (overrides auto-detect; multiple values comma-separated —
                                   # containers only honor a single announced address, first IP wins; multiple addresses require bare-metal run)
 ./mediaservo.sh build server --native  # Bare-metal compile server (pixi toolchain, needs network for meson wraps; multi-IP announce takes effect at run stage)
-./mediaservo.sh run server --native [--foreground]  # Run server on bare metal (background: target/server-native.pid + .log)
+./mediaservo.sh run server --native [--foreground]  # Retired → guidance + exit 2 (run plane = instance commands or up/down for containers; T21/C39)
 # host run CLI wrapper removed (D266) — deployed instance: systemctl --user start oxmgr-<brand>-host.service / <prefix>/bin/msrtc-host start <prefix>;
 # dev: target/debug/mediaservo-host init . && token issue --all . && start . (clear iceoryx2 residue first)
-./mediaservo.sh stop server   # Stop server (default native: kills bare-metal pid; --mode both stops both / --env dev stops container only)
+./mediaservo.sh stop server   # Retired → guidance + exit 2 (instance: <prefix>/bin/<brand>-server stop <dir>; containers: mediaservo down)
 ./mediaservo.sh stop host     # Removed (D266) — manual: systemctl --user stop oxmgr-<brand>-host.service / <prefix>/bin/msrtc-host stop <prefix>
 ./mediaservo.sh logs server    # Server logs (default bare-metal target/server-native.log; --env dev/--mode compose container logs; --native explicit)
 ./mediaservo.sh down --env dev && ./mediaservo.sh up --env dev   # Restart dev server (clear old then start; config changes take effect)
