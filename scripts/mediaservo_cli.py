@@ -1236,7 +1236,7 @@ def _write_changes_file(staging: Path, target: str) -> None:
 
 # SR6 P1: legs migrated to cmake install rules + CPack TGZ (one-leg-one-owner —
 # targets NOT in this set still run the python staging/tar branch in _cmd_package).
-_CPACK_PKG = {"sdk-client", "sdk-field", "bindings", "server"}
+_CPACK_PKG = {"sdk-client", "sdk-field", "bindings", "server", "host"}
 
 
 def _cpack_stage_sdk(staging: Path, args: argparse.Namespace) -> str:
@@ -1326,8 +1326,9 @@ def _cmd_package(args: argparse.Namespace) -> None:
     """package <target> — <dist>/<brand>-{host|server|sdk}-<ver>.tar.gz multi-package release (D-H13).
     dist: --dist selects the output dir; defaults to the submodule dist/ when unspecified (the MSRTC release shell injects out/packages/).
     server: run _cmd_deploy_server inside staging (bin+oxmgr/etc/web/init idempotent — isomorphic with host, T20/T21).
-    host: run _cmd_deploy_host(staging) inside staging (Momus ruling b — identity init / oxmgr pinning /
-    etc template / env.sh file assembly; build stays stateless) + tar contains bin 8/oxmgr/etc/identity/run/logs/recordings.
+    host/server: SR6 P1 L3+L4 — the deploy-equivalent assembly runs as cmake install
+    legs against the staging root (identity init / oxmgr pinning / env.sh / strip),
+    packed by native CPack TGZ (the python staging branch is now unreachable for every target).
     bindings: staging copies out/bindings (full SDK layout — D241 version-full triple /.pc / cmake /
     wheel / node / cxx headers, completed by Task 2.5) → sdk package.
     sdk-client/sdk-field (bindings alias) and server: SR6 P1 L1-L3 — staged by cmake
@@ -1358,7 +1359,7 @@ def _cmd_package(args: argparse.Namespace) -> None:
     cpack_root = ""
     try:
         if args.target == "host":
-            _cmd_deploy_host(str(staging), args.release, allow_stop=False)  # brand via MEDIASERVO_BRAND env / installed-instance derivation (D266)
+            cpack_root = _cpack_stage_app(staging, args)  # SR6 P1 L4 (design (e) legs)
         elif args.target == "server":
             cpack_root = _cpack_stage_app(staging, args)  # SR6 P1 L3 (design (e) legs)
         elif args.target in ("bindings", "sdk-field"):

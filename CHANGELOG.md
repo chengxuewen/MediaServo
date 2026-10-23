@@ -53,7 +53,16 @@ teams); for development process details, consult git log directly. Newest versio
   is staging-absolute paths baked into run/oxfile.toml(+.bak) — the python route
   baked its own temp path the same way — plus the CHANGES slice advancing with
   this file. `package host` keeps the python branch until its leg lands.
-- [deploy] `deploy host` lays its branded bin tree through CMake install rules
+- [deploy] SR6 P1 L4: `package host` rides the CPack route — SR7 bin rows + oxmgr
+  copy row + install-time legs (staged-binary `init` with the brand env, the
+  generated env.sh, run/logs + recordings, PIT-119 strip). Judge: file/link/dir name
+  sets identical, env.sh byte-equal; the remaining md5 drift is the per-staging
+  random credential material (identity.json, signing.pem, the six *.token,
+  issuance.jsonl) and the staging-absolute token_path baked into ros_bridge.yaml —
+  properties the python route had identically (the baseline carries its own random
+  keys and temp path). CHANGES.md drift = this file advancing. All four targets now
+  pack through cmake + CPack; the python staging/tar mechanics die the closing
+  stroke.- [deploy] `deploy host` lays its branded bin tree through CMake install rules
   (SR7 T3): the 8 app binaries (mediaservo-host + the seven host-<role> lanes,
   D269 names host-<app> -> <brand>-<app>) are PROGRAMS+RENAME rows over the
   cargo target/<profile> dir, the bin whitelist residue reclaim and the root
