@@ -16,7 +16,6 @@ import json
 import os
 import re
 import shutil
-import time
 import subprocess
 import sys
 import tempfile
@@ -91,168 +90,6 @@ def _run_or_exit(cmd: list[str], env: dict[str, str] | None = None, cwd: str | N
     code = _run(cmd, env=env, cwd=cwd)
     if code != 0:
         sys.exit(code)
-
-
-def _cmd_build_host() -> None:
-    """build host — pure compile into target/ (assembly/branding moved to deploy — D266)."""
-    _check("cargo", "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat")
-    _run_or_exit(["cargo", "build", "-p", "mediaservo-host", "-p", "mediaservo-client"])
-    print("✓ host build complete (pure compile to target/ — assembly and branding happen at deploy: mediaservo deploy host --prefix <X>)")
-
-def _ensure_admin_dist() -> None:
-    """Incremental admin frontend build (C13 dual-track parity — the Docker path builds inside the Dockerfile; the native path aligns with it).
-    Decision: dist missing, or any src file newer than dist/index.html → pnpm build:admin (turbo filter).
-    Zero extra cost when there are no frontend changes (mtime skip). Fixes the C24 incident (frontend edits not taking effect after rebuild)."""
-    dist_index = ROOT / "www" / "apps" / "admin" / "dist" / "index.html"
-    src_dir = ROOT / "www" / "apps" / "admin" / "src"
-    need = True
-    if dist_index.exists() and src_dir.exists():
-        dist_mtime = dist_index.stat().st_mtime
-        try:
-            newers = [p for p in src_dir.rglob("*") if p.is_file() and p.stat().st_mtime > dist_mtime]
-        except OSError:
-            newers = []
-        need = bool(newers)
-    if not need:
-        print(f"admin dist up to date ({dist_index.parent.relative_to(ROOT)} — no src changes) — skipping frontend build, reusing existing dist")
-        return
-    _check("pnpm", "pnpm not installed — required for the frontend build (or run manually: cd www && pnpm build:admin)")
-    print("admin dist stale/missing — building frontend (tsc -b && vite build)...")
-    _run_or_exit(["pnpm", "build:admin"], cwd=str(ROOT / "www"))
-
-
-def _cmd_build_web() -> None:
-    """build web — frontend-only fast lane: incremental pnpm by mtime → out/server/web
-    (does not touch cargo). SR6 batch-5: the placement rides the app-tree cmake face
-    (staging=web) — the retired _stage_web_to_out's rmtree+copytree is its REMOVE-leg +
-    install(DIRECTORY) pair; the vite INVOCATION stays here (language-native builder, F30)."""
-    _ensure_admin_dist()
-    _cmake_app_install(_out_root() / "server", "server", "", False, staging="web")
-
-
-
-
-
-
-def _build_stage_weaknet(release: bool) -> None:
-    """build server step 1 (ordering contract [bF4 bF5 BA-15]): cargo-compile weaknet into
-    target/{profile}. SR6 batch-5: the branded placement into out/server/bin/{brand}-weaknet
-    rides the app-tree cmake row — staging=build hunts the FRESH target binary first and an
-    absent artifact is the same WARN-skip polarity this function carried (compile WARN here,
-    placement WARN in the row). Profile follows --release propagation. Failure only WARNs and
-    does not block the server main flow (weaknet-server-integration design §D1 [bF4 bF5] —
-    running it last would take the mediasoup hung-build tree's exit guilt-by-association;
-    on this machine recorded as [BA-15 tree-hang endorsed by CI])."""
-    cmd = ["cargo", "build"] + (["--release"] if release else []) + ["-p", "mediaservo-weaknet"]
-    try:
-        code = _run(cmd)
-    except OSError as e:  # cargo missing/cannot start (degraded path — the server main path has its own _check error exit)
-        print(f"WARN: weaknet staging skipped (cargo unavailable: {e}) — not blocking the server build", file=sys.stderr)
-        return
-    if code != 0:
-        print(f"WARN: weaknet compile failed (rc={code}) — not blocking the server build; "
-              "the app-tree weaknet row WARNs if nothing stageable is found (re-run build server after troubleshooting)", file=sys.stderr)
-
-
-def _cmd_build_server(image: str | None = None, native: bool = False, release: bool = False) -> None:
-    """build server: default native (user ruling B — no mode written = native) | --image runtime|dev = Docker image (--native kept as compat alias)."""
-    # weaknet compile comes first (design §D1 [bF4 bF5 BA-15]): it must precede the server cargo build — mediasoup
-    # hangs in that posture don't guilt-by-association it; and its own failure only WARNs, never blocking server (separate try).
-    _build_stage_weaknet(release)
-    if native or image is None:   # default native; Docker only when --image is explicit
-        _ensure_admin_dist()      # incremental frontend build by mtime (the Docker path handles it in the Dockerfile)
-        _check("cargo", "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat")
-        if not os.environ.get("MESON"):
-            print("Error: MESON environment variable not set — invoke via ./mediaservo.sh (source pixi-shell.sh injects the activation env)", file=sys.stderr)
-            sys.exit(2)
-        cmd = ["cargo", "build"] + (["--release"] if release else []) + ["-p", "mediaservo-server"]
-        # tasks.py env pitfall (T1 Ruling extension, not foreseen in the brief): the MESON injected by pixi activation points to
-        # a nonexistent NINJA → build.rs/tasks.py skip pip but hang when NINJA is missing; popping it matches T1 unset semantics.
-        # The MESON assertion only proxies "activated via mediaservo.sh" (injected by pixi activation); after pop, cargo
-        # subprocesses see no MESON/MESON_ARGS, consistent with T1 unset semantics (tasks.py falls back to official pip self-installing meson/ninja).
-        env = {**os.environ}
-        env.pop("MESON_ARGS", None)
-        env.pop("MESON", None)
-        _run_or_exit(cmd, env=env)
-        # SR6 batch-5: the assembly (bin + weaknet + web tree + brand reclaim) rides the
-        # SR7 app-tree face EXACTLY like deploy does — _cmake_app_install with staging=build:
-        # swap-install rows for the FRESH target/{profile} binaries (the atomic .new/
-        # os.replace semantics of the retired copy loop — build must never truncate a live
-        # cluster's running bin, deploy may only because it stops first), the whitelist
-        # reclaim leg replaces the legacy-name unlinks, and the web move rides the same
-        # pass (retired _stage_web_to_out). No root entry shortcuts: a build-staged
-        # delivery tree stays bin/etc/web (the deploy landing adds the links).
-        # PIT-191 single-point branding stays CLI-resolved (env → in-tree derivation →
-        # upstream) and rides -DMEDIASERVO_BRAND (resolution order shared with deploy).
-        bin_dir = _out_root() / "server" / "bin"
-        bin_dir.mkdir(parents=True, exist_ok=True)
-        brand = os.environ.get("MEDIASERVO_BRAND", "").strip() or _derive_brand_server(bin_dir)
-        _cmake_app_install(_out_root() / "server", "server", brand, release, staging="build")
-        print(f"server assembly staged: out/server/ (bin/etc/web — app-tree rules, brand {brand or 'mediaservo'})")
-        # ship caddy along (2026-09-29: detection only honored PATH → root fix for bare-shell start silently going --no-web) —
-        # if found (PATH / in-repo pixi tree), copy it into bin/ (self-contained deployment: third probe-chain entry = bin's own directory);
-        # if not found, WARN without blocking (old form: provided by PATH).
-        caddy_src = shutil.which("caddy") or next(
-            (c for c in (ROOT / ".pixi" / "envs" / "default" / "bin" / "caddy",
-                         ROOT.parent / ".pixi" / "envs" / "default" / "bin" / "caddy")
-             if c.is_file()), None)
-        if caddy_src:
-            caddy_dst = _out_root() / "server" / "bin" / "caddy"
-            if not caddy_dst.exists() or Path(caddy_src).resolve() != caddy_dst.resolve():
-                shutil.copy2(caddy_src, caddy_dst)
-                print(f"caddy shipped: out/server/bin/caddy (from {caddy_src})")
-        else:
-            print("WARN: caddy not found (PATH / in-repo pixi tree) — out/server contains no caddy; "
-                  "at start it must come from PATH, otherwise web silently degrades", file=sys.stderr)
-        # stage the default config (server.yaml — derived from config/server.docker.yaml, accounts/devices relative paths)
-        # PIT-158/160: skip if already present (runtime registries devices/accounts may be hot-written by the admin API,
-        # and server.yaml may have been changed by ops) — build must not overwrite runtime data back with the template; to get a fresh template, delete the old file first.
-        etc_dir = _out_root() / "server" / "etc"
-        etc_dir.mkdir(parents=True, exist_ok=True)
-        src_cfg = ROOT / "config" / "server.docker.yaml"
-        if src_cfg.exists() and not (etc_dir / "server.yaml").exists():
-            cfg = src_cfg.read_text()
-            # point accounts/devices relative to the etc dir (after packaging: bin/../etc/accounts.yaml etc.)
-            cfg = cfg.replace('/opt/mediaservo/etc/accounts.yaml', 'accounts.yaml')
-            cfg = cfg.replace('/opt/mediaservo/etc/devices.yaml', 'devices.yaml')
-            (etc_dir / "server.yaml").write_text(cfg)
-        if src_cfg.exists():
-            # copy device/account files (dev templates — filled only when missing on first run)
-            for f in ("accounts.yaml", "devices.yaml"):
-                src = ROOT / "config" / f
-                dst = etc_dir / f
-                if src.exists() and not dst.exists():
-                    shutil.copy2(src, dst)
-            print(f"server default config staged: {etc_dir}/server.yaml")
-        return
-    _check("docker", "install docker and start the daemon")
-    if image:
-        if image == "runtime":
-            # production delivery image (--target runtime — slimmed / self-bootstrapping entrypoint)
-            _run_or_exit(["docker", "build", "--target", "runtime", "-t", "mediaservo-server:latest", "."])
-        else:
-            _run_or_exit(COMPOSE_BASE + ["build", "server"])
-        return
-    _run_or_exit(COMPOSE_BASE + ["build", "server"])
-
-
-def _cmd_build_client() -> None:
-    _check("cargo", "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat")
-    _run_or_exit(["cargo", "build", "-p", "mediaservo-client"])
-
-
-def _cmd_build(target: str) -> None:
-    """build <target> — all|host|server|client|bindings (default all)."""
-    if target in ("all", "host"):
-        _cmd_build_host()
-    if target in ("all", "server"):
-        _cmd_build_server()
-    if target in ("all", "client"):
-        _cmd_build_client()
-    if target == "web":   # frontend-only fast lane (not in all — build server already stages web)
-        _cmd_build_web()
-    if target == "bindings":
-        _cmd_build_bindings()
 
 
 def _workspace_version() -> str:
@@ -462,48 +299,6 @@ def _exe_name(name: str) -> str:
 
 
 
-def _pids_using(path: Path) -> list[int]:
-    """Pids of processes occupying path: (1) fd open, (2) /proc/pid/exe==realpath (exec memory-mapped occupancy).
-    Exact match — no basename/cmdline fuzzy matching (same-signature sibling processes get guilt-by-associated; on multi-instance machines that is a production incident
-    — PIT-166; the 2026-08-31 deploy drill proved the old basename matching could hit other instances' daemons)."""
-    target = os.path.realpath(path)
-    pids: list[int] = []
-    try:
-        for p in os.listdir("/proc"):
-            if not p.isdigit():
-                continue
-            pid = int(p)
-            try:
-                # (1) fd scan (open file descriptors)
-                for fd in os.listdir(f"/proc/{p}/fd"):
-                    try:
-                        if os.path.realpath(f"/proc/{p}/fd/{fd}") == target:
-                            pids.append(pid)
-                            break
-                    except OSError:
-                        continue
-                if pid in pids:
-                    continue
-                # (2) exe symlink (exec occupancy — the kernel records exactly this inode, no false positives)
-                if os.path.realpath(f"/proc/{p}/exe") == target:
-                    pids.append(pid)
-            except OSError:
-                continue
-    except FileNotFoundError:
-        pass
-    return pids
-
-def _kill_using(path: Path) -> None:
-    """Kill processes occupying path (_pids_using exact predicate — kill by pid only, graceful SIGTERM exit)."""
-    for pid in _pids_using(path):
-        try:
-            os.kill(pid, 15)  # SIGTERM (graceful daemon exit)
-            print(f"  killed occupying process {pid}")
-        except OSError:
-            pass
-    time.sleep(1)
-
-
 def _strip_so(path: Path) -> None:
     """strip --strip-unneeded on delivery-tree .so real files (N7 09-18 measurement: the debug cdylib was the entire
     cause of the fat wheel's 528MB — not FFmpeg — uncompressed 27M→~1M scale). Dynamic symbols (.dynsym / exported ABI) untouched,
@@ -530,52 +325,6 @@ def _derive_brand_server(bin_dir: Path) -> str:
 # predicates, .bak rotation and merge_manual_env re-absorption (baked values win, [lck-F4]
 # half-migration guard preserved by construction: one rotation, one merge, inside init).
 # WEAKNET_OXFILE_APP's duty lives on as the Rust constant templates::WEAKNET_APP [mn10].
-
-
-def _cmake_app_install(prefix_p: Path, tree: str, brand: str, release: bool,
-                       staging: str = "") -> None:
-    """SR7: run the app delivery-layout install rules (cmake/MediaServoAppTree.cmake)
-    into prefix_p. Configure is RE-RUN every invocation — the source-existence hunts
-    (server/weaknet dual source, host per-name skip-missing) are configure-time truth
-    and must never be frozen by a stale cache (PIT-189 family: never trust yesterday's
-    tree). Brand and the delivery root ride cache variables (§1 rule 3: the CLI keeps
-    invoke+brand, cmake describes layout).
-    staging (SR6 batch-5, server tree): '' = deploy landing (delivery-tree-first
-    PROGRAMS rows + root entry shortcuts); build = build-server assembly (fresh
-    target/{profile} swap rows + web move, no entry links); web = build-web fast
-    lane placement only. Passed explicitly EVERY invocation so a stale cache value
-    can never flip a verb's mode."""
-    # Dedicated binaryDir (preset default's recipe, -B override): the app cache
-    # vars must NEVER land in build/presets/default — a later plain IDE/gates
-    # configure of that tree would inherit a stale MEDIASERVO_APP_TREE from the
-    # cache and FATAL on a missing delivery tree (fresh-clone IDE regression).
-    app_tree = ROOT / "build" / "app-tree"
-    cfg = ["cmake", "--preset", "default", "-B", str(app_tree),
-           f"-DMEDIASERVO_APP_TREE={tree}",
-           f"-DMEDIASERVO_BRAND={brand}",
-           f"-DMEDIASERVO_APP_STAGING={staging}",
-           f"-DCMAKE_BUILD_TYPE={'Release' if release else 'Debug'}"]
-    if tree == "server":
-        cfg.append(f"-DMEDIASERVO_SERVER_OUT_DIR={_out_root() / 'server'}")
-    _run_or_exit(cfg, cwd=str(ROOT))
-    inst = ["cmake", "--install", str(app_tree), "--prefix", str(prefix_p)]
-    # ETXTBSY policy stays invocation-side (SR4 L5 precedent): graceful stop ran
-    # above; a survivor (daemon respawn race) kills the occupier BY EXACT PATH and
-    # re-runs the idempotent install (rerun-safe by cmake semantics).
-    for attempt in range(3):
-        r = subprocess.run(inst, cwd=str(ROOT), capture_output=True, text=True)
-        if r.returncode == 0:
-            return
-        blob = (r.stdout or "") + (r.stderr or "")
-        if ("busy" not in blob.lower() and "Text file" not in blob) or attempt == 2:
-            print(f"Error: cmake --install {tree} app tree into {prefix_p} failed (rc={r.returncode}):\n{blob[-600:]}", file=sys.stderr)
-            sys.exit(1)
-        print("  install hit busy artifacts — killing occupiers, retrying "
-              f"({attempt + 1}/3)", file=sys.stderr)
-        b = prefix_p / "bin"
-        for f in sorted(b.glob("*")) if b.is_dir() else []:
-            if f.is_file():
-                _kill_using(f)
 
 
 def _platform_tag() -> str:
@@ -896,7 +645,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     build_p = sub.add_parser("build", help="build <target> [--image runtime|dev]: all|web|host|server|client|bindings (default all; server = non-embedded variant + one-step web assembly; web = frontend-only fast lane; only --image takes the Docker path)")
-    build_p.add_argument("target", nargs="?", choices=["all", "web", "host", "server", "client", "bindings", "example"], default="all")
+    build_p.add_argument("target", nargs="?", choices=["bindings", "example"], default="all")
     build_p.add_argument("--release", action="store_true", help="release build (bindings: target/release, strip+LTO)")
     grp = build_p.add_mutually_exclusive_group()
     grp.add_argument("--image", choices=["runtime", "dev"], default=None,
@@ -905,7 +654,8 @@ def main() -> None:
                      help="build server only: native compile (pixi toolchain — first run needs network for meson wraps; multi-IP announcement takes effect at the run stage)")
     build_p.add_argument("names", nargs="*", metavar="NAME",
                         help="build example only: example names (omit = all; list example shows the roster)")
-    build_p.set_defaults(func=_cmd_build)
+    # no func= auto-dispatch (SR6 batch-beta-2: build handled by the explicit
+    # `if args.command == "build"` arm below; _cmd_build was retired to bash).
 
 
 
@@ -926,36 +676,10 @@ def main() -> None:
     package_p.add_argument("--brand", default="", help="brand package name (<dist>/<brand>-<target>-<ver>.tar.gz; default mediaservo)")
     package_p.add_argument("--release", action="store_true", help="package release artifacts (target/release, pairs with build --release)")
     package_p.set_defaults(func=_cmd_package)
-    # compat aliases (build-* kept — e2e scripts/habitual usage): run-host/up/down aliases removed (up/down are now first-level commands)
-    ALIASES = {
-        "build-host": ["build", "host"],
-        "build-server": ["build", "server"],
-    }
-    argv = sys.argv[1:]
-    if argv and argv[0] in ALIASES:
-        argv = ALIASES[argv[0]] + argv[1:]
-    args = parser.parse_args(argv)
-    if args.command == "build":
-        if getattr(args, "image", None) and args.target != "server":
-            print(f"build --image only supports build server (current target={args.target})", file=sys.stderr)
-            sys.exit(2)
-        if getattr(args, "native", False) and args.target != "server":
-            print(f"build --native only supports build server (current target={args.target})", file=sys.stderr)
-            sys.exit(2)
+    args = parser.parse_args(sys.argv[1:])
+    if args.command == "build":   # SR6 batch-beta-2: other targets are bash-owned
         if args.target == "bindings":
             _cmd_build_bindings(args.release)
-        elif args.target == "all":
-            _cmd_build_host()
-            _cmd_build_server()
-            _cmd_build_client()
-        elif args.target == "host":
-            _cmd_build_host()
-        elif args.target == "server":
-            _cmd_build_server(args.image, args.native, args.release)
-        elif args.target == "client":
-            _cmd_build_client()
-        elif args.target == "web":
-            _cmd_build_web()
         elif args.target == "example":
             _cmd_build_example(args.names, args.release)
     elif args.command == "run":

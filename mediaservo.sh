@@ -304,9 +304,9 @@ _msvc_app_install() {
     # default tree (fresh-clone IDE regression guard). Deploy landing mode = empty
     # MEDIASERVO_APP_STAGING. ETXTBSY survivors die BY EXACT PATH then the
     # idempotent install re-runs (rerun-safe by cmake semantics, SR4 L5 precedent).
-    local tree=$1 brand=$2 btype=$3 prefix=$4
+    local tree=$1 brand=$2 btype=$3 prefix=$4 staging=${5:-}
     local app_tree="$ROOT/build/app-tree"
-    local cfg=(cmake --preset default -B "$app_tree" "-DMEDIASERVO_APP_TREE=$tree" "-DMEDIASERVO_BRAND=$brand" "-DMEDIASERVO_APP_STAGING=" "-DCMAKE_BUILD_TYPE=$btype")
+    local cfg=(cmake --preset default -B "$app_tree" "-DMEDIASERVO_APP_TREE=$tree" "-DMEDIASERVO_BRAND=$brand" "-DMEDIASERVO_APP_STAGING=$staging" "-DCMAKE_BUILD_TYPE=$btype")
     [ "$tree" = server ] && cfg+=("-DMEDIASERVO_SERVER_OUT_DIR=${MSRTC_OUT_ROOT:-$ROOT/out}/server")
     echo "\$ ${cfg[*]}  (cwd: $ROOT)"
     (cd "$ROOT" && "${cfg[@]}") || exit $?
@@ -330,7 +330,170 @@ _ms_check() {
     command -v "$1" >/dev/null 2>&1 || { echo "Error: missing dependency '$1' — $2" >&2; exit 1; }
 }
 
+# =============================================================================
+# SR6 batch-beta-2 -- build family, bash-owned (moved out of mediaservo_cli.py;
+# echo/command shapes mirror the retired python exactly; the python
+# _run/_run_or_exit echo convention `$ cmd  (cwd: X)` is reproduced per leg).
+# =============================================================================
+_ms_build_host() {
+    _ms_check cargo "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat"
+    echo "\$ cargo build -p mediaservo-host -p mediaservo-client"
+    cargo build -p mediaservo-host -p mediaservo-client || exit $?
+    echo "✓ host build complete (pure compile to target/ — assembly and branding happen at deploy: mediaservo deploy host --prefix <X>)"
+}
+_ms_ensure_admin_dist() {
+    # incremental by mtime (C24/C13 dual-track parity): dist missing or any src
+    # file newer than dist/index.html → pnpm build:admin; zero cost otherwise.
+    local dist="$ROOT/www/apps/admin/dist/index.html" src="$ROOT/www/apps/admin/src"
+    if [ -f "$dist" ] && [ -d "$src" ] && [ -z "$(find "$src" -type f -newer "$dist" -print -quit 2>/dev/null)" ]; then
+        echo "admin dist up to date (www/apps/admin/dist — no src changes) — skipping frontend build, reusing existing dist"
+        return 0
+    fi
+    _ms_check pnpm "pnpm not installed — required for the frontend build (or run manually: cd www && pnpm build:admin)"
+    echo "admin dist stale/missing — building frontend (tsc -b && vite build)..."
+    echo "\$ pnpm build:admin  (cwd: $ROOT/www)"
+    (cd "$ROOT/www" && pnpm build:admin) || exit $?
+}
+_ms_build_web() {
+    # frontend-only fast lane: vite invocation stays here (language-native builder,
+    # F30); the placement rides the app-tree cmake face (staging=web).
+    _ms_ensure_admin_dist
+    _msvc_app_install server "" Debug "${MSRTC_OUT_ROOT:-$ROOT/out}/server" web
+}
+_ms_build_stage_weaknet() {
+    # $1=release flag — ordering contract [bF4 bF5 BA-15]: compiles BEFORE the
+    # server build (mediasoup-hung trees never guilt-by-associate it); its own
+    # failure only WARNs (degraded polarity carried from the retired python).
+    local cmd=(cargo build) rc=0
+    [ "$1" = 1 ] && cmd+=(--release)
+    cmd+=(-p mediaservo-weaknet)
+    if ! command -v cargo >/dev/null 2>&1; then
+        echo "WARN: weaknet staging skipped (cargo unavailable: command not found) — not blocking the server build" >&2
+        return 0
+    fi
+    echo "\$ ${cmd[*]}"
+    "${cmd[@]}" || rc=$?
+    if [ "$rc" != 0 ]; then
+        echo "WARN: weaknet compile failed (rc=$rc) — not blocking the server build; the app-tree weaknet row WARNs if nothing stageable is found (re-run build server after troubleshooting)" >&2
+    fi
+    return 0
+}
+
+_ms_build_server() {
+    # $1=image (''|runtime|dev) $2=native(0/1) $3=release(0/1)
+    # default native (user ruling B); Docker only on explicit --image.
+    _ms_build_stage_weaknet "$3"
+    local out_server="${MSRTC_OUT_ROOT:-$ROOT/out}/server" sbt=Debug
+    [ "$3" = 1 ] && sbt=Release
+    if [ "$2" = 1 ] || [ -z "$1" ]; then
+        _ms_ensure_admin_dist
+        _ms_check cargo "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat"
+        if [ -z "${MESON:-}" ]; then
+            echo "Error: MESON environment variable not set — invoke via ./mediaservo.sh (source pixi-shell.sh injects the activation env)" >&2
+            exit 2
+        fi
+        local cargs=(cargo build)
+        [ "$3" = 1 ] && cargs+=(--release)
+        cargs+=(-p mediaservo-server)
+        echo "\$ ${cargs[*]}"
+        # MESON/MESON_ARGS pop (tasks.py env pitfall, T1 unset semantics — the
+        # assertion above only proxies "activated via mediaservo.sh")
+        env -u MESON -u MESON_ARGS "${cargs[@]}" || exit $?
+        mkdir -p "$out_server/bin"
+        local brand="${MEDIASERVO_BRAND:-}"
+        [ -n "$brand" ] || brand=$(_ms_derive_brand_server "$out_server/bin")
+        # PIT-191 single-point branding: env -> in-tree derivation -> upstream,
+        # rides -DMEDIASERVO_BRAND (swap-install rows, staging=build).
+        _msvc_app_install server "$brand" "$sbt" "$out_server" build
+        echo "server assembly staged: out/server/ (bin/etc/web — app-tree rules, brand ${brand:-mediaservo})"
+        # ship caddy (PATH -> in-repo pixi tree -> WARN; never blocking)
+        local caddy_src="" c
+        caddy_src=$(command -v caddy || true)
+        if [ -z "$caddy_src" ]; then
+            for c in "$ROOT/.pixi/envs/default/bin/caddy" "$ROOT/../.pixi/envs/default/bin/caddy"; do
+                if [ -f "$c" ]; then caddy_src=$c; break; fi
+            done
+        fi
+        if [ -n "$caddy_src" ]; then
+            local caddy_dst="$out_server/bin/caddy"
+            if [ ! -e "$caddy_dst" ] || [ "$(realpath -- "$caddy_src")" != "$(realpath -- "$caddy_dst")" ]; then
+                cp -p "$caddy_src" "$caddy_dst"
+                echo "caddy shipped: out/server/bin/caddy (from $caddy_src)"
+            fi
+        else
+            echo "WARN: caddy not found (PATH / in-repo pixi tree) — out/server contains no caddy; at start it must come from PATH, otherwise web silently degrades" >&2
+        fi
+        # config template seeding (PIT-158/160: never overwrite runtime data —
+        # delete the old file first to get a fresh template)
+        mkdir -p "$out_server/etc"
+        local src_cfg="$ROOT/config/server.docker.yaml" f
+        if [ -f "$src_cfg" ] && [ ! -f "$out_server/etc/server.yaml" ]; then
+            sed -e 's|/opt/mediaservo/etc/accounts.yaml|accounts.yaml|g' \
+                -e 's|/opt/mediaservo/etc/devices.yaml|devices.yaml|g' \
+                "$src_cfg" > "$out_server/etc/server.yaml"
+        fi
+        if [ -f "$src_cfg" ]; then
+            for f in accounts.yaml devices.yaml; do
+                if [ -f "$ROOT/config/$f" ] && [ ! -f "$out_server/etc/$f" ]; then
+                    cp -p "$ROOT/config/$f" "$out_server/etc/$f"
+                fi
+            done
+            echo "server default config staged: $out_server/etc/server.yaml"
+        fi
+        return 0
+    fi
+    _ms_check docker "install docker and start the daemon"
+    if [ "$1" = runtime ]; then
+        echo "\$ docker build --target runtime -t mediaservo-server:latest ."
+        docker build --target runtime -t mediaservo-server:latest . || exit $?
+    else
+        echo "\$ docker compose -f docker-compose.dev.yml build server"
+        docker compose -f docker-compose.dev.yml build server || exit $?
+    fi
+}
+_ms_build_client() {
+    _ms_check cargo "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat"
+    echo "\$ cargo build -p mediaservo-client"
+    cargo build -p mediaservo-client || exit $?
+}
+
 case "${1:-}" in
+    build|build-host|build-server)
+        # SR6 batch-beta-2: build family bash-owned; bindings/example still forward
+        # to python until their own beta-2 commits land (one-leg-one-owner order).
+        # build-host/build-server = compat aliases (retired argparse ALIASES).
+        _ms_orig=("$@")
+        case "${_ms_orig[0]}" in
+            build-host) set -- build host "${_ms_orig[@]:1}" ;;
+            build-server) set -- build server "${_ms_orig[@]:1}" ;;
+        esac
+        shift
+        tgt=""; image=""; native=0; release=0; names=(); seen_tgt=0
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --release) release=1; shift ;;
+                --native) native=1; shift ;;
+                --image) image="${2:?build --image needs a value}"
+                         case "$image" in runtime|dev) ;; *) echo "build: argument --image: invalid choice: '$image' (choose from 'runtime', 'dev')" >&2; exit 2 ;; esac
+                         shift 2 ;;
+                -*) echo "build: unrecognized flag $1" >&2; exit 2 ;;
+                *) if [ $seen_tgt = 0 ]; then tgt="$1"; seen_tgt=1; else names+=("$1"); fi; shift ;;
+            esac
+        done
+        tgt="${tgt:-all}"
+        case "$tgt" in all|web|host|server|client|bindings|example) ;; *) echo "build: argument target: invalid choice: '$tgt' (choose from 'all', 'web', 'host', 'server', 'client', 'bindings', 'example')" >&2; exit 2 ;; esac
+        if [ -n "$image" ] && [ "$tgt" != server ]; then echo "build --image only supports build server (current target=$tgt)" >&2; exit 2; fi
+        if [ "$native" = 1 ] && [ "$tgt" != server ]; then echo "build --native only supports build server (current target=$tgt)" >&2; exit 2; fi
+        case "$tgt" in
+            bindings|example) exec python "$ROOT/scripts/mediaservo_cli.py" "${_ms_orig[@]}" ;;
+            all)    _ms_build_host; _ms_build_server "" 0 0; _ms_build_client ;;
+            host)   _ms_build_host ;;
+            server) _ms_build_server "$image" "$native" "$release" ;;
+            client) _ms_build_client ;;
+            web)    _ms_build_web ;;
+        esac
+        exit 0
+        ;;
     doctor)
         # toolchain version probe (was _cmd_env_diagnose: which + --version, first line)
         for t in pixi cargo docker node; do
@@ -735,7 +898,7 @@ case "${1:-}" in
                 done
                 sleep 1
             fi
-            _msvc_app_install host "$brand" "$build_type" "$prefix"
+            _msvc_app_install host "$brand" "$build_type" "$prefix" ""
             # oxmgr version locked with the deployment (D-H13)
             _msvc_oxmgr_resolve host
             _msvc_copy_with_kill "$MS_OXMGR_SRC" "$bin_dir/oxmgr"
@@ -881,7 +1044,7 @@ EOF
                 timeout 30 "$stop_bin" stop "$prefix" >/dev/null 2>&1 && stop_rc=0 || stop_rc=$?
                 [ "$stop_rc" = 124 ] && echo "  ⚠ old instance stop timed out (possibly a pre-lifecycle old binary) — continuing reinstall" >&2 || true
             fi
-            _msvc_app_install server "$brand" Debug "$prefix"
+            _msvc_app_install server "$brand" Debug "$prefix" ""
             # lifecycle smoke: an old pre-lifecycle out/ build fails here (those
             # booted straight through on unknown args — the version probe is the gate)
             ver_out=$(timeout 10 "$server_cli" version 2>/dev/null) && smoke_rc=0 || smoke_rc=$?
@@ -955,10 +1118,9 @@ if [ "${1:-}" = "build:deploy" ] && [ $# -ge 2 ]; then
             *) BUILD_FLAGS+=("$1"); DEPLOY_FLAGS+=("$1"); shift;;
         esac
     done
-    # deploy legs are shell-owned now (bindings SR6 P2, host/server batch-beta-1) —
-    # build stays python, deploy re-enters this shell.
-    python "$ROOT/scripts/mediaservo_cli.py" "${BUILD_FLAGS[@]}" \
-        && "$ROOT/mediaservo.sh" "${DEPLOY_FLAGS[@]}"
+    # build legs are shell-owned too now (SR6 batch-beta-2) — build re-enters
+    # this shell, deploy rides the same arms.
+    "$ROOT/mediaservo.sh" "${BUILD_FLAGS[@]}" && "$ROOT/mediaservo.sh" "${DEPLOY_FLAGS[@]}"
     exit $?
 fi
 
