@@ -487,137 +487,6 @@ def _cmd_package(args: argparse.Namespace) -> None:
                 continue
         shutil.rmtree(staging, ignore_errors=True)
 
-# ───────── example command surface (p3-gui-viewer W0, G7) ─────────
-#
-# Directory contract = bindings/cxx/examples/<name>/CMakeLists.txt (dir name == target == artifact name, G4).
-# the CLI and the aggregate-root CMake glob by the same literal rule (F-A-6). Artifacts in
-# target/examples/bin/ (island-pinned), never in out/, never packaged (example productization gate, PLAN §6).
-# F25: examples lost its preset — the island SELF-CHECKS the shell (activated conda/pixi =>
-# warn + force-off). The CLI is the sanitized bridge: it hands its cmake children a clean
-# system environment (the one legit strip site), so `build example` keeps working from an
-# activated shell while manual runs need a plain shell + -DMEDIASERVO_BUILD_EXAMPLES=ON.
-
-_EXAMPLES_DIR = ROOT / "bindings" / "cxx" / "examples"
-_EXAMPLES_BUILD = ROOT / "target" / "examples" / "build"
-_EXAMPLES_BIN = ROOT / "target" / "examples" / "bin"
-
-_SYSTEM_STRIP = frozenset({
-    "CC", "CXX",
-    "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "CPATH",
-    "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "CONDA_PREFIX",
-    "CMAKE_PREFIX_PATH", "PKG_CONFIG_PATH", "PKG_CONFIG_SYSROOT_DIR",
-    "COMPILER_PATH", "LIBRARY_PATH",
-})
-
-
-def _system_shell_env() -> dict[str, str]:
-    """F25 bridge: env for the examples cmake children = system constitution.
-    Drops conda build vars outright and scrubs .pixi/envs bins from PATH (the island's
-    own F25 probe reads the same signals — keep both lists aligned if either grows)."""
-    env = {k: v for k, v in os.environ.items() if k not in _SYSTEM_STRIP}
-    parts = [p for p in env.get("PATH", "").split(os.pathsep) if "/.pixi/envs/" not in p]
-    env["PATH"] = os.pathsep.join(["/usr/bin", *parts])
-    return env
-
-# compile-related env injected by pixi/conda activation — stripped from configure subprocesses (see the _cmd_build_example note)
-
-
-
-
-def _example_names() -> list[tuple[str, bool]]:
-    """[(dir name, is-pure-library)] — same literal rule as the aggregate root's file(GLOB */CMakeLists.txt)."""
-    out = []
-    for cml in sorted(_EXAMPLES_DIR.glob("*/CMakeLists.txt")):
-        name = cml.parent.name
-        is_lib = "add_library(" in cml.read_text(encoding="utf-8")
-        out.append((name, is_lib))
-    return out
-
-
-def _cmd_build_example(names: list[str], release: bool = False) -> None:
-    # build-c prelude (PLAN G7; auto-added when missing — freshness is cargo's incremental job).
-    profile = "release" if release else "debug"
-    if not (ROOT / "target" / profile / "libmediaservo_client.so").exists():
-        print("[example] libmediaservo_client.so missing → running build-c first", file=sys.stderr)
-        _run_or_exit([os.environ.get("PIXI_BIN", "pixi"), "run", "build-c"])
-    # F25 bridge route (see header): direct island configure with sanitized env; SDK guard +
-    # env probe live in the island CMakeLists. Release flips via cache, not a preset.
-    if names:
-        known = {n for n, _ in _example_names()}
-        for n in names:
-            if n not in known:
-                print(f"[example] unknown example '{n}' (see ./mediaservo.sh list example)",
-                      file=sys.stderr)
-                sys.exit(2)
-    gen = "Release" if release else "Debug"
-    # no -G: bridge-scrubbed PATH may lack ninja (pixi-only bin); cmake picks its
-    # platform default (Makefiles on bare Linux) — same auto-adapt e2e-delivery uses.
-    cfg = ["cmake", "-S", str(_EXAMPLES_DIR), "-B", str(_EXAMPLES_BUILD),
-           "-DCMAKE_BUILD_TYPE=" + gen,
-           "-DMEDIASERVO_BUILD_EXAMPLES=ON",
-           "-DMEDIASERVO_SDK_DIR=" + str(ROOT / "target" / profile)]
-    if not (_EXAMPLES_BUILD / "CMakeCache.txt").exists() or profile != "debug":
-        _run_or_exit(cfg, env=_system_shell_env(), cwd=str(ROOT))
-    cmd = ["cmake", "--build", str(_EXAMPLES_BUILD)]
-    if names:
-        cmd += ["--target"] + list(names)
-    else:
-        cmd += ["--parallel"]
-    _run_or_exit(cmd, env=_system_shell_env(), cwd=str(ROOT))
-    print(f"[example] artifacts → {_EXAMPLES_BIN.relative_to(ROOT)}/")
-
-
-def _cmd_run_example(rest: list[str]) -> None:
-    """run example <name> [passthrough…] — build first if needed, then exec in foreground (dev-tool surface,
-    distinct from the retired host-run semantics (C39 = deployed instances))."""
-    if not rest:
-        print("Usage: run example <name> [args…] (./mediaservo.sh list example)",
-              file=sys.stderr)
-        sys.exit(2)
-    name, extra = rest[0], rest[1:]
-    known = dict(_example_names())
-    if name not in known:
-        print(f"[example] unknown example '{name}'", file=sys.stderr)
-        sys.exit(2)
-    if known[name]:  # pure library, nothing to run
-        _cmd_build_example([name])
-        print(f"[example] '{name}' is a library (no runnable artifact)", file=sys.stderr)
-        sys.exit(1)
-    _cmd_build_example([name])
-    exe = _EXAMPLES_BIN / name
-    if not exe.exists():
-        print(f"[example] still no artifact after build: {exe}", file=sys.stderr)
-        sys.exit(1)
-    # Windowing hint (probe + state, never set for the user — display is session semantics; a script guessing from outside the session = a wrong guess is harder to diagnose than fail-soft;
-    # the correct path = ssh -X / a desktop session's own DISPLAY. This block only states what is missing and the exits.)
-    if not os.environ.get("DISPLAY") and not os.environ.get("SDL_VIDEODRIVER"):
-        print("[example] no display env vars (neither DISPLAY nor SDL_VIDEODRIVER set):", file=sys.stderr)
-        xsock = "/tmp/.X11-unix"
-        xs = sorted(f":{f[1:]}" for f in os.listdir(xsock) if f.startswith("X")) if os.path.isdir(xsock) else []
-        if xs:
-            print(f"  • windowed: local displays available: {' '.join(xs)} → export DISPLAY=:N and re-run"
-                  " (if it reports x11 not available = this build has SDL_X11=OFF; reconfigure with cmake -DSDL_X11=ON)", file=sys.stderr)
-        print("  • headless acceptance: SDL_VIDEODRIVER=dummy MSRTC_RUN_SECS=20 re-run (cb/tex dual-count predicate)", file=sys.stderr)
-    env = dict(os.environ, LD_LIBRARY_PATH=str(ROOT / "target" / "debug") +
-               (":" + os.environ["LD_LIBRARY_PATH"] if os.environ.get("LD_LIBRARY_PATH") else ""))
-    sys.exit(subprocess.run([str(exe), *extra], env=env).returncode)
-
-
-def _cmd_test_example(name: str | None) -> None:
-    """test example [<name>] — ctest (-R filter); a missing build dir = build first."""
-    if not (_EXAMPLES_BUILD / "CTestTestfile.cmake").exists():
-        _cmd_build_example([])
-    cmd = ["ctest", "--test-dir", str(_EXAMPLES_BUILD), "--output-on-failure"]
-    if name:
-        cmd += ["-R", name]
-    _run_or_exit(cmd)
-
-
-def _cmd_run(args: argparse.Namespace) -> None:
-    """run example <name> [passthrough…] — C++ examples runner (server/host guidance arms are shell-owned since SR6 P2)."""
-    _cmd_run_example(args.rest)
-
-
 def _out_root() -> Path:
     """Release root (MSRTC_OUT_ROOT env or the submodule's out/) — shared by the build delivery layout and the server runtime."""
     env_out = os.environ.get("MSRTC_OUT_ROOT", "")
@@ -645,7 +514,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     build_p = sub.add_parser("build", help="build <target> [--image runtime|dev]: all|web|host|server|client|bindings (default all; server = non-embedded variant + one-step web assembly; web = frontend-only fast lane; only --image takes the Docker path)")
-    build_p.add_argument("target", nargs="?", choices=["bindings", "example"], default="all")
+    build_p.add_argument("target", nargs="?", choices=["bindings"], default="all")
     build_p.add_argument("--release", action="store_true", help="release build (bindings: target/release, strip+LTO)")
     grp = build_p.add_mutually_exclusive_group()
     grp.add_argument("--image", choices=["runtime", "dev"], default=None,
@@ -659,17 +528,6 @@ def main() -> None:
 
 
 
-    run_p = sub.add_parser("run", help="run example <name> [args…] — C++ examples runner (server|host guidance is shell-owned)")
-    run_p.add_argument("target", choices=["example"])
-    run_p.add_argument("rest", nargs=argparse.REMAINDER,
-                       help="run example only: <name> [app passthrough args…]")
-    run_p.set_defaults(func=_cmd_run)
-
-
-    test_p = sub.add_parser("test", help="example=<name> ctest surface (bare workspace tests moved to mediaservo.sh test — SR6 batch-beta-1)")
-    test_p.add_argument("what", choices=["example"], help="example = GUI/SDK example ctest surface (bare test = unchanged workspace semantics, F-A-9(1))")
-    test_p.add_argument("name", nargs="?", help="example: filter by example name (ctest -R)")
-
     package_p = sub.add_parser("package", help="package <target>: host|server|sdk-field (device half; the old bindings name stays as a one-cycle alias)|sdk-client (cockpit half) → <dist>/<brand>-<target>-<ver>.tar.gz (D-H13/F12, includes the version contract and a versioned top-level dir)")
     package_p.add_argument("target", choices=["host", "server", "bindings", "sdk-field", "sdk-client"])
     package_p.add_argument("--dist", default="", help="output dir for the package tar and staging (default dist; the MSRTC release shell defaults to out/packages)")
@@ -680,13 +538,6 @@ def main() -> None:
     if args.command == "build":   # SR6 batch-beta-2: other targets are bash-owned
         if args.target == "bindings":
             _cmd_build_bindings(args.release)
-        elif args.target == "example":
-            _cmd_build_example(args.names, args.release)
-    elif args.command == "run":
-        _cmd_run(args)
-
-    elif args.command == "test":
-        _cmd_test_example(args.name)
     elif hasattr(args, "func"):
         args.func(args)
 

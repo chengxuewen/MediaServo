@@ -457,6 +457,106 @@ _ms_build_client() {
     cargo build -p mediaservo-client || exit $?
 }
 
+# =============================================================================
+# SR6 batch-beta-2 -- C++ example surface (p3 W0/G7; was _cmd_build_example /
+# _cmd_run_example / _cmd_test_example). Directory contract =
+# bindings/cxx/examples/<name>/CMakeLists.txt (dir == target == artifact, G4);
+# same literal rule as the aggregate root's file(GLOB */CMakeLists.txt).
+# F25 bridge: the cmake children get the SYSTEM constitution (conda build vars
+# dropped, .pixi/envs bins scrubbed from PATH) — the one legit strip site;
+# the island's own probe reads the same signals (keep the lists aligned).
+# =============================================================================
+_MS_EXAMPLES_BUILD="$ROOT/target/examples/build"
+_MS_EXAMPLES_BIN="$ROOT/target/examples/bin"
+_MS_STRIP_ENV=(env -u CC -u CXX -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS -u CPATH -u C_INCLUDE_PATH -u CPLUS_INCLUDE_PATH -u CONDA_PREFIX -u CMAKE_PREFIX_PATH -u PKG_CONFIG_PATH -u PKG_CONFIG_SYSROOT_DIR -u COMPILER_PATH -u LIBRARY_PATH)
+_ms_scrubbed_path() {
+    printf '%s' "$PATH" | tr ':' '\n' | grep -v '/\.pixi/envs/' | paste -sd: -
+}
+_ms_bridge_env() {  # prints the PATH=... assignment arg for the _MS_STRIP_ENV prefix
+    local sp; sp=$(_ms_scrubbed_path)
+    if [ -n "$sp" ]; then echo "PATH=/usr/bin:$sp"; else echo "PATH=/usr/bin"; fi
+}
+_ms_examples_is_lib() {  # $1=name → prints 0/1; rc1 when the example is unknown
+    local cml="$ROOT/bindings/cxx/examples/$1/CMakeLists.txt"
+    [ -f "$cml" ] || return 1
+    if grep -q "add_library(" "$cml"; then echo 1; else echo 0; fi
+}
+_ms_build_example() {  # $1=release(0/1); rest = example names (empty = all)
+    local release=$1; shift
+    local profile=debug; [ "$release" = 1 ] && profile=release
+    # build-c prelude (PLAN G7; auto-added when missing — freshness is cargo's job)
+    if [ ! -f "$ROOT/target/$profile/libmediaservo_client.so" ]; then
+        echo "[example] libmediaservo_client.so missing → running build-c first" >&2
+        (cd "$ROOT" && "${PIXI_BIN:-pixi}" run build-c) || exit $?
+    fi
+    local n
+    if [ $# -gt 0 ]; then
+        for n in "$@"; do
+            if ! _ms_examples_is_lib "$n" > /dev/null; then
+                echo "[example] unknown example '$n' (see ./mediaservo.sh list example)" >&2
+                exit 2
+            fi
+        done
+    fi
+    local gen=Debug; [ "$release" = 1 ] && gen=Release
+    local cfgargs=(-S "$ROOT/bindings/cxx/examples" -B "$_MS_EXAMPLES_BUILD" "-DCMAKE_BUILD_TYPE=$gen" "-DMEDIASERVO_BUILD_EXAMPLES=ON" "-DMEDIASERVO_SDK_DIR=$ROOT/target/$profile")
+    # no -G: scrubbed PATH may lack ninja (pixi-only bin); cmake picks its
+    # platform default (Makefiles on bare Linux) — same auto-adapt e2e-delivery uses.
+    if [ ! -f "$_MS_EXAMPLES_BUILD/CMakeCache.txt" ] || [ "$profile" != debug ]; then
+        echo "\$ cmake ${cfgargs[*]}  (cwd: $ROOT)"
+        (cd "$ROOT" && "${_MS_STRIP_ENV[@]}" "$(_ms_bridge_env)" cmake "${cfgargs[@]}") || exit $?
+    fi
+    local cmd=(cmake --build "$_MS_EXAMPLES_BUILD")
+    if [ $# -gt 0 ]; then cmd+=(--target "$@"); else cmd+=(--parallel); fi
+    echo "\$ ${cmd[*]}  (cwd: $ROOT)"
+    (cd "$ROOT" && "${_MS_STRIP_ENV[@]}" "$(_ms_bridge_env)" "${cmd[@]}") || exit $?
+    echo "[example] artifacts → target/examples/bin/"
+}
+_ms_run_example() {  # $@ = <name> [passthrough…] — foreground dev tool (distinct from the retired host-run C39 semantics)
+    if [ $# -eq 0 ]; then
+        echo "Usage: run example <name> [args…] (./mediaservo.sh list example)" >&2
+        exit 2
+    fi
+    local name=$1; shift
+    local islib
+    islib=$(_ms_examples_is_lib "$name") || { echo "[example] unknown example '$name'" >&2; exit 2; }
+    _ms_build_example 0 "$name"
+    if [ "$islib" = 1 ]; then
+        echo "[example] '$name' is a library (no runnable artifact)" >&2
+        exit 1
+    fi
+    local exe="$_MS_EXAMPLES_BIN/$name"
+    if [ ! -e "$exe" ]; then
+        echo "[example] still no artifact after build: $exe" >&2
+        exit 1
+    fi
+    # Windowing hint: probe + state, never set for the user — display is session
+    # semantics; a wrong scripted guess is harder to diagnose than fail-soft.
+    if [ -z "${DISPLAY:-}" ] && [ -z "${SDL_VIDEODRIVER:-}" ]; then
+        echo "[example] no display env vars (neither DISPLAY nor SDL_VIDEODRIVER set):" >&2
+        local xs=""
+        if [ -d /tmp/.X11-unix ]; then
+            xs=$(cd /tmp/.X11-unix && for f in X*; do [ -e "$f" ] && printf ':%s\n' "${f#X}"; done 2>/dev/null | sort | paste -sd' ' -) || xs=""
+        fi
+        if [ -n "$xs" ]; then
+            echo "  • windowed: local displays available: $xs → export DISPLAY=:N and re-run (if it reports x11 not available = this build has SDL_X11=OFF; reconfigure with cmake -DSDL_X11=ON)" >&2
+        fi
+        echo "  • headless acceptance: SDL_VIDEODRIVER=dummy MSRTC_RUN_SECS=20 re-run (cb/tex dual-count predicate)" >&2
+    fi
+    local ld="$ROOT/target/debug"
+    [ -n "${LD_LIBRARY_PATH:-}" ] && ld="$ld:$LD_LIBRARY_PATH"
+    LD_LIBRARY_PATH="$ld" exec "$exe" "$@"
+}
+_ms_test_example() {  # $1 = optional ctest -R filter; missing build dir = build first
+    if [ ! -f "$_MS_EXAMPLES_BUILD/CTestTestfile.cmake" ]; then
+        _ms_build_example 0
+    fi
+    local cmd=(ctest --test-dir "$_MS_EXAMPLES_BUILD" --output-on-failure)
+    [ -n "${1:-}" ] && cmd+=(-R "$1")
+    echo "\$ ${cmd[*]}"
+    "${cmd[@]}" || exit $?
+}
+
 case "${1:-}" in
     build|build-host|build-server)
         # SR6 batch-beta-2: build family bash-owned; bindings/example still forward
@@ -485,7 +585,8 @@ case "${1:-}" in
         if [ -n "$image" ] && [ "$tgt" != server ]; then echo "build --image only supports build server (current target=$tgt)" >&2; exit 2; fi
         if [ "$native" = 1 ] && [ "$tgt" != server ]; then echo "build --native only supports build server (current target=$tgt)" >&2; exit 2; fi
         case "$tgt" in
-            bindings|example) exec python "$ROOT/scripts/mediaservo_cli.py" "${_ms_orig[@]}" ;;
+            bindings) exec python "$ROOT/scripts/mediaservo_cli.py" "${_ms_orig[@]}" ;;
+            example)  _ms_build_example "$release" "${names[@]}"; exit $? ;;
             all)    _ms_build_host; _ms_build_server "" 0 0; _ms_build_client ;;
             host)   _ms_build_host ;;
             server) _ms_build_server "$image" "$native" "$release" ;;
@@ -542,10 +643,10 @@ case "${1:-}" in
         exit 2
         ;;
     run)
-        # run example stays python (build/run/test example surface = batch-beta);
-        # the server/host guidance arms are bash-owned now.
+        # SR6 batch-beta-2: run example is bash-owned (server/host guidance
+        # arms were batch-alpha).
         if [ "${2:-}" = example ]; then
-            exec python "$ROOT/scripts/mediaservo_cli.py" "$@"
+            shift 2; _ms_run_example "$@"; exit $?
         fi
         case "${2:-}" in
             server) _msvc_hint_server run ;;
@@ -819,10 +920,12 @@ case "${1:-}" in
         exit $?
         ;;
     test)
-        # bare = workspace tests (was _cmd_test); 'test example' forwards to python
-        # — build/run/test example share _cmd_build_example (batch-beta-2 surface).
+        # bare = workspace tests (was _cmd_test); test example is bash-owned
+        # since SR6 batch-beta-2.
         if [ "${2:-}" = example ]; then
-            exec python "$ROOT/scripts/mediaservo_cli.py" "$@"
+            shift 2
+            [ $# -le 1 ] || { echo "mediaservo test: error: unrecognized arguments: $*" >&2; exit 2; }
+            _ms_test_example "${1:-}"; exit $?
         fi
         if [ $# -gt 1 ]; then
             echo "mediaservo test: error: argument what: invalid choice: '${2}' (choose from example)" >&2
