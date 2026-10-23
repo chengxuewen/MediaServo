@@ -1248,21 +1248,6 @@ def _example_names() -> list[tuple[str, bool]]:
     return out
 
 
-def _cmd_list_example() -> None:
-    names = _example_names()
-    if not names:
-        print(f"(no examples in {_EXAMPLES_DIR.relative_to(ROOT)} yet)", file=sys.stderr)
-        return
-    print("Available examples (dir = target = artifact name; [lib] = non-executable):")
-    for name, is_lib in names:
-        art = _EXAMPLES_BIN / name
-        if is_lib:
-            tag = "[lib]"
-        else:
-            tag = "[built]" if art.exists() else "[not built]"
-        print(f"  {name:24s} {tag}")
-
-
 def _cmd_build_example(names: list[str], release: bool = False) -> None:
     # build-c prelude (PLAN G7; auto-added when missing — freshness is cargo's incremental job).
     profile = "release" if release else "debug"
@@ -1778,7 +1763,7 @@ def main() -> None:
     fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
   Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
   Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
-  bash-owned (SR6 batch-1/alpha, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor
+  bash-owned (SR6 batch-1/alpha, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list
   retired → guidance + exit 2: run/start/stop/restart server|host (C39 — use instance-directory commands; the container face up/down is unchanged)
   read-only probes kept: status server|host / logs server / clean server
   C++ example surface (p3): list example → build example [names…] → run example <name> / test example
@@ -1832,9 +1817,6 @@ def main() -> None:
     e2e_p.add_argument("suite", choices=["sfu", "push", "ui", "host", "package", "brand", "bindings", "client", "smoke"])
     e2e_p.set_defaults(func=_cmd_e2e)
 
-    list_p = sub.add_parser("list", help="listing <target>: example = C++ examples (directory contract = G4 three-forms-in-one)")
-    list_p.add_argument("target", choices=["example"])
-    list_p.set_defaults(func=lambda a: _cmd_list_example())
     test_p = sub.add_parser("test", help="workspace tests (excluding mediaservo-server) | example=<name> ctest")
     test_p.add_argument("what", nargs="?", choices=["example"], default=None,
                         help="example = GUI/SDK example ctest surface (bare test = unchanged workspace semantics, F-A-9(1))")

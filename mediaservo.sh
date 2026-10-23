@@ -210,6 +210,29 @@ case "${1:-}" in
         done
         exit 0
         ;;
+    list)
+        # example roster (was _cmd_list_example; same literal rule as the aggregate
+        # root's file(GLOB */CMakeLists.txt) — dir == target == artifact name, G4)
+        [ "${2:-}" = example ] || { echo "list: usage: list example" >&2; exit 2; }
+        ed="$ROOT/bindings/cxx/examples"
+        names=()
+        for cml in "$ed"/*/CMakeLists.txt; do
+            [ -f "$cml" ] || continue
+            names+=("$(basename "$(dirname "$cml")")")
+        done
+        if [ ${#names[@]} -eq 0 ]; then
+            echo "(no examples in bindings/cxx/examples yet)" >&2
+            exit 0
+        fi
+        echo "Available examples (dir = target = artifact name; [lib] = non-executable):"
+        for name in "${names[@]}"; do
+            if grep -q "add_library(" "$ed/$name/CMakeLists.txt"; then tag="[lib]"
+            elif [ -e "$ROOT/target/examples/bin/$name" ]; then tag="[built]"
+            else tag="[not built]"; fi
+            printf '  %-24s %s\n' "$name" "$tag"
+        done
+        exit 0
+        ;;
 esac
 
 # build:deploy composite (2026-09-29: verb surface aligned with the parent-repo msrtc.sh — the submodule shell
