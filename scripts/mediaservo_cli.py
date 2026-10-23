@@ -22,7 +22,6 @@ import platform
 import tempfile
 from pathlib import Path
 
-VERSION = "0.1.0"
 ROOT = Path(__file__).resolve().parent.parent
 COMPOSE_BASE = ["docker", "compose", "-f", "docker-compose.dev.yml"]
 HOST_CONF = ROOT / "crates/mediaservo-host/config/host.conf"
@@ -1694,10 +1693,6 @@ def _server_runtime_hint(action: str) -> None:
     print("  containers (modes 2/3): mediaservo up / down --env dev|prod unchanged", file=sys.stderr)
     print("  read-only probes kept: mediaservo status server | logs server", file=sys.stderr)
 
-def _cmd_dev(args: argparse.Namespace) -> None:
-    """dev web — thin vite-dev passthrough (pnpm dev, cwd www/:5173, proxy /api /ws→9800; foreground tool, no pidfile)."""
-    _check("pnpm", "pnpm not installed — dev web needs it (www is a pnpm workspace, or run manually: cd www && pnpm dev)")
-    _run_or_exit(["pnpm", "dev"] + list(args.rest), cwd=str(ROOT / "www"))
 
 def _cmd_start(args: argparse.Namespace) -> None:
     """start <target> — server/host retired → guidance + exit 2 (T21/C39: instance-directory commands; containers use up); web = transitional caddy."""
@@ -2486,18 +2481,6 @@ def _compose_file(env: str) -> str:
     return "docker-compose.yml" if env == "prod" else "docker-compose.dev.yml"
 
 
-def _cmd_up(args: argparse.Namespace) -> None:
-    """Deployment lifecycle: up [--env dev|prod] [svc] — prod = single container + named volumes + entrypoint bootstrap."""
-    cf = _compose_file(args.env)
-    cmd = ["docker", "compose", "-f", cf, "up", "-d", args.svc]
-    if args.build:
-        cmd.insert(5, "--build")
-    env = _compose_env(args.announced_ip)
-    if args.announced_ip:
-        print(f"MEDIASERVO_SFU_ANNOUNCED_IP explicitly set: {args.announced_ip}")
-    # PIT-79 wiring: when not set explicitly, auto-detect all real host IPs (multi-NIC/VPN scenarios) and inject into env
-    _run_or_exit(cmd, env=env)
-
 
 def _detect_running_env() -> str:
     """Detect which compose project the running server container belongs to (dev/prod — same container name,
@@ -2520,64 +2503,14 @@ def _detect_running_env() -> str:
         return "dev"
 
 
-def _cmd_down(args: argparse.Namespace) -> None:
-    """Stop the deployment (volumes kept — prod data persists). Without --env, auto-detect the current running environment."""
-    env = args.env if args.env is not None else _detect_running_env()
-    print(f"down: detected environment {env}")
-    cf = _compose_file(env)
-    _run_or_exit(["docker", "compose", "-f", cf, "down"])
 
 
-def _cmd_exec(args: argparse.Namespace) -> None:
-    """Run a command inside a container (debugging): exec <svc> -- <cmd> (argparse REMAINDER strips the -- automatically)."""
-    if not args.cmd:
-        print("Usage: mediaservo exec <svc> -- <cmd>", file=sys.stderr)
-        sys.exit(2)
-    _run_or_exit(["docker", "compose", "-f", "docker-compose.dev.yml", "exec", "-T", args.svc] + args.cmd)
-
-
-def _cmd_ps(args: argparse.Namespace) -> None:
-    """Runtime state: compose ps (server deployment) + host ps (process instances — inferred from cwd)."""
-    cf = _compose_file(getattr(args, "env", "dev"))
-    _run(["docker", "compose", "-f", cf, "ps"])
-
-
-def _cmd_data(args: argparse.Namespace) -> None:
-    """Data volume management: backup|reset|inspect (mediaservo-data/recordings)."""
-    vol_data = "mediaservo_mediaservo-data"
-    vol_rec = "mediaservo_mediaservo-recordings"
-    if args.data_cmd == "inspect":
-        _run_or_exit(["docker", "volume", "ls", "--format", "{{.Name}} {{.Mountpoint}}", "--filter", "name=mediaservo_"])
-    elif args.data_cmd == "backup":
-        target = Path(args.dir or "backup")
-        target.mkdir(parents=True, exist_ok=True)
-        for vol in (vol_data, vol_rec):
-            out = target / f"{vol}.tar.gz"
-            _run_or_exit([
-                "docker", "run", "--rm", "-v", f"{vol}:/data:ro",
-                "-v", f"{target.absolute()}:/backup",
-                "alpine", "sh", "-c", f"tar czf /backup/{vol}.tar.gz -C /data .",
-            ])
-            print(f"backed up {vol} → {out}")
-    elif args.data_cmd == "reset":
-        if not args.force:
-            ans = input(f"reset {vol_data} + {vol_rec} (delete all data)? [y/N] ")
-            if ans.strip().lower() != "y":
-                print("cancelled")
-                return
-        # semantics: down first (containers stop), then delete volumes (entrypoint regenerates on the next up)
-        _cmd_down(argparse.Namespace(env="prod"))
-        _run_or_exit(["docker", "volume", "rm", vol_data, vol_rec])
-        print("volumes deleted — `mediaservo up --env prod` re-initializes (keys regenerated)")
 
 
 def _cmd_doctor(_args: argparse.Namespace | None = None) -> None:
     """Environment diagnosis (toolchain versions — renamed from the original status to distinguish it from the runtime health probe status)."""
     _cmd_env_diagnose()
 
-
-def _cmd_version() -> None:
-    print(VERSION)
 
 
 def main() -> None:
@@ -2592,6 +2525,7 @@ def main() -> None:
              | run web (transitional standalone caddy :8080 — joins the instance process cluster after Phase 6)
   Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
   Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
+  bash-owned (SR6 batch-1, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version
   retired → guidance + exit 2: run/start/stop/restart server|host (C39 — use instance-directory commands; the container face up/down is unchanged)
   read-only probes kept: status server|web / logs server / clean server
   C++ example surface (p3): list example → build example [names…] → run example <name> / test example
@@ -2613,22 +2547,7 @@ def main() -> None:
                         help="build example only: example names (omit = all; list example shows the roster)")
     build_p.set_defaults(func=_cmd_build)
 
-    up_p = sub.add_parser("up", help="start deployment <svc> [--env dev|prod] [--announced-ip IP]: dev = hot-reload compose; prod = single container + named volumes + entrypoint bootstrap (announce address explicit override)")
-    up_p.add_argument("svc", nargs="?", default="server", help="service (default server)")
-    up_p.add_argument("--env", choices=["dev", "prod"], default="dev", help="environment (default dev — omittable)")
-    up_p.add_argument("--build", action="store_true", help="build the image first, then up")
-    up_p.add_argument(
-        "--announced-ip",
-        metavar="IP[,IP...]",
-        default=None,
-        help="container mediasoup announce address (overrides auto-detection — e.g. 10.144.0.3 or 192.168.2.127,10.144.0.3; "
-        "containers honor only a single announcement — the first IP wins; multiple addresses require bare-metal run)",
-    )
-    up_p.set_defaults(func=_cmd_up)
 
-    down_p = sub.add_parser("down", help="stop deployment [--env dev|prod] (volumes kept; without --env, auto-detect the current environment)")
-    down_p.add_argument("--env", choices=["dev", "prod"], default=None)
-    down_p.set_defaults(func=_cmd_down)
 
     restart_p = sub.add_parser("restart", help="restart <target>: web = transitional caddy; server/host retired → guidance + exit 2 (<prefix>/bin/mediaservo-server restart <dir>; containers up/down)")
     restart_p.add_argument("target", choices=["host", "server", "web"])
@@ -2655,10 +2574,6 @@ def main() -> None:
     _add_mode_args(stop_p, allow_both=True)
     stop_p.set_defaults(func=_cmd_stop)
 
-    dev_p = sub.add_parser("dev", help="dev service passthrough: web = vite dev (:5173, proxy /api /ws→9800 — pairs with mediaservo-server start --no-web for the dev stack; foreground tool, no pidfile)")
-    dev_p.add_argument("target", choices=["web"])
-    dev_p.add_argument("rest", nargs=argparse.REMAINDER, help="passthrough args (after --, e.g. -- --port 5174)")
-    dev_p.set_defaults(func=_cmd_dev)
 
     logs_p = sub.add_parser("logs", help="logs [<svc>] [--follow] [--mode native|compose]: server = bare-metal log (default) | compose container log | host log")
     logs_p.add_argument("target", nargs="?", choices=["server", "host"], default="server")
@@ -2666,14 +2581,7 @@ def main() -> None:
     logs_p.add_argument("--follow", "-f", action="store_true", help="follow output")
     logs_p.set_defaults(func=_cmd_logs)
 
-    ps_p = sub.add_parser("ps", help="runtime state: compose ps (server deployment — by --env)")
-    ps_p.add_argument("--env", choices=["dev", "prod"], default="dev")
-    ps_p.set_defaults(func=_cmd_ps)
 
-    exec_p = sub.add_parser("exec", help="execute in container: exec <svc> -- <cmd> (compose exec — for debugging)")
-    exec_p.add_argument("svc", help="service name (server/proxy)")
-    exec_p.add_argument("cmd", nargs=argparse.REMAINDER, help="command inside the container (after --)")
-    exec_p.set_defaults(func=_cmd_exec)
 
     e2e_p = sub.add_parser("e2e", help="test suites: sfu|push|ui|host|package|brand|bindings|client|smoke")
     e2e_p.add_argument("suite", choices=["sfu", "push", "ui", "host", "package", "brand", "bindings", "client", "smoke"])
@@ -2713,11 +2621,6 @@ def main() -> None:
     config_p.add_argument("key", nargs="?", help="set: config key (e.g. signaling.psk)")
     config_p.add_argument("value", nargs="?", help="set: config value")
     config_p.set_defaults(func=_cmd_config)
-    data_p = sub.add_parser("data", help="data volumes: backup [<dir>]| reset | inspect")
-    data_p.add_argument("data_cmd", choices=["backup", "reset", "inspect"])
-    data_p.add_argument("dir", nargs="?", help="backup: target directory (default ./backup)")
-    data_p.add_argument("--force", action="store_true", help="reset: skip the interactive confirmation")
-    data_p.set_defaults(func=_cmd_data)
     doctor_p = sub.add_parser("doctor", help="environment diagnosis (pixi/cargo/docker/node — the original status)")
     doctor_p.set_defaults(func=_cmd_doctor)
     status_p = sub.add_parser("status", help="health probe <target> (exit codes 0/1/2): server = bare metal (default) | compose containers (--mode compose) | host push processes")
@@ -2725,7 +2628,6 @@ def main() -> None:
     _add_mode_args(status_p)
     status_p.set_defaults(func=_cmd_status_runtime)
 
-    sub.add_parser("version", help="CLI version")
 
     # compat aliases (build-* kept — e2e scripts/habitual usage): run-host/up/down aliases removed (up/down are now first-level commands)
     ALIASES = {
@@ -2775,8 +2677,6 @@ def main() -> None:
             _cmd_test_example(args.name)
         else:
             _cmd_test()
-    elif args.command == "version":
-        _cmd_version()
     elif hasattr(args, "func"):
         args.func(args)
 

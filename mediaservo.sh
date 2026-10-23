@@ -17,11 +17,153 @@ fi
 
 # -h/--help/version: skip pixi activation (review H1: the activation banner pollutes -h output — 8-line banner before usage)
 case "${1:-}" in
-    -h|--help|version)
+    -h|--help)
         exec python3 "$ROOT/scripts/mediaservo_cli.py" "$@"   # bare python3 (stdlib-only at the top — no activation noise)
+        ;;
+    version)
+        # SR6 batch-1 (bash-owned): was a python float literal (0.1.0 — C43 drift
+        # caught at retirement). Single source = root Cargo.toml [workspace.package].
+        sed -n '/\[workspace.package\]/,/^\[/p' "$ROOT/Cargo.toml" | sed -n 's/^version *= *"\(.*\)"/\1/p' | head -1
+        exit 0
         ;;
 esac
 source "$ROOT/scripts/pixi-shell.sh"   # activate (same process, PATH/LIBCLANG injection)
+
+# =============================================================================
+# SR6 batch-1 -- compose face + dev, bash-owned (moved out of mediaservo_cli.py
+# one-leg-one-owner style; flags/output mirror the retired python exactly).
+# Python keeps its read-probe compose uses (status/logs/clean) until those legs'
+# own batches retire them. MEDIASERVO_DRY_RUN=1 echoes the final command instead
+# of executing (verb-matrix hook; production default off).
+# =============================================================================
+_msvc_run() { echo "$ $*"; if [ "${MEDIASERVO_DRY_RUN:-0}" = 1 ]; then return 0; fi; "$@"; }
+_msvc_compose_file() { if [ "$1" = prod ]; then echo docker-compose.yml; else echo docker-compose.dev.yml; fi; }
+_msvc_announced_ips() {
+    local out
+    out=$(ip -o -4 addr show 2>/dev/null | awk '{print $2, $4}' || true)
+    if [ -n "$out" ]; then
+        while read -r iface ip; do
+            case "$iface" in lo|docker*|br-*|veth*|virbr*) continue ;; esac
+            ip=${ip%%/*}
+            case "$ip" in 127.*) continue ;; esac
+            echo "$ip"
+        done <<< "$out"
+    else
+        hostname -I 2>/dev/null | tr ' ' '\n' | sed '/^$/d'   # coarse fallback (python parity)
+    fi | awk '!seen[$0]++'
+}
+_msvc_compose_env() {  # PIT-79: guarantee MEDIASERVO_SFU_ANNOUNCED_IP has a value
+    local announced="${1:-}" ips
+    if [ -n "$announced" ]; then
+        export MEDIASERVO_SFU_ANNOUNCED_IP="$announced"
+    elif [ -z "${MEDIASERVO_SFU_ANNOUNCED_IP:-}" ]; then
+        ips=$(_msvc_announced_ips | paste -sd, -)
+        if [ -n "$ips" ]; then
+            export MEDIASERVO_SFU_ANNOUNCED_IP="$ips"
+            echo "MEDIASERVO_SFU_ANNOUNCED_IP auto-detected: $ips"
+        fi
+    fi
+}
+_msvc_detect_env() {  # dev|prod via the running container's compose config_files label
+    local cfg
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx mediaservo-server-1; then
+        cfg=$(docker inspect mediaservo-server-1 --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
+        case "$cfg" in
+            *docker-compose.yml*) case "$cfg" in *dev*) ;; *) echo prod; return ;; esac ;;
+        esac
+    fi
+    echo dev
+}
+case "${1:-}" in
+    up)
+        shift
+        svc=server; env=dev; build=0; announced=""; pos=0
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --env) env="${2:?--env needs a value}"; shift 2 ;;
+                --build) build=1; shift ;;
+                --announced-ip) announced="${2:?--announced-ip needs a value}"; shift 2 ;;
+                -*) echo "up: unknown flag $1" >&2; exit 2 ;;
+                *) pos=$((pos+1)); [ $pos -eq 1 ] && svc="$1" || { echo "up: unexpected extra arg: $1" >&2; exit 2; }; shift ;;
+            esac
+        done
+        case "$env" in dev|prod) ;; *) echo "up: --env must be dev|prod (got $env)" >&2; exit 2 ;; esac
+        _msvc_compose_env "$announced"
+        cmd=(docker compose -f "$(_msvc_compose_file "$env")" up)
+        [ "$build" = 1 ] && cmd+=(--build)
+        cmd+=(-d "$svc")
+        _msvc_run "${cmd[@]}"
+        exit $?
+        ;;
+    down)
+        shift
+        env=""
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --env) env="${2:?--env needs a value}"; shift 2 ;;
+                *) echo "down: unexpected arg $1" >&2; exit 2 ;;
+            esac
+        done
+        if [ -z "$env" ]; then env=$(_msvc_detect_env); echo "down: detected environment $env"; fi
+        case "$env" in dev|prod) ;; *) echo "down: --env must be dev|prod" >&2; exit 2 ;; esac
+        _msvc_run docker compose -f "$(_msvc_compose_file "$env")" down
+        exit $?
+        ;;
+    ps)
+        shift
+        env=dev
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --env) env="${2:?--env needs a value}"; shift 2 ;;
+                *) echo "ps: unexpected arg $1" >&2; exit 2 ;;
+            esac
+        done
+        _msvc_run docker compose -f "$(_msvc_compose_file "$env")" ps || true   # python parity: probe never fails the shell
+        exit 0
+        ;;
+    exec)
+        shift
+        [ $# -ge 1 ] || { echo "Usage: mediaservo exec <svc> -- <cmd>" >&2; exit 2; }
+        svc="$1"; shift
+        [ "${1:-}" = "--" ] && shift
+        [ $# -ge 1 ] || { echo "Usage: mediaservo exec <svc> -- <cmd>" >&2; exit 2; }
+        _msvc_run docker compose -f docker-compose.dev.yml exec -T "$svc" "$@"
+        exit $?
+        ;;
+    data)
+        shift
+        sub="${1:-}"; [ $# -gt 0 ] && shift
+        case "$sub" in
+            inspect) _msvc_run docker volume ls --format '{{.Name}} {{.Mountpoint}}' --filter name=mediaservo_ ;;
+            backup)
+                target="${1:-backup}"
+                mkdir -p "$target"; abs=$(cd "$target" && pwd)
+                for vol in mediaservo_mediaservo-data mediaservo_mediaservo-recordings; do
+                    _msvc_run docker run --rm -v "${vol}:/data:ro" -v "${abs}:/backup" alpine sh -c "tar czf /backup/${vol}.tar.gz -C /data ."
+                    echo "backed up ${vol} → ${abs}/${vol}.tar.gz"
+                done
+                ;;
+            reset)
+                [ "${1:-}" = "--force" ] || { read -r -p "reset mediaservo_mediaservo-data + mediaservo_mediaservo-recordings (delete all data)? [y/N] " ans
+                    [ "$ans" = y ] || [ "$ans" = Y ] || { echo cancelled; exit 0; }; }
+                _msvc_run docker compose -f docker-compose.yml down
+                _msvc_run docker volume rm mediaservo_mediaservo-data mediaservo_mediaservo-recordings
+                echo "volumes deleted — \`mediaservo up --env prod\` re-initializes (keys regenerated)"
+                ;;
+            *) echo "data: expected backup|reset|inspect (got '${sub:-}')" >&2; exit 2 ;;
+        esac
+        exit $?
+        ;;
+    dev)
+        shift
+        [ "${1:-}" = web ] || { echo "dev: only target is web (got '${1:-}')" >&2; exit 2; }
+        shift
+        [ "${1:-}" = "--" ] && shift
+        command -v pnpm >/dev/null 2>&1 || { echo "Error: missing dependency 'pnpm' — dev web needs it (www is a pnpm workspace, or run manually: cd www && pnpm dev)" >&2; exit 1; }
+        cd "$ROOT/www" && _msvc_run pnpm dev "$@"
+        exit $?
+        ;;
+esac
 
 # oxmgr pinned injection (plan Y, aligned with the parent-repo msrtc.sh — the archive layer of a non-mirrorable download site):
 # 3rdparty/oxmgr/ stores only the upstream tar.gz + .sha256 (the file name is the coordinate); unpacked artifacts go to
