@@ -885,66 +885,6 @@ def _platform_tag() -> str:
     return f"{platform.system().lower()}_{mach}"
 
 
-def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
-    """Deploy the full SDK layout from out/bindings (D241 version-full triple + include C/cxx + .pc + cmake
-    + python/wheel + node — build already assembled it; deploy is a pure copy). SDK is brand-independent (libmediaservo_* kept verbatim, D3).
-    prefix default = `<out>/bindings` (same root as room-grouping: the out root resolves per calling shell — msrtc.sh injects
-    MSRTC_OUT_ROOT = the main repo's out; mediaservo.sh / bare CLI fall back to the submodule's out. Same-tree deploy = idempotent guard).
-    D4 narrowed (2026-09-29): bindings are pure-static/stateless → defaultable; host/server still mandatory (protects runtime data from mis-writes)."""
-    if not prefix:
-        prefix = str(_out_root() / "bindings")
-        print(f"[deploy bindings] prefix default → {prefix} (out root follows the calling shell; --prefix overrides)")
-    src = _out_root() / "bindings"
-    if not (src / "lib").is_dir():
-        print(f"Error: no assembled artifacts in {src} — run build bindings first", file=sys.stderr)
-        sys.exit(1)
-    prefix_p = Path(prefix)
-    try:
-        prefix_p.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        print(f"Error: cannot create {prefix_p}: {e} — for deployment use sudo msrtc.sh deploy bindings --prefix /opt/mediaservo-sdk", file=sys.stderr)
-        sys.exit(1)
-    lib_dir = prefix_p / "lib"
-    lib_dir.mkdir(parents=True, exist_ok=True)
-    # same-tree idempotent guard (build:deploy bindings default prefix = out/bindings = the assembly source itself):
-    # the build phase already ran the install rules into it; a second full pass is pure churn (09-21 SameFileError lesson).
-    if prefix_p.resolve() == src.resolve():
-        sos = sorted(x.name for x in (src / "lib").glob("libmediaservo_*.so*"))
-    else:
-        # SR4 L5 (T0 #17): the cmake-owned half (lib triple + symlinks + strip,
-        # include tree, pkgconfig + cmake suite) reaches ANY prefix through the SAME
-        # install rules the build used -- one route, one owner, zero hand-laid copies.
-        # SR6 batch-5 (face 3): the language-native half (wheel/, node/, docs/, pip
-        # site-packages under lib/) rides the SAME invocation too -- the
-        # MEDIASERVO_BINDINGS_SRC mirror legs copy them from this delivery tree,
-        # replacing python's sweep copy loops (deleted in this stroke; the
-        # rule-owned pkgconfig/cmake/lib/include subtrees are deliberately NOT
-        # mirrored -- the two-writer disease stays cured).
-        # Configure ALWAYS re-runs (SR7 freshness rule: the mode cache must be
-        # this call's truth, never the build verb's leftover). ETXTBSY policy stays
-        # invocation-side: retry the install after killing the occupiers (install is
-        # idempotent -- rerun-safe by cmake semantics).
-        _bind_build = ROOT / "build" / "presets" / "bindings"
-        _run_or_exit(["cmake", "--preset", "bindings",
-                      f"-DCMAKE_BUILD_TYPE={'Release' if release else 'Debug'}",
-                      f"-DMEDIASERVO_BINDINGS_SRC={src}"], cwd=str(ROOT))
-        ctypes = ["cmake", "--install", str(_bind_build), "--prefix", str(prefix_p), "--strip"]
-        for attempt in range(3):
-            r = subprocess.run(ctypes, cwd=str(ROOT), capture_output=True, text=True)
-            if r.returncode == 0:
-                break
-            blob = (r.stdout or "") + (r.stderr or "")
-            if "busy" not in blob.lower() and "Text file" not in blob or attempt == 2:
-                print(f"Error: cmake --install into {prefix_p} failed (rc={r.returncode}):\n{blob[-600:]}", file=sys.stderr)
-                sys.exit(1)
-            print(f"  install hit busy artifacts — killing occupiers, retrying ({attempt + 1}/3)")
-            for so in sorted(lib_dir.glob("libmediaservo_*.so*")):
-                _kill_using(so)
-        sos = sorted(x.name for x in lib_dir.glob("libmediaservo_*.so*"))
-    print(f"bindings deployed to {prefix} (lib/ {', '.join(sos)} + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx)")
-    print("  usage: export LD_LIBRARY_PATH=<prefix>/lib; link per the bindings headers; python: pip install <prefix>/wheel/*.whl")
-
-
 # ── package: CPack release tars (D-H13 / SR6 P1) ─────────────────────────
 def _git_out(args: list[str], timeout: int = 10) -> str | None:
     """Read-only git query (captures stdout, cwd = repo root); any failure (no git / shallow clone / timeout) → None, never raises
@@ -1257,10 +1197,8 @@ def _cmd_test() -> None:
 
 
 def _cmd_deploy(args: argparse.Namespace) -> None:
-    """deploy <target> — bindings | host | server (source = the out/ delivery tree; --prefix mandatory per D4; deploy does not trigger builds)."""
-    if args.target == "bindings":
-        _cmd_deploy_bindings(args.prefix, args.release)
-    elif args.target == "host":
+    """deploy <target> — host | server (source = the out/ delivery tree; --prefix mandatory per D4; deploy does not trigger builds; the bindings leg is shell-owned since SR6 P2)."""
+    if args.target == "host":
         _cmd_deploy_host(args.prefix, args.release)
     elif args.target == "server":
         _cmd_deploy_server(args.prefix)
@@ -1359,9 +1297,9 @@ def main() -> None:
                         help="example = GUI/SDK example ctest surface (bare test = unchanged workspace semantics, F-A-9(1))")
     test_p.add_argument("name", nargs="?", help="example: filter by example name (ctest -R)")
 
-    deploy_p = sub.add_parser("deploy", help="deploy <target> (stateful landing — deploy does not trigger builds; app bin/etc layout rides cmake install rules (cmake/MediaServoAppTree.cmake, cmake must be on PATH), stateful steps run in the managed binary): host|server|bindings; host/server --prefix mandatory (/opt needs root); bindings defaults to <out>/bindings")
-    deploy_p.add_argument("target", choices=["bindings", "host", "server"])
-    deploy_p.add_argument("--prefix", default=None, help="deployment prefix (mandatory for host/server: /opt/mediaservo-{host,server}; bindings defaults to <out>/bindings, out root follows the calling shell)")
+    deploy_p = sub.add_parser("deploy", help="deploy <target> (stateful landing — deploy does not trigger builds; app bin/etc layout rides cmake install rules (cmake/MediaServoAppTree.cmake, cmake must be on PATH), stateful steps run in the managed binary): host|server (--prefix mandatory, /opt needs root); the bindings leg moved to mediaservo.sh (SR6 P2)")
+    deploy_p.add_argument("target", choices=["host", "server"])
+    deploy_p.add_argument("--prefix", default=None, help="deployment prefix (mandatory: /opt/mediaservo-{host,server})")
     deploy_p.add_argument("--release", action="store_true", help="deploy release-profile assembled artifacts")
     deploy_p.set_defaults(func=_cmd_deploy)
     package_p = sub.add_parser("package", help="package <target>: host|server|sdk-field (device half; the old bindings name stays as a one-cycle alias)|sdk-client (cockpit half) → <dist>/<brand>-<target>-<ver>.tar.gz (D-H13/F12, includes the version contract and a versioned top-level dir)")

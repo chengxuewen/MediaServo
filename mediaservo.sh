@@ -466,6 +466,85 @@ case "${1:-}" in
         fi
         exit 0
         ;;
+    deploy)
+        # SR6 P2: the bindings leg is shell-driven (same cmake --install route
+        # the build verb uses). host/server legs stay python until batch-beta
+        # (118/148-LOC bodies; their stop arms duplicate the binary lifecycle).
+        if [ "${2:-}" != bindings ]; then
+            exec python "$ROOT/scripts/mediaservo_cli.py" "$@"
+        fi
+        shift 2; prefix=""; release=Debug
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --prefix) prefix="${2:?--prefix needs a value}"; shift 2 ;;
+                --release) release=Release; shift ;;
+                *) echo "deploy bindings: unexpected argument $1" >&2; exit 2 ;;
+            esac
+        done
+        src="${MSRTC_OUT_ROOT:-$ROOT/out}/bindings"
+        if [ -z "$prefix" ]; then
+            prefix="$src"
+            echo "[deploy bindings] prefix default → $prefix (out root follows the calling shell; --prefix overrides)"
+        fi
+        if [ ! -d "$src/lib" ]; then echo "Error: no assembled artifacts in $src — run build bindings first" >&2; exit 1; fi
+        if ! mkdir -p "$prefix/lib" 2>/dev/null; then
+            echo "Error: cannot create $prefix — for deployment use sudo msrtc.sh deploy bindings --prefix /opt/mediaservo-sdk" >&2; exit 1; fi
+        # exact-path occupancy predicate (was _pids_using: fd symlinks + exe mmap, no
+        # basename/cmdline fuzzy match — PIT-166 multi-instance rule preserved)
+        _ms_pids_using() {
+            local t p f r
+            t=$(realpath -- "$1" 2>/dev/null) || return 0
+            if [ -n "$t" ]; then
+                for p in /proc/[0-9]*; do
+                    if [ -d "$p/fd" ]; then
+                        for f in "$p"/fd/*; do
+                            r=$(readlink -- "$f" 2>/dev/null) || r=""
+                            if [ "$r" = "$t" ]; then basename "$p"; break; fi
+                        done
+                    fi
+                    r=$(readlink -- "$p/exe" 2>/dev/null) || r=""
+                    if [ "$r" = "$t" ]; then basename "$p"; fi
+                done | sort -u
+            fi
+            return 0
+        }
+        _msvc_kill_using() {
+            local pid
+            for pid in $(_ms_pids_using "$1"); do
+                if kill "$pid" 2>/dev/null; then echo "  killed occupying process $pid"; fi
+            done
+            sleep 1
+            return 0
+        }
+        if [ "$(cd "$prefix" && pwd -P)" = "$(cd "$src" && pwd -P)" ]; then
+            # same-tree idempotent guard (09-21 SameFileError lesson): the build
+            # phase already ran the install rules — a second full pass is churn.
+            sos=$(cd "$src/lib" && ls -1 | grep '^libmediaservo_.*\.so' | sort | paste -sd, - | sed 's/,/, /g')
+        else
+            echo "\$ cmake --preset bindings -DCMAKE_BUILD_TYPE=$release -DMEDIASERVO_BINDINGS_SRC=$src  (cwd: $ROOT)"
+            if ! (cd "$ROOT" && cmake --preset bindings -DCMAKE_BUILD_TYPE="$release" "-DMEDIASERVO_BINDINGS_SRC=$src"); then exit 1; fi
+            attempt=1
+            while :; do
+                if blob=$( (cd "$ROOT" && cmake --install build/presets/bindings --prefix "$prefix" --strip) 2>&1 ); then break; fi
+                rc=$?
+                if { echo "$blob" | grep -qi busy || echo "$blob" | grep -q 'Text file'; } && [ $attempt -lt 3 ]; then
+                    echo "  install hit busy artifacts — killing occupiers, retrying ($attempt/3)"
+                    for so in $(cd "$prefix/lib" 2>/dev/null && ls -1 | grep '^libmediaservo_.*\.so' | sed "s|^|$prefix/lib/|" | sort); do
+                        _msvc_kill_using "$so"
+                    done
+                    attempt=$((attempt+1))
+                else
+                    echo "Error: cmake --install into $prefix failed (rc=$rc):" >&2
+                    printf '%s' "$blob" | tail -c 600 >&2
+                    exit 1
+                fi
+            done
+            sos=$(cd "$prefix/lib" && ls -1 | grep '^libmediaservo_.*\.so' | sort | paste -sd, - | sed 's/,/, /g')
+        fi
+        echo "bindings deployed to $prefix (lib/ $sos + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx)"
+        echo "  usage: export LD_LIBRARY_PATH=<prefix>/lib; link per the bindings headers; python: pip install <prefix>/wheel/*.whl"
+        exit 0
+        ;;
 esac
 
 # build:deploy composite (2026-09-29: verb surface aligned with the parent-repo msrtc.sh — the submodule shell
@@ -485,8 +564,14 @@ if [ "${1:-}" = "build:deploy" ] && [ $# -ge 2 ]; then
             *) BUILD_FLAGS+=("$1"); DEPLOY_FLAGS+=("$1"); shift;;
         esac
     done
-    python "$ROOT/scripts/mediaservo_cli.py" "${BUILD_FLAGS[@]}" \
-        && python "$ROOT/scripts/mediaservo_cli.py" "${DEPLOY_FLAGS[@]}"
+    if [ "$TARGET" = bindings ]; then
+        # bindings deploy leg is shell-owned (SR6 P2) — re-enter this shell
+        python "$ROOT/scripts/mediaservo_cli.py" "${BUILD_FLAGS[@]}" \
+            && "$ROOT/mediaservo.sh" "${DEPLOY_FLAGS[@]}"
+    else
+        python "$ROOT/scripts/mediaservo_cli.py" "${BUILD_FLAGS[@]}" \
+            && python "$ROOT/scripts/mediaservo_cli.py" "${DEPLOY_FLAGS[@]}"
+    fi
     exit $?
 fi
 
