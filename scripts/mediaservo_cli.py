@@ -1236,7 +1236,7 @@ def _write_changes_file(staging: Path, target: str) -> None:
 
 # SR6 P1: legs migrated to cmake install rules + CPack TGZ (one-leg-one-owner —
 # targets NOT in this set still run the python staging/tar branch in _cmd_package).
-_CPACK_PKG = {"sdk-client"}
+_CPACK_PKG = {"sdk-client", "sdk-field", "bindings"}
 
 
 def _cpack_stage_sdk(staging: Path, args: argparse.Namespace) -> str:
@@ -1248,11 +1248,15 @@ def _cpack_stage_sdk(staging: Path, args: argparse.Namespace) -> str:
     if not src.exists():
         print("Error: out/bindings does not exist — run build bindings first", file=sys.stderr)
         sys.exit(1)
-    bdir = ROOT / "build" / "packages" / args.target
-    _run_or_exit(["cmake", "--preset", "default", "-B", str(bdir),
-                  f"-DMEDIASERVO_PKG={args.target}",
-                  f"-DMEDIASERVO_PKG_BRAND={args.brand}",
-                  f"-DMEDIASERVO_BIND_OUT={src}"], cwd=str(ROOT))
+    pkg = "sdk-field" if args.target in ("bindings", "sdk-field") else args.target
+    bdir = ROOT / "build" / "packages" / args.target   # alias keeps its own cache dir
+    cfg = ["cmake", "--preset", "default", "-B", str(bdir),
+           f"-DMEDIASERVO_PKG={pkg}",
+           f"-DMEDIASERVO_PKG_BRAND={args.brand}",
+           f"-DMEDIASERVO_BIND_OUT={src}"]
+    if args.target == "bindings":
+        cfg.append("-DMEDIASERVO_PKG_ALIAS=sdk")   # one-cycle naming slot (F12)
+    _run_or_exit(cfg, cwd=str(ROOT))
     # reconfigure-always at the call site (SR7 discipline): the source-existence
     # globs are configure-time truth (PIT-189 family)
     _run_or_exit(["cmake", "--install", str(bdir), "--prefix", str(staging)], cwd=str(ROOT))
@@ -1292,8 +1296,9 @@ def _cmd_package(args: argparse.Namespace) -> None:
     etc template / env.sh file assembly; build stays stateless) + tar contains bin 8/oxmgr/etc/identity/run/logs/recordings.
     bindings: staging copies out/bindings (full SDK layout — D241 version-full triple /.pc / cmake /
     wheel / node / cxx headers, completed by Task 2.5) → sdk package.
-    sdk-client: SR6 P1 L1 — staged by cmake install rules + packed by native CPack TGZ
-    (the python staging branch runs only for the non-migrated targets).
+    sdk-client/sdk-field (and the bindings alias): SR6 P1 L1+L2 — staged by cmake
+    install rules + packed by native CPack TGZ (the python staging branch runs only
+    for the non-migrated host/server targets).
     staging temp dir → tar.gz; the tar's top level is the versioned dir {brand}-{target}-{ver}/, so a bare unpack never scatters credentials/binaries;
     to land directly into a prefix dir use `tar xzf package.tar.gz -C <prefix> --strip-components=1`."""
     if sys.platform == "win32":
@@ -1323,7 +1328,7 @@ def _cmd_package(args: argparse.Namespace) -> None:
         elif args.target == "server":
             _cmd_deploy_server(str(staging))  # same deploy semantics, whole tree into staging (init lands idempotently in staging)
         elif args.target in ("bindings", "sdk-field"):
-            _stage_sdk_package(staging, "sdk-field")  # bindings = one-cycle alias (F12 rename WARN above)
+            cpack_root = _cpack_stage_sdk(staging, args)  # bindings = one-cycle alias (F12 rename WARN above)
         elif args.target == "sdk-client":
             cpack_root = _cpack_stage_sdk(staging, args)
         else:

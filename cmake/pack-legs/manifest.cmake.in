@@ -17,7 +17,7 @@ foreach(_so IN LISTS _sos)
     if(_readelf)
         file(REAL_PATH "${_so}" _real)
         execute_process(COMMAND "${_readelf}" -d "${_real}"
-                        OUTPUT_VARIABLE _nee OUTPUT_QUIET ERROR_QUIET
+                        OUTPUT_VARIABLE _nee ERROR_QUIET
                         RESULT_VARIABLE _rc TIMEOUT 10)
         if(NOT _rc EQUAL -1)
             if(_nee MATCHES "NEEDED[^\n]*\\[libav(format|codec)")
