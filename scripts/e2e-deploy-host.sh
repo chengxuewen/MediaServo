@@ -19,7 +19,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"; rm -rf /tmp/iceoryx2 /dev/shm/iox2_*' EXIT
 
 note "deploy host --prefix $TMP"
-python3 scripts/mediaservo_cli.py deploy host --prefix "$TMP"
+./mediaservo.sh deploy host --prefix "$TMP"
 
 BIN="$TMP/bin"
 
@@ -74,7 +74,7 @@ echo "$out" | grep -q "all checks passed" || { echo "FAIL: doctor did not pass e
 # ── 6. idempotent re-deploy: identity/signing/host.toml hashes unchanged ──
 note "re-deploy idempotency"
 SUM_BEFORE=$(sha256sum "$TMP/etc/link/signing.pem" "$TMP/identity.json" "$TMP/etc/host.toml")
-python3 scripts/mediaservo_cli.py deploy host --prefix "$TMP" >/dev/null
+./mediaservo.sh deploy host --prefix "$TMP" >/dev/null
 SUM_AFTER=$(sha256sum "$TMP/etc/link/signing.pem" "$TMP/identity.json" "$TMP/etc/host.toml")
 if [ "$SUM_BEFORE" = "$SUM_AFTER" ]; then
     echo "OK: hashes of signing.pem/identity.json/host.toml unchanged after re-deploy (credentials preserved)"

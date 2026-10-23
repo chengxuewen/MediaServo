@@ -42,7 +42,7 @@ echo "OK: bindings diff 0 (frozen)"
 
 # ── 3. install --brand cp (real install — exe_cmd uses the current_exe dir, brand apps must share the CLI directory) ─
 note "install --brand cp"
-pixi run python3 scripts/mediaservo_cli.py deploy host --brand cp --prefix "$TMP" >/dev/null 2>&1
+./mediaservo.sh deploy host --brand cp --prefix "$TMP" >/dev/null 2>&1
 for link in cp cp-host; do
     [ -L "$TMP/$link" ] || { echo "FAIL: missing root shortcut $TMP/$link"; FAIL=1; }
 done

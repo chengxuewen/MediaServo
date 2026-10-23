@@ -4,7 +4,9 @@ The thin shell (mediaservo.sh/.bat) guarantees this script runs after the pixi e
 PATH/LIBCLANG_PATH are already injected in the environment; subprocess calls cargo/docker directly.
 Platform differences exist in only two places: e2e (bash scripts) and clean (delete commands).
 
-Usage: mediaservo [-h] {build,build-host,build-server,up,down,logs,e2e,test,ci,deploy,install,package,clean,config,status,version} ...
+Usage: mediaservo [-h] {build,run example,test example,package} ... — the ops verbs
+(up down logs status clean config deploy e2e test-doctor-list …) live in
+mediaservo.sh (bash-owned, SR6); the -h epilog lists the split.
 """
 
 from __future__ import annotations
@@ -873,26 +875,6 @@ def _out_root() -> Path:
     return Path(env_out) if env_out else ROOT / "out"
 
 
-def _cmd_e2e(args: argparse.Namespace) -> None:
-    if sys.platform == "win32" and args.suite not in ("host", "package", "brand", "bindings", "smoke"):
-        print("e2e: Windows supports only bash-script suites", file=sys.stderr)
-        sys.exit(1)
-    for tool, hint in (
-        ("cargo", "pixi environment not activated?"),
-        ("docker", "the server container requires docker"),
-        ("bash", "e2e scripts require bash"),
-    ):
-        _check(tool, hint)
-    cmd = _E2E_SUITES[args.suite]
-    print(f"e2e {args.suite}: {' '.join(cmd)}")
-    _run_or_exit(cmd)
-
-
-def _cmd_test() -> None:
-    _check("cargo", "pixi environment not activated?")
-    _run_or_exit(["cargo", "test", "--workspace", "--exclude", "mediaservo-server"])
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mediaservo",
@@ -904,7 +886,7 @@ def main() -> None:
     fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
   Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
   Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
-  bash-owned (SR6 batch-1/alpha/beta-1, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance) logs status clean config deploy(bindings|host|server)
+  bash-owned (SR6 batch-1/alpha/beta-1, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance) logs status clean config e2e test(bare) deploy(bindings|host|server)
   guidance arms exit 2 (C39 — instance-directory commands; the container face up/down is unchanged)
   C++ example surface (p3): list example → build example [names…] → run example <name> / test example
              (foreground dev tool; artifacts in target/examples/bin/ — never in out/; the build-c prelude is auto-added)
@@ -933,13 +915,9 @@ def main() -> None:
                        help="run example only: <name> [app passthrough args…]")
     run_p.set_defaults(func=_cmd_run)
 
-    e2e_p = sub.add_parser("e2e", help="test suites: sfu|push|ui|host|package|brand|bindings|client|smoke")
-    e2e_p.add_argument("suite", choices=["sfu", "push", "ui", "host", "package", "brand", "bindings", "client", "smoke"])
-    e2e_p.set_defaults(func=_cmd_e2e)
 
-    test_p = sub.add_parser("test", help="workspace tests (excluding mediaservo-server) | example=<name> ctest")
-    test_p.add_argument("what", nargs="?", choices=["example"], default=None,
-                        help="example = GUI/SDK example ctest surface (bare test = unchanged workspace semantics, F-A-9(1))")
+    test_p = sub.add_parser("test", help="example=<name> ctest surface (bare workspace tests moved to mediaservo.sh test — SR6 batch-beta-1)")
+    test_p.add_argument("what", choices=["example"], help="example = GUI/SDK example ctest surface (bare test = unchanged workspace semantics, F-A-9(1))")
     test_p.add_argument("name", nargs="?", help="example: filter by example name (ctest -R)")
 
     package_p = sub.add_parser("package", help="package <target>: host|server|sdk-field (device half; the old bindings name stays as a one-cycle alias)|sdk-client (cockpit half) → <dist>/<brand>-<target>-<ver>.tar.gz (D-H13/F12, includes the version contract and a versioned top-level dir)")
@@ -984,10 +962,7 @@ def main() -> None:
         _cmd_run(args)
 
     elif args.command == "test":
-        if args.what == "example":
-            _cmd_test_example(args.name)
-        else:
-            _cmd_test()
+        _cmd_test_example(args.name)
     elif hasattr(args, "func"):
         args.func(args)
 

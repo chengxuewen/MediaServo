@@ -325,6 +325,10 @@ _msvc_app_install() {
         fi
     done
 }
+_ms_check() {
+    # was python _check — dependency probe with a clear error (never silent)
+    command -v "$1" >/dev/null 2>&1 || { echo "Error: missing dependency '$1' — $2" >&2; exit 1; }
+}
 
 case "${1:-}" in
     doctor)
@@ -618,6 +622,52 @@ case "${1:-}" in
                 echo "config: expected show|validate|set <key> <value> (got '${sub:-}')" >&2; exit 2
                 ;;
         esac
+        ;;
+    e2e)
+        # was _cmd_e2e + _E2E_SUITES (SR6 batch-beta-1). Honesty ledger: the
+        # python face has crashed with NameError since c9d4acb (2026-08-27 —
+        # ledger residual '_E2E_SUITES NameError'); the suite table is
+        # restored from that face's last living shape. 'host' targeted
+        # scripts/e2e-install-host.sh then — the file is e2e-deploy-host.sh today.
+        # win32 branch dropped (this entry point is the unix shell).
+        shift; suite="${1:-}"
+        [ -z "$suite" ] && { echo "mediaservo e2e: error: the following arguments are required: suite" >&2; exit 2; }
+        [ $# -gt 1 ] && { echo "mediaservo e2e: error: unrecognized arguments: ${*:2}" >&2; exit 2; }
+        case "$suite" in
+            sfu|push|ui|host|package|brand|bindings|client|smoke) ;;
+            *) echo "mediaservo e2e: error: argument suite: invalid choice: '${suite}' (choose from sfu, push, ui, host, package, brand, bindings, client, smoke)" >&2; exit 2 ;;
+        esac
+        _ms_check cargo "pixi environment not activated?"
+        _ms_check docker "the server container requires docker"
+        _ms_check bash "e2e scripts require bash"
+        case "$suite" in
+            sfu)      cmd=(cargo test -p mediaservo-host --test e2e_sfu) ;;
+            push)     cmd=(cargo test -p mediaservo-field --test push_e2e) ;;
+            ui)       cmd=(bash -c "cd www/apps/admin && npx playwright test e2e") ;;
+            host)     cmd=(bash scripts/e2e-deploy-host.sh) ;;
+            package)  cmd=(bash scripts/e2e-package.sh) ;;
+            brand)    cmd=(bash scripts/e2e-brand.sh) ;;
+            bindings) cmd=(bash scripts/e2e-bindings.sh) ;;
+            client)   cmd=(bash scripts/e2e-test.sh) ;;
+            smoke)    cmd=(bash scripts/e2e-prod-smoke.sh) ;;
+        esac
+        echo "e2e $suite: ${cmd[*]}"
+        _msvc_run "${cmd[@]}"   # MEDIASERVO_DRY_RUN=1 judges the command shape without firing suites
+        exit $?
+        ;;
+    test)
+        # bare = workspace tests (was _cmd_test); 'test example' forwards to python
+        # — build/run/test example share _cmd_build_example (batch-beta-2 surface).
+        if [ "${2:-}" = example ]; then
+            exec python "$ROOT/scripts/mediaservo_cli.py" "$@"
+        fi
+        if [ $# -gt 1 ]; then
+            echo "mediaservo test: error: argument what: invalid choice: '${2}' (choose from example)" >&2
+            exit 2
+        fi
+        _ms_check cargo "pixi environment not activated?"
+        echo "\$ cargo test --workspace --exclude mediaservo-server"
+        exec cargo test --workspace --exclude mediaservo-server
         ;;
     deploy)
         # SR6 P2: bindings leg shell-driven (cmake --install route). SR6 batch-beta-1:
