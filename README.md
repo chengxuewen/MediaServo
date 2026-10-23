@@ -73,7 +73,7 @@ Unified CLI entry point (available after bootstrap):
 ./mediaservo.sh e2e           # e2e_sfu regression (prereq: server + host + vite running)
 ./mediaservo.sh status server  # Health probe (default bare-metal native — pid+port+announced; --mode compose/--env dev container health; exit 0/1/2)
 ./mediaservo.sh status host    # Push processes + gateway 17980 + instance logs (C38 layer 2); environment diagnostics see doctor
-./mediaservo.sh config validate   # Config validation (pyyaml)
+./mediaservo.sh config validate   # Config validation (bash arm; serde_yaml via mediaservo-gates)
 ./mediaservo.sh clean         # Clean build artifacts (keeps cargo-cache volume); clean --all clears everything
 ./mediaservo.sh deploy host  # Assemble+deploy to prefix (--prefix required; brand via MEDIASERVO_BRAND; vehicle /opt/mediaservo-host); deploy bindings same
 ./mediaservo.sh package host|bindings  # dist/ dual-package release (D-H13): mediaservo-host-<ver>.tar.gz + mediaservo-sdk-<ver>.tar.gz (each tar has a versioned top-level dir + CHANGES.md = verbatim copy of repo-root CHANGELOG.md, human-readable update log for consumers)

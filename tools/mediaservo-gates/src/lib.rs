@@ -9,6 +9,7 @@
 //! | sub        | python prey            | rc 0 (pass)                      | rc 1 (fail)                                        |
 //! |------------|------------------------|----------------------------------|----------------------------------------------------|
 //! | `changelog`| gate-changelog.py      | stdout `changelog markers ok`    | stderr: one `L{n}: …` line per violation (joined)  |
+//! | `config-validate` | cli.py `config validate` | stdout `OK: <rel>` per file | stderr `missing:`/`YAML error:` line per bad file, rc 1 |
 //! | `lanes`    | gate-lanes.py          | stdout `OK: crate lanes reconciled (N lanes == M crates/* members)` | stderr `FAIL: <block/member rule>`; stdout `FAIL: {e}` per reconciliation error |
 //! | `openapi`  | gate-openapi.py        | stdout `openapi ok: {N} paths`   | stderr: parse/assert message (python: traceback)   |
 //! | `parity`   | gate-parity.py         | stdout `bindings parity ok ({v})`| stderr: one `{path} != {v}` line per stale copy    |
@@ -26,6 +27,7 @@
 //! `## [Unreleased]` — the gate passes vacuously until either side is ruled.
 
 pub mod changelog;
+pub mod config_validate;
 pub mod lanes;
 pub mod openapi;
 pub mod parity;
@@ -34,13 +36,16 @@ pub mod parity;
 /// Returns the process exit code (0 pass / 1 fail — table in the module doc).
 pub fn run(args: &[String]) -> i32 {
     let Some(sub) = args.first() else {
-        eprintln!("usage: mediaservo-gates <changelog|lanes|openapi|parity> [--root <dir>]");
+        eprintln!(
+            "usage: mediaservo-gates <changelog|config-validate|lanes|openapi|parity> [--root <dir>]"
+        );
         return 1;
     };
     let root = flag_value(&args[1..], "--root").unwrap_or_else(|| ".".to_string());
     let self_test = args[1..].iter().any(|a| a == "--self-test");
     match sub.as_str() {
         "changelog" => changelog::check(std::path::Path::new(&root)),
+        "config-validate" => config_validate::check(std::path::Path::new(&root)),
         "lanes" => lanes::check(std::path::Path::new(&root), self_test),
         "openapi" => openapi::check(std::path::Path::new(&root)),
         "parity" => parity::check(std::path::Path::new(&root)),

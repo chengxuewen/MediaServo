@@ -22,8 +22,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 COMPOSE_BASE = ["docker", "compose", "-f", "docker-compose.dev.yml"]
-HOST_CONF = ROOT / "crates/mediaservo-host/config/host.conf"
-SERVER_YAML = ROOT / "config/server.docker.yaml"
 
 
 # Delivery target -> version-source crate (F12: four independent version sources, packaging-side wiring; V1b four-package naming reuses this table).
@@ -895,50 +893,6 @@ def _cmd_test() -> None:
     _run_or_exit(["cargo", "test", "--workspace", "--exclude", "mediaservo-server"])
 
 
-
-def _cmd_config(args: argparse.Namespace) -> None:
-    if args.config_cmd == "show":
-        for path in (HOST_CONF, SERVER_YAML):
-            print(f"--- {path.relative_to(ROOT)} ---")
-            if path.exists():
-                print(path.read_text(encoding="utf-8"))
-            else:
-                print(f"(missing: {path})", file=sys.stderr)
-        return
-    if args.config_cmd == "set":
-        if not args.key or args.value is None:
-            print("Usage: mediaservo config set <key> <value>", file=sys.stderr)
-            sys.exit(2)
-        # dev track: writes the host config/ dir (inside prod volumes use the exec path — see docs/modules/26)
-        # only the signaling.psk key is supported (other keys pending evolution)
-        if args.key != "signaling.psk":
-            print(f"config set: currently supports only signaling.psk (got {args.key})", file=sys.stderr)
-            sys.exit(2)
-        p = ROOT / "config" / "host.conf"
-        p.write_text(f"signaling.psk = {args.value}\n", encoding="utf-8")
-        print(f"wrote {p.relative_to(ROOT)} (dev track — in prod, use exec to edit the in-volume server.yaml)")
-        return
-    # validate — real pyyaml parsing (review BLOCKER-2: the dependency was already added to pixi.toml)
-    try:
-        import yaml  # noqa: PLC0415
-    except ImportError:
-        print("Error: pyyaml missing — run: pixi install", file=sys.stderr)
-        sys.exit(1)
-    ok = True
-    for path in (HOST_CONF, SERVER_YAML):
-        if not path.exists():
-            print(f"missing: {path.relative_to(ROOT)}", file=sys.stderr)
-            ok = False
-            continue
-        try:
-            yaml.safe_load(path.read_text(encoding="utf-8"))
-            print(f"OK: {path.relative_to(ROOT)}")
-        except yaml.YAMLError as e:
-            print(f"YAML error: {path.relative_to(ROOT)}: {e}", file=sys.stderr)
-            ok = False
-    sys.exit(0 if ok else 1)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mediaservo",
@@ -950,7 +904,7 @@ def main() -> None:
     fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
   Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
   Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
-  bash-owned (SR6 batch-1/alpha/beta-1, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance) logs status clean deploy(bindings|host|server)
+  bash-owned (SR6 batch-1/alpha/beta-1, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance) logs status clean config deploy(bindings|host|server)
   guidance arms exit 2 (C39 — instance-directory commands; the container face up/down is unchanged)
   C++ example surface (p3): list example → build example [names…] → run example <name> / test example
              (foreground dev tool; artifacts in target/examples/bin/ — never in out/; the build-c prelude is auto-added)
@@ -994,11 +948,6 @@ def main() -> None:
     package_p.add_argument("--brand", default="", help="brand package name (<dist>/<brand>-<target>-<ver>.tar.gz; default mediaservo)")
     package_p.add_argument("--release", action="store_true", help="package release artifacts (target/release, pairs with build --release)")
     package_p.set_defaults(func=_cmd_package)
-    config_p = sub.add_parser("config", help="config show|validate|set <key> <value> (dev-track config/ directory)")
-    config_p.add_argument("config_cmd", choices=["show", "validate", "set"])
-    config_p.add_argument("key", nargs="?", help="set: config key (e.g. signaling.psk)")
-    config_p.add_argument("value", nargs="?", help="set: config value")
-    config_p.set_defaults(func=_cmd_config)
     # compat aliases (build-* kept — e2e scripts/habitual usage): run-host/up/down aliases removed (up/down are now first-level commands)
     ALIASES = {
         "build-host": ["build", "host"],

@@ -577,6 +577,48 @@ case "${1:-}" in
         fi
         exit 0
         ;;
+    config)
+        # was _cmd_config (SR6 batch-beta-1) — dev-track template face.
+        # show/set are pure shell; validate rides the mediaservo-gates Rust face
+        # (serde_yaml; the pyyaml twin retired with the verb — N4 pattern).
+        shift; sub="${1:-}"; [ $# -gt 0 ] && shift
+        case "$sub" in
+            show)
+                for rel in crates/mediaservo-host/config/host.conf config/server.docker.yaml; do
+                    echo "--- $rel ---"
+                    if [ -f "$ROOT/$rel" ]; then
+                        cat "$ROOT/$rel"; echo
+                    else
+                        echo "(missing: $ROOT/$rel)" >&2
+                    fi
+                done
+                exit 0
+                ;;
+            set)
+                key="${1:-}"
+                if [ -z "$key" ] || [ $# -lt 2 ]; then
+                    echo "Usage: mediaservo config set <key> <value>" >&2; exit 2
+                fi
+                value="$2"
+                if [ "$key" != signaling.psk ]; then
+                    echo "config set: currently supports only signaling.psk (got $key)" >&2; exit 2
+                fi
+                printf 'signaling.psk = %s\n' "$value" > "$ROOT/config/host.conf"
+                echo "wrote config/host.conf (dev track — in prod, use exec to edit the in-volume server.yaml)"
+                exit 0
+                ;;
+            validate)
+                if ! (cd "$ROOT" && cargo build -q -p mediaservo-gates); then
+                    echo "Error: cannot build mediaservo-gates (config-validate face) — cargo available / pixi activated?" >&2
+                    exit 1
+                fi
+                exec "$ROOT/target/debug/mediaservo-gates" config-validate --root "$ROOT"
+                ;;
+            *)
+                echo "config: expected show|validate|set <key> <value> (got '${sub:-}')" >&2; exit 2
+                ;;
+        esac
+        ;;
     deploy)
         # SR6 P2: bindings leg shell-driven (cmake --install route). SR6 batch-beta-1:
         # the host leg joined; server stays python until its own beta commit. The
