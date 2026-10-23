@@ -272,18 +272,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - name: Validate OpenAPI spec
-        run: |
-          python3 -c "
-          import yaml, sys
-          with open('docs/openapi.yaml') as f:
-              spec = yaml.safe_load(f)
-          assert spec.get('openapi') == '3.0.3', 'not OpenAPI 3.0.3'
-          assert spec.get('info', {}).get('title'), 'missing info.title'
-          assert spec.get('info', {}).get('version'), 'missing info.version'
-          assert 'paths' in spec, 'missing paths'
-          for path, methods in spec['paths'].items():
-              for method, detail in methods.items():
-                  assert 'responses' in detail, f'{path} {method} missing responses'
-          print('OpenAPI spec valid: ' + spec['info']['title'] + ' v' + spec['info']['version'])
-          "
+        # SR6 P3: one semantic source = the Rust face (gate-openapi.py retired).
+        # The old inline twin additionally walked per-operation `responses`;
+        # the EXECUTED .py gate never did — drift folded, not silently inherited.
+        run: cargo run --quiet -p mediaservo-gates -- openapi

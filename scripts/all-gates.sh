@@ -47,7 +47,7 @@ gate "server stub --all-targets"  cargo test -p mediaservo-server --no-default-f
 
 # ── test surface ──
 gate "test --workspace (lib)"     cargo test --workspace --lib
-gate "openapi validate"           python3 scripts/gate-openapi.py
+gate "openapi validate"           target/debug/mediaservo-gates openapi
 
 # ── heavy gates (--full) ──
 if [ "$FULL" = 1 ]; then

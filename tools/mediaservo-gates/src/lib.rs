@@ -27,6 +27,7 @@
 
 pub mod changelog;
 pub mod lanes;
+pub mod openapi;
 
 /// Dispatch `mediaservo-gates <sub> [--root <dir>] [--self-test(lanes)]`.
 /// Returns the process exit code (0 pass / 1 fail — table in the module doc).
@@ -40,7 +41,8 @@ pub fn run(args: &[String]) -> i32 {
     match sub.as_str() {
         "changelog" => changelog::check(std::path::Path::new(&root)),
         "lanes" => lanes::check(std::path::Path::new(&root), self_test),
-        // openapi/parity faces land in the following SR6 P3 commits
+        "openapi" => openapi::check(std::path::Path::new(&root)),
+        // parity face lands in the next SR6 P3 commit
         other => {
             eprintln!("unknown subcommand: {other}");
             1
