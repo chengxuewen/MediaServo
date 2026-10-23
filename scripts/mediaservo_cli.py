@@ -1620,9 +1620,6 @@ def _cmd_start(args: argparse.Namespace) -> None:
     elif target == "host":
         _host_runtime_hint("start")
         sys.exit(2)
-    else:  # client
-        print("start client: not implemented (client skeleton phase)", file=sys.stderr)
-        sys.exit(1)
 
 
 def _cmd_restart(args: argparse.Namespace) -> None:
@@ -1634,9 +1631,6 @@ def _cmd_restart(args: argparse.Namespace) -> None:
     elif target == "host":
         _host_runtime_hint("restart")
         sys.exit(2)
-    else:  # client
-        print("restart client: not implemented (client skeleton phase)", file=sys.stderr)
-        sys.exit(1)
 
 
 # ───────── example command surface (p3-gui-viewer W0, G7) ─────────
@@ -1790,9 +1784,6 @@ def _cmd_run(args: argparse.Namespace) -> None:
     elif args.target == "host":
         _host_runtime_hint("run")
         sys.exit(2)
-    else:
-        print('run client: not implemented (client skeleton phase)', file=sys.stderr)
-        sys.exit(1)
 
 
 def _out_root() -> Path:
@@ -1910,9 +1901,6 @@ def _cmd_stop(args: argparse.Namespace) -> None:
     elif target == "host":
         _host_runtime_hint("stop")
         sys.exit(2)
-    else:  # client
-        subprocess.run(["pkill", "-x", "mediaservo-client"], check=False)
-        print("✓ client stopped")
 
 
 def _cmd_logs(args: argparse.Namespace) -> None:
@@ -1946,9 +1934,7 @@ def _cmd_logs(args: argparse.Namespace) -> None:
             _run_or_exit(["tail", "-n", "100"] + (["-f"] if args.follow else []) + [str(log_path)])
         ox_logs = Path.home() / ".local/share/oxmgr/logs"
         print(f"host log directory: {ox_logs} (instance logs: OXMGR_DATA_DIR/run/logs/msrtc-streamer-*.err.log)", file=sys.stderr)
-    else:  # client
-        print("client logs: not implemented (client skeleton phase)", file=sys.stderr)
-        sys.exit(1)
+    # (client has no CLI-side log target: choices are server|host)
 
 
 def _cmd_e2e(args: argparse.Namespace) -> None:
@@ -2149,8 +2135,6 @@ def _cmd_status_runtime(args: argparse.Namespace) -> None:
         code = _status_server_native() if mode == "native" else _status_server_container(args.env)
     elif args.target == "host":
         code = _status_host()
-    else:
-        print("status client: not implemented (client skeleton phase)", file=sys.stderr)
     sys.exit(code)
 
 
@@ -2341,7 +2325,7 @@ def main() -> None:
   read-only probes kept: status server|host / logs server / clean server
   C++ example surface (p3): list example → build example [names…] → run example <name> / test example
              (foreground dev tool; artifacts in target/examples/bin/ — never in out/; the build-c prelude is auto-added)
-  exit codes: status/logs/stop — 0 = success, 1 = not running/target missing, 2 = bad args / retirement guidance
+  exit codes: status/logs — 0 = success, 1 = not running/target missing, 2 = bad args / probe undecidable; run/start/stop/restart — retired arms land at 2 with the instance-command guidance
 """)
 
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2362,27 +2346,19 @@ def main() -> None:
 
     restart_p = sub.add_parser("restart", help="restart <target>: server/host retired → guidance + exit 2 (<prefix>/bin/mediaservo-server restart <dir>; containers up/down)")
     restart_p.add_argument("target", choices=["host", "server"])
-    _add_mode_args(restart_p)
     restart_p.set_defaults(func=_cmd_restart)
     run_p = sub.add_parser("run", help="run <target>: server/host retired → guidance + exit 2 (instance commands: <prefix>/bin/mediaservo-server -h); example = C++ examples")
     run_p.add_argument("target", choices=["server", "host", "example"])
     run_p.add_argument("rest", nargs=argparse.REMAINDER,
                        help="run example only: <name> [app passthrough args…]")
-    run_p.add_argument("--foreground", "-f", action="store_true", help="(retirement leftover — the server run branch is removed; no effect)")
-    run_p.add_argument("--release", action="store_true", help="(retirement leftover — no effect)")
-    run_p.add_argument("--announced-ip", metavar="IP[,IP...]", default=None,
-                       help="(retirement leftover — for instance-side announcements use the MEDIASERVO_SFU_ANNOUNCED_IP env)")
     run_p.set_defaults(func=_cmd_run)
 
     start_p = sub.add_parser("start", help="start <target> (default server): server/host retired → guidance + exit 2 (containers use up; instance commands for the rest)")
     start_p.add_argument("target", nargs="?", choices=["host", "server"], default="server")
-    _add_mode_args(start_p)
-    start_p.add_argument("--foreground", "-f", action="store_true", help="(retirement leftover — the server run branch is removed; no effect)")
     start_p.set_defaults(func=_cmd_start)
 
     stop_p = sub.add_parser("stop", help="stop <target>: server/host retired → guidance + exit 2 (instance command stop <dir>; containers: mediaservo down)")
     stop_p.add_argument("target", choices=["host", "server"])
-    _add_mode_args(stop_p, allow_both=True)
     stop_p.set_defaults(func=_cmd_stop)
 
 
