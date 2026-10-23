@@ -215,6 +215,117 @@ _msvc_hint_server() {
     echo "  read-only probes kept: mediaservo status server | logs server" >&2
 }
 
+# =============================================================================
+# SR6 batch-beta-1 -- deploy host/server shell legs. Helpers were inline in the
+# bindings arm (SR6 P2); hoisted to shared scope so every deploy leg rides the
+# same exact-path occupancy predicate (PIT-166). Doctrine: the driver only
+# orchestrates (guards/brand/stop-first release/cmake invocation/oxmgr vendor/
+# managed-binary init/env.sh) — stateful oxfile/Caddyfile merge lives in the
+# binary's init [bF3], delivery layout lives in MediaServoAppTree.cmake rows.
+# =============================================================================
+_ms_pids_using() {
+    # exact-path occupancy predicate (was python _pids_using: fd symlinks + exe
+    # mmap, no basename/cmdline fuzzy match — PIT-166 multi-instance rule)
+    local t p f r
+    t=$(realpath -- "$1" 2>/dev/null) || return 0
+    if [ -n "$t" ]; then
+        for p in /proc/[0-9]*; do
+            if [ -d "$p/fd" ]; then
+                for f in "$p"/fd/*; do
+                    r=$(readlink -- "$f" 2>/dev/null) || r=""
+                    if [ "$r" = "$t" ]; then basename "$p"; break; fi
+                done
+            fi
+            r=$(readlink -- "$p/exe" 2>/dev/null) || r=""
+            if [ "$r" = "$t" ]; then basename "$p"; fi
+        done | sort -u
+    fi
+    return 0
+}
+_msvc_kill_using() {
+    local pid
+    for pid in $(_ms_pids_using "$1"); do
+        if kill "$pid" 2>/dev/null; then echo "  killed occupying process $pid"; fi
+    done
+    sleep 1
+    return 0
+}
+_msvc_copy_with_kill() {
+    # busy-retry copy (python _copy_with_kill parity: cp -p keeps mtime/mode;
+    # Text file busy -> kill occupier by exact path -> retry; max 3 attempts)
+    local src=$1 dst=$2 attempt err
+    for attempt in 1 2 3; do
+        if err=$(cp -p "$src" "$dst" 2>&1); then return 0; fi
+        case "$err" in
+            *[Bb]usy*|*Text\ file*) ;;
+            *) echo "Error: copy $src -> $dst failed: $err" >&2; return 1 ;;
+        esac
+        [ "$attempt" = 3 ] && break
+        echo "  $(basename "$dst") occupied (Text file busy) — killing the occupier then retrying (${attempt}/3)"
+        _msvc_kill_using "$dst"
+    done
+    echo "Error: failed to copy $dst (still busy after multiple retries)" >&2
+    return 1
+}
+_msvc_oxmgr_resolve() {
+    # vendor hunt (D-H13 hard gate, python _resolve_oxmgr_or_die parity):
+    # PATH -> ~/.cache/oxmgr reclaim -> fail. Sets MS_OXMGR_SRC. The archive
+    # layer/.cache PATH injection above this block is what normally hits PATH.
+    local role=${1:-} c
+    MS_OXMGR_SRC=$(command -v oxmgr || true)
+    if [ -z "$MS_OXMGR_SRC" ]; then
+        c=$(ls -1d "$HOME"/.cache/oxmgr/oxmgr-v*/oxmgr 2>/dev/null | sort -r | head -1) || c=""
+        if [ -n "$c" ]; then
+            echo "  oxmgr: not found in PATH, reclaiming local cache $c"
+            MS_OXMGR_SRC=$c
+        fi
+    fi
+    if [ -z "$MS_OXMGR_SRC" ]; then
+        echo "Error: oxmgr found in neither PATH nor ~/.cache/oxmgr — deploy ${role} must package the process manager (a hard runtime dependency of start/stop). Install: download the prebuilt Rust binary from GitHub Releases (with sha256/asc verification, https://github.com/Vladimir-Urik/OxMgr/releases),or build oxmgr-src and place it in ~/.local/bin, then re-run deploy" >&2
+        exit 2
+    fi
+}
+_ms_derive_brand_server() {
+    # first sorted *-server hit minus the upstream name (python _derive_brand_server parity)
+    local d=$1 f
+    for f in $(ls -1 "$d" 2>/dev/null | sort); do
+        case "$f" in
+            mediaservo-server) continue ;;
+            *-server) echo "${f%"-server"}"; return 0 ;;
+        esac
+    done
+    return 0
+}
+_msvc_app_install() {
+    # app delivery layout via cmake/MediaServoAppTree.cmake install rules (python
+    # _cmake_app_install parity). Configure RE-RUNS every invocation — the source-
+    # existence hunts are configure-time truth, never frozen by a stale cache
+    # (PIT-189). Dedicated binaryDir: app cache vars must not pollute the preset
+    # default tree (fresh-clone IDE regression guard). Deploy landing mode = empty
+    # MEDIASERVO_APP_STAGING. ETXTBSY survivors die BY EXACT PATH then the
+    # idempotent install re-runs (rerun-safe by cmake semantics, SR4 L5 precedent).
+    local tree=$1 brand=$2 btype=$3 prefix=$4
+    local app_tree="$ROOT/build/app-tree"
+    local cfg=(cmake --preset default -B "$app_tree" "-DMEDIASERVO_APP_TREE=$tree" "-DMEDIASERVO_BRAND=$brand" "-DMEDIASERVO_APP_STAGING=" "-DCMAKE_BUILD_TYPE=$btype")
+    [ "$tree" = server ] && cfg+=("-DMEDIASERVO_SERVER_OUT_DIR=${MSRTC_OUT_ROOT:-$ROOT/out}/server")
+    echo "\$ ${cfg[*]}  (cwd: $ROOT)"
+    (cd "$ROOT" && "${cfg[@]}") || exit $?
+    local attempt=1 blob rc f
+    while :; do
+        blob=$( (cd "$ROOT" && cmake --install "$app_tree" --prefix "$prefix") 2>&1 ) && return 0
+        rc=$?
+        if { printf '%s' "$blob" | grep -qi busy || printf '%s' "$blob" | grep -q 'Text file'; } && [ "$attempt" -lt 3 ]; then
+            echo "  install hit busy artifacts — killing occupiers, retrying (${attempt}/3)" >&2
+            for f in "$prefix"/bin/*; do [ -f "$f" ] && _msvc_kill_using "$f"; done
+            attempt=$((attempt + 1))
+        else
+            echo "Error: cmake --install $tree app tree into $prefix failed (rc=$rc):" >&2
+            printf '%s' "$blob" | tail -c 600 >&2
+            exit 1
+        fi
+    done
+}
+
 case "${1:-}" in
     doctor)
         # toolchain version probe (was _cmd_env_diagnose: which + --version, first line)
@@ -467,83 +578,164 @@ case "${1:-}" in
         exit 0
         ;;
     deploy)
-        # SR6 P2: the bindings leg is shell-driven (same cmake --install route
-        # the build verb uses). host/server legs stay python until batch-beta
-        # (118/148-LOC bodies; their stop arms duplicate the binary lifecycle).
-        if [ "${2:-}" != bindings ]; then
-            exec python "$ROOT/scripts/mediaservo_cli.py" "$@"
-        fi
-        shift 2; prefix=""; release=Debug
-        while [ $# -gt 0 ]; do
-            case "$1" in
-                --prefix) prefix="${2:?--prefix needs a value}"; shift 2 ;;
-                --release) release=Release; shift ;;
-                *) echo "deploy bindings: unexpected argument $1" >&2; exit 2 ;;
-            esac
-        done
-        src="${MSRTC_OUT_ROOT:-$ROOT/out}/bindings"
-        if [ -z "$prefix" ]; then
-            prefix="$src"
-            echo "[deploy bindings] prefix default → $prefix (out root follows the calling shell; --prefix overrides)"
-        fi
-        if [ ! -d "$src/lib" ]; then echo "Error: no assembled artifacts in $src — run build bindings first" >&2; exit 1; fi
-        if ! mkdir -p "$prefix/lib" 2>/dev/null; then
-            echo "Error: cannot create $prefix — for deployment use sudo msrtc.sh deploy bindings --prefix /opt/mediaservo-sdk" >&2; exit 1; fi
-        # exact-path occupancy predicate (was _pids_using: fd symlinks + exe mmap, no
-        # basename/cmdline fuzzy match — PIT-166 multi-instance rule preserved)
-        _ms_pids_using() {
-            local t p f r
-            t=$(realpath -- "$1" 2>/dev/null) || return 0
-            if [ -n "$t" ]; then
-                for p in /proc/[0-9]*; do
-                    if [ -d "$p/fd" ]; then
-                        for f in "$p"/fd/*; do
-                            r=$(readlink -- "$f" 2>/dev/null) || r=""
-                            if [ "$r" = "$t" ]; then basename "$p"; break; fi
-                        done
-                    fi
-                    r=$(readlink -- "$p/exe" 2>/dev/null) || r=""
-                    if [ "$r" = "$t" ]; then basename "$p"; fi
-                done | sort -u
+        # SR6 P2: bindings leg shell-driven (cmake --install route). SR6 batch-beta-1:
+        # the host leg joined; server stays python until its own beta commit. The
+        # driver only orchestrates — layout = cmake rows, stateful merge = binary
+        # init [bF3], never re-implemented here.
+        case "${2:-}" in
+        host)
+            shift 2; prefix=""; build_type=Debug
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --prefix) prefix="${2:?--prefix needs a value}"; shift 2 ;;
+                    --release) build_type=Release; shift ;;
+                    *) echo "deploy host: unexpected argument $1" >&2; exit 2 ;;
+                esac
+            done
+            [ -n "$prefix" ] || { echo "Error: deploy requires --prefix (no default — prevents polluting out/ stateless delivery; vehicles use /opt/mediaservo-host)" >&2; exit 2; }
+            bin_dir="$prefix/bin"
+            # brand: env (msrtc.sh injects MEDIASERVO_BRAND) first, falling back to
+            # derivation from the installed instance (python _derive_brand parity:
+            # first *-agent hit, host-* legacy names skipped; the multi-brand
+            # first-match limit is carried knowingly). Explicit default "mediaservo"
+            # maps to the legacy host-* layout (empty brand).
+            brand_in="${MEDIASERVO_BRAND:-}"
+            if [ -z "$brand_in" ]; then
+                for p in "$bin_dir"/*-agent; do
+                    [ -e "$p" ] || continue
+                    bn=$(basename "$p")
+                    case "$bn" in host-*) continue ;; esac
+                    brand_in=${bn%"-agent"}; break
+                done
             fi
-            return 0
-        }
-        _msvc_kill_using() {
-            local pid
-            for pid in $(_ms_pids_using "$1"); do
-                if kill "$pid" 2>/dev/null; then echo "  killed occupying process $pid"; fi
-            done
-            sleep 1
-            return 0
-        }
-        if [ "$(cd "$prefix" && pwd -P)" = "$(cd "$src" && pwd -P)" ]; then
-            # same-tree idempotent guard (09-21 SameFileError lesson): the build
-            # phase already ran the install rules — a second full pass is churn.
-            sos=$(cd "$src/lib" && ls -1 | grep '^libmediaservo_.*\.so' | sort | paste -sd, - | sed 's/,/, /g')
-        else
-            echo "\$ cmake --preset bindings -DCMAKE_BUILD_TYPE=$release -DMEDIASERVO_BINDINGS_SRC=$src  (cwd: $ROOT)"
-            if ! (cd "$ROOT" && cmake --preset bindings -DCMAKE_BUILD_TYPE="$release" "-DMEDIASERVO_BINDINGS_SRC=$src"); then exit 1; fi
-            attempt=1
-            while :; do
-                if blob=$( (cd "$ROOT" && cmake --install build/presets/bindings --prefix "$prefix" --strip) 2>&1 ); then break; fi
-                rc=$?
-                if { echo "$blob" | grep -qi busy || echo "$blob" | grep -q 'Text file'; } && [ $attempt -lt 3 ]; then
-                    echo "  install hit busy artifacts — killing occupiers, retrying ($attempt/3)"
-                    for so in $(cd "$prefix/lib" 2>/dev/null && ls -1 | grep '^libmediaservo_.*\.so' | sed "s|^|$prefix/lib/|" | sort); do
-                        _msvc_kill_using "$so"
+            brand=$brand_in; [ "$brand" = mediaservo ] && brand=""
+            rust_brand=${brand:-mediaservo}
+            mkdir -p "$bin_dir" 2>/dev/null || { echo "Error: cannot create $bin_dir — for deployment use sudo msrtc.sh deploy host --prefix /opt/mediaservo-host" >&2; exit 1; }
+            case "$prefix" in
+                /opt*) [ "$(id -u)" = 0 ] || { echo "Error: /opt deployment needs root (sudo msrtc.sh deploy host --prefix /opt/mediaservo-host)" >&2; exit 1; } ;;
+            esac
+            host_cli=${brand:+${brand}-host}; host_cli=${host_cli:-mediaservo-host}
+            # triple stop of the revival sources (unit -> daemon -> family), only
+            # when a live instance is detectable (oxfile + branded CLI present).
+            # Never call the oxmgr CLI here (its IPC auto-spawns the daemon —
+            # creating busy instead of clearing it). C50: the unit arm is
+            # OXMGR_HOME-scoped — a brand glob never stops another instance.
+            if [ -f "$prefix/run/oxfile.toml" ] && [ -f "$bin_dir/$host_cli" ]; then
+                echo "Running host instance detected — stopping the process family first (reinstall does not overwrite etc/ credentials)"
+                oxmgr_home=$(realpath -m -- "$prefix/run/oxmgr" 2>/dev/null || echo "$prefix/run/oxmgr")
+                want_home="Environment=OXMGR_HOME=$oxmgr_home"
+                if command -v systemctl >/dev/null 2>&1 && [ -d "$HOME/.config/systemd/user" ]; then
+                    for u in "$HOME/.config/systemd/user"/oxmgr-${brand}-*.service; do
+                        [ -e "$u" ] || continue
+                        un=$(basename "$u")
+                        if ! grep -qF -- "$want_home" "$u" 2>/dev/null; then
+                            echo "  note: leaving unit $un untouched (belongs to another instance home)"
+                            continue
+                        fi
+                        systemctl --user stop "$un" || true
+                        systemctl --user reset-failed "$un" || true
                     done
-                    attempt=$((attempt+1))
-                else
-                    echo "Error: cmake --install into $prefix failed (rc=$rc):" >&2
-                    printf '%s' "$blob" | tail -c 600 >&2
-                    exit 1
                 fi
+                _msvc_kill_using "$bin_dir/oxmgr"
+                for base in agent streamer capturer recorder controller emergency audio; do
+                    role=${brand:+${brand}-${base}}; role=${role:-host-${base}}
+                    pkill -x "$role" || true
+                done
+                sleep 1
+            fi
+            _msvc_app_install host "$brand" "$build_type" "$prefix"
+            # oxmgr version locked with the deployment (D-H13)
+            _msvc_oxmgr_resolve host
+            _msvc_copy_with_kill "$MS_OXMGR_SRC" "$bin_dir/oxmgr"
+            oxv=$("$MS_OXMGR_SRC" --version 2>/dev/null | head -1) || oxv=""
+            [ -n "$oxv" ] || oxv=$("$MS_OXMGR_SRC" --version 2>&1 >/dev/null | head -1) || oxv=""
+            echo "  oxmgr packaged: ${oxv:-?}"
+            # host init: etc/ + identity.json + tokens — idempotent write-only, never
+            # delete (reinstall keeps credentials). init is a separate process: the
+            # device prefix brand must match the layout brand (env override).
+            if [ -f "$prefix/identity.json" ]; then
+                echo "  identity.json exists — write-only, never delete (device identity preserved): $prefix/identity.json"
+            fi
+            echo "\$ $bin_dir/$host_cli init $prefix"
+            MEDIASERVO_BRAND="$rust_brand" "$bin_dir/$host_cli" init "$prefix"
+            # env.sh one-shot activation (MED5 — relocatable: derived relative to
+            # itself; same bytes as the pack-leg host template, deploy-side owner)
+            env_host=${brand:+${brand}-host}; env_host=${env_host:-mediaservo-host}
+            cat > "$prefix/env.sh" <<EOF
+#!/usr/bin/env bash
+# ${env_host} environment activation (generated at deploy) — all commands available after sourcing
+# Usage: source env.sh (still valid under any prefix / after relocation, derived relative to this file)
+__MSRTC_ENV_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd -P)"
+export PATH="\${__MSRTC_ENV_DIR}/bin:\$PATH"
+export MEDIASERVO_BRAND="${rust_brand}"   # brand env (D252); the deployment package pins the layout explicitly
+BIN_DIR_MSRTC="\${__MSRTC_ENV_DIR}/bin"   # for scripts/aliases to reference
+unset __MSRTC_ENV_DIR
+echo "[${rust_brand}] ${env_host} environment activated — bin/: \$BIN_DIR_MSRTC"
+EOF
+            chmod 755 "$prefix/env.sh"
+            echo "  env.sh generated: $prefix/env.sh (after sourcing, PATH=bin/ makes all commands available)"
+            mkdir -p "$prefix/run/logs" "$prefix/recordings"
+            echo "host deployed to $prefix (${build_type,,})"
+            echo "  bin/    $(ls -1 "$bin_dir" | sort | paste -sd, - | sed 's/,/, /g')"
+            echo "  etc/    host.yaml + link/{signing.pem,*.token} (generated by host init, kept on reinstall)"
+            echo "  run/    logs/"
+            echo "  recordings/"
+            echo "  identity.json (0600, device identity — write-only, do not delete)"
+            echo "Usage: export PATH=$bin_dir:\$PATH && $host_cli doctor $prefix && $host_cli start $prefix"
+            exit 0
+            ;;
+        bindings)
+            shift 2; prefix=""; release=Debug
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --prefix) prefix="${2:?--prefix needs a value}"; shift 2 ;;
+                    --release) release=Release; shift ;;
+                    *) echo "deploy bindings: unexpected argument $1" >&2; exit 2 ;;
+                esac
             done
-            sos=$(cd "$prefix/lib" && ls -1 | grep '^libmediaservo_.*\.so' | sort | paste -sd, - | sed 's/,/, /g')
-        fi
-        echo "bindings deployed to $prefix (lib/ $sos + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx)"
-        echo "  usage: export LD_LIBRARY_PATH=<prefix>/lib; link per the bindings headers; python: pip install <prefix>/wheel/*.whl"
-        exit 0
+            src="${MSRTC_OUT_ROOT:-$ROOT/out}/bindings"
+            if [ -z "$prefix" ]; then
+                prefix="$src"
+                echo "[deploy bindings] prefix default → $prefix (out root follows the calling shell; --prefix overrides)"
+            fi
+            if [ ! -d "$src/lib" ]; then echo "Error: no assembled artifacts in $src — run build bindings first" >&2; exit 1; fi
+            if ! mkdir -p "$prefix/lib" 2>/dev/null; then
+                echo "Error: cannot create $prefix — for deployment use sudo msrtc.sh deploy bindings --prefix /opt/mediaservo-sdk" >&2; exit 1; fi
+            if [ "$(cd "$prefix" && pwd -P)" = "$(cd "$src" && pwd -P)" ]; then
+                # same-tree idempotent guard (09-21 SameFileError lesson): the build
+                # phase already ran the install rules — a second full pass is churn.
+                sos=$(cd "$src/lib" && ls -1 | grep '^libmediaservo_.*\.so' | sort | paste -sd, - | sed 's/,/, /g')
+            else
+                echo "\$ cmake --preset bindings -DCMAKE_BUILD_TYPE=$release -DMEDIASERVO_BINDINGS_SRC=$src  (cwd: $ROOT)"
+                if ! (cd "$ROOT" && cmake --preset bindings -DCMAKE_BUILD_TYPE="$release" "-DMEDIASERVO_BINDINGS_SRC=$src"); then exit 1; fi
+                attempt=1
+                while :; do
+                    if blob=$( (cd "$ROOT" && cmake --install build/presets/bindings --prefix "$prefix" --strip) 2>&1 ); then break; fi
+                    rc=$?
+                    if { echo "$blob" | grep -qi busy || echo "$blob" | grep -q 'Text file'; } && [ $attempt -lt 3 ]; then
+                        echo "  install hit busy artifacts — killing occupiers, retrying ($attempt/3)"
+                        for so in $(cd "$prefix/lib" 2>/dev/null && ls -1 | grep '^libmediaservo_.*\.so' | sed "s|^|$prefix/lib/|" | sort); do
+                            _msvc_kill_using "$so"
+                        done
+                        attempt=$((attempt+1))
+                    else
+                        echo "Error: cmake --install into $prefix failed (rc=$rc):" >&2
+                        printf '%s' "$blob" | tail -c 600 >&2
+                        exit 1
+                    fi
+                done
+                sos=$(cd "$prefix/lib" && ls -1 | grep '^libmediaservo_.*\.so' | sort | paste -sd, - | sed 's/,/, /g')
+            fi
+            echo "bindings deployed to $prefix (lib/ $sos + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx)"
+            echo "  usage: export LD_LIBRARY_PATH=<prefix>/lib; link per the bindings headers; python: pip install <prefix>/wheel/*.whl"
+            exit 0
+            ;;
+        *)
+            # server leg still python-owned (batch-beta-1 next commit); everything
+            # else falls through to the CLI parser (its invalid-choice rc=2 shape).
+            exec python "$ROOT/scripts/mediaservo_cli.py" "$@"
+            ;;
+        esac
         ;;
 esac
 
@@ -564,8 +756,8 @@ if [ "${1:-}" = "build:deploy" ] && [ $# -ge 2 ]; then
             *) BUILD_FLAGS+=("$1"); DEPLOY_FLAGS+=("$1"); shift;;
         esac
     done
-    if [ "$TARGET" = bindings ]; then
-        # bindings deploy leg is shell-owned (SR6 P2) — re-enter this shell
+    if [ "$TARGET" = bindings ] || [ "$TARGET" = host ]; then
+        # shell-owned deploy legs (SR6 P2 bindings / batch-beta-1 host) — re-enter this shell
         python "$ROOT/scripts/mediaservo_cli.py" "${BUILD_FLAGS[@]}" \
             && "$ROOT/mediaservo.sh" "${DEPLOY_FLAGS[@]}"
     else

@@ -528,20 +528,9 @@ def _strip_so(path: Path) -> None:
         print(f"  warning: strip {path.name} failed (skipped — delivery size not optimized)")
 
 
-def _derive_brand(bin_dir: Path) -> str:
-    """Derive the brand from an installed/staged bin directory (used by triple-stop/init name/shortcut names — no parameters, no hardcoding).
-    Rule: if a <brand>-agent (any branded role) exists → that prefix; otherwise empty (official name host-*).
-    Known limit: with multiple brands coexisting, glob order is filesystem-dependent (first match) — current deployments are single-brand; multi-brand needs a sorted/longest-prefix strategy."""
-    for p in bin_dir.glob("*-agent"):
-        name = p.name
-        if name.startswith("host-"):
-            continue
-        return name[: -len("-agent")]
-    return ""
-
 def _derive_brand_server(bin_dir: Path) -> str:
     """server tree brand derivation (branding-completion BLOCKER-2): glob bin/*-server excluding the upstream name.
-    Do not reuse _derive_brand (it only recognizes *-agent; the server tree would always return ""). Multiple brands coexisting: take the first (same known limit as host)."""
+    Do not reuse the retired _derive_brand (it only recognized *-agent; the server tree would always return ""). Multiple brands coexisting: take the first (same known limit as the host arm in mediaservo.sh)."""
     for f in sorted(bin_dir.glob("*-server")):
         if f.name == _exe_name("mediaservo-server"):
             continue
@@ -560,126 +549,6 @@ def _server_bin_names(brand: str) -> tuple[str, str]:
 # half-migration guard preserved by construction: one rotation, one merge, inside init).
 # WEAKNET_OXFILE_APP's duty lives on as the Rust constant templates::WEAKNET_APP [mn10].
 
-def _cmd_deploy_host(prefix: str, release: bool = False, allow_stop: bool = True) -> None:
-    """deploy host (stateful deployment — assemble + land, D266): identity idempotence/oxmgr/systemd/env.sh.
-    Reused by package host (Momus b — Task 2.5): run this function inside the staging dir to assemble identity/etc/env.sh;
-    the triple-stop is not triggered (staging has no run/oxfile.toml — cli F5 read-only safety).
-
-    D4: --prefix mandatory (no default — protects out/ stateless delivery; vehicles use /opt/mediaservo-host).
-    Brand: env MEDIASERVO_BRAND first (injected by msrtc.sh), falling back to _derive_brand of the installed instance (deploy-ops hazard 2)."""
-    if not prefix:
-        print("Error: deploy requires --prefix (no default — prevents polluting out/ stateless delivery; vehicles use /opt/mediaservo-host)", file=sys.stderr)
-        sys.exit(2)
-    prefix_p = Path(prefix)
-    bin_dir = prefix_p / "bin"
-    # Brand: env (msrtc.sh injects MEDIASERVO_BRAND) first, falling back to derivation from the existing instance (zero parameters on re-deploy)
-    # Python layout aligned with Rust media_brand: "mediaservo" is the explicit default, mapping to legacy host-* strings.
-    brand_input = os.environ.get("MEDIASERVO_BRAND", "") or _derive_brand(bin_dir)
-    brand = "" if brand_input == "mediaservo" else brand_input
-    rust_brand = brand or "mediaservo"
-    try:
-        bin_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        print(f"Error: cannot create {bin_dir}: {e} — for deployment use sudo msrtc.sh deploy host --prefix /opt/mediaservo-host", file=sys.stderr)
-        sys.exit(1)
-    if str(prefix_p).startswith("/opt") and hasattr(os, "geteuid") and os.geteuid() != 0:
-        print("Error: /opt deployment needs root (sudo msrtc.sh deploy host --prefix /opt/mediaservo-host)", file=sys.stderr)
-        sys.exit(1)
-    host_cli = _exe_name(f"{brand}-host") if brand else _exe_name("mediaservo-host")
-
-    # Running instance binaries are occupied (Text file busy) → stop the process family automatically before copying.
-    # Note: do not call the oxmgr CLI (its IPC commands auto-spawn the daemon when it isn't running — creating busy instead);
-    # kill the host process family + the daemon occupying bin/oxmgr directly.
-    oxfile = prefix_p / "run" / "oxfile.toml"
-    if oxfile.exists() and (bin_dir / host_cli).exists() and not allow_stop:
-        print("packaging staging: skipping process-family stop (a read-only package run never touches running instances)")
-    elif oxfile.exists() and (bin_dir / host_cli).exists():
-        print("Running host instance detected — stopping the process family first (reinstall does not overwrite etc/ credentials)")
-        # Triple stop of revival sources: (1) systemd auto-start unit (Restart=always respawns right after the daemon is killed)
-        # (2) the daemon itself (3) the host process family (restart_policy=always restarted by the daemon — the daemon must die first)
-        # systemctl does not accept globs — enumerate only oxmgr-{brand}-*.service by the derived brand (deploy-ops hazard 2)
-        units_dir = Path.home() / ".config" / "systemd" / "user"
-        if shutil.which("systemctl") and units_dir.is_dir():
-            want_home = f"Environment=OXMGR_HOME={(prefix_p / 'run' / 'oxmgr').resolve()}"
-            for u in sorted(units_dir.glob(f"oxmgr-{brand}-*.service")):
-                try:
-                    # C50 prefix-scope: only units whose OXMGR_HOME is THIS instance's
-                    # daemon dir. (2026-10-19 incident: a brand-glob stop from a package
-                    # staging run tore down the LIVE vehicle unit — never again.)
-                    txt = u.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    continue
-                if want_home not in txt:
-                    print(f"  note: leaving unit {u.name} untouched (belongs to another instance home)")
-                    continue
-                subprocess.run(["systemctl", "--user", "stop", u.name], check=False)
-                subprocess.run(["systemctl", "--user", "reset-failed", u.name], check=False)
-        _kill_using(bin_dir / _exe_name("oxmgr"))
-        for base in ("agent", "streamer", "capturer", "recorder",
-                     "controller", "emergency", "audio"):
-            subprocess.run(["pkill", "-x", _exe_name(f"{brand}-{base}" if brand else f"host-{base}")], check=False)
-        time.sleep(1)
-
-    # SR7 T3: branded bin assembly (D266 source = target/{debug,release}), the
-    # bin whitelist residue reclaim and the root entry shortcut are cmake
-    # install rules now (cmake/MediaServoAppTree.cmake — one leg, one owner).
-    # The per-name N3 census: all 8 names are cmake-visible target-dir
-    # artifacts -> zero ruled-away bins. ruled-away (vendor layer, plan §5):
-    # the oxmgr copy below stays python — the archive unpack/cache is not a
-    # delivery layout concern.
-    _cmake_app_install(prefix_p, "host", brand, release)
-
-    # lock the oxmgr version with the deployment (D-H13): PATH → cache reclaim → fail on missing hard dependency
-    oxmgr_src = _resolve_oxmgr_or_die("host")
-    _copy_with_kill(oxmgr_src, bin_dir / _exe_name("oxmgr"))
-    ver = subprocess.run([str(oxmgr_src), "--version"], capture_output=True, text=True, check=False)
-    print(f"  oxmgr packaged: {ver.stdout.strip() or ver.stderr.strip() or '?'}")
-
-    # host init: generate etc/ + identity.json + tokens — idempotent write-only, never delete (skip if present; reinstall keeps credentials)
-    # brand: env injection (init is a separate process — the device prefix must match the layout brand)
-    identity_file = prefix_p / "identity.json"
-    if identity_file.exists():
-        print(f"  identity.json exists — write-only, never delete (device identity preserved): {identity_file}")
-    init_env = dict(os.environ)
-    init_env["MEDIASERVO_BRAND"] = rust_brand
-    _run_or_exit([str(bin_dir / host_cli), "init", str(prefix_p)], env=init_env)
-
-    # SR7 T3: the root entry shortcut (MED4 shape, relocatable relative link +
-    # copy fallback) is a cmake link leg of the --install above.
-    shortcut_names = (f"{brand}-host",) if brand else ("host", "mediaservo-host")
-
-    # env.sh one-shot activation (carrying arch MED5 — generated at deploy; relocatable: derived relative to itself, not hardcoded)
-    env_host = f"{brand}-host" if brand else "mediaservo-host"
-    env_sh = prefix_p / "env.sh"
-    env_lines = [
-        "#!/usr/bin/env bash",
-        f"# {env_host} environment activation (generated at deploy) — all commands available after sourcing",
-        "# Usage: source env.sh (still valid under any prefix / after relocation, derived relative to this file)",
-        '__MSRTC_ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"',
-        'export PATH="${__MSRTC_ENV_DIR}/bin:$PATH"',
-    ]
-    env_lines.append(f'export MEDIASERVO_BRAND="{rust_brand}"   # brand env (D252); the deployment package pins the layout explicitly'),
-    env_lines += [
-        'BIN_DIR_MSRTC="${__MSRTC_ENV_DIR}/bin"   # for scripts/aliases to reference',
-        "unset __MSRTC_ENV_DIR",
-        f'echo "[{brand or "mediaservo"}] {env_host} environment activated — bin/: $BIN_DIR_MSRTC"',
-    ]
-    env_sh.write_text("\n".join(env_lines) + "\n")
-    env_sh.chmod(0o755)
-    print(f"  env.sh generated: {env_sh} (after sourcing, PATH=bin/ makes all commands available)")
-
-    for d in ("run/logs", "recordings"):
-        (prefix_p / d).mkdir(parents=True, exist_ok=True)
-
-    print(f"host deployed to {prefix} ({'release' if release else 'debug'})")
-    print(f"  bin/    {', '.join(sorted(x.name for x in bin_dir.iterdir()))}")
-    print("  etc/    host.yaml + link/{signing.pem,*.token} (generated by host init, kept on reinstall)")
-    print("  run/    logs/")
-    print("  recordings/")
-    print("  identity.json (0600, device identity — write-only, do not delete)")
-    print(f"Usage: export PATH={bin_dir}:$PATH && {host_cli} doctor {prefix} && {host_cli} start {prefix}")
-    if sys.platform == "win32":
-        print("Note: Windows best-effort (not fully validated) — production deployment recommends Linux vehicles", file=sys.stderr)
 
 def _cmake_app_install(prefix_p: Path, tree: str, brand: str, release: bool,
                        staging: str = "") -> None:
@@ -1197,11 +1066,8 @@ def _cmd_test() -> None:
 
 
 def _cmd_deploy(args: argparse.Namespace) -> None:
-    """deploy <target> — host | server (source = the out/ delivery tree; --prefix mandatory per D4; deploy does not trigger builds; the bindings leg is shell-owned since SR6 P2)."""
-    if args.target == "host":
-        _cmd_deploy_host(args.prefix, args.release)
-    elif args.target == "server":
-        _cmd_deploy_server(args.prefix)
+    """deploy server — stateful landing (source = the out/server delivery tree; --prefix mandatory per D4; deploy does not trigger builds; the bindings leg is shell-owned since SR6 P2, the host leg since batch-beta-1 — mediaservo.sh)."""
+    _cmd_deploy_server(args.prefix)
 
 
 
@@ -1259,7 +1125,7 @@ def main() -> None:
     fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
   Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
   Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
-  bash-owned (SR6 batch-1/alpha, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance) logs status clean
+  bash-owned (SR6 batch-1/alpha/beta-1, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance) logs status clean deploy(bindings|host)
   guidance arms exit 2 (C39 — instance-directory commands; the container face up/down is unchanged)
   C++ example surface (p3): list example → build example [names…] → run example <name> / test example
              (foreground dev tool; artifacts in target/examples/bin/ — never in out/; the build-c prelude is auto-added)
@@ -1297,8 +1163,8 @@ def main() -> None:
                         help="example = GUI/SDK example ctest surface (bare test = unchanged workspace semantics, F-A-9(1))")
     test_p.add_argument("name", nargs="?", help="example: filter by example name (ctest -R)")
 
-    deploy_p = sub.add_parser("deploy", help="deploy <target> (stateful landing — deploy does not trigger builds; app bin/etc layout rides cmake install rules (cmake/MediaServoAppTree.cmake, cmake must be on PATH), stateful steps run in the managed binary): host|server (--prefix mandatory, /opt needs root); the bindings leg moved to mediaservo.sh (SR6 P2)")
-    deploy_p.add_argument("target", choices=["host", "server"])
+    deploy_p = sub.add_parser("deploy", help="deploy <target> (stateful landing — deploy does not trigger builds; app bin/etc layout rides cmake install rules (cmake/MediaServoAppTree.cmake, cmake must be on PATH), stateful steps run in the managed binary): server (--prefix mandatory, /opt needs root); the bindings leg moved to mediaservo.sh (SR6 P2), the host leg moved there too (batch-beta-1)")
+    deploy_p.add_argument("target", choices=["server"])
     deploy_p.add_argument("--prefix", default=None, help="deployment prefix (mandatory: /opt/mediaservo-{host,server})")
     deploy_p.add_argument("--release", action="store_true", help="deploy release-profile assembled artifacts")
     deploy_p.set_defaults(func=_cmd_deploy)
