@@ -1844,76 +1844,6 @@ def _native_runtime_dirs() -> tuple[Path, Path, Path]:
     return base / "etc", base / "logs", base
 
 
-def _run_server_native(args: argparse.Namespace) -> None:
-    """Run server on bare metal: idempotent (already running → hint + skip); bin/../etc/server.yaml default config + announce injection + port guards."""
-    # Idempotence: shared by start/restart/run — a live pid file means running (prevents our own process from tripping the port guard)
-    pid_file = _native_runtime_dirs()[1] / "server-native.pid"
-    if pid_file.exists():
-        try:
-            alive_pid = int(pid_file.read_text().strip())
-        except ValueError:
-            alive_pid = -1
-        if alive_pid > 0 and Path(f"/proc/{alive_pid}").exists():
-            print(f"✓ server already running on bare metal pid={alive_pid} (server-native.pid) — skipping start")
-            sys.exit(0)
-    _check('cargo', 'pixi environment not activated? Run first: source bootstrap.sh / pixi.bat')
-    # prefer out/server/bin (assembled by build server) → fall back to target/ (covers un-assembled scenarios)
-    bin_path = _out_root() / "server" / "bin" / "mediaservo-server"
-    if not bin_path.exists():
-        bin_path_fallback = ROOT / 'target' / ('release' if getattr(args, 'release', False) else 'debug') / 'mediaservo-server'
-        if bin_path_fallback.exists():
-            print("⚠ using the target/ binary (recommended first: mediaservo build server — assembles into out/server/bin)", file=sys.stderr)
-            bin_path = bin_path_fallback
-    if not bin_path.exists():
-        rel = bin_path.relative_to(ROOT) if bin_path.is_relative_to(ROOT) else bin_path
-        print(f'Error: {rel} not found — run first: mediaservo build server --native', file=sys.stderr)
-        sys.exit(1)
-    # Port conflict guards: bare-metal 9800/20000/40000-40100 conflict with dev/prod containers running in parallel
-    _check_port_free(9800, '9800(HTTP)')
-    _check_port_free(20000, '20000(SFU UDP)')
-    _check_port_range_free(40000, 40100, '40000-40100(RTP)')
-    # Announce injection: --announced-ip > env > CLI detection (incl. tun) > no injection (server-side detect_all_ips backstop)
-    env = _compose_env(getattr(args, 'announced_ip', None))  # reuse the probe (skips the auto-detect print when given explicitly)
-    print('⚠ Warning: bare metal runs the dev-track config (psk=mediaservo-dev + placeholder accounts admin123 etc.) —', file=sys.stderr)
-    print('     development/integration only; production deploys with up --env prod (entrypoint bootstraps random keys)', file=sys.stderr)
-    # Bare-metal config: prefer bin/../etc/server.yaml (generated during build server assembly)
-    # the target/ fallback scenario needs an explicit --config
-    bin_dir = bin_path.parent  # out/server/bin
-    default_cfg = bin_dir.parent / "etc" / "server.yaml"  # out/server/etc/server.yaml
-    if default_cfg.exists() and bin_dir == (_out_root() / "server" / "bin"):
-        # binary in out/server/bin/ → equivalent to build server assembly → no --config needed
-        cmd = [str(bin_path)]
-    else:
-        # target/ fallback: generate a temp config and pass it via --config
-        etc_dir, _logs_dir, _data_dir = _native_runtime_dirs()
-        native_cfg = etc_dir / 'server.native.yaml'
-        native_cfg.parent.mkdir(parents=True, exist_ok=True)
-        src_cfg = ROOT / 'config' / 'server.docker.yaml'
-        if src_cfg.exists():
-            cfg_text = src_cfg.read_text()
-            cfg_text = cfg_text.replace('/opt/mediaservo/etc/accounts.yaml', str(ROOT / 'config' / 'accounts.yaml'))
-            cfg_text = cfg_text.replace('/opt/mediaservo/etc/devices.yaml', str(ROOT / 'config' / 'devices.yaml'))
-            native_cfg.write_text(cfg_text)
-        cmd = [str(bin_path), '--config', str(native_cfg)]
-    # dev placeholder-account exemption (fail-fast guard — bare metal = dev integration, consistent with dev compose's ALLOW_DEV_CREDENTIALS=1)
-    env.setdefault('MEDIASERVO_ALLOW_DEV_CREDENTIALS', '1')
-    log_path = _native_runtime_dirs()[1] / "server-native.log"
-    # export guidance (borrowed from AccessBase cmd_start_native L180 — the PIT-79/138 announce loop:
-    # later terminal operations need the same announce value, zero new probing — read the effective env directly)
-    announced_val = env.get("MEDIASERVO_SFU_ANNOUNCED_IP", "")
-    if announced_val:
-        print(f"  export MEDIASERVO_SFU_ANNOUNCED_IP='{announced_val}'")
-    if getattr(args, 'foreground', False):
-        _run_or_exit(cmd, env=env)
-    else:
-        # I-1: clear stale pids (leftovers from the last crash) — prevents stop from killing a recycled pid; overwrite-on-write semantics kept
-        pid_file = _native_runtime_dirs()[1] / "server-native.pid"
-        pid_file.unlink(missing_ok=True)
-        # T3 minor: truncate at start (crash residue does not contaminate; restart records from scratch) + start_new_session (detached from the terminal; stop can kill by pid file)
-        proc = subprocess.Popen(cmd, env=env, stdout=open(log_path, 'wb'), stderr=subprocess.STDOUT, start_new_session=True)
-        pid_file.write_text(str(proc.pid))
-        print(f'✓ server running on bare metal pid={proc.pid} — log: {log_path} (logs server --native)')
-
 
 def _port_owner(port: int) -> str:
     """Parse the occupier (name,pid) of the :port line from ss -tulnp. Under non-root, container ports have no users section — reported honestly (review ops#2)."""
@@ -1991,12 +1921,22 @@ def _cmd_logs(args: argparse.Namespace) -> None:
     if target == "server":
         mode = _resolve_mode(args, default="native")
         if mode == "native":
-            log_path = _native_runtime_dirs()[1] / "server-native.log"
-            if not log_path.exists():
-                print(f"Error: {log_path} does not exist — is the bare-metal server not running?", file=sys.stderr)
+            # batch-2 rewiring: the fossil server-native.log has no writer since the
+            # T21 run-server retirement; the truth lives in the instance's oxmgr run
+            # tree (cluster layout: <dir>/run/logs/<app>.{out,err}.log).
+            inst = _out_root() / "server"
+            logs = sorted((inst / "run" / "logs").glob("*.log"))
+            if args.follow:
+                if not logs:
+                    print(f"logs: no cluster logs under {inst / 'run' / 'logs'} — start the instance first", file=sys.stderr)
+                    sys.exit(1)
+                _run_or_exit(["tail", "-f"] + [str(f) for f in logs])
+                return
+            exe = _server_instance_exe()
+            if exe is None:
+                print("logs: no deployed server instance under <out>/server — deploy first, or --mode compose", file=sys.stderr)
                 sys.exit(1)
-            cmd = (["tail", "-f"] if args.follow else ["tail", "-n", "100"]) + [str(log_path)]
-            _run_or_exit(cmd)
+            _run_or_exit([str(exe), "logs"])
             return
         _check("docker", "install docker and start the daemon")
         _run_or_exit(COMPOSE_BASE + ["logs"] + (["-f"] if args.follow else []) + ["server"])
@@ -2236,34 +2176,28 @@ def _ss_listening(port: int) -> bool | None:
         return None
 
 
+def _server_instance_exe() -> "Path | None":
+    """Deployed server instance binary under <out>/server/bin (brand-aware glob —
+    D269 named the file, the instance dir stays the locator). None = not deployed."""
+    inst = _out_root() / "server"
+    cands = [c for c in sorted((inst / "bin").glob("*-server"))
+             if c.is_file() and not c.name.endswith(".exe.bak")]
+    return cands[0] if cands else None
+
+
 def _status_server_native() -> int:
-    """Bare-metal runtime state. Returns 0/1."""
-    print("server (native):")
-    pid_file = _native_runtime_dirs()[1] / "server-native.pid"
-    running = False
-    if pid_file.exists():
-        try:
-            pid = int(pid_file.read_text().strip())
-        except ValueError:
-            pid = 0
-        alive = pid > 0 and Path(f"/proc/{pid}").exists()
-        print(f"  pid file: {pid_file.name} {'alive pid=' + str(pid) if alive else '(process gone — stale)'}")
-        running = alive
-    else:
-        print("  pid file: absent (not running)")
-    code = _curl_health_code()  # observation only — dev/prod containers also hold 9800; not a predicate for "bare metal running" (the pid file is the run/stop contract)
-    print(f"  health 9800: {'200 OK' if code == '200' else code or 'no response'}")
-    av = _compose_env().get("MEDIASERVO_SFU_ANNOUNCED_IP", "")
-    if av:
-        print(f"  announced: {av}")   # C38 layer-1 observation (review arch F3)
-    probe_failed = False
-    for port, name in ((20000, "SFU UDP"), (40000, "RTP start"), (40100, "RTP end")):
-        st = _ss_listening(port)
-        if st is None:
-            probe_failed = True
-        print(f"  {port} {name}: {'listening' if st else ('undecidable' if st is None else 'free')}")
-    # Momus LOW: probe-failure contract — undecidable → exit code 2 (takes priority over 0/1)
-    return 2 if probe_failed else (0 if running else 1)
+    """Server status = the managed binary's own registry view (SR6 batch-2).
+    The old pid-file probe died with the T21 run-server retirement — nobody
+    writes server-native.pid anymore, so under oxmgr management the instance
+    command IS the truth (F31 doctrine: ops lives in the binary, the CLI is a
+    forwarder). Exit codes 0/1/2 propagate from the binary."""
+    exe = _server_instance_exe()
+    inst = _out_root() / "server"
+    if exe is None:
+        print("server: no deployed instance under <out>/server — deploy first "
+              "(mediaservo deploy server --prefix <X>), or --mode compose for containers", file=sys.stderr)
+        return 1
+    return subprocess.run([str(exe), "status", str(inst)]).returncode
 
 
 def _compose_running(env: str) -> bool:
