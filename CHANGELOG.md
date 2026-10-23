@@ -24,26 +24,35 @@ teams); for development process details, consult git log directly. Newest versio
   5255a13: migrate_stale_files runs as init step 0, BEFORE the exists-skips;
   verified end-to-end on a temp prefix: drifted server-entry command -> .bak
   rotation -> re-render -> "merged 1 manual env entries", ops line survived).
-- [deploy] SR6 P1 L1: `package sdk-client` lays its release tree with cmake install
-  rules (new `cmake/MediaServoPack.cmake` + install-time legs for the domain sweep,
-  lib link pairs, manifest.json, the version contract file and the F11-X CHANGES
-  slice) and packs the staged tree with native CPack TGZ (`cpack --config`,
-  CPACK_INSTALLED_DIRECTORIES). Naming owner moved to cmake (package-root.txt
-  readback — python computes no second copy of the tar name). The other targets
-  host / server keep the python staging branch until their own legs land. Judge: extracted tree byte-identical to the pre-change
-  baseline (file+symlink+dir name sets, per-file md5, 0 drift).
-- [deploy] SR6 P1 L2: `package sdk-field` (and the `bindings` one-cycle alias —
-  naming slot `sdk`, own cache dir, same leg) rides the CPack route too: the wheel/,
-  node/ and lib/python3.*/site-packages payloads stay pip-built and are absorbed as
-  staged directories (CPACK_INSTALLED_DIRECTORIES design (c)); manifest components
-  gain the node/python discovery entries. Judge: extracted tree byte-identical to
-  the pre-change baseline (0 md5 drift).
   ⚠ Deploy-path stderr no longer carries the old "run/oxfile.toml stale —
   backed up..." python wording (the init message is the single surface now), and
   a pre-5255a13 instance binary performs no drift rotation: re-init with the
   current build after brand/bin-name migrations. deploy help + epilog state the
   cmake-rule fact (five-role wording: parent msrtc.sh/mediaservo.sh carry no
   placement-implementation claims; the Rust -h env-usage asset is untouched).
+- [deploy] SR6 P1 L1: `package sdk-client` lays its release tree with cmake install
+  rules (new `cmake/MediaServoPack.cmake` + install-time legs for the domain sweep,
+  lib link pairs, manifest.json, the version contract file and the F11-X CHANGES
+  slice) and packs the staged tree with native CPack TGZ (`cpack --config`,
+  CPACK_INSTALLED_DIRECTORIES). Naming owner moved to cmake (package-root.txt
+  readback — python computes no second copy of the tar name). Judge: extracted
+  tree byte-identical to the pre-change baseline (file+symlink+dir name sets,
+  per-file md5, 0 drift). The remaining targets keep the python staging branch
+  until their own legs land (one-leg-one-owner).
+- [deploy] SR6 P1 L2: `package sdk-field` (and the `bindings` one-cycle alias —
+  naming slot `sdk`, own cache dir, same leg) rides the CPack route too: the wheel/,
+  node/ and lib/python3.*/site-packages payloads stay pip-built and are absorbed as
+  staged directories (CPACK_INSTALLED_DIRECTORIES design (c)); manifest components
+  gain the node/python discovery entries. Judge: extracted tree byte-identical to
+  the pre-change baseline (0 md5 drift).
+- [deploy] SR6 P1 L3: `package server` rides the CPack route too — SR7 placement
+  rows plus install-time legs running the STAGED binary itself (lifecycle probe,
+  then `init` rendering Caddyfile/oxfile/secrets into the staging root — design (e),
+  zero second implementation), the oxmgr vendor copy row, the web move and the
+  PIT-119 bin strip. Judge: file/link/dir name sets identical; the only md5 drift
+  is staging-absolute paths baked into run/oxfile.toml(+.bak) — the python route
+  baked its own temp path the same way — plus the CHANGES slice advancing with
+  this file. `package host` keeps the python branch until its leg lands.
 - [deploy] `deploy host` lays its branded bin tree through CMake install rules
   (SR7 T3): the 8 app binaries (mediaservo-host + the seven host-<role> lanes,
   D269 names host-<app> -> <brand>-<app>) are PROGRAMS+RENAME rows over the

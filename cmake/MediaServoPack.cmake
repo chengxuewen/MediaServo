@@ -222,15 +222,74 @@ function(_msr_pack_sdk domain crate sdks)
     _msr_pack_contract_files("${domain}" "${_ver}" "${_pkg_name}" "${_keep}")
 endfunction()
 
-# -- app trees: gated until their legs land (SR6 P1 serial L3/L4) --
-function(_msr_pack_host)
-    message(FATAL_ERROR
-        "MEDIASERVO_PKG=host is not migrated to CPack yet (SR6 P1 legs: L3 server, L4 host) — "
-        "use the python package path")
+# -- server tree (L3): SR7 app rows (the CLI passes -DMEDIASERVO_APP_TREE=server)
+#    plus stateful legs — vendor copy row, web move, lifecycle probe, init render,
+#    strip (design (e): placement owner = AppTree rules, state owner = the staged
+#    binary; python's _cmd_deploy_server staging sequence ported 1:1 in order).
+function(_msr_pack_server)
+    if(NOT MEDIASERVO_APP_TREE STREQUAL "server")
+        message(FATAL_ERROR
+            "MEDIASERVO_PKG=server requires -DMEDIASERVO_APP_TREE=server (the CLI package verb passes both)")
+    endif()
+    if(NOT MEDIASERVO_OXMGR_BIN)
+        message(FATAL_ERROR
+            "MEDIASERVO_PKG=server requires -DMEDIASERVO_OXMGR_BIN (CLI _resolve_oxmgr_or_die owns the hunt)")
+    endif()
+    _msr_pack_naming("mediaservo-server" "server" _ver _rootname _pkg_name)
+    set(_exe "${CMAKE_EXECUTABLE_SUFFIX}")
+    if(MEDIASERVO_BRAND)
+        set(_sname "${MEDIASERVO_BRAND}-server${_exe}")
+    else()
+        set(_sname "mediaservo-server${_exe}")
+    endif()
+
+    # oxmgr vendor copy (python copied it after the app --install; registration
+    # order here reproduces that — the AppTree bin-sweep above never targets oxmgr)
+    install(PROGRAMS "${MEDIASERVO_OXMGR_BIN}" DESTINATION bin RENAME "oxmgr${_exe}")
+
+    # the web tree moves wholesale (caddy static root; copytree parity)
+    install(DIRECTORY "${MEDIASERVO_SERVER_OUT_DIR}/web/" DESTINATION web
+            USE_SOURCE_PERMISSIONS)
+
+    set(_gen "${CMAKE_CURRENT_BINARY_DIR}/pkg-gen")
+    set(SRV_NAME "${_sname}")
+    configure_file("${MEDIASERVO_PACK_LEGS}/server-legs.cmake.in"
+                   "${_gen}/server-legs.cmake" @ONLY)
+    install(SCRIPT "${_gen}/server-legs.cmake")
+
+    _msr_pack_contract_files("" "${_ver}" "${_pkg_name}" "server protocol deploy")
 endfunction()
 
-function(_msr_pack_server)
-    message(FATAL_ERROR
-        "MEDIASERVO_PKG=server is not migrated to CPack yet (SR6 P1 legs: L3 server, L4 host) — "
-        "use the python package path")
+# -- host tree (L4): SR7 app rows (8 branded bins + reclaim + entry link) plus
+#    init (identity/tokens — state owner = the staged binary), the generated env.sh,
+#    run/logs + recordings dirs and the PIT-119 strip.
+function(_msr_pack_host)
+    if(NOT MEDIASERVO_APP_TREE STREQUAL "host")
+        message(FATAL_ERROR
+            "MEDIASERVO_PKG=host requires -DMEDIASERVO_APP_TREE=host (the CLI package verb passes both)")
+    endif()
+    if(NOT MEDIASERVO_OXMGR_BIN)
+        message(FATAL_ERROR
+            "MEDIASERVO_PKG=host requires -DMEDIASERVO_OXMGR_BIN (CLI _resolve_oxmgr_or_die owns the hunt)")
+    endif()
+    _msr_pack_naming("mediaservo-host" "host" _ver _rootname _pkg_name)
+    set(_exe "${CMAKE_EXECUTABLE_SUFFIX}")
+    if(MEDIASERVO_BRAND)
+        set(_hostdn "${MEDIASERVO_BRAND}-host${_exe}")
+        set(_rust_brand "${MEDIASERVO_BRAND}")
+    else()
+        set(_hostdn "mediaservo-host${_exe}")
+        set(_rust_brand "mediaservo")
+    endif()
+
+    install(PROGRAMS "${MEDIASERVO_OXMGR_BIN}" DESTINATION bin RENAME "oxmgr${_exe}")
+
+    set(_gen "${CMAKE_CURRENT_BINARY_DIR}/pkg-gen")
+    set(HOST_BIN_NAME "${_hostdn}")
+    set(RUST_BRAND "${_rust_brand}")
+    configure_file("${MEDIASERVO_PACK_LEGS}/host-legs.cmake.in"
+                   "${_gen}/host-legs.cmake" @ONLY)
+    install(SCRIPT "${_gen}/host-legs.cmake")
+
+    _msr_pack_contract_files("" "${_ver}" "${_pkg_name}" "host protocol deploy")
 endfunction()

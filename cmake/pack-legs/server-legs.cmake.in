@@ -1,0 +1,44 @@
+# server-legs.cmake.in — SR6 P1 L3 stateful server legs (python _cmd_deploy_server
+# staging sequence ported 1:1 in order): lifecycle smoke probe -> run/ -> init ->
+# PIT-119 strip. Runs at install time; CMAKE_INSTALL_PREFIX = the live staging root.
+set(_root "${CMAKE_INSTALL_PREFIX}")
+set(_srv "${_root}/bin/@SRV_NAME@")
+
+# lifecycle smoke (python parity: an old pre-lifecycle binary treats unknown args
+# as daemon flags and boots straight through — probe 'version' instead)
+execute_process(COMMAND "${_srv}" version OUTPUT_QUIET ERROR_QUIET
+                RESULT_VARIABLE _prc TIMEOUT 10)
+if(NOT _prc EQUAL 0)
+    message(FATAL_ERROR
+        "Error: ${_srv} lifecycle smoke failed (version nonzero/timeout — the source tree is "
+        "likely a pre-lifecycle old build) — rebuild server then re-run packaging")
+endif()
+
+file(MAKE_DIRECTORY "${_root}/run")
+
+# init renders idempotently: etc/Caddyfile + run/oxfile.toml (+ conditional
+# weaknet-serve entry) + secret bootstrap — the managed binary owns every decision
+# (migrate_stale_files step 0 included). Ambient env inherits MEDIASERVO_BRAND /
+# SFU port vars exactly like the python call did.
+execute_process(COMMAND "${_srv}" init "${_root}" RESULT_VARIABLE _irc)
+if(NOT _irc EQUAL 0)
+    message(FATAL_ERROR "Error: ${_srv} init failed (exit code ${_irc})")
+endif()
+
+# PIT-119: strip debug symbols before packing (135-155MB unstripped bins turn the
+# gzip into a timeout); failure warns, never blocks (python strip_package_binaries).
+find_program(_strip strip)
+if(_strip)
+    file(GLOB _bins LIST_DIRECTORIES FALSE "${_root}/bin/*")
+    foreach(_f IN LISTS _bins)
+        if(IS_SYMLINK "${_f}" OR NOT IS_EXECUTABLE "${_f}")
+            continue()
+        endif()
+        execute_process(COMMAND "${_strip}" --strip-unneeded "${_f}"
+                        RESULT_VARIABLE _src OUTPUT_QUIET ERROR_QUIET)
+        if(NOT _src EQUAL 0)
+            get_filename_component(_bn "${_f}" NAME)
+            message(WARNING "  warning: strip ${_bn} failed (skipped — package size not optimized)")
+        endif()
+    endforeach()
+endif()

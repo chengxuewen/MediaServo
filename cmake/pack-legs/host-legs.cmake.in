@@ -1,0 +1,51 @@
+# host-legs.cmake.in — SR6 P1 L4 stateful host legs (python _cmd_deploy_host staging
+# sequence ported 1:1 in order): init (identity/tokens) -> env.sh -> run/logs +
+# recordings -> PIT-119 strip. Runs at install time; CMAKE_INSTALL_PREFIX = the live
+# staging root.
+set(_root "${CMAKE_INSTALL_PREFIX}")
+
+# host init: generate etc/ + identity.json + tokens — idempotent write-only, never
+# delete. init is a separate process: the device prefix must match the layout brand
+# (python's init_env MEDIASERVO_BRAND=rust_brand parity).
+set(ENV{MEDIASERVO_BRAND} "@RUST_BRAND@")
+execute_process(COMMAND "${_root}/bin/@HOST_BIN_NAME@" init "${_root}"
+                RESULT_VARIABLE _irc)
+if(NOT _irc EQUAL 0)
+    message(FATAL_ERROR "Error: ${_root}/bin/@HOST_BIN_NAME@ init failed (exit code ${_irc})")
+endif()
+
+# env.sh one-shot activation (carrying arch MED5 — generated at deploy; relocatable:
+# derived relative to itself, never hardcoded). Bytes pinned against the baseline tar.
+file(WRITE "${_root}/env.sh" "#!/usr/bin/env bash
+# @HOST_BIN_NAME@ environment activation (generated at deploy) — all commands available after sourcing
+# Usage: source env.sh (still valid under any prefix / after relocation, derived relative to this file)
+__MSRTC_ENV_DIR=\"$(cd \"$(dirname \"\${BASH_SOURCE[0]}\")\" && pwd -P)\"
+export PATH=\"\${__MSRTC_ENV_DIR}/bin:$PATH\"
+export MEDIASERVO_BRAND=\"@RUST_BRAND@\"   # brand env (D252); the deployment package pins the layout explicitly
+BIN_DIR_MSRTC=\"\${__MSRTC_ENV_DIR}/bin\"   # for scripts/aliases to reference
+unset __MSRTC_ENV_DIR
+echo "[@RUST_BRAND@] @HOST_BIN_NAME@ environment activated — bin/: $BIN_DIR_MSRTC"
+")
+file(CHMOD "${_root}/env.sh"
+     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+                 WORLD_READ WORLD_EXECUTE)
+
+file(MAKE_DIRECTORY "${_root}/run/logs" "${_root}/recordings")
+
+# PIT-119 strip (python strip_package_binaries parity: bin/* executables, skip
+# symlinks; warning-only on failure; no-op when strip is absent)
+find_program(_strip strip)
+if(_strip)
+    file(GLOB _bins LIST_DIRECTORIES FALSE "${_root}/bin/*")
+    foreach(_f IN LISTS _bins)
+        if(IS_SYMLINK "${_f}" OR NOT IS_EXECUTABLE "${_f}")
+            continue()
+        endif()
+        execute_process(COMMAND "${_strip}" --strip-unneeded "${_f}"
+                        RESULT_VARIABLE _src OUTPUT_QUIET ERROR_QUIET)
+        if(NOT _src EQUAL 0)
+            get_filename_component(_bn "${_f}" NAME)
+            message(WARNING "  warning: strip ${_bn} failed (skipped — package size not optimized)")
+        endif()
+    endforeach()
+endif()

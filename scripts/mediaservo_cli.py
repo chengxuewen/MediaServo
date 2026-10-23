@@ -1236,7 +1236,7 @@ def _write_changes_file(staging: Path, target: str) -> None:
 
 # SR6 P1: legs migrated to cmake install rules + CPack TGZ (one-leg-one-owner —
 # targets NOT in this set still run the python staging/tar branch in _cmd_package).
-_CPACK_PKG = {"sdk-client", "sdk-field", "bindings"}
+_CPACK_PKG = {"sdk-client", "sdk-field", "bindings", "server"}
 
 
 def _cpack_stage_sdk(staging: Path, args: argparse.Namespace) -> str:
@@ -1259,6 +1259,40 @@ def _cpack_stage_sdk(staging: Path, args: argparse.Namespace) -> str:
     _run_or_exit(cfg, cwd=str(ROOT))
     # reconfigure-always at the call site (SR7 discipline): the source-existence
     # globs are configure-time truth (PIT-189 family)
+    _run_or_exit(["cmake", "--install", str(bdir), "--prefix", str(staging)], cwd=str(ROOT))
+    return (bdir / "package-root.txt").read_text().strip()
+
+
+def _cpack_stage_app(staging: Path, args: argparse.Namespace) -> str:
+    """L3/L4: stage the host/server release tree via the SR7 placement rows plus the
+    stateful install legs (design (e)): vendor copy row, web move, lifecycle probe and
+    init run against the STAGED root inside cmake --install — same managed binaries as
+    the deploy verb, zero second implementation. Returns the cmake-computed root name."""
+    target = args.target
+    oxmgr = str(_resolve_oxmgr_or_die(target))
+    bdir = ROOT / "build" / "packages" / target
+    cfg = ["cmake", "--preset", "default", "-B", str(bdir),
+           f"-DMEDIASERVO_PKG={target}", f"-DMEDIASERVO_APP_TREE={target}",
+           f"-DMEDIASERVO_OXMGR_BIN={oxmgr}",
+           f"-DMEDIASERVO_PKG_BRAND={args.brand}"]
+    if target == "server":
+        src_root = _out_root() / "server"
+        if not (src_root / "web" / "index.html").exists():
+            print(f"Error: no frontend artifacts in {src_root / 'web'} — run build web first (deploy does not trigger builds — D266)", file=sys.stderr)
+            sys.exit(2)
+        # deploy server's brand chain with the always-empty staging arm dropped
+        # (a fresh staging dir derives nothing): env -> source-tree hunt
+        brand = (os.environ.get("MEDIASERVO_BRAND", "")
+                 or _derive_brand_server(src_root / "bin"))
+        cfg += [f"-DMEDIASERVO_BRAND={brand}",
+                f"-DMEDIASERVO_SERVER_OUT_DIR={src_root}",
+                "-DCMAKE_BUILD_TYPE=Debug"]   # deploy server assembly is Debug-pinned
+    else:
+        brand_input = os.environ.get("MEDIASERVO_BRAND", "").strip()
+        brand = "" if brand_input == "mediaservo" else brand_input
+        cfg += [f"-DMEDIASERVO_BRAND={brand}",
+                f"-DCMAKE_BUILD_TYPE={'Release' if args.release else 'Debug'}"]
+    _run_or_exit(cfg, cwd=str(ROOT))
     _run_or_exit(["cmake", "--install", str(bdir), "--prefix", str(staging)], cwd=str(ROOT))
     return (bdir / "package-root.txt").read_text().strip()
 
@@ -1296,9 +1330,9 @@ def _cmd_package(args: argparse.Namespace) -> None:
     etc template / env.sh file assembly; build stays stateless) + tar contains bin 8/oxmgr/etc/identity/run/logs/recordings.
     bindings: staging copies out/bindings (full SDK layout — D241 version-full triple /.pc / cmake /
     wheel / node / cxx headers, completed by Task 2.5) → sdk package.
-    sdk-client/sdk-field (and the bindings alias): SR6 P1 L1+L2 — staged by cmake
+    sdk-client/sdk-field (bindings alias) and server: SR6 P1 L1-L3 — staged by cmake
     install rules + packed by native CPack TGZ (the python staging branch runs only
-    for the non-migrated host/server targets).
+    for the non-migrated host target).
     staging temp dir → tar.gz; the tar's top level is the versioned dir {brand}-{target}-{ver}/, so a bare unpack never scatters credentials/binaries;
     to land directly into a prefix dir use `tar xzf package.tar.gz -C <prefix> --strip-components=1`."""
     if sys.platform == "win32":
@@ -1326,7 +1360,7 @@ def _cmd_package(args: argparse.Namespace) -> None:
         if args.target == "host":
             _cmd_deploy_host(str(staging), args.release, allow_stop=False)  # brand via MEDIASERVO_BRAND env / installed-instance derivation (D266)
         elif args.target == "server":
-            _cmd_deploy_server(str(staging))  # same deploy semantics, whole tree into staging (init lands idempotently in staging)
+            cpack_root = _cpack_stage_app(staging, args)  # SR6 P1 L3 (design (e) legs)
         elif args.target in ("bindings", "sdk-field"):
             cpack_root = _cpack_stage_sdk(staging, args)  # bindings = one-cycle alias (F12 rename WARN above)
         elif args.target == "sdk-client":
