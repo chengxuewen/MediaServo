@@ -920,6 +920,41 @@ def _cmd_deploy_host(prefix: str, release: bool = False, allow_stop: bool = True
     if sys.platform == "win32":
         print("Note: Windows best-effort (not fully validated) — production deployment recommends Linux vehicles", file=sys.stderr)
 
+def _cmake_app_install(prefix_p: Path, tree: str, brand: str, release: bool) -> None:
+    """SR7: run the app delivery-layout install rules (cmake/MediaServoAppTree.cmake)
+    into prefix_p. Configure is RE-RUN every invocation — the source-existence hunts
+    (server/weaknet dual source, host per-name skip-missing) are configure-time truth
+    and must never be frozen by a stale cache (PIT-189 family: never trust yesterday's
+    tree). Brand and the delivery root ride cache variables (§1 rule 3: the CLI keeps
+    invoke+brand, cmake describes layout)."""
+    cfg = ["cmake", "--preset", "default",
+           f"-DMEDIASERVO_APP_TREE={tree}",
+           f"-DMEDIASERVO_BRAND={brand}",
+           f"-DCMAKE_BUILD_TYPE={'Release' if release else 'Debug'}"]
+    if tree == "server":
+        cfg.append(f"-DMEDIASERVO_SERVER_OUT_DIR={_out_root() / 'server'}")
+    _run_or_exit(cfg, cwd=str(ROOT))
+    inst = ["cmake", "--install", str(ROOT / "build" / "presets" / "default"),
+            "--prefix", str(prefix_p)]
+    # ETXTBSY policy stays invocation-side (SR4 L5 precedent): graceful stop ran
+    # above; a survivor (daemon respawn race) kills the occupier BY EXACT PATH and
+    # re-runs the idempotent install (rerun-safe by cmake semantics).
+    for attempt in range(3):
+        r = subprocess.run(inst, cwd=str(ROOT), capture_output=True, text=True)
+        if r.returncode == 0:
+            return
+        blob = (r.stdout or "") + (r.stderr or "")
+        if ("busy" not in blob.lower() and "Text file" not in blob) or attempt == 2:
+            print(f"Error: cmake --install {tree} app tree into {prefix_p} failed (rc={r.returncode}):\n{blob[-600:]}", file=sys.stderr)
+            sys.exit(1)
+        print("  install hit busy artifacts — killing occupiers, retrying "
+              f"({attempt + 1}/3)", file=sys.stderr)
+        b = prefix_p / "bin"
+        for f in sorted(b.glob("*")) if b.is_dir() else []:
+            if f.is_file():
+                _kill_using(f)
+
+
 def _cmd_deploy_server(prefix: str) -> None:
     """deploy server (stateful landing — T20, D266 isomorphic with host; deploy does not trigger builds — source = the single out/server delivery tree).
     Brand: env MEDIASERVO_BRAND first, falling back to target-tree bin/*-server derivation (_derive_brand_server) —
@@ -992,22 +1027,14 @@ def _cmd_deploy_server(prefix: str) -> None:
             subprocess.run([str(stop_bin), "stop", str(prefix_p)], capture_output=True, timeout=30, check=False)
         except subprocess.TimeoutExpired:
             print("  ⚠ old instance stop timed out (possibly a pre-lifecycle old binary) — continuing reinstall", file=sys.stderr)
-    # renamed is only set true when an upstream→brand migration happens/is needed; same-file/same-dir no-ops do not trigger an oxfile force-refresh
-    renamed = src_bin.name != bin_name and not (dst_bin.exists() and os.path.samefile(src_bin, dst_bin))
-    if inplace:
-        if renamed:
-            os.replace(src_bin, dst_bin)  # atomic same-directory rename (with src==dst and no brand, renamed stays false and we never land here)
-            print(f"  bin renamed in place: {src_bin.name} → {bin_name}")
-        else:
-            print(f"  bin/{bin_name} in place (source = target) — skipping copy")
-    elif renamed:
-        _copy_with_kill(src_bin, dst_bin)  # upstream name → brand name (rename-on-copy)
-    else:
-        if dst_bin.exists() and os.path.samefile(src_bin, dst_bin):
-            print(f"  bin/{bin_name} already in place (source = target same file) — skipping copy")
-        else:
-            _copy_with_kill(src_bin, dst_bin)
-    os.chmod(dst_bin, 0o755)
+    # SR7 T1: bin placement = cmake install rules (cmake/MediaServoAppTree.cmake) —
+    # the rows land {brand}-server, reclaim the whitelist and re-lay the entry links
+    # in one --install pass (the weaknet row joins below). In-place assembly (prefix =
+    # out/server) same-name rows are file(INSTALL) no-ops; the upstream→brand
+    # migration lands as copy + sweep reclaim (final bytes identical). The renamed/
+    # oxfile-refresh trigger moved to the authoritative side: Rust init's
+    # migrate_stale_files (bF3 port) detects the drift itself.
+    _cmake_app_install(prefix_p, "server", brand, False)
     server_cli = dst_bin
     # lifecycle smoke test: out/ may be an old build without init/start subcommands (old binaries treat unknown args as daemon args and boot straight through)
     ver_line: str | None = None
@@ -1030,31 +1057,12 @@ def _cmd_deploy_server(prefix: str) -> None:
     ov = subprocess.run([str(oxmgr_src), "--version"], capture_output=True, text=True, check=False)
     print(f"  oxmgr packaged: {ov.stdout.strip() or ov.stderr.strip() or '?'}")
 
-    # weaknet dual-source copy (design §D1 [bF1 bF6]; the bin-presence check only settles the data plane — the oxfile conditional-render predicate
-    # belongs to Rust init (T4), nailed by M-1: Python has no rendering lever). prefix source out/server/bin first (upstream name →
-    # brand name, isomorphic with the server dual-source BLOCKER-1), falling back to target/{release,debug}; missing in both → WARN, no block.
+    # SR7 T1: weaknet staging = cmake row (same --install above — dual source,
+    # target/{release,debug} fallback and the absent WARN skip live in
+    # MediaServoAppTree.cmake [bF1 bF4 bF5]; the oxfile conditional-render predicate
+    # stays Rust init's, nailed by M-1). The target name is still resolved
+    # python-side for the stale-oxfile predicate below.
     wnet_bin = _weaknet_bin_name(brand)
-    wnet_dst = bin_dir / wnet_bin
-    wnet_candidates = [src_bin_dir / _exe_name("mediaservo-weaknet")]
-    if brand:
-        wnet_candidates.append(src_bin_dir / wnet_bin)
-    wnet_candidates += [ROOT / "target" / p / _exe_name("mediaservo-weaknet") for p in ("release", "debug")]
-    wnet_src = next((c for c in wnet_candidates if c.exists()), None)
-    if wnet_src is None:
-        print(f"WARN: weaknet binary absent from both locations (neither out/server/bin nor target/) — not staging bin/{wnet_bin} this time"
-              " (does not block deploy; run build server to produce it)", file=sys.stderr)
-    elif wnet_dst.exists() and os.path.samefile(wnet_src, wnet_dst):
-        print(f"  bin/{wnet_bin} in place (source = target same file) — skipping copy")
-    elif wnet_src.name != wnet_bin and src_bin_dir.resolve() == bin_dir.resolve():
-        # in-place deploy + rename needed → atomic same-directory rename; the upstream name leaves no residue (2026-09-10 user ruling aligning
-        # server bin rename semantics; the old BA-2(i) keeper dual-name is void; cross-directory target/ sources still go through copy —
-        # never move cargo cache files away).
-        os.replace(wnet_src, wnet_dst)
-        print(f"  weaknet renamed and staged in place: {wnet_src.name} → bin/{wnet_bin}")
-    else:
-        _copy_with_kill(wnet_src, wnet_dst)
-        os.chmod(wnet_dst, 0o755)
-        print(f"  weaknet staged: {wnet_src} → bin/{wnet_bin}")
 
     # BLOCKER-3: after a bin rename/brand migration the oxfile command becomes a dead path (init skips an existing oxfile — proven in mod.rs)
     # → delete it so the init below re-renders with current_exe. Predicate = server entry command basename != current bin name
@@ -1096,47 +1104,10 @@ def _cmd_deploy_server(prefix: str) -> None:
         if got:
             print(f"  ops env re-absorbed: {', '.join(got)}")
 
-    # bin whitelist (host isomorphic — deploy-ops 4): delete server/weaknet binaries not in the current layout
-    # (upstream old names / old-brand residue; mediaservo-server kept only in brand-less layouts).
-    # weaknet isomorphic with server (2026-09-10 revision; the old BA-2(i) keep-both-names rule is void): in-place assembly already
-    # consumed the upstream name via rename; with an empty brand the whitelist entry _weaknet_bin_name("") equals the upstream name and always hits. In-tree
-    # residual upstream names / old brands (historical copy layouts / interruptions) fall to the endswith cleanup branch below.
-    for p in sorted(bin_dir.iterdir()):
-        if p.is_symlink() or not p.is_file():
-            continue
-        if p.name in {_exe_name("oxmgr"), bin_name, _weaknet_bin_name(brand)}:
-            continue
-        if p.name.endswith(("-server", "-weaknet")) or p.name == _exe_name("mediaservo-server"):
-            print(f"  cleaning deployment residue: {p.name}")
-            p.unlink()
-
-    # root-level shortcuts (host isomorphic — a non-empty brand creates only the {brand}-server link; empty brand = dual upstream shortcuts, never a "-server" leftover)
-    if brand:
-        shortcut_names = (shortcut,)
-    else:
-        shortcut_names = ("server", "mediaservo-server")
-    for link_name in shortcut_names:
-        link = prefix_p / link_name
-        if link.is_symlink() or link.exists():
-            link.unlink(missing_ok=True)
-        try:
-            link.symlink_to(f"bin/{bin_name}")  # relative path; the prefix stays relocatable
-            print(f"  created symlink {link} → bin/{bin_name}")
-        except OSError:
-            shutil.copy2(bin_dir / bin_name, link)
-            os.chmod(link, 0o755)
-            print(f"  copied {bin_name} to {link} (symlink failed, fell back to copy)")
-    # old-brand root-level link cleanup (touch only *-server file links pointing into this layout's bin/; directories are never touched)
-    for link in prefix_p.glob("*-server"):
-        if not link.is_symlink() or link.name == shortcut:
-            continue
-        try:
-            resolved = (prefix_p / link.readlink()).resolve()
-        except OSError:
-            continue
-        if resolved.parent == bin_dir.resolve() and link.name.endswith("-server"):
-            print(f"  cleaning old-brand entry link: {link.name}")
-            link.unlink()
+    # SR7 T1: the bin whitelist reclaim and the root entry shortcuts (incl. the
+    # old-brand link cleanup) are cmake install legs now (MediaServoAppTree.cmake,
+    # run by the --install above). Names below are kept print-only for the summary.
+    shortcut_names = (shortcut,) if brand else ("server", "mediaservo-server")
 
     print(f"server deployed to {prefix}" + (" (assembled in place — rendering complete, start directly)" if inplace else "")
           + (f" (brand {brand})" if brand else ""))
@@ -1790,33 +1761,6 @@ def _out_root() -> Path:
     """Release root (MSRTC_OUT_ROOT env or the submodule's out/) — shared by the build delivery layout and the server runtime."""
     env_out = os.environ.get("MSRTC_OUT_ROOT", "")
     return Path(env_out) if env_out else ROOT / "out"
-
-
-def _stage_to_out(target: str, files: list[Path], sub: str = "bin", brand: str = "") -> list[Path]:
-    """Copy target/debug|release artifacts to out/<target>/<sub> (delivery layout mirror); with a non-empty brand, physically rename: host-<app> → <brand>-<app>, mediaservo-host → <brand>-host (server physical-name branding happens at deploy — D269)."""
-    dst = _out_root() / target / sub
-    dst.mkdir(parents=True, exist_ok=True)
-    staged = []
-    for src in files:
-        if not src.exists():
-            continue
-        name = src.name
-        if brand:
-            if name.startswith("host-"):      # host-agent → msrtc-agent (D3: only host- subprocesses are branded)
-                name = f"{brand}-{name[5:]}"
-            elif name == "mediaservo-host":
-                name = f"{brand}-host"
-        dst_path = dst / name
-        try:
-            shutil.copy2(src, dst_path)
-        except OSError as e:
-            if e.errno == 26:  # ETXTBSY — binary is running; unlink then retry
-                dst_path.unlink()
-                shutil.copy2(src, dst_path)
-            else:
-                raise
-        staged.append(dst / name)
-    return staged
 
 
 def _native_runtime_dirs() -> tuple[Path, Path, Path]:

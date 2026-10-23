@@ -13,6 +13,18 @@ teams); for development process details, consult git log directly. Newest versio
 - [deploy] Per-crate clean buttons on the shared-target presets (`host`/`server`/`all`): `mediaservo-*-clean` and the app-bin `mediaservo-*-bin-clean` alias run `cargo clean -p` through the sanctioned command wrapper (per-package scope only — the whole-face wipe stays banned there so the bare-cargo gate cache survives; separate-face presets keep their existing whole-face clean button). Needs the vendored PolyOrch v0.5.0 (supplier D44).
 
 ### Changed
+- [deploy] `deploy server` lays its bin tree through CMake install rules now
+  (cmake/MediaServoAppTree.cmake, SR7 T1 / F32-C): `bin/{brand}-server` and
+  `bin/{brand}-weaknet` are PROGRAMS+RENAME rows over the same dual-source hunt
+  (out/server/bin upstream→brand, weaknet falls back to target/ with the absent
+  WARN skip), and the bin whitelist reclaim, root entry links and old-brand
+  link cleanup are install(CODE) legs. The hand-laid copy/rename/chmod/sweep/
+  link loops in the CLI are deleted (one leg, one owner); the stale-oxfile
+  re-render decision belongs to Rust init alone (bF3 port 5255a13). Flags and
+  the "deploy does not trigger builds" contract are unchanged; layout judged
+  byte-identical against the pre-change deployed tree. Transient double name
+  during an upstream→brand migration (copy + reclaim replaces the atomic same-
+  dir rename) — final tree identical.
 - [deploy] `status server` / `logs server` (native mode) now forward to the deployed instance's own binary and its `run/logs/` cluster tree instead of the fossil `server-native.pid/.log` probes (dead writers since the T21 run-server retirement — the probes reported not-running under a healthy oxmgr cluster). Instance not deployed = rc=1 with the deploy hint; compose mode unchanged.
 - [deploy] Build/ops CLI surface (SR6 batch-1): `up|down|exec|ps|data|dev|version` moved from `mediaservo_cli.py` to bash-ownership in `mediaservo.sh` (identical flags/output; shell entry unchanged). `version` now reports the true workspace version (the python constant had drifted at 0.1.0). ⚠ direct `python3 scripts/mediaservo_cli.py up ...` style calls must use the shell entry point.
 - [deploy] The crates-lane ctest entries now register through the vendored PolyOrch CTEST keyword (supplier D45, v0.6.0): same 11 test names, same env-sanitized command vector as the IDE test buttons by construction (the hand-rolled bridge that read supplier internals is retired — zero internal-surface left). No user-visible behavior. Honest delta: a hypothetical cross-posture lane would now carry the button's full `--target`/linker-env argv in its ctest entry too (dormant — lanes are host-posture only today), and the entry command is quoted VERBATIM-style by the verb rather than raw by the bridge.

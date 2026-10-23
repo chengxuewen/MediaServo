@@ -51,6 +51,15 @@ if(MEDIASERVO_BUILD_CRATES_LANES)
   mediaservo_setup_crate_lanes()
 endif()
 
+# SR7 app-tree: the branded out/{host,server} bin layout as install rules (F32-C;
+# cmake/MediaServoAppTree.cmake). Registered only when the CLI deploy injects
+# -DMEDIASERVO_APP_TREE — every preset/IDE/gates configure registers ZERO rules
+# (behavior-neutral) and no lane tree can ever re-lay an app tree through --install.
+include(cmake/MediaServoAppTree.cmake)
+if(MEDIASERVO_APP_TREE)
+    mediaservo_setup_app_tree()
+endif()
+
 # S5 web lanes: node surface over the supplier D43 pnpm support; the workspace:*
 # edge (admin -> client) becomes a real dependency (PIT-194 class fix).
 include(cmake/MediaServoWeb.cmake)
