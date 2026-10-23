@@ -504,19 +504,6 @@ def _kill_using(path: Path) -> None:
     time.sleep(1)
 
 
-def _copy_with_kill(src, dst: Path) -> None:
-    """Copy with busy retry: Text file busy (occupied by a running process) → kill the occupier → retry (max 3 attempts)."""
-    for attempt in range(3):
-        try:
-            shutil.copy2(src, dst)
-            return
-        except OSError as e:
-            if e.errno != 26 or attempt == 2:  # 26 = Text file busy
-                raise
-            print(f"  {dst.name} occupied (Text file busy) — killing the occupier then retrying ({attempt + 1}/3)")
-            _kill_using(dst)
-    raise OSError(f"failed to copy {dst} (still busy after multiple retries)")
-
 def _strip_so(path: Path) -> None:
     """strip --strip-unneeded on delivery-tree .so real files (N7 09-18 measurement: the debug cdylib was the entire
     cause of the fat wheel's 528MB — not FFmpeg — uncompressed 27M→~1M scale). Dynamic symbols (.dynsym / exported ABI) untouched,
@@ -536,11 +523,6 @@ def _derive_brand_server(bin_dir: Path) -> str:
             continue
         return f.name[: -len("-server")]
     return ""
-
-def _server_bin_names(brand: str) -> tuple[str, str]:
-    """(deployed bin name, root shortcut name) — empty brand → upstream name (never render a "-server" leftover name)."""
-    base = f"{brand}-server" if brand else "mediaservo-server"
-    return _exe_name(base), base
 
 # SR7 T4: the Python-side stale-oxfile/Caddyfile migration guard (_drop_stale_server_oxfile)
 # + its env re-absorption twin (_reapply_carried_env) are retired -- the bF3 port (5255a13)
@@ -594,157 +576,6 @@ def _cmake_app_install(prefix_p: Path, tree: str, brand: str, release: bool,
         for f in sorted(b.glob("*")) if b.is_dir() else []:
             if f.is_file():
                 _kill_using(f)
-
-
-def _cmd_deploy_server(prefix: str) -> None:
-    """deploy server (stateful landing — T20, D266 isomorphic with host; deploy does not trigger builds — source = the single out/server delivery tree).
-    Brand: env MEDIASERVO_BRAND first, falling back to target-tree bin/*-server derivation (_derive_brand_server) —
-    the physical binary name = {brand}-server (D269 brand = physical name, isomorphic with host; cargo/bin unit names unchanged).
-    BLOCKER-1 dual source hunt (cmake rows, SR7 T1): upstream name (fresh build) → {brand}-server (already migrated, so a second deploy needs no rebuild) — python repeats the hunt only to pick the pre-install stop target.
-    BLOCKER-2 empty-brand guard: brand resolves empty while the target tree already has branded bin → reject (empty brand never deletes/renames branded files).
-    BLOCKER-3 oxfile/Caddyfile refresh: now owned by init alone (bF3 port — migrate_stale_files rotates the stale files to .bak BEFORE its exists-skips and re-absorbs [apps.env] via merge_manual_env; SR7 T4 retired the python guard twin).
-    bin/etc placement = cmake install rules (MediaServoAppTree.cmake via _cmake_app_install);
-    etc landing is first-writer-wins (PIT-160 — ops changes/registry data survive redeploys); the web tree still moves wholesale here (rmtree+copytree — pnpm product, rule 6);
-    init renders idempotently (run/oxfile.toml + Caddyfile + PSK/JWT secret bootstrap — lifecycle modules are built into the binary).
-    D4: --prefix mandatory (no default); /opt needs root (same rule as host)."""
-    if not prefix:
-        print("Error: deploy requires --prefix (no default — prevents polluting out/ stateless delivery; convention: /opt/mediaservo-server)", file=sys.stderr)
-        sys.exit(2)
-    src_root = _out_root() / "server"
-    src_bin_dir = src_root / "bin"
-    prefix_p = Path(prefix)
-    bin_dir = prefix_p / "bin"
-    # Brand: env first → target-tree derivation → source-tree derivation (same as host L554: zero-parameter idempotent re-deploy;
-    # the source-tree fallback covers the "out/server already branded in place → deploy /opt without env" scenario).
-    brand = (os.environ.get("MEDIASERVO_BRAND", "")
-             or _derive_brand_server(bin_dir)
-             or _derive_brand_server(src_bin_dir))
-    if not brand:
-        unexpected = sorted({f.name for d in (bin_dir, src_bin_dir) for f in d.glob("*-server")
-                             if f.name != _exe_name("mediaservo-server")})
-        if unexpected:
-            # derivation always hits branded files, theoretically unreachable — defensive assertion: empty brand never reaches delete/rename
-            print(f"Error: {', '.join(unexpected)} present but brand resolved empty — export MEDIASERVO_BRAND and retry", file=sys.stderr)
-            sys.exit(2)
-    bin_name, shortcut = _server_bin_names(brand)
-    server_bin_name = bin_name
-    # BLOCKER-1 dual source hunt (ordered): upstream name (fresh build output) → {brand}-server (migrated tree, no rebuild needed)
-    candidates = [src_bin_dir / _exe_name("mediaservo-server")]
-    if brand:
-        candidates.append(src_bin_dir / _exe_name(f"{brand}-server"))
-    src_bin = next((cand for cand in candidates if cand.exists()), None)
-    if src_bin is None:
-        print(f"Error: none of {' / '.join(str(c) for c in candidates)} exists — run build server first (deploy does not trigger builds — D266)", file=sys.stderr)
-        sys.exit(2)
-    src_web = src_root / "web"
-    if not (src_web / "index.html").exists():
-        print(f"Error: no frontend artifacts in {src_web} — run build web first (deploy does not trigger builds — D266)", file=sys.stderr)
-        sys.exit(2)
-    try:
-        bin_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        print(f"Error: cannot create {bin_dir}: {e} — for deployment use sudo mediaservo deploy server --prefix /opt/mediaservo-server", file=sys.stderr)
-        sys.exit(1)
-    if str(prefix_p).startswith("/opt") and hasattr(os, "geteuid") and os.geteuid() != 0:
-        print("Error: /opt deployment needs root (sudo mediaservo deploy server --prefix /opt/mediaservo-server)", file=sys.stderr)
-        sys.exit(1)
-
-    # build:deploy sugar injects --prefix out/<target> (host convention) — for server the source is the target: in-place assembly mode,
-    # cross-tree copies and the web rmtree must be skipped (SameFileError guard + delete-source self-destruction guard); init rendering proceeds;
-    # in-place rename (upstream→brand) is a same-directory os.rename, allowed (branding-completion T1.3).
-    inplace = prefix_p.resolve() == src_root.resolve()
-    dst_bin = bin_dir / bin_name
-    server_cli = dst_bin
-    # stop before move (PIT-170 isomorphic: graceful stop first; never force through a running binary via _copy/replace — otherwise
-    # _copy_with_kill's inode kill would bypass the cluster's graceful stop, and inplace rename opens a window where the daemon relaunches dead paths from a stale oxfile).
-    # check both old and new paths (before rename = old name running; last deploy = new name running); stop uses the live lifecycle binary.
-    stop_bin = dst_bin if dst_bin.exists() else src_bin
-    running = _pids_using(dst_bin)
-    for cand in candidates:
-        if cand.name != dst_bin.name:
-            running = running or _pids_using(bin_dir / cand.name)
-    if running or _pids_using(bin_dir / _exe_name("oxmgr")):
-        print("Running server instance detected — stopping this cluster first (reinstall does not overwrite etc/ credentials)")
-        try:
-            subprocess.run([str(stop_bin), "stop", str(prefix_p)], capture_output=True, timeout=30, check=False)
-        except subprocess.TimeoutExpired:
-            print("  ⚠ old instance stop timed out (possibly a pre-lifecycle old binary) — continuing reinstall", file=sys.stderr)
-    # SR7 T1: bin placement = cmake install rules (cmake/MediaServoAppTree.cmake) —
-    # the rows land {brand}-server, reclaim the whitelist and re-lay the entry links
-    # in one --install pass (the weaknet row joins below). In-place assembly (prefix =
-    # out/server) same-name rows are file(INSTALL) no-ops; the upstream→brand
-    # migration lands as copy + sweep reclaim (final bytes identical). The renamed/
-    # oxfile-refresh trigger moved to the authoritative side: Rust init's
-    # migrate_stale_files (bF3 port) detects the drift itself.
-    _cmake_app_install(prefix_p, "server", brand, False)
-    server_cli = dst_bin
-    # lifecycle smoke test: out/ may be an old build without init/start subcommands (old binaries treat unknown args as daemon args and boot straight through)
-    ver_line: str | None = None
-    try:
-        probe = subprocess.run([str(server_cli), "version"], capture_output=True, text=True, timeout=10, check=False)
-        if probe.returncode == 0:
-            out_lines = (probe.stdout or "").strip().splitlines()
-            ver_line = out_lines[0] if out_lines else "version ok"
-    except subprocess.TimeoutExpired:
-        pass
-    if ver_line is None:
-        print(f"Error: {server_cli} lifecycle smoke failed (version nonzero/timeout — out/ is likely a pre-lifecycle old build) — rebuild server then re-run deploy", file=sys.stderr)
-        sys.exit(2)
-    print(f"  binary ready: {ver_line}")
-
-    # lock the oxmgr version with the deployment (D-H13, same treatment as host): PATH → cache reclaim → fail on missing hard dependency
-    oxmgr_src = _resolve_oxmgr_or_die("server")
-    _copy_with_kill(oxmgr_src, bin_dir / _exe_name("oxmgr"))
-    os.chmod(bin_dir / _exe_name("oxmgr"), 0o755)
-    ov = subprocess.run([str(oxmgr_src), "--version"], capture_output=True, text=True, check=False)
-    print(f"  oxmgr packaged: {ov.stdout.strip() or ov.stderr.strip() or '?'}")
-
-    # SR7 T1: weaknet staging = cmake row (same --install above — dual source,
-    # target/{release,debug} fallback and the absent WARN skip live in
-    # MediaServoAppTree.cmake [bF1 bF4 bF5]).
-    # SR7 T4: the BLOCKER-3 stale-oxfile/Caddyfile rotation decision belongs to
-    # the managed binary alone — init's migrate_stale_files (bF3) runs BEFORE
-    # its exists-skips, rotates on drift, re-renders and re-absorbs [apps.env]
-    # via merge_manual_env. The Python guard and its reapply twin are gone.
-
-    # SR7 T2: the etc template mirror (first-writer-wins, PIT-160) is a cmake
-    # install(CODE) leg now (MediaServoAppTree.cmake) — run by the --install
-    # above; the per-file "exists — kept" quietness moved into the leg.
-
-    # the web tree moves wholesale (caddy static root — absolute paths written into oxfile/Caddyfile by init)
-    dst_web = prefix_p / "web"
-    if inplace:
-        print("  web/ in place (source = target) — skipping move (rmtree guard)")
-    else:
-        if dst_web.exists():
-            shutil.rmtree(dst_web)
-        shutil.copytree(src_web, dst_web)
-    (prefix_p / "run").mkdir(parents=True, exist_ok=True)
-
-    # init renders idempotently: etc/Caddyfile + run/oxfile.toml (server+caddy always + weaknet-serve conditionally
-    # rendered [M-1] — written only when bin is present; the check lives in Rust render_oxfile) + secret bootstrap (0600)
-    # SFU port/announce isolation: export MEDIASERVO_SFU_PORT / MEDIASERVO_SFU_ANNOUNCED_IP before deploy; init bakes them into the oxfile env
-    _run_or_exit([str(server_cli), "init", str(prefix_p)])
-
-    # SR7 T1: the bin whitelist reclaim and the root entry shortcuts (incl. the
-    # old-brand link cleanup) are cmake install legs now (MediaServoAppTree.cmake,
-    # run by the --install above). Names below are kept print-only for the summary.
-    shortcut_names = (shortcut,) if brand else ("server", "mediaservo-server")
-
-    print(f"server deployed to {prefix}" + (" (assembled in place — rendering complete, start directly)" if inplace else "")
-          + (f" (brand {brand})" if brand else ""))
-    print(f"  bin/    {server_bin_name} (physical name branded — D269) + oxmgr (pinned by D-H13)")
-    print("  etc/    server/devices/accounts.yaml + Caddyfile + secret (redeploys keep existing — PIT-160)")
-    print("  web/    frontend deliverables moved as a whole tree (caddy static root)")
-    print("  run/    oxfile.toml + oxmgr/ (OXMGR_DATA_DIR — C32 isolation) + logs/")
-    print("  entrypoints: " + ", ".join(str(prefix_p / s) for s in shortcut_names) + f" → bin/{bin_name}")
-    print("⚠ accounts.yaml is a dev placeholder template (admin123 etc.) — bare-metal startup will fail-fast (C35 guard):")
-    print('    production: export MEDIASERVO_ADMIN_PASSWORD=*** then delete etc/accounts.yaml and re-run this deploy')
-    print('    integration: add MEDIASERVO_ALLOW_DEV_CREDENTIALS = "1" under the server entry [apps.env] in run/oxfile.toml')
-    print("Next steps (instance-directory commands; this CLI's run branch is retired — C39):")
-    print(f"  start:   {prefix_p / shortcut} start {prefix} (backend only: add --no-web; frontend transition: mediaservo run web)")
-    print(f"  probe:   {prefix_p / shortcut} status {prefix} (exit codes 0/1/2) | doctor {prefix}")
-    print(f"  boot anchor (operator step, one-time): {prefix_p / shortcut} startup on {prefix}")
 
 
 def _platform_tag() -> str:
@@ -1065,12 +896,6 @@ def _cmd_test() -> None:
 
 
 
-def _cmd_deploy(args: argparse.Namespace) -> None:
-    """deploy server — stateful landing (source = the out/server delivery tree; --prefix mandatory per D4; deploy does not trigger builds; the bindings leg is shell-owned since SR6 P2, the host leg since batch-beta-1 — mediaservo.sh)."""
-    _cmd_deploy_server(args.prefix)
-
-
-
 def _cmd_config(args: argparse.Namespace) -> None:
     if args.config_cmd == "show":
         for path in (HOST_CONF, SERVER_YAML):
@@ -1125,7 +950,7 @@ def main() -> None:
     fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
   Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
   Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
-  bash-owned (SR6 batch-1/alpha/beta-1, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance) logs status clean deploy(bindings|host)
+  bash-owned (SR6 batch-1/alpha/beta-1, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance) logs status clean deploy(bindings|host|server)
   guidance arms exit 2 (C39 — instance-directory commands; the container face up/down is unchanged)
   C++ example surface (p3): list example → build example [names…] → run example <name> / test example
              (foreground dev tool; artifacts in target/examples/bin/ — never in out/; the build-c prelude is auto-added)
@@ -1163,11 +988,6 @@ def main() -> None:
                         help="example = GUI/SDK example ctest surface (bare test = unchanged workspace semantics, F-A-9(1))")
     test_p.add_argument("name", nargs="?", help="example: filter by example name (ctest -R)")
 
-    deploy_p = sub.add_parser("deploy", help="deploy <target> (stateful landing — deploy does not trigger builds; app bin/etc layout rides cmake install rules (cmake/MediaServoAppTree.cmake, cmake must be on PATH), stateful steps run in the managed binary): server (--prefix mandatory, /opt needs root); the bindings leg moved to mediaservo.sh (SR6 P2), the host leg moved there too (batch-beta-1)")
-    deploy_p.add_argument("target", choices=["server"])
-    deploy_p.add_argument("--prefix", default=None, help="deployment prefix (mandatory: /opt/mediaservo-{host,server})")
-    deploy_p.add_argument("--release", action="store_true", help="deploy release-profile assembled artifacts")
-    deploy_p.set_defaults(func=_cmd_deploy)
     package_p = sub.add_parser("package", help="package <target>: host|server|sdk-field (device half; the old bindings name stays as a one-cycle alias)|sdk-client (cockpit half) → <dist>/<brand>-<target>-<ver>.tar.gz (D-H13/F12, includes the version contract and a versioned top-level dir)")
     package_p.add_argument("target", choices=["host", "server", "bindings", "sdk-field", "sdk-client"])
     package_p.add_argument("--dist", default="", help="output dir for the package tar and staging (default dist; the MSRTC release shell defaults to out/packages)")

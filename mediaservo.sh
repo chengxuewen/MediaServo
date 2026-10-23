@@ -730,10 +730,117 @@ EOF
             echo "  usage: export LD_LIBRARY_PATH=<prefix>/lib; link per the bindings headers; python: pip install <prefix>/wheel/*.whl"
             exit 0
             ;;
+        server)
+            shift 2; prefix=""
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --prefix) prefix="${2:?--prefix needs a value}"; shift 2 ;;
+                    --release) shift ;;  # accepted for composite pass-through parity (ignored — server assembly is Debug-pinned, python parity)
+                    *) echo "deploy server: unexpected argument $1" >&2; exit 2 ;;
+                esac
+            done
+            [ -n "$prefix" ] || { echo "Error: deploy requires --prefix (no default — prevents polluting out/ stateless delivery; convention: /opt/mediaservo-server)" >&2; exit 2; }
+            src_root="${MSRTC_OUT_ROOT:-$ROOT/out}/server"
+            src_bin_dir="$src_root/bin"
+            bin_dir="$prefix/bin"
+            # brand: env first -> deployed-tree derivation -> source-tree derivation
+            # (zero-parameter idempotent re-deploy; python deploy-server chain parity)
+            brand="${MEDIASERVO_BRAND:-}"
+            [ -n "$brand" ] || brand=$(_ms_derive_brand_server "$bin_dir")
+            [ -n "$brand" ] || brand=$(_ms_derive_brand_server "$src_bin_dir")
+            bin_name=${brand:+${brand}-server}; bin_name=${bin_name:-mediaservo-server}
+            if [ -z "$brand" ]; then
+                # BLOCKER-2 empty-brand guard: empty brand never deletes/renames branded files
+                unexpected=$({ ls -1 "$bin_dir" 2>/dev/null; ls -1 "$src_bin_dir" 2>/dev/null; } | grep -- '-server$' | grep -vx 'mediaservo-server' | sort -u | paste -sd, - | sed 's/,/, /g') || unexpected=""
+                [ -z "$unexpected" ] || { echo "Error: $unexpected present but brand resolved empty — export MEDIASERVO_BRAND and retry" >&2; exit 2; }
+            fi
+            # BLOCKER-1 dual source hunt (ordered): upstream name (fresh build) ->
+            # branded (migrated tree — a second deploy needs no rebuild)
+            cands=("$src_bin_dir/mediaservo-server")
+            if [ -n "$brand" ]; then cands+=("$src_bin_dir/$bin_name"); fi
+            src_bin=""; cand_str=""
+            for c in "${cands[@]}"; do
+                cand_str+="${cand_str:+ / }$c"
+                if [ -z "$src_bin" ] && [ -f "$c" ]; then src_bin="$c"; fi
+            done
+            [ -n "$src_bin" ] || { echo "Error: none of $cand_str exists — run build server first (deploy does not trigger builds — D266)" >&2; exit 2; }
+            src_web="$src_root/web"
+            [ -f "$src_web/index.html" ] || { echo "Error: no frontend artifacts in $src_web — run build web first (deploy does not trigger builds — D266)" >&2; exit 2; }
+            mkdir -p "$bin_dir" 2>/dev/null || { echo "Error: cannot create $bin_dir — for deployment use sudo mediaservo deploy server --prefix /opt/mediaservo-server" >&2; exit 1; }
+            case "$prefix" in
+                /opt*) [ "$(id -u)" = 0 ] || { echo "Error: /opt deployment needs root (sudo mediaservo deploy server --prefix /opt/mediaservo-server)" >&2; exit 1; } ;;
+            esac
+            # build:deploy sugar injects --prefix out/<target> — for server the
+            # source IS the target: in-place assembly (same-tree copy guard +
+            # web rmtree self-destruct guard); init rendering proceeds either way
+            inplace=0
+            [ "$(realpath -- "$prefix")" = "$(realpath -- "$src_root")" ] && inplace=1
+            dst_bin="$bin_dir/$bin_name"
+            server_cli="$dst_bin"
+            # stop-before-move (PIT-170: graceful stop first — never force through
+            # a running binary; the occupier kill would bypass the cluster's own
+            # stop. Checks old+new paths (pre-rename vs last-deploy name) and the
+            # packaged daemon; the live lifecycle binary owns the stop).
+            running=$(_ms_pids_using "$dst_bin")
+            if [ -n "$brand" ]; then running="$running $(_ms_pids_using "$bin_dir/mediaservo-server")"; fi
+            if [ -n "${running// /}" ] || [ -n "$(_ms_pids_using "$bin_dir/oxmgr")" ]; then
+                echo "Running server instance detected — stopping this cluster first (reinstall does not overwrite etc/ credentials)"
+                stop_bin="$dst_bin"; [ -f "$dst_bin" ] || stop_bin="$src_bin"
+                timeout 30 "$stop_bin" stop "$prefix" >/dev/null 2>&1 && stop_rc=0 || stop_rc=$?
+                [ "$stop_rc" = 124 ] && echo "  ⚠ old instance stop timed out (possibly a pre-lifecycle old binary) — continuing reinstall" >&2 || true
+            fi
+            _msvc_app_install server "$brand" Debug "$prefix"
+            # lifecycle smoke: an old pre-lifecycle out/ build fails here (those
+            # booted straight through on unknown args — the version probe is the gate)
+            ver_out=$(timeout 10 "$server_cli" version 2>/dev/null) && smoke_rc=0 || smoke_rc=$?
+            if [ "$smoke_rc" != 0 ]; then
+                echo "Error: $server_cli lifecycle smoke failed (version nonzero/timeout — out/ is likely a pre-lifecycle old build) — rebuild server then re-run deploy" >&2
+                exit 2
+            fi
+            ver_line=$(printf '%s\n' "$ver_out" | head -1)
+            echo "  binary ready: ${ver_line:-version ok}"
+            _msvc_oxmgr_resolve server
+            _msvc_copy_with_kill "$MS_OXMGR_SRC" "$bin_dir/oxmgr"
+            chmod 755 "$bin_dir/oxmgr"
+            oxv=$("$MS_OXMGR_SRC" --version 2>/dev/null | head -1) || oxv=""
+            [ -n "$oxv" ] || oxv=$("$MS_OXMGR_SRC" --version 2>&1 >/dev/null | head -1) || oxv=""
+            echo "  oxmgr packaged: ${oxv:-?}"
+            # the web tree moves wholesale (caddy static root — absolute paths are
+            # baked into oxfile/Caddyfile by init below)
+            dst_web="$prefix/web"
+            if [ "$inplace" = 1 ]; then
+                echo "  web/ in place (source = target) — skipping move (rmtree guard)"
+            else
+                if [ -e "$dst_web" ]; then rm -rf "$dst_web"; fi
+                cp -a "$src_web" "$dst_web"
+            fi
+            mkdir -p "$prefix/run"
+            # init renders idempotently: etc/Caddyfile + run/oxfile.toml (weaknet
+            # app conditional render + secret bootstrap live in the binary) plus
+            # migrate_stale_files [bF3] — the driver never re-implements the merge.
+            echo "\$ $server_cli init $prefix"
+            "$server_cli" init "$prefix"
+            if [ -n "$brand" ]; then entry="$prefix/$bin_name"; else entry="$prefix/server, $prefix/mediaservo-server"; fi
+            inplace_note=""; [ "$inplace" = 1 ] && inplace_note=" (assembled in place — rendering complete, start directly)"
+            brand_note=""; [ -n "$brand" ] && brand_note=" (brand $brand)"
+            echo "server deployed to $prefix${inplace_note}${brand_note}"
+            echo "  bin/    $bin_name (physical name branded — D269) + oxmgr (pinned by D-H13)"
+            echo "  etc/    server/devices/accounts.yaml + Caddyfile + secret (redeploys keep existing — PIT-160)"
+            echo "  web/    frontend deliverables moved as a whole tree (caddy static root)"
+            echo "  run/    oxfile.toml + oxmgr/ (OXMGR_DATA_DIR — C32 isolation) + logs/"
+            echo "  entrypoints: $entry → bin/$bin_name"
+            echo "⚠ accounts.yaml is a dev placeholder template (admin123 etc.) — bare-metal startup will fail-fast (C35 guard):"
+            echo '    production: export MEDIASERVO_ADMIN_PASSWORD=*** then delete etc/accounts.yaml and re-run this deploy'
+            echo '    integration: add MEDIASERVO_ALLOW_DEV_CREDENTIALS = "1" under the server entry [apps.env] in run/oxfile.toml'
+            echo "Next steps (instance-directory commands; this CLI's run branch is retired — C39):"
+            echo "  start:   $prefix/$bin_name start $prefix (backend only: add --no-web; frontend transition: mediaservo run web)"
+            echo "  probe:   $prefix/$bin_name status $prefix (exit codes 0/1/2) | doctor $prefix"
+            echo "  boot anchor (operator step, one-time): $prefix/$bin_name startup on $prefix"
+            exit 0
+            ;;
         *)
-            # server leg still python-owned (batch-beta-1 next commit); everything
-            # else falls through to the CLI parser (its invalid-choice rc=2 shape).
-            exec python "$ROOT/scripts/mediaservo_cli.py" "$@"
+            echo "deploy: invalid target '${2:-}' (choose from bindings, host, server)" >&2
+            exit 2
             ;;
         esac
         ;;
@@ -756,14 +863,10 @@ if [ "${1:-}" = "build:deploy" ] && [ $# -ge 2 ]; then
             *) BUILD_FLAGS+=("$1"); DEPLOY_FLAGS+=("$1"); shift;;
         esac
     done
-    if [ "$TARGET" = bindings ] || [ "$TARGET" = host ]; then
-        # shell-owned deploy legs (SR6 P2 bindings / batch-beta-1 host) — re-enter this shell
-        python "$ROOT/scripts/mediaservo_cli.py" "${BUILD_FLAGS[@]}" \
-            && "$ROOT/mediaservo.sh" "${DEPLOY_FLAGS[@]}"
-    else
-        python "$ROOT/scripts/mediaservo_cli.py" "${BUILD_FLAGS[@]}" \
-            && python "$ROOT/scripts/mediaservo_cli.py" "${DEPLOY_FLAGS[@]}"
-    fi
+    # deploy legs are shell-owned now (bindings SR6 P2, host/server batch-beta-1) —
+    # build stays python, deploy re-enters this shell.
+    python "$ROOT/scripts/mediaservo_cli.py" "${BUILD_FLAGS[@]}" \
+        && "$ROOT/mediaservo.sh" "${DEPLOY_FLAGS[@]}"
     exit $?
 fi
 
