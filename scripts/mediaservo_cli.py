@@ -17,8 +17,6 @@ import shutil
 import time
 import subprocess
 import sys
-import tarfile
-import platform
 import tempfile
 from pathlib import Path
 
@@ -565,18 +563,6 @@ def _copy_with_kill(src, dst: Path) -> None:
             _kill_using(dst)
     raise OSError(f"failed to copy {dst} (still busy after multiple retries)")
 
-def strip_package_binaries(staging: Path) -> None:
-    """Strip binary symbols before packaging (debug builds are 135-155MB each — the root cause of gzip 1.2GB compression timeouts, PIT-119).
-    Keeps executability (release artifacts = size -90%+ after strip); strip failure only warns, never blocks (paths that cannot be missing)."""
-    if not shutil.which("strip"):
-        return
-    for f in sorted((staging / "bin").iterdir()) if (staging / "bin").is_dir() else []:
-        if f.is_file() and os.access(f, os.X_OK):
-            code = subprocess.run(["strip", "--strip-unneeded", str(f)], capture_output=True, check=False).returncode
-            if code != 0:
-                print(f"  warning: strip {f.name} failed (skipped — package size not optimized)")
-
-
 def _strip_so(path: Path) -> None:
     """strip --strip-unneeded on delivery-tree .so real files (N7 09-18 measurement: the debug cdylib was the entire
     cause of the fat wheel's 528MB — not FFmpeg — uncompressed 27M→~1M scale). Dynamic symbols (.dynsym / exported ABI) untouched,
@@ -1010,233 +996,15 @@ def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
     print("  usage: export LD_LIBRARY_PATH=<prefix>/lib; link per the bindings headers; python: pip install <prefix>/wheel/*.whl")
 
 
-# ── package: dist/ dual-package release (D-H13) ──────────────────────────
-def _stage_sdk_package(staging: Path, domain: str) -> None:
-    """V1b dual-package split (F12: device half = sdk-field / cockpit half = sdk-client) —
-    source = the single out/bindings tree (the full deploy bindings form), split by per-domain file lists;
-    the cmake config re-renders SDK_LIST per domain (consumers see only this package's components; unknown components erroring = correct)."""
-    src = _out_root() / "bindings"
-    if not src.exists():
-        print("Error: out/bindings does not exist — run build bindings first", file=sys.stderr)
-        sys.exit(1)
-    shutil.copytree(src, staging, dirs_exist_ok=True, symlinks=True)
-    sdk_cmake = staging / "lib" / "cmake" / "mediaservo"
-    ver = _crate_version(_TARGET_CRATE[domain])
-    major = ver.split(".")[0]
-    if domain == "sdk-client":
-        # strip the device surface: libs except the client triple, include except field/link/deck headers, pc, py/node/wheel
-        for pat in ("libmediaservo_field", "libmediaservo_link", "libmediaservo_deck"):
-            for p in (staging / "lib").glob(f"{pat}*"):
-                p.unlink()
-        shutil.rmtree(staging / "wheel", ignore_errors=True)
-        shutil.rmtree(staging / "node", ignore_errors=True)
-        # the client half ships ZERO python: sweep the whole pip-prefix tree (package
-        # dir AND its dist-info siblings -- the mediaservo/-only glob was a real leak,
-        # caught by e2e-package's never-before-executed contamination assert).
-        for pydir in (staging / "lib").glob("python3.*"):
-            shutil.rmtree(pydir, ignore_errors=True)
-        for name in ("field.h", "field.hpp", "link.h", "link.hpp", "deck.h", "deck.hpp"):
-            (staging / "include" / "mediaservo" / name).unlink(missing_ok=True)
-        for name in ("mediaservo-field.pc", "mediaservo-link.pc", "mediaservo-deck.pc"):
-            (staging / "lib" / "pkgconfig" / name).unlink(missing_ok=True)
-        for name in ("field.md", "link.md", "deck.md"):
-            (staging / "docs" / "sdk-cxx" / name).unlink(missing_ok=True)
-        sdk_list = "client"
-    else:  # sdk-field (includes the bindings alias)
-        for p in (staging / "lib").glob("libmediaservo_client*"):
-            p.unlink()
-        for name in ("client.h", "client.hpp"):
-            (staging / "include" / "mediaservo" / name).unlink(missing_ok=True)
-        (staging / "lib" / "pkgconfig" / "mediaservo-client.pc").unlink(missing_ok=True)
-        (staging / "docs" / "sdk-cxx" / "client.md").unlink(missing_ok=True)
-        sdk_list = "field link deck"
-    for name, tpl in (("mediaservoConfig.cmake", "mediaservoConfig.cmake.in"),
-                      ("mediaservoConfigVersion.cmake", "mediaservoConfigVersion.cmake.in")):
-        (sdk_cmake / name).write_text(
-            (ROOT / "bindings/c/cmake" / tpl).read_text()
-            .replace("@VERSION@", ver).replace("@MAJOR@", major).replace("@SDK_LIST@", sdk_list))
-
-
-_SDK_EXTRA = {"python", "node"}  # sdk-field's non-C components (discovery surface for py/npm consumers)
-
-
-def _write_manifest_file(dst: Path, domain: str, pkg_root: Path) -> None:
-    """N2 delivery discovery manifest (mechanically derived, zero new sources of truth): components come from the package's actual staging
-    contents + readelf ffmpeg evidence — consumers (ROS/packagers/CI) can enumerate the capability surface without parsing CMake."""
-    ver = _crate_version(_TARGET_CRATE[domain])
-    comps = []
-    for so in sorted((pkg_root / "lib").glob("libmediaservo_*.so")):
-        name = so.name.removeprefix("libmediaservo_").removesuffix(".so")
-        try:
-            nee = subprocess.run(["readelf", "-d", str(so.resolve() if so.is_symlink() else so)],
-                                 capture_output=True, text=True, timeout=10).stdout
-            ffmpeg = bool(re.search(r"NEEDED.*\[libav(format|codec)", nee))  # DT_NEEDED names are libav*
-        except (OSError, subprocess.TimeoutExpired):
-            ffmpeg = None  # readelf absent (non-Linux) = unknown, not false (honest form)
-        comps.append({
-            "name": name, "lib": f"lib/{so.name}",
-            "header": f"include/mediaservo/{name}.h",
-            "pkgconfig": f"lib/pkgconfig/mediaservo-{name}.pc",
-            "cmake_component": name, "requires_ffmpeg": ffmpeg,
-        })
-    if domain == "sdk-field":
-        if (pkg_root / "node").exists():
-            comps.append({"name": "node"})
-        if any((pkg_root / "lib").glob("python3.*/site-packages/mediaservo/")):
-            comps.append({"name": "python"})
-    manifest = {
-        "schema": 1,
-        "package": f"{domain}",
-        "version": ver,
-        "components": comps,
-        "protocol": {"frame_meta_wire_version": _frame_meta_wire_version(),
-                     "token_schema_version": _token_file_version(),
-                     "signaling_protocol_version": _signaling_protocol_versions()[0],
-                     "signaling_min_supported": _signaling_protocol_versions()[1]},
-        "generated_by": "mediaservo_cli package (D281/N2)",
-    }
-    (dst / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
-
-
-def _write_version_file(dst: Path, target: str) -> None:
-    """Version contract file (D-H13: version compatibility relies on explicit protocol-contract pairing, not same-package implication).
-    host-version.txt / sdk-version.txt: workspace version + FrameMeta wire version + token schema
-    version + signaling dialect tuple (max/min, C50 rule 5 / G1). Consumers (ROS/algorithms) verify
-    sdk-version.txt pairs with the host package. D-H14 closure: the signaling dialect constants ship
-    in this contract since 2026-10-14 (gate-wire-changelog.sh pairs wire changes with CHANGELOG
-    [protocol] entries; semver plane per C43)."""
-    ver = _crate_version(_TARGET_CRATE.get(target, "mediaservo-link"))
-    lines = [
-        f"# mediaservo-{target}-{ver} — protocol contract version declaration (D-H13/D-H14 minimal)",
-        f"workspace_version: {ver}",
-        f"frame_meta_version: {_frame_meta_wire_version()}",  # source-generated (WIRE_VERSION)
-        f"token_schema_version: {_token_file_version()}",  # MSTK token file version source-generated (D-H10; link token.rs)
-        f"signaling_protocol_version: {_signaling_protocol_versions()[0]}",  # dialect max (C50/G1; protocol.rs const)
-        f"signaling_min_supported: {_signaling_protocol_versions()[1]}",  # dialect acceptance floor (C50 rule 2)
-        "# host package deploy: bare unpack creates the versioned dir; to land into a prefix dir use `tar xzf <pkg>.tar.gz -C <prefix> --strip-components=1`",
-        "# when multiple devices share one package, delete identity.json on each device and re-run",
-        "# `host init <prefix>` (idempotent, existing credentials kept) to generate an independent device identity (G4)"
-    ]
-    (dst / f"{target}-version.txt").write_text("\n".join(lines) + "\n")
-
-
+# ── package: CPack release tars (D-H13 / SR6 P1) ─────────────────────────
 def _git_out(args: list[str], timeout: int = 10) -> str | None:
     """Read-only git query (captures stdout, cwd = repo root); any failure (no git / shallow clone / timeout) → None, never raises
-    — the degraded surface of package CHANGES generation (package-changes design §boundaries)."""
+    — the degraded surface of the release-integrity guard (package-changes design §boundaries)."""
     try:
         r = subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return r.stdout if r.returncode == 0 else None
-
-
-# V4/F11-X: scope marker → package routing table (vocabulary guarded by CI lint; protocol = full-chain term carried by all three packages,
-# deploy = cluster side, host/server only; when V1 becomes four packages, split sdk-field/sdk-client into dedicated rows).
-CHANGES_SCOPES = {
-    "host": {"host", "protocol", "deploy"},
-    "server": {"server", "protocol", "deploy"},
-    "bindings": {"sdk-field", "protocol"},      # alias = sdk-field form
-    "sdk-field": {"sdk-field", "protocol"},
-    "sdk-client": {"sdk-client", "protocol"},
-}
-
-_MARKERS = re.compile(r"\[([a-z0-9-]+)\]")
-
-
-def _cl_keep(first_line: str, keep: set[str]) -> bool:
-    tags = _MARKERS.findall(first_line[: first_line.find(":") if ":" in first_line else len(first_line)])
-    # no markers = carry everything (pre-F11-X historical entries / upgrade-note prose — better too many than missing; new entries are marker-enforced by the CI gate)
-    return (not tags) or any(t in keep for t in tags)
-
-
-def _cl_items(lines: list[str]):
-    """Entry-block generator: yields ("- " line + indented continuations) and other lines block by block as (is_item, block)."""
-    i, n = 0, len(lines)
-    while i < n:
-        if lines[i].startswith("- "):
-            k = i + 1
-            while k < n and (lines[k].startswith((" ", "\t")) or not lines[k].strip()):
-                if not lines[k].strip():
-                    k += 1
-                    break
-                k += 1
-            yield True, lines[i:k]
-            i = k
-        else:
-            yield False, [lines[i]]
-            i += 1
-
-
-def _cl_render_block(head: str | None, body: list[str], keep: set[str]) -> list[str]:
-    """Subsection rendering: filter entries; no kept entries = empty section (return [] to drop it)."""
-    out: list[str] = []
-    for is_item, blk in _cl_items(body):
-        if is_item and not _cl_keep(blk[0], keep):
-            continue
-        out.extend(blk)
-    if not any(l.startswith("- ") for l in out):
-        return []
-    return ([head] if head else []) + out
-
-
-def _changelog_slice(text: str, keep: set[str]) -> str:
-    """F11-X mechanical slicing (D280 single source stays untouched; routing happens only when packaging):
-    entries = "- " line + indented continuations; [scope] in keep survives; empty subsections / empty version sections are dropped; the file header always stays."""
-    lines = text.splitlines()
-    head_end = next((i for i, l in enumerate(lines) if l.startswith("## ")), len(lines))
-    out = lines[:head_end]
-    i, n = head_end, len(lines)
-    while i < n:
-        if not lines[i].startswith("## "):
-            i += 1
-            continue
-        j = i + 1
-        while j < n and not lines[j].startswith("## "):
-            j += 1
-        ver_head, ver_body = lines[i], lines[i + 1:j]
-        # the ## body is split by ### into blocks and rendered section by section
-        blocks: list[tuple[str | None, list[str]]] = []
-        cur: tuple[str | None, list[str]] = (None, [])
-        for ln in ver_body:
-            if ln.startswith("### "):
-                blocks.append(cur)
-                cur = (ln, [])
-            else:
-                cur[1].append(ln)
-        blocks.append(cur)
-        rendered: list[str] = []
-        for sub_head, sub_body in blocks:
-            rendered.extend(_cl_render_block(sub_head, sub_body, keep))
-        if rendered:
-            out.append(ver_head)
-            out.extend(rendered)
-        i = j
-    return "\n".join(out).rstrip() + "\n"
-
-
-def _write_changes_file(staging: Path, target: str) -> None:
-    """Embed the changelog into release packages (D280 single source + F11-X mechanical slicing V4):
-    the repo-root CHANGELOG.md is routed into packages by [scope] markers (CHANGES_SCOPES table).
-    unknown target / all-empty slice → degrade to copying the full text (better too many than missing). Missing source → WARN without blocking."""
-    try:
-        text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    except OSError:
-        print("WARN: CHANGELOG.md missing — package ships without CHANGES.md (packaging not blocked)", file=sys.stderr)
-        return
-    keep = CHANGES_SCOPES.get(target)
-    if keep:
-        sliced = _changelog_slice(text, keep)
-        if any(l.startswith("- ") for l in sliced.split("\n")):
-            text = sliced
-    try:
-        (staging / "CHANGES.md").write_text(text, encoding="utf-8")
-    except OSError as e:
-        print(f"WARN: CHANGES.md write failed ({e}) — packaging not blocked", file=sys.stderr)
-
-
-# SR6 P1: legs migrated to cmake install rules + CPack TGZ (one-leg-one-owner —
-# targets NOT in this set still run the python staging/tar branch in _cmd_package).
-_CPACK_PKG = {"sdk-client", "sdk-field", "bindings", "server", "host"}
 
 
 def _cpack_stage_sdk(staging: Path, args: argparse.Namespace) -> str:
@@ -1323,25 +1091,21 @@ def _cpack_pack(staging: Path, package_root: str, ver: str, dist: Path) -> Path:
 
 
 def _cmd_package(args: argparse.Namespace) -> None:
-    """package <target> — <dist>/<brand>-{host|server|sdk}-<ver>.tar.gz multi-package release (D-H13).
-    dist: --dist selects the output dir; defaults to the submodule dist/ when unspecified (the MSRTC release shell injects out/packages/).
-    server: run _cmd_deploy_server inside staging (bin+oxmgr/etc/web/init idempotent — isomorphic with host, T20/T21).
-    host/server: SR6 P1 L3+L4 — the deploy-equivalent assembly runs as cmake install
-    legs against the staging root (identity init / oxmgr pinning / env.sh / strip),
-    packed by native CPack TGZ (the python staging branch is now unreachable for every target).
-    bindings: staging copies out/bindings (full SDK layout — D241 version-full triple /.pc / cmake /
-    wheel / node / cxx headers, completed by Task 2.5) → sdk package.
-    sdk-client/sdk-field (bindings alias) and server: SR6 P1 L1-L3 — staged by cmake
-    install rules + packed by native CPack TGZ (the python staging branch runs only
-    for the non-migrated host target).
-    staging temp dir → tar.gz; the tar's top level is the versioned dir {brand}-{target}-{ver}/, so a bare unpack never scatters credentials/binaries;
-    to land directly into a prefix dir use `tar xzf package.tar.gz -C <prefix> --strip-components=1`."""
+    """package <target> — <dist>/<brand>-<target>-<ver>-<platform>-<arch>.tar.gz (D-H13/F12).
+    SR6 P1 end state: the release tree is described by cmake install rules
+    (cmake/MediaServoPack.cmake; host/server reuse the SR7 app-tree rows and run their
+    stateful steps — init/oxmgr/env.sh/strip — as install-time legs against the staging
+    root via the SAME managed binaries, design (e)) and packed by native CPack TGZ.
+    Python owns invoke + brand + lifecycle only (F29/F30 retreating-audit green).
+    dist: --dist selects the output dir; defaults to the submodule dist/ when unspecified
+    (the MSRTC release shell injects out/packages/). The tar's top level is the versioned
+    dir, so a bare unpack never scatters credentials/binaries; to land directly into a
+    prefix dir use `tar xzf package.tar.gz -C <prefix> --strip-components=1`."""
     if sys.platform == "win32":
         print("package: Windows best-effort — validation checklist in scripts/e2e-win-validate.ps1", file=sys.stderr)
     if args.target == "bindings":
         print("WARN: target `bindings` renamed to `sdk-field` (F12 dual-half split; this alias stays for one version cycle)",
               file=sys.stderr)
-    pkg_name = {"bindings": "sdk", "server": "server"}.get(args.target, args.target)
     ver = _crate_version(_TARGET_CRATE[args.target])
     # C43(8) release integrity guard: the workspace Cargo.toml differs from HEAD and git is available → the packaged version has no
     # git anchor (no tag to attach, same family as the v0.1.8.2 floating-number incident) — WARN without blocking (debug packages may be dirty).
@@ -1356,39 +1120,14 @@ def _cmd_package(args: argparse.Namespace) -> None:
     dist = Path(args.dist) if getattr(args, "dist", "") else ROOT / "dist"
     dist.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f"ms-{args.target}-pkg-", dir=str(dist)))
-    cpack_root = ""
     try:
-        if args.target == "host":
-            cpack_root = _cpack_stage_app(staging, args)  # SR6 P1 L4 (design (e) legs)
-        elif args.target == "server":
-            cpack_root = _cpack_stage_app(staging, args)  # SR6 P1 L3 (design (e) legs)
-        elif args.target in ("bindings", "sdk-field"):
-            cpack_root = _cpack_stage_sdk(staging, args)  # bindings = one-cycle alias (F12 rename WARN above)
-        elif args.target == "sdk-client":
-            cpack_root = _cpack_stage_sdk(staging, args)
-        else:
-            print(f"Error: unknown package target {args.target!r} (valid: host|server|sdk-field|sdk-client, bindings=alias)",
-                  file=sys.stderr)
-            sys.exit(2)
-        if args.target in _CPACK_PKG:
-            package_root = cpack_root
-            out = _cpack_pack(staging, package_root, ver, dist)
-        else:
-            _write_version_file(staging, pkg_name)
-            if args.target in ("bindings", "sdk-field", "sdk-client"):
-                _write_manifest_file(staging, "sdk-client" if args.target == "sdk-client" else "sdk-field", staging)
-            prefix_name = args.brand if args.brand else "mediaservo"
-            _write_changes_file(staging, args.target)  # D280 single source + F11-X slicing (WARN-degraded, non-blocking)
-        # Platform/arch in the package name + top-level dir (user ruling 2026-10-19, scheme A):
-        # the same name ships different binaries per machine — x86_64 -> amd64, aarch64 -> arm64
-        # (Go/Docker short form; the download-visible identity, not the Rust triple).
-            machine = platform.machine().lower()
-            arch = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(machine, machine)
-            package_root = f"{prefix_name}-{pkg_name}-{ver}-{sys.platform}-{arch}"
-            out = dist / f"{package_root}.tar.gz"
-            strip_package_binaries(staging)  # PIT-119: unstripped debug binaries (135-155MB each) → gzip 1.2GB timeout
-            with tarfile.open(out, "w:gz", compresslevel=6) as tar:  # default 9 is slowest; 6 is the engineering trade-off
-                tar.add(staging, arcname=package_root)  # unpacking creates the versioned dir; --strip-components=1 lands the prefix dir
+        # naming + layout owner = cmake (package-root.txt readback; the platform/arch
+        # formula of the 2026-10-19 ruling lives in MediaServoPack.cmake)
+        if args.target in ("host", "server"):
+            package_root = _cpack_stage_app(staging, args)   # design (e) stateful legs
+        else:  # bindings (one-cycle alias, WARN above) / sdk-field / sdk-client
+            package_root = _cpack_stage_sdk(staging, args)
+        out = _cpack_pack(staging, package_root, ver, dist)
         print(f"✓ packaged: {out} ({out.stat().st_size // 1024} KiB)")
         print(f"  top-level dir: {package_root}/")
         print(f"  contents: {', '.join(sorted(e.name for e in staging.iterdir()))}")

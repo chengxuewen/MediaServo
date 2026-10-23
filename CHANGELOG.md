@@ -62,7 +62,17 @@ teams); for development process details, consult git log directly. Newest versio
   properties the python route had identically (the baseline carries its own random
   keys and temp path). CHANGES.md drift = this file advancing. All four targets now
   pack through cmake + CPack; the python staging/tar mechanics die the closing
-  stroke.- [deploy] `deploy host` lays its branded bin tree through CMake install rules
+  stroke.
+- [deploy] SR6 P1 closure: all four `package` targets ride cmake install rules +
+  CPack TGZ; the python staging/tar mechanics are DELETED (-261 lines in
+  mediaservo_cli.py: _stage_sdk_package, _write_version_file/_write_manifest_file/
+  _write_changes_file + the _changelog_slice family, strip_package_binaries, the
+  routing-set constant, tarfile/platform imports). The verb keeps invoke + brand +
+  lifecycle only (F29/F30 split): C43(8) dirty-bump guard, staging temp dir and the
+  staging-scoped daemon reaper unchanged. Gates: e2e-package --sdk-only RC=0 (the
+  18-process managed cluster census untouched — guard asserted), all-gates quick
+  PASS, gate-py-retirement EXEMPT=44/RETIRE=8.
+- [deploy] `deploy host` lays its branded bin tree through CMake install rules
   (SR7 T3): the 8 app binaries (mediaservo-host + the seven host-<role> lanes,
   D269 names host-<app> -> <brand>-<app>) are PROGRAMS+RENAME rows over the
   cargo target/<profile> dir, the bin whitelist residue reclaim and the root
