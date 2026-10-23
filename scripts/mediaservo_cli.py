@@ -1098,68 +1098,6 @@ def _cmd_package(args: argparse.Namespace) -> None:
                 continue
         shutil.rmtree(staging, ignore_errors=True)
 
-# Excluded interface types/names: docker bridges, virtual interfaces (these IPs are unreachable by clients).
-# Note: tun/vpn are **not excluded** — in VPN-mesh scenarios the tunnel IP is exactly the client-reachable path (proven at 10.144.0.3);
-# extra announced candidates are harmless (ICE multi-candidate; peers skip unreachable ones automatically).
-_ANNOUNCED_IP_BLOCKED_IFACE = ("lo", "docker", "br-", "veth", "virbr")
-
-
-def _detect_announced_ips() -> list[str]:
-    """Detect all real NIC IPs of the host machine (for mediasoup announced_address inside containers).
-
-    Host IPs change and may be multiple (multi-NIC/DHCP) — returns all real IPs (comma-separated),
-    and the server side creates a ListenInfo per IP (WebRtcServer multi-announced).
-    Filters docker bridges (br-*) / virtual interfaces (veth/virbr) by name; tun/vpn are **kept**
-    (VPN-mesh tunnel IPs are exactly the client-reachable path — PIT-143 multi-IP announcement semantics, not filter targets)."""
-    ips: list[str] = []
-    try:
-        out = subprocess.run(
-            ["ip", "-o", "-4", "addr", "show"], capture_output=True, text=True, timeout=5, check=False
-        )
-        for line in out.stdout.splitlines():
-            # format: "2: ens32    inet 192.168.2.127/24 brd ... scope global ..."
-            parts = line.split()
-            if len(parts) < 4 or parts[2] != "inet":
-                continue
-            iface = parts[1].rstrip(":")
-            if any(iface.startswith(p) for p in _ANNOUNCED_IP_BLOCKED_IFACE):
-                continue
-            ip = parts[3].split("/")[0]
-            if ip.startswith("127."):
-                continue
-            if ip not in ips:
-                ips.append(ip)
-    except OSError:
-        # ip command unavailable → fall back to hostname -I (coarse filter)
-        try:
-            out = subprocess.run(
-                ["hostname", "-I"], capture_output=True, text=True, timeout=5, check=False
-            )
-            for ip in out.stdout.split():
-                ip = ip.strip()
-                if ip and not ip.startswith("127.") and ip not in ips:
-                    ips.append(ip)
-        except OSError:
-            pass
-    return ips
-
-
-def _compose_env(announced_ip: str | None = None) -> dict[str, str]:
-    """docker compose invocation env — ensures MEDIASERVO_SFU_ANNOUNCED_IP has a value.
-    PIT-79: if the CLI starts the server without injection, mediasoup announces 0.0.0.0 → browser pull fails.
-    Explicit --announced-ip (arg/env) wins; otherwise auto-detect all real host IPs (comma-separated, multi-NIC support).
-    When given explicitly, skip the "auto-detect" print (T3 minor)."""
-    env = {**os.environ}
-    if announced_ip:
-        env["MEDIASERVO_SFU_ANNOUNCED_IP"] = announced_ip
-    elif not env.get("MEDIASERVO_SFU_ANNOUNCED_IP"):
-        ips = _detect_announced_ips()
-        if ips:
-            env["MEDIASERVO_SFU_ANNOUNCED_IP"] = ",".join(ips)
-            print(f"MEDIASERVO_SFU_ANNOUNCED_IP auto-detected: {env['MEDIASERVO_SFU_ANNOUNCED_IP']}")
-    return env
-
-
 # ───────── example command surface (p3-gui-viewer W0, G7) ─────────
 #
 # Directory contract = bindings/cxx/examples/<name>/CMakeLists.txt (dir name == target == artifact name, G4).
@@ -1482,126 +1420,6 @@ def _cmd_config(args: argparse.Namespace) -> None:
     sys.exit(0 if ok else 1)
 
 
-def _cmd_status_runtime(args: argparse.Namespace) -> None:
-    """status <target> — health probe (borrowed from AccessBase cmd_status_native, absorbed per review).
-    Exit codes: 0 = running, 1 = not running, 2 = probe failed / bad arg. ps = listing vs status = health verdict (helps cross-reference)."""
-    code = 2
-    if args.target == "server":
-        mode = _resolve_mode(args, default="native")   # default native (flipped per user ruling B)
-        code = _status_server_native() if mode == "native" else _status_server_container(args.env)
-    elif args.target == "host":
-        code = _status_host()
-    sys.exit(code)
-
-
-def _curl_health_code() -> str:
-    """curl -o /dev/null -w %{http_code} against 9800 (2s timeout)."""
-    try:
-        out = subprocess.run(
-            ["curl", "--noproxy", "*", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-             "--max-time", "2", "http://127.0.0.1:9800/health"],
-            capture_output=True, text=True, timeout=5, check=False,
-        ).stdout
-        return out.strip()
-    except OSError:
-        return ""
-
-
-def _ss_listening(port: int) -> bool | None:
-    """Whether ss -tulnp contains :port. None = undecidable (C15 — review arch F4 false-negative fix)."""
-    try:
-        out = subprocess.run(["ss", "-tulnp"], capture_output=True, text=True, timeout=5, check=False).stdout
-        return f":{port} " in out
-    except OSError:
-        return None
-
-
-def _server_instance_exe() -> "Path | None":
-    """Deployed server instance binary under <out>/server/bin (brand-aware glob —
-    D269 named the file, the instance dir stays the locator). None = not deployed."""
-    inst = _out_root() / "server"
-    cands = [c for c in sorted((inst / "bin").glob("*-server"))
-             if c.is_file() and not c.name.endswith(".exe.bak")]
-    return cands[0] if cands else None
-
-
-def _status_server_native() -> int:
-    """Server status = the managed binary's own registry view (SR6 batch-2).
-    The old pid-file probe died with the T21 run-server retirement — nobody
-    writes server-native.pid anymore, so under oxmgr management the instance
-    command IS the truth (F31 doctrine: ops lives in the binary, the CLI is a
-    forwarder). Exit codes 0/1/2 propagate from the binary."""
-    exe = _server_instance_exe()
-    inst = _out_root() / "server"
-    if exe is None:
-        print("server: no deployed instance under <out>/server — deploy first "
-              "(mediaservo deploy server --prefix <X>), or --mode compose for containers", file=sys.stderr)
-        return 1
-    return subprocess.run([str(exe), "status", str(inst)]).returncode
-
-
-def _compose_running(env: str) -> bool:
-    """Whether env has containers running (dev/prod share container names, and compose ps aggregates by directory regardless of env —
-    distinguished by the config_files label, same source as _detect_running_env)."""
-    try:
-        out = subprocess.run(["docker", "ps", "--format", "{{.Names}}"],
-                             capture_output=True, text=True, timeout=5, check=False).stdout
-        if "mediaservo-server-1" not in out:
-            return False
-        return _detect_running_env() == env
-    except OSError:
-        return False
-
-
-def _status_server_container(env_arg: str | None = None) -> int:
-    """Container runtime state. env_arg reuses --env (review cli F1: no help-vs-implementation drift allowed)."""
-    code = _curl_health_code()
-    env_now = env_arg or _detect_running_env()
-    print(f"server (compose env={env_now}):", flush=True)  # flush: _run subprocess output lands before print (pipe buffering)
-    _check("docker", "install docker and start the daemon")
-    _run(["docker", "compose", "-f", _compose_file(env_now), "ps"])  # process/container listing (a subset of ps — review arch F1)
-    print(f"  health 9800: {'200 OK' if code == '200' else code or 'no response'}")
-    av = _compose_env().get("MEDIASERVO_SFU_ANNOUNCED_IP", "")
-    if av:
-        print(f"  announced: {av}")   # C38 layer-1 observation
-    return 0 if _compose_running(env_now) else 1
-
-
-def _status_host() -> int:
-    """Host runtime state. Process names have dual prefixes (review ops#1 CRITICAL: branded msrtc-* vs official host-*)."""
-    print("host:")
-    procs = ["agent", "streamer", "capturer"]  # branded roles (dual prefixes — ops#1 CRITICAL)
-    brands = ["msrtc", "host"]
-    bare_procs = ["oxmgr"]  # Momus HIGH: the oxmgr daemon's process name is bare `oxmgr` (npm binary bin/oxmgr;
-    # the brand prefix applies only to translate-generated <brand>-<app> — only agent/streamer/capturer carry prefixes)
-    any_alive = False
-    probe_failed = False
-    for role in procs + bare_procs:
-        pids: list[str] = []
-        cands = [f"{b}-{role}" for b in brands] if role not in bare_procs else [role]
-        for cname in cands:
-            out = subprocess.run(["pgrep", "-x", cname], capture_output=True, text=True, check=False).stdout.strip()
-            if out:
-                pids = out.splitlines()
-                break
-        if pids:
-            any_alive = True
-            print(f"  {role}: running pid={' '.join(pids)}")
-        else:
-            print(f"  {role}: not running")
-    st = _ss_listening(17980)
-    if st is None:
-        probe_failed = True
-    print(f"  gateway 17980: {'listening' if st else ('undecidable' if st is None else 'free')}")
-    # instance log path (review ops#5/docs#3: C32 instance isolation — no hardcoded placeholders)
-    inst = os.environ.get("OXMGR_DATA_DIR", "")
-    log_hint = (Path(inst).parent / "run" / "logs") if inst else (ROOT.parent / "out" / "host" / "run" / "logs")
-    print(f"  logs: {log_hint}/msrtc-streamer-<stream>.err.log (C38 layer-2: grep subscription/acl denied/OpenH264)")
-    if not any_alive:
-        print("  → host not running — manual: target/debug/mediaservo-host init . && token issue --all . && start . (development) or systemctl --user start oxmgr-<brand>-host.service (deployed)", file=sys.stderr)
-    return 2 if probe_failed else (0 if any_alive else 1)
-
-
 def _add_mode_args(p, *, env_choices=("dev", "prod"), allow_both=False):
     """Unified mode parameters (--mode native|compose[/both] + short aliases --native/--env; mutually exclusive).
     Semantics: commands default to native (user ruling B) — compose requires an explicit --mode compose / --env;
@@ -1628,37 +1446,6 @@ def _resolve_mode(args, default: str = "native") -> str:
     return default
 
 
-def _compose_file(env: str) -> str:
-    """Environment → compose file mapping (shared by up/down/ps/exec)."""
-    return "docker-compose.yml" if env == "prod" else "docker-compose.dev.yml"
-
-
-
-def _detect_running_env() -> str:
-    """Detect which compose project the running server container belongs to (dev/prod — same container name,
-    distinguished by the compose config_files label; no container = default dev)."""
-    try:
-        out = subprocess.run(
-            ["docker", "ps", "--format", "{{.Names}}"],
-            capture_output=True, text=True, timeout=5, check=False,
-        ).stdout
-        if "mediaservo-server-1" in out:
-            cfg = subprocess.run(
-                ["docker", "inspect", "mediaservo-server-1", "--format",
-                 '{{index .Config.Labels "com.docker.compose.project.config_files"}}'],
-                capture_output=True, text=True, timeout=5, check=False,
-            ).stdout.strip()
-            if "docker-compose.yml" in cfg and "dev" not in cfg:
-                return "prod"
-        return "dev"
-    except (OSError, subprocess.TimeoutExpired):
-        return "dev"
-
-
-
-
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mediaservo",
@@ -1670,12 +1457,12 @@ def main() -> None:
     fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
   Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
   Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
-  bash-owned (SR6 batch-1/alpha, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance) logs
+  bash-owned (SR6 batch-1/alpha, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance) logs status
   guidance arms exit 2 (C39 — instance-directory commands; the container face up/down is unchanged)
-  read-only probes kept: status server|host / logs server / clean server
+  read-only probe kept: clean server
   C++ example surface (p3): list example → build example [names…] → run example <name> / test example
              (foreground dev tool; artifacts in target/examples/bin/ — never in out/; the build-c prelude is auto-added)
-  exit codes: status/logs — 0 = success, 1 = not running/target missing, 2 = bad args / probe undecidable
+  exit codes (shell-owned status/logs): 0 = success, 1 = not running/target missing, 2 = bad args / probe undecidable
 """)
 
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1730,12 +1517,6 @@ def main() -> None:
     config_p.add_argument("key", nargs="?", help="set: config key (e.g. signaling.psk)")
     config_p.add_argument("value", nargs="?", help="set: config value")
     config_p.set_defaults(func=_cmd_config)
-    status_p = sub.add_parser("status", help="health probe <target> (exit codes 0/1/2): server = bare metal (default) | compose containers (--mode compose) | host push processes")
-    status_p.add_argument("target", choices=["server", "host"])
-    _add_mode_args(status_p)
-    status_p.set_defaults(func=_cmd_status_runtime)
-
-
     # compat aliases (build-* kept — e2e scripts/habitual usage): run-host/up/down aliases removed (up/down are now first-level commands)
     ALIASES = {
         "build-host": ["build", "host"],
@@ -1770,8 +1551,6 @@ def main() -> None:
             _cmd_build_example(args.names, args.release)
     elif args.command == "run":
         _cmd_run(args)
-    elif args.command == "status":
-        _cmd_status_runtime(args)
 
     elif args.command == "test":
         if args.what == "example":

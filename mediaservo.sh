@@ -326,6 +326,74 @@ case "${1:-}" in
         echo "host log directory: $HOME/.local/share/oxmgr/logs (instance logs: OXMGR_DATA_DIR/run/logs/msrtc-streamer-*.err.log)" >&2
         exit 0
         ;;
+    status)
+        # was _cmd_status_runtime + 8 helper fns — health verdict (rc 0 running /
+        # 1 not running / 2 bad args or probe undecidable). Native server = the
+        # managed binary's own registry view (F31: forward, never re-implement).
+        shift; tgt="${1:-}"; [ $# -gt 0 ] && shift
+        mode=""; seen_mode=0; env_arg=""
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --mode) [ $seen_mode = 0 ] || { echo "status: argument --mode: not allowed with the other mode flags" >&2; exit 2; }
+                        case "${2:-}" in native|compose) mode="$2";; *) echo "status: argument --mode: invalid choice '$2'" >&2; exit 2;; esac
+                        seen_mode=1; shift 2 ;;
+                --native) [ $seen_mode = 0 ] || { echo "status: argument --native: not allowed with the other mode flags" >&2; exit 2; }
+                        mode=native; seen_mode=1; shift ;;
+                --env) [ $seen_mode = 0 ] || { echo "status: argument --env: not allowed with the other mode flags" >&2; exit 2; }
+                       case "${2:-}" in dev|prod) env_arg="$2"; mode=compose;; *) echo "status: argument --env: invalid choice '$2'" >&2; exit 2;; esac
+                       seen_mode=1; shift 2 ;;
+                *) echo "status: unexpected argument $1" >&2; exit 2 ;;
+            esac
+        done
+        if [ -z "$tgt" ] || { [ "$tgt" != server ] && [ "$tgt" != host ]; }; then
+            echo "usage: status {server,host} [--mode native|compose] [--env dev|prod]" >&2; exit 2; fi
+        if [ "$tgt" = server ] && [ "${mode:-native}" = native ]; then
+            inst="${MSRTC_OUT_ROOT:-$ROOT/out}/server"
+            exe=""
+            for c in $(ls "$inst/bin" 2>/dev/null | grep -- '-server$' | sort); do
+                case "$c" in *.exe.bak) ;; *) exe="$inst/bin/$c"; break;; esac
+            done
+            if [ -z "$exe" ]; then echo "server: no deployed instance under <out>/server — deploy first (mediaservo deploy server --prefix <X>), or --mode compose for containers" >&2; exit 1; fi
+            exec "$exe" status "$inst"
+        fi
+        if [ "$tgt" = server ]; then
+            env_now="${env_arg:-$(_msvc_detect_env)}"
+            echo "server (compose env=$env_now):"
+            command -v docker >/dev/null || { echo "Error: missing dependency 'docker' — install docker and start the daemon" >&2; exit 1; }
+            _msvc_run docker compose -f "$(_msvc_compose_file "$env_now")" ps
+            code=$(curl --noproxy "*" -s -o /dev/null -w "%{http_code}" --max-time 2 http://127.0.0.1:9800/health 2>/dev/null | tr -d '[:space:]')
+            if [ "$code" = 200 ]; then echo "  health 9800: 200 OK"; else echo "  health 9800: ${code:-no response}"; fi
+            av="${MEDIASERVO_SFU_ANNOUNCED_IP:-}"
+            if [ -z "$av" ]; then
+                ips=$(_msvc_announced_ips | paste -sd, -)
+                if [ -n "$ips" ]; then av="$ips"; echo "MEDIASERVO_SFU_ANNOUNCED_IP auto-detected: $ips"; fi
+            fi
+            [ -n "$av" ] && echo "  announced: $av"
+            if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx mediaservo-server-1 && [ "$(_msvc_detect_env)" = "$env_now" ]; then exit 0; else exit 1; fi
+        fi
+        # host: dual brand prefixes (ops#1) + bare oxmgr daemon
+        echo "host:"
+        any=0; probe_failed=0
+        for role in agent streamer capturer oxmgr; do
+            pids=""
+            if [ "$role" = oxmgr ]; then cands=(oxmgr); else cands=("msrtc-$role" "host-$role"); fi
+            for cname in "${cands[@]}"; do
+                o=$(pgrep -x "$cname" 2>/dev/null | tr '\n' ' ')
+                if [ -n "$o" ]; then pids="${o% }"; break; fi
+            done
+            if [ -n "$pids" ]; then any=1; echo "  $role: running pid=$pids"; else echo "  $role: not running"; fi
+        done
+        if out=$(ss -tulnp 2>/dev/null); then
+            case "$out" in *":17980 "*) echo "  gateway 17980: listening" ;; *) echo "  gateway 17980: free" ;; esac
+        else probe_failed=1; echo "  gateway 17980: undecidable"; fi
+        inst="${OXMGR_DATA_DIR:-}"
+        if [ -n "$inst" ]; then log_hint="$(dirname "$inst")/run/logs"; else log_hint="${ROOT%/*}/out/host/run/logs"; fi
+        echo "  logs: $log_hint/msrtc-streamer-<stream>.err.log (C38 layer-2: grep subscription/acl denied/OpenH264)"
+        if [ $any = 0 ]; then
+            echo "  → host not running — manual: target/debug/mediaservo-host init . && token issue --all . && start . (development) or systemctl --user start oxmgr-<brand>-host.service (deployed)" >&2
+        fi
+        if [ $probe_failed = 1 ]; then exit 2; elif [ $any = 1 ]; then exit 0; else exit 1; fi
+        ;;
 esac
 
 # build:deploy composite (2026-09-29: verb surface aligned with the parent-repo msrtc.sh — the submodule shell
