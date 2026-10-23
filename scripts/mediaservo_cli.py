@@ -1235,23 +1235,6 @@ def _out_root() -> Path:
     return Path(env_out) if env_out else ROOT / "out"
 
 
-def _native_runtime_dirs() -> tuple[Path, Path, Path]:
-    """Native server runtime dirs (the MSRTC release shell injects MSRTC_OUT_ROOT → ${out}/server; bare CLI falls back to the submodule data/).
-    Returns (etc_dir, logs_dir, data_dir) — config/pid/log all converge under the release root out/ (main-repo scenario) or data/ (standalone use)."""
-    env_out = os.environ.get("MSRTC_OUT_ROOT", "")
-    if env_out:
-        base = Path(env_out) / "server"
-        base.mkdir(parents=True, exist_ok=True)
-        (base / "etc").mkdir(parents=True, exist_ok=True)
-        (base / "logs").mkdir(parents=True, exist_ok=True)
-        return base / "etc", base / "logs", base
-    base = ROOT / "data"
-    (base / "etc").mkdir(parents=True, exist_ok=True)
-    (base / "logs").mkdir(parents=True, exist_ok=True)
-    return base / "etc", base / "logs", base
-
-
-
 def _cmd_e2e(args: argparse.Namespace) -> None:
     if sys.platform == "win32" and args.suite not in ("host", "package", "brand", "bindings", "smoke"):
         print("e2e: Windows supports only bash-script suites", file=sys.stderr)
@@ -1273,35 +1256,6 @@ def _cmd_test() -> None:
 
 
 
-def _rm_path(path: Path) -> None:
-    """Delete a file or directory (general clean helper — binary files via unlink, directories via rmtree)."""
-    try:
-        if path.is_dir():
-            shutil.rmtree(path)
-        else:
-            path.unlink(missing_ok=True)
-    except FileNotFoundError:
-        pass
-
-
-def _rm_tree(path: Path) -> None:
-    """Cross-platform directory deletion (Windows uses rmdir /s /q semantics, Unix uses rmtree).
-    Root files created by containers trigger PermissionError — caught with a manual-delete hint; later cleanup continues."""
-    if not path.exists():
-        return
-    try:
-        if sys.platform == "win32":
-            _run_or_exit(["rmdir", "/s", "/q", str(path)])
-        else:
-            shutil.rmtree(path)
-        print(f"deleted: {path}")
-    except PermissionError:
-        print(
-            f"Warning: cannot delete {path} (contains container-created root files) — run manually: sudo rm -rf {path}",
-            file=sys.stderr,
-        )
-
-
 def _cmd_deploy(args: argparse.Namespace) -> None:
     """deploy <target> — bindings | host | server (source = the out/ delivery tree; --prefix mandatory per D4; deploy does not trigger builds)."""
     if args.target == "bindings":
@@ -1311,70 +1265,6 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
     elif args.target == "server":
         _cmd_deploy_server(args.prefix)
 
-
-
-def _cmd_clean(args: argparse.Namespace) -> None:
-    """clean <target> — all|server|host|client (default all).
-    server: default native (ruling B — clears bare-metal artifacts + stops processes first); --mode both clears both tracks / compose clears containers only; host/client: clears the host cargo target."""
-    target = args.target
-    if target in ("all", "server"):
-        mode = _resolve_mode(args, default="native")
-        # native: stop bare-metal processes first (read pid files), then delete artifacts (prevents orphans — clean once left a process running with its pid already deleted)
-        if mode in ("both", "native"):
-            pid_file = _native_runtime_dirs()[1] / "server-native.pid"
-            if pid_file.exists():
-                try:
-                    pid = int(pid_file.read_text().strip())
-                except ValueError:
-                    pid = -1
-                if pid > 0 and Path(f"/proc/{pid}").exists():
-                    print(f"clean server: stopping bare-metal process pid={pid}")
-                    subprocess.run(["kill", str(pid)], check=False)
-                    for _ in range(4):
-                        if not Path(f"/proc/{pid}").exists():
-                            break
-                        time.sleep(0.5)
-                    if Path(f"/proc/{pid}").exists():
-                        subprocess.run(["kill", "-9", str(pid)], check=False)
-            etc_d, logs_d, _ = _native_runtime_dirs()
-            out_server = _out_root() / "server"
-            targets = [logs_d / "server-native.pid", logs_d / "server-native.log",
-                       out_server / "bin" / _exe_name("mediaservo-server"),
-                       # weaknet staging reclaim (weaknet-server-integration [bF10]): out upstream name + both target profiles
-                       out_server / "bin" / _exe_name("mediaservo-weaknet"),
-                       ROOT / "target/debug/mediaservo-weaknet", ROOT / "target/release/mediaservo-weaknet",
-                       out_server / "web",  # frontend delivery tree (T21: build web artifacts reclaimed with clean)
-                       ROOT / "target/debug/mediaservo-server", ROOT / "target/release/mediaservo-server"]
-            # MAJOR-C: clear both branded names + root-level shortcut links (glob collects only files/links; directories are never touched)
-            targets += [f for f in sorted((out_server / "bin").glob("*-server")) if f.is_file()]
-            targets += [f for f in sorted((out_server / "bin").glob("*-weaknet")) if f.is_file()]
-            targets += [f for f in sorted(out_server.glob("*-server")) if f.is_symlink()]
-            _sv = out_server / "server"  # unbranded shortcut link (brand="" layout)
-            if _sv.is_symlink():
-                targets.append(_sv)
-            for f in targets:
-                _rm_path(f)
-            for d in sorted((_out_root() / "server" / "run").glob("oxmgr*")):
-                _rm_path(d)  # daemon data left by out-track drills (C32 — run/ under a prefix belongs to the instance lifecycle, not listed here)
-        # compose containers (under both/compose)
-        if mode in ("both", "compose"):
-            _check("docker", "install docker and start the daemon")
-            down = COMPOSE_BASE + ["down"]
-            if args.all:
-                down.append("-v")  # --all explicitly deletes volumes (cargo-cache) → the next build-server rebuild takes 15-30 minutes
-                print("Warning: clean --all deletes the cargo-cache named volume (the next server build recompiles fully, 15-30 minutes)")
-            _run_or_exit(down)
-    if target in ("all", "host", "client"):
-        # project-root target (workspace default, shared by host/client)
-        _rm_tree(ROOT / "target")
-        # CARGO_TARGET_DIR branch (review: project-root cleanup misses it when the user sets it)
-        cargo_target = os.environ.get("CARGO_TARGET_DIR")
-        if cargo_target:
-            print(f"Note: CARGO_TARGET_DIR={cargo_target} (possibly shared by multiple projects)")
-            _rm_tree(Path(cargo_target))
-    # --all additionally clears the docker builder cache; never touches .pixi-cache (package cache)
-    if args.all and target in ("all", "server"):
-        _run_or_exit(["docker", "builder", "prune", "-f"])
 
 
 def _cmd_config(args: argparse.Namespace) -> None:
@@ -1420,32 +1310,6 @@ def _cmd_config(args: argparse.Namespace) -> None:
     sys.exit(0 if ok else 1)
 
 
-def _add_mode_args(p, *, env_choices=("dev", "prod"), allow_both=False):
-    """Unified mode parameters (--mode native|compose[/both] + short aliases --native/--env; mutually exclusive).
-    Semantics: commands default to native (user ruling B) — compose requires an explicit --mode compose / --env;
-    both is enabled only for stop/clean (stops/clears both tracks)."""
-    choices = ["native", "compose"] + (["both"] if allow_both else [])
-    grp = p.add_mutually_exclusive_group()
-    grp.add_argument("--mode", choices=choices, default=None,
-                     help="run mode: native = bare metal (default) | compose = containers (--env equivalent)"
-                     + (" | both = handle both tracks" if allow_both else ""))
-    grp.add_argument("--native", action="store_true", help="(short alias for --mode native — default mode, omittable)")
-    grp.add_argument("--env", choices=list(env_choices), default=None,
-                     help="(short alias for --mode compose = process-family container mode; --env in the compose family up/down/ps selects the environment — two distinct semantics)")
-    p.set_defaults(_resolve_mode_into=None)
-
-
-def _resolve_mode(args, default: str = "native") -> str:
-    """Resolve args → mode uniformly (--mode > --native/--env > default)."""
-    if getattr(args, "mode", None):
-        return args.mode
-    if getattr(args, "native", False):
-        return "native"
-    if getattr(args, "env", None) is not None:
-        return "compose"
-    return default
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mediaservo",
@@ -1457,9 +1321,8 @@ def main() -> None:
     fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
   Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
   Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
-  bash-owned (SR6 batch-1/alpha, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance) logs status
+  bash-owned (SR6 batch-1/alpha, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance) logs status clean
   guidance arms exit 2 (C39 — instance-directory commands; the container face up/down is unchanged)
-  read-only probe kept: clean server
   C++ example surface (p3): list example → build example [names…] → run example <name> / test example
              (foreground dev tool; artifacts in target/examples/bin/ — never in out/; the build-c prelude is auto-added)
   exit codes (shell-owned status/logs): 0 = success, 1 = not running/target missing, 2 = bad args / probe undecidable
@@ -1507,11 +1370,6 @@ def main() -> None:
     package_p.add_argument("--brand", default="", help="brand package name (<dist>/<brand>-<target>-<ver>.tar.gz; default mediaservo)")
     package_p.add_argument("--release", action="store_true", help="package release artifacts (target/release, pairs with build --release)")
     package_p.set_defaults(func=_cmd_package)
-    clean_p = sub.add_parser("clean", help="clean <target>: all|server|host|client (default all; server = native clean (default) | --mode both clears both)")
-    clean_p.add_argument("target", nargs="?", choices=["all", "server", "host", "client"], default="all")
-    _add_mode_args(clean_p, allow_both=True)
-    clean_p.add_argument("--all", action="store_true", help="explicitly delete volumes + docker builder prune (15-30 minute rebuild cost)")
-    clean_p.set_defaults(func=_cmd_clean)
     config_p = sub.add_parser("config", help="config show|validate|set <key> <value> (dev-track config/ directory)")
     config_p.add_argument("config_cmd", choices=["show", "validate", "set"])
     config_p.add_argument("key", nargs="?", help="set: config key (e.g. signaling.psk)")

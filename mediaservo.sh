@@ -394,6 +394,78 @@ case "${1:-}" in
         fi
         if [ $probe_failed = 1 ]; then exit 2; elif [ $any = 1 ]; then exit 0; else exit 1; fi
         ;;
+    clean)
+        # was _cmd_clean + _rm_path/_rm_tree/_native_runtime_dirs + the mode
+        # helpers. Destructive legs mirror the python delete-list exactly;
+        # docker lines ride _msvc_run so MEDIASERVO_DRY_RUN=1 can prove the
+        # command shape without touching live containers.
+        shift; tgt=""; mode=""; seen_mode=0; do_all=0
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                all|server|host|client) [ -z "$tgt" ] || { echo "clean: too many arguments" >&2; exit 2; }; tgt="$1"; shift ;;
+                --mode) [ $seen_mode = 0 ] || { echo "clean: argument --mode: not allowed with the other mode flags" >&2; exit 2; }
+                        case "${2:-}" in native|compose|both) mode="$2";; *) echo "clean: argument --mode: invalid choice '$2'" >&2; exit 2;; esac
+                        seen_mode=1; shift 2 ;;
+                --native) [ $seen_mode = 0 ] || { echo "clean: argument --native: not allowed with the other mode flags" >&2; exit 2; }
+                        mode=native; seen_mode=1; shift ;;
+                --env) [ $seen_mode = 0 ] || { echo "clean: argument --env: not allowed with the other mode flags" >&2; exit 2; }
+                       case "${2:-}" in dev|prod) mode=compose;; *) echo "clean: argument --env: invalid choice '$2'" >&2; exit 2;; esac
+                       seen_mode=1; shift 2 ;;
+                --all) do_all=1; shift ;;
+                *) echo "clean: unexpected argument $1" >&2; exit 2 ;;
+            esac
+        done
+        tgt="${tgt:-all}"; mode="${mode:-native}"
+        _ms_rm_path() { [ -e "$1" ] || [ -L "$1" ] || return 0; if [ -d "$1" ] && [ ! -L "$1" ]; then rm -rf "$1"; else rm -f "$1"; fi; }
+        if [ "$tgt" = all ] || [ "$tgt" = server ]; then
+            if [ "$mode" = native ] || [ "$mode" = both ]; then
+                if [ -n "${MSRTC_OUT_ROOT:-}" ]; then base="$MSRTC_OUT_ROOT/server"; else base="$ROOT/data"; fi
+                mkdir -p "$base/etc" "$base/logs"; etc_d="$base/etc"; logs_d="$base/logs"
+                out_server="${MSRTC_OUT_ROOT:-$ROOT/out}/server"
+                pid_file="$logs_d/server-native.pid"
+                if [ -f "$pid_file" ]; then
+                    pid=$(tr -dc '0-9' < "$pid_file" | head -c 12); pid="${pid:--1}"
+                    if [ "$pid" -gt 0 ] 2>/dev/null && [ -d "/proc/$pid" ]; then
+                        echo "clean server: stopping bare-metal process pid=$pid"
+                        kill "$pid" 2>/dev/null || true
+                        for _i in 1 2 3 4; do [ -d "/proc/$pid" ] || break; sleep 0.5; done
+                        [ -d "/proc/$pid" ] && kill -9 "$pid" 2>/dev/null || true
+                    fi
+                fi
+                for f in "$logs_d/server-native.pid" "$logs_d/server-native.log" \
+                         "$out_server/bin/mediaservo-server" "$out_server/bin/mediaservo-weaknet" \
+                         "$ROOT/target/debug/mediaservo-weaknet" "$ROOT/target/release/mediaservo-weaknet" \
+                         "$out_server/web" "$ROOT/target/debug/mediaservo-server" "$ROOT/target/release/mediaservo-server"; do
+                    _ms_rm_path "$f"
+                done
+                for f in "$out_server"/bin/*-server "$out_server"/bin/*-weaknet; do [ -f "$f" ] && _ms_rm_path "$f"; done
+                for f in "$out_server"/*-server; do [ -L "$f" ] && _ms_rm_path "$f"; done
+                [ -L "$out_server/server" ] && _ms_rm_path "$out_server/server"
+                for d in "$out_server"/run/oxmgr*; do _ms_rm_path "$d"; done
+            fi
+            if [ "$mode" = compose ] || [ "$mode" = both ]; then
+                command -v docker >/dev/null || { echo "Error: missing dependency 'docker' — install docker and start the daemon" >&2; exit 1; }
+                cmd=(docker compose -f docker-compose.dev.yml down)
+                if [ "$do_all" = 1 ]; then cmd+=(-v); echo "Warning: clean --all deletes the cargo-cache named volume (the next server build recompiles fully, 15-30 minutes)"; fi
+                _msvc_run "${cmd[@]}"; rc=$?; [ $rc -ne 0 ] && exit $rc
+            fi
+        fi
+        if [ "$tgt" = all ] || [ "$tgt" = host ] || [ "$tgt" = client ]; then
+            if [ -e "$ROOT/target" ]; then
+                if rm -rf "$ROOT/target" 2>/dev/null; then echo "deleted: $ROOT/target"; else echo "Warning: cannot delete $ROOT/target (contains container-created root files) — run manually: sudo rm -rf $ROOT/target" >&2; fi
+            fi
+            if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+                echo "Note: CARGO_TARGET_DIR=$CARGO_TARGET_DIR (possibly shared by multiple projects)"
+                if [ -e "$CARGO_TARGET_DIR" ]; then
+                    if rm -rf "$CARGO_TARGET_DIR" 2>/dev/null; then echo "deleted: $CARGO_TARGET_DIR"; else echo "Warning: cannot delete $CARGO_TARGET_DIR (contains container-created root files) — run manually: sudo rm -rf $CARGO_TARGET_DIR" >&2; fi
+                fi
+            fi
+        fi
+        if [ "$do_all" = 1 ] && { [ "$tgt" = all ] || [ "$tgt" = server ]; }; then
+            _msvc_run docker builder prune -f; exit $?
+        fi
+        exit 0
+        ;;
 esac
 
 # build:deploy composite (2026-09-29: verb surface aligned with the parent-repo msrtc.sh — the submodule shell
