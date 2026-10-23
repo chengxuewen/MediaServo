@@ -6,6 +6,7 @@ teams); for development process details, consult git log directly. Newest versio
 ## [Unreleased]
 
 ### Removed
+- [deploy] SR6 P2 batch-alpha retired eight more CLI verbs from `scripts/mediaservo_cli.py` onto the `mediaservo.sh` bash driver: `doctor`, `list example`, the `start|stop|restart` + `run server|host` guidance arms, `logs`, `status`, `clean`, and the `deploy bindings` leg (host/server deploy legs stay python until batch-beta). User-facing forms through `mediaservo.sh`/`msrtc.sh` are UNCHANGED (per-verb before/after matrices byte-identical incl. brand shape and the deploy-bindings dst-tree md5/link census). ⚠ scripts invoking `python3 scripts/mediaservo_cli.py <verb>` directly for these verbs now get argparse `invalid choice` rc=2 — switch to `./mediaservo.sh <verb>` (or `./msrtc.sh <verb>` from the release shell).
 - [deploy] Three retired verbs (SR6 walkthrough rulings V1-V3): the transitional web runtime family (`run web`/`start web`/`stop web`/`restart web`/`status web`) — web is cluster-managed, use `msrtc-server start <dir>` (⚠ scripts driving the standalone CLI caddy must switch to the cluster); `ci` — the one true gate surface is `all-gates` (C46); `install` — the word now names only CMake's internal placement (`cmake --install` inside `deploy`), never a CLI verb (F31).
 
 ### Added
