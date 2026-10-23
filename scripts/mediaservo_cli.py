@@ -619,137 +619,12 @@ def _weaknet_bin_name(brand: str) -> str:
     build only stages the upstream name; branding is single-pointed at deploy (D266/D269 isomorphic)."""
     return _exe_name(f"{brand}-weaknet" if brand else "mediaservo-weaknet")
 
-WEAKNET_OXFILE_APP = "weaknet-serve"  # brand-independent literal — same value as Rust templates::WEAKNET_APP [mn10]
-
-
-def _drop_stale_server_oxfile(prefix_p: Path, bin_name: str, wnet_bin: str) -> tuple[bool, dict[str, dict[str, str]]]:
-    """BLOCKER-3 + weaknet-server-integration D1 stale predicate (**Python-side single point** — Rust init
-    always skips when oxfile exists, so a Rust-side write of the detection would never be called [bF3]):
-      oxfile migration = server entry basename drift (D269 original semantics, weaknet presence not guilt-by-associated)
-        OR **bin present AND (weaknet-serve entry missing OR its command basename drifts)** (post-mn2 form; bin absent
-        = conditional rendering with no entry is the correct form, zero churn). → rename to .bak so the following init re-renders.
-      Caddyfile symmetric migration [wF2] = bin present AND etc/Caddyfile exists AND the reverse-proxy block is missing (anchor predicate: see
-        the render-section comment below — the D3.1 finalized form has no '@weaknet' literal) → .bak
-        re-render. The return value merges into the same migrated flag wired to the existing --reapply path [lck-F4] — prevents
-        the half-migration false success of "oxfile migrated AND Caddyfile not migrated" (unit up, /weaknet 404).
-    Each [[apps]]'s [apps.env] key-values are captured and re-absorbed as before (PIT-171 lesson). Re-absorption only fills missing, never overwrites →
-    token-file path/statedir template-baked values naturally take precedence over old manual values [lck-F14/mn6]; no exemption code needed.
-    Returns (any file migrated, {app name: {env key: value}}); each .bak notice is printed inside this function."""
-    oxfile = prefix_p / "run" / "oxfile.toml"
-    wnet_present = (prefix_p / "bin" / wnet_bin).is_file()
-    stale = False
-    seen_apps: set[str] = set()
-    app_envs: dict[str, dict[str, str]] = {}
-    cur_app: str | None = None
-    in_env = False
-    if oxfile.exists():
-        for line in oxfile.read_text().splitlines():
-            t = line.strip()
-            if t.startswith("[[apps]]"):
-                cur_app, in_env = None, False
-                continue
-            if t.startswith("name") and "=" in t and cur_app is None:
-                cur_app = t.split("=", 1)[1].strip().strip('"')
-                seen_apps.add(cur_app)
-                in_env = False
-                continue
-            if t.startswith("[apps.env]"):
-                in_env = True
-                continue
-            if t.startswith("["):
-                in_env = False
-                continue
-            if in_env and "=" in t and cur_app:
-                k, _, v = t.partition("=")
-                app_envs.setdefault(cur_app, {})[k.strip()] = v.strip()
-                continue
-            if cur_app and t.startswith("command") and "=" in t:
-                cmd = t.split("=", 1)[1].strip().strip('"')
-                parts = cmd.split()
-                if parts:
-                    stem = Path(parts[0]).name.removesuffix(".exe")
-                    if (stem == "mediaservo-server" or stem.endswith("-server")) and stem != bin_name:
-                        stale = True
-                    if cur_app == WEAKNET_OXFILE_APP and stem != Path(wnet_bin).name.removesuffix(".exe"):
-                        stale = True  # weaknet entry basename drift (brand-switch redeploy) — reachable only when the entry is present
-        if wnet_present and WEAKNET_OXFILE_APP not in seen_apps:
-            stale = True  # weaknet entry missing AND bin present → re-render to add it [bF3/mn2]
-        if stale:
-            oxfile.replace(oxfile.with_name("oxfile.toml.bak"))
-            print("  run/oxfile.toml stale (bin rename migration / weaknet entry missing) — backed up to run/oxfile.toml.bak and will re-render; "
-                  "ops manual env re-absorption only fills missing (this init's baked values win); a whole-tree rebuild has no old file to absorb — manual line list in msrtc.sh -h env section [B]", file=sys.stderr)
-    # The block-present anchor = `handle_path /weaknet` (the functional core of the D3.1 finalized real-world form; the ticket's "'@weaknet'" was
-    # shorthand for design §D3.1's "@weaknet block" — template literals only contain @wnroot/handle_path; using '@weaknet'
-    # would be forever false → every deploy re-migrates without convergence. A lone redir does not constitute a reverse proxy and does not count as block-present.)
-    caddy = prefix_p / "etc" / "Caddyfile"
-    if wnet_present and caddy.exists() and "handle_path /weaknet" not in caddy.read_text(encoding="utf-8", errors="replace"):
-        caddy.replace(caddy.with_name("Caddyfile.bak"))
-        print("  etc/Caddyfile lacks the @weaknet reverse-proxy block AND weaknet bin is present — backed up to etc/Caddyfile.bak and init will re-render"
-              " (same migration flag as oxfile — reapply trigger coupling [lck-F4])", file=sys.stderr)
-        stale = True
-    return stale, app_envs
-
-
-def _reapply_carried_env(prefix_p: Path, app_envs: dict[str, dict[str, str]]) -> list[str]:
-    """Migration re-absorption: old env keys missing from the new oxfile (init re-render output) are restored per app.
-    Only fills missing, never overwrites (keys baked by this init take the new values); returns the list of restored "app:k" entries."""
-    if not app_envs:
-        return []
-    oxfile = prefix_p / "run" / "oxfile.toml"
-    if not oxfile.exists():
-        return []
-    lines = oxfile.read_text().splitlines()
-    carried: list[str] = []
-    for app, kv in app_envs.items():
-        if not kv:
-            continue
-        # locate this app's block
-        try:
-            i = next(n for n, l in enumerate(lines) if l.strip() == "[[apps]]")
-        except StopIteration:
-            continue
-        start = None
-        n = i
-        while n < len(lines):
-            if lines[n].strip() == "[[apps]]":
-                blk_i = n
-                m = n + 1
-                while m < len(lines) and not lines[m].strip().startswith("[["):
-                    m += 1
-                blk = lines[blk_i:m]
-                if any(l.strip() == f'name = "{app}"' for l in blk):
-                    start = blk_i
-                    end = m
-                    break
-                n = m
-            else:
-                n += 1
-        if start is None:
-            continue
-        blk = lines[start:end]
-        existing = {l.split("=", 1)[0].strip() for l in blk if "=" in l and not l.strip().startswith(("[", "#"))}
-        miss = {k: v for k, v in kv.items() if k.strip().strip('"') not in existing}
-        if not miss:
-            continue
-        # find the [apps.env] header inside the block; if absent, create one at the block end (before the next [[apps]])
-        try:
-            ei = next(j for j, l in enumerate(blk) if l.strip() == "[apps.env]")
-        except StopIteration:
-            ei = None
-        add = [f"{k} = {v}" for k, v in sorted(miss.items())]
-        if ei is None:
-            new_blk = blk + ["[apps.env]"] + add
-        else:
-            je = ei + 1
-            while je < len(blk) and "=" in blk[je] and not blk[je].strip().startswith("["):
-                je += 1
-            new_blk = blk[:je] + add + blk[je:]
-        lines[start:end] = new_blk
-        carried += [f"{app}:{k}" for k in sorted(miss)]
-    if carried:
-        oxfile.write_text("\n".join(lines) + "\n")
-    return carried
-
+# SR7 T4: the Python-side stale-oxfile/Caddyfile migration guard (_drop_stale_server_oxfile)
+# + its env re-absorption twin (_reapply_carried_env) are retired -- the bF3 port (5255a13)
+# runs migrate_stale_files as init step 0 (BEFORE both exists-skips) with the same
+# predicates, .bak rotation and merge_manual_env re-absorption (baked values win, [lck-F4]
+# half-migration guard preserved by construction: one rotation, one merge, inside init).
+# WEAKNET_OXFILE_APP's duty lives on as the Rust constant templates::WEAKNET_APP [mn10].
 
 def _cmd_deploy_host(prefix: str, release: bool = False, allow_stop: bool = True) -> None:
     """deploy host (stateful deployment — assemble + land, D266): identity idempotence/oxmgr/systemd/env.sh.
@@ -915,10 +790,11 @@ def _cmd_deploy_server(prefix: str) -> None:
     """deploy server (stateful landing — T20, D266 isomorphic with host; deploy does not trigger builds — source = the single out/server delivery tree).
     Brand: env MEDIASERVO_BRAND first, falling back to target-tree bin/*-server derivation (_derive_brand_server) —
     the physical binary name = {brand}-server (D269 brand = physical name, isomorphic with host; cargo/bin unit names unchanged).
-    BLOCKER-1 dual source hunt: upstream name (fresh build) → {brand}-server (already migrated, so a second deploy needs no rebuild).
+    BLOCKER-1 dual source hunt (cmake rows, SR7 T1): upstream name (fresh build) → {brand}-server (already migrated, so a second deploy needs no rebuild) — python repeats the hunt only to pick the pre-install stop target.
     BLOCKER-2 empty-brand guard: brand resolves empty while the target tree already has branded bin → reject (empty brand never deletes/renames branded files).
-    BLOCKER-3 oxfile refresh: bin rename migration → delete {prefix}/run/oxfile.toml so init re-renders (manual [apps.env] lines must be re-added).
-    etc is never overwritten when present (PIT-160 — ops changes/registry data survive redeploys); the web tree moves wholesale (rmtree+copytree);
+    BLOCKER-3 oxfile/Caddyfile refresh: now owned by init alone (bF3 port — migrate_stale_files rotates the stale files to .bak BEFORE its exists-skips and re-absorbs [apps.env] via merge_manual_env; SR7 T4 retired the python guard twin).
+    bin/etc placement = cmake install rules (MediaServoAppTree.cmake via _cmake_app_install);
+    etc landing is first-writer-wins (PIT-160 — ops changes/registry data survive redeploys); the web tree still moves wholesale here (rmtree+copytree — pnpm product, rule 6);
     init renders idempotently (run/oxfile.toml + Caddyfile + PSK/JWT secret bootstrap — lifecycle modules are built into the binary).
     D4: --prefix mandatory (no default); /opt needs root (same rule as host)."""
     if not prefix:
@@ -1015,16 +891,11 @@ def _cmd_deploy_server(prefix: str) -> None:
 
     # SR7 T1: weaknet staging = cmake row (same --install above — dual source,
     # target/{release,debug} fallback and the absent WARN skip live in
-    # MediaServoAppTree.cmake [bF1 bF4 bF5]; the oxfile conditional-render predicate
-    # stays Rust init's, nailed by M-1). The target name is still resolved
-    # python-side for the stale-oxfile predicate below.
-    wnet_bin = _weaknet_bin_name(brand)
-
-    # BLOCKER-3: after a bin rename/brand migration the oxfile command becomes a dead path (init skips an existing oxfile — proven in mod.rs)
-    # → delete it so the init below re-renders with current_exe. Predicate = server entry command basename != current bin name
-    # (a re-deploy where basenames already match → zero churn; a fresh tree has no oxfile → init renders normally).
-    # single-point migration predicate (includes the Caddyfile symmetric migration) — wnet_bin is this staging's target name (present = copy succeeded)
-    migrated, carried_envs = _drop_stale_server_oxfile(prefix_p, bin_name, wnet_bin)
+    # MediaServoAppTree.cmake [bF1 bF4 bF5]).
+    # SR7 T4: the BLOCKER-3 stale-oxfile/Caddyfile rotation decision belongs to
+    # the managed binary alone — init's migrate_stale_files (bF3) runs BEFORE
+    # its exists-skips, rotates on drift, re-renders and re-absorbs [apps.env]
+    # via merge_manual_env. The Python guard and its reapply twin are gone.
 
     # SR7 T2: the etc template mirror (first-writer-wins, PIT-160) is a cmake
     # install(CODE) leg now (MediaServoAppTree.cmake) — run by the --install
@@ -1044,12 +915,6 @@ def _cmd_deploy_server(prefix: str) -> None:
     # rendered [M-1] — written only when bin is present; the check lives in Rust render_oxfile) + secret bootstrap (0600)
     # SFU port/announce isolation: export MEDIASERVO_SFU_PORT / MEDIASERVO_SFU_ANNOUNCED_IP before deploy; init bakes them into the oxfile env
     _run_or_exit([str(server_cli), "init", str(prefix_p)])
-    # lck-F4: migrated = oxfile OR Caddyfile migrated → the single re-absorption path runs (carried only fills missing
-    # keys; the non-migrated side is an idempotent no-op — one trigger surface prevents half-migration false success)
-    if migrated:
-        got = _reapply_carried_env(prefix_p, carried_envs)
-        if got:
-            print(f"  ops env re-absorbed: {', '.join(got)}")
 
     # SR7 T1: the bin whitelist reclaim and the root entry shortcuts (incl. the
     # old-brand link cleanup) are cmake install legs now (MediaServoAppTree.cmake,
@@ -2206,7 +2071,7 @@ def main() -> None:
         description="MediaServo unified build CLI (terms: native = bare metal, compose = containers)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Three-mode quick reference (native = bare metal, compose = containers):
-  Mode 1 bare-metal delivery: build server (assembles bin/etc/web) → deploy server --prefix <X> →
+  Mode 1 bare-metal delivery: build server (assembles bin/etc/web in out/) → deploy server --prefix <X> (bin/etc layout = cmake install rules) →
              <X>/<brand>-server init/start/stop/status/restart/doctor <X> (startup on = boot anchor; bin physical name branded per D269)
     fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
   Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
@@ -2273,7 +2138,7 @@ def main() -> None:
                         help="example = GUI/SDK example ctest surface (bare test = unchanged workspace semantics, F-A-9(1))")
     test_p.add_argument("name", nargs="?", help="example: filter by example name (ctest -R)")
 
-    deploy_p = sub.add_parser("deploy", help="deploy <target> (stateful landing — deploy does not trigger builds, source = out/ delivery tree): host|server|bindings; host/server --prefix mandatory (/opt needs root); bindings defaults to <out>/bindings")
+    deploy_p = sub.add_parser("deploy", help="deploy <target> (stateful landing — deploy does not trigger builds; app bin/etc layout rides cmake install rules (cmake/MediaServoAppTree.cmake, cmake must be on PATH), stateful steps run in the managed binary): host|server|bindings; host/server --prefix mandatory (/opt needs root); bindings defaults to <out>/bindings")
     deploy_p.add_argument("target", choices=["bindings", "host", "server"])
     deploy_p.add_argument("--prefix", default=None, help="deployment prefix (mandatory for host/server: /opt/mediaservo-{host,server}; bindings defaults to <out>/bindings, out root follows the calling shell)")
     deploy_p.add_argument("--release", action="store_true", help="deploy release-profile assembled artifacts")

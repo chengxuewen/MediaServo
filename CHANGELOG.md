@@ -14,6 +14,22 @@ teams); for development process details, consult git log directly. Newest versio
 
 ### Changed
 ### Changed
+### Changed
+- [deploy] SR7 T4 call-site consolidation: `deploy server|host` = brand-resolve →
+  (pre-bF3-compatible) stop-oracle + one cmake configure/install pass
+  (dedicated `build/app-tree` dir; the layout rides the MediaServoAppTree rules) →
+  stateful calls unchanged (oxmgr vendor copy, init render, web move, env.sh).
+  The Python stale-oxfile/Caddyfile guard and its env re-absorption twin are
+  DELETED — `mediaservo-server init` owns rotation + merge alone (bF3 port
+  5255a13: migrate_stale_files runs as init step 0, BEFORE the exists-skips;
+  verified end-to-end on a temp prefix: drifted server-entry command -> .bak
+  rotation -> re-render -> "merged 1 manual env entries", ops line survived).
+  ⚠ Deploy-path stderr no longer carries the old "run/oxfile.toml stale —
+  backed up..." python wording (the init message is the single surface now), and
+  a pre-5255a13 instance binary performs no drift rotation: re-init with the
+  current build after brand/bin-name migrations. deploy help + epilog state the
+  cmake-rule fact (five-role wording: parent msrtc.sh/mediaservo.sh carry no
+  placement-implementation claims; the Rust -h env-usage asset is untouched).
 - [deploy] `deploy host` lays its branded bin tree through CMake install rules
   (SR7 T3): the 8 app binaries (mediaservo-host + the seven host-<role> lanes,
   D269 names host-<app> -> <brand>-<app>) are PROGRAMS+RENAME rows over the
