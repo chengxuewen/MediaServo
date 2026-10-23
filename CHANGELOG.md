@@ -15,6 +15,16 @@ teams); for development process details, consult git log directly. Newest versio
 ### Changed
 ### Changed
 ### Changed
+- [deploy] `deploy bindings` cross-tree is a pure cmake route now (SR6 batch-5
+  face 3): the language-native subtrees of the delivery tree (wheel/, node/,
+  docs/, lib/python3.*/ pip site-packages) ride MEDIASERVO_BINDINGS_SRC mirror
+  legs inside the SAME `cmake --install` pass that lays the rule-owned half —
+  python's sweep copy loops are deleted (one route, one owner). The verb always
+  reconfigures (SR7 freshness rule: the mode cache is this call's truth, never
+  the build verb's leftover). The rule-owned pkgconfig/cmake/lib/include trees
+  stay non-mirrored (two-writer disease stays cured). Judge: fresh cross-tree
+  deploy of the built delivery tree — file name+md5 set and symlink pairs
+  IDENTICAL to its source; same-tree in-place branch behavior unchanged.
 - [deploy] `build bindings` node-package + docs-volume placement are cmake install
   rules now (SR6 batch-5 face 2). New cache knob `MEDIASERVO_BINDINGS_SRC` on the
   bindings face: EMPTY (the build assembly — the CLI resets it explicitly so a

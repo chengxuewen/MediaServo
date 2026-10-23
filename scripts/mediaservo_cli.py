@@ -920,12 +920,20 @@ def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
         # SR4 L5 (T0 #17): the cmake-owned half (lib triple + symlinks + strip,
         # include tree, pkgconfig + cmake suite) reaches ANY prefix through the SAME
         # install rules the build used -- one route, one owner, zero hand-laid copies.
-        # ETXTBSY policy stays invocation-side: retry the install after killing the
-        # occupiers (install is idempotent -- rerun-safe by cmake semantics).
+        # SR6 batch-5 (face 3): the language-native half (wheel/, node/, docs/, pip
+        # site-packages under lib/) rides the SAME invocation too -- the
+        # MEDIASERVO_BINDINGS_SRC mirror legs copy them from this delivery tree,
+        # replacing python's sweep copy loops (deleted in this stroke; the
+        # rule-owned pkgconfig/cmake/lib/include subtrees are deliberately NOT
+        # mirrored -- the two-writer disease stays cured).
+        # Configure ALWAYS re-runs (SR7 freshness rule: the mode cache must be
+        # this call's truth, never the build verb's leftover). ETXTBSY policy stays
+        # invocation-side: retry the install after killing the occupiers (install is
+        # idempotent -- rerun-safe by cmake semantics).
         _bind_build = ROOT / "build" / "presets" / "bindings"
-        if not (_bind_build / "CMakeCache.txt").exists():
-            _run_or_exit(["cmake", "--preset", "bindings",
-                          f"-DCMAKE_BUILD_TYPE={'Release' if release else 'Debug'}"], cwd=str(ROOT))
+        _run_or_exit(["cmake", "--preset", "bindings",
+                      f"-DCMAKE_BUILD_TYPE={'Release' if release else 'Debug'}",
+                      f"-DMEDIASERVO_BINDINGS_SRC={src}"], cwd=str(ROOT))
         ctypes = ["cmake", "--install", str(_bind_build), "--prefix", str(prefix_p), "--strip"]
         for attempt in range(3):
             r = subprocess.run(ctypes, cwd=str(ROOT), capture_output=True, text=True)
@@ -939,20 +947,6 @@ def _cmd_deploy_bindings(prefix: str, release: bool = False) -> None:
             for so in sorted(lib_dir.glob("libmediaservo_*.so*")):
                 _kill_using(so)
         sos = sorted(x.name for x in lib_dir.glob("libmediaservo_*.so*"))
-        # language-native half (wheel/, node/, docs/, pip site-packages under lib/)
-        # stays python-side per SR4 §1.3 -- the cmake rules never touch them.
-        # pkgconfig/ + cmake/ under lib/ are RULE-OWNED (L3) -- re-copying them from
-        # the out tree would resurrect the two-writer disease; only python3.* moves.
-        for sub in sorted((src / "lib").glob("python3.*/")):
-            shutil.copytree(sub, lib_dir / sub.name, dirs_exist_ok=True)
-        for e in sorted(src.iterdir()):
-            if e.name in ("lib", "include"):
-                continue  # cmake-owned (L1-L3 rules) -- do not double-lay
-            dst = prefix_p / e.name
-            if e.is_dir():
-                shutil.copytree(e, dst, dirs_exist_ok=True)
-            elif e.is_file() or e.is_symlink():
-                shutil.copy2(e, dst, follow_symlinks=False)
     print(f"bindings deployed to {prefix} (lib/ {', '.join(sos)} + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx)")
     print("  usage: export LD_LIBRARY_PATH=<prefix>/lib; link per the bindings headers; python: pip install <prefix>/wheel/*.whl")
 
