@@ -26,6 +26,7 @@
 //! `## [Unreleased]` — the gate passes vacuously until either side is ruled.
 
 pub mod changelog;
+pub mod lanes;
 
 /// Dispatch `mediaservo-gates <sub> [--root <dir>] [--self-test(lanes)]`.
 /// Returns the process exit code (0 pass / 1 fail — table in the module doc).
@@ -35,9 +36,11 @@ pub fn run(args: &[String]) -> i32 {
         return 1;
     };
     let root = flag_value(&args[1..], "--root").unwrap_or_else(|| ".".to_string());
+    let self_test = args[1..].iter().any(|a| a == "--self-test");
     match sub.as_str() {
         "changelog" => changelog::check(std::path::Path::new(&root)),
-        // lanes/openapi/parity faces land in the following SR6 P3 commits
+        "lanes" => lanes::check(std::path::Path::new(&root), self_test),
+        // openapi/parity faces land in the following SR6 P3 commits
         other => {
             eprintln!("unknown subcommand: {other}");
             1

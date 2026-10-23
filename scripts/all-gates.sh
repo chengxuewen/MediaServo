@@ -38,7 +38,7 @@ gate "changelog markers (F11-X)"  target/debug/mediaservo-gates changelog
 gate "wire changelog pairing (G3)"  bash scripts/gate-wire-changelog.sh
 gate "bindings version parity"    python3 scripts/gate-parity.py
 gate "crate literal versions"     bash -c '! git grep -l "^version = \"" -- "crates/*/Cargo.toml" | grep -vE "mediaservo-(host|server|field|client)/Cargo.toml" | grep -q .'
-gate "crate lanes reconciliation" python3 scripts/gate-lanes.py
+gate "crate lanes reconciliation" target/debug/mediaservo-gates lanes
 
 # ── compile surface ──
 gate "check --workspace"          cargo check --workspace

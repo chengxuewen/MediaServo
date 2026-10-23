@@ -2,7 +2,8 @@
 #
 # Contract (parent-repo docs/plans/polyorch-adoption/PLAN.md §4 S4):
 #   * THE lane table (single source) — `<crate>@<lib-name>@<folder>` rows over the
-#     workspace's crates/* members. scripts/gate-lanes.py reconciles this table
+#     workspace's crates/* members. The mediaservo-gates lanes face
+#     (tools/mediaservo-gates, SR6 P3) reconciles this table
 #     against the root Cargo.toml members every all-gates run (drift = FATAL),
 #     so the table can never rot silently.
 #   * cargo keeps build authority: this file registers driver surface only

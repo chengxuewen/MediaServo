@@ -43,7 +43,7 @@ endif()
 
 # S4 crates lanes: LIB-kind rlib lanes + per-crate test buttons + ctest twins;
 # lane table single source = cmake/MediaServoCrates.cmake (reconciled against Cargo members
-# by scripts/gate-lanes.py in all-gates). Default cache face = build-tree-local;
+# by the mediaservo-gates lanes face (tools/mediaservo-gates) in all-gates). Default cache face = build-tree-local;
 # shared-target preset flips lanes onto target/ and drops the clean buttons (F17-D).
 include(cmake/MediaServoCrates.cmake)
 option(MEDIASERVO_BUILD_CRATES_LANES "Register crates lanes (IDE build/test buttons + ctest bridge)" OFF)
