@@ -276,6 +276,56 @@ case "${1:-}" in
         esac
         exit 2
         ;;
+    logs)
+        # was _cmd_logs — flags mirror argparse exactly (default target server,
+        # --mode/--native/--env mutually exclusive, rc=2 on bad args)
+        shift; tgt=server; mode=""; follow=0; seen_mode=0
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                server|host) tgt="$1"; shift ;;
+                --mode) [ $seen_mode = 0 ] || { echo "logs: argument --mode: not allowed with the other mode flags" >&2; exit 2; }
+                        case "${2:-}" in native|compose) mode="$2";; *) echo "logs: argument --mode: invalid choice '$2' (choose from native, compose)" >&2; exit 2;; esac
+                        seen_mode=1; shift 2 ;;
+                --native) [ $seen_mode = 0 ] || { echo "logs: argument --native: not allowed with the other mode flags" >&2; exit 2; }
+                        mode=native; seen_mode=1; shift ;;
+                --env) [ $seen_mode = 0 ] || { echo "logs: argument --env: not allowed with the other mode flags" >&2; exit 2; }
+                       case "${2:-}" in dev|prod) mode=compose;; *) echo "logs: argument --env: invalid choice '$2'" >&2; exit 2;; esac
+                       seen_mode=1; shift 2 ;;
+                -f|--follow) follow=1; shift ;;
+                *) echo "logs: unexpected argument $1" >&2; exit 2 ;;
+            esac
+        done
+        if [ "$tgt" = server ]; then
+            mode="${mode:-native}"
+            if [ "$mode" = native ]; then
+                inst="${MSRTC_OUT_ROOT:-$ROOT/out}/server"
+                if [ "$follow" = 1 ]; then
+                    real=()
+                    for f in "$inst"/run/logs/*.log; do [ -e "$f" ] && real+=("$f"); done
+                    if [ ${#real[@]} -eq 0 ]; then echo "logs: no cluster logs under $inst/run/logs — start the instance first" >&2; exit 1; fi
+                    echo "\$ tail -f ${real[*]}"; exec tail -f "${real[@]}"
+                fi
+                exe=""
+                for c in $(ls "$inst/bin" 2>/dev/null | grep -- '-server$' | sort); do
+                    case "$c" in *.exe.bak) ;; *) exe="$inst/bin/$c"; break;; esac
+                done
+                if [ -z "$exe" ]; then echo "logs: no deployed server instance under <out>/server — deploy first, or --mode compose" >&2; exit 1; fi
+                echo "\$ $exe logs"; exec "$exe" logs
+            fi
+            command -v docker >/dev/null || { echo "Error: missing dependency 'docker' — install docker and start the daemon" >&2; exit 1; }
+            cmd=(docker compose -f docker-compose.dev.yml logs)
+            [ "$follow" = 1 ] && cmd+=(-f)
+            cmd+=(server)
+            _msvc_run "${cmd[@]}"
+            exit $?
+        fi
+        if [ -f /tmp/mediaservo-host.log ]; then
+            t=(tail -n 100); [ "$follow" = 1 ] && t+=(-f); t+=(/tmp/mediaservo-host.log)
+            _msvc_run "${t[@]}" || exit $?
+        fi
+        echo "host log directory: $HOME/.local/share/oxmgr/logs (instance logs: OXMGR_DATA_DIR/run/logs/msrtc-streamer-*.err.log)" >&2
+        exit 0
+        ;;
 esac
 
 # build:deploy composite (2026-09-29: verb surface aligned with the parent-repo msrtc.sh — the submodule shell

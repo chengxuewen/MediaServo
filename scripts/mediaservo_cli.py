@@ -1314,40 +1314,6 @@ def _native_runtime_dirs() -> tuple[Path, Path, Path]:
 
 
 
-def _cmd_logs(args: argparse.Namespace) -> None:
-    """logs [<target>] [--follow] [--mode native|compose] — server: bare-metal log (default — user ruling B) | compose container log; host: log directory."""
-    target = args.target
-    if target == "server":
-        mode = _resolve_mode(args, default="native")
-        if mode == "native":
-            # batch-2 rewiring: the fossil server-native.log has no writer since the
-            # T21 run-server retirement; the truth lives in the instance's oxmgr run
-            # tree (cluster layout: <dir>/run/logs/<app>.{out,err}.log).
-            inst = _out_root() / "server"
-            logs = sorted((inst / "run" / "logs").glob("*.log"))
-            if args.follow:
-                if not logs:
-                    print(f"logs: no cluster logs under {inst / 'run' / 'logs'} — start the instance first", file=sys.stderr)
-                    sys.exit(1)
-                _run_or_exit(["tail", "-f"] + [str(f) for f in logs])
-                return
-            exe = _server_instance_exe()
-            if exe is None:
-                print("logs: no deployed server instance under <out>/server — deploy first, or --mode compose", file=sys.stderr)
-                sys.exit(1)
-            _run_or_exit([str(exe), "logs"])
-            return
-        _check("docker", "install docker and start the daemon")
-        _run_or_exit(COMPOSE_BASE + ["logs"] + (["-f"] if args.follow else []) + ["server"])
-    elif target == "host":
-        log_path = Path("/tmp/mediaservo-host.log")
-        if log_path.exists():
-            _run_or_exit(["tail", "-n", "100"] + (["-f"] if args.follow else []) + [str(log_path)])
-        ox_logs = Path.home() / ".local/share/oxmgr/logs"
-        print(f"host log directory: {ox_logs} (instance logs: OXMGR_DATA_DIR/run/logs/msrtc-streamer-*.err.log)", file=sys.stderr)
-    # (client has no CLI-side log target: choices are server|host)
-
-
 def _cmd_e2e(args: argparse.Namespace) -> None:
     if sys.platform == "win32" and args.suite not in ("host", "package", "brand", "bindings", "smoke"):
         print("e2e: Windows supports only bash-script suites", file=sys.stderr)
@@ -1704,7 +1670,7 @@ def main() -> None:
     fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
   Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
   Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
-  bash-owned (SR6 batch-1/alpha, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance)
+  bash-owned (SR6 batch-1/alpha, flags unchanged, entry: mediaservo.sh): up down exec ps data dev version doctor list start stop restart run(server|host guidance) logs
   guidance arms exit 2 (C39 — instance-directory commands; the container face up/down is unchanged)
   read-only probes kept: status server|host / logs server / clean server
   C++ example surface (p3): list example → build example [names…] → run example <name> / test example
@@ -1733,14 +1699,6 @@ def main() -> None:
     run_p.add_argument("rest", nargs=argparse.REMAINDER,
                        help="run example only: <name> [app passthrough args…]")
     run_p.set_defaults(func=_cmd_run)
-
-    logs_p = sub.add_parser("logs", help="logs [<svc>] [--follow] [--mode native|compose]: server = bare-metal log (default) | compose container log | host log")
-    logs_p.add_argument("target", nargs="?", choices=["server", "host"], default="server")
-    _add_mode_args(logs_p)
-    logs_p.add_argument("--follow", "-f", action="store_true", help="follow output")
-    logs_p.set_defaults(func=_cmd_logs)
-
-
 
     e2e_p = sub.add_parser("e2e", help="test suites: sfu|push|ui|host|package|brand|bindings|client|smoke")
     e2e_p.add_argument("suite", choices=["sfu", "push", "ui", "host", "package", "brand", "bindings", "client", "smoke"])
@@ -1812,8 +1770,6 @@ def main() -> None:
             _cmd_build_example(args.names, args.release)
     elif args.command == "run":
         _cmd_run(args)
-    elif args.command == "logs":
-        _cmd_logs(args)
     elif args.command == "status":
         _cmd_status_runtime(args)
 
