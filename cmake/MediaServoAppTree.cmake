@@ -31,10 +31,23 @@
 #     the names python matched; the keep manifest is embedded at configure time
 #     from THIS tree's brand (co-located installs never rely on each other —
 #     oxmgr/caddy provably never match the *-server/*-weaknet/-<role> patterns).
+#   * Build assembly mode (SR6 batch-5): `build server`/`build web` ride THIS face
+#     through MEDIASERVO_APP_STAGING ('' = deploy — every existing deploy byte
+#     parity untouched | build | web). build: the bin/weaknet rows source the FRESH
+#     target/{profile} artifacts first (a previous build's out/bin copy must never
+#     mask a just-compiled binary — PIT-189 family) through swap legs — file(COPY)
+#     into a side dir + file(RENAME) onto the landing name, the atomic .new/
+#     os.replace semantics python's staging had: install(PROGRAMS) truncates the
+#     destination and would ETXTBSY a LIVE cluster's running bin, and deploy may
+#     truncate only because it stops the cluster first — build must never stop
+#     anything. The web tree moves dist -> <prefix>/web (rmtree+copytree parity).
+#     Root entry shortcuts are a deploy landing: NEVER registered in build mode
+#     (the delivery tree stays bin/etc/web exactly like python laid it).
 
 set(MEDIASERVO_APP_TREE "" CACHE STRING "app delivery layout to describe at install time: '' (none) | host | server")
 set(MEDIASERVO_BRAND "" CACHE STRING "product brand for the physical bin names (D269); empty = upstream names byte-stable")
 set(MEDIASERVO_SERVER_OUT_DIR "" CACHE PATH "server delivery root (the CLI-resolved <out>/server) — server placement rows source from here")
+set(MEDIASERVO_APP_STAGING "" CACHE STRING "server-tree placement mode: '' (deploy: delivery-tree-first PROGRAMS route) | build (fresh target/{profile} bins via swap legs + web move) | web (web placement only — the build web fast lane)")
 
 # The eight host-tree bin names as cargo spells them (the CLI's HOST_BINS mirror —
 # D269 names: host-<app> -> <brand>-<app>, mediaservo-host -> <brand>-host).
@@ -42,6 +55,14 @@ set(MEDIASERVO_HOST_BINS mediaservo-host host-agent host-streamer host-capturer
     host-recorder host-controller host-emergency host-audio)
 
 function(mediaservo_setup_app_tree)
+    # The web fast lane rides the same gate: staging=web registers ONLY the web
+    # placement legs — build web never touches cargo, so the bin hunt's FATAL
+    # polarity must not fire (the tree value stays 'server': the web tree IS the
+    # server delivery tree).
+    if(MEDIASERVO_APP_STAGING STREQUAL "web")
+        _mediaservo_app_web_legs()
+        return()
+    endif()
     if(MEDIASERVO_APP_TREE STREQUAL "server")
         if(NOT MEDIASERVO_SERVER_OUT_DIR)
             message(FATAL_ERROR
@@ -57,6 +78,41 @@ function(mediaservo_setup_app_tree)
     endif()
 endfunction()
 
+# -- web placement legs (SR6 batch-5, absorbed from python _stage_web_to_out):
+#    the vite dist tree moves wholesale — rmtree+copytree parity = a rm -rf leg
+#    registered BEFORE the directory copy (install events run in registration
+#    order; P1-pack measured fact). Missing dist keeps the python exit-2 error
+#    verbatim at configure time (loud, never a silent hollow web/).
+function(_mediaservo_app_web_legs)
+    set(_dist "${MEDIASERVO_REPO_ROOT}/www/apps/admin/dist")
+    if(NOT EXISTS "${_dist}/index.html")
+        message(FATAL_ERROR
+            "Error: no artifacts in ${_dist} — pnpm build:admin not run or failed")
+    endif()
+    install(CODE "execute_process(COMMAND \"\${CMAKE_COMMAND}\" -E rm -rf \"\${CMAKE_INSTALL_PREFIX}/web\")")
+    install(DIRECTORY "${_dist}/" DESTINATION web USE_SOURCE_PERMISSIONS)
+endfunction()
+
+# -- swap-install leg (build mode only): file(COPY) into a side dir (preserves
+#    modes like python's copy2) then file(RENAME) onto the landing name — the
+#    atomic replace of the retired shutil.copy2 + os.replace pattern. The
+#    transient dir self-cleans long before the reclaim leg globs bin/.
+#    ponytail: RENAME-over-existing untested on Windows (server builds are the
+#    mediasoup-linux domain; the Windows faces stay out of scope).
+function(_mediaservo_app_swap_leg src land_name)
+    install(CODE "
+        file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/bin\")
+        set(_sw \"\${CMAKE_INSTALL_PREFIX}/bin/.swap-${land_name}\")
+        execute_process(COMMAND \"\${CMAKE_COMMAND}\" -E rm -rf \"\${_sw}\")
+        file(MAKE_DIRECTORY \"\${_sw}\")
+        file(COPY [==[${src}]==] DESTINATION \"\${_sw}\")
+        get_filename_component(_bn [==[${src}]==] NAME)
+        file(RENAME \"\${_sw}/\${_bn}\" \"\${CMAKE_INSTALL_PREFIX}/bin/${land_name}\")
+        execute_process(COMMAND \"\${CMAKE_COMMAND}\" -E rm -rf \"\${_sw}\")
+        message(STATUS \"  bin/${land_name}: staged via swap install (build assembly)\")
+    ")
+endfunction()
+
 # -- server tree: bin/{brand}-server + bin/{brand}-weaknet + reclaim + entry links --
 function(_mediaservo_app_tree_server)
     set(_exe "${CMAKE_EXECUTABLE_SUFFIX}")
@@ -69,12 +125,23 @@ function(_mediaservo_app_tree_server)
         set(_wname "mediaservo-weaknet${_exe}")
         set(_link_names "server;mediaservo-server")
     endif()
+    # cargo profile for build-mode sourcing (the host tree's same idiom).
+    string(TOLOWER "${CMAKE_BUILD_TYPE}" _profile)
+    if(NOT _profile)
+        set(_profile debug)
+    endif()
 
     # BLOCKER-1 dual-source hunt (ordered): upstream name (fresh build) -> brand
     # name (already-migrated tree: a second deploy needs no rebuild). Missing in
     # out/ = deploy precondition failure (D266: deploy does not trigger builds) —
-    # same message the CLI used to print before its copy loop.
-    set(_candidates "${MEDIASERVO_SERVER_OUT_DIR}/bin/mediaservo-server${_exe}")
+    # same message the CLI used to print before its copy loop. Build assembly
+    # prepends the just-compiled target/{profile} artifact so it always wins over
+    # any previous build's out/bin residue.
+    set(_candidates "")
+    if(MEDIASERVO_APP_STAGING STREQUAL "build")
+        list(APPEND _candidates "${MEDIASERVO_REPO_ROOT}/target/${_profile}/mediaservo-server${_exe}")
+    endif()
+    list(APPEND _candidates "${MEDIASERVO_SERVER_OUT_DIR}/bin/mediaservo-server${_exe}")
     if(MEDIASERVO_BRAND)
         list(APPEND _candidates "${MEDIASERVO_SERVER_OUT_DIR}/bin/${_sname}")
     endif()
@@ -94,12 +161,23 @@ function(_mediaservo_app_tree_server)
     # same-name landing is a file(INSTALL) no-op (measured on this cmake) — the
     # upstream->brand migration becomes copy + sweep reclaim (final bytes
     # identical; the transient double name is documented in the SR7 commit).
-    install(PROGRAMS "${_src}" DESTINATION bin RENAME "${_sname}")
+    # Build mode sources from target/ (never a same-name truncation of a live
+    # out/bin binary) and lands through the swap leg instead.
+    if(MEDIASERVO_APP_STAGING STREQUAL "build")
+        _mediaservo_app_swap_leg("${_src}" "${_sname}")
+    else()
+        install(PROGRAMS "${_src}" DESTINATION bin RENAME "${_sname}")
+    endif()
 
     # weaknet dual source + target/ fallback + absent = WARN skip ([bF4 bF5] —
     # never blocks the server main flow; the oxfile conditional-render predicate
     # belongs to Rust init, nailed by M-1 — cmake only settles the data plane).
-    set(_wcands "${MEDIASERVO_SERVER_OUT_DIR}/bin/mediaservo-weaknet${_exe}")
+    # Build mode puts the freshly compiled target/{profile} binary first.
+    set(_wcands "")
+    if(MEDIASERVO_APP_STAGING STREQUAL "build")
+        list(APPEND _wcands "${MEDIASERVO_REPO_ROOT}/target/${_profile}/mediaservo-weaknet${_exe}")
+    endif()
+    list(APPEND _wcands "${MEDIASERVO_SERVER_OUT_DIR}/bin/mediaservo-weaknet${_exe}")
     if(MEDIASERVO_BRAND)
         list(APPEND _wcands "${MEDIASERVO_SERVER_OUT_DIR}/bin/${_wname}")
     endif()
@@ -113,7 +191,11 @@ function(_mediaservo_app_tree_server)
         endif()
     endforeach()
     if(_wsrc)
-        install(PROGRAMS "${_wsrc}" DESTINATION bin RENAME "${_wname}")
+        if(MEDIASERVO_APP_STAGING STREQUAL "build")
+            _mediaservo_app_swap_leg("${_wsrc}" "${_wname}")
+        else()
+            install(PROGRAMS "${_wsrc}" DESTINATION bin RENAME "${_wname}")
+        endif()
     else()
         message(WARNING
             "weaknet binary absent from all locations (out/server/bin and target/) — "
@@ -181,6 +263,9 @@ function(_mediaservo_app_tree_server)
     # prefix relocatable; a filesystem without symlink support falls back to a
     # copy (python parity). Old-brand root links pointing into THIS bin/ are
     # reclaimed (touch only symlinks resolving into <prefix>/bin, never dirs).
+    # Build assembly NEVER registers these legs: the delivery tree stays
+    # bin/etc/web exactly like python's build staged it (deploy adds links).
+    if(NOT MEDIASERVO_APP_STAGING STREQUAL "build")
     install(CODE "
         set(_ln [==[${_link_names}]==])
         foreach(_n IN LISTS _ln)
@@ -223,6 +308,13 @@ function(_mediaservo_app_tree_server)
             endif()
         endforeach()
     ")
+    endif()
+
+    # build assembly: the web move rides the SAME --install pass (registered after
+    # the bin legs; python staged web first — one pass, end state identical).
+    if(MEDIASERVO_APP_STAGING STREQUAL "build")
+        _mediaservo_app_web_legs()
+    endif()
 endfunction()
 
 # -- host tree: the 8 branded app bins + reclaim + entry link (SR7 T3) --

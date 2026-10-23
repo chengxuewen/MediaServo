@@ -121,25 +121,13 @@ def _ensure_admin_dist() -> None:
     _run_or_exit(["pnpm", "build:admin"], cwd=str(ROOT / "www"))
 
 
-def _stage_web_to_out() -> None:
-    """Merge dist into the out/server/web tree (frontend-process-split T2 — the only web consumer is the server deployment unit,
-    single tree = single tar = single deploy; the Caddy static root points here)."""
-    src = ROOT / "www" / "apps" / "admin" / "dist"
-    dst = _out_root() / "server" / "web"
-    if not (src / "index.html").exists():
-        print(f"Error: no artifacts in {src} — pnpm build:admin not run or failed", file=sys.stderr)
-        sys.exit(2)
-    if dst.exists():
-        shutil.rmtree(dst)
-    shutil.copytree(src, dst)
-    n = sum(1 for x in dst.rglob("*") if x.is_file())
-    print(f"web deliverables staged: out/server/web/ ({n} files — Caddy static root)")
-
-
 def _cmd_build_web() -> None:
-    """build web — frontend-only fast lane: incremental pnpm by mtime → out/server/web (does not touch cargo)."""
+    """build web — frontend-only fast lane: incremental pnpm by mtime → out/server/web
+    (does not touch cargo). SR6 batch-5: the placement rides the app-tree cmake face
+    (staging=web) — the retired _stage_web_to_out's rmtree+copytree is its REMOVE-leg +
+    install(DIRECTORY) pair; the vite INVOCATION stays here (language-native builder, F30)."""
     _ensure_admin_dist()
-    _stage_web_to_out()
+    _cmake_app_install(_out_root() / "server", "server", "", False, staging="web")
 
 
 
@@ -147,10 +135,14 @@ def _cmd_build_web() -> None:
 
 
 def _build_stage_weaknet(release: bool) -> None:
-    """build server assembly step: compile weaknet + stage out/server/bin/{brand}-weaknet (single-point branding —
-    after the PIT-191 root fix, build writes the final name directly, making deploy's rename a no-op on equal values). Profile follows --release propagation.
-    Failure only WARNs and does not block the server main flow (weaknet-server-integration design §D1 [bF4 bF5] —
-    running it last would take the mediasoup hung-build tree's exit guilt-by-association; on this machine recorded as [BA-15 tree-hang endorsed by CI])."""
+    """build server step 1 (ordering contract [bF4 bF5 BA-15]): cargo-compile weaknet into
+    target/{profile}. SR6 batch-5: the branded placement into out/server/bin/{brand}-weaknet
+    rides the app-tree cmake row — staging=build hunts the FRESH target binary first and an
+    absent artifact is the same WARN-skip polarity this function carried (compile WARN here,
+    placement WARN in the row). Profile follows --release propagation. Failure only WARNs and
+    does not block the server main flow (weaknet-server-integration design §D1 [bF4 bF5] —
+    running it last would take the mediasoup hung-build tree's exit guilt-by-association;
+    on this machine recorded as [BA-15 tree-hang endorsed by CI])."""
     cmd = ["cargo", "build"] + (["--release"] if release else []) + ["-p", "mediaservo-weaknet"]
     try:
         code = _run(cmd)
@@ -158,37 +150,17 @@ def _build_stage_weaknet(release: bool) -> None:
         print(f"WARN: weaknet staging skipped (cargo unavailable: {e}) — not blocking the server build", file=sys.stderr)
         return
     if code != 0:
-        print(f"WARN: weaknet compile failed (rc={code}) — not blocking the server build; after troubleshooting, re-run build server to complete staging", file=sys.stderr)
-        return
-    src = ROOT / "target" / ("release" if release else "debug") / _exe_name("mediaservo-weaknet")
-    if not src.exists():
-        print(f"WARN: weaknet compiled but the artifact is missing at {src} — not staging", file=sys.stderr)
-        return
-    # PIT-191 root-fix isomorphic extension: out/server/bin is the live cluster directory and the unit points at the brand name — build writing the upstream name
-    # = freshly compiled binaries never take effect (dual-name drift; the 09-10 weaknet single-name fix only covered the deploy side). Resolution order same as server staging.
-    bin_dir = _out_root() / "server" / "bin"
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    brand = os.environ.get("MEDIASERVO_BRAND", "").strip() or _derive_brand_server(bin_dir)
-    wname = _weaknet_bin_name(brand)
-    tmp = bin_dir / (wname + ".new")
-    shutil.copy2(src, tmp)
-    os.replace(tmp, bin_dir / wname)
-    if brand:
-        legacy_w = bin_dir / _exe_name("mediaservo-weaknet")
-        if legacy_w.exists():
-            legacy_w.unlink()
-            print("  reclaimed legacy sibling name mediaservo-weaknet (the unit only recognizes the brand name)", file=sys.stderr)
-    print(f"weaknet staged: out/server/bin/{wname}")
+        print(f"WARN: weaknet compile failed (rc={code}) — not blocking the server build; "
+              "the app-tree weaknet row WARNs if nothing stageable is found (re-run build server after troubleshooting)", file=sys.stderr)
 
 
 def _cmd_build_server(image: str | None = None, native: bool = False, release: bool = False) -> None:
     """build server: default native (user ruling B — no mode written = native) | --image runtime|dev = Docker image (--native kept as compat alias)."""
-    # weaknet staging comes first (design §D1 [bF4 bF5 BA-15]): it must precede the server cargo build — mediasoup
+    # weaknet compile comes first (design §D1 [bF4 bF5 BA-15]): it must precede the server cargo build — mediasoup
     # hangs in that posture don't guilt-by-association it; and its own failure only WARNs, never blocking server (separate try).
     _build_stage_weaknet(release)
     if native or image is None:   # default native; Docker only when --image is explicit
         _ensure_admin_dist()      # incremental frontend build by mtime (the Docker path handles it in the Dockerfile)
-        _stage_web_to_out()       # after T3, default = no embedding; dist enters deliverables as a file tree (out/server/web)
         _check("cargo", "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat")
         if not os.environ.get("MESON"):
             print("Error: MESON environment variable not set — invoke via ./mediaservo.sh (source pixi-shell.sh injects the activation env)", file=sys.stderr)
@@ -202,24 +174,21 @@ def _cmd_build_server(image: str | None = None, native: bool = False, release: b
         env.pop("MESON_ARGS", None)
         env.pop("MESON", None)
         _run_or_exit(cmd, env=env)
-        # stage into out/server/bin/ (symmetric with build host/bindings — out = unified release root)
-        server_bin = ROOT / "target" / ("release" if release else "debug") / "mediaservo-server"
-        if server_bin.exists():
-            # PIT-191 root fix: single-point brand in staging (resolution order shared with deploy: env MEDIASERVO_BRAND →
-            # in-tree *-server derivation → upstream name). out/server/bin is the **live cluster directory** — build writing the legacy
-            # name while the unit points at the brand name = the cluster silently runs the old binary (PIT-191 incident surface; same root as the 09-10 weaknet single-name change).
-            bin_dir = _out_root() / "server" / "bin"
-            bin_dir.mkdir(parents=True, exist_ok=True)
-            brand = os.environ.get("MEDIASERVO_BRAND", "").strip() or _derive_brand_server(bin_dir)
-            deployed, base = _server_bin_names(brand)
-            tmp = bin_dir / (deployed + ".new")
-            shutil.copy2(server_bin, tmp)
-            os.replace(tmp, bin_dir / deployed)
-            legacy = bin_dir / _exe_name("mediaservo-server")
-            if brand and legacy.exists():
-                legacy.unlink()
-                print("  reclaimed legacy sibling name mediaservo-server (single-name bin — the unit only recognizes the brand name)", file=sys.stderr)
-            print(f"server delivery layout staged: out/server/bin/{base} ({server_bin.stat().st_size // 1024} KB)")
+        # SR6 batch-5: the assembly (bin + weaknet + web tree + brand reclaim) rides the
+        # SR7 app-tree face EXACTLY like deploy does — _cmake_app_install with staging=build:
+        # swap-install rows for the FRESH target/{profile} binaries (the atomic .new/
+        # os.replace semantics of the retired copy loop — build must never truncate a live
+        # cluster's running bin, deploy may only because it stops first), the whitelist
+        # reclaim leg replaces the legacy-name unlinks, and the web move rides the same
+        # pass (retired _stage_web_to_out). No root entry shortcuts: a build-staged
+        # delivery tree stays bin/etc/web (the deploy landing adds the links).
+        # PIT-191 single-point branding stays CLI-resolved (env → in-tree derivation →
+        # upstream) and rides -DMEDIASERVO_BRAND (resolution order shared with deploy).
+        bin_dir = _out_root() / "server" / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        brand = os.environ.get("MEDIASERVO_BRAND", "").strip() or _derive_brand_server(bin_dir)
+        _cmake_app_install(_out_root() / "server", "server", brand, release, staging="build")
+        print(f"server assembly staged: out/server/ (bin/etc/web — app-tree rules, brand {brand or 'mediaservo'})")
         # ship caddy along (2026-09-29: detection only honored PATH → root fix for bare-shell start silently going --no-web) —
         # if found (PATH / in-repo pixi tree), copy it into bin/ (self-contained deployment: third probe-chain entry = bin's own directory);
         # if not found, WARN without blocking (old form: provided by PATH).
@@ -733,13 +702,19 @@ def _cmd_deploy_host(prefix: str, release: bool = False, allow_stop: bool = True
     if sys.platform == "win32":
         print("Note: Windows best-effort (not fully validated) — production deployment recommends Linux vehicles", file=sys.stderr)
 
-def _cmake_app_install(prefix_p: Path, tree: str, brand: str, release: bool) -> None:
+def _cmake_app_install(prefix_p: Path, tree: str, brand: str, release: bool,
+                       staging: str = "") -> None:
     """SR7: run the app delivery-layout install rules (cmake/MediaServoAppTree.cmake)
     into prefix_p. Configure is RE-RUN every invocation — the source-existence hunts
     (server/weaknet dual source, host per-name skip-missing) are configure-time truth
     and must never be frozen by a stale cache (PIT-189 family: never trust yesterday's
     tree). Brand and the delivery root ride cache variables (§1 rule 3: the CLI keeps
-    invoke+brand, cmake describes layout)."""
+    invoke+brand, cmake describes layout).
+    staging (SR6 batch-5, server tree): '' = deploy landing (delivery-tree-first
+    PROGRAMS rows + root entry shortcuts); build = build-server assembly (fresh
+    target/{profile} swap rows + web move, no entry links); web = build-web fast
+    lane placement only. Passed explicitly EVERY invocation so a stale cache value
+    can never flip a verb's mode."""
     # Dedicated binaryDir (preset default's recipe, -B override): the app cache
     # vars must NEVER land in build/presets/default — a later plain IDE/gates
     # configure of that tree would inherit a stale MEDIASERVO_APP_TREE from the
@@ -748,6 +723,7 @@ def _cmake_app_install(prefix_p: Path, tree: str, brand: str, release: bool) -> 
     cfg = ["cmake", "--preset", "default", "-B", str(app_tree),
            f"-DMEDIASERVO_APP_TREE={tree}",
            f"-DMEDIASERVO_BRAND={brand}",
+           f"-DMEDIASERVO_APP_STAGING={staging}",
            f"-DCMAKE_BUILD_TYPE={'Release' if release else 'Debug'}"]
     if tree == "server":
         cfg.append(f"-DMEDIASERVO_SERVER_OUT_DIR={_out_root() / 'server'}")

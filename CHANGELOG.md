@@ -15,6 +15,24 @@ teams); for development process details, consult git log directly. Newest versio
 ### Changed
 ### Changed
 ### Changed
+- [deploy] `build server` / `build web` assembly now rides the SR7 app-tree cmake
+  rules (SR6 batch-5 face 1). `_cmd_build_server` hand-laid no more: the bin
+  copy/swap/legacy-reclaim block and `_build_stage_weaknet`'s branded placement
+  are deleted (that step is now a pure cargo compile with the same WARN-only
+  polarity), `_stage_web_to_out` is retired (dist -> web moves as a rm -rf leg +
+  install(DIRECTORY) pair), and one `cmake --install` pass lays
+  bin/{brand}-server, bin/{brand}-weaknet and web/. New cache knob
+  `MEDIASERVO_APP_STAGING`: '' = deploy landing rows unchanged; `build` = fresh
+  target/{profile} artifacts hunted first, landed through swap legs (file(COPY)
+  + file(RENAME) = the atomic .new/os.replace semantics — build must never
+  truncate a live cluster's running binary; deploy may only because it stops
+  first) and NO root entry shortcuts (a build-staged tree stays bin/etc/web,
+  exactly python's shape); `web` = placement-only lane for `build web` (the
+  vite/pnpm INVOCATION stays CLI-side, language-native per F30). Judge: fresh
+  `build web && build server && build bindings` into a temp out root — 63/63
+  file name+md5 set and 8/8 symlink pairs byte-identical to the pre-migration
+  baseline except the documented pip-owned artifacts (wheel, RECORD,
+  direct_url.json, 5 __pycache__ pyc — rebuilt per run even pre-change).
 - [deploy] SR7 T4 call-site consolidation: `deploy server|host` = brand-resolve →
   (pre-bF3-compatible) stop-oracle + one cmake configure/install pass
   (dedicated `build/app-tree` dir; the layout rides the MediaServoAppTree rules) →
