@@ -4,7 +4,7 @@ Lazy submodule loading (PEP 562): when only some SDKs are installed (install bin
 uninstalled SDKs only error on explicit import, without affecting the installed SDKs.
 """
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 __all__ = ["field", "link", "deck", "MediaServoError", "__version__"]
 
 from . import _ffi  # noqa: F401  (shared ctypes layer; MediaServoError re-exported at top level)
