@@ -4,9 +4,8 @@ The thin shell (mediaservo.sh/.bat) guarantees this script runs after the pixi e
 PATH/LIBCLANG_PATH are already injected in the environment; subprocess calls cargo/docker directly.
 Platform differences exist in only two places: e2e (bash scripts) and clean (delete commands).
 
-Usage: mediaservo [-h] {build,run example,test example,package} ... — the ops verbs
-(up down logs status clean config deploy e2e test-doctor-list …) live in
-mediaservo.sh (bash-owned, SR6); the -h epilog lists the split.
+Usage: mediaservo [-h] package ... — everything else is bash-owned
+(mediaservo.sh, SR6 batch-beta-2); the -h epilog lists the split.
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-COMPOSE_BASE = ["docker", "compose", "-f", "docker-compose.dev.yml"]
 
 
 # Delivery target -> version-source crate (F12: four independent version sources, packaging-side wiring; V1b four-package naming reuses this table).
@@ -42,35 +40,6 @@ def _crate_version(crate: str) -> str:
                 return _workspace_version()
             return line.split("=", 1)[1].strip().strip('"').split("  #")[0]
     return _workspace_version()
-
-
-def _frame_meta_wire_version() -> int:
-    """FrameMeta wire version derived from the Rust source (D243/N4 — ends version.txt floating numbers)."""
-    text = (ROOT / "crates" / "mediaservo-link" / "src" / "frame.rs").read_text()
-    m = re.search(r"pub const WIRE_VERSION: u8 = (\d+)", text)
-    if not m:
-        raise SystemExit("Error: WIRE_VERSION constant not found in frame.rs (shape drift)")
-    return int(m.group(1))
-
-
-def _token_file_version() -> int:
-    """MSTK token file format version derived from the Rust source (TokenFile::VERSION, D-H10)."""
-    text = (ROOT / "crates" / "mediaservo-link" / "src" / "token.rs").read_text()
-    m = re.search(r"pub const VERSION: u8 = (\d+)", text)
-    if not m:
-        raise SystemExit("Error: TokenFile::VERSION not found in token.rs (shape drift)")
-    return int(m.group(1))
-
-
-def _signaling_protocol_versions() -> tuple:
-    """(max, min) signaling dialect constants derived from the Rust source (C50 rule 5 / G1,
-    D-H14 closure — ends the version.txt signaling gap; same anti-drift shape as WIRE_VERSION)."""
-    text = (ROOT / "crates" / "mediaservo-common" / "src" / "protocol.rs").read_text()
-    m = re.search(r"pub const SIGNALING_PROTOCOL_VERSION: u32 = (\d+)", text)
-    n = re.search(r"pub const SIGNALING_PROTOCOL_MIN_SUPPORTED: u32 = (\d+)", text)
-    if not m or not n:
-        raise SystemExit("Error: SIGNALING_PROTOCOL_VERSION/MIN_SUPPORTED not found in protocol.rs (shape drift)")
-    return int(m.group(1)), int(n.group(1))
 
 
 def _check(tool: str, hint: str) -> None:
@@ -103,177 +72,6 @@ def _workspace_version() -> str:
     raise SystemExit("Error: workspace version not found")
 
 
-def _symlink_force(target: str, link: Path) -> None:
-    """Idempotent symlink (delete first if present)."""
-    try:
-        link.unlink()
-    except FileNotFoundError:
-        pass
-    os.symlink(target, link)
-
-
-def _cmd_build_bindings(release: bool = False) -> None:
-    """Build the three SDK cdylibs + dev .so.<MAJOR> symlinks (D241: DT_NEEDED resolution.
-
-    ruled-away (SR4 P3 audit, T0 row #2): the DEV-tree .so.<MAJOR> symlinks under
-    target/ stay python -- they are not a delivery layout concern (cmake install
-    rules own the DELIVERY tree only); terminal owner ruled at SR6 batch-4 kickoff
-    (drop vs tools-crate) per the ORPHAN GUARD table.
-
-    Staging discipline (2026-09-29): the **build artifacts** of bindings/node and bindings/python
-    (.node/.whl intermediates/_libs) all land in target/bindings-staging/ (gitignored area);
-    the source tree returns to pure source — previously artifacts were written in-place into source dirs (bad hygiene + git noise + accidental-commit risk).
-    """
-    _check("cargo", "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat")
-    staging = ROOT / "target" / "bindings-staging"
-    staging.mkdir(parents=True, exist_ok=True)
-    cmd = ["cargo", "build"]
-    if release:
-        cmd.append("--release")
-    for _sdk in ALL_SDKS:
-        cmd += ["-p", f"mediaservo-{_sdk}-c"]
-    _run_or_exit(cmd)
-    major = _workspace_version().split(".")[0]  # shim crates are workspace-inherited (S3)
-    out_dir = ROOT / ("target/release" if release else "target/debug")
-    for sdk in ALL_SDKS:
-        _symlink_force(
-            f"libmediaservo_{sdk}.so",
-            out_dir / f"libmediaservo_{sdk}.so.{major}",
-        )
-    # node bindings (napi-rs .node; FFmpeg dynamic-lib linking completed via build.rs).
-    # SR6 batch-5: the staging .node copy died with the python placement loop — the
-    # node/mediaservo rows read target/{profile} directly (cmake/MediaServoBindings.cmake).
-    _run_or_exit(["cargo", "build"] + (["--release"] if release else []) + ["-p", "mediaservo-node"])
-    # stage the delivery layout out/bindings (full SDK package mirror — completed per Momus HIGH3/Task 2.5):
-    # D241 version triple + N7 strip = cmake install rules (SR4 L1); D248 headers (C/cxx)
-    # = cmake install rules (SR4 L2); pkgconfig .pc + cmake config transport moves at
-    # SR4 L3; python WHEEL CONTENTS stay pip-side (ruled-away territory), while the
-    # node package + docs volumes ride the same cmake rows (SR6 batch-5).
-    ver = _workspace_version()   # S3: deliverable .so triple = the shims' own (workspace) version
-    major, minor, patch = ver.split(".")
-    bind_dst = _out_root() / "bindings"
-    lib_dst = bind_dst / "lib"; lib_dst.mkdir(parents=True, exist_ok=True)
-    # Stale full-version sweep (09-17 wheel-sweep family) — SR4 L4: the leg
-    # is a STALE_GLOB row on the merged polyorch_rust_install call
-    # (cmake/MediaServoBindings.cmake; keep = the twelve landed names of this
-    # install, sweep runs inside the `cmake --install` below, before the copy
-    # rows). Python no longer sweeps -- one leg, one owner.
-
-    # lib triple (D241) + N7 strip — SR4 L1: the copy/rename/link/strip legs are
-    # cmake install RULES now (cmake/MediaServoBindings.cmake -> polyorch_rust_install
-    # SOVERSION/VERSION/STRIP, supplier D46 P1/P7). The CLI only invokes; python no
-    # longer lays any of the 12 lib names (one leg, one owner). --strip is mandatory
-    # here: the STRIP CODE legs gate on CMAKE_INSTALL_DO_STRIP (install(FILES) rows
-    # are NOT covered by --strip itself — that is precisely why the legs exist).
-    _btype = "Release" if release else "Debug"
-    _bind_build = Path("build") / "presets" / "bindings"
-    # SRC reset is EXPLICIT: deploy may have left MEDIASERVO_BINDINGS_SRC in the cache;
-    # the build assembly must configure the ROWS mode, never inherit the mirror mode.
-    _run_or_exit(["cmake", "--preset", "bindings", f"-DCMAKE_BUILD_TYPE={_btype}",
-                  "-DMEDIASERVO_BINDINGS_SRC="], cwd=str(ROOT))
-    _run_or_exit(["cmake", "--install", str(_bind_build), "--prefix", str(bind_dst), "--strip"], cwd=str(ROOT))
-
-    # include/mediaservo (D248) -- SR4 L2: header staging is cmake install
-    # rules now (HEADERS_DIRECTORY per SDK call + one stock install(DIRECTORY)
-    # fan-in in cmake/MediaServoBindings.cmake). The tree form also lands the
-    # recursive cxx subtree (detail/, 3rdparty/ + NOTICE) that python rglob'd.
-
-    # SR4 L3 (#9 retired): the .pc + cmake-config renderers live on the cmake
-    # bindings surface (per-domain version stamps via cargo metadata, suite
-    # version for Config -- S3) and their TRANSPORT into the delivery tree is
-    # install(FILES) rows in cmake/MediaServoBindings.cmake, staged by the
-    # cmake --install above. The hand-suite SHAPE stays the template: the
-    # supplier EXPORT stub/wrapper cannot byte-replicate mediaservo::<sdk>
-    # INTERFACE targets + declarative COMPONENTS + per-domain SDK_LIST (L3
-    # ruling 2b). The package-half SDK_LIST re-render stays python (tar /
-    # CHANGES / manifest owner, D279 / SR6).
-
-    # python: fat wheel (.so.<major> real files inside _libs — DT_NEEDED self-resolution) + pip --prefix assembly of site-packages
-    # ruled-away (SR4 P3 audit): wheel CONTENTS are language-native packaging territory (SR4 §1.3) --
-    # the _libs copies/symlinks below feed the WHEEL, never the cmake-laid delivery layout.
-    # python wheel build tree = staging mirror (source files copied + _libs all live in staging;
-    # zero writes into the source tree bindings/python — neither the build/ cache nor _libs enter source dirs anymore)
-    # source mapping: bindings/python/mediaservo/ = pip build root (same level as pyproject) —
-    # the whole layer is a staging mirror (artifacts/cache stripped); py_src is the build root.
-    py_src = staging / "python-pkg"
-    shutil.rmtree(py_src, ignore_errors=True)
-    shutil.copytree(ROOT / "bindings" / "python" / "mediaservo", py_src,
-                    ignore=shutil.ignore_patterns("build", "__pycache__", "_libs",
-                                                  "*.egg-info", "dist", "examples"))
-    py_pkg = py_src / "mediaservo"
-    libs_src = py_pkg / "_libs"
-    libs_src.mkdir(exist_ok=True)
-    try:
-        for sdk in ("field", "link", "deck"):  # py domain = the three device-half items (client belongs to the sdk-client package; V1b prevents redundancy in the wheel)
-            so_major = libs_src / f"libmediaservo_{sdk}.so.{major}"
-            shutil.copy2(out_dir / f"libmediaservo_{sdk}.so", so_major)
-            _strip_so(so_major)  # same family: wheel-embedded _libs are immutable once baked in, so strip must be front-loaded
-            _symlink_force(f"libmediaservo_{sdk}.so.{major}", libs_src / f"libmediaservo_{sdk}.so")
-        wheel_dir = bind_dst / "wheel"  # pip -w creates the dir (batch-5: the stale-whl sweep
-        # — the 09-17 unordered-glob ENOENT guard — rode to the cmake bindings-face legs).
-        # setuptools build/ cache same-family sweep (09-17 V1b; build/ now also lives in staging — zero source-tree pollution)
-        shutil.rmtree(py_src / "build", ignore_errors=True)
-        r = subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-deps",
-                            "--no-build-isolation", "-w", str(wheel_dir), "."],
-                           cwd=str(py_src), capture_output=True, text=True)
-        if r.returncode != 0:
-            print(f"Error: wheel build failed — {r.stderr[-500:]}", file=sys.stderr)
-            sys.exit(1)
-        # force the platform tag (the wheel contains Linux .so; refuse any-tag misinstall across platforms): rewrite the Tag inside WHEEL + rename.
-        # keep the version consistent with pyproject (= the embedded dist-info) — do not force workspace ver (the old install's {ver} rename
-        # produced a dist-info version mismatch when workspace ver ≠ pyproject 0.1.0 → pip refused install — this implementation has a smaller fix surface)
-        import zipfile
-        wheel = next(wheel_dir.glob("mediaservo-*-py3-none-any.whl"))  # any-source form only
-        tag_new = f"py3-none-{_platform_tag()}"
-        with zipfile.ZipFile(wheel, "r") as z:
-            items = z.infolist()
-            data = {i.filename: z.read(i) for i in items}
-        fixed = wheel.with_name(wheel.name.replace("py3-none-any", tag_new))
-        with zipfile.ZipFile(fixed, "w") as z:
-            for i in items:
-                content = data[i.filename]
-                if i.filename.endswith(".dist-info/WHEEL"):
-                    content = content.replace(b"Tag: py3-none-any", f"Tag: {tag_new}".encode())
-                z.writestr(i, content)
-        wheel.unlink()
-        # pip --prefix does not delete old data_files (V1b client.so corpse + 10-22
-        # dist-info corpse catches): the pre-install sweep of the site-packages
-        # mediaservo/ + mediaservo-*.dist-info trees now runs as a cmake bindings-face
-        # leg in the --install pass that precedes this invocation (SR6 batch-5).
-        r2 = subprocess.run([sys.executable, "-m", "pip", "install", "--prefix",
-                             str(bind_dst), "--no-deps", str(fixed)],
-                            capture_output=True, text=True)
-        if r2.returncode != 0:
-            print(f"Error: pip install failed — {r2.stderr[-500:]}", file=sys.stderr)
-            sys.exit(1)
-    finally:
-        shutil.rmtree(libs_src, ignore_errors=True)  # clean up temp _libs (gitignore as backstop)
-
-    # SR6 batch-5: the node package (D248 layout) and the docs/sdk-cxx volumes (the
-    # remove-then-copy residue discipline) are cmake install rows on the bindings face
-    # — the python placement loops die here (one leg, one owner). The summary count
-    # below reads the LANDED tree. batch-5 ruled-away (remaining python): the py_src
-    # staging mirror + _libs feeds + tag rewrite above = wheel CONTENTS, pip territory
-    # (SR4 §1.3 verdict stands; only their stale DELIVERY sweeps moved).
-    n_docs = len(list((bind_dst / "docs" / "sdk-cxx").glob("*.md")))
-    print("bindings build complete: libmediaservo_{%s}.so version-full triple + node + python + .pc + cmake (%s)"
-          % (",".join(ALL_SDKS), "release" if release else "debug"))
-    n_lib = len([p for p in lib_dst.glob("libmediaservo_*") if p.is_file() or p.is_symlink()])
-    print(f"bindings delivery layout staged: out/bindings/ (lib {n_lib} files + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx {n_docs} volumes)")
-
-
-# client added to the roster (V2 completion knife 09-17): C surface 15 symbols + cxx RAII headers in repo, pc.in in place — previously ALL_SDKS
-# lacking client made the delivery surface = zero (find_package/pkg-config/include all absent). All downstream steps are driven by this constant + template generalization.
-ALL_SDKS = ("field", "link", "deck", "client")
-
-
-# D-H13: host package = 8 process binaries (host CLI + 7 daemons; the host-legacy old single process is not packaged)
-HOST_BINS = (
-    "mediaservo-host", "host-agent", "host-capturer", "host-streamer",
-    "host-recorder", "host-controller", "host-emergency", "host-audio",
-)
-
-
 def _resolve_oxmgr_or_die(role: str) -> Path:
     """oxmgr hard-dependency source hunt (config-unification pre-fix, D-H13 reinforcement): PATH → ~/.cache/oxmgr
     cache reclaim → deploy fails when both are missing. The old "non-fatal hint" semantics was a deployment trap — with oxmgr missing from bin/,
@@ -298,18 +96,6 @@ def _exe_name(name: str) -> str:
     return name + (".exe" if sys.platform == "win32" else "")
 
 
-
-def _strip_so(path: Path) -> None:
-    """strip --strip-unneeded on delivery-tree .so real files (N7 09-18 measurement: the debug cdylib was the entire
-    cause of the fat wheel's 528MB — not FFmpeg — uncompressed 27M→~1M scale). Dynamic symbols (.dynsym / exported ABI) untouched,
-    check-abi-drift and consumer ldd are unaware; only debug sections are removed. The target/ dev tree is untouched (gdb needs stacks)."""
-    if not shutil.which("strip"):
-        return
-    if subprocess.run(["strip", "--strip-unneeded", str(path)],
-                      capture_output=True, check=False).returncode != 0:
-        print(f"  warning: strip {path.name} failed (skipped — delivery size not optimized)")
-
-
 def _derive_brand_server(bin_dir: Path) -> str:
     """server tree brand derivation (branding-completion BLOCKER-2): glob bin/*-server excluding the upstream name.
     Do not reuse the retired _derive_brand (it only recognized *-agent; the server tree would always return ""). Multiple brands coexisting: take the first (same known limit as the host arm in mediaservo.sh)."""
@@ -325,13 +111,6 @@ def _derive_brand_server(bin_dir: Path) -> str:
 # predicates, .bak rotation and merge_manual_env re-absorption (baked values win, [lck-F4]
 # half-migration guard preserved by construction: one rotation, one merge, inside init).
 # WEAKNET_OXFILE_APP's duty lives on as the Rust constant templates::WEAKNET_APP [mn10].
-
-
-def _platform_tag() -> str:
-    """wheel platform tag (Linux x86_64 → linux_x86_64; other platforms best-effort)."""
-    import platform
-    mach = platform.machine().lower().replace("-", "_")
-    return f"{platform.system().lower()}_{mach}"
 
 
 # ── package: CPack release tars (D-H13 / SR6 P1) ─────────────────────────
@@ -513,20 +292,6 @@ def main() -> None:
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    build_p = sub.add_parser("build", help="build <target> [--image runtime|dev]: all|web|host|server|client|bindings (default all; server = non-embedded variant + one-step web assembly; web = frontend-only fast lane; only --image takes the Docker path)")
-    build_p.add_argument("target", nargs="?", choices=["bindings"], default="all")
-    build_p.add_argument("--release", action="store_true", help="release build (bindings: target/release, strip+LTO)")
-    grp = build_p.add_mutually_exclusive_group()
-    grp.add_argument("--image", choices=["runtime", "dev"], default=None,
-                     help="build server only: Docker image target (runtime = production slim delivery image; dev = toolchain image)")
-    grp.add_argument("--native", action="store_true",
-                     help="build server only: native compile (pixi toolchain — first run needs network for meson wraps; multi-IP announcement takes effect at the run stage)")
-    build_p.add_argument("names", nargs="*", metavar="NAME",
-                        help="build example only: example names (omit = all; list example shows the roster)")
-    # no func= auto-dispatch (SR6 batch-beta-2: build handled by the explicit
-    # `if args.command == "build"` arm below; _cmd_build was retired to bash).
-
-
 
     package_p = sub.add_parser("package", help="package <target>: host|server|sdk-field (device half; the old bindings name stays as a one-cycle alias)|sdk-client (cockpit half) → <dist>/<brand>-<target>-<ver>.tar.gz (D-H13/F12, includes the version contract and a versioned top-level dir)")
     package_p.add_argument("target", choices=["host", "server", "bindings", "sdk-field", "sdk-client"])
@@ -535,10 +300,7 @@ def main() -> None:
     package_p.add_argument("--release", action="store_true", help="package release artifacts (target/release, pairs with build --release)")
     package_p.set_defaults(func=_cmd_package)
     args = parser.parse_args(sys.argv[1:])
-    if args.command == "build":   # SR6 batch-beta-2: other targets are bash-owned
-        if args.target == "bindings":
-            _cmd_build_bindings(args.release)
-    elif hasattr(args, "func"):
+    if hasattr(args, "func"):
         args.func(args)
 
 

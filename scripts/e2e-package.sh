@@ -32,7 +32,7 @@ fi
 if [ ! -f target/debug/libmediaservo_field.so ] || [ ! -f target/debug/libmediaservo_link.so ] \
    || [ ! -f target/debug/libmediaservo_deck.so ] || [ ! -f bindings/node/mediaservo.node ]; then
     note "building SDK cdylibs + node binding (debug)"
-    pixi run python3 scripts/mediaservo_cli.py build bindings
+    bash ./mediaservo.sh build bindings
 fi
 
 TMP=$(mktemp -d)

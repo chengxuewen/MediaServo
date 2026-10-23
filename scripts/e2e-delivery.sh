@@ -3,14 +3,14 @@
 # ① component purity (link/field lightweight components must not have FFmpeg DT_NEEDED = V1 sdk-field componentization dependency assertion)
 # ② find_package COMPONENTS link+client: compile, link and run against real symbols (V2 drill, full form in CI)
 # ③ pkg-config version == workspace actual value (C43 parity, extended to the delivery surface)
-# Prereq: python3 scripts/mediaservo_cli.py build bindings (this script runs it itself; zero extra CI steps).
+# Prereq: ./mediaservo.sh build bindings (this script runs it itself; zero extra CI steps).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TMP=$(mktemp -d /tmp/ms-delivery.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
 FAIL=0
 
-python3 scripts/mediaservo_cli.py build bindings >/dev/null
+bash ./mediaservo.sh build bindings >/dev/null
 OUT="$PWD/out/bindings"
 VER=$(python3 -c 'import tomllib;print(tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"])')
 

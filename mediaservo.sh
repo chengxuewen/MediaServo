@@ -481,6 +481,141 @@ _ms_examples_is_lib() {  # $1=name → prints 0/1; rc1 when the example is unkno
     [ -f "$cml" ] || return 1
     if grep -q "add_library(" "$cml"; then echo 1; else echo 0; fi
 }
+
+# =============================================================================
+# SR6 batch-beta-2 -- bindings face (was _cmd_build_bindings). The DELIVERY
+# layout legs are cmake install rules (SR4 L1-L4 + SR6 batch-5 rows in
+# cmake/MediaServoBindings.cmake — one leg one owner); what stays here is the
+# cargo invocation pair, the DEV-tree .so.<MAJOR> shim links (ruled-away
+# territory: target/ dev tree is not a delivery concern — SR4 P3 audit T0 #2),
+# and the pip wheel mechanics (language-native packaging per SR4 §1.3 / N6).
+# =============================================================================
+_ms_workspace_version() {
+    # [workspace.package] version — the C43 single source (no tomllib needed)
+    sed -n '/\[workspace.package\]/,/^\[/p' "$ROOT/Cargo.toml" | sed -n 's/^version *= *"\([^"]*\)".*/\1/p' | head -1
+}
+_ms_build_bindings() {  # $1=release(0/1)
+    _ms_check cargo "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat"
+    local staging="$ROOT/target/bindings-staging" sdk
+    mkdir -p "$staging"
+    local cmd=(cargo build)
+    [ "$1" = 1 ] && cmd+=(--release)
+    # Staging discipline (2026-09-29): node/python build artifacts land under
+    # target/ (gitignored) — zero writes into the source bindings/ trees.
+    for sdk in field link deck client; do cmd+=("-p" "mediaservo-${sdk}-c"); done
+    echo "\$ ${cmd[*]}"
+    "${cmd[@]}" || exit $?
+    local major ver; ver=$(_ms_workspace_version); major=${ver%%.*}  # shim crates are workspace-inherited (S3)
+    local profile=debug; [ "$1" = 1 ] && profile=release
+    local out_dir="$ROOT/target/$profile"
+    for sdk in field link deck client; do
+        # dev .so.<MAJOR> shim (D241 DT_NEEDED resolution) — ruled-away: the
+        # target/ DEV tree, never the delivery layout
+        rm -f "$out_dir/libmediaservo_${sdk}.so.$major"
+        ln -s "libmediaservo_${sdk}.so" "$out_dir/libmediaservo_${sdk}.so.$major"
+    done
+    # node bindings (napi-rs .node; FFmpeg dynamic-lib linking done via build.rs)
+    local ncmd=(cargo build)
+    [ "$1" = 1 ] && ncmd+=(--release)
+    ncmd+=(-p mediaservo-node)
+    echo "\$ ${ncmd[*]}"
+    "${ncmd[@]}" || exit $?
+    local bind_dst="${MSRTC_OUT_ROOT:-$ROOT/out}/bindings"
+    mkdir -p "$bind_dst/lib"
+    # lib triple (D241) + N7 strip + headers + .pc/cmake transport + stale
+    # sweeps + node/docs/python placement = cmake install rows (SR4 L1-L4,
+    # batch-5). --strip is mandatory here: the STRIP CODE legs gate on
+    # CMAKE_INSTALL_DO_STRIP — install(FILES) rows are NOT covered by --strip
+    # itself, that is precisely why the legs exist. SRC reset is EXPLICIT:
+    # deploy may have left MEDIASERVO_BINDINGS_SRC in the cache; the build
+    # assembly configures ROWS mode, never inherits mirror mode.
+    local _btype=Debug; [ "$1" = 1 ] && _btype=Release
+    echo "\$ cmake --preset bindings -DCMAKE_BUILD_TYPE=$_btype -DMEDIASERVO_BINDINGS_SRC=  (cwd: $ROOT)"
+    (cd "$ROOT" && cmake --preset bindings "-DCMAKE_BUILD_TYPE=$_btype" "-DMEDIASERVO_BINDINGS_SRC=") || exit $?
+    echo "\$ cmake --install build/presets/bindings --prefix $bind_dst --strip  (cwd: $ROOT)"
+    (cd "$ROOT" && cmake --install build/presets/bindings --prefix "$bind_dst" --strip) || exit $?
+    _ms_build_pywheel "$out_dir" "$major" "$staging" "$bind_dst" || exit $?
+    local n_docs n_lib
+    n_docs=$(ls "$bind_dst"/docs/sdk-cxx/*.md 2>/dev/null | wc -l)
+    n_lib=$(ls -1 "$bind_dst/lib" 2>/dev/null | grep -c '^libmediaservo_' || true)
+    echo "bindings build complete: libmediaservo_{field,link,deck,client}.so version-full triple + node + python + .pc + cmake ($([ "$1" = 1 ] && echo release || echo debug))"
+    echo "bindings delivery layout staged: out/bindings/ (lib $n_lib files + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx $n_docs volumes)"
+}
+_ms_build_pywheel() {  # $1=out_dir $2=major $3=staging $4=bind_dst — fat wheel
+    # (_libs real files, DT_NEEDED self-resolution) + pip --prefix assembly.
+    # Ruled-away (SR4 P3 audit): wheel CONTENTS are language-native packaging
+    # territory; the _libs copies feed the WHEEL, never the cmake-laid tree.
+    local out_dir=$1 major=$2 staging=$3 bind_dst=$4
+    local py_src="$staging/python-pkg" rc=0 werr ierr sdk
+    rm -rf "$py_src"
+    cp -R "$ROOT/bindings/python/mediaservo" "$py_src"
+    # ignore= build, __pycache__, _libs, *.egg-info, dist, examples (staging
+    # mirror of the pip build root — zero writes into the source tree)
+    rm -rf "$py_src/build" "$py_src/__pycache__" "$py_src/_libs" "$py_src/dist" "$py_src/examples" "$py_src"/*.egg-info
+    local libs_src="$py_src/mediaservo/_libs"
+    mkdir -p "$libs_src"
+    local wheel_dir="$bind_dst/wheel"  # pip -w creates it; stale-whl sweep rides the cmake bindings-face legs
+    for sdk in field link deck; do  # py domain = the three device-half items (client is the sdk-client package — V1b redundancy guard)
+        cp -p "$out_dir/libmediaservo_${sdk}.so" "$libs_src/libmediaservo_${sdk}.so.$major"
+        # N7: wheel-embedded _libs are immutable once baked — strip must be front-loaded
+        if command -v strip >/dev/null 2>&1; then
+            strip --strip-unneeded "$libs_src/libmediaservo_${sdk}.so.$major" 2>/dev/null || echo "  warning: strip libmediaservo_${sdk}.so.$major failed (skipped — delivery size not optimized)"
+        fi
+        rm -f "$libs_src/libmediaservo_${sdk}.so"
+        ln -s "libmediaservo_${sdk}.so.$major" "$libs_src/libmediaservo_${sdk}.so"
+    done
+    # setuptools build/ cache same-family sweep (09-17 V1b; build/ lives in staging)
+    rm -rf "$py_src/build"
+    werr=$( (cd "$py_src" && python3 -m pip wheel --no-deps --no-build-isolation -w "$wheel_dir" .) 2>&1 >/dev/null ) || rc=1
+    if [ "$rc" != 0 ]; then
+        rm -rf "$libs_src"
+        echo "Error: wheel build failed — ${werr: -500}" >&2
+        exit 1
+    fi
+    # Force the platform tag (the wheel contains Linux .so — refuse any-tag
+    # misinstall across platforms): rewrite the Tag inside WHEEL + rename.
+    # H3 interpreter-inline exception (the single surviving python in the build
+    # driver): no installed tool face restamps wheel tags (uv/wheel-cli absent —
+    # measured 2026-10-23); zipfile logic kept byte-faithful to the retired leg,
+    # RECORD untouched by the same design (version stays = pyproject-embedded).
+    local tag name wheel fixed
+    tag="$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | tr '-' '_')"
+    wheel=$(ls -1 "$wheel_dir"/mediaservo-*-py3-none-any.whl 2>/dev/null | head -1)
+    if [ -z "$wheel" ]; then
+        rm -rf "$libs_src"
+        echo "Error: wheel build produced no py3-none-any wheel in $wheel_dir" >&2
+        exit 1
+    fi
+    name=$(basename "$wheel")
+    fixed="$wheel_dir/${name/py3-none-any/py3-none-$tag}"
+    python3 - "$wheel" "$fixed" "$tag" <<'PYRESTAMP' || rc=1
+import os, sys, zipfile
+src, dst, tag = sys.argv[1], sys.argv[2], sys.argv[3]
+with zipfile.ZipFile(src, "r") as z:
+    items = z.infolist()
+    data = {i.filename: z.read(i) for i in items}
+with zipfile.ZipFile(dst, "w") as z:
+    for i in items:
+        content = data[i.filename]
+        if i.filename.endswith(".dist-info/WHEEL"):
+            content = content.replace(b"Tag: py3-none-any", f"Tag: py3-none-{tag}".encode())
+        z.writestr(i, content)
+os.unlink(src)
+PYRESTAMP
+    if [ "$rc" != 0 ]; then
+        rm -rf "$libs_src"
+        exit 1
+    fi
+    # pip --prefix leaves old data_files (V1b corpse family) — the pre-install
+    # sweep of site-packages mediaservo/ + dist-info runs as a cmake bindings-face
+    # leg in the --install pass that precedes this invocation (SR6 batch-5).
+    ierr=$( (cd "$ROOT" && python3 -m pip install --prefix "$bind_dst" --no-deps "$fixed") 2>&1 >/dev/null ) || rc=1
+    rm -rf "$libs_src"  # clean up temp _libs (gitignore as backstop) — finally-parity
+    if [ "$rc" != 0 ]; then
+        echo "Error: pip install failed — ${ierr: -500}" >&2
+        exit 1
+    fi
+}
 _ms_build_example() {  # $1=release(0/1); rest = example names (empty = all)
     local release=$1; shift
     local profile=debug; [ "$release" = 1 ] && profile=release
@@ -585,7 +720,7 @@ case "${1:-}" in
         if [ -n "$image" ] && [ "$tgt" != server ]; then echo "build --image only supports build server (current target=$tgt)" >&2; exit 2; fi
         if [ "$native" = 1 ] && [ "$tgt" != server ]; then echo "build --native only supports build server (current target=$tgt)" >&2; exit 2; fi
         case "$tgt" in
-            bindings) exec python "$ROOT/scripts/mediaservo_cli.py" "${_ms_orig[@]}" ;;
+            bindings) _ms_build_bindings "$release"; exit $? ;;
             example)  _ms_build_example "$release" "${names[@]}"; exit $? ;;
             all)    _ms_build_host; _ms_build_server "" 0 0; _ms_build_client ;;
             host)   _ms_build_host ;;
