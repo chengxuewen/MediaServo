@@ -19,7 +19,7 @@
 
 # ── 1. 构建 + 打包（C22 镜像原则: host 在真机原生构建/运行, 非容器）──────────
 # [ ] pixi run cargo build -p mediaservo-host          # 8 进程二进制（host + host-*）
-# [ ] pixi run python scripts/mediaservo_cli.py package host
+# [ ] bash mediaservo.sh package host   (python CLI retired SR6 batch-beta-2; Windows-day owns a native twin)
 # [ ] 断言 dist/mediaservo-host-<ver>.tar.gz 存在
 #     备注: Windows 下二进制为 .exe（_exe_name 已处理）; oxmgr 需 npm install -g oxmgr
 
@@ -47,7 +47,7 @@
 # [ ] bin\host.exe stop C:\mediaservo-host      # 无已管理进程
 
 # ── 5. SDK 包（仅结构验证, 消费方为 Linux 车端时跳过运行）────────────────────
-# [ ] pixi run python scripts/mediaservo_cli.py package bindings
+# [ ] bash mediaservo.sh package bindings   (python CLI retired SR6 batch-beta-2; Windows-day owns a native twin)
 # [ ] tar tzf dist/mediaservo-sdk-<ver>.tar.gz 断言关键文件:
 #     lib/libmediaservo_*.so*（Windows 为 .dll 时另行评估）— 实际消费以 Linux 为主（D240）
 

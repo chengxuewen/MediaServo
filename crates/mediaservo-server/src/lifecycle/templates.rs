@@ -1,9 +1,11 @@
 //! Lifecycle templates and pure render functions (frontend-process-split T16 -- single template source M4).
 //!
-//! **Integration point (follow-up, for the orchestrator)**: the etc/ assembly section of
-//! `scripts/mediaservo_cli.py::_cmd_build_server` (currently derived from `config/server.docker.yaml` + copying
-//! `config/{accounts,devices}.yaml`) should delegate to `mediaservo-server init <out/server>` (or share this module's constants),
-//! eliminating the second copy of template drift. Until delegation lands, this module and the server runtime templates anchor the same schema via comments.
+//! **Integration point (follow-up, for the orchestrator)**: the etc/ seeding section of
+//! `mediaservo.sh::_ms_build_server` (bash-owned since SR6 batch-beta-2; derived from
+//! `config/server.docker.yaml` + copying `config/{accounts,devices}.yaml`) should delegate to
+//! `mediaservo-server init <out/server>` (or share this module's constants), eliminating the
+//! second copy of template drift. Until delegation lands, this module and the server runtime
+//! templates anchor the same schema via comments.
 //!
 //! This module has **zero process side effects** (no spawn, no state read beyond env); all pure functions are deterministically unit-testable.
 
