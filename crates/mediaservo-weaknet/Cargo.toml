@@ -18,6 +18,9 @@ futures-core = "0.3"
 rust-embed = { version = "8", features = ["debug-embed"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "process", "sync", "net"] }
 
+# measure (judge port): timestamp parsing only; 0.4 lock-present, zero new transitive deps
+chrono = "0.4"
+
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }  # pinned 0.4: the lock holds both 0.4/0.5; axum 0.7's routing oneshot contract goes through 0.4 (T6 api_matrix; util = ServiceExt, non-default, must be explicit)
 

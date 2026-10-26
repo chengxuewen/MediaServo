@@ -1,0 +1,5 @@
+{"t_utc":"2026-10-23T03:00:01Z","ev":"scenario-start","note":"synthetic nan-recovery pair (no zeroing step)"}
+{"t_utc":"2026-10-23T03:00:11Z","ev":"baseline-done","note":"window_s=10"}
+{"t_utc":"2026-10-23T03:00:16Z","ev":"set","before":"rtt=0ms jitter=0ms loss=0%/uniform rate=sentinel reorder=0 seed=off","after":"rtt=200ms jitter=0ms loss=30%/uniform rate=sentinel reorder=0 seed=off"}
+{"t_utc":"2026-10-23T03:00:16Z","ev":"scenario-step","note":"at_s=5 actual_s=5 drift_le_1s=1"}
+{"t_utc":"2026-10-23T03:00:26Z","ev":"scenario-end","note":"elapsed_s=25"}

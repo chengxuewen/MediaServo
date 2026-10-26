@@ -1,0 +1,8 @@
+room             base_kbps fault_kbps retention recov_kbps recover_ratio  verdict
+vehicle_test1          608         75      0.12        nan           nan  FAIL
+vehicle_test2          760         91      0.12        nan           nan  FAIL
+vehicle_test4          328         56      0.17        nan           nan  FAIL
+vehicle_test5          571         69      0.12        nan           nan  FAIL
+vehicle_test6          602         61      0.10         86          0.14  FAIL
+vehicle_test8          290         61      0.21         88          0.30  FAIL
+# retention 判据口径：对照流（非 --stream 定向对象）应 ≥0.95；定向流塌陷为预期

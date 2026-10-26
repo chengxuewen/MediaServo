@@ -1,0 +1,13 @@
+{"t_utc":"2026-09-08T01:04:19Z","ev":"apply","rtt_ms":100,"jitter_ms":0,"loss":"0%","rate_mbps":"","ports":"20000 ","seed":"","stream":""}
+{"t_utc":"2026-09-08T01:04:19Z","ev":"scenario-start","note":"/home/maxsense/Documents/ms_rtc/scripts/weaknet.d/scenarios/example-cell-edge-40s.yaml baseline=10s steps_dur=33s"}
+{"t_utc":"2026-09-08T01:04:29Z","ev":"baseline-done","note":"window_s=10"}
+{"t_utc":"2026-09-08T01:04:31Z","ev":"set","before":"rtt=100ms jitter=0ms loss=0%/uniform rate=sentinel reorder=0 seed=off","after":"rtt=100ms jitter=0ms loss=0%/uniform rate=sentinel reorder=0 seed=off"}
+{"t_utc":"2026-09-08T01:04:31Z","ev":"scenario-step","note":"at_s=0 actual_s=0 drift_le_1s=1"}
+{"t_utc":"2026-09-08T01:04:37Z","ev":"set","before":"rtt=100ms jitter=0ms loss=0%/uniform rate=sentinel reorder=0 seed=off","after":"rtt=150ms jitter=0ms loss=5%/uniform rate=sentinel reorder=0 seed=off"}
+{"t_utc":"2026-09-08T01:04:37Z","ev":"scenario-step","note":"at_s=6 actual_s=6 drift_le_1s=1"}
+{"t_utc":"2026-09-08T01:04:43Z","ev":"set","before":"rtt=150ms jitter=0ms loss=5%/uniform rate=sentinel reorder=0 seed=off","after":"rtt=200ms jitter=0ms loss=10%/uniform rate=2 reorder=0 seed=off"}
+{"t_utc":"2026-09-08T01:04:44Z","ev":"scenario-step","note":"at_s=12 actual_s=12 drift_le_1s=1"}
+{"t_utc":"2026-09-08T01:04:49Z","ev":"set","before":"rtt=200ms jitter=0ms loss=10%/uniform rate=2 reorder=0 seed=off","after":"rtt=0ms jitter=0ms loss=0%/uniform rate=2 reorder=0 seed=off"}
+{"t_utc":"2026-09-08T01:04:49Z","ev":"scenario-step","note":"at_s=18 actual_s=18 drift_le_1s=1"}
+{"t_utc":"2026-09-08T01:05:01Z","ev":"scenario-end","note":"elapsed_s=32"}
+{"t_utc":"2026-09-08T01:05:01Z","ev":"clear"}

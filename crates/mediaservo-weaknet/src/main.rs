@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 use mediaservo_weaknet::config;
 use mediaservo_weaknet::engine::{self, ApplyRequest, Env, Fail, Replay, Verify, Wn};
+use mediaservo_weaknet::measure;
 use mediaservo_weaknet::fuse;
 use mediaservo_weaknet::scenario;
 use mediaservo_weaknet::scope::{self, Targeting};
@@ -67,6 +68,16 @@ enum Cmd {
     Down,
     /// = status --watch
     Watch,
+    /// Verdict table for a probe/timeline pair (judge port; frozen goldens = truth; rc 1 = any FAIL)
+    Measure {
+        /// probe.jsonl (browser rows) path
+        probe: String,
+        /// timeline.jsonl (scenario events) path
+        timeline: String,
+        /// retention tolerance for the PASS verdict (default 0.95)
+        #[arg(long)]
+        tol: Option<f64>,
+    },
     /// Hidden subcommand: the watchdog's self re-exec executor (design §fuse; spawner passes current_exe + this command)
     #[command(name = "__watchdog", hide = true)]
     Watchdog {
@@ -233,6 +244,14 @@ fn dispatch(cmd: Cmd) -> Wn<()> {
         Cmd::Clear => {
             println!("{}", engine::clear(&dirs, &env, false)?);
             Ok(())
+        }
+        Cmd::Measure { probe, timeline, tol } => {
+            let mut argv = vec![probe, timeline];
+            if let Some(t) = tol {
+                argv.push("--tol".to_string());
+                argv.push(format!("{t}"));
+            }
+            measure::measure_cmd(&argv)
         }
         Cmd::Serve(args) => {
             let rt = tokio::runtime::Builder::new_multi_thread()

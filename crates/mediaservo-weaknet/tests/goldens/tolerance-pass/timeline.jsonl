@@ -1,0 +1,7 @@
+{"t_utc":"2026-10-23T04:00:01Z","ev":"scenario-start","note":"synthetic tolerance-edge PASS pair (--tol default)"}
+{"t_utc":"2026-10-23T04:00:11Z","ev":"baseline-done","note":"window_s=10"}
+{"t_utc":"2026-10-23T04:00:16Z","ev":"set","before":"rtt=0ms jitter=0ms loss=0%/uniform rate=sentinel reorder=0 seed=off","after":"rtt=50ms jitter=0ms loss=2%/uniform rate=sentinel reorder=0 seed=off"}
+{"t_utc":"2026-10-23T04:00:16Z","ev":"scenario-step","note":"at_s=5 actual_s=5 drift_le_1s=1"}
+{"t_utc":"2026-10-23T04:00:36Z","ev":"set","before":"rtt=50ms jitter=0ms loss=2%/uniform rate=sentinel reorder=0 seed=off","after":"rtt=0ms jitter=0ms loss=0%/uniform rate=sentinel reorder=0 seed=off"}
+{"t_utc":"2026-10-23T04:00:36Z","ev":"scenario-step","note":"at_s=25 actual_s=25 drift_le_1s=1"}
+{"t_utc":"2026-10-23T04:00:41Z","ev":"scenario-end","note":"elapsed_s=40"}

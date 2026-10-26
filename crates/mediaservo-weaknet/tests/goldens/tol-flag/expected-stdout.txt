@@ -1,0 +1,4 @@
+room             base_kbps fault_kbps retention recov_kbps recover_ratio  verdict
+room-a                2000        300      0.15       1900          0.95  FAIL
+room-b                1000        940      0.94        950          0.95  PASS
+# retention 判据口径：对照流（非 --stream 定向对象）应 ≥0.90；定向流塌陷为预期

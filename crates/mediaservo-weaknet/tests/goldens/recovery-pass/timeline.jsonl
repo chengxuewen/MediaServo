@@ -1,0 +1,7 @@
+{"t_utc":"2026-10-23T02:00:01Z","ev":"scenario-start","note":"synthetic recovery-PASS pair (row schema = V4-probe.jsonl 2026-09-08)"}
+{"t_utc":"2026-10-23T02:00:11Z","ev":"baseline-done","note":"window_s=10"}
+{"t_utc":"2026-10-23T02:00:16Z","ev":"set","before":"rtt=0ms jitter=0ms loss=0%/uniform rate=sentinel reorder=0 seed=off","after":"rtt=100ms jitter=0ms loss=8%/uniform rate=sentinel reorder=0 seed=off"}
+{"t_utc":"2026-10-23T02:00:16Z","ev":"scenario-step","note":"at_s=5 actual_s=5 drift_le_1s=1"}
+{"t_utc":"2026-10-23T02:00:36Z","ev":"set","before":"rtt=100ms jitter=0ms loss=8%/uniform rate=sentinel reorder=0 seed=off","after":"rtt=0ms jitter=0ms loss=0%/uniform rate=sentinel reorder=0 seed=off"}
+{"t_utc":"2026-10-23T02:00:36Z","ev":"scenario-step","note":"at_s=25 actual_s=25 drift_le_1s=1"}
+{"t_utc":"2026-10-23T02:00:41Z","ev":"scenario-end","note":"elapsed_s=40"}
