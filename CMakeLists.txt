@@ -33,6 +33,24 @@ if(MEDIASERVO_BUILD_EXAMPLES)
   add_subdirectory(bindings/cxx/examples)
 endif()
 
+# IDE bootstrap hint (ide-bootstrap plan, C''): the workspace settings file is
+# an INPUT to configure, so a failure-path hint is the only shape that can fix
+# a CMake Tools first-open that picked the system cmake. One call site at the
+# shared lane gate: any lane-bearing preset (bindings / crates / host / server
+# / all) that needs the rust toolchain and failed the probe lands here BEFORE
+# the lane functions run, so the guidance output precedes the lane FATAL.
+# Silence on every green path (a workspace that configures fine is never
+# touched -- the trigger itself is the wrong-toolchain detector).
+if(MEDIASERVO_BUILD_BINDINGS OR MEDIASERVO_BUILD_CRATES_LANES)
+  if(NOT POLYORCH_RUST_FOUND)
+    polyorch_rust_setup()   # the same probe the lanes run; result reused below
+  endif()
+  if(NOT POLYORCH_RUST_FOUND AND COMMAND polyorch_bootstrap_hint)
+    polyorch_bootstrap_hint(
+        CANDIDATE_CMAKE "${MEDIASERVO_REPO_ROOT}/.pixi/envs/default/bin/cmake")
+  endif()
+endif()
+
 # S3 bindings surface: lanes (shared target/ cache, deliberate F17-D exception) +
 # delivery-manifest renderers (.pc per-domain / Config suite-version) — cmake/MediaServoBindings.cmake.
 include(cmake/MediaServoBindings.cmake)
