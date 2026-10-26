@@ -52,8 +52,10 @@ fn load_jsonl(path: &Path) -> Wn<Vec<Value>> {
         if line.is_empty() {
             continue;
         }
-        rows.push(serde_json::from_str(line)
-            .map_err(|e| Fail::env(format!("{}: bad json line: {e}", path.display())))?);
+        rows.push(
+            serde_json::from_str(line)
+                .map_err(|e| Fail::env(format!("{}: bad json line: {e}", path.display())))?,
+        );
     }
     Ok(rows)
 }
@@ -92,12 +94,7 @@ fn window_avg(
     Ok(acc
         .into_iter()
         .map(|(k, d)| {
-            (
-                k,
-                d.into_iter()
-                    .map(|(f, v)| (f, v.iter().sum::<f64>() / v.len() as f64))
-                    .collect(),
-            )
+            (k, d.into_iter().map(|(f, v)| (f, v.iter().sum::<f64>() / v.len() as f64)).collect())
         })
         .collect())
 }
@@ -121,10 +118,11 @@ fn recovery_from(tl: &[Value]) -> Wn<Option<chrono::DateTime<chrono::Utc>>> {
         let mut after = "";
         for (st, a) in sets.iter().rev() {
             if *st <= t
-                && let Some(a) = a {
-                    after = a;
-                    break;
-                }
+                && let Some(a) = a
+            {
+                after = a;
+                break;
+            }
         }
         if after.starts_with("rtt=0ms") && after.contains("loss=0%") {
             return Ok(Some(t));
@@ -155,16 +153,14 @@ fn judge_core(probe: &[Value], tl: &[Value], tol: f64) -> Wn<(String, bool)> {
                 }
             }
             "scenario-step" => steps.push(e.clone()),
-            "scenario-end"
-                if end_ev.is_none() => {
-                    end_ev = Some(e.clone());
-                }
+            "scenario-end" if end_ev.is_none() => {
+                end_ev = Some(e.clone());
+            }
             _ => {}
         }
     }
     let start = start.ok_or_else(|| Fail::env("timeline has no scenario-start"))?;
-    let base_done =
-        base_done.unwrap_or(start + chrono::Duration::seconds(10));
+    let base_done = base_done.unwrap_or(start + chrono::Duration::seconds(10));
     let ends: chrono::DateTime<chrono::Utc> = match &end_ev {
         Some(e) => ts(e["t_utc"].as_str().unwrap_or_default())?,
         None => {
@@ -181,10 +177,11 @@ fn judge_core(probe: &[Value], tl: &[Value], tol: f64) -> Wn<(String, bool)> {
     for e in &steps {
         let t = ts(e["t_utc"].as_str().unwrap_or_default())?;
         if let Some(rt) = rec
-            && rt == t {
-                fault_end = fault_end.max(base_done).min(t);
-                continue;
-            }
+            && rt == t
+        {
+            fault_end = fault_end.max(base_done).min(t);
+            continue;
+        }
         fault_end = fault_end.max(t);
     }
     let recovery_from = rec.unwrap_or(ends);
@@ -282,9 +279,7 @@ pub fn measure_cmd(args: &[String]) -> Wn<()> {
                     .ok_or_else(|| Fail::bad_param("--tol requires a value".to_string()))?
                     .clone()
             };
-            tol = v.parse().map_err(|_| {
-                Fail::bad_param(format!("--tol: not a number: {v}"))
-            })?;
+            tol = v.parse().map_err(|_| Fail::bad_param(format!("--tol: not a number: {v}")))?;
         } else if !a.starts_with("--") {
             pos.push(a.clone());
         }
@@ -304,4 +299,3 @@ pub fn measure_cmd(args: &[String]) -> Wn<()> {
     }
     Ok(())
 }
-

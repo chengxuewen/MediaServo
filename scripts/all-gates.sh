@@ -39,6 +39,11 @@ gate "wire changelog pairing (G3)"  bash scripts/gate-wire-changelog.sh
 gate "bindings version parity"    target/debug/mediaservo-gates parity
 gate "crate literal versions"     bash -c '! git grep -l "^version = \"" -- "crates/*/Cargo.toml" | grep -vE "mediaservo-(host|server|field|client)/Cargo.toml" | grep -q .'
 gate "crate lanes reconciliation" target/debug/mediaservo-gates lanes
+if [ -f "$PWD/../../scripts/gate-py-retirement.sh" ]; then # SR6 P4: tracked .py minus the allowlist = 0, permanently (checker spans both repos = parent-owned)
+    gate "python retirement closure"  bash "$PWD/../../scripts/gate-py-retirement.sh" --final
+else
+    SKIP "python retirement closure" "parent release shell not colocated (standalone checkout)"
+fi
 
 # ── compile surface ──
 gate "check --workspace"          cargo check --workspace

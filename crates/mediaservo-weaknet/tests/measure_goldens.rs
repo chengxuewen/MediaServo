@@ -4,9 +4,7 @@
 use std::path::{Path, PathBuf};
 
 fn golden_dir(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/goldens")
-        .join(name)
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/goldens").join(name)
 }
 
 fn run_golden(name: &str, extra: &[&str]) -> (String, String) {
@@ -20,10 +18,7 @@ fn run_golden(name: &str, extra: &[&str]) -> (String, String) {
         .args(extra.iter().map(|s| s.to_string()))
         .output()
         .expect("spawn measure");
-    (
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        out.status.code().unwrap_or(-1).to_string(),
-    )
+    (String::from_utf8_lossy(&out.stdout).into_owned(), out.status.code().unwrap_or(-1).to_string())
 }
 
 fn expected(name: &str) -> (String, String) {

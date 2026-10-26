@@ -4,9 +4,9 @@
 
 pub mod config;
 pub mod engine;
-pub mod measure;
 pub mod fuse;
 pub mod ifb;
+pub mod measure;
 pub mod scenario;
 pub mod scope;
 pub mod server;

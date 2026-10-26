@@ -37,6 +37,13 @@ jobs:
           ver=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           grep -q "v$ver" CHANGELOG.md || { echo "FAIL: workspace version $ver has no CHANGELOG section — the bump commit must add the changelog entry in the same commit (human-facing log, AI-drafted)"; exit 1; }
           echo "OK: CHANGELOG.md contains the v$ver section"
+      - name: Python retirement closure (SR6 P4 — tracked .py minus the frozen allowlist must be 0, permanently)
+        run: |
+          if [ -f ../scripts/gate-py-retirement.sh ]; then
+            bash ../scripts/gate-py-retirement.sh --final
+          else
+            echo "SKIP: the checker spans both repos and lives in the parent release shell (colocated layout); this standalone mirror has no python-retirement program"
+          fi
 
   check:
     strategy:
