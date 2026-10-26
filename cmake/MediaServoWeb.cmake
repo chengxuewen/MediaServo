@@ -10,7 +10,7 @@
 #     becomes a REAL add_dependencies edge — this is the PIT-194 class fix:
 #     touching packages/client and building admin rebuilds client first,
 #     enforced by the graph, not by mtime luck or human memory.
-#   * web-build: aggregate button over every imported member.
+#   * mediaservo-web-build: aggregate button over every imported member.
 #   * The CLI `build web` verb intentionally KEEPS python's mtime-incremental
 #     `_ensure_admin_dist` path (proven, incremental-fast for staging flows);
 #     the lanes are the IDE/CI surface riding the same tree (§7.11). S5 audit
@@ -40,8 +40,12 @@ function(mediaservo_setup_web)
     # namespace the npm handles: @mediaservo/client sanitizes to `mediaservo-client`,
     # which would collide with the crates lane of the same name when server/all mount
     # both surfaces (supplier-sanctioned knob PolyOrch_NODE_TARGET_PREFIX).
+    # Prefix cannot be empty: the crates lanes mount mediaservo-<name>-build in
+    # server/all, so a bare handle (mediaservo-client) would collide once the
+    # @mediaservo/client web package lands (supplier duplicate-handle FATAL).
+    # "mediaservo-web" keeps every owned target sorted under mediaservo-*.
     if(NOT PolyOrch_NODE_TARGET_PREFIX)
-        set(PolyOrch_NODE_TARGET_PREFIX "node")
+        set(PolyOrch_NODE_TARGET_PREFIX "mediaservo-web")
     endif()
     polyorch_node_import(ROOT "${MEDIASERVO_REPO_ROOT}/www/package.json")
     set(_builds "")
@@ -51,9 +55,9 @@ function(mediaservo_setup_web)
         endif()
     endforeach()
     if(_builds)
-        add_custom_target(web-build
+        add_custom_target(mediaservo-web-build
             DEPENDS ${_builds}
             COMMENT "node: build all www members (admin chain rides the client edge)")
-        message(STATUS "MediaServo web lanes: web-build => ${_builds}")
+        message(STATUS "MediaServo web lanes: mediaservo-web-build => ${_builds}")
     endif()
 endfunction()
