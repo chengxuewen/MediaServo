@@ -1,5 +1,5 @@
-//! state.rs -- state.json (single JSON writer, carries the teardown plan) + timeline (JSONL = the judge.py contract) +
-//! path resolution + write lock + param_summary (verbatim bash port; judge.py:71 and the W7 muscle memory depend on it).
+//! state.rs -- state.json (single JSON writer, carries the teardown plan) + timeline (JSONL = the judge contract, now `measure` in this crate) +
+//! path resolution + write lock + param_summary (verbatim bash port; the judge line-71 predicate and the W7 muscle memory depend on it).
 //!
 //! Design contract source = design.md §state.rs: `{spec, scope, dir, iface, expires_at, teardown:{channel,
 //! sidecar?:{name,image}, steps[]}, job?, schema}` -- the teardown plan **is persisted at apply and carries its channel info**
@@ -354,7 +354,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 /// bash `param_summary()` exact shape:
 /// `rtt=80ms jitter=15ms loss=2%/uniform rate=sentinel reorder=0 seed=off`
 /// (LOSS_MODE never empty -> `/<mode>` always present; rate unset = sentinel; reorder unset = 0; seed unset = off.
-/// judge.py recognizes the recovery step by the `rtt=0ms` prefix + `loss=0%` substring -- the wording is the contract, do not change.)
+/// the judge (measure) recognizes the recovery step by the `rtt=0ms` prefix + `loss=0%` substring -- the wording is the contract, do not change.)
 #[must_use]
 pub fn param_summary(s: &ImpairSpec) -> String {
     let (loss, mode) = match &s.loss {
@@ -521,7 +521,7 @@ mod tests {
 
     #[test]
     fn param_summary_bash_parity_strings() {
-        // expected string = actual bash param_summary output (character by character; consumed at judge.py:71)
+        // expected string = actual bash param_summary output (character by character; consumed by the judge/measure zeroing predicate)
         let s = ImpairSpec {
             rtt_ms: 80,
             jitter_ms: 15,
@@ -550,7 +550,7 @@ mod tests {
             param_summary(&g),
             "rtt=120ms jitter=0ms loss=8%/gemodel rate=4.5 reorder=5 seed=42"
         );
-        // recovery-step predicate compat (judge.py: after.startswith('rtt=0ms') && 'loss=0%' in after)
+        // recovery-step predicate compat (measure.rs: after.starts_with("rtt=0ms") && after.contains("loss=0%"))
         let z = param_summary(&ImpairSpec::default());
         assert!(z.starts_with("rtt=0ms") && z.contains("loss=0%"), "{z}");
     }

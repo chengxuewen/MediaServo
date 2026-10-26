@@ -1,7 +1,7 @@
-//! scenario.rs -- T8: scenario engine (emit.py grammar parsing + tokio scheduling runner + job flag layer).
+//! scenario.rs -- T8: scenario engine (the P0-era bash emit.py plan grammar, @git ancestry: parent scripts/weaknet.d/emit.py, deleted SR6 P3-half-B; tokio scheduling runner + job flag layer).
 //!
-//! Semantic truth = `scripts/weaknet.sh do_scenario` + `scripts/weaknet.d/emit.py scenario` (plan grammar)
-//! and the `judge.py` event whitelist (`scenario*` union {baseline-done, set}; recovery-step predicate = a set event whose after
+//! Semantic truth = `scripts/weaknet.sh do_scenario` @git ancestry (bash, retired T10) + the emit.py scenario grammar @git ancestry (parent scripts/weaknet.d/, deleted SR6 P3-half-B)
+//! and the judge event whitelist @git ancestry (judge.py, deleted SR6 P3-half-B; now `measure` in this crate) (`scenario*` union {baseline-done, set}; recovery-step predicate = a set event whose after
 //! prefix is `rtt=0ms` AND contains `loss=0%`). PIT-187 discipline: bash semantics ported verbatim, deviations logged in the
 //! T8 delivery report (rev-2.2 authorized divergence: per-step transient locks + a job exclusivity layer replacing bash's full-run flock).
 //!
@@ -32,7 +32,7 @@ pub const COVERING_MARGIN_SECS: u64 = 90;
 /// Cross-process stop flag (consumed and deleted by the runner at each checkpoint).
 pub const CANCEL_FILE: &str = "scenario.cancel";
 
-// ---------- Parsing (branch-by-branch port of emit.py scenario mode, fail-closed whitelist) ----------
+// ---------- Parsing (branch-by-branch port of the emit.py scenario mode @git ancestry, fail-closed whitelist) ----------
 
 /// step/repeat param dict -> overrides (typed equivalent of the bash flags rendering; range validation in merge).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -129,8 +129,8 @@ fn yk(k: &str) -> Y {
     Y::String(k.to_string())
 }
 
-/// emit.py check_params: keys outside the whitelist are rejected (the legal set matches emit.py:21,47 verbatim -- the FLAG five keys + loss/gemodel/
-/// scope/clear + the lenient exemptions at_s/set/steps/repeat/scenario). Value validation matches emit.py:50-56.
+/// check_params (emit.py @git ancestry): keys outside the whitelist are rejected (the legal set matched the ancestor verbatim -- the FLAG five keys + loss/gemodel/
+/// scope/clear + the lenient exemptions at_s/set/steps/repeat/scenario). Value validation matches the ancestor's lines 50-56.
 fn check_params(p: &YM, ctx: &str) -> Result<(), String> {
     const LEGAL: &[&str] = &[
         "at_s",
@@ -177,7 +177,7 @@ fn check_params(p: &YM, ctx: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// emit.py flags_from: dict insertion order -> CLI flag string (gemodel composition validation; scope/clear silently stripped like the ancestor).
+/// flags_from (emit.py @git ancestry): dict insertion order -> CLI flag string (gemodel composition validation; scope/clear silently stripped like the ancestor).
 fn flags_from(p: &YM, ctx: &str) -> Result<String, String> {
     const FLAG: &[(&str, &str)] = &[
         ("rtt_ms", "--rtt"),
@@ -258,7 +258,7 @@ fn override_from(p: &YM) -> Result<StepOverride, String> {
     Ok(ov)
 }
 
-/// emit.py scenario main parsing (doc already yaml-typed). Plan line order = STEP(s) one by one -> REPEAT -> (TOTAL/CLEAR into the struct).
+/// scenario main parsing (emit.py @git ancestry; doc already yaml-typed). Plan line order = STEP(s) one by one -> REPEAT -> (TOTAL/CLEAR into the struct).
 pub fn parse_plan_doc(doc: &Y) -> Result<ScenarioPlan, String> {
     let empty_map = YM::new();
     let root = doc.as_mapping().unwrap_or(&empty_map);
@@ -323,7 +323,7 @@ pub fn parse_plan_doc(doc: &Y) -> Result<ScenarioPlan, String> {
         check_params(&set_map, "repeat.set")?;
         let on_flags = flags_from(&set_map, "repeat.set")?;
         let on_ov = override_from(&set_map)?;
-        // emit.py:107 off = the fixed zero-param set {rtt_ms:0, jitter_ms:0, loss:"0%"} -- the recovery step's after string
+        // emit.py @git ancestry (line 107): off = the fixed zero-param set {rtt_ms:0, jitter_ms:0, loss:"0%"} -- the recovery step's after string
         // contains rtt=0ms + loss=0% (the generation source of the judge recovery predicate).
         let off_ov = StepOverride {
             rtt_ms: Some(0),
@@ -347,7 +347,7 @@ pub fn parse_plan_doc(doc: &Y) -> Result<ScenarioPlan, String> {
         Some(n) => n.max(0.0) as u64, // python int() truncation form
         None => total.max(0.0) as u64,
     };
-    // python truthiness（emit.py:115 `1 if sc.get('clear', True) else 0`）
+    // python truthiness (emit.py @git ancestry, line 115: `1 if sc.get('clear', True) else 0`)
     let clear = match sc.get(yk("clear")) {
         None => true,
         Some(Y::Null) => false,
@@ -360,11 +360,11 @@ pub fn parse_plan_doc(doc: &Y) -> Result<ScenarioPlan, String> {
     Ok(ScenarioPlan { baseline_s, lines, total_s: total.max(0.0) as u64, clear })
 }
 
-/// emit.py scenario grammar port (source = scripts/weaknet.d/emit.py:81-115; keys outside the whitelist rejected,
-/// the error lists the full legal set -- fail-closed with the same convention as emit.py:47-49). Grammar:
+/// scenario grammar port (source = the emit.py ancestor lines 81-115 @git ancestry; keys outside the whitelist rejected,
+/// the error lists the full legal set -- fail-closed with the same convention as the ancestor's lines 47-49). Grammar:
 ///
 /// ```yaml
-/// scenario:            # top-level key optional (bare form read directly, structurally same as emit.py:81 `doc.get('scenario') or doc`)
+/// scenario:            # top-level key optional (bare form read directly, structurally same as the ancestor's `doc.get('scenario') or doc`)
 ///   baseline_s: 25     # no-fault twin window (default = auto from steps/repeat durations)
 ///   clear: true        # teardown at the end (false/0/"" = keep; python truthiness semantics)
 ///   steps:             # at_s strictly increasing (relative to t0 after baseline); set values = whitelist

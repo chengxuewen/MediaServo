@@ -1,7 +1,7 @@
 //! T8 scenario engine integration tests: NoopExec (zero tc/docker touching) chains the run_full full path --
 //! event sequence pinned verbatim (bash do_scenario timeline_note conventions), drift columns, job progress,
 //! the abort/stop/stale-recovery three surfaces, and lands clean/aborted timeline artifacts in CARGO_TARGET_TMPDIR
-//! for tests/scenario_judge_contract.py (the judge.py consumption contract) to re-consume.
+//! The judge consumption contract is now covered in-Rust: tests/measure_goldens.rs (SR6 P3-half-B; the python contract test was retired with judge.py).
 
 use std::sync::{Arc, Mutex};
 
@@ -205,7 +205,7 @@ async fn clean_run_exact_event_sequence_and_job_progression() {
     assert!(steps[0]["note"].as_str().unwrap().ends_with("drift_le_1s=1"));
     assert!(steps[1]["note"].as_str().unwrap().starts_with("at_s=2 actual_s="));
     assert!(steps[1]["note"].as_str().unwrap().ends_with("drift_le_1s=1"));
-    // the recovery (zeroing) step: set.after prefix rtt=0ms AND contains loss=0% (the consumption surface of the judge.py:71 predicate)
+    // the recovery (zeroing) step: set.after prefix rtt=0ms AND contains loss=0% (the consumption surface of the measure zeroing predicate)
     let sets: Vec<_> = tl.iter().filter(|e| e["ev"] == "set").collect();
     let after0 = sets[0]["after"].as_str().unwrap();
     let after1 = sets[1]["after"].as_str().unwrap();
@@ -226,7 +226,7 @@ async fn clean_run_exact_event_sequence_and_job_progression() {
     assert!(!dirs.state_json().exists());
     assert_eq!(scenario::aborted_in_timeline(&dirs).unwrap(), Vec::<String>::new());
 
-    // judge contract artifacts (consumed by tests/scenario_judge_contract.py)
+    // judge contract artifacts (the timeline contract now pinned by tests/measure_goldens.rs; these copies kept as run evidence)
     std::fs::copy(dirs.timeline(), artifact_path("scenario_clean_timeline.jsonl")).unwrap();
     std::fs::write(artifact_path("abort_clean.txt"), "none\n").unwrap();
     std::fs::remove_dir_all(&dirs.statedir).ok();
@@ -368,7 +368,7 @@ async fn stop_mid_run_emits_aborted_user_and_exits_zero() {
     std::fs::remove_dir_all(&dirs.statedir).ok();
 }
 
-// ---------- G: grammar fail-closed and emit.py parity surface ----------
+// ---------- G: grammar fail-closed and emit.py parity surface (@git ancestry: parent scripts/weaknet.d/emit.py, deleted SR6 P3-half-B) ----------
 
 #[test]
 fn parse_grammar_parity_with_emit() {
@@ -399,7 +399,7 @@ fn parse_grammar_parity_with_emit() {
         panic!("a single step should be Step");
     };
     assert_eq!((at_disp.as_str(), *at_secs), ("4.7", 4));
-    // repeat: the off fixed zero-param form (emit.py:107 -> the recovery-predicate generation source)
+    // repeat: the off fixed zero-param form (emit.py @git ancestry line 107 -> the recovery-predicate generation source)
     let p = scenario::parse_plan_yaml(
         "scenario:\n  repeat: {rounds: 2, on_s: 6, off_s: 5, set: {rtt_ms: 80}}\n",
     )
@@ -423,7 +423,7 @@ fn parse_grammar_parity_with_emit() {
             .unwrap()
             .clear
     );
-    // range validation (same rules as emit.py:50-56)
+    // range validation (same rules as the emit.py ancestor's lines 50-56)
     assert!(
         scenario::parse_plan_yaml(
             "scenario:\n  steps:\n    - at_s: 1\n      set: {loss: \"abc\"}\n"

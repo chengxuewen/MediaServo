@@ -1,6 +1,6 @@
 //! config.rs -- the vehicle-surface param file `weaknet.yaml` (design §config.rs row + §vehicle M4').
 //!
-//! schema (strict, unknown keys rejected with the legal set listed -- the yaml port of emit.py profile whitelist semantics):
+//! schema (strict, unknown keys rejected with the legal set listed -- the yaml port of the P0-era bash emit.py profile whitelist semantics @git ancestry):
 //! ```yaml
 //! iface: eth0            # default lo (documented constant)
 //! ports: [40010, 40012]  # media UDP port enumeration -- anti-deadlock rule layer: a physical iface with no ports
@@ -147,7 +147,7 @@ pub fn parse_yaml(raw: &str) -> Result<WeaknetConfig, String> {
     Ok(WeaknetConfig { iface, ports, duration: strict.duration, spec, path: None })
 }
 
-/// The single parse source of the profile / weaknet.yaml `spec:` section (the emit.py `profile` consumed key shape):
+/// The single parse source of the profile / weaknet.yaml `spec:` section (the emit.py profile consumed key shape @git ancestry):
 /// `rtt_ms/jitter_ms/rate_mbps/seed` taken directly, `loss` stringified numerically, `reorder_pct->reorder`,
 /// `gemodel{r,h,k}->[r,h,k]`, `dir` passed through (from_flat_json validates out|in|both; used by the T12 vehicle yaml,
 /// profile files can therefore carry dir for the first time -- existing profiles have no dir key, zero behavior change).

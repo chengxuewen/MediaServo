@@ -13,8 +13,8 @@ use serde_json::{Value, json};
 
 use mediaservo_weaknet::config;
 use mediaservo_weaknet::engine::{self, ApplyRequest, Env, Fail, Replay, Verify, Wn};
-use mediaservo_weaknet::measure;
 use mediaservo_weaknet::fuse;
+use mediaservo_weaknet::measure;
 use mediaservo_weaknet::scenario;
 use mediaservo_weaknet::scope::{self, Targeting};
 use mediaservo_weaknet::server;
@@ -812,7 +812,7 @@ fn weaknet_d_root() -> Option<PathBuf> {
     scope::weaknet_d_root()
 }
 
-// ---------- profile (serde_yaml port of emit.py whitelist semantics) ----------
+// ---------- profile (serde_yaml port of the P0-era bash emit.py whitelist semantics; @git ancestry: parent scripts/weaknet.d/emit.py, deleted SR6 P3-half-B) ----------
 
 fn load_profile(name: &str) -> Wn<ImpairSpec> {
     let parse = |raw: &str, disp: &str| -> Wn<ImpairSpec> {
