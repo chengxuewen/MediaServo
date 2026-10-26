@@ -37,15 +37,21 @@ function(mediaservo_setup_web)
                        "path is unaffected)")
         return()
     endif()
-    # namespace the npm handles: @mediaservo/client sanitizes to `mediaservo-client`,
-    # which would collide with the crates lane of the same name when server/all mount
-    # both surfaces (supplier-sanctioned knob PolyOrch_NODE_TARGET_PREFIX).
-    # Prefix cannot be empty: the crates lanes mount mediaservo-<name>-build in
-    # server/all, so a bare handle (mediaservo-client) would collide once the
-    # @mediaservo/client web package lands (supplier duplicate-handle FATAL).
-    # "mediaservo-web" keeps every owned target sorted under mediaservo-*.
+    # namespace the npm handles. Prefix cannot be empty: the crates lanes mount
+    # mediaservo-<name>-build in server/all, so a bare handle would collide with
+    # same-named crates (supplier duplicate-handle FATAL); "mediaservo-web" keeps
+    # every owned target sorted under mediaservo-*. STRIP_SCOPES then removes the
+    # scope word so @mediaservo/admin does not double it -- today's forms
+    # 'mediaservo-web-mediaservo-admin-build' / 'mediaservo-web-mediaservo-client-build'
+    # carry "mediaservo" twice at zero information and read near-colliding against
+    # the crate-lane targets mediaservo-client / mediaservo-admin. With the strip
+    # (supplier D47, PolyOrch >= 0.7.2): 'mediaservo-web-admin-build' /
+    # 'mediaservo-web-client-build'.
     if(NOT PolyOrch_NODE_TARGET_PREFIX)
         set(PolyOrch_NODE_TARGET_PREFIX "mediaservo-web")
+    endif()
+    if(NOT PolyOrch_NODE_STRIP_SCOPES)
+        set(PolyOrch_NODE_STRIP_SCOPES "mediaservo")
     endif()
     polyorch_node_import(ROOT "${MEDIASERVO_REPO_ROOT}/www/package.json")
     set(_builds "")
