@@ -23,7 +23,7 @@
 #     pip-artifact sweeps are install RULES here. What stays python is pip IMPERATIVE:
 #     the wheel BUILD inputs (staging mirror, _libs feeds) and the pip --prefix
 #     invocations (ruled-away wheel-content territory, batch-5 census). Renderers
-#     consume ${CMAKE_CURRENT_BINARY_DIR}/bindings-gen/ (F16 lane split).
+#     consume ${CMAKE_CURRENT_BINARY_DIR}/mediaservo-bindings-manifest/ (F16 lane split).
 
 set(MEDIASERVO_BINDINGS_SDKS field link deck client)
 set(MEDIASERVO_BINDINGS_SRC "" CACHE PATH "SR6 batch-5 deploy mirror root (<out>/bindings) — cross-tree deploy passes it; the build assembly leaves it EMPTY (mode reset is explicit at the call site so a stale cache can never flip the mode)")
@@ -122,7 +122,7 @@ function(mediaservo_setup_bindings)
         DESTINATION include)
 
     # -- renderers: delivery manifests into the build tree (python stages these) --
-    set(_gen "${CMAKE_CURRENT_BINARY_DIR}/bindings-gen")
+    set(_gen "${CMAKE_CURRENT_BINARY_DIR}/mediaservo-bindings-manifest")
     file(MAKE_DIRECTORY "${_gen}/pkgconfig" "${_gen}/cmake")
 
     foreach(_sdk IN LISTS MEDIASERVO_BINDINGS_SDKS)
@@ -134,7 +134,7 @@ function(mediaservo_setup_bindings)
         configure_file(
             "${_root}/bindings/c/mediaservo-${_sdk}-c/mediaservo-${_sdk}.pc.in"
             "${_gen}/pkgconfig/mediaservo-${_sdk}.pc" @ONLY)
-        message(STATUS "bindings-gen: mediaservo-${_sdk}.pc @ ${_sdk_ver} (domain crate)")
+        message(STATUS "mediaservo-bindings-manifest: mediaservo-${_sdk}.pc @ ${_sdk_ver} (domain crate)")
     endforeach()
 
     # Config suite version = workspace root project version (documented choice).
@@ -146,9 +146,9 @@ function(mediaservo_setup_bindings)
     configure_file("${_root}/bindings/c/cmake/mediaservoConfigVersion.cmake.in"
                    "${_gen}/cmake/mediaservoConfigVersion.cmake" @ONLY)
 
-    # Marker target: `cmake --build --target bindings-gen` = force re-render;
+    # Marker target: `cmake --build --target mediaservo-bindings-manifest` = force re-render;
     # files exist configure-time, the target documents/anchors them.
-    add_custom_target(bindings-gen
+    add_custom_target(mediaservo-bindings-manifest
         COMMENT "delivery manifests: ${_gen}/pkgconfig + ${_gen}/cmake (rendered at configure)")
 
     # -- SR4 L3 (T0 #9, the pre-ruled row): transport of the rendered suite becomes
