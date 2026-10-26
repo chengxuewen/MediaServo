@@ -38,7 +38,11 @@
 # command (N6 button symmetry with -bin-build; corr runs lib+bin buttons off ONE
 # package-scoped command: cargo has no bins-only selector, -p covers rlib+exe
 # together). The separate face keeps its own whole-dir wipe instead.
-set(MEDIASERVO_APP_BINS mediaservo-host mediaservo-server mediaservo-client)
+# app-binary lanes = crates that actually ship a bin named like the package
+# (cargo metadata 2026-10-26: host/server yes; client is lib-only since the
+# S6 SDK split moved its binary face to the cdylib delivery -- keeping a
+# client row here produced a permanently red button, first click 10-26).
+set(MEDIASERVO_APP_BINS mediaservo-host mediaservo-server)
 
 set(MEDIASERVO_CRATE_LANES
     "mediaservo-common@mediaservo_common@crates/mediaservo-common"
