@@ -1,0 +1,96 @@
+# Dockerfile.dev — devcontainer system-toolchain image (build-env-vsc-affinity K1)
+# Separate from ./Dockerfile (that one = production/runtime chain). This image is
+# the Dev Containers "system constitution": ubuntu base + Kitware cmake + rustup
+# under a uid-aligned `vscode` user + full apt toolchain. No conda anywhere.
+#
+# Layer contract (plan rev-2.8, Knife 1):
+#   apt toolchain -> Kitware repo (unpinned; resolves 4.4.x = host parity, U4)
+#   -> useradd vscode -> root rustup (rsproxy config) -> config copy to vscode
+#   -> vscode rustup -> ENV (non-login exec shell needs explicit exports, R3-N1)
+#   -> volume mountpoint prebuild with chown (copy-up ownership, ./Dockerfile:177
+#   lesson) -> wasm stack as vscode. NO cargo-fetch COPY layer (R3-N5 dead weight).
+FROM ubuntu:22.04 AS devcontainer
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# CN mirrors for reliability (mainland host precedent, ./Dockerfile:20-28)
+RUN sed -i 's|archive.ubuntu.com|mirrors.tuna.tsinghua.edu.cn|g; s|security.ubuntu.com|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential gdb lldb libclang-dev pkg-config ninja-build \
+        python3 python3-pip iproute2 unzip git curl ca-certificates gnupg \
+        libgirepository1.0-dev libglib2.0-dev \
+        libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
+        libjpeg-dev \
+        libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+        xorg-dev libxkbcommon-dev libwayland-dev xkb-data \
+    && rm -rf /var/lib/apt/lists/*
+
+# Kitware apt repo — unpinned on purpose (U4: jammy main resolves 4.4.x; the
+# supplier test harness needs cmake >= 4.0 for CMP0219; production floor 3.25
+# and pixi pin <4 are unaffected — harness-vs-product asymmetry, banked 10-22)
+RUN curl -fsSL https://apt.kitware.com/keys/kitware-archive-latest.asc \
+        | gpg --dearmor -o /usr/share/keyrings/kitware-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main" \
+        > /etc/apt/sources.list.d/kitware.list \
+    && apt-get update && apt-get install -y --no-install-recommends cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+# pip: meson (apt meson 0.61 too old for mediasoup wraps) + debugpy (python dap)
+ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip3 install --break-system-packages meson==1.11.2 debugpy \
+    || pip3 install meson==1.11.2 debugpy
+
+# --- user + dual-layer rustup (R2-#1 contract) ---
+RUN useradd -ms /bin/bash vscode
+
+# root layer rustup: exists to hold the rsproxy config in the canonical place,
+# then the config is copied into the vscode layer (D208 mirror preserved)
+ENV RUSTUP_DIST_SERVER=https://mirrors.tuna.tsinghua.edu.cn/rustup \
+    RUSTUP_UPDATE_ROOT=https://mirrors.tuna.tsinghua.edu.cn/rustup/rustup
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain stable --profile minimal \
+    && printf '[source.crates-io]\nreplace-with = "rsproxy-sparse"\n\n[source.rsproxy-sparse]\nregistry = "sparse+https://rsproxy.cn/index/"\n' \
+        > /root/.cargo/config.toml
+
+RUN mkdir -p /home/vscode/.cargo \
+    && cp /root/.cargo/config.toml /home/vscode/.cargo/config.toml \
+    && chown -R vscode:vscode /home/vscode/.cargo
+
+# vscode layer rustup (defaults land in /home/vscode/.{rustup,cargo})
+USER vscode
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain stable --profile minimal
+
+# non-login exec shells (docker exec / IDE remote server) do not source .profile —
+# export the toolchain env explicitly (R3-N1)
+ENV PATH="/home/vscode/.cargo/bin:${PATH}" \
+    RUSTUP_HOME=/home/vscode/.rustup \
+    CARGO_HOME=/home/vscode/.cargo
+
+# volume mountpoint prebuild — ownership at these paths is what named-volume
+# copy-up preserves (./Dockerfile:177 lesson: image-absent paths land root-owned
+# and the vscode user gets EACCES)
+USER root
+RUN mkdir -p /workspace/3rdparty/MediaServo/target \
+             /workspace/3rdparty/MediaServo/build \
+             /home/vscode/.cargo/registry \
+    && chown -R vscode:vscode /workspace /home/vscode/.cargo
+
+# wasm stack under the vscode identity (CF-10: without these the wasm legs
+# SKIP vacuously and Q4=C "8 green" would be fake-achievable)
+USER vscode
+# one crate per attempt, three retries each: rsproxy's /api/v1 download endpoint
+# intermittently fails per-crate (measured build 1: cbindgen ok, other three
+# download-failed; crates.io responds 302 fine) — retries + isolation keep one
+# flaky fetch from killing the layer.
+RUN rustup target add wasm32-unknown-unknown
+RUN for c in cbindgen cxxbridge-cmd wasm-pack wasm-bindgen-cli; do \
+        for i in 1 2 3; do \
+            cargo install "$c" --locked && break || \
+            { [ "$i" = 3 ] && echo "FATAL: $c failed 3 attempts" && exit 1 || \
+              echo "retry $i for $c"; sleep 5; }; \
+        done; \
+    done
+
+WORKDIR /workspace/3rdparty/MediaServo

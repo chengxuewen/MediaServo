@@ -1,31 +1,41 @@
 {
-  "name": "MediaServo SFU Dev",
-  "dockerComposeFile": "../docker-compose.dev.yml",
-  "service": "server",
-  "workspaceFolder": "/workspace",
-
+  // Dev Containers face (build-env-vsc-affinity K1): system-toolchain track.
+  // The pixi host face (parent repo) is untouched — this file only shapes the
+  // container opened via .devcontainer/docker-compose.devcontainer.yml (K0).
+  "name": "mediaservo-devcontainer",
+  "dockerComposeFile": "./docker-compose.devcontainer.yml",
+  "service": "dev",
+  "workspaceFolder": "/workspace/3rdparty/MediaServo",
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
   "customizations": {
     "vscode": {
       "extensions": [
         "rust-lang.rust-analyzer",
-        "tamasfe.even-better-toml",
-        "vadimcn.vscode-lldb"
+        "ms-vscode.cmake-tools",
+        "llvm-vs-code-extensions.vscode-clangd",
+        "vadimcn.vscode-lldb",
+        "tamasfe.even-better-toml"
       ],
       "settings": {
-        "rust-analyzer.cargo.features": ["sfu-mediasoup", "admin-dashboard"],
-        "rust-analyzer.check.command": "clippy",
-        "rust-analyzer.check.allTargets": true,
+        "cmake.configurePreset": "all",
+        "cmake.buildPreset": "all",
+        "cmake.testPreset": "all",
+        "cmake.cmakePath": "/usr/bin/cmake",
         "rust-analyzer.linkedProjects": [
-          "/workspace/Cargo.toml"
+          "/workspace/3rdparty/MediaServo/Cargo.toml"
         ],
-        "editor.formatOnSave": true,
-        "[rust]": {
-          "editor.defaultFormatter": "rust-lang.rust-analyzer"
-        }
+        "rust-analyzer.check.command": "clippy",
+        "rust-analyzer.check.allTargets": true
       }
     }
   },
-
-  "postCreateCommand": "cargo fetch",
-  "remoteUser": "root"
+  "containerEnv": {
+    "MEDIASERVO_CONTAINER_FACE": "1",
+    "LK_CUSTOM_WEBRTC": "/workspace/.cache/webrtc/linux-x64-release",
+    "MSRTC_OUT_ROOT": "/tmp/out-container",
+    "LIBCLANG_PATH": "/usr/lib/llvm-14/lib"
+  },
+  "postCreateCommand": "git config --global --add safe.directory /workspace && git config --global --add safe.directory /workspace/3rdparty/MediaServo && git config --global --add safe.directory /workspace/3rdparty/MediaServo/PolyOrch && cargo fetch && cmake --preset all",
+  "postStartCommand": "rm -rf /tmp/iceoryx2 /dev/shm/iox2_* 2>/dev/null; test ! -e .vscode/settings.json || echo 'WARN: submodule .vscode/settings.json pre-exists — it outranks these customizations and may carry host-face (pixi) paths'"
 }
