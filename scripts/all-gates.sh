@@ -10,10 +10,11 @@ cd "$(dirname "$0")/.."
 FULL=0; [ "${1:-}" = "--full" ] && FULL=1
 # PIT-193: MESON vars inherited from the parent shell change the build fingerprint → rebuild conflicts; clear inside the task
 unset MESON_ARGS MESON 2>/dev/null || true
-declare -a RESULTS=() FAILS=0
+declare -a RESULTS=() FAILS=0 SKIPS=0
+GATE_FACE="${MEDIASERVO_GATE_FACE:-host-pixi}"
 PASS() { RESULTS+=("✅ $1"); }
 FAIL() { RESULTS+=("❌ $1"); FAILS=$((FAILS+1)); }
-SKIP() { RESULTS+=("⏭️ $1 (skip: $2)"); }
+SKIP() { RESULTS+=("⏭️ $1 (skip: $2)"); SKIPS=$((SKIPS+1)); }
 gate() {  # gate <name> <command...> (per-gate mktemp log — first run caught a shared-name race)
     local name=$1 log; shift
     log=$(mktemp /tmp/all-gate.XXXXXX)
@@ -71,4 +72,12 @@ fi
 echo; echo "════════ all-gates summary ════════"
 printf '%s\n' "${RESULTS[@]}"
 echo "══════════════════════════════════════"
-[ "$FAILS" = 0 ] && echo "ALL-GATES: PASS" || { echo "ALL-GATES: $FAILS FAILED"; exit 1; }
+# census row (C46 extension): pass/skip/fail counts + skip list + execution
+# face — skips must never read as green (vacuous-green family), the counts make
+# them loud; evidence lines elsewhere name this face.
+echo "ALL-GATES: PASS" | { [ "$FAILS" = 0 ] && cat || true; }
+[ "$FAILS" = 0 ] || echo "ALL-GATES: $FAILS FAILED"
+_np=0; for r in "${RESULTS[@]}"; do case "$r" in ✅*) _np=$(( _np + 1 ));; esac; done
+echo "census (face=$GATE_FACE): pass=$_np skip=$SKIPS fail=$FAILS"
+for r in "${RESULTS[@]}"; do case "$r" in ⏭️*) echo "  $r";; esac; done
+[ "$FAILS" = 0 ] || exit 1
