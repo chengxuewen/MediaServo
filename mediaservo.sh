@@ -309,6 +309,38 @@ _msvc_copy_with_kill() {
     echo "Error: failed to copy $dst (still busy after multiple retries)" >&2
     return 1
 }
+# _ms_deploy_stop_instance <prefix> <brand> — triple-stop of revival sources
+# (unit -> daemon -> family), C50-scoped: the unit arm matches OXMGR_HOME so a
+# brand glob never stops another instance; never calls the oxmgr CLI here (its
+# IPC auto-spawns the daemon). Byte-equal port of the host leg's inline block
+# (pre-P2d-2 mediaservo.sh:1317-1337), shared by build:deploy + deploy host.
+_ms_deploy_stop_instance() {
+    local prefix="$1" brand="$2"
+    local bin_dir="$prefix/bin"
+    local host_cli="${brand:+${brand}-host}"; host_cli=${host_cli:-mediaservo-host}
+    local oxmgr_home want_home un
+    oxmgr_home=$(realpath -m -- "$prefix/run/oxmgr" 2>/dev/null || echo "$prefix/run/oxmgr")
+    want_home="Environment=OXMGR_HOME=$oxmgr_home"
+    if command -v systemctl >/dev/null 2>&1 && [ -d "$HOME/.config/systemd/user" ]; then
+        for u in "$HOME/.config/systemd/user"/oxmgr-${brand}-*.service; do
+            [ -e "$u" ] || continue
+            un=$(basename "$u")
+            if ! grep -qF -- "$want_home" "$u" 2>/dev/null; then
+                echo "  note: leaving unit $un untouched (belongs to another instance home)"
+                continue
+            fi
+            systemctl --user stop "$un" || true
+            systemctl --user reset-failed "$un" || true
+        done
+    fi
+    _msvc_kill_using "$bin_dir/oxmgr"
+    local base role
+    for base in agent streamer capturer recorder controller emergency audio; do
+        role=${brand:+${brand}-${base}}; role=${role:-host-${base}}
+        pkill -x "$role" || true
+    done
+}
+
 # _ms_deploy_via_target <target-suffix> <profile> [VAR=VAL ...] — P2d-2 forwarder:
 # re-configures the dedicated deploy binaryDir with the caller's overrides, then
 # drives the same custom target the IDE button uses. One implementation for all
@@ -1309,11 +1341,6 @@ case "${1:-}" in
             done
             [ -n "$prefix" ] || { echo "Error: deploy requires --prefix (no default — prevents polluting out/ stateless delivery; vehicles use /opt/mediaservo-host)" >&2; exit 2; }
             bin_dir="$prefix/bin"
-            # brand: env (msrtc.sh injects MEDIASERVO_BRAND) first, falling back to
-            # derivation from the installed instance (python _derive_brand parity:
-            # first *-agent hit, host-* legacy names skipped; the multi-brand
-            # first-match limit is carried knowingly). Explicit default "mediaservo"
-            # maps to the legacy host-* layout (empty brand).
             brand_in="${MEDIASERVO_BRAND:-}"
             if [ -z "$brand_in" ]; then
                 for p in "$bin_dir"/*-agent; do
@@ -1324,79 +1351,16 @@ case "${1:-}" in
                 done
             fi
             brand=$brand_in; [ "$brand" = mediaservo ] && brand=""
-            rust_brand=${brand:-mediaservo}
-            mkdir -p "$bin_dir" 2>/dev/null || { echo "Error: cannot create $bin_dir — for deployment use sudo msrtc.sh deploy host --prefix /opt/mediaservo-host" >&2; exit 1; }
-            case "$prefix" in
-                /opt*) [ "$(id -u)" = 0 ] || { echo "Error: /opt deployment needs root (sudo msrtc.sh deploy host --prefix /opt/mediaservo-host)" >&2; exit 1; } ;;
-            esac
-            host_cli=${brand:+${brand}-host}; host_cli=${host_cli:-mediaservo-host}
-            # triple stop of the revival sources (unit -> daemon -> family), only
-            # when a live instance is detectable (oxfile + branded CLI present).
-            # Never call the oxmgr CLI here (its IPC auto-spawns the daemon —
-            # creating busy instead of clearing it). C50: the unit arm is
-            # OXMGR_HOME-scoped — a brand glob never stops another instance.
-            if [ -f "$prefix/run/oxfile.toml" ] && [ -f "$bin_dir/$host_cli" ]; then
+            # triple-stop of revival sources (unit -> daemon -> family), C50-scoped
+            if [ -f "$prefix/run/oxfile.toml" ] && [ -e "$bin_dir/${brand:+${brand}-}host" ]; then
                 echo "Running host instance detected — stopping the process family first (reinstall does not overwrite etc/ credentials)"
-                oxmgr_home=$(realpath -m -- "$prefix/run/oxmgr" 2>/dev/null || echo "$prefix/run/oxmgr")
-                want_home="Environment=OXMGR_HOME=$oxmgr_home"
-                if command -v systemctl >/dev/null 2>&1 && [ -d "$HOME/.config/systemd/user" ]; then
-                    for u in "$HOME/.config/systemd/user"/oxmgr-${brand}-*.service; do
-                        [ -e "$u" ] || continue
-                        un=$(basename "$u")
-                        if ! grep -qF -- "$want_home" "$u" 2>/dev/null; then
-                            echo "  note: leaving unit $un untouched (belongs to another instance home)"
-                            continue
-                        fi
-                        systemctl --user stop "$un" || true
-                        systemctl --user reset-failed "$un" || true
-                    done
-                fi
-                _msvc_kill_using "$bin_dir/oxmgr"
-                for base in agent streamer capturer recorder controller emergency audio; do
-                    role=${brand:+${brand}-${base}}; role=${role:-host-${base}}
-                    pkill -x "$role" || true
-                done
+                _ms_deploy_stop_instance "$prefix" "$brand"
                 sleep 1
             fi
-            _msvc_app_install host "$brand" "$build_type" "$prefix" ""
-            # oxmgr version locked with the deployment (D-H13)
-            _msvc_oxmgr_resolve host
-            _msvc_copy_with_kill "$MS_OXMGR_SRC" "$bin_dir/oxmgr"
-            oxv=$("$MS_OXMGR_SRC" --version 2>/dev/null | head -1) || oxv=""
-            [ -n "$oxv" ] || oxv=$("$MS_OXMGR_SRC" --version 2>&1 >/dev/null | head -1) || oxv=""
-            echo "  oxmgr packaged: ${oxv:-?}"
-            # host init: etc/ + identity.json + tokens — idempotent write-only, never
-            # delete (reinstall keeps credentials). init is a separate process: the
-            # device prefix brand must match the layout brand (env override).
-            if [ -f "$prefix/identity.json" ]; then
-                echo "  identity.json exists — write-only, never delete (device identity preserved): $prefix/identity.json"
-            fi
-            echo "\$ $bin_dir/$host_cli init $prefix"
-            MEDIASERVO_BRAND="$rust_brand" "$bin_dir/$host_cli" init "$prefix"
-            # env.sh one-shot activation (MED5 — relocatable: derived relative to
-            # itself; same bytes as the pack-leg host template, deploy-side owner)
-            env_host=${brand:+${brand}-host}; env_host=${env_host:-mediaservo-host}
-            cat > "$prefix/env.sh" <<EOF
-#!/usr/bin/env bash
-# ${env_host} environment activation (generated at deploy) — all commands available after sourcing
-# Usage: source env.sh (still valid under any prefix / after relocation, derived relative to this file)
-__MSRTC_ENV_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd -P)"
-export PATH="\${__MSRTC_ENV_DIR}/bin:\$PATH"
-export MEDIASERVO_BRAND="${rust_brand}"   # brand env (D252); the deployment package pins the layout explicitly
-BIN_DIR_MSRTC="\${__MSRTC_ENV_DIR}/bin"   # for scripts/aliases to reference
-unset __MSRTC_ENV_DIR
-echo "[${rust_brand}] ${env_host} environment activated — bin/: \$BIN_DIR_MSRTC"
-EOF
-            chmod 755 "$prefix/env.sh"
-            echo "  env.sh generated: $prefix/env.sh (after sourcing, PATH=bin/ makes all commands available)"
-            mkdir -p "$prefix/run/logs" "$prefix/recordings"
-            echo "host deployed to $prefix (${build_type,,})"
-            echo "  bin/    $(ls -1 "$bin_dir" | sort | paste -sd, - | sed 's/,/, /g')"
-            echo "  etc/    host.yaml + link/{signing.pem,*.token} (generated by host init, kept on reinstall)"
-            echo "  run/    logs/"
-            echo "  recordings/"
-            echo "  identity.json (0600, device identity — write-only, do not delete)"
-            echo "Usage: export PATH=$bin_dir:\$PATH && $host_cli doctor $prefix && $host_cli start $prefix"
+            # P2d-2 (U5): placement+init retired into the cmake deploy target
+            case "$build_type" in Release) prof=Release ;; *) prof=Debug ;; esac
+            _ms_deploy_via_target host "$prof" "MEDIASERVO_DEPLOY_PREFIX_HOST=$prefix" \
+                || { echo "Error: deploy host target failed (rc=$?)" >&2; exit 1; }
             exit 0
             ;;
         bindings)
