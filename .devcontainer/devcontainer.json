@@ -34,8 +34,11 @@
     "MEDIASERVO_CONTAINER_FACE": "1",
     "LK_CUSTOM_WEBRTC": "/workspace/.cache/webrtc/linux-x64-release",
     "MSRTC_OUT_ROOT": "/tmp/out-container",
-    "LIBCLANG_PATH": "/usr/lib/llvm-14/lib"
+    "LIBCLANG_PATH": "/usr/lib/llvm-14/lib",
+    "FFMPEG_DIR": "${localEnv:HOME}/ffmpeg9",
+    "PKG_CONFIG_PATH": "/home/vscode/ffmpeg9/lib/pkgconfig",
+    "LD_LIBRARY_PATH": "/home/vscode/ffmpeg9/lib:/workspace/3rdparty/MediaServo/target/debug"
   },
-  "postCreateCommand": "git config --global --add safe.directory /workspace && git config --global --add safe.directory /workspace/3rdparty/MediaServo && git config --global --add safe.directory /workspace/3rdparty/MediaServo/PolyOrch && cargo fetch && cmake --preset all",
+  "postCreateCommand": "git config --global --add safe.directory /workspace && git config --global --add safe.directory /workspace/3rdparty/MediaServo && git config --global --add safe.directory /workspace/3rdparty/MediaServo/PolyOrch && mkdir -p $HOME/ffmpeg9 && tar -C $HOME/ffmpeg9 -xzf /workspace/3rdparty/ffmpeg9-dev/ffmpeg9-dev-linux64.tar.gz && sed -i s,/ffmpeg9,$HOME/ffmpeg9,g $HOME/ffmpeg9/lib/pkgconfig/*.pc && cargo fetch && cmake --preset all",
   "postStartCommand": "rm -rf /tmp/iceoryx2 /dev/shm/iox2_* 2>/dev/null; test ! -e .vscode/settings.json || echo 'WARN: submodule .vscode/settings.json pre-exists — it outranks these customizations and may carry host-face (pixi) paths'"
 }

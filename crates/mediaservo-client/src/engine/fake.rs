@@ -9,6 +9,10 @@
 //! never hold the lock across await). Dedicated to the test foundation, no throughput demands.
 //! ponytail: a global lock; split into per-pc locks if drill parallelism ever contends.
 
+// async_trait desugars Result-returning methods into a macro-generated must_use
+// attr -> clippy >=1.99 double_must_use fires (host conda clippy older, does not);
+// the Result IS the must-use intent. Constitution-drift module allow (S4 class).
+#![allow(clippy::double_must_use)]
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};

@@ -3,6 +3,10 @@
 //! The production impl = [`LinkSignal`] (wrapping mediaservo_link::SignalSession);
 //! the test impl = MockSignal inside tests/sfu_surface.rs (an in-memory broadcast + uplink collection).
 
+// async_trait desugars Result-returning methods into a macro-generated must_use
+// attr -> clippy >=1.99 double_must_use fires (host conda clippy older, does not);
+// the Result IS the must-use intent. Constitution-drift module allow (S4 class).
+#![allow(clippy::double_must_use)]
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use async_trait::async_trait;

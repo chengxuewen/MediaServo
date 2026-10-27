@@ -1,0 +1,10 @@
+{
+// __POLYORCH_GENERATED_BEGIN__ (PolyOrch bootstrap cmake path; keep this block last, regenerate via reconfigure)
+    "cmake.cmakePath": "${workspaceFolder}/.pixi/envs/default/bin/cmake",
+    "cmake.configureOnOpen": true,
+    "cmake.environment": {
+;        "PATH": "${workspaceFolder}/.pixi/envs/default/bin:${env:PATH}",
+;        "LIBCLANG_PATH": "${workspaceFolder}/.pixi/envs/default/bin/../lib"
+;    },
+// __POLYORCH_GENERATED_END__
+}

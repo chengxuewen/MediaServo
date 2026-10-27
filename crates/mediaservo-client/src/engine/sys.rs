@@ -4,6 +4,10 @@
 //! Error mapping keeps the `ClientError::WebRtc("<original call-site prefix>: <RTCError>")` verbatim shape;
 //! the observation surface (logs/error strings) matches the pre-refactor state.
 
+// async_trait desugars Result-returning methods into a macro-generated must_use
+// attr -> clippy >=1.99 double_must_use fires (host conda clippy older, does not);
+// the Result IS the must-use intent. Constitution-drift module allow (S4 class).
+#![allow(clippy::double_must_use)]
 use std::sync::Arc;
 
 use async_trait::async_trait;

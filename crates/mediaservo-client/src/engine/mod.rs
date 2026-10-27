@@ -29,6 +29,10 @@
 //! | `DcHandle::events` | the ingress event stream (Message/Closed) | session.rs:752, 758-775 |
 //! | `DcHandle::close` | targeted local self-teardown when the vehicle DataProducer dies (frees the sid) | session.rs:779 |
 
+// async_trait desugars Result-returning methods into a macro-generated must_use
+// attr -> clippy >=1.99 double_must_use fires (host conda clippy older, does not);
+// the Result IS the must-use intent. Constitution-drift module allow (S4 class).
+#![allow(clippy::double_must_use)]
 #[cfg(feature = "engine-fake")]
 // release builds exclude the fake engine (the K11 gating discipline)
 pub mod fake;

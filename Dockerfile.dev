@@ -49,7 +49,7 @@ RUN useradd -ms /bin/bash vscode
 ENV RUSTUP_DIST_SERVER=https://mirrors.tuna.tsinghua.edu.cn/rustup \
     RUSTUP_UPDATE_ROOT=https://mirrors.tuna.tsinghua.edu.cn/rustup/rustup
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-        | sh -s -- -y --default-toolchain stable --profile minimal \
+        | sh -s -- -y --default-toolchain stable --profile minimal --component rustfmt --component clippy \
     && printf '[source.crates-io]\nreplace-with = "rsproxy-sparse"\n\n[source.rsproxy-sparse]\nregistry = "sparse+https://rsproxy.cn/index/"\n' \
         > /root/.cargo/config.toml
 
@@ -60,7 +60,7 @@ RUN mkdir -p /home/vscode/.cargo \
 # vscode layer rustup (defaults land in /home/vscode/.{rustup,cargo})
 USER vscode
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-        | sh -s -- -y --default-toolchain stable --profile minimal
+        | sh -s -- -y --default-toolchain stable --profile minimal --component rustfmt --component clippy
 
 # non-login exec shells (docker exec / IDE remote server) do not source .profile —
 # export the toolchain env explicitly (R3-N1)

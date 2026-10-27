@@ -22,6 +22,10 @@
 //! ICE-Lite: candidates are delivered inline with WebRtcTransportCreated, no RTCIceCandidate exchange round;
 //! `transport_connected` (the Error{code:0} convention) is not a real error).
 
+// async_trait desugars Result-returning methods into a macro-generated must_use
+// attr -> clippy >=1.99 double_must_use fires (host conda clippy older, does not);
+// the Result IS the must-use intent. Constitution-drift module allow (S4 class).
+#![allow(clippy::double_must_use)]
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

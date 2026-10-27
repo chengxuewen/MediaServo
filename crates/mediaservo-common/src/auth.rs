@@ -4,6 +4,10 @@
 //! Server verifies. Used for WebSocket signaling auth.
 //! Phase 2+: JWT token auth as primary, PSK as fallback.
 
+// async_trait desugars Result-returning methods into a macro-generated must_use
+// attr -> clippy >=1.99 double_must_use fires (host conda clippy older, does not);
+// the Result IS the must-use intent. Constitution-drift module allow (S4 class).
+#![allow(clippy::double_must_use)]
 use crate::error::CoreError;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
