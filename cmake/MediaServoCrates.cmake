@@ -26,7 +26,11 @@
 #     entry from the SAME command vector as the button — the former
 #     sanctioned-internal exception (_polyorch_rust_command reads; ModuKit W4
 #     precedent) is RETIRED here: this file touches no supplier internals.
-#   * `polyorch_rust_run` is deliberately NOT wired for host/server packages:
+#   * Debug-launch generation: PolyOrch_VSCODE_DEBUG_ALL is enabled below so the
+#     node/python lane faces emit .vscode launch+task managed regions (the cxx
+#     examples keep GUI run buttons -- CodeLLDB attaches those binaries directly,
+#     no launch.json needed). `polyorch_rust_run` stays deliberately unwired for
+#     host/server packages:
 #     instance lifecycle belongs to C39 (deployed binaries / systemctl), not to
 #     IDE run buttons.
 
@@ -64,6 +68,9 @@ function(mediaservo_setup_crate_lanes)
     if(NOT POLYORCH_RUST_FOUND)
         polyorch_rust_setup()
     endif()
+    # P2 (build-env round): debug-launch generation ON for the lane faces that
+    # support it (node/python). Placement AFTER rust_setup, BEFORE lane loop.
+    set(PolyOrch_VSCODE_DEBUG_ALL ON)
 
     # C23 posture on aarch64 (see header): inject, or skip loudly.
     set(_c23_inject "")
