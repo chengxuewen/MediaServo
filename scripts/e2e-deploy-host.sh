@@ -36,7 +36,7 @@ else
 fi
 
 # ── 2. D-H13 layout asserts ───────────────────────────────
-[ -f "$TMP/etc/host.toml" ] || { echo "FAIL: etc/host.toml"; FAIL=1; }
+[ -f "$TMP/etc/host.yaml" ] || { echo "FAIL: etc/host.yaml"; FAIL=1; }
 for f in signing.pem cam0.token cam0-stream.token recorder.token agent.token; do
     [ -f "$TMP/etc/link/$f" ] || { echo "FAIL: etc/link/$f"; FAIL=1; }
 done
@@ -73,9 +73,9 @@ echo "$out" | grep -q "all checks passed" || { echo "FAIL: doctor did not pass e
 
 # ── 6. idempotent re-deploy: identity/signing/host.toml hashes unchanged ──
 note "re-deploy idempotency"
-SUM_BEFORE=$(sha256sum "$TMP/etc/link/signing.pem" "$TMP/identity.json" "$TMP/etc/host.toml")
+SUM_BEFORE=$(sha256sum "$TMP/etc/link/signing.pem" "$TMP/identity.json" "$TMP/etc/host.yaml")
 ./mediaservo.sh deploy host --prefix "$TMP" >/dev/null
-SUM_AFTER=$(sha256sum "$TMP/etc/link/signing.pem" "$TMP/identity.json" "$TMP/etc/host.toml")
+SUM_AFTER=$(sha256sum "$TMP/etc/link/signing.pem" "$TMP/identity.json" "$TMP/etc/host.yaml")
 if [ "$SUM_BEFORE" = "$SUM_AFTER" ]; then
     echo "OK: hashes of signing.pem/identity.json/host.toml unchanged after re-deploy (credentials preserved)"
 else

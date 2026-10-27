@@ -108,7 +108,7 @@ endfunction()
 # ---- target registration ----
 
 function(_mediaservo_deploy_target _t)
-    cmake_parse_arguments(DT "" "TREE;GATE" "EXTRA_DEFS" ${ARGN})
+    cmake_parse_arguments(DT "" "TREE;GATE" "EXTRA_COMMANDS" ${ARGN})
     if(NOT ${${DT_GATE}})
         return()
     endif()
@@ -126,10 +126,35 @@ function(_mediaservo_deploy_target _t)
     else()
         set(_cfg Debug)
     endif()
-    # per-target guard script in the MAIN binaryDir (configure_file embeds
-    # prefix/brand as @ONLY constants)
+    # per-target guard + init scripts in the MAIN binaryDir (configure_file
+    # embeds prefix/brand as @ONLY constants). Init leg reuses the pack-legs
+    # templates verbatim (F3c one-leg-one-owner: same bytes as `package` runs).
     _mediaservo_deploy_guard_script(
         "${CMAKE_BINARY_DIR}/deploy-${_t}-guard.cmake" "${_pfx}" "${MEDIASERVO_BRAND}")
+    if(DT_TREE STREQUAL "host")
+        # template contract: CMAKE_INSTALL_PREFIX (its line 6: set(_root ...)),
+        # HOST_BIN_NAME, RUST_BRAND — prefix emitted as a literal set() line
+        set(HOST_BIN_NAME "${MEDIASERVO_BRAND}-host")
+        set(RUST_BRAND "${MEDIASERVO_BRAND}")
+        configure_file("${CMAKE_CURRENT_LIST_DIR}/pack-legs/host-legs.cmake.in"
+                       "${CMAKE_BINARY_DIR}/deploy-init-host.cmake" @ONLY)
+        file(TO_CMAKE_PATH "${_pfx}" _pfx_cm)
+        file(READ "${CMAKE_BINARY_DIR}/deploy-init-host.cmake" _init)
+        string(PREPEND _init "set(CMAKE_INSTALL_PREFIX \"${_pfx_cm}\")\n")
+        file(WRITE "${CMAKE_BINARY_DIR}/deploy-init-host.cmake" "${_init}")
+    elseif(DT_TREE STREQUAL "server")
+        # server-legs template contract: CMAKE_INSTALL_PREFIX (template header:
+        # set(_root "${CMAKE_INSTALL_PREFIX}")) + SRV_NAME; rendered per-run in
+        # a wrapper that sets the prefix then includes the template render
+        set(SRV_NAME "${MEDIASERVO_BRAND}-server")
+        set(RUST_BRAND "${MEDIASERVO_BRAND}")
+        configure_file("${CMAKE_CURRENT_LIST_DIR}/pack-legs/server-legs.cmake.in"
+                       "${CMAKE_BINARY_DIR}/deploy-init-server-body.cmake" @ONLY)
+        file(WRITE "${CMAKE_BINARY_DIR}/deploy-init-server.cmake"
+             "set(CMAKE_INSTALL_PREFIX \"${_pfx}\")
+include(\"${CMAKE_BINARY_DIR}/deploy-init-server-body.cmake\")
+")
+    endif()
     add_custom_target(mediaservo-deploy-${_t}
         COMMAND ${CMAKE_COMMAND} -E echo
             "deploy-${_t}: configure dedicated binaryDir ${_bdir} (profile ${_profile})"
@@ -148,12 +173,24 @@ function(_mediaservo_deploy_target _t)
             -DMEDIASERVO_DEPLOY_GUARD_BRAND=${MEDIASERVO_BRAND}
             -P ${CMAKE_BINARY_DIR}/deploy-${_t}-guard.cmake
         COMMAND ${CMAKE_COMMAND} --install ${_bdir} --prefix ${_pfx}
+        ${DT_EXTRA_COMMANDS}
         COMMENT "mediaservo deploy ${_t} -> ${_pfx} (profile ${_profile}, brand '${MEDIASERVO_BRAND}')"
         VERBATIM)
 endfunction()
 
-_mediaservo_deploy_target(host TREE host GATE MEDIASERVO_BUILD_CRATES_LANES)
-_mediaservo_deploy_target(server TREE server GATE MEDIASERVO_BUILD_CRATES_LANES)
+# init legs as EXTRA_COMMANDS (verbatim, no generator expressions — Makefile
+# expands empty-string GEs in a way that eats adjacent COMMAND args, measured)
+_mediaservo_deploy_target(host TREE host GATE MEDIASERVO_BUILD_CRATES_LANES
+    EXTRA_COMMANDS
+        COMMAND ${CMAKE_COMMAND}
+            -DRUN_ROOT=${MEDIASERVO_DEPLOY_PREFIX_HOST}
+            -DHOST_BIN_NAME=${MEDIASERVO_BRAND}-host
+            -DRUST_BRAND=${MEDIASERVO_BRAND}
+            -P ${CMAKE_BINARY_DIR}/deploy-init-host.cmake)
+_mediaservo_deploy_target(server TREE server GATE MEDIASERVO_BUILD_CRATES_LANES
+    EXTRA_COMMANDS
+        COMMAND ${CMAKE_COMMAND}
+            -P ${CMAKE_BINARY_DIR}/deploy-init-server.cmake)
 
 # bindings: AppTree has no bindings tree — the bindings face IS an install face
 # (MediaServoBindings rows in the bindings-lane tree). Dedicated binaryDir with
