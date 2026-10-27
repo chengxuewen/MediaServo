@@ -84,6 +84,15 @@ fi
 
 # ── 7. start/status/stop smoke (C25: clear iceoryx2 + leftover processes first — an app
 # from the previous run holding 17980 makes this start correctly reject via the C32 conflict guard) ────
+# PIT-192-family guard: this leg starts a REAL instance on 17980 — structurally
+# mutually exclusive with a live cluster on this host. Skip loudly instead of
+# colliding (same shape as the mediasoup gate's 9800-busy skip).
+if ss -tln 2>/dev/null | grep -q ':17980 ' || pgrep -x host-agent >/dev/null 2>&1; then
+    note "start/status/stop roundtrip — SKIPPED (17980/host-agent busy: a live instance is running on this host; run on a cluster-free box)"
+    echo "PASS: deploy host e2e smoke (roundtrip skipped, placement+idempotency green)"
+    [ "$FAIL" = 0 ] || { echo "FAIL: $FAIL checks failed"; exit 1; }
+    exit 0
+fi
 note "start/status/stop roundtrip"
 rm -rf /tmp/iceoryx2 /dev/shm/iox2_*
 env PATH="$BIN:$PATH" "$BIN/mediaservo-host" stop "$TMP" >/dev/null 2>&1

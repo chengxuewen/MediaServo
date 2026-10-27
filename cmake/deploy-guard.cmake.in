@@ -40,10 +40,16 @@ if(NOT _is_branded)
     # threat face = ANY brand-suffixed artifact (agent family AND the branded
     # main CLI); first bug shape only globbed *-agent and missed a tree whose
     # only branded file was <brand>-host (measured, judge round 1)
+    # threat face = OTHER-brand artifacts. The empty-brand layout's own names
+    # (mediaservo-host, host-agent, host-streamer...) are the LEGACY upstream
+    # set and must NOT count (bash twin :1305 skips host-* the same way);
+    # otherwise a brandless IDEMPOTENT re-deploy would refuse its own tree
+    # (measured: guard round-2 fired on the upstream names it installed).
     file(GLOB _branded_bins
          "${_p_abs}/bin/*-agent"
          "${_p_abs}/bin/*-host"
          "${_p_abs}/bin/*-streamer")
+    list(FILTER _branded_bins EXCLUDE REGEX "/(host|mediaservo)-")
     list(LENGTH _branded_bins _n)
     if(_n GREATER 0)
         message(FATAL_ERROR

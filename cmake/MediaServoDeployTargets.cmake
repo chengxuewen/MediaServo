@@ -108,7 +108,7 @@ endfunction()
 # ---- target registration ----
 
 function(_mediaservo_deploy_target _t)
-    cmake_parse_arguments(DT "" "TREE;GATE" "EXTRA_COMMANDS" ${ARGN})
+    cmake_parse_arguments(DT "" "TREE;GATE" "EXTRA_DEFS;EXTRA_COMMANDS" ${ARGN})
     if(NOT ${${DT_GATE}})
         return()
     endif()
@@ -116,8 +116,6 @@ function(_mediaservo_deploy_target _t)
         set(_pfx "${MEDIASERVO_DEPLOY_PREFIX_HOST}")
     else()
         set(_pfx "${MEDIASERVO_DEPLOY_PREFIX_SERVER}")
-        set(_server_defs -DMEDIASERVO_SERVER_OUT_DIR=${MEDIASERVO_SERVER_OUT_DIR}
-                        -DMEDIASERVO_APP_STAGING=build)
     endif()
     set(_bdir "${CMAKE_BINARY_DIR}/../deploy-${_t}")
     set(_profile ${MEDIASERVO_DEPLOY_PROFILE})
@@ -134,7 +132,13 @@ function(_mediaservo_deploy_target _t)
     if(DT_TREE STREQUAL "host")
         # template contract: CMAKE_INSTALL_PREFIX (its line 6: set(_root ...)),
         # HOST_BIN_NAME, RUST_BRAND — prefix emitted as a literal set() line
-        set(HOST_BIN_NAME "${MEDIASERVO_BRAND}-host")
+        # bash parity (mediaservo.sh: env_host=${brand:+${brand}-host}; fallback
+        # mediaservo-host): an empty brand renders the upstream CLI name
+        if(MEDIASERVO_BRAND)
+            set(HOST_BIN_NAME "${MEDIASERVO_BRAND}-host")
+        else()
+            set(HOST_BIN_NAME "mediaservo-host")
+        endif()
         set(RUST_BRAND "${MEDIASERVO_BRAND}")
         configure_file("${CMAKE_CURRENT_LIST_DIR}/pack-legs/host-legs.cmake.in"
                        "${CMAKE_BINARY_DIR}/deploy-init-host.cmake" @ONLY)
@@ -146,7 +150,11 @@ function(_mediaservo_deploy_target _t)
         # server-legs template contract: CMAKE_INSTALL_PREFIX (template header:
         # set(_root "${CMAKE_INSTALL_PREFIX}")) + SRV_NAME; rendered per-run in
         # a wrapper that sets the prefix then includes the template render
-        set(SRV_NAME "${MEDIASERVO_BRAND}-server")
+        if(MEDIASERVO_BRAND)
+            set(SRV_NAME "${MEDIASERVO_BRAND}-server")
+        else()
+            set(SRV_NAME "mediaservo-server")
+        endif()
         set(RUST_BRAND "${MEDIASERVO_BRAND}")
         configure_file("${CMAKE_CURRENT_LIST_DIR}/pack-legs/server-legs.cmake.in"
                        "${CMAKE_BINARY_DIR}/deploy-init-server-body.cmake" @ONLY)
@@ -160,7 +168,7 @@ include(\"${CMAKE_BINARY_DIR}/deploy-init-server-body.cmake\")
             "deploy-${_t}: configure dedicated binaryDir ${_bdir} (profile ${_profile})"
         COMMAND ${CMAKE_COMMAND} -S ${MEDIASERVO_REPO_ROOT} -B ${_bdir}
             -DMEDIASERVO_APP_TREE=${DT_TREE}
-            $<$<BOOL:${_server_defs}>:${_server_defs}>
+            ${DT_EXTRA_DEFS}
             -DMEDIASERVO_BUILD_CRATES_LANES=ON
             -DMEDIASERVO_DEPLOY_PROFILE=${_profile}
             -DMEDIASERVO_BRAND=${MEDIASERVO_BRAND}
@@ -188,6 +196,8 @@ _mediaservo_deploy_target(host TREE host GATE MEDIASERVO_BUILD_CRATES_LANES
             -DRUST_BRAND=${MEDIASERVO_BRAND}
             -P ${CMAKE_BINARY_DIR}/deploy-init-host.cmake)
 _mediaservo_deploy_target(server TREE server GATE MEDIASERVO_BUILD_CRATES_LANES
+    EXTRA_DEFS -DMEDIASERVO_SERVER_OUT_DIR=${MEDIASERVO_SERVER_OUT_DIR}
+               -DMEDIASERVO_APP_STAGING=build
     EXTRA_COMMANDS
         COMMAND ${CMAKE_COMMAND}
             -P ${CMAKE_BINARY_DIR}/deploy-init-server.cmake)
