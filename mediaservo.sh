@@ -297,7 +297,10 @@ _msvc_copy_with_kill() {
     # Text file busy -> kill occupier by exact path -> retry; max 3 attempts)
     local src=$1 dst=$2 attempt err
     for attempt in 1 2 3; do
-        if err=$(cp -p "$src" "$dst" 2>&1); then return 0; fi
+        # LC_ALL=C so the "Text file busy" message is English on every host —
+        # a zh_CN box reported 文本文件忙 and the busy pattern missed, so the
+        # ETXTBSY retry never fired (real bug: re-deploy failed on this host)
+        if err=$(LC_ALL=C cp -p "$src" "$dst" 2>&1); then return 0; fi
         case "$err" in
             *[Bb]usy*|*Text\ file*) ;;
             *) echo "Error: copy $src -> $dst failed: $err" >&2; return 1 ;;
@@ -354,26 +357,56 @@ _ms_deploy_stop_instance() {
 # re-configures the dedicated deploy binaryDir with the caller's overrides, then
 # drives the same custom target the IDE button uses. One implementation for all
 # three faces (U5).
+# _ms_deploy_via_target <target-suffix> <profile> [VAR=VAL ...] — P2d-2 forwarder.
+# Two-phase: configure binaryDir -> build the bin lane (cargo artifact exists) ->
+# reconfigure (AppTree EXISTS pins now see real files) -> drive deploy target.
+# Single cargo writer at any moment (concurrent cargo on one target/ corrupted
+# the main bin mid-deploy, measured 10-27).
 _ms_deploy_via_target() {
+    # NOTE: host leg is NOT forwarded yet (P2d-2 reverted — see deploy host body);
+    # this helper serves bindings/server only.
+    if [ "$1" = host ]; then
+        echo "internal error: deploy host must use the bash leg" >&2; return 2
+    fi
     local suffix="$1" profile="$2"; shift 2
     local cmake_bin="${CMAKE_BIN:-$ROOT/.pixi/envs/default/bin/cmake}"
-    [ -x "$cmake_bin" ] || cmake_bin="$(command -v cmake)"
+    # NO ambient fallback: a system cmake here runs the lanes cargo under the
+    # ambient (possibly non-pixi) toolchain and has produced corrupted main-bin
+    # copies (measured: e2e shell without pixi on PATH -> cp-branded byte-copy
+    # at target/debug/mediaservo-host). Fail with the activation hint instead.
+    if [ ! -x "$cmake_bin" ]; then
+        echo "Error: deploy target face needs the pixi cmake ($cmake_bin not found — run via msrtc.sh/mediaservo.sh which activate pixi, or export CMAKE_BIN)" >&2
+        return 2
+    fi
     local -a extra=()
     for kv in "$@"; do extra+=("-D$kv"); done
-    # lane gates must be ON in the deploy binaryDir's MAIN configure — the
-    # targets register conditionally (preset availability matrix)
     local -a gates=(-DMEDIASERVO_BUILD_CRATES_LANES=ON)
     [ "$suffix" = bindings ] && gates=(-DMEDIASERVO_BUILD_BINDINGS=ON)
-    # BRAND must ALWAYS be passed explicitly (empty = legacy upstream names):
-    # an existing binaryDir cache keeps its old -D values otherwise, so a
-    # brandless deploy would silently reuse a previously-configured brand
-    # (measured: e2e brandless run landed msrtc-* names from stale cache)
+    "$cmake_bin" -S "$ROOT" -B "$ROOT/build/deploy-$suffix" \
+        "${gates[@]}" -DMEDIASERVO_DEPLOY_PROFILE="$profile" \
+        -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return 1
+    if [ "$suffix" != bindings ]; then
+        "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
+            --target "mediaservo-$suffix-bin-build" || return 1
+        # identity self-check: a replaced/foreign byte-copy at target must never
+        # ride a deploy (fingerprint-fresh foreign content is invisible to cargo)
+        local main_bin="$ROOT/target/$(echo "$profile" | tr 'A-Z' 'a-z')/mediaservo-host"
+        if [ -x "$main_bin" ] && ! "$main_bin" version 2>/dev/null | grep -q '^mediaservo-host '; then
+            echo "  target main-bin identity broken — forcing rebuild" >&2
+            touch "$ROOT/crates/mediaservo-host/src/main.rs"
+            "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
+                --target "mediaservo-$suffix-bin-build" || return 1
+            "$main_bin" version 2>/dev/null | grep -q '^mediaservo-host ' || \
+                { echo "Error: main-bin identity still broken" >&2; return 1; }
+        fi
+    fi
     "$cmake_bin" -S "$ROOT" -B "$ROOT/build/deploy-$suffix" \
         "${gates[@]}" -DMEDIASERVO_DEPLOY_PROFILE="$profile" \
         -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return 1
     "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
         --target "mediaservo-deploy-$suffix" || return 1
 }
+
 
 _msvc_oxmgr_resolve() {
     # vendor hunt (D-H13 hard gate, python _resolve_oxmgr_or_die parity):
@@ -1355,6 +1388,11 @@ case "${1:-}" in
             done
             [ -n "$prefix" ] || { echo "Error: deploy requires --prefix (no default — prevents polluting out/ stateless delivery; vehicles use /opt/mediaservo-host)" >&2; exit 2; }
             bin_dir="$prefix/bin"
+            # brand: env (msrtc.sh injects MEDIASERVO_BRAND) first, falling back to
+            # derivation from the installed instance (python _derive_brand parity:
+            # first *-agent hit, host-* legacy names skipped; the multi-brand
+            # first-match limit is carried knowingly). Explicit default "mediaservo"
+            # maps to the legacy host-* layout (empty brand).
             brand_in="${MEDIASERVO_BRAND:-}"
             if [ -z "$brand_in" ]; then
                 for p in "$bin_dir"/*-agent; do
@@ -1365,21 +1403,79 @@ case "${1:-}" in
                 done
             fi
             brand=$brand_in; [ "$brand" = mediaservo ] && brand=""
-            # triple-stop of revival sources (unit -> daemon -> family), C50-scoped
-            if [ -f "$prefix/run/oxfile.toml" ] && [ -e "$bin_dir/${brand:+${brand}-}host" ]; then
+            rust_brand=${brand:-mediaservo}
+            mkdir -p "$bin_dir" 2>/dev/null || { echo "Error: cannot create $bin_dir — for deployment use sudo msrtc.sh deploy host --prefix /opt/mediaservo-host" >&2; exit 1; }
+            case "$prefix" in
+                /opt*) [ "$(id -u)" = 0 ] || { echo "Error: /opt deployment needs root (sudo msrtc.sh deploy host --prefix /opt/mediaservo-host)" >&2; exit 1; } ;;
+            esac
+            host_cli=${brand:+${brand}-host}; host_cli=${host_cli:-mediaservo-host}
+            # triple stop of the revival sources (unit -> daemon -> family), only
+            # when a live instance is detectable (oxfile + branded CLI present).
+            # Never call the oxmgr CLI here (its IPC auto-spawns the daemon —
+            # creating busy instead of clearing it). C50: the unit arm is
+            # OXMGR_HOME-scoped — a brand glob never stops another instance.
+            if [ -f "$prefix/run/oxfile.toml" ] && [ -f "$bin_dir/$host_cli" ]; then
                 echo "Running host instance detected — stopping the process family first (reinstall does not overwrite etc/ credentials)"
-                _ms_deploy_stop_instance "$prefix" "$brand"
+                oxmgr_home=$(realpath -m -- "$prefix/run/oxmgr" 2>/dev/null || echo "$prefix/run/oxmgr")
+                want_home="Environment=OXMGR_HOME=$oxmgr_home"
+                if command -v systemctl >/dev/null 2>&1 && [ -d "$HOME/.config/systemd/user" ]; then
+                    for u in "$HOME/.config/systemd/user"/oxmgr-${brand}-*.service; do
+                        [ -e "$u" ] || continue
+                        un=$(basename "$u")
+                        if ! grep -qF -- "$want_home" "$u" 2>/dev/null; then
+                            echo "  note: leaving unit $un untouched (belongs to another instance home)"
+                            continue
+                        fi
+                        systemctl --user stop "$un" || true
+                        systemctl --user reset-failed "$un" || true
+                    done
+                fi
+                _msvc_kill_using "$bin_dir/oxmgr"
+                for base in agent streamer capturer recorder controller emergency audio; do
+                    role=${brand:+${brand}-${base}}; role=${role:-host-${base}}
+                    pkill -x "$role" || true
+                done
                 sleep 1
             fi
-            # D266 pre-flight (old-leg parity): deploy does not trigger builds —
-            # a missing main CLI here means "run build host first" (the AppTree
-            # missing-src skip would silently land a CLI-less tree)
-            [ -e "target/${build_type@L}/mediaservo-host" ] || \
-                { echo "Error: target/${build_type@L}/mediaservo-host missing — run build host first (deploy does not trigger builds — D266)" >&2; exit 1; }
-            # P2d-2 (U5): placement+init retired into the cmake deploy target
-            case "$build_type" in Release) prof=Release ;; *) prof=Debug ;; esac
-            _ms_deploy_via_target host "$prof" "MEDIASERVO_DEPLOY_PREFIX_HOST=$prefix" \
-                || { echo "Error: deploy host target failed (rc=$?)" >&2; exit 1; }
+            _msvc_app_install host "$brand" "$build_type" "$prefix" ""
+            # oxmgr version locked with the deployment (D-H13)
+            _msvc_oxmgr_resolve host
+            _msvc_copy_with_kill "$MS_OXMGR_SRC" "$bin_dir/oxmgr"
+            oxv=$("$MS_OXMGR_SRC" --version 2>/dev/null | head -1) || oxv=""
+            [ -n "$oxv" ] || oxv=$("$MS_OXMGR_SRC" --version 2>&1 >/dev/null | head -1) || oxv=""
+            echo "  oxmgr packaged: ${oxv:-?}"
+            # host init: etc/ + identity.json + tokens — idempotent write-only, never
+            # delete (reinstall keeps credentials). init is a separate process: the
+            # device prefix brand must match the layout brand (env override).
+            if [ -f "$prefix/identity.json" ]; then
+                echo "  identity.json exists — write-only, never delete (device identity preserved): $prefix/identity.json"
+            fi
+            echo "\$ $bin_dir/$host_cli init $prefix"
+            MEDIASERVO_BRAND="$rust_brand" "$bin_dir/$host_cli" init "$prefix"
+            # env.sh one-shot activation (MED5 — relocatable: derived relative to
+            # itself; same bytes as the pack-leg host template, deploy-side owner)
+            env_host=${brand:+${brand}-host}; env_host=${env_host:-mediaservo-host}
+            cat > "$prefix/env.sh" <<EOF
+#!/usr/bin/env bash
+# ${env_host} environment activation (generated at deploy) — all commands available after sourcing
+# Usage: source env.sh (still valid under any prefix / after relocation, derived relative to this file)
+__MSRTC_ENV_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd -P)"
+export PATH="\${__MSRTC_ENV_DIR}/bin:\$PATH"
+export MEDIASERVO_BRAND="${rust_brand}"   # brand env (D252); the deployment package pins the layout explicitly
+BIN_DIR_MSRTC="\${__MSRTC_ENV_DIR}/bin"   # for scripts/aliases to reference
+unset __MSRTC_ENV_DIR
+echo "[${rust_brand}] ${env_host} environment activated — bin/: \$BIN_DIR_MSRTC"
+EOF
+            chmod 755 "$prefix/env.sh"
+            echo "  env.sh generated: $prefix/env.sh (after sourcing, PATH=bin/ makes all commands available)"
+            mkdir -p "$prefix/run/logs" "$prefix/recordings"
+            echo "host deployed to $prefix (${build_type,,})"
+            echo "  bin/    $(ls -1 "$bin_dir" | sort | paste -sd, - | sed 's/,/, /g')"
+            echo "  etc/    host.yaml + link/{signing.pem,*.token} (generated by host init, kept on reinstall)"
+            echo "  run/    logs/"
+            echo "  recordings/"
+            echo "  identity.json (0600, device identity — write-only, do not delete)"
+            echo "Usage: export PATH=$bin_dir:\$PATH && $host_cli doctor $prefix && $host_cli start $prefix"
             exit 0
             ;;
         bindings)

@@ -71,13 +71,13 @@ out=$(env PATH="$BIN:$PATH" "$BIN/mediaservo-host" doctor "$TMP" 2>&1 || true)
 echo "$out"
 echo "$out" | grep -q "all checks passed" || { echo "FAIL: doctor did not pass everything"; FAIL=1; }
 
-# ── 6. idempotent re-deploy: identity/signing/host.toml hashes unchanged ──
+# ── 6. idempotent re-deploy: identity/signing/host.yaml hashes unchanged ──
 note "re-deploy idempotency"
 SUM_BEFORE=$(sha256sum "$TMP/etc/link/signing.pem" "$TMP/identity.json" "$TMP/etc/host.yaml")
 ./mediaservo.sh deploy host --prefix "$TMP" >/dev/null
 SUM_AFTER=$(sha256sum "$TMP/etc/link/signing.pem" "$TMP/identity.json" "$TMP/etc/host.yaml")
 if [ "$SUM_BEFORE" = "$SUM_AFTER" ]; then
-    echo "OK: hashes of signing.pem/identity.json/host.toml unchanged after re-deploy (credentials preserved)"
+    echo "OK: hashes of signing.pem/identity.json/host.yaml unchanged after re-deploy (credentials preserved)"
 else
     echo "FAIL: re-deploy broke credentials (hash changed)"; FAIL=1
 fi

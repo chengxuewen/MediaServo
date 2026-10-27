@@ -45,12 +45,16 @@ echo "OK: bindings diff 0 (frozen)"
 
 # ── 3. install --brand cp (real install — exe_cmd uses the current_exe dir, brand apps must share the CLI directory) ─
 note "install --brand cp"
-./mediaservo.sh deploy host --brand cp --prefix "$TMP" >/dev/null 2>&1
-for link in cp cp-host; do
+MEDIASERVO_BRAND=cp ./mediaservo.sh deploy host --prefix "$TMP" >/dev/null 2>&1
+# D269: a branded host deploy lands {brand}-host (bare-brand shortcut is
+# unbranded-only, AppTree:399-401) — the `cp` in the old assertion was stale
+for link in cp-host; do
     [ -L "$TMP/$link" ] || { echo "FAIL: missing root shortcut $TMP/$link"; FAIL=1; }
 done
 for app in agent recorder controller emergency audio capturer streamer; do
-    [ -L "$TMP/bin/cp-$app" ] || { echo "FAIL: missing bin/cp-$app symlink"; FAIL=1; }
+    # AppTree swap-leg lands regular files (COPY+RENAME), not symlinks —
+    # the -L assertion predated SR7 (stale-assert debt, P3b ruling: fix all)
+    [ -s "$TMP/bin/cp-$app" ] && [ -x "$TMP/bin/cp-$app" ] || { echo "FAIL: missing bin/cp-$app"; FAIL=1; }
 done
 python3 -c "import json; d=json.load(open('$TMP/identity.json')); assert d['device_id'].startswith('cp-'), d" \
     || { echo "FAIL: identity device_id should start with cp-"; FAIL=1; }
@@ -58,25 +62,26 @@ echo "OK: root shortcuts + bin/cp-* links + identity cp-<12hex>"
 
 # ── 4. branded instance runtime (real daemon + processes) ─────
 note "branded instance start/smoke"
-# C32: branded instances isolate via a different gateway port (default 17980 may be taken by the dev instance)
-python3 - <<PY
-p = "$TMP/etc/host.toml"
-s = open(p).read()
-if "local_port" not in s.split("[signaling]")[1].split("\n")[0]:
-    s = s.replace("[signaling]", "[signaling]\nlocal_port = 17981\nroom = \"cp-veh\"", 1)
-open(p, "w").write(s)
-PY
-rm -rf /tmp/iceoryx2 /dev/shm/iox2_*   # C25
-pkill -x oxmgr 2>/dev/null || true; sleep 1
-env PATH="$TMP/bin:$PATH" MEDIASERVO_BRAND=cp "$TMP/bin/mediaservo-host" stop "$TMP" >/dev/null 2>&1 || true
-env PATH="$TMP/bin:$PATH" MEDIASERVO_BRAND=cp timeout -k 5 40 "$TMP/bin/mediaservo-host" start "$TMP" >/dev/null 2>&1 \
-    || { echo "FAIL: brand instance start"; FAIL=1; }
-sleep 8   # daemon cold-start window
-# status consumes the directory argument (ps/monit/logs infer by cwd — a script cwd outside the instance connects to the wrong daemon)
-out=$(env PATH="$TMP/bin:$PATH" MEDIASERVO_BRAND=cp timeout -k 5 20 "$TMP/bin/mediaservo-host" status "$TMP" 2>&1 || true)
-echo "$out" | grep -q "cp-agent" || { echo "FAIL: no cp-agent in status: ${out:0:180}"; FAIL=1; }
-echo "$out" | grep -q "cp-capturer" || { echo "FAIL: no cp-capturer in status: ${out:0:180}"; FAIL=1; }
-echo "OK: cp-agent/cp-capturer listed (branded process names across the full chain)"
+# C32 port isolation + PIT-192 host-mutex: a real branded daemon binds the
+# gateway port; a live cluster on this host makes that collision-prone, so the
+# whole runtime leg skips loudly when any host family process is up (same shape
+# as the mediasoup/roundtrip gates). YAML-native signaling override (was
+# TOML `[signaling]` split — stale since the C35 yaml migration).
+if ss -tln 2>/dev/null | grep -q ':17980 ' || pgrep -x 'host-agent\|cp-agent\|msrtc-agent' >/dev/null 2>&1; then
+    echo "  SKIPPED (17980 busy / a host-agent family running — live cluster on this host)"
+    echo "OK: runtime leg skipped (placement+identity above still enforced)"
+else
+    printf '\nsignaling:\n  local_port: 17981\n  room: "cp-veh"\n' >> "$TMP/etc/host.yaml"
+    rm -rf /tmp/iceoryx2 /dev/shm/iox2_*   # C25 (guarded above: no live cluster to poison)
+    env PATH="$TMP/bin:$PATH" MEDIASERVO_BRAND=cp timeout -k 5 40 "$TMP/bin/cp-host" start "$TMP" >/dev/null 2>&1 \
+        || { echo "FAIL: brand instance start"; FAIL=1; }
+    sleep 8   # daemon cold-start window
+    out=$(env PATH="$TMP/bin:$PATH" MEDIASERVO_BRAND=cp timeout -k 5 20 "$TMP/bin/cp-host" status "$TMP" 2>&1 || true)
+    echo "$out" | grep -q "cp-agent" || { echo "FAIL: no cp-agent in status: ${out:0:180}"; FAIL=1; }
+    echo "$out" | grep -q "cp-capturer" || { echo "FAIL: no cp-capturer in status: ${out:0:180}"; FAIL=1; }
+    env PATH="$TMP/bin:$PATH" MEDIASERVO_BRAND=cp "$TMP/bin/cp-host" stop "$TMP" >/dev/null 2>&1 || true
+    echo "OK: cp-agent/cp-capturer listed (branded process names across the full chain)"
+fi
 
 echo
 if [ "$FAIL" = 0 ]; then
