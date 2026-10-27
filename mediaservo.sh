@@ -309,6 +309,26 @@ _msvc_copy_with_kill() {
     echo "Error: failed to copy $dst (still busy after multiple retries)" >&2
     return 1
 }
+# _ms_deploy_via_target <target-suffix> <profile> [VAR=VAL ...] — P2d-2 forwarder:
+# re-configures the dedicated deploy binaryDir with the caller's overrides, then
+# drives the same custom target the IDE button uses. One implementation for all
+# three faces (U5).
+_ms_deploy_via_target() {
+    local suffix="$1" profile="$2"; shift 2
+    local cmake_bin="${CMAKE_BIN:-$ROOT/.pixi/envs/default/bin/cmake}"
+    [ -x "$cmake_bin" ] || cmake_bin="$(command -v cmake)"
+    local -a extra=()
+    for kv in "$@"; do extra+=("-D$kv"); done
+    # lane gates must be ON in the deploy binaryDir's MAIN configure — the
+    # targets register conditionally (preset availability matrix)
+    local -a gates=(-DMEDIASERVO_BUILD_CRATES_LANES=ON)
+    [ "$suffix" = bindings ] && gates=(-DMEDIASERVO_BUILD_BINDINGS=ON)
+    "$cmake_bin" -S "$ROOT" -B "$ROOT/build/deploy-$suffix" \
+        "${gates[@]}" -DMEDIASERVO_DEPLOY_PROFILE="$profile" "${extra[@]}" >&2 || return 1
+    "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
+        --target "mediaservo-deploy-$suffix" || return 1
+}
+
 _msvc_oxmgr_resolve() {
     # vendor hunt (D-H13 hard gate, python _resolve_oxmgr_or_die parity):
     # PATH -> ~/.cache/oxmgr reclaim -> fail. Sets MS_OXMGR_SRC. The archive
@@ -1388,41 +1408,14 @@ EOF
                     *) echo "deploy bindings: unexpected argument $1" >&2; exit 2 ;;
                 esac
             done
+            # P2d-2 (U5): implementation retired into the cmake deploy target —
+            # this shim resolves args and drives the same dedicated-binaryDir
+            # choreography the IDE button uses (single implementation, F29/F32).
             src="${MSRTC_OUT_ROOT:-$ROOT/out}/bindings"
-            if [ -z "$prefix" ]; then
-                prefix="$src"
-                echo "[deploy bindings] prefix default → $prefix (out root follows the calling shell; --prefix overrides)"
-            fi
+            [ -n "$prefix" ] || prefix="$src"
             if [ ! -d "$src/lib" ]; then echo "Error: no assembled artifacts in $src — run build bindings first" >&2; exit 1; fi
-            if ! mkdir -p "$prefix/lib" 2>/dev/null; then
-                echo "Error: cannot create $prefix — for deployment use sudo msrtc.sh deploy bindings --prefix /opt/mediaservo-sdk" >&2; exit 1; fi
-            if [ "$(cd "$prefix" && pwd -P)" = "$(cd "$src" && pwd -P)" ]; then
-                # same-tree idempotent guard (09-21 SameFileError lesson): the build
-                # phase already ran the install rules — a second full pass is churn.
-                sos=$(cd "$src/lib" && ls -1 | grep '^libmediaservo_.*\.so' | sort | paste -sd, - | sed 's/,/, /g')
-            else
-                echo "\$ cmake --preset bindings -DCMAKE_BUILD_TYPE=$release -DMEDIASERVO_BINDINGS_SRC=$src  (cwd: $ROOT)"
-                if ! (cd "$ROOT" && cmake --preset bindings -DCMAKE_BUILD_TYPE="$release" "-DMEDIASERVO_BINDINGS_SRC=$src"); then exit 1; fi
-                attempt=1
-                while :; do
-                    if blob=$( (cd "$ROOT" && cmake --install build/presets/bindings --prefix "$prefix" --strip) 2>&1 ); then break; fi
-                    rc=$?
-                    if { echo "$blob" | grep -qi busy || echo "$blob" | grep -q 'Text file'; } && [ $attempt -lt 3 ]; then
-                        echo "  install hit busy artifacts — killing occupiers, retrying ($attempt/3)"
-                        for so in $(cd "$prefix/lib" 2>/dev/null && ls -1 | grep '^libmediaservo_.*\.so' | sed "s|^|$prefix/lib/|" | sort); do
-                            _msvc_kill_using "$so"
-                        done
-                        attempt=$((attempt+1))
-                    else
-                        echo "Error: cmake --install into $prefix failed (rc=$rc):" >&2
-                        printf '%s' "$blob" | tail -c 600 >&2
-                        exit 1
-                    fi
-                done
-                sos=$(cd "$prefix/lib" && ls -1 | grep '^libmediaservo_.*\.so' | sort | paste -sd, - | sed 's/,/, /g')
-            fi
-            echo "bindings deployed to $prefix (lib/ $sos + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx)"
-            echo "  usage: export LD_LIBRARY_PATH=<prefix>/lib; link per the bindings headers; python: pip install <prefix>/wheel/*.whl"
+            _ms_deploy_via_target bindings "$release" "MEDIASERVO_DEPLOY_PREFIX_HOST=$prefix"
+            echo "bindings deployed to $prefix (via cmake deploy target)"
             exit 0
             ;;
         server)
