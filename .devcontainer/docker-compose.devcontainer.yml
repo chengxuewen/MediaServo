@@ -1,0 +1,28 @@
+name: mediaservo-devcontainer
+
+services:
+  dev:
+    build:
+      context: ..
+      dockerfile: Dockerfile.dev
+      target: devcontainer
+    command: sleep infinity
+    shm_size: "2gb"
+    cap_add:
+      - SYS_PTRACE
+    environment:
+      MEDIASERVO_CONTAINER_FACE: "1"
+      DISPLAY: ${DISPLAY}
+      WAYLAND_DISPLAY: ${WAYLAND_DISPLAY}
+    volumes:
+      - ../../..:/workspace
+      - cargo-cache:/workspace/3rdparty/MediaServo/target
+      - cargo-registry:/home/vscode/.cargo/registry
+      - cmake-build:/workspace/3rdparty/MediaServo/build
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - ${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}:${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}:ro
+
+volumes:
+  cargo-cache:
+  cargo-registry:
+  cmake-build:
