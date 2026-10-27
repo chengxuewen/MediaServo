@@ -18,7 +18,10 @@ if ! command -v oxmgr >/dev/null 2>&1; then
 fi
 
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"; rm -rf /tmp/iceoryx2 /dev/shm/iox2_*; pkill -x oxmgr 2>/dev/null; pkill -x cp-agent 2>/dev/null || true' EXIT
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/e2e-trap-lib.sh
+source "$SCRIPT_DIR/e2e-trap-lib.sh"
+trap msrtc_e2e_cleanup EXIT
 
 HOST_BIN="target/debug/mediaservo-host"
 
