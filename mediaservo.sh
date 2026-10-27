@@ -334,10 +334,19 @@ _ms_deploy_stop_instance() {
         done
     fi
     _msvc_kill_using "$bin_dir/oxmgr"
-    local base role
+    # family pkill is CWD-SCOPED (C50/C54 lesson, live-fired 10-27: an unscoped
+    # pkill -x killed the PRODUCTION cluster's same-named processes when a /tmp
+    # test prefix triggered the stop arm — restart_policy revived them, but that
+    # is luck, not safety). Only pids whose cwd resolves inside $prefix die.
+    local base role p pcwd
     for base in agent streamer capturer recorder controller emergency audio; do
         role=${brand:+${brand}-${base}}; role=${role:-host-${base}}
-        pkill -x "$role" || true
+        for p in $(pgrep -x "$role" 2>/dev/null || true); do
+            pcwd=$(readlink "/proc/$p/cwd" 2>/dev/null) || continue
+            case "$pcwd" in
+                "$prefix"|"$prefix"/*) pkill -x "$role" 2>/dev/null || true; break ;;
+            esac
+        done
     done
 }
 
