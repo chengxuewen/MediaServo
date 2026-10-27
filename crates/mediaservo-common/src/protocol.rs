@@ -1379,7 +1379,13 @@ mod tests {
         let legacy = r#"{"type":"status_report","room_id":"v","topics":[],"streams":[],"processes":[],"signal":{"remote_connected":true,"remote_peer_id":"","children":[],"agent_uptime_secs":0},"ts":1,"config_version":0}"#;
         let parsed: SignalingMessage = serde_json::from_str(legacy).unwrap();
         match parsed {
-            SignalingMessage::StatusReport { config_running, config_file, config_last_push, config_flags, .. } => {
+            SignalingMessage::StatusReport {
+                config_running,
+                config_file,
+                config_last_push,
+                config_flags,
+                ..
+            } => {
                 assert_eq!(config_running, None);
                 assert_eq!(config_file, None);
                 assert_eq!(config_last_push, None);
@@ -1416,11 +1422,20 @@ mod tests {
         assert!(json.contains(r#""config_flags":{"pending":false,"error":false,"conflict":true}"#));
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
         match parsed {
-            SignalingMessage::StatusReport { config_running, config_file, config_last_push, config_flags, .. } => {
+            SignalingMessage::StatusReport {
+                config_running,
+                config_file,
+                config_last_push,
+                config_flags,
+                ..
+            } => {
                 assert_eq!(config_running.as_deref(), Some("abcdef012345"));
                 assert_eq!(config_file.as_deref(), Some("abcdef012345"));
                 assert_eq!(config_last_push.as_deref(), Some("1234567890ab"));
-                assert_eq!(config_flags, Some(ConfigFlagsEcho { pending: false, error: false, conflict: true }));
+                assert_eq!(
+                    config_flags,
+                    Some(ConfigFlagsEcho { pending: false, error: false, conflict: true })
+                );
             }
             other => panic!("expected StatusReport, got {other:?}"),
         }
@@ -1438,14 +1453,14 @@ mod tests {
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(!json.contains("actor"), "None actor must not hit the wire: {json}");
-        let legacy = r#"{"type":"config_push","room_id":"v","target":"t","config":"c","version":7}"#;
+        let legacy =
+            r#"{"type":"config_push","room_id":"v","target":"t","config":"c","version":7}"#;
         let parsed: SignalingMessage = serde_json::from_str(legacy).unwrap();
         match parsed {
             SignalingMessage::ConfigPush { actor, .. } => assert_eq!(actor, None),
             other => panic!("expected ConfigPush, got {other:?}"),
         }
     }
-
 
     // ── H1 SFU data domain ────────────────────────────────────────────────
 
