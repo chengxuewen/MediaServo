@@ -320,7 +320,13 @@ mod tests {
         // process ETXTBSYs (seen live 1/15 — stale sleep still mapped); suffixes are prefix-safe
         // for the family match.
         let fake = dir.join(format!("msrtc-agent-k0-{}", std::process::id()));
-        std::fs::copy("/bin/sleep", &fake).unwrap();
+        // sleep lives at /usr/bin on usrmerge systems (container judges) and
+        // /bin on others — probe both instead of hardcoding one
+        let sleep_src = ["/bin/sleep", "/usr/bin/sleep"]
+            .iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .expect("sleep binary not found at /bin or /usr/bin");
+        std::fs::copy(sleep_src, &fake).unwrap();
         let mut child = std::process::Command::new(&fake).arg("30").spawn().expect("spawn fixture");
         // spawn→/proc visibility is not synchronous — poll the very predicate we assert on
         // (the k10 sibling fixture shares the needle basename; the asserted scan must be
