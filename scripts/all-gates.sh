@@ -21,6 +21,9 @@ gate() {  # gate <name> <command...> (per-gate mktemp log — first run caught a
     echo "▶ $name"
     if "$@" >"$log" 2>&1; then PASS "$name"; rm -f "$log"
     else FAIL "$name"; mv "$log" "/tmp/all-gate-fail-$(echo "$name" | tr ' /' '__').log"
+         # keep a workspace-visible copy (container /tmp dies with the run —
+         # twice a failing gate's evidence was unrecoverable post-exit)
+         cp "/tmp/all-gate-fail-$(echo "$name" | tr ' /' '__').log" "target/all-gate-fail-$(echo "$name" | tr ' /' '__').log" 2>/dev/null || true
          echo "   ↳ $(grep -m1 -E "^error" "/tmp/all-gate-fail-$(echo "$name" | tr ' /' '__').log" 2>/dev/null | cut -c1-80)"; fi
 }
 port_busy() { ss -tln 2>/dev/null | grep -q ":9800 "; }

@@ -12,6 +12,10 @@ services:
       - SYS_PTRACE
     environment:
       MEDIASERVO_CONTAINER_FACE: "1"
+      FFMPEG_DIR: /ff
+      PKG_CONFIG_PATH: /ff/lib/pkgconfig
+      LD_LIBRARY_PATH: /ff/lib
+      LK_CUSTOM_WEBRTC: /workspace/.cache/webrtc/linux-x64-release
       DISPLAY: ${DISPLAY}
       WAYLAND_DISPLAY: ${WAYLAND_DISPLAY}
     volumes:
@@ -19,6 +23,7 @@ services:
       - cargo-cache:/workspace/3rdparty/MediaServo/target
       - cargo-registry:/home/vscode/.cargo/registry
       - cmake-build:/workspace/3rdparty/MediaServo/build
+      - ffmpeg9-runtime:/ff
       - /tmp/.X11-unix:/tmp/.X11-unix:ro
       - ${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}:${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}:ro
 
@@ -26,3 +31,5 @@ volumes:
   cargo-cache:
   cargo-registry:
   cmake-build:
+  ffmpeg9-runtime:
+    external: true
