@@ -38,8 +38,11 @@ RUN curl -fsSL https://apt.kitware.com/keys/kitware-archive-latest.asc \
 
 # pip: meson (apt meson 0.61 too old for mediasoup wraps) + debugpy (python dap)
 ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
-RUN pip3 install --break-system-packages meson==1.11.2 debugpy \
-    || pip3 install meson==1.11.2 debugpy
+# debugpy pinned: 1.8.2x tightened the DAP handshake (rejects the legacy
+# pathFormat the supplier's t-python-dap client sends) — measured red at
+# 1.8.22, green at 1.8.0. Un-pin when the supplier client upgrades.
+RUN pip3 install --break-system-packages meson==1.11.2 "debugpy==1.8.0" \
+    || pip3 install meson==1.11.2 "debugpy==1.8.0"
 
 # --- user + dual-layer rustup (R2-#1 contract) ---
 RUN useradd -ms /bin/bash vscode

@@ -23,6 +23,10 @@ services:
       PKG_CONFIG_PATH: /ff/lib/pkgconfig
       LD_LIBRARY_PATH: /ff/lib
       LK_CUSTOM_WEBRTC: /workspace/.cache/webrtc/linux-x64-release
+      # cargo-installed tools (cbindgen/cxxbridge-cmd/wasm-pack...) live here;
+      # the supplier fixtures probe PATH-only and the non-login shell does not
+      # source .profile (R3-N1)
+      PATH: /home/vscode/.cargo/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       DISPLAY: ${DISPLAY}
       WAYLAND_DISPLAY: ${WAYLAND_DISPLAY}
     volumes:
