@@ -1292,3 +1292,13 @@ install                        → 改名提示 + exit 2（退役）
 - PolyOrch D49 (dc80a3e): execution-truth PATH/LIBCLANG pinning -- IDE and CLI builds no longer depend on ambient PATH; proof = pure-desktop-PATH client-build Finished.
 - MEDIASERVO_APP_BINS drops mediaservo-client: the crate is lib-only (cargo metadata; binary face moved to the cdylib SDK delivery in S6) -- the client-bin lane button was born-red, first clicked 10-26. Table note carries the metadata evidence; lanes gate reconciled 11==11.
 - User-visible: IDE buttons (any lane) now build without pixi activation; client-bin button no longer exists (it could never have worked).
+
+### 2026-10-28: K3 closed — container face 13/13 ALL-GATES PASS
+- Final judge via compose (K0 shm 2gb topology): **pass=13 skip=1 fail=0, face=container, rc=0** — Q4=C acceptance #1 MET.
+- The last 1 red (test --workspace lib) took four judge rounds, each a distinct root cause, all fixed:
+  1. clippy>=1.99 double_must_use on async_trait (6-module allow, S4 constitution-drift)
+  2. ffmpeg9 archive incomplete (libavdevice .so missing; then 80 dangling symlinks from cp -a — repaired in volume + archive re-packed with tar -h dereference)
+  3. deck-c recorder test assumed /tmp/opencode exists (test now creates its own scratch)
+  4. conflict.rs k0 fixture hardcoded /bin/sleep (usrmerge containers = /usr/bin; dual-probe)
+- Infra landed en route: compose pins FFMPEG_DIR/PKG_CONFIG_PATH/LD_LIBRARY_PATH/LK_CUSTOM_WEBRTC + ffmpeg9-runtime external volume; gate() keeps workspace-visible fail evidence (container /tmp died with evidence twice).
+- Host face regression guard: all-gates 13/13 PASS re-verified after every change.
