@@ -1,0 +1,37 @@
+▶ build mediaservo-gates
+▶ fmt --check (incremental)
+   ↳ 
+▶ changelog markers (F11-X)
+▶ wire changelog pairing (G3)
+▶ bindings version parity
+▶ crate literal versions
+▶ crate lanes reconciliation
+▶ python retirement closure
+▶ check --workspace
+   ↳ error: failed to run custom build command for `mediasoup-sys v0.14.1`
+▶ clippy -D --workspace
+▶ server stub --all-targets
+▶ test --workspace (lib)
+   ↳ error: linking with `cc` failed: exit status: 1
+▶ openapi validate
+
+════════ all-gates summary ════════
+✅ build mediaservo-gates
+❌ fmt --check (incremental)
+✅ changelog markers (F11-X)
+✅ wire changelog pairing (G3)
+✅ bindings version parity
+✅ crate literal versions
+✅ crate lanes reconciliation
+✅ python retirement closure
+❌ check --workspace
+✅ clippy -D --workspace
+✅ server stub --all-targets
+❌ test --workspace (lib)
+✅ openapi validate
+⏭️ 7 heavy gates (skip: --full not given)
+══════════════════════════════════════
+ALL-GATES: 3 FAILED
+census (face=container): pass=10 skip=1 fail=3
+  ⏭️ 7 heavy gates (skip: --full not given)
+rc=1

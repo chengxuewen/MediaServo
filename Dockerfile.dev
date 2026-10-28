@@ -48,7 +48,10 @@ RUN useradd -ms /bin/bash vscode
 # then the config is copied into the vscode layer (D208 mirror preserved)
 ENV RUSTUP_DIST_SERVER=https://mirrors.tuna.tsinghua.edu.cn/rustup \
     RUSTUP_UPDATE_ROOT=https://mirrors.tuna.tsinghua.edu.cn/rustup/rustup
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+# mkdir first: some rustup installer paths write the config before CARGO_HOME
+# exists (buildkit sh -c ordering measured) — don't rely on implicit creation
+RUN mkdir -p /root/.cargo \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
         | sh -s -- -y --default-toolchain stable --profile minimal --component rustfmt --component clippy \
     && printf '[source.crates-io]\nreplace-with = "rsproxy-sparse"\n\n[source.rsproxy-sparse]\nregistry = "sparse+https://rsproxy.cn/index/"\n' \
         > /root/.cargo/config.toml

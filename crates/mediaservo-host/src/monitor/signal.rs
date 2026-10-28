@@ -493,7 +493,14 @@ mod tests {
     #[test]
     fn empty_flow_snapshot_serializes_empty_sections() {
         let flow = FlowSnapshot::default();
-        let msg = build_status_report("r", &topo_snap(), &flow, &signal_snap(), 0, &ConfigEcho::default());
+        let msg = build_status_report(
+            "r",
+            &topo_snap(),
+            &flow,
+            &signal_snap(),
+            0,
+            &ConfigEcho::default(),
+        );
         match msg {
             SignalingMessage::StatusReport { topics, streams, .. } => {
                 assert!(topics.is_empty());
@@ -506,7 +513,14 @@ mod tests {
     #[test]
     fn flow_stats_conversions_preserve_fields() {
         let snap = flow_snap();
-        let msg = build_status_report("r", &topo_snap(), &snap, &signal_snap(), 3, &ConfigEcho::default());
+        let msg = build_status_report(
+            "r",
+            &topo_snap(),
+            &snap,
+            &signal_snap(),
+            3,
+            &ConfigEcho::default(),
+        );
         match msg {
             SignalingMessage::StatusReport { topics, streams, config_version, .. } => {
                 assert_eq!(topics[0].fps, 29.0);
@@ -561,7 +575,10 @@ mod tests {
         assert_eq!(echo.running.as_deref(), Some(short12(&full)));
         assert_eq!(echo.file.as_deref(), Some(short12(&full)));
         assert_eq!(echo.last_push.as_deref(), Some("0123456789ab"));
-        assert_eq!(echo.flags, Some(ConfigFlagsEcho { pending: true, error: false, conflict: true }));
+        assert_eq!(
+            echo.flags,
+            Some(ConfigFlagsEcho { pending: true, error: false, conflict: true })
+        );
 
         let msg = build_status_report(
             "r",
@@ -582,7 +599,10 @@ mod tests {
                 assert_eq!(config_running.as_deref(), Some(short12(&full)));
                 assert_eq!(config_file.as_deref(), Some(short12(&full)));
                 assert_eq!(config_last_push.as_deref(), Some("0123456789ab"));
-                assert_eq!(config_flags, Some(ConfigFlagsEcho { pending: true, error: false, conflict: true }));
+                assert_eq!(
+                    config_flags,
+                    Some(ConfigFlagsEcho { pending: true, error: false, conflict: true })
+                );
             }
             other => panic!("expected StatusReport, got {other:?}"),
         }

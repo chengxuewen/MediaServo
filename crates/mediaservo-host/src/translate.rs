@@ -221,8 +221,8 @@ pub fn signaling_local_port(cfg: &str) -> Result<Option<u16>, String> {
 pub fn system_hostname_room() -> Option<String> {
     let raw = std::fs::read_to_string("/proc/sys/kernel/hostname").ok()?;
     let h = raw.trim().to_lowercase();
-    let ok = !h.is_empty()
-        && h.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_');
+    let ok =
+        !h.is_empty() && h.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_');
     if ok { Some(h) } else { None }
 }
 
@@ -1314,9 +1314,8 @@ sources:
             .expect("agent command line: {ox2}");
         // C-ruling 2026-10-19: unset room now falls back to the system hostname
         // (fleet-safe default); "vehicle" only remains when the hostname is unreadable.
-        let fallback = signaling_room(CFG_V0)
-            .unwrap()
-            .expect("unset room falls back to hostname/vehicle");
+        let fallback =
+            signaling_room(CFG_V0).unwrap().expect("unset room falls back to hostname/vehicle");
         let agent_line2 = ox2
             .lines()
             .find(|l| l.contains("command") && l.contains("host-agent"))
@@ -1347,9 +1346,8 @@ sources:
             .find(|l| l.contains("command") && l.contains("host-audio"))
             .expect("host-audio command line: {ox2}");
         // C-ruling: unset room -> audio-<hostname-fallback> (was audio-vehicle).
-        let fallback = signaling_room(CFG_V0)
-            .unwrap()
-            .expect("unset room falls back to hostname/vehicle");
+        let fallback =
+            signaling_room(CFG_V0).unwrap().expect("unset room falls back to hostname/vehicle");
         let audio_line2 = ox2
             .lines()
             .find(|l| l.contains("command") && l.contains("host-audio"))
