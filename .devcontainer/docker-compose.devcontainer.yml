@@ -10,6 +10,13 @@ services:
     shm_size: "2gb"
     cap_add:
       - SYS_PTRACE
+    # lldb's ptrace needs more than the capability: docker's DEFAULT seccomp
+    # and apparmor profiles both block it (measured: A-packet error 8 on
+    # /bin/echo with cap alone; both unconfined + SYS_PTRACE = clean hit).
+    # Scope: single-purpose dev container, no other services inside.
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
     environment:
       MEDIASERVO_CONTAINER_FACE: "1"
       FFMPEG_DIR: /ff
