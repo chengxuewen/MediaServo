@@ -390,13 +390,22 @@ _ms_deploy_via_target() {
             --target "mediaservo-$suffix-bin-build" || return 1
         # identity self-check: a replaced/foreign byte-copy at target must never
         # ride a deploy (fingerprint-fresh foreign content is invisible to cargo)
-        local main_bin="$ROOT/target/$(echo "$profile" | tr 'A-Z' 'a-z')/mediaservo-host"
-        if [ -x "$main_bin" ] && ! "$main_bin" version 2>/dev/null | grep -q '^mediaservo-host '; then
+        # per-suffix identity: host checks mediaservo-host, server checks
+        # mediaservo-server (server's version prints its own name — the host
+        # probe on a server tree was a P2d-2 bug, caught on live restore)
+        local main_bin="$ROOT/target/$(echo "$profile" | tr 'A-Z' 'a-z')/mediaservo-$suffix"
+        local main_name="mediaservo-$suffix"
+        # identity check runs BRAND-NEUTRAL (env -u MEDIASERVO_BRAND): D252
+        # version prints are runtime-branded, so a caller's msrtc env made the
+        # unbranded target bin read "msrtc-server" and the check self-fired
+        # (measured on the out/server live restore)
+        if [ -x "$main_bin" ] && ! env -u MEDIASERVO_BRAND "$main_bin" version 2>/dev/null | grep -q "^mediaservo-$suffix "; then
             echo "  target main-bin identity broken — forcing rebuild" >&2
-            touch "$ROOT/crates/mediaservo-host/src/main.rs"
+            touch "$ROOT/crates/mediaservo-$suffix/src/main.rs" 2>/dev/null || \
+                touch "$ROOT/crates/mediaservo-$suffix/src/bin/mediaservo-$suffix.rs" 2>/dev/null || true
             "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
                 --target "mediaservo-$suffix-bin-build" || return 1
-            "$main_bin" version 2>/dev/null | grep -q '^mediaservo-host ' || \
+            env -u MEDIASERVO_BRAND "$main_bin" version 2>/dev/null | grep -q "^mediaservo-$suffix " || \
                 { echo "Error: main-bin identity still broken" >&2; return 1; }
         fi
     fi
