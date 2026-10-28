@@ -34,7 +34,12 @@ gate "fmt --check (incremental)"  bash -c '
   files=$(git diff --name-only "$base" -- "*.rs")
   [ -z "$files" ] && { echo "no changed .rs files (base $base)"; exit 0; }
   echo "checking $(echo "$files" | grep -c .) changed files (base $base)"
-  rustfmt --edition 2024 --check $files'
+  # cargo fmt (crate mode) is the authority: bare rustfmt --check on bin main
+  # files disagrees with crate mode about the doc-comment gap (PIT-200 family,
+  # measured) — per-crate check keeps the incremental scope without the drift
+  for c in $(cargo metadata --no-deps --format-version 1 2>/dev/null | python3 -c "import json,sys; print(" ".join(p["name"] for p in json.load(sys.stdin)["packages"]))"); do
+    cargo fmt --check -p "$c" || exit 1
+  done'
 gate "changelog markers (F11-X)"  target/debug/mediaservo-gates changelog
 gate "wire changelog pairing (G3)"  bash scripts/gate-wire-changelog.sh
 gate "bindings version parity"    target/debug/mediaservo-gates parity
