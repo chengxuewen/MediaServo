@@ -41,10 +41,7 @@ fn argb_to_i420_roundtrip_loss_within_tolerance() {
     assert!(result.is_ok(), "i420_to_argb failed: {:?}", result.err());
 
     // ponytail: verify non-zero output (content was processed through conversion)
-    assert!(
-        argb_out.iter().any(|&p| p != 0),
-        "Expected non-zero output from round-trip"
-    );
+    assert!(argb_out.iter().any(|&p| p != 0), "Expected non-zero output from round-trip");
 }
 
 // ── I420 ↔ NV12 roundtrip ───────────────────────────────────

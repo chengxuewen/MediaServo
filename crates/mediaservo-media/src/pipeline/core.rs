@@ -14,10 +14,18 @@ pub type CodecId = String;
 use crate::pixel_format::PixelFormat;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MediaType { Encoded, Raw, Both }
+pub enum MediaType {
+    Encoded,
+    Raw,
+    Both,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum NodeType { Source, Processor, Sink }
+pub enum NodeType {
+    Source,
+    Processor,
+    Sink,
+}
 
 #[derive(Debug, Clone)]
 pub struct Plane {
@@ -34,7 +42,9 @@ pub struct TextureHandle {
 }
 
 impl TextureHandle {
-    pub fn dummy() -> Self { Self { _inner: std::sync::Arc::new(()) } }
+    pub fn dummy() -> Self {
+        Self { _inner: std::sync::Arc::new(()) }
+    }
 }
 
 #[derive(Debug, Clone)]

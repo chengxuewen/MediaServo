@@ -1,14 +1,22 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use mediaservo_webrtc::peer_connection::RTCConfiguration;
 use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
-use mediaservo_webrtc::traits::PeerConnectionApi;
+use mediaservo_webrtc::peer_connection::RTCConfiguration;
 use mediaservo_webrtc::track::{FrameSink, TrackKind, TrackRef};
+use mediaservo_webrtc::traits::PeerConnectionApi;
+use std::sync::atomic::{AtomicU64, Ordering};
 mod common;
 
-struct CountingSink { count: AtomicU64 }
-impl CountingSink { fn new() -> Self { Self { count: AtomicU64::new(0) } } }
+struct CountingSink {
+    count: AtomicU64,
+}
+impl CountingSink {
+    fn new() -> Self {
+        Self { count: AtomicU64::new(0) }
+    }
+}
 impl FrameSink for CountingSink {
-    fn on_frame(&self, _: &[u8], _: u32, _: u32) { self.count.fetch_add(1, Ordering::Relaxed); }
+    fn on_frame(&self, _: &[u8], _: u32, _: u32) {
+        self.count.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 #[tokio::test]

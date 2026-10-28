@@ -11,10 +11,7 @@ pub struct FrameMetadata {
 
 impl FrameMetadata {
     pub fn new() -> Self {
-        Self {
-            user_timestamp: None,
-            frame_id: None,
-        }
+        Self { user_timestamp: None, frame_id: None }
     }
 }
 
@@ -34,12 +31,7 @@ pub struct VideoFrame<T> {
 
 impl<T> VideoFrame<T> {
     pub fn new(buffer: T) -> Self {
-        Self {
-            rotation: Default::default(),
-            timestamp_us: 0,
-            metadata: None,
-            buffer,
-        }
+        Self { rotation: Default::default(), timestamp_us: 0, metadata: None, buffer }
     }
 
     pub fn with_rotation(mut self, rotation: super::rotation::VideoRotation) -> Self {

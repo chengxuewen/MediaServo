@@ -7,7 +7,7 @@ mod imp {
     use tokio::sync::Mutex;
 
     use mediaservo_common::error::CoreError;
-    use mediaservo_webrtc::{RTCPeerConnection, RTCPeerConnectionFactory, RTCConfiguration};
+    use mediaservo_webrtc::{RTCConfiguration, RTCPeerConnection, RTCPeerConnectionFactory};
 
     struct RelaySession {
         host_peer: Option<RTCPeerConnection>,
@@ -22,16 +22,10 @@ mod imp {
         pub fn new() -> Self {
             let factory = RTCPeerConnectionFactory::new();
             tracing::info!("WebRTC relay initialized (mediaservo-webrtc / libwebrtc)");
-            Relay {
-                factory,
-                sessions: Arc::new(Mutex::new(HashMap::new())),
-            }
+            Relay { factory, sessions: Arc::new(Mutex::new(HashMap::new())) }
         }
 
-        pub fn register_host(
-            &self,
-            room_id: &str,
-        ) -> Result<RTCPeerConnection, CoreError> {
+        pub fn register_host(&self, room_id: &str) -> Result<RTCPeerConnection, CoreError> {
             let config = RTCConfiguration::default();
             let pc = self
                 .factory
@@ -40,19 +34,13 @@ mod imp {
             let mut sessions = self.sessions.lock().await;
             let session = sessions
                 .entry(room_id.to_string())
-                .or_insert_with(|| RelaySession {
-                    host_peer: None,
-                    remote_peers: Vec::new(),
-                });
+                .or_insert_with(|| RelaySession { host_peer: None, remote_peers: Vec::new() });
             session.host_peer = Some(pc.clone());
             tracing::info!("Host registered in room {}", room_id);
             Ok(pc)
         }
 
-        pub fn register_remote(
-            &self,
-            room_id: &str,
-        ) -> Result<RTCPeerConnection, CoreError> {
+        pub fn register_remote(&self, room_id: &str) -> Result<RTCPeerConnection, CoreError> {
             let config = RTCConfiguration::default();
             let pc = self
                 .factory
@@ -61,10 +49,7 @@ mod imp {
             let mut sessions = self.sessions.lock().await;
             let session = sessions
                 .entry(room_id.to_string())
-                .or_insert_with(|| RelaySession {
-                    host_peer: None,
-                    remote_peers: Vec::new(),
-                });
+                .or_insert_with(|| RelaySession { host_peer: None, remote_peers: Vec::new() });
             session.remote_peers.push(pc.clone());
             tracing::info!(
                 "Remote registered in room {} (total: {})",
@@ -101,11 +86,7 @@ mod imp {
 
         /// ponytail: stub bridge_tracks; requires webrtc feature for real RTCPeerConnection access.
         /// Roadmap: integrate VideoFrameGenerator as test video source (see docs/plans/gen-webrtc-integration/design.md)
-        pub async fn bridge_tracks(
-            &self,
-            _host_pc: &(),
-            _remote_pc: &(),
-        ) -> Result<(), CoreError> {
+        pub async fn bridge_tracks(&self, _host_pc: &(), _remote_pc: &()) -> Result<(), CoreError> {
             tracing::debug!("bridge_tracks stub — enable webrtc feature for real relay");
             Ok(())
         }

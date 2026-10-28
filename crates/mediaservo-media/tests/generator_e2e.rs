@@ -10,16 +10,16 @@ use std::time::Duration;
 use mediaservo_media::base::frame::BoxVideoFrame;
 use mediaservo_media::error::MediaError;
 use mediaservo_media::pipeline::generator::{
-    Anchor, BitmapFont, PatternMode, SquaresConfig, TextBurner, TimestampFormat,
-    TimestampOverlay, VideoFrameGenerator,
+    Anchor, BitmapFont, PatternMode, SquaresConfig, TextBurner, TimestampFormat, TimestampOverlay,
+    VideoFrameGenerator,
 };
 use mediaservo_media::pipeline::sink::{VideoSink, VideoSinkWants};
 use mediaservo_media::pipeline::source::VideoSource;
 use mediaservo_media::pixel_format::PixelFormat;
 
-use mediaservo_media::transform::VideoTransform;
 #[cfg(feature = "backend-native")]
 use mediaservo_media::backend::NativeTransform;
+use mediaservo_media::transform::VideoTransform;
 
 #[cfg(feature = "backend-yuv-sys")]
 use mediaservo_media::backend::LibyuvTransform;
@@ -42,11 +42,19 @@ impl VideoSink<BoxVideoFrame> for CaptureSink {
 
             #[cfg(feature = "backend-yuv-sys")]
             let result = LibyuvTransform::i420_to_argb(
-                i420_ref, self.width, self.height, PixelFormat::RGBA, &mut rgba,
+                i420_ref,
+                self.width,
+                self.height,
+                PixelFormat::RGBA,
+                &mut rgba,
             );
             #[cfg(all(feature = "backend-native", not(feature = "backend-yuv-sys")))]
             let result = NativeTransform::i420_to_argb(
-                i420_ref, self.width, self.height, PixelFormat::RGBA, &mut rgba,
+                i420_ref,
+                self.width,
+                self.height,
+                PixelFormat::RGBA,
+                &mut rgba,
             );
 
             if let Err(e) = result {
@@ -60,11 +68,7 @@ impl VideoSink<BoxVideoFrame> for CaptureSink {
 }
 
 fn squares_config() -> SquaresConfig {
-    SquaresConfig {
-        count: 30,
-        motion_speed: 2,
-        ..Default::default()
-    }
+    SquaresConfig { count: 30, motion_speed: 2, ..Default::default() }
 }
 
 /// Verify generator produces frames and sink receives them.
@@ -73,18 +77,11 @@ fn generator_produces_frames() {
     let generator = VideoFrameGenerator::new();
     let queue = Arc::new(Mutex::new(VecDeque::new()));
 
-    let sink = CaptureSink {
-        queue: queue.clone(),
-        width: WIDTH,
-        height: HEIGHT,
-    };
+    let sink = CaptureSink { queue: queue.clone(), width: WIDTH, height: HEIGHT };
 
     generator.add_or_update_sink(
         Box::new(sink),
-        VideoSinkWants {
-            is_active: true,
-            ..Default::default()
-        },
+        VideoSinkWants { is_active: true, ..Default::default() },
     );
 
     generator.start(FPS, PatternMode::Squares(squares_config()), None, WIDTH, HEIGHT);
@@ -99,11 +96,7 @@ fn generator_produces_frames() {
             break;
         }
         if start.elapsed() > timeout {
-            panic!(
-                "Timed out waiting for frames: got {} frames in {:?}",
-                count,
-                start.elapsed()
-            );
+            panic!("Timed out waiting for frames: got {} frames in {:?}", count, start.elapsed());
         }
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -115,11 +108,7 @@ fn generator_produces_frames() {
         (0..q.len()).map(|_| q.pop_front().unwrap()).collect()
     };
 
-    assert!(
-        frames.len() >= 3,
-        "Expected at least 3 frames, got {}",
-        frames.len()
-    );
+    assert!(frames.len() >= 3, "Expected at least 3 frames, got {}", frames.len());
 
     // Verify each frame has correct RGBA byte size
     let expected_size = (WIDTH * HEIGHT * 4) as usize;
@@ -136,10 +125,7 @@ fn generator_produces_frames() {
 
     // Verify frames are not all identical (generator should produce varying output)
     if frames.len() >= 2 {
-        assert!(
-            frames[0] != frames[frames.len() - 1],
-            "Frames should differ over time"
-        );
+        assert!(frames[0] != frames[frames.len() - 1], "Frames should differ over time");
     }
 }
 
@@ -149,18 +135,11 @@ fn generator_stop_releases_thread() {
     let generator = VideoFrameGenerator::new();
     let queue = Arc::new(Mutex::new(VecDeque::new()));
 
-    let sink = CaptureSink {
-        queue,
-        width: WIDTH,
-        height: HEIGHT,
-    };
+    let sink = CaptureSink { queue, width: WIDTH, height: HEIGHT };
 
     generator.add_or_update_sink(
         Box::new(sink),
-        VideoSinkWants {
-            is_active: true,
-            ..Default::default()
-        },
+        VideoSinkWants { is_active: true, ..Default::default() },
     );
 
     generator.start(FPS, PatternMode::Squares(squares_config()), None, WIDTH, HEIGHT);
@@ -177,11 +156,7 @@ fn inactive_sink_receives_no_frames() {
     let generator = VideoFrameGenerator::new();
     let queue = Arc::new(Mutex::new(VecDeque::new()));
 
-    let sink = CaptureSink {
-        queue: queue.clone(),
-        width: WIDTH,
-        height: HEIGHT,
-    };
+    let sink = CaptureSink { queue: queue.clone(), width: WIDTH, height: HEIGHT };
 
     generator.add_or_update_sink(
         Box::new(sink),
@@ -196,11 +171,7 @@ fn inactive_sink_receives_no_frames() {
     generator.stop();
 
     let count = queue.lock().unwrap().len();
-    assert_eq!(
-        count, 0,
-        "Inactive sink should receive 0 frames, got {}",
-        count
-    );
+    assert_eq!(count, 0, "Inactive sink should receive 0 frames, got {}", count);
 }
 
 /// Verify frames with timestamp overlay differ between captures.
@@ -209,18 +180,11 @@ fn frames_differ_with_timestamp_overlay() {
     let generator = VideoFrameGenerator::new();
     let queue = Arc::new(Mutex::new(VecDeque::new()));
 
-    let sink = CaptureSink {
-        queue: queue.clone(),
-        width: WIDTH,
-        height: HEIGHT,
-    };
+    let sink = CaptureSink { queue: queue.clone(), width: WIDTH, height: HEIGHT };
 
     generator.add_or_update_sink(
         Box::new(sink),
-        VideoSinkWants {
-            is_active: true,
-            ..Default::default()
-        },
+        VideoSinkWants { is_active: true, ..Default::default() },
     );
 
     let font = BitmapFont::new();
@@ -257,8 +221,8 @@ fn frames_differ_with_timestamp_overlay() {
         assert!(
             frames[i - 1] != frames[i],
             "Frame {} and {} should differ due to timestamp overlay + motion",
-            i - 1, i
+            i - 1,
+            i
         );
     }
 }
-

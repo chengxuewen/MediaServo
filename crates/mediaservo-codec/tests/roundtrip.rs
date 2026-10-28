@@ -2,11 +2,11 @@
 //! Roundtrip tests — I420 → H.264 encode → I420 decode.
 
 use mediaservo_codec::codec::{CodecId, PixelFormat, VideoFormat};
-use mediaservo_codec::config::{Bitrate, EncoderConfig, DecoderConfig, EncoderPreset};
-use mediaservo_codec::encoder::VideoEncoder;
+use mediaservo_codec::config::{Bitrate, DecoderConfig, EncoderConfig, EncoderPreset};
 use mediaservo_codec::decoder::VideoDecoder;
+use mediaservo_codec::encoder::VideoEncoder;
 use mediaservo_codec::factory::CodecFactory;
-use mediaservo_codec::frame::{VideoFrame, Plane};
+use mediaservo_codec::frame::{Plane, VideoFrame};
 
 const W: u32 = 320;
 const H: u32 = 256; // multiple of 32, avoids FFmpeg alignment padding
@@ -14,34 +14,57 @@ const H: u32 = 256; // multiple of 32, avoids FFmpeg alignment padding
 fn test_config() -> EncoderConfig {
     let fmt = VideoFormat { width: W, height: H, pixel_format: PixelFormat::Yuv420p };
     EncoderConfig::builder(CodecId::H264, fmt)
-        .bitrate(Bitrate::Cbr(8000)).fps(30, 1)
-        .preset(EncoderPreset::P3VeryFast).gop(30).build()
+        .bitrate(Bitrate::Cbr(8000))
+        .fps(30, 1)
+        .preset(EncoderPreset::P3VeryFast)
+        .gop(30)
+        .build()
 }
 
 fn make_gradient_frame() -> VideoFrame {
-    let w = W as usize; let h = H as usize;
-    let y_size = w * h; let uv_size = (w/2) * (h/2);
+    let w = W as usize;
+    let h = H as usize;
+    let y_size = w * h;
+    let uv_size = (w / 2) * (h / 2);
     let mut y = vec![0u8; y_size];
-    for row in 0..h { let val = (row * 256 / h) as u8; for col in 0..w { y[row*w + col] = val; } }
+    for row in 0..h {
+        let val = (row * 256 / h) as u8;
+        for col in 0..w {
+            y[row * w + col] = val;
+        }
+    }
     VideoFrame {
         format: VideoFormat { width: W, height: H, pixel_format: PixelFormat::Yuv420p },
-        planes: vec![Plane { data: y, stride: W }, Plane { data: vec![128u8; uv_size], stride: W/2 }, Plane { data: vec![128u8; uv_size], stride: W/2 }],
-        pts: 0, keyframe: true,
+        planes: vec![
+            Plane { data: y, stride: W },
+            Plane { data: vec![128u8; uv_size], stride: W / 2 },
+            Plane { data: vec![128u8; uv_size], stride: W / 2 },
+        ],
+        pts: 0,
+        keyframe: true,
     }
 }
 
 fn encode_one(encoder: &mut Box<dyn VideoEncoder>, frame: &VideoFrame) -> Vec<Vec<u8>> {
     encoder.push_frame(frame).unwrap();
     let mut out = Vec::new();
-    while let Some(pkt) = encoder.pull_packet().unwrap() { if !pkt.data.is_empty() { out.push(pkt.data); } }
+    while let Some(pkt) = encoder.pull_packet().unwrap() {
+        if !pkt.data.is_empty() {
+            out.push(pkt.data);
+        }
+    }
     out
 }
 
 fn decode_all(decoder: &mut Box<dyn VideoDecoder>, packets: &[Vec<u8>]) -> Vec<VideoFrame> {
-    for p in packets { decoder.push_packet(p).unwrap(); }
+    for p in packets {
+        decoder.push_packet(p).unwrap();
+    }
     decoder.flush().unwrap();
     let mut out = Vec::new();
-    while let Some(f) = decoder.pull_frame().unwrap() { out.push(f); }
+    while let Some(f) = decoder.pull_frame().unwrap() {
+        out.push(f);
+    }
     out
 }
 
@@ -67,7 +90,8 @@ fn psnr(a: &[u8], b: &[u8], a_stride: u32, b_stride: u32, w: u32, h: u32) -> f64
 
 fn psnr_linear(a: &[u8], b: &[u8]) -> f64 {
     let n = a.len().min(b.len());
-    let mse = a[..n].iter().zip(&b[..n]).map(|(x,y)| (*x as f64 - *y as f64).powi(2)).sum::<f64>() / n as f64;
+    let mse = a[..n].iter().zip(&b[..n]).map(|(x, y)| (*x as f64 - *y as f64).powi(2)).sum::<f64>()
+        / n as f64;
     if mse < 0.0001 { 100.0 } else { 10.0 * (65025.0 / mse).log10() }
 }
 

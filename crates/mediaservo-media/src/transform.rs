@@ -17,12 +17,7 @@ pub trait VideoTransform: Send + Sync {
         dst_h: u32,
     ) -> Result<(), MediaError>;
 
-    fn mirror(
-        src: I420BufferRef,
-        w: u32,
-        h: u32,
-        dst: I420BufferRef,
-    ) -> Result<(), MediaError>;
+    fn mirror(src: I420BufferRef, w: u32, h: u32, dst: I420BufferRef) -> Result<(), MediaError>;
 
     fn crop(
         src: I420BufferRef,
@@ -43,12 +38,7 @@ pub trait VideoTransform: Send + Sync {
 
     // --- Color space conversion ---
 
-    fn argb_to_i420(
-        argb: &[u8],
-        w: u32,
-        h: u32,
-        dst: I420BufferRef,
-    ) -> Result<(), MediaError>;
+    fn argb_to_i420(argb: &[u8], w: u32, h: u32, dst: I420BufferRef) -> Result<(), MediaError>;
 
     fn i420_to_argb(
         src: I420BufferRef,

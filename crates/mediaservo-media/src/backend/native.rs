@@ -99,12 +99,7 @@ impl VideoTransform for NativeTransform {
     }
 
     /// Horizontal mirror (left-right flip) matching libyuv I420Mirror.
-    fn mirror(
-        src: I420BufferRef,
-        w: u32,
-        h: u32,
-        dst: I420BufferRef,
-    ) -> Result<(), MediaError> {
+    fn mirror(src: I420BufferRef, w: u32, h: u32, dst: I420BufferRef) -> Result<(), MediaError> {
         let w = w as usize;
         let h = h as usize;
 
@@ -160,8 +155,7 @@ impl VideoTransform for NativeTransform {
         for row in 0..h {
             let src_offset = (y + row) * src.stride_y + x;
             let dst_offset = row * dst.stride_y;
-            dst_y[dst_offset..dst_offset + w]
-                .copy_from_slice(&src_y[src_offset..src_offset + w]);
+            dst_y[dst_offset..dst_offset + w].copy_from_slice(&src_y[src_offset..src_offset + w]);
         }
 
         let half_x = x / 2;
@@ -209,10 +203,8 @@ impl VideoTransform for NativeTransform {
                 for y in 0..half_h {
                     let off = y * src.stride_u;
                     let dst_off = y * dst.stride_u;
-                    dst_u[dst_off..dst_off + half_w]
-                        .copy_from_slice(&src_u[off..off + half_w]);
-                    dst_v[dst_off..dst_off + half_w]
-                        .copy_from_slice(&src_v[off..off + half_w]);
+                    dst_u[dst_off..dst_off + half_w].copy_from_slice(&src_u[off..off + half_w]);
+                    dst_v[dst_off..dst_off + half_w].copy_from_slice(&src_v[off..off + half_w]);
                 }
             }
             VideoRotation::Rotation90 => {
@@ -220,8 +212,7 @@ impl VideoTransform for NativeTransform {
                     for sx in 0..w {
                         let dy = sx;
                         let dx = h - 1 - sy;
-                        dst_y[dy * dst.stride_y + dx] =
-                            src_y[sy * src.stride_y + sx];
+                        dst_y[dy * dst.stride_y + dx] = src_y[sy * src.stride_y + sx];
                     }
                 }
                 let half_w = w / 2;
@@ -230,10 +221,8 @@ impl VideoTransform for NativeTransform {
                     for sx in 0..half_w {
                         let dy = sx;
                         let dx = half_h - 1 - sy;
-                        dst_u[dy * dst.stride_u + dx] =
-                            src_u[sy * src.stride_u + sx];
-                        dst_v[dy * dst.stride_v + dx] =
-                            src_v[sy * src.stride_v + sx];
+                        dst_u[dy * dst.stride_u + dx] = src_u[sy * src.stride_u + sx];
+                        dst_v[dy * dst.stride_v + dx] = src_v[sy * src.stride_v + sx];
                     }
                 }
             }
@@ -242,8 +231,7 @@ impl VideoTransform for NativeTransform {
                     for sx in 0..w {
                         let dy = h - 1 - sy;
                         let dx = w - 1 - sx;
-                        dst_y[dy * dst.stride_y + dx] =
-                            src_y[sy * src.stride_y + sx];
+                        dst_y[dy * dst.stride_y + dx] = src_y[sy * src.stride_y + sx];
                     }
                 }
                 let half_w = w / 2;
@@ -252,10 +240,8 @@ impl VideoTransform for NativeTransform {
                     for sx in 0..half_w {
                         let dy = half_h - 1 - sy;
                         let dx = half_w - 1 - sx;
-                        dst_u[dy * dst.stride_u + dx] =
-                            src_u[sy * src.stride_u + sx];
-                        dst_v[dy * dst.stride_v + dx] =
-                            src_v[sy * src.stride_v + sx];
+                        dst_u[dy * dst.stride_u + dx] = src_u[sy * src.stride_u + sx];
+                        dst_v[dy * dst.stride_v + dx] = src_v[sy * src.stride_v + sx];
                     }
                 }
             }
@@ -264,8 +250,7 @@ impl VideoTransform for NativeTransform {
                     for sx in 0..w {
                         let dy = w - 1 - sx;
                         let dx = sy;
-                        dst_y[dy * dst.stride_y + dx] =
-                            src_y[sy * src.stride_y + sx];
+                        dst_y[dy * dst.stride_y + dx] = src_y[sy * src.stride_y + sx];
                     }
                 }
                 let half_w = w / 2;
@@ -274,10 +259,8 @@ impl VideoTransform for NativeTransform {
                     for sx in 0..half_w {
                         let dy = half_w - 1 - sx;
                         let dx = sy;
-                        dst_u[dy * dst.stride_u + dx] =
-                            src_u[sy * src.stride_u + sx];
-                        dst_v[dy * dst.stride_v + dx] =
-                            src_v[sy * src.stride_v + sx];
+                        dst_u[dy * dst.stride_u + dx] = src_u[sy * src.stride_u + sx];
+                        dst_v[dy * dst.stride_v + dx] = src_v[sy * src.stride_v + sx];
                     }
                 }
             }
@@ -286,12 +269,7 @@ impl VideoTransform for NativeTransform {
         Ok(())
     }
 
-    fn argb_to_i420(
-        argb: &[u8],
-        w: u32,
-        h: u32,
-        dst: I420BufferRef,
-    ) -> Result<(), MediaError> {
+    fn argb_to_i420(argb: &[u8], w: u32, h: u32, dst: I420BufferRef) -> Result<(), MediaError> {
         let w = w as usize;
         let h = h as usize;
         let stride_argb = w * 4;
@@ -780,10 +758,10 @@ mod tests {
         let mut input = vec![0u8; 64];
         // pixel(x,y) = quad_colors[y/2 * 2 + x/2]
         let quad_colors: [(u8, u8, u8); 4] = [
-            (255, 0, 0),       // top-left: red
-            (0, 255, 0),       // top-right: green
-            (0, 0, 255),       // bottom-left: blue
-            (128, 128, 128),   // bottom-right: gray
+            (255, 0, 0),     // top-left: red
+            (0, 255, 0),     // top-right: green
+            (0, 0, 255),     // bottom-left: blue
+            (128, 128, 128), // bottom-right: gray
         ];
         for y in 0..4u32 {
             for x in 0..4u32 {
@@ -821,12 +799,9 @@ mod tests {
             let out_r = output[off + 2] as i32;
 
             // ponytail: 4:2:0 chroma subsampling loses precision
-            assert!((orig_r - out_r).abs() <= 15,
-                "R diff too large at px {}", px);
-            assert!((orig_g - out_g).abs() <= 15,
-                "G diff too large at px {}", px);
-            assert!((orig_b - out_b).abs() <= 15,
-                "B diff too large at px {}", px);
+            assert!((orig_r - out_r).abs() <= 15, "R diff too large at px {}", px);
+            assert!((orig_g - out_g).abs() <= 15, "G diff too large at px {}", px);
+            assert!((orig_b - out_b).abs() <= 15, "B diff too large at px {}", px);
         }
     }
 
@@ -877,7 +852,11 @@ mod tests {
         let mut nv12_uv_l = vec![0u8; 32];
         let src_ref2 = i420_ref(&src_buf);
         crate::backend::LibyuvTransform::i420_to_nv12(
-            src_ref2, 8, 8, &mut nv12_y_l, &mut nv12_uv_l,
+            src_ref2,
+            8,
+            8,
+            &mut nv12_y_l,
+            &mut nv12_uv_l,
         )
         .unwrap();
 

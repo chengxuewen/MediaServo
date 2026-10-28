@@ -24,10 +24,7 @@ fn scale_down_by_two() {
     assert_eq!(dst.width(), 32);
     assert_eq!(dst.height(), 32);
     // ponytail: verify at least one bright pixel (content was copied from center square)
-    assert!(
-        dst.data_y.iter().any(|&p| p > 16),
-        "Expected some bright pixels after downscale"
-    );
+    assert!(dst.data_y.iter().any(|&p| p > 16), "Expected some bright pixels after downscale");
 }
 
 #[test]
@@ -41,10 +38,7 @@ fn scale_up_by_two() {
 
     assert_eq!(dst.width(), 128);
     assert_eq!(dst.height(), 128);
-    assert!(
-        dst.data_y.iter().any(|&p| p > 16),
-        "Expected some bright pixels after upscale"
-    );
+    assert!(dst.data_y.iter().any(|&p| p > 16), "Expected some bright pixels after upscale");
 }
 
 #[test]
@@ -66,40 +60,40 @@ fn scale_identity_is_copy() {
 
 // ── mirror ────────────────────────────────────────────────
 
-    #[test]
-    fn mirror_horizontal_left_to_right() {
-        // Horizontal mirror: left columns go right, right columns go left.
-        // Fill left 8 cols = 200 and right 8 cols = 50.
-        let mut src = I420Buffer::new(64, 64);
-        let stride_y = src.stride_y as usize;
-        for y in 0..64usize {
-            let off = y * stride_y;
-            src.data_y[off..off + 8].fill(200);
-            src.data_y[off + 56..off + 64].fill(50);
-        }
-        src.data_u.fill(128);
-        src.data_v.fill(128);
-
-        let dst = I420Buffer::new(64, 64);
-        let sr = i420_ref(&src);
-        let dr = i420_ref(&dst);
-        ActiveTransform::mirror(sr, 64, 64, dr).unwrap();
-
-        // After horizontal mirror: old left cols (200) now on right, old right cols (50) now on left
-        for y in 0..64usize {
-            let off = y * stride_y;
-            assert!(
-                dst.data_y[off..off + 8].iter().all(|&p| p == 50),
-                "Row {y}: left cols should be old right (50)"
-            );
-            assert!(
-                dst.data_y[off + 56..off + 64].iter().all(|&p| p == 200),
-                "Row {y}: right cols should be old left (200)"
-            );
-        }
-    }
 #[test]
-    fn mirror_is_idempotent() {
+fn mirror_horizontal_left_to_right() {
+    // Horizontal mirror: left columns go right, right columns go left.
+    // Fill left 8 cols = 200 and right 8 cols = 50.
+    let mut src = I420Buffer::new(64, 64);
+    let stride_y = src.stride_y as usize;
+    for y in 0..64usize {
+        let off = y * stride_y;
+        src.data_y[off..off + 8].fill(200);
+        src.data_y[off + 56..off + 64].fill(50);
+    }
+    src.data_u.fill(128);
+    src.data_v.fill(128);
+
+    let dst = I420Buffer::new(64, 64);
+    let sr = i420_ref(&src);
+    let dr = i420_ref(&dst);
+    ActiveTransform::mirror(sr, 64, 64, dr).unwrap();
+
+    // After horizontal mirror: old left cols (200) now on right, old right cols (50) now on left
+    for y in 0..64usize {
+        let off = y * stride_y;
+        assert!(
+            dst.data_y[off..off + 8].iter().all(|&p| p == 50),
+            "Row {y}: left cols should be old right (50)"
+        );
+        assert!(
+            dst.data_y[off + 56..off + 64].iter().all(|&p| p == 200),
+            "Row {y}: right cols should be old left (200)"
+        );
+    }
+}
+#[test]
+fn mirror_is_idempotent() {
     let mut src = I420Buffer::new(8, 8);
     let stride_y = src.stride_y as usize;
     for i in 0..8u8 {

@@ -21,7 +21,10 @@ fn main() {
         // bind libstdc++.a via the compiler-reported absolute path, plus exclude-libs so the vendored
         // std symbols stay LOCAL inside the .node (no interposition on node's own runtime).
         let a_path = std::env::var("CXX").or_else(|_| std::env::var("CC")).ok().and_then(|c| {
-            std::process::Command::new(c).arg("-print-file-name=libstdc++.a").output().ok()
+            std::process::Command::new(c)
+                .arg("-print-file-name=libstdc++.a")
+                .output()
+                .ok()
                 .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
                 .filter(|p| p.ends_with(".a") && std::path::Path::new(p).exists())
         });

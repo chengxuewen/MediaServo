@@ -2712,7 +2712,11 @@ mod tests {
                 assert_eq!(target, "veh-peer", "target should be the room's host peer");
                 assert!(config.contains("cam0"));
                 assert_eq!(version, 7);
-                assert_eq!(actor.as_deref(), Some("ops-admin"), "the admin actor rides the push (T1b6)");
+                assert_eq!(
+                    actor.as_deref(),
+                    Some("ops-admin"),
+                    "the admin actor rides the push (T1b6)"
+                );
             }
             other => panic!("expected ConfigPush, got {other:?}"),
         }

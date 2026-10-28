@@ -10,9 +10,9 @@
 // Usage: cargo run -p mediaservo-media --example viewer --features backend-native
 
 use eframe::egui;
+use mediaservo_media::backend::NativeTransform;
 use mediaservo_media::base::buffer::{I420Buffer, VideoBuffer};
 use mediaservo_media::base::rotation::VideoRotation;
-use mediaservo_media::backend::NativeTransform;
 use mediaservo_media::pixel_format::PixelFormat;
 use mediaservo_media::transform::VideoTransform;
 
@@ -99,11 +99,7 @@ fn resolve_asset_path() -> std::path::PathBuf {
     if path.exists() {
         return path;
     }
-    concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../assets/images/color_card_1920x1080.bmp"
-    )
-    .into()
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/images/color_card_1920x1080.bmp").into()
 }
 
 fn load_i420() -> I420Buffer {
@@ -111,10 +107,7 @@ fn load_i420() -> I420Buffer {
         let rgba = dynamic.to_rgba8();
         let (w, h) = rgba.dimensions();
         // native.rs argb_to_i420 reads bytes as [B, G, R, A] — swap R<->B
-        let bgra: Vec<u8> = rgba
-            .pixels()
-            .flat_map(|p| [p[2], p[1], p[0], p[3]])
-            .collect();
+        let bgra: Vec<u8> = rgba.pixels().flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
         let dst = I420Buffer::new(w, h);
         let dst_ref = dst.as_i420_ref().unwrap();
         if NativeTransform::argb_to_i420(&bgra, w, h, dst_ref).is_ok() {
@@ -148,13 +141,7 @@ impl FrameVariant {
         let mut rgba = vec![0u8; (w * h * 4) as usize];
         let src_ref = i420.as_i420_ref().unwrap();
         NativeTransform::i420_to_argb(src_ref, w, h, PixelFormat::RGBA, &mut rgba).unwrap();
-        Self {
-            label: label.into(),
-            rgba,
-            width: w,
-            height: h,
-            texture: None,
-        }
+        Self { label: label.into(), rgba, width: w, height: h, texture: None }
     }
 
     fn load_texture(&mut self, ctx: &egui::Context, id: &str, thumb_w: u32) {
@@ -319,10 +306,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label("Thumbnail:");
             for &tw in &[120u32, 180, 240, 320, 480] {
-                if ui
-                    .selectable_label(self.thumbnail_w == tw, tw.to_string())
-                    .clicked()
-                {
+                if ui.selectable_label(self.thumbnail_w == tw, tw.to_string()).clicked() {
                     self.thumbnail_w = tw;
                     for v in &mut self.variants {
                         v.texture = None;
@@ -385,10 +369,7 @@ impl App {
                 let (tw, th) = if s.selected_w > MAX_TEX || s.selected_h > MAX_TEX {
                     let m = s.selected_w.max(s.selected_h);
                     let r = MAX_TEX as f32 / m as f32;
-                    (
-                        (s.selected_w as f32 * r) as u32,
-                        (s.selected_h as f32 * r) as u32,
-                    )
+                    ((s.selected_w as f32 * r) as u32, (s.selected_h as f32 * r) as u32)
                 } else {
                     (s.selected_w, s.selected_h)
                 };
@@ -402,10 +383,7 @@ impl App {
                 ));
             }
 
-            ui.label(format!(
-                "{}  |  {}×{}",
-                s.selected_label, s.selected_w, s.selected_h
-            ));
+            ui.label(format!("{}  |  {}×{}", s.selected_label, s.selected_w, s.selected_h));
             ui.separator();
 
             if let Some(ref tex) = s.texture {
@@ -484,13 +462,11 @@ impl eframe::App for App {
                             ui.separator();
 
                             ui.label("Format Convert");
-                            for (label, cb) in [
-                                (
-                                    "I420 → NV12 → I420",
-                                    Box::new(|i: &I420Buffer| i420_nv12_roundtrip(i))
-                                        as Box<dyn Fn(&I420Buffer) -> I420Buffer>,
-                                ),
-                            ]
+                            for (label, cb) in [(
+                                "I420 → NV12 → I420",
+                                Box::new(|i: &I420Buffer| i420_nv12_roundtrip(i))
+                                    as Box<dyn Fn(&I420Buffer) -> I420Buffer>,
+                            )]
                             .iter()
                             {
                                 if ui.button(*label).clicked() {

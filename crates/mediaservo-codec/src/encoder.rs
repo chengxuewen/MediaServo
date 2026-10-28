@@ -1,4 +1,4 @@
-use crate::{EncoderConfig, VideoFrame, EncodedPacket, CodecError};
+use crate::{CodecError, EncodedPacket, EncoderConfig, VideoFrame};
 
 /// Live encoder statistics.
 #[derive(Debug, Clone, Default)]

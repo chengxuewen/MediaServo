@@ -14,29 +14,21 @@ pub enum HealthStatus {
     Healthy,
     /// Component is functional but degraded (e.g. high load, stale data).
     #[serde(rename = "degraded")]
-    Degraded {
-        reason: String,
-    },
+    Degraded { reason: String },
     /// Component is unavailable or malfunctioning.
     #[serde(rename = "unhealthy")]
-    Unhealthy {
-        reason: String,
-    },
+    Unhealthy { reason: String },
 }
 
 impl HealthStatus {
     /// A helper to construct a degraded status.
     pub fn degraded(reason: impl Into<String>) -> Self {
-        Self::Degraded {
-            reason: reason.into(),
-        }
+        Self::Degraded { reason: reason.into() }
     }
 
     /// A helper to construct an unhealthy status.
     pub fn unhealthy(reason: impl Into<String>) -> Self {
-        Self::Unhealthy {
-            reason: reason.into(),
-        }
+        Self::Unhealthy { reason: reason.into() }
     }
 
     /// True when the component is healthy or at least degraded (not fully down).

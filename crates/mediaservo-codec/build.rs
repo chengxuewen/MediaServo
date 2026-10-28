@@ -34,7 +34,9 @@ fn detect_ffmpeg() {
 
     // No FFmpeg found — backend is stub. Print guidance.
     println!("cargo:warning=FFmpeg not found. Install libavcodec-dev or set FFMPEG_DIR.");
-    println!("cargo:warning=  Ubuntu: apt install libavcodec-dev libavutil-dev libavformat-dev libswscale-dev libclang-dev");
+    println!(
+        "cargo:warning=  Ubuntu: apt install libavcodec-dev libavutil-dev libavformat-dev libswscale-dev libclang-dev"
+    );
     println!("cargo:warning=  macOS:  brew install ffmpeg");
     println!("cargo:warning=FFmpeg backend will be a stub (no real encoding/decoding).");
 }

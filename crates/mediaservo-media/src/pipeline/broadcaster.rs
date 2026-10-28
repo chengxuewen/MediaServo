@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
 
 use super::sink::{SinkId, VideoSink, VideoSinkWants};
 use super::source::VideoSource;
@@ -25,10 +28,7 @@ pub struct VideoBroadcaster<F> {
 
 impl<F: Send + 'static> VideoBroadcaster<F> {
     pub fn new() -> Self {
-        Self {
-            sinks: Mutex::new(Vec::new()),
-            next_id: AtomicU64::new(1),
-        }
+        Self { sinks: Mutex::new(Vec::new()), next_id: AtomicU64::new(1) }
     }
 
     /// Aggregate wants from all active sinks.
@@ -58,9 +58,11 @@ impl<F: Send + 'static> VideoBroadcaster<F> {
                 aggregated.max_pixel_count = aggregated.max_pixel_count.min(w.max_pixel_count);
             }
             if w.max_framerate_fps != 0 {
-                aggregated.max_framerate_fps = aggregated.max_framerate_fps.min(w.max_framerate_fps);
+                aggregated.max_framerate_fps =
+                    aggregated.max_framerate_fps.min(w.max_framerate_fps);
             }
-            aggregated.resolution_alignment = lcm(aggregated.resolution_alignment, w.resolution_alignment);
+            aggregated.resolution_alignment =
+                lcm(aggregated.resolution_alignment, w.resolution_alignment);
         }
         if !aggregated.is_active {
             aggregated.max_pixel_count = 0;
@@ -98,11 +100,7 @@ impl<F: Send + 'static> Default for VideoBroadcaster<F> {
 }
 
 impl<F: Send + 'static> VideoSource<F> for VideoBroadcaster<F> {
-    fn add_or_update_sink(
-        &self,
-        sink: Box<dyn VideoSink<F>>,
-        wants: VideoSinkWants,
-    ) -> SinkId {
+    fn add_or_update_sink(&self, sink: Box<dyn VideoSink<F>>, wants: VideoSinkWants) -> SinkId {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut sinks = self.sinks.lock().unwrap();
         sinks.push(SinkEntry { id, sink, wants });
@@ -165,10 +163,7 @@ mod tests {
 
     fn make_sink(wants: VideoSinkWants) -> (Box<TestSink>, Arc<Mutex<Vec<u32>>>) {
         let received = Arc::new(Mutex::new(Vec::new()));
-        let sink = Box::new(TestSink {
-            received: received.clone(),
-            wants,
-        });
+        let sink = Box::new(TestSink { received: received.clone(), wants });
         (sink, received)
     }
 
@@ -255,16 +250,11 @@ mod tests {
         let b: VideoBroadcaster<u32> = VideoBroadcaster::new();
 
         let (s_active, r_active) = make_sink(VideoSinkWants::default());
-        let (s_inactive, r_inactive) = make_sink(VideoSinkWants {
-            is_active: false,
-            ..Default::default()
-        });
+        let (s_inactive, r_inactive) =
+            make_sink(VideoSinkWants { is_active: false, ..Default::default() });
 
         b.add_or_update_sink(s_active, VideoSinkWants::default());
-        b.add_or_update_sink(s_inactive, VideoSinkWants {
-            is_active: false,
-            ..Default::default()
-        });
+        b.add_or_update_sink(s_inactive, VideoSinkWants { is_active: false, ..Default::default() });
 
         b.send_frame(&Arc::new(99)).unwrap();
 
@@ -285,10 +275,7 @@ mod tests {
             resolution_alignment: 1,
             rotation_applied: false,
         });
-        b.add_or_update_sink(s, VideoSinkWants {
-            is_active: false,
-            ..Default::default()
-        });
+        b.add_or_update_sink(s, VideoSinkWants { is_active: false, ..Default::default() });
 
         let agg = b.wants();
         assert!(!agg.is_active);

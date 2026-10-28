@@ -9,7 +9,7 @@
 //! ```
 
 mod common;
-use common::loopback::{create_connected_pair, generate_test_frame, FpsCounter};
+use common::loopback::{FpsCounter, create_connected_pair, generate_test_frame};
 
 use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
 use mediaservo_webrtc::track::{TrackKind, TrackRef};
@@ -60,9 +60,7 @@ fn loopback_video_push_receive() {
         });
 
         // Add video track on PC1
-        let track_id = pc1
-            .add_track("video-loopback", TrackKind::Video)
-            .expect("add track");
+        let track_id = pc1.add_track("video-loopback", TrackKind::Video).expect("add track");
         assert!(!track_id.is_empty());
 
         // Write test frames through TrackSender
@@ -70,22 +68,16 @@ fn loopback_video_push_receive() {
             let frame = generate_test_frame(FRAME_WIDTH, FRAME_HEIGHT, i);
             if let Some(tr) = pc1.get_track(&track_id) {
                 if let TrackRef::Sender(ts) = tr {
-                    ts.write_frame(&frame)
-                        .await
-                        .expect("write frame");
+                    ts.write_frame(&frame).await.expect("write frame");
                 }
             }
-            tokio::time::sleep(Duration::from_millis(FRAME_INTERVAL_MS))
-                .await;
+            tokio::time::sleep(Duration::from_millis(FRAME_INTERVAL_MS)).await;
         }
 
         // With stub backend, onTrack won't fire (stub is no-op).
         // With real backend, received_count should approach TEST_FRAMES.
         let received = received_count.load(Ordering::Relaxed);
-        assert!(
-            received <= TEST_FRAMES,
-            "received more frames than sent"
-        );
+        assert!(received <= TEST_FRAMES, "received more frames than sent");
     });
 }
 
@@ -93,8 +85,7 @@ fn loopback_video_push_receive() {
 fn generate_test_frame_produces_correct_size() {
     let frame = generate_test_frame(FRAME_WIDTH, FRAME_HEIGHT, 0);
     let expected_size =
-        (FRAME_WIDTH * FRAME_HEIGHT) as usize
-        + 2 * ((FRAME_WIDTH * FRAME_HEIGHT) / 4) as usize;
+        (FRAME_WIDTH * FRAME_HEIGHT) as usize + 2 * ((FRAME_WIDTH * FRAME_HEIGHT) / 4) as usize;
     assert_eq!(frame.len(), expected_size);
 }
 
@@ -115,17 +106,13 @@ fn loopback_data_channel_between_pcs() {
         let (pc1, _pc2) = create_connected_pair().await.expect("connect");
 
         // PC1 creates a data channel
-        let mut dc1 = pc1
-            .create_data_channel("loopback-dc", Default::default())
-            .await
-            .expect("create dc");
+        let mut dc1 =
+            pc1.create_data_channel("loopback-dc", Default::default()).await.expect("create dc");
 
         assert_eq!(dc1.label(), "loopback-dc");
 
         // Verify we can send text without error
-        dc1.send_text("hello loopback")
-            .await
-            .expect("send text");
+        dc1.send_text("hello loopback").await.expect("send text");
     });
 }
 
@@ -143,12 +130,9 @@ fn loopback_multiple_tracks() {
         });
 
         // Add multiple tracks of different kinds
-        pc1.add_track("video-1", TrackKind::Video)
-            .expect("add video-1");
-        pc1.add_track("audio-1", TrackKind::Audio)
-            .expect("add audio-1");
-        pc1.add_track("video-2", TrackKind::Video)
-            .expect("add video-2");
+        pc1.add_track("video-1", TrackKind::Video).expect("add video-1");
+        pc1.add_track("audio-1", TrackKind::Audio).expect("add audio-1");
+        pc1.add_track("video-2", TrackKind::Video).expect("add video-2");
 
         assert_eq!(pc1.track_count(), 3);
 
@@ -166,8 +150,7 @@ fn loopback_add_remove_track() {
     rt.block_on(async {
         let (pc1, _pc2) = create_connected_pair().await.expect("connect");
 
-        pc1.add_track("temp-track", TrackKind::Video)
-            .expect("add track");
+        pc1.add_track("temp-track", TrackKind::Video).expect("add track");
         assert_eq!(pc1.track_count(), 1);
 
         pc1.remove_track("temp-track").expect("remove track");
@@ -188,10 +171,7 @@ fn loopback_close_connects_gracefully() {
         // Verify closed state
         use mediaservo_webrtc::peer_connection::RTCPeerConnectionState;
         assert!(
-            matches!(
-                pc1.connection_state(),
-                RTCPeerConnectionState::Closed
-            ),
+            matches!(pc1.connection_state(), RTCPeerConnectionState::Closed),
             "pc1 should be Closed after close()"
         );
     });

@@ -13,7 +13,10 @@ fn main() {
         // leaves versioned UND (GLIBCXX_3.4.30 wall). Ask the compiler for libstdc++.a's absolute path
         // and bind statically (probe validated on client-c 2026-10-15: UND 78→0, NEEDED dropped).
         let a_path = std::env::var("CXX").or_else(|_| std::env::var("CC")).ok().and_then(|c| {
-            std::process::Command::new(c).arg("-print-file-name=libstdc++.a").output().ok()
+            std::process::Command::new(c)
+                .arg("-print-file-name=libstdc++.a")
+                .output()
+                .ok()
                 .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
                 .filter(|p| p.ends_with(".a") && std::path::Path::new(p).exists())
         });

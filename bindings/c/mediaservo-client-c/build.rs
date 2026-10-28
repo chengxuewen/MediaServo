@@ -14,7 +14,10 @@ fn main() {
         // compiler for libstdc++.a's absolute path and bind it statically; fall back to the explicit
         // -Bstatic sandwich (and keep exclude-libs regardless).
         let a_path = std::env::var("CXX").or_else(|_| std::env::var("CC")).ok().and_then(|c| {
-            std::process::Command::new(c).arg("-print-file-name=libstdc++.a").output().ok()
+            std::process::Command::new(c)
+                .arg("-print-file-name=libstdc++.a")
+                .output()
+                .ok()
                 .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
                 .filter(|p| p.ends_with(".a") && std::path::Path::new(p).exists())
         });

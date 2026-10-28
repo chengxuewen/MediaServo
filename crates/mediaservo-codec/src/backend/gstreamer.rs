@@ -85,21 +85,13 @@ fn drain_appsink_packets(
 ) -> Result<(), CodecError> {
     while let Some(sample) = appsink.try_pull_sample(timeout) {
         if let Some(buf) = sample.buffer() {
-            let map = buf
-                .map_readable()
-                .map_err(|e| CodecError::Encoder(format!("map: {e}")))?;
+            let map = buf.map_readable().map_err(|e| CodecError::Encoder(format!("map: {e}")))?;
             let data = map.as_slice().to_vec();
             let pts = buf.pts().map(|t| t.nseconds()).unwrap_or(0);
             let keyframe = !buf.flags().contains(gstreamer::BufferFlags::DELTA_UNIT);
             stats.packets_produced += 1;
             stats.bytes_encoded += data.len() as u64;
-            buffer.push(EncodedPacket {
-                data,
-                pts,
-                dts: pts,
-                keyframe,
-                codec: CodecId::H264,
-            });
+            buffer.push(EncodedPacket { data, pts, dts: pts, keyframe, codec: CodecId::H264 });
         }
     }
     Ok(())
@@ -111,14 +103,11 @@ fn drain_appsink_frames(
     timeout: gstreamer::ClockTime,
 ) -> Result<(), CodecError> {
     while let Some(sample) = appsink.try_pull_sample(timeout) {
-        let caps = sample
-            .caps()
-            .ok_or_else(|| CodecError::Decoder("sample has no caps".into()))?;
+        let caps = sample.caps().ok_or_else(|| CodecError::Decoder("sample has no caps".into()))?;
         let video_info = gstreamer_video::VideoInfo::from_caps(caps)
             .map_err(|_| CodecError::Decoder("failed to parse video caps".into()))?;
-        let buf = sample
-            .buffer()
-            .ok_or_else(|| CodecError::Decoder("sample has no buffer".into()))?;
+        let buf =
+            sample.buffer().ok_or_else(|| CodecError::Decoder("sample has no buffer".into()))?;
         let vframe = gstreamer_video::VideoFrameRef::from_buffer_ref_readable(&buf, &video_info)
             .map_err(|_| CodecError::Decoder("failed to map video frame".into()))?;
 
@@ -128,19 +117,12 @@ fn drain_appsink_frames(
         let mut planes = Vec::with_capacity(3);
         for i in 0..3u32 {
             if let Ok(data) = vframe.plane_data(i) {
-                planes.push(Plane {
-                    data: data.to_vec(),
-                    stride: strides[i as usize] as u32,
-                });
+                planes.push(Plane { data: data.to_vec(), stride: strides[i as usize] as u32 });
             }
         }
 
         buffer.push(VideoFrame {
-            format: VideoFormat {
-                width: w,
-                height: h,
-                pixel_format: PixelFormat::Yuv420p,
-            },
+            format: VideoFormat { width: w, height: h, pixel_format: PixelFormat::Yuv420p },
             planes,
             pts: buf.pts().map(|t| t.nseconds()).unwrap_or(0),
             keyframe: !buf.flags().contains(gstreamer::BufferFlags::DELTA_UNIT),
@@ -229,9 +211,7 @@ impl VideoEncoder for GstEncoder {
             .field("stream-format", "avc")
             .field("alignment", "au")
             .build();
-        let appsink = gstreamer_app::AppSink::builder()
-            .caps(&sink_caps)
-            .build();
+        let appsink = gstreamer_app::AppSink::builder().caps(&sink_caps).build();
 
         pipeline
             .add_many([
@@ -276,15 +256,12 @@ impl VideoEncoder for GstEncoder {
         let i420 = pack_i420(frame)?;
         let mut buf = gstreamer::Buffer::from_mut_slice(i420);
         {
-            let bref = buf
-                .get_mut()
-                .ok_or_else(|| CodecError::Encoder("buffer not writable".into()))?;
+            let bref =
+                buf.get_mut().ok_or_else(|| CodecError::Encoder("buffer not writable".into()))?;
             bref.set_pts(gstreamer::ClockTime::from_nseconds(frame.pts));
         }
 
-        appsrc
-            .push_buffer(buf)
-            .map_err(|e| CodecError::Encoder(format!("push_buffer: {e}")))?;
+        appsrc.push_buffer(buf).map_err(|e| CodecError::Encoder(format!("push_buffer: {e}")))?;
         self.stats.frames_encoded += 1;
 
         let timeout = gstreamer::ClockTime::from_mseconds(5);
@@ -325,12 +302,7 @@ pub(crate) struct GstDecoder {
 impl Default for GstDecoder {
     fn default() -> Self {
         gstreamer::init().ok();
-        Self {
-            pipeline: None,
-            appsrc: None,
-            appsink: None,
-            buffer: Vec::new(),
-        }
+        Self { pipeline: None, appsrc: None, appsink: None, buffer: Vec::new() }
     }
 }
 
@@ -361,12 +333,8 @@ impl VideoDecoder for GstDecoder {
             .build()
             .map_err(|e| CodecError::Decoder(format!("videoconvert: {e}")))?;
 
-        let sink_caps = gstreamer::Caps::builder("video/x-raw")
-            .field("format", "I420")
-            .build();
-        let appsink = gstreamer_app::AppSink::builder()
-            .caps(&sink_caps)
-            .build();
+        let sink_caps = gstreamer::Caps::builder("video/x-raw").field("format", "I420").build();
+        let appsink = gstreamer_app::AppSink::builder().caps(&sink_caps).build();
 
         pipeline
             .add_many([
@@ -411,9 +379,7 @@ impl VideoDecoder for GstDecoder {
             .ok_or_else(|| CodecError::InvalidState("decoder not configured".into()))?;
 
         let buf = gstreamer::Buffer::from_slice(data.to_vec());
-        appsrc
-            .push_buffer(buf)
-            .map_err(|e| CodecError::Decoder(format!("push_buffer: {e}")))?;
+        appsrc.push_buffer(buf).map_err(|e| CodecError::Decoder(format!("push_buffer: {e}")))?;
 
         let timeout = gstreamer::ClockTime::from_mseconds(5);
         drain_appsink_frames(appsink, &mut self.buffer, timeout)?;

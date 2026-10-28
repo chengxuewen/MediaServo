@@ -44,7 +44,9 @@ pub fn create_test_frame(width: u32, height: u32) -> BoxVideoFrame {
         }
     }
 
-    mediaservo_media::base::frame::VideoFrame::new(Box::new(buf) as Box<dyn mediaservo_media::base::buffer::VideoBuffer>)
-        .with_rotation(VideoRotation::Rotation0)
-        .with_timestamp(0)
+    mediaservo_media::base::frame::VideoFrame::new(
+        Box::new(buf) as Box<dyn mediaservo_media::base::buffer::VideoBuffer>
+    )
+    .with_rotation(VideoRotation::Rotation0)
+    .with_timestamp(0)
 }

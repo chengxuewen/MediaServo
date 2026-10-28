@@ -219,8 +219,8 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     // device-enroll S7: allow_dev_enroll (config-first, env ALLOW_DEV_ENROLL=1 override wins;
     // default false = production manual pending queue; true = controlled network/dev
     // auto-registers on verify success, zero manual steps). Env parsing: literal "1" only.
-    let allow_dev_enroll = config.allow_dev_enroll
-        || std::env::var("ALLOW_DEV_ENROLL").as_deref() == Ok("1");
+    let allow_dev_enroll =
+        config.allow_dev_enroll || std::env::var("ALLOW_DEV_ENROLL").as_deref() == Ok("1");
     if allow_dev_enroll {
         tracing::warn!(
             "allow_dev_enroll: unknown devices auto-register after pubkey verify passes (controlled private network/dev environments only)"

@@ -14,5 +14,5 @@ pub enum PixelFormat {
     NV12,
     // YUV 10-bit
     I010,
-    P010,  // merged from RawPixelFormat
+    P010, // merged from RawPixelFormat
 }

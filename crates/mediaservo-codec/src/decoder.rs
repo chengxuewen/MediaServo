@@ -1,4 +1,4 @@
-use crate::{DecoderConfig, VideoFrame, CodecError};
+use crate::{CodecError, DecoderConfig, VideoFrame};
 
 /// Video decoder trait — push encoded packets, pull decoded frames.
 pub trait VideoDecoder: Send {

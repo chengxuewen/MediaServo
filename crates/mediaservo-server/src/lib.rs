@@ -3,21 +3,21 @@
 //! Re-exports all server modules for binary and integration test use.
 
 pub mod accounts;
-pub mod apikeys;
 pub mod admin;
+pub mod apikeys;
 pub mod audit;
-pub mod roles;
 pub mod config;
 pub mod devices;
+pub mod health;
 pub mod monitor;
 pub mod relay;
+pub mod roles;
 pub mod room;
-pub mod status;
-pub mod sfu;
-pub mod health;
-pub mod signaling;
 pub mod rooms;
+pub mod sfu;
+pub mod signaling;
 pub mod static_files;
+pub mod status;
 pub mod tls;
 
 // Re-export key dependencies for integration tests

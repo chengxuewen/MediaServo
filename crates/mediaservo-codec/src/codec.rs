@@ -43,6 +43,10 @@ pub struct FrameRate {
 }
 
 impl FrameRate {
-    pub fn new(num: u32, den: u32) -> Self { Self { num, den } }
-    pub fn fps(&self) -> f64 { self.num as f64 / self.den as f64 }
+    pub fn new(num: u32, den: u32) -> Self {
+        Self { num, den }
+    }
+    pub fn fps(&self) -> f64 {
+        self.num as f64 / self.den as f64
+    }
 }

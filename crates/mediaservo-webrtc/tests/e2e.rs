@@ -3,22 +3,20 @@
 
 #[cfg(feature = "backend-webrtc-rs")]
 mod tests {
-    use mediaservo_webrtc::*;
+    use mediaservo_webrtc::data_channel::{
+        RTCDataChannel, RTCDataChannelInit, RTCDataChannelState,
+    };
     use mediaservo_webrtc::traits::PeerConnectionApi;
-    use mediaservo_webrtc::data_channel::{RTCDataChannelInit, RTCDataChannelState, RTCDataChannel};
+    use mediaservo_webrtc::*;
 
     #[tokio::test]
     async fn e2e_create_and_exchange_sdp() {
         let factory = RTCPeerConnectionFactory::new();
 
-        let pc_a = factory
-            .create_peer_connection(RTCConfiguration::default())
-            .await
-            .expect("create pc_a");
-        let pc_b = factory
-            .create_peer_connection(RTCConfiguration::default())
-            .await
-            .expect("create pc_b");
+        let pc_a =
+            factory.create_peer_connection(RTCConfiguration::default()).await.expect("create pc_a");
+        let pc_b =
+            factory.create_peer_connection(RTCConfiguration::default()).await.expect("create pc_b");
 
         // Verify initial states
         assert!(matches!(pc_a.connection_state(), RTCPeerConnectionState::New));

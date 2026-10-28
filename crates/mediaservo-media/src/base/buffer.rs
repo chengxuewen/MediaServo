@@ -535,7 +535,7 @@ mod tests {
     fn i420_new_creates_correct_plane_sizes() {
         let buf = I420Buffer::new(16, 8);
         assert_eq!(buf.data_y.len(), 128); // 16*8
-        assert_eq!(buf.data_u.len(), 32);  // (16/2)*(8/2) = 8*4
+        assert_eq!(buf.data_u.len(), 32); // (16/2)*(8/2) = 8*4
         assert_eq!(buf.data_v.len(), 32);
         assert_eq!(buf.stride_y, 16);
         assert_eq!(buf.stride_u, 8);

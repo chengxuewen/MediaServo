@@ -1,15 +1,19 @@
 //! Stub backend — no-op encoder/decoder for development and compile checks.
 
-use crate::encoder::VideoEncoder;
+use crate::config::{DecoderConfig, EncoderConfig};
 use crate::decoder::VideoDecoder;
-use crate::config::{EncoderConfig, DecoderConfig};
+use crate::encoder::EncoderStats;
+use crate::encoder::VideoEncoder;
+use crate::error::CodecError;
 use crate::frame::VideoFrame;
 use crate::packet::EncodedPacket;
-use crate::error::CodecError;
-use crate::encoder::EncoderStats;
 
 pub(crate) struct StubEncoder;
-impl Default for StubEncoder { fn default() -> Self { Self } }
+impl Default for StubEncoder {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl VideoEncoder for StubEncoder {
     fn configure(&mut self, _config: &EncoderConfig) -> Result<(), CodecError> {
@@ -30,7 +34,11 @@ impl VideoEncoder for StubEncoder {
 }
 
 pub(crate) struct StubDecoder;
-impl Default for StubDecoder { fn default() -> Self { Self } }
+impl Default for StubDecoder {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl VideoDecoder for StubDecoder {
     fn configure(&mut self, _config: &DecoderConfig) -> Result<(), CodecError> {

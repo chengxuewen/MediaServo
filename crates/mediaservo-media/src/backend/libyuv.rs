@@ -27,14 +27,7 @@ pub struct LibyuvTransform;
 ///
 /// libyuv returns 0 on success, negative on error.
 fn libyuv_ret(ret: i32) -> Result<(), MediaError> {
-    if ret == 0 {
-        Ok(())
-    } else {
-        Err(MediaError::BackendError(format!(
-            "libyuv error: {}",
-            ret
-        )))
-    }
+    if ret == 0 { Ok(()) } else { Err(MediaError::BackendError(format!("libyuv error: {}", ret))) }
 }
 
 /// Map `VideoRotation` to libyuv rotation degrees.
@@ -85,12 +78,7 @@ impl VideoTransform for LibyuvTransform {
         libyuv_ret(r)
     }
 
-    fn mirror(
-        src: I420BufferRef,
-        w: u32,
-        h: u32,
-        dst: I420BufferRef,
-    ) -> Result<(), MediaError> {
+    fn mirror(src: I420BufferRef, w: u32, h: u32, dst: I420BufferRef) -> Result<(), MediaError> {
         // SAFETY: same contract as scale — libyuv reads src, writes dst.
         let r = unsafe {
             rs_I420Mirror(
@@ -215,12 +203,7 @@ impl VideoTransform for LibyuvTransform {
         libyuv_ret(r)
     }
 
-    fn argb_to_i420(
-        argb: &[u8],
-        w: u32,
-        h: u32,
-        dst: I420BufferRef,
-    ) -> Result<(), MediaError> {
+    fn argb_to_i420(argb: &[u8], w: u32, h: u32, dst: I420BufferRef) -> Result<(), MediaError> {
         // SAFETY: ARGB src slice covers w×h×4 bytes. libyuv writes to dst planes.
         let r = unsafe {
             rs_ARGBToI420(

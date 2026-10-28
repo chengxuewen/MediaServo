@@ -12,11 +12,11 @@ pub enum Bitrate {
 pub enum EncoderPreset {
     P1UltraFast = 1,
     P2SuperFast = 2,
-    P3VeryFast  = 3,
-    P4Medium    = 4,
-    P5Slow      = 5,
-    P6VerySlow  = 6,
-    P7Lossless  = 7,
+    P3VeryFast = 3,
+    P4Medium = 4,
+    P5Slow = 5,
+    P6VerySlow = 6,
+    P7Lossless = 7,
 }
 
 /// Encoder configuration.
@@ -33,7 +33,8 @@ pub struct EncoderConfig {
 impl EncoderConfig {
     pub fn builder(codec: CodecId, format: VideoFormat) -> EncoderConfigBuilder {
         EncoderConfigBuilder {
-            codec, format,
+            codec,
+            format,
             bitrate: Bitrate::Cbr(2000),
             fps: FrameRate::new(30, 1),
             preset: EncoderPreset::P4Medium,
@@ -52,10 +53,22 @@ pub struct EncoderConfigBuilder {
 }
 
 impl EncoderConfigBuilder {
-    pub fn bitrate(mut self, bitrate: Bitrate) -> Self { self.bitrate = bitrate; self }
-    pub fn fps(mut self, num: u32, den: u32) -> Self { self.fps = FrameRate::new(num, den); self }
-    pub fn preset(mut self, preset: EncoderPreset) -> Self { self.preset = preset; self }
-    pub fn gop(mut self, gop: u32) -> Self { self.gop = gop; self }
+    pub fn bitrate(mut self, bitrate: Bitrate) -> Self {
+        self.bitrate = bitrate;
+        self
+    }
+    pub fn fps(mut self, num: u32, den: u32) -> Self {
+        self.fps = FrameRate::new(num, den);
+        self
+    }
+    pub fn preset(mut self, preset: EncoderPreset) -> Self {
+        self.preset = preset;
+        self
+    }
+    pub fn gop(mut self, gop: u32) -> Self {
+        self.gop = gop;
+        self
+    }
     pub fn build(self) -> EncoderConfig {
         EncoderConfig {
             codec: self.codec,
