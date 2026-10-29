@@ -47,7 +47,7 @@ function(mediaservo_setup_bindings)
             CRATE mediaservo_${_sdk}
             MANIFEST "${_root}/bindings/c/mediaservo-${_sdk}-c/Cargo.toml"
             BASE_DIR "${_target_dir}"
-            FOLDER bindings)
+            FOLDER "bindings/c")
     endforeach()
     polyorch_rust_build(
         TARGET mediaservo-node SHARED
@@ -55,7 +55,7 @@ function(mediaservo_setup_bindings)
         CRATE mediaservo_node
         MANIFEST "${_root}/bindings/node/rust/mediaservo-node/Cargo.toml"
         BASE_DIR "${_target_dir}"
-        FOLDER bindings)
+        FOLDER "bindings/node")
 
     # -- SR4 L1: delivery staging rules for the four SDK cdylibs -------------
     # D241 version triple + N7 strip, absorbed from python (one leg, one
@@ -150,6 +150,10 @@ function(mediaservo_setup_bindings)
     # files exist configure-time, the target documents/anchors them.
     add_custom_target(mediaservo-bindings-manifest
         COMMENT "delivery manifests: ${_gen}/pkgconfig + ${_gen}/cmake (rendered at configure)")
+    # R9: the render anchor is the bindings folder's signboard (zero-command;
+    # sits at the bindings/ top, sibling of the R8 disk-mirror subfolders
+    # bindings/c and bindings/node — shared name prefix, NOT parent/child).
+    set_target_properties(mediaservo-bindings-manifest PROPERTIES FOLDER bindings)
 
     # -- SR4 L3 (T0 #9, the pre-ruled row): transport of the rendered suite becomes
     # install rules. Direction is build-tree -> delivery-tree at INSTALL time (the

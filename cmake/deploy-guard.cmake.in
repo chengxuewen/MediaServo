@@ -290,4 +290,4 @@ if(_teardown_live)
     set(_teardown_live 0)
 endif()
 
-message(STATUS "deploy guard: ${_p_abs} clear (brand='${_brand}', profile=@GUARD_PROFILE@)")
+message(STATUS "deploy guard: destination ${_p_abs} clear (brand='${_brand}', profile=@GUARD_PROFILE@)")

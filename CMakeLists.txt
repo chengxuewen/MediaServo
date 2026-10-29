@@ -19,7 +19,7 @@ project(mediaservo VERSION ${CMAKE_MATCH_1} LANGUAGES CXX)
 
 # Must run before ALL add_subdirectory calls (measured sibling lesson: a late add_test
 # in a subdirectory is silently dropped).
-enable_testing()
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)  # R7: CMP0143 keys on the 3.25 floor, not the runtime
 
 include(cmake/MediaServoPolyOrch.cmake)
 mediaservo_ensure_polyorch()   # D39 sentinel: reuse superbuild copy first-wins, else embed the gitlink pin
