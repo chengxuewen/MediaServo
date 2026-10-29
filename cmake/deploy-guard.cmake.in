@@ -1,11 +1,41 @@
 # deploy-guard.cmake.in — fail-closed pre-install guard (K1b, three conditions)
-# Rendered PER TARGET by MediaServoDeployTargets.cmake (prefix/brand embedded).
+# Rendered PER TARGET by MediaServoDeployTargets.cmake (prefix/brand/mode embedded).
 # Script-mode policy context: policy-neutral forms only (generated install
 # scripts run at the consumer floor — f8f85db rule).
+#
+# Two modes (R10-K-a):
+#   refuse   (default) — all three conditions FATAL, byte-identical to the
+#                        pre-K-a guard (the verifiable zero-change landing).
+#   teardown           — condition 1 falls through to the stop choreography
+#                        (port of mediaservo.sh _ms_deploy_stop_instance,
+#                        CWD-scoped per C50); conditions 2 and 3 refuse
+#                        UNCONDITIONALLY (ops-F1 resurrection blocked).
+#
+# Single-writer (B2): every run takes an flock on the binaryDir's deploy
+# lock — refuse mode too (harmless). Concurrent deploys sharing one binaryDir
+# are the measured corruption mechanism (P2d-2).
 
 set(_p "@GUARD_PREFIX@")
 set(_brand "@GUARD_BRAND@")
 set(_is_branded @GUARD_IS_BRANDED@)
+set(_mode "@GUARD_MODE@")
+
+# ---- single-writer (B2) ----
+# A cmake -P run holds nothing across stages, so the lock is per-invocation
+# by design: flock -n exits immediately when another deploy already holds it.
+set(_lock "${CMAKE_BINARY_DIR}/deploy-host.lock")
+find_program(FLOCK_BIN flock)
+if(FLOCK_BIN)
+    execute_process(COMMAND "${FLOCK_BIN}" -n "${_lock}" true
+        RESULT_VARIABLE _flock_rc OUTPUT_QUIET ERROR_QUIET)
+    if(NOT _flock_rc EQUAL 0)
+        message(FATAL_ERROR
+            "deploy guard: another deploy holds the single-writer lock on this "
+            "binaryDir (${_lock})")
+    endif()
+else()
+    message(STATUS "deploy guard: flock not found — single-writer not enforced")
+endif()
 
 if(NOT _p)
     message(FATAL_ERROR
@@ -25,17 +55,11 @@ else()
     set(_cli "${_p_abs}/bin/mediaservo-host")
 endif()
 
-# condition 1: live instance (bash twin: mediaservo.sh:1317-1324)
-if(EXISTS "${_live_oxfile}" AND EXISTS "${_cli}")
-    message(FATAL_ERROR
-        "deploy guard: live instance at ${_p_abs} — refusing to install.\n"
-        "Escape hatch: run `build:deploy` (stops the instance first) or stop it manually.")
-endif()
-
 # condition 2 (ops-F1 brandless-reclaim): an EMPTY brand makes AppTree reclaim
 # legs treat brand-suffixed binaries as non-kept — a brandless deploy onto a
 # stopped-but-branded tree DESTROYS the delivery. bash can never hit this
 # (msrtc.sh:105 always injects the brand); the target face carries the guard.
+# Refuses in BOTH modes (teardown cannot resurrect ops-F1).
 if(NOT _is_branded)
     # threat face = ANY brand-suffixed artifact (agent family AND the branded
     # main CLI); first bug shape only globbed *-agent and missed a tree whose
@@ -56,6 +80,29 @@ if(NOT _is_branded)
             "deploy guard: empty brand but ${_n} branded bin(s) live at ${_p_abs}/bin — "
             "a brandless install would RECLAIM them. Re-run with the brand "
             "(MEDIASERVO_BRAND=...) or use `build:deploy --brand ...`.")
+    endif()
+endif()
+
+# condition 1: live instance (bash twin: mediaservo.sh:1317-1324).
+# refuse mode: FATAL (text unchanged). teardown mode: fall through to the
+# stop choreography; no live instance = clear STATUS, refuse-mode behavior.
+if(EXISTS "${_live_oxfile}" AND EXISTS "${_cli}")
+    if(_mode STREQUAL "teardown")
+        message(STATUS
+            "teardown mode: live instance at ${_p_abs} — stopping (unit -> daemon -> family)")
+        # R10-K-a scaffold interim: fail-closed. The stop legs land in the
+        # next commit; until then a teardown-mode run NEVER installs over a
+        # live instance.
+        message(FATAL_ERROR
+            "deploy guard: teardown scaffold has no stop legs yet — refusing")
+    else()
+        message(FATAL_ERROR
+            "deploy guard: live instance at ${_p_abs} — refusing to install.\n"
+            "Escape hatch: run `build:deploy` (stops the instance first) or stop it manually.")
+    endif()
+else()
+    if(_mode STREQUAL "teardown")
+        message(STATUS "teardown mode: no live instance at ${_p_abs} — nothing to stop")
     endif()
 endif()
 

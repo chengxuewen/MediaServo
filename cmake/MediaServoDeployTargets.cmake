@@ -23,6 +23,11 @@
 #                                         -> FATAL (pack-leg contract, Media-
 #                                         ServoPack.cmake:236/:273)
 #   MEDIASERVO_SERVER_OUT_DIR             default <prefix>/server (AppTree:66-72)
+#   MEDIASERVO_DEPLOY_GUARD_MODE          refuse|teardown (R10-K-a: condition 1
+#                                         stops the live instance before
+#                                         install; conditions 2/3 still
+#                                         refuse (ops-F1 stays blocked)
+#
 #
 # Fail-closed guard — THREE conditions, FATAL before install (comment anchor:
 # bash twin mediaservo.sh:1317-1324; ops-F1 brandless-reclaim):
@@ -54,6 +59,16 @@ set(MEDIASERVO_DEPLOY_PROFILE "Debug" CACHE STRING
     "deploy build profile: Debug | Release (U6)")
 set_property(CACHE MEDIASERVO_DEPLOY_PROFILE PROPERTY
     STRINGS Debug Release)
+
+# guard mode: refuse (default) = three-condition FATAL, byte-identical to the
+# pre-K-a guard; teardown (R10-K-a) = condition 1 stops the live instance
+# (unit -> daemon -> family, CWD-scoped) before install; conditions 2/3 still
+# refuse in BOTH modes (ops-F1 resurrection blocked). Cache var, not baked
+# into the rendered script = the kill-switch needs no code revert (§10).
+set(MEDIASERVO_DEPLOY_GUARD_MODE "refuse" CACHE STRING
+    "deploy guard mode: refuse | teardown (R10-K-a)")
+set_property(CACHE MEDIASERVO_DEPLOY_GUARD_MODE PROPERTY
+    STRINGS refuse teardown)
 
 if(NOT MEDIASERVO_BRAND AND DEFINED ENV{MEDIASERVO_BRAND})
     set(MEDIASERVO_BRAND "$ENV{MEDIASERVO_BRAND}" CACHE STRING
@@ -93,6 +108,7 @@ set(MEDIASERVO_DEPLOY_STRIP "" CACHE STRING
     "bindings deploy --strip flavor passthrough (empty = none; bindings face has no strip mechanism today — declared K1b finding, not invented)")
 
 function(_mediaservo_deploy_guard_script _out _prefix _brand)
+    set(GUARD_MODE "${MEDIASERVO_DEPLOY_GUARD_MODE}")
     set(GUARD_PREFIX "${_prefix}")
     set(GUARD_BRAND "${_brand}")
     if(_brand)
@@ -179,6 +195,7 @@ include(\"${CMAKE_BINARY_DIR}/deploy-init-server-body.cmake\")
             -DMEDIASERVO_DEPLOY_GUARD=1
             -DMEDIASERVO_DEPLOY_GUARD_PREFIX=${_pfx}
             -DMEDIASERVO_DEPLOY_GUARD_BRAND=${MEDIASERVO_BRAND}
+            -DMEDIASERVO_DEPLOY_GUARD_MODE=${MEDIASERVO_DEPLOY_GUARD_MODE}
             -P ${CMAKE_BINARY_DIR}/deploy-${_t}-guard.cmake
         COMMAND ${CMAKE_COMMAND} --install ${_bdir} --prefix ${_pfx}
         ${DT_EXTRA_COMMANDS}
