@@ -86,15 +86,12 @@ endif()
 # condition 1: live instance (bash twin: mediaservo.sh:1317-1324).
 # refuse mode: FATAL (text unchanged). teardown mode: fall through to the
 # stop choreography; no live instance = clear STATUS, refuse-mode behavior.
+set(_teardown_live 0)
 if(EXISTS "${_live_oxfile}" AND EXISTS "${_cli}")
     if(_mode STREQUAL "teardown")
+        set(_teardown_live 1)
         message(STATUS
             "teardown mode: live instance at ${_p_abs} — stopping (unit -> daemon -> family)")
-        # R10-K-a scaffold interim: fail-closed. The stop legs land in the
-        # next commit; until then a teardown-mode run NEVER installs over a
-        # live instance.
-        message(FATAL_ERROR
-            "deploy guard: teardown scaffold has no stop legs yet — refusing")
     else()
         message(FATAL_ERROR
             "deploy guard: live instance at ${_p_abs} — refusing to install.\n"
@@ -104,6 +101,186 @@ else()
     if(_mode STREQUAL "teardown")
         message(STATUS "teardown mode: no live instance at ${_p_abs} — nothing to stop")
     endif()
+endif()
+
+# literal cwd-inside-prefix predicate (bash twin: case "$pcwd" in
+# "$prefix"|"$prefix"/*) — string(FIND, NOT regex: a prefix holding path
+# metachars must never over-match, this is a kill gate)
+function(_dg_cwd_inside _cwd _prefix _out)
+    if("${_cwd}" STREQUAL "${_prefix}")
+        set(${_out} 1 PARENT_SCOPE)
+        return()
+    endif()
+    string(FIND "${_cwd}" "${_prefix}/" _i)
+    if(_i EQUAL 0)
+        set(${_out} 1 PARENT_SCOPE)
+    else()
+        set(${_out} 0 PARENT_SCOPE)
+    endif()
+endfunction()
+
+# ---- teardown legs (R10-K-a commit 2) ----
+# Port of mediaservo.sh _ms_deploy_stop_instance (unit -> daemon -> family).
+# Fires ONLY in teardown mode AND only when condition 1 saw a live instance.
+# Contract (audit §10, binding): CWD-scoped family kill (B1 — an unscoped
+# kill is the 10-27 production-killer); per-arm exit table pgrep/kill rc=1 =
+# steady state / rc>=2 = warn-and-continue; NO FATAL anywhere below (a
+# half-stopped cluster with an aborted deploy is the worst outcome); never
+# invoke the oxmgr CLI (its IPC auto-spawns a daemon, PIT-224).
+if(_teardown_live)
+    find_program(SYSTEMCTL_BIN systemctl)
+    find_program(PGREP_BIN pgrep)
+    find_program(READLINK_BIN readlink)
+    find_program(KILL_BIN kill)
+
+    # OXMGR_HOME canonicalization: realpath -m twin (exists -> REAL, missing
+    # -> ABSOLUTE; audit F3 — symlinked prefixes must match the unit text).
+    set(_oxmgr_home "${_p_abs}/run/oxmgr")
+    if(EXISTS "${_oxmgr_home}")
+        get_filename_component(_oxmgr_home "${_oxmgr_home}" REAL)
+    else()
+        get_filename_component(_oxmgr_home "${_oxmgr_home}" ABSOLUTE)
+    endif()
+    set(_want_home "Environment=OXMGR_HOME=${_oxmgr_home}")
+
+    # ---- arm a: systemd units (OXMGR_HOME-scoped; another home untouched) ----
+    set(_unit_dir "$ENV{HOME}/.config/systemd/user")
+    if(SYSTEMCTL_BIN AND EXISTS "${_unit_dir}")
+        file(GLOB _units "${_unit_dir}/oxmgr-${_brand}-*.service")
+        foreach(_u IN LISTS _units)
+            get_filename_component(_un "${_u}" NAME)
+            file(READ "${_u}" _uc)
+            string(FIND "${_uc}" "${_want_home}" _idx)
+            if(_idx EQUAL -1)
+                message(STATUS "teardown: leaving unit ${_un} untouched (another home)")
+                continue()
+            endif()
+            execute_process(COMMAND "${SYSTEMCTL_BIN}" --user stop "${_un}"
+                RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_QUIET)
+            if(_rc EQUAL 0)
+                message(STATUS "teardown: stopped unit ${_un}")
+            else()
+                message(WARNING "teardown: systemctl stop ${_un} rc=${_rc} — continuing")
+            endif()
+            execute_process(COMMAND "${SYSTEMCTL_BIN}" --user reset-failed "${_un}"
+                RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_QUIET)
+            if(NOT _rc EQUAL 0)
+                message(WARNING "teardown: systemctl reset-failed ${_un} rc=${_rc} — continuing")
+            endif()
+        endforeach()
+    else()
+        message(STATUS "teardown: systemctl or unit dir absent — unit arm skipped")
+    endif()
+
+    # ---- arm b: instance daemon (exact-name pgrep, cwd inside prefix) ----
+    if(PGREP_BIN)
+        execute_process(COMMAND "${PGREP_BIN}" -x oxmgr
+            RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_QUIET)
+        if(_rc EQUAL 1)
+            # no process matched = steady state (exit table, audit MAJOR-1)
+        elseif(_rc GREATER 1)
+            message(WARNING "teardown: pgrep oxmgr rc=${_rc} — daemon arm skipped")
+        else()
+            string(STRIP "${_out}" _out)
+            string(REPLACE "\n" ";" _pids "${_out}")
+            foreach(_pid IN LISTS _pids)
+                if(NOT _pid)
+                    continue()
+                endif()
+                execute_process(COMMAND "${READLINK_BIN}" /proc/${_pid}/cwd
+                    OUTPUT_VARIABLE _cwd ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+                get_filename_component(_cwd "${_cwd}" ABSOLUTE)
+                _dg_cwd_inside("${_cwd}" "${_p_abs}" _inside)
+                if(_inside)
+                    execute_process(COMMAND "${KILL_BIN}" ${_pid}
+                        RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_QUIET)
+                    if(_rc EQUAL 0)
+                        message(STATUS "teardown: killed instance daemon ${_pid} (cwd=${_cwd})")
+                    else()
+                        message(WARNING "teardown: kill ${_pid} rc=${_rc} — continuing")
+                    endif()
+                endif()
+            endforeach()
+        endif()
+    else()
+        message(STATUS "teardown: pgrep not found — daemon arm skipped")
+    endif()
+
+    # ---- arm c: role family (CWD-SCOPED, B1 — audit BLOCKER form) ----
+    foreach(_base IN ITEMS agent streamer capturer recorder controller emergency audio)
+        if(_brand)
+            set(_role "${_brand}-${_base}")
+        else()
+            set(_role "host-${_base}")
+        endif()
+        execute_process(COMMAND "${PGREP_BIN}" -x "${_role}"
+            RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_QUIET)
+        if(_rc EQUAL 1)
+            continue()
+        elseif(_rc GREATER 1)
+            message(WARNING "teardown: pgrep ${_role} rc=${_rc} — role skipped")
+            continue()
+        endif()
+        string(STRIP "${_out}" _out)
+        string(REPLACE "\n" ";" _pids "${_out}")
+        foreach(_pid IN LISTS _pids)
+            if(NOT _pid)
+                continue()
+            endif()
+            execute_process(COMMAND "${READLINK_BIN}" /proc/${_pid}/cwd
+                OUTPUT_VARIABLE _cwd ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+            get_filename_component(_cwd "${_cwd}" ABSOLUTE)
+            _dg_cwd_inside("${_cwd}" "${_p_abs}" _inside)
+            if(_inside)
+                execute_process(COMMAND "${KILL_BIN}" ${_pid}
+                    RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_QUIET)
+                if(_rc EQUAL 0)
+                    message(STATUS "teardown: killed ${_role} pid ${_pid} (cwd=${_cwd})")
+                else()
+                    message(WARNING "teardown: kill ${_pid} rc=${_rc} — continuing")
+                endif()
+            endif()
+        endforeach()
+    endforeach()
+
+    # ---- death verification: one probe round after a settle beat ----
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 1)
+    set(_alive "")
+    foreach(_base IN ITEMS agent streamer capturer recorder controller emergency audio)
+        if(_brand)
+            set(_role "${_brand}-${_base}")
+        else()
+            set(_role "host-${_base}")
+        endif()
+        execute_process(COMMAND "${PGREP_BIN}" -x "${_role}"
+            RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_QUIET)
+        if(NOT _rc EQUAL 0)
+            continue()
+        endif()
+        string(STRIP "${_out}" _out)
+        string(REPLACE "\n" ";" _pids "${_out}")
+        foreach(_pid IN LISTS _pids)
+            if(NOT _pid)
+                continue()
+            endif()
+            execute_process(COMMAND "${READLINK_BIN}" /proc/${_pid}/cwd
+                OUTPUT_VARIABLE _cwd ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+            get_filename_component(_cwd "${_cwd}" ABSOLUTE)
+            _dg_cwd_inside("${_cwd}" "${_p_abs}" _inside)
+            if(_inside)
+                list(APPEND _alive "${_role}(${_pid})")
+            endif()
+        endforeach()
+    endforeach()
+    list(LENGTH _alive _n_alive)
+    if(_n_alive GREATER 0)
+        string(JOIN " " _alive_str ${_alive})
+        message(WARNING
+            "teardown: ${_n_alive} role process(es) still alive in prefix after stop "
+            "(${_alive_str}) — ETXTBSY retry may cover, or stop manually")
+    endif()
+
+    set(_teardown_live 0)
 endif()
 
 message(STATUS "deploy guard: ${_p_abs} clear (brand='${_brand}', profile=@GUARD_PROFILE@)")
