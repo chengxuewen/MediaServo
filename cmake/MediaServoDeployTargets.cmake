@@ -107,7 +107,10 @@ endif()
 # F1 (audit): capture the template dir AT INCLUDE TIME — CMAKE_CURRENT_LIST_DIR
 # inside a function is the CALLER's dir, so parent-invoked callsites (R5) would
 # FATAL every configure_file below. All template paths ride this variable.
-set(_MSDT_TEMPLATE_DIR "${CMAKE_CURRENT_LIST_DIR}")
+set(_MSDT_TEMPLATE_DIR "${CMAKE_CURRENT_LIST_DIR}" CACHE INTERNAL
+    "deploy template dir (F1: captured at include time; CACHE INTERNAL = visible
+     at ANY callsite scope — a plain set() is function-dynamic-scoped and the
+     parent-brand callsites resolve it to empty)")
 
 set(MEDIASERVO_DEPLOY_STRIP "" CACHE STRING
     "bindings deploy --strip flavor passthrough (empty = none; bindings face has no strip mechanism today — declared K1b finding, not invented)")
@@ -150,119 +153,6 @@ endfunction()
 # GATE is NOT part of the public form — module callsites decide registration by
 # calling this function only when their lane flag is ON (audit: the gate would
 # otherwise make parent callsites register nothing under the default preset).
-function(_mediaservo_add_deploy_target)
-    cmake_parse_arguments(MDT "" "TREE;PREFIX;BRAND;FOLDER;SERVER_OUT_DIR;STAGING;INIT" "" ${ARGN})
-    # cmake_parse_arguments UNDEFINES a keyword given an empty-string value
-    # (BRAND "" = the upstream-name form, a legal input) — so DEFINED cannot
-    # distinguish "not passed" from "passed empty". Require TREE + PREFIX only;
-    # BRAND defaults to "" (upstream names) when absent.
-    if(NOT MDT_TREE OR NOT DEFINED MDT_PREFIX)
-        message(FATAL_ERROR "_mediaservo_add_deploy_target: TREE and PREFIX are required")
-    endif()
-    if(NOT DEFINED MDT_BRAND)
-        set(MDT_BRAND "")
-    endif()
-    set(_t "${MDT_TREE}")
-    set(_pfx "${MDT_PREFIX}")
-    set(_brand "${MDT_BRAND}")
-    if(_brand STREQUAL "mediaservo")
-        set(_brand "")
-    endif()
-    set(_bdir "${CMAKE_BINARY_DIR}/../deploy-${_t}")
-    set(_profile "${MEDIASERVO_DEPLOY_PROFILE}")
-    if(_profile STREQUAL "Release")
-        set(_cfg Release)
-    else()
-        set(_cfg Debug)
-    endif()
-    set(_extra_defs "")
-    set(_extra_commands "")
-    if(NOT _t STREQUAL "bindings")
-        _mediaservo_deploy_guard_script(
-            "${CMAKE_BINARY_DIR}/deploy-${_t}-guard.cmake" "${_pfx}" "${_brand}")
-        set(_guard_args
-            COMMAND ${CMAKE_COMMAND}
-                -DMEDIASERVO_DEPLOY_GUARD=1
-                -DMEDIASERVO_DEPLOY_GUARD_PREFIX=${_pfx}
-                -DMEDIASERVO_DEPLOY_GUARD_BRAND=${_brand}
-                -DMEDIASERVO_DEPLOY_GUARD_MODE=${MEDIASERVO_DEPLOY_GUARD_MODE}
-                -P ${CMAKE_BINARY_DIR}/deploy-${_t}-guard.cmake)
-    else()
-        set(_guard_args "")
-    endif()
-    if(_t STREQUAL "host")
-        if(_brand)
-            set(HOST_BIN_NAME "${_brand}-host")
-        else()
-            set(HOST_BIN_NAME "mediaservo-host")
-        endif()
-        set(RUST_BRAND "${_brand}")
-        configure_file("${_MSDT_TEMPLATE_DIR}/pack-legs/host-legs.cmake.in"
-                       "${CMAKE_BINARY_DIR}/deploy-init-host.cmake" @ONLY)
-        file(TO_CMAKE_PATH "${_pfx}" _pfx_cm)
-        file(READ "${CMAKE_BINARY_DIR}/deploy-init-host.cmake" _init)
-        string(PREPEND _init "set(CMAKE_INSTALL_PREFIX \"${_pfx_cm}\")\n")
-        file(WRITE "${CMAKE_BINARY_DIR}/deploy-init-host.cmake" "${_init}")
-        set(_init_args
-            COMMAND ${CMAKE_COMMAND}
-                -DRUN_ROOT=${_pfx}
-                -DHOST_BIN_NAME=${HOST_BIN_NAME}
-                -DRUST_BRAND=${_brand}
-                -P ${CMAKE_BINARY_DIR}/deploy-init-host.cmake)
-    elseif(_t STREQUAL "server")
-        if(MDT_SERVER_OUT_DIR)
-            set(_srv_out "${MDT_SERVER_OUT_DIR}")
-        else()
-            set(_srv_out "${_pfx}")   # audit F5: derived from the callsite prefix
-        endif()
-        if(_brand)
-            set(SRV_NAME "${_brand}-server")
-        else()
-            set(SRV_NAME "mediaservo-server")
-        endif()
-        set(RUST_BRAND "${_brand}")
-        configure_file("${_MSDT_TEMPLATE_DIR}/pack-legs/server-legs.cmake.in"
-                       "${CMAKE_BINARY_DIR}/deploy-init-server-body.cmake" @ONLY)
-        file(WRITE "${CMAKE_BINARY_DIR}/deploy-init-server.cmake"
-             "set(CMAKE_INSTALL_PREFIX \"${_pfx}\")
-include(\"${CMAKE_BINARY_DIR}/deploy-init-server-body.cmake\")
-")
-        set(_extra_defs
-            -DMEDIASERVO_SERVER_OUT_DIR=${_srv_out})
-        if(MDT_STAGING)
-            set(_extra_defs ${_extra_defs} -DMEDIASERVO_APP_STAGING=${MDT_STAGING})
-        endif()
-        set(_init_args
-            COMMAND ${CMAKE_COMMAND}
-                -P ${CMAKE_BINARY_DIR}/deploy-init-server.cmake)
-    else()
-        set(_init_args "")
-    endif()
-    if(MDT_INIT)
-        # caller-provided init leg (unused today; parent faces may pin one)
-        set(_init_args ${_init_args} COMMAND ${CMAKE_COMMAND} -P "${MDT_INIT}")
-    endif()
-    add_custom_target(mediaservo-deploy-${_t}
-        COMMAND ${CMAKE_COMMAND} -E echo
-            "deploy-${_t}: configure dedicated binaryDir ${_bdir} (profile ${_profile})"
-        COMMAND ${CMAKE_COMMAND} -S ${MEDIASERVO_REPO_ROOT} -B ${_bdir}
-            -DMEDIASERVO_APP_TREE=${_t}
-            ${_extra_defs}
-            -DMEDIASERVO_BUILD_CRATES_LANES=ON
-            -DMEDIASERVO_DEPLOY_PROFILE=${_profile}
-            -DMEDIASERVO_BRAND=${_brand}
-            -DMEDIASERVO_OXMGR_BIN=${MEDIASERVO_OXMGR_BIN}
-            -DCMAKE_BUILD_TYPE=${_cfg}
-        COMMAND ${CMAKE_COMMAND} --build ${_bdir}
-        ${_guard_args}
-        COMMAND ${CMAKE_COMMAND} --install ${_bdir} --prefix ${_pfx}
-        ${_init_args}
-        COMMENT "mediaservo deploy ${_t} -> ${_pfx} (profile ${_profile}, brand '${_brand}')"
-        VERBATIM)
-    if(MDT_FOLDER)
-        set_target_properties(mediaservo-deploy-${_t} PROPERTIES FOLDER "${MDT_FOLDER}")
-    endif()
-endfunction()
 
 # bindings: AppTree has no bindings tree — the bindings face IS an install face
 # (MediaServoBindings rows in the bindings-lane tree). Dedicated binaryDir with
@@ -352,11 +242,6 @@ if(NOT MEDIASERVO_SERVER_OUT_DIR)
         "server delivery root for the server target" FORCE)
 endif()
 
-# F1 (audit): capture the template dir AT INCLUDE TIME — CMAKE_CURRENT_LIST_DIR
-# inside a function is the CALLER's dir, so parent-invoked callsites (R5) would
-# FATAL every configure_file below. All template paths ride this variable.
-set(_MSDT_TEMPLATE_DIR "${CMAKE_CURRENT_LIST_DIR}")
-
 set(MEDIASERVO_DEPLOY_STRIP "" CACHE STRING
     "bindings deploy --strip flavor passthrough (empty = none; bindings face has no strip mechanism today — declared K1b finding, not invented)")
 
@@ -399,7 +284,7 @@ endfunction()
 # calling this function only when their lane flag is ON (audit: the gate would
 # otherwise make parent callsites register nothing under the default preset).
 function(_mediaservo_add_deploy_target)
-    cmake_parse_arguments(MDT "" "TREE;PREFIX;BRAND;FOLDER;SERVER_OUT_DIR;STAGING;INIT" "" ${ARGN})
+    cmake_parse_arguments(MDT "" "TREE;NAME;PREFIX;BRAND;FOLDER;SERVER_OUT_DIR;STAGING;INIT" "" ${ARGN})
     # cmake_parse_arguments UNDEFINES a keyword given an empty-string value
     # (BRAND "" = the upstream-name form, a legal input) — so DEFINED cannot
     # distinguish "not passed" from "passed empty". Require TREE + PREFIX only;
@@ -411,6 +296,13 @@ function(_mediaservo_add_deploy_target)
         set(MDT_BRAND "")
     endif()
     set(_t "${MDT_TREE}")
+    # target name: mediaservo-deploy-<tree> by default; the parent brand
+    # buttons pass NAME msrtc-deploy-<tree> (CMP0002 — the submodule
+    # registration already owns the mediaservo-* names)
+    set(_name "mediaservo-deploy-${_t}")
+    if(MDT_NAME)
+        set(_name "${MDT_NAME}")
+    endif()
     set(_pfx "${MDT_PREFIX}")
     set(_brand "${MDT_BRAND}")
     if(_brand STREQUAL "mediaservo")
@@ -427,14 +319,14 @@ function(_mediaservo_add_deploy_target)
     set(_extra_commands "")
     if(NOT _t STREQUAL "bindings")
         _mediaservo_deploy_guard_script(
-            "${CMAKE_BINARY_DIR}/deploy-${_t}-guard.cmake" "${_pfx}" "${_brand}")
+            "${CMAKE_BINARY_DIR}/deploy-${_name}-guard.cmake" "${_pfx}" "${_brand}")
         set(_guard_args
             COMMAND ${CMAKE_COMMAND}
                 -DMEDIASERVO_DEPLOY_GUARD=1
                 -DMEDIASERVO_DEPLOY_GUARD_PREFIX=${_pfx}
                 -DMEDIASERVO_DEPLOY_GUARD_BRAND=${_brand}
                 -DMEDIASERVO_DEPLOY_GUARD_MODE=${MEDIASERVO_DEPLOY_GUARD_MODE}
-                -P ${CMAKE_BINARY_DIR}/deploy-${_t}-guard.cmake)
+                -P ${CMAKE_BINARY_DIR}/deploy-${_name}-guard.cmake)
     else()
         set(_guard_args "")
     endif()
@@ -446,17 +338,17 @@ function(_mediaservo_add_deploy_target)
         endif()
         set(RUST_BRAND "${_brand}")
         configure_file("${_MSDT_TEMPLATE_DIR}/pack-legs/host-legs.cmake.in"
-                       "${CMAKE_BINARY_DIR}/deploy-init-host.cmake" @ONLY)
+                       "${CMAKE_BINARY_DIR}/deploy-${_name}-init.cmake" @ONLY)
         file(TO_CMAKE_PATH "${_pfx}" _pfx_cm)
-        file(READ "${CMAKE_BINARY_DIR}/deploy-init-host.cmake" _init)
+        file(READ "${CMAKE_BINARY_DIR}/deploy-${_name}-init.cmake" _init)
         string(PREPEND _init "set(CMAKE_INSTALL_PREFIX \"${_pfx_cm}\")\n")
-        file(WRITE "${CMAKE_BINARY_DIR}/deploy-init-host.cmake" "${_init}")
+        file(WRITE "${CMAKE_BINARY_DIR}/deploy-${_name}-init.cmake" "${_init}")
         set(_init_args
             COMMAND ${CMAKE_COMMAND}
                 -DRUN_ROOT=${_pfx}
                 -DHOST_BIN_NAME=${HOST_BIN_NAME}
                 -DRUST_BRAND=${_brand}
-                -P ${CMAKE_BINARY_DIR}/deploy-init-host.cmake)
+                -P ${CMAKE_BINARY_DIR}/deploy-${_name}-init.cmake)
     elseif(_t STREQUAL "server")
         if(MDT_SERVER_OUT_DIR)
             set(_srv_out "${MDT_SERVER_OUT_DIR}")
@@ -470,10 +362,10 @@ function(_mediaservo_add_deploy_target)
         endif()
         set(RUST_BRAND "${_brand}")
         configure_file("${_MSDT_TEMPLATE_DIR}/pack-legs/server-legs.cmake.in"
-                       "${CMAKE_BINARY_DIR}/deploy-init-server-body.cmake" @ONLY)
-        file(WRITE "${CMAKE_BINARY_DIR}/deploy-init-server.cmake"
+                       "${CMAKE_BINARY_DIR}/deploy-${_name}-init-server-body.cmake" @ONLY)
+        file(WRITE "${CMAKE_BINARY_DIR}/deploy-${_name}-init.cmake"
              "set(CMAKE_INSTALL_PREFIX \"${_pfx}\")
-include(\"${CMAKE_BINARY_DIR}/deploy-init-server-body.cmake\")
+include(\"${CMAKE_BINARY_DIR}/deploy-${_name}-init-server-body.cmake\")
 ")
         set(_extra_defs
             -DMEDIASERVO_SERVER_OUT_DIR=${_srv_out})
@@ -482,7 +374,7 @@ include(\"${CMAKE_BINARY_DIR}/deploy-init-server-body.cmake\")
         endif()
         set(_init_args
             COMMAND ${CMAKE_COMMAND}
-                -P ${CMAKE_BINARY_DIR}/deploy-init-server.cmake)
+                -P ${CMAKE_BINARY_DIR}/deploy-${_name}-init.cmake)
     else()
         set(_init_args "")
     endif()
@@ -490,7 +382,7 @@ include(\"${CMAKE_BINARY_DIR}/deploy-init-server-body.cmake\")
         # caller-provided init leg (unused today; parent faces may pin one)
         set(_init_args ${_init_args} COMMAND ${CMAKE_COMMAND} -P "${MDT_INIT}")
     endif()
-    add_custom_target(mediaservo-deploy-${_t}
+    add_custom_target(${_name}
         COMMAND ${CMAKE_COMMAND} -E echo
             "deploy-${_t}: configure dedicated binaryDir ${_bdir} (profile ${_profile})"
         COMMAND ${CMAKE_COMMAND} -S ${MEDIASERVO_REPO_ROOT} -B ${_bdir}
@@ -508,7 +400,7 @@ include(\"${CMAKE_BINARY_DIR}/deploy-init-server-body.cmake\")
         COMMENT "mediaservo deploy ${_t} -> ${_pfx} (profile ${_profile}, brand '${_brand}')"
         VERBATIM)
     if(MDT_FOLDER)
-        set_target_properties(mediaservo-deploy-${_t} PROPERTIES FOLDER "${MDT_FOLDER}")
+        set_target_properties(${_name} PROPERTIES FOLDER "${MDT_FOLDER}")
     endif()
 endfunction()
 
