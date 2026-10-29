@@ -1425,25 +1425,11 @@ case "${1:-}" in
             # OXMGR_HOME-scoped — a brand glob never stops another instance.
             if [ -f "$prefix/run/oxfile.toml" ] && [ -f "$bin_dir/$host_cli" ]; then
                 echo "Running host instance detected — stopping the process family first (reinstall does not overwrite etc/ credentials)"
-                oxmgr_home=$(realpath -m -- "$prefix/run/oxmgr" 2>/dev/null || echo "$prefix/run/oxmgr")
-                want_home="Environment=OXMGR_HOME=$oxmgr_home"
-                if command -v systemctl >/dev/null 2>&1 && [ -d "$HOME/.config/systemd/user" ]; then
-                    for u in "$HOME/.config/systemd/user"/oxmgr-${brand}-*.service; do
-                        [ -e "$u" ] || continue
-                        un=$(basename "$u")
-                        if ! grep -qF -- "$want_home" "$u" 2>/dev/null; then
-                            echo "  note: leaving unit $un untouched (belongs to another instance home)"
-                            continue
-                        fi
-                        systemctl --user stop "$un" || true
-                        systemctl --user reset-failed "$un" || true
-                    done
-                fi
-                _msvc_kill_using "$bin_dir/oxmgr"
-                for base in agent streamer capturer recorder controller emergency audio; do
-                    role=${brand:+${brand}-${base}}; role=${role:-host-${base}}
-                    pkill -x "$role" || true
-                done
+                # W5-H (audit B1/F2): routed through the CWD-scoped helper — the
+                # inline copy here was the UNSCOPED twin (live-fired 10-27 on a
+                # /tmp prefix); _ms_deploy_stop_instance gates the family kill on
+                # /proc/<pid>/cwd resolving inside $prefix.
+                _ms_deploy_stop_instance "$prefix" "$brand"
                 sleep 1
             fi
             _msvc_app_install host "$brand" "$build_type" "$prefix" ""
