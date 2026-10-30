@@ -222,7 +222,7 @@ def build_artifacts(source, target_root, cfg):
         if not host.get("enabled", True):
             continue
         surfaces = host.get("surfaces", [])
-        path = os.path.join(target_root, host["file"])
+        path = os.path.join(target_root, host["file"]) if host.get("file") else None
         if host.get("kind") == "mcp" and "mcp" in surfaces:
             arts.append(("json", path, {"mcpServers": host_mcp(servers, host["mcp_launcher"])}))
         elif host.get("kind") == "opencode":
@@ -237,6 +237,17 @@ def build_artifacts(source, target_root, cfg):
                     current.pop(name, None)
                 disk["mcp"] = current
             arts.append(("json", path, disk))
+        elif host.get("kind") == "qoder":
+            if "rules" in surfaces:
+                source_dir = os.path.join(target_root, host["rules_source"])
+                target_dir = os.path.join(target_root, host["rules_target"])
+                for name in sorted(os.listdir(source_dir)):
+                    if not name.endswith(".md"):
+                        continue
+                    body = "<!-- generated from %s/%s; edit the overlay source -->\n\n" % (
+                        host["rules_source"], name)
+                    body += common.read_text(os.path.join(source_dir, name))
+                    arts.append(("text", os.path.join(target_dir, name), body))
     if cfg.get("hub"):
         arts.append(("text", os.path.join(target_root, "AGENTS.md"), hub_text(source)))
     if cfg.get("repo_artifacts"):

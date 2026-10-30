@@ -1365,3 +1365,8 @@ install                        → 改名提示 + exit 2（退役）
 
 - `scripts/agents/shell_entry.sh` 承接 agents/ci/mcp/verify/doctor/clean；父仓经 SHELL_ROOT/SHELL_ENTRY/SHELL_SUBMODULE env 调用，零父仓字面量。
 - 父仓 `msrtc.sh` 303 行（<320）；E1-E7/ci/verify/doctor/agents/mcp 绿；`ci --all-gates` 改为实际可跑的 `pixi bash scripts/all-gates.sh`。
+
+### 2026-10-30: C4 qoder host
+
+- generator `kind:qoder` 生成 `.qoder/rules/shell/` 三条 overlay（entry/docs/release），不复制 82 条子仓规则。
+- Qoder 原生读 AGENTS.md + `.agents/skills`（33）；qoder target on；`agents check` 绿。
