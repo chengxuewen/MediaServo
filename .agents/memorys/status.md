@@ -1330,3 +1330,8 @@ install                        → 改名提示 + exit 2（退役）
 - pixi `[feature.book]`：mdbook 0.5.4 / markdownlint-cli 0.49.1，接入 default/test/ci；tasks `book-build` / `book-check` / `book-check-structure`。
 - `all-gates` 新增 check-only `book structure`（无 SUMMARY 时 SKIP）；CONSTRAINTS 重生成。
 - 验证：book-build 25 章 + 49 附录；book-check 绿；缺章 / CJK 两向变红；输出 `build/` 已忽略。
+
+### 2026-10-30: 临时/缓存/日志卫生
+
+- 删除根级 `.k3compose.log` / `.k3v5.log`；`.gitignore` 增 transient 块（根级 log/jsonl、tmp/bak/orig/rej/swp/pid/sock、pycache、coverage、env、IDE 本地文件）。
+- `check_guards` 增 C10：tracked-ignored 非空即红；证据目录日志与 goldens JSONL 明确不忽略。

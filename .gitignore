@@ -123,3 +123,35 @@ data/
 imgui.ini
 *.imgui.ini
 imgui_viewer.ini
+
+# --- Transient artifacts (2026-10-30 audit) ---
+# Root-level logs only: tests/goldens/**/*.jsonl and docs evidence stay tracked.
+/*.log
+/*.jsonl
+*.tmp
+*.bak
+*.orig
+*.rej
+*.swp
+*.swo
+*.pid
+*.sock
+*.stackdump
+core.[0-9]*
+*.dSYM/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+coverage.xml
+tarpaulin-report.html
+*.profraw
+.DS_Store
+.idea/
+CMakeUserPresets.json
+compile_commands.json
+.env
+.env.*
+!.env.example
+# Re-assert the tracked OMO config (the .omo/* rule above runs later than the first negation).
+!.omo/omo.jsonc

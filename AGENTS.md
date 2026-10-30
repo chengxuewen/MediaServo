@@ -198,7 +198,6 @@ _Project has entered the code implementation phase. Current state:_
 - C51: commit message shape — subject <=50 chars, one fact per body line (2026-10-19 user ruling; mirror of main-repo C55, with this repo's 200-char-subject history as the negative exhibit)
 
 ### status (last 6)
-- 2026-10-26 -- D49 consumer + client-bin dead lane removed (sub this commit)
 - 2026-10-28: K3 closed — container face 13/13 ALL-GATES PASS
 - 2026-10-30: P1-8/P1-9/P1-10 provenance + guards + self-tests
 <!-- END:agents-memory -->
