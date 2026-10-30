@@ -211,4 +211,5 @@ _Project has entered the code implementation phase. Current state:_
 - 2026-10-30: B2a skills
 - 2026-10-30: B2b lsp
 - 2026-10-30: C1 doc gates
+- 2026-10-30: C3 shell entry
 <!-- END:agents-memory -->

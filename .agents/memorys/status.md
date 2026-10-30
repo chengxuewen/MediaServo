@@ -1360,3 +1360,8 @@ install                        → 改名提示 + exit 2（退役）
 
 - 英文门文件级白名单（25-abi 带理由）；`mediaservo.sh` 1 行 CJK 修掉；717 文件 PASS。
 - 相对链接门 77 文件/0 死链；承诺门 3 文件/0 finding；三门自证 + 接入 all-gates（CONSTRAINTS 6/8/10）。
+
+### 2026-10-30: C3 shell entry
+
+- `scripts/agents/shell_entry.sh` 承接 agents/ci/mcp/verify/doctor/clean；父仓经 SHELL_ROOT/SHELL_ENTRY/SHELL_SUBMODULE env 调用，零父仓字面量。
+- 父仓 `msrtc.sh` 303 行（<320）；E1-E7/ci/verify/doctor/agents/mcp 绿；`ci --all-gates` 改为实际可跑的 `pixi bash scripts/all-gates.sh`。
