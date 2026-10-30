@@ -198,7 +198,7 @@ def hub_text(source):
         "- `./msrtc.sh agents check` -- generated layers vs source\n"
         "- `source bootstrap.sh` -- first-time setup\n\n"
         "## Skills\n"
-        "- %d skill(s) come from the submodule; `.agents/skills` is a generated link (P2a).\n" % count
+        "- %d skill(s) come from the submodule; `.agents/skills` is a symlink to the submodule.\n" % count
     )
 
 
