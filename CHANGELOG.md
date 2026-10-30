@@ -3,6 +3,23 @@
 This file records behavior changes aimed at consumers (deployment, ops, cockpit/vehicle-side
 teams); for development process details, consult git log directly. Newest version first.
 
+## [Unreleased]
+
+### Added
+- [deploy] deploy-guard two modes: refuse (default, unchanged) and teardown
+  (host face stop-first: unit -> daemon -> family, CWD-scoped to the target
+  prefix); host IDE target runs teardown; single-writer flock per deploy
+  binaryDir; guard lock anchored to the script dir
+- [deploy] parent-root msrtc-deploy-{server,host,bindings} buttons (msrtc
+  brand + parent out/ pinned at the callsite); submodule defaults now land in
+  the submodule's own out/ (W1)
+### Fixed
+- [deploy] deploy host stop arm routed through the CWD-scoped helper (the
+  inline unscoped pkill could kill same-named processes of another prefix)
+- [deploy] deploy target lock anchored to the script dir; missing flock is
+  fatal (fail-closed); HOST_BIN_NAME empty-brand form corrected to the
+  upstream CLI name
+
 ## v0.1.3 (2026-10-23)
 
 ### Removed

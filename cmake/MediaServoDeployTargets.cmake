@@ -29,6 +29,22 @@
 #                                         refuse (ops-F1 stays blocked)
 #
 #
+# DESTINATION & BRAND RULES (R2, user-facing — mirrored in the deployment doc):
+#   mediaservo-deploy-* (submodule view)  -> <submodule>/out/<t>, upstream names
+#   msrtc-deploy-* (parent view, R5)      -> <parent>/out/<t>, msrtc names
+#   msrtc.sh / mediaservo.sh deploy       -> shell env injection decides
+#   judges/tests                          -> explicit /tmp prefixes ONLY
+# R3: libraries NEVER carry the brand (libmediaservo_*.so stands; brand =
+# deployment face = binary/unit names only — D269/C47).
+# R4 brand stickiness: a manual -DMEDIASERVO_BRAND in a deploy binaryDir pins
+# over later env injection (cache persists across re-configures); the guards
+# fail closed on brand conflicts; remedy = delete build/deploy-*.
+# Parent-context semantics (C1): mediaservo-* buttons keep upstream semantics
+# in EVERY view — the name is the promise. msrtc-deploy-bindings is a symmetry
+# button (prefix-only, no brand). "bindings" and "bindings/c|node" render as
+# SIBLING tree nodes (shared prefix, not parent/child). The web lane has no
+# FOLDER today (root-level under the parent's mediaservo/ namespace).
+#
 # Fail-closed guard — THREE conditions, FATAL before install (comment anchor:
 # bash twin mediaservo.sh:1317-1324; ops-F1 brandless-reclaim):
 #   (1) live instance: <p>/run/oxfile.toml AND <p>/bin/<branded-cli>
