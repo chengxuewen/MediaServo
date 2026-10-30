@@ -1,6 +1,7 @@
 {
   "source": ".agents",
   "repo_artifacts": true,
+  "generated_tracked": [".mcp.json", "SKILL.md", "CONSTRAINTS.md", "AGENTS.md", ".opencode/opencode.json"],
   "hosts": [
     {
       "label": "opencode",

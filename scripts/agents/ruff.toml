@@ -1,0 +1,6 @@
+# Agent toolchain lint scope (H5 subtree).
+# Correctness rules only: E4 (imports), E7 (statements), E9 (runtime), F (pyflakes).
+# Opinionated rewrites (percent-format, regex aliases, shebang mode) stay off so
+# the gate reports defects, not style preferences.
+[lint]
+select = ["E4", "E7", "E9", "F"]

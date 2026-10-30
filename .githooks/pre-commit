@@ -1,0 +1,30 @@
+#!/bin/sh
+# pre-commit — keep the generated host layers in sync with the single source.
+#
+# Install (once per clone):  pixi run hooks-install
+# This copies the file into .git/hooks; it deliberately does NOT use
+# core.hooksPath (the parent repo's Gerrit commit-msg flow depends on it, C41).
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+PIXI="$(command -v pixi 2>/dev/null || true)"
+if [ -z "$PIXI" ] && [ -x "$HOME/.pixi/bin/pixi" ]; then
+    PIXI="$HOME/.pixi/bin/pixi"
+fi
+if [ -z "$PIXI" ]; then
+    echo "pre-commit: pixi not found; skipping agent sync (commit proceeds un-synced)" >&2
+    exit 0
+fi
+
+"$PIXI" run agents sync
+"$PIXI" run agents check
+
+# Stage every tracked generated artefact from the ONE list in targets.json
+# (a hand-written add-list drifted in the donor repo; keep it data-driven).
+python3 - <<'PY' | while IFS= read -r path; do
+import json
+print("\n".join(json.load(open(".agents/targets.json"))["generated_tracked"]))
+PY
+    [ -n "$path" ] || continue
+    git add -- "$path" 2>/dev/null || true
+done

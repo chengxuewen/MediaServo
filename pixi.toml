@@ -21,6 +21,10 @@ gst-plugins-good = ">=1.24.0,<2"
 gst-plugins-bad = ">=1.24.0,<2"
 pkg-config = ">=0.29.2,<1"
 zlib = ">=1.2,<2"
+# Agent toolchain runtime (D289/R4): node for the MCP launcher and LSP wrappers
+# (pnpm also pulls it; this makes the contract explicit), ruff for scripts/agents.
+nodejs = ">=24,<25"
+ruff = ">=0.8,<1"
 
 # Development tools (cmake for webrtc-sys, lld for fast linking, extra GStreamer codecs)
 [feature.dev.dependencies]
@@ -121,3 +125,9 @@ default = { features = ["dev", "test"] }
 [tasks]
 init = "scripts/pixi-init.sh"
 shell = "scripts/pixi-shell.sh"
+# Agent single-source layer (plan agent-infra-thin-shell, H5 scope)
+agents = "python3 scripts/agents/cli.py"
+gate-agents = "python3 scripts/agents/cli.py check"
+gate-mcp = "python3 scripts/agents/gate_mcp.py"
+agent-tools = "bash scripts/agents/tools-check.sh"
+hooks-install = "bash scripts/agents/install-hooks.sh"

@@ -21,7 +21,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 REGISTRY = os.path.join(HERE, "mcp-servers.json")
 LAUNCHER = os.path.join(HERE, "mcp-launch.sh")
 TIMEOUT = int(os.environ.get("MCP_PROBE_TIMEOUT", "300"))
-TOKEN_HINT = re.compile(r"token|unauthorized|401|credential", re.I)
+TOKEN_HINT = re.compile(r"token|unauthorized|401|credential", re.IGNORECASE)
 
 
 def main() -> int:
@@ -40,6 +40,7 @@ def main() -> int:
             proc = subprocess.run(
                 ["bash", LAUNCHER, name],
                 cwd=ROOT,
+                check=False,
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,

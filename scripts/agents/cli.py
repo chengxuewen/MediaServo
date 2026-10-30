@@ -31,7 +31,7 @@ MEM_END = "<!-- END:agents-memory -->"
 GATES_BEGIN = "<!-- BEGIN:ci-gates -->"
 GATES_END = "<!-- END:ci-gates -->"
 
-GATE_RE = re.compile(r'^[ \t]*gate "([^"]+)"', re.M)
+GATE_RE = re.compile(r'^[ \t]*gate "([^"]+)"', re.MULTILINE)
 WINDOW = {"decisions": 25, "pitfalls": 15, "conventions": 10, "status": 6}
 
 
@@ -273,6 +273,8 @@ def run(command, source, target_root, targets_path):
             if not same:
                 print(" [ FIX ] %s (drift)" % path)
                 worst = max(worst, common.EXIT_FINDINGS)
+            continue
+        if os.path.isfile(path) and common.read_text(path) == expected:
             continue
         common.write_text(path, expected)
         print(" [ WRITE] %s" % path)
