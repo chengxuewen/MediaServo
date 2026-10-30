@@ -1345,3 +1345,8 @@ install                        → 改名提示 + exit 2（退役）
 
 - serena 2.1.0 env（Python 3.13 + rust-analyzer）；wrapper 解析 `MEDIASERVO_AGENT_ROOT`；codegraph 1.6.0 / playwright 0.0.82。
 - `mcp_cli.py` status/setup/sync/index；status 只读；3 服 gate 绿；进程组清理无孤儿。
+
+### 2026-10-30: B2a skills
+
+- +8 技能（32 total）：debugging、TDD、repo-triage、deprecation、docs/ADR、observability、code-review、shipping。
+- 触发矩阵 `.agents/skills/TRIGGERS.md`；shipping 拆为子仓技能 + 父 overlay `release.md`；skill-lint/no-parent 绿；新技能 English-only。
