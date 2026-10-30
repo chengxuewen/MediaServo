@@ -1,0 +1,9 @@
+# smoke -- light impairment: prove the link is alive and recovers.
+# Values follow the foxglove-sdk CI netem default tuple (delay 80ms/jitter 20ms/loss 2%).
+# Note: rtt_ms is the input value (halved per leg; lo crosses twice -> observed RTT ~= rtt_ms).
+rtt_ms: 80
+jitter_ms: 20
+loss: "2%"
+scope:
+  media: true
+  signaling: false

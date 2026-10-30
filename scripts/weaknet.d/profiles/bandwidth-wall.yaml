@@ -1,0 +1,7 @@
+# bandwidth-wall -- pure bandwidth wall: zero delay/loss, only the htb rate ceiling.
+# 0.2 Mbit = the foxglove "almost certainly broken" anchor (D274 A/B tiers discriminate under it).
+rate_mbps: 0.2
+loss: "0%"
+scope:
+  media: true
+  signaling: false

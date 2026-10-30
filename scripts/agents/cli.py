@@ -90,6 +90,10 @@ def skill_rows(source):
         if not os.path.isfile(skill):
             continue
         desc = common.skill_description(skill)
+        # Generated hubs are English-only (C49): drop CJK trigger phrases from the
+        # registry view; the skill file itself keeps them with c49:trigger.
+        desc = re.sub(r"[\u4e00-\u9fff]+", "", desc)
+        desc = re.sub(r"\s+", " ", desc).strip(" -/")
         desc = re.split(r"(?<=\.)\s", desc)[0].strip()[:140] or "(no description)"
         rows.append((name, desc))
     return rows
@@ -120,6 +124,10 @@ def memory_block(source):
                 titles.append(line.lstrip("#").strip())
         lines.append("### %s (last %d)" % (name, limit))
         for title in titles[-limit:]:
+            # memorys are exempt from C49, but this hub is not: keep the digest
+            # English-only so AGENTS.md stays inside the English gate.
+            if re.search(r"[\u4e00-\u9fff]", title):
+                continue
             lines.append("- " + title)
         lines.append("")
     return "\n".join(lines).rstrip()

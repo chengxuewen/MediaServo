@@ -1,0 +1,15 @@
+# remote-burst -- teleoperation discrimination tier: bursty loss (real wireless shape),
+# paired with the D274 three-tier comparison.
+# Parameter semantics: loss gemodel p r (1-h) (1-k); p=1-H enters bad state, k=1-K stays.
+# Numbers: mediasoup-client #1105 field report (8% mean, ~4-packet bursts) + 160 ms RTT.
+rtt_ms: 160
+jitter_ms: 30
+loss: "8%"
+gemodel:
+  r: "25%"
+  h: "0.2"
+  k: "0.05"
+rate_mbps: 4
+scope:
+  media: true
+  signaling: false

@@ -1309,3 +1309,10 @@ install                        → 改名提示 + exit 2（退役）
 - Guards: numbering（hub high-water）/ skill-lint（22 技能）/ rule-ref（D296·PIT-237·C51，0 缺失）/ no-parent（memorys 视为历史豁免）/ batch-close memory（手动 task）。
 - `all-gates` 新增 `agent single source` + `agent toolchain`；CONSTRAINTS 重生成。
 - 自证：cli check/sync/drift 循环、路径无关性、`verify-cache --self-test`（父仓）。
+
+### 2026-10-30: P2b weaknet / adjudication 下沉
+
+- 两个技能移入子模块：`weaknet-testing` 英文化；`adjudication-walkthrough` 的 2 行功能中文带 `c49:trigger`。
+- `scripts/weaknet.d/` 6 文件移入（profiles/scenarios/sampler）；sampler 的 Chromium 路径改为 env/Playwright 解析。
+- 生成器：hub 的记忆摘要与技能注册表过滤 CJK（C49），AGENTS.md / SKILL.md 的 CJK 归零。
+- 技能数 22→24。

@@ -1,0 +1,16 @@
+# example-cell-edge-40s -- stepped ramp example (mini form for the T7 acceptance;
+# the full 40s shape follows the QNS 100/150/200 idea).
+# at_s must strictly increase (emit validation); parameters hold until the next step;
+# baseline_s defaults to the step total + tail.
+scenario:
+  baseline_s: 10
+  steps:
+    - at_s: 0
+      set: {rtt_ms: 100}
+    - at_s: 6
+      set: {rtt_ms: 150, loss: "5%"}
+    - at_s: 12
+      set: {rtt_ms: 200, loss: "10%", rate_mbps: 2}
+    - at_s: 18
+      set: {rtt_ms: 0, jitter_ms: 0, loss: "0%"}   # recovery step (fixed-length replacement for repeat rounds)
+  clear: false

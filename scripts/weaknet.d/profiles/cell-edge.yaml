@@ -1,0 +1,10 @@
+# cell-edge -- weak cellular: high delay + high uniform loss + narrow bandwidth
+# (use scenarios/ for stepped ramps).
+# Tiering follows the QUIC interop QNS ladder (rtt 100/150/200); this is its heaviest static point.
+rtt_ms: 300
+jitter_ms: 80
+loss: "15%"
+rate_mbps: 1.5
+scope:
+  media: true
+  signaling: false

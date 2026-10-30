@@ -28,6 +28,7 @@ Skills are auto-activated by AI agents based on task context. No manual invocati
 
 | Skill | Purpose |
 |-------|---------|
+| `adjudication-walkthrough` | one-at-a-time adjudication protocol. |
 | `api-interface-design` | Contract-first design for MediaServo: Rust traits (Component/Plugin), WebSocket signaling protocol (SignalingMessage enum), and REST API bou |
 | `book-to-skill` | Converts books and documents (PDF, EPUB, DOCX, HTML, Markdown, plain text, RTF, MOBI/AZW with Calibre) into structured agent skills, extract |
 | `browser-testing` | Admin Dashboard testing via Playwright/DevTools MCP. |
@@ -40,8 +41,8 @@ Skills are auto-activated by AI agents based on task context. No manual invocati
 | `lesson-review` | Batch session review: systematically extract lessons learned and write them to project memory. |
 | `openspec-apply-change` | Implement tasks from an OpenSpec change. |
 | `openspec-archive-change` | Archive a completed change in the experimental workflow. |
-| `openspec-explore` | >- |
-| `openspec-propose` | >- |
+| `openspec-explore` | > |
+| `openspec-propose` | > |
 | `openspec-sync-specs` | Sync delta specs from a change to main specs. |
 | `performance-optimization` | MediaServo performance profiling and optimization. |
 | `review-hardcode` | Hardcoded secrets/ports/URLs scan. |
@@ -50,4 +51,5 @@ Skills are auto-activated by AI agents based on task context. No manual invocati
 | `source-driven-development` | Ground every external dependency decision in official docs. |
 | `test-harness` | MediaServo multi-language automated test harness. |
 | `think-before-act` | Meta-constraint: check before acting, list options for user approval, no brute-forcing. |
+| `weaknet-testing` | Weak-network reproduction and measurement discipline for MediaServo (tc netem + the mediaservo-weaknet agent, optional web panel). |
 <!-- END:skill-registry -->
