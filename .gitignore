@@ -78,6 +78,12 @@ node_modules
 .npm-cache
 .turbo
 
+# agent toolchain local echoes (pins live in scripts/agents/mcp-servers.json)
+scripts/agents/package.json
+scripts/agents/package-lock.json
+__pycache__/
+*.pyc
+
 # Don't ignore files
 # --------
 !.vscode/settings.json
