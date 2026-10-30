@@ -13,14 +13,14 @@ MediaServo/
 │   ├── agent-model-tiers.md  # Model tier system
 │   ├── oh-my-openagent.jsonc  # OMO Agent configuration
 │   ├── init-lsp-wrap.mjs      # LSP wrapper initialization
-│   ├── init-mcp-*.mjs         # MCP init scripts (codegraph/playwright/postgres/openspace)
 │   ├── package.json    # OpenCode plugin dependencies
 │   └── .gitignore
 ├── .agents/
 │   ├── rules/          # Coding rule files (12 languages + common + web)
 │   ├── skills/         # Skills (book-to-skill/doc-audit/lesson-review/openspec-*/review-hardcode/test-harness/think-before-act)
 │   └── memorys/        # Project memory files (decisions.md, status.md)
-├── crates/              # Rust workspace (7 member crates)
+├── scripts/agents/      # Agent toolchain (generator, MCP launcher, guards)
+├── crates/              # Rust workspace (11 member crates)
 │   ├── mediaservo-host/   # Host app (headless, capture+encode+push)
 │   ├── mediaservo-client/ # Remote app (pull+decode+control)
 │   ├── mediaservo-server/ # Server app (signaling+relay+monitoring)
@@ -198,7 +198,6 @@ _Project has entered the code implementation phase. Current state:_
 - C51: commit message shape — subject <=50 chars, one fact per body line (2026-10-19 user ruling; mirror of main-repo C55, with this repo's 200-char-subject history as the negative exhibit)
 
 ### status (last 6)
-- 2026-10-26: web npm handles drop the duplicated scope (D47 consumer bite, PolyOrch 0.7.2)
 - 2026-10-26 -- ide-bootstrap C'' delivered (sub 5d678d1 + PolyOrch 483cc51, D48)
 - 2026-10-26 -- D49 consumer + client-bin dead lane removed (sub this commit)
 - 2026-10-28: K3 closed — container face 13/13 ALL-GATES PASS

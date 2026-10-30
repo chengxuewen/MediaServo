@@ -8,7 +8,7 @@
 // stdout is redirected to stderr so the MCP JSON-RPC channel stays clean.
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -49,11 +49,14 @@ if (spec.kind !== 'npm') {
   process.exit(2)
 }
 
-const binPath = join(HERE, 'node_modules', '.bin', isWin ? `${spec.bin}.cmd` : spec.bin)
+// One prefix per server: a shared prefix makes npm prune the other server's
+// packages on every install (observed: installing playwright removed codegraph).
+const PREFIX = join(HERE, 'node_modules', '.mcp', name)
+const binPath = join(PREFIX, 'node_modules', '.bin', isWin ? `${spec.bin}.cmd` : spec.bin)
 
 function installedVersion() {
   const parts = spec.pkg.startsWith('@') ? spec.pkg.split('/') : [spec.pkg]
-  const manifest = join(HERE, 'node_modules', ...parts, 'package.json')
+  const manifest = join(PREFIX, 'node_modules', ...parts, 'package.json')
   if (!existsSync(manifest)) return null
   try {
     return JSON.parse(readFileSync(manifest, 'utf8')).version
@@ -66,18 +69,23 @@ const have = installedVersion()
 if (!existsSync(binPath) || have !== spec.version) {
   if (have && have !== spec.version) {
     console.error(`[mcp-serve] pin drift: ${spec.pkg} installed @${have}, pin wants @${spec.version}`)
-    console.error('[mcp-serve] run: ./msrtc.sh mcp setup   (or remove scripts/agents/node_modules)')
+    console.error(`[mcp-serve] run: ./msrtc.sh mcp setup (or remove ${PREFIX})`)
     process.exit(1)
   }
   // Missing binary = first-run path (clean clone / GUI first click). npm writes
   // its summary to stdout, which IS the MCP channel here, so capture and re-emit
   // on stderr.
-  console.error(`[mcp-serve] installing ${spec.pkg}@${spec.version} into scripts/agents/node_modules ...`)
+  console.error(`[mcp-serve] installing ${spec.pkg}@${spec.version} into ${PREFIX} ...`)
+  mkdirSync(PREFIX, { recursive: true })
+  // Keep npm's cache inside the workspace: GUI/sandbox hosts often have a
+  // read-only $HOME cache, and a local cache makes first-run installs reproducible.
+  const npmCache = join(HERE, 'node_modules', '.npm-cache')
+  mkdirSync(npmCache, { recursive: true })
   const npm = process.env.NPM_BIN || join(dirname(process.execPath), isWin ? 'npm.cmd' : 'npm')
   const res = spawnSync(
     npm,
-    ['install', '--no-save', '--no-package-lock', '--prefix', HERE, `${spec.pkg}@${spec.version}`],
-    { cwd: HERE, stdio: ['ignore', 'pipe', 'inherit'] },
+    ['install', '--no-save', '--no-package-lock', '--prefix', PREFIX, `${spec.pkg}@${spec.version}`],
+    { cwd: HERE, env: { ...process.env, npm_config_cache: npmCache }, stdio: ['ignore', 'pipe', 'inherit'] },
   )
   if (res.stdout && res.stdout.length) process.stderr.write(res.stdout)
   if (res.error) {

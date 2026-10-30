@@ -1316,3 +1316,9 @@ install                        → 改名提示 + exit 2（退役）
 - `scripts/weaknet.d/` 6 文件移入（profiles/scenarios/sampler）；sampler 的 Chromium 路径改为 env/Playwright 解析。
 - 生成器：hub 的记忆摘要与技能注册表过滤 CJK（C49），AGENTS.md / SKILL.md 的 CJK 归零。
 - 技能数 22→24。
+
+### 2026-10-30: P3-2/P3-5 MCP 安装隔离 + 索引范围
+
+- `mcp-serve` 改为每服独立前缀 `node_modules/.mcp/<name>`，npm cache 放工作区（只读 `$HOME` 的宿主也能首装）；修掉“装 playwright 会 prune codegraph”的互删。
+- 删除 4 个未引用 `init-mcp-*.mjs`（浮动安装清零；代码/配置命中 = 0）。
+- 新增 `codegraph.json` 排除 `target/ .pixi/ build/ out/`；二次 gate 0.94s 不再重装。
