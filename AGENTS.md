@@ -207,10 +207,10 @@ _Project has entered the code implementation phase. Current state:_
 - C51: commit message shape — subject <=50 chars, one fact per body line (2026-10-19 user ruling; mirror of main-repo C55, with this repo's 200-char-subject history as the negative exhibit)
 
 ### status (last 6)
-- 2026-10-30: B1 MCP closure
 - 2026-10-30: B2a skills
 - 2026-10-30: B2b lsp
 - 2026-10-30: C1 doc gates
 - 2026-10-30: C3 shell entry
 - 2026-10-30: C4 qoder host
+- 2026-10-30: CLI Batch 1
 <!-- END:agents-memory -->

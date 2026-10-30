@@ -13,8 +13,23 @@ MEDIASERVO_ROOT="${MEDIASERVO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/shell_entry.sh"
 export MEDIASERVO_AGENT_ROOT="${MEDIASERVO_AGENT_ROOT:-$SHELL_ROOT}"
 
+usage() {
+    cat <<'EOF'
+usage: shell_entry.sh <command> ...
+  agents sync|check|status
+  ci [--all-gates [--full]]
+  mcp status|setup|sync|index|pins
+  verify
+  doctor
+  clean [--dry-run]
+EOF
+}
+
 CMD="${1:-}"
-[ -n "$CMD" ] || { echo "usage: shell_entry.sh <agents|ci|mcp|verify|doctor|clean> ..." >&2; exit 2; }
+case "$CMD" in
+    "") usage >&2; exit 2 ;;
+    -h|--help) usage; exit 0 ;;
+esac
 shift
 
 case "$CMD" in
@@ -26,10 +41,21 @@ case "$CMD" in
         ;;
     ci)
         RUN_ALL=false
+        FULL=0
         case "${1:-}" in
-            --all-gates) RUN_ALL=true; shift ;;
+            -h|--help) usage; exit 0 ;;
             "") ;;
-            *) echo "[msrtc] ci: 未知参数 $1（仅支持 --all-gates）" >&2; exit 2 ;;
+            --all-gates)
+                RUN_ALL=true; shift
+                case "${1:-}" in
+                    "") ;;
+                    --full) FULL=1; shift ;;
+                    *) echo "[msrtc] ci: 未知参数 $1（--all-gates 后仅支持 --full）" >&2; exit 2 ;;
+                esac
+                [ "$#" -eq 0 ] || { echo "[msrtc] ci: 多余参数 $*" >&2; exit 2; }
+                ;;
+            --full) echo "[msrtc] ci: --full 需要与 --all-gates 一起使用" >&2; exit 2 ;;
+            *) echo "[msrtc] ci: 未知参数 $1（仅支持 --all-gates [--full]）" >&2; exit 2 ;;
         esac
         FAIL=0
         echo "[ci] 1/5 agent layers"
@@ -47,6 +73,10 @@ case "$CMD" in
             exit 1
         fi
         if $RUN_ALL; then
+            if [ "$FULL" -eq 1 ]; then
+                echo "[ci] delegated all-gates (full)"
+                exec "$SHELL_ENTRY" pixi bash scripts/all-gates.sh --full
+            fi
             echo "[ci] delegated all-gates"
             exec "$SHELL_ENTRY" pixi bash scripts/all-gates.sh
         fi
@@ -55,6 +85,7 @@ case "$CMD" in
         ;;
     mcp)
         case "${1:-status}" in
+            -h|--help) usage; exit 0 ;;
             status|setup|sync|index)
                 exec python3 "${MEDIASERVO_ROOT}/scripts/agents/mcp_cli.py" "$1" ;;
             pins) exec cat "${MEDIASERVO_ROOT}/scripts/agents/mcp-servers.json" ;;
@@ -62,6 +93,11 @@ case "$CMD" in
         esac
         ;;
     verify)
+        case "${1:-}" in
+            -h|--help) usage; exit 0 ;;
+            "") ;;
+            *) echo "[msrtc] verify: 未知参数 $1" >&2; exit 2 ;;
+        esac
         FAIL=0
         echo "[verify] 1/5 submodule file"
         [ -f "${MEDIASERVO_ROOT}/mediaservo.sh" ] || { echo "  missing mediaservo.sh" >&2; FAIL=1; }
@@ -90,6 +126,9 @@ case "$CMD" in
         exit 0
         ;;
     doctor)
+        case "${1:-}" in
+            -h|--help) usage; exit 0 ;;
+        esac
         echo "[doctor] workspace: ${SHELL_ROOT}"
         echo "[doctor] submodule: $(git -C "${SHELL_ROOT}" submodule status "$SHELL_SUBMODULE" 2>/dev/null | head -1)"
         echo "[doctor] submodule dirty entries: $(git -C "${MEDIASERVO_ROOT}" status --porcelain 2>/dev/null | wc -l)"
@@ -104,10 +143,22 @@ case "$CMD" in
         exit 0
         ;;
     clean)
+        DRY=0
+        for arg in "$@"; do
+            case "$arg" in
+                -h|--help) usage; exit 0 ;;
+                --dry-run) DRY=1 ;;
+                *) echo "[msrtc] clean: 未知参数 $arg（仅支持 --dry-run）" >&2; exit 2 ;;
+            esac
+        done
+        if [ "$DRY" -eq 1 ]; then
+            echo "[clean] dry-run: would remove ${SHELL_ROOT}/{out,.cache,build}"
+            exit 0
+        fi
         echo "[clean] removing ${SHELL_ROOT}/{out,.cache,build}"
         rm -rf "${SHELL_ROOT}/out" "${SHELL_ROOT}/.cache" "${SHELL_ROOT}/build"
         cd "${MEDIASERVO_ROOT}"
-        exec "${MEDIASERVO_ROOT}/mediaservo.sh" clean "$@"
+        exec "${MEDIASERVO_ROOT}/mediaservo.sh" clean
         ;;
     *)
         echo "[msrtc] shell_entry: unknown command $CMD" >&2

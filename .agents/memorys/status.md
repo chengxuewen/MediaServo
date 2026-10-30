@@ -1370,3 +1370,8 @@ install                        → 改名提示 + exit 2（退役）
 
 - generator `kind:qoder` 生成 `.qoder/rules/shell/` 三条 overlay（entry/docs/release），不复制 82 条子仓规则。
 - Qoder 原生读 AGENTS.md + `.agents/skills`（33）；qoder target on；`agents check` 绿。
+
+### 2026-10-30: CLI Batch 1
+
+- `clean -h` 先于 `rm` 退出；`clean --dry-run` 只打印；`verify` 严格拒绝未知参数；`doctor` 保持 0。
+- `ci --all-gates --full` 显式分派；`agents sync` 英文汇总；7 个单测 + gate-shell 回归。

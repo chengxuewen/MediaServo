@@ -298,6 +298,7 @@ def run(command, source, target_root, targets_path):
         return common.EXIT_OK
 
     worst = common.EXIT_OK
+    wrote = 0
     for art in arts:
         path = art[1]
         reason = common.guard_target(path, source_real)
@@ -326,7 +327,13 @@ def run(command, source, target_root, targets_path):
             continue
         common.write_text(path, expected)
         print(" [ WRITE] %s" % path)
+        wrote += 1
 
+    if command == "sync":
+        if wrote:
+            print("GATE-AGENTS ✓ applied %d change(s)" % wrote)
+        else:
+            print("GATE-AGENTS ✓ already in sync (0 writes)")
     if command == "check":
         print("GATE-AGENTS %s" % ("✓ all layers clean" if worst == common.EXIT_OK else "✗ findings -- run: agents sync"))
     return worst
