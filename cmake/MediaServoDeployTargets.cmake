@@ -129,29 +129,6 @@ function(_mediaservo_deploy_guard_script _out _prefix _brand)
                    "${_out}" @ONLY)
 endfunction()
 
-# ---- target registration (R6: one parameterized function, audit signature) ----
-# mediaservo_add_deploy_target(TREE <host|server|bindings>
-#                              PREFIX <path>      REQUIRED — no cache fallback:
-#                                                 the caller pins the destination
-#                                                 (submodule callsites pass the
-#                                                 resolved cache vars; parent
-#                                                 callsites pin their own out)
-#                              BRAND <string>     REQUIRED — empty = upstream
-#                                                 names (explicit "" allowed)
-#                              FOLDER <dir>       optional IDE folder; empty =
-#                                                 unset (lets the parent view's
-#                                                 CMAKE_FOLDER carry the target;
-#                                                 audit ide-semantics: explicit
-#                                                 FOLDER wins wholesale)
-#                              SERVER_OUT_DIR <p> optional (server only; derived
-#                                                 from PREFIX when tree=server)
-#                              STAGING <s>        optional MEDIASERVO_APP_STAGING
-#                              INIT <script>      optional post-install init leg
-#                                                 (a cmake -P script path; host/
-#                                                 server render theirs internally
-#                                                 from the pack-legs templates)
-# GATE is NOT part of the public form — module callsites decide registration by
-# calling this function only when their lane flag is ON (audit: the gate would
 # otherwise make parent callsites register nothing under the default preset).
 
 # bindings: AppTree has no bindings tree — the bindings face IS an install face
@@ -180,84 +157,6 @@ if(MEDIASERVO_BUILD_BINDINGS)
         VERBATIM)
     set_target_properties(mediaservo-deploy-bindings PROPERTIES FOLDER "deploy")
 endif()
-if(NOT MEDIASERVO_DEPLOY_PREFIX_HOST)
-    set(MEDIASERVO_DEPLOY_PREFIX_HOST "${MEDIASERVO_REPO_ROOT}/../out/host" CACHE PATH
-        "deploy target prefix" FORCE)
-endif()
-if(DEFINED ENV{MSRTC_OUT_ROOT} AND NOT MEDIASERVO_DEPLOY_PREFIX_SERVER)
-    set(MEDIASERVO_DEPLOY_PREFIX_SERVER "$ENV{MSRTC_OUT_ROOT}/server" CACHE PATH
-        "deploy target prefix (env fallback)" FORCE)
-endif()
-if(NOT MEDIASERVO_DEPLOY_PREFIX_SERVER)
-    set(MEDIASERVO_DEPLOY_PREFIX_SERVER "${MEDIASERVO_REPO_ROOT}/../out/server" CACHE PATH
-        "deploy target prefix" FORCE)
-endif()
-
-set(MEDIASERVO_DEPLOY_PROFILE "Debug" CACHE STRING
-    "deploy build profile: Debug | Release (U6)")
-set_property(CACHE MEDIASERVO_DEPLOY_PROFILE PROPERTY
-    STRINGS Debug Release)
-
-# guard mode: refuse (default) = three-condition FATAL, byte-identical to the
-# pre-K-a guard; teardown (R10-K-a) = condition 1 stops the live instance
-# (unit -> daemon -> family, CWD-scoped) before install; conditions 2/3 still
-# refuse in BOTH modes (ops-F1 resurrection blocked). Cache var, not baked
-# into the rendered script = the kill-switch needs no code revert (§10).
-set(MEDIASERVO_DEPLOY_GUARD_MODE "refuse" CACHE STRING
-    "deploy guard mode: refuse | teardown (R10-K-a)")
-set_property(CACHE MEDIASERVO_DEPLOY_GUARD_MODE PROPERTY
-    STRINGS refuse teardown)
-
-if(NOT MEDIASERVO_BRAND AND DEFINED ENV{MEDIASERVO_BRAND})
-    set(MEDIASERVO_BRAND "$ENV{MEDIASERVO_BRAND}" CACHE STRING
-        "deploy brand (env fallback)" FORCE)
-endif()
-# bash parity: explicit `mediaservo` maps to the legacy upstream-name layout
-if(MEDIASERVO_BRAND STREQUAL "mediaservo")
-    set(MEDIASERVO_BRAND "" CACHE STRING "deploy brand (mediaservo->legacy empty)" FORCE)
-endif()
-
-if(NOT MEDIASERVO_OXMGR_BIN)
-    find_program(MEDIASERVO_OXMGR_BIN oxmgr)
-endif()
-if(NOT MEDIASERVO_OXMGR_BIN)
-    file(GLOB _msdt_oxmgr_candidates
-         "$ENV{HOME}/.local/bin/oxmgr"
-         "$ENV{HOME}/.cache/oxmgr/*/oxmgr")
-    list(LENGTH _msdt_oxmgr_candidates _n)
-    if(_n GREATER 0)
-        list(GET _msdt_oxmgr_candidates 0 MEDIASERVO_OXMGR_BIN)
-    endif()
-    unset(_msdt_oxmgr_candidates)
-endif()
-if(NOT MEDIASERVO_OXMGR_BIN)
-    message(FATAL_ERROR
-        "mediaservo-deploy-*: oxmgr binary not found (PATH, ~/.local/bin, ~/.cache/oxmgr/*) — "
-        "the oxmgr version-locked copy leg needs it (MediaServoPack.cmake:236/:273 contract); "
-        "or pass -DMEDIASERVO_OXMGR_BIN=<path>")
-endif()
-
-if(NOT MEDIASERVO_SERVER_OUT_DIR)
-    set(MEDIASERVO_SERVER_OUT_DIR "${MEDIASERVO_DEPLOY_PREFIX_SERVER}/server" CACHE PATH
-        "server delivery root for the server target" FORCE)
-endif()
-
-set(MEDIASERVO_DEPLOY_STRIP "" CACHE STRING
-    "bindings deploy --strip flavor passthrough (empty = none; bindings face has no strip mechanism today — declared K1b finding, not invented)")
-
-function(_mediaservo_deploy_guard_script _out _prefix _brand)
-    set(GUARD_MODE "${MEDIASERVO_DEPLOY_GUARD_MODE}")
-    set(GUARD_PREFIX "${_prefix}")
-    set(GUARD_BRAND "${_brand}")
-    if(_brand)
-        set(GUARD_IS_BRANDED 1)
-    else()
-        set(GUARD_IS_BRANDED 0)
-    endif()
-    set(GUARD_PROFILE "${MEDIASERVO_DEPLOY_PROFILE}")
-    configure_file("${_MSDT_TEMPLATE_DIR}/deploy-guard.cmake.in"
-                   "${_out}" @ONLY)
-endfunction()
 
 # ---- target registration (R6: one parameterized function, audit signature) ----
 # mediaservo_add_deploy_target(TREE <host|server|bindings>
@@ -320,12 +219,20 @@ function(_mediaservo_add_deploy_target)
     if(NOT _t STREQUAL "bindings")
         _mediaservo_deploy_guard_script(
             "${CMAKE_BINARY_DIR}/deploy-${_name}-guard.cmake" "${_pfx}" "${_brand}")
-        set(_guard_args
+        # R10-K-a: the host face runs the guard in TEARDOWN mode (stop-first
+    # inside the cmake choreography — IDE button == bash leg behavior);
+    # server/bindings keep the caller-selected mode (refuse default).
+    if(_t STREQUAL "host")
+        set(_guard_mode "teardown")
+    else()
+        set(_guard_mode "${MEDIASERVO_DEPLOY_GUARD_MODE}")
+    endif()
+    set(_guard_args
             COMMAND ${CMAKE_COMMAND}
                 -DMEDIASERVO_DEPLOY_GUARD=1
                 -DMEDIASERVO_DEPLOY_GUARD_PREFIX=${_pfx}
                 -DMEDIASERVO_DEPLOY_GUARD_BRAND=${_brand}
-                -DMEDIASERVO_DEPLOY_GUARD_MODE=${MEDIASERVO_DEPLOY_GUARD_MODE}
+                -DMEDIASERVO_DEPLOY_GUARD_MODE=${_guard_mode}
                 -P ${CMAKE_BINARY_DIR}/deploy-${_name}-guard.cmake)
     else()
         set(_guard_args "")

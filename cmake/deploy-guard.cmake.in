@@ -18,7 +18,15 @@
 set(_p "@GUARD_PREFIX@")
 set(_brand "@GUARD_BRAND@")
 set(_is_branded @GUARD_IS_BRANDED@)
-set(_mode "@GUARD_MODE@")
+# invocation-time -D overrides the embedded default (the kill-switch: flip to
+# refuse without code revert — audit §Landing; the R10-K-b live run caught its
+# absence: the host target passes teardown via -D, the embedded value stays
+# refuse for direct -P use)
+if(DEFINED MEDIASERVO_DEPLOY_GUARD_MODE AND NOT MEDIASERVO_DEPLOY_GUARD_MODE STREQUAL "")
+    set(_mode "${MEDIASERVO_DEPLOY_GUARD_MODE}")
+else()
+    set(_mode "@GUARD_MODE@")
+endif()
 
 # ---- single-writer (B2) ----
 # A cmake -P run holds nothing across stages, so the lock is per-invocation
@@ -140,12 +148,18 @@ if(_teardown_live)
     find_program(READLINK_BIN readlink)
     find_program(KILL_BIN kill)
 
-    # OXMGR_HOME canonicalization: realpath -m twin (exists -> REAL, missing
-    # -> ABSOLUTE; audit F3 — symlinked prefixes must match the unit text).
+    # OXMGR_HOME canonicalization: realpath(1) twin of the bash form
+    # (realpath -m). get_filename_component REAL is NOT script-mode-safe at
+    # the consumer policy floor (live-fired: 'unknown component REAL' aborted
+    # the teardown arm before any leg ran). exists -> realpath; missing ->
+    # ABSOLUTE fallback (same -m semantics for the nonexistent case).
     set(_oxmgr_home "${_p_abs}/run/oxmgr")
-    if(EXISTS "${_oxmgr_home}")
-        get_filename_component(_oxmgr_home "${_oxmgr_home}" REAL)
-    else()
+    find_program(REALPATH_BIN realpath)
+    if(REALPATH_BIN)
+        execute_process(COMMAND "${REALPATH_BIN}" -m "${_oxmgr_home}"
+            OUTPUT_VARIABLE _oxmgr_home ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
+            ENCODING UTF-8)
+    elseif(EXISTS "${_oxmgr_home}")
         get_filename_component(_oxmgr_home "${_oxmgr_home}" ABSOLUTE)
     endif()
     set(_want_home "Environment=OXMGR_HOME=${_oxmgr_home}")
