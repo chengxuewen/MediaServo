@@ -1322,3 +1322,11 @@ install                        → 改名提示 + exit 2（退役）
 - `mcp-serve` 改为每服独立前缀 `node_modules/.mcp/<name>`，npm cache 放工作区（只读 `$HOME` 的宿主也能首装）；修掉“装 playwright 会 prune codegraph”的互删。
 - 删除 4 个未引用 `init-mcp-*.mjs`（浮动安装清零；代码/配置命中 = 0）。
 - 新增 `codegraph.json` 排除 `target/ .pixi/ build/ out/`；二次 gate 0.94s 不再重装。
+
+### 2026-10-30: P5-1..4 Book 站点（English-only）
+
+- `book.toml` / `toc.toml`（25 章 + 6 组 + 5 条 exclude）；mermaid 11.17.2 vendor + 懒加载（5 篇 mermaid 文档）。
+- `scripts/book/{book_common,book-build,book-check}.py`：VE 移植，输出 `build/book`；toc-coverage + CJK=0；无 graph/browser/i18n。
+- pixi `[feature.book]`：mdbook 0.5.4 / markdownlint-cli 0.49.1，接入 default/test/ci；tasks `book-build` / `book-check` / `book-check-structure`。
+- `all-gates` 新增 check-only `book structure`（无 SUMMARY 时 SKIP）；CONSTRAINTS 重生成。
+- 验证：book-build 25 章 + 49 附录；book-check 绿；缺章 / CJK 两向变红；输出 `build/` 已忽略。

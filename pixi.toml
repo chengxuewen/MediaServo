@@ -114,12 +114,22 @@ CXXFLAGS = ""
 LDFLAGS = ""
 
 # Environments — composable feature groups
+# Book toolchain (D290): English-only docs site; no gettext/i18n packages.
+[feature.book.dependencies]
+mdbook = ">=0.5,<0.6"
+markdownlint-cli = ">=0.45,<1"
+
+[feature.book.tasks]
+book-build = "python3 scripts/book/book-build.py"
+book-check = "python3 scripts/book/book-check.py"
+book-check-structure = "python3 scripts/book/book-check.py --structure"
+
 [environments]
 runtime = { features = [] }
 dev = { features = ["dev"] }
-test = { features = ["dev", "test"] }
-ci = { features = ["dev", "test", "ci"] }
-default = { features = ["dev", "test"] }
+test = { features = ["dev", "test", "book"] }
+ci = { features = ["dev", "test", "ci", "book"] }
+default = { features = ["dev", "test", "book"] }
 
 # Global tasks (available in all environments)
 [tasks]

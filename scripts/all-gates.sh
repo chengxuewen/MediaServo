@@ -33,6 +33,8 @@ gate "build mediaservo-gates"      cargo build -q -p mediaservo-gates
 # Agent single-source layer (plan agent-infra-thin-shell): generated view and guards.
 gate "agent single source"         python3 scripts/agents/cli.py check
 gate "agent toolchain"             bash scripts/agents/tools-check.sh
+# Book structure: check-only; SKIPs when build/book-src/SUMMARY.md is absent (bare clone).
+gate "book structure"              python3 scripts/book/book-check.py --structure
 
 # ── fmt job, three fragments ──
 gate "fmt --check (incremental)"  bash -c '

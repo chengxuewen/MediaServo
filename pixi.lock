@@ -185,6 +185,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/lld-18.1.8-hef48ded_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/llvm-18.1.8-default_h36abe19_12.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/markdownlint-cli-0.49.1-h5ac6406_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/mdbook-0.5.4-hb17b654_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/mpg123-1.32.9-h8142553_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.6-hdb14827_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ninja-1.13.2-h171cf75_0.conda
@@ -408,6 +410,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libzlib-1.3.2-hdc9db2a_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/lld-18.1.8-hd253d04_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/llvm-18.1.8-default_h395f21b_12.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/markdownlint-cli-0.49.1-h7e68a87_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/mdbook-0.5.4-h069e38c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/mpg123-1.32.9-h2b27223_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/ncurses-6.6-h2b6f883_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/ninja-1.13.2-hdc560ac_0.conda
@@ -632,6 +636,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/llvm-openmp-22.1.8-h0d3cbff_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/llvm-tools-18-18.1.8-default_h9399c5b_12.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/llvm-tools-18.1.8-default_h9399c5b_12.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-64/markdownlint-cli-0.49.1-hf6b0dc5_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-64/mdbook-0.5.4-h19f9e61_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/mpc-1.4.0-h31caf2d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/mpfr-4.2.2-h31caf2d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/mpg123-1.32.9-hda136c6_0.conda
@@ -822,6 +828,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/llvm-openmp-22.1.8-hc7d1edf_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/llvm-tools-18-18.1.8-default_h8e162e0_12.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/llvm-tools-18.1.8-default_h8e162e0_12.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/markdownlint-cli-0.49.1-h7d04ff1_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mdbook-0.5.4-h6fdd925_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpc-1.4.0-h169892a_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpfr-4.2.2-h6bc93b0_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpg123-1.32.9-hbb31fce_0.conda
@@ -1021,6 +1029,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/lld-18.1.8-hef48ded_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/llvm-18.1.8-default_h36abe19_12.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/markdownlint-cli-0.49.1-h5ac6406_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/mdbook-0.5.4-hb17b654_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/mpg123-1.32.9-h8142553_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.6-hdb14827_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ninja-1.13.2-h171cf75_0.conda
@@ -1244,6 +1254,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libzlib-1.3.2-hdc9db2a_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/lld-18.1.8-hd253d04_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/llvm-18.1.8-default_h395f21b_12.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/markdownlint-cli-0.49.1-h7e68a87_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/mdbook-0.5.4-h069e38c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/mpg123-1.32.9-h2b27223_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/ncurses-6.6-h2b6f883_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/ninja-1.13.2-hdc560ac_0.conda
@@ -1468,6 +1480,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/llvm-openmp-22.1.8-h0d3cbff_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/llvm-tools-18-18.1.8-default_h9399c5b_12.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/llvm-tools-18.1.8-default_h9399c5b_12.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-64/markdownlint-cli-0.49.1-hf6b0dc5_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-64/mdbook-0.5.4-h19f9e61_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/mpc-1.4.0-h31caf2d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/mpfr-4.2.2-h31caf2d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/mpg123-1.32.9-hda136c6_0.conda
@@ -1658,6 +1672,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/llvm-openmp-22.1.8-hc7d1edf_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/llvm-tools-18-18.1.8-default_h8e162e0_12.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/llvm-tools-18.1.8-default_h8e162e0_12.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/markdownlint-cli-0.49.1-h7d04ff1_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mdbook-0.5.4-h6fdd925_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpc-1.4.0-h169892a_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpfr-4.2.2-h6bc93b0_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpg123-1.32.9-hbb31fce_0.conda
@@ -3124,6 +3140,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/lld-18.1.8-hef48ded_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/llvm-18.1.8-default_h36abe19_12.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/markdownlint-cli-0.49.1-h5ac6406_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/mdbook-0.5.4-hb17b654_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/mpg123-1.32.9-h8142553_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.6-hdb14827_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ninja-1.13.2-h171cf75_0.conda
@@ -3347,6 +3365,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libzlib-1.3.2-hdc9db2a_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/lld-18.1.8-hd253d04_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/llvm-18.1.8-default_h395f21b_12.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/markdownlint-cli-0.49.1-h7e68a87_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/mdbook-0.5.4-h069e38c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/mpg123-1.32.9-h2b27223_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/ncurses-6.6-h2b6f883_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/ninja-1.13.2-hdc560ac_0.conda
@@ -3571,6 +3591,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/llvm-openmp-22.1.8-h0d3cbff_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/llvm-tools-18-18.1.8-default_h9399c5b_12.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/llvm-tools-18.1.8-default_h9399c5b_12.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-64/markdownlint-cli-0.49.1-hf6b0dc5_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-64/mdbook-0.5.4-h19f9e61_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/mpc-1.4.0-h31caf2d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/mpfr-4.2.2-h31caf2d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/mpg123-1.32.9-hda136c6_0.conda
@@ -3761,6 +3783,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/llvm-openmp-22.1.8-hc7d1edf_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/llvm-tools-18-18.1.8-default_h8e162e0_12.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/llvm-tools-18.1.8-default_h8e162e0_12.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/markdownlint-cli-0.49.1-h7d04ff1_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mdbook-0.5.4-h6fdd925_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpc-1.4.0-h169892a_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpfr-4.2.2-h6bc93b0_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpg123-1.32.9-hbb31fce_0.conda
@@ -5908,6 +5932,27 @@ packages:
   license_family: Apache
   size: 60768
   timestamp: 1773663907642
+- conda: https://conda.anaconda.org/conda-forge/linux-64/markdownlint-cli-0.49.1-h5ac6406_0.conda
+  sha256: 27d812d3b9b602d73c9320d49a910c5e19286b6b729f669c37a671877c25f704
+  md5: 2e632ce02d57623142f2e4b8ab725f2b
+  depends:
+  - nodejs >=24.18.0,<25.0a0
+  license: MIT
+  license_family: MIT
+  size: 2212713
+  timestamp: 1784297893825
+- conda: https://conda.anaconda.org/conda-forge/linux-64/mdbook-0.5.4-hb17b654_0.conda
+  sha256: 905444801cffce938ca6db76673484d7612e2e16846586ad7056c8772d8fb51f
+  md5: 82d41f97c6aac1abb0006c5752704c8a
+  depends:
+  - libgcc >=14
+  - __glibc >=2.17,<3.0.a0
+  constrains:
+  - __glibc >=2.17
+  license: MPL-2.0
+  license_family: MOZILLA
+  size: 3991163
+  timestamp: 1783363427230
 - conda: https://conda.anaconda.org/conda-forge/linux-64/mpg123-1.32.9-h8142553_0.conda
   sha256: 72393d525761389d0225534d20f4cd917e255704f337f84939b74464d9bc6acb
   md5: 0dae03fd088c1ca13a8f6c9e5508e36c
@@ -8437,6 +8482,26 @@ packages:
   license_family: Apache
   size: 60960
   timestamp: 1773658475932
+- conda: https://conda.anaconda.org/conda-forge/linux-aarch64/markdownlint-cli-0.49.1-h7e68a87_0.conda
+  sha256: 089a376fab14331c007d30cf0ee93d55a4ad3c42a68eaed759de914cde20e4d4
+  md5: 21c5a240d26b53ac732e1c832a4e85e6
+  depends:
+  - nodejs >=24.18.0,<25.0a0
+  license: MIT
+  license_family: MIT
+  size: 2183266
+  timestamp: 1784297914676
+- conda: https://conda.anaconda.org/conda-forge/linux-aarch64/mdbook-0.5.4-h069e38c_0.conda
+  sha256: 5a3743ac51d5d70625999f9de4b803fce96bdea55a86ca84ed4b8c059ddb17a7
+  md5: 4f66d859a6efda9520e7ed147a3c415f
+  depends:
+  - libgcc >=14
+  constrains:
+  - __glibc >=2.17
+  license: MPL-2.0
+  license_family: MOZILLA
+  size: 3859184
+  timestamp: 1783363447116
 - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/mpg123-1.32.9-h2b27223_0.conda
   sha256: ba1db90daae7e13aa3974a298ad4f215acb1202505e0b945e76178cb5af6d76e
   md5: 7bcf6b79db2a04d77aea44cfb957377e
@@ -11067,6 +11132,26 @@ packages:
   license_family: Apache
   size: 94109
   timestamp: 1773654015945
+- conda: https://conda.anaconda.org/conda-forge/osx-64/markdownlint-cli-0.49.1-hf6b0dc5_0.conda
+  sha256: dcbe60a16f73083bc83fb0e659bbfe58066257afdd44741fc236fb1d6b018039
+  md5: 2a60e3342ea849f65068573003279ec4
+  depends:
+  - nodejs >=24.18.0,<25.0a0
+  license: MIT
+  license_family: MIT
+  size: 2189451
+  timestamp: 1784298155083
+- conda: https://conda.anaconda.org/conda-forge/osx-64/mdbook-0.5.4-h19f9e61_0.conda
+  sha256: eb346cd957c55aa5f955c7650d16eda293f34805682937b6d94380a91a2f3ff9
+  md5: d8cb61e668eb83e93159cc9eb2a49c77
+  depends:
+  - __osx >=11.0
+  constrains:
+  - __osx >=11.0
+  license: MPL-2.0
+  license_family: MOZILLA
+  size: 3913888
+  timestamp: 1783363481396
 - conda: https://conda.anaconda.org/conda-forge/osx-64/mpc-1.4.0-h31caf2d_0.conda
   sha256: 272ac1d9a2db3c9dbe2359c79784558a4e9b38624a0cc07c8f50b500a1b95d25
   md5: 52b3fbb35494ec12913a308397f52a9d
@@ -13185,6 +13270,26 @@ packages:
   license_family: Apache
   size: 94349
   timestamp: 1773655291188
+- conda: https://conda.anaconda.org/conda-forge/osx-arm64/markdownlint-cli-0.49.1-h7d04ff1_0.conda
+  sha256: 071a97d9870179a2e12bc8e5c50ba611baa0999e9dbe22eced52f916c319a639
+  md5: a57a8ea605573b733bb3d2010fbaf86d
+  depends:
+  - nodejs >=24.18.0,<25.0a0
+  license: MIT
+  license_family: MIT
+  size: 2202127
+  timestamp: 1784298413932
+- conda: https://conda.anaconda.org/conda-forge/osx-arm64/mdbook-0.5.4-h6fdd925_0.conda
+  sha256: a901d89a7f9c6684408f2cca7f0895c2010f5e8d16f302f84ff935ae90fd0a1d
+  md5: e2f776a82b6024c3641ecd7efe2718eb
+  depends:
+  - __osx >=11.0
+  constrains:
+  - __osx >=11.0
+  license: MPL-2.0
+  license_family: MOZILLA
+  size: 3721248
+  timestamp: 1783363421597
 - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpc-1.4.0-h169892a_0.conda
   sha256: a9774664adea222e4165efddcd902641c03c7d08fda3a83a5b0885e675ead309
   md5: 2845c3a1d0d8da1db92aba8323892475

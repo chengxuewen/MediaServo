@@ -1,0 +1,161 @@
+# Chapter order for the MediaServo book (English only, U1=C).
+# Unlisted docs are appended under Appendix with a WARN; `exclude` globs keep
+# research/history and the CJK ABI baseline out of the site (C18/C49).
+
+exclude = [
+  "docs/reference/research/**",
+  "docs/plans/**",
+  "docs/superpowers/**",
+  "docs/handoff-*.md",
+  "docs/modules/25-abi-baseline.md",
+]
+
+[[chapter]]
+title = "Overview"
+source = "docs/modules/00-overview.md"
+type = "index"
+group = "Foundations"
+
+[[chapter]]
+title = "Product Capabilities"
+source = "docs/modules/01-product-capabilities.md"
+type = "explanation"
+group = "Foundations"
+
+[[chapter]]
+title = "Deployment Modes"
+source = "docs/modules/02-deployment-modes.md"
+type = "explanation"
+group = "Foundations"
+
+[[chapter]]
+title = "Architecture"
+source = "docs/architecture.md"
+type = "explanation"
+group = "Foundations"
+
+[[chapter]]
+title = "Protocols"
+source = "docs/modules/07-protocols.md"
+type = "reference"
+group = "Media pipeline"
+
+[[chapter]]
+title = "Pipeline Model"
+source = "docs/modules/08-pipeline-model.md"
+type = "explanation"
+group = "Media pipeline"
+
+[[chapter]]
+title = "Transport Architecture"
+source = "docs/modules/09-transport-architecture.md"
+type = "explanation"
+group = "Media pipeline"
+
+[[chapter]]
+title = "Signaling Architecture"
+source = "docs/modules/10-signaling-architecture.md"
+type = "explanation"
+group = "Media pipeline"
+
+[[chapter]]
+title = "Client & Host"
+source = "docs/modules/03-client-host.md"
+type = "explanation"
+group = "Runtime"
+
+[[chapter]]
+title = "Server Architecture"
+source = "docs/modules/13-server-architecture.md"
+type = "explanation"
+group = "Runtime"
+
+[[chapter]]
+title = "Remote Architecture"
+source = "docs/modules/14-remote-architecture.md"
+type = "explanation"
+group = "Runtime"
+
+[[chapter]]
+title = "Component Architecture"
+source = "docs/modules/15-component-architecture.md"
+type = "explanation"
+group = "Runtime"
+
+[[chapter]]
+title = "Admin Dashboard"
+source = "docs/modules/16-admin-dashboard.md"
+type = "reference"
+group = "Runtime"
+
+[[chapter]]
+title = "WebRTC Crate"
+source = "docs/modules/17-webrtc-crate.md"
+type = "reference"
+group = "Runtime"
+
+[[chapter]]
+title = "Codec Crate"
+source = "docs/modules/18-codec-crate.md"
+type = "reference"
+group = "Runtime"
+
+[[chapter]]
+title = "SDK Layers"
+source = "docs/modules/04-sdk-layers.md"
+type = "explanation"
+group = "SDK & contracts"
+
+[[chapter]]
+title = "SDK API Contract"
+source = "docs/modules/20-sdk-api-contract.md"
+type = "reference"
+group = "SDK & contracts"
+
+[[chapter]]
+title = "Link IPC"
+source = "docs/modules/21-link-ipc.md"
+type = "reference"
+group = "SDK & contracts"
+
+[[chapter]]
+title = "Field Guide"
+source = "docs/modules/22-field-guide.md"
+type = "tutorial"
+group = "SDK & contracts"
+
+[[chapter]]
+title = "Binding Guide"
+source = "docs/modules/23-binding-guide.md"
+type = "tutorial"
+group = "SDK & contracts"
+
+[[chapter]]
+title = "Auth & Permissions"
+source = "docs/modules/05-auth-permissions.md"
+type = "explanation"
+group = "Auth & plugins"
+
+[[chapter]]
+title = "Plugin System"
+source = "docs/modules/06-plugin-system.md"
+type = "explanation"
+group = "Auth & plugins"
+
+[[chapter]]
+title = "Security Architecture"
+source = "docs/modules/security-architecture.md"
+type = "explanation"
+group = "Quality & ops"
+
+[[chapter]]
+title = "Testing Strategy"
+source = "docs/modules/testing-strategy.md"
+type = "reference"
+group = "Quality & ops"
+
+[[chapter]]
+title = "Operations"
+source = "docs/modules/operations.md"
+type = "reference"
+group = "Quality & ops"
