@@ -45,3 +45,11 @@ fi
 if [ -n "${CONDA_PREFIX:-}" ]; then
   export DYLD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${DYLD_LIBRARY_PATH:-}"
 fi
+
+# libwebrtc link patch (P1-7): a toolchain fact, so it lives on the activation
+# face and applies to both S (standalone) and P (submodule) builds.
+# The prebuilt .a carries UNDEF GLib symbols from the xdg-portal code; lld
+# tolerates link order, and the pixi GLib libs satisfy the symbols.
+if [ "$(uname -s)" = "Linux" ] && [ -d "${PROJECT_ROOT}/.pixi/envs/default/lib" ]; then
+  export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=lld -C link-arg=-L${PROJECT_ROOT}/.pixi/envs/default/lib -C link-arg=-lgio-2.0 -C link-arg=-lgobject-2.0 -C link-arg=-lglib-2.0"
+fi
