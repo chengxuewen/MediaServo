@@ -9,10 +9,10 @@
     "new-api"
   ],
   "plugin": [
-    "superpowers@git+https://github.com/obra/superpowers.git",
-    "@dietrichgebert/ponytail",
+    "superpowers@git+https://github.com/obra/superpowers.git@v6.4.2",
+    "@dietrichgebert/ponytail@4.10.0",
     "oh-my-openagent@4.19.4",
-    "context-mode"
+    "context-mode@1.0.169"
   ],
   "instructions": [
     ".agents/memorys/status.md",
@@ -27,15 +27,12 @@
     ".agents/rules/common/performance.md",
     ".agents/rules/common/testing.md",
     ".agents/rules/common/constraints.md",
-    ".agents/rules/common/docker.md",
-    ".agents/rules/common/platform.md",
     ".agents/rules/common/edit-safety.md",
     ".agents/rules/common/lesson-memory.md",
     ".agents/rules/rust/coding-style.md",
     ".agents/rules/rust/hooks.md"
   ],
   "mcp": {
-    
     "websearch": {
       "type": "remote",
       "url": "https://websearch.opencode.ai",
@@ -45,44 +42,18 @@
       "type": "local",
       "enabled": true,
       "command": [
-        "node",
-        ".opencode/init-mcp-codegraph.mjs"
+        "bash",
+        "scripts/agents/mcp-launch.sh",
+        "local-codegraph"
       ]
     },
     "local-playwright": {
       "type": "local",
-      "enabled": false,
-      "command": [
-        "node",
-        ".opencode/init-mcp-playwright.mjs"
-      ]
-    },
-    "local-github": {
-      "type": "local",
       "enabled": true,
       "command": [
-        "npx",
-        "-y",
-        "@modelcontextprotocol/server-github"
-      ],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_TOKEN}"
-      }
-    },
-    "local-postgres": {
-      "type": "local",
-      "enabled": false,
-      "command": [
-        "node",
-        ".opencode/init-mcp-postgres.mjs"
-      ]
-    },
-    "local-openspace": {
-      "type": "local",
-      "enabled": true,
-      "command": [
-        "node",
-        ".opencode/init-mcp-openspace.mjs"
+        "bash",
+        "scripts/agents/mcp-launch.sh",
+        "local-playwright"
       ]
     }
   },

@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "local-codegraph": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "scripts/agents/mcp-launch.sh",
+        "local-codegraph"
+      ]
+    },
+    "local-playwright": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "scripts/agents/mcp-launch.sh",
+        "local-playwright"
+      ]
+    }
+  }
+}
