@@ -1335,3 +1335,8 @@ install                        → 改名提示 + exit 2（退役）
 
 - 删除根级 `.k3compose.log` / `.k3v5.log`；`.gitignore` 增 transient 块（根级 log/jsonl、tmp/bak/orig/rej/swp/pid/sock、pycache、coverage、env、IDE 本地文件）。
 - `check_guards` 增 C10：tracked-ignored 非空即红；证据目录日志与 goldens JSONL 明确不忽略。
+
+### 2026-10-30: VE 对标 8 项裁决
+
+- 记忆双账本 + `child-refs` + C56-C59；9 个真缺口技能；serena + MCP 生命周期；Qoder 优先；夜间 all-gates；三文档门；入口六项下沉。
+- 记录：D297 / C52；执行另开批次。

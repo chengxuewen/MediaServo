@@ -940,3 +940,18 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **原因**: English-only（C49）；与 VE 构建行为 1:1 降低迁移成本；U3=B 避免 all-gates 变慢。
 - **影响**: H6 档进入 SR6 口径 H1-H6；`book-build` / `book-check` 为手动任务；`book/` 仅子模块持有。
 - **验证**: `pixi run book-build` 绿；`book-check` 对缺章 / CJK 变红；无 `po/`；输出 gitignored。
+
+## D297: VE 对标差距 —— 8 项逐条裁决 (2026-10-30, 用户逐项 A/B)
+
+- **范围**: 父/子记忆归属、技能导入、MCP、宿主、CI、文档门、入口瘦身。
+- **裁决**:
+  1. 父仓记忆重写 + 归档（active ≤60 KiB；legacy 进 `*-archived.md`）。
+  2. 双账本：子仓产品事实 / 父仓壳事实；父仓 `child-refs.md` 索引 + C56-C59。
+  3. 导入 9 个 VE 真缺口技能（不导 8 个重叠项；ast-grep 暂缓）。
+  4. MCP：加 serena 2.1.0 + `setup/sync/index` + status 只读；pins 升 codegraph 1.6.0 / playwright 0.0.82。
+  5. 宿主 Qoder 优先；codebuddy/trae 继续 S2=B。
+  6. CI：PR 保持四门；all-gates 夜间/手动。
+  7. 文档门：英文 + 相对链接 + 过度承诺；25-abi 用文档级白名单。
+  8. 入口：只下沉 agents/ci/mcp/verify/doctor/clean；缓存/品牌/deploy 留父仓。
+- **未决**: 25-abi 翻译 vs 白名单最终口径；ast-grep 依赖；codebuddy/trae 触发条件。
+- **验证**: 每项独立提交 + 门；不混做。

@@ -715,3 +715,10 @@ Checks:
   git log -1 --format='%b' | grep -q '^- ' || echo "NOTE: no bulleted body (trivial exempt)"
   ```
 - **Sweep (unpushed segment)**: `git log --format='%s' @{u}..HEAD | awk 'length>50 {print "LONG:", $0}'`
+
+## C52: 跨仓记忆归属与引用 (2026-10-30, mirror of parent C56-C59)
+
+- 子仓只记产品/架构/构建/运维/弱网事实；父仓只记壳事实（3rdparty 固定/品牌/发布/CI/入口/跨仓政策）；同一事实只归一边。
+- 父仓引用子仓写 `child:D297` / `child:PIT-184` / `child:C51`，不得复述正文；引用必须可解析。
+- 父仓 `child-refs.md` 列子仓账本路径 + D/PIT/C 高水位；gitlink 改子仓记忆时同笔更新。
+- 动 durable paths 的提交写 `Memory: parent|child|both|none(<reason>)`。

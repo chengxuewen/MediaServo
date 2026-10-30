@@ -36,7 +36,9 @@ def main():
     status = os.path.join(MEM, "status.md")
     if os.path.isfile(status):
         text = open(status, encoding="utf-8").read()
-        for match in re.finditer(r"high[- ]water[^\n]*?D(\d+)", text, re.I):
+        for match in re.finditer(
+                r"high[- ]water(?:\s+(?:today|now|current))?\s*(?:[:=]\s*)?D(\d+)",
+                text, re.I):
             claims.add(int(match.group(1)))
     if claims and claims != {max_d}:
         print("NUMBERING ✗ D1-D<n> claims %s != max D%d" % (sorted(claims), max_d))
