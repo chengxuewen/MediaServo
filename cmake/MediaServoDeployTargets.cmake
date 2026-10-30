@@ -336,10 +336,12 @@ endfunction()
 if(MEDIASERVO_BUILD_CRATES_LANES)
     _mediaservo_add_deploy_target(TREE host
         PREFIX "${MEDIASERVO_DEPLOY_PREFIX_HOST}"
-        BRAND "${MEDIASERVO_BRAND}")
+        BRAND "${MEDIASERVO_BRAND}"
+        FOLDER "deploy")
     _mediaservo_add_deploy_target(TREE server
         PREFIX "${MEDIASERVO_DEPLOY_PREFIX_SERVER}"
         BRAND "${MEDIASERVO_BRAND}"
         SERVER_OUT_DIR "${MEDIASERVO_SERVER_OUT_DIR}"
-        STAGING build)
+        STAGING build
+        FOLDER "deploy")
 endif()
