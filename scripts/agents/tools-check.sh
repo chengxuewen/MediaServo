@@ -5,4 +5,5 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 ruff check scripts/agents
+python3 scripts/agents/check_guards.py
 python3 -m unittest discover -s scripts/agents -p 'test_*.py'

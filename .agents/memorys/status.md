@@ -1302,3 +1302,10 @@ install                        → 改名提示 + exit 2（退役）
   4. conflict.rs k0 fixture hardcoded /bin/sleep (usrmerge containers = /usr/bin; dual-probe)
 - Infra landed en route: compose pins FFMPEG_DIR/PKG_CONFIG_PATH/LD_LIBRARY_PATH/LK_CUSTOM_WEBRTC + ffmpeg9-runtime external volume; gate() keeps workspace-visible fail evidence (container /tmp died with evidence twice).
 - Host face regression guard: all-gates 13/13 PASS re-verified after every change.
+
+### 2026-10-30: P1-8/P1-9/P1-10 provenance + guards + self-tests
+
+- NOTICE + `docs/reference/visiaengine.md`（逐文件 adapt 台账；未移植项也登记）。
+- Guards: numbering（hub high-water）/ skill-lint（22 技能）/ rule-ref（D296·PIT-237·C51，0 缺失）/ no-parent（memorys 视为历史豁免）/ batch-close memory（手动 task）。
+- `all-gates` 新增 `agent single source` + `agent toolchain`；CONSTRAINTS 重生成。
+- 自证：cli check/sync/drift 循环、路径无关性、`verify-cache --self-test`（父仓）。

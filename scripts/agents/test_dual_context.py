@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 import tempfile
@@ -30,7 +32,8 @@ class DualContextTests(unittest.TestCase):
                 targets = os.path.join(root, ".agents", "targets.json")
                 with open(targets, "w", encoding="utf-8") as handle:
                     json.dump(cfg, handle)
-                self.assertEqual(cli.run("sync", SOURCE, root, targets), 0)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(cli.run("sync", SOURCE, root, targets), 0)
 
             with open(os.path.join(first, ".mcp.json"), encoding="utf-8") as handle:
                 left = handle.read()

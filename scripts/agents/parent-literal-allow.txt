@@ -1,0 +1,2 @@
+# Files allowed to name the parent workspace literally (hub/documentation text).
+scripts/agents/cli.py

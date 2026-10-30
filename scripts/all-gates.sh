@@ -30,6 +30,9 @@ port_busy() { ss -tln 2>/dev/null | grep -q ":9800 "; }
 
 # ── gate checker face (SR6 P3): checker logics live in tools/mediaservo-gates (N4 ruling A′) ──
 gate "build mediaservo-gates"      cargo build -q -p mediaservo-gates
+# Agent single-source layer (plan agent-infra-thin-shell): generated view and guards.
+gate "agent single source"         python3 scripts/agents/cli.py check
+gate "agent toolchain"             bash scripts/agents/tools-check.sh
 
 # ── fmt job, three fragments ──
 gate "fmt --check (incremental)"  bash -c '
