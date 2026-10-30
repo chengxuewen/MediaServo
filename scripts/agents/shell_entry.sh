@@ -84,11 +84,16 @@ case "$CMD" in
         exit 0
         ;;
     mcp)
-        case "${1:-status}" in
+        MCP_CMD="${1:-status}"
+        shift || true
+        case "$MCP_CMD" in
             -h|--help) usage; exit 0 ;;
             status|setup|sync|index)
-                exec python3 "${MEDIASERVO_ROOT}/scripts/agents/mcp_cli.py" "$1" ;;
-            pins) exec cat "${MEDIASERVO_ROOT}/scripts/agents/mcp-servers.json" ;;
+                [ "$#" -eq 0 ] || { echo "[msrtc] mcp: 多余参数 $*" >&2; exit 2; }
+                exec python3 "${MEDIASERVO_ROOT}/scripts/agents/mcp_cli.py" "$MCP_CMD" ;;
+            pins)
+                [ "$#" -eq 0 ] || { echo "[msrtc] mcp: 多余参数 $*" >&2; exit 2; }
+                exec cat "${MEDIASERVO_ROOT}/scripts/agents/mcp-servers.json" ;;
             *) echo "[msrtc] mcp: status|setup|sync|index|pins" >&2; exit 2 ;;
         esac
         ;;
