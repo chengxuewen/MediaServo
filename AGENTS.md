@@ -166,6 +166,7 @@ _Project has entered the code implementation phase. Current state:_
 | `ecosystem-scan` | Audit the .agents/ system and scan the community ecosystem for skills/rules/MCP worth adopting. |
 | `incremental-implementation` | Thin vertical slices across Rust+TS. |
 | `lesson-review` | Batch session review: systematically extract lessons learned and write them to project memory. |
+| `lsp-code-analysis` | Semantic pre-change impact analysis for MediaServo: find definitions, implementors, references, and call paths across Rust crates, C ABI/FFI |
 | `observability-and-instrumentation` | Instrument MediaServo with useful logs, metrics, and traces: structured fields, RED metrics, spans across signaling/media, symptom-based ale |
 | `openspec-apply-change` | Implement tasks from an OpenSpec change. |
 | `openspec-archive-change` | Archive a completed change in the experimental workflow. |
@@ -208,4 +209,5 @@ _Project has entered the code implementation phase. Current state:_
 ### status (last 6)
 - 2026-10-30: B1 MCP closure
 - 2026-10-30: B2a skills
+- 2026-10-30: B2b lsp
 <!-- END:agents-memory -->

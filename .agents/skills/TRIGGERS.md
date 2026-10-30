@@ -14,6 +14,7 @@
 | Add logs/metrics/traces/alerts | `observability-and-instrumentation` | Tuning -> `performance-optimization`; one failure -> `debugging-and-error-recovery` |
 | Review a diff / merge verdict | `code-review-and-quality` | Deep security -> `security-hardening`; complexity -> `code-simplification` |
 | Release / tag / rollback | `shipping-and-launch` | Pipeline mechanics -> `ci-cd-automation`; security sign-off -> `security-hardening` |
+| Semantic impact before editing a symbol | `lsp-code-analysis` | Layer map -> `repo-triage`; contract -> `api-interface-design` |
 
 ## Trigger Boundaries
 
@@ -25,6 +26,7 @@
 - `observability-and-instrumentation` owns signal design; `performance-optimization` owns measurement/tuning.
 - `code-review-and-quality` owns the five-axis verdict; `security-hardening` owns the deep security pass.
 - `shipping-and-launch` owns the release decision; `ci-cd-automation` owns the pipeline that executes it.
+- `lsp-code-analysis` owns the symbol impact map; `repo-triage` owns the layer/file map.
 
 ## Naming Rule
 

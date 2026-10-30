@@ -1350,3 +1350,8 @@ install                        → 改名提示 + exit 2（退役）
 
 - +8 技能（32 total）：debugging、TDD、repo-triage、deprecation、docs/ADR、observability、code-review、shipping。
 - 触发矩阵 `.agents/skills/TRIGGERS.md`；shipping 拆为子仓技能 + 父 overlay `release.md`；skill-lint/no-parent 绿；新技能 English-only。
+
+### 2026-10-30: B2b lsp
+
+- `lsp-code-analysis` 入册（33 skills）；serena 工具梯（find_symbol/implementations/referencing_symbols）+ codegraph/ripgrep fallback。
+- 真实验证：`codegraph query "Plugin"` 命中 `crates/mediaservo-media/src/plugin.rs` 的 trait + PluginKind/PluginManager。
