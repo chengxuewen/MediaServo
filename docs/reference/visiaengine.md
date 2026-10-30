@@ -19,3 +19,14 @@ Not ported:
 
 - `rules-links.py` / `skills-links.py` mdc+copy modes -- deferred (S2=B).
 - `book-build.py` / `book-check.py` / `book-i18n.py` -- P5 (English-only book; H6).
+
+## Book toolchain (P5)
+
+| Donor | Destination | Mode | Batch |
+|---|---|---|---|
+| `scripts/book-build.py` | `scripts/book/book-build.py` | adapt (drop graph/browser; add toc coverage + CJK=0) | P5 |
+| `scripts/book-check.py` | `scripts/book/book-check.py` | adapt (same scope) | P5 |
+| `book/toc.toml` schema + append-all | `book/toc.toml` + builder | adapt | P5 |
+| `book/web/mermaid-init.js` + `vendor/mermaid.min.js` | `book/web/` | copy (license kept) | P5 |
+
+Not ported: `scripts/book-i18n.py`, `book/po/**` (English-only ruling U1=C).

@@ -933,3 +933,10 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **superseded**: S3 装后探针状态机（含当日 k21 OkWake 过渡形）双侧删除；startup-hardening 的"on 装后 apply 唤醒"设计（开机唤醒职责唯一化到 k19 钩子）。
 - **实环**: 抛弃树四连（on 748ms 零点火 / 真交叠 warn+register / off 后进程原封 / stop 收自家）+生产 out-host 纯登记恢复；验证 fixture 教训=systemd 裸环境跑的必须是部署件（target/debug 裸拷缺 conda 库解析，钩子假阴）。
 - **开放项**: 登记闸端口盲区（host.yaml 注释掉的默认 17980 对 `instance_ports` 不可见 → 两台同缺省口机器可"合法并存"，开机才打架）——先存 S1 缺陷，本环境抓现行，修刀另轮。
+
+## D290: Book 站点 —— English-only + VE 一致的 Python 构建 + H6 (2026-10-30, U1=C / U2=A / U3=B / U4=A)
+
+- **决策**: mdBook 站点采用 VE 同构：`book/toc.toml` + `tomllib` + `scripts/book/*.py`（H6：6 文件 / 1200 行）；输出 `build/book`；不引入 gettext / `mdbook-i18n-helpers` / `po/`；未登记文档按 Appendix append-all（>60 章 WARN）；mermaid vendor + 懒加载；all-gates 只做 SUMMARY 结构检查（不建书）。
+- **原因**: English-only（C49）；与 VE 构建行为 1:1 降低迁移成本；U3=B 避免 all-gates 变慢。
+- **影响**: H6 档进入 SR6 口径 H1-H6；`book-build` / `book-check` 为手动任务；`book/` 仅子模块持有。
+- **验证**: `pixi run book-build` 绿；`book-check` 对缺章 / CJK 变红；无 `po/`；输出 gitignored。
