@@ -2,8 +2,9 @@
 # mcp-launch.sh — host-neutral MCP launcher (agent toolchain home: scripts/agents).
 #
 # Resolves node without relying on the GUI host PATH (pixi env first, then PATH),
-# then delegates to mcp-serve.mjs. PROJECT_ROOT travels as an env var
-# (MEDIASERVO_AGENT_PROJECT_ROOT) so the parent shell can point the server at the
+# then delegates to mcp-serve.mjs. The workspace root travels as
+# MEDIASERVO_AGENT_ROOT (older launchers may still send
+# MEDIASERVO_AGENT_PROJECT_ROOT) so a parent shell can point the server at the
 # workspace root instead of the submodule root.
 set -u
 

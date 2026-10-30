@@ -14,7 +14,9 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..', '..')
-const PROJECT = process.env.MEDIASERVO_AGENT_PROJECT_ROOT || ROOT
+const PROJECT = process.env.MEDIASERVO_AGENT_ROOT
+  || process.env.MEDIASERVO_AGENT_PROJECT_ROOT
+  || ROOT
 const isWin = process.platform === 'win32'
 
 function arg(name) {
