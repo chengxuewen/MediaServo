@@ -197,6 +197,9 @@ def hub_text(source):
         "- `./msrtc.sh pixi <task>` -- pixi task passthrough\n"
         "- `./msrtc.sh agents check` -- generated layers vs source\n"
         "- `source bootstrap.sh` -- first-time setup\n\n"
+        "## Memory\n"
+        "- Shell facts: `.agents/memorys/` (active <=58 KiB; legacy `*-archived.md`).\n"
+        "- Child memory index: `.agents/memorys/child-refs.md`; cite as `child:<id>`, never copy the body.\n\n"
         "## Skills\n"
         "- %d skill(s) come from the submodule; `.agents/skills` is a symlink to the submodule.\n" % count
     )

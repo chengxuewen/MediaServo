@@ -22,8 +22,8 @@ if [ -n "$memory" ]; then
     echo "MEMORY ✓ memory updated ($(printf '%s\n' "$memory" | grep -c .) file(s))"
     exit 0
 fi
-if git log --format=%B "$RANGE" | grep -Eq '^ - Memory: none \(.+\)$'; then
-    echo "MEMORY ✓ explicit none with reason"
+if git log --format=%B "$RANGE" | grep -Eq '^[ -]*Memory: (parent|child|both|none\s*\(.+\))(\s*\(.+\))?$'; then
+    echo "MEMORY ✓ explicit Memory declaration"
     exit 0
 fi
 echo "MEMORY ✗ durable paths changed but memory untouched (add an entry or '- Memory: none (<reason>)')" >&2
