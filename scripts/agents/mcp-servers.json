@@ -2,15 +2,22 @@
   "local-codegraph": {
     "kind": "npm",
     "pkg": "@colbymchenry/codegraph",
-    "version": "1.5.0",
+    "version": "1.6.0",
     "bin": "codegraph",
     "args": ["serve", "--mcp"]
   },
   "local-playwright": {
     "kind": "npm",
     "pkg": "@playwright/mcp",
-    "version": "0.0.79",
+    "version": "0.0.82",
     "bin": "playwright-mcp",
     "args": []
+  },
+  "local-serena": {
+    "kind": "pixi",
+    "pixi_env": "serena",
+    "task": "mcp-serena",
+    "version": "2.1.0",
+    "probe": ["serena", "--version"]
   }
 }

@@ -198,5 +198,5 @@ _Project has entered the code implementation phase. Current state:_
 - C51: commit message shape — subject <=50 chars, one fact per body line (2026-10-19 user ruling; mirror of main-repo C55, with this repo's 200-char-subject history as the negative exhibit)
 
 ### status (last 6)
-- 2026-10-30: P1-8/P1-9/P1-10 provenance + guards + self-tests
+- 2026-10-30: B1 MCP closure
 <!-- END:agents-memory -->

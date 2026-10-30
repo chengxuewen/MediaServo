@@ -155,3 +155,7 @@ compile_commands.json
 !.env.example
 # Re-assert the tracked OMO config (the .omo/* rule above runs later than the first negation).
 !.omo/omo.jsonc
+
+# Code intelligence caches
+.codegraph/
+.serena/

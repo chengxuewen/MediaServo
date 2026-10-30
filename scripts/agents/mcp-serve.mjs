@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// mcp-serve.mjs — pinned npm-MCP launcher (agent toolchain home: scripts/agents).
+// mcp-serve.mjs — pinned MCP launcher (agent toolchain home: scripts/agents).
 //
-// Pins live in scripts/agents/mcp-servers.json (single source). The launcher
-// installs at the exact version into scripts/agents/node_modules, fails loudly
-// on pin drift, and spawns the server with cwd = MEDIASERVO_AGENT_PROJECT_ROOT
-// (default: this repo root). Arguments are passed as an array (no shell); npm's
-// stdout is redirected to stderr so the MCP JSON-RPC channel stays clean.
+// Pins live in scripts/agents/mcp-servers.json (single source). npm servers are
+// installed at the exact version into scripts/agents/node_modules/.mcp/<name>;
+// pixi servers run their declared task in the declared environment. Pin drift
+// fails loudly. PROJECT_ROOT (MEDIASERVO_AGENT_ROOT) is passed to the server so
+// a parent workspace can point it at the workspace root instead of this repo.
 
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
@@ -44,60 +44,79 @@ if (!spec) {
   console.error(`[mcp-serve] no server "${name}" in ${registryPath}`)
   process.exit(2)
 }
-if (spec.kind !== 'npm') {
+
+function spawnAndExit(command, args, options) {
+  const child = spawn(command, args, options)
+  child.on('error', (err) => {
+    console.error(`[mcp-serve] failed to start ${name}:`, err.message)
+    process.exit(1)
+  })
+  child.on('exit', (code) => process.exit(code ?? 1))
+}
+
+// --- pixi-backed servers (serena): run the declared task in the declared env ---
+if (spec.kind === 'pixi') {
+  const envDir = join(ROOT, '.pixi', 'envs', spec.pixi_env)
+  if (!existsSync(envDir)) {
+    console.error(`[mcp-serve] pixi env "${spec.pixi_env}" missing; run: ./msrtc.sh mcp setup`)
+    process.exit(1)
+  }
+  const pixi = process.env.PIXI_BIN || 'pixi'
+  spawnAndExit(
+    pixi,
+    ['run', '--manifest-path', join(ROOT, 'pixi.toml'), '-e', spec.pixi_env, spec.task],
+    {
+      stdio: 'inherit',
+      cwd: ROOT,
+      env: { ...process.env, MEDIASERVO_AGENT_ROOT: PROJECT },
+    },
+  )
+} else if (spec.kind === 'npm') {
+  // One prefix per server: a shared prefix makes npm prune the other server's
+  // packages on every install (observed: installing playwright removed codegraph).
+  const PREFIX = join(HERE, 'node_modules', '.mcp', name)
+  const binPath = join(PREFIX, 'node_modules', '.bin', isWin ? `${spec.bin}.cmd` : spec.bin)
+
+  function installedVersion() {
+    const parts = spec.pkg.startsWith('@') ? spec.pkg.split('/') : [spec.pkg]
+    const manifest = join(PREFIX, 'node_modules', ...parts, 'package.json')
+    if (!existsSync(manifest)) return null
+    try {
+      return JSON.parse(readFileSync(manifest, 'utf8')).version
+    } catch {
+      return null
+    }
+  }
+
+  const have = installedVersion()
+  if (!existsSync(binPath) || have !== spec.version) {
+    if (have && have !== spec.version) {
+      console.error(`[mcp-serve] pin drift: ${spec.pkg} installed @${have}, pin wants @${spec.version}`)
+      console.error(`[mcp-serve] run: ./msrtc.sh mcp setup (or remove ${PREFIX})`)
+      process.exit(1)
+    }
+    // Missing binary = first-run path. npm writes its summary to stdout, which IS
+    // the MCP channel here, so capture and re-emit on stderr.
+    console.error(`[mcp-serve] installing ${spec.pkg}@${spec.version} into ${PREFIX} ...`)
+    mkdirSync(PREFIX, { recursive: true })
+    const npmCache = join(HERE, 'node_modules', '.npm-cache')
+    mkdirSync(npmCache, { recursive: true })
+    const npm = process.env.NPM_BIN || join(dirname(process.execPath), isWin ? 'npm.cmd' : 'npm')
+    const res = spawnSync(
+      npm,
+      ['install', '--no-save', '--no-package-lock', '--prefix', PREFIX, `${spec.pkg}@${spec.version}`],
+      { cwd: HERE, env: { ...process.env, npm_config_cache: npmCache }, stdio: ['ignore', 'pipe', 'inherit'] },
+    )
+    if (res.stdout && res.stdout.length) process.stderr.write(res.stdout)
+    if (res.error) {
+      console.error('[mcp-serve] install failed:', res.error.message)
+      process.exit(1)
+    }
+    if (res.status !== 0) process.exit(res.status ?? 1)
+  }
+
+  spawnAndExit(binPath, spec.args || [], { stdio: 'inherit', cwd: PROJECT })
+} else {
   console.error(`[mcp-serve] unsupported kind "${spec.kind}" for ${name}`)
   process.exit(2)
 }
-
-// One prefix per server: a shared prefix makes npm prune the other server's
-// packages on every install (observed: installing playwright removed codegraph).
-const PREFIX = join(HERE, 'node_modules', '.mcp', name)
-const binPath = join(PREFIX, 'node_modules', '.bin', isWin ? `${spec.bin}.cmd` : spec.bin)
-
-function installedVersion() {
-  const parts = spec.pkg.startsWith('@') ? spec.pkg.split('/') : [spec.pkg]
-  const manifest = join(PREFIX, 'node_modules', ...parts, 'package.json')
-  if (!existsSync(manifest)) return null
-  try {
-    return JSON.parse(readFileSync(manifest, 'utf8')).version
-  } catch {
-    return null
-  }
-}
-
-const have = installedVersion()
-if (!existsSync(binPath) || have !== spec.version) {
-  if (have && have !== spec.version) {
-    console.error(`[mcp-serve] pin drift: ${spec.pkg} installed @${have}, pin wants @${spec.version}`)
-    console.error(`[mcp-serve] run: ./msrtc.sh mcp setup (or remove ${PREFIX})`)
-    process.exit(1)
-  }
-  // Missing binary = first-run path (clean clone / GUI first click). npm writes
-  // its summary to stdout, which IS the MCP channel here, so capture and re-emit
-  // on stderr.
-  console.error(`[mcp-serve] installing ${spec.pkg}@${spec.version} into ${PREFIX} ...`)
-  mkdirSync(PREFIX, { recursive: true })
-  // Keep npm's cache inside the workspace: GUI/sandbox hosts often have a
-  // read-only $HOME cache, and a local cache makes first-run installs reproducible.
-  const npmCache = join(HERE, 'node_modules', '.npm-cache')
-  mkdirSync(npmCache, { recursive: true })
-  const npm = process.env.NPM_BIN || join(dirname(process.execPath), isWin ? 'npm.cmd' : 'npm')
-  const res = spawnSync(
-    npm,
-    ['install', '--no-save', '--no-package-lock', '--prefix', PREFIX, `${spec.pkg}@${spec.version}`],
-    { cwd: HERE, env: { ...process.env, npm_config_cache: npmCache }, stdio: ['ignore', 'pipe', 'inherit'] },
-  )
-  if (res.stdout && res.stdout.length) process.stderr.write(res.stdout)
-  if (res.error) {
-    console.error('[mcp-serve] install failed:', res.error.message)
-    process.exit(1)
-  }
-  if (res.status !== 0) process.exit(res.status ?? 1)
-}
-
-const child = spawn(binPath, spec.args || [], { stdio: 'inherit', cwd: PROJECT })
-child.on('error', (err) => {
-  console.error(`[mcp-serve] failed to start ${spec.bin}:`, err.message)
-  process.exit(1)
-})
-child.on('exit', (code) => process.exit(code ?? 1))

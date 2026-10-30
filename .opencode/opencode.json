@@ -55,6 +55,15 @@
         "scripts/agents/mcp-launch.sh",
         "local-playwright"
       ]
+    },
+    "local-serena": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "bash",
+        "scripts/agents/mcp-launch.sh",
+        "local-serena"
+      ]
     }
   },
   "lsp": {

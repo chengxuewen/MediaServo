@@ -4,13 +4,13 @@ channels = ["conda-forge"]
 platforms = ["osx-64", "osx-arm64", "linux-64", "linux-aarch64"]
 version = "0.1.0"
 
-# Phase 1 base dependencies — always installed (Rust + GStreamer)
-[dependencies]
+# Media/host runtime dependencies (all environments except the isolated serena env).
+# Kept as a feature so serena can have its own Python 3.13 without inheriting GStreamer.
+[feature.media.dependencies]
 rust = ">=1.85.0,<2"
 flatbuffers = ">=24.3.25,<26"
-python = "3.12.*"
 pip = ">=24.0,<26"
-pyyaml = ">=6.0,<7"  # build-cli: mediaservo config validate (PIT-76 review BLOCKER-2)
+pyyaml = "==6.0.2"  # build-cli (PIT-76); serena-agent 2.1.0 pins the same version
 pnpm = ">=10.32,<11"  # www frontend build (build web / build server assembly step; packageManager field on the same line — 2026-09-29: new machine failed without pnpm, moved into pixi)
 caddy = ">=2.10"       # web entry reverse proxy (msrtc-web cluster entry; missing = deploy silently degrades to no frontend — added 2026-09-29 for new machines)
 ripgrep = ">=14.1.0,<15"
@@ -28,6 +28,7 @@ ruff = ">=0.8,<1"
 
 # Development tools (cmake for webrtc-sys, lld for fast linking, extra GStreamer codecs)
 [feature.dev.dependencies]
+python = "3.12.*"  # dev/test/default/ci; serena keeps its own 3.13
 cmake = ">=3.28.0,<4"
 lld = ">=18.0,<19"
 gst-plugins-ugly = ">=1.24.0,<2"
@@ -124,12 +125,29 @@ book-build = "python3 scripts/book/book-build.py"
 book-check = "python3 scripts/book/book-check.py"
 book-check-structure = "python3 scripts/book/book-check.py --structure"
 
+# Serena MCP: semantic/LSP server on its own Python 3.13 environment (D42/D30).
+[feature.serena.dependencies]
+python = "3.13.*"
+rust = ">=1.98,<2"
+rust-src = ">=1.98,<2"
+rust-analyzer = "*"
+
+[feature.serena.pypi-dependencies]
+serena-agent = "==2.1.0"
+
+[feature.serena.target.linux-64.dependencies]
+clang-tools = "23.*"
+
+[feature.serena.tasks]
+mcp-serena = "bash scripts/agents/serena-launch.sh"
+
 [environments]
-runtime = { features = [] }
-dev = { features = ["dev"] }
-test = { features = ["dev", "test", "book"] }
-ci = { features = ["dev", "test", "ci", "book"] }
-default = { features = ["dev", "test", "book"] }
+runtime = { features = ["media"] }
+dev = { features = ["media", "dev"] }
+test = { features = ["media", "dev", "test", "book"] }
+ci = { features = ["media", "dev", "test", "ci", "book"] }
+default = { features = ["media", "dev", "test", "book"] }
+serena = { features = ["serena"] }
 
 # Global tasks (available in all environments)
 [tasks]

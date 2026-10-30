@@ -1340,3 +1340,8 @@ install                        → 改名提示 + exit 2（退役）
 
 - 记忆双账本 + `child-refs` + C56-C59；9 个真缺口技能；serena + MCP 生命周期；Qoder 优先；夜间 all-gates；三文档门；入口六项下沉。
 - 记录：D297 / C52；执行另开批次。
+
+### 2026-10-30: B1 MCP closure
+
+- serena 2.1.0 env（Python 3.13 + rust-analyzer）；wrapper 解析 `MEDIASERVO_AGENT_ROOT`；codegraph 1.6.0 / playwright 0.0.82。
+- `mcp_cli.py` status/setup/sync/index；status 只读；3 服 gate 绿；进程组清理无孤儿。

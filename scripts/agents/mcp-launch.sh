@@ -19,4 +19,10 @@ if [ ! -x "$NODE" ]; then
 fi
 [ -n "$NODE" ] || { echo "mcp-launch: node not found (run bootstrap)" >&2; exit 127; }
 
+PIXI_BIN="${PIXI_BIN:-$(command -v pixi 2>/dev/null || true)}"
+if [ -z "$PIXI_BIN" ] && [ -x "$HOME/.pixi/bin/pixi" ]; then
+    PIXI_BIN="$HOME/.pixi/bin/pixi"
+fi
+export PIXI_BIN
+
 exec "$NODE" "$DIR/mcp-serve.mjs" --from "$DIR/mcp-servers.json" --name "$NAME"

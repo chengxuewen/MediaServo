@@ -9,6 +9,11 @@
       "type": "stdio",
       "command": "bash",
       "args": ["scripts/agents/mcp-launch.sh", "local-playwright"]
+    },
+    "local-serena": {
+      "type": "stdio",
+      "command": "bash",
+      "args": ["scripts/agents/mcp-launch.sh", "local-serena"]
     }
   }
 }
