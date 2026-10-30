@@ -1,0 +1,3 @@
+# English-only allowlist (C49). One file per line: path|reason.
+# Use only for historical/translation artifacts; new user-facing docs stay English.
+docs/modules/25-abi-baseline.md|historical ABI baseline; CJK retained for fidelity (translation is a separate task)

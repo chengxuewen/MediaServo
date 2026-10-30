@@ -210,4 +210,5 @@ _Project has entered the code implementation phase. Current state:_
 - 2026-10-30: B1 MCP closure
 - 2026-10-30: B2a skills
 - 2026-10-30: B2b lsp
+- 2026-10-30: C1 doc gates
 <!-- END:agents-memory -->

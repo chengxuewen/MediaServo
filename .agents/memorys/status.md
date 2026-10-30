@@ -1355,3 +1355,8 @@ install                        → 改名提示 + exit 2（退役）
 
 - `lsp-code-analysis` 入册（33 skills）；serena 工具梯（find_symbol/implementations/referencing_symbols）+ codegraph/ripgrep fallback。
 - 真实验证：`codegraph query "Plugin"` 命中 `crates/mediaservo-media/src/plugin.rs` 的 trait + PluginKind/PluginManager。
+
+### 2026-10-30: C1 doc gates
+
+- 英文门文件级白名单（25-abi 带理由）；`mediaservo.sh` 1 行 CJK 修掉；717 文件 PASS。
+- 相对链接门 77 文件/0 死链；承诺门 3 文件/0 finding；三门自证 + 接入 all-gates（CONSTRAINTS 6/8/10）。

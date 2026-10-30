@@ -2,7 +2,7 @@
 
 > MediaServo's third-party integration SDK uses the **four-SDK master architecture**: link (connection) / field (composed sessions) / client (cockpit-side consumption orchestration) / deck (media data).
 > Related decisions: D222-D234 (2026-08-13/14, superseding the D65-D69/D82 dual-facade model; D230-232 revised to static direct-link/composed SDK/consumer positioning; D233 single-layer session-style API; D234 calling conventions)
-> **Public API contract**: [20-sdk-api-contract.md](/docs/modules/20-sdk-api-contract.md) (link/field/client/deck interface signatures + C ABI binding forms)
+> **Public API contract**: [20-sdk-api-contract.md](20-sdk-api-contract.md) (link/field/client/deck interface signatures + C ABI binding forms)
 
 ---
 

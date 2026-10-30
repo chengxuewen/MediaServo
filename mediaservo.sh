@@ -298,7 +298,7 @@ _msvc_copy_with_kill() {
     local src=$1 dst=$2 attempt err
     for attempt in 1 2 3; do
         # LC_ALL=C so the "Text file busy" message is English on every host —
-        # a zh_CN box reported 文本文件忙 and the busy pattern missed, so the
+        # a zh_CN box reported "text file busy" and the busy pattern missed, so the
         # ETXTBSY retry never fired (real bug: re-deploy failed on this host)
         if err=$(LC_ALL=C cp -p "$src" "$dst" 2>&1); then return 0; fi
         case "$err" in

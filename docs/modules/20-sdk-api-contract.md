@@ -59,7 +59,7 @@ pub enum AuthCredential { Psk(PskCredential), Jwt(JwtCredential) }
 
 ## 3. link — Connection Surface
 
-> **The device-side IPC special topic** (FrameBus bus / Registry registration / ACL permissions / capability tokens) **is implemented** (iceoryx2), see [21-link-ipc.md](/docs/modules/21-link-ipc.md). This section covers link's signaling toward the server (SignalClient) and shared types.
+> **The device-side IPC special topic** (FrameBus bus / Registry registration / ACL permissions / capability tokens) **is implemented** (iceoryx2), see [21-link-ipc.md](21-link-ipc.md). This section covers link's signaling toward the server (SignalClient) and shared types.
 
 ```rust
 #[derive(Debug, thiserror::Error)]

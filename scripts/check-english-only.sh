@@ -13,6 +13,16 @@ cd "$(dirname "$0")/.." || exit 2
 SUMMARY=0
 [ "${1:-}" = "--summary" ] && SUMMARY=1
 
+# File-level allowlist (path|reason); used only for historical/translation artifacts.
+ALLOW_FILE=scripts/english-only-allow.txt
+declare -A ALLOW=()
+if [ -f "$ALLOW_FILE" ]; then
+  while IFS='|' read -r allow_path allow_reason; do
+    case "$allow_path" in ''|'#'*) continue ;; esac
+    ALLOW["$allow_path"]=1
+  done < "$ALLOW_FILE"
+fi
+
 # Collect tracked files matching artifact globs (respects gitignore automatically)
 mapfile -t FILES < <(git ls-files \
   'crates/**/*.rs' \
@@ -39,8 +49,28 @@ fi
 # trigger keywords that MUST match user Chinese input) are not counted as offenders.
 # grep -P CJK range, minus pragma lines
 count_cjk() { # $1 = file; prints count of CJK lines lacking the c49:trigger pragma
+  [ -n "${ALLOW[$1]:-}" ] && { echo 0; return 0; }
   grep -P '[\x{4e00}-\x{9fff}]' -- "$1" 2>/dev/null | grep -cv 'c49:trigger' || true
 }
+if [ "${1:-}" = "--self-test" ]; then
+  mkdir -p .cache
+  tmp=$(mktemp -d .cache/english-self-test.XXXXXX) || exit 2
+  printf 'hello \u4e2d\u6587\n' > "$tmp/plain.md"
+  printf '\u4e2d\u6587 <!-- c49:trigger -->\n' > "$tmp/trigger.md"
+  printf '\u4e2d\u6587\n' > "$tmp/allow.md"
+  ALLOW["$tmp/allow.md"]=1
+  n_plain=$(count_cjk "$tmp/plain.md")
+  n_trigger=$(count_cjk "$tmp/trigger.md")
+  n_allow=$(count_cjk "$tmp/allow.md")
+  rm -rf "$tmp"
+  if [ "$n_plain" -eq 1 ] && [ "$n_trigger" -eq 0 ] && [ "$n_allow" -eq 0 ]; then
+    echo "CHECK-ENGLISH self-test ✓ (plain red, trigger exempt, allowlist exempt)"
+    exit 0
+  fi
+  echo "CHECK-ENGLISH self-test ✗ plain=$n_plain trigger=$n_trigger allow=$n_allow"
+  exit 1
+fi
+
 if [ "$SUMMARY" -eq 1 ]; then
   HITS=0
   for f in "${FILES[@]}"; do

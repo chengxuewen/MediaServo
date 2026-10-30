@@ -264,15 +264,15 @@ See docs/reference/codec/ffmpeg-static-build-strategy.md.
 
 - [17. WebRTC Crate](17-webrtc-crate.md) — the WebRTC transport layer, target of encoder output
 - [08. Pipeline Model Reference](08-pipeline-model.md) — PipelineEngine integration
-- [Decision records D43/D46/D70/D71/D82](../.agents/memorys/decisions.md) — the codec architecture decision chain
+- [Decision records D43/D46/D70/D71/D82](../../.agents/memorys/decisions.md) — the codec architecture decision chain
 - [FFmpeg static build strategy](../reference/codec/ffmpeg-static-build-strategy.md) — build plan
-- [SDD acceptance criteria](../../docs/plans/mediaservo-codec/acceptance-criteria.md) — concrete thresholds
-- [Acceptance matrix §10](../../docs/plans/mediaservo-codec/acceptance-criteria.md#10-test-matrix) — 20-scenario AC matrix
+- SDD acceptance criteria (historical plan, no longer present) — concrete thresholds
+- Acceptance matrix §10 (historical plan, no longer present) — 20-scenario AC matrix
 
 ## Cross References
 
 The following documents link back to this one:
 - [17. WebRTC Crate](17-webrtc-crate.md) — Phase 2 reserved write_frame / on_encoded_packet API
-- [SDD acceptance criteria](../../docs/plans/mediaservo-codec/acceptance-criteria.md) — aligned with the push-pull trait API
+- SDD acceptance criteria (historical plan, no longer present) — aligned with the push-pull trait API
 - [FFmpeg static build strategy](../reference/codec/ffmpeg-static-build-strategy.md) — prebuilt + CI integration
-- [Acceptance matrix §10](../../docs/plans/mediaservo-codec/acceptance-criteria.md#10-test-matrix) — 8+ scenario test matrix
+- Acceptance matrix §10 (historical plan, no longer present) — 8+ scenario test matrix

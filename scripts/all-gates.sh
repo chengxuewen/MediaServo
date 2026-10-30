@@ -36,6 +36,14 @@ gate "agent toolchain"             bash scripts/agents/tools-check.sh
 # Book structure: check-only; SKIPs when build/book-src/SUMMARY.md is absent (bare clone).
 gate "book structure"              python3 scripts/book/book-check.py --structure
 
+# Documentation quality: language, dead links, overclaims (C1).
+gate "english gate self-test"      bash scripts/check-english-only.sh --self-test
+gate "english only"               bash scripts/check-english-only.sh
+gate "docs link self-test"        python3 scripts/agents/check_docs_links.py --self-test
+gate "docs links"                 python3 scripts/agents/check_docs_links.py
+gate "promises self-test"         python3 scripts/agents/check_promises.py --self-test
+gate "doc promises"               python3 scripts/agents/check_promises.py
+
 # ── fmt job, three fragments ──
 gate "fmt --check (incremental)"  bash -c '
   base=$(git rev-parse --abbrev-ref "@{u}" 2>/dev/null || echo HEAD)

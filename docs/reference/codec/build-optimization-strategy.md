@@ -245,7 +245,7 @@ time scripts/docker-cargo.sh check -p mediaservo-server --features sfu-mediasoup
 
 ## References
 
-- [docker-workflow.md](../modules/development/docker-workflow.md) — the Docker development workflow
+- [docker-workflow.md](../../modules/development/docker-workflow.md) — the Docker development workflow
 - [ffmpeg-static-build-strategy.md](./ffmpeg-static-build-strategy.md) — a build strategy reference (same kind)
 - Project memory: PIT-11/12/13/19/31/32/33 (mediasoup builds, proxies, Docker lessons)
 - Decisions: D206 (cargo mirror revision), D207 (pre-built image continuation), D208 (build-optimization strategy implementation)

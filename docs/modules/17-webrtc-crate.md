@@ -305,7 +305,7 @@ crates/mediaservo-webrtc/
 - [10. Signaling architecture](10-signaling-architecture.md) — the signaling layer, calls this crate to create connections
 - [14. Remote architecture](14-remote-architecture.md) — Remote Client/Host use this crate
 - [15. Component architecture](15-component-architecture.md) — Components communicate through this crate
-- [Decision records D144–D151](../.agents/memorys/decisions.md) — the architecture decision chain
+- [Decision records D144–D151](../../.agents/memorys/decisions.md) — the architecture decision chain
 
 ## Current Status
 
