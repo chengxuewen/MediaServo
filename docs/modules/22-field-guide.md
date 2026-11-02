@@ -61,7 +61,7 @@ mediaservo_field_push_start_video_frames(s);
 mediaservo_field_push_close(s);
 ```
 
-Full example: `bindings/c/mediaservo-field-c/examples/vehicle_push.c`
+Full example: `examples/c/field/vehicle_push.c`
 
 ## Runtime Prerequisites
 

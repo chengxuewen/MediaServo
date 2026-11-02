@@ -217,7 +217,7 @@ if (!sent) {
 }
 ```
 
-> Source: `bindings/cxx/mediaservo-link-cxx/examples/vehicle_link.cpp` (the full program includes
+> Source: `examples/cxx/crate-examples/vehicle_link.cpp` (the full program includes
 > `std::getenv` config reads and a `session.close()` ending; a running server is needed for the full flow).
 
 ### 5.2 Error Paths & Closed Semantics (real test code)

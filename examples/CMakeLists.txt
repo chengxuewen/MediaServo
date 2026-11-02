@@ -8,8 +8,12 @@
 # submodule's MEDIASERVO_IDE_ROOT, plan ide-folder-hierarchy mechanism).
 #
 # cxx  — GUI/SDK examples island (F25 system-toolchain constitution + PIT-189
-#        SDK-dir + cross-gate BINDINGS, all in the band root).
-# c    — batch ②: crate-embedded example material (plan C-D2).
+#        SDK-dir + cross-gate BINDINGS, all in the band root). Crate usage material
+#        (vehicle_{field,link,deck}.cpp + standalone ros2_node/) rides under
+#        cxx/crate-examples/ — one level deeper, deliberately invisible to the band
+#        G4 glob (*/CMakeLists.txt); compiled by e2e/docs paths, not CMake targets.
+# c    — batch ② LANDED: per-domain C material (deck/field/link), pure gcc artifacts
+#        compiled by scripts/e2e-bindings.sh; no CMake targets, no mount.
 # py   — batch ③: wheel-out examples relocation, C-D7 safe-valve applies.
 # rs   — batch ④: workspace-member example package + PolyOrch D40 EXAMPLE face
 #        (C-D6=B/C-D10=B'). The CMake face here inherits this family gate;

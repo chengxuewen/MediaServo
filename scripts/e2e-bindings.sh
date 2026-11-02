@@ -37,7 +37,7 @@ check() {
 
 # ── 3. C field: push to a real server ───────────────────────
 note "C field push"
-gcc bindings/c/mediaservo-field-c/examples/vehicle_push.c \
+gcc examples/c/field/vehicle_push.c \
     -I bindings/c/mediaservo-field-c/include -I bindings/c/include \
     -L target/debug -lmediaservo_field -o /tmp/opencode/e2e_vp
 check "C field: connected + published + frames" "frames running" \
@@ -45,7 +45,7 @@ check "C field: connected + published + frames" "frames running" \
 
 # ── 4. C link: signaling + event pump ───────────────────────
 note "C link signal"
-gcc bindings/c/mediaservo-link-c/examples/vehicle_signal.c \
+gcc examples/c/link/vehicle_signal.c \
     -I bindings/c/mediaservo-link-c/include -I bindings/c/include \
     -L target/debug -lmediaservo_link -o /tmp/opencode/e2e_vs
 check "C link: connected + event echo" '"type":"message"' \
@@ -53,7 +53,7 @@ check "C link: connected + event echo" '"type":"message"' \
 
 # ── 5. C deck: capture→record→playback closed loop ──────────
 note "C deck record/playback"
-gcc bindings/c/mediaservo-deck-c/examples/record_playback.c \
+gcc examples/c/deck/record_playback.c \
     -I bindings/c/mediaservo-deck-c/include -I bindings/c/include \
     -L target/debug -lmediaservo_deck -o /tmp/opencode/e2e_rp
 out=$(stdbuf -oL timeout 40 env LD_LIBRARY_PATH="$PWD/target/debug" /tmp/opencode/e2e_rp 2>&1 || true)
@@ -73,7 +73,7 @@ note "C++ field push"
 g++ -std=c++11 -Wall -Wextra \
     -I bindings/cxx/mediaservo-field-cxx/include -I bindings/cxx/include \
     -I bindings/c/mediaservo-field-c/include -I bindings/c/include \
-    bindings/cxx/mediaservo-field-cxx/examples/vehicle_field.cpp \
+    examples/cxx/crate-examples/vehicle_field.cpp \
     -L target/debug -lmediaservo_field -o /tmp/opencode/e2e_cxx
 check "C++ field: published" "published track" \
     env LD_LIBRARY_PATH="$PWD/target/debug" \

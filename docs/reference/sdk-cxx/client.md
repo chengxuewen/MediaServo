@@ -18,7 +18,7 @@ Typical scenarios:
 | Teleoperation cockpit | `list_rooms` discovers stream rooms + the whole-vehicle control room → a dual-Session pairing (see §8's two-room convention) → `consume` video + the `open_control`/`send`/`on_ack` control loop |
 | Monitoring wall / NVR playback end | multiple `Session::consume` (K4: one pump per stream, no cross-impact) + `Consumer::stats` mini readouts |
 | Safety e-stop | `Session::emergency_stop` (the HMAC-signed form, W4b) |
-| A ROS2 cockpit bridge | `bindings/cxx/mediaservo-client-cxx/examples/ros2_node/` (the pkg-config consumption form) |
+| A ROS2 cockpit bridge | `examples/cxx/crate-examples/ros2_node/` (the pkg-config consumption form) |
 
 Not applicable: the push/capture side (that's the `mediaservo::field` / host binary territory).
 

@@ -13,6 +13,11 @@ teams); for development process details, consult git log directly. Newest versio
   dir+prefix==target==artifact — targets/artifacts carry the mediaservo-example-
   brand (dir names unchanged); IDE run buttons pinned WORKING_DIRECTORY to the
   repo root (imgui.ini lands there regardless of binaryDir)
+- [examples] batch ②: crate-embedded usage material consolidated to the top-level
+  tree — C examples per domain under examples/c/{deck,field,link}/ and C++ demos +
+  the standalone ros2_node project under examples/cxx/crate-examples/ (one level
+  deeper than the G4 glob by design); e2e-bindings and the sdk-cxx/field-guide doc
+  paths follow the move; no new CMake targets (material, not lanes)
 - [deploy] deploy-guard two modes: refuse (default, unchanged) and teardown
   (host face stop-first: unit -> daemon -> family, CWD-scoped to the target
   prefix); host IDE target runs teardown; single-writer flock per deploy

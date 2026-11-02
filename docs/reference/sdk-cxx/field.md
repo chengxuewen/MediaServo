@@ -78,8 +78,8 @@ Key points (source-verified):
 
 ## 3. Lifecycle Sequence
 
-The call order comes from `bindings/cxx/mediaservo-field-cxx/examples/vehicle_field.cpp` (full text) and
-`bindings/c/mediaservo-field-c/examples/vehicle_push.c` (L14-73).
+The call order comes from `examples/cxx/crate-examples/vehicle_field.cpp` (full text) and
+`examples/c/field/vehicle_push.c` (L14-73).
 
 ```mermaid
 sequenceDiagram
@@ -218,7 +218,7 @@ config fields are passed as nullptr to C (`c_str_or_null`, L44-46), and the C fa
 
 ### 5.1 Complete C++ Push (real example; credentials injected via env)
 
-Source: `bindings/cxx/mediaservo-field-cxx/examples/vehicle_field.cpp` L10-59 (a skeleton excerpt, line by
+Source: `examples/cxx/crate-examples/vehicle_field.cpp` L10-59 (a skeleton excerpt, line by
 line against the original; the compile command is in that file's L2-3 comment and section 7).
 
 ```cpp
@@ -264,7 +264,7 @@ int main() {
 
 ### 5.2 The Equivalent C ABI Flow
 
-Source: `bindings/c/mediaservo-field-c/examples/vehicle_push.c` L14-73 (that example hardcodes
+Source: `examples/c/field/vehicle_push.c` L14-73 (that example hardcodes
 `ws://127.0.0.1:9800/ws` as a dev value; inject per the header's L8-16 usage for production).
 
 ```c

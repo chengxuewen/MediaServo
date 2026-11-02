@@ -59,8 +59,8 @@ Key points (all code-backed):
 
 ## 3. Lifecycle Sequence
 
-The call order comes from the real example `bindings/cxx/mediaservo-deck-cxx/examples/vehicle_deck.cpp`
-(L26-L92) and the C example `bindings/c/mediaservo-deck-c/examples/record_playback.c` (L33-L144):
+The call order comes from the real example `examples/cxx/crate-examples/vehicle_deck.cpp`
+(L26-L92) and the C example `examples/c/deck/record_playback.c` (L33-L144):
 
 ```mermaid
 sequenceDiagram
@@ -198,7 +198,7 @@ non-null. Multiple devices are newline-separated; `kind`: 0=Camera 1=Audio 2=Scr
 
 ### 5.1 C++ Capture→Record→Playback Closed Loop (real code)
 
-Source: `bindings/cxx/mediaservo-deck-cxx/examples/vehicle_deck.cpp` L26-L75 (excerpt; the playback section
+Source: `examples/cxx/crate-examples/vehicle_deck.cpp` L26-L75 (excerpt; the playback section
 is analogous at L78-L91; requires the env var `MEDIASERVO_RECORD_PATH`).
 
 ```cpp
@@ -255,7 +255,7 @@ assert(c.close().has_value()); // idempotent (C++ layer; a repeated C-layer clos
 
 ### 5.3 C ABI Consumption (real code, excerpt)
 
-Source: `bindings/c/mediaservo-deck-c/examples/record_playback.c` L39-L58, L94-L118.
+Source: `examples/c/deck/record_playback.c` L39-L58, L94-L118.
 
 ```c
 /* 1. Enumerate cameras (two-call pattern: first the length, then the content) */
@@ -416,8 +416,8 @@ pkg-config --cflags --libs mediaservo-deck
 | Shared C++ Result | `bindings/cxx/include/mediaservo/detail/result.hpp` |
 | C ABI impl + unit tests | `bindings/c/mediaservo-deck-c/src/lib.rs` |
 | The C++ compile-and-run test | `bindings/cxx/mediaservo-deck-cxx/tests/test_deck.cpp` |
-| The C++ closed-loop example | `bindings/cxx/mediaservo-deck-cxx/examples/vehicle_deck.cpp` |
-| The C closed-loop example | `bindings/c/mediaservo-deck-c/examples/record_playback.c` |
+| The C++ closed-loop example | `examples/cxx/crate-examples/vehicle_deck.cpp` |
+| The C closed-loop example | `examples/c/deck/record_playback.c` |
 | The Rust deck crate | `crates/mediaservo-deck/` (source/record/playback/error) |
 | CMake/pkg-config templates | `bindings/c/cmake/mediaservoConfig.cmake.in` · `bindings/c/mediaservo-deck-c/mediaservo-deck.pc.in` |
 | The C++ test driver script | `scripts/test-cxx.sh` |
