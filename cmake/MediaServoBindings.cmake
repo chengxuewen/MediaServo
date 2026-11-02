@@ -57,6 +57,65 @@ function(mediaservo_setup_bindings)
         BASE_DIR "${_target_dir}"
         FOLDER "${MEDIASERVO_IDE_ROOT}bindings/node")
 
+    # -- link faces (plan bindings-faces P2/P3, rulings 1-A/2-A + R2-1) ----------
+    # One merged dual-language consumer face per domain, mirroring the install-tree
+    # Config contract (mediaservoConfig.cmake.in:22-29: mediaservo::<sdk> = merged
+    # include + single .so). Iron law 7: the ALIAS IS the delivered name — tree and
+    # install states stay word-for-word identical. No compile-features ride
+    # (ruling 8-B: the C++11 floor is a documented compatibility promise, not an
+    # enforced property). The lane handle carries artifact path + build order (C-1);
+    # P1③ measured: it exports NO includes — the face adds all four roots itself.
+    foreach(_sdk IN LISTS MEDIASERVO_BINDINGS_SDKS)
+        add_library(mediaservo-${_sdk}-sdk INTERFACE)
+        add_library(mediaservo::${_sdk} ALIAS mediaservo-${_sdk}-sdk)
+        target_include_directories(mediaservo-${_sdk}-sdk INTERFACE
+            "$<BUILD_INTERFACE:${_root}/bindings/c/include>"                       # mediaservo/common.h
+            "$<BUILD_INTERFACE:${_root}/bindings/c/mediaservo-${_sdk}-c/include>"  # mediaservo/<sdk>.h
+            "$<BUILD_INTERFACE:${_root}/bindings/cxx/include>"                     # detail/ + 3rdparty/tl/
+            "$<BUILD_INTERFACE:${_root}/bindings/cxx/mediaservo-${_sdk}-cxx/include>") # mediaservo/<sdk>.hpp
+        target_link_libraries(mediaservo-${_sdk}-sdk INTERFACE mediaservo-${_sdk}-c)
+        if(UNIX AND NOT APPLE)
+            # in-tree consumers skip LD_LIBRARY_PATH (VE Ffi:82-85 shape; the dir
+            # derives from the handle, never re-spelled — C-1 discipline)
+            get_target_property(_face_loc mediaservo-${_sdk}-c IMPORTED_LOCATION)
+            if(_face_loc)
+                get_filename_component(_face_dir "${_face_loc}" DIRECTORY)
+                target_link_options(mediaservo-${_sdk}-sdk INTERFACE "-Wl,-rpath,${_face_dir}")
+            endif()
+        endif()
+    endforeach()
+
+    # -- view faces (plan bindings-faces P4, ruling 3-A) -------------------------
+    # Zero-command custom carriers (manifest precedent: File API records them —
+    # ide-folder-hierarchy P9 measured). Tables = P1② disk-verified final count
+    # (c: 5, cxx: 6 incl. the vendored expected.hpp per ruling 5-A); helper FOLDER
+    # kw carries the grouping (iron law 2: ${V} prefix; standalone stays bare).
+    # The stale-table direction FATALs; the undeclared-disk direction is blind for
+    # our nested mediaservo/ layout (F6-A: discipline + §6.3 negative test, on record).
+    add_custom_target(mediaservo-c-sources
+        COMMENT "mediaservo C headers: bindings/c/include + per-domain crate includes")
+    polyorch_header_face(TARGET mediaservo-c-sources
+        DIRECTORY "${_root}/bindings/c/include"
+        FOLDER "${MEDIASERVO_IDE_ROOT}bindings/c"
+        HEADERS
+            mediaservo/common.h
+            "${_root}/bindings/c/mediaservo-field-c/include/mediaservo/field.h"
+            "${_root}/bindings/c/mediaservo-link-c/include/mediaservo/link.h"
+            "${_root}/bindings/c/mediaservo-deck-c/include/mediaservo/deck.h"
+            "${_root}/bindings/c/mediaservo-client-c/include/mediaservo/client.h")
+    add_custom_target(mediaservo-cxx-sources
+        COMMENT "mediaservo C++ headers: bindings/cxx/include + per-domain crate includes")
+    polyorch_header_face(TARGET mediaservo-cxx-sources
+        DIRECTORY "${_root}/bindings/cxx/include"
+        FOLDER "${MEDIASERVO_IDE_ROOT}bindings/cxx"
+        HEADERS
+            mediaservo/detail/result.hpp
+            mediaservo/3rdparty/tl/expected.hpp
+            "${_root}/bindings/cxx/mediaservo-field-cxx/include/mediaservo/field.hpp"
+            "${_root}/bindings/cxx/mediaservo-link-cxx/include/mediaservo/link.hpp"
+            "${_root}/bindings/cxx/mediaservo-deck-cxx/include/mediaservo/deck.hpp"
+            "${_root}/bindings/cxx/mediaservo-client-cxx/include/mediaservo/client.hpp")
+
     # -- SR4 L1: delivery staging rules for the four SDK cdylibs -------------
     # D241 version triple + N7 strip, absorbed from python (one leg, one
     # owner: the triple loop/copy2/_strip_so/symlink pair in
@@ -244,4 +303,10 @@ function(mediaservo_setup_bindings)
             endforeach()
         ")
     endif()
+
+    # In-tree Config pin (plan bindings-faces P5.5, ruling 9-A; VE Ffi:89 shape).
+    # R4-1: the searched file is the CONVENTIONAL name — cmake/mediaservoConfig.cmake
+    # (checked-in, mirrors the install template's target contract; guard shape
+    # if(NOT TARGET) per C1 iron law 7).
+    set(mediaservo_DIR "${_root}/cmake" CACHE PATH "mediaservo in-tree config" FORCE)
 endfunction()

@@ -106,6 +106,8 @@ bindings/python/ → mediaservo_{link,field,deck,client}/ (not a cargo member, p
 
 For the link-conflict discipline and cross-language comparison tests (c/cxx/py/pyo3 asserting the same operation sequence), see spec §7, §11. For dependency-era semantics (build time vs runtime), see spec §15.
 
+**CMake consumption faces (bindings-faces round)**: each domain ships one merged dual-language link face — real name `mediaservo-<sdk>-sdk`, ALIAS `mediaservo::<sdk>` which is THE consumer name in both tree and install states (the install Config contract; two-state-same-name discipline). The face carries the four BUILD_INTERFACE include roots (c/include + c/<domain> + cxx/include + cxx/<domain>), links the lane artifact handle (path + build order, single-sourced), and rpaths the artifact dir. No C++ standard attribute rides the face (the C++11 floor is a documented compatibility promise verified by `test-cxx`, ruling 8-B); the island-only conda libstdc++ workaround stays island-side (ruling 6-A). In-tree `find_package(mediaservo [COMPONENTS …])` resolves through the pinned `cmake/mediaservoConfig.cmake` fake; examples consume `mediaservo::client` directly (ruling 7-B — the old hand-rolled `mediaservo_client_sdk` shell is retired; the island mount additionally FATALs when the bindings gate is off). Two viewer-only faces, `mediaservo-c-sources` / `mediaservo-cxx-sources`, list the public headers (c: 5, cxx: 6 incl. the vendored `tl/expected.hpp`, ruling 5-A) in the IDE via `polyorch_header_face` with its disk↔table audit.
+
 ## 9. Future Extensions (Phase 3+)
 
 - Video conference / live streaming / surveillance sub-scenario SDKs: scenario APIs layered over the field session surface (ConferenceSession etc.)

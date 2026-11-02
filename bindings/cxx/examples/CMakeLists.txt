@@ -67,26 +67,33 @@ if(MEDIASERVO_BUILD_EXAMPLES AND _ms_env_dirty)
 endif()
 
 
-add_library(mediaservo_client_sdk INTERFACE)
-# IDE group (plan ide-folder-hierarchy P8, ruling M-1 full coverage): definition-point
-# sets — the root loop only carries same-named dir targets and would drop these.
-set_target_properties(mediaservo_client_sdk PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples")
-target_include_directories(mediaservo_client_sdk INTERFACE
-    "${REPO_ROOT}/bindings/cxx/mediaservo-client-cxx/include"  # client.hpp（C++）
-    "${REPO_ROOT}/bindings/cxx/include"                          # detail/result.hpp
-    "${REPO_ROOT}/bindings/c/mediaservo-client-c/include"        # client.h（C ABI）
-    "${REPO_ROOT}/bindings/c/include")                           # common.h
-target_link_libraries(mediaservo_client_sdk INTERFACE
-    "${MEDIASERVO_SDK_DIR}/libmediaservo_client.so")
+# -- link-face consumption (plan bindings-faces P5, ruling 7-B) ------------------
+# The hand-rolled SDK shell (mediaservo_client_sdk, retired here) was the pre-face
+# shape: its include×4 + .so path + rpath triple now lives in mediaservo::client
+# (MediaServoBindings.cmake P2/P3) — the single authority, same name in tree and
+# install states (iron law 7). Forward reference of the later-defined ALIAS is the
+# measured pattern (P1④ probe: configure+generate green; the island mounts at the
+# root's :50 before the bindings setup at :74).
+if(NOT MEDIASERVO_BUILD_BINDINGS)
+    message(FATAL_ERROR
+        "examples island requires MEDIASERVO_BUILD_BINDINGS=ON — the link faces"
+        " (mediaservo::<sdk>) are registered by the bindings lanes (bindings-faces"
+        " ruling 7-B cross-gate check; gate-variable form per R4-2: a TARGET-existence"
+        " test here could never pass, the setup runs after this mount)")
+endif()
+
+# Island-private conda libstdc++ patch (ruling 6-A: environment-specific, consumer-
+# side only — never rides the public face; ruling 7-B moved it off the old shell).
 # The SDK is built with the conda toolchain (GLIBCXX_3.4.29/3.4.30 new symbols): when the examples use the system
 # compiler chain (the focal header mix fix, 2026-09-28), linking needs rpath-link to see the conda
 # libstdc++ to resolve versioned symbols; at runtime the .so's own RPATH backstops it, and the conda compiler also tolerates this flag.
+add_library(mediaservo-examples-toolchain-patch INTERFACE)
 set(_ms_conda_lib "${REPO_ROOT}/.pixi/envs/default/lib")
 if(EXISTS "${_ms_conda_lib}/libstdc++.so.6")
     # -L makes the driver-appended -lstdc++ resolve to the conda version (full versioned symbols; first -L wins);
     # rpath-link lets ld resolve the .so's NEEDED chain; rpath keeps the runtime loading the conda libstdc++
     # (system gcc-10 has 3.4.28 without 3.4.29/30 → a runtime version-not-found).
-    target_link_options(mediaservo_client_sdk INTERFACE
+    target_link_options(mediaservo-examples-toolchain-patch INTERFACE
         "-L${_ms_conda_lib}"
         "-Wl,-rpath-link,${_ms_conda_lib}"
         "-Wl,-rpath,${_ms_conda_lib}")
