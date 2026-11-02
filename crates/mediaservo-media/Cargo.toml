@@ -15,9 +15,9 @@ tokio = { version = "1", features = ["sync", "rt-multi-thread", "time", "macros"
 
 
 [dev-dependencies]
-eframe = "0.30"
-egui = "0.30"
 image = "0.25"
+# eframe/egui left with the egui examples (batch ④: they live in examples/rs now,
+# where the package declares them itself) — tests here only need image
 
 [features]
 default = ["backend-yuv-sys", "capture-v4l2"]
@@ -31,10 +31,5 @@ v4l = { version = "0.14", optional = true }
 [package.metadata.docs.rs]
 features = ["backend-yuv-sys"]
 
-[[example]]
-name = "viewer"
-required-features = ["backend-native"]  # 预存 bug 修复: import NativeTransform (mediaservo-rename T4 发现)
-
-[[example]]
-name = "square-gen-egui"
-required-features = ["backend-yuv-sys"]
+# example lanes relocated to examples/rs (plan directory-artifacts-convergence batch ④;
+# the required-features they declared ride the examples package dependency graph now)

@@ -42,7 +42,7 @@ session.stop_video_frames();
 session.close().await?;
 ```
 
-Full example: `crates/mediaservo-field/examples/vehicle_push.rs`
+Full example: `examples/rs/vehicle_push.rs`
 
 ## C ABI Example
 

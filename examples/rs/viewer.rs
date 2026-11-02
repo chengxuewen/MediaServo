@@ -1,22 +1,18 @@
-#![cfg(feature = "backend-yuv-sys")]
-
 // mediaservo-media viewer — VideoFrame transform demo with egui (grid + single view)
-// Usage: cargo run -p mediaservo-media --example viewer --features backend-native
+// Usage: cargo run -p examples --example viewer
 
-// Note: all code between here and fn main requires backend-native.
-// The empty-crate pattern is intentional — cargo needs a main fn.
-
-// mediaservo-media viewer — VideoFrame transform demo with egui (grid + single view)
-// Usage: cargo run -p mediaservo-media --example viewer --features backend-native
+// Backend-agnostic by design: ActiveTransform is media's compile-time alias for
+// whichever backend is selected (LibyuvTransform | NativeTransform), so this demo
+// builds under either. The pair is mutually exclusive inside mediaservo-media.
 
 use eframe::egui;
-use mediaservo_media::backend::NativeTransform;
+use mediaservo_media::backend::ActiveTransform;
 use mediaservo_media::base::buffer::{I420Buffer, VideoBuffer};
 use mediaservo_media::base::rotation::VideoRotation;
 use mediaservo_media::pixel_format::PixelFormat;
 use mediaservo_media::transform::VideoTransform;
 
-// ── Helpers wrapping NativeTransform ───────────────────────
+// ── Helpers wrapping ActiveTransform ───────────────────────
 
 fn i420_scale(src: &I420Buffer, new_w: u32, new_h: u32) -> I420Buffer {
     let src_w = src.width();
@@ -24,7 +20,7 @@ fn i420_scale(src: &I420Buffer, new_w: u32, new_h: u32) -> I420Buffer {
     let src_ref = src.as_i420_ref().unwrap();
     let dst = I420Buffer::new(new_w, new_h);
     let dst_ref = dst.as_i420_ref().unwrap();
-    NativeTransform::scale(src_ref, src_w, src_h, dst_ref, new_w, new_h).unwrap();
+    ActiveTransform::scale(src_ref, src_w, src_h, dst_ref, new_w, new_h).unwrap();
     dst
 }
 
@@ -32,7 +28,7 @@ fn i420_crop(src: &I420Buffer, x: u32, y: u32, w: u32, h: u32) -> I420Buffer {
     let src_ref = src.as_i420_ref().unwrap();
     let dst = I420Buffer::new(w, h);
     let dst_ref = dst.as_i420_ref().unwrap();
-    NativeTransform::crop(src_ref, x, y, w, h, dst_ref).unwrap();
+    ActiveTransform::crop(src_ref, x, y, w, h, dst_ref).unwrap();
     dst
 }
 
@@ -46,7 +42,7 @@ fn i420_rotate(src: &I420Buffer, rot: VideoRotation) -> I420Buffer {
     let src_ref = src.as_i420_ref().unwrap();
     let dst = I420Buffer::new(dst_w, dst_h);
     let dst_ref = dst.as_i420_ref().unwrap();
-    NativeTransform::rotate(src_ref, w, h, rot, dst_ref).unwrap();
+    ActiveTransform::rotate(src_ref, w, h, rot, dst_ref).unwrap();
     dst
 }
 
@@ -56,10 +52,10 @@ fn i420_nv12_roundtrip(src: &I420Buffer) -> I420Buffer {
     let src_ref = src.as_i420_ref().unwrap();
     let mut nv12_y = vec![0u8; (w * h) as usize];
     let mut nv12_uv = vec![0u8; (w * (h / 2)) as usize];
-    NativeTransform::i420_to_nv12(src_ref, w, h, &mut nv12_y, &mut nv12_uv).unwrap();
+    ActiveTransform::i420_to_nv12(src_ref, w, h, &mut nv12_y, &mut nv12_uv).unwrap();
     let dst = I420Buffer::new(w, h);
     let dst_ref = dst.as_i420_ref().unwrap();
-    NativeTransform::nv12_to_i420(&nv12_y, &nv12_uv, w, h, dst_ref).unwrap();
+    ActiveTransform::nv12_to_i420(&nv12_y, &nv12_uv, w, h, dst_ref).unwrap();
     dst
 }
 
@@ -110,7 +106,7 @@ fn load_i420() -> I420Buffer {
         let bgra: Vec<u8> = rgba.pixels().flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
         let dst = I420Buffer::new(w, h);
         let dst_ref = dst.as_i420_ref().unwrap();
-        if NativeTransform::argb_to_i420(&bgra, w, h, dst_ref).is_ok() {
+        if ActiveTransform::argb_to_i420(&bgra, w, h, dst_ref).is_ok() {
             return dst;
         }
     }
@@ -140,7 +136,7 @@ impl FrameVariant {
         let h = i420.height();
         let mut rgba = vec![0u8; (w * h * 4) as usize];
         let src_ref = i420.as_i420_ref().unwrap();
-        NativeTransform::i420_to_argb(src_ref, w, h, PixelFormat::RGBA, &mut rgba).unwrap();
+        ActiveTransform::i420_to_argb(src_ref, w, h, PixelFormat::RGBA, &mut rgba).unwrap();
         Self { label: label.into(), rgba, width: w, height: h, texture: None }
     }
 
@@ -228,7 +224,7 @@ impl App {
         let h = i420.height();
         let mut rgba = vec![0u8; (w * h * 4) as usize];
         let src_ref = i420.as_i420_ref().unwrap();
-        NativeTransform::i420_to_argb(src_ref, w, h, PixelFormat::RGBA, &mut rgba).unwrap();
+        ActiveTransform::i420_to_argb(src_ref, w, h, PixelFormat::RGBA, &mut rgba).unwrap();
         (rgba, w, h)
     }
 

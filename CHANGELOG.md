@@ -23,6 +23,28 @@ teams); for development process details, consult git log directly. Newest versio
   pywheel staging rm stays defensive; CLI gains `run example py/<name>`); fixes two
   latent NameErrors carried from the old location (missing `import os` in
   vehicle_push.py / vehicle_signal.py dev-mode path lines)
+- [examples] batch ④: Rust usage examples converge into one workspace-member
+  package examples/rs (8 [[example]] lanes, C-D6=B all-converge ruling); the crates
+  keep no example slots, and what the old in-crate position gave for free
+  (tokio/serde_json/tracing/image/eframe) rides the package's own dependency table.
+  CMake face per C-D10=B': per-lane build buttons (PolyOrch D40 EXAMPLE), IDE source
+  mounts, run buttons (GUI flavor for the display trio), ALL aggregate, clean through
+  polyorch_rust_clean(PACKAGE examples), double-FATAL disk<->table registry audit, and
+  a ctest roster limited to the server-free self-terminating square-gen
+- [examples] batch ④ fix: the `viewer` lane had been dead since it was written — it
+  hard-coded `NativeTransform` while its own `#![cfg(feature = "backend-yuv-sys")]`
+  demanded the other backend, and `required-features = ["backend-native"]` cannot be
+  satisfied inside a graph whose client/field/webrtc deps unify yuv in (media's two
+  backends are mutually exclusive by compile_error). Both transform demos now go
+  through media's backend-agnostic `ActiveTransform` alias: no lane carries
+  required-features, viewer builds, and the change stays inside examples/ (zero SDK
+  surface touched)
+- [examples] batch ④ CLI: `run|build example rs/<name>` take the cargo track, `test
+  example [<band/>name]` routes to the right ctest roster (cxx: core, rs: example_<name>),
+  `list example` prints all three bands; the cxx band's F25 probe now skips only its own
+  band (no cache flip), so an activated shell no longer drops the sibling rs face.
+  Duration note: the rs face compiles into the build tree's isolated .cargo-target (a
+  cold cache is ~450 crate units); the ALL aggregate is the expensive leg
 - [deploy] deploy-guard two modes: refuse (default, unchanged) and teardown
   (host face stop-first: unit -> daemon -> family, CWD-scoped to the target
   prefix); host IDE target runs teardown; single-writer flock per deploy

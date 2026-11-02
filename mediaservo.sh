@@ -41,10 +41,12 @@ build/assembly face:
         versioned top-level dir; --dist defaults to dist/, the MSRTC release
         shell injects out/packages; unpack straight into a prefix with
         tar xzf pkg.tar.gz -C <prefix> --strip-components=1)
-  run example <[band/]name> [args…]   test example [<name>]   list example
-        (bands cxx|c|py|rs, bare name = cxx; foreground dev tool; artifacts in
+  run example <[band/]name> [args…]   test example [<band/]name>   list example
+        (bands cxx|rs|py|c, bare name = cxx; foreground dev tool. cxx artifacts land in
         target/examples/bin/ — never in
-        out/; the build-c prelude is auto-added)
+        out/; the build-c prelude is auto-added. rs runs the cargo track (target/debug
+        /examples or the IDE face's .cargo-target), py execs examples/py/<name>.py, c is
+        e2e-compiled material; test = ctest roster (cxx: core, rs: example_<name>))
   deploy bindings|host|server [--prefix DIR] [--release]   (cmake install rows
         lay the tree; the managed binaries render state [bF3] — driver only
         orchestrates)
@@ -625,9 +627,8 @@ _ms_example_split() {  # $1 = [band/]name → prints "band<TAB>name", defaults c
     local spec=$1 band=cxx name=$1
     if [[ "$spec" == */* ]]; then band=${spec%%/*}; name=${spec#*/}; fi
     case "$band" in
-        cxx|py) ;;
+        cxx|py|rs) ;;
         c) echo "[example] band 'c' is gcc material (examples/c/, compiled by scripts/e2e-bindings.sh; no CLI build/run)" >&2; return 2 ;;
-        rs) echo "[example] band 'rs' consumes via cargo (cargo run -p examples --example <name>, or batch④ CMake face)" >&2; return 2 ;;
         *) echo "[example] unknown band '$band' (cxx|c|py|rs)" >&2; return 2 ;;
     esac
     printf '%s\t%s' "$band" "$name"
@@ -962,13 +963,17 @@ _ms_build_example() {  # $1=release(0/1); rest = example names (empty = all)
         (cd "$ROOT" && "${PIXI_BIN:-pixi}" run build-c) || exit $?
     fi
     local n spec split b
-    local _enames=()
+    local _enames=() _rsnames=()
     if [ $# -gt 0 ]; then
         for spec in "$@"; do
             split=$(_ms_example_split "$spec") || exit 2
             b=${split%%$'\t'*}; n=${split#*$'\t'}
             if [ "$b" = py ]; then
                 echo "[example] py band needs no build (run: run example py/$n)" >&2
+                continue
+            fi
+            if [ "$b" = rs ]; then
+                _rsnames+=("$n")   # batch ④: cargo track, no cmake roundtrip
                 continue
             fi
             if ! _ms_examples_is_lib "$n" > /dev/null; then
@@ -978,12 +983,17 @@ _ms_build_example() {  # $1=release(0/1); rest = example names (empty = all)
             _enames+=("$n")
         done
     fi
-    local gen=Debug; [ "$release" = 1 ] && gen=Release
-    # names given but none cxx-buildable (all py etc.) → nothing to do, no full build
+    if [ ${#_rsnames[@]} -gt 0 ]; then
+        local rargs=(); for n in "${_rsnames[@]}"; do rargs+=(--example "$n"); done
+        echo "\$ cargo build -p examples ${rargs[*]}  (cwd: $ROOT)"
+        (cd "$ROOT" && cargo build -p examples "${rargs[@]}") || exit $?
+    fi
+    # names given but nothing buildable (all py/rs) → no accidental cxx full build
     if [ $# -gt 0 ] && [ ${#_enames[@]} -eq 0 ]; then
-        echo "[example] no buildable cxx names in arguments (py band runs directly)"
+        [ ${#_rsnames[@]} -eq 0 ] && echo "[example] no buildable cxx names in arguments (py runs directly, rs builds via cargo track)"
         return 0
     fi
+    local gen=Debug; [ "$release" = 1 ] && gen=Release
     # main-tree bridge (batch ① design fact): the link faces mediaservo::<sdk> are
     # registered by the bindings lanes at the repo root — configuring the band alone
     # cannot resolve them anymore. Artifacts land at the same target/examples/bin.
@@ -1031,6 +1041,11 @@ _ms_run_example() {  # $@ = <name> [passthrough…] — foreground dev tool (dis
     if [ "${_split%%$'\t'*}" = py ]; then
         exec python3 "$ROOT/examples/py/$name.py" "$@"
     fi
+    # rs band (batch ④): cargo track straight on the examples package (build+run
+    # in one — works from any shell that has cargo; the CMake face adds IDE buttons)
+    if [ "${_split%%$'\t'*}" = rs ]; then
+        cd "$ROOT" && exec cargo run -p examples --example "$name" -- "$@"
+    fi
     local islib
     islib=$(_ms_examples_is_lib "$name") || { echo "[example] unknown example '$name'" >&2; exit 2; }
     _ms_build_example 0 "$name"
@@ -1060,12 +1075,33 @@ _ms_run_example() {  # $@ = <name> [passthrough…] — foreground dev tool (dis
     [ -n "${LD_LIBRARY_PATH:-}" ] && ld="$ld:$LD_LIBRARY_PATH"
     LD_LIBRARY_PATH="$ld" exec "$exe" "$@"
 }
-_ms_test_example() {  # $1 = optional ctest -R filter; missing build dir = build first
+_ms_test_example() {  # $1 = optional [band/]name (C-D8) | bare ctest regex; missing build dir = build first
+    local spec="${1:-}" filter
+    if [ -z "$spec" ]; then
+        filter='^core$'                     # cxx band roster today (imgui_shell's core test)
+    elif [ "$spec" = rs ]; then
+        filter='^example_'                  # band-only = the whole rs roster
+    elif [ "$spec" = cxx ]; then
+        filter='^core$'
+    elif [ "$spec" = py ] || [ "$spec" = c ]; then
+        echo "[example] band '$spec' has no ctest roster (py: run example py/<name>; c: scripts/e2e-bindings.sh)" >&2
+        return 0
+    elif [[ "$spec" != */* ]]; then
+        filter=$spec                         # bare word = raw ctest -R (pre-band contract kept)
+    else
+        local split b n
+        split=$(_ms_example_split "$spec") || exit 2
+        b=${split%%$'\t'*}; n=${split#*$'\t'}
+        case "$b" in
+            rs)  filter="^example_${n}\$" ;;   # rs test names = example_<registry name>
+            cxx) filter="^${n}\$" ;;
+            py)  echo "[example] py band has no ctest roster (run: run example py/$n)" >&2; return 0 ;;
+        esac
+    fi
     if [ ! -f "$_MS_EXAMPLES_BUILD/CTestTestfile.cmake" ]; then
         _ms_build_example 0
     fi
-    local cmd=(ctest --test-dir "$_MS_EXAMPLES_BUILD" --output-on-failure)
-    if [ -n "${1:-}" ]; then cmd+=(-R "$1"); else cmd+=(-R "^core$"); fi  # island roster today; later bands extend per batch
+    local cmd=(ctest --test-dir "$_MS_EXAMPLES_BUILD" --output-on-failure -R "$filter")
     echo "\$ ${cmd[*]}"
     "${cmd[@]}" || exit $?
 }
@@ -1121,8 +1157,10 @@ case "${1:-}" in
         exit 0
         ;;
     list)
-        # example roster (was _cmd_list_example; same literal rule as the aggregate
-        # root's file(GLOB */CMakeLists.txt) — dir == target == artifact name, G4)
+        # example roster per band (C-D8). cxx = the G4 dirs (dir == CLI arg; target/
+        # artifact carry the mediaservo-example- brand). rs = the examples package's
+        # own [[example]] table, sed-read so cargo stays the single source of truth
+        # (the CMake band registry mirrors the same names). py = examples/py/*.py.
         [ "${2:-}" = example ] || { echo "list: usage: list example" >&2; exit 2; }
         ed="$ROOT/examples/cxx"
         names=()
@@ -1130,16 +1168,30 @@ case "${1:-}" in
             [ -f "$cml" ] || continue
             names+=("$(basename "$(dirname "$cml")")")
         done
+        echo "cxx band (dir name = CLI arg; target/artifact carry mediaservo-example- brand; [lib] = non-executable):"
         if [ ${#names[@]} -eq 0 ]; then
-            echo "(no examples in examples/cxx yet)" >&2
-            exit 0
+            echo "  (no examples in examples/cxx yet)" >&2
+        else
+            for name in "${names[@]}"; do
+                if grep -q "add_library(" "$ed/$name/CMakeLists.txt"; then tag="[lib]"
+                elif [ -e "$ROOT/target/examples/bin/mediaservo-example-$name" ]; then tag="[built]"
+                else tag="[not built]"; fi
+                printf '  %-24s %s\n' "$name" "$tag"
+            done
         fi
-        echo "Available examples (cxx band; dir name = CLI arg, target/artifact carry mediaservo-example- brand; [lib] = non-executable):"
-        for name in "${names[@]}"; do
-            if grep -q "add_library(" "$ed/$name/CMakeLists.txt"; then tag="[lib]"
-            elif [ -e "$ROOT/target/examples/bin/mediaservo-example-$name" ]; then tag="[built]"
+        echo "rs band (cargo track — run: run example rs/<name>; CMake face: examples/CMakeLists.txt registry)"
+        for name in $(sed -n '/^\[\[example\]\]/{n;s/^name *= *"\(.*\)"/\1/p}' "$ROOT/examples/rs/Cargo.toml"); do
+            # the CMake face stages into the build tree's isolated .cargo-target; a
+            # plain `cargo build -p examples` lands in target/debug/examples
+            if [ -e "$_MS_EXAMPLES_BUILD/.cargo-target/debug/examples/$name" ] ||
+               [ -e "$ROOT/target/debug/examples/$name" ]; then tag="[built]"
             else tag="[not built]"; fi
             printf '  %-24s %s\n' "$name" "$tag"
+        done
+        echo "py band (run: run example py/<name> — no build step)"
+        for f in "$ROOT"/examples/py/*.py; do
+            [ -e "$f" ] || continue
+            printf '  %-24s %s\n' "$(basename "$f" .py)" "[script]"
         done
         exit 0
         ;;

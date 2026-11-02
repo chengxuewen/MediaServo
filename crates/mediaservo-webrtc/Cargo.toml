@@ -28,11 +28,9 @@ backend-webrtc-rs = ["dep:webrtc", "dep:mediaservo-codec"]
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = "0.3"
-egui = "0.30"
-eframe = { version = "0.30", features = ["default"] }
+# egui/eframe left with the egui example (batch ④: examples/rs carries its own GUI deps)
 webrtc = "0.12"
 mediaservo-media = { path = "../mediaservo-media" }
 
-[[example]]
-name = "webrtc_loopback_egui"
-required-features = ["backend-webrtc-sys"]
+# example lane relocated to examples/rs (batch ④); backend-webrtc-sys rides the
+# examples package dependency now — the crate default stays []

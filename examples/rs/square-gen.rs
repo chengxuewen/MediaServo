@@ -4,7 +4,7 @@
 //! collects frame statistics via a `StatsSink`, and prints results.
 //!
 //! Usage:
-//!   cargo run -p mediaservo-media --example square-gen --no-default-features --features backend-native
+//!   cargo run -p examples --example square-gen
 
 use std::sync::{Arc, Mutex};
 use std::thread;

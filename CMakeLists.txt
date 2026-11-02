@@ -46,6 +46,31 @@ message(STATUS "MediaServo IDE root prefix: '${MEDIASERVO_IDE_ROOT}' (top-level=
 include(cmake/MediaServoPolyOrch.cmake)
 mediaservo_ensure_polyorch()   # D39 sentinel: reuse superbuild copy first-wins, else embed the gitlink pin
 
+# Warm-tree self-heal for relocated cargo sources (plan directory-artifacts-convergence
+# batch ④). PolyOrch caches every manifest+crate IDE source list as an INTERNAL cache
+# entry (PolyOrchRustHelpers.cmake:1605) and reuses it whenever the key is already
+# DEFINED (:1521) — the key carries no mtime stamp. Moving a cargo target's src_path
+# (crates/*/examples -> examples/rs) therefore leaves a warm tree listing files that no
+# longer exist, and generate dies with "Cannot find source file" on every later
+# reconfigure until the tree is wiped. Drop ONLY the entries that name a missing file:
+# healthy trees keep the vendor's cache (and its configure speed) untouched, and the
+# metadata probe re-runs exactly where it must. Runs before any mounting (examples band,
+# bindings/crates lanes) because those are the readers.
+get_cmake_property(_meta_vars CACHE_VARIABLES)
+foreach(_v IN LISTS _meta_vars)
+  if(NOT _v MATCHES "^_polyorch_meta_srcs_")
+    continue()
+  endif()
+  set(_vals "${${_v}}")
+  foreach(_f IN LISTS _vals)
+    if(NOT EXISTS "${_f}")
+      message(STATUS "rust ide sources: stale cache entry for '${_v}' (${_f} is gone) — re-probing cargo metadata")
+      unset("${_v}" CACHE)
+      break()
+    endif()
+  endforeach()
+endforeach()
+
 # Island mount defaults OFF: the examples/cxx band hard-FATALs unless prebuilt SDK
 # outputs exist in target/ (its own PIT-189 guard) — keeping a fresh-clone configure
 # green is the S1 behavior-neutral contract. Dev/CI flip it after `build bindings`.

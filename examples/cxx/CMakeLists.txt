@@ -60,10 +60,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 if(MEDIASERVO_BUILD_EXAMPLES AND _ms_env_dirty)
     message(WARNING
-        "examples island: activated conda/pixi shell detected — forcing "
-        "MEDIASERVO_BUILD_EXAMPLES=OFF for this configure (system-toolchain constitution, F25). "
-        "Build via `./mediaservo.sh build example` (sanitized bridge) or re-run from a plain shell.")
-    set(MEDIASERVO_BUILD_EXAMPLES OFF CACHE BOOL "forced OFF by F25 env gate" FORCE)
+        "examples cxx band: activated conda/pixi shell detected — band SKIPPED for this "
+        "configure (system-toolchain constitution, F25). Build via `./mediaservo.sh build example` "
+        "(sanitized bridge) or re-run from a plain shell.")
+    # batch ①/④ discipline: skip MY band only — flipping the family cache here would
+    # retroactively drop the sibling rs/py material on the next reconfigure
     return()
 endif()
 

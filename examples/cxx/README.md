@@ -52,7 +52,7 @@ Under dummy headless mode the ini is never written (zero pollution of CI build d
   the red card 4013 without a reconnect storm; after login the bottom `identity:` line matches the server log's identity
 
 ## Environment gate (F25)
-The island only builds against the SYSTEM toolchain. From an activated conda/pixi shell, configuring with `-DMEDIASERVO_BUILD_EXAMPLES=ON` warns and force-disables the mount (no silent misbuilds). Use `./mediaservo.sh build example` (sanitized bridge) or a plain shell.
+The island only builds against the SYSTEM toolchain. From an activated conda/pixi shell, configuring with `-DMEDIASERVO_BUILD_EXAMPLES=ON` warns and SKIPS this band (no silent misbuilds, no leftover generated code). Since batch ④ the skip is band-local by design: the cache knob is not flipped, so the sibling rs face survives the same configure. Use `./mediaservo.sh build example` (sanitized bridge) or a plain shell.
 
 ## Run
 

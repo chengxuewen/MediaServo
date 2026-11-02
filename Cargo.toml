@@ -19,6 +19,7 @@ members = ["crates/mediaservo-host",
     "bindings/cxx/mediaservo-field-cxx",
     "bindings/cxx/mediaservo-client-cxx",
     "bindings/node/rust/mediaservo-node",
+    "examples/rs",
     "tools/mediaservo-gates"]
 resolver = "3"
 

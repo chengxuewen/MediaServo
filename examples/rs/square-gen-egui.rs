@@ -1,7 +1,7 @@
 //! MediaServo SquareGenerator Demo with egui
 //!
 //! Usage:
-//!   cargo run -p mediaservo-media --example square-gen-egui
+//!   cargo run -p examples --example square-gen-egui
 //!
 //! Creates a VideoFrameGenerator (colored squares + timestamp),
 //! implements VideoSink to capture frames, and displays them in an egui window.
@@ -10,10 +10,10 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use eframe::egui;
-#[cfg(feature = "backend-yuv-sys")]
-use mediaservo_media::backend::LibyuvTransform;
-#[cfg(feature = "backend-native")]
-use mediaservo_media::backend::NativeTransform;
+// media's compile-time backend alias — one name that exists under either backend
+// (the hand-written yuv/native cfg pair it replaces could never both compile here:
+// the two backends are mutually exclusive inside mediaservo-media)
+use mediaservo_media::backend::ActiveTransform;
 use mediaservo_media::base::frame::BoxVideoFrame;
 use mediaservo_media::error::MediaError;
 use mediaservo_media::pipeline::generator::{
@@ -63,16 +63,7 @@ impl VideoSink<BoxVideoFrame> for GeneratorSink {
     fn on_frame(&self, frame: &BoxVideoFrame) -> Result<VideoSinkWants, MediaError> {
         if let Some(i420_ref) = frame.buffer.as_i420_ref() {
             let mut rgba = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
-            #[cfg(feature = "backend-yuv-sys")]
-            let result = LibyuvTransform::i420_to_argb(
-                i420_ref,
-                WIDTH,
-                HEIGHT,
-                PixelFormat::RGBA,
-                &mut rgba,
-            );
-            #[cfg(all(feature = "backend-native", not(feature = "backend-yuv-sys")))]
-            let result = NativeTransform::i420_to_argb(
+            let result = ActiveTransform::i420_to_argb(
                 i420_ref,
                 WIDTH,
                 HEIGHT,

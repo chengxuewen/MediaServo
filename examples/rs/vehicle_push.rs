@@ -4,7 +4,7 @@
 //!
 //! ```bash
 //! SFU_E2E_WS_URL=ws://127.0.0.1:9800/ws SFU_E2E_PSK=mediaservo-dev \
-//!   pixi run cargo run -p mediaservo-field --example vehicle_push
+//!   pixi run cargo run -p examples --example vehicle_push
 //! ```
 
 use std::time::Duration;

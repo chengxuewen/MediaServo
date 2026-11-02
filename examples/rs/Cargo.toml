@@ -1,0 +1,73 @@
+# examples — the Rust user-facing example package (plan directory-artifacts-convergence
+# batch ④, ruling C-D6=B: all example material converges under the top-level examples/,
+# VE-parity shape). The examples ride the CMake face via the band registry in
+# examples/CMakeLists.txt (C-D10=B', PolyOrch D40 EXAMPLE kind) — one creation point per
+# name, the registry table is the single source (disk<->table double-FATAL audit lives
+# there; a stale [[example]] pair here that drifts reds at build time, ruled sufficient).
+[package]
+name = "examples"
+description = "MediaServo Rust usage examples (workspace-member carrier; not published)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+mediaservo-client = { path = "../../crates/mediaservo-client" }
+mediaservo-common = { path = "../../crates/mediaservo-common" }
+mediaservo-field = { path = "../../crates/mediaservo-field" }
+# backend-webrtc-sys rode the old [[example]] required-features (webrtc crate
+# default stays []); backend-native likewise rode media's (viewer). square-gen-egui's
+# backend-yuv-sys needs no lift — it is a media DEFAULT.
+mediaservo-webrtc = { path = "../../crates/mediaservo-webrtc", features = ["backend-webrtc-sys"] }
+mediaservo-media = { path = "../../crates/mediaservo-media", default-features = false }
+eframe = "0.30"
+egui = "0.30"
+# the old in-crate examples leaned on host [dependencies] visibility — carry them
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+serde_json = "1"
+image = "0.25"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# The media backend pair is mutually exclusive INSIDE mediaservo-media (compile_error
+# on both-or-none) and its default rides backend-yuv-sys, which the client/field/webrtc
+# deps of this package unify in. So the package picks the yuv line and never offers a
+# backend-native toggle: enabling it here would unify yuv+native and break the build.
+# The transform demo stays backend-agnostic through media's ActiveTransform alias.
+[features]
+default = ["backend-yuv-sys", "capture-v4l2"]
+backend-yuv-sys = ["mediaservo-media/backend-yuv-sys"]
+capture-v4l2 = ["mediaservo-media/capture-v4l2"]
+
+# explicit registration (bevy/VE form): files sit at the package root, not the
+# examples/ auto-discovery spot; names mirror the band CMake registry one-to-one.
+[[example]]
+name = "basic"
+path = "basic.rs"
+[[example]]
+name = "pull_observe"
+path = "pull_observe.rs"
+[[example]]
+name = "push_observe"
+path = "push_observe.rs"
+[[example]]
+name = "vehicle_push"
+path = "vehicle_push.rs"
+[[example]]
+name = "square-gen"
+path = "square-gen.rs"
+# No lane carries required-features any more: both transform demos go through media's
+# ActiveTransform alias, so they build on the package's single default backend line.
+# (viewer used to declare backend-native while its own #![cfg] demanded backend-yuv-sys
+# — a pair no feature combination could satisfy, which kept the lane dead since writing;
+# square-gen-egui hand-wrote the same cfg pair inside the file.)
+[[example]]
+name = "square-gen-egui"
+path = "square-gen-egui.rs"
+[[example]]
+name = "viewer"
+path = "viewer.rs"
+[[example]]
+name = "webrtc_loopback_egui"
+path = "webrtc_loopback_egui.rs"

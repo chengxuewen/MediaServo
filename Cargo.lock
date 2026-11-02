@@ -2287,6 +2287,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "examples"
+version = "0.1.3"
+dependencies = [
+ "eframe",
+ "egui",
+ "image",
+ "mediaservo-client",
+ "mediaservo-common",
+ "mediaservo-field",
+ "mediaservo-media",
+ "mediaservo-webrtc",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "exr"
 version = "1.74.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4505,8 +4523,6 @@ name = "mediaservo-media"
 version = "0.1.3"
 dependencies = [
  "chrono",
- "eframe",
- "egui",
  "image",
  "rand 0.8.7",
  "thiserror 2.0.18",
@@ -4594,8 +4610,6 @@ version = "0.1.3"
 dependencies = [
  "bytes",
  "cxx",
- "eframe",
- "egui",
  "mediaservo-codec",
  "mediaservo-media",
  "serde",

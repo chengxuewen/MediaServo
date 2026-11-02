@@ -6,14 +6,13 @@
 //!
 //! Run with:
 //! ```bash
-//! cargo run -p mediaservo-webrtc --example webrtc_loopback_egui
+//! cargo run -p examples --example webrtc_loopback_egui
 //! ```
 //!
 //! Use stub backend (no native libwebrtc): `--no-default-features`
 
 use eframe::egui;
 use egui::ColorImage;
-use mediaservo_webrtc::TrackWriteBackend;
 use mediaservo_webrtc::factory::RTCPeerConnectionFactory;
 use mediaservo_webrtc::peer_connection::*;
 use mediaservo_webrtc::track::{TrackKind, TrackRef};
@@ -33,6 +32,9 @@ enum P2pState {
     Idle,
     Connecting,
     Connected,
+    // Reserved for a future failure path; the in-process loopback demo never reaches
+    // it (the lane is built by the examples aggregate, so keep the lint quiet on purpose).
+    #[allow(dead_code)]
     Error,
 }
 
