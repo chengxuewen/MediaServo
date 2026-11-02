@@ -21,6 +21,24 @@ project(mediaservo VERSION ${CMAKE_MATCH_1} LANGUAGES CXX)
 # in a subdirectory is silently dropped).
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)  # R7: CMP0143 keys on the 3.25 floor, not the runtime
 
+# IDE folder-root prefix (plan ide-folder-hierarchy, rulings 1/2 + rules 1/7): the ONE
+# authority for the mediaservo/ subtree grouping, defined before every lane face and
+# every add_subdirectory (the island mount below included). Trailing-slash convention:
+# embedded = "mediaservo/", standalone = "" (disk-mirror names stay verbatim, zero
+# regression). FATAL guard: a future cmake floor below 3.21 would leave
+# PROJECT_IS_TOP_LEVEL undefined and silently mis-group the whole tree — make it loud.
+if(NOT DEFINED PROJECT_IS_TOP_LEVEL)
+  message(FATAL_ERROR
+    "PROJECT_IS_TOP_LEVEL is undefined — the cmake_minimum_required floor must stay "
+    ">= 3.21 for IDE grouping (plan ide-folder-hierarchy rule 7).")
+endif()
+if(PROJECT_IS_TOP_LEVEL)
+  set(MEDIASERVO_IDE_ROOT "")
+else()
+  set(MEDIASERVO_IDE_ROOT "mediaservo/")
+endif()
+message(STATUS "MediaServo IDE root prefix: '${MEDIASERVO_IDE_ROOT}' (top-level=${PROJECT_IS_TOP_LEVEL})")
+
 include(cmake/MediaServoPolyOrch.cmake)
 mediaservo_ensure_polyorch()   # D39 sentinel: reuse superbuild copy first-wins, else embed the gitlink pin
 

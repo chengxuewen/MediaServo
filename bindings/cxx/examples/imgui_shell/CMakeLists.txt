@@ -1,4 +1,7 @@
 add_library(imgui_shell STATIC src/shell.cpp src/core.cpp src/texture.cpp)
+# IDE group (plan ide-folder-hierarchy P8, R4-1): core_test below is NOT a same-named
+# dir target — the island root loop can never carry it; both join by definition point.
+set_target_properties(imgui_shell PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples")
 target_include_directories(imgui_shell PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_link_libraries(imgui_shell PUBLIC imgui)
 
@@ -18,5 +21,6 @@ endif()
 
 # viewer_core unit tests (core.cpp has no GUI dependency; compiling separately keeps SDL out of the test binary)
 add_executable(core_test tests/core_test.cpp ${CMAKE_CURRENT_LIST_DIR}/src/core.cpp)
+set_target_properties(core_test PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples")  # plan P8 (imgui_shell:20)
 target_include_directories(core_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
 add_test(NAME core COMMAND core_test)

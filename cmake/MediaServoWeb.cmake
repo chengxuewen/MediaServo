@@ -53,6 +53,12 @@ function(mediaservo_setup_web)
     if(NOT PolyOrch_NODE_STRIP_SCOPES)
         set(PolyOrch_NODE_STRIP_SCOPES "mediaservo")
     endif()
+    # Family IDE root (plan ide-folder-hierarchy, ruling 3): the node helpers join
+    # every creation site to this knob "only when set" (PolyOrchNodeHelpers:522-525,
+    # default NONE per :68-72) — one set carries the whole web family into the
+    # mediaservo/web group (standalone view: bare "web"). Function-scoped plain
+    # set: does not leak to other faces (rule 6 posture, mirrored at :50-55).
+    set(PolyOrch_RUST_FOLDER_ROOT "${MEDIASERVO_IDE_ROOT}web")
     polyorch_node_import(ROOT "${MEDIASERVO_REPO_ROOT}/www/package.json")
     set(_builds "")
     foreach(_h IN LISTS POLYORCH_NODE_IMPORT_HANDLES)
@@ -64,6 +70,10 @@ function(mediaservo_setup_web)
         add_custom_target(mediaservo-web-build
             DEPENDS ${_builds}
             COMMENT "node: build all www members (admin chain rides the client edge)")
+        # The aggregate is a plain add_custom_target — the knob only carries the
+        # mediator family; the button joins its members explicitly (same value).
+        set_target_properties(mediaservo-web-build PROPERTIES
+            FOLDER "${MEDIASERVO_IDE_ROOT}web")
         message(STATUS "MediaServo web lanes: mediaservo-web-build => ${_builds}")
     endif()
 endfunction()

@@ -42,8 +42,9 @@
 # Parent-context semantics (C1): mediaservo-* buttons keep upstream semantics
 # in EVERY view — the name is the promise. msrtc-deploy-bindings is a symmetry
 # button (prefix-only, no brand). "bindings" and "bindings/c|node" render as
-# SIBLING tree nodes (shared prefix, not parent/child). The web lane has no
-# FOLDER today (root-level under the parent's mediaservo/ namespace).
+# SIBLING tree nodes (shared prefix, not parent/child). Since plan
+# ide-folder-hierarchy P6 the web lanes join the mediaservo/web family (setup-
+# function knob + explicit aggregate-button FOLDER) — no longer root-level.
 #
 # Fail-closed guard — THREE conditions, FATAL before install (comment anchor:
 # bash twin mediaservo.sh:1317-1324; ops-F1 brandless-reclaim):
@@ -171,7 +172,7 @@ if(MEDIASERVO_BUILD_BINDINGS)
         COMMAND ${CMAKE_COMMAND} --install ${_bdir_b} --prefix ${MEDIASERVO_DEPLOY_PREFIX_HOST}
         COMMENT "mediaservo deploy bindings -> ${MEDIASERVO_DEPLOY_PREFIX_HOST} (bindings manifest + delivery rows)"
         VERBATIM)
-    set_target_properties(mediaservo-deploy-bindings PROPERTIES FOLDER "deploy")
+    set_target_properties(mediaservo-deploy-bindings PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}deploy")
 endif()
 
 # ---- target registration (R6: one parameterized function, audit signature) ----
@@ -337,11 +338,11 @@ if(MEDIASERVO_BUILD_CRATES_LANES)
     _mediaservo_add_deploy_target(TREE host
         PREFIX "${MEDIASERVO_DEPLOY_PREFIX_HOST}"
         BRAND "${MEDIASERVO_BRAND}"
-        FOLDER "deploy")
+        FOLDER "${MEDIASERVO_IDE_ROOT}deploy")
     _mediaservo_add_deploy_target(TREE server
         PREFIX "${MEDIASERVO_DEPLOY_PREFIX_SERVER}"
         BRAND "${MEDIASERVO_BRAND}"
         SERVER_OUT_DIR "${MEDIASERVO_SERVER_OUT_DIR}"
         STAGING build
-        FOLDER "deploy")
+        FOLDER "${MEDIASERVO_IDE_ROOT}deploy")
 endif()

@@ -10,5 +10,6 @@ add_executable(imgui_viewer
     src/panels/log_view.cpp
     src/panels/video_grid.cpp
     src/panels/control.cpp)
+set_target_properties(imgui_viewer PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples")  # plan P8
 target_include_directories(imgui_viewer PRIVATE src)
 target_link_libraries(imgui_viewer PRIVATE imgui_shell mediaservo_client_sdk)

@@ -68,6 +68,9 @@ endif()
 
 
 add_library(mediaservo_client_sdk INTERFACE)
+# IDE group (plan ide-folder-hierarchy P8, ruling M-1 full coverage): definition-point
+# sets — the root loop only carries same-named dir targets and would drop these.
+set_target_properties(mediaservo_client_sdk PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples")
 target_include_directories(mediaservo_client_sdk INTERFACE
     "${REPO_ROOT}/bindings/cxx/mediaservo-client-cxx/include"  # client.hpp（C++）
     "${REPO_ROOT}/bindings/cxx/include"                          # detail/result.hpp
@@ -201,6 +204,11 @@ if(NOT DEFINED SDL_UNIX_CONSOLE_BUILD)
     endif()
 endif()
 FetchContent_MakeAvailable(sdl3)
+# FetchContent offers no FOLDER kw for upstream targets — post-set the static one we
+# link (plan P8; name verified against the pinned 3.4.16 archive: add_library(SDL3-static ...)).
+if(TARGET SDL3-static)
+    set_target_properties(SDL3-static PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples")
+endif()
 
 # imgui has no official CMake build (upstream is just a set of source files; the official usage = compile them into your project manually):
 # core + the rendering backend are listed explicitly per the docs/BACKENDS.md inventory. For renderer=SDL3 the
@@ -213,6 +221,7 @@ add_library(imgui STATIC
     "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
     "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
     "${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp")
+set_target_properties(imgui PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples")
 target_include_directories(imgui PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
 target_link_libraries(imgui PUBLIC SDL3::SDL3)
 
@@ -238,7 +247,7 @@ foreach(entry ${EXAMPLE_DIRS})
     if(COMMAND polyorch_example_run)
         get_target_property(_et "${dir}" TYPE)
         if(_et STREQUAL "EXECUTABLE")
-            polyorch_example_run(TARGET "${dir}" GUI FOLDER "examples/${dir}")
+            polyorch_example_run(TARGET "${dir}" GUI FOLDER "${MEDIASERVO_IDE_ROOT}examples/${dir}")
             add_dependencies("${dir}-run" "${dir}")
         endif()
     endif()

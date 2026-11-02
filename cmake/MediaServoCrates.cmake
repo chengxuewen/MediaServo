@@ -112,7 +112,7 @@ function(mediaservo_setup_crate_lanes)
             TARGET ${_pkg} LIB
             PACKAGE ${_pkg} CRATE ${_lib}
             MANIFEST "${_manifest}" ${_base_args}
-            FOLDER "${_fold}")
+            FOLDER "${MEDIASERVO_IDE_ROOT}${_fold}")
         if(_c23_inject)
             polyorch_rust_set_env_vars(TARGET ${_pkg} ${_c23_inject})
         endif()
@@ -120,7 +120,7 @@ function(mediaservo_setup_crate_lanes)
         polyorch_rust_test(
             PACKAGE ${_pkg} NAME ${_pkg}-test TARGET ${_pkg}
             MANIFEST "${_manifest}" ${_base_args}
-            FOLDER "${_fold}"
+            FOLDER "${MEDIASERVO_IDE_ROOT}${_fold}"
             # D45 ctest entry: one vector with the button (default name is
             # exactly ${_pkg}-test -- the 11-name census must stay identical).
             # WORKING_DIRECTORY pins the workspace root (entry semantics held
@@ -135,11 +135,11 @@ function(mediaservo_setup_crate_lanes)
             # sanctioned wrapper (supplier D44) — manifest-parent cwd, sibling
             # artifacts provably untouched (t-rust-clean-e2e judge).
             polyorch_rust_clean(NAME ${_pkg}-clean PACKAGE ${_pkg}
-                MANIFEST "${_manifest}" ${_base_args} FOLDER "${_fold}")
+                MANIFEST "${_manifest}" ${_base_args} FOLDER "${MEDIASERVO_IDE_ROOT}${_fold}")
         else()
             # Separate face: whole-face honest clean (all lanes share one
             # build-tree-local dir) — wiping it IS the clean, zero-toolchain form.
-            polyorch_rust_clean(NAME ${_pkg}-clean ${_base_args} FOLDER "${_fold}")
+            polyorch_rust_clean(NAME ${_pkg}-clean ${_base_args} FOLDER "${MEDIASERVO_IDE_ROOT}${_fold}")
         endif()
 
     endforeach()
@@ -165,7 +165,7 @@ function(mediaservo_setup_crate_lanes)
             PACKAGE ${_app} CRATE ${_app}
             MANIFEST "${MEDIASERVO_REPO_ROOT}/crates/${_app}/Cargo.toml"
             BASE_DIR "${MEDIASERVO_REPO_ROOT}/target"
-            FOLDER "crates/${_app}")
+            FOLDER "${MEDIASERVO_IDE_ROOT}crates/${_app}")
         if(_c23_inject)
             polyorch_rust_set_env_vars(TARGET ${_app}-bin ${_c23_inject})
         endif()
@@ -178,7 +178,7 @@ function(mediaservo_setup_crate_lanes)
             polyorch_rust_clean(NAME ${_app}-bin-clean PACKAGE ${_app}
                 MANIFEST "${MEDIASERVO_REPO_ROOT}/crates/${_app}/Cargo.toml"
                 BASE_DIR "${MEDIASERVO_REPO_ROOT}/target"
-                FOLDER "crates/${_app}")
+                FOLDER "${MEDIASERVO_IDE_ROOT}crates/${_app}")
         endif()
     endforeach()
 
