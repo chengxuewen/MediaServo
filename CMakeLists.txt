@@ -18,7 +18,11 @@ endif()
 project(mediaservo VERSION ${CMAKE_MATCH_1} LANGUAGES CXX)
 
 # Must run before ALL add_subdirectory calls (measured sibling lesson: a late add_test
-# in a subdirectory is silently dropped).
+# in a subdirectory is silently dropped). The parent also carries its own copy;
+# this one makes the STANDALONE tree test-capable — the examples CLI bridge now
+# configures this root, so `test example` ctest needs it (plan
+# directory-artifacts-convergence batch ①).
+enable_testing()
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)  # R7: CMP0143 keys on the 3.25 floor, not the runtime
 
 # IDE folder-root prefix (plan ide-folder-hierarchy, rulings 1/2 + rules 1/7): the ONE
@@ -42,13 +46,15 @@ message(STATUS "MediaServo IDE root prefix: '${MEDIASERVO_IDE_ROOT}' (top-level=
 include(cmake/MediaServoPolyOrch.cmake)
 mediaservo_ensure_polyorch()   # D39 sentinel: reuse superbuild copy first-wins, else embed the gitlink pin
 
-# Island mount defaults OFF: bindings/cxx/examples hard-FATALs unless prebuilt SDK
+# Island mount defaults OFF: the examples/cxx band hard-FATALs unless prebuilt SDK
 # outputs exist in target/ (its own PIT-189 guard) — keeping a fresh-clone configure
 # green is the S1 behavior-neutral contract. Dev/CI flip it after `build bindings`.
-# S2 rewires the island itself onto lanes; the mount point stays here.
-option(MEDIASERVO_BUILD_EXAMPLES "Mount the C++/SDL examples aggregate (requires target/ SDK outputs)" OFF)
+# S2 rewires the island itself onto lanes; the mount point stays here (plan
+# directory-artifacts-convergence batch ①: the top-level examples/ aggregator owns
+# the per-band mounting now — C-D1-B).
+option(MEDIASERVO_BUILD_EXAMPLES "Mount the examples family via examples/ (cxx band: SDL/GUI, requires target/ SDK outputs)" OFF)
 if(MEDIASERVO_BUILD_EXAMPLES)
-  add_subdirectory(bindings/cxx/examples)
+  add_subdirectory(examples)
 endif()
 
 # IDE bootstrap hint (ide-bootstrap plan, C''): the workspace settings file is

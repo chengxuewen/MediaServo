@@ -1,7 +1,7 @@
 # 3rdparty GUI 依赖档案（p3-gui-viewer W0 · D281 oxmgr 同法）
 
 **本目录 = 纯档案层**：上游 release **原始 zip + .sha256** 进 git，不存解包件。
-消费方 = `bindings/cxx/examples/CMakeLists.txt` 的 FetchContent（`file://` 本地 URL +
+消费方 = `examples/cxx/CMakeLists.txt` 的 FetchContent（`file://` 本地 URL +
 `URL_HASH` 对账，不符拒绝展开）。解包目录 `target/examples/build/_deps/`（gitignored、可再生）。
 
 | 项 | SDL3 | Dear ImGui |

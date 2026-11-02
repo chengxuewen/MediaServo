@@ -41,8 +41,9 @@ build/assembly face:
         versioned top-level dir; --dist defaults to dist/, the MSRTC release
         shell injects out/packages; unpack straight into a prefix with
         tar xzf pkg.tar.gz -C <prefix> --strip-components=1)
-  run example <name> [args…]   test example [<name>]   list example
-        (foreground dev tool; artifacts in target/examples/bin/ — never in
+  run example <[band/]name> [args…]   test example [<name>]   list example
+        (bands cxx|c|py|rs, bare name = cxx; foreground dev tool; artifacts in
+        target/examples/bin/ — never in
         out/; the build-c prelude is auto-added)
   deploy bindings|host|server [--prefix DIR] [--release]   (cmake install rows
         lay the tree; the managed binaries render state [bF3] — driver only
@@ -609,15 +610,29 @@ _ms_build_client() {
 
 # =============================================================================
 # SR6 batch-beta-2 -- C++ example surface (p3 W0/G7; was _cmd_build_example /
-# _cmd_run_example / _cmd_test_example). Directory contract =
-# bindings/cxx/examples/<name>/CMakeLists.txt (dir == target == artifact, G4);
-# same literal rule as the aggregate root's file(GLOB */CMakeLists.txt).
+# _cmd_run_example / _cmd_test_example). Directory contract (plan
+# directory-artifacts-convergence batch ①, rulings C-D8/C-D9): the user-facing
+# name is the directory under examples/<band>/ (default band cxx; a band prefix
+# cxx|c|py|rs is accepted and validated); target/artifact carry the brand —
+# dir + prefix == target == artifact (G4 upgraded, mediaservo-example-<dir>).
 # F25 bridge: the cmake children get the SYSTEM constitution (conda build vars
 # dropped, .pixi/envs bins scrubbed from PATH) — the one legit strip site;
-# the island's own probe reads the same signals (keep the lists aligned).
+# the band root's own probe reads the same signals (keep the lists aligned).
 # =============================================================================
 _MS_EXAMPLES_BUILD="$ROOT/target/examples/build"
 _MS_EXAMPLES_BIN="$ROOT/target/examples/bin"
+_ms_example_split() {  # $1 = [band/]name → prints "band<TAB>name", defaults cxx
+    local spec=$1 band=cxx name=$1
+    if [[ "$spec" == */* ]]; then band=${spec%%/*}; name=${spec#*/}; fi
+    case "$band" in
+        cxx) ;;
+        c|py) echo "[example] band '$band' not wired yet (c=batch②, py=batch③, rs=batch④; plan directory-artifacts-convergence)" >&2; return 2 ;;
+        rs) echo "[example] band 'rs' consumes via cargo (cargo run -p examples --example <name>, or batch④ CMake face)" >&2; return 2 ;;
+        *) echo "[example] unknown band '$band' (cxx|c|py|rs)" >&2; return 2 ;;
+    esac
+    printf '%s\t%s' "$band" "$name"
+}
+_ms_example_dir() { printf '%s/examples/%s/%s' "$ROOT" "$1" "$2"; }  # band+name → directory
 _MS_STRIP_ENV=(env -u CC -u CXX -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS -u CPATH -u C_INCLUDE_PATH -u CPLUS_INCLUDE_PATH -u CONDA_PREFIX -u CMAKE_PREFIX_PATH -u PKG_CONFIG_PATH -u PKG_CONFIG_SYSROOT_DIR -u COMPILER_PATH -u LIBRARY_PATH)
 _ms_scrubbed_path() {
     printf '%s' "$PATH" | tr ':' '\n' | grep -v '/\.pixi/envs/' | paste -sd: -
@@ -626,8 +641,8 @@ _ms_bridge_env() {  # prints the PATH=... assignment arg for the _MS_STRIP_ENV p
     local sp; sp=$(_ms_scrubbed_path)
     if [ -n "$sp" ]; then echo "PATH=/usr/bin:$sp"; else echo "PATH=/usr/bin"; fi
 }
-_ms_examples_is_lib() {  # $1=name → prints 0/1; rc1 when the example is unknown
-    local cml="$ROOT/bindings/cxx/examples/$1/CMakeLists.txt"
+_ms_examples_is_lib() {  # $1=name → prints 0/1; rc1 when the example is unknown (cxx band)
+    local cml="$ROOT/examples/cxx/$1/CMakeLists.txt"
     [ -f "$cml" ] || return 1
     if grep -q "add_library(" "$cml"; then echo 1; else echo 0; fi
 }
@@ -945,17 +960,34 @@ _ms_build_example() {  # $1=release(0/1); rest = example names (empty = all)
         echo "[example] libmediaservo_client.so missing → running build-c first" >&2
         (cd "$ROOT" && "${PIXI_BIN:-pixi}" run build-c) || exit $?
     fi
-    local n
+    local n spec split
+    local _enames=()
     if [ $# -gt 0 ]; then
-        for n in "$@"; do
+        for spec in "$@"; do
+            split=$(_ms_example_split "$spec") || exit 2
+            n=${split#*$'\t'}
             if ! _ms_examples_is_lib "$n" > /dev/null; then
                 echo "[example] unknown example '$n' (see ./mediaservo.sh list example)" >&2
                 exit 2
             fi
+            _enames+=("$n")
         done
     fi
     local gen=Debug; [ "$release" = 1 ] && gen=Release
-    local cfgargs=(-S "$ROOT/bindings/cxx/examples" -B "$_MS_EXAMPLES_BUILD" "-DCMAKE_BUILD_TYPE=$gen" "-DMEDIASERVO_BUILD_EXAMPLES=ON" "-DMEDIASERVO_SDK_DIR=$ROOT/target/$profile")
+    # main-tree bridge (batch ① design fact): the link faces mediaservo::<sdk> are
+    # registered by the bindings lanes at the repo root — configuring the band alone
+    # cannot resolve them anymore. Artifacts land at the same target/examples/bin.
+    # The scrubbed PATH drops cargo (F25), so the supplier's official injection pair
+    # points discovery at the pixi toolchain — executables only, PATH stays clean.
+    local rustinj=()
+    if [ -x "$ROOT/.pixi/envs/default/bin/cargo" ]; then
+        rustinj=(-DPolyOrch_RUST_CARGO_EXECUTABLE="$ROOT/.pixi/envs/default/bin/cargo" -DPolyOrch_RUSTC_EXECUTABLE="$ROOT/.pixi/envs/default/bin/rustc")
+    fi
+    local cfgargs=(-S "$ROOT" -B "$_MS_EXAMPLES_BUILD" "-DCMAKE_BUILD_TYPE=$gen" "-DMEDIASERVO_BUILD_EXAMPLES=ON" "-DMEDIASERVO_BUILD_BINDINGS=ON" "${rustinj[@]}")
+    # stale island-style cache (different source dir) = wipe, or cmake hard-errors
+    if [ -f "$_MS_EXAMPLES_BUILD/CMakeCache.txt" ] && ! grep -q "^CMAKE_HOME_DIRECTORY:INTERNAL=$ROOT$" "$_MS_EXAMPLES_BUILD/CMakeCache.txt"; then
+        rm -rf "$_MS_EXAMPLES_BUILD"
+    fi
     # no -G: scrubbed PATH may lack ninja (pixi-only bin); cmake picks its
     # platform default (Makefiles on bare Linux) — same auto-adapt e2e-delivery uses.
     if [ ! -f "$_MS_EXAMPLES_BUILD/CMakeCache.txt" ] || [ "$profile" != debug ]; then
@@ -963,7 +995,14 @@ _ms_build_example() {  # $1=release(0/1); rest = example names (empty = all)
         (cd "$ROOT" && "${_MS_STRIP_ENV[@]}" "$(_ms_bridge_env)" cmake "${cfgargs[@]}") || exit $?
     fi
     local cmd=(cmake --build "$_MS_EXAMPLES_BUILD")
-    if [ $# -gt 0 ]; then cmd+=(--target "$@"); else cmd+=(--parallel); fi
+    if [ ${#_enames[@]} -gt 0 ]; then
+        # C-D9: user names map to branded targets (dir == name, target = mediaservo-example-<name>)
+        local _bn targs=()
+        for _bn in "${_enames[@]}"; do targs+=("mediaservo-example-${_bn}"); done
+        cmd+=(--target "${targs[@]}")
+    else
+        cmd+=(--parallel)
+    fi
     echo "\$ ${cmd[*]}  (cwd: $ROOT)"
     (cd "$ROOT" && "${_MS_STRIP_ENV[@]}" "$(_ms_bridge_env)" "${cmd[@]}") || exit $?
     echo "[example] artifacts → target/examples/bin/"
@@ -973,7 +1012,10 @@ _ms_run_example() {  # $@ = <name> [passthrough…] — foreground dev tool (dis
         echo "Usage: run example <name> [args…] (./mediaservo.sh list example)" >&2
         exit 2
     fi
-    local name=$1; shift
+    local spec=$1; shift
+    local _split
+    _split=$(_ms_example_split "$spec") || exit 2
+    local name=${_split#*$'\t'}
     local islib
     islib=$(_ms_examples_is_lib "$name") || { echo "[example] unknown example '$name'" >&2; exit 2; }
     _ms_build_example 0 "$name"
@@ -981,7 +1023,7 @@ _ms_run_example() {  # $@ = <name> [passthrough…] — foreground dev tool (dis
         echo "[example] '$name' is a library (no runnable artifact)" >&2
         exit 1
     fi
-    local exe="$_MS_EXAMPLES_BIN/$name"
+    local exe="$_MS_EXAMPLES_BIN/mediaservo-example-$name"   # C-D9 branded artifact
     if [ ! -e "$exe" ]; then
         echo "[example] still no artifact after build: $exe" >&2
         exit 1
@@ -1008,7 +1050,7 @@ _ms_test_example() {  # $1 = optional ctest -R filter; missing build dir = build
         _ms_build_example 0
     fi
     local cmd=(ctest --test-dir "$_MS_EXAMPLES_BUILD" --output-on-failure)
-    [ -n "${1:-}" ] && cmd+=(-R "$1")
+    if [ -n "${1:-}" ]; then cmd+=(-R "$1"); else cmd+=(-R "^core$"); fi  # island roster today; later bands extend per batch
     echo "\$ ${cmd[*]}"
     "${cmd[@]}" || exit $?
 }
@@ -1067,20 +1109,20 @@ case "${1:-}" in
         # example roster (was _cmd_list_example; same literal rule as the aggregate
         # root's file(GLOB */CMakeLists.txt) — dir == target == artifact name, G4)
         [ "${2:-}" = example ] || { echo "list: usage: list example" >&2; exit 2; }
-        ed="$ROOT/bindings/cxx/examples"
+        ed="$ROOT/examples/cxx"
         names=()
         for cml in "$ed"/*/CMakeLists.txt; do
             [ -f "$cml" ] || continue
             names+=("$(basename "$(dirname "$cml")")")
         done
         if [ ${#names[@]} -eq 0 ]; then
-            echo "(no examples in bindings/cxx/examples yet)" >&2
+            echo "(no examples in examples/cxx yet)" >&2
             exit 0
         fi
-        echo "Available examples (dir = target = artifact name; [lib] = non-executable):"
+        echo "Available examples (cxx band; dir name = CLI arg, target/artifact carry mediaservo-example- brand; [lib] = non-executable):"
         for name in "${names[@]}"; do
             if grep -q "add_library(" "$ed/$name/CMakeLists.txt"; then tag="[lib]"
-            elif [ -e "$ROOT/target/examples/bin/$name" ]; then tag="[built]"
+            elif [ -e "$ROOT/target/examples/bin/mediaservo-example-$name" ]; then tag="[built]"
             else tag="[not built]"; fi
             printf '  %-24s %s\n' "$name" "$tag"
         done

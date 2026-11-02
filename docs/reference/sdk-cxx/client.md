@@ -222,7 +222,7 @@ static void test_default_constructed_closed() {
 
 ### 5.2 The Headless Teleoperation Closed Loop (real code)
 
-`bindings/cxx/examples/control_demo/main.cpp` (95 lines: login→join→open_control→on_ack→
+`examples/cxx/control_demo/main.cpp` (95 lines: login→join→open_control→on_ack→
 12 resends of steer with the same seq → exit 0 on any ack). The core section, verbatim:
 
 ```cpp
@@ -276,7 +276,7 @@ auto stats = cons->stats();                       // the single-stream readout J
 
 ### 5.4 The E-Stop (real code, imgui_viewer)
 
-`bindings/cxx/examples/imgui_viewer/src/panels/control.cpp` `render_control` (the ESTOP button block):
+`examples/cxx/imgui_viewer/src/panels/control.cpp` `render_control` (the ESTOP button block):
 `t->sess.emergency_stop(*t->ctl, "chassis", 900, payload)` — the signed/unsigned state is decided by
 `Config::hmac_key_file` (see §8.2).
 
@@ -371,7 +371,7 @@ is §5.1's test_client.cpp. Prerequisite = the three cdylibs built by `build-c`.
 ### 8.1 The Two-Room Convention (the easiest to trip)
 
 The media plane and the control plane use **different rooms** (PIT-140 v2 + the W4c characterization,
-source `bindings/cxx/examples/README.md`):
+source `examples/cxx/README.md`):
 
 | Face | Room | list_rooms kind |
 |------|------|-----------------|

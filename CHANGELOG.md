@@ -6,6 +6,13 @@ teams); for development process details, consult git log directly. Newest versio
 ## [Unreleased]
 
 ### Added
+- [examples] top-level examples/ aggregator with language bands (plan
+  directory-artifacts-convergence batch ①): the cxx island moved from
+  bindings/cxx/examples to examples/cxx (band root stays standalone-configurable);
+  CLI example verbs accept [band/]name (bare = cxx); G4 upgraded to
+  dir+prefix==target==artifact — targets/artifacts carry the mediaservo-example-
+  brand (dir names unchanged); IDE run buttons pinned WORKING_DIRECTORY to the
+  repo root (imgui.ini lands there regardless of binaryDir)
 - [deploy] deploy-guard two modes: refuse (default, unchanged) and teardown
   (host face stop-first: unit -> daemon -> family, CWD-scoped to the target
   prefix); host IDE target runs teardown; single-writer flock per deploy

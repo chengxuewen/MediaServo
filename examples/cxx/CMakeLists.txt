@@ -1,7 +1,8 @@
-# bindings/cxx/examples — GUI/SDK examples aggregation root (p3-gui-viewer W0)
+# examples/cxx — cxx band root of the top-level examples/ aggregator (plan directory-artifacts-convergence batch ①; was bindings/cxx/examples, p3-gui-viewer W0)
 #
-# The single CLI entry point is `./mediaservo.sh build example [name...]` (G7); this file can also be configured standalone with
-# `cmake -S . -B build` (a compatibility bonus = each subdirectory can also be lifted out on its own — dependencies are prepared by this root).
+# The single CLI entry point is `./mediaservo.sh build example [name...]` (G7). Since batch ① the bridge configures the
+# REPO ROOT (link faces live there); a bare `cmake -S . -B build` of this band no longer resolves mediaservo::<sdk>
+# (the pre-faces standalone era passed control_demo only a raw .so path — the branding retired that bonus).
 #
 # Contracts (PLAN §3/§6):
 # - Directory name == target name == artifact name (the three-in-one G4): the subdirectory scan follows exactly the same literal rule as this file's
@@ -23,7 +24,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-get_filename_component(REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+get_filename_component(REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)   # load-bearing wall (plan batch ①/P3): band sits at depth 2 under the repo root
 
 # -- SDK delivery directory (build-c prerequisite) --
 set(MEDIASERVO_SDK_DIR "${REPO_ROOT}/target/debug" CACHE PATH
@@ -214,23 +215,25 @@ FetchContent_MakeAvailable(sdl3)
 # FetchContent offers no FOLDER kw for upstream targets — post-set the static one we
 # link (plan P8; name verified against the pinned 3.4.16 archive: add_library(SDL3-static ...)).
 if(TARGET SDL3-static)
-    set_target_properties(SDL3-static PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples")
+    set_target_properties(SDL3-static PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples/cxx")
 endif()
 
 # imgui has no official CMake build (upstream is just a set of source files; the official usage = compile them into your project manually):
 # core + the rendering backend are listed explicitly per the docs/BACKENDS.md inventory. For renderer=SDL3 the
 # SDL_Renderer backend (the W0 empty window; the GPU texture surface goes to W3, which will judge sdlgpu3).
 FetchContent_Populate(imgui)
-add_library(imgui STATIC
+# C-D9 branding: our wrapper over vendored sources carries the brand (the upstream
+# SDL3:: targets stay untouched — names CMake does not own are not ours to rename).
+add_library(mediaservo-imgui STATIC
     "${imgui_SOURCE_DIR}/imgui.cpp"
     "${imgui_SOURCE_DIR}/imgui_draw.cpp"
     "${imgui_SOURCE_DIR}/imgui_tables.cpp"
     "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
     "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
     "${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp")
-set_target_properties(imgui PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples")
-target_include_directories(imgui PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
-target_link_libraries(imgui PUBLIC SDL3::SDL3)
+set_target_properties(mediaservo-imgui PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples/cxx")
+target_include_directories(mediaservo-imgui PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
+target_link_libraries(mediaservo-imgui PUBLIC SDL3::SDL3)
 
 # -- Example aggregation: subdirectory scan with the same literal rule (same source as the CLI list, F-A-6) --
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${REPO_ROOT}/target/examples/bin")
@@ -242,20 +245,25 @@ set(_known_targets "")
 foreach(entry ${EXAMPLE_DIRS})
     get_filename_component(dir "${entry}" DIRECTORY)
     add_subdirectory("${dir}")
-    list(APPEND _known_targets "${dir}")
-    # The three-in-one gate (G4 promoted to a configure-time assertion, before any compilation): a directory must have a same-named target.
-    if(NOT TARGET "${dir}")
-        message(FATAL_ERROR "example directory '${dir}/' lacks a same-named target '${dir}' (a G4 three-in-one violation)")
+    # C-D9 G4 upgrade: dir keeps the plain name; target/artifact carry the brand
+    # (dir+prefix == target == artifact; the CLI maps user names the same way).
+    set(_tgt "mediaservo-example-${dir}")
+    list(APPEND _known_targets "${_tgt}")
+    # The three-in-one gate (G4, configure-time assertion before any compilation).
+    if(NOT TARGET "${_tgt}")
+        message(FATAL_ERROR "example directory '${dir}/' lacks target '${_tgt}' (a G4 dir+prefix==target violation)")
     endif()
-    # IDE run button (S2, supplier surface). Standalone island configure has no PolyOrch loaded →
+    # IDE run button (S2, supplier surface). Standalone band configure has no PolyOrch loaded →
     # COMMAND guard keeps the compatibility bonus valid. GUI flavor = the supplier's exec-time
     # display-probe chain (no display vars + a local X socket → DISPLAY=:0); CI/ctest never
-    # passes through it. The supplier deliberately ships no build edge — we wire our own.
+    # passes through it. CWD pinned to the repo root (plan C-D4=A: imgui.ini lands there no
+    # matter where the build dir is; unset = generator build-dir default). The supplier ships
+    # no build edge by design — we wire our own.
     if(COMMAND polyorch_example_run)
-        get_target_property(_et "${dir}" TYPE)
+        get_target_property(_et "${_tgt}" TYPE)
         if(_et STREQUAL "EXECUTABLE")
-            polyorch_example_run(TARGET "${dir}" GUI FOLDER "${MEDIASERVO_IDE_ROOT}examples/${dir}")
-            add_dependencies("${dir}-run" "${dir}")
+            polyorch_example_run(TARGET "${_tgt}" GUI WORKING_DIRECTORY "${REPO_ROOT}" FOLDER "${MEDIASERVO_IDE_ROOT}examples/cxx/${dir}")
+            add_dependencies("${_tgt}-run" "${_tgt}")
         endif()
     endif()
 endforeach()
