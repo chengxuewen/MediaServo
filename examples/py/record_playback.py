@@ -3,14 +3,14 @@
 
 Run (the deck library needs FFmpeg built + MEDIASERVO_LIB_DIR):
   export MEDIASERVO_LIB_DIR=$PWD/target/debug
-  python3 examples/record_playback.py
+  python3 examples/py/record_playback.py
 """
 
 import os
 import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # dev mode
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bindings", "python", "mediaservo"))  # dev mode (batch ③: repo layout examples/py -> package root)
 
 import mediaservo
 from mediaservo.deck import (

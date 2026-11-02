@@ -14,7 +14,8 @@
 #        G4 glob (*/CMakeLists.txt); compiled by e2e/docs paths, not CMake targets.
 # c    — batch ② LANDED: per-domain C material (deck/field/link), pure gcc artifacts
 #        compiled by scripts/e2e-bindings.sh; no CMake targets, no mount.
-# py   — batch ③: wheel-out examples relocation, C-D7 safe-valve applies.
+# py   — batch ③ LANDED: python usage examples at examples/py/ (never wheel content;
+#        run via the CLI py band / python3 directly; no CMake targets, no mount).
 # rs   — batch ④: workspace-member example package + PolyOrch D40 EXAMPLE face
 #        (C-D6=B/C-D10=B'). The CMake face here inherits this family gate;
 #        pure `cargo run -p examples --example <n>` consumption never does.

@@ -18,6 +18,11 @@ teams); for development process details, consult git log directly. Newest versio
   the standalone ros2_node project under examples/cxx/crate-examples/ (one level
   deeper than the G4 glob by design); e2e-bindings and the sdk-cxx/field-guide doc
   paths follow the move; no new CMake targets (material, not lanes)
+- [examples] batch ③: python usage examples relocated from
+  bindings/python/mediaservo/examples/ to examples/py/ (never wheel content — the
+  pywheel staging rm stays defensive; CLI gains `run example py/<name>`); fixes two
+  latent NameErrors carried from the old location (missing `import os` in
+  vehicle_push.py / vehicle_signal.py dev-mode path lines)
 - [deploy] deploy-guard two modes: refuse (default, unchanged) and teardown
   (host face stop-first: unit -> daemon -> family, CWD-scoped to the target
   prefix); host IDE target runs teardown; single-writer flock per deploy

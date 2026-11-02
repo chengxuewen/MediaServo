@@ -3,13 +3,14 @@
 
 Run (requires a signaling server + MEDIASERVO_LIB_DIR):
   export MEDIASERVO_LIB_DIR=$PWD/target/debug
-  python3 examples/vehicle_push.py ws://127.0.0.1:9800/ws mediaservo-dev room-1 10
+  python3 examples/py/vehicle_push.py ws://127.0.0.1:9800/ws mediaservo-dev room-1 10
 """
 
+import os
 import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # dev mode
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bindings", "python", "mediaservo"))  # dev mode (batch ③: repo layout examples/py -> package root)
 
 import mediaservo
 from mediaservo.field import PushConfig, PushSession
