@@ -12,21 +12,31 @@ FULL=0; [ "${1:-}" = "--full" ] && FULL=1
 unset MESON_ARGS MESON 2>/dev/null || true
 declare -a RESULTS=() FAILS=0 SKIPS=0
 GATE_FACE="${MEDIASERVO_GATE_FACE:-host-pixi}"
+WORK_TMP="${TMPDIR:-/tmp}"
+mkdir -p "$WORK_TMP"
+PIXI="${PIXI_BIN:-pixi}"
 PASS() { RESULTS+=("✅ $1"); }
 FAIL() { RESULTS+=("❌ $1"); FAILS=$((FAILS+1)); }
 SKIP() { RESULTS+=("⏭️ $1 (skip: $2)"); SKIPS=$((SKIPS+1)); }
 gate() {  # gate <name> <command...> (per-gate mktemp log — first run caught a shared-name race)
-    local name=$1 log; shift
-    log=$(mktemp /tmp/all-gate.XXXXXX)
+    local name=$1 log fail_log; shift
+    log=$(mktemp "$WORK_TMP/all-gate.XXXXXX")
+    fail_log="$WORK_TMP/all-gate-fail-$(echo "$name" | tr ' /' '__').log"
     echo "▶ $name"
     if "$@" >"$log" 2>&1; then PASS "$name"; rm -f "$log"
-    else FAIL "$name"; mv "$log" "/tmp/all-gate-fail-$(echo "$name" | tr ' /' '__').log"
+    else FAIL "$name"; mv "$log" "$fail_log"
          # keep a workspace-visible copy (container /tmp dies with the run —
          # twice a failing gate's evidence was unrecoverable post-exit)
-         cp "/tmp/all-gate-fail-$(echo "$name" | tr ' /' '__').log" "target/all-gate-fail-$(echo "$name" | tr ' /' '__').log" 2>/dev/null || true
-         echo "   ↳ $(grep -m1 -E "^error" "/tmp/all-gate-fail-$(echo "$name" | tr ' /' '__').log" 2>/dev/null | cut -c1-80)"; fi
+         cp "$fail_log" "target/all-gate-fail-$(echo "$name" | tr ' /' '__').log" 2>/dev/null || true
+         echo "   ↳ $(grep -m1 -E "^error" "$fail_log" 2>/dev/null | cut -c1-80)"; fi
 }
-port_busy() { ss -tln 2>/dev/null | grep -q ":9800 "; }
+port_busy() {
+    local ss_bin
+    ss_bin="$(command -v ss 2>/dev/null || true)"
+    [ -n "$ss_bin" ] || ss_bin=/usr/sbin/ss
+    [ -x "$ss_bin" ] || return 1
+    "$ss_bin" -tln 2>/dev/null | grep -q ':9800 '
+}
 
 # ── gate checker face (SR6 P3): checker logics live in tools/mediaservo-gates (N4 ruling A′) ──
 gate "build mediaservo-gates"      cargo build -q -p mediaservo-gates
@@ -78,12 +88,12 @@ gate "openapi validate"           target/debug/mediaservo-gates openapi
 
 # ── heavy gates (--full) ──
 if [ "$FULL" = 1 ]; then
-    gate "build-c cdylibs"        pixi run build-c
+    gate "build-c cdylibs"        "$PIXI" run build-c
     gate "test-cxx"               bash -c 'LD_LIBRARY_PATH=$PWD/target/debug bash scripts/test-cxx.sh'
     gate "abi drift+client"       bash -c 'bash scripts/check-abi-drift.sh && bash scripts/check-abi-client.sh'
     gate "delivery smoke"         bash scripts/e2e-delivery.sh
     gate "gui example"            bash -c 'MSRTC_RUN_SECS=0 bash mediaservo.sh build example && ctest --test-dir target/examples/build -R core --output-on-failure'
-    gate "gstreamer"              pixi run test-gstreamer
+    gate "gstreamer"              "$PIXI" run test-gstreamer
     if port_busy; then SKIP "mediasoup e2e" "live instance on 9800, PIT-192"
     else gate "mediasoup"         cargo test -p mediaservo-server --features sfu-mediasoup; fi
 else

@@ -1379,3 +1379,8 @@ install                        → 改名提示 + exit 2（退役）
 ### 2026-10-30: CLI Batch 2
 
 - `init -h/--bad`、`pixi`/`-e` 无 task、`mcp` 多余参数均已收紧；gate-shell 增加 B2 回归。
+
+### 2026-11-02: full-gate portability
+
+- `all-gates` 改用 `TMPDIR` + `PIXI_BIN` + 解析 `ss`；`shell_entry` 提示全英文（C49）。
+- 全量结果 27 pass / 1 skip（mediasoup live 9800）/ 1 fail（delivery smoke：`build bindings` 后 target/debug 库缺失，harness 顺序问题）。

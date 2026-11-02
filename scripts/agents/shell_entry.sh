@@ -50,12 +50,12 @@ case "$CMD" in
                 case "${1:-}" in
                     "") ;;
                     --full) FULL=1; shift ;;
-                    *) echo "[msrtc] ci: 未知参数 $1（--all-gates 后仅支持 --full）" >&2; exit 2 ;;
+                    *) echo "[msrtc] ci: unknown argument $1 (after --all-gates only --full is supported)" >&2; exit 2 ;;
                 esac
-                [ "$#" -eq 0 ] || { echo "[msrtc] ci: 多余参数 $*" >&2; exit 2; }
+                [ "$#" -eq 0 ] || { echo "[msrtc] ci: unexpected extra arguments: $*" >&2; exit 2; }
                 ;;
-            --full) echo "[msrtc] ci: --full 需要与 --all-gates 一起使用" >&2; exit 2 ;;
-            *) echo "[msrtc] ci: 未知参数 $1（仅支持 --all-gates [--full]）" >&2; exit 2 ;;
+            --full) echo "[msrtc] ci: --full requires --all-gates" >&2; exit 2 ;;
+            *) echo "[msrtc] ci: unknown argument $1 (only --all-gates [--full])" >&2; exit 2 ;;
         esac
         FAIL=0
         echo "[ci] 1/5 agent layers"
@@ -89,10 +89,10 @@ case "$CMD" in
         case "$MCP_CMD" in
             -h|--help) usage; exit 0 ;;
             status|setup|sync|index)
-                [ "$#" -eq 0 ] || { echo "[msrtc] mcp: 多余参数 $*" >&2; exit 2; }
+                [ "$#" -eq 0 ] || { echo "[msrtc] mcp: unexpected extra arguments: $*" >&2; exit 2; }
                 exec python3 "${MEDIASERVO_ROOT}/scripts/agents/mcp_cli.py" "$MCP_CMD" ;;
             pins)
-                [ "$#" -eq 0 ] || { echo "[msrtc] mcp: 多余参数 $*" >&2; exit 2; }
+                [ "$#" -eq 0 ] || { echo "[msrtc] mcp: unexpected extra arguments: $*" >&2; exit 2; }
                 exec cat "${MEDIASERVO_ROOT}/scripts/agents/mcp-servers.json" ;;
             *) echo "[msrtc] mcp: status|setup|sync|index|pins" >&2; exit 2 ;;
         esac
@@ -101,7 +101,7 @@ case "$CMD" in
         case "${1:-}" in
             -h|--help) usage; exit 0 ;;
             "") ;;
-            *) echo "[msrtc] verify: 未知参数 $1" >&2; exit 2 ;;
+            *) echo "[msrtc] verify: unknown argument $1" >&2; exit 2 ;;
         esac
         FAIL=0
         echo "[verify] 1/5 submodule file"
@@ -153,7 +153,7 @@ case "$CMD" in
             case "$arg" in
                 -h|--help) usage; exit 0 ;;
                 --dry-run) DRY=1 ;;
-                *) echo "[msrtc] clean: 未知参数 $arg（仅支持 --dry-run）" >&2; exit 2 ;;
+                *) echo "[msrtc] clean: unknown argument $arg (only --dry-run)" >&2; exit 2 ;;
             esac
         done
         if [ "$DRY" -eq 1 ]; then
