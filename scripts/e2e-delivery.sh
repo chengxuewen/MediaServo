@@ -6,7 +6,7 @@
 # Prereq: ./mediaservo.sh build bindings (this script runs it itself; zero extra CI steps).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-TMP=$(mktemp -d /tmp/ms-delivery.XXXXXX)
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/ms-delivery.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 FAIL=0
 

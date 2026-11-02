@@ -1384,3 +1384,8 @@ install                        → 改名提示 + exit 2（退役）
 
 - `all-gates` 改用 `TMPDIR` + `PIXI_BIN` + 解析 `ss`；`shell_entry` 提示全英文（C49）。
 - 全量结果 27 pass / 1 skip（mediasoup live 9800）/ 1 fail（delivery smoke：`build bindings` 后 target/debug 库缺失，harness 顺序问题）。
+
+### 2026-11-02: delivery smoke fix
+
+- `build bindings` 在 cmake configure 后从 deps 恢复 dev-tree `.so`/SONAME（field/link/deck/client/node）；e2e-delivery 尊重 `TMPDIR`。
+- 真实全量 28 pass / 1 skip / 0 fail；mediasoup 因 9800 live 正确 SKIP。

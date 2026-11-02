@@ -644,6 +644,34 @@ _ms_workspace_version() {
     # [workspace.package] version — the C43 single source (no tomllib needed)
     sed -n '/\[workspace.package\]/,/^\[/p' "$ROOT/Cargo.toml" | sed -n 's/^version *= *"\([^"]*\)".*/\1/p' | head -1
 }
+_ms_ensure_dev_cdylibs() {  # $1=out_dir $2=major
+    # CMake configure can leave the dev-tree unversioned cargo outputs absent
+    # while the deps/ real artifact remains. Restore exactly what the generated
+    # install rows expect: target/{debug,release}/libmediaservo_<sdk>.so and the
+    # dev-tree SONAME shim. Delivery layout itself is still cmake-owned.
+    local out_dir=$1 major=$2 sdk base dep shim
+    for sdk in field link deck client node; do
+        base="$out_dir/libmediaservo_${sdk}.so"
+        if [ "$sdk" = node ]; then
+            shim=""
+        else
+            shim="$out_dir/libmediaservo_${sdk}.so.$major"
+        fi
+        if [ ! -e "$base" ]; then
+            dep="$out_dir/deps/libmediaservo_${sdk}.so"
+            if [ ! -e "$dep" ]; then
+                dep="$(find "$out_dir/deps" -maxdepth 1 -name "libmediaservo_${sdk}-*.so" -type f -print -quit 2>/dev/null || true)"
+            fi
+            if [ -n "$dep" ] && [ -e "$dep" ]; then
+                cp -p "$dep" "$base"
+            fi
+        fi
+        if [ -n "$shim" ] && [ -e "$base" ] && [ ! -e "$shim" ]; then
+            ln -s "libmediaservo_${sdk}.so" "$shim"
+        fi
+    done
+}
+
 _ms_build_bindings() {  # $1=release(0/1)
     _ms_check cargo "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat"
     local staging="$ROOT/target/bindings-staging" sdk
@@ -682,6 +710,7 @@ _ms_build_bindings() {  # $1=release(0/1)
     local _btype=Debug; [ "$1" = 1 ] && _btype=Release
     echo "\$ cmake --preset bindings -DCMAKE_BUILD_TYPE=$_btype -DMEDIASERVO_BINDINGS_SRC=  (cwd: $ROOT)"
     (cd "$ROOT" && cmake --preset bindings "-DCMAKE_BUILD_TYPE=$_btype" "-DMEDIASERVO_BINDINGS_SRC=") || exit $?
+    _ms_ensure_dev_cdylibs "$out_dir" "$major"
     echo "\$ cmake --install build/presets/bindings --prefix $bind_dst --strip  (cwd: $ROOT)"
     (cd "$ROOT" && cmake --install build/presets/bindings --prefix "$bind_dst" --strip) || exit $?
     _ms_build_pywheel "$out_dir" "$major" "$staging" "$bind_dst" || exit $?
