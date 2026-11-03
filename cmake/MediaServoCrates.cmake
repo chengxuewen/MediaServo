@@ -61,6 +61,43 @@ set(MEDIASERVO_CRATE_LANES
     "mediaservo-server@mediaservo_server@crates/mediaservo-server"
     "mediaservo-weaknet@mediaservo_weaknet@crates/mediaservo-weaknet")
 
+# --- cargo artifact root: ONE resolver for the lanes face and the app-tree face ---
+# ([D-I2] round cargo-path-single-source). Defaults are byte-identical to the two
+# historical faces; when the environment relocates cargo (env CARGO_TARGET_DIR or
+# config build.target-dir) every consumer follows instead of drifting apart.
+# Memoized per configure through a DIRECTORY property on purpose: a warm tree must
+# re-resolve, never serve a stale CACHE INTERNAL path (PolyOrch PIT family).
+function(mediaservo_cargo_target_base out_var)
+    # F17-D self-contained face: lanes spell an explicit --target-dir under the
+    # binary dir, so cargo's own resolution (env/config) does not apply there.
+    if(MEDIASERVO_BUILD_CRATES_LANES AND NOT MEDIASERVO_SHARE_CARGO_TARGET)
+        set(${out_var} "${CMAKE_BINARY_DIR}/.cargo-target" PARENT_SCOPE)
+        return()
+    endif()
+    get_property(_mctd DIRECTORY PROPERTY _MEDIASERVO_CARGO_TARGET_BASE)
+    if(NOT _mctd)
+        set(_mctd "${MEDIASERVO_REPO_ROOT}/target")  # cargo default = fallback
+        find_program(_mctd_cargo cargo)
+        if(_mctd_cargo)
+            execute_process(
+                COMMAND "${_mctd_cargo}" metadata --format-version 1 --no-deps
+                        --manifest-path "${MEDIASERVO_REPO_ROOT}/Cargo.toml"
+                OUTPUT_VARIABLE _mctd_json
+                RESULT_VARIABLE _mctd_rc
+                ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+            if(_mctd_rc EQUAL 0 AND _mctd_json)
+                string(JSON _mctd_value ERROR_VARIABLE _mctd_err
+                       GET "${_mctd_json}" target_directory)
+                if(NOT _mctd_err AND _mctd_value)
+                    set(_mctd "${_mctd_value}")
+                endif()
+            endif()
+        endif()
+        set_property(DIRECTORY PROPERTY _MEDIASERVO_CARGO_TARGET_BASE "${_mctd}")
+    endif()
+    set(${out_var} "${_mctd}" PARENT_SCOPE)
+endfunction()
+
 function(mediaservo_setup_crate_lanes)
     if(NOT MEDIASERVO_BUILD_CRATES_LANES)
         return()
@@ -87,12 +124,9 @@ function(mediaservo_setup_crate_lanes)
     endif()
 
     # F17-D cache posture (see header): both forms spell the dir explicitly so that
-    # build/test/clean/ctest agree on ONE path.
-    if(MEDIASERVO_SHARE_CARGO_TARGET)
-        set(_base "${MEDIASERVO_REPO_ROOT}/target")
-            else()
-        set(_base "${CMAKE_BINARY_DIR}/.cargo-target")  # supplier default face, spelled
-    endif()
+    # build/test/clean/ctest agree on ONE path. Routed through the shared resolver
+    # so the app-tree face (MediaServoAppTree.cmake) can never drift from lanes.
+    mediaservo_cargo_target_base(_base)
 
     foreach(_row IN LISTS MEDIASERVO_CRATE_LANES)
         string(REPLACE "@" ";" _parts "${_row}")

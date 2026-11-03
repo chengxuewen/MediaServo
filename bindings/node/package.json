@@ -7,8 +7,8 @@
   "exports": { ".": "./lib/index.mjs" },
   "files": ["lib/", "mediaservo.node"],
   "scripts": {
-    "build": "bash -c 'pixi run cargo build -p mediaservo-node && cp ../../target/debug/libmediaservo_node.so ./mediaservo.node'",
-    "test": "bash -c \"LD_LIBRARY_PATH=$(pwd)/../../.pixi/envs/default/lib:$(pwd)/../../target/debug node --test tests/\""
+    "build": "bash -c 'pixi run cargo build -p mediaservo-node && cp \"$(bash ../../scripts/_common.sh)/debug/libmediaservo_node.so\" ./mediaservo.node'",
+    "test": "bash -c \"LD_LIBRARY_PATH=$(pwd)/../../.pixi/envs/default/lib:$(bash ../../scripts/_common.sh)/debug node --test tests/\""
   },
   "engines": { "node": ">=18" },
   "license": "Apache-2.0"

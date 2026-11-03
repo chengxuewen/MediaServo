@@ -23,7 +23,8 @@
 #     ordered hunt python used (BLOCKER-1 dual source: upstream name → brand name)
 #     so the PIT-191 protection (build stages final names into the live out/ tree)
 #     keeps feeding deploy. Weaknet adds the documented target/{release,debug}
-#     fallback + absent = WARN-skip polarity [bF4/bF5].
+#     fallback + absent = WARN-skip polarity [bF4/bF5]. The "target" prefix is
+#     mediaservo_cargo_target_base() (D-I2 single source), never spelled here.
 #   * f8f85db rule: every install(CODE) leg below is script-mode policy-neutral
 #     (list(FIND), never IN_LIST) — install scripts ignore the project's policy
 #     floor and must not depend on CMP0057.
@@ -130,6 +131,9 @@ function(_mediaservo_app_tree_server)
     if(NOT _profile)
         set(_profile debug)
     endif()
+    # Single-source cargo artifact root (D-I2): the same resolver the lanes face
+    # uses, so a relocated target dir is followed here too.
+    mediaservo_cargo_target_base(_cargo_base)
 
     # BLOCKER-1 dual-source hunt (ordered): upstream name (fresh build) -> brand
     # name (already-migrated tree: a second deploy needs no rebuild). Missing in
@@ -139,7 +143,7 @@ function(_mediaservo_app_tree_server)
     # any previous build's out/bin residue.
     set(_candidates "")
     if(MEDIASERVO_APP_STAGING STREQUAL "build")
-        list(APPEND _candidates "${MEDIASERVO_REPO_ROOT}/target/${_profile}/mediaservo-server${_exe}")
+        list(APPEND _candidates "${_cargo_base}/${_profile}/mediaservo-server${_exe}")
     endif()
     list(APPEND _candidates "${MEDIASERVO_SERVER_OUT_DIR}/bin/mediaservo-server${_exe}")
     if(MEDIASERVO_BRAND)
@@ -175,15 +179,15 @@ function(_mediaservo_app_tree_server)
     # Build mode puts the freshly compiled target/{profile} binary first.
     set(_wcands "")
     if(MEDIASERVO_APP_STAGING STREQUAL "build")
-        list(APPEND _wcands "${MEDIASERVO_REPO_ROOT}/target/${_profile}/mediaservo-weaknet${_exe}")
+        list(APPEND _wcands "${_cargo_base}/${_profile}/mediaservo-weaknet${_exe}")
     endif()
     list(APPEND _wcands "${MEDIASERVO_SERVER_OUT_DIR}/bin/mediaservo-weaknet${_exe}")
     if(MEDIASERVO_BRAND)
         list(APPEND _wcands "${MEDIASERVO_SERVER_OUT_DIR}/bin/${_wname}")
     endif()
     list(APPEND _wcands
-        "${MEDIASERVO_REPO_ROOT}/target/release/mediaservo-weaknet${_exe}"
-        "${MEDIASERVO_REPO_ROOT}/target/debug/mediaservo-weaknet${_exe}")
+        "${_cargo_base}/release/mediaservo-weaknet${_exe}"
+        "${_cargo_base}/debug/mediaservo-weaknet${_exe}")
     set(_wsrc "")
     foreach(_c IN LISTS _wcands)
         if(NOT _wsrc AND EXISTS "${_c}")
@@ -329,7 +333,9 @@ function(_mediaservo_app_tree_host)
     if(NOT _profile)
         set(_profile debug)
     endif()
-    set(_srcdir "${MEDIASERVO_REPO_ROOT}/target/${_profile}")
+    # Single-source cargo artifact root (D-I2), resolved per configure.
+    mediaservo_cargo_target_base(_cargo_base)
+    set(_srcdir "${_cargo_base}/${_profile}")
     set(_landed "")
     set(_hostdn "")
     foreach(_b IN LISTS MEDIASERVO_HOST_BINS)

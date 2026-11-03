@@ -67,3 +67,12 @@ ms_cargo_target_dir() {
     _ms_cargo_target_dir_cache="$td"
     printf '%s' "$td"
 }
+
+# Direct-execution entry (NOT sourced): print the resolved cargo target dir on
+# stdout. Lets non-bash consumers (pixi tasks, package.json scripts) query THIS
+# file: `$(bash scripts/_common.sh)` -- instead of re-spelling target/{debug,
+# release}, so one resolution algorithm serves every surface.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    ms_cargo_target_dir
+    echo
+fi
