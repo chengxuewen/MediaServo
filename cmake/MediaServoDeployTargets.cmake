@@ -13,7 +13,7 @@
 #
 # Cache-var contract (resolved HERE at main-tree configure time; targets take
 # no argv):
-#   MEDIASERVO_DEPLOY_PREFIX_HOST/SERVER  default ${repo}/../out/<t>, env
+#   MEDIASERVO_DEPLOY_PREFIX_HOST/SERVER  default ${repo}/out/<t>, env
 #                                         MSRTC_OUT_ROOT fallback (seat-2 F2)
 #   MEDIASERVO_DEPLOY_PROFILE             Debug|Release (U6 channel)
 #   MEDIASERVO_BRAND                      -D > env fallback > "" ; `mediaservo`
@@ -60,7 +60,7 @@ if(DEFINED ENV{MSRTC_OUT_ROOT} AND NOT MEDIASERVO_DEPLOY_PREFIX_HOST)
         "deploy target prefix (env fallback)" FORCE)
 endif()
 if(NOT MEDIASERVO_DEPLOY_PREFIX_HOST)
-    set(MEDIASERVO_DEPLOY_PREFIX_HOST "${MEDIASERVO_REPO_ROOT}/../out/host" CACHE PATH
+    set(MEDIASERVO_DEPLOY_PREFIX_HOST "${MEDIASERVO_REPO_ROOT}/out/host" CACHE PATH
         "deploy target prefix" FORCE)
 endif()
 if(DEFINED ENV{MSRTC_OUT_ROOT} AND NOT MEDIASERVO_DEPLOY_PREFIX_SERVER)
@@ -68,7 +68,7 @@ if(DEFINED ENV{MSRTC_OUT_ROOT} AND NOT MEDIASERVO_DEPLOY_PREFIX_SERVER)
         "deploy target prefix (env fallback)" FORCE)
 endif()
 if(NOT MEDIASERVO_DEPLOY_PREFIX_SERVER)
-    set(MEDIASERVO_DEPLOY_PREFIX_SERVER "${MEDIASERVO_REPO_ROOT}/../out/server" CACHE PATH
+    set(MEDIASERVO_DEPLOY_PREFIX_SERVER "${MEDIASERVO_REPO_ROOT}/out/server" CACHE PATH
         "deploy target prefix" FORCE)
 endif()
 

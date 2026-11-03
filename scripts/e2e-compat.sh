@@ -55,7 +55,7 @@ fi
 # ── P3 new SDK × old server ──
 if [[ -n "$OLD_SERVER" && -x "$OLD_SERVER" ]]; then
     TMP="$(mktemp -d)"
-    sed -e 's/9800/9811/' "$ROOT/../out/server/etc/server.yaml" > "$TMP/server.yaml" 2>/dev/null \
+    sed -e 's/9800/9811/' "${MSRTC_OUT_ROOT:-$ROOT/out}/server/etc/server.yaml" > "$TMP/server.yaml" 2>/dev/null \
         || cp "$ROOT/deploy/etc/server.yaml" "$TMP/server.yaml" 2>/dev/null || { say "P3-old x new" "SKIP (server.yaml template missing)"; TMP=""; }
     if [[ -n "$TMP" ]]; then
         MEDIASERVO_SFU_PORT=20011 MEDIASERVO_SFU_ANNOUNCED_IP=127.0.0.1 \
@@ -82,7 +82,7 @@ if [[ -x "$BASIC" ]]; then
     grep -qiE "control.*denied|4012" <<<"$OUT" && say "P4-4012-denied" "PASS" \
         || say "P4-4012-denied" "FAIL: $(grep -aE 'FAILED|OK' <<<"$OUT" | tail -1)"
     # audit line (actuation/authorization surface; bonus if present in logs, warn-only if absent)
-    grep -aq "control_dc" ../out/server/run/logs/*.log 2>/dev/null || echo "   | audit line not found in run logs (audit lives in server data/ or stderr — check manually)"
+    grep -aq "control_dc" "${MSRTC_OUT_ROOT:-$ROOT/out}/server/run/logs/"*.log 2>/dev/null || echo "   | audit line not found in run logs (audit lives in server data/ or stderr — check manually)"
 fi
 
 say "RESULT" "$( ((FAIL)) && echo 'SOME CHECKS FAILED' || echo 'E2E-COMPAT ALL PASS' )"
