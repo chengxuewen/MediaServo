@@ -690,7 +690,7 @@ _ms_ensure_dev_cdylibs() {  # $1=out_dir $2=major
 
 _ms_build_bindings() {  # $1=release(0/1)
     _ms_check cargo "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat"
-    local staging="$ROOT/target/bindings-staging" sdk
+    local staging="${MSRTC_BUILD_ROOT:-$ROOT/build}/staging/bindings" sdk
     mkdir -p "$staging"
     local cmd=(cargo build)
     [ "$1" = 1 ] && cmd+=(--release)

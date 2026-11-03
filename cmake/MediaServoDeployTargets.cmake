@@ -157,7 +157,7 @@ endfunction()
 # HOST/SERVER shape; the bindings target = configure(bindings gate) -> build
 # manifest -> install. Shape mismatch is by design, not an oversight.
 if(MEDIASERVO_BUILD_BINDINGS)
-    set(_bdir_b "${CMAKE_BINARY_DIR}/../deploy-bindings")
+    set(_bdir_b "${MEDIASERVO_REPO_ROOT}/build/deploy-bindings")
     set(_cfg_b "${MEDIASERVO_DEPLOY_PROFILE}")
     if(_cfg_b STREQUAL "Release")
         set(_cfg_b Release)
@@ -200,7 +200,7 @@ endif()
 # calling this function only when their lane flag is ON (audit: the gate would
 # otherwise make parent callsites register nothing under the default preset).
 function(_mediaservo_add_deploy_target)
-    cmake_parse_arguments(MDT "" "TREE;NAME;PREFIX;BRAND;FOLDER;SERVER_OUT_DIR;STAGING;INIT" "" ${ARGN})
+    cmake_parse_arguments(MDT "" "TREE;NAME;PREFIX;BRAND;FOLDER;SERVER_OUT_DIR;STAGING;INIT;BUILD_ROOT" "" ${ARGN})
     # cmake_parse_arguments UNDEFINES a keyword given an empty-string value
     # (BRAND "" = the upstream-name form, a legal input) — so DEFINED cannot
     # distinguish "not passed" from "passed empty". Require TREE + PREFIX only;
@@ -210,6 +210,12 @@ function(_mediaservo_add_deploy_target)
     endif()
     if(NOT DEFINED MDT_BRAND)
         set(MDT_BRAND "")
+    endif()
+    # build-root: deploy scratch binaryDir anchored per-context at the callsite
+    # (parent -> ms_rtc/build, submodule -> MediaServo/build). Default = submodule build
+    # for any caller that omits it; deterministic (no ${CMAKE_BINARY_DIR}/../ drift).
+    if(NOT MDT_BUILD_ROOT)
+        set(MDT_BUILD_ROOT "${MEDIASERVO_REPO_ROOT}/build")
     endif()
     set(_t "${MDT_TREE}")
     # target name: mediaservo-deploy-<tree> by default; the parent brand
@@ -224,7 +230,7 @@ function(_mediaservo_add_deploy_target)
     if(_brand STREQUAL "mediaservo")
         set(_brand "")
     endif()
-    set(_bdir "${CMAKE_BINARY_DIR}/../deploy-${_t}")
+    set(_bdir "${MDT_BUILD_ROOT}/deploy-${_t}")
     set(_profile "${MEDIASERVO_DEPLOY_PROFILE}")
     if(_profile STREQUAL "Release")
         set(_cfg Release)
@@ -338,11 +344,13 @@ if(MEDIASERVO_BUILD_CRATES_LANES)
     _mediaservo_add_deploy_target(TREE host
         PREFIX "${MEDIASERVO_DEPLOY_PREFIX_HOST}"
         BRAND "${MEDIASERVO_BRAND}"
+        BUILD_ROOT "${MEDIASERVO_REPO_ROOT}/build"
         FOLDER "${MEDIASERVO_IDE_ROOT}deploy")
     _mediaservo_add_deploy_target(TREE server
         PREFIX "${MEDIASERVO_DEPLOY_PREFIX_SERVER}"
         BRAND "${MEDIASERVO_BRAND}"
         SERVER_OUT_DIR "${MEDIASERVO_SERVER_OUT_DIR}"
         STAGING build
+        BUILD_ROOT "${MEDIASERVO_REPO_ROOT}/build"
         FOLDER "${MEDIASERVO_IDE_ROOT}deploy")
 endif()

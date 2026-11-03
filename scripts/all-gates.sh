@@ -26,8 +26,10 @@ gate() {  # gate <name> <command...> (per-gate mktemp log — first run caught a
     if "$@" >"$log" 2>&1; then PASS "$name"; rm -f "$log"
     else FAIL "$name"; mv "$log" "$fail_log"
          # keep a workspace-visible copy (container /tmp dies with the run —
-         # twice a failing gate's evidence was unrecoverable post-exit)
-         cp "$fail_log" "target/all-gate-fail-$(echo "$name" | tr ' /' '__').log" 2>/dev/null || true
+         # twice a failing gate's evidence was unrecoverable post-exit). Anchored to
+         # the context-aware build-root (parent ms_rtc/build, else submodule build).
+         _gl="${MSRTC_BUILD_ROOT:-$PWD/build}/gate-logs"; mkdir -p "$_gl" 2>/dev/null || true
+         cp "$fail_log" "$_gl/all-gate-fail-$(echo "$name" | tr ' /' '__').log" 2>/dev/null || true
          echo "   ↳ $(grep -m1 -E "^error" "$fail_log" 2>/dev/null | cut -c1-80)"; fi
 }
 port_busy() {
