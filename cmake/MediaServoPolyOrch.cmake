@@ -12,10 +12,10 @@
 #   * API floor (two forms, per the D39-era measured discipline): keyword-level
 #     capability is invisible to COMMAND probes, so it rides the sentinel's
 #     INTERFACE_POLYORCH_VERSION; a bare (pre-D39) sentinel fails the property
-#     read — same loud discipline upstream. Floor = 0.7.0 (D46 install-face
-#     primitives — SOVERSION/NAMESPACE/COMPONENTS/ConfigVersion/HEADERS_DIRECTORY/
-#     GLOB_HEADERS/STALE_GLOB/STRIP; the delivery-layout migration (SR4) depends on
-#     them. D45/D44/D42 floors stay subsumed; lanes from S2 onward need the line).
+#     read — same loud discipline upstream. Floor = 0.8.0 (D50 third-party face —
+#     fingerprint/fetch/build/manifest_write/import/recipe; the third-party
+#     dependency intake lanes depend on them). D46/D45/D44/D42 floors stay
+#     subsumed; lanes from S2 onward need the line).
 
 # Repo anchor: this file lives in <repo>/cmake/, so defining-file dir + ".." is the
 # repo root in BOTH standalone and superbuild (ms_rtc shell / third-party embed) mode —
@@ -34,11 +34,11 @@ function(mediaservo_ensure_polyorch)
             message(FATAL_ERROR
                 "MediaServo: PolyOrch sentinel lacks INTERFACE_POLYORCH_CMAKE_DIR/VERSION "
                 "(pre-D39 bare sentinel). Fix: upgrade the winning outer PolyOrch checkout "
-                "to a D39-complete version (>= 0.7.0).")
+                "to a D39-complete version (>= 0.8.0).")
         endif()
-        if(_po_ver VERSION_LESS "0.7.0")
+        if(_po_ver VERSION_LESS "0.8.0")
             message(FATAL_ERROR
-                "MediaServo needs PolyOrch >= 0.7.0 (install-face primitives, D46) but the winning "
+                "MediaServo needs PolyOrch >= 0.8.0 (third-party face, D50) but the winning "
                 "sentinel reports '${_po_ver}' — in reuse mode the outer copy is too old; "
                 "upgrade the superbuild's PolyOrch checkout or unshadow this repo's pinned copy.")
         endif()
@@ -68,10 +68,10 @@ function(mediaservo_ensure_polyorch)
 
     # post-embed floor check (self-embed path): D39 properties must be delivered
     get_target_property(_po_ver PolyOrch::PolyOrch INTERFACE_POLYORCH_VERSION)
-    if(NOT _po_ver OR _po_ver VERSION_LESS "0.7.0")
+    if(NOT _po_ver OR _po_ver VERSION_LESS "0.8.0")
         message(FATAL_ERROR
             "MediaServo: the pinned PolyOrch checkout reports '${_po_ver}', below the "
-            "required floor 0.7.0 (install-face primitives, D46). Bump the gitlink "
-            "to a D39/D46-complete SHA.")
+            "required floor 0.8.0 (third-party face, D50). Bump the gitlink "
+            "to a D50-complete SHA.")
     endif()
 endfunction()
