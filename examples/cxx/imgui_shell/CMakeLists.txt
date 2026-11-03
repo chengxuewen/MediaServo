@@ -8,16 +8,16 @@ target_link_libraries(mediaservo-example-imgui_shell PUBLIC mediaservo-imgui)
 
 # X11 real-window form: install a non-exiting Xlib error handler (SDL 3.4.16 has no global handler;
 # Xwayland selection/property negotiation None atoms → the default handler exit(1); see
-# the patches/sdl3-x11-none-guard.py header note). The handler works together with the events.c NULL guards (missing either means a second-order crash).
-# Not compiled in for headless (SDL_X11=OFF), zero CI disturbance. The conda libX11 and SDL dlopen share a soname → a single instance.
-if(SDL_X11 AND UNIX AND NOT APPLE)
-    find_package(X11 QUIET)
-    if(X11_X11_LIB)
-        target_compile_definitions(mediaservo-example-imgui_shell PRIVATE MSRTC_X11=1)
-        target_link_libraries(mediaservo-example-imgui_shell PUBLIC "${X11_X11_LIB}")
-        target_include_directories(mediaservo-example-imgui_shell PRIVATE "${X11_INCLUDE_DIR}")
-        message(STATUS "imgui_shell: X11 error handler enabled (${X11_X11_LIB})")
-    endif()
+# cmake/gui-deps/patches/sdl3-x11-none-guard.py). The handler works together with the
+# events.c NULL guards (missing either means a second-order crash). The probe, the library
+# and the include path all come from the gui-deps face (MediaServoGui::X11) -- no
+# hand-written find_package(X11) survives here (sr8 P3 seam retirement). Headless profiles
+# leave that target undefined → nothing compiles in, zero CI disturbance. The conda libX11
+# and SDL dlopen share a soname → a single instance.
+if(TARGET MediaServoGui::X11)
+    target_compile_definitions(mediaservo-example-imgui_shell PRIVATE MSRTC_X11=1)
+    target_link_libraries(mediaservo-example-imgui_shell PUBLIC MediaServoGui::X11)
+    message(STATUS "imgui_shell: X11 error handler enabled (gui-deps interface)")
 endif()
 
 # viewer_core unit tests (core.cpp has no GUI dependency; compiling separately keeps SDL out of the test binary)

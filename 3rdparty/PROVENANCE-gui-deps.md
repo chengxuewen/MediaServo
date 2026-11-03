@@ -1,8 +1,11 @@
 # 3rdparty GUI 依赖档案（p3-gui-viewer W0 · D281 oxmgr 同法）
 
 **本目录 = 纯档案层**：上游 release **原始 zip + .sha256** 进 git，不存解包件。
-消费方 = `examples/cxx/CMakeLists.txt` 的 FetchContent（`file://` 本地 URL +
-`URL_HASH` 对账，不符拒绝展开）。解包目录 `target/examples/build/_deps/`（gitignored、可再生）。
+消费方（sr8 P3 起）= `cmake/gui-deps/recipes/{sdl3,imgui}.json` 经 PolyOrch thirdparty face：
+`./mediaservo.sh build gui-deps` 独立构建 SDL3 → `build/3rdparty/<profile>/sdl3/install-<cfg>`
+（configure 期只 import，H2 不构建）；ImGui = `fetch_only` 配方 → `build/3rdparty/imgui/source`
+（source wrapper，随消费方编译，F8 不进包缓存）。配方 JSON 里 `url`/`url_hash` 是本台账的机器可读副本，
+改版本 = 两处同笔（台账表 + 配方）+ `sha256sum -c` 复验。
 
 | 项 | SDL3 | Dear ImGui |
 |----|------|-----------|
@@ -19,5 +22,6 @@
 SDL3 + ImGui（自带 `imgui_impl_sdl3` + `imgui_impl_sdlrenderer3` 后端）两档案已覆盖
 构建依赖全集，第三件（字体档案如 Noto CJK）= W3 纹理/字体需要时再入，届时同法补账。
 
-**bump 配方**：下载新 tag zip → `sha256sum > <同名>.sha256` → 更新本表 + examples/CMakeLists.txt
-的 `URL_HASH`（哈希不符 = FetchContent configure 即红 = 台账与构建天然联动）。
+**bump 配方**：下载新 tag zip → `sha256sum > <同名>.sha256` → 更新本表 +
+`cmake/gui-deps/recipes/<name>.json` 的 `url`/`url_hash`（哈希不符 = 配方门的 fetch 即红 =
+台账与构建天然联动）。

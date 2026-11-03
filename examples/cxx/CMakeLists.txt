@@ -9,8 +9,10 @@
 # file(GLOB */CMakeLists.txt) (F-A-6); the CLI `list example` reuses the same glob.
 # - MEDIASERVO_SDK_DIR = the build-c output directory (containing libmediaservo_*.so). Missing / no .so →
 # FATAL_ERROR with a message pointing at build-c (the compile-surface equivalent of the PIT-189 deployment-freshness lesson).
-# - GUI dependencies = local archive zips under 3rdparty/ + URL_HASH (the same method as D281's oxmgr; the ledger is
-# 3rdparty/PROVENANCE-gui-deps.md). A hash mismatch = FetchContent refuses to extract.
+# - GUI dependencies = the gui-deps face (sr8 P3): archives are hash-pinned, SDL3 is built by the
+# explicit `./mediaservo.sh build gui-deps` verb and consumed through its upstream SDL3Config.cmake;
+# cmake/gui-deps/ is the single definition point (recipes + patch scripts + the ImGui wrapper).
+# The ledger is 3rdparty/PROVENANCE-gui-deps.md. A missing install prefix is a FATAL naming the verb.
 # - Env constitution: the F25 gate (below) SELF-CHECKS the shell — an activated conda/pixi
 #   configure with the mount ON warns + force-OFFs; plain-shell -D or the CLI sanitized
 #   bridge are the two legit routes. pkg-config lockdown lives here regardless.
@@ -101,140 +103,27 @@ if(EXISTS "${_ms_conda_lib}/libstdc++.so.6")
         "-Wl,-rpath,${_ms_conda_lib}")
 endif()
 
-# -- pkg-config lockdown (PIT-199 four-gate behavior #3, moved from python to here = effective
-# for standalone and mounted configuration alike; a caller-set PKG_CONFIG_LIBDIR is honored).
-# conda's pkg-config bakes its own dirs into the default search set and env stripping alone cannot
-# block it — liburing/dbus leaked back into SDL's probes (focal incident 2026-09-28). --
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND "$ENV{PKG_CONFIG_LIBDIR}" STREQUAL "")
-    set(_ms_multiarch "")
-    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
-        set(_ms_multiarch "/usr/lib/x86_64-linux-gnu/pkgconfig")
-    elseif(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
-        set(_ms_multiarch "/usr/lib/aarch64-linux-gnu/pkgconfig")
-    endif()
-    set(_ms_pc "")
-    foreach(_d ${_ms_multiarch} /usr/lib/pkgconfig /usr/share/pkgconfig)
-        string(APPEND _ms_pc "${_d}:")
-    endforeach()
-    string(REGEX REPLACE ":$" "" _ms_pc "${_ms_pc}")
-    set(ENV{PKG_CONFIG_LIBDIR} "${_ms_pc}")
-    message(STATUS "GUI examples: pkg-config pinned to the system set (${_ms_pc})")
-endif()
+# (the pkg-config lockdown that used to live here moved with the SDL build into
+#  cmake/gui-deps/build.cmake: the SDL configure is an INDEPENDENT process now,
+#  so its env constitution must ride that process, not this band's configure)
 
-# -- GUI dependency archives (FetchContent local zips + hashes) --
-include(FetchContent)
-FetchContent_Declare(sdl3
-    URL "file://${REPO_ROOT}/3rdparty/sdl3-release-3.4.16.zip"
-    URL_HASH SHA256=547af2e721e8fc1a60f17acbb01cf6b65a6fa2022d885746b776e2d867adc2b1
-    # Upstream bug patch: X11_PickTarget calls XGetAtomName on a None atom from Xwayland's XdndTypeList,
-    # → the default Xlib handler exit(1) (unfixed in 3.4.16 / no report / no hint; confirmed 09-20 by comparing main verbatim;
-    # four crash sites: PickTarget / SDL_FORMATS×2 / PropertyNotify; the guard mirrors the existing if(name) form at line 1436 in the same file).
-    # The archive zip stays byte-for-byte upstream; the guard is applied after extraction (a python script, idempotent per site), harmless headless too.
-    PATCH_COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/patches/sdl3-x11-none-guard.py)
-FetchContent_Declare(imgui
-    # v1.92.9b-docking = the first-party docking branch's version-pinned tag (commit b48d1af, IMGUI_HAS_DOCK present;
-    # imgui.h's IMGUI_VERSION is the same string as master without a suffix — the branch fingerprint is only the IMGUI_HAS_DOCK macro)
-    URL "file://${REPO_ROOT}/3rdparty/imgui-v1.92.9b-docking.zip"
-    URL_HASH SHA256=0434445157a575f452ff0f2d1681fdd90ea8939e0c6983e6f8e47c51fba1bccd)
+# -- GUI dependencies (sr8 P3): ONE definition point = cmake/gui-deps/ -------
+# SDL3 is built/installed by the explicit verb (./mediaservo.sh build
+# gui-deps) -- configure never builds dependencies (H2; an IDE reconfigure
+# must not trigger minutes of compilation). This call imports the upstream
+# SDL3Config.cmake as the upstream static target, exposes MediaServoGui::SDL3, and
+# defines the mediaservo-imgui source wrapper (F8, consumer-compiled).
+# A missing install prefix is a FATAL naming the verb with the exact
+# --profile/--release mirror. Recipes/patches hash-pin the archives; the
+# ledger is 3rdparty/PROVENANCE-gui-deps.md.
+if(NOT MEDIASERVO_REPO_ROOT)
+    set(MEDIASERVO_REPO_ROOT "${REPO_ROOT}")   # mounted-tree fallback; the shim sets it in every real configure
+endif()
+include("${REPO_ROOT}/cmake/MediaServoGuiDeps.cmake")
+mediaservo_gui_deps()
 
-set(SDL_SHARED OFF CACHE BOOL "" FORCE)      # the examples link SDL3 statically, sparing the artifacts runtime library-path pins
-set(SDL_STATIC ON CACHE BOOL "" FORCE)
-set(SDL_TESTS OFF CACHE BOOL "" FORCE)
-set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
-# Desktop video backend: when the build machine lacks xorg/Wayland dev headers, SDL's auto-detection FATALs directly (3.4.16 reality
-# in sdlchecks CheckX11). The W0 archive surface = the official headless combination (docs/README-cmake.md):
-# X11/Wayland explicitly OFF + SDL_UNIX_CONSOLE_BUILD=ON (otherwise PrintSummary FATALs with no backend).
-# Desktop real-window runs (the W3 smoke / W5 ubuntu-x11 job): after installing the README-linux packages pass
-#   -DSDL_X11=ON -DSDL_UNIX_CONSOLE_BUILD=OFF
-# Desktop real-window automation (the 09-20 touch, the official recipe README L59-60): with the build machine's xorg header package group complete,
-# X11 turns on automatically (-DSDL_X11=OFF forces headless); without them → the W0 headless form (zero CI disturbance).
-# Three 09-20 pitfalls sidestepped together: ① the conda compiler does not search /usr/include by default (add -isystem); ② pixi's bundled
-# x11.pc points at an incomplete conda header directory, shadowing the system one (prepend the system segment to PKG_CONFIG_PATH); ③ SDL has no global
-# Xlib error handler (the Xwayland None atom = the upstream bug patch via PATCH_COMMAND).
-if(NOT DEFINED SDL_X11)
-    set(_msrtc_x11_probe ON)
-    # probe = what stays ENABLED (XTest dropped: opted out below, so its header is not a
-    # build requirement; Xext/Xdbe-era core headers are exercised by SDL's own
-    # check_c_source probes the moment SDL_X11 is ON).
-    foreach(_h "X11/Xlib.h" "X11/XKBlib.h" "X11/extensions/Xfixes.h" "X11/extensions/XInput2.h"
-               "X11/extensions/Xrandr.h" "X11/Xcursor/Xcursor.h" "X11/extensions/Xext.h")
-        find_file(_msrtc_h NAMES ${_h} PATHS /usr/include NO_DEFAULT_PATH)
-        if(NOT _msrtc_h)
-            set(_msrtc_x11_probe OFF)
-        endif()
-        unset(_msrtc_h CACHE)
-    endforeach()
-    if(_msrtc_x11_probe AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        set(SDL_X11 ON CACHE BOOL "" FORCE)
-        # The two 09-20 hacks apply only to the conda compiler: the system gcc's default chain already includes /usr/include,
-        # and another -isystem triggers include_next dedup breakage (c++/10/cstdlib cannot find stdlib.h,
-        # the focal incident of 2026-09-28). The conda side is unchanged (zero disturbance for CI / old Jetson).
-        if(CMAKE_C_COMPILER MATCHES "conda|envs/default")
-            string(PREPEND CMAKE_C_FLAGS "-isystem /usr/include ")
-            string(PREPEND CMAKE_CXX_FLAGS "-isystem /usr/include ")
-            set(ENV{PKG_CONFIG_PATH} "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:$ENV{PKG_CONFIG_PATH}")
-        endif()
-        message(STATUS "GUI examples: detected the system xorg header package group → SDL_X11=ON (windowed form; -DSDL_X11=OFF forces headless)")
-    else()
-        set(SDL_X11 OFF CACHE BOOL "" FORCE)
-    endif()
-endif()
-if(NOT DEFINED SDL_WAYLAND)
-    set(SDL_WAYLAND OFF CACHE BOOL "" FORCE)
-endif()
-# Audio backend (the GUI examples need no audio): on a clean CI (ubuntu-22.04 without libasound2-dev etc.),
-# SDL's default ON FATALs/find fails — explicitly OFF with the same X11 discipline; `if(NOT DEFINED)` keeps an _OVERRIDE slot.
-foreach(_snd ALSA PULSEAUDIO PIPEWIRE SNDIO OSS)
-    if(NOT DEFINED SDL_${_snd})
-        set(SDL_${_snd} OFF CACHE BOOL "" FORCE)
-    endif()
-endforeach()
-# XTest (global cursor-warp via XTestFakeMotionEvent): the viewer never warps the
-# system cursor (ImGui draws its own), so the feature is opted OUT — this removes the
-# libxtst-dev BUILD requirement from sudo-less dev boxes (SDL's own README-linux keeps
-# it listed for full-featured builds; -DSDL_X11_XTEST=ON restores it where headers exist).
-if(NOT DEFINED SDL_X11_XTEST)
-    set(SDL_X11_XTEST OFF CACHE BOOL "" FORCE)
-endif()
 
-# Gaming/peripheral stack (python configure args, disposition #8): probes want libusb/liburing/dbus
-# dev packages that build machines commonly lack and the examples never use — OFF unless overridden.
-foreach(_per LIBURING DBUS LIBUSB)
-    if(NOT DEFINED SDL_${_per})
-        set(SDL_${_per} OFF CACHE BOOL "" FORCE)
-    endif()
-endforeach()
 
-if(NOT DEFINED SDL_UNIX_CONSOLE_BUILD)
-    if(SDL_X11)
-        set(SDL_UNIX_CONSOLE_BUILD OFF CACHE BOOL "" FORCE)  # the official real-window recipe (console only needed with no backend)
-    else()
-        set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
-    endif()
-endif()
-FetchContent_MakeAvailable(sdl3)
-# FetchContent offers no FOLDER kw for upstream targets — post-set the static one we
-# link (plan P8; name verified against the pinned 3.4.16 archive: add_library(SDL3-static ...)).
-if(TARGET SDL3-static)
-    set_target_properties(SDL3-static PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples/cxx")
-endif()
-
-# imgui has no official CMake build (upstream is just a set of source files; the official usage = compile them into your project manually):
-# core + the rendering backend are listed explicitly per the docs/BACKENDS.md inventory. For renderer=SDL3 the
-# SDL_Renderer backend (the W0 empty window; the GPU texture surface goes to W3, which will judge sdlgpu3).
-FetchContent_Populate(imgui)
-# C-D9 branding: our wrapper over vendored sources carries the brand (the upstream
-# SDL3:: targets stay untouched — names CMake does not own are not ours to rename).
-add_library(mediaservo-imgui STATIC
-    "${imgui_SOURCE_DIR}/imgui.cpp"
-    "${imgui_SOURCE_DIR}/imgui_draw.cpp"
-    "${imgui_SOURCE_DIR}/imgui_tables.cpp"
-    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
-    "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
-    "${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp")
-set_target_properties(mediaservo-imgui PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples/cxx")
-target_include_directories(mediaservo-imgui PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
-target_link_libraries(mediaservo-imgui PUBLIC SDL3::SDL3)
 
 # -- Example aggregation: subdirectory scan with the same literal rule (same source as the CLI list, F-A-6) --
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${REPO_ROOT}/target/examples/bin")

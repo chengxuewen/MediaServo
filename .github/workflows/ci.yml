@@ -127,8 +127,10 @@ jobs:
         run: bash scripts/check-abi-drift.sh && bash scripts/check-abi-client.sh
 
   test-gui:
-    # p3 GUI examples compile+unit gate: SDL3/ImGui come from in-repo archives (file:// FetchContent,
-    # zero network), X11/audio backends explicitly OFF in the aggregate root (clean ubuntu dependency surface).
+    # p3 GUI examples compile+unit gate via the sr8 P3 gui-deps face: SDL3 is built by the explicit
+    # `build gui-deps` verb (auto-run by `build example` when the prefix is missing; configure never
+    # builds, H2) from the hash-pinned in-repo archive (zero network); the runner ships X11 headers,
+    # so the auto profile is linux-desktop with audio/peripheral backends OFF in the recipe.
     # Criteria = build example RC=0 + ctest -R core (viewer_core pure-function pins).
     # Live window output (dummy cb=tex meshing, needs a live server+producer) = device-day/self-hosted slot.
     runs-on: ubuntu-22.04
@@ -142,7 +144,7 @@ jobs:
         run: cargo build -p mediaservo-client-c
       - name: Dev soname symlinks (same discipline as test-cxx)
         run: cd target/debug && ln -sf libmediaservo_client_c.so libmediaservo_client_c.so.0
-      - name: Build GUI examples (aggregated FetchContent, headless combos)
+      - name: Build GUI examples (gui-deps verb + import, headless/desktop auto)
         run: ./mediaservo.sh build example
       - name: ctest viewer_core
         run: ctest --test-dir target/examples/build -R core --output-on-failure

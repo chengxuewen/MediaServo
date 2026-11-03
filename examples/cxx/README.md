@@ -2,8 +2,8 @@
 
 Runnable examples for one of the three Rust SDK families (`mediaservo::client` / C shim / this directory's C++17 header-only).
 The aggregation root `CMakeLists.txt` consumes `target/{debug,release}/`'s `libmediaservo_client_c.*` +
-`include/mediaservo/client.h` guarded by `MEDIASERVO_SDK_DIR`; SDL3/ImGui use in-repo archives
-(`3rdparty/*.zip` file:// FetchContent; zero network in CI).
+`include/mediaservo/client.h` guarded by `MEDIASERVO_SDK_DIR`; SDL3/ImGui are consumed through the
+gui-deps face (`cmake/gui-deps/recipes/*.json` + the `./mediaservo.sh build gui-deps` verb, zero network in CI).
 The ImGui archive = `v1.92.9b-docking` (the first-party docking branch; imgui_viewer's four-pane IDE layout depends on it).
 
 ## IN (what this directory guarantees)

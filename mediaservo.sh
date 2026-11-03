@@ -29,11 +29,12 @@ the build/package/example/compose/ops faces all live in this shell, cmake and th
 managed binaries own layout and runtime truth).
 
 build/assembly face:
-  build <target> [--release] [--image runtime|dev] [--native] [NAME...]
-        target: all|web|host|server|client|bindings|example (default all;
+  build <target> [--release] [--image runtime|dev] [--native] [--profile auto|headless|linux-desktop] [NAME...]
+        target: all|web|host|server|client|bindings|example|gui-deps (default all;
         server = non-embedded variant + one-step web assembly; web =
         frontend-only fast lane; only --image takes the Docker path;
-        build-host/build-server compat aliases kept)
+        build-host/build-server compat aliases kept; gui-deps = the explicit
+        SDL3 build/install verb (sr8 P3), --profile only applies to it)
   build:deploy <target> [--prefix DIR] [--release]   (one-step build + deploy)
   package <target> [--dist DIR] [--brand NAME] [--release]
         target: host|server|sdk-field|sdk-client (bindings = one-cycle alias)
@@ -954,6 +955,42 @@ _ms_package() {  # $1=target $2=dist $3=brand $4=release(0/1)
     _ms_reap_dist_daemons "$dist" "$staging"
     [ $rc = 0 ] || exit $rc
 }
+# sr8 P3 -- GUI dependency face: the SDL3 install prefix is an EXPLICIT-
+# VERB artifact (configure never builds, H2). The ImGui wrapper is consumer-
+# compiled (fetch_only recipe) and needs no verb. Profile auto = the same
+# seven-header probe as cmake/MediaServoGuiDeps.cmake (keep the lists aligned).
+_ms_x11_headers_present() {
+    local h
+    for h in X11/Xlib.h X11/XKBlib.h X11/extensions/Xfixes.h X11/extensions/XInput2.h \
+             X11/extensions/Xrandr.h X11/Xcursor/Xcursor.h X11/extensions/Xext.h; do
+        [ -f "/usr/include/$h" ] || return 1
+    done
+    return 0
+}
+_ms_build_gui_deps() {  # $1=release(0/1) $2=profile(auto|headless|linux-desktop)
+    local release=$1 profile=$2
+    local bt=Debug; [ "$release" = 1 ] && bt=Release
+    if [ "$profile" = auto ]; then
+        if _ms_x11_headers_present; then profile=linux-desktop; else profile=headless; fi
+    fi
+    # System-fixed tools (F25 discipline): the SDL child configure runs under
+    # the sanitized PATH, so a ninja that only lives in the activated pixi env
+    # would vanish there (measured: project() then dies with a misleading
+    # "CMAKE_C_COMPILER not set"). Pin absolute paths; ninja only if SYSTEM.
+    local gen="" mk=""
+    if [ -x /usr/bin/ninja ]; then gen=Ninja; mk=/usr/bin/ninja
+    elif [ -x /usr/bin/make ]; then gen="Unix Makefiles"; mk=/usr/bin/make
+    else echo "[gui-deps] neither /usr/bin/ninja nor /usr/bin/make found -- the SDL build needs a generator" >&2; return 1; fi
+    # F10 dual-track: the shell resolves MSRTC_BUILD_ROOT here; the CMake side
+    # pins the same default from the repo root (no env reads there).
+    local anchor="${MSRTC_BUILD_ROOT:-$ROOT/build}/3rdparty"
+    echo "[gui-deps] profile=$profile config=$bt anchor=$anchor generator=$gen"
+    (cd "$ROOT" && "${_MS_STRIP_ENV[@]}" "$(_ms_bridge_env)" \
+        cmake -DPROFILE="$profile" -DBUILD_TYPE="$bt" -DWORK_DIR="$anchor/$profile" \
+              -DGENERATOR="$gen" -DMAKE_PROGRAM="$mk" -DPARALLEL="${MEDIASERVO_GUI_DEPS_PARALLEL:-}" \
+              -P "$ROOT/cmake/gui-deps/build.cmake") || exit $?
+}
+
 _ms_build_example() {  # $1=release(0/1); rest = example names (empty = all)
     local release=$1; shift
     local profile=debug; [ "$release" = 1 ] && profile=release
@@ -961,6 +998,17 @@ _ms_build_example() {  # $1=release(0/1); rest = example names (empty = all)
     if [ ! -f "$ROOT/target/$profile/libmediaservo_client.so" ]; then
         echo "[example] libmediaservo_client.so missing → running build-c first" >&2
         (cd "$ROOT" && "${PIXI_BIN:-pixi}" run build-c) || exit $?
+    fi
+    # GUI dependency prelude (sr8 P3): the SDL3 install prefix is an explicit-
+    # verb artifact and configure never builds (H2). Auto-run the verb when the
+    # prefix for the effective profile/config is missing; the verb itself is
+    # manifest-idempotent, so a present prefix costs two stats.
+    local _gdprof=linux-desktop
+    _ms_x11_headers_present || _gdprof=headless
+    local _gdbt=Debug; [ "$release" = 1 ] && _gdbt=Release
+    if [ ! -f "${MSRTC_BUILD_ROOT:-$ROOT/build}/3rdparty/$_gdprof/sdl3/install-$_gdbt/lib/cmake/SDL3/SDL3Config.cmake" ]; then
+        echo "[example] SDL3 install prefix missing → running build gui-deps first" >&2
+        _ms_build_gui_deps "$release" "$_gdprof" || exit $?
     fi
     local n spec split b
     local _enames=() _rsnames=()
@@ -1117,11 +1165,14 @@ case "${1:-}" in
             build-server) set -- build server "${_ms_orig[@]:1}" ;;
         esac
         shift
-        tgt=""; image=""; native=0; release=0; names=(); seen_tgt=0
+        tgt=""; image=""; native=0; release=0; names=(); seen_tgt=0; gd_profile=""
         while [ $# -gt 0 ]; do
             case "$1" in
                 --release) release=1; shift ;;
                 --native) native=1; shift ;;
+                --profile) gd_profile="${2:?build --profile needs a value}"
+                           case "$gd_profile" in auto|headless|linux-desktop) ;; *) echo "build: argument --profile: invalid choice: '$gd_profile' (choose from 'auto', 'headless', 'linux-desktop')" >&2; exit 2 ;; esac
+                           shift 2 ;;
                 --image) image="${2:?build --image needs a value}"
                          case "$image" in runtime|dev) ;; *) echo "build: argument --image: invalid choice: '$image' (choose from 'runtime', 'dev')" >&2; exit 2 ;; esac
                          shift 2 ;;
@@ -1130,12 +1181,14 @@ case "${1:-}" in
             esac
         done
         tgt="${tgt:-all}"
-        case "$tgt" in all|web|host|server|client|bindings|example) ;; *) echo "build: argument target: invalid choice: '$tgt' (choose from 'all', 'web', 'host', 'server', 'client', 'bindings', 'example')" >&2; exit 2 ;; esac
+        case "$tgt" in all|web|host|server|client|bindings|example|gui-deps) ;; *) echo "build: argument target: invalid choice: '$tgt' (choose from 'all', 'web', 'host', 'server', 'client', 'bindings', 'example', 'gui-deps')" >&2; exit 2 ;; esac
+        if [ -n "$gd_profile" ] && [ "$tgt" != gui-deps ]; then echo "build --profile only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
         if [ -n "$image" ] && [ "$tgt" != server ]; then echo "build --image only supports build server (current target=$tgt)" >&2; exit 2; fi
         if [ "$native" = 1 ] && [ "$tgt" != server ]; then echo "build --native only supports build server (current target=$tgt)" >&2; exit 2; fi
         case "$tgt" in
             bindings) _ms_build_bindings "$release"; exit $? ;;
             example)  _ms_build_example "$release" "${names[@]}"; exit $? ;;
+            gui-deps) _ms_build_gui_deps "$release" "${gd_profile:-auto}"; exit $? ;;
             all)    _ms_build_host; _ms_build_server "" 0 0; _ms_build_client ;;
             host)   _ms_build_host ;;
             server) _ms_build_server "$image" "$native" "$release" ;;

@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "name": "sdl3",
+  "version": "3.4.16",
+  "provider": "source",
+  "license": "zlib",
+  "url": "../../../3rdparty/sdl3-release-3.4.16.zip",
+  "url_hash": "547af2e721e8fc1a60f17acbb01cf6b65a6fa2022d885746b776e2d867adc2b1",
+  "patch_command": ["python3", "../patches/sdl3-x11-none-guard.py"],
+  "link_mode": "static",
+  "profiles": {
+    "headless": {
+      "SDL_SHARED": "OFF",
+      "SDL_STATIC": "ON",
+      "SDL_TESTS": "OFF",
+      "SDL_EXAMPLES": "OFF",
+      "SDL_X11": "OFF",
+      "SDL_WAYLAND": "OFF",
+      "SDL_UNIX_CONSOLE_BUILD": "ON",
+      "SDL_ALSA": "OFF",
+      "SDL_PULSEAUDIO": "OFF",
+      "SDL_PIPEWIRE": "OFF",
+      "SDL_SNDIO": "OFF",
+      "SDL_OSS": "OFF",
+      "SDL_X11_XTEST": "OFF",
+      "SDL_LIBURING": "OFF",
+      "SDL_DBUS": "OFF",
+      "SDL_LIBUSB": "OFF"
+    },
+    "linux-desktop": {
+      "SDL_SHARED": "OFF",
+      "SDL_STATIC": "ON",
+      "SDL_TESTS": "OFF",
+      "SDL_EXAMPLES": "OFF",
+      "SDL_X11": "ON",
+      "SDL_WAYLAND": "OFF",
+      "SDL_UNIX_CONSOLE_BUILD": "OFF",
+      "SDL_ALSA": "OFF",
+      "SDL_PULSEAUDIO": "OFF",
+      "SDL_PIPEWIRE": "OFF",
+      "SDL_SNDIO": "OFF",
+      "SDL_OSS": "OFF",
+      "SDL_X11_XTEST": "OFF",
+      "SDL_LIBURING": "OFF",
+      "SDL_DBUS": "OFF",
+      "SDL_LIBUSB": "OFF"
+    }
+  },
+  "find_package": {
+    "name": "SDL3",
+    "components": ["SDL3-static"],
+    "targets": ["SDL3::SDL3-static"]
+  },
+  "alias": "MediaServoGui::SDL3"
+}
