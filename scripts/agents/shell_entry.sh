@@ -21,7 +21,8 @@ usage: shell_entry.sh <command> ...
   mcp status|setup|sync|index|pins
   verify
   doctor
-  clean [--dry-run]
+  clean [--logs] [--dry-run]
+  disk-usage
 EOF
 }
 
@@ -149,13 +150,43 @@ case "$CMD" in
         ;;
     clean)
         DRY=0
+        LOGS=0
         for arg in "$@"; do
             case "$arg" in
                 -h|--help) usage; exit 0 ;;
                 --dry-run) DRY=1 ;;
-                *) echo "[msrtc] clean: unknown argument $arg (only --dry-run)" >&2; exit 2 ;;
+                --logs) LOGS=1 ;;
+                *) echo "[msrtc] clean: unknown argument $arg (only --logs/--dry-run)" >&2; exit 2 ;;
             esac
         done
+        if [ "$LOGS" -eq 1 ]; then
+            # Clean only the delivery-tree runtime logs/recordings (run/logs, recordings);
+            # keep the skeleton and state files (oxfile.toml/config-state.json/run/oxmgr/
+            # etc/identity.json). Guard: absolute root + non-empty + exists (audit T3).
+            OUT="${SHELL_ROOT}/out"
+            case "$OUT" in
+                /*) ;;
+                *) echo "[clean --logs] refuse: out root not absolute (${OUT})" >&2; exit 2 ;;
+            esac
+            if [ ! -d "$OUT" ]; then
+                echo "[clean --logs] no out dir, skip (${OUT})"
+                exit 0
+            fi
+            removed=0
+            for d in "$OUT"/*/run/logs "$OUT"/*/recordings; do
+                [ -d "$d" ] || continue
+                if [ "$DRY" -eq 1 ]; then
+                    echo "[clean --logs] dry-run: would empty $d/*"
+                    continue
+                fi
+                while IFS= read -r -d '' c; do
+                    rm -rf -- "$c" && removed=$((removed+1))
+                done < <(find "$d" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+                echo "[clean --logs] emptied $d"
+            done
+            [ "$DRY" -eq 1 ] || echo "[clean --logs] processed $removed entries (kept skeleton/state files)"
+            exit 0
+        fi
         if [ "$DRY" -eq 1 ]; then
             echo "[clean] dry-run: would remove ${SHELL_ROOT}/{out,.cache,build}"
             exit 0
@@ -164,6 +195,36 @@ case "$CMD" in
         rm -rf "${SHELL_ROOT}/out" "${SHELL_ROOT}/.cache" "${SHELL_ROOT}/build"
         cd "${MEDIASERVO_ROOT}"
         exec "${MEDIASERVO_ROOT}/mediaservo.sh" clean
+        ;;
+    disk-usage)
+        case "${1:-}" in
+            -h|--help) usage; exit 0 ;;
+            "") ;;
+            *) echo "[msrtc] disk-usage: no arguments (read-only inventory)" >&2; exit 2 ;;
+        esac
+        _durow() {
+            if [ -e "$2" ]; then
+                printf '  [%-6s] %8s  %s\n' "$1" "$(du -sh -- "$2" 2>/dev/null | cut -f1)" "$2"
+            else
+                printf '  [%-6s] %8s  %s (missing)\n' "$1" "-" "$2"
+            fi
+        }
+        echo "[disk-usage] build-artifact disk inventory -- parent=${SHELL_ROOT} sub=${MEDIASERVO_ROOT}"
+        [ -n "${MSRTC_BUILD_ROOT:-}" ] && echo "[disk-usage] MSRTC_BUILD_ROOT=${MSRTC_BUILD_ROOT}"
+        [ -n "${MSRTC_OUT_ROOT:-}" ] && echo "[disk-usage] MSRTC_OUT_ROOT=${MSRTC_OUT_ROOT}"
+        echo "-- parent (ms_rtc) --"
+        _durow parent "${SHELL_ROOT}/build"; _durow parent "${SHELL_ROOT}/out"; _durow parent "${SHELL_ROOT}/.cache"
+        echo "-- delivery runtime hotspots (clean --logs targets) --"
+        _durow parent "${SHELL_ROOT}/out/host/run/logs"; _durow parent "${SHELL_ROOT}/out/host/recordings"
+        echo "-- submodule (MediaServo) --"
+        _durow sub "${MEDIASERVO_ROOT}/target"; _durow sub "${MEDIASERVO_ROOT}/target/debug"; _durow sub "${MEDIASERVO_ROOT}/target/release"
+        _durow sub "${MEDIASERVO_ROOT}/build"; _durow sub "${MEDIASERVO_ROOT}/out"; _durow sub "${MEDIASERVO_ROOT}/www"; _durow sub "${MEDIASERVO_ROOT}/.pixi"
+        echo "-- pixi download cache (6-prime: new home vs in-tree leftover) --"
+        _durow shared "${PIXI_CACHE_DIR:-${HOME:-}/.cache/pixi-mediaservo}"; _durow sub "${MEDIASERVO_ROOT}/.pixi-cache"
+        _total=$(du -shc "${SHELL_ROOT}/build" "${SHELL_ROOT}/out" "${SHELL_ROOT}/.cache" "${MEDIASERVO_ROOT}/target" "${MEDIASERVO_ROOT}/build" "${MEDIASERVO_ROOT}/out" "${MEDIASERVO_ROOT}/www" "${MEDIASERVO_ROOT}/.pixi" "${MEDIASERVO_ROOT}/.pixi-cache" 2>/dev/null | tail -1 | cut -f1)
+        echo "[disk-usage] total (dedup top-level: parent build+out+.cache and sub target+build+out+www+.pixi+.pixi-cache; excl pixi new home) ~ ${_total:-?}"
+        echo "[disk-usage] note: pixi cache goes to \$HOME/.cache/pixi-mediaservo after 6-prime; in-tree .pixi-cache is a pre-switch leftover, reclaimable"
+        exit 0
         ;;
     *)
         echo "[msrtc] shell_entry: unknown command $CMD" >&2
