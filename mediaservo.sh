@@ -29,12 +29,13 @@ the build/package/example/compose/ops faces all live in this shell, cmake and th
 managed binaries own layout and runtime truth).
 
 build/assembly face:
-  build <target> [--release] [--image runtime|dev] [--native] [--profile auto|headless|linux-desktop] [NAME...]
+  build <target> [--release] [--image runtime|dev] [--native] [--profile auto|headless|linux-desktop] [--provider none|system|pixi] [--pixi-env NAME] [NAME...]
         target: all|web|host|server|client|bindings|example|gui-deps (default all;
         server = non-embedded variant + one-step web assembly; web =
         frontend-only fast lane; only --image takes the Docker path;
         build-host/build-server compat aliases kept; gui-deps = the explicit
-        SDL3 build/install verb (sr8 P3), --profile only applies to it)
+        SDL3 build/install verb (sr8 P3), --profile/--provider/--pixi-env only
+        apply to it -- provider pixi is the sr8 P4 fill, OFF by default)
   build:deploy <target> [--prefix DIR] [--release]   (one-step build + deploy)
   package <target> [--dist DIR] [--brand NAME] [--release]
         target: host|server|sdk-field|sdk-client (bindings = one-cycle alias)
@@ -967,12 +968,17 @@ _ms_x11_headers_present() {
     done
     return 0
 }
-_ms_build_gui_deps() {  # $1=release(0/1) $2=profile(auto|headless|linux-desktop)
-    local release=$1 profile=$2
+_ms_pixi_present() {
+    command -v pixi >/dev/null 2>&1 && return 0
+    [ -x "$HOME/.pixi/bin/pixi" ]
+}
+_ms_build_gui_deps() {  # $1=release(0/1) $2=profile(auto|headless|linux-desktop) $3=provider(none|system|pixi) $4=pixi-env
+    local release=$1 profile=$2 provider=${3:-none} pixi_env=${4:-gui-deps}
     local bt=Debug; [ "$release" = 1 ] && bt=Release
     if [ "$profile" = auto ]; then
         if _ms_x11_headers_present; then profile=linux-desktop; else profile=headless; fi
     fi
+    case "$provider" in none|system|pixi) ;; *) echo "[gui-deps] unknown --provider '$provider' (none|system|pixi)" >&2; return 2 ;; esac
     # System-fixed tools (F25 discipline): the SDL child configure runs under
     # the sanitized PATH, so a ninja that only lives in the activated pixi env
     # would vanish there (measured: project() then dies with a misleading
@@ -983,11 +989,32 @@ _ms_build_gui_deps() {  # $1=release(0/1) $2=profile(auto|headless|linux-desktop
     else echo "[gui-deps] neither /usr/bin/ninja nor /usr/bin/make found -- the SDL build needs a generator" >&2; return 1; fi
     # F10 dual-track: the shell resolves MSRTC_BUILD_ROOT here; the CMake side
     # pins the same default from the repo root (no env reads there).
+    # Provider identity rides the work-dir tag (the cache key already carries
+    # it; the paths must not alias either -- P4). Default none keeps the P3
+    # layout byte-for-byte (F3=A: pixi is implemented, never the default).
     local anchor="${MSRTC_BUILD_ROOT:-$ROOT/build}/3rdparty"
-    echo "[gui-deps] profile=$profile config=$bt anchor=$anchor generator=$gen"
+    local ptag=""
+    [ "$provider" != "none" ] && ptag="-$provider"
+    local provargs=()
+    if [ "$provider" = "pixi" ]; then
+        # the explicit-compiler discipline (r4 C1): the system pair, absolute
+        if [ ! -x /usr/bin/cc ] || [ ! -x /usr/bin/c++ ]; then
+            echo "[gui-deps] provider pixi needs the system compilers at /usr/bin/cc and /usr/bin/c++ (the provider never lets the child discover a compiler)" >&2
+            return 1
+        fi
+        if ! _ms_pixi_present; then
+            echo "[gui-deps] provider pixi needs the pixi binary (bootstrap it first: ./bootstrap.sh)" >&2
+            return 1
+        fi
+        provargs=(-DPROVIDER=pixi -DPIXI_ENV="$pixi_env" -DCOMPILER_C=/usr/bin/cc -DCOMPILER_CXX=/usr/bin/c++)
+    elif [ "$provider" = "system" ]; then
+        provargs=(-DPROVIDER=system)
+    fi
+    echo "[gui-deps] profile=$profile provider=$provider config=$bt anchor=$anchor generator=$gen"
     (cd "$ROOT" && "${_MS_STRIP_ENV[@]}" "$(_ms_bridge_env)" \
-        cmake -DPROFILE="$profile" -DBUILD_TYPE="$bt" -DWORK_DIR="$anchor/$profile" \
+        cmake -DPROFILE="$profile" -DBUILD_TYPE="$bt" -DWORK_DIR="$anchor/$profile$ptag" \
               -DGENERATOR="$gen" -DMAKE_PROGRAM="$mk" -DPARALLEL="${MEDIASERVO_GUI_DEPS_PARALLEL:-}" \
+              "${provargs[@]}" \
               -P "$ROOT/cmake/gui-deps/build.cmake") || exit $?
 }
 
@@ -1165,11 +1192,15 @@ case "${1:-}" in
             build-server) set -- build server "${_ms_orig[@]:1}" ;;
         esac
         shift
-        tgt=""; image=""; native=0; release=0; names=(); seen_tgt=0; gd_profile=""
+        tgt=""; image=""; native=0; release=0; names=(); seen_tgt=0; gd_profile=""; gd_provider=""; gd_pixi_env=""
         while [ $# -gt 0 ]; do
             case "$1" in
                 --release) release=1; shift ;;
                 --native) native=1; shift ;;
+                --provider) gd_provider="${2:?build --provider needs a value}"
+                            case "$gd_provider" in none|system|pixi) ;; *) echo "build: argument --provider: invalid choice: '$gd_provider' (choose from 'none', 'system', 'pixi')" >&2; exit 2 ;; esac
+                            shift 2 ;;
+                --pixi-env) gd_pixi_env="${2:?build --pixi-env needs a value}"; shift 2 ;;
                 --profile) gd_profile="${2:?build --profile needs a value}"
                            case "$gd_profile" in auto|headless|linux-desktop) ;; *) echo "build: argument --profile: invalid choice: '$gd_profile' (choose from 'auto', 'headless', 'linux-desktop')" >&2; exit 2 ;; esac
                            shift 2 ;;
@@ -1183,12 +1214,14 @@ case "${1:-}" in
         tgt="${tgt:-all}"
         case "$tgt" in all|web|host|server|client|bindings|example|gui-deps) ;; *) echo "build: argument target: invalid choice: '$tgt' (choose from 'all', 'web', 'host', 'server', 'client', 'bindings', 'example', 'gui-deps')" >&2; exit 2 ;; esac
         if [ -n "$gd_profile" ] && [ "$tgt" != gui-deps ]; then echo "build --profile only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
+        if [ -n "$gd_provider" ] && [ "$tgt" != gui-deps ]; then echo "build --provider only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
+        if [ -n "$gd_pixi_env" ] && [ "$tgt" != gui-deps ]; then echo "build --pixi-env only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
         if [ -n "$image" ] && [ "$tgt" != server ]; then echo "build --image only supports build server (current target=$tgt)" >&2; exit 2; fi
         if [ "$native" = 1 ] && [ "$tgt" != server ]; then echo "build --native only supports build server (current target=$tgt)" >&2; exit 2; fi
         case "$tgt" in
             bindings) _ms_build_bindings "$release"; exit $? ;;
             example)  _ms_build_example "$release" "${names[@]}"; exit $? ;;
-            gui-deps) _ms_build_gui_deps "$release" "${gd_profile:-auto}"; exit $? ;;
+            gui-deps) _ms_build_gui_deps "$release" "${gd_profile:-auto}" "${gd_provider:-none}" "${gd_pixi_env:-gui-deps}"; exit $? ;;
             all)    _ms_build_host; _ms_build_server "" 0 0; _ms_build_client ;;
             host)   _ms_build_host ;;
             server) _ms_build_server "$image" "$native" "$release" ;;

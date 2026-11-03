@@ -89,17 +89,39 @@ macro(mediaservo_gui_deps)
         set(MEDIASERVO_GUI_DEPS_ANCHOR "${MEDIASERVO_REPO_ROOT}/build/3rdparty" CACHE PATH
             "GUI dependency build anchor (F10 callsite pin; the shell verb resolves MSRTC_BUILD_ROOT on its side)")
     endif()
-    set(_ms_gd_work "${MEDIASERVO_GUI_DEPS_ANCHOR}/${_ms_gd_profile}")
+    # ---- provider path tag (P4) ----
+    # The install tree an import reads must be the tree the VERB built under
+    # the SAME provider: provider identity rides the directory name (the cache
+    # key already carries it -- the paths must not alias either). Default none
+    # keeps the P3 layout byte-for-byte: <anchor>/<profile>/... (F3=A: pixi is
+    # implemented but never the default).
+    set(_ms_gd_provider "none")
+    if(DEFINED MEDIASERVO_GUI_DEPS_PROVIDER AND NOT "${MEDIASERVO_GUI_DEPS_PROVIDER}" STREQUAL "")
+        set(_ms_gd_provider "${MEDIASERVO_GUI_DEPS_PROVIDER}")
+    endif()
+    if(NOT _ms_gd_provider MATCHES "^(none|system|pixi)$")
+        message(FATAL_ERROR "mediaservo_gui_deps: MEDIASERVO_GUI_DEPS_PROVIDER='${_ms_gd_provider}' is not a known provider (none|system|pixi)")
+    endif()
+    set(_ms_gd_ptag "")
+    if(NOT _ms_gd_provider STREQUAL "none")
+        set(_ms_gd_ptag "-${_ms_gd_provider}")
+    endif()
+    set(_ms_gd_work "${MEDIASERVO_GUI_DEPS_ANCHOR}/${_ms_gd_profile}${_ms_gd_ptag}")
     set(_ms_gd_sdl_install "${_ms_gd_work}/sdl3/install-${CMAKE_BUILD_TYPE}")
     if(NOT EXISTS "${_ms_gd_sdl_install}/lib/cmake/SDL3/SDL3Config.cmake")
         set(_ms_gd_verb "--profile ${_ms_gd_profile}")
+        if(NOT _ms_gd_provider STREQUAL "none")
+            set(_ms_gd_verb_prov " --provider ${_ms_gd_provider}")
+        else()
+            set(_ms_gd_verb_prov "")
+        endif()
         if(CMAKE_BUILD_TYPE STREQUAL "Release")
             string(APPEND _ms_gd_verb " --release")
         endif()
         message(FATAL_ERROR
-            "mediaservo_gui_deps: no SDL3 install prefix at '${_ms_gd_sdl_install}' (profile=${_ms_gd_profile}, config=${CMAKE_BUILD_TYPE}).\n"
+            "mediaservo_gui_deps: no SDL3 install prefix at '${_ms_gd_sdl_install}' (profile=${_ms_gd_profile}, provider=${_ms_gd_provider}, config=${CMAKE_BUILD_TYPE}).\n"
             "Configure never builds dependencies (H2). Run the explicit verb first:\n"
-            "  ./mediaservo.sh build gui-deps ${_ms_gd_verb}\n"
+            "  ./mediaservo.sh build gui-deps ${_ms_gd_verb}${_ms_gd_verb_prov}\n"
             "If the shell resolved MSRTC_BUILD_ROOT, mirror it here: -DMEDIASERVO_GUI_DEPS_ANCHOR=<MSRTC_BUILD_ROOT>/3rdparty")
     endif()
     polyorch_thirdparty_import(NAME sdl3 INSTALL_DIR "${_ms_gd_sdl_install}"

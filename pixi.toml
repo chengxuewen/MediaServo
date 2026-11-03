@@ -87,6 +87,21 @@ server-dev = "docker compose -f docker-compose.dev.yml up"
 # CI tools (lightweight CI stages)
 [feature.ci.dependencies]
 
+# sr8 P4 (F3=A): the gui-deps build-time dev-package fill for the SDL
+# linux-desktop lane on boxes WITHOUT the system xorg dev group. Implemented
+# but NEVER the default: the environment is consulted through the PolyOrch
+# pixi provider only (`build gui-deps --provider pixi`, no-activation -- the
+# prefix's bin/ never enters the tool search, r4 C1); the system toolchain
+# stays the constitution (F25). Headers ship inside these conda packages.
+[feature.gui-deps.dependencies]
+xorg-libx11 = "*"
+xorg-libxext = "*"
+xorg-libxi = "*"
+xorg-libxrandr = "*"
+xorg-libxcursor = "*"
+xorg-libxfixes = "*"
+pkg-config = "*"
+
 [feature.test.dependencies]
 
 # test-env dependencies (empty table declared; the dev feature already includes what tests need)
@@ -148,6 +163,8 @@ test = { features = ["media", "dev", "test", "book"] }
 ci = { features = ["media", "dev", "test", "ci", "book"] }
 default = { features = ["media", "dev", "test", "book"] }
 serena = { features = ["serena"] }
+# isolated fill for the gui-deps provider lane (no media/dev stack; discipline 1)
+gui-deps = { features = ["gui-deps"], no-default-feature = true }
 
 # Global tasks (available in all environments)
 [tasks]
