@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "name": "fmt",
+  "version": "11.0.2",
+  "provider": "vcpkg",
+  "license": "MIT",
+  "pin_dir": "../pkg-deps/fmt",
+  "link_mode": "static",
+  "find_package": { "name": "fmt", "targets": ["fmt::fmt"] },
+  "alias": "MediaServoEco::fmt"
+}

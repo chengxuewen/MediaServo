@@ -1,0 +1,11 @@
+{
+  "name": "pkg-deps-fmt-island",
+  "version": "1",
+  "builtin-baseline": "afa249f12f52ed8a3b919f195495ba8b330288d1",
+  "dependencies": [
+    "fmt"
+  ],
+  "overrides": [
+    { "name": "fmt", "version": "11.0.2" }
+  ]
+}

@@ -1,0 +1,6 @@
+# The conan side of this shared island (sr8 P7b, r9a H2): one island carries
+# both providers' manifests, so a recipe switches lanes by editing "provider"
+# alone -- pin_dir keeps pointing here. Only the requirement is declared; the
+# generator is the lane's choice because its own consumption depends on it.
+[requires]
+fmt/11.0.2

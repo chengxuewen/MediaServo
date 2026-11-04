@@ -29,13 +29,22 @@ the build/package/example/compose/ops faces all live in this shell, cmake and th
 managed binaries own layout and runtime truth).
 
 build/assembly face:
-  build <target> [--release] [--image runtime|dev] [--native] [--profile auto|headless|linux-desktop] [--provider none|system|pixi] [--pixi-env NAME] [NAME...]
+  build <target> [--release] [--image runtime|dev] [--native] [--profile auto|headless|linux-desktop] [--provider none|system|pixi] [--pixi-env NAME] [--ecosystem vcpkg|conan] [--pkg NAME] [--generate-ecosystem] [NAME...]
         target: all|web|host|server|client|bindings|example|gui-deps (default all;
         server = non-embedded variant + one-step web assembly; web =
         frontend-only fast lane; only --image takes the Docker path;
         build-host/build-server compat aliases kept; gui-deps = the explicit
         SDL3 build/install verb (sr8 P3), --profile/--provider/--pixi-env only
-        apply to it -- provider pixi is the sr8 P4 fill, OFF by default)
+        apply to it -- provider pixi is the sr8 P4 fill, OFF by default;
+        --ecosystem/--pkg/--generate-ecosystem are the sr8 P7c dev-only intake
+        leg: acquire a library from the vcpkg/conan ecosystem instead of a
+        source archive, from a committed recipe + pin island under
+        cmake/gui-deps/. Strict-first, so nothing is fetched until
+        --generate-ecosystem is given. It never combines with --provider/
+        --pixi-env/--profile (those are the build-time/source axis -- a
+        different question than where the library comes from), and it is not a
+        route for SDL3/imgui, which carry a patch and a branch and stay on
+        provider "source")
   build:deploy <target> [--prefix DIR] [--release]   (one-step build + deploy)
   package <target> [--dist DIR] [--brand NAME] [--release]
         target: host|server|sdk-field|sdk-client (bindings = one-cycle alias)
@@ -972,6 +981,28 @@ _ms_pixi_present() {
     command -v pixi >/dev/null 2>&1 && return 0
     [ -x "$HOME/.pixi/bin/pixi" ]
 }
+_ms_build_eco_deps() {  # $1=release(0/1) $2=ecosystem(vcpkg|conan) $3=pkg $4=generate(0/1)
+    # sr8 P7c: the dev-only ecosystem intake leg. The ACQUIRE axis (--ecosystem)
+    # is a different thing from the BUILD-time axis (--provider), so the two
+    # never combine, and the lane has no desktop profile to speak of (SDL3 and
+    # imgui stay on provider "source": patch/branch, O-13/M5).
+    local release=$1 eco=$2 pkg=$3 gen=$4
+    local bt=Debug; [ "$release" = 1 ] && bt=Release
+    if [ -z "$pkg" ]; then
+        echo "[gui-deps] --ecosystem needs --pkg <name> (the recipe and the pin island are named after it)" >&2; return 2
+    fi
+    local rec="$ROOT/cmake/gui-deps/recipes/$pkg-$eco.json"
+    if [ ! -f "$rec" ]; then
+        echo "[gui-deps] no recipe cmake/gui-deps/recipes/$pkg-$eco.json (existing: $(ls "$ROOT/cmake/gui-deps/recipes" 2>/dev/null | sed 's/\.json$//' | tr '\n' ' '))" >&2; return 2
+    fi
+    local anchor="${MSRTC_BUILD_ROOT:-$ROOT/build}/3rdparty-ecosystem"
+    local gargs=(); [ "$gen" = 1 ] && gargs=(-DGENERATE=ON)
+    echo "[gui-deps] ecosystem=$eco pkg=$pkg config=$bt generate=$gen anchor=$anchor"
+    (cd "$ROOT" && "${_MS_STRIP_ENV[@]}" "$(_ms_bridge_env)" \
+        cmake -DECOSYSTEM="$eco" -DPKG="$pkg" -DBUILD_TYPE="$bt" -DWORK_DIR="$anchor/$pkg-$eco" \
+              "${gargs[@]}" -P "$ROOT/cmake/gui-deps/ecosystem.cmake") || exit $?
+}
+
 _ms_build_gui_deps() {  # $1=release(0/1) $2=profile(auto|headless|linux-desktop) $3=provider(none|system|pixi) $4=pixi-env
     local release=$1 profile=$2 provider=${3:-none} pixi_env=${4:-gui-deps}
     local bt=Debug; [ "$release" = 1 ] && bt=Release
@@ -1192,7 +1223,7 @@ case "${1:-}" in
             build-server) set -- build server "${_ms_orig[@]:1}" ;;
         esac
         shift
-        tgt=""; image=""; native=0; release=0; names=(); seen_tgt=0; gd_profile=""; gd_provider=""; gd_pixi_env=""
+        tgt=""; image=""; native=0; release=0; names=(); seen_tgt=0; gd_profile=""; gd_provider=""; gd_pixi_env=""; gd_eco=""; gd_pkg=""; gd_generate=0
         while [ $# -gt 0 ]; do
             case "$1" in
                 --release) release=1; shift ;;
@@ -1201,6 +1232,11 @@ case "${1:-}" in
                             case "$gd_provider" in none|system|pixi) ;; *) echo "build: argument --provider: invalid choice: '$gd_provider' (choose from 'none', 'system', 'pixi')" >&2; exit 2 ;; esac
                             shift 2 ;;
                 --pixi-env) gd_pixi_env="${2:?build --pixi-env needs a value}"; shift 2 ;;
+                --ecosystem) gd_eco="${2:?build --ecosystem needs a value}"
+                             case "$gd_eco" in vcpkg|conan) ;; *) echo "build: argument --ecosystem: invalid choice: '$gd_eco' (choose from 'vcpkg', 'conan')" >&2; exit 2 ;; esac
+                             shift 2 ;;
+                --pkg) gd_pkg="${2:?build --pkg needs a value}"; shift 2 ;;
+                --generate-ecosystem) gd_generate=1; shift ;;
                 --profile) gd_profile="${2:?build --profile needs a value}"
                            case "$gd_profile" in auto|headless|linux-desktop) ;; *) echo "build: argument --profile: invalid choice: '$gd_profile' (choose from 'auto', 'headless', 'linux-desktop')" >&2; exit 2 ;; esac
                            shift 2 ;;
@@ -1216,12 +1252,25 @@ case "${1:-}" in
         if [ -n "$gd_profile" ] && [ "$tgt" != gui-deps ]; then echo "build --profile only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
         if [ -n "$gd_provider" ] && [ "$tgt" != gui-deps ]; then echo "build --provider only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
         if [ -n "$gd_pixi_env" ] && [ "$tgt" != gui-deps ]; then echo "build --pixi-env only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
+        if [ -n "$gd_eco" ] && [ "$tgt" != gui-deps ]; then echo "build --ecosystem only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
+        if [ "$gd_generate" = 1 ] && [ -z "$gd_eco" ]; then echo "build --generate-ecosystem only accompanies --ecosystem (without it nothing is generated, so there is nothing to opt into)" >&2; exit 2; fi
+        # two axes, never both (r7 H1): --provider/--pixi-env shape the child env
+        # of a source build; --ecosystem lets the tool build the library itself.
+        # --profile is the desktop-profile axis of the source lane, refused by
+        # the ecosystem lane at the face too -- same reason, stated once here.
+        if [ -n "$gd_eco" ]; then
+            for _gd_axis in "--provider=$gd_provider" "--pixi-env=$gd_pixi_env" "--profile=$gd_profile"; do
+                case "$_gd_axis" in *="") continue ;; esac
+                echo "build: $_gd_axis is the build-time/source axis and does not combine with --ecosystem (the library builds inside $gd_eco); drop one of the two" >&2; exit 2
+            done
+        fi
         if [ -n "$image" ] && [ "$tgt" != server ]; then echo "build --image only supports build server (current target=$tgt)" >&2; exit 2; fi
         if [ "$native" = 1 ] && [ "$tgt" != server ]; then echo "build --native only supports build server (current target=$tgt)" >&2; exit 2; fi
         case "$tgt" in
             bindings) _ms_build_bindings "$release"; exit $? ;;
             example)  _ms_build_example "$release" "${names[@]}"; exit $? ;;
-            gui-deps) _ms_build_gui_deps "$release" "${gd_profile:-auto}" "${gd_provider:-none}" "${gd_pixi_env:-gui-deps}"; exit $? ;;
+            gui-deps) if [ -n "$gd_eco" ]; then _ms_build_eco_deps "$release" "$gd_eco" "$gd_pkg" "$gd_generate"; exit $?; fi
+                      _ms_build_gui_deps "$release" "${gd_profile:-auto}" "${gd_provider:-none}" "${gd_pixi_env:-gui-deps}"; exit $? ;;
             all)    _ms_build_host; _ms_build_server "" 0 0; _ms_build_client ;;
             host)   _ms_build_host ;;
             server) _ms_build_server "$image" "$native" "$release" ;;

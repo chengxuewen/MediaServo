@@ -69,6 +69,25 @@ teams); for development process details, consult git log directly. Newest versio
   test-gui-x11 pins the desktop compile gate (explicit X11 dev group, the
   error-handler compile asserted from the build log; compile gate, never a
   window run)
+- [gui-deps] sr8 P7c ecosystem intake leg (dev-only; plan
+  polyorch-sr8-thirdparty-face P7c; supplier = PolyOrch D50 P7a/P7b):
+  `./mediaservo.sh build gui-deps --ecosystem vcpkg|conan --pkg NAME
+  [--generate-ecosystem] [--release]` acquires a library from an ecosystem
+  instead of a source archive, driven by
+  cmake/gui-deps/recipes/<pkg>-<ecosystem>.json over the committed pin island
+  cmake/gui-deps/pkg-deps/<pkg>/ (one island carries vcpkg.json AND
+  conanfile.txt+conan.lock, so switching lanes is a one-line provider edit and
+  neither lane can age the other's artifact). Strict-first: with no pre-baked
+  pack the leg refuses and prints a copy-pasteable generate command -- nothing
+  is fetched implicitly; --generate-ecosystem is the single network step and
+  its result packs into .cache/3rdparty-ecosystem, which outlives the build
+  anchor so every later run reuses offline. --ecosystem never combines with
+  --provider/--pixi-env/--profile: those are the build-time dependency and
+  desktop-profile axes, different questions from where a library comes from.
+  SDL3 and Dear ImGui stay on provider "source" (they carry a patch and a
+  branch, O-13), the default gui-deps path is byte-identical, and no CI leg is
+  added (network + duration; conditional on a real migration need). fmt is the
+  proof library, not a shipped dependency.
 ### Fixed
 - [deploy] deploy host stop arm routed through the CWD-scoped helper (the
   inline unscoped pkill could kill same-named processes of another prefix)
