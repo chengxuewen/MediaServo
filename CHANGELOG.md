@@ -52,6 +52,23 @@ teams); for development process details, consult git log directly. Newest versio
 - [deploy] parent-root msrtc-deploy-{server,host,bindings} buttons (msrtc
   brand + parent out/ pinned at the callsite); submodule defaults now land in
   the submodule's own out/ (W1)
+- [gui-deps] sr8 third-party dependency face consumer lane (plan
+  polyorch-sr8-thirdparty-face P3-P5; supplier = PolyOrch D50): GUI deps now
+  ride the PolyOrch thirdparty verbs -- cmake/gui-deps/ (recipes + patches) is
+  the single definition point; SDL3 is built/installed by the explicit verb
+  `./mediaservo.sh build gui-deps [--profile auto|headless|linux-desktop]
+  [--provider none|system|pixi] [--release]` and consumed through its upstream
+  SDL3Config as SDL3::SDL3-static + the alias MediaServoGui::SDL3 (configure
+  never builds -- a missing prefix FATALs naming the verb, an IDE reconfigure
+  costs seconds); Dear ImGui stays a source wrapper compiled per consumer
+  (fetch-only recipe); the hand-written find_package(X11) wiring under
+  examples/ retired behind MediaServoGui::X11; the OPTIONAL pixi provider
+  fills missing dev packages through the isolated gui-deps environment with
+  sub-path-only injection and a readelf runtime audit (OFF by default -- the
+  system toolchain stays the constitution, F25 unchanged); new CI leg
+  test-gui-x11 pins the desktop compile gate (explicit X11 dev group, the
+  error-handler compile asserted from the build log; compile gate, never a
+  window run)
 ### Fixed
 - [deploy] deploy host stop arm routed through the CWD-scoped helper (the
   inline unscoped pkill could kill same-named processes of another prefix)

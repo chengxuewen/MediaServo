@@ -149,6 +149,37 @@ jobs:
       - name: ctest viewer_core
         run: ctest --test-dir target/examples/build -R core --output-on-failure
 
+  test-gui-x11:
+    # sr8 P5 (the conditional X11 leg; trigger fired when P3 retired the hand-rolled
+    # find_package(X11) wiring under examples/). F9=A keeps test-gui untouched; this leg
+    # makes the DESKTOP compile path deterministic: the X11 dev group is installed
+    # explicitly (image luck is not a contract), the profile is pinned linux-desktop, and
+    # the build log is asserted to show the X11 interface target + the error-handler TU
+    # compiled in. Compile gate only -- no window is ever run here.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cmake/ninja + the X11 dev group (explicit, not image luck)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libx11-dev libxext-dev libxi-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev
+      - name: Build client-c cdylib (SDK_DIR guard input)
+        run: cargo build -p mediaservo-client-c
+      - name: Dev soname symlinks (same discipline as test-cxx)
+        run: cd target/debug && ln -sf libmediaservo_client_c.so libmediaservo_client_c.so.0
+      - name: GUI deps with the pinned desktop profile (explicit verb, H2)
+        run: ./mediaservo.sh build gui-deps --profile linux-desktop
+      - name: Build GUI examples + assert the X11 compile path (compile gate, not a run gate)
+        run: |
+          ./mediaservo.sh build example 2>&1 | tee gui-desktop-build.log
+          grep -q "MediaServoGui::X11 ->" gui-desktop-build.log
+          grep -q "X11 error handler enabled" gui-desktop-build.log
+      - name: ctest viewer_core (unit only, headless-safe)
+        run: ctest --test-dir target/examples/build -R core --output-on-failure
+
   test-gstreamer:
     runs-on: ubuntu-latest
     steps:
