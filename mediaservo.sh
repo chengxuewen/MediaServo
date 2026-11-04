@@ -995,7 +995,7 @@ _ms_build_eco_deps() {  # $1=release(0/1) $2=ecosystem(vcpkg|conan) $3=pkg $4=ge
     if [ ! -f "$rec" ]; then
         echo "[gui-deps] no recipe cmake/gui-deps/recipes/$pkg-$eco.json (existing: $(ls "$ROOT/cmake/gui-deps/recipes" 2>/dev/null | sed 's/\.json$//' | tr '\n' ' '))" >&2; return 2
     fi
-    local anchor="${MSRTC_BUILD_ROOT:-$ROOT/build}/3rdparty-ecosystem"
+    local anchor="${MSRTC_BUILD_ROOT:-$ROOT/build}/3rdparty/ecosystem"
     local gargs=(); [ "$gen" = 1 ] && gargs=(-DGENERATE=ON)
     echo "[gui-deps] ecosystem=$eco pkg=$pkg config=$bt generate=$gen anchor=$anchor"
     (cd "$ROOT" && "${_MS_STRIP_ENV[@]}" "$(_ms_bridge_env)" \

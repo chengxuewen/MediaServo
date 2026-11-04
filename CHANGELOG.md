@@ -89,6 +89,21 @@ teams); for development process details, consult git log directly. Newest versio
   added (network + duration; conditional on a real migration need). fmt is the
   proof library, not a shipped dependency.
 ### Fixed
+- [gui-deps] sr8 P7c hygiene pass (adversarial self-review O1/O2/N1/N2 +
+  supplier-side O3/N4): the ecosystem work anchor moves under the F10
+  umbrella (build/3rdparty-ecosystem -> build/3rdparty/ecosystem; the pack
+  cache stays in .cache/3rdparty-ecosystem by design); the layout probe
+  drops two candidates that no measured artifact ever carried
+  (find<pkg>-config.cmake, <pkg>Config.cmake -- both verified absent from the
+  packed fmt trees); PolyOrch: BINARY_CACHE on the conan lane now warns
+  instead of silently no-op'ing (it is a vcpkg-lane switch), the conan
+  generate lane documents its in-anchor caches as ephemeral acceleration
+  (mirroring the vcpkg lane), and the two e2e island guards watch anchored
+  generated names with a count lower bound instead of an exact EQUAL 3 the
+  comment itself called a lie. Verified: suite 97/8/39 unchanged, both e2e
+  PASS under POLYORCH_TEST_E2E=1, both legs reuse offline from the new
+  anchor (pack hit, zero tool calls), the two-axis refusal still rc=2, and a
+  probe shows the BINARY_CACHE warning firing before the tool rung.
 - [deploy] deploy host stop arm routed through the CWD-scoped helper (the
   inline unscoped pkill could kill same-named processes of another prefix)
 - [deploy] deploy target lock anchored to the script dir; missing flock is

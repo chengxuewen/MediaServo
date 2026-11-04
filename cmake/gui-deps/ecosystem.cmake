@@ -52,8 +52,10 @@ if(ECOSYSTEM STREQUAL "conan")
     # not only to generate. Requiring it only under GENERATE would make the
     # strict refusal die on the profile guard instead of printing its manual
     # (that is exactly what the first run of this leg did).
-    # Script mode carries no CMAKE_CXX_* facts; the F25 posture is the system
-    # pair, and this face never picks a compiler behind the caller's back.
+    # Script mode carries no CMAKE_CXX_* facts. The default is the F25
+    # system pair -- a STATED default, not a silent pick: it lands on STATUS,
+    # is guarded by EXISTS, is overridable with COMPILER_CXX, and a box
+    # without it is refused with a pointer instead of a guess.
     set(_ec_cxx "${COMPILER_CXX}")
     if(NOT _ec_cxx)
         set(_ec_cxx "/usr/bin/c++")
@@ -75,15 +77,16 @@ polyorch_thirdparty_recipe(RECIPE "${_ec_recipe}"
     INSTALL_DIR_OUT _ec_install FINGERPRINT_OUT _ec_key MANIFEST_OUT _ec_mf
     FIND_PACKAGE_NAME_OUT _ec_fpn TARGETS_OUT _ec_tgts ALIAS_OUT _ec_alias)
 
-# Layout is probed, never hardcoded (sr8 §2.8): the vcpkg prefix carries its
-# config under share/<pkg>, the conan prefix puts the CMakeDeps configs at the
-# top level beside direct_deploy/. Both are find_package-able from the prefix
-# root, which is the only promise this leg asserts.
+# Layout is probed, never hardcoded (sr8 §2.8), and every candidate carries
+# a measured source: the vcpkg prefix ships its config under share/<pkg>/,
+# the conan direct_deploy prefix puts the CMakeDeps config at the top level
+# beside deploy/ (both verified against the packed fmt artifacts). CMake's
+# <Pkg>Config.cmake capitalization variant needs no candidate of its own:
+# whichever case the upstream spells it, find_package resolves against the
+# one file the layout actually contains.
 set(_ec_cfg "")
 foreach(_cand "${_ec_install}/share/${PKG}/${PKG}-config.cmake"
-              "${_ec_install}/share/${PKG}/find${PKG}-config.cmake"
-              "${_ec_install}/${PKG}-config.cmake"
-              "${_ec_install}/${PKG}Config.cmake")
+              "${_ec_install}/${PKG}-config.cmake")
     if(EXISTS "${_cand}")
         set(_ec_cfg "${_cand}")
         break()
