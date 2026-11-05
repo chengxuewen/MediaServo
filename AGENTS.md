@@ -175,6 +175,7 @@ _Project has entered the code implementation phase. Current state:_
 | `openspec-sync-specs` | Sync delta specs from a change to main specs. |
 | `performance-optimization` | MediaServo performance profiling and optimization. |
 | `repo-triage` | Triage an ambiguous MediaServo task into the right layer and files before editing: Rust crates, C ABI/FFI, mediasoup, Admin Dashboard, agent |
+| `reuse-first` | Borrow before build: prove the existing supplier face cannot take it BEFORE writing any new mechanism (CMake target/function, script verb, w |
 | `review-hardcode` | Hardcoded secrets/ports/URLs scan. |
 | `security-hardening` | MediaServo security audit and hardening. |
 | `shipping-and-launch` | MediaServo release checklist: full gates, version/tag policy, changelog decision, artifact and submodule pin verification, staged rollout, a |

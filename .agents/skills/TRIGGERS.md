@@ -15,6 +15,7 @@
 | Review a diff / merge verdict | `code-review-and-quality` | Deep security -> `security-hardening`; complexity -> `code-simplification` |
 | Release / tag / rollback | `shipping-and-launch` | Pipeline mechanics -> `ci-cd-automation`; security sign-off -> `security-hardening` |
 | Semantic impact before editing a symbol | `lsp-code-analysis` | Layer map -> `repo-triage`; contract -> `api-interface-design` |
+| Build vs borrow before writing a new mechanism | `reuse-first` | Approval to act -> `think-before-act`; upstream/external docs -> `source-driven-development` |
 
 ## Trigger Boundaries
 
@@ -27,6 +28,7 @@
 - `code-review-and-quality` owns the five-axis verdict; `security-hardening` owns the deep security pass.
 - `shipping-and-launch` owns the release decision; `ci-cd-automation` owns the pipeline that executes it.
 - `lsp-code-analysis` owns the symbol impact map; `repo-triage` owns the layer/file map.
+- `reuse-first` owns "build vs borrow" for in-repo faces (C60 ladder); `source-driven-development` owns upstream/external docs; `think-before-act` owns the act gate that follows both.
 
 ## Naming Rule
 
