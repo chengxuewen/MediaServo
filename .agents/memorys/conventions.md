@@ -722,3 +722,8 @@ Checks:
 - 父仓引用子仓写 `child:D297` / `child:PIT-184` / `child:C51`，不得复述正文；引用必须可解析。
 - 父仓 `child-refs.md` 列子仓账本路径 + D/PIT/C 高水位；gitlink 改子仓记忆时同笔更新。
 - 动 durable paths 的提交写 `Memory: parent|child|both|none(<reason>)`。
+
+## C53: 跨仓 callsite 挂共享面先读函数头注记；共享面对枚举参数入口校验（2026-11-05, bindings 出生病）
+- 消费仓（父仓/父预设）把新 TREE/形态塞进子仓共享函数前，必先读函数旁的设计注记（R6 NOTE 类）——msrtc-deploy-bindings 注册当天就违背了 "bindings does NOT ride 共享 AppTree 编排" 的注记，一点就炸且无人发现（出生病：注册 ≠ 可用，不点不知）。
+- 共享函数自身必须对枚举参数（TREE/STAGING 等）做入口校验，未知值 FATAL 并指向正确形态——让违背当场炸而不是生成静默坏序列。
+- Verify: `grep -n 'R6 NOTE' cmake/MediaServoDeployTargets.cmake`（注记在）；新 TREE/形态注册后必实测点一次（[100%] + 落地物非空才算注册完成）。

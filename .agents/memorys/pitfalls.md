@@ -1940,3 +1940,24 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **根因**: 品牌=**编译期注入**（build:deploy 设 MEDIASERVO_BRAND），不在 argv0 也不在运行 env；裸构建产物自报默认品牌 → unit 名/oxfile 名/进程签名全套漂移。
 - **解法**: host/server 二进制更新一律 `bash msrtc.sh build:deploy <t>`（先 stop 防 ETXTBSY）；已写错的 legacy 名 unit 文件手动 rm + daemon-reload 清场。
 - **验证**: 部署后 `python3 -c "marker in bin bytes"`（C49）+ `systemctl --user cat <现役unit>` 名实对账。
+
+## PIT-238: deploy 备货柄三连坑——展示壳/单 bin 柄/无桥 cargo（2026-11-05 C+ 轮实测）
+- **症状**: 给 deploy 按钮加"自动先编译"边，三连翻车：① 挂 `mediaservo-host-build`——Makefile 依赖边在、cargo 从没跑（"Built" 秒过，零产物）；② 换 `mediaservo-host-bin-build`——真跑 cargo 但 8 个 bin 只出 1 个；③ 内联 `cargo build`——cargo 起来报 rustc not found（env -i 干净 PATH 下）。
+- **根因**: ① `polyorch_rust_ide_mount` 是 SOFT display-only 挂载（给 IDE 看源码），名字带 `-build` 不代表它是编译 target；② BINARY lane 每柄只 `--bin` 一个具名 bin，而 mediaservo-host 是多 bin crate（8 个产品一个 Cargo.toml）；③ face 调 cargo 自带 PIT-14 消毒桥（六 unset + PATH 前置 + LIBCLANG_PATH 钉死），手拼命令没带，cargo spawn 不到同目录 rustc。
+- **解法**: 复用/挂靠任何 target 前验 COMMAND 本体：grep 生成树 `build.make` 有无真实命令（`grep -c cargo <build.make>`）；备货一律镜像 CLI `build <tree>` 的 cargo 形态（`-p <pkg>` 全 bins + face 同款消毒桥——桥配方直接从 face 生成的 build.make 里抄，不自造）。
+- **验证**: env -i 干净环境全链跑通 + 数落地 bin（8/8）；`ls -la target/debug/<bin>` mtime 动。
+- **禁止**: 按 target 名字语感当编译柄；多 bin crate 用单 bin lane 备货。
+
+## PIT-239: 专用树 cache 冻结崩溃现场的开关值——"不传"≠"清除"（PIT-189 家族，2026-11-05 bindings 轮）
+- **症状**: 修好 bindings 分支（新 configure 不再传 APP_TREE）后仍 FATAL `MEDIASERVO_APP_TREE='bindings' is not one of ''|host|server`。
+- **根因**: 首次点击崩溃前 `-DMEDIASERVO_APP_TREE=bindings` 已写进专用树 CMakeCache；修复版 configure 不传该变量 → cache 旧值复活进 `if(MEDIASERVO_APP_TREE)`。configure 对已存在的 cache 变量"不传只保留"，从不清除。
+- **解法**: 专用树 configure 对"本次不该激活的开关"显式传空覆盖（`-DMEDIASERVO_APP_TREE=`），每次调用洗掉历史残留；排查同族症状先 `grep <VAR> <bdir>/CMakeCache.txt`。
+- **验证**: grep cache 值为空 + 全链 [100%]（4f64b68 实测 out/bindings 落 4 cdylib）。
+- **禁止**: 假设专用树 cache 干净；复用 binaryDir 而不显式钉全部意图开关。
+
+## PIT-240: install_manifest 不含 install(CODE) 产物——swap leg/entry link 无痕（2026-11-05 deploy-server 取证轮）
+- **症状**: deploy-server 后 install_manifest.txt 只有 4 个 web 文件，bin/etc 全不在——差点误判"install 没装 bin"。
+- **根因**: manifest 只由 file(INSTALL) 型规则（install(FILES/DIRECTORY/PROGRAMS/TARGETS)）写入；install(CODE)（swap leg / entry link / reclaim 全家）执行不留 manifest 记录。
+- **解法**: 取证 install 行为三源对账：manifest（仅文件型）+ `--install` 输出的 STATUS 行（swap leg 有 "staged via swap install"）+ 落地现场 mtime/md5。
+- **验证**: tail install 输出找 STATUS + `ls` 落地物对账。
+- **禁止**: 拿 install_manifest 当 install 全量证据。
