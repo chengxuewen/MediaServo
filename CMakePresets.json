@@ -60,7 +60,7 @@
     },
     {
       "name": "all-examples",
-      "displayName": "all-examples - full lanes + examples (prereqs: build-c + build gui-deps; cxx band skips under the pixi env constitution)",
+      "displayName": "all-examples - full lanes + examples (prereqs: build bindings + build gui-deps; the cxx band skips only from an activated pixi/conda shell)",
       "inherits": "all",
       "binaryDir": "${sourceDir}/build/presets/${presetName}",
       "cacheVariables": {
