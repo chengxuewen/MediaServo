@@ -158,8 +158,11 @@ function(_mediaservo_app_tree_server)
     if(NOT _src)
         list(JOIN _candidates " / " _cand_text)
         message(FATAL_ERROR
-            "Error: none of ${_cand_text} exists — run build server first "
-            "(deploy does not trigger builds — D266)")
+            "Error: none of ${_cand_text} exists — rerun the deploy button "
+            "(its fresh-goods leg rebuilds the server bin into the shared "
+            "target/ right before this configure) or run `build server`; a hit "
+            "here despite that means the artifact was cleaned between the "
+            "goods leg and this configure — D266)")
     endif()
     # In-place assembly (build:deploy server, prefix = the source tree): a
     # same-name landing is a file(INSTALL) no-op (measured on this cmake) — the
@@ -363,10 +366,11 @@ function(_mediaservo_app_tree_host)
     endforeach()
     if(NOT _landed)
         message(FATAL_ERROR
-            "no host binaries found under ${_srcdir} — build the host bins first "
-            "(the mediaservo-host-build IDE button or `build:deploy`; the deploy "
-            "buttons ride that edge themselves — a hit here means the bins were "
-            "cleaned between the edge and this configure — D266)")
+            "no host binaries found under ${_srcdir} — rerun the deploy button "
+            "(its fresh-goods leg rebuilds the full bin set into the shared "
+            "target/ right before this configure) or run `build host`; a hit "
+            "here despite that means the bins were cleaned between the goods "
+            "leg and this configure — D266)")
     endif()
 
     # bin whitelist reclaim (deploy-ops 4 + the client/streamer-compat-chain
