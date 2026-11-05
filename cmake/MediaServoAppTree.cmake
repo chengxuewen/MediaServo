@@ -363,8 +363,10 @@ function(_mediaservo_app_tree_host)
     endforeach()
     if(NOT _landed)
         message(FATAL_ERROR
-            "no host binaries found under ${_srcdir} — run build host first "
-            "(deploy does not trigger builds — D266)")
+            "no host binaries found under ${_srcdir} — build the host bins first "
+            "(the mediaservo-host-build IDE button or `build:deploy`; the deploy "
+            "buttons ride that edge themselves — a hit here means the bins were "
+            "cleaned between the edge and this configure — D266)")
     endif()
 
     # bin whitelist reclaim (deploy-ops 4 + the client/streamer-compat-chain

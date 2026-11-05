@@ -312,18 +312,71 @@ include(\"${CMAKE_BINARY_DIR}/deploy-${_name}-init-server-body.cmake\")
         # caller-provided init leg (unused today; parent faces may pin one)
         set(_init_args ${_init_args} COMMAND ${CMAKE_COMMAND} -P "${MDT_INIT}")
     endif()
+    # Fresh-goods leg (2026-11-05, C+ ruling, inline form): the deploy
+    # sequence OPENS with the CLI `build <tree>` cargo invocation — the FULL
+    # bin set into the SHARED workspace target/ (hard-coded on purpose, same
+    # posture as the app-bin lanes: the calling tree's isolated .cargo-target
+    # base never leaks into deploy goods). Inline COMMAND, not a separate
+    # goods target: the IDE target tree stays as flat as the CLI verb list
+    # (one deploy button per tree, zero helper targets), and cargo still runs
+    # incrementally before the pure-install pass — never ships stale bins.
+    # This also breaks the first-run deadlock the old shape had: the dedicated
+    # tree used to carry its own lanes face, and AppTree's configure-time bin
+    # hunt fired on a .cargo-target/ that only the (never reached) build step
+    # would have populated. (A per-bin lane handle would NOT do here:
+    # mediaservo-host is a multi-bin crate and the BINARY lanes build one
+    # named bin each — 1 of 8.)
+    set(_goods_pkgs "")
+    if(_t STREQUAL "host")
+        set(_goods_pkgs mediaservo-host mediaservo-client)   # CLI _ms_build_host parity
+    elseif(_t STREQUAL "server")
+        set(_goods_pkgs mediaservo-server)
+    endif()
+    set(_goods_args "")
+    if(_goods_pkgs)
+        if(NOT POLYORCH_RUST_CARGO)
+            message(FATAL_ERROR "deploy ${_name}: fresh-goods leg needs "
+                "POLYORCH_RUST_CARGO (the crates lanes face resolves it — "
+                "deploy targets register only under that gate)")
+        endif()
+        # Env bridge mirrors the rust-build face's own invocation shape
+        # (RustHelpers PIT-14 block + PATH prepend + libclang pin): cargo can
+        # spawn rustc, bindings build scripts find libclang, and a host-
+        # activated shell cannot leak compiler shaping into the goods build.
+        get_filename_component(_cargo_dir "${POLYORCH_RUST_CARGO}" DIRECTORY)
+        set(_goods_cmd
+            ${CMAKE_COMMAND} -E env
+            --unset=RUSTFLAGS --unset=CARGO_ENCODED_RUSTFLAGS
+            --unset=CFLAGS --unset=CXXFLAGS --unset=CC --unset=CXX
+            "PATH=${_cargo_dir}:/usr/bin:/bin"
+            "LIBCLANG_PATH=${_cargo_dir}/../lib/libclang.so"
+            "${POLYORCH_RUST_CARGO}" build)
+        foreach(_p IN LISTS _goods_pkgs)
+            list(APPEND _goods_cmd -p "${_p}")
+        endforeach()
+        list(APPEND _goods_cmd
+            --manifest-path "${MEDIASERVO_REPO_ROOT}/Cargo.toml"
+            --target-dir "${MEDIASERVO_REPO_ROOT}/target")
+        if(_cfg STREQUAL "Release")
+            list(APPEND _goods_cmd --release)
+        endif()
+        set(_goods_args
+            COMMAND ${CMAKE_COMMAND} -E echo
+                "deploy-${_t}: fresh goods — cargo build [${_goods_pkgs}] -> shared target/ (profile ${_profile})"
+            COMMAND ${_goods_cmd})
+    endif()
     add_custom_target(${_name}
+        ${_goods_args}
         COMMAND ${CMAKE_COMMAND} -E echo
             "deploy-${_t}: configure dedicated binaryDir ${_bdir} (profile ${_profile})"
         COMMAND ${CMAKE_COMMAND} -S ${MEDIASERVO_REPO_ROOT} -B ${_bdir}
             -DMEDIASERVO_APP_TREE=${_t}
             ${_extra_defs}
-            -DMEDIASERVO_BUILD_CRATES_LANES=ON
+            -DMEDIASERVO_BUILD_CRATES_LANES=OFF
             -DMEDIASERVO_DEPLOY_PROFILE=${_profile}
             -DMEDIASERVO_BRAND=${_brand}
             -DMEDIASERVO_OXMGR_BIN=${MEDIASERVO_OXMGR_BIN}
             -DCMAKE_BUILD_TYPE=${_cfg}
-        COMMAND ${CMAKE_COMMAND} --build ${_bdir}
         ${_guard_args}
         COMMAND ${CMAKE_COMMAND} --install ${_bdir} --prefix ${_pfx}
         ${_init_args}
