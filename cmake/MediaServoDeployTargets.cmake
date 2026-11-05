@@ -152,10 +152,10 @@ endfunction()
 # (MediaServoBindings rows in the bindings-lane tree). Dedicated binaryDir with
 # the bindings gate ON; pure install, no init legs, no guard-needed state (no
 # run/oxfile in a bindings prefix; strip = no mechanism today, declared).
-# R6 NOTE: this face does NOT ride _mediaservo_add_deploy_target — the shared
-# function drives the AppTree choreography (lanes+guard+init), which is the
-# HOST/SERVER shape; the bindings target = configure(bindings gate) -> build
-# manifest -> install. Shape mismatch is by design, not an oversight.
+# R6 NOTE: this face drives its own shape — configure(bindings gate) -> build
+# manifest -> install. The shared function below carries a bindings branch for
+# the parent-brand buttons (same three-step shape, parameterized); its AppTree
+# choreography (lanes+guard+init) stays host/server-only.
 if(MEDIASERVO_BUILD_BINDINGS)
     set(_bdir_b "${MEDIASERVO_REPO_ROOT}/build/deploy-bindings")
     set(_cfg_b "${MEDIASERVO_DEPLOY_PROFILE}")
@@ -167,6 +167,7 @@ if(MEDIASERVO_BUILD_BINDINGS)
     add_custom_target(mediaservo-deploy-bindings
         COMMAND ${CMAKE_COMMAND} -S ${MEDIASERVO_REPO_ROOT} -B ${_bdir_b}
             -DMEDIASERVO_BUILD_BINDINGS=ON -DCMAKE_BUILD_TYPE=${_cfg_b}
+            -DMEDIASERVO_APP_TREE=
         COMMAND ${CMAKE_COMMAND} --build ${_bdir_b}
             --target mediaservo-bindings-manifest
         COMMAND ${CMAKE_COMMAND} --install ${_bdir_b} --prefix ${MEDIASERVO_DEPLOY_PREFIX_HOST}
@@ -236,6 +237,33 @@ function(_mediaservo_add_deploy_target)
         set(_cfg Release)
     else()
         set(_cfg Debug)
+    endif()
+    # bindings rides its OWN shape here (R6 NOTE above): AppTree has no
+    # bindings tree — the face is configure(bindings gate) -> build manifest
+    # -> install, mirroring the submodule's own mediaservo-deploy-bindings
+    # one-to-one (name/prefix/build-root parameterized). No goods leg (the
+    # manifest build produces its artifacts through the bindings face, whose
+    # cargo rides PolyOrch's built-in PIT-14 bridge), no guard, no init legs.
+    # The shared AppTree choreography below stays host/server-only —
+    # -DMEDIASERVO_APP_TREE=bindings would FATAL the AppTree gate
+    # ('' |host|server), which is how the parent button died on first click
+    # from the day it was registered (found 2026-11-05).
+    if(_t STREQUAL "bindings")
+        add_custom_target(${_name}
+            COMMAND ${CMAKE_COMMAND} -E echo
+                "deploy-bindings: configure dedicated binaryDir ${_bdir} (profile ${_profile})"
+            COMMAND ${CMAKE_COMMAND} -S ${MEDIASERVO_REPO_ROOT} -B ${_bdir}
+                -DMEDIASERVO_BUILD_BINDINGS=ON -DCMAKE_BUILD_TYPE=${_cfg}
+                -DMEDIASERVO_APP_TREE=
+            COMMAND ${CMAKE_COMMAND} --build ${_bdir}
+                --target mediaservo-bindings-manifest
+            COMMAND ${CMAKE_COMMAND} --install ${_bdir} --prefix ${_pfx}
+            COMMENT "mediaservo deploy bindings -> ${_pfx} (bindings manifest + delivery rows)"
+            VERBATIM)
+        if(MDT_FOLDER)
+            set_target_properties(${_name} PROPERTIES FOLDER "${MDT_FOLDER}")
+        endif()
+        return()
     endif()
     set(_extra_defs "")
     set(_extra_commands "")
