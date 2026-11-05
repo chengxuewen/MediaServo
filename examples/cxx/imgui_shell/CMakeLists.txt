@@ -1,8 +1,8 @@
 # C-D9: dir keeps the plain name, target carries the brand (G4 dir+prefix==target)
 add_library(mediaservo-example-imgui_shell STATIC src/shell.cpp src/core.cpp src/texture.cpp)
-# IDE group (plan ide-folder-hierarchy P8, R4-1): core_test below is NOT a same-named
-# dir target — the band root loop can never carry it; both join by definition point.
-set_target_properties(mediaservo-example-imgui_shell PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples/cxx")
+# IDE group (per-example folder, 2026-11-05 ruling evolving P8): every target
+# this directory owns — the lib and core_test below — lives in examples/cxx/imgui_shell/.
+set_target_properties(mediaservo-example-imgui_shell PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples/cxx/imgui_shell")
 target_include_directories(mediaservo-example-imgui_shell PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_link_libraries(mediaservo-example-imgui_shell PUBLIC mediaservo-imgui)
 
@@ -22,6 +22,6 @@ endif()
 
 # viewer_core unit tests (core.cpp has no GUI dependency; compiling separately keeps SDL out of the test binary)
 add_executable(mediaservo-core-test tests/core_test.cpp ${CMAKE_CURRENT_LIST_DIR}/src/core.cpp)
-set_target_properties(mediaservo-core-test PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples/cxx")  # plan P8 (non-G4: branded by hand, no dir partner)
+set_target_properties(mediaservo-core-test PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples/cxx/imgui_shell")  # non-G4: branded by hand; joins its owning dir's folder (2026-11-05)
 target_include_directories(mediaservo-core-test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
 add_test(NAME core COMMAND mediaservo-core-test)

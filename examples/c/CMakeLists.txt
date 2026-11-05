@@ -68,7 +68,9 @@ foreach(_dir IN LISTS _c_examples)
     endif()
     add_executable(mediaservo-example-${_dir} "${_src}")
     set_target_properties(mediaservo-example-${_dir} PROPERTIES
-        FOLDER "${MEDIASERVO_IDE_ROOT}examples/c")
+        # Per-example folder (2026-11-05 ruling, evolving P8): the build target
+        # lives beside its run button in examples/c/<name>/.
+        FOLDER "${MEDIASERVO_IDE_ROOT}examples/c/${_dir}")
     target_link_libraries(mediaservo-example-${_dir} PRIVATE mediaservo::${_dir})
     # IDE run button + F5 row (ruling 4): supplier faces only — the COMMAND
     # guard keeps the standalone-band configure (no PolyOrch loaded) green,

@@ -11,6 +11,6 @@ add_executable(mediaservo-example-imgui_viewer
     src/panels/log_view.cpp
     src/panels/video_grid.cpp
     src/panels/control.cpp)
-set_target_properties(mediaservo-example-imgui_viewer PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples/cxx")  # plan P8 + relocation
+set_target_properties(mediaservo-example-imgui_viewer PROPERTIES FOLDER "${MEDIASERVO_IDE_ROOT}examples/cxx/imgui_viewer")  # per-example folder (2026-11-05, evolving P8; relocation)
 target_include_directories(mediaservo-example-imgui_viewer PRIVATE src)
 target_link_libraries(mediaservo-example-imgui_viewer PRIVATE mediaservo-example-imgui_shell mediaservo::client mediaservo-examples-toolchain-patch)  # bindings-faces P5 ruling 7-B

@@ -38,7 +38,7 @@ foreach(_n IN LISTS _py_examples)
             SCRIPT "${CMAKE_CURRENT_LIST_DIR}/${_n}.py"
             WORKING_DIRECTORY "${REPO_ROOT}"
             ENVS "MEDIASERVO_LIB_DIR=${REPO_ROOT}/target/debug"
-            FOLDER "${MEDIASERVO_IDE_ROOT}examples/py")
+            FOLDER "${MEDIASERVO_IDE_ROOT}examples/py/${_n}")
     endif()
 endforeach()
 

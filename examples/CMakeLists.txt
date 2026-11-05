@@ -57,14 +57,17 @@ if(POLYORCH_RUST_FOUND)
         if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/rs/${_n}.rs")
             message(FATAL_ERROR "registry entry ${_n} has no file on disk (examples/rs/${_n}.rs)")
         endif()
+        # Per-example folder (2026-11-05 ruling, evolving P8): each example's
+        # build+run pair lives in its own examples/rs/<name>/ folder; only the
+        # family aggregates stay at the band level.
         polyorch_rust_build(TARGET mediaservo-example-${_n}
             PACKAGE examples CRATE ${_n}
             EXAMPLE MANIFEST "${CMAKE_CURRENT_LIST_DIR}/rs/Cargo.toml"
-            FOLDER "${MEDIASERVO_IDE_ROOT}examples/rs")
+            FOLDER "${MEDIASERVO_IDE_ROOT}examples/rs/${_n}")
         polyorch_rust_ide_mount(TARGET mediaservo-example-${_n}-build
             MANIFEST "${CMAKE_CURRENT_LIST_DIR}/rs/Cargo.toml"
             CRATE ${_n}
-            FOLDER "${MEDIASERVO_IDE_ROOT}examples/rs")
+            FOLDER "${MEDIASERVO_IDE_ROOT}examples/rs/${_n}")
         list(APPEND _rs_mediators mediaservo-example-${_n}-build)
         if(COMMAND polyorch_rust_run)
             # GUI flavor only for the display-backed trio; the rest run console.
@@ -78,7 +81,7 @@ if(POLYORCH_RUST_FOUND)
                 set(_rs_gui "")
             endif()
             polyorch_rust_run(TARGET mediaservo-example-${_n} ${_rs_gui}
-                WORKING_DIRECTORY "${_EX_ROOT}" FOLDER "${MEDIASERVO_IDE_ROOT}examples/rs")
+                WORKING_DIRECTORY "${_EX_ROOT}" FOLDER "${MEDIASERVO_IDE_ROOT}examples/rs/${_n}")
         endif()
     endforeach()
 
