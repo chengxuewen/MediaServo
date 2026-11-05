@@ -1403,3 +1403,6 @@ install                        → 改名提示 + exit 2（退役）
   unique, rs F5 rows dedup to exactly one set); the default `all`-tree cache
   stays clean (r1-H1); py targets carry a `py-` band prefix (CMP0002 vs the
   rs registry's vehicle_push).
+- PolyOrch 0.9.1: cmake clean spares the shared target/ artifacts (lane rules
+  are stamp-only now); the 2026-11-05 IDE-Clean incident (top-level
+  libmediaservo_*.so wiped, then PIT-189 configure FATAL) is closed by design.

@@ -5,6 +5,14 @@ teams); for development process details, consult git log directly. Newest versio
 
 ## [Unreleased]
 
+### Fixed
+
+- IDE/CLI clean (`cmake --build --target clean`) no longer deletes the shared
+  cargo artifacts under `target/` (the top-level libmediaservo_*.so): PolyOrch
+  0.9.1 moves the lane rules to a build-tree stamp (the artifact stays off
+  cmake's books), so one tree's clean can no longer wipe the .so another
+  tree's configure gates on (PIT-189 live incident, 2026-11-05).
+
 ### Added
 
 - examples c band CMake-ized (`examples/c/CMakeLists.txt`, ruling 3=B): deck/field/link
