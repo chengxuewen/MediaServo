@@ -301,6 +301,12 @@ include(\"${CMAKE_BINARY_DIR}/deploy-${_name}-init-server-body.cmake\")
             -DMEDIASERVO_SERVER_OUT_DIR=${_srv_out})
         if(MDT_STAGING)
             set(_extra_defs ${_extra_defs} -DMEDIASERVO_APP_STAGING=${MDT_STAGING})
+            # build-assembly staging skips the root entry links by contract;
+            # this face is a DEPLOY (assembly + landing in one button), so it
+            # opts in — the IDE button lands <prefix>/{brand}-server like the
+            # CLI deploy landing does (msrtc-deploy-server parity gap,
+            # 2026-11-05).
+            set(_extra_defs ${_extra_defs} -DMEDIASERVO_APP_ENTRY_LINKS=ON)
         endif()
         set(_init_args
             COMMAND ${CMAKE_COMMAND}

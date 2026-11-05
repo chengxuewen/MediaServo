@@ -43,12 +43,15 @@
 #     truncate only because it stops the cluster first — build must never stop
 #     anything. The web tree moves dist -> <prefix>/web (rmtree+copytree parity).
 #     Root entry shortcuts are a deploy landing: NEVER registered in build mode
-#     (the delivery tree stays bin/etc/web exactly like python laid it).
+#     (the delivery tree stays bin/etc/web exactly like python laid it) — unless
+#     MEDIASERVO_APP_ENTRY_LINKS=ON opts a build-assembly face into the landing
+#     too (the deploy-targets face: assembly + landing in one button).
 
 set(MEDIASERVO_APP_TREE "" CACHE STRING "app delivery layout to describe at install time: '' (none) | host | server")
 set(MEDIASERVO_BRAND "" CACHE STRING "product brand for the physical bin names (D269); empty = upstream names byte-stable")
 set(MEDIASERVO_SERVER_OUT_DIR "" CACHE PATH "server delivery root (the CLI-resolved <out>/server) — server placement rows source from here")
 set(MEDIASERVO_APP_STAGING "" CACHE STRING "server-tree placement mode: '' (deploy: delivery-tree-first PROGRAMS route) | build (fresh target/{profile} bins via swap legs + web move) | web (web placement only — the build web fast lane)")
+set(MEDIASERVO_APP_ENTRY_LINKS OFF CACHE BOOL "register the root entry-link legs under build-assembly staging too (the deploy-targets face is assembly + landing in one pass); OFF keeps python parity (build stages bare, deploy lands the links)")
 
 # The eight host-tree bin names as cargo spells them (the CLI's HOST_BINS mirror —
 # D269 names: host-<app> -> <brand>-<app>, mediaservo-host -> <brand>-host).
@@ -271,8 +274,10 @@ function(_mediaservo_app_tree_server)
     # copy (python parity). Old-brand root links pointing into THIS bin/ are
     # reclaimed (touch only symlinks resolving into <prefix>/bin, never dirs).
     # Build assembly NEVER registers these legs: the delivery tree stays
-    # bin/etc/web exactly like python's build staged it (deploy adds links).
-    if(NOT MEDIASERVO_APP_STAGING STREQUAL "build")
+    # bin/etc/web exactly like python's build staged it (deploy adds links) —
+    # the entry-links opt-in is the one exception: that caller IS a deploy
+    # (assembly + landing in one button), so its legs land too.
+    if(NOT MEDIASERVO_APP_STAGING STREQUAL "build" OR MEDIASERVO_APP_ENTRY_LINKS)
     install(CODE "
         set(_ln [==[${_link_names}]==])
         foreach(_n IN LISTS _ln)
