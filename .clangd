@@ -1,2 +1,13 @@
+# clangd navigation map. Paths are relative to THIS file's directory (the
+# submodule root). Primary database: the parent-workspace IDE tree (the
+# all-examples preset) -- it refreshes on every CMake Tools reconfigure via
+# CMAKE_EXPORT_COMPILE_COMMANDS, so IDE F12 navigation follows the tree you
+# actually configure from.
+#   Parent-workspace IDE (the daily flow): ../../build/presets/all-examples
+#   Submodule opened standalone:            build/presets/all-examples
+#   CLI-bridge-only flow (no IDE tree):     target/examples/build
+# The pre-IDE-era pin pointed at the bridge tree; it goes stale when the
+# bridge products are cleaned while the IDE tree keeps living (jump-to-def
+# went blind, examples-ide-unification follow-up 2026-11-05).
 CompileFlags:
-  CompilationDatabase: target/examples/build
+  CompilationDatabase: ../../build/presets/all-examples
