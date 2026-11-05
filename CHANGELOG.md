@@ -6,6 +6,19 @@ teams); for development process details, consult git log directly. Newest versio
 ## [Unreleased]
 
 ### Added
+
+- examples c band CMake-ized (`examples/c/CMakeLists.txt`, ruling 3=B): deck/field/link
+  build as `mediaservo-example-<dir>` against the `mediaservo::<sdk>` link faces;
+  the e2e gcc path is unchanged. All four example language bands (c/cxx/py/rs) now
+  expose IDE run buttons and F5 debug rows through the PolyOrch faces — no
+  hand-written `.vscode` entries remain (the MANAGED-marker imgui_viewer attach
+  row and the `build examples` task are deleted; generated rows replace them).
+  Enable paths: the `build example` bridge (now also exporting compile_commands
+  for clangd, `.clangd` pinned to the bridge tree) or the new `all-examples`
+  preset (CMake configure/build/test), which carries `PolyOrch_VSCODE_DEBUG_ALL=ON`.
+  Requires PolyOrch >= 0.9.0 (per-tree region slicing: two trees against one
+  source never erase each other's debug rows; cross-tree duplicates dedup
+  skip-on-name).
 - [examples] top-level examples/ aggregator with language bands (plan
   directory-artifacts-convergence batch ①): the cxx island moved from
   bindings/cxx/examples to examples/cxx (band root stays standalone-configurable);

@@ -12,10 +12,11 @@
 #   * API floor (two forms, per the D39-era measured discipline): keyword-level
 #     capability is invisible to COMMAND probes, so it rides the sentinel's
 #     INTERFACE_POLYORCH_VERSION; a bare (pre-D39) sentinel fails the property
-#     read — same loud discipline upstream. Floor = 0.8.0 (D50 third-party face —
-#     fingerprint/fetch/build/manifest_write/import/recipe; the third-party
-#     dependency intake lanes depend on them). D46/D45/D44/D42 floors stay
-#     subsumed; lanes from S2 onward need the line).
+#     read — same loud discipline upstream. Floor = 0.9.0 (per-tree VSCode
+#     debug regions: marker carries a tree id, skip-on-name dedup, legacy
+#     retitle migration — the examples-ide-unification lanes depend on them;
+#     D50 third-party-face floors stay subsumed). D46/D45/D44/D42 floors stay
+#     subsumed; lanes from S2 onward need the line.
 
 # Repo anchor: this file lives in <repo>/cmake/, so defining-file dir + ".." is the
 # repo root in BOTH standalone and superbuild (ms_rtc shell / third-party embed) mode —
@@ -68,10 +69,10 @@ function(mediaservo_ensure_polyorch)
 
     # post-embed floor check (self-embed path): D39 properties must be delivered
     get_target_property(_po_ver PolyOrch::PolyOrch INTERFACE_POLYORCH_VERSION)
-    if(NOT _po_ver OR _po_ver VERSION_LESS "0.8.0")
+    if(NOT _po_ver OR _po_ver VERSION_LESS "0.9.0")
         message(FATAL_ERROR
             "MediaServo: the pinned PolyOrch checkout reports '${_po_ver}', below the "
-            "required floor 0.8.0 (third-party face, D50). Bump the gitlink "
-            "to a D50-complete SHA.")
+            "required floor 0.9.0 (per-tree VSCode debug regions, examples-ide-unification). "
+            "Bump the gitlink to a slicing-complete SHA.")
     endif()
 endfunction()

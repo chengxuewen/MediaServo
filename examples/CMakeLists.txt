@@ -12,13 +12,21 @@
 #        (vehicle_{field,link,deck}.cpp + standalone ros2_node/) rides under
 #        cxx/crate-examples/ — one level deeper, deliberately invisible to the band
 #        G4 glob (*/CMakeLists.txt); compiled by e2e/docs paths, not CMake targets.
-# c    — batch ② LANDED: per-domain C material (deck/field/link), pure gcc artifacts
-#        compiled by scripts/e2e-bindings.sh; no CMake targets, no mount.
-# py   — batch ③ LANDED: python usage examples at examples/py/ (never wheel content;
-#        run via the CLI py band / python3 directly; no CMake targets, no mount).
+# c    — examples-ide-unification ruling 3=B: CMake-ized (mirror of the cxx
+#        band minus F25/gui-deps/toolchain-patch; pure C needs none, so these
+#        targets appear in the preset tree too). The e2e gcc script stays the
+#        pure-gcc validation path; this face adds IDE buttons + F5 rows.
+# py   — batch ③ LANDED (usage examples at examples/py/, never wheel content;
+#        the CLI py lane still execs them directly) + ruling 4: F5 rows via
+#        the python face (SCRIPT-based, no executable target needed).
 # rs   — batch ④ LANDED: workspace-member example package + PolyOrch D40 EXAMPLE face
 #        (C-D6=B/C-D10=B', 8 lanes all live). The CMake face here inherits this family
 #        gate; pure `cargo run -p examples --example <n>` consumption never does.
+#        NOTE (measured, ruling-4 round): the rs lanes' F5 rows also ride the
+#        cache-level knob (PolyOrch_VSCODE_DEBUG_ALL in the bridge cfgargs /
+#        the all-examples preset) — see the py band header for the gate
+#        layering; the local set() inside mediaservo_setup_crate_lanes only
+#        drives spec REGISTRATION, never the end-of-configure generator.
 
 # rs band face (C-D10=B' six-piece set, VE parity). Soft-degrade posture = the C23
 # crates precedent: no rust toolchain → STATUS skip, zero invented targets. Mount
@@ -58,16 +66,19 @@ if(POLYORCH_RUST_FOUND)
             CRATE ${_n}
             FOLDER "${MEDIASERVO_IDE_ROOT}examples/rs")
         list(APPEND _rs_mediators mediaservo-example-${_n}-build)
-        if(COMMAND polyorch_example_run)
-            # GUI flavor only for the display-backed trio; the rest run console
+        if(COMMAND polyorch_rust_run)
+            # GUI flavor only for the display-backed trio; the rest run console.
+            # The rust run face, NOT polyorch_example_run: the run face is what
+            # owns the F5 (CodeLLDB) debug registration (ruling 4; measured gap —
+            # example_run is the plain-exec face and registers nothing). It also
+            # wires the -build edge itself, so no add_dependencies here.
             if(_n MATCHES "egui|^viewer$")
                 set(_rs_gui GUI)
             else()
                 set(_rs_gui "")
             endif()
-            polyorch_example_run(TARGET mediaservo-example-${_n} ${_rs_gui}
+            polyorch_rust_run(TARGET mediaservo-example-${_n} ${_rs_gui}
                 WORKING_DIRECTORY "${_EX_ROOT}" FOLDER "${MEDIASERVO_IDE_ROOT}examples/rs")
-            add_dependencies(mediaservo-example-${_n}-run mediaservo-example-${_n}-build)
         endif()
     endforeach()
 
@@ -95,4 +106,6 @@ else()
     message(STATUS "examples rs band: no cargo/rustc found (C23 posture) — rs CMake face SKIPPED; pure cargo consumption unaffected")
 endif()
 
+add_subdirectory(c)
+add_subdirectory(py)
 add_subdirectory(cxx)

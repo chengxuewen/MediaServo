@@ -1389,3 +1389,17 @@ install                        → 改名提示 + exit 2（退役）
 
 - `build bindings` 在 cmake configure 后从 deps 恢复 dev-tree `.so`/SONAME（field/link/deck/client/node）；e2e-delivery 尊重 `TMPDIR`。
 - 真实全量 28 pass / 1 skip / 0 fail；mediasoup 因 9800 live 正确 SKIP。
+
+### 2026-11-05: examples-ide-unification (four bands on the PolyOrch faces)
+
+- examples c/py bands CMake-ized + cxx F5 rows + rs run-face swap: all four
+  bands expose IDE run buttons and F5 debug rows through PolyOrch 0.9.0
+  (per-tree region slicing); the hand-written .vscode entries are deleted.
+- presets: `all-examples` triple; the bridge cfgargs exports compile_commands;
+  the `PolyOrch_VSCODE_DEBUG_ALL` knob is cache-level only (Crates' local
+  set(ALL ON) was dead code for the include-time hook, recorded in the py
+  band header).
+- measured: dual-tree slices coexist (16 launch rows / 13 tasks labels all
+  unique, rs F5 rows dedup to exactly one set); the default `all`-tree cache
+  stays clean (r1-H1); py targets carry a `py-` band prefix (CMP0002 vs the
+  rs registry's vehicle_push).

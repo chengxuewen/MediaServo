@@ -1109,7 +1109,7 @@ _ms_build_example() {  # $1=release(0/1); rest = example names (empty = all)
     if [ -x "$ROOT/.pixi/envs/default/bin/cargo" ]; then
         rustinj=(-DPolyOrch_RUST_CARGO_EXECUTABLE="$ROOT/.pixi/envs/default/bin/cargo" -DPolyOrch_RUSTC_EXECUTABLE="$ROOT/.pixi/envs/default/bin/rustc")
     fi
-    local cfgargs=(-S "$ROOT" -B "$_MS_EXAMPLES_BUILD" "-DCMAKE_BUILD_TYPE=$gen" "-DMEDIASERVO_BUILD_EXAMPLES=ON" "-DMEDIASERVO_BUILD_BINDINGS=ON" "${rustinj[@]}")
+    local cfgargs=(-S "$ROOT" -B "$_MS_EXAMPLES_BUILD" "-DCMAKE_BUILD_TYPE=$gen" "-DMEDIASERVO_BUILD_EXAMPLES=ON" "-DMEDIASERVO_BUILD_BINDINGS=ON" "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON" "-DPolyOrch_VSCODE_DEBUG_ALL=ON" "${rustinj[@]}")
     # stale island-style cache (different source dir) = wipe, or cmake hard-errors
     if [ -f "$_MS_EXAMPLES_BUILD/CMakeCache.txt" ] && ! grep -q "^CMAKE_HOME_DIRECTORY:INTERNAL=$ROOT$" "$_MS_EXAMPLES_BUILD/CMakeCache.txt"; then
         rm -rf "$_MS_EXAMPLES_BUILD"

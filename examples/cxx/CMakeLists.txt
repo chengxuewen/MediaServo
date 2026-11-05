@@ -34,7 +34,8 @@ set(MEDIASERVO_SDK_DIR "${REPO_ROOT}/target/debug" CACHE PATH
 if(NOT EXISTS "${MEDIASERVO_SDK_DIR}/libmediaservo_client.so")
     message(FATAL_ERROR
         "no libmediaservo_client.so inside MEDIASERVO_SDK_DIR='${MEDIASERVO_SDK_DIR}' —"
-        " run ./mediaservo.sh build-c (or pixi run build-c) before configuring (PIT-189)")
+        " run ./mediaservo.sh build bindings before configuring (PIT-189;"
+        " the retired build-c alias is gone — build bindings is the .so face)")
 endif()
 
 # -- F25 environment-eligibility gate (system constitution self-check) --
@@ -154,6 +155,16 @@ foreach(entry ${EXAMPLE_DIRS})
         if(_et STREQUAL "EXECUTABLE")
             polyorch_example_run(TARGET "${_tgt}" GUI WORKING_DIRECTORY "${REPO_ROOT}" FOLDER "${MEDIASERVO_IDE_ROOT}examples/cxx/${dir}")
             add_dependencies("${_tgt}-run" "${_tgt}")
+        endif()
+    endif()
+    # F5 row (ruling 4, examples-ide-unification): the supplier's native face
+    # — replaces the hand-written MANAGED-marker imgui_viewer attach row,
+    # deleted in the same round. The hook rides the cache-level ALL knob;
+    # see the py band header for the gate layering.
+    if(COMMAND polyorch_native_debug)
+        get_target_property(_et "${_tgt}" TYPE)
+        if(_et STREQUAL "EXECUTABLE")
+            polyorch_native_debug(TARGET "${_tgt}" SEG "examples/cxx" CWD "${REPO_ROOT}")
         endif()
     endif()
 endforeach()

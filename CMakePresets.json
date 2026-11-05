@@ -57,6 +57,16 @@
         "MEDIASERVO_BUILD_CRATES_LANES": "ON",
         "MEDIASERVO_SHARE_CARGO_TARGET": "ON"
       }
+    },
+    {
+      "name": "all-examples",
+      "displayName": "all-examples - full lanes + examples (prereqs: build-c + build gui-deps; cxx band skips under the pixi env constitution)",
+      "inherits": "all",
+      "binaryDir": "${sourceDir}/build/presets/${presetName}",
+      "cacheVariables": {
+        "MEDIASERVO_BUILD_EXAMPLES": "ON",
+        "PolyOrch_VSCODE_DEBUG_ALL": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -79,6 +89,10 @@
     {
       "name": "all",
       "configurePreset": "all"
+    },
+    {
+      "name": "all-examples",
+      "configurePreset": "all-examples"
     }
   ],
   "testPresets": [
@@ -92,6 +106,13 @@
     {
       "name": "all",
       "configurePreset": "all",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "all-examples",
+      "configurePreset": "all-examples",
       "output": {
         "outputOnFailure": true
       }

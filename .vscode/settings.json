@@ -1,4 +1,5 @@
 {
+    "cmake.configurePreset": "all",
 // __POLYORCH_GENERATED_BEGIN__ (PolyOrch bootstrap cmake path; keep this block last, regenerate via reconfigure)
     "cmake.cmakePath": "${workspaceFolder}/.pixi/envs/default/bin/cmake",
     "cmake.configureOnOpen": true,
