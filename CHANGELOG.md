@@ -7,6 +7,11 @@ teams); for development process details, consult git log directly. Newest versio
 
 ### Fixed
 
+- The IDE bootstrap settings no longer prepend the pixi bin directory to
+  the configure PATH: PolyOrch 0.9.2 delivers cargo/rustc through the explicit
+  injection contract (`cmake.configureSettings`) instead, so an IDE configure
+  keeps a clean PATH and environment-constitution gates such as the cxx band's
+  F25 no longer skip the whole band (D51, user-adjudicated A'').
 - IDE/CLI clean (`cmake --build --target clean`) no longer deletes the shared
   cargo artifacts under `target/` (the top-level libmediaservo_*.so): PolyOrch
   0.9.1 moves the lane rules to a build-tree stamp (the artifact stays off

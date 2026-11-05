@@ -1406,3 +1406,8 @@ install                        → 改名提示 + exit 2（退役）
 - PolyOrch 0.9.1: cmake clean spares the shared target/ artifacts (lane rules
   are stamp-only now); the 2026-11-05 IDE-Clean incident (top-level
   libmediaservo_*.so wiped, then PIT-189 configure FATAL) is closed by design.
+- PolyOrch 0.9.2: the bootstrap settings deliver rust via the injection
+  contract (configureSettings keys, written only when sibling binaries
+  exist) and never prepend PATH -- consumer env constitutions (cxx band F25)
+  stay green on IDE configures; a warm cache tree must be re-probed to pick
+  the keys up (POLYORCH_RUST_FOUND is CACHE INTERNAL; D51).
