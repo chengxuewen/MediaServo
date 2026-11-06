@@ -311,17 +311,22 @@ _msvc_kill_using() {
 # _ms_deploy_via_target <target-suffix> <profile> [VAR=VAL ...] — P2d-2 forwarder:
 # re-configures the dedicated deploy binaryDir with the caller's overrides, then
 # drives the same custom target the IDE button uses. One implementation for all
-# three faces (U5).
-# _ms_deploy_via_target <target-suffix> <profile> [VAR=VAL ...] — P2d-2 forwarder.
-# Server: two-phase (configure binaryDir -> build the bin lane so cargo artifacts
-# exist -> reconfigure so AppTree EXISTS pins see real files -> drive deploy
-# target). Bindings skips the bin-build lane; host (B4) is single-pass and rides
-# the target body's own sequence. Single cargo writer at any moment (concurrent
-# cargo on one target/ corrupted the main bin mid-deploy, measured 10-27).
+# three faces (U5). B4/B5 (user-adjudicated A both): every suffix drives the
+# body directly — single-pass, button-identical. Registration configure keeps
+# the configure-time AppTree hunt OFF (explicit empty APP_TREE: cache-sticky
+# residue from a previous body run self-fires the hunt before artifacts exist,
+# PIT-189); the body's own configure re-activates AppTree with the fresh-goods
+# artifacts present. The fa48b38 two-phase bin-build lane is retired: it was
+# CLI-private choreography (the IDE button never ran it), its isolated
+# .cargo-target duplicated what the body's fresh-goods leg builds, and its
+# env path missed the MESON/MESON_ARGS unset that every other cargo driver
+# carries — conda gcc activation exports MESON_ARGS=-Dbuildtype=release,
+# which collides with mediasoup-sys's own --buildtype and panics the worker
+# build (pixi.toml build-server-native precedent; measured 2026-11-06, the
+# initially suspected memory-pressure theory superseded by this root cause).
+# The identity self-check rode that lane and dies with it (button parity; the
+# body's guard sequence keeps the single-writer proof).
 _ms_deploy_via_target() {
-    # NOTE: host joined the forward (B4, cli-cmake-single-source user-adjudicated A):
-    # the fa48b38 keep-on-bash reservation is paid off — the two-phase single-writer
-    # below was proven under the bindings/server forwards (judges green since 10-27).
     local suffix="$1" profile="$2"; shift 2
     local cmake_bin="${CMAKE_BIN:-$ROOT/.pixi/envs/default/bin/cmake}"
     # NO ambient fallback: a system cmake here runs the lanes cargo under the
@@ -336,54 +341,9 @@ _ms_deploy_via_target() {
     for kv in "$@"; do extra+=("-D$kv"); done
     local -a gates=(-DMEDIASERVO_BUILD_CRATES_LANES=ON)
     [ "$suffix" = bindings ] && gates=(-DMEDIASERVO_BUILD_BINDINGS=ON)
-    if [ "$suffix" = host ]; then
-        # B4: host rides the target body's own sequence — fresh-goods (cargo build
-        # into the SHARED target/, C+ ruling 2026-11-05) -> configure (APP_TREE=host
-        # injected by the body itself, lanes explicitly OFF) -> guard TEARDOWN ->
-        # install -> init legs. The bindings/server two-phase bin-build lane does
-        # NOT apply here: its isolated .cargo-target never leaks into deploy goods,
-        # and the host AppTree leg hard-fails at configure time on a cold isolated
-        # dir (the server leg merely skips missing bins — that asymmetry is why
-        # server forwards survived while the 10-27 host forward was reverted).
-        # This step only registers the deploy target in the dedicated binaryDir
-        # and clears any APP_TREE cache residue from a previous body run.
-        "$cmake_bin" -S "$ROOT" -B "$ROOT/build/deploy-$suffix" \
-            -DMEDIASERVO_BUILD_CRATES_LANES=ON -DMEDIASERVO_APP_TREE= \
-            -DMEDIASERVO_DEPLOY_PROFILE="$profile" \
-            -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return $?
-        "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
-            --target "mediaservo-deploy-$suffix" || return $?
-        return 0
-    fi
     "$cmake_bin" -S "$ROOT" -B "$ROOT/build/deploy-$suffix" \
-        "${gates[@]}" -DMEDIASERVO_DEPLOY_PROFILE="$profile" \
-        -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return $?
-    if [ "$suffix" != bindings ]; then
-        "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
-            --target "mediaservo-$suffix-bin-build" || return $?
-        # identity self-check: a replaced/foreign byte-copy at target must never
-        # ride a deploy (fingerprint-fresh foreign content is invisible to cargo)
-        # per-suffix identity: host checks mediaservo-host, server checks
-        # mediaservo-server (server's version prints its own name — the host
-        # probe on a server tree was a P2d-2 bug, caught on live restore)
-        local main_bin
-        main_bin="$ROOT/target/$(echo "$profile" | tr 'A-Z' 'a-z')/mediaservo-$suffix"
-        # identity check runs BRAND-NEUTRAL (env -u MEDIASERVO_BRAND): D252
-        # version prints are runtime-branded, so a caller's msrtc env made the
-        # unbranded target bin read "msrtc-server" and the check self-fired
-        # (measured on the out/server live restore)
-        if [ -x "$main_bin" ] && ! env -u MEDIASERVO_BRAND "$main_bin" version 2>/dev/null | grep -q "^mediaservo-$suffix "; then
-            echo "  target main-bin identity broken — forcing rebuild" >&2
-            touch "$ROOT/crates/mediaservo-$suffix/src/main.rs" 2>/dev/null || \
-                touch "$ROOT/crates/mediaservo-$suffix/src/bin/mediaservo-$suffix.rs" 2>/dev/null || true
-            "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
-                --target "mediaservo-$suffix-bin-build" || return $?
-            env -u MEDIASERVO_BRAND "$main_bin" version 2>/dev/null | grep -q "^mediaservo-$suffix " || \
-                { echo "Error: main-bin identity still broken" >&2; return 1; }
-        fi
-    fi
-    "$cmake_bin" -S "$ROOT" -B "$ROOT/build/deploy-$suffix" \
-        "${gates[@]}" -DMEDIASERVO_DEPLOY_PROFILE="$profile" \
+        "${gates[@]}" -DMEDIASERVO_APP_TREE= \
+        -DMEDIASERVO_DEPLOY_PROFILE="$profile" \
         -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return $?
     "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
         --target "mediaservo-deploy-$suffix" || return $?
@@ -1665,21 +1625,21 @@ case "${1:-}" in
             exit 0
             ;;
         server)
-            shift 2; prefix=""
+            shift 2; prefix=""; build_type=Debug
             while [ $# -gt 0 ]; do
                 case "$1" in
                     --prefix) prefix="${2:?--prefix needs a value}"; shift 2 ;;
-                    --release) shift ;;  # composite pass-through parity (server assembly is Debug-pinned, python parity)
+                    --release) build_type=Release; shift ;;  # B5: server joined the DEPLOY_PROFILE channel (U6) — host/bindings twin
                     *) echo "deploy server: unexpected argument $1" >&2; exit 2 ;;
                 esac
             done
             [ -n "$prefix" ] || { echo "Error: deploy requires --prefix (no default — prevents polluting out/ stateless delivery; convention: /opt/mediaservo-server)" >&2; exit 2; }
-            # D266 pre-flight (old-leg parity)
-            [ -e "target/debug/mediaservo-server" ] || \
-                { echo "Error: target/debug/mediaservo-server missing — run build server first (deploy does not trigger builds — D266)" >&2; exit 1; }
+            # (no pre-flight: the body's fresh-goods leg builds the goods itself —
+            # D266's "deploy does not trigger builds" retired with the fresh-goods
+            # body, B4/B5 button-identical)
             # P2d-2 (U5): assembly+placement retired into the deploy-server target
             # (APP_STAGING=build ride included; fresh-first + web move inside)
-            _ms_deploy_via_target server Debug "MEDIASERVO_DEPLOY_PREFIX_SERVER=$prefix" \
+            _ms_deploy_via_target server "$build_type" "MEDIASERVO_DEPLOY_PREFIX_SERVER=$prefix" \
                 || { echo "Error: deploy server target failed (rc=$?)" >&2; exit 1; }
             exit 0
             ;;

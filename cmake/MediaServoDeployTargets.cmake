@@ -378,11 +378,17 @@ include(\"${CMAKE_BINARY_DIR}/deploy-${_name}-init-server-body.cmake\")
         # (RustHelpers PIT-14 block + PATH prepend + libclang pin): cargo can
         # spawn rustc, bindings build scripts find libclang, and a host-
         # activated shell cannot leak compiler shaping into the goods build.
+        # MESON/MESON_ARGS too: conda gcc activation exports
+        # MESON_ARGS=-Dbuildtype=release, which collides with mediasoup-sys's
+        # own --buildtype and panics the worker build (pixi.toml
+        # build-server-native precedent; button envs are naturally clean —
+        # only the CLI shell rides the pixi activation, B5 measured).
         get_filename_component(_cargo_dir "${POLYORCH_RUST_CARGO}" DIRECTORY)
         set(_goods_cmd
             ${CMAKE_COMMAND} -E env
             --unset=RUSTFLAGS --unset=CARGO_ENCODED_RUSTFLAGS
             --unset=CFLAGS --unset=CXXFLAGS --unset=CC --unset=CXX
+            --unset=MESON --unset=MESON_ARGS
             "PATH=${_cargo_dir}:/usr/bin:/bin"
             "LIBCLANG_PATH=${_cargo_dir}/../lib/libclang.so"
             "${POLYORCH_RUST_CARGO}" build)
