@@ -571,40 +571,9 @@ _ms_build_server() {
         # rides -DMEDIASERVO_BRAND (swap-install rows, staging=build).
         _msvc_app_install server "$brand" "$sbt" "$out_server" build
         echo "server assembly staged: out/server/ (bin/etc/web — app-tree rules, brand ${brand:-mediaservo})"
-        # ship caddy (PATH -> in-repo pixi tree -> WARN; never blocking)
-        local caddy_src="" c
-        caddy_src=$(command -v caddy || true)
-        if [ -z "$caddy_src" ]; then
-            for c in "$ROOT/.pixi/envs/default/bin/caddy" "$ROOT/../.pixi/envs/default/bin/caddy"; do
-                if [ -f "$c" ]; then caddy_src=$c; break; fi
-            done
-        fi
-        if [ -n "$caddy_src" ]; then
-            local caddy_dst="$out_server/bin/caddy"
-            if [ ! -e "$caddy_dst" ] || [ "$(realpath -- "$caddy_src")" != "$(realpath -- "$caddy_dst")" ]; then
-                cp -p "$caddy_src" "$caddy_dst"
-                echo "caddy shipped: out/server/bin/caddy (from $caddy_src)"
-            fi
-        else
-            echo "WARN: caddy not found (PATH / in-repo pixi tree) — out/server contains no caddy; at start it must come from PATH, otherwise web silently degrades" >&2
-        fi
-        # config template seeding (PIT-158/160: never overwrite runtime data —
-        # delete the old file first to get a fresh template)
-        mkdir -p "$out_server/etc"
-        local src_cfg="$ROOT/config/server.docker.yaml" f
-        if [ -f "$src_cfg" ] && [ ! -f "$out_server/etc/server.yaml" ]; then
-            sed -e 's|/opt/mediaservo/etc/accounts.yaml|accounts.yaml|g' \
-                -e 's|/opt/mediaservo/etc/devices.yaml|devices.yaml|g' \
-                "$src_cfg" > "$out_server/etc/server.yaml"
-        fi
-        if [ -f "$src_cfg" ]; then
-            for f in accounts.yaml devices.yaml; do
-                if [ -f "$ROOT/config/$f" ] && [ ! -f "$out_server/etc/$f" ]; then
-                    cp -p "$ROOT/config/$f" "$out_server/etc/$f"
-                fi
-            done
-            echo "server default config staged: $out_server/etc/server.yaml"
-        fi
+        # B3: the caddy vendor copy and the etc seed (server.yaml template +
+        # accounts/devices) are app-tree placement now (MediaServoAppTree.cmake
+        # build-face legs, first-writer-wins) — the CLI seeding tail is gone.
         return 0
     fi
     _ms_check docker "install docker and start the daemon"

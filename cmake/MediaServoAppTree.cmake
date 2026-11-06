@@ -4,6 +4,12 @@
 #   * One leg one owner: the branded bin placement python's deploy bodies hand-laid
 #     is THIS file now (deletion stroke same commit). Stateful steps (stop, init
 #     render, identity, oxmgr vendor copy) are NOT placement and stay in the CLI.
+#     B3 re-rule (cli-cmake-single-source, adjudication 2=A): the caddy vendor
+#     copy and the etc seed (server.yaml template + accounts/devices) ARE
+#     placement now — build-face legs in _mediaservo_app_tree_server; the CLI
+#     seeding tail is deleted in the same commit. The runtime-data halves stay
+#     stateful untouched: first-writer-wins keeps PIT-158/160 (hot-written
+#     devices.yaml, PSK-edited server.yaml survive every re-stage).
 #   * Route (ruling N2, verified): polyorch_rust_install DOES accept BINARY-kind
 #     handles (supplier pass 1 rejects only rlib handles; the planner stages kind
 #     bin into bin/ with exec perms) — but it has no per-row RENAME, and the app
@@ -210,6 +216,70 @@ function(_mediaservo_app_tree_server)
         message(WARNING
             "weaknet binary absent from all locations (out/server/bin and target/) — "
             "bin/${_wname} is NOT staged this time (does not block deploy; run build server)")
+    endif()
+
+    # -- B3 build-face legs (absorbed from the CLI _ms_build_server tail, same commit) --
+    # caddy vendor copy: PATH (find_program) -> repo pixi tree -> parent pixi tree
+    # -> WARN, never blocking — the CLI probe chain mirrored 1:1; install(PROGRAMS)
+    # is content-aware (same bytes = "Up-to-date", no redundant copy — the CLI's
+    # realpath idempotence parity), and the sweep-keep whitelist already protects
+    # bin/caddy from eviction (see the reclaim leg below).
+    if(MEDIASERVO_APP_STAGING STREQUAL "build")
+        set(_caddy_src "")
+        find_program(_caddy_prog caddy)
+        if(_caddy_prog)
+            set(_caddy_src "${_caddy_prog}")
+        else()
+            foreach(_c "${MEDIASERVO_REPO_ROOT}/.pixi/envs/default/bin/caddy"
+                       "${MEDIASERVO_REPO_ROOT}/../.pixi/envs/default/bin/caddy")
+                if(EXISTS "${_c}")
+                    set(_caddy_src "${_c}")
+                    break()
+                endif()
+            endforeach()
+        endif()
+        if(_caddy_src)
+            install(PROGRAMS "${_caddy_src}" DESTINATION bin)   # lands as bin/caddy (no RENAME)
+        else()
+            message(WARNING
+                "caddy not found (PATH / repo pixi trees) — bin/caddy is NOT staged; "
+                "at start it must come from PATH, otherwise web silently degrades")
+        endif()
+
+        # etc seed: server.yaml template (server.docker.yaml with the /opt/mediaservo/etc
+        # paths relativized — the CLI's sed parity) + accounts/devices verbatim.
+        # FIRST-WRITER-WINS via one script-mode CODE leg (install(FILES) cannot express
+        # destination-exists; same pattern as the deploy-face etc mirror above, whose
+        # "whatever build staged" promise this leg finally fulfills).
+        set(_seed_files "")
+        set(_seed_dir "${CMAKE_CURRENT_BINARY_DIR}/etcdist")
+        file(MAKE_DIRECTORY "${_seed_dir}")
+        if(EXISTS "${MEDIASERVO_REPO_ROOT}/config/server.docker.yaml")
+            file(READ "${MEDIASERVO_REPO_ROOT}/config/server.docker.yaml" _tpl)
+            string(REPLACE "/opt/mediaservo/etc/accounts.yaml" "accounts.yaml" _tpl "${_tpl}")
+            string(REPLACE "/opt/mediaservo/etc/devices.yaml" "devices.yaml" _tpl "${_tpl}")
+            file(WRITE "${_seed_dir}/server.yaml" "${_tpl}")
+            list(APPEND _seed_files "${_seed_dir}/server.yaml")
+        endif()
+        foreach(_f accounts.yaml devices.yaml)
+            if(EXISTS "${MEDIASERVO_REPO_ROOT}/config/${_f}")
+                list(APPEND _seed_files "${MEDIASERVO_REPO_ROOT}/config/${_f}")
+            endif()
+        endforeach()
+        if(_seed_files)
+            install(CODE "
+                file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/etc\")
+                set(_seedSrc [==[${_seed_files}]==])
+                foreach(_f IN LISTS _seedSrc)
+                    get_filename_component(_n \"\${_f}\" NAME)
+                    if(EXISTS \"\${CMAKE_INSTALL_PREFIX}/etc/\${_n}\")
+                        continue()
+                    endif()
+                    file(COPY \"\${_f}\" DESTINATION \"\${CMAKE_INSTALL_PREFIX}/etc\")
+                    message(STATUS \"  etc/\${_n}: template seeded (first-writer-wins)\")
+                endforeach()
+            ")
+        endif()
     endif()
 
     # etc mirror (SR7 T2): the delivery tree's staged configs (server.yaml + the
