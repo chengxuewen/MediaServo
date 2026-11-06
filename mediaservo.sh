@@ -7,7 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 # v2: unified pixi detection — prefer command -v, fall back to ~/.pixi/bin (exports PIXI_BIN for pixi-shell)
 if command -v pixi >/dev/null 2>&1; then
-    export PIXI_BIN="$(command -v pixi)"
+    PIXI_BIN="$(command -v pixi)"
+    export PIXI_BIN
 elif [ -x "$HOME/.pixi/bin/pixi" ]; then
     export PIXI_BIN="$HOME/.pixi/bin/pixi"
 else
@@ -407,8 +408,8 @@ _ms_deploy_via_target() {
         # per-suffix identity: host checks mediaservo-host, server checks
         # mediaservo-server (server's version prints its own name — the host
         # probe on a server tree was a P2d-2 bug, caught on live restore)
-        local main_bin="$ROOT/target/$(echo "$profile" | tr 'A-Z' 'a-z')/mediaservo-$suffix"
-        local main_name="mediaservo-$suffix"
+        local main_bin
+        main_bin="$ROOT/target/$(echo "$profile" | tr 'A-Z' 'a-z')/mediaservo-$suffix"
         # identity check runs BRAND-NEUTRAL (env -u MEDIASERVO_BRAND): D252
         # version prints are runtime-branded, so a caller's msrtc env made the
         # unbranded target bin read "msrtc-server" and the check self-fired
@@ -743,7 +744,7 @@ _ms_build_bindings() {  # $1=release(0/1)
     _ms_build_pywheel "$out_dir" "$major" "$staging" "$bind_dst" || exit $?
     local n_docs n_lib
     n_docs=$(ls "$bind_dst"/docs/sdk-cxx/*.md 2>/dev/null | wc -l)
-    n_lib=$(ls -1 "$bind_dst/lib" 2>/dev/null | grep -c '^libmediaservo_' || true)
+    n_lib=$(find "$bind_dst/lib" -maxdepth 1 -name 'libmediaservo_*' 2>/dev/null | wc -l || true)
     echo "bindings build complete: libmediaservo_{field,link,deck,client}.so version-full triple + node + python + .pc + cmake ($([ "$1" = 1 ] && echo release || echo debug))"
     echo "bindings delivery layout staged: out/bindings/ (lib $n_lib files + include/mediaservo + pkgconfig + cmake + python + wheel + node + docs/sdk-cxx $n_docs volumes)"
 }
@@ -851,6 +852,7 @@ _ms_git_out() {  # read-only git query: any failure (no git/shallow/timeout) -> 
 _ms_cpack_stage_sdk() {  # $1=staging $2=target $3=brand — L1/L2 halves
     local src="${MSRTC_OUT_ROOT:-$ROOT/out}/bindings" pkg bdir
     if [ ! -e "$src" ]; then echo "Error: out/bindings does not exist — run build bindings first" >&2; exit 1; fi
+    # shellcheck disable=SC2100  # false positive: hyphenated literal assignment inside case body, not arithmetic
     case "$2" in bindings|sdk-field) pkg=sdk-field ;; *) pkg="$2" ;; esac
     bdir="$ROOT/build/packages/$2"   # alias keeps its own cache dir
     local cfg=(cmake --preset default -B "$bdir" "-DMEDIASERVO_PKG=$pkg" "-DMEDIASERVO_PKG_BRAND=$3" "-DMEDIASERVO_BIND_OUT=$src")
@@ -917,6 +919,7 @@ _ms_reap_dist_daemons() {  # $1=dist $2=staging — staging hygiene: a run again
     # fresh tree must never leave a daemon whose OXMGR_HOME points into dist
     # (PIT-224 family — auto-spawn during staging init). python finally-parity.
     local pid home comm
+    # shellcheck disable=SC2010  # /proc entries are kernel-controlled numeric names; the ls|grep scan idiom is safe here
     for pid in $(ls -1 /proc 2>/dev/null | grep -E '^[0-9]+$'); do
         [ -r "/proc/$pid/environ" ] || continue
         home=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^OXMGR_HOME=//p' | head -1)
@@ -1385,6 +1388,7 @@ case "${1:-}" in
                     echo "\$ tail -f ${real[*]}"; exec tail -f "${real[@]}"
                 fi
                 exe=""
+                # shellcheck disable=SC2010  # sort-then-first-wins contract over deployed bin/ (incl. .exe.bak skips); glob rewrite deferred until live-verifiable
                 for c in $(ls "$inst/bin" 2>/dev/null | grep -- '-server$' | sort); do
                     case "$c" in *.exe.bak) ;; *) exe="$inst/bin/$c"; break;; esac
                 done
@@ -1429,6 +1433,7 @@ case "${1:-}" in
         if [ "$tgt" = server ] && [ "${mode:-native}" = native ]; then
             inst="${MSRTC_OUT_ROOT:-$ROOT/out}/server"
             exe=""
+            # shellcheck disable=SC2010  # sort-then-first-wins contract over deployed bin/ (incl. .exe.bak skips); glob rewrite deferred until live-verifiable
             for c in $(ls "$inst/bin" 2>/dev/null | grep -- '-server$' | sort); do
                 case "$c" in *.exe.bak) ;; *) exe="$inst/bin/$c"; break;; esac
             done
@@ -1499,7 +1504,7 @@ case "${1:-}" in
         if [ "$tgt" = all ] || [ "$tgt" = server ]; then
             if [ "$mode" = native ] || [ "$mode" = both ]; then
                 if [ -n "${MSRTC_OUT_ROOT:-}" ]; then base="$MSRTC_OUT_ROOT/server"; else base="$ROOT/data"; fi
-                mkdir -p "$base/etc" "$base/logs"; etc_d="$base/etc"; logs_d="$base/logs"
+                mkdir -p "$base/etc" "$base/logs"; logs_d="$base/logs"
                 out_server="${MSRTC_OUT_ROOT:-$ROOT/out}/server"
                 pid_file="$logs_d/server-native.pid"
                 if [ -f "$pid_file" ]; then
@@ -1761,6 +1766,9 @@ EOF
             src="${MSRTC_OUT_ROOT:-$ROOT/out}/bindings"
             [ -n "$prefix" ] || prefix="$src"
             if [ ! -d "$src/lib" ]; then echo "Error: no assembled artifacts in $src — run build bindings first" >&2; exit 1; fi
+            # M6: the bindings prefix rides the host-named cmake channel
+            # (MEDIASERVO_DEPLOY_PREFIX_HOST) — bindings reuses it by contract
+            # (DeployTargets dedicated binaryDir); rename together only.
             _ms_deploy_via_target bindings "$release" "MEDIASERVO_DEPLOY_PREFIX_HOST=$prefix"
             echo "bindings deployed to $prefix (via cmake deploy target)"
             exit 0

@@ -10,7 +10,7 @@ Two parts: hand-written anti-gaming rules above, generated gate list below.
 - Never hand-edit a generated layer.
 
 <!-- BEGIN:ci-gates -->
-## Gate list (generated from `scripts/all-gates.sh`; 28 sites)
+## Gate list (generated from `scripts/all-gates.sh`; 31 sites)
 
 1. `build mediaservo-gates`
 2. `agent single source`
@@ -29,15 +29,18 @@ Two parts: hand-written anti-gaming rules above, generated gate list below.
 15. `crate literal versions`
 16. `crate lanes reconciliation`
 17. `python retirement closure`
-18. `check --workspace`
-19. `clippy -D --workspace`
-20. `server stub --all-targets`
-21. `test --workspace (lib)`
-22. `openapi validate`
-23. `build-c cdylibs`
-24. `test-cxx`
-25. `abi drift+client`
-26. `delivery smoke`
-27. `gui example`
-28. `gstreamer`
+18. `entry contract (E1-E3+golden)`
+19. `shellcheck mediaservo.sh (warning+)`
+20. `shellcheck parent msrtc.sh (warning+)`
+21. `check --workspace`
+22. `clippy -D --workspace`
+23. `server stub --all-targets`
+24. `test --workspace (lib)`
+25. `openapi validate`
+26. `build-c cdylibs`
+27. `test-cxx`
+28. `abi drift+client`
+29. `delivery smoke`
+30. `gui example`
+31. `gstreamer`
 <!-- END:ci-gates -->

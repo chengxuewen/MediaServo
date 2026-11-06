@@ -79,6 +79,21 @@ else
     SKIP "python retirement closure" "parent release shell not colocated (standalone checkout)"
 fi
 
+# ── shell face (adjudication 7=A+: entry contract + golden snapshot + shellcheck; B1) ──
+gate "entry contract (E1-E3+golden)"  bash scripts/gate-entry-contract.sh
+SC_BIN="$(command -v shellcheck || true)"
+[ -z "$SC_BIN" ] && SC_BIN="$PWD/.pixi/envs/default/bin/shellcheck"
+if [ -x "$SC_BIN" ]; then
+    gate "shellcheck mediaservo.sh (warning+)"  "$SC_BIN" -S warning mediaservo.sh
+    if [ -f "$PWD/../../msrtc.sh" ]; then # parent shell colocated (same standalone-checkout pattern as py-retirement above)
+        gate "shellcheck parent msrtc.sh (warning+)"  "$SC_BIN" -S warning "$PWD/../../msrtc.sh"
+    else
+        SKIP "shellcheck parent msrtc.sh" "parent shell not colocated (standalone checkout)"
+    fi
+else
+    SKIP "shellcheck" "pixi default env not installed (pixi install -e default)"
+fi
+
 # ── compile surface ──
 gate "check --workspace"          cargo check --workspace
 gate "clippy -D --workspace"      cargo clippy --workspace -- -D warnings

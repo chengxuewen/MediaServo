@@ -1,0 +1,52 @@
+usage: mediaservo [-h] <verb> [...]
+
+MediaServo unified build CLI (terms: native = bare metal, compose = containers)
+Entry: ./mediaservo.sh (bash driver; the python CLI retired at SR6 batch-beta-2 —
+the build/package/example/compose/ops faces all live in this shell, cmake and the
+managed binaries own layout and runtime truth).
+
+build/assembly face:
+  build <target> [--release] [--image runtime|dev] [--native] [--profile auto|headless|linux-desktop] [--provider none|system|pixi] [--pixi-env NAME] [--ecosystem vcpkg|conan] [--pkg NAME] [--generate-ecosystem] [NAME...]
+        target: all|web|host|server|client|bindings|example|gui-deps (default all;
+        server = non-embedded variant + one-step web assembly; web =
+        frontend-only fast lane; only --image takes the Docker path;
+        build-host/build-server compat aliases kept; gui-deps = the explicit
+        SDL3 build/install verb (sr8 P3), --profile/--provider/--pixi-env only
+        apply to it -- provider pixi is the sr8 P4 fill, OFF by default;
+        --ecosystem/--pkg/--generate-ecosystem are the sr8 P7c dev-only intake
+        leg: acquire a library from the vcpkg/conan ecosystem instead of a
+        source archive, from a committed recipe + pin island under
+        cmake/gui-deps/. Strict-first, so nothing is fetched until
+        --generate-ecosystem is given. It never combines with --provider/
+        --pixi-env/--profile (those are the build-time/source axis -- a
+        different question than where the library comes from), and it is not a
+        route for SDL3/imgui, which carry a patch and a branch and stay on
+        provider "source")
+  build:deploy <target> [--prefix DIR] [--release]   (one-step build + deploy)
+  package <target> [--dist DIR] [--brand NAME] [--release]
+        target: host|server|sdk-field|sdk-client (bindings = one-cycle alias)
+        → <dist>/<brand>-<target>-<ver>-<platform>-<arch>.tar.gz (D-H13/F12,
+        versioned top-level dir; --dist defaults to dist/, the MSRTC release
+        shell injects out/packages; unpack straight into a prefix with
+        tar xzf pkg.tar.gz -C <prefix> --strip-components=1)
+  run example <[band/]name> [args…]   test example [<band/]name>   list example
+        (bands cxx|rs|py|c, bare name = cxx; foreground dev tool. cxx artifacts land in
+        target/examples/bin/ — never in
+        out/; the build-c prelude is auto-added. rs runs the cargo track (target/debug
+        /examples or the IDE face's .cargo-target), py execs examples/py/<name>.py, c is
+        e2e-compiled material; test = ctest roster (cxx: core, rs: example_<name>))
+  deploy bindings|host|server [--prefix DIR] [--release]   (cmake install rows
+        lay the tree; the managed binaries render state [bF3] — driver only
+        orchestrates)
+
+Three-mode quick reference (native = bare metal, compose = containers):
+  Mode 1 bare-metal delivery: build server (assembles bin/etc/web in out/) → deploy server --prefix <X> (bin/etc layout = cmake install rules) →
+             <X>/<brand>-server init/start/stop/status/restart/doctor <X> (startup on = boot anchor; bin physical name branded per D269)
+    fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
+  Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
+  Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
+
+ops face (this shell): up down exec ps data dev version doctor list
+  start stop restart run logs status clean config e2e test deploy
+  guidance arms exit 2 (C39 — instance-directory commands; the container face up/down is unchanged)
+  exit codes (shell-owned status/logs): 0 = success, 1 = not running/target missing, 2 = bad args / probe undecidable
