@@ -222,32 +222,12 @@ case "${1:-}" in
         ;;
 esac
 
-# oxmgr pinned injection (plan Y, aligned with the parent-repo msrtc.sh — the archive layer of a non-mirrorable download site):
-# 3rdparty/oxmgr/ stores only the upstream tar.gz + .sha256 (the file name is the coordinate); unpacked artifacts go to
-# .cache/oxmgr/<archive name>/ (gitignored, regenerable, versioned directory = bump invalidates naturally).
-# sha256 is verified before unpacking; mismatch refuses. Unknown architecture = no injection + WARN
-# (PATH self-install as fallback — the deploy side has the _resolve_oxmgr_or_die hard gate).
-OXMGR_TRIPLE=""
-case "$(uname -m)" in
-    x86_64)  OXMGR_TRIPLE="x86_64-unknown-linux-musl" ;;
-    aarch64) OXMGR_TRIPLE="aarch64-unknown-linux-musl" ;;
-esac
-if [ -n "$OXMGR_TRIPLE" ]; then
-    OXMGR_PKG="oxmgr-v0.5.0-${OXMGR_TRIPLE}"   # version single source = 3rdparty/oxmgr/ archive file name; edit this line on bumps
-    OXMGR_TARBALL="${ROOT}/3rdparty/oxmgr/${OXMGR_PKG}.tar.gz"
-    OXMGR_CACHE="${ROOT}/.cache/oxmgr/${OXMGR_PKG}"
-    if [ ! -f "$OXMGR_TARBALL" ]; then
-        echo "[mediaservo] WARN: oxmgr archive missing (${OXMGR_TARBALL}) — relying on PATH self-install" >&2
-    elif [ -f "${OXMGR_TARBALL}.sha256" ] && ! (cd "${ROOT}/3rdparty/oxmgr" && sha256sum -c "${OXMGR_PKG}.tar.gz.sha256" >/dev/null 2>&1); then
-        echo "[mediaservo] ERROR: oxmgr archive sha256 verification failed — refusing to unpack (re-pin the archive layer)" >&2
-    elif [ ! -x "${OXMGR_CACHE}/oxmgr" ]; then
-        mkdir -p "$OXMGR_CACHE" && tar xzf "$OXMGR_TARBALL" -C "$OXMGR_CACHE" 2>/dev/null \
-            && chmod +x "${OXMGR_CACHE}/oxmgr"
-    fi
-    [ -x "${OXMGR_CACHE:-/nonexistent}/oxmgr" ] && export PATH="${OXMGR_CACHE}:${PATH}"
-else
-    echo "[mediaservo] WARN: uname -m=$(uname -m) has no pinned oxmgr (upstream ships no binaries for this platform) — install it into PATH yourself" >&2
-fi
+# oxmgr provisioning is single-sourced in the parent shell (msrtc.sh; B6, O-1
+# adjudicated revision) — this shell no longer injects anything. Standalone
+# (S-mode) runs rely on PATH self-install: the deploy face resolves via the
+# cmake find_program chain (DeployTargets: PATH -> ~/.local/bin ->
+# ~/.cache/oxmgr/*, fail-loud FATAL), the package face via _msvc_oxmgr_resolve
+# below.
 
 # =============================================================================
 # SR6 batch-alpha (P2) -- ops read-probe/guidance family, bash-owned (same
@@ -372,8 +352,9 @@ _ms_deploy_via_target() {
 
 _msvc_oxmgr_resolve() {
     # vendor hunt (D-H13 hard gate, python _resolve_oxmgr_or_die parity):
-    # PATH -> ~/.cache/oxmgr reclaim -> fail. Sets MS_OXMGR_SRC. The archive
-    # layer/.cache PATH injection above this block is what normally hits PATH.
+    # PATH -> ~/.cache/oxmgr reclaim -> fail. Sets MS_OXMGR_SRC. PATH normally
+    # comes from the parent shell's injection (P mode) or a user install
+    # (S mode) — the CLI itself no longer injects anything (B6).
     local role=${1:-} c
     MS_OXMGR_SRC=$(command -v oxmgr || true)
     if [ -z "$MS_OXMGR_SRC" ]; then
