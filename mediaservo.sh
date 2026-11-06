@@ -307,76 +307,17 @@ _msvc_kill_using() {
     sleep 1
     return 0
 }
-_msvc_copy_with_kill() {
-    # busy-retry copy (python _copy_with_kill parity: cp -p keeps mtime/mode;
-    # Text file busy -> kill occupier by exact path -> retry; max 3 attempts)
-    local src=$1 dst=$2 attempt err
-    for attempt in 1 2 3; do
-        # LC_ALL=C so the "Text file busy" message is English on every host —
-        # a zh_CN box reported "text file busy" and the busy pattern missed, so the
-        # ETXTBSY retry never fired (real bug: re-deploy failed on this host)
-        if err=$(LC_ALL=C cp -p "$src" "$dst" 2>&1); then return 0; fi
-        case "$err" in
-            *[Bb]usy*|*Text\ file*) ;;
-            *) echo "Error: copy $src -> $dst failed: $err" >&2; return 1 ;;
-        esac
-        [ "$attempt" = 3 ] && break
-        echo "  $(basename "$dst") occupied (Text file busy) — killing the occupier then retrying (${attempt}/3)"
-        _msvc_kill_using "$dst"
-    done
-    echo "Error: failed to copy $dst (still busy after multiple retries)" >&2
-    return 1
-}
-# _ms_deploy_stop_instance <prefix> <brand> — triple-stop of revival sources
-# (unit -> daemon -> family), C50-scoped: the unit arm matches OXMGR_HOME so a
-# brand glob never stops another instance; never calls the oxmgr CLI here (its
-# IPC auto-spawns the daemon). Byte-equal port of the host leg's inline block
-# (pre-P2d-2 mediaservo.sh:1317-1337), shared by build:deploy + deploy host.
-_ms_deploy_stop_instance() {
-    local prefix="$1" brand="$2"
-    local bin_dir="$prefix/bin"
-    local host_cli="${brand:+${brand}-host}"; host_cli=${host_cli:-mediaservo-host}
-    local oxmgr_home want_home un
-    oxmgr_home=$(realpath -m -- "$prefix/run/oxmgr" 2>/dev/null || echo "$prefix/run/oxmgr")
-    want_home="Environment=OXMGR_HOME=$oxmgr_home"
-    if command -v systemctl >/dev/null 2>&1 && [ -d "$HOME/.config/systemd/user" ]; then
-        for u in "$HOME/.config/systemd/user"/oxmgr-${brand}-*.service; do
-            [ -e "$u" ] || continue
-            un=$(basename "$u")
-            if ! grep -qF -- "$want_home" "$u" 2>/dev/null; then
-                echo "  note: leaving unit $un untouched (belongs to another instance home)"
-                continue
-            fi
-            systemctl --user stop "$un" || true
-            systemctl --user reset-failed "$un" || true
-        done
-    fi
-    _msvc_kill_using "$bin_dir/oxmgr"
-    # family pkill is CWD-SCOPED (C50/C54 lesson, live-fired 10-27: an unscoped
-    # pkill -x killed the PRODUCTION cluster's same-named processes when a /tmp
-    # test prefix triggered the stop arm — restart_policy revived them, but that
-    # is luck, not safety). Only pids whose cwd resolves inside $prefix die.
-    local base role p pcwd
-    for base in agent streamer capturer recorder controller emergency audio; do
-        role=${brand:+${brand}-${base}}; role=${role:-host-${base}}
-        for p in $(pgrep -x "$role" 2>/dev/null || true); do
-            pcwd=$(readlink "/proc/$p/cwd" 2>/dev/null) || continue
-            case "$pcwd" in
-                "$prefix"|"$prefix"/*) pkill -x "$role" 2>/dev/null || true; break ;;
-            esac
-        done
-    done
-}
 
 # _ms_deploy_via_target <target-suffix> <profile> [VAR=VAL ...] — P2d-2 forwarder:
 # re-configures the dedicated deploy binaryDir with the caller's overrides, then
 # drives the same custom target the IDE button uses. One implementation for all
 # three faces (U5).
 # _ms_deploy_via_target <target-suffix> <profile> [VAR=VAL ...] — P2d-2 forwarder.
-# Two-phase: configure binaryDir -> build the bin lane (cargo artifact exists) ->
-# reconfigure (AppTree EXISTS pins now see real files) -> drive deploy target.
-# Single cargo writer at any moment (concurrent cargo on one target/ corrupted
-# the main bin mid-deploy, measured 10-27).
+# Server: two-phase (configure binaryDir -> build the bin lane so cargo artifacts
+# exist -> reconfigure so AppTree EXISTS pins see real files -> drive deploy
+# target). Bindings skips the bin-build lane; host (B4) is single-pass and rides
+# the target body's own sequence. Single cargo writer at any moment (concurrent
+# cargo on one target/ corrupted the main bin mid-deploy, measured 10-27).
 _ms_deploy_via_target() {
     # NOTE: host joined the forward (B4, cli-cmake-single-source user-adjudicated A):
     # the fa48b38 keep-on-bash reservation is paid off — the two-phase single-writer
@@ -409,17 +350,17 @@ _ms_deploy_via_target() {
         "$cmake_bin" -S "$ROOT" -B "$ROOT/build/deploy-$suffix" \
             -DMEDIASERVO_BUILD_CRATES_LANES=ON -DMEDIASERVO_APP_TREE= \
             -DMEDIASERVO_DEPLOY_PROFILE="$profile" \
-            -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return 1
+            -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return $?
         "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
-            --target "mediaservo-deploy-$suffix" || return 1
+            --target "mediaservo-deploy-$suffix" || return $?
         return 0
     fi
     "$cmake_bin" -S "$ROOT" -B "$ROOT/build/deploy-$suffix" \
         "${gates[@]}" -DMEDIASERVO_DEPLOY_PROFILE="$profile" \
-        -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return 1
+        -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return $?
     if [ "$suffix" != bindings ]; then
         "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
-            --target "mediaservo-$suffix-bin-build" || return 1
+            --target "mediaservo-$suffix-bin-build" || return $?
         # identity self-check: a replaced/foreign byte-copy at target must never
         # ride a deploy (fingerprint-fresh foreign content is invisible to cargo)
         # per-suffix identity: host checks mediaservo-host, server checks
@@ -436,16 +377,16 @@ _ms_deploy_via_target() {
             touch "$ROOT/crates/mediaservo-$suffix/src/main.rs" 2>/dev/null || \
                 touch "$ROOT/crates/mediaservo-$suffix/src/bin/mediaservo-$suffix.rs" 2>/dev/null || true
             "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
-                --target "mediaservo-$suffix-bin-build" || return 1
+                --target "mediaservo-$suffix-bin-build" || return $?
             env -u MEDIASERVO_BRAND "$main_bin" version 2>/dev/null | grep -q "^mediaservo-$suffix " || \
                 { echo "Error: main-bin identity still broken" >&2; return 1; }
         fi
     fi
     "$cmake_bin" -S "$ROOT" -B "$ROOT/build/deploy-$suffix" \
         "${gates[@]}" -DMEDIASERVO_DEPLOY_PROFILE="$profile" \
-        -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return 1
+        -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return $?
     "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
-        --target "mediaservo-deploy-$suffix" || return 1
+        --target "mediaservo-deploy-$suffix" || return $?
 }
 
 
