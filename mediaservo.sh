@@ -347,6 +347,26 @@ _ms_deploy_via_target() {
         -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return $?
     "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
         --target "mediaservo-deploy-$suffix" || return $?
+    # B5 review follow-up (warn-only): the retired two-phase identity self-check
+    # was the only detector for a fingerprint-fresh foreign byte-copy at target/
+    # (invisible to cargo's incremental rebuild, which the body's fresh-goods leg
+    # would then deploy). Visibility restored without resurrecting the lane; the
+    # IDE button never had this probe, so CLI-only + warn-only is parity-safe.
+    # Shape check, not content check: the version brand resolves as runtime env >
+    # compile-time option_env bake > default (brand.rs D252 family), and the two
+    # faces print differently — host prints a bare "<brand> <semver>" while
+    # server prints "<brand>-server <semver>" (verified on-tree 2026-11-06), so
+    # anchoring on the suffix would false-alarm every host deploy. Accept any
+    # product token followed by a semantic version; a foreign binary's version
+    # output will not coincidentally match that shape.
+    if [ "$suffix" != bindings ]; then
+        local main_bin
+        main_bin="$ROOT/target/$(echo "$profile" | tr 'A-Z' 'a-z')/mediaservo-$suffix"
+        if [ -x "$main_bin" ] && ! env -u MEDIASERVO_BRAND "$main_bin" version 2>/dev/null \
+            | grep -qE '^[A-Za-z0-9][A-Za-z0-9_-]* [0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Warning: $main_bin version output anomalous — possible foreign byte-copy riding this deploy" >&2
+        fi
+    fi
 }
 
 
