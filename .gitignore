@@ -159,3 +159,7 @@ compile_commands.json
 # Code intelligence caches
 .codegraph/
 .serena/
+
+# imgui runtime layout residue (example runs at the repo root, r2-L6)
+/imgui.ini
+/imgui_viewer.ini

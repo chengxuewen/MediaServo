@@ -53,12 +53,12 @@ build/assembly face:
         versioned top-level dir; --dist defaults to dist/, the MSRTC release
         shell injects out/packages; unpack straight into a prefix with
         tar xzf pkg.tar.gz -C <prefix> --strip-components=1)
-  run example <[band/]name> [args…]   test example [<band/]name>   list example
-        (bands cxx|rs|py|c, bare name = cxx; foreground dev tool. cxx artifacts land in
-        target/examples/bin/ — never in
-        out/; the build-c prelude is auto-added. rs runs the cargo track (target/debug
-        /examples or the IDE face's .cargo-target), py execs examples/py/<name>.py, c is
-        e2e-compiled material; test = ctest roster (cxx: core, rs: example_<name>))
+  list example                        (cxx|rs|py bands; dev-example lanes after the run/test example retirement, B7:
+                                      cxx → 'build example' then run the artifact in target/examples/bin/ directly;
+                                      rs → cargo run -p examples --example <name>; py → python3 examples/py/<name>.py;
+                                      tests → ctest --test-dir build/examples -R <name>;
+                                      server/host instance commands: <prefix>/bin/<brand>-server start|stop|restart <prefix>;
+                                      read-only probes: status server | logs server)
   deploy bindings|host|server [--prefix DIR] [--release]   (cmake install rows
         lay the tree; the managed binaries render state [bF3] — driver only
         orchestrates)
@@ -106,7 +106,7 @@ _msvc_announced_ips() {
             echo "$ip"
         done <<< "$out"
     else
-        hostname -I 2>/dev/null | tr ' ' '\n' | sed '/^$/d'   # coarse fallback (python parity)
+        hostname -I 2>/dev/null | tr ' ' '\n' | sed '/^$/d'   # portable multi-IP fallback when the platform announce probe is unavailable
     fi | awk '!seen[$0]++'
 }
 _msvc_compose_env() {  # PIT-79: guarantee MEDIASERVO_SFU_ANNOUNCED_IP has a value
@@ -175,7 +175,7 @@ case "${1:-}" in
                 *) echo "ps: unexpected arg $1" >&2; exit 2 ;;
             esac
         done
-        _msvc_run docker compose -f "$(_msvc_compose_file "$env")" ps || true   # python parity: probe never fails the shell
+        _msvc_run docker compose -f "$(_msvc_compose_file "$env")" ps || true   # read-only probe: failure must not fail the shell (status is informational)
         exit 0
         ;;
     exec)
@@ -230,27 +230,12 @@ esac
 # below.
 
 # =============================================================================
-# SR6 batch-alpha (P2) -- ops read-probe/guidance family, bash-owned (same
+# SR6 batch-alpha (P2) -- ops read-probe family, bash-owned (same
 # one-leg-one-owner route as batch-1; flags and output shapes mirror the
-# retired python exactly; MEDIASERVO_DRY_RUN honored on command legs).
-# =============================================================================
-# runtime guidance (was _host_runtime_hint/_server_runtime_hint — the wrappers
-# retired at D266/T21; the arms only print the instance-command shape)
-_msvc_hint_host() {
-    echo "$1 host: CLI wrapper removed — run manually:" >&2
-    echo "  deployed instance: systemctl --user start|stop oxmgr-<brand>-host.service" >&2
-    echo "            or <prefix>/bin/msrtc-host start|stop <prefix>" >&2
-    echo "  development: target/debug/mediaservo-host init . && token issue --all . && start|stop ." >&2
-    echo "            clear iceoryx2 residue before running: rm -rf /tmp/iceoryx2 /dev/shm/iox2_* (C25)" >&2
-}
-_msvc_hint_server() {
-    local sb="${MEDIASERVO_BRAND:+${MEDIASERVO_BRAND}-server}"; sb="${sb:-mediaservo-server}"
-    echo "$1 server: CLI wrapper removed — run via the instance directory:" >&2
-    echo "  deployed instance: <prefix>/bin/$sb start|stop|restart|status <prefix> (not deployed yet: mediaservo deploy server --prefix <X>; bare-metal entry <prefix>/$sb)" >&2
-    echo "  development: target/debug/mediaservo-server init . && start . --no-web (frontend dev: dev web = vite:5173 pairs with --no-web; the browser entry itself is cluster-managed)" >&2
-    echo "  containers (modes 2/3): mediaservo up / down --env dev|prod unchanged" >&2
-    echo "  read-only probes kept: mediaservo status server | logs server" >&2
-}
+# retired python exactly; MEDIASERVO_DRY_RUN honored on command legs). The
+# guidance arms (_msvc_hint_host/_msvc_hint_server) retired with the run
+# plane (B7): instance commands surface at the instance, probes stay read-only.
+# ============================================================================
 
 # =============================================================================
 # SR6 batch-beta-1 -- deploy host/server shell legs. Helpers were inline in the
@@ -533,7 +518,6 @@ _ms_example_split() {  # $1 = [band/]name → prints "band<TAB>name", defaults c
     esac
     printf '%s\t%s' "$band" "$name"
 }
-_ms_example_dir() { printf '%s/examples/%s/%s' "$ROOT" "$1" "$2"; }  # band+name → directory
 _MS_STRIP_ENV=(env -u CC -u CXX -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS -u CPATH -u C_INCLUDE_PATH -u CPLUS_INCLUDE_PATH -u CONDA_PREFIX -u CMAKE_PREFIX_PATH -u PKG_CONFIG_PATH -u PKG_CONFIG_SYSROOT_DIR -u COMPILER_PATH -u LIBRARY_PATH)
 _ms_scrubbed_path() {
     printf '%s' "$PATH" | tr ':' '\n' | grep -v '/\.pixi/envs/' | paste -sd: -
@@ -966,7 +950,7 @@ _ms_build_example() {  # $1=release(0/1); rest = example names (empty = all)
             split=$(_ms_example_split "$spec") || exit 2
             b=${split%%$'\t'*}; n=${split#*$'\t'}
             if [ "$b" = py ]; then
-                echo "[example] py band needs no build (run: run example py/$n)" >&2
+                echo "[example] py band needs no build (run directly: python3 examples/py/$n.py)" >&2
                 continue
             fi
             if [ "$b" = rs ]; then
@@ -1022,85 +1006,13 @@ _ms_build_example() {  # $1=release(0/1); rest = example names (empty = all)
     fi
     echo "\$ ${cmd[*]}  (cwd: $ROOT)"
     (cd "$ROOT" && "${_MS_STRIP_ENV[@]}" "$(_ms_bridge_env)" "${cmd[@]}") || exit $?
-    echo "[example] artifacts → target/examples/bin/"
-}
-_ms_run_example() {  # $@ = <name> [passthrough…] — foreground dev tool (distinct from the retired host-run C39 semantics)
-    if [ $# -eq 0 ]; then
-        echo "Usage: run example <name> [args…] (./mediaservo.sh list example)" >&2
-        exit 2
+    echo "[example] artifacts → target/examples/bin/ (run one directly: LD_LIBRARY_PATH=$ROOT/target/debug target/examples/bin/mediaservo-example-<name> [args…])"
+    # Windowing hint (moved from the retired run example plane, B7; shown only
+    # when a runnable cxx artifact was built — rs/py lanes never need a display).
+    # Probe + state, never set for the user — display is session semantics.
+    if [ ${#_enames[@]} -gt 0 ] && [ -z "${DISPLAY:-}" ] && [ -z "${SDL_VIDEODRIVER:-}" ]; then
+        echo "[example] note: no display env vars (neither DISPLAY nor SDL_VIDEODRIVER set) — windowed runs need one of them; local displays show up under /tmp/.X11-unix (if the artifact reports x11 not available = this build has SDL_X11=OFF; reconfigure with cmake -DSDL_X11=ON); headless acceptance: SDL_VIDEODRIVER=dummy MSRTC_RUN_SECS=20 (cb/tex dual-count predicate)" >&2
     fi
-    local spec=$1; shift
-    local _split
-    _split=$(_ms_example_split "$spec") || exit 2
-    local name=${_split#*$'\t'}
-    # py band (batch ③): plain-script execution, nothing to build (wheel/dev import
-    # is the script's own sys.path contract; export MEDIASERVO_LIB_DIR for dev mode)
-    if [ "${_split%%$'\t'*}" = py ]; then
-        exec python3 "$ROOT/examples/py/$name.py" "$@"
-    fi
-    # rs band (batch ④): cargo track straight on the examples package (build+run
-    # in one — works from any shell that has cargo; the CMake face adds IDE buttons)
-    if [ "${_split%%$'\t'*}" = rs ]; then
-        cd "$ROOT" && exec cargo run -p examples --example "$name" -- "$@"
-    fi
-    local islib
-    islib=$(_ms_examples_is_lib "$name") || { echo "[example] unknown example '$name'" >&2; exit 2; }
-    _ms_build_example 0 "$name"
-    if [ "$islib" = 1 ]; then
-        echo "[example] '$name' is a library (no runnable artifact)" >&2
-        exit 1
-    fi
-    local exe="$_MS_EXAMPLES_BIN/mediaservo-example-$name"   # C-D9 branded artifact
-    if [ ! -e "$exe" ]; then
-        echo "[example] still no artifact after build: $exe" >&2
-        exit 1
-    fi
-    # Windowing hint: probe + state, never set for the user — display is session
-    # semantics; a wrong scripted guess is harder to diagnose than fail-soft.
-    if [ -z "${DISPLAY:-}" ] && [ -z "${SDL_VIDEODRIVER:-}" ]; then
-        echo "[example] no display env vars (neither DISPLAY nor SDL_VIDEODRIVER set):" >&2
-        local xs=""
-        if [ -d /tmp/.X11-unix ]; then
-            xs=$(cd /tmp/.X11-unix && for f in X*; do [ -e "$f" ] && printf ':%s\n' "${f#X}"; done 2>/dev/null | sort | paste -sd' ' -) || xs=""
-        fi
-        if [ -n "$xs" ]; then
-            echo "  • windowed: local displays available: $xs → export DISPLAY=:N and re-run (if it reports x11 not available = this build has SDL_X11=OFF; reconfigure with cmake -DSDL_X11=ON)" >&2
-        fi
-        echo "  • headless acceptance: SDL_VIDEODRIVER=dummy MSRTC_RUN_SECS=20 re-run (cb/tex dual-count predicate)" >&2
-    fi
-    local ld="$ROOT/target/debug"
-    [ -n "${LD_LIBRARY_PATH:-}" ] && ld="$ld:$LD_LIBRARY_PATH"
-    LD_LIBRARY_PATH="$ld" exec "$exe" "$@"
-}
-_ms_test_example() {  # $1 = optional [band/]name (C-D8) | bare ctest regex; missing build dir = build first
-    local spec="${1:-}" filter
-    if [ -z "$spec" ]; then
-        filter='^core$'                     # cxx band roster today (imgui_shell's core test)
-    elif [ "$spec" = rs ]; then
-        filter='^example_'                  # band-only = the whole rs roster
-    elif [ "$spec" = cxx ]; then
-        filter='^core$'
-    elif [ "$spec" = py ] || [ "$spec" = c ]; then
-        echo "[example] band '$spec' has no ctest roster (py: run example py/<name>; c: scripts/e2e-bindings.sh)" >&2
-        return 0
-    elif [[ "$spec" != */* ]]; then
-        filter=$spec                         # bare word = raw ctest -R (pre-band contract kept)
-    else
-        local split b n
-        split=$(_ms_example_split "$spec") || exit 2
-        b=${split%%$'\t'*}; n=${split#*$'\t'}
-        case "$b" in
-            rs)  filter="^example_${n}\$" ;;   # rs test names = example_<registry name>
-            cxx) filter="^${n}\$" ;;
-            py)  echo "[example] py band has no ctest roster (run: run example py/$n)" >&2; return 0 ;;
-        esac
-    fi
-    if [ ! -f "$_MS_EXAMPLES_BUILD/CTestTestfile.cmake" ]; then
-        _ms_build_example 0
-    fi
-    local cmd=(ctest --test-dir "$_MS_EXAMPLES_BUILD" --output-on-failure -R "$filter")
-    echo "\$ ${cmd[*]}"
-    "${cmd[@]}" || exit $?
 }
 
 case "${1:-}" in
@@ -1139,7 +1051,7 @@ case "${1:-}" in
             esac
         done
         tgt="${tgt:-all}"
-        case "$tgt" in all|web|host|server|client|bindings|example|gui-deps) ;; *) echo "build: argument target: invalid choice: '$tgt' (choose from 'all', 'web', 'host', 'server', 'client', 'bindings', 'example', 'gui-deps')" >&2; exit 2 ;; esac
+        case "$tgt" in all|web|host|server|client|bindings|example|gui-deps) ;; *) echo "build: argument target: invalid choice: '$tgt' (choose from 'all', 'web', 'host', 'server', 'client', 'bindings', 'example', 'gui-deps')" >&2; [ "$tgt" = weaknet ] && echo "build: weaknet is not a submodule build target — 'msrtc.sh build weaknet' in the parent shell drives cargo build -p mediaservo-weaknet directly; the app-tree staging leg rides build server" >&2; exit 2 ;; esac
         if [ -n "$gd_profile" ] && [ "$tgt" != gui-deps ]; then echo "build --profile only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
         if [ -n "$gd_provider" ] && [ "$tgt" != gui-deps ]; then echo "build --provider only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
         if [ -n "$gd_pixi_env" ] && [ "$tgt" != gui-deps ]; then echo "build --pixi-env only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
@@ -1205,7 +1117,7 @@ case "${1:-}" in
                 printf '  %-24s %s\n' "$name" "$tag"
             done
         fi
-        echo "rs band (cargo track — run: run example rs/<name>; CMake face: examples/CMakeLists.txt registry)"
+        echo "rs band (cargo track — run: cargo run -p examples --example <name>; CMake face: examples/CMakeLists.txt registry)"
         for name in $(sed -n '/^\[\[example\]\]/{n;s/^name *= *"\(.*\)"/\1/p}' "$ROOT/examples/rs/Cargo.toml"); do
             # the CMake face stages into the build tree's isolated .cargo-target; a
             # plain `cargo build -p examples` lands in target/debug/examples
@@ -1214,38 +1126,19 @@ case "${1:-}" in
             else tag="[not built]"; fi
             printf '  %-24s %s\n' "$name" "$tag"
         done
-        echo "py band (run: run example py/<name> — no build step)"
+        echo "py band (run directly: python3 examples/py/<name>.py — no build step)"
         for f in "$ROOT"/examples/py/*.py; do
             [ -e "$f" ] || continue
             printf '  %-24s %s\n' "$(basename "$f" .py)" "[script]"
         done
         exit 0
         ;;
-    start|stop|restart)
-        act="${1}"
-        [ $# -le 2 ] || { echo "$act: unrecognized arguments: ${*:3}" >&2; exit 2; }
-        if [ "$act" = start ] && [ $# -eq 1 ]; then tgt=server; else tgt="${2:-}"; fi
-        case "$tgt" in
-            server) _msvc_hint_server "$act" ;;
-            host) _msvc_hint_host "$act" ;;
-            *) if [ -z "$tgt" ] && [ "$act" != start ]; then echo "usage: $act {host,server}" >&2; else echo "$act: invalid target '${tgt:-}' (choose from host, server)" >&2; fi
-               exit 2 ;;
-        esac
-        exit 2
-        ;;
-    run)
-        # SR6 batch-beta-2: run example is bash-owned (server/host guidance
-        # arms were batch-alpha).
-        if [ "${2:-}" = example ]; then
-            shift 2; _ms_run_example "$@"; exit $?
-        fi
-        case "${2:-}" in
-            server) _msvc_hint_server run ;;
-            host) _msvc_hint_host run ;;
-            *) echo "run: invalid target '${2:-}' (choose from server, host, example)" >&2; exit 2 ;;
-        esac
-        exit 2
-        ;;
+    # start|stop|restart|run retired with the run plane (B7, adjudication O-3=D+D1):
+    # instance commands live at <prefix>/bin/<brand>-server start|stop|restart <prefix>,
+    # dev examples live in their own lanes (build example + run the artifact,
+    # cargo run -p examples, python3 examples/py/<name>.py). These verbs now
+    # fall through to the unknown-verb hint below; read-only probes stay:
+    # status server | logs server.
     logs)
         # was _cmd_logs — flags mirror argparse exactly (default target server,
         # --mode/--native/--env mutually exclusive, rc=2 on bad args)
@@ -1513,15 +1406,11 @@ case "${1:-}" in
         exit $?
         ;;
     test)
-        # bare = workspace tests (was _cmd_test); test example is bash-owned
-        # since SR6 batch-beta-2.
-        if [ "${2:-}" = example ]; then
-            shift 2
-            [ $# -le 1 ] || { echo "mediaservo test: error: unrecognized arguments: $*" >&2; exit 2; }
-            _ms_test_example "${1:-}"; exit $?
-        fi
+        # bare = workspace tests (was _cmd_test). The `test example` sub-form
+        # retired with the run plane (B7): ctest is the native filter surface —
+        # ctest --test-dir build/examples -R <name> (run `build example` first).
         if [ $# -gt 1 ]; then
-            echo "mediaservo test: error: argument what: invalid choice: '${2}' (choose from example)" >&2
+            echo "mediaservo test: error: argument what: invalid choice: '${2}' (unexpected extra argument)" >&2
             exit 2
         fi
         _ms_check cargo "pixi environment not activated?"

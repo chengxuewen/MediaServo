@@ -54,6 +54,14 @@ grep -q "unknown verb ''" "$OUT" && ok "E2 no-arg pointer" || bad "E2 no-arg poi
 expect_rc "E3 unknown verb" 2 "$rc"
 grep -q 'unknown verb' "$OUT" && ok "E3 unknown-verb pointer" || bad "E3 unknown-verb pointer"
 
+# B7 (adjudication O-3=D+D1): the run-plane verbs are deleted -- each must
+# fall through to the unknown-verb surface (hint + exit 2), never a lane.
+for v in run start stop restart; do
+    ./mediaservo.sh "$v" >"$OUT" 2>&1; rc=$?
+    expect_rc "B7 $v -> unknown" 2 "$rc"
+    grep -q "unknown verb '$v'" "$OUT" && ok "B7 $v pointer" || bad "B7 $v pointer"
+done
+
 # G1: -h golden snapshot -- help text is contract; a diff means the CLI face
 # changed and the fixture must be re-shot deliberately (state what changed).
 if [ -f scripts/fixtures/mediaservo-help.golden ]; then

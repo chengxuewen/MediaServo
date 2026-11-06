@@ -62,11 +62,11 @@ Unified CLI entry point (available after bootstrap):
 ./mediaservo.sh up --announced-ip 10.144.0.3  # Explicit container announced address (overrides auto-detect; multiple values comma-separated —
                                   # containers only honor a single announced address, first IP wins; multiple addresses require bare-metal run)
 ./mediaservo.sh build server --native  # Bare-metal compile server (pixi toolchain, needs network for meson wraps; multi-IP announce takes effect at run stage)
-./mediaservo.sh run server --native [--foreground]  # Retired → guidance + exit 2 (run plane = instance commands or up/down for containers; T21/C39)
+# (B7 retired the run/test example verbs — dev-example lanes: cxx `build example` + run the artifact in target/examples/bin/, rs `cargo run -p examples --example <name>`, py `python3 examples/py/<name>.py`; server/host instance commands: <prefix>/bin/<brand>-server start|stop|restart <prefix>; probes: status server | logs server)
 # host run CLI wrapper removed (D266) — deployed instance: systemctl --user start oxmgr-<brand>-host.service / <prefix>/bin/msrtc-host start <prefix>;
 # dev: target/debug/mediaservo-host init . && token issue --all . && start . (clear iceoryx2 residue first)
-./mediaservo.sh stop server   # Retired → guidance + exit 2 (instance: <prefix>/bin/<brand>-server stop <dir>; containers: mediaservo down)
-./mediaservo.sh stop host     # Removed (D266) — manual: systemctl --user stop oxmgr-<brand>-host.service / <prefix>/bin/msrtc-host stop <prefix>
+./mediaservo.sh stop server   # Unknown verb since B7 (E3 hint + exit 2) — instance: <prefix>/bin/<brand>-server stop <dir>; containers: mediaservo down
+./mediaservo.sh stop host     # Unknown verb since B7 (D266 removed the wrapper; E3 hint + exit 2) — manual: systemctl --user stop oxmgr-<brand>-host.service / <prefix>/bin/msrtc-host stop <prefix>
 ./mediaservo.sh logs server    # Server logs (default bare-metal target/server-native.log; --env dev/--mode compose container logs; --native explicit)
 ./mediaservo.sh down --env dev && ./mediaservo.sh up --env dev   # Restart dev server (clear old then start; config changes take effect)
 ./mediaservo.sh logs host     # Host logs (/tmp/mediaservo-host.log)

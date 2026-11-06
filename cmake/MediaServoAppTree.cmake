@@ -57,7 +57,7 @@ set(MEDIASERVO_APP_TREE "" CACHE STRING "app delivery layout to describe at inst
 set(MEDIASERVO_BRAND "" CACHE STRING "product brand for the physical bin names (D269); empty = upstream names byte-stable")
 set(MEDIASERVO_SERVER_OUT_DIR "" CACHE PATH "server delivery root (the CLI-resolved <out>/server) — server placement rows source from here")
 set(MEDIASERVO_APP_STAGING "" CACHE STRING "server-tree placement mode: '' (deploy: delivery-tree-first PROGRAMS route) | build (fresh target/{profile} bins via swap legs + web move) | web (web placement only — the build web fast lane)")
-set(MEDIASERVO_APP_ENTRY_LINKS OFF CACHE BOOL "register the root entry-link legs under build-assembly staging too (the deploy-targets face is assembly + landing in one pass); OFF keeps python parity (build stages bare, deploy lands the links)")
+set(MEDIASERVO_APP_ENTRY_LINKS OFF CACHE BOOL "register the root entry-link legs under build-assembly staging too (the deploy-targets face is assembly + landing in one pass); OFF = build stages bare and deploy lands the links (assembly/delivery separation is the contract, not a legacy echo)")
 
 # The eight host-tree bin names as cargo spells them (the CLI's HOST_BINS mirror —
 # D269 names: host-<app> -> <brand>-<app>, mediaservo-host -> <brand>-host).
@@ -341,7 +341,8 @@ function(_mediaservo_app_tree_server)
 
     # root entry shortcuts (MED4 shape): relative symlinks into bin/ keep the
     # prefix relocatable; a filesystem without symlink support falls back to a
-    # copy (python parity). Old-brand root links pointing into THIS bin/ are
+    # copy (best effort — a delivery tree without links beats a failed deploy).
+    # Old-brand root links pointing into THIS bin/ are
     # reclaimed (touch only symlinks resolving into <prefix>/bin, never dirs).
     # Build assembly NEVER registers these legs: the delivery tree stays
     # bin/etc/web exactly like python's build staged it (deploy adds links) —

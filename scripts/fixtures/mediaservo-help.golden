@@ -29,12 +29,12 @@ build/assembly face:
         versioned top-level dir; --dist defaults to dist/, the MSRTC release
         shell injects out/packages; unpack straight into a prefix with
         tar xzf pkg.tar.gz -C <prefix> --strip-components=1)
-  run example <[band/]name> [args…]   test example [<band/]name>   list example
-        (bands cxx|rs|py|c, bare name = cxx; foreground dev tool. cxx artifacts land in
-        target/examples/bin/ — never in
-        out/; the build-c prelude is auto-added. rs runs the cargo track (target/debug
-        /examples or the IDE face's .cargo-target), py execs examples/py/<name>.py, c is
-        e2e-compiled material; test = ctest roster (cxx: core, rs: example_<name>))
+  list example                        (cxx|rs|py bands; dev-example lanes after the run/test example retirement, B7:
+                                      cxx → 'build example' then run the artifact in target/examples/bin/ directly;
+                                      rs → cargo run -p examples --example <name>; py → python3 examples/py/<name>.py;
+                                      tests → ctest --test-dir build/examples -R <name>;
+                                      server/host instance commands: <prefix>/bin/<brand>-server start|stop|restart <prefix>;
+                                      read-only probes: status server | logs server)
   deploy bindings|host|server [--prefix DIR] [--release]   (cmake install rows
         lay the tree; the managed binaries render state [bF3] — driver only
         orchestrates)
