@@ -1804,15 +1804,31 @@ esac
 # works standalone without returning to the parent repo. Default prefix=<out>/<target> (the _out_root resolution
 # lives in the CLI layer — bindings default there; host/server composite forms still pass --prefix out/<target> explicitly for symmetry).
 # host/server deploy runtime data is written under out/<target> — same semantics as msrtc.sh.
-if [ "${1:-}" = "build:deploy" ] && [ $# -ge 2 ]; then
+# B2 single-source (cli-cmake-single-source adjudication 1=A): the composite is now parent-agnostic —
+# OUT_ROOT honors the parent-shell MSRTC_OUT_ROOT injection when colocated, else caller env, else repo out/;
+# --brand rides the deploy leg only (the build face has no brand arg — bare pass-through used to make build die
+# on the unexpected argument); relative --prefix is anchored to the caller's cwd (parent _abs_path parity, r1-M3);
+# missing target now prints usage + exit 2 instead of falling into the unknown-verb echo (r1-M2: verb is known,
+# what is missing is the target).
+if [ "${1:-}" = "build:deploy" ]; then
+    if [ $# -lt 2 ]; then
+        echo "usage: mediaservo build:deploy <target> [--prefix DIR] [--brand NAME] [--release] [build-args...]" >&2
+        exit 2
+    fi
     TARGET="$2"
     shift 2
-    OUT_ROOT="${OUT_ROOT:-$ROOT/out}"   # the submodule shell gets no MSRTC_OUT_ROOT injection (parent-shell duty) — explicit default
+    OUT_ROOT="${MSRTC_OUT_ROOT:-${OUT_ROOT:-$ROOT/out}}"   # parent-shell injection first, caller env next, repo out/ last
     BUILD_FLAGS=(build "$TARGET")
     DEPLOY_FLAGS=(deploy "$TARGET" --prefix "$OUT_ROOT/$TARGET")
     while [ $# -gt 0 ]; do
         case "$1" in
-            --prefix) DEPLOY_FLAGS+=(--prefix "$2"); shift 2;;   # explicit override of the default
+            --prefix)
+                case "$2" in
+                    /*) DEPLOY_FLAGS+=(--prefix "$2") ;;      # already absolute
+                    *)  DEPLOY_FLAGS+=(--prefix "$PWD/$2") ;;  # caller-cwd anchored
+                esac
+                shift 2 ;;   # explicit override of the default
+            --brand) DEPLOY_FLAGS+=(--brand "$2"); shift 2 ;;   # deploy leg only
             --release) BUILD_FLAGS+=(--release); DEPLOY_FLAGS+=(--release); shift;;
             *) BUILD_FLAGS+=("$1"); DEPLOY_FLAGS+=("$1"); shift;;
         esac
