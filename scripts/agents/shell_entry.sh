@@ -140,6 +140,21 @@ case "$CMD" in
         echo "[doctor] submodule dirty entries: $(git -C "${MEDIASERVO_ROOT}" status --porcelain 2>/dev/null | wc -l)"
         [ -x "${MEDIASERVO_ROOT}/.pixi/envs/default/bin/cargo" ] \
             && echo "[doctor] pixi cargo: present" || echo "[doctor] pixi cargo: missing"
+        # [toolchain] section (B7/M3, adjudication O-2=D): runs the submodule's
+        # four-probe doctor (pixi/cargo/docker/node) — same orchestration shape
+        # as the `agents status` call below. Section-level verdict: any MISSING
+        # line marks the section "!" and prints the prescription row; otherwise
+        # "✓". Doctor stays report-only (exit 0 contract untouched).
+        tc_out="$( bash "${MEDIASERVO_ROOT}/mediaservo.sh" doctor 2>&1 || true )"
+        printf '%s\n' "$tc_out" | sed 's/^/[doctor] [toolchain] /'
+        # "!" = either a probe answered MISSING, or the submodule doctor itself
+        # failed to run (its output would lack the first probe's line entirely —
+        # a silent green here would be worse than no section at all).
+        if printf '%s\n' "$tc_out" | grep -q MISSING || ! printf '%s\n' "$tc_out" | grep -q '^pixi'; then
+            echo "[doctor] [toolchain] ! missing entries above (or the submodule doctor failed to run — check MEDIASERVO_ROOT points at the submodule) — msrtc.sh build legs auto-activate the pixi shell (run pixi install if the env is absent); docker/node are only needed for the container/web faces"
+        else
+            echo "[doctor] [toolchain] ✓ all four probes answer"
+        fi
         ( bash "$SELF" agents status 2>&1 || true ) | sed 's/^/[doctor] /'
         if [ -d "${SHELL_ROOT}/.cache/webrtc" ]; then
             echo "[doctor] cache: $(ls -1 "${SHELL_ROOT}/.cache/webrtc" | head -3 | tr '\n' ' ')"
