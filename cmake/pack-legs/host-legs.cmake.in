@@ -4,6 +4,25 @@
 # staging root.
 set(_root "${CMAKE_INSTALL_PREFIX}")
 
+# oxmgr vendor copy (D-H13: version locked with the deployment) — CLI-parity leg
+# (the retired bash arm ran _msvc_oxmgr_resolve + copy_with_kill). The guard
+# TEARDOWN has already stopped the instance, so a plain copy is safe; a busy
+# target here means an out-of-band live process — fail loud with the stop hint.
+set(_oxmgr_dst "${_root}/bin/oxmgr")
+file(COPY_FILE "@OXMGR_BIN@" "${_oxmgr_dst}" RESULT _oxmgr_rc)
+if(NOT _oxmgr_rc EQUAL 0)
+    message(FATAL_ERROR
+        "Error: oxmgr copy to ${_oxmgr_dst} failed (rc=${_oxmgr_rc}) — "
+        "stop the live instance first (the deploy-host guard TEARDOWN should have)")
+endif()
+execute_process(COMMAND "@OXMGR_BIN@" --version
+                OUTPUT_VARIABLE _oxv ERROR_VARIABLE _oxe
+                OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_STRIP_TRAILING_WHITESPACE)
+if(NOT _oxv)
+    set(_oxv "${_oxe}")
+endif()
+message(STATUS "  oxmgr packaged: ${_oxv}")
+
 # host init: generate etc/ + identity.json + tokens — idempotent write-only, never
 # delete. init is a separate process: the device prefix must match the layout brand
 # (python's init_env MEDIASERVO_BRAND=rust_brand parity).

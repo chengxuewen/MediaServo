@@ -295,6 +295,7 @@ function(_mediaservo_add_deploy_target)
             set(HOST_BIN_NAME "mediaservo-host")
         endif()
         set(RUST_BRAND "${_brand}")
+        set(OXMGR_BIN "${MEDIASERVO_OXMGR_BIN}")   # D-H13 version-locked copy leg (host-legs.cmake.in)
         configure_file("${_MSDT_TEMPLATE_DIR}/pack-legs/host-legs.cmake.in"
                        "${CMAKE_BINARY_DIR}/deploy-${_name}-init.cmake" @ONLY)
         file(TO_CMAKE_PATH "${_pfx}" _pfx_cm)

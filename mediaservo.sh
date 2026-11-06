@@ -378,11 +378,9 @@ _ms_deploy_stop_instance() {
 # Single cargo writer at any moment (concurrent cargo on one target/ corrupted
 # the main bin mid-deploy, measured 10-27).
 _ms_deploy_via_target() {
-    # NOTE: host leg is NOT forwarded yet (P2d-2 reverted — see deploy host body);
-    # this helper serves bindings/server only.
-    if [ "$1" = host ]; then
-        echo "internal error: deploy host must use the bash leg" >&2; return 2
-    fi
+    # NOTE: host joined the forward (B4, cli-cmake-single-source user-adjudicated A):
+    # the fa48b38 keep-on-bash reservation is paid off — the two-phase single-writer
+    # below was proven under the bindings/server forwards (judges green since 10-27).
     local suffix="$1" profile="$2"; shift 2
     local cmake_bin="${CMAKE_BIN:-$ROOT/.pixi/envs/default/bin/cmake}"
     # NO ambient fallback: a system cmake here runs the lanes cargo under the
@@ -397,6 +395,25 @@ _ms_deploy_via_target() {
     for kv in "$@"; do extra+=("-D$kv"); done
     local -a gates=(-DMEDIASERVO_BUILD_CRATES_LANES=ON)
     [ "$suffix" = bindings ] && gates=(-DMEDIASERVO_BUILD_BINDINGS=ON)
+    if [ "$suffix" = host ]; then
+        # B4: host rides the target body's own sequence — fresh-goods (cargo build
+        # into the SHARED target/, C+ ruling 2026-11-05) -> configure (APP_TREE=host
+        # injected by the body itself, lanes explicitly OFF) -> guard TEARDOWN ->
+        # install -> init legs. The bindings/server two-phase bin-build lane does
+        # NOT apply here: its isolated .cargo-target never leaks into deploy goods,
+        # and the host AppTree leg hard-fails at configure time on a cold isolated
+        # dir (the server leg merely skips missing bins — that asymmetry is why
+        # server forwards survived while the 10-27 host forward was reverted).
+        # This step only registers the deploy target in the dedicated binaryDir
+        # and clears any APP_TREE cache residue from a previous body run.
+        "$cmake_bin" -S "$ROOT" -B "$ROOT/build/deploy-$suffix" \
+            -DMEDIASERVO_BUILD_CRATES_LANES=ON -DMEDIASERVO_APP_TREE= \
+            -DMEDIASERVO_DEPLOY_PROFILE="$profile" \
+            -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return 1
+        "$cmake_bin" --build "$ROOT/build/deploy-$suffix" \
+            --target "mediaservo-deploy-$suffix" || return 1
+        return 0
+    fi
     "$cmake_bin" -S "$ROOT" -B "$ROOT/build/deploy-$suffix" \
         "${gates[@]}" -DMEDIASERVO_DEPLOY_PROFILE="$profile" \
         -DMEDIASERVO_BRAND="${MEDIASERVO_BRAND:-}" "${extra[@]}" >&2 || return 1
@@ -1660,57 +1677,21 @@ case "${1:-}" in
             fi
             brand=$brand_in; [ "$brand" = mediaservo ] && brand=""
             rust_brand=${brand:-mediaservo}
-            mkdir -p "$bin_dir" 2>/dev/null || { echo "Error: cannot create $bin_dir — for deployment use sudo msrtc.sh deploy host --prefix /opt/mediaservo-host" >&2; exit 1; }
             case "$prefix" in
                 /opt*) [ "$(id -u)" = 0 ] || { echo "Error: /opt deployment needs root (sudo msrtc.sh deploy host --prefix /opt/mediaservo-host)" >&2; exit 1; } ;;
             esac
             host_cli=${brand:+${brand}-host}; host_cli=${host_cli:-mediaservo-host}
-            # triple stop of the revival sources (unit -> daemon -> family), only
-            # when a live instance is detectable (oxfile + branded CLI present).
-            # Never call the oxmgr CLI here (its IPC auto-spawns the daemon —
-            # creating busy instead of clearing it). C50: the unit arm is
-            # OXMGR_HOME-scoped — a brand glob never stops another instance.
-            if [ -f "$prefix/run/oxfile.toml" ] && [ -f "$bin_dir/$host_cli" ]; then
-                echo "Running host instance detected — stopping the process family first (reinstall does not overwrite etc/ credentials)"
-                # W5-H (audit B1/F2): routed through the CWD-scoped helper — the
-                # inline copy here was the UNSCOPED twin (live-fired 10-27 on a
-                # /tmp prefix); _ms_deploy_stop_instance gates the family kill on
-                # /proc/<pid>/cwd resolving inside $prefix.
-                _ms_deploy_stop_instance "$prefix" "$brand"
-                sleep 1
-            fi
-            _msvc_app_install host "$brand" "$build_type" "$prefix" ""
-            # oxmgr version locked with the deployment (D-H13)
-            _msvc_oxmgr_resolve host
-            _msvc_copy_with_kill "$MS_OXMGR_SRC" "$bin_dir/oxmgr"
-            oxv=$("$MS_OXMGR_SRC" --version 2>/dev/null | head -1) || oxv=""
-            [ -n "$oxv" ] || oxv=$("$MS_OXMGR_SRC" --version 2>&1 >/dev/null | head -1) || oxv=""
-            echo "  oxmgr packaged: ${oxv:-?}"
-            # host init: etc/ + identity.json + tokens — idempotent write-only, never
-            # delete (reinstall keeps credentials). init is a separate process: the
-            # device prefix brand must match the layout brand (env override).
-            if [ -f "$prefix/identity.json" ]; then
-                echo "  identity.json exists — write-only, never delete (device identity preserved): $prefix/identity.json"
-            fi
-            echo "\$ $bin_dir/$host_cli init $prefix"
-            MEDIASERVO_BRAND="$rust_brand" "$bin_dir/$host_cli" init "$prefix"
-            # env.sh one-shot activation (MED5 — relocatable: derived relative to
-            # itself; same bytes as the pack-leg host template, deploy-side owner)
-            env_host=${brand:+${brand}-host}; env_host=${env_host:-mediaservo-host}
-            cat > "$prefix/env.sh" <<EOF
-#!/usr/bin/env bash
-# ${env_host} environment activation (generated at deploy) — all commands available after sourcing
-# Usage: source env.sh (still valid under any prefix / after relocation, derived relative to this file)
-__MSRTC_ENV_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd -P)"
-export PATH="\${__MSRTC_ENV_DIR}/bin:\$PATH"
-export MEDIASERVO_BRAND="${rust_brand}"   # brand env (D252); the deployment package pins the layout explicitly
-BIN_DIR_MSRTC="\${__MSRTC_ENV_DIR}/bin"   # for scripts/aliases to reference
-unset __MSRTC_ENV_DIR
-echo "[${rust_brand}] ${env_host} environment activated — bin/: \$BIN_DIR_MSRTC"
-EOF
-            chmod 755 "$prefix/env.sh"
-            echo "  env.sh generated: $prefix/env.sh (after sourcing, PATH=bin/ makes all commands available)"
-            mkdir -p "$prefix/run/logs" "$prefix/recordings"
+            # B4 (cli-cmake-single-source, user-adjudicated A): the staging body —
+            # guard TEARDOWN (triple stop), placement, oxmgr vendor, init
+            # (identity/tokens), env.sh, run dirs and the PIT-119 strip — lives in
+            # the deploy-host target (host-legs.cmake.in 1:1 port; R10-K-a teardown
+            # parity). The fa48b38 keep-on-bash reservation is paid off: the
+            # two-phase single-writer was proven under the bindings/server forwards.
+            # This shim keeps registration-desk duties only: parse (above), the root
+            # gate, brand derivation, explicit BRAND hand-off, receipt (below).
+            export MEDIASERVO_BRAND="$rust_brand"   # always-explicit (fa48b38); init env-override parity
+            _ms_deploy_via_target host "$build_type" "MEDIASERVO_DEPLOY_PREFIX_HOST=$prefix" \
+                || { echo "Error: deploy host target failed (rc=$?)" >&2; exit 1; }
             echo "host deployed to $prefix (${build_type,,})"
             echo "  bin/    $(ls -1 "$bin_dir" | sort | paste -sd, - | sed 's/,/, /g')"
             echo "  etc/    host.yaml + link/{signing.pem,*.token} (generated by host init, kept on reinstall)"
