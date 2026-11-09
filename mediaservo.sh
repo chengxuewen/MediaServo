@@ -458,7 +458,6 @@ _ms_build_server() {
         # MESON/MESON_ARGS pop (tasks.py env pitfall, T1 unset semantics — the
         # assertion above only proxies "activated via mediaservo.sh")
         env -u MESON -u MESON_ARGS "${cargs[@]}" || exit $?
-        mkdir -p "$out_server/bin"
         local brand="${MEDIASERVO_BRAND:-}"
         [ -n "$brand" ] || brand=$(_ms_derive_brand_server "$out_server/bin")
         # PIT-191 single-point branding: env -> in-tree derivation -> upstream,
@@ -589,7 +588,6 @@ _ms_build_bindings() {  # $1=release(0/1)
     echo "\$ ${ncmd[*]}"
     "${ncmd[@]}" || exit $?
     local bind_dst="${MSRTC_OUT_ROOT:-$ROOT/out}/bindings"
-    mkdir -p "$bind_dst/lib"
     # lib triple (D241) + N7 strip + headers + .pc/cmake transport + stale
     # sweeps + node/docs/python placement = cmake install rows (SR4 L1-L4,
     # batch-5). --strip is mandatory here: the STRIP CODE legs gate on
@@ -1669,5 +1667,5 @@ BDEOF
     exit $?
 fi
 
-echo "mediaservo: unknown verb '${1:-}' — ./mediaservo.sh -h lists the surface (the python CLI entry retired at SR6 batch-beta-2)" >&2
+echo "mediaservo: unknown verb '${1:-}' — ./mediaservo.sh -h lists the surface" >&2
 exit 2
