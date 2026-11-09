@@ -9,7 +9,8 @@
       "file": ".opencode/opencode.json",
       "surfaces": ["instructions", "mcp"],
       "mcp_launcher": "scripts/agents/mcp-launch.sh",
-      "drop_mcp": ["local-github", "local-openspace", "local-postgres"],
+      "accepts_types": ["stdio", "remote"],
+      "filter_disabled": false,
       "instructions": [
         ".agents/memorys/status.md",
         ".agents/memorys/conventions.md",
@@ -34,7 +35,8 @@
       "kind": "mcp",
       "file": ".mcp.json",
       "surfaces": ["mcp"],
-      "mcp_launcher": "scripts/agents/mcp-launch.sh"
+      "mcp_launcher": "scripts/agents/mcp-launch.sh",
+      "accepts_types": ["stdio"]
     }
   ]
 }

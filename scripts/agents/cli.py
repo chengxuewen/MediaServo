@@ -61,9 +61,16 @@ def canonical_mcp(source):
     return common.load_json(os.path.join(source, "mcp.json")).get("mcpServers", {})
 
 
-def host_mcp(servers, launcher):
+def host_mcp(servers, launcher, accepts_types=("stdio",)):
+    """Project the single-source servers onto a .mcp.json-style host.
+
+    Entries whose type is not in accepts_types are skipped (the accepted set
+    is declared per host in targets.json, B5-1 A9=C). This host format has no
+    enabled field and no remote shape, so "stdio" is the default acceptance."""
     out = {}
     for name, entry in servers.items():
+        if entry.get("type", "stdio") not in accepts_types:
+            continue
         item = copy.deepcopy(entry)
         args = list(item.get("args", []))
         if args:
@@ -75,10 +82,31 @@ def host_mcp(servers, launcher):
     return out
 
 
-def opencode_mcp(servers, launcher):
+def opencode_mcp(servers, launcher, accepts_types=("stdio", "remote"),
+                 filter_disabled=False):
+    """Project the single-source servers onto an opencode-style host,
+    branching per entry type (B5-1, A9=C). This removes O-11: the previous
+    body hard-coded {"type": "local", ...} for every entry, so any remote
+    entry admitted into the single source would have been rendered as a
+    local server pointing at a task that does not exist."""
     out = {}
-    for name in servers:
-        out[name] = {"type": "local", "enabled": True, "command": ["bash", launcher, name]}
+    for name, entry in servers.items():
+        etype = entry.get("type", "stdio")
+        if etype not in accepts_types:
+            continue
+        if filter_disabled and not entry.get("enabled", True):
+            continue
+        enabled = entry.get("enabled", True)
+        if etype == "remote":
+            out[name] = {"type": "remote", "url": entry["url"], "enabled": enabled}
+        else:
+            args = list(entry.get("args", []))
+            if args:
+                args[0] = launcher
+            else:
+                args = [name]
+            out[name] = {"type": "local", "enabled": enabled,
+                         "command": [entry.get("command", "bash")] + args}
     return out
 
 
@@ -225,18 +253,21 @@ def build_artifacts(source, target_root, cfg):
         surfaces = host.get("surfaces", [])
         path = os.path.join(target_root, host["file"]) if host.get("file") else None
         if host.get("kind") == "mcp" and "mcp" in surfaces:
-            arts.append(("json", path, {"mcpServers": host_mcp(servers, host["mcp_launcher"])}))
+            arts.append(("json", path, {"mcpServers": host_mcp(
+                servers, host["mcp_launcher"], host.get("accepts_types", ("stdio",)))}))
         elif host.get("kind") == "opencode":
             disk = common.load_json(path) if os.path.isfile(path) else {}
             if "instructions" in surfaces:
                 disk["instructions"] = host.get("instructions", [])
             if "mcp" in surfaces:
-                current = dict(disk.get("mcp", {}))
-                for name, entry in opencode_mcp(servers, host["mcp_launcher"]).items():
-                    current[name] = entry
-                for name in host.get("drop_mcp", []):
-                    current.pop(name, None)
-                disk["mcp"] = current
+                # B4-1: whole-section equal rewrite. want is computed from the
+                # single source alone; anything on disk outside want (orphans)
+                # disappears instead of surviving the old merge + drop_mcp dance
+                # (whose blind spot: a source-side removal nobody mirrored into
+                # drop_mcp stayed on disk forever, invisible to check).
+                disk["mcp"] = opencode_mcp(
+                    servers, host["mcp_launcher"], host.get("accepts_types", ("stdio", "remote")),
+                    host.get("filter_disabled", False))
             arts.append(("json", path, disk))
         elif host.get("kind") == "qoder":
             if "rules" in surfaces:
@@ -249,6 +280,13 @@ def build_artifacts(source, target_root, cfg):
                         host["rules_source"], name)
                     body += common.read_text(os.path.join(source_dir, name))
                     arts.append(("text", os.path.join(target_dir, name), body))
+                # B4-1 (A10=B): the rules dir is judged two-way now -- a file
+                # left in the target dir that no longer exists in the overlay
+                # is stale and gets pruned. Guardrails: .md only, symlinks are
+                # refused, and `agents check` is the dry-run (reports, deletes
+                # nothing).
+                keep = {name for name in os.listdir(source_dir) if name.endswith(".md")}
+                arts.append(("prune", target_dir, keep))
     if cfg.get("hub"):
         arts.append(("text", os.path.join(target_root, "AGENTS.md"), hub_text(source)))
     if cfg.get("repo_artifacts"):
@@ -271,6 +309,8 @@ def expected_for(art):
         return art[2]
     if kind == "region":
         return expected_markdown(art[1], art[2], art[3], art[4], art[5])
+    if kind == "prune":
+        return None
     raise ValueError(kind)
 
 
@@ -306,6 +346,27 @@ def run(command, source, target_root, targets_path):
         if reason:
             print("GATE-AGENTS ✗ guard %s" % reason)
             return common.EXIT_GUARD
+        if art[0] == "prune":
+            target_dir, keep = art[1], art[2]
+            stale = sorted(
+                name for name in os.listdir(target_dir)
+                if name.endswith(".md") and name not in keep
+            ) if os.path.isdir(target_dir) else []
+            if command == "check":
+                for name in stale:
+                    print(" [ FIX ] %s (stale, not in source overlay)" % os.path.join(target_dir, name))
+                    worst = max(worst, common.EXIT_FINDINGS)
+                continue
+            victims = [os.path.join(target_dir, name) for name in stale]
+            for victim in victims:
+                if os.path.islink(victim) or not os.path.isfile(victim):
+                    print("GATE-AGENTS ✗ prune guard refused %s" % victim)
+                    return common.EXIT_GUARD
+            for victim in victims:
+                os.remove(victim)
+                print(" [ PRUNE] %s" % victim)
+                wrote += 1
+            continue
         expected = expected_for(art)
         if command == "check":
             if not os.path.isfile(path):
