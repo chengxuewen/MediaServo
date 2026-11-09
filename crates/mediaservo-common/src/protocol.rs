@@ -6,18 +6,22 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::floor::{DenyReason, FloorMode};
+
 // ── S0: protocol version negotiation (invariant I5: capability gates only look at the negotiated integer;
 // package version / protocol integer / schema-ABI stay on three separate planes). v1 = no protocol field on the wire
 // (legacy shape byte-identical); v2 = the datachannel.control domain (F8 control DC gate) opens;
 // v3 = session resume (S0.5: resume/session_nonce - integer monotonicity is what makes dialect exact:
 /// Highest dialect supported by the endpoints in this repo.
-pub const SIGNALING_PROTOCOL_VERSION: u32 = 3;
+pub const SIGNALING_PROTOCOL_VERSION: u32 = 4;
 /// Lowest dialect accepted for a connection (legacy clients that do not declare protocol = v1; below this -> Error 4101).
 pub const SIGNALING_PROTOCOL_MIN_SUPPORTED: u32 = 1;
 /// Lowest dialect needed to open the control DC domain (create_data_producer).
 pub const PROTOCOL_MIN_CONTROL_DC: u32 = 2;
 /// Lowest dialect needed for session resume (resume request accepted).
 pub const PROTOCOL_MIN_RESUME: u32 = 3;
+/// Lowest dialect needed for floor-control messages (additive family, P2).
+pub const PROTOCOL_MIN_FLOOR: u32 = 4;
 
 /// Negotiation result = min(client claim (None = v1), server max). The reject-low shape is handled up front by the
 /// caller (claim < MIN_SUPPORTED -> 4101); this function only converges.
@@ -401,6 +405,41 @@ pub enum SignalingMessage {
     /// device-enroll §2 (server -> host): manual mode, signature verified but not yet approved (moved to pending).
     /// The device keeps its existing retry backoff and reconnects while waiting for approval (log: "awaiting admin approval").
     DeviceAuthPending { device_id: String },
+
+    // ── floor control (dialect 4, additive; plan talkservo-port P2) ──────
+    /// C→S: request the floor. Identity is server-derived (C1); client-supplied
+    /// room/peer fields are ignored. `priority`/`preempt` are optional.
+    FloorRequest {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        priority: Option<u8>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preempt: Option<bool>,
+    },
+    /// C→S: release the floor (identity server-derived).
+    FloorRelease,
+    /// C→S: change the room floor mode (authorized command).
+    FloorModeSet { mode: FloorMode },
+    /// C→S: mute/unmute a room member (authorized command; membership checked server-side).
+    FloorMuteSet { target_peer_id: String, muted: bool },
+    /// C→S: request a role-scoped floor snapshot.
+    FloorResync,
+    /// S→C: the floor grant set changed.
+    FloorGranted { room_id: String, grants: Vec<String>, generation: u64 },
+    /// S→C: the floor was taken by another peer (pre-emption).
+    FloorTaken { room_id: String, by: String, generation: u64 },
+    /// S→C: a floor request was denied.
+    FloorDenied { room_id: String, reason: DenyReason, generation: u64 },
+    /// S→C: the request entered the queue at `position`.
+    FloorQueued { room_id: String, position: u32, generation: u64 },
+    /// S→C: the floor is idle (optional reason, e.g. "timeout").
+    FloorIdle {
+        room_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+        generation: u64,
+    },
+    /// S→C: role-scoped full snapshot (queue only for dispatch).
+    FloorState { room_id: String, snapshot: serde_json::Value, generation: u64 },
     // ponytail: add frame ack/retransmit when reliability matters
 }
 
@@ -1814,5 +1853,60 @@ mod tests {
         let json_with =
             serde_json::to_string(&make(Some(serde_json::json!({ "port": 5000 })))).unwrap();
         assert!(json_with.contains(r#""sctp_parameters":{"port":5000}"#));
+    }
+
+    #[test]
+    fn floor_variants_roundtrip_and_version_is_4() {
+        assert_eq!(SIGNALING_PROTOCOL_VERSION, 4);
+        assert_eq!(PROTOCOL_MIN_FLOOR, 4);
+
+        let variants = vec![
+            SignalingMessage::FloorRequest { priority: Some(5), preempt: Some(true) },
+            SignalingMessage::FloorRelease,
+            SignalingMessage::FloorModeSet { mode: FloorMode::Exclusive },
+            SignalingMessage::FloorMuteSet { target_peer_id: "p2".into(), muted: true },
+            SignalingMessage::FloorResync,
+            SignalingMessage::FloorGranted {
+                room_id: "r".into(),
+                grants: vec!["p1".into()],
+                generation: 7,
+            },
+            SignalingMessage::FloorTaken { room_id: "r".into(), by: "p1".into(), generation: 8 },
+            SignalingMessage::FloorDenied {
+                room_id: "r".into(),
+                reason: DenyReason::Busy,
+                generation: 9,
+            },
+            SignalingMessage::FloorQueued { room_id: "r".into(), position: 1, generation: 10 },
+            SignalingMessage::FloorIdle {
+                room_id: "r".into(),
+                reason: Some("timeout".into()),
+                generation: 11,
+            },
+            SignalingMessage::FloorState {
+                room_id: "r".into(),
+                snapshot: serde_json::json!({ "mode": "exclusive" }),
+                generation: 12,
+            },
+        ];
+        let expected = [
+            "floor_request",
+            "floor_release",
+            "floor_mode_set",
+            "floor_mute_set",
+            "floor_resync",
+            "floor_granted",
+            "floor_taken",
+            "floor_denied",
+            "floor_queued",
+            "floor_idle",
+            "floor_state",
+        ];
+        for (msg, tag) in variants.iter().zip(expected) {
+            let json = serde_json::to_value(msg).unwrap();
+            assert_eq!(json["type"], tag);
+            let parsed: SignalingMessage = serde_json::from_value(json.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&parsed).unwrap(), json);
+        }
     }
 }

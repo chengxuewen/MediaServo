@@ -431,6 +431,19 @@ fn rewrite_room(msg: &mut SignalingMessage, room: &str) {
         EmergencyCommand { room_id, .. } => *room_id = room.to_string(), // G3: estop room-level broadcast
         // S4/a4: estop WS audit copy (if it passes through the gateway = rewritten in the same group as EmergencyCommand; cockpit direct connections bypass it).
         ControlAudit { room_id, .. } => *room_id = room.to_string(),
+        // Floor control is account-only and per-connection (R13); gateway rooms do not
+        // carry floor messages in P2, so no room rewrite is needed here.
+        FloorRequest { .. }
+        | FloorRelease
+        | FloorModeSet { .. }
+        | FloorMuteSet { .. }
+        | FloorResync
+        | FloorGranted { .. }
+        | FloorTaken { .. }
+        | FloorDenied { .. }
+        | FloorQueued { .. }
+        | FloorIdle { .. }
+        | FloorState { .. } => {}
     }
 }
 

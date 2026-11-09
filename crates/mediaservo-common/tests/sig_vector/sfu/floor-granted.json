@@ -1,0 +1,16 @@
+{
+  "name": "floor-granted",
+  "kind": "signal",
+  "wire": {
+    "type": "floor_granted",
+    "room_id": "audio-p0",
+    "grants": ["p1"],
+    "generation": 42
+  },
+  "checks": {
+    "type": "floor_granted",
+    "room_id": "audio-p0",
+    "grants.0": "p1",
+    "generation": 42
+  }
+}

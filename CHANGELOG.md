@@ -20,6 +20,8 @@ teams); for development process details, consult git log directly. Newest versio
 
 ### Added
 
+- [protocol] `SIGNALING_PROTOCOL_VERSION` 3 -> 4: eleven additive floor-control
+  variants (dialect 4; `MIN_SUPPORTED` stays 1; `PROTOCOL_MIN_FLOOR = 4`).
 - examples c band CMake-ized (`examples/c/CMakeLists.txt`, ruling 3=B): deck/field/link
   build as `mediaservo-example-<dir>` against the `mediaservo::<sdk>` link faces;
   the e2e gcc path is unchanged. All four example language bands (c/cxx/py/rs) now

@@ -89,7 +89,7 @@ def wire_lines(lines):
     return {l for l in lines if WIRE.match(l)}
 
 def unreleased(text):
-    m = re.search(r"^## Unreleased\s*$", text, re.M)
+    m = re.search(r"^##\s+\[?Unreleased\]?\s*$", text, re.M)
     if not m:
         return ""
     rest = text[m.end():]

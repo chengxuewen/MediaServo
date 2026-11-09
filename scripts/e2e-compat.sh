@@ -37,7 +37,7 @@ else
     echo "$PROBE_OUT" | while IFS= read -r l; do echo "   | $l"; done
     grep -q 'legacy-v1 .*protocol=1' <<<"$PROBE_OUT" || { say "P1/legacy->echo1" "FAIL"; }
     grep -q 'v2 .*protocol=2' <<<"$PROBE_OUT" || { say "P1/claim2->min2" "FAIL"; }
-    grep -q 'claim99 .*protocol=3' <<<"$PROBE_OUT" || { say "P1/claim99->clamp3" "FAIL"; }
+    grep -q 'claim99 .*protocol=4' <<<"$PROBE_OUT" || { say "P1/claim99->clamp4" "FAIL"; }
     grep -q 'claim0 .*Error 4101' <<<"$PROBE_OUT" || { say "P1/claim0->4101" "FAIL"; }
     [[ $FAIL -eq 0 ]] && say "P1-dialect-quads" "PASS"
 fi

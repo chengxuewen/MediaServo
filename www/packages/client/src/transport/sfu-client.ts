@@ -244,7 +244,7 @@ export class SfuConsumerClient {
       type: 'room_join',
       room_id: this.roomId,
       peer_role: 'consumer',
-      protocol: 3, // S0.5: declare this endpoint's dialect ceiling (v3 = resume domain; server negotiates the min)
+      protocol: 4, // S0.5/S2: declare this endpoint's dialect ceiling (v4 = floor domain; server negotiates the min)
     }));
 
     // Reconnect on WS close
@@ -613,7 +613,7 @@ export class SfuConsumerClient {
     this.playRounds++;
     if (this.playRounds >= PLAY_ROUNDS_MAX) {
       this.waitingForProducer = true;
-      this.ws?.send(JSON.stringify({ type: 'room_join', room_id: this.roomId, peer_role: 'consumer', protocol: 3 }));
+      this.ws?.send(JSON.stringify({ type: 'room_join', room_id: this.roomId, peer_role: 'consumer', protocol: 4 }));
       this.logT(`${PLAY_ROUNDS_MAX} consecutive rounds without a first frame → source offline (waiting for a stream to wake it)`);
       this.onStatus('stalled');
       return;
@@ -699,7 +699,7 @@ export class SfuConsumerClient {
         await this.connect(); // the WS also dropped (rare) → do a full reconnect first
       }
       this.ws?.send(JSON.stringify({
-        type: 'room_join', room_id: this.roomId, peer_role: 'consumer', protocol: 3,
+        type: 'room_join', room_id: this.roomId, peer_role: 'consumer', protocol: 4,
       }));
       this.playingSeen = false; this.stalled = false; this.stallTicks = 0; // F2: reset the watchdog for the new first frame
       this.waitingForProducer = false; // W2: proactively re-running exits the waiting state
@@ -790,7 +790,7 @@ export class SfuMicProducer {
     });
     const peerId = `${this.roomId}-mic-${Math.random().toString(36).slice(2, 8)}`;
     await this.rpcWait('error', () => true, 10000); // auth ack (code:0 authenticated)
-    send({ type: 'room_join', room_id: this.roomId, peer_role: 'consumer', protocol: 3 });
+    send({ type: 'room_join', room_id: this.roomId, peer_role: 'consumer', protocol: 4 });
     await this.rpcWait('room_joined', () => true);
     const capsP = this.rpcWait('router_rtp_capabilities', (m) => m.capabilities);
     send({ type: 'get_router_rtp_capabilities', room_id: this.roomId });

@@ -432,9 +432,9 @@ batch 1b (producer_ids likewise).
   control DC may open is decided by the server account's `can_control`; a rejection = 4012 → `ERR_DENIED`.
 - **jwt/psk: exactly one non-empty**: both empty or both set → `ERR_INVALID_ARG` (validated locally at
   connect, no network touched).
-- **The protocol generation**: currently `SIGNALING_PROTOCOL_VERSION = 3` (S0 negotiation + S0.5's resume
-  occupying the generation); when an old server negotiates 1/2, `open_control` with a protocol <2 is locally
-  pre-rejected with `ERR_PROTOCOL`.
+- **The protocol generation**: currently `SIGNALING_PROTOCOL_VERSION = 4` (S0 negotiation + S0.5's resume
+  + the dialect-4 floor family); when an old server negotiates 1/2/3, `open_control` with a protocol <2 is locally
+  pre-rejected with `ERR_PROTOCOL`. The floor messages are additive and are not consumed by this SDK yet.
 - **Reconnect is observable but not switchable**: the supervisor reconnect loop is always on by default (the
   C face has no `set_auto_reconnect` exposure; whether one is planned is unverified); the terminal criterion
   = `state()==Failed` with wire_code in the auth family/4101.
