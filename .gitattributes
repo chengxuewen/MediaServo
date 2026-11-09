@@ -1,0 +1,22 @@
+# .gitattributes -- submodule line-ending and diff policy
+# (agent-governance-borrow B6 submodule half, G10=A).
+# Measured 2026-11-09: .bat=6 .cmd=1 .ps1=1 (real CRLF surface), Cargo.lock=2,
+# pixi.lock present; no .so/.a/.tar.gz/.zip tracked (the parent repo owns the
+# vendored archives). Ordering matters -- later rules win, so the vendor/**
+# carve-out sits AFTER *.bat: otherwise the vendored gradlew.bat would be
+# judged for renormalize and get its upstream line endings rewritten.
+* text=auto
+*.sh    text eol=lf
+*.py    text eol=lf
+*.md    text eol=lf
+*.cmake text eol=lf
+*.rs    text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+vendor/** -text
+Cargo.lock -diff
+pixi.lock -diff
+package-lock.json -diff
