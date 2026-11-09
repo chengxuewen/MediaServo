@@ -664,6 +664,28 @@ fn is_low_priority(msg: &SignalingMessage) -> bool {
     matches!(msg, SignalingMessage::StatusReport { .. })
 }
 
+/// R14 (forward compatibility): parse one inbound frame. An unknown variant
+/// (a newer server dialect) is logged at debug level and ignored; malformed
+/// frames still surface as errors. This must land before the dialect bump so a
+/// rebuilt client claiming v4 does not error on every future message.
+fn parse_incoming(text: &str, gateway: bool) -> Result<Option<SignalingMessage>, String> {
+    let parsed = if gateway {
+        serde_json::from_str::<LocalEnvelope>(text)
+            .map(|env| env.msg)
+            .map_err(|e| format!("parse envelope: {e}"))
+    } else {
+        serde_json::from_str::<SignalingMessage>(text).map_err(|e| format!("parse message: {e}"))
+    };
+    match parsed {
+        Ok(msg) => Ok(Some(msg)),
+        Err(e) if e.contains("unknown variant") => {
+            tracing::debug!(error = %e, "ignoring unknown signaling variant (forward compatibility)");
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Background task: WS read -> events; dual upstream queues (hi dequeued first / lo best-effort) -> WS write.
 /// D2 gateway mode: with gateway_src = Some(src), both directions wrap the LocalEnvelope envelope.
 async fn session_task(
@@ -690,15 +712,9 @@ async fn session_task(
                 last_rx = std::time::Instant::now();
                 match ws {
                     Some(Ok(Message::Text(text))) => {
-                        let parsed = match &gateway_src {
-                            Some(_) => serde_json::from_str::<LocalEnvelope>(&text)
-                                .map(|env| env.msg)
-                                .map_err(|e| format!("parse envelope: {e}")),
-                            None => serde_json::from_str::<SignalingMessage>(&text)
-                                .map_err(|e| format!("parse message: {e}")),
-                        };
-                        match parsed {
-                            Ok(m) => { let _ = events_tx.send(SignalEvent::Message(m)); }
+                        match parse_incoming(&text, gateway_src.is_some()) {
+                            Ok(Some(m)) => { let _ = events_tx.send(SignalEvent::Message(m)); }
+                            Ok(None) => {} // R14: unknown variant ignored (debug-logged)
                             Err(e) => { let _ = events_tx.send(SignalEvent::Error(e)); }
                         }
                     }
@@ -911,5 +927,31 @@ mod tests {
         assert!(c.jwt.is_none());
         let c = c.with_jwt("tok");
         assert_eq!(c.jwt.as_deref(), Some("tok"));
+    }
+
+    #[test]
+    fn unknown_variant_is_ignored_not_an_error() {
+        let parsed = parse_incoming(r#"{"type":"future_floor_variant","generation":1}"#, false);
+        assert!(matches!(parsed, Ok(None)));
+    }
+
+    #[test]
+    fn unknown_variant_in_gateway_envelope_is_ignored() {
+        let parsed = parse_incoming(
+            r#"{"src":"server","msg":{"type":"future_floor_variant"}}"#,
+            true,
+        );
+        assert!(matches!(parsed, Ok(None)));
+    }
+
+    #[test]
+    fn malformed_frame_still_errors() {
+        assert!(parse_incoming("{not json", false).is_err());
+    }
+
+    #[test]
+    fn known_variant_still_parses() {
+        let parsed = parse_incoming(r#"{"type":"room_leave","room_id":"r","peer_id":"p"}"#, false);
+        assert!(matches!(parsed, Ok(Some(SignalingMessage::RoomLeave { .. }))));
     }
 }
