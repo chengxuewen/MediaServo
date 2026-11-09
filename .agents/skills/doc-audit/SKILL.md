@@ -88,18 +88,17 @@ Check Phase progress vs doc claims vs code reality.
 ## Audit Modes
 
 ### A. Team Mode (recommended — large audits)
-3+ large documents → `team_create` with 4-6 members in parallel.
+3+ large documents. Convene a 4-6 member panel via the shared engine
+`expert-panel-review` — its Track 2 (parallel) when the host provides
+`team_create`, its Track 1 (sequential role passes) otherwise. The four
+dimension lanes are owned by THIS skill; the engine owns how the team runs:
 
 ```
-team_create(inline_spec={
-  name: "doc-audit",
-  members: [
-    { name: "decision-validator", category: "deep", prompt: "<decision-verification core questions>" },
-    { name: "consistency-checker", category: "deep", prompt: "<doc-consistency core questions>" },
-    { name: "agent-auditor", category: "deep", prompt: "<agent-system core questions>" },
-    { name: "gap-optimizer", category: "deep", prompt: "<gap-optimization core questions>" }
-  ]
-})
+panel lanes (dimension briefs owned here):
+  decision-validator    <decision-verification core questions>
+  consistency-checker   <doc-consistency core questions>
+  agent-auditor         <agent-system core questions>
+  gap-optimizer         <gap-optimization core questions>
 ```
 
 **Conductor spec** (dispatcher behavior):
@@ -108,7 +107,9 @@ team_create(inline_spec={
 - when all complete: **dedupe & merge** (same issue found by 2+ dimensions → merge into 1 item)
 - sort by severity: CRITICAL → HIGH → MEDIUM → LOW
 - timeout handling: any lane producing nothing past 10 minutes → mark "timed out"
-- conflict handling: dimension A says X, dimension B says Y → flag for human review
+- conflict handling: dimension A says X, dimension B says Y → keep both as a
+  conflict item and hand it to `adjudication-walkthrough` (per the engine's
+  preserve-disagreement rule)
 
 ### B. Background-Agent Mode (light audits)
 Few docs → `task(category="deep", run_in_background=true)` × N in parallel.

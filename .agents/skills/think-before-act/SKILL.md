@@ -83,15 +83,12 @@ Use the `question` tool and wait for the user's confirmation.
 ### Complex changes: team review
 
 For complex changes (build/architecture changes, framework-level issues, impact on >5 files),
-after user approval and before execution, add a team-review round:
-
-```
-1. team_create — create the review team (3 perspectives)
-2. team_task_create — assign review tasks
-3. team_send_message — send the plan draft
-4. collect review feedback → revise the plan
-5. user confirms the revision → enter Phase 3
-```
+after user approval and before execution, run one team-review round via the
+shared engine `expert-panel-review` (host-adaptive: sequential role passes by
+default, parallel opt-in where team_create exists). Minimum lineup: the
+constant core (correctness officer + evidence officer) plus one scenario mount
+fitting the change. Its Phase 4 hands CRITICAL findings back here; the
+disagreement items it surfaces go to `adjudication-walkthrough`.
 
 CRITICAL items found in review must be fixed. LOW items may be logged as tech debt.
 

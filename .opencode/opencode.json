@@ -33,11 +33,6 @@
     ".agents/rules/rust/hooks.md"
   ],
   "mcp": {
-    "websearch": {
-      "type": "remote",
-      "url": "https://websearch.opencode.ai",
-      "enabled": false
-    },
     "local-codegraph": {
       "type": "local",
       "enabled": true,
@@ -64,6 +59,11 @@
         "scripts/agents/mcp-launch.sh",
         "local-serena"
       ]
+    },
+    "websearch": {
+      "type": "remote",
+      "url": "https://websearch.opencode.ai",
+      "enabled": false
     }
   },
   "lsp": {

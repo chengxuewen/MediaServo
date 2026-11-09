@@ -164,6 +164,7 @@ _Project has entered the code implementation phase. Current state:_
 | `doc-audit` | MediaServo document & architecture audit. |
 | `documentation-and-adrs` | Record MediaServo decisions and keep docs consistent: D-series entries, architecture and protocol updates, book chapters, changelog, and lin |
 | `ecosystem-scan` | Audit the .agents/ system and scan the community ecosystem for skills/rules/MCP worth adopting. |
+| `expert-panel-review` | Multi-role expert panel reviewing ONE artifact (a plan, a conclusion, a decision, a design): independence first, isolation discipline, a man |
 | `incremental-implementation` | Thin vertical slices across Rust+TS. |
 | `lesson-review` | Batch session review: systematically extract lessons learned and write them to project memory. |
 | `lsp-code-analysis` | Semantic pre-change impact analysis for MediaServo: find definitions, implementors, references, and call paths across Rust crates, C ABI/FFI |
