@@ -24,56 +24,46 @@ case "${1:-}" in
         cat <<'HEOF'
 usage: mediaservo [-h] <verb> [...]
 
-MediaServo unified build CLI (terms: native = bare metal, compose = containers)
-Entry: ./mediaservo.sh (bash driver; the python CLI retired at SR6 batch-beta-2 —
-the build/package/example/compose/ops faces all live in this shell, cmake and the
-managed binaries own layout and runtime truth).
+MediaServo unified build CLI (native = bare metal, compose = containers).
+Run 'mediaservo <verb> -h' for a verb's full flags and notes.
 
-build/assembly face:
-  build <target> [--release] [--image runtime|dev] [--native] [--profile auto|headless|linux-desktop] [--provider none|system|pixi] [--pixi-env NAME] [--ecosystem vcpkg|conan] [--pkg NAME] [--generate-ecosystem] [NAME...]
-        target: all|web|host|server|client|bindings|example|gui-deps (default all;
-        server = non-embedded variant + one-step web assembly; web =
-        frontend-only fast lane; only --image takes the Docker path;
-        build-host/build-server compat aliases kept; gui-deps = the explicit
-        SDL3 build/install verb (sr8 P3), --profile/--provider/--pixi-env only
-        apply to it -- provider pixi is the sr8 P4 fill, OFF by default;
-        --ecosystem/--pkg/--generate-ecosystem are the sr8 P7c dev-only intake
-        leg: acquire a library from the vcpkg/conan ecosystem instead of a
-        source archive, from a committed recipe + pin island under
-        cmake/gui-deps/. Strict-first, so nothing is fetched until
-        --generate-ecosystem is given. It never combines with --provider/
-        --pixi-env/--profile (those are the build-time/source axis -- a
-        different question than where the library comes from), and it is not a
-        route for SDL3/imgui, which carry a patch and a branch and stay on
-        provider "source")
-  build:deploy <target> [--prefix DIR] [--release]   (one-step build + deploy)
-  package <target> [--dist DIR] [--brand NAME] [--release]
-        target: host|server|sdk-field|sdk-client (bindings = one-cycle alias)
-        → <dist>/<brand>-<target>-<ver>-<platform>-<arch>.tar.gz (D-H13/F12,
-        versioned top-level dir; --dist defaults to dist/, the MSRTC release
-        shell injects out/packages; unpack straight into a prefix with
-        tar xzf pkg.tar.gz -C <prefix> --strip-components=1)
-  list example                        (cxx|rs|py bands; dev-example lanes after the run/test example retirement, B7:
-                                      cxx → 'build example' then run the artifact in target/examples/bin/ directly;
-                                      rs → cargo run -p examples --example <name>; py → python3 examples/py/<name>.py;
-                                      tests → ctest --test-dir build/examples -R <name>;
-                                      server/host instance commands: <prefix>/bin/<brand>-server start|stop|restart <prefix>;
-                                      read-only probes: status server | logs server)
-  deploy bindings|host|server [--prefix DIR] [--release]   (cmake install rows
-        lay the tree; the managed binaries render state [bF3] — driver only
-        orchestrates)
+Build:
+  build <target> [flags]     one target: all|web|host|server|client|bindings|
+                             example|gui-deps (default all; see 'build -h')
+  build:deploy <target>      build then deploy in one step
 
-Three-mode quick reference (native = bare metal, compose = containers):
-  Mode 1 bare-metal delivery: build server (assembles bin/etc/web in out/) → deploy server --prefix <X> (bin/etc layout = cmake install rules) →
-             <X>/<brand>-server init/start/stop/status/restart/doctor <X> (startup on = boot anchor; bin physical name branded per D269)
-    fast lanes: build web (frontend only → out/server/web) | dev web (vite:5173 hot reload, pair with start --no-web)
-  Mode 2 single-container production: build server --image runtime → up --env prod → logs server --env prod
-  Mode 3 compose development: up --env dev (hot reload) → logs -f → down --env dev
+Release:
+  package <target>           release tarball: host|server|sdk-field|sdk-client
+  deploy <target>            install a built tree: bindings|host|server
 
-ops face (this shell): up down exec ps data dev version doctor list
-  start stop restart run logs status clean config e2e test deploy
-  guidance arms exit 2 (C39 — instance-directory commands; the container face up/down is unchanged)
-  exit codes (shell-owned status/logs): 0 = success, 1 = not running/target missing, 2 = bad args / probe undecidable
+Observe:
+  list example               example names per band (cxx|rs|py)
+  status | logs              read-only probes (native or compose)
+  doctor | version           diagnosis (always exit 0) / workspace version
+
+Containers:
+  up | down                  compose face (--env dev|prod)
+  exec | ps | data           container exec, process list, managed data
+
+Develop:
+  dev web                    vite dev server (hot reload)
+  test | e2e <suite>         workspace test run / end-to-end lane
+  config show|validate|set   resolved configuration
+
+Housekeeping:
+  clean [--logs] [--dry-run] build-tree clean; --logs drops logs, keeps state
+
+Instance commands are not shell verbs -- run them inside a prefix:
+  <prefix>/bin/<brand>-server init|start|stop|restart|status|doctor
+  (typing start|stop|restart|run here prints this pointer and exits 2)
+
+Examples:
+  ./mediaservo.sh build server                  # assemble out/ (bin/etc/web)
+  ./mediaservo.sh deploy server --prefix <X>    # cmake install rows
+  ./mediaservo.sh build server --image runtime && ./mediaservo.sh up --env prod
+  ./mediaservo.sh build gui-deps --profile auto
+
+Exit codes: 0 success | 1 not running / target missing | 2 bad args
 HEOF
         exit 0
         ;;
@@ -1020,6 +1010,40 @@ case "${1:-}" in
         # SR6 batch-beta-2: build family bash-owned; bindings/example still forward
         # to python until their own beta-2 commits land (one-leg-one-owner order).
         # build-host/build-server = compat aliases (retired argparse ALIASES).
+        case "${2:-}" in
+            -h|--help)
+                cat <<'BHEOF'
+usage: mediaservo build <target> [flags] [NAME...]
+
+targets:
+  all        default; the components in the preset tree
+  web        frontend only -> out/server/web (fast lane)
+  host       native host chain
+  server     non-embedded variant + one-step web assembly
+  client     native client chain
+  bindings   C ABI / C++ SDK artifacts
+  example    examples band (cxx|rs|py; names optional; see 'list example')
+  gui-deps   explicit SDL3 build/install verb
+  (build-host / build-server are compat aliases of host / server)
+
+flags:
+  --release              Release configuration (default Debug)
+  --image runtime|dev    Docker path; only build server accepts it
+  --native               bare-metal build; only build server accepts it
+  gui-deps only:
+  --profile auto|headless|linux-desktop   X11 probe decides 'auto'
+  --provider none|system|pixi             dependency provider (pixi OFF by default)
+  --pixi-env NAME                         environment for --provider pixi
+  --ecosystem vcpkg|conan                 dev-only intake leg: build a library
+  --pkg NAME                              from a committed recipe instead of a
+  --generate-ecosystem                    source archive; strict-first, so nothing
+                                          is fetched without this flag; never
+                                          combines with --profile/--provider/
+                                          --pixi-env (SDL3/imgui stay on source)
+BHEOF
+                exit 0
+                ;;
+        esac
         _ms_orig=("$@")
         case "${_ms_orig[0]}" in
             build-host) set -- build host "${_ms_orig[@]:1}" ;;
@@ -1099,6 +1123,23 @@ case "${1:-}" in
         # artifact carry the mediaservo-example- brand). rs = the examples package's
         # own [[example]] table, sed-read so cargo stays the single source of truth
         # (the CMake band registry mirrors the same names). py = examples/py/*.py.
+        case "${2:-}" in
+            -h|--help)
+                cat <<'LIEOF'
+usage: mediaservo list example
+
+Prints the example names per band: cxx (G4 dirs), rs (the examples package's
+[[example]] table), py (examples/py/*.py).
+
+How to run:
+  cxx  ./mediaservo.sh build example <name>; run target/examples/bin/<name>
+  rs   cargo run -p examples --example <name>
+  py   python3 examples/py/<name>.py
+  tests: ctest --test-dir build/examples -R <name>
+LIEOF
+                exit 0
+                ;;
+        esac
         [ "${2:-}" = example ] || { echo "list: usage: list example" >&2; exit 2; }
         ed="$ROOT/examples/cxx"
         names=()
@@ -1421,6 +1462,22 @@ case "${1:-}" in
         # SR6 batch-beta-2: release-tar driver on bash (CPack legs + pack-legs
         # templates stay cmake-owned; wheel/pip mechanics are build bindings'
         # territory). Flags mirror the retired argparse (--dist/--brand/--release).
+        case "${2:-}" in
+            -h|--help)
+                cat <<'PKEOF'
+usage: mediaservo package <host|server|sdk-field|sdk-client> [--dist DIR] [--brand NAME] [--release]
+
+Builds a release tarball: <dist>/<brand>-<target>-<ver>-<platform>-<arch>.tar.gz
+with a versioned top-level directory (bindings = one-cycle alias of sdk-field).
+  --dist DIR     output directory (default dist/; the parent release shell
+                 injects out/packages)
+  --brand NAME   package brand
+  --release      Release configuration
+Unpack: tar xzf pkg.tar.gz -C <prefix> --strip-components=1
+PKEOF
+                exit 0
+                ;;
+        esac
         shift; tgt="${1:-}"; [ $# -gt 0 ] && shift
         dist=""; brand=""; release=0
         while [ $# -gt 0 ]; do
@@ -1440,6 +1497,26 @@ case "${1:-}" in
         # the host leg joined; server stays python until its own beta commit. The
         # driver only orchestrates — layout = cmake rows, stateful merge = binary
         # init [bF3], never re-implemented here.
+        case "${2:-}" in
+            -h|--help)
+                cat <<'DHEOF'
+usage: mediaservo deploy <bindings|host|server> [--prefix DIR] [--release]
+
+Installs a built tree with the cmake install rows; the managed binaries
+render state -- this driver only orchestrates.
+  bindings   C ABI / C++ SDK install (defaults to the assembled source dir)
+  host       native host install; --prefix is REQUIRED (no default, keeps
+             out/ clean and stateless)
+  server     server install (defaults to the assembled source dir)
+
+flags:
+  --prefix DIR   installation prefix
+  --release      Release configuration
+Brand: env MEDIASERVO_BRAND (the parent release shell injects it).
+DHEOF
+                exit 0
+                ;;
+        esac
         case "${2:-}" in
         host)
             shift 2; prefix=""; build_type=Debug
@@ -1552,6 +1629,18 @@ esac
 # missing target now prints usage + exit 2 instead of falling into the unknown-verb echo (r1-M2: verb is known,
 # what is missing is the target).
 if [ "${1:-}" = "build:deploy" ]; then
+    case "${2:-}" in
+        -h|--help)
+            cat <<'BDEOF'
+usage: mediaservo build:deploy <target> [--prefix DIR] [--brand NAME] [--release] [build-args...]
+
+Builds then deploys in one step. Default prefix = <out>/<target> (the parent
+shell MSRTC_OUT_ROOT wins when injected). --brand rides the deploy leg only;
+every other argument passes through to build/deploy.
+BDEOF
+            exit 0
+            ;;
+    esac
     if [ $# -lt 2 ]; then
         echo "usage: mediaservo build:deploy <target> [--prefix DIR] [--brand NAME] [--release] [build-args...]" >&2
         exit 2
