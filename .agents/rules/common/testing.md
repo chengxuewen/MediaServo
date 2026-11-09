@@ -64,3 +64,19 @@ cargo test --workspace
 # Verify: coverage
 cargo tarpaulin --workspace 2>/dev/null || echo "tarpaulin not installed"
 ```
+
+## Zero-Count Assertions Need a Positive Control First
+
+**Rule**: before reporting any "0 warnings / 0 errors / 0 matches" result, first prove the
+target path was actually exercised (a positive control: `grep -c '<execution-marker>' > 0`,
+or a seeded defect that must be caught); only then does a `== 0` check count as a pass.
+A bare zero count is not verification -- the scan may simply not have run.
+
+**Precedent**: the zero-defined-symbols verdict for `libmediaservo_field.so` was only
+trustworthy because the same round had already matched a known symbol as a positive control --
+luck got it right, the rule exists so it does not depend on luck.
+
+**Verify**: the positive control's output (`> 0`) is captured in the same transcript as the
+zero assertion; no control, no claim.
+
+**Blocking condition**: declaring a zero-count pass without a positive control in the same round.

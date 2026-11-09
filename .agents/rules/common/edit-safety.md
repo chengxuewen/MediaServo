@@ -228,3 +228,51 @@ grep -c "<repeated-pattern>" <file>    # expect 1; >1 = edit inserted duplicates
 **Precedent**: 09-17 hallucination round — an entire round's tool output (build log/findings/commit echoes 0a7f29e/b6697b9) was fabricated; real HEAD stayed at 819b58c; caught by the next round's edit hash defense + grep of the actual state, zero damage (no real file was touched by the hallucination round).
 **Verify**: each round's opening reconciliation output must match the previous round's message before continuing; mismatch = rewrite the books from git ground truth.
 **Blocking condition**: in an exhausted session, starting any edit/build/commit without reconciling first.
+
+### 18. Structured files (JSON/TOML/YAML) get minimal text edits, never serialize-and-rewrite (2026-11-09)
+
+**Rule**: editing JSON/TOML/YAML uses the minimal text edit on the changed keys -- forbidden:
+parsing and re-serializing the whole file (`json.dumps(indent=2)` etc.) because it produces
+churn unrelated to the semantic change (key order, escaping, blank lines) and pollutes the
+diff review.
+**Verify**: `git show --stat HEAD` line count is commensurate with the semantic change (a
+one-key fix should not touch 30 lines).
+**Blocking condition**: a structured-file edit whose diff is mostly format churn.
+
+### 19. IDE attachments / diff reports are not disk content (2026-11-09)
+
+**Rule**: to judge "what did the other side change", always ground on the disk: `grep -n <key>`
+the actual file + `agents check` measured output. IDE attachment blocks, diff reports, and
+tool output are claims, not state. The same attachment block may ride along for many rounds
+while the disk has already moved on.
+**Precedent**: a session carried the same `CMakeUserPresets.json` attachment block on every
+message while the file on disk had changed under it.
+**Verify**: every cross-session/cross-agent "what changed" conclusion cites a disk read
+generated in the current round, not an earlier attachment or report.
+**Blocking condition**: editing or adjudicating based on attachment/report content without
+a fresh disk read.
+
+### 20. index, worktree and reports each may disagree with disk -- disk is the only referee (2026-11-09)
+
+**Rule**: `git status`/index, the worktree, and tool reports are three independent views;
+any of them can be stale relative to the actual file bytes. Verification of "what is on disk"
+always reads the file itself; index/worktree/report mismatches get reconciled against disk,
+never the other way around.
+**Verify**: for any "is X applied?" question: `grep -n` the file; for staged-state questions:
+`git diff --cached` freshly run, not remembered.
+**Blocking condition**: asserting file content from memory of a report, or "fixing" disk to
+match a stale index/report.
+
+### 21. Patch scripts containing multi-line strings land as files, not heredoc-inline (2026-11-09)
+
+**Rule**: a patch/transform script whose payload contains multi-line strings is written to a
+file first, then executed (`python3 script.py`), never `python3 - <<'PY'` inline. An inline
+SyntaxError aborts the whole script while later `echo` lines still print -- producing a false
+"it ran" signal; the heredoc-for-markdown rule (PIT-85, testing.md #11) covers content
+appending, this one covers executable scripts.
+**Precedent**: 4 inline heredoc invocations in one round; each SyntaxError would have been
+masked by the trailing echo.
+**Verify**: the script file exists (`ls`), runs to its own final success marker, and its
+mutation is confirmed by a disk grep before cleanup.
+**Blocking condition**: multi-line-string transforms inline in the command line; trusting
+echo output as proof a patch applied.

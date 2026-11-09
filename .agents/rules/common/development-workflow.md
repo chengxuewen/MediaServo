@@ -60,10 +60,17 @@ The Feature Implementation Workflow describes the development pipeline: research
 
 ## Commit Message Format
 ```
-<type>: <description>
+<type>(<scope>): <summary>
 
 <optional body>
 ```
+
+Hard rules for the first line:
+- **50 chars advised / 72 hard limit**.
+- Imperative, present tense ("add", not "added"/"adds").
+- No trailing period.
+- One thing per commit: no chain symbols (`+`, ` + `, and-chains) stitching
+  multiple changes into one line -- split into separate commits instead.
 
 Types: feat, fix, refactor, docs, test, chore, perf, ci
 

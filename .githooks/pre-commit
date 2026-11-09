@@ -3,7 +3,8 @@
 #
 # Install (once per clone):  pixi run hooks-install
 # This copies the file into .git/hooks; it deliberately does NOT use
-# core.hooksPath (the parent repo's Gerrit commit-msg flow depends on it, C41).
+# core.hooksPath (the parent repo installs its hooks by copy into .git/hooks
+# too -- neither repo sets core.hooksPath).
 set -e
 cd "$(git rev-parse --show-toplevel)"
 
