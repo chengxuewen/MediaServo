@@ -18,7 +18,7 @@ diversity**.
 
 ## Trigger Conditions
 
-- The user says the panel keywords: "专家团" / "团队审核" / "多角色评审" /
+- The user says the panel keywords: "专家团" / "团队审核" / "多角色评审" <!-- c49:trigger -->
   "审这份计划" / "审这个结论" / "red-team 一下" <!-- c49:trigger -->
 - The user names team mode explicitly.
 - A plan/decision needs multi-angle stress testing before execution (commonly

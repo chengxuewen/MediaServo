@@ -1,2 +1,6 @@
 # Files allowed to name the parent workspace literally (hub/documentation text).
 scripts/agents/cli.py
+# Dual-context entry: parent env vars are its job (pre-existing).
+scripts/agents/shell_entry.sh
+# External delivery, tracked as O-17 (pre-existing CJK + parent literals).
+.agents/skills/reuse-first/SKILL.md

@@ -1,0 +1,30 @@
+# rule-ref-allowlist.txt -- value-level exemptions for rule_ref_lint.py.
+# Each entry is a citation ID that exists in ANOTHER numbering space, not in
+# this repo's .agents/memorys ledger. Grouped by space; keep one line per ID,
+# comments explain why the citation is legitimate. (B4-3, r12)
+
+# Parent-repo (outer workspace) numbering space.
+C55   # AGENTS.md C51 entry: "mirror of main-repo C55" -- explicit parent citation
+C60   # reuse-first charter ledger C60, parent repo docs/governance
+PIT-246 # parent repo pitfalls ledger, cited by reuse-first
+D19   # parent repo decisions, cited by test-harness
+D21   # parent repo decisions, cited by test-harness
+
+# Upstream openspec project's own decision numbering (openspec-explore/-propose
+# skill text references its project's decisions.md, D1-D50 range).
+D3
+D10
+D11
+D12
+D17
+D24
+D33
+D46
+D50
+
+# Generic mention / worked-example text (not a citation to any real ledger).
+D1    # doc-audit: "decisions.md D1-Dx" generic range phrasing
+D15   # code-simplification worked example
+D78   # code-simplification worked example ("introduced by D78" in sample diff)
+D112  # code-simplification worked example ("obsoleted by D112" in sample diff)
+D155  # source-driven-development worked example

@@ -3,6 +3,7 @@ name: openspec-sync-specs
 description: Sync delta specs from a change to main specs. Use when the user wants to update main specs with changes from a delta spec, without archiving the change.
 license: MIT
 compatibility: Requires openspec CLI.
+status: inoperative
 metadata:
   author: openspec
   version: "1.0"
@@ -10,6 +11,8 @@ metadata:
 ---
 
 Sync delta specs from a change to main specs.
+
+> **INOPERATIVE (B4-4):** the `openspec` CLI is not installed on this machine, so every command in this skill fails. Kept for reference; becomes usable when the CLI lands.
 
 This is an **agent-driven** operation - you will read delta specs and directly edit main specs to apply the changes. This allows intelligent merging (e.g., adding a scenario without copying the entire requirement).
 

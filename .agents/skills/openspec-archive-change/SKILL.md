@@ -3,6 +3,7 @@ name: openspec-archive-change
 description: Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete.
 license: MIT
 compatibility: Requires openspec CLI.
+status: inoperative
 metadata:
   author: openspec
   version: "1.0"
@@ -10,6 +11,8 @@ metadata:
 ---
 
 Archive a completed change in the experimental workflow.
+
+> **INOPERATIVE (B4-4):** the `openspec` CLI is not installed on this machine, so every command in this skill fails. Kept for reference; becomes usable when the CLI lands.
 
 **Input**: Optionally specify a change name. If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
 

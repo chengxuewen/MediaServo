@@ -169,11 +169,11 @@ _Project has entered the code implementation phase. Current state:_
 | `lesson-review` | Batch session review: systematically extract lessons learned and write them to project memory. |
 | `lsp-code-analysis` | Semantic pre-change impact analysis for MediaServo: find definitions, implementors, references, and call paths across Rust crates, C ABI/FFI |
 | `observability-and-instrumentation` | Instrument MediaServo with useful logs, metrics, and traces: structured fields, RED metrics, spans across signaling/media, symptom-based ale |
-| `openspec-apply-change` | Implement tasks from an OpenSpec change. |
-| `openspec-archive-change` | Archive a completed change in the experimental workflow. |
+| `openspec-apply-change` | [inoperative] Implement tasks from an OpenSpec change. |
+| `openspec-archive-change` | [inoperative] Archive a completed change in the experimental workflow. |
 | `openspec-explore` | > |
 | `openspec-propose` | > |
-| `openspec-sync-specs` | Sync delta specs from a change to main specs. |
+| `openspec-sync-specs` | [inoperative] Sync delta specs from a change to main specs. |
 | `performance-optimization` | MediaServo performance profiling and optimization. |
 | `repo-triage` | Triage an ambiguous MediaServo task into the right layer and files before editing: Rust crates, C ABI/FFI, mediasoup, Admin Dashboard, agent |
 | `reuse-first` | Borrow before build: prove the existing supplier face cannot take it BEFORE writing any new mechanism (CMake target/function, script verb, w |

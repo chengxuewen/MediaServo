@@ -123,6 +123,11 @@ def skill_rows(source):
         desc = re.sub(r"[\u4e00-\u9fff]+", "", desc)
         desc = re.sub(r"\s+", " ", desc).strip(" -/")
         desc = re.split(r"(?<=\.)\s", desc)[0].strip()[:140] or "(no description)"
+        # B4-4: surface the status gate in the registry view so no consumer
+        # picks up an inoperative skill without the warning.
+        text = open(skill, encoding="utf-8").read()
+        if re.match(r"^---\n.*?^status:\s*inoperative\s*$", text, re.M | re.S):
+            desc = "[inoperative] " + desc
         rows.append((name, desc))
     return rows
 
