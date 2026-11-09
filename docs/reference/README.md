@@ -51,6 +51,7 @@
 | `research/video-conference/` | mediasoup* / openvidu-* / livekit / jitsi / kurento / zoom |
 | `research/teleoperation/` | comma-ai-openpilot / tether-rally / tum-teleoperated-driving / vay |
 | `research/network-emulation/` | Weak-network emulation tool landscape (tc/netem family / clumsy / ATC·toxiproxy verified corrections / webrtc test-network·Pion vnet / quick-selection table · pitfall list) |
+| `research/ptt/` | Nanshan PTT mobile intercom dossier (feature inventory / ultra-low-bitrate + background-audio inferences / floor-model mapping) |
 
 ## WebRTC Living-Reference Relationship Map
 
