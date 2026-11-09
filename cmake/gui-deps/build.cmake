@@ -13,6 +13,12 @@ if(NOT PROFILE OR NOT BUILD_TYPE OR NOT WORK_DIR OR NOT GENERATOR)
     message(FATAL_ERROR "gui-deps build: PROFILE, BUILD_TYPE, WORK_DIR and GENERATOR are required (script mode has no defaults)")
 endif()
 include("${_gd_repo}/PolyOrch/cmake/PolyOrchThirdPartyHelpers.cmake")
+# B8 archive-source policy (P/S mode split; ONE point shared with the
+# configure-time imgui fetch in MediaServoGuiDeps.cmake):
+# parent-shell env -> LOCAL_ARCHIVE_DIR override; no env -> DOWNLOAD on into
+# the cache anchor (first build fetches, every later build replays offline).
+include("${_gd_repo}/cmake/gui-deps/source-mode.cmake")
+mediaservo_gui_deps_source_mode("${_gd_repo}" _gd_local _gd_dl_args)
 
 # pkg-config lockdown (moved from examples/cxx with the SDL build, PIT-199
 # four-gate behavior #3): conda's pkg-config bakes its own dirs into the
@@ -62,6 +68,8 @@ polyorch_thirdparty_recipe(RECIPE "${_gd_repo}/cmake/gui-deps/recipes/sdl3.json"
     GENERATOR "${GENERATOR}" MAKE_PROGRAM "${MAKE_PROGRAM}" PARALLEL "${PARALLEL}"
     DEPENDENCY_PROVIDER "${_gd_provider}" PIXI_ENVIRONMENT "${PIXI_ENV}"
     CMAKE_ARGS ${_gd_extra}
+    ${_gd_dl_args}
+    LOCAL_ARCHIVE_DIR "${_gd_local}"
     INSTALL_DIR_OUT _gd_install FINGERPRINT_OUT _gd_key MANIFEST_OUT _gd_mf)
 if(NOT EXISTS "${_gd_install}/lib/cmake/SDL3/SDL3Config.cmake")
     message(FATAL_ERROR "gui-deps build: SDL3 install finished but '${_gd_install}/lib/cmake/SDL3/SDL3Config.cmake' is missing -- the upstream install layout changed")

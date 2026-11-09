@@ -34,6 +34,12 @@
 get_filename_component(MEDIASERVO_GUI_DEPS_DIR "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
 set(MEDIASERVO_GUI_DEPS_DIR "${MEDIASERVO_GUI_DEPS_DIR}" CACHE INTERNAL "MediaServo gui-deps module directory (recipes/patches live beside it)")
 
+# B8 archive-source policy, ONE point shared with the explicit verb body
+# (gui-deps/build.cmake): both consumers must resolve the same archive
+# source the same way. Included here at LIST_DIR capture time -- the same
+# measured trap as above makes macro-scope includes unreliable.
+include("${CMAKE_CURRENT_LIST_DIR}/gui-deps/source-mode.cmake")
+
 # mediaservo_gui_deps_profile(<out>) -- the dynamic decision shared with the
 # shell verb's --profile auto rule (keep both header lists aligned; the shell
 # copy is _ms_x11_headers_present in mediaservo.sh).
@@ -143,11 +149,18 @@ macro(mediaservo_gui_deps)
     endif()
 
     # ImGui source wrapper (F8): fetch-only recipe, compiled by the consumer.
+    # B8: the same source-mode policy as the verb -- override layer under the
+    # parent-shell env, otherwise one controlled download into the cache
+    # anchor (the fetch itself is configure-time by F8 design; where its
+    # bytes come from is exactly what this policy owns).
     if(TARGET mediaservo-imgui)
         message(FATAL_ERROR "mediaservo_gui_deps: mediaservo-imgui already exists -- the wrapper has exactly ONE definition point (this file; r4 H1)")
     endif()
+    mediaservo_gui_deps_source_mode("${MEDIASERVO_REPO_ROOT}" _ms_gd_local _ms_gd_dl)
     polyorch_thirdparty_recipe(RECIPE "${MEDIASERVO_GUI_DEPS_DIR}/gui-deps/recipes/imgui.json"
         WORK_DIR "${MEDIASERVO_GUI_DEPS_ANCHOR}" BUILD_TYPE "${CMAKE_BUILD_TYPE}"
+        ${_ms_gd_dl}
+        LOCAL_ARCHIVE_DIR "${_ms_gd_local}"
         SOURCE_DIR_OUT _ms_gd_imgui_src)
     add_library(mediaservo-imgui STATIC
         "${_ms_gd_imgui_src}/imgui.cpp"

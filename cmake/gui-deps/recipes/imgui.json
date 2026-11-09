@@ -4,7 +4,8 @@
   "version": "1.92.9b-docking",
   "provider": "source",
   "license": "MIT",
-  "url": "../../../3rdparty/imgui-v1.92.9b-docking.zip",
+  "url": "imgui-v1.92.9b-docking.zip",
+  "url_online": "https://codeload.github.com/ocornut/imgui/zip/refs/tags/v1.92.9b-docking",
   "url_hash": "0434445157a575f452ff0f2d1681fdd90ea8939e0c6983e6f8e47c51fba1bccd",
   "fetch_only": true
 }
