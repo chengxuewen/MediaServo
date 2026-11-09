@@ -14,6 +14,7 @@ pub mod backup;
 pub mod brand;
 pub mod config;
 pub mod error;
+pub mod floor;
 pub mod logging;
 pub mod metrics;
 pub mod protocol;
