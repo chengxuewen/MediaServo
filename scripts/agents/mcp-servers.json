@@ -11,7 +11,8 @@
     "pkg": "@playwright/mcp",
     "version": "0.0.82",
     "bin": "playwright-mcp",
-    "args": []
+    "args": [],
+    "probe": ["playwright-mcp", "--version"]
   },
   "local-serena": {
     "kind": "pixi",

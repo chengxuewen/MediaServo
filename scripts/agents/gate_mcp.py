@@ -23,6 +23,21 @@ REGISTRY = os.path.join(HERE, "mcp-servers.json")
 LAUNCHER = os.path.join(HERE, "mcp-launch.sh")
 TIMEOUT = int(os.environ.get("MCP_PROBE_TIMEOUT", "300"))
 TOKEN_HINT = re.compile(r"token|unauthorized|401|credential", re.IGNORECASE)
+ROUTING = os.path.join(ROOT, ".agents", "rules", "common", "tool-routing.md")
+LOCKED_SERVERS = ("local-codegraph", "local-serena", "local-playwright")
+
+
+def load(path, label):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f" [SHAPE ] {label:16s} {'':16s} unreadable: {exc}")
+        return None
+    if not isinstance(data, dict):
+        print(f" [SHAPE ] {label:16s} {'':16s} top level must be an object")
+        return None
+    return data
 
 
 def shape_check() -> int:
@@ -40,18 +55,6 @@ def shape_check() -> int:
         nonlocal red
         print(f" [SHAPE ] {surface:16s} {name:16s} {why}")
         red += 1
-
-    def load(path, label):
-        try:
-            with open(path, encoding="utf-8") as handle:
-                data = json.load(handle)
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f" [SHAPE ] {label:16s} {'':16s} unreadable: {exc}")
-            return None
-        if not isinstance(data, dict):
-            print(f" [SHAPE ] {label:16s} {'':16s} top level must be an object")
-            return None
-        return data
 
     source = load(os.path.join(ROOT, ".agents", "mcp.json"), "source")
     if source is None:
@@ -111,10 +114,44 @@ def shape_check() -> int:
     return 1 if red else 0
 
 
+def lock_check() -> int:
+    """B5-4 rule-lock: a locked server named in any host face <=> its row in
+    tool-routing.md. Kills both "MCP removed but rules still teach it" and
+    the reverse."""
+    red = 0
+    text = ""
+    if os.path.isfile(ROUTING):
+        text = open(ROUTING, encoding="utf-8").read()
+    named = set()
+    for label, path, getter in ((".mcp.json", os.path.join(ROOT, ".mcp.json"),
+                                 lambda d: list(d.get("mcpServers", {}))),
+                                ("opencode.json", os.path.join(ROOT, ".opencode", "opencode.json"),
+                                 lambda d: list(d.get("mcp", {})))):
+        data = load(path, label)
+        if data:
+            named.update(n for n in getter(data) if n in LOCKED_SERVERS)
+    for server in LOCKED_SERVERS:
+        # Row-level match: the name must appear in a matrix table row, not
+        # merely anywhere in the file (the lock-in prose mentions all three).
+        row_present = any(line.lstrip().startswith("|") and server in line
+                          for line in text.splitlines())
+        if server in named and not row_present:
+            print(f" [LOCK  ] {server:16s} named in host face but tool-routing.md row missing")
+            red += 1
+        if server not in named and row_present:
+            print(f" [LOCK  ] {server:16s} routing row exists but server absent from every host face")
+            red += 1
+    if red:
+        print(f"GATE-MCP lock ✗ ({red} issue(s))")
+    return 1 if red else 0
+
+
 def main() -> int:
     shape_rc = shape_check()
     if shape_rc:
         return shape_rc
+    if lock_check():
+        return 1
 
     with open(REGISTRY, encoding="utf-8") as handle:
         servers = json.load(handle)
@@ -134,6 +171,29 @@ def main() -> int:
 
         label = spec.get("pkg") or spec.get("task") or spec.get("kind")
         print(f" [PROBE]  {name:16s} {label}@{spec['version']}")
+        probe = spec.get("probe")
+        if probe:
+            # B5-3: cheap version probe -- no server start, no timeout burn.
+            if spec.get("kind") == "pixi":
+                argv = [os.path.join(ROOT, ".pixi", "envs", spec["pixi_env"], "bin", probe[0])]
+            else:
+                argv = [os.path.join(HERE, "node_modules", ".mcp", name,
+                                     "node_modules", ".bin", probe[0])]
+            try:
+                proc = subprocess.run(argv + list(probe[1:]), cwd=ROOT,
+                                      capture_output=True, text=True, timeout=60)
+            except subprocess.TimeoutExpired:
+                print(f" [RED   ] {name:16s} version probe timeout")
+                red += 1
+                continue
+            if proc.returncode == 0:
+                first = (proc.stdout or proc.stderr).strip().splitlines()
+                print(f" [VER   ] {name:16s} {first[-1][:60] if first else 'version ok'}")
+                green += 1
+            else:
+                print(f" [RED   ] {name:16s} version probe failed (exit {proc.returncode})")
+                red += 1
+            continue
         proc = subprocess.Popen(
             ["bash", LAUNCHER, name],
             cwd=ROOT,
