@@ -10,7 +10,7 @@ description: "Borrow before build: prove the existing supplier face cannot take 
 ## Trigger Conditions
 
 - About to write any NEW mechanism: a CMake target/function, a script verb, a wrapper, a generator, a config block
-- A review or the user asks "doesn't this already exist?" / "这不已经有了吗"
+- A review or the user asks "doesn't this already exist?" / "这不已经有了吗" <!-- c49:trigger -->
 - 用户说「复用优先 / 借先于造 / 别自造」 <!-- c49:trigger -->
 
 ## Why — this workspace's own scars (every rule has a receipt)
