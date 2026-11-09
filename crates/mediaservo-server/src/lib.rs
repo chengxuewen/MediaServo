@@ -8,6 +8,7 @@ pub mod apikeys;
 pub mod audit;
 pub mod config;
 pub mod devices;
+pub mod floor;
 pub mod health;
 pub mod monitor;
 pub mod relay;
