@@ -36,8 +36,9 @@
 ### Other living references (root)
 | Document | Content |
 |----------|---------|
-| `janus-gateway.md` | Janus Gateway (WebRTC conferencing gateway) reference |
+|  `research/video-conference/janus-gateway.md` | Janus Gateway (WebRTC conferencing gateway) reference |
 | `oxmgr-upstream-feedback.md` | **oxmgr vendor feedback letter** — service/startup gaps, daemon liveness truth + auto-spawn parasitism, SIGTERM orphaning (filed from the 2026-10-19 vehicle round; workarounds cross-ref k12/k14) |
+| `visiaengine.md` | **VisiaEngine donor-attribution ledger** — agent-toolchain port donor→destination table (MIT attribution surface; not-ported items pending P5) |
 
 ## Research Archive (Explanation — historical research, not part of active work)
 
