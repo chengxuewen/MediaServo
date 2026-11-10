@@ -5,6 +5,18 @@ teams); for development process details, consult git log directly. Newest versio
 
 ## [Unreleased]
 
+### Deprecated
+
+- [room-model] Legacy room-id forms are deprecated (PLAN §4c, five-surface warning;
+  removal after P6, warns only this round). `audio-<id>` prefix inference now resolves
+  to `kind=meet, video=false` (a full-duplex voice conference, RM6 — not `talk`), and the
+  per-stream `<device>_<stream>` rooms are deprecated in favour of one-`view`-room-per-device
+  with N producers (RM9). `mediaservo_common::room::resolve()` is the new policy authority;
+  `sfu::is_audio_room()` and the discovery `room_kind()` wire projection are marked
+  `#[deprecated]`. A per-room-per-process `WARN` fires on first legacy sighting, and the
+  `/api/rooms` discovery entries carry an additive `deprecated{legacy,since,remove_after,
+  replaced_by}` badge (omitted for kind-native rooms).
+
 ### Fixed
 
 - The IDE bootstrap settings no longer prepend the pixi bin directory to

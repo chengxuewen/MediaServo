@@ -165,12 +165,12 @@ impl SessionIdentity {
     }
 
     /// Produce gate: vehicles auto-allowed (their own streams); accounts denied by default (cockpits only consume) --
-    /// **audio-* conference-room exemption** (D-H11 revision/P1: conference mic uplink, C29 full-interconnect semantics);
-    /// Legacy allowed (dev path).
+    /// **voice-conference exemption** (D-H11 revision/P1; §4c: the old `audio-*` prefix test is now
+    /// a kind read -- `meet(video=false)`, C29 amendment); Legacy allowed (dev path).
     pub fn can_produce(&self, room_id: &str) -> Result<(), String> {
         match self {
             Self::Account(a) => {
-                if crate::sfu::is_audio_room(room_id) {
+                if mediaservo_common::room::resolve(room_id).is_voice_conference() {
                     Ok(())
                 } else {
                     Err(format!(

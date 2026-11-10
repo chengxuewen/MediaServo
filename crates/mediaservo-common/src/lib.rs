@@ -18,6 +18,7 @@ pub mod floor;
 pub mod logging;
 pub mod metrics;
 pub mod protocol;
+pub mod room;
 
 /// **Single source of truth** for deploy-side env help (msrtc.sh cats the same file at runtime; server/host -h embeds it at compile time).
 /// `${...}` placeholders are resolved by env_usage_text, keeping the three key tables byte-identical (drift is structurally impossible).

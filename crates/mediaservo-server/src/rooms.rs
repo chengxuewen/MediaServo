@@ -31,6 +31,7 @@ use crate::audit::{AuditEvent, log_event};
 #[allow(unused_imports)]
 // clippy --fix cfg blind spot (09-18 N8 record): items unused in this posture are used by the stub posture/tests branches
 use crate::roles::{AccountIdentity, CockpitRole, SessionIdentity};
+use mediaservo_common::room::stream_room_notice;
 
 /// List item (wire contract -- unit test pins the field shape; extra fields = regression failure).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -44,6 +45,36 @@ pub struct RoomEntry {
     /// Online streams embedded in the vehicle room (`generator1..N` stream id list; carried by control rooms only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub streams: Option<Vec<String>>,
+    /// Room model §4c deprecation badge (discovery surface: admin shows the marker).
+    /// Additive wire: None omits the key (the {room_id, kind} pin stays green for kind-native rooms).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecated: Option<DeprecationNotice>,
+}
+
+/// Wire shape of the §4c deprecation notice (machine-readable: badge + migration line).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct DeprecationNotice {
+    pub legacy: &'static str,
+    pub since: &'static str,
+    pub remove_after: &'static str,
+    pub replaced_by: &'static str,
+}
+
+/// Copy a resolved notice into the wire shape.
+fn notice_of(d: mediaservo_common::room::Deprecation) -> DeprecationNotice {
+    DeprecationNotice {
+        legacy: d.legacy,
+        since: d.since,
+        remove_after: d.remove_after,
+        replaced_by: d.replaced_by,
+    }
+}
+
+/// Resolve-based badge: the audio-prefix notice for `audio-` rooms, None for
+/// kind-native ids. Stream-room badges are attached separately where derivation
+/// evidence exists (the caller knows base x online streams), never by name guess.
+fn audio_notice_of(room_id: &str) -> Option<DeprecationNotice> {
+    mediaservo_common::room::resolve(room_id).deprecated.map(notice_of)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -51,9 +82,12 @@ pub struct RoomsResponse {
     pub rooms: Vec<RoomEntry>,
 }
 
-/// The three room kinds (W4d): audio (C29 prefix) always first; stream_room = a member of the derived set
-/// (`<vehicle-room>_<stream-id>`, media plane); remaining registered rooms = control (vehicle room/control plane -- no
-/// video producer inside; labeling video would mislead cockpit consumers).
+/// The three wire kinds of the legacy discovery projection (W4d; §4c note: the
+/// policy authority is now `mediaservo_common::room::resolve()` -- this function
+/// only projects the discovery label; audio-prefix labels stay served until P6).
+#[deprecated(
+    note = "discovery wire projection only -- policy reads must use the room-kind authority (PLAN §4c)"
+)]
 pub fn room_kind(room_id: &str, is_stream_room: bool) -> &'static str {
     if room_id.starts_with("audio-") {
         "audio"
@@ -132,8 +166,18 @@ fn psk_discover(
     let mut rooms: Vec<RoomEntry> = Vec::new();
     let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
     for r in state.signaling.room_manager.list_rooms() {
-        if r.id.starts_with("audio-") {
-            rooms.push(RoomEntry { room_id: r.id, kind: "audio", parent: None, streams: None });
+        // §4c: kind-based branching replaces the raw prefix test; the legacy wire
+        // labels (audio/video/control) stay served until P6, with the badge attached.
+        let stance = mediaservo_common::room::resolve(&r.id);
+        if stance.is_voice_conference() {
+            let deprecated = stance.deprecated.map(notice_of);
+            rooms.push(RoomEntry {
+                room_id: r.id,
+                kind: "audio",
+                parent: None,
+                streams: None,
+                deprecated,
+            });
             continue;
         }
         if let Some((base, sid)) = r.id.rsplit_once('_')
@@ -146,6 +190,8 @@ fn psk_discover(
                 kind: "video",
                 parent: Some(parent.clone()),
                 streams: None,
+                // derivation evidence: base x online streams matched -- the badge attaches here, not by name guessing
+                deprecated: Some(notice_of(stream_room_notice())),
             });
             emitted.insert(r.id);
             continue;
@@ -156,6 +202,7 @@ fn psk_discover(
             kind: "control",
             parent: None,
             streams: streams.clone(),
+            deprecated: None,
         });
         if let Some(ss) = &streams {
             for sid in ss {
@@ -167,6 +214,7 @@ fn psk_discover(
                         kind: "video",
                         parent: Some(r.id.clone()),
                         streams: None,
+                        deprecated: Some(notice_of(stream_room_notice())),
                     });
                 }
             }
@@ -270,6 +318,7 @@ async fn list_rooms(
                     kind: "video",
                     parent: Some(base.to_string()),
                     streams: None,
+                    deprecated: Some(notice_of(stream_room_notice())),
                 });
             }
             let streams: Vec<String> = derived
@@ -282,8 +331,16 @@ async fn list_rooms(
                 .collect();
             let streams = (!streams.is_empty()).then_some(streams);
             room_visible(&role, &vehicles, owner.as_deref()).then(|| {
+                #[allow(deprecated)]
+                // legacy discovery wire projection until P6 (policy reads use resolve())
                 let kind = room_kind(&r.id, stream_rooms.contains(&r.id));
-                RoomEntry { room_id: r.id.clone(), kind, parent: None, streams }
+                RoomEntry {
+                    room_id: r.id.clone(),
+                    kind,
+                    parent: None,
+                    streams,
+                    deprecated: audio_notice_of(&r.id),
+                }
             })
         })
         .collect();
@@ -745,17 +802,45 @@ mod tests {
 
     /// Wire contract: exactly the two fields {room_id, kind} (an extra/missing field = serde output change = this test goes red first).
     #[test]
+    #[allow(deprecated)] // room_kind is the legacy wire projection, pinned here intentionally
     fn wire_shape_exactly_two_fields() {
         let json = serde_json::to_value(RoomEntry {
             room_id: "vehicle_test1".into(),
             kind: "video",
             parent: None,
             streams: None,
+            deprecated: None,
         })
         .unwrap();
         assert_eq!(json, serde_json::json!({ "room_id": "vehicle_test1", "kind": "video" }));
         assert_eq!(room_kind("audio-v1", false), "audio");
         assert_eq!(room_kind("vehicle_test1", true), "video");
         assert_eq!(room_kind("vehicle", false), "control");
+    }
+
+    /// §4c deprecation surface 2: the discovery badge is present for a legacy
+    /// `audio-` room and absent for a kind-native id (additive wire -- None omits the key).
+    #[test]
+    fn discovery_badge_present_for_legacy_absent_for_native() {
+        let legacy = RoomEntry {
+            room_id: "audio-ms-car1".into(),
+            kind: "audio",
+            parent: None,
+            streams: None,
+            deprecated: audio_notice_of("audio-ms-car1"),
+        };
+        let json = serde_json::to_value(&legacy).unwrap();
+        assert_eq!(json["deprecated"]["legacy"], "audio-prefix");
+        assert_eq!(json["deprecated"]["remove_after"], "P6");
+
+        let native = RoomEntry {
+            room_id: "fleet1".into(),
+            kind: "control",
+            parent: None,
+            streams: None,
+            deprecated: audio_notice_of("fleet1"),
+        };
+        let json = serde_json::to_value(&native).unwrap();
+        assert!(json.get("deprecated").is_none(), "kind-native room carries no badge");
     }
 }

@@ -11,11 +11,30 @@
 use dashmap::DashMap;
 use mediaservo_common::protocol;
 
-/// H2: audio room predicate -- the room_id prefix convention `audio-<vehicle-id>`.
+/// H2: audio room predicate -- **delegates to the room-kind authority** (PLAN §4c;
+/// C29 amendment: the `audio-` prefix is a legacy form resolved to `meet(video=false)`,
+/// the policy question "is this a full-interconnect voice conference" is now a kind read.
 /// Audio room = a fully-interconnected opus conference (vehicle host-audio process + cockpit viewer+ / dispatcher);
 /// coexists on the same machine with video/control rooms (RoomType-independent; SFU rooms are isolated by the room_id string).
+#[deprecated(
+    note = "read the room-kind authority: mediaservo_common::room::resolve(id).is_voice_conference() (PLAN §4c)"
+)]
 pub fn is_audio_room(room_id: &str) -> bool {
-    room_id.starts_with("audio-")
+    mediaservo_common::room::resolve(room_id).is_voice_conference()
+}
+
+/// Process-wide warn-once ledger for legacy room forms (deprecation surface 1 of 5,
+/// PLAN §4c: per room, per process, one WARN -- ops-searchable, non-spamming; hygiene
+/// log, deliberately NOT an audit event). Room creation and discovery call it on the
+/// first sighting.
+pub fn note_room_deprecation(room_id: &str) {
+    use mediaservo_common::room::DeprecationLogger;
+    use std::sync::OnceLock;
+    static LOGGER: OnceLock<DeprecationLogger> = OnceLock::new();
+    let logger = LOGGER.get_or_init(DeprecationLogger::new);
+    if let Some(d) = mediaservo_common::room::resolve(room_id).deprecated {
+        logger.note(room_id, &d);
+    }
 }
 
 /// PIT-143 bare-metal predicate: whether the first announced IP belongs to a local interface IP.
@@ -1374,6 +1393,8 @@ mod imp {
                         participants: room.peers.len(),
                         producers,
                         consumers,
+                        // legacy wire label projection (admin summary shape); policy reads use the kind authority
+                        #[allow(deprecated)]
                         audio: super::is_audio_room(room.key()),
                         producer_ids,
                         consumer_ids,
@@ -1770,6 +1791,7 @@ mod imp {
         }
 
         #[test]
+        #[allow(deprecated)] // guard test pins the legacy predicate until P6 removal
         fn is_audio_room_recognizes_prefix() {
             assert!(is_audio_room("audio-ms-car1"), "the audio- prefix = audio room");
             assert!(!is_audio_room("ms-car1"), "an ordinary vehicle room is not an audio room");

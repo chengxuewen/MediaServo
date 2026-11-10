@@ -2329,8 +2329,9 @@ pub(crate) async fn handle_sfu_message(
                 });
                 return Some(SignalingMessage::Error { code: 4031, message: detail });
             }
-            // H2: audio rooms allow only audio producers (full-interconnect opus conference semantics) -- 4031 + audit (C15).
-            if crate::sfu::is_audio_room(room_id)
+            // H2: voice conferences allow only audio producers (full-interconnect opus semantics) -- 4031 + audit (C15).
+            // §4c: kind read replaces the prefix test (C29 amendment).
+            if mediaservo_common::room::resolve(room_id).is_voice_conference()
                 && *kind != mediaservo_common::protocol::MediaKind::Audio
             {
                 let detail = format!(

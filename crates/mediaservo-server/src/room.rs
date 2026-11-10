@@ -128,6 +128,9 @@ impl RoomManager {
                     }],
                 ),
             };
+            // Deprecation surface 1 (PLAN §4c): first sighting of a legacy room
+            // form -- per-room-per-process WARN (no-op for kind-native ids).
+            crate::sfu::note_room_deprecation(room_id);
             self.rooms.insert(
                 id.clone(),
                 Room {
