@@ -183,3 +183,7 @@ server.conf configures ports, PSK, and the database path. Sensitive values are i
 - Overall three-layer architecture: [architecture doc](../architecture.md) §2
 - Deployment forms: [deployment modes](02-deployment-modes.md)
 - Host-side capture and push: [client & host](03-client-host.md)
+
+## 13.11 Floor Control Module (2026-11-09)
+
+`crates/mediaservo-server/src/floor/` landed with the talkservo-port plan: a connection registry (per-connection floor delivery keyed by `conn_id`), a per-room single-writer reducer wrapper around the pure `FloorState`, and per-room policy (default OFF). Kind-gated dispatch, authz, timers, and media reconcile land with the P2 slice — see [26-room-model.md](26-room-model.md).

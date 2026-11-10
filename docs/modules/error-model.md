@@ -55,7 +55,7 @@ pub enum ComponentError {
 | 4001 | Room join failed | signaling.rs:308 |
 | 4002 | Room full | signaling.rs:295 |
 | 4003 | Auth failure (PSK) — semantically auth-layer; [planned] migrate to 5003 | signaling.rs:215/232 |
-| 4032 | Floor requires dialect 4 and an account session (P2 floor gate) | signaling.rs (P2) |
+| 4032 | Floor requires dialect 4, an account session, and a `talk` room (P2 floor gate) | signaling.rs (P2) |
 | 4099 | SFU internal error — [planned] migrated in from 5000 | signaling.rs:629/636/661/703/726 |
 
 > ⚠️ The 5xxx range note: **5000 is already occupied by SFU internal errors** (5 sites in signaling.rs), conflicting with 5xxx=auth/authz semantics; the migration plan is in the table above (5000→4099, 4003→5003) and needs a signaling-protocol compatibility assessment (browsers route by the type field, PIT-06, so code migration risk is low).

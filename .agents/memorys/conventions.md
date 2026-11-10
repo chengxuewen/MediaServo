@@ -484,6 +484,8 @@ conda 交叉编译器（会 PIT-85 复发）。
 
 **来源**: H2 实现实证 (2026-08-19), PIT-105 阻塞说明见 pitfalls.md
 
+**修订 (2026-11-10, talkservo-port §4c / docs/modules/26-room-model.md)**: ① 「不新增 RoomType」核心**保留**——房间 kind 是元数据上的**数据字段**（`RoomMeta`/`room_kind()`，随 talkservo P2 落地），不是枚举也不是新命名空间；② `audio-` **前缀判定进入弃用**：解析回退为 `kind=meet, video=false`（每房一次 WARN + 发现接口 `deprecated` 标记），produce 门/网关直通/TrackSender 语义不变；③ 检查锚点由 `is_audio_room` 过渡到 `room_kind()`（P2）。
+
 ## C30: libwebrtc 内嵌 FFmpeg 符号抢先满足 — host 二进制内 FFmpeg 调用必须进程内验证 (2026-08-20)
 
 **约束**: ① host 树任何二进制若同时链接 mediaservo-webrtc（backend-webrtc-sys →
