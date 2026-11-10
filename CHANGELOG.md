@@ -32,6 +32,14 @@ teams); for development process details, consult git log directly. Newest versio
 
 ### Added
 
+- [floor] WS-level O22 negative verification + r3-K3 disconnect injection: a new
+  `floor_ws_e2e` integration suite drives a live WS client — an undesignated room
+  answers exactly one 4032 per floor command with ZERO `floor_*` frames in the
+  drain window (O22), and a designated room passes the kind gate to hit the
+  eligibility gate's own 4032 (the two gates are distinguishable on the wire).
+  Disconnect now injects `FloorEvent::Leave` before the registry unregister —
+  the floor releases and the head is promoted immediately on a hard disconnect
+  (previously it lingered until the max_hold timeout).
 - [room-model] O19 producer-label convention + bitrate clamp: the canonical
   producer-label set for `view`-room camera views is `front / left / right /
   rear / ambient` (`mediaservo_common::room::PRODUCER_LABELS`) — the consumer

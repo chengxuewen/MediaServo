@@ -1330,6 +1330,16 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
             reason
         );
         if let Some(id) = floor_cleanup_conn {
+            // §3.2/r3-K3: disconnect injects Leave — the floor releases and the
+            // head is promoted immediately (not at max_hold), then the conn is
+            // removed from the registry.
+            apply_floor_event(
+                &floor_cleanup_server,
+                &relay_spawn_room,
+                &id,
+                FloorEvent::Leave { peer: relay_spawn_peer.clone() },
+            )
+            .await;
             floor_cleanup_server.floor_registry.unregister(&id);
         }
     });
