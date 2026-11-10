@@ -2152,6 +2152,7 @@ pub(crate) async fn handle_sfu_message(
                     rtp_parameters.clone(),
                     transport_id.as_deref(),
                     label.clone(),
+                    false,
                 )
                 .await
             {

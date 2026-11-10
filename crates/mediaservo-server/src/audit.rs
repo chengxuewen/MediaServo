@@ -66,6 +66,14 @@ pub enum AuditEvent {
     /// G3 authorization denial (C15: every denial must be logged + audited).
     /// action: room_join|consume|produce|config_push|emergency.
     AuthorizationDenied { action: String, peer_id: String, detail: String },
+    /// Floor-control mutation (P2): one line per grant/deny/preempt/release/mute/force-release/mode/timeout.
+    FloorAction {
+        action: String,
+        actor: String,
+        target: Option<String>,
+        room_id: String,
+        detail: String,
+    },
 }
 
 /// Emit an audit event as a structured `tracing` info-level log.
@@ -280,6 +288,17 @@ pub fn log_event(event: AuditEvent) {
                 audit.event = "psk_rotated",
                 actor = %actor,
                 "PSK rotated by admin — all hosts must sync"
+            );
+        }
+        AuditEvent::FloorAction { action, actor, target, room_id, detail } => {
+            tracing::info!(
+                audit.event = "floor_action",
+                action = %action,
+                actor = %actor,
+                target = target.as_deref().unwrap_or("-"),
+                room_id = %room_id,
+                detail = %detail,
+                "Floor action"
             );
         }
     }

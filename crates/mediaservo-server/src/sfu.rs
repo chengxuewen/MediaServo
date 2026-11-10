@@ -834,6 +834,7 @@ mod imp {
             rtp_parameters_json: serde_json::Value,
             transport_id: Option<&str>,
             label: Option<String>,
+            paused: bool,
         ) -> Result<ProduceResult, String> {
             // Convert JSON RTP parameters to mediasoup type
             let rtp_parameters: RtpParameters = serde_json::from_value(rtp_parameters_json)
@@ -862,7 +863,8 @@ mod imp {
             })?;
 
             // ponytail: construct ProducerOptions; let compiler validate the exact constructor
-            let producer_options = ProducerOptions::new(ms_kind, rtp_parameters);
+            let mut producer_options = ProducerOptions::new(ms_kind, rtp_parameters);
+            producer_options.paused = paused;
             let producer = transport
                 .produce(producer_options)
                 .await
@@ -888,6 +890,65 @@ mod imp {
                 room.producer_labels.insert(producer_id.clone(), l);
             }
             Ok(ProduceResult { producer_id, kind: kind.clone() })
+        }
+
+        /// Find a producer by id across the room's peers (R6 media gating).
+        fn find_producer(&self, room_id: &str, producer_id: &str) -> Result<Producer, String> {
+            let room = self
+                .rooms
+                .get(room_id)
+                .ok_or_else(|| format!("Room {} not found for producer {}", room_id, producer_id))?;
+            room.peers
+                .iter()
+                .find_map(|peer| {
+                    peer.producers.iter().find(|p| p.id().to_string() == producer_id).cloned()
+                })
+                .ok_or_else(|| format!("Producer {} not found in room {}", producer_id, room_id))
+        }
+
+        /// Pause a producer (R6: non-granted peers stop forwarding).
+        pub async fn pause_producer(
+            &self,
+            room_id: &str,
+            producer_id: &str,
+        ) -> Result<(), String> {
+            let producer = self.find_producer(room_id, producer_id)?;
+            producer
+                .pause()
+                .await
+                .map_err(|e| format!("pause producer {}: {e}", producer_id))
+        }
+
+        /// Resume a producer (R6: the granted peer forwards again).
+        pub async fn resume_producer(
+            &self,
+            room_id: &str,
+            producer_id: &str,
+        ) -> Result<(), String> {
+            let producer = self.find_producer(room_id, producer_id)?;
+            producer
+                .resume()
+                .await
+                .map_err(|e| format!("resume producer {}: {e}", producer_id))
+        }
+
+        /// Close a producer by removing it from its owner peer (the drop closes the
+        /// mediasoup handle). Used when a pause fails: never announce a state the
+        /// media plane cannot honor.
+        pub fn close_producer(&self, room_id: &str, producer_id: &str) -> bool {
+            let Some(mut room) = self.rooms.get_mut(room_id) else {
+                return false;
+            };
+            let mut removed = false;
+            for mut peer in room.peers.iter_mut() {
+                let before = peer.producers.len();
+                peer.producers.retain(|p| p.id().to_string() != producer_id);
+                if peer.producers.len() != before {
+                    peer.producer_transports.remove(producer_id);
+                    removed = true;
+                }
+            }
+            removed
         }
 
         /// Create a consumer for a peer on its recv transport,
@@ -2080,6 +2141,7 @@ mod imp {
                     rtp.clone(),
                     Some(&t1),
                     None,
+                    false,
                 )
                 .await
                 .expect("p1");
@@ -2091,6 +2153,7 @@ mod imp {
                     rtp.clone(),
                     Some(&t2),
                     None,
+                    false,
                 )
                 .await
                 .expect("p2");
@@ -2106,7 +2169,7 @@ mod imp {
             );
             // legacy client fallback: no transport_id -> most recently created (single-slot semantics preserved)
             let p3 = sfu
-                .create_producer("room-c1", "host", &protocol::MediaKind::Video, rtp, None, None)
+                .create_producer("room-c1", "host", &protocol::MediaKind::Video, rtp, None, None, false)
                 .await
                 .expect("p3");
             assert_eq!(
@@ -2114,6 +2177,13 @@ mod imp {
                 Some(t3.as_str()),
                 "legacy (no transport_id) must fall back to the most recently created transport"
             );
+            let handle = sfu.find_producer("room-c1", &p3.producer_id).expect("handle");
+            sfu.pause_producer("room-c1", &p3.producer_id).await.expect("pause");
+            assert!(handle.paused(), "pause must reach the mediasoup producer");
+            sfu.resume_producer("room-c1", &p3.producer_id).await.expect("resume");
+            assert!(!handle.paused(), "resume must reach the mediasoup producer");
+            assert!(sfu.close_producer("room-c1", &p3.producer_id), "close removes it");
+            assert!(sfu.find_producer("room-c1", &p3.producer_id).is_err());
         }
 
         /// C1: the data producer has the same semantics -- binds to the send transport named by transport_id;
@@ -2212,6 +2282,7 @@ mod imp {
             _rtp_parameters_json: serde_json::Value,
             _transport_id: Option<&str>,
             _label: Option<String>,
+            _paused: bool,
         ) -> Result<ProduceResult, String> {
             Err("sfu-mediasoup feature not enabled".into())
         }
