@@ -1,6 +1,15 @@
 import { SfuConsumerClient, SfuMicProducer, login } from '@mediaservo/client';
 
 type Metrics = { bitrate?: number; [k: string]: unknown };
+type Stat = {
+  type: string;
+  kind?: string;
+  bytesSent?: number;
+  bytesReceived?: number;
+  packetsSent?: number;
+  packetsReceived?: number;
+  ssrc?: number;
+};
 
 interface P0State {
   role: string;
@@ -15,6 +24,7 @@ declare global {
   interface Window {
     __p0: P0State;
     __p0Close?: () => void;
+    __p0Stats?: () => Promise<Stat[]>;
   }
 }
 
@@ -34,6 +44,24 @@ function setStatus(s: string): void {
   if (statusEl) statusEl.textContent = s;
 }
 
+// O24: expose the per-stream byte counters so the runner can assert real RTP flow
+// (PIT-105 lesson: "wired" is not "flowing" — only byte counts prove it).
+let statsProbe: (() => Promise<Stat[]>) | null = null;
+
+async function gatherStats(
+  transport: { getStats(): Promise<unknown> },
+  dir: 'out' | 'in',
+): Promise<Stat[]> {
+  const report = (await transport.getStats()) as unknown as {
+    values?: () => Iterable<Stat>;
+  } & Record<string, Stat>;
+  // RTCStatsReport is a Map — Object.values() on it is always empty.
+  const rows =
+    typeof report?.values === 'function' ? Array.from(report.values()) : Object.values(report ?? {});
+  const want = dir === 'out' ? 'outbound-rtp' : 'inbound-rtp';
+  return rows.filter((s) => s && typeof s === 'object' && s.type === want);
+}
+
 async function main(): Promise<void> {
   try {
     const { token } = await login(username, password);
@@ -43,6 +71,13 @@ async function main(): Promise<void> {
       await producer.produceAudio(stream.getAudioTracks()[0]);
       window.__p0.produced = true;
       setStatus('produced');
+      const pTransport = (
+        producer as unknown as { transport: { getStats(): Promise<unknown> } | null }
+      ).transport;
+      if (pTransport) {
+        statsProbe = () => gatherStats(pTransport, 'out');
+        window.__p0Stats = statsProbe;
+      }
       window.__p0Close = () => {
         producer.close();
         stream.getTracks().forEach((t) => t.stop());
@@ -55,6 +90,7 @@ async function main(): Promise<void> {
     audio.id = 'p0-audio';
     document.body.appendChild(audio);
 
+    let consumerRef: SfuConsumerClient | null = null;
     const consumer = new SfuConsumerClient(wsBase, room, token, {
       onTrack: (s) => {
         audio.srcObject = s;
@@ -67,9 +103,17 @@ async function main(): Promise<void> {
         window.__p0.metrics = m as Metrics;
       },
     });
+    consumerRef = consumer;
     await consumer.connect();
     await consumer.startPlay();
     setStatus('connected');
+    const rTransport = (
+      consumer as unknown as { transport: { getStats(): Promise<unknown> } | null }
+    ).transport;
+    if (rTransport) {
+      statsProbe = () => gatherStats(rTransport, 'in');
+      window.__p0Stats = statsProbe;
+    }
     window.__p0Close = () => consumer.close();
   } catch (e) {
     window.__p0.error = String((e as Error)?.message ?? e);

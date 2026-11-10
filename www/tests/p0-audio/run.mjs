@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +12,22 @@ const evidencePath =
   path.join(repoRoot, 'docs/plans/talkservo-port/evidence/p0-browser-audio.json');
 const chromePath =
   process.env.CHROME_PATH ??
-  path.join(os.homedir(), '.cache/ms-playwright/chromium-1243/chrome-linux64/chrome');
+  // pick the newest downloaded Playwright chromium (the build number moves per Playwright version)
+  (() => {
+    const root = path.join(os.homedir(), '.cache/ms-playwright');
+    if (!existsSync(root)) return '';
+    const candidates = readdirSync(root)
+      .filter((d) => /^chromium-\d+$/.test(d))
+      .sort()
+      .reverse();
+    for (const d of candidates) {
+      for (const rel of ['chrome-linux64/chrome', 'chrome-linux/chrome']) {
+        const p = path.join(root, d, rel);
+        if (existsSync(p)) return p;
+      }
+    }
+    return '';
+  })();
 const APP = 'http://127.0.0.1:5174';
 const SERVER = 'http://127.0.0.1:9800';
 const ROOM = process.env.P0_ROOM ?? 'audio-p0';
@@ -56,10 +71,11 @@ async function main() {
   const vite = spawn('pnpm', ['exec', 'vite', 'preview', '--port', '5174', '--strictPort'], {
     cwd: __dirname,
     stdio: 'inherit',
+    detached: true,
   });
   const stopVite = () => {
     try {
-      vite.kill('SIGTERM');
+      process.kill(-vite.pid, 'SIGTERM');
     } catch {
       // already gone
     }
@@ -112,11 +128,32 @@ async function main() {
     );
     evidence.consumer = await sub.evaluate(() => window.__p0);
 
+    // O24: real RTP flow — byte counters must grow in BOTH directions
+    // (PIT-105 lesson: "wired" is not "flowing"; only byte counts prove it).
+    const bytesStart = Date.now();
+    let pubStats = [];
+    let subStats = [];
+    while (Date.now() - bytesStart < 15000) {
+      pubStats = (await pub.evaluate(() => window.__p0Stats?.() ?? [])) ?? [];
+      subStats = (await sub.evaluate(() => window.__p0Stats?.() ?? [])) ?? [];
+      const outB = pubStats.reduce((a, s) => a + (s.bytesSent ?? 0), 0);
+      const inB = subStats.reduce((a, s) => a + (s.bytesReceived ?? 0), 0);
+      if (outB > 0 && inB > 0) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    evidence.publisher.stats = pubStats;
+    evidence.consumer.stats = subStats;
+    evidence.bytes = {
+      publisher_bytes_sent: pubStats.reduce((a, s) => a + (s.bytesSent ?? 0), 0),
+      publisher_packets_sent: pubStats.reduce((a, s) => a + (s.packetsSent ?? 0), 0),
+      consumer_bytes_received: subStats.reduce((a, s) => a + (s.bytesReceived ?? 0), 0),
+      consumer_packets_received: subStats.reduce((a, s) => a + (s.packetsReceived ?? 0), 0),
+    };
+
     evidence.pass =
       evidence.publisher?.produced === true &&
-      (evidence.consumer?.track === true ||
-        evidence.consumer?.status === 'playing' ||
-        (evidence.consumer?.metrics?.bitrate ?? 0) > 0);
+      (evidence.bytes?.publisher_bytes_sent ?? 0) > 0 &&
+      (evidence.bytes?.consumer_bytes_received ?? 0) > 0;
     log('consumer state', JSON.stringify(evidence.consumer));
   } catch (e) {
     evidence.error = String(e?.message ?? e);
@@ -129,7 +166,7 @@ async function main() {
     log('evidence', evidencePath, 'pass=', evidence.pass);
   }
 
-  process.exitCode = evidence.pass ? 0 : 1;
+  process.exit(evidence.pass ? 0 : 1);
 }
 
 main().catch((e) => {
