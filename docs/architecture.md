@@ -26,6 +26,8 @@ MediaServo is independently deployable multimedia infrastructure offering remote
 
 > ⚠️ **The D15/D118 scope change**: Phase 1 was originally Host↔Remote P2P direct connection and has changed to the Host→Server→Remote relay three-component model. See the [module doc](modules/03-client-host.md) and §2 for details.
 
+> Rooms are typed by purpose (2026-11-10, talkservo-port §4c): a room carries a `kind` **data field** — `talk` / `meet` / `desk` / `view` / `ctrl` — instead of name prefixes; see [module 26 — Room Model](modules/26-room-model.md).
+
 ### 1.2 Relationship to Third-Party Platforms
 
 ```

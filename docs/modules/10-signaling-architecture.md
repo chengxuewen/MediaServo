@@ -392,3 +392,11 @@ The server uses the same `SignalHandler` for both client types, distinguishing t
 > **Status revision (D289 / F13, finalized in the 2026-09-14 team review)**: MQTT is no longer the default Phase 2+ dual-track item — WS signaling hardening has already landed via S0.5 (v3 heartbeat/session resume/priority queues); MQTT is only evaluated when the "offline command delivery / large-scale presence" scenario actually appears, **with the precondition gate = completing the externalized-session-state assessment first** (this repo's "connection = session" model and the broker bus model cannot be mixed; the dual-presence-source = dual-stack same-session option was rejected in option D). The original design below is archived (unimplemented).
 
 Phase 2+ introduces MQTT 5.0 as the Vehicle-to-Cloud signaling channel. Phase 1 uses WebSocket only. MQTT 5.0's core features (session persistence, shared subscriptions, request-response pattern) suit large-scale vehicle-connection scenarios (D74).
+
+## 10.12 Room kinds & floor delivery (P2)
+
+> Status: normative design (talkservo-port §4c, RM3/RM6/RM13); see [26-room-model.md](26-room-model.md).
+
+- `room_kind(room_id)` replaces the `audio-` prefix check: explicit room metadata first, then legacy fallbacks (`audio-<id>` → `meet, video=false`; `<device>_<stream>` → `stream`, deprecated) with a once-per-room warning.
+- Floor commands are accepted only in `talk` rooms from account sessions at dialect >= 4; queue/denial responses go privately over the per-connection registry, grants/idle broadcast to eligible connections (never the flat room channel).
+- Media reconcile runs after the decision succeeds: resume granted participants' producers, pause the other participants, and never touch non-participant media (device/legacy producers) or non-`talk` rooms.

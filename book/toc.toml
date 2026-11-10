@@ -8,6 +8,7 @@ exclude = [
   "docs/superpowers/**",
   "docs/handoff-*.md",
   "docs/modules/25-abi-baseline.md",
+  "docs/modules/26-room-model.md",
 ]
 
 [[chapter]]
