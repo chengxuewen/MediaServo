@@ -2136,11 +2136,144 @@ pub(crate) async fn apply_floor_event(
         room_id: room_id.to_string(),
         detail: floor_detail,
     });
-    let signals = {
-        let mut g = room.lock().await;
-        g.apply(event)
-    };
-    for signal in signals {
+    // §3.2/O23 media-first reconcile: the pure decision and the media plane
+    // alternate in a bounded cascade. The state borrow is released before every
+    // SFU await (orders 1-3); pauses/resumes run without it (order 4); only
+    // media-confirmed truth is announced (order 5) — a failed resume rolls the
+    // grant back (Release promotes the head), the rolled-back peer gets a
+    // private `no_media` denial, and a superseded round's collective signals
+    // are replaced by one authoritative state announcement.
+    let mut pending: Vec<FloorEvent> = vec![event];
+    let mut out_signals: Vec<FloorSignal> = Vec::new();
+    let mut no_media_peers: Vec<String> = Vec::new();
+    let mut superseded = false;
+    let mut rounds = 0usize;
+    loop {
+        rounds += 1;
+        if rounds > 32 {
+            tracing::warn!(room_id, "floor reconcile cascade truncated at 32 rounds");
+            break;
+        }
+        let Some(ev) = pending.pop() else {
+            break;
+        };
+        // (1)-(3): pure decision; the borrow lives only inside this block.
+        let (round_signals, grants) = {
+            let mut g = room.lock().await;
+            let signals = g.apply(ev);
+            let grants = g.state().grants().to_vec();
+            (signals, grants)
+        };
+        let mut rolled_back = false;
+        // (4): media plane, no state borrow held.
+        #[cfg(feature = "sfu-mediasoup")]
+        if server.floor_enabled {
+            let granted_owners: Vec<String> =
+                grants.iter().map(|p| format!("session:{p}")).collect();
+            let producers = server.sfu_manager.list_producers(room_id).unwrap_or_default();
+            for (producer_id, _kind, _peer, _label) in &producers {
+                let owner = server.producer_owners.get(producer_id).map(|v| v.value().clone());
+                let granted = owner.as_ref().is_some_and(|o| granted_owners.contains(o));
+                let result = if granted {
+                    server.sfu_manager.resume_producer(room_id, producer_id).await
+                } else {
+                    server.sfu_manager.pause_producer(room_id, producer_id).await
+                };
+                match result {
+                    Ok(()) if granted => {
+                        // resume success arms the media-grace clock for the owner peer
+                        if let Some(peer) =
+                            owner.as_deref().and_then(|o| o.strip_prefix("session:"))
+                        {
+                            room.lock().await.media_confirm(peer);
+                        }
+                    }
+                    Err(e) if granted => {
+                        // O23: a failed resume rolls the grant back (the Release
+                        // promotes the queue head); this round's collective truth
+                        // is superseded by the corrected round.
+                        tracing::warn!(
+                            "floor reconcile: resume producer {producer_id} failed: {e}"
+                        );
+                        if let Some(peer) =
+                            owner.as_deref().and_then(|o| o.strip_prefix("session:"))
+                        {
+                            no_media_peers.push(peer.to_string());
+                            pending.push(FloorEvent::Release { peer: peer.to_string() });
+                            rolled_back = true;
+                        }
+                    }
+                    Err(e) => {
+                        // O23: a failed pause closes the producer and is audited.
+                        tracing::warn!("floor reconcile: pause producer {producer_id} failed: {e}");
+                        let closed = server.sfu_manager.close_producer(room_id, producer_id);
+                        audit::log_event(AuditEvent::FloorAction {
+                            action: "pause_fail_close".into(),
+                            actor: "reconcile".into(),
+                            target: Some(producer_id.clone()),
+                            room_id: room_id.to_string(),
+                            detail: format!("{e}; closed={closed}"),
+                        });
+                    }
+                    Ok(()) => {}
+                }
+            }
+        }
+        if rolled_back {
+            superseded = true;
+        } else {
+            out_signals.extend(round_signals);
+        }
+        if pending.is_empty() {
+            break;
+        }
+    }
+    // A cascade with rollbacks supersedes the stale collective signals: one
+    // authoritative announcement is synthesized from the final state.
+    if superseded {
+        out_signals.retain(|s| {
+            !matches!(
+                s,
+                FloorSignal::FloorGranted { .. }
+                    | FloorSignal::FloorTaken { .. }
+                    | FloorSignal::FloorIdle { .. }
+            )
+        });
+        let final_signal = {
+            let g = room.lock().await;
+            let st = g.state();
+            if st.grants().is_empty() {
+                FloorSignal::FloorIdle {
+                    generation: st.generation(),
+                    reason: Some("no_media".into()),
+                }
+            } else {
+                FloorSignal::FloorGranted {
+                    grants: st.grants().to_vec(),
+                    generation: st.generation(),
+                }
+            }
+        };
+        out_signals.push(final_signal);
+    }
+    // O23: rolled-back grantees get a private no_media denial (nothing was
+    // announced to them); delivered by peer — a cascaded grantee differs from
+    // the original actor's connection.
+    for peer in &no_media_peers {
+        let generation = floor_current_generation(server, room_id).await;
+        audit::log_event(AuditEvent::AuthorizationDenied {
+            action: "floor_request".into(),
+            peer_id: peer.clone(),
+            detail: "granted but media resume failed".into(),
+        });
+        let denied = SignalingMessage::FloorDenied {
+            room_id: room_id.to_string(),
+            reason: mediaservo_common::floor::DenyReason::NoMedia,
+            generation,
+        };
+        let _ = server.floor_registry.deliver_peer(peer, &denied);
+    }
+    for signal in out_signals {
         let (msg, private) = match signal {
             FloorSignal::FloorGranted { grants, generation } => (
                 SignalingMessage::FloorGranted { room_id: room_id.to_string(), grants, generation },
@@ -2173,6 +2306,19 @@ pub(crate) async fn apply_floor_event(
             let _ = server.floor_registry.broadcast_room(room_id, &msg);
         }
     }
+}
+
+/// P2: whether a new producer must start paused (floor-enabled room, peer not granted).
+#[cfg(feature = "sfu-mediasoup")]
+async fn floor_producer_paused(server: &SignalingServer, room_id: &str, peer_id: &str) -> bool {
+    if !server.floor_enabled {
+        return false;
+    }
+    let Some(arc) = server.floor_rooms.get(room_id).map(|r| Arc::clone(r.value())) else {
+        return true;
+    };
+    let g = arc.lock().await;
+    !g.state().is_granted(&peer_id.to_string())
 }
 
 async fn disconnect_session(
@@ -2608,6 +2754,7 @@ pub(crate) async fn handle_sfu_message(
                 });
                 return Some(SignalingMessage::Error { code: 4031, message: detail });
             }
+            let paused = floor_producer_paused(server, room_id, peer_id).await;
             match sfu
                 .create_producer(
                     room_id,
@@ -2616,7 +2763,7 @@ pub(crate) async fn handle_sfu_message(
                     rtp_parameters.clone(),
                     transport_id.as_deref(),
                     label.clone(),
-                    false,
+                    paused,
                 )
                 .await
             {

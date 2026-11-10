@@ -4,7 +4,7 @@
 //! broadcast. Eligibility is `is_account && negotiated >= PROTOCOL_MIN_FLOOR`.
 
 use dashmap::DashMap;
-use mediaservo_common::protocol::{SignalingMessage, PROTOCOL_MIN_FLOOR};
+use mediaservo_common::protocol::{PROTOCOL_MIN_FLOOR, SignalingMessage};
 use tokio::sync::mpsc;
 
 /// One registered connection. `tx` carries serialized signaling frames.
@@ -53,6 +53,20 @@ impl ConnRegistry {
             return false;
         };
         entry.tx.try_send(text).is_ok()
+    }
+
+    /// Deliver a private frame to a PEER (not a conn) — the O23 cascade denial
+    /// path: a rolled-back grantee may differ from the original actor's conn.
+    pub fn deliver_peer(&self, peer_id: &str, msg: &SignalingMessage) -> bool {
+        let Ok(text) = serde_json::to_string(msg) else {
+            return false;
+        };
+        for entry in self.inner.iter() {
+            if entry.peer_id == peer_id && entry.floor_eligible() {
+                return entry.tx.try_send(text).is_ok();
+            }
+        }
+        false
     }
 
     /// Public floor state (grants/mode/generation) to every eligible conn in

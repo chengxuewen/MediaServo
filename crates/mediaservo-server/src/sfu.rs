@@ -913,10 +913,9 @@ mod imp {
 
         /// Find a producer by id across the room's peers (R6 media gating).
         fn find_producer(&self, room_id: &str, producer_id: &str) -> Result<Producer, String> {
-            let room = self
-                .rooms
-                .get(room_id)
-                .ok_or_else(|| format!("Room {} not found for producer {}", room_id, producer_id))?;
+            let room = self.rooms.get(room_id).ok_or_else(|| {
+                format!("Room {} not found for producer {}", room_id, producer_id)
+            })?;
             room.peers
                 .iter()
                 .find_map(|peer| {
@@ -926,16 +925,9 @@ mod imp {
         }
 
         /// Pause a producer (R6: non-granted peers stop forwarding).
-        pub async fn pause_producer(
-            &self,
-            room_id: &str,
-            producer_id: &str,
-        ) -> Result<(), String> {
+        pub async fn pause_producer(&self, room_id: &str, producer_id: &str) -> Result<(), String> {
             let producer = self.find_producer(room_id, producer_id)?;
-            producer
-                .pause()
-                .await
-                .map_err(|e| format!("pause producer {}: {e}", producer_id))
+            producer.pause().await.map_err(|e| format!("pause producer {}: {e}", producer_id))
         }
 
         /// Resume a producer (R6: the granted peer forwards again).
@@ -945,10 +937,7 @@ mod imp {
             producer_id: &str,
         ) -> Result<(), String> {
             let producer = self.find_producer(room_id, producer_id)?;
-            producer
-                .resume()
-                .await
-                .map_err(|e| format!("resume producer {}: {e}", producer_id))
+            producer.resume().await.map_err(|e| format!("resume producer {}: {e}", producer_id))
         }
 
         /// Close a producer by removing it from its owner peer (the drop closes the
@@ -2191,7 +2180,15 @@ mod imp {
             );
             // legacy client fallback: no transport_id -> most recently created (single-slot semantics preserved)
             let p3 = sfu
-                .create_producer("room-c1", "host", &protocol::MediaKind::Video, rtp, None, None, false)
+                .create_producer(
+                    "room-c1",
+                    "host",
+                    &protocol::MediaKind::Video,
+                    rtp,
+                    None,
+                    None,
+                    false,
+                )
                 .await
                 .expect("p3");
             assert_eq!(

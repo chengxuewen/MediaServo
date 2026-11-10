@@ -32,6 +32,17 @@ teams); for development process details, consult git log directly. Newest versio
 
 ### Added
 
+- [floor] §3.4 media-first reconcile (O23): after every floor decision the media
+  plane is reconciled BEFORE anything is announced — resume the granted sessions'
+  producers; only on resume success is the grant broadcast (pauses stay async
+  best-effort; a failed pause closes the producer + one audit line). A failed
+  resume rolls the grant back: the queue head is promoted through a bounded
+  cascade (Release semantics) and the rolled-back peer gets a private
+  `FloorDenied{NoMedia}`; a cascade supersedes the stale collective signals with
+  one authoritative state announcement. Producers in floor rooms still start
+  paused unless their session is already granted. The reconcile success arms the
+  §3.2 media watchdog: a grantee whose media never confirms within
+  `media_grace_secs` (2 s) is released (`MediaDown`) and the head is promoted.
 - [floor] §3.3 role-scoped snapshots (D12/D16): `floor_state` for admin/dispatcher
   includes the pending queue; operator/viewer (field scopes) get a snapshot with
   the `queue` key omitted entirely (mirrors the reference wire contract). Join and

@@ -60,20 +60,34 @@ async fn tick(server: &SignalingServer, empty_since: &mut HashMap<String, Instan
 
     // Pass 2: classify rooms (locks are per-room; no map guard held).
     let mut due_timeout: Vec<String> = Vec::new();
+    let mut due_media: Vec<(String, String)> = Vec::new();
     let mut empty_now: HashSet<String> = HashSet::new();
     for (room_id, room) in &rooms {
         let g = room.lock().await;
         if hold_timed_out(g.granted_at(), g.limits().max_hold_secs, now) {
             due_timeout.push(room_id.clone());
         }
+        // §3.2 media watchdog (sfu posture only): a grantee whose media never
+        // confirmed within media_grace is released and the head is promoted.
+        #[cfg(feature = "sfu-mediasoup")]
+        if server.floor_enabled {
+            for peer in g.media_grace_due(now) {
+                due_media.push((room_id.clone(), peer));
+            }
+        }
         if state_preservable(&g, server, room_id) {
             empty_now.insert(room_id.clone());
         }
     }
 
-    // Pass 3: fire due timeouts through the standard pipeline (audit + delivery).
+    // Pass 3: fire due timeouts and media revocations through the standard
+    // pipeline (audit + delivery).
     for room_id in &due_timeout {
         apply_floor_event(server, room_id, "timer", FloorEvent::Timeout).await;
+    }
+    for (room_id, peer) in &due_media {
+        apply_floor_event(server, room_id, "timer", FloorEvent::MediaDown { peer: peer.clone() })
+            .await;
     }
 
     // Pass 4: idle-TTL bookkeeping. Rooms gone from the map or no longer empty
