@@ -1909,4 +1909,249 @@ mod tests {
             assert_eq!(serde_json::to_value(&parsed).unwrap(), json);
         }
     }
+
+    /// P1-carried wire detail: `priority`/`preempt` are optional — omitted keys
+    /// on the wire, `None` after parse (skip_serializing_if contract).
+    #[test]
+    fn floor_request_omits_optional_keys_when_none() {
+        let json =
+            serde_json::to_value(SignalingMessage::FloorRequest { priority: None, preempt: None })
+                .unwrap();
+        assert_eq!(json["type"], "floor_request");
+        assert!(json.get("priority").is_none(), "None must omit the key: {json}");
+        assert!(json.get("preempt").is_none(), "None must omit the key: {json}");
+        let parsed: SignalingMessage = serde_json::from_value(json).unwrap();
+        assert!(matches!(parsed, SignalingMessage::FloorRequest { priority: None, preempt: None }));
+    }
+
+    #[test]
+    fn floor_request_keeps_optional_keys_when_some() {
+        let json = serde_json::to_value(SignalingMessage::FloorRequest {
+            priority: Some(7),
+            preempt: Some(true),
+        })
+        .unwrap();
+        assert_eq!(json["priority"], 7);
+        assert_eq!(json["preempt"], true);
+        let parsed: SignalingMessage = serde_json::from_value(json).unwrap();
+        assert!(matches!(
+            parsed,
+            SignalingMessage::FloorRequest { priority: Some(7), preempt: Some(true) }
+        ));
+    }
+
+    #[test]
+    fn floor_idle_omits_reason_when_none() {
+        let json = serde_json::to_value(SignalingMessage::FloorIdle {
+            room_id: "r".into(),
+            reason: None,
+            generation: 3,
+        })
+        .unwrap();
+        assert!(json.get("reason").is_none(), "None must omit the key: {json}");
+        let parsed: SignalingMessage = serde_json::from_value(json).unwrap();
+        assert!(matches!(parsed, SignalingMessage::FloorIdle { reason: None, generation: 3, .. }));
+    }
+
+    #[test]
+    fn floor_idle_carries_reason_when_some() {
+        let json = serde_json::to_value(SignalingMessage::FloorIdle {
+            room_id: "r".into(),
+            reason: Some("timeout".into()),
+            generation: 4,
+        })
+        .unwrap();
+        assert_eq!(json["reason"], "timeout");
+    }
+
+    /// The cascade emits free-form reasons (e.g. "no_media") — any string passes.
+    #[test]
+    fn floor_idle_reason_is_free_form() {
+        let json = serde_json::to_value(SignalingMessage::FloorIdle {
+            room_id: "r".into(),
+            reason: Some("no_media".into()),
+            generation: 5,
+        })
+        .unwrap();
+        assert_eq!(json["reason"], "no_media");
+    }
+
+    /// Closed reason set: all seven snake_case wire names roundtrip.
+    #[test]
+    fn floor_denied_reason_wire_names_are_snake_case() {
+        let cases = [
+            (DenyReason::Busy, "busy"),
+            (DenyReason::ExceedsCeiling, "exceeds_ceiling"),
+            (DenyReason::NotMember, "not_member"),
+            (DenyReason::RateLimited, "rate_limited"),
+            (DenyReason::PreemptPriority, "preempt_priority"),
+            (DenyReason::NoMedia, "no_media"),
+            (DenyReason::Unauthorized, "unauthorized"),
+        ];
+        for (reason, wire) in cases {
+            let json = serde_json::to_value(SignalingMessage::FloorDenied {
+                room_id: "r".into(),
+                reason,
+                generation: 1,
+            })
+            .unwrap();
+            assert_eq!(json["reason"], wire, "{reason:?} wire name");
+            let parsed: SignalingMessage = serde_json::from_value(json).unwrap();
+            assert!(matches!(
+                parsed,
+                SignalingMessage::FloorDenied { reason: r, .. } if r == reason
+            ));
+        }
+    }
+
+    /// Closed enum: an unknown reason string must fail parsing (no silent variants).
+    #[test]
+    fn floor_denied_unknown_reason_string_is_rejected() {
+        let raw = serde_json::json!({
+            "type": "floor_denied",
+            "room_id": "r",
+            "reason": "weird",
+            "generation": 1,
+        });
+        assert!(serde_json::from_value::<SignalingMessage>(raw).is_err());
+    }
+
+    #[test]
+    fn floor_granted_wire_shape() {
+        let json = serde_json::to_value(SignalingMessage::FloorGranted {
+            room_id: "r".into(),
+            grants: vec!["a".into(), "b".into()],
+            generation: 6,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "floor_granted",
+                "room_id": "r",
+                "grants": ["a", "b"],
+                "generation": 6,
+            })
+        );
+    }
+
+    #[test]
+    fn floor_taken_wire_shape() {
+        let json = serde_json::to_value(SignalingMessage::FloorTaken {
+            room_id: "r".into(),
+            by: "p9".into(),
+            generation: 7,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "floor_taken",
+                "room_id": "r",
+                "by": "p9",
+                "generation": 7,
+            })
+        );
+    }
+
+    #[test]
+    fn floor_queued_wire_shape() {
+        let json = serde_json::to_value(SignalingMessage::FloorQueued {
+            room_id: "r".into(),
+            position: 2,
+            generation: 8,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "floor_queued",
+                "room_id": "r",
+                "position": 2,
+                "generation": 8,
+            })
+        );
+    }
+
+    #[test]
+    fn floor_mode_set_wire_shape() {
+        let json = serde_json::to_value(SignalingMessage::FloorModeSet { mode: FloorMode::Hybrid })
+            .unwrap();
+        assert_eq!(json, serde_json::json!({ "type": "floor_mode_set", "mode": "hybrid" }));
+    }
+
+    #[test]
+    fn floor_mute_set_wire_shape() {
+        let json = serde_json::to_value(SignalingMessage::FloorMuteSet {
+            target_peer_id: "p3".into(),
+            muted: false,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "floor_mute_set",
+                "target_peer_id": "p3",
+                "muted": false,
+            })
+        );
+    }
+
+    /// Bare commands carry no payload keys — exactly the tag object.
+    #[test]
+    fn floor_release_and_resync_are_bare_tags() {
+        let release = serde_json::to_value(SignalingMessage::FloorRelease).unwrap();
+        assert_eq!(release, serde_json::json!({ "type": "floor_release" }));
+        let resync = serde_json::to_value(SignalingMessage::FloorResync).unwrap();
+        assert_eq!(resync, serde_json::json!({ "type": "floor_resync" }));
+    }
+
+    /// The snapshot is an opaque Value on the wire — role-scoped shapes
+    /// (dispatch with queue / field without) pass through byte-equal.
+    #[test]
+    fn floor_state_snapshot_value_passthrough() {
+        for snapshot in [
+            serde_json::json!({
+                "mode": "exclusive",
+                "grants": ["a"],
+                "muted": [],
+                "queue": [{"peer": "b", "priority": 10}],
+            }),
+            serde_json::json!({
+                "mode": "exclusive",
+                "grants": ["a"],
+                "muted": [],
+            }),
+        ] {
+            let msg = SignalingMessage::FloorState {
+                room_id: "r".into(),
+                snapshot: snapshot.clone(),
+                generation: 42,
+            };
+            let json = serde_json::to_value(&msg).unwrap();
+            assert_eq!(json["snapshot"], snapshot);
+            let parsed: SignalingMessage = serde_json::from_value(json).unwrap();
+            assert_eq!(serde_json::to_value(&parsed).unwrap()["snapshot"], snapshot);
+        }
+    }
+
+    /// Generation seeds from unix nanos (~1.7e18) — beyond JS Number precision
+    /// (2^53). Rust-side serde_json keeps u64 exact; TS clients must treat it
+    /// as opaque (string/BigInt) — flagged for the P3 web client (O-note).
+    #[test]
+    fn floor_generation_is_u64_transparent() {
+        let generation: u64 = 1_700_000_000_000_000_000; // unix-nanos scale
+        let json = serde_json::to_value(SignalingMessage::FloorGranted {
+            room_id: "r".into(),
+            grants: vec![],
+            generation,
+        })
+        .unwrap();
+        assert_eq!(json["generation"], serde_json::to_value(&generation).unwrap());
+        let parsed: SignalingMessage = serde_json::from_value(json).unwrap();
+        assert!(matches!(
+            parsed,
+            SignalingMessage::FloorGranted { generation: g, .. } if g == generation
+        ));
+    }
 }
