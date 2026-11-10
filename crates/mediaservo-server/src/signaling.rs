@@ -1244,7 +1244,12 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     let tx = server.get_or_create_channel(&room_id);
     let mut rx = tx.subscribe();
 
-    // §3.5: the sender's role caps floor-request priority (entry-level ExceedsCeiling).
+    // §3.5: the sender's role caps floor-request priority (entry-level ExceedsCeiling)
+    // and scopes its floor_state snapshots (D12/D16: field scopes never see the queue).
+    let floor_role = match &session_identity {
+        SessionIdentity::Account(a) => Some(a.role),
+        _ => None,
+    };
     let floor_priority_bounds = match &session_identity {
         SessionIdentity::Account(a) => a.role.floor_priority_bounds(),
         _ => (0, u8::MAX), // unreachable in the floor branch; a defensive fallback
@@ -1274,7 +1279,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                 }
             }
         });
-        let snapshot = floor_snapshot_msg(&server, &room_id).await;
+        let snapshot = floor_snapshot_msg(&server, &room_id, floor_role).await;
         let _ = ws_sender.lock().await.send(Message::Text(send_msg(&snapshot).unwrap())).await;
         Some(conn_id)
     } else {
@@ -1285,6 +1290,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     let relay_peer_id = peer_id.clone();
     let relay_room = room_id.clone();
     let relay_floor_bounds = floor_priority_bounds;
+    let relay_floor_role = floor_role;
 
     // Clone ws_sender for direct responses (SFU + G3 authorization-denial replies) and relay
     let direct_sender = Arc::clone(&ws_sender);
@@ -1591,7 +1597,9 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                         }
                         SignalingMessage::FloorResync => {
                             if let Some(conn_id) = floor_conn_id.as_deref() {
-                                let msg = floor_snapshot_msg(&server, &relay_room).await;
+                                let msg =
+                                    floor_snapshot_msg(&server, &relay_room, relay_floor_role)
+                                        .await;
                                 let _ = server.floor_registry.deliver(conn_id, &msg);
                             } else {
                                 let err = SignalingMessage::Error {
@@ -1969,8 +1977,14 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
 
 /// a2 teardown body: SFU cross-room cleanup / device unbind / leave / consumer disconnect / router deferred teardown / RoomLeave broadcast.
 /// One shared copy for the three call sites (immediate / delayed / takeover) -- preventing multi-site drift.
-/// P2: build the role-scoped floor snapshot for a joiner/resync.
-async fn floor_snapshot_msg(server: &SignalingServer, room_id: &str) -> SignalingMessage {
+/// P2: build the role-scoped floor snapshot for a joiner/resync (D12/D16: the
+/// dispatch scope adds the pending queue; field scopes — operator/viewer — never
+/// see it: the `queue` key is omitted, mirroring the reference wire contract).
+async fn floor_snapshot_msg(
+    server: &SignalingServer,
+    room_id: &str,
+    role: Option<CockpitRole>,
+) -> SignalingMessage {
     let arc = server.floor_rooms.entry(room_id.to_string()).or_insert_with(|| {
         Arc::new(tokio::sync::Mutex::new(crate::floor::FloorRoom::new(
             room_id.to_string(),
@@ -1980,21 +1994,31 @@ async fn floor_snapshot_msg(server: &SignalingServer, room_id: &str) -> Signalin
     });
     let room = Arc::clone(&arc);
     drop(arc);
+    let dispatch_scope = matches!(role, Some(CockpitRole::Admin) | Some(CockpitRole::Dispatcher));
     let (snapshot, generation) = {
         let g = room.lock().await;
         let st = g.state();
-        (
-            serde_json::json!({
-                "mode": st.mode(),
-                "grants": st.grants(),
-                "muted": st.muted(),
-                "queue": st.queue().iter().map(|p| serde_json::json!({
-                    "peer": p.peer,
-                    "priority": p.priority,
-                })).collect::<Vec<_>>(),
-            }),
-            st.generation(),
-        )
+        let base = serde_json::json!({
+            "mode": st.mode(),
+            "grants": st.grants(),
+            "muted": st.muted(),
+        });
+        let snapshot = if dispatch_scope {
+            let mut full = base;
+            full["queue"] = serde_json::json!(
+                st.queue()
+                    .iter()
+                    .map(|p| serde_json::json!({
+                        "peer": p.peer,
+                        "priority": p.priority,
+                    }))
+                    .collect::<Vec<_>>()
+            );
+            full
+        } else {
+            base
+        };
+        (snapshot, st.generation())
     };
     SignalingMessage::FloorState { room_id: room_id.to_string(), snapshot, generation }
 }
@@ -3344,5 +3368,38 @@ mod tests {
             Some((now, 1)),
             "window expired -> fresh budget"
         );
+    }
+
+    /// D12/D16: the dispatch scope carries the pending queue; field scopes never
+    /// see it (the `queue` key is omitted from the snapshot payload entirely).
+    #[tokio::test]
+    async fn floor_snapshot_scopes_queue_by_role() {
+        let server = new_test_server().await;
+        apply_floor_event(
+            &server,
+            "talk-car1",
+            "timer",
+            FloorEvent::Request { peer: "a".into(), priority: 0, preempt: false },
+        )
+        .await;
+        apply_floor_event(
+            &server,
+            "talk-car1",
+            "timer",
+            FloorEvent::Request { peer: "b".into(), priority: 0, preempt: false },
+        )
+        .await;
+        let dispatch =
+            floor_snapshot_msg(&server, "talk-car1", Some(CockpitRole::Dispatcher)).await;
+        let field = floor_snapshot_msg(&server, "talk-car1", Some(CockpitRole::Viewer)).await;
+        let d = serde_json::to_value(&dispatch).unwrap();
+        assert_eq!(
+            d["snapshot"]["queue"].as_array().map(Vec::len),
+            Some(1),
+            "dispatch sees the queue: {d}"
+        );
+        let f = serde_json::to_value(&field).unwrap();
+        assert!(f["snapshot"].get("queue").is_none(), "field must not see the queue: {f}");
+        assert_eq!(f["snapshot"]["mode"], d["snapshot"]["mode"], "mode is common");
     }
 }

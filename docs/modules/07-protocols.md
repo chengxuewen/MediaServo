@@ -107,6 +107,6 @@ See `crates/webrtc-sys/`.
 > Status: normative design (talkservo-port §4c); the kind-based gating lands with P2. See [26-room-model.md](26-room-model.md).
 
 - **Dialect**: `SIGNALING_PROTOCOL_VERSION = 4`, `MIN_SUPPORTED = 1`, `PROTOCOL_MIN_FLOOR = 4` (`mediaservo-common/src/protocol.rs`). Native clients ignore unknown variants (landed in `mediaservo-link`).
-- **Floor family** (11 additive variants): `floor_request / floor_release / floor_mode_set / floor_mute_set / floor_resync` (C→S) and `floor_granted / floor_taken / floor_denied / floor_queued / floor_idle / floor_state` (S→C). Identity fields are never client-supplied (server-derived); refusal = error 4032 (see [error-model.md](27-error-model.md)).
+- **Floor family** (11 additive variants): `floor_request / floor_release / floor_mode_set / floor_mute_set / floor_resync` (C→S) and `floor_granted / floor_taken / floor_denied / floor_queued / floor_idle / floor_state` (S→C). Identity fields are never client-supplied (server-derived); refusal = error 4032 (see [error-model.md](27-error-model.md)). `floor_state` snapshots are role-scoped (D12/D16): dispatch scopes (admin/dispatcher) include the pending `queue`; field scopes (operator/viewer) omit the key entirely.
 - **Room kinds** ride as room metadata, not a wire enum; the floor family is delivered **per connection** (never the room broadcast) and only inside `talk` rooms. Non-`talk` rooms never carry or trigger floor state.
 

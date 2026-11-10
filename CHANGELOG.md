@@ -32,6 +32,10 @@ teams); for development process details, consult git log directly. Newest versio
 
 ### Added
 
+- [floor] §3.3 role-scoped snapshots (D12/D16): `floor_state` for admin/dispatcher
+  includes the pending queue; operator/viewer (field scopes) get a snapshot with
+  the `queue` key omitted entirely (mirrors the reference wire contract). Join and
+  resync both scope by the session role.
 - [floor] §3.2 timers: `FloorLimits` grows to the §3.2 field set (`max_hold_secs` 45,
   `media_grace_secs` 2 — arming needs the media plane and lands with the O23
   reconcile rewrite, `rate_limit_per_min` 30, `priority_ceiling` 100). A per-server
