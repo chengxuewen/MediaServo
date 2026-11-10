@@ -37,6 +37,27 @@ pub fn note_room_deprecation(room_id: &str) {
     }
 }
 
+/// O19 produce-time bitrate caps (§4c): each RTP encoding's `maxBitrate` is
+/// capped server-side (video 2.5 Mbps, audio 64 kbps — P2 dispatch defaults;
+/// config override rides with the R16 config pass). Applied on the wire JSON
+/// before the mediasoup conversion; encodings without a value GET the cap (the
+/// cap is an upper bound, not an override of explicit lower values).
+pub const VIDEO_MAX_BITRATE_BPS: u64 = 2_500_000;
+pub const AUDIO_MAX_BITRATE_BPS: u64 = 64_000;
+
+pub fn clamp_bitrate(rtp: &mut serde_json::Value, kind: &protocol::MediaKind) {
+    let cap = match kind {
+        protocol::MediaKind::Audio => AUDIO_MAX_BITRATE_BPS,
+        _ => VIDEO_MAX_BITRATE_BPS,
+    };
+    if let Some(encodings) = rtp.get_mut("encodings").and_then(|v| v.as_array_mut()) {
+        for encoding in encodings {
+            let current = encoding.get("maxBitrate").and_then(|v| v.as_u64()).unwrap_or(cap);
+            encoding["maxBitrate"] = serde_json::json!(current.min(cap));
+        }
+    }
+}
+
 /// PIT-143 bare-metal predicate: whether the first announced IP belongs to a local interface IP.
 /// In a container, announced = a host-reachable IP (not among the container's interfaces) -> false;
 /// bare metal (announced auto-detected or env/yaml being a local IP) -> true.
@@ -855,6 +876,9 @@ mod imp {
             label: Option<String>,
             paused: bool,
         ) -> Result<ProduceResult, String> {
+            // O19: enforce the produce-time bitrate caps on the wire JSON (§4c).
+            let mut rtp_parameters_json = rtp_parameters_json;
+            clamp_bitrate(&mut rtp_parameters_json, kind);
             // Convert JSON RTP parameters to mediasoup type
             let rtp_parameters: RtpParameters = serde_json::from_value(rtp_parameters_json)
                 .map_err(|e| format!("Invalid RTP parameters: {e}"))?;
@@ -1785,6 +1809,45 @@ mod imp {
             assert!(is_audio_room("audio-ms-car1"), "the audio- prefix = audio room");
             assert!(!is_audio_room("ms-car1"), "an ordinary vehicle room is not an audio room");
             assert!(!is_audio_room("room-1"), "a prefix-less room is not an audio room");
+        }
+
+        /// O19: the cap is an upper bound — over-cap clamped, under-cap kept,
+        /// absent set; audio cap is lower; no encodings key = no-op.
+        #[test]
+        fn clamp_bitrate_caps_each_encoding() {
+            let mut video = serde_json::json!({ "encodings": [
+                { "maxBitrate": 9_000_000u64 },
+                { "maxBitrate": 1_000_000u64 },
+                {},
+            ] });
+            clamp_bitrate(&mut video, &protocol::MediaKind::Video);
+            assert_eq!(
+                video["encodings"][0]["maxBitrate"],
+                serde_json::json!(2_500_000u64),
+                "over-cap clamped"
+            );
+            assert_eq!(
+                video["encodings"][1]["maxBitrate"],
+                serde_json::json!(1_000_000u64),
+                "under-cap kept"
+            );
+            assert_eq!(
+                video["encodings"][2]["maxBitrate"],
+                serde_json::json!(2_500_000u64),
+                "absent gets the cap"
+            );
+
+            let mut audio = serde_json::json!({ "encodings": [{ "maxBitrate": 9_000_000u64 }] });
+            clamp_bitrate(&mut audio, &protocol::MediaKind::Audio);
+            assert_eq!(
+                audio["encodings"][0]["maxBitrate"],
+                serde_json::json!(64_000u64),
+                "audio cap is lower"
+            );
+
+            let mut bare = serde_json::json!({ "codecs": [] });
+            clamp_bitrate(&mut bare, &protocol::MediaKind::Video);
+            assert!(bare.get("encodings").is_none(), "no encodings key = no-op");
         }
 
         /// PIT-58: announced_address must prefer the env variable (a host-reachable IP) --

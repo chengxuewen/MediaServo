@@ -108,6 +108,17 @@ pub struct Deprecation {
 /// Prefix convention being retired (C29 amendment; RM6 mapping).
 pub const AUDIO_PREFIX: &str = "audio-";
 
+/// O19 producer-label convention (§4c canonical set): camera views inside one
+/// `view` room are named from this table so consumers can subscribe selectively
+/// (RM9/O21 label filter). The server does not enforce the set (RM10: labels are
+/// advisory metadata — devices keep their legacy short forms like "fl"); this is
+/// the consumer-side filter vocabulary.
+pub const PRODUCER_LABELS: [&str; 5] = ["front", "left", "right", "rear", "ambient"];
+
+pub fn is_canonical_label(label: &str) -> bool {
+    PRODUCER_LABELS.contains(&label)
+}
+
 /// The deprecation notice for derived stream rooms. The server supplies this
 /// when derivation evidence is known (base is a registered device room and
 /// the suffix is an announced stream) — an underscore inside an id is NOT
@@ -236,6 +247,16 @@ mod tests {
             assert_eq!(RoomKind::parse(k.as_str()).unwrap(), k);
         }
         assert!(RoomKind::parse("watch").is_err());
+    }
+
+    #[test]
+    fn producer_labels_are_the_canonical_five() {
+        assert_eq!(PRODUCER_LABELS, ["front", "left", "right", "rear", "ambient"]);
+        assert!(is_canonical_label("front"));
+        assert!(
+            !is_canonical_label("fl"),
+            "legacy short forms are not canonical (accepted, not enforced)"
+        );
     }
 
     #[test]

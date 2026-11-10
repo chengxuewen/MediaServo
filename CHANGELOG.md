@@ -32,6 +32,14 @@ teams); for development process details, consult git log directly. Newest versio
 
 ### Added
 
+- [room-model] O19 producer-label convention + bitrate clamp: the canonical
+  producer-label set for `view`-room camera views is `front / left / right /
+  rear / ambient` (`mediaservo_common::room::PRODUCER_LABELS`) — the consumer
+  subscription-filter vocabulary (RM9/O21); the server does not enforce it
+  (RM10: labels are advisory, legacy short forms like "fl" keep flowing).
+  Produce-time bitrate caps are enforced server-side: each RTP encoding's
+  `maxBitrate` is clamped to video 2.5 Mbps / audio 64 kbps (absent values get
+  the cap; explicit lower values are kept).
 - [floor] §3.4 media-first reconcile (O23): after every floor decision the media
   plane is reconciled BEFORE anything is announced — resume the granted sessions'
   producers; only on resume success is the grant broadcast (pauses stay async
