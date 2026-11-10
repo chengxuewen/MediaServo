@@ -5,6 +5,8 @@
 > us — every gap is worked around in our own layer (see PLAN §6.2 k12/k14/k16 and
 > `.agents/memorys/pitfalls.md` PIT-223/224). This letter exists so the vendor can
 > fix the root causes and we can retire our workarounds on the next version bump.
+> Cross-repo note: PLAN §6.2 (k12/k14/k16) and PIT-223/224 live in the ms_rtc shell
+> repo (the parent), not this submodule.
 
 ## 1. `service install` — not usable for multi-instance deployments
 
