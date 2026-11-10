@@ -43,6 +43,18 @@ impl CockpitRole {
         }
     }
 
+    /// §3.5 floor priority mapping: dispatcher/admin 100, operator 50, viewer 10
+    /// (legacy 50 is config-gated and not wired in this slice). One number is both
+    /// the request default (client omitted `priority`) and the sender's ceiling —
+    /// a request above it is denied `ExceedsCeiling`, never silently clamped.
+    pub fn floor_priority_bounds(&self) -> (u8, u8) {
+        match self {
+            Self::Dispatcher | Self::Admin => (100, 100),
+            Self::Operator => (50, 50),
+            Self::Viewer => (10, 10),
+        }
+    }
+
     /// Pull streams (video+vision+audio): admin/dispatcher any vehicle; viewer/operator only allowlisted vehicles.
     pub fn can_pull(&self, vehicle: &str, allowed: &[String]) -> bool {
         match self {
@@ -240,6 +252,15 @@ mod tests {
 
     fn account(role: CockpitRole, vehicles: Vec<String>) -> SessionIdentity {
         SessionIdentity::Account(AccountIdentity { username: "u".into(), role, vehicles })
+    }
+
+    /// §3.5 floor priority mapping matrix (dispatcher/admin 100, operator 50, viewer 10).
+    #[test]
+    fn floor_priority_bounds_matrix() {
+        assert_eq!(CockpitRole::Dispatcher.floor_priority_bounds(), (100, 100));
+        assert_eq!(CockpitRole::Admin.floor_priority_bounds(), (100, 100));
+        assert_eq!(CockpitRole::Operator.floor_priority_bounds(), (50, 50));
+        assert_eq!(CockpitRole::Viewer.floor_priority_bounds(), (10, 10));
     }
 
     /// Full D-H11 matrix combination (table-driven): capability x role x vehicle authorization.

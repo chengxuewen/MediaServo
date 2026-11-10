@@ -32,6 +32,17 @@ teams); for development process details, consult git log directly. Newest versio
 
 ### Added
 
+- [floor] §3.5 authz: floor commands are kind-gated to designated `talk` rooms
+  (`MEDIASERVO_FLOOR_ROOMS`, comma-separated room ids, seeds the designation set;
+  P4 `rooms.yaml` takes over the seeding, the gate reads the same set). A non-talk
+  room answers 4032 "floor commands require a designated talk room" + one
+  `AuthorizationDenied` audit line and never carries floor state (O22 negative).
+  Floor requests are priority-mapped by role (dispatcher/admin 100, operator 50,
+  viewer 10): a request above the sender's ceiling is denied privately with
+  `FloorDenied{ExceedsCeiling}` (never silently clamped); FloorRelease/FloorResync
+  now answer 4032 instead of dropping silently. Every floor mutation emits one
+  `AuditEvent::FloorAction` line; registration additionally requires the
+  designation, so joining an undesignated room no longer spawns floor state.
 - [protocol] `SIGNALING_PROTOCOL_VERSION` 3 -> 4: eleven additive floor-control
   variants (dialect 4; `MIN_SUPPORTED` stays 1; `PROTOCOL_MIN_FLOOR = 4`).
 - examples c band CMake-ized (`examples/c/CMakeLists.txt`, ruling 3=B): deck/field/link

@@ -15,8 +15,8 @@ use futures_util::{SinkExt, StreamExt}; // the handle_socket WS pump consumes it
 // it was once wrongly gated behind the sfu cfg = the root cause of the --no-default-features lib compile break)
 use mediaservo_common::auth::{JwtAuth, SimplePskAuth};
 use mediaservo_common::error::CoreError;
-use mediaservo_common::protocol::{PeerRole, SignalingMessage};
 use mediaservo_common::floor::{FloorEvent, FloorSignal};
+use mediaservo_common::protocol::{PeerRole, SignalingMessage};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tokio::sync::broadcast;
@@ -142,7 +142,7 @@ impl SignalingServer {
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
             floor_registry: Arc::new(crate::floor::ConnRegistry::default()),
-            floor_rooms: Arc::new(dashmap::DashMap::new()),
+            floor_rooms: Arc::new(seed_floor_rooms()),
         }
     }
 
@@ -182,7 +182,7 @@ impl SignalingServer {
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
             floor_registry: Arc::new(crate::floor::ConnRegistry::default()),
-            floor_rooms: Arc::new(dashmap::DashMap::new()),
+            floor_rooms: Arc::new(seed_floor_rooms()),
         }
     }
 
@@ -1239,10 +1239,17 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     let tx = server.get_or_create_channel(&room_id);
     let mut rx = tx.subscribe();
 
-    // P2: floor registration (dialect 4 + account sessions only; env master switch).
+    // §3.5: the sender's role caps floor-request priority (entry-level ExceedsCeiling).
+    let floor_priority_bounds = match &session_identity {
+        SessionIdentity::Account(a) => a.role.floor_priority_bounds(),
+        _ => (0, u8::MAX), // unreachable in the floor branch; a defensive fallback
+    };
+
+    // P2: floor registration (dialect 4 + account sessions + a designated talk room; env master switch).
     let floor_conn_id = if server.floor_enabled
         && negotiated >= mediaservo_common::protocol::PROTOCOL_MIN_FLOOR
         && matches!(&session_identity, SessionIdentity::Account(_))
+        && floor_room_designated(&server, &room_id)
     {
         let conn_id = format!("floor-{}-{}", peer_id, &uuid::Uuid::new_v4().to_string()[..8]);
         let (floor_tx, mut floor_rx) = tokio::sync::mpsc::channel::<String>(64);
@@ -1272,6 +1279,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     // Phase 3: Message relay
     let relay_peer_id = peer_id.clone();
     let relay_room = room_id.clone();
+    let relay_floor_bounds = floor_priority_bounds;
 
     // Clone ws_sender for direct responses (SFU + G3 authorization-denial replies) and relay
     let direct_sender = Arc::clone(&ws_sender);
@@ -1422,20 +1430,78 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
 
                 // P2 floor commands: server-owned; never relayed to the room broadcast.
                 if let Ok(sig) = serde_json::from_str::<SignalingMessage>(&text_str) {
+                    // §3.2/RM6 + §3.5 kind gate: floor commands exist only in designated talk
+                    // rooms; a non-talk room gets 4032 + one audit line and zero floor_* (O22).
+                    if matches!(
+                        sig,
+                        SignalingMessage::FloorRequest { .. }
+                            | SignalingMessage::FloorRelease
+                            | SignalingMessage::FloorResync
+                            | SignalingMessage::FloorModeSet { .. }
+                            | SignalingMessage::FloorMuteSet { .. }
+                    ) && !floor_room_designated(&server, &relay_room)
+                    {
+                        let detail = format!(
+                            "floor command in non-talk room {relay_room} (peer={relay_peer_id})"
+                        );
+                        audit::log_event(AuditEvent::AuthorizationDenied {
+                            action: "floor_command".into(),
+                            peer_id: relay_peer_id.clone(),
+                            detail,
+                        });
+                        let err = SignalingMessage::Error {
+                            code: 4032,
+                            message: "floor commands require a designated talk room".into(),
+                        };
+                        let _ = direct_sender
+                            .lock()
+                            .await
+                            .send(Message::Text(send_msg(&err).unwrap()))
+                            .await;
+                        continue;
+                    }
                     match sig {
                         SignalingMessage::FloorRequest { priority, preempt } => {
                             if let Some(conn_id) = floor_conn_id.as_deref() {
-                                apply_floor_event(
-                                    &server,
-                                    &relay_room,
-                                    conn_id,
-                                    FloorEvent::Request {
-                                        peer: relay_peer_id.clone(),
-                                        priority: priority.unwrap_or(0),
-                                        preempt: preempt.unwrap_or(false),
-                                    },
-                                )
-                                .await;
+                                match floor_request_priority(priority, relay_floor_bounds) {
+                                    Ok(prio) => {
+                                        apply_floor_event(
+                                            &server,
+                                            &relay_room,
+                                            conn_id,
+                                            FloorEvent::Request {
+                                                peer: relay_peer_id.clone(),
+                                                priority: prio,
+                                                preempt: preempt.unwrap_or(false),
+                                            },
+                                        )
+                                        .await;
+                                    }
+                                    Err(requested) => {
+                                        // §3.5: above the sender's role ceiling -> private ExceedsCeiling.
+                                        let generation =
+                                            floor_current_generation(&server, &relay_room).await;
+                                        audit::log_event(AuditEvent::AuthorizationDenied {
+                                            action: "floor_request".into(),
+                                            peer_id: relay_peer_id.clone(),
+                                            detail: format!(
+                                                "request priority {requested} exceeds role ceiling {}",
+                                                relay_floor_bounds.1
+                                            ),
+                                        });
+                                        let denied = SignalingMessage::FloorDenied {
+                                            room_id: relay_room.clone(),
+                                            reason:
+                                                mediaservo_common::floor::DenyReason::ExceedsCeiling,
+                                            generation,
+                                        };
+                                        let _ = direct_sender
+                                            .lock()
+                                            .await
+                                            .send(Message::Text(send_msg(&denied).unwrap()))
+                                            .await;
+                                    }
+                                }
                             } else {
                                 let err = SignalingMessage::Error {
                                     code: 4032,
@@ -1459,6 +1525,17 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                                     FloorEvent::Release { peer: relay_peer_id.clone() },
                                 )
                                 .await;
+                            } else {
+                                let err = SignalingMessage::Error {
+                                    code: 4032,
+                                    message: "floor requires dialect 4 and an account session"
+                                        .into(),
+                                };
+                                let _ = direct_sender
+                                    .lock()
+                                    .await
+                                    .send(Message::Text(send_msg(&err).unwrap()))
+                                    .await;
                             }
                             continue;
                         }
@@ -1466,6 +1543,17 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                             if let Some(conn_id) = floor_conn_id.as_deref() {
                                 let msg = floor_snapshot_msg(&server, &relay_room).await;
                                 let _ = server.floor_registry.deliver(conn_id, &msg);
+                            } else {
+                                let err = SignalingMessage::Error {
+                                    code: 4032,
+                                    message: "floor requires dialect 4 and an account session"
+                                        .into(),
+                                };
+                                let _ = direct_sender
+                                    .lock()
+                                    .await
+                                    .send(Message::Text(send_msg(&err).unwrap()))
+                                    .await;
                             }
                             continue;
                         }
@@ -1861,6 +1949,65 @@ async fn floor_snapshot_msg(server: &SignalingServer, room_id: &str) -> Signalin
     SignalingMessage::FloorState { room_id: room_id.to_string(), snapshot, generation }
 }
 
+/// §3.2/RM6: floor exists only in `talk` rooms. Until P4 `rooms.yaml` provides explicit
+/// room metadata, `MEDIASERVO_FLOOR_ROOMS` (comma-separated room ids) is the talk
+/// designation set — explicit metadata outranks id inference (RM3), so a listed room
+/// carries floor state even if its id matches a legacy form. P4 replaces the seeding
+/// source; the gate reads the same set.
+fn parse_floor_room_list(raw: &str) -> Vec<String> {
+    raw.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect()
+}
+
+fn seed_floor_rooms() -> dashmap::DashMap<String, Arc<tokio::sync::Mutex<crate::floor::FloorRoom>>>
+{
+    let map = dashmap::DashMap::new();
+    if let Ok(raw) = std::env::var("MEDIASERVO_FLOOR_ROOMS") {
+        for id in parse_floor_room_list(&raw) {
+            map.insert(
+                id.clone(),
+                Arc::new(tokio::sync::Mutex::new(crate::floor::FloorRoom::new(
+                    id,
+                    mediaservo_common::floor::FloorMode::Exclusive,
+                    mediaservo_common::floor::FloorLimits::default(),
+                ))),
+            );
+        }
+    }
+    map
+}
+
+/// The §3.5 kind gate: floor commands are accepted only in designated talk rooms;
+/// everything else answers 4032 + one audit line and never carries floor state (O22).
+fn floor_room_designated(server: &SignalingServer, room_id: &str) -> bool {
+    server.floor_rooms.contains_key(room_id)
+}
+
+/// §3.5 entry rule: omitted -> role default; within ceiling -> passthrough;
+/// above the sender's ceiling -> Err(requested) (denied ExceedsCeiling, never clamped).
+fn floor_request_priority(requested: Option<u8>, bounds: (u8, u8)) -> Result<u8, u8> {
+    match requested {
+        None => Ok(bounds.0),
+        Some(p) if p <= bounds.1 => Ok(p),
+        Some(p) => Err(p),
+    }
+}
+
+/// Current floor generation of a designated room (state creation is allowed here:
+/// designated rooms are talk rooms and may carry floor state).
+async fn floor_current_generation(server: &SignalingServer, room_id: &str) -> u64 {
+    let arc = server.floor_rooms.entry(room_id.to_string()).or_insert_with(|| {
+        Arc::new(tokio::sync::Mutex::new(crate::floor::FloorRoom::new(
+            room_id.to_string(),
+            mediaservo_common::floor::FloorMode::Exclusive,
+            mediaservo_common::floor::FloorLimits::default(),
+        )))
+    });
+    let room = Arc::clone(&arc);
+    drop(arc);
+    let g = room.lock().await;
+    g.state().generation()
+}
+
 /// P2: apply one floor event and deliver its signals (public state broadcast; queue/denial private).
 async fn apply_floor_event(
     server: &SignalingServer,
@@ -1877,6 +2024,24 @@ async fn apply_floor_event(
     });
     let room = Arc::clone(&arc);
     drop(arc);
+    // §3.5: one mutation = one audit line with actor and target (captures identity before the event moves).
+    let (floor_action, floor_actor) = match &event {
+        FloorEvent::Request { peer, .. } => ("request", peer.clone()),
+        FloorEvent::Release { peer } => ("release", peer.clone()),
+        FloorEvent::Leave { peer } => ("leave", peer.clone()),
+        FloorEvent::MediaDown { peer } => ("media_down", peer.clone()),
+        FloorEvent::Timeout => ("timeout", conn_id.to_string()),
+        FloorEvent::ModeChange { actor, .. } => ("mode_change", actor.clone()),
+        FloorEvent::MuteSet { actor, peer, .. } => ("mute_set", format!("{actor}->{peer}")),
+    };
+    let floor_detail = format!("{event:?}");
+    audit::log_event(AuditEvent::FloorAction {
+        action: floor_action.to_string(),
+        actor: floor_actor,
+        target: None,
+        room_id: room_id.to_string(),
+        detail: floor_detail,
+    });
     let signals = {
         let mut g = room.lock().await;
         g.apply(event)
@@ -1896,7 +2061,11 @@ async fn apply_floor_event(
                 true,
             ),
             FloorSignal::FloorQueued { position, generation } => (
-                SignalingMessage::FloorQueued { room_id: room_id.to_string(), position, generation },
+                SignalingMessage::FloorQueued {
+                    room_id: room_id.to_string(),
+                    position,
+                    generation,
+                },
                 true,
             ),
             FloorSignal::FloorIdle { generation, reason } => (
@@ -3053,5 +3222,41 @@ mod tests {
         let msg = rx.try_recv().expect("grant delivered");
         assert!(msg.contains("\"type\":\"floor_granted\""), "wire: {msg}");
         assert!(msg.contains("p1"));
+    }
+
+    /// §3.5: the designation set is the talk registry — undesignated rooms fail the gate (default OFF).
+    #[tokio::test]
+    async fn floor_gate_denies_undesignated_rooms() {
+        let server = new_test_server().await;
+        assert!(!floor_room_designated(&server, "fleet1"));
+        assert!(!floor_room_designated(&server, "audio-p0"));
+        server.floor_rooms.insert(
+            "talk-car1".to_string(),
+            Arc::new(tokio::sync::Mutex::new(crate::floor::FloorRoom::new(
+                "talk-car1".to_string(),
+                mediaservo_common::floor::FloorMode::Exclusive,
+                mediaservo_common::floor::FloorLimits::default(),
+            ))),
+        );
+        assert!(floor_room_designated(&server, "talk-car1"));
+    }
+
+    #[test]
+    fn floor_room_list_parses_trims_and_drops_empties() {
+        assert_eq!(
+            parse_floor_room_list("a, b ,,c"),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+        assert!(parse_floor_room_list("").is_empty());
+        assert!(parse_floor_room_list(" , ").is_empty());
+    }
+
+    /// §3.5 entry rule: omitted -> role default; within ceiling -> passthrough; above -> Err.
+    #[test]
+    fn floor_request_priority_entry_rules() {
+        assert_eq!(floor_request_priority(None, (100, 100)), Ok(100));
+        assert_eq!(floor_request_priority(Some(50), (50, 50)), Ok(50));
+        assert_eq!(floor_request_priority(Some(10), (50, 50)), Ok(10));
+        assert_eq!(floor_request_priority(Some(51), (50, 50)), Err(51));
     }
 }
