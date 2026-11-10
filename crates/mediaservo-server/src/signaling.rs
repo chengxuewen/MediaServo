@@ -16,6 +16,7 @@ use futures_util::{SinkExt, StreamExt}; // the handle_socket WS pump consumes it
 use mediaservo_common::auth::{JwtAuth, SimplePskAuth};
 use mediaservo_common::error::CoreError;
 use mediaservo_common::protocol::{PeerRole, SignalingMessage};
+use mediaservo_common::floor::{FloorEvent, FloorSignal};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tokio::sync::broadcast;
@@ -90,6 +91,13 @@ pub struct SignalingServer {
     /// F1/T4: the count of DownstreamGone messages this device has received in this session (used at agent disconnect to distinguish
     /// "T4 already cleared per-stream" (normal) from "the registration chain broke" (05:43-style unsolved cases) -- only the latter WARNs).
     t4_gone_seen: Arc<dashmap::DashMap<String, u32>>,
+    /// P2: floor-control master switch (env `MEDIASERVO_FLOOR_ENABLED`, default off).
+    pub floor_enabled: bool,
+    /// P2: per-connection floor delivery registry (R13).
+    pub floor_registry: Arc<crate::floor::ConnRegistry>,
+    /// P2: per-room single-writer floor actors.
+    pub floor_rooms:
+        Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<crate::floor::FloorRoom>>>>,
 }
 
 impl SignalingServer {
@@ -130,6 +138,11 @@ impl SignalingServer {
             room_owners: Arc::new(dashmap::DashMap::new()),
             producer_owners: Arc::new(dashmap::DashMap::new()),
             t4_gone_seen: Arc::new(dashmap::DashMap::new()),
+            floor_enabled: std::env::var("MEDIASERVO_FLOOR_ENABLED")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
+            floor_registry: Arc::new(crate::floor::ConnRegistry::default()),
+            floor_rooms: Arc::new(dashmap::DashMap::new()),
         }
     }
 
@@ -165,6 +178,11 @@ impl SignalingServer {
             room_owners: Arc::new(dashmap::DashMap::new()),
             producer_owners: Arc::new(dashmap::DashMap::new()),
             t4_gone_seen: Arc::new(dashmap::DashMap::new()),
+            floor_enabled: std::env::var("MEDIASERVO_FLOOR_ENABLED")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
+            floor_registry: Arc::new(crate::floor::ConnRegistry::default()),
+            floor_rooms: Arc::new(dashmap::DashMap::new()),
         }
     }
 
@@ -1221,6 +1239,36 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     let tx = server.get_or_create_channel(&room_id);
     let mut rx = tx.subscribe();
 
+    // P2: floor registration (dialect 4 + account sessions only; env master switch).
+    let floor_conn_id = if server.floor_enabled
+        && negotiated >= mediaservo_common::protocol::PROTOCOL_MIN_FLOOR
+        && matches!(&session_identity, SessionIdentity::Account(_))
+    {
+        let conn_id = format!("floor-{}-{}", peer_id, &uuid::Uuid::new_v4().to_string()[..8]);
+        let (floor_tx, mut floor_rx) = tokio::sync::mpsc::channel::<String>(64);
+        server.floor_registry.register(crate::floor::ConnEntry {
+            conn_id: conn_id.clone(),
+            room_id: room_id.clone(),
+            peer_id: peer_id.clone(),
+            negotiated,
+            is_account: true,
+            tx: floor_tx,
+        });
+        let pump = Arc::clone(&ws_sender);
+        tokio::spawn(async move {
+            while let Some(m) = floor_rx.recv().await {
+                if pump.lock().await.send(Message::Text(m)).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let snapshot = floor_snapshot_msg(&server, &room_id).await;
+        let _ = ws_sender.lock().await.send(Message::Text(send_msg(&snapshot).unwrap())).await;
+        Some(conn_id)
+    } else {
+        None
+    };
+
     // Phase 3: Message relay
     let relay_peer_id = peer_id.clone();
     let relay_room = room_id.clone();
@@ -1233,6 +1281,8 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     tracing::info!("Relay spawned: peer={} room={}", relay_peer_id, relay_room);
     let relay_spawn_peer = relay_peer_id.clone();
     let relay_spawn_room = relay_room.clone();
+    let floor_cleanup_server = server.clone();
+    let floor_cleanup_conn = floor_conn_id.clone();
     let relay_handle = tokio::spawn(async move {
         let reason = loop {
             match rx.recv().await {
@@ -1260,6 +1310,9 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
             relay_spawn_room,
             reason
         );
+        if let Some(id) = floor_cleanup_conn {
+            floor_cleanup_server.floor_registry.unregister(&id);
+        }
     });
 
     // Forward: this peer's receiver → broadcast
@@ -1366,6 +1419,72 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
         match msg {
             Message::Text(text) => {
                 let text_str = text.to_string();
+
+                // P2 floor commands: server-owned; never relayed to the room broadcast.
+                if let Ok(sig) = serde_json::from_str::<SignalingMessage>(&text_str) {
+                    match sig {
+                        SignalingMessage::FloorRequest { priority, preempt } => {
+                            if let Some(conn_id) = floor_conn_id.as_deref() {
+                                apply_floor_event(
+                                    &server,
+                                    &relay_room,
+                                    conn_id,
+                                    FloorEvent::Request {
+                                        peer: relay_peer_id.clone(),
+                                        priority: priority.unwrap_or(0),
+                                        preempt: preempt.unwrap_or(false),
+                                    },
+                                )
+                                .await;
+                            } else {
+                                let err = SignalingMessage::Error {
+                                    code: 4032,
+                                    message: "floor requires dialect 4 and an account session"
+                                        .into(),
+                                };
+                                let _ = direct_sender
+                                    .lock()
+                                    .await
+                                    .send(Message::Text(send_msg(&err).unwrap()))
+                                    .await;
+                            }
+                            continue;
+                        }
+                        SignalingMessage::FloorRelease => {
+                            if let Some(conn_id) = floor_conn_id.as_deref() {
+                                apply_floor_event(
+                                    &server,
+                                    &relay_room,
+                                    conn_id,
+                                    FloorEvent::Release { peer: relay_peer_id.clone() },
+                                )
+                                .await;
+                            }
+                            continue;
+                        }
+                        SignalingMessage::FloorResync => {
+                            if let Some(conn_id) = floor_conn_id.as_deref() {
+                                let msg = floor_snapshot_msg(&server, &relay_room).await;
+                                let _ = server.floor_registry.deliver(conn_id, &msg);
+                            }
+                            continue;
+                        }
+                        SignalingMessage::FloorModeSet { .. }
+                        | SignalingMessage::FloorMuteSet { .. } => {
+                            let err = SignalingMessage::Error {
+                                code: 4032,
+                                message: "floor command not enabled in this slice".into(),
+                            };
+                            let _ = direct_sender
+                                .lock()
+                                .await
+                                .send(Message::Text(send_msg(&err).unwrap()))
+                                .await;
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
 
                 // Handle RoomLeave — relay to peers then disconnect (cleanup in disconnect path)
                 if let Ok(sig) = serde_json::from_str::<SignalingMessage>(&text_str)
@@ -1712,6 +1831,87 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
 
 /// a2 teardown body: SFU cross-room cleanup / device unbind / leave / consumer disconnect / router deferred teardown / RoomLeave broadcast.
 /// One shared copy for the three call sites (immediate / delayed / takeover) -- preventing multi-site drift.
+/// P2: build the role-scoped floor snapshot for a joiner/resync.
+async fn floor_snapshot_msg(server: &SignalingServer, room_id: &str) -> SignalingMessage {
+    let arc = server.floor_rooms.entry(room_id.to_string()).or_insert_with(|| {
+        Arc::new(tokio::sync::Mutex::new(crate::floor::FloorRoom::new(
+            room_id.to_string(),
+            mediaservo_common::floor::FloorMode::Exclusive,
+            mediaservo_common::floor::FloorLimits::default(),
+        )))
+    });
+    let room = Arc::clone(&arc);
+    drop(arc);
+    let (snapshot, generation) = {
+        let g = room.lock().await;
+        let st = g.state();
+        (
+            serde_json::json!({
+                "mode": st.mode(),
+                "grants": st.grants(),
+                "muted": st.muted(),
+                "queue": st.queue().iter().map(|p| serde_json::json!({
+                    "peer": p.peer,
+                    "priority": p.priority,
+                })).collect::<Vec<_>>(),
+            }),
+            st.generation(),
+        )
+    };
+    SignalingMessage::FloorState { room_id: room_id.to_string(), snapshot, generation }
+}
+
+/// P2: apply one floor event and deliver its signals (public state broadcast; queue/denial private).
+async fn apply_floor_event(
+    server: &SignalingServer,
+    room_id: &str,
+    conn_id: &str,
+    event: FloorEvent,
+) {
+    let arc = server.floor_rooms.entry(room_id.to_string()).or_insert_with(|| {
+        Arc::new(tokio::sync::Mutex::new(crate::floor::FloorRoom::new(
+            room_id.to_string(),
+            mediaservo_common::floor::FloorMode::Exclusive,
+            mediaservo_common::floor::FloorLimits::default(),
+        )))
+    });
+    let room = Arc::clone(&arc);
+    drop(arc);
+    let signals = {
+        let mut g = room.lock().await;
+        g.apply(event)
+    };
+    for signal in signals {
+        let (msg, private) = match signal {
+            FloorSignal::FloorGranted { grants, generation } => (
+                SignalingMessage::FloorGranted { room_id: room_id.to_string(), grants, generation },
+                false,
+            ),
+            FloorSignal::FloorTaken { by, generation } => (
+                SignalingMessage::FloorTaken { room_id: room_id.to_string(), by, generation },
+                false,
+            ),
+            FloorSignal::FloorDenied { reason, generation } => (
+                SignalingMessage::FloorDenied { room_id: room_id.to_string(), reason, generation },
+                true,
+            ),
+            FloorSignal::FloorQueued { position, generation } => (
+                SignalingMessage::FloorQueued { room_id: room_id.to_string(), position, generation },
+                true,
+            ),
+            FloorSignal::FloorIdle { generation, reason } => (
+                SignalingMessage::FloorIdle { room_id: room_id.to_string(), reason, generation },
+                false,
+            ),
+        };
+        if private {
+            let _ = server.floor_registry.deliver(conn_id, &msg);
+        } else {
+            let _ = server.floor_registry.broadcast_room(room_id, &msg);
+        }
+    }
+}
+
 async fn disconnect_session(
     server: SignalingServer,
     relay_peer_id: String,
@@ -2827,5 +3027,30 @@ mod tests {
             .await;
             assert!(resp.is_none(), "unknown room {room} should be silently idempotent");
         }
+    }
+
+    /// P2: a granted floor request is delivered through the per-conn registry.
+    #[tokio::test]
+    async fn floor_request_grants_via_registry() {
+        let server = new_test_server().await;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        server.floor_registry.register(crate::floor::ConnEntry {
+            conn_id: "c1".into(),
+            room_id: "audio-p0".into(),
+            peer_id: "p1".into(),
+            negotiated: 4,
+            is_account: true,
+            tx,
+        });
+        apply_floor_event(
+            &server,
+            "audio-p0",
+            "c1",
+            FloorEvent::Request { peer: "p1".into(), priority: 0, preempt: false },
+        )
+        .await;
+        let msg = rx.try_recv().expect("grant delivered");
+        assert!(msg.contains("\"type\":\"floor_granted\""), "wire: {msg}");
+        assert!(msg.contains("p1"));
     }
 }
