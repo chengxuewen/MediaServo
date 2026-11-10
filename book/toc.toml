@@ -5,7 +5,7 @@
 exclude = [
   "docs/reference/research/**",
   "docs/plans/**",
-  "docs/superpowers/**",
+  "docs/archive/**",
   "docs/handoff-*.md",
   "docs/modules/25-abi-baseline.md",
   "docs/modules/26-room-model.md",

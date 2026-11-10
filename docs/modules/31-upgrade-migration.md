@@ -99,7 +99,7 @@ Retention policy: `sha-` tags accumulate with main pushes; clean old tags every 
 ### Config & Data Migration
 
 - Config: `./config/server.docker.yaml` mounted read-only (`docker-compose.yml:24`); image upgrades never touch config; new fields are compatible via serde `#[serde(default)]` (see §Config Migration above).
-- Database: sqlx migrate runs automatically at startup (see §Database Migration below); back up `mediaservo.db` before upgrading (operations.md §Backup).
+- Database: sqlx migrate runs automatically at startup (see §Database Migration below); back up `mediaservo.db` before upgrading (29-operations.md §Backup).
 - Version compatibility: follow the §Version Compatibility Matrix (D118) — different MAJORs must upgrade Host/Remote in sync.
 
 ### Differences vs Host Upgrade

@@ -82,4 +82,4 @@ MEDIASERVO_BRAND=cp ./target/debug/mediaservo-host startup on <dir>  # unit oxmg
 - `mediaservo.sh` (bash driver): the `deploy host` / `package host --brand` brand chain; delivery layout truth lives in `cmake/MediaServo{AppTree,Pack}.cmake`
 - `www/apps/admin/vite.config.ts`: `__APP_TITLE__` define
 
-Plan: `docs/superpowers/plans/2026-08-21-app-branding-customization.md`
+Plan: `docs/archive/plans/2026-08-21-app-branding-customization.md`

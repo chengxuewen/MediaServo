@@ -44,4 +44,4 @@ Kind rules: `talk` never carries video; `meet` never injects input; `view` never
 - One WebSocket per room today; browsers cap same-origin WS (~6-30) — pages needing more rooms go through single-WS multiplexing or an aggregated wall room (open decision, plan O17).
 - The per-stream room shape (`<device>_<stream>`) keeps working during the deprecation window.
 
-Related: `07-protocols.md` §5 (dialect 4 + floor variants + room kind on the wire), `10-signaling-architecture.md` §10.12 (delivery), `error-model.md` 4032, plan §4c (rulings), `evidence/room-model-architecture.md` in the shell repo (pictures).
+Related: `07-protocols.md` §5 (dialect 4 + floor variants + room kind on the wire), `10-signaling-architecture.md` §10.12 (delivery), `27-error-model.md` 4032, plan §4c (rulings), `evidence/room-model-architecture.md` in the shell repo (pictures).

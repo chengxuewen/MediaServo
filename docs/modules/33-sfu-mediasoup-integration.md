@@ -112,7 +112,7 @@ Internally uses the `webrtc-sdp` crate for parsing and codec mapping.
 
 ## Transport Failure Scenarios & Recovery
 
-> Error-code definitions and layering: see `error-model.md` §SFU media-plane errors (40xx, real-time protocol) (unified per doc-audit L6).
+> Error-code definitions and layering: see `27-error-model.md` §SFU media-plane errors (40xx, real-time protocol) (unified per doc-audit L6).
 
 ### 1. transport.connect() timeout
 

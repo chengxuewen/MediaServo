@@ -1,12 +1,12 @@
 # 19. TLS Reverse Proxy & CORS Configuration
 
 > Phase 1 — deployment reference | 2026-07-24
-> Related docs: [security-architecture.md](security-architecture.md) §mTLS, [operations.md](operations.md) §TLS, [13-server-architecture.md](13-server-architecture.md) §Deployment
+> Related docs: [security-architecture.md](28-security-architecture.md) §mTLS, [29-operations.md](29-29-operations.md) §TLS, [13-server-architecture.md](13-server-architecture.md) §Deployment
 > Related crate: mediaservo-server
 
 ## 19.1 Overview
 
-MediaServo Phase 1 uses an **external TLS termination** strategy: the service process itself listens on plain HTTP/WS only; TLS is handled by a fronting reverse proxy (nginx/Caddy/Traefik). This follows operations.md's design decision: "Phase 1: systemd socket activation + external TLS termination (nginx/Caddy)".
+MediaServo Phase 1 uses an **external TLS termination** strategy: the service process itself listens on plain HTTP/WS only; TLS is handled by a fronting reverse proxy (nginx/Caddy/Traefik). This follows 29-operations.md's design decision: "Phase 1: systemd socket activation + external TLS termination (nginx/Caddy)".
 
 This document provides:
 - Reverse proxy configuration examples (nginx / Caddy / Traefik)
@@ -509,8 +509,8 @@ Verify before deployment:
 
 ## 19.9 Cross References
 
-- Auth architecture: [security-architecture.md](security-architecture.md)
-- Ops design: [operations.md](operations.md)
+- Auth architecture: [security-architecture.md](28-security-architecture.md)
+- Ops design: [29-operations.md](29-29-operations.md)
 - Server architecture: [13-server-architecture.md](13-server-architecture.md)
 - Deployment modes: [02-deployment-modes.md](02-deployment-modes.md)
 - Signaling architecture: [10-signaling-architecture.md]
