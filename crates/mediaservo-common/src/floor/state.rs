@@ -18,12 +18,33 @@ pub struct FloorLimits {
     pub max_peers: usize,
     /// Max queued requests before `Denied{Busy}`.
     pub max_queue: usize,
+    /// §3.2: max seconds a grant window may run before the server emits `Timeout`
+    /// (dispatch profile 45 s). Enforcement lives in the server actor layer — the
+    /// core stays wall-clock-free.
+    pub max_hold_secs: u64,
+    /// §3.2: seconds a grantee has to produce media before revocation (2 s).
+    /// The field ships now so the config surface is stable; arming requires the
+    /// media plane and lands with the O23 reconcile rewrite.
+    pub media_grace_secs: u64,
+    /// §3.2: per-connection floor-request guard (requests per rolling minute).
+    pub rate_limit_per_min: u32,
+    /// §3.2: room-level request-priority cap; the effective ceiling is the lower
+    /// of this and the sender's role ceiling.
+    pub priority_ceiling: u8,
 }
 
 impl Default for FloorLimits {
     fn default() -> Self {
-        // modules/01 defaults: exclusive=1/hybrid=2 grants; queue depth 16 at PoC
-        Self { max_peers: 1, max_queue: 16 }
+        // modules/01 defaults: exclusive=1/hybrid=2 grants; queue depth 16 at PoC;
+        // dispatch profile hold 45 s / media grace 2 s (§3.2)
+        Self {
+            max_peers: 1,
+            max_queue: 16,
+            max_hold_secs: 45,
+            media_grace_secs: 2,
+            rate_limit_per_min: 30,
+            priority_ceiling: 100,
+        }
     }
 }
 

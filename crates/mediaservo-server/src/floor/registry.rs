@@ -77,6 +77,11 @@ impl ConnRegistry {
         self.inner.len()
     }
 
+    /// Number of registered floor connections for one room (idle-TTL eviction input).
+    pub fn room_conn_count(&self, room_id: &str) -> usize {
+        self.inner.iter().filter(|e| e.room_id == room_id).count()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }

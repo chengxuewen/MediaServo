@@ -2,6 +2,7 @@ use futures_util::FutureExt;
 use mediaservo_common::auth::JwtAuth;
 use mediaservo_server::admin;
 use mediaservo_server::config;
+use mediaservo_server::floor;
 use mediaservo_server::monitor;
 use mediaservo_server::signaling;
 use std::time::Duration;
@@ -314,6 +315,10 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         srv.psk_state = std::sync::Arc::new(std::sync::RwLock::new(merged_psk));
         srv
     };
+
+    // §3.2 floor timers: the per-server supervisor drives max_hold timeouts and
+    // idle-TTL eviction (media-grace arming lands with the O23 reconcile rewrite).
+    floor::timer::spawn(signaling_server.clone());
 
     // Build axum router
     let signaling_router = signaling::signaling_router(signaling_server.clone());

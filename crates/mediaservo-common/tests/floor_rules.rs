@@ -265,13 +265,13 @@ fn r5_ceiling_violation_denied_busy() {
         );
     let (s, _) = s.apply(
         &FloorEvent::Request { peer: pid("q3"), priority: 0, preempt: false },
-        &FloorLimits { max_peers: 1, max_queue: 2 },
+        &FloorLimits { max_peers: 1, max_queue: 2, ..FloorLimits::default() },
     );
     assert_eq!(s.queue().len(), 2, "q2,q3 fill the queue");
     let g = generation(&s);
     let (s, out) = s.apply(
         &FloorEvent::Request { peer: pid("q4"), priority: 0, preempt: false },
-        &FloorLimits { max_peers: 1, max_queue: 2 },
+        &FloorLimits { max_peers: 1, max_queue: 2, ..FloorLimits::default() },
     );
     assert_eq!(emitted(&out), vec!["denied(Busy)"]);
     assert_eq!(s.queue().len(), 2, "queue stays at ceiling");

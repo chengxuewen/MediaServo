@@ -5,12 +5,17 @@
 //! synchronous and testable; media reconciliation lands with the SFU wiring.
 
 use mediaservo_common::floor::{FloorEvent, FloorLimits, FloorMode, FloorSignal, FloorState};
+use std::time::Instant;
 
 /// One room's authoritative floor state.
 pub struct FloorRoom {
     room_id: String,
     state: FloorState,
     limits: FloorLimits,
+    /// Wall-clock epoch of the live grant window (set when grants become
+    /// non-empty, cleared when empty) — the max_hold clock (§3.2). Media-grace
+    /// arming needs the media plane (O23 reconcile) and is not tracked here yet.
+    granted_at: Option<Instant>,
 }
 
 impl FloorRoom {
@@ -19,6 +24,7 @@ impl FloorRoom {
             room_id: room_id.into(),
             state: FloorState::initial_with_generation(mode, 1),
             limits,
+            granted_at: None,
         }
     }
 
@@ -30,11 +36,26 @@ impl FloorRoom {
         &self.state
     }
 
+    pub fn limits(&self) -> &FloorLimits {
+        &self.limits
+    }
+
+    /// §3.2 max_hold clock input: when the current grant window opened.
+    pub fn granted_at(&self) -> Option<Instant> {
+        self.granted_at
+    }
+
     /// Apply one event and return the emitted signals. The state is replaced
     /// only by the reducer's result; no I/O happens here.
     pub fn apply(&mut self, event: FloorEvent) -> Vec<FloorSignal> {
         let (next, out) = self.state.apply(&event, &self.limits);
         self.state = next;
+        // the max_hold clock runs while at least one grant is live
+        if self.state.grants().is_empty() {
+            self.granted_at = None;
+        } else if self.granted_at.is_none() {
+            self.granted_at = Some(Instant::now());
+        }
         out
     }
 }

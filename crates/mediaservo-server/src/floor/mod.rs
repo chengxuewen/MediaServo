@@ -10,6 +10,7 @@
 pub mod policy;
 pub mod registry;
 pub mod room;
+pub mod timer;
 
 pub use policy::FloorPolicy;
 pub use registry::{ConnEntry, ConnRegistry};

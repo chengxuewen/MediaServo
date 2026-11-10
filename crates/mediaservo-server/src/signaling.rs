@@ -98,6 +98,9 @@ pub struct SignalingServer {
     /// P2: per-room single-writer floor actors.
     pub floor_rooms:
         Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<crate::floor::FloorRoom>>>>,
+    /// §3.2 rate guard: per-conn fixed one-minute window `(window_start, count)`
+    /// (requests over the room's `rate_limit_per_min` are denied RateLimited).
+    pub floor_rate: Arc<dashmap::DashMap<String, (std::time::Instant, u32)>>,
 }
 
 impl SignalingServer {
@@ -143,6 +146,7 @@ impl SignalingServer {
                 .unwrap_or(false),
             floor_registry: Arc::new(crate::floor::ConnRegistry::default()),
             floor_rooms: Arc::new(seed_floor_rooms()),
+            floor_rate: Arc::new(dashmap::DashMap::new()),
         }
     }
 
@@ -183,6 +187,7 @@ impl SignalingServer {
                 .unwrap_or(false),
             floor_registry: Arc::new(crate::floor::ConnRegistry::default()),
             floor_rooms: Arc::new(seed_floor_rooms()),
+            floor_rate: Arc::new(dashmap::DashMap::new()),
         }
     }
 
@@ -1463,36 +1468,34 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                     match sig {
                         SignalingMessage::FloorRequest { priority, preempt } => {
                             if let Some(conn_id) = floor_conn_id.as_deref() {
-                                match floor_request_priority(priority, relay_floor_bounds) {
-                                    Ok(prio) => {
-                                        apply_floor_event(
-                                            &server,
-                                            &relay_room,
-                                            conn_id,
-                                            FloorEvent::Request {
-                                                peer: relay_peer_id.clone(),
-                                                priority: prio,
-                                                preempt: preempt.unwrap_or(false),
-                                            },
-                                        )
-                                        .await;
+                                // §3.2 rate guard + room-level ceiling (the Arc is cloned out
+                                // before the await — no DashMap entry guard across locks)
+                                let room = server
+                                    .floor_rooms
+                                    .get(&relay_room)
+                                    .map(|e| std::sync::Arc::clone(e.value()));
+                                let (rate_cap, room_ceiling) = match room {
+                                    Some(room) => {
+                                        let g = room.lock().await;
+                                        (g.limits().rate_limit_per_min, g.limits().priority_ceiling)
                                     }
-                                    Err(requested) => {
-                                        // §3.5: above the sender's role ceiling -> private ExceedsCeiling.
-                                        let generation =
-                                            floor_current_generation(&server, &relay_room).await;
+                                    None => (u32::MAX, u8::MAX),
+                                };
+                                let window = server.floor_rate.get(conn_id).map(|w| *w);
+                                match floor_rate_check(window, rate_cap, std::time::Instant::now())
+                                {
+                                    None => {
                                         audit::log_event(AuditEvent::AuthorizationDenied {
                                             action: "floor_request".into(),
                                             peer_id: relay_peer_id.clone(),
-                                            detail: format!(
-                                                "request priority {requested} exceeds role ceiling {}",
-                                                relay_floor_bounds.1
-                                            ),
+                                            detail: format!("rate limit {rate_cap}/min exceeded"),
                                         });
+                                        let generation =
+                                            floor_current_generation(&server, &relay_room).await;
                                         let denied = SignalingMessage::FloorDenied {
                                             room_id: relay_room.clone(),
                                             reason:
-                                                mediaservo_common::floor::DenyReason::ExceedsCeiling,
+                                                mediaservo_common::floor::DenyReason::RateLimited,
                                             generation,
                                         };
                                         let _ = direct_sender
@@ -1500,6 +1503,53 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                                             .await
                                             .send(Message::Text(send_msg(&denied).unwrap()))
                                             .await;
+                                    }
+                                    Some(w) => {
+                                        server.floor_rate.insert(conn_id.to_string(), w);
+                                        // effective ceiling = the lower of role and room caps (§3.2)
+                                        let bounds = (
+                                            relay_floor_bounds.0,
+                                            relay_floor_bounds.1.min(room_ceiling),
+                                        );
+                                        match floor_request_priority(priority, bounds) {
+                                            Ok(prio) => {
+                                                apply_floor_event(
+                                                    &server,
+                                                    &relay_room,
+                                                    conn_id,
+                                                    FloorEvent::Request {
+                                                        peer: relay_peer_id.clone(),
+                                                        priority: prio,
+                                                        preempt: preempt.unwrap_or(false),
+                                                    },
+                                                )
+                                                .await;
+                                            }
+                                            Err(requested) => {
+                                                // §3.5: above the sender's ceiling -> private ExceedsCeiling.
+                                                let generation =
+                                                    floor_current_generation(&server, &relay_room)
+                                                        .await;
+                                                audit::log_event(AuditEvent::AuthorizationDenied {
+                                                    action: "floor_request".into(),
+                                                    peer_id: relay_peer_id.clone(),
+                                                    detail: format!(
+                                                        "request priority {requested} exceeds ceiling {}",
+                                                        bounds.1
+                                                    ),
+                                                });
+                                                let denied = SignalingMessage::FloorDenied {
+                                                    room_id: relay_room.clone(),
+                                                    reason: mediaservo_common::floor::DenyReason::ExceedsCeiling,
+                                                    generation,
+                                                };
+                                                let _ = direct_sender
+                                                    .lock()
+                                                    .await
+                                                    .send(Message::Text(send_msg(&denied).unwrap()))
+                                                    .await;
+                                            }
+                                        }
                                     }
                                 }
                             } else {
@@ -2008,8 +2058,28 @@ async fn floor_current_generation(server: &SignalingServer, room_id: &str) -> u6
     g.state().generation()
 }
 
+/// §3.2 rate guard: fixed one-minute window per connection. Returns the updated
+/// window, or None when saturated (deny `RateLimited`, never queue the request).
+fn floor_rate_check(
+    window: Option<(std::time::Instant, u32)>,
+    limit_per_min: u32,
+    now: std::time::Instant,
+) -> Option<(std::time::Instant, u32)> {
+    match window {
+        Some((start, count)) if now.duration_since(start) < std::time::Duration::from_secs(60) => {
+            if count >= limit_per_min {
+                None
+            } else {
+                Some((start, count + 1))
+            }
+        }
+        _ => Some((now, 1)),
+    }
+}
+
 /// P2: apply one floor event and deliver its signals (public state broadcast; queue/denial private).
-async fn apply_floor_event(
+/// Also the timer pipeline's entry (floor/timer.rs fires `Timeout` through here).
+pub(crate) async fn apply_floor_event(
     server: &SignalingServer,
     room_id: &str,
     conn_id: &str,
@@ -3258,5 +3328,21 @@ mod tests {
         assert_eq!(floor_request_priority(Some(50), (50, 50)), Ok(50));
         assert_eq!(floor_request_priority(Some(10), (50, 50)), Ok(10));
         assert_eq!(floor_request_priority(Some(51), (50, 50)), Err(51));
+    }
+
+    /// §3.2 rate guard: fresh window, accumulating window, saturated window, expired window.
+    #[test]
+    fn floor_rate_check_windows() {
+        use std::time::{Duration, Instant};
+        let now = Instant::now();
+        assert_eq!(floor_rate_check(None, 30, now), Some((now, 1)));
+        assert_eq!(floor_rate_check(Some((now, 1)), 30, now), Some((now, 2)));
+        assert_eq!(floor_rate_check(Some((now, 30)), 30, now), None, "saturated");
+        let old = now - Duration::from_secs(61);
+        assert_eq!(
+            floor_rate_check(Some((old, u32::MAX)), 30, now),
+            Some((now, 1)),
+            "window expired -> fresh budget"
+        );
     }
 }

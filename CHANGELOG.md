@@ -32,6 +32,15 @@ teams); for development process details, consult git log directly. Newest versio
 
 ### Added
 
+- [floor] §3.2 timers: `FloorLimits` grows to the §3.2 field set (`max_hold_secs` 45,
+  `media_grace_secs` 2 — arming needs the media plane and lands with the O23
+  reconcile rewrite, `rate_limit_per_min` 30, `priority_ceiling` 100). A per-server
+  supervisor (1 s tick) releases grant windows past `max_hold` through the standard
+  pipeline (`FloorIdle{timeout}` + queue promotion + audit) and evicts empty floor
+  rooms after the idle TTL. Floor requests are rate-guarded per connection (fixed
+  one-minute window; over the room's `rate_limit_per_min` -> private
+  `FloorDenied{RateLimited}` + audit), and the effective request ceiling is now the
+  lower of the sender's role cap and the room cap.
 - [floor] §3.5 authz: floor commands are kind-gated to designated `talk` rooms
   (`MEDIASERVO_FLOOR_ROOMS`, comma-separated room ids, seeds the designation set;
   P4 `rooms.yaml` takes over the seeding, the gate reads the same set). A non-talk
