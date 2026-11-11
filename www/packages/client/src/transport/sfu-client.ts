@@ -200,6 +200,8 @@ export class SfuConsumerClient {
   private labels: ReadonlySet<string> = new Set();
   private isolatedLabels: ReadonlySet<string> = new Set();
   private pendingProducer: { producer_id: string; kind: string; label?: string } | null = null;
+  /** P3-3: floor-frame delegation hook (see constructor options). */
+  private floorDelegate: ((data: string) => boolean) | null = null;
   /** O21-M3: dedicated recv transport per isolated label (lazy-created on its
    *  first new_producer; torn down with the shared transport on restart). */
   private isolatedTransports = new Map<
@@ -216,11 +218,20 @@ export class SfuConsumerClient {
       onStatus: StatusCallback;
       onMetrics: MetricsCallback;
     },
-    options?: { expectedLabel?: string; labels?: string[]; isolatedLabels?: string[] },
+    options?: {
+      expectedLabel?: string;
+      labels?: string[];
+      isolatedLabels?: string[];
+      /** P3-3 voice app: floor_* frames on the consumer connection delegate
+       *  here FIRST (return true = consumed; false = legacy handling). The
+       *  dispatch console uses this to feed FloorClient.handleWire. */
+      onFloorFrame?: (data: string) => boolean;
+    },
   ) {
     this.onTrack = callbacks.onTrack;
     this.onStatus = callbacks.onStatus;
     this.onMetrics = callbacks.onMetrics;
+    this.floorDelegate = options?.onFloorFrame ?? null;
     if (options?.labels?.length) this.labels = new Set(options.labels);
     else if (options?.expectedLabel) this.labels = new Set([options.expectedLabel]);
     if (options?.isolatedLabels?.length) this.isolatedLabels = new Set(options.isolatedLabels);
@@ -516,6 +527,9 @@ export class SfuConsumerClient {
 
   handleMessage(data: string): void {
     try {
+      // P3-3: floor frames delegate first (consumed = the delegate owns them;
+      // the if/else chain below never sees floor_* types).
+      if (this.floorDelegate && data.includes('"floor_') && this.floorDelegate(data)) return;
       const msg = JSON.parse(data);
 
       // S0: store the negotiation result (missing protocol = v1) — read point for control-DC / (future) resume gating.
@@ -863,6 +877,13 @@ export class SfuConsumerClient {
     }
   }
 
+  /** P3-3: send a floor command on the consumer connection (dispatch console
+   *  mode_set/mute_set; the server derives the actor from THIS connection).
+   *  No-op when disconnected. */
+  sendFloorCommand(cmd: Record<string, unknown>): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(cmd));
+  }
+
   close(): void {
     this.closed = true;  // PIT-50: set the flag first to prevent onclose reconnect
     if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; } // W2: tear down the watchdog on unmount (prevents ghost rounds)
@@ -891,6 +912,11 @@ export class SfuMicProducer {
   private transport: MsTransport | null = null;
   /** Response type key → one-shot resolver (enough for the serial auth/join/caps/transport/produced flow). */
   private pending = new Map<string, (m: Record<string, unknown>) => void>();
+  /** P3-3 voice app: floor frames arriving on THIS connection (the same peer
+   *  session as the mic producer — floor grants and the audio stream must
+   *  share one peer identity). Set BEFORE produceAudio(); floor_* frames are
+   *  routed here FIRST (route() never sees them). */
+  onFloorFrame: ((data: string) => void) | null = null;
 
   constructor(
     private serverUrl: string,
@@ -923,7 +949,11 @@ export class SfuMicProducer {
     const ws = new WebSocket(`${protocol}//${host}/ws`, this.token ? [this.token] : []);
     this.ws = ws;
     ws.onmessage = (ev) => {
-      try { this.route(JSON.parse(String(ev.data))); } catch { /* ignore non-JSON */ }
+      try {
+        const raw = String(ev.data);
+        if (this.onFloorFrame && raw.includes('"floor_')) { this.onFloorFrame(raw); return; }
+        this.route(JSON.parse(raw));
+      } catch { /* ignore non-JSON */ }
     };
     const send = (m: Record<string, unknown>) => ws.send(JSON.stringify(m));
     await new Promise<void>((resolve, reject) => {
@@ -974,6 +1004,13 @@ export class SfuMicProducer {
       });
     });
     await transport.produce({ track });
+  }
+
+  /** P3-3: send a floor command on the mic connection (same peer session as
+   *  the producer — the server derives the floor actor from THIS connection).
+   *  No-op before produceAudio(). */
+  sendFloorCommand(cmd: Record<string, unknown>): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(cmd));
   }
 
   /** Un-mic (idempotent): close the transport hosting the producer plus the WS — if meeting P4a needs finer granularity, switch to producer.pause(). */
