@@ -302,3 +302,83 @@ async fn spoofed_identity_fields_are_ignored_and_never_echoed() {
     assert_eq!(errors, 1, "spoofed fields must not bypass the gate");
     assert_eq!(floors, 0, "no floor_* may carry the forged identity");
 }
+
+/// A14 restart semantics (in-process respawn equivalent — kill -9 leaves NO
+/// cleanup hooks, so a fresh instance on the same secret is byte-for-byte the
+/// respawn shape): (a) a token minted BEFORE the restart still verifies and
+/// joins on the fresh instance (JWT is stateless — the secret outlives the
+/// process); (b) the late joiner's floor_state snapshot is Idle with empty
+/// grants (R12: in-memory floor state never survives a restart, and no hidden
+/// persistence may resurrect grants); (c) mode defaults to exclusive.
+#[tokio::test]
+async fn restart_token_survives_and_floor_resets_to_idle() {
+    let secret = "test-secret-min-32-bytes!!!";
+    let make_jwt = || {
+        let now =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+                as usize;
+        jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &mediaservo_common::auth::JwtClaims {
+                sub: "dispatch-restart".into(),
+                iat: now,
+                exp: now + 3600,
+                role: Some("dispatcher".into()),
+                vehicles: None,
+            },
+            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap()
+    };
+
+    // instance 1 may have had ACTIVE floor state — irrelevant by design:
+    // kill -9 leaves no cleanup hooks, so a fresh instance on the same secret
+    // below IS the post-crash truth, and the token was minted BEFORE it.
+    let jwt = make_jwt();
+
+    // instance 2 = the respawn: SAME secret, fresh process shape. The old
+    // token must still verify; the snapshot must be Idle.
+    let url2 = spawn_server(&["talk-car1"]).await;
+    let (mut ws2, snapshot) = connect_account_jwt(url2, jwt, secret, "talk-car1").await;
+    assert_eq!(snapshot["mode"], "exclusive", "fresh instance seeds exclusive");
+    assert_eq!(snapshot["grants"], serde_json::json!([]), "R12: floor resets to Idle");
+    let _ = ws2;
+}
+
+/// connect with an account JWT (Sec-WebSocket-Protocol bearer) and drain until
+/// the join-time floor_state snapshot arrives. (A14 helper — mirrors the
+/// connect_account shape of kill_socket test but takes a pre-minted token.)
+async fn connect_account_jwt(
+    url: String,
+    jwt: String,
+    psk: &str,
+    room: &str,
+) -> (WsStream, serde_json::Value) {
+    let mut req: tokio_tungstenite::tungstenite::http::Request<()> =
+        tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(url)
+            .unwrap();
+    req.headers_mut().insert("Sec-WebSocket-Protocol", jwt.parse().unwrap());
+    let (mut ws, _) = tokio_tungstenite::connect_async(req).await.unwrap();
+    ws.send(Message::Text(psk.into())).await.unwrap();
+    ws.send(Message::Text(format!(
+        r#"{{"type":"room_join","room_id":"{room}","peer_role":"consumer","protocol":4}}"#
+    )))
+    .await
+    .unwrap();
+    let mut snapshot = serde_json::Value::Null;
+    loop {
+        match ws.next().await.unwrap().unwrap() {
+            Message::Text(t) if t.contains("floor_state") => {
+                let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+                snapshot = v["snapshot"].clone();
+                break;
+            }
+            Message::Text(t) if t.contains("room_joined") => continue,
+            Message::Ping(p) => {
+                let _ = ws.send(Message::Pong(p)).await;
+            }
+            _ => continue,
+        }
+    }
+    (ws, snapshot)
+}

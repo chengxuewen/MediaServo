@@ -2517,13 +2517,18 @@ pub(crate) async fn apply_floor_event(
 }
 
 /// P2: whether a new producer must start paused (floor-enabled room, peer not granted).
+/// A13/R6: producers in NON-designated rooms are NEVER floor-gated — view/ctrl/
+/// media rooms are untouched by intercom. The unconditional call site (produce)
+/// passes non-designated ids here too, so the table miss MUST answer false (the
+/// pre-P6 `true` silently blocked every producer in floor-enabled deployments
+/// whose room was not in the designation set — caught by the A13 negative).
 #[cfg(feature = "sfu-mediasoup")]
 async fn floor_producer_paused(server: &SignalingServer, room_id: &str, peer_id: &str) -> bool {
     if !server.floor_enabled {
         return false;
     }
     let Some(arc) = server.floor_rooms.get(room_id).map(|r| Arc::clone(r.value())) else {
-        return true;
+        return false; // A13: non-designated rooms are never floor-gated
     };
     let g = arc.lock().await;
     !g.state().is_granted(&peer_id.to_string())
@@ -3445,6 +3450,37 @@ mod tests {
         #[cfg(not(feature = "sfu-mediasoup"))]
         {
             SignalingServer::new(1 << 20, None)
+        }
+    }
+
+    /// A13 (acceptance port, P6-2): producers in NON-designated rooms are
+    /// NEVER floor-gated, even with floor enabled. The pre-P6 code answered
+    /// `true` for rooms missing from the designation table — silently blocking
+    /// every producer in floor-enabled deployments whose room was not seeded
+    /// (caught by this negative; O26/P0 never saw it because their rooms were
+    /// all designated).
+    #[tokio::test]
+    async fn producer_pause_never_gates_non_designated_rooms() {
+        let server = new_test_server().await;
+        let mut server = server;
+        server.floor_enabled = true;
+        server.floor_rooms.insert(
+            "talk-gate".to_string(),
+            std::sync::Arc::new(tokio::sync::Mutex::new(crate::floor::FloorRoom::new(
+                "talk-gate",
+                mediaservo_common::floor::FloorMode::Exclusive,
+                mediaservo_common::floor::FloorLimits::default(),
+            ))),
+        );
+        // designated + non-granted peer = paused (R6 gating works where it should)
+        #[cfg(feature = "sfu-mediasoup")]
+        assert!(floor_producer_paused(&server, "talk-gate", "peer-1").await);
+        // non-designated rooms: NEVER gated, regardless of the id shape
+        #[cfg(feature = "sfu-mediasoup")]
+        {
+            assert!(!floor_producer_paused(&server, "fleet1", "peer-1").await);
+            assert!(!floor_producer_paused(&server, "audio-legacy", "peer-1").await);
+            assert!(!floor_producer_paused(&server, "meet-ops", "peer-1").await);
         }
     }
 

@@ -26,7 +26,7 @@ services:
       # P2 §3.5: designated talk rooms (floor commands exist only here). Comma-separated.
       # P2 master switch (default OFF; floor command arms + registry are dead without it).
       MEDIASERVO_FLOOR_ENABLED: "1"
-      MEDIASERVO_FLOOR_ROOMS: "talk-o26,audio-p0,talk-a12"
+      MEDIASERVO_FLOOR_ROOMS: "talk-o26,talk-a12"
       # 容器内进程（mediasoup-sys meson wrapdb）需要独立代理 (PIT-38)
       HTTPS_PROXY: ${https_proxy:-}
       NO_PROXY: ${no_proxy:-}
