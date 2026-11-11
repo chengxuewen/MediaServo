@@ -26,6 +26,11 @@ export function FieldPage({ room, wsUrl }: { room: string; wsUrl: string }) {
 
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => () => { micRef.current?.close(); }, []);
+  // reload path (O26 B9 resync): a stored token connects automatically
+  useEffect(() => {
+    if (phase === 'login' && token && !user && !pass) void connect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
+  }, []);
 
   const connect = async () => {
     let t = token;
@@ -52,8 +57,10 @@ export function FieldPage({ room, wsUrl }: { room: string; wsUrl: string }) {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     await producer.produceAudio(stream.getAudioTracks()[0]);
     floor.resync(); // late-joiner replay: pull the current floor truth
-    if (producer.sfuPeerId) {
-      const fresh = initialFloorUi(producer.sfuPeerId);
+    if (producer.sessionPeerId) {
+      // the floor identity is the SESSION peer (server-assigned at room_join),
+      // not the mic transport peer -- grants name this id (O26-surfaced).
+      const fresh = initialFloorUi(producer.sessionPeerId);
       stateRef.current = fresh;
       setState(fresh);
     }
@@ -62,14 +69,17 @@ export function FieldPage({ room, wsUrl }: { room: string; wsUrl: string }) {
 
   const press = () => {
     if (!floorRef.current) return;
+    // hold-to-talk = QUEUE (no preempt): preempting would deny a lower-priority
+    // peer outright (PreemptPriority) instead of the M4 wait-your-turn posture.
+    // Preempt is an explicit dispatcher-side action, not a field-page default.
     if (locked) {
       // lock posture: one click toggles talk; release only via another click
       const grantedNow = stateRef.current.selfPeer
         && stateRef.current.grants.includes(stateRef.current.selfPeer);
       if (grantedNow) floorRef.current.release();
-      else floorRef.current.request(undefined, true);
+      else floorRef.current.request();
     } else {
-      floorRef.current.request(undefined, true); // hold-to-talk: preempt off? keep default
+      floorRef.current.request();
     }
   };
   const releasePress = () => {

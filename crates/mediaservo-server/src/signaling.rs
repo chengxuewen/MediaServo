@@ -1668,6 +1668,10 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                                     FloorEvent::ModeChange { mode, actor: relay_peer_id.clone() },
                                 )
                                 .await;
+                                // dispatcher sees the fresh truth immediately (D12 scope)
+                                let snap =
+                                    floor_snapshot_msg(&server, &relay_room, relay_floor_role).await;
+                                let _ = server.floor_registry.deliver(conn_id, &snap);
                             } else {
                                 let err = SignalingMessage::Error {
                                     code: 4032,
@@ -1708,6 +1712,9 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                                     },
                                 )
                                 .await;
+                                let snap =
+                                    floor_snapshot_msg(&server, &relay_room, relay_floor_role).await;
+                                let _ = server.floor_registry.deliver(conn_id, &snap);
                             } else {
                                 let err = SignalingMessage::Error {
                                     code: 4032,

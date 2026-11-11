@@ -26,6 +26,11 @@ export function DispatchPage({ room, wsUrl }: { room: string; wsUrl: string }) {
 
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => () => { clientRef.current?.close(); }, []);
+  // reload path (O26 B3/B9): a stored token connects automatically
+  useEffect(() => {
+    if (phase === 'login' && token && !user && !pass) void connect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
+  }, []);
 
   const connect = async () => {
     let t = token;
@@ -117,6 +122,13 @@ export function DispatchPage({ room, wsUrl }: { room: string; wsUrl: string }) {
           {state.muted.includes(g) ? `unmute ${g}` : `mute ${g}`}
         </button>
       ))}
+      {state.muted
+        .filter((m) => !state.grants.includes(m))
+        .map((m) => (
+          <button key={m} onClick={() => toggleMute(m, false)} style={{ marginRight: 8 }}>
+            unmute {m}
+          </button>
+        ))}
       {state.queue.length > 0 && (
         <p>
           Queue:{' '}

@@ -14,7 +14,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const appRoot = path.resolve(__dirname, '../../apps/voice');
 const evidencePath =
   process.env.O26_EVIDENCE ??
-  path.resolve(__dirname, '../../../../docs/plans/voice-web-app/evidence/o26-matrix.json');
+  path.resolve(__dirname, '../../../../../docs/plans/voice-web-app/evidence/o26-matrix.json');
 const chromePath = process.env.CHROME_PATH ?? (() => {
   const root = path.join(os.homedir(), '.cache/ms-playwright');
   if (!existsSync(root)) return '';
@@ -60,10 +60,13 @@ async function scenario(name, fn) {
     results.push({ scenario: name, pass: true });
     log(`PASS ${name}`);
   } catch (err) {
-    results.push({ scenario: name, pass: false, error: String(err).slice(0, 300) });
-    log(`FAIL ${name}: ${String(err).slice(0, 200)}`);
+    let body = '';
+    try { body = (await dispatchPageRef.current.locator('body').innerText()).slice(0, 200); } catch { /* noop */ }
+    results.push({ scenario: name, pass: false, error: String(err).slice(0, 300), body });
+    log(`FAIL ${name}: ${String(err).slice(0, 160)} | dispatch=${JSON.stringify(body)}`);
   }
 }
+const dispatchPageRef = { current: null };
 
 async function waitQueueChange(page, before) {
   await page.waitForFunction(
@@ -105,6 +108,7 @@ const main = async () => {
     const f1Ctx = await newContext(browser);
     const f2Ctx = await newContext(browser);
     const dispatch = await openPage(dispatchCtx, `/dispatch/${ROOM}`, 'admin', 'admin123');
+    dispatchPageRef.current = dispatch;
     const field1 = await openPage(f1Ctx, `/field/${ROOM}`, 'operator', 'operator123');
     const field2 = await openPage(f2Ctx, `/field/${ROOM}`, 'operator', 'operator123');
 
@@ -113,6 +117,19 @@ const main = async () => {
     await waitForText(field2, 'TALK');
     results.push({ scenario: 'B0 setup: 3 contexts live', pass: true });
     log('setup live');
+
+    await scenario('B-1 re-entry reset (mode exclusive + unmute leftovers)', async () => {
+      // the room persists across runs (server in-memory): force a clean base.
+      // open mode never queues (capacity unbounded) and stale mutes deny.
+      await dispatch.locator('button', { hasText: /^exclusive$/ }).click();
+      await waitForText(dispatch, 'Mode: exclusive');
+      for (let i = 0; i < 6; i++) {
+        const unmute = dispatch.locator('button', { hasText: /^unmute / });
+        if (!(await unmute.count())) break;
+        await unmute.first().click();
+        await new Promise((r) => setTimeout(r, 800));
+      }
+    });
 
     await scenario('B1 first hold grants (exclusive single holder)', async () => {
       await hold(field1);
@@ -124,7 +141,11 @@ const main = async () => {
       await waitForText(field2, 'Queued — waiting for the floor');
     });
 
-    await scenario('B3 dispatcher sees grant + queue strip', async () => {
+    await scenario('B3 dispatcher sees grant + queue strip (via resync)', async () => {
+      // P2 scoping: queue changes ride private updates + snapshots, not room
+      // broadcasts -- the dispatcher resyncs (reload = reconnect + resync).
+      await dispatch.reload();
+      await waitForText(dispatch, 'Floor panel');
       await waitForText(dispatch, 'Queue:');
       const text = await dispatch.locator('body').innerText();
       if (text.includes('Floor: idle')) throw new Error('floor should not be idle while held');
@@ -169,6 +190,7 @@ const main = async () => {
       await waitForText(field1, 'You have the floor');
       await hold(field2);
       await waitForText(field2, 'Queued — waiting for the floor');
+      await dispatch.reload();
       await waitForText(dispatch, 'Queue:');
       const before = (await dispatch.locator('body').innerText()).match(/Queue:\s*([^\n]*)/)[1];
       await dispatch.locator('button', { hasText: '+prio' }).first().click();

@@ -925,7 +925,9 @@ export class SfuConsumerClient {
 export class SfuMicProducer {
   private ws: WebSocket | null = null;
   private transport: MsTransport | null = null;
-  private peerId: string | null = null;
+  /** The session peer id the server assigned at room_join (the FLOOR identity:
+   *  grants/denials name THIS id — not the mic transport peer). */
+  private sessionPeer: string | null = null;
   /** Response type key → one-shot resolver (enough for the serial auth/join/caps/transport/produced flow). */
   private pending = new Map<string, (m: Record<string, unknown>) => void>();
   /** P3-3 voice app: floor frames arriving on THIS connection (the same peer
@@ -934,9 +936,10 @@ export class SfuMicProducer {
    *  routed here FIRST (route() never sees them). */
   onFloorFrame: ((data: string) => void) | null = null;
 
-  /** P3-3: this connection's SFU peer id (undefined until produceAudio ran). */
-  get sfuPeerId(): string | undefined {
-    return this.peerId ?? undefined;
+  /** P3-3: the session peer id (the floor actor identity; undefined until
+   *  produceAudio ran and the server answered room_joined). */
+  get sessionPeerId(): string | undefined {
+    return this.sessionPeer ?? undefined;
   }
 
   constructor(
@@ -983,10 +986,10 @@ export class SfuMicProducer {
       setTimeout(() => reject(new Error('mic connect timeout')), 10000);
     });
     const peerId = `${this.roomId}-mic-${Math.random().toString(36).slice(2, 8)}`;
-    this.peerId = peerId;
     await this.rpcWait('error', () => true, 10000); // auth ack (code:0 authenticated)
     send({ type: 'room_join', room_id: this.roomId, peer_role: 'consumer', protocol: 4 });
-    await this.rpcWait('room_joined', () => true);
+    const joined = await this.rpcWait('room_joined', (m) => ({ peer_id: String(m.peer_id ?? '') }));
+    this.sessionPeer = joined.peer_id;
     const capsP = this.rpcWait('router_rtp_capabilities', (m) => m.capabilities);
     send({ type: 'get_router_rtp_capabilities', room_id: this.roomId });
     const device = new Device();

@@ -103,6 +103,22 @@ async fn tick(server: &SignalingServer, empty_since: &mut HashMap<String, Instan
     let evict: Vec<String> = empty_since
         .iter()
         .filter(|(_, t)| idle_past_ttl(Some(**t), IDLE_TTL_SECS, now))
+        // O26-surfaced: a DESIGNATED room must never lose its map entry --
+        // floor_room_designated is a contains_key test and seed_floor_rooms
+        // runs only at process start; evicting a designated room kills the
+        // floor for that room until restart. Reset the ledger instead (the
+        // entry stays; it re-arms when the room is used again).
+        .filter(|(room_id, _)| {
+            let designated = std::env::var("MEDIASERVO_FLOOR_ROOMS")
+                .map(|raw| {
+                    raw.split(',').map(str::trim).any(|id| id == room_id.as_str())
+                })
+                .unwrap_or(false);
+            if designated {
+                tracing::info!(room_id, "designated room idle past TTL -- entry kept, ledger reset");
+            }
+            !designated
+        })
         .map(|(room_id, _)| room_id.clone())
         .collect();
     for room_id in evict {
