@@ -88,7 +88,13 @@ RUN mkdir -p crates/mediaservo-common/src && touch crates/mediaservo-common/src/
              bindings/node/rust/mediaservo-node/src && \
     touch bindings/c/mediaservo-field-c/src/lib.rs bindings/c/mediaservo-link-c/src/lib.rs bindings/c/mediaservo-deck-c/src/lib.rs \
           bindings/cxx/mediaservo-link-cxx/src/lib.rs bindings/cxx/mediaservo-deck-cxx/src/lib.rs bindings/cxx/mediaservo-field-cxx/src/lib.rs \
-          bindings/node/rust/mediaservo-node/src/lib.rs
+          bindings/node/rust/mediaservo-node/src/lib.rs && \
+    mkdir -p bindings/c/mediaservo-client-c/src bindings/cxx/mediaservo-client-cxx/src \
+             examples/rs/examples tools/mediaservo-gates/src && \
+    touch bindings/c/mediaservo-client-c/src/lib.rs bindings/cxx/mediaservo-client-cxx/src/lib.rs \
+          examples/rs/examples/basic.rs examples/rs/examples/pull_observe.rs \
+          examples/rs/examples/push_observe.rs examples/rs/examples/vehicle_push.rs && \
+    echo 'fn main() {}' > tools/mediaservo-gates/src/main.rs
 RUN cargo fetch
 RUN rm -rf crates/*/src
 COPY . .
@@ -144,7 +150,13 @@ RUN mkdir -p crates/mediaservo-common/src && touch crates/mediaservo-common/src/
              bindings/node/rust/mediaservo-node/src && \
     touch bindings/c/mediaservo-field-c/src/lib.rs bindings/c/mediaservo-link-c/src/lib.rs bindings/c/mediaservo-deck-c/src/lib.rs \
           bindings/cxx/mediaservo-link-cxx/src/lib.rs bindings/cxx/mediaservo-deck-cxx/src/lib.rs bindings/cxx/mediaservo-field-cxx/src/lib.rs \
-          bindings/node/rust/mediaservo-node/src/lib.rs
+          bindings/node/rust/mediaservo-node/src/lib.rs && \
+    mkdir -p bindings/c/mediaservo-client-c/src bindings/cxx/mediaservo-client-cxx/src \
+             examples/rs/examples tools/mediaservo-gates/src && \
+    touch bindings/c/mediaservo-client-c/src/lib.rs bindings/cxx/mediaservo-client-cxx/src/lib.rs \
+          examples/rs/examples/basic.rs examples/rs/examples/pull_observe.rs \
+          examples/rs/examples/push_observe.rs examples/rs/examples/vehicle_push.rs && \
+    echo 'fn main() {}' > tools/mediaservo-gates/src/main.rs
 
 # 3. Fetch and build dependencies (cached — only re-runs on Cargo.toml changes)
 RUN cargo fetch && \
