@@ -516,12 +516,16 @@ fn d16_leave_of_granted_peer_promotes_like_release() {
 // ── generation boot offset ──────────────────────────────────────────────────
 
 #[test]
-fn initial_uses_systemtime_entropy_nonzero_and_varying() {
+fn initial_is_monotonic_nonzero_and_ts_number_safe() {
+    // O29: the in-process counter stays far below 2^53 (JS Number precision)
+    // and strictly increases within a process lifetime. Restart reset is safe
+    // under R12: floor state is in-memory and clients resync on reconnect.
     let a = FloorState::initial(FloorMode::Exclusive);
     let b = FloorState::initial(FloorMode::Exclusive);
     assert_ne!(a.generation(), 0);
     assert_ne!(b.generation(), 0);
-    assert_ne!(a.generation(), b.generation(), "SystemTime nanos differ");
+    assert!(b.generation() > a.generation(), "counter strictly increases");
+    assert!(b.generation() < (1u64 << 53), "TS-safe: plain Number compares exactly");
 }
 
 #[test]

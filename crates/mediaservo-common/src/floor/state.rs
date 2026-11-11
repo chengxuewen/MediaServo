@@ -3,12 +3,13 @@
 //! Total function design: `apply()` takes `(state, event, limits)` and returns
 //! `(new_state, emitted_wire_messages)`. No I/O, no clocks, no randomness inside
 //! the reducer — `generation` advances as `prev + 1` (fresh entropy enters only
-//! at `initial()` via SystemTime nanos; tests pin determinism via
+//! at `initial()` via the process monotonic counter (O29: stays < 2^53 so TS
+//! clients compare it with plain Number); tests pin determinism via
 //! `initial_with_generation`).
 
 use super::PeerId;
 use super::wire::{DenyReason, FloorSignal};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Simultaneous-speaker and queue caps, passed per-call so the core stays
 /// config-free (values come from server config; modules/06).
@@ -86,12 +87,15 @@ pub enum FloorEvent {
 }
 
 impl FloorState {
-    /// Production constructor: generation seeded from SystemTime nanos
-    /// (nonzero, high-resolution — two calls never collide in practice).
+    /// Production constructor: generation from the in-process monotonic counter
+    /// (nonzero, strictly increasing; O29 -- stays far below 2^53 so TS clients
+    /// compare it safely with plain Number). Reset on restart is safe: R12
+    /// declares floor state in-memory and clients resync (snapshot covers the
+    /// local generation, no cross-restart comparison ever happens).
     pub fn initial(mode: FloorMode) -> Self {
-        let nanos =
-            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1);
-        Self::initial_with_generation(mode, nanos.max(1))
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let generation = NEXT.fetch_add(1, Ordering::Relaxed);
+        Self::initial_with_generation(mode, generation.max(1))
     }
 
     /// Deterministic constructor for tests and replay: any generation is legal
