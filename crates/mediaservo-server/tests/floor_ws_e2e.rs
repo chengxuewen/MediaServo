@@ -279,3 +279,26 @@ async fn floor_command_in_designated_room_hits_the_eligibility_gate() {
     assert_eq!(errors, 1, "the eligibility gate denies legacy sessions");
     assert_eq!(floors, 0, "denied means no floor_* traffic");
 }
+
+/// C1 spoofing (P2 gate): a floor command carrying forged identity fields
+/// (`room_id`/`peer_id` are NOT part of the C→S floor wire contract) must be
+/// tolerated by serde (unknown fields ignored), handled under the DERIVED
+/// identity (the gate verdict is identical to the clean message), and never
+/// echoed back -- the forged fields must not appear on the reply wire.
+#[tokio::test]
+async fn spoofed_identity_fields_are_ignored_and_never_echoed() {
+    let url = spawn_server(&["talk-car1"]).await;
+    let mut ws = connect_and_join(&url, "fleet1").await;
+    // forged fields injected into a floor command (identity spoofing attempt):
+    // the server derives room/peer from the connection, ignores these, and the
+    // Legacy-session eligibility denial is byte-identical to the clean shape.
+    ws.send(Message::Text(
+        r#"{"type":"floor_request","room_id":"victim-room","peer_id":"victim","priority":1,"preempt":true}"#
+            .into(),
+    ))
+    .await
+    .unwrap();
+    let (errors, floors) = drain(&mut ws, 2).await;
+    assert_eq!(errors, 1, "spoofed fields must not bypass the gate");
+    assert_eq!(floors, 0, "no floor_* may carry the forged identity");
+}
