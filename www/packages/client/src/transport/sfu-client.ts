@@ -54,7 +54,21 @@ export function mapIceCandidates(list: WireIceCandidate[]): Array<Record<string,
   }));
 }
 
-type StreamCallback = (stream: MediaStream) => void;
+/** O21 consumer metadata: which producer/label a delivered stream belongs to
+ *  (M1 mode delivers one callback per producer — the UI keys tracks by this). */
+export interface StreamMeta {
+  producerId: string;
+  label?: string;
+}
+/** O21 pure label-filter predicate (unit-tested): M1 (empty set) accepts every
+ *  producer; M2 (non-empty set) accepts only labeled producers in the set.
+ *  Unlabeled producers pass ONLY in M1. Exported pure — the class delegates. */
+export function wantsProducer(label: string | undefined, labels: ReadonlySet<string>): boolean {
+  if (labels.size === 0) return true;
+  return label !== undefined && labels.has(label);
+}
+
+type StreamCallback = (stream: MediaStream, meta?: StreamMeta) => void;
 type StatusCallback = (status: 'connecting' | 'connected' | 'playing' | 'stalled' | 'disconnected' | 'error') => void;
 type MetricsCallback = (metrics: StreamMetrics) => void;
 /// F2: consecutive zero-growth ticks (2s/tick) before declaring 'source offline' — ~6s, conservative for the slowest-fps stream and never earlier than any signaling self-heal.
@@ -107,6 +121,10 @@ export class SfuConsumerClient {
   // P1 core swap: the media plane belongs to mediasoup-client (Transport provides getStats/connectionstatechange).
   private device: Device | null = null;
   private transport: MsTransport | null = null;
+  /** O21: consumers keyed by producer_id (one room hosts N producers; RM9). The
+   *  legacy `consumer` field below stays as the FIRST-stream pointer for the
+   *  single-stream surfaces (metrics/watchdog/onTrack compatibility). */
+  private consumers = new Map<string, { consumer: Consumer; kind: string; label?: string }>();
   private consumer: Consumer | null = null;
   // v2 (web-stream-stats fix): dual-source merged accumulator — getStats and encoder_status alternated
   // overwrote each other and made the panel flicker (values one second, "-" the next); merged uniformly before the callback
@@ -155,10 +173,13 @@ export class SfuConsumerClient {
     console.info(`[T+${Math.round(t - this.t0)}ms] ${msg}`);
   }
 
-  /** producer-label (§12-1 device room + stream label): only consume producers with label===expectedLabel.
-   *  Unset = legacy behavior (derived-room mode: consume every producer in the room), fully compatible. */
-  private expectedLabel: string | undefined;
-  private pendingProducer: { producer_id: string; kind: string } | null = null;
+  /** producer-label (§12-1 device room + stream label): only consume producers whose label is in the set.
+   *  O21: upgraded from the single expectedLabel to a set — empty set = M1 (consume EVERY producer in
+   *  the room, RM9 one-device-one-room); non-empty = M2 (selective subscription by label set). M3
+   *  (dedicated transport per stream) is the O21 next step. Undefined/unlabeled producers only pass
+   *  in M1 (an unlabeled producer never matches a label filter — selective-subscription semantics). */
+  private labels: ReadonlySet<string> = new Set();
+  private pendingProducer: { producer_id: string; kind: string; label?: string } | null = null;
 
   constructor(
     private serverUrl: string,
@@ -169,12 +190,13 @@ export class SfuConsumerClient {
       onStatus: StatusCallback;
       onMetrics: MetricsCallback;
     },
-    options?: { expectedLabel?: string },
+    options?: { expectedLabel?: string; labels?: string[] },
   ) {
     this.onTrack = callbacks.onTrack;
     this.onStatus = callbacks.onStatus;
     this.onMetrics = callbacks.onMetrics;
-    this.expectedLabel = options?.expectedLabel;
+    if (options?.labels?.length) this.labels = new Set(options.labels);
+    else if (options?.expectedLabel) this.labels = new Set([options.expectedLabel]);
     // PIT-65: unique SFU peer_id per connection (pages sharing a peer_id → SfuManager transports overwrite each other)
     this.sfuPeerId = `${this.roomId}-consumer-${Math.random().toString(36).slice(2, 8)}`;
   }
@@ -344,8 +366,18 @@ export class SfuConsumerClient {
     if (this.pendingProducer) {
       const p = this.pendingProducer;
       this.pendingProducer = null;
-      void this.consumeProducer(p.producer_id, p.kind);
+      void this.consumeProducer(p.producer_id, p.kind, p.label);
     }
+  }
+
+  /** O21 pure label-filter predicate (unit-tested): M1 (empty set) accepts every
+   *  producer; M2 (non-empty set) accepts only labeled producers in the set.
+   *  Unlabeled producers pass ONLY in M1. */
+  /** O21 label-filter predicate — delegates to the exported pure wantsProducer
+   *  (M1 empty set accepts all; M2 non-empty set = label membership; unlabeled
+   *  producers pass ONLY in M1). Unit-tested at the module level. */
+  private wantsProducer(label: string | undefined): boolean {
+    return wantsProducer(label, this.labels);
   }
 
   /** get_router_rtp_capabilities → router_rtp_capabilities single-shot side channel (routed by handleMessage). */
@@ -362,7 +394,7 @@ export class SfuConsumerClient {
   /** consume request + consumed response (server Consumer parameters land) → local transport.consume attaches the track
    *  (the negotiation completion point = the old ontrack semantic anchor). rtp_capabilities uses the Device negotiation result —
    *  the old PIT-55 hand-spliced full-codec-field debt dies with the core swap. */
-  private async consumeProducer(producerId: string, kind: string): Promise<void> {
+  private async consumeProducer(producerId: string, kind: string, label?: string): Promise<void> {
     const transport = this.transport;
     const device = this.device;
     const ws = this.ws;
@@ -393,16 +425,20 @@ export class SfuConsumerClient {
         kind: result.kind as 'audio' | 'video',
         rtpParameters: result.rtp_parameters as RtpParameters,
       });
-      this.consumer = consumer;
+      // O21: book-keep per producer; the FIRST stream keeps the legacy
+      // single-consumer pointer (metrics/watchdog/onTrack compatibility).
+      this.consumers.set(producerId, { consumer, kind, label });
+      if (!this.consumer) this.consumer = consumer;
       this.clearPlayWatchdog();
       this.playRounds = 0;
       this.waitingForProducer = false;
+      const firstStream = !this.playingSeen;
       this.playingSeen = true;
       this.stalled = false;
       this.stallTicks = 0;
-      this.onTrack(new MediaStream([consumer.track]));
+      this.onTrack(new MediaStream([consumer.track]), { producerId, label });
       this.onStatus('playing');
-      this.startMetrics();
+      if (firstStream) this.startMetrics();
     } catch (err) {
       console.warn('SfuClient: transport.consume failed', err);
       if (!this.playingSeen && !this.restarting) void this.playDeadlineHit();
@@ -435,10 +471,15 @@ export class SfuConsumerClient {
         });
         this.transportResolver = null;
       } else if (msg.type === 'new_producer') {
-        // producer-label filter (§12-1): when expectedLabel is set, non-target streams are always ignored
-        // (in device-room mode, multiple streams broadcast in one room — each VideoPlayer consumes only its own label).
-        if (this.expectedLabel !== undefined && msg.label !== this.expectedLabel) {
-          this.logT(`new_producer label=${msg.label} ≠ expected=${this.expectedLabel} — ignored`);
+        // O21 (RM9): one room hosts N producers — filter by the label set (M1
+        // accepts all), dedupe by producer_id, then consume each into the map.
+        const label = typeof msg.label === 'string' ? msg.label : undefined;
+        if (!this.wantsProducer(label)) {
+          this.logT(`new_producer label=${label} not in filter set — ignored`);
+          return;
+        }
+        if (this.consumers.has(msg.producer_id)) {
+          this.logT(`new_producer producer=${msg.producer_id} already consumed — ignored`);
           return;
         }
         // W2: producer signal while in the 'source offline waiting' state → wake up and reopen the round budget (full re-negotiation, including late-join).
@@ -450,18 +491,38 @@ export class SfuConsumerClient {
           return;
         }
         if (this.transportId && this.transport) {
-          void this.consumeProducer(msg.producer_id, msg.kind);
+          void this.consumeProducer(msg.producer_id, msg.kind, label);
         } else {
           this.logT('new_producer before transport, queuing');
-          this.pendingProducer = { producer_id: msg.producer_id, kind: msg.kind };
+          this.pendingProducer = { producer_id: msg.producer_id, kind: msg.kind, label };
         }
       } else if (msg.type === 'producer_closed') {
         // S4′: data-producer (remote-control DC domain) death is unrelated to the video stream — do not trigger a media-plane restart,
         // otherwise every cockpit/vehicle DC flip fake-restarts the whole dashboard.
         if (msg.kind === 'data') {
           this.logT('producer_closed(data) — unrelated to the media plane, ignored');
+        } else if (this.consumers.has(msg.producer_id)) {
+          // O21: per-consumer teardown — remove ONLY the dead stream (other
+          // streams keep playing; no full restart storm). The surface flips to
+          // 'stalled' when the last stream dies, and new_producer wakes it (W2).
+          const dead = this.consumers.get(msg.producer_id);
+          if (dead) {
+            try { dead.consumer.close(); } catch { /* already closed */ }
+            this.consumers.delete(msg.producer_id);
+            this.logT(`producer_closed → consumer removed (${this.consumers.size} remain)`);
+            if (this.consumers.size === 0) {
+              this.consumer = null;
+              this.playingSeen = false;
+              this.waitingForProducer = true; // W2: wake on new_producer
+              this.playRounds = 0;
+              this.stopMetrics();
+              this.onStatus('stalled');
+            }
+          }
         } else if ((this.sfuMode || this.waitingForProducer) && !this.closed && !this.restarting) {
-          this.logT('producer_closed → auto resubscribe (refresh-free self-heal)');
+          // producer id unknown to the map (torn down by a restart round already)
+          // → legacy full-round behavior: re-join triggers the late-join replay.
+          this.logT('producer_closed (unknown id) → auto resubscribe (refresh-free self-heal)');
           void this.restartStream();
         }
       } else if (msg.type === 'encoder_status') {

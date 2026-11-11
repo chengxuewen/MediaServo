@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifySfuError, nextBackoff, mapIceParameters, mapIceCandidates, mapDtlsParameters } from './sfu-client';
+import { classifySfuError, nextBackoff, mapIceParameters, mapIceCandidates, mapDtlsParameters, wantsProducer } from './sfu-client';
 
 // T0.2 first batch of unit tests: two exported pure functions (W1/W4 resilience cornerstones), semantics pinned against P1 core-swap regressions.
 
@@ -59,5 +59,27 @@ describe('nextBackoff (W1 exponential backoff)', () => {
     expect(nextBackoff(-3)).toBe(1000);
     expect(nextBackoff(1.7)).toBe(1000);
     expect(nextBackoff(2.9)).toBe(2000);
+  });
+});
+
+describe('wantsProducer (O21 label filter — M1/M2 pure predicate)', () => {
+  const M1 = new Set<string>(); // empty set = consume EVERY producer
+  const M2 = new Set(['fl', 'fm']);
+
+  it('M1 (no filter set): every producer passes, including unlabeled', () => {
+    expect(wantsProducer(undefined, M1)).toBe(true);
+    expect(wantsProducer('anything', M1)).toBe(true);
+  });
+
+  it('M2: only set-member labels pass; unlabeled producers never match', () => {
+    expect(wantsProducer('fl', M2)).toBe(true);
+    expect(wantsProducer('cam-x', M2)).toBe(false);
+    expect(wantsProducer(undefined, M2)).toBe(false);
+  });
+
+  it('M2 boundary: undefined label in a non-empty set is rejected (selective-subscription semantics)', () => {
+    // legacy short-form producers (no label) must NOT be consumed by a
+    // label-filtered cockpit — the filter is the subscription contract.
+    expect(wantsProducer('fm', M2)).toBe(true);
   });
 });
