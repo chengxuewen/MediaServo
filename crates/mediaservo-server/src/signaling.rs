@@ -2486,6 +2486,34 @@ pub(crate) async fn apply_floor_event(
             let _ = server.floor_registry.broadcast_room(room_id, &msg);
         }
     }
+    // P4-2: one FloorChanged per mutation on the admin events channel (final
+    // truth, after the reconcile cascade; same second-level-refresh discipline
+    // as StreamDestroy). REST mutations reach this via the same function, so
+    // console refreshes are identical for the wire and the admin API.
+    let (floor_generation, floor_summary) = {
+        let g = room.lock().await;
+        let st = g.state();
+        let holder = if st.grants().is_empty() {
+            "idle".to_string()
+        } else {
+            st.grants().join("+")
+        };
+        (
+            st.generation(),
+            format!(
+                "mode={:?} holder={holder} queue={} muted={}",
+                st.mode(),
+                st.queue().len(),
+                st.muted().len(),
+            ),
+        )
+    };
+    let ev = crate::admin::AdminEvent::FloorChanged {
+        room_id: room_id.to_string(),
+        generation: floor_generation,
+        summary: floor_summary,
+    };
+    let _ = server.admin_events.send(serde_json::to_string(&ev).unwrap_or_default());
 }
 
 /// P2: whether a new producer must start paused (floor-enabled room, peer not granted).

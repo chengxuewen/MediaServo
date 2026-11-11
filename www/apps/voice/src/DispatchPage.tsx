@@ -109,7 +109,7 @@ export function DispatchPage({ room, wsUrl }: { room: string; wsUrl: string }) {
   return (
     <div>
       <h1>Dispatch — {room}</h1>
-      <p>Streams: {streams.size} | Mode: {state.mode ?? 'unknown'} | Floor: {state.grants.length ? state.grants.join(', ') : 'idle'}</p>
+      <p>Streams: {streams.size} | Mode: {state.mode ?? 'unknown'} (resets on restart) | Floor: {state.grants.length ? state.grants.join(', ') : 'idle'}</p>
       <p>{posture === 'granted' ? 'floor active' : ''}</p>
       <h2>Floor panel</h2>
       <p>

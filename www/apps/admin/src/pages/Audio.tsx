@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
-import { getSfuRooms, getSfuStats, type SfuRoom, type SfuStats as SfuStatsT } from '../api/client';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  getSfuRooms,
+  getSfuStats,
+  getFloorSnapshot,
+  type FloorSnapshot,
+  type SfuRoom,
+  type SfuStats as SfuStatsT,
+} from '../api/client';
+import { useAdminWS } from '../hooks/useAdminWS';
 import './Audio.css';
 import { Mic } from 'lucide-react';
 
@@ -30,6 +38,31 @@ export default function Audio() {
   const [statsByRoom, setStatsByRoom] = useState<Record<string, RoomStats>>({});
   const [statsLoading, setStatsLoading] = useState<Set<string>>(new Set());
 
+  // P4-2 (ADJ-1=B): READ-ONLY floor columns + push-driven refresh. The control
+  // face stays single-sourced in the voice dispatch console (/dispatch/:room).
+  const [floorByRoom, setFloorByRoom] = useState<Record<string, FloorSnapshot>>({});
+  const nonFloorRef = useRef<Set<string>>(new Set()); // 404 = not a designated talk room
+
+  const fetchFloor = useCallback(async (roomId: string) => {
+    if (nonFloorRef.current.has(roomId)) return;
+    try {
+      const snap = await getFloorSnapshot(roomId);
+      setFloorByRoom((prev) => ({ ...prev, [roomId]: snap }));
+    } catch {
+      nonFloorRef.current.add(roomId);
+    }
+  }, []);
+
+  // acceptance "push < 1 s": the server emits floor_changed per mutation
+  useAdminWS(
+    useCallback(
+      (event: { type?: string; room_id?: string }) => {
+        if (event?.type === 'floor_changed' && event.room_id) void fetchFloor(event.room_id);
+      },
+      [fetchFloor],
+    ),
+  );
+
   const fetchRooms = useCallback(async () => {
     try {
       const data = await getSfuRooms();
@@ -43,11 +76,15 @@ export default function Audio() {
   }, []);
 
   useEffect(() => { fetchRooms(); }, [fetchRooms]);
-  // ponytail: 5s polling (same cadence as useDevices); WS event merge deferred
+  // ponytail: 5s polling (same cadence as useDevices) stays as the floor
+  // snapshot's fallback; floor_changed pushes drive immediate refreshes above
   useEffect(() => {
     const interval = setInterval(fetchRooms, 5000);
     return () => clearInterval(interval);
   }, [fetchRooms]);
+  useEffect(() => {
+    rooms.forEach((r) => void fetchFloor(r.room_id));
+  }, [rooms, fetchFloor]); // eslint-disable-line react-hooks/exhaustive-deps -- poll fallback + initial seed
 
   const refreshStats = useCallback(async (roomId: string) => {
     const room = rooms.find((r) => r.room_id === roomId);
@@ -119,6 +156,22 @@ export default function Audio() {
                     {statsLoading.has(room.room_id) ? 'Refreshing...' : 'Refresh Stats'}
                   </button>
                 </div>
+                {(() => {
+                  const fl = floorByRoom[room.room_id];
+                  if (!fl) return null;
+                  const holder = fl.grants.length ? fl.grants.join('+') : 'idle';
+                  return (
+                    <div className="audio-floor-row">
+                      <span className="audio-floor-mode">Floor: {fl.mode}</span>
+                      <span>holder: {holder}</span>
+                      <span>queue: {fl.queue.length}</span>
+                      <span className="audio-floor-note">resets on restart</span>
+                      <a className="audio-floor-link" href={`/dispatch/${room.room_id}`}>
+                        Dispatch console →
+                      </a>
+                    </div>
+                  );
+                })()}
                 {stats?.error && <p className="audio-stats-error">{stats.error}</p>}
                 {stats && (stats.producerStats.length > 0 || stats.consumerStats.length > 0) && (
                   <div className="audio-stats">

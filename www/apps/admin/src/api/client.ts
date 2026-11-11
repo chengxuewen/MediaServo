@@ -18,6 +18,7 @@ import type {
   AdminAccountUpdated,
   AdminAccountDeleted,
   PskResponse,
+  FloorSnapshot,
 } from '@mediaservo/client';
 
 export * from '@mediaservo/client';
@@ -70,7 +71,15 @@ export async function getSfuStats(producerId?: string, consumerId?: string): Pro
   const params = new URLSearchParams();
   if (producerId) params.set('producer_id', producerId);
   if (consumerId) params.set('consumer_id', consumerId);
-  return request(`/sfu/stats?${params.toString()}`);
+  const qs = params.toString();
+  return request(`/sfu/stats${qs ? `?${qs}` : ''}`);
+}
+
+// P4-2 (ADJ-1=B): floor snapshot is READ-ONLY here — the control face lives in
+// the voice dispatch console (/dispatch/:room); a 404 means the room is not a
+// designated talk room (floor disabled) and the caller should stop polling it.
+export async function getFloorSnapshot(roomId: string): Promise<FloorSnapshot> {
+  return request(`/floor/${encodeURIComponent(roomId)}`);
 }
 
 export async function getVehicleStatus(): Promise<VehicleStatusResponse> {

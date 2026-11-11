@@ -16,3 +16,10 @@
 .audio-stat-label { font-family: monospace; flex: 1; }
 .audio-stat-score { color: #27ae60; }
 .audio-stats-error { font-size: 0.8rem; color: #e74c3c; padding: 0 1rem 0.5rem; }
+
+/* P4-2 (ADJ-1=B): read-only floor strip under the room header */
+.audio-floor-row { display: flex; align-items: center; gap: 1rem; padding: 0.35rem 1rem; background: #f6f8fa; border-top: 1px solid #eef1f4; font-size: 13px; color: #444; }
+.audio-floor-mode { font-weight: 600; color: #1d4ed8; }
+.audio-floor-note { color: #8a6d3b; font-size: 11px; }
+.audio-floor-link { margin-left: auto; color: #1d4ed8; text-decoration: none; font-size: 12px; }
+.audio-floor-link:hover { text-decoration: underline; }

@@ -19,6 +19,22 @@ export interface SfuRoom {
 }
 export interface SfuRoomsResponse { rooms: SfuRoom[]; }
 
+// P4-2: floor snapshot + policy (admin REST GET /api/admin/floor/:room;
+// mirrors floor_json on the server — read-only console surface, ADJ-1=B).
+// FloorQueueEntry is the wire type from ./floor (single source, no re-def).
+import type { FloorQueueEntry } from './floor';
+export type { FloorQueueEntry };
+export interface FloorLimitsInfo { max_peers: number; max_queue: number; max_hold_secs: number; media_grace_secs: number; }
+export interface FloorSnapshot {
+  room_id: string;
+  mode: string;
+  grants: string[];
+  muted: string[];
+  queue: FloorQueueEntry[];
+  generation: number;
+  limits: FloorLimitsInfo;
+}
+
 // H3: SfuStats (mirrors the WS signaling SfuStats — the H2 protocol admin surface).
 export interface SfuStats {
   producer_id?: string;

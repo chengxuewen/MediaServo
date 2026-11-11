@@ -66,6 +66,10 @@ pub enum AdminEvent {
     StreamDestroy { device_id: String, stream_id: String, timestamp: String },
     ConsumerJoin { peer_id: String, device_id: String, stream_id: String, timestamp: String },
     ConsumerLeave { peer_id: String, device_id: String, stream_id: String, timestamp: String },
+    /// P4-2: floor state changed (one per mutation, final truth after the
+    /// reconcile cascade). The console refreshes the room's snapshot on receipt
+    /// (push < 1 s acceptance); `summary` is a compact one-line state render.
+    FloorChanged { room_id: String, generation: u64, summary: String },
 }
 
 macro_rules! event_ts {
@@ -1966,6 +1970,44 @@ pub(crate) mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "dispatcher is read-only");
+    }
+
+    #[tokio::test]
+    async fn floor_rest_floorchanged_push_within_1s() {
+        let mut state = make_state().await;
+        state.signaling.floor_enabled = true;
+        seed_floor_room(&state, "talk-rest");
+        let token = admin_token(&state);
+        // the console consumes the same channel as AdminState.event_tx (main.rs
+        // wires them from signaling.admin_events()); subscribe there directly.
+        let mut rx = state.signaling.admin_events().subscribe();
+        let app = admin_router(state);
+
+        let started = std::time::Instant::now();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/floor/talk-rest/mode")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from("{\"mode\":\"open\"}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let raw = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("FloorChanged within 1s (acceptance)")
+            .expect("channel open");
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["type"], "floor_changed");
+        assert_eq!(v["room_id"], "talk-rest");
+        assert!(v["generation"].is_u64());
+        assert!(v["summary"].as_str().unwrap().contains("holder=idle"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
     }
 
     #[tokio::test]
