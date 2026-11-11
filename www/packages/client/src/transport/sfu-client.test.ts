@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifySfuError, nextBackoff, mapIceParameters, mapIceCandidates, mapDtlsParameters, wantsProducer } from './sfu-client';
+import { classifySfuError, classifyProducerRoute, nextBackoff, mapIceParameters, mapIceCandidates, mapDtlsParameters, wantsProducer } from './sfu-client';
 
 // T0.2 first batch of unit tests: two exported pure functions (W1/W4 resilience cornerstones), semantics pinned against P1 core-swap regressions.
 
@@ -81,5 +81,25 @@ describe('wantsProducer (O21 label filter — M1/M2 pure predicate)', () => {
     // legacy short-form producers (no label) must NOT be consumed by a
     // label-filtered cockpit — the filter is the subscription contract.
     expect(wantsProducer('fm', M2)).toBe(true);
+  });
+});
+
+describe('classifyProducerRoute (O21-M3 transport routing)', () => {
+  const labels = new Set(['left', 'right']); // shared group (M2 selective)
+  const isolated = new Set(['front']); // dedicated transport (teleop front camera)
+
+  it('isolated label routes to its own transport (and implicitly joins the subscription)', () => {
+    expect(classifyProducerRoute('front', labels, isolated)).toBe('isolated');
+    expect(classifyProducerRoute('front', new Set(), isolated)).toBe('isolated'); // M1+isolation
+  });
+
+  it('shared-group labels ride the shared transport', () => {
+    expect(classifyProducerRoute('left', labels, isolated)).toBe('shared');
+  });
+
+  it('everything else is ignored (unlabeled never matches a filter; M2 non-members dropped)', () => {
+    expect(classifyProducerRoute(undefined, labels, isolated)).toBe('ignore');
+    expect(classifyProducerRoute('cam-x', labels, isolated)).toBe('ignore');
+    expect(classifyProducerRoute('fl', new Set(['fl']), isolated)).toBe('shared'); // M2-only posture
   });
 });

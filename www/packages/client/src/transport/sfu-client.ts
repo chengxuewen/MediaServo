@@ -68,6 +68,25 @@ export function wantsProducer(label: string | undefined, labels: ReadonlySet<str
   return label !== undefined && labels.has(label);
 }
 
+/** O21-M3 transport-route classifier (unit-tested, RM11 refined form): M3 is
+ *  NOT a third mode — it is the composition of an ISOLATED label (each such
+ *  label gets its own dedicated recv transport, e.g. the teleop front camera)
+ *  plus a SHARED group for everything else. An isolated label implicitly
+ *  joins the subscription set (isolating a stream you do not subscribe to is
+ *  meaningless). Everything not isolated rides the shared transport. */
+export type TransportRoute = 'isolated' | 'shared' | 'ignore';
+export function classifyProducerRoute(
+  label: string | undefined,
+  labels: ReadonlySet<string>,
+  isolatedLabels: ReadonlySet<string>,
+): TransportRoute {
+  if (label !== undefined && isolatedLabels.has(label)) return 'isolated';
+  const effective = labels.size === 0
+    ? new Set([...isolatedLabels]) // M1 with isolation: only isolated labels are subscribed
+    : labels;
+  return wantsProducer(label, effective) ? 'shared' : 'ignore';
+}
+
 type StreamCallback = (stream: MediaStream, meta?: StreamMeta) => void;
 type StatusCallback = (status: 'connecting' | 'connected' | 'playing' | 'stalled' | 'disconnected' | 'error') => void;
 type MetricsCallback = (metrics: StreamMetrics) => void;
@@ -175,11 +194,18 @@ export class SfuConsumerClient {
 
   /** producer-label (§12-1 device room + stream label): only consume producers whose label is in the set.
    *  O21: upgraded from the single expectedLabel to a set — empty set = M1 (consume EVERY producer in
-   *  the room, RM9 one-device-one-room); non-empty = M2 (selective subscription by label set). M3
-   *  (dedicated transport per stream) is the O21 next step. Undefined/unlabeled producers only pass
-   *  in M1 (an unlabeled producer never matches a label filter — selective-subscription semantics). */
+   *  the room, RM9 one-device-one-room); non-empty = M2 (selective subscription by label set).
+   *  isolatedLabels (O21-M3): each such label gets a DEDICATED recv transport (teleop front camera
+   *  isolation) and implicitly joins the subscription set; everything else rides the shared transport. */
   private labels: ReadonlySet<string> = new Set();
+  private isolatedLabels: ReadonlySet<string> = new Set();
   private pendingProducer: { producer_id: string; kind: string; label?: string } | null = null;
+  /** O21-M3: dedicated recv transport per isolated label (lazy-created on its
+   *  first new_producer; torn down with the shared transport on restart). */
+  private isolatedTransports = new Map<
+    string,
+    { transport: MsTransport; transportId: string }
+  >();
 
   constructor(
     private serverUrl: string,
@@ -190,13 +216,14 @@ export class SfuConsumerClient {
       onStatus: StatusCallback;
       onMetrics: MetricsCallback;
     },
-    options?: { expectedLabel?: string; labels?: string[] },
+    options?: { expectedLabel?: string; labels?: string[]; isolatedLabels?: string[] },
   ) {
     this.onTrack = callbacks.onTrack;
     this.onStatus = callbacks.onStatus;
     this.onMetrics = callbacks.onMetrics;
     if (options?.labels?.length) this.labels = new Set(options.labels);
     else if (options?.expectedLabel) this.labels = new Set([options.expectedLabel]);
+    if (options?.isolatedLabels?.length) this.isolatedLabels = new Set(options.isolatedLabels);
     // PIT-65: unique SFU peer_id per connection (pages sharing a peer_id → SfuManager transports overwrite each other)
     this.sfuPeerId = `${this.roomId}-consumer-${Math.random().toString(36).slice(2, 8)}`;
   }
@@ -300,46 +327,80 @@ export class SfuConsumerClient {
       return;
     }
 
-    // recv transport: server create → option mapping → device.createRecvTransport.
-    // resolver armed before sending (lesson from an old race); no response in 3s = round failure (the P2P fallback was removed with the all-SFU reality).
-    const sfuPromise = new Promise<TransportCreated | null>((r) => { this.transportResolver = r; });
-    this.logT('sending create_web_rtc_transport');
-    this.ws.send(JSON.stringify({ type: 'create_web_rtc_transport', room_id: this.roomId, peer_id: this.sfuPeerId, direction: 'recv' }));
+    // O21: shared recv transport via the extracted setupTransport chain (M3
+    // isolated labels reuse the same chain lazily, one transport per label).
     this.armPlayWatchdog(); // W2: first-frame round deadline
-    const sfuResult = await Promise.race([
-      sfuPromise,
-      new Promise<null>((r) => setTimeout(() => r(null), 3000)),
-    ]);
-    if (!sfuResult) {
-      this.transportResolver = null;
+    const shared = await this.setupTransport();
+    if (!shared) {
       this.logT('SFU create got no response → advance round');
       void this.playDeadlineHit();
       return;
     }
 
+    this.logT('received web_rtc_transport_created, id: ' + shared.transportId);
+    this.transport = shared.transport;
+    this.transportId = shared.transportId;
+
+    // transport ready: queued producers (arrived before the transport) are consumed immediately; later new_producer goes through handleMessage.
+    if (this.pendingProducer) {
+      const p = this.pendingProducer;
+      this.pendingProducer = null;
+      void this.consumeProducer(p.producer_id, p.kind, p.label);
+    }
+  }
+
+  /** O21 label-filter predicate — delegates to the exported pure wantsProducer
+   *  (M1 empty set accepts all; M2 non-empty set = label membership; unlabeled
+   *  producers pass ONLY in M1). Unit-tested at the module level. */
+  private wantsProducer(label: string | undefined): boolean {
+    return wantsProducer(label, this.labels);
+  }
+
+  /** O21-M3/O21: create ONE recv transport (shared or per-isolated-label) —
+   *  the full server-create → option-mapping → device.createRecvTransport
+   *  chain with per-instance connect/state handlers. `this.transport`/
+   *  `this.transportId` are NOT touched here (the caller decides which slot
+   *  this transport fills). Returns null on no-response (round advance). */
+  private async setupTransport(): Promise<{
+    transport: MsTransport;
+    transportId: string;
+  } | null> {
+    const device = this.device;
+    if (!device) return null;
+    const sfuPromise = new Promise<TransportCreated | null>((r) => { this.transportResolver = r; });
+    this.logT('sending create_web_rtc_transport');
+    this.ws!.send(JSON.stringify({ type: 'create_web_rtc_transport', room_id: this.roomId, peer_id: this.sfuPeerId, direction: 'recv' }));
+    const sfuResult = await Promise.race([
+      sfuPromise,
+      new Promise<null>((r) => setTimeout(() => r(null), 3000)),
+    ]);
+    this.transportResolver = null;
+    if (!sfuResult) {
+      this.logT('SFU create got no response');
+      return null;
+    }
     this.logT('received web_rtc_transport_created, id: ' + sfuResult.transport_id);
-    this.transportId = sfuResult.transport_id;
-    const transport = this.device.createRecvTransport({
+    const transportId = sfuResult.transport_id;
+    const transport = device.createRecvTransport({
       id: sfuResult.transport_id,
       iceParameters: mapIceParameters(sfuResult.ice_parameters),
       iceCandidates: mapIceCandidates(sfuResult.ice_candidates ?? []) as never,
       dtlsParameters: mapDtlsParameters(sfuResult.dtls_parameters),
       // sctpParameters omitted — P1 has no browser SFU-DC (the control plane joins with the P2 host-controller migration).
     });
-    this.transport = transport;
     // PIT-64 observability surface (headless debugging): expose the transport under the debug switch.
     if (SFU_DEBUG) ((window as unknown as { __sfuTransports?: MsTransport[] }).__sfuTransports ??= []).push(transport);
 
     // The 'connect' event = mediasoup-client generates the local DTLS fingerprint (the old hand-spliced-answer fingerprint-extraction PIT-56 debt dies).
     transport.on('connect', ({ dtlsParameters }, ok, fail) => {
-      this.logT('transport connect → connect_web_rtc_transport');
+      this.logT(`transport connect (${transportId}) → connect_web_rtc_transport`);
       const ws = this.ws;
       if (!ws || ws.readyState !== WebSocket.OPEN) { fail(new Error('ws closed')); return; }
       ws.send(JSON.stringify({
         type: 'connect_web_rtc_transport',
         room_id: this.roomId,
         peer_id: this.sfuPeerId,
-        transport_id: this.transportId,
+        transport_id: transportId,
         dtls_parameters: {
           fingerprints: dtlsParameters.fingerprints.map((f) => ({ algorithm: f.algorithm, value: f.value })),
           role: dtlsParameters.role,
@@ -350,7 +411,7 @@ export class SfuConsumerClient {
     // ICE/DTLS aggregate state (semantics-equivalent migration from the old pc.oniceconnectionstatechange)
     let iceEver = false; // ever-connected marker — distinguishes "initial connect failed" from "dropped after connecting"
     transport.on('connectionstatechange', (state) => {
-      this.logT(`connectionstatechange = ${state}`);
+      this.logT(`connectionstatechange (${transportId}) = ${state}`);
       if (state === 'connected') iceEver = true;
       if (state === 'failed') {
         this.onStatus(iceEver ? 'disconnected' : 'error');
@@ -361,23 +422,19 @@ export class SfuConsumerClient {
         this.stopMetrics();
       }
     });
-
-    // transport ready: queued producers (arrived before the transport) are consumed immediately; later new_producer goes through handleMessage.
-    if (this.pendingProducer) {
-      const p = this.pendingProducer;
-      this.pendingProducer = null;
-      void this.consumeProducer(p.producer_id, p.kind, p.label);
-    }
+    return { transport, transportId };
   }
 
-  /** O21 pure label-filter predicate (unit-tested): M1 (empty set) accepts every
-   *  producer; M2 (non-empty set) accepts only labeled producers in the set.
-   *  Unlabeled producers pass ONLY in M1. */
-  /** O21 label-filter predicate — delegates to the exported pure wantsProducer
-   *  (M1 empty set accepts all; M2 non-empty set = label membership; unlabeled
-   *  producers pass ONLY in M1). Unit-tested at the module level. */
-  private wantsProducer(label: string | undefined): boolean {
-    return wantsProducer(label, this.labels);
+  /** O21-M3: lazy-create the dedicated transport for one isolated label. */
+  private async ensureIsolatedTransport(
+    label: string,
+  ): Promise<{ transport: MsTransport; transportId: string } | null> {
+    const existing = this.isolatedTransports.get(label);
+    if (existing) return existing;
+    const created = await this.setupTransport();
+    if (!created) return null;
+    this.isolatedTransports.set(label, created);
+    return created;
   }
 
   /** get_router_rtp_capabilities → router_rtp_capabilities single-shot side channel (routed by handleMessage). */
@@ -394,8 +451,14 @@ export class SfuConsumerClient {
   /** consume request + consumed response (server Consumer parameters land) → local transport.consume attaches the track
    *  (the negotiation completion point = the old ontrack semantic anchor). rtp_capabilities uses the Device negotiation result —
    *  the old PIT-55 hand-spliced full-codec-field debt dies with the core swap. */
-  private async consumeProducer(producerId: string, kind: string, label?: string): Promise<void> {
-    const transport = this.transport;
+  private async consumeProducer(
+    producerId: string,
+    kind: string,
+    label?: string,
+    tr?: { transport: MsTransport; transportId: string },
+  ): Promise<void> {
+    const transport = tr?.transport ?? this.transport;
+    const transportId = tr?.transportId ?? this.transportId;
     const device = this.device;
     const ws = this.ws;
     if (!transport || !device || !ws) return;
@@ -407,7 +470,7 @@ export class SfuConsumerClient {
         type: 'consume',
         room_id: this.roomId,
         peer_id: this.sfuPeerId,
-        transport_id: this.transportId,
+        transport_id: transportId,
         producer_id: producerId,
         kind,
         rtp_capabilities: device.rtpCapabilities,
@@ -488,6 +551,25 @@ export class SfuConsumerClient {
           this.playRounds = 0;
           this.logT('new_producer → waking source-offline wait');
           void this.restartStream();
+          return;
+        }
+        // O21-M3: route by label — isolated labels get a dedicated recv transport
+        // (teleop front camera isolation); everything else rides the shared one.
+        const route = classifyProducerRoute(label, this.labels, this.isolatedLabels);
+        if (route === 'ignore') {
+          this.logT(`new_producer label=${label} → ignore (route classifier)`);
+          return;
+        }
+        if (route === 'isolated') {
+          void (async () => {
+            const tr = await this.ensureIsolatedTransport(label as string);
+            if (!tr) {
+              this.logT(`isolated transport for ${label} failed → advance round`);
+              void this.playDeadlineHit();
+              return;
+            }
+            await this.consumeProducer(msg.producer_id, msg.kind, label, tr);
+          })();
           return;
         }
         if (this.transportId && this.transport) {
