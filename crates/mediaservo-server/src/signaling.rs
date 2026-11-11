@@ -1330,16 +1330,9 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
             reason
         );
         if let Some(id) = floor_cleanup_conn {
-            // §3.2/r3-K3: disconnect injects Leave — the floor releases and the
-            // head is promoted immediately (not at max_hold), then the conn is
-            // removed from the registry.
-            apply_floor_event(
-                &floor_cleanup_server,
-                &relay_spawn_room,
-                &id,
-                FloorEvent::Leave { peer: relay_spawn_peer.clone() },
-            )
-            .await;
+            // the Leave injection for floor-eligible conns lives in
+            // disconnect_session (the teardown funnel every break reason
+            // reaches); the relay only unregisters its registry entry.
             floor_cleanup_server.floor_registry.unregister(&id);
         }
     });
@@ -2459,6 +2452,20 @@ async fn disconnect_session(
         peer_id: relay_peer_id.clone(),
         room_id: relay_room.clone(),
     });
+
+    // §3.2/r3-K3: a hard disconnect injects Leave — the floor releases and the
+    // head is promoted immediately (not at max_hold). The disconnect path knows
+    // the peer, not the conn id, hence unregister_by_peer; the injected event
+    // flows through the standard reconcile pipeline (audit + delivery).
+    if let Some(conn_id) = server.floor_registry.unregister_by_peer(&relay_peer_id) {
+        apply_floor_event(
+            &server,
+            &relay_room,
+            &conn_id,
+            FloorEvent::Leave { peer: relay_peer_id.clone() },
+        )
+        .await;
+    }
 
     // ── DeviceStream host disconnect: drop all consumers
     if is_device_stream_host {

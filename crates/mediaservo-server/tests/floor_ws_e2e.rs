@@ -17,6 +17,7 @@ use tokio_tungstenite::tungstenite::Message;
 /// Spawn the server with floor enabled; `seed_rooms` are pre-registered as the
 /// designated talk set (same mechanism as MEDIASERVO_FLOOR_ROOMS seeding).
 async fn spawn_server(seed_rooms: &[&str]) -> String {
+    let jwt_auth = mediaservo_common::auth::JwtAuth::new("test-secret-min-32-bytes!!!");
     #[cfg(feature = "sfu-mediasoup")]
     let server = {
         let sfu = std::sync::Arc::new(
@@ -26,12 +27,13 @@ async fn spawn_server(seed_rooms: &[&str]) -> String {
             .await
             .unwrap(),
         );
-        SignalingServer::new(sfu, 65536, None)
+        SignalingServer::new(sfu, 65536, Some(jwt_auth))
     };
     #[cfg(not(feature = "sfu-mediasoup"))]
-    let server = SignalingServer::new(65536, None);
+    let server = SignalingServer::new(65536, Some(jwt_auth));
     let mut server = server;
     server.floor_enabled = true;
+    server.ws_ping_secs = 1; // fast heartbeat: a killed socket trips the send-failure cleanup in ~1 s
     server.ws_psk_wait_secs = 10;
     server.ws_join_wait_secs = 30;
     server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some("test-psk".into())));
@@ -104,6 +106,154 @@ async fn drain(ws: &mut WsStream, secs: u64) -> (usize, usize) {
         }
     }
     (errors_4032, floor_frames)
+}
+
+/// A7 kill-socket (r3-K3), WS-level with a real ACCOUNT session: a dispatcher
+/// is granted in the designated room; a second dispatcher joins; the grantee's
+/// socket is then HARD-DROPPED (no leave, no close frame -- the kill -9 shape).
+/// The server must inject Leave on its own: the second dispatcher observes the
+/// release (FloorIdle) and a resync shows empty grants.
+#[tokio::test]
+async fn kill_socket_releases_the_floor_and_promotes() {
+    // server-side tracing goes to stdout: without this the cleanup chain is invisible
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("mediaservo_server=debug,info")
+        .with_target(false)
+        .try_init();
+    use mediaservo_common::auth::JwtClaims;
+    let url = spawn_server(&["talk-car1"]).await;
+    let secret = "test-secret-min-32-bytes!!!";
+    let make_jwt = || {
+        let now =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+                as usize;
+        jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &JwtClaims {
+                sub: "dispatch-1".into(),
+                iat: now,
+                exp: now + 3600,
+                role: Some("dispatcher".into()),
+                vehicles: None,
+            },
+            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap()
+    };
+
+    let connect_account = |url: String, jwt: String, room: &str| {
+        let room = room.to_string();
+        async move {
+            let mut req: tokio_tungstenite::tungstenite::http::Request<()> =
+                tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(url)
+                    .unwrap();
+            req.headers_mut().insert("Sec-WebSocket-Protocol", jwt.parse().unwrap());
+            let (mut ws, _) = tokio_tungstenite::connect_async(req).await.unwrap();
+            ws.send(Message::Text("test-psk".into())).await.unwrap();
+            ws.send(Message::Text(format!(
+                r#"{{"type":"room_join","room_id":"{room}","peer_role":"consumer","protocol":4}}"#
+            )))
+            .await
+            .unwrap();
+            // the registration snapshot (floor_state) proves the floor conn registered
+            // AND carries the grant truth the joiner needs (the join-time snapshot is
+            // the only replay a late joiner gets -- broadcasts never replay).
+            let mut join_snapshot = serde_json::Value::Null;
+            loop {
+                match ws.next().await.unwrap().unwrap() {
+                    Message::Text(t) if t.contains("floor_state") => {
+                        let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+                        join_snapshot = v["snapshot"].clone();
+                        eprintln!("[account] registered (floor_state seen)");
+                        break;
+                    }
+                    Message::Text(t) if t.contains("room_joined") => continue,
+                    Message::Text(t) => eprintln!("[account] join-phase frame: {t}"),
+                    Message::Ping(p) => {
+                        let _ = ws.send(Message::Pong(p)).await;
+                    }
+                    _ => continue,
+                }
+            }
+            (ws, join_snapshot)
+        }
+    };
+
+    let (mut grantee, _grantee_snapshot) =
+        connect_account(url.clone(), make_jwt(), "talk-car1").await;
+    eprintln!("[kill] grantee connected+registered");
+    grantee.send(Message::Text(r#"{"type":"floor_request"}"#.into())).await.unwrap();
+    eprintln!("[kill] floor_request sent");
+    eprintln!("[kill] waiting floor_granted");
+    loop {
+        match grantee.next().await.unwrap().unwrap() {
+            Message::Text(t) if t.contains("floor_granted") => {
+                eprintln!("[kill] floor_granted seen");
+                break;
+            }
+            Message::Text(t) => eprintln!("[kill] grantee frame: {t}"),
+            Message::Ping(p) => {
+                let _ = grantee.send(Message::Pong(p)).await;
+            }
+            _ => continue,
+        }
+    }
+
+    let (mut observer, observer_snapshot) = connect_account(url, make_jwt(), "talk-car1").await;
+    // grant truth for a late joiner = the join-time snapshot (broadcasts never
+    // replay). If the snapshot already carries the grant, skip straight to the
+    // kill; only a pre-grant joiner waits for the floor_granted broadcast.
+    let observer_has_grant = observer_snapshot["grants"].as_array().is_some_and(|g| !g.is_empty());
+    eprintln!("[kill] observer snapshot grants={:?}", observer_snapshot["grants"]);
+    if !observer_has_grant {
+        loop {
+            match observer.next().await.unwrap().unwrap() {
+                Message::Text(t) if t.contains("\"type\":\"floor_granted\"") => break,
+                Message::Ping(p) => {
+                    let _ = observer.send(Message::Pong(p)).await;
+                }
+                _ => continue,
+            }
+        }
+    }
+
+    // KILL-SOCKET: drop the grantee without any leave/close frame.
+    drop(grantee);
+
+    // The observer must see the release (FloorIdle) within 5 s (ping=1 s trips
+    // the dead-socket cleanup quickly, leave some scheduling slack).
+    let saw_idle = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match observer.next().await.unwrap().unwrap() {
+                Message::Text(t) if t.contains("floor_idle") => break,
+                Message::Ping(p) => {
+                    let _ = observer.send(Message::Pong(p)).await;
+                }
+                _ => continue,
+            }
+        }
+    })
+    .await;
+    assert!(saw_idle.is_ok(), "the observer must see FloorIdle after the kill-socket");
+
+    // And a resync confirms the grants are actually gone (state, not just a frame).
+    observer.send(Message::Text(r#"{"type":"floor_resync"}"#.into())).await.unwrap();
+    let grants_empty = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            match observer.next().await.unwrap().unwrap() {
+                Message::Text(t) if t.contains("floor_state") => {
+                    let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+                    break v["snapshot"]["grants"].as_array().map(Vec::len) == Some(0);
+                }
+                Message::Ping(p) => {
+                    let _ = observer.send(Message::Pong(p)).await;
+                }
+                _ => continue,
+            }
+        }
+    })
+    .await;
+    assert_eq!(grants_empty, Ok(true), "resync after kill-socket shows empty grants");
 }
 
 /// O22 negative: an undesignated room answers exactly one 4032 naming the talk

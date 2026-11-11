@@ -40,6 +40,14 @@ impl ConnRegistry {
         self.inner.remove(conn_id).map(|(_, v)| v)
     }
 
+    /// Remove (and return the conn id of) the floor conn owned by a disconnecting
+    /// PEER — the r3-K3 disconnect path knows the peer, not the conn id, and the
+    /// Leave injection needs the conn id for the audit actor field.
+    pub fn unregister_by_peer(&self, peer_id: &str) -> Option<String> {
+        let conn_id = self.inner.iter().find(|e| e.peer_id == peer_id).map(|e| e.key().clone())?;
+        self.unregister(&conn_id).map(|_| conn_id)
+    }
+
     /// Deliver one floor message to a specific connection. Returns false when
     /// the conn is absent, ineligible, or its channel is full/closed.
     pub fn deliver(&self, conn_id: &str, msg: &SignalingMessage) -> bool {
