@@ -49,6 +49,37 @@ importers:
         specifier: ^5.4.0
         version: 5.4.21(@types/node@20.19.43)
 
+  apps/voice:
+    dependencies:
+      '@mediaservo/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      react:
+        specifier: ^18.3.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.0
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      '@types/react':
+        specifier: ^18.3.0
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.0
+        version: 18.3.7(@types/react@18.3.31)
+      '@vitejs/plugin-react':
+        specifier: ^4.3.0
+        version: 4.7.0(vite@5.4.21(@types/node@20.19.43))
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vite:
+        specifier: ^5.4.0
+        version: 5.4.21(@types/node@20.19.43)
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@20.19.43)
+
   packages/client:
     dependencies:
       mediasoup-client:
@@ -64,6 +95,38 @@ importers:
       vitest:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@20.19.43)
+
+  tests/a12-ptt-latency:
+    dependencies:
+      '@mediaservo/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+    devDependencies:
+      playwright-core:
+        specifier: ^1.65.0
+        version: 1.65.0
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vite:
+        specifier: ^5.4.0
+        version: 5.4.21(@types/node@20.19.43)
+
+  tests/o26-floor-matrix:
+    dependencies:
+      '@mediaservo/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+    devDependencies:
+      playwright-core:
+        specifier: ^1.65.0
+        version: 1.65.0
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vite:
+        specifier: ^5.4.0
+        version: 5.4.21(@types/node@20.19.43)
 
   tests/p0-audio:
     dependencies:
