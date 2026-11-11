@@ -118,6 +118,7 @@ async function main() {
     const subCtx = await browser.newContext({ permissions: ['microphone'] });
     const sub = await subCtx.newPage();
     sub.on('console', (m) => log('sub', m.type(), m.text()));
+    const tSubStart = Date.now(); // first-packet baseline clock start (page load)
     await sub.goto(`${APP}/?role=sub&room=${ROOM}&user=admin&pass=admin123`);
     await sub.waitForFunction(
       () =>
@@ -133,11 +134,15 @@ async function main() {
     const bytesStart = Date.now();
     let pubStats = [];
     let subStats = [];
+    let firstPacketAt = null;
     while (Date.now() - bytesStart < 15000) {
       pubStats = (await pub.evaluate(() => window.__p0Stats?.() ?? [])) ?? [];
       subStats = (await sub.evaluate(() => window.__p0Stats?.() ?? [])) ?? [];
       const outB = pubStats.reduce((a, s) => a + (s.bytesSent ?? 0), 0);
       const inB = subStats.reduce((a, s) => a + (s.bytesReceived ?? 0), 0);
+      if (subStats.length > 0 && firstPacketAt === null) {
+        firstPacketAt = Date.now(); // sub page load -> first inbound RTP stat
+      }
       if (outB > 0 && inB > 0) break;
       await new Promise((r) => setTimeout(r, 500));
     }
@@ -149,6 +154,42 @@ async function main() {
       consumer_bytes_received: subStats.reduce((a, s) => a + (s.bytesReceived ?? 0), 0),
       consumer_packets_received: subStats.reduce((a, s) => a + (s.packetsReceived ?? 0), 0),
     };
+
+    // Latency baseline (foundation scope: full-chain sub page -> first inbound
+    // RTP stat, plus steady-state RTT/jitter samples; the A12 PTT keydown
+    // thresholds are P3 scope and NOT asserted here).
+    const firstPacketMs =
+      firstPacketAt === null ? null : firstPacketAt - tSubStart;
+    const rttSamples = [];
+    const jitterSamples = [];
+    const sampleStart = Date.now();
+    while (Date.now() - sampleStart < 5000) {
+      await new Promise((r) => setTimeout(r, 500));
+      pubStats = (await pub.evaluate(() => window.__p0Stats?.() ?? [])) ?? [];
+      subStats = (await sub.evaluate(() => window.__p0Stats?.() ?? [])) ?? [];
+      for (const s of pubStats) {
+        if (s.type === 'remote-inbound-rtp' && typeof s.roundTripTime === 'number') {
+          rttSamples.push(s.roundTripTime * 1000);
+        }
+      }
+      for (const s of subStats) {
+        if (typeof s.jitter === 'number') {
+          jitterSamples.push(s.jitter * 1000);
+        }
+      }
+    }
+    const avg = (arr) =>
+      arr.length === 0 ? null : Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10;
+    evidence.latency = {
+      first_packet_ms: firstPacketMs,
+      first_packet_scope: 'sub page load -> first inbound RTP stat (login+join+negotiation+first packet)',
+      rtt_ms_avg: avg(rttSamples),
+      rtt_ms_samples: rttSamples.length,
+      jitter_ms_avg: avg(jitterSamples),
+      jitter_ms_samples: jitterSamples.length,
+      note: 'baseline record only — no threshold asserted (A12 PTT thresholds are P3 scope)',
+    };
+    log('latency baseline', JSON.stringify(evidence.latency));
 
     evidence.pass =
       evidence.publisher?.produced === true &&

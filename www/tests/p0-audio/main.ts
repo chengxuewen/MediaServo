@@ -9,6 +9,8 @@ type Stat = {
   packetsSent?: number;
   packetsReceived?: number;
   ssrc?: number;
+  roundTripTime?: number;
+  jitter?: number;
 };
 
 interface P0State {
@@ -58,8 +60,10 @@ async function gatherStats(
   // RTCStatsReport is a Map — Object.values() on it is always empty.
   const rows =
     typeof report?.values === 'function' ? Array.from(report.values()) : Object.values(report ?? {});
-  const want = dir === 'out' ? 'outbound-rtp' : 'inbound-rtp';
-  return rows.filter((s) => s && typeof s === 'object' && s.type === want);
+  // 'out' also carries remote-inbound-rtp: the RTT/jitter source (latency baseline).
+  const want =
+    dir === 'out' ? ['outbound-rtp', 'remote-inbound-rtp'] : ['inbound-rtp'];
+  return rows.filter((s) => s && typeof s === 'object' && want.includes(s.type));
 }
 
 async function main(): Promise<void> {
