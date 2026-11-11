@@ -41,7 +41,7 @@ Kind rules: `talk` never carries video; `meet` never injects input; `view` never
 ## 26.6 Compatibility notes
 
 - Signaling dialect 4 is additive (`MIN_SUPPORTED` stays 1); native clients ignore unknown variants (landed).
-- One WebSocket per room today; browsers cap same-origin WS (~6-30) — pages needing more rooms go through single-WS multiplexing or an aggregated wall room (open decision, plan O17).
+- One WebSocket per room today; browsers cap same-origin WS (~6-30, worst-case measured 6). **O17 DECIDED (P4, 2026-11-11, user-adjudicated A)**: single-WS multiplexing is THE chosen evolution path — signaling frames already carry `room_id`, and the server session model moves from one-room-per-connection to a multi-room registry when built. The aggregated wall room is REJECTED (structurally violates RM9 one-device-one-room; reopens only if RM9 itself is re-adjudicated). Implementation is gated on a real >6-rooms-per-page requirement (condition-registered, zero code now; interim mitigation: wall pages stay ≤6 tiles and paginate).
 - The per-stream room shape (`<device>_<stream>`) keeps working during the deprecation window.
 
 Related: `07-protocols.md` §5 (dialect 4 + floor variants + room kind on the wire), `10-signaling-architecture.md` §10.12 (delivery), `27-error-model.md` 4032, plan §4c (rulings), `evidence/room-model-architecture.md` in the shell repo (pictures).
