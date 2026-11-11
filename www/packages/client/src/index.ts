@@ -5,3 +5,4 @@
 export * from './transport/sfu-client';
 export * from './auth';
 export * from './types';
+export * from './floor';
