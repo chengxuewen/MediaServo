@@ -361,6 +361,7 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         .merge(mediaservo_server::rooms::rooms_router(admin_state.clone()))
         .merge(admin_router);
     let app = mediaservo_server::static_files::add_admin_routes(app);
+    let app = mediaservo_server::static_files::add_voice_routes(app); // P3-3 voice app under /voice
 
     // Rate limiting: per-IP governor using config.rate_limit requests/sec
     // ponytail: rate limiter disabled for testing

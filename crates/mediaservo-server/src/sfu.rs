@@ -968,7 +968,7 @@ mod imp {
         /// mediasoup handle). Used when a pause fails: never announce a state the
         /// media plane cannot honor.
         pub fn close_producer(&self, room_id: &str, producer_id: &str) -> bool {
-            let Some(mut room) = self.rooms.get_mut(room_id) else {
+            let Some(room) = self.rooms.get_mut(room_id) else {
                 return false;
             };
             let mut removed = false;
