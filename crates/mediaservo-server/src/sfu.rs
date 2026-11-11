@@ -857,6 +857,35 @@ mod imp {
         }
 
         /// Remove a room and its Router (stops forwarding for all peers).
+        /// O18: request a key frame on ONE consumer owned by `peer_id`
+        /// (media-plane; ownership checked -- a peer can only keyframe its own
+        /// subscriptions). The mediasoup guard is dropped before the await
+        /// (Consumer is a cheap Arc handle; no DashMap guard across await).
+        pub async fn request_consumer_key_frame(
+            &self,
+            room_id: &str,
+            peer_id: &str,
+            consumer_id: &str,
+        ) -> Result<(), String> {
+            let consumer = {
+                let room =
+                    self.rooms.get(room_id).ok_or_else(|| format!("room {room_id} not found"))?;
+                let peer = room
+                    .peers
+                    .get(peer_id)
+                    .ok_or_else(|| format!("peer {peer_id} not found"))?;
+                peer.consumers
+                    .iter()
+                    .find(|c| c.id().to_string() == consumer_id)
+                    .cloned()
+                    .ok_or_else(|| format!("consumer {consumer_id} not owned by {peer_id}"))
+            }?;
+            if consumer.kind() != mediasoup::prelude::MediaKind::Video {
+                return Err("key frames apply to video consumers only".to_string());
+            }
+            consumer.request_key_frame().await.map_err(|e| format!("request_key_frame failed: {e}"))
+        }
+
         pub fn remove_room(&self, room_id: &str) -> bool {
             let existed = self.rooms.remove(room_id).is_some();
             if existed {

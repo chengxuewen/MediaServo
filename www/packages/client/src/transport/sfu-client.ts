@@ -884,6 +884,21 @@ export class SfuConsumerClient {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(cmd));
   }
 
+  /** O18: request a key frame on one of OUR consumers (media-plane; pass the
+   *  producerId from StreamMeta — the consumer id is looked up internally).
+   *  Useful to punch through a long GOP when a stream looks stale. No-op for
+   *  unknown producers. */
+  requestKeyFrame(producerId: string): void {
+    const entry = this.consumers.get(producerId);
+    if (!entry) {
+      this.logT(`requestKeyFrame: no consumer for producer ${producerId}`);
+      return;
+    }
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'request_key_frame', consumer_id: entry.consumer.id }));
+    }
+  }
+
   close(): void {
     this.closed = true;  // PIT-50: set the flag first to prevent onclose reconnect
     if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; } // W2: tear down the watchdog on unmount (prevents ghost rounds)

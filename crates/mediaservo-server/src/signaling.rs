@@ -1442,6 +1442,33 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
             Message::Text(text) => {
                 let text_str = text.to_string();
 
+                // O18 media-plane: key-frame request on the caller's OWN consumer
+                // (any room; not a floor command — no kind gate, no dispatcher
+                // role; ownership is checked inside the SFU manager).
+                if let Ok(sig) = serde_json::from_str::<SignalingMessage>(&text_str)
+                    && let SignalingMessage::RequestKeyFrame { consumer_id } = sig
+                {
+                    match server
+                        .sfu_manager
+                        .request_consumer_key_frame(&relay_room, &relay_peer_id, &consumer_id)
+                        .await
+                    {
+                        Ok(()) => tracing::info!(
+                            "Consumer {consumer_id}: key frame requested by {relay_peer_id} in {relay_room}"
+                        ),
+                        Err(e) => {
+                            // 4040 media-plane rejection (not in the terminal auth family; classifySfuError = retry)
+                            let err = SignalingMessage::Error { code: 4040, message: e };
+                            let _ = direct_sender
+                                .lock()
+                                .await
+                                .send(Message::Text(send_msg(&err).unwrap()))
+                                .await;
+                        }
+                    }
+                    continue;
+                }
+
                 // P2 floor commands: server-owned; never relayed to the room broadcast.
                 if let Ok(sig) = serde_json::from_str::<SignalingMessage>(&text_str) {
                     // §3.2/RM6 + §3.5 kind gate: floor commands exist only in designated talk

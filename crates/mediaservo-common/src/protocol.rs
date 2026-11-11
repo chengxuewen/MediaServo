@@ -427,6 +427,11 @@ pub enum SignalingMessage {
     FloorSetPriority { target_peer_id: String, priority: u8 },
     /// C→S: request a role-scoped floor snapshot.
     FloorResync,
+    // ── media plane (O18; any room — NOT a floor command: no kind gate, no
+    //    dispatcher role; ownership checked server-side) ────────────────────
+    /// C→S: request a key frame on one of the caller's own consumers. A peer
+    /// cannot keyframe streams it does not subscribe to.
+    RequestKeyFrame { consumer_id: String },
     /// S→C: the floor grant set changed.
     FloorGranted { room_id: String, grants: Vec<String>, generation: u64 },
     /// S→C: the floor was taken by another peer (pre-emption).
@@ -1871,6 +1876,7 @@ mod tests {
             SignalingMessage::FloorMuteSet { target_peer_id: "p2".into(), muted: true },
             SignalingMessage::FloorSetPriority { target_peer_id: "p2".into(), priority: 9 },
             SignalingMessage::FloorResync,
+            SignalingMessage::RequestKeyFrame { consumer_id: "c1".into() },
             SignalingMessage::FloorGranted {
                 room_id: "r".into(),
                 grants: vec!["p1".into()],
@@ -1901,6 +1907,7 @@ mod tests {
             "floor_mute_set",
             "floor_set_priority",
             "floor_resync",
+            "request_key_frame",
             "floor_granted",
             "floor_taken",
             "floor_denied",
