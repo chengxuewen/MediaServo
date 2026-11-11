@@ -657,3 +657,52 @@ fn open_concurrent_requests_all_granted_release_drops_only_that_peer() {
     assert_eq!(names, vec!["a".to_string(), "c".to_string()], "release drops only b");
     assert_eq!(emitted(&out), vec!["granted([\"a\", \"c\"])"]);
 }
+
+// ── O18: QueuePrioritySet (dispatcher re-prioritization) ────────────────────
+
+#[test]
+fn queue_priority_set_reorders_priority_first_stable() {
+    use mediaservo_common::floor::{FloorEvent, FloorLimits};
+
+    let mut s =
+        FloorState::initial_with_generation(mediaservo_common::floor::FloorMode::Exclusive, 10);
+    // queue three peers at priority 1: a, b, c (arrival order)
+    let limits = FloorLimits::default();
+    for p in ["a", "b", "c"] {
+        let ev = FloorEvent::Request { peer: p.to_string(), priority: 1, preempt: false };
+        let (ns, _) = s.apply(&ev, &limits);
+        s = ns;
+    }
+    // Exclusive capacity=1: the first requester (a) is GRANTED; b, c queue at priority 1.
+    assert_eq!(s.grants(), ["a"]);
+    assert_eq!(s.queue().iter().map(|p| p.peer.as_str()).collect::<Vec<_>>(), ["b", "c"]);
+
+    // dispatcher boosts c to 9 -> [c(9), b(1)] (equal priorities keep arrival order)
+    let ev = FloorEvent::QueuePrioritySet {
+        actor: "dispatch".to_string(),
+        peer: "c".to_string(),
+        priority: 9,
+    };
+    let (ns, out) = s.apply(&ev, &limits);
+    assert_eq!(ns.queue().iter().map(|p| p.peer.as_str()).collect::<Vec<_>>(), ["c", "b"]);
+    assert_eq!(ns.queue()[0].priority, 9);
+    // reducer emits nothing — the server follows up privately (role-scoped, D12)
+    assert!(out.is_empty());
+    assert!(ns.generation() > s.generation(), "mutation bumps generation");
+}
+
+#[test]
+fn queue_priority_set_ignores_non_queued_peer() {
+    use mediaservo_common::floor::{FloorEvent, FloorLimits};
+
+    let s = FloorState::initial_with_generation(mediaservo_common::floor::FloorMode::Exclusive, 1);
+    let limits = FloorLimits::default();
+    let ev = FloorEvent::QueuePrioritySet {
+        actor: "dispatch".to_string(),
+        peer: "ghost".to_string(),
+        priority: 9,
+    };
+    let (ns, out) = s.apply(&ev, &limits);
+    assert_eq!(ns, s, "non-queued peer: no state change, no generation bump");
+    assert!(out.is_empty());
+}

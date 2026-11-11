@@ -1453,6 +1453,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                             | SignalingMessage::FloorResync
                             | SignalingMessage::FloorModeSet { .. }
                             | SignalingMessage::FloorMuteSet { .. }
+                            | SignalingMessage::FloorSetPriority { .. }
                     ) && !floor_room_designated(&server, &relay_room)
                     {
                         let detail = format!(
@@ -1618,17 +1619,149 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                             }
                             continue;
                         }
-                        SignalingMessage::FloorModeSet { .. }
-                        | SignalingMessage::FloorMuteSet { .. } => {
-                            let err = SignalingMessage::Error {
-                                code: 4032,
-                                message: "floor command not enabled in this slice".into(),
-                            };
-                            let _ = direct_sender
-                                .lock()
-                                .await
-                                .send(Message::Text(send_msg(&err).unwrap()))
+                        SignalingMessage::FloorModeSet { mode } => {
+                            if let Some(conn_id) = floor_conn_id.as_deref() {
+                                if !floor_command_allowed(&relay_floor_role) {
+                                    let err = SignalingMessage::Error {
+                                        code: 4032,
+                                        message: "floor mode_set requires the dispatcher role"
+                                            .into(),
+                                    };
+                                    let _ = direct_sender
+                                        .lock()
+                                        .await
+                                        .send(Message::Text(send_msg(&err).unwrap()))
+                                        .await;
+                                    continue;
+                                }
+                                apply_floor_event(
+                                    &server,
+                                    &relay_room,
+                                    conn_id,
+                                    FloorEvent::ModeChange { mode, actor: relay_peer_id.clone() },
+                                )
                                 .await;
+                            } else {
+                                let err = SignalingMessage::Error {
+                                    code: 4032,
+                                    message: "floor requires dialect 4 and an account session"
+                                        .into(),
+                                };
+                                let _ = direct_sender
+                                    .lock()
+                                    .await
+                                    .send(Message::Text(send_msg(&err).unwrap()))
+                                    .await;
+                            }
+                            continue;
+                        }
+                        SignalingMessage::FloorMuteSet { target_peer_id, muted } => {
+                            if let Some(conn_id) = floor_conn_id.as_deref() {
+                                if !floor_command_allowed(&relay_floor_role) {
+                                    let err = SignalingMessage::Error {
+                                        code: 4032,
+                                        message: "floor mute_set requires the dispatcher role"
+                                            .into(),
+                                    };
+                                    let _ = direct_sender
+                                        .lock()
+                                        .await
+                                        .send(Message::Text(send_msg(&err).unwrap()))
+                                        .await;
+                                    continue;
+                                }
+                                apply_floor_event(
+                                    &server,
+                                    &relay_room,
+                                    conn_id,
+                                    FloorEvent::MuteSet {
+                                        actor: relay_peer_id.clone(),
+                                        peer: target_peer_id,
+                                        on: muted,
+                                    },
+                                )
+                                .await;
+                            } else {
+                                let err = SignalingMessage::Error {
+                                    code: 4032,
+                                    message: "floor requires dialect 4 and an account session"
+                                        .into(),
+                                };
+                                let _ = direct_sender
+                                    .lock()
+                                    .await
+                                    .send(Message::Text(send_msg(&err).unwrap()))
+                                    .await;
+                            }
+                            continue;
+                        }
+                        SignalingMessage::FloorSetPriority { target_peer_id, priority } => {
+                            if let Some(conn_id) = floor_conn_id.as_deref() {
+                                if !floor_command_allowed(&relay_floor_role) {
+                                    let err = SignalingMessage::Error {
+                                        code: 4032,
+                                        message: "floor set_priority requires the dispatcher role"
+                                            .into(),
+                                    };
+                                    let _ = direct_sender
+                                        .lock()
+                                        .await
+                                        .send(Message::Text(send_msg(&err).unwrap()))
+                                        .await;
+                                    continue;
+                                }
+                                apply_floor_event(
+                                    &server,
+                                    &relay_room,
+                                    conn_id,
+                                    FloorEvent::QueuePrioritySet {
+                                        actor: relay_peer_id.clone(),
+                                        peer: target_peer_id.clone(),
+                                        priority,
+                                    },
+                                )
+                                .await;
+                                // O18 follow-ups (role-scoped, D12): the target gets a
+                                // private new-position update; the dispatcher gets the
+                                // dispatch-scoped snapshot (queue included).
+                                let generation =
+                                    floor_current_generation(&server, &relay_room).await;
+                                let arc = server.floor_rooms.get(&relay_room);
+                                if let Some(entry) = arc {
+                                    let g = entry.value().lock().await;
+                                    if let Some(pos) = g
+                                        .state()
+                                        .queue()
+                                        .iter()
+                                        .position(|p| p.peer == target_peer_id)
+                                    {
+                                        drop(g);
+                                        let queued = SignalingMessage::FloorQueued {
+                                            room_id: relay_room.clone(),
+                                            position: pos as u32,
+                                            generation,
+                                        };
+                                        let _ = server
+                                            .floor_registry
+                                            .deliver_peer(&target_peer_id, &queued);
+                                    }
+                                }
+                                let snap =
+                                    floor_snapshot_msg(&server, &relay_room, relay_floor_role)
+                                        .await;
+                                let _ = server.floor_registry.deliver(conn_id, &snap);
+                            } else {
+                                let err = SignalingMessage::Error {
+                                    code: 4032,
+                                    message: "floor requires dialect 4 and an account session"
+                                        .into(),
+                                };
+                                let _ = direct_sender
+                                    .lock()
+                                    .await
+                                    .send(Message::Text(send_msg(&err).unwrap()))
+                                    .await;
+                            }
                             continue;
                         }
                         _ => {}
@@ -1983,6 +2116,12 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
 /// P2: build the role-scoped floor snapshot for a joiner/resync (D12/D16: the
 /// dispatch scope adds the pending queue; field scopes — operator/viewer — never
 /// see it: the `queue` key is omitted, mirroring the reference wire contract).
+/// O18: authorized floor commands (mode_set/mute_set/set_priority) require the
+/// dispatcher role (admin inherits; operator/viewer are denied — D12/D16).
+fn floor_command_allowed(role: &Option<CockpitRole>) -> bool {
+    matches!(role, Some(CockpitRole::Admin) | Some(CockpitRole::Dispatcher))
+}
+
 async fn floor_snapshot_msg(
     server: &SignalingServer,
     room_id: &str,
@@ -2130,6 +2269,9 @@ pub(crate) async fn apply_floor_event(
         FloorEvent::Timeout => ("timeout", conn_id.to_string()),
         FloorEvent::ModeChange { actor, .. } => ("mode_change", actor.clone()),
         FloorEvent::MuteSet { actor, peer, .. } => ("mute_set", format!("{actor}->{peer}")),
+        FloorEvent::QueuePrioritySet { actor, peer, .. } => {
+            ("queue_priority_set", format!("{actor}->{peer}"))
+        }
     };
     let floor_detail = format!("{event:?}");
     audit::log_event(AuditEvent::FloorAction {

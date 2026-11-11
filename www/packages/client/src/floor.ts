@@ -80,6 +80,7 @@ export type FloorCommand =
   | { type: 'floor_release' }
   | { type: 'floor_mode_set'; mode: string }
   | { type: 'floor_mute_set'; target_peer_id: string; muted: boolean }
+  | { type: 'floor_set_priority'; target_peer_id: string; priority: number }
   | { type: 'floor_resync' };
 
 /** O29 guard: generation values are plain-Number-safe by construction. */
@@ -137,6 +138,12 @@ export class FloorClient {
 
   muteSet(targetPeerId: string, muted: boolean): void {
     this.opts.send({ type: 'floor_mute_set', target_peer_id: targetPeerId, muted });
+  }
+
+  /** O18: dispatcher adjusts a queued peer's request priority (server reorders
+   *  priority-first and answers with a private position update + snapshot). */
+  setPriority(targetPeerId: string, priority: number): void {
+    this.opts.send({ type: 'floor_set_priority', target_peer_id: targetPeerId, priority });
   }
 
   /**

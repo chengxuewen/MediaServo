@@ -31,17 +31,19 @@ describe('FloorClient commands', () => {
     expect(sent).toEqual([{ type: 'floor_request', priority: 7, preempt: true }]);
   });
 
-  it('release/resync/mode_set/mute_set wire shapes', () => {
+  it('release/resync/mode_set/mute_set/set_priority wire shapes', () => {
     const { client, sent } = makeClient();
     client.release();
     client.resync();
     client.modeSet('hybrid');
     client.muteSet('p3', true);
+    client.setPriority('p3', 9);
     expect(sent).toEqual([
       { type: 'floor_release' },
       { type: 'floor_resync' },
       { type: 'floor_mode_set', mode: 'hybrid' },
       { type: 'floor_mute_set', target_peer_id: 'p3', muted: true },
+      { type: 'floor_set_priority', target_peer_id: 'p3', priority: 9 },
     ]);
   });
 });

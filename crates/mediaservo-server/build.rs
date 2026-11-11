@@ -7,8 +7,8 @@
 //! P3-3: the voice app embeds with the same posture (optional — an absent
 //! dist warns but does not fail, ponytail).
 
-use std::fs;
-use std::path::PathBuf;
+#[cfg(feature = "admin-dashboard")]
+use std::{fs, path::PathBuf};
 
 fn main() {
     // Only process when admin-dashboard feature is enabled (the web-apps embed feature)

@@ -77,13 +77,39 @@ pub use super::wire::FloorMode;
 /// D16 audit surface) — the core does not police authorization.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FloorEvent {
-    Request { peer: PeerId, priority: u8, preempt: bool },
-    Release { peer: PeerId },
-    Leave { peer: PeerId },
-    MediaDown { peer: PeerId },
+    Request {
+        peer: PeerId,
+        priority: u8,
+        preempt: bool,
+    },
+    Release {
+        peer: PeerId,
+    },
+    Leave {
+        peer: PeerId,
+    },
+    MediaDown {
+        peer: PeerId,
+    },
     Timeout,
-    ModeChange { mode: FloorMode, actor: PeerId },
-    MuteSet { actor: PeerId, peer: PeerId, on: bool },
+    ModeChange {
+        mode: FloorMode,
+        actor: PeerId,
+    },
+    MuteSet {
+        actor: PeerId,
+        peer: PeerId,
+        on: bool,
+    },
+    /// O18: dispatcher adjusts a queued peer's request priority. The peer must
+    /// currently be queued; the queue reorders priority-first (stable). The
+    /// reducer emits nothing — the server follows up with private position
+    /// updates / a dispatcher snapshot (role-scoped, D12).
+    QueuePrioritySet {
+        actor: PeerId,
+        peer: PeerId,
+        priority: u8,
+    },
 }
 
 impl FloorState {
@@ -483,6 +509,20 @@ impl FloorState {
                     // so there is no priority state to remember or replay.
                     next.muted.retain(|p| p != peer);
                 }
+                (next, out)
+            }
+            FloorEvent::QueuePrioritySet { actor, peer, priority } => {
+                let _ = actor;
+                // O18: only a queued peer can be re-prioritized (grants/members are
+                // outside the queue's authority). Priority-first stable reorder:
+                // the queue is a service order, so equal priorities keep arrival order.
+                if let Some(slot) = next.queue.iter_mut().find(|p| p.peer == *peer) {
+                    slot.priority = *priority;
+                } else {
+                    return (next, out);
+                }
+                next.queue.sort_by_key(|p| std::cmp::Reverse(p.priority));
+                next.generation += 1;
                 (next, out)
             }
         }

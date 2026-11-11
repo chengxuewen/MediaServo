@@ -421,6 +421,10 @@ pub enum SignalingMessage {
     FloorModeSet { mode: FloorMode },
     /// C→S: mute/unmute a room member (authorized command; membership checked server-side).
     FloorMuteSet { target_peer_id: String, muted: bool },
+    /// C→S: dispatcher adjusts a queued peer's request priority (O18; authorized
+    /// command). The peer must currently be queued; the queue reorders
+    /// priority-first. Identity is server-derived (C1).
+    FloorSetPriority { target_peer_id: String, priority: u8 },
     /// C→S: request a role-scoped floor snapshot.
     FloorResync,
     /// S→C: the floor grant set changed.
@@ -1865,6 +1869,7 @@ mod tests {
             SignalingMessage::FloorRelease,
             SignalingMessage::FloorModeSet { mode: FloorMode::Exclusive },
             SignalingMessage::FloorMuteSet { target_peer_id: "p2".into(), muted: true },
+            SignalingMessage::FloorSetPriority { target_peer_id: "p2".into(), priority: 9 },
             SignalingMessage::FloorResync,
             SignalingMessage::FloorGranted {
                 room_id: "r".into(),
@@ -1894,6 +1899,7 @@ mod tests {
             "floor_release",
             "floor_mode_set",
             "floor_mute_set",
+            "floor_set_priority",
             "floor_resync",
             "floor_granted",
             "floor_taken",
