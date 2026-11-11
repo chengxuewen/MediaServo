@@ -14,6 +14,7 @@ pub mod monitor;
 pub mod relay;
 pub mod roles;
 pub mod room;
+pub mod room_config;
 pub mod rooms;
 pub mod sfu;
 pub mod signaling;

@@ -49,6 +49,8 @@ pub struct AdminState {
     pub api_token_ttl_secs: u64,
     /// PSK shared state (psk-admin-management): same Arc as signaling; rotation hot-updates through this.
     pub psk_state: std::sync::Arc<std::sync::RwLock<Option<String>>>,
+    /// Managed-room config store (P4-3, O20/RM12-C): rooms.yaml CRUD + the resolve-authority sync.
+    pub room_config: std::sync::Arc<crate::room_config::RoomConfigStore>,
     /// Config file absolute path (for PSK rotation write-back, assembled in main.rs).
     pub config_path: String,
     #[cfg(feature = "sfu-mediasoup")]
@@ -134,6 +136,17 @@ pub fn admin_router(state: AdminState) -> Router {
         )
         .route("/api/admin/floor/:room/mute", axum::routing::post(floor_mute))
         .route("/api/admin/floor/:room/mode", axum::routing::post(floor_mode))
+        // Managed-room config CRUD (P4-3, O20/RM12-C). NOT /api/admin/rooms:
+        // that collection is the RUNTIME room list (pre-P4). GET = admin +
+        // dispatcher; POST/PUT/DELETE = admin-only (auth_middleware).
+        .route(
+            "/api/admin/managed-rooms",
+            get(managed_rooms_list).post(managed_rooms_create),
+        )
+        .route(
+            "/api/admin/managed-rooms/:id",
+            get(managed_rooms_get).put(managed_rooms_update).delete(managed_rooms_remove),
+        )
         .route("/api/admin/events", get(ws_events));
     // H3: SFU management endpoints (exist only in the sfu-mediasoup build -- the native build has no SfuManager).
     #[cfg(feature = "sfu-mediasoup")]
@@ -1166,6 +1179,115 @@ async fn floor_mode(
     Ok(Json(floor_json(&room, &g)))
 }
 
+// ── Managed-room config CRUD (P4-3, O20/RM12-C) ─────────────────────────
+// Every mutation = one atomic save (tmp+fsync+rename) + one audit line + a
+// managed-table sync (room::set_managed_rooms) — the created room is
+// resolve-authoritative WITHOUT a restart (config kind wins, RM12).
+
+#[derive(serde::Deserialize)]
+struct ManagedRoomCreateRequest {
+    id: String,
+    kind: String,
+    #[serde(default)]
+    video: Option<bool>,
+}
+
+#[derive(serde::Deserialize)]
+struct ManagedRoomUpdateRequest {
+    kind: Option<String>,
+    /// absent = leave unchanged; present = set (null clears the flag)
+    video: Option<Option<bool>>,
+}
+
+async fn managed_rooms_list(State(state): State<AdminState>) -> Json<serde_json::Value> {
+    let rooms = state.room_config.list();
+    Json(serde_json::json!({ "rooms": rooms, "count": rooms.len() }))
+}
+
+async fn managed_rooms_get(
+    State(state): State<AdminState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    state.room_config.get(&id).map(|r| Json(serde_json::json!(r))).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse { error: format!("managed room {id} not found") }),
+        )
+    })
+}
+
+async fn managed_rooms_create(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    Json(req): Json<ManagedRoomCreateRequest>,
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<ErrorResponse>)> {
+    let id = req.id.trim().to_string();
+    if id.is_empty() || id.len() > 128 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "managed room id must be 1..=128 chars".into() }),
+        ));
+    }
+    let entry =
+        crate::room_config::ManagedRoom { id: id.clone(), kind: req.kind, video: req.video };
+    state.room_config.create(entry).map_err(|e| {
+        (StatusCode::CONFLICT, Json(ErrorResponse { error: e.to_string() }))
+    })?;
+    crate::audit::log_event(crate::audit::AuditEvent::RoomConfigChanged {
+        action: "create".into(),
+        room_id: id.clone(),
+        actor: claims.sub,
+        detail: "managed room created".into(),
+    });
+    Ok((StatusCode::CREATED, Json(serde_json::json!({ "room_id": id }))))
+}
+
+async fn managed_rooms_update(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(req): Json<ManagedRoomUpdateRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    // bad kind label = 400 (the store's other Err shape is 404 not-found)
+    if let Some(k) = &req.kind
+        && mediaservo_common::room::RoomKind::parse(k).is_err()
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: format!("unknown room kind '{k}'") }),
+        ));
+    }
+    let entry = state
+        .room_config
+        .update(&id, req.kind, req.video)
+        .map_err(|e| (StatusCode::NOT_FOUND, Json(ErrorResponse { error: e.to_string() })))?;
+    crate::audit::log_event(crate::audit::AuditEvent::RoomConfigChanged {
+        action: "update".into(),
+        room_id: id,
+        actor: claims.sub,
+        detail: format!("kind={} video={:?}", entry.kind, entry.video),
+    });
+    Ok(Json(serde_json::json!(entry)))
+}
+
+async fn managed_rooms_remove(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let entry = state
+        .room_config
+        .remove(&id)
+        .map_err(|e| (StatusCode::NOT_FOUND, Json(ErrorResponse { error: e.to_string() })))?;
+    crate::audit::log_event(crate::audit::AuditEvent::RoomConfigChanged {
+        action: "remove".into(),
+        room_id: id.clone(),
+        actor: claims.sub,
+        detail: format!("kind={} removed", entry.kind),
+    });
+    Ok(Json(serde_json::json!({ "removed": true, "room_id": id })))
+}
+
 /// Admin API all-route auth middleware (standard axum 0.7 from_fn shape).
 /// H3 role awareness: admin = every endpoint; dispatcher = read-only GET (except /api/admin/config -- config is admin-only;
 /// write ops POST/DELETE always denied). viewer/operator/unknown roles -> 401 (existing semantics unchanged).
@@ -1674,6 +1796,9 @@ pub(crate) mod tests {
             api_registry: Arc::new(crate::apikeys::ApiKeyRegistry::empty()),
             api_keys_path: format!("/tmp/ms-apikeys-{}.yaml", uuid::Uuid::new_v4()),
             api_token_ttl_secs: 3600,
+            room_config: std::sync::Arc::new(crate::room_config::RoomConfigStore::empty_with_path(
+                format!("/tmp/ms-rooms-test-{}.yaml", uuid::Uuid::new_v4()),
+            )),
             sfu_manager: sfu,
         }
     }
@@ -1699,6 +1824,9 @@ pub(crate) mod tests {
             api_registry: Arc::new(crate::apikeys::ApiKeyRegistry::empty()),
             api_keys_path: format!("/tmp/ms-apikeys-{}.yaml", uuid::Uuid::new_v4()),
             api_token_ttl_secs: 3600,
+            room_config: std::sync::Arc::new(crate::room_config::RoomConfigStore::empty_with_path(
+                format!("/tmp/ms-rooms-test-{}.yaml", uuid::Uuid::new_v4()),
+            )),
         }
     }
 
@@ -2008,6 +2136,137 @@ pub(crate) mod tests {
         assert!(v["generation"].is_u64());
         assert!(v["summary"].as_str().unwrap().contains("holder=idle"));
         assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn managed_rooms_crud_lifecycle_and_live_resolve() {
+        let state = make_state().await;
+        let token = admin_token(&state);
+        let app = admin_router(state);
+
+        // POST create (201) — id deliberately lacks the talk- prefix so the
+        // live-resolve assertion can distinguish table truth from inference
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/managed-rooms")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from("{\"id\":\"ops-crud\",\"kind\":\"talk\"}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        // resolve authority synced WITHOUT a restart (config kind wins RM12):
+        assert_eq!(
+            mediaservo_common::room::resolve("ops-crud").kind,
+            mediaservo_common::room::RoomKind::Talk,
+        );
+
+        // duplicate id -> 409
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/managed-rooms")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from("{\"id\":\"ops-crud\",\"kind\":\"view\"}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+
+        // PUT update (kind + video) -> 200 with the fresh entry
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/managed-rooms/ops-crud")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from("{\"kind\":\"meet\",\"video\":false}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["kind"], "meet");
+        assert_eq!(v["video"], serde_json::json!(false));
+
+        // PUT unknown id -> 404
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/managed-rooms/nope")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from("{\"kind\":\"view\"}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // GET one -> 200
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/managed-rooms/ops-crud")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // DELETE -> 200, then 404; resolve falls back to inference (ops-crud
+        // has no prefix → meet)
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri("/api/admin/managed-rooms/ops-crud")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            mediaservo_common::room::resolve("ops-crud").kind,
+            mediaservo_common::room::RoomKind::Meet,
+            "removal re-syncs the table: inference restored"
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri("/api/admin/managed-rooms/ops-crud")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        mediaservo_common::room::clear_managed_rooms();
     }
 
     #[tokio::test]

@@ -74,6 +74,8 @@ pub enum AuditEvent {
         room_id: String,
         detail: String,
     },
+    /// Admin-plane managed-room config mutation (P4-3, O20/RM12-C): one line per create/update/remove of a rooms.yaml entry.
+    RoomConfigChanged { action: String, room_id: String, actor: String, detail: String },
 }
 
 /// Emit an audit event as a structured `tracing` info-level log.
@@ -105,6 +107,16 @@ pub fn log_event(event: AuditEvent) {
                 audit.event = "room_create",
                 room_id = %room_id,
                 "Room created"
+            );
+        }
+        AuditEvent::RoomConfigChanged { action, room_id, actor, detail } => {
+            tracing::info!(
+                audit.event = "room_config_changed",
+                action = %action,
+                room_id = %room_id,
+                actor = %actor,
+                detail = %detail,
+                "Managed-room config mutated (rooms.yaml)"
             );
         }
         AuditEvent::RoomDestroy { room_id } => {

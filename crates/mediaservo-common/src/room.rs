@@ -13,8 +13,8 @@
 //! below, and every fallback is a deprecation surface (warn-once, RM6 fix:
 //! `audio-` maps to `meet(video=false)`, never `talk(open)`).
 
-use std::collections::HashSet;
-use std::sync::Mutex;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::{Mutex, OnceLock, RwLock};
 
 /// The six kind values (five live + deprecated `stream`). Wire form is the
 /// lowercase 4-char string itself.
@@ -142,6 +142,19 @@ pub fn stream_room_notice() -> Deprecation {
 /// rooms.yaml overrides via `RoomKind::parse`). Stream-room deprecation is
 /// NOT inferred here — it needs derivation evidence (see `stream_room_notice`).
 pub fn resolve(room_id: &str) -> RoomStance {
+    // P4-3 (O20/RM12-C): the managed table IS the config authority —
+    // "config kind wins"; the inference chain below now only serves
+    // unmanaged rooms (and contributes the legacy deprecation notices).
+    if let Some((kind, video)) = managed_lookup(room_id) {
+        return resolve_managed(room_id, kind, video);
+    }
+    resolve_inferred(room_id)
+}
+
+/// The inference chain WITHOUT the managed-table check — the base both the
+/// table path and the explicit path build on (keeps `resolve` → managed →
+/// `resolve_explicit` from recursing back into the table).
+fn resolve_inferred(room_id: &str) -> RoomStance {
     if let Some(rest) = room_id.strip_prefix(AUDIO_PREFIX)
         && !rest.is_empty()
     {
@@ -170,8 +183,53 @@ pub fn resolve(room_id: &str) -> RoomStance {
 /// Resolve with explicit managed metadata (P4 path): the config kind wins;
 /// the legacy id forms only contribute the deprecation notice.
 pub fn resolve_explicit(room_id: &str, kind: RoomKind) -> RoomStance {
-    let mut stance = resolve(room_id);
+    let mut stance = resolve_inferred(room_id);
     stance.kind = kind;
+    stance
+}
+
+// ── P4-3 (O20/RM12-C): the managed-room table ─────────────────────────────
+// Process-global BY DESIGN: RM12 rules the single-instance boundary, and the
+// resolve() call sites (rooms/signaling/sfu/roles) read the authority without
+// every signature threading a store handle. `RoomConfigStore` (server) rewrites
+// the whole table after each CRUD save; `clear_managed_rooms()` is the
+// test/restart hook. A managed entry overrides BOTH the kind and the optional
+// video flag; the legacy deprecation notice still applies (it is inference-
+// derived hygiene, orthogonal to the config kind).
+/// id -> (kind, video override) — the type alias exists only for clippy's
+/// type_complexity on the static below.
+type ManagedTable = BTreeMap<String, (RoomKind, Option<bool>)>;
+static MANAGED_ROOMS: OnceLock<RwLock<ManagedTable>> = OnceLock::new();
+
+fn managed_table() -> &'static RwLock<ManagedTable> {
+    MANAGED_ROOMS.get_or_init(|| RwLock::new(BTreeMap::new()))
+}
+
+/// Replace the whole managed table (config load / CRUD save-back path).
+pub fn set_managed_rooms(
+    entries: impl IntoIterator<Item = (String, (RoomKind, Option<bool>))>,
+) {
+    let mut table = managed_table().write().unwrap_or_else(|e| e.into_inner());
+    *table = entries.into_iter().collect();
+}
+
+/// Test/restart hook: drop the managed table (resolve falls back to inference).
+pub fn clear_managed_rooms() {
+    managed_table().write().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
+fn managed_lookup(room_id: &str) -> Option<(RoomKind, Option<bool>)> {
+    managed_table().read().unwrap_or_else(|e| e.into_inner()).get(room_id).copied()
+}
+
+/// Managed-entry stance: the config kind AND the config video flag win
+/// (a managed `meet` with `video: false` IS the voice-conference stance the
+/// O26 produce gate reads); the legacy notice survives.
+pub fn resolve_managed(room_id: &str, kind: RoomKind, video: Option<bool>) -> RoomStance {
+    let mut stance = resolve_explicit(room_id, kind);
+    if video.is_some() {
+        stance.video = video;
+    }
     stance
 }
 
@@ -210,6 +268,38 @@ impl DeprecationLogger {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── P4-3: managed table — config kind AND video win over inference ──
+    // Probe ids are deliberately unique (no other test asserts on them), so
+    // the process-global table cannot cross-contaminate parallel tests; the
+    // leading/trailing clears belt-and-suspenders the isolation.
+    #[test]
+    fn managed_table_overrides_kind_video_and_keeps_legacy_notice() {
+        clear_managed_rooms();
+        set_managed_rooms([
+            // a REAL audio- prefixed id: the legacy notice is what we assert
+            ("audio-managed-probe".to_string(), (RoomKind::Talk, Some(false))),
+            ("zz-managed-meet-probe".to_string(), (RoomKind::Meet, Some(false))),
+            ("zz-managed-view-probe".to_string(), (RoomKind::View, None)),
+        ]);
+
+        // legacy id + managed kind: the CONFIG kind wins, the deprecation
+        // notice (inference-derived hygiene) SURVIVES the override
+        let legacy = resolve("audio-managed-probe");
+        assert_eq!(legacy.kind, RoomKind::Talk);
+        assert!(legacy.deprecated.is_some(), "legacy notice kept under managed override");
+
+        // a managed meet(video=false) IS the voice domain (O26 produce gate)
+        assert!(resolve("zz-managed-meet-probe").is_voice_conference());
+        // managed view stays consume-only and never voice
+        assert!(!resolve("zz-managed-view-probe").is_voice_conference());
+
+        clear_managed_rooms();
+        // table dropped → inference restored for the same id
+        let fallback = resolve("audio-managed-probe");
+        assert_eq!(fallback.kind, RoomKind::Meet, "clear restores the inference chain");
+        assert!(fallback.deprecated.is_some(), "pure inference keeps the legacy notice");
+    }
 
     #[test]
     fn kind_wire_strings_are_four_chars() {

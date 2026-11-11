@@ -198,6 +198,37 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     // unified-device-admin: a single Arc instance shared by signaling (access auth) and admin (management write-back).
     let device_registry = std::sync::Arc::new(device_registry);
 
+    // -- P4-3 managed-room config (rooms.yaml; O20/RM12-C) -------------------------------------------
+    // Corrupt (exists but unparsable / bad kind label) -> REFUSE to start
+    // (refuse-on-corrupt, the accounts.yaml discipline: silently empty would
+    // resurrect the id-inference behavior RM12 exists to kill). A MISSING file
+    // is a legal first run -> empty store (CRUD creates it on first write).
+    let rooms_path = std::path::PathBuf::from(resolve_path("rooms.yaml"));
+    let room_config = match mediaservo_server::room_config::RoomConfigStore::load(&rooms_path) {
+        Ok(store) => {
+            tracing::info!(
+                "Managed-room config loaded from {}: {} rooms",
+                rooms_path.display(),
+                store.list().len()
+            );
+            store
+        }
+        Err(e) => {
+            if rooms_path.exists() {
+                panic!(
+                    "managed-room config {} is corrupt; refusing to start (refuse-on-corrupt): {e}",
+                    rooms_path.display()
+                );
+            }
+            tracing::info!(
+                "Managed-room config {}: absent — empty store (first run; CRUD creates it)",
+                rooms_path.display()
+            );
+            mediaservo_server::room_config::RoomConfigStore::empty_with_path(&rooms_path)
+        }
+    };
+    let room_config = std::sync::Arc::new(room_config);
+
     // -- accountless-client-auth T1: API-key registry (api_keys.yaml; default = same dir as server.yaml)
     // Missing file/parse failure -> empty registry + warning (exchange always 401; account/PSK/device paths unaffected).
     let api_keys_path = config
@@ -342,6 +373,7 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         config_path: config_path.clone(),
         device_registry: std::sync::Arc::clone(&device_registry),
         devices_path: devices_path.clone(),
+        room_config: std::sync::Arc::clone(&room_config),
         api_registry: std::sync::Arc::clone(&api_registry),
         api_keys_path: api_keys_path.clone(),
         api_token_ttl_secs: config.api_token_ttl_secs,
