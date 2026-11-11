@@ -2298,6 +2298,7 @@ pub(crate) async fn apply_floor_event(
     let (floor_action, floor_actor) = match &event {
         FloorEvent::Request { peer, .. } => ("request", peer.clone()),
         FloorEvent::Release { peer } => ("release", peer.clone()),
+        FloorEvent::ForceRelease { actor, peer } => ("force_release", format!("{actor}->{peer}")),
         FloorEvent::Leave { peer } => ("leave", peer.clone()),
         FloorEvent::MediaDown { peer } => ("media_down", peer.clone()),
         FloorEvent::Timeout => ("timeout", conn_id.to_string()),

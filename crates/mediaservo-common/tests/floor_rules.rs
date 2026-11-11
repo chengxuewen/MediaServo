@@ -728,3 +728,41 @@ fn talk_room_is_voice_conference_ptt_domain() {
     assert!(!mediaservo_common::room::resolve("meet-x").is_voice_conference());
     assert!(!mediaservo_common::room::resolve("view-carA").is_voice_conference());
 }
+
+// ── P4-1: ForceRelease — Release semantics, audit-line-only delta ───────────
+
+#[test]
+fn force_release_promotes_head_and_noops_on_non_holder() {
+    let s = state(FloorMode::Exclusive);
+    let (s, _) = s
+        .apply(
+            &FloorEvent::Request { peer: pid("a"), priority: 0, preempt: false },
+            &FloorLimits::default(),
+        )
+        .0
+        .apply(
+            &FloorEvent::Request { peer: pid("b"), priority: 0, preempt: false },
+            &FloorLimits::default(),
+        );
+    assert_eq!(s.grants(), &[pid("a")]);
+
+    let gen_mid = generation(&s);
+    let (s, out) = s.apply(
+        &FloorEvent::ForceRelease { actor: pid("admin"), peer: pid("a") },
+        &FloorLimits::default(),
+    );
+    // identical to Release: promote the head, granted-only broadcast (§ modules/01)
+    assert_eq!(emitted(&out), vec!["granted([\"b\"])"]);
+    assert_eq!(s.grants(), &[pid("b")]);
+    assert!(generation(&s) > gen_mid);
+
+    // R8-aligned: forcing a non-holder (or an idle floor) is a no-op.
+    let gen_pre = generation(&s);
+    let (s2, out2) = s.apply(
+        &FloorEvent::ForceRelease { actor: pid("admin"), peer: pid("ghost") },
+        &FloorLimits::default(),
+    );
+    assert_eq!(s2, s);
+    assert!(out2.is_empty());
+    assert_eq!(generation(&s2), gen_pre, "no-op keeps the generation unchanged (R8)");
+}

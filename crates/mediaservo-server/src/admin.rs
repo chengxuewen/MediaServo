@@ -119,6 +119,17 @@ pub fn admin_router(state: AdminState) -> Router {
         .route("/api/admin/apikeys", get(list_api_keys).post(register_api_key))
         .route("/api/admin/apikeys/:key_id", delete(revoke_api_key))
         .route("/api/admin/psk", get(get_psk).post(rotate_psk))
+        // Floor REST (P4-1, archived §3.6): GET = admin + dispatcher;
+        // mutations = admin-only (auth_middleware denies non-GET for non-admin).
+        // axum 0.7 / matchit 0.7 = :param syntax ({param} is axum 0.8+ and would
+        // silently match NOTHING as a literal path).
+        .route("/api/admin/floor/:room", get(floor_snapshot))
+        .route(
+            "/api/admin/floor/:room/force-release",
+            axum::routing::post(floor_force_release),
+        )
+        .route("/api/admin/floor/:room/mute", axum::routing::post(floor_mute))
+        .route("/api/admin/floor/:room/mode", axum::routing::post(floor_mode))
         .route("/api/admin/events", get(ws_events));
     // H3: SFU management endpoints (exist only in the sfu-mediasoup build -- the native build has no SfuManager).
     #[cfg(feature = "sfu-mediasoup")]
@@ -988,6 +999,169 @@ pub(crate) fn check_auth(
     })
 }
 
+// ── Floor REST (P4-1, archived §3.6) ────────────────────────────────────────
+// Mutations reuse the wire arm's apply_floor_event, so audit lines, the
+// media-first reconcile cascade and the public-state broadcast are IDENTICAL
+// to the WS path — no side door. Room gate matches the wire: floor is
+// addressable only where seeded (designated talk rooms + MEDIASERVO_FLOOR_ENABLED);
+// REST never creates floor state as a side effect (unlike the WS snapshot path).
+
+fn floor_room_lock(
+    state: &AdminState,
+    room: &str,
+) -> Option<Arc<tokio::sync::Mutex<crate::floor::FloorRoom>>> {
+    if !state.signaling.floor_enabled {
+        return None;
+    }
+    state.signaling.floor_rooms.get(room).map(|a| Arc::clone(a.value()))
+}
+
+fn floor_unavailable(room: &str) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            error: format!(
+                "floor not available for room {room} (not a designated talk room, or floor disabled)"
+            ),
+        }),
+    )
+}
+
+/// Snapshot JSON for one floor room (P4-1 GET body; also the mutation
+/// response — the admin sees the fresh truth immediately, mirroring the wire
+/// arm's private dispatcher snapshot).
+fn floor_json(room: &str, g: &crate::floor::FloorRoom) -> serde_json::Value {
+    let st = g.state();
+    let limits = g.limits();
+    serde_json::json!({
+        "room_id": room,
+        "mode": st.mode(),
+        "grants": st.grants(),
+        "muted": st.muted(),
+        "queue": st
+            .queue()
+            .iter()
+            .map(|p| serde_json::json!({"peer": p.peer, "priority": p.priority}))
+            .collect::<Vec<_>>(),
+        "generation": st.generation(),
+        "limits": {
+            "max_peers": limits.max_peers,
+            "max_queue": limits.max_queue,
+            "max_hold_secs": limits.max_hold_secs,
+            "media_grace_secs": limits.media_grace_secs,
+        },
+    })
+}
+
+/// GET /api/admin/floor/{room} — snapshot + policy (admin + dispatcher).
+async fn floor_snapshot(
+    State(state): State<AdminState>,
+    axum::extract::Path(room): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let Some(lock) = floor_room_lock(&state, &room) else {
+        return Err(floor_unavailable(&room));
+    };
+    let g = lock.lock().await;
+    Ok(Json(floor_json(&room, &g)))
+}
+
+/// POST /api/admin/floor/{room}/force-release — drop the sitting holder (P4-1).
+/// 409 when idle: forcing an idle floor is a client bug, not a no-op.
+async fn floor_force_release(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    axum::extract::Path(room): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let Some(lock) = floor_room_lock(&state, &room) else {
+        return Err(floor_unavailable(&room));
+    };
+    let holder = lock.lock().await.state().grants().first().cloned();
+    let Some(holder) = holder else {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorResponse { error: "floor is idle — nothing to force-release".into() }),
+        ));
+    };
+    crate::signaling::apply_floor_event(
+        &state.signaling,
+        &room,
+        "rest",
+        mediaservo_common::floor::FloorEvent::ForceRelease {
+            actor: claims.sub.clone(),
+            peer: holder,
+        },
+    )
+    .await;
+    let lock = floor_room_lock(&state, &room).expect("seeded above");
+    let g = lock.lock().await;
+    Ok(Json(floor_json(&room, &g)))
+}
+
+#[derive(serde::Deserialize)]
+struct FloorMuteRequest {
+    peer_id: String,
+    muted: bool,
+}
+
+/// POST /api/admin/floor/{room}/mute — mute/unmute a peer (admin-only; same
+/// MuteSet semantics as the wire arm, revoking grants when muting).
+async fn floor_mute(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    axum::extract::Path(room): axum::extract::Path<String>,
+    Json(req): Json<FloorMuteRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    if floor_room_lock(&state, &room).is_none() {
+        return Err(floor_unavailable(&room));
+    }
+    crate::signaling::apply_floor_event(
+        &state.signaling,
+        &room,
+        "rest",
+        mediaservo_common::floor::FloorEvent::MuteSet {
+            actor: claims.sub.clone(),
+            peer: req.peer_id,
+            on: req.muted,
+        },
+    )
+    .await;
+    let lock = floor_room_lock(&state, &room).expect("seeded above");
+    let g = lock.lock().await;
+    Ok(Json(floor_json(&room, &g)))
+}
+
+#[derive(serde::Deserialize)]
+struct FloorModeRequest {
+    mode: mediaservo_common::floor::FloorMode,
+}
+
+/// POST /api/admin/floor/{room}/mode — switch the floor mode (admin-only).
+/// In-memory semantics like the wire; the "resets on restart" copy is the
+/// console's duty (R16).
+async fn floor_mode(
+    State(state): State<AdminState>,
+    Extension(claims): Extension<JwtClaims>,
+    axum::extract::Path(room): axum::extract::Path<String>,
+    Json(req): Json<FloorModeRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    if floor_room_lock(&state, &room).is_none() {
+        return Err(floor_unavailable(&room));
+    }
+    crate::signaling::apply_floor_event(
+        &state.signaling,
+        &room,
+        "rest",
+        mediaservo_common::floor::FloorEvent::ModeChange {
+            mode: req.mode,
+            actor: claims.sub.clone(),
+        },
+    )
+    .await;
+    let lock = floor_room_lock(&state, &room).expect("seeded above");
+    let g = lock.lock().await;
+    Ok(Json(floor_json(&room, &g)))
+}
+
 /// Admin API all-route auth middleware (standard axum 0.7 from_fn shape).
 /// H3 role awareness: admin = every endpoint; dispatcher = read-only GET (except /api/admin/config -- config is admin-only;
 /// write ops POST/DELETE always denied). viewer/operator/unknown roles -> 401 (existing semantics unchanged).
@@ -1568,6 +1742,230 @@ pub(crate) mod tests {
             ),
         )
         .unwrap()
+    }
+
+    // ── Floor REST (P4-1) ─────────────────────────────────────────────────
+
+    fn seed_floor_room(state: &AdminState, room: &str) {
+        state.signaling.floor_rooms.insert(
+            room.to_string(),
+            Arc::new(tokio::sync::Mutex::new(crate::floor::FloorRoom::new(
+                room,
+                mediaservo_common::floor::FloorMode::Exclusive,
+                mediaservo_common::floor::FloorLimits::default(),
+            ))),
+        );
+    }
+
+    #[tokio::test]
+    async fn floor_rest_404_when_room_not_designated() {
+        let mut state = make_state().await;
+        state.signaling.floor_enabled = true;
+        let token = admin_token(&state);
+        let app = admin_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/floor/not-designated")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn floor_rest_disabled_gate_404s_even_when_seeded() {
+        let mut state = make_state().await;
+        state.signaling.floor_enabled = false; // the MEDIASERVO_FLOOR_ENABLED gate
+        seed_floor_room(&state, "talk-rest");
+        let token = admin_token(&state);
+        let app = admin_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/floor/talk-rest")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn floor_rest_get_snapshot_empty_room() {
+        let mut state = make_state().await;
+        state.signaling.floor_enabled = true;
+        seed_floor_room(&state, "talk-rest");
+        let token = admin_token(&state);
+        let app = admin_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/floor/talk-rest")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["mode"], "exclusive");
+        assert_eq!(v["grants"], serde_json::json!([]));
+        assert!(v["generation"].is_u64());
+        assert_eq!(v["limits"]["max_peers"], serde_json::json!(1));
+    }
+
+    #[tokio::test]
+    async fn floor_rest_force_release_lifecycle() {
+        let mut state = make_state().await;
+        state.signaling.floor_enabled = true;
+        seed_floor_room(&state, "talk-rest");
+        let token = admin_token(&state);
+
+        // seat a holder directly through the reducer (no WS session needed);
+        // clone the Arc inside this block so the DashMap Ref cannot outlive it
+        // (borrow checker: Ref + .await + later `state` move never overlap)
+        // -- BEFORE admin_router(state), which moves the state.
+        let room = {
+            let entry = state.signaling.floor_rooms.get("talk-rest").unwrap();
+            Arc::clone(entry.value())
+        };
+        room.lock()
+            .await
+            .apply(mediaservo_common::floor::FloorEvent::Request {
+                peer: "op-1".into(),
+                priority: 0,
+                preempt: false,
+            });
+
+        let app = admin_router(state);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/floor/talk-rest/force-release")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["grants"], serde_json::json!([]), "holder dropped");
+
+        // forcing an idle floor is a client bug: fail loud (409), not a no-op
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/floor/talk-rest/force-release")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn floor_rest_mute_and_mode_mutations() {
+        let mut state = make_state().await;
+        state.signaling.floor_enabled = true;
+        seed_floor_room(&state, "talk-rest");
+        let token = admin_token(&state);
+        let app = admin_router(state);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/floor/talk-rest/mute")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from("{\"peer_id\":\"p9\",\"muted\":true}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["muted"], serde_json::json!(["p9"]));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/floor/talk-rest/mode")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from("{\"mode\":\"open\"}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["mode"], "open");
+    }
+
+    #[tokio::test]
+    async fn floor_rest_dispatcher_reads_but_cannot_mutate() {
+        let mut state = make_state().await;
+        state.signaling.floor_enabled = true;
+        seed_floor_room(&state, "talk-rest");
+        let dtoken = token_of_role(&state, "disp1", Some("dispatcher"));
+        let app = admin_router(state);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/floor/talk-rest")
+                    .header("Authorization", format!("Bearer {dtoken}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "dispatcher may read");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/floor/talk-rest/force-release")
+                    .header("Authorization", format!("Bearer {dtoken}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "dispatcher is read-only");
     }
 
     #[tokio::test]

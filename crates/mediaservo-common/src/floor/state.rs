@@ -85,6 +85,15 @@ pub enum FloorEvent {
     Release {
         peer: PeerId,
     },
+    /// P4-1 admin REST (`force-release`): an admin drops a sitting holder.
+    /// Reducer semantics are IDENTICAL to `Release` (R2 auto-promote, R8
+    /// no-op) — the distinct variant exists for the audit line only: a reused
+    /// `Release` would misattribute the mutation to the holder (§3.5: one
+    /// mutation = one honest audit line; the actor is the admin).
+    ForceRelease {
+        actor: PeerId,
+        peer: PeerId,
+    },
     Leave {
         peer: PeerId,
     },
@@ -295,8 +304,9 @@ impl FloorState {
                 (next, out)
             }
 
-            // ── R2: Release → auto-promote ──────────────────────────────
-            FloorEvent::Release { peer } => {
+            // ── R2: Release → auto-promote (ForceRelease shares the body:
+            // identical reducer semantics; only the audit line differs) ──
+            FloorEvent::Release { peer } | FloorEvent::ForceRelease { peer, .. } => {
                 if !self.is_granted(peer) {
                     return (next, out); // R8 no-op
                 }
