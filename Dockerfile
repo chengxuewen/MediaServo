@@ -54,6 +54,7 @@ COPY crates/mediaservo-client/Cargo.toml crates/mediaservo-client/
 COPY crates/mediaservo-link/Cargo.toml crates/mediaservo-link/
 COPY crates/mediaservo-deck/Cargo.toml crates/mediaservo-deck/
 COPY crates/mediaservo-field/Cargo.toml crates/mediaservo-field/
+COPY crates/mediaservo-weaknet/Cargo.toml crates/mediaservo-weaknet/
 COPY bindings/c/mediaservo-field-c/Cargo.toml bindings/c/mediaservo-field-c/
 COPY bindings/c/mediaservo-link-c/Cargo.toml bindings/c/mediaservo-link-c/
 COPY bindings/c/mediaservo-deck-c/Cargo.toml bindings/c/mediaservo-deck-c/
@@ -61,6 +62,10 @@ COPY bindings/cxx/mediaservo-link-cxx/Cargo.toml bindings/cxx/mediaservo-link-cx
 COPY bindings/cxx/mediaservo-deck-cxx/Cargo.toml bindings/cxx/mediaservo-deck-cxx/
 COPY bindings/cxx/mediaservo-field-cxx/Cargo.toml bindings/cxx/mediaservo-field-cxx/
 COPY bindings/node/rust/mediaservo-node/Cargo.toml bindings/node/rust/mediaservo-node/
+COPY bindings/c/mediaservo-client-c/Cargo.toml bindings/c/mediaservo-client-c/
+COPY bindings/cxx/mediaservo-client-cxx/Cargo.toml bindings/cxx/mediaservo-client-cxx/
+COPY examples/rs/Cargo.toml examples/rs/
+COPY tools/mediaservo-gates/Cargo.toml tools/mediaservo-gates/
 # PIT-76: vendored [patch] dependencies need their manifests (fetch stage)
 COPY vendor/webrtc-sys/Cargo.toml vendor/webrtc-sys/
 # Build all dummy srcs — cargo fetch requires every dependency crate to have targets (missing src → 'no targets specified')
@@ -69,10 +74,12 @@ RUN mkdir -p crates/mediaservo-common/src && touch crates/mediaservo-common/src/
     mkdir -p crates/mediaservo-server/src && echo 'fn main() {}' > crates/mediaservo-server/src/main.rs && \
     mkdir -p crates/mediaservo-media/src crates/mediaservo-webrtc/src crates/mediaservo-codec/src \
              crates/mediaservo-host/src crates/mediaservo-client/src \
-             crates/mediaservo-link/src crates/mediaservo-deck/src crates/mediaservo-field/src && \
+             crates/mediaservo-link/src crates/mediaservo-deck/src crates/mediaservo-field/src \
+             crates/mediaservo-weaknet/src && \
     touch crates/mediaservo-media/src/lib.rs crates/mediaservo-webrtc/src/lib.rs \
           crates/mediaservo-codec/src/lib.rs crates/mediaservo-host/src/lib.rs crates/mediaservo-client/src/lib.rs \
-          crates/mediaservo-link/src/lib.rs crates/mediaservo-deck/src/lib.rs crates/mediaservo-field/src/lib.rs && \
+          crates/mediaservo-link/src/lib.rs crates/mediaservo-deck/src/lib.rs crates/mediaservo-field/src/lib.rs \
+          crates/mediaservo-weaknet/src/lib.rs && \
     mkdir -p crates/mediaservo-media/examples crates/mediaservo-webrtc/examples && touch crates/mediaservo-media/examples/square-gen-egui.rs \
           crates/mediaservo-media/examples/viewer.rs crates/mediaservo-media/examples/square-gen.rs \
           crates/mediaservo-webrtc/examples/webrtc_loopback_egui.rs && \
@@ -103,6 +110,7 @@ COPY crates/mediaservo-client/Cargo.toml crates/mediaservo-client/
 COPY crates/mediaservo-link/Cargo.toml crates/mediaservo-link/
 COPY crates/mediaservo-deck/Cargo.toml crates/mediaservo-deck/
 COPY crates/mediaservo-field/Cargo.toml crates/mediaservo-field/
+COPY crates/mediaservo-weaknet/Cargo.toml crates/mediaservo-weaknet/
 COPY bindings/c/mediaservo-field-c/Cargo.toml bindings/c/mediaservo-field-c/
 COPY bindings/c/mediaservo-link-c/Cargo.toml bindings/c/mediaservo-link-c/
 COPY bindings/c/mediaservo-deck-c/Cargo.toml bindings/c/mediaservo-deck-c/
@@ -110,6 +118,10 @@ COPY bindings/cxx/mediaservo-link-cxx/Cargo.toml bindings/cxx/mediaservo-link-cx
 COPY bindings/cxx/mediaservo-deck-cxx/Cargo.toml bindings/cxx/mediaservo-deck-cxx/
 COPY bindings/cxx/mediaservo-field-cxx/Cargo.toml bindings/cxx/mediaservo-field-cxx/
 COPY bindings/node/rust/mediaservo-node/Cargo.toml bindings/node/rust/mediaservo-node/
+COPY bindings/c/mediaservo-client-c/Cargo.toml bindings/c/mediaservo-client-c/
+COPY bindings/cxx/mediaservo-client-cxx/Cargo.toml bindings/cxx/mediaservo-client-cxx/
+COPY examples/rs/Cargo.toml examples/rs/
+COPY tools/mediaservo-gates/Cargo.toml tools/mediaservo-gates/
 # PIT-76: vendored [patch] dependencies need their manifests (fetch stage)
 COPY vendor/webrtc-sys/Cargo.toml vendor/webrtc-sys/
 
@@ -118,10 +130,12 @@ RUN mkdir -p crates/mediaservo-common/src && touch crates/mediaservo-common/src/
     mkdir -p crates/mediaservo-server/src && echo 'fn main() {}' > crates/mediaservo-server/src/main.rs && \
     mkdir -p crates/mediaservo-media/src crates/mediaservo-webrtc/src crates/mediaservo-codec/src \
              crates/mediaservo-host/src crates/mediaservo-client/src \
-             crates/mediaservo-link/src crates/mediaservo-deck/src crates/mediaservo-field/src && \
+             crates/mediaservo-link/src crates/mediaservo-deck/src crates/mediaservo-field/src \
+             crates/mediaservo-weaknet/src && \
     touch crates/mediaservo-media/src/lib.rs crates/mediaservo-webrtc/src/lib.rs \
           crates/mediaservo-codec/src/lib.rs crates/mediaservo-host/src/lib.rs crates/mediaservo-client/src/lib.rs \
-          crates/mediaservo-link/src/lib.rs crates/mediaservo-deck/src/lib.rs crates/mediaservo-field/src/lib.rs && \
+          crates/mediaservo-link/src/lib.rs crates/mediaservo-deck/src/lib.rs crates/mediaservo-field/src/lib.rs \
+          crates/mediaservo-weaknet/src/lib.rs && \
     mkdir -p crates/mediaservo-media/examples crates/mediaservo-webrtc/examples && touch crates/mediaservo-media/examples/square-gen-egui.rs \
           crates/mediaservo-media/examples/viewer.rs crates/mediaservo-media/examples/square-gen.rs \
           crates/mediaservo-webrtc/examples/webrtc_loopback_egui.rs && \
