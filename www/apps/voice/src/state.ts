@@ -83,5 +83,6 @@ export type TalkPosture = 'idle' | 'granted' | 'queued' | 'denied';
 export function talkPosture(s: FloorUiState): TalkPosture {
   if (s.selfPeer && s.grants.includes(s.selfPeer)) return 'granted';
   if (s.deniedReason) return 'denied';
+  if (s.lastEvent === 'floor_queued') return 'queued';
   return 'idle';
 }

@@ -706,3 +706,25 @@ fn queue_priority_set_ignores_non_queued_peer() {
     assert_eq!(ns, s, "non-queued peer: no state change, no generation bump");
     assert!(out.is_empty());
 }
+
+// ── O26-surfaced: talk rooms are voice-domain (produce allowed) ─────────────
+
+#[test]
+fn talk_room_is_voice_conference_ptt_domain() {
+    // RM6: the talk room exists for floor-controlled speaking. The O26 matrix
+    // caught the P2 gap where `is_voice_conference` only matched
+    // meet(video=false), locking accounts out of producing in talk rooms
+    // (4031 consume-only) -- PTT without produce is meaningless.
+    for room in ["talk-o26", "talk-fleet1"] {
+        let stance = mediaservo_common::room::resolve(room);
+        assert!(
+            stance.is_voice_conference(),
+            "{room} must be voice-domain (produce allowed)"
+        );
+    }
+    // the audio- legacy form stays voice-domain (meet(video=false)); a bare
+    // meet (video unset) and view rooms stay consume-only
+    assert!(mediaservo_common::room::resolve("audio-x").is_voice_conference());
+    assert!(!mediaservo_common::room::resolve("meet-x").is_voice_conference());
+    assert!(!mediaservo_common::room::resolve("view-carA").is_voice_conference());
+}

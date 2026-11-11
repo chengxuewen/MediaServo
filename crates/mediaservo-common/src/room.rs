@@ -84,11 +84,14 @@ pub struct RoomStance {
 }
 
 impl RoomStance {
-    /// Full-interconnect voice conference: the policy question the old
-    /// `is_audio_room()` prefix check used to answer (C29 amendment -- now a
-    /// kind read; true for `audio-` legacy rooms and explicit voice meets).
+    /// Voice-domain room: the policy question the old `is_audio_room()` prefix
+    /// check used to answer (C29 amendment -- now a kind read). True for
+    /// `talk` rooms (RM6: the floor-controlled speaking room -- PTT without
+    /// produce would be meaningless; surfaced by the O26 matrix) and explicit
+    /// voice meets, plus the `audio-` legacy form they replace.
     pub fn is_voice_conference(&self) -> bool {
         self.kind == RoomKind::Meet && self.video == Some(false)
+            || self.kind == RoomKind::Talk
     }
 }
 
@@ -152,6 +155,14 @@ pub fn resolve(room_id: &str) -> RoomStance {
                 replaced_by: "kind=meet room (video=false)",
             }),
         };
+    }
+    // RM6 id convention (O26-surfaced): `talk-` rooms are the floor-controlled
+    // speaking rooms. Without this inference the produce gate (roles.rs reads
+    // the voice domain) and the floor designation env seeded different truths
+    // for the same room -- PTT was impossible. P4 rooms.yaml replaces the
+    // inference with an explicit kind field.
+    if room_id.starts_with("talk-") {
+        return RoomStance { kind: RoomKind::Talk, video: Some(false), deprecated: None };
     }
     RoomStance { kind: RoomKind::Meet, video: None, deprecated: None }
 }

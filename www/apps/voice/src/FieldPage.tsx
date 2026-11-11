@@ -97,11 +97,25 @@ export function FieldPage({ room, wsUrl }: { room: string; wsUrl: string }) {
   return (
     <div>
       <h1>Field — {room}</h1>
-      <p>{selfGranted ? 'You have the floor' : state.deniedReason ? `Denied: ${state.deniedReason}` : 'Tap and hold to talk'}</p>
+      <p>
+        {selfGranted
+          ? 'You have the floor'
+          : posture === 'queued'
+            ? 'Queued — waiting for the floor'
+            : state.deniedReason
+              ? `Denied: ${state.deniedReason}`
+              : 'Tap and hold to talk'}
+      </p>
       <button
         style={{
           width: 220, height: 220, borderRadius: '50%', fontSize: 24,
-          background: selfGranted ? '#1d7d46' : posture === 'denied' ? '#7d1d1d' : '#2a3138',
+          background: selfGranted
+            ? '#1d7d46'
+            : posture === 'queued'
+              ? '#b8860b'
+              : posture === 'denied'
+                ? '#7d1d1d'
+                : '#2a3138',
           color: '#fff', border: '2px solid #444',
           touchAction: 'none', userSelect: 'none',
         }}

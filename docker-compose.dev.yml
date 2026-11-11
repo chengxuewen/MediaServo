@@ -23,6 +23,8 @@ services:
       # 支持逗号分隔多 IP（宿主多网卡）；由 mediaservo.sh/CLI 自动探测注入，
       # 直接 compose up 时需手动设 MEDIASERVO_SFU_ANNOUNCED_IP
       MEDIASERVO_SFU_ANNOUNCED_IP: ${MEDIASERVO_SFU_ANNOUNCED_IP:-10.144.0.3,192.168.2.127}
+      # P2 §3.5: designated talk rooms (floor commands exist only here). Comma-separated.
+      MEDIASERVO_FLOOR_ROOMS: "talk-o26,audio-p0"
       # 容器内进程（mediasoup-sys meson wrapdb）需要独立代理 (PIT-38)
       HTTPS_PROXY: ${https_proxy:-}
       NO_PROXY: ${no_proxy:-}

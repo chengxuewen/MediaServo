@@ -117,7 +117,32 @@ export function DispatchPage({ room, wsUrl }: { room: string; wsUrl: string }) {
           {state.muted.includes(g) ? `unmute ${g}` : `mute ${g}`}
         </button>
       ))}
-      {state.queue.length > 0 && <p>Queue: {state.queue.map((q) => `${q.peer}(${q.priority})`).join(' → ')}</p>}
+      {state.queue.length > 0 && (
+        <p>
+          Queue:{' '}
+          {state.queue.map((q) => (
+            <span key={q.peer} style={{ marginRight: 8 }}>
+              {q.peer}({q.priority})
+              <button
+                onClick={() => {
+                  const client = clientRef.current;
+                  if (client) {
+                    // O18: bump +5 (ceiling 100 enforced server-side; private
+                    // position update + fresh snapshot come back on the wire).
+                    void client.sendFloorCommand({
+                      type: 'floor_set_priority',
+                      target_peer_id: q.peer,
+                      priority: Math.min(100, q.priority + 5),
+                    });
+                  }
+                }}
+              >
+                +prio
+              </button>
+            </span>
+          ))}
+        </p>
+      )}
     </div>
   );
 }
