@@ -910,6 +910,7 @@ export class SfuConsumerClient {
 export class SfuMicProducer {
   private ws: WebSocket | null = null;
   private transport: MsTransport | null = null;
+  private peerId: string | null = null;
   /** Response type key → one-shot resolver (enough for the serial auth/join/caps/transport/produced flow). */
   private pending = new Map<string, (m: Record<string, unknown>) => void>();
   /** P3-3 voice app: floor frames arriving on THIS connection (the same peer
@@ -917,6 +918,11 @@ export class SfuMicProducer {
    *  share one peer identity). Set BEFORE produceAudio(); floor_* frames are
    *  routed here FIRST (route() never sees them). */
   onFloorFrame: ((data: string) => void) | null = null;
+
+  /** P3-3: this connection's SFU peer id (undefined until produceAudio ran). */
+  get sfuPeerId(): string | undefined {
+    return this.peerId ?? undefined;
+  }
 
   constructor(
     private serverUrl: string,
@@ -962,6 +968,7 @@ export class SfuMicProducer {
       setTimeout(() => reject(new Error('mic connect timeout')), 10000);
     });
     const peerId = `${this.roomId}-mic-${Math.random().toString(36).slice(2, 8)}`;
+    this.peerId = peerId;
     await this.rpcWait('error', () => true, 10000); // auth ack (code:0 authenticated)
     send({ type: 'room_join', room_id: this.roomId, peer_role: 'consumer', protocol: 4 });
     await this.rpcWait('room_joined', () => true);
