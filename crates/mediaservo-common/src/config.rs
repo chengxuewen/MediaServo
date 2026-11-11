@@ -117,6 +117,36 @@ pub struct ServerConfig {
     /// Web static layer (caddy) config. All-None default = current behavior (8080 + instance `web/`).
     #[serde(default)]
     pub web: WebConfig,
+
+    /// TURN short-term credentials (P4-5, coturn `use-auth-secret`). Empty
+    /// secret = disabled (the admin ICE endpoint answers empty uris).
+    #[serde(default)]
+    pub turn: TurnConfig,
+}
+
+/// TURN short-term credential issuance config (P4-5; coturn `use-auth-secret`,
+/// draft-uberti-rtcweb-turn-rest). Public deployment profile: run coturn with
+/// `use-auth-secret` + the SAME `secret` as server.yaml `turn.secret`, then
+/// set `uris` to the coturn listen forms (e.g. `turn:turn.example.com:3478?
+/// transport=udp,turns:turn.example.com:5349?transport=tcp`). LAN deployments
+/// leave `secret` empty — TURN stays disabled and ICE falls back to host
+/// candidates. Rotating the secret invalidates every outstanding credential
+/// at once (stateless: coturn recomputes the HMAC per request).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct TurnConfig {
+    /// coturn shared secret (HMAC-SHA1 key). Empty = TURN disabled.
+    #[serde(default)]
+    pub secret: String,
+    /// TURN URI(s), comma-separated.
+    #[serde(default)]
+    pub uris: String,
+    /// Credential TTL seconds (coturn short-term; dispatch profile 3600).
+    #[serde(default = "default_turn_ttl")]
+    pub ttl_secs: u64,
+}
+
+fn default_turn_ttl() -> u64 {
+    3600
 }
 
 /// Default listen port of the mediasoup WebRtcServer - single source of the `sfu.port`

@@ -202,6 +202,9 @@ export class SfuConsumerClient {
   private pendingProducer: { producer_id: string; kind: string; label?: string } | null = null;
   /** P3-3: floor-frame delegation hook (see constructor options). */
   private floorDelegate: ((data: string) => boolean) | null = null;
+  /** P4-5: TURN/STUN servers injected into the transport-window PCs (scoped
+   *  patch, see withIceServers). Empty/undefined = LAN default, no patching. */
+  private iceServers: RTCIceServer[] | undefined = undefined;
   /** O21-M3: dedicated recv transport per isolated label (lazy-created on its
    *  first new_producer; torn down with the shared transport on restart). */
   private isolatedTransports = new Map<
@@ -222,6 +225,9 @@ export class SfuConsumerClient {
       expectedLabel?: string;
       labels?: string[];
       isolatedLabels?: string[];
+      /** P4-5: TURN/STUN servers (from GET /api/admin/ice-servers) injected
+       *  into the transport-window RTCPeerConnection (scoped patch). */
+      iceServers?: RTCIceServer[];
       /** P3-3 voice app: floor_* frames on the consumer connection delegate
        *  here FIRST (return true = consumed; false = legacy handling). The
        *  dispatch console uses this to feed FloorClient.handleWire. */
@@ -235,6 +241,7 @@ export class SfuConsumerClient {
     if (options?.labels?.length) this.labels = new Set(options.labels);
     else if (options?.expectedLabel) this.labels = new Set([options.expectedLabel]);
     if (options?.isolatedLabels?.length) this.isolatedLabels = new Set(options.isolatedLabels);
+    if (options?.iceServers?.length) this.iceServers = options.iceServers;
     // PIT-65: unique SFU peer_id per connection (pages sharing a peer_id → SfuManager transports overwrite each other)
     this.sfuPeerId = `${this.roomId}-consumer-${Math.random().toString(36).slice(2, 8)}`;
   }
@@ -392,13 +399,15 @@ export class SfuConsumerClient {
     }
     this.logT('received web_rtc_transport_created, id: ' + sfuResult.transport_id);
     const transportId = sfuResult.transport_id;
-    const transport = device.createRecvTransport({
-      id: sfuResult.transport_id,
-      iceParameters: mapIceParameters(sfuResult.ice_parameters),
-      iceCandidates: mapIceCandidates(sfuResult.ice_candidates ?? []) as never,
-      dtlsParameters: mapDtlsParameters(sfuResult.dtls_parameters),
-      // sctpParameters omitted — P1 has no browser SFU-DC (the control plane joins with the P2 host-controller migration).
-    });
+    const transport = withIceServers(this.iceServers, () =>
+      device.createRecvTransport({
+        id: sfuResult.transport_id,
+        iceParameters: mapIceParameters(sfuResult.ice_parameters),
+        iceCandidates: mapIceCandidates(sfuResult.ice_candidates ?? []) as never,
+        dtlsParameters: mapDtlsParameters(sfuResult.dtls_parameters),
+        // sctpParameters omitted — P1 has no browser SFU-DC (the control plane joins with the P2 host-controller migration).
+      }),
+    );
     // PIT-64 observability surface (headless debugging): expose the transport under the debug switch.
     if (SFU_DEBUG) ((window as unknown as { __sfuTransports?: MsTransport[] }).__sfuTransports ??= []).push(transport);
 
@@ -925,6 +934,8 @@ export class SfuConsumerClient {
 export class SfuMicProducer {
   private ws: WebSocket | null = null;
   private transport: MsTransport | null = null;
+  /** P4-5: TURN/STUN servers (scoped patch, see withIceServers). */
+  private iceServers: RTCIceServer[] | undefined = undefined;
   /** The session peer id the server assigned at room_join (the FLOOR identity:
    *  grants/denials name THIS id — not the mic transport peer). */
   private sessionPeer: string | null = null;
@@ -946,7 +957,14 @@ export class SfuMicProducer {
     private serverUrl: string,
     private roomId: string,
     private token: string,
-  ) {}
+    options?: {
+      /** P4-5: TURN/STUN servers (from GET /api/admin/ice-servers) injected
+       *  into the transport-window RTCPeerConnection (scoped patch). */
+      iceServers?: RTCIceServer[];
+    },
+  ) {
+    if (options?.iceServers?.length) this.iceServers = options.iceServers;
+  }
 
   private rpcWait<T>(type: string, map: (m: Record<string, unknown>) => T, ms = 8000): Promise<T> {
     return new Promise((resolve, reject) => {
@@ -998,12 +1016,14 @@ export class SfuMicProducer {
     const createdP = this.rpcWait('web_rtc_transport_created', (m) => m);
     send({ type: 'create_web_rtc_transport', room_id: this.roomId, peer_id: peerId, direction: 'send' });
     const created = await createdP;
-    const transport = device.createSendTransport({
-      id: String(created.transport_id),
-      iceParameters: mapIceParameters(created.ice_parameters as WireIceParams),
-      iceCandidates: mapIceCandidates((created.ice_candidates ?? []) as WireIceCandidate[]) as never,
-      dtlsParameters: mapDtlsParameters(created.dtls_parameters as WireDtlsParams),
-    } as never);
+    const transport = withIceServers(this.iceServers, () =>
+      device.createSendTransport({
+        id: String(created.transport_id),
+        iceParameters: mapIceParameters(created.ice_parameters as WireIceParams),
+        iceCandidates: mapIceCandidates((created.ice_candidates ?? []) as WireIceCandidate[]) as never,
+        dtlsParameters: mapDtlsParameters(created.dtls_parameters as WireDtlsParams),
+      } as never),
+    );
     this.transport = transport;
     transport.on('connect', ({ dtlsParameters }, ok, fail) => {
       if (ws.readyState !== WebSocket.OPEN) { fail(new Error('ws closed')); return; }
@@ -1044,5 +1064,32 @@ export class SfuMicProducer {
     this.transport = null;
     if (this.ws) { this.ws.onmessage = null; this.ws.close(); this.ws = null; }
     this.pending.clear();
+  }
+}
+
+/**
+ * P4-5: scoped RTCIceServer injection for the transport window. mediasoup-
+ * client handlers create their RTCPeerConnection from the global constructor
+ * and expose no ICE surface of their own — patching the global for the
+ * synchronous create*Transport call is the standard workaround. Merges with
+ * any caller-provided config and restores the original synchronously in
+ * `finally`; empty/undefined servers = LAN default, no patching at all.
+ */
+export function withIceServers<T>(iceServers: RTCIceServer[] | undefined, fn: () => T): T {
+  if (!iceServers?.length) return fn();
+  const servers: RTCIceServer[] = iceServers; // captured: the closure loses the narrowing above
+  const w = window as unknown as { RTCPeerConnection?: unknown };
+  const Real = w.RTCPeerConnection as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  class Patched extends Real {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(cfg?: any) {
+      super({ ...(cfg ?? {}), iceServers: [...(cfg?.iceServers ?? []), ...servers] });
+    }
+  }
+  w.RTCPeerConnection = Patched;
+  try {
+    return fn();
+  } finally {
+    w.RTCPeerConnection = Real;
   }
 }

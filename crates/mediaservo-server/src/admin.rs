@@ -51,6 +51,12 @@ pub struct AdminState {
     pub psk_state: std::sync::Arc<std::sync::RwLock<Option<String>>>,
     /// Managed-room config store (P4-3, O20/RM12-C): rooms.yaml CRUD + the resolve-authority sync.
     pub room_config: std::sync::Arc<crate::room_config::RoomConfigStore>,
+    /// TURN short-term credential config (P4-5, ADJ-3=A: the auth_middleware
+    /// gate as-is — admin/dispatcher; operator/device gates are condition-
+    /// registered for public-voice-deploy / P5-native respectively).
+    pub turn_secret: String,
+    pub turn_uris: String,
+    pub turn_ttl_secs: u64,
     /// Config file absolute path (for PSK rotation write-back, assembled in main.rs).
     pub config_path: String,
     #[cfg(feature = "sfu-mediasoup")]
@@ -147,6 +153,8 @@ pub fn admin_router(state: AdminState) -> Router {
             "/api/admin/managed-rooms/:id",
             get(managed_rooms_get).put(managed_rooms_update).delete(managed_rooms_remove),
         )
+        // TURN short-term credentials (P4-5, ADJ-3=A: admin/dispatcher).
+        .route("/api/admin/ice-servers", get(ice_servers))
         .route("/api/admin/events", get(ws_events));
     // H3: SFU management endpoints (exist only in the sfu-mediasoup build -- the native build has no SfuManager).
     #[cfg(feature = "sfu-mediasoup")]
@@ -1288,6 +1296,29 @@ async fn managed_rooms_remove(
     Ok(Json(serde_json::json!({ "removed": true, "room_id": id })))
 }
 
+/// GET /api/admin/ice-servers — coturn short-term credentials (P4-5, ADJ-3=A:
+/// the auth_middleware gate as-is, admin/dispatcher). Empty secret = TURN
+/// disabled: the response carries empty uris and callers skip TURN entirely
+/// (LAN deployments). The credential is stateless HMAC — coturn validates it
+/// against the same secret on the relay request.
+async fn ice_servers(State(state): State<AdminState>) -> Json<serde_json::Value> {
+    let uris: Vec<String> = state
+        .turn_uris
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Json(
+        crate::turn::issue(&state.turn_secret, state.turn_ttl_secs, now, &uris)
+            .unwrap_or_else(|| serde_json::json!({ "uris": [] })),
+    )
+}
+
 /// Admin API all-route auth middleware (standard axum 0.7 from_fn shape).
 /// H3 role awareness: admin = every endpoint; dispatcher = read-only GET (except /api/admin/config -- config is admin-only;
 /// write ops POST/DELETE always denied). viewer/operator/unknown roles -> 401 (existing semantics unchanged).
@@ -1799,6 +1830,9 @@ pub(crate) mod tests {
             room_config: std::sync::Arc::new(crate::room_config::RoomConfigStore::empty_with_path(
                 format!("/tmp/ms-rooms-test-{}.yaml", uuid::Uuid::new_v4()),
             )),
+            turn_secret: String::new(),
+            turn_uris: String::new(),
+            turn_ttl_secs: 3600,
             sfu_manager: sfu,
         }
     }
@@ -1827,6 +1861,9 @@ pub(crate) mod tests {
             room_config: std::sync::Arc::new(crate::room_config::RoomConfigStore::empty_with_path(
                 format!("/tmp/ms-rooms-test-{}.yaml", uuid::Uuid::new_v4()),
             )),
+            turn_secret: String::new(),
+            turn_uris: String::new(),
+            turn_ttl_secs: 3600,
         }
     }
 
@@ -2267,6 +2304,62 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         mediaservo_common::room::clear_managed_rooms();
+    }
+
+    #[tokio::test]
+    async fn ice_servers_disabled_then_enabled_shape() {
+        let mut state = make_state().await;
+        let token = admin_token(&state);
+        let app = admin_router(state);
+
+        // disabled (empty secret, the LAN default): empty uris, no credential
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/ice-servers")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v, serde_json::json!({ "uris": [] }), "disabled = empty uris");
+
+        // enabled: real shape — username = expiry decimal, credential = base64
+        let mut state2 = make_state().await;
+        state2.turn_secret = "turn-secret-0123456789".into();
+        state2.turn_uris = "turn:turn.example.com:3478?transport=udp".into();
+        state2.turn_ttl_secs = 3600;
+        let token2 = admin_token(&state2);
+        let app2 = admin_router(state2);
+        let response = app2
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/ice-servers")
+                    .header("Authorization", format!("Bearer {token2}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["uris"][0], "turn:turn.example.com:3478?transport=udp");
+        let username = v["username"].as_str().unwrap().parse::<u64>().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert!((username > now) && (username - now) <= 3601, "expiry = now + ttl");
+        assert_eq!(v["credential"].as_str().unwrap().len(), 28, "base64(SHA1) = 28 chars");
+        assert_eq!(v["ttl"], serde_json::json!(3600));
     }
 
     #[tokio::test]

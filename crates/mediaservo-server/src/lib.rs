@@ -21,6 +21,7 @@ pub mod signaling;
 pub mod static_files;
 pub mod status;
 pub mod tls;
+pub mod turn;
 
 // Re-export key dependencies for integration tests
 pub use axum;

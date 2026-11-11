@@ -22,6 +22,10 @@ mediasoup = { version = "0.24", optional = true }
 # HTTP + WebSocket
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
+
+# TURN short-term credentials (P4-5, coturn use-auth-secret: HMAC-SHA1 + base64)
+hmac = "0.12"
+sha1 = "0.10"
 tower-http = { version = "0.5", features = ["trace", "cors", "timeout", "fs"] }
 tower_governor = "0.3"
 
