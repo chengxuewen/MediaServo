@@ -97,23 +97,49 @@ if(MEDIASERVO_BRAND STREQUAL "mediaservo")
 endif()
 
 if(NOT MEDIASERVO_OXMGR_BIN)
+    # MediaServoPack.cmake (included earlier) forward-declares this slot as an
+    # EMPTY cache entry; find_program treats any pre-existing cache value --
+    # empty included -- as already resolved and skips the search (measured).
+    # Drop the empty seed so the PATH hunt actually runs (the parent shell
+    # injects its .cache/oxmgr/<pkg> dir into PATH via msrtc.sh).
+    unset(MEDIASERVO_OXMGR_BIN CACHE)
     find_program(MEDIASERVO_OXMGR_BIN oxmgr)
 endif()
 if(NOT MEDIASERVO_OXMGR_BIN)
+    # The parent shell unpacks oxmgr into the WORKSPACE .cache/oxmgr/<pkg>/
+    # and injects that dir into PATH (msrtc.sh) -- a CLI-only leg. An IDE
+    # configure runs cmake directly (no msrtc.sh env), so also hunt the
+    # workspace cache structurally: CMAKE_SOURCE_DIR is the parent workspace
+    # root in superbuild mode. The MEDIASERVO_REPO_ROOT anchor covers the
+    # DEDICATED deploy trees: those are standalone configures where
+    # CMAKE_SOURCE_DIR is this repo root itself, so the workspace cache
+    # sits two levels above it (msrtc-deploy-bindings first-click FATAL,
+    # 2026-11-12).
     file(GLOB _msdt_oxmgr_candidates
          "$ENV{HOME}/.local/bin/oxmgr"
-         "$ENV{HOME}/.cache/oxmgr/*/oxmgr")
+         "$ENV{HOME}/.cache/oxmgr/*/oxmgr"
+         "${CMAKE_SOURCE_DIR}/.cache/oxmgr/*/oxmgr"
+         "${MEDIASERVO_REPO_ROOT}/../../.cache/oxmgr/*/oxmgr")
     list(LENGTH _msdt_oxmgr_candidates _n)
     if(_n GREATER 0)
-        list(GET _msdt_oxmgr_candidates 0 MEDIASERVO_OXMGR_BIN)
+        # CACHE, not a plain set(): this include runs in the submodule's
+        # directory scope under a superbuild, while the parent-brand deploy
+        # callsites (msrtc-deploy-*) read the variable from the TOP scope
+        # and bake it into the dedicated-tree -D leg -- a scope-local value
+        # left them NOTFOUND (measured). FORCE overrides the NOTFOUND seed
+        # find_program just wrote.
+        list(GET _msdt_oxmgr_candidates 0 _msdt_oxmgr_found)
+        set(MEDIASERVO_OXMGR_BIN "${_msdt_oxmgr_found}" CACHE FILEPATH
+            "oxmgr binary (deploy version-locked copy leg)" FORCE)
+        unset(_msdt_oxmgr_found)
     endif()
     unset(_msdt_oxmgr_candidates)
 endif()
 if(NOT MEDIASERVO_OXMGR_BIN)
     message(FATAL_ERROR
-        "mediaservo-deploy-*: oxmgr binary not found (PATH, ~/.local/bin, ~/.cache/oxmgr/*) — "
-        "the oxmgr version-locked copy leg needs it (MediaServoPack.cmake:236/:273 contract); "
-        "or pass -DMEDIASERVO_OXMGR_BIN=<path>")
+        "mediaservo-deploy-*: oxmgr binary not found (PATH, ~/.local/bin, ~/.cache/oxmgr/*, "
+        "<workspace>/.cache/oxmgr/*) — the oxmgr version-locked copy leg needs it "
+        "(MediaServoPack.cmake:236/:273 contract); or pass -DMEDIASERVO_OXMGR_BIN=<path>")
 endif()
 
 if(NOT MEDIASERVO_SERVER_OUT_DIR)
@@ -167,6 +193,7 @@ if(MEDIASERVO_BUILD_BINDINGS)
     add_custom_target(mediaservo-deploy-bindings
         COMMAND ${CMAKE_COMMAND} -S ${MEDIASERVO_REPO_ROOT} -B ${_bdir_b}
             -DMEDIASERVO_BUILD_BINDINGS=ON -DCMAKE_BUILD_TYPE=${_cfg_b}
+            -DMEDIASERVO_OXMGR_BIN=${MEDIASERVO_OXMGR_BIN}
             -DMEDIASERVO_APP_TREE=
         COMMAND ${CMAKE_COMMAND} --build ${_bdir_b}
             --target mediaservo-bindings-manifest
@@ -254,6 +281,7 @@ function(_mediaservo_add_deploy_target)
                 "deploy-bindings: configure dedicated binaryDir ${_bdir} (profile ${_profile})"
             COMMAND ${CMAKE_COMMAND} -S ${MEDIASERVO_REPO_ROOT} -B ${_bdir}
                 -DMEDIASERVO_BUILD_BINDINGS=ON -DCMAKE_BUILD_TYPE=${_cfg}
+                -DMEDIASERVO_OXMGR_BIN=${MEDIASERVO_OXMGR_BIN}
                 -DMEDIASERVO_APP_TREE=
             COMMAND ${CMAKE_COMMAND} --build ${_bdir}
                 --target mediaservo-bindings-manifest
