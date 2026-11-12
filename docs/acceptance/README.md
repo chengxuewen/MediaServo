@@ -1,6 +1,6 @@
 # Acceptance matrix — P6 port of the archived talkservo-port §5.2
 
-Opened 2026-11-11 (plan `docs/plans/acceptance-release/` in the shell repo).
+Opened 2026-11-11 (plan `docs/plans/_archive/acceptance-release/` in the shell repo).
 Status legend: **✅ covered** (evidence linked) · **🔶 partial** (unit covered,
 listed e2e remains) · **⏳ gap** (P6-2 worklist) · **🔵 deferred** (P5 spike,
 R7 non-gating).
@@ -45,9 +45,9 @@ evidence insufficient.
 
 ## Relationship to other evidence
 
-- O26 floor matrix: `docs/plans/voice-web-app/evidence/o26-matrix.json` (11
-  scenarios, shell repo) — run via `www/tests/o26-floor-matrix`.
-- A12 latency: `docs/plans/voice-web-app/evidence/a12-ptt-latency.json`
+- O26 floor matrix: `docs/plans/_archive/voice-web-app/evidence/o26-matrix.json`
+  (11 scenarios, shell repo) — run via `www/tests/o26-floor-matrix`.
+- A12 latency: `docs/plans/_archive/voice-web-app/evidence/a12-ptt-latency.json`
   (shell repo) — run via `www/tests/a12-ptt-latency`.
 - Wire/negative units: `crates/mediaservo-common/tests/floor_rules.rs` (R1-R9
   + O26-surfaced voice-domain + managed-table tests).

@@ -17,7 +17,7 @@ cd tests/p0-audio && pnpm test
 ```
 
 Evidence is written to
-`../../../../../docs/plans/talkservo-port/evidence/p0-browser-audio.json`
+`../../../../../docs/plans/_archive/talkservo-port/evidence/p0-browser-audio.json`
 (override with `P0_EVIDENCE`). The runner exits 0 only when the publisher produced and the
 consumer saw a track/playing status/non-zero bitrate.
 

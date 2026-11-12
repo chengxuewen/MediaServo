@@ -14,7 +14,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const appRoot = path.resolve(__dirname, '../../apps/voice');
 const evidencePath =
   process.env.O26_EVIDENCE ??
-  path.resolve(__dirname, '../../../../../docs/plans/voice-web-app/evidence/o26-matrix.json');
+  path.resolve(__dirname, '../../../../../docs/plans/_archive/voice-web-app/evidence/o26-matrix.json');
 const chromePath = process.env.CHROME_PATH ?? (() => {
   const root = path.join(os.homedir(), '.cache/ms-playwright');
   if (!existsSync(root)) return '';

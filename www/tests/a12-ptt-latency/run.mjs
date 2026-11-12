@@ -13,7 +13,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const evidencePath =
   process.env.A12_EVIDENCE ??
   // 5 levels up = ms_rtc root (www/tests/a12-ptt-latency -> ...)
-  path.resolve(__dirname, '../../../../../docs/plans/voice-web-app/evidence/a12-ptt-latency.json');
+  path.resolve(__dirname, '../../../../../docs/plans/_archive/voice-web-app/evidence/a12-ptt-latency.json');
 const chromePath = process.env.CHROME_PATH ?? (() => {
   const root = path.join(os.homedir(), '.cache/ms-playwright');
   if (!existsSync(root)) return '';

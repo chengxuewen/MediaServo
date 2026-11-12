@@ -9,7 +9,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../../../..'); // www/tests/p0-audio -> ms_rtc
 const evidencePath =
   process.env.P0_EVIDENCE ??
-  path.join(repoRoot, 'docs/plans/talkservo-port/evidence/p0-browser-audio.json');
+  path.join(repoRoot, 'docs/plans/_archive/talkservo-port/evidence/p0-browser-audio.json');
 const chromePath =
   process.env.CHROME_PATH ??
   // pick the newest downloaded Playwright chromium (the build number moves per Playwright version)
