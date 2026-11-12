@@ -71,23 +71,16 @@ foreach(_v IN LISTS _meta_vars)
   endforeach()
 endforeach()
 
-# Island mount defaults OFF: the examples/cxx band hard-FATALs unless prebuilt SDK
-# outputs exist in target/ (its own PIT-189 guard) — keeping a fresh-clone configure
-# green is the S1 behavior-neutral contract. Dev/CI flip it after `build bindings`.
-# S2 rewires the island itself onto lanes; the mount point stays here (plan
-# directory-artifacts-convergence batch ①: the top-level examples/ aggregator owns
-# the per-band mounting now — C-D1-B).
-option(MEDIASERVO_BUILD_EXAMPLES "Mount the examples family via examples/ (cxx band: SDL/GUI, requires target/ SDK outputs)" OFF)
-if(MEDIASERVO_BUILD_EXAMPLES)
-  add_subdirectory(examples)
-endif()
-
 # IDE bootstrap hint (ide-bootstrap plan, C''): the workspace settings file is
 # an INPUT to configure, so a failure-path hint is the only shape that can fix
 # a CMake Tools first-open that picked the system cmake. One call site at the
 # shared lane gate: any lane-bearing preset (bindings / crates / host / server
 # / all) that needs the rust toolchain and failed the probe lands here BEFORE
 # the lane functions run, so the guidance output precedes the lane FATAL.
+# MUST also precede the examples island mount below (measured fresh-clone
+# incident): the c/cxx bands' PIT-189 SDK-dir guard hard-FATALs on a missing
+# target/ .so, and an all-examples first-open aborted there BEFORE this hint
+# could write the settings file -- the chicken-and-egg breaker never fired.
 # Silence on every green path (a workspace that configures fine is never
 # touched -- the trigger itself is the wrong-toolchain detector).
 if(MEDIASERVO_BUILD_BINDINGS OR MEDIASERVO_BUILD_CRATES_LANES)
@@ -98,6 +91,17 @@ if(MEDIASERVO_BUILD_BINDINGS OR MEDIASERVO_BUILD_CRATES_LANES)
     polyorch_bootstrap_hint(
         CANDIDATE_CMAKE "${MEDIASERVO_REPO_ROOT}/.pixi/envs/default/bin/cmake")
   endif()
+endif()
+
+# Island mount defaults OFF: the examples/cxx band hard-FATALs unless prebuilt SDK
+# outputs exist in target/ (its own PIT-189 guard) — keeping a fresh-clone configure
+# green is the S1 behavior-neutral contract. Dev/CI flip it after `build bindings`.
+# S2 rewires the island itself onto lanes; the mount point stays here (plan
+# directory-artifacts-convergence batch ①: the top-level examples/ aggregator owns
+# the per-band mounting now — C-D1-B).
+option(MEDIASERVO_BUILD_EXAMPLES "Mount the examples family via examples/ (cxx band: SDL/GUI, requires target/ SDK outputs)" OFF)
+if(MEDIASERVO_BUILD_EXAMPLES)
+  add_subdirectory(examples)
 endif()
 
 # S3 bindings surface: lanes (shared target/ cache, deliberate F17-D exception) +
