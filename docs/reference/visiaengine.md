@@ -30,3 +30,11 @@ Not ported:
 | `book/web/mermaid-init.js` + `vendor/mermaid.min.js` | `book/web/` | copy (license kept) | P5 |
 
 Not ported: `scripts/book-i18n.py`, `book/po/**` (English-only ruling U1=C).
+
+## Agent skills (agent-subagent-layer)
+
+| Donor | Destination | Mode | Batch |
+|---|---|---|---|
+| `.agents/skills/repo-audit/SKILL.md` | `.agents/skills/repo-audit/SKILL.md` | adapt (gate names/surfaces mapped to this repo; 3 donor self-refs removed; donor PIT citations dropped; scan team 6->4 per team cap; CSR guard added) | B1b-1 |
+
+`ecosystem-scan` retired as tombstone (status: inoperative, superseded by repo-audit); deletion scheduled for R2.

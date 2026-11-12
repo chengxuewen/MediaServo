@@ -20,7 +20,8 @@
 | Convert a book/document into a skill | `book-to-skill` | Skill-crafting quality gate -> `create-skill`; registration -> a TRIGGERS row here |
 | Verify a browser-facing feature | `browser-testing` | Network-impairment angle -> `weaknet-testing`; UI code changes -> `incremental-implementation` |
 | Pick the right context for a polyglot task | `context-engineering` | Which layer/files -> `repo-triage`; symbol impact -> `lsp-code-analysis` |
-| Audit .agents/ or scan the community for adoptables | `ecosystem-scan` | Internal doc consistency -> `doc-audit`; whether to adopt -> `think-before-act` |
+| Audit .agents/ or scan the community for adoptables | `repo-audit` | Internal doc consistency -> `doc-audit`; whether to adopt -> `think-before-act` |
+| Legacy ecosystem-scan triggers | `ecosystem-scan` | **INOPERATIVE** -- superseded by `repo-audit` (B1b-1); tombstone kept, use `repo-audit` |
 | Batch-review a session and bank the lessons | `lesson-review` | One concrete failure -> `debugging-and-error-recovery`; durable decision -> `documentation-and-adr` |
 | Implement tasks from an OpenSpec change | `openspec-apply-change` | **INOPERATIVE** -- requires the missing `openspec` CLI (status: inoperative); until it lands use `openspec-explore` + manual planning |
 | Archive a completed OpenSpec change | `openspec-archive-change` | **INOPERATIVE** -- requires the missing `openspec` CLI (status: inoperative) |
@@ -44,7 +45,7 @@
 - `book-to-skill` owns document-to-skill conversion; `create-skill` owns the skill-crafting gate itself.
 - `browser-testing` owns browser-facing verification; `weaknet-testing` owns network-impairment measurement (tc netem + the weaknet agent).
 - `context-engineering` owns task-context routing; `repo-triage` owns the layer/file map.
-- `ecosystem-scan` owns the external community scan; `doc-audit` owns internal consistency.
+- `repo-audit` owns the external community scan; `doc-audit` owns internal consistency.
 - `lesson-review` owns batch lesson extraction; `documentation-and-adr` owns the durable decision record.
 - `openspec-apply-change` / `openspec-archive-change` / `openspec-sync-specs` are inoperative until the `openspec` CLI exists (frontmatter `status: inoperative`, B4-4); `openspec-propose` / `openspec-explore` remain usable (file-surface only, no CLI).
 - `review-hardcode` is folded into `security-hardening` Phase 1; the deep security pass is `security-hardening`'s.

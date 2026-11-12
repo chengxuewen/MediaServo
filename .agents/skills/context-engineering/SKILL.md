@@ -140,7 +140,7 @@ After identifying user intent, proactively suggest loading the matching skill:
 | "切换/上下文/语言" (switch/context/language) | `context-engineering` | multi-language tasks | <!-- c49:trigger -->
 | "CI/CD/Docker/pipeline" | `ci-cd-automation` | CI changes |
 | "简化/重构/清理" (simplify/refactor/cleanup) | `code-simplification` | reduce complexity | <!-- c49:trigger -->
-| "优化 agent/审计/技能" (optimize agents/audit/skills) | `ecosystem-scan` | agent ecosystem | <!-- c49:trigger -->
+| "优化 agent/审计/技能" (optimize agents/audit/skills) | `repo-audit` | agent ecosystem | <!-- c49:trigger -->
 | "总结/记录/教训/经验" (summarize/log lessons) | `lesson-review` | session end | <!-- c49:trigger -->
 | before any non-trivial action | `think-before-act` | automatic |
 | "审计/一致性/文档矛盾" (audit/consistency/doc conflicts) | `doc-audit` | docs audit | <!-- c49:trigger -->

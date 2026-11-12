@@ -72,7 +72,7 @@ When facing these scenarios, use the `skill` tool to load the corresponding skil
 | **Context switching** | `context-engineering` | Switching tasks across Rust/TS/DevOps |
 | **CI/CD changes** | `ci-cd-automation` | Dockerfile, pixi.toml, GitHub Actions |
 | **Code simplification** | `code-simplification` | Refactoring, reducing complexity |
-| **Optimizing agent ecosystem** | `ecosystem-scan` | Auditing .agents/, finding new skills |
+| **Optimizing agent ecosystem** | `repo-audit` | Auditing .agents/, finding new skills |
 | **Session end** | `lesson-review` | Summarize lessons learned |
 | **Before acting** | `think-before-act` | Before any non-trivial action (auto-triggers) |
 | **Uncertain which skill** | `skill-router` | Ambiguous intent or needs combined recommendations |
@@ -163,7 +163,7 @@ _Project has entered the code implementation phase. Current state:_
 | `deprecation-and-migration` | Deprecate and migrate MediaServo surfaces safely: mark the old surface, publish a migration path, keep an alias until consumers move, then r |
 | `doc-audit` | MediaServo document & architecture audit. |
 | `documentation-and-adrs` | Record MediaServo decisions and keep docs consistent: D-series entries, architecture and protocol updates, book chapters, changelog, and lin |
-| `ecosystem-scan` | Audit the .agents/ system and scan the community ecosystem for skills/rules/MCP worth adopting. |
+| `ecosystem-scan` | [inoperative] INOPERATIVE — superseded by repo-audit (agent-subagent-layer B1b-1). |
 | `expert-panel-review` | Multi-role expert panel reviewing ONE artifact (a plan, a conclusion, a decision, a design): independence first, isolation discipline, a man |
 | `incremental-implementation` | Thin vertical slices across Rust+TS. |
 | `lesson-review` | Batch session review: systematically extract lessons learned and write them to project memory. |
@@ -175,6 +175,7 @@ _Project has entered the code implementation phase. Current state:_
 | `openspec-propose` | > |
 | `openspec-sync-specs` | [inoperative] Sync delta specs from a change to main specs. |
 | `performance-optimization` | MediaServo performance profiling and optimization. |
+| `repo-audit` | Whole-repo engineering audit across 10 domains (skills, rules, mcp, scripts, docs, book, cli, tests, structure, naming) + external scan in t |
 | `repo-triage` | Triage an ambiguous MediaServo task into the right layer and files before editing: Rust crates, C ABI/FFI, mediasoup, Admin Dashboard, agent |
 | `reuse-first` | Borrow before build: prove the existing supplier face cannot take it BEFORE writing any new mechanism (CMake target/function, script verb, w |
 | `review-hardcode` | Hardcoded secrets/ports/URLs scan. |

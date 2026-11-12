@@ -28,7 +28,7 @@ Read the user message and classify:
 | **Test** | "测试"/"E2E"/"覆盖率" (test/E2E/coverage) | `/test-driven-development` + `/playwright` | <!-- c49:trigger -->
 | **Docs** | "文档"/"README"/"说明" (docs/README/explanation) | `/doc-audit` | <!-- c49:trigger -->
 | **Security** | "安全"/"权限"/"认证" (security/permissions/auth) | `/security-review` | <!-- c49:trigger -->
-| **Explore** | "调研"/"对比"/"有什么方案" (research/compare/what options) | `/ecosystem-scan` + librarian agent | <!-- c49:trigger -->
+| **Explore** | "调研"/"对比"/"有什么方案" (research/compare/what options) | `/repo-audit` + librarian agent | <!-- c49:trigger -->
 | **Ambiguous** | no clear keyword | propose 2-3 possible directions, let the user choose |
 
 ### Step 2: Context Check

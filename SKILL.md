@@ -40,7 +40,7 @@ Skills are auto-activated by AI agents based on task context. No manual invocati
 | `deprecation-and-migration` | Deprecate and migrate MediaServo surfaces safely: mark the old surface, publish a migration path, keep an alias until consumers move, then r |
 | `doc-audit` | MediaServo document & architecture audit. |
 | `documentation-and-adrs` | Record MediaServo decisions and keep docs consistent: D-series entries, architecture and protocol updates, book chapters, changelog, and lin |
-| `ecosystem-scan` | Audit the .agents/ system and scan the community ecosystem for skills/rules/MCP worth adopting. |
+| `ecosystem-scan` | [inoperative] INOPERATIVE — superseded by repo-audit (agent-subagent-layer B1b-1). |
 | `expert-panel-review` | Multi-role expert panel reviewing ONE artifact (a plan, a conclusion, a decision, a design): independence first, isolation discipline, a man |
 | `incremental-implementation` | Thin vertical slices across Rust+TS. |
 | `lesson-review` | Batch session review: systematically extract lessons learned and write them to project memory. |
@@ -52,6 +52,7 @@ Skills are auto-activated by AI agents based on task context. No manual invocati
 | `openspec-propose` | > |
 | `openspec-sync-specs` | [inoperative] Sync delta specs from a change to main specs. |
 | `performance-optimization` | MediaServo performance profiling and optimization. |
+| `repo-audit` | Whole-repo engineering audit across 10 domains (skills, rules, mcp, scripts, docs, book, cli, tests, structure, naming) + external scan in t |
 | `repo-triage` | Triage an ambiguous MediaServo task into the right layer and files before editing: Rust crates, C ABI/FFI, mediasoup, Admin Dashboard, agent |
 | `reuse-first` | Borrow before build: prove the existing supplier face cannot take it BEFORE writing any new mechanism (CMake target/function, script verb, w |
 | `review-hardcode` | Hardcoded secrets/ports/URLs scan. |

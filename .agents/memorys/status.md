@@ -1411,3 +1411,10 @@ install                        → 改名提示 + exit 2（退役）
   exist) and never prepend PATH -- consumer env constitutions (cxx band F25)
   stay green on IDE configures; a warm cache tree must be re-probed to pick
   the keys up (POLYORCH_RUST_FOUND is CACHE INTERNAL; D51).
+
+## repo-audit
+
+- 2026-11-12: B1b-1 port landed (donor VisiaEngine, adapt; ledger row added). ecosystem-scan tombstoned (inoperative, superseded; R2 deletion). Quick-run counter: 1.
+- Quick smoke (post-port): agent-tools + agent single source green; scripts syntax OK (28 sh + 18 py); no case collisions in .agents/ docs/.
+- Finding LOW (structure domain): AGENTS.md STRUCTURE tree omits bindings/ book/ cmake/ config/ deploy/ docker/ examples/ PolyOrch/ vs actual ls -- owner: next docs batch, not B1b-1.
+- Full scan (external lanes 2B/2C) pending first real use; C49 pre-existing red carried (docs/reference/research/ptt dossier, commit 8cbe504, outside this batch).

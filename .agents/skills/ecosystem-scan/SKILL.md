@@ -1,9 +1,13 @@
 ---
 name: ecosystem-scan
-description: "Audit the .agents/ system and scan the community ecosystem for skills/rules/MCP worth adopting. Two-tier (Quick/Full) + quality scoring + security gate. Use when the user asks to 'optimize agents', 'scan ecosystem', 'find new skills', 'audit .agents/', or '/ecosystem-scan'."
+status: inoperative
+description: "INOPERATIVE — superseded by repo-audit (agent-subagent-layer B1b-1). Formerly: audit .agents/ and scan the community ecosystem. All triggers now route to repo-audit; do not use this skill."
 ---
 
-# ecosystem-scan — Project Agent-System Audit + Ecosystem Scan
+> **INOPERATIVE — superseded by `repo-audit`** (agent-subagent-layer B1b-1, 2026-11-12).
+> Tombstone kept for searchability (N17=B); deletion scheduled for R2. All triggers route to `repo-audit`.
+
+# ecosystem-scan — Project Agent-System Audit + Ecosystem Scan (RETIRED)
 
 > Two-tier scan (Quick daily / Full deep-dive), quality scoring, security-audit gate.
 > Prior art: [autoskills](https://github.com/B143KC47/autoskills), [agent-skill-discovery](https://github.com/ericgandrade/claude-superskills), [skill-update-team](https://github.com/franktsai2008-eng/skill-update-team), [agent-self-audit](https://github.com/Xxt-XN/agent-self-audit).
