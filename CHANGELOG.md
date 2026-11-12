@@ -19,6 +19,12 @@ teams); for development process details, consult git log directly. Newest versio
 
 ### Fixed
 
+- [floor] A13 producer-block (P6-2): with floor enabled, producers in rooms
+  missing from the designation table started PAUSED (the produce path consults
+  the floor gate unconditionally) — a silent media-block in any non-seeded room
+  (meet/view/user-created). A designation-table miss now means never-gated
+  (non-talk media is untouched by intercom); the dev compose no longer
+  mis-seeds `audio-p0` as a floor talk room.
 - The IDE bootstrap settings no longer prepend the pixi bin directory to
   the configure PATH: PolyOrch 0.9.2 delivers cargo/rustc through the explicit
   injection contract (`cmake.configureSettings`) instead, so an IDE configure
@@ -32,6 +38,25 @@ teams); for development process details, consult git log directly. Newest versio
 
 ### Added
 
+- [admin] Floor REST (P4-1): `GET /api/admin/floor/:room` (snapshot + policy)
+  and `POST .../force-release|mute|mode` behind the admin/dispatcher gate.
+  Every mutation reuses the floor wire path (one audit line, media-first
+  reconcile, room broadcasts — no side door); force-release audits
+  `force_release` with the ADMIN actor (never misattributed to the holder).
+- [admin] `AdminEvent::floor_changed` push (P4-2): one event per floor mutation
+  on the admin events WS (< 1 s), carrying room_id/generation/summary —
+  consoles refresh immediately; the 5 s poll stays as a fallback.
+- [rooms] Managed-room store (P4-3, O20/RM12): `GET/POST /api/admin/managed-rooms`
+  + `GET/PUT/DELETE /:id` backed by `rooms.yaml` (atomic tmp+fsync+rename
+  write-back, refuse-on-corrupt startup, one audit line per mutation). The
+  configured kind AND video flag override id inference at runtime (no restart
+  — a managed `meet` with `video: false` IS the voice domain). The collection
+  lives at `managed-rooms`, NOT `/rooms` (that path is the runtime room list).
+- [turn] `GET /api/admin/ice-servers` (P4-5): coturn short-term credentials
+  (`use-auth-secret`, HMAC-SHA1, draft-uberti) from
+  `config.turn {secret, uris, ttl_secs}`; empty secret = TURN disabled (LAN
+  default). `SfuMicProducer`/`SfuConsumerClient` accept `iceServers` (scoped
+  injection over the transport window).
 - [floor] WS-level O22 negative verification + r3-K3 disconnect injection: a new
   `floor_ws_e2e` integration suite drives a live WS client — an undesignated room
   answers exactly one 4032 per floor command with ZERO `floor_*` frames in the

@@ -52,7 +52,7 @@ Industrial control end    ──┐              ┌── Host platform (enterp
 
 ## 2. The Three-Layer Architecture
 
-> 📄 See [modules/03-client-host.md](/docs/modules/03-client-host.md) for details
+> 📄 See [modules/03-client-host.md](modules/03-client-host.md) for details
 
 MediaServo adopts a three-layer architecture separating the control plane from the data plane: the backend centrally manages users, devices, permissions, licenses, and signaling; the Client/Host data planes communicate with the control plane over gRPC/REST. The dual Client/Host application design comes from decision D2 — the Host must run on platforms without a desktop environment (Linux servers, vehicle edge devices), and the split reduces the Host's size.
 
@@ -120,7 +120,7 @@ Why two applications rather than one: the Host must run on platforms without a d
 
 ## 3. Accounts & Permissions
 
-> 📄 See [modules/05-auth-permissions.md](/docs/modules/05-auth-permissions.md) for details
+> 📄 See [modules/05-auth-permissions.md](modules/05-auth-permissions.md) for details
 
 The Auth Provider trait implements dual-mode authentication: Local mode (embedded SQLite + JWT) for standalone deployment; platform mode delegates to the platform's RBAC/LDAP for the Docker-module scenario. The permission model covers feature flags, quota limits (stream count/bitrate/resolution/duration), and license control (trial/standard/enterprise). At startup the client SDK pulls the permission config from the backend, caches it locally, and the License Manager validates before every pipeline operation.
 
@@ -201,13 +201,13 @@ Analogous to Synology DSM: MediaServo installed as a Docker module on a host pla
 
 ## 4. The Plugin System
 
-> 📄 See [modules/06-plugin-system.md](/docs/modules/06-plugin-system.md) for details
+> 📄 See [modules/06-plugin-system.md](modules/06-plugin-system.md) for details
 
 The mediaservo-common microkernel hosts the five core components: PluginManager, LicenseManager, ProtocolBroker, PipelineEngine, and AuthProvider. Plugins are grouped by domain into production (Host capture/encode/push), consumption (Client decode/render/pull), protocol (RTMP/HLS/SRT/RTSP/WebRTC), and relay (STUN/TURN/SFU). The three-layer trait hierarchy (Plugin → MediaSource/Processor/Sink → concrete implementations) provides clean extension boundaries.
 
 ### 4.0 The Component Service Layer (D126-D134)
 
-> 📄 See [modules/15-component-architecture.md](/docs/modules/15-component-architecture.md) for details
+> 📄 See [modules/15-component-architecture.md](modules/15-component-architecture.md) for details
 
 Distinct from D1's deployment-topology three layers, D126 defines a three-layer logical abstraction in the code dimension:
 
@@ -329,7 +329,7 @@ pub trait MediaTransport: Send + Sync {
 
 ## 5. The Pipeline Model
 
-> 📄 See [modules/08-pipeline-model.md](/docs/modules/08-pipeline-model.md) for details
+> 📄 See [modules/08-pipeline-model.md](modules/08-pipeline-model.md) for details
 
 Adopts LVQR's Unified MediaFragment Model, with one internal unified format avoiding the N×M protocol-conversion matrix. GStreamer handles mature hot paths (protocol parsing, codec, packaging); homegrown paths cover GPU encode bridging, the sans-I/O WebRTC core, the RTCDataChannel control protocol, and the input-injection pipeline.
 
@@ -392,7 +392,7 @@ GStreamer is the implementation engine in these scenarios:
 
 ## 6. Deployment Forms
 
-> 📄 See [modules/02-deployment-modes.md](/docs/modules/02-deployment-modes.md) for details
+> 📄 See [modules/02-deployment-modes.md](modules/02-deployment-modes.md) for details
 
 Four deployment forms cover everything from embedded linking to standalone deployment: Embed (~5 plugins, third-party platform embedding), Sidecar (~12 plugins, a host-platform container sidecar), Standalone (all plugins + Web UI), and the platform module (a Docker container delegating auth to the platform).
 
@@ -419,7 +419,7 @@ Four deployment forms cover everything from embedded linking to standalone deplo
 
 ## 7. The SDK Layers
 
-> 📄 See [modules/04-sdk-layers.md](/docs/modules/04-sdk-layers.md) for details
+> 📄 See [modules/04-sdk-layers.md](modules/04-sdk-layers.md) for details
 
 The four-SDK master architecture (D222-D232): **link** (connection) / **field** (composed sessions) / **client** (cockpit-side consumption orchestration) / **deck** (media data). It replaces the early field/remote dual-facade model (D65-D69/D82 repealed).
 
@@ -467,7 +467,7 @@ if (permissions.surveillance) modules.push(SurveillanceModule); // the surveilla
 
 ## 8. Protocols & Communication
 
-> 📄 See [modules/07-protocols.md](/docs/modules/07-protocols.md) for details
+> 📄 See [modules/07-protocols.md](modules/07-protocols.md) for details
 
 The protocol stack has five layers: internal IPC (FlatBuffers zero-copy), third-party platform integration (C FFI static linking), host-platform integration (napi-rs native modules), the backend control plane (gRPC + REST), and the media data plane (RTP/SRT/WebRTC). Signaling uses in-house WebSocket with long-term evolution (v2 = the control domain, v3 = session resume; S0/S0.5 landed); the MQTT 5.0 channel **is no longer a default dual-track promise** — evaluation triggers only when an offline-command-delivery/large-scale-presence scenario appears, with the precondition gate = the "externalized session state" rework (this repo's "connection = session" model and the broker bus model cannot be mixed). Verdict = F13/D289 (booked as reserved).
 

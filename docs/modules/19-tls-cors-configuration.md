@@ -1,7 +1,7 @@
 # 19. TLS Reverse Proxy & CORS Configuration
 
 > Phase 1 — deployment reference | 2026-07-24
-> Related docs: [security-architecture.md](28-security-architecture.md) §mTLS, [29-operations.md](29-29-operations.md) §TLS, [13-server-architecture.md](13-server-architecture.md) §Deployment
+> Related docs: [security-architecture.md](28-security-architecture.md) §mTLS, [29-operations.md](29-operations.md) §TLS, [13-server-architecture.md](13-server-architecture.md) §Deployment
 > Related crate: mediaservo-server
 
 ## 19.1 Overview
@@ -510,7 +510,7 @@ Verify before deployment:
 ## 19.9 Cross References
 
 - Auth architecture: [security-architecture.md](28-security-architecture.md)
-- Ops design: [29-operations.md](29-29-operations.md)
+- Ops design: [29-operations.md](29-operations.md)
 - Server architecture: [13-server-architecture.md](13-server-architecture.md)
 - Deployment modes: [02-deployment-modes.md](02-deployment-modes.md)
 - Signaling architecture: [10-signaling-architecture.md]

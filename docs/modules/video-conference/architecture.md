@@ -255,4 +255,4 @@ Borrowing Janus's RTP Forwarding model:
 | Recording | RTP Forwarding | Native | Jibri | Egress |
 | Deployment | Multiple forms | Not self-hostable | Self-hosted | Self-hosted+cloud |
 
-See the [research doc](../../research/video-conference.md) for the full research analysis.
+See the [research doc](../../reference/research/video-conference/) for the full research analysis.

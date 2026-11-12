@@ -103,4 +103,4 @@ cargo clippy --features sfu-mediasoup --all-targets -- -D warnings
 | 8000 | HTTP/signaling |
 | 40000-40100/udp | mediasoup RTP/RTCP |
 
-> See [SFU mediasoup Integration](../sfu-mediasoup-integration.md)
+> See [SFU mediasoup Integration](../33-sfu-mediasoup-integration.md)

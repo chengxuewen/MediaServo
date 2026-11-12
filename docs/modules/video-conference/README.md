@@ -35,4 +35,4 @@ This document is the reference manual for MediaServo's video-conference (VC) mod
 | Recording | RTP Forwarding | SFU stream duplication pushed to a recording service |
 | Binding layer | napi-rs | Rust -> Node.js native module |
 
-See the [research doc](../../research/video-conference.md) for the research process and comparative analysis.
+See the [research doc](../../reference/research/video-conference/) for the research process and comparative analysis.
