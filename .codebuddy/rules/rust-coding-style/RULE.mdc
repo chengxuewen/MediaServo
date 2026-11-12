@@ -1,0 +1,7 @@
+---
+description: Rust Coding Style
+alwaysApply: false
+---
+
+External rule -- read the true source when this applies.
+True source: `.agents/rules/rust/coding-style.md`

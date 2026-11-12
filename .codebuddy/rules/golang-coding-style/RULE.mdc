@@ -1,0 +1,7 @@
+---
+description: Go Coding Style
+alwaysApply: false
+---
+
+External rule -- read the true source when this applies.
+True source: `.agents/rules/golang/coding-style.md`

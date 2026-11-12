@@ -1,0 +1,7 @@
+---
+description: Code Edit Safety
+alwaysApply: false
+---
+
+External rule -- read the true source when this applies.
+True source: `.agents/rules/common/edit-safety.md`

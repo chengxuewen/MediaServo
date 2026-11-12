@@ -480,6 +480,86 @@ def _skills_arts(source, target_root, cfg, host):
     return arts
 
 
+def _parse_core_constraints(source):
+    """Parse the always-on core annex (B10; the O-29-ruled selection, option A).
+
+    The annex is HAND-EDITED true source (user-ruled) delimited by markers so the
+    parser can find it; the generator never writes it."""
+    path = os.path.join(source, "rules", "common", "constraints.md")
+    if not os.path.isfile(path):
+        return []
+    text = common.read_text(path)
+    m = re.search(r"<!-- BEGIN:always-on-core -->(.*?)<!-- END:always-on-core -->",
+                  text, re.S)
+    if not m:
+        return []
+    rows = []
+    for line in m.group(1).splitlines():
+        rm = re.match(r"^\|\s*(\d+)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*$", line)
+        if rm:
+            rows.append({"index": int(rm.group(1)), "text": rm.group(2),
+                         "why": rm.group(3)})
+    return rows
+
+
+def _constraints_arts(source, target_root, cfg, host):
+    """Three-tier constraints projection for CodeBuddy (B10-B, N30=A+).
+
+    Layer 1: the ruled always-on core as ONE alwaysApply folder (compact).
+    Layer 2: every non-README rule as an agent-requested folder -- description
+    resident, body is a POINTER to the true source (zero full-text copy). Folder
+    names are domain-prefixed: common/ and rust/ both carry coding-style.md.
+    """
+    cb_dir = os.path.join(target_root, host["constraints_target"])
+    arts = []
+    keep = set()
+    core = _parse_core_constraints(source)
+    if core:
+        body = "\n".join("%d. %s" % (r["index"], r["text"]) for r in core)
+        mdc = ("---\ndescription: Always-on core constraints (verify-every-change,"
+               " gates, generated layers, start gates, evidence standard).\n"
+               "alwaysApply: true\n---\n\n%s\n" % body)
+        arts.append(("text", os.path.join(cb_dir, "always-on-core", "RULE.mdc"), mdc))
+        keep.add("always-on-core")
+    prefix = os.path.relpath(repo_of(source), target_root)
+    rules_root = os.path.join(source, "rules")
+    for dirpath, _dirnames, filenames in os.walk(rules_root):
+        for fn in sorted(filenames):
+            # r19 M-5: exclude README.md -- 83 rules + 1 README in the tree.
+            if not fn.endswith(".md") or fn == "README.md":
+                continue
+            domain = os.path.basename(dirpath)
+            stem = fn[:-3]
+            folder = "%s-%s" % (domain, stem)
+            abs_rule = os.path.join(dirpath, fn)
+            desc = _rule_description(common.read_text(abs_rule), stem)
+            rel_rule = common.rel(abs_rule, repo_of(source))
+            pointer = (rel_rule if prefix == "."
+                       else prefix.replace(os.sep, "/") + "/" + rel_rule)
+            mdc = ("---\ndescription: %s\nalwaysApply: false\n---\n\n"
+                   "External rule -- read the true source when this applies.\n"
+                   "True source: `%s`\n" % (desc, pointer))
+            arts.append(("text", os.path.join(cb_dir, folder, "RULE.mdc"), mdc))
+            keep.add(folder)
+    arts.append(("prune_tree", cb_dir, keep))
+    return arts
+
+
+def _constraints_qoder_arts(source, target_root, cfg, host):
+    """Qoder layer-1 equivalent face (B10): ONE flat file with the ruled core.
+
+    Dialect UNVERIFIED (whether Qoder injects .qoder/rules is not probed yet,
+    open item O-34) -- rendered following the existing shell-projection shape."""
+    core = _parse_core_constraints(source)
+    if not core:
+        return []
+    path = os.path.join(target_root, host["constraints_target"])
+    body = "\n".join("%d. %s" % (r["index"], r["text"]) for r in core)
+    text = ("# Always-on core constraints\n\n"
+            "> Generated from `rules/common/constraints.md`; edit the true source.\n\n%s\n" % body)
+    return [("text", path, text)]
+
+
 def _rule_description(rule_body, stem):
     for line in rule_body.splitlines():
         if line.startswith("# "):
@@ -507,6 +587,13 @@ def build_artifacts(source, target_root, cfg):
         # .agents/skills natively declare it (CodeBuddy). Same non-elif rule.
         if "skills" in surfaces:
             arts.extend(_skills_arts(source, target_root, cfg, host))
+        # Independent constraints branch (B10): three-tier projection for
+        # CodeBuddy, flat layer-1 face for Qoder. Same non-elif rule.
+        if "constraints" in surfaces:
+            if host.get("kind") == "codebuddy":
+                arts.extend(_constraints_arts(source, target_root, cfg, host))
+            elif host.get("kind") == "qoder":
+                arts.extend(_constraints_qoder_arts(source, target_root, cfg, host))
         if host.get("kind") == "mcp" and "mcp" in surfaces:
             arts.append(("json", path, {"mcpServers": host_mcp(
                 servers, host["mcp_launcher"], host.get("accepts_types", ("stdio",)))}))
@@ -571,7 +658,19 @@ def build_artifacts(source, target_root, cfg):
         agents = expected_agents(source)
         if agents is not None:
             arts.append(("text", os.path.join(repo, "AGENTS.md"), agents))
-    return arts
+    # Merge prune_tree arts that share a target dir (union of keeps): the shell
+    # rules surface and the constraints projection both target .codebuddy/rules
+    # on the parent, and two half-keeps would prune each other's folders.
+    merged_keeps = {}
+    ordered = []
+    for art in arts:
+        if art[0] == "prune_tree":
+            merged_keeps.setdefault(art[1], set()).update(art[2])
+        else:
+            ordered.append(art)
+    for prune_dir, keep in merged_keeps.items():
+        ordered.append(("prune_tree", prune_dir, keep))
+    return ordered
 
 
 def expected_for(art):

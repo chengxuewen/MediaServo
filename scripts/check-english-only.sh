@@ -39,6 +39,8 @@ mapfile -t FILES < <(git ls-files \
   '.agents/skills/**/SKILL.md' \
   '.agents/agents/**/*.md' \
   '.agents/teams/**/*.md' \
+  '.codebuddy/rules/**/RULE.mdc' \
+  '.qoder/rules/constraints.md' \
   'pixi.toml' 'Dockerfile' 'mediaservo.sh' 'CHANGELOG.md' 'AGENTS.md' 'README.md' 'SKILL.md' \
   | grep -v '^\.agents/memorys/' | grep -v '^vendor/')
 

@@ -1,0 +1,7 @@
+---
+description: Development Constraints
+alwaysApply: false
+---
+
+External rule -- read the true source when this applies.
+True source: `.agents/rules/common/constraints.md`

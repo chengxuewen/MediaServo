@@ -3,7 +3,7 @@
   "repo_artifacts": true,
   "expected_hosts": ["codebuddy", "qoder", "opencode"],
   "opencode_dialect": "v1",
-  "generated_tracked": [".mcp.json", "SKILL.md", "CONSTRAINTS.md", "AGENTS.md", ".opencode/opencode.json", ".codebuddy/agents", ".qoder/agents", ".opencode/agents", ".codebuddy/skills"],
+  "generated_tracked": [".mcp.json", "SKILL.md", "CONSTRAINTS.md", "AGENTS.md", ".opencode/opencode.json", ".codebuddy/agents", ".qoder/agents", ".opencode/agents", ".codebuddy/skills", ".codebuddy/rules", ".qoder/rules/constraints.md"],
   "hosts": [
     {
       "label": "opencode",
@@ -45,18 +45,20 @@
     {
       "label": "codebuddy",
       "kind": "codebuddy",
-      "surfaces": ["agents", "skills"],
+      "surfaces": ["agents", "skills", "constraints"],
       "agents_source": ".agents/agents",
       "agents_target": ".codebuddy/agents",
       "skills_source": ".agents/skills",
-      "skills_target": ".codebuddy/skills"
+      "skills_target": ".codebuddy/skills",
+      "constraints_target": ".codebuddy/rules"
     },
     {
       "label": "qoder",
       "kind": "qoder",
-      "surfaces": ["agents"],
+      "surfaces": ["agents", "constraints"],
       "agents_source": ".agents/agents",
-      "agents_target": ".qoder/agents"
+      "agents_target": ".qoder/agents",
+      "constraints_target": ".qoder/rules/constraints.md"
     }
   ]
 }

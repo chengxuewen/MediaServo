@@ -10,6 +10,7 @@ CHECKS = [
     ("numbering", [sys.executable, os.path.join(HERE, "check_numbering.py")]),
     ("skill-lint", [sys.executable, os.path.join(HERE, "skill_lint.py")]),
     ("agent-lint", [sys.executable, os.path.join(HERE, "agent_lint.py")]),
+    ("rules-lint", [sys.executable, os.path.join(HERE, "rules_lint.py")]),
     ("rule-ref", [sys.executable, os.path.join(HERE, "rule_ref_lint.py")]),
     ("no-parent", [sys.executable, os.path.join(HERE, "check_no_parent.py")]),
 ]

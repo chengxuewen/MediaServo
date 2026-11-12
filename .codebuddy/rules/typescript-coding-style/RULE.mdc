@@ -1,0 +1,7 @@
+---
+description: TypeScript/JavaScript Coding Style
+alwaysApply: false
+---
+
+External rule -- read the true source when this applies.
+True source: `.agents/rules/typescript/coding-style.md`

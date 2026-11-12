@@ -1,0 +1,7 @@
+---
+description: C# Security
+alwaysApply: false
+---
+
+External rule -- read the true source when this applies.
+True source: `.agents/rules/csharp/security.md`

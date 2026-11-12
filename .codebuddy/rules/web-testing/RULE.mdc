@@ -1,0 +1,7 @@
+---
+description: Web Testing Rules
+alwaysApply: false
+---
+
+External rule -- read the true source when this applies.
+True source: `.agents/rules/web/testing.md`
