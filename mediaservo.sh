@@ -451,6 +451,19 @@ _ms_build_server() {
             echo "Error: MESON environment variable not set — invoke via ./mediaservo.sh (source pixi-shell.sh injects the activation env)" >&2
             exit 2
         fi
+        # Plan-Y mediasoup wrap layer: the parent pins 3rdparty/mediasoup-worker/
+        # (per-file .sha256; hashes = the crate's .wrap pins). meson resolves
+        # sources+patches from it by filename -> zero network. Structural
+        # discovery, same posture as the cmake faces (MediaServoMesonCache.cmake);
+        # standalone checkout (no sibling layer) keeps the download behavior.
+        # MEDIASOUP_LOCAL_DEV=1 is the anti-purge pairing: without it the
+        # post-build `invoke clean-all` runs `meson subprojects purge
+        # --include-cache` and DELETES the pinned archives (measured).
+        if [ -z "${MESON_PACKAGE_CACHE_DIR:-}" ] && [ -d "$ROOT/../../3rdparty/mediasoup-worker" ]; then
+            MESON_PACKAGE_CACHE_DIR="$(cd "$ROOT/../../3rdparty/mediasoup-worker" && pwd -P)"
+            export MESON_PACKAGE_CACHE_DIR
+            export MEDIASOUP_LOCAL_DEV=1
+        fi
         local cargs=(cargo build)
         [ "$3" = 1 ] && cargs+=(--release)
         cargs+=(-p mediaservo-server)

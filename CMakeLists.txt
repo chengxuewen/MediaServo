@@ -112,6 +112,11 @@ if(MEDIASERVO_BUILD_BINDINGS)
   mediaservo_setup_bindings()
 endif()
 
+# Pinned meson wrap layer (Plan-Y family): mediasoup-sys worker deps resolve
+# offline from the parent's 3rdparty/mediasoup-worker/ when present -- consumed
+# by the crates lanes and the deploy fresh-goods leg alike.
+include(cmake/MediaServoMesonCache.cmake)
+
 # S4 crates lanes: LIB-kind rlib lanes + per-crate test buttons + ctest twins;
 # lane table single source = cmake/MediaServoCrates.cmake (reconciled against Cargo members
 # by the mediaservo-gates lanes face (tools/mediaservo-gates) in all-gates). Default cache face = build-tree-local;

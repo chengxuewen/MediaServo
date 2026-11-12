@@ -412,13 +412,24 @@ include(\"${CMAKE_BINARY_DIR}/deploy-${_name}-init-server-body.cmake\")
         # build-server-native precedent; button envs are naturally clean —
         # only the CLI shell rides the pixi activation, B5 measured).
         get_filename_component(_cargo_dir "${POLYORCH_RUST_CARGO}" DIRECTORY)
+        set(_goods_env
+            "PATH=${_cargo_dir}:/usr/bin:/bin"
+            "LIBCLANG_PATH=${_cargo_dir}/../lib/libclang.so")
+        # Pinned meson wrap layer (server goods build mediasoup-sys): the
+        # sanitized button env never rides the CLI's proxy/cache wiring, so
+        # the worker's meson wraps resolve offline from the parent's
+        # 3rdparty/mediasoup-worker/ when present. The env list pairs the
+        # cache dir with MEDIASOUP_LOCAL_DEV=1 -- without it the post-build
+        # `meson subprojects purge --include-cache` DELETES the pinned
+        # archives (MediaServoMesonCache.cmake, measured).
+        mediaservo_meson_cache_env(_mdt_meson_env)
+        list(APPEND _goods_env ${_mdt_meson_env})
         set(_goods_cmd
             ${CMAKE_COMMAND} -E env
             --unset=RUSTFLAGS --unset=CARGO_ENCODED_RUSTFLAGS
             --unset=CFLAGS --unset=CXXFLAGS --unset=CC --unset=CXX
             --unset=MESON --unset=MESON_ARGS
-            "PATH=${_cargo_dir}:/usr/bin:/bin"
-            "LIBCLANG_PATH=${_cargo_dir}/../lib/libclang.so"
+            ${_goods_env}
             "${POLYORCH_RUST_CARGO}" build)
         foreach(_p IN LISTS _goods_pkgs)
             list(APPEND _goods_cmd -p "${_p}")

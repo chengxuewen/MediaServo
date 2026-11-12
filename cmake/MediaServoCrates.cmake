@@ -128,6 +128,15 @@ function(mediaservo_setup_crate_lanes)
     # so the app-tree face (MediaServoAppTree.cmake) can never drift from lanes.
     mediaservo_cargo_target_base(_base)
 
+    # Pinned meson wrap layer (MediaServoMesonCache.cmake): the server lanes
+    # build mediasoup-sys, whose meson wraps otherwise fetch sources+patches
+    # from the network at build time. IDE lanes never ride the CLI env, so
+    # the cache dir (+ MEDIASOUP_LOCAL_DEV=1 anti-purge pairing) is injected
+    # into the cargo rules themselves (same write-through face as the C23
+    # inject; merged into ONE set -- a second polyorch_rust_set_env_vars
+    # call would REPLACE the first).
+    mediaservo_meson_cache_env(_meson_inject)
+
     foreach(_row IN LISTS MEDIASERVO_CRATE_LANES)
         string(REPLACE "@" ";" _parts "${_row}")
         list(GET _parts 0 _pkg)
@@ -147,8 +156,12 @@ function(mediaservo_setup_crate_lanes)
             PACKAGE ${_pkg} CRATE ${_lib}
             MANIFEST "${_manifest}" ${_base_args}
             FOLDER "${MEDIASERVO_IDE_ROOT}${_fold}")
-        if(_c23_inject)
-            polyorch_rust_set_env_vars(TARGET ${_pkg} ${_c23_inject})
+        set(_lane_env ${_c23_inject})
+        if(_pkg STREQUAL "mediaservo-server" AND _meson_inject)
+            list(APPEND _lane_env ${_meson_inject})
+        endif()
+        if(_lane_env)
+            polyorch_rust_set_env_vars(TARGET ${_pkg} ${_lane_env})
         endif()
 
         polyorch_rust_test(
@@ -200,8 +213,12 @@ function(mediaservo_setup_crate_lanes)
             MANIFEST "${MEDIASERVO_REPO_ROOT}/crates/${_app}/Cargo.toml"
             BASE_DIR "${MEDIASERVO_REPO_ROOT}/target"
             FOLDER "${MEDIASERVO_IDE_ROOT}crates/${_app}")
-        if(_c23_inject)
-            polyorch_rust_set_env_vars(TARGET ${_app}-bin ${_c23_inject})
+        set(_bin_env ${_c23_inject})
+        if(_app STREQUAL "mediaservo-server" AND _meson_inject)
+            list(APPEND _bin_env ${_meson_inject})
+        endif()
+        if(_bin_env)
+            polyorch_rust_set_env_vars(TARGET ${_app}-bin ${_bin_env})
         endif()
         if(MEDIASERVO_SHARE_CARGO_TARGET)
             # N6 alias pair with -bin-build (user ruling 2026-10-22): deliberately
