@@ -217,3 +217,95 @@ _Project has entered the code implementation phase. Current state:_
 - 2026-11-05: examples-ide-unification (four bands on the PolyOrch faces)
 - repo-audit
 <!-- END:agents-memory -->
+
+<!-- BEGIN:rules-index -->
+## Rule index (generated -- read the rule file when its condition applies)
+
+Paths are relative to this file's directory.
+
+| Rule | When to read |
+|------|--------------|
+| `.agents/rules/web/coding-style.md` | web work |
+| `.agents/rules/web/design-quality.md` | web work |
+| `.agents/rules/web/hooks.md` | web work |
+| `.agents/rules/web/patterns.md` | web work |
+| `.agents/rules/web/performance.md` | web work |
+| `.agents/rules/web/security.md` | web work |
+| `.agents/rules/web/testing.md` | web work |
+| `.agents/rules/java/coding-style.md` | java work |
+| `.agents/rules/java/hooks.md` | java work |
+| `.agents/rules/java/patterns.md` | java work |
+| `.agents/rules/java/security.md` | java work |
+| `.agents/rules/java/testing.md` | java work |
+| `.agents/rules/php/coding-style.md` | php work |
+| `.agents/rules/php/hooks.md` | php work |
+| `.agents/rules/php/patterns.md` | php work |
+| `.agents/rules/php/security.md` | php work |
+| `.agents/rules/php/testing.md` | php work |
+| `.agents/rules/kotlin/coding-style.md` | kotlin work |
+| `.agents/rules/kotlin/hooks.md` | kotlin work |
+| `.agents/rules/kotlin/patterns.md` | kotlin work |
+| `.agents/rules/kotlin/security.md` | kotlin work |
+| `.agents/rules/kotlin/testing.md` | kotlin work |
+| `.agents/rules/cpp/coding-style.md` | cpp work |
+| `.agents/rules/cpp/hooks.md` | cpp work |
+| `.agents/rules/cpp/patterns.md` | cpp work |
+| `.agents/rules/cpp/security.md` | cpp work |
+| `.agents/rules/cpp/testing.md` | cpp work |
+| `.agents/rules/dart/coding-style.md` | dart work |
+| `.agents/rules/dart/hooks.md` | dart work |
+| `.agents/rules/dart/patterns.md` | dart work |
+| `.agents/rules/dart/security.md` | dart work |
+| `.agents/rules/dart/testing.md` | dart work |
+| `.agents/rules/python/coding-style.md` | python work |
+| `.agents/rules/python/hooks.md` | python work |
+| `.agents/rules/python/patterns.md` | python work |
+| `.agents/rules/python/security.md` | python work |
+| `.agents/rules/python/testing.md` | python work |
+| `.agents/rules/csharp/coding-style.md` | csharp work |
+| `.agents/rules/csharp/hooks.md` | csharp work |
+| `.agents/rules/csharp/patterns.md` | csharp work |
+| `.agents/rules/csharp/security.md` | csharp work |
+| `.agents/rules/csharp/testing.md` | csharp work |
+| `.agents/rules/typescript/coding-style.md` | typescript work |
+| `.agents/rules/typescript/hooks.md` | typescript work |
+| `.agents/rules/typescript/patterns.md` | typescript work |
+| `.agents/rules/typescript/security.md` | typescript work |
+| `.agents/rules/typescript/testing.md` | typescript work |
+| `.agents/rules/common/agents.md` | common work |
+| `.agents/rules/common/code-review.md` | common work |
+| `.agents/rules/common/coding-style.md` | common work |
+| `.agents/rules/common/communication.md` | common work |
+| `.agents/rules/common/constraints.md` | common work |
+| `.agents/rules/common/development-workflow.md` | common work |
+| `.agents/rules/common/docker.md` | common work |
+| `.agents/rules/common/edit-safety.md` | common work |
+| `.agents/rules/common/hooks.md` | common work |
+| `.agents/rules/common/lesson-memory.md` | common work |
+| `.agents/rules/common/patterns.md` | common work |
+| `.agents/rules/common/performance.md` | common work |
+| `.agents/rules/common/platform.md` | common work |
+| `.agents/rules/common/security.md` | common work |
+| `.agents/rules/common/testing.md` | common work |
+| `.agents/rules/common/tool-routing.md` | common work |
+| `.agents/rules/swift/coding-style.md` | swift work |
+| `.agents/rules/swift/hooks.md` | swift work |
+| `.agents/rules/swift/patterns.md` | swift work |
+| `.agents/rules/swift/security.md` | swift work |
+| `.agents/rules/swift/testing.md` | swift work |
+| `.agents/rules/golang/coding-style.md` | golang work |
+| `.agents/rules/golang/hooks.md` | golang work |
+| `.agents/rules/golang/patterns.md` | golang work |
+| `.agents/rules/golang/security.md` | golang work |
+| `.agents/rules/golang/testing.md` | golang work |
+| `.agents/rules/perl/coding-style.md` | perl work |
+| `.agents/rules/perl/hooks.md` | perl work |
+| `.agents/rules/perl/patterns.md` | perl work |
+| `.agents/rules/perl/security.md` | perl work |
+| `.agents/rules/perl/testing.md` | perl work |
+| `.agents/rules/rust/coding-style.md` | rust work |
+| `.agents/rules/rust/hooks.md` | rust work |
+| `.agents/rules/rust/patterns.md` | rust work |
+| `.agents/rules/rust/security.md` | rust work |
+| `.agents/rules/rust/testing.md` | rust work |
+<!-- END:rules-index -->
