@@ -437,6 +437,7 @@ fn rewrite_room(msg: &mut SignalingMessage, room: &str) {
         | FloorRelease
         | FloorModeSet { .. }
         | FloorMuteSet { .. }
+        | FloorSetPriority { .. }
         | FloorResync
         | FloorGranted { .. }
         | FloorTaken { .. }
@@ -444,6 +445,10 @@ fn rewrite_room(msg: &mut SignalingMessage, room: &str) {
         | FloorQueued { .. }
         | FloorIdle { .. }
         | FloorState { .. } => {}
+        // O18 media plane: routes by consumer_id (ownership checked
+        // server-side); no room field, so no rewrite. NOT a floor command
+        // (protocol.rs: no kind gate, no dispatcher role).
+        RequestKeyFrame { .. } => {}
     }
 }
 
