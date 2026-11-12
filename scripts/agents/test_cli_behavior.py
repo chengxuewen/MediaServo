@@ -69,6 +69,23 @@ class CliBehaviorTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("already in sync (0 writes)", out)
 
+    def test_gate_list_counts_else_branch(self):
+        # B10-A: `else gate "x"` (all-gates.sh:115 mediasoup) must be counted --
+        # the old GATE_RE anchored to line start and missed it silently.
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, "scripts"))
+            os.makedirs(os.path.join(root, ".agents"))
+            with open(os.path.join(root, "scripts", "all-gates.sh"), "w",
+                      encoding="utf-8") as fh:
+                fh.write('gate "plain" cargo test\n'
+                         'if something; then SKIP "skipped" "reason"\n'
+                         'else gate "conditional" cargo test --features x\n')
+            block = cli.gates_block(os.path.join(root, ".agents"))
+            self.assertIn("`plain`", block)
+            self.assertIn("`conditional`", block)
+            self.assertNotIn("`skipped`", block)  # SKIP is not a gate
+            self.assertIn("2 sites", block)
+
 
 if __name__ == "__main__":
     unittest.main()
