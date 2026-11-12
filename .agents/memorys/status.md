@@ -1425,3 +1425,9 @@ install                        → 改名提示 + exit 2（退役）
 - Gates: agent-lint (role schema) mounted in check_guards; C49 globs extended to agents/teams. agent-tools 43 unittests green; no-parent clean.
 - Parent inherits these 10 as symlinks + 1 own (release-captain) = 11 visible per host; true-source role quota here stays 10.
 - B5 skills visibility = R1 downgrade: skills: refs are annotation-only (source-existence check kept); host skill loading deferred to R2/B7.
+
+## agent-subagent-layer R2
+
+- 2026-11-12: R2 delivered. Skills 37 (true source; +2 ui-ux-review/design-system, -ecosystem-scan tombstone; review-hardcode retirement ruled for B11), teams 4 (interface/design-system/agent-infrastructure/delivery-review + routing map), tokens layer landed (@mediaservo/ui, 41 tokens).
+- B7: skills projected to CodeBuddy only (symlinks; Qoder/opencode read .agents/skills natively). B8: admin consumes the tokens (169 var(--ms-*) uses across 13 CSS; 22 one-off values remain as backlog). B9: team templates + four-category routing.
+- O-29 ruled (five behavioral bottom lines, always-on core for B10); O-30 ruled (retire review-hardcode in B11). R3 prerequisites clear except this delivery.
