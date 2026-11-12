@@ -19,9 +19,11 @@
 | Multi-role review of one plan/verdict/decision | `expert-panel-review` | Whole doc corpus -> `doc-audit`; act/convene gate -> `think-before-act`; item-by-item verdicts -> `adjudication-walkthrough` |
 | Convert a book/document into a skill | `book-to-skill` | Skill-crafting quality gate -> `create-skill`; registration -> a TRIGGERS row here |
 | Verify a browser-facing feature | `browser-testing` | Network-impairment angle -> `weaknet-testing`; UI code changes -> `incremental-implementation` |
+| Review interface quality / a11y / three states | `ui-ux-review` | Functional verification -> `browser-testing`; token mechanics -> `design-system` |
+| Consume/extend design tokens, style a component | `design-system` | Visual-quality verdict -> `ui-ux-review`; implementation -> `web-frontend` role |
 | Pick the right context for a polyglot task | `context-engineering` | Which layer/files -> `repo-triage`; symbol impact -> `lsp-code-analysis` |
 | Audit .agents/ or scan the community for adoptables | `repo-audit` | Internal doc consistency -> `doc-audit`; whether to adopt -> `think-before-act` |
-| Legacy ecosystem-scan triggers | `ecosystem-scan` | **INOPERATIVE** -- superseded by `repo-audit` (B1b-1); tombstone kept, use `repo-audit` |
+
 | Batch-review a session and bank the lessons | `lesson-review` | One concrete failure -> `debugging-and-error-recovery`; durable decision -> `documentation-and-adr` |
 | Implement tasks from an OpenSpec change | `openspec-apply-change` | **INOPERATIVE** -- requires the missing `openspec` CLI (status: inoperative); until it lands use `openspec-explore` + manual planning |
 | Archive a completed OpenSpec change | `openspec-archive-change` | **INOPERATIVE** -- requires the missing `openspec` CLI (status: inoperative) |

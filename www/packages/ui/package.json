@@ -1,0 +1,16 @@
+{
+  "name": "@mediaservo/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MediaServo design system - shared design tokens (CSS custom properties) for admin/voice. agent-subagent-layer B8 (closes O-7). Values extracted from the existing admin styles; admin migration to consume them is B8 part 2.",
+  "exports": {
+    "./tokens.css": "./tokens.css"
+  },
+  "files": [
+    "tokens.css"
+  ],
+  "sideEffects": [
+    "*.css"
+  ]
+}

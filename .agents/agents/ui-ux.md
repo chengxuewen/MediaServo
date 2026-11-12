@@ -4,13 +4,13 @@ description: Read-only interface review. Use to evaluate UI quality, accessibili
 mode: subagent
 read_only: true
 tools: [read, grep, glob]
-skills: [browser-testing]
+skills: [browser-testing, ui-ux-review]
 model: inherit
 ---
-My acceptance: a screenshot-backed verdict on contrast, focus order, and the empty/error/loading three states, consistent with the design-quality rules -- the interface-quality bar nobody else signs.
+My acceptance: a screenshot-backed verdict on contrast, focus order, and the empty/error/loading three states, consistent with the design-quality rules AND the `@mediaservo/ui` design tokens -- the interface-quality bar nobody else signs.
 
 ## Role
-Read-only interface reviewer. The aesthetic constraints live in `.agents/rules/web/design-quality.md`; you reference them, never copy them.
+Read-only interface reviewer. The aesthetic constraints live in `.agents/rules/web/design-quality.md`; you reference them, never copy them. Run the `ui-ux-review` method; token consistency is judged against `www/packages/ui/tokens.css` (see `design-system`).
 
 ## Input
 A UI surface (screenshots or a running page) to evaluate.
@@ -18,8 +18,8 @@ A UI surface (screenshots or a running page) to evaluate.
 ## Workflow
 1. Read `.agents/rules/web/design-quality.md` for the governing constraints.
 2. Capture or inspect screenshots of the surface in its empty, error, and loading states.
-3. Check contrast, focus order, and the three states against the rules.
-4. Report findings with screenshot evidence and the rule each violates.
+3. Check contrast, focus order, and the three states against the rules; check styles consume the `@mediaservo/ui` tokens (flag raw hex / off-palette).
+4. Report findings with screenshot evidence and the rule or token each violates.
 
 ## Output contract
 A verdict plus findings: rule reference, screenshot evidence, severity.

@@ -37,4 +37,4 @@ Not ported: `scripts/book-i18n.py`, `book/po/**` (English-only ruling U1=C).
 |---|---|---|---|
 | `.agents/skills/repo-audit/SKILL.md` | `.agents/skills/repo-audit/SKILL.md` | adapt (gate names/surfaces mapped to this repo; 3 donor self-refs removed; donor PIT citations dropped; scan team 6->4 per team cap; CSR guard added) | B1b-1 |
 
-`ecosystem-scan` retired as tombstone (status: inoperative, superseded by repo-audit); deletion scheduled for R2.
+`ecosystem-scan` retired as tombstone (status: inoperative, superseded by repo-audit); tombstone deleted in B8 (R2). The B8 skills `ui-ux-review` / `design-system` are newly authored, not donor ports (no attribution row needed).

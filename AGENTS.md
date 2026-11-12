@@ -161,9 +161,9 @@ _Project has entered the code implementation phase. Current state:_
 | `context-engineering` | Feed MediaServo agents the right context for a 7-crate polyglot workspace. |
 | `debugging-and-error-recovery` | Systematic debugging for MediaServo: reproduce, capture evidence, localize the layer, narrow with bisect or a minimal input, fix minimally,  |
 | `deprecation-and-migration` | Deprecate and migrate MediaServo surfaces safely: mark the old surface, publish a migration path, keep an alias until consumers move, then r |
+| `design-system` | Govern the MediaServo design-token layer (@mediaservo/ui). |
 | `doc-audit` | MediaServo document & architecture audit. |
 | `documentation-and-adrs` | Record MediaServo decisions and keep docs consistent: D-series entries, architecture and protocol updates, book chapters, changelog, and lin |
-| `ecosystem-scan` | [inoperative] INOPERATIVE — superseded by repo-audit (agent-subagent-layer B1b-1). |
 | `expert-panel-review` | Multi-role expert panel reviewing ONE artifact (a plan, a conclusion, a decision, a design): independence first, isolation discipline, a man |
 | `incremental-implementation` | Thin vertical slices across Rust+TS. |
 | `lesson-review` | Batch session review: systematically extract lessons learned and write them to project memory. |
@@ -186,6 +186,7 @@ _Project has entered the code implementation phase. Current state:_
 | `test-driven-development` | Red-green-refactor for MediaServo Rust and protocol work: write the failing test first, make it pass minimally, then refactor under the gate |
 | `test-harness` | MediaServo multi-language automated test harness. |
 | `think-before-act` | Meta-constraint: check before acting, list options for user approval, no brute-forcing. |
+| `ui-ux-review` | Structured interface-quality review method. |
 | `weaknet-testing` | Weak-network reproduction and measurement discipline for MediaServo (tc netem + the mediaservo-weaknet agent, optional web panel). |
 <!-- END:agents-skills -->
 
