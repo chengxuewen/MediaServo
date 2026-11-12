@@ -52,7 +52,7 @@ Skills are auto-activated by AI agents based on task context. No manual invocati
 | `openspec-propose` | > |
 | `openspec-sync-specs` | [inoperative] Sync delta specs from a change to main specs. |
 | `performance-optimization` | MediaServo performance profiling and optimization. |
-| `repo-audit` | Whole-repo engineering audit across 10 domains (skills, rules, mcp, scripts, docs, book, cli, tests, structure, naming) + external scan in t |
+| `repo-audit` | Whole-repo engineering audit across 11 domains (skills, rules, mcp, scripts, docs, book, cli, tests, structure, naming, agents/teams) + gove |
 | `repo-triage` | Triage an ambiguous MediaServo task into the right layer and files before editing: Rust crates, C ABI/FFI, mediasoup, Admin Dashboard, agent |
 | `reuse-first` | Borrow before build: prove the existing supplier face cannot take it BEFORE writing any new mechanism (CMake target/function, script verb, w |
 | `review-hardcode` | Hardcoded secrets/ports/URLs scan. |
