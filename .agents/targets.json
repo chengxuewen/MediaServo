@@ -3,7 +3,7 @@
   "repo_artifacts": true,
   "expected_hosts": ["codebuddy", "qoder", "opencode"],
   "opencode_dialect": "v1",
-  "generated_tracked": [".mcp.json", "SKILL.md", "CONSTRAINTS.md", "AGENTS.md", ".opencode/opencode.json", ".codebuddy/agents", ".qoder/agents", ".opencode/agents"],
+  "generated_tracked": [".mcp.json", "SKILL.md", "CONSTRAINTS.md", "AGENTS.md", ".opencode/opencode.json", ".codebuddy/agents", ".qoder/agents", ".opencode/agents", ".codebuddy/skills"],
   "hosts": [
     {
       "label": "opencode",
@@ -45,9 +45,11 @@
     {
       "label": "codebuddy",
       "kind": "codebuddy",
-      "surfaces": ["agents"],
+      "surfaces": ["agents", "skills"],
       "agents_source": ".agents/agents",
-      "agents_target": ".codebuddy/agents"
+      "agents_target": ".codebuddy/agents",
+      "skills_source": ".agents/skills",
+      "skills_target": ".codebuddy/skills"
     },
     {
       "label": "qoder",

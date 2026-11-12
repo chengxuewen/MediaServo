@@ -210,12 +210,12 @@ _Project has entered the code implementation phase. Current state:_
 - C51: commit message shape — subject <=50 chars, one fact per body line (2026-10-19 user ruling; mirror of main-repo C55, with this repo's 200-char-subject history as the negative exhibit)
 
 ### status (last 6)
-- 2026-10-30: CLI Batch 1
 - 2026-10-30: CLI Batch 2
 - 2026-11-02: full-gate portability
 - 2026-11-02: delivery smoke fix
 - 2026-11-05: examples-ide-unification (four bands on the PolyOrch faces)
 - repo-audit
+- agent-subagent-layer R1
 <!-- END:agents-memory -->
 
 <!-- BEGIN:rules-index -->

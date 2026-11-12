@@ -446,6 +446,40 @@ def _agents_arts(source, target_root, cfg, host):
     return arts
 
 
+def _skills_arts(source, target_root, cfg, host):
+    """Build the skills-face artifacts for one host (B7).
+
+    Only CodeBuddy needs projection (it does not read .agents/skills, B0 7.3);
+    Qoder/opencode read .agents/skills natively (O-31 / N34) and declare no
+    skills face. SKILL.md is a universal dialect, so each skill is a SYMLINK
+    to the true-source skill directory -- zero copy (N29, O-27 proven).
+    """
+    skills_target = host.get("skills_target")
+    target_dir = os.path.join(target_root, skills_target)
+    source_skills = os.path.join(source, "skills")
+    arts = []
+    keep = set()
+    if os.path.isdir(source_skills):
+        for name in sorted(os.listdir(source_skills)):
+            skill_dir = os.path.join(source_skills, name)
+            # A skill is a directory carrying SKILL.md; TRIGGERS.md and other
+            # non-skill entries are excluded by construction (skill_rows rule).
+            if not os.path.isdir(skill_dir):
+                continue
+            if not os.path.isfile(os.path.join(skill_dir, "SKILL.md")):
+                continue
+            arts.append(("link", os.path.join(target_dir, name), skill_dir))
+            keep.add(name)
+    elif os.path.isdir(target_dir):
+        # Source skills absent (submodule not initialized): preserve existing
+        # links instead of pruning (M-6 degrade, never block the parent).
+        for fn in os.listdir(target_dir):
+            if os.path.islink(os.path.join(target_dir, fn)):
+                keep.add(fn)
+    arts.append(("prune_links", target_dir, keep))
+    return arts
+
+
 def _rule_description(rule_body, stem):
     for line in rule_body.splitlines():
         if line.startswith("# "):
@@ -469,6 +503,10 @@ def build_artifacts(source, target_root, cfg):
         # never run for them. Runs for any host kind declaring the agents face.
         if "agents" in surfaces:
             arts.extend(_agents_arts(source, target_root, cfg, host))
+        # Independent skills branch (B7): only hosts that cannot read
+        # .agents/skills natively declare it (CodeBuddy). Same non-elif rule.
+        if "skills" in surfaces:
+            arts.extend(_skills_arts(source, target_root, cfg, host))
         if host.get("kind") == "mcp" and "mcp" in surfaces:
             arts.append(("json", path, {"mcpServers": host_mcp(
                 servers, host["mcp_launcher"], host.get("accepts_types", ("stdio",)))}))
@@ -544,7 +582,7 @@ def expected_for(art):
         return art[2]
     if kind == "region":
         return expected_markdown(art[1], art[2], art[3], art[4], art[5])
-    if kind in ("prune", "prune_tree", "link"):
+    if kind in ("prune", "prune_tree", "prune_links", "link"):
         return None  # handled specially in run()
     raise ValueError(kind)
 
@@ -617,35 +655,51 @@ def run(command, source, target_root, targets_path):
                           "run sync in submodule" % child_dir)
     for art in arts:
         path = art[1]
-        reason = common.guard_target(path, source_real)
-        if reason:
-            print("GATE-AGENTS ✗ guard %s" % reason)
-            return common.EXIT_GUARD
-        # Self-source guard: the target's own .agents is outside source_real in
-        # P mode, so guard_target alone would not protect it. Never write there.
-        path_real = os.path.realpath(path)
-        if path_real == own_agents_real or path_real.startswith(own_agents_real + os.sep):
-            print("GATE-AGENTS ✗ guard target inside own .agents: %s" % path)
-            return common.EXIT_GUARD
+        if art[0] == "link":
+            # Link ops only create/remove the link itself, never write through
+            # it, so guard the link's LOCATION (parent dir), not the resolved
+            # target: a skills link legitimately points into the canonical
+            # source (B7). realpath(path) would follow it and false-positive.
+            loc = os.path.realpath(os.path.dirname(path))
+            reason = None
+            if loc == source_real or loc.startswith(source_real + os.sep):
+                reason = "link location inside canonical source: %s" % path
+            elif loc == own_agents_real or loc.startswith(own_agents_real + os.sep):
+                reason = "link location inside own .agents: %s" % path
+            if reason:
+                print("GATE-AGENTS ✗ guard %s" % reason)
+                return common.EXIT_GUARD
+        else:
+            reason = common.guard_target(path, source_real)
+            if reason:
+                print("GATE-AGENTS ✗ guard %s" % reason)
+                return common.EXIT_GUARD
+            # Self-source guard: the target's own .agents is outside source_real
+            # in P mode, so guard_target alone would not protect it.
+            path_real = os.path.realpath(path)
+            if path_real == own_agents_real or path_real.startswith(own_agents_real + os.sep):
+                print("GATE-AGENTS ✗ guard target inside own .agents: %s" % path)
+                return common.EXIT_GUARD
         if art[0] == "link":
             link_to = art[2]
             rel_target = os.path.relpath(link_to, os.path.dirname(path)).replace(os.sep, "/")
-            child_rendered = os.path.isfile(link_to)
+            # exists() covers both agent files and skill directories (B7).
+            child_rendered = os.path.exists(link_to)
             if command == "check":
                 if not os.path.islink(path):
                     if child_rendered:
                         print(" [ FIX ] %s (missing link)" % path)
                         worst = max(worst, common.EXIT_FINDINGS)
                     else:
-                        print(" [ WARN] %s (child agents not rendered)" % path)
+                        print(" [ WARN] %s (link target absent)" % path)
                 elif os.readlink(path) != rel_target:
                     print(" [ FIX ] %s (link drift)" % path)
                     worst = max(worst, common.EXIT_FINDINGS)
-                elif not os.path.isfile(path):
+                elif not os.path.exists(path):
                     print(" [ FIX ] %s (dangling link)" % path)
                     worst = max(worst, common.EXIT_FINDINGS)
                 continue
-            if os.path.islink(path) and os.readlink(path) == rel_target and os.path.isfile(path):
+            if os.path.islink(path) and os.readlink(path) == rel_target and os.path.exists(path):
                 continue
             if not child_rendered:
                 # Submodule absent / child not synced: downgrade to warn so a
@@ -658,6 +712,24 @@ def run(command, source, target_root, targets_path):
             os.symlink(rel_target, path)  # link-only: never write_text (no write-through)
             print(" [ LINK] %s -> %s" % (path, rel_target))
             wrote += 1
+            continue
+        if art[0] == "prune_links":
+            # Skills face (B7): entries are symlinks to skill directories.
+            # Prune stale links (unlink-only, never touches the target).
+            target_dir, keep = art[1], art[2]
+            stale = sorted(
+                name for name in os.listdir(target_dir)
+                if os.path.islink(os.path.join(target_dir, name)) and name not in keep
+            ) if os.path.isdir(target_dir) else []
+            if command == "check":
+                for name in stale:
+                    print(" [ FIX ] %s (stale skill link)" % os.path.join(target_dir, name))
+                    worst = max(worst, common.EXIT_FINDINGS)
+                continue
+            for name in stale:
+                os.remove(os.path.join(target_dir, name))
+                print(" [ PRUNE] %s" % os.path.join(target_dir, name))
+                wrote += 1
             continue
         if art[0] == "prune_tree":
             target_dir, keep = art[1], art[2]
