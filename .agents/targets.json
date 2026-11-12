@@ -1,13 +1,17 @@
 {
   "source": ".agents",
   "repo_artifacts": true,
-  "generated_tracked": [".mcp.json", "SKILL.md", "CONSTRAINTS.md", "AGENTS.md", ".opencode/opencode.json"],
+  "expected_hosts": ["codebuddy", "qoder", "opencode"],
+  "opencode_dialect": "v1",
+  "generated_tracked": [".mcp.json", "SKILL.md", "CONSTRAINTS.md", "AGENTS.md", ".opencode/opencode.json", ".codebuddy/agents", ".qoder/agents", ".opencode/agents"],
   "hosts": [
     {
       "label": "opencode",
       "kind": "opencode",
       "file": ".opencode/opencode.json",
-      "surfaces": ["instructions", "mcp"],
+      "surfaces": ["instructions", "mcp", "agents"],
+      "agents_source": ".agents/agents",
+      "agents_target": ".opencode/agents",
       "mcp_launcher": "scripts/agents/mcp-launch.sh",
       "accepts_types": ["stdio", "remote"],
       "filter_disabled": false,
@@ -37,6 +41,20 @@
       "surfaces": ["mcp"],
       "mcp_launcher": "scripts/agents/mcp-launch.sh",
       "accepts_types": ["stdio"]
+    },
+    {
+      "label": "codebuddy",
+      "kind": "codebuddy",
+      "surfaces": ["agents"],
+      "agents_source": ".agents/agents",
+      "agents_target": ".codebuddy/agents"
+    },
+    {
+      "label": "qoder",
+      "kind": "qoder",
+      "surfaces": ["agents"],
+      "agents_source": ".agents/agents",
+      "agents_target": ".qoder/agents"
     }
   ]
 }

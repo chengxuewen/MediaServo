@@ -37,6 +37,8 @@ mapfile -t FILES < <(git ls-files \
   '.github/workflows/*.yml' \
   '.agents/rules/**/*.md' \
   '.agents/skills/**/SKILL.md' \
+  '.agents/agents/**/*.md' \
+  '.agents/teams/**/*.md' \
   'pixi.toml' 'Dockerfile' 'mediaservo.sh' 'CHANGELOG.md' 'AGENTS.md' 'README.md' 'SKILL.md' \
   | grep -v '^\.agents/memorys/' | grep -v '^vendor/')
 
