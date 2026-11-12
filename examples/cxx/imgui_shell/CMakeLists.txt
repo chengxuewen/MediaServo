@@ -8,7 +8,7 @@ target_link_libraries(mediaservo-example-imgui_shell PUBLIC mediaservo-imgui)
 
 # X11 real-window form: install a non-exiting Xlib error handler (SDL 3.4.16 has no global handler;
 # Xwayland selection/property negotiation None atoms → the default handler exit(1); see
-# cmake/gui-deps/patches/sdl3-x11-none-guard.py). The handler works together with the
+# cmake/gui-deps/patches/sdl3-x11-none-guard.cmake). The handler works together with the
 # events.c NULL guards (missing either means a second-order crash). The probe, the library
 # and the include path all come from the gui-deps face (MediaServoGui::X11) -- no
 # hand-written find_package(X11) survives here (sr8 P3 seam retirement). Headless profiles

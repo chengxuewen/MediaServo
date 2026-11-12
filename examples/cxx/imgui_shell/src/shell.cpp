@@ -13,7 +13,7 @@ namespace {
 int x11_tolerant_error_handler(Display*, XErrorEvent* ev) {
     // The default Xlib handler exit(1)s on any X error. SDL 3.4.16 has no global handler, and the None atoms
     // negotiated by Xwayland selection/property trigger BadAtom and kill the process outright (recorded in the 09-20 window round;
-    // see patches/sdl3-x11-none-guard.py). This handler logs and returns 0 = the failing call returns
+    // see patches/sdl3-x11-none-guard.cmake). This handler logs and returns 0 = the failing call returns
     // NULL and SDL continues based on the return value; works together with the events.c None/NULL guards (missing either means a second-order crash).
     // Dedup: log an error_code once on first occurrence + one summary line per 100 occurrences (the Xwayland clipboard negotiation storm is a benign constant,
     // but a flood makes "examples as templates" look broken — a live 09-24 user run recorded 20+ lines/minute)
