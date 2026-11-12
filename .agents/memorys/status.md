@@ -1418,3 +1418,10 @@ install                        → 改名提示 + exit 2（退役）
 - Quick smoke (post-port): agent-tools + agent single source green; scripts syntax OK (28 sh + 18 py); no case collisions in .agents/ docs/.
 - Finding LOW (structure domain): AGENTS.md STRUCTURE tree omits bindings/ book/ cmake/ config/ deploy/ docker/ examples/ PolyOrch/ vs actual ls -- owner: next docs batch, not B1b-1.
 - Full scan (external lanes 2B/2C) pending first real use; C49 pre-existing red carried (docs/reference/research/ptt dossier, commit 8cbe504, outside this batch).
+
+## agent-subagent-layer R1
+
+- 2026-11-12: R1 role layer delivered. 10 canonical roles in .agents/agents/ (read-only seats code-reviewer/evidence-critic; writable domains rust-core/ffi-abi/build-ci/web-frontend/e2e-weaknet/deploy-ops; read-only ui-ux; infra agent-infra), each with a unique acceptance; rendered to codebuddy/qoder/opencode (30 files). Interface team template at .agents/teams/interface.md.
+- Gates: agent-lint (role schema) mounted in check_guards; C49 globs extended to agents/teams. agent-tools 43 unittests green; no-parent clean.
+- Parent inherits these 10 as symlinks + 1 own (release-captain) = 11 visible per host; true-source role quota here stays 10.
+- B5 skills visibility = R1 downgrade: skills: refs are annotation-only (source-existence check kept); host skill loading deferred to R2/B7.
