@@ -17,5 +17,6 @@
 
 ## Discipline
 - Read-only members never write; implementation belongs to web-frontend.
+- No re-delegation: a member does not spawn its own sub-agents or hand its work further down; the assigned role does the work itself.
 - Disagreements are surfaced to the lead, not voted away.
 - This template is host-neutral: no concrete tool calls are encoded here.

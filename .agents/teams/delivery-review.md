@@ -27,5 +27,6 @@ A severity-tagged adjudication report (ready / not-ready) with reproducible evid
 
 ## Discipline
 - Read-only throughout: this team reviews, it does not implement.
+- No re-delegation: a member does not spawn its own sub-agents or hand its review further down; the assigned role does the review itself.
 - The lead merges conclusions but does not add its own review verdict.
 - Host-neutral: no concrete tool calls are encoded here.

@@ -21,5 +21,6 @@
 
 ## Discipline
 - Read-only members (code-reviewer, evidence-critic) never write; implementation belongs to agent-infra.
+- No re-delegation: a member does not spawn its own sub-agents or hand its work further down; the assigned role does the work itself.
 - Independent conclusions first; disagreements surfaced to the lead, not voted away.
 - Host-neutral: no concrete tool calls are encoded here.

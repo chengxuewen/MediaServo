@@ -23,6 +23,7 @@ Design tokens + component contracts + a migration list (the `@mediaservo/ui` lay
 
 ## Discipline
 - Read-only members (ui-ux, evidence-critic) never write; token edits go through web-frontend / the lead.
+- No re-delegation: a member does not spawn its own sub-agents or hand its work further down; the assigned role does the work itself.
 - Each member gives an independent conclusion before seeing the others'.
 - Disagreements are surfaced to the lead, not voted away.
 - Host-neutral: no concrete tool calls are encoded here.

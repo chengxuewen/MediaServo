@@ -36,5 +36,6 @@ Ask: what is the artifact surface and the blast radius? Then route:
 ## Discipline (all categories)
 
 - Read-only reviewers never write; implementation belongs to the writable domain role.
+- No re-delegation: a member does not spawn its own sub-agents or hand its work further down; the assigned role does the work itself.
 - Independent conclusions before cross-feed; disagreements surfaced, not voted away.
 - Host-neutral: no concrete tool calls are encoded here.
