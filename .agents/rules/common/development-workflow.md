@@ -62,7 +62,10 @@ The Feature Implementation Workflow describes the development pipeline: research
 ```
 <type>(<scope>): <summary>
 
-<optional body>
+- <one fact per bullet, wrapped at 72 chars>
+- <continuation lines indented 2 spaces>
+
+<optional trailers, e.g. Change-Id>
 ```
 
 Hard rules for the first line:
@@ -71,6 +74,17 @@ Hard rules for the first line:
 - No trailing period.
 - One thing per commit: no chain symbols (`+`, ` + `, and-chains) stitching
   multiple changes into one line -- split into separate commits instead.
+
+Hard rules for the body (machine-checked by the shell `commit-lint`:
+hook layer for the commit being born + gate layer for anchor..HEAD):
+- Blank line between subject and body.
+- **List, not prose**: a body longer than one short line (<= 72 chars)
+  must be a bullet list -- every line starts with `- ` (or `* ` / `1. `)
+  or is a 2-space-indented continuation of the preceding bullet.
+  One fact per bullet; no dense multi-fact paragraphs.
+- **72-char hard wrap** on every body line. Trailer lines
+  (`Change-Id:`, `Bug:`, ...) are exempt and go last.
+- Merge / fixup! / squash! subjects skip the lint (rebase plumbing).
 
 Types: feat, fix, refactor, docs, test, chore, perf, ci
 
