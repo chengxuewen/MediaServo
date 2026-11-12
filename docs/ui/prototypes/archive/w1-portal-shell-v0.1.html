@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MediaServo Portal — W1 Shell Prototype v0.1</title>
+<style>
+/* ============ DESIGN TOKENS (control-room night palette) ============ */
+:root{
+  --bg:#070b14; --bg2:#0b1120; --surface:#101827; --surface2:#16203a;
+  --overlay:#1c2942; --line:#22304d; --line2:#2e4066;
+  --ink:#e8eefc; --ink2:#9fb0d0; --ink3:#5f7196;
+  --live:#00e676; --live-dim:#0a3d2a;
+  --queue:#ffb020; --queue-dim:#3d2e08;
+  --alert:#ff3b5c; --alert-dim:#3d0f1a;
+  --sel:#22d3ee; --sel-dim:#0a3340;
+  --info:#5b8cff; --violet:#a78bfa;
+  --ok:#00e676; --warn:#ffb020; --danger:#ff3b5c; --info-c:#22d3ee;
+  --r:10px; --r-sm:6px;
+  --mono:'SFMono-Regular',ui-monospace,'Cascadia Mono',Consolas,monospace;
+  --sans:-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  --sb-w:236px; --sb-w-collapsed:60px; --top-h:52px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;overflow:hidden}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:var(--line2);border-radius:5px;border:2px solid var(--bg2)}
+::-webkit-scrollbar-thumb:hover{background:var(--sel)}
+button{font-family:inherit;cursor:pointer}
+.mono{font-family:var(--mono)}
+
+/* ============ APP FRAME ============ */
+#app{display:grid;grid-template-rows:var(--top-h) 1fr;height:100vh}
+#topbar{display:flex;align-items:center;gap:14px;padding:0 16px;background:linear-gradient(180deg,var(--surface2),var(--surface));border-bottom:1px solid var(--line);z-index:30}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:.4px}
+.brand .dot{width:11px;height:11px;border-radius:3px;background:conic-gradient(from 200deg,var(--live),var(--sel),var(--info),var(--live));box-shadow:0 0 12px rgba(34,211,238,.6)}
+.brand small{color:var(--ink3);font-weight:500;font-size:11px}
+#topbar .spacer{flex:1}
+.conn{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink2);padding:5px 11px;border:1px solid var(--line);border-radius:20px;background:var(--bg2)}
+.conn .led{width:8px;height:8px;border-radius:50%;background:var(--live);box-shadow:0 0 8px var(--live);animation:pulse 2.4s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+.userchip{display:flex;align-items:center;gap:8px;font-size:12px}
+.avatar{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--info),var(--violet));display:grid;place-items:center;font-weight:700;font-size:12px}
+.role-tag{font-size:10px;color:var(--sel);border:1px solid var(--sel-dim);background:var(--sel-dim);padding:2px 7px;border-radius:10px;text-transform:uppercase;letter-spacing:.5px}
+.iconbtn{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:var(--bg2);color:var(--ink2);display:grid;place-items:center;font-size:15px;transition:.15s}
+.iconbtn:hover{border-color:var(--sel);color:var(--sel)}
+.iconbtn.active{background:var(--sel-dim);border-color:var(--sel);color:var(--sel)}
+
+#body{display:grid;grid-template-columns:var(--sb-w) 1fr;overflow:hidden;transition:grid-template-columns .22s ease}
+#body.collapsed{grid-template-columns:var(--sb-w-collapsed) 1fr}
+
+/* ============ SIDEBAR ============ */
+#sidebar{background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden}
+.sb-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line)}
+.sb-title{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--ink3);white-space:nowrap}
+#collapseBtn{width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--ink2);font-size:13px}
+#collapseBtn:hover{color:var(--sel);border-color:var(--sel)}
+.sb-scroll{flex:1;overflow-y:auto;padding:10px 8px}
+.nav-group{margin-bottom:16px}
+.nav-group-label{font-size:10px;text-transform:uppercase;letter-spacing:1.1px;color:var(--ink3);padding:4px 10px 6px;white-space:nowrap}
+.nav-item{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:8px;color:var(--ink2);cursor:pointer;border:1px solid transparent;margin-bottom:2px;transition:.13s;white-space:nowrap;position:relative}
+.nav-item:hover{background:var(--surface);color:var(--ink)}
+.nav-item.active{background:linear-gradient(90deg,var(--sel-dim),transparent);border-color:var(--sel-dim);color:var(--ink)}
+.nav-item.active::before{content:'';position:absolute;left:-8px;top:8px;bottom:8px;width:3px;border-radius:2px;background:var(--sel);box-shadow:0 0 8px var(--sel)}
+.nav-ico{width:22px;height:22px;flex:none;display:grid;place-items:center;font-size:15px}
+.nav-label{font-size:13px;font-weight:500}
+.nav-badge{margin-left:auto;font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:8px}
+.badge-live{background:var(--live-dim);color:var(--live)}
+.badge-queue{background:var(--queue-dim);color:var(--queue)}
+.badge-alert{background:var(--alert-dim);color:var(--alert)}
+.sb-foot{padding:12px 14px;border-top:1px solid var(--line);font-size:11px;color:var(--ink3);white-space:nowrap}
+#body.collapsed .nav-label,#body.collapsed .nav-badge,#body.collapsed .nav-group-label,#body.collapsed .sb-title,#body.collapsed .sb-foot span{display:none}
+#body.collapsed .nav-item{justify-content:center;padding:10px 0}
+#body.collapsed .sb-head{justify-content:center}
+#body.collapsed .nav-group-label{height:8px;padding:0}
+
+/* ============ MAIN ============ */
+#main{overflow:hidden;display:flex;flex-direction:column;background:radial-gradient(1200px 600px at 70% -10%,rgba(34,211,238,.05),transparent),var(--bg)}
+.screen{display:none;flex:1;overflow:hidden;flex-direction:column}
+.screen.active{display:flex}
+.screen-head{display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid var(--line)}
+.screen-title{font-size:17px;font-weight:700}
+.screen-sub{font-size:12px;color:var(--ink3)}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--bg2)}
+.seg button{padding:6px 14px;background:none;border:none;color:var(--ink2);font-size:12px;font-weight:600}
+.seg button.on{background:var(--sel-dim);color:var(--sel)}
+.toolbar{margin-left:auto;display:flex;align-items:center;gap:10px}
+.chip{font-size:11px;font-family:var(--mono);padding:4px 10px;border-radius:6px;border:1px solid var(--line);color:var(--ink2);background:var(--bg2)}
+.toggle{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2);cursor:pointer;user-select:none}
+.toggle .sw{width:36px;height:20px;border-radius:12px;background:var(--line);position:relative;transition:.18s}
+.toggle .sw::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--ink2);transition:.18s}
+.toggle.on .sw{background:var(--sel)}
+.toggle.on .sw::after{left:18px;background:#fff}
+.toggle.on{color:var(--sel)}
+
+/* ============ LIVE WALL ============ */
+.wall-wrap{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.wall{flex:1;display:grid;gap:10px;padding:16px 20px;overflow:auto}
+.tile{position:relative;border-radius:var(--r);overflow:hidden;border:1px solid var(--line);background:var(--surface);min-height:150px;cursor:pointer;transition:.15s}
+.tile:hover{border-color:var(--line2)}
+.tile.selected{border-color:var(--sel);box-shadow:0 0 0 1px var(--sel),0 0 20px rgba(34,211,238,.18)}
+.tile .feed{position:absolute;inset:0}
+.tile .scan{position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent 0 3px,rgba(0,0,0,.12) 3px 4px);pointer-events:none}
+.tile .hud{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;padding:9px 11px;pointer-events:none}
+.tile .hud-top{display:flex;justify-content:space-between;align-items:flex-start}
+.cam-name{font-size:12px;font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+.cam-meta{font-size:10px;color:var(--ink2);font-family:var(--mono);text-shadow:0 1px 3px rgba(0,0,0,.8)}
+.live-badge{font-size:10px;font-weight:700;letter-spacing:.8px;padding:3px 8px;border-radius:5px;display:flex;align-items:center;gap:5px}
+.live-badge.solid{background:var(--live);color:#04140c}
+.live-badge.outline{background:rgba(0,0,0,.4);color:var(--live);border:1px solid var(--live)}
+.live-badge .rec{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse 1.6s infinite}
+.tile .hud-bot{display:flex;justify-content:space-between;align-items:flex-end}
+.tile .ts{font-size:10px;font-family:var(--mono);color:var(--ink2);text-shadow:0 1px 3px rgba(0,0,0,.8)}
+.tile .ptz{display:flex;gap:4px;pointer-events:auto}
+.tile .ptz button{width:22px;height:22px;border-radius:5px;border:1px solid rgba(255,255,255,.2);background:rgba(0,0,0,.45);color:#fff;font-size:11px}
+.tile.dead .feed{filter:grayscale(1) brightness(.4)}
+.tile.dead::after{content:'SIGNAL LOST';position:absolute;inset:0;display:grid;place-items:center;font-family:var(--mono);font-size:12px;letter-spacing:2px;color:var(--alert);background:rgba(7,11,20,.55)}
+/* timeline */
+.timeline{border-top:1px solid var(--line);background:var(--bg2);padding:12px 20px 14px}
+.tl-row{display:flex;align-items:center;gap:14px}
+.tl-controls{display:flex;gap:6px}
+.tl-controls button{width:32px;height:32px;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:13px}
+.tl-controls button:hover{border-color:var(--sel);color:var(--sel)}
+.tl-controls button.playing{background:var(--sel-dim);border-color:var(--sel);color:var(--sel)}
+.tl-track{flex:1;position:relative;height:40px}
+.tl-ruler{position:absolute;top:0;left:0;right:0;height:14px;display:flex;justify-content:space-between;font-size:9px;font-family:var(--mono);color:var(--ink3)}
+.tl-bar{position:absolute;top:18px;left:0;right:0;height:14px;border-radius:4px;background:var(--surface2);border:1px solid var(--line);overflow:hidden}
+.tl-rec{position:absolute;top:0;bottom:0;background:linear-gradient(90deg,rgba(0,230,118,.25),rgba(0,230,118,.45))}
+.tl-events{position:absolute;top:0;bottom:0}
+.tl-ev{position:absolute;top:2px;width:3px;height:10px;border-radius:1px}
+.tl-playhead{position:absolute;top:14px;bottom:-4px;width:2px;background:var(--sel);box-shadow:0 0 8px var(--sel);cursor:ew-resize}
+.tl-playhead::after{content:'';position:absolute;top:-4px;left:-4px;width:10px;height:10px;border-radius:50%;background:var(--sel)}
+.tl-time{font-family:var(--mono);font-size:13px;color:var(--sel);min-width:70px;text-align:right}
+.tl-disabled{opacity:.4;pointer-events:none}
+.honesty{font-size:11px;color:var(--queue);background:var(--queue-dim);border:1px solid rgba(255,176,32,.3);padding:6px 12px;border-radius:6px;margin:0 20px 10px;display:flex;align-items:center;gap:8px}
+
+/* ============ TALK BOARD ============ */
+.board{flex:1;overflow:auto;padding:16px 20px}
+.board-row{display:grid;grid-template-columns:200px 110px 1fr 90px 80px 250px;gap:14px;align-items:center;padding:13px 16px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);margin-bottom:9px;transition:.15s}
+.board-row:hover{border-color:var(--line2)}
+.board-row.holding{border-color:rgba(0,230,118,.4);background:linear-gradient(90deg,rgba(0,230,118,.05),var(--surface))}
+.board-row.stale{border-style:dashed;border-color:var(--queue)}
+.grp-name{font-weight:600;font-size:14px}
+.grp-id{font-size:10px;color:var(--ink3);font-family:var(--mono)}
+.mode-chip{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;padding:4px 9px;border-radius:5px;text-align:center}
+.mode-exclusive{background:var(--sel-dim);color:var(--sel)}
+.mode-hybrid{background:rgba(167,139,250,.15);color:var(--violet)}
+.floor-state{display:flex;align-items:center;gap:9px}
+.floor-lamp{width:11px;height:11px;border-radius:50%;flex:none}
+.lamp-idle{background:var(--ink3)}
+.lamp-held{background:var(--live);box-shadow:0 0 9px var(--live);animation:pulse 1.8s infinite}
+.lamp-queued{background:var(--queue);box-shadow:0 0 9px var(--queue)}
+.lamp-unknown{background:var(--alert);box-shadow:0 0 9px var(--alert);animation:pulse .9s infinite}
+.floor-txt{font-size:12px}
+.floor-holder{font-weight:600}
+.floor-sub{font-size:10px;color:var(--ink3);font-family:var(--mono)}
+.timer{font-family:var(--mono);font-size:15px;color:var(--live)}
+.qdepth{font-family:var(--mono);font-size:12px;color:var(--queue)}
+.row-actions{display:flex;gap:5px;justify-content:flex-end}
+.act{padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--bg2);color:var(--ink2);font-size:11px;font-weight:600;transition:.13s}
+.act:hover{color:var(--ink);border-color:var(--line2)}
+.act.grant{color:var(--live);border-color:rgba(0,230,118,.3)}
+.act.grant:hover{background:var(--live-dim)}
+.act.revoke{color:var(--alert);border-color:rgba(255,59,92,.3)}
+.act.revoke:hover{background:var(--alert-dim)}
+.act.mute{color:var(--queue);border-color:rgba(255,176,32,.3)}
+.act:disabled{opacity:.3;cursor:not-allowed}
+.board-legend{display:flex;gap:18px;padding:10px 20px;border-top:1px solid var(--line);font-size:11px;color:var(--ink3);background:var(--bg2)}
+.board-legend span{display:flex;align-items:center;gap:6px}
+.stale-banner{margin:0 20px 10px;padding:8px 14px;border-radius:7px;background:var(--queue-dim);border:1px solid rgba(255,176,32,.35);color:var(--queue);font-size:12px;display:none;align-items:center;gap:9px}
+.stale-banner.show{display:flex}
+
+/* ============ TOWER ============ */
+.tower-grid{flex:1;display:grid;grid-template-columns:1.4fr 1fr;grid-template-rows:1fr auto;gap:12px;padding:14px 18px;overflow:hidden}
+.panel{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);display:flex;flex-direction:column;overflow:hidden}
+.panel-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--bg2)}
+.panel-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--ink2)}
+.panel-head .spacer{flex:1}
+.panel-body{flex:1;overflow:auto;padding:12px}
+.mini-wall{display:grid;grid-template-columns:1fr 1fr;gap:8px;height:100%}
+.mini-tile{position:relative;border-radius:7px;overflow:hidden;border:1px solid var(--line);min-height:90px}
+.alerts-panel{grid-column:1/-1}
+.alert-item{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:7px;border:1px solid var(--line);margin-bottom:7px;background:var(--bg2);font-size:12px}
+.alert-item .a-ico{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;font-size:13px;flex:none}
+.a-warn .a-ico{background:var(--queue-dim);color:var(--queue)}
+.a-danger .a-ico{background:var(--alert-dim);color:var(--alert)}
+.a-info .a-ico{background:var(--sel-dim);color:var(--sel)}
+.alert-item .a-time{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink3)}
+.tower-note{grid-column:1/-1;font-size:11px;color:var(--ink3);text-align:center;padding:4px}
+
+/* ============ ADMIN ============ */
+.admin-body{flex:1;overflow:auto;padding:18px 22px}
+.cfg-search{display:flex;gap:10px;margin-bottom:16px}
+.cfg-search input{flex:1;padding:10px 14px;border-radius:8px;border:1px solid var(--line);background:var(--bg2);color:var(--ink);font-size:13px;outline:none}
+.cfg-search input:focus{border-color:var(--sel)}
+.cfg-table{width:100%;border-collapse:collapse}
+.cfg-table th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--ink3);padding:9px 12px;border-bottom:1px solid var(--line)}
+.cfg-table td{padding:11px 12px;border-bottom:1px solid var(--line);font-size:13px}
+.cfg-table tr:hover td{background:var(--surface)}
+.cfg-key{font-family:var(--mono);font-size:12px;color:var(--sel)}
+.cfg-scope{font-size:11px;color:var(--ink3)}
+.deeplink{color:var(--info);font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:5px}
+.deeplink:hover{text-decoration:underline}
+.cfg-group-row td{background:var(--bg2);font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--ink3);font-weight:700;padding:7px 12px}
+
+/* prototype meta bar */
+#proto-bar{position:fixed;bottom:14px;right:14px;z-index:50;display:flex;align-items:center;gap:10px;background:var(--overlay);border:1px solid var(--line2);border-radius:10px;padding:8px 14px;font-size:11px;color:var(--ink2);box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#proto-bar b{color:var(--sel)}
+#proto-bar .ver{font-family:var(--mono);color:var(--ink3)}
+.toast{position:fixed;top:64px;left:50%;transform:translateX(-50%) translateY(-8px);background:var(--overlay);border:1px solid var(--line2);color:var(--ink);padding:10px 18px;border-radius:9px;font-size:13px;opacity:0;pointer-events:none;transition:.25s;z-index:60;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- TOP BAR -->
+  <header id="topbar">
+    <div class="brand"><span class="dot"></span>MediaServo <small>PORTAL</small></div>
+    <div class="spacer"></div>
+    <div class="conn"><span class="led"></span><span id="connTxt">Connected · 3 ms</span></div>
+    <button class="iconbtn" id="muteBtn" title="Mute all cues">🔔</button>
+    <div class="userchip">
+      <div class="avatar">DX</div>
+      <div><div style="font-weight:600">dispatch.x</div></div>
+      <span class="role-tag">Dispatcher</span>
+    </div>
+  </header>
+
+  <div id="body">
+    <!-- SIDEBAR -->
+    <nav id="sidebar">
+      <div class="sb-head">
+        <span class="sb-title">Navigation</span>
+        <button id="collapseBtn" title="Collapse sidebar">⟨</button>
+      </div>
+      <div class="sb-scroll" id="navScroll"></div>
+      <div class="sb-foot"><span>v0.1 · design prototype</span></div>
+    </nav>
+
+    <!-- MAIN -->
+    <main id="main">
+      <!-- LIVE WALL -->
+      <section class="screen active" id="screen-live">
+        <div class="screen-head">
+          <div><div class="screen-title">Live view</div><div class="screen-sub">Surveillance wall · 8 sources</div></div>
+          <div class="seg" id="gridSeg">
+            <button data-g="4" class="on">2×2</button>
+            <button data-g="6">3×2</button>
+            <button data-g="9">3×3</button>
+          </div>
+          <div class="toolbar">
+            <div class="toggle on" id="syncToggle"><span class="sw"></span>Sync</div>
+            <span class="chip" id="wallMode">LIVE</span>
+          </div>
+        </div>
+        <div class="honesty" id="recHonesty">⚠ Recording backend not landed — playback timeline shown in disabled state (honesty bar, W3).</div>
+        <div class="wall-wrap">
+          <div class="wall" id="wall"></div>
+          <div class="timeline tl-disabled" id="timeline">
+            <div class="tl-row">
+              <div class="tl-controls">
+                <button id="tlBack" title="Back 10s">⏪</button>
+                <button id="tlPlay" class="playing" title="Play/Pause">⏸</button>
+                <button id="tlFwd" title="Forward 10s">⏩</button>
+              </div>
+              <div class="tl-track">
+                <div class="tl-ruler"><span>-60m</span><span>-45m</span><span>-30m</span><span>-15m</span><span>now</span></div>
+                <div class="tl-bar"><div class="tl-rec" style="left:0;width:100%"></div><div class="tl-events" id="tlEvents"></div></div>
+                <div class="tl-playhead" id="playhead" style="left:100%"></div>
+              </div>
+              <div class="tl-time" id="tlTime">LIVE</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TALK BOARD -->
+      <section class="screen" id="screen-talk">
+        <div class="screen-head">
+          <div><div class="screen-title">Intercom board</div><div class="screen-sub">Floor control · 6 groups</div></div>
+          <div class="toolbar">
+            <span class="chip">capability: floor ✓</span>
+            <div class="toggle on" id="cueToggle"><span class="sw"></span>Cues</div>
+          </div>
+        </div>
+        <div class="stale-banner" id="staleBanner">⚠ Connection lost — floor state is <b>UNKNOWN</b>, not idle. Reconnecting…</div>
+        <div class="board" id="board"></div>
+        <div class="board-legend">
+          <span><span class="floor-lamp lamp-idle"></span>Idle</span>
+          <span><span class="floor-lamp lamp-held"></span>Held</span>
+          <span><span class="floor-lamp lamp-queued"></span>Queued</span>
+          <span><span class="floor-lamp lamp-unknown"></span>Unknown (stale)</span>
+          <span style="margin-left:auto">Hold-to-talk · Space · Esc long-press to exit session</span>
+        </div>
+      </section>
+
+      <!-- TOWER -->
+      <section class="screen" id="screen-tower">
+        <div class="screen-head">
+          <div><div class="screen-title">Tower</div><div class="screen-sub">Dispatcher workbench · multi-panel</div></div>
+          <div class="toolbar"><span class="chip">sidebar auto-collapsed</span></div>
+        </div>
+        <div class="tower-grid">
+          <div class="panel">
+            <div class="panel-head"><span class="panel-title">Live wall</span><span class="spacer"></span><span class="chip">4-up</span></div>
+            <div class="panel-body"><div class="mini-wall" id="miniWall"></div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><span class="panel-title">Intercom</span><span class="spacer"></span><span class="chip" id="towerHeld">2 held</span></div>
+            <div class="panel-body" id="towerTalk"></div>
+          </div>
+          <div class="panel alerts-panel">
+            <div class="panel-head"><span class="panel-title">Alerts &amp; presence</span><span class="spacer"></span><span class="chip" id="alertCount">3 active</span></div>
+            <div class="panel-body" id="alerts" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+          </div>
+          <div class="tower-note">Tower = role-gated workbench (dispatcher + admin). Panels are shared components (O1=C); this board composes view + talk + alerts.</div>
+        </div>
+      </section>
+
+      <!-- ADMIN -->
+      <section class="screen" id="screen-admin">
+        <div class="screen-head">
+          <div><div class="screen-title">Settings</div><div class="screen-sub">Read-only aggregation · deep-link to in-place edit (U5 / O3=B)</div></div>
+        </div>
+        <div class="admin-body">
+          <div class="cfg-search"><input id="cfgSearch" placeholder="Search settings across all apps…"><span class="chip" id="cfgCount"></span></div>
+          <table class="cfg-table">
+            <thead><tr><th>Key</th><th>Value</th><th>Scope</th><th>Owner app</th><th>Edit</th></tr></thead>
+            <tbody id="cfgBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div id="proto-bar"><b>W1</b> portal shell · <span class="ver">v0.1</span> · design prototype · not app code</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= SEEDED DATA ================= */
+const CAMS=[
+ {name:'CAM-01 · Gate A',meta:'1920×1080 · 25fps',hue:200,live:true},
+ {name:'CAM-02 · Yard',meta:'1280×720 · 25fps',hue:160,live:true},
+ {name:'CAM-03 · Dock',meta:'1920×1080 · 30fps',hue:260,live:true},
+ {name:'CAM-04 · Perimeter',meta:'1280×720 · 15fps',hue:30,live:false},
+ {name:'CAM-05 · Lobby',meta:'1920×1080 · 25fps',hue:330,live:true},
+ {name:'CAM-06 · Roof',meta:'1280×720 · 20fps',hue:190,live:true},
+ {name:'DESK-07 · Ops PC',meta:'screen share',hue:220,live:true},
+ {name:'ENV-08 · Ambient',meta:'audio only',hue:140,live:true},
+];
+let GROUPS=[
+ {id:'talk-alpha',name:'Alpha · Gate crew',mode:'exclusive',state:'held',holder:'field.03',timer:42,queue:2},
+ {id:'talk-bravo',name:'Bravo · Yard ops',mode:'exclusive',state:'queued',holder:null,timer:0,queue:3},
+ {id:'talk-charlie',name:'Charlie · Dock',mode:'hybrid',state:'held',holder:'field.11',timer:17,queue:0},
+ {id:'talk-delta',name:'Delta · Perimeter',mode:'exclusive',state:'idle',holder:null,timer:0,queue:0},
+ {id:'talk-echo',name:'Echo · Lobby',mode:'exclusive',state:'idle',holder:null,timer:0,queue:1},
+ {id:'talk-foxtrot',name:'Foxtrot · Roof',mode:'hybrid',state:'idle',holder:null,timer:0,queue:0},
+];
+const ALERTS=[
+ {sev:'danger',ico:'⛔',txt:'CAM-04 signal lost — perimeter blind',time:'12:04:11'},
+ {sev:'warn',ico:'⚠',txt:'Bravo queue depth 3 — consider dispatch',time:'12:03:47'},
+ {sev:'info',ico:'ℹ',txt:'field.11 joined Charlie (listening)',time:'12:02:19'},
+];
+const CONFIG=[
+ {g:'Intercom',key:'floor.mode',val:'exclusive',scope:'room:talk-alpha',app:'talk',link:'/talk/room/talk-alpha/config'},
+ {g:'Intercom',key:'floor.hold_timeout_ms',val:'30000',scope:'room:talk-alpha',app:'talk',link:'/talk/room/talk-alpha/config'},
+ {g:'Intercom',key:'floor.queue_policy',val:'priority',scope:'room:talk-bravo',app:'talk',link:'/talk/room/talk-bravo/config'},
+ {g:'Intercom',key:'floor.queue_max',val:'8',scope:'global',app:'talk',link:'/talk/room/_global/config'},
+ {g:'Surveillance',key:'view.grid_default',val:'2x2',scope:'user',app:'view',link:'/view/settings'},
+ {g:'Surveillance',key:'view.sync_playback',val:'on',scope:'user',app:'view',link:'/view/settings'},
+ {g:'Surveillance',key:'record.retention_days',val:'30',scope:'global',app:'view',link:'/view/settings'},
+ {g:'Remote',key:'desk.lease_renew_ms',val:'300',scope:'global',app:'desk',link:'/desk/settings'},
+ {g:'Remote',key:'desk.lease_expire_ms',val:'1000',scope:'global',app:'desk',link:'/desk/settings'},
+ {g:'Access',key:'auth.token_ttl_h',val:'24',scope:'global',app:'admin',link:'/admin/accounts'},
+ {g:'Access',key:'auth.legacy_mode',val:'fail-closed',scope:'global',app:'admin',link:'/admin/security'},
+];
+const NAV=[
+ {group:'Surveillance',items:[{id:'live',ico:'📹',label:'Live',badge:'8',bc:'badge-live'},{id:'playback',ico:'🎞',label:'Playback'}]},
+ {group:'Communication',items:[{id:'talk',ico:'🎙',label:'Intercom',badge:'2',bc:'badge-queue'},{id:'meet',ico:'👥',label:'Meeting'}]},
+ {group:'Control',items:[{id:'remote',ico:'🖥',label:'Remote'},{id:'tower',ico:'🗼',label:'Tower',badge:'3',bc:'badge-alert'}]},
+ {group:'Administration',items:[{id:'admin',ico:'⚙',label:'Settings'},{id:'devices',ico:'📟',label:'Devices'},{id:'rooms',ico:'🚪',label:'Rooms'},{id:'accounts',ico:'👤',label:'Accounts'}]},
+];
+
+/* ================= HELPERS ================= */
+const $=s=>document.querySelector(s);
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),1900);}
+function feedBg(hue,seed){return `linear-gradient(135deg,hsl(${hue},45%,16%),hsl(${(hue+40)%360},50%,9%)),radial-gradient(circle at ${30+seed*7}% ${20+seed*5}%,hsla(${hue},70%,45%,.28),transparent 55%)`;}
+
+/* ================= NAV ================= */
+function buildNav(){
+ const sc=$('#navScroll');sc.innerHTML='';
+ NAV.forEach(g=>{
+  const gd=document.createElement('div');gd.className='nav-group';
+  gd.innerHTML=`<div class="nav-group-label">${g.group}</div>`;
+  g.items.forEach(it=>{
+   const el=document.createElement('div');el.className='nav-item';el.dataset.screen=it.id;
+   el.innerHTML=`<span class="nav-ico">${it.ico}</span><span class="nav-label">${it.label}</span>${it.badge?`<span class="nav-badge ${it.bc}">${it.badge}</span>`:''}`;
+   el.onclick=()=>goto(it.id);
+   gd.appendChild(el);
+  });
+  sc.appendChild(gd);
+ });
+}
+const SCREEN_MAP={live:'screen-live',playback:'screen-live',talk:'screen-talk',meet:'screen-talk',remote:'screen-tower',tower:'screen-tower',admin:'screen-admin',devices:'screen-admin',rooms:'screen-admin',accounts:'screen-admin'};
+function goto(id){
+ const target=SCREEN_MAP[id]||'screen-live';
+ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+ $('#'+target).classList.add('active');
+ document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.screen===id));
+ // Tower auto-collapses sidebar (O4)
+ if(id==='tower'){$('#body').classList.add('collapsed');$('#collapseBtn').textContent='⟩';}
+ toast('→ '+id);
+}
+
+/* ================= LIVE WALL ================= */
+let gridN=4,selectedTile=0,syncOn=true;
+function buildWall(){
+ const w=$('#wall');w.innerHTML='';
+ const cols=gridN===4?2:3;
+ w.style.gridTemplateColumns=`repeat(${cols},1fr)`;
+ const n=gridN;
+ for(let i=0;i<n;i++){
+  const c=CAMS[i%CAMS.length];
+  const t=document.createElement('div');
+  t.className='tile'+(i===selectedTile?' selected':'')+(c.live?'':' dead');
+  t.innerHTML=`<div class="feed" style="background:${feedBg(c.hue,i)}"></div><div class="scan"></div>
+   <div class="hud"><div class="hud-top"><div><div class="cam-name">${c.name}</div><div class="cam-meta">${c.meta}</div></div>
+   <span class="live-badge ${c.live?'solid':'outline'}"><span class="rec"></span>${c.live?'LIVE':'REC'}</span></div>
+   <div class="hud-bot"><span class="ts mono">12:0${4+i}:2${i}</span><div class="ptz"><button>−</button><button>+</button><button>⌖</button></div></div></div>`;
+  t.onclick=()=>{selectedTile=i;buildWall();toast('Selected '+c.name);};
+  w.appendChild(t);
+ }
+}
+$('#gridSeg').addEventListener('click',e=>{
+ const b=e.target.closest('button');if(!b)return;
+ gridN=+b.dataset.g;selectedTile=0;
+ document.querySelectorAll('#gridSeg button').forEach(x=>x.classList.toggle('on',x===b));
+ buildWall();toast('Grid '+b.textContent);
+});
+$('#syncToggle').onclick=function(){syncOn=!syncOn;this.classList.toggle('on',syncOn);toast('Sync '+(syncOn?'ON — tiles locked to common axis':'OFF'));};
+
+/* timeline events */
+(function(){const ev=$('#tlEvents');const cols=['var(--alert)','var(--queue)','var(--sel)','var(--live)'];
+ for(let i=0;i<14;i++){const d=document.createElement('div');d.className='tl-ev';d.style.left=(5+i*6.8)+'%';d.style.background=cols[i%4];ev.appendChild(d);}})();
+
+/* ================= TALK BOARD ================= */
+function fmtT(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');}
+function buildBoard(){
+ const b=$('#board');b.innerHTML='';
+ GROUPS.forEach((g,idx)=>{
+  const lamp={idle:'lamp-idle',held:'lamp-held',queued:'lamp-queued',unknown:'lamp-unknown'}[g.state];
+  const stateTxt={idle:'Idle',held:'Held',queued:'Queued',unknown:'Unknown'}[g.state];
+  const r=document.createElement('div');
+  r.className='board-row'+(g.state==='held'?' holding':'')+(g.state==='unknown'?' stale':'');
+  r.innerHTML=`
+   <div><div class="grp-name">${g.name}</div><div class="grp-id">${g.id}</div></div>
+   <span class="mode-chip mode-${g.mode}">${g.mode}</span>
+   <div class="floor-state"><span class="floor-lamp ${lamp}"></span><div><div class="floor-txt"><span class="floor-holder">${g.holder||stateTxt}</span></div><div class="floor-sub">${g.state==='held'?'speaking':g.state==='queued'?'waiting for floor':g.state==='unknown'?'state unknown — not idle':'floor free'}</div></div></div>
+   <div class="timer">${g.state==='held'?fmtT(g.timer):'--:--'}</div>
+   <div class="qdepth">Q:${g.queue}</div>
+   <div class="row-actions">
+     <button class="act grant" data-a="grant" ${g.state==='held'?'disabled':''}>Grant</button>
+     <button class="act revoke" data-a="revoke" ${g.state!=='held'?'disabled':''}>Revoke</button>
+     <button class="act mute" data-a="mute">Mute</button>
+     <button class="act" data-a="prio">Prio</button>
+   </div>`;
+  r.querySelectorAll('.act').forEach(btn=>btn.onclick=()=>floorAction(idx,btn.dataset.a));
+  b.appendChild(r);
+ });
+}
+function floorAction(idx,a){
+ const g=GROUPS[idx];
+ if(a==='grant'){g.state='held';g.holder='dispatch.x';g.timer=0;toast('Floor granted → '+g.name);}
+ if(a==='revoke'){g.state=g.queue>0?'queued':'idle';g.holder=null;g.timer=0;toast('Floor revoked · '+g.name);}
+ if(a==='mute'){toast('Muted '+g.name+' (revokes grant + queue)');g.state='idle';g.holder=null;g.queue=0;}
+ if(a==='prio'){toast('Priority set for '+g.name);}
+ buildBoard();buildTowerTalk();
+}
+/* live timers */
+setInterval(()=>{GROUPS.forEach(g=>{if(g.state==='held')g.timer++;});
+ const b=$('#board');if($('#screen-talk').classList.contains('active')){
+  b.querySelectorAll('.board-row').forEach((r,i)=>{const t=r.querySelector('.timer');if(GROUPS[i].state==='held')t.textContent=fmtT(GROUPS[i].timer);});
+ }
+ const th=$('#towerHeld');if(th)th.textContent=GROUPS.filter(g=>g.state==='held').length+' held';
+},1000);
+
+/* ================= TOWER ================= */
+function buildMiniWall(){
+ const m=$('#miniWall');m.innerHTML='';
+ CAMS.slice(0,4).forEach((c,i)=>{
+  const t=document.createElement('div');t.className='mini-tile'+(c.live?'':' dead');
+  t.innerHTML=`<div class="feed" style="position:absolute;inset:0;background:${feedBg(c.hue,i)}"></div><div class="scan" style="position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent 0 3px,rgba(0,0,0,.12) 3px 4px)"></div>
+  <div style="position:absolute;top:6px;left:8px;font-size:10px;font-weight:600;text-shadow:0 1px 3px #000">${c.name.split('·')[0]}</div>
+  <span class="live-badge ${c.live?'solid':'outline'}" style="position:absolute;top:6px;right:8px;font-size:8px;padding:2px 5px"><span class="rec"></span>${c.live?'LIVE':'REC'}</span>`;
+  m.appendChild(t);
+ });
+}
+function buildTowerTalk(){
+ const t=$('#towerTalk');t.innerHTML='';
+ GROUPS.slice(0,5).forEach(g=>{
+  const lamp={idle:'lamp-idle',held:'lamp-held',queued:'lamp-queued',unknown:'lamp-unknown'}[g.state];
+  const d=document.createElement('div');
+  d.style.cssText='display:flex;align-items:center;gap:9px;padding:7px 9px;border:1px solid var(--line);border-radius:7px;margin-bottom:6px;background:var(--bg2);font-size:12px';
+  d.innerHTML=`<span class="floor-lamp ${lamp}"></span><span style="flex:1">${g.name.split('·')[0]}</span><span class="mono" style="color:${g.state==='held'?'var(--live)':'var(--ink3)'};font-size:11px">${g.state==='held'?fmtT(g.timer):g.state}</span>`;
+  t.appendChild(d);
+ });
+}
+function buildAlerts(){
+ const a=$('#alerts');a.innerHTML='';
+ ALERTS.forEach(al=>{
+  const d=document.createElement('div');d.className='alert-item a-'+al.sev;d.style.flex='1 1 280px';
+  d.innerHTML=`<span class="a-ico">${al.ico}</span><span>${al.txt}</span><span class="a-time">${al.time}</span>`;
+  a.appendChild(d);
+ });
+}
+
+/* ================= ADMIN ================= */
+function buildConfig(filter=''){
+ const b=$('#cfgBody');b.innerHTML='';let lastG='',count=0;
+ CONFIG.filter(c=>!filter||(c.key+c.val+c.scope+c.app).toLowerCase().includes(filter.toLowerCase())).forEach(c=>{
+  if(c.g!==lastG){const gr=document.createElement('tr');gr.className='cfg-group-row';gr.innerHTML=`<td colspan="5">${c.g}</td>`;b.appendChild(gr);lastG=c.g;}
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td class="cfg-key">${c.key}</td><td class="mono">${c.val}</td><td class="cfg-scope">${c.scope}</td><td>${c.app}</td><td><a class="deeplink" href="#" onclick="toast('Deep-link → ${c.link}');return false">edit ↗</a></td>`;
+  b.appendChild(tr);count++;
+ });
+ $('#cfgCount').textContent=count+' settings';
+}
+$('#cfgSearch').addEventListener('input',e=>buildConfig(e.target.value));
+
+/* ================= SHELL CONTROLS ================= */
+$('#collapseBtn').onclick=function(){
+ const c=$('#body').classList.toggle('collapsed');
+ this.textContent=c?'⟩':'⟨';
+ toast(c?'Sidebar collapsed (icon bar)':'Sidebar expanded');
+};
+$('#muteBtn').onclick=function(){this.classList.toggle('active');this.textContent=this.classList.contains('active')?'🔕':'🔔';toast(this.classList.contains('active')?'All cues muted':'Cues on');};
+$('#cueToggle').onclick=function(){this.classList.toggle('on');toast('Floor cues '+(this.classList.contains('on')?'on':'off'));};
+/* stale demo: click connection chip to simulate WS drop */
+$('.conn').onclick=function(){
+ const dropping=!this.dataset.dropped;
+ this.dataset.dropped=dropping?'1':'';
+ if(dropping){
+  this.querySelector('.led').style.background='var(--alert)';this.querySelector('.led').style.boxShadow='0 0 8px var(--alert)';
+  $('#connTxt').textContent='Reconnecting…';
+  GROUPS.forEach(g=>g._prev=g.state,g.state='unknown');
+  $('#staleBanner').classList.add('show');buildBoard();toast('WS dropped → floor state UNKNOWN (not idle)');
+ }else{
+  this.querySelector('.led').style.background='var(--live)';this.querySelector('.led').style.boxShadow='0 0 8px var(--live)';
+  $('#connTxt').textContent='Connected · 3 ms';
+  GROUPS.forEach(g=>g.state=g._prev||'idle');
+  $('#staleBanner').classList.remove('show');buildBoard();toast('Reconnected → floor_resync');
+ }
+};
+
+/* ================= INIT ================= */
+buildNav();buildWall();buildBoard();buildMiniWall();buildTowerTalk();buildAlerts();buildConfig();
+goto('live');
+</script>
+</body>
+</html>
