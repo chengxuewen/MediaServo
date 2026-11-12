@@ -105,6 +105,21 @@ fn main() {
         builder.file("src/desktop_capturer.cpp");
     }
 
+    // MediaServo vendored (offline IDE/bare-cargo leg): the parent shell pins
+    // libwebrtc (3rdparty/libwebrtc/webrtc-<triple>.zip + sha256) and injects
+    // LK_CUSTOM_WEBRTC through msrtc.sh -- a CLI-only leg. An IDE build
+    // (CMake Tools runs cmake/cargo directly) or bare cargo never sees that
+    // env and fell back to the GitHub download (measured: msrtc-deploy-host
+    // first build panicked on a dead network). Discover the parent workspace
+    // structurally before the download gate below; an explicit env or an
+    // existing prebuilt cache keeps precedence (upstream behavior unchanged).
+    if env::var("LK_CUSTOM_WEBRTC").is_err() && !webrtc_sys_build::webrtc_dir().exists() {
+        if let Some(dir) = mediaservo_pinned_webrtc() {
+            eprintln!("[webrtc-sys] using pinned libwebrtc: {}", dir.display());
+            env::set_var("LK_CUSTOM_WEBRTC", dir);
+        }
+    }
+
     let webrtc_dir = webrtc_sys_build::webrtc_dir();
     let webrtc_include = webrtc_dir.join("include");
     let webrtc_lib = webrtc_dir.join("lib");
@@ -418,6 +433,49 @@ fn main() {
 
     if target_os.as_str() == "android" {
         copy_libwebrtc_jar(&PathBuf::from(Path::new(&webrtc_dir)));
+    }
+}
+
+// MediaServo vendored: structural discovery of the parent shell's pinned
+// libwebrtc layer (see the call site in main). Ancestor walk from this
+// crate's manifest dir -- depth-independent, so it serves the superbuild
+// (<workspace>/3rdparty/MediaServo/vendor/webrtc-sys) and any nested shape:
+//   1. an already-extracted <ancestor>/.cache/webrtc/<triple> (any prior
+//      CLI build / bootstrap) wins outright -- zero subprocesses;
+//   2. otherwise <ancestor>/scripts/verify-cache.sh + the pinned zip:
+//      delegate sha256-verify + extract to the shell's own --prepare face
+//      (single definition point; never reimplemented here).
+// No layer found (standalone MediaServo, non-Linux) -> None -> the upstream
+// download path stays in charge. A present-but-failing prepare also yields
+// None (msrtc.sh parity: cache failure falls back to the online attempt).
+fn mediaservo_pinned_webrtc() -> Option<PathBuf> {
+    let triple = webrtc_sys_build::webrtc_triple();
+    let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
+    let mut anc = manifest.as_path();
+    loop {
+        let cache = anc.join(".cache/webrtc").join(&triple);
+        if cache.join("webrtc.ninja").is_file() && cache.join("lib/libwebrtc.a").is_file() {
+            return Some(cache);
+        }
+        let script = anc.join("scripts/verify-cache.sh");
+        let zip = anc
+            .join("3rdparty/libwebrtc")
+            .join(format!("webrtc-{triple}.zip"));
+        if script.is_file() && zip.is_file() {
+            let out = Command::new("bash")
+                .arg(&script)
+                .arg("--prepare")
+                .output()
+                .ok()?;
+            if out.status.success() {
+                let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !dir.is_empty() && Path::new(&dir).join("webrtc.ninja").is_file() {
+                    return Some(PathBuf::from(dir));
+                }
+            }
+            return None;
+        }
+        anc = anc.parent()?;
     }
 }
 
