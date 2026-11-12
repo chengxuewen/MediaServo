@@ -248,6 +248,7 @@ def hub_text(source):
         "- Never edit `3rdparty/MediaServo/.agents/**` from here; edit it in the submodule and bump the pointer.\n"
         "- `.refinfo/**` at the workspace top level is read-only reference: never edit or `git add` anything under it.\n\n"
         "## Entry points\n"
+        "- Product-layer entry: `3rdparty/MediaServo/AGENTS.md` (skills, rules, and roles live there)\n"
         "- `./msrtc.sh <task>` -- one-shot task (forwarded to the submodule)\n"
         "- `./msrtc.sh pixi <task>` -- pixi task passthrough\n"
         "- `./msrtc.sh agents check` -- generated layers vs source\n"
@@ -435,6 +436,12 @@ def _agents_arts(source, target_root, cfg, host):
                 arts.append(("link", os.path.join(target_dir, fn),
                              os.path.join(child_dir, fn)))
                 keep.add(fn)
+        elif os.path.isdir(target_dir):
+            # Child not rendered / absent: preserve existing inherited links
+            # instead of pruning them as stale (M-6 degrade, never block).
+            for fn in os.listdir(target_dir):
+                if os.path.islink(os.path.join(target_dir, fn)):
+                    keep.add(fn)
     arts.append(("prune", target_dir, keep))
     return arts
 
@@ -544,6 +551,13 @@ def expected_for(art):
 
 def run(command, source, target_root, targets_path):
     if not os.path.isdir(source):
+        # P mode (parent pointing at an uninitialized submodule): degrade to a
+        # warning so a fresh clone never blocks the parent's commit (M-6).
+        # S mode (this repo's own source) stays a hard guard.
+        if os.path.abspath(target_root) != os.path.abspath(common.ROOT):
+            print("GATE-AGENTS [WARN] source missing (submodule not initialized?): %s" % source)
+            print("GATE-AGENTS ✓ degraded (no source to sync)")
+            return common.EXIT_OK
         print("GATE-AGENTS ✗ source missing: %s" % source)
         return common.EXIT_GUARD
     if not os.path.isfile(targets_path):

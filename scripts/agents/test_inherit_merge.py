@@ -9,10 +9,12 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import tempfile
 import unittest
 
 import cli
+import common
 
 REVIEWER = ("---\nname: reviewer\ndescription: Read-only review.\n"
             "read_only: true\ntools: [read, grep, glob]\n---\nReviewer body.\n")
@@ -183,6 +185,33 @@ class InheritMergeTests(unittest.TestCase):
         targets = self.parent_targets(inherit=self.child_source)
         rc, _ = capture("check", self.child_source, self.parent, targets)
         self.assertEqual(rc, 0)
+
+    def test_child_host_dir_absent_preserves_links(self):
+        # M-6: child not rendered -> inherited links preserved, check degrades
+        self.sync_child()
+        targets = self.parent_targets(inherit=self.child_source)
+        self.sync_parent(targets)
+        host_dir = os.path.join(self.parent, ".codebuddy", "agents")
+        self.assertEqual(len(os.listdir(host_dir)), 2)
+        shutil.rmtree(os.path.join(self.child, ".codebuddy", "agents"))
+        rc, out = capture("check", self.child_source, self.parent, targets)
+        self.assertEqual(rc, 0)
+        self.assertIn("WARN", out)
+        self.assertEqual(len(os.listdir(host_dir)), 2)  # links not pruned
+
+    def test_source_absent_p_mode_degrades(self):
+        # M-6: uninitialized submodule (source missing) never blocks the parent
+        absent = os.path.join(self.base, "no-such-source")
+        rc, out = capture("check", absent, self.parent,
+                          os.path.join(self.parent, "targets.json"))
+        self.assertEqual(rc, 0)
+        self.assertIn("degraded", out)
+
+    def test_source_absent_s_mode_still_guard(self):
+        # S mode (target == this repo) keeps the hard guard on a missing source
+        rc, _ = capture("check", os.path.join(self.base, "nope"),
+                        common.ROOT, os.path.join(self.base, "targets.json"))
+        self.assertEqual(rc, common.EXIT_GUARD)
 
 
 if __name__ == "__main__":
