@@ -12,7 +12,15 @@
 #   - the parent shell injected MSRTC_3RDPARTY_DIR -> P mode: the override
 #     archive layer IS the source (zero network; the archives ship in the
 #     parent repo, clone = full archive set, CI included);
-#   - no env -> S mode: the caller allows ONE controlled fetch into
+#   - no env, but a SIBLING sdl-imgui archive layer exists (<repo>/../sdl-imgui,
+#     the parent-checkout shape <parent>/3rdparty/{MediaServo,sdl-imgui}) ->
+#     structural P mode. An IDE configure (CMake Tools) runs cmake directly
+#     and never sees the shell-injected env; without this leg the IDE face
+#     downloaded imgui from GitHub although the parent repo ships the zip
+#     (measured first-open incident). Same trust model as the env leg: the
+#     loader hash-verifies every archive against the recipe (strict-first).
+#     A directory without archives never hijacks the S-mode download leg;
+#   - neither -> S mode: the caller allows ONE controlled fetch into
 #     <repo>/.cache/3rdparty-archives (survives clean trees, r2-H6 -- never
 #     derived from the build tree); later acquires replay from the cache
 #     with the network dead.
@@ -24,9 +32,19 @@ function(mediaservo_gui_deps_source_mode _msm_root _msm_out_local _msm_out_dl)
         set(${_msm_out_local} "${_msm_env}" PARENT_SCOPE)
         set(${_msm_out_dl} "" PARENT_SCOPE)
         message(STATUS "gui-deps source: override layer ${_msm_env} (MSRTC_3RDPARTY_DIR)")
-    else()
-        set(${_msm_out_local} "" PARENT_SCOPE)
-        set(${_msm_out_dl} "DOWNLOAD;on;DOWNLOAD_CACHE_DIR;${_msm_root}/.cache/3rdparty-archives" PARENT_SCOPE)
-        message(STATUS "gui-deps source: no override env -- one controlled download into ${_msm_root}/.cache/3rdparty-archives allowed")
+        return()
     endif()
+    get_filename_component(_msm_sibling "${_msm_root}/../sdl-imgui" ABSOLUTE)
+    if(IS_DIRECTORY "${_msm_sibling}")
+        file(GLOB _msm_sibling_archives "${_msm_sibling}/*.zip")
+        if(_msm_sibling_archives)
+            set(${_msm_out_local} "${_msm_sibling}" PARENT_SCOPE)
+            set(${_msm_out_dl} "" PARENT_SCOPE)
+            message(STATUS "gui-deps source: sibling archive layer ${_msm_sibling} (structural P mode; MSRTC_3RDPARTY_DIR unset)")
+            return()
+        endif()
+    endif()
+    set(${_msm_out_local} "" PARENT_SCOPE)
+    set(${_msm_out_dl} "DOWNLOAD;on;DOWNLOAD_CACHE_DIR;${_msm_root}/.cache/3rdparty-archives" PARENT_SCOPE)
+    message(STATUS "gui-deps source: no override env -- one controlled download into ${_msm_root}/.cache/3rdparty-archives allowed")
 endfunction()

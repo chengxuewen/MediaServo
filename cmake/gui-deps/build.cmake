@@ -15,8 +15,10 @@ endif()
 include("${_gd_repo}/PolyOrch/cmake/PolyOrchThirdPartyHelpers.cmake")
 # B8 archive-source policy (P/S mode split; ONE point shared with the
 # configure-time imgui fetch in MediaServoGuiDeps.cmake):
-# parent-shell env -> LOCAL_ARCHIVE_DIR override; no env -> DOWNLOAD on into
-# the cache anchor (first build fetches, every later build replays offline).
+# parent-shell env -> LOCAL_ARCHIVE_DIR override; no env but a sibling
+# gui-deps archive layer -> structural P mode (IDE face); neither ->
+# DOWNLOAD on into the cache anchor (first build fetches, every later
+# build replays offline).
 include("${_gd_repo}/cmake/gui-deps/source-mode.cmake")
 mediaservo_gui_deps_source_mode("${_gd_repo}" _gd_local _gd_dl_args)
 
