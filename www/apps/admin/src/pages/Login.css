@@ -1,12 +1,12 @@
-/* Login page — tokens aligned with Settings.css / App.css (#4361ee primary, 4px radius, 0.85rem form font size). */
-.login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f0f2f5; }
-.login-card { width: 320px; background: #fff; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,.06); display: flex; flex-direction: column; gap: 0.75rem; }
+/* Login page — tokens aligned with Settings.css / App.css (var(--ms-color-primary) primary, 4px radius, 0.85rem form font size). */
+.login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--ms-color-bg); }
+.login-card { width: 320px; background: var(--ms-color-surface); border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,.06); display: flex; flex-direction: column; gap: 0.75rem; }
 .login-title { font-size: 1.2rem; text-align: center; }
-.login-subtitle { font-size: 0.85rem; color: #888; text-align: center; margin-bottom: 0.5rem; }
-.login-input { padding: 0.5rem 0.75rem; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem; outline: none; }
-.login-input:focus { border-color: #4361ee; }
+.login-subtitle { font-size: 0.85rem; color: var(--ms-color-text-muted); text-align: center; margin-bottom: 0.5rem; }
+.login-input { padding: 0.5rem 0.75rem; border: 1px solid var(--ms-color-border); border-radius: 4px; font-size: 0.85rem; outline: none; }
+.login-input:focus { border-color: var(--ms-color-primary); }
 .token-status { font-size: 0.85rem; }
-.token-status.error { color: #e74c3c; }
-.btn { padding: 0.5rem 1rem; font-size: 0.85rem; border: none; border-radius: 4px; cursor: pointer; background: #4361ee; color: #fff; }
-.btn:hover { background: #3651d4; }
+.token-status.error { color: var(--ms-color-danger); }
+.btn { padding: 0.5rem 1rem; font-size: 0.85rem; border: none; border-radius: 4px; cursor: pointer; background: var(--ms-color-primary); color: var(--ms-color-text-inverse); }
+.btn:hover { background: var(--ms-color-primary-hover); }
 .btn:disabled { opacity: 0.6; cursor: default; }

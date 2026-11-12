@@ -2,20 +2,20 @@
 
 .audio-room-list { display: flex; flex-direction: column; gap: 0.5rem; }
 
-.audio-room { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow: hidden; }
+.audio-room { background: var(--ms-color-surface); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow: hidden; }
 .audio-room-header { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; }
 .audio-room-name { font-weight: 600; }
-.audio-room-id { font-size: 0.75rem; color: #888; font-family: monospace; }
-.audio-room-counts { font-size: 0.8rem; color: #888; margin-left: auto; }
-.btn-stats { border: 1px solid #4361ee; color: #4361ee; background: none; }
-.btn-stats:hover:not(:disabled) { background: #4361ee; color: #fff; }
+.audio-room-id { font-size: 0.75rem; color: var(--ms-color-text-muted); font-family: monospace; }
+.audio-room-counts { font-size: 0.8rem; color: var(--ms-color-text-muted); margin-left: auto; }
+.btn-stats { border: 1px solid var(--ms-color-primary); color: var(--ms-color-primary); background: none; }
+.btn-stats:hover:not(:disabled) { background: var(--ms-color-primary); color: var(--ms-color-text-inverse); }
 .btn-stats:disabled { opacity: 0.5; cursor: default; }
 
-.audio-stats { border-top: 1px solid #f0f0f0; padding: 0.5rem 1rem 0.75rem; display: flex; flex-direction: column; gap: 0.25rem; }
-.audio-stat-row { display: flex; gap: 1rem; font-size: 0.8rem; color: #555; }
+.audio-stats { border-top: 1px solid var(--ms-color-surface-muted); padding: 0.5rem 1rem 0.75rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.audio-stat-row { display: flex; gap: 1rem; font-size: 0.8rem; color: var(--ms-color-text-secondary); }
 .audio-stat-label { font-family: monospace; flex: 1; }
-.audio-stat-score { color: #27ae60; }
-.audio-stats-error { font-size: 0.8rem; color: #e74c3c; padding: 0 1rem 0.5rem; }
+.audio-stat-score { color: var(--ms-color-success); }
+.audio-stats-error { font-size: 0.8rem; color: var(--ms-color-danger); padding: 0 1rem 0.5rem; }
 
 /* P4-2 (ADJ-1=B): read-only floor strip under the room header */
 .audio-floor-row { display: flex; align-items: center; gap: 1rem; padding: 0.35rem 1rem; background: #f6f8fa; border-top: 1px solid #eef1f4; font-size: 13px; color: #444; }

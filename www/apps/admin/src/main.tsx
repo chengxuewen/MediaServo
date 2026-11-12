@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
+import '@mediaservo/ui/tokens.css';
 import './App.css';
 
 // When served at /admin, set basename for proper routing

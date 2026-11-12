@@ -1,24 +1,24 @@
 .vehicles { max-width: 960px; }
 .vehicles-head { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 1rem; }
 .vehicles-head .section-title { margin-bottom: 0; }
-.vehicles-count { font-size: 0.8rem; color: #888; }
+.vehicles-count { font-size: 0.8rem; color: var(--ms-color-text-muted); }
 
 .vehicle-list { display: flex; flex-direction: column; gap: 0.75rem; }
-.vehicle-card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow: hidden; }
+.vehicle-card { background: var(--ms-color-surface); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow: hidden; }
 .vehicle-header { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; }
 .vehicle-name { font-weight: 600; }
 .vehicle-signal { font-size: 0.8rem; display: flex; align-items: center; gap: 4px; }
-.vehicle-signal.ok { color: #27ae60; }
-.vehicle-signal.down { color: #e74c3c; }
-.vehicle-meta { font-size: 0.8rem; color: #888; margin-left: auto; }
+.vehicle-signal.ok { color: var(--ms-color-success); }
+.vehicle-signal.down { color: var(--ms-color-danger); }
+.vehicle-meta { font-size: 0.8rem; color: var(--ms-color-text-muted); margin-left: auto; }
 
-.vehicle-body { display: flex; gap: 1.5rem; border-top: 1px solid #f0f0f0; padding: 0.75rem 1rem; }
+.vehicle-body { display: flex; gap: 1.5rem; border-top: 1px solid var(--ms-color-surface-muted); padding: 0.75rem 1rem; }
 .vehicle-col { flex: 1; min-width: 0; }
-.vehicle-col h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 0.5rem; }
-.vehicle-empty { font-size: 0.8rem; color: #aaa; }
+.vehicle-col h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--ms-color-text-muted); margin-bottom: 0.5rem; }
+.vehicle-empty { font-size: 0.8rem; color: var(--ms-color-text-faint); }
 .vehicle-list-ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.25rem; }
-.vehicle-list-ul li { display: flex; gap: 0.5rem; font-size: 0.8rem; color: #555; }
+.vehicle-list-ul li { display: flex; gap: 0.5rem; font-size: 0.8rem; color: var(--ms-color-text-secondary); }
 .vehicle-list-ul li span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topic-name { font-family: monospace; }
-.proc-running, .topic-ok { color: #27ae60; }
-.proc-down, .topic-stalled { color: #e74c3c; }
+.proc-running, .topic-ok { color: var(--ms-color-success); }
+.proc-down, .topic-stalled { color: var(--ms-color-danger); }

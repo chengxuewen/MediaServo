@@ -2,42 +2,42 @@
 
 .stats-bar { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
 
-.stats-card { flex: 1; background: #fff; border-radius: 8px; padding: 1rem 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,.06); display: flex; flex-direction: column; gap: 0.25rem; }
-.stats-card .stats-label { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
-.stats-card .stats-value { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
-.stats-card .stats-value small { font-size: 0.8rem; font-weight: 400; color: #888; margin-left: 2px; }
+.stats-card { flex: 1; background: var(--ms-color-surface); border-radius: 8px; padding: 1rem 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,.06); display: flex; flex-direction: column; gap: 0.25rem; }
+.stats-card .stats-label { font-size: 0.8rem; color: var(--ms-color-text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.stats-card .stats-value { font-size: 1.5rem; font-weight: 700; color: var(--ms-color-text)b; }
+.stats-card .stats-value small { font-size: 0.8rem; font-weight: 400; color: var(--ms-color-text-muted); margin-left: 2px; }
 
-.section-title { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: #1a1a2e; }
-.empty { color: #aaa; font-size: 0.9rem; }
+.section-title { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: var(--ms-color-text)b; }
+.empty { color: var(--ms-color-text-faint); font-size: 0.9rem; }
 
 .device-list { display: flex; flex-direction: column; gap: 0.5rem; }
 
-.device-group { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow: hidden; }
+.device-group { background: var(--ms-color-surface); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow: hidden; }
 .device-header { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; cursor: pointer; user-select: none; }
-.device-header:hover { background: #f8f9fa; }
+.device-header:hover { background: var(--ms-color-surface-subtle); }
 .device-name { font-weight: 600; flex: 1; }
-.device-stream-count { font-size: 0.8rem; color: #888; }
+.device-stream-count { font-size: 0.8rem; color: var(--ms-color-text-muted); }
 
-.tree-icon { font-size: 0.7rem; color: #888; transition: transform 0.15s; display: inline-block; width: 12px; }
+.tree-icon { font-size: 0.7rem; color: var(--ms-color-text-muted); transition: transform 0.15s; display: inline-block; width: 12px; }
 .tree-icon.expanded { transform: rotate(90deg); }
 
-.stream-list { border-top: 1px solid #f0f0f0; padding: 0.5rem 1rem 0.75rem 2rem; }
-.stream-item { display: flex; align-items: center; gap: 1rem; padding: 0.5rem 0; border-bottom: 1px solid #f5f5f5; }
+.stream-list { border-top: 1px solid var(--ms-color-surface-muted); padding: 0.5rem 1rem 0.75rem 2rem; }
+.stream-item { display: flex; align-items: center; gap: 1rem; padding: 0.5rem 0; border-bottom: 1px solid var(--ms-color-surface-hover); }
 .stream-item:last-child { border-bottom: none; }
 .stream-name { font-weight: 500; flex: 1; }
-.consumer-count { font-size: 0.8rem; color: #888; }
+.consumer-count { font-size: 0.8rem; color: var(--ms-color-text-muted); }
 .consumer-list { display: flex; gap: 0.25rem; flex-wrap: wrap; }
-.consumer-tag { font-size: 0.75rem; background: #eef1ff; color: #4361ee; padding: 2px 8px; border-radius: 10px; }
+.consumer-tag { font-size: 0.75rem; background: var(--ms-color-primary-soft); color: var(--ms-color-primary); padding: 2px 8px; border-radius: 10px; }
 
-.btn-sm { padding: 0.25rem 0.75rem; font-size: 0.75rem; border: 1px solid #e74c3c; background: none; color: #e74c3c; border-radius: 4px; cursor: pointer; }
-.btn-sm:hover { background: #e74c3c; color: #fff; }
+.btn-sm { padding: 0.25rem 0.75rem; font-size: 0.75rem; border: 1px solid var(--ms-color-danger); background: none; color: var(--ms-color-danger); border-radius: 4px; cursor: pointer; }
+.btn-sm:hover { background: var(--ms-color-danger); color: var(--ms-color-text-inverse); }
 
 .status-badge { font-size: 0.8rem; display: flex; align-items: center; gap: 4px; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 
-.loading, .error { padding: 2rem; text-align: center; color: #888; }
-.error { color: #e74c3c; }
-.btn-play { padding: .25rem .5rem; font-size: .75rem; background: #e74c3c; color: #fff; border: none; border-radius: 4px; cursor: pointer; margin-left: auto; } .btn-play:hover { background: #c0392b; }
+.loading, .error { padding: 2rem; text-align: center; color: var(--ms-color-text-muted); }
+.error { color: var(--ms-color-danger); }
+.btn-play { padding: .25rem .5rem; font-size: .75rem; background: var(--ms-color-danger); color: var(--ms-color-text-inverse); border: none; border-radius: 4px; cursor: pointer; margin-left: auto; } .btn-play:hover { background: #c0392b; }
 
 /* multi-stream P3 + play-layout-stats: multi-stream playback grid (column count set inline; this is the fallback of 3 columns)
    Cropping fix: 16:9 belongs to .vp-body (VideoPlayer.css); the whole card no longer locks aspect-ratio causing bottom overflow */
@@ -53,17 +53,17 @@
   gap: 6px;
   padding-top: 12px;
   font-size: 0.8rem;
-  color: #888;
+  color: var(--ms-color-text-muted);
 }
 .video-toolbar .vt-label { margin-right: 2px; }
 .video-toolbar .vt-btn {
   width: 28px; height: 28px;
-  border: 1px solid #d8dbe0; background: #fff; color: #555;
+  border: 1px solid #d8dbe0; background: var(--ms-color-surface); color: var(--ms-color-text-secondary);
   border-radius: 4px; font-size: 0.8rem; cursor: pointer;
 }
-.video-toolbar .vt-btn:hover { background: #f0f2f5; }
+.video-toolbar .vt-btn:hover { background: var(--ms-color-bg); }
 .video-toolbar .vt-btn.active {
-  border-color: #4361ee; background: #4361ee; color: #fff;
+  border-color: var(--ms-color-primary); background: var(--ms-color-primary); color: var(--ms-color-text-inverse);
 }
 .video-toolbar .vt-hint { margin-left: auto; color: #b45309; font-size: 0.75rem; }
 .stream-dot {
@@ -80,7 +80,7 @@
 .stream-select-all {
   margin-left: 8px;
   font-size: 0.8rem;
-  color: #888;
+  color: var(--ms-color-text-muted);
   cursor: pointer;
 }
 .stream-select-all input {

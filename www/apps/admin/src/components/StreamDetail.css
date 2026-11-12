@@ -1,19 +1,19 @@
 .stream-detail-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.3); z-index: 100; display: flex; justify-content: flex-end; }
-.stream-detail { width: 400px; height: 100%; background: #fff; box-shadow: -2px 0 8px rgba(0,0,0,.1); display: flex; flex-direction: column; animation: slideIn .2s ease; }
+.stream-detail { width: 400px; height: 100%; background: var(--ms-color-surface); box-shadow: -2px 0 8px rgba(0,0,0,.1); display: flex; flex-direction: column; animation: slideIn .2s ease; }
 @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
 
-.detail-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid #e8e8e8; }
+.detail-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid var(--ms-color-border-subtle); }
 .detail-header h3 { font-size: 1rem; }
-.close-btn { background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #888; padding: 0.25rem; }
-.close-btn:hover { color: #333; }
+.close-btn { background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--ms-color-text-muted); padding: 0.25rem; }
+.close-btn:hover { color: var(--ms-color-text-tertiary); }
 
 .detail-body { padding: 1.25rem; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; }
 .detail-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; }
-.detail-label { color: #888; }
+.detail-label { color: var(--ms-color-text-muted); }
 
 .consumer-list-detail { list-style: none; display: flex; flex-direction: column; gap: 0.5rem; }
-.consumer-item { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; font-size: 0.85rem; }
-.consumer-since { color: #888; font-size: 0.75rem; }
+.consumer-item { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem; background: var(--ms-color-surface-subtle); border-radius: 4px; font-size: 0.85rem; }
+.consumer-since { color: var(--ms-color-text-muted); font-size: 0.75rem; }
 
-.btn-danger { width: 100%; padding: 0.75rem; font-size: 0.9rem; border: 1px solid #e74c3c; background: none; color: #e74c3c; border-radius: 4px; cursor: pointer; margin-top: auto; }
-.btn-danger:hover { background: #e74c3c; color: #fff; }
+.btn-danger { width: 100%; padding: 0.75rem; font-size: 0.9rem; border: 1px solid var(--ms-color-danger); background: none; color: var(--ms-color-danger); border-radius: 4px; cursor: pointer; margin-top: auto; }
+.btn-danger:hover { background: var(--ms-color-danger); color: var(--ms-color-text-inverse); }
