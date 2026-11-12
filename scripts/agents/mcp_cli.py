@@ -36,6 +36,17 @@ def npm_bin():
     return shutil.which("npm") or "npm"
 
 
+def node_env():
+    # npm and the installed npm bins (codegraph, playwright-mcp) use
+    # `#!/usr/bin/env node` shebangs: resolving the npm path alone is not
+    # enough — the pixi env's bin must be on PATH so `env node` resolves
+    # without an activated shell (same policy as mcp-launch.sh).
+    env_bin = os.path.join(ROOT, ".pixi", "envs", "default", "bin")
+    if os.path.isdir(env_bin):
+        return {**os.environ, "PATH": env_bin + os.pathsep + os.environ.get("PATH", "")}
+    return dict(os.environ)
+
+
 def pixi_bin():
     found = shutil.which("pixi")
     if found:
@@ -95,7 +106,7 @@ def cmd_status() -> int:
     binary = codegraph_bin()
     if os.path.isfile(binary):
         try:
-            proc = run([binary, "status", PROJECT], PROJECT, timeout=60)
+            proc = run([binary, "status", PROJECT], PROJECT, timeout=60, env=node_env())
             text = (proc.stdout or proc.stderr).strip()
             if text:
                 print(f"{PREFIX} codegraph status:")
@@ -120,7 +131,7 @@ def install_npm(name, spec) -> int:
     proc = subprocess.run(
         [npm_bin(), "install", "--no-save", "--no-package-lock",
          "--prefix", prefix, f"{spec['pkg']}@{spec['version']}"],
-        cwd=HERE, env={**os.environ, "npm_config_cache": NPM_CACHE},
+        cwd=HERE, env={**node_env(), "npm_config_cache": NPM_CACHE},
         stdin=subprocess.DEVNULL, check=False)
     return proc.returncode
 
@@ -176,10 +187,16 @@ def cmd_index() -> int:
     if not os.path.isfile(binary):
         print(f"{PREFIX} codegraph missing -- run: ./msrtc.sh mcp setup")
         return 1
+    print(f"{PREFIX} rebuilding codegraph index ...")
     if os.path.isdir(os.path.join(PROJECT, ".codegraph")):
-        code = run([binary, "index", PROJECT], PROJECT).returncode
+        code = run([binary, "index", PROJECT], PROJECT, env=node_env()).returncode
     else:
-        code = run([binary, "init", "-y", PROJECT], PROJECT).returncode
+        code = run([binary, "init", "-y", PROJECT], PROJECT, env=node_env()).returncode
+        if code != 0 and os.path.isdir(os.path.join(PROJECT, ".codegraph")):
+            # init can exit non-zero leaving a truncated index (interrupted
+            # auto-index); the db exists, so recover with one full index pass.
+            print(f"{PREFIX} codegraph init exited {code} -- recovering with a full index")
+            code = run([binary, "index", PROJECT], PROJECT, env=node_env()).returncode
     if code != 0:
         print(f"{PREFIX} codegraph index failed (exit {code})")
         return 1
@@ -202,7 +219,8 @@ def cmd_sync() -> int:
     if not os.path.isfile(binary):
         print(f"{PREFIX} codegraph missing -- run: ./msrtc.sh mcp setup")
         return 1
-    code = run([binary, "sync", PROJECT], PROJECT).returncode
+    print(f"{PREFIX} syncing codegraph index ...")
+    code = run([binary, "sync", PROJECT], PROJECT, env=node_env()).returncode
     if code != 0:
         print(f"{PREFIX} codegraph sync failed (exit {code})")
         return 1

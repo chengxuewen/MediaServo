@@ -18,6 +18,12 @@ if [ ! -x "$NODE" ]; then
     NODE="$(command -v node 2>/dev/null || true)"
 fi
 [ -n "$NODE" ] || { echo "mcp-launch: node not found (run bootstrap)" >&2; exit 127; }
+# The npm server bins (codegraph, playwright-mcp) and npm itself use
+# `#!/usr/bin/env node` shebangs, and mcp-serve.mjs spawns them with the
+# inherited env: resolving NODE for this script alone is not enough — the
+# GUI host PATH has no node, so export the resolved node's dir for every
+# descendant (otherwise: "/usr/bin/env: 'node': No such file or directory").
+export PATH="$(dirname "$NODE"):$PATH"
 
 PIXI_BIN="${PIXI_BIN:-$(command -v pixi 2>/dev/null || true)}"
 if [ -z "$PIXI_BIN" ] && [ -x "$HOME/.pixi/bin/pixi" ]; then
