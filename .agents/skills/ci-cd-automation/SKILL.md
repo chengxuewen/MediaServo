@@ -257,7 +257,7 @@ Rules:
 
 | Skill | Relationship |
 |-------|-------------|
-| `review-hardcode` | Run BEFORE audit — catch hardcoded secrets in CI config |
+| `security-hardening` | Run BEFORE audit — catch hardcoded secrets in CI config (Phase 1 quick scan) |
 | `test-harness` | Generate test skeletons that CI will run |
 | `lesson-memory` (C9) | CI failures → write to pitfalls.md |
 | `think-before-act` | Check CI status BEFORE implementing fix |

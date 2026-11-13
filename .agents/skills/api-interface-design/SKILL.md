@@ -202,7 +202,7 @@ No circular dependencies. The protocol crate has zero internal deps.
 |-------|-------------|
 | `context-engineering` | Which crate gets which protocol change |
 | `test-harness` | Generate serde roundtrip + E2E test skeletons |
-| `review-hardcode` | Scan for hardcoded ports/URLs in new endpoints |
+| `security-hardening` | Scan for hardcoded ports/URLs in new endpoints (Phase 1 quick scan) |
 | `think-before-act` | Contract review BEFORE implementation |
 
 ---

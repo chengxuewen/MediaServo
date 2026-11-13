@@ -23,12 +23,13 @@
 | Consume/extend design tokens, style a component | `design-system` | Visual-quality verdict -> `ui-ux-review`; implementation -> `web-frontend` role |
 | Pick the right context for a polyglot task | `context-engineering` | Which layer/files -> `repo-triage`; symbol impact -> `lsp-code-analysis` |
 | Audit .agents/ or scan the community for adoptables | `repo-audit` | Internal doc consistency -> `doc-audit`; whether to adopt -> `think-before-act` |
+| Execute a ruled mechanism adoption/port | `mechanism-porting` | Discovery -> `repo-audit`; whether to adopt -> `think-before-act` (user ruling required) |
 
 | Batch-review a session and bank the lessons | `lesson-review` | One concrete failure -> `debugging-and-error-recovery`; durable decision -> `documentation-and-adr` |
 | Implement tasks from an OpenSpec change | `openspec-apply-change` | **INOPERATIVE** -- requires the missing `openspec` CLI (status: inoperative); until it lands use `openspec-explore` + manual planning |
 | Archive a completed OpenSpec change | `openspec-archive-change` | **INOPERATIVE** -- requires the missing `openspec` CLI (status: inoperative) |
 | Sync delta specs to main specs | `openspec-sync-specs` | **INOPERATIVE** -- requires the missing `openspec` CLI (status: inoperative); `openspec-propose`/`openspec-explore` stay usable (no CLI dependency) |
-| Quick hardcoded secrets/ports/URLs scan | `review-hardcode` | Folded into `security-hardening` (its Phase 1); the full audit -> `security-hardening` |
+| Quick hardcoded secrets/ports/URLs scan | `security-hardening` | Phase 1 covers the quick scan (absorbed `review-hardcode`, B11); the full audit is the same skill |
 | Reproduce/measure under network impairment | `weaknet-testing` | Latency/bitrate tracing -> `performance-optimization`; reproduce-first discipline -> `debugging-and-error-recovery` |
 
 ## Trigger Boundaries
@@ -50,7 +51,7 @@
 - `repo-audit` owns the external community scan; `doc-audit` owns internal consistency.
 - `lesson-review` owns batch lesson extraction; `documentation-and-adr` owns the durable decision record.
 - `openspec-apply-change` / `openspec-archive-change` / `openspec-sync-specs` are inoperative until the `openspec` CLI exists (frontmatter `status: inoperative`, B4-4); `openspec-propose` / `openspec-explore` remain usable (file-surface only, no CLI).
-- `review-hardcode` is folded into `security-hardening` Phase 1; the deep security pass is `security-hardening`'s.
+- The quick hardcoded-values scan lives in `security-hardening` Phase 1 (absorbed `review-hardcode`, retired B11); the deep security pass is the same skill.
 
 ## Naming Rule
 

@@ -98,3 +98,26 @@ When creating PRs:
 3. Draft comprehensive PR summary
 4. Include test plan with TODOs
 5. Push with `-u` flag if new branch
+
+## Governed Self-Evolution Protocol
+
+Governance changes follow the governed self-evolution loop (plan section 3.18,
+B11): evolution has PROPOSAL rights, never execution rights.
+
+1. **Trigger**: a banked lesson, an audit gap (repo-audit 2D/3D), a repeated
+   issue, or a community mechanism worth borrowing (see `mechanism-porting`).
+2. **Proposal card**: 2-3 options + a recommendation + source evidence + a
+   strategy tag {harden, repair-only, innovate} (default harden; innovate must
+   name the new judgment path) + a pre-registered recheck criterion that only
+   cites existing gates/audit rows -- inventing metrics is a violation.
+3. **User ruling**: the card is decided via the plan's N-table; silence or
+   "continue" is not approval; no ruling -> no port.
+4. **Gated execution**: the ruled card lands as a batch with landing + gate
+   columns; evolution batches pass the SAME gate chain as regular batches.
+5. **Solidify two-phase**: experiment drafts live in `evidence/` (verify, then
+   delete); production consolidation requires the ruled batch + gate + rollback
+   anchor. An "evolution" label never skips the draft phase.
+6. **Recheck**: the pre-registered criterion decides closure; unclosed gaps go
+   back to `lesson-review` or the next quarter's proposal queue (gap closure
+   rate, repo-audit 3C). Quota: net +2 skills per quarter; a replacement (retire
+   one, add one) does not consume the net quota.

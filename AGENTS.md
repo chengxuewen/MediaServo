@@ -17,7 +17,7 @@ MediaServo/
 │   └── .gitignore
 ├── .agents/
 │   ├── rules/          # Coding rule files (12 languages + common + web)
-│   ├── skills/         # Skills (book-to-skill/doc-audit/lesson-review/openspec-*/review-hardcode/test-harness/think-before-act)
+│   ├── skills/         # Skills (book-to-skill/doc-audit/lesson-review/mechanism-porting/openspec-*/test-harness/think-before-act)
 │   └── memorys/        # Project memory files (decisions.md, status.md)
 ├── scripts/agents/      # Agent toolchain (generator, MCP launcher, guards)
 ├── crates/              # Rust workspace (11 member crates)
@@ -82,7 +82,7 @@ When facing these scenarios, use the `skill` tool to load the corresponding skil
 | **Archiving changes** | `openspec-archive-change` | Archive after completion |
 | **Exploring options** | `openspec-explore` | Explore ideas during research phase |
 | **Test tooling** | `test-harness` | Generate test skeletons |
-| **Hardcode scan** | `review-hardcode` | Check for hardcoded secrets/ports/URLs |
+| **Hardcode scan** | `security-hardening` | Check for hardcoded secrets/ports/URLs (Phase 1 quick scan) |
 | **Docs to skill** | `book-to-skill` | Convert documents/books into AI skills |
 | **Sync specs** | `openspec-sync-specs` | Sync delta specs into main specs |
 
@@ -168,6 +168,7 @@ _Project has entered the code implementation phase. Current state:_
 | `incremental-implementation` | Thin vertical slices across Rust+TS. |
 | `lesson-review` | Batch session review: systematically extract lessons learned and write them to project memory. |
 | `lsp-code-analysis` | Semantic pre-change impact analysis for MediaServo: find definitions, implementors, references, and call paths across Rust crates, C ABI/FFI |
+| `mechanism-porting` | Execute a USER-RULED adoption of an external mechanism (agent-subagent-layer B11, N31). |
 | `observability-and-instrumentation` | Instrument MediaServo with useful logs, metrics, and traces: structured fields, RED metrics, spans across signaling/media, symptom-based ale |
 | `openspec-apply-change` | [inoperative] Implement tasks from an OpenSpec change. |
 | `openspec-archive-change` | [inoperative] Archive a completed change in the experimental workflow. |
@@ -178,7 +179,6 @@ _Project has entered the code implementation phase. Current state:_
 | `repo-audit` | Whole-repo engineering audit across 11 domains (skills, rules, mcp, scripts, docs, book, cli, tests, structure, naming, agents/teams) + gove |
 | `repo-triage` | Triage an ambiguous MediaServo task into the right layer and files before editing: Rust crates, C ABI/FFI, mediasoup, Admin Dashboard, agent |
 | `reuse-first` | Borrow before build: prove the existing supplier face cannot take it BEFORE writing any new mechanism (CMake target/function, script verb, w |
-| `review-hardcode` | Hardcoded secrets/ports/URLs scan. |
 | `security-hardening` | MediaServo security audit and hardening. |
 | `shipping-and-launch` | MediaServo release checklist: full gates, version/tag policy, changelog decision, artifact and submodule pin verification, staged rollout, a |
 | `skill-router` | Analyze user intent and output a recommended skill list. |

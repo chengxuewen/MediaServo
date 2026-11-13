@@ -149,7 +149,7 @@ After identifying user intent, proactively suggest loading the matching skill:
 | "归档/完成变更" (archive/complete change) | `openspec-archive-change` | change archiving | <!-- c49:trigger -->
 | "探索/调研/思路" (explore/research/ideas) | `openspec-explore` | option research | <!-- c49:trigger -->
 | "生成测试/测试骨架" (generate tests/test skeleton) | `test-harness` | test tooling | <!-- c49:trigger -->
-| "硬编码/密钥/端口扫描" (hardcode/secret/port scan) | `review-hardcode` | security scan | <!-- c49:trigger -->
+| "硬编码/密钥/端口扫描" (hardcode/secret/port scan) | `security-hardening` | security scan (Phase 1 quick scan) | <!-- c49:trigger -->
 | "文档转技能/书籍" (docs/book → skill) | `book-to-skill` | document conversion | <!-- c49:trigger -->
 | "同步规格/delta" (sync specs/delta) | `openspec-sync-specs` | spec sync | <!-- c49:trigger -->
 

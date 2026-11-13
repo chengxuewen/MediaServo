@@ -45,6 +45,7 @@ Skills are auto-activated by AI agents based on task context. No manual invocati
 | `incremental-implementation` | Thin vertical slices across Rust+TS. |
 | `lesson-review` | Batch session review: systematically extract lessons learned and write them to project memory. |
 | `lsp-code-analysis` | Semantic pre-change impact analysis for MediaServo: find definitions, implementors, references, and call paths across Rust crates, C ABI/FFI |
+| `mechanism-porting` | Execute a USER-RULED adoption of an external mechanism (agent-subagent-layer B11, N31). |
 | `observability-and-instrumentation` | Instrument MediaServo with useful logs, metrics, and traces: structured fields, RED metrics, spans across signaling/media, symptom-based ale |
 | `openspec-apply-change` | [inoperative] Implement tasks from an OpenSpec change. |
 | `openspec-archive-change` | [inoperative] Archive a completed change in the experimental workflow. |
@@ -55,7 +56,6 @@ Skills are auto-activated by AI agents based on task context. No manual invocati
 | `repo-audit` | Whole-repo engineering audit across 11 domains (skills, rules, mcp, scripts, docs, book, cli, tests, structure, naming, agents/teams) + gove |
 | `repo-triage` | Triage an ambiguous MediaServo task into the right layer and files before editing: Rust crates, C ABI/FFI, mediasoup, Admin Dashboard, agent |
 | `reuse-first` | Borrow before build: prove the existing supplier face cannot take it BEFORE writing any new mechanism (CMake target/function, script verb, w |
-| `review-hardcode` | Hardcoded secrets/ports/URLs scan. |
 | `security-hardening` | MediaServo security audit and hardening. |
 | `shipping-and-launch` | MediaServo release checklist: full gates, version/tag policy, changelog decision, artifact and submodule pin verification, staged rollout, a |
 | `skill-router` | Analyze user intent and output a recommended skill list. |
