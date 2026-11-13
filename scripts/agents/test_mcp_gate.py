@@ -7,8 +7,8 @@ import unittest
 
 import gate_mcp
 
-PIN = {"figma": {"kind": "npm", "pkg": "figma-developer-mcp",
-                 "version": "0.13.2", "bin": "figma-developer-mcp", "args": ["--stdio"]}}
+PIN = {"local-figma": {"kind": "npm", "pkg": "cursor-talk-to-figma-mcp",
+                       "version": "0.3.5", "bin": "cursor-talk-to-figma-mcp", "args": []}}
 
 
 def make_fixture(root, extra_project=None, pins=None):
@@ -21,8 +21,8 @@ def make_fixture(root, extra_project=None, pins=None):
     servers = {
         "local-codegraph": {"type": "stdio", "command": "bash",
                             "args": ["scripts/agents/mcp-launch.sh", "local-codegraph"]},
-        "figma": {"type": "stdio", "command": "bash",
-                  "args": ["scripts/agents/mcp-launch.sh", "figma"]},
+        "local-figma": {"type": "stdio", "command": "bash",
+                        "args": ["scripts/agents/mcp-launch.sh", "local-figma"]},
     }
     servers.update(extra_project or {})
     with open(os.path.join(root, ".agents", "mcp.json"), "w", encoding="utf-8") as fh:
@@ -59,12 +59,12 @@ class GateMcpTests(unittest.TestCase):
         make_fixture(self.root)
         user_file = os.path.join(self._tmp.name, "user-mcp.json")
         with open(user_file, "w", encoding="utf-8") as fh:
-            json.dump({"mcpServers": {"figma": {"command": "other"}}}, fh)
+            json.dump({"mcpServers": {"local-figma": {"command": "other"}}}, fh)
         os.environ["CHECK_MCP_USER_FILE"] = user_file
         fails, lines = gate_mcp.run(self.root)
         self.assertEqual(fails, 1)
         self.assertIn("same-name", lines[0])
-        self.assertIn("figma", lines[0])
+        self.assertIn("local-figma", lines[0])
 
     def test_floating_pin_red(self):
         make_fixture(self.root, pins={"figma": {"kind": "npm",

@@ -20,10 +20,10 @@
       "url": "https://websearch.opencode.ai",
       "enabled": false
     },
-    "figma": {
+    "local-figma": {
       "type": "stdio",
       "command": "bash",
-      "args": ["scripts/agents/mcp-launch.sh", "figma"]
+      "args": ["scripts/agents/mcp-launch.sh", "local-figma"]
     }
   }
 }
