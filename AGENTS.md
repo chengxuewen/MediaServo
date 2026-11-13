@@ -9,36 +9,37 @@ MediaServo — Real-Time Media Servo Platform. A standalone video/media service 
 <!-- BEGIN:structure-tree -->
 ```
 MediaServo/
-├── .opencode/          # OpenCode configuration (plugins, MCP, LSP, instructions)
-│   ├── opencode.json   # Main config: models, plugins, instructions, MCP, LSP
-│   ├── agent-model-tiers.md  # Model tier system
-│   ├── oh-my-openagent.jsonc  # OMO Agent configuration
-│   ├── init-lsp-wrap.mjs      # LSP wrapper initialization
-│   ├── package.json    # OpenCode plugin dependencies
-│   └── .gitignore
-├── .agents/
-│   ├── rules/          # Coding rule files (12 languages + common + web)
-│   ├── skills/         # Skills (book-to-skill/doc-audit/lesson-review/mechanism-porting/openspec-*/test-harness/think-before-act)
-│   └── memorys/        # Project memory files (decisions.md, status.md)
-├── scripts/agents/      # Agent toolchain (generator, MCP launcher, guards)
-├── crates/              # Rust workspace (11 member crates)
-│   ├── mediaservo-host/   # Host app (headless, capture+encode+push)
-│   ├── mediaservo-client/ # Remote app (pull+decode+control)
-│   ├── mediaservo-server/ # Server app (signaling+relay+monitoring)
-│   ├── mediaservo-common/   # Shared foundation: config, error, metrics, protocol, auth (72 tests)
-│   ├── mediaservo-media/  # Media pipeline: pipeline, broadcast, engine, transform (107 tests)
-│   ├── mediaservo-webrtc/ # WebRTC abstraction layer (stub/webrtc-rs/webrtc-sys, video pipeline parity)
-│   └── mediaservo-codec/  # Codec: stub + FFmpeg + GStreamer three backends
-├── docs/               # Design docs (architecture.md + modules/ + reference/ + research/)
-├── README.md           # Project overview
-├── LICENSE             # Apache 2.0
-├── package.json        # Root package.json (codegraph dev dependencies)
-├── bootstrap.sh / bootstrap.bat  # Dev environment bootstrap scripts
-├── .rustfmt.toml       # Rust formatting config
-├── clippy.toml         # Clippy lint config
-├── deny.toml           # cargo-deny audit config
-├── rust-toolchain.toml # Rust toolchain version
-└── .gitignore
+├── .agents/  # agent system (rules / skills / agents / teams / memorys)
+├── .cargo/
+├── .codebuddy/
+├── .devcontainer/
+├── .omo/
+├── .opencode/  # OpenCode configuration (plugins, MCP, LSP, instructions)
+├── .pixi-cache/
+├── .qoder/
+├── .vscode/
+├── PolyOrch/  # product-surface submodule (orchestration UI)
+├── bindings/  # FFI bindings (python / c)
+├── book/  # documentation build (toc + vendored web assets)
+├── cmake/  # CMake modules (app tree assembly)
+├── config/  # configuration presets
+├── crates/  # Rust workspace
+│   ├── mediaservo-client/  # Remote app (pull+decode+control)
+│   ├── mediaservo-codec/  # Codec: stub + FFmpeg + GStreamer three backends
+│   ├── mediaservo-common/  # Shared foundation: config, error, metrics, protocol, auth
+│   ├── mediaservo-host/  # Host app (headless, capture+encode+push)
+│   ├── mediaservo-media/  # Media pipeline: pipeline, broadcast, engine, transform
+│   ├── mediaservo-server/  # Server app (signaling+relay+monitoring)
+│   └── mediaservo-webrtc/  # WebRTC abstraction (stub / webrtc-rs / webrtc-sys)
+├── deploy/  # deployment presets (oxmgr services)
+├── docker/  # container build + compose
+├── docs/  # design docs (architecture + modules + reference + research)
+├── examples/  # example programs (cxx / rs / py)
+├── scripts/  # engineering scripts (gates / agent toolchain / book)
+│   └── agents/  # agent toolchain (generator, MCP launcher, guards, lints)
+├── tools/  # build/host tools (mediaservo-gates)
+├── vendor/  # vendored dependencies (ffmpeg, SDL+imgui)
+└── www/  # web frontends (admin / voice) + packages (client / ui)
 ```
 <!-- END:structure-tree -->
 
@@ -201,9 +202,6 @@ _Project has entered the code implementation phase. Current state:_
 - D294: ABI recipe + decode-sink contract shipped in-tree (2026-10-15, consumer-side session; commits 721f47c..9c6745a)
 
 ### pitfalls (last 15)
-- PIT-223: Raw-line text judges false-red on comment-stripping diffs (2026-10-14, G3 gate design)
-- PIT-224: i18n round dropped a CSS comment opener — parser ate the whole grid rule (2026-10-14)
-- PIT-225: K3 v1 explicit-dir gate deadbolt — monit/ps permanently unusable (2026-10-14)
 - PIT-226: grep -P Unicode class silently matches NOTHING under non-UTF-8 locale (2026-10-15)
 - PIT-227: conda-forge gcc's `-static-libstdc++` is a SILENT NO-OP for cdylib links (2026-10-15)
 - PIT-228: stop self-proof brand-needle vacuity — legacy name list matches NOTHING on branded trees (2026-10-16)

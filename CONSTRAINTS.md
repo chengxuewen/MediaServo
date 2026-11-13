@@ -18,7 +18,7 @@ Two parts: hand-written anti-gaming rules above, generated gate list below.
   gates are not retrofitted.
 
 <!-- BEGIN:ci-gates -->
-## Gate list (generated from `scripts/all-gates.sh`; 32 sites)
+## Gate list (generated from `scripts/all-gates.sh`; 33 sites)
 
 1. `build mediaservo-gates`
 2. `agent single source`
@@ -28,28 +28,29 @@ Two parts: hand-written anti-gaming rules above, generated gate list below.
 6. `english only`
 7. `docs link self-test`
 8. `docs links`
-9. `promises self-test`
-10. `doc promises`
-11. `fmt --check (incremental)`
-12. `changelog markers (F11-X)`
-13. `wire changelog pairing (G3)`
-14. `bindings version parity`
-15. `crate literal versions`
-16. `crate lanes reconciliation`
-17. `python retirement closure`
-18. `entry contract (E1-E3+golden)`
-19. `shellcheck mediaservo.sh (warning+)`
-20. `shellcheck parent msrtc.sh (warning+)`
-21. `check --workspace`
-22. `clippy -D --workspace`
-23. `server stub --all-targets`
-24. `test --workspace (lib)`
-25. `openapi validate`
-26. `build-c cdylibs`
-27. `test-cxx`
-28. `abi drift+client`
-29. `delivery smoke`
-30. `gui example`
-31. `gstreamer`
-32. `mediasoup`
+9. `docs numbering`
+10. `promises self-test`
+11. `doc promises`
+12. `fmt --check (incremental)`
+13. `changelog markers (F11-X)`
+14. `wire changelog pairing (G3)`
+15. `bindings version parity`
+16. `crate literal versions`
+17. `crate lanes reconciliation`
+18. `python retirement closure`
+19. `entry contract (E1-E3+golden)`
+20. `shellcheck mediaservo.sh (warning+)`
+21. `shellcheck parent msrtc.sh (warning+)`
+22. `check --workspace`
+23. `clippy -D --workspace`
+24. `server stub --all-targets`
+25. `test --workspace (lib)`
+26. `openapi validate`
+27. `build-c cdylibs`
+28. `test-cxx`
+29. `abi drift+client`
+30. `delivery smoke`
+31. `gui example`
+32. `gstreamer`
+33. `mediasoup`
 <!-- END:ci-gates -->
