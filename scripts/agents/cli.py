@@ -560,6 +560,43 @@ def _constraints_qoder_arts(source, target_root, cfg, host):
     return [("text", path, text)]
 
 
+def _surface_line(source, target_root, cfg):
+    """One-line managed-surface summary for sync/check output (B14 UX)."""
+    own = os.path.join(target_root, ".agents", "agents")
+    roles = len([f for f in os.listdir(own) if f.endswith(".md")]) if os.path.isdir(own) else 0
+    if cfg.get("inherit"):
+        for host in cfg.get("hosts", []):
+            if "agents" in host.get("surfaces", []) and host.get("agents_target"):
+                child_dir = os.path.join(repo_of(source), host["agents_target"])
+                if os.path.isdir(child_dir):
+                    roles += len([f for f in os.listdir(child_dir) if f.endswith(".md")])
+                break
+    skills = len(skill_rows(source))
+    rules = 0
+    for dirpath, _d, files in os.walk(os.path.join(source, "rules")):
+        rules += len([f for f in files if f.endswith(".md") and f != "README.md"])
+    teams_dir = os.path.join(source, "teams")
+    teams = (len([f for f in os.listdir(teams_dir)
+                  if f.endswith(".md") and f != "routing.md"])
+             if os.path.isdir(teams_dir) else 0)
+    mcp = len(canonical_mcp(source))
+    return ("surface: roles %d · skills %d · rules %d · teams %d · mcp %d"
+            % (roles, skills, rules, teams, mcp))
+
+
+def _fmt_tally(tally):
+    """Human tally of applied changes: files · links · prunes · pruned trees."""
+    labels = [("text", "files"), ("json", "json"), ("region", "regions"),
+              ("link", "links"), ("prune", "prunes"), ("prune_links", "prunes"),
+              ("prune_tree", "pruned trees")]
+    seen = {}
+    for kind, label in labels:
+        n = tally.get(kind, 0)
+        if n:
+            seen[label] = seen.get(label, 0) + n
+    return " · ".join("%s %d" % (label, n) for label, n in seen.items()) or "no writes"
+
+
 def _rule_description(rule_body, stem):
     for line in rule_body.splitlines():
         if line.startswith("# "):
@@ -742,6 +779,7 @@ def run(command, source, target_root, targets_path):
         worst = common.EXIT_FINDINGS
 
     wrote = 0
+    tally = {}
     own_agents_real = os.path.realpath(os.path.join(target_root, ".agents"))
     # Inherit opted in but the child has not rendered its agents (or the
     # submodule is absent): surface a WARN, never block the parent (B2 / M-6).
@@ -811,6 +849,7 @@ def run(command, source, target_root, targets_path):
             os.symlink(rel_target, path)  # link-only: never write_text (no write-through)
             print(" [ LINK] %s -> %s" % (path, rel_target))
             wrote += 1
+            tally[art[0]] = tally.get(art[0], 0) + 1
             continue
         if art[0] == "prune_links":
             # Skills face (B7): entries are symlinks to skill directories.
@@ -850,6 +889,7 @@ def run(command, source, target_root, targets_path):
                     os.rmdir(folder)
                 print(" [ PRUNE] %s" % folder)
                 wrote += 1
+                tally[art[0]] = tally.get(art[0], 0) + 1
             continue
         if art[0] == "prune":
             target_dir, keep = art[1], art[2]
@@ -874,6 +914,7 @@ def run(command, source, target_root, targets_path):
                 os.remove(victim)
                 print(" [ PRUNE] %s" % victim)
                 wrote += 1
+                tally[art[0]] = tally.get(art[0], 0) + 1
             continue
         expected = expected_for(art)
         if command == "check":
@@ -898,14 +939,20 @@ def run(command, source, target_root, targets_path):
         common.write_text(path, expected)
         print(" [ WRITE] %s" % path)
         wrote += 1
+        tally[art[0]] = tally.get(art[0], 0) + 1
 
     if command == "sync":
         if wrote:
-            print("GATE-AGENTS ✓ applied %d change(s)" % wrote)
+            print("GATE-AGENTS ✓ applied %d change(s) -- %s" % (wrote, _fmt_tally(tally)))
         else:
             print("GATE-AGENTS ✓ already in sync (0 writes)")
+        print("  " + _surface_line(source, target_root, cfg))
     if command == "check":
-        print("GATE-AGENTS %s" % ("✓ all layers clean" if worst == common.EXIT_OK else "✗ findings -- run: agents sync"))
+        if worst == common.EXIT_OK:
+            print("GATE-AGENTS ✓ all layers clean")
+            print("  " + _surface_line(source, target_root, cfg))
+        else:
+            print("GATE-AGENTS ✗ findings -- run: agents sync")
     return worst
 
 
