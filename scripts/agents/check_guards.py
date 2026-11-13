@@ -14,6 +14,7 @@ CHECKS = [
     ("check-quotas", [sys.executable, os.path.join(HERE, "check_quotas.py")]),
     ("gate-mcp", [sys.executable, os.path.join(HERE, "gate_mcp.py")]),
     ("scripts-lint", [sys.executable, os.path.join(HERE, "scripts_lint.py")]),
+    ("docs-numbers", [sys.executable, os.path.join(HERE, "check_docs_numbers.py")]),
     ("rule-ref", [sys.executable, os.path.join(HERE, "rule_ref_lint.py")]),
     ("no-parent", [sys.executable, os.path.join(HERE, "check_no_parent.py")]),
 ]

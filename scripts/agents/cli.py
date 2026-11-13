@@ -143,7 +143,8 @@ def skill_rows(source):
         desc = re.split(r"(?<=\.)\s", desc)[0].strip()[:140] or "(no description)"
         # B4-4: surface the status gate in the registry view so no consumer
         # picks up an inoperative skill without the warning.
-        text = open(skill, encoding="utf-8").read()
+        with open(skill, encoding="utf-8") as fh:
+            text = fh.read()
         if re.match(r"^---\n.*?^status:\s*inoperative\s*$", text, re.M | re.S):
             desc = "[inoperative] " + desc
         rows.append((name, desc))
@@ -269,6 +270,8 @@ def expected_agents(source):
     if not os.path.isfile(path):
         return None
     text = common.read_text(path)
+    text = common.place_region(text, STRUCTURE_BEGIN, STRUCTURE_END,
+                               structure_block(source), before=SKILLS_BEGIN)
     text = common.place_region(text, SKILLS_BEGIN, SKILLS_END, skills_block(source), before=MEM_BEGIN)
     text = common.place_region(text, MEM_BEGIN, MEM_END, memory_block(source))
     text = common.place_region(text, RULES_INDEX_BEGIN, RULES_INDEX_END,
@@ -291,6 +294,70 @@ OC_TOOLS = {"read": "read", "grep": "grep", "glob": "glob", "shell": "bash",
 WRITE_VERBS = ("write", "edit")
 RULES_INDEX_BEGIN = "<!-- BEGIN:rules-index -->"
 RULES_INDEX_END = "<!-- END:rules-index -->"
+STRUCTURE_BEGIN = "<!-- BEGIN:structure-tree -->"
+STRUCTURE_END = "<!-- END:structure-tree -->"
+
+# B10 ruling 1-B (adjudication walk 11-13): the STRUCTURE tree is now
+# generator-derived, not hand-maintained -- the hand tree drifted twice
+# (B1b-1: 8 dirs; full audit r42: 11 dirs + level mixing). Tier 1 is the
+# mechanical dir listing (can never drift); Tier 2 is OPTIONAL notes for
+# valuable annotations -- new dirs appear automatically without a note,
+# notes pointing at vanished dirs simply stop rendering.
+STRUCTURE_TERRITORIES = {"build", "target", ".pixi", ".cache", "node_modules",
+                         ".ruff_cache", ".git"}
+STRUCTURE_NOTES = {
+    ".agents": "agent system (rules / skills / agents / teams / memorys)",
+    ".opencode": "OpenCode configuration (plugins, MCP, LSP, instructions)",
+    "bindings": "FFI bindings (python / c)",
+    "book": "documentation build (toc + vendored web assets)",
+    "cmake": "CMake modules (app tree assembly)",
+    "config": "configuration presets",
+    "crates": "Rust workspace",
+    "crates/mediaservo-host": "Host app (headless, capture+encode+push)",
+    "crates/mediaservo-client": "Remote app (pull+decode+control)",
+    "crates/mediaservo-server": "Server app (signaling+relay+monitoring)",
+    "crates/mediaservo-common": "Shared foundation: config, error, metrics, protocol, auth",
+    "crates/mediaservo-media": "Media pipeline: pipeline, broadcast, engine, transform",
+    "crates/mediaservo-webrtc": "WebRTC abstraction (stub / webrtc-rs / webrtc-sys)",
+    "crates/mediaservo-codec": "Codec: stub + FFmpeg + GStreamer three backends",
+    "deploy": "deployment presets (oxmgr services)",
+    "docker": "container build + compose",
+    "docs": "design docs (architecture + modules + reference + research)",
+    "examples": "example programs (cxx / rs / py)",
+    "PolyOrch": "product-surface submodule (orchestration UI)",
+    "scripts": "engineering scripts (gates / agent toolchain / book)",
+    "scripts/agents": "agent toolchain (generator, MCP launcher, guards, lints)",
+    "tools": "build/host tools (mediaservo-gates)",
+    "vendor": "vendored dependencies (ffmpeg, SDL+imgui)",
+    "www": "web frontends (admin / voice) + packages (client / ui)",
+}
+
+
+def structure_block(source):
+    """Derive the STRUCTURE tree from the real top-level dirs (r43)."""
+    root = repo_of(source)
+    names = []
+    for name in sorted(os.listdir(root)):
+        p = os.path.join(root, name)
+        if (os.path.isdir(p) and name not in STRUCTURE_TERRITORIES
+                and not name.startswith(".git")):
+            names.append(name)
+    lines = ["```", os.path.basename(root) + "/"]
+    last = len(names) - 1
+    for i, name in enumerate(names):
+        branch = "└──" if i == last else "├──"
+        note = STRUCTURE_NOTES.get(name)
+        lines.append("%s %s/%s" % (branch, name, ("  # " + note) if note else ""))
+        children = sorted(
+            k for k in STRUCTURE_NOTES
+            if k.startswith(name + "/") and os.path.isdir(os.path.join(root, k))
+        )
+        for j, child in enumerate(children):
+            cb = "└──" if j == len(children) - 1 else "├──"
+            lines.append("│   %s %s/  # %s" % (cb, child.split("/", 1)[1],
+                                              STRUCTURE_NOTES[child]))
+    lines.append("```")
+    return "\n".join(lines)
 
 
 def parse_agent(path):

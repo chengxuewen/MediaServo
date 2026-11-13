@@ -6,6 +6,7 @@ MediaServo — Real-Time Media Servo Platform. A standalone video/media service 
 
 ## STRUCTURE
 
+<!-- BEGIN:structure-tree -->
 ```
 MediaServo/
 ├── .opencode/          # OpenCode configuration (plugins, MCP, LSP, instructions)
@@ -39,6 +40,7 @@ MediaServo/
 ├── rust-toolchain.toml # Rust toolchain version
 └── .gitignore
 ```
+<!-- END:structure-tree -->
 
 ## WHERE TO LOOK
 

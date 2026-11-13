@@ -53,6 +53,7 @@ gate "english gate self-test"      bash scripts/check-english-only.sh --self-tes
 gate "english only"               bash scripts/check-english-only.sh
 gate "docs link self-test"        python3 scripts/agents/check_docs_links.py --self-test
 gate "docs links"                 python3 scripts/agents/check_docs_links.py
+gate "docs numbering"             python3 scripts/agents/check_docs_numbers.py
 gate "promises self-test"         python3 scripts/agents/check_promises.py --self-test
 gate "doc promises"               python3 scripts/agents/check_promises.py
 

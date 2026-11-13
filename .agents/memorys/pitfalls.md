@@ -445,6 +445,7 @@ compose build args 从宿主环境读：`HTTP_PROXY: ${http_proxy:-}`。pip 另�
 
 **验证**: `docker compose -f docker-compose.yml config --quiet` EXIT 0 + `--services` 输出 server/proxy。
 
+## PIT-42: （占位）原条目从未写入、无代码引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，audit r42 H2）
 ## PIT-45: ~~webrtc-sys (livekit) Linux gathering 失效~~ — 已推翻 (2026-08-04)
 
 > **❌ 已修订 (2026-08-04)**：此结论**不成立**——真根因是应用层 SDP 构造 bug（candidate 行位置，见 PIT-46）。libwebrtc gathering 实际正常（strace 证明）。测试套件不验证真实连接的观察仍有效（PIT-50 方法论）。
@@ -564,6 +565,7 @@ close() { this.closed = true; ... }
 
 **验证**: `pixi install` EXIT 0 + `.pixi/envs/default/bin/cargo --version` 可用（原生编译链路首次打通）。
 
+## PIT-52: trickle 候选双向转发——libwebrtc 候选回调在信令线程触发，不能 tokio::spawn；用 std::mpsc 通道交付、主任务泵 add_ice_candidate（2026-11-13 依据 crates/mediaservo-webrtc/tests/ice_connect_e2e.rs:76 引用上下文补录，audit r42 H2）
 ## PIT-53: P2P 双 full ICE 不连接 — webrtc-sys trickle 候选激活失败 (2026-08-04)
 
 **症状**: 新增真实 ICE 连接测试（ice_connect_e2e：双 PC SDP 交换 + trickle 候选双向转发 + 等待 Connected）15s 超时失败；libwebrtc 无 p2p_transport/PortAllocator 日志（ICE transport 未激活）；候选 gather 正常（回调产生 172.18.0.1/192.168.2.127 host 候选）+ add_ice_candidate 全部 OK。对照：Host→mediasoup（ICE-Lite remote + SDP 内嵌候选）连接正常（PIT-46 修复后）。
@@ -586,6 +588,7 @@ close() { this.closed = true; ... }
 
 **调试教训**: ① 日志矛盾（response sent 出现在 produce() 之后）指向 Err 分支无日志——gdb 断点（signaling.rs:691/704/716）一锤定音。② 容器 gdb 需要 `cap_add: [SYS_PTRACE]`（已加入 docker-compose.dev.yml）；apt 包每次容器重建丢失 → gdb 已入 dev Dockerfile。③ **设计缺陷**：Host 手工构造 rtp_parameters 是双硬编码（SDP + produce JSON 各自写死 PT/SSRC），且两处已不一致——SDP fmtp 是 `profile-level-id=42e01f`（Baseline, main.rs:293），produce JSON 是 `4d0032`（Main, main.rs:380），靠 mediasoup answer 用 Router codec (4d0032) 应答才偶然对齐；正确形态是 audemsp-webrtc 补 `get_rtp_parameters(track_id)` API 从协商结果提取——记入待办。
 
+## PIT-55: 浏览器手拼 SDP 全 codec 字段拼接是债务——已被 mediasoup-client 正统实现取代（PIT-173/PIT-56 债务簇成员；2026-11-13 依据 www/packages/client/src/transport/sfu-client.ts:7,473 引用上下文补录，audit r42 H2）
 ## PIT-56: 浏览器 consume 链路 6 个问题 — rtp_capabilities/候选/DTLS/方向 (2026-08-04)
 
 **症状**: Host produce 成功后浏览器 consume 成功（Consumer created）但 videoWidth=0、ontrack 不触发（仅 audio 空轨）。逐层定位出 6 个独立 bug。
@@ -838,6 +841,7 @@ close() { this.closed = true; ... }
 
 **禁止**: 对含 `\r\n` 的字符串用 `lines()` + `join("\r\n")` 重组（CRLF 会翻倍）。
 
+## PIT-76: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
 ## PIT-77: libwebrtc SetParameters 校验 codecs/transaction_id — 上层映射往返必炸 (2026-08-10)
 
 **症状**: 按计划在 audemsp-webrtc 上层实现 `sender_set_parameters`（RTCRtpParameters → cxx RtpParameters 正向转换）前，审查发现 libwebrtc `RtpSenderBase::SetParameters` 校验三个不变条件：`parameters.codecs != params_.codecs`、`encodings.size()` 变化、`transaction_id != params_.transaction_id` → 均 INVALID_MODIFICATION 报错。上层 `map_rtp_parameters` 映射丢弃 codec `name`/`kind`/`rtcp_feedback`，重建 codecs 必然与内部不一致 → 每次 set 失败。
@@ -1296,6 +1300,16 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **验证**: `curl /api/admin/rooms` → devices 仅 vehicle（双流）；无 vehicle_test-30fps。
 - **禁止**: 新增房间形态时只改创建方（streamer/前端）不改 room.rs 的类型判定与归一——房间类型决定 list_devices 分组语义，两处必须同步。
 
+## PIT-133: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-134: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-135: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-136: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-137: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-138: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-139: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-140: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-141: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-142: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
 ## PIT-143: 多 announced 每 IP 一个 ListenInfo（listen 0.0.0.0 同端口）→ bind 冲突 panic（2026-08-25）
 - **症状**: 配双 announced IP 后容器启动 panic——`uv_udp_bind() failed [ip:'0.0.0.0', port:20000]: address already in use`；HTTP 000。
 - **根因**: sfu.rs 多 IP 实现（PIT-58 时代）为每个 announced IP 建一个 ListenInfo 且**都 listen 0.0.0.0:20000**——同端口二次 bind 冲突（多 IP 从未实测；PIT-58 只验证过单 IP）。且容器内 announced 宿主 IP 不在容器接口列表——多 ListenInfo 本就不适用。
@@ -1385,6 +1399,12 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 
 > 编号与主仓 ms_rtc 同步（157-162 存于主仓未回填）。2026-08-31 frontend-process-split 轮镜像：
 
+## PIT-157: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-158: first-writer-wins——re-stage 不覆盖运行时数据，devices.yaml 热写内容必须保留（2026-11-13 依据 cmake/MediaServoAppTree.cmake:11 引用上下文补录，audit r42）
+## PIT-159: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-160: PSK 编辑过的 server.yaml 在每次 re-stage 后必须保留——PSK 不因重新装配而重置（2026-11-13 依据 cmake/MediaServoAppTree.cmake:11 引用上下文补录，audit r42）
+## PIT-161: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-162: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
 ## PIT-163: psk 未配置时提交的 JWT 被整体跳过——账号退化 Legacy，produce/data 授权门旁路 (2026-08-31)
 - **症状/根因/解法/验证/禁止**: 同主仓——`signaling.rs handle_socket` 守卫 `if !authenticated`
   在 `authenticated = psk_auth.is_none()` 预置下吞掉验证；修为 `!authenticated || jwt_token.is_some()`；
@@ -1907,6 +1927,10 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **Verify**: after W1 deploys the build, stop on the branded vehicle must now report real survivors.
 - **Prohibited**: hardcoding family literals in any process-name scan — derive from app_name()/brand with legacy union; ANY "zero matches = clean" check must ship with a must-hit negative fixture (otherwise you never learn the needles are dead). Same class as comm-15-truncation (PIT-15/155) — name-based tooling rots silently under rebrand.
 
+## PIT-229: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-230: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-231: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
+## PIT-232: （占位）原条目从未写入、无引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
 ## PIT-233: include_str! 模板变更不被增量编译拾取（PIT-189 家族新形态，2026-10-19 room 缺省轮）
 - **症状**: 改 host.yaml.template 后跑 `host init` 冒烟，渲染产物仍是旧文案（两版前的注释形）；touch bin 源文件重链（22s）后新 template 才现形。
 - **根因**: include_str! 的 rerun-if-changed 依赖在增量编译的指纹判断中被缓存吞掉——模板内容变了但 bin 未重链（与 PIT-189 "部署树旧件"同族，但这里旧件在 target/ 编译缓存里）。

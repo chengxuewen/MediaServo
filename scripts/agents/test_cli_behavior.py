@@ -87,5 +87,24 @@ class CliBehaviorTests(unittest.TestCase):
             self.assertIn("2 sites", block)
 
 
+    def test_structure_block_derives_and_excludes(self):
+        # B10 ruling 1-B: the STRUCTURE tree is generator-derived from the real
+        # top-level dirs; territories are excluded, notes are optional.
+        with tempfile.TemporaryDirectory() as root:
+            repo = os.path.join(root, "repo")
+            os.makedirs(repo)
+            for d in ("alpha", "build", "target", ".agents", ".git", "zeta"):
+                os.makedirs(os.path.join(repo, d))
+            source = os.path.join(repo, ".agents")
+            block = cli.structure_block(source)
+            self.assertIn("alpha/", block)
+            self.assertIn("zeta/", block)
+            self.assertIn(".agents/", block)
+            self.assertNotIn("build/", block)
+            self.assertNotIn("target/", block)
+            self.assertNotIn(".git", block)
+
+
+
 if __name__ == "__main__":
     unittest.main()

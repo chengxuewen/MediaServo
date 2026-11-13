@@ -713,6 +713,12 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 
 **参考**：docs/plans/frontend-process-split/（主仓，含 Momus 审核修复轮）。
 
+## D263: （占位）原条目从未写入、无代码引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，audit r42 H1）
+## D264: （占位）原条目从未写入、无代码引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，audit r42 H1）
+## D265: （占位）原条目从未写入、无代码引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，audit r42 H1）
+## D266: 部署永不触发构建——部署是纯产物装配阶段，缺产物即前置失败并显式报错；装配走 BLOCKER-1 双源有序查找（target/ 新构建优先于已迁移树品牌产物）；host 实例归 oxmgr 接管，CLI host 包装命令移除（2026-08-31，前端进程分离簇；2026-11-13 依据 cmake/MediaServoAppTree.cmake:149,405、mediaservo.sh:748、scripts/e2e-test.sh:23、README.md:66-69 引用上下文补录，audit r42 H1）
+## D267: （占位）原条目从未写入、无代码引用、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，audit r42 H1）
+## D268: （占位）frontend-split-deploy.md:3 将其列为 D262/D266 相关决策，但原条目从未写入、内容不可考——编号保留不重排（2026-11-13 登记为有意空缺，audit r42 H1）
 ## D269: 品牌化统一收口——裸机物理二进制名 = 品牌名（2026-09-01，branding-completion）
 - **背景**: D3 实施期引申"server/client 不品牌化"与三层口径矛盾（msrtc.sh L94 承诺品牌覆盖 server、主仓 README《品牌化边界》明文 msrtc-host/msrtc-server/msrtc-client、D262/commands.md 行文全用 msrtc-server）。
 - **决策**: ① server 裸机物理名品牌化 `bin/{brand}-server` + 根级快捷 `{prefix}/{brand}-server` symlink（host 同构）；② `mediaservo-client` 移出 host 树（舱端工具不属车端部署树，`package host` tar 契约收窄；`stop client`/`build host` cargo 面不动）；③ `host-streamer` 兼容链退役（实证 install-host 时代防御冗余：oxfile command 全指 bin/msrtc-*，gateway src 字面量仅存测试；streamer 自报 src 改 app_prefix 运行时派生，默认品牌逐字节不变）；④ `build server` staging 仍落 cargo 名——品牌化归 deploy（D266 职责分层）。
@@ -818,6 +824,7 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **改判链**：D279 方案 B（机械分节+Release-Note 素材位）落地当日，用户裁决「changes 是给用户看的——开发者看 git log」→ 维护式。否决时担忧的人肉腐烂死穴由 CI 版本联动门禁消解；打包时调 LLM 仍否决（发布文档须确定性）。
 - **锚定收益**：v0.1.1 起 bump→tag→package 正序有物理提交可打 tag（此前 0.1.1 为工作区漂浮态——C43⑧ 守卫实弹抓获后闭环）。
 
+## D281: （占位）原条目从未写入——status.md:830 曾引用本号；编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
 ## D282: host 流配置三层合并 + smooth fps 联动地板 + h264 默认根治（2026-09-10, host-stream-defaults）
 - **决策**：① `defaults:{streams,sources}` 公共层，合并链 **逐条 > defaults > 内置**，两单点解析器（camera_configs/stream_configs）落地，下游无感；deny_unknown_fields 只加 defaults 子结构（顶层存量兼容键不焊）。② smooth 码率地板 = `(fps*100/30).max(50)`kbps（每帧字节恒定；15→50/30→100/60→200 无洞），host 裁决点计算（field bundle smooth min 400→None 职责移交）；地板链 显式>fps 联动>bundle。③ 缺省 codec vp8→**h264** + 真值表 `h264×backend∈{None,auto}→显式 software`（PIT-156 根治：h264 硬件路径本链路从未可用，auto 语义修正为"选已验证路径"；显式后端原样透传）。
 - **升级警示（breaking）**：未写 codec 的存量流升版后 vp8→h264+钉 software——CHANGELOG 节随下次 bump 成文（素材=本单 Release-Note trailer）；out 轨实例 yaml 注释不含 defaults 用法（PIT-160 族手动 sync）。
@@ -862,6 +869,7 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 - **影响**: sig 为 additive 线形（旧端忽略=其 estop 被新端拒=版本墙非破坏）；L1 双语言 canonical 钉；跨会话 stale ack 观察项挂 S4′。
 - **参考**: S4 evidence/s4-estop-audit.md、席3 安全评审（09-14 团队轮）。
 
+## D289: （占位）原条目顺延未写（本文件 859 行有解释）——编号保留不重排（2026-11-13 登记为有意空缺，r43 编号门首跑发现）
 ## D291: 免账号客户端凭证 = API-key 换短 JWT + 设备公钥链分层（accountless-client-auth，2026-09-28）
 - **决策**: 舱端/三方集成用 `POST /api/auth/exchange {key_id, secret}` 换 `{sub:"apikey:<id>", role, vehicles, exp≤TTL}` HS256 JWT（admin_jwt_secret 现签，`/ws` 与 REST 门零改动）；边缘设备用 D283 Ed25519 公钥链（client `identity_dir` 接线）。客户端自签（签钥下放=可伪造全权）与不透明 key 直传 WS 两案否决。
 - **理由**: 测绘实证 server 授权只看 SessionIdentity 枚举——JWT 验签不依赖账号存在，换签发源即可（改动面最小）；LiveKit apikey/apiSecret 业界同型。吊销粒度=删 key 挡新发 + 已发 JWT 至 TTL（不建 revocation 表，YAGNI）。
