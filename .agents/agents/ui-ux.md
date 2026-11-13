@@ -17,8 +17,8 @@ A UI surface (screenshots or a running page) to evaluate.
 
 ## Workflow
 1. Read `.agents/rules/web/design-quality.md` for the governing constraints.
-2. Capture or inspect screenshots of the surface in its empty, error, and loading states.
-3. Check contrast, focus order, and the three states against the rules; check styles consume the `@mediaservo/ui` tokens (flag raw hex / off-palette).
+2. Capture the surface yourself (Playwright is in the toolchain) -- do not wait for someone to paste screenshots; cover empty, error, and loading states. When a prototype exists under `www/prototype/`, capture it too for side-by-side comparison.
+3. Check contrast, focus order, and the three states against the rules; check styles consume the `@mediaservo/ui` tokens (flag raw hex / off-palette); compare implementation screenshots against the prototype.
 4. Report findings with screenshot evidence and the rule or token each violates.
 
 ## Output contract

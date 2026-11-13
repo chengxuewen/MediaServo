@@ -13,9 +13,9 @@ Owner of the web frontend under www/.
 A UI feature or fix scoped to www/**, with the design intent.
 
 ## Workflow
-1. Read the affected components and the frontend rules.
+1. Read the affected components, the frontend rules, and the design reference -- a prototype under `www/prototype/` (preferred; its screenshot is the expected output) or a provided design screenshot.
 2. Implement the change; keep the dependency budget (no gratuitous new deps); style via the `@mediaservo/ui` tokens (`design-system`), not new raw hex.
-3. Run tsc --noEmit and the Playwright tests; verify in a browser where visual.
+3. Run tsc --noEmit and the Playwright tests; capture a screenshot of the result and compare it against the prototype/design screenshot before calling it visually done.
 4. Hand interface-quality questions to ui-ux (read-only review), not self-approve.
 
 ## Output contract

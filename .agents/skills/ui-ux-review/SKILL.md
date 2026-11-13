@@ -18,6 +18,10 @@ description: Structured interface-quality review method. Use when evaluating a U
 
 ## Method (run in order, capture evidence as you go)
 
+0. **Self-serve capture.** Drive the browser yourself (Playwright is in the
+   toolchain) -- do not wait for someone to paste screenshots. When a prototype
+   exists under `www/prototype/`, capture it too: the prototype screenshot is
+   the expected output the implementation is compared against.
 1. **Three states.** Inspect the surface in **empty**, **error**, and **loading**
    states — not just the happy path. A surface that only works when full of data is
    not done. Screenshot each state that is reachable.
