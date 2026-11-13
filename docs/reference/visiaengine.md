@@ -41,4 +41,4 @@ Not ported: `scripts/book-i18n.py`, `book/po/**` (English-only ruling U1=C).
 
 | `.agents/skills/mechanism-porting/SKILL.md` | `.agents/skills/mechanism-porting/SKILL.md` | authored in-repo (no donor; operationalizes repo-audit 2C pattern-card execution + P-5 guardrails) | B11 |
 
-| `local-figma` MCP (plugin bridge) | `scripts/agents/mcp-launch.sh` figma case → npm `cursor-talk-to-figma-mcp@0.3.5` (MIT, ~7k stars) | authored wiring (mechanism: zero-auth plugin bridge over local WebSocket 3055; replaces the Framelink API-key pin, B12 ruling 11-13) | B12 |
+| `local-figma` MCP (plugin bridge) | pin registry (npm) → bin `cursor-talk-to-figma-mcp@0.3.5` (MIT, ~7k stars) | authored wiring (mechanism: zero-auth plugin bridge over local WebSocket 3055; replaces the Framelink API-key pin, B12 ruling 11-13) | B12 |
