@@ -4,6 +4,29 @@
 > Appearance carrier: `../prototypes/w1-portal-shell.html` (v0.2). This file = structure (what/where/order).
 > Symbols: ● held/online ○ idle ◐ queued ▲ warn/unknown ■ solid-badge □ outline-badge ⟨⟩ collapse ↗ deep-link
 
+## Sidecar (P9)
+```yaml
+board: w1-portal-shell
+surface: web
+theme: [light, dark]
+density: comfortable
+canvas: 1440x900
+refs: [web-portal-ui O4, U2, P3, P8, P9]
+e2e_hooks: [.nav-item.active, .screen.active, "#themeBtn", "#collapseBtn", .conn]
+status: in-review
+version: v0.2
+regions:
+  - {id: A1, name: topbar,  spec: "O4/U2 brand + conn + theme + mute + user"}
+  - {id: A2, name: sidebar, spec: "O4 collapsible groups; Tower auto-fold"}
+  - {id: A3, name: content, spec: "active screen; shell three-states (P3)"}
+open_questions:
+  - "sidebar width 232 vs research floor 220 (confirm at B1)"
+  - "light-theme video-wall HUD legibility (confirm at B1)"
+```
+> **Three states (P3 shell)**: logged-out / logging-in / logged-in / no-permission / manifest-load-fail degrade.
+> **W1 review scope = the shell.** The embedded Live/Intercom/Tower/Settings screens are context previews;
+> they become boards W2–W5 as each enters the loop, and W1 then slims to the pure shell.
+
 ## Shell (O4 collapsible sidebar)
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐

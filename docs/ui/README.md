@@ -25,6 +25,20 @@
 - Prototypes are design assets, **not app code**: never enter `www/**`, never imported by the app,
   retire to `archive/` when the board lands in implementation (P1 guard).
 
+## Design review loop (web-portal-ui P9)
+
+Design exploration runs as an **interactive per-board review loop** — one board at a time:
+
+`spec / PLAN + UI skill → agent draws one H5 board → preview + human review/comments → revise → user approves → write back docs/ui + ledger → next board`
+
+- **One board at a time.** No skipping, no bundling several boards into one file; do not advance until the user approves.
+- **Every board carries**: YAML sidecar (`board/surface/theme/density/refs/e2e_hooks/regions[]/open_questions[]`),
+  region annotations A1…An → spec clauses, three states (empty/loading/error; session states for safety-critical screens),
+  and its own open questions. Sidecar lives in `boards/<board>.md`.
+- **Approval ledger** (in the parent plan §3f): per-board status `draft / in-review / approved`; skips/deferrals recorded explicitly.
+- Board inventory: W1 shell (in-review) · W2 live · W3 intercom · W4 tower · W5 settings · W6 talk-session · W7 playback (P4-gated).
+  W2–W5 are split out of the current W1 file as each enters the loop; W1 then slims to the pure shell.
+
 ## Status
 
 Design exploration only. Implementation (`tokens.css`, `?mock=1`, `packages/shell`) lands in B1;
