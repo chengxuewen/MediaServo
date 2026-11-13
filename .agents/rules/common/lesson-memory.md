@@ -62,6 +62,14 @@
 
 1-line fix / no branches / no side effects → 1-line capture, no full template needed.
 
+## Conflict & supersedes notes (N38)
+
+When a new lesson contradicts an existing entry, do NOT edit or delete the old
+one (append-only iron rule). Append the new lesson WITH a supersedes note naming
+the superseded entry (file + PIT-n or section) and one line on why it no longer
+holds. The old entry stays verbatim for history; the supersedes note is what the
+next reader consults.
+
 ## Pitfall template (required content when writing to pitfalls.md)
 
 ```markdown

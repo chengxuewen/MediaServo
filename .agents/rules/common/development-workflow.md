@@ -104,20 +104,34 @@ When creating PRs:
 Governance changes follow the governed self-evolution loop (plan section 3.18,
 B11): evolution has PROPOSAL rights, never execution rights.
 
-1. **Trigger**: a banked lesson, an audit gap (repo-audit 2D/3D), a repeated
-   issue, or a community mechanism worth borrowing (see `mechanism-porting`).
-2. **Proposal card**: 2-3 options + a recommendation + source evidence + a
+**Quarterly cadence (the quarterly rotation)**: one cycle per quarter -- external
+radar (community scan) -> internal inventory (repo-audit 2D) -> proposal cards
+(capped at 5 per quarter) -> user ruling -> adversarial review
+(`expert-panel-review`) -> land one batch of at most 2 skills.
+
+**Event triggers** (any one opens a proposal card immediately, off-cycle):
+a gate going red; a quota overage; a host dialect change; a donor shipping a new
+mechanism; the same lesson recurring 2+ times.
+
+1. **Proposal card**: 2-3 options + a recommendation + source evidence + a
    strategy tag {harden, repair-only, innovate} (default harden; innovate must
    name the new judgment path) + a pre-registered recheck criterion that only
    cites existing gates/audit rows -- inventing metrics is a violation.
-3. **User ruling**: the card is decided via the plan's N-table; silence or
+2. **User ruling**: the card is decided via the plan's N-table; silence or
    "continue" is not approval; no ruling -> no port.
+3. **Citation requirement**: an evolution batch's start gate must cite the ruled
+   N-number. A batch that cannot cite its ruling is refused at start -- running
+   a proposal without a recorded verdict bypasses the loop and is treated as a
+   gate bypass.
 4. **Gated execution**: the ruled card lands as a batch with landing + gate
    columns; evolution batches pass the SAME gate chain as regular batches.
 5. **Solidify two-phase**: experiment drafts live in `evidence/` (verify, then
    delete); production consolidation requires the ruled batch + gate + rollback
    anchor. An "evolution" label never skips the draft phase.
-6. **Recheck**: the pre-registered criterion decides closure; unclosed gaps go
+6. **Worktree merge-back** (N39): an evolution batch worked in a worktree
+   rechecks its touch surface and bumps the pointer in the SAME commit as the
+   merge; the start gate is never waived for worktree work.
+7. **Recheck**: the pre-registered criterion decides closure; unclosed gaps go
    back to `lesson-review` or the next quarter's proposal queue (gap closure
    rate, repo-audit 3C). Quota: net +2 skills per quarter; a replacement (retire
    one, add one) does not consume the net quota.

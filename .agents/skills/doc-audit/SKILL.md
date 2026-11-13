@@ -75,6 +75,12 @@ Scan for missing key docs / design sections.
 - hardware baseline: minimum CPU/RAM, Docker resource config?
 - upgrade strategy: hot updates, crate version migration, config migration?
 
+### 6. Memory Health Report (N38, report-only)
+Duplicate lessons/decisions, conflict coverage (do contradicting entries carry
+supersedes notes?), growth rate over the recent window. Report-only -- never red,
+never prune (append-only iron rule). Size + staleness belong to repo-audit (N38
+split: the same finding is counted once, with an owner tag).
+
 ### 5. Phase Audit
 Check Phase progress vs doc claims vs code reality.
 

@@ -82,8 +82,13 @@ Write using the target file's template format.
 2. [title] → conventions.md
 ...
 
-### Not recorded (no need)
-- [reason: one-off issue / already recorded / environment-specific]
+### Not recorded (must pass ALL three checks -- N38 upgrade)
+Each "not recorded" verdict cites exactly ONE reason WITH its evidence:
+- one-off issue -> the failure context shows no recurrence vector (cite it)
+- already recorded -> name the existing entry (file + PIT-n); a search that
+  found nothing does not count
+- environment-specific -> name the environment bound and why it cannot recur here
+A verdict without a cited reason + evidence FAILS this review.
 
 ### Upgrade suggestions
 - [a lesson suggesting a CI gate, rationale: repeated 3+ times / cost >1h]
