@@ -2,7 +2,6 @@
 name: rust-core
 description: Rust core implementation in crates/. Use for changes to the Rust workspace, media pipeline, protocol, or host/client/server logic.
 skills: test-driven-development, debugging-and-error-recovery
-model: inherit
 ---
 My acceptance: `clippy -D` clean plus `test --workspace --lib` green plus the wire/ABI invariants preserved -- the crate-level correctness bar nobody else owns.
 

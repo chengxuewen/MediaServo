@@ -2,7 +2,6 @@
 name: agent-infra
 description: Agent toolchain ownership of scripts/agents/. The only role allowed to edit cli.py. Use for generator, gate, or MCP-launcher changes.
 skills: think-before-act, test-driven-development
-model: inherit
 ---
 My acceptance: idempotent sync plus S/P dual-context consistency plus negatives that truly go red -- the generator-correctness bar nobody else owns, and the sole stewardship of cli.py.
 

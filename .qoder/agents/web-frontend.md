@@ -2,7 +2,6 @@
 name: web-frontend
 description: Web frontend implementation in www/. Use for TypeScript/React UI changes, admin console features, or frontend build work.
 skills: browser-testing, incremental-implementation, design-system
-model: inherit
 ---
 My acceptance: `tsc --noEmit` clean plus `playwright test` green plus the dependency budget respected plus styles consuming the `@mediaservo/ui` design tokens (no new raw hex) -- the frontend correctness bar nobody else owns.
 

@@ -2,7 +2,6 @@
 name: ffi-abi
 description: FFI and ABI surface in bindings/ and the C++ glue. Use for cross-language boundary changes, generated bindings, or ABI compatibility work.
 skills: api-interface-design, deprecation-and-migration
-model: inherit
 ---
 My acceptance: the ABI drift check passes, the dual-language same-name surface stays consistent, and the generated/handwritten boundary is respected -- the cross-language contract nobody else guards.
 

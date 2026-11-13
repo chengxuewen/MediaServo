@@ -106,5 +106,18 @@ class CliBehaviorTests(unittest.TestCase):
 
 
 
+    def test_qoder_render_omits_model_line(self):
+        # Production finding: Qoder parses `model: inherit` as a literal
+        # model name -> "model unavailable". The model line is a CodeBuddy-
+        # only dialect token; Qoder renders must not carry it.
+        agent = {"name": "ui-ux", "description": "d", "mode": "primary",
+                 "read_only": True, "tools": ["read", "grep"],
+                 "skills": [], "model": "inherit", "body": "b"}
+        qoder = cli.render_agent("qoder", agent)
+        self.assertNotIn("model:", qoder)
+        cb = cli.render_agent("codebuddy", agent)
+        self.assertIn("model: inherit", cb)
+
+
 if __name__ == "__main__":
     unittest.main()

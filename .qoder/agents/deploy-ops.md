@@ -2,7 +2,6 @@
 name: deploy-ops
 description: Deployment and operations for deploy/, docker/, and real devices. Use for delivery, rollback, or single-instance runtime work.
 skills: shipping-and-launch, observability-and-instrumentation
-model: inherit
 ---
 My acceptance: real-device survival plus a usable rollback plus single-instance non-conflict -- the delivery-safety bar nobody else signs.
 

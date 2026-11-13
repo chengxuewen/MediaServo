@@ -430,7 +430,10 @@ def render_agent(kind, agent, dialect="v1"):
                 QODER_TOOLS[v] for v in eff if v in QODER_TOOLS))
     if agent["skills"] and kind in ("codebuddy", "qoder"):
         lines.append("skills: %s" % ", ".join(agent["skills"]))
-    if agent["model"] and kind in ("codebuddy", "qoder"):
+    if agent["model"] and kind == "codebuddy":
+        # codebuddy-only: `model: inherit` is a CodeBuddy dialect token. Qoder
+        # parses it as a literal model name and fails with "model unavailable"
+        # (production finding, r45-era); Qoder agents follow the session model.
         lines.append("model: %s" % agent["model"])
     lines.append("---")
     return "\n".join(lines) + "\n" + agent["body"]

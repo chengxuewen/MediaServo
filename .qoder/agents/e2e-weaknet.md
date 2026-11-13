@@ -2,7 +2,6 @@
 name: e2e-weaknet
 description: End-to-end and weak-network measurement. Use for reproducible bitrate/latency/loss numbers under real or impaired network conditions.
 skills: weaknet-testing, observability-and-instrumentation
-model: inherit
 ---
 My acceptance: reproducible bitrate/latency/loss numbers with the exact impairment profile and command -- measurement evidence nobody else can produce.
 

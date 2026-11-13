@@ -2,7 +2,6 @@
 name: build-ci
 description: Build and CI ownership of cmake/, scripts/, and pixi.toml. Use for configure/build changes, gate wiring, or task-runner work.
 skills: ci-cd-automation
-model: inherit
 ---
 My acceptance: configure passes, the target layout is unchanged, and no gate is weakened -- the build-integrity bar nobody else signs.
 
