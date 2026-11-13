@@ -11,10 +11,11 @@ theme: [light, dark]
 density: comfortable
 canvas: 1440x900
 refs: [web-portal-ui U3, W3, P8, P9]
-e2e_hooks: ["#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#openPicker", "#statsToggle", "#syncToggle", ".stream-item", ".tile"]
+e2e_hooks: ["#sidebar", "#navCollapse", "#navScroll", ".nav-item.active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#openPicker", "#statsToggle", "#syncToggle", ".stream-item", ".tile"]
 status: in-review
-version: v0.1
+version: v0.2
 regions:
+  - {id: A0, name: nav,         spec: "portal navigation (leftmost): grouped apps, Live active, collapsible; restored v0.2"}
   - {id: A1, name: topbar,      spec: "brand + conn + theme + mute + user"}
   - {id: A2, name: ws-banner,   spec: "conditional stale slot (WS>5s), cached data shown"}
   - {id: A3, name: stream-rail, spec: "selected-streams list + Select streams (device->stream)"}
@@ -27,7 +28,13 @@ open_questions:
   - "audio-only stream (ENV-04) tile rendering: waveform placeholder vs audio glyph"
 ```
 
-## Layout (column-driven + paginated — the W2 hard requirement)
+## Layout (three regions: portal nav → selected-streams rail → canvas)
+
+**v0.2 fix:** the leftmost **portal navigation** (region A0, same grouped nav as W1: Surveillance /
+Communication / Control / Administration, Live active, collapsible to an icon rail) was missing in v0.1
+and is restored. Full width order = `nav (232px) | stream-rail (250px) | canvas`. The diagram below
+zooms into the Live region (stream-rail + canvas); the nav column sits to its left.
+
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────┐
 │ ◆ MediaServo  Surveillance / Live view        ● Connected  ◐ 🔔 [DX] dispatch.x   │

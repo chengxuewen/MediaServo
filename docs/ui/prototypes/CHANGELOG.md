@@ -1,5 +1,14 @@
 # Prototypes CHANGELOG
 
+## v0.2 — 2026-11-13 (w2-live-wall)
+Fix (user review): the leftmost **portal navigation** was missing in v0.1 — restored it.
+- Layout is now the full three-region order: **portal nav (232px) → selected-streams rail (250px) → canvas**,
+  matching W1's grouped nav (Surveillance / Communication / Control / Administration).
+- Nav: Live active, collapsible to a 56px icon rail, Live badge = live selected-stream count,
+  keyboard-reachable items; other apps toast their target board (per-board loop scope).
+- v0.1 archived (`archive/w2-live-wall-v0.1.html`); board sidecar gains region A0 (nav).
+- Verified: both scripts node --check; DOM refs zero missing; div/nav/aside tags balanced; HTTP 200.
+
 ## v0.1 — 2026-11-13 (w2-live-wall)
 New board W2 (Live wall), per web-portal-ui P9 per-board loop. Borrows workbudy Live mechanisms
 (provenance in `boards/w2-live-wall.md`) and implements the W2 hard requirement:
