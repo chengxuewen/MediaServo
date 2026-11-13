@@ -40,3 +40,5 @@ Not ported: `scripts/book-i18n.py`, `book/po/**` (English-only ruling U1=C).
 `ecosystem-scan` retired as tombstone (status: inoperative, superseded by repo-audit); tombstone deleted in B8 (R2). The B8 skills `ui-ux-review` / `design-system` are newly authored, not donor ports (no attribution row needed).
 
 | `.agents/skills/mechanism-porting/SKILL.md` | `.agents/skills/mechanism-porting/SKILL.md` | authored in-repo (no donor; operationalizes repo-audit 2C pattern-card execution + P-5 guardrails) | B11 |
+
+| `figma` MCP (plugin bridge) | `scripts/agents/mcp-launch.sh` figma case → npm `cursor-talk-to-figma-mcp@0.3.5` (MIT, ~7k stars) | authored wiring (mechanism: zero-auth plugin bridge over local WebSocket 3055; replaces the Framelink API-key pin, B12 ruling 11-13) | B12 |
