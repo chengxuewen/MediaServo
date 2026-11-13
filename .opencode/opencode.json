@@ -64,6 +64,15 @@
       "type": "remote",
       "url": "https://websearch.opencode.ai",
       "enabled": false
+    },
+    "figma": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "bash",
+        "scripts/agents/mcp-launch.sh",
+        "figma"
+      ]
     }
   },
   "lsp": {

@@ -20,5 +20,13 @@
     "task": "mcp-serena",
     "version": "2.1.0",
     "probe": ["serena", "--version"]
+  },
+  "figma": {
+    "kind": "npm",
+    "pkg": "figma-developer-mcp",
+    "version": "0.13.2",
+    "bin": "figma-developer-mcp",
+    "args": ["--stdio"],
+    "needs_env": ["FIGMA_API_KEY"]
   }
 }
