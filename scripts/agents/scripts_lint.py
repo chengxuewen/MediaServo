@@ -68,8 +68,13 @@ def main():
         base = os.path.basename(path)
         if base in ("cli.py", "mcp-serve.mjs"):  # entry points: invoked by name/directly
             continue
+        if base.startswith("test_") and base.endswith(".py"):
+            continue  # unittest discover loads test_*.py by pattern (tools-check.sh) -- never orphans
         corpus = reference_corpus(root, path)
-        if base not in corpus:
+        # .py modules are import-referenced by STEM (import book_common), not
+        # by basename -- check both.
+        stem = base[:-3] if base.endswith(".py") else None
+        if base not in corpus and (stem is None or stem not in corpus):
             orphans.append(base)
 
     for line in fails:
