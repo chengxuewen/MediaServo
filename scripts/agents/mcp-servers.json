@@ -20,13 +20,5 @@
     "task": "mcp-serena",
     "version": "2.1.0",
     "probe": ["serena", "--version"]
-  },
-  "local-figma": {
-    "kind": "npm",
-    "pkg": "cursor-talk-to-figma-mcp",
-    "version": "0.3.5",
-    "bin": "cursor-talk-to-figma-mcp",
-    "args": [],
-    "needs": ["ws://localhost:3055 relay (bun socket) + Figma plugin active"]
   }
 }

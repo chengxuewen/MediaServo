@@ -23,14 +23,6 @@
         "scripts/agents/mcp-launch.sh",
         "local-serena"
       ]
-    },
-    "local-figma": {
-      "type": "stdio",
-      "command": "bash",
-      "args": [
-        "scripts/agents/mcp-launch.sh",
-        "local-figma"
-      ]
     }
   }
 }
