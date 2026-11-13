@@ -105,6 +105,8 @@ def run(root):
 
     mcp = count_mcp(root)
     cap_mcp = next((v for k, v in caps.items() if "mcp" in k), None)
+    # MCP count cap REMOVED by user ruling (11-13): report-only now. The gate
+    # still checks pins/routing/same-name via gate_mcp.
     if cap_mcp is not None and mcp > cap_mcp:
         fails.append("MCP servers %d > cap %d" % (mcp, cap_mcp))
 
@@ -122,9 +124,10 @@ def run(root):
         notes.append("standalone: own %d roles counted only" % sub)
     notes.append("skills %d -- net +2/quarter is ledger-accounted (report-only)" % skills)
 
-    summary = ("QUOTAS %s roles %d/%s, mcp %d/%s, teams %s, skills %d (report-only) | %s"
+    mcp_fmt = "%d" % mcp if cap_mcp is None else "%d/%d" % (mcp, cap_mcp)
+    summary = ("QUOTAS %s roles %d/%s, mcp %s (no count cap), teams %s, skills %d (report-only) | %s"
                % ("✓" if not fails else "✗",
-                  total_roles, cap_roles, mcp, cap_mcp,
+                  total_roles, cap_roles, mcp_fmt,
                   {k: v for k, v in teams.items()} if teams else "{}",
                   skills, "; ".join(notes)))
     return len(fails), fails + [summary]

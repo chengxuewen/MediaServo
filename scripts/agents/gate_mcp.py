@@ -57,8 +57,10 @@ def run(root):
             fails.append("entry %s neither launcher-routed nor explicit remote" % name)
     caps = check_quotas.parse_caps(
         os.path.join(root, ".agents", "rules", "common", "agents.md"))
-    cap_mcp = next((v for k, v in caps.items() if "mcp" in k), 5)
-    if len(servers) > cap_mcp:
+    cap_mcp = next((v for k, v in caps.items() if "mcp" in k), None)
+    # Count cap REMOVED by user ruling (11-13): quality is gated by pins +
+    # same-name, not by count. cap_mcp stays None for a numeric-cap table.
+    if cap_mcp is not None and len(servers) > cap_mcp:
         fails.append("MCP servers %d > cap %d" % (len(servers), cap_mcp))
 
     # 3. Same-name vs user level (skip VISIBLE when the user file is absent).
@@ -77,8 +79,10 @@ def run(root):
         else:
             notes.append("user-level %d server(s), no same-name overlap" % len(user_keys))
 
-    summary = ("GATE-MCP %s pins %d, project %d/%d, same-name %s | %s"
-               % ("✓" if not fails else "✗", len(pins), len(servers), cap_mcp,
+    proj_fmt = ("%d > cap %d" % (len(servers), cap_mcp)) if cap_mcp is not None \
+        else "%d (no count cap)" % len(servers)
+    summary = ("GATE-MCP %s pins %d, project %s, same-name %s | %s"
+               % ("✓" if not fails else "✗", len(pins), proj_fmt,
                   "checked" if user is not None else "SKIPPED (user file absent)",
                   "; ".join(notes) if notes else "no notes"))
     return len(fails), fails + [summary]

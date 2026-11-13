@@ -73,7 +73,9 @@ class GateMcpTests(unittest.TestCase):
         self.assertEqual(fails, 1)
         self.assertIn("floating", lines[0])
 
-    def test_quota_over_red(self):
+    def test_no_count_cap_reported(self):
+        # B12 ruling: MCP has no count cap -- many entries stay green, count
+        # is reported in the summary.
         make_fixture(self.root, extra_project={
             "x1": {"type": "remote", "url": "https://x1"},
             "x2": {"type": "remote", "url": "https://x2"},
@@ -81,8 +83,8 @@ class GateMcpTests(unittest.TestCase):
             "x4": {"type": "remote", "url": "https://x4"},
         })
         fails, lines = gate_mcp.run(self.root)
-        self.assertEqual(fails, 1)
-        self.assertIn("MCP servers 6 > cap 5", lines[0])
+        self.assertEqual(fails, 0)
+        self.assertIn("project 6 (no count cap)", lines[-1])
 
 
 if __name__ == "__main__":

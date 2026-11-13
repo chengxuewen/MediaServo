@@ -87,7 +87,7 @@ will read this table, keep the shape):
 |-------|----------|---------------|-----------------|
 | role files (true source, both repos) | 11 | submodule 10 + parent 1; inherited visibility does not count | add one, remove one |
 | skills | net +2 per quarter | true-source directories only; projection does not count | retire one first, or prove no existing skill covers it |
-| MCP servers | 5 | pinned registry entries | disable one before adding |
+| MCP servers | no count limit (ruled 11-13) | every entry version-pinned & launcher-routed; gate_mcp enforces pins + same-name, not count | n/a (quality gated by pins, not count) |
 | members per team | 4 | standing expert teams | answer "which new judgment path does this member bring?" first |
 
 **Role admission rule**: a role exists if and only if it can state ONE acceptance
