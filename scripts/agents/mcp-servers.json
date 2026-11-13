@@ -11,7 +11,7 @@
     "pkg": "@playwright/mcp",
     "version": "0.0.82",
     "bin": "playwright-mcp",
-    "args": [],
+    "args": ["--headless", "--no-sandbox", "--browser", "chromium", "--executable-path", "/home/maxsense/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome"],
     "probe": ["playwright-mcp", "--version"]
   },
   "local-serena": {
