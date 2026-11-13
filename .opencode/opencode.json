@@ -65,13 +65,13 @@
       "url": "https://websearch.opencode.ai",
       "enabled": false
     },
-    "figma": {
+    "local-figma": {
       "type": "local",
       "enabled": true,
       "command": [
         "bash",
         "scripts/agents/mcp-launch.sh",
-        "figma"
+        "local-figma"
       ]
     }
   },
