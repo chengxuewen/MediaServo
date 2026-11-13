@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-mode="target" data-planned="on">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MediaServo Admin — rooms &amp; fleet console (workbudy W2 port)</title>
+<style>
+:root{
+  color-scheme:light;
+  --bg-canvas:#F4F5F7; --bg-surface:#FFFFFF; --bg-sunken:#E8EAEF; --bg-hover:#F4F5F7;
+  --border:#E8EAEF; --border-strong:#B8BFCC; --border-control:#8C95A6;
+  --text:#141821; --text-2:#4A5364; --text-3:#646E82; --text-inv:#FFFFFF;
+  --accent:#4361EE; --accent-ink:#3651D4; --accent-tint:#EEF1FF;
+  --ok:#1F9D55; --ok-ink:#157A42; --ok-tint:#E6F7EE;
+  --warn:#C97A00; --warn-ink:#7A4E00; --warn-tint:#FDF3E2;
+  --err:#E5484D; --err-ink:#B8262E; --err-tint:#FDECEC;
+  --off:#8C95A6; --off-tint:#E8EAEF;
+  --row-h:40px; --ctl-h:34px;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",Roboto,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+}
+html[data-theme="dark"]{
+  color-scheme:dark;
+  --bg-canvas:#0B0E14; --bg-surface:#141821; --bg-sunken:#080A0F; --bg-hover:rgba(255,255,255,.05);
+  --border:#252B39; --border-strong:#3A4356; --border-control:#5F6A80;
+  --text:#E6EAF2; --text-2:#A6B0C2; --text-3:#838FA3; --text-inv:#0B0E14;
+  --accent:#4361EE; --accent-ink:#8EA3F9; --accent-tint:rgba(67,97,238,.16);
+  --ok:#2FBF71; --ok-ink:#45D18A; --ok-tint:rgba(47,191,113,.14);
+  --warn:#F5A524; --warn-ink:#F5A524; --warn-tint:rgba(245,165,36,.14);
+  --err:#FF5A5F; --err-ink:#FF8A8D; --err-tint:rgba(255,90,95,.16);
+  --off:#6B7688; --off-tint:rgba(255,255,255,.06);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;font-family:var(--font);font-size:14px;line-height:1.45;background:var(--bg-canvas);color:var(--text);-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app{height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.header{height:52px;flex:none;display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--bg-surface);border-bottom:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px}
+.brand-mark{width:26px;height:26px;border-radius:6px;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:13px}
+.h-sep{width:1px;height:20px;background:var(--border)}
+.h-sub{font-size:12px;color:var(--text-3)}
+.spacer{flex:1}
+.seg{display:inline-flex;border:1px solid var(--border-strong);border-radius:6px;overflow:hidden;height:30px}
+.seg button{border:0;background:transparent;padding:0 12px;font-size:12px;color:var(--text-2)}
+.seg button.on{background:var(--accent);color:#fff;font-weight:600}
+.h-btn{height:30px;padding:0 10px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:12px;color:var(--text-2)}
+.h-btn:hover{background:var(--bg-hover);color:var(--text)}
+.h-user{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2)}
+.avatar{width:24px;height:24px;border-radius:50%;background:var(--bg-sunken);border:1px solid var(--border);display:grid;place-items:center;font-size:11px;font-weight:600}
+.shell{flex:1;display:flex;min-height:0}
+.sidebar{width:216px;flex:none;background:var(--bg-surface);border-right:1px solid var(--border);overflow-y:auto;padding:10px 8px 16px}
+.nav-group{margin-bottom:14px}
+.nav-label{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-3);padding:0 10px 6px}
+.nav-item{display:flex;align-items:center;gap:9px;width:100%;height:34px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:var(--text-2);font-size:13px;text-align:left}
+.nav-item:hover{background:var(--bg-hover);color:var(--text)}
+.nav-item.on{background:var(--accent-tint);color:var(--accent-ink);font-weight:600}
+.nav-item .badge-n{margin-left:auto;font-size:11px;color:var(--text-3);font-family:var(--mono)}
+.nav-item .ext{margin-left:auto;font-size:11px;color:var(--text-3)}
+.nav-foot{border-top:1px solid var(--border);padding:10px 10px 0;font-size:11px;color:var(--text-3);line-height:1.5}
+.main{flex:1;min-width:0;overflow:auto;padding:24px}
+.page-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:18px}
+.page-head h1{margin:0;font-size:20px;font-weight:600;letter-spacing:-.2px}
+.page-meta{font-size:12px;color:var(--text-3);margin-top:3px}
+.page-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{height:var(--ctl-h);padding:0 12px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-surface);color:var(--text);font-size:13px;white-space:nowrap}
+.btn:hover{background:var(--bg-hover)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn.danger{color:var(--err-ink);border-color:var(--err)}
+.btn.sm{height:26px;padding:0 9px;font-size:12px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.link-btn{border:0;background:transparent;color:var(--accent-ink);font-size:12px;padding:0}
+.tabs{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--border);border-radius:7px;background:var(--bg-surface);flex-wrap:wrap}
+.tabs button{height:28px;padding:0 11px;border:0;border-radius:5px;background:transparent;font-size:12px;color:var(--text-2)}
+.tabs button.on{background:var(--accent-tint);color:var(--accent-ink);font-weight:600}
+.stat-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.stat{background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px}
+.stat-l{font-size:12px;color:var(--text-3);display:flex;align-items:center;gap:6px}
+.stat-v{font-size:24px;font-weight:600;margin-top:5px;font-family:var(--mono);letter-spacing:-.5px}
+.stat-s{font-size:11px;color:var(--text-3);margin-top:2px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block;flex:none}
+.dot.warn{background:var(--warn)} .dot.err{background:var(--err)} .dot.off{background:var(--off)}
+.card{background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;margin-bottom:16px;overflow:hidden}
+.card-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border)}
+.card-title{font-size:14px;font-weight:600}
+.card-hint{font-size:11px;color:var(--text-3)}
+.card-body{padding:14px 16px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+table.data{width:100%;border-collapse:collapse;font-size:13px}
+table.data th{position:sticky;top:0;background:var(--bg-sunken);text-align:left;font-size:11px;font-weight:600;color:var(--text-3);padding:0 12px;height:32px;border-bottom:1px solid var(--border);white-space:nowrap;z-index:1}
+table.data td{height:var(--row-h);padding:0 12px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+table.data tr:last-child td{border-bottom:0}
+table.data tr:hover td{background:var(--bg-hover)}
+table.data tr.sel td{background:var(--accent-tint)}
+table.data td.mono,table.data th.mono{font-family:var(--mono);font-size:12px}
+table.data td.num,table.data th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.row-actions{display:flex;gap:6px;justify-content:flex-end}
+.chip{display:inline-flex;align-items:center;gap:5px;height:21px;padding:0 7px;border-radius:4px;font-size:11px;border:1px solid var(--border);background:var(--bg-sunken);color:var(--text-2);white-space:nowrap}
+.chip.ok{background:var(--ok-tint);border-color:var(--ok);color:var(--ok-ink)}
+.chip.warn{background:var(--warn-tint);border-color:var(--warn);color:var(--warn-ink)}
+.chip.err{background:var(--err-tint);border-color:var(--err);color:var(--err-ink)}
+.chip.off{background:var(--off-tint);color:var(--off)}
+.chip.kind{font-family:var(--mono);font-weight:600;letter-spacing:.02em}
+.chip.k-talk{background:#E6F1FB;border-color:#185FA5;color:#0C447C}
+.chip.k-meet{background:#EEEDFE;border-color:#534AB7;color:#3C3489}
+.chip.k-desk{background:#FAEEDA;border-color:#854F0B;color:#633806}
+.chip.k-view{background:#E1F5EE;border-color:#0F6E56;color:#085041}
+.chip.k-ctrl{background:#FBEAF0;border-color:#993556;color:#72243E}
+.chip.planned{border-style:dashed;background:transparent;color:var(--warn-ink);border-color:var(--warn)}
+html[data-planned="off"] .planned-only{display:none!important}
+html[data-planned="off"] .is-planned{opacity:.45}
+.lights{display:inline-flex;gap:4px;vertical-align:middle}
+.lights i{width:8px;height:8px;border-radius:50%;background:var(--ok);display:block}
+.lights i.w{background:var(--warn)} .lights i.e{background:var(--err)}
+.note{font-size:12px;line-height:1.6;color:var(--text-3)}
+.note.warn{color:var(--warn-ink)}
+.banner{display:flex;align-items:flex-start;gap:10px;padding:11px 14px;border-radius:7px;font-size:12px;line-height:1.55;margin-bottom:16px;border:1px dashed var(--warn);background:var(--warn-tint);color:var(--warn-ink)}
+.banner.info{border-color:var(--accent);background:var(--accent-tint);color:var(--accent-ink);border-style:solid}
+.banner b{font-weight:600}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:8px 12px;font-size:13px}
+.kv dt{color:var(--text-3);font-size:12px} .kv dd{margin:0;font-family:var(--mono);font-size:12px;word-break:break-all}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.field label{font-size:12px;color:var(--text-2)}
+.field input,.field select{height:32px;padding:0 9px;border:1px solid var(--border-control);border-radius:5px;background:var(--bg-surface);font-size:13px}
+.field .hint{font-size:11px;color:var(--text-3)}
+.scrim{position:absolute;inset:0;background:rgba(12,16,24,.42);z-index:40;display:none}
+body.has-overlay .scrim{display:block}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:min(480px,92vw);background:var(--bg-surface);border-left:1px solid var(--border-strong);z-index:41;display:none;flex-direction:column;box-shadow:-8px 0 24px rgba(20,24,33,.14)}
+body.has-overlay .drawer{display:flex}
+.drawer-head{flex:none;padding:16px 18px;border-bottom:1px solid var(--border)}
+.drawer-title{font-size:16px;font-weight:600;display:flex;align-items:center;gap:8px}
+.drawer-sub{font-size:12px;color:var(--text-3);margin-top:3px}
+.drawer-body{flex:1;overflow:auto;padding:16px 18px}
+.drawer-foot{flex:none;display:flex;gap:8px;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--border)}
+.sec{margin-bottom:20px}
+.sec h3{margin:0 0 9px;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-3)}
+.dialog{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:42;width:min(520px,94vw);max-height:86vh;overflow:auto;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:9px;box-shadow:0 12px 36px rgba(20,24,33,.2);display:none}
+body.has-dialog .dialog{display:block}
+.dialog-head{padding:16px 18px;border-bottom:1px solid var(--border);font-size:15px;font-weight:600}
+.dialog-body{padding:16px 18px}
+.dialog-foot{display:flex;gap:8px;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--border)}
+.tiles-today{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.tile-old{aspect-ratio:16/9;background:linear-gradient(0deg,#232936,#2d3543);border-radius:5px;display:grid;place-items:center;color:#8b95a6;font-size:11px;font-family:var(--mono)}
+.pseudo-row{display:grid;grid-template-columns:1.4fr 1fr 1fr 80px;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);font-size:13px}
+.pseudo-head{background:var(--bg-sunken);font-size:11px;color:var(--text-3);font-weight:600}
+.empty{padding:34px 16px;text-align:center;color:var(--text-3);font-size:13px}
+.empty b{display:block;font-size:15px;color:var(--text);margin-bottom:5px;font-weight:600}
+.matrix{width:100%;border-collapse:collapse;font-size:12px}
+.matrix th,.matrix td{border:1px solid var(--border);padding:7px 9px;text-align:center}
+.matrix th{background:var(--bg-sunken);color:var(--text-2);font-weight:600;font-size:11px}
+.matrix td:first-child,.matrix th:first-child{text-align:left}
+.yes{color:var(--ok-ink);font-weight:600} .no{color:var(--off)} .part{color:var(--warn-ink);font-weight:600}
+.footnote{font-size:11px;color:var(--text-3);margin-top:18px;padding-top:12px;border-top:1px solid var(--border);line-height:1.6}
+pre.yaml{margin:0;padding:11px 13px;background:var(--bg-sunken);border:1px solid var(--border);border-radius:6px;font-family:var(--mono);font-size:11px;line-height:1.55;overflow:auto;max-height:280px;color:var(--text-2)}
+@media(max-width:900px){.stat-strip{grid-template-columns:repeat(2,1fr)}.grid-2{grid-template-columns:1fr}.sidebar{width:170px}.tiles-today{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <div class="brand"><span class="brand-mark">MS</span><span>MediaServo Admin</span></div>
+    <div class="h-sep"></div>
+    <span class="h-sub" id="hSub">Target console · rooms &amp; fleet</span>
+    <div class="spacer"></div>
+    <div class="seg" id="modeSeg">
+      <button type="button" data-action="mode" data-v="today">Today</button>
+      <button type="button" data-action="mode" data-v="target" class="on">Target</button>
+    </div>
+    <button class="h-btn" type="button" data-action="planned" id="plannedBtn" title="Show or hide P2 planned affordances">Planned: on</button>
+    <button class="h-btn" type="button" data-action="theme" id="themeBtn">Dark</button>
+    <div class="h-user"><span class="avatar">AD</span><span>admin</span></div>
+  </header>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main class="main" id="main"></main>
+  </div>
+  <div class="scrim" data-action="close"></div>
+  <aside class="drawer" id="drawer"></aside>
+  <div class="dialog" id="dialog"></div>
+</div>
+<script>
+'use strict';
+
+const KIND = {
+  talk:{label:'talk', desc:'Intercom / PTT', pub:'Channel members (audio only)', floor:'Enforced', data:'—', today:'audio-<id> room · floor half-wired', status:'partial'},
+  meet:{label:'meet', desc:'Meeting / voice conference', pub:'Members (audio/video/screen)', floor:'None (full duplex)', data:'—', today:'audio- prefix room · 4031 on account↔account', status:'partial'},
+  desk:{label:'desk', desc:'Remote desktop', pub:'Controlled-end screen', floor:'None', data:'Control ACL', today:'none · SourceMode::Desktop = Unsupported', status:'planned'},
+  view:{label:'view', desc:'Monitoring / one-way', pub:'Device only (cameras + mic)', floor:'None', data:'—', today:'DeviceStream room + per-stream subrooms', status:'live'},
+  ctrl:{label:'ctrl', desc:'Device control', pub:'Data only', floor:'—', data:'Required', today:'DataChannel on the vehicle room', status:'partial'}
+};
+const TIER = {
+  camera:{label:'camera', tier:'L0', adds:'1 video stream', kinds:['view']},
+  tablet:{label:'tablet', tier:'L1a', adds:'mic · dual camera · battery policy', kinds:['view','talk','meet']},
+  host:{label:'host', tier:'L1b', adds:'N streams · host.yaml · multiprocess', kinds:['view','desk']},
+  vehicle:{label:'vehicle', tier:'L2', adds:'teleop · GPS · estop · weaknet', kinds:['view','ctrl','talk','desk']}
+};
+
+const ROOMS = [
+  {id:'VH-07', kind:'view', origin:'derived', source:'vehicle · VH-07', members:3, producers:4, mode:'device room + label', state:'live', note:'Today: all producers publish into the device room with Produce.label = stream id (host-streamer.rs:566-573, :733). RoomJoin.stream_id is a dead field. GET /api/rooms would report this room as kind=control.'},
+  {id:'VH-11_video0', kind:'view', origin:'legacy', source:'PIT-140 v2 derived name', members:1, producers:1, mode:'legacy subroom', state:'warn', note:'The <vehicle>_<stream> subroom naming is deprecated in host-streamer. Discovery still derives stream entries from StatusReport and now merges them into the vehicle room streams[] field (rooms.rs:270-290).'},
+  {id:'audio-VH-07', kind:'meet', origin:'legacy', source:'name prefix audio-', members:4, producers:1, mode:'meet, video=false', state:'live', note:'Legacy prefix form. GET /api/rooms reports kind=audio. Deprecated in P2 but still resolvable.'},
+  {id:'stream-9f2c', kind:'view', origin:'orphan', source:'unregistered', members:0, producers:0, mode:'unknown', state:'warn', note:'Not in RoomManager. Visible only through /api/admin/sfu/rooms. No peer → never reclaimed.'},
+  {id:'fleet-ops', kind:'talk', origin:'managed', source:'admin-created', members:12, producers:1, mode:'exclusive + queue', state:'planned', note:'P2 managed room. Persisted in etc/rooms.yaml (file does not exist today).'},
+  {id:'ops-standup', kind:'meet', origin:'managed', source:'admin-created', members:5, producers:5, mode:'full duplex', state:'planned', note:'P2 managed room. Ephemeral with empty-timeout is also allowed.'},
+  {id:'helpdesk-01', kind:'desk', origin:'managed', source:'admin-created', members:2, producers:1, mode:'screen + input', state:'planned', note:'P2 managed room. Screen capture and input injection are not implemented.'},
+  {id:'VH-07_ctrl', kind:'ctrl', origin:'derived', source:'vehicle · VH-07', members:1, producers:1, mode:'data only', state:'planned', note:'P2 derived room. Today DataChannel shares the vehicle room.'}
+];
+const DEVICES = [
+  {id:'msrtv359', name:'East gate column 01', tier:'camera', streams:1, cfg:'synced', lights:['','',''], ver:'v142', last:'3s ago', online:true},
+  {id:'msrtv361', name:'Field tablet 04', tier:'tablet', streams:2, cfg:'pending', lights:['w','',''], ver:'v88', last:'6s ago', online:true},
+  {id:'msrtv402', name:'Edge host 02', tier:'host', streams:4, cfg:'drifted', lights:['','w',''], ver:'v211', last:'4s ago', online:true},
+  {id:'VH-07', name:'Vehicle 07', tier:'vehicle', streams:4, cfg:'synced', lights:['','',''], ver:'v318', last:'2s ago', online:true},
+  {id:'VH-11', name:'Vehicle 11', tier:'vehicle', streams:3, cfg:'failed', lights:['','','e'], ver:'v97', last:'14m ago', online:false},
+  {id:'msrtv418', name:'Yard camera 03', tier:'camera', streams:1, cfg:'pending', lights:['w','',''], ver:'v12', last:'31s ago', online:true}
+];
+const CLIENTS = [
+  {name:'Web Admin', shape:'embedded SPA in server binary', talk:'part', meet:'part', desk:'no', view:'yes', ctrl:'no', cfg:'no', note:'8 routes, L1.5 maturity. Should manage objects, never hold a live control session.'},
+  {name:'Tower (browser)', shape:'M0 launcher + M1/M2/M3 session', talk:'yes', meet:'yes', desk:'planned', view:'yes', ctrl:'yes', cfg:'no', note:'Design only — no apps/tower in the repo. Reload = losing the asset.'},
+  {name:'Tower (Tauri)', shape:'OS windows per session', talk:'yes', meet:'yes', desk:'planned', view:'yes', ctrl:'yes', cfg:'no', note:'Design only. Adds hotkeys, multi-window, gamepad, tray.'},
+  {name:'TS SDK', shape:'www/packages/client', talk:'yes', meet:'no', desk:'no', view:'yes', ctrl:'no', cfg:'no', note:'Video + audio; no control / estop / resume. Reconnect rebuilds the whole chain.'},
+  {name:'Rust SDK', shape:'crates/mediaservo-client', talk:'no', meet:'no', desk:'no', view:'yes', ctrl:'yes', cfg:'no', note:'Video + control + estop + resume; no audio consumer, no TLS.'},
+  {name:'Host config page', shape:'127.0.0.1:9800 on device', talk:'no', meet:'no', desk:'no', view:'no', ctrl:'no', cfg:'yes', note:'Boot-time only: identity, signaling endpoint, PSK. Everything else is pushed from Web.'}
+];
+const SESSIONS = [
+  {id:'s-8c21', client:'Tower (browser)', principal:'lin.wei', room:'VH-07', kind:'ctrl', dialect:4, state:'live', since:'00:14:22'},
+  {id:'s-3f07', client:'Web Admin', principal:'dispatcher', room:'audio-VH-07', kind:'meet', dialect:3, state:'live', since:'00:06:51'},
+  {id:'s-91ad', client:'TS SDK', principal:'api-key:cam03', room:'VH-07', kind:'view', dialect:1, state:'resuming', since:'00:00:28'},
+  {id:'s-6b44', client:'Rust SDK', principal:'device:VH-11', room:'VH-11', kind:'view', dialect:4, state:'hold', since:'00:00:19'},
+  {id:'s-0d18', client:'Tower (browser)', principal:'chen.yu', room:'ops-standup', kind:'meet', dialect:4, state:'planned', since:'—'}
+];
+const EVENTS = [
+  {t:'17:36:02', obj:'VH-11', ev:'StatusReport missing for 14m', sev:'warn'},
+  {t:'17:34:47', obj:'msrtv402', ev:'Config fingerprint drift detected', sev:'warn'},
+  {t:'17:31:40', obj:'stream-9f2c', ev:'Zero-peer SFU room observed', sev:'warn'},
+  {t:'17:28:11', obj:'VH-07', ev:'ConfigPush v318 acknowledged', sev:'ok'},
+  {t:'17:22:03', obj:'msrtv361', ev:'Device enrollment pending approval', sev:'off'}
+];
+const AUDIT = [
+  {t:'17:28:11', actor:'admin', act:'config.push', obj:'VH-07', res:'ok', detail:'version 318 · full host.yaml · 7-step restart'},
+  {t:'17:19:55', actor:'admin', act:'room.delete', obj:'VH-02', res:'warn', detail:'RoomManager entry removed only; no kick, no SFU cleanup'},
+  {t:'17:12:30', actor:'dispatcher', act:'room.join', obj:'audio-VH-07', res:'ok', detail:'RoomJoin accepted'},
+  {t:'17:08:02', actor:'device:VH-11', act:'emergency.stop', obj:'VH-11', res:'err', detail:'Latched · JSONL recorded'},
+  {t:'16:58:41', actor:'viewer', act:'consume', obj:'VH-07', res:'err', detail:'4031 · producer_owner not allowlisted'}
+];
+
+const NAV = {
+  today:[
+    {g:'Navigation', items:[
+      {p:'t-dashboard',label:'Dashboard'},{p:'t-audio',label:'Audio Conference'},{p:'t-vehicles',label:'Vehicles'},
+      {p:'t-devices',label:'Device Management'},{p:'t-accounts',label:'Account Management'},
+      {p:'t-apikeys',label:'API Keys'},{p:'t-settings',label:'Settings'},
+      {p:'t-weaknet',label:'WeakNet Panel',ext:'↗'}
+    ]}
+  ],
+  target:[
+    {g:'Operate', items:[{p:'overview',label:'Overview'},{p:'rooms',label:'Rooms',n:ROOMS.length},{p:'sessions',label:'Sessions & clients'}]},
+    {g:'Assets', items:[{p:'devices',label:'Devices',n:DEVICES.length},{p:'streams',label:'Streams'}]},
+    {g:'Configure', items:[{p:'config',label:'Config push'},{p:'keys',label:'Client keys'}]},
+    {g:'System', items:[{p:'audit',label:'Audit log'},{p:'settings',label:'Settings'},{p:'weaknet',label:'WeakNet',ext:'↗'}]}
+  ]
+};
+
+const state = {mode:'target', page:'rooms', kind:'all', tier:'all', planned:true, sel:new Set(), drawer:null, dialog:null, cfgTab:'basic', cfgDirty:false, detailId:null, roomTab:'overview'};
+
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function chipKind(k){return '<span class="chip kind k-'+k+'">'+k+'</span>';}
+function chipState(s){
+  const m={live:['ok','live'],warn:['warn','attention'],planned:['planned','planned'],off:['off','offline']};
+  const c=m[s]||['off',s];return '<span class="chip '+c[0]+'">'+c[1]+'</span>';
+}
+function plannedChip(){return '<span class="chip planned">P2 · no backend field</span>';}
+function lights(a){return '<span class="lights">'+a.map(x=>'<i class="'+x+'"></i>').join('')+'</span>';}
+function head(title,meta,actions){return '<div class="page-head"><div><h1>'+title+'</h1><div class="page-meta">'+meta+'</div></div><div class="spacer"></div><div class="page-actions">'+(actions||'')+'</div></div>';}
+function card(title,hint,body){return '<div class="card"><div class="card-head"><span class="card-title">'+title+'</span><span class="spacer"></span><span class="card-hint">'+hint+'</span></div>'+body+'</div>';}
+function table(cols,rows){return '<table class="data"><thead><tr>'+cols.map(c=>'<th scope="col" class="'+(c.cls||'')+'">'+c.t+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table>';}
+
+function renderNav(){
+  const groups=NAV[state.mode];
+  document.getElementById('sidebar').innerHTML=groups.map(g=>'<div class="nav-group"><div class="nav-label">'+g.g+'</div>'+
+    g.items.map(i=>'<button class="nav-item'+((state.page===i.p||(state.page==='room-detail'&&i.p==='rooms'))?' on':'')+'" type="button" data-action="nav" data-p="'+i.p+'">'+esc(i.label)+
+      (i.n!==undefined?'<span class="badge-n">'+i.n+'</span>':'')+(i.ext?'<span class="ext">'+i.ext+'</span>':'')+'</button>').join('')+'</div>').join('')+
+    '<div class="nav-foot">'+(state.mode==='today'
+      ? 'As shipped: 8 flat routes, no grouping, no room-type concept. Role gates use <code>canMonitor</code> / <code>isAdmin</code> in Layout.tsx.'
+      : 'Rooms, clients and devices are first-class objects. Planned affordances are dashed and can be hidden with the header toggle.')+'</div>';
+}
+
+/* ---------------- TODAY (as shipped) ---------------- */
+function pageTodayDashboard(){
+  return head('Dashboard','4 stat cards + 16 live tiles · no kind split · no alerts list','<button class="btn sm" type="button">Refresh</button>')+
+    '<div class="banner"><b>Why this is being replaced.</b>&nbsp; Dashboard.tsx decodes 16 streams (MAX_PLAYING = 16). The UI contract caps Web at ≤4 tiles; wall monitoring belongs to Tower. Four StatsCards exist (devices / streams / consumers / peers), but there is no kind split, no approvals queue and no persisted alert history.</div>'+
+    card('Live video wall','MAX_PLAYING = 16 · fixed grid','<div class="card-body"><div class="tiles-today">'+Array.from({length:16},(_,i)=>'<div class="tile-old">VH-'+String(i+1).padStart(2,'0')+'</div>').join('')+'</div></div>');
+}
+function pageTodayAudio(){
+  return head('Audio Conference','GET /api/admin/sfu/rooms filtered by audio- prefix · no member roster','<button class="btn sm" type="button">Refresh</button>')+
+    '<div class="banner info"><b>Only working audio surface.</b>&nbsp; Browser uplink works; the host mic is a 440 Hz placeholder. Account↔account consumption is refused with 4031 by can_consume(producer_owner).</div>'+
+    card('Rooms','getSfuRooms() → filter room_id.startsWith("audio-")',table(
+      [{t:'Room'},{t:'Participants',cls:'num'},{t:'Join'}],
+      [['audio-VH-07','4','<button class="btn sm" type="button">Join</button>'],['fleet-ops','12','<button class="btn sm" type="button">Join</button>']]
+        .map(r=>'<tr><td class="mono">'+r[0]+'</td><td class="num">'+r[1]+'</td><td><div class="row-actions">'+r[2]+'</div></td></tr>')));
+}
+function pageTodayVehicles(){
+  return head('Vehicles','5 s poll · div card grid, not a table','<button class="btn sm" type="button">Refresh</button>')+
+    card('Fleet','cards → no sort, no sticky header, no aria-sort',
+      '<div class="pseudo-row pseudo-head"><span>Vehicle</span><span>Link</span><span>Streams</span><span>Last report</span></div>'+
+      DEVICES.filter(d=>d.tier==='vehicle').map(d=>'<div class="pseudo-row"><span>'+esc(d.name)+'</span><span>'+(d.online?'online':'offline')+'</span><span>'+d.streams+'</span><span>'+d.last+'</span></div>').join(''));
+}
+function pageTodayDevices(){
+  return head('Device Management','approved / pending only · no tier, no config state','<button class="btn sm primary" type="button">Approve</button>')+
+    '<div class="banner"><b>Missing from this page:</b>&nbsp; device kind, stream list, host.yaml editor, config fingerprints, config push status, bulk actions. Destructive actions still use window.confirm.</div>'+
+    card('Approved devices','div pseudo-table',
+      '<div class="pseudo-row pseudo-head"><span>Name</span><span>Device ID</span><span>Status</span><span>Action</span></div>'+
+      DEVICES.map(d=>'<div class="pseudo-row"><span>'+esc(d.name)+'</span><span class="mono">'+d.id+'</span><span>'+(d.online?'online':'offline')+'</span><span><button class="btn sm" type="button">Revoke</button></span></div>').join(''));
+}
+function pageTodayGeneric(p){
+  const map={'t-accounts':['Account Management','Role editor lives here — 00-ui-contract.md §4.1 says identity is delegated to AccessBase and this page should be deleted.'],
+    't-apikeys':['API Keys','Machine credentials. PSK display is mixed into this surface; target IA moves PSK to Settings.'],
+    't-settings':['Settings','Token paste, PSK display, theme. No theme control is shipped today.'],
+    't-weaknet':['WeakNet Panel','External link, new tab. Probed once per mount with HEAD /weaknet/v1/capabilities.']};
+  const m=map[p]||['',''];
+  return head(m[0],'as shipped','')+'<div class="banner info"><b>Current behaviour.</b>&nbsp; '+m[1]+'</div>'+card('Page','read-only snapshot','<div class="card-body note">This prototype shows the navigation and information-architecture gap, not a full reconstruction of the shipped page.</div>');
+}
+
+/* ---------------- TARGET ---------------- */
+function pageOverview(){
+  const live=ROOMS.filter(r=>r.state==='live').length, plan=ROOMS.filter(r=>r.state==='planned').length;
+  return head('Overview','fleet state in 10 seconds · updated 3s ago · WS live','<button class="btn sm" type="button" data-action="refresh">Refresh</button><button class="btn sm primary" type="button" data-action="nav" data-p="devices">Review approvals (2)</button>')+
+    '<div class="stat-strip">'+
+      '<div class="stat"><div class="stat-l"><span class="dot"></span>Devices reporting</div><div class="stat-v">5 / 6</div><div class="stat-s">5 s StatusReport poll</div></div>'+
+      '<div class="stat"><div class="stat-l"><span class="dot warn"></span>Rooms needing attention</div><div class="stat-v">'+ROOMS.filter(r=>r.state==='warn').length+'</div><div class="stat-s">zero-peer SFU rooms</div></div>'+
+      '<div class="stat"><div class="stat-l"><span class="dot"></span>Active rooms</div><div class="stat-v">'+live+'</div><div class="stat-s">'+plan+' planned / P2</div></div>'+
+      '<div class="stat"><div class="stat-l"><span class="dot warn"></span>Config drift</div><div class="stat-v">2</div><div class="stat-s">1 pending · 1 drifted · 1 failed</div></div>'+
+    '</div>'+
+    '<div class="grid-2">'+
+      card('Rooms by kind','kind is a data field, not a name prefix',
+        '<div class="card-body">'+Object.keys(KIND).map(k=>{
+          const n=ROOMS.filter(r=>r.kind===k).length, p=ROOMS.filter(r=>r.kind===k&&r.state==='planned').length;
+          return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">'+chipKind(k)+
+            '<span class="note" style="flex:1">'+KIND[k].desc+'</span><span class="mono" style="font-size:12px">'+n+'</span>'+
+            (p?'<span class="chip planned">'+p+' planned</span>':'')+'</div>';
+        }).join('')+'</div>')+
+      card('Recent events','WS push · not persisted today','<div class="card-body">'+
+        EVENTS.map(e=>'<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)"><span class="mono" style="font-size:11px;color:var(--text-3)">'+e.t+'</span><span class="dot '+(e.sev==='ok'?'':e.sev)+'"></span><span style="flex:1;font-size:12px">'+esc(e.ev)+'</span><span class="mono" style="font-size:11px">'+e.obj+'</span></div>').join('')+
+        '<div class="note" style="margin-top:10px">Gap: event_tx is a broadcast channel with no replay. A 24 h list needs GET /api/admin/events?since= or a ring buffer.</div></div>')+
+    '</div>'+
+    card('Capability coverage','which of the five kinds can be operated today',
+      table([{t:'kind'},{t:'room create'},{t:'publish'},{t:'floor gate'},{t:'admin API'},{t:'state'}],
+        Object.keys(KIND).map(k=>'<tr><td>'+chipKind(k)+'</td><td>'+(k==='view'?'<span class="yes">derived</span>':'<span class="part">P2</span>')+'</td><td>'+(k==='desk'?'<span class="no">none</span>':'<span class="yes">yes</span>')+'</td><td>'+(k==='talk'?'<span class="part">half</span>':'<span class="no">n/a</span>')+'</td><td>'+(k==='view'?'<span class="part">list/delete</span>':'<span class="no">none</span>')+'</td><td>'+chipState(KIND[k].status)+'</td></tr>')));
+}
+
+function pageRooms(){
+  const list=ROOMS.filter(r=>state.kind==='all'||r.kind===state.kind);
+  const tabs=['all'].concat(Object.keys(KIND)).map(k=>'<button type="button" data-action="kind" data-v="'+k+'" class="'+(state.kind===k?'on':'')+'">'+(k==='all'?'All':k)+' <span style="opacity:.6">'+(k==='all'?ROOMS.length:ROOMS.filter(r=>r.kind===k).length)+'</span></button>').join('');
+  return head('Rooms','3 registries · only 2 are exposed by REST · '+ROOMS.length+' rooms',
+      '<button class="btn sm" type="button" data-action="refresh">Refresh</button><button class="btn sm primary planned-only" type="button" data-action="new-room">+ New room</button>')+
+    '<div class="banner info"><b>One room, one purpose.</b>&nbsp; kind is a <b>data field on room metadata</b> (module 26, RM3), not a name prefix. Derived rooms follow the device registry; managed rooms are created by an admin and persist in <code>etc/rooms.yaml</code>. Today neither RoomMeta nor rooms.yaml exists — every room is <code>RoomType::DeviceStream</code>. Watch the name collision: the shipped <code>room_kind()</code> in rooms.rs:57-65 returns <b>audio / video / control</b> (discovery plane), which is a different three-value vocabulary from the five design kinds.</div>'+
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap"><div class="tabs">'+tabs+'</div><span class="spacer"></span>'+
+      '<span class="note">'+list.length+' of '+ROOMS.length+' shown</span>'+
+      (state.sel.size?'<button class="btn sm danger is-planned" type="button" data-action="bulk-room">Delete ('+state.sel.size+')</button>':'')+'</div>'+
+    card('Room registry','RoomManager · SfuManager · SignalingServer.channels',
+      table([{t:'',cls:'num'},{t:'Room ID'},{t:'Kind'},{t:'Origin'},{t:'Source / mode'},{t:'Members',cls:'num'},{t:'Producers',cls:'num'},{t:'State'},{t:''}],
+        list.map(r=>'<tr class="'+(state.sel.has(r.id)?'sel':'')+'"><td><input type="checkbox" data-action="sel" data-id="'+esc(r.id)+'"'+(state.sel.has(r.id)?' checked':'')+' aria-label="Select '+esc(r.id)+'"></td>'+
+          '<td class="mono">'+esc(r.id)+'</td><td>'+chipKind(r.kind)+'</td>'+
+          '<td>'+(r.origin==='managed'?'<span class="chip planned">managed · P2</span>':r.origin==='legacy'?'<span class="chip warn">legacy</span>':r.origin==='orphan'?'<span class="chip err">orphan</span>':'<span class="chip">derived</span>')+'</td>'+
+          '<td class="note">'+esc(r.source)+' · '+esc(r.mode)+'</td><td class="num">'+r.members+'</td><td class="num">'+r.producers+'</td>'+
+          '<td>'+chipState(r.state)+'</td><td><div class="row-actions"><button class="btn sm" type="button" data-action="open-room-detail" data-id="'+esc(r.id)+'">Details</button></div></td></tr>')));
+}
+function pageSessions(){
+  const sym={yes:'<span class="yes">yes</span>',no:'<span class="no">—</span>',part:'<span class="part">partial</span>',planned:'<span class="part">P2</span>'};
+  return head('Sessions & clients','4 client shapes · no session registry API today','<button class="btn sm" type="button" data-action="refresh">Refresh</button>')+
+    '<div class="banner"><b>Missing backend object.</b>&nbsp; There is no session/client list API. The table below is derived from WS connections, room_owners and producer_owners; a real page needs a first-class MediaSession model (member state vs media state are not separable today — no C→S unpublish variant).</div>'+
+    card('Active sessions','WS connections · 30 s resume hold window','<div class="card-body">'+
+      table([{t:'Session'},{t:'Client shape'},{t:'Principal'},{t:'Room'},{t:'Kind'},{t:'Dialect',cls:'num'},{t:'State'},{t:'Since'}],
+        SESSIONS.map(s=>'<tr><td class="mono">'+s.id+'</td><td>'+esc(s.client)+'</td><td class="mono">'+esc(s.principal)+'</td><td class="mono">'+esc(s.room)+'</td><td>'+chipKind(s.kind)+'</td><td class="num">'+s.dialect+'</td><td>'+chipState(s.state)+'</td><td class="mono">'+s.since+'</td></tr>'))+'</div>')+
+    card('Client shape × kind capability','two SDKs are complementary, not equivalent',
+      '<div class="card-body"><table class="matrix"><thead><tr><th>Client surface</th><th>talk</th><th>meet</th><th>desk</th><th>view</th><th>ctrl</th><th>config</th></tr></thead><tbody>'+
+      CLIENTS.map(c=>'<tr><td><b style="font-weight:600">'+esc(c.name)+'</b><div class="note" style="font-size:11px">'+esc(c.shape)+'</div></td>'+
+        ['talk','meet','desk','view','ctrl','cfg'].map(k=>'<td>'+sym[c[k]]+'</td>').join('')+'</tr>').join('')+
+      '</tbody></table><div class="note" style="margin-top:10px">'+esc(CLIENTS[3].note)+' · '+esc(CLIENTS[4].note)+'</div></div>');
+}
+function pageDevices(){
+  const list=DEVICES.filter(d=>state.tier==='all'||d.tier===state.tier);
+  const tabs=['all'].concat(Object.keys(TIER)).map(k=>'<button type="button" data-action="tier" data-v="'+k+'" class="'+(state.tier===k?'on':'')+'">'+(k==='all'?'All':k)+'</button>').join('');
+  return head('Devices','tier-aware configuration · desired vs reported state',
+      '<button class="btn sm" type="button" data-action="refresh">Refresh</button><button class="btn sm" type="button" data-action="add-device">+ Add device</button>')+
+    '<div class="banner info"><b>Tier is a first-class field.</b>&nbsp; camera → tablet (camera+) / host (camera×N+) → vehicle (host+). The config drawer renders only the delta for the selected tier; every lower-tier field is inherited.</div>'+
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap"><div class="tabs">'+tabs+'</div><span class="spacer"></span>'+
+      (state.sel.size?'<span class="note">'+state.sel.size+' of '+DEVICES.length+' selected</span><button class="btn sm danger" type="button" data-action="bulk-device">Bulk remove ('+state.sel.size+')</button>':'')+'</div>'+
+    card('Fleet','configState = three fingerprints + three lights','<div class="card-body">'+
+      table([{t:''},{t:'Device'},{t:'ID'},{t:'Tier'},{t:'Streams',cls:'num'},{t:'Config'},{t:'Lights'},{t:'Version',cls:'num'},{t:'Last report'},{t:''}],
+        list.map(d=>'<tr class="'+(state.sel.has(d.id)?'sel':'')+'"><td><input type="checkbox" data-action="sel" data-id="'+esc(d.id)+'"'+(state.sel.has(d.id)?' checked':'')+' aria-label="Select '+esc(d.id)+'"></td>'+
+          '<td>'+esc(d.name)+'</td><td class="mono">'+d.id+'</td><td><span class="chip kind">'+d.tier+'</span></td><td class="num">'+d.streams+'</td>'+
+          '<td>'+chipState(d.cfg==='synced'?'live':d.cfg==='failed'?'warn':'warn')+' <span class="note">'+d.cfg+'</span></td>'+
+          '<td>'+lights(d.lights)+'</td><td class="num">'+d.ver+'</td><td class="mono">'+d.last+'</td>'+
+          '<td><div class="row-actions"><button class="btn sm" type="button" data-action="config" data-id="'+esc(d.id)+'">Configure</button></div></td></tr>'))+'</div>')+
+    card('Tier inheritance','what each layer adds on top of the layer below',
+      '<div class="card-body">'+Object.keys(TIER).map(t=>{
+        const x=TIER[t];return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)"><span class="chip kind" style="width:74px;justify-content:center">'+t+'</span><span class="note" style="width:40px">'+x.tier+'</span><span style="flex:1;font-size:12px">'+esc(x.adds)+'</span><span>'+x.kinds.map(k=>chipKind(k)).join(' ')+'</span></div>';
+      }).join('')+'<div class="note" style="margin-top:10px">Note: docs/ui/05-device-model.md still describes host as a PC screen-capture box with H.265/AAC/ONVIF fields. That document predates the tier ruling and must be superseded.</div></div>');
+}
+function pageStreams(){
+  const rows=[];
+  DEVICES.forEach(d=>{for(let i=0;i<d.streams;i++){rows.push({dev:d.id,tier:d.tier,id:'video'+i,label:i===0?'front':i===1?'rear':'cam'+i,codec:'H264',res:'1280×720',fps:30,state:i===0?'live':'live'});}});
+  return head('Streams','producer-level view · label is the subscription address','<button class="btn sm" type="button" data-action="refresh">Refresh</button>')+
+    '<div class="banner"><b>Data exists, the page does not.</b>&nbsp; Today Produce.label = stream id (host-streamer.rs:733); GET /api/rooms derives stream ids from StatusReport and merges them into the vehicle room <code>streams[]</code> (rooms.rs:270-290); GET /api/admin/sfu/stats exposes producer byte/packet stats. None of these three is consumed by a producer list page. Missing: the front/left/right/rear/ambient label set from module 26 §26.5 and a first-class producer object. <code>RoomJoin.stream_id</code> is a dead field.</div>'+
+    card('Active producers','per device · '+rows.length+' streams',
+      table([{t:'Producer'},{t:'Device'},{t:'Tier'},{t:'Label'},{t:'Codec'},{t:'Resolution'},{t:'FPS',cls:'num'},{t:'State'}],
+        rows.map(r=>'<tr><td class="mono">'+esc(r.dev)+' · '+r.id+'</td><td class="mono">'+r.dev+'</td><td><span class="chip kind">'+r.tier+'</span></td><td class="mono">'+r.label+'</td><td>'+r.codec+'</td><td class="mono">'+r.res+'</td><td class="num">'+r.fps+'</td><td>'+chipState(r.state)+'</td></tr>')));
+}
+function pageConfig(){
+  return head('Config push','desired = full host.yaml · reported = device receipts','<button class="btn sm" type="button" data-action="refresh">Refresh</button><button class="btn sm primary" type="button" data-action="push">Push to selected</button>')+
+    '<div class="banner"><b>Whole-file push, never field-level.</b>&nbsp; POST /api/admin/config/push takes {room_id, config:String, version:u64}. Every push triggers the 7-step teardown + restart (10–60 s outage). config_version is a monotonic push sequence, not a desired-state version; the three fingerprints + three lights are the real consistency signal.</div>'+
+    '<div class="grid-2">'+
+      card('Desired (admin edit)','etc/host.yaml on the server','<div class="card-body"><pre class="yaml">server:\n  signaling: wss://ms.example.com/ws\n  psk: ********\nencoder:\n  codec: h264\n  bitrate_kbps: 2500\nstreams:\n  - id: video0\n    label: front\n    source: /dev/video0\n    width: 1280\n    height: 720\n    fps: 30\nweaknet:\n  min_fps: 12</pre><div class="note" style="margin-top:10px">Four admin endpoints have zero SPA callers: GET /api/admin/config, POST /api/admin/config/push, GET /api/admin/rooms/{id}, DELETE /api/admin/peers/{id}. The independent GET /api/rooms (three-value kind) is also unused.</div></div>')+
+      card('Reported (device receipt)','StatusReport 5 s · NOT exposed by admin REST','<div class="card-body"><div class="note warn" style="margin-bottom:10px">GET /api/admin/status returns a compact DeviceStatusSnapshot with no config echo fields. The full StatusReport (three fingerprints + three flags) lives only in the in-memory StatusRegistry and the WS binary frame. A read-only admin endpoint is a prerequisite for this panel.</div><dl class="kv">'+
+        '<dt>config_version</dt><dd>318</dd><dt>running fp</dt><dd>a91f…c204</dd><dt>file fp</dt><dd>a91f…c204</dd>'+
+        '<dt>last push fp</dt><dd>a91f…c204</dd><dt>config_flags</dt><dd>pending / error / conflict</dd>'+
+        '</dl><div style="margin-top:12px">'+lights(['','',''])+' <span class="note">all green · device is running what was pushed</span></div>'+
+        '<div class="note warn" style="margin-top:12px">No AWS IoT-style desired/reported shadow. No field-level API. There is no way to change one stream without restarting every stream on that device.</div></div>')+
+    '</div>'+
+    card('Rollout targets','select devices, then push','<div class="card-body">'+
+      table([{t:''},{t:'Device'},{t:'Tier'},{t:'Current version',cls:'num'},{t:'Config state'},{t:'Impact'}],
+        DEVICES.map(d=>'<tr><td><input type="checkbox" data-action="sel" data-id="'+esc(d.id)+'"'+(state.sel.has(d.id)?' checked':'')+' aria-label="Select '+esc(d.id)+'"></td><td>'+esc(d.name)+'</td><td><span class="chip kind">'+d.tier+'</span></td><td class="num">'+d.ver+'</td><td>'+chipState(d.cfg==='synced'?'live':'warn')+' <span class="note">'+d.cfg+'</span></td><td class="note">full restart · 10–60 s</td></tr>'))+'</div>');
+}
+function pageKeys(){
+  return head('Client keys','machine credentials only · humans belong to AccessBase','<button class="btn sm primary" type="button">+ Issue key</button>')+
+    card('Keys','prefix shown, secret never re-displayed',
+      table([{t:'Label'},{t:'Prefix'},{t:'Created'},{t:'Last used'},{t:'Expires'},{t:''}],
+        [['host-02','msk_7f21','2026-09-14','2 min ago','never'],['cam-03','msk_3a88','2026-10-02','1 h ago','2027-01-01'],['bench','msk_90cd','2026-11-01','never','2026-12-01']]
+          .map(r=>'<tr><td>'+r[0]+'</td><td class="mono">'+r[1]+'</td><td class="mono">'+r[2]+'</td><td class="mono">'+r[3]+'</td><td class="mono">'+r[4]+'</td><td><div class="row-actions"><button class="btn sm danger" type="button">Revoke</button></div></td></tr>')));
+}
+function pageAudit(){
+  return head('Audit log','structured JSONL today · read-only view is P2','<button class="btn sm" type="button" data-action="refresh">Refresh</button>')+
+    '<div class="banner"><b>Written but not readable.</b>&nbsp; audit.rs emits structured tracing lines and keeps a bounded 256-entry ring (audit.rs:310); recent() is test/ops-only. There is no GET /api/admin/audit and no viewer. This page needs a server-side query before it can be real.</div>'+
+    card('Events','AUDIT_RING_CAP = 256 · in-memory · no REST reader',
+      table([{t:'Time'},{t:'Actor'},{t:'Action'},{t:'Object'},{t:'Result'},{t:'Detail'}],
+        AUDIT.map(a=>'<tr><td class="mono">'+a.t+'</td><td class="mono">'+esc(a.actor)+'</td><td class="mono">'+a.act+'</td><td class="mono">'+a.obj+'</td><td>'+chipState(a.res==='ok'?'live':a.res==='warn'?'warn':'warn')+'</td><td class="note">'+esc(a.detail)+'</td></tr>')));
+}
+function pageSettings(){
+  return head('Settings','identity · appearance · deployment','')+
+    '<div class="grid-2">'+
+      card('Identity source','standalone vs platform','<div class="card-body"><dl class="kv"><dt>Mode</dt><dd>standalone</dd><dt>Accounts</dt><dd>one admin (accounts.yaml)</dd><dt>Roles</dt><dd>fixed admin</dd><dt>Audit</dt><dd>audit.rs → logs</dd></dl><div class="note" style="margin-top:10px">In platform mode this card becomes a link to AccessBase. No Accounts page in either mode.</div></div>')+
+      card('Appearance','tokens are shared across all three surfaces','<div class="card-body"><div class="field"><label>Theme</label><select><option>Light</option><option>Dark</option><option>System</option></select></div><div class="field"><label>Density</label><select><option>Comfortable (Web)</option><option>Compact (Client)</option></select></div><div class="note">Header toggle in this prototype is a demo control, not a product setting.</div></div>')+
+    '</div>';
+}
+function pageTargetGeneric(p){
+  if(p==='weaknet') return head('WeakNet','external link · new tab','')+'<div class="banner info">Probed once per mount with HEAD /weaknet/v1/capabilities. Unchanged from the shipped console.</div>';
+  return head('Not found','','');
+}
+
+/* ---------------- overlays ---------------- */
+function pageRoomDetail(id){
+  const r=ROOMS.find(x=>x.id===id);
+  if(!r)return head('Room not found','','<button class="btn sm" type="button" data-action="nav" data-p="rooms">Back to rooms</button>');
+  const k=KIND[r.kind], tab=state.roomTab;
+  const crumb='<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-3);margin-bottom:14px">'+
+    '<button class="link-btn" type="button" data-action="nav" data-p="rooms">Rooms</button><span>/</span>'+
+    '<span class="mono">'+esc(r.id)+'</span><span class="spacer"></span>'+chipKind(r.kind)+chipState(r.state)+'</div>';
+  const tabs='<div class="tabs" style="margin-bottom:14px">'+['overview','members','producers','timeline'].map(t=>
+    '<button type="button" data-action="room-tab" data-v="'+t+'" class="'+(tab===t?'on':'')+'">'+t+'</button>').join('')+'</div>';
+  let body='';
+  if(tab==='overview'){
+    body='<div class="grid-2">'+
+      card('Definition (module 26)','normative design','<div class="card-body"><dl class="kv">'+
+        '<dt>Publishers</dt><dd>'+esc(k.pub)+'</dd><dt>Floor</dt><dd>'+esc(k.floor)+'</dd>'+
+        '<dt>Data channel</dt><dd>'+esc(k.data)+'</dd><dt>Mode</dt><dd>'+esc(r.mode)+'</dd>'+
+        '<dt>Members</dt><dd>'+r.members+'</dd><dt>Producers</dt><dd>'+r.producers+'</dd>'+
+        '<dt>Origin</dt><dd>'+esc(r.origin)+'</dd></dl></div>')+
+      card('Today','what actually runs','<div class="card-body"><div class="note">'+esc(k.today)+'</div>'+
+        '<div class="note" style="margin-top:8px">'+esc(r.note)+'</div>'+
+        '<div class="note warn" style="margin-top:10px">Kind gating is not implemented: floor_enabled is a global env flag (default false), 4032 comes from the mode/mute arms, and neither path checks a room kind.</div></div>')+
+      '</div>'+
+      (r.state==='planned'?'<div class="banner"><b>Planned.</b>&nbsp; '+plannedChip()+' Managed rooms persist in etc/rooms.yaml (tmp+rename, one audit line per mutation). The file does not exist in this build.</div>':'')+
+      card('Why this is a detail page','not a drawer','<div class="card-body note">Room detail has a member roster, a producer list and a timeline: drill-down steps matter, the URL should be shareable, and a back affordance must not lose the list filter. Ports and sessions use the same pattern. The single-layer right drawer stays reserved for device configuration (W1 decision).</div>');
+  }else if(tab==='members'){
+    body=card('Member roster','no roster API in this build','<div class="card-body">'+
+      (r.members?table([{t:'Principal'},{t:'Client shape'},{t:'Kind'},{t:'State'},{t:'Connected'}],
+        SESSIONS.filter(x=>x.room===r.id).concat([{principal:'device:'+r.id,client:'Host / streamer (PSK)',kind:r.kind,state:'live',since:'—'}])
+          .map(x=>'<tr><td class="mono">'+esc(x.principal)+'</td><td>'+esc(x.client)+'</td><td>'+chipKind(x.kind)+'</td><td>'+chipState(x.state)+'</td><td class="mono">'+esc(x.since||'—')+'</td></tr>'))
+        :'<div class="empty"><b>No members</b>Zero-peer rooms are visible only through /api/admin/sfu/rooms.</div>')+
+      '<div class="note warn" style="margin-top:10px">No participant-list endpoint. Member state and media state are not separable — there is no C→S unpublish variant, so disconnect is the only way to release a producer.</div></div>');
+  }else if(tab==='producers'){
+    body=card('Producers','label = stream id today','<div class="card-body">'+
+      (r.producers?table([{t:'Producer'},{t:'Label'},{t:'Kind'},{t:'Codec'},{t:'Room'}],
+        Array.from({length:r.producers},(_,i)=>'<tr><td class="mono">'+esc(r.id)+' · video'+i+'</td><td class="mono">'+(i===0?'front':i===1?'rear':'cam'+i)+'</td><td>video</td><td>H264</td><td class="mono">'+esc(r.id)+'</td></tr>'))
+        :'<div class="empty"><b>No producers</b>Nothing is publishing in this room.</div>')+
+      '<div class="note" style="margin-top:10px">GET /api/admin/sfu/stats exposes producer stats, and GET /api/rooms carries streams[] — but neither endpoint is consumed by the shipped SPA. There is no first-class producer list page.</div></div>');
+  }else{
+    body=card('Timeline','WS events · no persistence','<div class="card-body">'+
+      EVENTS.filter(e=>e.obj.indexOf(r.id)>=0||e.obj===r.id).concat(EVENTS.slice(0,3)).slice(0,5)
+        .map(e=>'<div style="display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)"><span class="mono" style="font-size:11px;color:var(--text-3)">'+e.t+'</span><span class="dot '+(e.sev==='ok'?'':e.sev)+'"></span><span style="flex:1;font-size:12px">'+esc(e.ev)+'</span></div>').join('')+
+      '<div class="note" style="margin-top:10px">event_tx is a broadcast channel with no replay. A 24 h timeline needs a ring buffer plus GET /api/admin/events?since=.</div></div>');
+  }
+  return crumb+head(esc(r.id),esc(k.desc)+' · '+esc(r.origin)+' room · updated 3s ago',
+      '<button class="btn sm" type="button" data-action="nav" data-p="rooms">Back to rooms</button>'+
+      '<button class="btn sm danger is-planned" type="button" data-action="delete-room" data-id="'+esc(r.id)+'">Delete room</button>')+tabs+body;
+}
+function cfgDrawer(id){
+  const d=DEVICES.find(x=>x.id===id); if(!d) return '';
+  const t=TIER[d.tier];
+  const tab=state.cfgTab;
+  let body='';
+  if(tab==='basic'){
+    body='<div class="field"><label>Device name</label><input value="'+esc(d.name)+'"></div>'+
+      '<div class="field"><label>Device tier</label><select><option selected>'+d.tier+' ('+t.tier+')</option>'+Object.keys(TIER).filter(x=>x!==d.tier).map(x=>'<option>'+x+'</option>').join('')+'</select><span class="hint">Inherited from lower tiers: '+esc(t.adds)+'</span></div>'+
+      '<div class="field"><label>Signaling endpoint</label><input value="wss://ms.example.com/ws"></div>'+
+      '<div class="field"><label>Encoder codec</label><select><option selected>h264</option><option>vp8</option><option>vp9</option><option>av1</option><option>auto</option></select><span class="hint">host.yaml.template only. H.265 / AAC / FEC / simulcast are not configurable.</span></div>';
+  }else if(tab==='streams'){
+    body='<div style="display:flex;align-items:center;margin-bottom:10px"><span class="note">'+d.streams+' streams on this '+d.tier+'</span><span class="spacer"></span><button class="btn sm" type="button" data-action="add-stream">+ Add stream</button></div>'+
+      Array.from({length:d.streams},(_,i)=>'<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)"><span class="mono" style="font-size:12px">video'+i+'</span><span class="note">'+(i===0?'front':i===1?'rear':'cam'+i)+' · 1280×720 · 30 fps</span><span class="spacer"></span><button class="btn sm" type="button" data-action="edit-stream" data-id="video'+i+'">Edit</button></div>').join('');
+  }else if(tab==='system'){
+    body='<div class="field"><label>Weak-network min fps</label><input value="12"></div>'+
+      '<div class="field"><label>StatusReport interval</label><input value="5 s" disabled><span class="hint">Hardcoded, not configurable.</span></div>'+
+      (d.tier==='vehicle'?'<div class="field"><label>Teleop control lease</label><input value="300 ms"><span class="hint">vehicle-only delta</span></div>':'')+
+      '<div class="note warn">Planned fields are marked; do not ship controls the backend cannot honour.</div>';
+  }else{
+    body='<pre class="yaml">server:\n  signaling: wss://ms.example.com/ws\n  psk: ********\nencoder:\n  codec: h264\n  bitrate_kbps: 2500\nstreams:\n  - id: video0\n    label: front\n    source: /dev/video0\n    width: 1280\n    height: 720\n    fps: 30\nweaknet:\n  min_fps: 12</pre>'+
+      '<div class="note" style="margin-top:10px">This is the exact string sent by ConfigPush. No field-level API.</div>';
+  }
+  return '<div class="drawer-head"><div class="drawer-title">Configure <span class="mono" style="font-size:14px">'+esc(d.id)+'</span></div>'+
+    '<div class="drawer-sub">'+d.tier+' · '+t.tier+' · config version '+d.ver+' · '+d.cfg+'</div></div>'+
+    '<div class="drawer-body">'+
+      '<div class="sec"><h3>Consistency</h3><div class="card" style="margin:0"><div class="card-body">'+
+        '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'+lights(d.lights)+'<span class="note">pending / error / conflict</span><span class="spacer"></span>'+chipState(d.cfg==='synced'?'live':'warn')+'</div>'+
+        '<dl class="kv" style="margin-top:12px"><dt>running fp</dt><dd>a91f…c204</dd><dt>file fp</dt><dd>'+(d.cfg==='drifted'?'77bd…9e10':'a91f…c204')+'</dd><dt>last push fp</dt><dd>a91f…c204</dd></dl>'+
+      '</div></div></div>'+
+      '<div class="sec"><h3>Sections</h3><div class="tabs">'+
+        ['basic','streams','system','yaml'].map(x=>'<button type="button" data-action="cfg-tab" data-v="'+x+'" class="'+(tab===x?'on':'')+'">'+x+'</button>').join('')+'</div></div>'+
+      '<div class="sec">'+body+'</div>'+
+    '</div>'+
+    '<div class="drawer-foot"><button class="btn" type="button" data-action="close">Cancel</button>'+
+      '<button class="btn primary" type="button" data-action="save-cfg" data-id="'+esc(d.id)+'">Save &amp; push</button></div>';
+}
+function newRoomDialog(){
+  return '<div class="dialog-head">Create a managed room <span class="chip planned">P2</span></div>'+
+   '<div class="dialog-body">'+
+    '<div class="banner"><b>Design-only action.</b>&nbsp; No create-room REST route exists. This dialog documents the form shape the API will need.</div>'+
+    '<div class="field"><label>Room kind</label><select id="nrKind">'+Object.keys(KIND).map(k=>'<option value="'+k+'">'+k+' — '+KIND[k].desc+'</option>').join('')+'</select></div>'+
+    '<div class="field"><label>Room ID</label><input id="nrId" value="fleet-ops-2" class="mono"><span class="hint">Opaque ID. kind is metadata, never a name prefix.</span></div>'+
+    '<div class="field"><label>Lifecycle</label><select><option>Persistent (etc/rooms.yaml)</option><option>Ephemeral · empty-timeout</option></select><span class="hint">Only talk / meet / desk are admin-managed. view and ctrl are derived from the device registry.</span></div>'+
+    '<div class="field"><label>Kind-gated capabilities</label><div class="note" id="nrHint">'+esc(KIND.talk.today)+'</div></div>'+
+   '</div><div class="dialog-foot"><button class="btn" type="button" data-action="close">Cancel</button><button class="btn primary" type="button" data-action="create-room">Create (prototype only)</button></div>';
+}
+function addDeviceDialog(){
+  return '<div class="dialog-head">Add a device</div><div class="dialog-body">'+
+    '<div class="field"><label>Display name</label><input id="ndName" value="Yard camera 04"></div>'+
+    '<div class="field"><label>Device tier</label><select id="ndTier">'+Object.keys(TIER).map(k=>'<option value="'+k+'">'+k+' — '+TIER[k].tier+'</option>').join('')+'</select><span class="hint">Determines which config sections render and how many streams are seeded.</span></div>'+
+    '<div class="field"><label>Enrollment</label><select><option>Pending approval</option><option>Pre-approved (PSK)</option></select></div>'+
+    '</div><div class="dialog-foot"><button class="btn" type="button" data-action="close">Cancel</button><button class="btn primary" type="button" data-action="create-device">Add device</button></div>';
+}
+function confirmDialog(title,body,action,id){
+  return '<div class="dialog-head">'+title+'</div><div class="dialog-body">'+body+'</div>'+
+    '<div class="dialog-foot"><button class="btn" type="button" data-action="close">Cancel</button>'+
+    '<button class="btn danger" type="button" data-action="'+action+'" data-id="'+esc(id||'')+'">Confirm</button></div>';
+}
+
+function render(){
+  const root=document.documentElement;
+  root.setAttribute('data-mode',state.mode);
+  root.setAttribute('data-planned',state.planned?'on':'off');
+  document.getElementById('hSub').textContent=state.mode==='today'?'As shipped · www/apps/admin · 8 routes':'Target console · rooms & fleet';
+  document.getElementById('plannedBtn').textContent='Planned: '+(state.planned?'on':'off');
+  [].forEach.call(document.querySelectorAll('#modeSeg button'),b=>b.classList.toggle('on',b.dataset.v===state.mode));
+  renderNav();
+  let html='';
+  if(state.mode==='today'){
+    const p=state.page;
+    if(p==='t-dashboard')html=pageTodayDashboard();
+    else if(p==='t-audio')html=pageTodayAudio();
+    else if(p==='t-vehicles')html=pageTodayVehicles();
+    else if(p==='t-devices')html=pageTodayDevices();
+    else html=pageTodayGeneric(p);
+  }else{
+    const p=state.page;
+    const map={overview:pageOverview,rooms:pageRooms,'room-detail':function(){return pageRoomDetail(state.detailId);},sessions:pageSessions,devices:pageDevices,streams:pageStreams,config:pageConfig,keys:pageKeys,audit:pageAudit,settings:pageSettings};
+    html=(map[p]||pageTargetGeneric)(p);
+  }
+  html+='<div class="footnote">W2 prototype · fixtures only, no backend calls · English UI follows C49 · <b>today</b> = evidence from src/www/apps/admin and src/crates/mediaservo-server · <b>target</b> = module 26 + docs/ui contracts. Dashed items are P2 and have no backend field in this build.</div>';
+  document.getElementById('main').innerHTML=html;
+  document.body.classList.toggle('has-overlay',!!state.drawer);
+  document.body.classList.toggle('has-dialog',!!state.dialog);
+  const dr=document.getElementById('drawer'),dg=document.getElementById('dialog');
+  if(state.drawer){dr.innerHTML=cfgDrawer(state.drawer.id);}
+  if(state.dialog){
+    const d=state.dialog;
+    if(d.t==='new-room')dg.innerHTML=newRoomDialog();
+    else if(d.t==='add-device')dg.innerHTML=addDeviceDialog();
+    else if(d.t==='confirm')dg.innerHTML=confirmDialog(d.title,d.body,d.action,d.id);
+  }
+}
+
+function go(page){state.page=page;state.detailId=null;state.sel.clear();state.drawer=null;state.dialog=null;state.cfgTab='basic';render();document.getElementById('main').scrollTop=0;}
+function toast(msg){
+  const m=document.getElementById('main');
+  const d=document.createElement('div');
+  d.className='banner info';d.style.cssText='margin:0 0 16px';d.innerHTML='<b>Prototype</b>&nbsp; '+esc(msg);
+  m.insertBefore(d,m.firstChild);setTimeout(()=>d.remove(),3200);
+}
+
+document.addEventListener('click',e=>{
+  const el=e.target.closest('[data-action]'); if(!el)return;
+  const a=el.dataset.action,id=el.dataset.id,v=el.dataset.v;
+  if(a==='mode'){state.mode=v;go(v==='today'?'t-dashboard':'overview');}
+  else if(a==='nav')go(el.dataset.p);
+  else if(a==='planned'){state.planned=!state.planned;render();}
+  else if(a==='theme'){const cur=document.documentElement.getAttribute('data-theme');document.documentElement.setAttribute('data-theme',cur==='dark'?'light':'dark');document.getElementById('themeBtn').textContent=cur==='dark'?'Dark':'Light';}
+  else if(a==='kind'){state.kind=v;state.sel.clear();render();}
+  else if(a==='tier'){state.tier=v;state.sel.clear();render();}
+  else if(a==='sel'){
+    if(state.sel.has(id))state.sel.delete(id);else state.sel.add(id);
+    render();
+  }
+  else if(a==='open-room-detail'){state.page='room-detail';state.detailId=id;state.roomTab='overview';state.drawer=null;render();document.getElementById('main').scrollTop=0;}
+  else if(a==='room-tab'){state.roomTab=v;render();}
+  else if(a==='config'){state.drawer={t:'cfg',id:id};state.cfgTab='basic';render();}
+  else if(a==='cfg-tab'){state.cfgTab=v;render();}
+  else if(a==='close'){state.drawer=null;state.dialog=null;render();}
+  else if(a==='new-room'){state.dialog={t:'new-room'};render();}
+  else if(a==='add-device'){state.dialog={t:'add-device'};render();}
+  else if(a==='add-stream'){toast('Add stream is a per-device action in this drawer. The real backend sends the whole host.yaml.');}
+  else if(a==='edit-stream'){toast('Stream '+id+' opens in place — no nested modal.');}
+  else if(a==='create-room'){
+    const n=document.getElementById('nrId'),k=document.getElementById('nrKind');
+    state.dialog=null;render();toast('Room '+(n?n.value:'?')+' ('+(k?k.value:'?')+') is a P2 design — no create endpoint exists.');
+  }
+  else if(a==='create-device'){
+    const n=document.getElementById('ndName'),t=document.getElementById('ndTier');
+    const name=(n&&n.value)||'New device',tier=(t&&t.value)||'camera';
+    DEVICES.push({id:'msrtv'+(420+DEVICES.length),name:name,tier:tier,streams:TIER[tier].kinds.length>2?2:1,cfg:'pending',lights:['w','',''],ver:'v1',last:'just now',online:false});
+    state.dialog=null;state.tier='all';render();toast(name+' added as '+tier+' · pending approval.');
+  }
+  else if(a==='save-cfg'){state.drawer=null;render();toast('ConfigPush sends the full host.yaml; every push restarts all streams on that device (10–60 s).');}
+  else if(a==='push'){toast('No devices were actually pushed. Real push = POST /api/admin/config/push with a monotonic version.');}
+  else if(a==='refresh'){toast('Fixtures refreshed. Real pages use WS push + 5 s StatusReport poll.');}
+  else if(a==='bulk-device'){
+    state.dialog={t:'confirm',title:'Remove '+state.sel.size+' devices?',
+      body:'<div class="banner"><b>Irreversible from the UI.</b>&nbsp; Typed confirmation of the device name is required for high-grade actions. This prototype shows the two-step shape only.</div><div class="note">Affected: '+Array.from(state.sel).map(esc).join(', ')+'</div>',
+      action:'do-bulk-device'};
+    render();
+  }
+  else if(a==='do-bulk-device'){
+    const n=state.sel.size;
+    for(let i=DEVICES.length-1;i>=0;i--)if(state.sel.has(DEVICES[i].id))DEVICES.splice(i,1);
+    state.sel.clear();state.dialog=null;render();toast(n+' devices removed from the local fixture.');
+  }
+  else if(a==='delete-room'){
+    state.dialog={t:'confirm',title:'Delete room '+id+'?',
+      body:'<div class="banner"><b>Read this before shipping.</b>&nbsp; Today DELETE /api/admin/rooms/{id} only removes the RoomManager entry: it does not kick members, close channels or clean SFU objects. The two registries then diverge permanently.</div>',
+      action:'do-delete-room',id:id};
+    render();
+  }
+  else if(a==='do-delete-room'){
+    const i=ROOMS.findIndex(r=>r.id===id);if(i>=0)ROOMS.splice(i,1);
+    go('rooms');toast(id+' removed from the fixture. The real fix is teardown_room_if_dead(room_id, room_removed) with the PIT-183 gate kept.');
+  }
+  else if(a==='bulk-room'){toast('Bulk room delete is P2. It must call the same teardown path as a single delete.');}
+});
+document.addEventListener('change',e=>{
+  if(e.target.id==='nrKind'){
+    const h=document.getElementById('nrHint');if(h)h.textContent=KIND[e.target.value].today;
+  }
+});
+render();
+</script>
+</body>
+</html>

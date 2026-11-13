@@ -1,5 +1,19 @@
 # Prototypes CHANGELOG
 
+## 2026-11-13 — workbudy H5 prototype port (user: 尽量搬迁/移植)
+Ported workbudy's two complete MediaServo consoles into `prototypes/` (they already use our P8 `--ms-`
+tokens and MediaServo branding, so the port is faithful, not a rewrite):
+- **`port-web-shell.html`** ← workbudy `w1-web-shell.html` (213 KB): the full **14-page operations console**
+  (overview / view / intercom / meetings / remote / devices / rooms / sessions / streams / config / audit /
+  settings / signaling / keys). Covers the pages our focused boards have not built yet.
+- **`port-admin-console.html`** ← workbudy `w2-admin-console.html` (65 KB): the **rooms & fleet admin console**
+  (rooms / sessions / devices / streams / fleet + config push / client keys / audit / settings / weaknet).
+- Adaptations: `Cockpit → Tower` (8 refs total, web-portal-ui **P5**); titles marked "(workbudy W1/W2 port)"
+  to avoid collision with our focused `w1-portal-shell` / `w2-live-wall` boards. `Teleoperation` kept (domain term).
+- Both fully offline (no CDN/font/image), inline JS passes `node --check`, HTTP 200. Board docs:
+  `boards/port-web-shell.md`, `boards/port-admin-console.md`.
+- These are **reference-complete ports**, distinct from the per-board review artifacts (P9 loop).
+
 ## v0.2 — 2026-11-13 (w2-live-wall)
 Fix (user review): the leftmost **portal navigation** was missing in v0.1 — restored it.
 - Layout is now the full three-region order: **portal nav (232px) → selected-streams rail (250px) → canvas**,

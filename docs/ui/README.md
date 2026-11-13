@@ -9,6 +9,7 @@
 | Path | Layer | What |
 |---|---|---|
 | `prototypes/*.html` | appearance | single-file offline HTML prototypes (P1 exploration carrier). No CDN / webfont / build; open directly in a browser. |
+| `prototypes/port-*.html` | appearance (ported) | **workbudy H5 consoles ported faithfully** (already MediaServo + our P8 tokens): `port-web-shell.html` = 14-page operations console; `port-admin-console.html` = rooms & fleet admin. Adapted `Cockpit→Tower` (P5). Reference-complete, distinct from the focused per-board artifacts. |
 | `prototypes/archive/` | history | superseded versions, kept not deleted (workbudy version discipline). |
 | `prototypes/CHANGELOG.md` | history | per-version change log. |
 | `boards/*.md` | structure | character/SVG wireframes + region annotations (the "what is on screen, in what order" layer). |
