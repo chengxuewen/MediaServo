@@ -4,6 +4,11 @@
 > rulings P1/P2/P8). Design assets follow the product: they live in the submodule so an independent
 > MediaServo clone is self-sufficient (P2). English-only per C49; UI copy is English (U2, zh deferred to i18n).
 
+> **★ Single iteration baseline: `prototypes/portal-unified.html` (v1.0).** One single page integrating
+> all UI — unified navigation taxonomy, one design system, all 16 pages, consistent operations. It resolves
+> the earlier fragmentation/conflict. **Iterate only on this file.** The older `w1-portal-shell`,
+> `w2-live-wall`, `port-web-shell`, `port-admin-console` are reference/history only. See `boards/portal-unified.md`.
+
 ## Layout
 
 | Path | Layer | What |

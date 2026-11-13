@@ -1,5 +1,20 @@
 # Prototypes CHANGELOG
 
+## v1.0 — 2026-11-13 (portal-unified) — **THE single iteration baseline**
+User directive: the prototypes were fragmented & conflicting (nav / style / page content / operations).
+Built **`portal-unified.html`** — one single page integrating everything, the only artifact to iterate on:
+- **Unified navigation taxonomy** reconciling the new-design capability groups with workbudy's features:
+  Overview / Surveillance(Live,Playback) / Communication(Intercom,Meeting) / Control(Remote,Tower) /
+  Administration(Devices,Rooms,Sessions,Streams,Config,Keys,Audit,Settings,Signaling) — **16 pages**.
+- **One design system**: P8 tokens, dual theme + density, control-room palette, state grammar (glyph+hue),
+  custom combobox, styled scrollbars, toast, WS-drop → floor UNKNOWN + stale banner.
+- **Working interactions**: column-driven + paginated Live wall, select-streams picker, zoom, floor
+  grant/revoke/mute/prio, device approve/revoke + search/filter/sort, live tables, theme/density, meeting/key CRUD.
+- Verified: inline JS node --check OK; 84 ids / 57 refs zero missing; tags balanced; offline; HTTP 200;
+  **runtime logic smoke 12/12** (pagination/clamp/counts/floor state machine/re-render).
+- **Supersedes for iteration**: `w1-portal-shell`, `w2-live-wall`, `port-web-shell`, `port-admin-console`
+  remain as reference/history only — do not iterate on them. Board doc: `boards/portal-unified.md`.
+
 ## 2026-11-13 — workbudy H5 prototype port (user: 尽量搬迁/移植)
 Ported workbudy's two complete MediaServo consoles into `prototypes/` (they already use our P8 `--ms-`
 tokens and MediaServo branding, so the port is faithful, not a rewrite):
