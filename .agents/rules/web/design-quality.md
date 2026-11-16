@@ -2,8 +2,10 @@
 
 # Web Design Quality Standards
 
-<!-- De-slop tells, direction lines, and the nine-step pass are adapted from
-     heydamir/unslop (CC BY 4.0), rewritten to this repo's token vocabulary. -->
+<!-- De-slop tells, direction lines, the nine-step pass, and the template test
+     are adapted from heydamir/unslop (CC BY 4.0,
+     https://github.com/heydamir/unslop), rewritten to this repo's token
+     vocabulary. -->
 
 
 ## Anti-Template Policy
@@ -65,8 +67,9 @@ Micro-fixes touch only the relevant step. Values adapt to the token vocabulary
 (`tokens.css` stays the single source for color and type roles):
 
 1. Spacing -- 4px grid; same-class elements share sizes; navigation densest.
-2. Color -- neutral scale + three text roles + ONE restrained accent, all via
-   tokens; kill cross-color gradients, glows, colored shadows.
+2. Color -- neutral scale + three text roles, all via tokens; ONE restrained
+   accent budget (= `--ms-color-primary`; semantic roles danger/success/warning
+   are exempt); kill cross-color gradients, glows, colored shadows.
 3. Icons -- emoji out; one line-icon set (lucide), uniform 16/18px.
 4. Copy -- no exclamations, greetings, or hype words; mock data stays realistic.
 5. Type -- two weights (400/500), sentence case, no uppercase letter-spaced labels.
@@ -89,8 +92,11 @@ starts with five written lines, confirmed by the user before edits begin
 4. Moments -- the 1-2 spots allowed to be visually rich; the frame stays quiet.
 5. Signature -- the small detail only this product would have.
 
-Micro-fixes (single-element tweaks) skip the direction step. Then gather a
-small set of real references and check the ECC design/frontend skills.
+Micro-fixes skip the direction step: one element, no new tokens/colors/layout
+semantics, roughly under ten changed lines -- when in doubt, it is NOT micro
+(write the lines). Then gather a
+small set of real references and load the `design-system` / `ui-ux-review`
+skills.
 
 ## Worthwhile Style Directions
 

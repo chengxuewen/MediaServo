@@ -35,6 +35,7 @@ export PIXI_BIN
 # B12 ruling (11-13): Figma rides the plugin bridge -- no API key, no paid
 # seat. Requires the WebSocket relay (bun socket from a local clone of
 # cursor-talk-to-figma-mcp) running on ws://localhost:3055 and the Figma
-# plugin active in the open file. The pinned npm bin is installed by
-# `msrtc.sh mcp setup` and launched through mcp-serve.mjs like the others.
+# plugin active in the open file. The npm pin was REMOVED in r44 (design
+# medium ruled to in-repo H5 prototypes); the bridge mechanics stay here
+# for a future revival -- restore the pin + setup step if that ruling lands.
 exec "$NODE" "$DIR/mcp-serve.mjs" --from "$DIR/mcp-servers.json" --name "$NAME"
