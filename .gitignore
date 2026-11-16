@@ -4,12 +4,9 @@
 *~
 *.autosave
 *.core
-*.orig
-*.rej
 .#*
 *.*#
 tags
-.DS_Store
 .directory
 *.debug
 *.app
@@ -51,27 +48,32 @@ Thumbs.db
 # IDE files
 # --------
 .vs
-.idea
 .cache
 .vscode/*
-# whitelist: only the IDE settings template is tracked (polyorch-adoption CA-1;
-# a negation under a plain `.vscode` dir-rule is inert — git never descends)
+# whitelist: the IDE settings template is tracked (polyorch-adoption CA-1);
+# negations of exact files WORK under a `.vscode/*` rule (only contents are
+# ignored, so git still descends) -- a bare `.vscode` dir rule would be inert.
 !.vscode/settings.example.json
+!.vscode/settings.json
 
 # Build dirs
 # --------
-out
-log
-dist
-build
-target
+/out
+/log
+/dist
+/build
+/target
+/logs
 *.node
 /install
 
 # Temp dirs
 # --------
-nodejs
-stash
+/nodejs
+/stash
+
+# www build outputs (pnpm build artifacts; the inner www/.gitignore also guards)
+www/apps/*/dist/
 
 # nodejs environments
 node_modules
@@ -82,17 +84,13 @@ node_modules
 scripts/agents/package.json
 scripts/agents/package-lock.json
 __pycache__/
-*.pyc
 
 # Don't ignore files
 # --------
-!.vscode/settings.json
-!.omo/omo.jsonc
 
 # Agent dirs
 .venv-openspace
 .playwright-mcp
-.codegraph
 # pixi environment manager
 .pixi
 .pixi-pack
@@ -108,7 +106,7 @@ test-results
 *.tsbuildinfo
 
 # Python bindings example artifacts
-bindings/python/mediaservo/examples/recorded.mp4/bindings/python/mediaservo/mediaservo/_libs/
+/bindings/python/mediaservo/mediaservo/_libs/
 /bindings/python/mediaservo/mediaservo.egg-info/
 
 # host multi-process runtime artifacts (host init/start at repo root)
@@ -117,7 +115,7 @@ bindings/python/mediaservo/examples/recorded.mp4/bindings/python/mediaservo/medi
 /run/
 /recordings/
 /identity.json
-data/
+/data/
 
 # imgui 布局缓存（09-24 脱轨：曾被子仓根跟踪=CI/构建目录污染面）
 imgui.ini
