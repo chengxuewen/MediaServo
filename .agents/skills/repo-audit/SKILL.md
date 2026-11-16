@@ -241,6 +241,15 @@ self-consistency belongs to doc-audit.
 
 ## Phase 3: Synthesis & Recommendation
 
+### Gatekeeper pass + dismissal log (shadcn/improve pattern)
+
+Before the report ships, re-verify every finding against its cited evidence
+yourself -- remove false positives and RECORD each dismissal with its reason
+in the repo-audit paragraph (3C). The next audit consults past dismissals
+BEFORE re-investigating: the same false positive is checked once, ever.
+(First live catches, r48-era: a tracked-by-design generated layer misjudged
+as an accident surface; an "unverified" claim about an already-closed probe.)
+
 ### 3A: Cross-comparison
 
 - multiple sources recommending the same content -> +2 points
@@ -317,6 +326,7 @@ surface is a fixed four-file set, and new files change the agent-links sync face
 - the Quick-run counter lives in the same paragraph
 - >=5 Quick runs -> automatically suggest Full
 - **gap closure rate**: read the previous 3D gaps + evolution-batch acceptance, report closure rate against the pre-registered criteria (closed / previous gaps); unclosed -> flag for lesson-review, re-propose or drop next round. Full evolution-batch linkage lands B11+.
+- **dismissal log**: every false positive caught in the gatekeeper pass is recorded here with its reason; the next audit consults past dismissals before re-investigating (shadcn/improve pattern).
 
 ---
 
@@ -345,6 +355,7 @@ This skill's composite design borrows from the following community precedents:
 | [claude-ecosystem](https://github.com/melodic-software/claude-code-plugins) | meta-skill architecture, audit agents, component health |
 | [skill-optimizer](https://github.com/hqhq1025/skill-optimizer) | skill lifecycle (miner -> personalizer -> generalizer) |
 | [large-codebase-audit](https://github.com/MJWNA/large-codebase-audit-skill) | multi-surface AI-layer audit, aligned with Anthropic best practices |
+| [shadcn/improve](https://github.com/shadcn/improve) | gatekeeper pass with a false-positive dismissal log; reconcile-before-start; bounded send-back (approve / <=2 rounds / block-and-refine-plan) |
 
 ## Adapting to any project
 

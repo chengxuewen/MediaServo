@@ -135,3 +135,32 @@ mechanism; the same lesson recurring 2+ times.
    back to `lesson-review` or the next quarter's proposal queue (gap closure
    rate, repo-audit 3C). Quota: net +2 skills per quarter; a replacement (retire
    one, add one) does not consume the net quota.
+
+## Execution discipline (delegated work and batch plans)
+
+Patterns adapted from shadcn/improve (MIT).
+
+**Weakest-executor plan standard.** A batch plan is written for the coldest
+possible executor: self-contained (inline exact paths, excerpts, and repo
+conventions -- never "as mentioned before"); every step ends with a command +
+expected output (machine-checkable completion); hard boundaries list
+out-of-scope items and STOP conditions. Stamp the plan with its baseline
+commit and run a drift check before executing. Micro-batches are exempt from
+the full standard (landing + gate columns still apply).
+
+**Reconcile before starting.** Before starting any parked or queued batch,
+answer four questions: has the baseline moved? are the prerequisites still
+satisfied? was any finding independently fixed? is the touch surface still
+clean? Any "no" -> reconcile first, then start.
+
+**Delegated-execution verdicts.** Review verdicts for delegated execution are
+approve / send-back (at most 2 rounds) / block and refine the plan. Two
+failed rounds mean the PLAN is defective -- revise the plan instead of
+pushing the executor a third time. User-collaborative iteration has no round
+cap.
+
+**Model tiering.** Advisory work (audit, plan, review) runs on the strongest
+available model; mechanical execution may ride a cheaper tier; merge
+authority stays with the user. The CodeBuddy role frontmatter `model` field
+is the ready hook for per-role tiers -- its value domain is unprobed (O-33).
+Guidance only: hosts control model selection, so this is not a gate.
