@@ -54,6 +54,7 @@ MediaServo/
 | Common rules | `.agents/rules/common/` | Security, coding style, testing, Git workflow |
 | Architecture doc | `docs/architecture.md` | Overall architecture design |
 | Module docs | `docs/modules/` | Detailed per-domain designs (27 docs) |
+| Operational scripts | `scripts/` | `build-server.sh` (docker dev compose), `e2e-prod-smoke.sh` (prod smoke suite), `e2e-compat.sh` + `e2e-compat-probe.mjs` (legacy dialect probe) |
 | Project memory | `.agents/memorys/` | Decision records (decisions.md), status tracking (status.md) |
 | Rust source | `crates/` | Seven crates: mediaservo-host/mediaservo-client/mediaservo-server/mediaservo-common/mediaservo-webrtc/mediaservo-media/mediaservo-codec
 
