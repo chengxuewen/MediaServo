@@ -4,10 +4,12 @@
 Checks two things over the memorys registries (.agents/memorys):
   1. Continuity -- inside each registry's active range, every number must
      exist as an entry or be a REGISTERED VOID (a placeholder line in the
-     registry itself, tagged 有意空缺/占位). Ghost numbers = fail.
+     registry itself, tagged as an intentional void). Ghost numbers = fail.
   2. Ghost cites -- any D<n> / PIT-<n> token in the reference corpus
      (docs, scripts, crates src/tests, www src, cmake, mediaservo.sh,
-     README, .agents rules/skills/teams) must resolve to an existing entry.
+     README, .agents rules/skills/teams) must resolve to an existing
+     entry. Registered voids (placeholder entries tagged as intentional
+     gaps in the registry) count as resolved.
      Running code citing a non-existent registry entry is real breakage
      (audit r42: cmake cited D266 which had no entry).
 

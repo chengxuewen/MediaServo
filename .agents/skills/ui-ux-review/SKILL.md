@@ -32,10 +32,15 @@ description: Structured interface-quality review method. Use when evaluating a U
    visual layout, focus is visible, nothing is keyboard-trapped. Note the focus ring.
 4. **Token consistency.** Verify styles consume `@mediaservo/ui` tokens (see
    `design-system`); flag raw hex / magic spacing / off-palette values.
-5. **Anti-template.** Apply `.agents/rules/web/design-quality.md`: hierarchy,
-   layering, intentional spacing — not a generic uniform card grid. This is a
-   judgment call; state the reason, not just "looks template-y".
-6. **Verdict.** Emit a verdict (pass / needs-work) plus a findings table:
+5. **Anti-template + signs.** Apply `.agents/rules/web/design-quality.md`:
+   audit the AI-look tells and grade severity (heavy / light / none — "none"
+   earns at most 2-3 small suggestions, not a redesign); then hierarchy,
+   layering, intentional spacing — not a generic uniform card grid. State the
+   reason, not just "looks template-y".
+6. **Template test.** Swap in another product's name and content: if the
+   surface still works unchanged, the direction is not pushed enough — flag it
+   and name the elements that stayed generic.
+7. **Verdict.** Emit a verdict (pass / needs-work) plus a findings table:
    `check | evidence (screenshot / file:line) | rule or token violated | severity`.
 
 ## Evidence discipline

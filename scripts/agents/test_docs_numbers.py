@@ -42,7 +42,7 @@ class DocsNumbersTests(unittest.TestCase):
         self.assertEqual(fails, 1)
         self.assertIn("ghost number D197", lines[0])
         # registering the void (placeholder in the registry) turns it green
-        self._decisions("## D196: a\n## D197: （占位）void\n## D198: b\n")
+        self._decisions("## D196: a\n## D197: (void) placeholder\n## D198: b\n")
         fails, _ = check_docs_numbers.run(self.root)
         self.assertEqual(fails, 0)
 
