@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0B0E14">
-<title>MediaServo Portal — Unified Prototype v1.24</title>
+<title>MediaServo Portal — Unified Prototype v1.39</title>
 <script>
 try{var k=localStorage.getItem('msrv_theme')||'dark';document.documentElement.dataset.theme=k;}catch(e){}
 </script>
@@ -165,9 +165,11 @@ svg.ic{flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:r
 .caret{font-size:10px;color:var(--tx3);flex:none;transition:transform .15s}
 .combo-trigger[aria-expanded="true"] .caret{transform:rotate(180deg)}
 /* anchored to the trigger's right edge so it never overflows the canvas */
-.combo-pop{position:absolute;top:calc(100% + 4px);right:0;left:auto;min-width:100%;width:max-content;max-width:240px;background:var(--raised);border:1px solid var(--bd2);border-radius:var(--r6);box-shadow:var(--glow);padding:var(--sp4);z-index:60;display:none;list-style:none;margin:0}
+/* v1.39: layout popup — left-anchored, wider, stronger elevation, grouped, scroll-safe. */
+.combo-pop{position:absolute;top:calc(100% + 6px);left:0;right:auto;min-width:220px;width:max-content;max-width:280px;max-height:min(60vh,420px);overflow-y:auto;background:var(--raised);border:1px solid var(--bd2);border-radius:var(--r8);box-shadow:0 8px 24px rgba(0,0,0,.5);padding:var(--sp6);z-index:80;display:none;list-style:none;margin:0}
 .combo.open .combo-pop{display:block}
-.combo-opt{display:flex;align-items:center;gap:var(--sp8);height:32px;padding:0 var(--sp8);border-radius:var(--r4);font-size:var(--fs12);color:var(--tx2);cursor:pointer;white-space:nowrap}
+.combo-sep{height:1px;background:var(--bd);margin:var(--sp4) var(--sp6)}
+.combo-opt{display:flex;align-items:center;gap:var(--sp8);height:34px;padding:0 var(--sp10);border-radius:var(--r6);font-size:var(--fs12);color:var(--tx2);cursor:pointer;white-space:nowrap;margin-bottom:2px}
 .combo-opt:hover,.combo-opt.is-active{background:var(--hover);color:var(--tx1)}
 .combo-opt[aria-selected="true"]{color:var(--accent-ink);font-weight:600;background:var(--accent-tint)}
 /* fixed check column: hidden unless selected, so labels stay aligned */
@@ -228,17 +230,20 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .stream-rail{grid-column:1;grid-row:1;background:var(--surface);border-right:1px solid var(--bd);display:flex;flex-direction:column;overflow:hidden}
 .rail-head{padding:var(--sp12);border-bottom:1px solid var(--bd)}
 .rail-title{font-size:var(--fs11);text-transform:uppercase;letter-spacing:1px;color:var(--tx3);font-weight:600;margin-bottom:var(--sp8)}
+.rail-headrow{display:flex;align-items:center;gap:var(--sp4);margin-bottom:var(--sp8)}
+.rail-headrow .rail-title{margin-bottom:0}
 .btn-block{width:100%}
 .rail-list{flex:1;overflow-y:auto;padding:var(--sp8)}
-.stream-item{display:flex;align-items:center;gap:var(--sp8);padding:var(--sp8);border-radius:var(--r6);border:1px solid transparent;margin-bottom:var(--sp2);cursor:pointer}
-.stream-item:hover{background:var(--hover)}
+/* v1.39 unified card-row language: bordered card + hover + selected; bg=sunken on surface panels. */
+.stream-item{display:flex;align-items:center;gap:var(--sp8);padding:var(--sp8);border-radius:var(--r6);border:1px solid var(--bd);background:var(--sunken);margin-bottom:var(--sp2);cursor:pointer}
+.stream-item:hover{background:var(--hover);border-color:var(--bd2)}
 .stream-item.active{background:var(--accent-tint);border-color:var(--accent)}
-.s-idx{font-family:var(--mono);font-size:var(--fs11);color:var(--tx3);width:18px;text-align:right;flex:none}
-.thumb{width:34px;height:22px;border-radius:var(--r2);flex:none}
+/* v1.39 (A): rail rows are text-first (no fake thumbnail); two lines name + res·state; del on hover. */
 .stream-meta{flex:1;min-width:0}
 .stream-name{font-size:var(--fs12);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
-.stream-sub{font-size:var(--fs11);color:var(--tx3);font-family:var(--mono)}
-.s-del{width:20px;height:20px;border-radius:var(--r2);display:grid;place-items:center;color:var(--tx3);font-size:14px;flex:none}
+.stream-sub{font-size:var(--fs11);color:var(--tx3);font-family:var(--mono);display:block}
+.s-del{width:20px;height:20px;border-radius:var(--r2);display:grid;place-items:center;color:var(--tx3);font-size:14px;flex:none;opacity:0;transition:opacity .12s}
+.stream-item:hover .s-del,.stream-item:focus-within .s-del{opacity:1}
 .s-del:hover{color:var(--danger-ink);background:var(--danger-tint)}
 .rail-foot{padding:var(--sp8) var(--sp12);border-top:1px solid var(--bd);font-size:var(--fs11);color:var(--tx-3)}
 .canvas{grid-column:2;grid-row:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
@@ -248,14 +253,14 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .al-title{font-size:var(--fs11);text-transform:uppercase;letter-spacing:1px;color:var(--tx3);font-weight:600}
 .al-unread{font-size:var(--fs11);font-family:var(--mono);font-weight:600;color:var(--warn-ink);background:var(--warn-tint);border:1px solid var(--warn);border-radius:var(--rpill);padding:0 var(--sp6);min-width:18px;text-align:center}
 .al-unread.zero{display:none}
-.al-collapse{width:26px;height:26px;flex:none}
+.region-collapse{flex:none}
 .al-filter{display:flex;gap:var(--sp4);padding:var(--sp8) var(--sp12);border-bottom:1px solid var(--bd);flex-wrap:wrap}
 .al-chip{font-size:var(--fs11);padding:var(--sp2) var(--sp8);border-radius:var(--rpill);border:1px solid var(--bd);background:var(--sunken);color:var(--tx2);cursor:pointer}
 .al-chip:hover{border-color:var(--bd2);color:var(--tx1)}
 .al-chip.on{background:var(--accent-tint);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
 .al-list{flex:1;overflow-y:auto;padding:var(--sp8)}
-.al-row{display:flex;align-items:flex-start;gap:var(--sp8);padding:var(--sp8);border-radius:var(--r6);border:1px solid transparent;margin-bottom:var(--sp2);cursor:pointer}
-.al-row:hover{background:var(--hover);border-color:var(--bd)}
+.al-row{display:flex;align-items:flex-start;gap:var(--sp8);padding:var(--sp8);border-radius:var(--r6);border:1px solid var(--bd);background:var(--sunken);margin-bottom:var(--sp2);cursor:pointer}
+.al-row:hover{background:var(--hover);border-color:var(--bd2)}
 .al-row .al-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none;margin-top:5px}
 .al-row.read .al-dot{background:transparent;border:1px solid var(--bd2)}
 .al-row .al-body{flex:1;min-width:0}
@@ -285,7 +290,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .rec-search .ic{width:15px;height:15px;color:var(--tx3)}
 .rec-filters{display:flex;gap:var(--sp4);flex-wrap:wrap}
 .rec-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:var(--sp6);min-height:0}
-.rec-row{display:flex;align-items:center;gap:var(--sp12);padding:var(--sp10) var(--sp12);border:1px solid var(--bd);border-radius:var(--r8);background:var(--surface);cursor:pointer}
+.rec-row{display:flex;align-items:center;gap:var(--sp12);padding:var(--sp8) var(--sp12);border:1px solid var(--bd);border-radius:var(--r6);background:var(--surface);cursor:pointer}
 .rec-row:hover{border-color:var(--bd2);background:var(--hover)}
 .rec-ico{width:34px;height:34px;border-radius:var(--r6);display:grid;place-items:center;flex:none;background:var(--sunken);color:var(--tx2)}
 .rec-ico .ic{width:16px;height:16px}
@@ -317,10 +322,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .rec-pmeta{display:flex;gap:var(--sp8)}
 .rec-pctl{display:flex;align-items:center;gap:var(--sp6)}
 .rec-pctl .iconbtn{width:30px;height:30px}
-@media (max-width:900px){.rec-layout{grid-template-columns:1fr}}
+@media (max-width:1100px){.rec-layout{grid-template-columns:1fr}.rec-player{max-height:340px}}
 .stage-bar{display:flex;align-items:center;gap:var(--sp12);min-height:52px;padding:var(--sp8) var(--sp16);background:var(--surface);border-bottom:1px solid var(--bd);flex-wrap:wrap}
-.stage-meta{font-size:var(--fs12);color:var(--tx2);font-family:var(--mono)}
-.stage-meta b{color:var(--tx1)}
+.canvas-foot{display:flex;align-items:center;gap:var(--sp16);padding:var(--sp8) var(--sp16);border-top:1px solid var(--bd);background:var(--surface);font-size:var(--fs11);color:var(--tx3);flex-wrap:wrap}
+.legend{display:flex;align-items:center;gap:var(--sp6)}
 .pager{display:flex;align-items:center;gap:var(--sp6)}
 .pager button{width:30px;height:30px;border-radius:var(--r4);border:1px solid var(--bd);background:var(--sunken);color:var(--tx1);font-size:14px}
 .pager button:hover:not(:disabled){border-color:var(--accent);color:var(--accent-ink)}
@@ -329,8 +334,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .wall-scroll{flex:1;overflow:auto;padding:var(--sp16);display:flex;flex-direction:column}
 .tiles{display:grid;gap:var(--sp12);grid-template-columns:repeat(var(--cols,3),1fr);flex:none}
 /* layout-grid: named-area template fills the wall height; tiles stretch to their slot (big spans 2×2) */
-.tiles.layout-grid{flex:1;min-height:0}
-.tiles.layout-grid .tile{aspect-ratio:auto;min-height:0;height:100%}
+.tiles.layout-grid{flex:1;min-height:0;align-content:start}
+/* v1.39: restore video-like 16:9 tiles (the fill-height stretch read as flat banners, not video). */
+.tiles.layout-grid .tile{aspect-ratio:16/9;min-height:0;height:auto}
+.tiles.layout-grid .tile-empty{aspect-ratio:16/9}
 /* P3.1 elastic custom grid: dense-flow, tiles keep 16:9, per-tile 2×2 span */
 .tiles.elastic-grid{grid-auto-flow:dense;align-content:start;position:relative}
 .tiles.elastic-grid .tile{aspect-ratio:16/9;height:auto;min-height:0}
@@ -400,8 +407,6 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .stage-empty.show{display:flex}
 .stage-empty h2{font-size:var(--fs20);color:var(--tx1)}
 .stage-empty .big{font-size:42px;opacity:.5}
-.canvas-foot{display:flex;align-items:center;gap:var(--sp16);padding:var(--sp8) var(--sp16);border-top:1px solid var(--bd);background:var(--surface);font-size:var(--fs11);color:var(--tx3);flex-wrap:wrap}
-.legend{display:flex;align-items:center;gap:var(--sp6)}
 /* ---- Live: full-tile zoom + local drag-zoom ---- */
 .tile-media{transition:transform .18s ease;transform-origin:var(--zx,50%) var(--zy,50%);transform:scale(var(--zs,1))}
 .tile.zoomed-in .tile-media{cursor:move}
@@ -460,8 +465,9 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .play-ctl .iconbtn{width:34px;height:34px;font-size:15px}
 /* ---- Live: slim real-time bridge (recorded review lives in Playback) ---- */
 .live-bridge{display:flex;align-items:center;gap:var(--sp12);border-top:1px solid var(--bd);background:var(--surface);padding:var(--sp8) var(--sp16)}
-.live-badge{display:inline-flex;align-items:center;gap:var(--sp6);font-size:var(--fs12);font-weight:600;letter-spacing:.5px;color:var(--ok-ink);background:var(--ok-tint);border:1px solid var(--ok);border-radius:var(--r6);padding:var(--sp4) var(--sp12)}
-.live-clock{font-size:var(--fs14);font-weight:600;color:var(--tx1)}
+/* v1.39: status cluster aligns to the single --ctl-h token (C54); badge/clock no longer mismatched. */
+.live-badge{display:inline-flex;align-items:center;gap:var(--sp6);height:var(--ctl-h);padding:0 var(--sp8);font-size:var(--fs11);font-weight:600;letter-spacing:.5px;color:var(--ok-ink);background:var(--ok-tint);border:1px solid var(--ok);border-radius:var(--r6)}
+.live-clock{display:inline-flex;align-items:center;height:var(--ctl-h);font-size:var(--fs12);font-weight:600;color:var(--tx1)}
 .bridge-note{font-size:var(--fs11);color:var(--tx3)}
 /* ---- Playback: recorded-review workspace (Milestone-style: rail + synchronized wall + timeline) ---- */
 .pb-body{display:flex;flex-direction:column;gap:var(--sp12)}
@@ -560,7 +566,7 @@ body[data-content="error"] .tile{opacity:.7}
 /* shared row rhythm: device header / channel / selected all 34px, same padding+radius */
 .pick-dev,.pick-ch,.pick-row{display:flex;align-items:center;gap:var(--sp8);min-height:34px;padding:0 var(--sp8);border-radius:var(--r6);font-size:var(--fs13)}
 .pick-dev:hover,.pick-ch:hover,.pick-row:hover{background:var(--hover)}
-.pick-dev{cursor:pointer;font-weight:600;margin-top:var(--sp4)}
+.pick-dev{cursor:pointer;font-weight:600;margin-top:var(--sp4);background:var(--sunken);border:1px solid var(--bd);border-radius:var(--r6);padding:var(--sp4) var(--sp8)}
 .pick-dev:first-child{margin-top:0}
 .pick-dev .tw{display:grid;place-items:center;width:16px;height:16px;color:var(--tx3);transition:transform .15s;flex:none}
 .pick-dev .tw .ic{width:12px;height:12px}
@@ -581,10 +587,9 @@ body[data-content="error"] .tile{opacity:.7}
 /* channel rows: checkbox + name sit on the SAME vertical axis as the device header's
    (header = pad8 + twisty16 + gap8 = 32; channel padding-left = 32), so expanding never
    shifts the checkbox column. Tree guide runs under the twisty centre (x=16). */
-.pick-ch{position:relative;cursor:pointer;color:var(--tx2);font-size:var(--fs12);padding-left:32px}
-.pick-ch::before{content:'';position:absolute;left:16px;top:0;bottom:0;width:1px;background:var(--bd)}
+.pick-ch{position:relative;cursor:pointer;color:var(--tx2);font-size:var(--fs12);padding-left:32px;background:var(--sunken);border:1px solid var(--bd);margin-bottom:2px}
 .pick-ch .ch-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pick-ch.on{background:var(--accent-tint);color:var(--tx1)}
+.pick-ch.on{background:var(--accent-tint);border-color:var(--accent);color:var(--tx1)}
 .pick-ch .ch-st{flex:none;display:grid;place-items:center}
 /* selected rows: index + name + state + icon actions. No thumbnail (a fake gradient is not a
    real preview) and no static resolution chip (resolution switches dynamically at runtime). */
@@ -605,7 +610,7 @@ body[data-content="error"] .tile{opacity:.7}
 .pick-empty .big .ic{width:18px;height:18px}
 @media (max-width:760px){.pick-cols{grid-template-columns:1fr}.pick-link{transform:rotate(90deg);padding:var(--sp4) 0}.pick-col{max-height:38vh}}
 /* intercom board */
-.board-row{display:grid;grid-template-columns:210px 92px 1fr 76px 60px 230px;gap:var(--sp12);align-items:center;padding:var(--sp12) var(--sp16);border:1px solid var(--bd);border-radius:var(--r10);background:var(--surface);margin-bottom:var(--sp8)}
+.board-row{display:grid;grid-template-columns:210px 92px 1fr 76px 60px 230px;gap:var(--sp12);align-items:center;padding:var(--sp8) var(--sp12);border:1px solid var(--bd);border-radius:var(--r6);background:var(--surface);margin-bottom:var(--sp2)}
 .board-row.holding{border-left:3px solid var(--ok)}
 .board-row.stale{border-style:dashed;border-color:var(--warn)}
 .grp-name{font-weight:600;font-size:var(--fs14)}
@@ -729,11 +734,72 @@ body[data-badge="on"] #proto-bar{display:flex}
   #body{grid-template-columns:var(--nav-w-min) 1fr}
   .nav-label,.nav-badge,.nav-group-label,.sb-title,.sb-foot span{display:none}
   .nav-item{justify-content:center}
-  #live-layout{grid-template-columns:0 1fr 0}
-  .stream-rail,.mon-alerts{display:none}
   .board-row{grid-template-columns:1fr;gap:var(--sp6)}
   .tower-grid{grid-template-columns:1fr}
 }
+/* ---- Responsive audit fix (v1.39): below 1500px the side panels become overlay drawers so the
+   center wall keeps FULL width instead of being squeezed between two fixed columns. Above 1500px
+   they remain grid columns. Open panels show as drawers; collapsed stay hidden (R7). ---- */
+/* v1.39: keep the integrated 3-column look at desktop widths; only narrow (<1200) uses drawers.
+   Mid widths (1201–1500) slim the side panels so both-open never squeezes the wall. */
+@media (min-width:1201px) and (max-width:1500px){
+  #live-layout{--rail-w:210px;--alerts-w:260px}
+}
+@media (max-width:1200px){
+  #live-layout,#live-layout.no-rail,#live-layout.no-alerts,#live-layout.no-rail.no-alerts{grid-template-columns:1fr;position:relative}
+  .canvas{grid-column:1;grid-row:1}
+  .stream-rail{position:absolute;left:0;top:0;bottom:0;grid-column:auto;grid-row:auto;width:min(var(--rail-w),82vw);z-index:30;box-shadow:var(--glow)}
+  .mon-alerts{position:absolute;right:0;top:0;bottom:0;grid-column:auto;grid-row:auto;width:min(var(--alerts-w),86vw);z-index:30;box-shadow:var(--glow)}
+  #live-layout:not(.no-rail) .stream-rail{display:flex}
+  #live-layout:not(.no-alerts) .mon-alerts{display:flex}
+}
+/* container-query condensing: when the center itself is narrow, drop secondary tile text and
+   thin the timeline scale so labels never collide. */
+.canvas{container-type:inline-size;container-name:monc}
+@container monc (max-width:640px){
+  .tile-idle{display:none}
+  .stage-bar,.ctl-top{gap:var(--sp6)}
+  .tl-scale{font-size:9px}
+  .tl-scale span:nth-child(even){display:none}
+}
+@container monc (max-width:460px){
+  .tile-bar .tile-drift{display:none}
+  .tl-scale span:nth-child(3n){display:none}
+  .bridge-note{display:none}
+}
+/* ---- P5 unified regions + control polish (§6b/§6c) ---- */
+.canvas{position:relative}
+.panel-cluster{display:flex;align-items:center;gap:var(--sp4)}
+.iconbtn .ic{width:16px;height:16px}
+/* B (adjudicated): no standalone edge strips — collapse/expand via the centralized cluster +
+   in-header close + pin (Synology/VSCode button-toggle school). Keeps wall edges clean. */
+#live-layout.no-timeline .ctl-bar{display:none}
+.pin-btn{display:none;width:26px;height:26px}
+@media (max-width:1200px){.pin-btn{display:grid}}
+:root{--ctl-h:30px}
+/* single control-size token for ALL interactive controls (toolbar / header / on-video) */
+.iconbtn,.region-collapse,.pin-btn,.tile-btn,.tile.zoomed .tile-btn,.pager button,.date-nav button,.cal-nav,.spin button{width:var(--ctl-h);height:var(--ctl-h)}
+.combo-trigger,.chip-btn,.btn-sm,.btn-live{height:var(--ctl-h)}
+.chip-btn,.btn-live{display:inline-flex;align-items:center}
+@media (pointer:coarse){.iconbtn,.region-collapse,.pin-btn,.tile-btn,.pager button,.date-nav button,.cal-nav,.spin button,.chip-btn,.btn-sm,.btn-live{min-width:44px;min-height:44px}}
+.tile.dead .tile-idle{display:none}
+.tile-idle{color:rgba(255,255,255,.45)}
+.chip-btn:focus-visible,.iconbtn:focus-visible,.tile:focus-visible,.al-row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#pbSyncChip{border-color:transparent;background:var(--sunken);cursor:default}
+/* unified in-header region collapse buttons (left/right/bottom): same ghost size + directional chevron */
+.tb-group{display:flex;align-items:center;gap:var(--sp4)}
+.tb-sep{width:1px;height:20px;background:var(--bd);flex:none}
+.tb-status{gap:var(--sp8)}
+.warn-chip{background:var(--danger-tint);border-color:var(--danger);color:var(--danger-ink);font-weight:600}
+.warn-chip .ic{width:13px;height:13px}
+.warn-chip[hidden]{display:none}
+.iconbtn.on,.iconbtn.active{background:var(--accent-tint);border-color:var(--accent);color:var(--accent-ink)}
+.spin .ic{width:12px;height:12px}
+.pager .ic,.date-nav .ic,.cal-nav .ic{width:14px;height:14px}
+.pager button,.date-nav button,.cal-nav{display:grid;place-items:center}
+.region-collapse .ic,.pin-btn .ic{width:14px;height:14px}
+#guardTip.neutral{border-color:var(--bd2)}
+#guardTip.neutral .gt-ico{display:none}
 </style>
 </head>
 <body>
@@ -745,6 +811,12 @@ body[data-badge="on"] #proto-bar{display:flex}
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
   <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v4h-4"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></symbol>
   <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
   <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7"/></symbol>
   <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
@@ -758,6 +830,14 @@ body[data-badge="on"] #proto-bar{display:flex}
   <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.9l1.1-6.5L2.6 9.8l6.5-.9L12 3z"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
   <symbol id="i-resize" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></symbol>
+  <symbol id="i-panel-left" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+  <symbol id="i-panel-right" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+  <symbol id="i-timeline" viewBox="0 0 24 24"><rect x="3" y="14" width="18" height="6" rx="1"/><path d="M3 6h18M7 14v-3M12 14v-3M17 14v-3"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5"/><path d="M8 3h8l-1 7 3 3H6l3-3-1-7z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5l12 7-12 7V5z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+  <symbol id="i-rew" viewBox="0 0 24 24"><path d="M12 12l8-6v12l-8-6z"/><path d="M4 12l8-6v12l-8-6z"/></symbol>
+  <symbol id="i-fwd" viewBox="0 0 24 24"><path d="M12 12l-8-6v12l8-6z"/><path d="M20 12l-8-6v12l8-6z"/></symbol>
 </svg>
 <div id="app">
   <header id="topbar">
@@ -774,7 +854,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <nav id="sidebar" aria-label="Portal navigation">
       <div class="sb-head"><span class="sb-title">Navigation</span><button id="navCollapse" title="Collapse navigation">⟨</button></div>
       <div class="sb-scroll" id="navScroll"></div>
-      <div class="sb-foot"><span>Prototype · v1.24 · not app code</span></div>
+      <div class="sb-foot"><span>Prototype · v1.39 · not app code</span></div>
     </nav>
     <main id="main"></main>
   </div>
@@ -800,7 +880,7 @@ body[data-badge="on"] #proto-bar{display:flex}
   </div>
 </div>
 <div id="zoom"><div class="zoom-card"><div class="zoom-media" id="zoomMedia"></div><div class="zoom-bar"><b id="zoomName"></b><span class="mono" id="zoomDrift" style="color:var(--tx3)"></span><div class="spacer"></div><button class="btn" id="zoomClose">Close ✕</button></div><div class="zoom-stats" id="zoomStats"></div></div></div>
-<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.24</span> · prototype watermark · drag to move</div>
+<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.39</span> · prototype watermark · drag to move</div>
 <div class="toast" id="toast"></div>
 <div id="guardTip" role="tooltip" aria-hidden="true"></div>
 <div id="devtools">
@@ -817,7 +897,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <div class="dt-row"><div class="dt-label">Sync</div><div class="dt-seg"><button type="button" data-set="sync:on">On</button><button type="button" data-set="sync:off">Off</button></div></div>
     <div class="dt-row"><div class="dt-label">Version badge</div><div class="dt-seg"><button type="button" data-set="badge:off">Hidden</button><button type="button" data-set="badge:on">Floating</button></div></div>
     <div class="dt-row"><div class="dt-label">Simulate event</div><div class="dt-seg"><button type="button" data-set="sim:motion" title="Emit a motion event on the unified bus">Motion</button><button type="button" data-set="sim:alarm" title="Emit an alarm event (drives alarm-to-wall + intercom)">Alarm</button><button type="button" data-set="sim:bookmark" title="Emit a bookmark event">Bookmark</button></div></div>
-    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.24</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
+    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.39</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
   </div>
 </div>
 
@@ -931,15 +1011,21 @@ const LAYOUTS=[
  {id:'1+7',name:'1+7',cols:4,rows:3,slots:['big','s1','s2','s3','s4','s5','s6','s7','s8'],areas:['big big s1 s2','big big s3 s4','s5 s6 s7 s8']},
  {id:'custom',name:'Custom',cols:4,rows:0,slots:null,areas:null,elastic:true}
 ];
-let layoutId=(()=>{try{const v=localStorage.getItem('ms_mon_layout');return LAYOUTS.some(l=>l.id===v)?v:'9';}catch(_){return '9';}})();
-const layout=()=>LAYOUTS.find(l=>l.id===layoutId)||LAYOUTS[2];
+let layoutId=(()=>{try{const v=localStorage.getItem('ms_mon_layout');return (v==='auto'||LAYOUTS.some(l=>l.id===v))?v:'9';}catch(_){return '9';}})();
+/* E (v1.39): single layout control. 'auto' = template picked by stream count, live-re-evaluated;
+   manual ids = fixed template. Width responsiveness is built-in (minmax 230px), not a user mode. */
+const autoTemplateId=n=>n<=1?'1':n<=4?'4':n<=6?'1+5':n<=9?'9':'16';
+const layout=()=>layoutId==='auto'?(LAYOUTS.find(l=>l.id===autoTemplateId(selected.length))||LAYOUTS[2]):(LAYOUTS.find(l=>l.id===layoutId)||LAYOUTS[2]);
 /* P3.1 elastic per-tile span (true = 2×2, absent = 1×1), persisted */
 let tileSpans={};try{tileSpans=JSON.parse(localStorage.getItem('ms_tile_spans')||'{}')||{};}catch(_){tileSpans={};}
 function saveSpans(){try{localStorage.setItem('ms_tile_spans',JSON.stringify(tileSpans));}catch(_){}}
 /* P3 elastic heavy tier: draggable column separators adjust track weights (Synology drag-frame). */
 let colWeights=[1,1,1,1];try{const w=JSON.parse(localStorage.getItem('ms_col_weights')||'null');if(Array.isArray(w)&&w.length===4&&w.every(x=>x>0))colWeights=w;}catch(_){}
 function saveWeights(){try{localStorage.setItem('ms_col_weights',JSON.stringify(colWeights));}catch(_){}}
-const pageSize=()=>{const L=layout();return L.elastic?Math.max(1,selected.length):L.slots.length;};
+const isSymLayout=L=>!L.elastic&&(L.id==='1'||L.id==='4'||L.id==='9'||L.id==='16');
+/* E: symmetric keeps cols × 2 rows + pagination; columns honor the template (minmax 230px handles
+   narrow via horizontal scroll), so no separate fit mode / column downgrade is needed. */
+const pageSize=()=>{const L=layout();if(L.elastic)return Math.max(1,selected.length);if(isSymLayout(L))return L.cols*2;return L.slots.length;};
 const totalPages=()=>Math.max(1,Math.ceil(selected.length/pageSize()));
 function clampPage(){page=Math.min(Math.max(0,page),totalPages()-1);}
 function counts(){let l=0,d=0,o=0;selected.forEach(id=>{const s=STREAMS[id];if(!s)return;if(s.state==='live')l++;else if(s.state==='degraded')d++;else o++;});return{l,d,o};}
@@ -949,7 +1035,7 @@ function buildPages(){
  const m=$('#main');m.innerHTML='';
  const mk=(id,html)=>{const s=document.createElement('section');s.className='page';s.id='page-'+id;s.innerHTML=html;m.appendChild(s);};
  mk('overview',head('Overview','Fleet health at a glance','<button class="btn btn-sm" id="ovRefresh">↻ Refresh</button>')+`<div class="page-body"><div class="stats" id="ovStats"></div><div class="grid" style="grid-template-columns:1.4fr 1fr;margin-top:16px"><div class="card"><div class="card-title">Alerts · last 24 h</div><div id="ovAlerts"></div></div><div class="card"><div class="card-title">Quick check <span class="chip">≤4 tiles</span></div><div class="mini-wall" id="ovQuick" style="height:220px"></div><div style="margin-top:10px;font-size:11px;color:var(--tx3)">Multi-tile wall monitoring lives in <a href="#" data-goto="monitor">Monitor</a> / <a href="#" data-goto="tower">Tower</a>.</div></div></div></div>`);
- mk('monitor',head('Monitor Center','Surveillance wall + timeline review','')+`<div id="live-layout"><aside class="stream-rail"><div class="rail-head"><div class="rail-title">Selected streams</div><button class="btn btn-primary btn-block" id="openPicker">＋ Select streams</button><button class="btn btn-sm btn-block" id="autoLayout" style="margin-top:6px"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg> Auto-fit layout</button></div><div class="rail-list" id="railList"></div><div class="rail-foot" id="railFoot"></div></aside><div class="canvas"><div class="stage-bar"><button class="iconbtn" id="railToggle" style="width:30px;height:30px" title="Show / hide stream list">⟨</button><span class="stage-meta" id="stageMeta"></span><span class="live-badge"><span class="g g-online"></span>LIVE</span><span class="live-clock mono" id="liveClock">18:43:15</span><div class="spacer"></div><button class="chip-btn on" id="syncBtn" aria-pressed="true" title="Synchronise live drift display across streams">Sync</button><button class="iconbtn" id="statsToggle" style="width:30px;height:30px" title="Stream statistics">ⓘ</button><div class="combo" id="colsCombo"><button class="combo-trigger" id="colsTrigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="colsPop" aria-label="Wall layout"><span class="combo-value" id="colsValue">Layout 9</span><span class="caret">▾</span></button><ul class="combo-pop" id="colsPop" role="listbox"><li class="combo-opt" role="option" data-layout="1" aria-selected="false"><span>1 · single</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="4" aria-selected="false"><span>4 · 2×2</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="9" aria-selected="true"><span>9 · 3×3</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="16" aria-selected="false"><span>16 · 4×4</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="1+3" aria-selected="false"><span>1+3 · featured</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="1+5" aria-selected="false"><span>1+5 · featured</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="1+7" aria-selected="false"><span>1+7 · featured</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="custom" aria-selected="false"><span>Custom · elastic</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li></ul></div><div class="pager"><button id="pgPrev">‹</button><span class="pg-label" id="pgLabel">1 / 1</span><button id="pgNext">›</button></div><button class="chip-btn" id="carouselToggle" aria-pressed="false" title="Auto-cycle pages in sequence (default off)">Carousel</button><div class="spin" id="carouselSpin" title="Carousel interval"><button data-c="-1" aria-label="Shorter interval">−</button><span class="spin-val" id="carouselVal">5s</span><button data-c="1" aria-label="Longer interval">+</button></div><button class="chip-btn al-toggle" id="alertsToggle" title="Show / hide alerts" aria-pressed="false">Alerts<span class="al-badge" id="alBadge">5</span></button></div><div class="error-banner" id="liveStale"><span class="g g-warn"></span>Stream list is stale. Showing the last known state.<div class="spacer"></div><button class="btn btn-sm" id="liveRetry">Retry</button></div><div class="wall-scroll" id="wallScroll"><div class="tiles" id="tiles" style="--cols:3"></div><div id="wallLoading"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div><div class="stage-empty" id="stageEmpty"><div class="big">▣</div><h2>No streams selected</h2><p>Pick devices and streams from the left rail to start monitoring.</p><button class="btn btn-primary" id="emptyPicker">＋ Select streams</button></div></div><div class="ctl-bar"><div class="ctl-top"><span class="ctl-time mono" id="ctlTime">18:43:15</span><div class="spin" id="winSpin"><button data-w="-1" aria-label="Wider time window">−</button><span class="spin-val" id="zoomVal">24h</span><button data-w="1" aria-label="Narrower time window">+</button></div><div class="ctl-date"><div class="date-nav"><button id="dayPrev" aria-label="Previous day">‹</button><span id="calBtn">2026-11-13</span><button id="dayNext" aria-label="Next day">›</button></div><div class="cal-pop" id="calPop" hidden><div class="cal-head"><button class="cal-nav" id="calPrev">‹</button><span id="calMonth">November 2026</span><button class="cal-nav" id="calNext">›</button></div><div class="cal-grid" id="calGrid"></div><div class="cal-foot"><input id="calTime" value="18:43" aria-label="Jump to time"><button class="btn btn-sm" id="calGo">Go</button></div></div></div><button class="chip-btn" id="evPrev" title="Previous event">‹ Event</button><button class="chip-btn" id="evNext" title="Next event">Event ›</button><div class="spacer"></div><div class="spin" id="speedSpin"><button data-s="-1" aria-label="Slower">−</button><span class="spin-val" id="speedVal">1×</span><button data-s="1" aria-label="Faster">+</button></div><span class="chip" id="pbSyncChip" title="Sync-seek: all cameras play the same wall-clock time">Sync-seek</span><button class="chip-btn" id="soloBtn" aria-pressed="false" title="Solo time: each zoomed channel keeps its own playhead (per-channel independent timeline)">Solo</button><button class="btn-live" id="liveBtn" title="Jump to the live edge">LIVE</button><button class="btn btn-sm" id="toPlayback" title="Open Recordings library">⏪ Recordings</button></div><div class="ctl-bot"><div class="tl-track" id="tlTrack"></div><div class="play-ctl"><button class="iconbtn" id="btnRew" aria-label="Play backwards" title="Play backwards">⏪</button><button class="iconbtn" id="btnPause" aria-label="Pause" title="Pause / play">⏸</button><button class="iconbtn" id="btnFwd" aria-label="Play forwards" title="Play forwards">⏩</button></div><div class="tl-scale" id="tlScale"></div></div></div><div class="canvas-foot"><span class="legend"><span class="g g-online"></span>live</span><span class="legend"><span class="segbar"><i class="f"></i><i class="f"></i><i></i></span>degraded</span><span class="legend"><span class="g g-offline"></span>offline</span><div class="spacer"></div><span id="footInfo" class="mono"></span></div></div><aside class="mon-alerts" id="monAlerts"><div class="al-head"><span class="al-title">Alerts</span><span class="al-unread" id="alUnread">5</span><div class="spacer"></div><button class="chip-btn al-arm" id="alarmWallToggle" aria-pressed="false" title="Alarm-to-wall: auto-focus the wall on new alarms/motion (default off)">Auto-wall</button><button class="iconbtn al-collapse" id="alCollapse" title="Hide alerts panel">⟩</button></div><div class="al-filter" id="alFilter"><button class="al-chip on" data-f="all">All</button><button class="al-chip" data-f="motion">Motion</button><button class="al-chip" data-f="alarm">Alarm</button><button class="al-chip" data-f="bookmark">Bookmark</button></div><div class="al-list" id="alList"></div><div class="al-foot"><button class="btn btn-sm btn-block" id="alMarkAll">Mark all read</button></div></aside></div>`);
+ mk('monitor',head('Monitor Center','Surveillance wall + timeline review','')+`<div id="live-layout"><aside class="stream-rail"><div class="rail-head"><div class="rail-headrow"><div class="rail-title">Selected streams</div><div class="spacer"></div><button class="iconbtn pin-btn" id="railPin" title="Pin panel (dock when wide)" aria-label="Pin left panel"><svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg></button><button class="iconbtn region-collapse" id="railCollapse" title="Hide left panel" aria-label="Hide left panel"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button></div><button class="btn btn-primary btn-block" id="openPicker">＋ Select streams</button></div><div class="rail-list" id="railList"></div><div class="rail-foot" id="railFoot"></div></aside><div class="canvas"><div class="stage-bar"><div class="tb-group"><button class="iconbtn" id="railToggle" title="Show / hide left panel" aria-label="Toggle left panel"><svg class="ic" aria-hidden="true"><use href="#i-panel-left"/></svg></button><button class="iconbtn" id="alertsToggle" title="Show / hide alerts panel" aria-label="Toggle alerts panel"><svg class="ic" aria-hidden="true"><use href="#i-panel-right"/></svg><span class="al-badge" id="alBadge">5</span></button><button class="iconbtn" id="tlToggle" title="Show / hide timeline" aria-label="Toggle timeline"><svg class="ic" aria-hidden="true"><use href="#i-timeline"/></svg></button></div><div class="tb-sep"></div><div class="tb-group"><div class="combo" id="colsCombo"><button class="combo-trigger" id="colsTrigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="colsPop" aria-label="Wall layout" title="Wall layout"><span class="combo-value" id="colsValue">Layout 9</span><span class="caret">▾</span></button><ul class="combo-pop" id="colsPop" role="listbox"><li class="combo-opt" role="option" data-layout="auto" aria-selected="false"><span>Auto · by count</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-sep" role="separator"></li><li class="combo-opt" role="option" data-layout="1" aria-selected="false"><span>1 · single</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="4" aria-selected="false"><span>4 · 2×2</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="9" aria-selected="true"><span>9 · 3×3</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="16" aria-selected="false"><span>16 · 4×4</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="1+3" aria-selected="false"><span>1+3 · featured</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="1+5" aria-selected="false"><span>1+5 · featured</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="1+7" aria-selected="false"><span>1+7 · featured</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-sep" role="separator"></li><li class="combo-opt" role="option" data-layout="custom" aria-selected="false"><span>Custom · elastic</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li></ul></div><div class="pager"><button id="pgPrev" title="Previous page" aria-label="Previous page"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><span class="pg-label" id="pgLabel">1 / 1</span><button id="pgNext" title="Next page" aria-label="Next page"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><button class="iconbtn" id="carouselToggle" title="Carousel: auto-cycle pages (off)" aria-label="Toggle carousel" aria-pressed="false"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg></button><div class="spin" id="carouselSpin" title="Carousel interval"><button data-c="-1" title="Shorter interval" aria-label="Shorter interval"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button><span class="spin-val" id="carouselVal">5s</span><button data-c="1" title="Longer interval" aria-label="Longer interval"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button></div></div><div class="tb-sep"></div><div class="tb-group tb-status"><button class="chip-btn warn-chip" id="healthChip" hidden aria-label="Problem streams — click to focus"></button><span class="live-badge" id="liveBadge"><span class="g g-online"></span>LIVE</span><span class="live-clock mono" id="liveClock">18:43:15</span></div><div class="spacer"></div><div class="tb-group"><button class="iconbtn on" id="syncBtn" title="Sync drift display across streams" aria-label="Toggle drift sync" aria-pressed="true"><svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg></button><button class="iconbtn" id="statsToggle" title="Stream statistics" aria-label="Toggle stream statistics"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg></button></div></div><div class="error-banner" id="liveStale"><span class="g g-warn"></span>Stream list is stale. Showing the last known state.<div class="spacer"></div><button class="btn btn-sm" id="liveRetry">Retry</button></div><div class="wall-scroll" id="wallScroll"><div class="tiles" id="tiles" style="--cols:3"></div><div id="wallLoading"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div><div class="stage-empty" id="stageEmpty"><div class="big">▣</div><h2>No streams selected</h2><p>Pick devices and streams from the left rail to start monitoring.</p><button class="btn btn-primary" id="emptyPicker">＋ Select streams</button></div></div><div class="ctl-bar"><div class="ctl-top"><div class="tb-group"><span class="ctl-time mono" id="ctlTime">18:43:15</span><div class="spin" id="winSpin"><button data-w="-1" title="Wider time window" aria-label="Wider time window"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button><span class="spin-val" id="zoomVal">24h</span><button data-w="1" title="Narrower time window" aria-label="Narrower time window"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button></div><div class="ctl-date"><div class="date-nav"><button id="dayPrev" title="Previous day" aria-label="Previous day"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><span id="calBtn">2026-11-13</span><button id="dayNext" title="Next day" aria-label="Next day"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="cal-pop" id="calPop" hidden><div class="cal-head"><button class="cal-nav" id="calPrev" title="Previous month" aria-label="Previous month"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><span id="calMonth">November 2026</span><button class="cal-nav" id="calNext" title="Next month" aria-label="Next month"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="cal-grid" id="calGrid"></div><div class="cal-foot"><input id="calTime" value="18:43" aria-label="Jump to time"><button class="btn btn-sm" id="calGo">Go</button></div></div></div></div><div class="spacer"></div><div class="tb-group"><div class="spin" id="speedSpin"><button data-s="-1" title="Slower" aria-label="Slower"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button><span class="spin-val" id="speedVal">1×</span><button data-s="1" title="Faster" aria-label="Faster"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button></div></div><div class="tb-sep"></div><div class="tb-group"><button class="iconbtn" id="pbSyncChip" title="Sync-seek: all cameras play the same wall-clock time" aria-label="Sync-seek indicator"><svg class="ic" aria-hidden="true"><use href="#i-link"/></svg></button><button class="iconbtn" id="soloBtn" title="Solo time: each zoomed channel keeps its own playhead" aria-label="Toggle solo time" aria-pressed="false"><svg class="ic" aria-hidden="true"><use href="#i-clock"/></svg></button><button class="btn-live" id="liveBtn" title="Jump to the live edge">LIVE</button></div><div class="tb-sep"></div><div class="tb-group"><button class="iconbtn" id="toPlayback" title="Open Recordings library" aria-label="Open Recordings library"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg></button><button class="iconbtn region-collapse" id="tlCollapse" title="Hide timeline" aria-label="Hide timeline"><svg class="ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></div></div><div class="ctl-bot"><div class="tl-track" id="tlTrack"></div><div class="play-ctl"><button class="iconbtn" id="btnRew" aria-label="Play backwards" title="Play backwards"><svg class="ic" aria-hidden="true"><use href="#i-rew"/></svg></button><button class="iconbtn" id="btnPause" aria-label="Pause" title="Pause / play"><svg class="ic" aria-hidden="true"><use href="#i-pause"/></svg></button><button class="iconbtn" id="btnFwd" aria-label="Play forwards" title="Play forwards"><svg class="ic" aria-hidden="true"><use href="#i-fwd"/></svg></button></div><div class="tl-scale" id="tlScale"></div></div></div></div><aside class="mon-alerts" id="monAlerts"><div class="al-head"><span class="al-title">Alerts</span><span class="al-unread" id="alUnread">5</span><div class="spacer"></div><button class="chip-btn al-arm" id="alarmWallToggle" aria-pressed="false" title="Alarm-to-wall: auto-focus the wall on new alarms/motion (default off)">Auto-wall</button><button class="iconbtn pin-btn" id="alertsPin" title="Pin panel (dock when wide)" aria-label="Pin alerts panel"><svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg></button><button class="iconbtn region-collapse" id="alCollapse" title="Hide alerts panel" aria-label="Hide alerts panel"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="al-filter" id="alFilter"><button class="al-chip on" data-f="all">All</button><button class="al-chip" data-f="motion">Motion</button><button class="al-chip" data-f="alarm">Alarm</button><button class="al-chip" data-f="bookmark">Bookmark</button></div><div class="al-list" id="alList"></div><div class="al-foot"><button class="btn btn-sm btn-block" id="alMarkAll">Mark all read</button></div></aside></div>`);
  mk('recordings',head('Recordings library','Search, bookmarks & export','<button class="btn btn-sm" id="pbBackLive" title="Return to the monitor wall">← Back to Monitor</button><button class="btn btn-sm" id="pbExport" title="Export the selected clip">Export clip</button>')+`<div class="page-body rec-body"><div class="honesty"><span class="g g-warn"></span>Recording + sync-seek backend not landed yet (recording-recon). The clip list shows event-based design samples; recorded playback and export stay honestly disabled until it lands.</div><div class="rec-toolbar"><div class="search rec-search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><input id="recQ" type="text" placeholder="Search camera, event or time…" aria-label="Search recordings"></div><div class="rec-filters" id="recType"><button class="al-chip on" data-t="all">All</button><button class="al-chip" data-t="motion">Motion</button><button class="al-chip" data-t="alarm">Alarm</button><button class="al-chip" data-t="continuous">Continuous</button><button class="al-chip" data-t="bookmark">Bookmark</button></div><button class="chip-btn" id="recBmOnly" aria-pressed="false" title="Show bookmarked only"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg> Bookmarked</button></div><div class="rec-layout"><div class="rec-list" id="recList"></div><aside class="rec-player" id="recPlayer"></aside></div></div>`);
  mk('intercom',head('Intercom board','Floor control across groups','<span class="chip">capability: floor ✓</span><div class="toggle on" id="cueToggle"><span class="sw"></span>Cues</div>')+`<div class="page-body"><div id="boardWrap"><div id="boardList"></div><div class="canvas-foot" style="border:1px solid var(--bd);border-radius:8px;margin-top:8px"><span class="legend"><span class="g g-online"></span>Held</span><span class="legend"><span class="segbar"><i class="f"></i><i class="f"></i><i></i></span>Queued</span><span class="legend"><span class="g g-offline"></span>Idle</span><div class="spacer"></div><span>Click a group to enter · hold Space / PTT to talk · Esc back</span></div></div><div id="chanView" hidden></div></div>`);
  mk('meeting',head('Meeting','Multi-party conferences','<button class="btn btn-primary btn-sm" id="newMeet">＋ New meeting</button>')+`<div class="page-body"><div class="grid" id="meetGrid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))"></div></div>`);
@@ -975,8 +1061,9 @@ function renderOverview(){
  $('#ovQuick').innerHTML=selected.slice(0,4).map((id,i)=>{const s=STREAMS[id];return `<div class="mini-tile"><div class="tile-media" style="position:absolute;inset:0;background:${feedBg(s,i)}"></div><div class="tile-scan"></div><div style="position:absolute;top:6px;left:8px;font-size:11px;font-weight:600;color:#E7ECF5;text-shadow:0 1px 3px #000">${s.device}·${s.label}</div><span class="tile-live ${s.state==='offline'?'outline':'solid'}" style="position:absolute;top:6px;right:8px;font-size:10px;padding:2px 5px">${s.state==='offline'?'□':'■'}</span></div>`;}).join('');
 }
 function renderRail(){
- const r=$('#railList');r.innerHTML='';selected.forEach((id,i)=>{const s=STREAMS[id];if(!s)return;const el=document.createElement('div');el.className='stream-item'+(id===activeStream?' active':'');el.draggable=true;el.dataset.stream=id;el.title='Drag onto a wall slot to reorder · drag to the footer to remove';
- el.innerHTML=`<span class="s-idx">${i+1}</span><span class="thumb" style="background:${feedBg(s,i)}"></span><span class="stream-meta"><span class="stream-name">${s.device} · ${s.label}</span><span class="stream-sub">${s.res}</span></span>${glyph(s.state)}<span class="s-del" role="button" tabindex="0" aria-label="Remove">×</span>`;
+ const r=$('#railList');r.innerHTML='';selected.forEach((id,i)=>{const s=STREAMS[id];if(!s)return;const el=document.createElement('div');el.className='stream-item'+(id===activeStream?' active':'');el.draggable=true;el.dataset.stream=id;
+ el.dataset.tip=s.device+' · '+s.label+' — drag onto a wall slot to reorder, footer to remove';
+ el.innerHTML=`<span class="stream-meta"><span class="stream-name">${s.device} · ${s.label}</span><span class="stream-sub">${s.res} · ${s.state}</span></span>${glyph(s.state)}<span class="s-del" role="button" tabindex="0" aria-label="Remove">×</span>`;
  el.onclick=e=>{if(e.target.closest('.s-del')){removeStream(id);return;}activeStream=id;gotoStream(id);renderRail();};r.appendChild(el);});
  $('#railFoot').textContent=selected.length+' streams selected';
 }
@@ -986,7 +1073,7 @@ function gotoStream(id){const i=selected.indexOf(id);if(i<0)return;page=Math.flo
    auto-fit layout. Adding new cameras stays with the shuttle picker (R8 division of labor). ---- */
 let dragId=null;
 function moveStream(id,target){const from=selected.indexOf(id);if(from<0)return;target=Math.max(0,Math.min(target,selected.length-1));if(from===target)return;selected.splice(from,1);selected.splice(target,0,id);clampPage();renderMonitor();toast('Reordered '+STREAMS[id].device+' · '+STREAMS[id].label);}
-function autoLayout(){const n=selected.length;const id=n<=1?'1':n<=4?'4':n<=6?'1+5':n<=9?'9':'16';chooseLayout(id);toast('Auto-fit layout '+id+' for '+n+' stream'+(n===1?'':'s'));}
+
 function wireWallDrag(){
  document.addEventListener('dragstart',e=>{const it=e.target.closest('[data-stream]');if(!it||!(it.classList.contains('stream-item')||it.classList.contains('tile')))return;dragId=it.dataset.stream;try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',dragId);}catch(_){}
   it.classList.add('dragging');const f=$('#railFoot');if(f){f.classList.add('drop-remove');f.textContent='Drop here to remove';}});
@@ -1003,7 +1090,7 @@ function wireWallDrag(){
   foot.addEventListener('dragleave',()=>foot.classList.remove('drag-over'));
   foot.addEventListener('drop',e=>{if(!dragId)return;e.preventDefault();removeStream(dragId);});
  }
- const al=$('#autoLayout');if(al)al.onclick=autoLayout;
+
 }
 /* ---- P2.4 carousel (R1=C): optional sequential page auto-cycle, default off; manual pager kept ---- */
 let carouselOn=false,carouselTimer=null;const carouselIntervals=[3,5,10,30];let carouselIdx=1;
@@ -1022,24 +1109,26 @@ function renderWall(){
  prevZoom=zoomedId;if(pbSolo&&zoomedId)tlPaint(pb.ratio);
  t.classList.toggle('has-zoomed',!!zoomed);t.classList.toggle('layout-grid',!zoomed&&!elastic);t.classList.toggle('elastic-grid',elastic);
  if(zoomed){t.style.gridTemplateAreas='none';t.style.gridTemplateColumns='1fr';t.style.gridTemplateRows='auto';t.style.gridAutoFlow='row';t.style.setProperty('--cols',1);}
- else if(elastic){t.style.gridTemplateAreas='none';t.style.gridTemplateColumns=colWeights.slice(0,L.cols).map(w=>w+'fr').join(' ');t.style.gridTemplateRows='none';t.style.gridAutoFlow='dense';t.style.setProperty('--cols',L.cols);}
- else{t.style.gridAutoFlow='row';t.style.setProperty('--cols',L.cols);t.style.setProperty('--rows',L.rows);t.style.gridTemplateColumns=`repeat(${L.cols},minmax(0,1fr))`;t.style.gridTemplateRows=`repeat(${L.rows},minmax(0,1fr))`;t.style.gridTemplateAreas=L.areas.map(r=>`"${r}"`).join(' ');}
+ else if(elastic){t.style.gridTemplateAreas='none';t.style.gridTemplateColumns=colWeights.slice(0,L.cols).map(w=>`minmax(230px,${w}fr)`).join(' ');t.style.gridTemplateRows='none';t.style.gridAutoFlow='dense';t.style.setProperty('--cols',L.cols);}
+ else if(isSymLayout(L)){t.style.gridTemplateAreas='none';t.style.gridAutoFlow='row';t.style.setProperty('--cols',L.cols);t.style.gridTemplateColumns=`repeat(${L.cols},minmax(230px,1fr))`;t.style.gridTemplateRows='repeat(2,auto)';t.style.minWidth='';}
+ else{t.style.gridAutoFlow='row';t.style.setProperty('--cols',L.cols);t.style.setProperty('--rows',L.rows);t.style.gridTemplateColumns=`repeat(${L.cols},minmax(230px,1fr))`;t.style.gridTemplateRows=`repeat(${L.rows},auto)`;t.style.gridTemplateAreas=L.areas.map(r=>`"${r}"`).join(' ');}
  const start=page*pageSize(),slice=zoomed?[zoomedId]:selected.slice(start,start+pageSize());t.innerHTML='';
  slice.forEach((id,i)=>{const s=STREAMS[id];if(!s)return;const dead=s.state==='offline';const el=document.createElement('div');
  el.className='tile'+(id===activeStream?' selected':'')+(s.state==='degraded'?' degraded':'')+(dead?' dead':'')+(zoomed&&id===zoomedId?' zoomed':'');
- el.dataset.stream=id;if(!zoomed){el.draggable=true;if(elastic){const sp=tileSpans[id]?2:1;el.style.gridColumn='span '+sp;el.style.gridRow='span '+sp;}else if(L.slots&&L.slots[i])el.style.gridArea=L.slots[i];}
+ el.dataset.stream=id;if(!zoomed){el.draggable=true;if(elastic){const sp=tileSpans[id]?2:1;el.style.gridColumn='span '+sp;el.style.gridRow='span '+sp;}else if(!isSymLayout(L)&&L.slots&&L.slots[i])el.style.gridArea=L.slots[i];}
  const lat=dead?'—':Math.abs(s.drift)+' ms',dec=dead?'—':(s.jit/9).toFixed(1)+' ms',bitShort=s.bit.replace(' Mbps','M').replace(' kbps','k');
- const sizeBtn=elastic?'<button class="tile-btn size-b'+(tileSpans[id]?' on':'')+'" type="button" aria-label="'+(tileSpans[id]?'Shrink to 1×1':'Enlarge to 2×2')+'" title="'+(tileSpans[id]?'Shrink to 1×1':'Enlarge to 2×2')+'"><svg class="ic" aria-hidden="true"><use href="#i-resize"/></svg></button>':'';
- el.innerHTML=`<div class="tile-media" ${dead?'data-reason="No signal on this camera — nothing to region-zoom. Reconnect the stream first."':''} style="background:${feedBg(s,start+i)}"></div><div class="tile-scan"></div><div class="tile-bar"><span class="tile-name">${s.device} · ${s.label}</span><div class="spacer"></div><span class="tile-drift mono">${driftTxt(s)}</span>${glyph(s.state)}</div><div class="tile-actions">${sizeBtn}<button class="tile-btn zoom-b" type="button" aria-label="${zoomed?'Exit zoom':'Zoom'}" title="${zoomed?'Exit zoom':'Zoom'}"><svg class="ic" aria-hidden="true"><use href="${zoomed?'#i-zoom-out':'#i-zoom'}"/></svg></button><button class="tile-btn del" type="button" aria-label="Remove from grid" title="Remove from grid"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button></div><div class="tile-stats"><div class="st-head">${glyph(s.state)} ${s.state.toUpperCase()}</div><div class="st-grid"><span class="k">FPS</span><span class="v">${s.fps}</span><span class="k">RES</span><span class="v">${s.res}</span><span class="k">BIT</span><span class="v">${bitShort}</span><span class="k">JIT</span><span class="v">${s.jit} ms</span><span class="k">LAT</span><span class="v">${lat}</span><span class="k">RTT</span><span class="v">${s.rtt} ms</span><span class="k">DEC</span><span class="v">${dec}</span><span class="k">LOSS</span><span class="v">${s.loss}%</span></div></div><div class="tile-idle">${dead?'reconnecting — last frame 2 min ago':s.codec+' · '+s.res+' · '+s.fps+' fps · '+s.bit}</div><span class="tile-live ${dead?'outline':'solid'}">${dead?'□ OFF':'■ LIVE'}</span>${dead?'<div class="deadmsg"><span class="g g-offline"></span>SIGNAL LOST</div>':''}`;
+ const sizeBtn=elastic?'<button class="tile-btn size-b'+(tileSpans[id]?' on':'')+'" type="button" aria-label="'+(tileSpans[id]?'Shrink to 1×1':'Enlarge to 2×2')+'" data-tip="'+(tileSpans[id]?'Shrink to 1×1':'Enlarge to 2×2')+'"><svg class="ic" aria-hidden="true"><use href="#i-resize"/></svg></button>':'';
+ el.innerHTML=`<div class="tile-media" ${dead?'data-reason="No signal on this camera — nothing to region-zoom. Reconnect the stream first."':''} style="background:${feedBg(s,start+i)}"></div><div class="tile-scan"></div><div class="tile-bar"><span class="tile-name">${s.device} · ${s.label}</span><div class="spacer"></div><span class="tile-drift mono">${driftTxt(s)}</span>${glyph(s.state)}</div><div class="tile-actions">${sizeBtn}<button class="tile-btn zoom-b" type="button" aria-label="${zoomed?'Exit zoom':'Zoom'}" data-tip="${zoomed?'Exit zoom':'Zoom'}"><svg class="ic" aria-hidden="true"><use href="${zoomed?'#i-zoom-out':'#i-zoom'}"/></svg></button><button class="tile-btn del" type="button" aria-label="Remove from grid" data-tip="Remove from grid"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button></div><div class="tile-stats"><div class="st-head">${glyph(s.state)} ${s.state.toUpperCase()}</div><div class="st-grid"><span class="k">FPS</span><span class="v">${s.fps}</span><span class="k">RES</span><span class="v">${s.res}</span><span class="k">BIT</span><span class="v">${bitShort}</span><span class="k">JIT</span><span class="v">${s.jit} ms</span><span class="k">LAT</span><span class="v">${lat}</span><span class="k">RTT</span><span class="v">${s.rtt} ms</span><span class="k">DEC</span><span class="v">${dec}</span><span class="k">LOSS</span><span class="v">${s.loss}%</span></div></div><div class="tile-idle">${dead?'reconnecting — last frame 2 min ago':s.codec+' · '+s.res+' · '+s.fps+' fps · '+s.bit}</div><span class="tile-live ${dead?'outline':'solid'}">${dead?'□ OFF':'■ LIVE'}</span>${dead?'<div class="deadmsg"><span class="g g-offline"></span>SIGNAL LOST</div>':''}`;
  el.onclick=e=>{if(e.target.closest('.del')){removeStream(id);return;}if(e.target.closest('.zoom-b')){zoomedId=(zoomed&&id===zoomedId)?null:id;renderWall();return;}if(!zoomed){activeStream=id;renderWall();renderRail();}};
  const sb=el.querySelector('.size-b');if(sb)sb.onclick=e=>{e.stopPropagation();tileSpans[id]=!tileSpans[id];saveSpans();renderWall();};
  t.appendChild(el);});
- if(!zoomed&&!elastic&&selected.length&&L.slots){for(let i=slice.length;i<L.slots.length;i++){const ph=document.createElement('div');ph.className='tile-empty';ph.style.gridArea=L.slots[i];ph.dataset.slot=L.slots[i];ph.innerHTML='<svg class="ic"><use href="#i-grid"/></svg><span>Empty slot</span>';t.appendChild(ph);}}
+ if(!zoomed&&!elastic&&selected.length&&L.slots){const cap=isSymLayout(L)?L.cols*2:L.slots.length;for(let i=slice.length;i<cap;i++){const ph=document.createElement('div');ph.className='tile-empty';if(!isSymLayout(L))ph.style.gridArea=L.slots[i];ph.dataset.slot=L.slots[i];ph.innerHTML='<svg class="ic"><use href="#i-grid"/></svg><span>Empty slot</span>';t.appendChild(ph);}}
  $('#stageEmpty').classList.toggle('show',selected.length===0);$('#tiles').style.display=selected.length===0?'none':'grid';
- const c=counts();$('#stageMeta').innerHTML=`<b>${selected.length}</b> streams · ${c.l} live · ${c.d} degraded · ${c.o} offline`;
+ const c=counts();const hc=$('#healthChip');if(hc){const bad=c.d+c.o;hc.hidden=bad===0;if(bad){hc.innerHTML='<svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>'+[c.d?c.d+' degraded':'',c.o?c.o+' offline':''].filter(Boolean).join(' · ');hc.dataset.tip='Problem streams: '+c.d+' degraded, '+c.o+' offline — click to focus the first';}}
+ const lb=$('#liveBadge');if(lb)lb.dataset.tip='Legend: green=live · amber=degraded · gray=offline · '+selected.length+' streams ('+c.l+' live / '+c.d+' degraded / '+c.o+' offline)';
  $('#pgLabel').textContent=(page+1)+' / '+totalPages();
  const a=selected.length?start+1:0,b=Math.min(start+pageSize(),selected.length);
- $('#footInfo').textContent=zoomed?('zoomed · '+STREAMS[zoomedId].device+' · '+STREAMS[zoomedId].label+' · drag to region-zoom, double-click to reset'):`showing ${a}–${b} of ${selected.length} · layout ${L.name} · page ${page+1}/${totalPages()}`;
+ const pl=$('#pgLabel');if(pl)pl.dataset.tip=zoomed?('zoomed · '+STREAMS[zoomedId].device+' · '+STREAMS[zoomedId].label+' · drag to region-zoom, double-click to reset'):('showing '+a+'–'+b+' of '+selected.length+' · layout '+L.name+' · page '+(page+1)+'/'+totalPages());
  applyLiveGuards();
  const wl=$('#wallLoading');if(wl)wl.style.setProperty('--cols',cols);
  syncDevtools();placeColHandles();
@@ -1087,11 +1176,27 @@ function focusAlertCam(e){
  if(RECORDING_READY){pb.mode='playback';tlPaint(Math.max(0,Math.min(1,(e.sec-pb.start)/pb.span)));}
  toast('Alert → focused '+STREAMS[e.cam].device+' · '+STREAMS[e.cam].label+(RECORDING_READY?'':' (time-review gated)'));
 }
-function setAlertsOpen(open){const ll=$('#live-layout');if(!ll)return;ll.classList.toggle('no-alerts',!open);try{localStorage.setItem('ms_mon_alerts',open?'1':'0');}catch(_){}
- const tg=$('#alertsToggle');if(tg){tg.classList.toggle('on',open);tg.setAttribute('aria-pressed',String(open));}
- if(open)renderAlerts();else syncAlertBadges();}
-function setRailOpen(open){const ll=$('#live-layout');if(!ll)return;ll.classList.toggle('no-rail',!open);try{localStorage.setItem('ms_mon_rail',open?'1':'0');}catch(_){}
- const rt=$('#railToggle');if(rt)rt.textContent=open?'⟨':'⟩';}
+/* ---- P5 unified region controller (left/right/bottom isomorphic collapse; §2d/§6b/§2e) ----
+   Tiered defaults + user-override memory + breakpoint open-state carry. Narrow(<1200)=drawers with
+   mutual exclusion on open; desktop=docked. Bottom hide = pause + switch live (pure live wall). */
+const narrowMon=()=>window.matchMedia('(max-width:1200px)').matches;
+let rzT=null;window.addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(()=>{if(current==='monitor'){renderWall();syncRegionUI();}},120);});
+function syncRegionUI(){const ll=$('#live-layout');if(!ll)return;
+ const ro=!ll.classList.contains('no-rail'),ao=!ll.classList.contains('no-alerts'),to=!ll.classList.contains('no-timeline');
+ const set=(id,on)=>{const b=$(id);if(b){b.classList.toggle('on',on);b.setAttribute('aria-pressed',String(on));}};
+ set('#railToggle',ro);set('#alertsToggle',ao);set('#tlToggle',to);
+ const ct=$('#carouselToggle');if(ct){ct.classList.toggle('on',carouselOn);ct.setAttribute('aria-pressed',String(carouselOn));ct.dataset.tip=carouselOn?'Carousel ON — auto-cycle pages':'Carousel: auto-cycle pages (off)';}
+ const cs=$('#carouselSpin');if(cs)cs.style.display=carouselOn?'':'none';}
+function setAlertsOpen(open,store=true){const ll=$('#live-layout');if(!ll)return;if(open&&narrowMon())setRailOpen(false,store);ll.classList.toggle('no-alerts',!open);if(store){try{localStorage.setItem('ms_mon_alerts',open?'1':'0');}catch(_){}}
+ if(open)renderAlerts();else syncAlertBadges();syncRegionUI();if(current==='monitor')renderWall();}
+function setRailOpen(open,store=true){const ll=$('#live-layout');if(!ll)return;if(open&&narrowMon())setAlertsOpen(false,store);ll.classList.toggle('no-rail',!open);if(store){try{localStorage.setItem('ms_mon_rail',open?'1':'0');}catch(_){}}
+ syncRegionUI();if(current==='monitor')renderWall();}
+function setTimelineOpen(open,store=true){const ll=$('#live-layout');if(!ll)return;ll.classList.toggle('no-timeline',!open);if(store){try{localStorage.setItem('ms_mon_tl',open?'1':'0');}catch(_){}}
+ if(!open){pb.mode='live';pb.paused=true;tlPaint(tlLiveRatio());}  /* hide = pause + live; expand won't auto-resume */
+ syncRegionUI();if(current==='monitor')renderWall();}
+function pinRegion(region){ /* drawer -> docked: only meaningful ≥1200; force wide by clearing narrow via pin flag */
+ try{localStorage.setItem('ms_mon_pin','1');}catch(_){}
+ if(region==='rail')setRailOpen(true);else setAlertsOpen(true);toast('Pinned — resize wider to dock');}
 function wireAlerts(){
  const tg=$('#alertsToggle');if(tg)tg.onclick=()=>setAlertsOpen($('#live-layout').classList.contains('no-alerts'));
  const ac=$('#alCollapse');if(ac)ac.onclick=()=>setAlertsOpen(false);
@@ -1111,9 +1216,24 @@ function wireEventBus(){
 function alarmToIntercom(evt){const ib=document.querySelector('[data-badge="intercom"]');if(ib){ib.classList.add('pulse');setTimeout(()=>ib.classList.remove('pulse'),2500);}
  toast('Alarm → Intercom notified · '+(evt.cam&&STREAMS[evt.cam]?STREAMS[evt.cam].device:evt.k));}
 function initMonPanels(){
- let rail=false,alerts=false;try{rail=localStorage.getItem('ms_mon_rail')==='1';alerts=localStorage.getItem('ms_mon_alerts')==='1';}catch(_){}
- setRailOpen(rail);setAlertsOpen(alerts);syncAlertBadges();
- const cv=$('#colsValue');if(cv)cv.textContent='Layout '+layout().name;document.querySelectorAll('#colsPop .combo-opt').forEach(o=>o.setAttribute('aria-selected',String(o.dataset.layout===layoutId)));
+ /* tiered defaults (K1/K2): desktop left-open/right-closed/bottom-open; narrow both-collapsed/bottom-open.
+    User override (stored) wins and persists across breakpoints. */
+ let rail=null,alerts=null,tl=null;try{rail=localStorage.getItem('ms_mon_rail');alerts=localStorage.getItem('ms_mon_alerts');tl=localStorage.getItem('ms_mon_tl');}catch(_){}
+ const narrow=narrowMon();
+ const rDef=rail==null?(narrow?false:true):rail==='1';
+ const aDef=alerts==null?false:alerts==='1';
+ const tDef=tl==null?true:tl==='1';
+ setRailOpen(rDef,false);setAlertsOpen(aDef,false);setTimelineOpen(tDef,false);syncAlertBadges();syncRegionUI();
+ const cv=$('#colsValue');if(cv)cv.textContent=layoutId==='auto'?'Auto · '+layout().name:'Layout '+layout().name;document.querySelectorAll('#colsPop .combo-opt').forEach(o=>o.setAttribute('aria-selected',String(o.dataset.layout===layoutId)));
+}
+function wireRegions(){
+ const tl=$('#tlToggle');if(tl)tl.onclick=()=>setTimelineOpen($('#live-layout').classList.contains('no-timeline'));
+
+ const rp=$('#railPin');if(rp)rp.onclick=()=>pinRegion('rail');
+ const rc=$('#railCollapse');if(rc)rc.onclick=()=>setRailOpen(false);
+ const hcp=$('#healthChip');if(hcp)hcp.onclick=()=>{const pid=selected.find(id=>STREAMS[id]&&STREAMS[id].state!=='live');if(!pid){toast('No problem streams');return;}activeStream=pid;zoomedId=pid;clampPage();renderWall();renderRail();toast('Focused problem stream '+STREAMS[pid].device+' · '+STREAMS[pid].label);};
+ const ap=$('#alertsPin');if(ap)ap.onclick=()=>pinRegion('alerts');
+ const tc=$('#tlCollapse');if(tc)tc.onclick=()=>setTimelineOpen(false);
 }
 /* ---- Playback: recorded-review workspace (single owner of timeline/transport/calendar) ---- */
 const PB_EVENTS=[
@@ -1410,7 +1530,7 @@ let pbSel=[];let liveSec=18*3600+43*60+15;
 /* P3.2 per-channel independent timeline (dual mode): global sync-seek default; Solo lets each zoomed
    channel keep its own playhead (saved/restored on zoom change). */
 let pbSolo=false;const chRatio={};let prevZoom=null;
-function syncSoloUI(){const c=$('#pbSyncChip'),b=$('#soloBtn');if(c){c.textContent=pbSolo?'Solo':'Sync-seek';c.title=pbSolo?'Solo time: the zoomed channel keeps its own playhead':'Sync-seek: all cameras play the same wall-clock time';c.classList.toggle('solo',pbSolo);}if(b){b.classList.toggle('on',pbSolo);b.setAttribute('aria-pressed',String(pbSolo));}}
+function syncSoloUI(){const c=$('#pbSyncChip'),b=$('#soloBtn');if(c){c.dataset.tip=pbSolo?'Solo: the zoomed channel keeps its own playhead':'Sync-seek: all cameras play the same wall-clock time';c.classList.toggle('solo',pbSolo);}if(b){b.classList.toggle('on',pbSolo);b.setAttribute('aria-pressed',String(pbSolo));b.dataset.tip=pbSolo?'Solo time ON — zoomed channel keeps its own playhead':'Solo time: each zoomed channel keeps its own playhead';}}
 function fmtSp(v){const a=Math.abs(v);let s;if(a>=1)s=a+'×';else if(a===0.5)s='1/2×';else if(a===0.25)s='1/4×';else s='1/8×';return (v<0?'−':'')+s;}
 function pad2(n){return n<10?'0'+n:''+n;}
 function fmtClock(sec){const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60);return (h>=24?'24':pad2(h))+':'+pad2(m);}
@@ -1456,10 +1576,7 @@ function wireLivePlayback(){
   track.addEventListener('mousedown',e=>{if(isGuarded(track)){showGuardTip(track);return;}dragging=true;seekTo(ratioAt(e));e.preventDefault();});
   document.addEventListener('mousemove',e=>{if(dragging)seekTo(ratioAt(e));});
   document.addEventListener('mouseup',()=>{dragging=false;});}
- const evPrev=$('#evPrev'),evNext=$('#evNext');
- const jumpEvent=dir=>{const cur=pb.start+pb.ratio*pb.span;const list=PB_EVENTS.map(e=>e.sec).sort((a,b)=>a-b);const t=dir<0?[...list].reverse().find(s=>s<cur-1):list.find(s=>s>cur+1);if(t==null){toast(dir<0?'No earlier event':'No later event');return;}pb.mode='playback';tlPaint(Math.max(0,Math.min(1,(t-pb.start)/pb.span)));toast('Event @ '+fmtClock(t));};
- if(evPrev)evPrev.onclick=()=>{if(isGuarded(evPrev))return;jumpEvent(-1);};
- if(evNext)evNext.onclick=()=>{if(isGuarded(evNext))return;jumpEvent(1);};
+
  const liveBtn=$('#liveBtn');if(liveBtn)liveBtn.onclick=()=>{if(isGuarded(liveBtn))return;pb.mode='live';tlPaint(tlLiveRatio());toast('Back to LIVE edge');};
  const soloBtn=$('#soloBtn');if(soloBtn)soloBtn.onclick=()=>{pbSolo=!pbSolo;if(pbSolo&&zoomedId)chRatio[zoomedId]=pb.ratio;syncSoloUI();if(pbSolo&&zoomedId)tlPaint(pb.ratio);toast(pbSolo?(zoomedId?'Solo time — this channel keeps its own playhead':'Solo armed — zoom a channel for its own timeline'):'Sync-seek — all cameras share one time');};
  const rew=$('#btnRew'),fwd=$('#btnFwd'),pause=$('#btnPause');
@@ -1508,16 +1625,22 @@ function wireLocalZoom(){
 const RECORDING_READY=false;
 function setGuard(el,disabled,reason){if(!el)return;el.classList.toggle('is-disabled',!!disabled);if(disabled){el.setAttribute('aria-disabled','true');el.dataset.reason=reason||'Unavailable in the current state.';}else{el.removeAttribute('aria-disabled');delete el.dataset.reason;}}
 function isGuarded(el){return !!el&&el.getAttribute('aria-disabled')==='true';}
-function showGuardTip(el,override){const tip=$('#guardTip');if(!tip||!el)return;const reason=override||el.dataset.reason||'Unavailable in the current state.';
- tip.innerHTML='<span class="gt-ico">⚠</span><span class="gt-txt"><b>Disabled</b>'+reason+'</span>';tip.classList.add('show');tip.setAttribute('aria-hidden','false');
+/* unified hover/focus tooltip: neutral for data-tip, warn for data-reason (guarded). */
+function showTip(el,text,neutral){const tip=$('#guardTip');if(!tip||!el)return;tip.classList.toggle('neutral',!!neutral);
+ tip.innerHTML=neutral?'<span class="gt-txt">'+text+'</span>':'<span class="gt-ico">⚠</span><span class="gt-txt"><b>Disabled</b>'+text+'</span>';
+ tip.classList.add('show');tip.setAttribute('aria-hidden','false');
  const r=el.getBoundingClientRect(),tw=tip.offsetWidth,th=tip.offsetHeight;let top=r.top-th-8;if(top<8)top=r.bottom+8;
  const left=Math.max(8,Math.min(r.left+r.width/2-tw/2,window.innerWidth-8-tw));tip.style.top=Math.round(top)+'px';tip.style.left=Math.round(left)+'px';}
+function showGuardTip(el,override){showTip(el,override||el.dataset.reason||'Unavailable in the current state.',false);}
+function tipTarget(e){return e.target.closest('[data-reason],[data-tip]');}
+function tipShow(t){if(t.dataset.reason)showGuardTip(t);else showTip(t,t.dataset.tip,true);}
 function hideGuardTip(){const tip=$('#guardTip');if(tip){tip.classList.remove('show');tip.setAttribute('aria-hidden','true');}}
+function sweepTips(){document.querySelectorAll('button[title]').forEach(el=>{if(!el.dataset.tip&&!el.dataset.reason)el.dataset.tip=el.getAttribute('title');el.removeAttribute('title');});}
 function wireGuardTips(){
- document.addEventListener('pointerover',e=>{const t=e.target.closest('[data-reason]');if(t)showGuardTip(t);});
- document.addEventListener('pointerout',e=>{const t=e.target.closest('[data-reason]');if(t&&!(e.relatedTarget&&t.contains(e.relatedTarget)))hideGuardTip();});
- document.addEventListener('focusin',e=>{const t=e.target.closest('[data-reason]');if(t)showGuardTip(t);});
- document.addEventListener('focusout',e=>{const t=e.target.closest('[data-reason]');if(t)hideGuardTip();});
+ document.addEventListener('pointerover',e=>{const t=tipTarget(e);if(t)tipShow(t);});
+ document.addEventListener('pointerout',e=>{const t=tipTarget(e);if(t&&!(e.relatedTarget&&t.contains(e.relatedTarget)))hideGuardTip();});
+ document.addEventListener('focusin',e=>{const t=tipTarget(e);if(t)tipShow(t);});
+ document.addEventListener('focusout',e=>{const t=tipTarget(e);if(t)hideGuardTip();});
  /* capture-phase: a guarded control swallow its own activation and explains why instead */
  document.addEventListener('click',e=>{const t=e.target.closest('[data-reason]');if(t){e.preventDefault();e.stopPropagation();showGuardTip(t);}},true);
  window.addEventListener('scroll',hideGuardTip,true);
@@ -1550,8 +1673,7 @@ function applyPlaybackGuards(){
  setGuard($('#btnRew'),trDis,trReason);
  setGuard($('#btnPause'),trDis,trReason);
  setGuard($('#btnFwd'),trDis,trReason);
- setGuard($('#evPrev'),trDis,trReason);
- setGuard($('#evNext'),trDis,trReason);
+
  setGuard($('#tlTrack'),no||!RECORDING_READY,no?noMsg:recMsg);
  const dateDis=no||!RECORDING_READY,dateReason=no?noMsg:recMsg;
  setGuard($('#dayPrev'),dateDis,dateReason);
@@ -1562,7 +1684,7 @@ function applyPlaybackGuards(){
 }
 /* ================= COLUMN COMBOBOX (accessible listbox) ================= */
 function setComboOpen(open){const c=$('#colsCombo');if(!c)return;c.classList.toggle('open',open);const tr=$('#colsTrigger');if(tr)tr.setAttribute('aria-expanded',String(open));if(!open)c.querySelectorAll('.combo-opt.is-active').forEach(o=>o.classList.remove('is-active'));}
-function chooseLayout(id){if(!LAYOUTS.some(l=>l.id===id))return;layoutId=id;const L=layout();cols=L.cols;page=0;zoomedId=null;try{localStorage.setItem('ms_mon_layout',id);}catch(_){}document.querySelectorAll('#colsPop .combo-opt').forEach(o=>o.setAttribute('aria-selected',String(o.dataset.layout===id)));$('#colsValue').textContent='Layout '+L.name;setComboOpen(false);renderWall();toast('Layout '+L.name);}
+function chooseLayout(id){if(id!=='auto'&&!LAYOUTS.some(l=>l.id===id))return;layoutId=id;const L=layout();cols=L.cols;page=0;zoomedId=null;try{localStorage.setItem('ms_mon_layout',id);}catch(_){}document.querySelectorAll('#colsPop .combo-opt').forEach(o=>o.setAttribute('aria-selected',String(o.dataset.layout===id)));$('#colsValue').textContent=id==='auto'?'Auto · '+L.name:'Layout '+L.name;setComboOpen(false);renderWall();toast(id==='auto'?'Auto layout · '+L.name+' for '+selected.length+' streams':'Layout '+L.name);}
 function wireColsCombo(){
  const tr=$('#colsTrigger'),pop=$('#colsPop');if(!tr||!pop)return;
  tr.addEventListener('click',e=>{e.stopPropagation();if(isGuarded(tr)){showGuardTip(tr);return;}setComboOpen(!$('#colsCombo').classList.contains('open'));});
@@ -1682,7 +1804,7 @@ function wireDevtools(){
  makeDraggable(dt,$('#dtHead'));
  makeDraggable(dt,$('#dtToggle'));
  makeDraggable($('#proto-bar'),$('#proto-bar'));
- [['#topbar','A1'],['#sidebar','A2'],['#live-layout .stream-rail','A3'],['#live-layout .stage-bar','A4'],['#wallScroll','A5'],['#live-layout .ctl-bar','A6'],['#live-layout .canvas-foot','A7'],['#monAlerts','A8'],['#page-recordings .rec-toolbar','P1'],['#page-recordings .rec-list','P2']].forEach(pr=>{const e=document.querySelector(pr[0]);if(e)e.setAttribute('data-region',pr[1]);});
+ [['#topbar','A1'],['#sidebar','A2'],['#live-layout .stream-rail','A3'],['#live-layout .stage-bar','A4'],['#wallScroll','A5'],['#live-layout .ctl-bar','A6'],['#monAlerts','A8'],['#page-recordings .rec-toolbar','P1'],['#page-recordings .rec-list','P2']].forEach(pr=>{const e=document.querySelector(pr[0]);if(e)e.setAttribute('data-region',pr[1]);});
 }
 /* ================= CUES — WebAudio reference implementation of the SDK cue contract =================
    Mechanism (future SDK): floor/signaling events -> CueEvent -> local synth (zero bandwidth, instant).
@@ -1794,7 +1916,7 @@ setInterval(()=>{GROUPS.forEach(g=>{if(g.state==='held')g.timer++;});if(current=
  if(current==='monitor'&&pb.mode==='playback'&&!pb.paused){const nr=Math.max(0,Math.min(1,pb.ratio+speeds[spIdx]/pb.span));tlPaint(nr);if(nr>=1&&speeds[spIdx]>0){pb.mode='live';}}},1000);
 /* init */
 DEFAULT_SELECTED=selected.slice();pbSel=selected.slice();
-buildPages();buildNav();wire();wireColsCombo();wireGuardTips();wireDevtools();wireAlerts();wireEventBus();wireRecordings();wireCarousel();initLivePlayback();wireLivePlayback();wireLocalZoom();wireWallDrag();initMonPanels();const _alias={live:'monitor',playback:'recordings'};const _h0=(location.hash||'').replace('#','');const _h=_alias[_h0]||_h0;goto(TITLES[_h]?_h:'overview');const _pm=$('#page-monitor'),_pr=$('#page-recordings');if(_pm)_pm.dataset.kind='view';if(_pr)_pr.dataset.kind='view';updateNavBadges();syncDevtools();syncCueUI();syncSoloUI();applyPlaybackGuards();
+buildPages();buildNav();wire();wireColsCombo();wireGuardTips();sweepTips();wireDevtools();wireAlerts();wireEventBus();wireRegions();wireRecordings();wireCarousel();initLivePlayback();wireLivePlayback();wireLocalZoom();wireWallDrag();initMonPanels();const _alias={live:'monitor',playback:'recordings'};const _h0=(location.hash||'').replace('#','');const _h=_alias[_h0]||_h0;goto(TITLES[_h]?_h:'overview');const _pm=$('#page-monitor'),_pr=$('#page-recordings');if(_pm)_pm.dataset.kind='view';if(_pr)_pr.dataset.kind='view';updateNavBadges();syncDevtools();syncCueUI();syncSoloUI();applyPlaybackGuards();
 </script>
 </body>
 </html>

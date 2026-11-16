@@ -729,3 +729,13 @@ Checks:
 - 消费仓（父仓/父预设）把新 TREE/形态塞进子仓共享函数前，必先读函数旁的设计注记（R6 NOTE 类）——msrtc-deploy-bindings 注册当天就违背了 "bindings does NOT ride 共享 AppTree 编排" 的注记，一点就炸且无人发现（出生病：注册 ≠ 可用，不点不知）。
 - 共享函数自身必须对枚举参数（TREE/STAGING 等）做入口校验，未知值 FATAL 并指向正确形态——让违背当场炸而不是生成静默坏序列。
 - Verify: `grep -n 'R6 NOTE' cmake/MediaServoDeployTargets.cmake`（注记在）；新 TREE/形态注册后必实测点一次（[100%] + 落地物非空才算注册完成）。
+
+## C54: 单文件原型 UI 控件纪律——单一 --ctl-h 尺寸 token + 统一 data-tip 悬浮提示 + icon-only 必 aria-label（2026-11-16, v1.33 出生病）
+- design-system skill 只管 `www/packages/ui/tokens.css`（@mediaservo/ui），**不覆盖** `docs/ui/prototypes` 单文件原型；原型须自有纪律：所有交互控件高度=`--ctl-h`（粗指针≥44），禁止散写 26/28/34px。
+- 按钮悬浮提示统一走 `data-tip`（#guardTip neutral/warn 两态）；init `sweepTips` 把静态 title 转 data-tip 并移除 native title（避免双提示/慢提示）；动态提示写 `dataset.tip`；icon-only 必 `aria-label`。
+- Verify: 每次原型 UI 改动跑计算尺寸断言（控件 height==--ctl-h）+ tooltip 断言（pointerover→#guardTip.show）+ node --check/DOM/lint。
+
+## C55: 原型列表行统一卡片行语言（2026-11-16, v1.38 出生病）
+- 所有可选列表行（rail stream-item / picker pick-ch / pick-row / al-row / rec-row / board-row）统一**卡片行**：1px bd 边框 + r6 + sp8 padding + sp2 间距 + hover(bd2/hover) + 选中(accent-tint/accent 边框)；resting 必须有容器信号（禁透明边框+无底"白纸平铺"）。
+- 底色按容器对比：surface 面板上用 sunken，page(sunken) 上用 surface。picker 设备组头 pick-dev 用区别横带（非卡片行）。
+- Verify: 列表行 resting computed border/background 非透明；picker 左右未选中行同底色。

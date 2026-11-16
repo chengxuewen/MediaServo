@@ -1,5 +1,208 @@
 # Prototypes CHANGELOG
 
+## v1.39 — 2026-11-16 (portal-unified) — layout dropdown popup polish
+User: the layout dropdown's opened popup looked bad. Analysis: right-anchored (hung left over neighbors),
+narrow (min-width=trigger), weak elevation (glow shadow invisible on dark wall), cramped 32px rows,
+no grouping (Auto/symmetric/featured/Custom mixed), and clip risk on short viewports (canvas overflow).
+- Popup now **left-anchored** to the trigger, **min-width 220 / max 280**, **stronger drop shadow**
+  (0 8px 24px), r8, sp6 padding, z80; **max-height min(60vh,420px)+overflow-y:auto** (scroll-safe).
+- Options: 34px rows, sp10 padding, r6 inset, 2px gap; **group separators** (Auto | templates | Custom).
+- Verified: headless opened popup @1440×900 clean/elevated/grouped; @1440×600 not clipped (scroll-safe);
+  node --check + lint clean. Keyboard nav skips separators (they are not .combo-opt).
+
+## v1.38 — 2026-11-16 (portal-unified) — unified card-row list language (rail / picker / alerts / rec / board)
+User: rail list lacked row/item feel ("white paper"), and the Select-streams dialog's left column was
+flat while its right column was card-styled (inconsistent). Analysis found TWO row families: flat
+(stream-item / pick-ch / al-row: transparent border, no bg) vs card (pick-row / rec-row / board-row).
+- **Unified to one card-row language**: bordered (1px bd) + r6 + sp8 padding + sp2 gap + hover(bd2/hover)
+  + selected(accent-tint + accent border); resting rows now have a container signal. Converted the flat
+  family (rail stream-item, picker pick-ch, al-row) to cards; aligned card family radius/padding
+  (rec-row r8→r6, board-row r10→r6/sp8/sp2). Row bg adapts to container contrast (sunken on surface
+  panels, surface on page). Picker device group headers (pick-dev) became distinct sunken bands; removed
+  the tree guide line (cards don't need it).
+- Governance: child convention **C55** (unified card-row language + resting container signal + verify).
+- Verified: railCard resting border/bg non-transparent; picker left channel cards vs right cards same
+  language (selected rows accent); headless picker + rail/alerts renders show consistent bordered rows;
+  node --check + lint clean.
+
+## v1.37 — 2026-11-16 (portal-unified) — rail list text-first (adjudicated A): drop fake thumb, fix truncation
+User: the left rail's black-box thumbnail is unnecessary and stream names/info were truncated.
+Analysis: the fake `feedBg` thumb (34px+gap) plus idx/dot/del fixed widths squeezed the flex name to
+~118px (~80px at mid rail), ellipsizing names; the thumb carries zero info in a prototype (no real
+video) and misplaces "view footage" (a wall job) into the selection list (Synology's tree is text+icon).
+- **A implemented**: removed the fake thumbnail and the index; rail rows are now two text lines —
+  `device · label` (full width, tooltip fallback) + `res · state` meta line; status dot kept; remove
+  button reveals on hover/focus. Freed ~60px so names display in full at 1440 and 1250.
+- Verified: noThumb / fullNames(scrollWidth<=clientWidth) / sub "1080p · live" / delHidden:0; headless
+  rail renders at 1440 & 1250 show full names + two-line meta; node --check + lint clean.
+
+## v1.36 — 2026-11-16 (portal-unified) — align top status cluster (LIVE badge / clock) to --ctl-h
+User: the LIVE badge at the top of the multi-grid had bad sizing. Analysis: the status cluster mixed
+three heights/fonts — warn-chip 30px (--ctl-h), live-badge ~25-27px (padding-driven), live-clock fs14
+(larger than the fs12 controls) — violating the C54 single control-size token.
+- `.live-badge` and `.live-clock` now `height:var(--ctl-h)` (30px), badge padding `0 sp8` + fs11,
+  clock fs12 inline-flex centered. Status cluster (warn-chip / LIVE / clock) is uniform height and
+  type scale, compact and consistent with the toolbar.
+- Verified: computed chip/badge/clock all 30px; headless render shows aligned compact status cluster;
+  node --check + lint clean.
+
+## v1.35 — 2026-11-16 (portal-unified) — single layout control (adjudicated E; supersedes K1 fit toggle)
+User asked for a more elegant solution to the layout/fit redundancy (rail "Auto-fit layout" button vs
+center "Fit: Fixed/Auto" vs Layout combo). Adjudicated **E**: collapse three controls into ONE dropdown.
+- **Layout dropdown gains "Auto · by count"**: a template *option* (not a separate mode) that live-picks
+  a template by stream count (1/4/1+5/9/16) and re-evaluates as streams are added/removed. Manual entries
+  (incl. featured 1+3/1+5/1+7, Custom) remain fixed and respected.
+- **Removed the center Fit:Fixed/Auto toggle** and the rail Auto-fit button. Width responsiveness is now
+  **built-in**: grid columns use `minmax(230px, …)` so tiles stay readable and the wall horizontal-scrolls
+  when the center is too narrow — no user-managed fit mode, no fitMode localStorage, no column-jump mode.
+- Left rail keeps stream list + Select streams + drag (only the redundant button removed).
+- Verified: residual fit/autoLayout/displayCols/effCols = none; node --check + DOM clean; click-through
+  auto8→9 / auto7→9 / auto8b→9 / feat1+5 respected / noFitBtn / noRailAuto / autoOpt; narrow @1000 render
+  readable 3-col; featured render big+small.
+
+## v1.34 — 2026-11-16 (portal-unified) — remove persistent bottom message bar (adjudicated C+D)
+User discussed whether the multi-grid bottom message bar (canvas-foot: legend + stream counts +
+showing/page info) is still needed; adjudicated **C+D hybrid**.
+- **Removed** the persistent canvas-foot row from Monitor (reclaims vertical space; wall taller).
+  Legend → tooltip on the LIVE badge; showing/page context → tooltip on the pager label; stream-count
+  summary folded into the LIVE-badge tooltip. (canvas-foot/.legend CSS kept: shared with Intercom board.)
+- **D conditional warning chip**: `#healthChip` in the stage bar appears ONLY when degraded+offline>0
+  (`1 degraded · 1 offline`, danger tint), click focuses the first problem stream; hidden when all live.
+  Turns "at-a-glance health" into "at-a-glance problems".
+- Verified: noFoot/chipVis/legendTip/pgTip/focusProb/hideHealthy assertions green; Intercom board footer
+  regression green (shared CSS restored after an over-broad dead-CSS sweep); node --check + lint clean.
+
+## v1.33 — 2026-11-16 (portal-unified) — real hover tooltips + single control-size token (governance fix)
+User: icon buttons had no perceptible hover tooltip (native `title` is slow/OS-styled) and button sizes
+were inconsistent (34/30/28/26 mixed). Root cause: the design-system skill governs only
+`www/packages/ui/tokens.css` (@mediaservo/ui), NOT this single-file prototype; no prototype control-scale
+or tooltip discipline existed; ad-hoc px + native title drifted in.
+- **Unified hover/focus tooltip**: `showTip(el,text,neutral)` reuses #guardTip (neutral for data-tip,
+  warn for data-reason); wireGuardTips now targets `[data-reason],[data-tip]`; `sweepTips()` at init
+  converts static button `title`→`data-tip` and removes native title (no double/slow tooltip); dynamic
+  titles (fit/carousel/solo/sync-seek) and tile/rail templates write `data-tip`. Immediate, styled,
+  viewport-clamped, flips below near top.
+- **Single control-size token**: `--ctl-h:30px` applied to ALL interactive controls (iconbtn,
+  region-collapse, pin, tile-btn(+zoomed), pager, date-nav, cal-nav, spin, combo-trigger, chip-btn,
+  btn-sm, btn-live); coarse-pointer ≥44. Removed scattered 26/28/34 overrides.
+- **Governance**: child convention **C54** added (prototype control discipline: single --ctl-h + unified
+  data-tip tooltip + icon-only aria-label + computed-size/tooltip assertions each UI change).
+- Verified: tooltip pointerover→show/neutral/text + pointerout→hide; all sampled controls computed 30px
+  (incl pager/spin/combo); styled tooltip render; node --check + DOM + lint clean.
+
+## v1.32 — 2026-11-16 (portal-unified) — Synology-style toolbar: iconify + group + universal tooltips
+User: text buttons (Recordings/Carousel/Fit/Sync/Solo) waste space; all icon buttons need hover tooltips;
+group icons like Synology; current layout too arbitrary. Reworked both Monitor bars into clustered
+icon groups (Synology "Layout Display & Controls" school):
+- **Iconified** text buttons: Fit→i-resize, Sync(drift)→i-swap, stats ⓘ→i-info, Carousel→i-refresh,
+  Solo→i-clock, Sync-seek→i-link, Recordings→i-grid (icon-only); pager ‹›/date ‹›/cal ‹›/spin −+ → SVG
+  chevrons/minus/plus. New sprites i-plus/i-refresh/i-clock/i-link.
+- **Grouped** with `.tb-group` + `.tb-sep`: stage = [panels+fit] | [layout+pager+carousel] | [LIVE+clock]
+  … [drift-sync+stats]; ctl = [time+window+date] … [speed] | [sync-seek+solo+LIVE] | [Recordings+collapse].
+  Moved the long stream-count meta from stage-bar to canvas-foot so the stage bar is a SINGLE row.
+- **Universal tooltips**: every icon/chip button carries title + aria-label (assert allTip:true);
+  dynamic titles for fit/carousel/solo/sync-seek states via syncRegionUI/syncSoloUI (no textContent).
+- Verified: allTip/noTextBtn/groups assertions green; single-row stage + ctl renders; node --check +
+  DOM zero missing + lint clean.
+
+## v1.31 — 2026-11-16 (portal-unified) — remove the two bottom-bar Event buttons (user request)
+Removed `evPrev`/`evNext` ("‹ Event"/"Event ›") from the Monitor ctl-bar, plus their `jumpEvent` wiring
+and honest-guards. The bottom bar is now a cleaner single row (time/window/date/speed/sync/solo/LIVE/
+Recordings/collapse). Event access remains via the right alerts panel (click-to-jump) — no loss of
+event navigation capability, just de-duplicated from the transport bar.
+- Verified: no evPrev/evNext/jumpEvent in source; node --check clean; bottom-bar render without Event buttons.
+
+## v1.30 — 2026-11-16 (portal-unified) — unify the three region collapse buttons (style parity)
+User report: left/right/bottom hide buttons were inconsistent (left/right = `al-collapse` + × icon;
+bottom = plain `iconbtn` + ↓ arrow; sizes differed).
+- Unified all three to one ghost class `region-collapse` (26px, 14px icon) with a **directional chevron
+  family**: left `i-chevron-left`, right `i-chevron` (right), bottom `i-chevron-down` (new sprites).
+  Renamed `al-collapse`→`region-collapse`; pin buttons aligned to 26px. Semantics = "collapse toward
+  this edge", coherent across the three regions.
+- Verified: all three share class + computed 26px + directional icons (cls/size/icons assertions);
+  three-panel render shows ‹ / › / ⌄ consistently. node --check + lint clean.
+
+## v1.29 — 2026-11-16 (portal-unified) — remove edge strips (adjudicated B; Synology/VSCode button-toggle school)
+User found the collapsed-edge arrow strips ugly/uncoordinated (they crossed the stage-bar/wall/footer
+rows, double-bordered, and the bottom strip covered the footer text). Research: Synology toggles panels
+via a "show/hide panel" BUTTON (kb liveview_alert); VS Code uses toolbar/Ctrl+B with NO edge handle;
+only desktop IDEs (VS/JetBrains auto-hide) use edge TABS, and those are aligned labeled tabs, not our
+cross-row surface bars. Adjudicated **B = remove standalone edge strips**.
+- Removed railStrip/alertsStrip/tlStrip (HTML/CSS/wiring). Collapse/expand now solely via the centralized
+  cluster `[left][right][timeline]` + in-header close (railCollapse/alCollapse) + pin. Bottom reopen via
+  tlToggle. Wall edges clean, footer no longer covered, symmetric margins.
+- Verified: no `.edge-strip` in DOM; all-collapsed render clean (footer intact, pure live wall); cluster
+  reopen left/timeline works (render + assertions noStrips/reopenL/reopenT). node --check + lint clean.
+
+## v1.28 — 2026-11-16 (portal-unified) — fix: left rail close-button parity (narrow drawer could not collapse)
+User report: the left rail lacked the right panel's in-header close button, so on narrow screens the
+open left drawer (which covers the top toolbar cluster) could not be collapsed.
+- Added `railCollapse` (i-close) to the rail head, isomorphic to the alerts `alCollapse`; rail head now
+  a flex row (title + spacer + pin + close). Wired to `setRailOpen(false)`; visible at all widths.
+- Verified: railCollapse visible; click closes (no-rail) + left edge-strip appears; strip reopens;
+  narrow @1150 drawer head shows pin + close. node --check clean.
+
+## v1.27 — 2026-11-16 (portal-unified) — monitor-center Phase 5: responsive rework + unified collapse + UI polish
+Implements `docs/plans/monitor-center/PLAN.md` Phase 5 (5.1–5.7) after the §2d/§2e adjudications
+(K1/K2 = width-tiered defaults + user-override) and the 4-role panel re-review. Supersedes the rejected
+v1.25/v1.26 responsive approach.
+- **5.1 unified region controller**: left/right/bottom are isomorphic collapsible regions
+  (`setRailOpen/setAlertsOpen/setTimelineOpen`), each with a persistent edge expand-strip; a centralized
+  top toolbar cluster `[left][right][timeline]` + Fit toggle; per-region localStorage memory;
+  **tiered defaults** (≥1200 left-open/right-closed/bottom-open; <1200 both-collapsed/bottom-open) with
+  **user-override priority** and breakpoint open-state carry (classes persist across resize).
+- **5.2 Fixed/Auto fit**: tiered default (≥1200 Fixed, <1200 Auto) + override memory; Fixed honors the
+  chosen layout with min-tile 230 + horizontal-scroll fallback (no column downgrade); Auto = effCols
+  recompute, never writes back the layout.
+- **5.3 three-column adaptive grid**: center = total − visible panels; tiles stay 16:9; reflow on any
+  region toggle/resize; ≥1200 docked (1201–1500 slim panels).
+- **5.4 narrow <1200 drawers**: overlay + edge strips + pin-to-dock button + mutual exclusion (drawer
+  mode only); wall keeps full width.
+- **5.5 bottom hide = pure live wall**: hides ctl-bar, pauses + switches to live; bottom expand strip;
+  expand does not auto-resume; stage-bar keeps LIVE/clock.
+- **5.6 UI polish**: transport ⏪⏸⏩ + handoff emoji → monochrome SVG (i-rew/i-pause/i-fwd/i-grid); new
+  sprite i-panel-left/right/i-timeline/i-pin; `--ctl-h:30px` control-height token (coarse ≥44, tile-btn
+  28); `.tile.dead .tile-idle{display:none}` fixes dead-tile text overlap; idle contrast raised to .45;
+  Alerts moved into the cluster (no orphan wrap); Carousel interval spin hidden when off; Sync-seek
+  static chip de-buttoned; aria-labels + focus-visible added.
+- Verified: node --check + DOM zero missing; headless @1440 default (left-open/right-closed/bottom-open,
+  Fit Fixed, cluster, SVG transport, clean dead tile), @1150 default (both-collapsed + edge strips +
+  Fit Auto), @1150 drawer-open (overlay + pin, wall full), bottom-hide (ctl hidden + mode live + no
+  auto-resume); click-through (defL/defR/defT/fit/stripR/noTl/mode/ctlHidden/backT/noResume/deadIdle/
+  rewSvg) all green; regression ic6/chan/tower/dev/rec/mon green.
+
+## v1.26 — 2026-11-16 (portal-unified) — restore the original video-wall look (user: current worse than original)
+User judged the v1.25 Monitor style/layout worse than the original. Two regressions identified & fixed:
+- **Stretched tiles**: P2.1's fill-height grid made tiles flat wide banners (aspect auto), not video.
+  FIX: restore **16:9 tiles**; symmetric layouts (1/4/9/16) return to the original **cols × 2 rows +
+  pagination** rhythm with **adaptive column count** (effCols from center width, min tile ~230px);
+  asymmetric templates keep their areas but with 16:9 auto rows. Empty slots also 16:9.
+- **Drawers at desktop**: v1.25 turned side panels into overlay drawers below 1500px, losing the
+  integrated 3-column look at 1440. FIX: integrated columns kept at **≥1200px** (mid 1201–1500 slims
+  panels to 210/260 so both-open never squeezes); drawers + mutual-exclusion only **<1200px**.
+- Re-render wall on resize (debounced) and on panel toggle so effCols tracks the center width.
+- Verified: node --check + DOM clean; headless @1440 default = 16:9 3×2 video wall + pager 1/2;
+  @1440 both-open = integrated 3-column with readable 16:9 tiles; @1150 = drawers. (Earlier "panels
+  missing" screenshot was the .18s grid-transition mid-frame, not a defect.)
+
+## v1.25 — 2026-11-16 (portal-unified) — responsive audit + fix: side panels no longer squeeze the wall
+User report: with BOTH Monitor side panels open the center multi-grid + controls were compressed and
+unreadable. A multi-viewport headless audit (1440/1150/950 + other pages) confirmed and enumerated the
+size-adaptation defects; all fixed or verified:
+- **M1 (critical) Monitor #live-layout**: fixed 248+300px grid columns squeezed the center at 900–1500px
+  (1440→~660, 1150→~360, 950→~200). FIX: below 1500px the rail/alerts become **overlay drawers**
+  (absolute, shadowed) so the wall keeps FULL width; above 1500px they stay grid columns.
+- **M5 Monitor double-drawer cover**: at ≤1100px opening both drawers covered the wall. FIX: narrow-screen
+  **mutual exclusion** (opening one closes the other).
+- **M2/M3/M4 Monitor bars/timeline/tile text**: narrow center wrapped bars 2–5 rows, timeline scale labels
+  collided, tile name/stats overlapped. FIX: **container queries** on .canvas condense gaps, thin/hide
+  alternate scale labels, and drop secondary tile text (tile-idle/drift) when narrow.
+- **R1 Recordings**: player column narrowed the list at 900–1100. FIX: stack breakpoint raised to 1100.
+- **Checked-OK**: tables (.tbl-wrap overflow:auto), Tower/Intercom channel/picker breakpoints already
+  adapt at tested widths — no change needed.
+- Verified: node --check + DOM clean; headless re-renders at 1440/1150/950 show full-width readable wall
+  with drawers overlay (950 = single drawer via mutual exclusion), scale labels no longer collide.
+
 ## v1.24 — 2026-11-16 (portal-unified) — monitor-center P3.2: per-channel independent timeline (dual mode)
 Completes the last deferred feature of adjudication 5 (global sync-seek default + per-channel solo).
 - **Solo toggle** in the ctl-bar (next to the Sync-seek chip). Default off = global sync-seek (all
