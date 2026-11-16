@@ -18,7 +18,7 @@ Two parts: hand-written anti-gaming rules above, generated gate list below.
   gates are not retrofitted.
 
 <!-- BEGIN:ci-gates -->
-## Gate list (generated from `scripts/all-gates.sh`; 33 sites)
+## Gate list (generated from `scripts/all-gates.sh`; 34 sites)
 
 1. `build mediaservo-gates`
 2. `agent single source`
@@ -53,4 +53,5 @@ Two parts: hand-written anti-gaming rules above, generated gate list below.
 31. `gui example`
 32. `gstreamer`
 33. `mediasoup`
+34. `tracked-file leaks`
 <!-- END:ci-gates -->

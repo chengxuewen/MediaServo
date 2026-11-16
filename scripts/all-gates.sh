@@ -124,6 +124,7 @@ echo "════════════════════════�
 # census row (C46 extension): pass/skip/fail counts + skip list + execution
 # face — skips must never read as green (vacuous-green family), the counts make
 # them loud; evidence lines elsewhere name this face.
+gate "tracked-file leaks"      bash scripts/check-leaks.sh
 echo "ALL-GATES: PASS" | { [ "$FAILS" = 0 ] && cat || true; }
 [ "$FAILS" = 0 ] || echo "ALL-GATES: $FAILS FAILED"
 _np=0; for r in "${RESULTS[@]}"; do case "$r" in ✅*) _np=$(( _np + 1 ));; esac; done
