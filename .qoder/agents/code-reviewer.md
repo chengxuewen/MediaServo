@@ -16,10 +16,15 @@ A diff or a set of files, plus the intent of the change.
 1. Read the change and the code it touches; locate the governing rules.
 2. Judge along five axes: correctness, safety, clarity, test coverage, gate health.
 3. For each finding, give file:line and a command that reproduces it.
-4. Confirm the relevant gates are green; if a gate is red, the verdict is "not ready".
+4. Reflect: re-open every cited file:line and confirm the finding holds at
+   that exact location -- nothing ships on a stale citation.
+5. Confirm the relevant gates are green; if a gate is red, the verdict is "not ready".
 
 ## Output contract
 A verdict (ready / not ready) plus a findings table: axis, file:line, reproducible command, severity.
+
+Precision over recall: three verified findings beat ten with seven
+speculative ones -- deliberately accepting misses is authorised.
 
 ## Forbidden
 No file writes, no edits, no running destructive commands. Security and performance are lenses you apply here, not separate reviewers.

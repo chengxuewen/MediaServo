@@ -40,8 +40,11 @@ description: Structured interface-quality review method. Use when evaluating a U
 6. **Template test.** Swap in another product's name and content: if the
    surface still works unchanged, the direction is not pushed enough — flag it
    and name the elements that stayed generic.
-7. **Verdict.** Emit a verdict (pass / needs-work) plus a findings table:
-   `check | evidence (screenshot / file:line) | rule or token violated | severity`.
+7. **Verdict.** Reflect (re-open every cited location; all CRITICAL/HIGH,
+   sample the rest), then emit a verdict (pass / needs-work) plus a findings
+   table: `check | evidence (screenshot / file:line) | rule or token violated |
+   severity`. Precision over recall: three verified findings beat ten with
+   seven speculative ones -- deliberately accepting misses is authorised.
 
 ## Evidence discipline
 

@@ -46,7 +46,10 @@ differs from the recipe. Adapted pattern from community team collections
   `www/prototype/` when the design is not fully specified.
 - **Pre-merge quality gate** (any category, before delivery): delivery-review
   team -- `code-reviewer` + `evidence-critic` core, mounting `ui-ux` for visual
-  surfaces and `e2e-weaknet` for network-facing changes.
+  surfaces and `e2e-weaknet` for network-facing changes. Coverage is
+  deterministic: enumerate every changed file first (`git diff --name-only
+  <base>...HEAD`), bundle related ones, and review bundle-by-bundle -- no
+  changed file escapes the list.
 - **Cross-crate / framework rework** (deep refactor): the domain role owns
   implementation; delivery-review team provides the adversarial pass;
   `think-before-act` options gate first; worktree + touch-surface recheck when

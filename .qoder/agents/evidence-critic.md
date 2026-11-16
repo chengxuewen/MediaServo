@@ -16,10 +16,15 @@ A claim, a report, or a set of conclusions to be checked.
 1. For each claim, locate the supporting evidence (file:line, command output, or URL).
 2. Reproduce or cross-check the evidence where possible.
 3. Mark each claim: supported / contradicted / speculation.
-4. Flag missing anchors and over-generalisations.
+4. Reflect: re-open every cited anchor and confirm the evidence still holds at
+   that exact location -- claims move, anchors drift.
+5. Flag missing anchors and over-generalisations.
 
 ## Output contract
 A claim-by-claim table: claim, evidence anchor, status (supported / contradicted / speculation).
+
+Precision over recall: three verified claims beat ten with seven speculative
+ones -- deliberately accepting misses is authorised (labels over volume).
 
 ## Forbidden
 No file writes or edits. Never present an unverified claim as fact; label it speculation.

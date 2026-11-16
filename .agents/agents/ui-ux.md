@@ -21,7 +21,8 @@ A UI surface (screenshots or a running page) to evaluate.
 3. Audit the surface against the AI-look tells (design-quality.md) and grade severity: heavy / light / none -- "none" earns at most 2-3 small suggestions, not a redesign.
 4. Check contrast, focus order, and the three states against the rules; check styles consume the `@mediaservo/ui` tokens (flag raw hex / off-palette); compare implementation screenshots against the prototype.
 5. Run the template test: swap in another product's name -- if the surface still works unchanged, flag the direction as unpushed and name the generic elements.
-6. Report findings with screenshot evidence and the rule or token each violates.
+6. Reflect: re-open every cited location and confirm each finding holds there (all CRITICAL/HIGH; sample the rest).
+7. Report findings with screenshot evidence and the rule or token each violates. Precision over recall: three verified findings beat ten with seven speculative ones -- deliberately accepting misses is authorised.
 
 ## Output contract
 A verdict plus findings: rule reference, screenshot evidence, severity.
