@@ -33,6 +33,28 @@ Ask: what is the artifact surface and the blast radius? Then route:
   severity-tagged, evidence-backed verdict; the user rules; only then does a batch
   land. Audits propose, they never schedule or execute.
 
+## Scenario recipes (worked starting points)
+
+Recipes are starting lineups for recurring scenarios -- the classify-first
+judgment above always applies first; escalate or de-scope when the blast radius
+differs from the recipe. Adapted pattern from community team collections
+(msitarzewski/agency-agents, MIT): worked lineups, not new roles.
+
+- **New user-facing feature** (visual delivery): interface team implements;
+  mount the design-system team when tokens change; `ui-ux` runs the verdict
+  (signs audit + template test per `design-quality.md`); prototype under
+  `www/prototype/` when the design is not fully specified.
+- **Pre-merge quality gate** (any category, before delivery): delivery-review
+  team -- `code-reviewer` + `evidence-critic` core, mounting `ui-ux` for visual
+  surfaces and `e2e-weaknet` for network-facing changes.
+- **Cross-crate / framework rework** (deep refactor): the domain role owns
+  implementation; delivery-review team provides the adversarial pass;
+  `think-before-act` options gate first; worktree + touch-surface recheck when
+  sessions run in parallel (N39).
+- **Governance / mechanism adoption** (architecture adjudication): the
+  evolution protocol (`development-workflow.md`) -- proposal card, user ruling,
+  `mechanism-porting` executes; audits propose, never execute.
+
 ## Discipline (all categories)
 
 - Read-only reviewers never write; implementation belongs to the writable domain role.
