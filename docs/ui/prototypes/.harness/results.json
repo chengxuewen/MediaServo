@@ -1,0 +1,93 @@
+{
+  "when": "2026-11-17T09:04:32.629Z",
+  "fail": 0,
+  "results": {
+    "floor": {
+      "pass": true,
+      "size": 184622,
+      "assertions": {
+        "idleGrant": true,
+        "noJump": true
+      },
+      "error": null
+    },
+    "queue": {
+      "pass": true,
+      "size": 191891,
+      "assertions": {
+        "cap": true,
+        "rew": true
+      },
+      "error": null
+    },
+    "replay": {
+      "pass": true,
+      "size": 249837,
+      "assertions": {
+        "scanKeeps": true,
+        "manualClears": true,
+        "xpageClears": true
+      },
+      "error": null
+    },
+    "emergency": {
+      "pass": true,
+      "size": 189903,
+      "assertions": {
+        "armPersist": true,
+        "emergNoPress": true
+      },
+      "error": null
+    },
+    "tabs-size": {
+      "pass": true,
+      "size": 182359,
+      "assertions": {
+        "diag": true,
+        "tabSwitch": true
+      },
+      "error": null
+    },
+    "nav": {
+      "pass": true,
+      "size": 166552,
+      "assertions": {
+        "navSvg": true,
+        "unique": true,
+        "countOk": true
+      },
+      "error": null
+    },
+    "notif": {
+      "pass": true,
+      "size": 190544,
+      "assertions": {
+        "xpage": true,
+        "clickLand": true,
+        "inpageHide": true
+      },
+      "error": null
+    },
+    "groups": {
+      "pass": true,
+      "size": 256128,
+      "assertions": {
+        "created": true,
+        "cascade": true,
+        "focusRestore": true,
+        "roleGuard": true,
+        "escModal": true
+      },
+      "error": null
+    },
+    "evidence": {
+      "pass": true,
+      "size": 188275,
+      "assertions": {
+        "purge": true,
+        "revoke": true
+      },
+      "error": null
+    }
+  }
+}

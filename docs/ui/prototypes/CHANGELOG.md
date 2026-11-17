@@ -1,5 +1,34 @@
 # Prototypes CHANGELOG
 
+## v1.62 — 2026-11-17 (portal-unified) — Phase 7 delivered: group mgmt + cross-page notif + evidence privacy + harness
+Implements PLAN Phase 7 (7.1–7.5) after the second 4-role panel re-review; mechanisms per K14=B/K15=A/K16=C.
+- **7.1 Group management**: NEW dialog infrastructure (the existing picker modal had no trap/focus restore,
+  so it could not be reused): focus trap + initial focus + stack-based focus restore (nested confirm keeps
+  the outer restore) + Esc arbitration (modal-first, stopPropagation, never cascades leaveChannel; Esc in a
+  modal input cancels the modal). "Manage groups" modal: create / inline rename / member add-remove / role
+  edit (dispatcher-gated via setGuard); disband = modal confirm + full cascade (recBuf/evBuf/consents/
+  chanMutes/chanVols/chanMsgs/mutedParts/callWith hangup/chanOpen/monitorSet + tower/badges + audit);
+  temp groups deep-copy members (no reference bleed); Clear = modal confirm (K16 criterion); enterChannel
+  id-guard (stale id no longer crashes); devtools role-switch leg; board empty-state points to Manage groups.
+- **7.2 Cross-page floor notifications (K15=A)**: #floorNotif chip before conn chip; per-group+type dedup,
+  cap 3 drop-oldest + aggregate count; aria-live + keyboard; expiry per type (held=hold_timeout /
+  queued=granted-other|cleared|60s / preempted=ack|10s); stale-click revalidate (toast+clear, no crash);
+  valid click = goto intercom + enterChannel + clear; entering intercom hides chip (in-page toast only);
+  other floor toasts suppressed cross-page; badge stays pure held count; devtools external emergency +
+  external queue-to-you legs; unknown never fakes a notification.
+- **7.3 Evidence privacy (K14=B)**: evBuf.at = real Date.now; per-second tick purges entries older than
+  EV_RETAIN_DAYS with an audit row; purge repaints an open Recordings tab; display formatted via fmtEvAt
+  (storage/display split); revoke consent = modal confirm + clears evBuf + audit; ev-tag becomes an
+  affordance opening the Recordings tab; devtools "Inject expired evidence" (simulated) triggers purge;
+  AUDIT evidence rows use the real time base.
+- **7.4 Assertion harness in-repo**: `scripts/ui-harness.mjs` (Marionette WebDriver:ExecuteScript read-back
+  via injected page-script + TakeScreenshot; no OCR / no exit-code trust). 9 cases (floor/queue/replay/
+  emergency/tabs-size/nav/notif/groups/evidence) ALL GREEN; products `docs/ui/prototypes/.harness/*.png`
+  (stat>0 enforced, C61/PIT-256) + results.json.
+- **7.5 Regression**: monitor/tower/recordings/overview renders + node --check + DOM zero-missing + lint clean.
+- Verified assertions: grpCreate/grpDisbandCascade/memberCopy/roleGuard/focusRestore/escModal/trapWrap;
+  notif xpage/clickLand/inpageHide/dedup/cap3/stalePurge; ev injected/purged/repaint/revokeClears/evTagRec.
+
 ## v1.61 — 2026-11-17 (portal-unified) — K11=C: split-path incremental rendering (capture/focus survive)
 Adjudicated K11=C: high-frequency paths (PTT down/up, per-second tick, yieldFloor) now use incremental
 paintChannelLive()/paintBoardLive() that update text/classes/guards WITHOUT rebuilding nodes, so pointer

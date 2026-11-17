@@ -1,6 +1,6 @@
 # Unified baseline — MediaServo Portal (single page)
 
-> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0)**
+> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.61 见 sidecar)**
 > Carrier: `../prototypes/portal-unified.html` · Supersedes the fragmented boards for iteration.
 
 ## Why this exists (user directive 11-13)
@@ -16,7 +16,7 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.61
+version: v1.62
 pages: [overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
 e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg"]
 ```
@@ -39,7 +39,7 @@ Workbudy's rich admin pages (sessions/streams/config/keys/audit/signaling) are f
 - State grammar: glyph + hue, never hue alone (dot / 3-seg bar / hollow-ring-slash / triangle).
 - Custom combobox (no native `<select>`), styled scrollbars, toast feedback, WS-drop → floor UNKNOWN + stale banner.
 
-## Working interactions (verified)
+## Working interactions (verified) (v1.0 historical snapshot; superseded by v1.17+ redesign)
 - Live wall: columns 1–4, pagination, Sync/Stats toggles, stream-rail show/hide, select-streams picker, zoom, remove.
 - Intercom: grant / revoke / mute / prio with live floor state + timers; disconnect → UNKNOWN (not idle).
 - Devices: search / filter (All/Pending) / sort / approve / revoke; Rooms/Sessions/Streams/Keys/Audit tables live.
@@ -77,10 +77,10 @@ expert-panel elegance re-ruling — see Round 3 below; code/kind stays `view`; *
 - Per-channel independent timeline (from #5) — future.
 - Event-triggered layout / alarm-to-wall + alarm→intercom→wall linkage (from #6) — future.
 - Recording in-page clip player (option B of #8) — optional enhancement.
-- Whether to make Monitor the default landing (kept Overview in #2) — revisit.
-- Pagination vs big-layout+carousel (raised in #4 impact) — not separately adjudicated.
-- Carousel / patrol (Synology) — not adjudicated.
-- (Historical open list: elastic grid / independent timeline / alarm-to-wall / in-page player closed in P3 v1.21–24; carousel closed R1=C; default-landing still open.)
+- Whether to make Monitor the default landing (kept Overview in #2) — **closed by K13=A (2026-11-17): keep Overview**.
+- Pagination vs big-layout+carousel (raised in #4 impact) — **closed: pagination kept + carousel R1=C (v1.20)**.
+- Carousel / patrol (Synology) — **closed R1=C (optional, default off, v1.20)**.
+- (Historical open list: elastic grid / independent timeline / alarm-to-wall / in-page player closed in P3 v1.21–24; carousel closed R1=C; default-landing **closed by K13=A**.)
 - Nav visual form — kept as-is (collapse + density), not contested.
 - Recording smart-search / export — depends on recording backend (`RECORDING_READY=false`).
 
@@ -100,7 +100,7 @@ P1–P5 delivered v1.17–v1.27; see implementation-status sections below.
 | R8 | Drag vs picker | **A clear split**: drag = quick placement / picker = batch+search+sort; shared layout/selected model |
 
 Round-2 delivery record + tasks: parent `docs/plans/monitor-center/PLAN.md` (§2b, §7, §8).
-Still open after round 2: elastic transition tier (P3 prep), Monitor in-page title wording,
+Still open after round 2: elastic transition tier (**closed v1.21/23**) (P3 prep), Monitor in-page title wording (**closed v1.46**),
 www/apps/view port timing (P4.3); plus the P3-deferred and backend-dependent items above.
 
 ### Round 3 — expert-panel review + conflict adjudication (2026-11-16, elegance-first)
@@ -116,7 +116,7 @@ Conflicts adjudicated one by one, **ignoring sunk cost, elegance-first**:
 - Upstream forward-supersession note added to `web-portal-ui/PLAN.md` (U2 table); internal plan drifts
   (template set, carousel scope, mk('playback') split, route=kind, testable density criterion) fixed.
 - Panel findings: 8 (CRITICAL 1 / HIGH 2 / MEDIUM 3 / LOW 2); both conflicts resolved by the naming
-  ruling; MEDIUM/LOW fixed in PLAN.md. Still open: elastic transition tier, www/apps/view port timing.
+  ruling; MEDIUM/LOW fixed in PLAN.md. Still open: elastic transition tier (**closed v1.21/23**), www/apps/view port timing.
 
 ### Implementation status — Phase 1 delivered (2026-11-16, v1.17–v1.18)
 Parent `docs/plans/monitor-center/PLAN.md` P1.1–P1.6 implemented in `portal-unified.html`:
@@ -142,7 +142,7 @@ source; P3.5 Recordings in-page clip player (honest-gated, Open-in-Monitor hando
 tier (v1.23): draggable column separators rebalance track weights with live reflow + persistence;
 P3.2 (v1.24): per-channel independent timeline — Solo dual-mode, each zoomed channel keeps its own
 playhead (saved/restored), global sync-seek default. All P3 features delivered; only the default-landing
-revisit (decision, adjudication 2 kept Overview) remains open.
+revisit (decision, adjudication 2 kept Overview) — **closed by K13=A (2026-11-17)**.
 
 ### Responsive / size-adaptation audit (2026-11-16, v1.25) — marked list
 User report: both Monitor side panels open squeezed the center wall. Multi-viewport headless audit
@@ -253,7 +253,7 @@ click-through + regression green. Supersedes v1.25/v1.26.
 - v1.46: renamed Recordings → **Recording** (singular), aligning Synology's "Recording" application
   (management/review workspace, sibling of singular Monitor); nav/title/head/handoff updated, ids kept.
 
-### Intercom optimization — expert-panel review + adjudications (2026-11-17; design adjudicated; Phase 6 delivered v1.47 + v1.48–v1.57 polish/fixes)
+### Intercom optimization — expert-panel review + adjudications (2026-11-17; design adjudicated; Phase 6 delivered v1.47 + v1.48–v1.61 polish/fixes/rulings)
 5-role panel vs 南山对讲/PoC 调度(海能达)/Mumble: 17 findings (HIGH 5/MED 9/LOW 3; +queue_max +keyboard-PTT/a11y). Rulings (user, one-by-one):
 K1 scope=C layered (core floor correctness first, then missed-speech replay + multi-channel monitor +
 emergency force-insert, rest deferred); K2 half-duplex=A exclusive default + hybrid optional with cap;
@@ -317,3 +317,16 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
 - v1.61 (K11=C): split-path rendering — paintChannelLive/paintBoardLive incremental for PTT + per-second tick
   (nodes not rebuilt -> pointer capture/focus/scroll/range survive); full render only for structural changes.
   All panel conflicts K8-K11 now adjudicated (C/C/A/C).
+- Remaining intercom scope adjudicated: K12=B (Phase 7 = group mgmt + cross-page floor notifications +
+  evidence privacy completion + assertion harness; history/per-event/loading/shortcuts deferred to PLAN §8);
+  K13=A keep Overview default landing (re-review of ruling 2). Phase 7 design-only, NOT implemented.
+- Phase 7 mechanisms adjudicated: K14=B (real-Date.now TTL purge + Prototype-controls 'Inject expired
+  evidence' simulated trigger), K15=A (cross-page chip+cue suppress toast / in-page toast / badge pure count),
+  K16=C (emergency armed double-click; disband/revoke modal confirm). Phase 7 fully defined, NOT implemented.
+- v1.62: **Phase 7 delivered** — 7.1 group mgmt (new dialog infra: focus trap/initial focus/stack restore/Esc
+  arbitration; create/rename/members/roles dispatcher-gated; disband cascade incl buffers/call/chanOpen;
+  member deep-copy; devtools role leg); 7.2 cross-page floorNotif chip (dedup<=3/overflow/expiry per type/
+  stale-click revalidate/click-land; K15 gate list; devtools external emergency+queue legs); 7.3 evidence
+  epoch + real-time TTL purge + open-tab repaint + revoke modal clears + ev-tag affordance + inject-expired
+  leg; 7.4 Marionette harness scripts/ui-harness.mjs (9 cases ALL GREEN, .harness png+results.json, stat>0);
+  7.5 regression green (monitor/tower/recordings/overview + node --check + DOM + lint).
