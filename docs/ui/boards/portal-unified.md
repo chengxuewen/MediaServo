@@ -16,8 +16,8 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.0
-pages: [overview, live, playback, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
+version: v1.46
+pages: [overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
 e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg"]
 ```
 
@@ -25,12 +25,12 @@ e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPr
 | Group | Items |
 |---|---|
 | Overview | Overview (fleet dashboard) |
-| Surveillance | **Live** (column-driven + paginated wall), Playback (honest disabled until recording backend) |
+| Surveillance | **Monitor** (integrated wall+timeline), **Recording** (library, honest-gated) — supersedes Live/Playback (see redesign section) |
 | Communication | **Intercom** (floor board), Meeting |
 | Control | Remote (lease-gated, view-only), **Tower** (multi-panel workbench) |
 | Administration | Devices, Rooms, Sessions, Streams, Config push, Client keys, Audit log, Settings, Signaling |
 
-Naming follows web-portal-ui W4/P5 (Live / Intercom / Meeting / Remote / **Tower**, not "Cockpit"/"View").
+Naming follows web-portal-ui W4/P5 (Intercom / Meeting / Remote / **Tower**, not "Cockpit"/"View"); **Live/Playback superseded by Monitor/Recording** (redesign section below).
 Workbudy's rich admin pages (sessions/streams/config/keys/audit/signaling) are folded into Administration.
 
 ## One design system
@@ -59,7 +59,7 @@ Station Monitor Center**. Research: Synology official help (Monitor Center five 
 live view for instant playback; Recordings library) + community/blogger reviews (praised integrated
 turnkey GUI; criticisms are licensing/hardware/AI, not the layout). Eight adjudications were walked
 one at a time; naming settled as **Monitor** + **Recordings** (plural collection word, after the
-expert-panel elegance re-ruling — see Round 3 below; code/kind stays `view`).
+expert-panel elegance re-ruling — see Round 3 below; code/kind stays `view`; **v1.46 superseded: menu/title singular Recording, URL unchanged**).
 
 | # | Decision | Key note |
 |---|---|---|
@@ -80,11 +80,12 @@ expert-panel elegance re-ruling — see Round 3 below; code/kind stays `view`).
 - Whether to make Monitor the default landing (kept Overview in #2) — revisit.
 - Pagination vs big-layout+carousel (raised in #4 impact) — not separately adjudicated.
 - Carousel / patrol (Synology) — not adjudicated.
+- (Historical open list: elastic grid / independent timeline / alarm-to-wall / in-page player closed in P3 v1.21–24; carousel closed R1=C; default-landing still open.)
 - Nav visual form — kept as-is (collapse + density), not contested.
 - Recording smart-search / export — depends on recording backend (`RECORDING_READY=false`).
 
-**Status: design adjudicated, NOT yet implemented** (explore mode). Implementation is a separate
-change proposal; the current `portal-unified.html` (v1.16) remains the working baseline until then.
+**Status (historical, Round-1 era): design adjudicated, not yet implemented then.** Superseded —
+P1–P5 delivered v1.17–v1.27; see implementation-status sections below.
 
 ### Round 2 — pending items walked one by one (2026-11-16)
 | # | Topic | Ruling |
@@ -92,10 +93,10 @@ change proposal; the current `portal-unified.html` (v1.16) remains the working b
 | R1 | Many-camera navigation | **C coexist**: big layout primary + optional carousel (default off) + keep manual pager |
 | R2 | Channel toolbar | **A lean core real** (zoom/stats/remove/fullscreen/audio-listen-mute); snapshot/manual-record/PTZ/stream-switch/dewarp = honest-disabled placeholders |
 | R3 | Two "Sync" meanings | **B split**: live "drift-axis" toggle + playback "Sync-seek" fixed chip (default on) |
-| R4 | Recording code/URL word | initial A `recording`; **re-ruled by expert panel (elegance): Recordings (plural) nested in view domain `/view/recordings`** (see Round 3) |
+| R4 | Recording code/URL word | initial A `recording`; **re-ruled by expert panel (elegance): Recordings (plural) nested in view domain `/view/recordings`** (see Round 3; **v1.46 re-revised to singular Recording**) |
 | R5 | Event model | **A unified EventType + event bus** consumed by alerts/timeline/cue/Intercom; reserve alarm→intercom→wall hook |
 | R6 | Layout templates | **A lean set**: symmetric 1/4/9/16 + asymmetric 1+3/1+5/1+7; integer cell span (2×2/1×1) |
-| R7 | Disclosure defaults | **A all collapsed by default + state memory + expand buttons + alert unread badge** |
+| R7 | Disclosure defaults | **A all collapsed by default + state memory + expand buttons + alert unread badge** (**Revised by Round4 #3 / Round5 K2**: desktop left-open/right-closed, narrow all-collapsed, override memory) |
 | R8 | Drag vs picker | **A clear split**: drag = quick placement / picker = batch+search+sort; shared layout/selected model |
 
 Round-2 delivery record + tasks: parent `docs/plans/monitor-center/PLAN.md` (§2b, §7, §8).
@@ -107,8 +108,7 @@ A 4-role isolated panel (correctness / evidence / consistency / architecture-bou
 conflicted with frozen upstream rulings it had not registered (U6 "monitor retired as menu word",
 U8 "view kind + /monitor redirect", U2 table "/view/recordings", U3 view-internal structure).
 Conflicts adjudicated one by one, **ignoring sunk cost, elegance-first**:
-- **Naming = A**: menu **Monitor + Recordings** (plural collection word, matches Devices/Rooms/
-  Sessions/Streams); page titles "Monitor Center" / "Recordings library"; **code/kind = `view`**;
+- **Naming = A**: menu **Monitor + Recording** (v1.46 singular; original plural ruling superseded); page titles "Monitor Center" / "Recording library" (v1.46); **code/kind = `view`**;
   routes **`/view/monitor + /view/recordings`** (one domain, two surfaces). Monitor semantically covers
   live+review (Live cannot); `view` is source-agnostic (RM7); two-layer vocabulary is U2's principle.
 - This **supersedes U6's menu-word clause** (Live→Monitor) and **refines R4** (Recording singular →
@@ -135,7 +135,7 @@ batch add per R8); Recordings refactored into a searchable/filterable/bookmarkab
 carousel (default off, 3/5/10/30s) coexisting with manual pager (R1=C). Intercom/Tower/admin regression
 green.
 
-### Implementation status — Phase 3 largely delivered (2026-11-16, v1.21–v1.22)
+### Implementation status — Phase 3 delivered (2026-11-16, v1.21–v1.24)
 P3.1 elastic custom grid (dense-flow, per-tile 1×1↔2×2, persisted); P3.3 unified event bus (R5) +
 alarm-to-wall (Auto-wall toggle, default off) + alarm→intercom linkage hook + devtools simulate-event
 source; P3.5 Recordings in-page clip player (honest-gated, Open-in-Monitor handoff); P3 elastic heavy
@@ -162,17 +162,17 @@ Follow-up (v1.26, user: "current worse than original"): restored 16:9 video tile
 cols×2-row pagination with adaptive columns; integrated 3-column kept ≥1200px (mid widths slim panels),
 drawers+mutual-exclusion only <1200px. Re-render on resize/panel-toggle.
 
-### Round 4 — responsive/layout re-adjudication (2026-11-16, walked one by one; design only, NOT implemented)
+### Round 4 — responsive/layout re-adjudication (2026-11-16, walked one by one; design; **P5 implemented v1.27**)
 User rejected v1.25/v1.26 adaptivity (full-bleed stretch; panels not resident / controls broken). Rulings:
 | # | Topic | Ruling |
 |---|---|---|
 | 1 | Wall model | Synology 3-pane all-adaptive: left\|center(1fr)\|right; center=total−visible panels; grid cols adapt to center width, tiles stay 16:9 (no stretch); panel toggle reflows center |
-| 2 | Grid-count rule | "Fixed/Auto-fit" toggle, DEFAULT FIXED (honor chosen layout + scale + scroll fallback); auto=min(chosen,fit) stateless, never writes back chosen layout |
-| 3 | Panel default | LEFT resident by default, RIGHT hidden; persistent edge collapse/expand handles + memory; desktop ≥1200 docked. **Revises R7** (was all-collapsed) |
-| 4 | Narrow <1200 | overlay drawers + always-visible edge expand strip + pin-to-dock + mutual-exclusion (drawer mode only); desktop never drawers |
-| 5 | Bottom timeline + unified collapse | left/right/bottom as three isomorphic collapsible regions: centralized top toolbar toggle cluster + persistent edge handles/strips + per-region memory; bottom hideable = live-only wall + bottom expand strip (hidden = live mode, stage-bar keeps LIVE/clock); mirrors Synology upper-right Show/hide cluster |
+| 2 | Grid-count rule | "Fixed/Auto-fit" toggle, DEFAULT FIXED; auto=min(chosen,fit) stateless (**Superseded by v1.35 E**: single layout dropdown + built-in minmax, no fit toggle) |
+| 3 | Panel default | LEFT resident by default, RIGHT hidden; centralized cluster + in-header close handles + memory (edge strips removed v1.29); desktop ≥1200 docked. **Revises R7** (was all-collapsed) |
+| 4 | Narrow <1200 | overlay drawers + expand entry (edge strips removed v1.29) + pin-to-dock + mutual-exclusion (drawer mode only); desktop never drawers |
+| 5 | Bottom timeline + unified collapse | left/right/bottom as three isomorphic collapsible regions: centralized top toolbar toggle cluster + in-header close handles (edge strips removed v1.29) + per-region memory; bottom hideable = live-only wall + bottom expand entry (hidden = live mode, stage-bar keeps LIVE/clock); mirrors Synology upper-right Show/hide cluster |
 Default disclosure = left open / right collapsed / bottom open. Supersedes v1.25/v1.26 implementation
-approach. Implementation pending user 开工.
+approach. **P5 implemented v1.27.**
 
 ### Monitor control-level UI audit (2026-11-16, render + markup evidence; folded into PLAN §6c / task 5.6)
 - Icons: transport ⏪⏸⏩ are color emoji (ignore currentColor) and ⏪ doubles as Recordings handoff →
@@ -187,8 +187,8 @@ approach. Implementation pending user 开工.
 
 ### Round 5 — expert-panel re-review of Phase 5 + conflict rulings (2026-11-16, K1/K2 user-adjudicated)
 4-role sequential panel on §2d/6b/6c/Phase5: 8 findings (MEDIUM 5/LOW 3, no CRITICAL/HIGH) + 2 conflicts:
-- **K1 fixed/auto default = B**: width-tiered (≥1200 fixed, <1200 auto) + user-override wins & persists.
-- **K2 narrow panel default = B**: <1200 both collapsed + edge expand strips (wall clean on load);
+- **K1 fixed/auto default = B**: width-tiered + user-override wins (**Superseded by v1.35 E**: single dropdown + built-in minmax).
+- **K2 narrow panel default = B**: <1200 both collapsed + expand entries (edge strips removed v1.29; wall clean on load);
   desktop left-open/right-closed/bottom-open; override memory wins.
 - MEDIUM/LOW fixed in PLAN §6b/6c/7: fixed min-tile 230 + horizontal scroll, breakpoint open-state
   carry, bottom-hide = pause + switch live, R7/§2-row3 revision annotated, --ctl-h:30px (coarse 44),
@@ -252,3 +252,22 @@ click-through + regression green. Supersedes v1.25/v1.26.
   camera/door/plug/waveform/sliders/key/list-check/gear/exchange); .nav-ico grid-centered SVG container.
 - v1.46: renamed Recordings → **Recording** (singular), aligning Synology's "Recording" application
   (management/review workspace, sibling of singular Monitor); nav/title/head/handoff updated, ids kept.
+
+### Intercom optimization — expert-panel review + adjudications (2026-11-17, design only, NOT implemented)
+5-role panel vs 南山对讲/PoC 调度(海能达)/Mumble: 17 findings (HIGH 5/MED 9/LOW 3; +queue_max +keyboard-PTT/a11y). Rulings (user, one-by-one):
+K1 scope=C layered (core floor correctness first, then missed-speech replay + multi-channel monitor +
+emergency force-insert, rest deferred); K2 half-duplex=A exclusive default + hybrid optional with cap;
+K3 missed-speech=A short rolling recording buffer + explicit consent + short retention + per-channel off.
+Follow-up panel (4-role parallel team) on revised PLAN: 22 findings; objective drifts fixed (naming v1.46,
+edge-strip/E supersession propagation, stale labels, anchors, backlog 15->17 +queue_max +keyboard-PTT/a11y,
+layer-order 6.3a buffer前置, Verify targets/consent/unknown/carrier-boundary, §11 intercom sources).
+Conflicts adjudicated one-by-one: K5=A dual-buffer (replay exit-clear vs event-evidence retained+consent),
+K6=A tiered (priority=re-queue, emergency=preempt), K7=B lock-screen PTT = backend-gated deferred + honest
+placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in parent PLAN §2j/§6d.
+- v1.47: **Phase 6 delivered** — 6.1 floor correctness (priority re-queue + auto-grant, hold-timeout 30s
+  enforced + remaining hint, hybrid cap 2, queue_max 8, Prio real toggle, queue order transparent, keyboard
+  PTT + aria-live); 6.3a consent-gated rolling replay buffer (exit-clear); 6.2 replay player + multi-group
+  monitor(cap 4)/scan + emergency insert(two-click, preempted toast, audit); 6.3b event evidence(7d+audit);
+  6.4 1:1 call/temp group/VOX-NR-AGC/SD-HD+latency/cross-page PTT/lock-screen honest-disabled; 6.5 messages/
+  location/whisper/per-member volume/encrypted tag. Micro-decisions fixed (hybridMax2/queueMax8/MON4/REPLAY20/
+  EV7d/VOXoff/HDdefault). Verified assertions + full-page regression green.

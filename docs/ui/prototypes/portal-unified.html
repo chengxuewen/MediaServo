@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0B0E14">
-<title>MediaServo Portal — Unified Prototype v1.46</title>
+<title>MediaServo Portal — Unified Prototype v1.47</title>
 <script>
 try{var k=localStorage.getItem('msrv_theme')||'dark';document.documentElement.dataset.theme=k;}catch(e){}
 </script>
@@ -166,7 +166,7 @@ svg.ic{flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:r
 .caret{font-size:10px;color:var(--tx3);flex:none;transition:transform .15s}
 .combo-trigger[aria-expanded="true"] .caret{transform:rotate(180deg)}
 /* anchored to the trigger's right edge so it never overflows the canvas */
-/* v1.46: layout popup — left-anchored, wider, stronger elevation, grouped, scroll-safe. */
+/* v1.47: layout popup — left-anchored, wider, stronger elevation, grouped, scroll-safe. */
 .combo-pop{position:absolute;top:calc(100% + 6px);left:0;right:auto;min-width:220px;width:max-content;max-width:280px;max-height:min(60vh,420px);overflow-y:auto;background:var(--raised);border:1px solid var(--bd2);border-radius:var(--r8);box-shadow:0 8px 24px rgba(0,0,0,.5);padding:var(--sp6);z-index:80;display:none;list-style:none;margin:0}
 .combo.open .combo-pop{display:block}
 .combo-sep{height:1px;background:var(--bd);margin:var(--sp4) var(--sp6)}
@@ -235,11 +235,11 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .rail-headrow .rail-title{margin-bottom:0}
 .btn-block{width:100%}
 .rail-list{flex:1;overflow-y:auto;padding:var(--sp8)}
-/* v1.46 unified card-row language: bordered card + hover + selected; bg=sunken on surface panels. */
+/* v1.47 unified card-row language: bordered card + hover + selected; bg=sunken on surface panels. */
 .stream-item{display:flex;align-items:center;gap:var(--sp8);padding:var(--sp8);border-radius:var(--r6);border:1px solid var(--bd);background:var(--sunken);margin-bottom:var(--sp2);cursor:pointer}
 .stream-item:hover{background:var(--hover);border-color:var(--bd2)}
 .stream-item.active{background:var(--accent-tint);border-color:var(--accent)}
-/* v1.46 (A): rail rows are text-first (no fake thumbnail); two lines name + res·state; del on hover. */
+/* v1.47 (A): rail rows are text-first (no fake thumbnail); two lines name + res·state; del on hover. */
 .stream-meta{flex:1;min-width:0}
 .stream-name{font-size:var(--fs12);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 .stream-sub{font-size:var(--fs11);color:var(--tx3);font-family:var(--mono);display:block}
@@ -336,7 +336,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .tiles{display:grid;gap:var(--sp12);grid-template-columns:repeat(var(--cols,3),1fr);flex:none}
 /* layout-grid: named-area template fills the wall height; tiles stretch to their slot (big spans 2×2) */
 .tiles.layout-grid{flex:1;min-height:0}
-/* v1.46: restore video-like 16:9 tiles (the fill-height stretch read as flat banners, not video). */
+/* v1.47: restore video-like 16:9 tiles (the fill-height stretch read as flat banners, not video). */
 .tiles.layout-grid .tile{aspect-ratio:auto;min-height:0;height:100%}
 .tiles.layout-grid .tile-empty{aspect-ratio:auto;height:100%}
 /* P3.1 elastic custom grid: dense-flow, tiles keep 16:9, per-tile 2×2 span */
@@ -359,7 +359,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .tile-empty.drag-over{background:var(--accent-tint);border-color:var(--accent);color:var(--accent-ink)}
 .rail-foot.drop-remove{margin:var(--sp8);padding:var(--sp12);border:1px dashed var(--danger);border-radius:var(--r6);background:var(--danger-tint);color:var(--danger-ink);text-align:center;font-weight:600}
 .rail-foot.drag-over{background:var(--danger);color:#fff}
-/* v1.46 PlayerTile ("little TV"): cell fills the grid slot (any shape, black letterbox); inner
+/* v1.47 PlayerTile ("little TV"): cell fills the grid slot (any shape, black letterbox); inner
    .tile-stage keeps 16:9 and hosts media + all overlays, so resize never distorts or overlaps. */
 .tile{position:relative;border-radius:0;overflow:hidden;border:1px solid var(--bd);background:var(--video);aspect-ratio:16/9;cursor:pointer;container-type:size;container-name:cell;display:grid;place-items:center}
 .tile-stage{position:relative;aspect-ratio:16/9;width:min(100cqw,calc(100cqh * 16 / 9));max-width:100%;max-height:100%;overflow:hidden;container-type:inline-size;container-name:tile}
@@ -377,7 +377,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .tile-actions{position:absolute;right:4px;top:0;height:28px;display:none;align-items:center;gap:var(--sp6);z-index:5}
 .tile:hover .tile-actions,.tile.zoomed .tile-actions{display:flex}
 .tile:hover .tile-bar,.tile.zoomed .tile-bar{padding-right:96px}
-/* v1.46: zoom = focused inspection; removal is a layout-edit action, not offered here (Synology). */
+/* v1.47: zoom = focused inspection; removal is a layout-edit action, not offered here (Synology). */
 .tile.zoomed .tile-actions .del{display:none}
 .tile.zoomed .tile-bar{padding-right:40px}
 .tile-btn{width:22px;height:22px;border-radius:var(--r4);border:1px solid rgba(255,255,255,.22);background:rgba(0,0,0,.55);color:rgba(255,255,255,.85);display:grid;place-items:center;padding:0}
@@ -471,7 +471,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .play-ctl .iconbtn{width:34px;height:34px;font-size:15px}
 /* ---- Live: slim real-time bridge (recorded review lives in Playback) ---- */
 .live-bridge{display:flex;align-items:center;gap:var(--sp12);border-top:1px solid var(--bd);background:var(--surface);padding:var(--sp8) var(--sp16)}
-/* v1.46: status cluster aligns to the single --ctl-h token (C54); badge/clock no longer mismatched. */
+/* v1.47: status cluster aligns to the single --ctl-h token (C54); badge/clock no longer mismatched. */
 .live-badge{display:inline-flex;align-items:center;gap:var(--sp6);height:var(--ctl-h);padding:0 var(--sp8);font-size:var(--fs11);font-weight:600;letter-spacing:.5px;color:var(--ok-ink);background:var(--ok-tint);border:1px solid var(--ok);border-radius:var(--r6)}
 .live-clock{display:inline-flex;align-items:center;height:var(--ctl-h);font-size:var(--fs12);font-weight:600;color:var(--tx1)}
 .bridge-note{font-size:var(--fs11);color:var(--tx3)}
@@ -743,10 +743,10 @@ body[data-badge="on"] #proto-bar{display:flex}
   .board-row{grid-template-columns:1fr;gap:var(--sp6)}
   .tower-grid{grid-template-columns:1fr}
 }
-/* ---- Responsive audit fix (v1.46): below 1500px the side panels become overlay drawers so the
+/* ---- Responsive audit fix (v1.47): below 1500px the side panels become overlay drawers so the
    center wall keeps FULL width instead of being squeezed between two fixed columns. Above 1500px
    they remain grid columns. Open panels show as drawers; collapsed stay hidden (R7). ---- */
-/* v1.46: keep the integrated 3-column look at desktop widths; only narrow (<1200) uses drawers.
+/* v1.47: keep the integrated 3-column look at desktop widths; only narrow (<1200) uses drawers.
    Mid widths (1201–1500) slim the side panels so both-open never squeezes the wall. */
 @media (min-width:1201px) and (max-width:1500px){
   #live-layout{--rail-w:210px;--alerts-w:260px}
@@ -803,11 +803,31 @@ body[data-badge="on"] #proto-bar{display:flex}
 .spin .ic{width:12px;height:12px}
 .pager .ic,.date-nav .ic,.cal-nav .ic{width:14px;height:14px}
 .pager button,.date-nav button,.cal-nav{display:grid;place-items:center}
+.enc-tag,.ev-tag,.call-tag{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--tx3);border:1px solid var(--bd);border-radius:var(--r4);padding:2px 6px}
+.enc-tag .ic{width:12px;height:12px}
+.ev-tag{color:var(--danger-ink);border-color:var(--danger)}
+.call-tag{color:var(--accent-ink);border-color:var(--accent)}
+.p-vol{width:64px}
+.proc-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.proc-tag{font-size:10px;border:1px solid var(--bd);border-radius:var(--r4);padding:1px 5px;color:var(--tx3)}
+.link-ms{font-size:11px;color:var(--tx2)}
+.msg-in{flex:1;min-width:0;height:28px;border:1px solid var(--bd);border-radius:var(--r4);background:var(--sunken);color:var(--tx1);padding:0 8px;font-size:12px}
+.msg-list{max-height:120px;overflow-y:auto}
+.mon-tag{display:inline-flex;margin-right:6px;color:var(--accent-ink)}
+.mon-tag .ic{width:13px;height:13px}
+.replay-row{display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--bd)}
+.replay-row b{flex:1}
+.replay-empty{font-size:12px;color:var(--tx3);line-height:1.5}
+.btn-danger{background:var(--danger-tint);border-color:var(--danger);color:var(--danger-ink)}
+.rec-consent.on{background:var(--danger-tint);border-color:var(--danger);color:var(--danger-ink)}
+.rec-count{font-size:11px;color:var(--tx3)}
+.q-order{font-size:11px;color:var(--tx3);margin-top:4px;font-family:var(--mono)}
+.act.on{background:var(--accent-tint);border-color:var(--accent);color:var(--accent-ink)}
 .region-collapse .ic,.pin-btn .ic{width:14px;height:14px}
 #guardTip.neutral{border-color:var(--bd2)}
 #guardTip.neutral .gt-ico{display:none}
-/* v1.46 per-tile (stage) container queries: overlays adapt to the video box, never overlap. */
-/* v1.46: overlays anchor the whole player (cell) so letterbox bars are used; per-cell CQ prevents
+/* v1.47 per-tile (stage) container queries: overlays adapt to the video box, never overlap. */
+/* v1.47: overlays anchor the whole player (cell) so letterbox bars are used; per-cell CQ prevents
    overlap; idle (in-stage) keeps its own stage CQ. */
 @container cell (max-width:320px){
   .tile-drift{display:none}
@@ -821,7 +841,7 @@ body[data-badge="on"] #proto-bar{display:flex}
 @container tile (max-width:230px){
   .tile-idle{display:none}
 }
-/* v1.46 layout picker gallery: icon thumbnails (Synology-style), grouped, keyboard-navigable. */
+/* v1.47 layout picker gallery: icon thumbnails (Synology-style), grouped, keyboard-navigable. */
 .combo.open .combo-pop{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp4);width:300px;max-width:320px}
 .combo-pop .combo-opt{flex-direction:column;align-items:center;height:auto;padding:var(--sp6);gap:4px;margin-bottom:0;position:relative}
 .combo-pop .combo-sep{grid-column:1/-1;height:1px;margin:0}
@@ -845,6 +865,7 @@ body[data-badge="on"] #proto-bar{display:flex}
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
   <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
   <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
   <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
@@ -904,7 +925,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <nav id="sidebar" aria-label="Portal navigation">
       <div class="sb-head"><span class="sb-title">Navigation</span><button id="navCollapse" title="Collapse navigation">⟨</button></div>
       <div class="sb-scroll" id="navScroll"></div>
-      <div class="sb-foot"><span>Prototype · v1.46 · not app code</span></div>
+      <div class="sb-foot"><span>Prototype · v1.47 · not app code</span></div>
     </nav>
     <main id="main"></main>
   </div>
@@ -930,8 +951,8 @@ body[data-badge="on"] #proto-bar{display:flex}
   </div>
 </div>
 <div id="zoom"><div class="zoom-card"><div class="zoom-media" id="zoomMedia"></div><div class="zoom-bar"><b id="zoomName"></b><span class="mono" id="zoomDrift" style="color:var(--tx3)"></span><div class="spacer"></div><button class="btn" id="zoomClose">Close ✕</button></div><div class="zoom-stats" id="zoomStats"></div></div></div>
-<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.46</span> · prototype watermark · drag to move</div>
-<div class="toast" id="toast"></div>
+<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.47</span> · prototype watermark · drag to move</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div id="guardTip" role="tooltip" aria-hidden="true"></div>
 <div id="devtools">
   <button id="dtToggle" type="button" title="Open prototype controls (drag to move)"><svg class="ic" aria-hidden="true"><use href="#i-sliders"/></svg>Prototype controls</button>
@@ -947,7 +968,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <div class="dt-row"><div class="dt-label">Sync</div><div class="dt-seg"><button type="button" data-set="sync:on">On</button><button type="button" data-set="sync:off">Off</button></div></div>
     <div class="dt-row"><div class="dt-label">Version badge</div><div class="dt-seg"><button type="button" data-set="badge:off">Hidden</button><button type="button" data-set="badge:on">Floating</button></div></div>
     <div class="dt-row"><div class="dt-label">Simulate event</div><div class="dt-seg"><button type="button" data-set="sim:motion" title="Emit a motion event on the unified bus">Motion</button><button type="button" data-set="sim:alarm" title="Emit an alarm event (drives alarm-to-wall + intercom)">Alarm</button><button type="button" data-set="sim:bookmark" title="Emit a bookmark event">Bookmark</button></div></div>
-    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.46</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
+    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.47</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
   </div>
 </div>
 
@@ -1033,7 +1054,7 @@ const CONFIG=[
  {g:'Access',key:'auth.legacy_mode',val:'fail-closed',scope:'global',app:'admin'},
 ];
 /* ================= NAV ================= */
-/* v1.46: nav icons = unique semantic monochrome SVG sprite ids (no text glyphs / no duplicates). */
+/* v1.47: nav icons = unique semantic monochrome SVG sprite ids (no text glyphs / no duplicates). */
 const NAV=[
  {group:'Overview',items:[{id:'overview',ico:'i-overview',label:'Overview'}]},
  {group:'Surveillance',items:[{id:'monitor',ico:'i-monitor',label:'Monitor',badge:'live',bc:'b-live'},{id:'recordings',ico:'i-recordings',label:'Recording'}]},
@@ -1066,7 +1087,7 @@ const LAYOUTS=[
  {id:'custom',name:'Custom',cols:4,rows:0,slots:null,areas:null,elastic:true}
 ];
 let layoutId=(()=>{try{const v=localStorage.getItem('ms_mon_layout');return (v==='auto'||LAYOUTS.some(l=>l.id===v))?v:'9';}catch(_){return '9';}})();
-/* E (v1.46): single layout control. 'auto' = template picked by stream count, live-re-evaluated;
+/* E (v1.47): single layout control. 'auto' = template picked by stream count, live-re-evaluated;
    manual ids = fixed template. Width responsiveness is built-in (minmax 230px), not a user mode. */
 const autoTemplateId=n=>n<=1?'1':n<=4?'4':n<=6?'1+5':n<=9?'9':'16';
 const layout=()=>layoutId==='auto'?(LAYOUTS.find(l=>l.id===autoTemplateId(selected.length))||LAYOUTS[2]):(LAYOUTS.find(l=>l.id===layoutId)||LAYOUTS[2]);
@@ -1091,7 +1112,7 @@ function buildPages(){
  mk('overview',head('Overview','Fleet health at a glance','<button class="btn btn-sm" id="ovRefresh">↻ Refresh</button>')+`<div class="page-body"><div class="stats" id="ovStats"></div><div class="grid" style="grid-template-columns:1.4fr 1fr;margin-top:16px"><div class="card"><div class="card-title">Alerts · last 24 h</div><div id="ovAlerts"></div></div><div class="card"><div class="card-title">Quick check <span class="chip">≤4 tiles</span></div><div class="mini-wall" id="ovQuick" style="height:220px"></div><div style="margin-top:10px;font-size:11px;color:var(--tx3)">Multi-tile wall monitoring lives in <a href="#" data-goto="monitor">Monitor</a> / <a href="#" data-goto="tower">Tower</a>.</div></div></div></div>`);
  mk('monitor',head('Monitor Center','Surveillance wall + timeline review','')+`<div id="live-layout"><aside class="stream-rail"><div class="rail-head"><div class="rail-headrow"><div class="rail-title">Selected streams</div><div class="spacer"></div><button class="iconbtn pin-btn" id="railPin" title="Pin panel (dock when wide)" aria-label="Pin left panel"><svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg></button><button class="iconbtn region-collapse" id="railCollapse" title="Hide left panel" aria-label="Hide left panel"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button></div><button class="btn btn-primary btn-block" id="openPicker">＋ Select streams</button></div><div class="rail-list" id="railList"></div><div class="rail-foot" id="railFoot"></div></aside><div class="canvas"><div class="stage-bar"><div class="tb-group"><button class="iconbtn" id="railToggle" title="Show / hide left panel" aria-label="Toggle left panel"><svg class="ic" aria-hidden="true"><use href="#i-panel-left"/></svg></button><button class="iconbtn" id="alertsToggle" title="Show / hide alerts panel" aria-label="Toggle alerts panel"><svg class="ic" aria-hidden="true"><use href="#i-panel-right"/></svg><span class="al-badge" id="alBadge">5</span></button><button class="iconbtn" id="tlToggle" title="Show / hide timeline" aria-label="Toggle timeline"><svg class="ic" aria-hidden="true"><use href="#i-timeline"/></svg></button></div><div class="tb-sep"></div><div class="tb-group"><div class="combo" id="colsCombo"><button class="combo-trigger" id="colsTrigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="colsPop" aria-label="Wall layout" title="Wall layout"><span class="combo-value" id="colsValue">Layout 9</span><span class="caret">▾</span></button><ul class="combo-pop" id="colsPop" role="listbox"></ul></div><div class="pager"><button id="pgPrev" title="Previous page" aria-label="Previous page"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><span class="pg-label" id="pgLabel">1 / 1</span><button id="pgNext" title="Next page" aria-label="Next page"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><button class="iconbtn" id="carouselToggle" title="Carousel: auto-cycle pages (off)" aria-label="Toggle carousel" aria-pressed="false"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg></button><div class="spin" id="carouselSpin" title="Carousel interval"><button data-c="-1" title="Shorter interval" aria-label="Shorter interval"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button><span class="spin-val" id="carouselVal">5s</span><button data-c="1" title="Longer interval" aria-label="Longer interval"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button></div></div><div class="tb-sep"></div><div class="tb-group tb-status"><button class="chip-btn warn-chip" id="healthChip" hidden aria-label="Problem streams — click to focus"></button><span class="live-badge" id="liveBadge"><span class="g g-online"></span>LIVE</span><span class="live-clock mono" id="liveClock">18:43:15</span></div><div class="spacer"></div><div class="tb-group"><button class="iconbtn on" id="syncBtn" title="Sync drift display across streams" aria-label="Toggle drift sync" aria-pressed="true"><svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg></button><button class="iconbtn" id="statsToggle" title="Stream statistics" aria-label="Toggle stream statistics"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg></button></div></div><div class="error-banner" id="liveStale"><span class="g g-warn"></span>Stream list is stale. Showing the last known state.<div class="spacer"></div><button class="btn btn-sm" id="liveRetry">Retry</button></div><div class="wall-scroll" id="wallScroll"><div class="tiles" id="tiles" style="--cols:3"></div><div id="wallLoading"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div><div class="stage-empty" id="stageEmpty"><div class="big">▣</div><h2>No streams selected</h2><p>Pick devices and streams from the left rail to start monitoring.</p><button class="btn btn-primary" id="emptyPicker">＋ Select streams</button></div></div><div class="ctl-bar"><div class="ctl-top"><div class="tb-group"><span class="ctl-time mono" id="ctlTime">18:43:15</span><div class="spin" id="winSpin"><button data-w="-1" title="Wider time window" aria-label="Wider time window"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button><span class="spin-val" id="zoomVal">24h</span><button data-w="1" title="Narrower time window" aria-label="Narrower time window"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button></div><div class="ctl-date"><div class="date-nav"><button id="dayPrev" title="Previous day" aria-label="Previous day"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><span id="calBtn">2026-11-13</span><button id="dayNext" title="Next day" aria-label="Next day"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="cal-pop" id="calPop" hidden><div class="cal-head"><button class="cal-nav" id="calPrev" title="Previous month" aria-label="Previous month"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><span id="calMonth">November 2026</span><button class="cal-nav" id="calNext" title="Next month" aria-label="Next month"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="cal-grid" id="calGrid"></div><div class="cal-foot"><input id="calTime" value="18:43" aria-label="Jump to time"><button class="btn btn-sm" id="calGo">Go</button></div></div></div></div><div class="spacer"></div><div class="tb-group"><div class="spin" id="speedSpin"><button data-s="-1" title="Slower" aria-label="Slower"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button><span class="spin-val" id="speedVal">1×</span><button data-s="1" title="Faster" aria-label="Faster"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button></div></div><div class="tb-sep"></div><div class="tb-group"><button class="iconbtn" id="pbSyncChip" title="Sync-seek: all cameras play the same wall-clock time" aria-label="Sync-seek indicator"><svg class="ic" aria-hidden="true"><use href="#i-link"/></svg></button><button class="iconbtn" id="soloBtn" title="Solo time: each zoomed channel keeps its own playhead" aria-label="Toggle solo time" aria-pressed="false"><svg class="ic" aria-hidden="true"><use href="#i-clock"/></svg></button><button class="btn-live" id="liveBtn" title="Jump to the live edge">LIVE</button></div><div class="tb-sep"></div><div class="tb-group"><button class="iconbtn" id="toPlayback" title="Open Recording library" aria-label="Open Recording library"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg></button><button class="iconbtn region-collapse" id="tlCollapse" title="Hide timeline" aria-label="Hide timeline"><svg class="ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></div></div><div class="ctl-bot"><div class="tl-track" id="tlTrack"></div><div class="play-ctl"><button class="iconbtn" id="btnRew" aria-label="Play backwards" title="Play backwards"><svg class="ic" aria-hidden="true"><use href="#i-rew"/></svg></button><button class="iconbtn" id="btnPause" aria-label="Pause" title="Pause / play"><svg class="ic" aria-hidden="true"><use href="#i-pause"/></svg></button><button class="iconbtn" id="btnFwd" aria-label="Play forwards" title="Play forwards"><svg class="ic" aria-hidden="true"><use href="#i-fwd"/></svg></button></div><div class="tl-scale" id="tlScale"></div></div></div></div><aside class="mon-alerts" id="monAlerts"><div class="al-head"><span class="al-title">Alerts</span><span class="al-unread" id="alUnread">5</span><div class="spacer"></div><button class="chip-btn al-arm" id="alarmWallToggle" aria-pressed="false" title="Alarm-to-wall: auto-focus the wall on new alarms/motion (default off)">Auto-wall</button><button class="iconbtn pin-btn" id="alertsPin" title="Pin panel (dock when wide)" aria-label="Pin alerts panel"><svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg></button><button class="iconbtn region-collapse" id="alCollapse" title="Hide alerts panel" aria-label="Hide alerts panel"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="al-filter" id="alFilter"><button class="al-chip on" data-f="all">All</button><button class="al-chip" data-f="motion">Motion</button><button class="al-chip" data-f="alarm">Alarm</button><button class="al-chip" data-f="bookmark">Bookmark</button></div><div class="al-list" id="alList"></div><div class="al-foot"><button class="btn btn-sm btn-block" id="alMarkAll">Mark all read</button></div></aside></div>`);
  mk('recordings',head('Recording library','Search, bookmarks & export','<button class="btn btn-sm" id="pbBackLive" title="Return to the monitor wall">← Back to Monitor</button><button class="btn btn-sm" id="pbExport" title="Export the selected clip">Export clip</button>')+`<div class="page-body rec-body"><div class="honesty"><span class="g g-warn"></span>Recording + sync-seek backend not landed yet (recording-recon). The clip list shows event-based design samples; recorded playback and export stay honestly disabled until it lands.</div><div class="rec-toolbar"><div class="search rec-search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><input id="recQ" type="text" placeholder="Search camera, event or time…" aria-label="Search recordings"></div><div class="rec-filters" id="recType"><button class="al-chip on" data-t="all">All</button><button class="al-chip" data-t="motion">Motion</button><button class="al-chip" data-t="alarm">Alarm</button><button class="al-chip" data-t="continuous">Continuous</button><button class="al-chip" data-t="bookmark">Bookmark</button></div><button class="chip-btn" id="recBmOnly" aria-pressed="false" title="Show bookmarked only"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg> Bookmarked</button></div><div class="rec-layout"><div class="rec-list" id="recList"></div><aside class="rec-player" id="recPlayer"></aside></div></div>`);
- mk('intercom',head('Intercom board','Floor control across groups','<span class="chip">capability: floor ✓</span><div class="toggle on" id="cueToggle"><span class="sw"></span>Cues</div>')+`<div class="page-body"><div id="boardWrap"><div id="boardList"></div><div class="canvas-foot" style="border:1px solid var(--bd);border-radius:8px;margin-top:8px"><span class="legend"><span class="g g-online"></span>Held</span><span class="legend"><span class="segbar"><i class="f"></i><i class="f"></i><i></i></span>Queued</span><span class="legend"><span class="g g-offline"></span>Idle</span><div class="spacer"></div><span>Click a group to enter · hold Space / PTT to talk · Esc back</span></div></div><div id="chanView" hidden></div></div>`);
+ mk('intercom',head('Intercom board','Floor control across groups','<span class="chip">capability: floor ✓</span><div class="toggle on" id="cueToggle"><span class="sw"></span>Cues</div>')+`<div class="page-body"><div id="boardWrap"><div id="boardList"></div><div class="canvas-foot" style="border:1px solid var(--bd);border-radius:8px;margin-top:8px"><span class="legend"><span class="g g-online"></span>Held</span><span class="legend"><span class="segbar"><i class="f"></i><i class="f"></i><i></i></span>Queued</span><span class="legend"><span class="g g-offline"></span>Idle</span><div class="spacer"></div><button class="chip-btn" id="tempGroup" data-tip="Create a temporary group from monitored members">Temp group</button><button class="chip-btn" id="scanToggle" aria-pressed="false" data-tip="Scan: cycle the focused channel across monitored groups every 5s">Scan</button><span>Click a group to enter · hold Space / PTT to talk · Esc back</span></div></div><div id="chanView" hidden></div></div>`);
  mk('meeting',head('Meeting','Multi-party conferences','<button class="btn btn-primary btn-sm" id="newMeet">＋ New meeting</button>')+`<div class="page-body"><div class="grid" id="meetGrid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))"></div></div>`);
  mk('remote',head('Remote','Desktop / teleop control (lease-gated)','')+`<div class="page-body"><div class="honesty"><span class="g g-warn"></span>Control requires a live lease (300 ms renew · 1 s expire · WS-drop = release). Until the lease gate is green this surface is view-only.</div><div class="grid" style="grid-template-columns:1fr 300px"><div class="card" style="padding:0;overflow:hidden"><div style="aspect-ratio:16/9;background:${'linear-gradient(135deg,#1c2740,#0e1526)'};position:relative"><div class="tile-scan"></div><span class="tile-live outline" style="position:absolute;top:10px;left:10px">□ VIEW-ONLY</span><div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--tx3);font-family:var(--mono)">DESK-03 · Ops workstation</div></div></div><div class="card"><div class="card-title">Lease</div><div style="font-size:13px;color:var(--tx2);line-height:1.7">State: <b style="color:var(--warn-ink)">not acquired</b><br>Renew: 300 ms<br>Expire: 1000 ms<br>WS drop: immediate release</div><button class="btn btn-primary btn-block" style="margin-top:12px" id="acquireLease" disabled>Acquire control lease</button><div style="margin-top:10px;font-size:11px;color:var(--tx3)">Emergency stop is always visible during a live session; press-and-hold ≥400 ms, no dialog.</div></div></div></div>`);
  mk('tower',head('Tower','Dispatcher workbench · multi-panel','<span class="chip">sidebar auto-focus</span>')+`<div class="tower-grid"><div class="panel"><div class="panel-head"><span class="panel-title">Live wall</span><div class="spacer"></div><span class="chip">4-up</span></div><div class="panel-body"><div class="mini-wall" id="towerWall"></div></div></div><div class="panel"><div class="panel-head"><span class="panel-title">Intercom</span><div class="spacer"></div><span class="chip" id="towerHeld">2 held</span></div><div class="panel-body" id="towerTalk"></div></div><div class="panel alerts-panel"><div class="panel-head"><span class="panel-title">Alerts &amp; presence</span><div class="spacer"></div><span class="chip">${ALERTS.length} active</span></div><div class="panel-body" id="towerAlerts" style="display:flex;gap:8px;flex-wrap:wrap"></div></div></div>`);
@@ -1374,19 +1395,19 @@ function renderBoard(){
  const b=$('#boardList');b.innerHTML='';GROUPS.forEach((g,idx)=>{const stTxt={idle:'Idle',held:'Held',queued:'Queued',unknown:'Unknown'}[g.state];
  const unk=g.state==='unknown';
  const r=document.createElement('div');r.className='board-row'+(g.state==='held'?' holding':'')+(unk?' stale':'');
- r.innerHTML=`<div><div class="grp-name">${g.name}${chanMutes[g.id]?' <span class="mute-tag" title="You muted this channel (listen off)"><svg class="ic"><use href="#i-mic-off"/></svg></span>':''}</div><div class="grp-id">${g.id}</div></div><span class="mode-chip ${g.mode}">${g.mode}</span><div class="floor-state">${stateGlyph(g.state)}<div><div class="floor-holder">${g.holder||stTxt}</div><div class="floor-sub">${g.state==='held'?'speaking':g.state==='queued'?'waiting for floor':unk?'state unknown — not idle':'floor free'}</div></div></div><div class="timer">${g.state==='held'?fmtT(g.timer):'--:--'}</div><div class="qdepth">Q:${g.queue}</div><div class="row-actions"><button class="act grant" data-a="grant">Grant</button><button class="act revoke" data-a="revoke">Revoke</button><button class="act" data-a="mute" title="Dispatcher clear: revoke floor + empty the queue for everyone">Clear</button><button class="act" data-a="prio">Prio</button></div>`;
+ r.innerHTML=`<div><div class="grp-name">${monitorSet.has(g.id)?'<span class="mon-tag" data-tip="Monitored (listening)"><svg class="ic"><use href="#i-tower"/></svg></span>':''}${g.name}${chanMutes[g.id]?' <span class="mute-tag" title="You muted this channel (listen off)"><svg class="ic"><use href="#i-mic-off"/></svg></span>':''}</div><div class="grp-id">${g.id}</div></div><span class="mode-chip ${g.mode}">${g.mode}</span><div class="floor-state">${stateGlyph(g.state)}<div><div class="floor-holder">${g.holder||stTxt}</div><div class="floor-sub">${g.state==='held'?('speaking'+(g.side&&g.side.length?' +'+g.side.length+' side':'')):g.state==='queued'?'waiting for floor':unk?'state unknown — not idle':'floor free'}</div></div></div><div class="timer">${g.state==='held'?fmtT(g.timer):'--:--'}</div><div class="qdepth" data-tip="Queue order: ${g.q.map((x,i)=>(i+1)+'. '+x.n+(x.prio?' (prio)':'')+(x.you?' (you)':'')).join(' · ')||'empty'}">Q:${g.queue}</div><div class="row-actions"><button class="act grant" data-a="grant">Grant</button><button class="act revoke" data-a="revoke">Revoke</button><button class="act" data-a="mute" title="Dispatcher clear: revoke floor + empty the queue for everyone">Clear</button><button class="act${g.priority?' on':''}" data-a="prio" data-tip="Toggle priority queue policy for this group">${g.priority?'Prio ✓':'Prio'}</button>${g.temp?'<button class="act" data-a="disband" data-tip="Disband temporary group">Disband</button>':''}<button class="act${monitorSet.has(g.id)?' on':''}" data-a="mon" data-tip="Monitor (listen) this group alongside others (max ${MON_CAP})">${monitorSet.has(g.id)?'Mon ✓':'Mon'}</button></div>`;
  r.querySelectorAll('.act').forEach(btn=>btn.onclick=e=>{e.stopPropagation();floorAction(idx,btn.dataset.a);});
  setGuard(r.querySelector('[data-a="grant"]'),unk||g.state==='held',unk?'Connection lost — floor state unknown.':'Floor already held by '+(g.holder||'someone')+' — Revoke first.');
  setGuard(r.querySelector('[data-a="revoke"]'),unk||g.state!=='held',unk?'Connection lost — floor state unknown.':'No one holds the floor.');
  setGuard(r.querySelector('[data-a="mute"]'),unk,'Connection lost — floor state unknown.');
- setGuard(r.querySelector('[data-a="prio"]'),true,'Priority scheduling is not modeled in this prototype yet.');
+ setGuard(r.querySelector('[data-a="prio"]'),unk,'Connection lost — floor state unknown.');
  r.onclick=()=>enterChannel(g.id);
  r.setAttribute('role','button');r.tabIndex=0;r.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();enterChannel(g.id);}};
  b.appendChild(r);});
 }
 function floorAction(idx,a){const g=GROUPS[idx];
  if(g.state==='unknown'&&a!=='prio'){cue('denied');toast('Connection lost — floor state unknown; action blocked');return;}
- if(a==='grant'){g.state='held';g.holder='dispatch.x';g.timer=0;cue('floor_permit');toast('Floor granted → '+g.name);}if(a==='revoke'){g.state=g.queue>0?'queued':'idle';g.holder=null;g.timer=0;cue('floor_yield');toast('Floor revoked · '+g.name);}if(a==='mute'){g.state='idle';g.holder=null;g.queue=0;g._q=false;cue('floor_yield');toast('Cleared '+g.name+' (floor + queue)');}if(a==='prio'){toast('Priority set · '+g.name);}renderBoard();renderTowerTalk();updateNavBadges();if(chanOpen)renderChannel();}
+ if(a==='grant'){g.state='held';g.holder='dispatch.x';g.timer=0;cue('floor_permit');toast('Floor granted → '+g.name);}if(a==='revoke'){yieldFloor(g,'Floor revoked · '+g.name);}if(a==='mute'){g.q=[];g.queue=0;g._q=false;g.side=[];g.state='idle';g.holder=null;g.timer=0;cue('floor_yield');toast('Cleared '+g.name+' (floor + queue)');}if(a==='prio'){g.priority=!g.priority;qSort(g);toast('Priority '+(g.priority?'ON':'OFF')+' · '+g.name);}if(a==='disband'){GROUPS.splice(idx,1);monitorSet.delete(g.id);toast('Temporary group disbanded');renderBoard();return;}if(a==='mon'){if(monitorSet.has(g.id)){monitorSet.delete(g.id);toast('Stopped monitoring '+g.name);}else{if(monitorSet.size>=MON_CAP){cue('denied');toast('Monitor cap '+MON_CAP+' reached');return;}monitorSet.add(g.id);toast('Monitoring '+g.name+' (listen)');}}renderBoard();renderTowerTalk();updateNavBadges();if(chanOpen)renderChannel();}
 /* ---- Intercom: channel session (enter a group, PTT, queue, per-member mute) ---- */
 let chanOpen=null,pttHeld=false,pttTook=false,pttSide=false;
 const chanMutes={},chanVols={};
@@ -1394,8 +1415,28 @@ const chMutedOf=g=>!!chanMutes[g.id];
 const chVolOf=g=>(g.id in chanVols)?chanVols[g.id]:70;
 const mutedParts=new Set();
 const chListening=g=>((g.members||[]).length+1);
+/* P6.1 floor model: ordered priority queue + auto-grant + hold-timeout + hybrid cap + queue_max. */
+const FLOOR_CFG={holdTimeoutMs:30000,queueMax:8,hybridMax:2};
+GROUPS.forEach(g=>{g.side=[];g.priority=(g.id==='talk-bravo');const pool=(g.members||[]).filter(m=>m.n!==g.holder);g.q=Array.from({length:g.queue||0},(_,i)=>({n:(pool[i%pool.length]||{n:'field.'+i}).n,prio:false,you:false}));g.queue=g.q.length;});
+const qSort=g=>g.q.sort((a,b)=>(b.prio?1:0)-(a.prio?1:0));
+function qPush(g,e){if(g.q.length>=FLOOR_CFG.queueMax){cue('denied');toast('Queue full (max '+FLOOR_CFG.queueMax+') — request denied');return false;}g.q.push(e);qSort(g);g.queue=g.q.length;return true;}
+function qRemoveYou(g){const i=g.q.findIndex(x=>x.you);if(i>=0)g.q.splice(i,1);g.queue=g.q.length;g._q=false;}
+function autoGrant(g){if(!g.q.length)return false;const h=g.q.shift();g.queue=g.q.length;g.state='held';g.holder=h.you?'dispatch.x':h.n;g.timer=0;cue('floor_permit');toast(h.you?'Floor auto-granted to you (queue head)':'Floor auto-granted to '+h.n);return true;}
+function yieldFloor(g,why){recPush(g,g.holder,g.timer);evPush(g,g.holder,g.timer);g.holder=null;g.timer=0;g.side=[];if(pttHeld&&chanOpen===g.id){pttHeld=false;pttTook=false;pttSide=false;}if(!autoGrant(g))g.state='idle';cue('floor_yield');if(why)toast(why);if(chanOpen===g.id)renderChannel();}
+/* P6.3a replay rolling buffer + consent gate (simulated; exit-clear; per-channel off). */
+const REPLAY_CAP=20;const recConsent={},recBuf={};
+/* P6.2 multi-group monitor + scan + emergency insert. */
+const monitorSet=new Set();const MON_CAP=4;let scanOn=false,scanT=null,emergArm=0;
+/* P6.3b event-evidence buffer (independent of replay; consent + 7-day retain + audit). */
+const evBuf={},evConsent={};const EV_RETAIN_DAYS=7;
+function evPush(g,who,dur){if(!evConsent[g.id]||!who)return;const al=ALERTS.find(a=>a.sev!=='info');if(!al)return;const b=evBuf[g.id]||(evBuf[g.id]=[]);b.push({who,dur,at:fmtClock(liveSec),alert:al.txt,retain:EV_RETAIN_DAYS});AUDIT.unshift({t:fmtClock(liveSec),actor:'system',action:'floor.evidence',target:g.id,ok:true});}
+/* P6.4 client extras state. */
+let callWith=null,voxOn=false,codecHD=true;const memberVols={},whisperTo=null;const chanMsgs={};let locConsent=false;
+function recPush(g,who,dur){if(!recConsent[g.id]||!who)return;const b=recBuf[g.id]||(recBuf[g.id]=[]);b.push({who,dur,at:fmtClock(liveSec)});if(b.length>REPLAY_CAP)b.shift();}
+function recClear(g){delete recBuf[g.id];}
+function floorTick(){GROUPS.forEach(g=>{if(g.state==='held'){g.timer++;if(g.timer*1000>=FLOOR_CFG.holdTimeoutMs){const you=g.holder==='dispatch.x';yieldFloor(g,'Hold timeout ('+(FLOOR_CFG.holdTimeoutMs/1000)+'s) — floor revoked'+(you?' (you were holding)':''));renderBoard();if(chanOpen===g.id)renderChannel();}}});}
 function enterChannel(id){chanOpen=id;pttHeld=false;pttTook=false;pttSide=false;const v=$('#chanView');v.hidden=false;$('#boardWrap').style.display='none';renderChannel();toast('Entered '+GROUPS.find(g=>g.id===id).name);}
-function leaveChannel(){if(pttHeld)pttUp();chanOpen=null;$('#chanView').hidden=true;$('#boardWrap').style.display='';renderBoard();}
+function leaveChannel(){if(pttHeld)pttUp();const lg=GROUPS.find(x=>x.id===chanOpen);if(lg)recClear(lg);chanOpen=null;$('#chanView').hidden=true;$('#boardWrap').style.display='';renderBoard();}
 function chParts(g){return [{n:'dispatch.x',r:'dispatcher',you:true},...(g.members||[])];}
 function renderChannel(){
  const v=$('#chanView');if(!v||!chanOpen)return;const g=GROUPS.find(x=>x.id===chanOpen);
@@ -1406,13 +1447,14 @@ function renderChannel(){
  const nameTxt=unk?'State unknown':(talking?(youHold?'You · transmitting':g.holder+' · transmitting'):'No one transmitting');
  const subTxt=unk?'connection lost — cached view':(talking?(youHold?'you are transmitting':g.holder+' speaking'):(g.state==='queued'?'waiting for floor':'floor free'));
  const parts=chParts(g).map(p=>{const speaking=g.state==='held'&&((p.you&&youHold)||(!p.you&&g.holder===p.n));const off=mutedParts.has(p.n);
-  return `<div class="part-row${speaking?' speaking':''}"><span class="p-ini">${p.you?'DX':p.n.slice(0,2).toUpperCase()}</span><span class="p-name"><b>${p.n}</b><span class="p-role">${p.you?'you · '+p.r:p.r}</span></span>${stateGlyph(speaking?'held':off?'offline':'idle')}<button class="p-btn${off?' off':''}" data-m="${p.n}" aria-label="Mute ${p.n}" title="${off?'Unmute':'Mute'} ${p.n}"><svg class="ic"><use href="#${off?'i-mic-off':'i-mic'}"/></svg></button></div>`;}).join('');
+  return `<div class="part-row${speaking?' speaking':''}"><span class="p-ini">${p.you?'DX':p.n.slice(0,2).toUpperCase()}</span><span class="p-name"><b>${p.n}</b><span class="p-role">${p.you?'you · '+p.r:p.r}</span></span>${stateGlyph(speaking?'held':off?'offline':'idle')}<button class="p-btn${off?' off':''}" data-m="${p.n}" aria-label="Mute ${p.n}" data-tip="${off?'Unmute':'Mute'} ${p.n}"><svg class="ic"><use href="#${off?'i-mic-off':'i-mic'}"/></svg></button>${p.you?'':`<input type="range" class="p-vol" data-pv="${p.n}" min="0" max="100" value="${memberVols[p.n]??70}" aria-label="Volume ${p.n}" data-tip="Per-member listen volume"><button class="p-btn" data-wh="${p.n}" data-tip="Whisper (directed, only ${p.n} hears)"><svg class="ic"><use href="#i-mic"/></svg></button><button class="p-btn" data-call="${p.n}" data-tip="1:1 duplex call with ${p.n}"><svg class="ic"><use href="#i-tower"/></svg></button>`}</div>`;}).join('');
  v.innerHTML=`
  <div class="chan-head">
   <button class="iconbtn chan-back" id="chBack" title="Back to board (Esc)"><svg class="ic"><use href="#i-arrow-left"/></svg></button>
   <div><div class="chan-title">${g.name}</div><div class="chan-sub">${g.id} · ${g.mode} · ${chListening(g)} listening</div></div>
   <div class="spacer"></div>${muted?'<span class="mute-tag" title="Listen off for this channel"><svg class="ic"><use href="#i-mic-off"/></svg>listen off</span>':''}<span class="mode-chip ${g.mode}">${g.mode}</span>
-  <span class="timer" id="chTimer">${talking?fmtT(g.timer):'--:--'}</span>
+  <span class="enc-tag" data-tip="Channel encrypted (simulated TLS/SRTP)"><svg class="ic"><use href="#i-lock"/></svg>encrypted</span>${evConsent[g.id]?'<span class="ev-tag" data-tip="Event-triggered evidence retained '+EV_RETAIN_DAYS+' days + audit">event evidence · '+EV_RETAIN_DAYS+'d</span>':''}${callWith?'<span class="call-tag">1:1 '+callWith+' · duplex <button class="btn btn-sm" id="chCallEnd">End</button></span>':''}<button class="chip-btn rec-consent${recConsent[g.id]?' on':''}" id="chRec" data-tip="${recConsent[g.id]?'Replay buffer ON (simulated, last '+REPLAY_CAP+' spurts, cleared on exit) — click to disable & clear':'Enable a short rolling replay buffer (simulated) to catch missed speech; cleared when you leave'}">${recConsent[g.id]?'● REC buffer':'Enable replay buffer'}</button>${recConsent[g.id]?'<span class="rec-count mono">'+(recBuf[g.id]||[]).length+' spurts</span>':''}
+  <span class="timer" id="chTimer">${talking?fmtT(g.timer)+' · '+Math.max(0,FLOOR_CFG.holdTimeoutMs/1000-g.timer)+'s left':'--:--'}</span>
  </div>
  <div class="chan-stage">
   <div class="ch-avatar${talking?' talking':''}" id="chAv">${holderIni}</div>
@@ -1426,15 +1468,22 @@ function renderChannel(){
   <div class="part-list"><div class="part-head">Participants · ${chParts(g).length}</div>${parts}</div>
   <div class="ch-side">
    <div class="ch-card"><div class="card-title">Floor</div>
-    <div class="ch-q" id="chQ">Holder: <b>${g.holder||'—'}</b> · Queue: <b>${g.queue}</b>${g._q?' · you in queue':''}</div>
+    <div class="ch-q" id="chQ">Holder: <b>${g.holder||'—'}</b> · Queue: <b>${g.queue}</b>${g.side&&g.side.length?' · side '+g.side.length+'/'+FLOOR_CFG.hybridMax:''}<div class="q-order">${g.q.map((x,i)=>(i+1)+'. '+x.n+(x.prio?' (prio)':'')+(x.you?' (you)':'')).join(' · ')||'queue empty'}</div></div>
     <div class="ch-actions">
      <button class="btn btn-sm" id="chReq">${g._q?'In queue':'Request floor'}</button>
      <button class="btn btn-sm" id="chRel">Release floor</button>
      <button class="btn btn-sm" id="chMute">${muted?'Unmute channel':'Mute channel (listen off)'}</button>
+     <button class="btn btn-sm btn-danger" id="chEmerg" data-tip="Emergency insert: preempt the current holder (dispatcher). Two-click confirm.">Emergency insert</button>
     </div>
    </div>
    <div class="ch-card"><div class="card-title">Listen volume</div><input type="range" class="vol" id="chVol" min="0" max="100" value="${vol}" aria-label="Listen volume"></div>
-   <div class="ch-card"><div class="card-title">Honest state</div><div style="font-size:12px;color:var(--tx3);line-height:1.5">Simulated audio — host mic is a placeholder; floor arbitration follows the dispatcher model on the board.</div></div>
+   <div class="ch-card"><div class="card-title">Replay · missed speech</div><div class="replay-list" id="chReplay">${(recBuf[g.id]||[]).length?(recBuf[g.id]||[]).map((r,i)=>'<div class="replay-row"><span class="mono">'+r.at+'</span><b>'+r.who+'</b><span class="mono">'+r.dur+'s</span><button class="btn btn-sm" data-r="'+i+'"'+(unk?' disabled':'')+'>Play</button></div>').join(''):'<div class="replay-empty">'+(recConsent[g.id]?'No buffered speech yet — wait for talk spurts':'Enable the replay buffer (channel head) to catch missed speech')+'</div>'}</div></div>
+   <div class="ch-card"><div class="card-title">Event evidence</div><div class="replay-list">${(evBuf[g.id]||[]).length?(evBuf[g.id]||[]).map(r=>'<div class="replay-row"><span class="mono">'+r.at+'</span><b>'+r.who+'</b><span class="mono">'+r.dur+'s · '+r.retain+'d</span></div>').join(''):'<div class="replay-empty">No event-triggered evidence yet</div>'}</div><button class="btn btn-sm" id="chEv">${evConsent[g.id]?'Evidence ON':'Enable evidence'}</button></div>
+   <div class="ch-card"><div class="card-title">Mic processing (simulated)</div><div class="proc-row"><button class="chip-btn${voxOn?' on':''}" id="chVox" aria-pressed="${voxOn}">VOX</button><span class="proc-tag">NR</span><span class="proc-tag">AGC</span><span class="proc-tag">AEC</span></div><div class="replay-empty">VOX/NR/AGC simulated — host mic is a placeholder.</div></div>
+   <div class="ch-card"><div class="card-title">Link (simulated)</div><div class="proc-row"><button class="chip-btn${codecHD?' on':''}" id="chCodec">${codecHD?'HD':'SD'}</button><span class="mono link-ms" id="chLink">${codecHD?'48 kbps · 60 ms':'12 kbps · 110 ms'}</span></div><div class="replay-empty">PTT turnaround simulated; SD auto-fallback on weak net.</div></div>
+   <div class="ch-card"><div class="card-title">Messages / location</div><div class="msg-list" id="chMsgs">${(chanMsgs[g.id]||[]).map(m=>'<div class="replay-row"><b>'+m.who+'</b><span>'+m.txt+'</span></div>').join('')||'<div class="replay-empty">No messages</div>'}</div><div class="proc-row"><input class="msg-in" id="chMsgIn" placeholder="Text message" aria-label="Text message"><button class="btn btn-sm" id="chMsgSend">Send</button><button class="btn btn-sm" id="chLoc" data-tip="Share location (consent-gated, simulated)">${locConsent?'Share loc':'Loc off'}</button></div></div>
+   <div class="ch-card"><div class="card-title">Lock-screen PTT</div><button class="btn btn-sm" id="chLock" disabled data-reason="Lock-screen / background PTT needs a native shell or backend PTT service; not available in this offline prototype.">Lock-screen PTT</button><div class="replay-empty">In-page cross-page Space PTT works; lock-screen is backend-gated.</div></div>
+   <div class="ch-card"><div class="card-title">Honest state</div><div style="font-size:12px;color:var(--tx3);line-height:1.5">Simulated audio — host mic is a placeholder; floor arbitration follows the dispatcher model on the board. Replay buffer (if enabled) is simulated, consent-gated, and cleared when you leave the channel.</div></div>
   </div>
  </div>`;
  $('#chBack').onclick=leaveChannel;
@@ -1443,21 +1492,37 @@ function renderChannel(){
  ptt.addEventListener('pointerup',()=>pttUp());
  ptt.addEventListener('pointerleave',()=>{if(pttHeld)pttUp();});
  ptt.addEventListener('pointercancel',()=>{if(pttHeld)pttUp();});
+ ptt.addEventListener('keydown',e=>{if((e.code==='Space'||e.key==='Enter')&&!e.repeat){e.preventDefault();pttDown();}});
+ ptt.addEventListener('keyup',e=>{if(e.code==='Space'||e.key==='Enter'){e.preventDefault();pttUp();}});
  setGuard($('#chReq'),unk||youHold||g._q,unk?'Connection lost — floor state unknown.':(youHold?'You already hold the floor.':'You are already in the queue.'));
  setGuard($('#chRel'),unk||!youHold,unk?'Connection lost — floor state unknown.':'You do not hold the floor.');
  v.querySelectorAll('.p-btn').forEach(b=>b.onclick=()=>{const n=b.dataset.m;if(mutedParts.has(n))mutedParts.delete(n);else mutedParts.add(n);renderChannel();toast((mutedParts.has(n)?'Muted ':'Unmuted ')+n+' locally');});
- $('#chReq').onclick=()=>{if(g.state==='unknown'){cue('denied');toast('Connection lost — floor state unknown');return;}if(g._q||youHold)return;g.queue++;g._q=true;cue('queue_ping');renderChannel();renderBoard();toast('Floor requested — queued on '+g.name);};
- $('#chRel').onclick=()=>{if(!youHold)return;g.state=g.queue>0?'queued':'idle';g.holder=null;g.timer=0;g._q=false;cue('floor_yield');renderChannel();renderBoard();renderTowerTalk();updateNavBadges();toast('Floor released');};
+ $('#chReq').onclick=()=>{if(g.state==='unknown'){cue('denied');toast('Connection lost — floor state unknown');return;}if(g._q||youHold)return;if(qPush(g,{n:'dispatch.x',prio:g.priority,you:true})){g._q=true;cue('queue_ping');renderChannel();renderBoard();toast('Floor requested — position '+(g.q.findIndex(x=>x.you)+1)+' on '+g.name);}};
+ $('#chRel').onclick=()=>{if(!youHold)return;qRemoveYou(g);yieldFloor(g,'Floor released');renderChannel();renderBoard();renderTowerTalk();updateNavBadges();};
  $('#chMute').onclick=()=>{chanMutes[g.id]=!muted;renderChannel();renderBoard();toast(chanMutes[g.id]?(g.name+' muted (listen off)'):(g.name+' unmuted'));};
  $('#chVol').oninput=e=>{chanVols[g.id]=+e.target.value;};
+ $('#chRec').onclick=()=>{recConsent[g.id]=!recConsent[g.id];if(!recConsent[g.id])recClear(g);renderChannel();toast(recConsent[g.id]?'Replay buffer ON (simulated) — cleared on exit':'Replay buffer OFF — cleared');};
+ v.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{const r=(recBuf[g.id]||[])[+b.dataset.r];if(!r)return;cue('floor_permit');toast('Replaying '+r.who+' · '+r.dur+'s (simulated)');const wv=$('#chWave');if(wv)wv.classList.add('live');setTimeout(()=>{const w=$('#chWave');const gg=GROUPS.find(x=>x.id===chanOpen);if(w&&!(gg&&gg.state==='held'))w.classList.remove('live');},Math.min(3000,r.dur*1000));});
+ $('#chEmerg').onclick=()=>{if(unk){cue('denied');toast('Connection lost — emergency insert blocked');return;}
+  if(!emergArm){emergArm=Date.now();$('#chEmerg').textContent='Confirm insert?';setTimeout(()=>{emergArm=0;const b=$('#chEmerg');if(b)b.textContent='Emergency insert';},3000);toast('Click again within 3s to confirm emergency insert');return;}
+  emergArm=0;const prev=g.holder;recPush(g,prev,g.timer);g.state='held';g.holder='dispatch.x';g.timer=0;pttHeld=true;pttTook=true;pttSide=false;cue('floor_permit');AUDIT.unshift({t:fmtClock(liveSec),actor:'dispatch.x',action:'floor.emergency',target:g.id,ok:true});toast('Emergency insert — '+(prev||'no one')+' preempted');renderChannel();renderBoard();renderTowerTalk();updateNavBadges();};
+ $('#chEv').onclick=()=>{evConsent[g.id]=!evConsent[g.id];renderChannel();toast(evConsent[g.id]?'Event evidence ON (retained '+EV_RETAIN_DAYS+'d + audit)':'Event evidence OFF');};
+ $('#chVox').onclick=()=>{voxOn=!voxOn;renderChannel();toast('VOX '+(voxOn?'ON':'OFF')+' (simulated)');};
+ $('#chCodec').onclick=()=>{codecHD=!codecHD;renderChannel();toast('Codec '+(codecHD?'HD':'SD')+' (simulated)');};
+ $('#chMsgSend').onclick=()=>{const inp=$('#chMsgIn');const t=(inp.value||'').trim();if(!t)return;(chanMsgs[g.id]||(chanMsgs[g.id]=[])).push({who:'dispatch.x',txt:t});inp.value='';renderChannel();toast('Message sent');};
+ $('#chLoc').onclick=()=>{locConsent=!locConsent;if(locConsent){(chanMsgs[g.id]||(chanMsgs[g.id]=[])).push({who:'dispatch.x',txt:'📍 location shared (simulated)'});}renderChannel();toast(locConsent?'Location shared (simulated, consented)':'Location off');};
+ const ce=$('#chCallEnd');if(ce)ce.onclick=()=>{callWith=null;renderChannel();toast('Call ended');};
+ v.querySelectorAll('[data-pv]').forEach(r=>r.oninput=e=>{memberVols[r.dataset.pv]=+e.target.value;});
+ v.querySelectorAll('[data-wh]').forEach(b=>b.onclick=()=>{toast('Whisper → '+b.dataset.wh+' (directed, simulated)');});
+ v.querySelectorAll('[data-call]').forEach(b=>b.onclick=()=>{callWith=b.dataset.call;renderChannel();toast('1:1 duplex call with '+callWith+' (simulated)');});
 }
 function updateChanLive(){const g=GROUPS.find(x=>x.id===chanOpen);if(!g)return;const t=$('#chTimer');if(!t)return;
  const youHold=g.state==='held'&&g.holder==='dispatch.x',talking=g.state==='held',unk=g.state==='unknown';
- t.textContent=talking?fmtT(g.timer):'--:--';
+ t.textContent=talking?fmtT(g.timer)+' · '+Math.max(0,FLOOR_CFG.holdTimeoutMs/1000-g.timer)+'s left':'--:--';
  const n=$('#chName'),s=$('#chSub'),q=$('#chQ');
  if(n)n.textContent=unk?'State unknown':(talking?(youHold?'You · transmitting':g.holder+' · transmitting'):'No one transmitting');
  if(s)s.textContent=(unk?'connection lost — cached view':(talking?(youHold?'you are transmitting':g.holder+' speaking'):(g.state==='queued'?'waiting for floor':'floor free')))+' · '+chListening(g)+' listening';
- if(q)q.innerHTML='Holder: <b>'+(g.holder||'—')+'</b> · Queue: <b>'+g.queue+'</b>'+(g._q?' · you in queue':'');
+ if(q)q.innerHTML='Holder: <b>'+(g.holder||'—')+'</b> · Queue: <b>'+g.queue+'</b>'+(g.side&&g.side.length?' · side '+g.side.length+'/'+FLOOR_CFG.hybridMax:'')+'<div class="q-order">'+(g.q.map((x,i)=>(i+1)+'. '+x.n+(x.prio?' (prio)':'')+(x.you?' (you)':'')).join(' · ')||'queue empty')+'</div>';
  const av=$('#chAv'),wv=$('#chWave');
  if(av){av.classList.toggle('talking',talking);av.textContent=talking?(youHold?'DX':g.holder.slice(0,2).toUpperCase()):'—';}
  if(wv)wv.classList.toggle('live',talking);
@@ -1468,15 +1533,16 @@ function pttDown(){
  pttHeld=true;pttTook=false;pttSide=false;
  if(g.state==='held'&&g.holder==='dispatch.x'){/* floor already yours — on air */}
  else if(g.state==='held'&&g.mode==='exclusive'){pttHeld=false;cue('denied');toast('Floor held by '+g.holder+' — Request floor or Grant from the board');renderChannel();return;}
- else if(g.state==='held'&&g.mode==='hybrid'){pttSide=true;cue('floor_permit');toast('Transmitting alongside '+g.holder);}
- else{if(g._q){g.queue=Math.max(0,g.queue-1);g._q=false;}g.state='held';g.holder='dispatch.x';g.timer=0;pttTook=true;cue('floor_permit');toast('Floor open — transmitting');}
+ else if(g.state==='held'&&g.mode==='hybrid'){if((g.side||[]).length>=FLOOR_CFG.hybridMax){pttHeld=false;cue('denied');toast('Hybrid side-talk full (max '+FLOOR_CFG.hybridMax+') — wait or request floor');renderChannel();return;}g.side.push('dispatch.x');pttSide=true;cue('floor_permit');toast('Transmitting alongside '+g.holder+' (side '+g.side.length+'/'+FLOOR_CFG.hybridMax+')');}
+ else{qRemoveYou(g);g.state='held';g.holder='dispatch.x';g.timer=0;pttTook=true;cue('floor_permit');toast('Floor open — transmitting');}
  renderChannel();renderBoard();renderTowerTalk();updateNavBadges();
 }
 function pttUp(){
  const g=GROUPS.find(x=>x.id===chanOpen);if(!g||!pttHeld)return;pttHeld=false;
- if(pttTook&&g.holder==='dispatch.x'){g.state=g.queue>0?'queued':'idle';g.holder=null;g.timer=0;cue('floor_yield');toast('Floor released');}
+ if(pttTook&&g.holder==='dispatch.x'){qRemoveYou(g);yieldFloor(g,'Floor released');}else if(pttSide){g.side=(g.side||[]).filter(n=>n!=='dispatch.x');}
  pttTook=false;pttSide=false;renderChannel();renderBoard();renderTowerTalk();updateNavBadges();
 }
+function wireBoardExtras(){const tg=$('#tempGroup');if(tg)tg.onclick=()=>{const mem=[...monitorSet].flatMap(id=>(GROUPS.find(x=>x.id===id)||{members:[]}).members).slice(0,6);if(!mem.length){toast('Monitor some groups first to build a temp group');return;}const id='temp-'+(GROUPS.length+1);GROUPS.push({id,name:'Temp · '+mem.length+' members',mode:'exclusive',state:'idle',holder:null,timer:0,queue:0,q:[],side:[],priority:false,temp:true,members:mem});renderBoard();toast('Temporary group created ('+mem.length+' members)');};const st=$('#scanToggle');if(st)st.onclick=()=>{scanOn=!scanOn;st.classList.toggle('on',scanOn);st.setAttribute('aria-pressed',String(scanOn));if(scanOn){scanT=setInterval(()=>{const ids=[...monitorSet];if(!ids.length){toast('Monitor some groups first (Mon button)');return;}const i=ids.indexOf(chanOpen);enterChannel(ids[(i+1)%ids.length]);},5000);}else{clearInterval(scanT);scanT=null;}toast(scanOn?'Scan ON — cycling monitored groups':'Scan OFF');};}
 function renderMeeting(){
  $('#meetGrid').innerHTML=ROOMS.filter(r=>r.kind==='meet').map(r=>`<div class="card"><div class="card-title"><span class="g ${r.state==='live'?'g-online':'g-offline'}"></span>${r.name}</div><div style="font-size:13px;color:var(--tx2);margin-bottom:12px">${r.parts} participants · ${r.state}</div><div style="display:flex;gap:8px"><button class="btn btn-primary btn-sm meet-join" data-id="${r.id}">${r.state==='live'?'Join':'Start'}</button><button class="btn btn-sm meet-invite" data-id="${r.id}">Invite</button></div></div>`).join('');
  document.querySelectorAll('.meet-join').forEach(b=>b.onclick=()=>toast('Joined meeting '+b.dataset.id));
@@ -1739,7 +1805,7 @@ function applyPlaybackGuards(){
 }
 /* ================= COLUMN COMBOBOX (accessible listbox) ================= */
 function setComboOpen(open){const c=$('#colsCombo');if(!c)return;c.classList.toggle('open',open);const tr=$('#colsTrigger');if(tr)tr.setAttribute('aria-expanded',String(open));if(!open)c.querySelectorAll('.combo-opt.is-active').forEach(o=>o.classList.remove('is-active'));}
-/* v1.46: layout picker = icon-thumbnail gallery (Synology-style), built from LAYOUTS. */
+/* v1.47: layout picker = icon-thumbnail gallery (Synology-style), built from LAYOUTS. */
 function layoutThumb(L){
  if(L.id==='auto')return '<span class="lo-thumb lo-auto"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg></span>';
  if(L.elastic){let c='<i class="big" style="grid-column:1/3;grid-row:1/3"></i>';for(let k=0;k<12;k++)c+='<i></i>';return '<span class="lo-thumb" style="grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(4,1fr);grid-auto-flow:dense">'+c+'</span>';}
@@ -1979,19 +2045,19 @@ function wire(){
  document.addEventListener('keydown',e=>{if(e.key==='Escape'){$('#zoom').classList.remove('show');closePicker();const cp=$('#calPop');if(cp)cp.hidden=true;setComboOpen(false);closeDevtools();if(chanOpen)leaveChannel();if(zoomedId){zoomedId=null;renderWall();}}});
  /* hold Space = push-to-talk while a channel session is open */
  document.addEventListener('keydown',e=>{
-  if(e.code!=='Space'||current!=='intercom'||!chanOpen)return;
+  if(e.code!=='Space'||!chanOpen)return;
   const t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable||t.closest('.combo')||t.closest('button')))return;
   e.preventDefault();if(!e.repeat)pttDown();});
- document.addEventListener('keyup',e=>{if(e.code!=='Space'||current!=='intercom'||!chanOpen)return;e.preventDefault();pttUp();});
+ document.addEventListener('keyup',e=>{if(e.code!=='Space'||!chanOpen)return;e.preventDefault();pttUp();});
 }
 function setTheme(t){document.documentElement.dataset.theme=t;try{localStorage.setItem('msrv_theme',t);}catch(e){}document.querySelector('meta[name=theme-color]').content=t==='dark'?'#0B0E14':'#F2F4F8';document.querySelectorAll('#themeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));syncDevtools();toast('Theme: '+t);}
 /* timers */
-setInterval(()=>{GROUPS.forEach(g=>{if(g.state==='held')g.timer++;});if(current==='intercom'){if(chanOpen)updateChanLive();else renderBoard();}if(current==='tower')renderTowerTalk();
+setInterval(()=>{floorTick();if(current==='intercom'){if(chanOpen)updateChanLive();else renderBoard();}if(current==='tower')renderTowerTalk();
  if(current==='monitor'){liveSec++;const lc=$('#liveClock');if(lc)lc.textContent=fmtClock(liveSec)+':'+pad2(liveSec%60);}
  if(current==='monitor'&&pb.mode==='playback'&&!pb.paused){const nr=Math.max(0,Math.min(1,pb.ratio+speeds[spIdx]/pb.span));tlPaint(nr);if(nr>=1&&speeds[spIdx]>0){pb.mode='live';}}},1000);
 /* init */
 DEFAULT_SELECTED=selected.slice();pbSel=selected.slice();
-buildPages();buildNav();wire();wireColsCombo();wireGuardTips();sweepTips();wireDevtools();wireAlerts();wireEventBus();wireRegions();wireRecordings();wireCarousel();initLivePlayback();wireLivePlayback();wireLocalZoom();wireWallDrag();initMonPanels();const _alias={live:'monitor',playback:'recordings'};const _h0=(location.hash||'').replace('#','');const _h=_alias[_h0]||_h0;goto(TITLES[_h]?_h:'overview');const _pm=$('#page-monitor'),_pr=$('#page-recordings');if(_pm)_pm.dataset.kind='view';if(_pr)_pr.dataset.kind='view';updateNavBadges();syncDevtools();syncCueUI();syncSoloUI();applyPlaybackGuards();
+buildPages();buildNav();wire();wireColsCombo();wireGuardTips();sweepTips();wireDevtools();wireAlerts();wireEventBus();wireRegions();wireBoardExtras();wireRecordings();wireCarousel();initLivePlayback();wireLivePlayback();wireLocalZoom();wireWallDrag();initMonPanels();const _alias={live:'monitor',playback:'recordings'};const _h0=(location.hash||'').replace('#','');const _h=_alias[_h0]||_h0;goto(TITLES[_h]?_h:'overview');const _pm=$('#page-monitor'),_pr=$('#page-recordings');if(_pm)_pm.dataset.kind='view';if(_pr)_pr.dataset.kind='view';updateNavBadges();syncDevtools();syncCueUI();syncSoloUI();applyPlaybackGuards();
 </script>
 </body>
 </html>

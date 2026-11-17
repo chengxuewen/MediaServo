@@ -1,5 +1,31 @@
 # Prototypes CHANGELOG
 
+## v1.47 — 2026-11-17 (portal-unified) — monitor-center Phase 6: Intercom layered optimization (K1=C/K2=A/K3=A/K5=A/K6=A/K7=B)
+Implements PLAN Phase 6 (6.1→6.3a→6.2→6.3b→6.4→6.5→6.6) after the 5-role panel + 6 one-by-one rulings.
+- **6.1 floor correctness + honesty + a11y**: ordered priority queue (`g.q`, priority re-queue not preempt)
+  with **auto-grant** of queue head on release/revoke/timeout (no dead-end); **hold_timeout=30000 enforced**
+  with "Ns left" hint; **hybrid side-talk cap=2** with visible side count; **queue_max=8 enforced**;
+  **Prio real toggle** (per-group priority policy, was honest-disabled); queue order/position transparent
+  (board tooltip + channel q-order); **keyboard PTT** (Space/Enter on the PTT button) + toast `aria-live`.
+- **6.3a replay buffer + consent (P0,前置)**: per-channel rolling buffer (last 20 spurts), consent-gated
+  chan-head chip, "● REC buffer / n spurts" indicator, **cleared on exit**; simulated + honest-labelled.
+- **6.2 three high-value**: missed-speech **Replay card** (list + Play + empty state, unknown-guarded);
+  **multi-group monitor** (Mon toggle, cap 4) + **Scan** (cycle focused channel across monitored, 5s);
+  **Emergency insert** = emergency preempt (two-click confirm, preempted-party toast, audit entry).
+- **6.3b event evidence**: independent buffer, consent + **7-day retain** + audit link (`floor.evidence`),
+  NOT cleared on exit (contrast replay); "event evidence · 7d" indicator.
+- **6.4 client increments**: 1:1 duplex **call** (member button + head call bar + End); **temp group** from
+  monitored members + Disband; **VOX/NR/AGC/AEC** indicators (simulated, VOX default off); **SD/HD codec** +
+  latency/turnaround readout (simulated); **cross-page global Space PTT**; **lock-screen PTT honest-disabled**
+  (backend/native-shell gated, K7=B).
+- **6.5 supplements**: text **messages** + consent-gated **location** share; **whisper** (directed) +
+  **per-member volume**; **encrypted** channel tag (simulated TLS/SRTP).
+- Micro-decisions fixed at impl: hybridMax=2, queueMax=8, MON_CAP=4, REPLAY_CAP=20, EV_RETAIN_DAYS=7,
+  VOX off, codec HD default, emergency two-click, temp-group from monitored.
+- Verified: auto-grant/timeout/hybridCap/queueMax/prio/keyboard/aria-live; replayRow/evBuf/audit/emerg/
+  monCap/temp/disband/vox/codec/msg/call/whisper/per-member-vol/lock-disabled/encrypted/cross-page-PTT;
+  full-page regression (monitor/recordings/tower/devices/overview/intercom) green; node --check + DOM + lint clean.
+
 ## v1.46 — 2026-11-17 (portal-unified) — rename Recordings → Recording (singular, Synology-aligned)
 Analysis: Synology names the recording-management/review application **singular "Recording"**
 ("The Recording application lists … recording files, bookmarks, and their settings"); our page is a
