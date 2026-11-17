@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0B0E14">
-<title>MediaServo Portal — Unified Prototype v1.62</title>
+<title>MediaServo Portal — Unified Prototype v1.63</title>
 <script>
 try{var k=localStorage.getItem('msrv_theme')||'dark';document.documentElement.dataset.theme=k;}catch(e){}
 </script>
@@ -616,7 +616,7 @@ body[data-content="error"] .tile{opacity:.7}
 .pick-empty .big .ic{width:18px;height:18px}
 @media (max-width:760px){.pick-cols{grid-template-columns:1fr}.pick-link{transform:rotate(90deg);padding:var(--sp4) 0}.pick-col{max-height:38vh}}
 /* intercom board */
-.board-row{display:grid;grid-template-columns:210px 92px 1fr 76px 60px 320px;gap:var(--sp12);align-items:center;padding:var(--sp8) var(--sp12);border:1px solid var(--bd);border-radius:var(--r6);background:var(--surface);margin-bottom:var(--sp2)}
+.board-row{display:grid;grid-template-columns:minmax(120px,210px) minmax(64px,92px) minmax(120px,1fr) 76px 60px 200px;gap:var(--sp12);align-items:center;min-height:44px;padding:var(--sp8) var(--sp12);border:1px solid var(--bd);border-radius:var(--r6);background:var(--surface);margin-bottom:var(--sp2)}
 .board-row.holding{border-left:3px solid var(--ok)}
 .board-row.stale{border-style:dashed;border-color:var(--warn)}
 .grp-name{font-weight:600;font-size:var(--fs14)}
@@ -628,8 +628,10 @@ body[data-content="error"] .tile{opacity:.7}
 .floor-sub{font-size:var(--fs11);color:var(--tx3);font-family:var(--mono)}
 .timer{font-family:var(--mono);font-size:var(--fs16);color:var(--ok-ink)}
 .qdepth{font-family:var(--mono);font-size:var(--fs12);color:var(--warn-ink)}
-.row-actions{display:flex;flex-wrap:wrap;gap:var(--sp4);justify-content:flex-end}
-.act{display:inline-flex;align-items:center;justify-content:center;height:var(--ctl-h);padding:0 var(--sp12);border-radius:var(--r6);border:1px solid var(--bd);background:var(--sunken);color:var(--tx2);font-size:var(--fs11);min-width:54px}
+.row-actions{display:grid;grid-template-columns:repeat(6,30px);gap:var(--sp4);justify-content:end;align-items:center}
+.act{display:inline-flex;align-items:center;justify-content:center;width:30px;height:var(--ctl-h);padding:0;border-radius:var(--r6);border:1px solid var(--bd);background:var(--sunken);color:var(--tx2);min-width:30px}
+.act .ic{width:14px;height:14px}
+.act-ph{width:30px;height:var(--ctl-h);visibility:hidden}
 .act:hover{color:var(--tx1);border-color:var(--bd2)}
 .act.grant{color:var(--ok-ink);border-color:var(--ok)}
 .act.revoke{color:var(--danger-ink);border-color:var(--danger)}
@@ -638,6 +640,20 @@ body[data-content="error"] .tile{opacity:.7}
 .mute-tag .ic{width:11px;height:11px}
 /* ---- Intercom: channel session view (drill-in from the board, reference ptt-stage pattern) ---- */
 .board-row{cursor:pointer}
+.board-row>div:first-child,.board-row .mode-chip,.board-row .floor-state{min-width:0}
+.board-row .grp-name,.board-row .floor-holder,.board-row .floor-sub,.board-row .mode-chip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.board-row .floor-state{overflow:hidden}.board-row .floor-state>div{min-width:0;flex:1}
+/* v1.63 (A+D+E): fixed 6 icon slots, state=color only, no wrap, hidden placeholder -> identical row
+   geometry in every state; narrow screens reflow to card rows; min-height 44 touch. */
+@media (max-width:1000px){.board-row{grid-template-columns:1fr auto;grid-template-areas:"name mode" "state timer" "q actions";row-gap:var(--sp6)}
+.board-row>div:first-child{grid-area:name}.board-row .mode-chip{grid-area:mode}.board-row .floor-state{grid-area:state}.board-row .timer{grid-area:timer}.board-row .qdepth{grid-area:q}.board-row .row-actions{grid-area:actions;justify-content:end}}
+@media (max-width:760px){.crumb{display:none}.userchip .role-tag{display:none}.topbar{gap:var(--sp6)}}
+@media (max-width:600px){.board-row{grid-template-columns:1fr auto;grid-template-areas:"name name" "mode timer" "state state" "q q" "actions actions"}
+.board-row .row-actions{justify-content:start}}
+@media (pointer:coarse){.row-actions{grid-template-columns:repeat(6,44px)}.row-actions .act{min-width:44px;min-height:44px}.act-ph{width:44px;height:44px}}
+@media (pointer:coarse) and (max-width:1100px){.board-row{grid-template-columns:1fr auto;grid-template-areas:"name mode" "state timer" "q actions";row-gap:var(--sp6)}
+.board-row>div:first-child{grid-area:name}.board-row .mode-chip{grid-area:mode}.board-row .floor-state{grid-area:state}.board-row .timer{grid-area:timer}.board-row .qdepth{grid-area:q}.board-row .row-actions{grid-area:actions;justify-content:end}}
+@media (pointer:coarse) and (min-width:1101px){.board-row{grid-template-columns:minmax(120px,210px) minmax(64px,92px) minmax(120px,1fr) 76px 60px 284px}}
 .board-row:hover{border-color:var(--bd2);background:var(--hover)}
 #chanView{display:flex;flex-direction:column;gap:var(--sp12)}
 #chanView[hidden]{display:none}
@@ -882,6 +898,8 @@ body[data-badge="on"] #proto-bar{display:flex}
   <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
   <symbol id="i-bell-off" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0M3 3l18 18"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></symbol>
   <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></symbol>
   <symbol id="i-whisper" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M17 6l4-2M17 9l4 0"/></symbol>
   <symbol id="i-call" viewBox="0 0 24 24"><path d="M5 4h4l2 5-3 2a12 12 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></symbol>
@@ -946,7 +964,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <nav id="sidebar" aria-label="Portal navigation">
       <div class="sb-head"><span class="sb-title">Navigation</span><button id="navCollapse" title="Collapse navigation">⟨</button></div>
       <div class="sb-scroll" id="navScroll"></div>
-      <div class="sb-foot"><span>Prototype · v1.62 · not app code</span></div>
+      <div class="sb-foot"><span>Prototype · v1.63 · not app code</span></div>
     </nav>
     <main id="main"></main>
   </div>
@@ -972,7 +990,7 @@ body[data-badge="on"] #proto-bar{display:flex}
   </div>
 </div>
 <div id="zoom"><div class="zoom-card"><div class="zoom-media" id="zoomMedia"></div><div class="zoom-bar"><b id="zoomName"></b><span class="mono" id="zoomDrift" style="color:var(--tx3)"></span><div class="spacer"></div><button class="btn" id="zoomClose">Close ✕</button></div><div class="zoom-stats" id="zoomStats"></div></div></div>
-<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.62</span> · prototype watermark · drag to move</div>
+<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.63</span> · prototype watermark · drag to move</div>
 <div class="scrim" id="grpScrim"><div class="modal" role="dialog" aria-modal="true" aria-label="Manage groups"><div class="modal-head"><span class="modal-title">Manage groups</span><div class="spacer"></div><button class="iconbtn" id="grpClose" aria-label="Close"><svg class="ic"><use href="#i-close"/></svg></button></div><div class="modal-body" id="grpBody"></div></div></div>
 <div class="scrim" id="cfmScrim"><div class="modal" role="dialog" aria-modal="true" aria-label="Confirm"><div class="modal-head"><span class="modal-title" id="cfmTitle">Confirm</span><div class="spacer"></div><button class="iconbtn" id="cfmCancelX" aria-label="Cancel"><svg class="ic"><use href="#i-close"/></svg></button></div><div class="modal-body"><div class="cfm-msg" id="cfmMsg"></div><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" id="cfmCancel">Cancel</button><button class="btn btn-sm btn-danger" id="cfmOk">Confirm</button></div></div></div></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -994,7 +1012,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <div class="dt-row"><div class="dt-label">Sync</div><div class="dt-seg"><button type="button" data-set="sync:on">On</button><button type="button" data-set="sync:off">Off</button></div></div>
     <div class="dt-row"><div class="dt-label">Version badge</div><div class="dt-seg"><button type="button" data-set="badge:off">Hidden</button><button type="button" data-set="badge:on">Floating</button></div></div>
     <div class="dt-row"><div class="dt-label">Simulate event</div><div class="dt-seg"><button type="button" data-set="sim:motion" title="Emit a motion event on the unified bus">Motion</button><button type="button" data-set="sim:alarm" title="Emit an alarm event (drives alarm-to-wall + intercom)">Alarm</button><button type="button" data-set="sim:bookmark" title="Emit a bookmark event">Bookmark</button></div></div>
-    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.62</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
+    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.63</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
   </div>
 </div>
 
@@ -1446,7 +1464,7 @@ function renderBoard(){
  const b=$('#boardList');b.innerHTML='';if(!GROUPS.length){b.innerHTML='<div class="replay-empty" style="padding:16px">No groups — use Manage groups (or Temp group from monitored members) to create one.</div>';return;}GROUPS.forEach((g,idx)=>{const stTxt={idle:'Idle',held:'Held',queued:'Queued',unknown:'Unknown'}[g.state];
  const unk=g.state==='unknown';
  const r=document.createElement('div');r.className='board-row'+(g.state==='held'?' holding':'')+(unk?' stale':'');
- r.innerHTML=`<div><div class="grp-name">${monitorSet.has(g.id)?'<span class="mon-tag" data-tip="Monitored (listening)"><svg class="ic"><use href="#i-tower"/></svg></span>':''}${g.name}${chanMutes[g.id]?' <span class="mute-tag" title="You muted this channel (listen off)"><svg class="ic"><use href="#i-mic-off"/></svg></span>':''}</div><div class="grp-id">${g.id}</div></div><span class="mode-chip ${g.mode}">${g.mode}</span><div class="floor-state">${stateGlyph(g.state)}<div><div class="floor-holder">${g.holder||stTxt}</div><div class="floor-sub">${g.state==='held'?('speaking'+(g.side&&g.side.length?' +'+g.side.length+' side':'')):g.state==='queued'?'waiting for floor':unk?'state unknown — not idle':'floor free'}</div></div></div><div class="timer">${g.state==='held'?fmtT(g.timer):'--:--'}</div><div class="qdepth" data-tip="Queue order: ${g.q.map((x,i)=>(i+1)+'. '+x.n+(x.prio?' (prio)':'')+(x.you?' (you)':'')).join(' · ')||'empty'}">Q:${g.queue}</div><div class="row-actions"><button class="act grant" data-a="grant">Grant</button><button class="act revoke" data-a="revoke">Revoke</button><button class="act" data-a="mute" title="Dispatcher clear: revoke floor + empty the queue for everyone">Clear</button><button class="act${g.priority?' on':''}" data-a="prio" data-tip="Toggle priority queue policy for this group">${g.priority?'Prio ✓':'Prio'}</button>${g.temp?'<button class="act" data-a="disband" data-tip="Disband temporary group">Disband</button>':''}<button class="act${monitorSet.has(g.id)?' on':''}" data-a="mon" data-tip="Monitor (listen) this group alongside others (max ${MON_CAP})">${monitorSet.has(g.id)?'Mon ✓':'Mon'}</button></div>`;
+ r.innerHTML=`<div><div class="grp-name">${monitorSet.has(g.id)?'<span class="mon-tag" data-tip="Monitored (listening)"><svg class="ic"><use href="#i-tower"/></svg></span>':''}${g.name}${chanMutes[g.id]?' <span class="mute-tag" title="You muted this channel (listen off)"><svg class="ic"><use href="#i-mic-off"/></svg></span>':''}</div><div class="grp-id">${g.id}</div></div><span class="mode-chip ${g.mode}">${g.mode}</span><div class="floor-state">${stateGlyph(g.state)}<div><div class="floor-holder">${g.holder||stTxt}</div><div class="floor-sub">${g.state==='held'?('speaking'+(g.side&&g.side.length?' +'+g.side.length+' side':'')):g.state==='queued'?'waiting for floor':unk?'state unknown — not idle':'floor free'}</div></div></div><div class="timer">${g.state==='held'?fmtT(g.timer):'--:--'}</div><div class="qdepth" data-tip="Queue order: ${g.q.map((x,i)=>(i+1)+'. '+x.n+(x.prio?' (prio)':'')+(x.you?' (you)':'')).join(' · ')||'empty'}">Q:${g.queue}</div><div class="row-actions"><button class="act grant" data-a="grant" aria-label="Grant floor" data-tip="Grant floor to dispatch"><svg class="ic"><use href="#i-check"/></svg></button><button class="act revoke" data-a="revoke" aria-label="Revoke floor" data-tip="Revoke current holder"><svg class="ic"><use href="#i-mic-off"/></svg></button><button class="act" data-a="mute" aria-label="Clear floor and queue" data-tip="Dispatcher clear: revoke floor + empty the queue"><svg class="ic"><use href="#i-trash"/></svg></button><button class="act${g.priority?' on':''}" data-a="prio" aria-pressed="${g.priority}" aria-label="Priority queue policy" data-tip="Toggle priority queue policy for this group"><svg class="ic"><use href="#i-star"/></svg></button>${g.temp?'<button class="act" data-a="disband" aria-label="Disband temporary group" data-tip="Disband temporary group"><svg class="ic"><use href="#i-close"/></svg></button>':'<span class="act-ph" aria-hidden="true"></span>'}<button class="act${monitorSet.has(g.id)?' on':''}" data-a="mon" aria-pressed="${monitorSet.has(g.id)}" aria-label="Monitor group" data-tip="Monitor (listen) this group alongside others (max ${MON_CAP})"><svg class="ic"><use href="#i-tower"/></svg></button></div>`;
  r.querySelectorAll('.act').forEach(btn=>btn.onclick=e=>{e.stopPropagation();floorAction(idx,btn.dataset.a);});
  setGuard(r.querySelector('[data-a="grant"]'),unk||g.state==='held',unk?'Connection lost — floor state unknown.':'Floor already held by '+(g.holder||'someone')+' — Revoke first.');
  setGuard(r.querySelector('[data-a="revoke"]'),unk||g.state!=='held',unk?'Connection lost — floor state unknown.':'No one holds the floor.');

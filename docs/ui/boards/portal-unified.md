@@ -16,7 +16,7 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.62
+version: v1.63
 pages: [overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
 e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg"]
 ```
@@ -330,3 +330,10 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   epoch + real-time TTL purge + open-tab repaint + revoke modal clears + ev-tag affordance + inject-expired
   leg; 7.4 Marionette harness scripts/ui-harness.mjs (9 cases ALL GREEN, .harness png+results.json, stat>0);
   7.5 regression green (monitor/tower/recordings/overview + node --check + DOM + lint).
+- v1.63: board rows aligned in every state — fixed 6 icon action slots (30px, no-wrap, hidden Disband
+  placeholder on non-temp rows), checked = color + aria-pressed only (no ✓ label growth), action column
+  220 (coarse 284); narrow reflow ≤900 3-row card / ≤600 stacked card; ≤760 topbar hides crumb+role-tag
+  (was the 600px page-overflow source); min-height 44. Verified uniform rowH/actH/rightEdge + no overflow.
+  Mid-band follow-up (Mon icon outside card at ~901–1100px): desktop tracks → minmax(120,210)/minmax(64,92)/
+  minmax(120,1fr)+ellipsis, card breakpoint 900→1000 (coarse ≤1100; coarse 284 col only ≥1101); verified
+  inside:true + holder readable + rowSW==CW at 1000/1100/1200.

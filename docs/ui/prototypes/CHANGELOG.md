@@ -1,5 +1,26 @@
 # Prototypes CHANGELOG
 
+## v1.63 — 2026-11-17 (portal-unified) — intercom board rows: fixed icon action slots + narrow reflow (A+D+E)
+User: board (channel list) right-side buttons misalign vertically when checked/other states, and narrow
+screens adapt poorly. Root causes: variable button count (temp rows 6 vs 5) + checked labels growing
+("Prio ✓"/"Mon ✓") pushed the flex-wrap action cluster over the 320px column → some rows wrapped to two
+lines while others stayed one (vertical offset exactly in checked states); no fixed slot widths → ragged
+right edges; board-row had NO responsive rule (fixed columns ≈842px min) → narrow overflow.
+- **A fixed slots**: `.row-actions` = grid `repeat(6,30px)` no-wrap; `.act` icon-only 30×30 (aria-label +
+  data-tip; new i-trash/i-star sprites); checked state = color + aria-pressed ONLY (✓ text removed);
+  non-temp rows render a hidden `.act-ph` placeholder in the Disband slot → identical geometry in every
+  state; action column 320→220 (coarse 44px slots → 284 column).
+- **D narrow reflow**: ≤1000 board-row → 3-row card (`name mode / state timer / q actions`); ≤600 → stacked
+  card with full-width action row; ≤760 topbar hides crumb + role-tag (topbar min-content 712px was the
+  page-level overflow source at 600). **Mid-band fix (user screenshot: Mon icon outside the card at
+  ~901–1100px)**: desktop fixed tracks could not shrink, pushing the 200px action track past the card edge;
+  tracks now `minmax(120px,210px) minmax(64px,92px) minmax(120px,1fr) 76px 60px 200px` with ellipsis on
+  name/mode/holder/sub (+ `.floor-state>div{min-width:0}`), card breakpoint raised 900→1000 (coarse ≤1100,
+  coarse 284px action column only ≥1101) so no width band overflows.
+- **E**: `.board-row{min-height:44px}` touch target.
+- Verified: rowH uniform 54 across all rows incl temp+checked; actH uniform 30 (single line); rightEdge
+  unique=1; @900/@600 renders no horizontal overflow (docSW=600 at 600vw, topbar 540); node --check + lint clean.
+
 ## v1.62 — 2026-11-17 (portal-unified) — Phase 7 delivered: group mgmt + cross-page notif + evidence privacy + harness
 Implements PLAN Phase 7 (7.1–7.5) after the second 4-role panel re-review; mechanisms per K14=B/K15=A/K16=C.
 - **7.1 Group management**: NEW dialog infrastructure (the existing picker modal had no trap/focus restore,
