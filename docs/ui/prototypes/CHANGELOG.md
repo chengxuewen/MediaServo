@@ -1,5 +1,15 @@
 # Prototypes CHANGELOG
 
+## v1.46 — 2026-11-17 (portal-unified) — rename Recordings → Recording (singular, Synology-aligned)
+Analysis: Synology names the recording-management/review application **singular "Recording"**
+("The Recording application lists … recording files, bookmarks, and their settings"); our page is a
+management/review workspace (search/filter/bookmark/export + in-page player), i.e. a singular
+workspace like Monitor, not a bare plural file list. User approved removing the "s".
+- Renamed user-facing strings: nav label, TITLES, page head ("Recording library"), handoff button
+  title/aria ("Open Recording library"), handoff toast. Internal ids/function names (recordings,
+  renderRecordings, rec*) unchanged for stability.
+- Verified: nav shows "Recording", page/breadcrumb "Recording library"; node --check + lint clean.
+
 ## v1.45 — 2026-11-17 (portal-unified) — nav icons: unique semantic monochrome SVG (no glyphs/dupes)
 User: sidebar nav icons ugly, style-inconsistent, wrong meaning. Audit: all 16 were Unicode geometric
 text glyphs (◈▣▤◉◍▦▲▢≋⚙⚿≣⇄) — mixed fill/outline/line/emoji, platform-variable (⚙ emoji, ⚿ tofu risk),

@@ -250,3 +250,5 @@ click-through + regression green. Supersedes v1.25/v1.26.
 - v1.45: sidebar nav icons replaced Unicode glyphs with unique semantic monochrome SVG sprite
   (16 icons, no duplicates, correct meanings; gauge/screens/library-play/mic/users/desktop/headset/
   camera/door/plug/waveform/sliders/key/list-check/gear/exchange); .nav-ico grid-centered SVG container.
+- v1.46: renamed Recordings → **Recording** (singular), aligning Synology's "Recording" application
+  (management/review workspace, sibling of singular Monitor); nav/title/head/handoff updated, ids kept.
