@@ -734,6 +734,10 @@ Checks:
 - design-system skill 只管 `www/packages/ui/tokens.css`（@mediaservo/ui），**不覆盖** `docs/ui/prototypes` 单文件原型；原型须自有纪律：所有交互控件高度=`--ctl-h`（粗指针≥44），禁止散写 26/28/34px。
 - 按钮悬浮提示统一走 `data-tip`（#guardTip neutral/warn 两态）；init `sweepTips` 把静态 title 转 data-tip 并移除 native title（避免双提示/慢提示）；动态提示写 `dataset.tip`；icon-only 必 `aria-label`。
 - Verify: 每次原型 UI 改动跑计算尺寸断言（控件 height==--ctl-h）+ tooltip 断言（pointerover→#guardTip.show）+ node --check/DOM/lint。
+- **spacing token 存在性**（v1.50 出生病）：引用 var(--spN) 前确认 :root 已定义该档（曾缺 --sp10 致 padding/gap 整条失效归 0）；UI 改动断言加"关键行 computed padding/gap 非 0"。
+- **尺寸审计覆盖面+不得自创尺度**（v1.52 出生病）：控件尺寸审计须覆盖 height+border-radius+padding（族），不能只查 height；用户明确要求"统一"时不得自创"主操作档/两档尺度"等偏离（v1.51 曾擅设 PTT=40 被否）；主次用颜色/字重区分而非尺寸。
+- **填充/视觉重量族**（v1.53 出生病）：同几何控件若 resting/on/disabled 的 background 填充族不同（实心 vs 描边 vs 淡色），浅色下仍显"大小不一"；统一须含 fill 族（resting 同底、on 才 tint、disabled 同盒淡字）；审计加 bg/state 维度，且双主题复测。
+- **统一靠共享钉死类，不靠逐族补丁**（v1.55 出生病）：需"完全同尺寸"的一组控件若分属多条 cascade（chip-btn/btn-sm/…），逐族修是 whack-a-mole；应加一个共享专用类（固定 px **width+height 双轴**+min/max+border-box+padding+radius，置 cascade 末）钉死整组（只钉高会留宽度随文字分叉，v1.56）；隔离放大截图逐像素验收**宽+高**，不凭整页小图。
 
 ## C55: 原型列表行统一卡片行语言（2026-11-16, v1.38 出生病）
 - 所有可选列表行（rail stream-item / picker pick-ch / pick-row / al-row / rec-row / board-row）统一**卡片行**：1px bd 边框 + r6 + sp8 padding + sp2 间距 + hover(bd2/hover) + 选中(accent-tint/accent 边框)；resting 必须有容器信号（禁透明边框+无底"白纸平铺"）。

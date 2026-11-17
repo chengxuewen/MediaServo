@@ -1,5 +1,175 @@
 # Prototypes CHANGELOG
 
+## v1.61 — 2026-11-17 (portal-unified) — K11=C: split-path incremental rendering (capture/focus survive)
+Adjudicated K11=C: high-frequency paths (PTT down/up, per-second tick, yieldFloor) now use incremental
+paintChannelLive()/paintBoardLive() that update text/classes/guards WITHOUT rebuilding nodes, so pointer
+capture, focus, scroll and range values survive; structural changes (tab/enter/queue/consent/emergency)
+still use full render + focus restore.
+- paintChannelLive: timer/name/sub/q-order/avatar/wave/PTT onair/emerg-arm label/rec-count/link readout/
+  chReq+chRel guards. paintBoardLive: per-row holder/sub/timer/qdepth+order tooltip/grants/revoke/mute/prio
+  guards + holding/stale classes.
+- Verified: pttNodeKept / boardNodeKept / pttOnAir / pttReleased assertions green (same DOM node across PTT
+  and tick); node --check + lint clean.
+
+## v1.60 — 2026-11-17 (portal-unified) — K10=A: guarded disabled (aria-disabled) replaces native disabled
+Adjudicated K10=A: native `disabled` suppresses pointer/click/focus so the guard-reason tooltip could never
+appear ("backend-gated" honesty was dead text). Switched #chLock and unknown-state Replay Play to the site
+guard doctrine: setGuard -> aria-disabled + data-reason + is-disabled; reason now discoverable on hover/focus.
+- Verified: lockAria/lockTip (reason tooltip shows)/playGuard assertions green; node --check + lint clean.
+
+## v1.59 — 2026-11-17 (portal-unified) — K9=C: replay exit-clear scope (scan keeps, manual/cross-page clears)
+Adjudicated K9=C: scan cycling is a continuous listening session (buffer kept); manually switching channel,
+cross-page goto, or Back counts as exit and clears that channel's replay buffer (K5 privacy default upheld
+for real exits). Consent chip + diagnostics copy now state both paths explicitly.
+- enterChannel(id,viaScan): recClear(old) only when !viaScan; goto() clears chanOpen buffer when leaving
+  intercom; leaveChannel unchanged (clears).
+- Verified: scanKeeps / manualClears / xpageClears assertions green; node --check + lint clean.
+
+## v1.58 — 2026-11-17 (portal-unified) — K8=C: simulated behaviors for VOX/codec; shout/ACL relabelled
+Adjudicated K8=C (mixed landing standard): high-value sub-features get simulated BEHAVIOR + assertions;
+low-value ones stay switch/indicator-level and are relabelled backend-gated (claims aligned with code).
+- VOX: when ON, a simulated voice source auto-keys PTT (pttDown/pttUp ~2s utterance every 8s) only when the
+  floor is free; button data-tip states the simulated source.
+- Codec: simulated weak-net cycle auto-falls back HD->SD (turnaround 260ms) and recovers SD->HD (120ms);
+  link readout now shows turnaround (`ta N ms`), making 6.4d's degrade/turnaround claims testable.
+- Shout (cross-group) + ACL enforcement (listen/talk/manage): relabelled as backend-gated; Comms "Directed"
+  card footnote states prototype shows roles only; backlog #14/#15 marked partial (switch/indicator level).
+- Verified: voxT armed / degrade(liveSec20)->SD+260 / recover(liveSec30)->HD+120 / ta readout; node --check
+  + lint clean.
+
+## v1.57 — 2026-11-17 (portal-unified) — intercom expert-panel re-review: objective defect fixes
+4-role parallel panel on implemented intercom (v1.56) found 24 findings; objective ones fixed here
+(conflicts K8-K11 handed to adjudication, NOT decided):
+- Floor: idle/queued requests now auto-grant (qPush/floorTick grant head when floor free); bare PTT no
+  longer jumps a non-empty queue; autoGrant clears your _q; Prio toggle rewrites existing queue items.
+- Session: enterChannel cleans previous channel side-talkers + releases held PTT; manual leave/enter stops
+  scan (scan-driven switch keeps scanning); replay-buffer-on-scan semantics left to K9.
+- Emergency: arm state per-channel + reflected across re-renders (no single-click degrade); insert grants
+  floor without a fake physical press (no pointerleave/keyup accidental release); removes your queue item.
+- Input/a11y: global Enter keyup releases PTT; focus restored after re-render; tabs roving tabindex + arrow
+  keys + tabpanel; Esc ignored while typing; whisper/call aria-labels; cueToggle role=switch + keyboard;
+  board rows respond to Space; board empty state.
+- Honesty/robustness: Comms (message/whisper/call/location) guarded under unknown; WS double-drop no longer
+  strands groups in permanent unknown; replay playback wave persists via replayUntil; PTT setPointerCapture.
+- Layout/visual: chan-head wraps; board actions track 320px + wrap; .act/.ch-tab r6; emoji (bell/pin) -> SVG;
+  syncCueUI innerHTML (was textContent escaping SVG); navCollapse chevrons SVG; temp-group id unique;
+  hybrid seed side-talker makes cap reachable; floor.hybrid_max config row added.
+- Docs freshness: sidecar v1.57; "NOT implemented" title -> delivered; PLAN/README summaries v1.48-57;
+  §8 elastic-tier marked delivered; §6d micro-decision values + anchor-snapshot notes; HTML comment version
+  attribution restored per feature.
+- Verified: idleGrant/noJump/scanSideClean/armPersist/emergNoPress/xpageStill assertions green; node --check
+  + lint clean.
+
+## v1.56 — 2026-11-17 (portal-unified) — pin WIDTH too: VOX/HD/PTT identical 56x30 boxes
+User: heights now equal but WIDTHS still differ (auto width follows label length: VOX/PTT 3 chars vs HD 2).
+v1.55 pinned height only; width was left auto — the remaining axis.
+- `.diag-ctl` now pins **width too**: `width/min-width/max-width:56px; padding:0; justify-content:center`
+  (height already 30). All three diag controls are now identical 56x30 boxes regardless of label length.
+- Screenshot-verified (2x isolated, light): chVox 56.0x30.0 / chCodec 56.0x30.0 / chLock 56.0x30.0.
+  node --check + lint clean.
+- Lesson folded into C54: "identical size" means BOTH axes pinned (width+height), not height alone.
+
+## v1.55 — 2026-11-17 (portal-unified) — pin VOX/HD/PTT to ONE dedicated class (cascade-independent sizing)
+User: several rounds and VOX/HD/PTT STILL different in their browser. Root-cause chain of the repeated
+failures (honest accounting): v1.51 imposed PTT=40 (wrong judgment); v1.52 unified geometry but audited
+height only; v1.53 unified fill family; v1.54 fixed disabled opacity — yet the three buttons still lived on
+THREE different cascades (`.chip-btn`, `.chip-btn.on`, `.btn.btn-sm`), so any environment/override/cache
+difference could re-diverge them. Fixing families one at a time was whack-a-mole.
+- **Structural fix**: added ONE dedicated class `.diag-ctl` applied to all three (#chVox/#chCodec/#chLock):
+  `height/min-height/max-height:30px; padding:0 12px; radius:6px; fs12; line-height:1; inline-flex centered;
+  border-box`, placed at the end of the cascade. Identical box regardless of chip/btn family or overrides.
+- Screenshot-verified (2x isolated, light): chVox h30 w49.7 / chCodec h30 w43.7 / chLock h30 w48.8 — three
+  identical-height boxes; node --check + lint clean.
+- If a browser still differs after hard-refresh to v1.55, it is stale cache/environment: check footer version
+  and report it; the pinned class makes divergence impossible from this stylesheet.
+
+## v1.54 — 2026-11-17 (portal-unified) — disabled-state visual weight unified (screenshot-verified at 2x)
+User: "still different in real test; did you screenshot-confirm?" Produced an ISOLATED 2x-zoom screenshot
+of the Diagnostics card: VOX/HD/PTT heights identical (30 each) and same outline family, BUT the disabled
+PTT used whole-box `opacity:.4`, making it look fainter/smaller than VOX/HD.
+- `.btn:disabled` changed from `opacity:.4` to **same box + muted text** (`opacity:1; color:tx3;
+  border:bd; background:surface; cursor:not-allowed`) so disabled keeps identical visual weight; state is
+  conveyed by text color + cursor + guard tooltip, not by fading the whole control.
+- Screenshot-verified (2x isolated, light): chVox h30 op1 / chCodec h30 op1 / chLock h30 op1 — three
+  identical boxes, only text color differs (dark / accent / muted). node --check + lint clean.
+- Note: if a browser still shows old sizes it is a stale cache — check the footer version (v1.54) and
+  hard-refresh; the live file and headless renders are unified.
+
+## v1.53 — 2026-11-17 (portal-unified) — unify control FILL family (VOX/HD/PTT perceived-size fix, light theme)
+User screenshot (light theme) still showed VOX/HD/PTT "different sizes". Re-measured live v1.52 in BOTH
+themes: geometry already identical (h30/r6/pad12) — not a lie. But reproduced the user's perception in
+light theme: same-size boxes looked different because **fill states differed** (VOX = solid sunken grey,
+HD = outline-only on-state, PTT = faded disabled). Visual weight, not geometry, was the remaining gap.
+- Unified the resting fill family: `.chip-btn` background sunken → **surface** (same outline family as
+  `.btn`); on-state keeps accent-tint + accent border; disabled keeps faded text but identical box.
+- Verified light theme: chVox h30 bg white / chCodec h30 bg accent-tint / chLock h30 bg white — same geometry
+  AND same outline family; render shows harmonious VOX/HD/PTT; node --check + lint clean.
+- Governance: C54 extended — size/harmony audits must also cover **fill/background family and state
+  (resting/on/disabled)**, not just geometry.
+
+## v1.52 — 2026-11-17 (portal-unified) — TRUE control-size unification (corrects v1.51's imposed PTT=40 deviation)
+User challenged: VOX/HD/PTT still not unified; was the audit incomplete? Honest accounting: v1.51's
+*measurements* were correct, but I **imposed a "primary PTT=40" two-step scale** that contradicted the
+user's unify requirement, and the audit only checked HEIGHT (not width/radius/padding family). Both were
+judgment/coverage errors, now corrected.
+- Full re-audit (height+width+border-radius+padding) found: PTT h40/r999/pad20 vs others h30/r6; and
+  chip-btn pad12 vs btn-sm pad8 (inconsistent horizontal padding family).
+- **Single token family for ALL text buttons**: `.btn/.btn-sm/.chip-btn/.ptt/.act/.btn-live` =
+  height `--ctl-h`(30) + padding `0 sp12` + radius `r6` + fs12. PTT keeps accent color + weight 600 to signal
+  primary (distinction by color, NOT size). Icon buttons (.p-btn/.iconbtn) remain 30×30 square family.
+- Verified: chVox/chCodec/ptt/chLock/chReq/chEmerg all h30 r6 pad12; node --check + lint clean.
+- Governance: C54 extended — size audits must cover height+radius+padding (not height alone) and must NOT
+  introduce self-imposed scale deviations against an explicit unify requirement.
+
+## v1.51 — 2026-11-17 (portal-unified) — intercom control-size audit: unify to --ctl-h (VOX/HD/PTT/tabs/etc)
+User: VOX / HD / PTT and other intercom controls not size-harmonious. Full computed-height audit of the
+intercom page (board + all channel tabs) vs --ctl-h:30 found mismatches: `.act` 31, `.ptt` 46, `.ch-tab` 28,
+`.vol` 20, `.msg-in` 28 (everything else already 30).
+- Unified secondary controls to `--ctl-h`(30): `.act` (board Grant/Revoke/Clear/Prio/Mon, now inline-flex
+  centered, padding 0 sp8), `.ch-tab`, `.vol` (listen-volume range), `.msg-in`.
+- Primary PTT set to a deliberate **40px** step (hero hold-to-talk target, distinct from 30px secondary),
+  and added `.ptt/.act/.ch-tab/.p-btn` to the coarse-pointer ≥44 rule.
+- Verified: act 30 / scan 30 / ptt 40 / tab 30 / vox 30 / hd 30 / lock 30 / req 30 / vol 30 / msgin 30 /
+  send 30; node --check + lint clean. Two-step scale now: secondary 30, primary 40, coarse ≥44.
+
+## v1.50 — 2026-11-17 (portal-unified) — fix missing --sp10 token (participant row left/right padding was 0)
+User: participant list item left/right padding wrong. Measured: `.part-row` computed padding-left/right = **0**
+while `.part-head` = 12 → rows flush to the list edges. Root cause: the spacing scale defined
+sp2/4/6/8/12/16/20/24 but **no --sp10**; `padding:var(--sp10) var(--sp12)` is an invalid declaration → whole
+padding dropped to 0. Two more latent victims of the same missing token: `.combo-opt{padding:0 var(--sp10)}`
+(layout options left/right 0) and `.rec-player{gap:var(--sp10)}` (gap 0).
+- **Added `--sp10:10px`** to the spacing scale (fills the 8→12 gap), fixing all three invalid declarations at
+  once: participant rows now 12px left/right (aligned with the head), combo options regain horizontal
+  padding, recordings player regains column gap.
+- Verified: part-row padL/padR 12 + leftInset/rightInset 12; combo-opt padding non-zero; rec-player gap 10px;
+  node --check + lint clean.
+
+## v1.49 — 2026-11-17 (portal-unified) — participant row spacing/height harmony (C54 token alignment)
+User: participant-list buttons/controls/text spacing too tight → disharmonious. Root causes: three
+control heights in one row (avatar 30 / buttons 26 / range ~16), a single gap(sp10) for every interval
+(no grouping breath), name+role crammed inline (role swallowed by ellipsis), 64px volume squeezed between
+buttons, state dot without breathing, tight row padding.
+- Unified heights to `--ctl-h`: `.p-btn` 30×30 (icon 14), `.p-vol` 30h × 88w; avatar 30 kept → one row height.
+- Grouping: actions (mute/whisper/call) wrapped in `.p-actions{gap:sp4}`; row gap sp12; volume moved before
+  the action group; state dot `margin-inline:sp4`; name/role now two lines (b block + role block).
+- Row breathing: padding sp10 sp12 + min-height 44 (touch target).
+- Verified: rowGap 12 / minH 44 / btnH 30 / volH 30 volW 88 / actGap 4 actN 3 / roleBlock block / mute still
+  works; render shows aligned two-line rows + grouped controls; node --check + lint clean.
+
+## v1.48 — 2026-11-17 (portal-unified) — Intercom channel right column: side-sheet + 4 tabs (research-backed)
+User: the channel detail right column stacked 9 equal cards (Floor/volume/Replay/Evidence/Mic/Link/
+Messages/Lock/Honest) → over-tall, high-frequency features buried, simulated-diagnostic noise.
+Research: Motorola WAVE PTX dispatch separates concerns into regions; Discord channel settings uses
+TABS (Overview/Permissions/Invites/Integrations); Material side-sheet = supplementary secondary content;
+accordions/drawers for low-frequency settings. Flat 9-card stack is an anti-pattern.
+- **Reorganized ch-side into a Material side-sheet with 4 tabs**: `Floor` (default; floor control + queue +
+  emergency + listen-volume row) / `Recordings` (Replay + Event evidence) / `Comms` (Messages/location +
+  directed note) / `Diagnostics` (Mic VOX/NR/AGC + Link SD/HD + Lock-screen condensed into compact rows +
+  ONE simulated footnote, replacing 4 cards). Right column now constant one-screen height.
+- Tab state `chTab` resets to floor on enter; per-tab wiring null-guarded so switching never throws.
+- Verified: tabs=4; floor has chReq; rec has chReplay+chEv and no chReq; diag has chVox+chLock; comms has
+  chMsgSend; request-floor works after tab round-trip; four tab renders clean; node --check + lint clean.
+
 ## v1.47 — 2026-11-17 (portal-unified) — monitor-center Phase 6: Intercom layered optimization (K1=C/K2=A/K3=A/K5=A/K6=A/K7=B)
 Implements PLAN Phase 6 (6.1→6.3a→6.2→6.3b→6.4→6.5→6.6) after the 5-role panel + 6 one-by-one rulings.
 - **6.1 floor correctness + honesty + a11y**: ordered priority queue (`g.q`, priority re-queue not preempt)

@@ -16,7 +16,7 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.46
+version: v1.61
 pages: [overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
 e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg"]
 ```
@@ -253,7 +253,7 @@ click-through + regression green. Supersedes v1.25/v1.26.
 - v1.46: renamed Recordings → **Recording** (singular), aligning Synology's "Recording" application
   (management/review workspace, sibling of singular Monitor); nav/title/head/handoff updated, ids kept.
 
-### Intercom optimization — expert-panel review + adjudications (2026-11-17, design only, NOT implemented)
+### Intercom optimization — expert-panel review + adjudications (2026-11-17; design adjudicated; Phase 6 delivered v1.47 + v1.48–v1.57 polish/fixes)
 5-role panel vs 南山对讲/PoC 调度(海能达)/Mumble: 17 findings (HIGH 5/MED 9/LOW 3; +queue_max +keyboard-PTT/a11y). Rulings (user, one-by-one):
 K1 scope=C layered (core floor correctness first, then missed-speech replay + multi-channel monitor +
 emergency force-insert, rest deferred); K2 half-duplex=A exclusive default + hybrid optional with cap;
@@ -271,3 +271,49 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   6.4 1:1 call/temp group/VOX-NR-AGC/SD-HD+latency/cross-page PTT/lock-screen honest-disabled; 6.5 messages/
   location/whisper/per-member volume/encrypted tag. Micro-decisions fixed (hybridMax2/queueMax8/MON4/REPLAY20/
   EV7d/VOXoff/HDdefault). Verified assertions + full-page regression green.
+- v1.48: channel right column reorganized from a 9-card flat stack into a Material side-sheet with 4 tabs
+  (Floor / Recordings / Comms / Diagnostics), research-backed (WAVE PTX region separation, Discord channel
+  tabs, Material side-sheet). Diagnostics condensed to compact rows + one simulated footnote; right column
+  constant one-screen height; per-tab wiring null-guarded.
+- v1.49: participant row harmony — unified control heights to --ctl-h (p-btn 30, p-vol 30×88), actions grouped
+  (.p-actions gap sp4) with row gap sp12, volume before action group, state dot breathing, name/role two
+  lines, row padding sp10 sp12 + min-height 44 (C54 touch). Fixes tight/disharmonious member rows.
+- v1.50: fixed missing `--sp10` spacing token (scale had 8→12 gap). `padding:var(--sp10) …` was an invalid
+  declaration → participant rows had 0 left/right padding (flush to edges); also fixed latent `.combo-opt`
+  horizontal padding and `.rec-player` gap. Added --sp10:10px; rows now 12px insets aligned with head.
+- v1.51: intercom control-size audit — unified secondary controls to --ctl-h:30 (.act 31→30, .ch-tab 28→30,
+  .vol 20→30, .msg-in 28→30); primary PTT 46→40 (deliberate hero step); coarse ≥44 extended to
+  .ptt/.act/.ch-tab/.p-btn. Two-step scale: secondary 30 / primary 40 / coarse 44.
+- v1.52 (corrects v1.51): user flagged VOX/HD/PTT still ununified. v1.51 had imposed PTT=40 (against the
+  unify requirement) and audited height only. TRUE unification: all text buttons (.btn/.btn-sm/.chip-btn/
+  .ptt/.act/.btn-live) = h --ctl-h:30 + pad 0 sp12 + r6 + fs12; PTT distinguished by color/weight not size.
+  Verified h30/r6/pad12 across VOX/HD/PTT/lock/req/emerg. C54: audits cover height+radius+padding, no
+  self-imposed scale deviations against explicit unify requirements.
+- v1.53: user light-theme screenshot still perceived VOX/HD/PTT different; geometry was already identical
+  (h30/r6/pad12 both themes) but FILL family differed (VOX solid sunken / HD outline / PTT faded). Unified
+  resting fill: .chip-btn bg sunken→surface (outline family like .btn); on=accent-tint; disabled same box.
+  C54: harmony audits cover fill/background family + states, not just geometry.
+- v1.54: disabled PTT whole-box opacity .4 made it look fainter/smaller; changed .btn:disabled to same box +
+  muted text (opacity 1). Screenshot-verified at 2x isolated: VOX/HD/PTT three identical h30 boxes, only text
+  color differs. Stale browser cache ruled out via footer version + hard-refresh guidance.
+- v1.55: repeated-fix root cause = three buttons on three cascades (chip-btn / chip-btn.on / btn.btn-sm);
+  family-by-family fixes were whack-a-mole. Structural fix: ONE dedicated .diag-ctl class pinned on all three
+  (30px min/max height, pad 0 12, r6, border-box, end of cascade) → cascade-independent identical box.
+  Screenshot-verified h30 x3. Lesson: unify by shared pinned class, not by patching each family.
+- v1.56: widths still auto (label-length) after v1.55 pinned height; .diag-ctl now pins width 56 too →
+  VOX/HD/PTT identical 56x30 boxes (screenshot-verified). C54: identical size = both axes pinned.
+- v1.57: expert-panel re-review objective fixes — idle/queued auto-grant + no queue-jump; enterChannel cleans
+  side/ptt + manual leave stops scan; emergency arm per-channel + survives re-render + no physical press;
+  Enter keyup global + focus restore; Comms unknown-guards; autoGrant clears _q; WS double-drop guard; replay
+  playback state; pointer capture; chan-head wrap + board track 320; tabs roving/arrow/tabpanel + Esc input
+  guard; whisper/call aria-label + cueToggle keyboard; Prio rewrites queue; temp id unique; hybrid seed side;
+  floor.hybrid_max config row; r6 alignment; emoji->SVG; board empty state + Space. K8-K11 pending adjudication.
+- v1.58 (K8=C): VOX simulated voice source auto-keys PTT; codec simulated weak-net auto-fallback SD +
+  recovery HD + turnaround readout; shout/ACL relabelled switch/indicator-level (backend-gated). K9-K11 pending.
+- v1.59 (K9=C): replay exit-clear scope — scan switching keeps buffer (continuous listen session); manual
+  channel switch / cross-page goto / Back clear it; consent + diag copy state both paths. K10-K11 pending.
+- v1.60 (K10=A): chLock + unknown Replay Play use setGuard (aria-disabled + data-reason + is-disabled) instead
+  of native disabled, so the disable reason is discoverable on hover/focus (site guard doctrine / C54). K11 pending.
+- v1.61 (K11=C): split-path rendering — paintChannelLive/paintBoardLive incremental for PTT + per-second tick
+  (nodes not rebuilt -> pointer capture/focus/scroll/range survive); full render only for structural changes.
+  All panel conflicts K8-K11 now adjudicated (C/C/A/C).
